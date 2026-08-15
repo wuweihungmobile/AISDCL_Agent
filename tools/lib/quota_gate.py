@@ -91,6 +91,15 @@ import endurance_env  # noqa: E402
 import pace_contract  # noqa: E402  # R86：配速檔案契約的寫入端（引擎側唯一的傳遞方式）
 import quota_pace  # noqa: E402  # R86：窗長／燃燒率／跨窗攤提（同樣是判讀原語）
 import quota_policy  # noqa: E402
+
+# 🔴 R91：「送進模型 context」這件事的唯一發射口搬到 `platform_utils`（hook I/O 的既有
+# SSOT，它已經住著 `read_payload`）。本檔此前自己 `print(json.dumps(...))`，而同一輪
+# context 守衛也要用同一條通道 ⇒ 兩份實作＝兩份會漂移的知識（R73 判例），且兩份各自
+# `print` 會在同一行程吐出**兩個相接的 JSON 物件** ⇒ parse 失敗、兩則訊息一起消失。
+# 刻意**不**放進本檔：R82／Q2-02 明文「兩把尺不共用模組」，架構鎖
+# `test_quota_is_not_wired_into_the_context_blocking_path` 在守。`flush_to_model` 只被
+# 測試與 `atexit` 呼叫，在本檔是純 re-export（讓消費端沿用 `quota_gate.<name>`）。
+from platform_utils import emit_to_model, flush_to_model  # noqa: E402,F401
 from quota_limits import parse_reset_at, unhandled_limit_event  # noqa: E402
 
 # 🔴 R88／LOC-01：**人話面**整族搬到 `quota_messages.py`（立案與射程劃界見該檔檔頭）。
@@ -348,6 +357,39 @@ def read_quota(now: datetime, path: Path | None = None) -> quota_policy.QuotaSta
     return quota_policy.QuotaState(axes, str(data.get("measured_at") or ""), "cache", "ok")
 
 
+#: 🔴 PRD `TOKEN_DRAIN_PERCENT`（→ 狀態 `DRAINING`）↔ 本 repo 四道帶的**唯一對映**（R91）。
+#: 立案：這個對映此前**從未被登記過**——`DRAIN_PERCENT` 全庫只出現在 PRD 一份 `.md` 裡，
+#: `tools/lib/` 一次都沒有；於是任何要用「PRD 那條線」做判斷的程式碼，只能靠讀者自己推論
+#: （SA 原話：「我假設 PREPARE/HALT ≈ DRAIN，那是推論不是 repo 裡登記過的對映」）。
+#: 對映是**可證的**，不是選的：PRD §6 的出廠值 `TOKEN_WARN_PERCENT=70`／`DRAIN=85`／
+#: `HALT=95` 與 `quota_policy.Policy` 的 `converge_pct`／`prepare_pct`／`halt_pct` 三個預設
+#: **逐格相同** ⇒ 「`U5h ≥ DRAIN_PERCENT`」與「band ∈ (prepare, halt)」是同一個述詞。
+#: 那三格相等由 `tools/tests/test_context_budget_guard.py::PrdDrainPercentMapsToTheBandsTest`
+#: 直接讀 PRD 對帳（PRD 是憲法、改它要走修憲程序 ⇒ 兩邊漂開時該紅的是這裡）。
+#: `notice_pct` 刻意沒有 PRD 對應物：它比 PRD 更早開始出聲，方向是收緊，安全。
+DRAINING_BANDS = (quota_policy.BAND_PREPARE, quota_policy.BAND_HALT)
+
+
+def draining(now: datetime | None = None) -> str:
+    """額度相對 PRD `DRAIN_PERCENT` 那條線的位置：`"yes"`／`"no"`／`"unknown"`。**零網路**。
+
+    只讀額度快取（`read_quota`），不刷新、不外呼 ⇒ 掛在每次工具呼叫的路徑上付得起。
+    🔴 三態而不是布林：`decide()` 對量不到的狀態回 `BAND_UNMEASURED`，把它折進 `"no"`
+    就是「沒量到卻宣稱量到」（`quota_policy` 檔頭對 `BAND_UNMEASURED` 的原話），而 PRD
+    §4.3 的壓縮條件是 `U5h + COMPACT_COST_BUDGET_PP ≤ DRAIN_PERCENT`——**證不出成立就不
+    該壓縮**（PRD §0 第 6 條明定遙測失效方向為 fail-safe）。呼叫端必須把三態各自處理。
+    """
+    at = now or datetime.now().astimezone()
+    try:
+        policy, _problems = quota_policy.load_policy(policy_env())
+        band = quota_policy.decide(read_quota(at), at, policy).band
+    except Exception:  # noqa: BLE001 — 判不出來就說判不出來，不得反過來變成故障源
+        return "unknown"
+    if band == quota_policy.BAND_UNMEASURED:
+        return "unknown"
+    return "yes" if band in DRAINING_BANDS else "no"
+
+
 # 🔴 為什麼是「滾動視窗的派發率」而不是「in-flight 併發數」（SD-B1 的正面答覆）：
 # 用 PreToolUse 記 dispatched、PostToolUse 記 completed 去算 in-flight，在這個 harness 上
 # **恆讀 ≈0**——`Workflow` 47/47 是「launched in background」，那次呼叫在扇出開始前就結束、
@@ -454,8 +496,10 @@ def note_degraded(source: str, detail: str, *, event: str = "PreToolUse") -> str
     # 實際事件不符時，Claude Code 直接把整個 `additionalContext` 丟掉 ⇒ 降級通報靜默失效
     # ——正是這支函式當初立案要治的那個病，只是改由接線引入。⇒ 事件名一律由呼叫端傳，
     # 本檔不再假設自己被誰呼叫。預設留 `PreToolUse` 是為了既有呼叫端的行為逐字不變。
-    print(json.dumps({"hookSpecificOutput": {
-        "hookEventName": event, "additionalContext": msg}}, ensure_ascii=False))
+    # 🔴 R91：`print(json.dumps(...))` 換成共用發射口（見檔頭那段 import 的 WHY）。送達
+    # 形態與事件名逐字不變，改的是**誰負責寫那一行**——因為同一行程現在有第二個發言者
+    # （context 75% warn），兩個各自 print 會吐出兩個相接的 JSON 物件而一起被丟掉。
+    emit_to_model(event, msg)
     return msg
 
 

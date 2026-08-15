@@ -242,8 +242,11 @@ def _isolated_env(tmp: Path, *, real_scheduler: bool = False) -> dict[str, str]:
     # 🔴 R81：額度那兩個旗標也要清。少清它們時，開發者自己機器上設過 `AUTOSDD_QUOTA_
     # GUARD_OFF=1` 就會讓下面所有 quota e2e **靜默轉綠**（守衛整支被關掉，rc 一律 0），
     # 而在 CI 上又是紅的——「污染的方向正好是看起來通過」同一條紀律。
+    # 🔴 R91 補 `AUTOSDD_CONTEXT_SIGNAL_OFF`：它關掉的正是本輪新增的那條 stdout 通道 ⇒
+    # 開發者機器上設過就會讓每一條「訊息必須送進模型」的 e2e **靜默轉綠**，方向同上。
     for flag in ("AUTOSDD_CONTEXT_WINDOW", "SDD_ACTIVE_VERSION",
                  "CLAUDE_CODE_AUTO_COMPACT_WINDOW", "AUTOSDD_CONTEXT_GUARD_OFF",
+                 "AUTOSDD_CONTEXT_SIGNAL_OFF",
                  "AUTOSDD_SENTINEL_OFF", "AUTOSDD_QUOTA_GUARD_OFF",
                  "AUTOSDD_QUOTA_FANOUT_CAP"):
         env.pop(flag, None)
@@ -264,12 +267,20 @@ def _isolated_env(tmp: Path, *, real_scheduler: bool = False) -> dict[str, str]:
     return env
 
 
-def _run_hook(payload: object, tmp: Path) -> tuple[int, str]:
-    """以子行程真跑 hook，回 `(rc, stderr)`。
+def _run_hook3(payload: object, tmp: Path) -> tuple[int, str, str]:
+    """以子行程真跑 hook，回 `(rc, stderr, stdout)`。
 
     走子行程而非 import＋呼叫 `main()`：hook 的契約是「被 Claude Code 以獨立行程呼叫、
     讀 stdin、以 exit code 表態」，import 進來會繞過 stdin 與 exit code 這兩個契約面
     （本 repo「驗證載具必須對齊 production 真正執行路徑」的既有紀律）。
+
+    🔴 R91 為什麼 **stdout 必須進得了斷言**：`.claude/hooks/context_budget_guard.py` 自
+    R91 起把 75% 提示同時送上 stdout 的 `hookSpecificOutput`（exit 0 下唯一進得了模型
+    context 的通道）。此前 `_run_hook()` 只回 `(rc, stderr)` ⇒ 全檔沒有任何一條看得到
+    stdout，於是「低水位誤發一份 JSON」在結構上不可能轉紅——而那正是本輪新增出來的
+    失效面。`_run_hook()` 保留為本函式的 `[:2]` 投影，而**不是**把它就地改成三元組：
+    只有真的要斷言 stdout 的那幾個站點改呼叫 `_run_hook3()`（本輪 4 個），其餘沿用投影
+    ——為了一個新性質去改一批與它無關的斷言，本身就是引入回歸的方式。
     """
     env = _isolated_env(tmp)
     text = payload if isinstance(payload, str) else json.dumps(payload, ensure_ascii=False)
@@ -277,7 +288,16 @@ def _run_hook(payload: object, tmp: Path) -> tuple[int, str]:
         [sys.executable, str(_HOOK)], input=text, env=env, capture_output=True,
         encoding="utf-8", errors="replace", timeout=180, check=False,
     )
-    return proc.returncode, proc.stderr
+    return proc.returncode, proc.stderr, proc.stdout
+
+
+#: 「完全靜默」的定義（R91 補上 stdout 那一欄，見 `_run_hook3` 的 WHY）。
+_SILENT = (0, "", "")
+
+
+def _run_hook(payload: object, tmp: Path) -> tuple[int, str]:
+    """`_run_hook3()` 的 `(rc, stderr)` 投影——不看 stdout 的那些呼叫點沿用，不必改。"""
+    return _run_hook3(payload, tmp)[:2]
 
 
 class UsageArithmeticTest(unittest.TestCase):
@@ -422,8 +442,10 @@ class HookExitContractTest(unittest.TestCase):
                 "transcript_path": str(_write_jsonl(self.tmp / name, [used]))}
 
     def test_below_warn_is_silent_and_zero(self) -> None:
-        rc, err = _run_hook(self._payload(100_000, "low.jsonl"), self.tmp)
-        self.assertEqual((rc, err), (0, ""), "低水位必須完全靜默——常亮的燈等於沒有燈")
+        """🔴 R91：`_SILENT` 含 stdout 那一欄——低水位誤發一份 `hookSpecificOutput`
+        （＝把一則「已越過 75%」的假話送進模型 context）此前沒有任何東西會紅。"""
+        self.assertEqual(_run_hook3(self._payload(100_000, "low.jsonl"), self.tmp),
+                         _SILENT, "低水位必須完全靜默——常亮的燈等於沒有燈")
 
     def test_warn_band_speaks_but_does_not_block(self) -> None:
         rc, err = _run_hook(self._payload(160_000, "warn.jsonl"), self.tmp)
@@ -487,7 +509,7 @@ class HookExitContractTest(unittest.TestCase):
         }
         for label, text in cases.items():
             with self.subTest(label):
-                self.assertEqual(_run_hook(text, self.tmp), (0, ""))
+                self.assertEqual(_run_hook3(text, self.tmp), _SILENT)
 
     def test_env_override_reaches_the_running_hook(self) -> None:
         """指定值必須真的傳得到 production 路徑（不是只有純函式吃得到）。"""
@@ -714,9 +736,11 @@ class LatchRearmTest(unittest.TestCase):
         base = {"hook_event_name": "PostToolUse", "transcript_path": str(path)}
         _write_jsonl(path, [190_000])
         self.assertEqual(_run_hook(base, self.tmp)[0], 2)
-        self.assertEqual(_run_hook(base, self.tmp), (0, ""))
+        self.assertEqual(_run_hook3(base, self.tmp), _SILENT)
         _write_jsonl(path, [195_000])  # 同一個 window、同一個 tier ⇒ 仍不得再喊
-        self.assertEqual(_run_hook(base, self.tmp), (0, ""))
+        # 🔴 R91：閂鎖住的那幾次連 **stdout** 都不准說話——`emit_to_model` 是一條新的
+        # 出聲管道，閂鎖若只管住 stderr，「每次工具呼叫都吵」就會從另一邊長回來。
+        self.assertEqual(_run_hook3(base, self.tmp), _SILENT)
 
 
 class PreToolUseBlockTest(unittest.TestCase):
@@ -5065,10 +5089,16 @@ class QuotaDegradationReachesTheModelTest(unittest.TestCase):
         self.addCleanup(self._restore, saved)
 
     def _restore(self, saved) -> None:  # noqa: ANN001
+        qg.flush_to_model()  # 別把待送訊息留給 atexit——那會印到真的 stdout 上
         sys.stdout, qg.degraded_stamp_path, qg.quota_trace_path = saved
 
     def test_the_degraded_message_goes_out_on_the_channel_the_model_reads(self) -> None:
+        """🔴 R91：`note_degraded()` 改由共用發射口 `platform_utils.emit_to_model()` 送，
+        而它**只累積、不輸出**（一個行程至多一份 JSON，見該檔的立案）⇒ 本組要觀測就得
+        顯式 flush 一次。production 的唯一 flush 站點是 `atexit`，由
+        `SingleEmitterHasOneFlushSiteTest` 釘住。"""
         qg.note_degraded("meter-unreachable", "同步取數失敗")
+        qg.flush_to_model()
         payload = json.loads(self.buf.getvalue().strip())
         self.assertEqual(payload["hookSpecificOutput"]["hookEventName"], "PreToolUse")
         context = payload["hookSpecificOutput"]["additionalContext"]
@@ -5083,8 +5113,14 @@ class QuotaDegradationReachesTheModelTest(unittest.TestCase):
         呼叫都出聲的守衛會被整個關掉，那是本 repo 反覆判過的形態。
         """
         qg.note_degraded("meter-unreachable", "第一次")
+        qg.flush_to_model()
         first = self.buf.getvalue()
+        # 🔴 R91：`ensure_ascii=True`（見 `platform_utils.emit_to_model` 的約束②）⇒ CJK 在
+        # 線上是 `\uXXXX`，子字串比對會假紅。要比對就得先像 CC 那樣把它 parse 回來。
+        self.assertIn("第一次", json.loads(first)["hookSpecificOutput"]["additionalContext"],
+                      "第一次就沒送出去 ⇒ 下面那個相等是假綠")
         qg.note_degraded("meter-unreachable", "第二次")
+        qg.flush_to_model()
         self.assertEqual(self.buf.getvalue(), first, "閂鎖住了卻仍在 stdout 喊了第二次")
 
     def test_a_muted_call_returns_the_empty_string(self) -> None:
@@ -5099,6 +5135,7 @@ class QuotaDegradationReachesTheModelTest(unittest.TestCase):
         for event in ("PreToolUse", "PostToolUse"):
             with self.subTest(event=event):
                 qg.note_degraded(f"src-{event}", "同步取數失敗", event=event)
+                qg.flush_to_model()
                 emitted = [json.loads(ln)["hookSpecificOutput"]["hookEventName"]
                            for ln in self.buf.getvalue().splitlines() if ln.startswith("{")]
                 self.assertEqual(emitted[-1], event, "事件名又被寫死 ⇒ 通報進不了模型上下文")
@@ -5861,8 +5898,12 @@ class SentinelReapVerdictTest(unittest.TestCase):
 # 住在 `arm_sentinel()` 裡，逐點改寫必然留下一個改不到的縫，而那個縫**正是本條在治的
 # 靜默失效**。填充之後，每一個 `os.environ.get(<ENV_SPEC 宣告過的鍵>)` 都看得到 `.env`。
 class EnvFileReachesEveryEscapeHatchTest(unittest.TestCase):
+    # 🔴 R91 加入第五個逃生口 `AUTOSDD_CONTEXT_SIGNAL_OFF`（送達形態）。本清單是**手寫**
+    # 的：新增一個逃生口卻忘了補這一列時，本組不會紅（它只走自己列的那幾個）——所以真正
+    # 守「宣告過的逃生口都要在 `ENV_SPEC` 裡」的是
+    # `EveryHookEscapeHatchIsDeclaredTest`（R91 新增，分母現查 `.claude/hooks/*.py`）。
     _FLAGS = ("AUTOSDD_QUOTA_GUARD_OFF", "AUTOSDD_SENTINEL_OFF",
-              "AUTOSDD_CONTEXT_GUARD_OFF")
+              "AUTOSDD_CONTEXT_GUARD_OFF", "AUTOSDD_CONTEXT_SIGNAL_OFF")
 
     def setUp(self) -> None:
         # 🔴 開發機的 shell 真的會帶著這些鍵（落地當回合實測：`AUTOSDD_SENTINEL_OFF=1`
@@ -6393,6 +6434,361 @@ class QuotaPaceOutletIsReachableTest(unittest.TestCase):
                     self.assertIn(want, report, f"{name}：{report}")
                 if deny:
                     self.assertNotIn(deny, report, f"{name}：{report}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# R91：75% 提示走不走得到**模型**（`.claude/hooks/context_budget_guard.py` 的 WARN 分支
+# ＋ `tools/lib/platform_utils.py` 的單一發射口）
+# ═══════════════════════════════════════════════════════════════════════════
+def _emitted(stdout: str) -> list[dict]:
+    """把 hook 的 stdout 解析成 `hookSpecificOutput` 清單（非 JSON 行一律忽略）。"""
+    out: list[dict] = []
+    for line in stdout.splitlines():
+        if not line.startswith("{"):
+            continue
+        out.append(json.loads(line)["hookSpecificOutput"])
+    return out
+
+
+class ContextWarnReachesTheModelTest(unittest.TestCase):
+    """🔴 M1 送達形態鎖：`.claude/hooks/context_budget_guard.py` 的 75% 分支此前是
+    `stderr + exit 0`，而官方契約下 exit 0 的 stderr **不進模型 context**
+    ⇒ 模型在 75~90% 這一整帶結構上收不到訊號（本輪立案實測 1h49m／45 turns 零訊號）。
+
+    本組守兩件事，兩件都是**實測過的失效面**，不是形式：
+      ① 送出的 `hookEventName` 必須**逐字等於 payload 的 `hook_event_name`**。刻意不釘死
+         `"PostToolUse"`——那正是 R83／D3 已被推翻的假設（不符時 CC 直接把整個
+         `additionalContext` 丟掉，失效外觀與「水位很低」相同）。
+      ② 兩軸同時開火時，stdout 必須是**單一**合法 JSON 且兩段文字都在裡面。這一條不是
+         推論：本輪以臨時專案目錄實跑對照（PostToolUse hook，單物件 vs 兩個相接物件），
+         單物件 ⇒ 模型回 `TOKEN=ALPHA`；**兩個相接物件 ⇒ 模型回 `TOKEN=NONE`（兩則一起
+         消失）**。逐字輸出見 `docs/06_quality/CrossPlatform_R91_Scan_Findings.md` §B。
+    """
+
+    def _tmp(self, name: str) -> Path:
+        root = Path(tempfile.mkdtemp(prefix=f"r91-emit-{name}-"))
+        self.addCleanup(shutil.rmtree, root, True)
+        return root
+
+    def test_the_signal_declares_the_event_it_was_actually_called_from(self) -> None:
+        """兩個事件各一組（各自獨立的暫存 ⇒ per-source TTL 閂鎖不互相吃掉）。
+
+        用「額度量不到」那一軸取樣，是因為它是**唯一**兩個事件都到得了的發言者
+        （context warn 只在 PostToolUse 出聲，PreToolUse 走 `block_verdict` 靜默）——
+        而事件名的正確性住在共用發射口裡，兩軸共用同一個風險。
+        """
+        for event, tool in (("PostToolUse", "Read"), ("PreToolUse", "Agent")):
+            with self.subTest(event=event):
+                tmp = self._tmp(event.lower())
+                payload = {"hook_event_name": event, "tool_name": tool,
+                           "transcript_path": str(_write_jsonl(tmp / "s.jsonl", [30_000]))}
+                _rc, _err, out = _run_hook3(payload, tmp)
+                events = [o["hookEventName"] for o in _emitted(out)]
+                self.assertTrue(events, f"{event}：一則都沒送進模型 context")
+                self.assertEqual(set(events), {event},
+                                 "事件名沒跟著 payload 走 ⇒ CC 會把整段 additionalContext 丟掉")
+
+    def test_two_speakers_in_one_process_share_one_json_object(self) -> None:
+        """🔴 本案最大的新風險：額度降級（TTL 180s／per source）與 context warn
+        （per tier/window）**可以在同一次 hook 呼叫裡同時開火**。各自 `print` 一份就是
+        兩個相接的 JSON 物件 ⇒ 實測模型兩則都收不到。故判準是「**恰好一個**物件」。
+        """
+        tmp = self._tmp("dual")
+        env = _isolated_env(tmp)
+        env["AUTOSDD_CONTEXT_WINDOW"] = "200000"   # 釘死分母：本組量的是送達形態不是判分母
+        payload = json.dumps({
+            "hook_event_name": "PostToolUse", "tool_name": "Read",
+            "transcript_path": str(_write_jsonl(tmp / "s.jsonl", [160_000]))})
+        proc = subprocess.run([sys.executable, str(_HOOK)], input=payload, env=env,
+                              capture_output=True, encoding="utf-8", errors="replace",
+                              timeout=180, check=False)
+        objs = _emitted(proc.stdout)
+        self.assertEqual(len(objs), 1,
+                         f"stdout 上有 {len(objs)} 個 JSON 物件（必須恰好 1）：{proc.stdout[:400]}")
+        body = objs[0]["additionalContext"]
+        self.assertIn("context 水位 80.0%", body, "context 那一則沒併進來")
+        self.assertIn("額度水位", body, "額度那一則沒併進來 ⇒ 併入邏輯只留了最後一個發言者")
+
+    def test_the_signal_hatch_falls_back_to_the_old_stderr_only_shape(self) -> None:
+        """`AUTOSDD_CONTEXT_SIGNAL_OFF` 只關**送達形態**：stdout 沒了、stderr 一字不少。
+
+        成對寫（開／關）才證得出這個旗標真的接上了——只驗「設了就沒 stdout」時，
+        一個從頭到尾就不發 stdout 的實作也會通過。
+        """
+        for off, want_stdout in ((None, True), ("1", False)):
+            with self.subTest(off=off):
+                tmp = self._tmp(f"hatch-{off}")
+                env = _isolated_env(tmp)
+                env["AUTOSDD_CONTEXT_WINDOW"] = "200000"
+                if off:
+                    env["AUTOSDD_CONTEXT_SIGNAL_OFF"] = off
+                payload = json.dumps({
+                    "hook_event_name": "PostToolUse", "tool_name": "Read",
+                    "transcript_path": str(_write_jsonl(tmp / "s.jsonl", [160_000]))})
+                proc = subprocess.run([sys.executable, str(_HOOK)], input=payload, env=env,
+                                      capture_output=True, encoding="utf-8",
+                                      errors="replace", timeout=180, check=False)
+                bodies = [o["additionalContext"] for o in _emitted(proc.stdout)]
+                got = any("context 水位" in b for b in bodies)
+                self.assertEqual(got, want_stdout, f"stdout={proc.stdout[:300]}")
+                self.assertIn("context 水位 80.0%", proc.stderr,
+                              "stderr 那一半被一起關掉了——本旗標只准關送達形態")
+
+
+class WarnBandLatchTest(unittest.TestCase):
+    """🔴 M2：75~90% 這一帶的**取樣**與**閂鎖**是兩件事，故拆成兩條、名字各自誠實。
+
+    （原稿把 76/80/85/89 四個樣本寫在同一個 session 裡——它們同 tier 同 window ⇒ 同一把
+    閂鎖鑰匙，同 session 跑必然只有第一個出聲；那樣的測試在換 session 時是假綠。）
+    """
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="r91-warnband-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        _quota_cache(self.tmp, 20.0)   # free 帶 ⇒ 額度軸全程靜默，stdout 只會有 context 那一則
+
+    def _run(self, used: int, name: str) -> str:
+        env = _isolated_env(self.tmp)
+        env["AUTOSDD_CONTEXT_WINDOW"] = "100000"
+        payload = json.dumps({
+            "hook_event_name": "PostToolUse", "tool_name": "Read",
+            "transcript_path": str(_write_jsonl(self.tmp / name, [used]))})
+        proc = subprocess.run([sys.executable, str(_HOOK)], input=payload, env=env,
+                              capture_output=True, encoding="utf-8", errors="replace",
+                              timeout=180, check=False)
+        return proc.stdout
+
+    def test_every_sample_in_the_warn_band_reaches_the_model(self) -> None:
+        """整條帶都要有訊號（每個樣本各自 fresh session）——守的是 `tier_of()` 無縫。"""
+        for pct in (76, 80, 85, 89):
+            with self.subTest(pct=pct):
+                out = self._run(pct * 1000, f"s{pct}.jsonl")
+                bodies = [o["additionalContext"] for o in _emitted(out)]
+                self.assertTrue(any(f"{pct}.0%" in b for b in bodies),
+                                f"{pct}% 沒有進到模型 context：{out[:300]}")
+
+    def test_a_single_session_climbing_76_to_89_speaks_exactly_once(self) -> None:
+        """🔴 **把現行行為釘成契約**，而不是當成缺陷：同一 session 由 76% 爬到 89%，
+        整條帶只出聲**一次**（閂鎖鍵＝(tier, window)）。
+
+        為什麼這是刻意的：每次工具呼叫都出聲的守衛會被整個關掉，那是本 repo 反覆判過的
+        形態。代價也照實記——模型若無視那一喊，本帶不會再喊第二次（「每 5 個百分點重新
+        武裝」的提案已被評估，它會打紅 `LatchRearmTest::
+        test_the_same_tier_and_window_still_only_fires_once`，與本案正交，另輪處理）。
+        本條就是那個提案的**入場券**：它一落地就必須先讓這一條轉紅。
+        """
+        spoke = [pct for pct in (76, 80, 85, 89)
+                 if any("水位" in o["additionalContext"]
+                        for o in _emitted(self._run(pct * 1000, "climb.jsonl")))]
+        self.assertEqual(spoke, [76], f"同一 session 的警告次數不是 1：{spoke}")
+
+
+class WarnGuidanceFollowsTheQuotaBandTest(unittest.TestCase):
+    """🔴 PRD 前置條件（本變更**不可省**的那一半）：PRD §4.3 的壓縮觸發是三個 AND，
+    而 `.claude/hooks/context_budget_guard.py` 原本只實作了 `K_ctx ≥ 75`。PRD §0 第 1 條
+    把「額度高時觸發 `/compact`」列為 🔴 阻斷級（§2：壓縮要模型讀完整段對話再產摘要 ⇒
+    顯著推升 U5h）。這個缺陷在換通道之前是**良性的，正因為沒有人聽那則訊息**；
+    一旦訊息真的進得了模型 context，它就會被執行 ⇒ 兩件事必須同一個 commit。
+    """
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="r91-drain-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+    def _guidance(self, quota_pct: float | None) -> str:
+        if quota_pct is not None:
+            _quota_cache(self.tmp, quota_pct)
+        env = _isolated_env(self.tmp)
+        env["AUTOSDD_CONTEXT_WINDOW"] = "100000"
+        payload = json.dumps({
+            "hook_event_name": "PostToolUse", "tool_name": "Read",
+            "transcript_path": str(_write_jsonl(self.tmp / f"q{quota_pct}.jsonl", [82_000]))})
+        proc = subprocess.run([sys.executable, str(_HOOK)], input=payload, env=env,
+                              capture_output=True, encoding="utf-8", errors="replace",
+                              timeout=180, check=False)
+        bodies = [o["additionalContext"] for o in _emitted(proc.stdout)]
+        hit = [b for b in bodies if "context 水位 82.0%" in b]
+        self.assertTrue(hit, f"82% 的 context 提示沒送出：{proc.stdout[:300]}｜{proc.stderr[:300]}")
+        return hit[0]
+
+    def test_a_drained_account_is_told_to_hand_off_not_to_compact(self) -> None:
+        """注入組：context 82% ＋ 額度 90%（prepare 帶＝已越過 PRD `DRAIN_PERCENT`）。"""
+        body = self._guidance(90.0)
+        self.assertIn("不要 `/compact`", body, "高額度下仍在勸壓縮 ⇒ PRD §0 第 1 條的阻斷級違反")
+        self.assertIn("交棒", body, "沒給替代路線＝只擋不指路，那種提示會被無視")
+        self.assertNotIn("建議現在跑", body, "同時給了兩個互相矛盾的下一步")
+
+    def test_a_healthy_account_still_gets_the_compact_advice(self) -> None:
+        """控制組：不加這一條，上面那條被「永遠都說不要壓縮」的實作也會通過。"""
+        body = self._guidance(20.0)
+        self.assertIn("建議現在跑 `/compact`", body)
+        self.assertNotIn("不要 `/compact`", body)
+
+    def test_an_unmeasurable_account_fails_safe_rather_than_assuming_room(self) -> None:
+        """🔴 「量不到」不得折進「額度很低」：PRD §0 第 6 條明定遙測失效方向為 fail-safe，
+        而 §4.3 的第二個 AND **證不出成立**就不該壓縮（同本 repo「量不到 ≠ 量到零」紀律）。
+        """
+        body = self._guidance(None)
+        self.assertIn("量不到", body)
+        self.assertNotIn("建議現在跑 `/compact`", body,
+                         "沒量到卻宣稱壓縮成本付得起 ⇒ 把推論寫成了已知")
+
+
+class PrdDrainPercentMapsToTheBandsTest(unittest.TestCase):
+    """🔴 R91：PRD 的 `DRAIN_PERCENT` ↔ `tools/lib/quota_policy.py` 四道帶的對映，
+    落地前**全庫實查為零登記**（`DRAIN_PERCENT` 只出現在 PRD 那一份 `.md`，`tools/` 下
+    一次都沒有）⇒ 任何要用「PRD 那條線」判斷的程式碼只能靠讀者自行推論，而推論不會轉紅。
+
+    本組把它變成可證的：分母**直接讀 PRD 檔**。兩邊漂開時該紅的是
+    `tools/lib/quota_gate.py::DRAINING_BANDS` 那一側——PRD 是憲法，改它要走修憲程序。
+    """
+
+    _PRD = (_REPO_ROOT / "docs" / "01_requirements"
+            / "AutoClaude_Token_監控與喚醒機制_PRD_v2.1.md")
+    #: PRD §6 的出廠值 ↔ `Policy` 的欄位名。`notice_pct` 刻意沒有對應物：它比 PRD 更早
+    #: 開始出聲，方向是收緊 ⇒ 不需要 PRD 授權，也不該假裝 PRD 講過它。
+    _PAIRS = (("TOKEN_WARN_PERCENT", "converge_pct"),
+              ("TOKEN_DRAIN_PERCENT", "prepare_pct"),
+              ("TOKEN_HALT_PERCENT", "halt_pct"))
+
+    def _prd_value(self, key: str) -> float:
+        text = self._PRD.read_text(encoding="utf-8")
+        found = re.findall(rf"^{key}=(\d+(?:\.\d+)?)", text, re.MULTILINE)
+        self.assertEqual(len(found), 1, f"PRD 裡 `{key}` 的出廠值不是恰好一處：{found}")
+        return float(found[0])
+
+    def test_the_prd_thresholds_equal_the_policy_defaults(self) -> None:
+        for key, field in self._PAIRS:
+            with self.subTest(key=key):
+                self.assertEqual(self._prd_value(key),
+                                 getattr(quota_policy.DEFAULT_POLICY, field),
+                                 f"PRD 的 {key} 與 Policy.{field} 已經漂開 ⇒ "
+                                 "`DRAINING_BANDS` 那個對映不再成立")
+
+    def test_draining_bands_are_derived_from_the_threshold_not_hand_listed(self) -> None:
+        """由 `pct_band()` 掃出「≥ DRAIN 線」的帶別集合，再與 `DRAINING_BANDS` 對帳。
+
+        刻意**推導**而不是複述常數：後者只會證明「我把同一句話寫了兩次」。
+        """
+        p = quota_policy.DEFAULT_POLICY
+        drain = self._prd_value("TOKEN_DRAIN_PERCENT")
+        above = {quota_policy.pct_band(x / 10, p)
+                 for x in range(int(drain * 10), 1001)}
+        below = {quota_policy.pct_band(x / 10, p) for x in range(0, int(drain * 10))}
+        self.assertEqual(above, set(qg.DRAINING_BANDS))
+        self.assertFalse(below & set(qg.DRAINING_BANDS),
+                         "DRAIN 線以下的帶別跑進 DRAINING_BANDS ⇒ 會在額度健康時誤擋壓縮")
+
+    def test_the_three_state_answer_never_folds_unmeasurable_into_no(self) -> None:
+        """`draining()` 三態各自可達，且「量不到」不得長得像「額度很低」。"""
+        tmp = Path(tempfile.mkdtemp(prefix="r91-draining-"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        # 🔴 三個路徑一起關進沙箱（`TraceIsolationTest` 在守）：`draining()` 今天走不到
+        # `note_degraded()`，但「今天走不到」不是隔離；下一次它多一條降級分支時，本測試
+        # 就會吃掉 production 那個 180 秒閂鎖，而失效是靜默的。
+        with (unittest.mock.patch.object(qg, "quota_cache_path",
+                                         lambda: tmp / "autosdd_quota.json"),
+              unittest.mock.patch.object(qg, "quota_trace_path",
+                                         lambda: tmp / "trace.jsonl"),
+              unittest.mock.patch.object(qg, "degraded_stamp_path",
+                                         lambda source: tmp / f"stamp-{source}")):
+            self.assertEqual(qg.draining(), "unknown", "沒有快取時竟然敢說話")
+            _quota_cache(tmp, 90.0)
+            self.assertEqual(qg.draining(), "yes")
+            _quota_cache(tmp, 20.0)
+            self.assertEqual(qg.draining(), "no")
+
+
+def flush_site_problems(sources: dict[str, str]) -> list[str]:
+    """`flush_to_model` 的呼叫站點普查（空＝通過）。純函式，紅綠由注入自證。
+
+    判準：production 面（`.claude/hooks/`＋`tools/lib/`）內對 `flush_to_model()` 的呼叫
+    **只准出現在 `atexit.register(...)` 的引數位置**。理由是硬的：一個行程只要 flush 兩次，
+    stdout 上就會有兩個相接的 JSON 物件，而那個形態本輪實測會讓**兩則訊息一起消失**。
+    `re-export`（`from platform_utils import ... flush_to_model`）不是呼叫，不計。
+    """
+    problems: list[str] = []
+    for rel, text in sorted(sources.items()):
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:  # pragma: no cover - 別人的壞檔不該讓本判準崩
+            continue
+        registered = {
+            id(a) for n in ast.walk(tree) if isinstance(n, ast.Call)
+            and getattr(n.func, "attr", "") == "register" for a in n.args}
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            if getattr(node.func, "id", getattr(node.func, "attr", "")) != "flush_to_model":
+                continue
+            if id(node.func) not in registered:
+                problems.append(
+                    f"[多重 flush] {rel}:{node.lineno} 直接呼叫 flush_to_model()"
+                    "——一個行程 flush 兩次＝stdout 上兩個相接的 JSON 物件，"
+                    "實測模型兩則都收不到（比只送一則更糟）")
+    return problems
+
+
+class SingleEmitterHasOneFlushSiteTest(unittest.TestCase):
+    """🔴 `tools/lib/platform_utils.py` 的「一個行程至多發射一份 JSON」保證，靠的是
+    **production 只有 `atexit` 這一個 flush 站點**——那件事必須是可查的，不是散文。
+    """
+
+    def _sources(self) -> dict[str, str]:
+        files = sorted((_REPO_ROOT / ".claude" / "hooks").glob("*.py"))
+        files += sorted((_REPO_ROOT / "tools" / "lib").glob("*.py"))
+        return {p.relative_to(_REPO_ROOT).as_posix(): p.read_text(encoding="utf-8")
+                for p in files}
+
+    def test_the_real_tree_has_no_extra_flush_call(self) -> None:
+        self.assertEqual(flush_site_problems(self._sources()), [])
+
+    def test_the_atexit_registration_actually_exists(self) -> None:
+        """反向：`atexit.register(flush_to_model)` 不見了 ⇒ 訊息永遠停在緩衝區裡，
+        而失效表徵是「什麼都沒說」＝與「水位很低」完全相同。"""
+        text = (_REPO_ROOT / "tools" / "lib" / "platform_utils.py").read_text(encoding="utf-8")
+        tree = ast.parse(text)
+        hits = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
+                and getattr(n.func, "attr", "") == "register"
+                and any(getattr(a, "id", "") == "flush_to_model" for a in n.args)]
+        self.assertEqual(len(hits), 1, "atexit 註冊不是恰好一處 ⇒ 送達保證沒有載體")
+
+    def test_red_a_second_flush_site_is_caught(self) -> None:
+        """合成注入（缺陷本體）：多一個直接呼叫就必須紅。"""
+        self.assertTrue(flush_site_problems(
+            {"fake.py": "import atexit\natexit.register(flush_to_model)\nflush_to_model()\n"}))
+
+
+class EveryHookEscapeHatchIsDeclaredTest(unittest.TestCase):
+    """🔴 R82／C2 的那條路要對**每一個**逃生口成立：`.env` 裡設了卻不生效時，
+    「關掉了」與「沒關掉」外觀完全相同。分母現查 `.claude/hooks/context_budget_guard.py`
+    自己宣告的 `*_OFF_ENV` 常數，不寫死清單。
+
+    誠實劃界：射程**只有這一支 hook**。`AUTOSDD_GIT_GUARD_OFF`／`AUTOSDD_CLAIM_GUARD_OFF`
+    （`block_destructive_git.py`／`check_claim_provenance.py`）今天不在 `ENV_SPEC` 裡，
+    也就是它們從 `.env` 到不了——那是**已知且尚未關的缺口**，不是本組漏看；把它們一起
+    納入會製造兩筆今天無人負責的紅，而那種鎖活不過一輪。
+    """
+
+    def test_every_off_switch_this_hook_declares_is_reachable_from_dot_env(self) -> None:
+        names = {spec.name for spec in quota_policy.ENV_SPEC}
+        declared = {v for k, v in vars(guard).items()
+                    if k.endswith("_OFF_ENV") and isinstance(v, str)}
+        self.assertTrue(declared, "一個 `*_OFF_ENV` 都抓不到 ⇒ 本判準的錨已經漂掉")
+        self.assertEqual(sorted(declared - names), [],
+                         "本 hook 宣告的逃生口沒進 ENV_SPEC ⇒ 使用者照 .env.example 設了也關不掉")
+
+
+def tearDownModule() -> None:
+    """把測試期間累積、卻沒有任何斷言在讀的模型訊息**排掉**（R91）。
+
+    立案同 `_tmpdir` 的 SA84-06：測試不得在使用者的環境留下真實副作用。這裡的副作用是
+    「一則假的額度降級通報，在跑測試的人的 stdout 上出現」——`platform_utils.emit_to_model`
+    只累積、由 `atexit` 送出，而好幾個 in-process 呼叫 `qg.quota_gate()` 的類別會把訊息
+    排進去卻不讀它。排掉而不是關掉：真正在斷言送達的那幾組自己會先 flush。
+    """
+    with contextlib.redirect_stdout(io.StringIO()):
+        qg.flush_to_model()
 
 
 if __name__ == "__main__":

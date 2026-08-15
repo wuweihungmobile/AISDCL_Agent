@@ -3074,7 +3074,7 @@ class TestR82ComplexReviewSealTableIntegrity(unittest.TestCase):
 _REASSIGN_FRESHNESS_FROM = 84
 #: 生效輪之外、**今天就已過期**的存量筆數——相等棘輪，只准變小（不是上限，是現值）。
 #: 它讓「還有幾筆躺在過期出口上」是可查的量測值而不是散文（同鐵律三對照表的判準形狀）。
-_EXPIRED_REASSIGN_LEGACY_CENSUS = 26
+_EXPIRED_REASSIGN_LEGACY_CENSUS = 25
 #: 走該出口、但狀態欄**解析不出任何承接輪號**的筆數（同上，只准變小）。
 _UNPARSEABLE_REASSIGN_CENSUS = 3
 

@@ -190,6 +190,11 @@ _GOVERNANCE_DOCS = (
     # 複審者要判「還有哪些缺口開著」就得讀完它 ⇒ 體積守門）。它同時是 `doc_guard_total_
     # problems()` 款(1) 要求的兩個標記站點之一（另一處＝`AutoSDD_improving_110.md`）。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R86_Scan_Findings.md",
+    # R91 收尾：同時是稽核列款(9) 指名的「逐檔清單的家」與 `doc_guard_total_problems()`
+    # 款(1) 的兩個標記站點。資格另有一項是同名檔沒有的：它承載本輪那組**真跑實驗**的
+    # 逐字輸出（單一 vs 兩個相接的 `hookSpecificOutput` 物件，後者實測兩則訊息一起消失）
+    # ——那是 `emit_to_model()` 為何非得「一行程至多一份 JSON」的唯一還能重驗的依據。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R91_Scan_Findings.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/CrossPlatform_*.md`。這**不是**把具名常數

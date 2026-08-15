@@ -14,6 +14,7 @@ buffering 行為（TextIOWrapper 預設非 line-buffered）、丟棄原始 strea
 """
 from __future__ import annotations
 
+import atexit
 import importlib.util
 import json
 import sys
@@ -187,3 +188,70 @@ def read_payload() -> dict | None:
 def read_hook_payload() -> dict:
     """同 `read_payload()`，但退化回 `{}`——給「拿不到就放行」的消費者。"""
     return read_payload() or {}
+
+
+# ── hook → **模型 context** 的唯一發射口（R91／`DEF-200-135`）─────────────────────
+#
+# 病本體：hook 寫 stderr **在 exit 0 下不進模型 context**（官方契約：PostToolUse 只有
+# exit 2 才把 stderr 回饋給模型）。`context_budget_guard.py` 的 75% WARN 分支正是
+# `stderr + exit 0` ⇒ 模型在 75~90% 這一整帶結構上收不到任何訊號（本輪實測：1h49m／
+# 45 turns 零訊號）。唯一送得進去的通道是 **stdout 上的 `hookSpecificOutput`**，而它
+# 已經在 production 用了一年（`tools/lib/quota_gate.py::note_degraded`）——同一份知識
+# 因此必須只有一個家（R73 `Find-GitBash` 判例），本函式就是那個家。
+#
+# 三條硬約束，每一條都是**實測或判例**得來的，不是風格：
+#  ① **事件名由呼叫端傳，不得寫死**。R83／D3 已為同一件事下過判詞：`hookEventName` 與
+#     實際事件不符時 Claude Code **直接把整個 `additionalContext` 丟掉** ⇒ 靜默失效，
+#     而它的外觀與「水位很低／額度很健康」完全相同。
+#  ② **`ensure_ascii=True`**。本模組層的 `reconfigure` 包在裸 `except: pass` 裡（見
+#     消費端 hook 的檔頭）：reconfigure 失敗時 `ensure_ascii=False` 的 CJK 在 cp1252 上
+#     會 `UnicodeEncodeError` → 被 hook `main()` 的 catch-all 吞掉 → **rc=0 靜默失聲**，
+#     外觀同樣與「水位很低」相同。逃脫序列由 CC 的 JSON parser 還原，讀者端零損失。
+#  ③ **一個行程至多發射一份 JSON**。額度降級通報（閂鎖 TTL 180s／per source）與 context
+#     warn（閂鎖 per tier/window）**可以在同一次 hook 呼叫裡同時開火**；兩份相接的 JSON
+#     物件會讓 parse 失敗 ⇒ **兩則訊息一起消失**。⇒ `emit_to_model()` 只累積、不輸出，
+#     真正的輸出集中在 `flush_to_model()`，而 production 只有 `atexit` 這**一個**呼叫站點
+#     （鎖＝`tools/tests/test_context_budget_guard.py::SingleEmitterHasOneFlushSiteTest`）。
+#     選 `atexit` 而不是在 `main()` 裡 try/finally：`main()` 有六個 return 出口，且既有
+#     接線鎖以 AST 認 `main` 這個函式名（改名會打紅它）。
+_MODEL_MSGS: list[str] = []
+_MODEL_EVENT = ""
+
+
+def emit_to_model(event: str, msg: str) -> bool:
+    """把 `msg` 排進「這個行程要送給模型的那一份 JSON」；回「有沒有被收下」。
+
+    `event` 必須是 payload 的 `hook_event_name` 原值（見上方約束①）。第二次以後的呼叫
+    **併入**同一份，事件名沿用第一次收下的那個——同一次 hook 呼叫裡兩軸的事件名必然相同，
+    不同就是呼叫端傳錯了，而那時把後者丟掉比讓兩則一起消失安全。
+    任何輸入都不得拋例外（hook 崩潰會讓守衛的判定靜默消失，見上方 `read_payload` 的 P0）。
+    """
+    global _MODEL_EVENT
+    if not isinstance(event, str) or not event.strip() or not msg:
+        return False
+    if not _MODEL_MSGS:
+        _MODEL_EVENT = event
+        atexit.register(flush_to_model)
+    _MODEL_MSGS.append(str(msg))
+    return True
+
+
+def flush_to_model() -> str:
+    """把累積的訊息寫成**單一** JSON 物件到 stdout；回實際送出的文字（`""`＝沒送）。
+
+    production 只由 `atexit` 呼叫（見上方約束③）；測試可顯式呼叫以觀測。寫失敗一律吞掉：
+    送不出去最多是少一則提示，絕不可反過來變成守衛的故障源。
+    """
+    if not _MODEL_MSGS:
+        return ""
+    body = "\n".join(_MODEL_MSGS)
+    _MODEL_MSGS.clear()
+    try:
+        sys.stdout.write(json.dumps(
+            {"hookSpecificOutput": {"hookEventName": _MODEL_EVENT,
+                                    "additionalContext": body}},
+            ensure_ascii=True) + "\n")
+        sys.stdout.flush()
+    except Exception:  # noqa: BLE001 — 見 docstring 最後一句
+        return ""
+    return body

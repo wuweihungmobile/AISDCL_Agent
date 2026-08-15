@@ -4,20 +4,11 @@
 WHY
 ---
 掌舵者連續多輪指名要兩件事：「注意上下文是否超出 90%，進行 /compact，不要爆」與
-「注意 Token 限制，適當進行排程再喚醒繼續處理」。實查**四處**：
-
-  · 根 `.claude/settings.json`：SessionStart/PreToolUse/PostToolUse 全部條目裡
-    沒有任何一支在看 token 或 context；
-  · `AutoClaude` Kernel 的 Token Guard（≥80% `/compact`、≥90% checkpoint ＋
-    `scheduled_resume_at`）活在 **playbook 執行迴圈**裡，對 Claude Code session
-    本身一行都不生效——它守的是被驅動的那個東西，不是驅動者；
-  · 根 `CLAUDE.md`〈Token 將耗盡時的「無害暫停 → reset 後重啟」SOP〉是**純人工程序**；
-  · 🔴 **第四處＝harness 自己**（R79 補上；R78 版的這段 docstring 逐字寫「實查三處」
-    而漏了它，等於在說「沒人在自動 compact」——與磁碟不符）。實測 `claude --version`
-    ＝2.1.223、`claude --help` 有 `--autocompact <auto|tokens>  Auto-compact window
-    size (auto, or 100k–1M tokens)`；二進位內的開關判定逐字是
-    `if(DISABLE_COMPACT)return!1; if(env.DISABLE_AUTO_COMPACT)return!1;
-    return config("autoCompactEnabled", true)` ⇒ **預設開啟**。
+「注意 Token 限制，適當進行排程再喚醒繼續處理」。四處實查（哪四處、當時各量到什麼，
+逐字保全於 `docs/06_quality/CrossPlatform_R91_Scan_Findings.md` §A-1；R91 搬出，理由是
+其中的 `claude --version` 讀數已隨版本過期，而過期的量測值住在契約文件裡會被當成常數）
+的結論只剩兩句仍在約束今天的行為：**沒有任何既有 hook 在看 context 水位**，以及
+**harness 自己的 autocompact 預設開啟**（姿態現查 `--check-autocompact`，見下一節）。
 
 🔴 因此本檔的角色被明確收斂（別讓一個東西假裝能做兩件事）
 --------------------------------------------------------
@@ -33,64 +24,40 @@ harness 那一半的姿態是**可現查的**：`python tools/session_resume_pla
 
 🔴 與 SDD `context_ledger` 的分工邊界（**先查過再寫，本檔不是重複造輪子**）
 ------------------------------------------------------------------------
-repo 內確實已有一套帶 90% 門檻的 context 機制，而且**已經橋接在根註冊面上**：
-`AISDLC_SDD/AISDLC_SDD_v0.30/.claude/hooks/context_ledger_pre.py`（各版目錄各一份），
-經根 `.claude/settings.json` 的 `sdd_hook_router.py` 以 `context_ledger_pre`／
-`context_ledger_post` 掛在 PreToolUse／PostToolUse。實查其常數：`WARN_RATIO = 0.85`／
-`AUTO_COMPACT_RATIO = 0.90`／`CRIT_RATIO = 0.95`（95% 發 `permissionDecision=deny`），
-分母 `MAX_CONTEXT` 來自 `SDD_MAX_CONTEXT`、預設 200000。**它不該被廢、也不該被改**
-（30 個版目錄、Copy-on-Evolve 凍結、FSM 有依賴）。
-
-本檔與它**量的不是同一個東西**，三點皆逐項實查過：
-  ① **估算 vs 實測**：ledger 的分子是 `_estimate_tokens(tool, tool_input)`，
-     委派 `conversation_ledger.estimate_tool_tokens`，回退 `len(text) // 4`。
-     它的輸入**只有 tool_input**——看不到工具**輸出**、subagent 回傳、對話本身、
-     system prompt，而真正把 context 撐爆的正是那些。本檔的分子是逐字稿裡
-     API 自己回報的 `message.usage`，是實測值。
-  ② **生效條件不相交**：router 以 `SDD_ACTIVE_VERSION` 為守衛，未設時
-     PreToolUse／PostToolUse **完全靜默放行**（SessionStart 印一行 dormant 提示）。
-     純 AutoClaude／monorepo 根 session（＝本檔要守的那一種）ledger 一行都不跑。
-  ③ **分母不同**：ledger 的分母是 SDD 專案的 Stage 預算，不是 Claude Code 的
-     context window。兩者同為 200000 是巧合（一個是預設值、一個是保守下界）。
+repo 內確實已有一套帶 90% 門檻的 context 機制（SDD 各版目錄的 `context_ledger_pre/post`，
+經 `sdd_hook_router.py` 橋接在根註冊面上）。**它不該被廢、也不該被改**（數十個版目錄、
+Copy-on-Evolve 凍結、FSM 有依賴）。本檔與它**量的不是同一個東西**，三點逐項實查過——
+估算 vs 實測（ledger 的分子只看 `tool_input`，看不到工具輸出／subagent 回傳／對話本身）／
+生效條件不相交（ledger 以 `SDD_ACTIVE_VERSION` 為守衛，純根 session 一行都不跑）／
+分母不同（Stage 預算 vs context window）。逐條實查數字與 ledger 的常數表逐字保全於
+`docs/06_quality/CrossPlatform_R91_Scan_Findings.md` §A-4（R91 搬出：那是另一支檔的實作
+細節，抄在這裡就是同一份知識的第二個家，而只有這一份會過期）。
 
 🔴 這個分工論證的**洞**，照實寫（不粉飾）
 ------------------------------------------
-`SDD_ACTIVE_VERSION` 有設時兩者同時活著，而**兩邊都有一條 90% 線**。它們的分子分母
-都不同，所以同一時刻的兩個百分比會**不一樣**——「同一份 repo 對同一個數字兩種說法」
-正是本 repo 反覆判過的缺陷形態。本檔採取的處置是**標示而非收編**：
-  · 每一則訊息都印出 `MEASURE_LABEL`，讓讀者一眼分得出這是哪一把尺量的；
-  · 不去讀、也不去寫 ledger 的檔案（耦合會讓凍結版被拖下水）；
-  · 不因 ledger 存在而讓路——它結構上看不到讓 context 爆掉的那部分。
+`SDD_ACTIVE_VERSION` 有設時兩者同時活著，而**兩邊都有一條 90% 線**、分子分母都不同 ⇒
+同一時刻兩個百分比會不一樣。處置是**標示而非收編**：每一則訊息都印 `MEASURE_LABEL`；
+不讀也不寫 ledger 的檔案（耦合會讓凍結版被拖下水）；不因它存在而讓路。
 **未解的那一半**：兩者同時觸發時使用者會連拿兩則語氣相近的告警。本檔不試圖去重
-（去重需要跨 30 個凍結版的協議），僅以標籤讓它們可分辨。這一段是已知且已接受的
-限制，不是漏看。
+（去重需要跨全部凍結版的協議），僅以標籤讓它們可分辨——已知且已接受的限制，不是漏看。
 
-而「純文件約束對當下的模型零攔阻力」在本 repo 已被實證：`block_bash_on_windows.py`
-那條規則寫進 CLAUDE.md 之後，同一個回合內仍再犯一次；換成 PreToolUse hook 之後
-一次嘗試、一次攔下。水位這件事同型且更嚴重——CLAUDE.md 由 session **開場**載入，
-而「現在幾 % 了」是每回合都在變的量，靠模型主動想起來去算它，正是決策負荷第一個
-擠掉的東西。姊妹檔 `lint_powershell_command.py` 的立案量測寫得更直白：**有觀測者
-的規則違規 1 次且被當場擋下，沒有觀測者的規則違規率 20~35%**。context 水位在本檔
-出現之前是「沒有觀測者」那一類。
+而「純文件約束對當下的模型零攔阻力」在本 repo 已被實證兩次（`block_bash_on_windows.py`
+與 `lint_powershell_command.py` 的立案量測，逐字見 `CrossPlatform_R91_Scan_Findings.md`
+§A-2）。水位這件事同型且更嚴重——CLAUDE.md 由 session **開場**載入，而「現在幾 % 了」
+是每回合都在變的量，靠模型主動想起來去算它，正是決策負荷第一個擠掉的東西。
 
-量測面（本輪實測確認，不是推測）
---------------------------------
+量測面（實測確認，不是推測）
+----------------------------
 Claude Code 的 hook payload 帶 `transcript_path`，指向本 session 的 jsonl。該檔每筆
 `type == "assistant"` 的記錄在 `message.usage` 下有四個計數欄。**當前 context 佔用
 ＝ `input_tokens` ＋ `cache_creation_input_tokens` ＋ `cache_read_input_tokens`**
 （`output_tokens` 不算：它是這一則回覆吐出來的量，下一回合才會以 input 的形式回到
 context 裡，重複計會高估）。
 
-🔴 context window 判定（R79 重寫——R78 版在本機模型上結構性保證在真 90% 靜默）
+🔴 context window 判定（R79 重寫；當時的缺陷實況＝`CrossPlatform_R91_Scan_Findings.md`
+§A-3——一句話：分母猜小只是早喊，猜大會讓守衛在真 90% 結構性靜默）
 --------------------------------------------------------------------------------
-R78 版只有兩階（環境變數 → `peak > 200K` 推論 → 保守下界 200K）。它在**掌舵者自己
-這台機器**上的實測後果，是這支守衛存在的理由被完全抵銷掉：本機 user 層 settings
-的 `model` 欄是 `opus[1m]`（1,000,000），而守衛拿 200,000 當分母 ⇒ 真實 15%／18% 各
-誤喊一次 75%／90%，把兩個閂鎖同時燒掉；等 peak 越過 200K、window 翻成 1M 之後，
-**到 99.9% 都不會再出聲**。誤報那一半 `settings.json` 承認過，「誤報會把真報一起吃掉」
-那一半沒有。兩件事各自要修：分母要對（本段）、閂鎖要能重新武裝（見〈行為契約〉）。
-
-方向仍是不對稱的，這一點沒變：
+方向是不對稱的：
   · 猜小（實際 1M、當成 200K）⇒ 提早喊。成本＝一次多餘的 `/compact`。
   · 猜大（實際 200K、當成 1M）⇒ 到 90% 才喊時真實水位已是 450%，**根本喊不到**。
 判定順序（先可證、後推斷；**每一階的來源字串都會原樣印進使用者看到的訊息**，
@@ -123,7 +90,20 @@ R78 版只有兩階（環境變數 → `peak > 200K` 推論 → 保守下界 200
   是**不同**的事：那是「輸入壞掉」，這是「量測暫時不可得」（session 剛開場一定會
   走到這裡）。把兩者混同就會變成每次呼叫都出聲的守衛，然後整支被關掉。
 · `< 75%` → exit 0 且**完全靜默**（每次工具呼叫都出聲的守衛會被關掉）。
-· `>= 75%` → stderr 一行建議 `/compact`，exit 0。
+· `>= 75%` → stderr 一行 ＋ **同一段文字送進模型 context**（stdout 的
+  `hookSpecificOutput`，發射口＝`platform_utils.emit_to_model`），exit 0。
+  🔴 R91 立案：exit 0 下 stderr **不進模型 context**（官方契約：PostToolUse 只有 exit 2
+  才回饋 stderr）⇒ 這一整帶（75~90%）模型結構上收不到任何訊號，本輪實測 1h49m／45 turns
+  零訊號。stderr 保留不動（人與 log 的可見面），新增的是模型那一半——形態與
+  `quota_gate.note_degraded()` 逐字同構（那是本通道在 production 的第一個消費者）。
+  逃生口 `AUTOSDD_CONTEXT_SIGNAL_OFF` 只關這半條（退回舊的純 stderr），刻意不與
+  `AUTOSDD_CONTEXT_GUARD_OFF`／`AUTOSDD_SENTINEL_OFF` 共用。
+  🔴 **這一格說什麼，取決於額度那把尺**（`quota_gate.draining()`，零網路、只讀快取）：
+  PRD `docs/01_requirements/AutoClaude_Token_監控與喚醒機制_PRD_v2.1.md` §4.3 的壓縮觸發
+  是**三個 AND**，本 hook 原本只實作了第一條（`K_ctx ≥ 75`）。PRD §0 第 1 條把「額度高時
+  觸發 `/compact`」列為**阻斷級**（§2：壓縮要模型讀完整段對話再產摘要 ⇒ 顯著推升 U5h）。
+  這個缺陷在 R91 之前是**良性的，正因為它壞著**——沒有人聽那則訊息；換上模型通道會讓它
+  真的被執行 ⇒ 分流與換通道必須是**同一個** commit，見 `warn_message` 的 WHY。
 · `>= 90%` → stderr 強制指引（含 %、used/window 實數、下一步）＋ 呼叫
   `tools/session_resume_planner.py` 寫出「可重啟點任務書」骨架 ＋ **exit 2**。
   PostToolUse 的 exit 2 會把 stderr 回饋給模型，這正是要的效果；它**不**阻斷已經
@@ -213,10 +193,13 @@ sys.path.insert(0, os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
     "tools", "lib"))
 try:
-    from platform_utils import read_payload  # type: ignore[import-not-found]
+    from platform_utils import emit_to_model, read_payload  # type: ignore[import-not-found]
 except Exception:  # noqa: BLE001 — 共用層不可達＝退化，不是崩潰（fail-open 是 P0）
     def read_payload() -> dict | None:  # type: ignore[misc]
         return None
+
+    def emit_to_model(event: str, msg: str) -> bool:  # type: ignore[misc]
+        return False  # 送不進模型 ⇒ 只剩 stderr 那一半，與 R91 之前的行為相同
 
 # 額度水位節流閘（80/95 兩道）整條的家＝`tools/lib/quota_gate.py`（R82／Q2-02）。搬走的
 # 是一個完整主題：輸入是額度快取／逐字稿撞線，輸出是「這次扇出准不准」，與 context 水位
@@ -293,6 +276,12 @@ GUARD_OFF_ENV = "AUTOSDD_CONTEXT_GUARD_OFF"
 #: context 阻斷、一個是額度續航），共用一個開關會讓「我只是想暫時別被擋」順手把
 #: 續航保護一起關掉，而那件事沒有人會注意到。
 SENTINEL_OFF_ENV = "AUTOSDD_SENTINEL_OFF"
+
+#: 送達形態的獨立逃生口（R91）：只把 75% 提示的 **stdout 那一半**關掉，退回純 stderr。
+#: 判定、阻斷、哨兵一律不受影響。刻意**不**沿用上面兩個、也不沿用 `AUTOSDD_GIT_GUARD_OFF`
+#: ——四者關掉的是四件不同的事，共用一個會讓「我只是不想看到那則 JSON」順手把阻斷或續航
+#: 一起關掉。已登記進 `quota_policy.ENV_SPEC`（⇒ `.env` 也到得了，R82／C2 那條路）。
+SIGNAL_OFF_ENV = "AUTOSDD_CONTEXT_SIGNAL_OFF"
 
 #: 無 console 父行程下 spawn 子行程的**防彈窗**兩層防線（`NO_WINDOW` 旗標 ＋
 #: `quiet_python()` 載具）唯一的家＝`tools/lib/win_spawn.py`（R84／C8 的減法）。
@@ -712,17 +701,13 @@ def write_resume_plan(transcript: Path) -> str:
 
 
 # ───────────────────────── 預防性哨兵的**觸發層**（R79 補洞包；R82／HELM-02 改觸發時機）
-# 🔴 R82／HELM-02 訂正本段的**時機**（方向不變、理由不變，改的是「在哪一刻按下去」）：
-# 下面整段論證的是「非預防性武裝不可」，那一半今天仍然成立、一個字都沒被推翻。被推翻的是
-# 它的實作把「預防性」等同於「SessionStart 就註冊」——掌舵者當場截圖回報排程器裡三支
-# `AutoSDD_Sentinel_*`，實測其中兩支屬於**活了 5 秒與 12 秒**的短命 session。
-# 現行形狀：SessionStart 只**清閂鎖**（見 `arm_sentinel`），真正的註冊延後到 PostToolUse
-# 且要通過 `tools/lib/sentinel_lifecycle.should_arm()`（回合數＋存活跨度雙門檻，門檻取值
-# 是量出來的，見該檔 docstring）。延後的代價已界定：一個 8 分鐘就結束的 session 拿不到
-# 續航；而它換掉的是「每一支 5 秒探針都留一支每 15 分鐘醒來的排程」。
-# 🔴 為什麼判準不能寫在 SessionStart 那一刻：見取捨②——那一刻逐字稿往往還不存在，
-# 手上沒有任何可以量的東西；而 payload 欄位分不出主 session 與探針（實測六支短命逐字稿
-# 與主 session 結構同形，差別只在規模）。
+# 🔴 現行形狀（R82／HELM-02 改的是「在哪一刻按下去」，不是方向）：SessionStart 只**清閂鎖**
+# （見 `arm_sentinel`），真正的註冊延後到 PostToolUse 且要通過
+# `tools/lib/sentinel_lifecycle.should_arm()`（回合數＋存活跨度雙門檻）。延後的代價已界定：
+# 一個 8 分鐘就結束的 session 拿不到續航；換掉的是「每一支 5 秒探針都留一支排程」。
+# 判準不能寫在 SessionStart 那一刻：見取捨②——那一刻逐字稿往往還不存在。
+# 立案量測（三支殘留哨兵、兩支屬於活 5 秒／12 秒的 session；六支短命逐字稿與主 session
+# 結構同形）逐字保全於 `CrossPlatform_R91_Scan_Findings.md` §A-6。
 #
 # 🔴 為什麼非得預防性不可（不是「順手掛一下」）：
 # `tools/session_resume_planner.py --arm-endurance` 是**手動**武裝的，而額度耗盡那一刻
@@ -857,23 +842,11 @@ def arm_quota_wakeup(transcript: Path | None, plan: str) -> dict:
     憑證仍是 planner 自己的取證閘（`relay_problems()` 禁止在兩個憑證鍵皆空時把狀態寫成
     armed），本函式一行都沒有動它，只當消費者。
 
-    🔴 R83／W2-A 的射程，以及**這一段自己在同一輪內就轉假的那兩句**（原文保留為沿革，
-    照本 repo 體例逐字訂正而不是靜默刪掉）：
-    `posix` 這個鍵的語意是「這台機器沒有排程載具」，它現在由 `_has_carrier()` 決定
-    ⇒ **mac 上它變成 False**，因為 mac 現在真的武裝得起來（launchd）。**這一句仍然為真。**
-    原文接著寫的是：`tools/lib/quota_gate.py::quota_halt_message` 在 `posix=False and armed`
-    那一支印的取證指令逐字是 `Get-ScheduledTask …`（mac 上不存在），而「那一檔不在本包的
-    授權範圍內…故只在這裡具名登記、**不偷改**：訊息會指錯路」。
-    🔴 **兩句在本輪內都已為假**（複審 SD／FC-1 逐字判過，我複驗）：同一棵工作樹的
-    `tools/lib/quota_gate.py` 已由 R83／F2-② 就地訂正——`evidence_hint()` 委派給
-    `schedule_backend.select().evidence_hint()`。收斂當回合實跑 `quota_gate.evidence_hint()`
-    在 darwin 上的輸出含 `launchctl print gui/501/<label>`，
-    `contains 'Get-ScheduledTask': False`／`contains 'launchctl': True`。
-    留著它的代價不是文字難看：**下一個人會照這段散文去修一個已經修好的東西**，
-    或反過來相信 mac 的取證指引還是壞的（與 R74 訂正文自己成假話、R80「`.py` 行尾那格
-    自陳沒人守而其實有鎖」同一族）。
-    ⇒ 現行事實：取證指令的唯一的家＝各後端的 `evidence_hint()`（`tools/lib/schedule_backend.py`）。
-    本函式只回報 `armed`／`sentinel_off`／`posix` 三個布林，一行取證字串都不產。
+    🔴 射程：`posix` 這個鍵的語意是「這台機器沒有排程載具」，由 `_has_carrier()` 決定
+    ⇒ mac 上為 False（launchd 真的武裝得起來）。取證指令的唯一的家＝各後端的
+    `evidence_hint()`（`tools/lib/schedule_backend.py`）；本函式只回報三個布林，一行取證
+    字串都不產。R83／W2-A 那段「訊息會指錯路」的沿革（含它在同一輪內就轉假的經過與
+    darwin 實測輸出）逐字保全於 `CrossPlatform_R91_Scan_Findings.md` §A-5。
     """
     if not _has_carrier():
         return {"armed": False, "sentinel_off": False, "posix": True}
@@ -888,11 +861,44 @@ def _headline(used: int, window: int, source: str) -> str:
             f"（{MEASURE_LABEL}：used {used:,} / window {window:,}〔{source}〕）")
 
 
-def warn_message(used: int, window: int, source: str) -> str:
+#: 75% 那一格的**下一步**，依額度相對 PRD `DRAIN_PERCENT` 的位置三分（`quota_gate.draining()`）。
+#:
+#: 🔴 立案（R91，PRD 前置條件）：PRD §4.3 的壓縮觸發是**三個 AND**——
+#: `K_ctx ≥ 75` ∧ `U5h + COMPACT_COST_BUDGET_PP ≤ DRAIN_PERCENT` ∧ `距上次壓縮 ≥
+#: COMPACT_MIN_INTERVAL_SECONDS`——而本 hook 原本只實作了第一條，於是它在額度高位照樣
+#: 喊 `/compact`。PRD §0 第 1 條把那件事列為 **🔴 阻斷級**，理由在 §2「關鍵釐清」：壓縮
+#: 本身要模型讀完整段對話並產生摘要 ⇒ **會顯著推升 U5h**，高位壓縮是反向操作。
+#: 本輪之前這個缺陷是**良性的，正因為它壞著**（訊息走沒有讀者的 stderr）；一旦換上模型
+#: 通道，它就會**真的被執行** ⇒ 補這一條與換通道必須同一個 commit，否則等於啟動一個
+#: 休眠的阻斷級違反。第三條 AND（距上次壓縮的間隔）本 hook 量不到，由「同一門檻本
+#: session 只喊一次」的閂鎖近似——**誠實劃界：那是 per (tier, window)，不是 per 時間間隔**。
+#: 🔴 第二條 AND 也**只實作到** `U5h ≥ DRAIN`：PRD §6 的 `COMPACT_COST_BUDGET_PP=3` 邊際
+#: 全庫實查零實作 ⇒ `U5h ∈ (82, 85]` 這 3pp 帶內 `"no"` 勸的是 PRD 不允許的事（QA／R91）。
+#: `"unknown"` 不折進 `"no"`：PRD §0 第 6 條明定遙測失效方向為 fail-safe，而「證不出
+#: 第二個 AND 成立」與「已證明它成立」是兩件事（同本檔通篇「量不到 ≠ 量到零」的紀律）。
+_NEXT_STEP = {
+    "no": ("   建議現在跑 `/compact`（額度現查：未越過 PRD 的 DRAIN 線；🔴 未計入 PRD 的 "
+           "`COMPACT_COST_BUDGET_PP` 邊際 ⇒ 貼線時自行判斷）。此時仍可開新工作。\n"),
+    "yes": ("   🔴 **不要 `/compact`**——額度已越過 PRD `DRAIN_PERCENT`（prepare／halt 帶）。"
+            "壓縮要模型讀完整段對話再產摘要 ⇒ 會顯著推升 U5h，在這一帶壓縮是反向操作"
+            "（PRD §0 第 1 條：阻斷級）。\n"
+            "   改走**交棒**（PRD §4.3 指定的替代路線「主動結束該 Step 並以新 session 交棒」）："
+            "把狀態寫成磁碟任務書 `python tools/session_resume_planner.py`，結束本 Step，"
+            "以 `claude -r <sessionId>` 或新 session 續作。\n"),
+    "unknown": ("   ⚠️ 額度**量不到** ⇒ PRD §4.3 的第二個 AND 條件證不出成立，依 §0 第 6 條"
+                "（遙測失效即 fail-safe）不得逕行壓縮。\n"
+                "   先現查 `python tools/lib/quota_meter.py --json`：量得到且未越 DRAIN 線"
+                "再 `/compact`；仍量不到就走交棒 `python tools/session_resume_planner.py`。\n"),
+}
+
+
+def warn_message(used: int, window: int, source: str, drain: str = "unknown") -> str:
+    """75% 提示。`drain`＝`quota_gate.draining()` 的三態，未知一律走 fail-safe 那一格。"""
     return (
         f"⚠️  context 水位 {_headline(used, window, source)}——已越過 75%。\n"
-        "   建議現在跑 `/compact`（根 CLAUDE.md〈Token 將耗盡時的無害暫停〉三段式水位："
-        "~75% compact、~90% 停止開新戰場、撞上限才重啟）。此時仍可開新工作。\n"
+        f"{_NEXT_STEP.get(drain, _NEXT_STEP['unknown'])}"
+        "   （根 CLAUDE.md〈Token 將耗盡時的無害暫停〉三段式水位：~75%、~90% 停止開新戰場、"
+        "撞上限才重啟。🔴 那張表量的是 context，額度是另一把尺——本行已把兩者都問過了。）\n"
         f"   要精確判定分母就設 {WINDOW_ENV}；本行的 window 來源已標在括號裡。\n"
         "   （同一門檻本 session 只喊這一次）\n"
     )
@@ -1038,7 +1044,16 @@ def main() -> int:
         remember_latch(state, key)
 
         if tier == TIER_WARN:
-            sys.stderr.write(warn_message(used, window, source))
+            # 🔴 R91：發話**之前**先問額度那把尺（零網路，只讀快取）。順序不能倒過來——
+            # 訊息內容本身取決於答案（見 `_NEXT_STEP` 的立案）。`quota_gate` 不可達時
+            # 三態退化成 `"unknown"`＝fail-safe 那一格，與本檔既有的降級方向一致。
+            drain = quota_gate.draining() if quota_gate is not None else "unknown"
+            message = warn_message(used, window, source, drain)
+            sys.stderr.write(message)
+            # stderr 在 exit 0 下**不進模型 context**（官方契約）⇒ 這一行才是本輪要修的
+            # 那一半。事件名由 payload 傳，不得寫死（R83／D3：不符即整段被 CC 丟掉）。
+            if not os.environ.get(SIGNAL_OFF_ENV):
+                emit_to_model(event, message)
             return 0
         sys.stderr.write(hard_message(
             used, window, source, write_resume_plan(transcript),

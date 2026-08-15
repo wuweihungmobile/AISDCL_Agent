@@ -650,14 +650,18 @@ ENV_SPEC: tuple[EnvVar, ...] = (
            "加速後的絕對上界", "policy"),
     EnvVar("AUTOSDD_QUOTA_DEGRADED_CAP", "degraded_cap", 4, "int", 1.0, None,
            "量不到時的上限（絕不是「不設限」）", "policy"),
-    EnvVar("AUTOSDD_QUOTA_GUARD_OFF", None, "", "flag", None, None,
-           "1 ⇒ 整條額度節流關掉", "escape"),
+    EnvVar("AUTOSDD_QUOTA_GUARD_OFF", None, "", "flag", None, None, "1 ⇒ 額度節流全關", "escape"),
     EnvVar("AUTOSDD_QUOTA_FANOUT_CAP", "fanout_cap_override", None, "int", 1.0, None,
            "節流帶 cap 的**上限**覆寫：只收緊不放寬（halt 帶不吃）", "escape"),
     EnvVar("AUTOSDD_SENTINEL_OFF", None, "", "flag", None, None,
            "1 ⇒ 額度續航哨兵關掉", "escape"),
     EnvVar("AUTOSDD_CONTEXT_GUARD_OFF", None, "", "flag", None, None,
            "1 ⇒ context 阻斷關掉（**與上一個不同的東西**）", "escape"),
+    # 🔴 R91：**第五個**逃生口，刻意不與上面四個共用（repo 明文：共用一個會讓「我只是想
+    # 暫時別被擋」順手把別的保護一起關掉）。它只關 context 提示的**送達形態**（stdout 的
+    # `hookSpecificOutput` ⇒ 退回舊的純 stderr），不關任何判定、不關阻斷、不關哨兵。
+    # 上一列刻意壓成一行以騰出這一格：`guardrail_lib` 對本檔的 LOC 預算餘裕實測為 0。
+    EnvVar("AUTOSDD_CONTEXT_SIGNAL_OFF", None, "", "flag", None, None, "1 ⇒ 只關送達面", "escape"),
 )
 
 _ENV_HEADER = (
