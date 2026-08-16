@@ -86,7 +86,7 @@ sys.path.insert(0, str(_TESTS_DIR))
 import test_subprocess_encoding_hygiene as _HYGIENE  # noqa: E402
 
 import sync_onboarding_baselines as SYNC  # noqa: E402
-from lib import baseline_origin as BO  # noqa: E402  # nightly 探針的解析契約（DEF-101-759）
+from lib import baseline_origin as BO  # noqa: E402  # nightly 探針的解析契約（DEF-101-763）
 from lib import ci_liveness as _CI_LIVENESS  # noqa: E402  # job 層 fail-open 正則 SSOT
 from lib import defect_ledger_index as _LEDGER_INDEX  # noqa: E402  # 改派判定的生產 SSOT
 from lib import git_paths as _GIT_PATHS  # noqa: E402  # git argv 的 quotepath SSOT
@@ -2602,7 +2602,7 @@ class _ReadAccountingPath:
 
 
 class TestR71NightlyProbeActuallyParsesEachPlatformsOwnFormat(unittest.TestCase):
-    """🔴 DEF-101-759：讓平台覆蓋不再靠人記憶的那道機械守，自己一天都沒量到過東西。
+    """🔴 DEF-101-763：讓平台覆蓋不再靠人記憶的那道機械守，自己一天都沒量到過東西。
 
     `nightly_evidence()` 隨 `fbc9bb5`（DEF-101-756/757/758）落地，首版彙總行解析是
     `read_text().splitlines()[:3]` 找 `"PASS="`——那是 **mac 心跳**的形狀。win32 讀的卻是
@@ -2640,7 +2640,7 @@ class TestR71NightlyProbeActuallyParsesEachPlatformsOwnFormat(unittest.TestCase)
         )
         self.assertNotIn(
             "找不到彙總行", line,
-            "真實 log 明明有彙總行卻回 fallback——DEF-101-759 的原始症狀；"
+            "真實 log 明明有彙總行卻回 fallback——DEF-101-763 的原始症狀；"
             "fallback 讀起來像資料現況，於是探針壞掉一整天沒人發現",
         )
 
@@ -2687,7 +2687,7 @@ class TestR71NightlyProbeActuallyParsesEachPlatformsOwnFormat(unittest.TestCase)
         `f.read()` 讀滿全檔，6/6 照樣全綠）。它斷言的是「檔頭誘餌不出現在**輸出那一行**」，
         而 `nightly_summary()` 取的是 `hits[-1]`——檔尾的真彙總行**永遠**會蓋掉檔頭誘餌，
         於是它證的其實是「取最後一筆命中」，跟有沒有界完全無關；docstring 卻宣稱後者。
-        「寫了鎖沒驗鎖」與 DEF-101-759 的 fallback 文案同構：看起來有守，實際一天沒守過。
+        「寫了鎖沒驗鎖」與 DEF-101-763 的 fallback 文案同構：看起來有守，實際一天沒守過。
 
         改法：用 duck-typed Path 替身把 `read()` 真正吐出的位元組記帳。任何形態的整檔讀
         （`f.read()` 不 seek／先讀全檔再切尾）都會讓帳超出上限而轉紅；繞過 `path.open()`
@@ -2723,7 +2723,7 @@ class TestR71NightlyProbeActuallyParsesEachPlatformsOwnFormat(unittest.TestCase)
 
 
 class TestR71StaleFingerprintMustNotSwallowTheCoverageDetail(unittest.TestCase):
-    """🔴 D-3：**一個無關的漂移不得讓整段平台覆蓋明細消失**（與 DEF-101-759 同族）。
+    """🔴 D-3：**一個無關的漂移不得讓整段平台覆蓋明細消失**（與 DEF-101-763 同族）。
 
     實測立案（本批以 production 入口重現）：`tools/sync_onboarding_baselines.py
     --check-snapshot` → rc=1，輸出**停在 ❌ 指紋區塊**，逐欄明細（baseline-origin 三態、

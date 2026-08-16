@@ -695,7 +695,7 @@ OVERSIZE_ROW_CEILING = 63
 #:     併入的解鎖條件，長 **378 bytes**——那是併列結案的**資訊零損失義務**，方向與本棘輪
 #:     相反，所以它必須被上面那三列吐出來的位元組付掉（`DEF-101-957` 形態，R80／R82 已各
 #:     實證一次）。誠實記在這裡：−5710 是付完這筆成長之後的數。
-OVERSIZE_ROW_EXCESS_CEILING = 77186
+OVERSIZE_ROW_EXCESS_CEILING = 69122
 
 
 def oversize_row_problems(ledger_text: str) -> list[str]:

@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import ast
 import dataclasses
+import json
 import random
 import re
 import sys
@@ -1687,7 +1688,7 @@ class TestR86WindowRelativeHorizonAndCrossWindowAmortization(unittest.TestCase):
         self.assertLess(ratio, 15.0, "點估 15 是上界；下界才是保守側")
         self.assertEqual(W.estimate_ratio([])[0], None)
         text = "".join(W.row_of(ts, (("five_hour", s), ("seven_day", lg)))
-                       for ts, s, lg in W.SEED_OBSERVATIONS)
+                       for ts, s, lg, _fp in W.SEED_OBSERVATIONS)
         self.assertEqual(len(W.rows_from_jsonl(text + text)), 2)
         self.assertEqual(W.rows_from_jsonl("not json\n{}\n{\"pct\": 3}\n"), [])
         rows = [("2026-08-12T01:00+08:00", 10.0, 70.0), ("2026-08-12T02:00+08:00", 40.0, 72.0),
@@ -1707,6 +1708,96 @@ class TestR86WindowRelativeHorizonAndCrossWindowAmortization(unittest.TestCase):
         self.assertEqual(reading.axis.pct, pct, "pct 必須逐字吻合，不吃容差")
         self.assertAlmostEqual(reading.minutes, cli_minutes,
                                delta=QC.CLI_TOLERANCE_MINUTES)
+
+
+class TestR93PlanChangeAdaptiveAmortization(unittest.TestCase):
+    """R93／DEF-200-122：換方案/換帳號的分區過濾（`filter_by_signature`）。分區優於
+    偵測——過濾發生在 `segments()`／`estimate_ratio()` 之前，兩者零改動。
+    """
+
+    def test_row_of_round_trips_the_signature(self) -> None:
+        text = W.row_of("2026-08-16T00:00:00+08:00",
+                        (("five_hour", 10.0), ("seven_day", 20.0)),
+                        fp=("five_hour", "session"))
+        rows = W.rows_from_jsonl(text)
+        self.assertEqual(rows[0][3], ("five_hour", "session"))
+
+    def test_legacy_rows_without_fp_key_parse_to_none(self) -> None:
+        """本輪落地之前寫下的舊落款沒有 `fp` 鍵 ⇒ 必須解成 `None`，不是 `()`。"""
+        line = json.dumps({"ts": "2026-08-16T00:00:00+08:00",
+                           "pct": {"five_hour": 10.0, "seven_day": 20.0}})
+        rows = W.rows_from_jsonl(line + "\n")
+        self.assertEqual(len(rows), 1)
+        self.assertIsNone(rows[0][3])
+
+    def test_filter_by_signature_excludes_none_even_when_signature_is_empty(self) -> None:
+        rows = [("t1", 1.0, 2.0, None)]
+        self.assertEqual(W.filter_by_signature(rows, ()), [])
+
+    def test_filter_by_signature_is_symmetric_for_shrink_and_grow(self) -> None:
+        """🔴 SA 條件②，本規格最重要的一支：雙向都要驗，不能只驗其一。"""
+        sig_a = ("extra_usage", "five_hour", "session")   # 大→小：extra_usage 之後消失
+        sig_b = ("five_hour", "session", "weekly_scoped")  # 小→大：weekly_scoped 新增
+        rows_a = [("2026-08-01T00:00:00+08:00", 1.0, 70.0, sig_a),
+                 ("2026-08-01T01:00:00+08:00", 10.0, 71.0, sig_a)]
+        rows_b = [("2026-08-02T00:00:00+08:00", 2.0, 60.0, sig_b),
+                 ("2026-08-02T01:00:00+08:00", 12.0, 61.0, sig_b)]
+        mixed = rows_a + rows_b
+        only_a = W.filter_by_signature(mixed, sig_a)
+        only_b = W.filter_by_signature(mixed, sig_b)
+        self.assertEqual(only_a, [(r[0], r[1], r[2]) for r in rows_a])
+        self.assertEqual(only_b, [(r[0], r[1], r[2]) for r in rows_b])
+        self.assertTrue(all(row not in only_b for row in only_a), "大→小的樣本混進了另一池")
+        self.assertTrue(all(row not in only_a for row in only_b), "小→大的樣本混進了另一池")
+
+    def test_seed_observations_never_enter_any_pool(self) -> None:
+        for signature in ((), ("five_hour",), ("five_hour", "seven_day")):
+            with self.subTest(signature=signature):
+                self.assertEqual(
+                    W.filter_by_signature(list(W.SEED_OBSERVATIONS), signature), [])
+
+    def test_estimate_ratio_on_a_fresh_signature_falls_back_safely(self) -> None:
+        rows = [("2026-08-01T00:00:00+08:00", 1.0, 70.0, ("five_hour", "seven_day")),
+               ("2026-08-01T01:00:00+08:00", 10.0, 71.0, ("five_hour", "seven_day"))]
+        pool = W.filter_by_signature(rows, ("session", "weekly_all"))
+        self.assertEqual(pool, [])
+        ratio, note = W.estimate_ratio(pool)
+        self.assertIsNone(ratio)
+        self.assertIn("無可用區段", note)
+        self.assertIsNone(W.amortize((("five_hour", 40.0),), (100.0,), (300.0,), ratio, note))
+
+    def test_the_amortization_floor_survives_arbitrary_ratio_sourced_from_a_filtered_pool(
+            self) -> None:
+        """🔴 SA 條件④，最關鍵的不變式：`shown_pct >= raw_pct` 不因換算比的來源改變而破。"""
+        sig = ("five_hour", "seven_day")
+        rows = [("2026-08-01T00:00:00+08:00", 1.0, 70.0, sig),
+               ("2026-08-01T01:00:00+08:00", 10.0, 71.0, sig),
+               ("2026-08-01T02:00:00+08:00", 20.0, 72.0, sig),
+               ("2026-08-01T03:00:00+08:00", 30.0, 73.0, sig)]
+        for signature in (sig, ("session",)):   # 同指紋（有樣本）／陌生指紋（無樣本）
+            with self.subTest(signature=signature):
+                pool = W.filter_by_signature(rows, signature)
+                ratio, note = W.estimate_ratio(pool)
+                shown = W.band_inputs((("five_hour", 40.0), ("seven_day", 75.0)),
+                                     (100.0, 9000.0), (300.0, 10080.0), ratio, 95.0, note)[0]
+                self.assertGreaterEqual(shown[0], 40.0, f"ratio={ratio} 讓攤提放寬了")
+
+    def test_cross_signature_isolation_end_to_end(self) -> None:
+        sig_x, sig_y, sig_z = (("five_hour", "session"), ("five_hour", "weekly_all"),
+                               ("seven_day", "session"))
+        rows = [("2026-08-01T00:00:00+08:00", 1.0, 61.0, sig_x),
+               ("2026-08-01T01:00:00+08:00", 2.0, 62.0, sig_x),
+               ("2026-08-02T00:00:00+08:00", 5.0, 65.0, sig_y),
+               ("2026-08-02T01:00:00+08:00", 6.0, 66.0, sig_y),
+               ("2026-08-03T00:00:00+08:00", 10.0, 70.0, sig_z),
+               ("2026-08-03T01:00:00+08:00", 11.0, 71.0, sig_z)]
+        for target in (sig_x, sig_y, sig_z):
+            with self.subTest(target=target):
+                filtered = W.filter_by_signature(rows, target)
+                self.assertEqual(len(filtered), 2)
+                others = [r for r in rows if r[3] != target]
+                self.assertTrue(all((r[0], r[1], r[2]) not in filtered for r in others),
+                                f"{target} 的過濾結果混進了別的指紋")
 
 
 class TestR86ThePaceContractWriterMatchesTheEngineReader(unittest.TestCase):
@@ -1856,6 +1947,49 @@ class TestR87AccountPostureIsKnownBeforeDispatch(unittest.TestCase):
         self.assertIn("spend", p["plan_fingerprint"])
         self.assertIn("session", p["plan_fingerprint"])
         self.assertEqual(p["plan_fingerprint"], tuple(sorted(p["plan_fingerprint"])))
+
+
+class TestR93AccountKeyIsDerivedFromExistingResponseHeaders(unittest.TestCase):
+    """R93／DEF-200-114（Architect REJECT 承接）：帳號身分訊號＝
+    `sha256(org-id:workspace-id)[:12]`，取自 `fetch_usage()` 已經在發的那次回應標頭。
+    立案史料與真實對照組（Pro→Team 真實換帳號）＝`docs/06_quality/
+    Quota_R90_CrossAccount_Experiment.md` §2.5。
+
+    🔴 這是**純函式**測試（零網路）：`account_key_of()` 只吃一個 dict，本類不打端點。
+    """
+
+    ORG_A, WS_A = "8b63e143-0d4a-4c6a-a0fc-53229d07b7f5", "wrkspc_01RVxG93ofY2Rq2SQyNhqHm5"
+    ORG_B, WS_B = "c7716c3e-4510-4d6e-9473-6c639f6c77d6", "wrkspc_01AaQ7rxzXCosJbx4LkJXQnn"
+
+    def _headers(self, org: str, ws: str) -> dict:
+        return {M.ORG_HEADER: org, M.WORKSPACE_HEADER: ws}
+
+    def test_both_headers_present_yields_a_deterministic_short_hash(self) -> None:
+        """R90 §2.5 一手實測值：兩個真實帳號的標頭 → 兩個相異、穩定的 12-hex 摘要。"""
+        key = M.account_key_of(self._headers(self.ORG_B, self.WS_B))
+        self.assertEqual(key, "34cd3507237f", "與 R90 §2.5 的一手實測值不符")
+        self.assertEqual(key, M.account_key_of(self._headers(self.ORG_B, self.WS_B)),
+                         "同輸入兩次呼叫必須逐字相同")
+
+    def test_two_real_accounts_from_r90_give_different_keys(self) -> None:
+        """這正是要解的盲區：同方案換帳號時，兩個帳號的 key 必須不同。"""
+        self.assertNotEqual(M.account_key_of(self._headers(self.ORG_A, self.WS_A)),
+                            M.account_key_of(self._headers(self.ORG_B, self.WS_B)))
+
+    def test_either_header_missing_or_blank_is_unmeasurable(self) -> None:
+        """量不到 ≠ 量到零：缺席／空字串／非字串一律回 `None`，不得猜。"""
+        for headers in ({}, {M.ORG_HEADER: self.ORG_A}, {M.WORKSPACE_HEADER: self.WS_A},
+                        {M.ORG_HEADER: "", M.WORKSPACE_HEADER: self.WS_A},
+                        {M.ORG_HEADER: "  ", M.WORKSPACE_HEADER: self.WS_A},
+                        {M.ORG_HEADER: 123, M.WORKSPACE_HEADER: self.WS_A}, None, []):
+            with self.subTest(headers=headers):
+                self.assertIsNone(M.account_key_of(headers))
+
+    def test_the_headers_are_not_credentials_and_never_appear_in_the_key(self) -> None:
+        """R90 §2.5／§3.2：標頭不是憑證。雜湊後的輸出不得逐字含任一原始標頭值。"""
+        key = M.account_key_of(self._headers(self.ORG_B, self.WS_B))
+        self.assertNotIn(self.ORG_B, key)
+        self.assertNotIn(self.WS_B, key)
 
 
 class TestR89TheFallbackSetMayNotSwallowASubscriptionAxis(unittest.TestCase):

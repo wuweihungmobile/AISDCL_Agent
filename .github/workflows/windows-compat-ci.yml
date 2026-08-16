@@ -219,6 +219,10 @@ on:
       - "tools/dev_start.py"
       - "tools/tests/**"
       - "tools/run_root_unittests.py"
+      # R94：tools/tests/test_context_budget_guard.py 直接讀取本檔內容做驗證，
+      # 而該測試由本 workflow 執行（tools/tests/ ↔ windows-compat-ci.yml）；
+      # 只改 PRD 不改測試檔時，本 workflow 此前不會被觸發（DEF-101-042 同構）。
+      - "docs/01_requirements/AutoClaude_Token_監控與喚醒機制_PRD_v2.1.md"
       # R78：新增 tools/act/（act 自建 runner 映像的 Dockerfile）。
       # tools/tests/test_act_local_runner_image.py 對它做「映像三處一致」斷言，而
       # tools/tests/** 只涵蓋測試那一側——只改 Dockerfile 不改測試時該鎖不會被觸發、
@@ -540,6 +544,10 @@ on:
       - "tools/dev_start.py"
       - "tools/tests/**"
       - "tools/run_root_unittests.py"
+      # R94：tools/tests/test_context_budget_guard.py 直接讀取本檔內容做驗證，
+      # 而該測試由本 workflow 執行（tools/tests/ ↔ windows-compat-ci.yml）；
+      # 只改 PRD 不改測試檔時，本 workflow 此前不會被觸發（DEF-101-042 同構）。
+      - "docs/01_requirements/AutoClaude_Token_監控與喚醒機制_PRD_v2.1.md"
       # R78：新增 tools/act/（act 自建 runner 映像的 Dockerfile）。
       # tools/tests/test_act_local_runner_image.py 對它做「映像三處一致」斷言，而
       # tools/tests/** 只涵蓋測試那一側——只改 Dockerfile 不改測試時該鎖不會被觸發、

@@ -208,7 +208,7 @@ SMOKE_EVIDENCE: dict[str, str] = {
     ),
 }
 
-# ── 心跳彙總行的解析契約：**逐平台**，因為兩邊根本不是同一種檔（DEF-101-759）─────
+# ── 心跳彙總行的解析契約：**逐平台**，因為兩邊根本不是同一種檔（DEF-101-763）─────
 #
 # 🔴 本探針的首版（R70 落地當天）把 mac 側的形狀硬套到兩個平台上——`splitlines()[:3]`
 # 找 `"PASS="`——於是 win32 欄**結構上永遠**落到 fallback，而 fallback 文案
@@ -263,7 +263,7 @@ SMOKE_SUMMARY_SPECS: dict[str, _SummarySpec] = {
     "win32": _SummarySpec(
         shape="transcript 檔尾的 `===== 彙總：PASS=n FAIL=n =====`",
         # 不含 `nightly` 字樣：那是 mac 心跳的形狀，smoke 的彙總行沒有它（沿用
-        # DEF-101-759 的教訓——把一個平台的形狀硬套到另一個上，fallback 文案會把
+        # DEF-101-763 的教訓——把一個平台的形狀硬套到另一個上，fallback 文案會把
         # 解析失敗偽裝成資料現況）。
         strict=re.compile(r"(=====\s*彙總[：:]\s*PASS=\d+\s+FAIL=\d+\s*=====)"),
         loose=re.compile(r"彙總|PASS=|FAIL="),
@@ -552,7 +552,7 @@ def snapshot_verdict(ok: bool, scope: str, live: dict[str, str]) -> str:
     而指紋 stale 在單機交替工作流下是**日常態**（動到任一棵測試樹就觸發）⇒ 那段專為根治
     DEF-101-756 誤讀而加的說明，在最常見的路徑上結構性看不見；讀者只會看到一句「某欄某棵
     樹的指紋變了」，正好又要自己去腦補「那這平台到底驗過沒有」——回到事故原點。
-    這與「fallback 文案掩蓋探針失效」（DEF-101-759）同族：**一個無關的漂移把整段資訊吃掉**。
+    這與「fallback 文案掩蓋探針失效」（DEF-101-763）同族：**一個無關的漂移把整段資訊吃掉**。
     修法：明細兩條路都印，rc 語意不變（stale 仍 rc=1），並在本行標明明細屬 presumed stale。
     """
     fp = ", ".join(f"{k}={v}" for k, v in live.items())

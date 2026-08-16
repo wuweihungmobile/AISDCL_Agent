@@ -15,7 +15,7 @@ WHY
 「不要爆」這件事**主要由 harness 的 autocompact 做**，本檔做不到——hook 不能執行
 `/compact`，模型也不能自己打 slash 指令。本檔是那條線的**第二道**：
   ① 把「現在幾 %」變成看得見的數字（harness 的 autocompact 不告訴你水位）；
-  ② 在 ≥90% 時**真的擋下展開型工具**（見下方〈PreToolUse 阻斷模式〉）——因為
+  ② 在 ≥94% 時**真的擋下展開型工具**（見下方〈PreToolUse 阻斷模式〉）——因為
      autocompact 觸發時會丟掉舊訊息，而「丟掉什麼」不由使用者決定；在那之前把
      戰場收斂掉，才是掌舵者要的「不要爆」。
   ③ 產出「可重啟點任務書」骨架，供 token 用完後 `claude -r` 續跑。
@@ -89,8 +89,10 @@ context 裡，重複計會高估）。
 · 沒有 `transcript_path`／檔案不存在／掃不到任何 usage → exit 0 靜默。這與上一條
   是**不同**的事：那是「輸入壞掉」，這是「量測暫時不可得」（session 剛開場一定會
   走到這裡）。把兩者混同就會變成每次呼叫都出聲的守衛，然後整支被關掉。
-· `< 75%` → exit 0 且**完全靜默**（每次工具呼叫都出聲的守衛會被關掉）。
-· `>= 75%` → stderr 一行 ＋ **同一段文字送進模型 context**（stdout 的
+· `< 84%` → exit 0 且**完全靜默**（每次工具呼叫都出聲的守衛會被關掉）。
+  🔴 R92 掌舵者裁決：閾值 75／90 → **84／94**，理由見 `WARN_RATIO` 旁的 WHY
+  （與額度尺 85／95 刻意錯開；84 在機械 autocompact 點之前、94 是它的失效警報）。
+· `>= 84%` → stderr 一行 ＋ **同一段文字送進模型 context**（stdout 的
   `hookSpecificOutput`，發射口＝`platform_utils.emit_to_model`），exit 0。
   🔴 R91 立案：exit 0 下 stderr **不進模型 context**（官方契約：PostToolUse 只有 exit 2
   才回饋 stderr）⇒ 這一整帶（75~90%）模型結構上收不到任何訊號，本輪實測 1h49m／45 turns
@@ -104,7 +106,7 @@ context 裡，重複計會高估）。
   觸發 `/compact`」列為**阻斷級**（§2：壓縮要模型讀完整段對話再產摘要 ⇒ 顯著推升 U5h）。
   這個缺陷在 R91 之前是**良性的，正因為它壞著**——沒有人聽那則訊息；換上模型通道會讓它
   真的被執行 ⇒ 分流與換通道必須是**同一個** commit，見 `warn_message` 的 WHY。
-· `>= 90%` → stderr 強制指引（含 %、used/window 實數、下一步）＋ 呼叫
+· `>= 94%` → stderr 強制指引（含 %、used/window 實數、下一步）＋ 呼叫
   `tools/session_resume_planner.py` 寫出「可重啟點任務書」骨架 ＋ **exit 2**。
   PostToolUse 的 exit 2 會把 stderr 回饋給模型，這正是要的效果；它**不**阻斷已經
   完成的那次工具呼叫（與 PreToolUse 的 exit 2 語意不同，別混淆）。
@@ -120,7 +122,7 @@ R78 版的鏈條是「印一段話 → 模型自己記得去 compact」，而「
 攔阻力」在本 repo 已被實證兩次（`block_bash_on_windows.py` 的立案就是這樣來的）。
 故同一支腳本另有一個由 payload 的 `hook_event_name` 分派的模式：
 
-  · 只在 `>= 90%` 且 **window 不是保守下界猜測**時擋（`may_block()`）。分母是猜的
+  · 只在 `>= 94%` 且 **window 不是保守下界猜測**時擋（`may_block()`）。分母是猜的
     就只出聲不擋——否則今天這個缺陷（1M session 被當成 200K）會直接變成「真實 18%
     就把工具鎖死」，比原缺陷更糟。
   · 只擋**展開型**工具（`BLOCKING_TOOLS`；R80 起含本 harness 真正在用的 `Agent`／
@@ -277,7 +279,7 @@ GUARD_OFF_ENV = "AUTOSDD_CONTEXT_GUARD_OFF"
 #: 續航保護一起關掉，而那件事沒有人會注意到。
 SENTINEL_OFF_ENV = "AUTOSDD_SENTINEL_OFF"
 
-#: 送達形態的獨立逃生口（R91）：只把 75% 提示的 **stdout 那一半**關掉，退回純 stderr。
+#: 送達形態的獨立逃生口（R91）：只把 WARN 提示的 **stdout 那一半**關掉，退回純 stderr。
 #: 判定、阻斷、哨兵一律不受影響。刻意**不**沿用上面兩個、也不沿用 `AUTOSDD_GIT_GUARD_OFF`
 #: ——四者關掉的是四件不同的事，共用一個會讓「我只是不想看到那則 JSON」順手把阻斷或續航
 #: 一起關掉。已登記進 `quota_policy.ENV_SPEC`（⇒ `.env` 也到得了，R82／C2 那條路）。
@@ -293,32 +295,17 @@ SIGNAL_OFF_ENV = "AUTOSDD_CONTEXT_SIGNAL_OFF"
 #: 取用 ⇒ 這裡 import 回本檔命名空間，呼叫端與既有回歸鎖一個字都不必改。
 from win_spawn import NO_WINDOW, quiet_python  # noqa: E402,F401
 
-#: 🔴 送進 `powershell.exe`（5.1）的每一段腳本都要以這一行開頭。
-#: 立案（掌舵者當回合實測，哨兵稽核 jsonl 逐字）：`"next_run_time": "2026/8/9 �U�� 07:14:19"`
-#: ——`Get-ScheduledTaskInfo` 的 `NextRunTime` 由 `Format-List` 以**當前文化** zh-TW 算繪成
-#: 「下午」，PS 5.1 把它以主控台 codepage（本機 cp950）寫進 stdout，而 Python 這一側以
-#: `encoding="utf-8"` 讀 ⇒ 逐位元組降解成 `?`。後果不只難看：那個字串是**取證憑證**
-#: （`next_run_time`），而降解過的憑證仍然非空 ⇒ 取證規則照樣判綠，只是它記下來的時刻
-#: 人再也讀不出來。同族問題本 repo 已有 `init_utf8_streams()`（Python 那一側）；這一格是
-#: **PowerShell 那一側**缺的那一半。
-#: 放在本檔而不是各自為政：`session_resume_planner`／`sentinel_lifecycle`／`console_spawn_watch`
-#: 三個消費者，前兩者已經在向本檔取 `NO_WINDOW`／`quiet_python()`，同一族知識同一個家。
+#: 🔴 送進 `powershell.exe`（5.1）的每一段腳本都要以這一行開頭——PS 5.1 以主控台
+#: codepage（zh-TW＝cp950）寫 stdout、Python 這一側以 UTF-8 讀 ⇒ 取證憑證
+#: （`next_run_time`）逐位元組降解卻仍非空＝取證規則照樣判綠。立案實測（哨兵稽核
+#: jsonl 逐字）與「三個消費者為何同住本檔」的選址理由逐字保全於
+#: `CrossPlatform_R91_Scan_Findings.md` §A-7（R92 搬出）。
 PS_UTF8_PRELUDE = ("$OutputEncoding = [Console]::OutputEncoding = "
                    "[Text.UTF8Encoding]::new($false)\n")
 
-#: PreToolUse 模式會擋下的「展開型」工具。刻意不含 Read／Edit／PowerShell：
-#: 收斂（讀檔、寫任務書、跑 git）必須還做得到，否則守衛會被整個關掉。
-#:
-#: 🔴 **R80：這一組名字在本 harness 上的命中面原本是 0**（掃描 S7-02 實測：8,106 次
-#: `tool_use` 裡 `Task`／`WebFetch`／`WebSearch` 出現 **0 次**）。本 harness 派子代理叫
-#: `Agent`、批次編排叫 `Workflow` ⇒ 阻斷臂蓋好了但一次都不會被觸發，而 R79 為它新增的
-#: 那道鎖只把「matcher ↔ 本常數」釘成**相等**，保證的是「兩個都寫錯時也一致」——鑑別力
-#: 的方向錯了（同 R77「鎖無鑑別力」那一桶）。修法是兩件事一起做：把真的會出現的名字補
-#: 進來，並補一條**有效性**判準（本常數必須與最近若干支逐字稿的 `tool_use` 名稱集合有
-#: 非空交集，見 `blocking_reach_problems`），讓「圈了一組永遠不出現的工具名」當場轉紅。
-#:
-#: `Task`／`WebFetch`／`WebSearch` **保留不刪**：它們是 Claude Code 上游的標準工具名，
-#: 換一個 harness 就會回來，刪掉只是把同一個缺口移到另一台機器上。
+#: PreToolUse 模式會擋下的「展開型」工具。刻意不含 Read／Edit／PowerShell：收斂
+#: （讀檔、寫任務書、跑 git）必須還做得到，否則守衛會被整個關掉。R80 立案（命中面
+#: 原本是 0，本 harness 實際叫 `Agent`／`Workflow`）與保留舊名的理由見證據檔 §I-11。
 BLOCKING_TOOLS = ("Task", "WebFetch", "WebSearch", "Agent", "Workflow")
 
 
@@ -339,8 +326,13 @@ CONSERVATIVE_WINDOW = 200_000
 #: 取這個值是在已知變體裡選，不是證出來的——訊息必須標成推斷。
 WIDE_WINDOW = 1_000_000
 
-WARN_RATIO = 0.75
-HARD_RATIO = 0.90
+#: 🔴 R92 掌舵者裁決：84／94 各喊一次（取代 75／90）。84＝收斂前置訊號（repo settings
+#: 已釘 `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=90`；其分母是 auto-compact window，「84 早於
+#: 壓縮點」不可證、只有方向安全——ADR-XPLAT-008 §4）；94＝「壓縮沒發生」的失效警報
+#: （autocompact 正常時結構上走不到）。**刻意與額度尺 85／95 錯開
+#: 1pp**：分母不同，同值會讓讀者認錯尺（`test_quota_thresholds_are_not_the_context_thresholds` 釘住不得同值）。
+WARN_RATIO = 0.84
+HARD_RATIO = 0.94
 
 TIER_WARN = "warn"
 TIER_HARD = "hard"
@@ -433,16 +425,11 @@ def scan_transcript(path: Path) -> tuple[int | None, int, str | None]:
                     continue
                 seen_model = message.get("model")
                 if seen_model == SYNTHETIC_MODEL:
-                    # 🔴 R79：合成記錄整筆退出**用量累計**，不只是退出 model 判定。
-                    # harness 在額度耗盡時寫進逐字稿的那一筆長這樣：`type=assistant`、
-                    # `model=<synthetic>`、`isApiErrorMessage=true`，而它的 `usage` 三欄
-                    # **都在、且都是 0**（全庫實測 135 筆，無一例外）⇒ `used_of()` 依約回 0
-                    # 而不是 None（「欄位在」就算量到），於是 `last` 被它覆寫成 0。
-                    # 後果不是少算一點：水位在**額度耗盡的那一刻**由真值掉成 0.0%、tier 變
-                    # None、守衛整支靜默——而 90% 那一支正是負責寫「可重啟點任務書」的那一
-                    # 條路（`write_resume_plan`）。也就是說最需要任務書的那一刻，恰好是它
-                    # 結構上不會被產生的那一刻。這是「量不到 ≠ 量到零」在**上游**又犯一次：
-                    # 那筆記錄根本不是一次模型呼叫，它的 0 不是用量，是佔位。
+                    # 🔴 R79：合成記錄整筆退出**用量累計**，不只是退出 model 判定——
+                    # 它的 usage 三欄都在且都是 0（佔位不是用量），採計會讓水位在額度
+                    # 耗盡那一刻掉成 0.0% ⇒ 最需要任務書的那一刻守衛整支靜默。
+                    # 完整立案敘事（全庫 135 筆實測）見
+                    # `CrossPlatform_R91_Scan_Findings.md` §A-8（R92 搬出）。
                     continue
                 if isinstance(seen_model, str):
                     model = seen_model
@@ -456,6 +443,30 @@ def scan_transcript(path: Path) -> tuple[int | None, int, str | None]:
     return last, peak, model
 
 
+def compact_boundary_count(path: Path) -> int:
+    """本 session 逐字稿裡 `type=="system" and subtype=="compact_boundary"` 的累計次數。
+
+    🔴 R92／D3（SD 複審 P1）：harness 免費寫進逐字稿、`scan_transcript()` 此前沒讀過的
+    「已 compact 幾次」訊號，`latch_key` 靠它重新武裝。獨立成一支函式而非併入
+    `scan_transcript`（後者三元組回傳值已有多個三元解包呼叫端）。完整立案敘事與
+    `compactMetadata` 欄位形狀見證據檔 §I-10（R92 搬出）。
+    """
+    count = 0
+    try:
+        with path.open(encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                if '"compact_boundary"' not in line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except ValueError:
+                    continue
+                if (isinstance(record, dict) and record.get("type") == "system"
+                        and record.get("subtype") == "compact_boundary"):
+                    count += 1
+    except OSError:
+        return 0
+    return count
 
 
 def _positive_int(raw: object) -> int:
@@ -578,15 +589,16 @@ def state_path(session_id: str, tmp_dir: str | None = None) -> Path:
     return Path(tmp_dir or tempfile.gettempdir()) / f"{STATE_PREFIX}{session_id}.json"
 
 
-def latch_key(tier: str, window: int) -> str:
-    """閂鎖鍵＝(門檻, 分母)。
+def latch_key(tier: str, window: int, epoch: int = 0) -> str:
+    """閂鎖鍵＝(門檻, 分母, compact 週期)。
 
-    🔴 分母必須進鍵，這是 R79 修的半個缺陷：R78 版只以 tier 為鍵，於是「拿 200K 當
-    分母在真實 18% 誤喊一次 90%」之後，等分母修正成 1,000,000、真的到 90% 時閂鎖
-    **還鎖著** ⇒ 唯一該出聲的那一次被前面那次誤報吃掉。分母一變就重新武裝；分母
-    沒變的 session（例：真的 200K）行為完全不變。
+    分母必須進鍵，這是 R79 修的半個缺陷（誤報吃掉真正的那一次）。`epoch` 是
+    R92／D3 補的第二個盲區：同一 (tier, window) 內「compact 成功 → 真的再次越線」
+    此前不會重新武裝。`epoch`＝`compact_boundary_count()`，同一次 compact 週期內
+    不變 ⇒ one-shot 語意零改變；跨過一次真 compact 才前進，鍵才因此不同。
+    完整立案敘事見證據檔 §I-3／§I-10。
     """
-    return f"{tier}@{window}"
+    return f"{tier}@{window}@{epoch}"
 
 
 def announced_latches(state: Path) -> set[str]:
@@ -692,7 +704,7 @@ def write_resume_plan(transcript: Path) -> str:
             timeout=15,
             check=False,
             # 本 hook 行程沒有 console，而 planner 是 console 子系統的 python.exe
-            # ⇒ 不帶這個旗標時每次越過 90% 都會彈一個視窗（見 NO_WINDOW 的實測表）。
+            # ⇒ 不帶這個旗標時每次越過硬線（HARD_RATIO）都會彈一個視窗（見 NO_WINDOW 的實測表）。
             creationflags=NO_WINDOW,
         )
     except Exception:  # noqa: BLE001 — 診斷輔助不得反過來變成守衛的故障源
@@ -701,32 +713,11 @@ def write_resume_plan(transcript: Path) -> str:
 
 
 # ───────────────────────── 預防性哨兵的**觸發層**（R79 補洞包；R82／HELM-02 改觸發時機）
-# 🔴 現行形狀（R82／HELM-02 改的是「在哪一刻按下去」，不是方向）：SessionStart 只**清閂鎖**
-# （見 `arm_sentinel`），真正的註冊延後到 PostToolUse 且要通過
-# `tools/lib/sentinel_lifecycle.should_arm()`（回合數＋存活跨度雙門檻）。延後的代價已界定：
-# 一個 8 分鐘就結束的 session 拿不到續航；換掉的是「每一支 5 秒探針都留一支排程」。
-# 判準不能寫在 SessionStart 那一刻：見取捨②——那一刻逐字稿往往還不存在。
-# 立案量測（三支殘留哨兵、兩支屬於活 5 秒／12 秒的 session；六支短命逐字稿與主 session
-# 結構同形）逐字保全於 `CrossPlatform_R91_Scan_Findings.md` §A-6。
-#
-# 🔴 為什麼非得預防性不可（不是「順手掛一下」）：
-# `tools/session_resume_planner.py --arm-endurance` 是**手動**武裝的，而額度耗盡那一刻
-# 是 16 秒內全部 subagent 瞬間掛掉——那個時間點沒有任何人會去跑一行指令。更根本的是
-# **額度耗盡在 Claude Code 的 hook 體系裡沒有任何觸發點**：它是 API 層的失敗，不是工具
-# 呼叫失敗 ⇒ PreToolUse／PostToolUse 都不會被叫到，本檔那兩個模式一次都不會醒來。
-# ⇒ 唯一可行的形狀是**預防性武裝**：趁還能跑指令的時候先掛好，之後由 OS 排程器（不是
-# 這個 session、不是這個模型）去輪詢。SessionStart 是「還能跑指令的最早時刻」。
-# 這也是本 repo 已判過三次的同一個病的解藥：R77「PKG-GUARD 機制蓋好沒接電」——機制做完
-# 了但沒有任何東西會自動去按它。純文件約束（「開工前記得武裝」）對當下的模型零攔阻力。
-#
-# 三個刻意的取捨：
-#  ① **detached 子行程**，不同步等它跑完。註冊一支 schtasks 要外呼 powershell.exe，
-#     實測數秒；同步做等於每次開 session 都先卡幾秒。取證不因此消失——`--arm-sentinel`
-#     自己有 `NextRunTime` 憑證閘，成敗都寫進稽核 jsonl 與下面這支 boot log。
-#  ② **逐字稿檔案不存在也照樣武裝**。SessionStart 那一刻檔案往往還沒被建立；planner
-#     對這個入口特別放行（見該檔 `--arm-sentinel` 的 WHY），只把路徑記進狀態塊。
-#  ③ **一切例外吞掉**。`.claude/settings.json` 的 description 記載過 P0：hook 誤觸會把
-#     所有工具硬鎖死。武裝失敗最多是少一層保護，絕不可反過來變成故障源。
+# 🔴 SessionStart 只**清閂鎖**（見 `arm_sentinel`），真正註冊延後到 PostToolUse 且要通過
+# `tools/lib/sentinel_lifecycle.should_arm()`（回合數＋存活跨度雙門檻）——判準不能寫在
+# SessionStart 那一刻，逐字稿那時往往還不存在。為何非預防性不可、三個刻意取捨（detached
+# 子行程／逐字稿不存在也照樣武裝／一切例外吞掉）逐字保全於
+# `CrossPlatform_R91_Scan_Findings.md` §I-12；立案量測見同檔 §A-6。
 def spawn_sentinel(transcript_raw: str, out: str, log: object = None) -> bool:
     """Detached 起 planner 的 `--arm-sentinel`；回「有沒有真的 spawn 出去」。
 
@@ -861,10 +852,10 @@ def _headline(used: int, window: int, source: str) -> str:
             f"（{MEASURE_LABEL}：used {used:,} / window {window:,}〔{source}〕）")
 
 
-#: 75% 那一格的**下一步**，依額度相對 PRD `DRAIN_PERCENT` 的位置三分（`quota_gate.draining()`）。
+#: 84% 那一格的**下一步**，依額度相對 PRD `DRAIN_PERCENT` 的位置三分（`quota_gate.draining()`）。
 #:
 #: 🔴 立案（R91，PRD 前置條件）：PRD §4.3 的壓縮觸發是**三個 AND**——
-#: `K_ctx ≥ 75` ∧ `U5h + COMPACT_COST_BUDGET_PP ≤ DRAIN_PERCENT` ∧ `距上次壓縮 ≥
+#: `K_ctx ≥ CONTEXT_COMPACT_PERCENT`（R92 修訂為 84） ∧ `U5h + COMPACT_COST_BUDGET_PP ≤ DRAIN_PERCENT` ∧ `距上次壓縮 ≥
 #: COMPACT_MIN_INTERVAL_SECONDS`——而本 hook 原本只實作了第一條，於是它在額度高位照樣
 #: 喊 `/compact`。PRD §0 第 1 條把那件事列為 **🔴 阻斷級**，理由在 §2「關鍵釐清」：壓縮
 #: 本身要模型讀完整段對話並產生摘要 ⇒ **會顯著推升 U5h**，高位壓縮是反向操作。
@@ -877,8 +868,8 @@ def _headline(used: int, window: int, source: str) -> str:
 #: `"unknown"` 不折進 `"no"`：PRD §0 第 6 條明定遙測失效方向為 fail-safe，而「證不出
 #: 第二個 AND 成立」與「已證明它成立」是兩件事（同本檔通篇「量不到 ≠ 量到零」的紀律）。
 _NEXT_STEP = {
-    "no": ("   建議現在跑 `/compact`（額度現查：未越過 PRD 的 DRAIN 線；🔴 未計入 PRD 的 "
-           "`COMPACT_COST_BUDGET_PP` 邊際 ⇒ 貼線時自行判斷）。此時仍可開新工作。\n"),
+    "no": ("   機械 autocompact 將於觸發點自動壓縮（模型自身打不了 `/compact`，人在旁可手動——ADR-XPLAT-008；"
+           "額度現查：未越過 DRAIN 線；🔴 未計入 PRD `COMPACT_COST_BUDGET_PP` 邊際 ⇒ 貼線時自行判斷）。此時仍可開新工作。\n"),
     "yes": ("   🔴 **不要 `/compact`**——額度已越過 PRD `DRAIN_PERCENT`（prepare／halt 帶）。"
             "壓縮要模型讀完整段對話再產摘要 ⇒ 會顯著推升 U5h，在這一帶壓縮是反向操作"
             "（PRD §0 第 1 條：阻斷級）。\n"
@@ -893,12 +884,12 @@ _NEXT_STEP = {
 
 
 def warn_message(used: int, window: int, source: str, drain: str = "unknown") -> str:
-    """75% 提示。`drain`＝`quota_gate.draining()` 的三態，未知一律走 fail-safe 那一格。"""
+    """84% 提示。`drain`＝`quota_gate.draining()` 的三態，未知一律走 fail-safe 那一格。"""
     return (
-        f"⚠️  context 水位 {_headline(used, window, source)}——已越過 75%。\n"
+        f"⚠️  context 水位 {_headline(used, window, source)}——已越過 {WARN_RATIO:.0%}。\n"
         f"{_NEXT_STEP.get(drain, _NEXT_STEP['unknown'])}"
-        "   （根 CLAUDE.md〈Token 將耗盡時的無害暫停〉三段式水位：~75%、~90% 停止開新戰場、"
-        "撞上限才重啟。🔴 那張表量的是 context，額度是另一把尺——本行已把兩者都問過了。）\n"
+        f"   （根 CLAUDE.md〈Token 將耗盡時的無害暫停〉三段式水位，R92 起 {WARN_RATIO:.0%}＝收斂前置、"
+        f"{HARD_RATIO:.0%}＝壓縮未發生警報、撞上限才重啟。🔴 那張表量的是 context，額度是另一把尺——本行已把兩者都問過了。）\n"
         f"   要精確判定分母就設 {WINDOW_ENV}；本行的 window 來源已標在括號裡。\n"
         "   （同一門檻本 session 只喊這一次）\n"
     )
@@ -913,10 +904,14 @@ def hard_message(used: int, window: int, source: str, plan: str,
         "  3. 任務書：`python tools/session_resume_planner.py`（本次自動產生失敗，請手動跑）\n"
     )
     return (
-        f"🔴 context 水位 {_headline(used, window, source)}——已越過 90% 硬線。\n"
+        f"🔴 context 水位 {_headline(used, window, source)}——已越過 {HARD_RATIO:.0%} 硬線。\n"
+        "   機械 autocompact 已由 repo settings 釘住（autoCompactEnabled ＋"
+        " CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=90 ⇒ 正常應在 ~90% 就自動壓縮）——"
+        "你讀到這行代表壓縮**沒有發生**（或發生後又漲回來）。\n"
         "   此後**只做收斂，不做展開**（根 CLAUDE.md〈Token 將耗盡時的「無害暫停 →"
         " reset 後重啟」SOP〉）：\n"
-        "  1. 立刻 `/compact`。\n"
+        "  1. 立刻 `/compact`，並現查姿態找出它為何沒觸發："
+        "`python tools/session_resume_planner.py --check-autocompact`。\n"
         f"{SDD_STAGE_HINT if sdd_active else ''}"
         "  2. 把工作樹收到「可重啟點」四條件：① 已 commit 且閘門全綠，或"
         " `git stash create` ＋ `git tag <輪次>-wip-preserved`（絕不留半套 edit 就走）；"
@@ -937,7 +932,7 @@ def hard_message(used: int, window: int, source: str, plan: str,
 def block_message(used: int, window: int, source: str, tool: str) -> str:
     """PreToolUse 阻斷訊息。必須逐字給出下一步，否則擋下來只是製造挫折。"""
     return (
-        f"🔴 context 水位 {_headline(used, window, source)}——已越過 90% 硬線，"
+        f"🔴 context 水位 {_headline(used, window, source)}——已越過 {HARD_RATIO:.0%} 硬線，"
         f"`{tool}` 這類**展開型**工具已被擋下。\n"
         "   根 CLAUDE.md〈Token 將耗盡時的「無害暫停 → reset 後重啟」SOP〉：此後"
         "**只做收斂，不做展開**。Read／Edit／PowerShell 仍然放行，收斂做得完。\n"
@@ -988,7 +983,7 @@ def main() -> int:
         # 「不是 PreToolUse 就當 PostToolUse」，後者是預設開啟、方向錯的。
         measuring = event in ("PreToolUse", "PostToolUse")
         # 🔴 額度那把尺**必須在這裡**求值，不能往下擺（SA-B1 判過的死碼）。下面五道早退
-        # 全是 context 語意，而 `tier_of()` 在 context <75% 一律回 `None` ⇒ 撞額度那一刻
+        # 全是 context 語意，而 `tier_of()` 在低於 WARN_RATIO 時一律回 `None` ⇒ 撞額度那一刻
         # （實測水位只有 ~18~20%）任何掛在 `block_verdict()` 裡的 quota 分支都到不了。
         # 兩把尺不共用早退條件，這一行的位置就是那個設計。
         # 🔴 R83／接電：`blocking and` 這個前綴拿掉了，`event` 改為傳進去。立案是量出來的
@@ -1020,7 +1015,7 @@ def main() -> int:
         if not transcript.is_file():
             return 0
         # 🔴 哨兵武裝掛在這裡（不是 SessionStart，理由見 `arm_when_earned` 上方那段），而且
-        # **必須在下面五道 context 早退之前**：`tier_of()` 在水位 <75% 一律回 `None`，掛在
+        # **必須在下面五道 context 早退之前**：`tier_of()` 在低於 WARN_RATIO 時一律回 `None`，掛在
         # 後面等於永遠不會被執行（同 SA-B1 判過的死碼形狀，只是換一把尺）。閂鎖已設時它只
         # 做一次 `Path.exists()`，所以放在每次工具呼叫都會經過的路徑上是付得起的。
         if not blocking:
@@ -1038,7 +1033,7 @@ def main() -> int:
             return block_verdict(payload, used, window, source, tier)
 
         state = state_path(session_id_of(transcript))
-        key = latch_key(tier, window)
+        key = latch_key(tier, window, compact_boundary_count(transcript))
         if key in announced_latches(state):
             return 0
         remember_latch(state, key)

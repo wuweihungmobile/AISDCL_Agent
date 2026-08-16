@@ -2048,3 +2048,23 @@ R89 靜默桶 10→**0**。
 **重跑法**（本節所有數字的唯一出處，任何人可重跑）：以 `check_defect_log_crossref` 的
 `_table_layout()`／`_row_cells()`／`_classify()`／`_handover_rounds()`／`_reassign_hit()`
 對主檔逐列分桶，判準與工具同源、不另寫第二份。
+
+## 護欄層史料搬遷（R92 結案輪批）— `_UNPINNED_HANDOVER_GRANDFATHERED` 下修 4 → 2
+
+依 `tools/check_defect_log_crossref.py` 該表旁注（「歷次下修的逐筆理由與被刪 ID 史料
+逐字保全於本檔」）續記：R92 結案輪把 `DEF-101-238`（closed-by-decision@R92，R85 已明文
+裁決 CONDITIONAL 白名單維持不收斂並改名分義）與 `DEF-101-392`（closed-by-decision@R92，
+掌舵者 R84 已裁 Copy-on-Evolve 政策、ADR-XPLAT-001 已 Accepted）結案 ⇒ 兩列不再是未結列、
+不再需要「未指派」豁免，依該判準 fail-loud 訊息自己指名的動作自白名單移除，
+`_UNPINNED_HANDOVER_CEILING` 同步 4 → 2（收緊方向）。逐列結案證據＝
+`CrossPlatform_R91_Scan_Findings.md` §F-238／§F-392。同批：
+`UNPINNED_HANDOVER_CEILING_HISTORY` 尾端追加 2、封印延長至含 4；
+`OVERSIZE_ROW_EXCESS_CEILING` 77186 → 75047（兩列狀態欄瘦身成索引、原文逐字進 §F 所致，
+收緊方向）、其史料尾端追加 75047、封印延長至含 77186；
+`_SEAL_TOTAL_MIN_LEN` 22 → 24、`_SEAL_TABLE_SHA256` 重釘為 `a4f77751b849fbd7`
+（封印判準紅燈訊息自己指名的同批動作）。
+🔴 **同輪第二批（R92 裁決執行段，上段寫下時尚未發生——補到終值，E-02）**：八項掌舵者
+裁決結案（238／392 之外另七列瘦身）使 `OVERSIZE_ROW_EXCESS_CEILING` 再由 75047 → **69122**
+（收緊方向），其史料尾端追加 69122、封印延長至含 75047 ⇒ `_SEAL_TOTAL_MIN_LEN` 24 → **25**、
+`_SEAL_TABLE_SHA256` 重釘為 `56cc201b920adee7`。磁碟終值＝69122／25／`56cc201b920adee7`
+（`test_archive_defect_log.py` 相等釘實測 `161 passed, 336 subtests` rc=0）。

@@ -207,3 +207,13 @@ def pace_line(decision: quota_policy.Decision) -> str:
     when = next((f"剩 {int(r.minutes)} 分鐘" for r in decision.per_axis
                  if r.axis is axis and r.minutes is not None), "reset 距離不明")
     return head + f"｜最緊的一條＝{axis.kind} {axis.pct:g}% {when}"
+
+
+# 🔴 R93／DEF-200-122：Plan B 的「出聲」半邊（SA 裁決保留，不做狀態檔輪替）。純渲染，
+# 讀落款最後一列的指紋與這次的指紋比對，不落任何新狀態檔。
+def core_signature_change_note(last_fp, current_fp: tuple) -> str:
+    """換方案的一行提示。`last_fp is None`（史上第一筆／全是舊格式列）⇒ 沒有基準，不出聲。"""
+    if last_fp is None or tuple(last_fp) == tuple(current_fp):
+        return ""
+    old_s, new_s = "+".join(last_fp) or "(空)", "+".join(current_fp) or "(空)"
+    return f"⚠️ 偵測到帳號軸組合改變（{old_s} → {new_s}）：攤提正在用新樣本重新累積\n"

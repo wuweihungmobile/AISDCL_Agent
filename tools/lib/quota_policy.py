@@ -191,6 +191,10 @@ class QuotaState:
     measured_at: str
     source: str
     reason: str = "ok"
+    #: 🔴 R93／DEF-200-114（Architect REJECT 承接）：帳號身分訊號，`None`＝量不到
+    #: （見 `quota_meter.account_key_of()`）。**新增欄位帶預設值**——所有既有建構點皆傳
+    #: 4 個位置參數，本欄不影響任何一處。唯一消費端是 `quota_gate.core_signature()`。
+    account_key: str | None = None
 
     def usable(self) -> bool:
         """有沒有任何一軸可判讀（**指名軸別**才拿得到數字）。"""
@@ -392,9 +396,9 @@ def _cap_for(band: str, horizon: str, p: Policy) -> int | None:
     # 🔴 覆寫是**上限**，不是拿去參與乘法的 base。舊寫法 `base = override` 會被
     # horizon 乘數放大——`AUTOSDD_QUOTA_FANOUT_CAP=8` 在 near 檔實得 16，也就是一個
     # 名字叫 CAP 的旋鈕給出了**比使用者要求的還鬆**的值。只收緊、不放寬。
-    if p.fanout_cap_override is None:
-        return cap
-    return _clamp(min(cap, p.fanout_cap_override), p)
+    # 🔴 R93／DEF-200-114：三行併一行是 `guardrail_lib`（≤400 行）騰出 `QuotaState.
+    # account_key` 那 1 行淨增的位置——**行為不變**（同一分支，非風格偏好）。
+    return cap if p.fanout_cap_override is None else _clamp(min(cap, p.fanout_cap_override), p)
 
 
 # 單軸建議派工數；恆 `<=` 同軸 cap（見 `_bound`）。

@@ -380,8 +380,11 @@ def explain(amort) -> str:
 #   （R85 教訓 5：做了但不落磁碟＝沒發生），所以在這裡落成 repo 內的常數，
 #   provenance 與逐項對帳＝`docs/06_quality/CrossPlatform_R86_Pace_Calibration.md`。
 #   它是**先驗不是現況**：落款一旦累積出真實區段，`estimate_ratio()` 會把它併進同一池。
-SEED_OBSERVATIONS = (("2026-08-12T21:24:00+08:00", 1.0, 74.0),
-                     ("2026-08-12T22:16:00+08:00", 16.0, 75.0))
+#
+# 🔴 R93／DEF-200-122：第 4 欄 `fp=None`＝**永久排除**（見 `filter_by_signature`）。
+#   校準文件全文查無指紋 provenance，回填等於偽造，故承認退場，見證據檔。
+SEED_OBSERVATIONS = (("2026-08-12T21:24:00+08:00", 1.0, 74.0, None),
+                     ("2026-08-12T22:16:00+08:00", 16.0, 75.0, None))
 
 
 # 🔴 量化保守：兩軸讀數都是整數 pp（實測 `pct` 皆 `.0`）⇒ 差值的誤差各最多 ±1
@@ -440,10 +443,12 @@ def estimate_ratio(rows) -> tuple:
 
 
 def rows_from_jsonl(text: str) -> list:
-    """落款 jsonl → `[(ts, 短窗 pct, 長窗 pct)]`。壞列一律略過（取數不得掛掉）。
+    """落款 jsonl → `[(ts, 短窗 pct, 長窗 pct, fp)]`。壞列一律略過（取數不得掛掉）。
 
-    同一個 `ts` 只取第一列：`--pace` 可能在同一份快取上被連呼數次，重複列會讓區段變長
-    卻不帶任何新資訊。
+    `fp`＝該列的核心方案指紋；**缺席這個鍵的舊格式列一律回 `None`**——provenance
+    不明時的正確處置是不採信（見 `filter_by_signature`），不是硬湊近似。
+    同一個 `ts` 只取第一列：`--pace` 可能在同一份快取上被連呼數次，重複列會讓區段
+    變長卻不帶任何新資訊。
     """
     rows: list = []
     seen = set()
@@ -464,15 +469,32 @@ def rows_from_jsonl(text: str) -> list:
         if high <= low:
             continue
         seen.add(when)
+        raw_fp = data.get("fp")
+        fp = tuple(str(x) for x in raw_fp) if isinstance(raw_fp, list) else None
         rows.append((when,
                      max(pcts[k] for k in known if known[k] == low),
-                     max(pcts[k] for k in known if known[k] == high)))
+                     max(pcts[k] for k in known if known[k] == high),
+                     fp))
     return rows
 
 
-def row_of(measured_at: str, pcts, live: int = 0) -> str:
-    """一列落款（含尾端換行）。`live`＝當時的併發派發數，留給下一輪的 per-agent 校準。"""
+def row_of(measured_at: str, pcts, live: int = 0, fp: tuple = ()) -> str:
+    """一列落款（含尾端換行）。`live`＝當時的併發派發數；`fp`＝寫入時的**核心方案指紋**
+    （R93／DEF-200-122：見 `quota_gate.core_signature`。預設 `()` 給既有呼叫端相容，
+    真正的生產呼叫端 `quota_gate.record_burn` 一律顯式帶入）。
+    """
     return json.dumps({"ts": str(measured_at),
                        "pct": {str(k): float(v) for k, v in pcts},
-                       "live": int(live)},
+                       "live": int(live), "fp": list(fp)},
                       ensure_ascii=False, sort_keys=True) + "\n"
+
+
+# 🔴 這就是雙向對稱性的來源（R93／DEF-200-122／ADR-XPLAT-009）：換方案不論方向為何，
+# 只要核心桶集合改變，舊指紋的列在新指紋的過濾裡結構上絕不會出現，`segments()`／
+# `estimate_ratio()` 因而永遠看不到跨方案的樣本混在同一段裡——過濾發生在呼叫它們**之前**，
+# 兩者一行都不改。`fp is None`（舊格式列／`SEED_OBSERVATIONS`）永遠不參與任何池子，
+# 即使 `signature` 恰好也是 `()`：provenance 不明時的正確處置是不採信，不是碰巧相等就採信。
+def filter_by_signature(rows, signature: tuple) -> list:
+    """只留 `fp == signature` 的列，回 `(ts, short, long)` 三元組（既有輸入形狀）。"""
+    return [(ts, short, long) for ts, short, long, fp in rows
+            if fp is not None and fp == signature]

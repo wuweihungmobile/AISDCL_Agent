@@ -727,7 +727,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 537,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 5445,
+    "test_adr_xplat001_c1c2_lock.py": 5463,
     "test_archive_defect_log.py": 3877,
     "test_bash32_compat.py": 946,
     "test_bash_probe_spec_contract.py": 983,
@@ -742,7 +742,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_check_wrapper_thinness.py": 1234,
     "test_claim_provenance_r86.py": 341,
     "test_component_sanitizer_shared_layer_lock.py": 293,
-    "test_context_budget_guard.py": 6795,
+    "test_context_budget_guard.py": 6900,
     "test_defect_id_reference_integrity.py": 261,
     "test_dev_start.py": 7056,
     "test_dev_start_ps1_lastexitcode.py": 548,
@@ -770,7 +770,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_ps51_compat.py": 565,
     "test_ps_engine_ssot.py": 933,
     "test_python_c_percent_shim.py": 119,
-    "test_quota_policy.py": 1934,
+    "test_quota_policy.py": 2068,
     "test_root_infra_parity.py": 441,
     "test_run_root_unittests.py": 2190,
     "test_sanitize_component_frozen_sdd_versions_lock.py": 340,
@@ -907,6 +907,23 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "（platform_utils.emit_to_model），判準本體留在測試面才是對的位置。"
      "代價側現查：本輪為款(12) 到期輪 ⇒ 單輪上限 2000→1600 並就地重新武裝下一段；"
      "連升 streak 第 2／2 ⇒ **R92 必須淨額 ≤ 0**。"),
+    ("R92", 84149, 84142, -7,
+     "[淨減法] R92 收尾窗口最終定案（覆寫草稿列）。SD 複審修復包（D3/D2/D4）貢獻"
+     "test_context_budget_guard.py +85；六段純敘事 docstring（98 行）搬進"
+     "CrossPlatform_R91_Scan_Findings.md §I-18~§I-23 抵銷，淨額 -7，streak 歸零。"
+     "容量自適應攤提工作獨立拆入下方 R93。逐項立案見該檔 §I-24。"),
+    ("R93", 84142, 84367, 225,
+     "[非淨減法輪] 容量自適應攤提落地（DEF-200-122／DEF-200-114／ADR-XPLAT-009；帳本"
+     "首列 DEF-200-139）。收尾窗口動工期間該工作線仍在延伸（account-key 追加），"
+     "經三次靜止檢查定案：test_quota_policy.py +134、test_context_budget_guard.py "
+     "account-key 部分 +78、本表自身編修 +12。streak 因 R92 淨額 -7 已歸零 ⇒ 本輪為"
+     "第 1／2 輪。逐次量測與三條合法出口不適用之理由見"
+     "CrossPlatform_R91_Scan_Findings.md §I-24／§I-25。"),
+    ("R94", 84367, 84406, 39,
+     "[非淨減法輪] D1（獨立 SD 複審阻塞項）：account_key 缺席退化路徑補 "
+     "note_degraded() 觀測性＋命名回歸鎖（詳細支數見 §J-2），test_context_budget_guard.py +34、"
+     "本表自身編修 +5。streak 因 R93 為第 1／2 輪，本輪為第 2／2 輪（R95 起若再正"
+     "淨額需搬史料抵銷）。詳見 CrossPlatform_R91_Scan_Findings.md §J。"),
 )
 
 
@@ -970,6 +987,7 @@ _REPIN_NET_CAP_SCHEDULE: tuple[tuple[int, int], ...] = (
     (87, 2600),   # R87：到期輪下修。本輪自身淨額遠低於此（事故鎖 ＋ 派工前置檢查兩組）
     (89, 2000),   # R89：到期輪下修。本輪淨額 ≤ 0（史料搬遷抵銷新判準，兌現款(11)）
     (91, 1600),   # 到期輪下修（款(12)）。步伐 400 < 前一段的 600：見上方「步伐刻意變小」
+    (93, 1300),   # 到期輪下修（款(12)）。步伐 300 < 前一段的 400，續守「步伐刻意變小」
 )
 #: 生效點＝首列輪號、現行上限＝末列上限，**皆由表導出不另立常數**（R73 判例：一份知識一個家）。
 _REPIN_ROUND_CAP_SINCE = _REPIN_NET_CAP_SCHEDULE[0][0]
@@ -1036,8 +1054,8 @@ def net_cap_schedule_problems(
 #: 就逼近真實輪次大小（現查逐輪淨額的最小正值），步伐不縮就會製造沒有出路的紅（ARCH-02）。
 #: 🔴 **兌現必然是「下修上限」＋「重新武裝下一段」兩個動作**，不是可選的第二步——本款要
 #: `cap ≤ 目標`、下方 assertLess 要 `目標 < cap`，互斥推導見 CrossPlatform_R89 結案證據檔。
-_REPIN_NET_CAP_DUE_ROUND = 93
-_REPIN_NET_CAP_DUE_TARGET = 1300
+_REPIN_NET_CAP_DUE_ROUND = 95
+_REPIN_NET_CAP_DUE_TARGET = 1100
 
 #: 🔴 R85 收尾單人窗口：款(11)／ADR-XPLAT-002 §8.1 item 15 那條「**必須出現一次淨額 ≤ 0**」
 #: 的**到期輪**。此前它寄生在 `test_the_real_repin_log_stays_inside_the_cost_envelope` 的
@@ -1134,10 +1152,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: 追加當輪不必動指紋（一列寬限），下一輪要再追加就必須先把前一列納入前綴並重釘，
 #: 否則 `[前綴過期]` 轉紅。草稿兩個值都由 `--print-guard-lines` 印出
 #: （ARCH-02 的教訓：紅了卻沒有出路的鎖會被關掉）。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 21
+_REPIN_LOG_FROZEN_PREFIX_LEN = 24
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "45f4d50a8c312664a59cb3f124aea5bdeced5c3dbfee6ef201e7454b1684cc3f")
+    "45c48f4f22ad76060705bde3f80275067b3609886aee40fa41cec8178777df01")
 
 
 def repin_log_history_digest(

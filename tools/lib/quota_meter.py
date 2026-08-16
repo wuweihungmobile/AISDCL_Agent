@@ -56,6 +56,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
@@ -321,9 +322,9 @@ def normalize_pct(value: object, scale: float) -> float | None:
     pct = float(value) * scale
     # 負值／NaN 一律當「量不到」。超過 100 不夾（overage 是真的存在的狀態），
     # 但 0..100 之外的**負**方向沒有任何合法語意。
-    if pct != pct or pct < 0:
-        return None
-    return pct
+    # 🔴 R93／DEF-200-114：併成三元式是 `guardrail_lib`（≤400 行）騰位置給
+    # `account_key_of()`——**行為不變**，非風格偏好。
+    return None if pct != pct or pct < 0 else pct
 
 
 # 🔴 SA-B3 的修法：**兩個來源取聯集**，不是只讀 `limits[]`。
@@ -507,10 +508,28 @@ def account_posture(payload: object) -> dict:
     實際後果（與換帳號直接相關）：`quota_burn.jsonl` 的去重鍵只有 `measured_at`
     ⇒ 換帳號／換方案後**新舊樣本混在同一份落款裡**，`burn_ratio()` 會拿 A 帳號的燃燒
     特性去算 B 帳號的攤提配額，而它**不會隨 TTL 自癒**（快取 TTL 180s，落款是持久的）。
-    本輪**刻意不修**：修法要動 `record_burn`／`burn_ratio`＝配速取數層，而 R87 的教訓
-    正是「不得以模型判斷改取數層」，需第三方複審——本輪額度 halt、結構上沒有第三方。
-    誠實劃界：指紋只分得出**方案**變更；同方案的兩個帳號指紋逐字相同 ⇒ Pro→Pro 換帳號
-    這一型，靠指紋結構上抓不到，要抓需要帳號識別（涉及憑證處理，另案）。
+    🔴 R93 訂正：上一段「本輪刻意不修」自本輪起不再是現行狀態——burn-ledger 隔離
+    問題已解（見 ADR-XPLAT-009），但修法**不是**重新定義本欄位的內容。本欄
+    `plan_fingerprint` 保持**顯示用**語意不變（全部桶名、含未知桶，服務
+    `posture_line()` 的診斷可讀性）；真正做隔離判定的是一個**獨立、且僅限
+    `quota_policy.KNOWN_KINDS`** 的核心指紋，由 `quota_gate.core_signature()`
+    直接從 `QuotaState.axes` 算出（不經過本函式），寫進 `quota_burn.jsonl` 的
+    `fp` 欄，供 `quota_pace.filter_by_signature()` 過濾。兩者故意分開的家、
+    分開的用途（同 `CREDIT_POOL_KEYS`／`FALLBACK_KINDS` 的既有判例：今天恰好
+    在部分桶名上重疊，關係不是相等）。
+
+    🔴 R93 二次訂正（Architect REJECT 承接，`docs/06_quality/
+    Quota_R90_CrossAccount_Experiment.md` §2.5-2.8）：上一段「同方案換帳號…需帳號識別，
+    仍是另案」**兩個子句都被 R90 的真實 Pro→Team 對照組推翻**——① 帳號識別**不涉憑證
+    處理**：`anthropic-organization-id`／`anthropic-workspace-id` 就在 `fetch_usage()`
+    已經在發的那次回應標頭裡，不是憑證也不需要另打一次端點；② 因此**不是另案**，本輪已
+    實作：`account_key_of()` 把兩個標頭雜湊成 `sha256(org:ws)[:12]`（見該函式），
+    `quota_gate.core_signature()` 在量得到時把它併入指紋。R90 同時證偽了「靠 kind 集合
+    當身分訊號」本身：真實換帳號那一筆的差異軸與同帳號內兩次自然翻動**逐字相同**
+    （3 命中 2 假陽性），且 29%（10/35）跨方案舊帳號樣本與新帳號指紋逐字相同（偽陰性）
+    ——kind 集合的有無量的是**額度狀態**，不是**身分**，兩件事只是這次巧合地部分重疊。
+    誠實劃界縮小為：`account_key_of()` 量不到時（標頭缺席）、或帳號未變但**同一組織／
+    工作區**下方案原地升降級時，仍與既有盲區同型。
     """
     if not isinstance(payload, dict):
         return {"plan_fingerprint": (), "credits_present": False,
@@ -554,22 +573,60 @@ def denominator_of(payload: object) -> dict:
             "cross_check": {"derived_pct": derived, "reported_pct": util, "agrees": ok}}
 
 
-def fetch_usage(token: str, timeout: int = HTTP_TIMEOUT_SECONDS) -> tuple[int, object]:
-    """打端點。回 `(http_status, payload)`；status 0＝連線層就失敗。"""
+def fetch_usage(token: str,
+                timeout: int = HTTP_TIMEOUT_SECONDS) -> tuple[int, object, dict]:
+    """打端點。回 `(http_status, payload, headers)`；status 0＝連線層就失敗。
+
+    🔴 R93／ADR-XPLAT-009 §6：**第三個回傳值是本輪加的**（此前是 2-tuple）。理由——
+    `anthropic-organization-id`／`anthropic-workspace-id` 這兩個帳號識別欄位**就住在
+    這次呼叫已經在發的回應標頭裡**（R90 一手實測，見
+    `docs/06_quality/Quota_R90_CrossAccount_Experiment.md` §2.5），取數層此前把它們
+    丟在原地——`account_posture()` 舊 docstring 曾誤稱帳號識別「涉及憑證處理，另案」，
+    而標頭不是憑證，這裡取的又是同一次呼叫，零額外網路、零額外 token。
+    """
     # 🔴 header 只帶這兩個是**實測**結論（Architect 的對照組）：`anthropic-beta` 與
     # claude-cli 的 User-Agent 都不是必要條件 ⇒ 不必偽裝成 CLI，少一個會隨版本漂移的耦合面。
     req = urllib.request.Request(USAGE_URL, headers={
         "Authorization": f"Bearer {token}", "Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
-            return int(resp.status), json.loads(resp.read().decode("utf-8"))
+            return (int(resp.status), json.loads(resp.read().decode("utf-8")),
+                    dict(resp.headers.items()))
     except urllib.error.HTTPError as exc:
         # 🔴 401 與「額度真的沒回來」必須在痕跡裡分得開（調研 S1-08）：OAuth token 4 小時
         # 到期，而無人看管那條路上沒有人在 refresh。混在一起會讓排程器把認證失敗誤判成
         # 額度未恢復而一直等下去——那與 R80 哨兵整晚失明是同一個形狀。
-        return int(exc.code), None
+        return int(exc.code), None, {}
     except (urllib.error.URLError, OSError, ValueError, TimeoutError):
-        return 0, None
+        return 0, None, {}
+
+
+#: 帳號識別的標頭鍵。兩者皆缺席（或空字串）⇒ `account_key_of()` 回 `None`（量不到，
+#: 不得猜）——同一支端點的其餘欄位讀不到時的既有紀律（`.get()` 一律容忍缺席）。
+ORG_HEADER = "anthropic-organization-id"
+WORKSPACE_HEADER = "anthropic-workspace-id"
+
+
+# 🔴 R93／DEF-200-114（Architect REJECT 承接，見 `docs/06_quality/
+# Quota_R90_CrossAccount_Experiment.md` §2.5-2.8）：`plan_fingerprint`／`core_signature`
+# 兩者皆只算「已知桶名集合」，而 R90 用真實 Pro→Team 換帳號資料雙向證偽了它當身分訊號的
+# 資格——同一份落款裡，真事件的差異軸與另外兩次同帳號自然翻動**逐字相同**（3 命中 2
+# 假陽性），且 29%（10/35）的舊帳號舊樣本與新帳號指紋逐字相同（偽陰性，且不限同方案，
+# 跨方案 Pro→Team 照樣撞）。根因：kind 集合的有無是**額度狀態**，不是**身分**。
+#
+# 本函式提供**真正的身分訊號**：帳號在伺服器端的識別碼雜湊。**零成本**——不是新網路
+# 呼叫，是這次呼叫已經在發的回應標頭；**不涉憑證處理**——標頭不是憑證，雜湊後更不是，
+# 兩個生字串本身也不落磁碟（只落它們的 sha256 前 12 hex 碼）。
+def account_key_of(headers: dict) -> str | None:
+    """`sha256(org-id:workspace-id)[:12]`；任一標頭缺席／空字串 ⇒ `None`（量不到）。"""
+    if not isinstance(headers, dict):
+        return None
+    org, workspace = headers.get(ORG_HEADER), headers.get(WORKSPACE_HEADER)
+    if not isinstance(org, str) or not org.strip():
+        return None
+    if not isinstance(workspace, str) or not workspace.strip():
+        return None
+    return hashlib.sha256(f"{org}:{workspace}".encode()).hexdigest()[:12]
 
 
 def measure_detail(timeout: int = HTTP_TIMEOUT_SECONDS,
@@ -578,8 +635,9 @@ def measure_detail(timeout: int = HTTP_TIMEOUT_SECONDS,
     """量一次，回 `(讀數 dict 或 None, 失效字面)`。**這是 B4 的修法本體。**
 
     🔴 立案（SD-B4）：`fetch_usage()` 檔頭 §S1-08 逐字要求「401 與『額度真的沒回來』
-    必須在痕跡裡分得開」，而它**做到了**——回 `(status, payload)`。真正掉東西的是它
-    唯一的呼叫端：舊 `measure()` 把 status 丟掉、四種失效一律回同一個 `None`
+    必須在痕跡裡分得開」，而它**做到了**——當時回 `(status, payload)`（R93 起再加第三格
+    `headers`，本段歷史敘述不逐字更動，見 `fetch_usage()` 自己的 docstring）。真正掉
+    東西的是它唯一的呼叫端：舊 `measure()` 把 status 丟掉、四種失效一律回同一個 `None`
     ⇒ token 過期（401）、斷網、憑證檔不在、schema 升版，在消費端外觀完全相同。
 
     🔴 R82 新增的兩個參數**只有測試會傳**（production 三個呼叫端——`measure()`／
@@ -594,7 +652,7 @@ def measure_detail(timeout: int = HTTP_TIMEOUT_SECONDS,
     token, reason = token_detail(platform, runner)
     if not token:
         return None, reason
-    status, payload = fetch_usage(token, timeout)
+    status, payload, headers = fetch_usage(token, timeout)
     if status == 0:
         return None, REASON_UNREACHABLE
     if status != 200 or not isinstance(payload, dict):
@@ -614,6 +672,9 @@ def measure_detail(timeout: int = HTTP_TIMEOUT_SECONDS,
         # 🔴 R87：派工前置檢查的資料來源（見 `account_posture`）。快取裡沒有它，
         # `--pace` 就只能講水位、講不出「訂閱窗用完之後還有沒有救」。
         "posture": {k: v for k, v in account_posture(payload).items() if k != "pools"},
+        # 🔴 R93／DEF-200-114：帳號身分訊號（見 `account_key_of` 的 WHY）。`SCHEMA`
+        # 刻意不升版——純追加鍵，向後相容，同 `is_active`／`severity` 的既有先例。
+        "account_key": account_key_of(headers),
     }, REASON_OK
 
 

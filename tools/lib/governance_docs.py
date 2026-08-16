@@ -195,6 +195,11 @@ _GOVERNANCE_DOCS = (
     # 逐字輸出（單一 vs 兩個相接的 `hookSpecificOutput` 物件，後者實測兩則訊息一起消失）
     # ——那是 `emit_to_model()` 為何非得「一行程至多一份 JSON」的唯一還能重驗的依據。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R91_Scan_Findings.md",
+    # R93：額度攤提換方案適配（DEF-200-122 收尾／DEF-200-114 補完）的落地證據。資格同
+    # 上方同名檔：逐節寫出「規格覆核發現／紅綠自證輸出／LOC 棘輪處置狀態」的座標宣稱
+    # （⇒ 指針稽核），複審者要重驗落地過程中發現的規格缺陷（`burn_ratio` 的 `last_fp`
+    # 取法）就得讀完它（⇒ 體積守門）。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R93_Plan_Change_Adaptive_Evidence.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/CrossPlatform_*.md`。這**不是**把具名常數

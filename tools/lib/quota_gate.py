@@ -113,6 +113,7 @@ from quota_messages import (  # noqa: E402,F401
     USAGE_URL,
     _aware,
     binding_resets_at,
+    core_signature_change_note,
     evidence_hint,
     pace_line,
     quota_halt_message,
@@ -275,6 +276,51 @@ def burn_ledger_path() -> Path:
     return endurance_env.trace_dir() / BURN_LEDGER_NAME
 
 
+# 🔴 R93／DEF-200-122：**判定用**指紋（同名詞見 `quota_meter.account_posture()` 的
+# **顯示用** `plan_fingerprint`，兩者刻意分開的家）。只算 `KNOWN_KINDS` 內的桶名集合：
+# 未知桶名的增減是 schema 演進（既有 `NOTE_UNKNOWN` 已通報），不該觸發攤提重置；
+# 已知桶名的增減才是換方案/換帳號訊號。`axes==()` ⇒ `()`，結構上不會匹配任何真實樣本。
+#
+# 🔴 R93 二次訂正（Architect REJECT 承接，`docs/06_quality/
+# Quota_R90_CrossAccount_Experiment.md` §2）：**只算桶名集合**這件事本身被 R90 用真實
+# Pro→Team 換帳號資料雙向證偽——真事件的差異軸與同帳號內兩次自然翻動逐字相同（3 命中
+# 2 假陽性），且 29%（10/35）跨方案舊帳號樣本與新帳號指紋逐字相同（偽陰性；不限同方案）。
+# 桶名集合量的是**額度狀態**，不是**身分**。⇒ 併入 `state.account_key`（見
+# `quota_meter.account_key_of()`：`sha256(org-id:workspace-id)[:12]`，取自既有回應標頭，
+# 零額外網路／token／憑證處理）——**互補而非取代**：桶名分區仍然捕捉真的方案容量差異
+# 訊號（保留既有雙向對稱性），account_key 專門解決 R90／Architect 指出的兩個盲區：
+# 同方案換帳號（桶名集合不變但帳號變了）、不同方案桶名集合恰好相同。
+# `account_key` 為 `None`（量不到／舊快取無此鍵）⇒ 逐字退回今天的桶名指紋，不改變
+# 既有行為——這是安全預設，不是本函式的降級分支。
+_ACCOUNT_KEY_TAG = "account="   # 前綴避免與桶名字面碰撞（桶名皆不含 `=`）
+
+
+def core_signature(state: quota_policy.QuotaState) -> tuple:
+    """本次讀數的核心方案指紋。史料見 `docs/06_quality/
+    CrossPlatform_R93_Plan_Change_Adaptive_Evidence.md` ＋ `docs/06_quality/
+    Quota_R90_CrossAccount_Experiment.md` §2.5-2.8。
+
+    🔴 R94／D1（SD 獨立複審阻塞項，`docs/04_planning/ADR/
+    ADR-XPLAT-009-plan-change-adaptive-signature.md` §6）：`state.usable()` 為真（有
+    軸可判讀）卻 `account_key is None` 時，這裡此前**靜默**退回裸桶名指紋——那正是
+    R90 §2.4 已實測「29%（10/35）跨方案指紋逐字相同」的碰撞面，退化卻零觀測性。
+    現比照本檔其餘每一種「量不到／退化」路徑（stale-cache／schema-mismatch／
+    no-credentials／ledger-unreadable／meter-crashed／policy-invalid）接上
+    `note_degraded()`：TTL 閂鎖已有（每 source 180 秒僅出聲一次），成本低。
+    `not usable()` 時**不**出聲：那種狀態的 kinds 本來就是空集合，account_key 缺席
+    不是額外資訊，硬出聲只是重複「量不到」已經在別處說過的話。
+    """
+    kinds = tuple(sorted({a.kind for a in state.axes if a.kind in quota_policy.KNOWN_KINDS}))
+    if state.account_key:
+        return (f"{_ACCOUNT_KEY_TAG}{state.account_key}",) + kinds
+    if state.usable():
+        note_degraded(
+            "no-account-key",
+            "帳號指紋量不到（account_key 缺席，量測本身成功）⇒ 逐字退回裸桶名指紋，"
+            "R90 已實測 29%（10/35）跨方案舊帳號樣本與新帳號指紋逐字相同")
+    return kinds
+
+
 # 🔴 為什麼要落款：換算比 r（短窗 pp／長窗 pp）只能從**歷時差分**推估，而快取只存最新一
 # 次 ⇒ 沒有落款就結構上沒有樣本。R86 實測今天三個時刻（21:24／22:16／22:29）的兩軸讀數
 # 給出 r 的量級 6~15，而它們全部只活在對話裡——這一支就是把那種觀測變成可累積的資料。
@@ -290,20 +336,35 @@ def record_burn(state: quota_policy.QuotaState, live: int = 0) -> bool:
             return False
         with path.open("a", encoding="utf-8") as handle:
             handle.write(quota_pace.row_of(
-                state.measured_at, [(a.kind, a.pct) for a in state.axes], live))
+                state.measured_at, [(a.kind, a.pct) for a in state.axes], live,
+                fp=core_signature(state)))
     except OSError:
         return False
     return True
 
 
-def burn_ratio() -> tuple:
-    """`(r|None, note)`：由落款＋外部校準先驗推估換算比。樣本不足**說出來**。"""
+# 🔴 R93／DEF-200-122：只取與當前核心指紋相符的樣本（分區優於偵測，見 ADR-XPLAT-009）。
+# `plan_note` 是 Plan B 的「出聲」半邊（SA 裁決保留），不落任何新狀態檔。
+# 🔴 落地實測發現的規格缺陷（SD 草稿 `last_fp = rows[-1][3]` 逐字實作會恆不出聲，已訂正
+# ——見交付報告）：`pace_report()` 先呼叫 `record_burn(state)` 才呼叫本函式，於是「最後
+# 一列」在**每一次**成功寫入時都是**這一次呼叫自己剛寫的那一列** ⇒ `last_fp` 逐字必然
+# 等於 `signature`，換方案訊號結構上永遠出不了聲（雙時刻真實驗證：兩次不同指紋呼叫，
+# `plan_note` 兩次皆為空字串）。修法：`last_fp` 改由**排除本次 `measured_at`** 之後的
+# 最後一列取得——這樣才是真的「上一次量到的指紋」，而非「這一次剛寫的指紋」。
+def burn_ratio(state: quota_policy.QuotaState) -> tuple:
+    """`(r|None, note, plan_note)`：由落款＋外部校準先驗推估換算比，僅取同指紋樣本。"""
     try:
         text = burn_ledger_path().read_text(encoding="utf-8")
     except OSError:
         text = ""
-    return quota_pace.estimate_ratio(
-        quota_pace.rows_from_jsonl(text) + list(quota_pace.SEED_OBSERVATIONS))
+    rows = quota_pace.rows_from_jsonl(text)
+    signature = core_signature(state)
+    prior = [r for r in rows if r[0] != state.measured_at]
+    last_fp = prior[-1][3] if prior else None
+    pool = quota_pace.filter_by_signature(
+        rows + list(quota_pace.SEED_OBSERVATIONS), signature)
+    ratio, note = quota_pace.estimate_ratio(pool)
+    return ratio, note, core_signature_change_note(last_fp, signature)
 
 
 # 🔴 R86（Dev 包挖出、本檔修）：`source` 與 `reason` 現在可以**不同**。`source` 是分類器
@@ -354,7 +415,11 @@ def read_quota(now: datetime, path: Path | None = None) -> quota_policy.QuotaSta
         return _blank("stale-cache", f"stale-cache（資料在，但已 "
                       f"{int((now - measured).total_seconds())}s > TTL "
                       f"{QUOTA_CACHE_TTL_SECONDS}s ⇒ 重量一次即可，不是取數壞掉）")
-    return quota_policy.QuotaState(axes, str(data.get("measured_at") or ""), "cache", "ok")
+    # 🔴 R93／DEF-200-114：`account_key` 是**帶預設值的新欄**，舊快取（本輪之前寫下的、
+    # 沒有這一鍵）一律讀成 `None`——與缺席語意一致，不得猜一個值出來。
+    key = data.get("account_key")
+    return quota_policy.QuotaState(axes, str(data.get("measured_at") or ""), "cache", "ok",
+                                   key if isinstance(key, str) and key else None)
 
 
 #: 🔴 PRD `TOKEN_DRAIN_PERCENT`（→ 狀態 `DRAINING`）↔ 本 repo 四道帶的**唯一對映**（R91）。
@@ -629,7 +694,7 @@ def pace_report(now: datetime | None = None) -> str:
     # 🔴 `live` 落款進去是為了**下一輪**：per-agent 燃燒率＝Δpct ÷（Δ分鐘 × 併發數），
     # 而併發數不記下來就永遠算不出來（本輪的 r 只到「每 pp 換幾 pp」這一層）。
     record_burn(state, live_dispatches(fanout_ledger_path(), now))
-    ratio, ratio_note = burn_ratio()
+    ratio, ratio_note, plan_note = burn_ratio(state)
     decision = quota_policy.decide(state, now, policy, ratio, ratio_note)
     # 🔴 R86 跨包：引擎（`autoclaude/`）**不准** import 本層（`.importlinter` 的
     # `no-harness-import`）⇒ 唯一的傳遞方式是檔案契約。fail-soft 在 `pace_contract.write`
@@ -646,7 +711,7 @@ def pace_report(now: datetime | None = None) -> str:
     horizon = "" if decision.cap is None else throttle_horizon_line(decision, now)
     return (f"{pace_line(decision)}\n  {quota_policy.describe(decision)}\n"
             f"  {quota_pace.explain(decision.amort)}\n  {posture_line()}\n{horizon}"
-            f"  來源={state.source} 量測於={state.measured_at or '(無)'}{tail}\n")
+            f"  來源={state.source} 量測於={state.measured_at or '(無)'}{tail}\n{plan_note}")
 
 
 def posture_line(path: Path | None = None) -> str:

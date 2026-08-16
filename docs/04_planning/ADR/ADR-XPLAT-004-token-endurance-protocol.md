@@ -38,7 +38,7 @@ SA 量到的等待分布說明浪費在哪：那次撞線在台北 08:44、訊�
 | 既有物 | 為何接不上 |
 | --- | --- |
 | AutoClaude Kernel 的 Token Guard（≥80% compact／≥90% checkpoint ＋ `scheduled_resume_at`） | 它守的是**被驅動的那個 CLI 的 PTY**，與 Claude Code session 自己零接線。它的 `time.sleep()` 睡在本 repo 自己的 Python 行程裡，而我們的等待必須發生在 harness 的行程裡 |
-| `context_budget_guard.py` 的 75/90 線 | 那是 **context 水位**（分母＝window）。額度耗盡當下水位只有 ~18%，四道放行條件會全數放行 |
+| `context_budget_guard.py` 的 75/90 線（R92 訂正：已改 **84/94**，見 ADR-XPLAT-008） | 那是 **context 水位**（分母＝window）。額度耗盡當下水位只有 ~18%，四道放行條件會全數放行 |
 | `CronCreate` | `CronList` 標 `[session-only]`。R59 已踩過並寫進 CLAUDE.md |
 | `ScheduleWakeup` | `delaySeconds` clamp 到 [60, 3600]；**且它不寫磁碟、沒有可查詢的登錄、沒有 `NextRunTime`** ⇒ 沒有任何憑證，事後無從得知它排到了沒有——與 R59 那次事故同形 |
 | CLAUDE.md〈Token 將耗盡時的 SOP〉 | 純散文。本 repo 已反覆實證純文件約束對當下的模型零攔阻力 |
@@ -349,12 +349,14 @@ R79 已判過一次同型失誤——R77 宣稱「每輪重跑分群」卻沒留
   > 屬**另一個決策**（context 水位 ≥90% 擋展開型工具），不是本協定的一部分。
   > 兩者共用腳本、由 payload 的 `hook_event_name` 分派，但立案理由與門檻各自獨立。
   > 「本輪」與「本協定」在多包並行的一輪裡不是同一個範圍，**ADR 只能替自己說話**。
+  > （R92 訂正：上段的 context 硬線 90% 已改 **94%**，matcher 亦已含 Agent|Workflow——見 ADR-XPLAT-008。）
   > 現查：`git -C "$r" diff --numstat -- .claude/settings.json`
 
 ### 與 AutoClaude Token Guard 的關係：另立一套
 
 判準是「**改一個值，是不是兩邊都得改？**」——不是「看起來像不像」。
 門檻階梯（80/90 vs 75/90）歷來各自設定、從沒有人需要同時改；
+（R92 訂正：context 側那一組現為 **84/94**，見 ADR-XPLAT-008——本段判準不受影響，R92 那次也只改了一邊。）
 `seconds_until_resume()` 吃 ISO 字串、睡在本 repo 的 Python 行程裡，而本協定的輸入是**人類可讀的錯誤字串**、
 等待發生在 harness 的行程裡。共用要嘛讓套件依賴 harness 內臟、要嘛讓根治理層被子專案的 LOC/import 契約綁住。
 Copy-on-Evolve 管的是**知識（事實）**不是**形狀（模式）**：事實只能有一個家，

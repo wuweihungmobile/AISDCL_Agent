@@ -76,16 +76,16 @@ monorepo 根目錄（`AISDCL_Agent/`，各機器 checkout 路徑不同）底下�
 
 | Token 水位 | 動作 |
 |-----------|------|
-| ~75% | `/compact`。此時仍可開新工作 |
-| ~90% | **停止開新戰場**，把狀態收斂到「可重啟點」（見下）並寫任務書。此後只做收斂，不做展開 |
+| ~84% | 收斂前置訊號（R92 起機械 autocompact 已由 repo settings 釘在 auto-compact window 的 90%，`/compact` 不再靠人記得下）。此時仍可開新工作 |
+| ~94% | **「壓縮沒發生」失效警報**＋停止開新戰場，把狀態收斂到「可重啟點」（見下）並寫任務書。autocompact 正常時結構上走不到這格；走到了就只做收斂，不做展開 |
 | 撞上限 | 記下 CLI 印出的 **reset 時間** ＋ **本 session ID**；等 reset 後 `claude -r <sessionId>`。🔴 這一格**已不再只靠人記得**——見下方〈額度耗盡：為什麼只能預防性武裝〉 |
 
 > 🔴 **這張表量的是 context 水位，額度那把尺是另一張表（R84 補記）**：額度側有四道門檻（注意／收斂／**準備**／停止，門檻與係數全部住 `tools/lib/quota_policy.py`，**百分比一律現查** `python tools/lib/quota_policy.py --print-env-example`，本檔不複寫數字）。兩者分母不同、守衛不同，**不要互相換算**。自 R84 起「準備」那一帶**真的會動作**——進帶後第一次工具呼叫就出聲一次、把可重啟點任務書寫到磁碟，一個 reset 視窗只做一次、**不改 rc**（在收斂帶擋下收斂型工作會讓人連收斂都做不完）。
 
 🔴 **本節已有機械物**（R78 上線、R79 兩度補強並補記於此）：`.claude/hooks/context_budget_guard.py`，在根 `.claude/settings.json` 註冊**三個**條目——
-PostToolUse（只出聲：≥75% 提示、≥90% 強制指引＋產出可重啟點任務書骨架）、**PreToolUse／matcher `Task|WebFetch|WebSearch`（真的擋下「展開型」工具）**、
+PostToolUse（只出聲：≥84% 提示、≥94% 強制指引＋產出可重啟點任務書骨架——R92 起與額度尺出廠錨點刻意錯開保鑑別力（額度百分比一律現查 `quota_policy`，本檔不複寫），兩把尺不得同值有測試釘住）、**PreToolUse／matcher `Task|WebFetch|WebSearch|Agent|Workflow`（真的擋下「展開型」工具；matcher 以 `.claude/settings.json` 現查為準）**、
 以及 **SessionStart（開場自動武裝額度哨兵，見下一小節）**。三個模式由 payload 的 `hook_event_name` 分派，共用同一支腳本。
-matcher 刻意不含 `Read`／`Edit`／`PowerShell`：上表 90% 那格要的是「只做收斂」，而收斂本身需要讀檔、寫任務書、跑 git——擋到讓人無法收斂的守衛會被整個關掉。
+matcher 刻意不含 `Read`／`Edit`／`PowerShell`：上表 94% 那格要的是「只做收斂」，而收斂本身需要讀檔、寫任務書、跑 git——擋到讓人無法收斂的守衛會被整個關掉。
 逃生口 `AUTOSDD_CONTEXT_GUARD_OFF`（context 阻斷）／`AUTOSDD_SENTINEL_OFF`（額度哨兵）——**刻意是兩個開關**：兩者關掉的是不同的東西，共用一個會讓「我只是想暫時別被擋」順手把續航保護一起關掉，而那件事沒有人會注意到。
 配套現查指令：`python tools/session_resume_planner.py --check`（水位）／`--check-autocompact`（harness 自動壓縮姿態，關閉時 rc=1）／`--register-schtasks`｜`--verify-schtasks`｜`--remove-schtasks`（把「reset 後自動重啟」端到端排進 Task Scheduler，見下方取證規則）。
 
