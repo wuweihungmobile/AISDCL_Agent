@@ -91,6 +91,20 @@ def binding_resets_at(decision: quota_policy.Decision) -> object:
     return decision.binding.resets_at if decision.binding is not None else None
 
 
+# 🔴 修4／R-4.5.6-5（R95；ADR-XPLAT-004 §2.9 事故次因）：halt 武裝分支不得只看
+# binding 單軸——2026-08-16 00:42 binding 軸無 reset ⇒ escalate-only 未武裝，而
+# five_hour 軸 03:50 reset 後工作實際可續（時間線逐字＝Pace 證據檔 §7-R95-修4）。
+# 方向鎖：候選含 binding 自己 ⇒ min 只會更早、不會更晚；全 ≥halt 軸皆無可解析 reset
+# 時回 binding 原值，讓 `reset_branch()` 走 escalate——「可等的 reset 被判成 escalate」
+# 在結構上不可能發生。ARM 的 6 小時視界仍由 `reset_branch()` 把關（R59 同形防護）。
+# 掃描面刻意是 per_axis 全軸（含保險軸）：喚醒錯付的代價是一次探測，漏喚醒是空轉整窗。
+def halt_resets_at(decision: quota_policy.Decision) -> object:
+    """halt 帶該等的 reset＝**≥halt 各軸**中最早可解析者；全軸皆無 ⇒ binding 原值。"""
+    stamps = [r.axis.resets_at for r in decision.per_axis
+              if r.band == quota_policy.BAND_HALT and _aware(r.axis.resets_at) is not None]
+    return min(stamps, key=_aware) if stamps else binding_resets_at(decision)
+
+
 # 憑證是真的、**指路是假的**——那個 cmdlet 在 mac 不存在，而 `NextRunTime` 這個概念 launchd
 # 從不提供（`launchctl print` 輸出裡 next／fire／due 皆不存在，R83 實測）。同型判例：
 # 「憑證裡混一句假話，比沒有那一欄更難看見」（`schedule_backend._readback` 的 depth-1 訂正）。
@@ -128,7 +142,8 @@ def quota_halt_message(decision: quota_policy.Decision, act: dict) -> str:
             "扇出型工具一律不執行；收斂（讀檔／寫檔／跑 git）不受影響。\n"
             f"   {quota_policy.describe(decision)}\n"
             f"   任務書：{act['plan'] or '（寫不出來——逐字稿路徑不可得）'}\n")
-    horizon = reset_horizon_phrase(act["branch"], binding_resets_at(decision))
+    # 修4：期程句印**被選中的** reset（≥halt 最早可 reset 軸），不再印 binding 的 None。
+    horizon = reset_horizon_phrase(act["branch"], halt_resets_at(decision))
     if act["posix"]:
         # 🔴 SA-B7：沒有排程載具的平台若沿用 weekly 那支「不排程」的靜默路徑，
         # 「不排程」與「排不了」會長得一模一樣。
@@ -161,7 +176,10 @@ def quota_halt_message(decision: quota_policy.Decision, act: dict) -> str:
 # 兩者同源於 `quota_policy`，不是兩個判準。
 def throttle_horizon_line(decision: quota_policy.Decision, now: datetime) -> str:
     """節流帶要說出「這道限制會套多久」。"""
-    resets_at = binding_resets_at(decision)
+    # 修4：halt 帶改讀多軸選擇——撞牆期間人唯一持續看得到的就是這一則（R89 判例），
+    # binding 無 reset 時印「不會自己解除」而喚醒其實已武裝＝訊息說假話。
+    resets_at = (halt_resets_at(decision) if decision.band == quota_policy.BAND_HALT
+                 else binding_resets_at(decision))
     branch = reset_branch(resets_at, now)
     horizon = reset_horizon_phrase(branch, resets_at)
     if branch == QUOTA_BRANCH_ESCALATE:
@@ -207,6 +225,18 @@ def pace_line(decision: quota_policy.Decision) -> str:
     when = next((f"剩 {int(r.minutes)} 分鐘" for r in decision.per_axis
                  if r.axis is axis and r.minutes is not None), "reset 距離不明")
     return head + f"｜最緊的一條＝{axis.kind} {axis.pct:g}% {when}"
+
+
+# 🔴 R95／PRD §4.2.3 第 7 步的人話面：模型降級**建議**行。觸發判定住 `quota_policy.
+# decide()`（converge 帶起、或模型分軌 kind 進 notice 帶起），這裡只渲染。空 hint ⇒
+# 空字串——free 帶印一行降級建議就是一句假話（「訊息裡混一句假話比少一欄更難看見」）。
+# 方向鎖：cap／rec 在 `decide()` 內先算完才產生 `model_hint`，本行結構上改不動任何節流。
+def model_hint_line(decision: quota_policy.Decision) -> str:
+    """`--pace` 的降級建議行。收緊帶才出現；只建議、不自動改任何模型設定。"""
+    if not decision.model_hint:
+        return ""
+    return (f"   🔻 降級建議：kind={decision.model_hint} 已進收緊帶 ⇒ 建議派工帶 "
+            "model: sonnet/haiku 續跑（只建議不自動改模型；cap 不受本行影響）。\n")
 
 
 # 🔴 R93／DEF-200-122：Plan B 的「出聲」半邊（SA 裁決保留，不做狀態檔輪替）。純渲染，

@@ -309,6 +309,121 @@ R79 已判過一次同型失誤——R77 宣稱「每輪重跑分群」卻沒留
 > `claude --disallowed-tools` 存在（實查 `--help`），但它只能擋整支工具，擋掉 PowerShell 會讓續跑失去意義。
 > 本輪**沒有**做這道，故預設關閉是它的替代品。這是已知缺口，不是漏看。
 
+### 2.9 哨兵死於自己的任務書：單檔雙寫者事故與零人工閉環（R95；掌舵者 2026-08-17 立案「Token 用盡時，為何沒有啟動下一個 Reset 的喚醒機制」）
+
+> 本節由唯讀調查包落款（PRD v2.1.5 的設計對應節）。所有「已存在」皆為當回合現查；
+> 「修 1～修 4」皆**未實作**，交下一波實作包。§2.6〈已知限制〉第 4 條與 §7-4
+> 「mac/Linux 完全沒有」自 R83 落地 launchd 後端（`tools/lib/schedule_backend.py`
+> `StartInterval`＋`StartCalendarInterval`，該檔 86-127 行含真機實測）起已過期——
+> 依本 ADR 慣例原文不動，在此標記 superseded。
+>
+> 🔴 **狀態標記（R95 收尾修復包，2026-08-17；依本 ADR 既有 superseded 體例，原文不動）**：上句「『修 1～修 4』皆**未實作**，交下一波實作包」已 stale——修 1～4 已於 R95 同輪由實作波落地，證據＝帳本 DEF-200-146、CrossPlatform_R95_Resume_Strategy_Evidence.md §L-4、CrossPlatform_R95_Pace_Actuator_Evidence.md §7-R95-修4（修4 以 `halt_resets_at` 具名函式實作，形狀與本清單「reset_branch 簽名擴充」不同，理由見該節）。
+
+#### 事故時間線（Asia/Taipei；證據全部為現存痕跡，逐字／檔案:行號）
+
+| 時刻 | 事件 | 證據 |
+| --- | --- | --- |
+| 08-16 ~22:09 | 哨兵武裝（launchd，900s 巡邏底盤） | resume log `sentinel_armed`，credential 逐字含「launchd gui/501/AutoSDD_Sentinel_48e5e840-…｜launchctl print rc=0（不存在時是 113）｜run interval = 900 seconds〔launchd 回讀，與請求相符〕」 |
+| 22:24:58～00:40:00 | 十次巡邏**全數成功讀出狀態塊**、判 patrol | resume log 連續十筆 `sentinel_decided`「無未處理撞線；逐字稿 Ns 前仍有更新」（jsonl 住 `$TMPDIR/autosdd_resume_log_autosdd_resume_plan_48e5e840-….jsonl`） |
+| 08-17 00:42 | 額度閘 halt 閂鎖 `halt@extra_usage@None` 首次落鎖；`quota_halt_actions()` 無條件呼叫 `plan_writer` → planner 預設路徑**整檔覆寫任務書骨架，RELAY 狀態塊被砸掉**；且 binding 軸無 reset ⇒ `reset_branch()`=escalate，`waker` 未武裝 | `$TMPDIR/autosdd_quota_latch.json` mtime=08-17 00:42、tiers 含 `halt@extra_usage@None`；`tools/lib/quota_gate.py:836-841`（閂鎖＋動作）、`:643`（`waker` 只在 branch==ARM）；`tools/session_resume_planner.py:1394`（`out.write_text(render_plan(...))` 無條件覆寫；`render_plan` 骨架不含 RELAY 塊） |
+| 00:51:09～:11 | 收尾 subagent（`agent-aa8fd5ba…`）撞線死亡；主 session 被 task-notification 喚醒一回合，**該回合自身死於 API 層** ⇒ 主逐字稿寫入合成權威記錄——當晚最後一筆 | 主逐字稿 line 241：`type=assistant`＋`model=<synthetic>`＋逐字「You've hit your session limit · resets 3:50am (Asia/Taipei)」（timestamp 2026-08-16T16:51:11.319Z） |
+| 00:55:00 | 第 11 巡醒來——事件落地後 4 分鐘、唯一有機會偵測的一巡——`parse_relay()` 讀不出狀態塊 ⇒ `_abort_and_unregister()` **自我解除排程**，只印一行沒有人收得到的 stderr | launchd log 逐字「❌ 哨兵拒絕動作：任務書／狀態塊讀不出來 已自我解除排程 AutoSDD_Sentinel_48e5e840-…（rc=0）」；`tools/session_resume_planner.py:1268-1274` |
+| 03:50 | 額度 reset。**機器上已無任何排程** ⇒ 空轉 | 今晨 `launchctl list` 過濾 AutoSDD_Sentinel_ 零註冊 rc=1；`~/.autosdd/traces/autosdd_sentinel_bootout_AutoSDD_Sentinel_48e5e840-….log` mtime=00:55:02（持久痕跡，證明「查不到」是**自我解除的結果**，不是從未武裝） |
+| ~11:30 | 掌舵者手動回來才續上 | armed stamp `autosdd_sentinel_armed_48e5e840-….json` mtime=11:33:44（turns=76、span=48835.9s——PostToolUse `should_arm` 門檻 24 回合/600s 的重新武裝） |
+
+00:42 觸發面歸因：00:22～00:29 其餘三支 subagent 已停筆（`subagents/*.jsonl` mtime），
+00:42 唯一活著的是 `agent-aa8fd5ba…`；而 `$TMPDIR` 全部 hook 產物（ctxguard／fanout／
+sentinel_armed）均只以主 session id 為鍵、無任何 `agent-*` 鍵 ⇒ subagent 工具呼叫的
+hook payload 帶主 session 逐字稿，00:42 覆寫的正是本 session 的任務書。
+
+#### 反事實：整條喚醒鏈當晚是通的，被一次檔案覆寫殺死
+
+逐環現查：① 詞表——`quota_limits._LIMIT_MARKS` 的 `"session limit"` 命中該錯誤字串
+（`tools/lib/quota_limits.py:63`）；② 形狀——line 241 正是判準要的 `type=assistant`＋
+`model=<synthetic>`（同檔 165-171 行），且 `unhandled_limit_event` 掃主檔＋subagent
+（§2.8 判準 D，假陽性 0.0%）；00:55 當下事件之後全域零成功回應 ⇒ 必判未處理；
+③ 決策——`sentinel_decide()` 會走 `arm_reset`＝reset+120s skew＝03:52
+（`tools/session_resume_planner.py:642-668`）；④ 載具——launchd 已支援
+`StartCalendarInterval`（R83-B）；⑤ 選路——`choose_resume_route()` 三態＋
+`_run_resume` 的 `claude -p -r`（同檔 1072/1105-1145）。
+**缺的不是任何一環的能力，而是哨兵活到 00:55 的資格。**
+
+#### 根因（三層主因＋一層次因）
+
+1. **單檔雙寫者（主因）**：任務書一支檔兩個寫者——哨兵的 RELAY 狀態塊
+   （`write_relay()`，替換式、保結構）vs 骨架產生器（planner 預設路徑，整檔覆寫、
+   不保 RELAY）。額度閘 halt（`quota_gate.py:839`）與 prepare（`:649-660`）帶的
+   `plan_writer`（`.claude/hooks/context_budget_guard.py:680` `write_resume_plan` →
+   planner 預設路徑）在哨兵武裝期間觸發即摧毀狀態塊。
+2. **讀不出狀態塊＝fail-quiet 自我解除**：`_sentinel_tick` 的 abort 分支只拆排程＋
+   寫痕跡＋一行 stderr（launchd job 的 stderr 沒有人收）——不 `escalation.alert`、
+   不自癒、不重巡；且三種失效（檔不存在／沒有狀態塊／JSON 壞掉）痕跡同形
+   （`_resume_tick` 分得開，`_sentinel_tick` 沒分）。「主 session 活著但帳號級撞線」
+   這一格的**唯一**機械物，在最需要它的那 4 分鐘把自己拆掉。
+3. **解除後結構上無人 re-arm**：重新武裝依賴該 session 的 PostToolUse
+   （`sentinel_lifecycle.maybe_arm`），而撞線後 session 發不出任何工具呼叫。
+4. **次因（另案修）**：halt 武裝分支以 binding 單軸決定（`quota_messages.reset_branch`
+   75-88 行）——本案 binding=extra_usage、resets_at=None → escalate-only；但
+   five_hour 軸 03:50 reset 後工作實際可續（今晨實證：額度快取 session/five_hour 18%）。
+   多軸情境下「binding 無 reset ⇒ 只能等人」是假的。
+
+#### 三個候選觸發點的取捨（判準：最少新增件數、最大覆蓋）
+
+| 候選 | 判定 | 理由 |
+| --- | --- | --- |
+| (a) 哨兵巡邏判準擴充認得 subagent 撞線 | **改形採納**：辨識面已存在（§2.8 判準 D 本來就掃 subagent，本案逐環驗證全通），缺的是**哨兵存活** ⇒ 主修改為「骨架寫入保 RELAY」＋「abort 分支自癒＋fail-loud」。0 新檔、2 個函式 | 反事實節五環現查 |
+| (b) PostToolUse／task-notification 層攔截撞線字串當場排程 | **否決** | 結構不可能：撞線是 API 層失敗，那一刻沒有工具事件（§2.6 偵測列的既有結論）；task-notification 抵達後的 assistant 回合自身死於 API 層，PostToolUse 同樣不觸發（本案實證：00:51:10 通知落地後零 hook 事件）。能做的只剩「預測性掛哨」——那就是哨兵本人，不是新觸發點 |
+| (c) 主 session halt 閂鎖（`quota_halt_actions`）擴充 | **次要採納**（修 4：多軸 reset 選擇），不能當主觸發 | halt 動作只在「session 還跑得動工具」時可達；本案 00:42 它跑到了，卻因 escalate-only 分支沒武裝；且撞線常發生在最後一次工具呼叫**之後** ⇒ 覆蓋面天生不完整 |
+
+#### 閉環設計（修 1～修 4 合起來才是「零人工」）
+
+```
+任一層級撞線（主 session API 回合／Task subagent／workflow agent）
+  │ harness 寫合成權威記錄進逐字稿（磁碟；已存在）
+  ▼
+哨兵巡邏（launchd StartInterval 900s 底盤／schtasks；已存在）
+  │ 修1：任務書骨架重寫必保 RELAY 塊 ⇒ 哨兵讀得到自己的狀態（存活）
+  │ 修2：狀態塊讀不出 ⇒ 先以 CLI 引數＋任務書檔名重建最小狀態塊、續巡（自癒）；
+  │      重建不了才解除，解除必經 escalation.alert(loud=True)；三種失效痕跡分形
+  ▼
+unhandled_limit_event（判準 D；已存在）→ sentinel_decide=arm_reset（已存在）
+  ▼
+launchd StartCalendarInterval＝reset+skew（已存在，R83-B）｜Win schtasks -Once（已存在）
+  ▼
+到點醒來 → probe 一次探測（已存在）→ choose_resume_route 三態（已存在，Pkg-D）
+        → claude -p -r <sid>（已存在）
+  （修4：halt 武裝分支改取「≥halt 各軸中最早的 reset」，僅全軸皆無 reset 才 escalate-only）
+  （修3：武裝／自癒／解除每步落痕跡且出聲——armed stamp、bootout log 已存在，
+        缺的是 abort 分支的 alert 接線與派工面可見性）
+```
+
+憑證紀律（沿用 §6 與 CLAUDE.md〈反事後諸葛〉）：mac＝`launchctl print gui/501/<label>`
+的 rc（不存在＝113）＋ plist 路徑回讀＋ calendar descriptor 回讀（launchd **從不**提供
+NextRunTime，rc 才是憑證）；Windows＝`NextRunTime` 非空值。宣稱「已武裝」的每一處都
+必須落這兩種憑證之一。
+
+#### 交付下一波實作的工作清單（本包唯讀，僅落款設計）
+
+| # | 改哪支檔 | 鎖的持有面（常數／史料／消費端） | 規模 | 測試要求 |
+| --- | --- | --- | --- | --- |
+| 修1 | `tools/session_resume_planner.py`（main 預設寫出路徑 :1388-1394：寫骨架前先 `parse_relay` 舊檔，有狀態塊則寫完骨架後 `write_relay` 回填） | 常數 `RELAY_BEGIN/END`、`parse_relay`/`has_relay`/`write_relay` 皆同檔 ⇒ 單包可完成 | ~10-15 行（該檔 guardrail_cli tier 上限 750，新增需以搬史料抵銷） | 紅綠自證：對已含 RELAY 的任務書跑預設路徑 → `parse_relay` 非 None 且 state 逐格保留；紅面＝現行程式必紅 |
+| 修2 | 同檔 `_sentinel_tick` :1263-1274（abort 前先嘗試以 `args` 重建最小狀態塊續巡；重建不了才 `_abort_and_unregister`，且該路徑補 `escalation.alert(loud=True)`；三種失效訊息比照 `_resume_tick` 分形） | `escalation.alert` 住 `tools/lib/quota_escalation.py`（消費端已 import）⇒ 單包可完成 | ~20-30 行（同上 LOC 抵銷） | `SentinelDecisionTest` 加分支：狀態塊缺席×逐字稿存在 ⇒ 不得 unregister；alert 有被叫到（注入驗證） |
+| 修3 | `tools/session_resume_planner.py` `--pace`/`--check` 輸出面加「哨兵活性」欄（armed stamp vs `launchctl list`/`Get-ScheduledTask` 現查對比，不一致即出聲） | 讀數層 `schedule_backend.select()` 已有查詢原語 ⇒ 單包可完成 | ~15 行 | 斷言不一致時輸出含警語；一致時安靜 |
+| 修4 | `tools/lib/quota_messages.py` `reset_branch`（簽名擴充：收全軸、取 ≥halt 中最早可 reset 軸）＋ `tools/lib/quota_gate.py:836-841` 呼叫端＋`binding_resets_at` 消費端 | 🔴 常數（quota_messages）＋消費端（quota_gate、context_budget_guard 訊息）＋測試（test_quota_policy.py）**跨三檔** ⇒ 依鐵律七不得拆給並行包，單包整案 | ~30 行 | 紅面＝本事故重演：binding=extra_usage@None 且 five_hour@+3h ⇒ 必須 arm 而非 escalate；全軸無 reset ⇒ 仍 escalate |
+
+🔴 前置協調：`sentinel_lifecycle.py`／`session_resume_planner.py`／`context_budget_guard.py`
+現正由收尾包終驗中——實作波動工前先與收尾窗口對時序，不得並行同檔。
+
+#### 誠實劃界
+
+- 睡著的 Mac 仍不會醒（§2.6 已知限制 4 之後段、CLAUDE.md〈mac 已知邊界〉）：本設計
+  交付的仍是「醒著必動作＋失效可偵測」，不是「必然喚醒」。
+- 修 1 之後任務書仍是雙寫者（只是兩個寫者都保 RELAY）；徹底解法（狀態塊分檔）動
+  `guard.PLAN_PREFIX` 持有面，與 §3「任務書搬家」列同型 ⇒ 列為候選不採。
+- 00:42 觸發面歸因依據是排除法＋鍵名普查（上表下方那段），不是直接痕跡（halt 閂鎖
+  不記 session 與觸發工具）；修 4 實作時應讓閂鎖多記 `session_id` 與 `tool`，把這種
+  歸因從推理變成讀檔。
+
 ---
 
 ## 3. 被否決的方案（各記為何否決）

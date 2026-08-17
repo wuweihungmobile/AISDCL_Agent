@@ -200,6 +200,18 @@ _GOVERNANCE_DOCS = (
     # （⇒ 指針稽核），複審者要重驗落地過程中發現的規格缺陷（`burn_ratio` 的 `last_fp`
     # 取法）就得讀完它（⇒ 體積守門）。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R93_Plan_Change_Adaptive_Evidence.md",
+    # R95 三個並行包（Pkg-B 治理檔禁寫／Pkg-C 配速致動器／Pkg-D 喚醒選路）各自的證據檔，
+    # 由收尾單人窗口一次補三列（鐵律七：登記面住 `tools/lib/`，不在任何並行包的持有面內；
+    # 三份檔頭皆自陳「登記留收尾窗口」）。資格同 R85~R93 同名檔：各自承載該包唯一還能重驗
+    # 的實測逐字帳（govwrite 九格 rc 矩陣／攤提免除的憲法檢查表／逐字稿大小分佈量測），
+    # 且皆為 R89 體例的史料搬遷目的地——逐節寫出「某敘事原文現居本檔某節」的座標宣稱
+    # （⇒ 指針稽核），複審者要重驗各包落地就得讀完它（⇒ 體積守門）。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R95_GovWrite_Evidence.md",
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R95_Pace_Actuator_Evidence.md",
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R95_Resume_Strategy_Evidence.md",
+    # R95 收尾單人窗口：護欄層行數棘輪重釘的量測帳＋鎖檔史料搬遷目的地（資格同
+    # R86/R87/R90 的同名 Guard_Repin 檔：稽核列指名的家、逐節座標宣稱、體積守門）。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R95_Guard_Repin_Evidence.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/CrossPlatform_*.md`。這**不是**把具名常數

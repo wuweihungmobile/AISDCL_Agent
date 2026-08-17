@@ -1,13 +1,8 @@
 #!/usr/bin/env python
 """`.claude/hooks/block_destructive_git.py` 的回歸鎖（R83）。
 
-WHY 這支鎖存在
---------------
-被守的那支 hook 的立案事實：一個 subagent 在**六包並行共用的工作樹**上跑
-`git stash -q -u --keep-index`，16 個修改檔 ＋ 4 個未追蹤檔瞬間消失（含其他包當時
-正在寫的三支檔）。它自己 `git stash pop` 還原、前後 `git diff --stat` 逐字相同
-——**沒有偵測到資料遺失，但那是運氣不是設計**。任務書當時已寫「不要 git add /
-commit / push」⇒ **禁令沒涵蓋到的那個動詞，就是被踩的那個**。
+WHY 這支鎖存在：六包並行工作樹上的 `git stash` 真實事故——「禁令沒涵蓋到的那個
+動詞，就是被踩的那個」。事故敘事原文＝CrossPlatform_R95_GovWrite_Evidence.md §6.1。
 
 而這道守衛的價值**完全等於它判準的精準度**：repo 已判過「擋到讓人無法工作的守衛
 會被整個關掉，而被關掉的守衛比沒有守衛更糟」。所以本檔的分量刻意壓在**放行面**：
@@ -59,7 +54,7 @@ def run_hook(payload: object, env: dict[str, str] | None = None,
     stdin = raw if raw is not None else json.dumps(payload, ensure_ascii=False)
     child_env = dict(os.environ)
     # 逃生口是**繼承**來的：測試行程若剛好帶著它，被守的分支會整個不跑而恆綠。
-    for key in (G.GUARD_OFF_ENV, G.UNATTENDED_ENV):
+    for key in (G.GUARD_OFF_ENV, G.UNATTENDED_ENV, G.GOVWRITE_OFF_ENV):
         child_env.pop(key, None)
     child_env.update(env or {})
     return subprocess.run(
@@ -103,10 +98,8 @@ class TestDestructiveFormsAreBlocked(unittest.TestCase):
         "git checkout -f main",
         "git switch -f main",
         "git switch --discard-changes main",
-        # 🔴 R85／SD-B3：**引號包住的執行檔絕對路徑**——根 CLAUDE.md 鐵律二對 Windows
-        # 明訂的正是這個寫法（`& '<絕對路徑>' …`），而兩支守衛都先把引號區段遮成空白
-        # 才判 ⇒ 連 `git.exe` 一起消失。實測本族修前**一條都不擋**（同一條去掉引號則
-        # 全部命中）＝本 repo 自己規定的寫法恰好落在射程外。
+        # 🔴 R85／SD-B3：引號包住的執行檔絕對路徑，修前一條都不擋（立案敘事原文＝
+        # GovWrite 證據檔 §6.9）。
         r"""& 'C:\Program Files\Git\bin\git.exe' stash""",  # platform-ok: 被測指令字面
         r"""& "C:\Program Files\Git\bin\git.exe" reset --hard""",  # platform-ok: 同上
         r"""'/usr/bin/git' stash""",          # mac 側同形（引號才是成因，不是碟符）
@@ -458,7 +451,9 @@ class TestHookIsActuallyRegistered(unittest.TestCase):
         self.assertEqual(len(entries), 1,
                          f"PreToolUse 底下承載本 hook 的條目有 {len(entries)} 個（預期 1）")
         matcher = str(entries[0].get("matcher", ""))
-        self.assertEqual(set(matcher.split("|")), set(G.OWN_TOOLS),
+        # 🔴 R95 起本 hook 承載兩族判準：shell 指令面（OWN_TOOLS）＋治理面唯讀
+        # （GOV_TOOLS）。matcher 仍必須**恰好等於**兩族聯集——多圈一個工具就是附帶面。
+        self.assertEqual(set(matcher.split("|")), set(G.OWN_TOOLS) | set(G.GOV_TOOLS),
                          f"matcher 與腳本射程不一致：{matcher}")
 
     def test_it_is_exec_form_with_both_platform_carriers(self) -> None:
@@ -519,11 +514,8 @@ class _ForeignTreeCase(unittest.TestCase):
 class TestWorktreeConfinedVerbsRelaxOutsideTheSharedTree(_ForeignTreeCase):
     """危害只限當前工作樹的動詞，落在非共用樹時必須**放行**。
 
-    WHY 這件事非做不可（不是便利性）：兩名複審者各自在自己 scratchpad 的拋棄式
-    worktree 內跑 `git checkout -- <path>` 被擋下。repo 已判過「擋到讓人無法工作的守衛
-    會被整個關掉，而被關掉的守衛比沒有守衛更糟」⇒ 誤擋是這道鎖的**存亡問題**。
-    合成 repo 實測支撐這一族可以放：wt 內 `git checkout -- b.txt` 之後，主樹的
-    `MAIN_UNCOMMITTED` 原封不動倖存。
+    WHY（誤擋是這道鎖的**存亡問題**——擋到讓人無法工作的守衛會被整個關掉，repo
+    判例）：真誤擋立案與合成 repo 實測原文＝GovWrite 證據檔 §6.2。
     """
 
     def test_each_confined_verb_is_allowed_in_a_foreign_tree(self) -> None:
@@ -558,10 +550,8 @@ class TestWorktreeConfinedVerbsRelaxOutsideTheSharedTree(_ForeignTreeCase):
 class TestStashIsBlockedInEveryTree(_ForeignTreeCase):
     """🔴 `stash` 全家**不論在哪一棵樹都擋**——換樹不會讓它變安全。
 
-    這是「只看樹就整條放行」會製造的新漏擋，而它漏掉的恰好是**立案那一條指令**。
-    實測依據（合成 repo，主樹 ＋ 一棵 linked worktree）：在 wt 內跑
-    `git stash -q -u --keep-index`，主樹的 stash 深度 **0→1**，兩邊
-    `git rev-parse refs/stash` 是**同一個 SHA** ⇒ `refs/stash` 是 repo 級不是工作樹級。
+    「只看樹就整條放行」漏掉的恰好是**立案那一條指令**：`refs/stash` 是 repo 級不是
+    工作樹級（合成 repo 實測原文＝GovWrite 證據檔 §6.3）。
     """
 
     def test_the_accident_command_is_still_blocked_in_a_throwaway_worktree(self) -> None:
@@ -666,12 +656,9 @@ class TestTheRelaxationOpensNoNewHoles(_ForeignTreeCase):
 class TestTheGuardDoesNotAskGitWhereItIs(unittest.TestCase):
     """🔴 為什麼判準不是複審者建議的 `git rev-parse --show-toplevel`。
 
-    本回合實測 PreToolUse payload 與 hook 行程狀態：`payload["cwd"]`、`os.getcwd()`、
-    `$CLAUDE_PROJECT_DIR` **三者恆等於專案根**，即使被檢查的指令自己是
-    `cd /private/tmp && pwd`。⇒ 在 hook 自己的 cwd 跑 `--show-toplevel`，答案恆為專案根、
-    判準恆假、誤擋一次都沒少，**而程式碼看起來已經修好了**——那正是本 repo 反覆判紅的
-    「鎖存在但沒有鑑別力」。本條把「不去問 git」釘成契約：下一個想改成 subprocess 的人
-    必須先面對這個量測。順帶也守住阻斷路徑上不長出子行程（PreToolUse 每次工具呼叫都跑）。
+    立案量測（payload cwd 三值恆等於專案根 ⇒ 該判準恆假、而程式碼看起來修好了——
+    「鎖存在但沒有鑑別力」）原文＝GovWrite 證據檔 §6.4。本條把「不去問 git」釘成契約：
+    想改 subprocess 的人先面對那個量測；順帶守住阻斷路徑不長子行程（PreToolUse 每呼叫都跑）。
     """
 
     def test_the_hook_spawns_no_subprocess(self) -> None:
@@ -1170,16 +1157,8 @@ class TestTheHookStaysInsideItsLocTier(unittest.TestCase):
 # ══════════════════════════════════════════════════════════════════════════════
 # R84：兩條**已知**缺口的第一個真實命中 — Python 層 git 呼叫 ＋ 殼 heredoc body
 # ══════════════════════════════════════════════════════════════════════════════
-# 立案事實（不是假想）：2026-08-12 00:21:13，一個 agent 送出的 Bash 指令裡有一行沒刪掉的
-# 草稿殘留，清空了 R84 全輪工作樹（91 檔、+4658/-508）。`capture_output=True` 把
-# `Saved working directory…` 吃掉 ⇒ rc=0、無 stderr、**看起來完全正常**；送出它的 agent
-# 事後自陳「我全程只跑唯讀指令」——它自己看不見。已用 `git stash apply` 全額還原
-# （`stash@{0}` ＝ `7b7ce22`），但那是運氣不是設計。
-#
-# 🔴 這一族的教訓不是「再加一條判準」，而是：**被守的那支 hook 自己的檔頭早就寫著這兩條
-# 缺口**（「不經 shell 的路徑」與「heredoc 內容」），而「已知並劃界」被當成了結案。
-# 本 repo 對這個形態已有判例（`DEF-101-757`：已知的鎖射程缺口不得只以劃界結案）。
-# ⇒ 下面兩張表就是那兩條劃界的**到期日**：它們現在會紅。
+# 立案事實與「已知並劃界＝結案」教訓（DEF-101-757 判例）——
+# 原文＝GovWrite 證據檔 §6.5；下兩張表＝劃界的到期日。
 _CULPRIT = (
     "cd /Users/wuweihong/Antigravity/AISDCL_Agent; .venv/bin/python - <<'PY'\n"
     "import sys, pathlib, subprocess, tempfile, os\n"
@@ -1461,10 +1440,8 @@ class TestR84StashRefSentinel(unittest.TestCase):
 # ══════════════════════════════════════════════════════════════════════════════
 # R84 四方複審抓到的「載具類」漏擋（SD-01／02／04／06／07／08）— 每一條都是當回合實測
 # ══════════════════════════════════════════════════════════════════════════════
-# 🔴 這一批的共同形態：**同一件事，只因換了一個載具就一擋一放**。R84 第一版把
-# heredoc 那個載具修好了，卻沒有把「載具」抽象成一類 ⇒ `-c`／尾逗號／argv 前綴三個
-# 兄弟原封不動地留著。所以下面每一張表都刻意用**同一個毀滅性子指令**跑過所有載具：
-# 判準要守的是「不論走哪條路進來，都判同一個結果」，不是「這幾個字面有被列到」。
+# 🔴 共同形態＝「同一件事，只因換了一個載具就一擋一放」（敘事原文＝GovWrite 證據檔
+# §6.8）⇒ 下面每一張表都刻意用**同一個毀滅性子指令**跑過所有載具。
 _D_SUBS = ("git stash", "git reset --hard", "git clean -fdx", "git checkout -- CLAUDE.md")
 
 
@@ -1659,11 +1636,8 @@ class TestR84TheHeredocOwnerIsTheNearestExecutable(unittest.TestCase):
 class TestR84WorktreeRemoveForce(unittest.TestCase):
     """SD-07（medium）：`git worktree remove --force` 修訂前實測 exit 0。
 
-    🔴 但它的判準是**量出來的**：全語料 4,017 筆／去重 3,740 種上，新舊判準各跑一次，
-    新增命中 6 種**全部**是這個動詞，逐筆判讀 6/6 都是「拆自己的拋棄式樹」——一筆事故
-    形態都沒有。無差別擋＝拿一個從未發生的危害去換一個天天發生的誤擋。故收窄成
-    「被拆的是誰」：外樹放行、harness 自己的 `.claude/worktrees/` 沙盒放行，其餘照擋。
-    收窄後新增命中降到 4 種，且**舊擋新放 0 種**（沒有任何既有守備被換掉）。
+    🔴 判準是**量出來的**（全語料新舊對跑：新增命中逐筆判讀全是「拆自己的拋棄式樹」
+    ⇒ 收窄成「被拆的是誰」，舊擋新放 0 種）：普查數字原文＝GovWrite 證據檔 §6.6。
     """
 
     def setUp(self) -> None:
@@ -1880,23 +1854,12 @@ class TestR84TheWaitformDocstringIsTheSingleHome(unittest.TestCase):
 class TestUnattendedAuthzHasTeethOnEveryPlatform(unittest.TestCase):
     """R79 立的 Auto Pilot 條件，在 macOS 上到 R85 為止**一行都不會跑**。
 
-    🔴 立案（本輪 P3 實測，不是假想）：唯一擋 commit／push 的是
-    `.claude/hooks/lint_powershell_command.py`，而它 matcher 是 `PowerShell`
-    （mac 的 shell 載具是 `Bash`，連 matcher 都對不上）、且第一件事是
-    `os.name != 'nt' → exit 0`。兩道各自都足以讓那條規則在 mac 上不存在
-    ⇒ 無人看管代理在 mac 可自由 commit／push。該 hook 檔頭自己已把這個缺口寫成
-    〈誠實劃界〉——**登記了卻一直沒補**，而訴求 6d（reset 後自動喚醒續跑）回來的
-    正是那種 headless 代理。
+    立案與假紅普查（母體＝transcripts，假陽性 0）原文＝GovWrite 證據檔 §6.7；數字一律現查。
 
     本類與姊妹鎖 `test_check_hooks_liveness.TestUnattendedCommitPushBlock` 守**同一條
     規則的另一個平台**，四件事逐一對齊（每一件都帶反向，只帶一個方向必在另一向恆綠）：
     ①有訊號×動 git 歷史→exit 2；②**沒有訊號**×同一批→exit 0（互動 session 零附帶面，
     這一條壞掉＝掌舵者自己的 commit 被鎖死）；③有訊號×無關指令→放行；④行內豁免無效。
-
-    🔴 假紅普查（母體＝逐字稿裡**真的送出過**的指令字串＝PreToolUse 的真實輸入面，
-    不是 tracked 面——照 tracked 面判會把「只出現在描述它的散文裡」的命中讀成假紅）：
-    3,804 條相異指令 → 命中 136 條，逐條回查「解析器或正則指不指得出一次真的
-    git/gh write」＝ **0 條指不出** ⇒ 假陽性 0。數字一律現查，見報告的普查腳本。
     """
 
     #: 有訊號時**必須擋**。前 5 筆是 mac 專有形態（Windows 那支姊妹鎖沒有的）。
@@ -1938,9 +1901,7 @@ class TestUnattendedAuthzHasTeethOnEveryPlatform(unittest.TestCase):
         ("字尾巧合不算指令（`legit` 不是 `git`）", "legit commit -m x"),
         ("🔴 `git stash create`＝〈可重啟點四條件〉第 1 條指定的保全手法",
          "git stash create"),
-        # 🔴 R85／SD-B3 的另一半：假紅同樣是缺陷。git 的**設定鍵天生以子指令名開頭**
-        # （`push.*`／`commit.*`），修前 `git config push.default` 這種唯讀查詢被判成
-        # push；而 `&` 之後是**下一個**指令，跨過去等於把別人的參數算到 git 頭上。
+        # 🔴 R85／SD-B3 的另一半：假紅同樣是缺陷（敘事原文＝GovWrite 證據檔 §6.9）。
         ("設定鍵以子指令名開頭的唯讀查詢", "git config push.default"),
         ("同上，帶 --get", "git config --get push.default"),
         ("`-c` 覆寫設定但實際動作是 status", "git -c push.default=simple status"),
@@ -1983,6 +1944,156 @@ class TestUnattendedAuthzHasTeethOnEveryPlatform(unittest.TestCase):
         self.assertEqual(G.UNATTENDED_ENV, A.UNATTENDED_ENV)
         for name in ("_GIT_WRITE_RE", "_GH_WRITE_RE"):
             self.assertFalse(hasattr(G, name), f"{name} 在 hook 內長出了第二份")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# R95／Pkg-B：PRD §15.5 紅線 10「治理檔在無人值守下唯讀」— govwrite 一族的回歸鎖
+# ══════════════════════════════════════════════════════════════════════════════
+class TestGovernanceFilesAreReadOnlyWhenUnattended(unittest.TestCase):
+    """立案（R87 實帳：繞過 halt 改取數層 ⇒ 13 agent 全滅）與設計取捨、實測 rc 逐字＝
+    docs/06_quality/CrossPlatform_R95_GovWrite_Evidence.md §1~§3；本類是其紅綠自證。
+
+    六個方向對齊本檔既有慣例：①該擋的擋（無人值守 × 保護面 × 三種寫檔工具）；
+    ②不該擋的放行（有人值守／保護面之外／專案根之外的同名檔）；③逃生口；
+    ④開關不共用（**雙向**都驗）；⑤退化 payload fail-open；⑥判準本身可證偽。
+    """
+
+    #: 保護面全集（與 hook 內 SSOT `_GOV_EXACT` ∪ `.claude/hooks/*.py` 逐筆對齊；
+    #: 這裡刻意逐字重抄一份當**期望值**——期望值引用 SSOT 本身會讓測試恆真）。
+    PROTECTED = (
+        ".env",
+        ".claude/settings.json",
+        ".claude/settings.local.json",
+        ".claude/hooks/block_destructive_git.py",
+        ".claude/hooks/context_budget_guard.py",
+        "tools/lib/quota_meter.py",
+        "tools/lib/quota_gate.py",
+        "tools/lib/quota_policy.py",
+        "tools/lib/quota_pace.py",
+        "tools/lib/quota_limits.py",
+        "tools/lib/pace_contract.py",
+        "tools/lib/sentinel_lifecycle.py",
+        "tools/lib/schedule_backend.py",
+        "tools/lib/quota_messages.py", "tools/lib/quota_escalation.py",
+        "tools/lib/platform_utils.py", "tools/session_resume_planner.py",
+    )
+    #: 誤擋是守衛被整個關掉的路徑——放行面與擋下面同等重要。
+    NOT_PROTECTED = (
+        "docs/06_quality/CrossPlatform_R95_GovWrite_Evidence.md",
+        "tools/lib/git_paths.py",            # tools/lib 不是整目錄保護，是字面清單
+        "tools/tests/test_block_destructive_git_r83.py",
+        ".claude/hooks/README.md",           # hooks 目錄只保護 .py
+        "AutoClaude/.claude/settings.json",  # 子專案同名檔不在保護面（另有子專案守衛）
+    )
+
+    def _env(self, **extra: str) -> dict[str, str]:
+        return {"CLAUDE_PROJECT_DIR": str(_REPO_ROOT), **extra}
+
+    def _payload(self, path: str, tool: str = "Write") -> dict:
+        key = "notebook_path" if tool == "NotebookEdit" else "file_path"
+        return {"tool_name": tool, "tool_input": {key: path}}
+
+    def test_every_protected_file_is_blocked_when_unattended(self) -> None:
+        for rel in self.PROTECTED:
+            with self.subTest(rel=rel):
+                proc = run_hook(self._payload(rel),
+                                env=self._env(**{G.UNATTENDED_ENV: "1"}))
+                self.assertEqual(proc.returncode, 2, proc.stderr)
+                self.assertIn("唯讀", proc.stderr, "訊息沒說這是唯讀保護")
+                self.assertIn("回報主控", proc.stderr, "訊息沒給出正確的出路")
+
+    def test_unattended_write_to_dot_env_is_blocked(self) -> None:
+        """M3：`.env`＝settings.json `env` 的同義繞行面 ⇒ rc=2（DEF-200-115 訂正；原文＝§6.10）。"""
+        proc = run_hook(self._payload(".env"), env=self._env(**{G.UNATTENDED_ENV: "1"}))
+        self.assertEqual(proc.returncode, 2, proc.stderr)
+
+    def test_the_autoclaude_prefix_is_pinned_before_the_directory_exists(self) -> None:
+        """m4：`.autoclaude/`＝PRD 紅線 10 字面；目錄未建先釘判準
+        （建立那天才發現沒人守＝靜默失效）。"""
+        proc = run_hook(self._payload(".autoclaude/state.json"),
+                        env=self._env(**{G.UNATTENDED_ENV: "1"}))
+        self.assertEqual(proc.returncode, 2, proc.stderr)
+
+    def test_all_three_write_tools_are_in_scope(self) -> None:
+        """Edit 與 NotebookEdit 走同一格——漏任一個，改治理檔只要換個工具就繞過。"""
+        for tool in ("Edit", "NotebookEdit"):
+            with self.subTest(tool=tool):
+                proc = run_hook(self._payload(".claude/settings.json", tool),
+                                env=self._env(**{G.UNATTENDED_ENV: "1"}))
+                self.assertEqual(proc.returncode, 2, proc.stderr)
+
+    def test_an_absolute_path_is_the_production_shape(self) -> None:
+        """production 的 file_path 是絕對路徑——相對路徑那格只是防禦縱深。"""
+        proc = run_hook(self._payload(str(_REPO_ROOT / ".claude" / "settings.json")),
+                        env=self._env(**{G.UNATTENDED_ENV: "1"}))
+        self.assertEqual(proc.returncode, 2, proc.stderr)
+
+    def test_attended_is_loud_but_not_blocking(self) -> None:
+        """主 session 每輪都要改這些檔——擋了，守衛就會被整個關掉（repo 判例）。"""
+        proc = run_hook(self._payload(".claude/settings.json"), env=self._env())
+        self.assertEqual(proc.returncode, 1, proc.stderr)
+        self.assertIn("治理檔", proc.stderr, "出聲面必須說明這是治理檔")
+
+    def test_paths_off_the_protected_list_pass_even_when_unattended(self) -> None:
+        for rel in self.NOT_PROTECTED:
+            with self.subTest(rel=rel):
+                proc = run_hook(self._payload(rel),
+                                env=self._env(**{G.UNATTENDED_ENV: "1"}))
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                self.assertEqual(proc.stderr.strip(), "")
+
+    def test_a_same_named_file_outside_the_root_is_not_governance(self) -> None:
+        """scratchpad／合成樹裡的 `.claude/settings.json` 不是治理檔——誤擋它等於
+        擋掉「在沙盒重現缺陷」這個正當用途（同 git 族換樹放寬的方向）。"""
+        with tempfile.TemporaryDirectory(prefix="w3-govwrite-") as foreign:
+            proc = run_hook(
+                self._payload(os.path.join(foreign, ".claude", "settings.json")),
+                env=self._env(**{G.UNATTENDED_ENV: "1"}))
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+
+    def test_missing_target_fails_open(self) -> None:
+        """Write payload 沒有 file_path ⇒ 判不出目標 ⇒ 放行（fail-open 是 P0：hook
+        誤觸 deny 會把所有工具硬鎖死）。"""
+        proc = run_hook({"tool_name": "Write", "tool_input": {}},
+                        env=self._env(**{G.UNATTENDED_ENV: "1"}))
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
+    def test_the_escape_hatch_works_and_is_not_shared(self) -> None:
+        """③＋④：自己的開關關得掉自己；兩族的開關互相關不掉對方（**雙向**都要驗——
+        共用開關會讓「我只是想暫時別被擋」順手把別的保護一起關掉，repo 明文禁止）。"""
+        blocked = self._payload(".claude/settings.json")
+        proc = run_hook(blocked, env=self._env(
+            **{G.UNATTENDED_ENV: "1", G.GOVWRITE_OFF_ENV: "1"}))
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        proc = run_hook(blocked, env=self._env(
+            **{G.UNATTENDED_ENV: "1", G.GUARD_OFF_ENV: "1"}))
+        self.assertEqual(proc.returncode, 2,
+                         f"{G.GUARD_OFF_ENV} 竟然也能關掉治理面唯讀\n{proc.stderr}")
+        proc = run_hook(bash_payload("git stash"), env={G.GOVWRITE_OFF_ENV: "1"})
+        self.assertEqual(proc.returncode, 2,
+                         f"{G.GOVWRITE_OFF_ENV} 竟然也能關掉毀滅性 git 阻斷\n{proc.stderr}")
+
+    def test_the_protected_list_is_load_bearing(self) -> None:
+        """⑥反 vacuity：清空字面清單，settings.json 必須當場變成放行；hooks 目錄那一半
+        不靠字面清單，必須仍然命中——證明兩半各自承重、判準不是恆真的。"""
+        with mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(_REPO_ROOT)}):
+            self.assertEqual(G.govwrite_hit({"file_path": ".claude/settings.json"}),
+                             ".claude/settings.json")
+            with mock.patch.object(G, "_GOV_EXACT", frozenset()):
+                self.assertIsNone(
+                    G.govwrite_hit({"file_path": ".claude/settings.json"}),
+                    "清單清空後仍命中 ⇒ 判準沒有真的讀那張表")
+                self.assertEqual(G.govwrite_hit({"file_path": ".claude/hooks/foo.py"}),
+                                 ".claude/hooks/foo.py")
+                self.assertEqual(G.govwrite_hit({"file_path": ".autoclaude/x.json"}),
+                                 ".autoclaude/x.json")
+
+    def test_dot_dot_does_not_smuggle_a_write_past_the_check(self) -> None:
+        """`..` 繞行由 realpath 收掉：路徑繞出去再繞回保護面，仍必須命中。"""
+        sneaky = str(_REPO_ROOT / "docs" / os.pardir / ".claude" / "settings.json")
+        with mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(_REPO_ROOT)}):
+            self.assertEqual(G.govwrite_hit({"file_path": sneaky}),
+                             ".claude/settings.json")
 
 
 if __name__ == "__main__":  # pragma: no cover

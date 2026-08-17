@@ -24,24 +24,10 @@
 #   · `--register-schtasks` ／ `--verify-schtasks` ／ `--remove-schtasks`：真的註冊／
 #     取證／移除（R79 新增，理由見下一段）。
 #
-# 🔴 「只印不執行」這條限制的依據已被實測推翻，故本輪解除（照實寫）
-# ------------------------------------------------------------------
-# R78 版的本段逐字寫「註冊 S4U 任務需要提權，session 內做不到也驗不了 ⇒ 本檔的處置是
-# **只印指令**」。兩個前提在 R79 各被實測一次：
-#   · 「session 內 spawn `claude` 會死結」（`DEF-101-089`，`CLAUDECODE=1`）——當回合
-#     真跑，兩組對照皆 `rc=0`：繼承 `CLAUDECODE=1` 者 4.0s、剝掉者 3.6s。**沒有死結。**
-#     🔴 射程：該實測用的是 `claude -p` 非互動 spawn。樹上另有一批用 wexpect pty 的測試
-#     仍以舊前提 skip；那條路徑 R79 收斂輪**已複驗**（上一版此處寫「沒有複驗過」，已過期），
-#     結論是**在巢狀 session 內仍掛住**：`PtyWrapper.start()` 三次都沒回返（180/180/45s）、
-#     `claude.exe` 從未被啟動、剝除 `CLAUDECODE` 的對照組行為相同。
-#     ⇒ 反證**只對 subprocess 這一路成立**，不遞移到 pty 路。
-#     逐字量測見 docs/06_quality/CrossPlatform_R79_Debt_Audit.md 的 `## DEF-101-913` 節。
-#   · 「註冊排程一定要提權」——`Register-ScheduledTask` 註冊**當前使用者**的工作不需要
-#     提權（需要提權的是 S4U／`-User SYSTEM` 那種）。
-# 於是「排程重啟」這條路第一次變成**可以在 session 內端到端驗證**的東西，而不是一段
-# 只能相信的指令字串。取證規則本身一個字都沒放寬：`--register-schtasks` 會在同一段輸出
-# 裡自動跑 `Get-ScheduledTask | Get-ScheduledTaskInfo` 並把 `NextRunTime` 印出來，
-# **印不出來就回非零 rc**——「我下了指令」不等於「它真的排進去了」。
+# 🔴 「只印不執行」限制已於 R79 以雙實測解除：subprocess 路（`claude -p`）rc=0 無死結；
+# wexpect pty 路在巢狀 session 內仍掛住（DEF-101-913）。取證規則一字未放寬（拿不到
+# `NextRunTime` 即非零 rc）。立案原文與兩組量測逐字已於 R95 一字未刪搬進
+# docs/06_quality/CrossPlatform_R95_Resume_Strategy_Evidence.md §L-1。
 #
 # 🔴 任務書裡的「已驗證什麼」一律是 `TODO:`，本檔不代填
 # ------------------------------------------------------
@@ -101,6 +87,7 @@ import context_budget_guard as guard  # noqa: E402  # 水位判定唯一實作�
 import quota_escalation as escalation  # noqa: E402  # R81：叫人＋扇出清單（R84／ARCH-10：改裸名）
 import quota_gate  # noqa: E402  # R84／SA-02：`--pace` 的內容產生者（額度判讀唯一入口）
 import schedule_backend  # noqa: E402  # R83：平台差異（schtasks／launchd）唯一收斂點
+import sentinel_lifecycle  # noqa: E402  # R95 修3：哨兵活性欄（armed stamp vs 現查）
 
 import _stdio_utf8  # noqa: E402,F401  # Windows 非 UTF-8 終端印中文／emoji 防崩潰
 from probe.audit_session import project_transcript_dir  # noqa: E402
@@ -244,16 +231,9 @@ def check_report(data: dict) -> str:
             guard.TIER_HARD: f"≥{guard.HARD_RATIO:.0%}（停止開新戰場）"}[data["tier"]]
     return (
         f"session   {data['session_id']}\n逐字稿    {data['transcript']}\n"
-        f"used      {data['used']:,}（input + cache_creation + cache_read；"
-        f"output_tokens 不計）\npeak      {data['peak_used']:,}"
-        "（本 session 歷來最大，window 下界推論的輸入）\n"
-        f"model     {data['model'] or '（逐字稿裡讀不到）'}（window 交叉否決的依據）\n"
-        f"window    {data['window']:,}〔{data['window_source']}〕\n"
-        f"水位      {data['ratio']:.1%}  → {tier}\n"
-        f"硬擋資格  {'有' if data['may_block'] else '無（分母是保守下界猜測 ⇒ 只出聲不擋）'}"
-        f"（PreToolUse 阻斷模式的第三道放行條件）\n重啟指令  claude -r "
-        f"{data['session_id']}\nharness   姿態現查：--check-autocompact"
-        "（autocompact 才是真正在做 compact 的東西）\n"
+        f"used      {data['used']:,}（input + cache_creation + cache_read；output_tokens 不計）\npeak      {data['peak_used']:,}（本 session 歷來最大，window 下界推論的輸入）\n"  # noqa: E501
+        f"model     {data['model'] or '（逐字稿裡讀不到）'}（window 交叉否決的依據）\nwindow    {data['window']:,}〔{data['window_source']}〕\n水位      {data['ratio']:.1%}  → {tier}\n"  # noqa: E501
+        f"硬擋資格  {'有' if data['may_block'] else '無（分母是保守下界猜測 ⇒ 只出聲不擋）'}（PreToolUse 阻斷模式的第三道放行條件）\n重啟指令  claude -r {data['session_id']}\nharness   姿態現查：--check-autocompact（autocompact 才是真正在做 compact 的東西）\n"  # noqa: E501
     )
 
 
@@ -342,21 +322,19 @@ SENTINEL_IDLE_SECONDS = 6 * 3600
 #: 沒有第二個家——續航狀態與可重啟點任務書是同一個主題的兩半。
 RELAY_BEGIN = "<!-- AUTOSDD-RELAY-BEGIN -->"
 RELAY_END = "<!-- AUTOSDD-RELAY-END -->"
+#: M2 第四分形（R95 修復包）：檔在但讀不動（IO/解碼失敗）≠ 沒有狀態塊——撕裂多位元組
+#: 寫入是已觀測輸入形態；兩支 tick 共用同一句，痕跡 why 才對得起「分形可辨」。
+READ_FAULT_WHY = "任務書讀不動（IO/解碼失敗：{kind}）"
 
 #: 狀態塊必填鍵。缺一即 fail-loud，不靜默補預設——補出來的預設會讓「狀態檔壞掉」
 #: 長得跟「狀態正常」一模一樣，而這份檔是整條續航鏈唯一的地板。
-RELAY_REQUIRED = ("schema", "session_id", "plan_path", "state", "kind",
-                  "reset_at", "reset_source", "attempts", "max_attempts",
-                  "allow_resume", "task_name")
+RELAY_REQUIRED = ("schema", "session_id", "plan_path", "state", "kind", "reset_at", "reset_source", "attempts", "max_attempts", "allow_resume", "task_name")  # noqa: E501
 RELAY_SCHEMA = "autosdd.resume/1"
 
 #: 取證指令。查排程一律用 `Get-ScheduledTask`——`schtasks /query` 在本機實測會回空
 #: ＝假陰性（根 CLAUDE.md〈查詢載具自己也會騙人〉）。
 #: `{task}` 一律先過 `_ps_single_quote`，理由見該函式。
-_EVIDENCE_TEMPLATE = (
-    "Get-ScheduledTask -TaskName '{task}' | Get-ScheduledTaskInfo | "
-    "Format-List TaskName,LastRunTime,LastTaskResult,NextRunTime"
-)
+_EVIDENCE_TEMPLATE = ( "Get-ScheduledTask -TaskName '{task}' | Get-ScheduledTaskInfo | " "Format-List TaskName,LastRunTime,LastTaskResult,NextRunTime" )  # noqa: E501
 
 
 # PowerShell 單引號字串的跳脫：內部的單引號要寫成兩個，這是**唯一**的跳脫方式
@@ -383,13 +361,9 @@ def schtasks_command(plan_path: str, task_name: str = DEFAULT_TASK_NAME,
                      at_expr: str = DEFAULT_AT_EXPR) -> str:
     """`--print-schtasks-command` 的輸出：註冊腳本 ＋ 它沒有被執行的聲明。"""
     return (
-        "# 🔴 以下指令本次**沒有執行**，也沒有建立任何排程（本旗標只印）。\n#    要真的"
-        "註冊並當場取證：改用 --register-schtasks（同一份字串，不是另一份）。\n"
-        "# 🔴 執行完**必須**貼出最後那道取證指令的輸出才准宣稱「已排程」——\n"
-        "#    「我下了指令」不等於「它真的排進去了」（反『事後諸葛』取證規則）。\n"
-        f"# 🔴 `{at_expr}` 是**猜的**，不是 reset 時刻。要正確的觸發時刻請改用\n"
-        "#    --arm-endurance（它從逐字稿原文觀測，見 ADR-XPLAT-004 §2.1）；"
-        "還沒撞線就想掛著請用 --arm-sentinel。\n"
+        "# 🔴 以下指令本次**沒有執行**，也沒有建立任何排程（本旗標只印）。\n#    要真的註冊並當場取證：改用 --register-schtasks（同一份字串，不是另一份）。\n"  # noqa: E501
+        "# 🔴 執行完**必須**貼出最後那道取證指令的輸出才准宣稱「已排程」——\n#    「我下了指令」不等於「它真的排進去了」（反『事後諸葛』取證規則）。\n"  # noqa: E501
+        f"# 🔴 `{at_expr}` 是**猜的**，不是 reset 時刻。要正確的觸發時刻請改用\n#    --arm-endurance（它從逐字稿原文觀測，見 ADR-XPLAT-004 §2.1）；還沒撞線就想掛著請用 --arm-sentinel。\n"  # noqa: E501
         + endurance_schtasks_script(plan_path, task_name, at_expr))
 
 
@@ -404,11 +378,7 @@ def schtasks_command(plan_path: str, task_name: str = DEFAULT_TASK_NAME,
 def run_powershell(script: str) -> subprocess.CompletedProcess[str]:
     """把一段 PowerShell 丟給 **`powershell.exe`（5.1）** 跑。"""
     if os.name != "nt":
-        return subprocess.CompletedProcess(
-            args=["powershell.exe"], returncode=1, stdout="",
-            stderr="❌ 本功能只在 Windows 成立（schtasks + powershell.exe）。"
-                   f"當前 os.name={os.name!r}。mac/Linux 請改用 launchd／cron，"
-                   "本檔刻意不假裝支援它。")
+        return subprocess.CompletedProcess( args=["powershell.exe"], returncode=1, stdout="", stderr="❌ 本功能只在 Windows 成立（schtasks + powershell.exe）。" f"當前 os.name={os.name!r}。mac/Linux 請改用 launchd／cron，" "本檔刻意不假裝支援它。")  # noqa: E501
     holder = Path(tempfile.mkdtemp(prefix="autosdd_schtasks_")) / "run.ps1"
     # BOM ＋ CRLF：PS 5.1 對無 BOM 的 UTF-8 會以 ANSI codepage 誤讀（本 repo 的
     # check_ps1_encoding.py 立案理由），`.ps1` 行尾政策亦為 CRLF。
@@ -593,20 +563,16 @@ def tick_plan(state: dict, verdict: dict, now: datetime) -> dict:
     """探測完之後**該做什麼**的唯一判定。純函式——整條續航鏈的大腦，必須可注入。"""
     kind, attempts = verdict["kind"], int(state.get("attempts") or 0)
     if verdict["open"]:
-        return {"action": "resume", "reason": "探針通過＝額度已恢復",
-                "at": None, "state": "resumed"}
+        return {"action": "resume", "reason": "探針通過＝額度已恢復", "at": None, "state": "resumed"}  # noqa: E501
     if kind == guard.LIMIT_SPEND:
         # 🔴 這一格是本協定最貴的誤判的解藥：月度支出上限等再久都不會回來。
-        return {"action": "stop", "at": None, "state": "abandoned",
-                "reason": "月度支出上限——等待無效，只有人去提額才會回來"}
+        return {"action": "stop", "at": None, "state": "abandoned", "reason": "月度支出上限——等待無效，只有人去提額才會回來"}  # noqa: E501
     if kind == guard.LIMIT_TRANSIENT:
         # 壞的是別的東西，不計入 attempts（否則幾次 502 就把重試預算吃光）。
         return {"action": "rearm", "reason": "伺服器暫時性錯誤，短退避後再探",
-                "at": now + timedelta(seconds=TRANSIENT_RETRY_SECONDS),
-                "state": "waiting"}
+                "at": now + timedelta(seconds=TRANSIENT_RETRY_SECONDS), "state": "waiting"}
     if attempts + 1 >= int(state.get("max_attempts") or MAX_PROBE_ATTEMPTS):
-        return {"action": "stop", "at": None, "state": "abandoned",
-                "reason": f"已探測 {attempts + 1} 次仍未恢復，達上限 ⇒ 硬停並通知人"}
+        return {"action": "stop", "at": None, "state": "abandoned", "reason": f"已探測 {attempts + 1} 次仍未恢復，達上限 ⇒ 硬停並通知人"}  # noqa: E501
     fresh = guard.parse_reset_at(verdict["text"], now)
     if fresh is None:
         # 🔴 認不出新的 reset 時刻就**明說**，不准退回固定 5 小時（見 parse_reset_at）。
@@ -663,14 +629,10 @@ def sentinel_decide(event: dict | None, handled_through: object,
     """哨兵醒來後的四分支判定。純函式——預防鏈的大腦，每一支都要能單獨注入。"""
     if event and str(event.get("timestamp") or "") > str(handled_through or ""):
         if event["kind"] == guard.LIMIT_SPEND:
-            return {"action": "escalate", "at": None,
-                    "reason": "月度支出上限——等待無效，只有人去 claude.ai 提額才會回來"}
-        reset_at = guard.parse_reset_at(
-            event["text"], local_time(event["timestamp"], now.tzinfo) or now)
+            return {"action": "escalate", "at": None, "reason": "月度支出上限——等待無效，只有人去 claude.ai 提額才會回來"}  # noqa: E501
+        reset_at = guard.parse_reset_at(event["text"], local_time(event["timestamp"], now.tzinfo) or now)  # noqa: E501
         if reset_at is None:
-            return {"action": "escalate", "at": None,
-                    "reason": "偵測到撞線但訊息裡解不出 reset 時刻 ⇒ 拒絕用猜的重排"
-                              f"（猜出來的會醒在錯的時間）。逐字：{event['text'][:80]}"}
+            return {"action": "escalate", "at": None, "reason": f"偵測到撞線但訊息裡解不出 reset 時刻 ⇒ 拒絕用猜的重排（猜出來的會醒在錯的時間）。逐字：{event['text'][:80]}"}  # noqa: E501
         at = reset_at + timedelta(seconds=RESET_SKEW_SECONDS)
         if at > now:
             # 🔴 R83-B：這句話原本逐字寫「⇒ **重排到那個時刻**（本次零 token）」，而它在
@@ -680,38 +642,19 @@ def sentinel_decide(event: dict | None, handled_through: object,
             # 現在它只陳述**決策**（一個純函式唯一有資格陳述的東西），載具真的做到什麼由
             # 憑證講：同一筆 `sentinel_rearmed` 痕跡的 `credential` 欄就是那句話的家，而它
             # 在 mac 上會明說「有 / 沒有 StartCalendarInterval」與「重載是否仍待完成」。
-            return {"action": "arm_reset", "at": at, "reset_at": reset_at,
-                    "reset_source": "transcript-verbatim",
-                    "reason": f"偵測到未處理的撞線；觀測 reset={reset_at} 尚未到 ⇒ "
-                              "要求排程器改在那個時刻醒（本次零 token；載具實際做到什麼"
-                              "看同一筆痕跡的 credential 欄）"}
-        return {"action": "probe", "at": None,
-                "reason": f"偵測到未處理的撞線；觀測 reset={reset_at} 已過 ⇒ "
-                          "花一次探測確認額度回來了沒"}
+            return {"action": "arm_reset", "at": at, "reset_at": reset_at, "reset_source": "transcript-verbatim", "reason": f"偵測到未處理的撞線；觀測 reset={reset_at} 尚未到 ⇒ " "要求排程器改在那個時刻醒（本次零 token；載具實際做到什麼" "看同一筆痕跡的 credential 欄）"}  # noqa: E501
+        return {"action": "probe", "at": None, "reason": f"偵測到未處理的撞線；觀測 reset={reset_at} 已過 ⇒ " "花一次探測確認額度回來了沒"}  # noqa: E501
     if idle_seconds is not None and idle_seconds < SENTINEL_IDLE_SECONDS:
-        return {"action": "patrol",
-                "at": now + timedelta(seconds=SENTINEL_INTERVAL_SECONDS),
-                "reason": f"無未處理撞線；逐字稿 {idle_seconds:.0f}s 前仍有更新 ⇒ "
-                          "session 還活著，續巡（本次零 token）"}
-    why = ("從來沒有被建立出來（開了沒做事就結束的 session 是常態，不是哨兵失明）"
-           if idle_seconds is None else
-           f"已靜止 {idle_seconds:.0f}s（≥{SENTINEL_IDLE_SECONDS}s）⇒ 工作已結束")
+        return {"action": "patrol", "at": now + timedelta(seconds=SENTINEL_INTERVAL_SECONDS), "reason": f"無未處理撞線；逐字稿 {idle_seconds:.0f}s 前仍有更新 ⇒ " "session 還活著，續巡（本次零 token）"}  # noqa: E501
+    why = ("從來沒有被建立出來（開了沒做事就結束的 session 是常態，不是哨兵失明）" if idle_seconds is None else f"已靜止 {idle_seconds:.0f}s（≥{SENTINEL_IDLE_SECONDS}s）⇒ 工作已結束")  # noqa: E501
     return {"action": "disarm", "at": None,
             "reason": f"無未處理撞線，且逐字稿{why} ⇒ 靜默解除，不叫人"}
 
 
 # 哨兵是 **per-session** 的：共用一個工作名會讓新 session 靜默蓋掉舊 session 還在等的
 # 那一支。顯式給了 `--task-name` 就聽人的（測試與人工操作都要能指定）。
-#
-# 🔴 R79 已知設計問題（**本輪不修**，交棒下一輪）：per-session ＋ SessionStart **無條件**
-# 武裝＝每一次 headless `claude -p` 呼叫都會生出一支自己的哨兵（每個 headless session
-# 有自己的 session id）。本輪實測：跑兩次探針之後機器上有 3 支 `AutoSDD_Sentinel_*`。
-# 6 小時的 `SENTINEL_IDLE_SECONDS` 會讓它們自己下班，所以不會無限長；但 Auto Pilot
-# 開啟後短時間內的堆積是真的——續跑那一跑本身也是一個 headless session，它也會武裝
-# 一支。可能的處置（都需要先決定語意，故不在本輪射程）：同一個 repo 只留一支（以
-# repo 路徑而非 session id 命名，武裝時 `-Force` 覆蓋）；或 SessionStart 先數一次現有
-# 哨兵、超過 N 支就不再武裝；或對 headless session（`claude -p`）整個不武裝——但最後
-# 這條會把「續跑那一跑自己撞線」的續航能力一起關掉，是取捨不是純改善。
+# 🔴 R79 已知設計問題（headless 哨兵堆積，本輪不修）與三種候選處置的取捨，R95 一字未刪
+# 搬進 docs/06_quality/CrossPlatform_R95_Resume_Strategy_Evidence.md §L-2。
 def sentinel_task_name(session_id: str, given: str = DEFAULT_TASK_NAME) -> str:
     """哨兵的 schtasks 工作名。"""
     return given if given != DEFAULT_TASK_NAME else f"AutoSDD_Sentinel_{session_id}"
@@ -833,7 +776,13 @@ def register_endurance(state: dict, at: datetime, tick: str = RESUME_TICK) -> tu
 
 def write_relay(plan: Path, state: dict) -> None:
     """把狀態塊寫回任務書（有就替換、沒有就附加）。任務書仍是同一支檔。"""
-    text = plan.read_text(encoding="utf-8")
+    try:
+        text = plan.read_text(encoding="utf-8")
+    except ValueError:
+        # M2 第四分形（R95 修復包）：撕裂多位元組的任務書讀不動，但自癒必須寫得回去——
+        # 以 replace 落地保留仍可讀的部分（毀損位元組本來就救不回來；OSError 照舊上拋，
+        # 呼叫端 `_heal_relay` 接住它並誠實回「自癒不了」）。
+        text = plan.read_bytes().decode("utf-8", errors="replace")
     block = render_relay(state)
     if has_relay(text):
         head, tail = text.find(RELAY_BEGIN), text.find(RELAY_END) + len(RELAY_END)
@@ -912,21 +861,14 @@ TODO: 重啟後要跑的第一組指令，**寫絕對路徑**（PowerShell 工�
 def build_parser() -> argparse.ArgumentParser:
     # `allow_abbrev=False`：前綴縮寫會「好心地」把打錯的旗標補全成合法旗標，
     # 那正是 R67-D20 實測到的假綠來源（`--check-snapsho` → `--check-snapshot`）。
-    parser = argparse.ArgumentParser(
-        prog="session_resume_planner.py", allow_abbrev=False,
-        description="可重啟點任務書產生器 ＋ session context 水位現查",
-    )
+    parser = argparse.ArgumentParser( prog="session_resume_planner.py", allow_abbrev=False, description="可重啟點任務書產生器 ＋ session context 水位現查", )  # noqa: E501
     parser.add_argument("--session-id", help="session id（逐字稿檔名去副檔名）")
     parser.add_argument("--transcript", help="直接指定逐字稿 .jsonl 路徑")
     parser.add_argument("--out", help="任務書落點（預設：系統暫存）")
     parser.add_argument("--check", action="store_true",
                         help="只印當前 context 用量與百分比，不寫檔")
-    parser.add_argument("--check-autocompact", action="store_true", dest="check_autocompact",
-                        help="只印 harness 的 autocompact 姿態；**被關掉時 rc=1**"
-                             "（不需要逐字稿，可單獨跑）")
-    parser.add_argument("--print-schtasks-command", action="store_true", dest="print_schtasks",
-                        help="只印離線排程指令與取證指令，**不執行、不註冊**"
-                             "（會一併產生任務書：排程起來的那一跑要吃它）")
+    parser.add_argument("--check-autocompact", action="store_true", dest="check_autocompact", help="只印 harness 的 autocompact 姿態；**被關掉時 rc=1**" "（不需要逐字稿，可單獨跑）")  # noqa: E501
+    parser.add_argument("--print-schtasks-command", action="store_true", dest="print_schtasks", help="只印離線排程指令與取證指令，**不執行、不註冊**" "（會一併產生任務書：排程起來的那一跑要吃它）")  # noqa: E501
     parser.add_argument("--register-schtasks", action="store_true", dest="register_schtasks",
                         help="真的註冊排程並當場取證；拿不到 NextRunTime 一律 rc=1")
     parser.add_argument("--verify-schtasks", action="store_true", dest="verify_schtasks",
@@ -937,19 +879,11 @@ def build_parser() -> argparse.ArgumentParser:
                         help=f"排程工作名稱（預設 {DEFAULT_TASK_NAME}）")
     parser.add_argument("--at", default=DEFAULT_AT_EXPR,
                         help=f"觸發時刻（PowerShell 運算式／時間字串；預設 {DEFAULT_AT_EXPR}）")
-    parser.add_argument("--arm-endurance", action="store_true", dest="arm_endurance",
-                        help="額度耗盡續航武裝：從逐字稿觀測 reset 時刻 → 寫任務書＋狀態塊 → "
-                             "註冊一次性 schtasks → 取證。月度支出上限一律拒絕武裝（等待無效）")
+    parser.add_argument("--arm-endurance", action="store_true", dest="arm_endurance", help="額度耗盡續航武裝：從逐字稿觀測 reset 時刻 → 寫任務書＋狀態塊 → " "註冊一次性 schtasks → 取證。月度支出上限一律拒絕武裝（等待無效）")  # noqa: E501
     parser.add_argument("--probe-quota", action="store_true", dest="probe_quota",
                         help="花一次最便宜的呼叫問「額度回來了沒」；額度通時 rc=0、耗盡時 rc=1")
-    parser.add_argument("--pace", action="store_true",
-                        help="**現在能派幾個 agent**（R84／6b）：一行印出 可派數／cap／band／"
-                             "最緊那一軸與它距 reset 幾分鐘。只讀額度快取＝零 token；"
-                             "快取不可用時每 TTL 至多補量一次（那個端點不是模型呼叫）")
-    parser.add_argument("--arm-sentinel", action="store_true", dest="arm_sentinel",
-                        help="**預防性**武裝：還沒撞線就掛一支哨兵。不需要已觀測的 reset 時刻，"
-                             "到點只讀逐字稿（零 token），偵測到撞線才自動轉成續航排程。"
-                             "這是 --arm-endurance 的觸發層")
+    parser.add_argument("--pace", action="store_true", help="**現在能派幾個 agent**（R84／6b）：一行印出 可派數／cap／band／" "最緊那一軸與它距 reset 幾分鐘。只讀額度快取＝零 token；" "快取不可用時每 TTL 至多補量一次（那個端點不是模型呼叫）")  # noqa: E501
+    parser.add_argument("--arm-sentinel", action="store_true", dest="arm_sentinel", help="**預防性**武裝：還沒撞線就掛一支哨兵。不需要已觀測的 reset 時刻，" "到點只讀逐字稿（零 token），偵測到撞線才自動轉成續航排程。" "這是 --arm-endurance 的觸發層")  # noqa: E501
     parser.add_argument("--sentinel-tick", action="store_true", dest="sentinel_tick",
                         help="**哨兵被叫起來的那一支**：留痕 → 讀檔判定 → 續巡／重排到 reset／"
                              "探測／自我解除。不該由人手動跑（除了驗證它）")
@@ -1041,66 +975,129 @@ def _arm_endurance(args, transcript: Path, plan: Path) -> int:
     """武裝續航：觀測 → 分類 → 算觸發時刻 → 註冊 → 取證。任何一步取不到憑證即 rc=1。"""
     event = guard.latest_limit_event(transcript)
     if event is None:
-        print("❌ 逐字稿裡沒有任何額度／錯誤事件（`type=assistant` ＋ "
-              f"`model={guard.SYNTHETIC_MODEL}`）⇒ 沒有東西可以等，不武裝。\n   續航是"
-              "**對已經發生的撞線**做的處置，不是預先掛著的定時器——要預防性的請用 "
-              "--arm-sentinel（它不需要已觀測的 reset 時刻）。", file=sys.stderr)
+        print(f"❌ 逐字稿裡沒有任何額度／錯誤事件（`type=assistant` ＋ `model={guard.SYNTHETIC_MODEL}`）⇒ 沒有東西可以等，不武裝。\n   續航是**對已經發生的撞線**做的處置，不是預先掛著的定時器——要預防性的請用 --arm-sentinel（它不需要已觀測的 reset 時刻）。", file=sys.stderr)  # noqa: E501
         return 1
     kind = event["kind"]
     if kind == guard.LIMIT_SPEND:
-        print("🔴 撞到的是**月度支出上限**，不是 session 額度——等待無效，排程等於白燒探測。"
-              f"\n   逐字：{event['text']}\n   請去 claude.ai 提額；提完再重跑本指令。\n",
-              file=sys.stderr)
+        print(f"🔴 撞到的是**月度支出上限**，不是 session 額度——等待無效，排程等於白燒探測。\n   逐字：{event['text']}\n   請去 claude.ai 提額；提完再重跑本指令。\n", file=sys.stderr)  # noqa: E501
         return 1
     if kind != guard.LIMIT_SESSION:
-        print(f"❌ 事件分類為 {kind}（非 session 額度），不武裝（fail-closed）。\n"
-              f"   逐字：{event['text']}\n", file=sys.stderr)
+        print(f"❌ 事件分類為 {kind}（非 session 額度），不武裝（fail-closed）。\n   逐字：{event['text']}\n", file=sys.stderr)  # noqa: E501
         return 1
     anchor = local_time(event["timestamp"]) or datetime.now().astimezone()
     reset_at = guard.parse_reset_at(event["text"], anchor)
     if reset_at is None:
-        print("❌ 訊息裡解不出 reset 時刻 ⇒ **拒絕退回「假設 5 小時」**。\n"
-              f"   逐字：{event['text']}\n   reset 是滾動視窗（全庫 7 個相異值沒有一個"
-              "落在 5 小時格點上），猜出來的時刻會讓排程醒在錯的時間，"
-              "而取證規則照樣是綠的。\n", file=sys.stderr)
+        print(f"❌ 訊息裡解不出 reset 時刻 ⇒ **拒絕退回「假設 5 小時」**。\n   逐字：{event['text']}\n   reset 是滾動視窗（全庫 7 個相異值沒有一個落在 5 小時格點上），猜出來的時刻會讓排程醒在錯的時間，而取證規則照樣是綠的。\n", file=sys.stderr)  # noqa: E501
         return 1
     now = datetime.now().astimezone()
     if reset_at + timedelta(seconds=RESET_SKEW_SECONDS) <= now:
-        print(f"ℹ️  觀測到的 reset 時刻 {reset_at} 已經過去（現在 {now}）⇒ 額度應該早就"
-              "回來了，沒有東西需要等。要確認就跑 --probe-quota。", file=sys.stderr)
+        print(f"ℹ️  觀測到的 reset 時刻 {reset_at} 已經過去（現在 {now}）⇒ 額度應該早就回來了，沒有東西需要等。要確認就跑 --probe-quota。", file=sys.stderr)  # noqa: E501
         return 1
-    state = _base_state(guard.session_id_of(transcript), plan, args, kind,
-                        args.task_name)
-    state.update(reset_at=reset_at.isoformat(), reset_source="transcript-verbatim",
-                 observed_at=event["timestamp"], observed_text=event["text"],
-                 transcript=str(transcript))
-    rc, moment = _register_and_record(
-        plan, state, reset_at + timedelta(seconds=RESET_SKEW_SECONDS), RESUME_TICK)
+    state = _base_state(guard.session_id_of(transcript), plan, args, kind, args.task_name)
+    state.update(reset_at=reset_at.isoformat(), reset_source="transcript-verbatim", observed_at=event["timestamp"], observed_text=event["text"], transcript=str(transcript))  # noqa: E501
+    rc, moment = _register_and_record(plan, state, reset_at + timedelta(seconds=RESET_SKEW_SECONDS), RESUME_TICK)  # noqa: E501
     if rc != 0:
         return 1
-    append_log(endurance_log_path(plan), "armed", reset_at=reset_at.isoformat(),
-               credential=moment, allow_resume=bool(args.allow_resume))
+    append_log(endurance_log_path(plan), "armed", reset_at=reset_at.isoformat(), credential=moment, allow_resume=bool(args.allow_resume))  # noqa: E501
     print(schedule_backend.select().credential_line(moment))
-    print(f"   觀測到的 reset：{reset_at}（來源：逐字稿原文，非推算）")
-    print(f"   任務書＋狀態塊：{plan}")
-    print(f"   稽核痕跡：{state['log_path']}（沒觸發＝這個檔不會長大，是可偵測的）")
-    print("   ℹ️  醒來那一跑會自動續跑（Auto Pilot 預設開；禁 commit／push，由 "
-          f"{UNATTENDED_ENV} 配 PreToolUse 守衛硬擋）。" if args.allow_resume else
+    print(f"   觀測到的 reset：{reset_at}（來源：逐字稿原文，非推算）\n   任務書＋狀態塊：{plan}\n   稽核痕跡：{state['log_path']}（沒觸發＝這個檔不會長大，是可偵測的）")  # noqa: E501
+    print(f"   ℹ️  醒來那一跑會自動續跑（Auto Pilot 預設開；禁 commit／push，由 {UNATTENDED_ENV} 配 PreToolUse 守衛硬擋）。" if args.allow_resume else  # noqa: E501
           f"   ℹ️  已關閉自動續跑（--no-allow-resume／{RESUME_OFF_ENV}）⇒ 醒來只探測＋留痕。")
     return 0
+
+
+#: ── R95／Pkg-D：喚醒降級選路（PRD §4.5.4／§8-10）─────────────────────────────
+#: `-r <sessionId>` 的前提是逐字稿可用；缺檔／為空／超上限時整條喚醒鏈此前**沒有退路**
+#: （指令直接失敗且靜默）。降級目標＝FRESH_SESSION_WITH_STATE：不帶 `-r` 的全新
+#: session，state 由磁碟任務書交棒（〈可重啟點四條件〉第 2 條本來就要求它落盤）。
+#: 上限預設 32MiB 是量出來的：本機 ~/.claude/projects/ 全量 1,108 支 .jsonl，
+#: p50=403KB、p99=3.1MB、max=6.0MB ⇒ 32MiB 只攔病態值（≈觀測 max 的 5 倍）——假降級
+#: 會把可用的 session context 丟掉，判準刻意窄。量測逐字與選值理由住
+#: docs/06_quality/CrossPlatform_R95_Resume_Strategy_Evidence.md §2。
+#: 🔴 ENV 以 `os.environ` 直讀（消費端住本檔）；`quota_policy.ENV_SPEC` 的宣告列已由
+#: R95 收尾窗口補上（attr=None ⇒ 不進 Policy——宣告面與消費面刻意分居兩檔）。
+RESUME_MAX_TRANSCRIPT_ENV = "AUTOSDD_RESUME_MAX_TRANSCRIPT_BYTES"
+RESUME_MAX_TRANSCRIPT_DEFAULT = 32 * 1024 * 1024
+STRATEGY_RESUME = "SESSION_RESUME"
+STRATEGY_FRESH = "FRESH_SESSION_WITH_STATE"
+STRATEGY_REFUSE = "REFUSE"
+#: 兩條路共用的護欄尾段（重驗＋禁 commit/push）。住常數而不是兩處各自內嵌：降級路
+#: 少帶護欄句＝FRESH 那一跑比 RESUME 少一層約束，而漏帶是靜默的。
+_RESUME_RULES = ("🔴 第一件事是重驗，不採信該檔任何「已通過」宣稱。遵守第 4 節〈禁止事項〉。"
+                 "🔴 本回合無人看管，禁止 commit／push"
+                 "（已由 PreToolUse 守衛硬擋，不是請求）——改動留在工作樹讓人回來收。")
+
+
+# m5（R95 修復包）：ENV 病態值（非整數字串／零／負值）此前直接 `int()` 炸在喚醒路徑上
+# ——那正是「無人看管、沒有人看 stderr」的一跑。退回內建預設並出聲一次，比照「量不到
+# ≠不設限」慣例；空字串＝未設，走預設不出聲（`or` 語意本來就如此，不是病態值）。
+def _transcript_cap() -> tuple[int, str]:
+    """ENV 上限解析：回 `(limit, note)`；`note` 非空＝病態值已退回預設（呼叫端進 reason）。"""
+    raw = str(os.environ.get(RESUME_MAX_TRANSCRIPT_ENV) or "").strip()
+    try:
+        val = int(raw) if raw else RESUME_MAX_TRANSCRIPT_DEFAULT
+    except ValueError:
+        val = 0
+    if val >= 1:
+        return val, ""
+    note = (f"{RESUME_MAX_TRANSCRIPT_ENV}={raw!r} 是病態值（非正整數）⇒ 退回預設 "
+            f"{RESUME_MAX_TRANSCRIPT_DEFAULT:,}B")
+    print(f"⚠️ {note}", file=sys.stderr)
+    return RESUME_MAX_TRANSCRIPT_DEFAULT, note
+
+
+# 🔴 選路是純函式（stat 一次逐字稿，不 spawn、不寫檔；m5 起病態 ENV 會印一行 stderr，
+# 那是出聲不是副作用升級）：四種輸入態（可用／缺檔／為空／超上限）都要能在測試裡注入。
+# 方向鎖：降級只准 RESUME→FRESH 單向——逐字稿可用時**必須**回 SESSION_RESUME（把可用
+# 的 session context 丟掉＝資訊損失），且 FRESH 的 argv 不得帶 `-r`。任務書缺席＝REFUSE：
+# 兩條路的 prompt 都指向任務書，它缺席時派出去的是一個空承諾（R59 事故同形），呼叫端
+# 必須 fail-loud，不得靜默派空 prompt。argv 順序（prompt 必在 `--add-dir` 之前，且
+# --add-dir 後只能有一個值）的立案見 `_run_resume` 上方 R80 段與姊妹鎖
+# test_the_variadic_add_dir_does_not_swallow_the_prompt。
+def choose_resume_route(claude: str, session_id: str, transcript: Path | None,
+                        plan_path: str, max_bytes: int | None = None) -> dict:
+    """喚醒選路：回 `{strategy, reason, argv}`；REFUSE 時 argv=None（呼叫端 fail-loud）。"""
+    plan = Path(str(plan_path or ""))
+    if not plan.is_file():
+        return {"strategy": STRATEGY_REFUSE, "argv": None,
+                "reason": f"任務書不存在：{plan_path!r}——state 交棒載體缺席，RESUME 與 "
+                          "FRESH 兩條路都無法成立 ⇒ 拒絕武裝（不得靜默派空 prompt）"}
+    limit, cap_note = (max_bytes, "") if max_bytes is not None else _transcript_cap()
+    suffix = f"；{cap_note}" if cap_note else ""
+    size = transcript.stat().st_size if (transcript and transcript.is_file()) else None
+    if session_id and size and size <= limit:
+        return {"strategy": STRATEGY_RESUME,
+                "reason": f"逐字稿可用（{size:,}B ≤ 上限 {limit:,}B）⇒ 帶完整 context 續跑{suffix}",  # noqa: E501
+                "argv": [claude, "-p", "-r", str(session_id),
+                         f"讀 {plan}，照它第 3 節做。{_RESUME_RULES}",
+                         "--add-dir", str(plan.parent)]}
+    why = ("session id 缺席" if not session_id else "逐字稿缺檔" if size is None else
+           "逐字稿為空" if size == 0 else f"逐字稿 {size:,}B 超上限 {limit:,}B")
+    return {"strategy": STRATEGY_FRESH,
+            "reason": f"{why} ⇒ 降級開全新 session，state 由磁碟任務書交棒{suffix}",
+            "argv": [claude, "-p",
+                     f"按磁碟任務書繼續：讀 {plan}，照它第 3 節做。{_RESUME_RULES}",
+                     "--add-dir", str(plan.parent)]}
 
 
 # 真的開一個無人看管的模型回合（R79 起**預設開啟**，見上方 Auto Pilot 區塊的 WHY 與
 # 兩個關閉出口）。抽成函式是因為兩條路都會走到它：`--resume-tick` 的 resume 分支、
 # 以及哨兵探測到額度回來的那一支。同一份知識不留兩個家——**注入無人看管訊號的站點
 # 也因此只有一個**，這正是它抽出來的價值：漏注入是靜默的（護欄不會出聲說自己沒被
-# 掛上），而只有一個站點的東西才有辦法一次證完。
+# 掛上），而只有一個站點的東西才有辦法一次證完。喚醒 argv 的組裝（含 RESUME→FRESH
+# 降級）收在 `choose_resume_route`，本函式只負責 spawn 與留痕。
 def _run_resume(args, state: dict, log: Path) -> int:
     """額度回來且已授權時，真的把工作續跑起來（帶無人看管訊號）。"""
-    prompt = (f"讀 {state['plan_path']}，照它第 3 節做。"
-              "🔴 第一件事是重驗，不採信該檔任何「已通過」宣稱。遵守第 4 節〈禁止事項〉。"
-              "🔴 本回合無人看管，禁止 commit／push"
-              "（已由 PreToolUse 守衛硬擋，不是請求）——改動留在工作樹讓人回來收。")
+    sid = str(state.get("session_id") or "")
+    transcript = (Path(str(state["transcript"])) if state.get("transcript")
+                  else resolve_transcript(sid) if sid else None)
+    route = choose_resume_route(args.probe_command, sid, transcript,
+                                str(state.get("plan_path") or ""))
+    # 痕跡必記策略與原因：降級是靜默失效的高風險點，「走了哪條路」必須事後可稽核。
+    append_log(log, "route_chosen", strategy=route["strategy"], why=route["reason"])
+    if route["argv"] is None:
+        print(f"❌ {route['reason']}", file=sys.stderr)
+        return 1
     # 🔴 R80 P0 的第二層（兩層都補才算修好，缺任一層續跑那一跑都做不了事）。
     # · `cwd=_REPO_ROOT`：沒有它時 cwd 繼承自排程行程＝system32，而 Claude Code 用 cwd
     #   決定「本 session 允許的工作目錄」⇒ 續跑碰不到 repo 一個檔。**排程 Action 的
@@ -1122,16 +1119,15 @@ def _run_resume(args, state: dict, log: Path) -> int:
     #   在前 rc=0），順序由 `ConsoleFreeSpawnTest` 的姊妹鎖釘住。
     # · `creationflags`：見 `guard.NO_WINDOW`。少了它，無人看管的續跑會彈一個視窗。
     proc = subprocess.run(
-        [args.probe_command, "-p", "-r", state["session_id"], prompt,
-         "--add-dir", str(Path(state["plan_path"]).parent)],
+        route["argv"],
         capture_output=True, encoding="utf-8", errors="replace", timeout=3600,
         check=False, creationflags=guard.NO_WINDOW, cwd=str(_REPO_ROOT),
         env={**os.environ, UNATTENDED_ENV: "1"})
     # 🔴 `err=` 是 R80 補的：此前只記 stdout，而上面那個 argv 缺陷的表現正好是
     # 「rc=1、stdout 全空」⇒ 稽核痕跡看得到「失敗了」卻看不到**為什麼**，我是靠手工
     # 重跑一次才找出原因的。無人看管的那一跑沒有人在看 stderr，它只有這一個家。
-    append_log(log, "resumed", rc=proc.returncode, err=(proc.stderr or "")[:300],
-               out=(proc.stdout or "")[:400])
+    append_log(log, "resumed", rc=proc.returncode, strategy=route["strategy"],
+               err=(proc.stderr or "")[:300], out=(proc.stdout or "")[:400])
     print((proc.stdout or "")[:2000])
     return proc.returncode
 
@@ -1157,25 +1153,28 @@ def _resume_tick(args) -> int:
     log = endurance_log_path(plan)
     append_log(log, "woken", plan=str(plan))
     if not plan.is_file():
-        return _abort_and_unregister(
-            log, args.task_name, "任務書不存在", "aborted",
-            f"❌ 任務書不存在：{plan}（地板沒了，無法續跑）")
-    text = plan.read_text(encoding="utf-8")
+        return _abort_and_unregister(log, args.task_name, "任務書不存在", "aborted", f"❌ 任務書不存在：{plan}（地板沒了，無法續跑）")  # noqa: E501
+    try:
+        text = plan.read_text(encoding="utf-8")
+    except (OSError, ValueError) as exc:  # M2 第四分形：讀不動 ≠ 沒有狀態塊，走自癒不走解除
+        why = READ_FAULT_WHY.format(kind=type(exc).__name__)
+        healed = _heal_relay(plan, args, why)
+        if healed is None:
+            append_log(log, "heal_failed", why=why, **escalation.alert(f"任務書讀不動且自癒失敗（{why}）⇒ 解除排程，喚醒鏈斷線", {"session_id": plan.stem, "plan_path": str(plan), "log_path": str(log)}, loud=True, plan=plan))  # noqa: E501
+            return _abort_and_unregister(log, args.task_name, why, "aborted", f"❌ {why}（已桌面告警）")  # noqa: E501
+        append_log(log, "selfhealed", why=why, **escalation.alert(f"任務書被砸到讀不動（{why}），已自癒續跑——請查誰在覆寫任務書", healed, loud=True, plan=plan))  # noqa: E501
+        text = plan.read_text(encoding="utf-8")  # 自癒剛把它寫回可讀形態
     state = parse_relay(text)
     if state is None:
         why = "狀態塊在但 JSON 壞掉" if has_relay(text) else "任務書裡沒有狀態塊"
-        return _abort_and_unregister(log, args.task_name, why, "aborted",
-                                     f"❌ {why} ⇒ 拒絕動作")
+        return _abort_and_unregister(log, args.task_name, why, "aborted", f"❌ {why} ⇒ 拒絕動作")  # noqa: E501
     log = Path(state.get("log_path") or log)
     problems = relay_problems(state)
     if problems:
-        return _abort_and_unregister(
-            log, args.task_name, "；".join(problems), "aborted",
-            "❌ 狀態塊體檢不過：\n  - " + "\n  - ".join(problems))
+        return _abort_and_unregister(log, args.task_name, "；".join(problems), "aborted", "❌ 狀態塊體檢不過：\n  - " + "\n  - ".join(problems))  # noqa: E501
 
     verdict = probe_quota(args.probe_command)
-    append_log(log, "probed", rc=verdict["rc"], kind=verdict["kind"],
-               quota_open=verdict["open"])
+    append_log(log, "probed", rc=verdict["rc"], kind=verdict["kind"], quota_open=verdict["open"])  # noqa: E501
     decision = tick_plan(state, verdict, datetime.now().astimezone())
     print(f"探針 rc={verdict['rc']} kind={verdict['kind']} open={verdict['open']}")
     print(f"判定 {decision['action']}：{decision['reason']}")
@@ -1190,20 +1189,16 @@ def _resume_tick(args) -> int:
         # 🔴 R81 缺口 A 的另一半（`tick_plan` 的 stop 理由逐字寫著「硬停並**通知人**」／
         # 「只有人去提額才會回來」，而此前的「通知」只是一行 stderr——這一支由 schtasks
         # 以無 console 的 pythonw 起，那一行沒有任何終端收得到）。載體見 `escalation.alert`。
-        append_log(log, "stopped", why=decision["reason"],
-                   unregister_rc=_schtasks_remove(state["task_name"]),
-                   **escalation.alert(decision["reason"], state))
+        append_log(log, "stopped", why=decision["reason"], unregister_rc=_schtasks_remove(state["task_name"]), **escalation.alert(decision["reason"], state))  # noqa: E501
         return 1
     if decision["action"] == "rearm":
         state["state"] = decision["state"]
         if verdict["kind"] != guard.LIMIT_TRANSIENT:
             state["attempts"] = int(state.get("attempts") or 0) + 1
             state["reset_source"] = "probe-verbatim"
-            state["reset_at"] = (decision["at"]
-                                 - timedelta(seconds=RESET_SKEW_SECONDS)).isoformat()
+            state["reset_at"] = (decision["at"] - timedelta(seconds=RESET_SKEW_SECONDS)).isoformat()  # noqa: E501
         rc, moment = _register_and_record(plan, state, decision["at"], RESUME_TICK)
-        append_log(log, "rearmed", fire_at=decision["at"].isoformat(),
-                   credential=moment, attempts=state["attempts"])
+        append_log(log, "rearmed", fire_at=decision["at"].isoformat(), credential=moment, attempts=state["attempts"])  # noqa: E501
         return rc
     # action == resume
     state["state"] = "resumed"
@@ -1212,9 +1207,7 @@ def _resume_tick(args) -> int:
     _schtasks_remove(state["task_name"])  # 同上：終態不留死工作
     if not state.get("allow_resume"):
         append_log(log, "quota_back_no_resume")
-        print("✅ 額度已恢復。狀態塊記著 allow_resume=false（帶了 --no-allow-resume／"
-              f"{RESUME_OFF_ENV}，或它是 R79 之前武裝的）⇒ 人回來跑："
-              f"claude -r {state['session_id']}")
+        print(f"✅ 額度已恢復。狀態塊記著 allow_resume=false（帶了 --no-allow-resume／{RESUME_OFF_ENV}，或它是 R79 之前武裝的）⇒ 人回來跑：claude -r {state['session_id']}")  # noqa: E501
         return 0
     return _run_resume(args, state, log)
 
@@ -1230,40 +1223,69 @@ def _arm_sentinel(args, transcript: Path, plan: Path) -> int:
     # 舊寫法的立案理由是「我此刻跑得動武裝指令 ⇒ 額度是通的 ⇒ 既有撞線必然都已解決」——
     # 那句話**是假的**（武裝零 API 呼叫），而它正是哨兵整晚失明的主因。本欄現在只作稽核，
     # 真正的「已處理」判定在 `guard.unhandled_limit_event` 內以復原證據做。
-    state = _base_state(session_id, plan, args, "sentinel",
-                        sentinel_task_name(session_id, args.task_name))
-    state.update(transcript=str(transcript), handled_through=guard.latest_success_at(
-        guard.session_transcripts(transcript)) if transcript.is_file() else "")
+    state = _base_state(session_id, plan, args, "sentinel", sentinel_task_name(session_id, args.task_name))  # noqa: E501
+    state.update(transcript=str(transcript), handled_through=guard.latest_success_at(guard.session_transcripts(transcript)) if transcript.is_file() else "")  # noqa: E501
     at = datetime.now().astimezone() + timedelta(seconds=SENTINEL_INTERVAL_SECONDS)
     rc, moment = _register_and_record(plan, state, at, SENTINEL_TICK)
-    append_log(endurance_log_path(plan), "sentinel_armed" if rc == 0 else "arm_failed",
-               task=state["task_name"], credential=moment,
-               handled_through=state["handled_through"])
+    append_log(endurance_log_path(plan), "sentinel_armed" if rc == 0 else "arm_failed", task=state["task_name"], credential=moment, handled_through=state["handled_through"])  # noqa: E501
     if rc != 0:
         return 1
     print(schedule_backend.select().credential_line(moment) + "\n"
-          f"   哨兵 {state['task_name']}：每 {SENTINEL_INTERVAL_SECONDS}s 醒一次，"
-          "平時只讀逐字稿＝零 token；只有真的撞線那一次才花一次探測。\n"
-          f"   已處理到：{state['handled_through'] or '（本 session 尚無撞線事件）'}\n"
-          f"   任務書＋狀態塊：{plan}\n"
-          f"   稽核痕跡：{state['log_path']}（沒觸發＝這個檔不會長大，是可偵測的）")
+          f"   哨兵 {state['task_name']}：每 {SENTINEL_INTERVAL_SECONDS}s 醒一次，平時只讀逐字稿＝零 token；只有真的撞線那一次才花一次探測。\n"  # noqa: E501
+          f"   已處理到：{state['handled_through'] or '（本 session 尚無撞線事件）'}\n   任務書＋狀態塊：{plan}\n   稽核痕跡：{state['log_path']}（沒觸發＝這個檔不會長大，是可偵測的）")  # noqa: E501
     return 0
+
+
+# 修2／R-4.5.6-4a（R95；ADR §2.9）：狀態塊讀不出 ≠ 哨兵該死。任務書是單檔雙寫者
+# （修1 之後兩個寫者都保 RELAY，但「別人砸掉它」仍是可能輸入），而哨兵是「主 session
+# 活著但帳號級撞線」那一格的**唯一**機械物——它自我解除的代價是整格失效（P0）。
+# 重建材料＝呼叫端引數（task_name）＋任務書檔名（session id）＋既有 SSOT（逐字稿定位
+# 走 resolve_transcript）。state 誠實記 "recovering" 而不是 "armed"：自癒瞬間拿不出
+# 排程器憑證，寫 armed 會被 relay_problems 的憑證閘判紅（那道閘是對的）；本巡結尾的
+# _register_and_record 會重新武裝並補上真憑證。
+def _heal_relay(plan: Path, args, why: str) -> dict | None:
+    """以呼叫端引數＋任務書檔名重建最小狀態塊並落盤；重建不了（檔不存在）回 `None`。"""
+    if not plan.is_file():
+        return None  # 地板沒了：沒有檔可以把狀態塊寫回去 ⇒ 自癒不了，交給解除路徑
+    sid = plan.stem.removeprefix(PLAN_PREFIX)
+    transcript = resolve_transcript(sid)
+    state = _base_state(sid, plan, args, "sentinel", sentinel_task_name(sid, args.task_name))
+    state.update(state="recovering", healed_from=why, handled_through="",
+                 transcript=str(transcript) if transcript else "")
+    try:
+        write_relay(plan, state)
+    except OSError:
+        return None  # M2：IO 層寫不回去＝自癒不了，交給解除路徑（那一支必經 loud alert）
+    return state
 
 
 # 哨兵醒來。**第一件事是留痕**（與 `_resume_tick` 同一條紀律：讓「觸發了但早期失敗」
 # 與「根本沒觸發」分得開），第二件事才是讀狀態。
 def _sentinel_tick(args) -> int:
-    """schtasks 叫起來的巡邏那一支：留痕 → 讀檔判定 → 四分支。"""
+    """schtasks 叫起來的巡邏那一支：留痕 → 讀檔判定（讀不出先自癒）→ 四分支。"""
     plan = Path(args.plan or "unknown")
     log = endurance_log_path(plan)
     append_log(log, "sentinel_woken", plan=str(plan))
-    state = parse_relay(plan.read_text(encoding="utf-8")) if plan.is_file() else None
-    problems = relay_problems(state) if state is not None else ["任務書／狀態塊讀不出來"]
+    try:
+        text, read_fault = (plan.read_text(encoding="utf-8") if plan.is_file() else ""), ""
+    except (OSError, ValueError) as exc:  # M2 第四分形（UnicodeDecodeError ⊂ ValueError）
+        text, read_fault = "", READ_FAULT_WHY.format(kind=type(exc).__name__)
+    state = parse_relay(text)
+    # 修2：四種讀不出分形（比照 `_resume_tick`）——事故當晚痕跡同形，驗屍只能靠推理。
+    fault = (read_fault or ("" if state is not None else
+             "任務書不存在" if not plan.is_file() else
+             "狀態塊在但 JSON 壞掉" if has_relay(text) else "任務書裡沒有狀態塊"))
+    problems = [fault] if fault else relay_problems(state)
     if problems:
-        # 見 `_abort_and_unregister`（同一個病、同一份實作）。
-        return _abort_and_unregister(
-            log, args.task_name, "；".join(problems), "sentinel_aborted",
-            "❌ 哨兵拒絕動作：\n  - " + "\n  - ".join(problems))
+        why = "；".join(problems)
+        state = _heal_relay(plan, args, why)
+        if state is None:
+            # R-4.5.6-4b：解除必經桌面級告警——launchd／schtasks job 的 stderr 沒有人收，
+            # 事故當晚那一行「已自我解除」正是寫給了不存在的讀者。
+            append_log(log, "sentinel_heal_failed", why=why, **escalation.alert(f"哨兵狀態塊讀不出來且自癒失敗（{why}）⇒ 解除巡邏，喚醒鏈斷線", {"session_id": plan.stem, "plan_path": str(plan), "log_path": str(log)}, loud=True, plan=plan))  # noqa: E501
+            return _abort_and_unregister(log, args.task_name, why, "sentinel_aborted",
+                                         f"❌ 哨兵拒絕動作：{why}（已桌面告警）")
+        append_log(log, "sentinel_selfhealed", why=why, **escalation.alert(f"哨兵狀態塊被砸（{why}），已自癒續巡——請查誰在覆寫任務書", state, loud=True, plan=plan))  # noqa: E501
     log = Path(state.get("log_path") or log)
     transcript = Path(str(state.get("transcript") or ""))
     now = datetime.now().astimezone()
@@ -1289,11 +1311,9 @@ def _sentinel_tick(args) -> int:
     # `escalation.alert` 的三層）。扇出快照提前到判定之前算，因為死者數現在是叫人的門檻。
     event = guard.unhandled_limit_event(transcript) if transcript.is_file() else None
     fan = escalation.snapshot_fanout(transcript, event)
-    idle = (now.timestamp() - guard.newest_activity_at(guard.session_transcripts(transcript))
-            if transcript.is_file() else None)
+    idle = (now.timestamp() - guard.newest_activity_at(guard.session_transcripts(transcript)) if transcript.is_file() else None)  # noqa: E501
     decision = sentinel_decide(event, "", idle, now)
-    append_log(log, "sentinel_decided", action=decision["action"],
-               reason=decision["reason"], **fan)
+    append_log(log, "sentinel_decided", action=decision["action"], reason=decision["reason"], **fan)  # noqa: E501
     print(f"哨兵判定 {decision['action']}：{decision['reason']}")
     if decision["action"] == "probe":
         # 🔴 交棒給既有的續航機器，不另寫一份：`--resume-tick` 已經有探測、`tick_plan`
@@ -1308,17 +1328,14 @@ def _sentinel_tick(args) -> int:
         # （收掉自己的任務書殘骸，見 `escalation.gc_plans`），而「什麼都不做」正是
         # `%TEMP%` 累積 26 份任務書的原因。`**fan` 把扇出死者數帶進叫人的門檻。
         loud = decision["action"] == "escalate"
-        state.update(state="abandoned" if loud else "disarmed",
-                     **_cleared_credentials())
+        state.update(state="abandoned" if loud else "disarmed", **_cleared_credentials())
         write_relay(plan, state)
         rc = _schtasks_remove(state["task_name"])
         told = escalation.alert(decision["reason"], state, loud=loud, plan=plan, **fan)
-        append_log(log, "sentinel_" + decision["action"], unregister_rc=rc,
-                   why=decision["reason"], **told)
+        append_log(log, "sentinel_" + decision["action"], unregister_rc=rc, why=decision["reason"], **told)  # noqa: E501
         return 1 if loud else rc
     if decision["action"] == "arm_reset":
-        state.update(state="waiting", reset_source=decision["reset_source"],
-                     reset_at=decision["reset_at"].isoformat())
+        state.update(state="waiting", reset_source=decision["reset_source"], reset_at=decision["reset_at"].isoformat())  # noqa: E501
     rc, moment = _register_and_record(plan, state, decision["at"], SENTINEL_TICK)
     append_log(log, "sentinel_rearmed", action=decision["action"],
                fire_at=decision["at"].isoformat(), credential=moment)
@@ -1342,6 +1359,12 @@ def main(argv: list[str]) -> int:
     # 的路徑上會讓「這台機器上找不到 session」變成查不到額度（同 --check-autocompact 的理由）。
     if args.pace:
         print(quota_gate.pace_report(), end="")
+        # 修3（R95；ADR §2.9）：哨兵活性欄。定位不到 session 時靜默跳過（本旗標的
+        # 「不依賴逐字稿」契約不變）；定位得到而 stamp 與排程器現查不一致才出聲。
+        aim = resolve_transcript(args.session_id, args.transcript)
+        liveness = sentinel_lifecycle.liveness_line(guard.session_id_of(aim)) if aim else ""
+        if liveness:
+            print(liveness, file=sys.stderr)
         return 0
 
     # 這三個模式不需要逐字稿，先處理（否則在找不到 session 的機器上連查姿態都做不到）。
@@ -1362,19 +1385,16 @@ def main(argv: list[str]) -> int:
         # 在 payload 裡給的）。其餘入口一律維持 fail-loud。
         transcript = Path(args.transcript)
     if transcript is None:
-        print(
-            "❌ 找不到逐字稿。依序試過：--transcript / --session-id / "
-            f"{project_transcript_dir(_REPO_ROOT)} 下最後修改的 *.jsonl。\n"
-            "   fail-loud 是刻意的：定位不到 session 時產出的任務書會綁錯 session id，"
-            "而那個 id 正是重啟指令唯一的參數。",
-            file=sys.stderr,
-        )
+        print(f"❌ 找不到逐字稿。依序試過：--transcript / --session-id / {project_transcript_dir(_REPO_ROOT)} 下最後修改的 *.jsonl。\n   fail-loud 是刻意的：定位不到 session 時產出的任務書會綁錯 session id，而那個 id 正是重啟指令唯一的參數。", file=sys.stderr)  # noqa: E501
         return 1
 
     data = measure(transcript)
 
     if args.check:
         print(check_report(data), end="")
+        liveness = sentinel_lifecycle.liveness_line(data["session_id"])  # 修3：同 --pace
+        if liveness:
+            print(liveness, file=sys.stderr)
         if args.print_schtasks:
             print(
                 "ℹ️  --check 不寫檔，故不印 schtasks 指令：那段指令要引用任務書的路徑，"
@@ -1388,9 +1408,16 @@ def main(argv: list[str]) -> int:
     )
     now = datetime.now(UTC).astimezone().isoformat(timespec="seconds")
     try:
+        # 修1／R-4.5.6-3 單檔雙寫者禁令（R95；ADR §2.9）：骨架重寫前先搶救既有 RELAY
+        # 狀態塊、寫完骨架原樣回填。halt 動作的 plan_writer 走的就是這條預設路——
+        # 2026-08-16 00:42 它整檔覆寫任務書砸掉哨兵狀態塊（事故時間線＝Resume 證據檔 §L-4）。
+        relic = parse_relay(out.read_text(encoding="utf-8")) if out.is_file() else None
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(render_plan(data, now), encoding="utf-8", newline="\n")
-    except OSError as exc:
+        if relic is not None:
+            write_relay(out, relic)
+    except (OSError, ValueError) as exc:
+        # M2：relic 讀取的 UnicodeDecodeError ⊂ ValueError，修前直接 traceback 出場。
         print(f"❌ 任務書寫檔失敗：{out}（{exc}）", file=sys.stderr)
         return 1
 

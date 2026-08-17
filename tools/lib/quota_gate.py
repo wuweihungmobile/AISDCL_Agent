@@ -115,6 +115,8 @@ from quota_messages import (  # noqa: E402,F401
     binding_resets_at,
     core_signature_change_note,
     evidence_hint,
+    halt_resets_at,
+    model_hint_line,
     pace_line,
     quota_halt_message,
     quota_prepare_message,
@@ -635,7 +637,8 @@ def quota_halt_actions(payload: dict, decision: quota_policy.Decision, now: date
     🔴 哨兵的既有逃生口在這裡也算數：關掉時**必須在訊息裡說出來**——「關掉了所以沒武裝」
     與「武裝了」外觀相同就是假綠。
     """
-    branch = reset_branch(binding_resets_at(decision), now)
+    # 修4／R-4.5.6-5：分支吃 ≥halt 各軸中最早可 reset 者（binding 無 reset ≠ 只能等人）。
+    branch = reset_branch(halt_resets_at(decision), now)
     raw = payload.get("transcript_path")
     transcript = Path(raw) if isinstance(raw, str) and raw.strip() else None
     plan = plan_writer(transcript) if transcript and transcript.is_file() else ""
@@ -709,8 +712,10 @@ def pace_report(now: datetime | None = None) -> str:
     # 🔴 free 帶（`cap is None`）刻意不印：那一行逐字說「這道節流…」，而 free 帶沒有任何
     # 節流 ⇒ 印出來就是一句假話，而「訊息裡混一句假話比少一欄更難看見」是本 repo 的判例。
     horizon = "" if decision.cap is None else throttle_horizon_line(decision, now)
+    # R95：攤提行帶 converge 錨點（出聲不收緊時說出口）；hint 行空字串＝不印（見渲染端）。
     return (f"{pace_line(decision)}\n  {quota_policy.describe(decision)}\n"
-            f"  {quota_pace.explain(decision.amort)}\n  {posture_line()}\n{horizon}"
+            f"  {quota_pace.explain(decision.amort, policy.converge_pct)}\n"
+            f"  {posture_line()}\n{horizon}{model_hint_line(decision)}"
             f"  來源={state.source} 量測於={state.measured_at or '(無)'}{tail}\n{plan_note}")
 
 
@@ -830,7 +835,9 @@ def quota_gate(payload: dict, *, blocking, latch_read, latch_write,
         # **硬前置**，不是順手清理。`binding` 在 halt 帶結構上不可能是 `None`：`decide()`
         # 是唯一的 `Decision` 產生者，而它回 `binding=None` 的那一支把 band 寫死成
         # `BAND_UNMEASURED`（見該檔 `decide()`）。
-        key = f"halt@{decision.binding.kind}@{str(binding_resets_at(decision))[:16]}"
+        # 修4：閂鎖鍵的期程半改記**被武裝的**那個 reset（halt_resets_at）——鍵若釘在
+        # binding 的 None 上，跨 reset 視窗永遠不換鍵＝reset 後不re-arm（事故 00:42 原形）。
+        key = f"halt@{decision.binding.kind}@{str(halt_resets_at(decision))[:16]}"
         if key not in latch_read(latch):
             latch_write(latch, key)
             act = quota_halt_actions(payload, decision, now,

@@ -1059,9 +1059,7 @@ class TestCheckNightlyFlag(DevStartTestCase):
 
 
 class TestCacheRestoreTrustRestoredBranch(DevStartTestCase):
-    """QA 複審：_cache_restore_trust() / _venv_healthy() 的『restored』分支是 round 2
-    （b2a9cf2）修復的核心防線、也是本工具『秒級換回』賣點的實作核心，先前只測到
-    TestVenvCacheHandoffBackup 這個旁支（碰撞備份），本體完全沒有直接測試機械把關。
+    """QA 複審覆蓋缺口立案（round 2／b2a9cf2 核心防線，原文＝Guard_Repin 證據檔 §D-4）。
     透過 _ensure_venv_shape() 驗證端到端行為（含實際 rename 是否發生），而非只測
     _cache_restore_trust 的回傳值。
     """
@@ -1070,12 +1068,8 @@ class TestCacheRestoreTrustRestoredBranch(DevStartTestCase):
     def _make_fake_interpreter(py: Path, healthy: bool) -> None:
         py.parent.mkdir(parents=True, exist_ok=True)
         if healthy:
-            # R3 QA 發現：shebang 腳本（#!/bin/sh）只在 POSIX 上可執行，Windows
-            # 上 _venv_healthy() 實際 subprocess.run([py, "--version"]) 會撞
-            # WinError 193（非合法 PE 格式），使「健康」情境在 Windows 上永遠
-            # 走到「不健康」分支——改複製當前真正在跑的直譯器本體（含 pyvenv.cfg，
-            # 見 _copy_functional_interpreter），三平台皆為合法可執行檔，能真實
-            # 驗證 _venv_healthy() 的 subprocess 呼叫成功。
+            # R3 QA 發現：shebang 腳本在 Windows 上不可執行會誤判「不健康」
+            # （原文＝Guard_Repin 證據檔 §D-5）；改複製真正在跑的直譯器本體。
             _copy_functional_interpreter(py)
         else:
             # 損毀的假二進位：非合法可執行格式（無 shebang、非 ELF/Mach-O）→ exec 失敗
@@ -1446,20 +1440,11 @@ class TestOrphanChildLockRegression(DevStartTestCase):
                 if proc.poll() is None:
                     proc.kill()
                     proc.wait()
-            # R3 QA 發現（Windows-only）：Popen 物件本身持有子行程 handle，即使
-            # 子行程已真正結束，只要此 handle 未關閉，Windows 仍視該行程物件為
-            # 存活（OpenProcess 可成功開啟），造成 _pid_alive() 誤判仍存活——這
-            # 與正式場景（另一個全新 dev_start 行程檢查陌生 PID、從未持有其
-            # handle）不同，顯式釋放本行程自己持有的 handle 才能正確模擬「已
-            # 終止且無人持有」的情境。POSIX 上 del 對測試結果無影響。
+            # R3 QA 發現（Windows-only）：Popen 物件持有子行程 handle 未關閉會讓
+            # _pid_alive() 誤判仍存活，故顯式 del 釋放（原文＝Guard_Repin 證據檔 §D-6）。
             del proc
-            # R59 DEF-101-523：`del proc` 只是丟掉 Python 端參照，實際 handle 由 CPython
-            # 的 refcount 立即釋放，但**Windows 核心釋放行程物件仍有極短延遲**，期間
-            # `OpenProcess` 仍可能成功 → `_pid_alive()` 回 True → 本斷言偶發翻紅。
-            # R59 主控實測：連續多次執行中出現過一次 `AssertionError: 1976 is not None`，
-            # 隨後連續 3 次重跑皆綠＝非決定性。改為**有界等待**（≤2s、20 次輪詢）後才斷言：
-            # 語意仍是「子行程結束後必須回 None」，但不再把「核心尚未釋放」誤判為缺陷。
-            # 假紅與漏測同等有害——它會讓人去追一個不存在的缺陷，或反過來養成忽略紅燈的習慣。
+            # R59 DEF-101-523：del 後 Windows 核心釋放行程物件仍有極短延遲，改為
+            # 有界等待（≤2s、20 次輪詢）後才斷言（本輪實測與處置原文同上 §D-6）。
             with mock.patch.object(dev_start, "LOCK_FILE", lock_file):
                 peeked = dev_start._peek_bootstrap_lock()
                 for _ in range(20):
@@ -1630,13 +1615,8 @@ class TestStreamNewProcessGroupSurvivesDirectChildDeath(DevStartTestCase):
 
 
 class TestBootstrapProcessGroupSurvivesDirectChildKill(DevStartTestCase):
-    """MUST FIX A 迴歸測試（取代舊版 TestGrandchildOrphanSurvivesDirectChildKill /
-    TestMultiGrandchildLockNotPrematurelyStale 對『事後 ppid 回溯』的測試方式）：
-    Architect 第三輪複審已用真實驗證證明那個修法在因果上必然無效（見上方
-    TestStreamNewProcessGroupSurvivesDirectChildDeath 與 dev_start.py 內
-    `_stream`/`_lock_target_alive`/`_DescendantWatcher` docstring 的完整推導），
-    舊測試的 `root_pid` 用的是測試行程自己（全程沒有死亡），跟真正的 bug
-    （直接子行程本身已經死亡、孫行程被過繼）完全是兩回事。
+    """MUST FIX A 迴歸測試（取代舊版對『事後 ppid 回溯』的測試方式——Architect
+    第三輪複審立案，原文＝Guard_Repin 證據檔 §D-7）。
 
     新設計：`_run_bootstrap()` 對 POSIX 呼叫 `_stream(..., new_process_group=True)`，
     讓直接子行程以 `start_new_session=True` 成為新 session 的 group leader
@@ -1933,11 +1913,8 @@ class TestNormalBootstrapFlowUnaffectedByProcessGroupChange(DevStartTestCase):
 
 class TestDescendantWatcherFinalSyncSampleWindows(DevStartTestCase):
     """MUST FIX #3 迴歸測試（Windows 版）：`_DescendantWatcher` 自 MUST FIX A
-    起僅供 Windows 使用（POSIX 已改用 pgid + os.killpg，見上方兩個新測試類別）；
-    舊版 `TestDescendantWatcherFinalSyncSample` 是在這台 macOS 開發機上直接
-    呼叫 `_DescendantWatcher`，實際命中的是已被移除的 POSIX 分支
-    （`_list_pid_ppid_pairs_posix`）——該分支代表的機制在生產環境已不再被任何
-    平台呼叫（POSIX 不用，且該分支本身已刪除），繼續測它沒有意義。
+    起僅供 Windows 使用；舊版測試命中的是已移除的 POSIX 分支、繼續測它沒有意義
+    的沿革，原文＝Guard_Repin 證據檔 §D-8。
 
     本測試改用 `mock ctypes.windll` 的既有慣例（比照 `TestPidAliveWindowsBranch`）
     模擬 Windows Toolhelp32 API，在 Windows 分支上重新驗證 MUST FIX #3 這個
@@ -3024,21 +3001,10 @@ class TestLaunchdNightlyLoaded(DevStartTestCase):
         fake_run.assert_not_called()
 
     def test_win32_returns_none_without_spawning(self):
-        """DEF-101-243③：既有三態測試只覆蓋 darwin/linux，缺 win32 專屬案例
-        （launchd 為純 macOS 機制，win32 上 platform_utils.is_macos() 應同樣判 False
-        並提早 return，不嘗試呼叫 launchctl）。
-
-        R19 四方一審 QA 對抗式 bug-injection 標的：只 mock `subprocess.run` 對
-        `Popen`/`os.system` 這類其他子行程 API 完全無視野——同時 mock 這三個入口，
-        確保「提早 return、不 spawn 任何子行程」的意圖真的被完整鎖住，而不只鎖住
-        目前實作剛好用到的那一個 API。
-
-        DEF-101-247③（R19 複審，記入 backlog；R20 補齊）：三重 mock 仍未涵蓋
-        `os.spawnv`/`os.posix_spawn` 等不經 `Popen` 的行程建立 API——本專案風格
-        全走 subprocess，發生機率低，但既然要鎖「不 spawn 任何子行程」的意圖，
-        補齊視野比留下已知縫隙划算。`os.posix_spawn` 為 POSIX-only（Windows
-        `os` 模組無此屬性），`create=True` 讓 mock 在任何平台上都能安全掛上去，
-        不因屬性不存在而先於斷言就 AttributeError。"""
+        """DEF-101-243③／R19／DEF-101-247③ 立案：win32 專屬案例與三重 mock 視野缺口
+        （原文＝Guard_Repin 證據檔 §D-3）。三重 mock 涵蓋 `subprocess.run`／`Popen`／
+        `os.system`／`os.posix_spawn`，確保「提早 return、不 spawn 任何子行程」的
+        意圖被完整鎖住。"""
         with mock.patch.object(sys, "platform", "win32"), \
              mock.patch.object(dev_start.subprocess, "run") as fake_run, \
              mock.patch.object(dev_start.subprocess, "Popen") as fake_popen, \
@@ -3563,28 +3529,13 @@ class TestNightlyHeartbeatDimensionContract(_NightlyHeartbeatDimensionMixin, uni
 class TestNightlyHeartbeatCrossSiteBehavioralEquivalence(
     _NightlyHeartbeatDimensionMixin, unittest.TestCase
 ):
-    """R50 四方複審發現：dev_start.py `_check_nightly_heartbeat()` 與
-    install_mac_nightly.sh `report_heartbeat()` 是各自獨立實作的心跳判斷。既有
-    `TestCrossSiteLiteralLocks` 只用 regex 從兩側原始碼抽『字面常數』（門檻天數、
-    label）斷言相等，從未拿同一組心跳檔輸入實際執行兩側邏輯、比對『判定結果』是否
-    一致——若任一側未來改變比較運算子或取整方式，字面值鎖完全不會有訊號。
+    """R50 四方複審發現：兩側各自獨立實作的心跳判斷，舊字面值鎖比對不到『判定結果』
+    是否一致（R50／R67-E21／R67-M40 三筆立案沿革，原文＝Guard_Repin 證據檔 §D-9）。
 
     本測試直接從 install_mac_nightly.sh 原始碼**動態擷取** `report_heartbeat()`
     函式本體（非另外複製一份到測試檔——避免測試與生產程式碼各自漂移），在獨立
     bash 子行程中對同一顆心跳檔執行，並與 python 側 `_check_nightly_heartbeat()`
     在同一顆心跳檔上的輸出逐維度比對。
-
-    🔴 R67-E21：比對「哪些維度」不再由本檔自行決定——`_classify()` 回傳的 dict
-    鍵集合就是實際比對面，而 `test_lock_covers_every_dimension_claimed_by_installer`
-    強制它等於安裝器檔頭 `DIMENSIONS:` 機讀清單。WHY：R15 於 dev_start 新增第 4 個
-    維度（FAIL 計數）時安裝器沒跟上，而本鎖被寫死在 R12 的「三態」語意上，於是
-    「--status 對 nightly 全紅假綠」這件事在兩層守門下都零訊號。散文契約若沒有
-    機械出口，就只是一句沒人會發現它過期的話。
-
-    🔴 R67-M40：`now` 由測試凍結後**同時**餵給兩側（bash 走 IMN_NOW 測試縫、python
-    走 time.time patch），年齡以整數秒指定。舊版讓兩側各自呼叫 date/time.time，在
-    8.0 天整秒邊界上必然分歧且無法穩定斷言，只好刻意取 7.9／8.1 天避開——避開的
-    那一點正是唯一會出事的點。
     """
 
     # 維度契約面（`_REPO`／`_INSTALLER`／`_DIMENSIONS_RE`／`_installer_claimed_
@@ -3603,11 +3554,8 @@ class TestNightlyHeartbeatCrossSiteBehavioralEquivalence(
         launchd/plist 副作用、不 source 整支腳本以免誤觸其 case 分派或 Darwin
         guard 之外的其他邏輯），回傳其 stdout。
 
-        R67-M38：門檻取自 `dev_start._HEARTBEAT_MAX_AGE_DAYS`，**不得硬編**。舊版
-        寫死 `HEARTBEAT_MAX_AGE_DAYS=8`，是全 repo 第 4 份門檻字面值且不受任何跨檔
-        鎖保護——兩生產站點合法同步演進（8→10）時字面鎖 `test_heartbeat_threshold_
-        matches_installer` 仍綠，只有本鎖假紅，且失敗訊息指控生產程式碼「兩份實作
-        分歧」，把維護者導向一個不存在的問題。
+        R67-M38：門檻取自 `dev_start._HEARTBEAT_MAX_AGE_DAYS`，不得硬編（舊版
+        寫死值曾讓本鎖假紅，原文＝Guard_Repin 證據檔 §D-9）。
         """
         extract = subprocess.run(
             ["sed", "-n", "/^report_heartbeat() {/,/^}/p", str(self._INSTALLER)],
@@ -3853,21 +3801,8 @@ _MACNIGHTLY_DEGENERATE_PLIST = """<?xml version="1.0" encoding="UTF-8"?>
 class MacNightlyStatusTestCase(unittest.TestCase):
     """`--status` 報表契約共用夾具。
 
-    背景：`--status` 過去是「三行全綠」——launchctl 有沒有列出 label、plist 檔案存
-    不存在、心跳 mtime 幾天前。三個判準沒有一個會去看**已安裝產物的內容**，也沒有
-    一個看得見**中間漏跑**：
-
-      R67-M37  一份指向 `/nonexistent/OLD_PATH` 載體、且缺 `RunAtLoad` 的死排程
-               （R15 之前安裝過的機器至今就是這個樣子）回報全綠 rc=0。護欄側
-               `tools/macos_smoke_local.sh:474` 鎖的是**安裝器 heredoc 原始碼**含
-               RunAtLoad，不是**機器上實際安裝的產物**——來源正確不蘊含產物正確。
-               Windows 側 Show-TaskDetail 逐項印 4 個補跑保護設定的 `(expected X)`
-               供人比對，mac 側零對等物。
-      R67-F29  本機 07-28/29/30 三天零 nightly（整段關機），`--status` 仍印「✅ 心跳：
-               新鮮（距今 0 天）」——因為 07-31 開機後 RunAtLoad 補跑一輪把計數歸零。
-               心跳語意是「最後一次何時跑」，結構上看不見連續性缺口，而任何一次補跑
-               都會把先前整段空窗永久蓋掉。CI 停擺（DEF-101-081）期間本地 nightly 是
-               唯一每日兜底層，這正是判斷該兜底層死活的工具。
+    背景：修前「三行全綠」判準看不到已安裝產物內容、也看不到中間漏跑
+    （R67-M37／R67-F29 立案，原文＝Guard_Repin 證據檔 §D-10）。
 
     夾具在暫存目錄搭一棵最小 repo 樹 + fake HOME + stub launchctl，跑**真實的**
     `install_mac_nightly.sh --status`（複製自真檔，非另抄一份邏輯）。絕不觸碰真實
@@ -4242,16 +4177,10 @@ class TestMacNightlyMachineStateCapabilities(MacNightlyStatusTestCase):
         撐不起「每天 02:00 前把機器叫醒」這個語意；把它算成已排定，等於在唯一的每日
         回饋通道上宣告一個不存在的保護。
 
-        🔴 本鎖的鑑別力射程（**複審實測訂正**，不是推論）：本測試此前自陳「合成注入
-        『退回全文子字串比對』→ 轉紅（有鑑別力）」——**那句話是假的**。忠實還原該形態
-        （`pmset -g sched | grep -iE "(${PMSET_WAKE_EVENTTYPES})"`）實測 24 tests **OK、
-        rc=0**。原因：本 stub 的 eventtype 是 `wake`，而它不是詞彙表
-        `wakepoweron|wakeorpoweron|poweron` 裡任何一項的子字串 ⇒ 全文比對在這份輸入上
-        **本來就不會命中**，綠是白撿的，不是判準擋下來的。真正吃得下那個假綠的輸入是
-        一次性的 **wakeorpoweron**，已補成獨立一支
+        🔴 本鎖的鑑別力射程（**複審實測訂正**，不是推論）：本測試此前自陳的鑑別力宣稱
+        經複審實測證偽，本支保留的價值是情境覆蓋而非形態鑑別力（原文＝Guard_Repin
+        證據檔 §D-17）；真正吃得下全文比對假綠的輸入已補成獨立一支
         （`test_a_one_shot_wakeorpoweron_is_not_mistaken_for_the_daily_repeat`）。
-        ⇒ 本支保留的價值是「macOS 出廠常態（user-invisible wake）不得被誤判」這個
-        **情境**覆蓋，不是形態鑑別力；別再把它讀成全文比對的守門人。
 
         🔴 仍然沒有測試在守的那一半（不變）：合成注入「只拿掉安裝器的區段錨定、保留
         tolower($1) 欄位判準」→ 全綠。因為一次性段的 $1 結構上恆為 `[N]`
@@ -4305,21 +4234,15 @@ class TestMacNightlyPmsetMarkerIsNotProse(unittest.TestCase):
     DimensionMixin` 檔頭記載的那個「搭錯車造成覆蓋損失」形態（R72 已為
     `test_capability_row_count_reaches_windows_side_parity` 處理過一次）。
 
-    這件事在本輪特別要緊：被撤回的那個字面值**就是在 Windows 上寫下的**（R82 全輪
-    在 Windows 完成，mac 側整組被 skip 掉所以零回饋）。把守它的鎖也做成 mac 才跑，
-    等於把守衛擺在錯的那一岸——下一個在 Windows 上動這支安裝器的人照樣看不到紅。
+    這件事在本輪特別要緊：被撤回的字面值當初就是在錯的那一岸寫下的
+    （沿革原文＝Guard_Repin 證據檔 §D-18）。
     """
 
     _INSTALLER = Path(dev_start.__file__).resolve().parents[1] / "tools" / "install_mac_nightly.sh"
 
     def test_the_installer_does_not_pin_a_prose_marker_that_pmset_never_prints(self) -> None:
-        """R82 那個判準字面值不得回來：`pmset` 從不印「wake or poweron」。
-
-        真 mac 實測：`strings /usr/bin/pmset | grep -c "wake or poweron"` ＝ 0。
-        pmset 印的是 com.apple.AutoWake.plist 的 `eventtype` **原值**
-        （輸出樣板 `  %s at %s %s`），值域＝sleep/wake/poweron/shutdown/
-        wakepoweron/wakeorpoweron。押那句散文的後果不是報錯而是**恆不命中**：
-        使用者照著跑完 sudo 指令，這兩列照樣印 ⚠️，於是他會再排一次、再一次。
+        """R82 那個判準字面值不得回來：`pmset` 從不印「wake or poweron」
+        （真 mac 實測數字，原文＝Guard_Repin 證據檔 §D-18）。
 
         本斷言與那幾支行為測試不是重複——行為測試用的是 stub 的輸出，
         stub 可以被改成配合任何字面值；這一支直接讀原始碼，釘的是
@@ -5234,25 +5157,9 @@ _GUARD_PS1_PATH = Path(__file__).resolve().parents[1] / "lib" / "WindowsAppsGuar
 _DEV_START_SH_PATH = Path(__file__).resolve().parents[1] / "dev_start.sh"
 _DEV_START_PS1_PATH = Path(__file__).resolve().parents[1] / "dev_start.ps1"
 
-# 🔴 R71（DEF-101-760）：PowerShell 寫進 pipe 的位元組編碼＝**console output code
-# page**，不是 UTF-8。Windows 繁中預設 CP=950（Big5），而本檔對 PowerShell 輸出的
-# 斷言含 `❌`（U+274C）——CP950 表示不了它，Windows PowerShell 5.1 會靜默換成 `?`，
-# Python 端再以 `encoding="utf-8"` 解碼整段中文即成亂碼 ⇒ `assertIn("❌", …)` 必紅。
-#
-# 為什麼以前沒紅（這才是本缺陷真正的形狀）：`chcp` 是**整個 console 共用**的行程外
-# 狀態，全套跑時只要有任何一支較早的測試把它換成 65001，後面所有 PowerShell 呼叫
-# 就跟著沾光。於是這支斷言「全套跑綠、單獨跑紅」——綠燈不是它自己掙來的，是別的
-# 測試檔的副作用借給它的。這種綠沒有鑑別力，也會隨測試順序漂移。
-#
-# 修法＝每次呼叫都自帶 UTF-8 前置，把 `[Console]::OutputEncoding`（引擎寫進 pipe 的
-# 編碼）釘成 UTF-8。前置字串本身住在 `_platform_helpers.PS_UTF8_PRELUDE`。
-#
-# 🔴 R71 訂正（原本這裡是第 4 份、且寫法與其他三處不同）：本檔首版自寫
-# `$OutputEncoding = [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding
-# $false`，理由寫「`[System.Text.Encoding]::UTF8` 帶 preamble 會吐 BOM」。該理由經
-# Windows 11 真機 / PS 5.1 單變因實測**證偽**（三種寫法輸出逐位元組相同、BOM 全程
-# 未出現；`$OutputEncoding` 只管餵原生子行程 stdin，本檔無此用法）——完整量測貼在
-# `PS_UTF8_PRELUDE` 上方註解。故本檔改用既有多數寫法的共用常數，不留第 4 種。
+# R71（DEF-101-760）：PowerShell 寫進 pipe 的是 console output code page 不是 UTF-8，
+# 修法＝每次呼叫自帶 UTF-8 前置（`_platform_helpers.PS_UTF8_PRELUDE`）。缺陷形狀與
+# 訂正沿革原文＝Guard_Repin 證據檔 §D-1。
 
 # 掃描面：三棵測試樹（比照 test_bash_probe_spec_contract._TEST_TREES——只守自己那棵
 # 等於留著下一次分歧）。AISDLC_SDD 側也有兩處行內複本，故不可只掃 tools/tests。
@@ -5904,13 +5811,9 @@ class TestGetPythonGeMinPowerShell(unittest.TestCase):
 
     ADR-XPLAT-002 §3.2 的紀律：字面比對型 parity 不算機械釘選。
 
-    🔴 R71（DEF-101-755 結案）：`test_skips_sub_311_candidate` 原掛
-    `@unittest.skipIf(os.name == "nt", "shim 為 POSIX sh 腳本")`——也就是說，
-    這支 `.ps1` **唯一真正出貨的平台**上，本類的行為鑑別力等於零，而類別 docstring
-    讀起來像它有。代價不是理論的：DEF-101-760（`else ""` 被 PS 5.1 吃掉一個雙引號，
-    `Get-PythonGeMin` 在真 Windows 上恆回 $null）就是躲在這個 skip 後面出貨的，
-    macOS/pwsh 上跑本類**全綠**。現改為依 `os.name` 造合適形態的假直譯器，
-    Windows 上真的執行（解鎖條件 (a)）。
+    🔴 R71（DEF-101-755 結案）：本類原本在唯一真正出貨的平台上鑑別力等於零、
+    DEF-101-760 就是躲在那個 skip 後面出貨的（沿革原文＝Guard_Repin 證據檔 §D-16）。
+    現改為依 `os.name` 造合適形態的假直譯器，Windows 上真的執行（解鎖條件 (a)）。
     """
 
     def setUp(self) -> None:
@@ -6034,23 +5937,9 @@ class TestGetPythonGeMinPowerShell(unittest.TestCase):
         )
 
 
-# ────────────────────────────────────────────────────────────────────────────
-# R69 P1：「版本閘之前的 prelude 必須在 _MIN_PY 下限**以下**的直譯器可載入」
-#
-# 缺陷本體（macOS 真機重現）：`tools/dev_start.py` 第 53 行被加上
-# `from datetime import UTC`（`datetime.UTC` 是 **3.11** 才有的別名），而該行位在
-# 版本閘（`_MIN_PY` / `SystemExit(2)`）**之前** ⇒ 用 macOS 系統 python3（3.9.6）跑
-# 本檔會在 import 期就吐 `ImportError` traceback，DEF-101-628 修好的友善最低版本
-# 訊息整個被打回原形。
-#
-# 🔴 為何舊測試抓不到、非重寫不可：既有的 `_FAKE_39_SHIM` 是「真 3.11 直譯器 +
-# 開跑後改寫 `sys.version_info`」。改寫發生在 `runpy.run_path()` **之前**沒錯，但
-# 底下跑的仍是真 3.11 直譯器——`from datetime import UTC` 在它身上永遠成功。也就是
-# 說那支 shim **結構上不可能**觀測到 import-time 的版本相依失敗，它只能驗「版本
-# 判斷分支」，驗不了「prelude 本身載不載得動」。本節因此改用**真的**次版直譯器
-# subprocess 實跑（第一道），並補一道不依賴外部直譯器的靜態掃描（第二道），
-# 兩道互為備援：真跑有鑑別力但依賴環境，靜態掃描恆跑但只看得到語法/名字。
-# ────────────────────────────────────────────────────────────────────────────
+# R69 P1：版本閘之前的 prelude 必須在 _MIN_PY 下限以下的直譯器可載入；缺陷本體與
+# 舊測試（`_FAKE_39_SHIM`）為何結構上驗不到，原文＝Guard_Repin 證據檔 §D-2。
+# 本節改用真的次版直譯器 subprocess 實跑＋不依賴外部直譯器的靜態掃描，兩道互為備援。
 
 _TOOLS_DIR = Path(__file__).resolve().parents[1]
 _DEV_START_PY = _TOOLS_DIR / "dev_start.py"
@@ -6087,12 +5976,8 @@ _POST_39_FROM_NAMES = {
 def _sub_min_interpreter_candidates() -> list[list[str]]:
     """候選直譯器的 argv（順序＝先便宜後昂貴）。
 
-    🔴 R81 包 F（S3-06）：原本只有一串 PATH 名稱，而那串在 Windows 上**結構上**
-    找不到任何可用的東西——pyenv-win 放進 PATH 的是 shim（`python3.10.BAT`），該
-    shim 只有在 pyenv 把該版設成 global/local 時才轉得過去，否則它自己 rc=1
-    （本機實測 stderr 逐字：`'python3.10' is not recognized as an internal or
-    external command`）。真的直譯器住在 `<PYENV_ROOT>/versions/<ver>/python.exe`，
-    PATH 上沒有它 ⇒ 只掃 PATH 等於在一台**裝了** 3.10 的機器上宣稱「找不到」。
+    🔴 R81 包 F（S3-06）：原本只有一串 PATH 名稱，而那串在 Windows 上結構上找不到
+    任何可用的東西（pyenv-win shim 本機實測細節，原文＝Guard_Repin 證據檔 §D-13）。
 
     三種發現路徑並存，缺一都會在某類機器上失明：
       · `/usr/bin/python3`：macOS 主場（3.9.x），POSIX 上第一順位就命中。
@@ -6194,10 +6079,8 @@ class TestRealSubMinInterpreterPrelude(unittest.TestCase):
             # 環境湊不出舊直譯器時必須讓 skip 訊息自己喊出來（`[TOOL-ABSENCE]`），
             # 讓 CI log 上「這道鎖沒跑」是可被搜尋的事實，而不是一片綠裡的沉默。
             #
-            # 🔴 R81 包 F（S3-06）：**兩種失效必須分得開**。原訊息只說得出「找不到」，
-            # 而本機的實況是「找到了 pyenv 的 3.10.11、跑它、它自己 rc=1」——把後者
-            # 印成前者，等於在帳面上宣稱一件與磁碟相反的事（而且是一個永遠不會有人
-            # 去修的理由：「這台機器缺件」）。
+            # 🔴 R81 包 F（S3-06）：兩種失效必須分得開，本機實況原文＝
+            # Guard_Repin 證據檔 §D-14。
             if self.broken:
                 self.skipTest(
                     f"[TOOL-ABSENCE] 找得到候選直譯器，但**每一支都跑不起來**"
@@ -6359,30 +6242,9 @@ class TestPy39PreludeStaticScan(unittest.TestCase):
 
 
 # ======================================================= 原生 stdout 解碼（DEF-101-762）
-# 🔴 為何這組鎖住在本檔、而不是自己一支檔（R71／DEF-101-561③）：架構級裁決「R61 開輪
-# 即禁止新增鎖檔、只准合併／刪除」——理由是護欄層已經比它所護的生產碼還大。R71 落地
-# 時新開了 `test_native_stdout_utf8_decoding.py`，使 tools/tests 鎖檔數 53→54，三支機械
-# 棘輪當場翻紅而四路收尾無一提到。四方指定的落點就是本檔：本檔已持有 `PS_UTF8_PRELUDE`
-# 一族判準，同源的判準放同一處；併進來也順帶逼出了「兩道鎖互斥」這個真設計衝突的解
-# （見 `_narrative_node_ids()`）。**併檔不等於降低鑑別力**：五個 case 逐一注入退化複驗。
-#
-# WHY（這條缺陷為什麼能活著出貨兩天以上）：
-# Windows PowerShell 解碼**原生指令 stdout** 用的是 `[Console]::OutputEncoding`，而本
-# repo 兩個上游都固定吐 UTF-8——`tools/git_hooks_install_common.py` 於載入
-# `tools/_stdio_utf8.py` 時把 stdout reconfigure 成 UTF-8（不看 locale），`git` 本身也
-# 一律以 UTF-8 輸出路徑。兩者只在 **UTF-8 主控台**下剛好對得上；在 **cp950**（繁中
-# Windows 的 OEM 預設）下，含非 ASCII 的路徑會被解成 mojibake（真機實測：`煙霧測試`
-# U+7159 U+9727 U+6E2C U+8A66 → U+003F U+EA57 U+EBEC U+769C U+7948 U+5CAB）。
-#
-# 致命的是**顯形條件與驗證條件互斥**：
-#   · schtasks 起的排程環境 codepage＝950 ⇒ 每日必現；
-#   · 人手動跑（Claude Code 的 PowerShell 工具／Windows Terminal）codepage＝65001
-#     ⇒ 永遠不現；
-#   · GitHub 的 windows runner 既非繁中系統、也不跑中文路徑情境 ⇒ 雲端 CI 抓不到。
-# 也就是說**所有既有的人工與 CI 驗證載具，系統性地繞開了缺陷所在的那個條件**。
-# `tools/windows_smoke_local.ps1` [6/9] 其實正確抓到了它，卻因為該腳本當時沒有任何 log
-# 落點（DEF-101-761）而讓紅燈原因連續兩天不可考。這組鎖的存在，就是把那個條件從
-# 「只有每日排程碰得到」搬進**平常就會跑的測試**。
+# 為何這組鎖住在本檔而非自己一支檔（R71／DEF-101-561③ 架構裁決）、以及這條缺陷為何
+# 能活著出貨兩天以上（cp950 mojibake 真機實測、顯形條件與驗證條件互斥），
+# 原文＝Guard_Repin 證據檔 §D-12。
 #
 # 三道鎖分工刻意不同，缺一都會退回原狀：①行為鎖（原生 5.1 才有鑑別力）②同類別內的
 # 負控（證明危害此刻仍存在，否則①在「載具沒走到危害條件」時一樣綠）③靜態備援（任何
@@ -6619,11 +6481,8 @@ class TestNativeStdoutDecodingRoutingLock(unittest.TestCase):
 
 
 # ================================================ 非 Windows 平台短路（DEF-101-766）
-# 缺陷本體：`WindowsAppsGuard.ps1::Resolve-NativeExecutable`（DEF-101-759 為擋 pyenv-win
-# 無副檔名 shim 而生）原本無條件照 `$env:PATHEXT` 過濾候選。PATHEXT 是 **Windows-only**
-# 概念——PS Core 跑在 macOS/Linux 時該變數不存在，且 POSIX 執行檔本來就不帶副檔名
-# ⇒ 每個候選都被淘汰 ⇒ `Get-PythonGeMin` 恆回 $null ⇒ macos-compat-ci 與
-# root-infra-ci(ubuntu) 必紅。與 DEF-101-759 是同一個病，只是換平台發作。
+# 缺陷本體：PATHEXT 過濾在非 Windows 上讓 Get-PythonGeMin 恆回 $null（與 DEF-101-759
+# 同病換平台發作），原文＝Guard_Repin 證據檔 §D-11。
 #
 # 🔴 為何用「參數化 harness」而不是真的起一支 PS Core：缺陷只在
 # 「`$PSVersionTable.PSVersion.Major >= 6` 且 `$IsWindows` 為假」時顯形，而在 Windows
@@ -6638,11 +6497,9 @@ class TestNativeStdoutDecodingRoutingLock(unittest.TestCase):
 # `$FakePsMajor`（替換恰 1 處，數目不對即 fail-loud）。`$IsWindows` 不必替換——它在
 # PS 5.1 本來就是未定義變數，harness 直接賦值即可，模擬 5.1 時則刻意**不定義**它。
 #
-# 🔴 被否決的第三種做法（誠實記錄，免下一個人再走一遍）：「在 PS 5.1 下清空
-# `$env:PATHEXT` 跑生產函式、斷言它不回 $null」**零鑑別力**。本包實測（原生 5.1、
-# 子行程內 `$env:PATHEXT = ''`）：修好之後的生產函式對無副檔名候選回 `FAKEPY_NULL=True`、
-# 對真 `.exe` 候選 `git` 也回 `GIT_NULL=True`——因為 Major=5 一律短路進 Windows 分支，
-# 清 PATHEXT 只是讓 Windows 分支把全部候選濾光，永遠碰不到本次修的那條路。修好修壞都綠。
+# 🔴 被否決的第三種做法（誠實記錄，免下一個人再走一遍；本包實測結果原文＝
+# Guard_Repin 證據檔 §D-11）：「在 PS 5.1 下清空 `$env:PATHEXT` 跑生產函式、斷言
+# 它不回 $null」**零鑑別力**。
 #
 # 兩道鎖分工（缺一即有缺口，且此處**不是**「行為＋字面」的例行搭配）：①行為鎖真的執行
 # 函式本體，抓「短路不存在／不生效」；②順序鎖抓「短路存在但落在 PATHEXT 過濾之後」。
@@ -6903,11 +6760,8 @@ def _real_pwsh7() -> str | None:
 class TestResolveNativeExecutableOnRealPwsh7(unittest.TestCase):
     """🔴 `DEF-101-769` 殘留項的補驗：`Major >= 6` 分支以**真 pwsh 7 行程**跑一次。
 
-    WHY 這一支非補不可（帳本逐字指派 R74）：`DEF-101-766` 的修法此前**只有 harness 鎖**
-    ——把生產函式原始碼搬進 harness、把唯讀的 `$PSVersionTable.PSVersion.Major` 換成可
-    設定的替身。那份鎖量的是**一份副本**，它證明不了「真的用 PS 7 跑起來時，這個分支
-    真的走得到、且行為與副本一致」。帳本把解鎖條件寫成三個可辨認的觸發時刻，其中
-    「要改雙引擎判準」已於 R73 發生、pwsh 7.6.4 也已在機器上 ⇒ 條件成立，補驗即到期。
+    WHY 這一支非補不可（帳本逐字指派 R74，解鎖條件於 R73 成立的沿革原文＝
+    Guard_Repin 證據檔 §D-15）。
 
     🔴 誠實劃界（勿超譯）：真 pwsh 7 在 Windows 上 `$IsWindows` **恆為真**（自動變數是
     唯讀常數，`Set-Variable -Force` 亦蓋不掉——同檔上方 harness 區段已實測記載）。

@@ -108,21 +108,9 @@ def _unpin_sentinel_off() -> None:
 def _run_nested_suite(suite: unittest.TestSuite) -> unittest.TestResult:
     """跑一個**本模組自己的**巢狀 suite，收尾把 pin 補回去。唯一准起巢狀 runner 的地方。
 
-    🔴 立案（R84／SA84-01，複審實測）：`pytest tools/tests/test_context_budget_guard.py`
-    rc=1、唯一失敗者是 `SentinelArmingCriterionTest
-    ::test_this_module_never_reaches_the_real_scheduler`（`AssertionError: None != '1'`），
-    而 `python -m unittest tools.tests.test_context_budget_guard` 對同一份原始碼 rc=0。
-    兩者差別**只有執行順序**：unittest 依類別名字母序（`S` 早於 `T`）、pytest 依定義順序
-    （巢狀 runner 那一支在前）。機制：巢狀 suite 收尾會走 `_handleModuleTearDown` →
-    `unittest.case.doModuleCleanups()`，把 `setUpModule` 註冊的還原動作提前執行掉。
-    最小重現（本輪實跑，逐字）：同模組三個類別、中間那個起巢狀 runner ⇒
-    `PIN-AFTER-NESTED: None`、`PIN-IN-LATER-CLASS: None`。
-    ⇒ 官方閘門（`run_root_unittests.py`＝unittest 載具）當時是綠的，但那是**字母序的運氣**；
-    真正的損失是 C3-P4c 要防的「同行程測試在開發者機器上註冊真 launchd job」在
-    `TraceIsolationTest` 之後全程失效——掌舵者機器上那支 22:40 移除、22:58 又重生的
-    `AutoSDD_Sentinel_s` 正是這個形狀。
-    `addModuleCleanup` 也一併補掛回去：堆疊已被沖乾淨，不補的話真正的 module teardown
-    不會還原，pin 會漏到同一個行程裡的後續測試模組。
+    機制：巢狀 suite 收尾會走 `_handleModuleTearDown` → `unittest.case.doModuleCleanups()`
+    把 `setUpModule` 註冊的還原動作提前執行掉——所以 finally 要補 pin、並把
+    `addModuleCleanup` 補掛回去。R84／SA84-01 立案敘事原文＝Resume 證據檔 §L-3.1。
     """
     try:
         return unittest.TextTestRunner(stream=io.StringIO(), verbosity=0).run(suite)
@@ -172,19 +160,8 @@ def _hook_invocations(event: str) -> list[tuple[str, str]]:
     """根 `.claude/settings.json` 內某事件的 `(matcher, 這個 hook 的完整呼叫字串)`。
 
     🔴 呼叫字串＝`command` **加上** `args` 全部串起來，不是只看 `command`。
-    立案（R80 當回合實測）：並行的另一包把註冊面改成經 `_hook_launcher.py` 轉呼叫，
-    於是實體腳本路徑從 `command` 搬到了 `args` ⇒ 只看 `command` 的判準當場回空清單，
-    兩支既有接線鎖同時紅。**那是判準太脆，不是接線壞了**——被鎖的性質是「這支 hook
-    有沒有被註冊在這個事件上」，而它與「是誰去啟動它」無關。這裡把兩處重複的讀法
-    收成一份，順帶讓它對未來再換一次啟動器免疫。
-
-    🔴 R80 收尾：上一段的判斷完全正確，但那份讀法**同一輪內長出了第二個家**——
-    另一包為同一件事建了唯一真相源 `tools/lib/hook_wiring.py`（該包實測：repo 內原有的
-    「只讀 command 找腳本名」解析器會在 exec form 下**全部**掃出空集合而恆綠。🔴 R80
-    二審 `NEW-ARCH-R80B-07`：此處原本寫死支數，而同一個數字在三個家有兩個值——支數是
-    量測值不是常數，現查指令見 `hook_wiring.py` 檔頭）。
-    兩個家各自正確、卻只有一個會被下一次形態變更改到，那正是本 repo 的頭號病。
-    這裡改為委派，回傳形狀逐字不變（呼叫端不受影響）。
+    這裡改為委派（唯一真相源＝`tools/lib/hook_wiring.py`），回傳形狀逐字不變
+    （呼叫端不受影響）。兩段 R80 立案原文＝Resume 證據檔 §L-3.2。
     """
     return [(str(entry.get("matcher", "")), " ".join(_wiring().hook_entry_argv(hook)))
             for entry in _root_settings().get("hooks", {}).get(event, []) or []
@@ -192,8 +169,7 @@ def _hook_invocations(event: str) -> list[tuple[str, str]]:
 
 
 def _root_settings() -> dict:
-    return json.loads(
-        (_REPO_ROOT / ".claude" / "settings.json").read_text(encoding="utf-8-sig"))
+    return json.loads( (_REPO_ROOT / ".claude" / "settings.json").read_text(encoding="utf-8-sig"))
 
 
 def _wiring():
@@ -230,17 +206,8 @@ def _isolated_env(tmp: Path, *, real_scheduler: bool = False) -> dict[str, str]:
                  "AUTOSDD_QUOTA_FANOUT_CAP"):
         env.pop(flag, None)
     # 🔴 R84／C3-P4c：**預設不准碰真的排程器**，要碰得自己具名（`real_scheduler=True`）。
-    # 立案是實測到的：本機 `launchctl list` 長期掛著一支 `AutoSDD_Sentinel_s`，session id
-    # 就是 `s`——那是 `QuotaGateIsWiredToTheBurnPathTest` 的 fixture 檔名（`s.jsonl`）。
-    # 它每 15 分鐘醒來一次，在 Windows 上就是掌舵者看到的那個黑框；而它的 session
-    # 早就不存在，所以永遠不會有人來收它。
-    # 🔴 上面那組 `TMPDIR`／`HOME` 隔離**結構上擋不住這件事**：`launchctl bootstrap` 進的是
-    # 真正的 `gui/<uid>` 網域，與 plist 落在哪個目錄無關 ⇒「把暫存改掉」這一招在排程器
-    # 這一軸沒有對應物。唯一能擋的位置就是「根本不要走到武裝那一步」。
-    # 🔴 為什麼沿用 `AUTOSDD_SENTINEL_OFF` 而不是新開一個測試專用旗標：它已經是「不要
-    # 武裝」的唯一真相源，新開一個等於同一件事兩個家。上面那個 `pop` 仍然必要且不衝突
-    # ——它治的是「開發者機器上設過就靜默轉綠」，這裡治的是「測試不得留下真實副作用」，
-    # 兩者方向相反地作用在同一個變數上，所以順序是先 pop 再由本測試決定。
+    # 立案實測（launchctl 孤兒哨兵）原文＝Resume 證據檔 §L-3.3；TMPDIR 隔離為何擋不住
+    # bootstrap、為何沿用 `AUTOSDD_SENTINEL_OFF` 且先 pop 再設＝Resume 證據檔 §L-4.10。
     if not real_scheduler:
         env["AUTOSDD_SENTINEL_OFF"] = "1"
     return env
@@ -249,17 +216,9 @@ def _isolated_env(tmp: Path, *, real_scheduler: bool = False) -> dict[str, str]:
 def _run_hook3(payload: object, tmp: Path) -> tuple[int, str, str]:
     """以子行程真跑 hook，回 `(rc, stderr, stdout)`。
 
-    走子行程而非 import＋呼叫 `main()`：hook 的契約是「被 Claude Code 以獨立行程呼叫、
-    讀 stdin、以 exit code 表態」，import 進來會繞過 stdin 與 exit code 這兩個契約面
-    （本 repo「驗證載具必須對齊 production 真正執行路徑」的既有紀律）。
-
-    🔴 R91 為什麼 **stdout 必須進得了斷言**：`.claude/hooks/context_budget_guard.py` 自
-    R91 起把 75% 提示同時送上 stdout 的 `hookSpecificOutput`（exit 0 下唯一進得了模型
-    context 的通道）。此前 `_run_hook()` 只回 `(rc, stderr)` ⇒ 全檔沒有任何一條看得到
-    stdout，於是「低水位誤發一份 JSON」在結構上不可能轉紅——而那正是本輪新增出來的
-    失效面。`_run_hook()` 保留為本函式的 `[:2]` 投影，而**不是**把它就地改成三元組：
-    只有真的要斷言 stdout 的那幾個站點改呼叫 `_run_hook3()`（本輪 4 個），其餘沿用投影
-    ——為了一個新性質去改一批與它無關的斷言，本身就是引入回歸的方式。
+    走子行程而非 import＋呼叫 `main()`：hook 的契約是「獨立行程、讀 stdin、以 exit
+    code 表態」。R91 stdout 通道沿革（§L-3.4）與「`_run_hook()` 保留 `[:2]` 投影、
+    不就地改三元組」的取捨全文＝Resume 證據檔 §L-4.13。
     """
     env = _isolated_env(tmp)
     text = payload if isinstance(payload, str) else json.dumps(payload, ensure_ascii=False)
@@ -1290,14 +1249,9 @@ class TickDecisionTest(unittest.TestCase):
 def _outside_single_quoted(script: str) -> tuple[str, bool]:
     """把 PowerShell 單引號字串的內容剝掉，回傳（落在字串**外**的殘餘, 全部閉合與否）。
 
-    PowerShell 單引號字串的文法很小且完整：`'` 進入字串；字串內 `''` 是一個字面單引號、
-    仍在字串內；落單的 `'` 結束字串。這裡刻意自己走一遍而**不外呼 `powershell.exe`**——
-    根層 unittest 在 mac／Linux 也要跑，多一支平台 skip 就是多一個沒人在跑的判準
-    （而「沒人在跑的判準」正是本輪 S3 在治的東西）。
-
-    🔴 這支掃描器與**真** tokenizer 的一致性由 R79 收輪當回合兩地對照證過：同一份腳本
-    餵給 `powershell.exe` 的 `[Parser]::ParseFile`，健康版 `errors=0`、把 `_ps_single_quote`
-    改成恆等後 `errors=4` 且 `Write-Output` 以獨立 token 出現——與本函式的判讀一致。
+    文法很小且完整（`'` 進入；`''` 是字面單引號；落單 `'` 結束）。刻意不外呼
+    `powershell.exe`（mac/Linux 也要跑）；與真 tokenizer 的一致性已由 R79 兩地對照
+    證過——實測數字原文＝Resume 證據檔 §L-4.17。
     """
     out: list[str] = []
     i, n, in_str = 0, len(script), False
@@ -1330,13 +1284,9 @@ class EnduranceWiringTest(unittest.TestCase):
     _NASTY_TASK = "AutoSDD'; Write-Output PWNED; '"
 
     def test_an_apostrophe_in_the_plan_path_stays_inside_the_string(self) -> None:
-        """🔴 R79 複審（ARCH nonblocking）修的缺陷：五個內插點把外部字串直接塞進
-        PowerShell 單引號字串而未跳脫。`O'Brien` 這種**合法**使用者名就足以讓整段
-        註冊腳本語法錯——而失效發生在 `powershell.exe` 那一端，本行程只看得到一個 rc。
-
-        判準刻意不看「有沒有呼叫某個函式」（那種鎖改個名字就瞎），而是看**產出**：
-        路徑的任何一段都不得落到單引號字串之外，且所有字串必須閉合。
-        把 `_ps_single_quote` 改成恆等即紅（收輪當回合實測）。
+        """🔴 R79 複審修的缺陷：五個內插點未跳脫（`O'Brien` 即炸，失效在 powershell 端）。
+        判準看**產出**不看「呼叫過某函式」：路徑不得落到單引號字串外、字串全閉合；
+        `_ps_single_quote` 改恆等即紅。立案全文＝Resume 證據檔 §L-4.24。
         """
         script = planner.endurance_schtasks_script(self._NASTY_PLAN, "T", "'09:00'")
         outside, closed = _outside_single_quoted(script)
@@ -1354,23 +1304,15 @@ class EnduranceWiringTest(unittest.TestCase):
         script = planner.endurance_schtasks_script(_A_PLAN, self._NASTY_TASK, "'09:00'")
         outside, closed = _outside_single_quoted(script)
         self.assertTrue(closed, "惡意 task-name 讓某個單引號字串沒有閉合")
-        # 🔴 R84／C3-P1：判準由 `Write-Output` 換成 `PWNED`——**不是放寬，是換成唯一標記**。
-        # `Write-Output` 是 PowerShell 的普通動詞，腳本自己也會**合法地**用它（本輪 P1 在
-        # Principal 回退分支加了 `Write-Output 'PRINCIPAL-FALLBACK=…'` 留痕跡）⇒ 舊判準對
-        # 「腳本裡本來就有一個 Write-Output」與「payload 逃出來了」無法區分，那是假紅。
-        # `PWNED` 只住在 `_NASTY_TASK` 裡，兩者在 payload 中相鄰 ⇒ 逃出去一定一起逃出去，
-        # 鑑別力不減。把 `_ps_single_quote` 改成恆等即紅（本輪實測，見收輪回報）。
+        # 🔴 R84／C3-P1：判準由 `Write-Output` 換成 `PWNED`——不是放寬，是換成唯一標記
+        # （前者是腳本自己也合法在用的動詞＝假紅）。全文＝Resume 證據檔 §L-4.5。
         self.assertNotIn("PWNED", outside,
                          "payload 逃出單引號字串、成為一段會被真的執行的獨立指令")
 
     def test_the_principal_fallback_leaves_a_trace(self) -> None:
-        """🔴 R84／C3-P1：S4U → 預設 Principal 的回退分支**必須留痕跡**。
-
-        修前它是靜默的：`catch { Register-ScheduledTask @common }` 什麼都不印，而取證段
-        （`_EVIDENCE_TEMPLATE`）只印 TaskName/LastRunTime/LastTaskResult/NextRunTime，
-        一個字都不提 Principal ⇒「S4U 生效」與「已回退成 InteractiveToken」在憑證上
-        **長得一模一樣**。而回退後有互動桌面，載具那一層若同時也退回 console 版就會彈窗
-        ——兩層一起失效、零痕跡，正是掌舵者看到「黑框每 15 分鐘一次」而工具側查不到的原因。
+        """🔴 R84／C3-P1：S4U → 預設 Principal 的回退分支**必須留痕跡**——修前「S4U
+        生效」與「已回退」在憑證上同形，兩層一起失效即黑框且工具側查不到。
+        立案全文＝Resume 證據檔 §L-4.25。
         """
         script = planner.endurance_schtasks_script(_A_PLAN, "T", "'09:00'")
         catch = next(line for line in script.splitlines()
@@ -1472,13 +1414,9 @@ class EnduranceWiringTest(unittest.TestCase):
                         "S4U 必須是 try 的那一支，回退才有意義")
 
     def test_the_audit_trail_has_exactly_one_home(self) -> None:
-        """🔴 本輪端到端實測抓到的真缺陷：稽核痕跡分裂成兩個檔。
-
-        `--resume-tick` 必須在讀任何東西**之前**就寫下「我被叫起來了」——那一刻它手上
-        只有 `--plan`（session id 還躺在沒讀的狀態塊裡）。舊寫法用 session id 當鍵，
-        於是開場那一行落在 `..._<plan 檔名>.jsonl`、其餘落在 `..._<session id>.jsonl`；
-        而「觸發了但早期就失敗」那一行剛好寫進沒有人會去看的那個檔 ⇒ 這道機制唯一要
-        守的東西（讓「沒觸發」可偵測）自己漏掉。鍵只能是任務書路徑。
+        """🔴 端到端實測抓到的真缺陷：痕跡鍵用 session id 會分裂成兩個檔，而「早期
+        失敗」那一行剛好落在沒人看的那個檔 ⇒ 鍵只能是任務書路徑。
+        全文＝Resume 證據檔 §L-4.26。
         """
         plan = Path(tempfile.mkdtemp()) / "some_plan.md"
         self.assertEqual(planner.endurance_log_path(plan),
@@ -1509,14 +1447,9 @@ class EnduranceWiringTest(unittest.TestCase):
     def test_the_quota_axis_is_a_separate_path_not_a_missing_one(self) -> None:
         """🔴 R81 補上這條鎖**反向的那一半**（SA-B1 抓到的形態）。
 
-        上一條只釘住「額度沒有被掛進 context 阻斷路徑」，於是「額度根本沒有人在守」
-        與「額度有自己的路徑」兩種狀態它**都判綠**——分母 0 的鎖恆綠，正是本 repo
-        判過四成的那一桶。這一條要求 quota 必須有一條**存在且獨立**的路徑：
-        `quota_gate()` 存在、被 `main()` 呼叫、且它自己不碰 context 那三個早退符號。
-
-        🔴 R82／Q2-02 擴射程：那條路徑現在住 `tools/lib/quota_gate.py`，所以「存在」
-        這件事的掃描面必須跟著搬——否則本鎖會因為 hook 裡再也找不到 `def quota_gate(`
-        而變成**恆紅**（那與恆綠一樣沒有鑑別力，而且會被人順手刪掉）。
+        分母 0 的鎖恆綠 ⇒ 這一條要求 quota 有一條**存在且獨立**的路徑（`quota_gate()`
+        存在、被 `main()` 呼叫、不碰 context 三個早退符號）。R82 掃描面搬家與恆紅
+        風險全文＝Resume 證據檔 §L-4.16。
         """
         source = _HOOK.read_text(encoding="utf-8")
         gate_src = _QUOTA_GATE.read_text(encoding="utf-8")
@@ -1727,6 +1660,167 @@ class SentinelDecisionTest(unittest.TestCase):
         不會更新，門檻若短於視窗，哨兵會在最需要它的時候把自己拆掉。"""
         self.assertGreater(planner.SENTINEL_IDLE_SECONDS, 5 * 3600)
 
+    # ── R95「哨兵存活四修」修1／修2（ADR §2.9；PRD §4.5.6 A1/A2/A4/A5；立案＝§L-4）──
+    def _tick(self, plan: Path, live: Path, tmp: Path, task: str = "T-r95") -> dict:
+        """跑一次 `_sentinel_tick`：排程器／告警／逐字稿定位全部注入（不碰真排程器）。"""
+        args = planner.build_parser().parse_args(
+            ["--sentinel-tick", "--plan", str(plan), "--task-name", task])
+        calls: dict = {"alert": [], "remove": [], "register": []}
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(unittest.mock.patch.object(
+                planner.escalation, "alert", side_effect=lambda reason, *a, **k:
+                calls["alert"].append((reason, k.get("loud"))) or {}))
+            stack.enter_context(unittest.mock.patch.object(
+                planner, "_schtasks_remove",
+                side_effect=lambda t: calls["remove"].append(t) or 0))
+            stack.enter_context(unittest.mock.patch.object(
+                planner, "register_endurance", side_effect=lambda s, at, tick:
+                calls["register"].append(tick) or (0, "cred-stub")))
+            stack.enter_context(unittest.mock.patch.object(
+                planner, "resolve_transcript", return_value=live))
+            stack.enter_context(
+                unittest.mock.patch("tempfile.gettempdir", return_value=str(tmp)))
+            stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
+            calls["rc"] = planner._sentinel_tick(args)
+        return calls
+
+    def test_a_skeleton_rewrite_preserves_an_existing_relay_block(self) -> None:
+        """修1／R-4.5.6-3（A1，紅綠自證：修前整檔覆寫必紅）：骨架重寫不得摧毀 RELAY。"""
+        tmp = Path(tempfile.mkdtemp(prefix="relay-keep-"))
+        transcript = _write_jsonl(tmp / "sess-keep.jsonl", [1000])
+        plan = tmp / f"{guard.PLAN_PREFIX}sess-keep.md"
+        plan.write_text("# 舊任務書\n\n" + planner.render_relay(RelayStateTest.GOOD),
+                        encoding="utf-8", newline="\n")
+        with contextlib.redirect_stdout(io.StringIO()):
+            rc = planner.main(["--transcript", str(transcript), "--out", str(plan)])
+        self.assertEqual(rc, 0)
+        text = plan.read_text(encoding="utf-8")
+        self.assertEqual(planner.parse_relay(text), RelayStateTest.GOOD,
+                         "骨架重寫砸掉／改寫了狀態塊（單檔雙寫者禁令，逐格保留才算數）")
+        self.assertIn("## 0. 量測", text, "骨架本身也要真的重寫（不是跳過寫檔）")
+
+    def test_a_smashed_relay_self_heals_instead_of_unregistering(self) -> None:
+        """修2／R-4.5.6-4（A2）：狀態塊缺席×逐字稿存在 ⇒ 自癒續巡，不得 unregister，
+        且告警注入點必須被叫到（修前直接自我解除＝事故 00:55——哨兵是「主 session
+        活著但帳號級撞線」那一格唯一的機械物，它下班＝整格失效）。"""
+        tmp = Path(tempfile.mkdtemp(prefix="selfheal-"))
+        live = _transcript(tmp, "sess-heal.jsonl", 40, 900.0)
+        plan = tmp / f"{guard.PLAN_PREFIX}sess-heal.md"
+        plan.write_text("# 骨架（halt 覆寫後：狀態塊沒了）\n", encoding="utf-8", newline="\n")
+        calls = self._tick(plan, live, tmp)
+        self.assertEqual(calls["remove"], [], "自癒得了卻仍 unregister（R-4.5.6-4a）")
+        self.assertTrue(calls["alert"], "自癒沒經過告警注入點（R-4.5.6-4b）")
+        state = planner.parse_relay(plan.read_text(encoding="utf-8"))
+        self.assertEqual(state["transcript"], str(live), "最小狀態塊沒把逐字稿接回來")
+        self.assertEqual((calls["rc"], calls["register"]), (0, [planner.SENTINEL_TICK]),
+                         "自癒後必須續巡（重排哨兵、rc=0）")
+
+    def test_the_three_read_failures_and_the_heal_leave_distinct_traces(self) -> None:
+        """A5＋R-4.5.6-4c：三種讀不出與自癒／解除在痕跡檔各自可辨（事故當晚同形）。"""
+        tmp = Path(tempfile.mkdtemp(prefix="trace-forms-"))
+        live = _transcript(tmp, "sess-forms.jsonl", 40, 900.0)
+        plan = tmp / f"{guard.PLAN_PREFIX}sess-forms.md"
+        for content in (None, "# 只有骨架\n",
+                        planner.RELAY_BEGIN + "\n{壞掉}\n" + planner.RELAY_END + "\n"):
+            plan.unlink(missing_ok=True)
+            if content is not None:
+                plan.write_text(content, encoding="utf-8", newline="\n")
+            self._tick(plan, live, tmp)
+        rows = [json.loads(line) for line in
+                (tmp / f"autosdd_resume_log_{guard.session_id_of(plan)}.jsonl")
+                .read_text(encoding="utf-8").splitlines()]
+        events = {row["event"] for row in rows}
+        self.assertLessEqual({"sentinel_woken", "sentinel_heal_failed", "sentinel_aborted",
+                              "sentinel_selfhealed", "sentinel_rearmed"}, events,
+                             f"喚醒鏈各步的事件名沒有分形：{sorted(events)}")
+        whys = {row["why"] for row in rows
+                if row["event"] in ("sentinel_selfhealed", "sentinel_heal_failed")}
+        self.assertEqual(len(whys), 3, f"三種讀不出的痕跡同形（驗屍只能靠推理）：{whys}")
+
+    def test_a_torn_multibyte_plan_self_heals_as_the_fourth_fault(self) -> None:
+        """M2：撕裂多位元組任務書＝第四分形（UnicodeDecodeError ⊂ ValueError；原文＝§L-4.29）。"""
+        tmp = Path(tempfile.mkdtemp(prefix="torn-"))
+        live = _transcript(tmp, "sess-torn.jsonl", 40, 900.0)
+        plan = tmp / f"{guard.PLAN_PREFIX}sess-torn.md"
+        plan.write_bytes("# 任務書\n中".encode()[:-1])  # 砍尾 byte＝撕裂多位元組
+        calls = self._tick(plan, live, tmp)
+        self.assertEqual(calls["remove"], [], "第四分形竟 unregister（M2 禁止）")
+        self.assertEqual([loud for _, loud in calls["alert"]], [True],
+                         "第四分形沒經 escalation.alert(loud=True) 注入點")
+        log = tmp / f"autosdd_resume_log_{guard.session_id_of(plan)}.jsonl"
+        rows = [json.loads(ln) for ln in log.read_text(encoding="utf-8").splitlines()]
+        whys = {r.get("why", "") for r in rows if r["event"] == "sentinel_selfhealed"}
+        self.assertTrue({w for w in whys if "任務書讀不動" in w}, f"痕跡缺第四分形：{whys}")
+        self.assertEqual((calls["rc"], calls["register"]), (0, [planner.SENTINEL_TICK]),
+                         "自癒後必須續巡")
+
+    def test_the_incident_replay_arms_to_the_observed_reset_with_evidence(self) -> None:
+        """A4／R-4.5.6-1/2/6：事故重演（撞線原文逐字）→ 下一巡 arm_reset＋憑證非空。"""
+        tmp = Path(tempfile.mkdtemp(prefix="replay-"))
+        hit = "You've hit your session limit · resets 3:50am (Asia/Taipei)"
+        live = tmp / "sess-replay.jsonl"
+        live.write_text(json.dumps({
+            "type": "assistant",
+            "timestamp": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+            "message": {"model": guard.SYNTHETIC_MODEL, "content": [{"text": hit}]}}) + "\n",
+            encoding="utf-8", newline="\n")
+        plan = tmp / f"{guard.PLAN_PREFIX}sess-replay.md"
+        plan.write_text("# 任務書\n", encoding="utf-8", newline="\n")
+        planner.write_relay(plan, {**RelayStateTest.GOOD, "kind": "sentinel",
+                                   "session_id": "sess-replay", "plan_path": str(plan),
+                                   "reset_source": "operator", "reset_at": "",
+                                   "task_name": "T-r95", "transcript": str(live),
+                                   "log_path": str(tmp / "trail.jsonl")})
+        calls = self._tick(plan, live, tmp)
+        state = planner.parse_relay(plan.read_text(encoding="utf-8"))
+        self.assertEqual((state["state"], state["reset_source"], calls["remove"]),
+                         ("waiting", "transcript-verbatim", []),
+                         f"撞線沒被下一巡接住（喚醒鏈斷）：{state}")
+        self.assertIn("03:50", state["reset_at"], "reset 時刻必須來自逐字稿原文觀測")
+        cred = str(state.get(planner.schedule_backend.select().credential_key) or "")
+        self.assertTrue(cred.strip(), "武裝憑證是空的卻宣稱 waiting（R-4.5.6-6）")
+        self.assertEqual(planner.relay_problems(state), [], "自癒後的狀態塊必須通過體檢")
+
+
+class SentinelLivenessColumnTest(unittest.TestCase):
+    """修3（ADR §2.9）：`--pace`／`--check` 的哨兵活性欄——armed stamp（宣稱）對
+    排程器現查（實況）的機械對比；不一致即出聲、一致安靜。平台憑證各一條
+    （Win＝NextRunTime 值、mac＝launchctl print rc）由 `schedule_backend` seam 保證。"""
+
+    def test_a_stamp_with_no_live_job_is_loud(self) -> None:
+        line = sentinel_lifecycle.liveness_problem("sid-a", True, ["AutoSDD_Sentinel_x"])
+        self.assertIn("AutoSDD_Sentinel_sid-a", line)
+        self.assertIn("--arm-sentinel", line, "警語必須附重新武裝的路")
+
+    def test_a_consistent_or_unclaimed_state_is_quiet(self) -> None:
+        self.assertEqual(sentinel_lifecycle.liveness_problem(
+            "sid-a", True, ["AutoSDD_Sentinel_sid-a"]), "")
+        self.assertEqual(sentinel_lifecycle.liveness_problem("sid-a", False, None), "",
+                         "沒宣稱過武裝＝沒有可對比的東西，不得出聲")
+
+    def test_an_unmeasurable_scheduler_is_not_read_as_dead(self) -> None:
+        line = sentinel_lifecycle.liveness_problem("sid-a", True, None)
+        self.assertIn("量不到", line, "列舉不到（None）≠ 沒有（[]）——既有判例，不得混同")
+        self.assertNotIn("斷線", line)
+
+    def test_both_cli_outlets_are_wired_to_the_column(self) -> None:
+        """接線面：`--check` 行為驗證＋`--pace` 結構驗證（pace_report 會記帳，測試內不跑）。"""
+        tmp = Path(tempfile.mkdtemp(prefix="liveness-wire-"))
+        transcript = _write_jsonl(tmp / "sid-b.jsonl", [1000])
+        err = io.StringIO()
+        with unittest.mock.patch.object(sentinel_lifecycle, "liveness_line",
+                                        return_value="🔴 哨兵活性：注入警語"), \
+             contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+            rc = planner.main(["--check", "--transcript", str(transcript)])
+        self.assertEqual((rc, "哨兵活性：注入警語" in err.getvalue()), (0, True),
+                         f"--check 沒接上活性欄：{err.getvalue()!r}")
+        main_src = ast.unparse(next(
+            n for n in ast.walk(ast.parse(_PLANNER.read_text(encoding="utf-8")))
+            if isinstance(n, ast.FunctionDef) and n.name == "main"))
+        pace_branch = main_src[main_src.index("args.pace"):
+                               main_src.index("args.check_autocompact")]
+        self.assertIn("liveness_line", pace_branch, "--pace 沒接上活性欄（蓋好沒接電）")
+
 
 class SentinelWiringTest(unittest.TestCase):
     """接線：Action 叫得回哨兵、工作名不互相覆蓋、SessionStart 真的會按下去。"""
@@ -1916,15 +2010,9 @@ class SentinelWiringTest(unittest.TestCase):
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# R79 Auto Pilot：`--allow-resume` 預設翻成開，以及它必須付的代價
+# R79 Auto Pilot：`--allow-resume` 預設翻成開，以及它必須付的代價——掌舵者逐字裁決
+# 與「下面兩個 class 是一組」的立案敘事原文＝Resume 證據檔 §L-4.1（R95 搬出，一字未刪）。
 # ══════════════════════════════════════════════════════════════════════════
-# 掌舵者逐字裁決：「現在開，但禁止 commit/push」。**兩件事必須綁在同一組鎖裡**——
-# 只鎖前者會讓「開了但護欄沒接上」全程綠，而那正是本 repo 判過三次的
-# 「機制蓋好沒接電」（R77 PKG-GUARD）。所以下面兩個 class 是一組：
-#   ① 預設真的是開，且兩個關閉出口都真的關得掉；
-#   ② 那一跑的 spawn **真的**帶著無人看管訊號（漏注入是靜默的——護欄不會出聲說
-#      自己沒被掛上，被守的那一跑也不會知道自己沒被守）。
-# hook 那一端讀同一個字面，由 `tools/tests/test_check_hooks_liveness.py` 自證。
 _UNATTENDED_ENV = "AUTOSDD_UNATTENDED"
 _RESUME_OFF_ENV = "AUTOSDD_RESUME_OFF"
 
@@ -1979,6 +2067,11 @@ class ResumeSpawnCarriesTheUnattendedSignalTest(unittest.TestCase):
 
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp())
+        # 🔴 R95：選路要求任務書與逐字稿**真的存在**（缺任一會走 REFUSE／FRESH 而不是
+        # RESUME）。本類鎖的是 RESUME 那條路的 spawn 形狀，所以前置把兩者都建出來。
+        (self.tmp / "p.md").write_text("# 任務書", encoding="utf-8")
+        self.transcript = self.tmp / "sid-1.jsonl"
+        self.transcript.write_text('{"type":"assistant"}\n', encoding="utf-8")
         self.calls: list[dict] = []
 
         class _Done:
@@ -1994,7 +2087,8 @@ class ResumeSpawnCarriesTheUnattendedSignalTest(unittest.TestCase):
 
     def _run(self) -> dict:
         args = planner.build_parser().parse_args(["--probe-command", "claude"])
-        state = {"plan_path": str(self.tmp / "p.md"), "session_id": "sid-1"}
+        state = {"plan_path": str(self.tmp / "p.md"), "session_id": "sid-1",
+                 "transcript": str(self.transcript)}
         planner._run_resume(args, state, self.tmp / "log.jsonl")
         self.assertEqual(len(self.calls), 1, "續跑應該只 spawn 一次")
         return self.calls[0]
@@ -2018,13 +2112,9 @@ class ResumeSpawnCarriesTheUnattendedSignalTest(unittest.TestCase):
                          f"續跑指令的形狀被改掉了：{argv[:4]}")
 
     def test_the_resumed_run_lands_in_the_repo_not_system32(self) -> None:
-        """🔴 R80 P0。沒有這一格時，續跑那一跑的 cwd 繼承排程行程＝`C:\\Windows\\System32`，
-        而 Claude Code 用 cwd 決定「本 session 允許的工作目錄」⇒ 那一跑**結構上做不了任何
-        事**。實測逐字（今天 01:55 那一跑自己的回報）：`Read` 任務書 → 權限未授予；
-        `Get-Content` 同一份 → 「本 session 允許的工作目錄只有 C:\\WINDOWS\\system32」。
-
-        五段流程（巡邏→偵測→重排→探測→續跑）全部觸發成功、稽核痕跡齊備，最後一步空轉
-        ——所以這一條斷言的是**能不能做事**，不是「有沒有被叫起來」。
+        """🔴 R80 P0：續跑 cwd 繼承排程行程（system32）⇒ 那一跑結構上做不了任何事——
+        這一條斷言的是**能不能做事**，不是「有沒有被叫起來」。
+        實測逐字原文＝Resume 證據檔 §L-3.5。
         """
         self.assertEqual(
             self._run().get("cwd"), str(_REPO_ROOT),
@@ -2064,40 +2154,191 @@ class ResumeSpawnCarriesTheUnattendedSignalTest(unittest.TestCase):
         self.assertEqual(self._run().get("creationflags"), guard.NO_WINDOW)
 
 
+class ResumeRouteDegradesOneWayTest(unittest.TestCase):
+    """R95／Pkg-D：喚醒降級選路（PRD §4.5.4／§8-10）的方向鎖。
+
+    立案缺口敘事原文＝Resume 證據檔 §1（R95 修復包批補搬）。三判準：①可用**必**
+    SESSION_RESUME（降級只准 RESUME→FRESH 單向）；②FRESH 不得帶 `-r`、prompt 指向
+    磁碟任務書；③任務書缺席＝REFUSE、argv=None（不得靜默派空 prompt，R59 同形）。
+    """
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp())
+        self.plan = self.tmp / "plan.md"
+        self.plan.write_text("# 任務書", encoding="utf-8")
+        self.transcript = self.tmp / "sid-9.jsonl"
+        self.transcript.write_text('{"type":"assistant"}\n', encoding="utf-8")
+
+    def _route(self, transcript: Path, plan: Path | None = None, **kw) -> dict:
+        return planner.choose_resume_route(
+            "claude", "sid-9", transcript, str(plan or self.plan), **kw)
+
+    def test_a_usable_transcript_must_resume_not_degrade(self) -> None:
+        """方向鎖的「不得反向」半邊：可用時降級＝丟掉可用的 session 資訊，判紅。"""
+        route = self._route(self.transcript)
+        self.assertEqual(route["strategy"], planner.STRATEGY_RESUME,
+                         f"逐字稿可用卻不走 RESUME：{route}")
+        self.assertEqual(route["argv"][:4], ["claude", "-p", "-r", "sid-9"],
+                         f"RESUME 的指令形狀被改掉了：{route['argv'][:4]}")
+
+    def test_a_missing_transcript_degrades_to_fresh_without_r(self) -> None:
+        route = self._route(self.tmp / "ghost.jsonl")
+        self.assertEqual(route["strategy"], planner.STRATEGY_FRESH)
+        self.assertNotIn("-r", route["argv"],
+                         "FRESH 還帶著 -r ⇒ 對一個不可用的 session 下注，喚醒照樣失敗"
+                         "——這正是本包立案要補的那個洞")
+        prompt = route["argv"][2]
+        self.assertIn("按磁碟任務書繼續", prompt)
+        self.assertIn(str(self.plan), prompt, "FRESH 的 prompt 沒有指向磁碟任務書 ⇒ "
+                                              "全新 session 拿不到 state，交棒斷裂")
+
+    def test_an_empty_transcript_degrades(self) -> None:
+        empty = self.tmp / "empty.jsonl"
+        empty.write_text("", encoding="utf-8")
+        route = self._route(empty)
+        self.assertEqual(route["strategy"], planner.STRATEGY_FRESH)
+        self.assertIn("為空", route["reason"])
+
+    def test_an_oversized_transcript_degrades(self) -> None:
+        route = self._route(self.transcript, max_bytes=1)
+        self.assertEqual(route["strategy"], planner.STRATEGY_FRESH)
+        self.assertIn("超上限", route["reason"])
+
+    def test_the_env_var_tunes_the_limit(self) -> None:
+        """`AUTOSDD_RESUME_MAX_TRANSCRIPT_BYTES` 直讀 os.environ（不進 quota_policy 的
+        ENV_SPEC——那是別包持有面，註冊留收尾窗口）。同一支檔，環境變數收緊即降級。"""
+        old = os.environ.get(planner.RESUME_MAX_TRANSCRIPT_ENV)
+        os.environ[planner.RESUME_MAX_TRANSCRIPT_ENV] = "1"
+        self.addCleanup(lambda: os.environ.pop(planner.RESUME_MAX_TRANSCRIPT_ENV, None)
+                        if old is None else os.environ.update(
+                            {planner.RESUME_MAX_TRANSCRIPT_ENV: old}))
+        self.assertEqual(self._route(self.transcript)["strategy"], planner.STRATEGY_FRESH)
+
+    def test_a_pathological_env_limit_falls_back_loud_not_crash(self) -> None:
+        """m5："32MB"／"0" 病態值 ⇒ 退回內建預設＋reason/stderr 出聲一次；""＝未設走預設
+        **不**出聲（修前原文＝§L-4.30）。"""
+        old = os.environ.get(planner.RESUME_MAX_TRANSCRIPT_ENV)
+        self.addCleanup(lambda: os.environ.pop(planner.RESUME_MAX_TRANSCRIPT_ENV, None)
+                        if old is None else os.environ.update(
+                            {planner.RESUME_MAX_TRANSCRIPT_ENV: old}))
+        for bad, loud in (("32MB", True), ("0", True), ("", False)):
+            with self.subTest(bad=bad):
+                os.environ[planner.RESUME_MAX_TRANSCRIPT_ENV] = bad
+                err = io.StringIO()
+                with contextlib.redirect_stderr(err):
+                    route = self._route(self.transcript)
+                self.assertEqual(route["strategy"], planner.STRATEGY_RESUME,
+                                 "病態值不得把可用逐字稿降級——退回預設不是收成 0")
+                spoke = "病態值" in route["reason"] and "病態值" in err.getvalue()
+                self.assertEqual(spoke, loud, f"{bad!r} 出聲面錯誤：{route['reason']}")
+
+    def test_a_missing_plan_refuses_to_arm(self) -> None:
+        """任務書缺席＝拒絕武裝——**即使逐字稿完全可用**（fail-loud 優先於一切選路）。"""
+        route = self._route(self.transcript, plan=self.tmp / "ghost.md")
+        self.assertEqual(route["strategy"], planner.STRATEGY_REFUSE)
+        self.assertIsNone(route["argv"], "REFUSE 還給得出 argv ⇒ 呼叫端可能照 spawn")
+
+    def test_fresh_keeps_the_prompt_before_add_dir(self) -> None:
+        """姊妹鎖的降級版：`--add-dir <directories...>` 是變長的，FRESH 的 prompt 排在
+        它後面一樣會被吃掉（R80 實測的同一個缺陷，只是換了條路）。"""
+        argv = self._route(self.tmp / "ghost.jsonl")["argv"]
+        idx = argv.index("--add-dir")
+        prompt_at = [i for i, a in enumerate(argv) if "第 3 節" in a]
+        self.assertTrue(prompt_at and prompt_at[0] < idx)
+        self.assertEqual(len(argv) - idx, 2,
+                         f"--add-dir 後面必須只有一個目錄值：{argv}")
+
+    def test_fresh_carries_the_same_guard_rules_as_resume(self) -> None:
+        """降級不減損護欄：FRESH 那一跑的 prompt 必須帶同一份重驗＋禁 commit/push 句。"""
+        fresh = self._route(self.tmp / "ghost.jsonl")["argv"][2]
+        resume = self._route(self.transcript)["argv"][4]
+        for rule in ("第一件事是重驗", "禁止 commit／push"):
+            self.assertIn(rule, fresh)
+            self.assertIn(rule, resume)
+
+
+class RunResumeConsumesTheRouteTest(unittest.TestCase):
+    """R95／Pkg-D 消費端：`_run_resume` 只認選路結果——REFUSE 不 spawn、策略落痕跡。"""
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp())
+        self.calls: list[dict] = []
+
+        class _Done:
+            returncode, stdout, stderr = 0, "ok", ""
+
+        def _fake_run(argv, **kwargs):
+            self.calls.append({"argv": argv, **kwargs})
+            return _Done()
+
+        real = planner.subprocess.run
+        planner.subprocess.run = _fake_run
+        self.addCleanup(setattr, planner.subprocess, "run", real)
+
+    def _events(self, log: Path) -> list[dict]:
+        return [json.loads(line) for line in
+                log.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+    def _resume(self, state: dict) -> tuple[int, list[dict]]:
+        args = planner.build_parser().parse_args(["--probe-command", "claude"])
+        log = self.tmp / "log.jsonl"
+        rc = planner._run_resume(args, state, log)
+        return rc, self._events(log)
+
+    def test_a_missing_plan_does_not_spawn_and_fails_loud(self) -> None:
+        """任務書缺席時不得靜默派空 prompt：rc=1、零 spawn、痕跡記 REFUSE 與原因。"""
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            rc, events = self._resume({"plan_path": str(self.tmp / "ghost.md"),
+                                       "session_id": "sid-1",
+                                       "transcript": str(self.tmp / "ghost.jsonl")})
+        self.assertEqual(rc, 1)
+        self.assertEqual(self.calls, [], "REFUSE 之後還是 spawn 了 ⇒ 空承諾照樣派出去")
+        chosen = [e for e in events if e["event"] == "route_chosen"]
+        self.assertEqual([e["strategy"] for e in chosen], [planner.STRATEGY_REFUSE])
+        self.assertIn("任務書不存在", stderr.getvalue(), "拒絕武裝沒有出聲＝靜默失效")
+
+    def test_the_degraded_route_is_spawned_and_logged(self) -> None:
+        """逐字稿缺檔 ⇒ 真的以 FRESH 形態 spawn（無 `-r`），且策略＋原因寫進痕跡。"""
+        plan = self.tmp / "p.md"
+        plan.write_text("# 任務書", encoding="utf-8")
+        rc, events = self._resume({"plan_path": str(plan), "session_id": "sid-1",
+                                   "transcript": str(self.tmp / "ghost.jsonl")})
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(self.calls), 1)
+        self.assertNotIn("-r", self.calls[0]["argv"])
+        by_event = {e["event"]: e for e in events}
+        self.assertEqual(by_event["route_chosen"]["strategy"], planner.STRATEGY_FRESH)
+        self.assertIn("缺檔", by_event["route_chosen"]["why"],
+                      "痕跡沒記**為什麼**降級 ⇒ 事後無從稽核選路對不對")
+        self.assertEqual(by_event["resumed"]["strategy"], planner.STRATEGY_FRESH)
+
+    def test_a_legacy_state_without_transcript_key_still_works(self) -> None:
+        """R95 之前武裝的狀態塊沒有 `transcript` 鍵：改由 session id 現查逐字稿目錄，
+        查不到就降級——**不得**崩潰、也不得把 None 當路徑去 stat。"""
+        plan = self.tmp / "p.md"
+        plan.write_text("# 任務書", encoding="utf-8")
+        rc, events = self._resume({"plan_path": str(plan),
+                                   "session_id": "no-such-session-r95"})
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(self.calls), 1)
+        self.assertNotIn("-r", self.calls[0]["argv"])
+
+
 # ────────────────── R80：無 console 父行程下的 spawn（類級機械物，不是逐站點補丁）
-# 🔴 為何是**類級**而不是「把漏掉的兩站補上就好」：R79 治這件事時只改了排程 Action 的
-# 載具（python.exe → pythonw.exe），而同一條路上還有三個 spawn 站點沒帶旗標——本 repo
-# 已反覆判過「同一份知識住多個家、只鎖一個」的形態（R73 `Find-GitBash`、R79 的 3 站鎖 1
-# 站）。所以這裡鎖的是**一整類檔案的一整類呼叫**：宣告集合內每一個 subprocess spawn 都
-# 必須顯式帶 no-window 旗標，漏掉任何一站當場紅，不靠人記得。
-#
-# 集合語意＝「這支檔可能在**無 console 的父行程**下被執行」：
-#   · `.claude/hooks/*.py`      由 Claude Code 起（實測其 hook 子行程會自帶 conhost）
-#   · `tools/session_resume_planner.py`  由 schtasks 以 `pythonw.exe` 起（無 console）
-# 在那個條件下 spawn 一個 console 子系統應用（`python.exe`／`powershell.exe`／
-# `claude.exe`）時，Windows 必定新配置一個 console ＝跳到使用者臉上的視窗。
-#
-# 🔴 分母是**覆蓋率棘輪**（鐵律三的體例）：`_CONSOLE_FREE_FLOOR` 只准升。新增一支 hook
-# 卻沒進掃描面時，掃描面會縮到下限以下而轉紅——「射程靜默縮小」是本 repo 記載過的
-# 失效方式（`MIN_TESTS` 腐化 11 輪），不能只靠 glob 看起來會自己長大。
+# 集合語意＝「這支檔可能在無 console 的父行程下被執行」（hooks 由 CC 起、planner 由
+# schtasks 以 pythonw 起）；`_CONSOLE_FREE_FLOOR` 是只准升的覆蓋率棘輪。為何類級而非
+# 逐站補丁、集合語意全文與 MIN_TESTS 腐化判例＝Resume 證據檔 §L-4.2（R95 搬出，一字未刪）。
 _SPAWN_FUNCS = frozenset({"run", "Popen", "call", "check_call", "check_output"})
 
-#: 掃描面檔數下限。R82／HELM-02 上修：射程由「planner ＋ hooks ＋ 一支具名的
-#: `quota_escalation`」擴成「planner ＋ hooks ＋ `tools/lib/` 全部 `quota_*.py`／
-#: `sentinel_*.py`」。🔴 立案不是預防性的，是**實測漏掉了一支**：`tools/lib/quota_meter.py`
-#: 的 `subprocess.run` 一直沒有 `creationflags`，而它對本鎖完全隱形——因為射程是一份
-#: 手寫清單，而清單只列了當時想到的那一支。改成 glob 之後，同族新檔自動進來。
+#: 掃描面檔數下限（R82／HELM-02 立案原文＝Resume 證據檔 §L-3.6）。
 #: 現值＝本輪實測，只准上修（射程靜默縮小是本 repo 記載過的失效方式）。
 #: R84／C3-A 上修 10→11：具名納入 `tools/lib/schedule_backend.py`（兩個 glob 都罩不到，
 #: 理由見 `ConsoleFreeSpawnTest._sources`）。
 _CONSOLE_FREE_FLOOR = 11
 
-#: 🔴 合法例外的**名字**與**上限**。
-#: 本 repo 判例：沒有上限的逃生口會變成預設關法——豁免標記一多，這支鎖就等於被關掉。
-#: 用法：在 spawn 呼叫的**任一行**行尾寫 `# no-window-ok: <為什麼這支真的需要視窗>`；
-#: **理由留空無效**（正規式要求至少一個非空白字元）——「有標記」不等於「有理由」，
-#: 那是本檔另一條判準（`creationflags` 有設 ≠ 設對）在豁免這一側的同一個形狀。
-#: 今天實測用掉 **0** 個。要調大這個上限請在缺陷帳本具名理由；方向是只准調小。
+#: 🔴 合法例外的名字與上限：行尾 `# no-window-ok: <非空理由>`；理由留空無效；上限只准
+#: 調小（今天實測用掉 0 個）。判例與用法全文＝Resume 證據檔 §L-4.6。
 _NO_WINDOW_EXEMPTION_CAP = 2
 _NO_WINDOW_EXEMPT_RE = re.compile(r"#\s*no-window-ok:\s*(\S.*)$")
 
@@ -2216,20 +2457,12 @@ class ConsoleFreeSpawnTest(unittest.TestCase):
     def _sources() -> dict[str, str]:
         """掃描面＝所有**可能被無 console 的父行程叫到**的檔。
 
-        🔴 R82／HELM-02 把 `tools/lib/` 那一半由手寫清單換成 glob。舊寫法只具名了
-        `quota_escalation.py`（R81 新增 spawn 站點的那一支），於是同一層的
-        `quota_meter.py` 帶著一個**沒有 `creationflags` 的 `subprocess.run`** 一直對本鎖
-        隱形——本鎖照跑、照綠。這正是本類 docstring 自己寫著要防的事，只是缺口不在
-        「有沒有掃」而在「掃誰是誰決定的」：手寫清單的分母由記憶決定，glob 的不會。
-        射程限定 `quota_*`／`sentinel_*` 兩族而不是整個 `tools/lib`：那一層還有純資料與
-        純判準模組，把它們全拉進來只會製造要逐一辯護的假紅（本 repo 判過那種鎖活不過一輪）。
+        R82／HELM-02 把 `tools/lib/` 那一半由手寫清單換成 glob（清單的分母由記憶決定）；
+        射程限定 `quota_*`／`sentinel_*` 兩族（全拉進來＝要逐一辯護的假紅）。
+        立案全文（quota_meter 隱形站點）＝Resume 證據檔 §L-4.20。
         """
-        # 🔴 R84／C3-A：`schedule_backend.py` **具名**加入。它不叫 `quota_*`／`sentinel_*`
-        # 所以上面兩個 glob 一條都罩不到它，而它正是哨兵路徑上僅存的兩個裸 spawn 的家
-        # （`_run()` 每 tick 跑 schtasks 查詢／註冊、`_defer()` 起延後的 `/bin/sh`）——
-        # 掃描面是 glob 決定的那一刻起，這支就對本鎖隱形，與 R82 漏掉 `quota_meter.py`
-        # 逐字同構。刻意具名而不是再放寬 glob：放寬會把同層純資料模組一起拉進來，
-        # 製造要逐一辯護的假紅（本 repo 判過那種鎖活不過一輪）。
+        # 🔴 R84／C3-A：`schedule_backend.py` 具名加入（不叫 quota_*/sentinel_* ⇒ glob
+        # 罩不到，而它是哨兵路徑僅存兩個裸 spawn 的家）。全文＝Resume 證據檔 §L-4.7。
         paths = {
             "tools/session_resume_planner.py": _PLANNER,
             "tools/lib/schedule_backend.py": _REPO_ROOT / "tools" / "lib" / "schedule_backend.py",
@@ -2301,11 +2534,8 @@ class ConsoleFreeSpawnTest(unittest.TestCase):
         🔴 為什麼是**值**相等而不是文字比對：兩份的意義是「同一組 Windows 旗標」，
         而那件事只有值說得準；文字比對會在有人換個等價寫法時給出假紅。
 
-        🔴 **`sentinel_lifecycle` 已於 R83／PD 由兩份名冊移除**（不是鎖被放寬）：該檔那兩個
-        常數的唯一消費者（`_powershell`）在 A-01 收斂時整支刪掉 ⇒ 常數成了零消費者的死碼，
-        本輪連同它們一起刪除（該檔留有墓碑段記載沿革與判準）。名冊是**複製品清單**，複製品
-        不存在了就必須離開清單——留著會 `AttributeError`，而那是假紅不是牙。仍在守的兩端
-        （`quota_meter`／`console_spawn_watch`）逐一具名，射程縮小時會指名道姓地紅。
+        `sentinel_lifecycle` 已於 R83／PD 由兩份名冊移除（不是鎖被放寬），沿革原文＝
+        Resume 證據檔 §L-3.7。仍在守的兩端逐一具名，射程縮小時會指名道姓地紅。
         """
         sys.path.insert(0, str(_REPO_ROOT / "tools" / "probe"))
         import console_spawn_watch  # noqa: PLC0415 — probe 不在 import 面，隨用隨載
@@ -2501,13 +2731,9 @@ class NoWindowBehaviourTest(unittest.TestCase):
     def test_the_shipped_flag_really_suppresses_the_console(self) -> None:
         """本體：`guard.NO_WINDOW` 之下子行程 `GetConsoleWindow()` 必須是 0。
 
-        控制組（不帶旗標）必須**有** console，否則本載具量不到這個缺陷，上一條斷言
-        就沒有鑑別力——一個永遠回 0 的壞載具看起來與修好一模一樣。
-
-        🔴 **子行程刻意用 `python.exe` 而不是 `pythonw.exe`**：後者是 GUI 子系統，在
-        六種旗標下**全部**都是 0（見 `guard.NO_WINDOW` 的矩陣第三、四列）⇒ 拿它當被測
-        對象，控制組也會是 0，整條測試恆綠。要驗「旗標那一層」就必須挑一個沒有旗標
-        時**真的會開視窗**的載具。
+        控制組（不帶旗標）必須**有** console（永遠回 0 的壞載具與修好同形）；子行程
+        刻意用 `python.exe` 不用 `pythonw.exe`（後者六旗標全 0 ⇒ 整條恆綠）。
+        全文＝Resume 證據檔 §L-4.19。
         """
         cases = self._measure({"shipped": guard.NO_WINDOW, "none": 0})
         self.assertEqual(
@@ -2549,15 +2775,11 @@ class NoWindowBehaviourTest(unittest.TestCase):
 
 
 class UnhandledLimitDetectionTest(unittest.TestCase):
-    """🔴 R80 P0：哨兵整晚失明那一格的回歸鎖（事故見 `unhandled_limit_event` 上方 WHY）。
-
-    被守的性質有三條，每一條都對應一個**已實際發生過**的失效：
-      ① 「已處理」必須是**證據**（事後真的有成功 API 回應），不是推論。舊判準的推論
-         逐字是「我跑得動武裝指令 ⇒ 額度是通的」，而武裝是零 API 呼叫的本機 subprocess
-         ⇒ 那句話恆真、與額度無關。實證：撞線後 2 分鐘就被標成已解決。
-      ② 偵測面必須含 subagent（扇出模式下撞線主要打在那裡）。
-      ③ 必須看**所有**未處理事件，不是只看最後一筆——本次事故裡最後一筆是 `quota_spend`，
-         把更早、仍未解決的 `quota_session` 整個蓋掉。
+    """🔴 R80 P0：哨兵整晚失明那一格的回歸鎖（事故見 `unhandled_limit_event` 上方 WHY；
+    R80 驗屍敘事原文＝Resume 證據檔 §L-3.30）。被守的性質三條，各對應一個實際發生過的失效：
+      ① 「已處理」必須是**證據**（事後真的有成功 API 回應），不是推論；
+      ② 偵測面必須含 subagent（扇出模式下撞線主要打在那裡）；
+      ③ 必須看**所有**未處理事件，不是只看最後一筆。
     """
 
     def setUp(self) -> None:
@@ -2655,14 +2877,7 @@ class UnhandledLimitDetectionTest(unittest.TestCase):
         self.assertEqual(guard.session_transcripts(self.main, 1.0, far), [self.main],
                          "成本閘對主逐字稿不生效（它一律納入，否則整條鏈沒有地板）")
 
-    # 🔴 R80-SD-01：P0 修復自己引入的**反向**靜默自毀。
-    # `<synthetic>` 是 harness 對**所有**合成訊息的共同標記，不是額度事件的指紋——
-    # `API Error` 與 `[Request interrupted by user]` 都長這樣。第一版把任何沒有後續成功
-    # 回應的合成記錄都登記成候選 ⇒ 一個以中斷／API 錯誤收尾的 session（常態，不是例外）
-    # 會被判成未處理撞線 → `sentinel_decide` 解不出 reset → `escalate` → **哨兵自我刪除**。
-    # 舊病是「該醒不醒」，新病是「不該死卻自我刪除」，兩者同樣靜默：痕跡只多一行
-    # `sentinel_escalate`，`Get-ScheduledTask` 查不到那支工作，與正常下班外觀相同。
-    # 註解裡那個 0.0% 假陽性是**橫斷面**（單一時點 257 支檔），量不到這個**縱向**情境。
+    # 🔴 R80-SD-01：P0 修復自己引入的**反向**靜默自毀（敘事原文＝Resume 證據檔 §L-3.8）。
     def test_a_non_quota_synthetic_message_is_not_a_hit(self) -> None:
         """注入自證：整支逐字稿只有 API 錯誤／使用者中斷 ⇒ 必須回 `None`。
 
@@ -2709,21 +2924,14 @@ class UnhandledLimitDetectionTest(unittest.TestCase):
 
 
 # ═══════ R81：續航協定的兩個**設計缺口**（R80 四次真實撞線的驗屍，improving_104 §4.5）
-# 兩個都不是 bug——機制照著規格跑，而規格漏了一種情況。鎖也照這條界線寫：守的是
-# 「規格現在涵蓋了那一種情況」，不是「某支函式回傳什麼」。
-#   缺口 A：額度有兩條線（`session limit` 等得到、`monthly spend limit` 等不到），
-#           而下游動作只有一種。R80 第 3 次撞線就是這一類，協定全程零反應。
-#   缺口 B：協定救的單位是 session，而四次撞線裡主迴圈**一次都沒死**——死的是扇出。
+# 缺口 A＝兩條額度線只有一種下游動作；缺口 B＝協定救 session 而死的是扇出。
+# 驗屍全文與「鎖守規格涵蓋面、不守函式回傳」的界線＝Resume 證據檔 §L-4.8。
 
 
 class SpendLimitReachesAHumanTest(unittest.TestCase):
-    """缺口 A。🔴 注意：`escalate`／`stop` 這兩個判定**本來就不排程**，缺的不是那個。
-
-    缺的是「通知」有沒有載體：兩支的理由逐字寫著「只有人去 claude.ai 提額才會回來」
-    「硬停並通知人」，而全部的反應是 `print(..., file=sys.stderr)`——這兩支都由
-    schtasks 以 `pythonw.exe`（GUI 子系統、**沒有 console**）起，那行 stderr 沒有任何
-    終端收得到。⇒ 「不排程」成立、「叫人」結構上不可能成立，而兩者留下的痕跡完全同形
-    （狀態 abandoned、工作被刪、jsonl 多一行）。**最難發現的失效形態**正是這一種。
+    """缺口 A。🔴 注意：`escalate`／`stop` 這兩個判定**本來就不排程**，缺的不是那個——
+    缺的是「通知」有沒有載體（stderr 在 pythonw 下沒有任何終端收得到）。
+    R80 驗屍敘事原文＝Resume 證據檔 §L-3.30。
     """
 
     def setUp(self) -> None:
@@ -2793,12 +3001,9 @@ class SpendLimitReachesAHumanTest(unittest.TestCase):
 
     def test_a_monthly_spend_limit_alerts_a_human_and_never_schedules(self) -> None:
         """等不到的那一條線：**不排程**（等到天亮它還是滿的）＋ 真的把人叫來。
-
-        🔴 R82／HELM-01 收緊了「敲人」的門檻，所以這一條的語料也跟著補上第二個合取項：
-        **有未處理撞線 且 有扇出待救**。理由是使用者三度收到彈窗的那件事——「敲人」是
-        整條協定裡唯一會打斷人的動作，而唯一只有人做得到、又真的等不了的情形，是有一批
-        被打死的 agent 等著他去按 `resumeFromRunId`。沒有東西要救時仍然寫紙（零打擾），
-        那一半由 `test_a_spend_limit_with_nothing_to_rescue_never_taps_a_human` 守。
+        R82／HELM-01 收緊敲人門檻＝「有未處理撞線 且 有扇出待救」；零打擾那一半由
+        `test_a_spend_limit_with_nothing_to_rescue_never_taps_a_human` 守。
+        立案全文＝Resume 證據檔 §L-4.27。
         """
         transcript = _quota_transcript(self.tmp / "sid_spend.jsonl", _REAL_SPEND_LIMIT)
         self._dead_agent(transcript)
@@ -2892,14 +3097,9 @@ class SpendLimitReachesAHumanTest(unittest.TestCase):
         self.assertTrue(Path(decided[-1]["fanout"]).is_file())
 
     def test_a_session_limit_still_takes_the_scheduling_branch(self) -> None:
-        """🔴 控制組（不得回歸）：等得到的那一條線必須**還是**排程，而且不打擾人。
-
-        判準的價值全在這裡——一個「把兩類都叫人」的實作會讓上面兩條全綠，卻把每一次
-        普通的 session 撞線都變成一次騷擾，於是護欄很快就會被關掉。
-
-        語料刻意**不帶** `(Asia/Taipei)` 後綴：帶了的話 `declared_zone` 在有 tz 資料庫的
-        機器（Linux／macOS）上會把時刻換到台北框架、在 Windows 上回 `None` 而沿用機器
-        時區 ⇒ 同一份語料在兩種機器上落在不同分支。這是本 repo act 實跑抓過的形態。
+        """🔴 控制組（不得回歸）：等得到的那一條線必須**還是**排程，而且不打擾人
+        （「兩類都叫人」會讓上面兩條全綠而護欄被關掉）。語料刻意不帶 `(Asia/Taipei)`
+        後綴——時區框架跨平台分岔的 act 實跑判例全文＝Resume 證據檔 §L-4.22。
         """
         soon = datetime.now().astimezone() + timedelta(minutes=45)
         hour = soon.hour % 12 or 12
@@ -2983,12 +3183,9 @@ class FanoutCasualtyRecordTest(unittest.TestCase):
     def test_the_same_file_criterion_is_deliberate_not_a_copy_of_the_global_one(self) -> None:
         """🔴 這一條釘住的是「為什麼判準不一樣」，不是行為（Rule 9）。
 
-        `guard.unhandled_limit_event` 用**全域**復原證據，本模組用**同檔**證據——因為
-        它們問的是不同的問題。R80 量到同檔證據對「帳號額度通不通」假陽性 81.3%，成因
-        是「被打死的 subagent 在自己的檔裡永遠不會再有下一則成功回應」；而對「這一個
-        agent 死了沒」，那個性質正是唯一正確的判準。把本模組改成沿用全域判準，這一條
-        會紅：整個 session 已經復原（主逐字稿有更晚的成功回應），死掉的 agent 仍必須
-        留在重派清單上——它不會因為別人活過來就自己活過來。
+        全域復原證據問「帳號通不通」、同檔證據問「這一個 agent 死了沒」——兩個問題
+        各自要各自的判準（R80 假陽性 81.3% 的量測與反向論證全文＝Resume 證據檔
+        §L-4.23）。改成沿用全域判準時本條會紅：死掉的 agent 不因別人活過來就復活。
         """
         self._agent("wf_abc", "agent-dead",
                     [UnhandledLimitDetectionTest._limit("2026-08-07T18:36:53Z",
@@ -3042,12 +3239,9 @@ class FanoutCasualtyRecordTest(unittest.TestCase):
 
 
 # ════════════════════ R80：時區框架（act 在 Linux 容器抓到、Windows 本機看不見的兩個紅）
-# 缺陷本體：`resets 9am` 是一個**牆上時刻**，舊實作拿**機器的**本地時區去解它，而
-# `now` 由呼叫端給 ⇒ 同一份語料有兩個框架。act 實跑逐字：
-#   FAIL: SentinelDecisionTest.test_a_pending_hit_whose_reset_already_passed_spends_one_probe
-#         AssertionError: 'arm_reset' != 'probe'
-# 容器是 UTC、本機是 UTC+8，「reset 過了沒」整個翻面。修法是把框架收成**一個**，
-# 且優先採用**訊息自報**的時區（`… (Asia/Taipei)`）——那是資料自己回答的，與機器無關。
+# 缺陷本體：`resets 9am` 是牆上時刻，舊實作拿機器本地時區去解 ⇒ 同一份語料有兩個框架。
+# 修法是把框架收成**一個**，且優先採用**訊息自報**的時區（`… (Asia/Taipei)`）——那是
+# 資料自己回答的，與機器無關。act 實跑逐字原文＝Resume 證據檔 §L-3.9。
 class ResetFrameIsNotTheMachineClockTest(unittest.TestCase):
     """同一份語料 ＋ 同一個**絕對時刻** ⇒ 判定必須一致，不論它被表示成哪個時區。"""
 
@@ -3129,18 +3323,8 @@ class ResetFrameIsNotTheMachineClockTest(unittest.TestCase):
 
 
 # ════════════════════ R81 額度軸（訴求 a／b）：quota 是第二把尺，不是 context 的分支
-# 🔴 本段每一條都對著一筆**已被獨立審查者實測坐實**的失效，而不是對著實作細節：
-#   SA-B1 quota 分支掛在 `block_verdict()` 內 ⇒ 低 context × 高 quota 那個唯一場景到不了
-#   SA-B2 分母不是散文，payload 自己帶 `*_dollars`
-#   SA-B3 有真值卻不在 `limits[]` 的桶（實測 `nimbus_quill`）
-#   SA-B4 utilization 非單調（視窗翻頁驟降 48pp）⇒ 過期快取不得被判為 normal
-#   SA-B6 被擋下的呼叫若留在帳上 ⇒ 永久過度節流
-#   SA-B7 mac/Linux 上「不排程」與「排不了」外觀相同
-#   SD-B1 `Workflow` 在扇出開始前就返回 ⇒ in-flight 恆讀 ≈0
-# 🔴 R82：本檔那份寫死的 quota schema 複本已刪除（見 `_quota_cache` 的 WHY）。要 schema
-# 的地方一律 `_meter().SCHEMA`——契約字面只有一個家，而那個家在 meter。
-# （刻意**不**以反引號逐字寫出那個已死的常數名：幽靈符號鎖對它必紅，而下一個人 grep
-#  到它會以為那是現行說法——同 `check_loc_budget.py` 對已死常數名的既有處置。）
+# 本段七筆實測坐實的失效清單（SA-B1~B7／SD-B1）與「schema 複本已刪、契約字面只有
+# meter 一個家」的處置原文＝Resume 證據檔 §L-4.3（R95 搬出，一字未刪）。
 
 
 def _quota_axis(now: datetime, kind: str, pct: float, resets_in: float | None) -> dict:
@@ -3157,15 +3341,9 @@ def _quota_cache(tmp: Path, pct: float | None, kind: str = "session",
     """種一份合成快取（`autosdd.quota/2` 的**逐軸**形狀）。
 
     `resets_in`＝距 reset 幾秒；`age`＝這份讀數幾秒前量的；`extra`＝再加幾條
-    `(kind, pct, resets_in)` 軸——多軸是 R82 之後才**表達得出來**的東西：舊形狀只有
-    頂層一組 `{pct, kind, resets_at}`，於是「session 90%@34min ＋ weekly 20%@6d」與
-    「session 10%@34min ＋ weekly 90%@6d」在快取裡根本寫不出差別。
-    `account_key`＝R93 新增的帳號身分欄（`None`＝不寫這一鍵，等同本輪之前的舊快取）。
-
-    🔴 schema **跟著 meter 走、不寫死字面**（R82 接線階段的實測教訓）：此處原本是一份
-    寫死的 `"autosdd.quota/1"` 複本，meter 升版到 `/2` 之後每一份合成快取都被判
-    schema-mismatch ⇒ 額度軸整條靜默退化成「量不到」⇒ 16 條測試同時紅，而**紅的原因
-    與被測的性質無關**。同一份契約字面第二個家的代價，這一次是在測試側現形。
+    `(kind, pct, resets_in)` 軸；`account_key`＝R93 帳號身分欄（`None`＝不寫這一鍵）。
+    schema 跟著 meter 走、不寫死字面（§L-3.10）；「多軸為何 R82 才表達得出來」的
+    舊形狀對照全文＝Resume 證據檔 §L-4.18。
     """
     now = datetime.now(UTC).astimezone()
     axes = ([] if pct is None else [_quota_axis(now, kind, pct, resets_in)])
@@ -3283,11 +3461,9 @@ class QuotaUnmeasurableTest(unittest.TestCase):
             meter.fetch_usage = original
 
     def test_unmeasurable_is_its_own_band_and_is_capped_not_unlimited(self) -> None:
-        """🔴 R82 具名改寫（裁決 D-8，駁回本條 R81 版的「量不到 ⇒ 不設限」）。
+        """🔴 R82 具名改寫（裁決 D-8，駁回本條 R81 版的「量不到 ⇒ 不設限」；R81 版斷言
+        原文與複審探針數字＝Resume 證據檔 §L-3.11）。
 
-        R81 版逐字斷言 `fanout_cap(None) is None`＝**不設限**，理由是「斷網時自動降併發
-        會讓『網路壞了』與『額度滿了』外觀相同」。那個理由只成立到 R81 複審探針量出它的
-        淨效果為止：**快取過期 600s ＋ 額度 99% 時，42 次 `Agent` 派發放行 42、擋下 0**。
         裁決把它拆成兩層——守衛**行程**仍然 fail-open（不得崩、不得誤 deny），但**節流
         決策**不得靜默全放行 ⇒ 量不到時 `cap = degraded_cap`（>0，所以不會鎖死；
         且**永不** halt，因為絕不對一個沒量到的值開火）。狀態字仍必須與任何水位帶分得開。
@@ -3350,14 +3526,9 @@ class FanoutCapLadderTest(unittest.TestCase):
         self.assertEqual(self._cap(85.0, env={"AUTOSDD_QUOTA_FANOUT_CAP": "1"}), 1)
 
     def test_the_two_thresholds_are_tunable_because_the_helm_asked_for_that(self) -> None:
-        """🔴 R82 具名改寫（掌舵者裁定：訴求 6c 是使用者原文，優先於本條的舊宣稱）。
+        """🔴 R82 具名改寫（掌舵者裁定：訴求 6c 是使用者原文，優先於本條的舊宣稱；
+        R81 版沿革原文＝Resume 證據檔 §L-3.12）。
 
-        本條的 R81 版是另一個名字（**刻意不逐字反引號寫出**：那支 test 已不存在，指名它
-        會被幽靈符號鎖判紅，而 grep 到的人會以為它還在——同 `check_loc_budget.py` 對已死
-        符號名的既有處置），逐字註解「掌舵者訴求 b 的兩個數字是規格，**不是可調參數**」
-        並把 80／95 釘死。
-        訴求 6c 逐字要求「有參數設定 .env.example」⇒ 這是**一道鎖在守一個與需求矛盾的
-        宣稱**（本 repo 判過的形態，比沒有鎖更難看見）。裁決見合議規格 D-6（裁 SA）。
         改寫後守的性質換成兩條**仍然有鑑別力**的：① 出廠預設就是使用者原文的四個錨點；
         ② 設定真的會生效（忽略設定值即紅），而非法設定不得靜默採用。
         """
@@ -3386,10 +3557,7 @@ class QuotaBucketUnionTest(unittest.TestCase):
 
         只讀 `limits[]` 時這一條當場紅——那正是它存在的理由：哪天是代號桶先滿，
         取 `max(limits[].percent)` 會讀到一個低值而**永不節流**，且沒有東西轉紅。
-
-        🔴 R82 改判準（`meter.worst()` 已刪除，見該檔的墓碑）：舊版問「挑出來的那一桶
-        是不是它」，而「挑桶」這個動作本身就是本輪要拆掉的缺陷。現在問的是**取數層有沒有
-        把它交出去**——判讀層對全部軸求值，所以「它在不在 axes 裡」才是取數層的責任邊界。
+        R82 改判準（現在問的是**取數層有沒有把它交出去**）沿革原文＝Resume 證據檔 §L-3.13。
         """
         meter = _meter()
         payload = {"limits": [{"kind": "session", "percent": 12},
@@ -3511,16 +3679,10 @@ class QuotaKindBranchTest(unittest.TestCase):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# R83／F2-② 的**接線面**：使用者看到的那則 halt 訊息，指的是本機那個載具的指令
+# R83／F2-② 的**接線面**：使用者看到的那則 halt 訊息，指的是本機那個載具的指令。
+# 判準必須讀訊息本身（後端層另有 BackendInterfaceIsSymmetricTest 守判定層）；
+# 立案與「貼回 cmdlet 字面全庫零轉紅」的複驗實測原文＝Resume 證據檔 §L-4.4（R95 搬出）。
 # ═══════════════════════════════════════════════════════════════════════════
-# 🔴 立案（獨立複驗補的那一半）：F2-② 把取證指引下沉到 `schedule_backend.<後端>.
-# evidence_hint()`，而「三句話彼此不同、mac 那句不含 Windows cmdlet」已由
-# `test_mac_endurance_r83.BackendInterfaceIsSymmetricTest` 在**後端層**守住。但那是
-# 判定層——「那三句話真的出現在使用者讀到的那則訊息裡」是另一件事，而本 repo 的
-# 「機制蓋好沒接電」已三度復發。複驗當回合實測：把 cmdlet 字面貼回 `quota_halt_message`
-# （＝本輪修掉的缺陷原形，且 `evidence_hint()` 仍留在原處被別人叫）時，全庫**沒有任何
-# 東西會轉紅**——後端那三句仍然正確，只是沒有人在讀它。缺陷 ② 的本體是「訊息說了假話」,
-# 所以判準必須讀訊息本身。
 def halt_hint_problems(text: str, must: str, forbidden: str) -> list[str]:
     """halt 訊息必須帶本機載具的取證指令，且不得帶別的平台的。純函式，紅綠由注入自證。"""
     problems = []
@@ -3670,38 +3832,18 @@ class QuotaCacheContractHomeTest(unittest.TestCase):
 # ═══════════════════════════════════════════════════════════════════════════
 # R83／F2-①：跑測試不得寫進**生產的**降級觀測面
 # ═══════════════════════════════════════════════════════════════════════════
-# 🔴 立案是實測，不是衛生偏好。本輪在 mac 真機的 `%TMPDIR%` 撈到
-# `autosdd_quota_degraded.jsonl` 有 **17 列** `source=no-cache`，逐列時間戳與
-# `mkdtemp(prefix="degraded-")`／`"quota-gate-"` 這些**測試自己**的暫存目錄一一對上；
-# 二分定位（逐類別跑、量該檔行數增減）得到逐字證據：
-#     QuotaUnmeasurableFanoutTest: trace +1  新 stamp=1
-#     其餘四個 quota 類別:          trace +0  新 stamp=0
-# 成因：上面那兩個類別把 `quota_cache_path`／`fanout_ledger_path`／`quota_latch_path`
-# 換成沙箱，卻**沒有換** `quota_trace_path`／`degraded_stamp_path` ⇒ `note_degraded()`
-# 寫的是真的那兩個檔。
-#
-# 為什麼這比「檔案變髒」嚴重得多，兩層：
-#   ① 那個 jsonl **就是** SD-B2 要的那個觀測面——人要靠它回答「額度軸是不是正在靜默地
-#      不節流」。17/17 是假的，於是真事件在裡面讀不出來（訊噪比被測試自己毀掉）。
-#   ② 更硬的一層：`note_degraded()` 出聲帶 per-source TTL 閂鎖，而測試**消耗掉了真的那個
-#      閂鎖**。跑完測試後的 180 秒內，production 真的降級時 `note_degraded()` 回 `""`
-#      ——一聲都不出。「不節流 ≠ 不出聲」這條不變量在那個視窗裡是假的，而它完全靜默。
-#      這正是任務書 F2-① 觀察到的症狀（no-cache ⇒ 量不到 ⇒ 不節流且無聲），只是成因
-#      不是它推測的 `TMPDIR` 分裂（該推測已被三組實測否證，見交付報告）。
+# 成因：兩個類別把 cache／ledger／latch 換成沙箱，卻沒換 `quota_trace_path`／
+# `degraded_stamp_path` ⇒ `note_degraded()` 寫的是真的那兩個檔。立案實測全文
+# （17 列 no-cache、二分定位逐字、兩層嚴重性）＝Resume 證據檔 §L-3.14。
 def _TRACE_ISOLATION(test: unittest.TestCase) -> tuple:  # noqa: N802 — 與同檔 setUp 表對齊
     """要接在 `setUp` 那張 swap 表後面的兩格：把降級痕跡與閂鎖也關進沙箱。
 
     做成**共用的一格**而不是各類別自己抄一份：抄的那個形態正是這個缺陷的成因（兩個
     類別各抄了四格、各漏了同樣的兩格）。漏用它會被下面那道鎖抓到。
     """
-    # 🔴 R84：第三格（`refresh_stamp_path`）。它與上面兩格同構——額度軸落在生產暫存的
-    # 檔——而它此前在 `claim_refresh_slot()` 裡是寫死路徑、沒有注入點 ⇒ 任何走到刷新
-    # 路徑的測試都會吃掉真的那個 180 秒名額，此後真的需要補量時靜默不補。
-    # 🔴 R86：第四格（`burn_ledger_path`）。它住**持久**目錄（`~/.autosdd/traces`）⇒ 漏關
-    # 的代價比前三格更大：合成讀數會被 `burn_ratio()` 當真觀測拿去推換算比，汙染的是
-    # **下一次真的派工決策**（理由全文見具名證據檔 `CrossPlatform_R86_Pace_Calibration.md`
-    # ——刻意不寫它的目錄前綴：分桶棘輪把「提到散文樹」的整塊歸進 shrink-only 的 `prose`
-    # 桶，而本塊守的是沙箱隔離、不是散文，寫全路徑會讓 61 行被誤記進那一桶）。
+    # 🔴 R84 第三格（`refresh_stamp_path`）＋ R86 第四格（`burn_ledger_path`，持久目錄
+    # ⇒ 漏關會汙染下一次真派工決策）。兩格立案全文＝Resume 證據檔 §L-4.11
+    # （目錄前綴刻意不寫的分桶理由也在那裡）。
     return (("quota_trace_path", lambda: test.tmp / "trace.jsonl"),
             ("degraded_stamp_path", lambda source: test.tmp / f"stamp-{source}"),
             ("refresh_stamp_path", lambda: test.tmp / "refresh.stamp"),
@@ -3841,12 +3983,7 @@ class ZSentinelPinOutlivesEveryNestedRunnerTest(unittest.TestCase):
 
 class QuotaUnmeasurableFanoutTest(unittest.TestCase):
     """🔴 R81 收斂（Architect-B1）：「量不到」時**不得**對任意規模的扇出全數放行。
-
-    複審探針實測的缺口（跑 `quota_gate()` 真碼、沙箱 cache/ledger）：快取過期 600s／
-    額度 99% ⇒ 42 次 `Agent` 派發**放行 42、擋下 0**；完全沒有快取亦然。成因是唯一的
-    刷新呼叫點就在這條「已經量不到」的支線上、且 fire-and-forget 不等它 ⇒ 本次仍判
-    「量不到」⇒ 放行。而「過期」是**常態**不是罕見：哨兵巡邏一次都不刷快取、TTL 只有
-    180 秒 ⇒ 任何 ≥3 分鐘的非扇出工作之後，下一波扇出整批通過。
+    複審探針實測缺口原文＝Resume 證據檔 §L-3.15。
 
     本類的四條刻意涵蓋**兩個方向**：量得到就要擋（前三條），真的量不到又沒有任何證據
     時仍然放行（最後一條）。只鎖前者會讓下一個人用「一律 fail-closed」滿足它，而那正是
@@ -3922,16 +4059,12 @@ class QuotaUnmeasurableFanoutTest(unittest.TestCase):
         self.assertEqual(self._burst(transcript=str(main)), 42)
 
     def test_a_dead_endpoint_with_no_evidence_falls_back_to_the_degraded_cap(self) -> None:
-        """🔴 R82 具名改寫（裁決 D-8，駁回本條 R81 版的斷言）。
-
-        R81 版逐字斷言「真的量不到、又沒有任何撞線證據 ⇒ **仍然放行**」（`_burst() == 0`
-        ＝ 42 次全過），理由是「斷網時自動降併發會讓『網路壞了』與『額度真的滿了』外觀
-        完全相同」。裁決把那個矛盾拆成三層，各自的失效方向不同：
+        """🔴 R82 具名改寫（裁決 D-8，駁回本條 R81 版的斷言；R81 版斷言原文與複審探針
+        數字＝Resume 證據檔 §L-3.16）。裁決把那個矛盾拆成三層，各自的失效方向不同：
           · 守衛**行程**：永遠不得崩、不得誤 deny ⇒ fail-open（**這一層一行都沒動**）；
           · **節流決策**：不得靜默全放行 ⇒ 量不到時 `cap = degraded_cap`；
           · **halt 決策**：絕不對沒量到的值開火 ⇒ 量不到時**永不** halt。
-        R81 複審探針量到的淨效果就是本條在守的東西反了：過期 600s／額度 99% 時 42 次
-        派發放行 42。改判之後 cap 之內仍然全放行（所以「網路壞了 ≠ 停機」還在），
+        改判之後 cap 之內仍然全放行（所以「網路壞了 ≠ 停機」還在），
         超出 cap 才擋——而且它**永遠不會變成 0**（`decide` 保證 `>=1`，禁止靜默鎖死）。
         """
         self._endpoint(None)
@@ -3942,16 +4075,9 @@ class QuotaUnmeasurableFanoutTest(unittest.TestCase):
         self.assertGreater(42 - blocked, 0, "量不到不得變成靜默鎖死（cap 必須 >0）")
 
 
-# ═══════════ R81 收斂：**多行程** barrier 回歸鎖（B1／B3）——為什麼不是 Pool.map
-# 這一段每一條都 spawn 真的獨立行程，並用**壁鐘 barrier** 把它們對齊到同一瞬間。
-# 這不是講究，是量出來的判準差異：
-#   · `Pool.map` 的 worker 是**依序**被啟動的（本機實測彼此錯開數十毫秒）⇒「同時碰同
-#     一個檔」那件事根本沒發生。SD 對 `claim_refresh_slot` 兩種量法：Pool.map 得到
-#     CLAIM=1（看起來完全正確），壁鐘 barrier 得到 **CLAIM=16**（設計意圖 1）。
-#     同一支程式、兩個相反的結論——量法選錯就是一條恆綠的鎖。
-#   · 執行緒也不行：這兩個缺陷的本體是**跨行程**的檔案語意（Windows CRT 的 append 是
-#     使用者態的 seek＋write），同一個行程內的執行緒共用檔案物件，結構上量不到。
-#   · 本檔原本的 `FanoutLedgerTest` 是單行程序列呼叫 ⇒ 對這兩個缺陷零鑑別力，而它全綠。
+# ═══════════ R81 收斂：**多行程** barrier 回歸鎖（B1／B3）——為什麼不是 Pool.map／
+# 執行緒（跨行程檔案語意，行程內結構上量不到）。量出來的判準差異（Pool.map CLAIM=1
+# vs barrier CLAIM=16、單行程版零鑑別力）原文＝Resume 證據檔 §L-3.17。
 _BARRIER_WORKER = '''\
 import json, sys, time
 from datetime import datetime
@@ -3998,15 +4124,7 @@ def _barrier_run(tmp: Path, job: str, target: str, procs: int, each: int = 1,
 
 class FanoutLedgerConcurrencyTest(unittest.TestCase):
     """🔴 SD-B1：派發帳在併發下掉行／撕行 ⇒ 節流器兩個方向都會錯。
-
-    落地前以同一支 barrier 探針實測（8 行程 × 40 筆＝320）：
-      · 舊實作 `path.open("a")`             lines=221 **LOST=99（30.9%）**
-      · `os.open` 帶 `os.O_APPEND` ＋單次 `os.write`   lines=281 **LOST=39（12.2%）**
-        （SD 建議的修法本身治不好——Windows 的 CRT 把那個旗標實作成使用者態的 seek＋write）
-      · `msvcrt.locking(LK_LOCK)`           N=8 時 0，**N=20 時 10 個行程直接死在
-        `OSError: Resource deadlock avoided`**（它只重試 10×1 秒）⇒ 鎖自己變成故障源
-      · 現行（目錄項＋`O_CREAT|O_EXCL`）     8×40／20×40／42×10 三組皆 **LOST=0 torn=0**
-    """
+    四組 barrier 實測數字原文＝Resume 證據檔 §L-3.18。"""
 
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp(prefix="ledger-mp-"))
@@ -4306,13 +4424,8 @@ class QuotaDenominatorTest(unittest.TestCase):
 class WorkflowFanoutIsOutOfReachTest(unittest.TestCase):
     """🔴 SD-B1：把量到的失明面釘成政策，而不是留一句「擋得住」的假話。
 
-    本包當回合實測（`~/.claude/projects/d--CursorProject-AISDCL-Agent/`）：
-      · `Workflow` 的 tool_result **47/47** 是「Workflow launched in background」
-        ⇒ 那次呼叫在內部 agent 生出來之前就結束，用 Pre/Post 配對算 in-flight 恆讀 ≈0；
-      · `%TEMP%` 的 19 支 `autosdd_sentinel_boot_*.log` **沒有一支**的 sid 長得像 subagent
-        ⇒ SessionStart 對 workflow 內部 agent 一次都沒觸發過；
-      · 但 subagent 逐字稿裡 `PreToolUse:` 命中 136 次 ⇒ 那些 agent **自己的**工具呼叫會跑本 hook。
     ⇒ 一次 `Workflow` 啟動是事後界不住的扇出，節流帶唯一誠實的處置是不讓它啟動。
+    當回合三點量測原文＝Resume 證據檔 §L-3.19。
     """
 
     def setUp(self) -> None:
@@ -4689,14 +4802,8 @@ class QuotaDegradationIsAudibleTest(unittest.TestCase):
         self.assertEqual([s for s in spoken if s], [], "同一個 source 每次都在吵")
 
 
-#: 憑證來源的**雙欄登記表**（R83）。ONBOARDING §7 那兩欄基線是同一個體例：不把「這台
-#: 機器上憑證住哪裡」寫成常數，而是把**每個平台各自的答案**登記下來，兩欄在**任何**主機
-#: 上都跑。`platform` 是 `sys.platform` 的字面（`quota_meter.access_token` 的分支讀它）。
-#:
-#: 🔴 為什麼不是「在 mac 上跳過檔案欄／在 Windows 上跳過 Keychain 欄」：那等於那個平台
-#: 的憑證來源永遠沒有覆蓋，而本組要守的性質（「憑證讀不到」與「憑證讀得到但 401」是兩個
-#: 分得開的答案）**兩個平台都必須成立**——它正是排程器判斷「要不要繼續等額度回來」的
-#: 依據，一邊沒守住就等於那半邊的節流演算法建立在假數字上。
+#: 憑證來源的**雙欄登記表**（R83）：每個平台各自的答案都登記、兩欄在任何主機上都跑
+#: （`platform`＝`sys.platform` 字面）。為何不做平台跳過＝Resume 證據檔 §L-4.12。
 _CRED_COLUMNS = ("win32", "darwin")
 
 #: 形態像真 OAuth token（base64url、無空白、>=20 字元）⇒ 通過 `_keychain_token` 的
@@ -4710,11 +4817,8 @@ def _cred_kwargs(test: unittest.TestCase, meter: object, platform: str,
     """把 `platform` 那一欄的憑證鋪成「讀得到／讀不到」，回 `measure_detail` 的注入參數。
 
     兩欄都**不碰主機真正的憑證**：檔案欄一律指到 `mkdtemp` 下的路徑，Keychain 欄一律
-    走注入的 runner。這不只是衛生問題——R83 修這一組之前，`darwin` 主機上這組測試每跑
-    一次就真的 `security find-generic-password` 讀一次使用者的 login Keychain，於是
-    「401 這條臂綠不綠」取決於這台機器有沒有登入過 Claude Code（本機實測：Keychain
-    rc=0、有真 token ⇒ 401 那條臂僥倖是綠的；換一台沒登入的 mac 就會紅在
-    `no-credentials-darwin`）。判準去讀一個會隨機器變的外部狀態，本身就是缺陷。
+    走注入的 runner。R83 立案敘事（判準不得讀會隨機器變的外部狀態）原文＝Resume 證據檔
+    §L-3.20。
     """
     old_creds = meter.CREDENTIALS
     test.addCleanup(setattr, meter, "CREDENTIALS", old_creds)
@@ -5004,13 +5108,8 @@ class PlanGarbageCollectionTest(unittest.TestCase):
 
 
 class QuotaDegradationReachesTheModelTest(unittest.TestCase):
-    """🔴 L4-02：降級**有出聲，但出在一個沒有讀者的通道上**。
-
-    立案（讀碼＋本輪實跑）：`note_degraded()` 寫 stderr，而它唯一的 production 呼叫鏈
-    （`quota_gate()` 的 L4 分支）在那之後 `return 0`＝放行 ⇒ 依本 repo 自己記載的行為
-    契約（`context_budget_guard.py` 模組 docstring 逐字：「PostToolUse 的 exit 2 會把
-    stderr 回饋給模型」），那段話一個字都到不了模型面前。而 L4 **必須**不節流（斷網
-    與「額度真的滿了」不可混為一談）⇒ 不能改用 exit 2 去換能見度。
+    """🔴 L4-02：降級**有出聲，但出在一個沒有讀者的通道上**（立案原文＝Resume 證據檔
+    §L-3.21）。
     ⇒ 換通道不換 rc：`hookSpecificOutput.additionalContext` 是 exit 0 下唯一送得進
     模型上下文的管道。螢幕上「量不到」與「水位很低」從此分得開。
     """
@@ -5080,14 +5179,9 @@ class QuotaDegradationReachesTheModelTest(unittest.TestCase):
 class MacCredentialSourceTest(unittest.TestCase):
     """🔴 L4-03：mac 的 Claude Code 憑證在 login Keychain，不在檔案系統上。
 
-    本組今天守得住的是「判定邏輯」：平台分支選對了路、取不到時回一個**分得出來的**
-    理由字面、`security` 吐出來的垃圾不得變成 token。**仍然守不住**的是「一台**沒有**
-    Keychain 條目的 mac」——本機構造不出來（清掉條目等於把使用者登出），那一半只由
-    `_runner` 注入覆蓋，屬於模擬而非真機。實測值的**唯一的家**是
-    `quota_meter.KEYCHAIN_SERVICE` 的註解，本段刻意不複寫（R73 判例）。
-
-    🔴 R89 減法：本段此前另有 25 行「誰署名錯了、哪一句今天變假了」的**史料**（是輪次
-    證據不是判準），逐字保全於 `CrossPlatform_R89_Closure_Evidence.md` §護欄層減法。
+    守得住判定邏輯；守不住「沒有 Keychain 條目的真 mac」（那一半只由 `_runner` 注入
+    模擬）。射程劃界全文＝Resume 證據檔 §L-4.15；R89 減法史料＝R89 收尾證據檔
+    §護欄層減法；實測值唯一的家＝`quota_meter.KEYCHAIN_SERVICE` 的註解（不複寫）。
     """
 
     def setUp(self) -> None:
@@ -5160,14 +5254,7 @@ class MacCredentialSourceTest(unittest.TestCase):
         """`security` 可能吐錯誤訊息而不是 JSON ⇒ 不得把它當 token 送出去。
 
         送出去的話會變成一個**永遠 401** 的假綠：取數看起來有在跑，只是永遠失敗。
-
-        🔴 R83 補第三種形態（輪號經獨立驗證者訂正：原文署名 R82，而該形態在 R82 收輪
-        commit 內 grep「第三種形態」命中 **0**——被守的 `_run_security` 是 R82 的，
-        這一條斷言不是）：`_run_security` 帶 `errors="replace"`，所以**非 UTF-8
-        位元組會降解成一串 U+FFFD**，而那串東西不含任何空白、長度也遠超過 20
-        ⇒ 舊判準（只看「夠長且不含空白」）照樣放行（實測 `True`）。守衛與它自己上一段
-        註解宣稱要防的東西之間差一個字，而後果正是那句話寫的「永遠 401 的假 token」：
-        額度軸從此恆為 `unmeasurable`，80%／95% 兩道門一次都到不了。
+        R83 補第三種形態（輪號訂正、實測 `True`）沿革原文＝Resume 證據檔 §L-3.22。
         """
         self.assertEqual(self.meter.access_token(
             "darwin", self._runner(0, "security: SecKeychainSearchCopyNext: not found\n")),
@@ -5359,15 +5446,9 @@ class SentinelArmingCriterionTest(unittest.TestCase):
         self.assertEqual(len(self.spawned), 2)
 
     # ── R84／C3-C：每一條「醒來之後」的路徑都必須處置掉自己的排程 ──────────────
-    #: 允許的處置：拆掉自己（`_schtasks_remove`）、重排下一次（`_register_and_record`），
-    #: 或把整件事**交棒**給另一支同樣受本判準約束的 tick（`_resume_tick`）。
-    #: 三者以外的 return＝那一跑醒來、做了點事、然後把排程留在原地 ⇒ 下一個間隔它會
-    #: 再醒一次、再走同一條路，永遠不會停。Windows 上那就是每 15 分鐘一個黑框。
-    #: 🔴 R84／C8：第四個名字是**委派**而非新語意——`_abort_and_unregister` 是那四條
-    #: abort 路徑收成一份之後的唯一實作，它在函式體第一行就無條件 `_schtasks_remove`。
-    #: 直接把名字加進本表會讓判準退化成「呼叫了一個名字好聽的函式」，所以同輪補
-    #: `test_the_abort_delegate_really_disposes`：委派自己不處置時當場紅（兩條合起來
-    #: 才等價於原判準的強度，缺任一條都比原判準弱）。
+    #: 允許的處置＝拆掉自己／重排下一次／交棒給另一支受本判準約束的 tick；第四個名字
+    #: （`_abort_and_unregister`）是委派而非新語意，強度由
+    #: `test_the_abort_delegate_really_disposes` 補齊。全文＝Resume 證據檔 §L-4.9。
     _TICK_DISPOSALS = ("_schtasks_remove", "_register_and_record", "_resume_tick",
                        "_abort_and_unregister")
     #: 受判準約束的 tick 函式。兩支都要判：`_sentinel_tick` 的 probe 分支會交棒給
@@ -5378,23 +5459,9 @@ class SentinelArmingCriterionTest(unittest.TestCase):
     def _returns_with_dominators(fn: ast.FunctionDef) -> list[tuple[int, set[str]]]:
         """每一個 `return` 的**支配呼叫集合**（同一條直線路徑上先於它的呼叫名）。
 
-        分支體內的呼叫**不算**其他分支的支配者——那正是「支配」與「函式體內出現過」
-        的差別，而後者是沒有鑑別力的（`_sentinel_tick` 隨便哪一支分支呼叫過一次
-        `_schtasks_remove`，全部 return 就一起被判成安全）。
-
-        🔴 R84／SD-09 訂正**射程**：舊版靠 `isinstance(sub, ast.stmt)` 決定要不要往下走，
-        而 `ast.ExceptHandler`／`ast.match_case` **不是** `ast.stmt` ⇒ 寫在 `except:`／
-        `case:` 裡的 `return` 連進分母都沒有進，判準對它完全隱形（掃描器照跑、照綠、
-        照回報命中數，只是那條路徑從來不在分母裡——本 repo 判過的「失明是靜默的」）。
-        `ast.TryStar`／`ast.AsyncFor`／`ast.AsyncWith` 是同一個洞的另一半：型別根本不在
-        舊的 isinstance 名單上 ⇒ 落到最後那一格「直線陳述式」，return 被吞掉、而且體內
-        的呼叫還會被當成後續 return 的支配者（往**放行**的方向錯）。
-        今日 `_sentinel_tick`／`_abort_and_unregister` 實測 0 個 try/except ⇒ 存量命中 0，
-        但那是運氣不是設計：任何人補一段 `try/except` 進去就整條失明。
-
-        分支拆法逐條對齊「真的先跑過」這件事，而不是求方便：迴圈的 `orelse` 只拿到
-        **迴圈之前**的支配集合（迴圈可能一次都沒跑）；`except` handler 同理只拿到
-        `try` **之前**的（body 可能在任何一行拋出）——兩者都往「判紅」的保守方向站。
+        分支體內的呼叫不算其他分支的支配者（「支配」≠「函式體內出現過」，後者零鑑別
+        力）；迴圈 `orelse`／`except` handler 只拿到迴圈前／`try` 前的集合——往判紅的
+        保守方向站。SD-09 沿革（§L-3.23）與分支拆法全文＝Resume 證據檔 §L-4.14。
         """
         out: list[tuple[int, set[str]]] = []
         try_types = (ast.Try, getattr(ast, "TryStar", ast.Try))
@@ -5530,10 +5597,7 @@ class SentinelArmingCriterionTest(unittest.TestCase):
 
     def test_this_module_never_reaches_the_real_scheduler(self) -> None:
         """🔴 R84／C3-P4c 的回歸鎖：兩條路都必須被關起來，而它們**結構上不相交**。
-
-        本機實測留下的證據：`launchctl list` 長期掛著一支 `AutoSDD_Sentinel_s`
-        （session id 就是本模組某個 fixture 的檔名 `s.jsonl`），每 15 分鐘醒一次、
-        session 早就不存在 ⇒ 永遠沒有人來收。Windows 上它就是那個黑框。
+        本機實測證據原文＝Resume 證據檔 §L-3.24。
         兩條路：① 子行程走 `_isolated_env`（預設 `real_scheduler=False`）；
         ② 同行程走 `setUpModule` 設在**本行程**環境上的同一個旗標。
         """
@@ -5608,10 +5672,8 @@ class ConsoleSpawnAttributionTest(unittest.TestCase):
         """
         watch = self._watch()
         kind, why = watch.classify({
-            "Name": "cmd.exe",
-            "CommandLine": _WMI_CMD,
-            "ParentName": "python.exe",
-            "ParentCommandLine": _WMI_PARENT,
+            "Name": "cmd.exe", "CommandLine": _WMI_CMD,
+            "ParentName": "python.exe", "ParentCommandLine": _WMI_PARENT,
         }, _WMI_REPO)
         self.assertEqual(kind, "shell-hop", why)
         self.assertIn("evaluator", why)
@@ -5758,13 +5820,10 @@ class SentinelReapVerdictTest(unittest.TestCase):
             return sentinel_lifecycle.gc(apply=True, tmp_dir=str(tmp))[0], trace
 
     def test_reaping_a_sentinel_leaves_an_audit_trace(self) -> None:
-        """🔴 回收**不得靜默**——這是本輪實機觀測到的那個病徵的另一半。
-
-        少了這一行痕跡，`--apply` 跑完之後的磁碟狀態與「哨兵自己靜默消失」**完全同形**，
-        事後連「是被收掉還是自己死了」都分不出來（實機觀測原文＝
-        `docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`）。
-        斷言逐項對應那個歸因問題：誰（`task`／`session_id`）、為什麼（`why`）、
-        排程真的拆掉了嗎（`unregister_rc`）、殘骸掃了幾件（`swept`）、何時（`at`）。
+        """🔴 回收**不得靜默**——少了這行痕跡，`--apply` 後的磁碟狀態與「哨兵自己靜默
+        消失」完全同形（實機觀測原文＝R89 收尾證據檔）。斷言逐項對應歸因問題：
+        誰（task／session_id）、為什麼（why）、排程拆了嗎（unregister_rc）、
+        殘骸掃了幾件（swept）、何時（at）。
         """
         row, trace = self._apply_once("r83-gc-trace")
         self.assertTrue(row["reap"], row)
@@ -5794,15 +5853,8 @@ class SentinelReapVerdictTest(unittest.TestCase):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# R82／C2：`.env` 裡設的逃生口必須真的算數
+# R82／C2：`.env` 裡設的逃生口必須真的算數（病的複審鏡實測原文＝Resume 證據檔 §L-3.25）
 # ═══════════════════════════════════════════════════════════════════════════
-#
-# 病（複審鏡實測）：`.env.example` 逐字宣稱「生效路徑① 本檔（repo 根 .env）」，而三個
-# 逃生口（`AUTOSDD_QUOTA_GUARD_OFF`／`AUTOSDD_SENTINEL_OFF`／`AUTOSDD_CONTEXT_GUARD_OFF`）
-# 全部直讀 `os.environ`、一律不經 `policy_env()` ⇒ 在 `.env` 裡設 `AUTOSDD_QUOTA_GUARD_OFF=1`
-# → **rc=2（沒放行）**；設成真環境變數 → rc=0。「安全逃生口靜默失效」比沒有文件更糟：
-# 人以為關掉了、守衛照擋，而兩者外觀完全相同。
-#
 # 修法是**一次前置填充**（`quota_gate.apply_env_defaults`，由 hook 的 `main()` 呼叫），
 # 不是把每個讀取點改寫成 `policy_env()`。理由是射程：`SENTINEL_OFF_ENV` 有一個讀取點
 # 住在 `arm_sentinel()` 裡，逐點改寫必然留下一個改不到的縫，而那個縫**正是本條在治的
@@ -5826,13 +5878,8 @@ class EnvFileReachesEveryEscapeHatchTest(unittest.TestCase):
             os.environ.pop(spec.name, None)
 
     def _tmpdir(self) -> Path:
-        """🔴 R84／SA84-06：夾具**自己收自己的垃圾**。
-
-        立案是量出來的：`ls $TMPDIR | grep -c autosdd_dotenv` ＝ **265**（複審當下的
-        量測值，不是常數——落地時同一條指令已經 295，因為它每跑一次就漲）。本類每跑一次
-        就在使用者的暫存區留下數個目錄，而它們永遠沒有人收。與哨兵孤兒 job 同一個病
-        （測試在開發者機器上留下真實副作用），只是這一種安靜得多。
-        落地驗證：接上本 cleanup 後，同一支模組跑完一輪的 delta ＝ **0**。
+        """🔴 R84／SA84-06：夾具**自己收自己的垃圾**（測試不得在開發者機器上留下真實
+        副作用）。量測數字原文＝Resume 證據檔 §L-3.26。
         """
         root = Path(tempfile.mkdtemp(prefix="autosdd_dotenv_"))
         self.addCleanup(shutil.rmtree, root, True)
@@ -5923,12 +5970,8 @@ class EnvFileReachesEveryEscapeHatchTest(unittest.TestCase):
 class QuotaGateIsWiredToTheBurnPathTest(unittest.TestCase):
     """🔴 R83：額度那把尺造好了，卻接在一條**幾乎不通電**的線上——本類守的就是那條線。
 
-    呼叫點條件此前是 `if blocking and …`，而 `blocking` 只在 PreToolUse 為真 ⇒ 額度只在
-    「我要扇出」那一刻被問一次。R83 實測：配額 5%→90% 的整段，主 session 派完最後一波之後
-    再也沒呼叫任何扇出型工具（後續全是全樹跑、agent 回傳、大量讀檔）⇒ 本閘一次都沒被叫到。
-    它守的是「我要不要多派人」，燒掉額度的卻是「我自己在做事」。
-    紅端（接電前實跑）：PostToolUse×{Read,Bash,Grep,Glob,Task} 一律 rc=0、stderr 0 位元組、
-    零任務書、`decide()` 呼叫 0 次。⇒ 判例 #3「機制蓋好沒接電」已復發三次，故本類不驗
+    它守的是「我要不要多派人」，燒掉額度的卻是「我自己在做事」。R83 實測與紅端逐字
+    原文＝Resume 證據檔 §L-3.27。⇒ 判例 #3「機制蓋好沒接電」已復發三次，故本類不驗
     「程式碼在不在」，只驗「它真的做了動作」。
     """
 
@@ -6234,15 +6277,8 @@ class QuotaGateIsWiredToTheBurnPathTest(unittest.TestCase):
 # ═══════════════════════════════════════════════════════════════════════════
 # R84：`ConsoleFreeSpawnTest` 的掃描面擴到 `AutoClaude/tools/hooks/**`
 # ═══════════════════════════════════════════════════════════════════════════
-# 🔴 立案（Windows 彈窗窮舉的實測結論）：全庫 80 個 spawn 站點只有 10 個帶旗標，而本鎖的
-# 宣告集合只有 14 支檔——`AutoClaude/**` **整片在射程外**。而那一層裡有一族與根層 hook
-# 完全同構的東西：`AutoClaude/tools/hooks/*.py` 是子專案 session 的 Claude Code hook，
-# 跑在**同一種無 console 的父行程**下 ⇒ 同一個危害、同一個修法、零判準。
-#
-# 🔴 為什麼是「擴面＋登記存量」而不是「擴面就好」：實測擴面後命中 **1 筆**，逐筆判讀是
-# **真陽性**（`claude_md_freshness.py::check_snapshot_drift` 起一支 console 的
-# `sys.executable`，無 `creationflags`），而那支檔不在本包的所有權內。兩個都不可接受的
-# 選項：讓閘門紅著交件／把射程縮回去。第三條路＝本 repo 既有的 **shrink-only 存量棘輪**：
+# 立案實測（80 站點僅 10 帶旗標；擴面後命中 1 筆真陽性）原文＝Resume 證據檔 §L-3.28。
+# 第三條路＝本 repo 既有的 **shrink-only 存量棘輪**：
 # 新站點一律紅，已登記的那一筆放行**但必須仍然真的違規**——有人修好了它，這張表就會
 # stale 而轉紅，逼人把它拿掉。分子只准降。
 # 🔴 錨用**函式名**不用行號：行號會隨那支檔的任何一次編輯漂掉，而漂掉的方向是靜默放行。
@@ -6316,14 +6352,8 @@ class AutoClaudeHookSpawnIsInScopeTest(unittest.TestCase):
 # R84／6C：prepare 帶（85~95%）真的要做準備動作 —— SA-03
 # ═══════════════════════════════════════════════════════════════════════════
 class QuotaPrepareBandActuallyPreparesTest(unittest.TestCase):
-    """🔴 紅端（本輪落地前對 HEAD 實跑，逐字）：合成 86% 快取走真閘 ⇒
-    `event=PostToolUse tool=Read rc=0 stderr_bytes=0 plan_writer_calls=0`；
-    `event=PreToolUse tool=Read rc=0 stderr_bytes=0`。對照 96%：`rc=2 stderr_bytes=607`。
-
-    也就是 85% 這一帶唯一真的會發生的事，是 PreToolUse×`Workflow` 被擋
-    （`UNBOUNDED_FANOUT_TOOLS` 只有這一個成員）；`Read`／`Task` 全部靜默放行，
-    而訴求 6C 要的「提前準備下一次 reset」一份任務書都沒有——外觀與「額度很健康」相同。
-    R83 交棒書把射程記成只有 PostToolUse，實測**兩個事件都靜默**。
+    """🔴 SA-03 紅端：prepare 帶在 HEAD 上兩個事件都靜默、外觀與「額度很健康」相同
+    （紅端逐字原文＝Resume 證據檔 §L-3.29）。
 
     本類刻意不驗「程式碼在不在」，只驗它真的做了那三件事（出聲／落磁碟／一個視窗一次），
     以及**沒有**做第四件事（改 rc）——85% 擋下收斂型工作會讓人連收斂都做不完。
@@ -6363,11 +6393,9 @@ class QuotaPrepareBandActuallyPreparesTest(unittest.TestCase):
     def test_both_events_speak_and_leave_a_restart_point(self) -> None:
         """射程是**兩個**事件（R83 交棒書只記了 PostToolUse 那一半）；各自要出聲＋落任務書。
 
-        🔴 誠實劃界（SA-03 的紅端證據裡混了一格治不了的）：`PreToolUse` 只在**扇出邊緣**
-        被叫（`tool not in blocking` 就早退，那是刻意的——收斂型工具不受額度節流），
-        所以 `PreToolUse×Read` 在 86% 仍然是零位元組，而且**應該是**。那一格由
-        `PostToolUse`（射程是註冊面上的每一個工具）覆蓋 ⇒ 兩者合起來的性質才是本輪要的：
-        「進了 prepare 帶之後，**第一次**工具呼叫就會出聲並留下可重啟點」。
+        🔴 誠實劃界：`PreToolUse` 只在扇出邊緣被叫 ⇒ `PreToolUse×Read` 86% 仍零位元組
+        且**應該是**；那一格由 `PostToolUse` 覆蓋——合起來的性質＝「進了 prepare 帶之後
+        **第一次**工具呼叫就出聲並留下可重啟點」。SA-03 紅端全文＝Resume 證據檔 §L-4.28。
         """
         for event, tool in (("PostToolUse", "Read"), ("PreToolUse", "Task")):
             with self.subTest(event=event, tool=tool):
@@ -6865,14 +6893,10 @@ class SingleEmitterHasOneFlushSiteTest(unittest.TestCase):
 
 
 class EveryHookEscapeHatchIsDeclaredTest(unittest.TestCase):
-    """🔴 R82／C2 的那條路要對**每一個**逃生口成立：`.env` 裡設了卻不生效時，
-    「關掉了」與「沒關掉」外觀完全相同。分母現查 `.claude/hooks/context_budget_guard.py`
-    自己宣告的 `*_OFF_ENV` 常數，不寫死清單。
-
-    誠實劃界：射程**只有這一支 hook**。`AUTOSDD_GIT_GUARD_OFF`／`AUTOSDD_CLAIM_GUARD_OFF`
-    （`block_destructive_git.py`／`check_claim_provenance.py`）今天不在 `ENV_SPEC` 裡，
-    也就是它們從 `.env` 到不了——那是**已知且尚未關的缺口**，不是本組漏看；把它們一起
-    納入會製造兩筆今天無人負責的紅，而那種鎖活不過一輪。
+    """🔴 R82／C2 的那條路要對**每一個**逃生口成立：`.env` 裡設了卻不生效＝「關掉了」
+    與「沒關掉」外觀相同。分母現查 hook 自己宣告的 `*_OFF_ENV` 常數，不寫死清單。
+    誠實劃界（git／claim 兩支 hook 的逃生口今天到不了 `.env`＝已知缺口）全文＝
+    Resume 證據檔 §L-4.21。
     """
 
     def test_every_off_switch_this_hook_declares_is_reachable_from_dot_env(self) -> None:

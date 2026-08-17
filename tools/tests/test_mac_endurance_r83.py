@@ -61,12 +61,8 @@ _ARMING_ARMS_FLOOR = 4
 def arming_arms(source: str) -> tuple[str, ...]:
     """現查「這台機器要不要掛續航」的全部入口＝module-level `arm_*`／`spawn_*` 函式。
 
-    🔴 R83 複審 F-05／FC-5 訂正：此處原本是**寫死的四元組**，而它上方的註解自稱那是
-    「全部入口」。複審者注入第五支 `arm_next_thing`（body 內含 `os.name != "nt"`，正是本包
-    立案要防的那個寫法）實測：現行寫死分母之下**兩支鎖皆綠**；換成量測分母後當場紅
-    （`arm_next_thing:1083` / `arm_next_thing:UNWIRED`）。⇒ 那句話是「今天成立的量測值被
-    寫成常數」，本 repo 反覆判過這個形態（R79 為 hook 註冊面補的「第三向以量測集合當分母」
-    是同一件事）。改成現查之後，第五支臂一落地就進分母，不需要有人記得回來改這一行。
+    分母改現查而非寫死四元組（R83 複審 F-05／FC-5 訂正，立案史料原文＝Guard_Repin 證據檔
+    §E-1）。改成現查之後，第五支臂一落地就進分母，不需要有人記得回來改這一行。
     """
     tree = ast.parse(source)
     return tuple(sorted(node.name for node in tree.body
@@ -188,11 +184,7 @@ class SelectIsTheOnlyPlatformQuestionTest(unittest.TestCase):
 # 🔴 R83 複審 A-02／F-6：「唯一提問點」這句宣稱原本**只有一支檔在守**
 # ═══════════════════════════════════════════════════════════════════════════
 #
-# 上面那一組判準讀的是 `_GUARD_SRC`，而 `_GUARD_SRC` 只有 `.claude/hooks/
-# context_budget_guard.py` 一支檔 ⇒ `tools/lib/sentinel_lifecycle.py` 的回收臂（零 import、
-# 硬寫 `powershell.exe`）完全在射程外。複審實測後果：mac 上 `sentinel_task_names()` 回 `[]`、
-# `_remove_task()` 回 127，而同一刻 `launchctl list` 列著活著的哨兵 ⇒ GC 回報「沒有任何工作」。
-# **這是「有鎖在守假話」**（檔案在、判準在、測試全綠），本 repo 判過它比沒鎖更貴。
+# 立案實測史料搬遷，原文＝Guard_Repin 證據檔 §E-2。
 #
 # 🔴 判準為什麼問「誰在驅動排程器」而不是「誰在問 `os.name`」
 # ---------------------------------------------------------
@@ -384,18 +376,7 @@ def symmetry_problems(backends: tuple, launchd_only: tuple[str, ...]) -> list[st
 class BackendInterfaceIsSymmetricTest(unittest.TestCase):
     """🔴 R83／F2-⑤：三個排程後端的契約面必須**對稱**。
 
-    立案（實測，非預防性）：修前 `list_jobs()` 只住在 `LaunchdBackend` 與
-    `NoCarrierBackend`，`SchtasksBackend` **沒有**。一旦有人寫 `select().list_jobs(...)`，
-    同一行程式在 mac 上會工作、在 Windows 上 `AttributeError`——那正是「單平台判準不可
-    無條件外推」（DEF-101-766）的形狀，只是這次外推的是**介面**。
-
-    F2-⑤ 當時的處置是**刪掉那兩支**而不是補第三支（依據：實查零呼叫端零測試＝死碼；
-    補一支給不存在的呼叫端＝推測性程式碼，Rule 2）。原註記自己寫了那個判斷的失效條件：
-    「哪天真的有消費者，補的時候三支一起補」。
-    🔴 R83 複審 A-01／A-06 訂正：**消費者當時就存在**，只是住在還沒重構的另一側——
-    `sentinel_lifecycle.sentinel_task_names()` 是這支方法的 Windows 孿生，且有活消費者
-    （`gc()`）。「零呼叫端」在字面上為真、在語意上為假，而那筆減法把 mac 回收臂的修法從
-    「叫一個現成方法」變成「先補回原語」。本輪三支一起回補，這道鎖的射程不變：
+    立案與 A-01／A-06 訂正史料搬遷，原文＝Guard_Repin 證據檔 §E-3。這道鎖
     **兩個方向都紅**——只給一個後端加方法會紅，從一個後端拿掉共同方法也會紅。
     """
 
@@ -473,12 +454,7 @@ class BackendInterfaceIsSymmetricTest(unittest.TestCase):
 class RecyclingArmIsWiredTest(unittest.TestCase):
     """🔴 R83 複審 A-01（本輪最嚴重的一筆）：mac 的續航「武裝接通了、回收一行都沒接」。
 
-    落地當時的實測（複審者，我複驗）：`sentinel_lifecycle` 對 `schedule_backend` 的 import 數
-    ＝**0**，GC 走 `powershell.exe` ⇒ mac 上 `sentinel_task_names()` 回 `[]`、`_remove_task()`
-    回 127，而同一刻 `launchctl list` 列著活著的哨兵。**最貴的一半是回報**：GC 逐字印
-    「（沒有任何 AutoSDD_Sentinel_* 工作…）」＝假陰性——專門用來發現增生的那支工具說一切正常。
-    而「移除」那一半其實是通的（舵手手動 `--remove-schtasks` rc=0 收掉孤兒走的正是那條路）
-    ⇒ 只壞列舉比整支壞掉更危險：移除得動、卻永遠找不到要移除的東西。
+    立案實測史料搬遷，原文＝Guard_Repin 證據檔 §E-4。
 
     本類守三件事，缺一個都會讓修復退回去：
       ① 接線（回收臂真的問 `select()`）；
@@ -630,13 +606,7 @@ def credential_key_copies(source: str) -> list[str]:
 class CredentialKeyHasOneHomeTest(unittest.TestCase):
     """🔴 R83／F2-④：憑證鍵名住兩個家，而改鍵名時**不會有東西轉紅**。
 
-    立案（實查）：`schedule_backend.CRED_KEY_LAUNCHD = "schedule_credential"` 是宣告的家，
-    但 `session_resume_planner.py` 有 **3 處**把它當 kwarg 名字直接寫出來
-    （`state.update(next_run_time="", schedule_credential="")`，三支終態路徑各一處）。
-    改鍵名的後果：後端把憑證寫進新鍵、終態清的是舊鍵 ⇒ 舊鍵殘留一個過期憑證，而
-    `relay_problems()` 的判準是「兩鍵任一非空」⇒ 一個**已經放棄**的續航會被判成
-    armed／waiting 而繼續被信任。這與 R59 事故同形（「我下了指令」≠「它真的排進去了」），
-    且全套測試照綠——因為兩個家今天恰好相符，而判準從不問「這兩個字面是同一個東西嗎」。
+    立案實查史料搬遷，原文＝Guard_Repin 證據檔 §E-5。
     """
 
     def test_the_planner_carries_no_literal_copy(self) -> None:
@@ -737,12 +707,7 @@ def _print_output(interval: int, argv: list[str], path: str,
                   calendar: dict | None = None) -> str:
     """合成一份 `launchctl print` 輸出（欄位與真機實測逐字同形）。
 
-    🔴 R83／QA 訂正：本 fixture 原本是**扁平**的，而真機輸出是巢狀的——`state = ` 在裡面
-    出現三次（job 自己那一個在最外層，另外兩個在 `resource coalition`／`jetsam coalition`
-    子區塊裡，且那兩個恆為 `active`）。fixture 少了巢狀結構，等於讓整組 launchd 測試都在
-    一個比真實世界簡單的世界裡跑：解析器的「掃到就覆蓋」缺陷在這裡結構上顯現不出來，於是
-    30 條綠全數成立，而真機上的憑證同一刻在說假話。**fixture 與被測世界的形狀不符，是最
-    貴的一種假綠**——所以這裡照真機補上巢狀塊，讓每一條既有的綠都改在真的形狀上成立。
+    R83／QA 訂正史料搬遷（fixture 從扁平改巢狀），原文＝Guard_Repin 證據檔 §E-6。
     子區塊刻意放在 `arguments` 之後、`run interval` 之前，與真機的欄位順序一致。
     """
     lines = ["gui/501/L = {", f"\tpath = {path}", "\tstate = not running",
@@ -1025,13 +990,7 @@ class SelfDisarmTest(unittest.TestCase):
 class CalendarMomentReachesThePlistTest(unittest.TestCase):
     """🔴 R83-B ⑤：`arm_reset` 要求的**時刻**必須真的到得了 launchd，而憑證必須說實話。
 
-    修前的實況（本輪逐位元組實測，不是推論）：四個相異 `at_expr`
-    （`'2026-08-10 23:02:00'`／`'2027-01-01 00:00:00'`／`(Get-Date).AddHours(5)`／空字串）
-    產出的 plist **sha256 完全相同**，相異指紋數 = 1 ⇒ 那個引數結構上到不了 plist；
-    而同一刻決策層逐字印「⇒ **重排到那個時刻**（本次零 token）」。
-    代價已經發生：本輪真實撞線語料裡同一個判定連印四次（22:06／22:21／22:36／22:51，
-    `fire_at` 每次都是 23:02:00），掌舵者據此判「喚醒完全不 WORK」並開了一個 P0
-    ——**假話造成假診斷**。
+    修前實況的逐位元組實測史料搬遷，原文＝Guard_Repin 證據檔 §E-7。
 
     本類別守的四件事，每一件都附合成注入的紅：
       ① 真的截止時刻 ⇒ plist 必須帶 `StartCalendarInterval`（相異時刻 ⇒ 相異 plist）；
@@ -1184,27 +1143,8 @@ class CalendarMomentReachesThePlistTest(unittest.TestCase):
 class DeferredActionWaitsForTheParentTest(unittest.TestCase):
     """🔴 R83-B ⑥ — **本輪 P0 的真根因**：延後動作等的是「父行程退場」，不是一個猜的秒數。
 
-    掌舵者的判讀是「移除成功、建立失敗，而且回報成功」。**那個判讀被駁回**——真根因是
-    `_defer_bootout` 裡寫死的 `sleep 3`：
-      · `_sentinel_tick` 的 disarm／escalate 分支在 disarm 之後只再寫一行 log（3 秒夠用，
-        所以這個缺陷躲過了當初那次對照實驗）；
-      · 而 `_resume_tick` 的 **resume** 分支在 disarm 之後才跑 `_run_resume`
-        （`subprocess.run(..., timeout=3600)`）⇒ 3 秒後 bootout 把整個 job 連同那一跑
-        一起殺掉，`append_log(resumed)` 那一行**永遠寫不出來**。
-
-    真機合成實驗（R83-B 當回合，本機 macOS 25.5.0，label `AutoSDD_R83B_E4`）逐字：
-        23:24:18 START pid=77099 XPC_SERVICE_NAME='AutoSDD_R83B_E4'
-        23:24:18 disarm rc=0（延後 bootout 已 spawn）
-        23:24:19 長工作進行中 t+1s
-        23:24:21 長工作進行中 t+2s          ← 到此為止，沒有下一行
-        bootout rc=0 at 2026-08-10T15:24:22Z
-    對照本輪**真實撞線**語料（同一個形狀，這是它在 production 的證據）：
-        23:06:33 sentinel_decided action=probe    ← reset 23:00 已過，正確地去探測
-        23:06:37 probed                            ← 探針真的跑了
-        23:06:41 bootout rc=0                      ← 4 秒後自我 bootout
-        （此後沒有任何 `resumed` 事件，哨兵也從 launchctl 消失）
-    ⇒ 修法不是「把 3 改大一點」（那只是換一個會過期的猜測），而是讓那句原本就寫在
-      `disarm` 上方的話變成真的：「主行程把該寫的都寫完、正常退場，然後才 bootout」。
+    真根因判讀、真機合成實驗與 production 撞線語料的逐字史料搬遷，原文＝Guard_Repin
+    證據檔 §E-8。
     """
 
     def setUp(self) -> None:
@@ -1490,10 +1430,7 @@ class HookWiringReachesThisPlatformTest(unittest.TestCase):
 # ═══════════════════════════════════════════════════════════════════════════
 # 🔴 R84／SA-05：訴求 6e 的**誠實化**——「睡著的 Mac 不會醒」不得只活在一行註解裡
 # ═══════════════════════════════════════════════════════════════════════════
-# 病（複審當回合實測）：`pmset -g sched` rc=0／**0 位元組**（零排程喚醒）、`pmset -g custom`
-# 的 AC 段逐字 `sleep 0`，而武裝路徑對 `sleep != 0` **完全靜默**——憑證會照樣印出一份看起來
-# 完全正常的三件式。⇒ 6e 今天在這台機器上成立的唯一原因是一個**不在 repo、不隨 clone 走**
-# 的機器設定（同 R73 把一台機器的安裝路徑寫成常數的判例）。
+# 複審當回合實測的立案史料搬遷，原文＝Guard_Repin 證據檔 §E-9。
 # 🔴 本組鎖**不驗「Mac 會醒」**（那件事本專案不做：需 sudo 改動掌舵者機器的電源行為，已被
 # 否決）。它驗的是「失效變成可偵測的」：非 0 就出聲、量不到也出聲、而且不對非 mac 發言。
 _SLEEPY = "AC Power:\n displaysleep 10\n sleep 25\n disksleep 0\n"
@@ -1595,10 +1532,7 @@ class MacSleepPostureIsSaidOutLoudTest(unittest.TestCase):
 # ═══════════════════════════════════════════════════════════════════════════
 # 🔴 R84／ZT-03＋ZT-07：續航鏈走過哪幾個分支，必須留下**不會蒸發**的憑證
 # ═══════════════════════════════════════════════════════════════════════════
-# 病（複審當回合實測，逐字）：R83 那個 P0（等父行程退場才 bootout）的唯一決定性憑證
-# `parent-gone waited=20s` 住在 `$TMPDIR` ⇒ `ls "$TMPDIR"/autosdd_sentinel_bootout_*.log`
-# 回 `no matches found`、`grep -rl "parent-gone" "$TMPDIR"` rc=1 ⇒ **修好與沒修好在事後外觀
-# 相同**；同一份實測還顯示交棒書引用的 `probed`／`gc_reaped` 在現存痕跡檔裡皆為 0。
+# 複審當回合逐字實測的立案史料搬遷，原文＝Guard_Repin 證據檔 §E-10。
 # 🔴 判準刻意**不**斷言「這台機器上那個檔存在」：那是機器狀態，會讓 CI 與任何全新 clone
 # 必紅（同 `test_check_hooks_liveness.py` 對載具存在性的既有分工）。它斷言的是**居所的性質**
 # ＋ 兩個寫檔點真的用了它。

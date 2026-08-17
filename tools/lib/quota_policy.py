@@ -221,6 +221,10 @@ class Policy:
     # 而**方向**（far ≤ 1 ≤ near）由 `policy_monotonicity_problems()` 機械守。
     pace_near: float = 2.0
     pace_far: float = 0.5
+    # 🔴 R95／PRD §4.2.8：配速上限（PACE_INDEX 超過才判超前）。下界 1（`ENV_SPEC`）：
+    # 低於 1 會把「還沒超支」判成超前、與節儉判定互相矛盾；預設 1.0＝逐位元維持
+    # 「任何超前即減速」的現行行為（見 `quota_pace.burn_step` 的三條結構方向鎖）。
+    pace_ceiling: float = 1.0
     fanout_cap_override: int | None = None
 
 
@@ -253,6 +257,11 @@ class Decision:
     # 隨決策一起走，因為舵手的直接要求是「畫面一行內要能回答為什麼空著也不能衝」——
     # 把它留在 `axes_of` 裡算完就丟，那句話就答不出來（R85 教訓 5 的同型）。
     amort: object = None
+    # 🔴 R95／PRD §4.2.3 第 7 步：模型降級**建議**的觸發軸（逗號串接的 kind；`""`＝無）。
+    # 只建議不動作：本欄在 cap／rec／band 全部算完之後才產生（見 `decide()` 的建構順序），
+    # 結構上讀不到它們的輸入 ⇒ 「hint 不得放寬 cap」是建構順序保證的，不是靠自律。
+    # 與 hook 側 `context_budget_guard.model_hint`（context 窗長判定用）**同名不同物**。
+    model_hint: str = ""
 
 
 # ── 時間：只把伺服器給的瞬時字串轉成「現在還剩幾分鐘」，不持久化任何時長 ──────────
@@ -354,25 +363,18 @@ def _mult(horizon: str, p: Policy) -> float:
 
 
 # pct 階梯的第一段：硬上限（`None`＝free 帶不設限，維持 shipped 行為）。
+# 🔴 R95：兩張階梯 dict 由逐鍵一行併為緊排——是 `guardrail_lib`（≤400 行）騰出
+# `pace_ceiling`／`model_hint` 那幾行淨增的位置，**行為不變**（同一張表，非風格偏好；
+# 同 R93 對 `_cap_for` 的三行併一行判例）。
 def _base_cap(band: str, p: Policy) -> int | None:
-    return {
-        BAND_FREE: None,
-        BAND_NOTICE: p.cap_notice,
-        BAND_CONVERGE: p.cap_converge,
-        BAND_PREPARE: p.cap_prepare,
-        BAND_HALT: 0,
-    }[band]
+    return {BAND_FREE: None, BAND_NOTICE: p.cap_notice, BAND_CONVERGE: p.cap_converge,
+            BAND_PREPARE: p.cap_prepare, BAND_HALT: 0}[band]
 
 
 # 建議值階梯＝上限階梯**往下錯開一格**（不新增常數，只有 prepare 的 1 是字面）。
 def _base_rec(band: str, p: Policy) -> int:
-    return {
-        BAND_FREE: p.cap_notice,
-        BAND_NOTICE: p.cap_converge,
-        BAND_CONVERGE: p.cap_prepare,
-        BAND_PREPARE: 1,
-        BAND_HALT: 0,
-    }[band]
+    return {BAND_FREE: p.cap_notice, BAND_NOTICE: p.cap_converge,
+            BAND_CONVERGE: p.cap_prepare, BAND_PREPARE: 1, BAND_HALT: 0}[band]
 
 
 # 非 halt 一律 `>=1`：**禁止靜默鎖死**；上界 `max_fanout`。
@@ -411,6 +413,14 @@ def _rec_for(band: str, horizon: str, p: Policy) -> int:
 
 #: 水位帶由寬到緊。`policy_monotonicity_problems` 的取樣序就是它。
 _BAND_LADDER = (BAND_FREE, BAND_NOTICE, BAND_CONVERGE, BAND_PREPARE, BAND_HALT)
+
+#: 🔴 R95：模型降級建議的兩個觸發面（PRD §4.2.3：致動器表「`THROTTLING` 或 `U7d_model`
+#: 超標」）。① 任一參與 cap 聚合的軸進 converge 帶起（≈PRD 的 THROTTLING 線）；
+#: ② 模型分軌的軸進 notice 帶起（notice 錨點預設 50＝PRD `MODEL_DOWNGRADE_PERCENT` 出廠
+#: 值，逐格對齊）。`MODEL_SCOPED_KINDS` 與 `KNOWN_KINDS` 同族**不是**「禁止寫死桶名清單」
+#: 要禁的東西：一行都不參與分類／cap，過期的後果只是少（或多）一句建議，fail-safe。
+MODEL_HINT_BANDS = (BAND_CONVERGE, BAND_PREPARE, BAND_HALT)
+MODEL_SCOPED_KINDS = frozenset({"weekly_scoped", "seven_day_opus", "seven_day_sonnet"})
 
 
 # 🔴 為何需要（實測走得到的靜默路徑）：`AUTOSDD_QUOTA_CAP_PREPARE=16` 之下 90% 拿到
@@ -462,7 +472,8 @@ def axes_of(state: QuotaState, now: datetime, p: Policy,
     """逐軸解析的**唯一正規路徑**：`minutes` 只能從 `axis.resets_at` 導出。"""
     resolved = W.resolve(  # 🔴 帶號分鐘進去：負值的 mid 強制在 `horizon()`，不在這裡
         _rows(state), tuple(_delta_minutes(a.resets_at, now) for a in state.axes),
-        ratio, ratio_note, p.accel_window_minutes, p.far_horizon_minutes, p.halt_pct)
+        ratio, ratio_note, p.accel_window_minutes, p.far_horizon_minutes, p.halt_pct,
+        p.pace_ceiling, p.converge_pct)
     readings = []
     for axis, (pct, horizon, minutes, note) in zip(state.axes, resolved):
         band = pct_band(pct, p)
@@ -554,6 +565,9 @@ def decide(state: QuotaState, now: datetime, p: Policy,
     # 拆除，故該句一併刪去——留著就是一個指向不存在物的散文。）
     reason = ",".join([state.reason, *sorted({r.note for r in readings if r.note})])
     base = min(_base_rec(r.band, p) for r in gate)
+    # R95：hint 的取樣面＝`gate`（保險軸不進 cap 聚合，也不由它觸發降級建議——R89 同判）。
+    hint = ",".join(sorted({r.axis.kind for r in gate if r.band in MODEL_HINT_BANDS or (
+        r.axis.kind in MODEL_SCOPED_KINDS and r.band != BAND_FREE)}))
     # ── 墓碑：`if any(halt ∧ FALLBACK_KINDS) ⇒ cap = min(cap, 1)` 那道地板（R89 中段
     #    落地，同輪末拆除；掌舵者裁決＋QA 複審 REJECT）。**刻意不留一個「暫時關掉」的版本**
     #    ——本檔已判過「留一個沒人叫的版本等於把缺陷留在原地等下一個呼叫端」。
@@ -593,7 +607,8 @@ def decide(state: QuotaState, now: datetime, p: Policy,
         # 被攤提整個排除。夾 0 之後長窗軸會變成「窗數 1、配額＝全部剩餘」＝**放寬**，
         # 而放寬是本案唯一不准無證據發生的方向（同 `horizon_band` 負值分支的判詞）。
         amort=W.amort_for(_rows(state), tuple(_delta_minutes(a.resets_at, now)
-                                              for a in state.axes), ratio, ratio_note))
+                                              for a in state.axes), ratio, ratio_note),
+        model_hint=hint)
 
 
 # M7：每一段只帶**一個** %，且同段必有 `kind=` 與剩餘分鐘（或明文不明）。
@@ -615,7 +630,7 @@ def describe(d: Decision) -> str:
 
 # ── env：門檻的唯一的家，`.env.example` 由它生成（不手寫＝不製造第二個家）─────────
 class EnvVar(NamedTuple):
-    """一個環境變數的完整宣告。`attr is None` ＝ 逃生口，不進 `Policy`。"""
+    """一個環境變數的完整宣告。`attr is None` ＝ 不進 `Policy`（逃生口，或外部消費者直讀）。"""
 
     name: str
     attr: str | None
@@ -650,6 +665,8 @@ ENV_SPEC: tuple[EnvVar, ...] = (
            "reset 近在眼前時的**加速**倍率（下界 1＝不加速；R84／6b）", "policy"),
     EnvVar("AUTOSDD_QUOTA_PACE_FAR", "pace_far", 0.5, "float", 0.0, 1.0,
            "reset 很遠／期程不明時的**減速**倍率（上界 1＝不減速；R84／6b）", "policy"),
+    EnvVar("AUTOSDD_QUOTA_PACE_CEILING", "pace_ceiling", 1.0, "float", 1.0, None,
+           "配速上限：PACE_INDEX 超過才判超前（1＝任何超前即減速；PRD §4.2.8）", "policy"),
     EnvVar("AUTOSDD_QUOTA_MAX_FANOUT", "max_fanout", 16, "int", 1.0, None,
            "加速後的絕對上界", "policy"),
     EnvVar("AUTOSDD_QUOTA_DEGRADED_CAP", "degraded_cap", 4, "int", 1.0, None,
@@ -662,9 +679,12 @@ ENV_SPEC: tuple[EnvVar, ...] = (
     # 於是結構（`attr`／`kind`）與渲染分節不再互相矛盾。
     EnvVar("AUTOSDD_QUOTA_FANOUT_CAP", "fanout_cap_override", None, "int", 1.0, None,
            "節流帶 cap 的**上限**覆寫（留空＝不覆寫）：只收緊不放寬，halt 帶不吃", "policy"),
+    # 🔴 R95／Pkg-D 交棒的註冊補位：消費者＝`tools/session_resume_planner.py` 的
+    # choose_resume_route() os.environ 直讀（attr=None 不進 Policy）；選值見 Resume 證據檔 §2。
+    EnvVar("AUTOSDD_RESUME_MAX_TRANSCRIPT_BYTES", None, None, "int", 1.0, None,
+           "喚醒選路：逐字稿超此位元組數即降級 FRESH（留空＝內建 32MiB）", "policy"),
     EnvVar("AUTOSDD_QUOTA_GUARD_OFF", None, "", "flag", None, None, "1 ⇒ 額度節流全關", "escape"),
-    EnvVar("AUTOSDD_SENTINEL_OFF", None, "", "flag", None, None,
-           "1 ⇒ 額度續航哨兵關掉", "escape"),
+    EnvVar("AUTOSDD_SENTINEL_OFF", None, "", "flag", None, None, "1 ⇒ 額度續航哨兵關掉", "escape"),
     EnvVar("AUTOSDD_CONTEXT_GUARD_OFF", None, "", "flag", None, None,
            "1 ⇒ context 阻斷關掉（**與上一個不同的東西**）", "escape"),
     # 🔴 R91：**第四個**逃生口，刻意不與上面三個共用（repo 明文：共用一個會讓「我只是想

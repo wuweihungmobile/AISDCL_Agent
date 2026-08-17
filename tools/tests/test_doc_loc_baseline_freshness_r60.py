@@ -3866,7 +3866,6 @@ _SYMBOL_ASSIGN_RE = re.compile(r"^\s*(\w+)\s*(?::[^=\n]+)?=", re.M)
 #:     `_GHOST_SYMBOL_BASELINE_CEILING` 這道 shrink-only 天花板承擔（形狀抄
 #:     `test_subprocess_encoding_hygiene._ENTRY_WAIVER_CEILING`）。
 _GHOST_SYMBOL_BASELINE: frozenset[str] = frozenset({
-    "TestDescendantWatcherFinalSyncSample",
     "TestGuardFileCountShrinkOnlyRatchet",   # R79-docs：ADR-XPLAT-002 §8 item 12 的沿革
     "TestMultiGrandchildLockNotPrematurelyStale",
     "_CALL",
@@ -3910,7 +3909,8 @@ _GHOST_SYMBOL_BASELINE: frozenset[str] = frozenset({
 #: 🔴 R89 收尾：32→31（**收緊**）。`test_main_separates_vague_rows_from_valid_count_and_
 #: does_not_fail` 那一筆的唯一引用是一段史料敘述，該段本輪已遷入 R89 收尾證據檔 ⇒ 全引用
 #: 面歸零、幽靈清乾淨，依 stale 向的指示刪除，天花板同步降到現值。
-_GHOST_SYMBOL_BASELINE_CEILING = 31
+#: 🔴 R95 收尾：31→30（收緊，體例同上）——DescendantWatcher 樣本類的唯一引用已隨史料搬遷離開掃描面。
+_GHOST_SYMBOL_BASELINE_CEILING = 30
 
 _SYMBOL_INDEX_CACHE: dict[str, frozenset[str]] = {}
 

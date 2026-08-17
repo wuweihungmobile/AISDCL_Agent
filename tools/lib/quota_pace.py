@@ -111,6 +111,11 @@ _ROBUST_SEGMENTS = 3
 #: 判「翻頁」的容差：pct 是整數 pp 的讀數，微小抖動不算翻頁。
 _ROLLOVER_EPS = 0.5
 
+#: `pace_index` 分母下限（elapsed_frac）：窗剛開的一瞬 elapsed→0 比值發散，而 PRD
+#: §4.2.8 的原式就寫成 `utilization / max(ε, elapsed_frac)`——窗首 1% 之內的任何讀數
+#: 都還不構成配速證據，此值只防爆表，不參與任何方向判定（方向仍由 `lead_pp` 決定）。
+_ELAPSED_FLOOR = 0.01
+
 
 def window_minutes(kind: str) -> float | None:
     """桶名字面 → 窗長（分鐘）。解不出回 `None`（**不猜**）。
@@ -202,7 +207,28 @@ def lead_pp(pct: float, minutes: float | None, window: float | None) -> float | 
     return float(pct) - 100.0 * elapsed
 
 
-def burn_step(pct: float, minutes: float | None, window: float | None) -> tuple:
+# 🔴 R95／PRD §4.2.8：比值形式（供人讀與校準）與 `lead_pp` 差值形式（供決策）**並存**，
+# 不互相取代：差值天生帶 anchor 邊際的 pp 語意（`anchor_margin_pp`），比值才對得上
+# CLI 內建判準的參考值（five_hour 1.25、seven_day 1.25/1.43/1.67，見 PRD 該節表格）。
+def pace_index(pct: float, minutes: float | None, window: float | None) -> float | None:
+    """PACE_INDEX ＝ 利用率 ÷ 窗已流逝比例。`None`＝算不出（與 `lead_pp` 同一組前置）。
+
+    >1＝超前燃燒（會提前用完）、≈1＝照線性預算、<1＝比預算省。
+    """
+    if minutes is None or minutes < 0 or window is None or window <= 0:
+        return None
+    elapsed = min(1.0, max(0.0, 1.0 - float(minutes) / float(window)))
+    return float(pct) / (100.0 * max(elapsed, _ELAPSED_FLOOR))
+
+
+# 🔴 R95：`ceiling` 是**可調配速上限**（`AUTOSDD_QUOTA_PACE_CEILING`，SSOT＝
+# `quota_policy.ENV_SPEC`）。方向鎖三條，皆為結構保證：
+#   ① 預設 1.0 ⇒ `ceiling <= 1.0` 短路 ⇒ 超前判定**逐位元**等於既有 `lead > 0`；
+#   ② 調高只會把「超前 ⇒ 強制 far」放回**中性**（`tightest(relative, legacy)`），
+#      而中性永不比絕對門檻版鬆（見 `effective_horizon`）⇒ 動不到「無證據不得放寬」；
+#   ③ 「省」那一側（負 lead ＋ anchor 邊際）一個字不讀 ceiling ⇒ 它放不出任何加速。
+def burn_step(pct: float, minutes: float | None, window: float | None,
+              ceiling: float = 1.0) -> tuple:
     """`(-1 省／0 不明或中性／+1 超前, note)`。**不對稱是刻意的**：
 
     超前 ⇒ 任何幅度都減速（減速猜錯只是慢一點）；省 ⇒ 必須越過 anchor 邊際才放行
@@ -212,7 +238,10 @@ def burn_step(pct: float, minutes: float | None, window: float | None) -> tuple:
     if lead is None:
         return 0, ""
     if lead > 0:
-        return 1, NOTE_AHEAD
+        index = pace_index(pct, minutes, window)
+        if float(ceiling) <= 1.0 or (index is not None and index > float(ceiling)):
+            return 1, NOTE_AHEAD
+        return 0, ""
     if lead <= -anchor_margin_pp(window):
         return -1, NOTE_THRIFTY
     return 0, ""
@@ -227,11 +256,12 @@ def burn_step(pct: float, minutes: float | None, window: float | None) -> tuple:
 # near 2.0 > mid 1.0 > far/none 0.5）⇒ 夾住 label 就等於夾住 cap 與 rec，而消費端
 # （`_pace_of`／`describe`／`AxisReading.horizon`）一行都不必改。
 def effective_horizon(pct: float, minutes: float | None, window: float | None,
-                      accel_abs: float, far_abs: float) -> tuple:
+                      accel_abs: float, far_abs: float,
+                      ceiling: float = 1.0) -> tuple:
     """`(視野檔位, note)`：相對門檻 ＋ 燃燒率 ＋「無證據不得比絕對門檻鬆」夾層。"""
     relative = horizon(minutes, window, accel_abs, far_abs)
     legacy = horizon(minutes, None, accel_abs, far_abs)
-    step, note = burn_step(pct, minutes, window)
+    step, note = burn_step(pct, minutes, window, ceiling)
     if step > 0:
         return tightest(relative, legacy, AXIS_FAR), note
     if step < 0:
@@ -292,17 +322,34 @@ def amortize(named_pcts, minutes, wins, ratio, ratio_note: str = ""):
                  allowance - used, min(x[2] for x in short), rate_window)
 
 
+# 🔴 R95／掌舵者 2026-08-16 裁決（實案：five_hour 窗尾 33 分、自軸 25%、weekly 46%
+# free band，攤提仍把 cap 壓到 1 ⇒ 派工被迫空等 reset）：short 窗剩餘額度 reset 即作廢
+# （use-it-or-lose-it）、weekly 是同一消耗池（推遲≠節省）⇒ 長窗自軸還沒踏進 converge
+# 錨點（「開始收斂」的那條線）之前，攤提**出聲不收緊**——`Amort` 照算照回（痕跡、
+# `explain()` 的第三行、落款一格不少），只是不再調高餵給 `pct_band` 的水位。
+# 邊界取 `>= converge 即收緊`（錨點本身算收緊側）＝fail-safe 方向；錨點不明
+# （`converge_pct is None`，含所有既有呼叫端）⇒ 逐字維持 R94 行為。
+def amort_relaxed(amort, converge_pct) -> bool:
+    """長窗自軸未達 converge 錨點 ⇒ 攤提只出聲、不收緊（R95）。"""
+    return (amort is not None and converge_pct is not None
+            and (100.0 - amort.remaining_pp) < float(converge_pct))
+
+
 # 🔴 攤提**只會調高**餵給 `pct_band` 的水位（`max(raw, …)`）⇒ 方向鎖無條件成立：
 #   `allowance <= 100` ⇒ `100*raw/allowance >= raw`，所以它永遠不可能放寬，連換算比被
 #   `AUTOSDD_*` 誤設成一個很大的值也不行。另兩道邊界：
 #   · 上界夾在 `halt - 1`：推導值永不觸發停止派發（halt 只由伺服器給的真實水位開火）。
 #   · 下界是原始 pct：已經在 halt 帶的軸不會被這一格**放寬**回 prepare。
+#   R95 的免除分支不破這條不變式：它回的是原始 pct 本身（`shown == raw` 仍滿足
+#   `shown >= raw`），且只在長窗自軸 free/notice 帶成立——收緊面一格都沒鬆。
 def band_inputs(named_pcts, minutes, wins, ratio, halt_pct: float,
-                ratio_note: str = "") -> tuple:
+                ratio_note: str = "", converge_pct: float | None = None) -> tuple:
     """`(逐軸餵給 pct_band 的水位, Amort|None)`。"""
     amort = amortize(named_pcts, minutes, wins, ratio, ratio_note)
     if amort is None:
         return tuple(float(p) for _k, p in named_pcts), None
+    if amort_relaxed(amort, converge_pct):
+        return tuple(float(p) for _k, p in named_pcts), amort
     ceiling = float(halt_pct) - _HALT_GUARD_PP
     shown = []
     for (_kind, pct), win in zip(named_pcts, wins):
@@ -326,15 +373,17 @@ def band_inputs(named_pcts, minutes, wins, ratio, halt_pct: float,
 # 產生：水位本身壞掉時的字面，本檔不重新實作一份）。
 # `deltas` ＝ `[(帶號分鐘|None, note)]`（負值＝時鐘偏移，一路帶進 `horizon()` 才不會變死碼）。
 def resolve(rows, deltas, ratio, ratio_note: str, accel_abs: float, far_abs: float,
-            halt_pct: float) -> tuple:
+            halt_pct: float, pace_ceiling: float = 1.0,
+            converge_pct: float | None = None) -> tuple:
     """`[(餵給 pct_band 的水位, 視野檔位, 夾 0 的剩餘分鐘|None, 合併後的 note)]`。"""
     wins = windows(tuple((kind, at) for kind, _pct, at, _n in rows))
     shown = band_inputs(tuple((kind, pct) for kind, pct, _at, _n in rows),
-                        tuple(d[0] for d in deltas), wins, ratio, halt_pct, ratio_note)[0]
+                        tuple(d[0] for d in deltas), wins, ratio, halt_pct, ratio_note,
+                        converge_pct)[0]
     out = []
     for (_kind, pct, _at, pct_note), (raw, note), win, feed in zip(
             rows, deltas, wins, shown):
-        horizon, burn = effective_horizon(pct, raw, win, accel_abs, far_abs)
+        horizon, burn = effective_horizon(pct, raw, win, accel_abs, far_abs, pace_ceiling)
         joined = "+".join(x for x in (pct_note, note, burn,
                                       NOTE_AMORT if feed > pct else "") if x)
         out.append((feed, horizon, None if raw is None else max(0.0, raw), joined))
@@ -353,20 +402,28 @@ def amort_for(rows, deltas, ratio, ratio_note: str = ""):
 #   ① pp（百分點）才是這些量的正確單位——它們是差值與配額，不是比例；
 #   ② `quota_policy` 的 M7 判準逐個掃 `%`、要求每一個都自帶 `kind=` 與剩餘分鐘，而攤提
 #      算式天生會出現一串中間量 ⇒ 用 pp 讓判準的射程與本行的語意不互相扭曲。
-def explain(amort) -> str:
+def explain(amort, converge_pct: float | None = None) -> str:
     """攤提的人看版（`--pace` 的第三行）。`None` ⇒ 說出為什麼沒有這一行。"""
     if amort is None:
         return "攤提：只有一種窗長或換算比無樣本 ⇒ 未套用（不偽造換算比）"
     # 🔴 分鐘一律 `int()` **截斷**而不是 `:.0f` 四捨五入：`quota_policy._axis_phrase` 用的是
     # `int()`，兩者不一致時同一個量會在相鄰兩行印出差 1 的兩個數字，而「同一件事兩個數」
     # 正是本 repo 反覆判過的不可信號（讀者會開始懷疑哪一行才是真的）。
-    return (f"攤提：kind={amort.total_kind} 剩 {amort.remaining_pp:.0f}pp／距 reset "
+    text = (f"攤提：kind={amort.total_kind} 剩 {amort.remaining_pp:.0f}pp／距 reset "
             f"{int(amort.total_minutes)} 分鐘 ÷ {amort.windows_left:.1f} 個 "
             f"kind={amort.rate_kind} 窗 = 每窗 {amort.per_window_pp:.2f}pp"
             f" ×r={amort.ratio:.1f}（{amort.ratio_note}）⇒ 本窗配額 "
             f"{amort.allowance_pp:.1f}pp；kind={amort.rate_kind} 已用 "
             f"{amort.used_pp:.0f}pp 剩 {int(amort.rate_minutes)} 分鐘 ⇒ 本窗餘裕 "
             f"{amort.headroom_pp:+.1f}pp")
+    # R95：比值供人讀與校準（對照 PRD §4.2.8 的 CLI 內建參考值），差值仍是決策輸入。
+    index = pace_index(amort.used_pp, amort.rate_minutes, amort.rate_window)
+    if index is not None:
+        text += f"；短窗 pace_index={index:.2f}"
+    if amort_relaxed(amort, converge_pct):
+        text += (f"；長窗自軸 {100.0 - amort.remaining_pp:.0f}pp 未達 converge "
+                 f"{float(converge_pct):.0f}pp ⇒ 出聲不收緊（本次未壓制短窗水位）")
+    return text
 
 
 # ── 換算比 r（短窗 pp／長窗 pp）：只能從觀測來，不能從結構來 ──────────────────────

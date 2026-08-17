@@ -42,6 +42,8 @@ sys.path.insert(0, str(_REPO / "tools" / "lib"))
 # 「呼叫判準 ＋ 斷言」；理由見該檔檔頭。**鑑別力不得下降**（搬家後注入自證全數重跑）。
 import pace_contract as PC  # noqa: E402
 import quota_criteria as QC  # noqa: E402
+import quota_gate as QG  # noqa: E402  # R95 修4：halt 動作接線面（waker 注入驗證）
+import quota_messages as QM  # noqa: E402  # R95 修4：halt 多軸 reset 裁決的家
 import quota_meter as M  # noqa: E402
 import quota_pace as W  # noqa: E402
 import quota_policy as Q  # noqa: E402
@@ -154,21 +156,10 @@ class TestDecisionTable(unittest.TestCase):
 
 
 class TestTheTableIsProducedByTheRuleNotByHand(unittest.TestCase):
-    """🔴 上表每一列都必須從**寫下來的聚合規則**重算得到，而不是手挑的數字。
-
-    規則（見 `quota_policy` 檔頭「兩個角色分開聚合」）：
-      cap = min(逐軸 cap)                                    ← 煞車
-      rec = min( clamp(min(逐軸 base_rec) × pace) , cap )     ← 加速，pace 取最短期程
-    本測試**不呼叫 `decide()`**，而是照上式獨立重算一次——同一顆星有兩條互不相干的
-    算法對得上，才排除得掉「表是照著實作抄的」。
-
-    🔴 聚合規則改寫後，規格 S4 參數表有**兩列**與交件時的判定不同，照實記：
-      · 第 3 列：表寫 rec=4。舊的 `min(逐軸 rec)` 算出 2 ⇒ 當時被判成「抄寫失誤」；
-        新規則算出 **4** ⇒ **表原本就是對的**，那筆失誤是舊聚合造成的假象。
-      · 第 1 列：表寫 8、它自己的語意欄寫「被 weekly 的 8×0.5=4 壓下來」、舊式子算
-        出 4——三個數字互不相同。新規則算出 **16**：weekly 20% 落在 free 帶、根本
-        不是約束，而 session 30 分鐘後就 reset ⇒ 這正是使用者原句要的「多派」。
-      其餘 13 列（cap／rec／binding 三欄）與規格表逐字相同。
+    """🔴 上表每一列都必須從**寫下來的聚合規則**重算得到（本測試不呼叫 `decide()`，
+    照 `quota_policy` 檔頭的 cap／rec 兩式獨立重算——兩條互不相干的算法對得上，才排除
+    「表是照著實作抄的」）。S4 表兩列與交件時判定不同的歸因＝R95 Pace 證據檔 §7.4；
+    規則原文與重算取捨全文＝同檔 §7-R95-L1。
     """
 
     def test_every_row_follows_from_the_documented_rule(self) -> None:
@@ -200,12 +191,8 @@ _B = state(("session", 10, 34), ("weekly_all", 90, 8640))   # 長期程高水位
 
 
 def m1_problems(cap_of) -> list[str]:
-    """判準本體：`cap(A)` 必須**嚴格大於** `cap(B)`。
-
-    🔴 刻意**不**斷言「binding 不同／reset 分支不同／訊息不同」——規格實測那三條
-    今天就是綠的（A→kind=session branch=arm、B→kind=weekly_all branch=notify），
-    寫進去就是零鑑別力的鎖。
-    """
+    """判準本體：`cap(A)` 必須**嚴格大於** `cap(B)`。刻意不斷言「binding／reset 分支
+    ／訊息不同」——那三條今天就是綠的，寫進去就是零鑑別力的鎖。"""
     a, b = QC.cap_num(cap_of(_A)), QC.cap_num(cap_of(_B))
     if a <= b:
         return [f"cap(A)={a} 未嚴格大於 cap(B)={b}：短期程與長期程被壓成同一件事"]
@@ -236,11 +223,8 @@ class TestM1OppositeScenariosDiverge(unittest.TestCase):
         self.assertIn("session", kinds, "session 那一列在消費端不得結構性缺席")
 
     def test_is_active_is_never_used_to_pick_a_bucket(self) -> None:
-        """五次觀測 `is_active` 都等於 argmax，但五次一致不構成契約。
-
-        把 `is_active` 掛到**低水位**那一軸上，決策必須一個位元都不變——否則
-        就是把 `worst()` 換個寫法再犯一次。
-        """
+        """五次觀測 `is_active` 都等於 argmax，但五次一致不構成契約：把它掛到低水位
+        那一軸，決策必須一個位元都不變（否則＝`worst()` 換個寫法再犯一次）。"""
         plain = state(("session", 10, 34), ("weekly_all", 90, 8640))
         flagged = Q.QuotaState(
             axes=(axis("session", 10, 34, is_active=True),
@@ -384,14 +368,9 @@ class TestR89ObservationFieldsAreWiredButInert(unittest.TestCase):
         self.assertIn("is_active=None", M._report(old))
 
 # ═══════════════════════════════════════════════════════════════════════════
-# M1b 加速訊號必須**穿過 `decide()`**，不是只穿 `axis_cap()`（R82 複驗鏡 ①）
+# M1b 加速訊號必須**穿過 `decide()`**，不是只穿 `axis_cap()`（R82 複驗鏡 ①；
+# 立案與複驗鏡實測數字原文＝Pace 證據檔 §7，R89 搬遷體例）。
 # ═══════════════════════════════════════════════════════════════════════════
-# 🔴 這一節的存在理由是一個被鎖結構性放行的缺口：M2 的每一條判準都只穿 `axis_cap()`，
-# 而 S4 表第 4/5/6 列全是**單軸** fixture ⇒ 「跨軸聚合把加速吃掉」在整份機械物裡
-# 一次都沒有被觀測到。複驗鏡實測：固定 weekly_all 57%@8233min、把 session 的 reset
-# 從 1 分鐘掃到 6 天（**差 8640 倍**），`decide()` 的 cap/rec/band **逐格相同**
-# （4/2/notice）；使用者錨點①「0%+30m ⇒ 多派」在多軸下相異 rec 只有一個值，而且
-# 比中性基準（8）更小 ⇒ 方向相反。
 #: 掃描點刻意跨過 30／360 兩條 horizon 線的兩側（1 分鐘 ~ 6 天）。
 _SWEEP_MINUTES = (1, 5, 15, 30, 31, 120, 360, 361, 1000, 8640)
 
@@ -441,11 +420,8 @@ class TestM1bAccelerationSurvivesAggregation(unittest.TestCase):
                 self.assertIn("只有一個值", problems[0])
 
     def test_the_helm_anchor_survives_a_second_axis(self) -> None:
-        """使用者原句「Token 剩 30Min 就 Reset、還有 100% 沒用 ⇒ 加速」。
-
-        加一條**不緊**的長期程軸之後必須仍然成立，而且不得低於中性基準（8）——
-        複驗鏡量到的正是「多軸下 rec=4，方向與中性基準相反」。
-        """
+        """使用者原句「剩 30Min 就 Reset、還有 100% 沒用 ⇒ 加速」：加一條不緊的長期程
+        軸後必須仍成立且不低於中性基準 8（複驗鏡量到 rec=4，方向相反）。"""
         solo = Q.decide(state(("session", 0, 30)), NOW, P)
         paired = Q.decide(state(("session", 0, 30), _LOOSE_WEEKLY), NOW, P)
         self.assertEqual((solo.recommended_fanout, paired.recommended_fanout),
@@ -479,11 +455,8 @@ class TestM1bAccelerationSurvivesAggregation(unittest.TestCase):
                             float(d.recommended_fanout), QC.cap_num(d.cap))
 
     def test_an_axis_with_no_horizon_but_a_real_cap_blocks_acceleration(self) -> None:
-        """fail-closed 那一半**原封不動**：期程不明且**真的在煞車**的軸仍一票否決。
-
-        不變式＝「**不參與 cap 的軸不得參與 pace**」，兩個方向各自被下面兩支釘住。
-        R84／SA-01 的立案史料＝`CrossPlatform_R89_Closure_Evidence.md`。
-        """
+        """fail-closed 那一半原封不動：期程不明且真的在煞車的軸仍一票否決（不變式＝
+        不參與 cap 的軸不得參與 pace；R84／SA-01 史料＝R89 收尾證據檔）。"""
         # 🔴 R89：fixture 由 `spend` 換成 `nimbus_quill`——`spend` 是保險軸、不進 gate，
         # 拿它當煞車軸的例子，測的就不再是本測試宣稱的性質。
         braking = Q.decide(state(("session", 75, 3), ("nimbus_quill", 55, None)), NOW, P)
@@ -502,12 +475,9 @@ class TestM1bAccelerationSurvivesAggregation(unittest.TestCase):
         self.assertEqual(Q._bound(Q._clamp(int(base * no_veto), P), int(cap)), 4)
 
     def test_a_toothless_null_axis_no_longer_vetoes_acceleration(self) -> None:
-        """治本那一半：`cap is None`（free 帶）的無期程軸**不得**否決加速。
-
-        數字是 live 快取的形狀（3 軸 `resets_at=null` 且 0%）：修前 8、修後 16。
-        🔴 R89 收尾／QA 複審 B-3：fixture 由 `spend` 換成 `nimbus_quill`（保險軸到不了
-        `_pace_of()` ⇒ 對它零鑑別力），紅端自證同步換軸讓兩端的軸集合配對得起來。
-        """
+        """治本那一半：`cap is None`（free 帶）的無期程軸**不得**否決加速（live 形狀
+        實測修前 8、修後 16）。R89／QA B-3：fixture 換 `nimbus_quill`（保險軸到不了
+        `_pace_of()` ⇒ `spend` 對它零鑑別力），紅端自證同步換軸。"""
         with_none = Q.decide(state(("session", 0, 5), ("nimbus_quill", 0, None)), NOW, P)
         without = Q.decide(state(("session", 0, 5), ("nimbus_quill", 0, 8640)), NOW, P)
         self.assertEqual(with_none.recommended_fanout, 16, "零煞車力的軸仍在從後門煞車")
@@ -723,12 +693,8 @@ class TestM3bImplementationDefects(unittest.TestCase):
         self.assertTrue(problems, "rec 超過 cap 卻沒轉紅＝零鑑別力")
 
     def test_the_negative_horizon_guard_is_live_not_dead_code(self) -> None:
-        """時鐘偏移的負號必須**真的走進** `horizon_band`，那道防線才不是死碼。
-
-        舊實作在 `_delta_minutes` 就把負值夾成 0、另在 `axes_of` 用一個 if 強制
-        mid ⇒ `horizon_band` 的負值分支任何生產路徑都到不了（刪掉它零測試會紅），
-        而「偏移不得加速」變成同一份知識的第二個家。
-        """
+        """時鐘偏移的負號必須**真的走進** `horizon_band`，那道防線才不是死碼（舊實作
+        提前夾 0 ⇒ 負值分支任何生產路徑都到不了＝同一份知識的第二個家）。"""
         past = (NOW - timedelta(minutes=5)).isoformat()
         raw, note = Q._delta_minutes(past, NOW)
         self.assertLess(raw, 0.0, "負號沒有傳到 horizon_band ⇒ 那道防線是死碼")
@@ -744,12 +710,9 @@ class TestM3bImplementationDefects(unittest.TestCase):
 # M3c 單調性不變式：任何合法設定下，pct 愈高 cap 必須單調不增（R82 複驗鏡 ③）
 # ═══════════════════════════════════════════════════════════════════════════
 def cap_monotonicity_problems(policy: Q.Policy) -> list[str]:
-    """獨立於實作的判準：直接掃 pct 0~100，逐 horizon 檢查 cap／rec 非遞增。
-
-    刻意**不呼叫** `Q.policy_monotonicity_problems`（那是被判的對象；用它來判自己
-    等於沒判）。這一支掃的是連續水位，模組那一支只取樣帶邊界——兩者對得上才排除
-    「取樣點剛好避開違規」。
-    """
+    """獨立於實作的判準：直接掃 pct 0~100，逐 horizon 檢查 cap／rec 非遞增。刻意不
+    呼叫 `Q.policy_monotonicity_problems`（被判的對象不能判自己）；這一支掃連續水位、
+    模組那一支只取樣帶邊界——兩者對得上才排除「取樣點剛好避開違規」。"""
     problems = []
     for minutes in (3, 240, 8640, None):
         caps = [QC.cap_num(Q.axis_cap(pct / 2.0, minutes, policy)) for pct in range(0, 201)]
@@ -1023,14 +986,9 @@ class TestM5ScanSurfaceScope(unittest.TestCase):
                       _M5_SCAN_SURFACES["tools/lib/quota_*.py"])
 
 
-# 🔴 R82／C4：把「三個掃描面」從**列舉**升成**硬 gate**。病＝兩個判準只對
-# `quota_policy.py` 自己斷言，於是把 `worst()`／`fanout_cap(pct)`／`quota_tier_of(pct)`
-# 放回 gate／meter／hook／AutoClaude adapter **五組注入全綠**；「掃描面列出來了」與
-# 「掃描面被判了」是兩件事，前者讀起來很像後者。當時那支「確認掃描器擋得住活標的」的
-# 測試寫成 `if 定義還在: assertIn(...)` ⇒ 定義不在就整條沉默＝**結構上不可能失敗**
-# （這一型比沒有鎖更難看見）。立案史料原文＝R89 收尾證據檔。
-# 現在的判準：四個面**每一支檔**都必須同時 `QC.scalar_decision_defs == []` 且
-# `QC.worst_mentions == []`。今天全部為空 ⇒ 這不是「登記存量」而是「不准有人放回去」。
+# 🔴 R82／C4：「三個掃描面」從列舉升成硬 gate——四個面每一支檔都必須同時
+# `QC.scalar_decision_defs == []` 且 `QC.worst_mentions == []`（不准有人放回去）。
+# 立案史料原文＝R89 收尾證據檔；五組注入全綠的病灶全文＝R95 Pace 證據檔 §7-R95-L2。
 class TestM5EveryScanSurfaceIsGatedHard(unittest.TestCase):
     def _files(self) -> list[Path]:
         return [p for files in _M5_SCAN_SURFACES.values() for p in files if p.is_file()]
@@ -1143,12 +1101,8 @@ class TestM6EnvExampleBidirectionalLock(unittest.TestCase):
 # R82／C1：產生器 ↔ **消費者** 的 round-trip（此前整條不存在）
 # ═══════════════════════════════════════════════════════════════════════════
 #
-# 病：`env_example_problems()` 拿 `render_env_example()` **跟自己比**，從不呼叫消費者的
-# 解析器 ⇒ 兩個家互相一致、都沒對消費者測。而消費者 `quota_gate.policy_env()` 當時做的是
-# `partition("=")` + `strip()`，產生器產出的卻是 `KEY=值<補白>#說明`（同一行）。
-# 複審鏡實測：把 `.env.example` 原封不動複製成 `.env`，**12 個帶值的鍵全部解析失敗**、
-# 全部靜默退回預設；把 `AUTOSDD_QUOTA_HALT_PCT` 改成 99.5、額度 99% ⇒ **仍 rc=2 被擋**
-# （生效的是預設 95）。而使用者的標準流程就是 copy 一份再改幾個值 ⇒ 這不是邊角案例。
+# 病：判準拿生成物跟自己比、從不呼叫消費者的解析器 ⇒ 兩個家互相一致、都沒對消費者測。
+# 複審鏡實測（12 個帶值鍵全部解析失敗、照抄範例檔會關掉整條節流）原文＝R95 Pace 證據檔 §7.5。
 class TestM6TheGeneratedFileSurvivesItsOwnConsumer(unittest.TestCase):
     #: 帶值且真的會進 `Policy` 的鍵數（機械導出，不寫死——ENV_SPEC 長大時自己跟著走）。
     def _valued(self) -> list[Q.EnvVar]:
@@ -1223,12 +1177,9 @@ class TestM6TheGeneratedFileSurvivesItsOwnConsumer(unittest.TestCase):
             self.assertIn(key, names)
 
     def test_the_disk_file_matches_the_generator_once_it_lands(self) -> None:
-        """接線後 `.env.example` 必須逐字等於生成物。
-
-        🔴 誠實劃界：該檔的建立屬**第二步**（本包只准動兩支檔），今天磁碟上還沒有
-        它。這裡刻意不寫 skip（skip 會被當成通過），而是「存在才判」——判準本身的
-        紅綠已由上面三支注入測試自證，這一支只負責在接線落地那一刻自動長出牙齒。
-        """
+        """接線後 `.env.example` 必須逐字等於生成物。誠實劃界：刻意不寫 skip（skip 會
+        被當成通過）而是「存在才判」——紅綠已由上面三支注入自證，這一支只負責在接線
+        落地那一刻自動長出牙齒。"""
         path = _REPO / ".env.example"
         if path.exists():
             self.assertEqual(
@@ -1263,12 +1214,8 @@ class TestM7EveryPercentNamesItsBucket(unittest.TestCase):
 
     def test_red_removing_the_separators_no_longer_launders_a_bare_percentage(
             self) -> None:
-        """🔴 ⑦ 的紅綠自證：舊的 chunk 級判準被「拿掉分隔符」整段矇混過關。
-
-        下面這一則裡第二個百分比既沒有自己的 `kind=`、也沒有自己的分鐘，只是坐在
-        第一個桶的名牌與分鐘旁邊。chunk 級判準把它切成**一段**、看到段內有 `kind=`
-        也有「分鐘」⇒ 放行；百分比級判準逐個問 ⇒ 抓到兩筆。
-        """
+        """🔴 ⑦ 的紅綠自證：chunk 級判準被「拿掉分隔符」矇混（第二個百分比坐在第一個
+        桶的名牌旁即放行）；百分比級判準逐個問 ⇒ 抓到兩筆。"""
         laundered = "kind=session 61% 剩 13 分鐘 57% 剩 8233 分鐘"
         self.assertEqual(QC.chunk_level_m7_problems(laundered), [],
                          "控制組：舊判準本來就該放行這一則（那正是它的病）")
@@ -1341,27 +1288,11 @@ class TestM8SchemaStaysInSync(unittest.TestCase):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# M8-b 檔案契約的**路徑**那一半（R83／F2-①：此前只有 SCHEMA 被鎖住）
+# M8-b 檔案契約的**路徑**那一半（R83／F2-①）：判準＝兩邊算路徑的「家」token 序列相等
+# ——搬家可以，但必須同一次 commit 動兩支檔。立案與取捨原文＝R95 Pace 證據檔 §7。
 # ═══════════════════════════════════════════════════════════════════════════
-# 🔴 立案。檔案契約有兩個欄位（**路徑** ＋ schema），而 R82 只把 schema 綁起來。路徑那一半
-# 今天各自寫在兩支檔裡：meter 是 `cache_path()`、adapter 是 `__init__` 的預設值，兩者都
-# 自己算 `tempfile.gettempdir() / "autosdd_quota.json"`。adapter **不能** import meter
-# （importlinter contract #9「autoclaude must not import monorepo harness modules」），
-# 所以複本是設計上必要的——正因為必要，它才需要一道鎖。
-#
-# 為什麼這一格值得一道鎖，而不是「今天兩邊相符就算了」：R83 本輪的 F2-① 任務書提出的修法
-# 正是「把快取搬到不吃 TMPDIR 的固定家」。那個動作只改 meter 的話，adapter 會**靜默**讀不到
-# 任何檔 ⇒ `_pick()` 回 `None` ⇒ `resume_wait_seconds` 回落寫死延遲、`TokenGuardPlugin`
-# 的額度軸恆「量不到」，而 `None` 這個回傳值被 adapter 自己的測試釘成正確行為（同 SCHEMA
-# 那一格的判例：「失效全綠、完全靜默」）。⇒ 搬家是可以做的，但它必須是**同一次** commit
-# 動兩支檔，而這道鎖就是那個「同一次」的機械保證。
-#
-# 判準取「兩邊算路徑用的 token 序列相等」而不是「必須是 gettempdir」：後者會把家釘死在
-# 今天這個選擇上，於是將來真的要搬家時，這道鎖自己會變成阻力（本 repo 對「鎖住了實作而
-# 不是性質」有判例）。搬到 `~/.cache/autosdd/` 一樣綠——只要兩邊一起搬。
-#: 「家」只可能來自這幾個地方。刻意是白名單而不是「抓所有識別字」：後者會把
-#: `self._path`／`Path`／`if`／`else` 這種**寫法差異**也算進去，於是兩支檔明明用同一個
-#: 算法卻判紅（實測：第一版判準就是這樣假紅的）。假紅的鎖活不過一輪。
+#: 「家」只可能來自這幾個地方——刻意白名單（抓所有識別字會把寫法差異也算進去＝假紅，
+#: 第一版實測如此；假紅的鎖活不過一輪）。
 _HOME_SOURCE_RE = re.compile(
     r"tempfile\.gettempdir|Path\.home|os\.path\.expanduser|expanduser|"
     r"os\.environ|os\.getenv")
@@ -1435,12 +1366,9 @@ class TestM8bCacheHomeStaysInSync(unittest.TestCase):
 # ═══════════════════════════════════════════════════════════════════════════
 # M9 「量不到」不得等於「不設限」
 # ═══════════════════════════════════════════════════════════════════════════
-#: 規格 S7 的失效字面（`no-horizon` 那一列有桶，不在本表）。
-#: 🔴 R83／F2-③ 新增 `keychain-timeout`：mac 的 Keychain 跳鎖定提示而沒有人按時，
-#: `security` 會阻塞到逾時——那與「這台 mac 沒有條目」要做的事完全相反（解鎖 vs 重新登入），
-#: 故取數層給了它自己的字面。本表**不是**這批字面的家（家在 `quota_meter.REASON_*`），
-#: 而是「每一個字面都必須被 M9 那兩條不變量掃過」的登記處；兩者的同步由
-#: `TestMeterReasonsAreAllRegistered` 機械守（漏登記即紅）。
+#: 規格 S7 的失效字面（`no-horizon` 那一列有桶，不在本表）。本表是「每個字面都必須
+#: 被 M9 兩條不變量掃過」的登記處（家在 `quota_meter.REASON_*`；同步由
+#: `TestMeterReasonsAreAllRegistered` 機械守）。keychain-timeout 立案全文＝Pace 證據檔 §7-R95-L3。
 _UNMEASURABLE_REASONS = (
     "no-credentials", "no-credentials-darwin", "keychain-timeout",
     "http-401", "http-5xx", "meter-unreachable", "no-buckets",
@@ -1448,11 +1376,8 @@ _UNMEASURABLE_REASONS = (
 )
 
 
-# 🔴 立案（R83／F2-③，形狀與 `TestM8SchemaStaysInSync` 同構）：取數層新增一個失效字面
-# 時，**沒有任何東西**會提醒你來這張表登記它。漏登記的後果不是崩潰而是失明——那個字面
-# 從此不在 M9 的分母裡，於是「它會不會被錯判成不設限／被錯判成 halt」這兩條不變量對它
-# 一次都沒有驗過，而 rc 與「正確地全部通過」一模一樣（分母少一項是看不見的）。
-# 判準的分母是**現查** meter 的 `REASON_*` 宣告集合（會變的量測值），不是寫死清單。
+# 🔴 立案（R83／F2-③，同 `TestM8SchemaStaysInSync` 形狀）：漏登記＝失明而 rc 全綠。
+# 分母是**現查** meter 的 `REASON_*` 宣告集合，不是寫死清單。全文＝Pace 證據檔 §7-R95-L5。
 _METER_REASON_RE = re.compile(r"^REASON_([A-Z0-9_]+)\s*=\s*\"([^\"]+)\"", re.MULTILINE)
 #: `REASON_OK` 是「量到了」，語意上不屬本表——唯一的例外，且必須具名而不是靠註解。
 _NOT_A_FAILURE = ("ok",)
@@ -1585,10 +1510,8 @@ class TestM10SingleDecisionEntry(unittest.TestCase):
 # ═══════════════════════════════════════════════════════════════════════════
 # R84／6b：pace 兩個係數必須可由 `.env` 調，而**方向**必須被機械守
 # ═══════════════════════════════════════════════════════════════════════════
-# 病：三檔乘數此前是模組層寫死的 dict（`_MULTIPLIER = {near: 2.0, …}`），而掌舵者訴求 6b
-# 逐字要求「係數必須可由 env 參數化」——寫死的字面結構上不可能被參數化。
-# 這一節同時守住開放之後**新長出來的**危害：兩個鍵各自合法（值域檢查看得到），但
-# 「near < far」這種**關係**錯誤只有跨鍵判準看得到，而它會讓「近 reset 加速」變成減速。
+# 病＝乘數寫死的 dict 結構上不可能被參數化；開放後的新危害＝「near < far」這種跨鍵
+# 關係錯誤會讓加速變減速。立案全文＝R95 Pace 證據檔 §7-R95-L4。
 class TestR84ThePaceCoefficientsAreTunableAndDirectional(unittest.TestCase):
     def test_the_two_knobs_are_declared_and_reach_the_policy(self) -> None:
         """`.env` 兩個鍵 → `Policy` 欄位 → 真的改變 rec（三段都要接上）。"""
@@ -1824,10 +1747,8 @@ class TestR86ThePaceContractWriterMatchesTheEngineReader(unittest.TestCase):
 
 
 class TestR87TheMeterMayNotDropAThrottlingAxis(unittest.TestCase):
-    """R87 事故鎖：**取數層不得把「已撞頂但自報 `enabled:false`」的軸丟掉。**
-
-    架構缺口：判讀層的不變式只保證「**給定的軸**不會被放寬」，不保證「軸不會消失」。
-    立案史料原文（事故數字、掌舵者裁決逐字、本鎖的存在理由）＝R89 收尾證據檔的
+    """R87 事故鎖：**取數層不得把「已撞頂但自報 `enabled:false`」的軸丟掉**（判讀層
+    只保證給定的軸不被放寬，不保證軸不消失）。立案史料原文＝R89 收尾證據檔
     〈護欄層史料搬遷（R89 收尾批）〉節（路徑見檔頭）。
     """
 
@@ -1951,11 +1872,9 @@ class TestR87AccountPostureIsKnownBeforeDispatch(unittest.TestCase):
 
 class TestR93AccountKeyIsDerivedFromExistingResponseHeaders(unittest.TestCase):
     """R93／DEF-200-114（Architect REJECT 承接）：帳號身分訊號＝
-    `sha256(org-id:workspace-id)[:12]`，取自 `fetch_usage()` 已經在發的那次回應標頭。
-    立案史料與真實對照組（Pro→Team 真實換帳號）＝`docs/06_quality/
+    `sha256(org-id:workspace-id)[:12]`，取自 `fetch_usage()` 已在發的回應標頭；純函式
+    測試（零網路）。立案史料與真實對照組＝`docs/06_quality/
     Quota_R90_CrossAccount_Experiment.md` §2.5。
-
-    🔴 這是**純函式**測試（零網路）：`account_key_of()` 只吃一個 dict，本類不打端點。
     """
 
     ORG_A, WS_A = "8b63e143-0d4a-4c6a-a0fc-53229d07b7f5", "wrkspc_01RVxG93ofY2Rq2SQyNhqHm5"
@@ -2062,6 +1981,232 @@ class TestR89UnknownKindsAreLoudButNeverReclassified(unittest.TestCase):
                          (after.cap, after.recommended_fanout, after.band))
         self.assertNotIn(Q.NOTE_UNKNOWN, before.reason)
         self.assertIn(Q.NOTE_UNKNOWN, after.reason, "詞彙表少一項卻沒多說＝觀測者失效")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# R95 配速致動器三合一：攤提窗尾修正／模型降級建議／PACE_INDEX 與可調配速上限
+# 立案史料與設計辯護＝docs/06_quality/CrossPlatform_R95_Pace_Actuator_Evidence.md
+# ═══════════════════════════════════════════════════════════════════════════
+class TestR95AmortizationSpeaksButDoesNotTightenBelowConverge(unittest.TestCase):
+    """掌舵者 2026-08-16 裁決：長窗自軸未達 converge 錨點 ⇒ 攤提**出聲不收緊**
+    （窗尾額度 use-it-or-lose-it、weekly 同一消耗池 ⇒ 空等純浪費牆鐘）。
+    立案實案數字全文＝Pace 證據檔 §2。
+    """
+
+    HELM = (("five_hour", 25.0, 33.0), ("seven_day", 46.0, 4000.0))
+    ARGS = ((("five_hour", 25.0), ("seven_day", 46.0)), (33.0, 4000.0), (300.0, 10080.0))
+
+    def test_the_helm_case_is_no_longer_pressed_by_amortization(self) -> None:
+        """生產路徑（`decide` 帶 ratio）：長窗 free band ⇒ 短窗不再被推導水位壓制。"""
+        d = Q.decide(state(*self.HELM), NOW, P, 1.0, "r95")
+        self.assertIsNone(d.cap, f"長窗 free band 仍被攤提壓制：{Q.describe(d)}")
+        self.assertIsNotNone(d.amort, "出聲那一半不見了（amort 必須照算照回）")
+        self.assertNotIn(W.NOTE_AMORT, d.reason, "水位沒被調高就不該掛 amortized 註記")
+
+    def test_red_the_unconditional_form_still_tightens_the_same_input(self) -> None:
+        """合成注入自證：不帶 converge 錨點（＝R94 版行為）同一組輸入**必被**壓制。"""
+        old = W.band_inputs(*self.ARGS, 1.0, 95.0)[0]
+        new = W.band_inputs(*self.ARGS, 1.0, 95.0, converge_pct=70.0)[0]
+        self.assertGreater(old[0], 25.0, "對照組失去鑑別力：R94 版本來就會壓制這一格")
+        self.assertEqual(new[0], 25.0, "出聲不收緊：餵 pct_band 的水位必須是原值")
+        self.assertIsNotNone(W.band_inputs(*self.ARGS, 1.0, 95.0, converge_pct=70.0)[1])
+
+    def test_at_or_above_the_converge_anchor_nothing_relaxes(self) -> None:
+        """方向鎖：長窗自軸 ≥ converge（含錨點本身＝fail-safe 側）⇒ 逐格等於 R94 版。"""
+        for long_pct in (70.0, 75.0, 99.0):
+            pcts = (("five_hour", 40.0), ("seven_day", long_pct))
+            with self.subTest(long_pct=long_pct):
+                self.assertEqual(
+                    W.band_inputs(pcts, (100.0, 9000.0), (300.0, 10080.0), 1.0, 95.0,
+                                  converge_pct=70.0)[0],
+                    W.band_inputs(pcts, (100.0, 9000.0), (300.0, 10080.0), 1.0, 95.0)[0])
+
+    def test_the_feed_never_drops_below_the_raw_pct_for_any_anchor(self) -> None:
+        """不變式 `shown >= raw`（SA 條件④）對任何 converge 值仍成立，含 `None`。"""
+        for converge in (None, 0.0, 50.0, 70.0, 100.0):
+            shown = W.band_inputs((("five_hour", 40.0), ("seven_day", 46.0)),
+                                  (100.0, 9000.0), (300.0, 10080.0), 7.0, 95.0,
+                                  converge_pct=converge)[0]
+            with self.subTest(converge=converge):
+                self.assertGreaterEqual(shown[0], 40.0)
+                self.assertEqual(shown[1], 46.0, "攤提不得動長窗那一軸的水位")
+
+    def test_explain_says_out_loud_that_it_did_not_tighten(self) -> None:
+        cool = W.amortize(*self.ARGS, 1.0, "n=1")
+        hot = W.amortize((("five_hour", 40.0), ("seven_day", 75.0)),
+                         (100.0, 9000.0), (300.0, 10080.0), 1.0, "n=1")
+        self.assertIn("出聲不收緊", W.explain(cool, converge_pct=70.0))
+        self.assertIn("攤提", W.explain(cool, converge_pct=70.0), "免除不得吃掉整行說明")
+        self.assertNotIn("出聲不收緊", W.explain(cool), "錨點不明＝維持 R94 字面")
+        self.assertNotIn("出聲不收緊", W.explain(hot, converge_pct=70.0))
+
+
+class TestR95ModelHintOnlyInTighteningBands(unittest.TestCase):
+    """PRD §4.2.3 第 7 步／致動器表：模型降級**建議**。方向鎖兩條：
+    ① hint 只在收緊帶出現（converge 帶起；模型分軌 kind 為 notice 帶起＝PRD
+    `MODEL_DOWNGRADE_PERCENT=50` 出廠值逐格對齊）；② cap 完全不受 hint 影響
+    （建構順序保證：`decide()` 先算完 cap／rec 才產生 hint）。"""
+
+    def test_no_hint_below_the_tightening_bands(self) -> None:
+        for kind, pct in (("session", 0), ("session", 55), ("session", 69),
+                          ("weekly_scoped", 0), ("weekly_scoped", 49)):
+            with self.subTest(kind=kind, pct=pct):
+                self.assertEqual(
+                    Q.decide(state((kind, pct, 8640)), NOW, P).model_hint, "")
+
+    def test_a_model_scoped_axis_hints_from_the_notice_band(self) -> None:
+        """模型分軌（weekly_scoped）在 notice 帶（≥50）就建議＝PRD 第 7 步的水位。"""
+        d = Q.decide(state(("weekly_scoped", 55, 8640)), NOW, P)
+        self.assertIn("weekly_scoped", d.model_hint)
+        self.assertEqual(Q.decide(state(("session", 55, 8640)), NOW, P).model_hint,
+                         "", "非模型分軌的 notice 帶不該觸發（那是 converge 的事）")
+
+    def test_any_tight_axis_hints_from_the_converge_band(self) -> None:
+        for pct in (70, 85, 96):
+            with self.subTest(pct=pct):
+                self.assertIn("session",
+                              Q.decide(state(("session", pct, 8640)), NOW, P).model_hint)
+
+    def test_the_hint_never_moves_a_single_decision_bit(self) -> None:
+        """S4-10 的釘值（cap 2／rec 1）在 hint 出現時逐格不變。"""
+        d = Q.decide(state(("session", 75, 8640)), NOW, P)
+        self.assertEqual((d.cap, d.recommended_fanout), (2, 1))
+        self.assertTrue(d.model_hint)
+
+    def test_a_healthy_subscription_is_not_hinted_by_the_fallback_pool(self) -> None:
+        """R89 同判：保險軸不進 cap 聚合，也不由它觸發降級建議。"""
+        d = Q.decide(state(("spend", 88, None), ("session", 20, 30)), NOW, P)
+        self.assertEqual(d.model_hint, "")
+
+    def test_unmeasured_never_hints(self) -> None:
+        st = Q.QuotaState(axes=(), measured_at=NOW.isoformat(), source="cache",
+                          reason="stale-cache")
+        self.assertEqual(Q.decide(st, NOW, P).model_hint, "")
+
+    def test_the_screen_line_appears_only_with_a_hint(self) -> None:
+        import quota_messages as QM  # noqa: PLC0415 — 與本檔既有的延後 import 同形態
+        tight = Q.decide(state(("weekly_scoped", 75, 8640)), NOW, P)
+        free = Q.decide(state(("weekly_scoped", 20, 8640)), NOW, P)
+        self.assertIn("sonnet/haiku", QM.model_hint_line(tight))
+        self.assertIn("weekly_scoped", QM.model_hint_line(tight))
+        self.assertEqual(QM.model_hint_line(free), "", "free 帶印降級建議＝一句假話")
+
+
+class TestR95PaceIndexAndTunableCeiling(unittest.TestCase):
+    """PRD §4.2.8：`pace_index` 比值形式（供人讀與校準）與 `lead_pp` 差值形式（供決策）
+    並存；`AUTOSDD_QUOTA_PACE_CEILING` 預設 1.0＝逐位元維持現行「任何超前即減速」。"""
+
+    def test_the_ratio_form_matches_the_prd_formula(self) -> None:
+        self.assertAlmostEqual(W.pace_index(74.0, 8064.0, 10080.0), 3.7)
+        self.assertAlmostEqual(W.pace_index(74.0, 1008.0, 10080.0), 74.0 / 90.0)
+        for bad in ((74.0, None, 10080.0), (74.0, -5.0, 10080.0), (74.0, 100.0, None)):
+            with self.subTest(bad=bad):
+                self.assertIsNone(W.pace_index(*bad))
+
+    def test_the_denominator_floor_prevents_blowup_at_window_start(self) -> None:
+        self.assertEqual(W.pace_index(5.0, 300.0, 300.0), 5.0)
+
+    def test_the_default_ceiling_keeps_the_shipped_burn_step_verbatim(self) -> None:
+        """預設 1.0 ⇒ 超前判定逐位元等於既有 `lead > 0`（含省與中性兩側）。"""
+        for pct in (0.0, 5.0, 40.0, 74.0, 96.0):
+            for minutes in (33.0, 100.0, 1008.0, 8064.0, 10080.0):
+                lead = W.lead_pp(pct, minutes, 10080.0)
+                want = (1 if lead > 0 else
+                        (-1 if lead <= -W.anchor_margin_pp(10080.0) else 0))
+                with self.subTest(pct=pct, minutes=minutes):
+                    self.assertEqual(W.burn_step(pct, minutes, 10080.0)[0], want)
+
+    def test_a_raised_ceiling_releases_the_brake_but_never_grants_speed(self) -> None:
+        """方向鎖：調高上限只把「超前⇒強制 far」放回中性，絕不越過絕對門檻版。"""
+        eased = dataclasses.replace(P, pace_ceiling=1e9)
+        _looser, unlicensed = QC.unlicensed_acceleration(eased, Q, W, NOW)
+        self.assertEqual(unlicensed, [], "調高配速上限造出了無節省證據的放寬")
+        self.assertEqual(W.burn_step(74.0, 100.0, 300.0, 1e9), (0, ""))
+        self.assertEqual(W.burn_step(74.0, 100.0, 300.0), (1, W.NOTE_AHEAD))
+
+    def test_the_ceiling_reaches_the_production_path(self) -> None:
+        """five_hour 74%@100min（pace_index≈1.11）：預設判超前（far、cap 2）；
+        上限調高後回中性（mid、cap 4）——仍逐格等於 R85 絕對門檻版的 cap 4。"""
+        tight = QC.new_axis(P, Q, NOW, "five_hour", 74.0, 100.0)
+        eased = QC.new_axis(dataclasses.replace(P, pace_ceiling=1e9), Q, NOW,
+                            "five_hour", 74.0, 100.0)
+        self.assertEqual((tight.horizon, tight.cap), (Q.AXIS_FAR, 2))
+        self.assertEqual((eased.horizon, eased.cap), (Q.AXIS_MID, 4))
+        self.assertEqual(QC.r85_axis(P, Q, 74.0, 100.0)[1], 4, "中性不得越過對照組")
+
+    def test_the_ceiling_is_declared_bounded_and_reaches_the_policy(self) -> None:
+        policy, problems = Q.load_policy({"AUTOSDD_QUOTA_PACE_CEILING": "1.5"})
+        self.assertEqual(problems, [])
+        self.assertEqual(policy.pace_ceiling, 1.5)
+        bad, problems = Q.load_policy({"AUTOSDD_QUOTA_PACE_CEILING": "0.5"})
+        self.assertTrue(problems, "低於 1 的上限被靜默接受（會反轉節儉判定）")
+        self.assertEqual(bad.pace_ceiling, 1.0, "壞值必須採用預設")
+        self.assertIn("AUTOSDD_QUOTA_PACE_CEILING", Q.render_env_example())
+
+    def test_explain_carries_the_pace_index(self) -> None:
+        amort = W.amortize((("five_hour", 16.0), ("seven_day", 75.0)),
+                           (2520.0, 4320.0), (300.0, 10080.0), 7.0, "n")
+        self.assertIn("pace_index=", W.explain(amort))
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# R95 修4（PRD R-4.5.6-5／A3；ADR §2.9）：halt 武裝分支不得只看 binding 單軸；方向鎖＝
+# 只准更早喚醒、絕不把可等的 reset 判成 escalate。事故立案全文＝Pace 證據檔 §7-R95-修4。
+# ═══════════════════════════════════════════════════════════════════════════
+class TestR95HaltArmsOffTheEarliestResettableAxis(unittest.TestCase):
+    def test_the_incident_shape_now_arms_instead_of_escalating(self) -> None:
+        """A3 前半＝事故重演（紅面：修前 binding 單軸判 escalate，本測試必紅）。
+        binding 軸無 reset 的訂閱側重現：halt 帶兩軸 cap 同為 0（優先權判例只管平手時
+        的 cap），`-remaining=-INF` 的那一軸依 `_binding_key` 勝出。"""
+        d = Q.decide(state(("session", 96, None), ("five_hour", 96, 188)), NOW, P)
+        self.assertIsNone(d.binding.resets_at,
+                          "前提破了：binding 必須是無期程那一軸才有鑑別力")
+        self.assertEqual(QM.halt_resets_at(d), at(188), "沒取到 ≥halt 中最早可 reset 軸")
+        self.assertEqual(QM.reset_branch(QM.halt_resets_at(d), NOW), QM.QUOTA_BRANCH_ARM)
+        # 事故原形自證：對照組（binding 單軸）確實是 escalate——修的正是這一格。
+        self.assertEqual(QM.reset_branch(QM.binding_resets_at(d), NOW),
+                         QM.QUOTA_BRANCH_ESCALATE)
+
+    def test_the_literal_incident_binding_shape_is_also_covered(self) -> None:
+        """事故閂鎖逐字 `halt@extra_usage@None`＝binding 落在保險軸（R89 起保險軸不進
+        gate，這只在全軸皆保險的 `or readings` fail-safe 路上成立）——這一格也要 arm：
+        錯付的代價是一次探測，漏喚醒的代價是空轉八小時。"""
+        d = Q.decide(state(("extra_usage", 100, None),
+                           ("seven_day_overage_included", 96, 188)), NOW, P)
+        self.assertEqual(d.binding.kind, "extra_usage", "前提：重現事故閂鎖的 binding")
+        self.assertEqual(QM.reset_branch(QM.halt_resets_at(d), NOW), QM.QUOTA_BRANCH_ARM)
+
+    def test_no_resettable_axis_anywhere_still_escalates(self) -> None:
+        """A3 後半：全軸皆無 reset ⇒ 仍 escalate（提額是唯一的路，排程等於白等）。"""
+        d = Q.decide(state(("extra_usage", 100, None), ("spend", 96, None)), NOW, P)
+        self.assertIsNone(QM.halt_resets_at(d))
+        self.assertEqual(QM.reset_branch(QM.halt_resets_at(d), NOW),
+                         QM.QUOTA_BRANCH_ESCALATE)
+
+    def test_the_choice_is_directionally_locked(self) -> None:
+        """方向鎖三格：①只會更早不會更晚（候選含 binding 自己 ⇒ min 不可能更晚）；
+        ②未到 halt 的軸不得進候選（醒在它的 reset 上是白醒——那一刻 halt 軸仍滿）；
+        ③遠 reset 走 notify 而非 arm（R59 同形防護）、也絕非 escalate。"""
+        self.assertEqual(QM.halt_resets_at(
+            Q.decide(state(("session", 97, 300), ("five_hour", 96, 120)), NOW, P)), at(120))
+        self.assertEqual(QM.halt_resets_at(
+            Q.decide(state(("session", 96, 200), ("five_hour", 55, 10)), NOW, P)), at(200))
+        far = Q.decide(state(("extra_usage", 100, None),
+                             ("weekly_all", 96, 6 * 24 * 60)), NOW, P)
+        self.assertEqual(QM.reset_branch(QM.halt_resets_at(far), NOW),
+                         QM.QUOTA_BRANCH_NOTIFY)
+
+    def test_the_halt_actions_and_message_follow_the_choice(self) -> None:
+        """接線＋訊息面：事故形狀下 waker 真的被按下去（修前 branch=escalate ⇒ waker
+        一次都不會被叫），且已武裝那一句印**被選中的** reset 而非 binding 的 None。"""
+        d = Q.decide(state(("session", 96, None), ("five_hour", 96, 188)), NOW, P)
+        woken: list[str] = []
+        act = QG.quota_halt_actions({"transcript_path": ""}, d, NOW, plan_writer=lambda t: "",
+                                    waker=lambda t, p: woken.append(p) or {"armed": True})
+        self.assertEqual((act["branch"], act["armed"], len(woken)),
+                         (QM.QUOTA_BRANCH_ARM, True, 1))
+        self.assertIn(str(at(188)), QM.quota_halt_message(d, act),
+                      "halt 訊息還在印 binding 軸的期程（None）")
 
 
 if __name__ == "__main__":

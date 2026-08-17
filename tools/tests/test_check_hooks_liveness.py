@@ -1889,13 +1889,13 @@ _REGISTRATION_BASELINE: dict[tuple[str, str], frozenset[str]] = {
     # 那個**，而 R71 已實證純文件約束對「當下的模型」零攔阻力。
     # matcher 取 `{Bash, PowerShell}` 的依據是**逐字稿實查**而非推測：本機 60 份逐字稿、
     # 7,189 次 tool_use 中 Bash 4,083 次、PowerShell 0 次（Windows 側是另一個 project dir，
-    # 且該平台依鐵律一禁用 Bash ⇒ 一律走 PowerShell）。兩者相加＝腳本自己的 OWN_TOOLS，
-    # **matcher 與射程恰好相等、零附帶面**。
+    # 且該平台依鐵律一禁用 Bash ⇒ 一律走 PowerShell）。兩者相加＝腳本自己的 OWN_TOOLS；
+    # 🔴 R95 起 matcher＝OWN_TOOLS ∪ GOV_TOOLS（治理檔禁寫；下限同步升格，射程縮回即紅）。
     # 該守衛對退化 payload 走 rc=1（出聲不阻斷）故不受「rc==2 必須配窄 matcher」那條約束，
     # 但仍取窄 matcher；且腳本內**刻意沒有 `os.name` 閘**——照抄
     # `block_bash_on_windows.py` 的平台閘等於「在事故現場（macOS）把它關掉」。
     ("PreToolUse", ".claude/hooks/block_destructive_git.py"): frozenset(
-        {"Bash", "PowerShell"}),
+        {"Bash", "PowerShell", "Write", "Edit", "NotebookEdit"}),
     ("PostToolUse", ".claude/hooks/sdd_hook_router.py"): frozenset(
         {"Write", "Edit", "Read", "Bash", "NotebookEdit"}),
     # 🔴 QA M4 打的就是下面這兩支共用的那個 `Write|Edit` 條目。

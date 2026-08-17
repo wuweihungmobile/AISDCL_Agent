@@ -257,6 +257,31 @@ def session_of(task_name: str) -> str:
     return task_name[len(TASK_PREFIX):] if task_name.startswith(TASK_PREFIX) else ""
 
 
+# ── 修3（R95；ADR-XPLAT-004 §2.9）：哨兵活性欄——armed stamp 對排程器現查的對比 ──
+# 立案：2026-08-17 00:55 哨兵自我解除後，03:50 reset 時機器上零排程、空轉八小時；
+# 期間 `--pace`／`--check` 照常回報額度與水位，沒有任何出口說「哨兵已經死了」。
+# 對比的兩端都是既有讀數：stamp（`maybe_arm` 落款）＝「宣稱武裝過」，`list_jobs()`
+# （平台各自的載具：Win＝Get-ScheduledTask、mac＝launchctl list）＝「現在還在不在」。
+# 警語裡的查法向 `schedule_backend.select().evidence_hint()` 要（R-4.5.6-6：mac 憑證＝
+# launchctl print 的 rc、Win＝NextRunTime 值——平台各一條住後端，本層不複寫）。
+def liveness_problem(session_id: str, stamped: bool, jobs: list[str] | None) -> str:
+    """純判準：不一致回警語；一致或本 session 沒宣稱過武裝時回 ``""``（安靜）。"""
+    task = TASK_PREFIX + session_id
+    if not stamped:
+        return ""
+    if jobs is None:
+        return (f"⚠️ 哨兵活性：{task} 有 armed stamp，但排程器**列舉不到**（量不到 ≠ 沒有）。請以載具現查：{schedule_backend.select().evidence_hint()}")  # noqa: E501
+    if task in jobs:
+        return ""
+    return (f"🔴 哨兵活性：armed stamp 說 {task} 已武裝，排程器現查卻沒有這支工作 ⇒ 哨兵已死、喚醒鏈斷線（2026-08-16 事故形狀）。重新武裝：python tools/session_resume_planner.py --arm-sentinel；取證：{schedule_backend.select().evidence_hint()}")  # noqa: E501
+
+
+def liveness_line(session_id: str) -> str:
+    """接線層：本機 stamp ＋ 載具現查餵給純判準（`--pace`／`--check` 共用這一個家）。"""
+    return liveness_problem(session_id, arm_marker_path(session_id).exists(),
+                            sentinel_task_names())
+
+
 def plan_state(plan: Path) -> str | None:
     """任務書狀態塊裡的 `state`；讀不出來回 `None`（＝「量不到」，不是「終態」）。
 

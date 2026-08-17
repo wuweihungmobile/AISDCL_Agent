@@ -1,25 +1,14 @@
 #!/usr/bin/env python
 """PreToolUse 守衛：擋下**會不可逆清掉工作樹內容**的 git 指令（R83）。
 
-WHY（立案事實，不是假想）
+WHY（立案事實，不是假想；敘事全文已搬
+`docs/06_quality/CrossPlatform_R95_GovWrite_Evidence.md` §史料搬遷）
 ------------------------
-本輪一個 subagent 在**六包並行共用的同一個工作樹**上執行了
-
-    git stash -q -u --keep-index
-
-瞬間清空 16 個修改檔 ＋ 4 個未追蹤檔（含其他包當時正在寫的
-`tools/lib/quota_meter.py`、`tools/tests/test_dev_start.py`、`tools/lib/schedule_backend.py`）。
-它自己發現後 `git stash pop` 還原，前後 `git diff --stat` 逐字相同
-（16 files / 1791 insertions / 215 deletions）⇒ **沒有偵測到資料遺失，但那是運氣不是設計**：
-當時若有任何 agent 正在寫檔，pop 會衝突或直接覆蓋。
-
-那一次的任務書上**已經寫著**「不要 git add / commit / push」。
-⇒ **禁令沒涵蓋到的那個動詞，就是被踩的那個。** 這正是本 repo 判過兩次的形態
-（`block_bash_on_windows.py` 的立案理由、`lint_powershell_command.py` 的立案理由）：
-**純文件約束對「當下的模型」零攔阻力**——規則寫進 CLAUDE.md 的同一個回合仍會再犯，
-因為 CLAUDE.md 由 session 開場載入，而「主動記得」正是決策負荷第一個擠掉的東西。
-所以這一條必須是 hook，不是散文；而散文那一半（動詞清單會有缺口）本檔也不修，
-本檔改成**列舉會毀掉工作樹的形態**，不是列舉「不准做的事」。
+R83：一個 subagent 在**六包並行共用的工作樹**上跑 `git stash -q -u --keep-index`，
+16 個修改檔＋4 個未追蹤檔瞬間消失；當時任務書**已寫著**「不要 git add / commit / push」
+⇒ **禁令沒涵蓋到的那個動詞，就是被踩的那個**，而純文件約束對「當下的模型」零攔阻力
+（本 repo 已判過兩次）。所以這一條必須是 hook 不是散文，且本檔**列舉會毀掉工作樹的
+形態**，不是列舉「不准做的事」。
 
 判準為何必須精準（另一半的設計約束）
 ------------------------------------
@@ -33,39 +22,18 @@ repo 原話：**擋到讓人無法工作的守衛會被整個關掉，而被關�
   · 純切分支（`git checkout -b` / `git switch -c` / `git checkout <branch>`）⇒ 放行。
   · 所有唯讀查詢（`status`／`diff`／`log`／`show`／`stash list`／`stash show`…）⇒ 放行。
 
-🔴 動詞的**危害射程**：為什麼不能「換一棵樹就整條放行」（R83 誤攔訂正）
+🔴 動詞的**危害射程**（R83 誤攔訂正；合成 repo 逐條實測全文見證據檔 §史料搬遷）
 ----------------------------------------------------------------------
-立案之後，兩名複審者各自在**自己 scratchpad 的拋棄式 worktree 內**跑
-`git checkout -- <path>`（清掉零代價）而被本檔攔下。那是真誤擋，而誤擋正是這道鎖
-被整個拔掉的路徑。但「偵測到不是共用工作樹就整條放行」是**錯的修法**——動詞的
-危害射程不一樣，本回合在合成 repo（主樹 ＋ 一棵 linked worktree）逐條實測：
+誤擋是這道鎖被整個拔掉的路徑，但「不是共用樹就整條放行」是**錯的修法**——
+`checkout -- <path>`／`restore`／`reset --hard`／`clean`／`switch -f` 危害**只限落腳的
+那棵樹**（wt 內跑、主樹改動倖存），`stash` 全家**溢出到共用 `.git`**（`refs/stash`
+是 repo 級，兩邊同一個 SHA ⇒ 不論在哪一棵樹都必須擋）。所以判準是**動詞感知**的：
+先分類，再問樹；放寬只作用在前一族。
 
-  · **只限當前工作樹**（`checkout -- <path>`／`restore`／`reset --hard`／`clean`／`switch -f`）：
-    在 wt 內 `git checkout -- b.txt` 之後，wt 的未提交改動消失、**主樹的
-    `MAIN_UNCOMMITTED` 原封不動倖存 1 筆**。⇒ 這一族換一棵樹確實就安全了。
-  · **會溢出到共用 `.git`**（`stash` 全家）：在 wt 內跑事故那條
-    `git stash -q -u --keep-index`，**主樹的 stash 深度 0→1、兩邊 `rev-parse refs/stash`
-    是同一個 SHA**。⇒ `refs/stash` 是 repo 級不是工作樹級，**不論在哪一棵樹都必須擋**。
-    這正是「只看樹就放行」會製造的新漏擋，而它漏掉的恰好是立案那一條指令。
-
-所以判準是**動詞感知**的：先分類，再問樹。放寬只作用在「只限當前工作樹」那一族。
-
-🔴 樹要從哪裡看出來？（一個會讓修法變成死分支的量測）
-------------------------------------------------------
-複審者建議的判準是 `realpath(git rev-parse --show-toplevel) != realpath($CLAUDE_PROJECT_DIR)`。
-`--show-toplevel` 確有鑑別力（實測主樹／wt 回不同值；`--git-common-dir` 兩邊相同 ⇒ 不可用），
-**但問題在「在哪裡跑它」**：本回合實測 PreToolUse payload 的欄位與 hook 自己的行程狀態——
-
-    payload keys: agent_id / agent_type / cwd / effort / hook_event_name / permission_mode /
-                  prompt_id / session_id / tool_input / tool_name / tool_use_id / transcript_path
-    payload["cwd"] == os.getcwd() == $CLAUDE_PROJECT_DIR == <專案根>
-    ——即使被檢查的那條指令自己是 `cd /private/tmp && pwd`，這三個值仍然全是專案根。
-
-⇒ 拿 hook 自己的 cwd 去跑 `--show-toplevel`，答案**恆等於**專案根 ⇒ 判準恆假 ⇒
-放寬永遠不觸發、誤擋一次都沒少，而程式碼看起來已經修好了。那正是本 repo 反覆判紅的
-「鎖存在但沒有鑑別力」。**唯一真的帶著樹資訊的東西是指令字串自己**：段內的
-`cd`／`pushd`／`Set-Location` 目標，與 `git -C <path>`。故本檔從字串推導「這次呼叫會落腳在
-哪個目錄」，推導不出來就**不放寬**（fail-closed 到現行行為）。
+🔴 樹要從哪裡看出來？payload 的 `cwd`、hook 的 `os.getcwd()`、`$CLAUDE_PROJECT_DIR`
+實測**三者恆等於專案根**（量測全文見證據檔 §史料搬遷）⇒ 在 hook 行程裡問 git 恆得
+專案根、判準恆假。**唯一真的帶著樹資訊的是指令字串自己**：段內的 `cd`／`pushd`／
+`Set-Location` 目標，與 `git -C <path>`；推導不出來就**不放寬**（fail-closed）。
 
 放寬的四道前提（缺一即不放寬——每一條都對應一個實測到的漏擋）
 --------------------------------------------------------------
@@ -80,55 +48,36 @@ repo 原話：**擋到讓人無法工作的守衛會被整個關掉，而被關�
 4. 指令內沒有子殼／群組／反引號／`popd`。`(cd /wt); git clean -fdx` 的 `cd` 作用域在
    `)` 就結束了，順序掃描會把後面那條誤判成落在 `/wt`——方向是**放行共用工作樹**。
 
-`git -C` 是**反向**也要成立的那一半：`cd` 到別處不代表安全。實測 cwd=`/tmp`（完全在
-lab 之外）時 `git -C <主樹> checkout -- b.txt` rc=0、主樹改動消失 ⇒ `-C` 必須被當成
-這次呼叫的落腳目錄（於是它會判回「共用工作樹」而擋下），不是被忽略。
+`git -C` 是**反向**也要成立的那一半（`cd` 到別處不代表安全）：實測 `-C <主樹>` 會把
+危害導回主樹 ⇒ 它必須被當成落腳目錄。pathspec 逃出當前工作樹則由 git 自己擋
+（rc=128 fatal），本檔刻意不另加判準——兩者實測逐字見證據檔 §史料搬遷。
 
-不需要另立判準的那一個（git 自己就守住了）
-------------------------------------------
-「在 wt 內用絕對路徑指主樹的檔」實測 rc=**128**、逐字
-`fatal: <path>: '<path>' is outside repository at '<wt>'`，主樹的 `MAIN_AGAIN` 倖存 ⇒
-pathspec 逃出當前工作樹這條路由 git 自己關掉。本檔因此**不**另加 pathspec 包含性判準
-（多一條判準就多一族假紅），代價是這條事實由 git 的行為擔保、不由本檔擔保。
-
-`--staged` 的取捨（刻意的、不是漏看）
-------------------------------------
-`git restore --staged <path>`（且未同時帶 `--worktree`／`-W`）**只動 index**，
-工作樹的檔案內容原封不動 ⇒ **放行**。本檔守的危害類是「工作樹內容被不可逆清掉」，
-而 unstage 掉的東西還完整躺在檔案裡。代價誠實寫在這裡：它確實會丟掉「哪些 hunk 已暫存」
-這個狀態，`--keep-index` 那種精細操作會被打斷——但那不是本檔守的東西，把它一起擋
-就是拿一筆會天天發生的誤擋，去換一個沒有資料遺失的情境。
-`git restore --staged --worktree <path>` 兩者同時帶時工作樹會被覆寫 ⇒ **擋**。
+`--staged` 的取捨（刻意的、不是漏看；代價全文見證據檔 §史料搬遷）：
+`git restore --staged <path>` 未同時帶 `--worktree`／`-W` 時**只動 index**，工作樹
+內容原封不動 ⇒ 放行；兩者同時帶時工作樹會被覆寫 ⇒ 擋。
 
 行為契約
 --------
-· `tool_name` 不在 `OWN_TOOLS`（`Bash`／`PowerShell`）→ exit 0。
-  射程不得擴大：matcher 若被改寬，守衛自己必須認得工具名（同 `block_bash_on_windows.py`
-  的第二道限縮）。
+· `tool_name` 不在 `OWN_TOOLS ∪ GOV_TOOLS` → exit 0。射程不得擴大：matcher 若被
+  改寬，守衛自己必須認得工具名（同 `block_bash_on_windows.py` 的第二道限縮）。
 · 命中任一形態 → exit 2 阻斷，stderr 一次列出**全部**命中項（不早退——早退會遮蔽
   後面檢查的訊號，而遮蔽的方向是「看起來變乾淨」）。
-· payload 解析不出工具名／指令 → **exit 1（出聲但不阻斷）**，不是 exit 2。理由同
-  `lint_powershell_command.py`：Bash（mac）／PowerShell（Windows）是這台機器上**唯一的
-  shell 載具**，對一份根本讀不出內容的 payload 硬擋它，等於用一個讀不懂的輸入換掉整個
-  工作面；而「送壞 payload 繞過守衛」在這裡不是真實威脅面——payload 由 Claude Code 產生，
-  不由被守的一方撰寫。真正要防的是**守衛靜默失效**，exit 1 已經滿足（不阻斷但出聲）。
-  這條「rc==2 才必須配窄 matcher」的對應關係由
-  `tools/tests/test_check_hooks_liveness.py::degraded_payload_verdict` 機械釘住；
-  本檔即使走 rc=1，matcher 仍取 `Bash|PowerShell`＝**恰好等於自己的射程**，零附帶面。
+· payload 解析不出工具名／指令 → **exit 1（出聲但不阻斷）**，不是 exit 2：shell
+  載具是唯一工作面，硬擋一份讀不出內容的 payload 等於換掉整個工作面；真正要防的是
+  **守衛靜默失效**，exit 1 已滿足（理由全文見證據檔 §史料搬遷）。「rc==2 才必須配窄
+  matcher」由 `tools/tests/test_check_hooks_liveness.py::degraded_payload_verdict`
+  機械釘住；本檔 matcher＝`OWN_TOOLS ∪ GOV_TOOLS`（R95 起）＝**恰好等於自己的射程**。
 · 任何非預期例外 → exit 0（fail-open）。`.claude/settings.json` description 記載過的 P0：
   hook 誤觸 PreToolUse deny 會把**所有**工具硬鎖死，守衛自身絕不可成為那種故障源。
 
-🔴 為何**不**加平台閘（鐵律三的自問：「這在另一個平台是什麼值？」）
-------------------------------------------------------------------
-姊妹檔 `block_bash_on_windows.py` 第一件事是 `os.name != 'nt' → exit 0`，因為它守的
-規則本身只在 Windows 成立。本檔相反：**`git stash` 在 mac 上清掉的檔案，和在 Windows 上
-清掉的一模一樣**，而立案的那起事故就發生在 macOS。無條件把姊妹檔的平台閘抄過來，
-會讓這道鎖在事故現場那個平台上一行都不跑——那是 `DEF-101-766` 的鏡像版本
-（單平台判準不可無條件外推，**兩個方向都不可以**）。故本檔不看平台。
+🔴 為何**不**加平台閘（鐵律三自問；論證全文見證據檔 §史料搬遷）：`git stash` 在
+mac 清掉的檔案與 Windows 一模一樣，而事故就發生在 macOS——照抄姊妹檔的平台閘等於
+在事故現場關掉它（`DEF-101-766` 的鏡像：單平台判準兩個方向都不可無條件外推）。
 
 兩個逃生口（刻意是兩個層級，且刻意**不與既有變數共用**）
 --------------------------------------------------------
-1. 環境變數 `AUTOSDD_GIT_GUARD_OFF` 有設 → 整支 no-op。
+1. 環境變數 `AUTOSDD_GIT_GUARD_OFF` 有設 → git／等待兩族 no-op（R95 起治理面唯讀
+   另有自己的開關 `AUTOSDD_GOVWRITE_GUARD_OFF`，本開關刻意管不到它——見 R95 節）。
    🔴 **刻意不共用** `AUTOSDD_CONTEXT_GUARD_OFF`／`AUTOSDD_SENTINEL_OFF`：repo 明文
    「共用一個會讓『我只是想暫時別被擋』順手把別的保護一起關掉，而那件事沒有人會注意到」。
    🔴 這個出口**模型碰不到**，是刻意的不對稱：hook 是 `claude` 行程的子行程，讀的是
@@ -163,10 +112,7 @@ pathspec 逃出當前工作樹這條路由 git 自己關掉。本檔因此**不*
   在阻斷路徑上加子行程」那一邊，代價誠實寫在這裡。
 · **執行檔路徑被引號包住**時（`& '<含空白的安裝路徑>/git.exe' stash` 這種寫法）：
   引號區段會被 `mask_inert()` 抹掉 ⇒ 那個 `git` token 消失 ⇒ 漏擋。這是「遮蔽以避免
-  誤擋」的必然代價，方向與姊妹檔 `_EXE_HEAD` 相同。
-  （此處刻意寫成佔位符而不是某台機器上的真實磁碟機路徑：本檔會被 commit，寫死的
-    路徑對其他 checkout 一律是錯的，且 `tools/tests/test_platform_neutral_paths.py`
-    會逐行掃描並判紅——姊妹檔 `block_bash_on_windows.py` 因同一條規則已訂正過一次。）
+  誤擋」的必然代價，方向與姊妹檔 `_EXE_HEAD` 相同（為何寫佔位符：原文＝證據檔 §4.8）。
 · **別名／函式**：`alias gst='git stash'` 之後只寫 `gst`——判準看不到定義。
 · **PowerShell 的反引號行接續**（`` git ` ``↵`` stash ``）：bash 的「反斜線＋換行」已折回
   （見 `_LINE_CONT_RE`），反引號那一種**刻意沒折**——理由與代價寫在該常數旁邊：
@@ -1127,11 +1073,82 @@ _UNATTENDED_NOTE = waiver_void_note(
     "工作樹、把狀態寫進\n     任務書，然後停下來讓人回來收。")
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# 🔴 R95／Pkg-B：PRD §15.5 紅線 10「治理檔在無人值守下唯讀」的機械物
+# ══════════════════════════════════════════════════════════════════════════════
+# 立案（R87 實帳，不是假想）：一個 agent 為繞過 halt 改了取數層 ⇒ 13 agent 全滅、
+# 1.3M tokens 零產出——「不得以模型判斷推翻機械守衛」此前只有散文，零機械物。
+# WHY 住本檔而不是新開一支 hook：本檔已是「PreToolUse × 平台中立」觀測面上唯一的
+# 住戶（同上方鐵律六那一族的入住理由——另開一支等於把 payload 解析、UTF-8 stdio、
+# fail-open 契約與逃生口語意各再抄一份，且 hook 檔數與 hook_wiring 普查面都要多付
+# 一格）。設計取捨與實測 rc 逐字＝docs/06_quality/CrossPlatform_R95_GovWrite_Evidence.md。
+# 判準刻意窄（誤擋是守衛被整個關掉的路徑，repo 判例）：
+#   · 只在 AUTOSDD_UNATTENDED 有設（無人值守／並行包）時**阻斷**；有人值守只出聲
+#     不阻斷——主 session 每輪都要改這些檔，擋了守衛就會被關掉。
+#   · 保護面＝下表字面清單（SSOT 只有這一份，測試與文件都引用這裡）；寫入目標落在
+#     專案根之外一律放行（scratchpad／合成樹裡的同名檔不是治理檔）。
+#   · 刻意**沒有行內豁免**：無人值守的回合自己寫得出豁免（同 authz 的處置）。
+#     人的出口＝啟動 claude 前設 AUTOSDD_GOVWRITE_GUARD_OFF——刻意不與
+#     AUTOSDD_GIT_GUARD_OFF 共用（共用會讓「關掉 git 守衛」順手把治理面唯讀一起
+#     關掉，而那件事沒有人會注意到；repo 對此已有明文與具名測試）。
+# 誠實劃界（擋不到什麼）：經 shell 的寫檔（`sed -i`／`tee`／`cp` 蓋治理檔）走的是
+# Bash/PowerShell 指令字串面，本包刻意不加該判準（寫檔動詞的假紅面大，會把守衛
+# 變成天天誤擋的東西）；MCP 檔案工具與其他 session 同樣不經此觀測面。
+GOVWRITE_OFF_ENV = "AUTOSDD_GOVWRITE_GUARD_OFF"
+#: 治理面的射程（寫檔工具）。與 OWN_TOOLS 刻意分開：兩族判準輸入不同（路徑 vs 指令字串）。
+GOV_TOOLS = frozenset({"Write", "Edit", "NotebookEdit"})
+#: 保護面清單（相對專案根、正斜線）。`.claude/hooks/` 底下只保護 `.py`（README 等不擋）。
+#: 收錄邊界判準＝「改它可直接改變 cap/band/武裝裁決/守衛自身行為」（R95 修復包 m4，
+#: 論證全文＝GovWrite 證據檔 §2.2）。`.env` 是 QA 探針實證的繞行面（settings.json 的
+#: `env` 同義載體，M3）；`.autoclaude/` 是 PRD 紅線 10 字面的目錄前綴（目錄今日不存在，
+#: 先釘判準）。
+_GOV_HOOK_PREFIX = ".claude/hooks/"
+_GOV_DIR_PREFIX = ".autoclaude/"
+_GOV_EXACT = frozenset({
+    ".env", ".claude/settings.json", ".claude/settings.local.json",
+    "tools/lib/quota_meter.py", "tools/lib/quota_gate.py", "tools/lib/quota_policy.py",
+    "tools/lib/quota_pace.py", "tools/lib/quota_limits.py", "tools/lib/pace_contract.py",
+    "tools/lib/sentinel_lifecycle.py", "tools/lib/schedule_backend.py",
+    "tools/lib/quota_messages.py", "tools/lib/quota_escalation.py",
+    "tools/lib/platform_utils.py", "tools/session_resume_planner.py",
+})
+
+_GOVWRITE_BLOCK_MSG = (
+    "🔴 治理檔在無人值守下唯讀（PRD §15.5 紅線 10），已擋下：{rel}\n"
+    "  需要改它請回報主控，由收尾單人窗口處理（立案＝R87：agent 為繞過 halt 改了"
+    "取數層 ⇒ 13 agent 全滅、1.3M tokens 零產出——守衛的訊息就是答案）。\n"
+    "  本條刻意沒有行內豁免；人的出口＝啟動 claude 前設 " + GOVWRITE_OFF_ENV + "。\n")
+_GOVWRITE_NOTE_MSG = (
+    "[block_destructive_git] 提醒：{rel} 是治理檔（PRD §15.5 紅線 10 保護面）。"
+    "有人值守 ⇒ 只出聲不阻斷；無人值守回合對它是唯讀的，改完請跑對應守衛測試。\n")
+
+
+def govwrite_hit(tool_input: object) -> str | None:
+    # 寫入目標落在治理面時回「相對專案根的正斜線路徑」，否則 None。realpath 對根與
+    # 目標**兩邊都做**：symlink（mac 的 /tmp）與 `..` 繞行收在同一格；相對路徑以專案根
+    # 為基準（production 的 file_path 實測是絕對路徑，這格是防禦縱深）。任何解析失敗
+    # ＝不在保護面——fail-open 是 P0（hook 誤觸 deny 會把所有工具硬鎖死）。
+    try:
+        raw = (tool_input.get("file_path") or tool_input.get("notebook_path")) \
+            if isinstance(tool_input, dict) else None
+        if not isinstance(raw, str) or not raw.strip():
+            return None
+        root = os.path.realpath(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
+        target = os.path.realpath(raw if os.path.isabs(raw)
+                                  else os.path.join(root, raw))
+        if not target.startswith(_dir_prefix(root)):
+            return None  # 專案根之外的同名檔不是治理檔（沙盒樹照常可寫）
+        rel = target[len(_dir_prefix(root)):].replace(os.sep, "/")
+        if rel in _GOV_EXACT or rel.startswith(_GOV_DIR_PREFIX) or (
+                rel.startswith(_GOV_HOOK_PREFIX) and rel.endswith(".py")):
+            return rel
+        return None
+    except Exception:  # noqa: BLE001 — 判不出＝不在保護面，見上方 P0 理由
+        return None
+
+
 def main() -> int:
     try:
-        if os.environ.get(GUARD_OFF_ENV):
-            return 0  # 人的逃生口；模型改不到 hook 行程的環境（見模組 docstring）
-
         # 🔴 payload 讀取的**唯一家**是 `tools/lib/platform_utils.read_hook_payload()`。
         # 本檔第一版自己碰 `sys.stdin`，被
         # `tools/tests/test_pre_commit_dispatcher_sigpipe.py::TestHookPayloadSingleHome`
@@ -1149,8 +1166,25 @@ def main() -> int:
                 "本次不檢查。刻意不阻斷：硬擋唯一的 shell 載具，代價遠大於漏掉一次檢查；"
                 "但也不靜默——守衛失效必須看得見。\n")
             return 1
-        if tool not in OWN_TOOLS:
-            return 0  # 射程不得擴大（matcher 被改寬時的第二道限縮）
+        # 🔴 R95 治理面唯讀（GOV_TOOLS 一族）。刻意判在 GUARD_OFF_ENV **之前**：那個
+        # 開關是 git／等待兩族的逃生口，不得順手把治理面唯讀一起關掉（兩族各自有開關，
+        # 同本檔「不與既有變數共用」的既有論述；具名測試釘住兩個方向）。
+        if tool in GOV_TOOLS:
+            rel = None if os.environ.get(GOVWRITE_OFF_ENV) \
+                else govwrite_hit(payload.get("tool_input"))
+            if rel is None:
+                # 逃生口有設（人啟動前設的，模型改不到 hook 行程的環境）、目標不在
+                # 保護面、或判不出目標（fail-open）——三者同一格，一律放行。
+                return 0
+            if os.environ.get(UNATTENDED_ENV):
+                sys.stderr.write(_GOVWRITE_BLOCK_MSG.format(rel=rel))
+                return 2
+            sys.stderr.write(_GOVWRITE_NOTE_MSG.format(rel=rel))
+            return 1
+        if os.environ.get(GUARD_OFF_ENV) or tool not in OWN_TOOLS:
+            # 前者＝git／等待兩族「人的逃生口」（模型改不到 hook 行程的環境，見模組
+            # docstring）；後者＝matcher 被改寬時的第二道限縮。
+            return 0
 
         tool_input = payload.get("tool_input")
         command = tool_input.get("command") if isinstance(tool_input, dict) else None
