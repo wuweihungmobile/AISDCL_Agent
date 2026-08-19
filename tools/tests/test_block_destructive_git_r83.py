@@ -24,6 +24,7 @@ WHY 這支鎖存在：六包並行工作樹上的 `git stash` 真實事故——
 from __future__ import annotations
 
 import json
+import ntpath  # R96／B-8：Windows 路徑語意的**真實實作**，注入用（不是手捏的假貨）
 import os
 import re
 import shutil
@@ -1672,6 +1673,65 @@ class TestR84WorktreeRemoveForce(unittest.TestCase):
                     self.assertEqual(
                         G.destructive_git_hits(command, start_dir=str(_REPO_ROOT)), [],
                         f"{command!r} 被誤擋——全語料實測這一類佔新增命中的 100%")
+
+    #: Windows 那一側的 `_DISPOSABLE_WT`（由 `ntpath` 造，不寫死字面 ⇒ 常數改名／改層級
+    #: 時本組跟著動，而不是留一份會漂開的複本）。
+    _WIN_DISPOSABLE_WT = ntpath.normcase(ntpath.join(".claude", "worktrees") + "\\")
+
+    def _as_windows(self) -> tuple:
+        """把 Windows 的兩個前提顯式注入：`os.path.normcase` 與那個常數的字面。
+
+        兩者缺一不可——`_DISPOSABLE_WT` 是 import 期用 `os.sep` 算好的，POSIX 上是
+        `.claude/worktrees/`，只 patch `normcase` 比對照樣不成立。
+        """
+        return (mock.patch.object(G.os.path, "normcase", ntpath.normcase),
+                mock.patch.object(G, "_DISPOSABLE_WT", self._WIN_DISPOSABLE_WT))
+
+    def test_the_mixed_separator_shape_is_judged_on_every_platform(self) -> None:
+        """🔴 R96 收尾／B-8：混合分隔符那條放行路必須在**兩個平台**都真的走得進去。
+
+        此前唯一在守它的是上一支放行清單裡那一行
+        `f"…{_REPO_ROOT}/.claude/worktrees/agent-ac3ed"`——只有在 `_REPO_ROOT` 渲染成
+        反斜線（Windows）時才合成得出混合分隔符；macOS／Linux 上 `_REPO_ROOT` 是純正
+        斜線 ⇒ 混合形態**結構上造不出來** ⇒ 把正規化整個刪掉，mac 全綠。也就是說，R96
+        對「單平台專屬判準在對面平台失效」的修法，它自己的回歸鎖犯了同一個錯。
+        修法＝顯式注入 Windows 語意（`ntpath.normcase` 就是 Windows 上真正在跑的那一份
+        實作），於是 mac 上也真的比到同一條判準。
+        """
+        victim = str(_REPO_ROOT).replace("/", "\\") + "/.claude/worktrees/agent-ac3ed"
+        command = f"git worktree remove --force {victim}"
+        normcase_patch, const_patch = self._as_windows()
+        with normcase_patch, const_patch:
+            self.assertEqual(
+                G.destructive_git_hits(command, start_dir=str(_REPO_ROOT)), [],
+                "混合分隔符的拋棄式樹被誤擋 ⇒ 正規化那一格在本平台失明；"
+                "普查明載這一類佔新增命中的 100%，而誤擋是這道鎖被整個關掉的路徑")
+            # 紅綠自證：把正規化換成 no-op（＝R96 之前的形態）⇒ 同一條指令當場被誤擋。
+            with mock.patch.object(G.os.path, "normcase", lambda s: s):
+                self.assertTrue(
+                    G.destructive_git_hits(command, start_dir=str(_REPO_ROOT)),
+                    "正規化拿掉後竟仍放行 ⇒ 這條鎖沒有承重")
+
+    def test_the_windows_case_insensitive_shape_is_judged(self) -> None:
+        """🔴 R96 收尾／B-8 的配套鎖（`normcase` 換法一併治好的第二個 Windows 失明）。
+
+        NTFS 大小寫不敏感 ⇒ `…\\.CLAUDE\\WORKTREES\\agent-x` 與小寫寫法指的是**同一棵
+        樹**，而 `.replace("/", os.sep)` 版本比不到 ⇒ 同一類 routine teardown 只要換個
+        大小寫寫法就又被誤擋。改用 `normcase` 之後兩種寫法同判——「改了沒人守」是本
+        repo 反覆判過的形態，所以這一支與換法同輪落地。
+        """
+        victim = str(_REPO_ROOT).replace("/", "\\") + "\\.CLAUDE\\WORKTREES\\agent-ac3ed"
+        command = f"git worktree remove --force {victim}"
+        normcase_patch, const_patch = self._as_windows()
+        with normcase_patch, const_patch:
+            self.assertEqual(
+                G.destructive_git_hits(command, start_dir=str(_REPO_ROOT)), [],
+                "大小寫不同的同一棵拋棄式樹被誤擋（NTFS 不區分大小寫）")
+            # 紅綠自證：只做分隔符正規化、不做大小寫（＝R96 那版的能力上界）⇒ 當場誤擋。
+            with mock.patch.object(G.os.path, "normcase", lambda s: s.replace("/", "\\")):
+                self.assertTrue(
+                    G.destructive_git_hits(command, start_dir=str(_REPO_ROOT)),
+                    "只正規化分隔符竟仍放行 ⇒ 大小寫那一半沒有承重")
 
     def test_the_relaxation_is_load_bearing_in_both_directions(self) -> None:
         """紅綠自證：拿掉放行條件 ⇒ 那三類 routine teardown 當場全變假紅。"""

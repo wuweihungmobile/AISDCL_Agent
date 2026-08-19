@@ -1507,7 +1507,13 @@ class MacSleepPostureIsSaidOutLoudTest(unittest.TestCase):
         sb.LAUNCH_AGENTS_DIR = tmp / "LaunchAgents"
         sb._run = _pm(0, _SLEEPY)          # print/bootstrap 皆回 (0, "") ⇒ 武裝必然失敗
         err = io.StringIO()
-        with contextlib.redirect_stderr(err):
+        # 🔴 R96：`sys.platform` 必須跟著注入——`arm()` 呼叫 `warn_if_sleepy(_run)` 時**不帶
+        # platform**，而 `_sleep_rows()` 對非 darwin 回 `NOT_APPLICABLE`（同檔
+        # `test_the_probe_never_even_spawns_off_darwin` 已把它釘成契約）⇒ 本鎖在 Windows 恆紅。
+        # launchd 只在 mac 存在 ⇒「這台是 mac」本來就該是注入項（同本檔 runner 注入紀律）；
+        # `sb._run` 已全面替身化故無真行程。見 Closure_Evidence §2④(c)。
+        with mock.patch.object(sys, "platform", "darwin"), \
+                contextlib.redirect_stderr(err):
             sb.LaunchdBackend().arm(str(plan), "AutoSDD_Sentinel_pm", "", "--sentinel-tick")
         self.assertIn("sleep 25", err.getvalue(),
                       "武裝路徑對「這台機器會睡著」仍然是靜默的（SA-05 的原病）")
@@ -1564,15 +1570,63 @@ class DurableTraceHomeTest(unittest.TestCase):
         self.assertNotIn(_REPO_ROOT.resolve(), [default.resolve(strict=False),
                                                 *default.resolve(strict=False).parents])
 
-    def test_an_unwritable_home_degrades_instead_of_raising(self) -> None:
-        """痕跡留不下來**絕不可**升級成續航本身的故障源（同 `append_log` 的既有紀律）。"""
-        blocked = self.tmp / "ro"
-        blocked.mkdir()
-        blocked.chmod(0o500)
-        self.addCleanup(blocked.chmod, 0o700)
-        os.environ[endurance_env.TRACE_DIR_ENV] = str(blocked / "traces")
-        self.assertEqual(endurance_env.trace_dir(),
-                         Path(tempfile.gettempdir()), "唯讀家目錄沒有退回 $TMPDIR")
+    def test_a_home_that_cannot_be_created_degrades_instead_of_raising(self) -> None:
+        """痕跡留不下來**絕不可**升級成續航本身的故障源（同 `append_log` 的既有紀律）。
+
+        驗 `trace_dir()` 的**第一層**：`mkdir` 就失敗（走 `except OSError`）。
+        🔴 R96 訂正製造手法（原為 `chmod(0o500)`——NTFS 不理 POSIX mode bits ⇒ 該退化分支在
+        Windows 上結構上進不去、鎖在 mac 綠而 Windows 恆紅）：改用「父層是一個檔案」，兩平台
+        都拋 `OSError` 子類 ⇒ 都真的走進那一支，不必為任何一邊加 skip。診斷見
+        `CrossPlatform_R96_Closure_Evidence.md` §2④(a)。
+        """
+        not_a_dir = self.tmp / "not-a-dir"
+        not_a_dir.write_text("x", encoding="utf-8", newline="\n")
+        os.environ[endurance_env.TRACE_DIR_ENV] = str(not_a_dir / "traces")
+        self.assertEqual(endurance_env.trace_dir(), Path(tempfile.gettempdir()),
+                         "建不出來的痕跡目錄沒有退回 $TMPDIR")
+
+    def test_a_permission_error_on_mkdir_also_degrades(self) -> None:
+        """第一層的**另一個例外子類**：`PermissionError`（家目錄權限）。
+
+        🔴 R96 把上一支的製造手法從 `chmod(0o500)` 換成「父層是一個檔案」之後，被打中的
+        例外子類由 `PermissionError` 變成 `NotADirectoryError`（mac）／`FileExistsError`
+        （Windows 本機實測：errno 17、winerror 183——**不是** `NotADirectoryError`）。
+        三者都被同一句 `except OSError` 接住，所以換法本身沒錯——但**覆蓋面掉了一個
+        子類**：把 `trace_dir()` 的 `except OSError` 窄化掉，R96 之前 mac 抓得到、之後
+        抓不到，而家目錄權限正是 mac 上真正常見的那個失效形態。
+        🔴 用注入而不是 `skipUnless(darwin)`：後者會讓 Windows 的 `platform` skip 群再 +1、
+        當場撞上 skip 天花板棘輪（兩道鎖互為對方違規）。注入是平台中性的，兩邊都真的跑。
+        """
+        fallback = Path(tempfile.gettempdir())
+        want = self.tmp / "denied" / "traces"
+        os.environ[endurance_env.TRACE_DIR_ENV] = str(want)
+        with mock.patch.object(endurance_env.Path, "mkdir",
+                               side_effect=PermissionError(13, "denied")):
+            self.assertEqual(endurance_env.trace_dir(), fallback,
+                             "PermissionError 沒被接住 ⇒ 退化那一層對家目錄權限失明")
+        # 控制組：拿掉注入之後同一個路徑必須建得起來，否則上面那個相等是恆真的。
+        self.assertEqual(endurance_env.trace_dir(), want,
+                         "沒有注入時也退回 $TMPDIR ⇒ 上一個斷言沒有鑑別力")
+
+    def test_a_home_that_exists_but_is_unwritable_also_degrades(self) -> None:
+        """驗 `trace_dir()` 的**第二層**：`mkdir` 成功但寫不進去（`os.access` 為假）。
+
+        兩層各自要有鎖（該函式註解逐字說明兩層都檢查是刻意的），而這一層的失敗表徵是
+        「痕跡檔不會長大」＝與「沒觸發」同形。用注入而非檔案系統權限（真正唯讀的目錄在
+        Windows 上做不出來，見上一支）；`gettempdir()` 先在 patch 外求值，免得 `tempfile`
+        的可寫探測跟著失真。
+        """
+        fallback = Path(tempfile.gettempdir())
+        want = self.tmp / "exists"
+        os.environ[endurance_env.TRACE_DIR_ENV] = str(want)
+        with mock.patch.object(endurance_env.os, "access", return_value=False):
+            self.assertEqual(endurance_env.trace_dir(), fallback,
+                             "存在但不可寫的痕跡目錄沒有退回 $TMPDIR")
+            # 🔴 本鎖存在的**唯一**理由是「兩層各自要有鎖」，所以它必須證明自己真的走到
+            # 了第二層：`mkdir` 哪天因為任何理由改成會拋，這一條會由**第一層**的
+            # `except OSError` 滿足而照樣綠——而那時第二層就沒有人在守了。
+            self.assertTrue(want.is_dir(),
+                            "第一層就退化了（mkdir 沒成功）⇒ 本鎖沒有走到第二層")
 
     def test_both_writers_really_use_the_durable_home(self) -> None:
         """接線鎖：兩個寫檔點（job 自己的 stdout、延後動作的 rc 痕跡）都必須落在那裡。
@@ -1584,6 +1638,11 @@ class DurableTraceHomeTest(unittest.TestCase):
         os.environ[endurance_env.TRACE_DIR_ENV] = str(want)
         self.addCleanup(setattr, sb, "LAUNCH_AGENTS_DIR", sb.LAUNCH_AGENTS_DIR)
         sb.LAUNCH_AGENTS_DIR = self.tmp / "LaunchAgents"
+        # 🔴 R96：`_write_plist()` 會跑 macOS 專屬的 `plutil -lint`（Windows 上 WinError 2
+        # ⇒ 依設計刪檔回 False ⇒ 本鎖在 mac 綠、Windows 恆紅）。掛既有的 `_pm` 替身**不**弱化
+        # 判準：plist 合法性由下面那行 `plistlib.loads()` 直接驗。見 Closure_Evidence §2④(b)。
+        self.addCleanup(setattr, sb, "_run", sb._run)
+        sb._run = _pm(0, _AWAKE)
         backend = sb.LaunchdBackend()
         trace = backend._defer("AutoSDD_Sentinel_probe", 'echo "noop";')
         self.assertEqual(trace.parent, want, "延後動作的痕跡仍落在 $TMPDIR")

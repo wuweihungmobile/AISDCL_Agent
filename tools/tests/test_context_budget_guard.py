@@ -58,6 +58,7 @@ import context_budget_guard as guard  # noqa: E402
 # 同一行程裡有兩個模組物件，於是 monkeypatch 打在其中一個上、受測碼讀的是另一個
 # （`ModuleIdentityIsSingleTest` 在守這一條）。
 sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
+import endurance_env  # noqa: E402  # R96／B-4：持久痕跡居所的 SSOT（不複寫路徑字面）
 import quota_criteria  # noqa: E402  # R86：判準本體的家（本檔只做斷言）
 import quota_gate as qg  # noqa: E402
 import quota_messages as qm  # noqa: E402  # R88／LOC-01：人話面與載具參照的家
@@ -193,15 +194,34 @@ def _isolated_env(tmp: Path, *, real_scheduler: bool = False) -> dict[str, str]:
         "TMPDIR": str(tmp), "TEMP": str(tmp), "TMP": str(tmp),
         "USERPROFILE": str(tmp), "HOME": str(tmp), "HOMEPATH": str(tmp),
         "CLAUDE_PROJECT_DIR": str(_REPO_ROOT),
+        # 🔴 R96／B-5：`DEF-200-153` 的根因自陳是「第三方在家目錄下的副作用」，而此前被
+        # 隔離的只有 `USERPROFILE`／`HOME` 那一條路——`APPDATA`／`LOCALAPPDATA` 一律**原封
+        # 繼承開發者的真家目錄**（實測：子行程看到的 APPDATA 逐字是
+        # `C:\Users\<人>\AppData\Roaming`）。任何走 `%APPDATA%` 的第三方（PowerShell 模組
+        # 快取、.NET、pip）因此仍會寫進**真的**那一棵樹：既污染開發者機器，又完全落在
+        # 任何斷言的射程之外（沙箱目錄裡看不到 ⇒ 「沒有副作用」是假的）。
+        # 一個家、兩個呼叫端（`_run_hook3` 與 `PlannerCliTest._run`）自動受益。
+        "APPDATA": str(tmp / "AppData" / "Roaming"),
+        "LOCALAPPDATA": str(tmp / "AppData" / "Local"),
+        # POSIX 側的同一件事：開發者若把 `XDG_*` 顯式匯出成絕對路徑，它們同樣不隨 `HOME`
+        # 走（沒匯出時 XDG 預設本來就由 `HOME` 導出 ⇒ 已被上面那一格蓋住）。
+        "XDG_CONFIG_HOME": str(tmp / ".config"), "XDG_CACHE_HOME": str(tmp / ".cache"),
+        "XDG_DATA_HOME": str(tmp / ".local" / "share"),
+        "XDG_STATE_HOME": str(tmp / ".local" / "state"),
     })
     # 🔴 R81：額度那兩個旗標也要清。少清它們時，開發者自己機器上設過 `AUTOSDD_QUOTA_
     # GUARD_OFF=1` 就會讓下面所有 quota e2e **靜默轉綠**（守衛整支被關掉，rc 一律 0），
     # 而在 CI 上又是紅的——「污染的方向正好是看起來通過」同一條紀律。
     # 🔴 R91 補 `AUTOSDD_CONTEXT_SIGNAL_OFF`：它關掉的正是本輪新增的那條 stdout 通道 ⇒
     # 開發者機器上設過就會讓每一條「訊息必須送進模型」的 e2e **靜默轉綠**，方向同上。
+    # 🔴 R96／B-4 尾項補 `AUTOSDD_TRACE_DIR`：開發者機器上設過它，`endurance_env.trace_dir()`
+    # 就會把痕跡（含 `quota_gate.burn_ledger_path()` 的落款）整個寫到**沙箱之外** ⇒ 下面
+    # `PlannerCliTest` 那道「`--check` 不寫檔」的全樹相等判準會**靜默轉綠**（方向同上面那
+    # 兩條旗標：污染的方向正好是看起來通過）。pop 掉之後它落回 `HOME/.autosdd/traces`，
+    # 而 `HOME` 已經在沙箱裡 ⇒ 真的寫了痕跡就會被看見。
     for flag in ("AUTOSDD_CONTEXT_WINDOW", "SDD_ACTIVE_VERSION",
                  "CLAUDE_CODE_AUTO_COMPACT_WINDOW", "AUTOSDD_CONTEXT_GUARD_OFF",
-                 "AUTOSDD_CONTEXT_SIGNAL_OFF",
+                 "AUTOSDD_CONTEXT_SIGNAL_OFF", "AUTOSDD_TRACE_DIR",
                  "AUTOSDD_SENTINEL_OFF", "AUTOSDD_QUOTA_GUARD_OFF",
                  "AUTOSDD_QUOTA_FANOUT_CAP"):
         env.pop(flag, None)
@@ -460,27 +480,119 @@ class HookExitContractTest(unittest.TestCase):
                          "window 被指定為 1M 後 190K 只有 19%，不該有任何輸出")
 
 
+#: 🔴 R96／B-4：第三方在沙箱家目錄下的副作用，**逐個具名**（不是「忽略一切」）。
+#: 唯一成員是量出來的：Windows 上 `--check` 會 spawn PowerShell 判排程載具活性，而
+#: PowerShell 一啟動就在家目錄底下建出空的 `AppData` 骨架。🔴 R96 二審訂正這份「本輪實測」
+#: 清單（QA 兩次可重現，主控本輪獨立複核兩次同值）：新增路徑逐字＝**3 筆目錄、0 個檔案**
+#: ——`home/AppData`、`home/AppData/Local`、`home/AppData/Roaming`。原文只寫了其中兩筆、
+#: 漏掉 `home/AppData/Local` 卻結語「別無他物」⇒ 一句標著「本輪實測」而重現不出來的宣稱
+#: （數字不影響判準行為，但本 repo 判過「訂正註記逐字引述假話＝製造新假話」）。
+#: mac 走 launchctl，這一格不會出現。
+#: 誠實劃界：判準因此看不見「planner 開始往 `AppData` 底下寫東西」——那是**一個目錄名**的
+#: 盲區，而 R96 原方案（把 HOME 移出被觀測目錄）盲掉的是**整棵 HOME 子樹**，嚴格更大。
+#: 🔴 **豁免形狀可以更小，但本輪刻意不收**（R96 二審／QA 提案，承接輪次見缺陷帳本）：
+#: 判準吃的是「任意深度的元件名、**含檔案**」，而實際只需放過上面那 3 個目錄。收窄的兩個
+#: 候選（只豁免目錄／錨定 `home/AppData/` 前綴）都會讓「第三方在別人機器上往 `AppData` 底下
+#: 寫一個檔」變成假紅，而那是**只能在那台機器上量得到**的事（本機兩次實測 0 個檔案，證明
+#: 不了別台機器同樣是 0）。本 repo 判過「擋到讓人無法工作的守衛會被整個關掉，比沒有守衛
+#: 更糟」⇒ 拿一個量不到的前提去收窄，風險方向與收益不對稱。
+_HOME_ARTIFACT_DIRS = frozenset({"AppData"})
+
+
+def _tree(root: Path) -> list[str]:
+    """`root` 底下**整棵樹**的相對路徑清單（扣掉具名的第三方副作用）。
+
+    🔴 為什麼是 `rglob` 而不是 `iterdir`：`sorted(p.name for p in tmp.iterdir())` 只看
+    頂層、且比的是**檔名**——只要新增物落在任何一個 `setUp` 當下就已存在的子目錄底下，
+    它就結構上看不見。planner 的持久痕跡居所正是這一型（`endurance_env.trace_dir()`
+    ＝`Path.home()/.autosdd/traces`，`quota_gate.burn_ledger_path()` 建在它底下）。
+    """
+    return sorted(rel for rel in (p.relative_to(root).as_posix() for p in root.rglob("*"))
+                  if not set(rel.split("/")) & _HOME_ARTIFACT_DIRS)
+
+
 class PlannerCliTest(unittest.TestCase):
     """交付物 B 的 CLI 契約：`--check` 不寫檔、排程指令只印不執行。"""
 
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp(prefix="ctxguard-cli-"))
         self.transcript = _write_jsonl(self.tmp / "s.jsonl", [123_456])
+        # 家目錄與被觀測目錄分開（R96），但**觀測面仍是整棵 `self.tmp`**——R96 第一版把
+        # HOME 搬進 `self.tmp/home` 之後沿用非遞迴的頂層檔名快照，而 `home` 這個名字在
+        # `setUp` 就已存在並被快照 ⇒ 寫進 HOME 底下的任何東西都看不見了（方向與該版文件
+        # 宣稱的「恢復完全相等」相反：盲區從「幾個被列舉的檔名」擴大成整棵子樹）。
+        # 修法＝全樹快照 ＋ `_HOME_ARTIFACT_DIRS` 這一組具名例外。
+        self.home = self.tmp / "home"
+        self.home.mkdir()
 
     def _run(self, *args: str) -> subprocess.CompletedProcess[str]:
+        env = _isolated_env(self.tmp)
+        env.update({"USERPROFILE": str(self.home), "HOME": str(self.home),
+                    "HOMEPATH": str(self.home)})
         return subprocess.run(
             [sys.executable, str(_PLANNER), "--transcript", str(self.transcript), *args],
-            env=_isolated_env(self.tmp), capture_output=True,
+            env=env, capture_output=True,
             encoding="utf-8", errors="replace", timeout=180, check=False,
         )
 
     def test_check_prints_usage_and_writes_nothing(self) -> None:
-        before = sorted(p.name for p in self.tmp.iterdir())
+        before = _tree(self.tmp)
         proc = self._run("--check")
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("123,456", proc.stdout)
         self.assertIn("61.7%", proc.stdout)
-        self.assertEqual(sorted(p.name for p in self.tmp.iterdir()), before)
+        self.assertEqual(_tree(self.tmp), before)
+
+    def test_the_write_check_can_actually_see_under_the_home(self) -> None:
+        """判準自證：HOME 底下長出一個痕跡檔**必須**被抓到。
+
+        這一條就是 B-4 的全部價值。R96 那版的快照是
+        `sorted(p.name for p in self.tmp.iterdir())`（非遞迴、只比檔名），而 HOME 被搬成
+        `self.tmp/home`、`home` 又在 `setUp` 就存在 ⇒ 「planner 開始在家目錄下寫 burn
+        ledger／續航痕跡」這一類真回歸在它底下結構上恆綠。合成的這個檔案就是那一類回歸
+        的最小樣本（路徑逐字取自 `endurance_env.TRACE_HOME_PARTS` ＋
+        `quota_gate.BURN_LEDGER_NAME`，不是隨手挑的名字）。
+        """
+        before = _tree(self.tmp)
+        trace = self.home.joinpath(*endurance_env.TRACE_HOME_PARTS)
+        trace.mkdir(parents=True)
+        (trace / qg.BURN_LEDGER_NAME).write_text("{}\n", encoding="utf-8", newline="\n")
+        self.assertNotEqual(_tree(self.tmp), before,
+                            "HOME 底下多了一份落款卻沒被看見 ⇒ 這道「不寫檔」判準是恆綠的")
+
+    def test_the_named_exception_does_not_swallow_the_whole_home(self) -> None:
+        """具名例外的邊界：只有 `AppData` 那一個目錄名被讓過，隔壁一個字母之差就要被抓。"""
+        before = _tree(self.tmp)
+        (self.home / "AppData" / "Roaming").mkdir(parents=True)
+        self.assertEqual(_tree(self.tmp), before, "具名例外沒生效 ⇒ 本組會在 Windows 假紅")
+        (self.home / "AppDataX").mkdir()
+        self.assertNotEqual(_tree(self.tmp), before, "例外擴散到了沒被具名的目錄")
+
+    def test_every_home_shaped_env_key_points_inside_the_sandbox(self) -> None:
+        """R96／B-5 的沙箱化本身要有回歸鎖——落地當回合它一支都沒有。
+
+        SD 二審注射實測：把 `_isolated_env()` 的 `APPDATA`／`LOCALAPPDATA` 兩行還原成
+        「原封繼承開發者的真家目錄」⇒ **GREEN**；`tools/tests` 全樹對這幾個鍵零斷言，也就是
+        那兩行可以被無聲刪掉而沒有任何東西轉紅。而它們正是「走 `%APPDATA%` 的第三方
+        （PowerShell 模組快取／.NET／pip）寫進**真的**那一棵樹」這件事的唯一擋板：副作用既
+        污染開發者機器，又完全落在任何斷言的射程之外（沙箱目錄裡看不到 ⇒ 「沒有副作用」
+        是假的）。形態與第一輪 D7 點名的「修法沒有具名回歸鎖」同構。
+        XDG 那一族同理：開發者若顯式匯出過絕對路徑，它們**不隨 `HOME` 走**。
+        判準是「每一個家目錄形狀的鍵都必須落在沙箱底下」而不是逐鍵比對字面值——後者會在
+        沙箱佈局微調時假紅，前者只在「某個鍵指回真家目錄」時才紅，正是要守的那一件事。
+        """
+        env = _isolated_env(self.tmp)
+        for key in ("USERPROFILE", "HOME", "HOMEPATH", "TMPDIR", "TEMP", "TMP",
+                    "APPDATA", "LOCALAPPDATA", "XDG_CONFIG_HOME", "XDG_CACHE_HOME",
+                    "XDG_DATA_HOME", "XDG_STATE_HOME"):
+            with self.subTest(key=key):
+                value = env.get(key)
+                self.assertIsNotNone(
+                    value, f"{key} 沒有被沙箱化 ⇒ 子行程看到的是開發者真的那一份")
+                self.assertTrue(
+                    value.startswith(str(self.tmp)),
+                    f"{key}={value} 指到沙箱之外（沙箱＝{self.tmp}）⇒ 走這個變數的第三方"
+                    "會寫進真的家目錄，而那棵樹不在任何斷言的射程內")
 
     def test_plan_is_written_and_prints_the_restart_command(self) -> None:
         out = self.tmp / "plan.md"
@@ -1876,7 +1988,10 @@ class SentinelWiringTest(unittest.TestCase):
                 f"{event} 沒有掛上本守衛 ⇒ 哨兵那一段接線斷了：{commands}")
 
     def _sessionstart(self, root: Path, extra: dict[str, str] | None = None):
-        env = _isolated_env(self.tmp)
+        # 🔴 R96：與 `_posttooluse` 同一個理由（見那支的 docstring）。這一支斷言的是
+        # 「SessionStart **不**武裝」——若哨兵整條被 `AUTOSDD_SENTINEL_OFF` 關掉，這個
+        # 斷言由「關掉了」而非「判定正確」滿足，是本 repo 判過最貴的假綠形態。
+        env = _isolated_env(self.tmp, real_scheduler=True)
         env["CLAUDE_PROJECT_DIR"] = str(root)
         env.update(extra or {})
         payload = json.dumps({"hook_event_name": "SessionStart", "source": "startup",
@@ -1903,8 +2018,15 @@ class SentinelWiringTest(unittest.TestCase):
 
     def _posttooluse(self, root: Path, transcript: Path,
                      extra: dict[str, str] | None = None):
-        """跑一次 PostToolUse（＝R82／HELM-02 之後**真正**會武裝的那個事件）。"""
-        env = _isolated_env(self.tmp)
+        """跑一次 PostToolUse（＝R82／HELM-02 之後**真正**會武裝的那個事件）。
+
+        🔴 R96：`real_scheduler=True` 是**必要條件、不是放寬**——預設的
+        `AUTOSDD_SENTINEL_OFF=1` 會讓 `arm_when_earned()` 直接 `return "disabled"`，
+        本組三支於是全部由「哨兵被整個關掉」滿足（1 真紅 ＋ 2 假綠）。安全性由
+        `_fake_repo()` 的替身 planner 保證（見其 docstring），一支真排程都不會註冊。
+        十三輪無人發現的成因見 `CrossPlatform_R96_Closure_Evidence.md` §2②。
+        """
+        env = _isolated_env(self.tmp, real_scheduler=True)
         env["CLAUDE_PROJECT_DIR"] = str(root)
         env.update(extra or {})
         payload = json.dumps({"hook_event_name": "PostToolUse", "tool_name": "Read",
@@ -4913,9 +5035,13 @@ class MeterFailureShapesTest(unittest.TestCase):
         🔴 R82：讀數形狀由頂層 `pct` 純量換成 `axes[]`，斷言跟著換到**每一軸自帶**
         `resets_at` 那一層——那正是該輪的缺陷本體（舊形狀在投影時把它丟掉）。
         🔴 R82：最後那一行驗的是**窄介面**（`measure()` 只吃 timeout、仍回 dict／None，
-        新參數沒有改掉它）。它刻意把 `access_token` 換成替身而不是走預設路徑：預設路徑
-        在 darwin 上會去讀主機真正的 login Keychain，而判準不得依賴一台機器的登入狀態
-        （憑證來源本身的覆蓋在上面的雙欄矩陣，不在這一行）。
+        新參數沒有改掉它）。替身必須掛在 `measure()` **真正的取數點**上，否則判準會退化成
+        「這台機器現在登入了沒有」，而判準不得依賴一台機器的登入狀態（憑證來源本身的覆蓋
+        在上面的雙欄矩陣，不在這一行）。
+        🔴 R96 訂正：替身原掛 `access_token`，而 R82 把平台分支併回 `token_detail()` 後它
+        已不在 `measure()` 的鏈上 ⇒ 自 R82 起一次都沒生效（mac 靠主機真實 Keychain 憑證假綠、
+        Windows 真紅）。鏈路、成因與實測見
+        `CrossPlatform_R96_Closure_Evidence.md` §2①。
         """
         payload = {"five_hour": {"utilization": 61.0, "resets_at": None},
                    "limits": [{"kind": "session", "percent": 61,
@@ -4929,9 +5055,9 @@ class MeterFailureShapesTest(unittest.TestCase):
                     {(a["kind"], a["pct"], a["resets_at"]) for a in reading["axes"]},
                     {("session", 61.0, "2026-08-09T04:59:59+00:00"),
                      ("five_hour", 61.0, None)})
-        old_token = meter.access_token
-        meter.access_token = lambda *a, **k: _FAKE_TOKEN
-        self.addCleanup(setattr, meter, "access_token", old_token)
+        old_token = meter.token_detail
+        meter.token_detail = lambda *a, **k: (_FAKE_TOKEN, meter.REASON_OK)
+        self.addCleanup(setattr, meter, "token_detail", old_token)
         self.assertEqual(len(meter.measure(4)["axes"]), 2)
 
     def test_the_two_platform_columns_are_not_the_same_column(self) -> None:
@@ -6579,6 +6705,156 @@ class QuotaPaceOutletIsReachableTest(unittest.TestCase):
                     self.assertIn(want, report, f"{name}：{report}")
                 if deny:
                     self.assertNotIn(deny, report, f"{name}：{report}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 🔴 R96／B-3：兩個出口（派工**前**查的 `--pace`、被擋**當下**的節流訊息）必須說同一句話
+# ═══════════════════════════════════════════════════════════════════════════
+# 立案（QA 當回合實測）：本組落地之前，`tools/tests/` 全樹 grep `本視窗已用` **零命中**
+# ⇒ 把那兩行 revert 回去沒有任何一支測試會紅（唯一觸及 Workflow 分支的
+# `test_the_throttle_message_qualifies_every_percentage` 只斷言「每個百分比都帶 kind 與
+# 分鐘」，`live` 印不印完全不判）。同一份實測還量到：`recommended_fanout` 22 處全在
+# `test_quota_policy.py`、`live_dispatches` 8 處全在本檔 ⇒ **兩組永不相遇**，於是
+# 「cap 側說可派 N 個」與「派發帳說已用 N 次」可以無限期互相矛盾而沒有東西轉紅。
+# 本類的全部價值就是讓它們相遇：三條分別守渲染面、呼叫點、跨層一致性，缺一個就會留下
+# 一種「改壞了照樣綠」的形態（下面每一條的 docstring 各自寫出它守的是哪一種）。
+class WindowUsageIsToldTheSameWayByBothOutletsTest(unittest.TestCase):
+    """節流訊息的 live 欄、`--pace` 的可派數、真閘的 rc——三者對同一份派發帳對帳。"""
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="window-usage-"))
+        # 18% context：遠低於 WARN_RATIO ⇒ context 那把尺全程靜默（同 `…WiredToTheBurnPath`）。
+        self.transcript = _write_jsonl(self.tmp / "s.jsonl", [36_000])
+        for name, value in (("quota_cache_path", lambda: self.tmp / quota_meter.CACHE_NAME),
+                            ("fanout_ledger_path", lambda: self.tmp / "ledger.d"),
+                            ("quota_latch_path", lambda: self.tmp / "latch.json"),
+                            *_TRACE_ISOLATION(self)):
+            old = getattr(qg, name)
+            setattr(qg, name, value)
+            self.addCleanup(setattr, qg, name, old)
+
+    def _seed_dispatches(self, count: int) -> int:
+        """種 `count` 筆真的派發（走 production 的 `claim_dispatch`），回真的數回來的量。"""
+        now = datetime.now(UTC).astimezone()
+        for _ in range(count):
+            qg.claim_dispatch(qg.fanout_ledger_path(), now)
+        return qg.live_dispatches(qg.fanout_ledger_path(), now)
+
+    def _pre(self, tool: str) -> dict:
+        return {"hook_event_name": "PreToolUse", "tool_name": tool,
+                "transcript_path": str(self.transcript)}
+
+    def _cap_now(self) -> tuple[int, datetime]:
+        now = datetime.now(UTC).astimezone()
+        state = qg.read_quota(now, qg.quota_cache_path())
+        return quota_policy.decide(state, now, quota_policy.load_policy({})[0]).cap, now
+
+    def test_both_fanout_branches_print_the_window_count_they_were_given(self) -> None:
+        """① **渲染面**：`Agent`／`Workflow` 兩支都要把拿到的 `live` 說出來。
+
+        `live=3` 是挑過的：它既不是 `0`（舊 Workflow 分支硬寫的那個字面），也不是 cap
+        （否則「印的是 live」與「印的是 cap」在畫面上分不出來）——底下那一行斷言就是在
+        釘住這個前提，免得哪天階梯一改讓 cap 恰好等於 3 而本條靜默失去鑑別力。
+        """
+        decision = _decision((("session", 88.0, 3600.0),))
+        self.assertNotIn(decision.cap, (0, 3),
+                         f"cap={decision.cap} 與挑的 live 撞號 ⇒ 本條分不出印的是哪一個數字")
+        for tool in ("Agent", "Workflow"):
+            with self.subTest(tool=tool):
+                text = qg.quota_throttle_message(decision, tool, 3,
+                                                 datetime.now(UTC).astimezone())
+                self.assertIn("本視窗已用 3 次", text,
+                              f"{tool} 分支沒把拿到的視窗用量說出來：{text}")
+
+    def test_the_blocked_workflow_message_counts_the_real_ledger(self) -> None:
+        """② **呼叫點**：走真的閘，訊息裡那個 N 必須等於當下 `live_dispatches()`。
+
+        紅端逐字（R96 落地前）：Workflow 那一支傳的是**字面 `0`**，而真正的 `live` 要更
+        後面才算得出來、該分支早就 `return 2` 了 ⇒ 被擋的人恆看到「本視窗已用 0 次」，
+        於是會推論「配額還有、擋我的是別的原因」。①（純渲染）結構上抓不到它——①問的是
+        「給了 live 有沒有印」，而這個缺陷是「呼叫端根本沒把 live 給進去」。
+        """
+        _quota_cache(self.tmp, 75.0, kind="session", resets_in=2 * 3600)
+        live = self._seed_dispatches(3)
+        self.assertEqual(live, 3, "派發帳沒種進去 ⇒ 下面那個相等會退化成 0==0 的恆真")
+        err = _capture_stderr(
+            lambda: self.assertEqual(_gate(self._pre("Workflow")), 2,
+                                     "Workflow 在收斂帶沒被擋 ⇒ 本條的前提不成立"),
+            self.tmp)
+        self.assertIn(f"本視窗已用 {live} 次", err, err)
+        self.assertNotIn("本視窗已用 0 次", err,
+                         "呼叫點又把 live 寫死成 0 ⇒ 訊息裡混了一句假話")
+
+    def test_a_full_window_reads_as_zero_on_both_sides(self) -> None:
+        """③ **跨層對帳**：同一份帳、同一份快取，兩個出口不得說出不同的話。
+
+        紅端（主控本輪實測）：`--pace` 印「現在可派 2 個 agent（硬上限 cap=2）」的同一
+        刻，`Agent` 被守衛擋下、理由逐字是「每 300s 最多 2 次扇出，本視窗已用 2 次 ⇒
+        不執行」。根 CLAUDE.md〈現查指令速查表〉明文要求「**派工前**問『現在能派幾個
+        agent』→ `--pace`」⇒ 官方指定的派工前置出口會給出一個當場被守衛推翻的數字。
+        ①②都抓不到它：那兩條完全不碰 `--pace` 這個出口。
+        """
+        _quota_cache(self.tmp, 75.0, kind="session", resets_in=2 * 3600)
+        cap, _now = self._cap_now()
+        self.assertTrue(cap, f"cap={cap} ⇒ 這一條要的「視窗剛好用滿」構造不出來")
+        self.assertEqual(self._seed_dispatches(cap), cap, "派發帳沒種滿")
+        line = qg.pace_report().splitlines()[0]
+        self.assertIn("現在可派 0 個", line, f"視窗已用滿，`--pace` 卻還在報可派：{line}")
+        self.assertIn(f"cap={cap}", line, "cap 這個原始值不見了 ⇒ 「cap 很寬但視窗滿了」"
+                                          "與「cap 本來就是 0」在畫面上同形")
+        self.assertIn(f"本視窗已用 {cap} 次", line, f"live 這個原始值不見了：{line}")
+        # 另一半：同一份帳下真的派一個 `Agent` 必須被擋——兩個出口這才算對得上。
+        err = _capture_stderr(
+            lambda: self.assertEqual(_gate(self._pre("Agent")), 2,
+                                     "`--pace` 說可派 0，守衛卻放行 ⇒ 兩個出口說不同話"),
+            self.tmp)
+        self.assertIn(f"本視窗已用 {cap} 次", err, err)
+
+    def test_an_empty_window_is_paced_by_the_recommendation_not_by_the_raw_cap(self) -> None:
+        """④ **公式面**：畫面數字＝`min(rec, cap−live)`，既不是 `rec` 也不是 `cap−live`。
+
+        `pace_line()` 上方那一整段 WHY 逐字宣稱「畫面數字恆 ≤ 守衛真的會放行的量
+        （`live_dispatches() >= cap` 即擋），也恆 ≤ 配速建議」，而 R96 落地當時**沒有任何
+        測試在守這個公式**：SD 與 QA 各自獨立把它注射成純差值 `max(0, cap−live)`，四支新增
+        鎖全部 GREEN。結構成因是 ③ 刻意構造 `live == cap`，而在那一格 `min(rec, cap−live)`
+        與純差值同為 0 ⇒ 兩式在唯一被斷言的格子上重合；①②則一格都不碰 `--pace` 的數字。
+
+        本條用**兩格**把三種實作分開，缺一格就會漏掉一種：
+          · `live=0`（視窗還空著）⇒ 必須印 `rec`。純差值在這裡印 `cap`＝**放大**（實測
+            cap=8／rec=4 時放大 2 倍），而放大是這一族唯一不准無證據發生的方向。
+          · `live = cap − (rec − 1)`（視窗吃掉一部分、剩餘刻意壓到 `rec` 以下）⇒ 必須印
+            `rec − 1`。`rec` 純量在這裡印 `rec`＝報一個守衛當場就會擋下的數字（B-2 立案的
+            那個病）。
+        兩道前提斷言（`cap > rec >= 2`、且 `rec != rec − 1`）是刻意的：階梯常數哪天一改讓
+        `cap == rec`，三式在兩格上就會全部重合而本條靜默失去鑑別力。
+        """
+        decision = _decision((("session", 55.0, 3600.0),))
+        cap, rec = decision.cap, decision.recommended_fanout
+        self.assertIsNotNone(cap, "notice 帶的 cap 變成不設限 ⇒ 本條的前提不成立")
+        self.assertGreater(cap, rec, f"cap={cap} rec={rec}：cap 不大於 rec ⇒ 「純差值」"
+                                     "與「min」在第一格重合，本條分不出它們")
+        self.assertGreaterEqual(rec, 2, f"rec={rec}：第二格要的 `rec − 1 >= 1` 構造不出來")
+        empty = qg.pace_line(decision, 0)
+        self.assertIn(f"現在可派 {rec} 個", empty,
+                      f"視窗還空著時印的不是配速建議 {rec}：{empty}")
+        self.assertNotIn(f"現在可派 {cap} 個", empty,
+                         f"視窗還空著時印了裸 cap {cap}＝把畫面數字放大到守衛之上：{empty}")
+        live = cap - (rec - 1)
+        partial = qg.pace_line(decision, live)
+        self.assertIn(f"現在可派 {rec - 1} 個", partial,
+                      f"視窗剩餘（{rec - 1}）已低於配速建議（{rec}），印的卻不是剩餘："
+                      f"{partial}")
+        self.assertIn(f"本視窗已用 {live} 次", partial,
+                      f"live 這個原始值不見了 ⇒ 上一格斷言可能是被別的數字滿足的：{partial}")
+
+    def test_a_free_band_keeps_its_own_wording(self) -> None:
+        """對照組：free 帶沒有滾動視窗預算（閘對 `cap is None` 直接早退、連帳都不記）
+        ⇒ 印一個 `cap − live` 就是替一道不存在的節流編數字。措辭必須逐字維持舊樣。"""
+        free = _decision((("session", 20.0, 3600.0),))
+        self.assertIsNone(free.cap, "free 帶的 cap 不是 None ⇒ 本對照組的前提不成立")
+        line = qg.pace_line(free, 7)
+        self.assertIn("cap=不設限", line)
+        self.assertNotIn("本視窗已用", line, f"free 帶印出了一道不存在的節流：{line}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════

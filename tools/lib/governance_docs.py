@@ -212,6 +212,15 @@ _GOVERNANCE_DOCS = (
     # R95 收尾單人窗口：護欄層行數棘輪重釘的量測帳＋鎖檔史料搬遷目的地（資格同
     # R86/R87/R90 的同名 Guard_Repin 檔：稽核列指名的家、逐節座標宣稱、體積守門）。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R95_Guard_Repin_Evidence.md",
+    # R96（Windows 真機切換輪）兩份姊妹檔。資格與 R88/R89 同名 Closure_Evidence 逐字同一份：
+    # 帳本九列（`DEF-200-149`～`157`）被體積守門壓成索引之後，逐筆重驗所需的原文（根因、
+    # 平台不對稱性、當回合 rc）只住 Closure_Evidence ⇒ 它自己必須受體積守門；而 Scan_Findings
+    # 逐列寫出「某 DEF-ID 的詳情在某節」的座標宣稱 ⇒ 受指針稽核。兩者同輪新生，即刻登記，
+    # 不等下一輪（SA-R60R3-01 的復發路徑正是「新建姊妹檔而兩張清單都沒進」）。
+    # 🔴 Scan_Findings 另承載本輪護欄層重釘的 `guard-total:R96` 兩處標記（`_GUARD_TOTAL_DOC_GLOBS`
+    # 的掃描面之一）⇒ 它同時是行數棘輪的文件側對帳站點，漏登記會讓那道對帳無人可查。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R96_Closure_Evidence.md",
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R96_Scan_Findings.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/CrossPlatform_*.md`。這**不是**把具名常數

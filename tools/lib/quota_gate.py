@@ -696,7 +696,12 @@ def pace_report(now: datetime | None = None) -> str:
     state = pace_state(now)
     # 🔴 `live` 落款進去是為了**下一輪**：per-agent 燃燒率＝Δpct ÷（Δ分鐘 × 併發數），
     # 而併發數不記下來就永遠算不出來（本輪的 r 只到「每 pp 換幾 pp」這一層）。
-    record_burn(state, live_dispatches(fanout_ledger_path(), now))
+    # 🔴 R96／B-2：同一個 `live` 現在**還要餵給 `pace_line()`**——舵手派工前問的那個數字
+    # 此前只讀 cap 側（`recommended_fanout`），而守衛擋人的判準是滾動視窗派發帳
+    # ⇒ 實測「`--pace` 印可派 2 個」與「`Agent` 被擋、本視窗已用 2 次」同一刻並存。
+    # 用 walrus 而不是多一行 `live = …`：本檔 `guardrail_hub` tier 餘裕為 0（500/500），
+    # 取數次數與時點逐字不變（同一次呼叫、同一個 `now`），只是把值留下來給第二個消費者。
+    record_burn(state, live := live_dispatches(fanout_ledger_path(), now))
     ratio, ratio_note, plan_note = burn_ratio(state)
     decision = quota_policy.decide(state, now, policy, ratio, ratio_note)
     # 🔴 R86 跨包：引擎（`autoclaude/`）**不准** import 本層（`.importlinter` 的
@@ -713,7 +718,7 @@ def pace_report(now: datetime | None = None) -> str:
     # 節流 ⇒ 印出來就是一句假話，而「訊息裡混一句假話比少一欄更難看見」是本 repo 的判例。
     horizon = "" if decision.cap is None else throttle_horizon_line(decision, now)
     # R95：攤提行帶 converge 錨點（出聲不收緊時說出口）；hint 行空字串＝不印（見渲染端）。
-    return (f"{pace_line(decision)}\n  {quota_policy.describe(decision)}\n"
+    return (f"{pace_line(decision, live)}\n  {quota_policy.describe(decision)}\n"
             f"  {quota_pace.explain(decision.amort, policy.converge_pct)}\n"
             f"  {posture_line()}\n{horizon}{model_hint_line(decision)}"
             f"  來源={state.source} 量測於={state.measured_at or '(無)'}{tail}\n{plan_note}")
@@ -755,7 +760,8 @@ def quota_throttle_message(decision: quota_policy.Decision, tool: str, live: int
         return (head + f"   ⇒ `{tool}` 本次不執行。理由不是「太多」而是「數不到」："
                 "一次 Workflow 啟動會在背景生出未知數量的 agent，而那一刻**沒有任何 hook "
                 "會被叫到**（實測：tool_result 47/47 是「launched in background」）⇒ 事後"
-                f"界不住。請改逐個派 `Agent`（每 {FANOUT_WINDOW_SECONDS}s 最多 {cap} 個）。\n"
+                f"界不住。請改逐個派 `Agent`（每 {FANOUT_WINDOW_SECONDS}s 最多 {cap} 個，"
+                f"本視窗已用 {live} 次）。\n"
                 + throttle_horizon_line(decision, now))
     return (head + f"   ⇒ 少派 agent：每 {FANOUT_WINDOW_SECONDS}s 最多 {cap} 次扇出，"
             f"本視窗已用 {live} 次 ⇒ `{tool}` 本次不執行。\n"
@@ -878,14 +884,19 @@ def quota_gate(payload: dict, *, blocking, latch_read, latch_write,
     # 也沒有節流要擋**——派發帳只屬於 PreToolUse 那一刻（見本函式 docstring）。
     if decision.cap is None or event != "PreToolUse":
         return 0
-    cap = decision.cap
+    cap, root = decision.cap, fanout_ledger_path()
     # 🔴 R82 訂正判準（舊版是「只要不是 normal 帶就擋 Workflow」）：那條在新階梯下會讓
     # 55% 這種**還很寬鬆**的水位把 `Workflow` 整個鎖死。改成「cap 已收斂到 converge 檔
     # 以下才擋」——notice 帶（cap 8）放行，prepare／halt 仍然擋。
+    # 🔴 R96／B-1：`live` 一律**真的去數**，不得傳字面 `0`。舊版在這一支硬寫 0，於是被擋
+    # 下的人恆看到「本視窗已用 0 次」⇒ 會推論「配額還有、擋我的是別的原因」，比少印那一欄
+    # 更誤導（本檔判例逐字：「訊息裡混一句假話比少一欄更難看見」）。取數提前到這裡是
+    # **零程式行**的（`root` 由下方那一行搬上來），而 Workflow 這一支不記帳 ⇒ 數到的就是
+    # 「這個視窗到目前為止真的派了幾次」，語意與訊息那句話逐字相符。
     if tool in UNBOUNDED_FANOUT_TOOLS and cap <= policy.cap_converge:
-        sys.stderr.write(quota_throttle_message(decision, tool, 0, now))
+        sys.stderr.write(quota_throttle_message(
+            decision, tool, live_dispatches(root, now), now))
         return 2
-    root = fanout_ledger_path()
     # 🔴 先記帳再數（含自己這一筆），而不是先數再記：42 個 `Agent` 在同一則 assistant
     # message 裡平行派發時 PreToolUse 是平行觸發的 ⇒ 先數再記會讓它們全部讀到 live<cap
     # 而全數放行。先記再數之後，**目錄項的建立順序**替我們排了序，後到的看得到前面的。

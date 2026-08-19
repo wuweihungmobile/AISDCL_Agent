@@ -214,11 +214,45 @@ def quota_prepare_message(decision: quota_policy.Decision, plan: str, now: datet
 # 🔴 binding 一律具名（SA-06）：此前它恆是資訊量最低的那一軸（cap 平手時期程不明的軸
 # 必勝，實測 live 快取 `binding=nimbus_quill`＝0%、reset 不明、完全不消耗），於是真正的
 # 約束（weekly 那一族）在訊息裡不具名。`_binding_key` 已同輪修好，這裡只負責呈現。
-def pace_line(decision: quota_policy.Decision) -> str:
+#: 🔴 R96／B-2：`--pace` 印的「現在可派幾個」此前**沒有扣掉本視窗已用次數**。實測（R96
+#: 收尾當回合）：`--pace` 印「現在可派 2 個 agent（硬上限 cap=2）」的同一刻，`Agent` 被
+#: `quota_gate()` 擋下、理由逐字是「每 300s 最多 2 次扇出，本視窗已用 2 次 ⇒ 不執行」。
+#: 根 CLAUDE.md〈現查指令速查表〉明文要求「**派工前**問『現在能派幾個 agent』→ `--pace`」
+#: ⇒ 官方指定的派工前置出口會給出一個當場就會被守衛擋下的數字。成因是兩個出口讀不同的
+#: 東西：本行讀 cap 側（`recommended_fanout`），守衛讀滾動視窗派發帳（`live_dispatches()`）。
+#: 🔴 **cap 與 live 兩個原始值都必須留在畫面上**（QA 具體要求）：只印差值時，「cap 很寬但
+#: 這個視窗剛好用滿」與「cap 本來就是 0」在畫面上同形，而那兩件事要 operator 做的事不同
+#: （前者等幾分鐘就好、後者要去看水位／提額）。
+#: 🔴 free 帶（`cap is None`）措辭**逐字不變**：那一帶沒有滾動視窗預算（`quota_gate()` 對
+#: `cap is None` 直接早退、連派發帳都不記），印一個 `cap − live` 就是替一道不存在的節流
+#: 編數字——同本檔對 `model_hint_line()` free 帶的既有處置（「印出來就是一句假話」）。
+#: 🔴 **為什麼是 `min(rec, cap−live)` 而不是逐字的 `cap−live`**（與複審建議的差異，照實記）：
+#: 純差值在「視窗還空著、但配速建議比 cap 低」時會把畫面數字**放大**（實測 cap=4／live=0
+#: ／rec=2 ⇒ 差值印 4、今天印 2）——那一格從來沒有壞過，而放大是本檔唯一不准無證據發生的
+#: 方向（同 `quota_policy.decide()` 對攤提夾 0 的判詞）。取 min 之後兩個病都不在：畫面數字
+#: 恆 ≤ 守衛真的會放行的量（`live_dispatches() >= cap` 即擋），也恆 ≤ 配速建議（R86 攤提
+#: 那條軸不被本行悄悄繞過）。`live == cap` 時 min 的結果仍是 0，QA 指名的跨層對帳鎖不受影響。
+#: 🔴 R96 二審（SD／QA 各自獨立注射命中同一個缺口）：上面這一整段辯護在寫下的當時**零觀測
+#: 者**——把本行改成純差值 `max(0, cap - live)`，R96 新增的四支全部 GREEN。結構成因是
+#: `test_a_full_window_reads_as_zero_on_both_sides` 刻意構造 `live == cap`，而**在那一格
+#: `min(rec, cap−live)` 與純差值同為 0** ⇒ 兩式在唯一被斷言的格子上重合，其餘三支一支都不
+#: 碰 `--pace` 的數字。⇒ 公式本身現由
+#: `test_context_budget_guard.py::WindowUsageIsToldTheSameWayByBothOutletsTest::
+#: test_an_empty_window_is_paced_by_the_recommendation_not_by_the_raw_cap` 直接釘住（兩格
+#: ＋兩道前提斷言，三種實作各自都會被打紅；紅端自證見該 docstring）。
+#: 🔴 `live` **刻意沒有預設值**（R96 二審／SD）：漏傳的新呼叫端會印「本視窗已用 **0** 次」
+#: ——那正是第一輪 D1 修掉的那個形態（本檔判例逐字：「訊息裡混一句假話比少一欄更難看見」），
+#: 而預設值讓同一個病復發時**外觀與正確輸出相同**。拿掉之後它變成 `TypeError`：全 repo 只有
+#: 兩個呼叫端（`quota_gate.pace_report()` 與本族的渲染鎖），兩者本來就顯式傳值 ⇒ 零成本。
+def pace_line(decision: quota_policy.Decision, live: int) -> str:
     """**一行**：能派幾個／cap／band／距 reset／binding 是哪一軸（SA-02 要的五項）。"""
-    head = (f"現在可派 {decision.recommended_fanout} 個 agent（硬上限 cap="
-            f"{'不設限' if decision.cap is None else decision.cap}）"
-            f"｜band={decision.band}")
+    if decision.cap is None:
+        head = f"現在可派 {decision.recommended_fanout} 個 agent（硬上限 cap=不設限）"
+    else:
+        left = min(decision.recommended_fanout, max(0, decision.cap - live))
+        head = (f"現在可派 {left} 個 agent（硬上限 cap={decision.cap}，"
+                f"本視窗已用 {live} 次）")
+    head += f"｜band={decision.band}"
     axis = decision.binding
     if axis is None:
         return head + "｜**量不到任何一軸**（這不是「額度很寬鬆」）"

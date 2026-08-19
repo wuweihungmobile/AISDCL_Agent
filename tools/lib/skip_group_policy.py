@@ -359,8 +359,38 @@ _RUNTIME_SKIP_CEILING: dict[str, dict[str, int]] = {
     # （回 System32 的 WSL 佔位版）換成 `usable_bash_for_fixture()` 就真的跑起來了。
     # 當回合實測：`[skip census] tools/tests@win32 共 38 支：platform=37／env-disabled=1
     # ／其餘 0／欠債型 1 支`。
+    # 🔴 R96（Windows 側自 R82 以來首次重跑）**上修**：38 → 42，`platform` 37 → **41**。
+    # 依本表上方那條規則，上修必須「同時顯式改兩個常數」＋在此寫明理由，故逐項交代：
+    #   · 多出來的 4 支**全部**是 `test_dev_start.TestMacNightlyMachineStateCapabilities`
+    #     （`test_a_mac_with_no_power_schedule_at_all_flags_both_rows`／
+    #      `test_a_machine_without_pmset_is_reported_distinctly`／
+    #      `test_a_one_shot_wake_event_does_not_count_as_the_daily_repeat`／
+    #      `test_a_one_shot_wakeorpoweron_is_not_mistaken_for_the_daily_repeat`）。
+    #   · 🔴 R96 二審訂正：第 4 支原本寫成「第 4 支同類」＝不具名。本表的整段紀律是「值逐格
+    #     照抄載具當場印出的那一行、零加減推算」「代填＝假 provenance」，留一支不具名就違反
+    #     它自己——而那個名字用 AST 對 `tools/tests/test_dev_start.py` 的
+    #     `TestMacNightlyMachineStateCapabilities` 列舉 `test_` 開頭方法即得（本輪實跑列舉，
+    #     四支逐字如上；Architect 與 SD 二審各自獨立查到同一個名字）。
+    #   · 來源已查到 commit：`git log -S TestMacNightlyMachineStateCapabilities` → **`bc024e3`
+    #     （R83，mac 真機首輪）**。那一輪在 mac 上它們是**真的跑**的；在 Windows 上必然 skip。
+    #   · **為什麼不走「讓它們真的會跑」那條合法出口**（本表偏好的那一條）：這一類繼承
+    #     `MacNightlyStatusTestCase`，受測對象是 `tools/install_mac_nightly.sh`，而該檔對
+    #     非 Darwin **直接 fail-loud**（`uname != Darwin` guard），且本組的自變數是 `pmset`
+    #     排程、`plutil` 輸出與 BSD `date -v` 語意。要在 Windows 上跑起來等於偽造整個 BSD
+    #     userland ⇒ 測到的是我們自己造的假環境，不是那支腳本的真實行為（該群 skip 理由
+    #     逐字寫的「非 macOS 上執行本身即為無意義假訊號」正是這件事）。⇒ 結構上跑不到。
+    #     對照組：R82 那次之所以能把 3 支從 skip 救回來，是因為 Windows 上的 Git Bash **是真
+    #     bash**；本輪這 4 支沒有對等的「真 pmset／真 plutil」，兩者不同構。
+    # 🔴 這筆紅的形態值得單獨記下來，因為它**不是缺陷、是本判準的結構性後果**：mac 輪合法
+    # 新增 mac-only 測試 ⇒ Windows 側 `platform` 群必然上升；而本表下方 darwin 那幾列的註解
+    # 逐字寫著「**只動 darwin 剖面**：win32 各剖面在 mac 上量不到」（代填就是假 provenance）
+    # ⇒ 兩邊都做對事，這一格仍然會在**下一次 Windows 開工時**變紅，反方向（Windows 輪新增
+    # `[WINDOWS-NATIVE-ONLY]` ⇒ mac 側必紅）完全同構。R83→R96 之間隔了 13 輪、期間 4 支
+    # 累積在暗處，沒有任何機械物會提前說話。⇒ 判準形狀本身有改善空間（把「總量計數」換成
+    # 「test-id 集合」，先例＝R86 把 M6 判準粒度升為 test-id 集合），但那會同時改動 mac 側的
+    # 判定、且無法在本平台驗，故本輪只誠實上修並留下這段診斷，不擅自改判準形狀。
     "tools/tests@win32": {
-        SKIP_GROUP_PLATFORM: 37,
+        SKIP_GROUP_PLATFORM: 41,
         SKIP_GROUP_TOOL_ABSENCE: 0,
         SKIP_GROUP_ENV_DISABLED: 1,
         SKIP_GROUP_STRUCTURAL: 0,
@@ -439,8 +469,12 @@ _RUNTIME_SKIP_CEILING_MAX: dict[str, dict[str, int]] = {
     },
     # 🔴 R82（CARRIER-02）：連同基線一起下修 40 → 37（天花板不跟著降＝把剛還掉的
     # 欠債額度留著，日後可無聲用回去——這句話是本表自己的既有紀律）。
+    # 🔴 R96：`platform` 37 → **41**，與 `_RUNTIME_SKIP_CEILING` 同鍵**同一個 commit** 一起上修
+    # （本表上方那條規則要的就是這個「兩個常數都得動、會出現在 diff 裡」）。完整理由、來源
+    # commit（`bc024e3`／R83）、以及「為什麼這 4 支不走『讓它們真的會跑』那條出口」逐項寫在
+    # `_RUNTIME_SKIP_CEILING` 同鍵那一段，此處不複寫第二份（同一份知識只准一個家）。
     "tools/tests@win32": {
-        SKIP_GROUP_PLATFORM: 37,
+        SKIP_GROUP_PLATFORM: 41,
         SKIP_GROUP_TOOL_ABSENCE: 0,
         SKIP_GROUP_ENV_DISABLED: 1,
         SKIP_GROUP_STRUCTURAL: 0,

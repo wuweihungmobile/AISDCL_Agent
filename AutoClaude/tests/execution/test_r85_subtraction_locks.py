@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 import sys
@@ -22,6 +23,39 @@ from autoclaude.plugins.goal_synthesis_plugin import GoalSynthesisPlugin
 from autoclaude.utils.config import AppConfig
 
 _REPO_PB = Path(__file__).resolve().parents[2] / "scripts" / "example_playbook.yaml"
+
+
+# 🔴 R96：凡「在 tempdir 裡跑 `main()`、跑完就刪那個 tempdir」的測試，都必須先把 log 的
+# 檔案握把放掉。病徵（本輪 Windows 側首跑實測）：`main()` 建的 `RotatingFileHandler` 一直
+# 握著 `<tmp>\logs\autoclaude.log`，而 Windows **不允許刪除仍被開啟的檔** ⇒ tempdir 清理拋
+# `PermissionError: [WinError 32] 程序無法存取檔案，因為檔案正由另一個程序使用`，於是測試在
+# **本體已經通過之後**才紅（同一段 captured stdout 裡就有 `KernelResult(success=True,
+# completed_steps=4, ...)`）。POSIX 允許 unlink 開啟中的檔 ⇒ mac 上結構上重現不了，正是根
+# CLAUDE.md 鐵律三「Windows 檔案鎖：會改動目錄項的原語」那一列的形態。
+# 🔴 刻意**不用** `TemporaryDirectory(ignore_cleanup_errors=True)`：那會把所有清理失敗一起
+# 吞掉（包含真正的資源洩漏），而這裡要治的就是「handler 沒被關」這個真實洩漏——形態是**殘留
+# 一個指向已被刪除的 tempdir 的握把**，不是累積：`setup_logger` 開頭即
+# `if root.handlers: return root`（`autoclaude/utils/logger.py:39-40` 實查）⇒ 整個行程只會掛
+# 上那**一組**（`RotatingFileHandler` ＋ console 各一），多跑幾支 playbook 也不會變多；洩漏的
+# 是那組裡的檔案 handler 仍握著它**第一次**落腳的那個 tempdir 底下的
+# `logs/autoclaude.log`，而那個 tempdir 正要被刪掉。只動本專案自己的 logger（handler 掛在
+# `getLogger("autoclaude")`），不碰 pytest 自己的 handler。
+# 🔴 **一個家**：本檔有兩個站點會在 tempdir 內跑 `main()`，而第二個站點先前是靠
+# 「handler 已存在 ⇒ `setup_logger` 不重建」僥倖躲過的——第一個站點修好、handler 被正確卸下
+# 之後，第二個站點的 `main()` 才會真的建出指向它自己 tempdir 的 handler 並當場翻紅（本輪實測
+# 就是這個順序）。所以這件事只准有一份實作，不得在兩處各寫一次迴圈。
+# 🔴 誠實劃界（R96 四方複審 QA 的覆蓋面指摘；本輪**刻意不修**）：本修法整個落在**測試側**。
+# 生產側那個行為——第二次 `setup_logger(log_dir=<另一個目錄>)` 靜默沿用前一次留下的檔案握把、
+# **不**為新的 `log_dir` 重建 handler——**一個鎖都沒有**；而測試側修好之後，原本唯一會讓它
+# 現形的訊號（Windows 清理 tempdir 時的 WinError 32）就消失了。不在此補生產側的鎖，是因為
+# 那是**行為改動**、本輪已無複審可以接住它；承接載體＝缺陷帳本 `DEF-200-154`（該列目前只
+# 記到測試側，生產側這一半需另立）。
+def _release_autoclaude_log_handles() -> None:
+    """關閉並卸下 `autoclaude` logger 的 handler（Windows 檔案鎖；理由見上方註解）。"""
+    log = logging.getLogger("autoclaude")
+    for handler in list(log.handlers):
+        handler.close()
+        log.removeHandler(handler)
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -158,6 +192,7 @@ def _run_example_playbook(tmp: Path, *, storage_yaml: str = "") -> tuple[int, li
             rc = main_mod.main()
     finally:
         os.chdir(origin)
+        _release_autoclaude_log_handles()   # Windows 檔案鎖，理由見該函式上方註解
     return rc, executed
 
 
@@ -210,6 +245,7 @@ class TestExamplePlaybookRunsWithoutAMinimaxAccount:
                     rc = main_mod.main()
             finally:
                 os.chdir(origin)
+                _release_autoclaude_log_handles()   # 同上：Windows 檔案鎖，見該函式註解
         assert rc == 1, "enable_kernel_brain=True 但無金鑰時必須停機，不可靜默降級"
 
 

@@ -721,11 +721,11 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 537,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 5419,
+    "test_adr_xplat001_c1c2_lock.py": 5431,
     "test_archive_defect_log.py": 3846,
     "test_bash32_compat.py": 946,
     "test_bash_probe_spec_contract.py": 983,
-    "test_block_destructive_git_r83.py": 2100,
+    "test_block_destructive_git_r83.py": 2160,
     "test_bootstrap_core.py": 439,
     "test_bootstrap_ps1.py": 160,
     "test_check_defect_log_crossref.py": 3266,
@@ -736,7 +736,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_check_wrapper_thinness.py": 1234,
     "test_claim_provenance_r86.py": 341,
     "test_component_sanitizer_shared_layer_lock.py": 293,
-    "test_context_budget_guard.py": 6924,
+    "test_context_budget_guard.py": 7200,
     "test_defect_id_reference_integrity.py": 261,
     "test_dev_start.py": 6910,
     "test_dev_start_ps1_lastexitcode.py": 548,
@@ -747,7 +747,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_gha_action_versions.py": 703,
     "test_git_hooks_install_common.py": 393,
     "test_install_windows_nightly.py": 1479,
-    "test_mac_endurance_r83.py": 1721,
+    "test_mac_endurance_r83.py": 1780,
     "test_mac_readiness_r82.py": 621,
     "test_macos_smoke_skip_honesty.py": 225,
     "test_maturity_criteria_r79.py": 431,
@@ -930,6 +930,18 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "受 E501 顯示寬度棘輪約束實抵 2 行（m5 ±0），殘額 +29 全為判準與斷言本體照實記，"
      "本表自身編修 +8。逐檔清單＝CrossPlatform_R95_Guard_Repin_Evidence.md §F。R95 整輪"
      "合計 84406→84399（−7）仍為淨減；連升 streak 不進位（同輪多列合併後淨額 < 0）。"),
+    ("R96", 84399, 84806, 407,
+     "[非淨減法輪] R96 收尾單人窗口一次定案（覆寫草稿列，體例同 R92）。本輪重釘**分三批**："
+     "①Windows 真機切換輪（mac→Windows，前 13 輪皆在 macOS）的八筆跨平台修復，已按 R89 "
+     "體例先搬 22 行長 WHY 進證據檔；②**第一輪**四方複審（Architect／SA／SD／QA 全數 "
+     "REJECT）後的包 A（只動 docs、不進量測面）與包 B；③**第二輪**四方複審（四方全數 "
+     "APPROVE_WITH_CONDITIONS）後的包 C1（docs）與包 C2（程式／測試）。"
+     "🔴 成長**全在新增的判準本體**、不是敘事：`pace_line` 公式邊界鎖、`_isolated_env` "
+     "沙箱鎖、四支跨層對帳鎖（`--pace` 與守衛同刻說不同話）、`PermissionError` 那一臂、"
+     "tempdir 判準改整棵樹快照、兩支平台中性 worktree 形態鎖。"
+     "逐檔漂移、三批相加對帳、三條合法出口的逐條實查與代價側現查（cap 1100／streak 1of2／"
+     "到期輪 R97 未到）＝CrossPlatform_R96_Scan_Findings.md §D；閘門重跑取證＝該輪 "
+     "Closure_Evidence §8。"),
 )
 
 
@@ -1134,10 +1146,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: 追加當輪不必動指紋（一列寬限），下一輪要再追加就必須先把前一列納入前綴並重釘，
 #: 否則 `[前綴過期]` 轉紅。草稿兩個值都由 `--print-guard-lines` 印出
 #: （ARCH-02 的教訓：紅了卻沒有出路的鎖會被關掉）。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 26
+_REPIN_LOG_FROZEN_PREFIX_LEN = 27
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "cf3860204ad4696478f1c09c54d5192219b709364e25ea04982bf92a87e87866")
+    "1c8031c9f9b22187fbf07188dfe3855d9c9a7ab8f808dd701091a1f23be0b3a1")
 
 
 def repin_log_history_digest(
