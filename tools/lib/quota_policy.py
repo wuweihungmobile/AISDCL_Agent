@@ -685,13 +685,16 @@ ENV_SPEC: tuple[EnvVar, ...] = (
            "喚醒選路：逐字稿超此位元組數即降級 FRESH（留空＝內建 32MiB）", "policy"),
     EnvVar("AUTOSDD_QUOTA_GUARD_OFF", None, "", "flag", None, None, "1 ⇒ 額度節流全關", "escape"),
     EnvVar("AUTOSDD_SENTINEL_OFF", None, "", "flag", None, None, "1 ⇒ 額度續航哨兵關掉", "escape"),
-    EnvVar("AUTOSDD_CONTEXT_GUARD_OFF", None, "", "flag", None, None,
-           "1 ⇒ context 阻斷關掉（**與上一個不同的東西**）", "escape"),
+    EnvVar("AUTOSDD_CONTEXT_GUARD_OFF", None, "", "flag", None, None, "1 ⇒ context 阻斷關掉（**與上一個不同的東西**）", "escape"),  # noqa: E501
     # 🔴 R91：**第四個**逃生口，刻意不與上面三個共用（repo 明文：共用一個會讓「我只是想
     # 暫時別被擋」順手把別的保護一起關掉）。它只關 context 提示的**送達形態**（stdout 的
     # `hookSpecificOutput` ⇒ 退回舊的純 stderr），不關任何判定、不關阻斷、不關哨兵。
-    # 上一列刻意壓成一行以騰出這一格：`guardrail_lib` 對本檔的 LOC 預算餘裕實測為 0。
+    # 上兩列刻意壓成一行以騰出這一格：`guardrail_lib` 對本檔的 LOC 預算餘裕一路是 0。
     EnvVar("AUTOSDD_CONTEXT_SIGNAL_OFF", None, "", "flag", None, None, "1 ⇒ 只關送達面", "escape"),
+    # 🔴 R97：第五個逃生口。`session_resume_planner.py` 的 `RESUME_OFF_ENV` 此前只讀
+    # `os.environ`，`.env` 設了也關不掉（同 R82／C2 那個病）：非要 Windows 登錄檔＋整個
+    # 重啟 Claude Code 才生效。`attr=None`：不進 Policy，消費端住該檔自己。
+    EnvVar("AUTOSDD_RESUME_OFF", None, "", "flag", None, None, "1 ⇒ 醒來只探測＋留痕，不自動續跑（session_resume_planner.py 專屬）", "escape"),  # noqa: E501
 )
 
 _ENV_HEADER = (

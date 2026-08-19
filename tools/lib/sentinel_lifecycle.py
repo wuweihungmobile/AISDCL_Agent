@@ -98,7 +98,10 @@ ARM_MARKER_PREFIX = "autosdd_sentinel_armed_"
 GC_IDLE_SECONDS = 6 * 3600.0
 
 #: 任務書狀態塊的**終態**（工作已經結束，哨兵留著只是死工作）。
-TERMINAL_STATES = frozenset({"disarmed", "abandoned", "resumed", "done"})
+#: 🔴 R97：`resume_failed`＝`_run_resume()` 的 `subprocess.run` 本身炸掉（例外，不是
+#: `claude` 自己的非零 rc）——同 `resumed` 一樣不會再被重試（`-Once` 觸發器已燒過），
+#: 故同屬終態；漏列會讓 GC 把它誤判成「可能還在等額度」而永遠不收。
+TERMINAL_STATES = frozenset({"disarmed", "abandoned", "resumed", "resume_failed", "done"})
 
 #: 「閒置夠久就可以收」的狀態集合＝終態 ＋ **巡邏中**（`armed`／`sentinel`）。
 #: 🔴 為什麼巡邏中的也算（本輪實跑 dry-run 才發現第一版漏了它）：一支 `armed` 的哨兵

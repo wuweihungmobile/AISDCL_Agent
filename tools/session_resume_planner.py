@@ -259,6 +259,9 @@ SENTINEL_TICK = "--sentinel-tick"
 #   ② 排程／hook 路徑：設環境變數 `AUTOSDD_RESUME_OFF=1`。這一個才是實務上有用的
 #      那一個——哨兵是由 SessionStart hook 武裝的，沒有人會去改它的參數，但環境變數
 #      是模型改不到、人改得到的那一層（同 `AUTOSDD_SENTINEL_OFF` 的形態）。
+#      🔴 R97：本鍵已補進 `quota_policy.ENV_SPEC`（白名單），repo 根 `.env` 現在也
+#      算數（本檔 `main()` 開頭與 hook `main()` 一樣先跑 `apply_env_defaults`）——不必
+#      再靠 Windows `[Environment]::SetEnvironmentVariable` 寫登錄檔＋整個重啟才生效。
 #      🔴 射程誠實劃界：它只影響**武裝當下**寫進狀態塊的 `allow_resume`。已經武裝出去
 #      的排程讀的是任務書裡那一格，事後設這個變數不會改變它——要收回已武裝的那一支，
 #      改任務書狀態塊的 `allow_resume` 或直接 `--remove-schtasks`。
@@ -660,6 +663,18 @@ def sentinel_task_name(session_id: str, given: str = DEFAULT_TASK_NAME) -> str:
     return given if given != DEFAULT_TASK_NAME else f"AutoSDD_Sentinel_{session_id}"
 
 
+# 🔴 R97：`--arm-endurance`／`--register-schtasks` 未顯式帶 `--task-name` 時此前共用
+# 這支固定名字——`Register-ScheduledTask ... -Force` 對同名工作是覆蓋語意，兩個 session
+# 平行武裝時後註冊的會靜默蓋掉先註冊的，且沒有任何警告。比照 `sentinel_task_name()` 走
+# per-session 命名，但**不共用**它的前綴（`AutoSDD_Sentinel_`）：那個前綴是
+# `sentinel_lifecycle.TASK_PREFIX`，GC／活性檢查專門用它篩「哨兵那一種」工作，共用會讓
+# 續航排程被哨兵的 GC／`liveness_line()` 誤判。續航排程（`--arm-endurance`／
+# `--register-schtasks`）的 schtasks 工作名——沒有獨立 docstring：說明已在本段
+# WHY（`guardrail_cli` tier 對本檔的 LOC 預算餘裕實測為 0，同下方各處 noqa 手法）。
+def resume_task_name(session_id: str, given: str = DEFAULT_TASK_NAME) -> str:
+    return given if given != DEFAULT_TASK_NAME else f"{DEFAULT_TASK_NAME}_{session_id}"
+
+
 # 🔴 R79 修的缺陷：舊寫法把**整份任務書內容**內嵌進 `-Command` 當 prompt。三個問題
 # ——任務書一長就撞命令列長度上限；骨架裡的 `TODO:` 佔位會被當成指令餵給無人看管的
 # 那一跑；而且它把「要不要續跑」這個決策交給了一個沒有判準的模型回合。改成叫回本檔
@@ -993,7 +1008,9 @@ def _arm_endurance(args, transcript: Path, plan: Path) -> int:
     if reset_at + timedelta(seconds=RESET_SKEW_SECONDS) <= now:
         print(f"ℹ️  觀測到的 reset 時刻 {reset_at} 已經過去（現在 {now}）⇒ 額度應該早就回來了，沒有東西需要等。要確認就跑 --probe-quota。", file=sys.stderr)  # noqa: E501
         return 1
-    state = _base_state(guard.session_id_of(transcript), plan, args, kind, args.task_name)
+    # 🔴 R97：per-session 命名（見 `resume_task_name` 的 WHY）——未顯式帶 `--task-name`
+    # 時不得共用固定名字，否則多 session 平行武裝會靜默互踩覆蓋。
+    state = _base_state(guard.session_id_of(transcript), plan, args, kind, resume_task_name(guard.session_id_of(transcript), args.task_name))  # noqa: E501
     state.update(reset_at=reset_at.isoformat(), reset_source="transcript-verbatim", observed_at=event["timestamp"], observed_text=event["text"], transcript=str(transcript))  # noqa: E501
     rc, moment = _register_and_record(plan, state, reset_at + timedelta(seconds=RESET_SKEW_SECONDS), RESUME_TICK)  # noqa: E501
     if rc != 0:
@@ -1086,7 +1103,10 @@ def choose_resume_route(claude: str, session_id: str, transcript: Path | None,
 # 也因此只有一個**，這正是它抽出來的價值：漏注入是靜默的（護欄不會出聲說自己沒被
 # 掛上），而只有一個站點的東西才有辦法一次證完。喚醒 argv 的組裝（含 RESUME→FRESH
 # 降級）收在 `choose_resume_route`，本函式只負責 spawn 與留痕。
-def _run_resume(args, state: dict, log: Path) -> int:
+# 🔴 R97：回傳 `int | None`——`None`＝`subprocess.run` 本身沒有跑成（例外，不是
+# `claude` 自己的非零 rc；REFUSE 路徑仍照舊回 `1`，不在這個語意內）。呼叫端
+# `_resume_tick` 必須據此判斷，`None` 時不得把狀態塊寫成 `"resumed"`。
+def _run_resume(args, state: dict, log: Path) -> int | None:
     """額度回來且已授權時，真的把工作續跑起來（帶無人看管訊號）。"""
     sid = str(state.get("session_id") or "")
     transcript = (Path(str(state["transcript"])) if state.get("transcript")
@@ -1118,11 +1138,15 @@ def _run_resume(args, state: dict, log: Path) -> int:
     #   to continue the conversation.`。修前修後各實測一次（prompt 在後 rc=1／prompt
     #   在前 rc=0），順序由 `ConsoleFreeSpawnTest` 的姊妹鎖釘住。
     # · `creationflags`：見 `guard.NO_WINDOW`。少了它，無人看管的續跑會彈一個視窗。
-    proc = subprocess.run(
-        route["argv"],
-        capture_output=True, encoding="utf-8", errors="replace", timeout=3600,
-        check=False, creationflags=guard.NO_WINDOW, cwd=str(_REPO_ROOT),
-        env={**os.environ, UNATTENDED_ENV: "1"})
+    # 🔴 R97：此前這裡沒有 try/except——本函式被無 console 的 pythonw 排程行程呼叫
+    # （`sys.stderr is None`），`TimeoutExpired`／`FileNotFoundError` 會一路往上炸穿、
+    # 整支行程消失，而呼叫端此前已經把狀態塊寫成 `"resumed"`、排程也刪了（謊稱成功、
+    # 無法重試）。同 `probe_quota()` 既有的 except 寫法。
+    try:
+        proc = subprocess.run(route["argv"], capture_output=True, encoding="utf-8", errors="replace", timeout=3600, check=False, creationflags=guard.NO_WINDOW, cwd=str(_REPO_ROOT), env={**os.environ, UNATTENDED_ENV: "1"})  # noqa: E501
+    except (OSError, subprocess.SubprocessError) as exc:
+        append_log(log, "resume_spawn_failed", strategy=route["strategy"], error=str(exc))
+        print(f"❌ 續跑呼叫本身失敗：{exc}", file=sys.stderr); return None  # noqa: E702
     # 🔴 `err=` 是 R80 補的：此前只記 stdout，而上面那個 argv 缺陷的表現正好是
     # 「rc=1、stdout 全空」⇒ 稽核痕跡看得到「失敗了」卻看不到**為什麼**，我是靠手工
     # 重跑一次才找出原因的。無人看管的那一跑沒有人在看 stderr，它只有這一個家。
@@ -1200,16 +1224,19 @@ def _resume_tick(args) -> int:
         rc, moment = _register_and_record(plan, state, decision["at"], RESUME_TICK)
         append_log(log, "rearmed", fire_at=decision["at"].isoformat(), credential=moment, attempts=state["attempts"])  # noqa: E501
         return rc
-    # action == resume
-    state["state"] = "resumed"
-    state.update(_cleared_credentials())
-    write_relay(plan, state)
-    _schtasks_remove(state["task_name"])  # 同上：終態不留死工作
-    if not state.get("allow_resume"):
+    # action == resume。🔴 R97：狀態塊必須等 `_run_resume()` 真的跑完（不論成敗）才寫
+    # ——此前先寫 "resumed"、排程也刪了，才呼叫它；它此前沒有 try/except，中途拋例外時
+    # 整支行程消失，卻已經謊稱成功、排程已刪，無法重試。`rc=None` 專屬「沒真的跑成」。
+    if state.get("allow_resume"):
+        rc = _run_resume(args, state, log); state["state"] = "resumed" if rc is not None else "resume_failed"  # noqa: E501,E702
+    else:
+        rc, state["state"] = 0, "resumed"
         append_log(log, "quota_back_no_resume")
         print(f"✅ 額度已恢復。狀態塊記著 allow_resume=false（帶了 --no-allow-resume／{RESUME_OFF_ENV}，或它是 R79 之前武裝的）⇒ 人回來跑：claude -r {state['session_id']}")  # noqa: E501
-        return 0
-    return _run_resume(args, state, log)
+    state.update(_cleared_credentials())
+    write_relay(plan, state)
+    _schtasks_remove(state["task_name"])  # -Once 已觸發、不會再響，無論成敗都不再需要它
+    return rc if rc is not None else 1
 
 
 # 預防性武裝。與 `_arm_endurance` 的差別是**它不需要任何已觀測的 reset 時刻**：
@@ -1343,6 +1370,12 @@ def _sentinel_tick(args) -> int:
 
 
 def main(argv: list[str]) -> int:
+    # 🔴 R97：`.env` 裡的 `AUTOSDD_RESUME_OFF`（與其他 `ENV_SPEC` 逃生口）必須在
+    # `build_parser()` 之前套用——`--allow-resume` 的預設值是
+    # `os.environ.get(RESUME_OFF_ENV) is None`，在 `add_argument()` 呼叫的那一刻就
+    # 求值。同 hook `main()` 既有的前置填充（`.claude/hooks/context_budget_guard.py`），
+    # 缺席才填、真環境變數仍然贏。
+    quota_gate.apply_env_defaults(os.environ)
     args = build_parser().parse_args(argv)
 
     if args.sentinel_tick:
@@ -1431,11 +1464,13 @@ def main(argv: list[str]) -> int:
         print()
         arm = _arm_sentinel if args.arm_sentinel else _arm_endurance
         return arm(args, transcript, out)
+    # 🔴 R97：per-session 命名（同 `_arm_endurance`）——兩條路共用同一個算法，讓
+    # `--print-schtasks-command` 印出的指令與 `--register-schtasks` 真的註冊的是同一份。
     if args.print_schtasks:
-        print("\n" + schtasks_command(str(out), args.task_name, args.at), end="")
+        print("\n" + schtasks_command(str(out), resume_task_name(data["session_id"], args.task_name), args.at), end="")  # noqa: E501
     if args.register_schtasks:
         print()
-        rc, moment = _register_at_expr(str(out), args.task_name, args.at, RESUME_TICK)
+        rc, moment = _register_at_expr(str(out), resume_task_name(data["session_id"], args.task_name), args.at, RESUME_TICK)  # noqa: E501
         if rc != 0:
             return 1
         print(schedule_backend.select().credential_line(moment))

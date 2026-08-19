@@ -615,6 +615,20 @@ class PlannerCliTest(unittest.TestCase):
                      "-AllowStartIfOnBatteries", "-DontStopIfGoingOnBatteries"):
             self.assertIn(flag, proc.stdout, "四項補跑保護缺一即漏跑（DEF-101-249）")
 
+    def test_the_printed_task_name_is_per_session_not_the_fixed_default(self) -> None:
+        """🔴 R97：未帶 `--task-name` 時，印出來的排程指令必須帶 per-session 的工作名——
+
+        `Register-ScheduledTask ... -Force` 對同名工作是覆蓋語意，共用固定名字
+        `AutoSDD_SessionResume` 會讓兩個 session 平行武裝時後者靜默覆蓋前者。
+        """
+        out = self.tmp / "p4.md"
+        proc = self._run("--out", str(out), "--print-schtasks-command")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn(planner.resume_task_name("s"), proc.stdout,
+                      "印出來的指令沒有帶 per-session 工作名")
+        self.assertNotIn("TaskName='AutoSDD_SessionResume'", proc.stdout,
+                         "印出來的指令仍是固定名字 ⇒ 平行武裝會靜默互踩")
+
     def test_it_never_claims_a_schedule_was_created(self) -> None:
         """反「事後諸葛」：輸出裡不得有「排程已成立」這類完成式宣稱。
 
@@ -1605,6 +1619,46 @@ class EnduranceWiringTest(unittest.TestCase):
                       "import 是 fail-open 但呼叫端沒有守 None ⇒ 缺席時改成 AttributeError")
 
 
+class ArmEnduranceUsesPerSessionTaskNameTest(unittest.TestCase):
+    """🔴 R97：`_arm_endurance()`（`--arm-endurance` 的實作）未帶顯式 `--task-name` 時
+    此前直接用 `args.task_name`（＝固定的 `DEFAULT_TASK_NAME`）——兩個 session 平行
+    武裝會用 `-Force` 靜默互踩覆蓋。修法比照 `--arm-sentinel` 走 per-session 命名。
+    """
+
+    def _armed_task_name(self, session_id: str) -> str:
+        tmp = Path(tempfile.mkdtemp(prefix="arm-endurance-"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        hit = "You've hit your session limit · resets 3:50am (Asia/Taipei)"
+        transcript = tmp / f"{session_id}.jsonl"
+        transcript.write_text(json.dumps({
+            "type": "assistant",
+            "timestamp": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+            "message": {"model": guard.SYNTHETIC_MODEL, "content": [{"text": hit}]}}) + "\n",
+            encoding="utf-8", newline="\n")
+        plan = tmp / "plan.md"
+        plan.write_text("# 任務書\n", encoding="utf-8", newline="\n")
+        args = planner.build_parser().parse_args(
+            ["--transcript", str(transcript), "--out", str(plan), "--arm-endurance"])
+        captured: dict = {}
+        with unittest.mock.patch.object(
+                planner, "_register_and_record",
+                side_effect=lambda plan_, state, at, tick:
+                    captured.update(task_name=state["task_name"]) or (0, "cred-stub")):
+            with contextlib.redirect_stdout(io.StringIO()):
+                rc = planner._arm_endurance(args, transcript, plan)
+        self.assertEqual(rc, 0, "武裝失敗 ⇒ 沒有拿到 task_name，測試地板本身垮了")
+        return captured["task_name"]
+
+    def test_two_sessions_get_two_different_task_names(self) -> None:
+        first = self._armed_task_name("sess-r97-a")
+        second = self._armed_task_name("sess-r97-b")
+        self.assertNotEqual(first, second,
+                            "兩個 session 未帶 --task-name 卻拿到同一個工作名"
+                            " ⇒ 平行武裝會用 -Force 靜默互踩")
+        self.assertEqual(first, planner.resume_task_name("sess-r97-a"))
+        self.assertEqual(second, planner.resume_task_name("sess-r97-b"))
+
+
 # ══════════════════════════ R79 補洞包：預防性哨兵（ADR-XPLAT-004 §2.6）的回歸鎖
 # 🔴 這一段守的是**觸發層**，與上面那一段（判定層）不同。上一段證明了「撞線之後怎麼
 # 等」是對的，但整條鏈仍然要人手動去按 `--arm-endurance`——而撞線那一刻沒有人在。
@@ -1961,6 +2015,20 @@ class SentinelWiringTest(unittest.TestCase):
         for sid in ("aaa", "bbb"):
             self.assertIn(sid, planner.sentinel_task_name(sid))
         self.assertEqual(planner.sentinel_task_name("aaa", "MyOwnName"), "MyOwnName")
+
+    def test_the_resume_task_name_carries_the_session_id(self) -> None:
+        """🔴 R97：`--arm-endurance`／`--register-schtasks` 同型缺陷——未帶 `--task-name`
+        時此前共用固定名字，`Register-ScheduledTask -Force` 靜默覆蓋掉另一 session
+        還在等的那一支。修法比照 `sentinel_task_name()`，但**不共用它的前綴**
+        （`AutoSDD_Sentinel_` 是哨兵 GC／活性檢查專用的篩選鍵）。"""
+        self.assertNotEqual(planner.resume_task_name("aaa"),
+                            planner.resume_task_name("bbb"))
+        for sid in ("aaa", "bbb"):
+            self.assertIn(sid, planner.resume_task_name(sid))
+        self.assertEqual(planner.resume_task_name("aaa", "MyOwnName"), "MyOwnName")
+        # 兩個命名空間不得互相踩到：續航工作名不得落進哨兵 GC 篩選用的前綴。
+        self.assertFalse(planner.resume_task_name("aaa").startswith("AutoSDD_Sentinel_"))
+        self.assertNotEqual(planner.resume_task_name("aaa"), planner.sentinel_task_name("aaa"))
 
     def test_an_operator_interval_is_an_acceptable_reset_source(self) -> None:
         """哨兵的觸發時刻是**巡邏間隔**，不是任何 reset 時刻 ⇒ 它沒有在宣稱 reset，
@@ -2445,6 +2513,146 @@ class RunResumeConsumesTheRouteTest(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(len(self.calls), 1)
         self.assertNotIn("-r", self.calls[0]["argv"])
+
+
+class RunResumeSurvivesASpawnExceptionTest(unittest.TestCase):
+    """🔴 R97：`subprocess.run` 本身炸掉（`TimeoutExpired`／`FileNotFoundError`）不得
+    一路往上炸穿——本函式被無 console 的 pythonw 排程行程呼叫（`sys.stderr is None`），
+    未捕捉例外會讓整支行程無聲消失，而呼叫端（`_resume_tick`）此前已經把狀態塊寫成
+    `"resumed"`（見 `ResumeTickWritesStateOnlyAfterConfirmingTest`）。同 `probe_quota()`
+    既有的 except 寫法（`OSError`／`SubprocessError`）。
+    """
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        (self.tmp / "p.md").write_text("# 任務書", encoding="utf-8")
+        self.transcript = self.tmp / "sid-1.jsonl"
+        self.transcript.write_text('{"type":"assistant"}\n', encoding="utf-8")
+
+    def _run_with(self, raiser) -> tuple[int | None, list[dict], str]:
+        real = planner.subprocess.run
+        planner.subprocess.run = raiser
+        self.addCleanup(setattr, planner.subprocess, "run", real)
+        args = planner.build_parser().parse_args(["--probe-command", "claude"])
+        state = {"plan_path": str(self.tmp / "p.md"), "session_id": "sid-1",
+                 "transcript": str(self.transcript)}
+        log = self.tmp / "log.jsonl"
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            rc = planner._run_resume(args, state, log)
+        events = [json.loads(line) for line in
+                  log.read_text(encoding="utf-8").splitlines() if line.strip()]
+        return rc, events, stderr.getvalue()
+
+    def test_a_timeout_does_not_propagate_and_is_recorded(self) -> None:
+        def _raiser(*_a, **_k):
+            raise subprocess.TimeoutExpired(cmd="claude", timeout=3600)
+
+        rc, events, err = self._run_with(_raiser)
+        self.assertIsNone(rc, "沒有真的跑起來卻回一個看起來像 rc 的整數")
+        self.assertTrue(any(e["event"] == "resume_spawn_failed" for e in events),
+                        "例外被吞掉卻沒有留下任何稽核痕跡")
+        self.assertTrue(err, "無人看管的那一跑沒有人在看 stderr，這是唯一的家")
+
+    def test_a_missing_executable_does_not_propagate_and_is_recorded(self) -> None:
+        def _raiser(*_a, **_k):
+            raise FileNotFoundError("claude executable not found")
+
+        rc, events, _err = self._run_with(_raiser)
+        self.assertIsNone(rc)
+        self.assertTrue(any(e["event"] == "resume_spawn_failed" for e in events))
+
+    def test_a_real_run_is_unaffected_by_the_new_guard(self) -> None:
+        """控制組：正常跑完仍回真的 rc，不被 try/except 誤傷。"""
+        class _Done:
+            returncode, stdout, stderr = 0, "ok", ""
+
+        rc, events, _err = self._run_with(lambda *_a, **_k: _Done())
+        self.assertEqual(rc, 0)
+        self.assertTrue(any(e["event"] == "resumed" for e in events))
+
+
+class ResumeTickWritesStateOnlyAfterConfirmingTest(unittest.TestCase):
+    """🔴 R97：`_resume_tick()` 的 "resume" 分支必須等 `_run_resume()` 真的跑完（不論
+    成敗）才寫狀態塊——此前它在呼叫前就先寫 `"resumed"` 並拆排程，若 `_run_resume()`
+    中途拋例外（此前沒有 try/except）就會謊稱成功，且排程已被刪掉、無法重試。
+    """
+
+    def _tick(self, *, run_resume_result, allow_resume: bool = True) -> tuple:
+        tmp = Path(tempfile.mkdtemp(prefix="resume-tick-"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        plan = tmp / "plan.md"
+        state = {**RelayStateTest.GOOD, "plan_path": str(plan), "session_id": "sid-r97",
+                 "allow_resume": allow_resume, "task_name": "T-r97"}
+        plan.write_text("# 任務書\n\n" + planner.render_relay(state),
+                        encoding="utf-8", newline="\n")
+        args = planner.build_parser().parse_args(
+            ["--resume-tick", "--plan", str(plan), "--task-name", "T-r97"])
+        removed: list[str] = []
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(unittest.mock.patch.object(
+                planner, "probe_quota",
+                side_effect=lambda *_a, **_k: {"open": True, "kind": guard.LIMIT_UNKNOWN,
+                                               "rc": 0, "text": "ok"}))
+            stack.enter_context(unittest.mock.patch.object(
+                planner, "_run_resume", side_effect=lambda *_a, **_k: run_resume_result))
+            stack.enter_context(unittest.mock.patch.object(
+                planner, "_schtasks_remove",
+                side_effect=lambda t: removed.append(t) or 0))
+            stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
+            stack.enter_context(contextlib.redirect_stderr(io.StringIO()))
+            rc = planner._resume_tick(args)
+        written = planner.parse_relay(plan.read_text(encoding="utf-8"))
+        return rc, written, removed
+
+    def test_a_spawn_failure_is_recorded_as_resume_failed_not_resumed(self) -> None:
+        """`_run_resume()` 回 `None`（例外已被它自己吞下）⇒ 狀態塊**不得**寫成 "resumed"。"""
+        rc, written, removed = self._tick(run_resume_result=None)
+        self.assertEqual(written["state"], "resume_failed",
+                         "_run_resume() 沒有確認成功卻被寫成 resumed ⇒ 謊稱成功")
+        self.assertEqual(rc, 1)
+        self.assertTrue(removed, "終態必須處置掉自己的排程（見 dominator 鎖）")
+
+    def test_a_confirmed_run_is_still_recorded_as_resumed(self) -> None:
+        """控制組：`_run_resume()` 真的跑了（回一個 int，即便非零）⇒ 仍記 "resumed"
+        ——既有語意不變："resumed" 代表『我們真的呼叫了』，不是『claude 自己成功』。"""
+        rc, written, removed = self._tick(run_resume_result=3)
+        self.assertEqual(written["state"], "resumed")
+        self.assertEqual(rc, 3)
+        self.assertTrue(removed)
+
+    def test_allow_resume_false_never_calls_run_resume_and_still_terminates(self) -> None:
+        """控制組：`allow_resume=False` 這條既有路徑不應被本輪改動——不呼叫
+        `_run_resume()`，仍正確終結（狀態 "resumed"、排程被拆）。"""
+        calls: list = []
+        tmp = Path(tempfile.mkdtemp(prefix="resume-tick-noop-"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        plan = tmp / "plan.md"
+        state = {**RelayStateTest.GOOD, "plan_path": str(plan), "session_id": "sid-r97b",
+                 "allow_resume": False, "task_name": "T-r97b"}
+        plan.write_text("# 任務書\n\n" + planner.render_relay(state),
+                        encoding="utf-8", newline="\n")
+        args = planner.build_parser().parse_args(
+            ["--resume-tick", "--plan", str(plan), "--task-name", "T-r97b"])
+        removed: list[str] = []
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(unittest.mock.patch.object(
+                planner, "probe_quota",
+                side_effect=lambda *_a, **_k: {"open": True, "kind": guard.LIMIT_UNKNOWN,
+                                               "rc": 0, "text": "ok"}))
+            stack.enter_context(unittest.mock.patch.object(
+                planner, "_run_resume", side_effect=lambda *a, **k: calls.append((a, k))))
+            stack.enter_context(unittest.mock.patch.object(
+                planner, "_schtasks_remove",
+                side_effect=lambda t: removed.append(t) or 0))
+            stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
+            rc = planner._resume_tick(args)
+        self.assertEqual(calls, [], "allow_resume=false 卻呼叫了 _run_resume()")
+        self.assertEqual(rc, 0)
+        written = planner.parse_relay(plan.read_text(encoding="utf-8"))
+        self.assertEqual(written["state"], "resumed")
+        self.assertTrue(removed)
 
 
 # ────────────────── R80：無 console 父行程下的 spawn（類級機械物，不是逐站點補丁）
@@ -5990,8 +6198,12 @@ class EnvFileReachesEveryEscapeHatchTest(unittest.TestCase):
     # 的：新增一個逃生口卻忘了補這一列時，本組不會紅（它只走自己列的那幾個）——所以真正
     # 守「宣告過的逃生口都要在 `ENV_SPEC` 裡」的是
     # `EveryHookEscapeHatchIsDeclaredTest`（R91 新增，分母現查 `.claude/hooks/*.py`）。
+    # 🔴 R97：`AUTOSDD_RESUME_OFF` 的讀取點不住這支 hook（住
+    # `tools/session_resume_planner.py`），但 `qg.apply_env_defaults` 是它們共用的同一份
+    # 前置填充機制——併進這張清單一併驗證泛用性，不必為它另開一組測試。
     _FLAGS = ("AUTOSDD_QUOTA_GUARD_OFF", "AUTOSDD_SENTINEL_OFF",
-              "AUTOSDD_CONTEXT_GUARD_OFF", "AUTOSDD_CONTEXT_SIGNAL_OFF")
+              "AUTOSDD_CONTEXT_GUARD_OFF", "AUTOSDD_CONTEXT_SIGNAL_OFF",
+              "AUTOSDD_RESUME_OFF")
 
     def setUp(self) -> None:
         # 🔴 開發機的 shell 真的會帶著這些鍵（落地當回合實測：`AUTOSDD_SENTINEL_OFF=1`
@@ -6091,6 +6303,50 @@ class EnvFileReachesEveryEscapeHatchTest(unittest.TestCase):
         self.assertTrue(armed, "main() 找不到 arm_sentinel 呼叫 ⇒ 這條鎖的錨已經漂掉")
         self.assertLess(prefill[0], min(armed),
                         "前置填充必須在 arm_sentinel 之前，否則那個讀取點仍然看不到 .env")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# R97：`AUTOSDD_RESUME_OFF` 併入 `.env` 逃生口白名單——`session_resume_planner.py`
+# 自己的 `main()` 也要跑同一份前置填充（不能只靠 hook 那一份，hook 只在
+# `spawn_sentinel()` 那條 subprocess 繼承路徑上生效；直接手動呼叫 planner CLI 時
+# 沒有任何一個 hook 行程替它先讀 `.env`）。
+# ═══════════════════════════════════════════════════════════════════════════
+class PlannerMainAlsoPrefillsFromDotEnvTest(unittest.TestCase):
+    """🔴 接線鎖（同型 `test_the_hook_main_really_calls_the_prefill`）：`--allow-resume`
+    的預設在 `build_parser()` 裡對 `RESUME_OFF_ENV` 求值，必須在那之前把 `.env` 填進
+    `os.environ`，否則直接手動跑 `session_resume_planner.py`（不經過 hook 的
+    `spawn_sentinel()`）時，`.env` 裡設的 `AUTOSDD_RESUME_OFF=1` 對它零影響。
+    """
+
+    def test_planner_main_calls_the_prefill_before_the_parser(self) -> None:
+        tree = ast.parse(_PLANNER.read_text(encoding="utf-8"))
+        main = next(n for n in ast.walk(tree)
+                    if isinstance(n, ast.FunctionDef) and n.name == "main")
+        calls = [(getattr(n.func, "attr", getattr(n.func, "id", "")), n.lineno)
+                 for n in ast.walk(main) if isinstance(n, ast.Call)]
+        prefill = [ln for name, ln in calls if name == "apply_env_defaults"]
+        parsed = [ln for name, ln in calls if name == "build_parser"]
+        self.assertEqual(len(prefill), 1,
+                         "planner main() 沒有（或重複）呼叫 apply_env_defaults")
+        self.assertTrue(parsed, "main() 找不到 build_parser 呼叫 ⇒ 這條鎖的錨已經漂掉")
+        self.assertLess(prefill[0], min(parsed),
+                        "前置填充必須在 build_parser 之前——`--allow-resume` 的預設在"
+                        "那一刻就對 RESUME_OFF_ENV 求值，晚了就看不到 .env")
+
+    def test_the_env_var_reaches_the_allow_resume_default_via_prefill(self) -> None:
+        """單元層級：直接驗證 `apply_env_defaults` 填完之後，`RESUME_OFF_ENV` 的讀取點
+        （`build_parser()` 的 `--allow-resume` 預設）真的看得到它。
+        """
+        root = Path(tempfile.mkdtemp(prefix="resume-off-unit-"))
+        self.addCleanup(shutil.rmtree, root, True)
+        (root / ".env").write_text("AUTOSDD_RESUME_OFF=1\n", encoding="utf-8", newline="\n")
+        env: dict[str, str] = {}
+        filled = qg.apply_env_defaults(env, root=root)
+        self.assertIn("AUTOSDD_RESUME_OFF", filled)
+        with unittest.mock.patch.dict(os.environ, env, clear=False):
+            args = planner.build_parser().parse_args([])
+        self.assertFalse(args.allow_resume,
+                         "apply_env_defaults 填完 .env 之後，--allow-resume 的預設沒有翻轉")
 
 
 class QuotaGateIsWiredToTheBurnPathTest(unittest.TestCase):

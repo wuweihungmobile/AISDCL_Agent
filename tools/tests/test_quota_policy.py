@@ -1170,11 +1170,24 @@ class TestM6TheGeneratedFileSurvivesItsOwnConsumer(unittest.TestCase):
                 self.assertEqual(policy.halt_pct, P.halt_pct, "壞值必須採用預設")
 
     def test_escape_hatches_are_listed_for_humans(self) -> None:
-        """四個逃生口此前只散落在 hook 註解裡，零使用者可讀清單。"""
+        """逃生口此前只散落在 hook 註解裡，零使用者可讀清單。"""
         names = [spec.name for spec in Q.ENV_SPEC]
         for key in ("AUTOSDD_QUOTA_GUARD_OFF", "AUTOSDD_QUOTA_FANOUT_CAP",
-                    "AUTOSDD_SENTINEL_OFF", "AUTOSDD_CONTEXT_GUARD_OFF"):
+                    "AUTOSDD_SENTINEL_OFF", "AUTOSDD_CONTEXT_GUARD_OFF",
+                    "AUTOSDD_RESUME_OFF"):
             self.assertIn(key, names)
+
+    def test_the_resume_off_hatch_reaches_the_process_env_from_dot_env(self) -> None:
+        """🔴 R97：`AUTOSDD_RESUME_OFF` 此前只讀 `os.environ`，`.env` 設了也關不掉——
+
+        `session_resume_planner.py` 要 Windows `[Environment]::SetEnvironmentVariable`
+        寫登錄檔＋整個重啟 Claude Code 才吃得到。補進白名單後，同一份前置填充機制
+        （`quota_gate.apply_env_defaults`）必須也能把它從 `.env` 帶進 `os.environ`。
+        """
+        spec = next(s for s in Q.ENV_SPEC if s.name == "AUTOSDD_RESUME_OFF")
+        self.assertEqual(spec.kind, "flag")
+        self.assertIsNone(spec.attr, "逃生口不得誤植進 Policy 欄位")
+        self.assertEqual(spec.section, "escape")
 
     def test_the_disk_file_matches_the_generator_once_it_lands(self) -> None:
         """接線後 `.env.example` 必須逐字等於生成物。誠實劃界：刻意不寫 skip（skip 會
