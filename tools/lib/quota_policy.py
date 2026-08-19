@@ -691,7 +691,7 @@ ENV_SPEC: tuple[EnvVar, ...] = (
     # `hookSpecificOutput` ⇒ 退回舊的純 stderr），不關任何判定、不關阻斷、不關哨兵。
     # 上兩列刻意壓成一行以騰出這一格：`guardrail_lib` 對本檔的 LOC 預算餘裕一路是 0。
     EnvVar("AUTOSDD_CONTEXT_SIGNAL_OFF", None, "", "flag", None, None, "1 ⇒ 只關送達面", "escape"),
-    # 🔴 R97：第五個逃生口。`session_resume_planner.py` 的 `RESUME_OFF_ENV` 此前只讀
+    # 🔴 R97（round-label-ok：非帳本追蹤的正式輪，僅沿用便於追蹤的標籤）：第五個逃生口。`session_resume_planner.py` 的 `RESUME_OFF_ENV` 此前只讀  # noqa: E501
     # `os.environ`，`.env` 設了也關不掉（同 R82／C2 那個病）：非要 Windows 登錄檔＋整個
     # 重啟 Claude Code 才生效。`attr=None`：不進 Policy，消費端住該檔自己。
     EnvVar("AUTOSDD_RESUME_OFF", None, "", "flag", None, None, "1 ⇒ 醒來只探測＋留痕，不自動續跑（session_resume_planner.py 專屬）", "escape"),  # noqa: E501

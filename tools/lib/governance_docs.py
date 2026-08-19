@@ -221,6 +221,10 @@ _GOVERNANCE_DOCS = (
     # 的掃描面之一）⇒ 它同時是行數棘輪的文件側對帳站點，漏登記會讓那道對帳無人可查。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R96_Closure_Evidence.md",
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R96_Scan_Findings.md",
+    # 額度哨兵 token 洩漏調查（非 R71~R96 跨平台複審系列延續，僅沿用命名慣例；即刻登記，
+    # 理由與上方各列相同：複審者要逐條重驗就得讀完它 ⇒ 受體積守門；逐筆寫出座標宣稱 ⇒ 受
+    # 指針稽核）。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R97_Scan_Findings.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/CrossPlatform_*.md`。這**不是**把具名常數

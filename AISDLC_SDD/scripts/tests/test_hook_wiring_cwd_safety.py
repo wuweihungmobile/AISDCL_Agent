@@ -150,7 +150,7 @@ def _materialise_carrier(hook: dict, project_root: str) -> None:
     """把**本平台**真正會被 spawn 的載具材料化到這個條目宣告的位置——只造載具，不造
     任何目標腳本。
 
-    🔴 R97：跨平台配對必須**各造自己那一半**，不是「只造 POSIX 那一半、Windows 永遠
+    🔴 R97（round-label-ok：非帳本追蹤的正式輪，僅沿用便於追蹤的標籤）：跨平台配對必須**各造自己那一半**，不是「只造 POSIX 那一半、Windows 永遠
     不造」。後者在 POSIX 上恰好對，因為那一半就是本平台會 viable 的那一半；但直接搬到
     Windows 上跑同一份邏輯時，POSIX 載具因 `.py` + `os.name=="nt"` 本就恆判不可跑
     （`carrier_available()`），而 Windows 那一半从未被材料化 ⇒ 全部條目 `checked==0`，

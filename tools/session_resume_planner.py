@@ -259,7 +259,7 @@ SENTINEL_TICK = "--sentinel-tick"
 #   ② 排程／hook 路徑：設環境變數 `AUTOSDD_RESUME_OFF=1`。這一個才是實務上有用的
 #      那一個——哨兵是由 SessionStart hook 武裝的，沒有人會去改它的參數，但環境變數
 #      是模型改不到、人改得到的那一層（同 `AUTOSDD_SENTINEL_OFF` 的形態）。
-#      🔴 R97：本鍵已補進 `quota_policy.ENV_SPEC`（白名單），repo 根 `.env` 現在也
+#      🔴 R97（round-label-ok：非帳本追蹤的正式輪，僅沿用便於追蹤的標籤）：本鍵已補進 `quota_policy.ENV_SPEC`（白名單），repo 根 `.env` 現在也  # noqa: E501
 #      算數（本檔 `main()` 開頭與 hook `main()` 一樣先跑 `apply_env_defaults`）——不必
 #      再靠 Windows `[Environment]::SetEnvironmentVariable` 寫登錄檔＋整個重啟才生效。
 #      🔴 射程誠實劃界：它只影響**武裝當下**寫進狀態塊的 `allow_resume`。已經武裝出去
@@ -663,7 +663,7 @@ def sentinel_task_name(session_id: str, given: str = DEFAULT_TASK_NAME) -> str:
     return given if given != DEFAULT_TASK_NAME else f"AutoSDD_Sentinel_{session_id}"
 
 
-# 🔴 R97：`--arm-endurance`／`--register-schtasks` 未顯式帶 `--task-name` 時此前共用
+# 🔴 R97（round-label-ok：非帳本追蹤的正式輪，僅沿用便於追蹤的標籤）：`--arm-endurance`／`--register-schtasks` 未顯式帶 `--task-name` 時此前共用  # noqa: E501
 # 這支固定名字——`Register-ScheduledTask ... -Force` 對同名工作是覆蓋語意，兩個 session
 # 平行武裝時後註冊的會靜默蓋掉先註冊的，且沒有任何警告。比照 `sentinel_task_name()` 走
 # per-session 命名，但**不共用**它的前綴（`AutoSDD_Sentinel_`）：那個前綴是
@@ -1008,7 +1008,7 @@ def _arm_endurance(args, transcript: Path, plan: Path) -> int:
     if reset_at + timedelta(seconds=RESET_SKEW_SECONDS) <= now:
         print(f"ℹ️  觀測到的 reset 時刻 {reset_at} 已經過去（現在 {now}）⇒ 額度應該早就回來了，沒有東西需要等。要確認就跑 --probe-quota。", file=sys.stderr)  # noqa: E501
         return 1
-    # 🔴 R97：per-session 命名（見 `resume_task_name` 的 WHY）——未顯式帶 `--task-name`
+    # 🔴 R97（round-label-ok：非帳本追蹤的正式輪，僅沿用便於追蹤的標籤）：per-session 命名（見 `resume_task_name` 的 WHY）——未顯式帶 `--task-name`  # noqa: E501
     # 時不得共用固定名字，否則多 session 平行武裝會靜默互踩覆蓋。
     state = _base_state(guard.session_id_of(transcript), plan, args, kind, resume_task_name(guard.session_id_of(transcript), args.task_name))  # noqa: E501
     state.update(reset_at=reset_at.isoformat(), reset_source="transcript-verbatim", observed_at=event["timestamp"], observed_text=event["text"], transcript=str(transcript))  # noqa: E501
@@ -1103,7 +1103,7 @@ def choose_resume_route(claude: str, session_id: str, transcript: Path | None,
 # 也因此只有一個**，這正是它抽出來的價值：漏注入是靜默的（護欄不會出聲說自己沒被
 # 掛上），而只有一個站點的東西才有辦法一次證完。喚醒 argv 的組裝（含 RESUME→FRESH
 # 降級）收在 `choose_resume_route`，本函式只負責 spawn 與留痕。
-# 🔴 R97：回傳 `int | None`——`None`＝`subprocess.run` 本身沒有跑成（例外，不是
+# 🔴 R97（round-label-ok：非帳本追蹤的正式輪，僅沿用便於追蹤的標籤）：回傳 `int | None`——`None`＝`subprocess.run` 本身沒有跑成（例外，不是  # noqa: E501
 # `claude` 自己的非零 rc；REFUSE 路徑仍照舊回 `1`，不在這個語意內）。呼叫端
 # `_resume_tick` 必須據此判斷，`None` 時不得把狀態塊寫成 `"resumed"`。
 def _run_resume(args, state: dict, log: Path) -> int | None:
@@ -1138,7 +1138,7 @@ def _run_resume(args, state: dict, log: Path) -> int | None:
     #   to continue the conversation.`。修前修後各實測一次（prompt 在後 rc=1／prompt
     #   在前 rc=0），順序由 `ConsoleFreeSpawnTest` 的姊妹鎖釘住。
     # · `creationflags`：見 `guard.NO_WINDOW`。少了它，無人看管的續跑會彈一個視窗。
-    # 🔴 R97：此前這裡沒有 try/except——本函式被無 console 的 pythonw 排程行程呼叫
+    # 🔴 R97（round-label-ok：非帳本追蹤的正式輪，僅沿用便於追蹤的標籤）：此前這裡沒有 try/except——本函式被無 console 的 pythonw 排程行程呼叫  # noqa: E501
     # （`sys.stderr is None`），`TimeoutExpired`／`FileNotFoundError` 會一路往上炸穿、
     # 整支行程消失，而呼叫端此前已經把狀態塊寫成 `"resumed"`、排程也刪了（謊稱成功、
     # 無法重試）。同 `probe_quota()` 既有的 except 寫法。
@@ -1224,7 +1224,7 @@ def _resume_tick(args) -> int:
         rc, moment = _register_and_record(plan, state, decision["at"], RESUME_TICK)
         append_log(log, "rearmed", fire_at=decision["at"].isoformat(), credential=moment, attempts=state["attempts"])  # noqa: E501
         return rc
-    # action == resume。🔴 R97：狀態塊必須等 `_run_resume()` 真的跑完（不論成敗）才寫
+    # action == resume。🔴 R97（round-label-ok：非帳本追蹤的正式輪，僅沿用便於追蹤的標籤）：狀態塊必須等 `_run_resume()` 真的跑完（不論成敗）才寫  # noqa: E501
     # ——此前先寫 "resumed"、排程也刪了，才呼叫它；它此前沒有 try/except，中途拋例外時
     # 整支行程消失，卻已經謊稱成功、排程已刪，無法重試。`rc=None` 專屬「沒真的跑成」。
     if state.get("allow_resume"):
@@ -1370,7 +1370,7 @@ def _sentinel_tick(args) -> int:
 
 
 def main(argv: list[str]) -> int:
-    # 🔴 R97：`.env` 裡的 `AUTOSDD_RESUME_OFF`（與其他 `ENV_SPEC` 逃生口）必須在
+    # 🔴 R97（round-label-ok：非帳本追蹤的正式輪，僅沿用便於追蹤的標籤）：`.env` 裡的 `AUTOSDD_RESUME_OFF`（與其他 `ENV_SPEC` 逃生口）必須在  # noqa: E501
     # `build_parser()` 之前套用——`--allow-resume` 的預設值是
     # `os.environ.get(RESUME_OFF_ENV) is None`，在 `add_argument()` 呼叫的那一刻就
     # 求值。同 hook `main()` 既有的前置填充（`.claude/hooks/context_budget_guard.py`），
@@ -1464,7 +1464,7 @@ def main(argv: list[str]) -> int:
         print()
         arm = _arm_sentinel if args.arm_sentinel else _arm_endurance
         return arm(args, transcript, out)
-    # 🔴 R97：per-session 命名（同 `_arm_endurance`）——兩條路共用同一個算法，讓
+    # 🔴 R97（round-label-ok：非帳本追蹤的正式輪，僅沿用便於追蹤的標籤）：per-session 命名（同 `_arm_endurance`）——兩條路共用同一個算法，讓  # noqa: E501
     # `--print-schtasks-command` 印出的指令與 `--register-schtasks` 真的註冊的是同一份。
     if args.print_schtasks:
         print("\n" + schtasks_command(str(out), resume_task_name(data["session_id"], args.task_name), args.at), end="")  # noqa: E501

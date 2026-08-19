@@ -616,7 +616,7 @@ class PlannerCliTest(unittest.TestCase):
             self.assertIn(flag, proc.stdout, "四項補跑保護缺一即漏跑（DEF-101-249）")
 
     def test_the_printed_task_name_is_per_session_not_the_fixed_default(self) -> None:
-        """🔴 R97：未帶 `--task-name` 時，印出來的排程指令必須帶 per-session 的工作名——
+        """🔴 R97（round-label-ok：非帳本追蹤的正式輪，僅沿用便於追蹤的標籤）：未帶 `--task-name` 時，印出來的排程指令必須帶 per-session 的工作名——
 
         `Register-ScheduledTask ... -Force` 對同名工作是覆蓋語意，共用固定名字
         `AutoSDD_SessionResume` 會讓兩個 session 平行武裝時後者靜默覆蓋前者。
@@ -1620,7 +1620,7 @@ class EnduranceWiringTest(unittest.TestCase):
 
 
 class ArmEnduranceUsesPerSessionTaskNameTest(unittest.TestCase):
-    """🔴 R97：`_arm_endurance()`（`--arm-endurance` 的實作）未帶顯式 `--task-name` 時
+    """🔴 R97（round-label-ok：非帳本追蹤的正式輪，僅沿用便於追蹤的標籤）：`_arm_endurance()`（`--arm-endurance` 的實作）未帶顯式 `--task-name` 時
     此前直接用 `args.task_name`（＝固定的 `DEFAULT_TASK_NAME`）——兩個 session 平行
     武裝會用 `-Force` 靜默互踩覆蓋。修法比照 `--arm-sentinel` 走 per-session 命名。
     """
@@ -2017,7 +2017,7 @@ class SentinelWiringTest(unittest.TestCase):
         self.assertEqual(planner.sentinel_task_name("aaa", "MyOwnName"), "MyOwnName")
 
     def test_the_resume_task_name_carries_the_session_id(self) -> None:
-        """🔴 R97：`--arm-endurance`／`--register-schtasks` 同型缺陷——未帶 `--task-name`
+        """🔴 R97（round-label-ok：非帳本追蹤的正式輪，僅沿用便於追蹤的標籤）：`--arm-endurance`／`--register-schtasks` 同型缺陷——未帶 `--task-name`
         時此前共用固定名字，`Register-ScheduledTask -Force` 靜默覆蓋掉另一 session
         還在等的那一支。修法比照 `sentinel_task_name()`，但**不共用它的前綴**
         （`AutoSDD_Sentinel_` 是哨兵 GC／活性檢查專用的篩選鍵）。"""
@@ -2516,7 +2516,7 @@ class RunResumeConsumesTheRouteTest(unittest.TestCase):
 
 
 class RunResumeSurvivesASpawnExceptionTest(unittest.TestCase):
-    """🔴 R97：`subprocess.run` 本身炸掉（`TimeoutExpired`／`FileNotFoundError`）不得
+    """🔴 R97（round-label-ok：非帳本追蹤的正式輪，僅沿用便於追蹤的標籤）：`subprocess.run` 本身炸掉（`TimeoutExpired`／`FileNotFoundError`）不得
     一路往上炸穿——本函式被無 console 的 pythonw 排程行程呼叫（`sys.stderr is None`），
     未捕捉例外會讓整支行程無聲消失，而呼叫端（`_resume_tick`）此前已經把狀態塊寫成
     `"resumed"`（見 `ResumeTickWritesStateOnlyAfterConfirmingTest`）。同 `probe_quota()`
@@ -2574,7 +2574,7 @@ class RunResumeSurvivesASpawnExceptionTest(unittest.TestCase):
 
 
 class ResumeTickWritesStateOnlyAfterConfirmingTest(unittest.TestCase):
-    """🔴 R97：`_resume_tick()` 的 "resume" 分支必須等 `_run_resume()` 真的跑完（不論
+    """🔴 R97（round-label-ok：非帳本追蹤的正式輪，僅沿用便於追蹤的標籤）：`_resume_tick()` 的 "resume" 分支必須等 `_run_resume()` 真的跑完（不論
     成敗）才寫狀態塊——此前它在呼叫前就先寫 `"resumed"` 並拆排程，若 `_run_resume()`
     中途拋例外（此前沒有 try/except）就會謊稱成功，且排程已被刪掉、無法重試。
     """
@@ -6198,7 +6198,7 @@ class EnvFileReachesEveryEscapeHatchTest(unittest.TestCase):
     # 的：新增一個逃生口卻忘了補這一列時，本組不會紅（它只走自己列的那幾個）——所以真正
     # 守「宣告過的逃生口都要在 `ENV_SPEC` 裡」的是
     # `EveryHookEscapeHatchIsDeclaredTest`（R91 新增，分母現查 `.claude/hooks/*.py`）。
-    # 🔴 R97：`AUTOSDD_RESUME_OFF` 的讀取點不住這支 hook（住
+    # 🔴 R97（round-label-ok：非帳本追蹤的正式輪，僅沿用便於追蹤的標籤）：`AUTOSDD_RESUME_OFF` 的讀取點不住這支 hook（住
     # `tools/session_resume_planner.py`），但 `qg.apply_env_defaults` 是它們共用的同一份
     # 前置填充機制——併進這張清單一併驗證泛用性，不必為它另開一組測試。
     _FLAGS = ("AUTOSDD_QUOTA_GUARD_OFF", "AUTOSDD_SENTINEL_OFF",
@@ -6306,7 +6306,7 @@ class EnvFileReachesEveryEscapeHatchTest(unittest.TestCase):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# R97：`AUTOSDD_RESUME_OFF` 併入 `.env` 逃生口白名單——`session_resume_planner.py`
+# R97（round-label-ok：非帳本追蹤的正式輪，僅沿用便於追蹤的標籤）：`AUTOSDD_RESUME_OFF` 併入 `.env` 逃生口白名單——`session_resume_planner.py`
 # 自己的 `main()` 也要跑同一份前置填充（不能只靠 hook 那一份，hook 只在
 # `spawn_sentinel()` 那條 subprocess 繼承路徑上生效；直接手動呼叫 planner CLI 時
 # 沒有任何一個 hook 行程替它先讀 `.env`）。
