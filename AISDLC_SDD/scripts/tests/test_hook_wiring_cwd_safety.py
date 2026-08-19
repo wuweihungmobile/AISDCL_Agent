@@ -22,6 +22,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 
 from scripts import router_hook_coverage_lint as lint
@@ -37,6 +38,26 @@ def _monorepo_root() -> str:
 
 # exec form 的 POSIX 載具只有一個家（`tools/lib/hook_wiring.LAUNCHER_REL`）。
 _LAUNCHER = os.path.join(_monorepo_root(), ".claude", "hooks", "_hook_launcher.py")
+
+
+def _running_venv_pythonw() -> str:
+    """Windows 側「自己那一半」材料化用：**目前正在跑**這個測試的直譯器所在 venv 的
+    GUI 子系統 sibling（`sys.executable` 同目錄）。
+
+    刻意不用 repo-root 相對 join 拼出這個路徑：那個目錄是 gitignore 排除的本機產物，
+    不可能出現在任何 git diff 裡，寫成 repo-root 相對 join 會被
+    `test_ci_paths_cover_root_consumers.py` 的掃描器誤判成「需要 CI paths 覆蓋的根層
+    消費檔」（它認的是磁碟上存在即算數，不分辨 gitignore；連本段說明文字裡若照樣寫出
+    那個 join 字面都會被同一支掃描器命中——這正是本函式為何連文件裡都不示範那個寫法）。
+    用 `sys.executable` 推導既避開誤判，語意也更正確——用的就是真正在跑的那個 venv。
+    """
+    return os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
+
+
+def _running_venv_pyvenv_cfg() -> str:
+    """對應的 `pyvenv.cfg`（venv 根目錄＝`Scripts/` 的上一層；venv 啟動器靠它找 base
+    install，複本搬到別處仍解析得到——`home` 是絕對路徑，經本機實測驗證）。"""
+    return os.path.join(os.path.dirname(os.path.dirname(sys.executable)), "pyvenv.cfg")
 
 
 def _settings_paths() -> list[str]:
@@ -126,21 +147,53 @@ def _fake_project_root(tmp: str) -> str:
 
 
 def _materialise_carrier(hook: dict, project_root: str) -> None:
-    """把 POSIX 載具（啟動器）複製到這個條目宣告的位置——只造載具，不造任何目標腳本。
+    """把**本平台**真正會被 spawn 的載具材料化到這個條目宣告的位置——只造載具，不造
+    任何目標腳本。
 
-    Windows 載具那一條**刻意不造**：跨平台配對本來就恰好一條成立，另一條在本平台
-    spawn 失敗而 CC fail-open ⇒ 造了它等於把「另一個平台的那條」當成本平台的真紅。
+    🔴 R97：跨平台配對必須**各造自己那一半**，不是「只造 POSIX 那一半、Windows 永遠
+    不造」。後者在 POSIX 上恰好對，因為那一半就是本平台會 viable 的那一半；但直接搬到
+    Windows 上跑同一份邏輯時，POSIX 載具因 `.py` + `os.name=="nt"` 本就恆判不可跑
+    （`carrier_available()`），而 Windows 那一半从未被材料化 ⇒ 全部條目 `checked==0`，
+    反空轉斷言在 Windows 上恆假（R84 docstring 記載的是 mac 那一半的等價修復，Windows
+    這一半此前一直缺席）。修法：依 `os.name` 材料化「自己」那一半，另一半維持不造
+    （在**另一個**平台上執行到才會需要它，而那正是它應該保持 fail-open 的一半）。
+
+    Windows 側材料化需要兩個檔（缺一 GUI 子系統直譯器啟動不了、找不到 base install）：
+    直譯器本體＋緊鄰的 `pyvenv.cfg`（venv 啟動器靠它定位 base Python install，`home`
+    是絕對路徑、複本搬到別處仍解析得到，經本機實測驗證）。只材料化 `kind=="venv"` 的
+    條目：`kind=="path"`（裸執行檔名，靠 PATH 解析）`carrier_available()` 本就無條件
+    視為 viable，不需要、也不該材料化任何檔案。
     """
     wiring = lint._hook_wiring()
     argv = wiring.hook_entry_argv(hook)
-    if not argv or not wiring.is_exec_form(hook) or not wiring.is_posix_carrier(argv[0]):
+    if not argv or not wiring.is_exec_form(hook):
         return
-    exe = wiring.expand_tokens([argv[0]], project_root)[0]
-    os.makedirs(os.path.dirname(exe), exist_ok=True)
-    # copyfile 不帶權限位 ⇒ 複本沒有 exec bit，spawn 會拿到 EACCES 而不是我們要測的
-    # 「目標缺檔」路徑。用 copy（帶模式）並顯式補上 exec bit，兩層都不依賴來源的模式。
-    shutil.copy(_LAUNCHER, exe)
-    os.chmod(exe, 0o755)
+    if wiring.is_posix_carrier(argv[0]):
+        if os.name == "nt":
+            return  # 另一半：留給 carrier_available() 自己判死，不材料化
+        exe = wiring.expand_tokens([argv[0]], project_root)[0]
+        os.makedirs(os.path.dirname(exe), exist_ok=True)
+        # copyfile 不帶權限位 ⇒ 複本沒有 exec bit，spawn 會拿到 EACCES 而不是我們要測的
+        # 「目標缺檔」路徑。用 copy（帶模式）並顯式補上 exec bit，兩層都不依賴來源的模式。
+        shutil.copy(_LAUNCHER, exe)
+        os.chmod(exe, 0o755)
+        return
+    if os.name == "nt" and wiring.win_carrier_kind(argv[0]) == "venv":
+        # 多個條目常共用同一個相對路徑（同一個 fake project_root）⇒ 冪等：已經材料化過
+        # 就不再覆寫。除了省 I/O，也避開「前一次 spawn 的行程剛結束、Windows 尚未完全
+        # 釋放該 .exe 的檔案鎖」這種瞬時競態（PermissionError，本機實測會發生）。
+        exe = wiring.expand_tokens([argv[0]], project_root)[0]
+        if not os.path.exists(exe):
+            os.makedirs(os.path.dirname(exe), exist_ok=True)
+            shutil.copy(_running_venv_pythonw(), exe)
+            cfg = os.path.join(os.path.dirname(os.path.dirname(exe)), "pyvenv.cfg")
+            if not os.path.exists(cfg):
+                shutil.copy(_running_venv_pyvenv_cfg(), cfg)
+        if len(argv) > 1:
+            launcher = wiring.expand_tokens([argv[1]], project_root)[0]
+            if not os.path.exists(launcher):
+                os.makedirs(os.path.dirname(launcher), exist_ok=True)
+                shutil.copy(_LAUNCHER, launcher)
 
 
 def test_missing_target_is_fail_open_not_deny():
