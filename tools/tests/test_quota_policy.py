@@ -1178,7 +1178,7 @@ class TestM6TheGeneratedFileSurvivesItsOwnConsumer(unittest.TestCase):
             self.assertIn(key, names)
 
     def test_the_resume_off_hatch_reaches_the_process_env_from_dot_env(self) -> None:
-        """🔴 R97（round-label-ok：非帳本追蹤的正式輪，僅沿用便於追蹤的標籤）：`AUTOSDD_RESUME_OFF` 此前只讀 `os.environ`，`.env` 設了也關不掉——
+        """🔴 R97：`AUTOSDD_RESUME_OFF` 此前只讀 `os.environ`，`.env` 設了也關不掉—— round-label-ok
 
         `session_resume_planner.py` 要 Windows `[Environment]::SetEnvironmentVariable`
         寫登錄檔＋整個重啟 Claude Code 才吃得到。補進白名單後，同一份前置填充機制
