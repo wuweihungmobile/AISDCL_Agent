@@ -73,7 +73,8 @@ desktop.ini
 /perf_results.json
 
 # R57 ARCH-R57R3-03：run_root_unittests 失敗明細落檔（診斷用，不入庫）
-tools/.last_failure.log
+# DEF-200-162：檔名改帶時間戳／HEAD 短碼並輪替最近 N 份，pattern 需跟著改
+tools/.last_failure_*.log
 
 # act 實跑帳本（run_act_core.py `--verify-all` 寫入，`--list` 讀取）。
 # 刻意**不入庫**：它記的是「**這台機器**上那一次 act 執行真的走完了」——是本機量測值，

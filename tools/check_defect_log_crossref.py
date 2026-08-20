@@ -75,6 +75,7 @@ import _stdio_utf8  # noqa: E402,F401  # Windows 非 UTF-8 終端 print(✅/❌)
 from lib import defect_ledger_index as _ledger_index  # noqa: E402
 from lib import governance_docs as _gov_docs  # noqa: E402
 from lib import ledger_rotation as _rotation  # noqa: E402
+from lib import ledger_staleness as _staleness  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _DEFECT_LOG = _REPO_ROOT / "docs" / "06_quality" / "AutoSDD_Defect_Log.md"
@@ -1378,6 +1379,9 @@ def main() -> int:
         unpinned_problems += unres_fails
         # 逐列位元組上限同受本守衛（豁免清單綁真實主檔的 ID）；鑑別力見 TestR79RowByteCeiling。
         deferred += _ledger_index.oversize_row_problems(ledger_text)
+        # DEF-200-163：帳本相對 git HEAD 若有未 commit 修改，本場結論可能已過期（advisory）。
+        for note in _staleness.uncommitted_problems(_DEFECT_LOG, _REPO_ROOT):
+            print(f"⚠️  {note}", file=sys.stderr)
     if unpinned_problems:
         return _bail("未結列缺承接指派（硬規則② 後半句）", unpinned_problems)
 

@@ -296,7 +296,11 @@ _TREE_FILE_FLOORS: dict[str, int] = {
     # 而「零加減推算」優先於「少紅一次」⇒ 照填公式值。
     # 🔴 因此：本輪尚有並行包在跑，**收輪者請在所有包停工後的單人窗口重量一次再定案**
     # （同 R82／R83／R84 的既有紀律）；再多一支檔第三向就會再次判紅，那是它的設計意圖。
-    "tools/tests": 49,
+    # 🔴 治理修復輪重釘 49 → 52（機制同上：本輪新增 `test_worktree_paths.py`／
+    # `test_failure_log_rotation.py`／`test_skip_ceiling_ratchet_direction.py` 三支鎖檔，
+    # `tools/tests` 由 62 支長到 **65**，49 只剩實測的 75%〔低於 `TREE_FLOOR_RATIO` 80%〕，
+    # 第三向判紅並逐字指示「重釘為 52」⇒ 照填、零加減推算）。
+    "tools/tests": 52,
     # 🔴 R82 包 A2（DEBT-01）：204 → 205。新增 `AutoClaude/tests/contract/test_w6_deletion.py`
     # （AC2-2 的真斷言落點）後掃描面變 257，下限只剩實測的 79% ⇒ 依 `TREE_FLOOR_RATIO` 的
     # 防腐那一向轉紅。這正是它的設計意圖：下限不跟著長就會愈來愈鬆而沒有任何東西說話。

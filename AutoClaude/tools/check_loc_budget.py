@@ -229,7 +229,11 @@ SPECIAL_FILES: dict[str, int] = {
     # 各檔現值不寫死在此（會過期）：`python tools/check_loc_budget.py --json` 現查。
     "../tools/check_script_parity.py": 1618,
     "../tools/archive_defect_log.py": 1507,
-    "../tools/check_defect_log_crossref.py": 1474,
+    # 🔴 具名調高 1474 → 1479（DEF-200-163 staleness advisory 落地）：調高前已先走完「抽共用
+    # 模組」那一步——git-dirty 判斷搬進新檔 `tools/lib/ledger_staleness.py`（guardrail_lib
+    # 400 budget、當回合遠低於上限），本檔只留 import＋2 行呼叫的接線；+5 行是接線本身，
+    # 且 `TestActionableMessagesHaveLocHeadroom` 要求本檔維持 ≥5 行餘裕（見該測試）。
+    "../tools/check_defect_log_crossref.py": 1479,
     # 🔴 R70 具名調高 1451 → 1499（`DEF-101-756`／`DEF-101-757`，依本棘輪自訂的解鎖程序）：
     # 調高**前**已先走完「抽共用模組」那一步——基線三態語意（`unrecorded` 二義性根治）與
     # nightly 落地產物探針共約 180 行已抽到 `tools/lib/baseline_origin.py`（先例：
@@ -237,7 +241,11 @@ SPECIAL_FILES: dict[str, int] = {
     # `_SLOW_SPECS`／`platform_cell_index()` 這些只有本檔有的表格解析器，搬出去等於把
     # 解析器一起搬（那會製造第二份表格語意＝本檔一直在治的病）。
     "../tools/sync_onboarding_baselines.py": 1499,
-    "../tools/run_root_unittests.py": 754,
+    # 🔴 具名調高 754 → 759（DEF-200-162，依本棘輪自訂的解鎖程序）：調高前已先走完「抽共用
+    # 模組」那一步——失敗明細檔名／輪替邏輯搬進新檔 `tools/lib/failure_log_rotation.py`
+    # （guardrail_lib 400 budget、當回合遠低於上限），本檔只留呼叫端最小接線（import＋2 行
+    # 呼叫），+5 行是接線本身、非可再壓縮的重複邏輯。
+    "../tools/run_root_unittests.py": 759,
     # 🔴 R81（Architect-B3）：`.claude/hooks/` 納入治理面（見 `ROOT_GUARD_ROOTS` 的 WHY）。
     # 這一支超過 tier 的 750，走與上面那批同一條路：門檻＝**納管當下的實際 raw 行數**、
     # 只准往下改。納管當下＝1,634（見下方 `ROOT_GUARD_ROOTS` 那段的立案量測）。

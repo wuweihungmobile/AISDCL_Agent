@@ -136,6 +136,7 @@ from lib.windows_skip_tags import (  # noqa: E402, I001
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import skip_group_policy  # noqa: E402  ← R80 包 A（S3-04）：skip 分群天花板的政策 SSOT
 import skip_runtime_report  # noqa: E402  ← M6 的 id 集合面（計數面答不了「有沒有跑過」）
+import failure_log_rotation  # noqa: E402  ← DEF-200-162：失敗明細檔名／輪替 SSOT
 
 _PATTERN = "test_*.py"
 
@@ -574,7 +575,9 @@ def warn_ratchet_drift(count: int, min_tests: int) -> str | None:
 # 該次的失敗測試名隨 process 消失，故無法歸因。方向為 fail-closed（假紅、不放行缺陷），
 # 但「下次再發生仍然無法診斷」本身是可以現在就消除的缺口。
 # 落檔而非改判邏輯：不動 rc、不動任何斷言，只在已經要回 1 的路徑上多寫一份明細。
-_FAILURE_LOG = Path(__file__).resolve().parent / ".last_failure.log"
+# 🔴 DEF-200-162：固定檔名每次覆寫且被 `.gitignore` 排除 ⇒ 上輪失敗證據被抹掉；檔名／
+# 輪替邏輯搬 `tools/lib/failure_log_rotation.py`（本檔零餘裕棘輪，新邏輯抽出去才塞得進來）。
+_FAILURE_LOG_DIR = Path(__file__).resolve().parent
 
 
 def dump_failure_detail(result: unittest.TestResult, path: Path | None = None) -> Path:
@@ -583,7 +586,7 @@ def dump_failure_detail(result: unittest.TestResult, path: Path | None = None) -
     只在 `wasSuccessful()` 為 False 時被呼叫。回傳寫入的路徑（測試用）。
     寫檔失敗不得影響 runner 的 rc——診斷輔助不應反過來變成新的失敗來源。
     """
-    target = path or _FAILURE_LOG
+    target = path or failure_log_rotation.failure_log_path(_FAILURE_LOG_DIR)
     # R57 round 4 SA-R57R4-01：`wasSuccessful()` 在 `unexpectedSuccesses` 非空時
     # 也回 False，原版只讀 failures/errors ⇒ 該模式下 rc=1 卻落一份**不指名任何
     # 測試的空明細**，正是本機制立意要消除的「無法歸因」狀態（實測產出僅 60 bytes
@@ -599,6 +602,8 @@ def dump_failure_detail(result: unittest.TestResult, path: Path | None = None) -
         tid = test.id() if hasattr(test, "id") else str(test)
         lines.append(f"\n===== UNEXPECTED SUCCESS: {tid} =====\n"
                      "（標記 expectedFailure 但實際通過——該缺陷可能已修好，請移除標記）")
+    if path is None:  # 只有預設落點才輪替；測試傳自訂 target 時不動 _FAILURE_LOG_DIR
+        failure_log_rotation.prune_old_failure_logs(_FAILURE_LOG_DIR)
     return _write_failure_log(target, "\n".join(lines))
 
 

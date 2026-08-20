@@ -104,7 +104,7 @@ mac 清掉的檔案與 Windows 一模一樣，而事故就發生在 macOS——�
   同理，靠**上一次** Bash 呼叫留下的持久 cwd（主 agent 的殼會保留 `cd`）落在拋棄式
   worktree、然後只寫裸 `git checkout -- x` 的形態也仍然擋——payload 的 `cwd` 實測是專案根，
   本檔看不到那個持久狀態。兩者都是 fail-closed 方向；要放寬就把目錄寫出來
-  （`cd <絕對路徑> && …` 或 `git -C <絕對路徑> …`），或用行內豁免。🔴 但**`..` 穿越不在射程**（放行方向的 fail-open）：實測與代價見 `_DISPOSABLE_WT` 旁註解。
+  （`cd <絕對路徑> && …` 或 `git -C <絕對路徑> …`），或用行內豁免。
 · **`stash` 在真正無關的第三方 repo 內也會被擋**（例如自己在 scratchpad `git init` 出來的
   合成 repo）。技術上可鑑別——`git rev-parse --git-common-dir` 在共用 repo 的 linked
   worktree 內指回共用 `.git`、在無關 repo 內指自己（本回合實測），但那要在推導出的目錄裡
@@ -200,6 +200,12 @@ GUARD_OFF_ENV = "AUTOSDD_GIT_GUARD_OFF"
 # 靜默放行。硬 import 失敗＝traceback ＋ 非 0/2 的 rc＝出聲但不阻斷（看得見的失效）。
 from unattended_authz import (  # type: ignore[import-not-found] # noqa: E402
     UNATTENDED_ENV, authz_header, authz_hits, waiver_void_note)
+
+# 🔴 P0-1：拋棄式 worktree 根目錄的正規化與包含判斷搬到 `tools/lib/
+# worktree_paths.py`（理由同上——`guardrail_cli<=750` 零餘裕，且它與 `is_foreign_tree()`
+# 同族，抽出去才不會第二次長出自己的正規化邏輯）。同 `unattended_authz` 刻意不包
+# try/except：這是安全判準，import 失敗要 traceback 而不是靜默退化成放行。
+from worktree_paths import is_under_disposable_worktree  # type: ignore[import-not-found] # noqa: E402
 
 #: 行內豁免：`# git-guard-ok: <WHY>`，WHY 必填（空白理由不算豁免，讓「刻意這樣寫」
 #: 與「沒注意」分得開）。
@@ -662,56 +668,29 @@ def _switch_hit(args: list[str], target: str | None = None) -> str | None:
 #: 根底下 ⇒ `is_foreign_tree()` 判它「不是外樹」而擋下，但那是**routine teardown**：全語料
 #: 6 筆新增命中裡有 3 筆就是它。放行的代價誠實寫在這裡——拆掉一棵**還有 agent 活著**的沙盒
 #: 樹會被放行；那個危害與 `rm -rf <該目錄>` 同級，而本檔本來就不守 `rm`。
-_DISPOSABLE_WT = os.path.normcase(os.path.join(".claude", "worktrees") + os.sep)
-# 🔴 R96：比對前必須把兩邊都正規化（見下面那行的 `os.path.normcase()`），否則這個放行
-# 條件**在 Windows 上恆假**。成因是兩件事相乘：① `_DISPOSABLE_WT` 是用 `os.sep` 建的字面
-# （Windows 上＝ `.claude\worktrees\`）；② `_resolve_dir()` 對絕對路徑**刻意不做任何正規化**
-# （原字面直接回傳）。而 Windows 上兩種分隔符都合法、混用極普遍——本輪 Windows 側首跑實測
-# 的命中形態逐字是
-#   git worktree remove --force D:\CursorProject\AISDCL_Agent/.claude/worktrees/agent-ac3ed
-# （前半反斜線、後半正斜線）⇒ 包含判準比不到 ⇒ 這一整類 routine teardown 全部被誤擋，而
-# 上方那段普查明載它佔新增命中的 100%、一筆事故形態都沒有。**誤擋是這道鎖被整個關掉的路徑**，
-# 所以這不是放寬而是修失明：本輪同一支守衛也真的擋下了收尾者自己的一條合法指令。
-# 🔴 R96 收尾（SD 複審建議，採納）：正規化改用 `os.path.normcase()` 而不是自己寫
-# `.replace("/", os.sep)`。理由不是風格——`normcase` 在 Windows 逐字等於
-# `s.replace("/", "\\").lower()`，於是**同一格順便治好第二個 Windows 專屬失明**：NTFS
-# 大小寫不敏感，`…\.CLAUDE\WORKTREES\agent-x` 指的是同一棵樹，而 `.replace()` 版本比不到
-# ⇒ 同一類 routine teardown 換個大小寫寫法就又被誤擋。POSIX 上 `normcase` 是 no-op
-# （逐字回傳原字串）⇒ 該平台行為與 `.replace("/", "/")` 版本逐位元相同。兩邊都要正規化，
-# 所以上面那個常數也包一層（今天兩個字面本來就全小寫 ⇒ 值不變，但配對關係從此是
-# **構造上成立**而不是碰巧成立）。
-# 🔴 `is_foreign_tree()` 不需要這道處理：它內部走 `os.path.realpath()`，自己就會正規化。
-# 🔴 零**程式**行增加是硬約束（不是風格選擇）：本檔的 `guardrail_cli` tier 是 750，落地當回合
-# 實測 750／餘裕 0，而 `count_loc` 計 docstring、不計 `#` 註解 ⇒ WHY 只能寫在註解裡。
-# 回歸鎖（**平台中性**）＝`tools/tests/test_block_destructive_git_r83.py` 的
-# `TestR84WorktreeRemoveForce.test_the_mixed_separator_shape_is_judged_on_every_platform`
-# 與 `…_the_windows_case_insensitive_shape_is_judged`：兩支都以 `ntpath` 顯式注入
-# Windows 語意，所以 mac／Linux 上也真的走進這一格（此前唯一在守它的是放行清單裡那個
-# 帶 `_REPO_ROOT` 的字面，而 `_REPO_ROOT` 在 POSIX 是純正斜線 ⇒ 混合形態結構上造不出來）。
 #
-# 🔴 R96 收尾／〈誠實劃界〉的可及範圍——**本檔擋不到 `..` 穿越**（SD 複審 R3 的證偽探針；本輪
-# **只記不修**）：這個放行條件是**字串包含**（`_DISPOSABLE_WT in normcase(victim)`），`..` 完全
-# 不解析 ⇒ 把拋棄式樹的前綴寫進路徑再穿越出去，就繞過了整條 `_worktree_hit`。當回合唯讀實測
-# （直接呼叫 `_worktree_hit(["remove","--force",<路徑>], None)`，未執行任何 git）：
-#   ④ <repo>\AutoClaude                          is_foreign=False prefix_in=False 判決=阻擋
-#   ⑤ <repo>\.claude\worktrees\..\..\AutoClaude  is_foreign=False prefix_in=True  判決=放行
-#   ⑥ <repo>\.claude\worktrees\..\..（repo 根）  is_foreign=False prefix_in=True  判決=放行
-# ⑤ 就是 ④ 的繞行：兩者的 `os.path.realpath()` **逐字相同**（皆為 `<repo>\AutoClaude`），判決
-# 卻相反 ⇒ 缺口不是理論的。壞的只有本常數這一半；`is_foreign_tree()` 那一半沒事（它內部走
-# `realpath`，⑤⑥ 都正確判成「不是外樹」）。
-# 🔴 危害方向照實寫：被繞過的是**放行**臂（讓 `git worktree remove --force` 對**專案樹內**的
-# 目標放行，含 repo 根自己）⇒ 這是 fail-open，與本檔其餘劃界條目多為 fail-closed **方向相反**。
-# 🔴 **本輪不修的理由是可審計性、不是難度**：修法（比對前先 `realpath` 再比）是**行為改動**——
-# 它會把今天放行的形態改成阻擋，而本檔的放寬向來要求「先量全語料的假紅面再改」（見上方那段
-# 4,017 筆普查），R96 的四方複審此時已跑完、沒有第三方能接住這個改動。⇒ 本輪只把缺口寫進
-# 〈誠實劃界〉的可及範圍（模組 docstring 該節已就地指來這裡），修法與其假紅普查留給下一輪。
+# 🔴 P0-1：識別「這是不是拋棄式 worktree」的正規化與包含判斷已搬到
+# `tools/lib/worktree_paths.py::is_under_disposable_worktree()`（理由與零 LOC 代價見
+# 該模組檔頭）。R96 版在這裡自己寫的是**純字串包含**（`_DISPOSABLE_WT in normcase(victim)`），
+# 不解析 `..`——`<repo>/.claude/worktrees/../../AutoClaude` 這種路徑 `realpath` 後其實落在
+# 拋棄式樹**之外**（等於 `<repo>/AutoClaude`），卻因為字面上仍帶著 `.claude\worktrees\` 這段
+# 子字串而被判定放行；同一招甚至能繞出 `<repo>/.claude/worktrees/../..`＝repo 根自己。
+# 兩例當回合實測見 `tools/tests/test_worktree_paths.py` 與
+# `test_block_destructive_git_r83.py::TestR84WorktreeRemoveForce
+# .test_dotdot_traversal_disguised_as_disposable_worktree_is_blocked`。新函式比對前把
+# `victim` 也 `realpath()`＋`normcase()`，改成**前綴**（不是子字串）比對，對齊
+# `is_foreign_tree()` 的既有手法，`..` 穿越與大小寫／分隔符混用同時收斂。
+# 混合分隔符／NTFS 大小寫不敏感的回歸鎖（**平台中性**，以 `ntpath` 顯式注入 Windows 語意，
+# 所以 mac／Linux 上也真的走進這一格）＝`TestR84WorktreeRemoveForce
+# .test_the_mixed_separator_shape_is_judged_on_every_platform` 與
+# `…_the_windows_case_insensitive_shape_is_judged`。
 
 
 def _worktree_hit(args: list[str], target: str | None = None) -> str | None:
     pos = [a for a in args if not a.startswith("-")]
     victim = _resolve_dir(target, pos[1] if len(pos) > 1 else "") or ""
     if pos[:1] != ["remove"] or not ("--force" in args or "f" in _all_shorts(args)) or \
-            is_foreign_tree(victim) or _DISPOSABLE_WT in os.path.normcase(victim):
+            is_foreign_tree(victim) or is_under_disposable_worktree(victim):
         return None
     return ("git worktree remove --force（把整棵 linked worktree 連同裡面未提交的改動與"
             "未追蹤檔一起刪掉；不進 stash、不進 reflog ⇒ 沒有還原路徑）")
