@@ -8,6 +8,8 @@
 | **v2.1.3（R93 二次訂正）** | 2026-08-16 | Ready for Implementation | 獨立 Architect 複審 REJECT 承接：§4.1.4「同方案換帳號需帳號識別，非本節範圍」與 `docs/06_quality/Quota_R90_CrossAccount_Experiment.md` 實測不符（核心桶集合指紋本身不具身分鑑別力：3 命中 2 假陽性、29% 偽陰性），訂正為已解決——帳號身份訊號（回應標頭雜湊，零額外網路/token/憑證處理）併入核心指紋；補齊「不同方案桶名集合相同」邊界。設計細節見 ADR-XPLAT-009 §6 |
 | **v2.1.4（T5 修憲）** | 2026-08-16 | 經掌舵者 2026-08-16 拍板、待四方複審後生效 | 解除 PRD 內部三角衝突（§15.5 紅線 1「不碰未公開端點」↔ 現行唯一取數源即 §4.1.1 T5 ↔ §12「不得讀 OAuth token」為呼叫 T5 的必要前提所必違）：T5 升格為認可主源（零 token、帳號層級權威讀數、R90 四通道實測勝出、失效 fail-safe 降級 cap=4，見 §4.1.1〈T5 升格依據〉）；紅線 1 加收窄豁免（唯讀 GET／單一程式站點 `tools/lib/quota_meter.py`／TTL≥180s 節流／失效降級出聲）；§12 憑證條改為「允許唯讀取用、禁止落痕跡」劃界。§0.6 表與附錄 B-05 的「T5 可整條刪除」保留為 v2.1 核實當時的歷史紀錄，不再是現行規範 |
 | **v2.1.5（撞線喚醒閉環修憲）** | 2026-08-17 | 經掌舵者 2026-08-17 立案（「Token 用盡時，為何沒有啟動下一個 Reset 的喚醒機制，不需要人類介入」）、待四方複審後生效 | 新增 §4.5.6：需求層明確化「任一執行層級撞線 → 零人工 → reset 喚醒續跑」，覆蓋面必含 (a) subagent／workflow agent 撞線、(b) **主 session 活著但帳號級撞線**（該回合死於 API 層、hook 體系零觸發點）兩情境；喚醒機制自身失效必須 fail-loud 且可自癒（禁止 fail-quiet 自我解除）；可重啟點任務書的骨架重寫不得摧毀機器可讀狀態塊（單檔雙寫者禁令）。立案證據＝2026-08-16/17 事件（哨兵武裝且巡邏十次全綠，卻在撞線落地後 4 分鐘死於被 halt 動作覆寫的任務書而自我解除，03:50 reset 時機器上零排程，空轉至人工介入；逐字證據與逐環驗證見 ADR-XPLAT-004 §2.9）。設計細節與實作工作清單見 ADR-XPLAT-004 §2.9 |
+| **v2.1.6（主控閒置盲區修憲）** | 2026-08-17/18 | 經掌舵者定級 P0「會破產的嚴重 BUG」立案、規格化後待實作 | 新增 §4.5.7：撞線那一刻**之前**主控完全不知道水位已逼近（等 subagent 回覆期間零工具呼叫，`context_budget_guard.py` 只掛 Pre/PostToolUse，該窗口結構上不會被觸發），且撞線那一刻通知能不能送達也未受保障。立案＝`DEF-200-148`，2026-08-16/17 收尾包與修復包兩次實證（皆為「subagent 背景耗至 session 38% 期間主控零喚醒」）。三條規範性要求：R-4.5.7-1（主控閒置盲區量測）／R-4.5.7-2（prepare 帶預防性提醒、不寫任務書骨架）／R-4.5.7-3（通知走桌面通道、不依賴主控下一次工具呼叫）。本版僅完成規格化，實作與回歸鎖見 v2.1.7 |
+| **v2.1.7（哨兵武裝狀態漂移自癒 ＋ §4.5.7 落地）** | 2026-08-20 | 經本輪落地並回歸鎖驗證通過 | §4.5.7（B1~B3）與新增 §4.5.8（C1~C4）**全數完整實作**：主控閒置量測、prepare 帶預防性桌面通知、哨兵武裝狀態對排程器現查漂移時的自動重新武裝。落地在 `tools/lib/quota_escalation.py`（`patrol_housekeeping()` 一族）與 `tools/lib/sentinel_lifecycle.py`（`armed_but_missing()`），由 `tools/session_resume_planner.py` 的 `_sentinel_tick()` 接線；回歸鎖見 `tools/tests/test_context_budget_guard.py` 的 `ControllerIdlePrepareWatchTest`／`PatrolNoticeIsDesktopNotHookTest`／`ArmedDriftSelfHealTest` |
 
 > **v2.1 的變更**：附錄 B 的事實核對清單已**實際核實完成**（方法見附錄 B 開頭）。核實結果顯示 Claude Code v2.1.x **已內建**本 PRD 原本打算自建的多項能力（原生 worktree 隔離、任務 DAG、排程喚醒、零 Token 用量遙測、併發上限、官方配速門檻）。因此新增 [§15 執行方法論](#15-執行方法論與注意事項v21-新增)，並將建議架構從「大型自建 Daemon」縮減為「薄治理層 + 採用原生能力」。**§15 是實際動工時應遵循的章節**（含動工前置檢查、採用 vs 自建決策矩陣、P0–P5 分階段步驟、12 條紅線注意事項、參數校準方法與交付目錄結構）。
 
@@ -923,18 +925,104 @@ CLAUDE.md〈三段式水位〉）且尚未進入 halt，發出一則「即將撞
 也同時在額度限制內，它可能永遠不會有下一次工具呼叫去讀那則訊息。桌面通知不佔用 API 額度，故此
 通道在「主控與哨兵同時撞線」的最壞情境下仍然成立。
 
-**驗收判準（全部可機械查證；未實作者標明狀態，見下方施工狀態段）**：
+**驗收判準（全部可機械查證）**：
 
 | # | 判準 | 查證方式 | 狀態 |
 | :---- | :---- | :---- | :---- |
-| B1 | 巡邏讀出主逐字稿最後事件時間戳並算出閒置秒數 | 單元測試（合成逐字稿注入不同時間戳） | 規格已定，實作待 R98 |
-| B2 | 閒置且水位進入 prepare 帶時發出預防性提醒、且不寫任務書骨架 | 單元測試（紅綠自證：R-4.5.7-2 分支開關） | 規格已定，實作待 R98 |
-| B3 | 預防性提醒與撞線提醒皆走桌面通知通道，且不依賴主控下一次工具呼叫 | 整合測試（mock 通知器，斷言呼叫發生於巡邏行程而非 hook 行程） | 規格已定，實作待 R98 |
+| B1 | 巡邏讀出主逐字稿最後事件時間戳並算出閒置秒數 | 單元測試（合成逐字稿注入不同時間戳）：`tools/tests/test_context_budget_guard.py::ControllerIdlePrepareWatchTest`（`test_b1_*` 三支） | 已實作 |
+| B2 | 閒置且水位進入 prepare 帶時發出預防性提醒、且不寫任務書骨架 | 單元測試（紅綠自證：R-4.5.7-2 分支開關）：同上類別 `test_b2_*` 三支 | 已實作 |
+| B3 | 預防性提醒與撞線提醒皆走桌面通知通道，且不依賴主控下一次工具呼叫 | 整合測試（mock 通知器，斷言呼叫發生於巡邏行程而非 hook 行程）：`tools/tests/test_context_budget_guard.py::PatrolNoticeIsDesktopNotHookTest` | 已實作 |
 
-**🔴 施工狀態（誠實記載，不得曖昧）**：本節（v2.1.6）於本輪只完成**規格化**——三個結構洞的
-機制設計已具體化到「掛哪支既有腳本、讀哪個既有資料源、走哪個既有通知通道」的層級，但**尚未落地
-程式碼與回歸鎖**。R96 開場時誤稱「即辦」（見 `DEF-200-148` 原始修復方向欄，已訂正），實際完整
-實作（三條 R-4.5.7-x ＋ B1~B3 三支測試）承接 **R98**。
+**🔴 施工狀態（誠實記載，不得曖昧）**：本節（v2.1.6）已完整實作，不再是規格化階段。三條
+R-4.5.7-x 的機制本體落在 `tools/lib/quota_escalation.py`（`_main_transcript_idle_seconds()` /
+`_idle_prepare_watch()` / `patrol_housekeeping()`），由 `tools/session_resume_planner.py` 的
+`_sentinel_tick()` 於每次巡邏 tick 呼叫；桌面通知走既有的 `quota_escalation.notify()`
+（Windows Toast／macOS 通知中心／`notify-send`，`AUTOSDD_DESKTOP_NOTIFY` 預設關閉的既有非模態
+管道）。B1~B3 三支測試（外加 `test_b1_a_tool_use_record_also_counts_as_activity` 等變體）全數
+綠燈，回歸鎖見上表。
+
+🔴 **對規格文字的兩處刻意偏離（誠實記載，非疏漏）**：
+
+1. 本節原文把 R-4.5.7-1 的落點寫在 `tools/lib/sentinel_lifecycle.py`；實作時發現該檔在
+   `guardrail_lib` tier（400 行）下**僅剩 3 行餘裕**（`python AutoClaude/tools/check_loc_budget.py
+   --json` 現查），塞不下完整的逐字稿掃描邏輯，遂改落地在同層、餘裕充裕的
+   `tools/lib/quota_escalation.py`（該檔既有「續航協定的兩件事：叫人與扇出續跑清單」定位，
+   §4.5.8 的漂移自癒也落在這裡，屬同一主題的自然延伸）。`tools/lib/sentinel_lifecycle.py`
+   保留一支 3 行的 `armed_but_missing()` 純判準（供 §4.5.8 呼叫），用滿其僅剩的餘裕；
+   `tools/session_resume_planner.py`（`guardrail_cli` tier 750/750、零餘裕）淨改動為 0 行——
+   巡邏 tick 的既有呼叫點 `snapshot_fanout(transcript, event)` 換成 `patrol_housekeeping(
+   transcript, event, now, state, idle_threshold, tick, log)`，同一物理行、未新增任何一行。
+2. 本節原文（R-4.5.7-3）把桌面通道寫成 `escalation.alert(loud=True)`／既有機制見
+   `autoclaude/utils/notifier.py`；實作改走 `quota_escalation.notify()`（同一支檔既有的
+   Windows Toast／macOS `osascript`／`notify-send` 三態非模態通道，`AUTOSDD_DESKTOP_NOTIFY`
+   預設關閉）。理由：`autoclaude/utils/notifier.py` 住在 `AutoClaude/` 子專案，其套件現查
+   **未安裝於根層 `.venv`**（`Test-Path .venv/Lib/site-packages/autoclaude` 為 `False`），
+   而 `tools/session_resume_planner.py`／`tools/lib/*` 一律跑在根層 `.venv` 下；跨子專案
+   import 會在這台機器上直接 `ImportError`。`quota_escalation.notify()` 已是同一份程式碼、
+   同一份「不消耗額度」承諾下的既有機制（R-4.5.6-4b 的桌面告警走的正是它），選它是沿用
+   既有的家，不是發明第二份通知知識。`escalation.alert()` 本身仍保留給撞線／終態叫人用
+   （見 §4.5.6），本節的預防性提醒刻意走更輕量的 `notify()`，因為它不需要 `alert()` 附帶的
+   寫紙／扇出清單那些終態語意。
+
+#### 4.5.8 哨兵武裝狀態漂移自癒（v2.1.7 新增）
+
+**立案事實**：§4.5.6 R-4.5.6-6 已要求「已武裝」宣稱必須附排程器自報憑證，而 §4.5.6 修好的是
+「武裝那一刻要有憑證」；本節修的是**武裝之後**——排程器裡的哨兵工作可能因系統重開機、
+Windows 工作排程器的到期清理、或其他外部因素而在武裝之後**憑空消失**，本機的 armed stamp
+標記檔卻不會跟著更新，於是「宣稱已武裝」與「排程器現查實況」之間出現漂移。立案證據＝本輪
+現查 `python tools/session_resume_planner.py --pace` 時工具自己印出的警語：「🔴 哨兵活性：
+armed stamp 說 `AutoSDD_Sentinel_<session>` 已武裝，排程器現查卻沒有這支工作 ⇒ 哨兵已死、
+喚醒鏈斷線」——`sentinel_lifecycle.liveness_line()`（R95／ADR-XPLAT-004 §2.9 修3 的既有機制）
+此前只在人手動執行 `--pace`／`--check` 時**出聲**，且只印警語、**不動作**，要求人手動重跑
+`--arm-sentinel` 才能恢復，不符合「不需要人類介入」的自動化閉環要求（R-4.5.6-2 已定調：哨兵
+自身的可用性即帳號級撞線情境的全部可用性，任何 fail-quiet 形態一律按 P0 處理——「武裝了卻
+沒人發現已經死掉」正是這個形態的一種）。
+
+**R-4.5.8-1（每次巡邏自我健檢）** 哨兵巡邏邏輯（`_sentinel_tick()`）於每次巡邏時，除既有
+判準外，新增一項核對：比對「本機 armed stamp 宣稱的武裝狀態」（`sentinel_lifecycle.
+arm_marker_path()`／狀態塊 `task_name`）與「排程器現查的實際狀態」（`sentinel_lifecycle.
+sentinel_task_names()`——Windows 走 `Get-ScheduledTask`、macOS 走 `launchctl list`，同
+R-4.5.6-6 的既有憑證判準）。純判準 `armed_but_missing(task, jobs)`：`jobs is None`（量不到）
+與 `jobs` 不含 `task`（真漂移）必須分得開——量不到不得誤判成漂移（同本 repo 通篇「量不到 ≠
+量到零」的紀律），只有後者才進入 R-4.5.8-2 的自癒動作。
+
+**R-4.5.8-2（偵測到漂移即自動重新武裝）** 真的漂移時，直接呼叫既有的排程器介面
+（`schedule_backend.select().arm(...)`，與 `--arm-sentinel`／`register_endurance()` 底層共用
+同一支後端方法，不重新發明武裝流程）就地重新武裝，武裝的下次喚醒時刻沿用巡邏間隔
+（`SENTINEL_INTERVAL_SECONDS`，同一般巡邏重排的既有邏輯）。已達終態（`state` 屬於
+`sentinel_lifecycle.TERMINAL_STATES`）的哨兵不觸發自癒——那是正常下班，不是漂移。
+
+**R-4.5.8-3（痕跡可分辨）** 自癒動作在稽核痕跡檔留一筆**與既有『巡邏／武裝／自癒（RELAY
+版，R-4.5.6-4）／解除』互異**的事件名（`sentinel_armed_drift_healed`），比照 R-4.5.6-4c
+的紀律：不同失效形態要能從痕跡分辨出來，不能只靠 `sentinel_decided` 多幾個稽核欄位（那一行
+每次巡邏都會印，欄位增減不足以讓「這次巡邏發生過漂移」在痕跡上一眼可辨）。自癒失敗（例如
+排程器本身不可用、`arm()` 回非零 rc）記在同一事件的 `armed_drift_healed=False` 欄位裡，
+本節**不**額外定義一條「自癒失敗才升級叫人」的路徑——排程器完全不可用時，該情境已由
+R-4.5.6-4b 的桌面級告警機制涵蓋（讀不出狀態塊、自癒不了才會走到那一層）。
+
+**🔴 誠實劃界（結構性限制，不是待修 bug）**：本檢查依附在巡邏 tick 本身執行——若排程器裡的
+哨兵工作被整條刪除、且**再也不會觸發下一次 tick**，本機制沒有任何辦法把它救回來（沒有事件源
+可以叫醒一支已經不存在的排程，同鐵律六「任何停等都必須有一個會主動叫醒我的事件源」的反面：
+一支已死的排程本身就不再是事件源）。它能治的是「工作還在（tick 因此被叫起），但 armed stamp
+與現查不一致」這一類**可觀測**的漂移；真正「整條排程消失且永不再觸發」的最壞情境，仍要靠人
+或 AutoClaude 在下一次主動介入時（例如手動 `--pace`）才會被發現——本節把「發現後怎麼辦」從
+「要求人手動重跑 `--arm-sentinel`」降級為「大多數漂移情境下不需要人介入」，而不是宣稱涵蓋
+排程器徹底消失且 tick 永不再被觸發的那個子情境（宣稱涵蓋會是一句結構上不成立的話，比沒有
+這個功能更糟，同 `snapshot_fanout()` 對 `resumeFromRunId` 同 session only 那條既有紀律）。
+
+**驗收判準（全部可機械查證）**：
+
+| # | 判準 | 查證方式 | 狀態 |
+| :---- | :---- | :---- | :---- |
+| C1 | armed stamp 存在且排程器現查確定不含該工作 ⇒ 自動重新武裝 | 單元測試（mock 排程器查詢結果）：`tools/tests/test_context_budget_guard.py::ArmedDriftSelfHealTest::test_armed_stamp_present_but_scheduler_shows_missing_self_heals` | 已實作 |
+| C2 | 排程器現查確實還在 ⇒ 不觸發自癒（控制組） | 同上類別 `test_when_the_scheduler_still_shows_the_task_nothing_is_re_armed` | 已實作 |
+| C3 | 排程器量不到（`None`）不得誤判成漂移 | 同上類別 `test_unmeasurable_scheduler_listing_is_not_mistaken_for_drift` | 已實作 |
+| C4 | 自癒動作留下與既有事件名互異的痕跡 | 同 C1 測試方法內斷言 `sentinel_armed_drift_healed` 事件與既有家族不撞名 | 已實作 |
+
+**🔴 施工狀態**：已實作。純判準 `armed_but_missing()` 落在 `tools/lib/sentinel_lifecycle.py`；
+自癒動作本體（`_heal_armed_drift()`）與痕跡寫入（`_append_trace()`）落在
+`tools/lib/quota_escalation.py`，由同檔的 `patrol_housekeeping()` 於每次巡邏 tick 呼叫（接線
+方式同 §4.5.7）。C1~C4 四支驗收判準全數綠燈，回歸鎖見上表。
 
 ### 4.6 跨平台防休眠（修正 v1 的技術細節）
 

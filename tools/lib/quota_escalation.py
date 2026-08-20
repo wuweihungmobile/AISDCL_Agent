@@ -42,6 +42,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from datetime import datetime, timedelta
 from pathlib import Path
 
 # 🔴 R84／ARCH-06 連帶：本檔**不得**再出現 `from datetime import UTC`（3.11+）。
@@ -65,6 +66,16 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO_ROOT / ".claude" / "hooks"))
 
 import context_budget_guard as guard  # noqa: E402  # 逐字稿判讀的唯一實作（不另抄一份）
+
+# 🔴 PRD §4.5.7／§4.5.8（v2.1.6／v2.1.7）：四支同層 sibling，供下方 `patrol_housekeeping()`
+# 一族使用。零循環風險——本檔既有的 `guard` import 已證實這條路可通；`quota_gate`／
+# `schedule_backend` 皆不 import 本檔（`quota_gate.py` 檔頭明文「本檔不得 import 那支
+# hook」，方向反過來才對）；`sentinel_lifecycle` 對本檔的唯一參照是函式層 lazy import
+# （`_sweep_artifacts` 內的 `from quota_escalation import reap_plans`），模組層不會成環。
+import quota_gate  # noqa: E402
+import quota_policy  # noqa: E402
+import schedule_backend  # noqa: E402
+import sentinel_lifecycle  # noqa: E402
 
 #: 🔴 固定檔名、**不帶 session id**。帶了就等於把「要人看的那張紙」藏進一個只有機器知道
 #: 名字的地方——R80 的稽核痕跡 `autosdd_resume_log_<sid>.jsonl` 正是這個形態，整晚沒有
@@ -205,6 +216,124 @@ def snapshot_fanout(transcript: Path, event: object) -> dict:
     return {"fanout": str(path) if ok else "", "fanout_written": ok,
             "dead_agents": sum(len(r["dead"]) for r in runs),
             "runs": [r["run_id"] for r in runs]}
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# PRD §4.5.7（v2.1.6）：主控閒置盲區與預防性水位提醒
+# ══════════════════════════════════════════════════════════════════════════
+# 立案：撞線那一刻**之前**主控完全不知道水位已逼近（等 subagent 回覆期間零工具呼叫，
+# `context_budget_guard.py` 只掛 Pre/PostToolUse，該窗口結構上不會被觸發）。修法掛在
+# 既有哨兵巡邏——巡邏本來就每 900s 讀一次逐字稿，這裡只是多讀一眼「主控自己」多久沒
+# 動過、再多讀一次額度快取。三件事一次到位：R-4.5.7-1（閒置量測，只看**主**逐字稿，
+# 不含 subagent——否則扇出正忙時主控閒置會被 subagent 的 mtime 蓋過去）／R-4.5.7-2
+# （水位進 prepare 帶且未 halt 才提醒，且刻意不寫任務書骨架，同 R-4.5.6-3 單檔雙寫者
+# 禁令的精神）／R-4.5.7-3（走 `notify()` 桌面通道，不依賴主控下一次工具呼叫）。
+def _main_transcript_idle_seconds(transcript: Path, now: float) -> float | None:
+    """只讀**主**逐字稿最後一筆 `type=assistant`／`tool_use` 事件時間戳，回距今秒數。
+
+    `None`＝這支檔案沒有任何可辨識的事件（讀不到／空檔／格式全不認得）。
+    """
+    last = None
+    try:
+        with transcript.open(encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                if '"timestamp"' not in line or '"type"' not in line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(record, dict) or record.get("type") not in (
+                        "assistant", "tool_use"):
+                    continue
+                stamp = _epoch(record.get("timestamp"))
+                if stamp is not None and (last is None or stamp > last):
+                    last = stamp
+    except OSError:
+        return None
+    return None if last is None else max(0.0, now - last)
+
+
+def _epoch(raw: object) -> float | None:
+    """ISO 時間戳→epoch 秒；認不出來回 `None`。只做相減，不持久化（同既有紀律）。"""
+    if not isinstance(raw, str):
+        return None
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
+def _idle_prepare_watch(transcript: Path, now: datetime, idle_threshold: float) -> dict:
+    """R-4.5.7-1／-2／-3：主控閒置中 ＋ 水位進 prepare 帶 ⇒ 桌面通知，不寫任務書骨架。"""
+    idle = _main_transcript_idle_seconds(transcript, now.timestamp())
+    if idle is None or idle < idle_threshold:
+        return {"controller_idle_seconds": idle}
+    policy, _ = quota_policy.load_policy(quota_gate.policy_env())
+    decision = quota_policy.decide(quota_gate.read_quota(now), now, policy)
+    if decision.band != quota_policy.BAND_PREPARE:
+        return {"controller_idle_seconds": idle, "quota_band": decision.band}
+    rc = notify("AutoSDD 額度即將見底", quota_policy.describe(decision))
+    return {"controller_idle_seconds": idle, "quota_band": decision.band, "prepare_notify_rc": rc}
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# PRD §4.5.8（v2.1.7）：哨兵武裝狀態漂移自癒
+# ══════════════════════════════════════════════════════════════════════════
+# 立案：`--pace` 的 `sentinel_lifecycle.liveness_line()` 只出聲、不動作——本機 armed
+# stamp 說已武裝，排程器現查卻沒有這支工作時，此前唯一的處置是要求人手動重跑
+# `--arm-sentinel`，不符合「不需要人類介入」的自動化閉環要求。修法：每次巡邏 tick 額外
+# 核對一次「這支工作還在不在」，真的漂移（非量不到）就地重新武裝，不必等人發現。
+# 🔴 誠實劃界：本檢查依附在巡邏 tick 本身——若排程器裡的工作被整條刪除且**再也不會
+# 觸發**下一次 tick，這裡沒有任何辦法把它救回來（沒有事件源可以叫醒一支已經不存在的
+# 排程）。它能治的是「工作還在（tick 因此被叫起），但 armed stamp 與現查不一致」這一類
+# 可觀測的漂移，等同把 R-4.5.6-4 的「先自癒後解除」紀律用到「排程器現查」這一個新輸入上。
+def _append_trace(path: Path, event: str, **fields: object) -> None:
+    """append 一行 JSONL 稽核痕跡（py3.9 安全版；同檔既有 `_STAMP`／`time.strftime` 慣例，
+    不引入 `datetime.now(UTC)`——`planner.append_log` 的字面複本會把本檔重新踩進
+    ARCH-06 那個 hook 鏈 py3.9 census 的雷）。寫不進去不得升級為失敗，同 `_write` 的紀律。
+    """
+    record = {**fields, "event": event, "at": time.strftime(_STAMP)}
+    try:
+        with path.open("a", encoding="utf-8", newline="\n") as handle:
+            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+
+
+def _heal_armed_drift(state: dict, now: datetime, idle_threshold: float, tick: str,
+                      log: Path) -> dict:
+    """armed stamp 說已武裝但排程器查無此工作 ⇒ 自動重新武裝；回稽核欄位（`{}`＝沒漂移）。
+
+    自癒成功與否都留一筆**與『巡邏／武裝／自癒（RELAY 版）／解除』互異**的事件名
+    （`sentinel_armed_drift_healed`）——比照 R-4.5.6-4c 的紀律：不同失效形態要能從
+    痕跡分辨出來，不能只靠 `sentinel_decided` 多幾個欄位（那一行每次巡邏都會印，
+    多幾個欄位不足以讓「這次巡邏發生過漂移」在痕跡上一眼可辨）。
+    """
+    task = str(state.get("task_name") or "")
+    if not task or state.get("state") in sentinel_lifecycle.TERMINAL_STATES:
+        return {}
+    if not sentinel_lifecycle.armed_but_missing(task, sentinel_lifecycle.sentinel_task_names()):
+        return {}  # 量不到／確實還在 ⇒ 沒有漂移可自癒（量不到不得誤判成漂移）
+    at = (now + timedelta(seconds=idle_threshold)).astimezone()
+    at_expr = f"'{at.strftime('%Y-%m-%d %H:%M:%S')}'"
+    rc, moment = schedule_backend.select().arm(
+        str(state.get("plan_path") or ""), task, at_expr, tick, at)
+    audit = {"armed_drift_healed": rc == 0, "armed_drift_rc": rc, "armed_drift_credential": moment}
+    _append_trace(log, "sentinel_armed_drift_healed", task=task, **audit)
+    return audit
+
+
+def patrol_housekeeping(transcript: Path, event: object, now: datetime, state: dict,
+                        idle_threshold: float, tick: str, log: Path) -> dict:
+    """每次巡邏的三件事：扇出死亡快照（既有）＋主控閒置預防提醒（§4.5.7）＋武裝狀態
+    漂移自癒（§4.5.8）。合成一個字典，直接 `**` 進 `sentinel_decided` 痕跡。
+    """
+    audit = dict(snapshot_fanout(transcript, event))
+    if event is None:
+        audit.update(_idle_prepare_watch(transcript, now, idle_threshold))
+    audit.update(_heal_armed_drift(state, now, idle_threshold, tick, log))
+    return audit
 
 
 # 🔴 rc 一定要被記進稽核痕跡：通知的失效是**靜默**的——沒有人會因為「沒收到通知」而

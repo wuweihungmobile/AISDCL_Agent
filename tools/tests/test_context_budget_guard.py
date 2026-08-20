@@ -3568,6 +3568,263 @@ class FanoutCasualtyRecordTest(unittest.TestCase):
         self.assertIn("不會", hint, "沒說清楚它不會自動發生 ⇒ 會被當成一個壞掉的按鈕")
 
 
+class ControllerIdlePrepareWatchTest(unittest.TestCase):
+    """PRD §4.5.7（v2.1.6，R-4.5.7-1／-2／-3）：主控閒置盲區與預防性水位提醒。
+
+    B1／B2 兩支驗收判準（PRD 該節表格）：B1＝閒置秒數只讀**主**逐字稿；B2＝閒置＋
+    prepare 帶才提醒、且不寫任務書骨架（紅綠自證：分支開關本身）。B3（走桌面通道、
+    不依賴 hook）見下面 `PatrolNoticeIsDesktopNotHookTest` 的整合測試。
+    """
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="idle-prepare-"))
+        self.transcript = self.tmp / "sid.jsonl"
+        self.notified: list[tuple[str, str]] = []
+
+    def _write(self, records: list[dict]) -> None:
+        self.transcript.write_text(
+            "\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8", newline="\n")
+
+    def _notify(self, title: str, body: str) -> int:
+        self.notified.append((title, body))
+        return 0
+
+    def test_b1_idle_seconds_come_only_from_the_main_transcripts_last_event(self) -> None:
+        """B1：閒置秒數只讀**主**逐字稿最後一筆 assistant／tool_use，不含 subagent。
+
+        紅綠自證：subagent 塞一筆比主逐字稿新很多的事件；判準若誤讀了 subagent，
+        算出來的閒置秒數會比預期小很多（甚至變負值），本條斷言會抓到。
+        """
+        base = datetime(2026, 8, 9, 10, 0, 0, tzinfo=UTC)
+        self._write([
+            {"type": "user", "timestamp": base.isoformat().replace("+00:00", "Z")},
+            {"type": "assistant",
+             "timestamp": (base + timedelta(seconds=100)).isoformat().replace("+00:00", "Z"),
+             "message": {"model": "claude-opus-5"}},
+        ])
+        sub = self.transcript.with_suffix("") / "subagents" / "agent-x.jsonl"
+        sub.parent.mkdir(parents=True, exist_ok=True)
+        sub.write_text(json.dumps({
+            "type": "assistant",
+            "timestamp": (base + timedelta(seconds=5000)).isoformat().replace("+00:00", "Z"),
+            "message": {"model": "claude-opus-5"}}) + "\n", encoding="utf-8", newline="\n")
+        now = (base + timedelta(seconds=400)).timestamp()
+        idle = escalation._main_transcript_idle_seconds(self.transcript, now)
+        self.assertEqual(idle, 300.0, "混進了 subagent 較新的事件，或算錯了差")
+
+    def test_b1_a_tool_use_record_also_counts_as_activity(self) -> None:
+        """PRD 逐字寫『type=assistant／type=tool_use』——後者不得被判準漏掉。"""
+        base = datetime(2026, 8, 9, 10, 0, 0, tzinfo=UTC)
+        self._write([{"type": "tool_use", "timestamp": base.isoformat().replace("+00:00", "Z")}])
+        now = (base + timedelta(seconds=42)).timestamp()
+        self.assertEqual(escalation._main_transcript_idle_seconds(self.transcript, now), 42.0)
+
+    def test_b1_no_recognisable_event_returns_none(self) -> None:
+        """量不到必須回 `None`，不得偽裝成 0（量不到 ≠ 量到零，本 repo 通篇的紀律）。"""
+        self._write([{"type": "system", "timestamp": "2026-08-09T10:00:00Z"}])
+        self.assertIsNone(escalation._main_transcript_idle_seconds(self.transcript, time.time()))
+
+    def test_b2_not_yet_idle_never_touches_the_quota_cache(self) -> None:
+        """B2 紅綠自證的前半：閒置門檻沒到就不讀額度、不通知——分支開關本身。"""
+        base = datetime(2026, 8, 9, 10, 0, 0, tzinfo=UTC)
+        self._write([{"type": "assistant", "timestamp": base.isoformat().replace("+00:00", "Z"),
+                      "message": {"model": "claude-opus-5"}}])
+        now = base + timedelta(seconds=10)
+        with unittest.mock.patch.object(qg, "read_quota") as read_quota:
+            audit = escalation._idle_prepare_watch(self.transcript, now, idle_threshold=900)
+        read_quota.assert_not_called()
+        self.assertNotIn("prepare_notify_rc", audit)
+
+    def test_b2_idle_and_prepare_band_notifies_without_writing_a_plan_skeleton(self) -> None:
+        """B2 紅綠自證的後半：閒置＋prepare 帶 ⇒ 通知；且**不**寫任務書骨架
+        （同 R-4.5.6-3 單檔雙寫者禁令的精神——這個通道與撞線重啟走不同的任務書語意）。
+        """
+        base = datetime(2026, 8, 9, 10, 0, 0, tzinfo=UTC)
+        self._write([{"type": "assistant", "timestamp": base.isoformat().replace("+00:00", "Z"),
+                      "message": {"model": "claude-opus-5"}}])
+        now = (base + timedelta(seconds=1000)).replace(tzinfo=UTC)
+        state = quota_policy.QuotaState(
+            (quota_policy.Axis("session", 90.0, None),), now.isoformat(), "test")
+        with unittest.mock.patch.object(qg, "read_quota", return_value=state), \
+             unittest.mock.patch.object(qg, "policy_env", return_value={}), \
+             unittest.mock.patch.object(escalation, "notify", side_effect=self._notify):
+            audit = escalation._idle_prepare_watch(self.transcript, now, idle_threshold=900)
+        self.assertEqual(audit["quota_band"], quota_policy.BAND_PREPARE)
+        self.assertEqual(len(self.notified), 1, "水位進 prepare 帶卻沒敲桌面通知")
+        self.assertFalse(list(self.tmp.glob(f"{guard.PLAN_PREFIX}*.md")),
+                         "R-4.5.7-2 明文不得寫任務書骨架，這裡卻寫出一份")
+
+    def test_b2_halt_band_does_not_fire_the_prepare_notice(self) -> None:
+        """分支開關的另一半：已經到 halt 就不是『即將』，不該再走這條預防性通道
+        （halt 由 §4.5.6 的重啟任務書骨架接手，兩個語意不得互相覆寫）。
+        """
+        base = datetime(2026, 8, 9, 10, 0, 0, tzinfo=UTC)
+        self._write([{"type": "assistant", "timestamp": base.isoformat().replace("+00:00", "Z"),
+                      "message": {"model": "claude-opus-5"}}])
+        now = (base + timedelta(seconds=1000)).replace(tzinfo=UTC)
+        state = quota_policy.QuotaState(
+            (quota_policy.Axis("session", 99.0, None),), now.isoformat(), "test")
+        with unittest.mock.patch.object(qg, "read_quota", return_value=state), \
+             unittest.mock.patch.object(qg, "policy_env", return_value={}), \
+             unittest.mock.patch.object(escalation, "notify", side_effect=self._notify):
+            escalation._idle_prepare_watch(self.transcript, now, idle_threshold=900)
+        self.assertEqual(self.notified, [], "已經 halt 卻仍發了『即將見底』的預防性提醒")
+
+
+def _fresh_transcript(tmp: Path, name: str) -> Path:
+    """一支剛剛才動過的逐字稿（最後一筆 assistant 事件＝現在往前 5 秒）。
+
+    專門給 `ArmedDriftSelfHealTest` 用：讓 `_main_transcript_idle_seconds` 算出來的
+    閒置秒數遠小於 `SENTINEL_INTERVAL_SECONDS`，`_idle_prepare_watch` 會在第一格
+    （閒置未達門檻）就短路返回，不去碰額度快取——漂移自癒的測試才不會被 R-4.5.7-2
+    那條路徑的副作用（讀真額度快取）干擾。
+    """
+    path = tmp / name
+    path.write_text(json.dumps({
+        "type": "assistant",
+        "timestamp": (datetime.now(UTC) - timedelta(seconds=5)).isoformat().replace(
+            "+00:00", "Z"),
+        "message": {"model": "claude-opus-5", "usage": {"input_tokens": 1}}}) + "\n",
+        encoding="utf-8", newline="\n")
+    return path
+
+
+class PatrolNoticeIsDesktopNotHookTest(unittest.TestCase):
+    """B3（整合測試）：預防性提醒必須從**巡邏行程**（`_sentinel_tick`）本身觸發，
+    不依賴任何 hook（Pre/PostToolUse）事件——本測試從頭到尾只呼叫 `_sentinel_tick`，
+    一次 hook 都沒有叫到，`notify()` 卻仍被觸發，證明送達不靠『主控下一次工具呼叫』。
+    """
+
+    def test_the_prepare_notice_fires_from_the_patrol_tick_alone(self) -> None:
+        tmp = Path(tempfile.mkdtemp(prefix="b3-patrol-"))
+        live = _transcript(tmp, "sess-b3.jsonl", 40, 900.0)
+        task = "AutoSDD_Sentinel_sess-b3"
+        plan = tmp / f"{guard.PLAN_PREFIX}sess-b3.md"
+        plan.write_text("# 任務書\n", encoding="utf-8", newline="\n")
+        planner.write_relay(plan, {**RelayStateTest.GOOD, "kind": "sentinel",
+                                   "session_id": "sess-b3", "plan_path": str(plan),
+                                   "reset_source": "operator", "reset_at": "",
+                                   "task_name": task, "transcript": str(live)})
+        notified: list[tuple[str, str]] = []
+        state = quota_policy.QuotaState(
+            (quota_policy.Axis("session", 90.0, None),), datetime.now(UTC).isoformat(), "test")
+        with unittest.mock.patch.object(qg, "read_quota", return_value=state), \
+             unittest.mock.patch.object(qg, "policy_env", return_value={}), \
+             unittest.mock.patch.object(
+                 escalation, "notify",
+                 side_effect=lambda t, b: notified.append((t, b)) or 0), \
+             unittest.mock.patch.object(sentinel_lifecycle, "sentinel_task_names",
+                                        return_value=[task]):
+            calls = SentinelDecisionTest()._tick(plan, live, tmp, task)
+        self.assertEqual(calls["rc"], 0)
+        self.assertEqual(len(notified), 1,
+                         "巡邏 tick 讀到 prepare 帶卻沒有透過桌面通道發出提醒")
+        self.assertEqual(calls["alert"], [],
+                         "B3 走的是 notify() 桌面通道，不該同時觸發 escalation.alert"
+                         "（那是撞線／解除族的通道）")
+
+
+class ArmedDriftSelfHealTest(unittest.TestCase):
+    """PRD §4.5.8（v2.1.7 新增）：哨兵武裝狀態漂移自癒。
+
+    立案：`sentinel_lifecycle.liveness_line()` 此前只在人手動跑 `--pace`／`--check`
+    時出聲、且只印警語不動作。本節把同一個判準（`armed_but_missing`）掛進巡邏 tick，
+    偵測到漂移就地自動重新武裝，不需要人手動重跑 `--arm-sentinel`。
+    """
+
+    def _plan_and_state(self, tmp: Path, live: Path, task: str) -> Path:
+        plan = tmp / f"{guard.PLAN_PREFIX}{live.stem}.md"
+        plan.write_text("# 任務書\n", encoding="utf-8", newline="\n")
+        planner.write_relay(plan, {**RelayStateTest.GOOD, "kind": "sentinel",
+                                   "session_id": live.stem, "plan_path": str(plan),
+                                   "reset_source": "operator", "reset_at": "",
+                                   "task_name": task, "transcript": str(live)})
+        return plan
+
+    def test_armed_stamp_present_but_scheduler_shows_missing_self_heals(self) -> None:
+        """紅綠自證核心：`sentinel_task_names()` 回空清單（漂移）⇒ 自動重新武裝，
+        且痕跡檔留下與『巡邏／武裝／自癒（RELAY 版）／解除』互異的事件名。
+        """
+        tmp = Path(tempfile.mkdtemp(prefix="drift-heal-"))
+        live = _fresh_transcript(tmp, "sess-drift.jsonl")
+        task = "AutoSDD_Sentinel_sess-drift"
+        plan = self._plan_and_state(tmp, live, task)
+        armed: list[tuple] = []
+
+        class _StubBackend:
+            name = "stub"
+            credential_key = sb.CRED_KEY_SCHTASKS
+
+            def arm(self, plan_path, t, at_expr, tick, at=None):
+                armed.append((plan_path, t, tick))
+                return 0, "cred-heal"
+
+        with unittest.mock.patch.object(sentinel_lifecycle, "sentinel_task_names",
+                                        return_value=[]), \
+             unittest.mock.patch.object(sb, "select", return_value=_StubBackend()):
+            calls = SentinelDecisionTest()._tick(plan, live, tmp, task)
+        self.assertEqual(calls["rc"], 0)
+        self.assertTrue(armed, "armed stamp 有、排程器查無此工作，卻沒有自動重新武裝")
+        self.assertEqual(armed[0][1], task)
+        log = tmp / f"autosdd_resume_log_{guard.session_id_of(plan)}.jsonl"
+        rows = [json.loads(ln) for ln in log.read_text(encoding="utf-8").splitlines()]
+        healed = [r for r in rows if r["event"] == "sentinel_armed_drift_healed"]
+        self.assertTrue(healed, "沒有留下 sentinel_armed_drift_healed 這一筆互異事件名：" +
+                        str([r["event"] for r in rows]))
+        self.assertTrue(healed[-1]["armed_drift_healed"])
+        self.assertEqual(healed[-1]["task"], task)
+        existing_family = {"sentinel_woken", "sentinel_decided", "sentinel_selfhealed",
+                           "sentinel_heal_failed", "sentinel_rearmed"}
+        self.assertNotIn("sentinel_armed_drift_healed", existing_family,
+                         "事件名與既有家族撞名 ⇒ 無法從痕跡分辨這次是不是漂移自癒")
+
+    def test_when_the_scheduler_still_shows_the_task_nothing_is_re_armed(self) -> None:
+        """控制組：task 確實還在排程器清單裡 ⇒ 不是漂移，不該多此一舉重新武裝。"""
+        tmp = Path(tempfile.mkdtemp(prefix="no-drift-"))
+        live = _fresh_transcript(tmp, "sess-nodrift.jsonl")
+        task = "AutoSDD_Sentinel_sess-nodrift"
+        plan = self._plan_and_state(tmp, live, task)
+        armed: list[tuple] = []
+
+        class _StubBackend:
+            name = "stub"
+            credential_key = sb.CRED_KEY_SCHTASKS
+
+            def arm(self, plan_path, t, at_expr, tick, at=None):
+                armed.append((plan_path, t, tick))
+                return 0, "cred-should-not-happen"
+
+        with unittest.mock.patch.object(sentinel_lifecycle, "sentinel_task_names",
+                                        return_value=[task]), \
+             unittest.mock.patch.object(sb, "select", return_value=_StubBackend()):
+            SentinelDecisionTest()._tick(plan, live, tmp, task)
+        self.assertEqual(armed, [], "排程器現查確實還在，卻仍觸發了自癒重新武裝")
+
+    def test_unmeasurable_scheduler_listing_is_not_mistaken_for_drift(self) -> None:
+        """量不到（`None`）≠ 漂移——載具本身查不到清單時不該誤判成『排程器沒有這支
+        工作』而胡亂重新武裝（同 `sentinel_lifecycle.sentinel_task_names()` 既有紀律）。
+        """
+        tmp = Path(tempfile.mkdtemp(prefix="unmeasurable-"))
+        live = _fresh_transcript(tmp, "sess-unmeasurable.jsonl")
+        task = "AutoSDD_Sentinel_sess-unmeasurable"
+        plan = self._plan_and_state(tmp, live, task)
+        armed: list[tuple] = []
+
+        class _StubBackend:
+            name = "stub"
+            credential_key = sb.CRED_KEY_SCHTASKS
+
+            def arm(self, plan_path, t, at_expr, tick, at=None):
+                armed.append((plan_path, t, tick))
+                return 0, "cred-should-not-happen"
+
+        with unittest.mock.patch.object(sentinel_lifecycle, "sentinel_task_names",
+                                        return_value=None), \
+             unittest.mock.patch.object(sb, "select", return_value=_StubBackend()):
+            SentinelDecisionTest()._tick(plan, live, tmp, task)
+        self.assertEqual(armed, [], "量不到（None）被誤判成漂移而重新武裝")
+
+
 # ════════════════════ R80：時區框架（act 在 Linux 容器抓到、Windows 本機看不見的兩個紅）
 # 缺陷本體：`resets 9am` 是牆上時刻，舊實作拿機器本地時區去解 ⇒ 同一份語料有兩個框架。
 # 修法是把框架收成**一個**，且優先採用**訊息自報**的時區（`… (Asia/Taipei)`）——那是

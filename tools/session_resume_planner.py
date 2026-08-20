@@ -1336,8 +1336,14 @@ def _sentinel_tick(args) -> int:
     # 現在它只是把 `idle` 傳成 `None`，由 `sentinel_decide` 判成靜默 `disarm`——**唯一**
     # 還會叫人的路徑是「有未處理撞線」那三支，而敲不敲桌面再由扇出死者數決定（見
     # `escalation.alert` 的三層）。扇出快照提前到判定之前算，因為死者數現在是叫人的門檻。
+    # 🔴 PRD §4.5.7／§4.5.8（v2.1.6／v2.1.7）：`snapshot_fanout()` 已由 `patrol_housekeeping()`
+    # 取代呼叫——同一個字典，多帶了「主控閒置＋prepare 帶預防性提醒」與「武裝狀態漂移
+    # 自癒」兩件事的稽核欄位。改在這裡接線是刻意的：這是**唯一**每次巡邏都會執行、且此刻
+    # `state`／`now` 兩者皆已就緒的地方；三件事的實作全部住在 `quota_escalation.py`
+    # （`tools/session_resume_planner.py` 本檔 loc 預算餘裕為 0，見 `check_loc_budget.py`
+    # 的 `guardrail_cli` tier——新邏輯放不進本檔，只能在既有呼叫點換一個更胖的被呼叫端）。
     event = guard.unhandled_limit_event(transcript) if transcript.is_file() else None
-    fan = escalation.snapshot_fanout(transcript, event)
+    fan = escalation.patrol_housekeeping(transcript, event, now, state, SENTINEL_INTERVAL_SECONDS, SENTINEL_TICK, log)  # noqa: E501
     idle = (now.timestamp() - guard.newest_activity_at(guard.session_transcripts(transcript)) if transcript.is_file() else None)  # noqa: E501
     decision = sentinel_decide(event, "", idle, now)
     append_log(log, "sentinel_decided", action=decision["action"], reason=decision["reason"], **fan)  # noqa: E501

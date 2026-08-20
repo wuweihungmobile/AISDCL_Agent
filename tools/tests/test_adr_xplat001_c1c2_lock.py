@@ -721,7 +721,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 537,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 5467,
+    "test_adr_xplat001_c1c2_lock.py": 5476,
     "test_archive_defect_log.py": 3846,
     "test_bash32_compat.py": 946,
     "test_bash_probe_spec_contract.py": 983,
@@ -736,7 +736,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_check_wrapper_thinness.py": 1234,
     "test_claim_provenance_r86.py": 341,
     "test_component_sanitizer_shared_layer_lock.py": 293,
-    "test_context_budget_guard.py": 7456,
+    "test_context_budget_guard.py": 7713,
     "test_defect_id_reference_integrity.py": 261,
     "test_dev_start.py": 6910,
     "test_dev_start_ps1_lastexitcode.py": 548,
@@ -976,6 +976,15 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "279+309+24=612，streak 仍為兩輪（R96／R97），未產生第三個連續上升輪。"),
     ("R97", 85418, 85429, 11,
      "[非淨減法輪][同輪追加] 護欄層自身編修（見前列 CrossPlatform_R97_Scan_Findings.md）。"),
+    ("R97", 85429, 85695, 266,
+     "[非淨減法輪][同輪追加] PRD §4.5.7／§4.5.8 落地：`test_context_budget_guard.py` 新增"
+     "三支測試類別（B1/B2/B3 分支開關紅綠自證 ＋ armed stamp 漂移自癒的漂移／未漂移／"
+     "量不到三組控制對照），並含本表自身編修（重釘理由＋更新 `_FROZEN_GUARD_LINES`／"
+     "`_REPIN_LOG_FROZEN_PREFIX_LEN`／sha 常數）的連帶漂移，同 R95/R96/R97 既有體例。"
+     "合法出口逐條實查：刪死碼不適用（皆為新功能的必要回歸覆蓋）；抽共用層不適用"
+     "（生產碼側已先抽——`tools/session_resume_planner.py` guardrail_cli 750/750 零餘裕，"
+     "淨額為 0，新邏輯全落有餘裕的 `tools/lib/quota_escalation.py`）。"
+     "逐檔清單見 CrossPlatform_R97_Scan_Findings.md。"),
 )
 
 
@@ -1182,10 +1191,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: 追加當輪不必動指紋（一列寬限），下一輪要再追加就必須先把前一列納入前綴並重釘，
 #: 否則 `[前綴過期]` 轉紅。草稿兩個值都由 `--print-guard-lines` 印出
 #: （ARCH-02 的教訓：紅了卻沒有出路的鎖會被關掉）。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 31
+_REPIN_LOG_FROZEN_PREFIX_LEN = 32
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "7cbee8ca6a23116e902d56a74da6b2a0bcd1a0de4b0cc1043c2b14daa2a890de")
+    "e44e44eddc8ebfa119a1795d0cf8046026ecfca0d087590f41149cfbc7046147")
 
 
 def repin_log_history_digest(

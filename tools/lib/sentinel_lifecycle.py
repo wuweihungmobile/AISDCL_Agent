@@ -285,6 +285,13 @@ def liveness_line(session_id: str) -> str:
                             sentinel_task_names())
 
 
+# PRD §4.5.8（v2.1.7）：`liveness_problem()` 的布林版——`quota_escalation.
+# _heal_armed_drift()` 拿它決定該不該自動重新武裝，不必自己解析上面那兩則警語字串。
+def armed_but_missing(task: str, jobs: list[str] | None) -> bool:
+    """排程器**確定**查得到清單、但這支不在裡面 ⇒ 真漂移（`jobs is None`＝量不到，不算）。"""
+    return jobs is not None and task not in jobs
+
+
 def plan_state(plan: Path) -> str | None:
     """任務書狀態塊裡的 `state`；讀不出來回 `None`（＝「量不到」，不是「終態」）。
 
