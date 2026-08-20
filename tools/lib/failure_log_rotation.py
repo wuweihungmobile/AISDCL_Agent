@@ -30,7 +30,8 @@ def _head_short_sha(repo_root: Path | None) -> str | None:
     try:
         proc = subprocess.run(
             ["git", "-C", str(repo_root or Path.cwd()), "rev-parse", "--short", "HEAD"],
-            capture_output=True, text=True, timeout=10)
+            capture_output=True, text=True, timeout=10,
+            encoding="utf-8", errors="replace")
     except Exception:  # noqa: BLE001 — 診斷輔助不得因 git 不可用而崩潰
         return None
     return proc.stdout.strip() if proc.returncode == 0 and proc.stdout.strip() else None

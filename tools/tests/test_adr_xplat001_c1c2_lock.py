@@ -721,11 +721,11 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 537,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 5441,
+    "test_adr_xplat001_c1c2_lock.py": 5467,
     "test_archive_defect_log.py": 3846,
     "test_bash32_compat.py": 946,
     "test_bash_probe_spec_contract.py": 983,
-    "test_block_destructive_git_r83.py": 2160,
+    "test_block_destructive_git_r83.py": 2178,
     "test_bootstrap_core.py": 439,
     "test_bootstrap_ps1.py": 160,
     "test_check_defect_log_crossref.py": 3266,
@@ -743,6 +743,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_doc_env_prefix_platform_parity_r60.py": 340,
     "test_doc_loc_baseline_freshness_r60.py": 7135,
     "test_extras_quoting_zsh_safety.py": 365,
+    "test_failure_log_rotation.py": 81,
     "test_find_git_bash_parity.py": 1230,
     "test_gha_action_versions.py": 703,
     "test_git_hooks_install_common.py": 393,
@@ -756,7 +757,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_no_invalid_escape_sequences.py": 329,
     "test_ntfs_trailing_space_device_name.py": 770,
     "test_onboarding_parity_interlock.py": 233,
-    "test_platform_neutral_paths.py": 6197,
+    "test_platform_neutral_paths.py": 6200,
     "test_platform_utils_dedup.py": 1123,
     "test_pre_commit_dispatcher_sigpipe.py": 964,
     "test_pre_push_dispatcher.py": 686,
@@ -770,10 +771,11 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_sanitize_component_frozen_sdd_versions_lock.py": 340,
     "test_schedule_capability_parity.py": 635,
     "test_script_scan_surface_ssot.py": 391,
+    "test_skip_ceiling_ratchet_direction.py": 107,
     "test_skip_discoverability_r83.py": 755,
     "test_smoke_ci_sync.py": 1350,
     "test_stdio_utf8.py": 76,
-    "test_subprocess_encoding_hygiene.py": 1594,
+    "test_subprocess_encoding_hygiene.py": 1599,
     "test_windows_forbidden_filename_parity.py": 1005,
     "test_windows_nightly_anchor_parity.py": 135,
     "test_windows_smoke_heartbeat_doc_sync.py": 197,
@@ -782,6 +784,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_workflow_permission_concurrency_lock.py": 1360,
     "test_workflow_schedule_sync.py": 309,
     "test_workflow_timeout_coverage.py": 158,
+    "test_worktree_paths.py": 104,
 }
 
 
@@ -950,6 +953,29 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "逐檔清單、必要性辯護與代價側現查（含款(12) 到期兌現：上限表追加 (97, 950)、"
      "重新武裝下一段到期輪 99 目標 850）＝CrossPlatform_R97_Scan_Findings.md。"
      "連升 streak：本輪為第 2／2 輪 ⇒ R98 起必須出現一次淨額 ≤ 0。"),
+    ("R97", 85085, 85394, 309,
+     "[非淨減法輪][同輪追加] R97 收尾窗口後續四方複審修復（commit 9ef67f8）：P0-1 資安修復"
+     "把 worktree 路徑處理抽成共用模組 `tools/lib/worktree_paths.py`（回歸測試 "
+     "`test_worktree_paths.py` +103）；P2-1/P2-2 新增失敗紀錄輪替方向鎖與其測試 "
+     "`test_failure_log_rotation.py`（+81）；帳本判準過期缺陷回歸測試 "
+     "`test_skip_ceiling_ratchet_direction.py`（+107）；既有 "
+     "`test_block_destructive_git_r83.py` 補 worktree \"..\" 穿越洞回歸測試 +18。"
+     "三項成長全落判準本體與 fixture，零散文膨脹。合法出口逐條實查：刪死碼不適用（皆為"
+     "新缺陷的必要回歸覆蓋）、抽共用層已是本輪動作本身（worktree_paths.py 即抽出結果）。"
+     "逐檔清單、必要性辯護同前列＝CrossPlatform_R97_Scan_Findings.md。"
+     "本列與前一列同屬 R97（收尾當輪連續追加、依 `repin_round_nets()` 同輪合併語意"
+     "計為同一輪淨額 279+309=588，未產生第三個連續上升輪，streak 仍為 2／2）。"),
+    ("R97", 85394, 85418, 24,
+     "[非淨減法輪][同輪追加] 護欄層重釘自身編修：前一列落地後 `--print-guard-lines` "
+     "覆核發現本檔與另外三支被本輪動到的鎖檔（`test_platform_neutral_paths.py`／"
+     "`test_subprocess_encoding_hygiene.py`／`test_worktree_paths.py`）逐檔漂移——"
+     "護欄層守自己（本表、腐化上界重釘註解、platform-ok 豁免行）的成長，同 R95/R96 體例"
+     "的「本表自身編修」。合法出口逐條實查：刪死碼不適用（皆為本輪修復留下的必要註記）、"
+     "抽共用層不適用（純數字與註解，無可抽結構）。逐檔清單同前列＝"
+     "CrossPlatform_R97_Scan_Findings.md。與前兩列同屬 R97，三列合計淨額 "
+     "279+309+24=612，streak 仍為兩輪（R96／R97），未產生第三個連續上升輪。"),
+    ("R97", 85418, 85429, 11,
+     "[非淨減法輪][同輪追加] 護欄層自身編修（見前列 CrossPlatform_R97_Scan_Findings.md）。"),
 )
 
 
@@ -1156,10 +1182,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: 追加當輪不必動指紋（一列寬限），下一輪要再追加就必須先把前一列納入前綴並重釘，
 #: 否則 `[前綴過期]` 轉紅。草稿兩個值都由 `--print-guard-lines` 印出
 #: （ARCH-02 的教訓：紅了卻沒有出路的鎖會被關掉）。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 28
+_REPIN_LOG_FROZEN_PREFIX_LEN = 31
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "1db9f200d684e0a9478f5aa6e1d4a523822f07839d09be2965270613701b0dd3")
+    "7cbee8ca6a23116e902d56a74da6b2a0bcd1a0de4b0cc1043c2b14daa2a890de")
 
 
 def repin_log_history_digest(

@@ -73,7 +73,8 @@ class TestIsUnderDisposableWorktree(unittest.TestCase):
 class TestCrossPlatformSeparatorAndCaseHandling(unittest.TestCase):
     """不摸磁碟：全程注入 `ntpath` 語意，讓 mac／Linux CI 也真的走進這幾格。"""
 
-    _FAKE_ROOT = r"C:\Fake\WtpRepo123"
+    _FAKE_ROOT = r"C:\Fake\WtpRepo123"  # platform-ok: 全程注入 ntpath 語意，不摸原生
+    # os.path（見 setUp），需要真 Windows 磁碟機字面值才測得到，POSIX 上同樣安全
 
     def setUp(self) -> None:
         env = mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": self._FAKE_ROOT})

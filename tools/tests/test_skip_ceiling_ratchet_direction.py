@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 """`tools/lib/skip_group_policy.py::_RUNTIME_SKIP_CEILING_MAX` 的方向鎖（DEF-200-160）。
 
-WHY：該表上方散文自陳「天花板只准降」，但當回合實查全 repo **無對應的 `_FROZEN_` 常數、
-無方向鎖**——唯一守它的判準只比「基線（`_RUNTIME_SKIP_CEILING`）vs 天花板
+WHY：該表上方散文自陳「天花板只准降」，但當回合實查全 repo **無對應的 `_FROZEN_CEILING_MAX`
+常數、無方向鎖**——唯一守它的判準只比「基線（`_RUNTIME_SKIP_CEILING`）vs 天花板
 （`_RUNTIME_SKIP_CEILING_MAX`）」，兩者一起加大即無判準可擋。本檔補上凍結對照：
 把 `_RUNTIME_SKIP_CEILING_MAX` 的落地當回合快照凍結下來，任何一格數字比凍結值更大即紅。
 

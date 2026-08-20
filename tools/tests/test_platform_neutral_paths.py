@@ -137,7 +137,10 @@ def _scan_roots() -> list[tuple[Path, bool, int]]:
     當場印出——那才是唯一不會腐化的取值面。"""
     latest = _latest_root()
     return [
-        (_TESTS_DIR, True, 53),
+        # 🔴 護欄層重釘 R97 追加當輪由 85085→85394 新增 3 支鎖檔，`tools/tests`
+        # 實測 67 支越過腐化上界 66（`TestScanRootFloorBand` 開的藥：只還守得住
+        # 79% 掃描面），依失敗訊息重釘 53 → 64。
+        (_TESTS_DIR, True, 64),
         (_REPO_ROOT / "AISDLC_SDD" / "scripts" / "tests", True, 28),
         (_REPO_ROOT / "AutoClaude" / "tests", True, 268),
         # LATEST fsm_runtime **整棵遞迴**（原本 tests/ 與頂層分兩列、頂層還是 flat
@@ -538,7 +541,7 @@ def _tmpdir_scan_roots() -> list[tuple[Path, bool, int]]:
       把它們納進來會讓本鎖一上線就紅，而那紅燈反映的是待決策，不是新退化。
     """
     return [
-        (_TESTS_DIR, False, 53),                                       # 實測 56
+        (_TESTS_DIR, False, 64),                                       # 實測 67
         (_REPO_ROOT / "AISDLC_SDD" / "scripts" / "tests", False, 28),  # 實測 29
         (_REPO_ROOT / "AutoClaude" / "tests", True, 268),              # 實測 282
         (_latest_fsm_tests_dir(), True, 74),                           # 實測 78

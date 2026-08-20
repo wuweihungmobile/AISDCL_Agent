@@ -25,7 +25,8 @@ def uncommitted_problems(ledger_path: Path, repo_root: Path) -> list[str]:
     try:
         proc = subprocess.run(
             ["git", "-C", str(repo_root), "status", "--porcelain=v1", "--", str(ledger_path)],
-            capture_output=True, text=True, timeout=20)
+            capture_output=True, text=True, timeout=20,
+            encoding="utf-8", errors="replace")
     except Exception:  # noqa: BLE001 — advisory：git 不可用就不判，不是崩潰
         return []
     if proc.returncode != 0 or not proc.stdout.strip():
