@@ -2843,6 +2843,67 @@ class TestR82RatchetDirectionLock(unittest.TestCase):
         self.assertIn("OVERSIZE_ROW_EXCESS_CEILING", problems[0])
 
 
+class TestLedgerStalenessUncommittedProblems(unittest.TestCase):
+    """`tools/lib/ledger_staleness.py::uncommitted_problems()` 的基本回歸鎖（DEF-200-163）。
+
+    落地時零測試覆蓋（四方複審 Architect／QA 獨立命中）——本組只補三個最基本的分支：
+    帳本乾淨／帳本有未 commit 修改／git 問不出來時 fail-closed。用真的拋棄式 git repo
+    （同 `test_platform_utils_dedup.py` 既有手法），不 mock `git status` 本身，才驗得到
+    它真的在讀 git 的話，不是驗一份自己編的假輸出。
+    """
+
+    def _init_repo_with_committed_ledger(self, root: Path) -> Path:
+        subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+        subprocess.run(["git", "config", "user.email", "test@example.com"],
+                        cwd=root, check=True)
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=root, check=True)
+        ledger = root / "AutoSDD_Defect_Log.md"
+        ledger.write_text("# 缺陷帳本\n\n既有內容\n", encoding="utf-8")
+        subprocess.run(["git", "add", "AutoSDD_Defect_Log.md"], cwd=root, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=root, check=True)
+        return ledger
+
+    def test_a_clean_ledger_reports_nothing(self) -> None:
+        """剛 commit、未再修改 ⇒ 空清單（沒有過期疑慮）。"""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            ledger = self._init_repo_with_committed_ledger(root)
+            self.assertEqual(m._staleness.uncommitted_problems(ledger, root), [])
+
+    def test_an_uncommitted_edit_is_reported(self) -> None:
+        """commit 之後又改了帳本卻沒再 commit ⇒ 必須出聲（本 DEF 修的正是這個盲區）。"""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            ledger = self._init_repo_with_committed_ledger(root)
+            with ledger.open("a", encoding="utf-8") as f:
+                f.write("又追加了一列，還沒 commit\n")
+            problems = m._staleness.uncommitted_problems(ledger, root)
+            self.assertEqual(len(problems), 1, problems)
+            self.assertIn(ledger.name, problems[0])
+
+    def test_git_unavailable_fails_closed_to_empty_list(self) -> None:
+        """git 不可執行（或逾時／非 git repo）時回空清單——advisory 性質，問不出來不是有問題。
+
+        用 mock 讓 `subprocess.run` 拋錯，模擬「這台機器沒有 git」；不得讓例外往外冒。
+        """
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            ledger = root / "AutoSDD_Defect_Log.md"
+            ledger.write_text("內容\n", encoding="utf-8")
+            with mock.patch(
+                "subprocess.run", side_effect=FileNotFoundError("git executable not found"),
+            ):
+                self.assertEqual(m._staleness.uncommitted_problems(ledger, root), [])
+
+    def test_a_non_git_directory_also_fails_closed(self) -> None:
+        """`repo_root` 根本不是 git repo（`git status` 回非零 rc）⇒ 同樣回空清單，不炸掉。"""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            ledger = root / "AutoSDD_Defect_Log.md"
+            ledger.write_text("內容\n", encoding="utf-8")
+            self.assertEqual(m._staleness.uncommitted_problems(ledger, root), [])
+
+
 class TestR82SealedHistoryPrefix(unittest.TestCase):
     """史料前綴不可變（`DEF-101-995`）。
 

@@ -22,11 +22,69 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
 import skip_group_policy as S  # noqa: E402
 
-#: 🔴 落地當回合（本輪）對 `S._RUNTIME_SKIP_CEILING_MAX` 的逐字快照——**只准新增鍵、
-#: 既有鍵的值只准調小**（同 `ledger_rotation.py` 史料封印的精神：這是凍結前綴，不是
-#: 「與現值相等」的斷言，否則會變成砸溫度計）。下修天花板時本表**不動**；上修則必須先
-#: 在缺陷帳本具名理由，才把對應鍵的值也調大——那一行 diff 就是「有人在放寬」的可見痕跡。
-_FROZEN_CEILING_MAX: dict[str, dict[str, int]] = copy.deepcopy(S._RUNTIME_SKIP_CEILING_MAX)
+#: 🔴 DEF-200-160 二審修復（QA 親測證偽原版）：原版寫成
+#: `copy.deepcopy(S._RUNTIME_SKIP_CEILING_MAX)`——那是**每次測試行程啟動時從當下即時模組值
+#: 現算出來的快照**，不是寫死在磁碟上的歷史字面。QA 親自把 `_RUNTIME_SKIP_CEILING_MAX
+#: ['tools/tests@win32']['platform']` 從 41 改成 999（放大 24 倍）重跑本檔，全數通過、
+#: 完全沒抓到——因為「快照」與「現值」永遠是同一個物件的兩份拷貝，比較恆為套套邏輯。
+#: 修法比照同目錄 `skip_tag_policy._POSIX_TAG_RATCHET_CEILING` 的既有做法：把落地當回合
+#: 的真值**逐字抄成原始碼字面 dict**，不得再用 `copy.deepcopy(即時匯入值)` 或任何從
+#: `S._RUNTIME_SKIP_CEILING_MAX` 推導的形式（那樣兩者恆等，方向鎖structurally 不可能觸發）。
+#:
+#: **只准新增鍵、既有鍵的值只准調小**（同 `ledger_rotation.py` 史料封印的精神：這是凍結
+#: 前綴，不是「與現值相等」的斷言，否則會變成砸溫度計）。下修天花板時本表**不動**；
+#: 上修則必須先在缺陷帳本具名理由，才把對應鍵的值也調大——那一行 diff 就是
+#: 「有人在放寬」的可見痕跡。
+_FROZEN_CEILING_MAX: dict[str, dict[str, int]] = {
+    "AutoClaude/tests@win32+nopg+nested": {
+        S.SKIP_GROUP_PLATFORM: 17,
+        S.SKIP_GROUP_TOOL_ABSENCE: 0,
+        S.SKIP_GROUP_ENV_DISABLED: 1,
+        S.SKIP_GROUP_STRUCTURAL: 0,
+        S.SKIP_GROUP_DEBT: 0,
+        S.SKIP_GROUP_UNTAGGED: 118,
+    },
+    "AutoClaude/tests@win32+pg+nested": {
+        S.SKIP_GROUP_PLATFORM: 5,
+        S.SKIP_GROUP_TOOL_ABSENCE: 0,
+        S.SKIP_GROUP_ENV_DISABLED: 12,
+        S.SKIP_GROUP_STRUCTURAL: 1,
+        S.SKIP_GROUP_DEBT: 6,
+        S.SKIP_GROUP_UNTAGGED: 0,
+    },
+    "AutoClaude/tests@darwin+pg+nested": {
+        S.SKIP_GROUP_PLATFORM: 53,
+        S.SKIP_GROUP_TOOL_ABSENCE: 3,
+        S.SKIP_GROUP_ENV_DISABLED: 2,
+        S.SKIP_GROUP_STRUCTURAL: 1,
+        S.SKIP_GROUP_DEBT: 3,
+        S.SKIP_GROUP_UNTAGGED: 0,
+    },
+    "tools/tests@win32": {
+        S.SKIP_GROUP_PLATFORM: 41,
+        S.SKIP_GROUP_TOOL_ABSENCE: 0,
+        S.SKIP_GROUP_ENV_DISABLED: 1,
+        S.SKIP_GROUP_STRUCTURAL: 0,
+        S.SKIP_GROUP_DEBT: 0,
+        S.SKIP_GROUP_UNTAGGED: 0,
+    },
+    "tools/tests@darwin": {
+        S.SKIP_GROUP_PLATFORM: 44,
+        S.SKIP_GROUP_TOOL_ABSENCE: 0,
+        S.SKIP_GROUP_ENV_DISABLED: 0,
+        S.SKIP_GROUP_STRUCTURAL: 0,
+        S.SKIP_GROUP_DEBT: 0,
+        S.SKIP_GROUP_UNTAGGED: 0,
+    },
+    "tools/tests@linux": {
+        S.SKIP_GROUP_PLATFORM: 63,
+        S.SKIP_GROUP_TOOL_ABSENCE: 0,
+        S.SKIP_GROUP_ENV_DISABLED: 0,
+        S.SKIP_GROUP_STRUCTURAL: 0,
+        S.SKIP_GROUP_DEBT: 0,
+        S.SKIP_GROUP_UNTAGGED: 9,
+    },
+}
 
 
 def ceiling_max_direction_problems(

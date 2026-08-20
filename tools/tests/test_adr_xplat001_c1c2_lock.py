@@ -721,14 +721,14 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 537,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 5476,
+    "test_adr_xplat001_c1c2_lock.py": 5492,
     "test_archive_defect_log.py": 3846,
     "test_bash32_compat.py": 946,
     "test_bash_probe_spec_contract.py": 983,
     "test_block_destructive_git_r83.py": 2178,
     "test_bootstrap_core.py": 439,
     "test_bootstrap_ps1.py": 160,
-    "test_check_defect_log_crossref.py": 3266,
+    "test_check_defect_log_crossref.py": 3327,
     "test_check_gha_action_versions.py": 295,
     "test_check_hooks_liveness.py": 3433,
     "test_check_pytest_baseline_sites.py": 297,
@@ -743,7 +743,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_doc_env_prefix_platform_parity_r60.py": 340,
     "test_doc_loc_baseline_freshness_r60.py": 7135,
     "test_extras_quoting_zsh_safety.py": 365,
-    "test_failure_log_rotation.py": 81,
+    "test_failure_log_rotation.py": 80,
     "test_find_git_bash_parity.py": 1230,
     "test_gha_action_versions.py": 703,
     "test_git_hooks_install_common.py": 393,
@@ -771,7 +771,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_sanitize_component_frozen_sdd_versions_lock.py": 340,
     "test_schedule_capability_parity.py": 635,
     "test_script_scan_surface_ssot.py": 391,
-    "test_skip_ceiling_ratchet_direction.py": 107,
+    "test_skip_ceiling_ratchet_direction.py": 165,
     "test_skip_discoverability_r83.py": 755,
     "test_smoke_ci_sync.py": 1350,
     "test_stdio_utf8.py": 76,
@@ -985,6 +985,22 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "（生產碼側已先抽——`tools/session_resume_planner.py` guardrail_cli 750/750 零餘裕，"
      "淨額為 0，新邏輯全落有餘裕的 `tools/lib/quota_escalation.py`）。"
      "逐檔清單見 CrossPlatform_R97_Scan_Findings.md。"),
+    ("R97", 85695, 85813, 118,
+     "[非淨減法輪][同輪追加] 四方最終複審收斂修復：①DEF-200-160 二審——QA 親測揪出方向鎖"
+     "假鎖（`_FROZEN_CEILING_MAX` 原用 `copy.deepcopy(即時匯入值)`，套套邏輯零鑑別力），"
+     "改為原始碼字面凍結（比照 `skip_tag_policy._POSIX_TAG_RATCHET_CEILING` 既有做法），"
+     "`test_skip_ceiling_ratchet_direction.py` +58；②DEF-200-163 補測試覆蓋——"
+     "`tools/lib/ledger_staleness.py::uncommitted_problems()` 落地時零測試，"
+     "`test_check_defect_log_crossref.py` 新增 `TestLedgerStalenessUncommittedProblems`"
+     "（乾淨／未 commit／git 不可用三分支）+61；③`test_failure_log_rotation.py` 移除未用"
+     "`import time` −1。合法出口逐條實查：刪死碼不適用（皆為新缺陷必要回歸覆蓋）、"
+     "搬史料不適用（判準與回歸鎖同次落地）、抽共用層不適用（drift_tolerance=0）。"
+     "紅綠雙向驗證（把真實常數 41→999 重跑方向鎖轉紅、改回後轉綠）與逐檔清單見"
+     "CrossPlatform_R97_Scan_Findings.md「同輪追加④」。"),
+    ("R97", 85813, 85829, 16,
+     "[非淨減法輪][同輪追加] 護欄層重釘自身編修：前一列落地後 `--print-guard-lines` 覆核"
+     "發現本檔自己（新增的稽核列本身）逐檔漂移 +16，同 R95/R96/R97 既有體例。"
+     "逐檔清單見 CrossPlatform_R97_Scan_Findings.md「同輪追加④」。"),
 )
 
 
@@ -1191,10 +1207,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: 追加當輪不必動指紋（一列寬限），下一輪要再追加就必須先把前一列納入前綴並重釘，
 #: 否則 `[前綴過期]` 轉紅。草稿兩個值都由 `--print-guard-lines` 印出
 #: （ARCH-02 的教訓：紅了卻沒有出路的鎖會被關掉）。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 32
+_REPIN_LOG_FROZEN_PREFIX_LEN = 34
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "e44e44eddc8ebfa119a1795d0cf8046026ecfca0d087590f41149cfbc7046147")
+    "098c83c6ae08fce8535e84ec65390d17f3a4a4187de91f5028201f217b89bf66")
 
 
 def repin_log_history_digest(

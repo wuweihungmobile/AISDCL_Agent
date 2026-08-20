@@ -7,7 +7,6 @@ WHY：修前 `.last_failure.log` 是固定檔名、每次覆寫、且 gitignored
 from __future__ import annotations
 
 import sys
-import time
 import unittest
 from pathlib import Path
 from unittest import mock

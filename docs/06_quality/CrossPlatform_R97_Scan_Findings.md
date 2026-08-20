@@ -38,9 +38,10 @@ Architect/SA/SD/QA 四方獨立審查「額度哨兵無人看管耗用 token」�
 `_GUARD_LINES_REPIN_LOG`／`_FROZEN_GUARD_LINES`／`_REPIN_NET_CAP_SCHEDULE` 佔用的行數
 ——見下方「本表含本檔自己」段）。
 
-<!-- guard-total:R97 --> **本輪護欄層累積淨額＝ 84806 → 85695（+889）** —— 逐檔漂移 3 支
+<!-- guard-total:R97 --> **本輪護欄層累積淨額＝ 84806 → 85829（+1023）** —— 逐檔漂移 3 支
 （含「同輪追加」節：commit 9ef67f8 之後收尾窗口續作的 +309 與自身編修 +35，逐項見下方；
-另含 PRD §4.5.7／§4.5.8 落地的 +266，見「同輪追加③」段）
+含 PRD §4.5.7／§4.5.8 落地的 +266，見「同輪追加③」段；
+含四方最終複審收斂修復的 +134，見「同輪追加④」段）
 
 ## 淨額與逐檔清單
 
@@ -91,13 +92,13 @@ Architect/SA/SD/QA 四方獨立審查「額度哨兵無人看管耗用 token」�
 | 量 | 值 | 出處 |
 |---|---|---|
 | R97 單輪淨額上限（重釘前） | 1100 | `net_cap_for_round(97)`（`_REPIN_NET_CAP_SCHEDULE` 末段 `(95, 1100)`） |
-| 本輪淨額 | +279 | 遠低於上限，款(10) 不觸發 |
-| 連續上升輪數 | 2（R96 +407、R97 +279） | 上限 `_REPIN_MAX_CONSECUTIVE_RISING_ROUNDS = 2`，剛好踩線但不逾越，款(11) 不觸發；**R98 起必須出現一次淨額 ≤ 0** |
+| 本輪淨額（原始＋追加①②③） | +889 | 遠低於當時上限，款(10) 不觸發 |
 | 到期義務 | 已到期並兌現 | `_REPIN_NET_CAP_DUE_ROUND = 97`（本輪＝到期輪）；上限表追加 `(97, 950)`，同輪重新武裝下一段：到期輪 99、目標 850 |
+| 🔴 本輪淨額（追加④之後） | **+1023 > 950** | **`[超出每輪上限]` 已觸發**——追加④（四方最終複審收斂修復，DEF-200-160／DEF-200-163 必要回歸鎖 +134）把本輪累積淨額推過同輪剛兌現的到期上限 950。三條合法出口（刪等量行／合併鎖檔／把史料搬進帳本）皆會實質縮減本輪剛新增的必要回歸覆蓋，與本 repo「測試編碼 WHY」既有紀律衝突；`拆給下一輪`需要一個尚未到來、且不違反 `_REPIN_MAX_CONSECUTIVE_RISING_ROUNDS=2`（R96/R97 已用滿）的新輪次。**本次收斂刻意不強行壓線**，如實記錄並交由下一個收尾單人窗口裁決（下修排程表或接受一次超額並於下一輪立刻出現淨額 ≤ 0）。連續上升輪數維持 2（R96／R97，未產生第三輪）|
 
-<!-- guard-total:R97 --> 護欄層累積總量現值 **84806 → 85695（+889）**；原始逐檔清單即上一節，
-「同輪追加」節見下方新增段落，款(12) 到期義務同輪兌現（上限表追加 `(97, 950)`，
-重新武裝下一段到期輪 99、目標 850）。
+<!-- guard-total:R97 --> 護欄層累積總量現值 **84806 → 85829（+1023）**；原始逐檔清單即上一節，
+「同輪追加」節見下方新增段落（含「同輪追加④」四方最終複審收斂修復），款(12) 到期義務
+同輪兌現（上限表追加 `(97, 950)`，重新武裝下一段到期輪 99、目標 850）。
 
 ## 同輪追加（收尾窗口續作，commit 9ef67f8 之後的四方複審修復）
 
@@ -111,15 +112,17 @@ commit 9ef67f8 落地資安修復＋架構機制（P0-1／P2-1／P2-2）新增 3
 | 追加①（功能回歸鎖） | 85085 → 85394（+309） | `test_worktree_paths.py` +103（P0-1：`tools/lib/worktree_paths.py` 抽出共用模組，`is_under_disposable_worktree()` 的 `..` 穿越洞回歸鎖）；`test_failure_log_rotation.py` +81（P2-1/P2-2：失敗紀錄輪替方向鎖）；`test_skip_ceiling_ratchet_direction.py` +107（`_RUNTIME_SKIP_CEILING_MAX` 方向鎖，帳本判準過期缺陷回歸測試）；`test_block_destructive_git_r83.py` +18（既有檔補 worktree `..` 穿越洞回歸測試） |
 | 追加②（護欄層重釘自身編修） | 85394 → 85429（+35） | `test_adr_xplat001_c1c2_lock.py` +26（本表／稽核列／腐化上界重釘註解自身佔行）、`test_platform_neutral_paths.py` +3（`tools/tests` 掃描下限重釘 53→64 的兩處註解）、`test_subprocess_encoding_hygiene.py` +5（`tools` 掃描下限重釘 110→131 的註解）、`test_worktree_paths.py` +1（`# platform-ok:` 豁免行） |
 | 追加③（AutoClaude_Token_監控與喚醒機制 PRD §4.5.7／§4.5.8 落地） | 85429 → 85695（+266） | `test_context_budget_guard.py` +257：新增 `ControllerIdlePrepareWatchTest`（B1／B2，主控閒置量測與 prepare 帶預防性提醒的分支開關紅綠自證）、`PatrolNoticeIsDesktopNotHookTest`（B3，整合測試證明通知從巡邏 tick 本身觸發、零 hook 事件）、`ArmedDriftSelfHealTest`（新缺口：armed stamp 對排程器現查漂移時自動重新武裝，含漂移／未漂移／量不到三組控制對照）；`test_adr_xplat001_c1c2_lock.py` +9（本表／稽核列自身編修，同追加②體例）。生產碼側新邏輯全落 `tools/lib/quota_escalation.py`（400 budget 內，零跨檔溢出）與 `tools/lib/sentinel_lifecycle.py`（3 行擴充，剛好用滿既有餘裕），`tools/session_resume_planner.py`（guardrail_cli tier 750/750 零餘裕）淨額為 0（換被呼叫端更胖，未新增任何一行） |
+| 追加④（四方最終複審收斂修復） | 85695 → 85829（+134） | `test_skip_ceiling_ratchet_direction.py` +58：DEF-200-160 二審修復——QA 親測把 `_RUNTIME_SKIP_CEILING_MAX['tools/tests@win32']['platform']` 從 41 改成 999 重跑方向鎖，全數通過、完全沒抓到（根因＝`_FROZEN_CEILING_MAX` 原用 `copy.deepcopy(即時匯入值)`，套套邏輯）；改為原始碼字面凍結（比照 `skip_tag_policy._POSIX_TAG_RATCHET_CEILING` 既有做法），並以同一手法紅綠雙向驗證（放大轉紅、改回轉綠）；`test_check_defect_log_crossref.py` +61：DEF-200-163——`tools/lib/ledger_staleness.py::uncommitted_problems()` 落地時零測試覆蓋，新增 `TestLedgerStalenessUncommittedProblems`（拋棄式 git repo：乾淨帳本／未 commit 修改／git 不可執行三分支）；`test_failure_log_rotation.py` −1：移除未用 `import time`；`test_adr_xplat001_c1c2_lock.py` +16（本表／稽核列自身編修，同追加②③體例） |
 
 三條合法出口逐條實查（同上一節體例）：刪死碼不適用（皆為本輪修復必要的回歸覆蓋或
-治理帳本自身的稽核痕跡）、搬史料不適用（P0-1/P2-1/P2-2 判準與回歸鎖同次落地，無等量
-舊敘事可搬）、抽共用層不適用（`drift_tolerance=0`，且追加②純為數字與註解，無可抽結構）。
+治理帳本自身的稽核痕跡）、搬史料不適用（P0-1/P2-1/P2-2、DEF-200-160/163 判準與回歸鎖
+同次落地，無等量舊敘事可搬）、抽共用層不適用（`drift_tolerance=0`，且追加②④純為數字與
+註解，無可抽結構）。
 
-連續上升輪數：R96（+407）／R97（原始 +279、追加① +309、追加② +35，合計 +623）
-——依 `repin_round_nets()` 同輪合併語意仍計為兩輪，未產生第三個連續上升輪，
-`_REPIN_MAX_CONSECUTIVE_RISING_ROUNDS = 2` 不觸發；`net_cap_for_round(97) = 950`，
-本輪合計 623 遠低於上限，`[超出每輪上限]` 不觸發。
+連續上升輪數：R96（+407）／R97（原始 +279、追加① +309、追加② +35、追加③ +266、
+追加④ +134，合計 +1023）——依 `repin_round_nets()` 同輪合併語意仍計為兩輪，未產生
+第三個連續上升輪，`_REPIN_MAX_CONSECUTIVE_RISING_ROUNDS = 2` 不觸發；
+`net_cap_for_round(97) = 950`，本輪合計 1023 已**超過**上限 950——見下方「款(10) 觸發」段。
 
 ## 逐輪淨額（現查，不寫死）
 
