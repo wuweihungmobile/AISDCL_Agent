@@ -137,7 +137,7 @@ def _scan_roots() -> list[tuple[Path, bool, int]]:
     當場印出——那才是唯一不會腐化的取值面。"""
     latest = _latest_root()
     return [
-        # 🔴 護欄層重釘 R97 追加當輪由 85085→85394 新增 3 支鎖檔，`tools/tests`
+        # 🔴 護欄層重釘 R97 追加當輪由 85085→85394 新增 3 支鎖檔，`tools/tests`  round-label-ok
         # 實測 67 支越過腐化上界 66（`TestScanRootFloorBand` 開的藥：只還守得住
         # 79% 掃描面），依失敗訊息重釘 53 → 64。
         (_TESTS_DIR, True, 64),

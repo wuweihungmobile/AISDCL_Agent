@@ -142,7 +142,7 @@ def _scan_roots() -> list[tuple[Path, int]]:
         # `test_skip_discoverability_r83.py`），該樹由 112 支長到 116 支，92 這個下限只
         # 還守得住 79% 的掃描面 ⇒ `tree_count_verdict()` 的腐化上界（115）當場紅並直接
         # 給出該填的數字（110 ＝ 116 × 0.95），本列照填、不做加減推算。
-        # 🔴 R97 追加當輪重釘 110 → 131（**方向是收緊**，同上一段語意）。觸發＝本輪
+        # 🔴 R97 追加當輪重釘 110 → 131（**方向是收緊**，同上一段語意）。觸發＝本輪  round-label-ok
         # 新增 `tools/lib/worktree_paths.py`／`tools/lib/ledger_staleness.py`／
         # `tools/lib/failure_log_rotation.py` 三支模組，該樹由 130 支長到 138 支，
         # 110 這個下限只還守得住 80% 的掃描面 ⇒ `tree_count_verdict()` 的腐化上界
