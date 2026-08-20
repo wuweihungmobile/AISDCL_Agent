@@ -134,9 +134,9 @@ from lib.windows_skip_tags import (  # noqa: E402, I001
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import failure_log_rotation  # noqa: E402  ← DEF-200-162：失敗明細檔名／輪替 SSOT
 import skip_group_policy  # noqa: E402  ← R80 包 A（S3-04）：skip 分群天花板的政策 SSOT
 import skip_runtime_report  # noqa: E402  ← M6 的 id 集合面（計數面答不了「有沒有跑過」）
-import failure_log_rotation  # noqa: E402  ← DEF-200-162：失敗明細檔名／輪替 SSOT
 
 _PATTERN = "test_*.py"
 
