@@ -65,7 +65,11 @@ MONOREPO_ROOT = REPO_ROOT.parent
 
 
 def _pwsh_exe() -> str | None:
-    return shutil.which("pwsh") or shutil.which("powershell")
+    # DEF-101-797：原為 pwsh 優先，與 R59 DEF-101-509 拍板的「生產引擎（Windows
+    # PowerShell 5.1）優先、pwsh 只作次選」方向相反——schtasks Action 實際跑的是
+    # 5.1，本檔若以 7 為先探到的引擎去驗證，驗的就不是生產路徑（同型判準見
+    # `tools/tests/_ps_engine.py::production_engine`）。
+    return shutil.which("powershell") or shutil.which("pwsh")
 
 
 _PWSH = _pwsh_exe()

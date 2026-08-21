@@ -714,28 +714,49 @@ class TestNoStaleLocalEngineClaims(unittest.TestCase):
     # `stale_local_engine_claims`），本欄保留為同一個物件的別名——既有斷言逐句
     # 直接對句型判準說話，不必繞過掃描器。
     _STALE_RE = _STALE_CLAIM_RE
-    # 射程＝`tools/` 樹全部 .py。刻意不限 `tools/tests/`：本輪命中的最嚴重一筆在
+    # 射程＝一組樹根（DEF-101-797：原單樹根 `tools/` 漏了 `AISDLC_SDD/scripts/` 的
+    # 同型站點，`test_install_post_commit_windowsapps_guard.py` 的 `_pwsh_exe()`
+    # 引擎優先序即長在那裡）。刻意不限 `tools/tests/`：本輪命中的最嚴重一筆在
     # `tools/lib/windows_skip_tags.py`＝護欄層生產碼，只掃測試就會漏掉它。
-    _SCAN_ROOT = Path(__file__).resolve().parents[1]
+    _SCAN_ROOTS = (
+        Path(__file__).resolve().parents[1],
+        Path(__file__).resolve().parents[2] / "AISDLC_SDD" / "scripts",
+    )
 
     @classmethod
     def _scan_files(cls) -> list[Path]:
-        return sorted(p for p in cls._SCAN_ROOT.rglob("*.py") if "__pycache__" not in p.parts)
+        files: list[Path] = []
+        for root in cls._SCAN_ROOTS:
+            files.extend(p for p in root.rglob("*.py") if "__pycache__" not in p.parts)
+        return sorted(files)
+
+    @classmethod
+    def _rel(cls, path: Path) -> str:
+        """回報用的相對路徑：對多樹根逐一嘗試，失敗才退回絕對路徑。"""
+        for root in cls._SCAN_ROOTS:
+            try:
+                return str(path.relative_to(root))
+            except ValueError:
+                continue
+        return str(path)
 
     def test_scan_root_is_anchored(self) -> None:
         """🔴 R73 二審防呆（SD）：射程錯位必須 fail-loud，不得靜默縮小。
 
-        `_SCAN_ROOT = parents[1]` 依賴本檔位於 `tools/tests/`。若本檔被移到
-        `tools/tests/sub/`，射程會靜默縮成 `tools/tests`（SD 實測 79 檔 → 56 檔），
-        而唯一守衛 `assertGreater(scanned, 20)` **抓不到**——本輪最嚴重的那筆違規
-        （`tools/lib/windows_skip_tags.py`）就會逸出而全套照綠。
-        故除了檔數下限，另釘「樹根叫 tools」與「sentinel 檔必須在掃描集合內」。
+        DEF-101-797：原判準斷言「樹根名必須是 tools」，改成多樹根後此斷言不再適用
+        （第二個樹根名為 `scripts`）。改斷言為「每個樹根都必須存在且非空」——與原判準
+        同一個意圖：本檔或任一樹根被搬走時要 fail-loud，而不是靜默縮小掃描面。
         """
-        self.assertEqual(
-            self._SCAN_ROOT.name, "tools",
-            f"射程樹根不是 tools/（實得 {self._SCAN_ROOT}）——本檔可能被移動了位置",
-        )
-        sentinel = self._SCAN_ROOT / "lib" / "windows_skip_tags.py"
+        for root in self._SCAN_ROOTS:
+            self.assertTrue(
+                root.is_dir(),
+                f"射程樹根不存在：{root}——本檔或該樹根可能被移動了位置",
+            )
+            self.assertTrue(
+                any(root.rglob("*.py")),
+                f"射程樹根為空（掃不到任何 .py）：{root}——射程可能已錯位",
+            )
+        sentinel = self._SCAN_ROOTS[0] / "lib" / "windows_skip_tags.py"
         self.assertIn(
             sentinel, self._scan_files(),
             "sentinel `tools/lib/windows_skip_tags.py` 不在掃描集合內——射程已錯位。"
@@ -750,7 +771,7 @@ class TestNoStaleLocalEngineClaims(unittest.TestCase):
             # 而不是自己拋 UnicodeDecodeError（SD 二審指出的失效模式）。
             text = path.read_text(encoding="utf-8", errors="replace")
             scanned += 1
-            rel = path.relative_to(self._SCAN_ROOT)
+            rel = self._rel(path)
             for spanned, hit in stale_local_engine_claims(text):
                 where = "-".join(str(ln) for ln in spanned)
                 offenders.append(f"{rel}:{where}: {hit}")
@@ -773,7 +794,7 @@ class TestNoStaleLocalEngineClaims(unittest.TestCase):
         """🔴 R73 鑑別力：射程擴大前逃過鎖的三種真實句型，必須逐句被命中。
 
         意圖（Rule 9）：這三句不是我編的樣本，是 R73 實查到的**逐字原文**（分別來自
-        護欄層、測試 docstring、本檔自己）。若有人把 `_SCAN_ROOT` 縮回單一檔案，
+        護欄層、測試 docstring、本檔自己）。若有人把 `_SCAN_ROOTS` 縮回單一樹根，
         `test_tools_tree_has_no_hardcoded_local_engine_absence` 會變綠而缺陷復活——
         本 case 讓「偵測器認不認得這些句型」與「射程涵不涵蓋它們」分開受測。
         """
@@ -921,7 +942,7 @@ class TestNoStaleLocalEngineClaims(unittest.TestCase):
             if path.resolve() == Path(__file__).resolve():
                 continue
             if _STALE_SAMPLE_MARKER in path.read_text(encoding="utf-8"):
-                users.append(str(path.relative_to(self._SCAN_ROOT)))
+                users.append(self._rel(path))
         self.assertEqual(
             users, [],
             f"`{_STALE_SAMPLE_MARKER}` 只允許用在偵測器自己的樣本上，"

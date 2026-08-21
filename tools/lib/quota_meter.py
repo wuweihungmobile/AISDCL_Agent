@@ -400,7 +400,7 @@ def normalize_pct(value: object, scale: float) -> float | None:
 # 所以另有一條釘住「電真的通了」，否則整包可以靠什麼都不做通過驗收。
 def bucket_readings(payload: object) -> list[dict]:
     """payload 裡每一個看得到水位的桶：`{kind, pct, resets_at, group,
-    is_active, severity, via}`。
+    is_active, severity, scope_model, via}`。
 
     🔴 `resets_at` 與 `group` **逐桶保留**（R82）：判讀層的分類只由 `resets_at` 導出，
     而 `group` 是伺服器自己的分組欄（實測多數桶沒有它 ⇒ 一律允許 `None`，
@@ -412,6 +412,11 @@ def bucket_readings(payload: object) -> list[dict]:
     if not isinstance(payload, dict):
         return []
     out: list[dict] = []
+    # 🔴 R98：`limits[].scope.model.display_name`——伺服器對模型分軌桶具名回報是哪一個
+    # 模型（實測 `weekly_scoped` 帶 `scope={"model":{"display_name":"Fable"},...}`，
+    # 與 UI「Fable 61%」逐格吻合）。此前這個欄位被靜默丟棄，讓判讀層無從分辨「這一軸
+    # 是不是我這次派工用的模型」——同一句「取數層少給一半，判讀層再聰明也補不回來」
+    # （見 `SCHEMA` 段）。`.get()` 全程容忍缺席：沒有 `scope` 的桶（多數）回 `None`。
     for item in payload.get("limits") or []:
         if not isinstance(item, dict):
             continue
@@ -421,7 +426,7 @@ def bucket_readings(payload: object) -> list[dict]:
                         "resets_at": item.get("resets_at"),
                         "group": item.get("group"),
                         "is_active": item.get("is_active"),
-                        "severity": item.get("severity"),
+                        "severity": item.get("severity"), "scope_model": ((item.get("scope") or {}).get("model") or {}).get("display_name"),  # noqa: E501
                         "via": "limits[].percent"})
     for key, val in payload.items():
         if key == "limits" or not isinstance(val, dict):
@@ -432,7 +437,7 @@ def bucket_readings(payload: object) -> list[dict]:
                 out.append({"kind": key, "pct": pct, "resets_at": val.get("resets_at"),
                             "group": val.get("group"),
                             "is_active": val.get("is_active"),
-                            "severity": val.get("severity"),
+                            "severity": val.get("severity"), "scope_model": ((val.get("scope") or {}).get("model") or {}).get("display_name"),  # noqa: E501
                             "via": f"{key}.{field}"})
                 break
     return out

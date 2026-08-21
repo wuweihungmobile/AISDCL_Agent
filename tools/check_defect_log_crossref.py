@@ -74,6 +74,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _stdio_utf8  # noqa: E402,F401  # Windows 非 UTF-8 終端 print(✅/❌) 防崩潰保護
 from lib import defect_ledger_index as _ledger_index  # noqa: E402
 from lib import governance_docs as _gov_docs  # noqa: E402
+from lib import ledger_closing_guards as _closing  # noqa: E402
 from lib import ledger_rotation as _rotation  # noqa: E402
 from lib import ledger_staleness as _staleness  # noqa: E402
 
@@ -652,15 +653,14 @@ _UNASSIGNED_LITERAL = "未指派"
 #: 追加重釘史」四步可在同一次變更內走完。`DEF-101-206`（P4、零行動項）本輪結為 wontfix，
 #: 本表 6 → 5、天花板 6 → 5、`UNPINNED_HANDOVER_CEILING_HISTORY` 追加 5（追加後未封印的
 #: 尾巴＝1，未逾 `_SEAL_TAIL_MAX`，故封印本身不必動）。這是判準訊息自己指名的動作，不是放寬。
-_UNPINNED_HANDOVER_GRANDFATHERED = frozenset({
-    "DEF-101-235",
-    "DEF-101-324",
-})
+#: 🔴 帳本減半波：唯二兩筆存量豁免本輪雙雙以 `closed-by-decision` 結案，清單清空、
+#: 天花板 2 → 0（見 `UNPINNED_HANDOVER_CEILING_HISTORY`）。
+_UNPINNED_HANDOVER_GRANDFATHERED: frozenset[str] = frozenset()
 #: shrink-only 棘輪上限（形狀比照 `tools/tests/` 的檔數棘輪）。只能往小改。
 #: 🔴 歷次下修（34→28→…→5→4）的逐筆理由與被刪 ID 一律**不住這裡**：本檔受 LOC 相等棘輪
 #: 管、餘裕近乎零，史料逐字保全於 `CrossPlatform_R89_Closure_Evidence.md` 的
 #: 〈護欄層史料搬遷（帳本瘦身批）〉節。每一次下修都是判準訊息自己指名的動作，不是放寬。
-_UNPINNED_HANDOVER_CEILING = 2
+_UNPINNED_HANDOVER_CEILING = 0
 
 #: 🔴 本天花板的**方向鎖**（`DEF-101-993`）：`grandfather_ceiling_problems()` 判的是
 #: 「清單筆數 ≤ 天花板」，對「把天花板往上搬」零判準。判準、重釘史與 WHY 皆住
@@ -1276,7 +1276,7 @@ def cli(argv: list[str]) -> int:
     if len(argv) == 2 and argv[0] == "--reconcile":
         return _run_reconcile(Path(argv[1]))
     if argv == ["--unresolved-count"]:  # 未結存量的唯一量測入口（R74 PKG-2）
-        return _ledger_index.report_unresolved(_load_ledger_status())
+        return _closing.print_external_blocked_count(_DEFECT_LOG.parent) or _ledger_index.report_unresolved(_load_ledger_status())  # noqa: E501
     if argv:
         print(f"❌ 無法辨識的參數：{argv}\n{_USAGE}", file=sys.stderr)
         return 2
@@ -1378,7 +1378,7 @@ def main() -> int:
         unres_fails, unres_warns = _ledger_index.unresolved_ceiling_problems(ledger)
         unpinned_problems += unres_fails
         # 逐列位元組上限同受本守衛（豁免清單綁真實主檔的 ID）；鑑別力見 TestR79RowByteCeiling。
-        deferred += _ledger_index.oversize_row_problems(ledger_text)
+        deferred += _ledger_index.oversize_row_problems(ledger_text) + _closing.closing_round_problems(_REPO_ROOT, _DEFECT_LOG, ledger, _table_layout, _row_cells, _classify, _ROW_RE, _ID_RE)  # noqa: E501
         # DEF-200-163：帳本相對 git HEAD 若有未 commit 修改，本場結論可能已過期（advisory）。
         for note in _staleness.uncommitted_problems(_DEFECT_LOG, _REPO_ROOT):
             print(f"⚠️  {note}", file=sys.stderr)
@@ -1466,7 +1466,8 @@ def main() -> int:
           "**現查**推得（不寫死）——本輪若尚未寫入任何帳本列，此值仍停在上一輪，"
           "屆時「交棒給剛結束的那一輪」會合法通過（刻意選的 fail-open 方向：漏抓而非"
           "假紅，窗口於本輪第一列落地時自動關閉，見 lagging_clock_notes()）")
-    return 0
+    # 無參數 main() 併印外部阻塞軌筆數（先前僅 --unresolved-count 看得到）。
+    return _closing.print_external_blocked_count(_DEFECT_LOG.parent) or 0
 
 
 if __name__ == "__main__":

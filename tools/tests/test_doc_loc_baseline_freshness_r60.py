@@ -4253,6 +4253,8 @@ _GHOST_PATH_BASELINE: frozenset[str] = frozenset({
     "tools/session_endurance.py",
     "tools/tests/_ci_scan_anchors.py",
     "tools/tests/_source_strip.py",
+    # R99 round-label-ok：ADR-XPLAT-012 §2.4 歷史錯誤路徑，WHY 見 CrossPlatform_R99_Scan_Findings.md
+    "tools/lib/check_loc_budget.py",
 })
 #: shrink-only 天花板（同 `_GHOST_SYMBOL_BASELINE_CEILING` 的立案理由）：上面那句
 #: 「只准變少」若只是散文，這道鎖最省力的關法就是把新寫下的壞路徑登記進表。
@@ -4263,7 +4265,8 @@ _GHOST_PATH_BASELINE: frozenset[str] = frozenset({
 #: 🔴 R82／P4 再下修：18 → **17**——`AISDLC_SDD/.claude/settings.local.json` 改由第三態
 #: 承接（見上方表頭與 `is_machine_local_artifact()`）。這一筆不是「清掉了」而是「搬家了」，
 #: 但天花板要的就是**本表**只准變小，搬走同樣算變小。
-_GHOST_PATH_BASELINE_CEILING = 17
+#: R99 round-label-ok：17→18 新增一筆，WHY 同上方 CrossPlatform_R99_Scan_Findings.md
+_GHOST_PATH_BASELINE_CEILING = 18
 
 #: 目錄項快取：本檔的平台中立性鎖會把全檔重跑 3 次，逐段列目錄不快取會慢一個量級。
 _DIR_ENTRY_CACHE: dict[str, frozenset[str]] = {}

@@ -397,6 +397,14 @@ on:
       - "tools/lib/schedule_backend_calendar.py"
       - "tools/lib/sentinel_lifecycle_arm.py"
       - "tools/lib/worktree_paths.py"
+      # R99：本輪新建的四支根層 SSOT（CI 逐軌活性狀態／護欄層行數分類法／帳本收尾
+      #      共用判準／帳本逐列超標三常數 shrink-only 自動重釘）。漏列的代價逐字同
+      #      DEF-101-042：只改該檔時其回歸鎖不會跑（與 R80／R81／R86／R98 同一形態、
+      #      同一支判準，第五次重犯）。
+      - "tools/lib/ci_run_status.py"
+      - "tools/lib/guard_line_taxonomy.py"
+      - "tools/lib/ledger_closing_guards.py"
+      - "tools/lib/oversize_repin.py"
       - "AutoClaude/autoclaude/execution/pre_run_validator.py"
       - "AutoClaude/autoclaude/core/ports/observability.py"
       - "AutoClaude/autoclaude/core/ports/rtm_feedback.py"
@@ -674,6 +682,14 @@ on:
       - "tools/lib/schedule_backend_calendar.py"
       - "tools/lib/sentinel_lifecycle_arm.py"
       - "tools/lib/worktree_paths.py"
+      # R99：本輪新建的四支根層 SSOT（CI 逐軌活性狀態／護欄層行數分類法／帳本收尾
+      #      共用判準／帳本逐列超標三常數 shrink-only 自動重釘）。漏列的代價逐字同
+      #      DEF-101-042：只改該檔時其回歸鎖不會跑（與 R80／R81／R86／R98 同一形態、
+      #      同一支判準，第五次重犯）。
+      - "tools/lib/ci_run_status.py"
+      - "tools/lib/guard_line_taxonomy.py"
+      - "tools/lib/ledger_closing_guards.py"
+      - "tools/lib/oversize_repin.py"
       - "AutoClaude/autoclaude/execution/pre_run_validator.py"
       - "AutoClaude/autoclaude/core/ports/observability.py"
       - "AutoClaude/autoclaude/core/ports/rtm_feedback.py"

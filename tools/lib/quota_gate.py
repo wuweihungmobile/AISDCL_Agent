@@ -402,7 +402,7 @@ def read_quota(now: datetime, path: Path | None = None) -> quota_policy.QuotaSta
     axes = tuple(
         quota_policy.Axis(str(a.get("kind") or ""), float(a["pct"]), a.get("resets_at"),
                           a.get("group"), a.get("is_active"), a.get("severity"),
-                          str(a.get("via") or ""))
+                          str(a.get("via") or ""), a.get("scope_model"))  # R98：模型分軌名
         for a in data.get("axes") or []
         if isinstance(a, dict) and type(a.get("pct")) in (int, float))
     if measured is None or not axes:
@@ -689,7 +689,10 @@ def pace_state(now: datetime) -> quota_policy.QuotaState:
 # 那一行現在自己回答「為什麼空著也不能衝」：本窗分攤到的長窗配額是多少、已用多少、
 # 還剩幾分鐘會蒸發。落款則在同一次呼叫裡 append 一列——**查一次就多一個樣本**，
 # 而換算比只能從歷時差分來（見 `record_burn` 上方那段）。
-def pace_report(now: datetime | None = None) -> str:
+# 🔴 R98：新增 `model` 參數——這次要問的目標模型；`None`＝不知道，模型分軌軸（見
+# `quota_policy.MODEL_SCOPED_KINDS`）一律不進 cap 聚合，但仍全帶在 describe() 那一行裡
+# （`quota_policy._in_cap_gate()`）。既有呼叫端全部沿用這個預設，行為逐字不變。
+def pace_report(now: datetime | None = None, model: str | None = None) -> str:
     """`--pace` 的全文：第一行是那個數字，第二行起是逐軸明細（每個 % 都帶 kind 與分鐘）。"""
     now = now or datetime.now().astimezone()
     policy, problems = quota_policy.load_policy(policy_env())
@@ -703,7 +706,7 @@ def pace_report(now: datetime | None = None) -> str:
     # 取數次數與時點逐字不變（同一次呼叫、同一個 `now`），只是把值留下來給第二個消費者。
     record_burn(state, live := live_dispatches(fanout_ledger_path(), now))
     ratio, ratio_note, plan_note = burn_ratio(state)
-    decision = quota_policy.decide(state, now, policy, ratio, ratio_note)
+    decision = quota_policy.decide(state, now, policy, ratio, ratio_note, active_model=model)
     # 🔴 R86 跨包：引擎（`autoclaude/`）**不准** import 本層（`.importlinter` 的
     # `no-harness-import`）⇒ 唯一的傳遞方式是檔案契約。fail-soft 在 `pace_contract.write`
     # 內（寫不進去只在 stderr 說一次，`--pace` 的 rc 與那一行輸出都不受影響）。

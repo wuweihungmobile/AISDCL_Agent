@@ -120,6 +120,7 @@ import _stdio_utf8  # noqa: E402,F401  # Windows 非 UTF-8 終端 print(✅/❌)
 import check_defect_log_crossref as gate  # noqa: E402  # 判準 SSOT：不自己另寫一份正則
 from lib import defect_ledger_index as _ledger_index  # noqa: E402
 from lib import ledger_rotation as _rotation  # noqa: E402
+from lib import oversize_repin as _repin  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _QUALITY_DIR = _REPO_ROOT / "docs" / "06_quality"
@@ -1455,12 +1456,27 @@ def apply(archive_num: int, ack: frozenset[str], header_note: str,
     return 0
 
 
+def _run_repin_cli(override_ceiling: int | None, reason: str) -> int:
+    """`--repin-oversize` 的磁碟 I/O 外殼：純決策在 `_repin.run_repin()`，這裡只讀寫檔。"""
+    index_path = _REPO_ROOT / "tools" / "lib" / "defect_ledger_index.py"
+    rc, msg, new_text = _repin.run_repin(
+        _LEDGER.read_text(encoding="utf-8-sig"),
+        index_path.read_text(encoding="utf-8"), override_ceiling, reason)
+    print(msg)
+    if new_text is not None:
+        index_path.write_bytes(new_text.encode("utf-8"))  # bytes 層寫入，見既有 apply() 紀律
+    return rc
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="缺陷帳本歸檔輪替工具")
     g = ap.add_mutually_exclusive_group(required=True)
     g.add_argument("--plan", action="store_true", help="乾跑：列出可搬／需承認／不可搬")
     g.add_argument("--apply", action="store_true", help="實際搬遷")
     g.add_argument("--check", action="store_true", help="事後保全稽核")
+    g.add_argument("--repin-oversize", action="store_true", help="機械物③：逐列超標三常數 shrink-only 自動重釘（詳見 lib/oversize_repin.py）")  # noqa: E501
+    ap.add_argument("--repin-oversize-ceiling", type=int, default=None, help="人工核准放寬 OVERSIZE_ROW_CEILING 的新值（須搭配 --reason）")  # noqa: E501
+    ap.add_argument("--reason", default="", help="--repin-oversize-ceiling 的核准理由")
     ap.add_argument("--archive-num", type=int, help="--apply 時的 archive 編號")
     ap.add_argument("--ack-handoff", default="",
                     help="逗號分隔的 DEF-ID，具名承認搬遷帶交棒字樣的列")
@@ -1473,6 +1489,8 @@ def main(argv: list[str] | None = None) -> int:
     ack, only, keep = (frozenset(x.strip() for x in s.split(",") if x.strip())
                        for s in (a.ack_handoff, a.only, a.keep))
 
+    if a.repin_oversize:
+        return _run_repin_cli(a.repin_oversize_ceiling, a.reason)
     if a.check:
         return check()
     if a.plan:

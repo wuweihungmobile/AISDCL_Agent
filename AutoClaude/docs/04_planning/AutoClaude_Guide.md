@@ -586,45 +586,22 @@ pip install 'autoclaude[pgvector]'   # pgvector Python 套件（需 DB 端安裝
 
 ### 15.3 Windows 11 PostgreSQL DB 主機設定（以系統管理員 PowerShell 於 DB 主機執行）
 
-**Step 1 — `postgresql.conf` 允許遠端連線**
+> 🔴 **SSOT 指針（DEF-101-998）**：DB 主機端逐步設定（`postgresql.conf`／`pg_hba.conf`／
+> 防火牆／pgvector extension 安裝／建立 DB 與用戶）唯一權威出處＝
+> [`docs/08_deployment/DB_Only_Switch_Runbook.md`](../08_deployment/DB_Only_Switch_Runbook.md)
+> §0（`0.1`～`0.5`）。此前本節與該 Runbook、`AutoClaude/docs/AutoClaude_Guide.md` 同一段
+> 步驟各自維護一份拷貝，三處逐字漂移（PG 版本號、路徑寫死值互不同步）——同一段設定
+> 步驟改一次要記得清三處，漏一處就等於沒清。本節不再重複逐步指令，僅列摘要；
+> 詳細步驟、指令與疑難排解一律以 Runbook 為準。
+
+摘要（PowerShell 系統管理員身分，於 DB 主機執行）：
 
 ```powershell
-psql -U postgres -c "SHOW config_file;"
-$pgConf = "C:\Program Files\PostgreSQL\17\data\postgresql.conf"
-(Get-Content $pgConf) -replace "#listen_addresses = 'localhost'", "listen_addresses = '*'" | Set-Content $pgConf
-```
-
-**Step 2 — `pg_hba.conf` 允許 LAN 連線（固定來源 IP）**
-
-```powershell
-$pgHba = "C:\Program Files\PostgreSQL\17\data\pg_hba.conf"
-Add-Content $pgHba "host    aisdlc    all    192.168.1.25/32    md5"
-```
-
-**Step 3 — 重啟服務 + 開放防火牆**
-
-```powershell
-$svcName = (Get-Service | Where-Object {$_.Name -like "postgresql*"} | Select-Object -First 1).Name
-Restart-Service -Name $svcName
-netsh advfirewall firewall add rule name="PostgreSQL 5432" dir=in action=allow protocol=TCP localport=5432
-```
-
-**Step 4 — 安裝 pgvector extension（Docker 推薦）**
-
-```powershell
-docker run -d --name pgvector-db -p 5432:5432 `
-    -e POSTGRES_USER=koala -e POSTGRES_PASSWORD=your_password_here -e POSTGRES_DB=aisdlc `
-    pgvector/pgvector:pg17
-```
-
-**Step 5 — 建立 DB / 用戶 / extension**
-
-```sql
-CREATE DATABASE aisdlc;
-CREATE USER koala WITH PASSWORD 'your_password_here';
-GRANT ALL ON DATABASE aisdlc TO koala;
-\c aisdlc
-CREATE EXTENSION IF NOT EXISTS vector;
+# 1. postgresql.conf：listen_addresses = '*'
+# 2. pg_hba.conf：host aisdlc all <應用主機 IP>/32 md5
+# 3. 重啟 PostgreSQL 服務 + 開防火牆 port 5432
+# 4. 安裝 pgvector extension（Docker 或原生安裝，詳見 Runbook §0.4）
+# 5. CREATE DATABASE / CREATE USER / GRANT / CREATE EXTENSION IF NOT EXISTS vector;
 ```
 
 ### 15.4 灰度驗證（both 模式）

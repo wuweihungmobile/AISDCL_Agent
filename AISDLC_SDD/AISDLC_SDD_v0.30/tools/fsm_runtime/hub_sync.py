@@ -211,6 +211,7 @@ class HubSyncClient:
         registry_path: Optional[Path] = None,
         *,
         anon_config: Optional[AnonymizerConfig] = None,
+        outbox_root: Optional[Path] = None,
     ):
         self.registry_path = Path(registry_path) if registry_path else DEFAULT_REGISTRY_PATH
         if not self.registry_path.exists():
@@ -264,6 +265,15 @@ class HubSyncClient:
         )
         self.audit_log_path = REPO_ROOT / self.registry.get(
             "push_audit_log", "build/reports/hub/PUSH-AUDIT.yaml"
+        )
+        # DEF-101-596/DEF-101-663: outbox root was hard-coded to REPO_ROOT, so
+        # concurrent test suites racing on the same real production path could
+        # clobber/rmtree each other's artifacts. Now injectable (tests should
+        # pass a tmp_path-derived dir); default preserves prior behavior.
+        self.outbox_root = (
+            Path(outbox_root)
+            if outbox_root is not None
+            else REPO_ROOT / "build" / "reports" / "hub" / "push-outbox"
         )
 
     # ─────────── helpers ───────────
@@ -590,7 +600,7 @@ class HubSyncClient:
         ep = self._resolve_endpoint(endpoint_id) if endpoint_id else None
         if ep is None:
             raise HubConfigError("real push requires --endpoint to be specified")
-        outbox = REPO_ROOT / "build" / "reports" / "hub" / "push-outbox" / ep.id
+        outbox = self.outbox_root / ep.id
         outbox.mkdir(parents=True, exist_ok=True)
         for it in result.items:
             if it.would_push and it.anonymized_text is not None:

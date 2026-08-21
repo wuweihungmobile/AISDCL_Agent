@@ -68,7 +68,7 @@ def _utc_date_of_record(record: dict[str, Any]) -> str | None:
         return None
     try:
         dt = _dt.datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
-        return dt.astimezone(_dt.timezone.utc).date().isoformat()
+        return dt.astimezone(_dt.UTC).date().isoformat()
     except (TypeError, ValueError):
         return None
 
@@ -238,7 +238,7 @@ def run(
         )
 
     record = {
-        "timestamp": _dt.datetime.now(tz=_dt.timezone.utc).isoformat(),
+        "timestamp": _dt.datetime.now(tz=_dt.UTC).isoformat(),
         "git_sha": git_sha,
         "scenarios": valid_scenarios,
     }
@@ -258,13 +258,18 @@ def run(
                 old_baseline_p95 = None
         locked, new_p95 = should_lock(history, scen, old_baseline_p95)
         if locked and new_p95 is not None:
-            # 取最後一筆 stats（最保守 p95 取自 tail max）
-            tail_last = history[-1]["scenarios"][scen]
+            # DEF-200-164：p50/p99/samples 改取「p95 最大那一筆」的同一次量測，不再各自
+            # 取不同母體（原本 p50/p99 取 tail 最後一筆、samples 硬寫 MIN_SAMPLES，三者
+            # 可能互不自洽，例如 p99 < p95）。同一筆天然滿足 p50 <= p95 <= p99。
+            worst = max(
+                (t["scenarios"][scen] for t in history[-CONSECUTIVE_RUNS:]),
+                key=lambda s: s.get("p95_ms", float("-inf")),
+            )
             locked_updates[scen] = {
-                "p50_ms": tail_last.get("p50_ms", 0.0),
+                "p50_ms": worst.get("p50_ms", 0.0),
                 "p95_ms": round(new_p95, 3),
-                "p99_ms": tail_last.get("p99_ms", new_p95),
-                "samples": MIN_SAMPLES,
+                "p99_ms": worst.get("p99_ms", new_p95),
+                "samples": worst.get("samples", MIN_SAMPLES),
                 "git_sha": git_sha,
                 "captured_at": record["timestamp"],
             }

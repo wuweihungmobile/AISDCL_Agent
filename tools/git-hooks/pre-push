@@ -448,4 +448,60 @@ if [ "$run_integration_gate" -eq 1 ]; then
   fi
 fi
 
+# DEF-101-733：push 前唯讀查一次「上一個 main commit」的雲端 CI 結論——本機閘門
+# 全綠不代表雲端全綠（本機只驗得到平台面的其中一支，R69 實測全綠推 main 後雲端
+# 三支轉紅正是這個落差的活體標本）。純 advisory：`gh` 缺席／未登入／逾時／解析
+# 失敗一律靜默降級，不得影響 rc 或擋下本次 push（不消耗 Actions 額度，只讀
+# read-only API，同 DEF-101-208 既有哨兵的額度紀律）。
+if command -v gh >/dev/null 2>&1 && [ -n "$PY" ]; then
+  GH_RUN_JSON="$(gh run list --limit 1 --json status,conclusion,workflowName,updatedAt 2>/dev/null)"
+  if [ -n "$GH_RUN_JSON" ]; then
+    # 用環境變數而非 stdin 重導向餵資料：`"$PY" -` 本身就是「從 stdin 讀程式碼」，
+    # 若再把 JSON 資料也接到同一條 stdin（管線或 heredoc）會與程式碼搶同一個 fd，
+    # 兩者哪個先被讀完全看 shell 怎麼合併，親測會把 JSON 併進程式碼字面前段造成
+    # SyntaxError。環境變數是資料與程式碼分開通道的最小改法。
+    export GH_RUN_JSON
+    "$PY" - <<'PYEOF'
+import json
+import os
+import sys
+
+try:
+    runs = json.loads(os.environ.get("GH_RUN_JSON", "") or "")
+except ValueError:
+    runs = None
+if isinstance(runs, list) and runs and isinstance(runs[0], dict):
+    r = runs[0]
+    status = r.get("status")
+    conclusion = r.get("conclusion")
+    workflow = r.get("workflowName", "?")
+    if status != "completed":
+        print(f"[pre-push dispatcher] 雲端 CI 現況（DEF-101-733）：最新 run（{workflow}）"
+              f"執行中，status={status}")
+    elif conclusion == "success":
+        print(f"[pre-push dispatcher] 雲端 CI 現況（DEF-101-733）：最新 run（{workflow}）= success")
+    else:
+        print(f"[pre-push dispatcher] ⚠ 雲端 CI 現況（DEF-101-733）：最新 run（{workflow}）"
+              f"= {conclusion}（{r.get('updatedAt', '?')}）——本機閘門全過不代表雲端全過",
+              file=sys.stderr)
+PYEOF
+    unset GH_RUN_JSON
+  fi
+fi
+
+# DEF-200-117：末段失敗摘要——git 對 hook 非零一律只印通用的
+# 「! [remote rejected] ... failed to push some refs」，外觀與網路／權限問題無法
+# 分辨；而真因（某個 leg 的 ❌ 行）常落在 log 中段，被後面子步驟自己印出的成功
+# 訊息（例如 ruff 乾淨時的出廠預設訊息）蓋掉，讀者容易停在最後一行、誤以為
+# 「全過」。故末段**依 rc 分流**且**rc≠0 時絕不印任何『全過』語意的句子**：
+if [ "$rc" -ne 0 ]; then
+  echo "" >&2
+  echo "[pre-push dispatcher] ❌❌❌ 本次 push 被擋下（rc=${rc}）——不是全過" >&2
+  echo "[pre-push dispatcher] git 稍後印的「failed to push some refs」不會指出是哪個 leg 壞的；" >&2
+  echo "[pre-push dispatcher] 真因＝上面輸出裡**最後一個 ❌ 開頭的行**，往上捲找它，" >&2
+  echo "[pre-push dispatcher] 不要被同一段輸出裡任何子步驟自己印的成功訊息（如 ruff 乾淨時的" >&2
+  echo "[pre-push dispatcher] 出廠訊息）誤導成「已經全過」" >&2
+else
+  echo "[pre-push dispatcher] ✅ 本次 push 觸發的所有 leg 皆通過（rc=0）"
+fi
 exit $rc

@@ -99,6 +99,11 @@ _SUPPORTED_SPEC_FORMAT_VERSIONS = frozenset({"1.0"})
 _DEFAULT_SPEC_FORMAT_VERSION = "1.0"
 _SPEC_VERSION_RE = re.compile(r"spec[-_ ]format[-_ ]version\D{0,4}(\d+\.\d+)", re.I)
 
+# DEF-200-176：官方模板唯一命名（`TEST-CONTRACT-SPEC-*.md`／`TCS-*.md`）；
+# `CONTRACT-TEST-SPEC-INTEGRATION-*.md`／`ENV-CONTRACT-SPEC-*.md` 等模板同樣含
+# 「CONTRACT」+「SPEC」子字串但語意不同，字母序 `sorted()[0]` 會靜默選錯檔。
+_EXACT_CONTRACT_SPEC_RE = re.compile(r"^(TEST-CONTRACT-SPEC-|TCS-)", re.I)
+
 
 class SddToPlaybookAdapter:
     """ISpecSource 實作：解析凍結後的 TEST-CONTRACT-SPEC，編譯為 PlaybookTask。"""
@@ -239,6 +244,15 @@ class SddToPlaybookAdapter:
             raise FileNotFoundError(
                 f"{spec_dir}: 找不到 TEST-CONTRACT-SPEC（*CONTRACT*SPEC*.md / TCS-*.md）"
             )
+        if len(candidates) > 1:
+            exact = [p for p in candidates if _EXACT_CONTRACT_SPEC_RE.match(p.name)]
+            if len(exact) != 1:
+                raise ValueError(
+                    f"{spec_dir}: {len(candidates)} 份規格檔皆含「CONTRACT+SPEC」，"
+                    f"官方命名（TEST-CONTRACT-SPEC-*.md/TCS-*.md）未能唯一鎖定其一，"
+                    f"字母序選檔可能選錯（DEF-200-176）：{[p.name for p in candidates]}"
+                )
+            candidates = exact
         spec_file = candidates[0]
         return spec_file.read_text(encoding="utf-8"), spec_file
 

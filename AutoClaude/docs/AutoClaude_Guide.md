@@ -487,94 +487,21 @@ AutoClaude 同時支援 Windows / macOS / Linux 應用主機，PostgreSQL DB 主
 
 ### 14.3 Windows 11 PostgreSQL 設定（DB 主機 192.168.1.133）
 
-以下指令均在 **DB 主機（192.168.1.133）** 以 **PowerShell（系統管理員）** 執行。
+> 🔴 **SSOT 指針（DEF-101-998）**：DB 主機端逐步設定（`postgresql.conf`／`pg_hba.conf`／
+> 防火牆／pgvector extension 安裝／建立 DB 與用戶／連線驗證）唯一權威出處＝
+> [`docs/08_deployment/DB_Only_Switch_Runbook.md`](08_deployment/DB_Only_Switch_Runbook.md)
+> §0。此前本節與該 Runbook、`docs/04_planning/AutoClaude_Guide.md` 同一段步驟各自維護
+> 一份拷貝，三處逐字漂移——同一段設定步驟改一次要記得清三處，漏一處就等於沒清。本節
+> 不再重複逐步指令；詳細步驟一律以 Runbook 為準。
 
-**Step 1 — 修改 `postgresql.conf`（允許遠端連線）**
-
-```powershell
-# 查詢 postgresql.conf 路徑
-psql -U postgres -c "SHOW config_file;"
-
-# 以 PowerShell 替換（確認版本號，範例為 17）
-$pgConf = "C:\Program Files\PostgreSQL\17\data\postgresql.conf"
-(Get-Content $pgConf) `
-    -replace "#listen_addresses = 'localhost'", "listen_addresses = '*'" |
-    Set-Content $pgConf
-```
-
-**Step 2 — 修改 `pg_hba.conf`（允許 LAN 連線）**
+摘要（PowerShell 系統管理員身分，於 DB 主機執行）：
 
 ```powershell
-$pgHba = "C:\Program Files\PostgreSQL\17\data\pg_hba.conf"
-Add-Content $pgHba "host    aisdlc    all    192.168.1.25/32    md5"
-```
-
-**Step 3 — 重啟服務 + 開放防火牆**
-
-```powershell
-# 查詢服務名稱
-Get-Service | Where-Object {$_.Name -like "postgresql*"}
-
-# 重啟
-$svcName = (Get-Service | Where-Object {$_.Name -like "postgresql*"} | Select-Object -First 1).Name
-Restart-Service -Name $svcName
-
-# Windows 防火牆
-netsh advfirewall firewall add rule `
-    name="PostgreSQL 5432" dir=in action=allow protocol=TCP localport=5432
-```
-
-**Step 4 — 安裝 pgvector extension（二選一）**
-
-*方式 A：Docker Desktop（推薦）*
-
-```powershell
-docker run -d --name pgvector-db -p 5432:5432 `
-    -e POSTGRES_USER=koala `
-    -e POSTGRES_PASSWORD=your_password_here `
-    -e POSTGRES_DB=aisdlc `
-    pgvector/pgvector:pg17
-```
-
-*方式 B：原生安裝（無 Docker）*
-
-1. 至 [pgvector Releases](https://github.com/pgvector/pgvector/releases) 下載 Windows 預編譯 zip（對應 PostgreSQL 版本）
-2. 以系統管理員複製三個檔案：
-
-```powershell
-$pgLib = "C:\Program Files\PostgreSQL\17\lib\"
-$pgExt = "C:\Program Files\PostgreSQL\17\share\extension\"
-Copy-Item ".\vector.dll"     $pgLib
-Copy-Item ".\vector.control" $pgExt
-Copy-Item ".\vector--*.sql"  $pgExt
-Restart-Service -Name $svcName
-```
-
-**Step 5 — 建立 DB / 用戶 / extension**
-
-```sql
--- psql -U postgres
-CREATE DATABASE aisdlc;
-CREATE USER koala WITH PASSWORD 'your_password_here';
-GRANT ALL ON DATABASE aisdlc TO koala;
-\c aisdlc
-CREATE EXTENSION IF NOT EXISTS vector;
-```
-
-**Step 6 — 驗證（從應用主機執行）**
-
-```bash
-python -c "
-import psycopg2
-conn = psycopg2.connect(host='192.168.1.133', dbname='aisdlc', user='koala', password='your_password_here')
-cur = conn.cursor()
-cur.execute('SELECT version()')
-print(cur.fetchone()[0])
-cur.execute(\"SELECT extname FROM pg_extension WHERE extname = 'vector'\")
-print('pgvector:', cur.fetchone())
-conn.close()
-print('OK')
-"
+# 1. postgresql.conf：listen_addresses = '*'
+# 2. pg_hba.conf：host aisdlc all <應用主機 IP>/32 md5
+# 3. 重啟 PostgreSQL 服務 + 開防火牆 port 5432
+# 4. 安裝 pgvector extension（Docker 或原生安裝，詳見 Runbook §0.4）
+# 5. CREATE DATABASE / CREATE USER / GRANT / CREATE EXTENSION IF NOT EXISTS vector;
 ```
 
 ### 14.4 設定灰度驗證（both 模式）

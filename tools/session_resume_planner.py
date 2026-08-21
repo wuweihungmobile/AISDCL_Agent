@@ -880,8 +880,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--session-id", help="session id（逐字稿檔名去副檔名）")
     parser.add_argument("--transcript", help="直接指定逐字稿 .jsonl 路徑")
     parser.add_argument("--out", help="任務書落點（預設：系統暫存）")
-    parser.add_argument("--check", action="store_true",
-                        help="只印當前 context 用量與百分比，不寫檔")
+    parser.add_argument("--check", action="store_true", help="只印當前 context 用量與百分比，不寫檔")  # noqa: E501
+    # 🔴 R98：`--pace` 用的目標模型（模型分軌軸只有命中它才進 cap，見 quota_policy）；
+    # `None`＝不知道，一律不進 cap 但仍出聲（見 quota_gate.pace_report 的 WHY）。
+    parser.add_argument("--model", help="--pace 用：目標模型名（不給則模型分軌軸一律不進 cap，只出聲）")  # noqa: E501
     parser.add_argument("--check-autocompact", action="store_true", dest="check_autocompact", help="只印 harness 的 autocompact 姿態；**被關掉時 rc=1**" "（不需要逐字稿，可單獨跑）")  # noqa: E501
     parser.add_argument("--print-schtasks-command", action="store_true", dest="print_schtasks", help="只印離線排程指令與取證指令，**不執行、不註冊**" "（會一併產生任務書：排程起來的那一跑要吃它）")  # noqa: E501
     parser.add_argument("--register-schtasks", action="store_true", dest="register_schtasks",
@@ -1397,7 +1399,7 @@ def main(argv: list[str]) -> int:
     # 人機入口。放在最前面那幾道之後、逐字稿解析之前：它**不需要逐字稿**，掛在需要逐字稿
     # 的路徑上會讓「這台機器上找不到 session」變成查不到額度（同 --check-autocompact 的理由）。
     if args.pace:
-        print(quota_gate.pace_report(), end="")
+        print(quota_gate.pace_report(model=args.model), end="")
         # 修3（R95；ADR §2.9）：哨兵活性欄。定位不到 session 時靜默跳過（本旗標的
         # 「不依賴逐字稿」契約不變）；定位得到而 stamp 與排程器現查不一致才出聲。
         aim = resolve_transcript(args.session_id, args.transcript)

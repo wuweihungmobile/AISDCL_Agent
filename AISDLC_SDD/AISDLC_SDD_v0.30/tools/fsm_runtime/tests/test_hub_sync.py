@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import inspect
 import re
-import shutil
 import stat
 from pathlib import Path
 from typing import Dict, List
@@ -383,7 +382,7 @@ class TestHubSyncClient:
         client = sync_mod.HubSyncClient(reg)
         artifact = tmp_path / "leaky.md"
         artifact.write_text(
-            "Customer alice@acme.com hit the bug; rotate sk-ABCDE0123456789FGHIJ.",
+            "Customer alice@acme.com hit the bug; rotate sk-FAKEABCDE0123456789FGHIJ.",
             encoding="utf-8",
         )
         monkeypatch.setenv("SDD_HUB_PUSH_CONFIRMED", "test_push")
@@ -781,7 +780,7 @@ class TestAcceptanceE2E:
         clean2.write_text("# FPL-B\nUntestable AC pattern observed.\n", encoding="utf-8")
         leaky = a_root / "FPL-C.md"
         leaky.write_text(
-            "# FPL-C\nLeaked alice@acme.com and key sk-AAAABBBBCCCCDDDDEEEEFFFF.\n",
+            "# FPL-C\nLeaked alice@acme.com and key sk-FAKEAAAABBBBCCCCDDDDEEEEFFFF.\n",
             encoding="utf-8",
         )
 
@@ -794,7 +793,10 @@ class TestAcceptanceE2E:
         (tmp_path / "hub_repo" / "rules").mkdir(parents=True, exist_ok=True)
         (tmp_path / "hub_repo" / "failure-patterns").mkdir(parents=True, exist_ok=True)
 
-        a_client = sync_mod.HubSyncClient(a_reg)
+        # DEF-101-596/DEF-101-663: inject a per-test outbox root instead of the
+        # real REPO_ROOT push-outbox — the latter races with any other test
+        # suite writing/rmtree-ing the same production path concurrently.
+        a_client = sync_mod.HubSyncClient(a_reg, outbox_root=tmp_path / "outbox")
         monkeypatch.setenv("SDD_HUB_PUSH_CONFIRMED", "a30_1_e2e")
 
         # PII Scanner blocks the leaky one.
@@ -803,7 +805,7 @@ class TestAcceptanceE2E:
         # Push the two clean ones — should write outbox.
         res = a_client.push([clean1, clean2], endpoint_id="shared-hub")
         assert res.all_clean is True
-        outbox = REPO_ROOT / "build" / "reports" / "hub" / "push-outbox" / "shared-hub"
+        outbox = a_client.outbox_root / "shared-hub"
         assert outbox.exists()
         assert (outbox / "FPL-A.md").exists()
         assert (outbox / "FPL-B.md").exists()
@@ -836,9 +838,8 @@ class TestAcceptanceE2E:
         verified = yaml.safe_load(local_rule.read_text(encoding="utf-8"))
         assert verified["trust_level"] == "verified"
         assert verified["reviewed_by"] == "user-b"
-
-        # Cleanup outbox to avoid side-effects across tests
-        shutil.rmtree(outbox, ignore_errors=True)
+        # outbox now lives under tmp_path (outbox_root injected above), so no
+        # manual cross-test cleanup is needed — pytest tears down tmp_path itself.
 
     def test_a30_5_failure_non_blocking(self, tmp_path, monkeypatch):
         """A-30.5: Hub failure (missing path) returns error but doesn't escalate."""

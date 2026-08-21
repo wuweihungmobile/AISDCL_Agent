@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import ast
 import atexit
+import contextlib
 import io
+import os
 import re
 import shutil
 import subprocess
@@ -16,11 +18,13 @@ import sys
 import tempfile
 import tokenize
 import unittest
+from datetime import date
 from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import check_defect_log_crossref as m  # noqa: E402
+from lib import ledger_closing_guards as lcg  # noqa: E402
 
 # 系統暫存目錄放測試用 fixture 檔（非 repo 內），process 結束自動清除，避免污染 tools/tests/。
 _TMP_DIR = Path(tempfile.mkdtemp(prefix="crossref_test_"))
@@ -3321,6 +3325,290 @@ class TestCrossRowReassignMustAlsoNameAFreshRound(unittest.TestCase):
             m.orphan_backlog_problems(text), [],
             "跨列出口收緊後主檔轉紅 ⇒ 依 ARCH-R59-NB4 必須同輪把那幾列的承接輪號補正，"
             "**不是**把判準放寬回布林")
+
+
+# ============================================================ 帳本減半收斂期機械物①②
+class TestNetNewVsClosedRatchet(unittest.TestCase):
+    """機械物①（淨額棘輪）：`tools/lib/ledger_closing_guards.py`。
+
+    意圖（Rule 9）：這道鎖要驗的是「帳本正在變胖時會被擋下」而非「函式有回傳值」，
+    所以正樣本斷言淨增筆數逐字出現在訊息裡（不是只看非空清單），且逃生口用
+    `mock.patch.dict(os.environ, …)` 真的注入環境變數（不是繞過 `os.environ.get`）。
+    """
+
+    HEAD = ("| ID | 日期 | 發現情境 | 現象與證據 | 嚴重度 | 分流去向 | 狀態 |\n"
+            "|---|---|---|---|---|---|---|\n")
+
+    def _row(self, def_id: str, status: str) -> str:
+        return f"| {def_id} | d | R99 | x | P3 | y | {status} |\n"
+
+    def _repo(self, initial_ledger_text: str) -> tuple[Path, Path]:
+        repo = Path(tempfile.mkdtemp(prefix="net_ratchet_repo_"))
+        self.addCleanup(shutil.rmtree, repo, ignore_errors=True)
+        env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t.example",
+               "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t.example"}
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True, env=env)
+        ledger = repo / "ledger.md"
+        ledger.write_text(initial_ledger_text, encoding="utf-8")
+        subprocess.run(["git", "add", "ledger.md"], cwd=repo, check=True, env=env)
+        subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=repo, check=True, env=env)
+        return repo, ledger
+
+    def _problems(self, repo: Path, ledger: Path, curr: dict) -> list[str]:
+        return lcg.net_new_vs_closed_problems(
+            repo, ledger, curr, m._table_layout, m._row_cells, m._classify,
+            m._ROW_RE, m._ID_RE)
+
+    def test_net_positive_growth_is_red(self) -> None:
+        repo, ledger = self._repo(self.HEAD + self._row("DEF-1-001", "fixed"))
+        curr = {"DEF-1-001": "fixed", "DEF-1-002": "open", "DEF-1-003": "open"}
+        problems = self._problems(repo, ledger, curr)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("淨增 2", problems[0])
+        self.assertIn("DEF-1-002", problems[0])
+        self.assertIn("DEF-1-003", problems[0])
+
+    def test_net_zero_is_green(self) -> None:
+        """新增與結案打平（淨額 == 0）不算違反——規則是 `<= 0` 不是 `< 0`。"""
+        repo, ledger = self._repo(self.HEAD + self._row("DEF-1-001", "open"))
+        curr = {"DEF-1-001": "fixed", "DEF-1-002": "open"}
+        self.assertEqual(self._problems(repo, ledger, curr), [])
+
+    def test_net_negative_is_green(self) -> None:
+        repo, ledger = self._repo(
+            self.HEAD + self._row("DEF-1-001", "open") + self._row("DEF-1-002", "open"))
+        curr = {"DEF-1-001": "fixed", "DEF-1-002": "fixed"}
+        self.assertEqual(self._problems(repo, ledger, curr), [])
+
+    def test_escape_hatch_env_var_bypasses_a_real_violation(self) -> None:
+        repo, ledger = self._repo(self.HEAD + self._row("DEF-1-001", "fixed"))
+        curr = {"DEF-1-001": "fixed", "DEF-1-002": "open"}
+        self.assertNotEqual(self._problems(repo, ledger, curr), [],
+                            "前提不成立：這組輸入本來就該是綠的，逃生口測不出東西")
+        with mock.patch.dict(os.environ, {lcg.AUTOSDD_NET_RATCHET_OFF: "1"}):
+            self.assertEqual(self._problems(repo, ledger, curr), [])
+
+    def test_non_git_directory_fails_open(self) -> None:
+        """量不到基準（非 git 工作樹）一律放行，不假造基準去逼假紅；收斂波 R-02：
+        fail-open 必須**出聲**（修復前 stdout／stderr 皆空，無聲失能無人知道）。"""
+        non_repo = Path(tempfile.mkdtemp(prefix="not_a_repo_"))
+        self.addCleanup(shutil.rmtree, non_repo, ignore_errors=True)
+        ledger = non_repo / "ledger.md"
+        ledger.write_text(self.HEAD, encoding="utf-8")
+        curr = {"DEF-1-001": "open", "DEF-1-002": "open", "DEF-1-003": "open"}
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            self.assertEqual(self._problems(non_repo, ledger, curr), [])
+        self.assertIn("fail-open", buf.getvalue())
+
+    def test_first_commit_with_no_such_path_at_head_fails_open(self) -> None:
+        """檔案是本次才新增進版本控制（HEAD 版尚不存在該路徑）——同樣量不到基準，
+        同樣必須出聲（收斂波 R-02）。"""
+        repo = Path(tempfile.mkdtemp(prefix="empty_repo_"))
+        self.addCleanup(shutil.rmtree, repo, ignore_errors=True)
+        env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t.example",
+               "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t.example"}
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True, env=env)
+        (repo / "placeholder.txt").write_text("x", encoding="utf-8")
+        subprocess.run(["git", "add", "placeholder.txt"], cwd=repo, check=True, env=env)
+        subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=repo, check=True, env=env)
+        ledger = repo / "ledger.md"  # 從未進過版本控制
+        ledger.write_text(self.HEAD, encoding="utf-8")
+        curr = {"DEF-1-001": "open"}
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            self.assertEqual(self._problems(repo, ledger, curr), [])
+        self.assertIn("fail-open", buf.getvalue())
+
+    def test_no_git_executable_fails_open_and_warns(self) -> None:
+        """收斂波 R-02：QA 實測繞過樣本——`subprocess.run` 拋 `OSError`（本機無 git）
+        時修復前 stdout／stderr 皆空，這道棘輪無聲失能無人知道；修復後必須出聲。"""
+        repo, ledger = self._repo(self.HEAD + self._row("DEF-1-001", "open"))
+        curr = {"DEF-1-001": "open", "DEF-1-002": "open"}
+        buf = io.StringIO()
+        with mock.patch("subprocess.run", side_effect=OSError("no git")), \
+             contextlib.redirect_stderr(buf):
+            problems = self._problems(repo, ledger, curr)
+        self.assertEqual(problems, [], "fail-open 決策本身不變——只補出聲，不阻斷")
+        self.assertIn("fail-open", buf.getvalue())
+        self.assertIn("git", buf.getvalue())
+
+
+class TestExternalBlockedLog(unittest.TestCase):
+    """機械物②（外部阻塞軌）：`tools/lib/ledger_closing_guards.py`。"""
+
+    HEAD = ("| DEF-ID | 具名阻塞源 | 阻塞起始日 | 解鎖條件（可機械查） | 最近複查日 |\n"
+            "|---|---|---|---|---|\n")
+
+    def _row(self, def_id: str, source: str, review: str) -> str:
+        return f"| {def_id} | {source} | 2026-01-01 | 見解鎖條件說明 | {review} |\n"
+
+    def test_named_source_enum_rejects_free_text(self) -> None:
+        text = self.HEAD + self._row("DEF-9-001", "隨便寫的理由", "2026-08-20")
+        fails, _ = lcg.external_blocked_log_problems(text, set(), date(2026, 8, 21))
+        self.assertEqual(len(fails), 1)
+        self.assertIn("不是具名枚舉值", fails[0])
+
+    def test_named_source_enum_accepts_all_four_forms(self) -> None:
+        for source in ("GitHub Actions 帳務", "Windows 實機", "上游套件", "其他-供應商停服"):
+            with self.subTest(source=source):
+                text = self.HEAD + self._row("DEF-9-001", source, "2026-08-20")
+                fails, _ = lcg.external_blocked_log_problems(text, set(), date(2026, 8, 21))
+                self.assertEqual(fails, [])
+
+    def test_legal_prefix_followed_by_free_text_suffix_is_rejected(self) -> None:
+        """收斂波 R-01：QA 實測繞過樣本——原正則只錨頭未錨尾，`.match()` 對「合法字首＋
+        任意自由文字」照樣放行。改 `fullmatch()` 後整格須恰好等於四種合法形態之一。"""
+        text = self.HEAD + self._row(
+            "DEF-9-001", "上游套件其實是我懶得修這個真缺陷，隨便掰的理由", "2026-08-20")
+        fails, _ = lcg.external_blocked_log_problems(text, set(), date(2026, 8, 21))
+        self.assertEqual(len(fails), 1)
+        self.assertIn("不是具名枚舉值", fails[0])
+
+    def test_bare_other_without_a_name_is_rejected(self) -> None:
+        """`其他-` 之後必須緊跟具體理由，裸「其他」不是萬用桶。"""
+        text = self.HEAD + self._row("DEF-9-001", "其他", "2026-08-20")
+        fails, _ = lcg.external_blocked_log_problems(text, set(), date(2026, 8, 21))
+        self.assertEqual(len(fails), 1)
+
+    def test_crosslock_rejects_id_present_in_main_unresolved(self) -> None:
+        text = self.HEAD + self._row("DEF-9-001", "Windows 實機", "2026-08-20")
+        fails, _ = lcg.external_blocked_log_problems(text, {"DEF-9-001"}, date(2026, 8, 21))
+        self.assertEqual(len(fails), 1)
+        self.assertIn("同時出現", fails[0])
+
+    def test_stale_review_is_warn_not_fail(self) -> None:
+        text = self.HEAD + self._row("DEF-9-001", "上游套件", "2026-01-01")
+        fails, warns = lcg.external_blocked_log_problems(text, set(), date(2026, 8, 21))
+        self.assertEqual(fails, [])
+        self.assertEqual(len(warns), 1)
+        self.assertIn("距今", warns[0])
+
+    def test_fresh_review_has_no_warn(self) -> None:
+        text = self.HEAD + self._row("DEF-9-001", "上游套件", "2026-08-20")
+        self.assertEqual(
+            lcg.external_blocked_log_problems(text, set(), date(2026, 8, 21)), ([], []))
+
+    def test_unparseable_review_date_fails(self) -> None:
+        text = self.HEAD + self._row("DEF-9-001", "上游套件", "不是日期")
+        fails, _ = lcg.external_blocked_log_problems(text, set(), date(2026, 8, 21))
+        self.assertEqual(len(fails), 1)
+        self.assertIn("不是可解析的 ISO 日期", fails[0])
+
+    def test_malformed_row_arity_fails_loud_and_is_skipped(self) -> None:
+        text = self.HEAD + "| DEF-9-001 | 上游套件 | 2026-01-01 |\n"  # 少兩欄
+        fails, warns = lcg.external_blocked_log_problems(text, set(), date(2026, 8, 21))
+        self.assertEqual(len(fails), 1)
+        self.assertIn("欄位定位失效", fails[0])
+        self.assertEqual(warns, [])
+
+    def test_print_external_blocked_count_when_file_missing(self) -> None:
+        quality_dir = Path(tempfile.mkdtemp(prefix="ext_missing_"))
+        self.addCleanup(shutil.rmtree, quality_dir, ignore_errors=True)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            lcg.print_external_blocked_count(quality_dir)
+        self.assertIn("0 筆", buf.getvalue())
+
+    def test_print_external_blocked_count_lists_ids(self) -> None:
+        quality_dir = Path(tempfile.mkdtemp(prefix="ext_present_"))
+        self.addCleanup(shutil.rmtree, quality_dir, ignore_errors=True)
+        (quality_dir / lcg.EXTERNAL_BLOCKED_LOG_NAME).write_text(
+            self.HEAD + self._row("DEF-9-001", "上游套件", "2026-08-20"), encoding="utf-8")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            lcg.print_external_blocked_count(quality_dir)
+        out = buf.getvalue()
+        self.assertIn("1 筆", out)
+        self.assertIn("DEF-9-001", out)
+
+    def test_the_real_doc_is_well_formed_and_currently_empty(self) -> None:
+        """本輪落地的真檔：空表頭即合規（資料列由書記填）。"""
+        path = m._REPO_ROOT / "docs" / "06_quality" / lcg.EXTERNAL_BLOCKED_LOG_NAME
+        self.assertTrue(path.exists(), f"找不到 {path}")
+        text = path.read_text(encoding="utf-8-sig")
+        self.assertEqual(lcg.external_blocked_log_problems(text, set()), ([], []))
+
+
+class TestClosingRoundProblemsWiring(unittest.TestCase):
+    """`closing_round_problems()` 的統一入口，以及與 `main()` 的接線。
+
+    🔴 **接線刻意不是獨立的 `_CHECK_ORDER` 名目**（設計取捨，非疏忽）：
+    `check_defect_log_crossref.py` 的 raw-line 棘輪餘裕本輪動工前只剩個位數
+    （`TestActionableMessagesHaveLocHeadroom` 要求至少 5 行），獨立一道新名目需要
+    一個新的 `_bail()` 分支（至少 3 行），會把餘裕打到那條鎖的下限之下。故本輪把兩個
+    判準的結果併入**既有**的「帳本體積與逐列位元組上限」`deferred` 收斂點——與 R79
+    把「主檔體積」＋「逐列位元組上限」併成同一個名目是同一個理由、同一個先例（見該檢查
+    上方註解「逐列位元組上限同屬帳本體積語意，故共用同一個名目」）。代價：命中時
+    `_bail()` 的標頭文字對「淨額棘輪」不夠精準，但 `closing_round_problems()` 回傳的
+    每一則訊息本身已把真正發生了什麼講清楚。
+    """
+
+    def test_combined_entry_reports_both_kinds_of_fail(self) -> None:
+        repo = Path(tempfile.mkdtemp(prefix="combined_repo_"))
+        self.addCleanup(shutil.rmtree, repo, ignore_errors=True)
+        env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t.example",
+               "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t.example"}
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True, env=env)
+        quality = repo / "docs" / "06_quality"
+        quality.mkdir(parents=True)
+        ledger = quality / "AutoSDD_Defect_Log.md"
+        head = ("| ID | 日期 | 發現情境 | 現象與證據 | 嚴重度 | 分流去向 | 狀態 |\n"
+               "|---|---|---|---|---|---|---|\n")
+        ledger.write_text(head + "| DEF-1-001 | d | R99 | x | P3 | y | fixed |\n",
+                          encoding="utf-8")
+        (quality / lcg.EXTERNAL_BLOCKED_LOG_NAME).write_text(
+            "| DEF-ID | 具名阻塞源 | 阻塞起始日 | 解鎖條件（可機械查） | 最近複查日 |\n"
+            "|---|---|---|---|---|\n"
+            "| DEF-1-002 | 自由亂寫 | 2026-01-01 | x | 2026-08-20 |\n", encoding="utf-8")
+        subprocess.run(["git", "add", "."], cwd=repo, check=True, env=env)
+        subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=repo, check=True, env=env)
+        curr = {"DEF-1-001": "fixed", "DEF-1-002": "open", "DEF-1-003": "open"}
+        problems = lcg.closing_round_problems(
+            repo, ledger, curr, m._table_layout, m._row_cells, m._classify,
+            m._ROW_RE, m._ID_RE)
+        self.assertTrue(any("淨增" in p for p in problems), problems)
+        self.assertTrue(any("不是具名枚舉值" in p for p in problems), problems)
+
+    def test_it_is_folded_into_the_existing_volume_deferred_check(self) -> None:
+        """設計取捨的機械證據：`_CHECK_ORDER` 沒有新名目，且原始碼裡
+        `closing_round_problems(` 與既有的 `oversize_row_problems(ledger_text)` 併在
+        **同一個** `deferred +=` 運算式內（見類別 docstring）。"""
+        self.assertNotIn("帳本淨額棘輪與外部阻塞軌", m._CHECK_ORDER)
+        src = Path(m.__file__).read_text(encoding="utf-8")
+        self.assertIn(
+            "oversize_row_problems(ledger_text) + _closing.closing_round_problems(", src,
+            "併線斷了：net-ratchet／外部阻塞軌的結果不再搭著既有 deferred 收斂點被印出，"
+            "會變成靜默不執行（本輪 LOC 餘裕不足以再開一個獨立 `_bail()` 分支）")
+
+    def test_the_unresolved_count_cli_also_prints_the_external_count(self) -> None:
+        """`--unresolved-count` 的接線：同一個 `or` 運算式裡真的呼叫了兩支函式
+        （用 `or` 而非兩條陳述式，同樣是為了不再多佔一行 raw-line 餘裕）。"""
+        src = Path(m.__file__).read_text(encoding="utf-8")
+        self.assertIn(
+            "_closing.print_external_blocked_count(_DEFECT_LOG.parent) or "
+            "_ledger_index.report_unresolved(", src)
+
+    def test_no_args_main_also_prints_the_external_count(self) -> None:
+        """回歸鎖：CI 呼叫的是**無參數** `main()`，先前只有 `--unresolved-count` 看得到
+        外部阻塞軌筆數——那條路徑 CI 從不執行。端到端跑 `main()` 才有真鑑別力。"""
+        d = Path(_TMP_DIR) / "ext_log_cli_visibility"
+        d.mkdir(parents=True, exist_ok=True)
+        ledger = d / "AutoSDD_Defect_Log.md"
+        ledger.write_text(_ledger_text(_row("DEF-01-001", "wontfix+凍結版紀律")),
+                          encoding="utf-8")
+        (d / lcg.EXTERNAL_BLOCKED_LOG_NAME).write_text(
+            "| DEF-ID | 具名阻塞源 | 阻塞起始日 | 解鎖條件（可機械查） | 最近複查日 |\n"
+            "|---|---|---|---|---|\n"
+            "| DEF-01-002 | 上游套件 | 2026-01-01 | x | 2026-08-20 |\n", encoding="utf-8")
+        with mock.patch.object(m, "_DEFECT_LOG", ledger), \
+             mock.patch.object(m, "_CROSSREF_TARGETS", []), \
+             mock.patch("builtins.print") as fake_print:
+            self.assertEqual(m.main(), 0)
+        printed = " ".join(str(a) for call in fake_print.call_args_list for a in call.args)
+        self.assertIn("外部阻塞軌", printed)
+        self.assertIn("1 筆", printed)
+        self.assertIn("DEF-01-002", printed)
 
 
 if __name__ == "__main__":

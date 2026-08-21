@@ -107,7 +107,12 @@ import check_hooks_liveness  # noqa: E402
 # 既有慣例（R17 DEF-101-231 觀察點 1+2：收斂 is_windows/os_label/venv_python_path
 # 平台判斷邏輯的第二次重複）。
 sys.path.insert(0, str(ROOT / "tools" / "lib"))
-import ci_liveness  # noqa: E402  # R68：GitHub 排程軌逐軌活性偵測（見該檔檔頭 WHY）
+# noqa: F401 — DEF-101-758 後本檔已不直接呼叫，但 `tools/tests/test_dev_start.py`
+# 以 `ci_liveness = dev_start.ci_liveness` 取得與生產路徑同一個模組物件（避免
+# patch 到不同副本，見該檔行內 WHY），拿掉這個名字會讓該別名連鎖打壞其下
+# 數十個測試案例；真正的呼叫端已搬到 `ci_run_status.py`（見下一行 import）。
+import ci_liveness  # noqa: E402,F401
+import ci_run_status  # noqa: E402  # DEF-101-758：最新 run 判讀本體（LOC 死結搬遷）
 import platform_utils  # noqa: E402
 
 
@@ -1779,66 +1784,14 @@ def _check_nightly_heartbeat(now: str) -> str:
 def _check_ci_liveness(is_repo: bool) -> str | None:
     """CI 活性哨兵（DEF-101-208，純 advisory）——回傳 summary 片段，None＝靜默跳過。
 
-    WHY：CI 額度停擺（DEF-101-081）期間 GitHub Actions 可能長期紅/停，push 者
-    以為雲端有兜底其實沒有——本哨兵用 gh 的 read-only API（零 Actions 額度）
-    查最新 run 結論。三道靜默跳過閘：無 gh／step_sync 已判定離線或跳過（重用
-    其判定，不做第二次網路探測）／非 git repo。全函式 try/except 兜底：任何
-    例外不得改變 dev_start 行為（同心跳哨兵契約）。
-
-    SD-R15-REV-1 訂正：GitHub Actions API 對尚未跑完的 run（queued/in_progress）
-    `conclusion` 恆為 null——若只看 conclusion、剛 push 完就跑本哨兵極易把「還在
-    跑」誤判為「帳務停擺/失敗」。故先查 `status`，非 completed 一律視為正常
-    （執行中），不落入 `_warn` 異常分支。
+    DEF-101-758：邏輯本體已搬到 `tools/lib/ci_run_status.py`（本檔為 SPECIAL_FILES
+    raw-line 棘輪、搬遷前實測 1999/2000 僅餘 1 行）；本函式僅接線注入 module-level
+    狀態（SUMMARY／ROOT／_warn），行為與搬遷前逐位元組相同，簽章不變以維持既有
+    測試（mock.patch.object(dev_start, "_check_ci_liveness", ...)）契約。
     """
-    try:
-        if shutil.which("gh") is None:
-            return None
-        sync = SUMMARY.get("sync", "")
-        if sync.startswith("離線") or sync.startswith("跳過"):
-            return None
-        if not is_repo:
-            return None
-        # R68：逐軌陳舊度先查（與下方「最新一筆 run」是兩種粒度，缺一即有盲區——
-        # 見 tools/lib/ci_liveness.py 檔頭的 18 天實測）。
-        stale = ci_liveness.stale_schedule_tracks(ROOT, time.monotonic() + 25)
-        if stale:
-            _warn("GitHub 排程軌長期未成功：" + "；".join(stale)
-                  + " — 週/日頻兜底軌已死（最新一次 push 的綠燈遮蔽不了它）")
-        try:
-            r = subprocess.run(
-                ["gh", "run", "list", "--limit", "1",
-                 "--json", "status,conclusion,updatedAt,workflowName"],
-                timeout=15, capture_output=True, encoding="utf-8", errors="replace",
-            )
-        except (OSError, subprocess.TimeoutExpired):
-            r = None
-        if r is None or r.returncode != 0:
-            # 不入 WARNINGS：gh 未登入/網路抖動是常態，溫和一行即可
-            print("    CI 活性未知（gh 不可用或未登入）")
-            return "CI 活性未知"
-        try:
-            runs = json.loads(r.stdout or "")
-        except ValueError:
-            runs = None
-        if not isinstance(runs, list) or not runs or not isinstance(runs[0], dict):
-            print("    CI 活性未知（gh 回應無可解析的 run 資料）")
-            return "CI 活性未知"
-        status = runs[0].get("status")
-        conclusion = runs[0].get("conclusion")
-        workflow = runs[0].get("workflowName", "?")
-        if status != "completed":
-            print(f"    CI 活性正常（最新 run：{workflow} 執行中，status={status}）")
-            return "CI 活性正常（執行中）"
-        if conclusion == "success":
-            print(f"    ✅ GitHub CI 活性正常（最新 run：{workflow}=success）")
-            return "CI 活性正常"
-        _warn(f"GitHub CI 最新 run {workflow}={conclusion}"
-              f"（{runs[0].get('updatedAt', '?')}）——帳務停擺/失敗中，"
-              f"本地 pre-push＋nightly 為唯一活體驗證（DEF-101-081/208）")
-        return f"CI 活性異常（最新 run={conclusion}，見警告）"
-    except Exception:
-        # 兜底：哨兵絕不可改變 dev_start 的 exit code 或流程
-        return None
+    return ci_run_status.check_ci_run_status(
+        is_repo, SUMMARY.get("sync", ""), ROOT, _warn,
+    )
 
 
 def step_platform(now: str, is_repo: bool) -> None:

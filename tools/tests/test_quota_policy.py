@@ -2222,5 +2222,111 @@ class TestR95HaltArmsOffTheEarliestResettableAxis(unittest.TestCase):
                       "halt 訊息還在印 binding 軸的期程（None）")
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# R98／掌舵者判定嚴重錯誤：`MODEL_SCOPED_KINDS` 的軸（`weekly_scoped` 等）此前**沒有**
+# 被排除在 `gate`（cap 聚合）之外，於是一個本次派工完全沒碰過的模型的水位會被當成硬牆。
+# 立案數字逐字取自本輪主控實測：UI「Fable 61%」與 `weekly_scoped=61.0` 逐格吻合
+# （`scope.model.display_name="Fable"`），而本 session 全程只用
+# `claude-opus-5[1m]`／`claude-sonnet-5`，Fable 一次都沒用過。
+# ═══════════════════════════════════════════════════════════════════════════
+class TestR98ModelScopedAxisDoesNotBindWithoutDispatch(unittest.TestCase):
+    """不變式：`MODEL_SCOPED_KINDS` 的軸在其模型未被派工時，不得成為 `decision.binding`，
+    也不得壓低 `cap`（見掌舵者任務書〈修法要求〉第 1、4 條）。"""
+
+    @staticmethod
+    def _r98_state(**scope_kw) -> Q.QuotaState:
+        """本輪真實 7 軸讀數（`measured_at 2026-08-21T23:30:36+08:00`）。session／
+        five_hour 剩 270 分鐘（≈4.5h，對齊 UI「Resets in 4 hr 31 min」）；weekly_all／
+        weekly_scoped／seven_day 剩 2700 分鐘（≈45h，對齊 UI「Resets Sun 1:59 AM」）；
+        nimbus_quill／spend 無 reset 可解析（實測 `resets_at=null`）。"""
+        axes = (
+            Q.Axis("session", 11.0, at(270)),
+            Q.Axis("weekly_all", 42.0, at(2700)),
+            Q.Axis("weekly_scoped", 61.0, at(2700), **scope_kw),
+            Q.Axis("five_hour", 11.0, at(270)),
+            Q.Axis("seven_day", 42.0, at(2700)),
+            Q.Axis("nimbus_quill", 0.0, None),
+            Q.Axis("spend", 0.0, None),
+        )
+        return Q.QuotaState(axes, NOW.isoformat(), "endpoint", "ok")
+
+    def test_a_model_scoped_axis_never_binds_when_its_model_was_not_dispatched(self) -> None:
+        """`active_model` 缺席（既有呼叫端現況）：61% 的 Fable 軸不得綁住 42% 的訂閱軸。"""
+        d = Q.decide(self._r98_state(scope_model="Fable"), NOW, P)
+        self.assertNotEqual(d.binding.kind, "weekly_scoped", "被一個沒派工用到的模型節流")
+        self.assertIn(d.binding.kind, ("weekly_all", "seven_day"))
+        self.assertEqual(d.band, Q.BAND_FREE)
+        self.assertIsNone(d.cap, "42% 未過 notice 門檻，cap 不該被 61% 的旁支模型壓低")
+        self.assertGreater(d.recommended_fanout, 4, "整輪扇出被腰斬正是本缺陷的可觀後果")
+
+    def test_a_mismatched_active_model_is_excluded_the_same_way(self) -> None:
+        """`active_model` 給了、但與伺服器回報的模型不同（本 session 真實模型）：
+        結果必須逐格同「不知道」那一支——**不確定命中就是不確定**，不是半確定。"""
+        d = Q.decide(self._r98_state(scope_model="Fable"), NOW, P,
+                     active_model="claude-opus-5[1m]")
+        self.assertNotEqual(d.binding.kind, "weekly_scoped")
+        self.assertIsNone(d.cap)
+
+    def test_a_matching_active_model_lets_the_axis_back_into_the_gate(self) -> None:
+        """精準版不是假裝存在的旋鈕：命中時 weekly_scoped 真的能夠 binding（大小寫不敏感）。
+        這裡它確實是全場最緊（notice／cap=8），命中後就該由它決定 cap——證明排除的是
+        「不確定」，不是「這個 kind 本身」。"""
+        d = Q.decide(self._r98_state(scope_model="Fable"), NOW, P, active_model="fable")
+        self.assertEqual(d.binding.kind, "weekly_scoped")
+        self.assertEqual(d.cap, 8)
+
+    def test_the_axis_never_silently_disappears(self) -> None:
+        """🔴 絕對不可以讓它靜默消失（任務書逐字）：即使被排除在 gate 外，`per_axis`
+        與人看的 `describe()` 仍必須帶著它的水位、它是哪個模型、以及被排除這件事。"""
+        d = Q.decide(self._r98_state(scope_model="Fable"), NOW, P)
+        seen = {r.axis.kind: r for r in d.per_axis}
+        self.assertIn("weekly_scoped", seen, "軸從 per_axis 消失＝R87 同型的靜默失明")
+        self.assertEqual(seen["weekly_scoped"].axis.pct, 61.0, "水位被改寫")
+        self.assertIn(Q.NOTE_MODEL_EXCLUDED, seen["weekly_scoped"].note)
+        text = Q.describe(d)
+        self.assertIn("kind=weekly_scoped 61%", text, "人看的那一面少一軸")
+        self.assertIn("model=Fable", text, "看不出是哪一個模型，等於白排除")
+        self.assertIn(Q.NOTE_MODEL_EXCLUDED, text)
+
+    def test_an_axis_without_a_known_scope_model_stays_excluded(self) -> None:
+        """`seven_day_opus`／`seven_day_sonnet` 今天在本帳號是 `null`（見 Probe）：一旦
+        它們哪天帶著空的 `scope_model` 出現，仍必須保守排除，不得因為「反正是 None」
+        就放行——`None == None` 不是「命中」。"""
+        d = Q.decide(self._r98_state(), NOW, P, active_model="claude-sonnet-5")
+        self.assertNotEqual(d.binding.kind, "weekly_scoped")
+
+    def test_red_the_old_unconditional_gate_would_have_bound_the_unused_model(self) -> None:
+        """合成注入自證（R98 的 `test_the_lock_discriminates` 同型）：**重演**修前的
+        `gate` 判準（只排 `FALLBACK_KINDS`，`MODEL_SCOPED_KINDS` 一律放行），必須被
+        本測試抓到——這是本輪修好的那個判準真的有鑑別力的證據，不是空鎖。"""
+        readings = Q.axes_of(self._r98_state(scope_model="Fable"), NOW, P)
+        old_gate = [r for r in readings if r.axis.kind not in Q.FALLBACK_KINDS] or readings
+        old_binding = min(old_gate, key=Q._binding_key)  # noqa: SLF001 — 刻意重演舊私有邏輯
+        self.assertEqual(old_binding.axis.kind, "weekly_scoped",
+                         "重演組沒有重現 R98＝這個自證沒有在重演事故")
+        self.assertEqual(old_binding.cap, 8, "重演組必須看得到腰斬——這正是本輪修的病")
+        new_d = Q.decide(self._r98_state(scope_model="Fable"), NOW, P)
+        self.assertNotEqual(new_d.binding.kind, "weekly_scoped", "新判準必須不再重演")
+
+    def test_binding_follows_the_current_account_not_a_stale_determination(self) -> None:
+        """掌舵者訴求〈帳號動態切換〉：同一份 `decide()`、不同帳號指紋（不同 `account_key`
+        ／不同軸組合）餵進去，binding 必須**跟著這次的資料變**，不得沿用另一次呼叫的
+        判定——`decide()` 是純函式，沒有模組層狀態可以讓判定「黏住」不放。"""
+        team_state = dataclasses.replace(
+            self._r98_state(scope_model="Fable"), account_key="team-aaaa1111")
+        pro_axes = (Q.Axis("session", 20.0, at(120)),
+                   Q.Axis("weekly_all", 80.0, at(4000)))
+        pro_state = Q.QuotaState(pro_axes, NOW.isoformat(), "endpoint", "ok",
+                                 account_key="pro-bbbb2222")
+        d_team = Q.decide(team_state, NOW, P)
+        d_pro = Q.decide(pro_state, NOW, P)
+        self.assertNotEqual(d_team.binding.kind, "weekly_scoped")
+        self.assertEqual(d_pro.binding.kind, "weekly_all")
+        self.assertEqual(d_pro.band, Q.BAND_CONVERGE, "80% 應落在 pro 帳號自己的緊帶")
+        self.assertNotEqual((d_team.binding.kind, d_team.band),
+                            (d_pro.binding.kind, d_pro.band),
+                            "兩個帳號的判定必須各自成立，證明沒有跨呼叫的殘留狀態")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

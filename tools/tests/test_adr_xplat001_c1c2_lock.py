@@ -269,22 +269,14 @@ _BASELINE_ID_CEILING = "DEF-101-526"
 _MAX_BASELINE_ENTRIES = 2
 
 _BASELINE_WAIVERS: dict[str, Waiver] = {
-    "DEF-101-324": Waiver(
-        frozenset({"C1"}),
-        "R60 前的舊列（2026-07-24）且**形態與 §4.3 不同**：本列是檔名淨化「多對一碰撞」的"
-        " backlog，範圍是**全部凍結版連同 LATEST 一致存在**（版本數以"
-        " `AISDLC_SDD/FRAMEWORK_STATUS.md` 現查為準，那裡是版本計數的唯一真相源；"
-        "此處刻意不引數字——round 3 SD-R60R3-05 抓到的就是這一句寫死了當時的版本數）"
-        "，不是「LATEST 已修、凍結版殘留」"
-        "——放進 §9〈凍結版豁免與平台限制〉表會是一列**假的**凍結版缺口。它之所以落入"
-        " §4.3.1，是因為狀態欄引用了 DEF-101-358 的 wontfix 判例字樣。C2 本列自己已滿足"
-        "（狀態欄逐字「本輪重新評估後確認此範圍擴大不改變既有 wontfix/backlog 定性」）。",
-        "承接輪次：**未指派**（觸發點＝任何輪次下次檢視 DEF-101-324 的 backlog 時，二擇一"
-        "——判定確實需要 §9 列則補列（並刪本登記）；或在 ADR §4.3.1 之外另立「全版本一致"
-        "存在」的分類，使本列不再落入 §4.3）",
-    ),
     # R74 刪除一筆：該列已隨本輪歸檔離開主檔 ⇒ 已在本鎖射程外，登記若留著就是在遮蔽一個
     # 不存在的標的（本鎖自帶的 stale 自檢會判紅，正確處置是刪登記而非放寬判準）。
+    # 本輪刪除一筆（`DEF-101-324`）：ADR-XPLAT-011 §2 正式裁決後，帳本狀態欄已改寫為
+    # 「closed-by-decision｜ADR-XPLAT-011 §2 正式裁決」，不再出現「凍結基線」與
+    # 「wontfix」同格字樣 ⇒ 該列**已不落入 §4.3.1**（同 `_BASELINE_ID_CEILING` 上方
+    # DEF-101-534／552 的先例：敘述已據實訂正，不是條件被 grandfather 掉，正確處置是
+    # 刪登記而非放寬判準）。孤兒自檢 `test_baseline_entries_still_exist_in_the_main_
+    # ledger_and_still_fall` 當場攔下並逐字指名，即本次修復依據。
 }
 
 # 🔴 R60 本輪自己的兩列（`DEF-101-534`／`DEF-101-552`）**刻意不在上表內**——它們是
@@ -703,14 +695,14 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 537,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 5363,
-    "test_archive_defect_log.py": 3846,
+    "test_adr_xplat001_c1c2_lock.py": 5484,
+    "test_archive_defect_log.py": 4008,
     "test_bash32_compat.py": 970,
     "test_bash_probe_spec_contract.py": 983,
     "test_block_destructive_git_r83.py": 2178,
     "test_bootstrap_core.py": 439,
     "test_bootstrap_ps1.py": 160,
-    "test_check_defect_log_crossref.py": 3327,
+    "test_check_defect_log_crossref.py": 3615,
     "test_check_gha_action_versions.py": 295,
     "test_check_hooks_liveness.py": 3433,
     "test_check_pytest_baseline_sites.py": 297,
@@ -723,12 +715,13 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_dev_start.py": 6910,
     "test_dev_start_ps1_lastexitcode.py": 548,
     "test_doc_env_prefix_platform_parity_r60.py": 340,
-    "test_doc_loc_baseline_freshness_r60.py": 7135,
+    "test_doc_loc_baseline_freshness_r60.py": 7138,
     "test_extras_quoting_zsh_safety.py": 365,
     "test_failure_log_rotation.py": 80,
     "test_find_git_bash_parity.py": 1230,
     "test_gha_action_versions.py": 703,
     "test_git_hooks_install_common.py": 393,
+    "test_guard_line_taxonomy_r99.py": 148,
     "test_install_windows_nightly.py": 1479,
     "test_mac_endurance_r83.py": 1780,
     "test_mac_readiness_r82.py": 621,
@@ -745,9 +738,9 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_pre_push_dispatcher.py": 686,
     "test_ps1_bom.py": 204,
     "test_ps51_compat.py": 565,
-    "test_ps_engine_ssot.py": 933,
+    "test_ps_engine_ssot.py": 954,
     "test_python_c_percent_shim.py": 119,
-    "test_quota_policy.py": 2226,
+    "test_quota_policy.py": 2332,
     "test_root_infra_parity.py": 441,
     "test_run_root_unittests.py": 2190,
     "test_sanitize_component_frozen_sdd_versions_lock.py": 340,
@@ -1011,6 +1004,31 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "[非淨減法輪][同輪追加] 護欄層重釘自身編修：本檔新增本列＋上一列稽核列＋"
      "prefix_len/digest 更新，本檔自身逐檔漂移 +10（5353→5363），同 R95/R96/R97 既有"
      "體例。逐檔清單見 CrossPlatform_R98_Scan_Findings.md「第二次收斂·同輪追加」。"),
+    ("R99", 85248, 85915, 667,
+     "[非淨減法輪] 多包並行波留下的既有成長，由收尾單人窗口在全部包停工後一次重釘："
+     "test_check_defect_log_crossref.py +237（淨額棘輪／外部阻塞軌／收輪接線三個新測試類別）、"
+     "test_archive_defect_log.py +162（`--repin-oversize` 帳本超標三常數自動重釘回歸鎖）、"
+     "新檔 test_guard_line_taxonomy_r99.py +148（`tools/lib/guard_line_taxonomy.py` 觀察模式"
+     "回歸鎖，ADR-XPLAT-012 落地）、test_quota_policy.py +106（額度門檻新判準回歸鎖）、"
+     "test_ps_engine_ssot.py +21。逐項立案見 docs/06_quality/CrossPlatform_R99_Ledger_Closure.md。"
+     "🔴 本檔自身淨 −8（收尾者刪除已閉合的 `DEF-101-324` 基線豁免登記，見 "
+     "`_BASELINE_WAIVERS` 與 ADR-XPLAT-001 §7 同步訂正）。"),
+    ("R99", 85915, 85932, 17,
+     "[非淨減法輪][同輪追加] 護欄層重釘自身編修：本檔新增上一列＋本稽核列＋"
+     "`_REPIN_NET_CAP_SCHEDULE` 到期義務兌現列 `(99, 850)`，本檔自身逐檔漂移 +17"
+     "（5356→5373），同 R95～R98 既有體例。逐項立案見 "
+     "docs/06_quality/CrossPlatform_R99_Ledger_Closure.md「同輪追加」。"),
+    ("R99", 85932, 86090, 158,
+     "[非淨減法輪][同輪追加] 收斂波四方複審對抗包一次修完：test_check_defect_log_"
+     "crossref.py +51（R-01 具名阻塞源正則改 fullmatch 防繞過／R-02 淨額棘輪 "
+     "fail-open 補 stderr 警告／R-09 CI 無參數 main() 併印外部阻塞軌筆數，各附回歸"
+     "測試）；本檔自身 +107（R-10：新增 `frozen_prefix_rewrite_problems()` 機制——"
+     "凍結前綴指紋改由跨檔 DEF-ID 錨點把關協同改寫，附回歸測試與本列自身編修，"
+     "同步重釘 `_REPIN_LOG_FROZEN_PREFIX_LEN`／`_REPIN_LOG_HISTORY_SHA256`）。"
+     "逐項立案見 CrossPlatform_R99_Ledger_Closure.md「收斂波」節。"),
+    ("R99", 86090, 86097, 7,
+     "[非淨減法輪] 收尾併帳（詳見 CrossPlatform_R99_Scan_Findings.md「收尾」節）："
+     "freshness 檔依出口③刪 18 行搬遷散文，淨額 +3；本檔自身逐檔漂移 +4；合計 +7。"),
 )
 
 
@@ -1035,6 +1053,9 @@ _REPIN_NET_CAP_SCHEDULE: tuple[tuple[int, int], ...] = (
     (95, 1100),   # 到期輪下修（款(12)）。步伐 200 < 前一段的 300，續守「步伐刻意變小」
     (97, 950),    # 到期輪下修（款(12)）。步伐 150 < 前一段的 200，續守「步伐刻意變小」；
                   # 恰好落在到期目標 950（`_REPIN_NET_CAP_DUE_TARGET` 兌現前的值）
+    (99, 850),    # 到期輪兌現：`_REPIN_NET_CAP_DUE_ROUND`/`_REPIN_NET_CAP_DUE_TARGET` 到期
+                  # 義務本列（前一段到期輪就寫好、本輪兌現）。本輪淨額 667 遠低於新上限，
+                  # 兌現後未緊接著再排下一段到期義務——步伐是否續縮留給下一次到期輪決定
 )
 #: 生效點＝首列輪號、現行上限＝末列上限，**皆由表導出不另立常數**（R73 判例：一份知識一個家）。
 _REPIN_ROUND_CAP_SINCE = _REPIN_NET_CAP_SCHEDULE[0][0]
@@ -1093,8 +1114,8 @@ def net_cap_schedule_problems(
 #: 出口＝往 `_REPIN_NET_CAP_SCHEDULE` 追加更小上限（刻意不留延期參數）。立案理由、步伐遞減
 #: 設計（5400→3200 起）與 R89 互斥推導全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈到期義務與重新武裝 WHY〉節。
-_REPIN_NET_CAP_DUE_ROUND = 99
-_REPIN_NET_CAP_DUE_TARGET = 850
+_REPIN_NET_CAP_DUE_ROUND = 101
+_REPIN_NET_CAP_DUE_TARGET = 750
 
 #: R85：款(11)／ADR-XPLAT-002 §8.1 item 15「必須出現一次淨額 ≤ 0」的到期輪，搬成具名常數
 #: 理由同上（義務要能被看見、要有到期時點；`DEF-101-757`）。只准往前挪（更早到期＝更嚴），
@@ -1154,10 +1175,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 40
+_REPIN_LOG_FROZEN_PREFIX_LEN = 44
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "2b5c7e53c9b2e68e3d43ea109cb3680a34b2b733098c9cbbd4f714c658e1b8ba")
+    "23c0e49b2c63ed4518e574f6e15cb2925420bb7bb0c0c61dbe474fa45287b657")
 
 
 def repin_log_history_digest(
@@ -1174,6 +1195,63 @@ def repin_log_history_digest(
     已有判例）。`repr` 對 `tuple[str, int, int, int, str]` 是無歧義且跨版本穩定的。
     """
     return hashlib.sha256(repr(tuple(log[:prefix_len])).encode("utf-8")).hexdigest()
+
+
+#: R-10（收斂波機制缺口）：`[歷史被改寫]` 只驗「指紋是否等於 `log` 現況」——資料與
+#: 指紋同檔同 commit，誰能改前綴內一列就能同時重算指紋讓兩者自洽（實測：既有回歸
+#: 測試同步後全綠，非零星幾支）。修法接一個**不受本檔單一 commit 控制**的外部錨點：指紋每變一次
+#: 就追加一列，且該列 DEF-ID 須真的存在於缺陷帳本——協同改寫從此變成跨檔協同，比
+#: 「同一份檔案自己說自己對」成本高一個量級（誠實劃界：非密碼學級不可繞過證明，
+#: 帳本仍可能被另外偽造一筆，但那已是**兩個治理面**）。捨棄任務書另一案（數值／敘事
+#: 指紋分離）：兩者仍同檔同 commit，未解決協同改寫，只是拆成兩句自圓其說。
+_FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
+    ("R99", "9106b9c01f1c", "23c0e49b2c63", "DEF-101-561"),)
+
+#: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。
+#: 往後指紋每變一次，都要能從本值出發、經 `_FROZEN_PREFIX_REWRITE_LEDGER` 逐列鏈接
+#: 到當時的新值；鏈斷了就是有一次指紋變動沒有留痕。
+_FROZEN_PREFIX_REWRITE_LAUNCH_SHA = (
+    "9106b9c01f1c47ef9e013e5f36854d5ff950cd7a5439f2870b49d3c760a023e4")
+
+
+def _def_id_exists_in_ledger(def_id: str) -> bool:
+    """預設查核：`def_id` 是否出現在缺陷帳本家族全檔（主檔＋全部 archive）。"""
+    return any(def_id in text for _name, text in read_family())
+
+
+def frozen_prefix_rewrite_problems(
+    rewrite_ledger: Sequence[tuple[str, str, str, str]],
+    *, current_sha: str, launch_sha: str = _FROZEN_PREFIX_REWRITE_LAUNCH_SHA,
+    def_id_exists: Callable[[str], bool] = _def_id_exists_in_ledger,
+) -> list[str]:
+    """凍結前綴指紋的「協同改寫」機械物（回空＝通過）。純函式，紅綠由合成注入自證。
+
+    鏈路：`launch_sha` 是起點，`rewrite_ledger` 逐列 `(輪次, 舊指紋前12碼, 新指紋
+    前12碼, DEF-ID)` 必須首尾相接，最後一列的新指紋須接上 `current_sha` 現值。
+    表空且 `current_sha == launch_sha`（從未變動）視為合規。每一列的 DEF-ID 皆須
+    通過 `def_id_exists()`（預設查真實缺陷帳本家族全檔，可注入偽造版做純函式測試）。
+    """
+    cur12, launch12 = current_sha[:12], launch_sha[:12]
+    if not rewrite_ledger:
+        if cur12 == launch12:
+            return []
+        return [f"[缺一即紅] 指紋由 {launch12} 變為 {cur12}，但 "
+                "_FROZEN_PREFIX_REWRITE_LEDGER 一列都沒有——任何指紋變動都必須留痕"]
+    problems: list[str] = []
+    prev = launch12
+    for rnd, old12, new12, def_id in rewrite_ledger:
+        if old12 != prev:
+            problems.append(f"[斷鏈] {rnd} 列宣稱舊指紋 {old12}，與前一環 {prev} 不符")
+        if not ADL.gate._ID_RE.fullmatch(def_id):
+            problems.append(f"[DEF-ID 格式不合法] {rnd} 列：{def_id!r}")
+        elif not def_id_exists(def_id):
+            problems.append(f"[DEF-ID 查無此列] {rnd} 列指名 {def_id}，缺陷帳本家族"
+                            "全檔查無此 ID")
+        prev = new12
+    if prev != cur12:
+        problems.append(f"[未接上現值] 帳本鏈路終點指紋 {prev} 不等於現值 {cur12}——"
+                        "現值變了卻沒有對應的最後一列，或最後一列的新指紋抄錯")
+    return problems
 
 
 def repin_round_nets(
@@ -3373,6 +3451,49 @@ class TestGuardLayerRatchet(unittest.TestCase):
         self.assertEqual(
             [p for p in problems if "[歷史被改寫]" in p], problems,
             f"應恰為 [歷史被改寫] 一款（零串音）；實得：{problems}")
+
+    def test_coordinated_rewrite_defeats_the_digest_alone(self) -> None:
+        """R-10 前提自證：**同時**改前綴內一列並重算指紋 ⇒ `[歷史被改寫]` 不再說話
+        （對照上一支：只改內容不改指紋才抓得到）。證明「資料與指紋同檔同 commit」
+        本身防不住協同改寫，`frozen_prefix_rewrite_problems()` 的存在理由正是補這格。
+        """
+        rows = list(_GUARD_LINES_REPIN_LOG)
+        head = rows[0]
+        rows[0] = (head[0], head[1], head[2], head[3], head[4] + "（協同改寫：連指紋一起改）")
+        coordinated_digest = repin_log_history_digest(tuple(rows), _REPIN_LOG_FROZEN_PREFIX_LEN)
+        problems = repin_log_problems(
+            tuple(rows), sum(_FROZEN_GUARD_LINES.values()),
+            history_digest=coordinated_digest, prefix_len=_REPIN_LOG_FROZEN_PREFIX_LEN,
+            max_unfrozen_tail=_REPIN_LOG_MAX_UNFROZEN_TAIL)
+        self.assertEqual(problems, [], "前提不成立：協同改寫本該讓既有判準沉默")
+
+    def test_frozen_prefix_rewrite_ledger_chains_and_validates_def_ids(self) -> None:
+        """R-10 主牙：上一支證明沉默之後，`frozen_prefix_rewrite_problems()` 必須用
+        **跟資料不同檔**的錨點把協同改寫抓出來。五格併一支（比照本檔既有體例
+        `test_a_miscomputed_net_or_a_broken_chain_is_red`）：缺一列／鏈路完整＋DEF-ID
+        查得到（綠對照組）／DEF-ID 虛構／斷鏈／格式不合法／最後一列沒接上現值。
+        """
+        launch12, new_sha = _FROZEN_PREFIX_REWRITE_LAUNCH_SHA[:12], "d" * 64
+        good = ("R100", launch12, new_sha[:12], "DEF-1-001")
+        self.assertTrue(any("[缺一即紅]" in p for p in frozen_prefix_rewrite_problems(
+            (), current_sha="c0ffee" * 10 + "abcd")))
+        self.assertEqual(frozen_prefix_rewrite_problems(
+            (good,), current_sha=new_sha, def_id_exists=lambda _d: True), [])
+        self.assertTrue(any("[DEF-ID 查無此列]" in p for p in frozen_prefix_rewrite_problems(
+            (good,), current_sha=new_sha, def_id_exists=lambda _d: False)))
+        broken = ("R100", "0" * 12, new_sha[:12], "DEF-1-001")
+        self.assertTrue(any("[斷鏈]" in p for p in frozen_prefix_rewrite_problems(
+            (broken,), current_sha=new_sha, def_id_exists=lambda _d: True)))
+        bad_id = ("R100", launch12, new_sha[:12], "not-a-defid")
+        self.assertTrue(any("[DEF-ID 格式不合法]" in p for p in frozen_prefix_rewrite_problems(
+            (bad_id,), current_sha=new_sha, def_id_exists=lambda _d: True)))
+        stale = ("R100", launch12, "a" * 12, "DEF-1-001")
+        self.assertTrue(any("[未接上現值]" in p for p in frozen_prefix_rewrite_problems(
+            (stale,), current_sha="b" * 64, def_id_exists=lambda _d: True)))
+        # wiring：真實常數此刻必須合規——落地時指紋與啟動快照逐字相同，帳本理應是空的。
+        real = frozen_prefix_rewrite_problems(
+            _FROZEN_PREFIX_REWRITE_LEDGER, current_sha=_REPIN_LOG_HISTORY_SHA256)
+        self.assertEqual(real, [], real)
 
     def test_appending_one_row_keeps_the_history_digest_stable(self) -> None:
         """對照組：**追加一列**是每輪的正常動作，指紋與判準都不得因此說話。

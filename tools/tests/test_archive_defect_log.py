@@ -3842,5 +3842,167 @@ class TestUnresolvedAdvisoryBandIsBelowWarnAndNeverRed(unittest.TestCase):
                       "`--unresolved-count` 沒有印預警帶")
 
 
-if __name__ == "__main__":
+# ==================================================== 帳本減半收斂期機械物③
+class TestOversizeRepinDirectionLock(unittest.TestCase):
+    """機械物③：`tools/lib/oversize_repin.py` 的 shrink-only 自動重釘。
+
+    意圖（Rule 9）：本組鎖的核心不是「函式回傳值對不對」，而是「放寬這個方向在任何
+    呼叫路徑上都不可能被自動化繞過」——`test_apply_tighten_refuses_to_loosen_even_
+    when_called_directly` 直接繞過 `run_repin()` 的分派層去呼叫最底層函式，證明方向鎖
+    釘在資料本身、不是只釘在 CLI 的 if/else 裡。
+    """
+
+    repin = ADL._repin
+    idx = ADL._ledger_index
+
+    HEAD = ("| ID | 日期 | 發現情境 | 現象與證據 | 嚴重度 | 分流去向 | 狀態 |\n"
+            "|---|---|---|---|---|---|---|\n")
+
+    _INDEX_SRC = (
+        "OVERSIZE_ROW_CEILING = 3\n"
+        "OVERSIZE_ROW_EXCESS_CEILING = 300\n"
+        'OVERSIZE_ROW_GRANDFATHERED: frozenset[str] = frozenset("""\n'
+        "DEF-9-001 DEF-9-002 DEF-9-003\n"
+        '""".split())\n'
+    )
+
+    def _row(self, def_id: str, nbytes: int) -> str:
+        head = f"| {def_id} | d | R98 | x | P3 | y | fixed "
+        pad = nbytes - len(head.encode("utf-8")) - 1
+        return head + "x" * pad + "|\n"
+
+    def _ledger(self, *rows: str) -> str:
+        return self.HEAD + "".join(rows)
+
+    def test_direction_noop_when_equal(self):
+        with mock.patch.object(self.idx, "OVERSIZE_ROW_CEILING", 3), \
+             mock.patch.object(self.idx, "OVERSIZE_ROW_EXCESS_CEILING", 300):
+            self.assertEqual(
+                self.repin.direction({"new_ceiling": 3, "new_excess": 300}), "noop")
+
+    def test_direction_tighten_when_both_smaller(self):
+        with mock.patch.object(self.idx, "OVERSIZE_ROW_CEILING", 3), \
+             mock.patch.object(self.idx, "OVERSIZE_ROW_EXCESS_CEILING", 300):
+            self.assertEqual(
+                self.repin.direction({"new_ceiling": 2, "new_excess": 250}), "tighten")
+
+    def test_direction_loosen_when_either_dimension_worse(self):
+        """🔴 雙向注入之一：即使筆數變小，只要超標總量變大，仍判為 loosen（不可各過各的）。"""
+        with mock.patch.object(self.idx, "OVERSIZE_ROW_CEILING", 3), \
+             mock.patch.object(self.idx, "OVERSIZE_ROW_EXCESS_CEILING", 300):
+            self.assertEqual(
+                self.repin.direction({"new_ceiling": 2, "new_excess": 301}), "loosen")
+            self.assertEqual(
+                self.repin.direction({"new_ceiling": 4, "new_excess": 200}), "loosen")
+
+    def test_apply_tighten_refuses_to_loosen_even_when_called_directly(self):
+        """方向鎖釘在最底層函式本身：繞過 `run_repin()` 分派層直接呼叫一樣被拒。"""
+        with mock.patch.object(self.idx, "OVERSIZE_ROW_CEILING", 3), \
+             mock.patch.object(self.idx, "OVERSIZE_ROW_EXCESS_CEILING", 300), \
+             mock.patch.object(self.idx, "OVERSIZE_ROW_GRANDFATHERED",
+                               frozenset({"DEF-9-001", "DEF-9-002", "DEF-9-003"})):
+            with self.assertRaises(ValueError) as ctx:
+                self.repin.apply_tighten(self._INDEX_SRC, 4, 300, set())
+            self.assertIn("放寬", str(ctx.exception))
+
+    def test_apply_tighten_rewrites_all_three_constants_correctly(self):
+        with mock.patch.object(self.idx, "OVERSIZE_ROW_CEILING", 3), \
+             mock.patch.object(self.idx, "OVERSIZE_ROW_EXCESS_CEILING", 300), \
+             mock.patch.object(self.idx, "OVERSIZE_ROW_GRANDFATHERED",
+                               frozenset({"DEF-9-001", "DEF-9-002", "DEF-9-003"})):
+            new_text = self.repin.apply_tighten(self._INDEX_SRC, 2, 250, {"DEF-9-002"})
+        ns = {}
+        exec(compile(new_text, "x.py", "exec"), ns)
+        self.assertEqual(ns["OVERSIZE_ROW_CEILING"], 2)
+        self.assertEqual(ns["OVERSIZE_ROW_EXCESS_CEILING"], 250)
+        self.assertEqual(ns["OVERSIZE_ROW_GRANDFATHERED"], {"DEF-9-001", "DEF-9-003"})
+
+    def test_apply_tighten_rejects_unknown_remove_id(self):
+        with mock.patch.object(self.idx, "OVERSIZE_ROW_GRANDFATHERED", frozenset({"DEF-9-001"})):
+            with self.assertRaises(ValueError):
+                self.repin.apply_tighten(self._INDEX_SRC, 1, 100, {"DEF-9-999"})
+
+    def test_run_repin_noop(self):
+        """現測值**恰等於**現行常數（沒有列超標、天花板也是 0）⇒ no-op、不寫檔。"""
+        with mock.patch.object(self.idx, "OVERSIZE_ROW_CEILING", 0), \
+             mock.patch.object(self.idx, "OVERSIZE_ROW_EXCESS_CEILING", 0):
+            rc, msg, new_text = self.repin.run_repin(
+                self._ledger(self._row("DEF-9-001", 100)), self._INDEX_SRC, None, "")
+        self.assertEqual((rc, new_text), (0, None))
+        self.assertIn("no-op", msg)
+
+    def test_run_repin_loosen_without_override_refuses_and_writes_nothing(self):
+        with mock.patch.object(self.idx, "OVERSIZE_ROW_CEILING", 0), \
+             mock.patch.object(self.idx, "OVERSIZE_ROW_EXCESS_CEILING", 0):
+            rc, msg, new_text = self.repin.run_repin(
+                self._ledger(self._row("DEF-9-001", 900)), self._INDEX_SRC, None, "")
+        self.assertEqual(rc, 1)
+        self.assertIsNone(new_text)
+        self.assertIn("拒絕自動調高", msg)
+
+    def test_run_repin_loosen_without_reason_also_refuses(self):
+        """雙向注入之二：有 `--repin-oversize-ceiling` 但沒有 `--reason` 仍拒絕。"""
+        with mock.patch.object(self.idx, "OVERSIZE_ROW_CEILING", 0), \
+             mock.patch.object(self.idx, "OVERSIZE_ROW_EXCESS_CEILING", 0):
+            rc, _msg, new_text = self.repin.run_repin(
+                self._ledger(self._row("DEF-9-001", 900)), self._INDEX_SRC, 5, "")
+        self.assertEqual(rc, 1)
+        self.assertIsNone(new_text)
+
+    def test_run_repin_loosen_with_explicit_override_and_reason_writes(self):
+        with mock.patch.object(self.idx, "OVERSIZE_ROW_CEILING", 0), \
+             mock.patch.object(self.idx, "OVERSIZE_ROW_EXCESS_CEILING", 0):
+            rc, _msg, new_text = self.repin.run_repin(
+                self._ledger(self._row("DEF-9-001", 900)), self._INDEX_SRC, 5, "人工核准示範")
+        self.assertEqual(rc, 0)
+        self.assertIsNotNone(new_text)
+        ns = {}
+        exec(compile(new_text, "x.py", "exec"), ns)
+        self.assertEqual(ns["OVERSIZE_ROW_CEILING"], 5)
+
+    def test_the_real_scenario_from_the_task_brief(self):
+        """任務書指名的現況實測情境：對「搬遷後」文字重新獨立算一次超標狀態，
+        驗證與 `expiring_oversize_waivers()` 算出的結果一致，再餵進 `apply_tighten()`
+        驗證新檔全文正確——不斷言寫死的數字快照（帳本會隨輪次變動），而是斷言
+        「兩種算法互相印證＋轉換本身正確」這個不隨時間過期的性質。
+        """
+        ledger_text = ADL._LEDGER.read_text(encoding="utf-8-sig")
+        p = ADL.plan()
+        move_ids = [v["id"] for v in p["movable"]]
+        state = ADL._rotation.expiring_oversize_waivers(move_ids, ledger_text)
+        moved = set(move_ids)
+        remaining = "\n".join(
+            ln for ln in ledger_text.split("\n")
+            if not any(ln.startswith(f"| {i} |") for i in moved))
+        over = {i: n for i, n in self.idx.row_bytes(remaining).items()
+                if n > self.idx.ROW_MAX_BYTES}
+        self.assertEqual(state["new_ceiling"], len(over))
+        self.assertEqual(state["new_excess"],
+                         sum(n - self.idx.ROW_MAX_BYTES for n in over.values()))
+        self.assertEqual(set(state["expiring"]), self.idx.OVERSIZE_ROW_GRANDFATHERED - set(over))
+        print(f"[帳本減半現況實測] new_ceiling={state['new_ceiling']} "
+              f"new_excess={state['new_excess']} expiring={state['expiring']}")
+        index_text = (_REPO / "tools" / "lib" / "defect_ledger_index.py").read_text(
+            encoding="utf-8")
+        new_text = self.repin.apply_tighten(
+            index_text, state["new_ceiling"], state["new_excess"], set(state["expiring"]))
+        ns = {}
+        exec(compile(new_text, "x.py", "exec"), ns)
+        self.assertEqual(ns["OVERSIZE_ROW_CEILING"], state["new_ceiling"])
+        self.assertEqual(ns["OVERSIZE_ROW_EXCESS_CEILING"], state["new_excess"])
+        self.assertEqual(ns["OVERSIZE_ROW_GRANDFATHERED"],
+                         self.idx.OVERSIZE_ROW_GRANDFATHERED - set(state["expiring"]))
+
+    def test_cli_flag_is_wired_and_mutually_exclusive_with_plan_apply_check(self):
+        """`--repin-oversize` 真的接上了 argparse 的互斥群組，不是孤立的死旗標。"""
+        src = _TOOL_PATH.read_text(encoding="utf-8")
+        self.assertIn('g.add_argument("--repin-oversize"', src)
+        self.assertIn("_run_repin_cli(a.repin_oversize_ceiling, a.reason)", src)
+
+
+if __name__ == "__main__":  # pragma: no cover
+    # 本輪：`test_the_real_scenario_from_the_task_brief` 的 print 含中文，本檔被當成
+    # child 獨立執行時需自帶 UTF-8 stdio 保護（同型防線見 test_adr_xplat001_c1c2_lock.py
+    # 的 __main__，此處刻意照抄同一形態、不發明新寫法）。
+    import _stdio_utf8  # noqa: F401
     unittest.main()

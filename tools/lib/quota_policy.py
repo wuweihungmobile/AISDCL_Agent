@@ -151,6 +151,10 @@ NOTE_OK, NOTE_MISSING, NOTE_BAD, NOTE_SKEW = "", "missing", "bad-horizon", "cloc
 #: `unknown-kind`＝伺服器吐出一個本 repo 從未列舉過的 kind（見 `KNOWN_KINDS`）。它與上面
 #: 幾個同族：**都只描述取數面發生了什麼，一個都不參與分類**。多重情形以 `+` 串接。
 NOTE_BAD_PCT, NOTE_UNKNOWN = "bad-pct", "unknown-kind"
+#: 🔴 R98：模型分軌軸（`MODEL_SCOPED_KINDS`）未確認命中目標模型 ⇒ 被排除在 cap 聚合外。
+#: 同族紀律：**只准多說一句，不參與分類**——這一句只出現在 `note`／`describe()`，
+#: `band`／`cap`／`rec` 三欄一律不受影響（見 `decide()` 的建構順序）。
+NOTE_MODEL_EXCLUDED = "model-scoped-excluded"
 
 _INF = float("inf")
 
@@ -178,6 +182,11 @@ class Axis:
     is_active: bool | None = None
     severity: str | None = None
     via: str = ""
+    # 🔴 R98／DEF-200-1xx：伺服器對模型分軌桶（`weekly_scoped` 等）在 `limits[].scope.
+    # model.display_name` 具名回報是**哪一個**模型（實測值 `"Fable"`）。**帶預設值的新欄**
+    # ——既有建構點皆傳 ≤7 個位置參數，本欄不影響任何一處（同 `QuotaState.account_key`
+    # 的既有先例）。`None`＝伺服器沒給／這一軸本來就不是模型分軌。
+    scope_model: str | None = None
     # 🔴 刻意不定義 __float__ / __int__ / __index__ / __lt__ / __gt__：
     #    `float(axis)` 與 `axis_a < axis_b` 必須拋 TypeError（見 M5 執行期半）。
 
@@ -419,6 +428,13 @@ _BAND_LADDER = (BAND_FREE, BAND_NOTICE, BAND_CONVERGE, BAND_PREPARE, BAND_HALT)
 #: 值，逐格對齊）。`MODEL_SCOPED_KINDS` 與 `KNOWN_KINDS` 同族**不是**「禁止寫死桶名清單」
 #: 要禁的東西：一行都不參與分類／cap，過期的後果只是少（或多）一句建議，fail-safe。
 MODEL_HINT_BANDS = (BAND_CONVERGE, BAND_PREPARE, BAND_HALT)
+#: 🔴 R98／掌舵者判定嚴重錯誤：本集合的軸只吃「該模型」的量，**不是**與其餘訂閱軸平起
+#: 平坐的節流軸——把它排進 `gate` 等於用一個本次派工完全沒碰過的模型的水位（實測
+#: `weekly_scoped=61%` ↔ UI「Fable 61%」逐格吻合，而本 session 全程用
+#: `claude-opus-5[1m]`／`claude-sonnet-5`，Fable 一次都沒用過）去節流真正在用的模型。
+#: 見 `_in_cap_gate()`／`decide()` 的排除邏輯；`MODEL_HINT_BANDS` 上一段的降級建議
+#: 語意不受影響（未命中的軸現在**也**不再觸發降級建議——同一個理由：建議降級一個沒在
+#: 用的模型沒有意義）。
 MODEL_SCOPED_KINDS = frozenset({"weekly_scoped", "seven_day_opus", "seven_day_sonnet"})
 
 
@@ -525,6 +541,26 @@ def _binding_key(r: AxisReading) -> tuple[float, float, float, str]:
     return (cap, toothless, -remaining, r.axis.kind)
 
 
+# 🔴 R98：`MODEL_SCOPED_KINDS` 的軸只有**確認**命中這次要問的模型才准進 cap 聚合，
+# 否則一個本次派工完全沒碰過的模型（實測＝Fable）會被當成硬牆。任一邊缺席（不知道要
+# 問誰／伺服器沒說這一軸是誰）一律當「不算命中」——同 repo 通篇「量不到 ≠ 量到零」
+# 的方向：不確定時保守地排除，不確定時**不**放行也不猜著放進去。
+def _model_active(axis: Axis, active_model: str | None) -> bool:
+    """`axis.scope_model` 是否等於 `active_model`（大小寫不敏感）；任一邊缺席／非字串
+    （快取讀出的異形欄位，同 `quota_meter` 對「原樣帶出不猜、不拋例外」的既有紀律）
+    一律不算命中——拋例外會讓整條額度軸變成量不到，比保守地判「不算命中」更糟。"""
+    return (isinstance(active_model, str) and isinstance(axis.scope_model, str)
+            and axis.scope_model.strip().casefold() == active_model.strip().casefold())
+
+
+def _in_cap_gate(r: AxisReading, active_model: str | None) -> bool:
+    """cap 聚合的成員資格：`FALLBACK_KINDS` 排除同既有；`MODEL_SCOPED_KINDS` 新增一條
+    ——不在此集合的軸照舊全進，在此集合的軸只有 `_model_active()` 為真才進。"""
+    if r.axis.kind in FALLBACK_KINDS:
+        return False
+    return r.axis.kind not in MODEL_SCOPED_KINDS or _model_active(r.axis, active_model)
+
+
 # 🔴 為何 rec 不能也取 `min(逐軸 rec)`（那會讓本案要治的病原封不動復發）：weekly 這種
 # 長期程軸的 horizon 幾乎恆為 far ⇒ 它的 ×0.5 永遠 binding，短期程軸的 ×2 一次都出不
 # 來。實測固定 weekly 57%@8233min、把 session 的 reset 掃過 8640 倍的範圍，`min(逐軸
@@ -533,10 +569,14 @@ def _binding_key(r: AxisReading) -> tuple[float, float, float, str]:
 # 🔴 `axes == ()`（量不到）⇒ `cap = degraded_cap`，不是 `None`／不設限：R81 複審探針
 # 實測「快取過期 600s ＋ 額度 99%」時 42 次派發放行 42。同時**永不 halt**。
 def decide(state: QuotaState, now: datetime, p: Policy,
-           ratio: float | None = None, ratio_note: str = "") -> Decision:
+           ratio: float | None = None, ratio_note: str = "",
+           active_model: str | None = None) -> Decision:
     # 🔴 `ratio`＝短窗 pp／長窗 pp 的換算比（R86／缺陷 C）。它是**觀測值不是門檻**，所以
     # 刻意不進 `Policy`（那裡是「全部門檻的唯一的家」）：由呼叫端從落款推估後注入，
     # 缺席 ⇒ 攤提整段不套用（不偽造一個 r）。
+    # 🔴 `active_model`（R98）＝這次要問的目標模型；`None`＝不知道（既有呼叫端全部沿用
+    # 這個預設，行為對它們**逐字不變**——本輪之前不存在的參數，缺席不影響任何既有呼叫）。
+    # 同樣不進 `Policy`：它是**這一次呼叫**的性質，不是門檻，見 `_in_cap_gate()`。
     """跨軸聚合：`cap = min(逐軸 cap)`＝煞車；`rec = min(base×pace, cap)`＝加速。"""
     readings = axes_of(state, now, p, ratio, ratio_note)
     if not readings:
@@ -555,9 +595,20 @@ def decide(state: QuotaState, now: datetime, p: Policy,
     # （`bucket_readings()`）把兩軸整個丟掉，判讀層因此拿不到輸入；這裡兩軸照樣被量到、
     # 照樣進 `per_axis`（訊息、`--pace`、告警全都看得見），只是不進 **cap 聚合**。
     # 判讀歸判讀、取數歸取數，正是該案要求的方向。
-    # 🔴 `or readings` 是 fail-safe：萬一某天全部的軸都是保險軸，寧可退回舊行為（全部
-    # 參與、可能過度保守），也不要讓 `min()` 對空序列拋例外而讓整條額度軸消失。
-    gate = [r for r in readings if r.axis.kind not in FALLBACK_KINDS] or readings
+    # 🔴 `or readings` 是 fail-safe：萬一某天全部的軸都是保險軸（或全是未命中的模型分軌
+    # 軸），寧可退回舊行為（全部參與、可能過度保守），也不要讓 `min()` 對空序列拋例外
+    # 而讓整條額度軸消失。`gate_list`（fallback 之**前**）另外用來判斷「有沒有真的排除」
+    # ——fallback 觸發時等於沒有排除，note 不該說一句與事實不符的「被排除」。
+    gate_list = [r for r in readings if _in_cap_gate(r, active_model)]
+    gate = gate_list or readings
+    if gate_list:
+        # 🔴 R98：未命中的模型分軌軸**不得靜默消失**——note 補一句，per_axis 仍全帶
+        # （見 `_axis_phrase()` 一併印出 `scope_model`）。`band`／`cap`／`rec` 不受影響，
+        # 只有 `note`／`reason` 兩個「人看的」欄位變長。
+        readings = tuple(
+            r._replace(note="+".join(x for x in (r.note, NOTE_MODEL_EXCLUDED) if x))
+            if r.axis.kind in MODEL_SCOPED_KINDS and r not in gate_list else r
+            for r in readings)
     binding = min(gate, key=_binding_key)
     # 🔴 `if notes else` 分支是冗餘的（`",".join(["x"])` 不產生尾逗號）——R89 就地簡化，
     # 行為逐字等價。（此處原先接著一句「騰出的餘裕給下面那道地板」，那道地板已於本輪
@@ -614,8 +665,10 @@ def decide(state: QuotaState, now: datetime, p: Policy,
 def _axis_phrase(r: AxisReading) -> str:
     when = "reset 距離不明" if r.minutes is None else f"剩 {int(r.minutes)} 分鐘"
     note = f" note={r.note}" if r.note else ""
+    # 🔴 R98：`scope_model` 有值才印——多數軸沒有這一欄，印一個 `model=None` 是雜訊。
+    model = f" model={r.axis.scope_model}" if r.axis.scope_model else ""
     return (f"kind={r.axis.kind} {r.axis.pct:g}% {when} "
-            f"band={r.band} horizon={r.horizon} cap={r.cap}{note}")
+            f"band={r.band} horizon={r.horizon} cap={r.cap}{model}{note}")
 
 
 def describe(d: Decision) -> str:

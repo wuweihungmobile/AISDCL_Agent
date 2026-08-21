@@ -11,10 +11,8 @@ from pathlib import Path
 import pytest
 
 from tools.perf_baseline_lock import (
-    BLOCK_THRESHOLD,
     CONSECUTIVE_RUNS,
     MIN_SAMPLES,
-    SUBMS_JITTER_FLOOR_MS,
     append_history,
     load_baseline,
     load_history,
@@ -46,8 +44,12 @@ def test_load_baseline_empty_when_missing(tmp_path):
 def test_append_history_same_utc_date_dedup(tmp_path):
     """M-05 對齊：同 UTC date 多次 run 僅保留最新（不污染觀察期計數）。"""
     h = tmp_path / "hist.jsonl"
-    append_history(h, {"timestamp": "2026-05-21T01:00:00+00:00", "scenarios": {"s": _make_scen(100)}})
-    append_history(h, {"timestamp": "2026-05-21T05:00:00+00:00", "scenarios": {"s": _make_scen(120)}})
+    append_history(
+        h, {"timestamp": "2026-05-21T01:00:00+00:00", "scenarios": {"s": _make_scen(100)}}
+    )
+    append_history(
+        h, {"timestamp": "2026-05-21T05:00:00+00:00", "scenarios": {"s": _make_scen(120)}}
+    )
     records = load_history(h)
     assert len(records) == 1
     assert records[0]["scenarios"]["s"]["p95_ms"] == 120
@@ -55,8 +57,12 @@ def test_append_history_same_utc_date_dedup(tmp_path):
 
 def test_append_history_different_date_keeps_both(tmp_path):
     h = tmp_path / "hist.jsonl"
-    append_history(h, {"timestamp": "2026-05-21T01:00:00+00:00", "scenarios": {"s": _make_scen(100)}})
-    append_history(h, {"timestamp": "2026-05-22T01:00:00+00:00", "scenarios": {"s": _make_scen(110)}})
+    append_history(
+        h, {"timestamp": "2026-05-21T01:00:00+00:00", "scenarios": {"s": _make_scen(100)}}
+    )
+    append_history(
+        h, {"timestamp": "2026-05-22T01:00:00+00:00", "scenarios": {"s": _make_scen(110)}}
+    )
     assert len(load_history(h)) == 2
 
 
@@ -170,11 +176,39 @@ def test_run_lock_after_seven_runs(tmp_path):
     assert baseline["s"]["samples"] == MIN_SAMPLES
 
 
-def test_should_lock_allows_subms_jitter_despite_relative_excess(tmp_path):
-    """SD_09 R52 sub-ms deadlock 修復：baseline 0.489ms，tail 含 0.782ms（相對 +60% 超
-    BLOCK_THRESHOLD，但絕對差 0.293ms < SUBMS_JITTER_FLOOR_MS 0.5）→ 視為 jitter 容忍 → 允許 re-lock。
+def test_run_lock_fields_come_from_same_record_def_200_164(tmp_path):
+    """DEF-200-164：p50/p95/p99/samples 必須同出一次量測，不得出現 p99 < p95。
 
-    這正是 token_halt_roundtrip 永遠卡 samples=7 的根因；修復後 baseline 得以 re-lock 至 samples=20。
+    tail 中 p95 最大的一筆（idx=3）刻意帶*不同*的 samples（25，非 MIN_SAMPLES）；
+    tail 最後一筆（舊邏輯的 `tail_last`）刻意帶*較低* p95/p99（90/99 < 150）。
+    舊邏輯（p50/p99 取 tail 最後一筆、samples 硬寫 MIN_SAMPLES）會寫出
+    p99(99) < p95(150) 的自相矛盾 baseline，且 samples 與貢獻 p95 的那一筆對不上。
+    """
+    r = tmp_path / "res.json"
+    h = tmp_path / "h.jsonl"
+    b = tmp_path / "b.toml"
+    for i in range(CONSECUTIVE_RUNS - 1):
+        scen = _make_scen(150, samples=25) if i == 3 else _make_scen(100)
+        append_history(
+            h,
+            {"timestamp": f"2026-05-{10 + i:02d}T01:00:00+00:00", "scenarios": {"s": scen}},
+        )
+    _write_results(r, {"s": _make_scen(90)})  # 最後一筆（tail_last）刻意最低
+    result = run(r, h, b)
+    assert result["status"] == "locked"
+    baseline = load_baseline(b)["s"]
+    assert baseline["p95_ms"] == 150
+    assert baseline["p99_ms"] >= baseline["p95_ms"], "p99 倒掛 p95——分位數取自不同記錄"
+    assert baseline["samples"] == 25, "samples 須為貢獻該 p95 那一筆的真實樣本數"
+
+
+def test_should_lock_allows_subms_jitter_despite_relative_excess(tmp_path):
+    """SD_09 R52 sub-ms deadlock 修復：baseline 0.489ms，tail 含 0.782ms（相對 +60%
+    超 BLOCK_THRESHOLD，但絕對差 0.293ms < SUBMS_JITTER_FLOOR_MS 0.5）
+    → 視為 jitter 容忍 → 允許 re-lock。
+
+    這正是 token_halt_roundtrip 永遠卡 samples=7 的根因；
+    修復後 baseline 得以 re-lock 至 samples=20。
     """
     # tail 7 筆模擬真實 token_halt jitter（0.47~0.782），全部 abs<0.5ms of 0.489 baseline
     jitter = [0.47, 0.489, 0.551, 0.771, 0.782, 0.46, 0.5]

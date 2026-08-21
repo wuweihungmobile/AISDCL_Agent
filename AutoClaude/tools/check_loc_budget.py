@@ -53,9 +53,13 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 BASELINE_FILE = PROJECT_ROOT / ".loc_baseline"
 OVERRIDE_FILE = PROJECT_ROOT / ".loc-budget.toml"
 
-# 強制 stdout/stderr 為 UTF-8 的唯一實作住 monorepo 根層 `tools/lib/`（見該檔
-# `init_utf8_streams` 上方的 SSOT 說明）；取用方式同 `AutoClaude/tools/snapshot_sync.py`。
+# 強制 stdout/stderr 為 UTF-8 的唯一實作、與 ADR-XPLAT-012 條文五 §2 Phase 1 觀察模式
+# 分類器（敘事／斷言／空白）皆住 monorepo 根層 `tools/lib/`（見 `init_utf8_streams`
+# 上方的 SSOT 說明；取用方式同 `AutoClaude/tools/snapshot_sync.py`）。
 sys.path.insert(0, str(PROJECT_ROOT.parent / "tools" / "lib"))
+from guard_line_taxonomy import (  # noqa: E402
+    classify_file as _classify_guard_line_taxonomy,  # type: ignore[import-not-found]
+)
 from platform_utils import (  # noqa: E402
     init_utf8_streams as _init_utf8_streams,  # type: ignore[import-not-found]
 )
@@ -216,8 +220,12 @@ SPECIAL_FILES: dict[str, int] = {
     # 門檻的機械量測者：路徑刻意以 `../` 越出 AutoClaude（唯一的 dev_start.py 在
     # monorepo 根 tools/，SCAN_ROOT="autoclaude" 掃不到它）。**棘輪：只准往下改**，
     # 要往上調必須在缺陷帳本具名理由（同 _FROZEN_GUARD_LINES 的重釘慣例）。
+    # 🔴 DEF-101-758 下釘 2000 → 1952：gh-run-list 判讀邏輯本體（原 1798~1836，
+    # 已無 +4~5 行餘裕可再修）搬到新葉節點模組 `tools/lib/ci_run_status.py`，本檔僅留
+    # 薄呼叫；依本棘輪「合法縮小後必須同步下修」的紀律重釘為現值，不下修的話這段
+    # 差額就是日後無聲加回去的破口。
     # 現值不寫死在此（會過期）：`python tools/check_loc_budget.py --json` 現查。
-    "../tools/dev_start.py": 2000,
+    "../tools/dev_start.py": 1952,
     # 🔴 R69 P3：上一列（R68 落地）**只守 `dev_start.py` 一支**，而根層 `tools/` 是一整層
     # 逾兩萬行的護欄層。同一輪（R68）就有另外兩支在無人看守下大幅膨脹——
     # `check_defect_log_crossref.py` 漲到四位數行、`archive_defect_log.py` 亦然——證明
@@ -240,7 +248,7 @@ SPECIAL_FILES: dict[str, int] = {
     # `tools/lib/ci_liveness.py`）。留在本檔的殘餘是**不可壓縮的接線**：三態判準要吃
     # `_SLOW_SPECS`／`platform_cell_index()` 這些只有本檔有的表格解析器，搬出去等於把
     # 解析器一起搬（那會製造第二份表格語意＝本檔一直在治的病）。
-    "../tools/sync_onboarding_baselines.py": 1499,
+    "../tools/sync_onboarding_baselines.py": 1430,  # 本輪：R60/R67 史料搬遷後重釘（收緊）
     # 🔴 具名調高 754 → 759（DEF-200-162，依本棘輪自訂的解鎖程序）：調高前已先走完「抽共用
     # 模組」那一步——失敗明細檔名／輪替邏輯搬進新檔 `tools/lib/failure_log_rotation.py`
     # （guardrail_lib 400 budget、當回合遠低於上限），本檔只留呼叫端最小接線（import＋2 行
@@ -620,6 +628,30 @@ def build_root_tools_reports() -> list[FileReport]:
     )
 
 
+def guard_taxonomy_reports() -> list[dict]:
+    """ADR-XPLAT-012 條文五 §2／§7：Phase 1 觀察模式——逐檔敘事／斷言／空白／
+    unparseable 快照，**只回報、不參與 rc／violations**（該 ADR 條文五 §1）。
+
+    掃描面＝條文五 §5 SSOT 公式 `root_tools_reports() ∪ special_file_reports()`：
+    兩個來源集合已由 `root_tools_reports()` 自身排除已入 `SPECIAL_FILES` 的檔
+    （見該函式 docstring），故互斥、直接串接即可、不需額外去重。
+    """
+    reports: list[dict] = []
+    for rel_path, base in (
+        *((r.rel_path, PROJECT_ROOT.parent) for r in root_tools_reports()),
+        *((r.rel_path, PROJECT_ROOT) for r in special_file_reports()),
+    ):
+        t = _classify_guard_line_taxonomy(base / rel_path)
+        reports.append({
+            "rel_path": rel_path,
+            "narrative": t.narrative,
+            "assertion": t.assertion,
+            "blank": t.blank,
+            "unparseable": t.unparseable,
+        })
+    return reports
+
+
 def build_reports(overrides: dict[str, dict]) -> list[FileReport]:
     reports: list[FileReport] = []
     for p in iter_source_files():
@@ -732,6 +764,11 @@ def check(update_baseline: bool = False, as_json: bool = False) -> int:
             "absolute_limit": ABSOLUTE_LIMIT,
             "special_files": SPECIAL_FILES,
         }
+        # ADR-XPLAT-012 條文五 §2：Phase 1 觀察模式並存欄位——只加欄位，不動上面
+        # 任何既有鍵、不影響 `has_violation`／rc（見本函式末尾組裝式，taxonomy 未入內）。
+        guard_taxonomy = guard_taxonomy_reports()
+        payload["guard_taxonomy"] = guard_taxonomy
+        payload["narrative_total"] = sum(r["narrative"] for r in guard_taxonomy)
         print(json.dumps(payload, indent=2, ensure_ascii=False))
     else:
         violations_count = (

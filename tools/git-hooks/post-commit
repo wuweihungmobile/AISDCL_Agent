@@ -36,5 +36,22 @@ fi
 
 if [ -x "$target" ]; then
   "$target" || true
+elif [ -f "$target" ]; then
+  # DEF-101-918：Windows 的 Git Bash 上 `[ -x ]` 是「檔首是不是 shebang」的內容
+  # 猜測而非權限位元——親測目標檔首多一個 UTF-8 BOM，`[ -x ]` 就由 EXECUTABLE
+  # 翻成 NOT-EXEC（且 `chmod +x` 之後仍誤判），上面那道判斷因此靜默 exit 0、
+  # 不呼叫任何東西。反向判準：讀檔首 5 位元組，若確為 BOM（EF BB BF）緊接
+  # `#!`（23 21），判定為「疑似 BOM 誤判」，改用 bash 直接執行（保持 advisory
+  # 語意不變）並印出警告——讓這個失效可被看見，而不是與「本來就沒裝 hook」
+  # 混成同一種沉默。誠實劃界：只認 BOM 這一種已重現的具體位元組污染，不宣稱
+  # 涵蓋「檔首多任何位元組」的通則情形。
+  sig="$(LC_ALL=C head -c 5 "$target" 2>/dev/null | od -An -tx1 2>/dev/null | tr -d ' \n')"
+  if [ "$sig" = "efbbbf2321" ]; then
+    echo "post-commit dispatcher：$target 檔首含 UTF-8 BOM，Git Bash 的 [ -x ] 內容猜測誤判為 NOT-EXEC（DEF-101-918）——改用 bash 直接執行" >&2
+    # 剝掉前 3 個 BOM 位元組再交給 bash：不剝的話 shebang 行前多出的 BOM 位元組會
+    # 讓 bash 把整行當成一個字面命令去找（拋一句無害但吵人的 No such file），剝掉後
+    # `#!...` 行才會被 bash 正常辨識為註解而跳過。
+    tail -c +4 "$target" | bash || true
+  fi
 fi
 exit 0

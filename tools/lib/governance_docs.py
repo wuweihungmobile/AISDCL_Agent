@@ -251,6 +251,21 @@ _GOVERNANCE_DOCS = (
     # 涵蓋缺口的逐字證據）**唯一還能重驗的地方**（⇒ 體積守門），且七列各指名本檔某節
     # 為其詳情居所（⇒ 指針稽核）。即刻登記，不等下一輪（DEF-200-131 同型）。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R98_Mac_Closure_Evidence.md",
+    # 帳本減半波（單一書記收斂）：四包回報複驗、B 類證偽、E 類拆列裁決的詳情面。
+    # 資格同上——本輪 30 餘筆帳本列瘦身為索引後，逐條重驗所需的原文只住這裡
+    # （⇒ 體積守門），且逐節寫出「某 DEF-ID 現居本檔某節」的座標宣稱（⇒ 指針稽核）。
+    # 即刻登記，不等下一輪（DEF-200-131 同型）。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R99_Ledger_Closure.md",
+    # 本輪護欄層行數棘輪重釘證據（收尾單人窗口產出）。資格同 R98 同名檔：
+    # `_GUARD_LINES_REPIN_LOG` 本輪的稽核列指名本檔為逐檔漂移清單的家（⇒ 指針稽核），
+    # 且本檔承載本輪 `guard-total:` 兩處標記（`_GUARD_TOTAL_DOC_GLOBS` 掃描面之一）⇒
+    # 同時是行數棘輪的文件側對帳站點。即刻登記，不等下一輪（DEF-200-131 同型）。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R99_Scan_Findings.md",
+    # 帳本連通分量分析（R-06 對抗包）：本輪核心因果敘事「48 個連通分量、41 個孤立單筆
+    # ⇒ 推翻結案吞吐恆為 1」的落地物與可重跑證據。資格同上——複審者要核對這個量化判決
+    # 就得讀完輸入定義／演算法／逐一列出的成員（⇒ 體積守門），且逐節寫出「某 DEF-ID
+    # 屬於哪個分量」的座標宣稱（⇒ 指針稽核）。即刻登記，不等下一輪（DEF-200-131 同型）。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R99_Ledger_Connectivity_Analysis.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/{CrossPlatform,Quota}_*.md`。這**不是**把具名

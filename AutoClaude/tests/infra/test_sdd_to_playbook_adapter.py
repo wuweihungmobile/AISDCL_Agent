@@ -116,6 +116,28 @@ class TestFrozenGate:
         with pytest.raises(FileNotFoundError):
             SddToPlaybookAdapter().load_spec(str(tmp_path / "docs"))
 
+    def test_ambiguous_candidates_resolved_by_exact_official_name(self, tmp_path):
+        """DEF-200-176：字母序 `sorted()[0]` 會選到 `CONTRACT-TEST-SPEC-INTEGRATION-*`
+        （C < T），即使唯一符合官方命名的 `TEST-CONTRACT-SPEC-*` 才是正確規格。"""
+        spec_dir = _write_spec(tmp_path)  # 寫入 TEST-CONTRACT-SPEC-Demo.md
+        decoy_dir = spec_dir / "03_testing" / "contracts"
+        (decoy_dir / "CONTRACT-TEST-SPEC-INTEGRATION-Demo.md").write_text(
+            "# 非官方測試契約規格的干擾檔", encoding="utf-8"
+        )
+        _write_fsm_state(tmp_path)
+        spec = SddToPlaybookAdapter().load_spec(str(spec_dir))
+        assert spec.scenario == "brownfield"  # 來自真正的 TEST-CONTRACT-SPEC 內容
+
+    def test_ambiguous_candidates_without_exact_match_fail_loud(self, tmp_path):
+        """兩份候選皆非官方 `TEST-CONTRACT-SPEC-*`/`TCS-*` 命名 → 拒絕字母序靜默選檔。"""
+        docs = tmp_path / "docs" / "03_testing" / "contracts"
+        docs.mkdir(parents=True)
+        (docs / "CONTRACT-TEST-SPEC-INTEGRATION-A.md").write_text("a", encoding="utf-8")
+        (docs / "ENV-CONTRACT-SPEC-B.md").write_text("b", encoding="utf-8")
+        _write_fsm_state(tmp_path)
+        with pytest.raises(ValueError, match="DEF-200-176"):
+            SddToPlaybookAdapter().load_spec(str(tmp_path / "docs"))
+
 
 class TestParsing:
     @pytest.fixture()
