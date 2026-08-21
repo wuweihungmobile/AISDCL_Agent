@@ -510,6 +510,17 @@ on:
       - "tools/lib/quota_criteria.py"
       - "tools/lib/pace_contract.py"
       - "tools/lib/guard_bucket_policy.py"
+      # R98：本輪新建的六支根層 SSOT（失敗明細輪替／帳本陳舊度／額度 env 子系統／
+      #      行事曆排程後端／哨兵武裝側／拋棄式 worktree 路徑判定）。漏列的代價逐字同
+      #      DEF-101-042：只改該檔時其回歸鎖不會跑。🔴 本批是 R98 落地當輪漏登記、
+      #      切到 macOS 側重跑 pre-push 才由 test_ci_paths_cover_root_consumers.py
+      #      攔下（與 R80／R81／R86 同一形態、同一支判準，第四次重犯）。
+      - "tools/lib/failure_log_rotation.py"
+      - "tools/lib/ledger_staleness.py"
+      - "tools/lib/quota_policy_env.py"
+      - "tools/lib/schedule_backend_calendar.py"
+      - "tools/lib/sentinel_lifecycle_arm.py"
+      - "tools/lib/worktree_paths.py"
       - "AutoClaude/autoclaude/execution/pre_run_validator.py"
       - "AutoClaude/autoclaude/core/ports/observability.py"
       - "AutoClaude/autoclaude/core/ports/rtm_feedback.py"
@@ -778,6 +789,17 @@ on:
       - "tools/lib/quota_criteria.py"
       - "tools/lib/pace_contract.py"
       - "tools/lib/guard_bucket_policy.py"
+      # R98：本輪新建的六支根層 SSOT（失敗明細輪替／帳本陳舊度／額度 env 子系統／
+      #      行事曆排程後端／哨兵武裝側／拋棄式 worktree 路徑判定）。漏列的代價逐字同
+      #      DEF-101-042：只改該檔時其回歸鎖不會跑。🔴 本批是 R98 落地當輪漏登記、
+      #      切到 macOS 側重跑 pre-push 才由 test_ci_paths_cover_root_consumers.py
+      #      攔下（與 R80／R81／R86 同一形態、同一支判準，第四次重犯）。
+      - "tools/lib/failure_log_rotation.py"
+      - "tools/lib/ledger_staleness.py"
+      - "tools/lib/quota_policy_env.py"
+      - "tools/lib/schedule_backend_calendar.py"
+      - "tools/lib/sentinel_lifecycle_arm.py"
+      - "tools/lib/worktree_paths.py"
       - "AutoClaude/autoclaude/execution/pre_run_validator.py"
       - "AutoClaude/autoclaude/core/ports/observability.py"
       - "AutoClaude/autoclaude/core/ports/rtm_feedback.py"

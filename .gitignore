@@ -75,6 +75,10 @@ desktop.ini
 # R57 ARCH-R57R3-03：run_root_unittests 失敗明細落檔（診斷用，不入庫）
 # DEF-200-162：檔名改帶時間戳／HEAD 短碼並輪替最近 N 份，pattern 需跟著改
 tools/.last_failure_*.log
+# 🔴 舊固定檔名同時保留：DEF-200-162 換 pattern 時把它一起拿掉了，而既有 checkout
+# 上那支殘檔（改版前寫的）並不會自己消失 ⇒ Source Control 永久多一支未追蹤雜訊。
+# `*` 不匹配空字串，故上一行涵蓋不到它。今日已無程式碼寫這個名字，此行純為殘檔除噪。
+tools/.last_failure.log
 
 # act 實跑帳本（run_act_core.py `--verify-all` 寫入，`--list` 讀取）。
 # 刻意**不入庫**：它記的是「**這台機器**上那一次 act 執行真的走完了」——是本機量測值，
