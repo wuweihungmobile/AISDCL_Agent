@@ -15,6 +15,33 @@
 > - **體積上限（若納管）**：fail `_LEDGER_FAIL_BYTES = 256 * 1024 = 262,144` bytes；
 >   warn `_LEDGER_WARN_BYTES = 240 * 1024 = 245,760` bytes（`tools/check_defect_log_crossref.py:1158~1162`；
 >   來源是 Read 工具單次讀取上限，非 git/markdown 限制）。本檔遠低於該線。
+>
+> 🔴 **R98 收尾窗口裁決（DEF-200-177）：不納入 `_GOVERNANCE_DOCS`，理由如下**——
+>
+> 1. **本檔仍是未執行的提案，不是已執行的紀錄**：現查（`Test-Path`）本檔 §6 列出的搬檔動作
+>    （`AutoSDD_improving_103~108.md`、`R74/77/79~82_HANDOFF.md` 等）截至 R98（第 13 輪之後）
+>    **一支都沒有被搬動**——`docs/04_planning/AutoSDD_improving_103.md` 與 `docs/04_planning/R74_HANDOFF.md`
+>    仍在上層原位、`Archive/` 下皆無同名檔。`_GOVERNANCE_DOCS` 收錄的是**已發生事件的證據／收尾檔**
+>    （承載某 DEF-ID 的詳情、或某輪淨額重釘的稽核痕跡），本檔性質不同：它是**尚待執行的計畫**。
+> 2. **沒有任何帳本列以本檔為「唯一居所」**：現查全帳本（`AutoSDD_Defect_Log.md`）與
+>    `CrossPlatform_R85_Review_{SA,QA}.md` 對本檔的引用，皆是**批評本檔尚未落地**（SA-10／注③），
+>    沒有一筆 DEF-ID 寫著「詳情現居本檔」。`_GOVERNANCE_DOCS` 的資格判準（見 `governance_docs.py`
+>    檔頭 WHY）是「複審者要逐條重驗某 DEF-ID 的結案就得讀完它」——本檔不承擔這項義務。
+> 3. **本檔的座標宣稱本就是「當回合快照」而非長期指標**：內文大量 `file:line` 引用
+>    （如 `governance_docs.py:105~108`、`test_doc_loc_baseline_freshness_r60.py:6813` 等）
+>    是 R85 當下的行號，隨後 13 輪程式碼持續變動，這些行號**已知會漂移**；若納管等於承諾
+>    持續維護一份設計上就是時間戳記快照的文件，義務錯位。
+> 4. **既有先例支持「提案類文件另有歸屬」**：`R*_HANDOFF.md`（同為規劃／交棒性質）本來就不在
+>    `_GOVERNANCE_DOCS`，而是由 `test_adr_xplat001_c1c2_lock.py` 的 `_HANDOFF_RECONCILE_SINCE`／
+>    `_HANDOFF_CLAIMLESS_BASELINE` 另一套機制管——本檔屬同一類（提案／規劃），不屬
+>    `_GOVERNANCE_DOCS` 管的那一類（證據／收尾）。
+> 5. **不納管不造成任何機械面新缺口**：本檔名不符 `_GOVERNANCE_DOC_GLOBS` 兩種樣式，
+>    `unregistered_governance_docs()` 本就結構上看不到它；這條裁決只是把「看得見的決定」寫下來，
+>    不改變任何 rc。
+>
+> **此裁決不代表本檔的搬檔提案作廢**——§6 的執行清單仍然有效，只是尚未有收尾單人窗口去做；
+> 若未來真的執行了，屆時本檔會自然變成一份純歷史記錄（同 `R*_HANDOFF.md` 的性質），仍不需要
+> 進 `_GOVERNANCE_DOCS`。見 `docs/06_quality/AutoSDD_Defect_Log.md` 的 `DEF-200-177`。
 
 ---
 

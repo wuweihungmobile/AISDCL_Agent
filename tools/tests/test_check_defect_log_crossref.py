@@ -988,8 +988,8 @@ class TestGovernanceDocRegistrationIsComplete(unittest.TestCase):
         )
 
     def test_the_three_named_docs_are_exactly_what_the_glob_finds(self) -> None:
-        """雙向：登記面 == 發現面。單向只驗一邊時，多登記一支不存在的檔不會被抓到。"""
-        on_disk = {p.name for p in m._GOVERNANCE_DOC_DIR.glob(m._GOVERNANCE_DOC_GLOB)}
+        """雙向：登記面 == 發現面（DEF-200-131：發現面為 `_GOVERNANCE_DOC_GLOBS` 樣式聯集）。"""
+        on_disk = {p.name for g in m._GOVERNANCE_DOC_GLOBS for p in m._GOVERNANCE_DOC_DIR.glob(g)}
         registered = {p.name for p in m._GOVERNANCE_DOCS}
         self.assertEqual(registered, on_disk,
                          "登記面與發現面不一致（登記了不存在的檔，或漏登記磁碟上的檔）")

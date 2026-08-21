@@ -703,9 +703,9 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 537,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 5350,
+    "test_adr_xplat001_c1c2_lock.py": 5363,
     "test_archive_defect_log.py": 3846,
-    "test_bash32_compat.py": 946,
+    "test_bash32_compat.py": 970,
     "test_bash_probe_spec_contract.py": 983,
     "test_block_destructive_git_r83.py": 2178,
     "test_bootstrap_core.py": 439,
@@ -739,7 +739,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_no_invalid_escape_sequences.py": 329,
     "test_ntfs_trailing_space_device_name.py": 770,
     "test_onboarding_parity_interlock.py": 233,
-    "test_platform_neutral_paths.py": 6200,
+    "test_platform_neutral_paths.py": 5724,
     "test_platform_utils_dedup.py": 1123,
     "test_pre_commit_dispatcher_sigpipe.py": 964,
     "test_pre_push_dispatcher.py": 686,
@@ -998,6 +998,19 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "[非淨減法輪][同輪追加] 護欄層重釘自身編修：前一列落地後 `--print-guard-lines` 覆核"
      "再次發現本檔自己逐檔漂移 +8（收斂尾段：新增稽核列＋prefix_len／digest 更新自身佔行），"
      "同 R95/R96/R97 既有體例。逐檔清單見 CrossPlatform_R97_Scan_Findings.md「同輪追加⑤」。"),
+    ("R98", 85687, 85687, 0,
+     "R98：tools/lib 拆分子模組觸發重釘 30→41；同輪壓縮舊史料換取淨額。逐檔清單見 "
+     "CrossPlatform_R98_Scan_Findings.md。"),
+    ("R98", 85687, 85238, -449,
+     "R98 第二次收斂：DEF-101-941 BSD regex 修復再度讓 test_bash32_compat.py +23 行、"
+     "第四次撞上護欄層行數棘輪。改採結構性減法：test_platform_neutral_paths.py 內"
+     "20 段逐輪判準歷史敘事原文搬至 docs/06_quality/CrossPlatform_Guard_Line_History.md"
+     "（僅留判準邏輯＋指標），淨額 -472。兩者相抵，總淨額為負，非壓線打平。"
+     "逐檔清單見 CrossPlatform_R98_Scan_Findings.md「第二次收斂」節。"),
+    ("R98", 85238, 85248, 10,
+     "[非淨減法輪][同輪追加] 護欄層重釘自身編修：本檔新增本列＋上一列稽核列＋"
+     "prefix_len/digest 更新，本檔自身逐檔漂移 +10（5353→5363），同 R95/R96/R97 既有"
+     "體例。逐檔清單見 CrossPlatform_R98_Scan_Findings.md「第二次收斂·同輪追加」。"),
 )
 
 
@@ -1141,10 +1154,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 37
+_REPIN_LOG_FROZEN_PREFIX_LEN = 40
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "99658c85be1068a42c4c8a6638a131eabb4ddb63a05ff569f8a10e1cad24ca48")
+    "2b5c7e53c9b2e68e3d43ea109cb3680a34b2b733098c9cbbd4f714c658e1b8ba")
 
 
 def repin_log_history_digest(

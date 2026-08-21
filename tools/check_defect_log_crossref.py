@@ -1169,7 +1169,7 @@ _READ_TOOL_MAX_BYTES = 256 * 1024
 # 「抽共用模組」是該棘輪自己指定的第一順位處置，先例 `tools/lib/defect_ledger_index.py`。
 # 下方三個名字是**再匯出**（同一個物件，`assertIs` 鎖住），消費端與 monkeypatch 面零改動。
 _GOVERNANCE_DOCS = _gov_docs._GOVERNANCE_DOCS
-_GOVERNANCE_DOC_GLOB = _gov_docs._GOVERNANCE_DOC_GLOB
+_GOVERNANCE_DOC_GLOBS = _gov_docs._GOVERNANCE_DOC_GLOBS
 _GOVERNANCE_DOC_DIR = _gov_docs._GOVERNANCE_DOC_DIR
 
 
@@ -1183,17 +1183,17 @@ def unregistered_governance_docs() -> list[str]:
 
     誠實劃界：判定面＝檔名前綴慣例，**不是**語意判斷。有人把治理文件取名成別的前綴
     （或放到別的目錄）一樣抓不到——那需要理解「這份檔承擔什麼義務」，本鎖不假裝有。
-    它擋的是「照慣例命名、卻漏登記」這條**已實際發生過**的復發路徑。
+    它擋的是「照慣例命名、卻漏登記」這條**已實際發生過**的復發路徑（DEF-200-131：
+    命名慣例不止一種，改為樣式元組 `_GOVERNANCE_DOC_GLOBS` 逐一 glob 後聯集——
+    `fnmatch` 不支援單一字串內的前綴交替）。
     """
     registered = {p.resolve() for p in _GOVERNANCE_DOCS}
-    missing = sorted(
-        p.name for p in _GOVERNANCE_DOC_DIR.glob(_GOVERNANCE_DOC_GLOB)
-        if p.resolve() not in registered
-    )
+    on_disk = {p for g in _GOVERNANCE_DOC_GLOBS for p in _GOVERNANCE_DOC_DIR.glob(g)}
+    missing = sorted(p.name for p in on_disk if p.resolve() not in registered)
     if not missing:
         return []
     return [
-        f"{name}：符合具名治理文件的命名慣例（{_GOVERNANCE_DOC_GLOB}）卻未登記進 "
+        f"{name}：符合具名治理文件的命名慣例（{'／'.join(_GOVERNANCE_DOC_GLOBS)}）卻未登記進 "
         f"{Path(__file__).name} 的 _GOVERNANCE_DOCS —— 未登記＝該檔同時逸出**體積守門**"
         f"與 archive_defect_log 的**指針稽核**（SA-R60R3-01 的原始路徑：本輪新生的姊妹"
         f"證據檔只進了其中一張清單）。請在該常數補上一筆，並在該檔內寫明它為何屬於這一類；"
@@ -1453,7 +1453,7 @@ def main() -> int:
           "合法值內（散文與程式常數雙向綁定，且每個合法值都有分類器對應）；"
           "全部表格列的欄數皆等於表頭欄數、狀態欄由表頭定位（非 cells[-1] 位置猜測）；"
           f"具名治理文件 {len(_GOVERNANCE_DOCS)} 份皆已登記且未逾體積上限"
-          f"（登記面對 {_GOVERNANCE_DOC_GLOB} 發現面雙向核對）；"
+          f"（登記面對 {'／'.join(_GOVERNANCE_DOC_GLOBS)} 發現面雙向核對）；"
           f"全部未結案列的承接輪次皆 ≥ 當前輪 R{current_round(ledger_text)} 或已載明改派"
           "（硬規則②；已實測不涵蓋的形態見 orphan_backlog_problems docstring）；"
           f"未結存量 {len(_ledger_index.unresolved_ids(ledger))} 列（唯一量測入口＝"

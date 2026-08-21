@@ -130,13 +130,11 @@
 #     登記「6e 不得宣稱達成」），憑證字串因此明文帶著這一句。
 from __future__ import annotations
 
-import json
 import os
 import plistlib
 import subprocess
 import sys
-import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 # 「這台機器」的兩個事實（痕跡的持久居所、電源姿態）唯一的家。**不是**第二個平台知識的家：
@@ -144,6 +142,14 @@ from pathlib import Path
 # 理由是本檔 `count_loc` 落地當回合為 395/400（餘裕 5），而那正是 ROOT-TOOLS
 # `override_reason` 指定的動作（「破線後不是調高預算，而是拆職責／抽共用模組」）。
 import endurance_env
+from schedule_backend_calendar import (
+    _append_trace,
+    _calendar_of,
+    _descriptor_problems,
+    _first_int,
+    _labels_with_prefix,
+    _unsafe_name,
+)
 
 #: 兩個後端把憑證寫進續航狀態塊的**不同鍵**。刻意不共用 `next_run_time` 一個鍵：
 #: 那個鍵名在 mac 上是一句假話（launchd 不報 next-run），而把 launchd 憑證塞進一個叫
@@ -816,89 +822,18 @@ def has_carrier(os_name: str | None = None, platform_name: str | None = None) ->
     return select(os_name, platform_name).name != "none"
 
 
-# label／檔名安全閘：帶路徑分隔符或空白的 label 一律拒絕。
-# 理由與 planner 的 `_ps_single_quote` 同源（工作名是外部輸入，`--task-name` 由人直接
-# 給）：這裡的 label 會直接變成 `~/Library/LaunchAgents/<label>.plist` 的檔名，含 `/`
-# 就能寫到目錄外去。純白名單式的拒絕比跳脫簡單，且 label 本來就不需要那些字元。
-# （同 `_planner` 上方那一句：docstring → 註解，為 R83-B 騰 LOC，一字未刪。）
-def _unsafe_name(task_name: str) -> bool:
-    return (not task_name or task_name in (".", "..")
-            or any(ch in task_name for ch in "/\\ \t\n\r"))
+# `_unsafe_name`／`_labels_with_prefix` 一律從 `schedule_backend_calendar` import（見檔頭）：
+# 純函式、無模組層可變狀態依賴，搬遷理由與範圍見該檔檔頭說明，本檔不重寫第二份邏輯。
 
 
-# 把列舉輸出收成工作名清單。兩個後端**共用**這一支的理由是它們的輸出恰好同形：
-# `launchctl list` 是 `PID\tStatus\tLabel` 三欄，`Get-ScheduledTask` 那一側一行就是一個名字
-# ⇒ 取最後一欄兩邊都成立。前綴過濾在這裡做一次（不是兩份），呼叫端因此拿到的一律是名字。
-def _labels_with_prefix(text: str, prefix: str) -> list[str]:
-    names = [line.split("\t")[-1].strip() for line in text.splitlines()]
-    return [name for name in names if name.startswith(prefix)]
-
-
-# 「這個時刻值不值得一個 `StartCalendarInterval`」＝本檔唯一的判準點。回 `None` 表示
-# 「巡邏底盤已經夠了」，回 dict 表示「這是一個真的截止時刻」。純函式 ⇒ 紅綠可注入自證。
-#
-# 🔴 門檻取 `> interval` 而不是「有時刻就寫」，理由是**風險**不是美感：寫進 calendar 就
-# 代表下一次 `arm()` 的回讀會不符 ⇒ 要走一輪 bootout+bootstrap，而那是整條鏈上唯一會讓
-# 哨兵消失的動作。巡邏那一支的 `at` 恆為 `now + interval`（`sentinel_decide` 建構它），
-# 落在門檻之外 ⇒ 巡邏永遠走冪等路徑、一次都不動排程器。`TRANSIENT_RETRY_SECONDS`（300s）
-# 也落在門檻之外，代價（重試慢最多 10 分鐘）已登記在檔頭。
-#
-# 🔴 `Month`／`Day` 一起釘住，不是只寫 Hour/Minute：只給時分的 `StartCalendarInterval`
-# 是**每天**都會觸發的（`install_mac_nightly.sh` 的 nightly 正是要那個語意），而這裡要的是
-# 「某一個特定時刻」。多釘兩個鍵讓它退化成一年一次，殘留的那一次也落在哨兵早已解除之後。
-#
-# 🔴 **只往後取整，絕不提早**（`+59s` 再切掉秒）：calendar 是分鐘粒度，而截止時刻的語意是
-# 「在這之前額度還沒回來」⇒ 提早觸發會白燒一次探測，而探測是這整套唯一花 token 的動作。
-# 今天的 `RESET_SKEW_SECONDS`（120s）本來就讓提早 <60s 仍落在 reset 之後，但那是**別人的
-# 常數**：把正確性寄託在它上面，等於讓調小 skew 的人在完全無關的地方靜默破壞這裡。
-def _calendar_of(at: datetime | None, interval: int) -> dict | None:
-    if at is None or (at - datetime.now(at.tzinfo)).total_seconds() <= interval:
-        return None
-    at = (at + timedelta(seconds=59)).replace(second=0, microsecond=0)
-    return {"Month": at.month, "Day": at.day, "Hour": at.hour, "Minute": at.minute}
-
+# `_calendar_of`／`_first_int`／`_descriptor_problems`／`_append_trace` 一律從
+# `schedule_backend_calendar` import（見檔頭）：純函式、無模組層可變狀態依賴，搬遷理由與
+# 完整設計討論見該檔檔頭說明，本檔不重寫第二份邏輯。
 
 # calendar descriptor 的人讀形態。走 `_CAL_KEYS` 的順序而不是 dict 的插入順序，這樣
 # 「plist 寫進去的那一份」與「launchd 回讀的那一份」印出來可以逐字比對。
+# 🔴 本函式**刻意留在原檔**（未隨其餘純函式搬遷）：它依賴 `_CAL_KEYS`，而 `_CAL_KEYS`
+# 同時被 `LaunchdBackend._readback` 用裸名讀取——兩者搬走會讓兩檔互相 import，代價大於
+# 省下的兩行（見 `schedule_backend_calendar.py` 檔頭說明）。
 def _cal_text(cal: dict) -> str:
     return "-".join(f"{k}={cal[k]}" for k in _CAL_KEYS if k in cal) or "(無)"
-
-
-def _first_int(text: str) -> int | None:
-    for token in text.replace("=", " ").split():
-        if token.isdigit():
-            return int(token)
-    return None
-
-
-def _descriptor_problems(live: dict, want_argv: list[str], want_interval: int,
-                         want_path: str | None = None,
-                         want_cal: dict | None = None) -> list[str]:
-    """回讀值與請求值的差異清單（空＝憑證的第 ② 件成立）。純函式，紅綠由注入自證。"""
-    problems = []
-    # 🔴 calendar 這一格**雙向**都要判。少了「要求沒有、回讀卻有」那一向，一支殘留著舊
-    # 截止時刻的 job 會被判成相符 ⇒ 憑證說「參數就是我要的那組」，而它其實還會在去年的
-    # 那個時刻醒來。單向判準在這裡就是 R83 `verify_cli` 那個「憑證不回答那個問題」的重演。
-    if dict(live.get("calendar") or {}) != dict(want_cal or {}):
-        problems.append(f"StartCalendarInterval 回讀 {live.get('calendar')!r}，請求 {want_cal!r}")
-    if live.get("interval") != want_interval:
-        problems.append(f"run interval 回讀 {live.get('interval')!r}，請求 {want_interval}")
-    if list(live.get("argv") or []) != list(want_argv):
-        problems.append(f"argv 回讀 {live.get('argv')!r} 與請求不符")
-    path = str(live.get("path") or "").strip()
-    if not path:
-        problems.append("launchd 沒有回報 plist path ⇒ 無法證明它已持久化")
-    elif want_path is not None and path != want_path:
-        # launchd 載入的來源不是我們剛寫的那一份 ⇒ 這支 job 是別的東西建的，我們對它的
-        # 內容一無所知。**不接受**：憑證第 ③ 件說的是「這一份已持久化」，不是「有一份」。
-        problems.append(f"launchd 載入的 plist 是 {path!r}，不是 {want_path!r}")
-    return problems
-
-
-def _append_trace(path: Path, record: dict) -> None:
-    record = {**record, "at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
-    try:
-        with path.open("a", encoding="utf-8", newline="\n") as handle:
-            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
-    except OSError:
-        pass

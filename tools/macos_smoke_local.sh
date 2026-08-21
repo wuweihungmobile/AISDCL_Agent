@@ -37,7 +37,8 @@
 #
 # 相容性：嚴格 bash 3.2（macOS /bin/bash，2007 凍結版；禁 declare -A / mapfile /
 # ${var,,}）+ BSD 工具（禁 sed -i 無 ''、readlink -f、grep -P、stat -c、date -d、
-# timeout、xargs -r、find -printf、裸 mktemp〔BSD 無預設模板，必須帶 XXXXXX〕）。
+# timeout、xargs -r、find -printf、裸 mktemp〔BSD 無預設模板，必須帶 XXXXXX〕、
+# base64 -w／--wrap〔BSD base64 無此旗標〕、sha256sum〔BSD/macOS 無此指令，用 shasum -a 256〕）。
 # 另禁 date 的 %N 奈秒（GNU 擴充；BSD strftime 無此格式字元，會原樣輸出字面 N 使
 # `$(( END - START ))` 算術崩）——該項的判準是 tools/tests/test_bash32_compat.py 的
 # `gnu_date_nanos_problems`（**不在** `_PATTERNS` 內：存量債走 shrink-only 棘輪登記，

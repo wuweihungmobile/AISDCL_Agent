@@ -42,7 +42,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 #     皆 `= <上游>._GOVERNANCE_DOCS` 再匯出，`assertIs` 鎖住）。若未來真出現
 #     只受其中一項管的檔，才拆成兩個**不同名字**的常數並各寫 WHY——絕不可同名而成員不同。
 #   · 另一道守門（`unregistered_governance_docs()`）：磁碟上凡符合姊妹檔命名慣例
-#     （`_GOVERNANCE_DOC_GLOB`）而未登記者一律 rc=1——「新增姊妹檔卻忘了登記」正是實際
+#     （`_GOVERNANCE_DOC_GLOBS`）而未登記者一律 rc=1——「新增姊妹檔卻忘了登記」正是實際
 #     發生過的路徑，不能只靠人記得。
 _GOVERNANCE_DOCS = (
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R60_Fix_Evidence.md",
@@ -225,10 +225,36 @@ _GOVERNANCE_DOCS = (
     # 理由與上方各列相同：複審者要逐條重驗就得讀完它 ⇒ 受體積守門；逐筆寫出座標宣稱 ⇒ 受
     # 指針稽核）。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R97_Scan_Findings.md",
+    # R98 PRD 對照現況差距分析（AutoClaude↔AISDLC_SDD 橋接複驗，另一併行包產出）。資格同
+    # 上方同名檔：逐節寫出「某 PRD 概念的落地位置／某 DEF-ID 的座標」宣稱（⇒ 指針稽核），
+    # 複審者要判「PRD 對照現況還有哪些落差」就得讀完它（⇒ 體積守門）。即刻登記，不等下一輪。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R98_PRD_Gap_Analysis.md",
+    # DEF-200-131 修復：`Quota_R90_CrossAccount_Experiment.md` 是 PRD `:79`／`:1372`／`:296`
+    # 三處修憲／校準論述**唯一**引用的實測依據，資格同上——複審者要重驗 T5 升格與跨帳號碰撞
+    # 率結論就得讀完它（⇒ 體積守門），且它是「某論述現居本檔某節」座標宣稱的對象（⇒ 指針
+    # 稽核）。此檔命名不符 `CrossPlatform_*` 慣例，過去對 `unregistered_governance_docs()`
+    # 結構上不可見（見下方 `_GOVERNANCE_DOC_GLOBS` 的第二個樣式）。
+    _REPO_ROOT / "docs" / "06_quality" / "Quota_R90_CrossAccount_Experiment.md",
+    # R98 護欄層行數棘輪重釘證據（收尾單人窗口產出）。資格同上：`_GUARD_LINES_REPIN_LOG`
+    # 的 R98 稽核列指名本檔為逐檔漂移清單的家（⇒ 指針稽核），複審者要重驗「為何本輪淨額
+    # 能壓到 ≤0」就得讀完它（⇒ 體積守門）。即刻登記，不等下一輪。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R98_Scan_Findings.md",
+    # R98 第二次收斂（BSD regex 修復再度撞上護欄層行數棘輪）：把 `test_platform_neutral_
+    # paths.py` 裡最大宗的 20 段逐輪判準 WHY 敘事原文一字不漏搬到這裡，測試檔本身只留判準
+    # 邏輯＋指回本檔對應章節的錨點。資格同上——它是那 20 段敘事**唯一還能重驗的地方**
+    # （⇒ 體積守門），且逐節寫出「某判準的 WHY 原文現居本檔某錨點」的座標宣稱（⇒ 指針稽核）。
+    # 🔴 DEF-200-131 同型：新建證據檔沒有即刻登記，導致 `unregistered_governance_docs()`
+    # 對它結構上不可見。即刻登記，不等下一輪。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_Guard_Line_History.md",
 )
 
-# 姊妹治理文件的命名慣例：`docs/06_quality/CrossPlatform_*.md`。這**不是**把具名常數
-# 換成 glob（那個方向的反對理由見上方），而是拿 glob 當**發現面**去反查登記面：
-# 具名常數仍是權威，glob 只負責在「有人建了一份長得像治理文件的檔卻沒登記」時吵起來。
-_GOVERNANCE_DOC_GLOB = "CrossPlatform_*.md"
+# 姊妹治理文件的命名慣例：`docs/06_quality/{CrossPlatform,Quota}_*.md`。這**不是**把具名
+# 常數換成 glob（那個方向的反對理由見上方），而是拿 glob 當**發現面**去反查登記面：具名
+# 常數仍是權威，glob 只負責在「有人建了一份長得像治理文件的檔卻沒登記」時吵起來。
+# 🔴 DEF-200-131：原僅 `CrossPlatform_*.md` 一個樣式，使命名慣例不同的姊妹檔（`Quota_*.md`，
+# 例：`Quota_R90_CrossAccount_Experiment.md`）對這道發現面結構上不可見——`fnmatch`／
+# `Path.glob()` 不支援單一字串內的前綴交替（無 `{a,b}` 語法），故改為**樣式元組**、
+# 呼叫端逐一 glob 後聯集。新增樣式前先確認不會誤撈 `docs/06_quality/` 既有其他慣例
+# （已現查：`Quota_*.md` 今日在該目錄下唯一命中即 `Quota_R90_CrossAccount_Experiment.md`）。
+_GOVERNANCE_DOC_GLOBS = ("CrossPlatform_*.md", "Quota_*.md")
 _GOVERNANCE_DOC_DIR = _REPO_ROOT / "docs" / "06_quality"

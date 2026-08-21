@@ -6,15 +6,14 @@ WHY：macOS 內建 /bin/bash 凍結於 3.2.57（2007，GPLv2 授權凍結），b
 多數以「合法指令名／執行期展開」形式存在，直到執行期才炸（DEF-101-004 家族
 真機重現：CI 的 ubuntu bash 5.x 全綠、mac 執行期才紅）。另 BSD 工具紀律組
 （grep -P／readlink -f／sed -i）為 GNU/BSD 選項分歧，同樣執行期才炸。
-本測試以行級 regex 掃描六樹 active bash 腳本，防未來複製舊 pattern 再踩
-（骨架鏡射 test_subprocess_encoding_hygiene.py：豁免行內註記＋stale 自檢＋
-per-tree 下限）。
+本測試以行級 regex 掃描六樹 active bash 腳本，防未來複製舊 pattern 再踩（骨架鏡射
+test_subprocess_encoding_hygiene.py：豁免行內註記＋stale 自檢＋per-tree 下限）。
 
 判準（行級 regex；先剝註解再掃，heuristic 邊界如下，均為刻意取捨）：
   A 執行期必炸組（bash 4+ 語法）：declare -A、mapfile、readarray、
     ${var,,}/${var^^}/${var@Q…}、|&、&>>、coproc、local -n、wait -n
-  B BSD 工具紀律組（GNU-only 選項）：grep -P、readlink -f、sed -i、stat -c、
-    date -d、timeout、xargs -r、find -printf
+  B BSD 工具紀律組（GNU-only 選項）：grep -P、readlink -f、sed -i、stat -c、date -d、
+    timeout、xargs -r、find -printf
     （SA-R15-REV-4 揭露：ONBOARDING §8 靜態自查清單另列「BRE 交替」屬語意級判準
     ——grep 是否用 ERE `|` 交替需理解上下文，非行級 regex 能可靠判定，刻意不納入
     本守門、仍靠人工紀律。🔴 R69：本段原寫「本組僅機械化前 3 項」，而
@@ -107,6 +106,23 @@ _PATTERNS: list[tuple[re.Pattern[str], str]] = [
     # 能可靠判定的東西，寫進來只會製造要逐筆辯護的假紅。
     (re.compile(r"\bmktemp(?!\s+(?:-[a-zA-Z]+\s+)*[\"'$/])"),
      "裸 mktemp（BSD 無預設模板，必須帶 \"${TMPDIR:-/tmp}/x.XXXXXX\"）"),
+    # R97 覆審（DEF-101-941 修復不完整）：`-w\b` 抓不到最常見的無空白寫法 `base64 -w0 f`
+    # ——`\b` 是 word/non-word 邊界，`-w0` 裡 "w" 與 "0" 都是 word 字元、中間沒有邊界，
+    # 判準對自己要防的形態視而不見。SD 一審建議改 `-w(?!\w)`，經以下實測**否證**：
+    # `(?!\w)` 在 "w" 之後仍要求下一字元非 word 字元——對 "-w0" 而言 "0" 本身就是 word
+    # 字元，(?!\w) 與原本的 `\b` 在此處判準完全等價，並不會多抓到任何東西
+    # （`python -c` 逐一比對兩個 pattern 對 "-w0 f" 的 `.search()` 結果皆為 None）。
+    # 真正能涵蓋 `-w0`／`-w=0`／`-w,`／行尾 `-w` 而不誤傷 `-wombat` 這類另一個字母開頭
+    # 的長旗標的形狀，是 `-w(?![a-zA-Z])`（否定前瞻僅排除「下一字元是字母」，數字/等號/
+    # 逗號/空白/行尾皆非字母，一律放行）。另加一支涵蓋 `--wrap` 長選項的分支
+    # （`[^\n|;]*` 沿用 `find -printf` 那條的慣例，避免跨管線/分號誤連別的指令）。
+    (re.compile(
+        r"\bbase64\s+(?:-[a-zA-Z]+\s+)*-w(?![a-zA-Z])"
+        r"|\bbase64\b[^\n|;]*--wrap\b"
+        r"|\bsha256sum\b"
+    ),
+     "base64 -w／--wrap／sha256sum（GNU-only；DEF-101-941；BSD 無 -w/--wrap 旗標／"
+     "無此指令，用 shasum -a 256）"),
 ]
 
 # 散文側禁令 token ↔ 上表判準的綁定用樣本：每個 token 配一段**應被判違規**的最小 bash。
@@ -129,6 +145,14 @@ _BAN_TOKEN_SAMPLES: dict[str, str] = {
     "xargs -r": "xargs -r rm",
     "find -printf": "find . -printf '%p'",
     "mktemp": "x=$(mktemp)",
+    # R97：樣本改用**無空白**的 `-w0`——這是 DEF-101-941 一審漏抓的真實形態；若樣本仍
+    # 停在「-w 0」這種帶空白的好整以暇寫法，自證測試對這次要修的缺口毫無鑑別力
+    # （舊版 `-w\b` 一樣打得中「-w 0」，只有 `-w0` 才會露出邊界判準的破綻）。
+    "base64 -w": "base64 -w0 f",
+    # 不在 macos_smoke_local.sh 檔頭散文裡逐字出現，故不計入 `_prose_tokens()` 門檻，
+    # 純粹加強 `test_every_registered_sample_is_actually_caught` 對長選項分支的鑑別力。
+    "base64 --wrap": "base64 --wrap=0 f",
+    "sha256sum": "sha256sum f",
 }
 
 
