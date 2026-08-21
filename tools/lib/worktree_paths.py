@@ -14,6 +14,14 @@ WHY 這一段從 `.claude/hooks/block_destructive_git.py` 搬出來（P0-1）：
 NTFS 大小寫不敏感／正反斜線混用，且不依賴磁碟查詢，所以「大小寫正確」這件事
 不必等 `realpath` 去問磁碟），再做**前綴**（不是子字串）比對。
 
+🔴 分隔符取 `os.path.sep`（**不是** `os.sep`），雖然兩者在任一真實平台上恆為
+同值。理由是可模擬性：本函式的平台行為必須**完全**由 `os.path` 決定，測試才能
+用一個 `mock.patch.object(os, "path", ntpath)` 把 Windows 語意整包注入。舊寫法
+把分隔符留在 `os.sep`（`os.path` 之外的全域），於是只換 `os.path` 的模擬會造出
+一個不存在的混血平台——路徑是 `\\` 而分隔符是 `/`——判準當場對不上。這個形態
+已經咬過兩次（R96 那兩支回歸鎖的 docstring 自己寫了同一件事），所以修的是**類別**
+而不是實例：`os.path` 之外的平台全域，本函式一律不碰。
+
 搬出來的理由同 `tools/lib/shell_tokens.py`（同檔第一段 WHY 逐字同構）：
 這支護欄的 `guardrail_cli<=750`（`AutoClaude/tools/check_loc_budget.py`）已
 零餘裕，任何新程式碼行都必須先抽共用模組，不是把門檻調高。
@@ -45,4 +53,4 @@ def is_under_disposable_worktree(path: str) -> bool:
     except OSError:
         return False
     wt_root = disposable_worktree_root()
-    return target == wt_root or target.startswith(wt_root + os.sep)
+    return target == wt_root or target.startswith(wt_root + os.path.sep)

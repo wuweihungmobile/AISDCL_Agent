@@ -44,7 +44,17 @@ from autoclaude.plugins.token_guard.policy import TokenGuardPlugin
 from autoclaude.utils.config import TokenGuardConfig
 
 REPO = Path(__file__).resolve().parents[1]
+# 🔴 R98 起 `EnvVar(...)` 宣告已從 `quota_policy.py` 搬到 `quota_policy_env.py`
+# （該輪護欄層 LOC 拆分）。本鏡射鎖讀的是**原始碼文字**（ACQ-02 禁止 import
+# harness），所以它綁的是宣告實際所在的那支檔，不是再匯出它的門面檔。
+# 常數搬家而跨子專案的消費端沒跟上＝鐵律七；上次搬家時本鎖大聲紅掉（非靜默
+# 歸零）正是它該有的行為，勿把它改成寬鬆比對來消除這種紅。
+# 🔴 兩支檔**各持一半**，不可一律改指新檔：`EnvVar(...)` 宣告在 `_env` 那支，
+# 而帶別字面（BAND_HALT／BAND_PREPARE）仍住 `quota_policy.py`。實測依據＝把
+# 本檔的指標一律改指 `_env` 後，`test_the_band_literals_match_the_root_ones`
+# 當場翻紅。故此處刻意保留兩個指標，各綁自己那一半的真實所在。
 _ROOT_POLICY = REPO.parent / "tools" / "lib" / "quota_policy.py"
+_ROOT_POLICY_ENV = REPO.parent / "tools" / "lib" / "quota_policy_env.py"
 
 
 # ─────────────────────────────────────────────────────────────
@@ -287,7 +297,7 @@ class TestTheBandFromTheContractDrivesTheLiveGuard:
 # ─────────────────────────────────────────────────────────────
 class TestDegradedCapMirrorsTheRootDeclaration:
     def test_the_shipped_degraded_cap_equals_the_root_env_spec_default(self):
-        src = _ROOT_POLICY.read_text(encoding="utf-8")
+        src = _ROOT_POLICY_ENV.read_text(encoding="utf-8")
         m = re.search(r'EnvVar\("AUTOSDD_QUOTA_DEGRADED_CAP",\s*"[^"]*",\s*(\d+)', src)
         assert m, "根層 ENV_SPEC 找不到 AUTOSDD_QUOTA_DEGRADED_CAP ⇒ 這條鏡射鎖已靜默歸零"
         assert DEGRADED_CAP == int(m.group(1)) == TokenGuardConfig().quota_degraded_cap

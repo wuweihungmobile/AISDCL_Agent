@@ -80,12 +80,12 @@ class TestCrossPlatformSeparatorAndCaseHandling(unittest.TestCase):
         env = mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": self._FAKE_ROOT})
         env.start()
         self.addCleanup(env.stop)
-        normcase_patch = mock.patch.object(WT.os.path, "normcase", ntpath.normcase)
-        realpath_patch = mock.patch.object(WT.os.path, "realpath", ntpath.realpath)
-        normcase_patch.start()
-        realpath_patch.start()
-        self.addCleanup(normcase_patch.stop)
-        self.addCleanup(realpath_patch.stop)
+        # 🔴 整包換掉 `os.path`（不是逐個函式換）：逐個換會漏掉分隔符那一格而造出
+        # 「路徑是 \ 、分隔符是 /」的混血平台 ⇒ 判準對不上、mac 上假紅。整包換之後
+        # 「只換一半」在結構上不可能發生，這才是把錯誤類別消掉而非只修實例。
+        ntpath_patch = mock.patch.object(WT.os, "path", ntpath)
+        ntpath_patch.start()
+        self.addCleanup(ntpath_patch.stop)
 
     def test_mixed_separators_are_recognized(self) -> None:
         mixed = self._FAKE_ROOT + "/.claude/worktrees/agent-x"

@@ -1675,7 +1675,7 @@ class TestR84WorktreeRemoveForce(unittest.TestCase):
                         f"{command!r} 被誤擋——全語料實測這一類佔新增命中的 100%")
 
     def _as_windows(self) -> tuple:
-        """把 Windows 的兩個前提顯式注入：`os.path.normcase` 與 `os.path.realpath`。
+        """把 Windows 的路徑語意**整包**顯式注入：`os.path` → `ntpath`。
 
         🔴 P0-1：識別邏輯搬到 `tools/lib/worktree_paths.py`
         （`is_under_disposable_worktree()`）後，正規化不再只靠 `normcase`——`realpath`
@@ -1684,9 +1684,11 @@ class TestR84WorktreeRemoveForce(unittest.TestCase):
         `ntpath.realpath` 在沒有 `nt` 模組時（POSIX）退化成純字面 `normpath`／
         `abspath`，不摸磁碟（CPython `ntpath.py` 原始碼確認），所以在假造的
         Windows 語意下兩平台結果一致。
+
+        🔴 整包換而非逐個換（R98）：漏掉分隔符那一格＝混血平台（mac 假紅／Windows
+        恆綠）；WHY 全文見 `tools/lib/worktree_paths.py` 模組 docstring。
         """
-        return (mock.patch.object(G.os.path, "normcase", ntpath.normcase),
-                mock.patch.object(G.os.path, "realpath", ntpath.realpath))
+        return mock.patch.object(G.os, "path", ntpath)
 
     def test_the_mixed_separator_shape_is_judged_on_every_platform(self) -> None:
         """🔴 R96 收尾／B-8：混合分隔符那條放行路必須在**兩個平台**都真的走得進去。
@@ -1701,8 +1703,7 @@ class TestR84WorktreeRemoveForce(unittest.TestCase):
         """
         victim = str(_REPO_ROOT).replace("/", "\\") + "/.claude/worktrees/agent-ac3ed"
         command = f"git worktree remove --force {victim}"
-        normcase_patch, realpath_patch = self._as_windows()
-        with normcase_patch, realpath_patch:
+        with self._as_windows():
             self.assertEqual(
                 G.destructive_git_hits(command, start_dir=str(_REPO_ROOT)), [],
                 "混合分隔符的拋棄式樹被誤擋 ⇒ 正規化那一格在本平台失明；"
@@ -1723,8 +1724,7 @@ class TestR84WorktreeRemoveForce(unittest.TestCase):
         """
         victim = str(_REPO_ROOT).replace("/", "\\") + "\\.CLAUDE\\WORKTREES\\agent-ac3ed"
         command = f"git worktree remove --force {victim}"
-        normcase_patch, realpath_patch = self._as_windows()
-        with normcase_patch, realpath_patch:
+        with self._as_windows():
             self.assertEqual(
                 G.destructive_git_hits(command, start_dir=str(_REPO_ROOT)), [],
                 "大小寫不同的同一棵拋棄式樹被誤擋（NTFS 不區分大小寫）")

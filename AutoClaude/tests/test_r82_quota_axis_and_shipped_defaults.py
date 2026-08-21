@@ -334,7 +334,12 @@ class TestQuotaThresholdsAreNotTheContextThresholds:
 # ─────────────────────────────────────────────────────────────
 # R82 / C3：門檻只有一個家（根層 ENV_SPEC），AutoClaude 這一側是鏡射不是複本
 # ─────────────────────────────────────────────────────────────
-_ROOT_POLICY_SRC = (REPO.parent / "tools" / "lib" / "quota_policy.py").read_text(
+# 🔴 R98 起 `EnvVar(...)` 宣告已從 `quota_policy.py` 搬到 `quota_policy_env.py`
+# （該輪護欄層 LOC 拆分）。本鏡射鎖讀的是**原始碼文字**（ACQ-02 禁止 import
+# harness），所以它綁的是宣告實際所在的那支檔，不是再匯出它的門面檔。
+# 常數搬家而跨子專案的消費端沒跟上＝鐵律七；上次搬家時本鎖大聲紅掉（非靜默
+# 歸零）正是它該有的行為，勿把它改成寬鬆比對來消除這種紅。
+_ROOT_POLICY_SRC = (REPO.parent / "tools" / "lib" / "quota_policy_env.py").read_text(
     encoding="utf-8")
 
 
