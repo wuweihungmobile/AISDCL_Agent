@@ -12,8 +12,9 @@ SD_Improving_06 W1 T1-2（ExecutionEvent + on_event + send_interrupt）。
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional, Protocol
+from typing import Protocol
 
 
 @dataclass(frozen=True)
@@ -26,7 +27,15 @@ class ExecutionOutput:
     """
     text: str
     exit_code: int = 0
-    completed: bool = True   # False = 因 hotkey / timeout 中斷
+    completed: bool = True   # False = 因 hotkey / timeout / CLI 拒工中斷
+    # R100 P2-C（PRD §8-1 的 AutoClaude 半）：非空＝執行器在**自己的輸出裡**看到撞額度／
+    # 限流跡證，該次執行沒有做到工。值＝要交給上游的 failure_reason（產生器＝
+    # core/ports/quota_meter.quota_refusal()，判準一個家）。
+    # 🔴 為什麼要一個欄位、而不是讓上游自己再判一次輸出：json 模式下 `text` 已被換成
+    # `parsed["result"]`，撞線訊息只在**原始** stdout 裡 ⇒ 上游再判會判到一個不含證據的
+    # 字串（假綠）。加欄位而非改 `completed` 的語意：`completed=False` 現有三個成因
+    # （hotkey／timeout／啟動失敗），上游要分得出「是不是撞線」才決定該 halt 還是重試。
+    quota_refusal: str = ""
 
 
 # ──────────────────────────────────────────────────────────────
@@ -92,7 +101,7 @@ class IExecutor(Protocol):
         maintain_context: bool = True,
         timeout: int = 600,
         label: str = "",
-        on_event: Optional[ExecutionEventCallback] = None,
+        on_event: ExecutionEventCallback | None = None,
     ) -> ExecutionOutput:
         """送出 prompt 給底層 CLI，回傳完整輸出。
 

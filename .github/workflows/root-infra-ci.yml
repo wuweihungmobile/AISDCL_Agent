@@ -70,6 +70,11 @@
 #                      與 `docs/06_quality/AutoSDD_Defect_Log.md` 該 ID 最新狀態是否矛盾
 #                      （DEF-101-066 這類「改帳本忘同步姊妹文件」曾真實發生一次，
 #                      本道步驟即該問題類別的治本機械守護，DEF-101-068(e) 落地）
+#   9.5 交接項機械承接載體 — tools/check_handoff_carriers.py：commit 訊息／交接文件
+#                      宣告「延後到 R<N>」時，帳本家族必須有未結列承接 ≥ N。第 9 道守的是
+#                      **帳本內的列**（硬規則②），只寫在交接散文或 commit 訊息裡的項在它的
+#                      輸入面上結構性不存在——`DEF-200-188` 立案（上一輪六項延後宣告，帳本
+#                      承接列 0 列，其中一項連規格都查不到）
 #   10. wrapper 薄殼守門 — tools/check_wrapper_thinness.py（dev_start＋local_ci_gate 對子）：獨立具名 step
 #                      執行（先前唯一執行路徑是 tools/tests/test_check_wrapper_thinness.py
 #                      裡一個不帶 mock 的測試方法，靠第 8 道 unittest 間接跑到，不像同批
@@ -460,6 +465,9 @@ jobs:
 
       - name: 缺陷帳本跨文件狀態一致（ONBOARDING.md 對 DEF-* 狀態宣稱 vs 帳本實況）
         run: python3 tools/check_defect_log_crossref.py
+
+      - name: 交接項的機械承接載體（commit 訊息／交接文件宣告延後 ⇒ 帳本須有承接列）
+        run: python3 tools/check_handoff_carriers.py
 
       - name: pytest 基線站點鎖（tools/check_pytest_baseline_sites.py：基線數字只准住 ONBOARDING §7）
         run: python3 tools/check_pytest_baseline_sites.py

@@ -10,6 +10,8 @@
 | **v2.1.5（撞線喚醒閉環修憲）** | 2026-08-17 | 經掌舵者 2026-08-17 立案（「Token 用盡時，為何沒有啟動下一個 Reset 的喚醒機制，不需要人類介入」）、待四方複審後生效 | 新增 §4.5.6：需求層明確化「任一執行層級撞線 → 零人工 → reset 喚醒續跑」，覆蓋面必含 (a) subagent／workflow agent 撞線、(b) **主 session 活著但帳號級撞線**（該回合死於 API 層、hook 體系零觸發點）兩情境；喚醒機制自身失效必須 fail-loud 且可自癒（禁止 fail-quiet 自我解除）；可重啟點任務書的骨架重寫不得摧毀機器可讀狀態塊（單檔雙寫者禁令）。立案證據＝2026-08-16/17 事件（哨兵武裝且巡邏十次全綠，卻在撞線落地後 4 分鐘死於被 halt 動作覆寫的任務書而自我解除，03:50 reset 時機器上零排程，空轉至人工介入；逐字證據與逐環驗證見 ADR-XPLAT-004 §2.9）。設計細節與實作工作清單見 ADR-XPLAT-004 §2.9 |
 | **v2.1.6（主控閒置盲區修憲）** | 2026-08-17/18 | 經掌舵者定級 P0「會破產的嚴重 BUG」立案、規格化後待實作 | 新增 §4.5.7：撞線那一刻**之前**主控完全不知道水位已逼近（等 subagent 回覆期間零工具呼叫，`context_budget_guard.py` 只掛 Pre/PostToolUse，該窗口結構上不會被觸發），且撞線那一刻通知能不能送達也未受保障。立案＝`DEF-200-148`，2026-08-16/17 收尾包與修復包兩次實證（皆為「subagent 背景耗至 session 38% 期間主控零喚醒」）。三條規範性要求：R-4.5.7-1（主控閒置盲區量測）／R-4.5.7-2（prepare 帶預防性提醒、不寫任務書骨架）／R-4.5.7-3（通知走桌面通道、不依賴主控下一次工具呼叫）。本版僅完成規格化，實作與回歸鎖見 v2.1.7 |
 | **v2.1.7（哨兵武裝狀態漂移自癒 ＋ §4.5.7 落地）** | 2026-08-20 | 經本輪落地並回歸鎖驗證通過 | §4.5.7（B1~B3）與新增 §4.5.8（C1~C4）**全數完整實作**：主控閒置量測、prepare 帶預防性桌面通知、哨兵武裝狀態對排程器現查漂移時的自動重新武裝。落地在 `tools/lib/quota_escalation.py`（`patrol_housekeeping()` 一族）與 `tools/lib/sentinel_lifecycle.py`（`armed_but_missing()`），由 `tools/session_resume_planner.py` 的 `_sentinel_tick()` 接線；回歸鎖見 `tools/tests/test_context_budget_guard.py` 的 `ControllerIdlePrepareWatchTest`／`PatrolNoticeIsDesktopNotHookTest`／`ArmedDriftSelfHealTest` |
+| **v2.1.8（四段結構性修憲：救援序列／管家事項／醒來確認／平穩機制運算元）** | 2026-08-22 | 經掌舵者裁決「走理想版」立案，本版僅完成規格化，實作由後續階段接手 | 四段原條文與本 repo 憲法或本實作結構直接衝突，一律**不降規**改寫為更強解，並各自保留「原條文 → 改後條文 → 為什麼（含實測數字）」對照：**(A) §8-8 存檔救援序列**——原文前兩步 `commit --no-verify`／`git stash` 被憲法直接禁止（鐵律五機械阻斷 stash 全族、根 CLAUDE.md 逐字列 `--no-verify` 為禁止事項），刪除該兩步並把第三步升級為「patch 寫完必須重新開檔讀回驗 SHA-256、驗不過 fail-loud」（新增 §4.5.9）；**(B) §8-11／§8-13／§8-14**——三項以「長駐 Daemon」為前提而本 repo 刻意不做 Daemon，**意圖全部保留、只換實現**，塌成「開機自檢」形態掛上 §6.1（新增 §6.2、§6.1 不變式 11~13）；**(C) §8-2 醒來確認**——固定級距 30s→300s×10 是在猜 reset 時刻（與「reset 只能觀測不能算」直接衝突），而現行實作「解不出就硬停」會永眠 ⇒ 改為觀測優先、解不出**掛回零成本哨兵巡邏**兜底（新增 §4.5.10）；**(D) §4.2.4 平穩機制**——運算元 `C_current`／`C_target`（持久併發設定點）在本實作結構上不存在，且 watermark 遲滯要防的病量不到（本包當回合實測 `~/.autosdd/traces/quota_burn.jsonl` 十天 119 筆／8 軸／819 個逐軸讀數：band 變動 77 次，其中下降 33 次**全部**是視窗翻頁（跌幅 ≥ 20pp），小幅擺動反轉 **0** 次），真正在抖的是量測可得性（同段痕跡合併實測：12 小時內 measured⇄unmeasured 翻動 **19** 次）⇒ (a)(b)(c)(d) 改寫為 cap 語意、遲滯與最小停留時間**改掛量測可得性軸**，(e) 保留並列為優先實作；順帶兩項：§8-6 全失效姿態按 fail-safe 修憲為「收斂到 `cap_prepare` 語意」（新增 §4.1.5；立案＝實測 `degraded_cap == cap_converge` 為 `True`、`cap_prepare=2`，且 `draining()` 對 `unmeasured` 明文回 `"unknown"` ⇒ 原文「全失效 → DRAINING」在本實作結構上到不了），以及「訊息中的姿態字面必須與 `decide()` 實際 cap 一致」（`tools/lib/quota_gate.py:551` 逐字「本次不節流，扇出照常放行」與同檔 `:832` 註解自述互相矛盾） |
+| **v2.1.9（v2.1.8 四段修憲的否決權複審承接：1 blocker ＋ 6 major ＋ 4 minor）** | 2026-08-23 | 經獨立複審 **REJECT** 承接、逐條修訂後待再審 | v2.1.8 四段條文本身帶有**與它自己要獵的那一族同型**的缺陷（判準會綠、而它要防的事照樣發生），一律不降規改寫，並保留「原條文 → 改後 → 為什麼（含實測數字）」對照。**🔴 BLOCKER §4.5.9 救援序列救不到未追蹤檔案，而四道斷言全部會綠**——R-4.5.9-1 把救援釘死成 `git diff HEAD --binary --no-color`，而該指令的射程**結構上**只有 index 與 HEAD 認識的路徑；當回合合成 worktree 實測：`?? brand_new.py` 存在時 patch 仍為 `135` bytes 非空、`grep -c 'brand_new'` ⇒ **`0`**、SHA-256／位元組數／非空／語意閘全過 ⇒ 「已驗證存檔成功」與「全新工作被靜默丟掉」外觀完全相同。修法＝母體改為「tracked 變更 ∪ untracked 新檔」（② 走 `ls-files --others --exclude-standard -z` 逐檔 `diff --no-index`，實測 `status --porcelain` 前後字串相等 ⇒ 同時滿足原禁令「救援不得改動工作樹」），新增斷言 (d) 覆蓋率與判準 **D8**（紅綠自證＝退回單一來源必須讓 D8 轉紅）、D5b、D9（自我遞迴）。順帶治好第二道語意閘：天真寫法在髒工作樹上**實測恆紅**（rc=1），改為「臨時索引 read-tree 到記錄的 base_sha ＋ `apply --check --cached`」（實測 rc=0，真索引與工作樹皆未動），並禁用 `--3way`（實測會把套不上 fuzz 成 rc=0）、判準改為 `rc == 0`（截半 patch 實測回 **128** 而非 1）。**MAJOR**：① §4.5.10 具名它正在改的 `tools/session_resume_planner.py::tick_plan()` 與兩個既有常數（`MAX_PROBE_ATTEMPTS` 實查 5、`TRANSIENT_RETRY_SECONDS` 實查 300；三者此前全 PRD `grep` 命中 **0**），並逐一登記三支既有鎖的「現在斷言什麼 → 該斷言什麼 → 為什麼改是對的」——其中 transient 那一支判為**一字不改**（兩個數字量的不是同一段時間：行程內 vs 跨醒來），並同步收窄 R-4.5.10-1 的射程免除衝突；② §6.2 掃描集合的 `QUEUED`／`VERIFY_FAILED` 在 §7 schema 不存在（唯一定義過的字面是 `PENDING_VERIFY`）⇒ 照原文實作會掃出 **0 筆**而 G1 注入 `QUEUED` 仍綠＝**結構性假綠**，改以 `PENDING_VERIFY` 為注入值、枚舉補進 §7 並要求「注入值必須是生產真的會寫出來的字面」；③ §4.2.4 挑的 `endurance_env.trace_dir()` **本身就有兩處靜默退回** `tempfile.gettempdir()`（OSError 分支 ＋ `os.access` 三元運算），正是同節花整段論證絕不能用的那個失效 ⇒ 加規範性 loud ＋ 降級標示 ＋ 收緊側 cap，並把 **H4 拆成 H4a／H4b 兩格**（沙箱那格結構上踩不到退回，退回真的發生時仍是綠的）；④ §4.2.4 指定的寫入原語`quota_ledger.append_record()` 自陳〈誠實劃界〉「**仍可能掉行**……不是唯一那一半」、`claim_once()` 是 TTL 閂鎖而非狀態存取器，兩者都承載不了「dwell 判決的唯一真相源」⇒ 改寫死 tmp → fsync → `os.replace` 原子換名（與 §4.5.1 步驟 4 及 R-4.5.9-3 一致）；⑤ R-4.5.10-4 的既有分支枚舉寫「四」而 `sentinel_decide()` AST 實查有 **5** 個相異 action（缺 **`probe`**，且同節 R-4.5.10-3 自己就引用了它＝節內自相矛盾）⇒ 實作者把新事件命名為 `probe` 會**通過 E5** 卻撞名，正好摧毀本條要保護的東西；補齊五元素並要求 E5 的集合由 AST 現查、不得手抄。**MINOR**：`DIRTY_SAVE_RETRIES` 補進 §6 區塊 12（出廠 1、值域 0~3；此前 D6 斷言一個沒有家的鍵）；訂正三處引文／事實（「非 halt 一律 ≥1：禁止靜默鎖死」歸屬 `_clamp()` **不是** `_bound()`——後者函式體實查只有 `min(rec, cap)` 沒有下界／刪除「unmeasured→measured 是**唯一**沒有中間級的躍遷」（`notice → free` 同型，`BAND_FREE` 三個 horizon 皆 `None`）並改由既有的「重置後不暴衝」承重／F3 補上「`None`＝不設限不受此條約束」——照原字面寫成測試會在 `BAND_FREE` 那格 `TypeError`）；`TELEMETRY_UNMEASURED_CAP` 與既有 `AUTOSDD_QUOTA_DEGRADED_CAP`（→ `Policy.degraded_cap`，實查出廠 4、下界 1.0）判為**同一旋鈕的兩個命名面**（沿用本文件既有的 `_PAIRS` 對映判例），三候選逐一記錄取捨，並修掉「留空＝取 cap_prepare」與「留空＝取實作預設」的矛盾（前者在實作面不成立：留空得 4 > cap_prepare 2）；H1／§11.2「無抖動」的 37 字元 U/M 序列補時間戳（dwell 以秒計，序列本身決定不了那一半），fixture 須 git-tracked 且自帶 `len==37`／`flips==19` 不變式。🔴 本輪只改 `.md`，零 `.py` 改動；三道閘門的實測輸出與「PRD 不在治理面清單內」的唯讀證明見交件回報 |
 
 > **v2.1 的變更**：附錄 B 的事實核對清單已**實際核實完成**（方法見附錄 B 開頭）。核實結果顯示 Claude Code v2.1.x **已內建**本 PRD 原本打算自建的多項能力（原生 worktree 隔離、任務 DAG、排程喚醒、零 Token 用量遙測、併發上限、官方配速門檻）。因此新增 [§15 執行方法論](#15-執行方法論與注意事項v21-新增)，並將建議架構從「大型自建 Daemon」縮減為「薄治理層 + 採用原生能力」。**§15 是實際動工時應遵循的章節**（含動工前置檢查、採用 vs 自建決策矩陣、P0–P5 分階段步驟、12 條紅線注意事項、參數校準方法與交付目錄結構）。
 
@@ -328,6 +330,103 @@ ADR-XPLAT-005/007 既有定義）」的 kind 集合作為指紋。伺服器新�
 可能更保守，取決於新方案的實際容量），**不是**協助偵測或切換帳號以規避
 額度限制的機制。
 
+#### 4.1.5 遙測全失效時的收斂姿態（v2.1.8 修憲；標的＝§8-6）
+
+**原條文（§8-6／§4.1.2）**：全部失效 → `DRAINING` + 告警，絕不猜測用量繼續派工；
+`age > TELEMETRY_TIMEOUT (600s)` → 強制 `DRAINING`。
+
+**衝突事實（本包當回合實測）**：
+
+| 觀測 | 實測值／逐字 | 為什麼這讓原條文在本實作裡到不了 |
+| :---- | :---- | :---- |
+| 量不到時的 cap | `tools/lib/quota_policy.py` 出廠 `degraded_cap=4`、`cap_converge=4`、`cap_prepare=2`；本包實跑 `degraded_cap == cap_converge` ⇒ **`True`** | 「完全量不到」與「量到 70% CONVERGE 帶」在致動器上是**同一個 cap** ⇒ 量不到沒有換來任何收緊 |
+| 量不到時的帶別 | `tools/lib/quota_gate.py::draining()` 對 `BAND_UNMEASURED` 明文 `return "unknown"` | `draining()` 結構上永遠不會對量不到回 `"yes"` ⇒「全失效 → `DRAINING`」在本實作**沒有可達路徑** |
+| 訊息面 | `tools/lib/quota_gate.py:551` 逐字：`⚠️  額度水位**量不到**（source=...）⇒ 本次不節流，扇出照常放行。`；同檔 `:832` 註解自述「量不到時 `decide()` 回 `degraded_cap`（不是不設限、也永不 halt）」 | 同一個決策有兩份互相矛盾的敘述，而**只有訊息那一份有讀者** |
+
+**R-4.1.5-1（量不到 ⇒ 收斂到 `cap_prepare` 語意）** 遙測全失效（`TELEMETRY_SOURCE_ORDER`
+逐一降級完畢，且逐字稿裡沒有可當地板的未復原撞線）時，致動器的硬上限必須**至少**收到
+「準備下一次 reset」那一帶的緊度：`cap ≤ cap_prepare`。
+
+- **為什麼改寫成 cap 而不是維持 `DRAINING`**：`DRAINING` 是**狀態機**的字，本實作沒有那個
+  狀態物件，只有 band ＋ cap（唯一判讀入口＝`quota_policy.decide()`）。用不存在的物件寫
+  需求，下游只能靠推論落地，而推論不會轉紅。改寫成 cap 語意後方向完全相同、且更緊
+  （`cap_prepare` 嚴格緊於現行 `degraded_cap`），並且**可以直接驗收**。
+- **為什麼不是 `cap = 0`**：0＝靜默鎖死，本實作已明文禁止。🔴 **引文歸屬（v2.1.9 訂正）**：
+  「非 halt 一律 `>=1`：**禁止靜默鎖死**；上界 `max_fanout`」這句掛的是
+  `tools/lib/quota_policy.py::_clamp()`，**不是** `_bound()`——後者函式體實查只有
+  `return rec if cap is None else min(rec, cap)`（沒有任何下界），它的註解講的是另一件事
+  （`rec > cap` 是自相矛盾的建議）。兩支同在該檔相鄰兩處、名字相似，而只有 `_clamp()` 真的
+  夾下界 ⇒ 依錯的那一支去找實作會找到一個不存在的保證。量不到不是「已經撞線」，把它折成
+  halt 就是把「量不到」當成「量到 100%」——與下一段那條紀律的另一邊撞上。
+
+**🔴 與既有紀律「量不到 ≠ 量到零」如何共存（本節最容易被誤讀的一格）**
+
+那條紀律禁止的是**把 unmeasured 當成一個具體讀數去做推論**——當 0% 而放行、當 100% 而
+halt、把過期讀數「上調一個安全邊際」當成新讀數（`read_quota()` 的 `stale-cache` 分支
+逐字：「這個量非單調（視窗翻頁會驟降）也非等速……所以『上調一個安全邊際』同樣是猜」）。
+它**不**禁止「在不知道的情況下把行為收緊」：收緊不需要一個假讀數當前提，它需要的只是
+「我不知道」這件事本身。
+
+兩者在判準上也分得開，而且分界線是機械可查的：
+
+- 造假讀數 ⇒ `band` 會變成一個具體帶別（可觀測的違規）。
+- 依「不知道」收緊 ⇒ 只動 `cap`，`band` 逐字仍為 `BAND_UNMEASURED`。
+
+⇒ **規範性要求**：本條只動 `cap`。`band` 必須繼續是 `unmeasured`、`draining()` 必須繼續
+回 `"unknown"`；既有鎖 `tools/tests/test_context_budget_guard.py::
+PrdDrainPercentMapsToTheBandsTest::test_the_three_state_answer_never_folds_unmeasurable_into_no`
+不得因本條而鬆動。
+
+**🔴 這個旋鈕有幾個家（v2.1.9 補；擇一寫死，並修掉一處自相矛盾）**
+
+`§6` 區塊 2 的 `TELEMETRY_UNMEASURED_CAP` 與實作面既有的 `AUTOSDD_QUOTA_DEGRADED_CAP`
+（→ `tools/lib/quota_policy.py::Policy.degraded_cap`；`tools/lib/quota_policy_env.py::ENV_SPEC`
+實查 `EnvVar("AUTOSDD_QUOTA_DEGRADED_CAP", "degraded_cap", 4, "int", 1.0, None, "量不到時的
+上限（絕不是「不設限」）", "policy")`）**治的是同一個數字**。三個候選處置與判決：
+
+| # | 候選 | 判決 |
+| :-- | :---- | :---- |
+| (i) | **同一旋鈕的兩個命名面**（PRD 面 `TELEMETRY_UNMEASURED_CAP` ↔ 實作面 `AUTOSDD_QUOTA_DEGRADED_CAP`），對映機械登記，數值 SSOT 在實作面 | ✅ **採用**。本文件**已有同型判例**：`TOKEN_WARN_PERCENT`／`TOKEN_DRAIN_PERCENT`／`TOKEN_HALT_PERCENT` 三個 PRD 面名字對映到 `Policy.converge_pct`／`prepare_pct`／`halt_pct`，而那個對映**已經有機械物**＝`tools/tests/test_context_budget_guard.py::PrdDrainPercentMapsToTheBandsTest._PAIRS`（分母直接讀本 PRD 檔）⇒ 沿用既有形態，不發明第二種 |
+| (ii) | 新旋鈕再夾（`cap = min(degraded_cap, TELEMETRY_UNMEASURED_CAP)`） | ❌ 同一個數字兩個家：讀者要判「現在生效的是哪一個」得讀程式碼。兩個家的漂移方向是**放寬**（任一家被調鬆就鬆） |
+| (iii) | 只在 `decide()` 內夾死、不設任何 env 鍵 | ❌ operator 失去唯一的收緊手段，而本節整段的立案就是「量不到時要能收得更緊」 |
+
+⇒ **規範性要求**：
+1. 對映必須進 `_PAIRS` 那張表（同形新增一列 `("TELEMETRY_UNMEASURED_CAP", "degraded_cap")`），
+   於是兩邊漂開時會**真的轉紅**，而不是靠讀者自行推論。
+2. **不新增第二個 env 鍵**。`.env.example` 的 `TELEMETRY_UNMEASURED_CAP` 是 PRD 面的名字，
+   載入時映到 `degraded_cap`。
+3. **出廠值的家在實作面**，本 PRD 不複寫數字（現查 `ENV_SPEC`）；本 PRD 只登記**約束**：
+   `1 ≤ degraded_cap ≤ cap_prepare`。上界是本次修憲新增的部分，也是 F1 唯一的內容。
+4. 🔴 **修掉一處自相矛盾**：原 `.env` 註解寫「留空＝取 `cap_prepare`」，而同一次修憲新增的
+   `AVAILABILITY_MIN_DWELL_SECONDS` 寫「留空＝取實作預設」——兩種「留空」語意不同，且前者
+   在實作面**不成立**（留空時 `ENV_SPEC` 給的是 `degraded_cap` 的出廠值 **4**，而
+   `cap_prepare` 實查為 **2**，`4 > 2` 直接違反本節上界）。統一為「**留空＝取實作面出廠值**」，
+   並把「≤ cap_prepare」從「留空時的取值規則」改成「**對出廠值本身的不變式**」——即出廠值
+   必須被調到滿足上界，而不是靠留空時偷偷換一個值。兩者的差別是可觀測的：後者會讓
+   `.env` 顯式寫 `4` 與留空得到**不同**結果，而那正是 operator 最容易誤判的形態。
+
+**R-4.1.5-2（訊息中的姿態字面必須與 `decide()` 實際 cap 一致）** 任何對外的降級告警，其
+**姿態字面**（節流／不節流、放行／收緊、cap 數值）一律由該次 `decide()` 的回傳值算出來，
+不得寫成常數字串；同一個決策不得有兩份敘述。
+
+- **為什麼這是修憲層級而不是文案問題**：訊息是這條路上**唯一**的讀者介面（`decide()` 算
+  出來的 cap 不會出現在畫面上，`note_degraded()` 檔頭已記載「這條路此前是零 stderr、零
+  痕跡，與『額度很健康』外觀一模一樣」）。訊息說「照常放行」而致動器其實收到一個上限，
+  兩個方向的誤判都會發生：operator 以為沒保護而過度手動收斂，或以為有保護而放心加派。
+- 🔴 **判準必須是「同源」而不是「字面比對」**：斷言訊息裡的 cap 數字**取自**同一次
+  `decide()` 的結果（例如把 `degraded_cap` 換成一個哨兵值，訊息必須跟著變），而不是斷言
+  訊息裡出現某個特定字串——後者只鎖死一句文案，改用詞就假紅。
+
+**驗收判準（全部可機械查證）**：
+
+| # | 判準 | 查證方式 |
+| :---- | :---- | :---- |
+| F1 | `axes == ()`（量不到）⇒ `decide().cap ≤ cap_prepare` | 單元測試。**紅綠自證**：把 `degraded_cap` 調回等於 `cap_converge` 的值即必須轉紅（否則這條測試對本次修憲沒有鑑別力） |
+| F2 | 同一輸入下 `band` 仍為 `BAND_UNMEASURED`、`draining()` 仍回 `"unknown"` | 控制組單元測試 ＋ 既有鎖 `test_the_three_state_answer_never_folds_unmeasurable_into_no` 必須繼續綠 |
+| F3 | `cap ≥ 1`（禁止靜默鎖死） | 單元測試（掃 band × horizon 全笛卡兒積）。🔴 **判準的精確形態（v2.1.9 訂正）：`cap is None`（＝不設限）不受本條約束；只有「有限的 cap」才須 ≥ 1，且 `BAND_HALT` 的 0 是唯一例外。** 照原字面「非 halt 一律 ≥ 1」寫成測試會在 `BAND_FREE` 那一格**失敗**——當回合實查 `_cap_for(BAND_FREE, h, p)` 在 `near`／`mid`／`far` 三個 horizon 皆為 `None`，而 `None >= 1` 在 Python 直接 `TypeError`。可查形態：`assert cap is None or cap >= 1 or band == BAND_HALT` |
+| F4 | 降級告警的 cap 數字隨 `decide()` 變動，且不得出現與實際 cap 相反的姿態字面 | 單元測試：注入哨兵 `degraded_cap` ⇒ 斷言訊息含該值；另斷言「不節流」「照常放行」這類**放行姿態字面**在 cap 有限時不出現（判準取姿態詞彙表，不取整句文案） |
+| F5 | 【v2.1.9 新增】`TELEMETRY_UNMEASURED_CAP` ↔ `Policy.degraded_cap` 的對映是**機械登記**的，且出廠值滿足 `1 ≤ degraded_cap ≤ cap_prepare` | 後設鎖：在 `PrdDrainPercentMapsToTheBandsTest._PAIRS` 同形新增一列，分母直接讀本 PRD 檔 ⇒ 兩邊漂開必紅。**紅綠自證**：把實作面出廠值改成 `cap_converge`（實查 4）必須讓上界斷言轉紅。🔴 另需一格**反向**斷言：不得同時存在第二個治同一個數字的 env 鍵（判準＝`ENV_SPEC` 內 `attr == "degraded_cap"` 的項恰好一個） |
+
 ### 4.2 配速控制器（Pacing Controller）— 修正後的數學模型
 
 #### 4.2.1 燃燒率估計（加入 EWMA 與統一下限）
@@ -383,25 +482,198 @@ C_target   = clamp(C_raw, C_min, C_cap(state))              # ← v1 缺少狀�
 
 #### 4.2.4 平穩性機制（v1 完全缺漏，是實務上最會出事的部分）
 
+🔴 **v2.1.8 修憲**：運算元從 `C_current`／`C_target` 改為本實作的 cap 語意，且遲滯與
+最小停留時間**改掛「量測可得性」軸**（不是掛在 watermark 上）。以下先記原條文與判決
+依據，再給新條文全文。
+
+**原條文（v2.0~v2.1.7，逐字保留供對照）**：
+
 ```
 # (a) 遲滯帶：避免在門檻附近抖動
 進入 THROTTLING: U5h ≥ WARN
 離開 THROTTLING: U5h ≤ WARN − WATERMARK_HYSTERESIS_PP (3)
-
-# (b) 死區：微小變化不動作
-若 |C_target − C_current| < 1  → 不變更
-
-# (c) 變化率限制（slew rate）：每個控制週期最多變動 ±1
-C_next = clamp(C_target, C_current − 1, C_current + 1)
-  例外：升級到 DRAINING/FREEZING 時允許直接歸零（安全方向不限速）
-
-# (d) 最小停留時間：避免控制器比任務生命週期還快
-若 (now − last_change) < MIN_DWELL_SECONDS (300)  → 不變更（僅適用於「增加」方向）
-
-# (e) 控制週期 vs 死時間
-CONTROL_INTERVAL_SECONDS 應 ≥ 2× 單一 Step 的中位執行時間，
-否則控制器會對尚未反映在用量上的決策重複反應（積分飽和）。
+# (b) 死區：微小變化不動作            若 |C_target − C_current| < 1 → 不變更
+# (c) 變化率限制（slew rate）         C_next = clamp(C_target, C_current − 1, C_current + 1)
+#     例外：升級到 DRAINING/FREEZING 時允許直接歸零（安全方向不限速）
+# (d) 最小停留時間                    若 (now − last_change) < MIN_DWELL_SECONDS (300) → 不變更（僅「增加」方向）
+# (e) 控制週期 vs 死時間              CONTROL_INTERVAL_SECONDS ≥ 2× 單一 Step 的中位執行時間
 ```
+
+**判決依據（兩項，皆為本包當回合實測；探針為唯讀）**：
+
+| # | 量測 | 母體與方法 | 結果 |
+| :-- | :---- | :---- | :---- |
+| 1 | watermark 遲滯要防的病，這台機器**得不到** | `~/.autosdd/traces/quota_burn.jsonl` 全量重放（span `2026-08-12T22:45:43+08:00` .. `2026-08-22T07:01:10+08:00`，**119 筆 / 8 軸 / 819 個逐軸讀數**）；逐軸把 pct 換成 `quota_policy.pct_band()` 的帶別，數「一次下降之後緊接著一次上升」的次數，並把跌幅 ≥ 20pp（§4.1.3 `RESET_DROP_THRESHOLD`）的下降剔為視窗翻頁 | `band_changes=77 up=44 down=33 down_of_which_window_resets=33` ⇒ **`SMALL_WOBBLE_REVERSALS=0`**。**33 次下降穿越全部是視窗翻頁**，視窗內 usage 單增 ⇒ 結構上不可能來回穿越門檻 |
+| 2 | 真正在抖的是**量測可得性** | 同期兩串痕跡按時間合併：measured 事件源＝burn ledger（只有量到才落款）／unmeasured 事件源＝`autosdd_quota_degraded.jsonl`（`note_degraded()` 每 180s 閂鎖一次 ⇒ 每筆代表一個相異降級視窗）。窗＝degraded 痕跡存在的那段（`2026-08-21T18:56:59+08:00` .. `2026-08-22T07:01:10+08:00`） | `measured_events=23 unmeasured_events=14` ⇒ **`AVAILABILITY_FLIPS=19`**（約 12 小時）。序列逐字：`UMMMUMMMMUMUMMUMMUUUMMMMUMMMUUMUUMUMM` |
+
+⇒ **遲滯必須掛在真的會抖的那一軸**。掛在 watermark 上不是「多一層保險」，是把一個機制
+建在它自己的盲區上（十天 819 個讀數換來 0 次動作），同時讓真正每小時翻好幾次的那一軸
+完全裸奔。
+
+**運算元對照（本實作沒有持久的併發設定點，這是整段要改寫的根因）**：
+
+| 原條文運算元 | 本實作的等價物 | 差異在哪 |
+| :---- | :---- | :---- |
+| `C_current`（持久的併發設定點） | **不存在**。致動器是「每次工具呼叫的准入控制」：`quota_policy.decide()` 每次重算 `cap`（硬上限，`None`＝不設限）＋ 300 秒滾動派發帳 `live_dispatches()`（`tools/lib/quota_gate.py::FANOUT_WINDOW_SECONDS`） | 沒有 setpoint 可以「比較上一次」⇒ (b)(c)(d) 三條原文字面無物可依 |
+| `C_target` | `decide().cap`（硬上限）／`decide().recommended_fanout`（諮詢值） | `cap` 是**無狀態純函式**：由 `(band, horizon)` 導出（`_cap_for()`），不帶記憶 |
+| `WATERMARK_HYSTERESIS_PP` | **廢除**（見上表判決依據 1）。遲滯改掛可得性軸（新常數見 (a)） | 遲滯的宿主換軸，不是換值 |
+| 「控制週期」 | 派發帳滾動視窗 `FANOUT_WINDOW_SECONDS`（現值現查該檔） | 「量測週期」對應 `QUOTA_CACHE_TTL_SECONDS`（額度快取 TTL） |
+
+**新條文（v2.1.8 起生效）**：
+
+```
+# (a) 遲滯帶 —— 掛在「量測可得性」軸，不是 watermark
+availability ∈ {measured, unmeasured}                    # 唯一有遲滯的軸
+進入 unmeasured：本次 read_quota() 不 usable（含 bad-cache / stale-cache 兩形態）
+                 ⇒ 立即生效，收緊方向不受遲滯與 dwell 約束（同原文 (c) 的例外條款）
+離開 unmeasured：連續 AVAILABILITY_EXIT_STREAK 次（≥2）read_quota() 皆 usable
+                 且 (now − availability_entered_at) ≥ AVAILABILITY_MIN_DWELL_SECONDS
+
+# (b) 死區 —— 由 band 量化本身提供，不是另一個門檻
+cap 一律由 band 導出（_cap_for(band, horizon, p)），**不得**由 pct 連續函數直接算。
+理由：帶別是階梯函數，帶內任何 pct 噪音都不產生任何動作 ⇒ 死區是結構性的、不需要
+      第二個參數；改成連續函數則死區當場消失，而失效外觀與「調得比較靈敏」相同。
+諮詢值 recommended_fanout 另有顯示層死區：|new − last| < 1 ⇒ 不改寫顯示。
+
+# (c) 變化率限制 —— 安全方向不限速，放寬方向走階梯
+收緊方向（cap 變小、或 measured→unmeasured）：不限速，允許直接到位。
+放寬方向：受 (a) 的 streak ＋ (d) 的 dwell 管；且 cap 對 band 必須單調
+          （水位愈高 cap 不得愈鬆），由既有 quota_policy 的單調性自檢守住
+          （違反時逐字印 `[非單調] ... ⇒ 水位愈高反而愈鬆`）。
+🔴 unmeasured → measured 是「沒有中間級」的躍遷（有限的 degraded cap ↔ 可能直接到不設限）
+   ⇒ 它是 (c) 要限速的那一格，而限速手段即 (a)(d)，不另立第三個機制。
+   【v2.1.9 訂正】原文寫「**唯一**沒有中間級」，該字已刪：實查 `_cap_for()` 的階梯，
+   measured 軸**內部**同型的躍遷至少還有一個——`notice → free` 是「有限 cap → None
+   （不設限）」，且 `BAND_FREE` 在 near／mid／far 三個 horizon 皆為 `None`
+   （`notice` 於 mid 為 8）⇒ 一樣沒有中間級。原文用「唯一」去論證「(c) 不需要第三個
+   機制」，論據因此不完整；結論仍成立，但改由**另一個**理由承重：那一格已經有既有守衛
+   （§11.2「重置後不暴衝」逐字要求翻頁後第一拍 `cap ≤ cap_notice`，即 `None` 不得在翻頁
+   後第一拍出現）⇒ 不是沒人管，是**已經由別條管**，不必在本節再立第三個機制。
+
+# (d) 最小停留時間 —— 只約束放寬方向，狀態必須落磁碟
+遲滯要記住的只有兩格：(availability, availability_entered_at)
+不變式：QUOTA_CACHE_TTL_SECONDS ≤ AVAILABILITY_MIN_DWELL_SECONDS ≤ SENTINEL_INTERVAL_SECONDS
+  下界：dwell 短於量測週期＝結構上無效（翻動的成因就是快取 TTL 邊界）
+  上界：dwell 長於「reset 之後最壞多久才會有人動作」＝一次瞬時降級把整段時間鎖在
+        degraded cap 上，而那段時間本機自己都已經反應過一輪了
+  兩個界都是**導出的**、且各有既有的家 ⇒ 現值一律現查實作，本 PRD 不複寫數字
+
+# (e) 控制週期 vs 死時間 —— 保留，且列為本段的優先實作項
+FANOUT_WINDOW_SECONDS ≥ 2× 單一 Step 的中位牆鐘執行時間（量測值，現查）
+FANOUT_WINDOW_SECONDS ≥ QUOTA_CACHE_TTL_SECONDS      # 控制不得比量測快（＝原文的積分飽和）
+```
+
+**🔴 遲滯狀態記在哪（本段唯一需要新增持久化的東西，先劃清「不算新開一層」的界線）**
+
+- **家**：`tools/lib/endurance_env.py::trace_dir()`（出廠 `~/.autosdd/traces`，逃生口
+  `AUTOSDD_TRACE_DIR`）底下**一支專屬檔**，經一支與 `tools/lib/quota_gate.py::
+  burn_ledger_path()` 同形的 `*_path()` 存取器取得。
+- **為什麼不用系統暫存**：這一格的**全部職責就是記住**。`tempfile.gettempdir()` 的痕跡
+  重開機即消失（本 repo 明文紀律：「查不到」≠「沒發生」）⇒ 遲滯狀態蒸發＝dwell 計時器
+  歸零＝回到翻動，而失效外觀與「遲滯正常運作」完全相同。
+- 🔴 **`trace_dir()` 自己就會靜默退回系統暫存 ⇒ 選它當家並不足以滿足上一條**（v2.1.9
+  補；此前本節花整段論證「絕不能用系統暫存」，卻挑了一個會自己退回系統暫存的存取器）。
+  函式體逐字有**兩處**這種退回：
+
+```
+    try:
+        want.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return Path(tempfile.gettempdir())              # ← 退回 ①（OSError 分支）
+    return want if os.access(want, os.W_OK) else Path(tempfile.gettempdir())
+                                                        # ← 退回 ②（不可寫的三元運算）
+```
+
+  該函式檔頭並已逐字自陳這是**刻意**的設計：「拿不到就退回 `$TMPDIR`（**退化，不是失敗**：
+  痕跡留不下來絕不可反過來變成續航本身的故障源）」，且「兩層都檢查是刻意的：`mkdir` 成功
+  不等於寫得進去……而那種失敗的表徵正好是**痕跡檔不會長大**——與『沒觸發』完全同形」。
+  ⇒ 對**痕跡**而言退化是對的（少一筆稽核紀錄，不影響決策）；對**遲滯狀態**而言退化是
+  **決策層的失效**（dwell 是判決的唯一真相源，狀態沒了就等於遲滯沒了）。同一個存取器，
+  兩種消費者，容忍度不同。
+
+  🔴 **規範性要求（不改 `trace_dir()` 的既有語意，改的是本節這個消費者的姿態）**：
+  1. 取得目錄後必須**判定它是不是那個持久目錄**（＝與 `AUTOSDD_TRACE_DIR`／
+     `~/.autosdd/traces` 的解析結果相等）。相等⇒正常路徑。
+  2. **不相等（即已退回系統暫存）時，三件事同時做**：(i) 走 §4.5.7 R-4.5.7-3 的通道
+     **loud 一次**（不是只寫進痕跡——痕跡正是此刻壞掉的那個東西）；(ii) 自檢輸出必須逐字
+     標明**「遲滯已降級」**並附退回後的實際路徑；(iii) 該次決策的 cap 一律走**收緊側**
+     （視同 `unmeasured`），因為此刻 dwell 這半邊的判決能力確實已經沒有了。
+  3. **不得**把退回當成正常路徑靜默吃掉。判準的可查形態：降級時自檢輸出含「遲滯已降級」
+     字樣；未降級時**不得**含（兩向都要驗，否則常印那句話等於沒印）。
+- **為什麼不併進 `quota_burn.jsonl`**：(1) 一份檔一個寫者（§4.5.6 R-4.5.6-3 的單檔雙寫者
+  禁令，立案＝哨兵死於被覆寫的任務書）；(2) burn ledger **只在量到時落款**，結構上記不下
+  `unmeasured` 那一半——併進去就是把這個機制建在它自己的盲區上（與上表判決依據 1 同型的
+  錯誤）。
+- **為什麼這不算「新開一層」**：新增的是**既有持久痕跡層的一個成員**，逃生口與沙箱隔離
+  兩件事都沿用既有機制。⇒ **規範性要求**：該存取器必須登記進既有的沙箱隔離表
+  （`tools/tests/test_context_budget_guard.py::_TRACE_ISOLATION`，現有四格
+  `quota_trace_path`／`degraded_stamp_path`／`refresh_stamp_path`／`burn_ledger_path`）。
+  漏登記的後果該表已逐字記載：跑一次測試就往生產面寫假紀錄並吃掉真的閂鎖。
+- **寫入必須原子**：多個 hook 行程並行是已觀測輸入形態（`note_degraded()` 檔頭記載 42 個
+  平行 hook 同時降級、`claim_refresh_slot()` 記載 16 個壁鐘 barrier 對齊行程實測
+  `CLAIM=16 SKIP=0` 的 check-then-act 事故）⇒ **不得**自己寫 check-then-act。
+
+  🔴 **原語必須寫死，而 v2.1.8 指的那兩支都承載不了這個狀態**（v2.1.9 訂正；原條文寫
+  「一律走既有的 `quota_ledger.claim_once()`／`append_record()` 原語」，而遲滯狀態是
+  **dwell 判決的唯一真相源**，不是一筆事後痕跡）：
+
+  | 原語 | 它實際是什麼 | 為什麼承載不了 |
+  | :---- | :---- | :---- |
+  | `quota_ledger.append_record()` | `O_APPEND` ＋單次 `os.write` 的**追加**器 | 該模組 docstring〈誠實劃界〉逐字：「它在同一瞬間 N 個行程同時寫時**仍可能掉行**。這是刻意的取捨而不是漏看……痕跡是事後可稽核的那一半，**不是唯一那一半**。」掉一行痕跡＝少一筆稽核；掉一次狀態更新＝dwell 計時器停在舊值 ⇒ 該放寬的不放寬、或該擋的不擋。**追加**語意本身也不對：這一格要的是「**替換**一份 2 欄狀態」，append 會留下 N 個版本而讀者得自己決定哪一個是現在 |
+  | `quota_ledger.claim_once()` | **TTL 閂鎖**（`O_CREAT\|O_EXCL` 的一次性佔位），回 `bool` | 它回答的是「這一屆是不是我的」，**不是狀態存取器**：既寫不進 `(availability, availability_entered_at)` 這兩個值，也讀不出來。它在本節仍有正當用途——把 loud（上一條第 2 點的 (i)）節流成「每 TTL 一次」——但那是**另一件事** |
+
+  ⇒ **規範性形態（擇一寫死，本 PRD 選第一種）**：**tmp → `flush()` → `os.fsync(fd)` →
+  `close()` → `os.replace(tmp, final)` 的原子換名**，每次寫入整份取代那 2 欄狀態。
+
+  - **為什麼選它**：§4.5.1 步驟 4 已逐字是這個紀律（`原子寫入 state.json（tmp → fsync →
+    rename）`），R-4.5.9-3 步驟 1 也剛剛沿用同一套 ⇒ 同一份規格裡只有一種「原子寫一份小
+    狀態」的手法，讀者不必猜。`os.replace` 在 POSIX 與 Windows 上皆為原子換名。
+  - **兩個必須一起寫下來的平台事實**（鐵律三）：(i) `os.replace` 在 Windows 覆寫「被別人
+    開著」的目的檔會 **WinError 5**（鐵律三該列機械物＝`TestDirEntryPrimitivesAreAccountedFor`）
+    ⇒ 讀取端必須「開檔、讀完、立刻關」，不得長期持有 handle；(ii) tmp 檔必須與 final
+    **同一個目錄**（跨檔案系統的 `os.replace` 不是原子的，且會拋 `OSError`）。
+  - **讀取端的失效姿態**：讀不到／解不出（首次啟動、或檔被外力刪除）⇒ 視同「剛進入
+    unmeasured」而**不是**「dwell 已滿」。兩者的差別就是 fail-safe 的方向：前者收緊、
+    後者放行。
+  - **替代形態（若實作者選它，必須在 PR 描述裡具名並說明為何）**：在 `quota_ledger` 增設
+    一支 read-modify-write 存取器（例如 `swap_state(path, fn)`）並把上述原子換名收在裡面。
+    這是同一件事的不同放置處，**不是**放寬——`append_record()` 這條路無論放在哪裡都不合格。
+
+**驗收判準（全部可機械查證；§11.2 兩支性質測試的新語意見該節）**：
+
+| # | 判準 | 查證方式 |
+| :---- | :---- | :---- |
+| H1 | 遲滯掛在可得性軸：以本節實測序列 `UMMMUMMMMUMUMMUMMUUUMMMMUMMMUUMUUMUMM`（**37 個符號、19 次翻動**，兩者皆機械現查）**＋每個符號一個時間戳**為輸入，開啟遲滯的 cap 變動次數 **嚴格小於** 關閉遲滯者 | 單元測試（對照組即紅綠自證）。母體刻意用實測形態而非合成隨機走：合成序列證明不了「這台機器真的會這樣抖」。🔴 **時間戳是判準的一部分，不是佈景**（v2.1.9 補）：dwell 以**秒**計，而 37 個字元的 U/M 序列**不含任何時間資訊** ⇒ 光靠它決定不了 (d) 那一半，同一個序列在「翻動間隔 1 秒」與「間隔 1 小時」下的正確答案相反（前者 dwell 全程未滿、後者全滿）。補法見下方〈H1 的時間軸怎麼補〉，通過門檻唯一 |
+| H2 | 收緊方向不限速（measured→unmeasured 立即生效，不等 streak／dwell） | 單元測試。控制組：把收緊也套上 dwell ⇒ 必須紅（那會讓量不到的期間繼續放行，方向與 §0 第 6 條 fail-safe 相反） |
+| H3 | 放寬方向必過 streak ＋ dwell：任何一次 unmeasured→measured 的 cap 放寬，其 `now − entered_at ≥ AVAILABILITY_MIN_DWELL_SECONDS` | 單元測試（注入時間，不睡） |
+| H4a | 遲滯狀態存活於行程之外：兩次獨立行程呼叫之間 dwell 計時器不得歸零 | 整合測試（兩次 subprocess，共用沙箱 `AUTOSDD_TRACE_DIR`）。**這一條是本段最容易被實作成假綠的一格**——把狀態放在模組級變數，單元測試會全綠而生產零效果 |
+| H4b | 🔴 **持久目錄拿不到時必須出聲**：**不**設 `AUTOSDD_TRACE_DIR`、而是讓解析出來的持久目錄變成**不可寫**（`chmod` 掉寫位元，或指向一個 `mkdir` 會 `OSError` 的路徑），斷言 (i) loud 恰好發生一次、(ii) 自檢輸出含「遲滯已降級」＋退回後的實際路徑、(iii) 該次 cap 走收緊側 | 整合測試。**🔴 為什麼必須與 H4a 分成兩格**：H4a 走的是 `AUTOSDD_TRACE_DIR` 沙箱＝**永遠是可寫的持久目錄**，於是它結構上永遠踩不到 `trace_dir()` 的兩處退回 ⇒ 退回真的發生時 H4a 仍是綠的。**控制組**：目錄可寫時**不得**出現「遲滯已降級」字樣（只有單向斷言的話，一個「每次都印」的實作會通過）。🔴 兩處退回**各要一格**：`mkdir` 失敗（OSError 分支）與 `os.access` 為假（三元運算分支）是不同的程式路徑，只驗一個等於只守一半 |
+| H5 | cap 一律由 band 導出（(b) 的死區） | 靜態判準：`_cap_for()` 的入參不得含連續的 pct；＋既有單調性自檢必須繼續綠 |
+| H6 | 不變式 `QUOTA_CACHE_TTL_SECONDS ≤ AVAILABILITY_MIN_DWELL_SECONDS ≤ SENTINEL_INTERVAL_SECONDS` 在啟動自檢被驗（§6.1 第 4 條） | 單元測試（三個值任一越界即拒絕啟動） |
+| H7 | (e)：`FANOUT_WINDOW_SECONDS ≥ QUOTA_CACHE_TTL_SECONDS` 且 ≥ 2× Step 中位牆鐘時間 | 單元測試（前半為常數比較）＋ §9 需新增 Step 牆鐘時間 histogram 才能驗後半（見 §9 該列） |
+
+**🔴 H1 的時間軸怎麼補（v2.1.9；實作者不得自行選一種，本段寫死使通過門檻唯一）**
+
+原始序列是從兩串痕跡按時間合併算出來的，**時間戳在來源裡就有**，是摘要成字串時掉的：
+`measured` 事件源＝burn ledger（`quota_burn.jsonl`，每筆帶落款時刻）／`unmeasured` 事件源＝
+`autosdd_quota_degraded.jsonl`（`note_degraded()` 每 180s 閂鎖一次 ⇒ 每筆代表一個相異降級
+視窗）。⇒ 補的方式是**取回**，不是編造：
+
+1. **母體形態**：`(symbol, offset_seconds)` 的序列，`offset_seconds` 為相對序列首筆的秒數
+   （整數，單調不減）。序列長度必須仍是 **37**，翻動數必須仍是 **19**（兩個數字是本節立案
+   母體的指紋，變了就不是同一個母體）。
+2. **時間戳從哪來**：由實作者以唯讀探針對上述兩串痕跡重跑一次合併，把每個符號的落款時刻
+   一併取出，落成一份 **git-tracked 的 fixture 檔**（理由同 §6.2 R-6.2-2 第 2 點：本機痕跡
+   檔不隨 clone 走，跑在另一台機器上會變成空母體而測試靜默轉綠）。
+3. **fixture 必須自帶不變式**：載入時斷言 `len == 37` 且 `flips == 19` 且 offsets 單調不減；
+   任一不成立即 fail-loud。🔴 這一格是防止「fixture 被後續某輪順手改小」——那種改動不會讓
+   任何測試轉紅，除了這一格。
+4. **窗長也要對得上**：整段 offsets 的跨距應落在立案窗（`2026-08-21T18:56:59+08:00` ..
+   `2026-08-22T07:01:10+08:00`，約 12 小時）的量級。斷言取寬鬆上下界（例如 6~24 小時）而
+   不是等值——痕跡可能被輪替，而過緊的斷言會變成假紅。
+5. 🔴 **痕跡不可得時的姿態＝skip 並出聲，不得靜默降級成無時間戳版本**：後者會讓 H1 退回
+   「只驗 (a) 不驗 (d)」而外觀全綠，正是本列在修的失效。
+
 
 #### 4.2.5 突刺（BURSTING）判準 — v1 未定義且有觀念錯誤
 
@@ -1024,6 +1296,370 @@ R-4.5.6-4b 的桌面級告警機制涵蓋（讀不出狀態塊、自癒不了才
 `tools/lib/quota_escalation.py`，由同檔的 `patrol_housekeeping()` 於每次巡邏 tick 呼叫（接線
 方式同 §4.5.7）。C1~C4 四支驗收判準全數綠燈，回歸鎖見上表。
 
+#### 4.5.9 髒污工作樹的存檔救援序列（v2.1.8 修憲；標的＝§8-8）
+
+**原條文（§8-8）**：`Worktree 有未提交變更且無法提交` ⇒ 依序嘗試
+`commit --no-verify` → `git stash` → 產生 patch 檔存入 checkpoints 目錄；三者皆失敗 →
+標記 `DIRTY_UNSAVED`。
+
+**衝突事實**：前兩步被本 repo 憲法**直接禁止**，不是「不建議」：
+
+| 原步驟 | 禁令出處（逐字可查） | 為什麼禁令是對的（不是形式主義） |
+| :---- | :---- | :---- |
+| `commit --no-verify` | 根 CLAUDE.md〈可重啟點四條件〉第 3 條把 `--no-verify` 逐字列為任務書必寫的**禁止事項** | pre-commit 閘門是「這份變更還沒過品質閘」的**唯一**告知管道；繞過它會把半套工作寫成一個外觀已驗證的 commit，而下一輪讀者無從分辨 |
+| `git stash` | 鐵律五 PreToolUse 機械阻斷 stash **全族**（裸 `stash`＝push／`push`／`pop`／`apply`／`drop`／`clear`／`save`），機械物＝`.claude/hooks/block_destructive_git.py` | 立案＝多包並行**共用工作樹**上的真實事故。`stash` 會把變更從工作樹**移走**——對一個無人看管的凍結流程，那正是最壞的失敗形態：變更消失且沒有人知道 |
+
+> 🔴 **不得用「`git stash create` 是放行的」來繞過**：那一支放行是因為它**不動工作樹**
+> （產出一個 dangling commit 物件），本就是〈可重啟點四條件〉第 1 條指定的**互動情境**
+> 保全手法（且必須配 `git tag` 才有 ref 指著它、否則 `gc` 可回收）。它不是本節要的東西：
+> 本節要的是「**存檔了沒**」這個問題可以靠讀一個檔回答，而 object database 裡的
+> dangling commit 回答不了它。
+
+**裁決（理想版）：救援序列只有一個動作（產生 patch，不動工作樹），但它的母體有兩段
+（tracked 變更 ∪ untracked 新檔——v2.1.9 補上後者）；第三步升級為「寫完必須讀回來驗」。**
+
+**R-4.5.9-1（單步救援，且不得改動工作樹）** 救援序列＝把**兩段**輸出依序落盤成**同一份**
+patch 檔（順序是規範性的：① 在前，② 在後）：
+
+```
+① tracked 變更（相對 R-4.5.9-2 記錄的那個 HEAD）：
+     git -C <wt> diff HEAD --binary --no-color
+② untracked 新檔（逐檔，NUL 分隔以承受含空白／非 ASCII 的檔名）：
+     git -C <wt> ls-files --others --exclude-standard -z
+       ⇒ 對每一個 <path>：
+     git -C <wt> diff --no-index --binary --no-color -- /dev/null <path>
+```
+
+序列中**不得**出現任何會改動工作樹或索引的 git 動詞（`add`／`commit`／`stash`
+（`create` 除外）／`checkout`／`restore`／`reset --hard|--merge|--keep`／`clean`／
+`switch -f`），也**不得**出現 `--no-verify`。救援跑完後 `git -C <wt> status --porcelain`
+必須逐字不變。
+
+🔴 **② 是 v2.1.9 補上的缺口，不是原設計的一部分。缺它會產生「四道斷言全綠、而全新工作被
+靜默丟掉」**——本輪否決權複審立案，當回合以合成 worktree 實測逐字：
+
+| 步驟 | 實測輸出（逐字） |
+| :---- | :---- |
+| 工作樹狀態 | `git status --porcelain` ⇒ ` M tracked.txt` ／ `?? brand_new.py` |
+| 只跑 ① | `patch bytes = 135`（非空）；`grep -c 'brand_new' rescue.patch` ⇒ **`0`**（`grep rc=1`） |
+| 四道斷言 | (a) SHA-256 相等 ✅　(b) 位元組數相等 ✅　(c) `n_written > 0` ✅　第二道語意閘 ✅ |
+| ⇒ 結論 | **「已驗證存檔成功」與「`brand_new.py` 被靜默丟掉」外觀完全相同** |
+| 補上 ② | patch `1283`→（排除自我遞迴後）覆蓋兩者，`grep -c 'brand_new'` ⇒ **`4`**，且 `status --porcelain` 前後字串**相等** |
+
+`git diff HEAD` 的射程**結構上**只有 index 與 HEAD 認識的路徑；untracked 正是 index 不認識
+的那一半 ⇒ 這不是參數調得不對，是**母體少了一半**。而「全新的檔」恰好是最貴的那一半：
+tracked 變更在 HEAD 裡至少還留著一個祖先版本，untracked 新檔一丟就是歸零。
+
+🔴 **為什麼修法不是「把 `add` 從禁用動詞裡放出來」**（原禁令的理由要先讀懂，再談新修法）：
+`git add` 改動**索引**，`git status --porcelain` 的第一欄會從 `??` 變成 `A ` ⇒ 直接違反本條
+最後一句。禁令守的不是「別寫 add 這三個字」，是**救援不得改變下一個讀者看到的工作樹狀態**
+——一個無人看管的凍結流程把檔案 stage 起來就走，下一輪的人會看到一棵「有人動過但沒說為
+什麼」的樹，而 pre-commit 閘門對已 stage 與未 stage 的內容行為並不相同。
+`git diff --no-index` 把兩個路徑當**檔案系統上的兩份檔**比：一個 git 物件都不寫、索引一個
+位元組都不動 ⇒ 同時滿足「覆蓋 untracked」與「工作樹逐字不變」兩個約束。
+同理 `git stash create -u` 仍被明文擋掉，理由是**兩個**而非一個：`-u` 那一支**會**把
+untracked 檔從工作樹移走（那正是 `stash` 全族被機械阻斷的立案理由本身），且它的產物住
+object database ⇒ 回答不了本節唯一要能回答的那個問題「存檔了沒，可以靠讀一個檔知道嗎」。
+
+🔴 **② 的自我遞迴必須被排除，而排除它的東西是既有不變式、不是新規則**：patch 檔落在
+`AUTOCLAUDE_CHECKPOINT_DIR`（出廠 `.autoclaude/checkpoints`，位置在 repo 內）⇒ 若
+`.autoclaude/` 不在 `.gitignore`，它自己會被 ② 列舉到（把自己抄進自己），且
+`status --porcelain` 會多一行而違反本條。§6.1 不變式 9 已逐字要求「`.autoclaude/` 已在
+`.gitignore`」，`--exclude-standard` 於是結構上跳過它。當回合兩種姿態各實測一次：
+**未** ignore ⇒ `status verbatim unchanged? NO` 且 patch 內含自己（`1283` bytes，含
+`rescue.patch`／`rescue2.patch` 兩段自我抄錄）；**已** ignore ⇒
+`status verbatim unchanged? YES`、`grep -c 'dirty.patch'` 自身檔名為 **`0`**。
+⇒ **規範性要求**：本條的整合測試必須把「`.autoclaude/`（或當次 `AUTOCLAUDE_CHECKPOINT_DIR`
+的頂層目錄）落在 `--exclude-standard` 的排除面內」當**前置斷言顯式驗一次**，不得只依賴
+§6.1 在別處驗過——那條不變式若失效，本條的失效形態是靜默的（patch 照樣非空、斷言照樣全綠）。
+
+**R-4.5.9-2（落地路徑與檔名）** patch 檔落在 `AUTOCLAUDE_CHECKPOINT_DIR`（§6 出廠值
+`.autoclaude/checkpoints`），檔名 `dirty-<agent_id>-<offset-aware ISO8601 basic>-<short_sha>.patch`，
+同目錄再寫一份同名 `.sha256` 側檔。
+
+🔴 **`short_sha` 是哪一個 commit：`git -C <wt> rev-parse --short HEAD`，且必須在跑 ①
+之前取、之後不再重取**（v2.1.9 寫死；此前規格未指名，而它決定第二道閘的成敗）。
+
+- **為什麼必須是那一個**：① 產出的 hunk 是**相對該 HEAD** 的 diff。第二道語意閘問的正是
+  「這份 patch 套不套得回它宣稱的基準」⇒ 基準寫錯，閘門測的就是另一個問題。當回合實測：
+  同一份 patch 對正確 HEAD 的臨時索引 `apply --check --cached` ⇒ **rc=0**；救援後多做一個
+  commit 讓 HEAD 前進一格再測同一份 patch ⇒ **rc=1**（逐字 `error: patch failed: staged.txt:1`／
+  `error: tracked.txt: patch does not apply`）。
+- **不是 integration 分支的 SHA**：救援發生在 agent 自己的 worktree，`integration` 可能早已
+  前進；用它命名會讓檔名指向一個這份 patch 從來沒有對齊過的基準。
+- **HEAD 在救援之後會動**（§6.2 R-6.2-1 的重排、§4.4.2 的 `--ff-only` 併入都會動它）⇒
+  檔名裡那個值是**寫入當下的事實快照**，這正是它有價值的原因：人在下一輪拿到這份 patch
+  時，唯一能靠它回答「該對著哪一棵樹套」的東西就是檔名裡的那七個字元。
+- **同一個值必須同時進 state.json**（R-4.5.9-4 的四個可重驗值旁），理由是檔名可能被人重
+  命名而 state.json 不會 ⇒ 兩處相等本身就是一道可查的斷言。
+
+- **為什麼沿用 checkpoint 目錄**：§6 設定區塊 12 已把它定義為狀態持久化的家，§10 升級程序
+  也已把備份寫在那裡 ⇒ 沿用既有的家，不新開一層。
+- **為什麼帶時間戳、不覆寫**：救援可能連續發生（同一個 worktree 在兩次 reset 視窗各髒一
+  次），覆寫等於把上一次救援**靜默**丟掉。
+- **時間戳必須帶 offset**：鐵律三已有機械物 `tools/tests/test_platform_neutral_paths.py::
+  TestNaiveLocalTimestampsAreNotPersisted`——naive 本地時間戳跨 DST 相減完全靜默。
+- **不覆寫也是繞開一個平台事實**：`os.replace` 在 Windows 上覆寫「被別人開著」的目的檔
+  會 WinError 5（鐵律三該列機械物＝`TestDirEntryPrimitivesAreAccountedFor`）。
+
+**R-4.5.9-3（checksum 演算法＝SHA-256，且驗證必須是「重新開檔讀回」）**
+
+- **演算法選 SHA-256**：§7 的 `checksum_sha256` 已是本文件既有的完整性欄位；同一份規格裡
+  不該有第二種完整性演算法（讀者要判「這個 checksum 是什麼」就得猜）。`hashlib` 內建、
+  跨平台一致，且對「寫一半」與「寫壞」兩種形態同樣敏感。
+- **為什麼不用檔案大小**：磁碟滿的典型形態是最後一個 block 寫不進去；patch 恰好在 block
+  邊界結束時，大小看起來是對的。
+- **為什麼語意閘不能取代它（但要當第二道）**：語意閘驗的是「這個 patch 套不套得回它宣稱
+  的基準」——那是另一個問題，而完整性是寫入當下就該定案的性質。兩者不互相取代：SHA-256
+  是第一道（磁碟完整性），語意閘是第二道（語意可用性），**兩道都必須過**才算救援成功。
+- 🔴 **第二道閘的形態必須寫死，因為天真寫法「`git -C <wt> apply --check <patch>`」在本節
+  唯一會被跑到的情境下結構上恆紅**（v2.1.9 訂正；當回合實測）。救援發生時工作樹**定義上
+  是髒的**——那些變更已經在樹上，再套一次當然衝突。實測逐字：
+
+  | 形態 | index == HEAD | 有 staged 變更（index ≠ HEAD） | 判決 |
+  | :---- | :---- | :---- | :---- |
+  | 在髒工作樹上 `apply --check <p>` | **rc=1**（`error: brand_new.py: already exists in working directory`） | **rc=1** | ❌ 結構上恆紅，無鑑別力 |
+  | `apply --check --cached <p>`（吃真索引） | rc=0 | **rc=1**（`error: patch failed: staged.txt:1`） | ❌ ① 是對 HEAD 的 diff，不是對索引 |
+  | `apply --check --cached --3way <p>` | rc=0 | rc=0（逐字 `Applied patch to 'staged.txt' cleanly.`） | ❌ **禁用**：`--3way` 會把「套不上」fuzz 成綠 |
+  | **臨時索引 read-tree 到記錄的 HEAD，再 `--check --cached`** | rc=0 | **rc=0** | ✅ 唯一形態 |
+
+  ⇒ **規範性形態**（`<idx>` 為 checkpoint 目錄下的臨時索引檔，用完刪除）：
+
+```
+GIT_INDEX_FILE=<idx> git -C <wt> read-tree <R-4.5.9-2 記錄的 short_sha>
+GIT_INDEX_FILE=<idx> git -C <wt> apply --check --cached <patch>
+```
+
+  - **它為什麼不動工作樹**：`--check` 從不寫入；`--cached` 只碰索引，而 `GIT_INDEX_FILE`
+    把「索引」換成一個一次性檔案 ⇒ 真索引與工作樹皆零改動。當回合實測：跑完後
+    `real status verbatim unchanged? YES`，且真索引裡原本 staged 的檔仍 staged
+    （`git diff --cached --name-only` ⇒ `staged.txt`）。
+  - 🔴 **判準是 `rc == 0`，不是「`rc == 1` 才算失敗」**：截半的 patch（磁碟滿的典型形態）
+    實測回 **rc=128**（`error: patch with only garbage at line 10`）。寫成 `rc == 1` 的實作
+    會把 128 當成通過。
+  - **誠實劃界（這一道的盲區，也是 SHA-256 必須留在第一道的理由）**：new-file hunk 不需要
+    context 就能套 ⇒ 只損壞 untracked 那一段的內容時本閘實測回 **rc=0**。它守得住的是
+    tracked context 損壞（實測 rc=1）與基準錯（實測 rc=1）。
+
+- **驗證程序（順序是規範性的）**：
+
+```
+0. 取基準：base_sha = git -C <wt> rev-parse --short HEAD      # R-4.5.9-2；之後不再重取
+   取母體：tracked  = git -C <wt> diff HEAD --name-only
+           untracked = git -C <wt> ls-files --others --exclude-standard -z
+   expected_paths = tracked ∪ untracked                       # 🔴 聯集，不是只有 tracked
+1. 寫 patch：tmp 檔 → flush() → os.fsync(fd) → close() → os.replace(tmp, final)
+             （原子換名，同 §4.5.1 步驟 4 的既有紀律）；記下寫入位元組數 n_written
+2. 寫 .sha256 側檔（同樣 fsync + replace）
+3. 🔴 重新開檔讀回 final（**不得**複用寫入時的 buffer／記憶體內容——那樣驗的是記憶體
+   不是磁碟，而磁碟才是這一條要治的東西），逐塊算 SHA-256
+4. 四個斷言全過才算成功（(a)~(c) 的母體是磁碟，(d) 的母體是 expected_paths）：
+   (a) 讀回的 SHA-256 == 側檔內容
+   (b) 讀回位元組數 == n_written
+   (c) n_written > 0                      # 空檔 vs 空檔的 SHA-256 會一致 ⇒ 第一個漏洞
+   (d) 🔴 覆蓋率：expected_paths 的**每一個**路徑，都必須在讀回的 patch 內容裡出現於
+       某一段 `diff --git a/<X> b/<Y>` 標頭的 **X 或 Y 任一側**；缺任何一個即失敗。
+       這一格是 v2.1.9 補的第二個漏洞——(a)(b)(c) 全部只問「磁碟上那份檔完不完整」，
+       沒有一格問「它裝的東西夠不夠」。母體來自步驟 0 的**列舉**而不是 patch 自己，
+       否則就是拿答案去對答案。
+5. 第二道語意閘（形態見上表；失敗的處置同驗證失敗），跑完刪除 <idx>
+```
+🔴 **(d) 為什麼是「X 或 Y 任一側」而不是 `a/<path> b/<path>`（v2.1.9；當回合實測，寫死以免
+假紅把整條判準關掉）**：git 對**改名**產生的標頭兩側路徑**不同**，而 `--name-only` 只報新名。
+合成 worktree 實測（同時含改名／刪除／修改／untracked 四種）逐字：
+
+```
+git status --porcelain           ⇒   D del.txt /  M keep.txt / R  ren.txt -> renamed.txt / ?? brand.py
+git diff HEAD --name-only        ⇒  del.txt / keep.txt / renamed.txt          ← 只有新名
+實際產生的標頭                    ⇒  diff --git a/del.txt b/del.txt
+                                     diff --git a/keep.txt b/keep.txt
+                                     diff --git a/ren.txt b/renamed.txt        ← 兩側不同名
+                                     diff --git a/brand.py b/brand.py
+```
+
+⇒ 寫成 `a/<path> b/<path>` 的實作會對 `renamed.txt` 判**失敗**，而那是一次**假紅**：patch
+其實完整涵蓋了它。假紅的下場本 repo 已有判例（擋到讓人無法工作的守衛會被整個關掉，比沒有
+守衛更糟）⇒ 這一格必須是判準本文的一部分。
+🔴 **反向也要有一格控制組**：真的少一個路徑時 (d) 必須紅——否則「兩側任一」放寬到最後會
+變成「只要 patch 非空就算涵蓋」。
+
+**R-4.5.9-4（驗證失敗的狀態轉移：fail-loud，且絕不 fail-open）**
+
+- 進入條件改寫：由原文的「三者皆失敗」改為「**驗證失敗**」（含 R-4.5.9-3 任一斷言不成立）
+  即進入既有終態 `DIRTY_UNSAVED`（狀態名沿用，不改編號骨架）。
+- `DIRTY_UNSAVED` 的語意收緊為三件事**同時**成立：
+  1. state.json 內明確警示，且必須帶可重驗的四個值：patch 路徑、期望 checksum、實測
+     checksum、位元組數（寫入時 vs 讀回時）。只寫「救援失敗」等於把下一輪的診斷成本
+     推給人。
+  2. **禁止自動喚醒**（需人工確認；沿用原條文）。
+  3. 走 §4.5.7 R-4.5.7-3 的桌面通知通道 **loud 一次**。🔴 原條文只要求「在 state.json 中
+     明確警示」——state.json **沒有讀者會主動去看它**，那是 fail-quiet，而本節整段修憲的
+     出發點正是「patch 寫下去了沒人驗它讀不讀得回來」這種靜默。
+- 🔴 **重試不得無上限**：磁碟滿是最可能的成因，每一次重試再吃一份空間。上限
+  `DIRTY_SAVE_RETRIES`（建議 1 次重試），且第二次寫入**之前**必須先跑一次 §6.2 R-6.2-3 的
+  可用空間檢查；仍失敗即終態。
+- 🔴 **絕不 fail-open**：驗證失敗時**不得**繼續轉入 `WAITING_RESET`／`LONG_HIBERNATE`。
+  那兩個狀態的語意是「工作已保全，可以安全睡」，而此刻工作沒有保全。
+
+**驗收判準（全部可機械查證）**：
+
+| # | 判準 | 查證方式 |
+| :---- | :---- | :---- |
+| D1 | 救援序列不含任何改動工作樹的 git 動詞、不含 `--no-verify`、不含 `git stash create -u`、不含 `--3way`；救援後 `git status --porcelain` 逐字不變 | 靜態詞彙掃描（判準形態同 `.claude/hooks/block_destructive_git.py`）＋ 對真 worktree 的整合測試（前後兩次 `status --porcelain` 字串相等）。🔴 整合測試的工作樹**必須同時含 tracked 變更與 untracked 新檔**——只有 tracked 的樹讓 D8 結構上跑不到 |
+| D2 | patch 落在 `AUTOCLAUDE_CHECKPOINT_DIR`、檔名時間戳帶 offset、連續兩次救援產出**兩個**檔 | 整合測試（連跑兩次，斷言檔數 == 2） |
+| D3 | **驗證真的重新開檔**：寫入後把檔案截半（模擬磁碟滿）⇒ 必須判失敗 | 單元測試 ＋ **紅綠自證**：把驗證改成「用寫入時的 buffer 算」必須讓本測試轉綠 ⇒ 該對照組是本條的鑑別力憑證，不可省 |
+| D4 | 驗證失敗 ⇒ 狀態 `DIRTY_UNSAVED`、`resume` 被拒、桌面通知恰好發生一次、state.json 帶齊四個可重驗值 | 單元測試。**控制組**：驗證成功 ⇒ 狀態為 `WAITING_RESET`／`LONG_HIBERNATE` 且**無**通知 |
+| D5 | 0 bytes patch 不得被判成救援成功 | 單元測試（空 diff 的路徑本就不該進救援；若進了，(c) 斷言必須擋下） |
+| D5b | patch **非空但內容不足** 也不得被判成救援成功 | 單元測試。(c) 只問「有沒有位元組」，D8 才問「裝的東西夠不夠」；本列是兩者之間那道界線的守衛：注入「① 有輸出、② 為空」⇒ 必須失敗 |
+| D6 | 重試上限：注入永久失敗 ⇒ 寫入嘗試次數 ≤ `DIRTY_SAVE_RETRIES + 1`，且不進入無限迴圈 | 單元測試（計數注入）。理由掛鐵律六：等待／重試機制自己靜默壞掉 ⇒ 無做工空轉 |
+| D7 | 第二道語意閘走**臨時索引 read-tree 到 R-4.5.9-2 記錄的 base_sha ＋ `apply --check --cached`**，判準為 `rc == 0`，且失敗處置與驗證失敗相同 | 整合測試（構造一個 checksum 正確但套不回 base_sha 的 patch ⇒ 實測 rc=1）＋ 三道形態控制組，每一道都必須紅：(i) 改成在髒工作樹上裸跑 `apply --check`（實測 rc=1，恆紅＝無鑑別力）；(ii) 改成吃真索引的 `--cached`（有 staged 變更時實測 rc=1，假紅）；(iii) 加上 `--3way`（實測把套不上 fuzz 成 rc=0，假綠）。🔴 另需一格斷言真索引與 `status --porcelain` 跑完後皆未變 |
+| D8 | 🔴 **救援的母體是「tracked 變更 ∪ untracked 新檔」**：在**同時**含 tracked 變更與 untracked 新檔的髒工作樹上跑救援，patch 內容必須涵蓋**該 untracked 新檔** | 整合測試：`?? brand_new.py` 存在 ⇒ 讀回的 patch 內必須有 `diff --git a/brand_new.py b/brand_new.py`。**🔴 紅綠自證（本列的鑑別力憑證，不可省）＝把實作退回「維持現行 `git diff HEAD` 單一來源」必須讓 D8 轉紅**；退不紅就表示本測試沒有在測它宣稱要測的東西。立案實測：單一來源下 patch `135` bytes 非空、四道斷言全綠、`grep -c 'brand_new'` ⇒ `0` |
+| D8b | (d) 的路徑比對是**兩側任一**，不是 `a/<p> b/<p>` | 整合測試：工作樹同時含改名／刪除／修改／untracked 四種（實測標頭 `diff --git a/ren.txt b/renamed.txt` 兩側不同名，而 `--name-only` 只報 `renamed.txt`）⇒ 寫成兩側同名的實作必須紅（假紅示範），寫成兩側任一的必須綠。**反向控制組**：真的抽掉一個路徑時 (d) 仍必須紅 |
+| D9 | patch 檔自己不得被列舉進自己（自我遞迴） | 整合測試：把 `AUTOCLAUDE_CHECKPOINT_DIR` 的頂層目錄從 `.gitignore` 移除 ⇒ 必須紅（實測：`status` 前後不相等，且 patch 內含自身檔名）；在 `.gitignore` 內 ⇒ 綠（實測 `grep -c` 自身檔名 `0`）。前置斷言見 R-4.5.9-1 末段 |
+
+#### 4.5.10 醒來確認額度是否已恢復（v2.1.8 修憲；標的＝§8-2）
+
+**原條文（§8-2／§4.5.3 步驟 2）**：醒來後確認 `U5h < RESET_CONFIRM_PERCENT`；未達則退避
+重試（`30s→300s`，最多 10 次），仍未達則延長等待並告警。
+
+**兩端都不是理想（兩個失效方向各自具名）**：
+
+| 形態 | 為什麼會壞 | 出處 |
+| :---- | :---- | :---- |
+| 固定級距 `30s→300s ×10` | **是在猜 reset 時刻** ⇒ 會醒在錯的時間，白燒一個額度視窗；而且「猜出來的排程照樣拿得到 `NextRunTime`」＝取證規則全綠的假綠 | 本 repo 已立案「reset 時刻是滾動視窗，只能觀測不能算」（ADR-XPLAT-004 §2.1；分佈現查 `python tools/probe/reset_window_distribution.py`）。現行實作對此已有具名鎖 `tools/tests/test_context_budget_guard.py::SentinelDecisionTest::test_an_unparseable_reset_refuses_to_guess`，逐字要求 `escalate` 且理由含「拒絕用猜的」 |
+| 現行實作的另一端「解不出就硬停不猜」 | 方向對，但終點是**永眠**：伺服器永遠不報時刻就永遠不醒 | 同上鎖的四分支：解不出 ⇒ `escalate`（叫人）。叫人本身沒錯，但它把「等一個零成本事件源」也一起排除了 |
+| 原條文的終點「延長等待並告警」 | 沒定義延長多久、也**沒有任何事件源會叫醒它** ⇒ 直接違反鐵律六（除「等額度 reset」與「等人介入」，任何停等都必須有一個會主動叫醒我的事件源） | 根 CLAUDE.md 鐵律六 |
+
+**裁決（理想版）：永不在錯誤時刻喚醒，也永不無限期沉睡。觀測優先；解不出時不是終止，
+而是掛回零成本巡邏由它兜底重試。**
+
+**🔴 本節在改什麼：具名標的、既有常數、以及必然轉紅的既有鎖（v2.1.9 補；此前全 PRD
+對這三個名字零命中，等於在無記錄的情況下推翻三支既有機械鎖與兩個既有常數）**
+
+| 面 | 座標（機械現查得到） | 現況逐字 |
+| :---- | :---- | :---- |
+| 本節真正在改寫的**判定函式** | `tools/session_resume_planner.py::tick_plan(state, verdict, now)` | 純函式，回 `{action, reason, at, state}`；`action ∈ {resume, rearm, stop}`（AST 實查三個相異值）。docstring 逐字「探測完之後**該做什麼**的唯一判定……整條續航鏈的大腦」 |
+| 既有常數 ①（探測次數上限） | 同檔 `MAX_PROBE_ATTEMPTS`（實查 **5**） | 檔內 WHY 逐字自陳「**這個數字是挑的、不是量出來的**」，並記載上界估算 `5 × 一次探測（31,847 tokens／$0.0176）≈ 16 萬 tokens` |
+| 既有常數 ②（暫時性錯誤重排間隔） | 同檔 `TRANSIENT_RETRY_SECONDS`（實查 **300**） | 註解逐字「不計入 `MAX_PROBE_ATTEMPTS`——壞的是別的東西，不是額度」 |
+
+**三支既有鎖逐一登記（皆住 `tools/tests/test_context_budget_guard.py::TickDecisionTest`）**：
+
+| 鎖（全名） | 它**現在**斷言什麼 | 新條文下**該**斷言什麼 | 為什麼改是對的 |
+| :---- | :---- | :---- | :---- |
+| `test_still_closed_without_a_parseable_reset_refuses_to_guess` | `action == "stop"`，且 `reason` 含「拒絕」 | `action ==` R-4.5.10-4 的**新事件名**（掛回巡邏），`state` **不得**為 `abandoned`；而 `reason` 仍必須含「拒絕」族措辭 | 這支鎖同時鎖住**兩件**事，而只有一件是對的：「拒絕用猜的」是本 repo 憲法（reset 只能觀測不能算）⇒ **必須原封不動保留**；「所以只能死」是它自己多出來的結論——`stop`／`abandoned` 的代價是永眠（伺服器永遠不報時刻就永遠不醒）。改後兩件事分離：不猜（保留）＋不死（改）。🔴 因此本鎖**不得整支刪掉**，只准改那一個 assert；刪掉它就把「不猜」一起丟了 |
+| `test_the_attempt_cap_actually_stops` | 在 `attempts == MAX_PROBE_ATTEMPTS - 1` 時 `action == "stop"` 且 `state == "abandoned"` | 同一輸入下 `action ==` 新事件名、`state != "abandoned"`，**並新增**一格斷言：該路徑此後**不得再產生任何付費探測**（`action != "rearm"`，即不再排一次會花 token 的醒） | 上限的 WHY 逐字是「沒有硬上限的重排會在額度最緊的時候持續燒」——它要保護的是**不要再燒**，不是**要死掉**。掛回巡邏的成本結構恰好滿足它：巡邏只讀逐字稿 ＋ 一次 `stat`，**零 token** ⇒ 上限的目的達成、而永眠這個副作用消失。新增的那格斷言是把「不再燒」變成可查的，否則改完之後沒有人守得住原本那個目的 |
+| `test_transient_retries_without_spending_an_attempt` | `action == "rearm"`，且 `at − now == TRANSIENT_RETRY_SECONDS`（＝**300s**） | **一字不改，繼續綠** | 🔴 這一支是三支裡唯一**不該**改的，而不改的理由必須寫下來，否則實作者會照 R-4.5.10-1 的「≤ 90s」把 300 砍掉：**兩個數字量的不是同一段時間**。`TRANSIENT_RETRY_SECONDS` 是**跨醒來**的重排間隔（一次 `schtasks`／`launchctl` 觸發＝一次行程 spawn），而 R-4.5.10-1 的「≤ 3 次／≤ 90s」是**單次醒來之內**的行程內重量。把跨醒來間隔壓到 90s 等於每 90 秒 spawn 一個行程去問同一件事——那正是「掛回零成本巡邏」要取代的東西。⇒ R-4.5.10-1 的射程已同步收窄成「行程內」（見下條），兩者於是不再互相矛盾 |
+
+> 🔴 **登記這件事本身是規範性的**：以上三個座標與兩個常數必須在實作 PR 的描述裡逐一
+> 對帳。理由是本節此前的失效形態——條文推翻了鎖，而鎖的名字一次都沒出現在條文裡 ⇒
+> 實作者改鎖時無從分辨「這支鎖過期了」與「我改壞了」。
+
+**R-4.5.10-1（觀測優先；固定級距只准治「這一次量測失敗」）** 醒來後先重新觀測。確認
+`U5h < RESET_CONFIRM_PERCENT` ⇒ 走 §4.5.3 步驟 3。未確認時**不得**用固定級距重試 10 次
+然後放棄。full-jitter 退避保留，但**降級**為單一觀測動作的重試（治的是取數端點瞬時
+5xx 這種東西）：上限 3 次、總時長 ≤ 90s。
+
+🔴 **這條「≤ 3 次／≤ 90s」的射程只有「同一次醒來的行程內」**（v2.1.9 收窄；不收窄的話
+它會與既有常數 `TRANSIENT_RETRY_SECONDS`＝300 直接衝突，而該常數量的是**跨醒來**的重排
+間隔）。兩層各自的家與判準：
+
+| 層 | 家 | 值 | 判準 |
+| :---- | :---- | :---- | :---- |
+| 行程內重量（本條） | 實作本節時新增 | ≤ 3 次、總時長 ≤ 90s | E1 |
+| 跨醒來重排（既有） | `tools/session_resume_planner.py::TRANSIENT_RETRY_SECONDS` | 現值現查（實查 300） | 既有鎖 `test_transient_retries_without_spending_an_attempt` 繼續綠 |
+
+⇒ 實作時**不得**把兩層折成一個數字。折起來的失效方向是可預測的：取 90s 會讓跨醒來重排
+變成每 90 秒一次行程 spawn；取 300s 會讓「端點瞬時 5xx」這種該立刻再量一次的事白等五分鐘。
+
+> 🔴 這兩件事此前混在同一個退避階梯裡，是本節要拆開的東西：「這一次量測失敗」與
+> 「reset 還沒到」的正確處置完全不同——前者該立刻再量一次，後者該去等一個事件。
+
+**R-4.5.10-2（解不出 ⇒ 掛回零成本巡邏，不是終止）** 確認不了 reset（量不到、或量到但仍
+高於 `RESET_CONFIRM_PERCENT`、或訊息裡解不出時刻）時，狀態**不轉終態**，而是掛回既有的
+零成本巡邏：
+
+- **掛點（指名真實存在的東西，不得寫成抽象的「排程機制」）**：
+  `python tools/session_resume_planner.py --arm-sentinel`（SessionStart 已自動武裝；本條是
+  「確認失敗」這條路徑上的**再**武裝）。它註冊的是 Windows `schtasks`／macOS `launchctl`
+  排程；巡邏本體＝`tools/session_resume_planner.py::_sentinel_tick()` →
+  `tools/lib/quota_escalation.py::patrol_housekeeping()`；四分支判定＝同檔
+  `sentinel_decide()`；痕跡與憑證紀律沿用 §4.5.6 R-4.5.6-6。
+- **為什麼「掛回巡邏」不是換一種等待**：巡邏**只讀逐字稿 ＋ 一次 `stat`，零 token**——
+  `SENTINEL_INTERVAL_SECONDS` 上方的既有 WHY 逐字如此，並記載「這一側沒有需要權衡的
+  東西」。⇒ 它可以無限期掛著，而固定級距不能（每一次醒來都是一次真的探測成本）。
+- **巡邏偵測到新的可觀測 reset 時刻** ⇒ 自動轉續航排程（`arm_reset` 分支），回到
+  R-4.5.10-1 的確認流程。這就是「兜底重試」的全部機制，不新增第二套。
+- 🔴 **兩個例外必須繼續走 `escalate`（叫人），不得掛回巡邏**：
+  1. 月度支出上限（SSOT＝`tools/lib/quota_limits.py::LIMIT_SPEND`，hook 側為再匯出）——等到
+     天荒地老都不會回來，只有人去提額。既有鎖
+     `test_a_spend_limit_escalates_instead_of_waiting` 不得因本節而鬆掉。
+  2. 逐字稿判定「工作已結束」（自我解除門檻成立，見 R-4.5.10-3）——那是正常下班。
+
+**R-4.5.10-3（兩個常數只登記方向與導出關係，數值不進本 PRD）**
+
+- **巡邏間隔的上界是導出的，不是選的**：間隔決定「reset 之後最壞多久才會有人動作」
+  ⇒ **只准調小**。家＝`tools/session_resume_planner.py::SENTINEL_INTERVAL_SECONDS`；方向鎖＝
+  `tools/tests/test_context_budget_guard.py::SentinelDecisionTest::
+  test_the_patrol_interval_bounds_the_post_reset_dead_time`（該測試並明文禁止改成 50 分鐘
+  ——那個數字是 `ScheduleWakeup` 的 `delaySeconds` 上限外溢出來的，`schtasks` 沒有那個
+  上限）。
+  - 🔴 **已被證偽、不得再引用的舊說法**：「間隔小於最短觀測窗」。R80 以全庫 1,433 支逐字稿
+    重量得最短窗 **0.5 分鐘** ⇒ 該宣稱字面不成立。窗比間隔短時走的是 `probe` 分支，
+    **代價是一次探測，不是失效**。
+- **自我解除門檻必須大於一個完整的額度視窗**：等額度那段期間逐字稿本來就不會更新，門檻
+  若短於視窗，哨兵會在最需要它的時候把自己拆掉。家＝同檔 `SENTINEL_IDLE_SECONDS`；
+  方向鎖＝同檔 `test_the_idle_threshold_outlives_a_whole_quota_window`。
+- 🔴 **為什麼 PRD 只登記方向**：把數字複寫進來會製造第二個家。本文件已有同型判例——
+  §4.5.7 R-4.5.7-1 逐字寫「不寫死於本 PRD」。
+
+**R-4.5.10-4（「掛回巡邏」與「終止」在痕跡上必須可分辨）**
+
+痕跡兩處、壽命不同（既有事實，照抄不重新發明）：事件檔 `autosdd_resume_log_*.jsonl` 住
+系統暫存（重開機即消失 ⇒「查不到」≠「沒發生」）；分支／等待痕跡落
+`tools/lib/endurance_env.py::trace_dir()`（出廠 `~/.autosdd/traces`，逃生口
+`AUTOSDD_TRACE_DIR`，唯讀時退回暫存）。
+
+規範性要求：三種結局各有**互異的事件名**，且「沒觸發＝檔不長大」這個可偵測性不得被破壞。
+
+| 結局 | 事件名要求 | 何時出現 |
+| :---- | :---- | :---- |
+| 掛回巡邏（本節新增） | 必須與 `sentinel_decide()` 既有的**五**個分支名（`arm_reset`／`disarm`／`escalate`／`patrol`／**`probe`**）**都不同**——它是「確認失敗但刻意不終止」，那五個名字沒有一個表達這件事 | R-4.5.10-2 主路 |
+| 終止（`disarm`） | 沿用 | 僅自我解除門檻成立時 |
+| 叫人（`escalate`） | 沿用 | 僅 R-4.5.10-2 那兩個例外 |
+
+🔴 **禁止用「同一個事件名 ＋ 一個布林欄位」表達這三者**。理由沿用 §4.5.8 R-4.5.8-3 的逐字
+紀律：`sentinel_decided` 那一行每次巡邏都會印，欄位增減不足以讓「這次是確認失敗掛回去」
+在痕跡上一眼可辨。
+
+🔴 **既有分支到底有幾個：五個，不是四個**（v2.1.9 訂正；當回合對
+`tools/session_resume_planner.py::sentinel_decide()` 做 AST 實查，取所有 `action` 字面）：
+
+```
+sentinel_decide actions = ['disarm', 'probe', 'patrol', 'escalate', 'escalate', 'arm_reset']
+distinct = ['arm_reset', 'disarm', 'escalate', 'patrol', 'probe']   count = 5
+```
+
+- **缺的那一個是 `probe`**：`reset_at` 已過（`at <= now`）時走它，逐字理由「花一次探測確認
+  額度回來了沒」。它是五個分支裡**唯一會花錢**的那一個 ⇒ 恰好是最不能與「掛回零成本巡邏」
+  撞名的一個。
+- **為什麼原條文寫「四」不是筆誤而是有代價的**：本節 R-4.5.10-3 自己就引用了 `probe`
+  （「窗比間隔短時走的是 `probe` 分支」）⇒ 節內自相矛盾。而 E5 的判準是「名稱集合互斥」：
+  實作者把新事件命名為 `probe` 會**通過 E5**，卻與既有分支撞名——正好摧毀本條唯一要保護的
+  「痕跡上一眼可辨」。判準寫錯方向時，通過判準的實作就是壞的那一個。
+- 🔴 **`sentinel_decide()` 自己的 docstring 逐字仍寫「四分支判定」**，與函式體實有的 5 個
+  action 不一致。那份 docstring 的訂正屬**實作面**（本節不改 `.py`），但實作本節時必須一併
+  修掉——否則 E5 的實作者會照 docstring 而不是照函式體去數，重犯同一個錯。
+
+**驗收判準（全部可機械查證）**：
+
+| # | 判準 | 查證方式 |
+| :---- | :---- | :---- |
+| E1 | 觀測優先：未確認時的量測重試 ≤ 3 次、總時長 ≤ 90s，且最終動作是「重新武裝巡邏」而非放棄 | 單元測試（注入未確認讀數，斷言呼叫序列） |
+| E2 | 解不出 ⇒ 掛回巡邏而非終止 | 單元測試 ＋ **紅綠自證**：把該分支改回 `disarm`／`escalate` 必須轉紅 |
+| E3 | 月度支出上限仍 `escalate`（控制組） | 既有鎖 `test_a_spend_limit_escalates_instead_of_waiting` 必須繼續綠 |
+| E4 | 兩個常數的方向鎖仍在：巡邏間隔只准調小、自我解除門檻大於一個完整額度視窗 | 後設斷言：那兩支既有測試的**名字**必須仍存在於檔內（本節新增了一條依賴它們的路徑 ⇒ 它們被刪掉時必須有人知道） |
+| E5 | 三種結局事件名互異，**且新事件名與 `sentinel_decide()` 的五個既有 action 皆不同**；零觸發 ⇒ 痕跡檔位元組數不變 | 單元測試：互斥集合是**五元素**（`arm_reset`／`disarm`／`escalate`／`patrol`／`probe`）＋ 新名，共 6 個相異字串。🔴 **五元素那一半必須由 AST 從 `sentinel_decide()` 現查取得，不得在測試裡手抄常數清單**——手抄就是把同一份清單放進第二個家，而本列立案的成因正是一份手抄清單漏了 `probe`。**紅綠自證**：把新事件名改成 `probe` 必須轉紅 ＋ 整合測試（不觸發後 `stat` 位元組數相等） |
+
 ### 4.6 跨平台防休眠（修正 v1 的技術細節）
 
 | 平台 | 實作 | v1 的問題與修正 |
@@ -1093,7 +1729,13 @@ AUTOCLAUDE_ACCOUNT_TYPE=MAX                 # 僅作為預設值提示；實際�
 TELEMETRY_SOURCE_ORDER=OTEL,TRANSCRIPT,STATUSLINE,CLI_USAGE
 TELEMETRY_ALLOW_UNDOCUMENTED_ENDPOINT=false # v1 的主要方案，v2 降為選用（風險自負）
 MONITOR_POLL_INTERVAL_SECONDS=60
-TELEMETRY_TIMEOUT_SECONDS=600               # 超時 → 強制 DRAINING
+TELEMETRY_TIMEOUT_SECONDS=600               # 超時 → 收斂到 cap_prepare 語意（v2.1.8：原文寫 DRAINING，本實作無該狀態物件，見 §4.1.5）
+TELEMETRY_UNMEASURED_CAP=                   # 【v2.1.8 新增／v2.1.9 訂正】留空＝取實作面出廠值。
+#   🔴 這**不是新旋鈕**：它與實作面既有的 `AUTOSDD_QUOTA_DEGRADED_CAP`（→ `Policy.degraded_cap`，
+#   實查出廠值 4、值域下界 1.0，`ENV_SPEC` 逐字說明「量不到時的上限（絕不是『不設限』）」）
+#   是**同一個旋鈕的兩個命名面**——PRD 面／實作面。三個候選處置裡選這一個的理由，以及被否決
+#   的兩個，見 §4.1.5〈這個旋鈕有幾個家〉。值域：1 ≤ 本鍵 ≤ cap_prepare（下界沿用實作面
+#   ENV_SPEC，上界為 v2.1.8 修憲新增）。數值一律以實作面為 SSOT，本檔不複寫。
 LOCAL_ESTIMATE_SAFETY_MARGIN_PP=15          # 僅有本機推估時，所有水位悲觀化的百分點
 
 # ------------------------------------------------------------------------------
@@ -1103,7 +1745,9 @@ LOCAL_ESTIMATE_SAFETY_MARGIN_PP=15          # 僅有本機推估時，所有水�
 TOKEN_WARN_PERCENT=70                       # → THROTTLING
 TOKEN_DRAIN_PERCENT=85                      # → DRAINING（單向鎖存）
 TOKEN_HALT_PERCENT=95                       # → FREEZING
-WATERMARK_HYSTERESIS_PP=3                   # 【新增】遲滯帶，防抖動
+# 已廢除（v2.1.8）：WATERMARK_HYSTERESIS_PP —— 遲滯帶改掛「量測可得性」軸。
+#   立案實測：十天 819 個逐軸讀數，小幅擺動反轉 0 次（33 次下降穿越全部是視窗翻頁）
+#   ⇒ 掛在 watermark 上結構上得不到動作。改後的運算元與新鍵見 §4.2.4、下方區塊 6。
 
 # ------------------------------------------------------------------------------
 # 4. 週額度安全閥
@@ -1153,9 +1797,16 @@ AGENT_DEFAULT_CONCURRENCY=2
 AGENT_MAX_CONCURRENCY=5                     # 亦受 CPU/RAM 與平台併發限制夾緊
 AGENT_THROTTLE_CONCURRENCY=1                # 【新增】THROTTLING 狀態上限
 BURN_RATE_EWMA_ALPHA=0.25                   # 【新增】取代固定 15 分鐘視窗
-CONTROL_INTERVAL_SECONDS=120                # 【新增】控制週期（應 ≥ 2× Step 中位時間）
-CONCURRENCY_MIN_DWELL_SECONDS=300           # 【新增】升併發的最小停留時間
-FAIL_SAFE_CONCURRENCY=0                     # 【新增】遙測不可得時的併發（0 或 1）
+# 【v2.1.8 修憲】本區塊三個鍵的運算元改寫，理由與對照見 §4.2.4。
+#   舊：CONTROL_INTERVAL_SECONDS / CONCURRENCY_MIN_DWELL_SECONDS 綁「持久併發設定點」，
+#       而本實作沒有那個物件（致動器＝每次工具呼叫的准入控制 + 300s 滾動派發帳）。
+CONTROL_INTERVAL_SECONDS=120                # 保留為 Daemon 形態的相容鍵；本實作的控制週期＝派發帳滾動視窗
+#   ↑ 本實作對應物：tools/lib/quota_gate.py::FANOUT_WINDOW_SECONDS（現值現查該檔）
+AVAILABILITY_EXIT_STREAK=2                  # 【v2.1.8 新增】離開 unmeasured 需連續幾次量得到（≥2）
+AVAILABILITY_MIN_DWELL_SECONDS=             # 【v2.1.8 新增】留空＝取實作預設；不變式見 §6.1 第 4 條
+#   ↑ 不變式：QUOTA_CACHE_TTL_SECONDS ≤ 本值 ≤ SENTINEL_INTERVAL_SECONDS（兩界皆導出，現值現查實作）
+# 已廢除（v2.1.8）：CONCURRENCY_MIN_DWELL_SECONDS —— dwell 改掛可得性軸（見上一鍵）
+FAIL_SAFE_CONCURRENCY=0                     # 保留鍵；本實作以 cap 語意表達，且量不到時 cap ≤ cap_prepare 且 ≥ 1（禁止靜默鎖死，見 §4.1.5）
 
 # ------------------------------------------------------------------------------
 # 7. 突刺（BURSTING）
@@ -1208,6 +1859,12 @@ AUTOCLAUDE_STATE_FILE=.autoclaude/state.json
 AUTOCLAUDE_CHECKPOINT_DIR=.autoclaude/checkpoints
 STATE_WRITE_MODE=ATOMIC                      # 【新增】tmp → fsync → rename
 STATE_RETAIN_VERSIONS=5                      # 【新增】保留歷史版本供人工回溯
+DIRTY_SAVE_RETRIES=1                         # 【v2.1.9 新增】存檔救援驗證失敗時的**重試**次數
+#   （總寫入嘗試 = 本值 + 1）。值域 0 ≤ 本值 ≤ 3；0＝不重試（合法）。
+#   🔴 上界不是風格問題：磁碟滿是最可能的失敗成因，每一次重試再吃一份空間 ⇒ 重試本身會讓
+#   它更不可能成功。第二次寫入**之前**必須先跑一次 §6.2 R-6.2-3 的可用空間檢查。全文見 §4.5.9
+#   R-4.5.9-4，判準＝該節 D6（此前本鍵只在 §4.5.9 節內出現、§6 無登記 ⇒ D6 斷言的是一個沒有
+#   家的鍵，而「鍵沒有家」的失效形態是實作者各自挑一個預設值）。
 
 # ------------------------------------------------------------------------------
 # 13. 安全（v1 缺此整段）
@@ -1241,8 +1898,16 @@ API_AUTO_CONTINUE_NEXT_PERIOD=false          # 【新增】
 1.  0 < WARN < DRAIN < HALT ≤ 100  且  HALT − DRAIN ≥ 5
 2.  WEEKLY_WARN < WEEKLY_DRAIN < WEEKLY_HALT ≤ 100
 3.  1 ≤ C_min ≤ C_default ≤ C_max  且  C_throttle ≥ C_min
-4.  WATERMARK_HYSTERESIS_PP < (DRAIN − WARN)
-5.  CONTROL_INTERVAL_SECONDS ≥ MONITOR_POLL_INTERVAL_SECONDS
+4.  【v2.1.8 改寫】遲滯改掛「量測可得性」軸 ⇒ 等價不變式為雙邊：
+      QUOTA_CACHE_TTL_SECONDS ≤ AVAILABILITY_MIN_DWELL_SECONDS ≤ SENTINEL_INTERVAL_SECONDS
+      且 AVAILABILITY_EXIT_STREAK ≥ 2
+      （原式 WATERMARK_HYSTERESIS_PP < (DRAIN − WARN) 是**上界**，防遲滯吃掉整個帶而讓狀態機
+        失去鑑別力；新式的上界同型——dwell 不得長於「reset 之後最壞多久才會有人動作」；
+        新增的下界防的是另一個方向：dwell 短於量測週期＝遲滯結構上無效。理由見 §4.2.4）
+5.  【v2.1.8 改寫】控制不得比量測快 ⇒ FANOUT_WINDOW_SECONDS ≥ QUOTA_CACHE_TTL_SECONDS
+      且 FANOUT_WINDOW_SECONDS ≥ 2 × median(單一 Step 牆鐘秒數)（後者為量測值，現查；見 §4.2.4 (e)）
+      （原式 CONTROL_INTERVAL_SECONDS ≥ MONITOR_POLL_INTERVAL_SECONDS 的等價物；同一件事——
+        對尚未反映在用量上的決策重複反應＝積分飽和）
 6.  COMPACT_COST_BUDGET_PP < (DRAIN − WARN)
 7.  AUTH_MODE=API_KEY → API_BUDGET_HARD_USD 必須有值
 7b. OVERAGE_POLICY=ALLOW_WITH_CAP → OVERAGE_HARD_CAP_USD 必須有值，否則拒絕啟動
@@ -1250,10 +1915,134 @@ API_AUTO_CONTINUE_NEXT_PERIOD=false          # 【新增】
 8.  ALLOW_PERMISSION_BYPASS=true → 必須偵測到容器/VM 環境，否則拒絕啟動
 9.  Git repo 存在、工作區乾淨或已確認、.autoclaude/ 已在 .gitignore
 10. 至少一個遙測來源可用；防休眠驅動可用（若需要）
+11. 【v2.1.8 新增，見 §6.2 R-6.2-1】待整合佇列**可讀**（讀不出即明確回報「狀態不明」，
+      不得靜默視為 0 筆）；CONFLICT_POLICY 值落在合法枚舉內；【v2.1.9】每一筆 integration_queue
+      項的 `status` 亦須落在 §7 定義的枚舉內（`PENDING_VERIFY|CONFLICT|VERIFY_FAILED|MERGED`），
+      未知字面**視為讀不出來**而非略過——略過等於把一筆殘留整合靜默丟掉
+12. 【v2.1.8 新增，見 §6.2 R-6.2-2】`claude --version` 可讀且落在 git-tracked 的已驗證清單內；
+      否則以 DRY_RUN 啟動並 loud 一次（**不阻止啟動**——CLI 一升版就整套停擺的守衛會被關掉）
+13. 【v2.1.8 新增，見 §6.2 R-6.2-3】可用空間 ≥ 本次預估凍結寫入位元組數 + 常數餘裕；
+      不足 → 清理**已 --ff-only 併入**的 worktree 後重測；仍不足即 loud（不得只印一行 log）
 違反 → 明確錯誤訊息 + 非零退出碼；不得以預設值靜默帶過
+🔴 例外只有第 12 條（未知 CLI 版本 → DRY_RUN 而非拒絕啟動），且該例外必須 loud；
+   其餘各條違反一律拒絕啟動。
 ```
 
 ---
+
+### 6.2 開機自檢：把「長駐管家才做得到的事」塌成「醒來時做一次」（v2.1.8 修憲）
+
+**立案**：§8-11／§8-13／§8-14 三列的原條文都以「長駐 Daemon ＋ 多 worktree 生命週期管理」
+為前提——有一個永遠活著的行程，可以在任意時點做家事。本 repo **刻意不做 Daemon**（§15.3
+的「薄治理層 + 採用原生能力」；喚醒改由 OS 排程重啟，見 §4.5.5 與 ADR-XPLAT-004 §2.3）
+⇒ 那個前提在本實作裡不存在。
+
+🔴 **三項的意圖全部保留，只換實現**。不得把它們標成「架構性不適用」而刪掉——那是把意圖
+跟實現一起丟掉。塌成的形態是**開機自檢**：原本「持續看著」的事，改成「每次醒來看一次」，
+掛在 §6.1 既有的啟動自檢不變式那一層（違反 → 明確錯誤訊息 + 非零退出碼，不得以預設值
+靜默帶過）。
+
+> **為什麼「醒來時做一次」在覆蓋面上不弱於長駐管家**：本實作的執行單位就是「一次被排程
+> 叫起來的行程」。長駐管家的價值在「事件發生的那一刻就處置」，而這三項要處置的事
+> （沒做完的整合、CLI 換版、磁碟滿）**下一次派工之前處置就夠了**——它們都不是必須在
+> 毫秒內反應的事。真正必須即時的那一類（撞線喚醒）本 repo 走的是另一條路（§4.5.6~§4.5.8
+> 的哨兵巡邏），不在本節射程。
+
+#### R-6.2-1（§8-11 意圖保留：沒做完的整合，醒來時掃一次並重排）
+
+- **原意圖**：整合驗證失敗 → 退回佇列並記錄；`CONFLICT_POLICY` 決定是否派 Agent 修復
+  （並計入額度預算）。
+- **原實現前提**：有一個 Daemon 持有整合鎖、序列化跑佇列（§4.4.2）。
+- **新實現**：佇列本身改為**磁碟上的狀態**，住 state.json 的既有結構（§7）——不新開一個檔
+  （一份檔一個寫者，同 §4.5.6 R-4.5.6-3）。啟動自檢時掃一次：任何 status 落在**待處理集合**
+  的整合項，依 `CONFLICT_POLICY` 重排；`CONFLICT_POLICY=HUMAN_REVIEW`（出廠值）者
+  **不自動重排**，只在自檢輸出裡逐項列出並要求人工處置。
+
+- 🔴 **待處理集合的枚舉（v2.1.9 訂正；此前寫錯，且錯法會讓 G1 結構性假綠）**：
+
+  | status 字面 | 出處 | 語意 | 在待處理集合內？ |
+  | :---- | :---- | :---- | :---- |
+  | `PENDING_VERIFY` | **§7 schema 的既有值**（該節 `integration_queue` 範例逐字唯一出現過的字面） | 已入列、驗證尚未跑完 | ✅ **必須在**（見下） |
+  | `CONFLICT` | §4.4.2 步驟 2 逐字（`衝突 → 標記 CONFLICT`） | rebase 衝突，待 `CONFLICT_POLICY` 決定 | ✅ |
+  | `VERIFY_FAILED` | 本次修憲新增；§8-11 原文「整合驗證失敗 → 退回佇列」的那個狀態此前沒有字面 | 驗證跑完且失敗 | ✅（同時進 §7，見下） |
+  | `MERGED` | 本次修憲新增（終態，補齊枚舉才使「不在集合內」有意義） | 已 `--ff-only` 併入 integration | ❌ 終態 |
+
+  ⇒ **§7 的 `integration_queue.status` 枚舉同步定義為 `PENDING_VERIFY | CONFLICT |
+  VERIFY_FAILED | MERGED`**（見該節「Schema 設計要點」新增列）。本次**不引入** `QUEUED`：
+  它與 `PENDING_VERIFY` 語意重疊，而 §7 已經有後者 ⇒ 引入前者等於給同一個狀態開第二個家，
+  並需要一次沒有必要的資料遷移。
+
+- 🔴 **為什麼這一格是「結構性假綠」而不是筆錯字**（立案逐字，v2.1.9）：原條文的掃描集合是
+  `{QUEUED, CONFLICT, VERIFY_FAILED}`，而 `QUEUED` 與 `VERIFY_FAILED` 在**全 PRD 只出現在
+  本次新增的文字裡**（`grep -n` 實查：僅 §6.2 條文與 G1 兩處），§7 schema 唯一定義過的字面
+  是 `PENDING_VERIFY`。照原條文實作 ⇒ 生產環境的殘留項全帶 `PENDING_VERIFY`、掃出 **0 筆**，
+  而 G1 的判準是「注入 `QUEUED` 必須被掃到」⇒ **測試綠、生產零覆蓋**。這正是本 repo 反覆
+  記載的「注入值與生產真的會寫出來的值不同」那一族。
+  ⇒ **規範性要求**：G1（與任何以注入殘留項為輸入的測試）的注入值**必須是生產路徑真的會
+  寫出來的那個字面**。判準是可查的：注入值必須取自 §7 schema 的枚舉，不得是測試自己造的
+  字串。
+- 🔴 **重排必須先過額度閘**：重排會派工、派工會燒額度。啟動當下若已在 `DRAINING` 以上
+  （本實作的等價述詞＝`band ∈ (prepare, halt)`，唯一對映登記在
+  `tools/lib/quota_gate.py::DRAINING_BANDS`），**只登記不重排**——這是 §4.4.2 逐字既有的
+  「在 `DRAINING` 以上狀態禁止啟動衝突解決任務」，此處只是把它接到開機這一刻。
+- 🔴 **「掃一次」不得變成靜默的「掃 0 筆」**：佇列讀不出來（檔不存在／schema 不符／
+  checksum 失敗）與「佇列是空的」必須**分開回報**（同本 repo 通篇「量不到 ≠ 量到零」）。
+  讀不出來 ⇒ 依 §8-4 既有的 checksum 回退路徑處理，並在自檢輸出明說「佇列狀態不明」，
+  **不得**印成「0 筆待整合」。
+
+#### R-6.2-2（§8-13 意圖保留：CLI 版本相容性在啟動時判一次）
+
+- **原意圖**：CLI 版本升級破壞相容性（旗標／輸出格式改變）⇒ 啟動時記錄 CLI 版本並比對已
+  驗證清單；未知版本 → 進入 `DRY_RUN` 並要求人工確認。
+- 這一列的原條文**本來就寫「啟動時」** ⇒ 意圖與「開機自檢」形態原生相容。本節補的是它
+  缺的三件事：
+  1. **版本從哪裡讀**：`claude --version`（唯讀、零 token）。讀不到版本字串 ⇒ **視為未知
+     版本**。🔴 不得因為讀不到就當成已驗證——那是 fail-open，而失效外觀與「版本沒變」相同。
+  2. **已驗證清單住哪**：一份 repo 內、**git-tracked** 的清單（人可讀、可 review、隨 clone
+     走），不是本機狀態檔。本機檔不隨 clone 走 ⇒ 換一台機器就變成「全部未知」或「全部已
+     驗證」，兩種都錯。附錄 B 已把「核實來源是實作內部字串，不是官方文件承諾的公開介面」
+     寫成前提 ⇒ 清單必須帶「**這一版核實過什麼**」欄位，不能只有版號（只有版號的清單在
+     下一次介面變動時給不出任何判斷依據）。
+  3. **`DRY_RUN` 的語意必須是真的不動作**：未知版本下不得派工、不得寫 worktree、不得註冊
+     排程；只做觀測與自檢輸出。
+- 🔴 **未知版本不阻止啟動**（阻止啟動＝CLI 一升版就整套停擺，那種守衛會被整個關掉，比沒有
+  守衛更糟），但必須 **loud**：走 §4.5.7 R-4.5.7-3 的桌面通道一次，並在自檢輸出印出「本次
+  以 DRY_RUN 執行」與確認方式。
+
+#### R-6.2-3（§8-14 意圖保留：可用空間在啟動與凍結前各檢一次）
+
+- **原意圖**：磁碟空間不足（worktrees 與記錄檔累積）⇒ 啟動與凍結前檢查可用空間；不足則
+  清理已合併 worktree 並告警。
+- 這一列的原條文**本來就寫「啟動與凍結前」** ⇒ 同樣原生相容。本節補的是它缺的四件事：
+  1. 🔴 **凍結前那一次是寫 patch 的硬前置**：§8-8／R-4.5.9 的救援序列會寫 patch 檔，而
+     **磁碟滿正是它最可能的失敗成因** ⇒ 空間檢查必須在寫 patch **之前**，不是之後。順序
+     錯了，這道檢查在它唯一要治的情境下根本不會被跑到（本 repo 反覆記載的「機制蓋好沒
+     接電」的一種）。
+  2. **門檻不得只看百分比**：要比的是「本次凍結預估要寫多少 bytes」對「可用 bytes」。
+     預估來源＝各 worktree `git diff HEAD --binary` 的位元組數（唯讀、零 token）＋
+     state.json 與其 `STATE_RETAIN_VERSIONS` 份保留版本的大小 ＋ 一個常數餘裕。
+     百分比門檻在小容量磁碟上太鬆、在大容量磁碟上太緊。
+  3. **清理只准動「已合併」的 worktree**：判準是「該分支已 `--ff-only` 併入 integration」
+     （§4.4.2 步驟 4 的既有出口），**不是** mtime、**不是**目錄大小。🔴 清理動作本身受
+     鐵律五管：不得用 `git clean`／`git reset --hard`；移除 worktree 走
+     `git worktree remove`（§4.4.2 步驟 5 的既有動詞）。
+  4. **清理後仍不足** ⇒ 這是 R-4.5.9 驗證失敗的**前置警報**，直接走 `DIRTY_UNSAVED` 那條
+     路的桌面通知通道 loud 一次，不得只印一行 log。
+
+#### R-6.2 三項共同的驗收判準（全部可機械查證）
+
+| # | 判準 | 查證方式 |
+| :---- | :---- | :---- |
+| G1 | 佇列有殘留項時，啟動自檢**真的**重排（不是只印一行） | 整合測試：注入 `status=PENDING_VERIFY` 一筆 ⇒ 斷言重排動作發生。🔴 注入值刻意用 **`PENDING_VERIFY`**（§7 schema 既有、生產路徑真的會寫出來的那個字面）而不是 `QUEUED`——後者在本實作沒有寫者，注入它會讓本列**測試綠而生產零覆蓋**（立案見 R-6.2-1 末段）。**遍歷要求**：待處理集合的**每一個**字面各注入一次（`PENDING_VERIFY`／`CONFLICT`／`VERIFY_FAILED`），漏一個就是漏一種殘留項。**控制組兩格**：(i) `CONFLICT_POLICY=HUMAN_REVIEW` ⇒ 不重排但必須逐項列出；(ii) `status=MERGED`（終態）⇒ **不得**被掃出來重排 |
+| G2 | 佇列讀不出來 ≠ 0 筆 | 單元測試：注入壞 checksum ⇒ 輸出含「狀態不明」，且**不得**含「0 筆」。**這一格是本節最容易寫成假綠的地方** |
+| G3 | 啟動當下已在 `DRAINING` 以上 ⇒ 只登記不重排 | 單元測試（注入 band=prepare／halt 兩例） |
+| G4 | `claude --version` 讀不到 ⇒ 視為未知版本並進 DRY_RUN（fail-safe） | 單元測試（讀取失敗注入）。**紅綠自證**：把它改成「讀不到就當已驗證」必須轉紅 |
+| G5 | DRY_RUN 真的不動作 | 整合測試：斷言零派工、零 worktree 寫入、零排程註冊 |
+| G6 | 已驗證清單是 git-tracked 檔 | 靜態判準：`git ls-files` 命中該路徑（本機狀態檔會落空 ⇒ 紅） |
+| G7 | 空間檢查發生在寫 patch **之前** | 單元測試：以呼叫順序斷言（mock 兩支，比對呼叫序）。順序反了必須紅——這正是本條的全部價值 |
+| G8 | 門檻是 bytes 對 bytes | 單元測試：同一個「可用百分比」下，預估寫入量大／小兩例必須得到不同判定 |
+| G9 | 清理只動已 `--ff-only` 併入者，且不使用 `git clean`／`reset --hard` | 整合測試（未合併分支必須留下）＋ 靜態詞彙掃描（判準形態同鐵律五 hook） |
+| G10 | 清理後仍不足 ⇒ 桌面通知恰好一次 | 單元測試（mock 通知器） |
 
 ## 7. 狀態資料結構規格（state.json schema v2）
 
@@ -1356,6 +2145,7 @@ API_AUTO_CONTINUE_NEXT_PERIOD=false          # 【新增】
 - `resume_plan` 只存**參數**，不存可直接執行的完整 shell 命令字串。v1 把 `resumption_command` 存成完整命令（含引號內的中文提示）會有 shell 注入與引號轉義風險，且讓 state.json 從資料變成可執行碼。
 - `agents` 為陣列；每個 Agent 有自己的 session、分支、checkpoint。
 - 記錄 `quota_cost_pp`：累積實際成本資料，可用於「Step 額度預算」的自適應校準。
+- 【v2.1.9 新增】`integration_queue[].status` 的枚舉為 **`PENDING_VERIFY | CONFLICT | VERIFY_FAILED | MERGED`**（前三者＝§6.2 R-6.2-1 的「待處理集合」，`MERGED` 為終態）。上方範例的 `PENDING_VERIFY` 是這個枚舉的成員，不是自由字串。🔴 枚舉必須在**這一節**定義而不是散落在各節條文裡：§6.2 的掃描集合、§6.1 不變式 11 與 §11.6 的驗收都以它為分母，分母若沒有單一的家，各處各抄一份的漂移方向是**漏抄**（本次修憲即因此把不存在的 `QUEUED` 寫進掃描集合，見 R-6.2-1）。
 - `checksum_sha256` + 原子寫入：防止在凍結途中斷電造成半寫入而無法恢復。
 - SHA 使用完整 40 字元十六進位（v1 的 16 字元非法）。
 - 時間同時提供 ISO 8601（含時區）與 epoch，且兩者必須一致（v1 範例不一致）。
@@ -1367,19 +2157,19 @@ API_AUTO_CONTINUE_NEXT_PERIOD=false          # 【新增】
 | # | 異常事件 | 觸發情境 | 防禦機制 |
 | :-- | :---- | :---- | :---- |
 | 1 | **非預期 429** | 遙測落後於真實用量，或其他裝置同時消耗 | 優先**遵循回應中的重試建議標頭**；無標頭時採 full jitter 退避：`sleep = rand(0, min(300, 10·2^n))`，最多 5 次。v1 的固定 10/30/90s 無 jitter，多 Agent 同時撞牆會同步重試造成雷群。重試耗盡 → `FREEZING`。**且必須把 429 視為遙測低估的證據**，將 `U5h` 推估值上修 |
-| 2 | **重置時間漂移** | 後端重置延遲 | 醒來後確認 `U5h < RESET_CONFIRM_PERCENT`；未達則退避重試（30s→300s，最多 10 次），仍未達則延長等待並告警 |
+| 2 | **重置時間漂移** | 後端重置延遲 | **【v2.1.8 修憲，全文見 §4.5.10】** 觀測優先：醒來重新觀測 `U5h < RESET_CONFIRM_PERCENT`；確認不了**既不猜也不終止**，掛回零成本哨兵巡邏兜底重試（掛點＝`tools/session_resume_planner.py --arm-sentinel`）。**原條文的固定級距（30s→300s、最多 10 次）已降級**為「單次量測失敗」的重試（≤3 次／≤90s，🔴 **【v2.1.9】射程限於「同一次醒來的行程內」**——跨醒來的重排間隔是另一層，家＝既有常數 `tools/session_resume_planner.py::TRANSIENT_RETRY_SECONDS`，兩層不得折成一個數字），不再是「等 reset」的主路——固定級距是在猜 reset 時刻，與「reset 只能觀測不能算」直接衝突。例外：月度支出上限仍 `escalate`（等不回來） |
 | 3 | **Git index.lock 殘留** | 中斷時 git 操作未完成 | 檢查鎖檔 **mtime 與持有 PID 是否存活**；僅清理確認陳舊者。v1 的「清理陳舊鎖」若無存活檢查，可能刪掉正在使用的鎖而毀損 repo |
 | 4 | **斷電／強制重啟** | — | `INIT` 掃描 state.json + checksum 驗證；提供 `autoclaude resume` 與 `--force-fresh`。若 checksum 失敗 → 回退到 `STATE_RETAIN_VERSIONS` 中最近的有效版本 |
 | 5 | **【新增】機器在等待中睡著** | 防休眠失效 / Modern Standby | 醒來偵測時鐘跳躍 → 立即重新輪詢 → 若已過重置點直接 `RESUMING`；記錄防休眠失效事件並告警 |
-| 6 | **【新增】遙測來源永久失效** | 未公開端點被移除、記錄檔格式變更 | 依 `TELEMETRY_SOURCE_ORDER` 降級；全部失效 → `DRAINING` + 告警，**絕不**猜測用量繼續派工 |
+| 6 | **【新增】遙測來源永久失效** | 未公開端點被移除、記錄檔格式變更 | **【v2.1.8 修憲，全文見 §4.1.5】** 依 `TELEMETRY_SOURCE_ORDER` 降級；全部失效 → **cap 收斂到 `cap_prepare` 語意**（且 ≥1，禁止靜默鎖死）＋ 告警，**絕不**猜測用量繼續派工。原文寫 `DRAINING` 是**狀態機的字**，本實作只有 band + cap 且實測 `degraded_cap == cap_converge` 為 `True`、`draining()` 對 `unmeasured` 明文回 `"unknown"` ⇒ 原條文在本實作結構上沒有可達路徑。🔴 `band` 必須繼續是 `unmeasured`（「量不到 ≠ 量到零」只禁造假讀數，不禁收緊） |
 | 7 | **【新增】同帳號多 Daemon 超燒** | 兩個專案同時跑 | §4.7 帳號配額仲裁鎖 + 租約 |
-| 8 | **【新增】Worktree 有未提交變更且無法提交** | 檔案權限、pre-commit hook 失敗 | 依序嘗試：`commit --no-verify` → `git stash` → 產生 patch 檔存入 checkpoints 目錄；三者皆失敗 → 標記 `DIRTY_UNSAVED` 並在 state.json 中明確警示，禁止自動喚醒（需人工確認） |
+| 8 | **【新增】Worktree 有未提交變更且無法提交** | 檔案權限、pre-commit hook 失敗 | **【v2.1.8 修憲，全文見 §4.5.9】** 救援序列**只有一個動作且不動工作樹**：產生 patch 檔存入 `AUTOCLAUDE_CHECKPOINT_DIR`，**寫完必須重新開檔讀回並驗 SHA-256**（＋位元組數相等、＋非空、＋**覆蓋率**、＋第二道語意閘）；🔴 **【v2.1.9】patch 的母體是「tracked 變更 ∪ untracked 新檔」**——`git diff HEAD` 從不含 untracked，只用它會讓四道斷言全綠而全新工作被靜默丟掉（實測 patch `135` bytes 非空、`grep -c` 目標檔名 `0`）；第二道語意閘走「臨時索引 read-tree 到記錄的 `base_sha` ＋ `apply --check --cached`」，天真寫法在髒工作樹上實測恆紅；任一不成立 → fail-loud 進 `DIRTY_UNSAVED`（state.json 帶齊四個可重驗值 ＋ 桌面通知一次 ＋ 禁止自動喚醒），**絕不** fail-open 轉入 `WAITING_RESET`／`LONG_HIBERNATE`。原條文前兩步（`commit --no-verify`、`git stash`）**已刪除**——本 repo 憲法直接禁止（鐵律五機械阻斷 stash 全族；`--no-verify` 為逐字禁止事項） |
 | 9 | **【新增】Agent 無回應／卡死** | 等待外部指令、無限循環 | 硬性預算逾時 → 優雅終止序列；連續 `N` 次卡死同一 Step → 標記 `NEEDS_HUMAN` |
 | 10 | **【新增】喚醒後上下文已不可用** | session 記錄被清理、CLI 升級不相容 | 自動降級為 `FRESH_SESSION_WITH_STATE`；此為 `SESSION_RESUME` 的必備退路（v1 無退路） |
-| 11 | **【新增】整合驗證失敗** | 測試在合併前不通過 | 退回佇列並記錄；`CONFLICT_POLICY` 決定是否派 Agent 修復（並計入額度預算） |
+| 11 | **【新增】整合驗證失敗** | 測試在合併前不通過 | 退回佇列並記錄；`CONFLICT_POLICY` 決定是否派 Agent 修復（並計入額度預算）。**【v2.1.8 修憲，全文見 §6.2 R-6.2-1】** 原實現前提（長駐 Daemon 持整合鎖）在本 repo 不存在 ⇒ **意圖保留、實現換成開機自檢**：佇列住 state.json，醒來時掃一次殘留項並重排；`DRAINING` 以上只登記不重排；**讀不出來必須回報「狀態不明」，不得印成「0 筆」**。掛 §6.1 不變式 11 |
 | 12 | **【新增】Prompt injection** | Agent 讀入 repo 中含惡意指令的檔案／依賴 | 工具白名單 + 寫入範圍限制在 worktree + 禁止未經確認的網路存取；Daemon 對 Agent 產出的「狀態回報」做 schema 驗證，不直接信任自然語言 |
-| 13 | **【新增】CLI 版本升級破壞相容性** | 旗標／輸出格式改變 | 啟動時記錄 CLI 版本並比對已驗證清單；未知版本 → 進入 `DRY_RUN` 並要求人工確認 |
-| 14 | **【新增】磁碟空間不足** | worktrees 與記錄檔累積 | 啟動與凍結前檢查可用空間；不足則清理已合併 worktree 並告警 |
+| 13 | **【新增】CLI 版本升級破壞相容性** | 旗標／輸出格式改變 | 啟動時記錄 CLI 版本並比對已驗證清單；未知版本 → 進入 `DRY_RUN` 並要求人工確認。**【v2.1.8 修憲，全文見 §6.2 R-6.2-2】** 本列原文已是「啟動時」形態 ⇒ 意圖不動，補齊三件缺項：版本讀自 `claude --version`（讀不到＝未知，**不得** fail-open）、已驗證清單須為 **git-tracked** 且帶「這一版核實過什麼」欄位、`DRY_RUN` 必須真的零派工／零 worktree 寫入／零排程註冊。未知版本**不阻止啟動**但必須 loud。掛 §6.1 不變式 12 |
+| 14 | **【新增】磁碟空間不足** | worktrees 與記錄檔累積 | 啟動與凍結前檢查可用空間；不足則清理已合併 worktree 並告警。**【v2.1.8 修憲，全文見 §6.2 R-6.2-3】** 本列原文已是「啟動與凍結前」形態 ⇒ 意圖不動，補齊四件缺項：凍結前那一次是**寫 patch 的硬前置**（順序錯了這道檢查在它唯一要治的情境下跑不到）、門檻改為 **bytes 對 bytes**（不是百分比）、清理**只准動已 `--ff-only` 併入**者且不得用 `git clean`／`reset --hard`（鐵律五）、清理後仍不足即桌面通知。掛 §6.1 不變式 13 |
 
 ---
 
@@ -1396,6 +2186,8 @@ API_AUTO_CONTINUE_NEXT_PERIOD=false          # 【新增】
 | `autoclaude_state_transitions_total{from,to,reason}` | counter | 抖動偵測（同一組 from/to 高頻 → 遲滯參數不足） |
 | `autoclaude_telemetry_age_seconds{source}` | gauge | 遙測健康度 |
 | `autoclaude_step_quota_cost_pp` | histogram | 校準 `MAX_STEP_QUOTA_PP` |
+| `autoclaude_step_wall_seconds` | histogram | **【v2.1.8 新增】** §4.2.4 (e) 的不變式（控制週期 ≥ 2× Step 中位牆鐘時間）需要這個中位數才驗得起來；沒有它，該不變式只有前半（`FANOUT_WINDOW_SECONDS ≥ QUOTA_CACHE_TTL_SECONDS`）是可查證的 |
+| `autoclaude_availability_flips_total` | counter | **【v2.1.8 新增】** measured⇄unmeasured 翻動次數。§4.2.4 把遲滯改掛這一軸，而遲滯有沒有生效**唯一**能看的就是這個計數在遲滯上線前後的變化（立案母體＝本包實測 12 小時 19 次） |
 | `autoclaude_resume_cost_pp` | histogram | 量化喚醒成本，驗證 `RESUME_STRATEGY` 門檻 |
 | `autoclaude_429_total` | counter | 遙測低估的直接證據 |
 | `autoclaude_freeze_duration_seconds` | histogram | 等待時間佔比（效率指標） |
@@ -1431,9 +2223,10 @@ API_AUTO_CONTINUE_NEXT_PERIOD=false          # 【新增】
 
 ### 11.2 配速控制器（以模擬器測試，不燒真實額度）
 必須提供**離線模擬器**（餵入合成的 `U5h/U7d/T_rem` 時間序列），對 §4.2.7 的 7 個情境做斷言。額外性質測試：
-- **無抖動**：在 `U5h` 於 68%–72% 之間隨機遊走 60 個控制週期，`THROTTLING ⇄ CRUISING` 轉移次數 ≤ 3。
-- **無暴衝**：任何單一控制週期的併發增量 ≤ 1。
-- **重置後不暴衝**：視窗重置事件後第一個週期的併發 ≤ `C_default`。
+- **無抖動【v2.1.8 改寫】**：原判準「`U5h` 於 68%–72% 隨機遊走 60 個控制週期，`THROTTLING ⇄ CRUISING` 轉移次數 ≤ 3」在本實作**量不到它要防的病**——本包當回合對 `~/.autosdd/traces/quota_burn.jsonl` 全量重放（十天、119 筆、8 軸、819 個逐軸讀數）得 `band_changes=77 up=44 down=33 down_of_which_window_resets=33` ⇒ **小幅擺動反轉 0 次**（視窗內 usage 單增，結構上不可能來回穿越門檻）。改為掛在真的會抖的那一軸（同期痕跡合併實測：12 小時內 measured⇄unmeasured 翻動 **19** 次）：
+  以**實測形態**序列 `UMMMUMMMMUMUMMUMMUUUMMMMUMMMUUMUUMUMM`（本包從 burn ledger ＋ `autosdd_quota_degraded.jsonl` 按時間合併算出；機械現查 **37 個符號、19 次翻動**）**＋每個符號一個時間戳**為輸入，斷言「開啟遲滯」的 cap 變動次數 **嚴格小於**「關閉遲滯」者；且不得出現任何一次「dwell 未滿就放寬」。🔴 母體刻意用實測形態而非合成隨機走——合成序列證明不了「這台機器真的會這樣抖」，那正是原判準失效的成因。🔴 **時間戳不可省（v2.1.9 補）**：後半那句「dwell 未滿就放寬」以**秒**為單位，而 37 個字元的序列不含任何時間資訊 ⇒ 只有前半（變動次數）驗得起來，後半會靜默變成沒人驗。母體形態、fixture 的家與其自帶不變式、痕跡不可得時的姿態，一律照 §4.2.4〈H1 的時間軸怎麼補〉（該處為唯一真相源，本節不複寫）。
+- **無暴衝【v2.1.8 改寫】**：原判準「任何單一控制週期的併發增量 ≤ 1」的運算元（持久併發設定點）在本實作不存在。等價物：**放寬方向必經 band 階梯，不得跳級**——對每一對相鄰決策斷言 `cap_next` 不超過 `cap_prev` 的下一個較寬階梯；**收緊方向不設限**（安全方向，同 §4.2.4 (c) 的例外條款）。並補一格原判準沒有的：`unmeasured → measured` 是「沒有中間級」的躍遷 ⇒ 那一次的放寬必須同時滿足 `AVAILABILITY_EXIT_STREAK` 與 `AVAILABILITY_MIN_DWELL_SECONDS`。【v2.1.9 訂正】「**唯一**」一字已刪——measured 軸內部的 `notice → free`（有限 cap → `None` 不設限）同型，理由與該格由誰承重見 §4.2.4 (c) 的同名訂正。⇒ 本節的斷言母體因此必須**兩格都掃**：`unmeasured → measured` 走 streak ＋ dwell，`* → free` 走下一列（重置後不暴衝）的 `cap ≤ cap_notice`。
+- **重置後不暴衝【v2.1.8 改寫】**：視窗翻頁（pct 跌幅 ≥ `RESET_DROP_THRESHOLD`）後第一次決策的 cap ≤ `cap_notice`；即**不設限（`BAND_FREE` 的 `None`）不得在翻頁後第一拍出現**。原判準的 `C_default` 在本實作沒有對應物，`cap_notice` 是最寬的**有限** cap。
 - **收斂性**：模擬固定燃燒率下，併發在 10 個週期內收斂並穩定（不再變動）。
 - **驗收標準 3b（v1 的矛盾點）**：`U5h = 75%` 時併發必定為 `AGENT_THROTTLE_CONCURRENCY`，**由 `C_cap` 保證，不依賴公式湊巧**。
 - **fail-safe**：注入遙測中斷 11 分鐘 → 併發歸零；注入 429 → 用量推估上修且退避有 jitter。

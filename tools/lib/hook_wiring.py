@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """`.claude/settings.json` 的 hook 佈線解析 — **唯一真相源**（R80）。"""
 #
-# 🔴 為何以下 WHY 是 `#` 註解而不是 docstring（R81；**一個字都沒刪，只換承載形式**）：
-# 本檔受 `guardrail_lib<=400` 分級管，而 `AutoClaude/tools/check_loc_budget.count_loc()`
-# **把 docstring 行計入、`#` 行排除**——該閘門的 TIER-WARN 訊息逐字這樣指路。同層級的
-# 姊妹模組全是這個體例（`ci_liveness.py` 544 raw/379 loc、`skip_tag_policy.py` 596/309、
-# `defect_ledger_index.py` 661/386）；本檔一度是唯一把 WHY essay 放進 docstring 的例外
-# （註解佔比 12%，全 `tools/lib/` 最低），於是**同樣的散文量**讓它在同為 544 raw 時撞到
-# 407/400。⇒ 要加 WHY 請往下寫 `#`；把這段搬回 docstring 會直接讓 LOC 閘門再紅一次。
+# 🔴 以下 WHY 為何用 `#`：**只是 R81 留下的體例，不再是預算理由**（ADR-XPLAT-013 否決權
+# 複審 M3 訂正）。原文寫的是「`count_loc()` 把 docstring 計入、`#` 排除，搬回 docstring
+# 會直接讓 LOC 閘門再紅一次」，並引 TIER-WARN 訊息當依據。那兩件事**現在都不成立**：
+#   · ADR-XPLAT-013 起 `count_loc()` 只算**斷言行**，docstring 與整行 `#` 同為敘事、
+#     同為零計價 ⇒ 換載體省不到一行。當回合實測：把下方 52 行 essay 逐字搬進 docstring，
+#     `count_loc` 367 → 367（+0）。原文宣稱的「會再紅一次」是**假的**。
+#   · 它引的那句 TIER-WARN 指路（「說明文字請寫成 `#` 而非 docstring」）已由
+#     ADR-XPLAT-013 從 `check_loc_budget.py` **刪除** ⇒ 該引用已懸空。
+# ⇒ 加 WHY 用 `#` 或 docstring 皆可，挑可讀性高的那個；不要再為了預算而搬敘事——
+#   新計價下要省預算只有一條路：**少寫斷言**（拆職責／抽共用模組）。
 #
 # WHY 這支檔非有不可（立案量測，不是預防性設計）
 # ================================================
@@ -498,6 +501,88 @@ def posix_carrier_problems(
                 f"    修法：讓 PATH 上的 python3 指向 >= {want}，或把 POSIX 條目的 "
                 "command 釘到 venv 內的直譯器（後者要一併處理「全新 clone 還沒有 venv」）")
     return problems
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 執行期證據（本輪）：載具**真的**解析到了嗎
+# ─────────────────────────────────────────────────────────────────────────────
+
+# 🔴 為何靜態那三道全都看不到「載具解析不到」（M9 立案，本輪現查得出的空格）
+# ---------------------------------------------------------------------------
+# 現查（母體＝本機 `~/.claude/projects/<slug>/` 全部 1,061 支逐字稿）：
+# `hook_non_blocking_error` 共 **217** 筆，其 stderr **全部** 是同一句
+# `ENOENT: no such file or directory, posix_spawn '<repo>/.venv/Scripts/pythonw.exe'`
+# ——分佈 PreToolUse 86／PostToolUse 72／SessionStart 40／**Stop 19**，跨
+# 2026-08-12 ~ 2026-08-21（九天）、Stop 那 19 筆分屬 16 個不同 session。
+#
+# ⇒ 第一個結論與直覺相反：**這不是 Stop 專屬的缺陷**。四個事件全中，因為每個 block 依
+# 形態判準 E 都必須成對（Windows 一條 ＋ POSIX 一條），而 mac 上 Windows 那條每次必然
+# ENOENT。「Stop 只有 19 筆」不是它比較少壞，是 attachment 落盤本身有偏差（見下）。
+#
+# 三道靜態機械物為何一條都沒說話，逐一對號：
+#   · `hook_form_problems()`（A~F）：**成對是它要求的**，兩條都在 ⇒ 判綠是正確的。
+#   · `carrier_liveness_problems()`：非 Windows 第一行就 `return posix_carrier_problems(...)`
+#     ⇒ 結構上**看不到** Windows 那條。這是刻意的（外平台載具不存在是設計，不是缺陷），
+#     但代價是「宣告↔實況」這條綁定在每個平台**只綁一半**。
+#   · `tools/check_hooks_liveness.py`：檔頭自陳射程＝git hooks 生效性 ＋ 載具**存在性**，
+#     兩者都是靜態讀檔。
+# ⇒ 缺的那一格不是「再加一條靜態判準」，是**沒有任何東西讀執行期證據**。而執行期證據
+# 一直都在（逐字稿裡的 hook attachment），只是零讀者——與本輪 M8 判過的「痕跡沒有自動
+# 讀者 ⇒ 它不是機制」同型。
+#
+# 🔴 第二個結論（判準能做到什麼、做不到什麼，是量出來的）：`hook_success` **只有在
+# hook 真的印了東西時才落盤**——全母體 11,438 筆 success 逐筆檢查，stdout 或 stderr
+# 至少一個非空的有 11,438 筆、兩者皆空 **0 筆**；而根層六支守衛安靜時一筆都不留（全母體
+# 只有 14 筆屬於根層 hook，其餘 11,424 筆全是會固定印字的 SDD 三支）。
+# ⇒ 「某個目標零 success」**不能**當成「它沒跑起來」，那會對每一支安靜的守衛假紅。
+# 可判的只有**失敗**那一半，所以本判準只問一件事：**這次失敗的是不是本平台自己那條載具**。
+HOOK_RESULT_TYPES = ("hook_success", "hook_non_blocking_error")
+
+
+def hook_result_attachments(records) -> list[dict]:
+    """逐字稿記錄串 → 其中的 hook 執行結果 attachment（保序；非該型一律略過）。"""
+    return [rec["attachment"] for rec in records
+            if isinstance(rec, dict) and isinstance(rec.get("attachment"), dict)
+            and rec["attachment"].get("type") in HOOK_RESULT_TYPES]
+
+
+# 三種分類，各自的**方向**都是設計上決定的：
+#   · `native`：本平台自己那條載具失敗 ⇒ **真的壞了**（那個 hook 這一次沒跑，而 CC 只記
+#     一行 ERROR 就放行）。這是本判準會轉紅的一類。
+#   · `by_design`：另一個平台那條失敗 ⇒ 跨平台配對刻意的 fail-open，**不是缺陷**。它必須
+#     被**數出來**而不是被忽略：一個每次都響的噪音底線會讓真訊號無法被辨認（本 repo 對
+#     「一個永遠在響的警報等於沒有警報」已有判例），而九天沒人發現正是這個機制。
+#   · `alien`：失敗的 command 兩種載具都不是（有人塞回 `python -c`／改了載具／多了第三種）
+#     ⇒ 也算真的壞了，因為形態判準只看 settings.json，看不到「實際被執行的是別的東西」。
+# 上限 8 筆是訊息長度的防呆：同一場同一條載具會重複失敗上百次，逐筆列出等於把訊息變成
+# 沒有人會讀的一片牆（計數欄仍然是全量，不受這個上限影響）。
+def runtime_carrier_verdict(attachments, *, on_windows: bool = os.name == "nt"
+                            ) -> tuple[list[str], dict[str, int]]:
+    """執行期證據 → `(真的壞了的問題清單, 分類計數)`；問題清單非空即紅。"""
+    counts = dict.fromkeys(("native_fail", "by_design_fail", "alien_fail", "success"), 0)
+    problems: list[str] = []
+    for att in attachments:
+        command = str(att.get("command") or "")
+        head = (command.split() or [""])[0]
+        if att.get("type") == "hook_success":
+            counts["success"] += 1
+            continue
+        win, posix = bool(win_carrier_kind(head)), is_posix_carrier(head)
+        where = f"[{att.get('hookEvent') or att.get('hookName') or '?'}]"
+        if win if on_windows else posix:
+            counts["native_fail"] += 1
+            problems.append(
+                f"{where} 本平台自己那條 hook 載具失敗 ⇒ "
+                f"{(hook_entry_targets({'command': command}) or ['?'])[0]} 這一次**沒有跑**"
+                f"（CC 只記一行 ERROR 就放行，fail-open）：{str(att.get('stderr') or '')[:200]}")
+        elif win or posix:
+            counts["by_design_fail"] += 1
+        else:
+            counts["alien_fail"] += 1
+            problems.append(
+                f"{where} 失敗的 command 不是本 repo 認得的兩種載具之一（形態判準只看 "
+                f"settings.json，看不到實際被執行的是別的東西）：{head!r}")
+    return problems[:8], counts
 
 
 # ─────────────────────────────────────────────────────────────────────────────

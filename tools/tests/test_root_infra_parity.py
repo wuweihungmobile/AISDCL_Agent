@@ -118,8 +118,8 @@ def _runs_ruff_over_root_tools(text: str) -> bool:
 # 這個正常動作在無關的檔案上炸紅，實務上會被下一個人改寬。折衷＝下限貼齊現況（刪一道即紅）
 # ＋一支後設鎖釘住「餘裕」上限：餘裕一旦累積到 _FLOOR_SLACK_MAX，測試就紅並指名要重釘。
 # 這正是本檔自陳的復發形狀（下限落後實數 2 以上＝可靜默刪兩道）能被機械攔下的判準。
-_FLOOR_CI_PYTHON_TOOLS = 9
-_FLOOR_HEADER_ITEMS = 15
+_FLOOR_CI_PYTHON_TOOLS = 11  # 本輪重釘（現查 11；+check_handoff_carriers.py）
+_FLOOR_HEADER_ITEMS = 16  # 本輪重釘（現查 16；+第 9.5 道檔頭項）
 _FLOOR_SDD_CONSUMERS = 12  # R84 重釘（現查 12；上修＝更嚴）
 _FLOOR_SLACK_MAX = 2
 

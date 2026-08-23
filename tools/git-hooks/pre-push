@@ -9,7 +9,7 @@
 #     - push 範圍變更含 AISDLC_SDD/ → 執行 AISDLC_SDD/.githooks/pre-push
 #     - root-infra leg（對齊 root-infra-ci.yml 的本地接線；R9 複審：原本純根層變更
 #       push 一個閘門都不跑，CI 停擺期間零防護）自 R69 起**快慢分層**：
-#         · 快層＝九支守門工具 ＋ `ruff check tools/`（R69 補：對齊 root-infra-ci.yml
+#         · 快層＝十支守門工具 ＋ `ruff check tools/`（R69 補：對齊 root-infra-ci.yml
 #           第 16 道；`tools/ruff.toml` 落地時全 repo 零執行者，同機實測冷 cache 0.02s／
 #           熱 cache 0.01s，比任一支守門都便宜），**任何 push 都跑**（含純子專案 push）。理由：這八支
 #           守的全是跨子專案不變式（腳本對等／NTFS 路徑／薄殼 hash／帳本互參…），
@@ -306,7 +306,7 @@ fi
 # root-infra leg（R9 複審接線）：純根層變更（tools/、docs/、workflows 等）原本
 # 一個閘門都不跑——root-infra-ci.yml 的守門在 CI 帳單停擺期間本地零接線。
 # 內容對齊 root-infra-ci.yml：py_compile 全 tools/*.py + tools/tests unittest +
-# 九支守門工具；失敗累積進 rc（不中斷其他 leg），python 缺席 fail-loud 不軟跳過。
+# 十支守門工具；失敗累積進 rc（不中斷其他 leg），python 缺席 fail-loud 不軟跳過。
 # （R56 訂正：R55 由五支增為六支時本行漏改，與 L12／L211 及實際迴圈不一致；
 #  三處計數宣稱現由 test_root_infra_parity.py::test_guard_count_claims_match_loop
 #  機械斷言與迴圈項數相等，不再靠人工同步。）
@@ -342,7 +342,7 @@ if [ "$run_rootinfra" -eq 1 ] || [ "$run_rootinfra_guards" -eq 1 ]; then
         leg_rc=1
       fi
       fi
-      # ③ 九支守門工具（**快層**，R69 起任何 push 皆跑，見檔頭）（R79 增
+      # ③ 十支守門工具（**快層**，R69 起任何 push 皆跑，見檔頭）（R79 增
       #    _script_scan_surface.py --check-floors——.ps1 掃描面 SSOT 的 per-tree 檔數
       #    下限，對齊 root-infra-ci.yml 第 2 道；該道自 R79 起由 CI 呼叫本 SSOT 取得
       #    掃描面，本地原本零接線）（逐支跑完累積，不因單支失敗提早退出；R13 增
@@ -352,10 +352,14 @@ if [ "$run_rootinfra" -eq 1 ] || [ "$run_rootinfra_guards" -eq 1 ]; then
       #    對齊 CI 第 13 道。R60 round 1 四方複審 ARCH-R60-02／QA-R60-01 實證：帳本
       #    **體積**硬閘（check_defect_log_crossref.py）本來就在這個迴圈裡，而同一份
       #    帳本的**保全**稽核卻零接線——「可重跑但沒有任何閘門看它的 rc」與「不可
-      #    重跑」是同一個病的兩種形狀，故本輪把 rc 真正接上。）
+      #    重跑」是同一個病的兩種形狀，故本輪把 rc 真正接上。R100 增
+      #    check_handoff_carriers.py——交接項的機械承接載體（`DEF-200-188`）：
+      #    帳本內的列有硬規則② 在守，只寫在交接散文／commit 訊息裡的項**零守衛**，
+      #    本地這一格是它的第一個消費者，對齊 CI 第 9.5 道。）
       #    迴圈項改為「指令字串」（可帶子指令參數），故 $PY 後刻意不加引號以分詞。
       for guard in "tools/check_script_parity.py" "tools/check_ntfs_paths.py" \
                    "tools/check_defect_log_crossref.py" "tools/check_wrapper_thinness.py" \
+                   "tools/check_handoff_carriers.py" \
                    "tools/check_pytest_baseline_sites.py" "tools/check_gha_action_versions.py" \
                    "tools/archive_defect_log.py --check" \
                    "tools/sync_onboarding_baselines.py --check-snapshot" \

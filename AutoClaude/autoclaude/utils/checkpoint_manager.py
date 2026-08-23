@@ -13,6 +13,8 @@ Playbook 執行檢查點管理器。
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -68,6 +70,28 @@ class PlaybookCheckpoint:
     # 結構 {step_id: {"warning": int, "hint": int, "no_improve_streak": int}}。
     # additive：舊 checkpoint 反序列化 → default_factory 補空 dict，零遷移破壞。
     alert_ladder: dict = field(default_factory=dict)
+    # 🔴 R100 P2-C（PRD §8-4 ②／§7 `checksum_sha256`）：磁碟完整性欄位。
+    # 空字串＝**舊檔沒有這一欄**（legacy，驗不了；誠實劃界，不得當成「驗過了」）。
+    # 為什麼需要它：`os.replace` 只保證「換名是原子的」，不保證**內容已落地**——
+    # 斷電（正是本項要防的情境）時 rename 可能先落地而 page cache 未落地
+    # ⇒ 得到一個「檔在、JSON 截斷」的 checkpoint。而截斷的 JSON 在修法前會被
+    # `except Exception: return None` 吃掉，與「沒有 checkpoint」外觀完全相同。
+    checksum_sha256: str = ""
+    # R100 P2-C（PRD §6.2 R-6.2-1）：待整合佇列。**住既有結構、不新開一個檔**
+    # （一份檔一個寫者，同 §4.5.6 R-4.5.6-3）。每一項 {"agent_id","branch","status"}，
+    # status 的枚舉唯一定義在 execution/boot_self_check.py::QUEUE_STATUSES。
+    integration_queue: list[dict] = field(default_factory=list)
+
+
+CHECKSUM_FIELD = "checksum_sha256"
+
+
+def checkpoint_digest(payload: dict) -> str:
+    # 除 `checksum_sha256` 本欄之外的序列化內容的 SHA-256（PRD §7 逐字定義）。
+    # `sort_keys=True`＝對欄位順序不敏感：dataclass 加欄位／json 重排都不該讓舊檔轉腐。
+    body = {k: v for k, v in payload.items() if k != CHECKSUM_FIELD}
+    blob = json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
 class CheckpointManager:

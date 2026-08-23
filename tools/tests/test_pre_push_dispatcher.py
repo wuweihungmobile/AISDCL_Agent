@@ -177,7 +177,7 @@ class TestPrePushDispatcher(unittest.TestCase):
             "check_defect_log_crossref",
             "check_wrapper_thinness",
             "check_pytest_baseline_sites",
-            "check_gha_action_versions",
+            "check_gha_action_versions", "check_handoff_carriers",
         ):
             self._write(f"tools/{guard}.py", "raise SystemExit(0)\n")
         # R60：leg ③ 的守門迴圈項自此可帶子指令（`archive_defect_log.py --check`），

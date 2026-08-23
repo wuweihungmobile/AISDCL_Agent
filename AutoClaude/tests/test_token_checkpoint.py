@@ -13,8 +13,10 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 import yaml
 
+from autoclaude.core.ports.state_repository import CheckpointCorruptError
 from autoclaude.execution.failure_tracker import FailureTracker
 from autoclaude.execution.playbook_runner import PlaybookRunner
 from autoclaude.utils.checkpoint_manager import CheckpointManager, PlaybookCheckpoint
@@ -241,12 +243,26 @@ class TestCheckpointManager:
         assert mgr.checkpoint_path("weird<name>.yaml") == saved_files[0]
         assert mgr.exists("weird<name>.yaml") is True
 
-    def test_corrupt_file_returns_none(self, tmp_path):
+    def test_corrupt_file_is_not_the_same_answer_as_no_checkpoint(self, tmp_path):
+        """🔴 R100 P2-C（PRD §8-4 ②）：本測試**取代**原 `test_corrupt_file_returns_none`。
+
+        判讀（任務書要求逐一判「鎖對了我改錯」還是「鎖過時該同步」）＝**鎖過時**：
+        原斷言 `result is None` 把「損壞」與「沒有 checkpoint」釘成同一個答案，而
+        `None` 在呼叫端的正確反應是**從 step 0 開始** ⇒ 一個寫壞／截斷的 checkpoint
+        會讓整份 playbook 靜默重跑一次，畫面與「第一次跑」完全相同。PRD §8-4 ② 逐字
+        要求兩者分成兩個回值，所以這條鎖釘住的是被修掉的那個行為本身。
+
+        控制組在下一格：檔**不存在**時仍必須回 `None`（那才是「沒有 checkpoint」）。
+        """
         mgr = CheckpointManager(str(tmp_path))
         bad = tmp_path / "corrupt.checkpoint.json"
         bad.write_text("NOT JSON", encoding="utf-8")
-        result = mgr.load("corrupt.yaml")
-        assert result is None
+        with pytest.raises(CheckpointCorruptError):
+            mgr.load("corrupt.yaml")
+
+    def test_a_missing_file_is_still_none(self, tmp_path):
+        # 控制組：`None` 的語意收窄成「真的沒有 checkpoint」這一種，不得跟著一起變成例外。
+        assert CheckpointManager(str(tmp_path)).load("never_saved.yaml") is None
 
 
 # ══════════════════════════════════════════════

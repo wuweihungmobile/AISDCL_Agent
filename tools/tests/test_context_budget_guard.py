@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import ast
 import contextlib
+import email.message
 import io
 import json
 import os
@@ -42,6 +43,8 @@ import tempfile
 import time
 import unittest
 import unittest.mock
+import urllib.error
+import urllib.request
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -1135,8 +1138,24 @@ class QuotaClassifierTest(unittest.TestCase):
         self.assertEqual(guard.classify_limit(_REAL_SPEND_LIMIT), guard.LIMIT_SPEND)
         self.assertEqual(guard.classify_limit("API Error: 529 Overloaded"),
                          guard.LIMIT_TRANSIENT)
+        # 🔴 R100：這一格此前斷言 `LIMIT_UNKNOWN`，而它的輸入是**完全沒有撞線訊號**的
+        # 一句話 ⇒ 那個斷言把「沒撞線」與「有撞線但認不出來」寫成同一個值。判為**鎖過時
+        # 該同步**：借用 fail-closed 常數去表達「額度是開的」正是止血 B 的立案本體。
         self.assertEqual(guard.classify_limit("something nobody has seen"),
-                         guard.LIMIT_UNKNOWN)
+                         guard.LIMIT_NONE)
+
+    def test_a_drifted_limit_wording_stays_fail_closed(self) -> None:
+        """🔴 止血 B 的另一半：措辭漂移（具名 mark 全失手）**不得**變成 `LIMIT_NONE`。
+
+        `_LIMIT_MARKS` 三族字樣全部是實測來的 ⇒ 那是一個會漂移的量測面。漂移後具名
+        mark 認不出來，但泛型字樣（`_LIMIT_HINTS`）幾乎不可能一個都不剩 ⇒ 漂移的淨
+        效果從「假裝額度已開」變成「多等一輪」，方向與本檔的 fail-closed 契約一致。
+        """
+        for drifted in ("You've hit your weekly cap for this model",
+                        "Request throttled: too many requests",
+                        "your quota for the current period is used up"):
+            with self.subTest(drifted=drifted):
+                self.assertEqual(guard.classify_limit(drifted), guard.LIMIT_UNKNOWN)
 
     def test_a_prefix_only_classifier_would_be_caught(self) -> None:
         """兩句話的前綴都是 `You've hit your `。只比對前綴的分類器會把 71 筆
@@ -1157,12 +1176,20 @@ class QuotaClassifierTest(unittest.TestCase):
 
     def test_unknown_is_fail_closed_by_contract(self) -> None:
         """認不出來時走 `LIMIT_UNKNOWN`，而 `tick_plan` 對它**不重排**。
-        寧可叫人，也不要排一支永遠不成的工作。"""
-        verdict = {"open": False, "kind": guard.classify_limit("???"),
-                   "rc": 1, "text": "???"}
+        寧可叫人，也不要排一支永遠不成的工作。
+
+        🔴 R100：輸入從 `"???"` 換成一句**真的認不出來的撞線訊息**。舊輸入沒有任何撞線
+        訊號 ⇒ 新分類下它是 `LIMIT_NONE`，那支鎖會變成在測另一件事（而且是恆綠的那件）。
+        """
+        verdict = {"open": False, "kind": guard.classify_limit("weekly cap reached"),
+                   "rc": 1, "text": "weekly cap reached"}
         decision = planner.tick_plan(
             {"attempts": 0, "max_attempts": 5}, verdict, _NOON)
-        self.assertEqual(decision["action"], "stop")
+        # 🔴 R100：本鎖真正要的是「**不重排**」（不要排一支永遠不成的付費工作），而
+        # `action == "stop"` 是它順手多鎖的一個結論。PRD §4.5.10 之後那個結論不再成立
+        # （終止的代價是永眠），而「不重排」原封不動：掛回巡邏零 token、`at is None`。
+        self.assertNotEqual(decision["action"], "rearm", "認不出來卻排了一支付費重排")
+        self.assertIsNone(decision["at"])
 
 
 _TAIPEI = timezone(timedelta(hours=8))  # 釘死時區：CI runner 是 UTC、本機 +8 ⇒ 差 8 小時
@@ -1318,6 +1345,142 @@ class RelayStateTest(unittest.TestCase):
                                     "next_run_time": ""}), [])
 
 
+class PatrolHandbackIsItsOwnOutcomeTest(unittest.TestCase):
+    """PRD §4.5.10 E2／E4／E5：**掛回巡邏 ≠ 終止 ≠ 叫人**，三者在痕跡上必須一眼可辨。"""
+
+    _PLANNER = _REPO_ROOT / "tools" / "session_resume_planner.py"
+
+    def _sentinel_actions(self) -> set:
+        """AST 現查 `sentinel_decide()` 的 `action` 字面集合。
+
+        🔴 **不得手抄清單**：手抄就是把同一份清單放進第二個家，而本項立案的成因正是
+        一份手抄清單漏了 `probe`（五個分支裡唯一會花錢的那一個）。
+        """
+        tree = ast.parse(self._PLANNER.read_text(encoding="utf-8"))
+        fn = next(n for n in ast.walk(tree)
+                  if isinstance(n, ast.FunctionDef) and n.name == "sentinel_decide")
+        return {v.value for d in ast.walk(fn) if isinstance(d, ast.Dict)
+                for k, v in zip(d.keys, d.values)
+                if isinstance(k, ast.Constant) and k.value == "action"
+                and isinstance(v, ast.Constant) and isinstance(v.value, str)}
+
+    def test_e5_the_new_event_name_collides_with_nothing(self) -> None:
+        """新事件名 ＋ 五個既有 action ＝ **6** 個相異字串。"""
+        existing = self._sentinel_actions()
+        self.assertEqual(len(existing), 5, f"既有分支不是 5 個：{sorted(existing)}")
+        self.assertIn("probe", existing, "分母裡沒有 probe ⇒ 這次又漏了會花錢的那一個")
+        self.assertNotIn(planner.PATROL_HANDBACK, existing,
+                         "新事件名與既有分支撞名 ⇒ 痕跡上一眼可辨這件事被摧毀")
+        self.assertEqual(len(existing | {planner.PATROL_HANDBACK}), 6)
+
+    def test_e2_the_unparseable_reset_no_longer_terminates(self) -> None:
+        """E2：解不出 ⇒ 掛回巡邏而非終止。**紅綠自證**＝改回 disarm／escalate 必紅。"""
+        for name in ("stop", "disarm", "escalate"):
+            self.assertNotEqual(planner.PATROL_HANDBACK, name)
+        decision = planner.tick_plan(
+            {"attempts": 0, "max_attempts": 5},
+            {"open": False, "kind": guard.LIMIT_SESSION, "rc": 1,
+             "text": "session limit, no time given"}, _NOON)
+        self.assertEqual(decision["action"], planner.PATROL_HANDBACK)
+
+    def test_e3_and_e4_the_control_locks_are_still_present(self) -> None:
+        """E3／E4 後設斷言：本節新增了一條依賴那三支既有鎖的路徑 ⇒ 它們被刪時要有人知道。"""
+        body = Path(__file__).read_text(encoding="utf-8")
+        for name in ("test_a_spend_limit_escalates_instead_of_waiting",
+                     "test_the_patrol_interval_bounds_the_post_reset_dead_time",
+                     "test_the_idle_threshold_outlives_a_whole_quota_window",
+                     "test_transient_retries_without_spending_an_attempt"):
+            self.assertIn(f"def {name}(", body, f"`{name}` 不見了 ⇒ 本節的前提沒人守")
+
+    def test_the_rearmed_sentinel_carries_the_sentinel_prefix(self) -> None:
+        """🔴 掛回去的那一支必須用**哨兵自己的**工作名，否則它對活性檢查隱形。
+
+        `sentinel_task_name()` 只在 `--task-name` 是預設值時才套
+        `sentinel_lifecycle.TASK_PREFIX`，而本路徑的 `args.task_name` 是**續航**工作的
+        名字（schtasks Action 帶進來的）⇒ 不歸位就會掛在續航名下，而 GC／`liveness_line()`
+        正是用那個前綴篩「哨兵那一種」工作。失效外觀＝哨兵在，但沒有人看得到它（R80
+        整晚失明的同一個形狀）。本包實作時就是靠一次手動 smoke 才發現，故補這道鎖。
+        """
+        tmp = Path(tempfile.mkdtemp(prefix="handback-"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        plan = tmp / f"{planner.PLAN_PREFIX}sid-lock.md"
+        (tmp / "sid-lock.jsonl").write_text("", encoding="utf-8")
+        state = {**RelayStateTest.GOOD, "session_id": "sid-lock", "state": "waiting",
+                 "kind": "resume", "plan_path": str(plan), "attempts": 0,
+                 "max_attempts": 5, "task_name": "AutoSDD_Resume_sid-lock",
+                 "log_path": str(tmp / "log.jsonl"),
+                 "transcript": str(tmp / "sid-lock.jsonl")}
+        plan.write_text("# 任務書\n\n" + planner.render_relay(state),
+                        encoding="utf-8", newline="\n")
+        args = planner.build_parser().parse_args(
+            ["--resume-tick", "--plan", str(plan), "--task-name", state["task_name"]])
+        seen: dict = {}
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(unittest.mock.patch.object(
+                planner, "probe_quota", lambda *a, **k: {
+                    "open": False, "kind": guard.LIMIT_SESSION, "rc": 1,
+                    "text": "You've hit your session limit"}))
+            stack.enter_context(unittest.mock.patch.object(
+                planner, "_schtasks_remove", lambda *a, **k: 0))
+            stack.enter_context(unittest.mock.patch.object(
+                planner, "_register_and_record",
+                lambda pl, st, at, tick: (seen.update(task=st["task_name"], tick=tick),
+                                          (0, "已回讀（測試）"))[1]))
+            with contextlib.redirect_stdout(io.StringIO()):
+                rc = planner._resume_tick(args)
+        self.assertEqual(rc, 0)
+        self.assertTrue(seen["task"].startswith(sentinel_lifecycle.TASK_PREFIX),
+                        f"重新武裝的工作名 {seen['task']!r} 沒有哨兵前綴 ⇒ 對活性檢查隱形")
+        self.assertEqual(seen["tick"], planner.SENTINEL_TICK, "掛回去的是續航 tick，不是巡邏")
+
+    def test_the_spend_exception_still_escalates_not_patrols(self) -> None:
+        """兩個例外之一：月度支出上限等到天荒地老都不會回來 ⇒ 必須叫人，不得掛回巡邏。"""
+        decision = planner.tick_plan(
+            {"attempts": 0, "max_attempts": 5},
+            {"open": False, "kind": guard.LIMIT_SPEND, "rc": 1,
+             "text": _REAL_SPEND_LIMIT}, _NOON)
+        self.assertEqual(decision["action"], "stop")
+        self.assertNotEqual(decision["action"], planner.PATROL_HANDBACK)
+
+
+class ProbeOpennessIsAPositiveVerdictTest(unittest.TestCase):
+    """R100 止血 B：`probe_quota()` 的 **`is_open` 計算面**——此前無人覆蓋的那一行。
+
+    立案：`is_open = rc == 0 and kind == guard.LIMIT_UNKNOWN`（改前逐字）讓
+    `LIMIT_UNKNOWN` 同時承載兩個相反語意。既有測試全部**直接注入** `open`
+    （`TickDecisionTest` 實測 `Ran 19 tests / OK`），於是那一行的計算面結構上沒有讀者
+    ⇒ 措辭漂移＋rc 恰為 0 這個組合永遠不會被任何一支測試看到。
+    """
+
+    def _probe(self, rc: int, text: str) -> dict:
+        """打真的 `probe_quota()`，只把它的 `subprocess.run` 換掉（＝計算面全程真跑）。"""
+        class _Done:
+            returncode, stdout, stderr = rc, text, ""
+
+        with unittest.mock.patch.object(planner.subprocess, "run",
+                                        return_value=_Done()):
+            return planner.probe_quota()
+
+    def test_a_drifted_limit_wording_with_rc_zero_is_not_open(self) -> None:
+        """**本項唯一的止血斷言**：rc=0 ＋ 分類器不認識的限流措辭 ⇒ 必須**不是** open。"""
+        verdict = self._probe(0, "You've hit your weekly cap for this model")
+        self.assertFalse(verdict["open"],
+                         "措辭漂移 ＋ rc=0 被判成『額度已恢復』⇒ 喚醒會直接撞牆")
+        self.assertEqual(verdict["kind"], guard.LIMIT_UNKNOWN)
+
+    def test_red_the_old_condition_would_have_called_that_shape_open(self) -> None:
+        """**紅綠自證**：把條件退回 `kind == LIMIT_UNKNOWN` 會讓同一個輸入判成 open。"""
+        verdict = self._probe(0, "You've hit your weekly cap for this model")
+        self.assertTrue(verdict["rc"] == 0 and verdict["kind"] == guard.LIMIT_UNKNOWN,
+                        "舊條件的兩個合項都成立才證明退回去真的會翻成 open")
+
+    def test_a_clean_probe_answer_is_still_open(self) -> None:
+        """控制組：真的通過時仍必須是 open（fail-closed 不得變成 fail-never）。"""
+        self.assertTrue(self._probe(0, '{"result":"ok"}')["open"])
+        self.assertFalse(self._probe(1, '{"result":"ok"}')["open"],
+                         "rc 非零仍是 open ⇒ 那一行的 rc 那一半掉了")
+
+
 class TickDecisionTest(unittest.TestCase):
     """醒來之後**該做什麼**的唯一判定。這裡是整條鏈的大腦，五個分支逐一釘死。"""
 
@@ -1330,7 +1493,7 @@ class TickDecisionTest(unittest.TestCase):
             _NOON)
 
     def test_quota_open_resumes(self) -> None:
-        decision = self._tick(guard.LIMIT_UNKNOWN, "ok", is_open=True)
+        decision = self._tick(guard.LIMIT_NONE, "ok", is_open=True)
         self.assertEqual((decision["action"], decision["state"]), ("resume", "resumed"))
 
     def test_spend_limit_never_reschedules(self) -> None:
@@ -1354,16 +1517,30 @@ class TickDecisionTest(unittest.TestCase):
         self.assertEqual(decision["at"].minute, planner.RESET_SKEW_SECONDS // 60)
 
     def test_still_closed_without_a_parseable_reset_refuses_to_guess(self) -> None:
+        """🔴 R100／PRD §4.5.10 登記改法：本鎖此前同時鎖住**兩件**事，只有一件是對的。
+
+        「拒絕用猜的」是本 repo 憲法（reset 只能觀測不能算）⇒ 一字不動保留。
+        「所以只能死」是它自己多出來的結論——`stop`／`abandoned` 的代價是**永眠**
+        （伺服器永遠不報時刻就永遠不醒）⇒ 改成掛回零成本巡邏。本鎖**不得整支刪掉**：
+        刪了就把「不猜」一起丟了。
+        """
         decision = self._tick(guard.LIMIT_SESSION, "session limit, no time given")
-        self.assertEqual(decision["action"], "stop")
+        self.assertEqual(decision["action"], planner.PATROL_HANDBACK)
+        self.assertNotEqual(decision["state"], "abandoned")
         self.assertIn("拒絕", decision["reason"])
 
     def test_the_attempt_cap_actually_stops(self) -> None:
-        """沒有硬上限的重排會在額度最緊的時候持續燒。上界＝5 × 一次探測 ≈ 16 萬 tokens。"""
+        """沒有硬上限的重排會在額度最緊的時候持續燒。上界＝5 × 一次探測 ≈ 16 萬 tokens。
+
+        🔴 R100：上限要保護的是**不要再燒**，不是**要死掉**。巡邏只讀逐字稿＋一次
+        `stat`、零 token ⇒ 目的達成而永眠消失。新增的那格斷言（`action != "rearm"`
+        且 `at is None`）是把「不再燒」變成可查的——否則改完之後沒有人守得住原本的目的。
+        """
         decision = self._tick(guard.LIMIT_SESSION, _REAL_SESSION_LIMIT,
                               attempts=planner.MAX_PROBE_ATTEMPTS - 1)
-        self.assertEqual(decision["action"], "stop")
-        self.assertEqual(decision["state"], "abandoned")
+        self.assertEqual(decision["action"], planner.PATROL_HANDBACK)
+        self.assertNotEqual(decision["state"], "abandoned")
+        self.assertIsNone(decision["at"], "還排了一個時刻 ⇒ 又會產生付費探測")
 
     def test_one_below_the_cap_still_rearms(self) -> None:
         """雙邊帶：上限要真的在那一格才生效，不能提前一格就放棄（那是另一種失效）。"""
@@ -2593,7 +2770,7 @@ class ResumeTickWritesStateOnlyAfterConfirmingTest(unittest.TestCase):
         with contextlib.ExitStack() as stack:
             stack.enter_context(unittest.mock.patch.object(
                 planner, "probe_quota",
-                side_effect=lambda *_a, **_k: {"open": True, "kind": guard.LIMIT_UNKNOWN,
+                side_effect=lambda *_a, **_k: {"open": True, "kind": guard.LIMIT_NONE,
                                                "rc": 0, "text": "ok"}))
             stack.enter_context(unittest.mock.patch.object(
                 planner, "_run_resume", side_effect=lambda *_a, **_k: run_resume_result))
@@ -2639,7 +2816,7 @@ class ResumeTickWritesStateOnlyAfterConfirmingTest(unittest.TestCase):
         with contextlib.ExitStack() as stack:
             stack.enter_context(unittest.mock.patch.object(
                 planner, "probe_quota",
-                side_effect=lambda *_a, **_k: {"open": True, "kind": guard.LIMIT_UNKNOWN,
+                side_effect=lambda *_a, **_k: {"open": True, "kind": guard.LIMIT_NONE,
                                                "rc": 0, "text": "ok"}))
             stack.enter_context(unittest.mock.patch.object(
                 planner, "_run_resume", side_effect=lambda *a, **k: calls.append((a, k))))
@@ -4035,7 +4212,12 @@ class QuotaUnmeasurableTest(unittest.TestCase):
         original = meter.fetch_usage
         # 🔴 R93：`fetch_usage` 回 3-tuple（見 `(status, payload, headers)`），第三格
         # 在這些失敗形狀下皆為 `{}`——本測試不驗帳號識別，headers 內容零意義。
-        shapes = {"HTTP 401": (401, None, {}), "HTTP 429": (429, None, {}),
+        # 🔴 R100：**`HTTP 429` 已從本母體移出**（PRD §8 第 1 列）。它不再是「失敗形狀」
+        # ——429 現在回一份 pct 下界 100 的單軸**地板讀數**（`rate_limited_reading()`）並
+        # 落進 halt。判為**鎖過時該同步**：把 429 留在這裡等於把「額度吃緊最強的直接證據」
+        # 鎖死成「量不到」，而量不到在本 repo 的語意是**放寬**（`degraded_cap`）。
+        # 那一格由 `RateLimitIsAFloorNotAnUnknownTest` 承接，且它比本列更嚴（驗到 halt）。
+        shapes = {"HTTP 401": (401, None, {}),
                   "連線層失敗": (0, None, {}), "200 但不是 dict": (200, "nope", {}),
                   "200 但沒有任何桶": (200, {"limits": [], "five_hour": {}}, {})}
         try:
@@ -5382,11 +5564,27 @@ class QuotaDegradationIsAudibleTest(unittest.TestCase):
         self.assertNotIn("量不到", err)
 
     def test_the_same_source_does_not_shout_on_every_call(self) -> None:
-        """出聲要有閂鎖：每次工具呼叫都吵的守衛會被關掉（同 90% 那道的既有判例）。"""
-        first, _, _ = self._gate()[0], None, None
-        spoken = [self._gate()[1] for _ in range(3)]
-        self.assertEqual(first, 0)
-        self.assertEqual([s for s in spoken if s], [], "同一個 source 每次都在吵")
+        """出聲要有閂鎖：每次工具呼叫都吵的守衛會被關掉（同 90% 那道的既有判例）。
+
+        🔴 R100 訂正判準的**觀測面**（不是放寬）：從「後續呼叫零 stderr」換成「後續呼叫
+        零新增痕跡」。兩個理由：
+          1. `degraded_cap` 依 PRD §4.1.5 收到 2 之後，第 3、4 次扇出會**合法地**被節流
+             而說出**節流**訊息——那是另一個發言者（同檔
+             `test_the_throttle_message_is_not_the_degraded_message` 就是在守兩者要分得
+             開）。拿 stderr 當判準會把它誤讀成閂鎖壞掉。
+          2. 兩個發言者的字面**互相包含**（節流訊息裡也有「額度量不到（reason=…）」）
+             ⇒ 用措辭去分辨它們本來就不可靠。痕跡才是 `note_degraded()` 專屬的觀測面
+             （節流那條路實測 `trace == []`，見上一支控制組）。
+        """
+        first_rc, _, first_trace = self._gate()
+        later = [self._gate()[2] for _ in range(3)]
+        self.assertEqual(first_rc, 0)
+        # 刻意不斷言「恰好一行」：這條路上實測有**兩個**降級發言者各持自己的 source 閂鎖
+        # （`refresh_quota_blocking()` 的取數失敗 ＋ `quota_gate()` 的無地板），兩者都該
+        # 出聲一次。要釘的是「不會每次都吵」，不是「總共幾行」。
+        self.assertTrue(first_trace, "第一次就沒留痕 ⇒ 這條鎖的分母是 0")
+        self.assertEqual([t for t in later if t], [],
+                         "同一個 source 每次都在留痕＝閂鎖沒生效（每次都吵的守衛會被關掉）")
 
 
 #: 憑證來源的**雙欄登記表**（R83）：每個平台各自的答案都登記、兩欄在任何主機上都跑
@@ -5479,8 +5677,14 @@ class MeterFailureShapesTest(unittest.TestCase):
                                  (None, meter.REASON_UNREACHABLE))
 
     def test_every_http_code_survives_into_the_reason(self) -> None:
+        # 🔴 R100：**429 已從本母體移出**（PRD §8 第 1 列）。它現在走專屬分支回一份地板
+        # 讀數，不再是 `(None, "http-429")`。這支鎖此前把「429 折成量不到」寫成了規格
+        # ——判為**鎖過時該同步**而不是我改錯：條文逐字要求「必須把 429 視為遙測低估的
+        # 證據，將 U5h 推估值上修」，而舊斷言鎖死的正好是它的反面（折成量不到 ⇒
+        # `degraded_cap` ⇒ 比量到 70% 那一帶更寬鬆）。429 那一格由
+        # `RateLimitIsAFloorNotAnUnknownTest` 承接，覆蓋面不減。
         for platform in _CRED_COLUMNS:
-            for status in (403, 429, 500, 503):
+            for status in (403, 500, 503):
                 with self.subTest(platform=platform, status=status):
                     meter, creds = self._with_fetch(status, None, platform)
                     self.assertEqual(meter.measure_detail(4, **creds)[1],
@@ -5543,6 +5747,84 @@ class MeterFailureShapesTest(unittest.TestCase):
         # 兩欄的「讀不到」必須叫不同的名字，否則 mac 上真正的原因永遠說不出口。
         self.assertNotEqual(_expected_missing_reason(meter, "darwin"),
                             _expected_missing_reason(meter, "win32"))
+
+
+class RateLimitIsAFloorNotAnUnknownTest(unittest.TestCase):
+    """PRD §8 第 1 列／R100 止血 A：**429 此前被折成「量不到」，方向與條文完全相反。**
+
+    立案實測（本輪動手前）：`measure_detail()` 對 429 回 `(None, "http-429")` ⇒
+    `read_quota()` 判 `BAND_UNMEASURED` ⇒ `decide()` 給 `degraded_cap`（出廠 4，
+    實測 `== cap_converge`）⇒ 429 換來的姿態比「量到 70% CONVERGE 帶」還寬鬆，而 429
+    是額度吃緊最強的**直接**證據。`git grep Retry-After` 於 tools/ 全庫命中 **0**。
+    """
+
+    def _fake_429(self, meter: object, headers: dict) -> None:
+        """注入一個**回 429 的假 opener**（不是替掉 `fetch_usage`）。
+
+        刻意打在 `urlopen` 這一層：本修法有一半住在 `fetch_usage()` 的 `HTTPError`
+        分支（此前第三格寫死 `{}` ⇒ 錯誤回應的標頭被丟掉），替掉 `fetch_usage` 會把
+        那一半整個跳過而仍然全綠。
+        """
+        msg = email.message.Message()
+        for key, val in headers.items():
+            msg[key] = val
+
+        def boom(req, timeout=10):  # noqa: ARG001
+            raise urllib.error.HTTPError(meter.USAGE_URL, 429, "Too Many Requests",
+                                         msg, None)
+
+        old = meter.urllib.request.urlopen
+        meter.urllib.request.urlopen = boom
+        self.addCleanup(setattr, meter.urllib.request, "urlopen", old)
+
+    def _decide_on(self, reading: dict | None, meter: object) -> object:
+        """把 `measure_detail()` 的產物走完**真正的**下游（快取 → 判讀 → 決策）。"""
+        policy, gate = quota_policy, qg
+        now = datetime.now(UTC).astimezone()
+        path = Path(tempfile.mkdtemp(prefix="q429-")) / "cache.json"
+        if reading is None:      # 舊行為的對照組：量不到就是沒有快取
+            return policy.decide(gate.read_quota(now, path), now, policy.Policy())
+        meter.write_cache(reading, path)
+        return policy.decide(gate.read_quota(now, path), now, policy.Policy())
+
+    def test_a_429_lands_on_halt_and_not_on_unmeasured(self) -> None:
+        """本項唯一的止血斷言：429 ⇒ halt 側，**不是** unmeasured 側。"""
+        meter, policy = _meter(), quota_policy
+        self._fake_429(meter, {"Retry-After": "120"})
+        creds = _cred_kwargs(self, meter, "darwin", readable=True)
+        reading, reason = meter.measure_detail(4, **creds)
+        self.assertIsNotNone(reading, f"429 仍回 None ⇒ 又折回量不到（reason={reason}）")
+        self.assertEqual(reason, meter.REASON_RATE_LIMITED)
+        decision = self._decide_on(reading, meter)
+        self.assertEqual(decision.band, policy.BAND_HALT, "429 沒有落進 halt")
+        self.assertEqual(decision.cap, 0, "halt 帶的 cap 必須是 0（＝FREEZING）")
+
+    def test_red_the_old_shape_would_have_been_looser_than_the_converge_band(self) -> None:
+        """**紅綠自證**：把修法拿掉（reading=None）必須讓姿態變成比 70% 帶更寬鬆。
+
+        這一格同時是「為什麼舊形態是缺陷而不只是不夠好」的證據：同一個輸入下，
+        unmeasured 的 cap **嚴格大於** CONVERGE 帶的 cap 是不成立的（出廠兩者相等），
+        但它與 halt 的 0 相比是**放行**——而 429 的正確答案在 halt 那一側。
+        """
+        policy = quota_policy
+        loose = self._decide_on(None, _meter())
+        self.assertEqual(loose.band, policy.BAND_UNMEASURED)
+        self.assertGreater(loose.cap, 0, "舊形態若不放行，本項就沒有在修任何東西")
+
+    def test_the_server_reported_retry_after_becomes_the_observed_reset(self) -> None:
+        """`Retry-After` ⇒ `resets_at`；標頭缺席 ⇒ `None`（**絕不猜**）。
+
+        方向是規範性的：`resets_at` 有值 ⇒ halt 分支 `arm_reset`（在伺服器說的時刻
+        醒）；沒值 ⇒ `escalate`（叫人）。憲法禁止的是**算** reset，而 `Retry-After`
+        是伺服器交出來的**觀測值**。
+        """
+        meter = _meter()
+        creds = _cred_kwargs(self, meter, "darwin", readable=True)
+        self._fake_429(meter, {"Retry-After": "120"})
+        self.assertIsNotNone(meter.measure_detail(4, **creds)[0]["axes"][0]["resets_at"])
+        self._fake_429(meter, {})
+        self.assertIsNone(meter.measure_detail(4, **creds)[0]["axes"][0]["resets_at"],
+                          "標頭缺席時憑空生出一個時刻＝在猜 reset（憲法禁止）")
 
 
 class ThrottleBandSaysHowLongItLastsTest(unittest.TestCase):
@@ -7649,6 +7931,92 @@ def flush_site_problems(sources: dict[str, str]) -> list[str]:
                     "——一個行程 flush 兩次＝stdout 上兩個相接的 JSON 物件，"
                     "實測模型兩則都收不到（比只送一則更糟）")
     return problems
+
+
+class UnmeasuredConvergesToThePrepareBandTest(unittest.TestCase):
+    """PRD §4.1.5（§8-6 修憲）F1~F5：**量不到必須換來收緊，而訊息必須說真話。**
+
+    立案實測（改前）：`degraded_cap == cap_converge` ⇒ `True`（兩者皆 4）⇒「完全量不到」
+    與「量到 70% CONVERGE 帶」在致動器上是同一個 cap；而 `note_degraded()` 的訊息逐字
+    寫 `⇒ 本次不節流，扇出照常放行。`，同檔 `quota_gate()` 註解卻自述「量不到時
+    `decide()` 回 `degraded_cap`（不是不設限、也永不 halt）」——同一個決策兩份敘述，
+    而**只有訊息那一份有讀者**。
+    """
+
+    _PRD = PrdDrainPercentMapsToTheBandsTest._PRD
+    #: 🔴 PRD 面 ↔ 實作面的**對映登記**（F5）。刻意**不**併進 `_PAIRS`：那張表的消費者
+    #: 逐字要求 PRD 側有恰好一個數字字面，而本鍵的 PRD 條文明文「留空＝取實作面出廠值、
+    #: 本 PRD 不複寫數字」⇒ 併進去會讓「值的家在實作面」與「表要求 PRD 有值」直接衝突。
+    #: 這是同一個判例的**第二種形狀**：登記對映（會漂紅）但值只有一個家。
+    _DECLARED = ("TELEMETRY_UNMEASURED_CAP", "degraded_cap")
+
+    def test_f1_unmeasured_converges_to_at_most_the_prepare_cap(self) -> None:
+        """F1：`axes == ()` ⇒ `decide().cap ≤ cap_prepare`（對任意 env 輸入都成立）。"""
+        p = quota_policy.DEFAULT_POLICY
+        for dc in (1, p.cap_prepare, p.cap_converge, 99):
+            with self.subTest(degraded_cap=dc):
+                d = quota_policy.decide(qg._blank("no-cache"), _NOON,
+                                        quota_policy.Policy(degraded_cap=dc))
+                self.assertLessEqual(d.cap, p.cap_prepare)
+                self.assertGreaterEqual(d.cap, 1, "F3：不得靜默鎖死")
+
+    def test_red_the_shipped_unclamped_form_did_exceed_that_bound(self) -> None:
+        """**紅綠自證**：改前的式子（`max(1, degraded_cap)`，無上夾）在出廠值下就破界。"""
+        p = quota_policy.Policy(degraded_cap=quota_policy.DEFAULT_POLICY.cap_converge)
+        self.assertGreater(max(1, p.degraded_cap), p.cap_prepare,
+                           "舊式子若本來就在界內，本項沒有在修任何東西")
+
+    def test_f2_the_band_is_still_unmeasured_and_draining_is_still_unknown(self) -> None:
+        """F2 控制組：只動 cap。造假讀數的話 `band` 會變成具體帶別（可觀測的違規）。"""
+        d = quota_policy.decide(qg._blank("no-cache"), _NOON, quota_policy.DEFAULT_POLICY)
+        self.assertEqual(d.band, quota_policy.BAND_UNMEASURED)
+        self.assertEqual(qg.draining(d.band), "unknown")
+
+    def test_f3_a_finite_cap_is_never_zero_outside_halt(self) -> None:
+        """F3：`cap is None or cap >= 1 or band == BAND_HALT`（掃 band × horizon）。
+
+        判準形態取 PRD v2.1.9 的訂正版：照原字面「非 halt 一律 ≥1」寫會在 `BAND_FREE`
+        那格 `TypeError`（三個 horizon 皆 `None`，而 `None >= 1` 直接炸）。
+        """
+        p = quota_policy.DEFAULT_POLICY
+        for band in (quota_policy.BAND_FREE, quota_policy.BAND_NOTICE,
+                     quota_policy.BAND_CONVERGE, quota_policy.BAND_PREPARE,
+                     quota_policy.BAND_HALT):
+            for horizon in ("near", "mid", "far"):
+                with self.subTest(band=band, horizon=horizon):
+                    cap = quota_policy._cap_for(band, horizon, p)
+                    self.assertTrue(cap is None or cap >= 1
+                                    or band == quota_policy.BAND_HALT)
+
+    def test_f4_the_degraded_message_is_computed_not_written(self) -> None:
+        """F4：姿態字面**同源**——換掉政策，訊息必須跟著變；且不得出現放行姿態詞。
+
+        🔴 判準刻意不斷言某句特定文案（那只鎖死一句話，改用詞就假紅），而是：
+        (a) 注入哨兵政策 ⇒ 訊息裡出現該政策算出來的 cap；(b) cap 有限時，放行姿態
+        **詞彙表**一個都不准出現。
+        """
+        with unittest.mock.patch.object(
+                qg, "policy_env", lambda *a, **k: {"AUTOSDD_QUOTA_DEGRADED_CAP": "1"}):
+            tight = qg.degraded_posture(_NOON)
+        live = qg.degraded_posture(_NOON)
+        self.assertIn("1", tight)
+        self.assertNotEqual(tight, live, "換了政策訊息沒變 ⇒ 那句話還是寫死的")
+        for word in ("不節流", "照常放行", "不設限"):
+            self.assertNotIn(word, live, f"cap 有限卻說「{word}」⇒ 姿態字面與致動器相反")
+
+    def test_f5_the_knob_has_exactly_one_home_and_it_is_registered(self) -> None:
+        """F5：對映機械登記 ＋ 出廠值滿足 `1 ≤ degraded_cap ≤ cap_prepare` ＋ 只有一個家。"""
+        prd_key, attr = self._DECLARED
+        text = self._PRD.read_text(encoding="utf-8")
+        self.assertEqual(len(re.findall(rf"^{prd_key}=", text, re.MULTILINE)), 1,
+                         f"PRD §6 沒有恰好一處宣告 {prd_key} ⇒ 對映的分母不存在")
+        value = getattr(quota_policy.DEFAULT_POLICY, attr)
+        self.assertGreaterEqual(value, 1)
+        self.assertLessEqual(value, quota_policy.DEFAULT_POLICY.cap_prepare,
+                             f"出廠值 {value} 破了本節登記的上界 ⇒ 量不到沒換來收緊")
+        # 反向：不得同時存在第二個治同一個數字的 env 鍵。
+        self.assertEqual([sp.name for sp in quota_policy.ENV_SPEC if sp.attr == attr],
+                         ["AUTOSDD_QUOTA_DEGRADED_CAP"])
 
 
 class SingleEmitterHasOneFlushSiteTest(unittest.TestCase):

@@ -138,7 +138,20 @@ def test_override_applied_in_build_reports():
 
 
 def test_no_file_exceeds_absolute_limit_750():
-    """任何層級不得超 750 LOC（紅線 ❌14 + ❌16 防 god-class 復活）。"""
+    """任何層級不得超 750 LOC（紅線 ❌14 + ❌16 防 god-class 復活）。
+
+    🔴 ADR-XPLAT-013 之後 `r.loc` 的**值域換了**：由「非空非註解行」變成「斷言行」
+    （docstring／裸字串／整行 `#` 一律免費）。本鎖仍是同一個不變量——「沒有 god-class」
+    ——但它現在量的是**判斷邏輯的量**而不是「檔案有多長」，這正是紅線 ❌16 本來想守的東西
+    （一支 800 行全是 WHY 註記的檔不是 god-class；一支 800 行全是分支的檔才是）。
+    落地當回合實測（否決權複審 M2 訂正——原文寫「全樹零檔上升」是**無母體限定的假數字**）：
+    閘門計價母體 286 支（`build_reports()` 207 ＋ `root_tools_reports()` 79）
+    的 `新值 > 舊值` 檔數＝**0**；放大到全樹 5557 支 tracked `.py` 則有 **2 支**上升
+    （`tests/tools/test_scaffold_sprint_section.py` 116→118、
+    `tests/tools/test_snapshot_sync_sprint_skeleton.py` 113→116，機制＝指派給變數的字串裡的
+    Markdown 標題被舊判準誤判成 Python 註解而免費），兩支皆未破線
+    ⇒ 本鎖不因換值域而放寬，方向只有收緊。
+    """
     overrides = clb.load_overrides()
     reports = clb.build_reports(overrides)
     over = [r for r in reports if r.loc > clb.ABSOLUTE_LIMIT]
@@ -146,6 +159,113 @@ def test_no_file_exceeds_absolute_limit_750():
         "absolute red line breach (> 750 LOC):\n"
         + "\n".join(f"  {r.rel_path}: {r.loc}" for r in over)
     )
+
+
+# ── ADR-XPLAT-013：敘事載體互換的計價不變式 ─────────────────
+
+
+def test_narrative_carrier_swap_is_priced_identically(tmp_path: Path) -> None:
+    """🔴 本次修法的**核心不變式**：同一段敘事換載體，`count_loc` 一行都不該變。
+
+    意圖（Rule 9）：改前 `count_loc` 對「整行 `#`」免費、對 docstring 全額計價，於是
+    「把 docstring 逐字改寫成 `#` 前綴」可以在 **raw 行數不變、可執行 AST 節點不變**
+    的前提下把計價砍掉一大截——那不是把程式改小，那是換一個計價器看不到的口袋。
+    這道門還被工具自己的違規訊息逐字教過（`[TIER-WARN]` 段原本寫「說明文字請寫成 `#`
+    註解而非 docstring」，同一次變更已移除）。
+
+    本鎖釘的是**值域**上的關閉：兩份合成檔的敘事**逐字相同**、只差載體，計價必須相等。
+    判準會在下列任一情形轉紅（＝它真的有牙）：
+      · `count_loc` 退回舊實作（docstring 收費）⇒ A 比 B 高出 docstring 行數；
+      · 分類器把整行 `#` 誤判成斷言 ⇒ B 比 A 高。
+    """
+    narrative = ["這一段是敘事：解釋為什麼要這樣做，不是判斷什麼。",
+                 "第二行敘事，用來讓兩種載體都跨多行。",
+                 "第三行敘事。"]
+    body = "\n".join(("import os", "", "", "def f(x):", "    if x:",
+                       "        return os.sep", '    return ""', ""))
+    as_docstring = '"""' + "\n".join(narrative) + '"""\n' + body
+    as_comments = "".join(f"# {line}\n" for line in narrative) + body
+
+    a, b = tmp_path / "as_docstring.py", tmp_path / "as_comments.py"
+    a.write_text(as_docstring, encoding="utf-8")
+    b.write_text(as_comments, encoding="utf-8")
+
+    # 前提自檢：兩份檔的敘事行數真的相同、且真的只差載體（否則本鎖比的是別的東西）。
+    assert len(as_docstring.splitlines()) == len(as_comments.splitlines())
+
+    loc_a, loc_b = clb.count_loc(a), clb.count_loc(b)
+    assert loc_a == loc_b, (
+        f"敘事載體互換改變了計價（docstring={loc_a} vs `#`={loc_b}）——套利門還開著："
+        "同一段話搬進 `#` 就變便宜，等於鼓勵把 WHY 從 docstring 搬走以換預算。"
+    )
+    # 鑑別力：計價必須真的只剩下斷言（4 行：import／def／if／兩個 return 之一…），
+    # 不是「兩邊都回同一個常數」那種恆真。
+    assert loc_a == len([ln for ln in body.splitlines() if ln.strip()]), (
+        f"計價 {loc_a} 不等於合成檔的斷言行數 ⇒ 相等可能來自兩邊都算錯同一個量"
+    )
+
+
+def test_a_bare_string_prefix_cannot_buy_a_free_line(tmp_path: Path) -> None:
+    """🔴 否決權複審 M1 的回歸鎖：`""; x = 1` 這種裸字串前綴**不得**讓該行免費。
+
+    意圖（Rule 9）：ADR-XPLAT-013 落地的第一版只關掉 docstring↔`#` 那一道門，同一次
+    改動卻開了一道更寬的：`Expr(Constant(str))` 的 `(lineno, end_lineno)` 涵蓋整個
+    **物理行**，於是在任一行前面加一個裸字串 ＋ 分號就能把該行整行判成敘事。實測在真的
+    受計價檔上機械套用（raw 行數與每一個 AST 邏輯節點皆逐字不變）：
+    `.claude/hooks/block_destructive_git.py` 的計價 558 → 316（−43.4%）。
+    **舊計價對這招是懲罰的**（`; ` 破壞行首井號、免費資格消失），新計價若不補判準就變成
+    **獎勵** ⇒ 門不是關掉，是搬家並變寬，而且方向翻轉。
+
+    本鎖釘的是值域上的關閉：同一份程式碼加上前綴之後計價必須**一行都不變**。
+    判準會在下列任一情形轉紅：
+      · `guard_line_taxonomy._shared_code_lines()` 被移除／改成看 span 涵蓋面
+        ⇒ 前綴版變便宜（本鎖的 `==` 紅）；
+      · 判準過度收緊、把正常 docstring 也打成斷言 ⇒ 對照組 `plain` 的值上升（第二條斷言紅）。
+    """
+    body = ("import os", "", "", "def f(x):", "    y = os.sep", "    if x:",
+            "        return y", "    return x")
+    plain = tmp_path / "plain.py"
+    plain.write_text('"""模組敘事：解釋為什麼，不是判斷什麼。"""\n' + "\n".join(body) + "\n",
+                     encoding="utf-8")
+    # 同一份程式碼，逐行前綴 `""; `（單物理行的 simple statement 才貼，語法保持合法）
+    prefixed_body = []
+    for line in body:
+        stripped = line.lstrip()
+        if stripped and stripped.split(" ")[0] not in ("def", "if"):
+            indent = line[: len(line) - len(stripped)]
+            prefixed_body.append(f'{indent}""; {stripped}')
+        else:
+            prefixed_body.append(line)
+    prefixed = tmp_path / "prefixed.py"
+    prefixed.write_text('"""模組敘事：解釋為什麼，不是判斷什麼。"""\n'
+                        + "\n".join(prefixed_body) + "\n", encoding="utf-8")
+
+    # 前提自檢：兩份檔的 raw 行數相同（否則比的不是「同一份程式碼」）
+    assert len(plain.read_text(encoding="utf-8").splitlines()) == len(
+        prefixed.read_text(encoding="utf-8").splitlines())
+    assert '""; ' in prefixed.read_text(encoding="utf-8"), "前綴沒貼上去 ⇒ 本鎖沒有受測物"
+
+    loc_plain, loc_prefixed = clb.count_loc(plain), clb.count_loc(prefixed)
+    assert loc_prefixed == loc_plain, (
+        f"裸字串前綴買到了免費行（無前綴={loc_plain} vs 有前綴={loc_prefixed}）——"
+        "套利門仍開著：任一行加 `\"\"; ` 就免費，raw 行數與 AST 節點卻一個都沒少。"
+    )
+    # 鑑別力：對照組不得因判準收緊而漲價（否則相等可能來自「兩邊都被打成斷言」）
+    assert loc_plain == len([ln for ln in body if ln.strip()]), (
+        f"對照組計價 {loc_plain} 不等於其斷言行數 ⇒ 判準收得太寬，把敘事也計了價"
+    )
+
+
+def test_count_loc_refuses_to_price_an_unparseable_file(tmp_path: Path) -> None:
+    """🔴 語法錯誤不得變成零成本（ADR-XPLAT-013 條文二）。
+
+    意圖：分類器對 `SyntaxError` 的契約是「跳過並標記、三桶歸零」，若計價器照抄那個
+    0，最省預算的手法就變成「把檔弄壞」——那是本 ADR 要關的套利門的鏡像版本。
+    """
+    bad = tmp_path / "broken.py"
+    bad.write_text("def f(:\n    pass\n", encoding="utf-8")
+    with pytest.raises(clb.UnparseableSourceError):
+        clb.count_loc(bad)
 
 
 # ── 政策版本標記 ────────────────────────────────────────────

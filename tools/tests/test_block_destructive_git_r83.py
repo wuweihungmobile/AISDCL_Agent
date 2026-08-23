@@ -1136,11 +1136,20 @@ class TestTheFalsePositiveCensusIsRerunnable(unittest.TestCase):
 
 
 class TestTheHookStaysInsideItsLocTier(unittest.TestCase):
-    """🔴 鐵律六那一族是加在**既有** hook 上的，而該檔的 tier 餘裕本來就窄。
+    """🔴 鐵律六那一族是加在**既有** hook 上的，而該檔一直是這一層最靠近上限的檔之一。
 
-    立案理由：本包落地時該檔 `count_loc` 距 `guardrail_cli` tier 只剩兩位數餘裕。
-    把「還在預算內」寫成散文等於沒寫——下一個往這支 hook 加判準的人需要的是一個會紅的東西。
+    立案理由：本包落地時該檔 `count_loc` 距 `guardrail_cli` tier 只剩兩位數餘裕，後來
+    更走到**零餘裕**（`[ROOT-TOOLS-WARN]` 段實測 750/750）。把「還在預算內」寫成散文等於
+    沒寫——下一個往這支 hook 加判準的人需要的是一個會紅的東西。
     判準本身**不複寫預算數字**（現查 `check_loc_budget` 的 SSOT，同 CLAUDE.md 的既有政策）。
+
+    🔴 ADR-XPLAT-013 之後本鎖的**語意變了，鑑別力也變了**，照實記：`count_loc` 已改為
+    只算斷言行（docstring／裸字串／整行 `#` 一律免費），該檔的計價因此一次性大幅下降，
+    本鎖從「幾乎貼著上限」變成「離上限很遠」。⇒ 它現在守的不再是「再加一行就破線」，
+    而是「這支 hook 的**判斷邏輯量**不得長到 tier 之外」——那才是 tier 本來想守的東西，
+    但它作為早期預警的靈敏度確實下降了。距上限的實測餘裕現查
+    `python AutoClaude/tools/check_loc_budget.py --json` 的 `root_tools_warn_band`
+    （本檔刻意不寫死那個數字：它是量測值，寫下去下一輪就過期）。
     """
 
     def test_the_hook_is_within_its_root_tools_tier(self) -> None:

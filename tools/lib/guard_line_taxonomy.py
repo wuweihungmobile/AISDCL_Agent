@@ -15,6 +15,9 @@
     ∪ tokenize 的整行 `#` 註解（`#` 前全為空白，行尾附掛註解不算）。
   · 強制歸斷言（優先序最高，條文一 §2）：shebang（首行 `#!`）、PEP 263 編碼
     宣告（前兩行）、`ASSERTION_PRAGMA_COMMENTS` 封閉表。
+  · 強制歸斷言（ADR-XPLAT-013 M1）：同一行還有**別的** statement 起點的行——
+    `""; x = 1` 這種裸字串前綴會讓整行落進字串節點的 `(lineno, end_lineno)` 而免費，
+    是與 docstring↔`#` 同型、且更寬的套利門（實測 −43.4%）。見 `_shared_code_lines()`。
   · 讀檔一律 `utf-8-sig`；`ast.parse()` 失敗即標記 `unparseable`、不中止呼叫端
     的逐檔迴圈（條文一 §4）。
 """
@@ -23,6 +26,7 @@ from __future__ import annotations
 import ast
 import io
 import tokenize
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -43,20 +47,46 @@ def _matches_pragma(comment_text: str) -> bool:
     return any(normalized.startswith(p.replace(" ", "")) for p in ASSERTION_PRAGMA_COMMENTS)
 
 
-def _string_expr_ranges(tree: ast.AST) -> list[tuple[int, int]]:
-    """docstring／裸字串涵蓋的 `(起始行, 結束行)` 清單。
+def _string_expr_nodes(tree: ast.AST) -> list[ast.Expr]:
+    """docstring／裸字串的 `Expr(Constant(str))` 節點清單。
 
     刻意不用 `ast.get_docstring()`：那只認每個 body 的**第一個**元素，會漏掉
     條文二 §2 要求的「非傳統位置裸字串仍算敘事」（例如函式中段插入的說明字串）。
     直接掃全樹的 `Expr(Constant(str))` 節點同時涵蓋兩種情形。
     """
     return [
-        (node.lineno, getattr(node, "end_lineno", node.lineno))
+        node
         for node in ast.walk(tree)
         if isinstance(node, ast.Expr)
         and isinstance(node.value, ast.Constant)
         and isinstance(node.value.value, str)
     ]
+
+
+def _shared_code_lines(tree: ast.AST, string_exprs: Iterable[ast.Expr]) -> set[int]:
+    """「同一行還有別的 statement 起點」的行號（ADR-XPLAT-013 M1 的門）。
+
+    🔴 為什麼非有這一格不可（複審實測的套利門）：`Expr(Constant(str))` 的
+    `(lineno, end_lineno)` 涵蓋整個**物理行**，於是在任一行前面加一個裸字串 ＋ 分號
+    （`""; x = 1`）就能把該行整行判成敘事 ⇒ **免費**。實測在真的受計價檔上機械套用
+    （raw 行數與每一個 AST 邏輯節點皆逐字不變）：`.claude/hooks/block_destructive_git.py`
+    的 `assertion` 由 558 掉到 316（−43.4%）。舊判準對這招是**懲罰**的（`#` 前綴會被
+    `; ` 破壞而失去免費資格），新判準若不補這一格就變成**獎勵** ⇒ 門不是關掉，是搬家
+    並變寬。唯一擋得住它的 ruff E702 在 `.claude/hooks/` 沒有任何閘門，不能當依靠。
+
+    判準＝「**別人的** statement 起點」：字串本身那些 `Expr` 節點的 `lineno` 要排除，
+    否則每個 docstring 的第一行都會被自己打成斷言（整批假紅）。刻意只看 `lineno` 而不看
+    `end_lineno` 涵蓋面——`ast.stmt` 的 span 會**包住自己的 body**（`FunctionDef` 的
+    span 涵蓋它的 docstring），看涵蓋面等於把所有函式／類別的 docstring 全部沒收。
+    只看起點的殘留形態（把語句拆成多物理行、再在最後一行綴 `; ""`）實測是**收支平衡**
+    而非套利：綴出來的那一行免費，但拆行時多出來的物理行本身就是斷言，淨額為 0。
+    """
+    owned = {id(node) for node in string_exprs}
+    return {
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.stmt) and id(node) not in owned
+    }
 
 
 def classify_lines(source: str) -> tuple[set[int], set[int], set[int]]:
@@ -71,10 +101,13 @@ def classify_lines(source: str) -> tuple[set[int], set[int], set[int]]:
     blank = {i for i, ln in enumerate(lines, start=1) if ln.strip() == ""}
 
     tree = ast.parse(source)
+    string_exprs = _string_expr_nodes(tree)
+    shared = _shared_code_lines(tree, string_exprs)
     narrative: set[int] = set()
-    for start, end in _string_expr_ranges(tree):
-        for ln in range(start, min(end, total) + 1):
-            if ln not in blank:
+    for node in string_exprs:
+        end = getattr(node, "end_lineno", node.lineno)
+        for ln in range(node.lineno, min(end, total) + 1):
+            if ln not in blank and ln not in shared:
                 narrative.add(ln)
 
     forced_assertion: set[int] = set()

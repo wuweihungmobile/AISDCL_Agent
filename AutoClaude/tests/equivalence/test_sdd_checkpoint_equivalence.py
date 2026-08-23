@@ -51,9 +51,16 @@ def _make_checkpoint() -> PlaybookCheckpoint:
 
 
 def _normalized(cp: PlaybookCheckpoint) -> dict:
-    """asdict 後抹平 saved_at（兩後端各自蓋時間戳，非語意欄位）。"""
+    """asdict 後抹平 saved_at 與 checksum_sha256（兩者皆非語意欄位）。
+
+    R100 P2-C：`checksum_sha256`（PRD §8-4 ②／§7）是**磁碟完整性產物**，與 saved_at
+    同族——File 後端寫檔時算出來、載回來時帶著它；InMemory 後端沒有磁碟，結構上就沒有
+    這個值。抹平它**不是**放寬 DAL 等價紀律：那道紀律守的是「同一份語意在兩個後端
+    round-trip 後相等」，而 checksum 描述的是載體不是語意。
+    """
     d = asdict(cp)
     d["saved_at"] = "<normalized>"
+    d["checksum_sha256"] = "<normalized>"
     return d
 
 

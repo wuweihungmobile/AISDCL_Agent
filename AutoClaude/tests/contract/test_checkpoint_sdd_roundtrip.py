@@ -165,8 +165,18 @@ class TestSerializationSymmetry:
 
     def test_field_is_additive_last_position(self):
         """additive 紀律：新欄位只能 append 末位，不改變既有欄位序
-        （舊位置參數呼叫不受影響）。F-B1（ADR-AGT-004）alert_ladder 為現行末位。"""
+        （舊位置參數呼叫不受影響）。R100 P2-C 新增兩欄：checksum_sha256
+        （PRD §8-4 ②）與 integration_queue（PRD §6.2 R-6.2-1），後者為現行末位；
+        alert_ladder（F-B1／ADR-AGT-004）退居 -3。
+
+        判讀（鎖對了還是鎖過時）＝**鎖過時該同步**：本鎖的意圖是「只准 append」，
+        而 checksum_sha256 就是 append 在末位 ⇒ 意圖未被違反，只是末位的名字換了。
+        鎖刻意寫成硬名比對（而非「最後一個是新加的那個」這種恆真式），代價就是每次
+        合法的 additive 都得回來改一行——那一行是**刻意的**確認動作。
+        """
         fields = list(PlaybookCheckpoint.__dataclass_fields__)
-        assert fields[-1] == "alert_ladder"
-        assert fields[-2] == "sdd_governance"
-        assert fields.index("goal_task_id") == len(fields) - 3
+        assert fields[-1] == "integration_queue"
+        assert fields[-2] == "checksum_sha256"
+        assert fields[-3] == "alert_ladder"
+        assert fields[-4] == "sdd_governance"
+        assert fields.index("goal_task_id") == len(fields) - 5

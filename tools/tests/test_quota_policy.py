@@ -107,9 +107,13 @@ _TABLE = [
      state(("spend", 88, None)), 1, 1, "spend"),
     ("S4-14 時鐘偏移（強制不加速）",
      state(("session", 0, -5)), None, 8, "session"),
-    ("S4-15 量不到＝degraded，不是不設限",
+    # 🔴 R100／PRD §4.1.5 F1：`4` → `2`。這一列的字面此前恰好等於 `cap_converge`
+    # ⇒ 「完全量不到」與「量到 70%」在致動器上同一個 cap＝量不到**沒有**換來收緊，
+    # 而列名寫的是「不是不設限」——它守住了下界，卻讓上界名存實亡。放回 4 即再度與
+    # `cap_converge` 相等（那是本列的紅綠線，也是 `Unmeasured...PrepareBandTest` 的分母）。
+    ("S4-15 量不到＝degraded（收斂到 cap_prepare 語意），不是不設限",
      Q.QuotaState(axes=(), measured_at=NOW.isoformat(), source="cache",
-                  reason="stale-cache"), 4, 4, None),
+                  reason="stale-cache"), 2, 2, None),
 ]
 
 
@@ -1392,8 +1396,17 @@ _UNMEASURABLE_REASONS = (
 # 🔴 立案（R83／F2-③，同 `TestM8SchemaStaysInSync` 形狀）：漏登記＝失明而 rc 全綠。
 # 分母是**現查** meter 的 `REASON_*` 宣告集合，不是寫死清單。全文＝Pace 證據檔 §7-R95-L5。
 _METER_REASON_RE = re.compile(r"^REASON_([A-Z0-9_]+)\s*=\s*\"([^\"]+)\"", re.MULTILINE)
-#: `REASON_OK` 是「量到了」，語意上不屬本表——唯一的例外，且必須具名而不是靠註解。
-_NOT_A_FAILURE = ("ok",)
+#: 「量到了」的字面，語意上不屬本表——例外必須**具名**而不是靠註解。
+#: 🔴 R100 新增第二個成員 `http-429-floor`：它與 `ok` 同族（都**帶著讀數**回來），只是
+#: 那份讀數是一個 pct 下界 100 的單軸**地板**（`quota_meter.rate_limited_reading()`）。
+#: 把它登記進 `_UNMEASURABLE_REASONS` 會是一句假話——那張表的每一項都會被 `m9_problems()`
+#: 造成 `axes == ()` 的合成態去掃，而 429 這條路**結構上不可能** `axes == ()`，於是
+#: 「量不到不得等於不設限」那兩條不變量會對一個不存在的形狀成立，分母虛胖一項。
+#: 它不是漏登記：本例外由 `test_context_budget_guard.py::
+#: RateLimitIsAFloorNotAnUnknownTest::test_a_429_lands_on_halt_and_not_on_unmeasured`
+#: 承接（斷言同一個字面回來時 `reading is not None` 且落在 halt 側）⇒ 兩表互斥即可，
+#: 見下方 `test_the_exemptions_are_not_also_registered_as_unmeasurable`。
+_NOT_A_FAILURE = ("ok", "http-429-floor")
 
 
 def reason_registry_problems(meter_src: str, registered: tuple[str, ...]) -> list[str]:
@@ -1405,6 +1418,14 @@ def reason_registry_problems(meter_src: str, registered: tuple[str, ...]) -> lis
 
 
 class TestMeterReasonsAreAllRegistered(unittest.TestCase):
+    def test_the_exemptions_are_not_also_registered_as_unmeasurable(self) -> None:
+        """兩表**互斥**：一個字面不得同時是「量到了」與「量不到」。
+
+        沒有這一格時 `_NOT_A_FAILURE` 就是一個無代價的消音清單（往裡面加一個名字即可
+        讓漏登記的鎖閉嘴）。互斥讓「豁免」變成一個**有語意的宣稱**：宣稱它帶著讀數。
+        """
+        self.assertEqual(set(_NOT_A_FAILURE) & set(_UNMEASURABLE_REASONS), set())
+
     def test_green_the_real_meter_is_fully_registered(self) -> None:
         if _METER.exists():
             self.assertEqual(reason_registry_problems(
@@ -2326,6 +2347,85 @@ class TestR98ModelScopedAxisDoesNotBindWithoutDispatch(unittest.TestCase):
         self.assertNotEqual((d_team.binding.kind, d_team.band),
                             (d_pro.binding.kind, d_pro.band),
                             "兩個帳號的判定必須各自成立，證明沒有跨呼叫的殘留狀態")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 攤提（`quota_pace.amortize`）與 binding（`_in_cap_gate`，R98）對 `MODEL_SCOPED_KINDS`
+# 的處置**刻意不同**，而 `explain()` 的字面把兩件事混成一句假話：實測 `--pace` 逐字
+# 「攤提：kind=weekly_all 剩 39pp」，而 weekly_all 當時 52%（剩 48pp）——39pp 來自
+# weekly_scoped(61%，Fable，binding 側已排除)。兩條鎖：① 具名必須是真的被用到的那一軸；
+# ② 納入的方向必須是**保守側**（只會更緊）＝不排除它的實質判詞，見 `amortize()` 上方。
+# ═══════════════════════════════════════════════════════════════════════════
+class TestAmortizationNamesTheAxisItActuallyUsed(unittest.TestCase):
+    """輸入＝2026-08-22T11:46:51 `--pace` 實測軸集合（session/five_hour 37%＠212 分鐘；
+    weekly_all 52%、weekly_scoped 61%(Fable)、seven_day 52%＠852 分鐘）。"""
+
+    PCTS = (("session", 37.0), ("five_hour", 37.0), ("weekly_all", 52.0),
+            ("weekly_scoped", 61.0), ("seven_day", 52.0))
+    MINS = (212.0, 212.0, 852.0, 852.0, 852.0)
+    WINS = (300.0, 300.0, 10080.0, 10080.0, 10080.0)
+    #: 去掉 Fable 軸的對照組（＝「把排除搬進攤提」會得到的那一組）。
+    WITHOUT = (PCTS[0], PCTS[1], PCTS[2], PCTS[4])
+    W_MINS, W_WINS = MINS[:4], WINS[:4]
+    RATIO = 4.5
+
+    def _amort(self, scoped: float = 61.0):
+        return W.amortize(tuple((k, scoped if k == "weekly_scoped" else p)
+                                for k, p in self.PCTS),
+                          self.MINS, self.WINS, self.RATIO, "n=4")
+
+    def _base(self):
+        return W.amortize(self.WITHOUT, self.W_MINS, self.W_WINS, self.RATIO, "n=4")
+
+    def test_the_named_axis_is_the_one_whose_pct_set_remaining(self) -> None:
+        """① 具名 ↔ 取值同一軸。舊實作取 `total[0][0]`（同窗長第一軸）當名字，而
+        `remaining` 取 `max(pct)` ⇒ argmax 不是第一軸時那句話就是假的。這不是排版問題：
+        主控就是照著這句話去找 61 的來源，而它指錯了軸。"""
+        a = self._amort()
+        self.assertEqual(a.remaining_pp, 39.0, "取值面漂移了，本鎖的前提不成立")
+        self.assertEqual(a.total_kind, "weekly_scoped",
+                         "39pp 來自 weekly_scoped(61%)，卻具名成另一軸＝一句假話")
+        self.assertIn(f"kind={a.total_kind} 剩 {a.remaining_pp:.0f}pp", W.explain(a, 70.0))
+
+    def test_ties_keep_the_pre_existing_wording_byte_for_byte(self) -> None:
+        """同窗長諸軸等值（`weekly_all == seven_day` 的常態）⇒ 字面逐字不變：修的是
+        「說錯軸」，不是換一套命名法。短窗那一對（session/five_hour 同值）同理——
+        `rate_kind` 一併證明本修法沒有順手改掉平手時的既有字面。"""
+        a = W.amortize((("session", 37.0), ("five_hour", 37.0),
+                        ("weekly_all", 55.0), ("seven_day", 55.0)),
+                       self.W_MINS, self.W_WINS, self.RATIO, "n=4")
+        self.assertEqual((a.total_kind, a.rate_kind), ("weekly_all", "session"))
+        self.assertEqual((self._amort().rate_kind, self._amort().used_pp),
+                         ("session", 37.0), "短窗平手仍須維持既有字面與取值")
+
+    def test_including_the_model_scoped_axis_can_only_tighten(self) -> None:
+        """② 方向鎖：`_in_cap_gate` 排除的軸仍留在攤提裡，而差異方向恆為「只會更緊」
+        ⇒ 它結構上不可能替任何人核准超支。這一條同時擋住反向的「順手修好」：把排除搬進
+        `amortize()` 就是放寬，而本 repo 對放寬一律要求證據。
+        🔴 嚴格不等式那一格是鑑別力所在——只用 `<=` 時，搬排除會讓兩組相等而全部假綠
+        （本輪注入實測到）。"""
+        base = self._base()
+        for scoped in (0.0, 30.0, 52.0, 61.0, 71.0, 99.0):
+            with self.subTest(scoped=scoped):
+                a = self._amort(scoped)
+                self.assertLessEqual(a.allowance_pp, base.allowance_pp,
+                                     "納入被排除的軸讓本窗配額變大＝放寬，方向反了")
+                self.assertLessEqual(int(W.amort_relaxed(a, 70.0)),
+                                     int(W.amort_relaxed(base, 70.0)))
+                if scoped > 52.0:
+                    self.assertLess(a.allowance_pp, base.allowance_pp,
+                                    "排除規則被搬進攤提了：差異整個消失＝煞車被拿掉")
+                    self.assertLess(a.headroom_pp, base.headroom_pp)
+        self.assertFalse(W.amort_relaxed(self._amort(71.0), 70.0),
+                         "越過 converge 仍不收緊＝納入是死碼")
+
+    def test_the_relaxation_today_is_not_caused_by_the_excluded_axis(self) -> None:
+        """主控假設「Fable 軸正在替我核准超支」的**證偽**：把 Fable 軸整個抽掉，
+        `amort_relaxed` 仍為 True（52 < converge 70）⇒ 今天的免除由真的在消耗的
+        weekly_all／seven_day 決定，與被排除的那一軸無關。"""
+        self.assertTrue(W.amort_relaxed(self._amort(), 70.0))
+        self.assertTrue(W.amort_relaxed(self._base(), 70.0),
+                        "抽掉它就翻轉的話本結論才會不成立")
 
 
 if __name__ == "__main__":

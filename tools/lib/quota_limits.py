@@ -56,6 +56,25 @@ LIMIT_SPEND = "quota_spend"
 LIMIT_TRANSIENT = "transient"
 #: 認不出來。**一律當不可等待處理**（fail-closed）：寧可叫人，也不要排一支永遠不成的工作。
 LIMIT_UNKNOWN = "unknown"
+#: 🔴 **正向答案**：掃過 `_LIMIT_MARKS` 全部條目、連 `_LIMIT_HINTS` 的泛型撞線字樣都
+#: 沒中 ⇒ 這則輸出裡真的**沒有**撞線訊號。與 `LIMIT_UNKNOWN` 刻意是**兩個不同的值**。
+#:
+#: 立案（R100 止血 B）：`tools/session_resume_planner.py::probe_quota()` 此前逐字寫
+#: `is_open = rc == 0 and kind == LIMIT_UNKNOWN` ⇒ 讓**同一個常數同時承載兩個相反的
+#: 語意**：本檔的契約是「認不出來 ⇒ fail-closed，不得排程等待」，而那一行把它當成
+#: 「沒有撞線字樣 ⇒ 額度已開」。而本檔自己就記載限流訊息的字面是**會漂移的量測面**
+#: （`_LIMIT_MARKS` 三族字樣全部是實測來的）⇒ 措辭一改（分類器認不出）＋ rc 恰為 0，
+#: 就會判成「額度已恢復」而喚醒撞牆——那是這條無人看管路徑上最貴的誤判。
+LIMIT_NONE = "none"
+
+#: 泛型撞線字樣。命中它但沒命中任何具名 mark ⇒ 判 `LIMIT_UNKNOWN`（fail-closed），
+#: **不是** `LIMIT_NONE`。這一層是上面那段立案的機械解藥：措辭漂移時具名 mark 會失手，
+#: 而漂移後的訊息幾乎不可能連「limit」這種字都不剩 ⇒ 漂移的淨效果從「假裝額度已開」
+#: 變成「多等一輪」。母體是實測的：全庫 151 筆 `session limit` 與 71 筆 `monthly spend
+#: limit` 的**共同**前綴逐字是 `You've hit your `。
+#: 方向刻意保守：正常的探針輸出（`claude -p ok`）誤含這些字時只會多等一輪，而反向的
+#: 誤判會白燒一次主 session 的續跑成本（見 `probe_quota()` 的 fail-closed WHY）。
+_LIMIT_HINTS = ("you've hit your", "limit", "quota", "429", "too many requests")
 
 #: 判讀順序即優先序。spend 必須排在 session 前面——見 `LIMIT_SPEND` 的 WHY。
 _LIMIT_MARKS: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -119,16 +138,20 @@ def reset_literal(text: object) -> str | None:
 
 
 def classify_limit(text: object) -> str:
-    """把一則錯誤訊息分成四類之一。純函式，零 I/O。
+    """把一則錯誤訊息分成五類之一（見下方 R100 那段）。純函式，零 I/O。
 
     `LIMIT_UNKNOWN` 是 fail-closed 的那一側：認不出來時呼叫端**不得**排程等待。
     這與本檔其他地方「量不到就閉嘴」同一個方向——不確定時不要做有後果的事。
+
+    🔴 R100：**「沒有撞線」與「有撞線但認不出來」現在是兩個回傳值**（見 `LIMIT_NONE`
+    的立案）。分成五類之一而不是四類：本函式此前把兩者折成 `LIMIT_UNKNOWN`，於是任何
+    想表達「額度是開的」的呼叫端只能拿 fail-closed 那個值去做**正向**判斷。
     """
     low = str(text or "").lower()
     for kind, marks in _LIMIT_MARKS:
         if any(mark in low for mark in marks):
             return kind
-    return LIMIT_UNKNOWN
+    return LIMIT_UNKNOWN if any(h in low for h in _LIMIT_HINTS) else LIMIT_NONE
 
 
 def parse_reset_at(text: object, now: datetime) -> datetime | None:

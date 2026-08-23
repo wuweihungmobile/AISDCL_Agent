@@ -84,8 +84,11 @@ ENV_SPEC: tuple[EnvVar, ...] = (
            "配速上限：PACE_INDEX 超過才判超前（1＝任何超前即減速；PRD §4.2.8）", "policy"),
     EnvVar("AUTOSDD_QUOTA_MAX_FANOUT", "max_fanout", 16, "int", 1.0, None,
            "加速後的絕對上界", "policy"),
-    EnvVar("AUTOSDD_QUOTA_DEGRADED_CAP", "degraded_cap", 4, "int", 1.0, None,
-           "量不到時的上限（絕不是「不設限」）", "policy"),
+    # 🔴 R100：出廠值 4 → 2，與 `Policy.degraded_cap` 同步（不變式 `1 ≤ 本鍵 ≤
+    # cap_prepare`，見 PRD §4.1.5）。`hi` 仍是 `None`：上界是另一個 `Policy` 欄位而不是
+    # 常數，放不進本欄 ⇒ 由 `decide()` 的量不到分支夾住任意 env 輸入。
+    EnvVar("AUTOSDD_QUOTA_DEGRADED_CAP", "degraded_cap", 2, "int", 1.0, None,
+           "量不到時的上限（絕不是「不設限」；≤ cap_prepare）", "policy"),
     # 🔴 R91／`DEF-200-097`：本鍵**結構上就是政策鍵**（有 `attr`、型別 `int`、下界 1），
     # 而它先前被渲染在下方〈既有逃生口〉標題底下、夾在兩個 `_OFF` 開關之間 ⇒ 讀者會把它
     # 讀成「關掉某個東西」的開關。逃生口關掉的是守衛，本鍵**永遠只收緊**

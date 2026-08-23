@@ -411,18 +411,59 @@ class FileReport:
     override_reason: str | None
 
 
+class UnparseableSourceError(ValueError):
+    """`count_loc()` 對解析不出來的 `.py` 的**明確錯誤態**（ADR-XPLAT-013 條文二）。
+
+    刻意是例外而不是「回 0」：計價器回 0 會讓「語法錯誤」變成**零成本**，那是本 ADR
+    要關掉的套利門的鏡像版本（把整檔弄壞比刪行更省預算）。呼叫端要嘛修檔、要嘛在自己
+    的迴圈裡把它翻譯成一筆違規——兩條路都會留下痕跡，回 0 不會。
+    """
+
+
 def count_loc(path: Path) -> int:
-    """計算實際程式碼行數（排除空行與純註解行）。"""
+    """計價＝**只算斷言行**（ADR-XPLAT-013 條文一；改前為「排除空行與純註解行」）。
+
+    判準本體不住本檔——委派 `tools/lib/guard_line_taxonomy.classify_file()` 的
+    `.assertion` 桶（敘事＝docstring／裸字串 ∪ tokenize 判定的整行 `#`；空白免費）。
+    一份判準一個家：本檔自己再實作一次同一個分類，兩份必然漂移。
+
+    🔴 為什麼改（缺陷本體）：舊實作把「整行 `#` 免費、docstring 全額」寫成硬編二分，
+    於是「把 docstring 逐字改寫成 `#` 前綴」可在 raw 行數與可執行 AST 節點數**都逐字
+    不變**的前提下大幅降低計價 ⇒ 一道套利門；而且它被本工具自己的違規訊息逐字教過
+    （那句指引已於同一次變更移除）。改後兩種載體同為敘事、同為免費。回歸鎖＝
+    `AutoClaude/tests/contract/test_loc_budget_tiered.py::
+    test_narrative_carrier_swap_is_priced_identically`（合成檔前後相等）。
+
+    🔴 門「關掉了」這句話的射程（否決權複審 M1 訂正——原文寫「門在**值域上**關閉」，
+    該句已被實測推翻）：改用敘事桶的第一版**把門搬家並變寬了**——`Expr(Constant(str))`
+    的 `(lineno, end_lineno)` 涵蓋整個物理行，於是 `""; x = 1` 這種裸字串前綴能讓任一行
+    免費（實測 `.claude/hooks/block_destructive_git.py` 558→316，−43.4%，而 raw 行數與
+    每一個 AST 邏輯節點皆逐字不變）。已由 `guard_line_taxonomy._shared_code_lines()`
+    在值域上補掉（同一份合成套用後 558→558，+0.0%），回歸鎖＝同一支 contract 檔的
+    `test_a_bare_string_prefix_cannot_buy_a_free_line`。**仍未關**的殘留是「多語句擠一行」
+    （`a=1;b=2`）——那不是本案開的門：它在舊計價下同樣省錢、且同時減少 raw 行數，是
+    行數制計價的共有性質。唯一擋它的 ruff E702 在 `.claude/hooks/` 沒有閘門，見
+    ADR-XPLAT-013 §6 缺口 ⑥。
+
+    誠實劃界：shebang／PEP 263／`ASSERTION_PRAGMA_COMMENTS` 這三類整行 `#` 依分類器的
+    強制歸斷言規則**改為計價**（改前免費）。母體限定的實測值（M2 訂正——原文寫「全樹零檔
+    上升」是假數字）：**閘門計價母體** 286 支（`build_reports()` 207 ＋
+    `root_tools_reports()` 79；`SPECIAL_FILES` 走 `count_raw_lines`、不在本函式母體）
+    新值 > 舊值的檔數＝**0**；放大到**全樹** 5557 支 tracked `.py` 則有 **2 支上升**：
+    `AutoClaude/tests/tools/test_scaffold_sprint_section.py` 116→118、
+    `AutoClaude/tests/tools/test_snapshot_sync_sprint_skeleton.py` 113→116。機制不是上述
+    三類，而是**指派給變數的字串裡的 Markdown 標題**（舊判準看到行首 `#` 就免費＝把
+    Markdown 誤判成 Python 註解；新判準因該字串不是裸 `Expr(Constant)` 而歸斷言）。
+    方向皆收緊、兩支皆未破線。
+    """
     if not path.exists():
         return 0
-    n = 0
-    with path.open(encoding="utf-8", errors="replace") as f:
-        for line in f:
-            s = line.strip()
-            if not s or s.startswith("#"):
-                continue
-            n += 1
-    return n
+    t = _classify_guard_line_taxonomy(path)
+    if t.unparseable:
+        raise UnparseableSourceError(
+            f"{path}: 分類器解析不出來（讀檔失敗或 SyntaxError）⇒ 計價器拒絕給行數。"
+            "回 0 會讓語法錯誤變成零成本的預算優惠，那個失效方向比破線更糟。")
+    return t.assertion
 
 
 def count_raw_lines(path: Path) -> int:
@@ -830,8 +871,9 @@ def check(update_baseline: bool = False, as_json: bool = False) -> int:
                 "（DEF-101-526 實測：4 處 E501 斷行 → +6 行 → LOC 閘門紅）。"
                 "\n       修 E501 請用**行內 noqa**（0 行成本）而非斷行；勿加 "
                 "per-file-ignores（會讓整檔永久失去該規則保護）。"
-                "\n       說明文字請寫成 `#` 註解而非 docstring——docstring 行會被 "
-                "count_loc 計入，寫進 docstring 等於再吃掉預算。"
+                "\n       🔴 這裡曾經教人「說明文字寫成 `#` 而非 docstring」——那句話已由 "
+                "ADR-XPLAT-013 刪除：`count_loc` 現在只算斷言行，兩種敘事載體同價，"
+                "換載體省不到一行。要省預算只有一條路：**少寫斷言**（拆職責／抽共用模組）。"
             )
         if special_violations:
             print("\n[SPECIAL] ADR-SD08-001 SPECIAL_FILES line-count violations:")

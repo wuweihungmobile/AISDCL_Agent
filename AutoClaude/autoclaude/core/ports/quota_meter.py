@@ -40,6 +40,7 @@
 # 本模組刻意只放**純資料 ＋ 純函式**（data tier ≤150），零 I/O、零平台判斷。
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Protocol
@@ -48,7 +49,30 @@ from typing import Protocol
 # 誠實劃界：字串比對永遠是啟發式，R80 已量過「撞線偵測用文字比對」的假陽性問題；
 # 這裡的用途是「別再重試」這種**保守方向**的決策，誤判的代價是早停一步，不是燒額度。
 _LIMIT_MARKERS = ("usage limit reached", "claude usage limit", "quota exceeded",
-                  "rate limit", "spend limit", "resets at")
+                  "rate limit", "spend limit", "resets at",
+                  # R100 P2-C（PRD §8-1 的 AutoClaude 半）：HTTP 那一族的**字**此前不在表內
+                  # ⇒ 「辨識詞表真的認得 429／529」在接線之前先是一個詞表缺口，不是接線缺口。
+                  # 逐字取自實際會出現的形態：SDK 的 `rate_limit_error`／`overloaded_error`
+                  # （`"rate limit"` 帶空白，比不到帶底線的那個）與 HTTP reason phrase。
+                  "rate_limit_error", "overloaded_error", "too many requests")
+
+# 🔴 狀態碼**不能**用子字串比：`"429" in text` 會命中 `line 429`／任何雜湊／
+# `4290 passed`。  # baseline-ok: 反例引文（引的是會誤命中的形態，不是基線值）
+# 兩個 alternation 分支各自要求一側的語境（母體是 CLI 自己的輸出，不是我們造的字串）：
+#   ① 碼在前、限流字彙在 24 個非數字字元內跟上（`429 rate limit exceeded`）
+#   ② 具名前綴在前、碼在 16 個非數字字元內跟上（`API Error: 429 {...}`／`Error code: 529`）
+# 前綴詞彙刻意**不收裸 `error`**：`AssertionError: assert x == 429` 會被它吃成撞線
+# （pytest 輸出會經由 CLI stdout 流過本判準）⇒ 那是假紅，而假紅會讓整道判準被關掉。
+_LIMIT_CODE_RE = re.compile(
+    r"\b(?:429|529)\b(?=[^0-9\n]{0,24}?(?:rate|limit|overload|too\s+many|retry))"
+    r"|(?:api[ _-]?error|http|status|code)[^0-9\n]{0,16}\b(?:429|529)\b", re.I)
+
+# 執行器判定「CLI 拒工」時寫進 failure_reason 的前綴。🔴 它必須自己滿足
+# `is_quota_limit_text()`——那是「執行器 → TokenGuardPlugin.evaluate_quota」這條縫的
+# 全部：plugin 讀的就是 failure_reason，前綴不含任何撞線字彙時 plugin 結構上看不見它。
+# 機械物＝tests/test_r100_quota_refusal_false_positive.py::test_the_refusal_prefix_is_
+# recognised_by_the_same_judgement（縫斷掉就紅）。
+QUOTA_REFUSAL_PREFIX = "[QUOTA_LIMIT] rate limit／撞額度：CLI 輸出顯示本步驟未實際完成"
 
 # 哪些 kind 的額度「等得到」reset。R81 實測：15 個 episode 沒有一個超過 5 小時，
 # 而 weekly/spend 那兩類的 resets_at 距當下可達數天（實測 kind=weekly_all、距 5 天）
@@ -117,7 +141,19 @@ class QuotaMeterPort(Protocol):
 
 
 def is_quota_limit_text(text: object) -> bool:
-    return isinstance(text, str) and any(m in text.lower() for m in _LIMIT_MARKERS)
+    if not isinstance(text, str):
+        return False
+    low = text.lower()
+    return any(m in low for m in _LIMIT_MARKERS) or _LIMIT_CODE_RE.search(low) is not None
+
+
+def quota_refusal(text: object) -> str:
+    # 「CLI 拒工了嗎」的唯一產生器：回**要給上游的 failure_reason**，空字串＝沒有跡證。
+    # 回字串而非 bool，理由同 evaluator.unattended_refusal()：理由若只留在這裡，失效時的
+    # 表徵會退化成一次普通的步驟失敗，而人分不出「模型答錯」與「根本沒跑到」。
+    if not is_quota_limit_text(text):
+        return ""
+    return f"{QUOTA_REFUSAL_PREFIX}｜輸出末段：{str(text)[-400:]}"
 
 
 def reset_instant(resets_at: object) -> datetime | None:
@@ -172,9 +208,13 @@ BAND_UNMEASURED = "unmeasured"
 # 引擎真的有動作的那兩個帶（字面與根層 `quota_policy.py` 的 `BAND_*` 相同，鏡射鎖見上）。
 BAND_PREPARE, BAND_HALT = "prepare", "halt"
 # 量不到時的上限。🔴 **絕不是「不設限」**——本 repo 已判過這條（根層 `AUTOSDD_QUOTA_
-# DEGRADED_CAP` 就是它的既有實作，出廠 4）。此處是引擎側的同一個數字的鏡像；預設值相等
-# 由 `tests/test_r86_pace_contract.py` 讀根層 `ENV_SPEC` 原始碼比對（同既有鏡射鎖體例）。
-DEGRADED_CAP = 4
+# DEGRADED_CAP` 就是它的既有實作）。此處是引擎側的同一個數字的鏡像；預設值相等由
+# `tests/test_r86_pace_contract.py` 讀根層 `ENV_SPEC` 原始碼比對（同既有鏡射鎖體例）。
+# 🔴 R100／PRD §4.1.5 R-4.1.5-1：4 → **2**。立案實測「改前 `degraded_cap ==
+# cap_converge` 為 `True`」⇒「完全量不到」與「量到 70%」在致動器上是同一個 cap，
+# 量不到沒有換來任何收緊。新不變式＝`1 ≤ 本值 ≤ cap_prepare`（根層 cap_prepare 實查 2）。
+# 本值是**被上面那道鏡射鎖拉著走的**：根層動了這裡不動就會紅，那正是它存在的理由。
+DEGRADED_CAP = 2
 
 
 @dataclass(frozen=True)

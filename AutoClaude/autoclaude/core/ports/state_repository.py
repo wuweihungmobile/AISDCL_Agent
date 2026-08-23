@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional, Protocol
+from typing import Protocol
 
 from ...utils.checkpoint_manager import PlaybookCheckpoint
 
@@ -38,7 +38,7 @@ class IStateRepository(Protocol):
         """
         ...
 
-    def load_checkpoint(self, playbook_id: str) -> Optional[PlaybookCheckpoint]:
+    def load_checkpoint(self, playbook_id: str) -> PlaybookCheckpoint | None:
         """⚠️ Deprecated（SD_06 W5-T5-8）：請改用 load_latest_by_playbook(playbook_id)。
 
         保留以維持 v1.x 相容；行為等同 load_latest_by_playbook。
@@ -48,11 +48,11 @@ class IStateRepository(Protocol):
 
     def load_latest_by_playbook(
         self, playbook_id: str,
-    ) -> Optional[PlaybookCheckpoint]:
+    ) -> PlaybookCheckpoint | None:
         """SD_06 W5-T5-7：載入指定 playbook_id 最新一筆 checkpoint。"""
         ...
 
-    def load_by_run_id(self, run_id: str) -> Optional[PlaybookCheckpoint]:
+    def load_by_run_id(self, run_id: str) -> PlaybookCheckpoint | None:
         """SD_06 W5-T5-7：載入指定 run_id 的 checkpoint（三層任務模型）。
 
         File backend 遍歷檔案（用於 dev 環境）；PG backend 走 indexed query。
@@ -82,7 +82,7 @@ class IQueryableStateRepository(IStateRepository, Protocol):
     """
 
     def list_recent_checkpoints(
-        self, since: Optional[datetime] = None, limit: int = 50
+        self, since: datetime | None = None, limit: int = 50
     ) -> list[PlaybookCheckpoint]:
         """列出近期 checkpoint，依 saved_at 倒序排列。"""
         ...
@@ -90,3 +90,16 @@ class IQueryableStateRepository(IStateRepository, Protocol):
 
 class StateRepositoryError(Exception):
     """持久化失敗的統一例外。"""
+
+
+class CheckpointCorruptError(StateRepositoryError):
+    """🔴 R100 P2-C（PRD §8-4 ②）：checkpoint **在**，但讀不回來／checksum 不符。
+
+    為什麼一定要與 `None` 分成兩個回值：`None` 的語意是「沒有 checkpoint」，呼叫端
+    對它的正確反應是**從 step 0 開始**。把「損壞」也回成 `None` ⇒ 一個寫壞的
+    checkpoint 會讓整份 playbook 靜默從頭重跑一次，而人看到的畫面與「第一次跑」
+    完全相同——那正是本例外要消掉的靜默。
+
+    誠實劃界：本例外只覆蓋 File 後端。PG 後端的完整性由 DB 自己保證，其
+    `load_latest_by_playbook` 既有的暫時性失敗 fallback 不在本例外射程內。
+    """

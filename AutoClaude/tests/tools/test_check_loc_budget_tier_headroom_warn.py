@@ -30,11 +30,12 @@ DEF-101-526 記載的治理衝突：在 LOC tier **滿載檔**上「修 lint」�
 
   (1) production band 篩選 `<=` 誤寫成 `<` ⇒ **2 failed / 7 passed**：
       `test_boundary_at_margin_and_one_beyond[None-None]` ＋
-      `test_real_repo_band_is_exercised_on_real_data`。
+      `test_real_repo_bands_match_production_output`（M5 記帳分離後之名；R60 原名
+      `test_real_repo_band_is_exercised_on_real_data`）。
   (2) `TIER_WARN_MARGIN` 注入為 0（runtime patch，不落地改檔）⇒ **2 failed / 7 passed**：
       `test_margin_constant_is_positive_and_documented` ＋
       `test_boundary_at_margin_and_one_beyond[1-True]`。
-      🔴 **真 repo 錨點測試在此注入下不紅**——band 縮成「餘裕恰為 0」後仍非空
+      🔴 **真 repo 一致性測試在此注入下不紅**——band 縮成「餘裕恰為 0」後仍非空
       （現況有滿載檔），且測試側期望值與 production 同步縮小，故此注入抓不到它。
       這正是 R60 原註記失真之處，記於此以免下一輪又照抄。
   (3) tier band 標籤改回 `[WARN]` ⇒ **6 failed / 3 passed**，含
@@ -195,59 +196,112 @@ def test_json_payload_matches_text_mode(
 
 # --- 不變量 5：真 repo 錨點（DEF-101-526 的當事檔）---
 
-def test_real_repo_band_is_exercised_on_real_data(
+def _real_layers() -> dict[str, tuple[list[clb.FileReport], int]]:
+    """三層預警帶的 `(真 repo 報表, 該層 margin)`——取數面唯一的家。"""
+    return {
+        "tier_warn_band": (clb.build_reports(clb.load_overrides()), clb.TIER_WARN_MARGIN),
+        "special_warn_band": (clb.special_file_reports(), clb.SPECIAL_WARN_MARGIN),
+        "root_tools_warn_band": (clb.root_tools_reports(), clb.TIER_WARN_MARGIN),
+    }
+
+
+def _expected_bands() -> dict[str, dict[str, int]]:
+    """測試側**獨立推導**的逐層期望成員（刻意不重用 production 的 band 物件——重用即恆真）。"""
+    return {
+        field: {r.rel_path: r.budget - r.loc for r in reports
+                if r.over_by == 0 and r.budget - r.loc <= margin}
+        for field, (reports, margin) in _real_layers().items()
+    }
+
+
+def test_real_repo_bands_match_production_output(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """預警帶必須在**真 repo 資料**上真的跑起來，且 production 吐出的成員逐筆正確。
+    """真 repo 資料上，production 逐層吐出的預警帶 == 測試側獨立推導的期望成員。
 
-    錨點沿革（本鎖原名 `test_real_repo_full_tier_file_is_actually_caught`）：
+    🔴 **本鎖只驗「一致」，不驗「篩選語意」**（ADR-XPLAT-013 否決權複審 M5 的記帳分離）。
+    沿革與這一刀為什麼要切：
       DEF-101-526 的當事檔 `pg_state_repository.py` 原為 400/400，本鎖曾以
-      `assert target in band and band[target] == 0` 寫死該檔名。ADR-SD07-001 §6.3
-      順位一（刪死碼／收斂重複）把四個 state repository 逐字重複的 deprecation
-      shim 收斂成共用函式之後，該檔降為 393/400（餘裕 7 > TIER_WARN_MARGIN），
-      **合法**離開預警帶，本鎖因此轉紅。
-
-      🔴 改形理由（而非只換一個檔名）：把「某支檔必須是滿載的」寫進斷言，等於讓
-      每一次成功瘦身都把這道鎖打紅，把「減行成功」誤報成「鎖壞了」——那是會養成
-      忽略紅燈習慣的反向誘因。真正該守的不變量是原註記那句「不能只用合成資料證明」：
-      band 的計算必須跑在真 repo 上、真的命中東西、且命中的成員與 production 一致。
-      滿載檔的**存在**不是本鎖的目的，是本 repo 當下的狀態。
-
-      🔴 二次改形（本輪；前一版第二條斷言是**恆真的**）：改形後的第二條斷言寫成
-      `all(0 <= h <= TIER_WARN_MARGIN for h in band.values())`，而 `band` 正是**本函式
-      自己**用 `over_by == 0 and budget - loc <= TIER_WARN_MARGIN` 篩出來的——篩選條件
-      直接蘊涵被斷言的區間（`over_by == 0` ⟺ `loc <= budget` ⟺ `h >= 0`，見
-      `check_loc_budget.py:327` 的 `over_by=max(0, loc - budget)`），故它對**任何** repo
-      狀態、**任何** TIER_WARN_MARGIN 值都不可能紅。等於「兩條真斷言」被換成「一條真
-      ＋一條永遠通過」，而註記還宣稱它有鑑別力——比沒有鎖更糟。
-      本版把比對對象換成 **production 實際吐出的 `--json` band**：測試側自 raw reports
-      獨立算出期望成員，再與 production 的輸出做集合相等比對。production 的篩選語意
-      一漂移（`<=` 誤寫成 `<`、漏排除破線檔、`headroom` 欄位算錯、排序去重寫壞）即紅。
+      `assert target in band` 寫死該檔名；該檔合法瘦身後鎖轉紅 ⇒ 一次改形改成
+      「band 必須在真 repo 上真的命中東西」。二次改形訂正了一條**恆真**斷言
+      （`all(0 <= h <= MARGIN ...)` 被自己的篩選條件蘊涵）。三次改形（ADR-XPLAT-013）
+      把「非空」的分母由單層上移到三層聯集。
+      🔴 四次改形（本次）＝**記帳分離**：三次改形之後，「非空」這個前提從此**永遠**由
+      `special_warn_band` 滿足（它走 raw-line 軸，結構上不受計價改動影響，實測仍有 6 支），
+      而 `tier_warn_band` 與 `root_tools_warn_band` 皆已空 ⇒ 那兩層的「成員比對」退化成
+      **空集合互比**。一支拿空集合互比、卻掛在「真實資料驗收」名下的測試，會讓人誤以為
+      篩選語意在真資料上被驗過。分離後的權責：
+        · **篩選語意**（`<=` vs `<`、破線檔要排除、`headroom` 算式、排序去重）一律由本檔的
+          **合成資料**鎖負責，見 `_SEMANTIC_OWNERS`——那些鎖對空層照樣有牙。
+        · **本鎖**只回答一個問題：production 與獨立推導在**當下的真實資料**上是否一致。
+          因此它**刻意允許任一層為空**（空集合相等是合法通過），不再兼職「母體非空」。
+        · 「整套機制是不是已經沒有任何母體」由 `test_the_warn_band_machinery_has_a_live_population`
+          單獨記帳。
     """
-    reports = clb.build_reports(clb.load_overrides())
-    # 測試側獨立推導期望成員（刻意不重用 production 的 band 物件——重用即恆真）。
-    expected = {
-        r.rel_path: r.budget - r.loc
-        for r in reports
-        if r.over_by == 0 and r.budget - r.loc <= clb.TIER_WARN_MARGIN
-    }
-    assert expected, (
-        "真 repo 的 tier 預警帶為空 —— 本鎖退化為恆真（DEF-101-526 交棒條目要求以"
-        "真實資料驗收）。若 repo 真的已無任何接近 tier 上限的檔，請連同 "
-        "TIER_WARN_MARGIN 的存在意義一起重新評估，不要直接刪本鎖。"
-    )
+    expected = _expected_bands()
     clb.check(as_json=True)
-    emitted = {
-        e["rel_path"]: e["headroom"]
-        for e in json.loads(capsys.readouterr().out)["tier_warn_band"]
-    }
-    assert emitted == expected, (
-        "production 在**真 repo 資料**上吐出的 tier 預警帶與獨立推導的期望成員不符。\n"
-        f"  production 吐出：{emitted}\n"
-        f"  期望（over_by == 0 且餘裕 ≤ {clb.TIER_WARN_MARGIN}）：{expected}\n"
-        "  只出現在 production 側 ⇒ 篩選條件放太寬（如漏排除已破線檔）；\n"
-        "  只出現在期望側 ⇒ 篩選條件太緊（如 `<=` 誤寫成 `<`）；\n"
-        "  成員相同但值不同 ⇒ `headroom` 欄位的算式漂移。"
+    payload = json.loads(capsys.readouterr().out)
+    census = {k: len(v) for k, v in expected.items()}
+    for field, want in expected.items():
+        emitted = {e["rel_path"]: e["headroom"] for e in payload[field]}
+        assert emitted == want, (
+            f"production 在**真 repo 資料**上吐出的 `{field}` 與獨立推導的期望成員不符。\n"
+            f"  production 吐出：{emitted}\n"
+            f"  期望（over_by == 0 且餘裕 ≤ 該層 margin）：{want}\n"
+            f"  逐層母體筆數：{census}\n"
+            "  只出現在 production 側 ⇒ 篩選條件放太寬（如漏排除已破線檔）；\n"
+            "  只出現在期望側 ⇒ 篩選條件太緊（如 `<=` 誤寫成 `<`）；\n"
+            "  成員相同但值不同 ⇒ `headroom` 欄位的算式漂移。"
+        )
+
+
+#: M5 記帳分離的另一半：篩選語意的**合成資料**擁有者。真資料鎖把語意委派給它們，
+#: 而「委派對象還在不在」必須是機械可查的——否則那句委派就是散文，合成鎖被順手刪掉
+#: 之後，真資料鎖仍會綠著並繼續自稱「已驗收」。
+_SEMANTIC_OWNERS: tuple[str, ...] = (
+    "test_boundary_at_margin_and_one_beyond",              # tier 層邊界（margin / margin+1）
+    "test_over_budget_file_goes_to_blocking_tier_not_warn_band",  # 破線檔要排除
+    "test_new_warn_bands_are_non_blocking_and_boundary_exact",    # special／root_tools 兩層邊界
+    "test_new_bands_are_machine_readable_and_match_text_mode",    # headroom 欄位算式
+    "test_all_three_bands_share_one_selection_implementation",    # 三層共用同一份篩選
+)
+
+
+def test_the_warn_band_machinery_has_a_live_population() -> None:
+    """三層預警帶在真 repo 上**同時**為空 ⇒ 這套機制已經沒有任何母體，該紅。
+
+    意圖（Rule 9）：單一層空掉是合法的——一次成功的瘦身或一次計價規則變更就會發生
+    （ADR-XPLAT-013 當輪 `tier_warn_band` 與 `root_tools_warn_band` 同時合法地空了）。
+    三層全空是另一件事：那代表三個 `*_WARN_MARGIN` 常數已經沒有任何檔會落進來，
+    「第一個訊號就是紅」這個設計目標從此不可能達成，而它會靜靜地不出現。
+
+    本鎖同時把「逐層母體」印進失敗訊息——記帳分離之後，哪一層在承重必須是**看得見**的，
+    不能再被聯集蓋掉（那正是四次改形要修的東西）。
+    """
+    census = {k: len(v) for k, v in _expected_bands().items()}
+    assert any(census.values()), (
+        "三層預警帶在真 repo 上同時為空 —— 這套機制已無母體（DEF-101-526 交棒條目要求以"
+        "真實資料驗收）。請連同三個 margin 常數的存在意義一起重新評估，不要直接刪本鎖。"
+        f"\n  逐層母體筆數：{census}"
+    )
+
+
+def test_the_semantic_owners_delegated_to_by_the_real_data_lock_still_exist() -> None:
+    """🔴 記帳分離的封閉性：真資料鎖委派出去的合成鎖，必須真的還在本模組裡。
+
+    意圖（Rule 9）：`test_real_repo_bands_match_production_output` 的 docstring 明文把
+    「篩選語意」委派給合成資料鎖，並據此**放棄**了「母體非空」這個要求。那句委派若只是
+    散文，合成鎖被順手刪掉（或改名）之後，真資料鎖會繼續綠著、繼續自稱已驗收，而
+    `<=` 誤寫成 `<`、破線檔沒排除這類漂移將**完全無人守**——退化方向與二次改形治的
+    「恆真斷言」同型。本鎖讓那個刪除變成會轉紅的事件。
+    """
+    module = sys.modules[__name__]
+    missing = [name for name in _SEMANTIC_OWNERS if not callable(getattr(module, name, None))]
+    assert not missing, (
+        f"真資料鎖委派的合成語意鎖已消失：{missing}。"
+        "要嘛把它們找回來／改名同步進 `_SEMANTIC_OWNERS`，"
+        "要嘛把 `test_real_repo_bands_match_production_output` 的委派說明一起改掉"
+        "——不能只刪鎖不改那句話。"
     )
 
 

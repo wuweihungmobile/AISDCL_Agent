@@ -345,9 +345,13 @@ _TREE_FILE_FLOORS: dict[str, int] = {
     # （pytest／lint-imports／ruff／check_loc_budget／snapshot_sync 全綠）就宣稱「All gates
     # green」，而根層閘門其實 rc=1 且**畫面上沒有任何 FAIL 行**——正是上一段預告的形狀。
     # ⇒ 這一列的教訓不只是「記得重釘」，是「子專案閘門全綠 ≠ 根層閘門綠」。
-    # 🔴 本輪仍有並行包在跑（SA／M6／SD 三包當回合都在改檔）⇒ 收尾單人窗口請在所有包停工後
-    # 重量一次再定案；`AutoClaude/tests` 再多一支檔第三向就會再次判紅，那是它的設計意圖。
-    "AutoClaude/tests": 213,
+    # 🔴 R100 收尾單人窗口重釘 213 → 216（上一段那句「所有包停工後重量一次」就是本行）：
+    # 停工後自量 `AutoClaude/tests` ＝ 271（HEAD 267 ＋ 本輪四支新檔
+    # `test_r100_{boot_self_check,dirty_worktree_rescue,power_loss_protection,
+    # quota_refusal_false_positive}.py`），`int(271×0.8)=216 > 213` ⇒ 第三向逐字指示重釘為
+    # 216，本行照填、零加減推算。方向是**上修＝判準更嚴**。216 對 270／271 兩個檔數皆成立
+    # （`int(270×0.8)=216`），第 272 支會再次判紅——那是它的設計意圖。
+    "AutoClaude/tests": 216,
     # 🔴 R84 包 W5：23 → 24。**非本包造成**——`AISDLC_SDD/scripts/tests` 由 29 支長到 30
     # （並行包新增鎖檔），下限只剩實測的 77%、低於 `TREE_FLOOR_RATIO` 的 80% ⇒
     # `tree_floor_problems()` 的第三向（下限已過期）當場判紅並**逐字**指示重釘為 24，本行

@@ -525,6 +525,27 @@ def degraded_stamp_path(source: str) -> Path:
     return Path(tempfile.gettempdir()) / f"{DEGRADED_STAMP_PREFIX}{safe}.stamp"
 
 
+def degraded_posture(now: datetime | None = None) -> str:
+    """量不到時**這一刻真正的姿態**，由 `decide()` 的回傳值算出來。
+
+    🔴 立案（R100／PRD §4.1.5 R-4.1.5-2）：本函式取代的那一句逐字寫
+    `⇒ 本次不節流，扇出照常放行。`，而同一支檔 `quota_gate()` 內的註解自述「量不到時
+    `decide()` 回 `degraded_cap`（不是不設限、也永不 halt）」⇒ **同一個決策有兩份互相
+    矛盾的敘述，而只有訊息那一份有讀者**（`decide()` 算出來的 cap 不會出現在畫面上）。
+    兩個方向的誤判都真的會發生：operator 以為沒保護而過度手動收斂，或以為有保護而加派。
+
+    🔴 為什麼是**算**而不是「把字串改對」：字串改對只會在下一次調 `degraded_cap` 時再度
+    漂開（那正是本輪要修的那一族）。這裡呼叫的是**同一個** `decide()`，於是姿態字面與
+    致動器結構上不可能不一致——判準因此是「同源」而不是「某句特定文案」。
+    """
+    when = now or datetime.now().astimezone()
+    cap = quota_policy.decide(_blank("posture-probe"), when,
+                              quota_policy.load_policy(policy_env())[0]).cap
+    if cap is None:                       # 結構上到不了；到得了就是 fail-safe 破了
+        return "本次**不設限**（⚠️ 量不到卻不設限＝fail-safe 已失效，請查 decide()）。"
+    return f"本次扇出硬上限收到 {cap}（量不到 ⇒ 收緊，不是放行）。"
+
+
 def note_degraded(source: str, detail: str, *, event: str = "PreToolUse") -> str:
     """額度軸降級時**出一次聲 ＋ 留一行痕跡**；回「這一次真的說出口的那段話」（`""`＝沒說）。
 
@@ -548,7 +569,7 @@ def note_degraded(source: str, detail: str, *, event: str = "PreToolUse") -> str
         "source": source, "detail": detail, "pid": os.getpid(),
         "state": quota_policy.BAND_UNMEASURED})
     msg = (
-        f"⚠️  額度水位**量不到**（source={source}）⇒ 本次不節流，扇出照常放行。\n"
+        f"⚠️  額度水位**量不到**（source={source}）⇒ {degraded_posture()}\n"
         f"   這不是「額度很寬鬆」：{detail}。\n"
         f"   現查：`python tools/lib/quota_meter.py --json`（失敗時會印 reason）；"
         f"痕跡：{trace}\n"
@@ -819,19 +840,24 @@ def quota_gate(payload: dict, *, blocking, latch_read, latch_write,
         refresh_quota_blocking(event=event)
         now = datetime.now().astimezone()
         state = read_quota(now)
+    unmeasured = False
     if not state.usable():
         floor = quota_floor_reading(payload, now)
         if floor is None:
             # 🔴 **不節流 ≠ 不出聲**（SD-B2）：這條路此前是零 stderr、零痕跡，與「額度
             # 很健康」外觀一模一樣。而「不節流」那一半已在 R82 被裁決推翻（見下方 cap）。
-            note_degraded(state.source or "unknown",
-                          "取數失敗，且逐字稿裡沒有未復原的撞線可以當地板", event=event)
+            # 🔴 R100：出聲**延後到 `decide()` 之後**——姿態字面必須是「那一次」決策的
+            # 結果（R-4.1.5-2），在決策之前說話就只能說一句寫死的話。
+            unmeasured = True
         else:
             state = floor  # L3 地板：撞線且未復原 ⇒ 下界 100% ⇒ 落進 halt
     # 🔴 **整支 hook 唯一的判讀入口，恰好呼叫一次**（M10：「函式對了但沒人叫它」是本 repo
     # 反覆記載的『機制蓋好沒接電』）。量不到時 `decide()` 回 `degraded_cap`（不是不設限、
     # 也永不 halt）：R81 複審探針實測「快取過期 600s ＋ 額度 99%」時 42 次派發放行 42。
     decision = quota_policy.decide(state, now, policy)
+    if unmeasured:
+        note_degraded(state.source or "unknown",
+                      "取數失敗，且逐字稿裡沒有未復原的撞線可以當地板", event=event)
     if decision.band == quota_policy.BAND_HALT:
         latch = quota_latch_path()
         # 閂鎖鍵帶 (kind, reset 分鐘)：新的視窗＝重新武裝一次。截到分鐘是因為 `resets_at`

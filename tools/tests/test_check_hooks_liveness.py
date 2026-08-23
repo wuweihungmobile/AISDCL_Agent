@@ -3429,5 +3429,170 @@ class TestNightlyTaskActionsAreWindowless(unittest.TestCase):
         self.assertTrue(windowless_action_problems(bare))
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 執行期證據（本輪 M9）：靜態那三道看不到的那一格
+# ─────────────────────────────────────────────────────────────────────────────
+
+#: 本機全母體實測到的那 217 筆失敗的**逐字形狀**（去識別化：把家目錄換成假路徑）。
+#: 它在本組裡當**綠色對照**用：跨平台配對刻意的 fail-open 必須判成「不是缺陷」，
+#: 否則判準會在 mac 上每一次 hook 都響一次，而那是本 repo 判過的「永遠在響＝沒有警報」。
+_ALIEN_CARRIER_ENOENT = {
+    "type": "hook_non_blocking_error", "hookEvent": "Stop", "exitCode": 1,
+    "stderr": "Failed with non-blocking status code: Error occurred while executing "
+              "hook command: ENOENT: no such file or directory, posix_spawn "
+              "'/fake/repo/.venv/Scripts/pythonw.exe'",
+    "command": "${CLAUDE_PROJECT_DIR}/.venv/Scripts/pythonw.exe "
+               "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py "
+               ".claude/hooks/check_claim_provenance.py",
+}
+
+#: 同一件事的**真**失效：本平台自己那條載具沒跑起來。這一筆與上面那筆在螢幕上的表徵
+#: 完全相同（都是一行 ERROR、工具照跑），差別只在 `command` 指的是哪一種載具。
+_NATIVE_CARRIER_EACCES = {
+    "type": "hook_non_blocking_error", "hookEvent": "PreToolUse", "exitCode": 1,
+    "stderr": "EACCES: permission denied, posix_spawn "
+              "'/fake/repo/.claude/hooks/_hook_launcher.py'",
+    "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py "
+               ".claude/hooks/block_destructive_git.py",
+}
+
+
+class TestRuntimeCarrierEvidenceIsRead(unittest.TestCase):
+    """🔴 **立案：這一格此前完全沒有人守，而它沉默了九天。**
+
+    立案的普查數字與「三道既有機械物為何一條都沒說話」的逐條對號，**唯一真相源＝
+    `tools/lib/hook_wiring.py` 的〈執行期證據〉區塊註解**（本檔刻意不複寫：那些數字是量測
+    值，抄第二份就會漂移，而只有一份會被改）。現查：
+    `grep -n hook_non_blocking_error tools/lib/hook_wiring.py`
+
+    本組守的是**判準本體**（純函式、合成輸入、紅綠雙向）。**刻意不斷言機器狀態**：本機
+    此刻有幾筆 by-design 失敗是量測值，寫進斷言會讓這道鎖在別台機器上假紅。真正會讀本機
+    證據的是 `.claude/hooks/check_claim_provenance.py`（見下一組）。
+    """
+
+    def test_the_by_design_cross_platform_failure_is_not_reported_as_a_defect(self) -> None:
+        """綠色對照：那 217 筆必須全部判成「不是缺陷」，只被**數**起來。"""
+        wiring = _hook_wiring()
+        problems, counts = wiring.runtime_carrier_verdict(
+            [_ALIEN_CARRIER_ENOENT] * 19, on_windows=False)
+        self.assertEqual(problems, [],
+                         "跨平台配對的 fail-open 被判成缺陷 ⇒ 這道判準在 mac 上每次都響")
+        self.assertEqual(counts["by_design_fail"], 19,
+                         "噪音底線必須是**可數的**：九天沒人發現的機制就是它沒有數字")
+        self.assertEqual(counts["native_fail"], 0)
+
+    def test_the_native_carrier_failure_is_reported(self) -> None:
+        """紅：同一種螢幕表徵，但失敗的是本平台自己那條 ⇒ 那個 hook 真的沒跑。"""
+        wiring = _hook_wiring()
+        problems, counts = wiring.runtime_carrier_verdict(
+            [_ALIEN_CARRIER_ENOENT, _NATIVE_CARRIER_EACCES], on_windows=False)
+        self.assertEqual(counts["native_fail"], 1)
+        self.assertEqual(counts["by_design_fail"], 1)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("block_destructive_git.py", problems[0],
+                      "必須指名是**哪一支守衛**沒跑，否則讀者無從行動")
+
+    def test_the_same_evidence_flips_when_the_platform_flips(self) -> None:
+        """同一份證據在 Windows 上判反過來——判準必須是平台的函式，不是硬編一條載具。
+
+        沒有這一條，`native`／`by_design` 的分類可以靠「永遠把 pythonw 當外平台」通過，
+        而那正是 `carrier_liveness_problems()` 只綁一半的病（DEF-101-766：單平台判準
+        不可無條件外推）。
+        """
+        wiring = _hook_wiring()
+        problems, counts = wiring.runtime_carrier_verdict(
+            [_ALIEN_CARRIER_ENOENT, _NATIVE_CARRIER_EACCES], on_windows=True)
+        self.assertEqual(counts["native_fail"], 1)
+        self.assertIn("check_claim_provenance.py", problems[0],
+                      "Windows 上該轉紅的是 pythonw 那條")
+
+    def test_a_carrier_the_repo_does_not_recognise_is_also_a_defect(self) -> None:
+        """有人把條目退回 `python -c …`／換了載具 ⇒ 形態判準看不到「實際跑的是別的東西」。"""
+        wiring = _hook_wiring()
+        problems, counts = wiring.runtime_carrier_verdict([{
+            "type": "hook_non_blocking_error", "hookEvent": "PostToolUse",
+            "command": "python -c import runpy .claude/hooks/x.py"}], on_windows=False)
+        self.assertEqual(counts["alien_fail"], 1)
+        self.assertTrue(problems)
+
+    def test_successes_are_counted_but_never_treated_as_coverage(self) -> None:
+        """🔴 `hook_success` **只有在 hook 真的印字時才落盤**（本機全母體 11,438 筆 success
+        逐筆檢查，stdout／stderr 兩者皆空 **0 筆**；其中只有 14 筆屬於根層 hook，其餘全是
+        會固定印字的 SDD 三支）⇒ 「某個目標零 success」**不能**當成「它沒跑起來」。
+
+        這一條釘的就是那個界線：success 只准進計數欄，不准變成任何「缺席即紅」的判準——
+        否則每一支安靜的守衛都會被判成沒跑，而那是假紅方向。
+        """
+        wiring = _hook_wiring()
+        problems, counts = wiring.runtime_carrier_verdict([{
+            "type": "hook_success", "hookEvent": "Stop", "exitCode": 0,
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py "
+                       ".claude/hooks/check_claim_provenance.py"}], on_windows=False)
+        self.assertEqual(counts["success"], 1)
+        self.assertEqual(problems, [])
+
+    def test_only_hook_result_attachments_are_picked_up(self) -> None:
+        """逐字稿裡絕大多數記錄與 hook 無關；挑錯了會把別的東西餵進判準。"""
+        wiring = _hook_wiring()
+        records = [{"type": "user", "message": {"role": "user"}},
+                   {"type": "system", "attachment": {"type": "todo_changed"}},
+                   {"type": "system", "attachment": _ALIEN_CARRIER_ENOENT}]
+        self.assertEqual(wiring.hook_result_attachments(records),
+                         [_ALIEN_CARRIER_ENOENT])
+        self.assertEqual(wiring.hook_result_attachments([None, "x", 3]), [])
+
+
+class TestTheStopGuardIsTheAutomaticReaderOfThatEvidence(unittest.TestCase):
+    """M9 的另一半：判準有了，**還要有人自動去讀**，否則同樣不是機制。
+
+    選 Stop 那支守衛當讀者不是順手：它是全 repo 唯一「每一則回覆都會跑、而且手上已經
+    有逐字稿」的地方 ⇒ 讀這份證據對它是零額外成本。誠實劃界：它只出聲、不阻斷，也不會
+    讓任何閘門轉紅。
+    """
+
+    def test_the_stop_guard_speaks_when_the_native_carrier_failed(self) -> None:
+        hook = _REPO_ROOT / ".claude" / "hooks" / "check_claim_provenance.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = Path(tmp) / "t.jsonl"
+            transcript.write_text("\n".join(json.dumps(r) for r in [
+                {"type": "system", "attachment": _ALIEN_CARRIER_ENOENT},
+                {"type": "system", "attachment": _NATIVE_CARRIER_EACCES}]) + "\n",
+                encoding="utf-8")
+            payload = json.dumps({"hook_event_name": "Stop", "stop_hook_active": False,
+                                  "last_assistant_message": "收工。",
+                                  "transcript_path": str(transcript)})
+            done = subprocess.run([sys.executable, str(hook)], input=payload,
+                                  capture_output=True, text=True, timeout=60,
+                                  env={**os.environ, "AUTOSDD_TRACE_DIR": tmp},
+                                  encoding="utf-8", errors="replace")
+        self.assertEqual(done.returncode, 0, "本守衛永不阻斷")
+        self.assertIn("block_destructive_git.py", done.stderr,
+                      "本平台自己那條載具失敗，這支讀者沒說話 ⇒ 證據又回到零讀者狀態")
+        self.assertIn("hookSpecificOutput", done.stdout,
+                      "只寫 stderr 等於沒說（exit 0 的 stderr 不進模型 context）")
+
+    def test_the_by_design_failure_alone_keeps_the_stop_guard_quiet(self) -> None:
+        """紅綠自證的另一半：只有跨平台那條失敗時**必須完全安靜**。
+
+        缺這一條，上一條可以靠「永遠出聲」通過，而那支守衛在 mac 上會對每一則回覆都響。
+        """
+        hook = _REPO_ROOT / ".claude" / "hooks" / "check_claim_provenance.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = Path(tmp) / "t.jsonl"
+            transcript.write_text(json.dumps(
+                {"type": "system", "attachment": _ALIEN_CARRIER_ENOENT}) + "\n",
+                encoding="utf-8")
+            payload = json.dumps({"hook_event_name": "Stop", "stop_hook_active": False,
+                                  "last_assistant_message": "收工。",
+                                  "transcript_path": str(transcript)})
+            done = subprocess.run([sys.executable, str(hook)], input=payload,
+                                  capture_output=True, text=True, timeout=60,
+                                  env={**os.environ, "AUTOSDD_TRACE_DIR": tmp},
+                                  encoding="utf-8", errors="replace")
+        self.assertEqual(done.returncode, 0)
+        self.assertEqual(done.stderr.strip(), "",
+                         "跨平台配對的 fail-open 讓守衛出聲了 ⇒ 它會變成每次都響的噪音")
+
+
 if __name__ == "__main__":
     unittest.main()

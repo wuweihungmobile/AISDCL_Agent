@@ -293,9 +293,19 @@ class Amort(NamedTuple):
 # 🔴 誰是速率軸、誰是總量軸**由窗長導出**，不由桶名（同 `windows()` 的紀律）：
 #   最短窗＝速率軸（它是「同時可以燒多快」的限制），最長窗＝總量軸（它是「一共能燒
 #   多少」的限制）。只有一種窗長時攤提不成立（沒有兩個尺度可以換算）⇒ 回 `None`。
-# 同窗長的多軸（今天 `session` 與 `five_hour`、`weekly_all` 與 `seven_day` 各一對）取
-# **最保守**的那一格：用量取 max、長窗剩餘分鐘取 max（窗數愈多 ⇒ 每窗配額愈小 ⇒ 愈緊）、
-# 短窗剩餘分鐘取 min（最早蒸發）。
+# 同窗長的多軸（今天 `session` 與 `five_hour` 一對；長窗那一側是 `weekly_all`、
+# `weekly_scoped`、`seven_day` **三軸**）取**最保守**的那一格：用量取 max、長窗剩餘分鐘取
+# max（窗數愈多 ⇒ 每窗配額愈小 ⇒ 愈緊）、短窗剩餘分鐘取 min（最早蒸發）。
+# 🔴 被誤讀過一次，所以把判詞寫在這裡：長窗那一側**含 `MODEL_SCOPED_KINDS`**，而
+#   `quota_policy._in_cap_gate()`（R98）把同一批軸排除在 **cap 聚合**外。兩邊不同**不是
+#   漏修**：`binding` 與攤提問的是兩個不同的問題，而攤提這一側納入它的方向是**保守側**
+#   ——`remaining = 100 − max(pct)` 與 `amort_relaxed()` 的 `max(pct) < converge` 都只會
+#   因為多一個較高的軸而**更緊**（實測 weekly_scoped 61 在場 allowance=61.8pp、抽掉後
+#   76.1pp）⇒ 它結構上不可能替任何人核准超支，而把排除搬過來是**拿掉一個煞車**＝放寬。
+#   本檔檔頭〈為什麼本輪不動 far×0.5〉已判：「放寬要有證據」，而落款實測該軸
+#   2026-08-15~17 真的從 0 走到 69（是牆，只是近日沒動）⇒ 刻意不排除。
+#   獨立第二理由：排除規則的鍵是**桶名集合**，本段第一句就是「不由桶名」。
+#   方向鎖＝`test_quota_policy.TestAmortizationNamesTheAxisItActuallyUsed`。
 def amortize(named_pcts, minutes, wins, ratio, ratio_note: str = ""):
     """跨窗攤提。`None`＝條件不足（缺換算比／只有一種窗長／沒有可用軸）。
 
@@ -311,13 +321,16 @@ def amortize(named_pcts, minutes, wins, ratio, ratio_note: str = ""):
         return None
     short = [x for x in live if x[3] == rate_window]
     total = [x for x in live if x[3] == total_window]
-    remaining = max(0.0, 100.0 - max(x[1] for x in total))
+    # 🔴 具名的是 **argmax 自己**，不是「同窗長的第一軸」（舊字面在 argmax 不是第一軸時
+    #   說假話）。`max(key=)` 平手取前者 ⇒ 諸軸等值時字面逐字不變；數值面**零改動**。
+    hot_total, hot_short = max(total, key=lambda x: x[1]), max(short, key=lambda x: x[1])
+    remaining = max(0.0, 100.0 - hot_total[1])
     total_minutes = max(x[2] for x in total)
     windows_left = max(1.0, total_minutes / rate_window)
     per_window = remaining / windows_left
     allowance = min(100.0, per_window * float(ratio))
-    used = max(x[1] for x in short)
-    return Amort(short[0][0], total[0][0], remaining, total_minutes, windows_left,
+    used = hot_short[1]
+    return Amort(hot_short[0], hot_total[0], remaining, total_minutes, windows_left,
                  per_window, float(ratio), ratio_note, allowance, used,
                  allowance - used, min(x[2] for x in short), rate_window)
 

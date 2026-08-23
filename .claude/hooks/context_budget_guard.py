@@ -248,12 +248,13 @@ def _has_carrier() -> bool:
 # 給它 fallback stub 等於讓同一份字面有第二個家，而且會用錯的答案靜默通過。
 # `tools/session_resume_planner.py` 以 `guard.<name>` 取用這些符號 ⇒ 這裡把它們 import
 # 回本檔的命名空間，呼叫端與既有回歸鎖一個字都不必改。
-# 🔴 下面 10 個在本檔內一次都不會被呼叫：它們是給 planner 的純再匯出（`guard.
+# 🔴 下面 11 個在本檔內一次都不會被呼叫：它們是給 planner 的純再匯出（`guard.
 # classify_limit` 這種取法），刪掉任一個 planner 會在無人看管的排程路徑上 AttributeError。
 # R82（Q2-01）刪掉了此前替它們背書的 15 行 tuple 常數——它零消費者（全 repo 只命中定義
 # 那一行），真正在做事的只有 lint 那一半，而那件事下一行的 F401 抑制一個字就說得完。
 from quota_limits import (  # noqa: E402,F401
-    LIMIT_SESSION, LIMIT_SPEND, LIMIT_TRANSIENT, LIMIT_UNKNOWN, SYNTHETIC_MODEL,
+    LIMIT_NONE, LIMIT_SESSION, LIMIT_SPEND, LIMIT_TRANSIENT, LIMIT_UNKNOWN,
+    SYNTHETIC_MODEL,
     classify_limit, declared_zone, latest_limit_event, latest_success_at,
     newest_activity_at, parse_reset_at, session_transcripts, unhandled_limit_event)
 

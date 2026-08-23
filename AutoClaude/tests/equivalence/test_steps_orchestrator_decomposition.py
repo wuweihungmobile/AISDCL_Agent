@@ -128,7 +128,18 @@ def test_impl_no_inline_escalation_logic():
 
 
 def test_impl_loc_within_service_tier():
-    """_impl.py 邏輯行 ≤ 500（service tier 上限，依 ADR-SD07-001）"""
+    """_impl.py **斷言行** ≤ 500（service tier 上限，依 ADR-SD07-001）
+
+    🔴 ADR-XPLAT-013 之後 `count_loc()` 的值域換了（由「非空非註解行」變成「斷言行」：
+    docstring／裸字串／整行 `#` 一律免費），本鎖的門檻數字不動、量的東西變了——它現在
+    守的是「這支協調器的**判斷邏輯量**不得超出 service tier」，而不是「檔案有多長」。
+    落地當回合實測 486／500。「換值域沒有放寬本鎖」這句話的母體（M2 訂正，原文寫「全樹零檔」）：
+    閘門計價母體 286 支（`build_reports()` 207 ＋ `root_tools_reports()` 79）
+    的 `新值 > 舊值` 檔數＝**0**；放大到全樹 5557 支 tracked `.py` 則有 **2 支**上升
+    （`tests/tools/test_scaffold_sprint_section.py` 116→118、
+    `tests/tools/test_snapshot_sync_sprint_skeleton.py` 113→116，機制＝指派給變數的字串裡的
+    Markdown 標題被舊判準誤判成 Python 註解而免費），兩支皆未破線 ⇒ 本鎖所在的計價母體零放寬。
+    """
     from tools.check_loc_budget import classify_file, count_loc
 
     impl_path = Path("autoclaude/execution/steps_orchestrator/_impl.py")

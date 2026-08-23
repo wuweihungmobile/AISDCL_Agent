@@ -168,7 +168,7 @@ pre-push（`AUTOCLAUDE_SKIP_HOOKS=1`／`--no-verify`／其他）。
 
 **掌舵者裁決（2026-08-21）：先修剖面軸（把 pgextras／driver 可用性入鍵），修好前維持
 advisory 不登記**——不在軸修好前寫下一個必錯的數字。re-key 需同步 win32 四個既有鍵與
-`_RUNTIME_SKIP_CEILING_MAX`，屬 R99 承接（該檔 docstring §252 亦明記 re-key 屬另案）。
+`_RUNTIME_SKIP_CEILING_MAX`，屬 R99 承接（帳本承接列＝`DEF-200-183`；該檔 docstring §252 亦明記 re-key 屬另案）。
 
 誠實劃界：**不擋 push**。`local_ci_gate.py::check_skip_census` 的 docstring 逐字說明
 本入口對未登記剖面刻意判紅（人在現場可當場入表），而 push 通道走 `--census-only`

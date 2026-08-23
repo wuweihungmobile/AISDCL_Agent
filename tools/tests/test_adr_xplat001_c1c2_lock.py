@@ -695,11 +695,11 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 537,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 5484,
+    "test_adr_xplat001_c1c2_lock.py": 5830,
     "test_archive_defect_log.py": 4008,
     "test_bash32_compat.py": 970,
     "test_bash_probe_spec_contract.py": 983,
-    "test_block_destructive_git_r83.py": 2178,
+    "test_block_destructive_git_r83.py": 2187,
     "test_bootstrap_core.py": 439,
     "test_bootstrap_ps1.py": 160,
     "test_check_defect_log_crossref.py": 3615,
@@ -1029,6 +1029,19 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
     ("R99", 86090, 86097, 7,
      "[非淨減法輪] 收尾併帳（詳見 CrossPlatform_R99_Scan_Findings.md「收尾」節）："
      "freshness 檔依出口③刪 18 行搬遷散文，淨額 +3；本檔自身逐檔漂移 +4；合計 +7。"),
+    ("R100", 86097, 86438, 341,
+     "[非淨減法輪] ADR-XPLAT-013 計價規則改為 assertion-only（Phase 2 方向 (a)）："
+     "本檔新增兩組載體——計價規則變更輪的零緩衝豁免（`pricing_exemption_problems()`）與"
+     "觀察模式 5 輪時效的到期判準（`phase2_review_problems()`），兩者皆含方向鎖與紅綠"
+     "注入自證；`test_block_destructive_git_r83.py` 的 tier 鎖語意訂正 +9。"
+     "合法出口逐條實查：刪死碼不適用（兩組皆為此前不存在的判準面，沒有等量舊判準可退場）、"
+     "抽共用層已做（兩者共用的輪次時鐘抽成具名函式 `live_repin_round()`，避免第二份手抄本）。"
+     "逐檔清單與立案實測見 CrossPlatform_R100_Scan_Findings.md。"),
+    ("R100", 86438, 86452, 14,
+     "[非淨減法輪][同輪追加] 護欄層重釘自身編修：前一列落地後 `--print-guard-lines` 覆核"
+     "發現本檔自己逐檔漂移——來源是兩個重釘數字、新增的稽核列本身、以及 prefix_len／digest"
+     "的更新所佔的行，同 R95~R98 既有體例（合法出口逐條實查：無死碼可刪、純數字與註解"
+     "無可抽結構）。逐檔清單見 CrossPlatform_R100_Scan_Findings.md。"),
 )
 
 
@@ -1175,10 +1188,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 44
+_REPIN_LOG_FROZEN_PREFIX_LEN = 46
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "23c0e49b2c63ed4518e574f6e15cb2925420bb7bb0c0c61dbe474fa45287b657")
+    "423d63fddc0a641ce5388a4b2a1429e9629ae381f1c64bdd7b43b23e55570f26")
 
 
 def repin_log_history_digest(
@@ -1205,7 +1218,8 @@ def repin_log_history_digest(
 #: 帳本仍可能被另外偽造一筆，但那已是**兩個治理面**）。捨棄任務書另一案（數值／敘事
 #: 指紋分離）：兩者仍同檔同 commit，未解決協同改寫，只是拆成兩句自圓其說。
 _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
-    ("R99", "9106b9c01f1c", "23c0e49b2c63", "DEF-101-561"),)
+    ("R99", "9106b9c01f1c", "23c0e49b2c63", "DEF-101-561"),
+    ("R100", "23c0e49b2c63", "423d63fddc0a", "DEF-200-042"),)
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。
 #: 往後指紋每變一次，都要能從本值出發、經 `_FROZEN_PREFIX_REWRITE_LEDGER` 逐列鏈接
@@ -5155,6 +5169,338 @@ def self_invocation_flag_problems(text: str, dispatched: Iterable[str]) -> list[
         for flag in sorted(named - mentioned)
     ]
     return problems
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ADR-XPLAT-013：計價規則變更的**豁免載體** ＋ 觀察模式 5 輪時效的**到期載體**
+# ══════════════════════════════════════════════════════════════════════════════
+# 兩者共用同一個「現在是第幾輪」的時鐘＝`_GUARD_LINES_REPIN_LOG` 末列的輪號（同
+# `repin_cost_ratchet_problems()` 的 `live_round`）。刻意不另開第二個輪次時鐘：本 repo
+# 已有判例（`run_root_unittests.py` 的 MIN_TESTS 註記）記載「在 .py 裡開第二個輪次
+# 時鐘」的代價。
+
+#: 條文三：**計價規則變更輪**的零緩衝豁免到期時點。豁免的內容只有一件事——那一輪不必
+#: 把 `AutoClaude/.loc_baseline` 重釘為改後 total 的實測值（ADR-XPLAT-012 條文五 §3 的
+#: 「當回合實測直接填入、零加減推算、不留成長緩衝」）。掌舵者裁決的理由：換計價器當輪的
+#: total 位移不是「這一輪長了多少」，立刻重釘會把整段位移一次性沒收，而改前餘裕的實測值
+#: 是 12 行（後續包連接線都加不進去）。
+#: 🔴 判準＝`pricing_exemption_problems()`：稽核痕跡走到本值**之後**，`.loc_baseline`
+#: 仍高於實測 total 即紅。出口是一行 diff（`python AutoClaude/tools/check_loc_budget.py
+#: --update`），永遠開著。本常數只准調小（更早到期＝更嚴），刻意不留延期參數——可延期的
+#: 到期日不是到期日（同 `_REPIN_NET_CAP_DUE_ROUND` 的設計）。
+_PRICING_CHANGE_EXEMPT_ROUND = 100
+#: 方向鎖的基準（形狀照 `frozen_ratchet_problems()`：基準是簽入本檔的字面常數，比較在
+#: 任何時點都非退化；若改用 git 導出基準，commit 一落地基準就等於現值）。
+_FROZEN_PRICING_CHANGE_EXEMPT_ROUND = 100
+
+#: 條文五 §6「5 輪時效」的機械載體——ADR-XPLAT-012 自己的〈未解決缺口〉節逐字自陳
+#: 「散文寫了 5 輪、沒有具名常數與判準」，本表即那一項的承接。**append-only**：
+#: `(輪號, 結局標記, 理由)`。結局標記取封閉表 `_PHASE2_OUTCOMES`——§6 只給兩條合法出路
+#: （提出 Phase 2 提案並走複審／具名記錄「決定維持觀察模式」的理由並重新武裝下一個視窗），
+#: 第三個是「已落地」。首列是視窗的起算錨（Phase 1 觀察模式落地的那一輪）。
+_PHASE2_OUTCOMES: tuple[str, ...] = ("[提案]", "[維持觀察]", "[落地]")
+#: 視窗長度＝條文五 §6 的字面「5 輪」。只准調小（視窗更短＝更嚴）。
+_PHASE2_REVIEW_WINDOW = 5
+_FROZEN_PHASE2_REVIEW_WINDOW = 5
+#: 連續「維持觀察」的上限。**這是本表真正的牙**：§6 允許「重新武裝下一個視窗」，若不設
+#: 上限，每一輪貼一行 `[維持觀察]` 就能無限期買下去——那正是 §6 自己寫的「不留無限期
+#: 空轉的觀察機制」要防的事。只准調小（同 `_REPIN_MAX_CONSECUTIVE_RISING_ROUNDS`）。
+_PHASE2_MAX_CONSECUTIVE_DEFERRALS = 1
+_FROZEN_PHASE2_MAX_CONSECUTIVE_DEFERRALS = 1
+_PHASE2_REVIEW_LOG: tuple[tuple[int, str, str], ...] = (
+    (99, "[維持觀察]",
+     "Phase 1 觀察模式落地（ADR-XPLAT-012 條文五 §1，只印不擋）——條文五 §6 的 5 輪視窗"
+     "自本列起算。當輪未提出 Phase 2 提案，該 ADR 的〈狀態〉節逐字寫「Phase 2（阻斷模式）："
+     "未落地、未提案」。"),
+    (100, "[落地]",
+     "Phase 2 方向 (a) 落地（ADR-XPLAT-013）：`check_loc_budget.count_loc()` 改為以分類器的"
+     "斷言桶計價 ⇒ 觀測欄位自此參與 rc／violations，阻斷模式對這一個方向已生效。方向 (b)(c) "
+     "未落地、交棒收尾單人窗口，故視窗依 §6 重新武裝一次（到期輪隨末列前移）。"),
+)
+#: 到期輪由末列導出、不另立常數（一份知識一個家；同 `_REPIN_NET_CAP_SCHEDULE` 的
+#: 「生效點＝首列、現值＝末列，皆由表導出」）。
+_PHASE2_DUE_ROUND = _PHASE2_REVIEW_LOG[-1][0] + _PHASE2_REVIEW_WINDOW
+
+
+def live_repin_round(log: Sequence[tuple[str, int, int, int, str]] | None = None) -> int:
+    """稽核痕跡上的最大輪號＝本檔各到期判準共用的時鐘（推不出回 0）。
+
+    抽成具名函式而不是各處重寫一遍 `max(...)`：`repin_cost_ratchet_problems()` 早已
+    在做同一件事，第二份手抄本就是本檔一路在治的病。
+    """
+    rows = _GUARD_LINES_REPIN_LOG if log is None else log
+    return max((no for no, _d in repin_round_nets(rows)), default=0)
+
+
+def pricing_exemption_problems(
+    latest_round: int | None = None,
+    baseline: int | None = None,
+    total: int | None = None,
+    *,
+    exempt_round: int = _PRICING_CHANGE_EXEMPT_ROUND,
+    frozen_exempt_round: int = _FROZEN_PRICING_CHANGE_EXEMPT_ROUND,
+) -> list[str]:
+    """計價規則變更豁免的到期判準（空＝通過）。純函式，紅綠由合成注入自證。
+
+    三款，各帶方括號標籤（本檔的零串音紀律）：
+      (1) `[量不到]` `baseline`／`total` 任一取不到 —— 取不到就沒有東西可判，而
+          「讓它取不到」正是最省力的滿足方式（同 `repin_log_problems()` 款(1) 的理由）。
+      (2) `[豁免過期]` 稽核痕跡已走到豁免輪**之後**，而 baseline 仍高於實測 total ——
+          那段差額就是「預先發放的成長額度」，正是 ADR-XPLAT-012 條文五 §3 明文禁止的
+          東西。出口＝重釘 baseline（一行 diff），永遠開著。
+      (3) `[豁免被延期]` 豁免輪被調大 —— 本常數只准調小。調大它就是把「豁免只限一輪」
+          這件事本身取消掉，而「口頭承諾＝零機制＝真的空轉」在本 repo 已有實證。
+
+    誠實劃界：本判準保證「豁免不會活過那一輪」，**不保證那一輪的豁免是對的**（那是
+    修憲程序與人審的責任），也不看 `TOTAL_INCREASE_LIMIT` 那 20% 的結構性緩衝——那是
+    ADR-SD07-001 的既有設計，不在本條文射程內。
+    """
+    problems: list[str] = []
+    if exempt_round > frozen_exempt_round:
+        problems.append(
+            f"[豁免被延期] 豁免輪由 {frozen_exempt_round} 推遲為 {exempt_round}——"
+            "本常數只准調小。它不是門檻而是**到期日**：往後挪等於把「只限計價規則變更"
+            "當輪」磨成一個永久豁免，而那正是本載體立案要防的形態（沒有機械載體的豁免"
+            "＝口頭承諾，本 repo 已實證會真的空轉）")
+    if not baseline or not total:
+        problems.append(
+            f"[量不到] baseline={baseline}／total={total} 任一為 0 或 None ⇒ 本判準沒有"
+            "母體可判。現查：`python AutoClaude/tools/check_loc_budget.py --json` 的 "
+            "`baseline`／`total` 兩欄；讀不到檔或掃不到檔一律當失效，不是放行")
+        return problems
+    live = live_repin_round() if latest_round is None else latest_round
+    if live > exempt_round and baseline > total:
+        problems.append(
+            f"[豁免過期] 稽核痕跡已走到 R{live}（豁免輪＝R{exempt_round}，只涵蓋那一輪），"
+            f"而 AutoClaude/.loc_baseline 仍是 {baseline}、高於實測 total {total} "
+            f"⇒ 陳舊餘裕 {baseline - total} 行。ADR-XPLAT-012 條文五 §3 的取值紀律是"
+            "「當回合實測直接填入、零加減推算、不留成長緩衝」，這段差額就是它禁止的"
+            "「預先發放的成長額度」。"
+            "出口只有一個且永遠開著：`python AutoClaude/tools/check_loc_budget.py --update`"
+            "（一行 diff，把 baseline 重釘為當回合實測 total）。"
+            "🔴 反向出口已封：不得調大 _PRICING_CHANGE_EXEMPT_ROUND 讓紅字消失"
+            "（款(3) 的方向鎖只准調小），也不得改大 baseline")
+    return problems
+
+
+def phase2_review_problems(
+    log: Sequence[tuple[int, str, str]] | None = None,
+    latest_round: int | None = None,
+    *,
+    window: int = _PHASE2_REVIEW_WINDOW,
+    frozen_window: int = _FROZEN_PHASE2_REVIEW_WINDOW,
+    max_deferrals: int = _PHASE2_MAX_CONSECUTIVE_DEFERRALS,
+    frozen_max_deferrals: int = _FROZEN_PHASE2_MAX_CONSECUTIVE_DEFERRALS,
+) -> list[str]:
+    """ADR-XPLAT-012 條文五 §6「5 輪時效」的判準（空＝通過）。純函式，紅綠由注入自證。
+
+    六款：
+      (1) `[空表]` 一列都沒有 —— 整張表被刪掉時下面幾條全部無事可判＝fail-open。
+      (2) `[輪號未遞增]` —— 到期輪由**末列**導出，輪號不遞增時「誰在位」的語意不成立。
+      (3) `[結局不在封閉表]` —— §6 只給兩條出路（＋「已落地」），開放式字串等於沒有分類，
+          款(5) 的連續計數就無從判起。
+      (4) `[無理由]` 理由欄過短 —— 「延期」兩個字不是理由（同 `repin_log_problems()` 款(5)）。
+      (5) `[連續空轉]` 連續 `[維持觀察]` 超過上限 —— §6 允許重新武裝視窗，本款讓
+          「每輪貼一行就能無限期買下去」有代價。
+      (6) `[時效逾期]` 稽核痕跡已走過末列 ＋ 視窗 —— 到期而無任何 §6 決議。
+      (7) `[視窗被放寬]`／`[上限被放寬]` 兩個代價常數被調大 —— 只准調小。
+    """
+    rows = list(_PHASE2_REVIEW_LOG if log is None else log)
+    problems: list[str] = []
+    if window > frozen_window:
+        problems.append(
+            f"[視窗被放寬] 視窗由 {frozen_window} 輪放寬為 {window} 輪——只准調小。"
+            "放寬它就是把條文五 §6 的「5 輪」改成一句可以自己改的話")
+    if max_deferrals > frozen_max_deferrals:
+        problems.append(
+            f"[上限被放寬] 連續維持觀察上限由 {frozen_max_deferrals} 調升為 "
+            f"{max_deferrals}——只准調小。調高它＝把「不留無限期空轉的觀察機制」取消掉")
+    if not rows:
+        problems.append(
+            "[空表] _PHASE2_REVIEW_LOG 一列都沒有——條文五 §6 的時效又回到「只寫在散文裡」"
+            "的狀態（該 ADR 自己的〈未解決缺口〉節就是在說這件事）。至少要有起算錨那一列")
+        return problems
+    for (r0, _o0, _x0), (r1, _o1, _x1) in zip(rows, rows[1:]):
+        if r1 <= r0:
+            problems.append(
+                f"[輪號未遞增] R{r0} 之後又出現 R{r1}——到期輪由末列導出，"
+                "輪號不遞增時末列的語意不成立（同 `net_cap_schedule_problems()`）")
+    run = 0
+    for rnd, outcome, reason in rows:
+        if outcome not in _PHASE2_OUTCOMES:
+            problems.append(
+                f"[結局不在封閉表] R{rnd} 的結局標記 {outcome!r} 不在 {_PHASE2_OUTCOMES}"
+                "——封閉表刻意禁止擴表：開放式字串會讓款(5) 的連續計數無從判起")
+        if len(reason.strip()) < 20:
+            problems.append(
+                f"[無理由] R{rnd} 那一列的理由欄只有 {len(reason.strip())} 字——"
+                "「延期」兩個字不是理由；每一次重新武裝都要有人負責解釋")
+        run = run + 1 if outcome == "[維持觀察]" else 0
+        if run > max_deferrals:
+            problems.append(
+                f"[連續空轉] 到 R{rnd} 已連續 {run} 次 `[維持觀察]`，上限是 "
+                f"{max_deferrals} 次——條文五 §6 逐字寫「不留無限期空轉的觀察機制」。"
+                "合法出口：提出 Phase 2 提案（`[提案]`）或讓某個方向真的落地（`[落地]`），"
+                "連續計數即歸零。**不要調高上限**——它只准下修")
+    live = live_repin_round() if latest_round is None else latest_round
+    due = rows[-1][0] + window
+    if live > due:
+        problems.append(
+            f"[時效逾期] 稽核痕跡已走到 R{live}，超過到期輪 R{due}"
+            f"（末列 R{rows[-1][0]} ＋ 視窗 {window} 輪）而 _PHASE2_REVIEW_LOG 沒有新列。"
+            "條文五 §6 給的兩條合法出路：①提出 Phase 2 提案並走條文六的四方複審"
+            "（追加一列 `[提案]`）；②具名記錄「決定維持觀察模式」的理由並重新武裝下一個"
+            "視窗（追加一列 `[維持觀察]`，但受款(5) 的連續上限管）。"
+            "刻意沒有「延期」參數——可延期的到期日不是到期日")
+    return problems
+
+
+def _loc_pricing_facts() -> tuple[int, int]:
+    """現查 `(baseline, total)`——兩個都是量測值，刻意不寫死在本檔。
+
+    走 `AutoClaude/tools/check_loc_budget.py` 的公開面（`read_baseline()` ＋
+    `build_reports()`），與 `test_block_destructive_git_r83.py` 取用該模組的方式同一條路。
+    """
+    sys.path.insert(0, str(_REPO / "AutoClaude" / "tools"))
+    import check_loc_budget as CLB  # noqa: PLC0415
+    baseline = CLB.read_baseline() or 0
+    total = sum(r.loc for r in CLB.build_reports(CLB.load_overrides()))
+    return baseline, total
+
+
+class TestPricingChangeExemptionExpiresOnItsOwn(unittest.TestCase):
+    """🔴 ADR-XPLAT-013 條文三：計價規則變更豁免的**機械載體**。
+
+    WHY 這一格非有不可：本輪的豁免內容是「不把 `.loc_baseline` 重釘為改後實測 total」，
+    釋出的餘裕行數是四位數（現值一律現查 `--json` 的 `cap - total`，本檔不寫死）。散文
+    形態的「只限這一輪」在本 repo 已實證攔阻力為 0（記憶索引那條「承諾沒機制會真的空轉」
+    ＝三小時真空轉的實測）。所以豁免必須自己會過期。
+
+    紅綠對照：今天為綠（豁免輪就是本輪）／走過豁免輪而 baseline 未重釘為紅／
+    重釘之後回綠（鎖有出口）／豁免輪被調大為紅（方向鎖）／量不到為紅（fail-loud）。
+    """
+
+    def test_the_exemption_is_green_only_inside_its_own_round(self) -> None:
+        baseline, total = _loc_pricing_facts()
+        self.assertGreater(total, 0, "掃不到 total ⇒ 本組鎖沒有母體（fail-loud，不是放行）")
+        self.assertEqual(
+            pricing_exemption_problems(baseline=baseline, total=total), [],
+            f"真表今天就被判紅 ⇒ 豁免輪設得太早，本輪自己付不出來；稽核痕跡最新輪＝"
+            f"R{live_repin_round()}、豁免輪＝R{_PRICING_CHANGE_EXEMPT_ROUND}、"
+            f"baseline={baseline}／total={total}")
+
+    def test_the_next_round_cannot_reuse_the_exemption(self) -> None:
+        """🔴 主牙：時鐘走過豁免輪之後，未重釘的 baseline 必紅。"""
+        baseline, total = _loc_pricing_facts()
+        self.assertGreater(
+            baseline, total,
+            "前提已不成立：baseline 已 ≤ total（＝已重釘）⇒ 本注入量不到「未重釘」那一側。"
+            "此時請把 _PRICING_CHANGE_EXEMPT_ROUND 連同本鎖一起重新評估，不要直接刪")
+        self.assertTrue(
+            any("[豁免過期]" in p for p in pricing_exemption_problems(
+                latest_round=_PRICING_CHANGE_EXEMPT_ROUND + 1,
+                baseline=baseline, total=total)),
+            "下一輪還帶著未重釘的 baseline 竟然放行 ⇒ 豁免又退回口頭承諾")
+
+    def test_repinning_the_baseline_is_a_real_exit(self) -> None:
+        _baseline, total = _loc_pricing_facts()
+        self.assertEqual(
+            pricing_exemption_problems(
+                latest_round=_PRICING_CHANGE_EXEMPT_ROUND + 1,
+                baseline=total, total=total), [],
+            "已把 baseline 重釘為實測 total 卻仍判紅 ⇒ 這道鎖沒有出口，"
+            "實務上一定被整個關掉（ARCH-02 判例）")
+
+    def test_postponing_the_exemption_round_is_red(self) -> None:
+        self.assertTrue(
+            any("[豁免被延期]" in p for p in pricing_exemption_problems(
+                latest_round=_PRICING_CHANGE_EXEMPT_ROUND + 1,
+                baseline=1, total=1,
+                exempt_round=_FROZEN_PRICING_CHANGE_EXEMPT_ROUND + 1)),
+            "把豁免輪往後挪竟然放行 ⇒ 一行 diff 就能把單輪豁免磨成永久豁免")
+
+    def test_an_unmeasurable_surface_fails_loud(self) -> None:
+        self.assertTrue(
+            any("[量不到]" in p for p in pricing_exemption_problems(
+                latest_round=_PRICING_CHANGE_EXEMPT_ROUND + 1, baseline=0, total=0)),
+            "量不到竟然當成通過 ⇒ 「讓它量不到」就是最省力的滿足方式（fail-open）")
+
+
+class TestPhase2FiveRoundDeadlineIsMechanical(unittest.TestCase):
+    """🔴 ADR-XPLAT-012 條文五 §6 的 5 輪時效——該 ADR 自陳「零具名常數與判準」的那一項。
+
+    WHY：§6 逐字寫「不留無限期空轉的觀察機制——同本 repo `_REPIN_NET_CAP_DUE_ROUND`
+    的到期義務設計哲學：義務要能被看見、要有到期時點」，而它自己當輪並沒有那個東西。
+    本組鎖就是把那句話兌現成一個會紅的東西。
+    """
+
+    def test_the_live_log_is_green_and_the_due_round_is_derived(self) -> None:
+        self.assertEqual(
+            phase2_review_problems(), [],
+            f"真表今天就被判紅——稽核痕跡最新輪＝R{live_repin_round()}、"
+            f"到期輪＝R{_PHASE2_DUE_ROUND}、末列＝{_PHASE2_REVIEW_LOG[-1][:2]}")
+        self.assertEqual(
+            _PHASE2_DUE_ROUND, _PHASE2_REVIEW_LOG[-1][0] + _PHASE2_REVIEW_WINDOW,
+            "到期輪必須由末列導出——寫死第二份就是「一份知識兩個家」，兩份必然漂移")
+
+    def test_running_past_the_due_round_without_a_decision_is_red(self) -> None:
+        self.assertTrue(
+            any("[時效逾期]" in p for p in phase2_review_problems(
+                latest_round=_PHASE2_DUE_ROUND + 1)),
+            "走過到期輪而表上沒有新列竟然放行 ⇒ 5 輪時效又只是散文")
+
+    def test_appending_a_decision_rearms_the_window(self) -> None:
+        rearmed = (*_PHASE2_REVIEW_LOG,
+                   (_PHASE2_DUE_ROUND + 1, "[提案]",
+                    "合成語料：本輪提出 Phase 2 阻斷模式提案並送條文六的四方複審。"))
+        self.assertEqual(
+            phase2_review_problems(rearmed, latest_round=_PHASE2_DUE_ROUND + 1), [],
+            "照 §6 追加一列決議竟然仍判紅 ⇒ 這道鎖沒有出口")
+
+    def test_two_consecutive_deferrals_are_red(self) -> None:
+        """🔴 本表真正的牙：靠貼 `[維持觀察]` 無限期買下去必須有代價。"""
+        anchor = _PHASE2_REVIEW_LOG[-1][0]
+        deferrals = (
+            (anchor + 1, "[維持觀察]", "合成語料：本輪決定維持觀察模式，理由 A 夠長可過款(4)。"),
+            (anchor + 2, "[維持觀察]", "合成語料：本輪又決定維持觀察模式，理由 B 夠長可過款(4)。"),
+        )
+        self.assertTrue(
+            any("[連續空轉]" in p for p in phase2_review_problems(
+                deferrals, latest_round=anchor + 2)),
+            "連續兩次維持觀察竟然放行 ⇒ 「不留無限期空轉」沒有機械面")
+
+    def test_the_two_cost_constants_only_shrink(self) -> None:
+        self.assertTrue(
+            any("[視窗被放寬]" in p for p in phase2_review_problems(
+                latest_round=0, window=_FROZEN_PHASE2_REVIEW_WINDOW + 1)),
+            "視窗被放寬竟然放行 ⇒ 條文五 §6 的「5 輪」變成一句可以自己改的話")
+        self.assertTrue(
+            any("[上限被放寬]" in p for p in phase2_review_problems(
+                latest_round=0,
+                max_deferrals=_FROZEN_PHASE2_MAX_CONSECUTIVE_DEFERRALS + 1)),
+            "連續空轉上限被調高竟然放行 ⇒ 款(5) 的代價可以一行 diff 取消")
+
+    def test_a_malformed_row_is_red(self) -> None:
+        bad_outcome = ((99, "[隨便寫]", "合成語料：結局標記不在封閉表內，理由欄夠長。"),)
+        self.assertTrue(
+            any("[結局不在封閉表]" in p for p in phase2_review_problems(
+                bad_outcome, latest_round=0)),
+            "開放式結局字串竟然放行 ⇒ 款(5) 的連續計數無從判起")
+        no_reason = ((99, "[維持觀察]", "延期"),)
+        self.assertTrue(
+            any("[無理由]" in p for p in phase2_review_problems(no_reason, latest_round=0)),
+            "「延期」兩個字被當成理由 ⇒ 每一次重新武裝就沒有人負責解釋")
+        self.assertTrue(
+            any("[空表]" in p for p in phase2_review_problems((), latest_round=0)),
+            "空表竟然放行 ⇒ 把整張表刪掉就是最省力的滿足方式（fail-open）")
+
+    def test_a_non_increasing_round_is_red(self) -> None:
+        flat = (*_PHASE2_REVIEW_LOG,
+                (_PHASE2_REVIEW_LOG[-1][0], "[提案]",
+                 "合成語料：輪號與末列相同，末列語意不成立，理由欄夠長可過款(4)。"))
+        self.assertTrue(
+            any("[輪號未遞增]" in p for p in phase2_review_problems(flat, latest_round=0)),
+            "輪號不遞增竟然放行 ⇒ 「到期輪由末列導出」的語意不成立")
 
 
 def _print_guard_lines() -> None:

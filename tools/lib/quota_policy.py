@@ -223,7 +223,13 @@ class Policy:
     cap_converge: int = 4
     cap_prepare: int = 2
     max_fanout: int = 16
-    degraded_cap: int = 4
+    # 🔴 R100／PRD §4.1.5 R-4.1.5-1：出廠值 4 → **2**（＝`cap_prepare`）。立案實測：
+    # 改前 `degraded_cap == cap_converge` ⇒ **`True`**，也就是「完全量不到」與「量到 70%
+    # CONVERGE 帶」在致動器上是同一個 cap ⇒ 量不到沒有換來任何收緊。條文登記的不變式是
+    # `1 ≤ degraded_cap ≤ cap_prepare`，且刻意寫成**對出廠值本身**的不變式（不是「留空
+    # 時偷偷換一個值」——後者會讓 `.env` 顯式寫 4 與留空得到不同結果）。
+    # 上界對任意 env 輸入的強制在 `decide()`（見那裡的 `min(..., p.cap_prepare)`）。
+    degraded_cap: int = 2
     # 🔴 R84／SA-01：三檔 horizon 乘數不再是模組層寫死的字面，而是 Policy 的一部分
     # ⇒ 掌舵者要的「加速多積極／減速多保守」可由 `.env` 兩個鍵調（`ENV_SPEC` 同名項），
     # 而**方向**（far ≤ 1 ≤ near）由 `policy_monotonicity_problems()` 機械守。
@@ -580,8 +586,14 @@ def decide(state: QuotaState, now: datetime, p: Policy,
     """跨軸聚合：`cap = min(逐軸 cap)`＝煞車；`rec = min(base×pace, cap)`＝加速。"""
     readings = axes_of(state, now, p, ratio, ratio_note)
     if not readings:
+        # 🔴 R100／PRD F1：`axes == ()` ⇒ `cap ≤ cap_prepare`。夾在**這裡**而不是只靠出廠
+        # 值，是為了讓 operator 顯式把 `AUTOSDD_QUOTA_DEGRADED_CAP` 調鬆時不變式仍然成立
+        # （`ENV_SPEC` 的上界欄放不下 `cap_prepare`——那是另一個 `Policy` 欄位，不是常數）。
+        # 下界 1 照舊（F3：禁止靜默鎖死）；`band` 必須繼續是 `BAND_UNMEASURED`
+        # （F2：只動 cap 不造假讀數，那是「量不到 ≠ 量到零」與收緊姿態的分界線）。
+        floor = min(max(1, p.degraded_cap), max(1, p.cap_prepare))
         return Decision(
-            cap=max(1, p.degraded_cap), recommended_fanout=max(1, p.degraded_cap),
+            cap=floor, recommended_fanout=floor,
             band=BAND_UNMEASURED, binding=None, per_axis=(),
             reason=state.reason or "unmeasurable")
     # 🔴 R89／憲法裁決：**保險池不得一票否決主力**。掌舵者原話「付費額度是一個保險，

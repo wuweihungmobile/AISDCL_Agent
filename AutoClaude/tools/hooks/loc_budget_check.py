@@ -38,6 +38,7 @@ try:
     from check_loc_budget import (  # type: ignore[import-not-found]
         ABSOLUTE_LIMIT,
         SPECIAL_FILES,
+        UnparseableSourceError,
         classify_file,
         count_loc,
         count_raw_lines,
@@ -67,10 +68,24 @@ def normalize_rel_path(file_path: str) -> Path | None:
 
 
 def check_python_file(rel: Path) -> int:
+    """`.py` 的 tier 檢查（warn-only）。
+
+    🔴 ADR-XPLAT-013 連動：`count_loc()` 對解析不出來的檔改為拋
+    `UnparseableSourceError`（不再靜默回 0）。本 hook 把它翻成一行 WARN 而非讓
+    traceback 直接噴出來——**但仍是 rc=1、仍會說話**：PostToolUse 每次寫入都會跑，
+    靜默 return 0 等於「剛寫壞的檔沒有任何訊號」，那正是回 0 的失效方向。
+    """
     abs_path = PROJECT_ROOT / rel
     if not abs_path.exists():
         return 0
-    loc = count_loc(abs_path)
+    try:
+        loc = count_loc(abs_path)
+    except UnparseableSourceError as exc:
+        print(
+            f"[loc_budget_check] WARN: '{rel.as_posix()}' 無法計價——{exc}",
+            file=sys.stderr,
+        )
+        return 1
     tier, budget = classify_file(rel)
     if loc > ABSOLUTE_LIMIT:
         print(

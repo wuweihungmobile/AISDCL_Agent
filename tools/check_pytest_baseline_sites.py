@@ -83,6 +83,9 @@ _SCAN_FILES = [
     #      正解是「納管 ＋ 行內豁免」兩者並用。
     ".claude/hooks/check_claim_provenance.py",
     "tools/tests/test_claim_provenance_r86.py",
+    # R100：同型第三例（`4290 passed` 是「不可用子字串比」的**反例引文**）。單靠行內
+    #      豁免不足的實測結論見上一段 ⇒ 沿用「納管 ＋ 行內豁免」並用的正解。
+    "AutoClaude/autoclaude/core/ports/quota_meter.py",
     "CLAUDE.md",
     "ONBOARDING.md",
     "useMacWin.md",

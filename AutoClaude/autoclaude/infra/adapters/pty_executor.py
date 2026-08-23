@@ -23,6 +23,7 @@ from ...core.ports.executor import (
     ExecutionEventKind,
     ExecutionOutput,
 )
+from ...core.ports.quota_meter import quota_refusal
 from ...perception.pty_wrapper import CmdLineTooLongError, PtyWrapper
 from ...utils.config import ClaudeConfig, LoopConfig
 from ...utils.logger import _sanitize_log_filename
@@ -142,6 +143,18 @@ class PtyExecutor:
         # COMPLETION 之前），並還原 result 作答案文字（保下游 expected_output_regex 比對零退化）。
         # parse 失敗 → fail-loud warn + text 退回原始輸出（＝純文字舊行為，零退化 fallback）。
         raw_text = "".join(output_lines)
+        # 🔴 R100 P2-C（PRD §8-1）：`completed` 此前**從不檢視輸出內容**——上面四個寫
+        # `completed = False` 的地方全是 hotkey／interrupt／timeout／啟動失敗，而 CLI 撞
+        # 429 之後是**正常退出**：走 `if not pty.is_alive: break`（或 `line is None`）
+        # 那兩條 break，一個字都不動 completed ⇒ 回 completed=True／exit_code=0。
+        # 下游 ShellEvaluator 對「無 expected_output_regex 且無 evaluator_command」的 task
+        # 恆回成功 ⇒ 撞線那一步被記成 ✓。判準本體不在本檔（quota_meter 一個家）。
+        # 母體刻意是 **raw_text**：json 模式下 `text` 會被換成 `parsed["result"]`，
+        # 撞線訊息只在原始 stdout 裡。
+        refusal = quota_refusal(raw_text)
+        if refusal:
+            completed = False
+            logger.error("PtyExecutor: %s（label=%s）", refusal, label or "untitled")
         text = raw_text
         if output_format == "json" and raw_text.strip():
             parsed = self._try_parse_json(raw_text)
@@ -186,6 +199,7 @@ class PtyExecutor:
             text=text,
             exit_code=0 if completed else 1,
             completed=completed,
+            quota_refusal=refusal,
         )
 
     @staticmethod

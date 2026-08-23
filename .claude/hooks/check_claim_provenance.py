@@ -100,6 +100,66 @@ dump hook 實測確認兩個欄位都在，且逐字稿當下**已經含**那一
 ——`spend`／`extra_usage` 會直接印成 `CONSTANT`＝不可能是變因。本判準的訊息因此**指著它**，
 讓查證比宣稱便宜（判準治形態、工具治內容，兩者刻意分工，不是同一份知識住兩個家）。
 
+第三個判準：引述一個**已經過期**的額度讀數（本輪 M1~M8，逃生口自己一個）
+--------------------------------------------------------------------
+立案（使用者原話）：「我沒有每分每秒監督，也不一定會發現」。根 CLAUDE.md 對 `--pace`
+的規定逐字是「值是 (水位%, 距 reset) 的函式——**每次派工前現查，不得記住上次的值**」，
+而此前**零觀測者**：把四小時前的 pace 區塊整塊貼上，沒有任何東西會說一句話。
+
+判準：句子裡出現「軸名 ＋ 百分比」（`PACE_AXES` × `PACE_VALUE_WINDOW` 字元窗），而那個
+讀數的**量測時刻**距今超過該軸自己的 TTL ⇒ 出聲。量測時刻兩條路取得：作者自己貼的
+`量測於=<ISO>`（優先），否則往本場 `tool_result` 回溯找同一個「軸＋值」的錨點、取那筆
+落款時刻。
+
+🔴 **逃生口是算術，不是「在場即抑制」**：貼了 `量測於` 不等於免罰——本判準把那個時刻
+**解析出來算 age**，只有 `age <= TTL` 才靜音。立案是量出來的：先前設計版的抑制器（在場
+即抑制）在本機全母體上**一次都沒有做對過** ⇒ 那不是逃生口，那是隨機靜音器。因此訊息
+一律寫「**重跑** `--pace` 並貼上**新的** 量測於」，絕不寫「貼上量測於即抑制」——後者會把
+讀者訓練成把舊區塊整塊貼上，而那正是本判準要治的行為本身。
+
+🔴 **per-axis TTL 是導出來的，不是挑的**（M5）。落款 SSOT＝`~/.autosdd/traces/quota_burn.jsonl`，
+本輪重跑（`rows=134`，跨 `2026-08-12T22:45:43+08:00` ~ `2026-08-23T20:49:42+08:00`，逐相鄰
+樣本取 `Δpp/Δhr`、reset 造成的下降不計）實測**中位漂移**：
+`five_hour` 27.1357／`session` 26.7305／`seven_day` 2.6315／`weekly_all` 2.5316 pp/hr，
+而 `weekly_scoped`／`spend`／`nimbus_quill`／`extra_usage` 中位 **0.0000**。
+TTL 取「期望漂移 1pp」⇒ `3600 / rate`（見 `PACE_TTL_S`）。
+🔴 中位 0 的四軸**刻意不判**（M5 給的兩條路裡選「照實登記已量測的假紅類別」那條），而且
+**不採信「那個讀數在物理上不會過期」**——同一份重跑實測 `weekly_scoped` 的 p90 是 9.375、
+最大值 31.034 pp/hr（`spend` 最大 9.708），⇒ 它會動，只是中位是 0。把它判成「無上界」
+會是一句在自己的母體上就能證偽的話；不判它是**登記的盲區**，不是「安全」。
+
+🔴 **距離窗與單位都是量出來的**（M6；母體＝本機全部逐字稿的 assistant 文字塊 12,265 個，
+軸出現 1,826 次，重跑腳本見 `docs/06_quality/` 本輪證據檔）：
+  · 「軸 → 最近一個帶 `%` 的值」距離分佈 min=1／p50=2／p75=14／p90=38／max=76 ⇒ 窗寬
+    覆蓋率實測 `<=8` **68.7%**、`<=20` 79.9%、`<=40` **91.6%**、`<=60` 97.8%。取 40：8
+    是挑的（漏掉 31.3%），60 開始把隔句的數字吃進來。**殘餘 8.4% 是登記的漏抓**。
+  · **全角 `％`**：assistant 文字面實測 **1** 次、含 tool_result 的原始語料 **83** 次。
+    覆蓋成本是一個字元（`[%％]`）⇒ 收。**本輪不引用複審那一包的 37**（單機單作者母體，
+    且我這輪量到的是 1／83，不是 37 — 母體定義不同的數字不可互換）。
+  · **全角數字**（`０`~`９`）：assistant 文字面實測 **0** 次 ⇒ 不做正規化（沒有母體支持的
+    覆蓋只是猜）。這是登記的漏抓。
+  · **「軸 ＋ 裸數字」（無單位）刻意不判**：同一份普查裡「軸後最近值只有裸數字」的有 696
+    次（vs 帶 `%` 的 418 次），而它的距離 p50=29（帶 `%` 的是 2）⇒ 那個數字**通常根本不是
+    這個軸的值**（行號、筆數、別的百分比）。判它會讓觸發面 ×2.66 且多數是雜訊，而
+    「一個永遠在響的警報等於沒有警報」本 repo 已有判例。代價是 `session 16`（不寫 `%`）
+    可以規避 ⇒ **登記的規避口**，與下面那個同類。
+
+🔴 **「錨不到＝放行」是登記的盲區，不是通過**（M7）。照實引述一個四小時前的真數字會被
+唸；憑空捏一個讀數則錨不到、放行 ⇒ 反向誘因。判準無法在散文平面上分辨「捏的」與
+「輸出被截斷」，所以本檔的處置是把它**單獨記一類**（`kind="unanchored"`）並讓它可數：
+每次落一列 `claim_freshness.jsonl`，同一次執行讀回累計數塞進送給模型的那則訊息。
+**這不是修好那個盲區，是讓它有數字。**
+
+🔴 **送得進模型的通道只有一條，而它有迴圈**（M1）。stderr ＋ exit 0 **不進模型 context**
+（`tools/lib/platform_utils.py` 的 `emit_to_model` 區塊註解逐字記著 `DEF-200-135`：實測
+1h49m／45 turns 零訊號）；本機全母體 26 筆 Stop attachment 的 `content` 非空數 **0**、
+`stderr` 非空 **26**，且有因果憑證（同一個值在相隔 38 分鐘各響一次 ⇒ 那則訊息不在行為
+迴圈裡）。唯一送得進去的是 stdout 上的 `hookSpecificOutput`——但它會讓模型多跑一回合，
+而那一回合結束又觸發 Stop ⇒ **不夾住就是自己燒額度**（實測一個 prompt 9 次 Stop、9 則零
+內容 assistant 訊息）。⇒ 一律夾在 `stop_hook_active` 上：只有它為假時才發射，實測收斂成
+2 次 Stop、1 次發射、恰好 1 個額外回合。**這個夾具不是優化，沒有它這支守衛會在額度吃緊
+的那一刻製造它要防的傷害。**
+
 誠實劃界（本檔抓不到什麼）
 ------------------------
 · **只看數字**。「全綠」「已驗證」「零損失」這種**不帶值**的判決一律看不到——它們沒有
@@ -117,6 +177,13 @@ dump hook 實測確認兩個欄位都在，且逐字稿當下**已經含**那一
   亂標會在收輪對帳時被逐列核出來。這仍**不是**密封，只是把成本拉高。
 · **證據面只認 `tool_result`**：背景 agent 的完成通知不是 tool_result ⇒ 它帶回來的數字
   一律判成無出處。這是**刻意的**——那正是「採信 agent 回報而未親查」本身。
+· 第三個判準只在**寫出百分號**時看得見（見上方 M6 登記的兩個規避口：裸數字、全角數字）；
+  它也**不判讀數對不對**，只判「你引的這個值是什麼時候量的」。
+· 第三個判準的 TTL 由**本機**落款導出 ⇒ 換一台機器、換一種用法，漂移率就不是這幾個數字。
+  重跑方式寫在 `PACE_DRIFT_MEDIAN_PP_PER_HOUR` 旁註；不重跑就沿用等於把量測值當常數。
+· **執行期證據那一格只讀本場逐字稿**（`runtime_carrier_verdict`）：它看得到「本平台自己
+  那條載具失敗」，看不到「載具跑起來了但目標腳本自己 fail-open 成了 no-op」——後者不留
+  attachment（`hook_success` 只有在 hook 真的印字時才落盤，全母體實測）。
 · 逐字稿讀不到／payload 退化／任何非預期例外 ⇒ **一律 fail-open 靜默放行**
   （`.claude/settings.json` description 記載過的 P0：hook 誤觸 deny 會把所有工具硬鎖死）。
 
@@ -131,6 +198,7 @@ import json
 import os
 import re
 import sys
+from datetime import datetime, timezone
 
 # payload 讀取與 UTF-8 stdio 都住共用層 `tools/lib/platform_utils.py`，形態逐字對齊姊妹檔
 # `block_destructive_git.py`／`lint_powershell_command.py`（同一個 shim、同一個 except 語意）。
@@ -158,6 +226,28 @@ try:
     init_utf8_streams()
 except Exception:  # noqa: BLE001 — 模組層崩潰會繞過 main() 的 fail-open，故必須吞掉
     pass
+
+# 🔴 三個「有就用、沒有就退化」的借用（每一個都各自 try：任一不可達不得拖垮其他兩個，
+# 而三者全部不可達時本檔仍必須是一支會 exit 0 的合法 hook）。
+#   · `emit_to_model`：唯一送得進模型 context 的通道（見檔頭 M1）。取不到就只剩 stderr，
+#     那等於回到 `DEF-200-135` 的狀態——**會靜默失聲**，所以退化版回 False 讓呼叫端知道。
+#   · `hook_wiring`：執行期證據判準（M9）住在佈線唯一真相源那一支，本檔不重寫第二份。
+#   · `trace_dir`：痕跡目錄解析的 SSOT（`AUTOSDD_TRACE_DIR` 逃生口、唯讀時退回暫存）。
+try:
+    from platform_utils import emit_to_model  # type: ignore[import-not-found]
+except Exception:  # noqa: BLE001
+    def emit_to_model(event: str, msg: str) -> bool:  # type: ignore[misc]
+        return False
+
+try:
+    import hook_wiring  # type: ignore[import-not-found]
+except Exception:  # noqa: BLE001
+    hook_wiring = None  # type: ignore[assignment]
+
+try:
+    from endurance_env import trace_dir  # type: ignore[import-not-found]
+except Exception:  # noqa: BLE001
+    trace_dir = None  # type: ignore[assignment]
 
 #: 「只可能來自某次執行」的量化判決形狀。刻意不含不帶值的判決詞（見檔頭誠實劃界）。
 VERDICT_RE = re.compile(
@@ -211,6 +301,176 @@ CONTRAST_RE = re.compile(
     r"(常數|變因|對照組|對照|反例|控制|兩組|證偽|唯一差異|成功組|失敗組|同一個值|沒有變)")
 
 
+#: 額度／pace 軸名。SSOT＝`tools/lib/quota_policy.KNOWN_KINDS`；本檔刻意重寫一份字面而
+#: 不 import 那支檔（本檔的 import 面只准是「有就用、沒有就退化」的三個借用，多一個硬
+#: 相依就多一條 fail-open 路徑），對帳由 `tools/tests/test_claim_provenance_r86.py` 的具名
+#: 斷言做——同一份知識允許住兩個家的唯一條件就是有東西在對帳。
+PACE_AXES = ("session", "five_hour", "seven_day", "weekly_all", "weekly_scoped",
+             "nimbus_quill", "spend", "extra_usage")
+
+#: 本輪重跑實測的**中位**漂移率（pp/hr）。母體＝`~/.autosdd/traces/quota_burn.jsonl`
+#: （rows=134，跨 2026-08-12 ~ 2026-08-23），逐相鄰樣本取 `Δpp / Δhr`、reset 造成的下降不計。
+#: 🔴 **這是量測值不是常數**：換機器／換用法就不是這幾個數字，重跑方式見檔頭 M5 段。
+#: 值為 0 的軸＝中位不動 ⇒ 依檔頭登記**刻意不判**（不是「無上界」，同段有反例）。
+PACE_DRIFT_MEDIAN_PP_PER_HOUR = {
+    "session": 26.7305, "five_hour": 27.1357, "seven_day": 2.6315, "weekly_all": 2.5316,
+    "weekly_scoped": 0.0, "spend": 0.0, "nimbus_quill": 0.0, "extra_usage": 0.0,
+}
+
+#: per-axis TTL（秒）＝「期望漂移 1pp 需要多久」。**導出來的，不是挑的**——這一行就是
+#: 導出式本身，改門檻只能改上面那張量測表（或重新量），不能直接改秒數。
+PACE_TTL_S = {axis: round(3600.0 / rate)
+              for axis, rate in PACE_DRIFT_MEDIAN_PP_PER_HOUR.items() if rate > 0}
+
+#: 軸名到它的百分比值之間允許幾個字元。40＝實測 p90（覆蓋 91.6%）；見檔頭 M6 的覆蓋率表。
+PACE_VALUE_WINDOW = 40
+
+#: 🔴 讀數還必須與 **pace 輸出自己的欄位記號**同行。這不是額外的抑制器，是把觸發面收回
+#: 到本判準自己的立案（「把舊的 pace **區塊**整塊貼上」）上——沒有這一條，判準等於對
+#: 「散文裡提到某個軸名附近有個百分比」發警報，而那個母體裡多數根本不是讀數。
+#:
+#: 🔴 **精確率是逐筆判讀出來的，而且它比本檔另兩個判準弱——照實寫在這裡，不藏**。
+#: 母體＝本機 1,061 支逐字稿／12,279 個 assistant 文字塊／330 個軸綁定百分比讀數
+#: （重跑方式見檔頭 M6 段；逐場重放，以「該則之前」的 tool_result 當證據面、該則自己的
+#: 落款時刻當 now ⇒ 量的是**當時真正的處境**，不是事後視角）：
+#:   · 不收斂（只有「軸 ＋ %」）：stale **71**，抽 12 筆逐筆判讀 **5 真 7 假（41.7%）**
+#:   · ＋ 本行的 pace 欄位記號：stale **34**
+#:   · ＋ 下面的 `_STALE_AWARE_RE`：stale **30**（占讀數 9.1%、占訊息 **0.24%**、≈2.7 筆/天），
+#:     抽 14 筆逐筆判讀 **8 真 6 假（57.1%）**；`unanchored` **4**（1.2%）；
+#:     被「時間戳／錨點自己是新的」**正確靜音 296（89.7%）**。
+#: 🔴 **對照本檔第一個判準的 12/13**：57.1% 明顯較弱。它仍然出貨的三個理由都是既有判例：
+#: ① 只出聲、永不阻斷；② 有自己的逃生口；③ 送模型那條被 `stop_hook_active` 夾成恰好一個
+#: 額外回合。但**這個數字必須留在檔頭讓下一個人重新裁決**，不是被寫成「已驗證」。
+#: 🔴 **殘餘假紅三類照實登記，本輪刻意不再加第四、第五條 regex**（≤14 筆判讀上調參就是
+#: overfitting，而本檔立案的那個「隨機靜音器」正是這樣長出來的）：
+#:   (a) 把讀數當成**分析裡的證據**引述（缺陷敘事、甚至表格裡的**合成測試 fixture 值**）
+#:   (b) **討論 pace 輸出本身**的名詞／格式對照表（同一則訊息會貢獻多筆）
+#:   (c) 作者用**本詞表沒收的說法**敘明它是舊讀數（實例：「那是 06:45 量到的值…中間過了
+#:       約 4 小時」）——這一筆與 `_STALE_AWARE_RE` 同類，只是詞沒收到。
+#: 已實測否決的修法：擋「反引號內／表格列」會同時打掉**主要立案形態**（整塊貼上的
+#: `kind=… band=…` 區塊本來就住在 code fence 裡，抽樣裡多筆真陽性正是它）⇒ 那不是收斂，
+#: 是把召回率換掉。
+_PACE_OUTPUT_TOKEN_RE = re.compile(
+    r"(kind=|band=|binding=|recommended=|pace_index=|cap=|horizon=|量測於|"
+    r"剩\s*\d+\s*分鐘)")
+
+#: 🔴 **作者自己已經說出「這個讀數是舊的」時抑制** —— 與第二個判準的 `CONTRAST_RE` 同一個
+#: 設計模式（本檔已驗證過兩次）：真的做對的人本來就會寫出來，沒做的寫不出來。
+#: 立案是逐筆判讀出來的，不是預防性設計：12 筆抽樣裡有 **3 筆假紅是「正解被處罰」**
+#: —— 作者明文寫「`cap=8` 這個數字現在是過期的」「我 22:32 量到 6%，現在量到 47%」
+#: 「`five_hour` 在我取樣期間由 5% 升到 28%」，也就是**他做的正是本判準要求的事**。
+#: 處罰正解是本檔檔頭已判過的失格條件（「命中它等於處罰正解」），比假紅率本身嚴重。
+_STALE_AWARE_RE = re.compile(
+    r"(過期|重跑|重新量|再量|現在量到|升到|降到|舊值|前值|兩個時刻|相隔|照實記)")
+
+#: 「軸 ＋ 百分比」。`[%％]` 收全角（覆蓋成本一個字元）；裸數字刻意不收（見檔頭 M6）。
+_PACE_READING_RE = re.compile(
+    "(" + "|".join(PACE_AXES) + r")[^\n]{0,%d}?(\d{1,3}(?:\.\d+)?)\s*[%%％]"
+    % PACE_VALUE_WINDOW)
+
+#: 作者自己貼出來的量測時刻。**要求帶 offset**：不帶 offset 的字串算 age 要猜時區，而
+#: naive 本地時間戳在本 repo 是明文禁止持久化的形態（鐵律三的機械物之一）。解析不到就
+#: 當作沒貼 ⇒ 走錨點那條路，方向是「不因為一個壞時間戳而免罰」。
+_MEASURED_AT_RE = re.compile(
+    r"量測於\s*[=＝]\s*(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?"
+    r"(?:Z|[+-]\d{2}:?\d{2}))")
+
+
+def _parse_aware(text: str):
+    """ISO 字串 → **帶 tzinfo** 的 datetime；解析不出或是 naive 一律回 `None`。"""
+    try:
+        when = datetime.fromisoformat(str(text).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    return when if when.tzinfo is not None else None
+
+
+def _anchor_time(axis: str, value: str, stamped: list):
+    """本場工具輸出裡「這個軸綁這個值」最後一次出現的落款時刻（`None`＝全場無錨點）。"""
+    needle = re.compile(re.escape(axis) + r"[^\n]{0,%d}" % PACE_VALUE_WINDOW
+                        + re.escape(value))
+    for when, text in reversed(stamped):
+        if when is not None and needle.search(text):
+            return when
+    return None
+
+
+def stale_pace_hits(claim_text: str, stamped: list, now) -> list[dict]:
+    """`claim_text` 裡引述的**過期**額度讀數，以及錨不到的那一類（`[]`＝沒有）。
+
+    純函式。`stamped`＝本場 `tool_result` 的 `[(落款時刻|None, 文字)]`（時序）；`now` 必須
+    帶 tzinfo。回傳每筆帶 `kind`：`"stale"`＝真的過期（會出聲）／`"unanchored"`＝軸綁定
+    讀數但全場找不到錨點（**登記的盲區，不出聲、只計數**，見檔頭 M7）。
+    """
+    own = None
+    match = _MEASURED_AT_RE.search(claim_text)
+    if match:
+        own = _parse_aware(match.group(1))
+    seen: set = set()
+    out: list[dict] = []
+    for m in _PACE_READING_RE.finditer(claim_text):
+        axis, value = m.group(1), m.group(2)
+        ttl = PACE_TTL_S.get(axis)
+        if ttl is None:
+            continue  # 中位漂移 0 的軸刻意不判（檔頭 M5 登記）
+        start = claim_text.rfind("\n", 0, m.start()) + 1
+        stop = claim_text.find("\n", m.end())
+        line = claim_text[start: stop if stop >= 0 else len(claim_text)]
+        if not _PACE_OUTPUT_TOKEN_RE.search(line):
+            continue  # 同行沒有 pace 輸出的欄位記號 ⇒ 這不是在引述讀數（見上方實測）
+        if _STALE_AWARE_RE.search(line):
+            continue  # 作者自己已經說出這是舊讀數 ⇒ 那是正解，不是違規
+        when = own if own is not None else _anchor_time(axis, value, stamped)
+        if when is None:
+            kind, age = "unanchored", None
+        else:
+            age = int((now - when).total_seconds())
+            if age <= ttl:
+                continue  # 🔴 逃生口是**算術**：時間戳自己是新的才靜音
+            kind = "stale"
+        key = (kind, axis, value)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({"kind": kind, "axis": axis, "value": value, "age_s": age,
+                    "ttl_s": ttl, "source": "self-quoted" if own is not None else "transcript"})
+    return out
+
+
+#: 痕跡檔名。與 `quota_burn.jsonl` 同目錄、同「沒觸發＝檔不長大」語意。
+FRESHNESS_TRACE = "claim_freshness.jsonl"
+
+
+def freshness_trace(hits: list[dict], *, cap: int = 4 * 1024 * 1024) -> tuple[int, int]:
+    """落一列痕跡並**同一次讀回**累計數 → `(累計 stale, 累計 unanchored)`。
+
+    🔴 這個「讀回」就是本通道的自動讀者（檔頭 M8）：本輪否決權複審現查全庫的 trace 消費端只有
+    一支要人記得跑的手動 probe ⇒ 那不是機制。這裡把累計數塞進同一則送給模型的訊息，
+    讓盲區的數字在**沒有人監督**時也會出現在讀者眼前。誠實劃界：它只讀自己寫的那一份、
+    只出聲，**repo 側沒有任何閘門會因為這個數字轉紅**（那需要一個穩定的分母，本機母體不是）。
+    任何 I/O 失敗一律回 `(0, 0)`——痕跡寫不進去絕不可反過來變成守衛的故障源。
+    """
+    stale = sum(1 for h in hits if h.get("kind") == "stale")
+    unanchored = len(hits) - stale
+    if not hits or trace_dir is None:
+        return (stale, unanchored)  # 沒觸發＝檔不長大（本 repo 對痕跡的既有語意）
+    try:
+        path = os.path.join(str(trace_dir()), FRESHNESS_TRACE)
+        row = {"ts": datetime.now(timezone.utc).isoformat(), "stale": stale,
+               "unanchored": unanchored,
+               "axes": sorted({str(h.get("axis")) for h in hits})}
+        with open(path, "a", encoding="utf-8") as handle:
+            handle.write(json.dumps(row, ensure_ascii=True) + "\n")
+        if os.path.getsize(path) > cap:
+            return (stale, unanchored)
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            rows = [json.loads(x) for x in handle if x.strip().startswith("{")]
+        return (sum(int(r.get("stale") or 0) for r in rows),
+                sum(int(r.get("unanchored") or 0) for r in rows))
+    except Exception:  # noqa: BLE001 — 見 docstring 最後一句
+        return (stale, unanchored)
+
+
 def normalize_digits(text: str) -> str:
     """把千分位逗號拿掉，讓 `3,566 passed` 與輸出裡的 `3566` 對得上。"""  # baseline-ok:語料
     return _THOUSANDS_RE.sub("", text)
@@ -262,30 +522,44 @@ def error_literal_mechanism_hits(claim_text: str, tool_output: str) -> list[dict
     return hits
 
 
-def _tool_output_digits(transcript_path: str, byte_cap: int = 32 * 1024 * 1024) -> str:
-    """本場**自己跑出來的**工具輸出（只認 `tool_result`；見檔頭誠實劃界）。
+#: 逐字稿裡「這一列值得 json 解析」的字面前篩。第三項起是 hook 執行結果 attachment 的
+#: `type` 值（M9 的執行期證據面）——刻意用字面前篩而不是全列解析：本機最大逐字稿 6.0 MB，
+#: 每一列都解析會把單次成本從 61ms 推到秒級，而 Stop 是**每一則回覆都會經過**的路徑。
+_INTERESTING = ('"tool_result"', '"hook_success"', '"hook_non_blocking_error"')
+
+
+def _read_transcript(transcript_path: str, byte_cap: int = 32 * 1024 * 1024
+                     ) -> tuple[list, list]:
+    """一次掃完 → `([(落款時刻|None, 工具輸出文字)], [帶 hook attachment 的記錄])`。
 
     `byte_cap` 是防呆而非效能手段：本機最大逐字稿 6.0 MB／全場 51 支掃完 10.3 s
     ⇒ 單場遠在預算內。超過上限時**回空字串會讓每個數字都變成命中**（截斷偏向假紅），
     故超限一律讓呼叫端 fail-open 放行，見 `main()`。
+
+    🔴 讀不到／超上限一律 **raise**，讓 `main()` 走 fail-open 靜默放行。
+    絕不可 `return`空的：空證據面會讓**每一個**數字都變成命中，而那是假紅方向。
+    本檔第一版就是回空字串，被 `tools/tests/test_claim_provenance_r86.py::
+    TestTruncationBiasesTowardsSilenceNotFalseRed` 當場抓出來（逐字稿路徑不存在時
+    噴出一整段違規訊息）——「證據面拿不到」與「證據面裡沒有這個數字」必須分開。
     """
-    # 🔴 讀不到／超上限一律 **raise**，讓 `main()` 走 fail-open 靜默放行。
-    # 絕不可 `return ""`：空證據面會讓**每一個**數字都變成命中，而那是假紅方向。
-    # 本檔第一版就是回空字串，被 `tools/tests/test_claim_provenance_r86.py::
-    # TestTruncationBiasesTowardsSilenceNotFalseRed` 當場抓出來（逐字稿路徑不存在時
-    # 噴出一整段違規訊息）——「證據面拿不到」與「證據面裡沒有這個數字」必須分開。
     size = os.path.getsize(transcript_path)  # OSError ⇒ 交給 main() fail-open
     if size > byte_cap:
         raise ValueError("transcript exceeds byte cap")
-    chunks: list[str] = []
+    stamped: list = []
+    records: list = []
     with open(transcript_path, encoding="utf-8", errors="replace") as handle:
         for line in handle:
-            if '"tool_result"' not in line:
+            if not any(token in line for token in _INTERESTING):
                 continue
             try:
                 record = json.loads(line)
             except ValueError:
                 continue  # 逐字稿邊寫邊讀，尾列半截是常態
+            if not isinstance(record, dict):
+                continue
+            if isinstance(record.get("attachment"), dict):
+                records.append(record)
+            when = _parse_aware(record.get("timestamp"))
             message = record.get("message")
             if not isinstance(message, dict):
                 continue
@@ -297,15 +571,68 @@ def _tool_output_digits(transcript_path: str, byte_cap: int = 32 * 1024 * 1024) 
                     continue
                 inner = block.get("content")
                 if isinstance(inner, str):
-                    chunks.append(inner)
+                    stamped.append((when, inner))
                 elif isinstance(inner, list):
-                    chunks.extend(str(b.get("text") or "") for b in inner
-                                  if isinstance(b, dict))
-    return "\n".join(chunks)
+                    stamped.extend((when, str(b.get("text") or "")) for b in inner
+                                   if isinstance(b, dict))
+    return stamped, records
+
+
+def _tool_output_digits(transcript_path: str, byte_cap: int = 32 * 1024 * 1024) -> str:
+    """本場**自己跑出來的**工具輸出（只認 `tool_result`；見檔頭誠實劃界）。"""
+    return "\n".join(text for _when, text in
+                     _read_transcript(transcript_path, byte_cap)[0])
+
+
+def _say(messages: list[str], event: str, quiet: bool) -> None:
+    """兩條通道各說一次：stderr（人看的 log）＋ 模型 context（唯一進得去的那條）。
+
+    🔴 `quiet` 就是 M1 的夾具：`stop_hook_active` 為真時**只寫 stderr、不發射**。發射會讓
+    模型多跑一回合，而那一回合結束又觸發 Stop ⇒ 不夾就是自己燒額度（實測一個 prompt
+    9 次 Stop、9 則零內容 assistant 訊息）。夾住之後收斂成 2 次 Stop、1 次發射、恰好 1 個
+    額外回合。stderr 那條**保留但不能當憑證**：exit 0 的 stderr 依官方契約不進模型
+    context（`DEF-200-135`，本機 26 筆 Stop attachment 的 content 非空數為 0）。
+    """
+    for msg in messages:
+        print(msg, file=sys.stderr)
+    if quiet:
+        return
+    for msg in messages:
+        emit_to_model(event, msg)
+
+
+def _pace_messages(hits: list[dict]) -> list[str]:
+    """第三個判準的兩則訊息（過期讀數／登記的盲區），無事回 `[]`。"""
+    if not hits:
+        return []  # 無事不碰痕跡檔：`trace_dir()` 會 mkdir、讀回會掃全檔，而 Stop 是每一則
+                   # 回覆都會經過的路徑（「沒觸發＝檔不長大」是本 repo 對痕跡的既有語意）
+    stale = [h for h in hits if h.get("kind") == "stale"]
+    totals = freshness_trace(hits)
+    out: list[str] = []
+    if stale:
+        listed = "／".join(
+            f"{h['axis']}={h['value']}%（量測於 {max(1, (h['age_s'] or 0) // 60)} 分鐘前，"
+            f"TTL {h['ttl_s']} 秒）" for h in stale[:3])
+        out.append(
+            f"🔴 這一則引述了 {len(stale)} 個**已經過期**的額度讀數：{listed}。"
+            f"額度是 (水位%, 距 reset) 的函式，不是可以記住的常數 —— 請**重跑** "
+            f"`python tools/session_resume_planner.py --pace`（零 token）並貼上**新的** "
+            f"「量測於=<時刻>」。⚠️ 把舊的 pace 區塊整塊貼上**不會**讓它變新：本守衛對你貼的"
+            f"那個時刻**算 age**，過期照樣出聲。TTL 由實測漂移導出（1pp／該軸中位 pp/hr，"
+            f"見 PACE_DRIFT_MEDIAN_PP_PER_HOUR）。"
+            f"（判準：.claude/hooks/check_claim_provenance.py；關閉：AUTOSDD_PACE_GUARD_OFF=1）")
+    blind = [h for h in hits if h.get("kind") == "unanchored"]
+    if blind:
+        out.append(
+            f"ℹ️ 另有 {len(blind)} 個軸綁定讀數在本場工具輸出裡**找不到任何錨點**"
+            f"（可能是輸出被截斷，也可能是憑空寫的——判準在散文平面上分不出來）。"
+            f"本守衛對這一類**放行**：這是**登記的盲區，不是通過**。"
+            f"累計（{FRESHNESS_TRACE}）：過期 {totals[0]} 筆／錨不到 {totals[1]} 筆。")
+    return out
 
 
 def main() -> int:
-    # 🔴 兩個判準各自一個逃生口，且**都在讀 payload 之後才分別檢查**：共用一個開關會讓
+    # 🔴 每個判準各自一個逃生口，且**都在讀 payload 之後才分別檢查**：共用一個開關會讓
     # 「我只是想暫時別被唸這一件事」順手把另一件也關掉，而那件事沒有人會注意到。
     try:
         payload = read_hook_payload()
@@ -313,7 +640,13 @@ def main() -> int:
         transcript = str(payload.get("transcript_path") or "")
         if not claim or not transcript:
             return 0
-        output = _tool_output_digits(transcript)
+        event = str(payload.get("hook_event_name") or "Stop")
+        # 🔴 M1 的夾具值。缺欄位時**當成 False**（＝會發射）：CC 只在「這一回合是 Stop hook
+        # 造成的續跑」時才給 True，缺席等同第一次 ⇒ 把缺席當 True 會讓通道永遠不開。
+        quiet = bool(payload.get("stop_hook_active"))
+        stamped, records = _read_transcript(transcript)
+        output = "\n".join(text for _when, text in stamped)
+        messages: list[str] = []
         if not os.environ.get("AUTOSDD_CLAIM_GUARD_OFF"):
             hits = unsourced_verdict_hits(
                 claim, output,
@@ -321,18 +654,16 @@ def main() -> int:
             )
             if hits:
                 listed = "／".join(f"{h['value']}" for h in hits[:4])
-                print(
+                messages.append(
                     f"🔴 這一則有 {len(hits)} 個量化判決數字（{listed}）在本場自己的工具輸出裡"
                     f"找不到出處。若是轉述別包交件，請標 `[他包回報]`；若是自己跑的，請把那次"
                     f"執行的指令與 rc 一起貼出來。（判準：.claude/hooks/check_claim_provenance.py"
-                    f"；關閉：AUTOSDD_CLAIM_GUARD_OFF=1）",
-                    file=sys.stderr,
-                )
+                    f"；關閉：AUTOSDD_CLAIM_GUARD_OFF=1）")
         if not os.environ.get("AUTOSDD_CAUSAL_GUARD_OFF"):
             causal = error_literal_mechanism_hits(claim, output)
             if causal:
                 listed = "／".join(f"`{h['literal']}`" for h in causal[:3])
-                print(
+                messages.append(
                     f"🔴 這一則有 {len(causal)} 句把**錯誤訊息的字面**（{listed}）當成機制"
                     f"結論。那串字是機器吐給你的**症狀**，不是你查出來的**變因**——變因必須"
                     f"有兩個不同的觀測值（R89 事故：那個量連續 15 列都是 100.0＝常數，數學上"
@@ -341,9 +672,24 @@ def main() -> int:
                     f"（逐欄印相異值數與 CONSTANT 標記）；已經對照過就在句子裡寫出來"
                     f"（常數／變因／對照組／反例／成功組／失敗組…）即抑制。"
                     f"（判準：.claude/hooks/check_claim_provenance.py"
-                    f"；關閉：AUTOSDD_CAUSAL_GUARD_OFF=1）",
-                    file=sys.stderr,
-                )
+                    f"；關閉：AUTOSDD_CAUSAL_GUARD_OFF=1）")
+        if not os.environ.get("AUTOSDD_PACE_GUARD_OFF"):
+            messages += _pace_messages(
+                stale_pace_hits(claim, stamped, datetime.now(timezone.utc)))
+        # 🔴 執行期證據（M9）：本檔是全 repo 唯一每一則回覆都會跑、且**手上已經有逐字稿**
+        # 的地方 ⇒ 「hook 載具到底有沒有解析到」這件事的自動讀者只能是它。靜態那三道結構上
+        # 看不到這件事（判準面是 settings.json ＋ 檔案系統，不是執行結果），而執行期證據
+        # 此前**零讀者** —— 本機全母體 217 筆 hook 失敗跨九天沒有任何東西說過一句話。
+        if hook_wiring is not None and not os.environ.get("AUTOSDD_CARRIER_GUARD_OFF"):
+            problems, counts = hook_wiring.runtime_carrier_verdict(
+                hook_wiring.hook_result_attachments(records))
+            if problems:
+                messages.append(
+                    "🔴 本場逐字稿的執行期證據顯示 hook **本平台自己那條載具**失敗了"
+                    f"（{len(problems)} 筆；另有 {counts['by_design_fail']} 筆是跨平台配對"
+                    "刻意的 fail-open、不計）。CC 對載具失敗只記一行 ERROR 就放行 ⇒ 表徵與"
+                    "「修好了」完全相同。逐筆：\n    " + "\n    ".join(problems))
+        _say(messages, event, quiet)
     except Exception:  # noqa: BLE001 — fail-open，見檔頭 P0
         return 0
     return 0

@@ -86,6 +86,7 @@ sys.path.insert(0, str(_REPO_ROOT / ".claude" / "hooks"))
 import context_budget_guard as guard  # noqa: E402  # 水位判定唯一實作（見上方 WHY）
 import quota_escalation as escalation  # noqa: E402  # R81：叫人＋扇出清單（R84／ARCH-10：改裸名）
 import quota_gate  # noqa: E402  # R84／SA-02：`--pace` 的內容產生者（額度判讀唯一入口）
+import quota_reconcile  # noqa: E402  # R100：`--reconcile` 的判準（輸入面出處守衛）
 import schedule_backend  # noqa: E402  # R83：平台差異（schtasks／launchd）唯一收斂點
 import sentinel_lifecycle  # noqa: E402  # R95 修3：哨兵活性欄（armed stamp vs 現查）
 
@@ -557,13 +558,37 @@ def probe_quota(claude: str = "claude", model: str = "haiku") -> dict:
         except OSError:
             pass
     kind = guard.classify_limit(text)
-    is_open = rc == 0 and kind == guard.LIMIT_UNKNOWN
+    # 🔴 R100 止血 B：正向條件用**專屬的正向常數** `LIMIT_NONE`，不再借 `LIMIT_UNKNOWN`。
+    # 那個借用讓同一個常數承載兩個相反語意（`quota_limits` 的契約是「認不出來 ⇒
+    # fail-closed 不得排程等待」，這裡卻當成「沒有撞線字樣 ⇒ 額度已開」）⇒ 限流訊息
+    # 措辭一漂移（分類器認不出）＋ rc 恰為 0，就判成「額度已恢復」而喚醒撞牆。
+    is_open = rc == 0 and kind == guard.LIMIT_NONE
     return {"open": is_open, "kind": kind, "rc": rc, "text": text[:2000]}
 
 
-# 回 `{action, reason, at, state}`，`action ∈ resume|rearm|stop`。
+#: R-4.5.10-2／R-4.5.10-4 的新結局：**確認失敗但刻意不終止**——掛回零成本巡邏。
+#: 🔴 這個字面必須與 `sentinel_decide()` 既有的**五**個 action 全部不同
+#: （`arm_reset`／`disarm`／`escalate`／`patrol`／**`probe`**）。缺的那一個是 `probe`，
+#: 而它恰好是五個裡**唯一會花錢**的（`reset_at` 已過時花一次探測）⇒ 最不能撞名的一個。
+#: 名字互斥由 `test_context_budget_guard.py::PatrolHandbackIsItsOwnOutcomeTest` 以 AST
+#: 現查 `sentinel_decide()` 取集合來守（不得手抄清單——手抄就是第二個家，而本條立案的
+#: 成因正是一份手抄清單漏了 `probe`）。
+PATROL_HANDBACK = "patrol_handback"
+
+# 回 `{action, reason, at, state}`，`action ∈ resume|rearm|stop|patrol_handback`。
 def tick_plan(state: dict, verdict: dict, now: datetime) -> dict:
-    """探測完之後**該做什麼**的唯一判定。純函式——整條續航鏈的大腦，必須可注入。"""
+    """探測完之後**該做什麼**的唯一判定。純函式——整條續航鏈的大腦，必須可注入。
+
+    🔴 R100／PRD §4.5.10（v2.1.8 修憲）：**「解不出 reset」與「探測次數用完」不再是終
+    態。** 兩端此前都通往 `stop`／`abandoned`，而那個終點是**永眠**——伺服器永遠不報時
+    刻就永遠不醒。新條文把兩件事分開：
+      · 「不猜」保留（reset 只能觀測不能算，是本 repo 憲法）；
+      · 「所以只能死」改掉——掛回既有的零成本巡邏（`--arm-sentinel` →
+        `_sentinel_tick()` → `patrol_housekeeping()`，判定＝`sentinel_decide()`）。
+    上限（`MAX_PROBE_ATTEMPTS`）的 WHY 逐字是「沒有硬上限的重排會在額度最緊的時候持續
+    燒」——它要保護的是**不要再燒**，不是**要死掉**。巡邏只讀逐字稿 ＋ 一次 `stat`、
+    **零 token** ⇒ 上限的目的達成，而永眠這個副作用消失。
+    """
     kind, attempts = verdict["kind"], int(state.get("attempts") or 0)
     if verdict["open"]:
         return {"action": "resume", "reason": "探針通過＝額度已恢復", "at": None, "state": "resumed"}  # noqa: E501
@@ -575,13 +600,17 @@ def tick_plan(state: dict, verdict: dict, now: datetime) -> dict:
         return {"action": "rearm", "reason": "伺服器暫時性錯誤，短退避後再探",
                 "at": now + timedelta(seconds=TRANSIENT_RETRY_SECONDS), "state": "waiting"}
     if attempts + 1 >= int(state.get("max_attempts") or MAX_PROBE_ATTEMPTS):
-        return {"action": "stop", "at": None, "state": "abandoned", "reason": f"已探測 {attempts + 1} 次仍未恢復，達上限 ⇒ 硬停並通知人"}  # noqa: E501
+        # 🔴 `at=None` 是規範性的，不是省事：它保證這條路**此後不再產生任何付費探測**
+        # （付費重排走的是 `rearm` ＋ 一個 `at`）。上限要的「不要再燒」因此仍然成立。
+        return {"action": PATROL_HANDBACK, "at": None, "state": "patrolling", "reason": f"已探測 {attempts + 1} 次仍未恢復，達上限 ⇒ 停止付費探測，掛回零成本巡邏兜底"}  # noqa: E501
     fresh = guard.parse_reset_at(verdict["text"], now)
     if fresh is None:
         # 🔴 認不出新的 reset 時刻就**明說**，不准退回固定 5 小時（見 parse_reset_at）。
-        return {"action": "stop", "at": None, "state": "abandoned",
+        # 🔴 R100：理由裡的「拒絕」一字不動（那是憲法那一半），改的只有**結局**。
+        return {"action": PATROL_HANDBACK, "at": None, "state": "patrolling",
                 "reason": "額度仍未恢復，且探針輸出裡解不出新的 reset 時刻 ⇒ "
-                          "拒絕用猜的時間重排（猜出來的排程會醒在錯的時間）"}
+                          "拒絕用猜的時間重排（猜出來的排程會醒在錯的時間）；"
+                          "掛回零成本巡邏，由它偵測到可觀測的 reset 再轉續航排程"}
     return {"action": "rearm", "reason": f"額度仍未恢復，改依新觀測的 reset {fresh}",
             "at": fresh + timedelta(seconds=RESET_SKEW_SECONDS), "state": "waiting"}
 
@@ -629,7 +658,13 @@ def tick_plan(state: dict, verdict: dict, now: datetime) -> dict:
 # 「叫人」的門檻同輪收緊成「有未處理撞線 **且** 有扇出待救」，落在 `escalation.alert`。
 def sentinel_decide(event: dict | None, handled_through: object,
                     idle_seconds: float | None, now: datetime) -> dict:
-    """哨兵醒來後的四分支判定。純函式——預防鏈的大腦，每一支都要能單獨注入。"""
+    """哨兵醒來後的**五**分支判定。純函式——預防鏈的大腦，每一支都要能單獨注入。
+
+    🔴 R100 訂正：此前逐字寫「四分支」而函式體實有 **5** 個相異 `action`
+    （`arm_reset`／`disarm`／`escalate`／`patrol`／`probe`）。少算的那一個是 `probe`
+    ——五個裡唯一**會花錢**的分支 ⇒ 照 docstring 去數的人會把新事件命名成 `probe`
+    而撞名，正好摧毀「掛回巡邏 vs 終止在痕跡上一眼可辨」這件事。
+    """
     if event and str(event.get("timestamp") or "") > str(handled_through or ""):
         if event["kind"] == guard.LIMIT_SPEND:
             return {"action": "escalate", "at": None, "reason": "月度支出上限——等待無效，只有人去 claude.ai 提額才會回來"}  # noqa: E501
@@ -900,6 +935,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--probe-quota", action="store_true", dest="probe_quota",
                         help="花一次最便宜的呼叫問「額度回來了沒」；額度通時 rc=0、耗盡時 rc=1")
     parser.add_argument("--pace", action="store_true", help="**現在能派幾個 agent**（R84／6b）：一行印出 可派數／cap／band／" "最緊那一軸與它距 reset 幾分鐘。只讀額度快取＝零 token；" "快取不可用時每 TTL 至多補量一次（那個端點不是模型呼叫）")  # noqa: E501
+    # 🔴 R100：**輸入面**的出處守衛（唯讀、零 token）。既有守衛全裝在輸出面（宣稱要出處），
+    # 而一份外部貼進來的額度讀數此前沒有任何東西問它「這是現值嗎」——2026-08-23 22:53 的
+    # 假陰性就是這樣來的。判準住 `tools/lib/quota_reconcile.py`（含誠實劃界）。
+    parser.add_argument("--reconcile", help="外部宣稱讀數 vs 落款的相容性判別（唯讀）："
+                        "`<kind>=<pct>%%,<分鐘>m`，例 session=2%%,180m。回 compatible／"
+                        "incompatible／undecidable 三態；undecidable 不折進任一邊")
+    parser.add_argument("--reconcile-at", dest="reconcile_at",
+                        help="--reconcile 用：宣稱時刻（帶 offset 的 ISO 字串，預設＝現在）")
     parser.add_argument("--arm-sentinel", action="store_true", dest="arm_sentinel", help="**預防性**武裝：還沒撞線就掛一支哨兵。不需要已觀測的 reset 時刻，" "到點只讀逐字稿（零 token），偵測到撞線才自動轉成續航排程。" "這是 --arm-endurance 的觸發層")  # noqa: E501
     parser.add_argument("--sentinel-tick", action="store_true", dest="sentinel_tick",
                         help="**哨兵被叫起來的那一支**：留痕 → 讀檔判定 → 續巡／重排到 reset／"
@@ -1217,6 +1260,36 @@ def _resume_tick(args) -> int:
         # 以無 console 的 pythonw 起，那一行沒有任何終端收得到）。載體見 `escalation.alert`。
         append_log(log, "stopped", why=decision["reason"], unregister_rc=_schtasks_remove(state["task_name"]), **escalation.alert(decision["reason"], state))  # noqa: E501
         return 1
+    if decision["action"] == PATROL_HANDBACK:
+        # R-4.5.10-2：不轉終態、不再付費探測，把工作交回**既有**的零成本巡邏。
+        # 🔴 排程要換一支：續航排程是 `-Once`（已觸發、不會再響），而哨兵是重複巡邏的
+        # 那一支 ⇒ 先收掉這一支續航工作，再走 `_arm_sentinel()` 重新武裝。收不掉時
+        # 仍然武裝（多一支死工作比沒有哨兵好，前者可見、後者是永眠）。
+        state["state"] = decision["state"]
+        # 憑證要跟著清：下一行就把那支續航工作刪掉了，留著它的 NextRunTime 就是讓
+        # 查詢載具交出一個過期事實（本 repo 對此有判例）。`patrolling` 不在憑證閘的
+        # 射程內（`armed`／`waiting` 才是），所以清空不會反過來造出一筆違規。
+        state.update(_cleared_credentials())
+        write_relay(plan, state)
+        removed = _schtasks_remove(state["task_name"])
+        # 逐字稿先吃狀態塊記的那一份（哨兵路寫得進去），退回 session id 反查；兩者都拿
+        # 不到時**明說**——`_arm_sentinel()` 會對 `None` 拋 AttributeError，而在一支由
+        # pythonw 起的無人看管行程裡，那個例外的表徵與「掛回去了」完全相同。
+        raw = str(state.get("transcript") or "")
+        seen = Path(raw) if raw else resolve_transcript(state.get("session_id") or "")
+        # 🔴 命名必須交還給哨兵自己：`sentinel_task_name()` 只在 `--task-name` 是預設值
+        # 時才套 `AutoSDD_Sentinel_` 前綴，而本路徑的 `args.task_name` 是**續航**工作的
+        # 名字（schtasks Action 帶進來的）⇒ 不歸位的話新武裝的哨兵會掛在續航名下，
+        # 而 `sentinel_lifecycle.TASK_PREFIX` 的 GC／`liveness_line()` 正是用那個前綴
+        # 篩「哨兵那一種」工作 ⇒ 哨兵對活性檢查隱形＝R80 整晚失明的同一個形狀。
+        # 這一行之後 `args.task_name` 不再被讀（移除用的是 state 裡那份，已先取好）。
+        args.task_name = DEFAULT_TASK_NAME
+        rc = _arm_sentinel(args, seen, plan) if seen is not None else 1
+        if seen is None:
+            print("❌ 掛回巡邏失敗：定位不到逐字稿 ⇒ 哨兵沒有可讀的檔。"
+                  "請人工 `--arm-sentinel --transcript <路徑>`", file=sys.stderr)
+        append_log(log, "patrol_handback", why=decision["reason"], transcript=str(seen or ""), unregister_rc=removed, rearm_rc=rc)  # noqa: E501
+        return rc
     if decision["action"] == "rearm":
         state["state"] = decision["state"]
         if verdict["kind"] != guard.LIMIT_TRANSIENT:
@@ -1390,6 +1463,8 @@ def main(argv: list[str]) -> int:
         return _sentinel_tick(args)
     if args.resume_tick:
         return _resume_tick(args)
+    if args.reconcile:
+        return quota_reconcile.cli(args.reconcile, args.reconcile_at)
     if args.probe_quota:
         verdict = probe_quota(args.probe_command)
         print(f"quota_open={verdict['open']}  kind={verdict['kind']}  rc={verdict['rc']}")

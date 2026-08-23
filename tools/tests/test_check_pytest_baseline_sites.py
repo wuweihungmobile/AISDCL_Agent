@@ -205,6 +205,8 @@ class TestRealRepoConfigPinning(unittest.TestCase):
             {
                 ".claude/hooks/check_claim_provenance.py",
                 "tools/tests/test_claim_provenance_r86.py",
+                # R100：`4290 passed` 是「不可用子字串比」的反例引文，非基線值；納管＋行內豁免並用。
+                "AutoClaude/autoclaude/core/ports/quota_meter.py",
                 "CLAUDE.md",
                 "ONBOARDING.md",
                 "useMacWin.md",

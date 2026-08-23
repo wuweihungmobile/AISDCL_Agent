@@ -7,12 +7,21 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+from contextlib import suppress
 from dataclasses import asdict
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from ...core.ports.state_repository import StateRepositoryError
-from ...utils.checkpoint_manager import PlaybookCheckpoint
+from ...core.ports.state_repository import (
+    CheckpointCorruptError,
+    StateRepositoryError,
+)
+from ...utils.checkpoint_manager import (
+    CHECKSUM_FIELD,
+    PlaybookCheckpoint,
+    checkpoint_digest,
+)
 from ...utils.logger import _sanitize_log_filename
 from ...utils.resume_clock import seconds_until as resume_clock_seconds_until
 from ._deprecation import warn_load_checkpoint_deprecated
@@ -20,6 +29,62 @@ from ._deprecation import warn_load_checkpoint_deprecated
 logger = logging.getLogger("autoclaude.infra.file_state")
 
 _SUFFIX = ".checkpoint.json"
+
+# R100 P2-C（PRD §8-4 第 4 列）：「若 checksum 失敗 → 回退到 STATE_RETAIN_VERSIONS 中最近
+# 的**有效**版本」。沒有這一層，②（CORRUPT 不再靜默回 None）的代價是「壞一份就整場停」——
+# 而 fail-loud 的正解是**先退回上一個驗得過的版本**，不是停機，也不是靜默從 0 重跑。
+# 值域 0..9；0＝不保留（合法，退化成純 fail-loud）。保留檔名＝`<原名>.v1`、`.v2`…（`.v1`
+# 最新）。刻意不進 `*{_SUFFIX}` 的 glob 面 ⇒ list_recent_checkpoints 不會把它們當獨立條目。
+STATE_RETAIN_VERSIONS = max(0, min(9, int(
+    os.environ.get("AUTOCLAUDE_STATE_RETAIN_VERSIONS", "2") or 0)))
+
+
+def retained_paths(p: Path) -> list[Path]:
+    # `.v1` 最新 ⇒ 依編號升冪就是「由新到舊」，回退時第一個驗得過的就是最近的有效版本。
+    return sorted((q for q in p.parent.glob(p.name + ".v*") if q.is_file()),
+                  key=lambda q: int(q.suffix[2:] or 0))
+
+
+def _retain_previous(p: Path, prev: bytes | None, keep: int) -> None:
+    """在 tmp → p 的原子換名**成功之後**才跑（R100 收尾 blocker；取證＝
+    `docs/06_quality/CrossPlatform_R100_Scan_Findings.md` §E 那一輪，承接列 DEF-200-207）。
+
+    修法前這裡是「先把現行 p 推成 .v1，**再** replace」。於是 replace 失敗（ENOSPC
+    不需斷電就到得了）或在兩個換名之間斷電時，主檔的**目錄項不存在** ⇒
+    `load_latest_by_playbook` 的 `not p.exists()` 判成「沒有 checkpoint」而回 None，
+    呼叫端靜默從 step 0 重跑整份 playbook——旁邊那份有效的 `.v1` 一個字都沒被讀到。
+    🔴 它打掉的正是同輪剛修好的「CORRUPT ≠ None」：那個修法讓「損壞」與「沒有」
+    分家，這個順序缺陷讓「有效的舊版本」也變成「沒有」。
+
+    誠實劃界（付出去的代價）：舊主檔改為先讀進記憶體、事後另寫一份，不再是零額外
+    空間的換名 ⇒ 峰值多一份 checkpoint 檔的空間（原註解記載的「不多吃一份空間」
+    正是為了磁碟滿）。這個交換是刻意的：**主檔的目錄項在任何瞬間都必須存在**，其
+    優先序高於保留版本的空間效率；而保留這一段自己遇到 ENOSPC 時只降級、不失敗。
+    """
+    if keep <= 0 or prev is None:
+        return
+    # 刻意不叫 `.v*`：那個名字會落進 retained_paths 的 glob，而它的 int() 會當場炸。
+    stage = p.with_name(f"{p.name}.prev.tmp")
+    try:
+        for n in range(keep, 0, -1):
+            src, dst = p.with_name(f"{p.name}.v{n}"), p.with_name(f"{p.name}.v{n + 1}")
+            if src.exists():
+                if n == keep:
+                    src.unlink()              # 超出保留份數 ⇒ 丟掉最舊的那一份
+                else:
+                    os.replace(src, dst)
+        stage.write_bytes(prev)
+        os.replace(stage, p.with_name(f"{p.name}.v1"))
+    except OSError as exc:
+        # 處置方向由**語意**決定：保留版本是主檔的補網、不是主線 ⇒ 輪替失敗**不得**讓
+        # checkpoint 的儲存跟著失敗（此刻主檔已就位且內容已 fsync），但也不得靜默
+        # （靜默的下場是「以為有退版可用」而其實沒有）。射程刻意是 OSError 而非只有
+        # PermissionError：① 鐵律三「Windows 檔案鎖」那一列——目的檔被別的行程開著時
+        # `os.replace` 回 WinError 5（POSIX 恆成功 ⇒ 開發機上重現不了）；② ENOSPC
+        # ——本族的頭號成因，只捕 PermissionError 時它會穿出去把整次儲存拖紅。
+        with suppress(OSError):
+            stage.unlink(missing_ok=True)
+        logger.warning("checkpoint 保留版本輪替失敗（%s）：本次不保留舊版，主檔已就位", exc)
 
 
 class FileStateRepository:
@@ -41,15 +106,34 @@ class FileStateRepository:
         try:
             p = self._path(playbook_id)
             checkpoint.saved_at = datetime.now().isoformat(timespec="seconds")
+            payload = asdict(checkpoint)
+            # 刻意**不**回寫 `checkpoint.checksum_sha256`：那是對呼叫端傳進來的物件
+            # 動手腳，而 InMemory 後端沒有磁碟、結構上沒有這個值 ⇒ 回寫會讓 DAL 等價
+            # 契約（tests/equivalence/test_sdd_checkpoint_equivalence.py）在**記憶體**
+            # 這一側也失衡，而那道鎖守的是真的東西。值只住磁碟。
+            payload[CHECKSUM_FIELD] = checkpoint_digest(payload)
             tmp_p = p.with_suffix(".tmp")
+            # 舊主檔的內容先讀進記憶體：下一行的 replace 會原子覆蓋掉它，而保留版本
+            # 只准在 replace **成功之後**才動（見 _retain_previous 的 docstring）。
+            prev: bytes | None = None
+            if STATE_RETAIN_VERSIONS > 0:
+                with suppress(OSError):       # 第一次存（檔還不存在）也走這條
+                    prev = p.read_bytes()
             try:
                 with tmp_p.open("w", encoding="utf-8") as f:
-                    json.dump(asdict(checkpoint), f, ensure_ascii=False, indent=2)
+                    json.dump(payload, f, ensure_ascii=False, indent=2)
+                    # 🔴 R100 P2-C（PRD §8-4 ①）：`flush()` 只把資料交到 OS page cache。
+                    # 斷電（正是本項要防的情境）時 rename 的目錄項可能先落地而內容沒有
+                    # ⇒ 得到「檔在、內容截斷」的 checkpoint。R98 曾把「原子寫入已做」記為
+                    # 完成，發現波駁回了那個判讀：`os.replace` 保證的是**換名原子**，
+                    # 與**內容是否已落地**是兩件正交的事，缺 fsync 這一半沒有任何表徵。
                     f.flush()
+                    os.fsync(f.fileno())
                 tmp_p.replace(p)
             except Exception:
                 tmp_p.unlink(missing_ok=True)
                 raise
+            _retain_previous(p, prev, STATE_RETAIN_VERSIONS)
             logger.info(
                 "檢查點已儲存: %s | step_idx=%d [%s] token=%.1f%%",
                 p, checkpoint.step_idx, checkpoint.step_id, checkpoint.peak_token_pct,
@@ -74,19 +158,48 @@ class FileStateRepository:
         """
         p = self._path(playbook_id)
         if not p.exists():
-            return None
+            return None                       # 「沒有 checkpoint」——唯一該回 None 的情形
         try:
-            with p.open(encoding="utf-8") as f:
-                data = json.load(f)
+            return self._read_verified(p)
+        except CheckpointCorruptError as first:
+            for older in retained_paths(p):
+                try:
+                    cp = self._read_verified(older)
+                except CheckpointCorruptError:
+                    continue
+                # loud：退版是**降級**不是正常路徑，靜默退版會讓人以為讀到的是最新進度。
+                logger.error("checkpoint 損毀（%s），已退回保留版本 %s（step_idx=%d）：%s",
+                             p.name, older.name, cp.step_idx, first)
+                return cp
+            raise
+
+    def _read_verified(self, p: Path) -> PlaybookCheckpoint:
+        # 🔴 R100 P2-C（PRD §8-4 ②）：**檔在但讀不回來 ≠ 沒有 checkpoint**。
+        # 修法前這裡是 `except Exception: return None`，於是一個截斷的 JSON 在呼叫端的
+        # 外觀與「第一次跑」完全相同 ⇒ 靜默從 step 0 重跑一整份 playbook。
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
             cp = PlaybookCheckpoint(**data)
-            logger.info(
-                "已載入檢查點: step_idx=%d [%s]，儲存於 %s",
-                cp.step_idx, cp.step_id, cp.saved_at,
-            )
-            return cp
         except Exception as exc:
-            logger.warning("檢查點載入失敗 (%s): %s，將從頭開始", p, exc)
-            return None
+            raise CheckpointCorruptError(
+                f"checkpoint 檔存在但無法還原（{type(exc).__name__}: {exc}）：{p}。"
+                "🔴 這**不是**「沒有 checkpoint」——不得靜默從 step 0 重跑；"
+                "請人工檢視該檔（或用 --fresh 明確表示要放棄它）") from exc
+        stored = data.get(CHECKSUM_FIELD) or ""
+        if not stored:
+            logger.warning(
+                "檢查點無 %s 欄位（本工具 R100 之前寫的舊檔）：%s。"
+                "完整性**無法驗證**——照載入，但這一格是誠實劃界不是通過",
+                CHECKSUM_FIELD, p)
+        elif stored != checkpoint_digest(data):
+            raise CheckpointCorruptError(
+                f"checkpoint checksum 不符：{p}（期望 {stored}，"
+                f"實測 {checkpoint_digest(data)}）。內容在寫入後被改動或寫入未完成")
+        logger.info(
+            "已載入檢查點: step_idx=%d [%s]，儲存於 %s",
+            cp.step_idx, cp.step_id, cp.saved_at,
+        )
+        return cp
 
     def load_by_run_id(self, run_id: str) -> PlaybookCheckpoint | None:
         """SD_06 W5-T5-7：遍歷 checkpoint 檔案找符合 run_id 的紀錄。
@@ -103,7 +216,10 @@ class FileStateRepository:
                 if data.get("run_id") == run_id:
                     return PlaybookCheckpoint(**data)
             except Exception as exc:
-                logger.debug("load_by_run_id | 跳過損毀檔案 %s: %s", p, exc)
+                # R100 P2-C：由 debug 升為 warning。這條路徑是**跨 playbook 掃描**，
+                # 一個壞檔不該中止整個查詢；但「跳過了一個壞檔」必須看得見——
+                # debug 級在生產組態下等於沒有訊號。
+                logger.warning("load_by_run_id | 跳過損毀檔案 %s: %s", p, exc)
                 continue
         return None
 
@@ -134,7 +250,13 @@ class FileStateRepository:
         results: list[PlaybookCheckpoint] = []
         for p in self._dir.glob(f"*{_SUFFIX}"):
             playbook_id = p.stem.replace(".checkpoint", "")
-            cp = self.load_checkpoint(playbook_id)
+            try:
+                cp = self.load_checkpoint(playbook_id)
+            except CheckpointCorruptError as exc:
+                # 列舉面（診斷用）刻意不讓一個壞檔炸掉整張清單，但必須 loud：
+                # 續作路徑（load_latest_by_playbook）那一側照樣 raise，兩者不同軸。
+                logger.error("list_recent_checkpoints | 損毀的 checkpoint：%s", exc)
+                continue
             if cp is None:
                 continue
             if since:

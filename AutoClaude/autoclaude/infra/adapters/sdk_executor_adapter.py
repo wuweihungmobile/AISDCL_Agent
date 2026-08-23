@@ -36,6 +36,7 @@ from ...core.ports.executor import (
     ExecutionEventKind,
     ExecutionOutput,
 )
+from ...core.ports.quota_meter import quota_refusal
 from ...plugins.token_guard.thresholds import verify_act_first_ordering
 
 logger = logging.getLogger(__name__)
@@ -188,13 +189,23 @@ class SdkExecutorAdapter:
                 exit_code = exit_code or 1
             await self._emit_token_pct(client, on_event, seq)
         text = "".join(texts)
+        # R100 P2-C（PRD §8-1）：與 PtyExecutor 同一個洞——`completed` 只由 interrupt／
+        # timeout 兩條路寫成 False，撞 429 的訊息會原樣進 text 而 completed 留在 True
+        # （本檔既有測試 `assert out.completed is True  # 只是 is_error` 就是那個外觀）。
+        # 修在兩個後端都要做：只修一邊等於「換 backend 就繞過」。判準同一個家。
+        refusal = quota_refusal(text)
+        if refusal:
+            completed = False
+            exit_code = exit_code or 1
+            logger.error("SdkExecutorAdapter: %s（label=%s）", refusal, label or "untitled")
         self._emit(
             on_event,
             ExecutionEventKind.COMPLETION,
             {"exit_code": exit_code, "completed": completed, "text_len": len(text)},
             seq,
         )
-        return ExecutionOutput(text=text, exit_code=exit_code, completed=completed)
+        return ExecutionOutput(text=text, exit_code=exit_code, completed=completed,
+                               quota_refusal=refusal)
 
     def _map_message(
         self,

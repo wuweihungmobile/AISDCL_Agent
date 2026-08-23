@@ -207,7 +207,20 @@ class PlaybookKernel:
                                                      last_failure_reason)
             if halt_outcome is not None:
                 return halt_outcome
-            failure_reason, _eval_out, _exit = self._eval.evaluate(task, output.text)
+            # 🔴 R100 P2-C（PRD §8-1 的 AutoClaude 半，缺陷的第二半）：執行器說「CLI 拒工」
+            # 時**不得**再問 evaluator。ShellEvaluator 對「無 expected_output_regex 且無
+            # evaluator_command」的 task 恆回 (None, "", 0)＝成功 ⇒ 撞線那一步被記成 ✓、
+            # ADVANCE、下一步照跑。改成把拒工理由當 failure_reason 灌進**既有**失敗路徑：
+            # 其後 POST_ATTEMPT 的 payload 帶著它 → TokenGuardPlugin.evaluate_quota 的
+            # `is_quota_limit_text(failure_reason)` 命中 → request_halt。
+            # ⇒ 「halt 還是重試」這個**決策**留在 plugin（Everything is a Plugin 不變），
+            # Kernel 只是停止製造假成功。isinstance 那一半是給注入 MagicMock 執行器的既有
+            # 測試用的：Mock 的任意屬性都是 truthy，不判型會把它們全部推進撞線分支。
+            refusal = getattr(output, "quota_refusal", "")
+            if isinstance(refusal, str) and refusal:
+                failure_reason, _eval_out, _exit = refusal, output.text[-2000:], 1
+            else:
+                failure_reason, _eval_out, _exit = self._eval.evaluate(task, output.text)
 
             if failure_reason is None:
                 completed_ids.append(task.step_id)

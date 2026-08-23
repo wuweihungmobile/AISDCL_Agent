@@ -20,6 +20,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -38,6 +39,13 @@ G = _load()
 
 #: 一段「本場真的跑過」的工具輸出。判準比對的是**值**，所以這裡只要含那些數字即可。
 _OWN_OUTPUT = "3748 passed, 146 skipped\nrc=0\n377 passed\n44 skipped"  # baseline-ok:語料
+
+#: `PACE_AXES` 裡不在 `quota_policy.KNOWN_KINDS` 的軸——**登記的例外，只准變小**。
+_AXES_OUTSIDE_KNOWN_KINDS = frozenset({"nimbus_quill"})
+
+#: 第三個判準的固定「現在」。用固定時刻而不是 `datetime.now()`：age 是判準的輸入，
+#: 讓它隨牆上時鐘漂移＝把測試變成非決定性的（本 repo 對脆弱綠有判例）。
+_NOW = datetime(2026, 8, 23, 12, 0, tzinfo=UTC)
 
 
 # 🔴 **刻意不在本檔驗「hook 檔存在」與「Stop 兩個載具都在」**（本批以雙向注入實測後移除）。
@@ -334,6 +342,275 @@ class TestTheCausalEscapeHatchIsItsOwn(unittest.TestCase):
                               encoding="utf-8", errors="replace")
         self.assertEqual(done.returncode, 0)
         self.assertNotIn("錯誤訊息的字面", done.stderr, "逃生口沒有真的關掉本判準")
+        self.assertIn("99991", done.stderr, "另一個判準被順手關掉了")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 第三個判準（本輪 M1~M8）：引述一個已經過期的額度讀數
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _pace_line(axis: str = "session", pct: str = "16") -> str:
+    """一行**看起來就是 pace 輸出**的讀數（判準要求同行帶 pace 欄位記號）。"""
+    return f"kind={axis} {pct}% 剩 128 分鐘 band=free horizon=mid cap=8"
+
+
+class TestTheEscapeHatchIsArithmeticNotPresence(unittest.TestCase):
+    """🔴 **本組是本輪否決權複審 M2＋M4 的直接產物，斷言方向刻意與規格版相反。**
+
+    規格版寫的紅綠自證是「插入 4 小時前的『量測於』⇒ 回空清單」——那**把事故寫成契約**：
+    立案的事故形狀就是「把四小時前的 pace 區塊整塊貼上」，而那份規格會讓那個動作**變成
+    合法的靜音手法**。複審量到的代價：在整個母體上，「在場即抑制」型抑制器**一次都沒有
+    做對過** ⇒ 它不是逃生口，是隨機靜音器。
+
+    所以這裡的契約是：**時間戳自己過期 ⇒ 仍命中，且訊息要帶出它的 age**；只有「真的剛量」
+    才靜音。第二條（真的剛量 → 靜音）是逃生口該有的紅綠自證，缺它就無法證明抑制器有
+    鑑別力而不是恆真。
+    """
+
+    def _hits(self, minutes_ago: float, *, axis: str = "session"):
+        now = datetime(2026, 8, 23, 12, 0, tzinfo=UTC)
+        stamp = (now - timedelta(minutes=minutes_ago)).isoformat()
+        claim = f"{_pace_line(axis)}｜來源=cache 量測於={stamp}"
+        return G.stale_pace_hits(claim, [], now)
+
+    def test_a_four_hour_old_self_quoted_stamp_still_gets_flagged(self) -> None:
+        """事故形狀本身：貼上四小時前的量測時刻**不是**豁免。"""
+        hits = self._hits(240)
+        self.assertEqual([h["kind"] for h in hits], ["stale"],
+                         "貼一個過期的『量測於』被當成豁免了——那正是立案的事故")
+        self.assertGreater(hits[0]["age_s"], 4 * 3600 - 60,
+                           "訊息必須帶出那個時刻自己的 age，否則讀者不知道它有多舊")
+
+    def test_the_message_says_how_old_the_reading_actually_is(self) -> None:
+        """M3：訊息不得只說「過期了」，要說**過期多久**（age 是可行動的唯一資訊）。"""
+        messages = G._pace_messages(self._hits(240))
+        self.assertTrue(messages, "四小時前的讀數必須產出訊息")
+        self.assertIn("240 分鐘前", messages[0])
+
+    def test_a_stamp_that_really_is_fresh_is_the_silent_case(self) -> None:
+        """逃生口該有的紅綠自證：真的剛量過 ⇒ 回空清單。
+
+        沒有這一條，上一條可以靠「抑制器恆假」通過——那不是逃生口，是把它拿掉。
+        """
+        self.assertEqual(self._hits(0.5), [],
+                         "剛量到的讀數被判過期了 ⇒ 這個守衛會擋到讓人無法工作")
+
+    def test_the_boundary_is_the_axis_own_measured_ttl(self) -> None:
+        """門檻必須是**那個軸自己的** TTL，不是一個全域數字（M5）。
+
+        `session` 的 TTL 約兩分鐘、`seven_day` 約 23 分鐘 ⇒ 同一個 age（10 分鐘）在快軸上
+        必須命中、在慢軸上必須靜音。單一門檻的代價是量出來的：複審實測 35% 的發火只由慢軸
+        貢獻，而慢軸的中位漂移比快軸低一個數量級。
+        """
+        self.assertEqual([h["kind"] for h in self._hits(10, axis="session")], ["stale"])
+        self.assertEqual(self._hits(10, axis="seven_day"), [],
+                         "慢軸被快軸的門檻誤判 ⇒ 這就是單一門檻製造的那 35% 假紅")
+
+
+class TestTheMessageMustNotTeachThePresenceLoophole(unittest.TestCase):
+    """M3：訊息本身就是行為的教材，寫錯一句就把讀者訓練成用繞過 7。"""
+
+    def test_it_tells_you_to_rerun_not_merely_to_paste_a_timestamp(self) -> None:
+        now = datetime(2026, 8, 23, 12, 0, tzinfo=UTC)
+        claim = f"{_pace_line()}｜量測於={(now - timedelta(hours=4)).isoformat()}"
+        message = G._pace_messages(G.stale_pace_hits(claim, [], now))[0]
+        self.assertIn("重跑", message, "沒有叫人重跑＝在教『把舊區塊貼上就好』")
+        self.assertIn("--pace", message, "必須給出確切指令，否則不可行動")
+        self.assertIn("算 age", message,
+                      "必須明說抑制是算術的——不說就等於默許『貼上即抑制』的誤解")
+
+
+class TestPerAxisThresholdsAreDerivedNotPicked(unittest.TestCase):
+    """M5：TTL 必須是**導出式的輸出**，不是有人挑的秒數。"""
+
+    def test_every_ttl_is_exactly_one_pp_of_that_axis_measured_drift(self) -> None:
+        """判準：`TTL == round(3600 / 該軸實測中位漂移)`。
+
+        這一條會在「有人直接改秒數」時轉紅——那是本組存在的唯一理由：一個挑出來的門檻
+        沒有辦法被複審，而一個導出來的門檻只要重新量就能重新裁決。
+        """
+        for axis, ttl in G.PACE_TTL_S.items():
+            with self.subTest(axis=axis):
+                rate = G.PACE_DRIFT_MEDIAN_PP_PER_HOUR[axis]
+                self.assertEqual(ttl, round(3600.0 / rate))
+
+    def test_axes_measured_as_not_drifting_are_registered_not_judged(self) -> None:
+        """中位漂移 0 的軸**不得**有 TTL（含「無上界」那種寫法）。
+
+        複審給了兩條路：導出 per-axis TTL，或**照實登記已量測的假紅類別**。本檔走後者，
+        而且刻意不採信「那個讀數在物理上不會過期」——同一份重跑實測 `weekly_scoped`
+        p90=9.375、max=31.034 pp/hr ⇒ 它會動。判它是假紅，宣稱它不會過期是假話。
+        """
+        zero = [a for a, r in G.PACE_DRIFT_MEDIAN_PP_PER_HOUR.items() if r == 0]
+        self.assertTrue(zero, "沒有零漂移軸的話這一條就沒有守到東西")
+        for axis in zero:
+            self.assertNotIn(axis, G.PACE_TTL_S)
+            self.assertEqual(G.stale_pace_hits(_pace_line(axis, "61"), [], _NOW), [])
+
+    def test_the_two_axis_tables_inside_the_hook_cannot_drift_apart(self) -> None:
+        """觸發表與漂移表必須逐格對齊：多在一邊＝那個軸靜默失去 TTL 或靜默失去觸發。"""
+        self.assertEqual(set(G.PACE_AXES), set(G.PACE_DRIFT_MEDIAN_PP_PER_HOUR))
+
+    def test_axes_outside_the_quota_policy_ssot_are_named_not_silent(self) -> None:
+        """軸名字面允許住兩個家的唯一條件＝有東西在對帳（本檔就是那個東西）。
+
+        差集刻意**釘成具名集合而不是空集合**：`nimbus_quill` 是伺服器真的會吐、而 PRD 任何
+        列舉都沒有的桶（`quota_policy.py` 的 `KNOWN_KINDS` 旁註逐字記載這件事，並指出它
+        今天已經在參與 cap 聚合）⇒ hook 認得它是對的。把差集斷言成空集合會逼下一個人
+        「為了讓紅變綠」把那個軸從 hook 拿掉，而那是**縮小守衛的射程**去迎合一個鎖。
+        """
+        sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
+        import quota_policy  # noqa: PLC0415
+
+        self.assertEqual(set(G.PACE_AXES) - set(quota_policy.KNOWN_KINDS),
+                         _AXES_OUTSIDE_KNOWN_KINDS,
+                         "hook 與 quota_policy 的軸名差集變了 ⇒ 兩個家漂移了，"
+                         "請確認新軸是伺服器真的吐的，再把它加進本例外集合")
+
+
+class TestTheTriggerCoversTheMeasuredBypasses(unittest.TestCase):
+    """M6：規避形態必須是**量出來**才收或才不收，不是憑感覺挑。"""
+
+    def test_a_full_width_percent_sign_does_not_silence_the_guard(self) -> None:
+        """全角 `％` 一個按鍵就能永久靜音整支守衛 ⇒ 覆蓋成本一個字元，收。"""
+        claim = "kind=session 16％ 剩 128 分鐘 band=free"
+        self.assertEqual([h["kind"] for h in G.stale_pace_hits(claim, [], _NOW)],
+                         ["unanchored"])
+
+    def test_the_axis_to_value_window_is_wide_enough_for_real_prose(self) -> None:
+        """距離窗實測 p90=38 ⇒ 窗寬 40。規格挑的 8 只覆蓋 68.7%（本輪重跑）。"""
+        self.assertGreaterEqual(G.PACE_VALUE_WINDOW, 38)
+        claim = "kind=session（5 小時窗，binding 那一軸）已用 16% band=free"
+        self.assertTrue(G.stale_pace_hits(claim, [], _NOW),
+                        f"距離 {claim.index('16') - claim.index('session')} 字元就漏抓了")
+
+    def test_a_bare_number_is_a_registered_bypass_not_an_oversight(self) -> None:
+        """「軸 ＋ 裸數字」刻意不判，而這一條就是那個裁決的落款。
+
+        量出來的理由：裸數字的母體是帶 `%` 的 **2.66 倍**（696 vs 418 次），而它的距離
+        p50=29（帶 `%` 的是 2）⇒ 那個數字**通常根本不是這個軸的值**。判它會讓觸發面暴增
+        且多數是雜訊，而「一個永遠在響的警報等於沒有警報」本 repo 已有判例。
+        """
+        self.assertEqual(G.stale_pace_hits("kind=session 16 剩 128 分鐘", [], _NOW), [],
+                         "裸數字若開始命中，請先重跑普查再改這一條")
+
+
+class TestTheUnanchoredBlindSpotIsCountedNotHidden(unittest.TestCase):
+    """M7：「錨不到＝放行」製造反向誘因（照實引述舊數字被唸、憑空捏一個不會）。
+
+    判準無法在散文平面上分辨「捏的」與「輸出被截斷」，所以這裡守的不是「抓到它」，
+    是**它有數字**——盲區可數才可能在下一輪被裁決。
+    """
+
+    def test_an_unanchorable_reading_is_its_own_class_not_silently_dropped(self) -> None:
+        hits = G.stale_pace_hits(_pace_line("session", "77"), [], _NOW)
+        self.assertEqual([h["kind"] for h in hits], ["unanchored"])
+        self.assertIsNone(hits[0]["age_s"], "錨不到就沒有 age，不得編一個出來")
+
+    def test_the_blind_spot_count_reaches_the_reader_without_anyone_running_a_probe(
+            self) -> None:
+        """M8：痕跡通道必須有**自動讀者**，否則它不是機制。
+
+        本輪複審現查：全庫 trace 的唯一讀者是一支要人記得跑的手動 probe ⇒ 那個數字只在
+        有人想起來時才存在。這一條釘的就是「寫進去的同一次執行就讀回來、並出現在送給模型
+        的那則訊息裡」。誠實劃界：它只讀自己寫的那一份、只出聲，**沒有任何閘門會因為這個
+        數字轉紅**——那需要一個穩定的分母，本機母體不是。
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            old = os.environ.get("AUTOSDD_TRACE_DIR")
+            os.environ["AUTOSDD_TRACE_DIR"] = tmp
+            try:
+                hits = G.stale_pace_hits(_pace_line("session", "77"), [], _NOW)
+                first = G._pace_messages(hits)
+                second = G._pace_messages(hits)
+            finally:
+                if old is None:
+                    os.environ.pop("AUTOSDD_TRACE_DIR", None)
+                else:
+                    os.environ["AUTOSDD_TRACE_DIR"] = old
+            written = Path(tmp) / G.FRESHNESS_TRACE
+            self.assertTrue(written.is_file(), "盲區沒有落痕跡 ⇒ 它不可數")
+            self.assertIn("unanchored", written.read_text(encoding="utf-8"),
+                          "盲區必須是**自己一類**，混進總數等於沒登記")
+            self.assertIn("錨不到 1 筆", first[0], "第一次就必須把累計數讀回來")
+            self.assertIn("錨不到 2 筆", second[0],
+                          "第二次沒有累加 ⇒ 那個『讀回』其實沒有在讀檔")
+
+    def test_nothing_to_say_means_the_trace_file_does_not_grow(self) -> None:
+        """「沒觸發＝檔不長大」是本 repo 對痕跡的既有語意，也是它可偵測的前提。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            old = os.environ.get("AUTOSDD_TRACE_DIR")
+            os.environ["AUTOSDD_TRACE_DIR"] = tmp
+            try:
+                self.assertEqual(G._pace_messages([]), [])
+            finally:
+                if old is None:
+                    os.environ.pop("AUTOSDD_TRACE_DIR", None)
+                else:
+                    os.environ["AUTOSDD_TRACE_DIR"] = old
+            self.assertFalse((Path(tmp) / G.FRESHNESS_TRACE).exists())
+
+
+class TestTheModelChannelIsClampedOnStopHookActive(unittest.TestCase):
+    """M1：這個夾具**不是優化**——沒有它，守衛會在額度吃緊的那一刻自己燒額度。
+
+    複審實測：不夾 ⇒ 一個 prompt 9 次 Stop、9 則零內容 assistant 訊息；夾了 ⇒ 2 次 Stop、
+    1 次發射、恰好 1 個額外回合。而 stderr 那條**送不到模型**（`DEF-200-135`：exit 0 的
+    stderr 不進 context，實測 1h49m／45 turns 零訊號）⇒ 唯一有效通道就是會迴圈的那一條。
+    """
+
+    def setUp(self) -> None:
+        self._dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._dir.cleanup)
+        self.transcript = Path(self._dir.name) / "t.jsonl"
+        self.transcript.write_text("", encoding="utf-8")
+
+    def _run(self, *, active: bool):
+        payload = json.dumps({
+            "hook_event_name": "Stop", "stop_hook_active": active,
+            "last_assistant_message": _pace_line("session", "77"),
+            "transcript_path": str(self.transcript)})
+        env = {**os.environ, "AUTOSDD_TRACE_DIR": self._dir.name}
+        return subprocess.run([sys.executable, str(_HOOK)], input=payload, env=env,
+                              capture_output=True, text=True, timeout=60,
+                              encoding="utf-8", errors="replace")
+
+    def test_the_first_stop_really_reaches_the_model(self) -> None:
+        done = self._run(active=False)
+        self.assertEqual(done.returncode, 0)
+        self.assertIn("hookSpecificOutput", done.stdout,
+                      "沒有發射 ⇒ 訊息不在行為迴圈裡（stderr 進不了 context）")
+        self.assertIn('"hookEventName": "Stop"', done.stdout,
+                      "事件名與實際事件不符時 CC 會把整個 additionalContext 丟掉")
+
+    def test_the_re_entrant_stop_says_nothing_to_the_model(self) -> None:
+        """紅綠自證的另一半：夾具必須真的夾得住，否則上一條只是證明它會發射。"""
+        done = self._run(active=True)
+        self.assertEqual(done.returncode, 0)
+        self.assertEqual(done.stdout.strip(), "",
+                         "stop_hook_active 下仍發射 ⇒ 迴圈沒有煞車，這支守衛會自己燒額度")
+        self.assertIn("錨不到", done.stderr, "夾住的是模型通道，不是整個判準")
+
+
+class TestThePaceGuardHasItsOwnEscapeHatch(unittest.TestCase):
+    """第三個逃生口同樣不共用——共用會讓一次關閉波及別的守衛。"""
+
+    def test_turning_off_the_pace_guard_leaves_the_value_guard_armed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = Path(tmp) / "t.jsonl"
+            transcript.write_text("", encoding="utf-8")
+            payload = json.dumps({
+                "hook_event_name": "Stop",
+                "last_assistant_message":
+                    _pace_line("session", "77") + " 收工：99991 passed。",  # baseline-ok: 合成語料
+                "transcript_path": str(transcript)})
+            env = {**os.environ, "AUTOSDD_PACE_GUARD_OFF": "1",
+                   "AUTOSDD_TRACE_DIR": tmp}
+            done = subprocess.run([sys.executable, str(_HOOK)], input=payload, env=env,
+                                  capture_output=True, text=True, timeout=60,
+                                  encoding="utf-8", errors="replace")
+        self.assertEqual(done.returncode, 0)
+        self.assertNotIn("錨不到", done.stderr, "逃生口沒有真的關掉本判準")
         self.assertIn("99991", done.stderr, "另一個判準被順手關掉了")
 
 

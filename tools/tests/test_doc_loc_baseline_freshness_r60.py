@@ -65,6 +65,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import tokenize
 import unittest
 from collections.abc import Iterable
 from contextlib import contextmanager
@@ -1763,7 +1764,7 @@ class TestR67CliFailsLoud(unittest.TestCase):
 
     def test_mode_flags_are_mutually_exclusive(self) -> None:
         self.assertEqual(SYNC.main(["--check", "--json"]), 2)
-        self.assertEqual(SYNC.main(["--write", "--check-snapshot"]), 2)
+        self.assertEqual(SYNC.main(["--write", "--check-snapshot"]), 2)  # writemode-ok: rc=2 先返回
 
     def test_with_slow_requires_write(self) -> None:
         self.assertEqual(SYNC.main(["--with-slow"]), 2)
@@ -1771,8 +1772,15 @@ class TestR67CliFailsLoud(unittest.TestCase):
 
     def test_platform_may_not_be_combined_with_write(self) -> None:
         """跨平台代填＝替另一台機器捏造 provenance，正是 R67-D1 本體 ⇒ rc=2。"""
-        self.assertEqual(SYNC.main(["--write", "--platform", "win32"]), 2)
-        self.assertEqual(SYNC.main(["--write", "--with-slow", "--platform", "darwin"]), 2)
+        self.assertEqual(
+            SYNC.main(["--write", "--platform", "win32"]), 2,  # writemode-ok: rc=2 先返回
+        )
+        self.assertEqual(
+            SYNC.main(  # writemode-ok: rc=2 先返回
+                ["--write", "--with-slow", "--platform", "darwin"]
+            ),
+            2,
+        )
 
     def test_platform_choices_cover_exactly_the_managed_columns(self) -> None:
         action = next(
@@ -7132,6 +7140,178 @@ class TestR85DocNamedLiveCheckEntriesActuallyRun(unittest.TestCase):
         self.assertIn("相異撞線 episode    1 個", proc.stdout)
         self.assertIn("reset 相異字面      1 個", proc.stdout,
                       "字面統計那一路（C5 就爆在這裡）沒有被走到 ⇒ 這支測試沒有鑑別力")
+
+
+#: 認可的「落地目標已改道」標記：出現在呼叫點**外層任一** `with` 的 context 運算式裡
+#: 即視為安全。判準刻意收在「目標被改離真 repo 檔」這件事上，而不是「有沒有寫在測試
+#: 裡」——後者會把本檔那批合法的沙箱回歸鎖全數誤判成違規，而擋到讓人無法工作的守衛
+#: 會被整個關掉，比沒有守衛更糟。
+_WRITE_TARGET_REDIRECT_MARKERS = ("_slow_window_sandbox", "_ONBOARDING", "write_bytes")
+
+#: 行尾豁免（比照本 repo 既有的「行尾標記 ＋ 必填理由」慣例；此處刻意不引述別的
+#: 標記字面——引述會讓那些標記的陳舊掃描器把本行判成 stale 標記）。理由必填——空理由
+#: 不得換到豁免，否則這個窄出口會被磨成通用後門。
+_WRITE_MODE_EXEMPT_MARK = "# writemode-ok:"
+
+
+def _invokes_write_mode(node: ast.AST) -> bool:
+    """`<任何物件>.main([... "--write" ...])`／`main([...])` 形態的呼叫。"""
+    if not isinstance(node, ast.Call):
+        return False
+    func = node.func
+    name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+    if name != "main":
+        return False
+    return any(
+        isinstance(arg, (ast.List, ast.Tuple))
+        and any(isinstance(e, ast.Constant) and e.value == "--write" for e in arg.elts)
+        for arg in node.args
+    )
+
+
+def unsandboxed_write_mode_sites(source: str) -> list[str]:
+    """回傳「呼叫寫入模式、而外層沒有把落地目標改離真 repo 檔」的站點。
+
+    🔴 判準的輸入**只有測試自己的原始碼**，不含工作樹狀態。這是刻意的：改成比對
+    前後的工作樹指紋，在本 repo 會被並行包的正常編輯打成假紅（多包同時改檔是常態），
+    而且它只能在**漂移已經發生之後**才出聲。本鎖問的是「有沒有人寫出一個沒改道的寫入
+    站點」——那件事在閘門時就看得見，早於任何檔案被改。
+
+    誠實劃界（皆為已知盲區，不是待修 bug）：
+      - 只認 argv 是**字面 list／tuple** 的呼叫；`main(["--write"] + extra)` 這種拼接
+        形態看不見。
+      - 只認 `main` 這個函式名；自寫 helper 再繞進落地函式者看不見。
+      - 射程只有 `tools/tests/`（根層 unittest 閘門的母體）。AISDLC_SDD 的 pytest 語料
+        以 `--repo-root` 參數化沙箱、走另一道閘門，本鎖不代言。
+      - 只看得見「經由 Python 呼叫」；測試若改以 subprocess 起 CLI 寫真檔，本鎖無感。
+    """
+    tree = ast.parse(source)
+    lines = source.split("\n")
+    offenders: list[str] = []
+
+    def visit(node: ast.AST, guard: str) -> None:
+        if isinstance(node, (ast.With, ast.AsyncWith)):
+            guard += " " + " ".join(ast.unparse(i.context_expr) for i in node.items)
+        if _invokes_write_mode(node):
+            span = "\n".join(lines[node.lineno - 1:(node.end_lineno or node.lineno)])
+            after = span.split(_WRITE_MODE_EXEMPT_MARK, 1)[1:]
+            reason = ((after[0].splitlines() or [""])[0].strip()) if after else ""
+            if not reason and not any(m in guard for m in _WRITE_TARGET_REDIRECT_MARKERS):
+                offenders.append(f"L{node.lineno}: {lines[node.lineno - 1].strip()}")
+        for child in ast.iter_child_nodes(node):
+            visit(child, guard)
+
+    visit(tree, "")
+    return offenders
+
+
+def stale_write_mode_exemptions(source: str) -> list[str]:
+    """回傳「掛了具名豁免、但該處根本沒有寫入模式呼叫」的行。
+
+    WHY：豁免清單會腐化——判準改嚴或呼叫被刪之後，標記留在原地，下一個人讀到的是一句
+    假的「這裡已審過」。本 repo 對 `tmpdir-ok`／`posix-ok`／`callrepr-ok` 都掛了同型的
+    陳舊掃描，本標記沿用同一條紀律。
+
+    🔴 走 `tokenize` 而非字面 `in`：判準只認**真註解**。否則本標記自己的常數定義那一行
+    （字串字面）會第一個被自己抓出來——實測犯過一次。
+    """
+    tree = ast.parse(source)
+    covered: set[int] = set()
+    for node in ast.walk(tree):
+        if _invokes_write_mode(node):
+            covered.update(range(node.lineno, (node.end_lineno or node.lineno) + 1))
+    lines = source.split("\n")
+    return [
+        f"L{tok.start[0]}: {lines[tok.start[0] - 1].strip()}"
+        for tok in tokenize.generate_tokens(io.StringIO(source).readline)
+        if tok.type == tokenize.COMMENT
+        and _WRITE_MODE_EXEMPT_MARK in tok.string
+        and tok.start[0] not in covered
+    ]
+
+
+class TestWriteModeNeverAimsAtTheTrackedBaselineFile(unittest.TestCase):
+    """跑根層閘門不得讓 git-tracked 的 `ONBOARDING.md` 漂移。
+
+    🔴 **立案假設先被證偽，本鎖守的是另一件事**。立案判讀是「跑測試會回寫
+    ONBOARDING.md」。實測反過來：把該格改成 stale（`total=20426` vs 實測 16483）後跑
+    本檔 262 支，得到 **4 支 FAIL、零寫入、檔案一個 byte 都沒動**——`--check` 才是預設
+    模式（`main()`：`mode = selected[0] if selected else "--check"`），寫入只有
+    `--write` 一條路，而 pre-push 消費的是唯讀的 `--check-snapshot`。那次漂移的真兇是
+    **有人手動跑了 `--write`**：改了 LOC 計價規則後保鮮鎖正確地轉紅，而該格自己的散文
+    就寫著「一鍵回填」。
+
+    ⇒ 今天沒有「測試會寫檔」這個 bug，有的是**沒有任何機械物阻止它明天出現**：本檔已
+    有四個合法的 `--write` 呼叫站點，它們安全**只因為慣例**（外層 `_slow_window_sandbox`
+    把 `_ONBOARDING` 改到 tmp）。第五個站點漏了改道，真檔就會被改寫，而後果不只是髒
+    工作樹——本 repo 的 pre-push 驗**工作樹**而非 commit，被意外漂移擋下的人無法自救。
+    本鎖把那條慣例升成判準：漏改道在**閘門時**轉紅，而不是等漂移發生。
+    """
+
+    def test_no_root_test_aims_write_mode_at_the_real_repo_file(self) -> None:
+        offenders = {
+            path.name: sites
+            for path in sorted(_TESTS_DIR.glob("test_*.py"))
+            if (sites := unsandboxed_write_mode_sites(path.read_text(encoding="utf-8")))
+        }
+        self.assertEqual(
+            offenders, {},
+            "有測試把寫入模式對準真 repo 檔：外層請包 `_slow_window_sandbox`（或自行改道 "
+            f"`_ONBOARDING`）；確定觸不到寫入路徑者於該呼叫行標 `{_WRITE_MODE_EXEMPT_MARK} <理由>`",
+        )
+
+    def test_the_judgement_reds_on_a_synthetic_unredirected_site(self) -> None:
+        """鑑別力自證：沒改道的合成站點必須被抓到，改道／具名豁免的必須放行。
+
+        缺這一支，上一支在判準退化成恆空時會靜默變成永遠綠——本 repo 已被同型咬過。
+        """
+        bare = 'def test_x():\n    SYNC.main(["--write"])\n'
+        self.assertEqual(len(unsandboxed_write_mode_sites(bare)), 1, "沒改道卻放行")
+        sandboxed = (
+            "def test_x():\n"
+            "    with _slow_window_sandbox(mutate_during_window=False):\n"
+            '        SYNC.main(["--write", "--with-slow"])\n'
+        )
+        self.assertEqual(unsandboxed_write_mode_sites(sandboxed), [], "合法沙箱被誤判成違規")
+        marked = f'def test_x():\n    SYNC.main(["--write"])  {_WRITE_MODE_EXEMPT_MARK} 理由\n'
+        self.assertEqual(unsandboxed_write_mode_sites(marked), [], "具名豁免未生效")
+
+    def test_an_empty_reason_does_not_buy_the_exemption(self) -> None:
+        """空理由不得換到豁免，否則這個窄出口會被磨成通用後門。"""
+        empty = f'def test_x():\n    SYNC.main(["--write"])  {_WRITE_MODE_EXEMPT_MARK}\n'
+        self.assertEqual(len(unsandboxed_write_mode_sites(empty)), 1, "空理由買到了豁免")
+
+    def test_the_judgement_never_reads_the_worktree(self) -> None:
+        """本鎖不得因『別的包正在改檔』而假紅 ⇒ 判準不准取用工作樹狀態。
+
+        釘住的是**形態**而非結果：判準函式裡不得出現起 subprocess 取 git 狀態那一類
+        取數。會假紅的守衛在本 repo 的壽命是一輪。
+        """
+        fn = ast.parse(textwrap.dedent(inspect.getsource(unsandboxed_write_mode_sites))).body[0]
+        assert isinstance(fn, ast.FunctionDef)
+        if isinstance(fn.body[0], ast.Expr) and isinstance(fn.body[0].value, ast.Constant):
+            fn.body = fn.body[1:]  # 剝掉 docstring：判準看的是**程式碼**，不是散文
+        src = ast.unparse(fn)
+        for forbidden in ("subprocess", "porcelain", "check_output"):
+            self.assertNotIn(
+                forbidden, src, "判準吃了工作樹狀態 ⇒ 並行包的正常編輯會把它打成假紅",
+            )
+
+    def test_no_exemption_marker_outlives_the_call_it_exempted(self) -> None:
+        """具名豁免不得腐化成一句假的『這裡已審過』。"""
+        stale = {
+            path.name: rot
+            for path in sorted(_TESTS_DIR.glob("test_*.py"))
+            if (rot := stale_write_mode_exemptions(path.read_text(encoding="utf-8")))
+        }
+        self.assertEqual(stale, {}, "豁免標記所在處已無寫入模式呼叫 ⇒ 請把標記一起刪掉")
+
+    def test_the_stale_scan_reds_on_a_marker_with_nothing_to_exempt(self) -> None:
+        """鑑別力自證：孤兒標記必須被抓到，貼在真呼叫上的必須放行。"""
+        orphan = f'x = 1  {_WRITE_MODE_EXEMPT_MARK} 沒有任何呼叫\n'
+        self.assertEqual(len(stale_write_mode_exemptions(orphan)), 1, "孤兒標記被放行")
+        attached = f'SYNC.main(["--write"])  {_WRITE_MODE_EXEMPT_MARK} 理由\n'
+        self.assertEqual(stale_write_mode_exemptions(attached), [], "真呼叫上的標記被誤判")
 
 
 if __name__ == "__main__":
