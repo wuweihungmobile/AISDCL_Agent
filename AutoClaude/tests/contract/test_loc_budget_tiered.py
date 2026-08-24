@@ -336,7 +336,7 @@ def frozen_cap(monkeypatch):
 
     monkeypatch.setattr(clb, "write_baseline", _boom)
     monkeypatch.setattr(clb, "TOTAL_INCREASE_LIMIT", 1.0)
-    # R102 收尾：ADR-XPLAT-013 條文五（E4）新增 cap_basis 獨立審核機制後，check()
+    # R102 收尾：ADR-XPLAT-013 條文五（E4）新增 cap_basis 獨立審核機制後，check() round-label-ok
     # 改先讀磁碟 .loc_cap_basis；若該檔已落地（--repin-cap 執行後即會如此），
     # cap 會改吃磁碟真值而非本 fixture 透過 read_baseline 注入的合成 cap，讓
     # 本測試組的斷言全部落空。這裡把 read_cap_basis 固定回 None（＝模擬「尚未執行

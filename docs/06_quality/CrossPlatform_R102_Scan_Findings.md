@@ -1,6 +1,6 @@
 # CrossPlatform R102 — 掃描發現與逐檔清單（DEF-200-204 PRD §4.2.4 平穩性機制交付）
 
-<!-- guard-total:R102 --> **本輪護欄層累積淨額（稽核痕跡合計）＝ 87784 → 88415（+631）**
+<!-- guard-total:R102 --> **本輪護欄層累積淨額（稽核痕跡合計）＝ 87784 → 88425（+641）**
 ——逐檔清單見下方〈§B 逐檔清單〉與〈§D DEF-200-218 逐檔清單〉。
 
 - **輪次**：R102（與 R101 治理修憲並行進行，R101 先落地；本輪收尾單人窗口把 DEF-200-204
@@ -113,3 +113,24 @@ R100／R101／R102 三個 commit 從未真的 `git push` 過，本機 pre-push �
 另兩項既存缺陷（`AutoClaude/tests/test_r100_boot_self_check.py:239` 補
 `-c core.quotepath=false`；`docs/04_planning/R102_HANDOFF.md` 補齊 `absent-if:`／現查
 標記）不動任何護欄層檔案的行數，故不進本節逐檔清單。
+
+## §E DEF-200-219 逐檔清單（R102 收尾：第二輪 push 逐項排除，護欄層 88415 → 88425，+10）
+
+`6fea8a3` 落地時新增的 `R71` 全樹掃描抓到漏帶 `round-label-ok` 既存缺陷，於重新驗證
+push 前的完整回歸時被 `test_no_code_file_claims_a_round_beyond_the_ledger` 抓到。
+
+### E.1 既存缺陷修復（功能修復，非漂移）
+
+| 檔案:行 | 內容 |
+|---------|------|
+| `AutoClaude/tests/contract/test_loc_budget_tiered.py:339` | 補 `round-label-ok`（真實 R102 註解，非合成語料） |
+| `test_adr_xplat001_c1c2_lock.py:1340` | 補 `round-label-ok` |
+| `test_adr_xplat001_c1c2_lock.py:5679`／`:5680`（docstring） | 補 `round-label-ok`；`:5680` 補標後顯示寬度超線（101 > 100），拆成兩行修復 |
+
+### E.2 本檔自身編修（護欄層重釘自身編修）
+
+| 項目 | 淨額 | 內容 |
+|------|-----:|------|
+| E.1 拆行（本檔淨增 1 行）＋ `_GUARD_LINES_REPIN_LOG` 一筆新列 ＋ `_FROZEN_GUARD_LINES` 一處數值更新 ＋ prefix_len／sha256／`_FROZEN_PREFIX_REWRITE_LEDGER` 新增一列 | +9 | 同 R95~R102 既有體例（合法出口逐條實查：純數字與註解無可抽結構、無死碼可刪） |
+
+小計：**+9**。**E.1 + E.2 = 1 + 9 = 10**，與 `_GUARD_LINES_REPIN_LOG` 該筆 R102 列的淨額逐字相符。

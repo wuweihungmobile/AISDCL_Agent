@@ -695,7 +695,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 537,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 6127,
+    "test_adr_xplat001_c1c2_lock.py": 6137,
     "test_archive_defect_log.py": 4008,
     "test_bash32_compat.py": 970,
     "test_bash_probe_spec_contract.py": 983,
@@ -1092,6 +1092,11 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "[非淨減法輪] 收斂列。逐檔清單見 CrossPlatform_R102_Scan_Findings.md。"),
     ("R102", 88407, 88415, 8,
      "[非淨減法輪] 收斂列。逐檔清單見 CrossPlatform_R102_Scan_Findings.md。"),
+    ("R102", 88415, 88425, 10,
+     "[非淨減法輪][同輪追加] DEF-200-219：R71 全樹掃描抓到 `6fea8a3` 新增的多處 R102 "
+     "註解漏帶 `round-label-ok`；補標後一行顯示寬度超線觸發 `test_e501_debt_only_shrinks`，"
+     "拆行修復＋本表與重釘史料自身編修合計本檔逐檔漂移。逐項見 "
+     "CrossPlatform_R102_Scan_Findings.md。"),
 )
 
 
@@ -1294,10 +1299,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 56
+_REPIN_LOG_FROZEN_PREFIX_LEN = 57
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "23b5b6fcc0a21052687378f6d52560c48df40d67852d73e007d4a2912fa6d367")
+    "cb643af00b7a86b5479d4db96b7734135da0548488577889336a311485305930")
 
 
 def repin_log_history_digest(
@@ -1337,11 +1342,15 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # DEF-200-218：R102 收尾修復 push 被擋下的三項既存缺陷，同體例「追加後立即自我 round-label-ok
     # 凍結」——本輪追加一列（納管漏檔 +2 ＋ 本檔自身編修 +10），prefix_len 49→50 涵蓋該列本身。
     ("R102", "c44b6a066da8", "605806a0d4aa", "DEF-200-218"),
-    # DEF-200-207：R102 收尾（四方核准並執行 --repin-cap／--update 後）訂正
+    # DEF-200-207：R102 收尾（四方核准並執行 --repin-cap／--update 後）訂正 round-label-ok
     # test_the_next_round_cannot_reuse_the_exemption 的合成注入前提，同體例「追加後
     # 立即自我凍結」——本輪追加多列（測試訂正＋本檔自身逐檔漂移收斂），
     # prefix_len 50→56 涵蓋全部新列本身。
-    ("R102", "605806a0d4aa", "23b5b6fcc0a2", "DEF-200-207"),)
+    ("R102", "605806a0d4aa", "23b5b6fcc0a2", "DEF-200-207"),
+    # DEF-200-219：R71 全樹掃描抓到漏帶 round-label-ok 的既存缺陷，同體例「追加後立即
+    # 自我凍結」——本輪追加一列（補標＋E501拆行＋本表自身編修合計 +5），
+    # prefix_len 56→57 涵蓋該列本身。
+    ("R102", "23b5b6fcc0a2", "cb643af00b7a", "DEF-200-219"),)
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。
 #: 往後指紋每變一次，都要能從本值出發、經 `_FROZEN_PREFIX_REWRITE_LEDGER` 逐列鏈接
@@ -5676,8 +5685,9 @@ class TestPricingChangeExemptionExpiresOnItsOwn(unittest.TestCase):
     def test_the_next_round_cannot_reuse_the_exemption(self) -> None:
         """🔴 主牙：時鐘走過豁免輪之後，provenance 未指向目前這把尺的 baseline 必紅。
 
-        R102 訂正：原本借磁碟真實狀態（尚未執行 `--update`）當「未重釘」的反面測資；
-        R102 收尾四方核准並執行 `--repin-cap`＋`--update` 後，磁碟合法轉為「已重釘」，
+        R102 訂正：原本借磁碟真實狀態（尚未執行 `--update`）當「未重釘」的反面測資； round-label-ok
+        R102 收尾四方核准並執行 `--repin-cap`＋`--update` 後， round-label-ok
+        磁碟合法轉為「已重釘」，
         該巧合資料不復存在（這正是本鎖 §D-14 訂正段落自己記載的「出口永遠開著」被
         真的走過一次）。改為合成注入一個與 `current_policy_version` 不同的
         `baseline_policy_version`，繼續驗證同一段判準邏輯，不再依賴磁碟暫態——比照
