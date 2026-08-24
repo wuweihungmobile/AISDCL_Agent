@@ -60,7 +60,11 @@ from __future__ import annotations
 import json
 import os
 import time
+from collections.abc import Callable
 from pathlib import Path
+from typing import TypeVar
+
+_T = TypeVar("_T")
 
 #: `O_BINARY` 只有 Windows 的 `os` 有（鐵律三：「這在另一個平台是什麼值」）。
 #: POSIX 取 0 ＝不加任何旗標，那正是 POSIX 上正確的值。
@@ -224,3 +228,64 @@ def append_record(path: Path, record: dict) -> bool:
     finally:
         os.close(fd)
     return True
+
+
+#: 鎖檔多久沒人碰就視為孤兒（持有者中途死掉、沒機會 `unlink`）——同 `claim_once()` 的
+#: TTL 判斷精神，不會讓一個死掉的持有者把鎖永久卡死。
+LOCK_STALE_AFTER_SECONDS = 5.0
+#: 等鎖的總時限（壁鐘秒）。過了這個時限仍拿不到 ⇒ fail-open 直接跑 `fn()`（見
+#: `with_lock` docstring：一個會讓 hook 卡死的鎖比沒有鎖更糟，同本檔 R81 對
+#: `msvcrt.locking` 的既有判定）。
+_LOCK_MAX_WAIT_SECONDS = 10.0
+_LOCK_POLL_SECONDS = 0.005
+
+
+def with_lock(lock_path: Path, fn: Callable[[], _T], *,
+              stale_after: float = LOCK_STALE_AFTER_SECONDS,
+              max_wait: float = _LOCK_MAX_WAIT_SECONDS) -> _T:
+    """在 `lock_path` 這個互斥點上 serialize 呼叫 `fn()`；回 `fn()` 的回傳值。
+
+    🔴 立案（R102／PRD §4.2.4 R7 明文：「多個 hook 行程並行是已觀測輸入形態……⇒  round-label-ok
+    **不得**自己寫 check-then-act」）：`quota_availability.evaluate()`／
+    `quota_stability.evaluate()` 都是「讀狀態 → 算下一步 → 寫回」——寫入本身已經是
+    原子換名（`tmp → fsync → replace`），但**整段**讀-算-寫之間沒有互斥：兩個行程可以
+    同時讀到同一份舊值、各自算完，後寫的覆蓋先寫的（遺失更新），與本模組 docstring
+    引用的 `claim_refresh_slot()` 事故同型（`CLAIM=16 SKIP=0`）。
+
+    🔴 為什麼不用 `fcntl.flock`／`msvcrt.locking`（本檔 R81 立案已經測過、且判定不收）：
+    那兩支在高併發下會直接把行程拋例外弄死（`msvcrt` 實測 N=20 時 10 個行程直接死在
+    `Resource deadlock avoided`）——落在 hook 的關鍵路徑上，一個會讓行程掛掉的鎖比沒有
+    鎖更糟。改用與 `claim_once()` 同款的 `O_CREAT|O_EXCL` 目錄項當互斥點：拿不到就短睡
+    重試；持有者若中途死掉沒機會 `unlink`，鎖檔會變成孤兒——用 `stale_after` 把它視為
+    過期並強制回收，不會永久卡死。等到 `max_wait` 仍拿不到（理論上只會發生在
+    `stale_after`／`max_wait` 設反或系統時鐘異常這類設定錯誤）⇒ **fail-open**：不加鎖
+    直接跑 `fn()`，寧可偶爾遺失一次更新也不讓整個工具呼叫卡住（同本 repo 對
+    `append_record()` 掉行的既有取捨：「痕跡是事後可稽核的那一半，不是唯一那一半」，
+    這裡的等價說法是「多數時候被鎖治好，極端情況下退回舊風險，不是新增一個更糟的
+    故障源」）。
+    """
+    deadline = time.time() + max_wait
+    while True:
+        try:
+            age = time.time() - lock_path.stat().st_mtime
+        except OSError:
+            age = None
+        if age is not None and age >= stale_after:
+            try:
+                lock_path.unlink()
+            except OSError:
+                pass
+        try:
+            os.close(os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY | _BINARY, 0o600))
+        except OSError:
+            if time.time() >= deadline:
+                return fn()  # fail-open：見上方 WHY，等鎖等到超時也不能讓呼叫端卡死
+            time.sleep(_LOCK_POLL_SECONDS)
+            continue
+        try:
+            return fn()
+        finally:
+            try:
+                lock_path.unlink()
+            except OSError:
+                pass

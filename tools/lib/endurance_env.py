@@ -92,14 +92,30 @@ NOT_APPLICABLE = -1
 # 變成續航本身的故障源，同 `quota_escalation._write` 與 `planner.append_log` 的既有紀律）。
 # 兩層都檢查是刻意的：`mkdir` 成功不等於寫得進去（目錄可能早就存在且唯讀），而那種失敗
 # 的表徵正好是「痕跡檔不會長大」——與「沒觸發」完全同形。
-def trace_dir() -> Path:
+#
+# 🔴 R102／PRD §4.2.4 R7：`trace_dir()` 此前把「退化了沒」這件事**吞掉**——呼叫端拿到的  round-label-ok
+# 永遠只有最終目錄，分不出「這就是我要的家目錄」與「本次悄悄退回了 `$TMPDIR`」。遲滯
+# 狀態機（`tools/lib/quota_availability.py`）的持久化落在這裡，而 R7 明文要求「退回系統
+# 暫存」必須被**偵測**（loud 一次＋自檢文字＋該次判定視同 unmeasured）——沒有第二格
+# 布林，那三件事在呼叫端結構上做不到。拆成 `trace_dir_status()` 是**延伸 SSOT**而不是
+# 開第二個家：兩層判斷（`mkdir` 失敗／建了但不可寫）原封不動留在這裡，`trace_dir()` 改為
+# 對第二格布林的相容包裝，行為對既有呼叫端逐字不變（回歸鎖＝本檔既有的
+# `DurableTraceHomeTest` 五支，皆呼叫 `trace_dir()` 本身，未改動任何一支）。
+def trace_dir_status() -> tuple[Path, bool]:
+    """`(目錄, 是否已退回系統暫存)`。`degraded=True` 時目錄恆為 `Path(tempfile.gettempdir())`。"""
     override = os.environ.get(TRACE_DIR_ENV, "").strip()
     want = Path(override) if override else Path.home().joinpath(*TRACE_HOME_PARTS)
     try:
         want.mkdir(parents=True, exist_ok=True)
     except OSError:
-        return Path(tempfile.gettempdir())
-    return want if os.access(want, os.W_OK) else Path(tempfile.gettempdir())
+        return Path(tempfile.gettempdir()), True
+    if not os.access(want, os.W_OK):
+        return Path(tempfile.gettempdir()), True
+    return want, False
+
+
+def trace_dir() -> Path:
+    return trace_dir_status()[0]
 
 
 # `pmset -g custom` 裡「睡眠設定不是 0」的那幾行。回 `(rc, 逐行原文)`。

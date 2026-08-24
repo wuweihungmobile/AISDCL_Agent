@@ -27,9 +27,14 @@ from __future__ import annotations
 import ast
 import dataclasses
 import json
+import os
 import random
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
+import time
 import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -40,13 +45,18 @@ _REPO = _HERE.parents[2]
 sys.path.insert(0, str(_REPO / "tools" / "lib"))
 # 🔴 判準本體（M2／M5／M7／M10 ＋ R86 三缺陷）住 `tools/lib/quota_criteria.py`，本檔只留
 # 「呼叫判準 ＋ 斷言」；理由見該檔檔頭。**鑑別力不得下降**（搬家後注入自證全數重跑）。
+import endurance_env as EE  # noqa: E402  # R102：可得性軸持久化的目錄 SSOT  round-label-ok
 import pace_contract as PC  # noqa: E402
+import quota_availability as QA  # noqa: E402  # R102：可得性軸遲滯狀態機（PRD §4.2.4(a)/R7）  round-label-ok
+import quota_boot_check as QBC  # noqa: E402  # R102／R16：啟動自檢（H6／H7）  round-label-ok
 import quota_criteria as QC  # noqa: E402
 import quota_gate as QG  # noqa: E402  # R95 修4：halt 動作接線面（waker 注入驗證）
+import quota_ledger as QL  # noqa: E402  # R102：`with_lock()` 互斥原語（F24 修復）  round-label-ok
 import quota_messages as QM  # noqa: E402  # R95 修4：halt 多軸 reset 裁決的家
 import quota_meter as M  # noqa: E402
 import quota_pace as W  # noqa: E402
 import quota_policy as Q  # noqa: E402
+import quota_stability as QS  # noqa: E402  # R102：併發上限死區／變化率／最小停留時間  round-label-ok
 
 _MODULE_SRC = (_REPO / "tools" / "lib" / "quota_policy.py").read_text(encoding="utf-8")
 
@@ -2426,6 +2436,557 @@ class TestAmortizationNamesTheAxisItActuallyUsed(unittest.TestCase):
         self.assertTrue(W.amort_relaxed(self._amort(), 70.0))
         self.assertTrue(W.amort_relaxed(self._base(), 70.0),
                         "抽掉它就翻轉的話本結論才會不成立")
+
+
+class AvailabilityHysteresisTest(unittest.TestCase):
+    """R102／PRD §4.2.4(a) ＋ R7：可得性軸遲滯狀態機與其持久化（`quota_availability.py`）。  round-label-ok
+
+    每一支斷言**行為／方向**（同 `SentinelDecisionTest` 的既有風格），不是單純比對一個
+    今天恰好如此的數字：那種鎖存在但沒有鑑別力，是本檔檔頭已點名的最大缺陷桶。
+    """
+
+    NOW = datetime(2026, 8, 24, 12, 0, 0, tzinfo=UTC)
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="r102_availability_"))
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.addCleanup(os.environ.pop, EE.TRACE_DIR_ENV, None)
+        os.environ[EE.TRACE_DIR_ENV] = str(self.tmp / "traces")
+
+    # ── (a) 進入 unmeasured：立即生效，不受遲滯／dwell 約束 ──────────────────────
+    def test_entering_unmeasured_is_immediate_regardless_of_dwell(self) -> None:
+        """剛進 `measured` 才 0 秒，下一次讀數就量不到 ⇒ 當場翻，不必等任何停留時間。"""
+        prev = QA.AvailabilityState(QA.AVAILABILITY_MEASURED,
+                                    self.NOW.isoformat(timespec="seconds"), 0)
+        nxt = QA.advance(prev, usable=False, now=self.NOW + timedelta(seconds=1))
+        self.assertEqual(nxt.availability, QA.AVAILABILITY_UNMEASURED,
+                         "量不到卻沒有立即翻成 unmeasured——收緊方向被遲滯擋住了")
+
+    def test_tightening_direction_never_needs_a_streak(self) -> None:
+        """方向鎖：無論 `exit_streak`／`min_dwell_seconds` 設多大，收緊（進入 unmeasured）
+        這一步的行為都不變——那兩個參數只管**離開**，不得反過來也擋住進入。"""
+        prev = QA.AvailabilityState(QA.AVAILABILITY_MEASURED,
+                                    self.NOW.isoformat(timespec="seconds"), 0)
+        for streak, dwell in ((2, 0.0), (10, 999999.0)):
+            with self.subTest(exit_streak=streak, min_dwell_seconds=dwell):
+                nxt = QA.advance(prev, usable=False, now=self.NOW,
+                                 exit_streak=streak, min_dwell_seconds=dwell)
+                self.assertEqual(nxt.availability, QA.AVAILABILITY_UNMEASURED)
+
+    # ── 離開需要連續達標「且」停留滿時間；任一條件缺席都不得放行 ──────────────────
+    def test_leaving_requires_both_the_streak_and_the_dwell(self) -> None:
+        """streak 達標但 dwell 沒到、dwell 到了但 streak 沒達標——兩者單獨都不足以放行。
+
+        `exit_streak=3` 讓兩種「只滿足一半」的情境可以同時被建構：情境①的這一次呼叫把
+        streak 由 0 推到 1（< 3，dwell 卻早已過了）；情境②先墊到 streak=2、這一次呼叫
+        推到 3（達標），但 dwell 只過了 10 秒（< 360）。
+        """
+        entered = self.NOW
+        # 情境①：streak 只到 1（< exit_streak=3），dwell 早就過了：不准離開。
+        prev = QA.AvailabilityState(QA.AVAILABILITY_UNMEASURED,
+                                    entered.isoformat(timespec="seconds"), 0)
+        nxt = QA.advance(prev, usable=True, now=entered + timedelta(seconds=9999),
+                         exit_streak=3, min_dwell_seconds=360.0)
+        self.assertEqual(nxt.availability, QA.AVAILABILITY_UNMEASURED,
+                         "streak 未達標卻放行——只有 dwell 满足是不夠的")
+        self.assertEqual(nxt.streak, 1, "這一次成功没有被算進 streak")
+        # 情境②：streak 這次推到 3（已達標），但 dwell 只過了 10 秒（< 360）：不准離開。
+        prev2 = QA.AvailabilityState(QA.AVAILABILITY_UNMEASURED,
+                                     entered.isoformat(timespec="seconds"), 2)
+        nxt2 = QA.advance(prev2, usable=True, now=entered + timedelta(seconds=10),
+                          exit_streak=3, min_dwell_seconds=360.0)
+        self.assertEqual(nxt2.availability, QA.AVAILABILITY_UNMEASURED,
+                         "dwell 未滿卻放行——只有 streak 满足是不夠的")
+
+    def test_leaving_succeeds_only_once_both_conditions_hold(self) -> None:
+        """控制組：兩個條件同時滿足時才真的離開——證明上一支鎖不是恆紅（沒有鑑別力）。"""
+        entered = self.NOW
+        prev = QA.AvailabilityState(QA.AVAILABILITY_UNMEASURED,
+                                    entered.isoformat(timespec="seconds"), 1)
+        nxt = QA.advance(prev, usable=True, now=entered + timedelta(seconds=400),
+                         exit_streak=2, min_dwell_seconds=360.0)
+        self.assertEqual(nxt.availability, QA.AVAILABILITY_MEASURED,
+                         "streak 與 dwell 都滿足卻仍不放行")
+        self.assertEqual(nxt.streak, 0, "離開後 streak 沒有歸零")
+
+    # ── 單次量測失敗又立即恢復：不得被誤判成「已經離開」/「快離開了」 ──────────────
+    def test_a_single_blip_recovery_does_not_leave_unmeasured(self) -> None:
+        """`unmeasured` 期間單獨一次 `usable=True`（streak 只到 1）必須仍是 unmeasured
+        ——不是「離開了」，也不會因為只差一次就悄悄放寬判準。"""
+        entered = self.NOW
+        prev = QA.AvailabilityState(QA.AVAILABILITY_UNMEASURED,
+                                    entered.isoformat(timespec="seconds"), 0)
+        nxt = QA.advance(prev, usable=True, now=entered + timedelta(seconds=400),
+                         exit_streak=2, min_dwell_seconds=360.0)
+        self.assertEqual(nxt.availability, QA.AVAILABILITY_UNMEASURED,
+                         "單次成功就被判成已離開——streak 門檻形同虛設")
+
+    def test_a_failure_between_successes_resets_the_streak(self) -> None:
+        """連續對兩次中間夾一次失敗：streak 必須歸零，不能把失敗前後的成功接在一起算。"""
+        entered = self.NOW
+        after_one_success = QA.AvailabilityState(
+            QA.AVAILABILITY_UNMEASURED, entered.isoformat(timespec="seconds"), 1)
+        failed_again = QA.advance(after_one_success, usable=False,
+                                  now=entered + timedelta(seconds=100))
+        self.assertEqual(failed_again.streak, 0, "失敗沒有把 streak 歸零")
+        self.assertEqual(failed_again.entered_at, after_one_success.entered_at,
+                         "仍在同一段 unmeasured 內，entered_at 不該被这次失敗重算"
+                         "（否則會偽造出更短的停留時間）")
+        # 這次失敗之後立刻再成功一次：streak 從 1（不是從 2）開始，仍不足以離開。
+        recovered_once = QA.advance(failed_again, usable=True,
+                                    now=entered + timedelta(seconds=500))
+        self.assertEqual(recovered_once.availability, QA.AVAILABILITY_UNMEASURED,
+                         "夾在中間的失敗沒有真的重置 streak——被誤判成已經連續兩次")
+
+    # ── 持久化：跨行程存活（寫入後重新讀取拿到同一組值） ─────────────────────────
+    def test_persisted_state_survives_a_fresh_read(self) -> None:
+        """`save_state()` 之後另一次 `load_state()`（模擬下一個行程）必須拿回同一組值。"""
+        state = QA.AvailabilityState(QA.AVAILABILITY_UNMEASURED,
+                                     self.NOW.isoformat(timespec="seconds"), 1)
+        path = self.tmp / "state.json"
+        self.assertTrue(QA.save_state(state, path), "原子寫入回報失敗")
+        reloaded = QA.load_state(path, now=self.NOW)
+        self.assertEqual(reloaded, state, "重新讀取拿到的不是剛寫入的那一組值")
+
+    def test_persistence_is_a_single_atomic_replace_not_a_partial_patch(self) -> None:
+        """R7 規範性形態：只留下最終檔，`.tmp` 暫存檔必須在 `save_state()` 回來時已清空
+        （成功路徑靠 `os.replace` 本身清掉暫存名；此鎖確保沒有殘留的半成品檔）。"""
+        path = self.tmp / "state2.json"
+        state = QA.AvailabilityState(QA.AVAILABILITY_MEASURED,
+                                     self.NOW.isoformat(timespec="seconds"), 0)
+        QA.save_state(state, path)
+        self.assertTrue(path.is_file())
+        self.assertFalse(path.with_suffix(path.suffix + ".tmp").exists(),
+                         "暫存檔沒有被 os.replace 清乾淨——不是真正的原子換名")
+
+    def test_a_corrupt_persisted_file_degrades_to_the_safe_default_not_a_crash(self) -> None:
+        """壞掉的舊檔（schema 不符／非 JSON）必須回安全起點，不得拋例外污染呼叫端。"""
+        path = self.tmp / "corrupt.json"
+        path.write_text("not json at all", encoding="utf-8")
+        state = QA.load_state(path, now=self.NOW)
+        self.assertEqual(state.availability, QA.AVAILABILITY_MEASURED)
+
+    # ── R7：持久目錄退回系統暫存時，三件事都必須發生 ────────────────────────────
+    def test_a_reverted_trace_dir_triggers_all_three_r7_behaviours(self) -> None:
+        """(i) loud 一次、(ii) 自檢文字逐字含「遲滯已降級」＋實際路徑、
+        (iii) 該次判定視同 unmeasured——三者必須**同時**成立，不是三選一。"""
+        # 🔴 loud 的 TTL 閂鎖刻意落在系統暫存（見 `_trace_degraded_stamp` 的 WHY：那裡
+        # 此刻才是真的寫得進去的地方），但這代表它是**跨測試行程共用的真實檔案**——
+        # 不隔離會讓「這一輪剛跑過」的舊閂鎖讓下一次呼叫誤判成「TTL 內已經說過了」，
+        # 於是本鎖對「有沒有真的 loud」失去鑑別力。注入到沙箱路徑以保持測試獨立。
+        stamp = self.tmp / "degraded.stamp"
+        with (mock.patch.object(EE.os, "access", return_value=False),
+              mock.patch.object(QA, "_trace_degraded_stamp", return_value=stamp)):
+            fallback = Path(tempfile.gettempdir())
+            dir_path, degraded = EE.trace_dir_status()
+            self.assertTrue(degraded, "測試前提本身不成立：trace_dir 沒有真的退化")
+            self.assertEqual(dir_path, fallback)
+
+            captured: list[str] = []
+            with mock.patch.object(sys.stderr, "write", side_effect=captured.append):
+                result = QA.evaluate(self.NOW, usable=True)  # usable=True 也要被壓成收緊側
+
+        self.assertEqual(result.availability, QA.AVAILABILITY_UNMEASURED,
+                         "(iii) 目錄退化時沒有視同 unmeasured——即使這次量測本身成功")
+        joined = "".join(captured)
+        self.assertIn(QA.DEGRADED_TRACE_PHRASE, joined,
+                     "(ii) 自檢輸出沒有逐字含「遲滯已降級」")
+        self.assertIn(str(fallback), joined, "(ii) 自檢輸出沒有附上退回後的實際路徑")
+        self.assertTrue(captured, "(i) 沒有走既有通知通道 loud 一次（stderr 為空）")
+
+    def test_a_trace_dir_mkdir_oserror_also_triggers_all_three_r7_behaviours(self) -> None:
+        """R102 修復（四方審查 F9/F19/F14①）：H4b 逐字要求兩處退回**各要一格**——  round-label-ok
+        `os.access` 為假只是三元運算那一支，`want.mkdir()` 拋 `OSError` 是完全不同的
+        程式路徑（`endurance_env.trace_dir_status()` 的 try/except 分支），此前結構上
+        零測試覆蓋。斷言內容與上一支鎖完全對稱，只換了退回的觸發點。"""
+        stamp = self.tmp / "degraded-mkdir.stamp"
+        with (mock.patch.object(EE.Path, "mkdir", side_effect=OSError("boom")),
+              mock.patch.object(QA, "_trace_degraded_stamp", return_value=stamp)):
+            fallback = Path(tempfile.gettempdir())
+            dir_path, degraded = EE.trace_dir_status()
+            self.assertTrue(degraded, "測試前提本身不成立：mkdir 沒有真的拋出 OSError")
+            self.assertEqual(dir_path, fallback)
+
+            captured: list[str] = []
+            with mock.patch.object(sys.stderr, "write", side_effect=captured.append):
+                result = QA.evaluate(self.NOW, usable=True)
+
+        self.assertEqual(result.availability, QA.AVAILABILITY_UNMEASURED,
+                         "(iii) mkdir OSError 時沒有視同 unmeasured")
+        joined = "".join(captured)
+        self.assertIn(QA.DEGRADED_TRACE_PHRASE, joined,
+                     "(ii) mkdir OSError 分支的自檢輸出沒有逐字含「遲滯已降級」")
+        self.assertIn(str(fallback), joined, "(ii) 自檢輸出沒有附上退回後的實際路徑")
+        self.assertTrue(captured, "(i) mkdir OSError 分支沒有走既有通知通道 loud 一次")
+
+    def test_a_healthy_trace_dir_does_not_get_the_degradation_notice(self) -> None:
+        """控制組：目錄正常時不准印那句話——否則上一支鎖對「有沒有印」沒有鑑別力。"""
+        captured: list[str] = []
+        with mock.patch.object(sys.stderr, "write", side_effect=captured.append):
+            result = QA.evaluate(self.NOW, usable=True)
+        self.assertNotIn(QA.DEGRADED_TRACE_PHRASE, "".join(captured))
+        self.assertEqual(result.availability, QA.AVAILABILITY_MEASURED)
+
+    def test_evaluate_persists_across_calls_when_the_dir_is_healthy(self) -> None:
+        """`evaluate()` 是接線用的正規入口：目錄正常時，狀態必須真的跨呼叫累積 streak
+        （而不是每次都從 `_default_state` 重來）——這是持久化真的被接上的端到端證據。"""
+        t0 = self.NOW
+        first = QA.evaluate(t0, usable=False)  # 進入 unmeasured
+        self.assertEqual(first.availability, QA.AVAILABILITY_UNMEASURED)
+        second = QA.evaluate(t0 + timedelta(seconds=1), usable=True,
+                             exit_streak=2, min_dwell_seconds=360.0)
+        self.assertEqual(second.availability, QA.AVAILABILITY_UNMEASURED,
+                         "只成功一次就跨行程離開了——persist 沒有真的把 streak 帶到下一次呼叫")
+        third = QA.evaluate(t0 + timedelta(seconds=400), usable=True,
+                            exit_streak=2, min_dwell_seconds=360.0)
+        self.assertEqual(third.availability, QA.AVAILABILITY_MEASURED,
+                         "第二次成功、且 dwell 已滿，仍然沒有真的離開")
+
+
+class ConcurrencyStabilityTest(unittest.TestCase):
+    """R102（第二棒）／PRD §4.2.4(b)(c)(d)：死區／變化率限制／最小停留時間  round-label-ok
+    （`tools/lib/quota_stability.py`）。
+
+    每一支斷言**行為／方向**（同 `AvailabilityHysteresisTest` 的既有風格），涵蓋任務書
+    逐字列出的六項：死區內不變更／死區外按變化率限速／安全方向不受限速／stay time
+    未到不允許增加但允許減少／availability=unmeasured 時放寬全部失效／（第六項＝R16，
+    見 `DynamicPacingBootCheckTest`）。
+    """
+
+    NOW = datetime(2026, 8, 24, 12, 0, 0, tzinfo=UTC)
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="r102_stability_"))
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.addCleanup(os.environ.pop, EE.TRACE_DIR_ENV, None)
+        os.environ[EE.TRACE_DIR_ENV] = str(self.tmp / "traces")
+
+    def _state(self, cap: int, at: datetime | None = None) -> QS.StabilityState:
+        return QS.StabilityState(cap, (at or self.NOW).isoformat(timespec="seconds"))
+
+    # ── (b) 死區：|C_target − C_current| < 1（整數域 ⟺ 相等）⇒ 不變更 ────────────
+    def test_dead_zone_leaves_the_state_object_untouched(self) -> None:
+        prev = self._state(4)
+        nxt = QS.stabilize(prev, 4, Q.BAND_NOTICE, self.NOW + timedelta(seconds=1))
+        self.assertIs(nxt, prev, "目標與目前相同（死區）卻換了一個新物件／新時刻")
+
+    # ── (c) 變化率限制：一般帶最多 ±1，安全帶／量不到可直接到位 ──────────────────
+    def test_loosening_outside_the_dead_zone_advances_by_at_most_one_step(self) -> None:
+        prev = self._state(2)
+        nxt = QS.stabilize(prev, 8, Q.BAND_NOTICE, self.NOW + timedelta(seconds=400))
+        self.assertEqual(nxt.cap, 3, "目標比目前高很多，但一次只准 +1")
+
+    def test_tightening_outside_the_dead_zone_jumps_straight_to_the_target(self) -> None:
+        """R102 修復（四方審查 F1/F15/F16/F23）：PRD §4.2.4(c) v2.1.8 逐字「收緊方向……  round-label-ok
+        不限速，允許直接到位」，沒有帶別限定詞——目標 2、目前 8，notice 帶也要直接到 2，
+        不是被 ±1 變化率卡在 7。此前的實作誤把舊版（v2.0~v2.1.7）「僅升級到
+        DRAINING／FREEZING 才允許直接歸零」的窄例外當成新條文，把這支鎖釘成了錯誤方向
+        （同一筆修復把舊版對應的非安全帶收緊測試改寫成了本測試，方向由「卡 ±1」
+        改成「一步到位」）。"""
+        prev = self._state(8)
+        nxt = QS.stabilize(prev, 2, Q.BAND_NOTICE, self.NOW)
+        self.assertEqual(nxt.cap, 2, "notice 帶（非安全帶）的收緊沒有一步到位")
+
+    def test_safety_band_tightening_jumps_straight_to_the_target_including_zero(self) -> None:
+        """PRD (c)：升級到 DRAINING（prepare）／FREEZING（halt）不限速，可直接歸零
+        ——這兩個帶別只是「收緊不限速」這條規則的其中兩個例子，不是唯一允許的帶別
+        （見上面 `test_tightening_outside_the_dead_zone_jumps_straight_to_the_target`）。"""
+        for band in (Q.BAND_PREPARE, Q.BAND_HALT):
+            with self.subTest(band=band):
+                prev = self._state(8)
+                nxt = QS.stabilize(prev, 0, band, self.NOW)
+                self.assertEqual(nxt.cap, 0, f"{band} 帶的收緊沒有一步到位")
+
+    # ── (d) 最小停留時間：只卡「增加」方向 ───────────────────────────────────────
+    def test_increase_is_refused_before_the_dwell_elapses(self) -> None:
+        prev = self._state(2, at=self.NOW)
+        nxt = QS.stabilize(prev, 4, Q.BAND_NOTICE, self.NOW + timedelta(seconds=100),
+                           min_dwell_seconds=300.0)
+        self.assertIs(nxt, prev, "停留時間還沒到卻放行了增加")
+
+    def test_increase_is_allowed_once_the_dwell_has_elapsed(self) -> None:
+        prev = self._state(2, at=self.NOW)
+        nxt = QS.stabilize(prev, 4, Q.BAND_NOTICE, self.NOW + timedelta(seconds=301),
+                           min_dwell_seconds=300.0)
+        self.assertEqual(nxt.cap, 3, "停留時間已滿卻仍然沒有放行增加（一步 +1）")
+
+    def test_decrease_is_never_gated_by_dwell(self) -> None:
+        """方向鎖：dwell 剛剛才開始算（0 秒），減少仍必須立即生效——(d) 只管「增加」，
+        且 R102 修復後收緊方向本身就是直接到位（不是 ±1），故預期值是目標本身（4）。 round-label-ok"""
+        prev = self._state(8, at=self.NOW)
+        nxt = QS.stabilize(prev, 4, Q.BAND_NOTICE, self.NOW + timedelta(seconds=1))
+        self.assertEqual(nxt.cap, 4, "減少方向被 dwell 卡住了，PRD 逐字只卡『增加』")
+
+    # ── availability=unmeasured 接線：放寬方向全部失效，收緊永遠立即生效 ──────────
+    def test_unmeasured_blocks_any_increase_even_past_the_dwell(self) -> None:
+        prev = self._state(2, at=self.NOW)
+        nxt = QS.stabilize(prev, 8, Q.BAND_NOTICE, self.NOW + timedelta(seconds=99999),
+                           min_dwell_seconds=300.0, unmeasured=True)
+        self.assertIs(nxt, prev, "量不到時放寬方向必須整段失效，dwell 再久都不該放行")
+
+    def test_unmeasured_still_tightens_immediately_and_directly(self) -> None:
+        """量不到時收緊方向「永遠立即生效」——即使帶別不是安全帶，也不受 (c) 的 ±1 限速。"""
+        prev = self._state(8, at=self.NOW)
+        nxt = QS.stabilize(prev, 1, Q.BAND_NOTICE, self.NOW, unmeasured=True)
+        self.assertEqual(nxt.cap, 1, "量不到時的收緊仍被變化率限速卡住，PRD 逐字要求不限速")
+
+    def test_tightening_direct_jump_does_not_depend_on_the_unmeasured_flag(self) -> None:
+        """R102 修復（四方審查 F1/F15/F16/F23）後的更新版控制組：拿掉 `unmeasured=True`，  round-label-ok
+        同一組輸入仍必須直接到位——PRD §4.2.4(c) 的「收緊不限速」判準是 `target < current`
+        本身（見 `test_tightening_outside_the_dead_zone_jumps_straight_to_the_target`），
+        不是靠 `unmeasured` 這個旗標才生效；`unmeasured` 只管**放寬**方向（見
+        `test_unmeasured_blocks_any_increase_even_past_the_dwell`）。此前這支測試斷言
+        `nxt.cap == 7`（受限速），那是與上一支修復同一個根因的誤植，已一併修正。"""
+        prev = self._state(8, at=self.NOW)
+        nxt = QS.stabilize(prev, 1, Q.BAND_NOTICE, self.NOW, unmeasured=False)
+        self.assertEqual(nxt.cap, 1, "measured 狀態下的收緊不該被限速卡住")
+
+    # ── free 帶（`cap=None`）：直接放行、清空持久狀態 ────────────────────────────
+    def test_free_band_bypasses_the_state_machine_entirely(self) -> None:
+        self.assertIsNone(QS.evaluate(None, Q.BAND_FREE, self.NOW))
+
+    def test_free_band_clears_any_prior_persisted_history(self) -> None:
+        """回到 free 之後再進受限帶：必須從第一次收斂重新開始，不沿用舊歷史（見檔頭 WHY）。"""
+        QS.evaluate(2, Q.BAND_PREPARE, self.NOW)  # 建立一段歷史（cap=2）
+        self.assertIsNone(QS.evaluate(None, Q.BAND_FREE, self.NOW + timedelta(seconds=1)))
+        # free 之後第一次回到受限帶：沒有歷史 ⇒ 直接採用這一次的目標（8），不是從 2 爬升。
+        got = QS.evaluate(8, Q.BAND_NOTICE, self.NOW + timedelta(seconds=2))
+        self.assertEqual(got, 8, "free 帶沒有把舊歷史清乾淨，下一次受限判定被舊值污染")
+
+    # ── `evaluate()`：持久化真的跨呼叫累積（不是每次都從無歷史重來） ─────────────
+    def test_evaluate_persists_the_stabilized_cap_across_calls(self) -> None:
+        t0 = self.NOW
+        first = QS.evaluate(2, Q.BAND_PREPARE, t0)
+        self.assertEqual(first, 2)
+        second = QS.evaluate(8, Q.BAND_NOTICE, t0 + timedelta(seconds=301),
+                             min_dwell_seconds=300.0)
+        self.assertEqual(second, 3, "第二次呼叫沒有讀到第一次留下的歷史，直接跳到目標值")
+
+    def test_atomic_write_leaves_no_tmp_file_behind(self) -> None:
+        QS.evaluate(4, Q.BAND_NOTICE, self.NOW)
+        leftovers = list(QS.state_path().parent.glob("*.tmp"))
+        self.assertEqual(leftovers, [], f"原子寫入留下了 tmp 殘影：{leftovers}")
+
+
+class StabilityConstantsTest(unittest.TestCase):
+    """R102（四方審查 F3）：`quota_stability.SAFETY_BANDS` 的檔頭註解逐字宣稱「與  round-label-ok
+    `quota_gate.DRAINING_BANDS` 的同步由本檔的方向鎖測試直接比對兩者相等」——這支就是
+    那個測試（此前該註解指向一支不存在的測試，屬於「文件宣稱與測試不符」的缺陷）。
+    兩個常數未來各自漂移不會被抓到，除了這一支。
+    """
+
+    def test_safety_bands_matches_quota_gate_draining_bands(self) -> None:
+        self.assertEqual(QS.SAFETY_BANDS, frozenset(QG.DRAINING_BANDS),
+                         "SAFETY_BANDS 與 quota_gate.DRAINING_BANDS 已經漂移")
+
+
+#: 獨立行程的 worker：壁鐘 barrier 對齊後，對同一個計數檔做一次「讀 → +1 → 寫」——
+#: 刻意用**非原子**的讀寫（不靠 `with_lock` 以外的任何保護），逼互斥點必須是
+#: `with_lock()` 本身而不是巧合。
+_LOCK_WORKER_SRC = '''
+import sys, time
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import quota_ledger as ql  # noqa: E402
+counter, lock, start = Path(sys.argv[2]), Path(sys.argv[3]), float(sys.argv[4])
+while time.time() < start:      # 壁鐘 barrier：所有行程在同一瞬間被放行
+    pass
+
+
+def _step():
+    n = int(counter.read_text(encoding="utf-8"))
+    counter.write_text(str(n + 1), encoding="utf-8")
+
+
+ql.with_lock(lock, _step)
+'''
+
+
+class LockedReadModifyWriteTest(unittest.TestCase):
+    """R102 修復（四方審查 F24／QA MUST FIX）：`quota_ledger.with_lock()` 必須真的讓  round-label-ok
+    整段讀-算-寫互斥，不能只靠寫入本身原子。用**真正獨立的行程**＋壁鐘 barrier 重現
+    （同 `test_context_budget_guard.py::RefreshSlotConcurrencyTest`／
+    `FanoutLedgerConcurrencyTest` 的既有慣例）——執行緒在 GIL 下無法重現跨行程的
+    check-then-act 競態，這正是本鎖要證明「治得住」的那個情境。
+    """
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="r102_lock_"))
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+
+    def test_twenty_processes_incrementing_under_the_lock_lose_nothing(self) -> None:
+        counter = self.tmp / "counter.txt"
+        counter.write_text("0", encoding="utf-8")
+        lock = self.tmp / "counter.txt.lock"
+        worker = self.tmp / "_lock_worker.py"
+        worker.write_text(_LOCK_WORKER_SRC, encoding="utf-8", newline="\n")
+        lib_dir = str(_REPO / "tools" / "lib")
+        start = str(time.time() + 2.0)
+        procs = [subprocess.Popen(
+            [sys.executable, str(worker), lib_dir, str(counter), str(lock), start],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) for _ in range(20)]
+        for proc in procs:
+            self.assertEqual(proc.wait(timeout=60), 0, "worker 行程本身就跑失敗")
+        self.assertEqual(int(counter.read_text(encoding="utf-8")), 20,
+                         "20 個行程各自 +1，讀回的不是 20——read-modify-write 掉了更新")
+
+    def test_a_lock_left_behind_by_a_dead_holder_does_not_deadlock_the_next_caller(
+            self) -> None:
+        """反向對照：只鎖「互斥」不鎖「孤兒鎖回收」，會做出一個永遠卡死的守衛。模擬持有者
+        中途死掉留下的鎖檔（mtime 早已超過 `stale_after`），下一個呼叫者必須拿得到鎖。"""
+        lock = self.tmp / "orphan.lock"
+        lock.write_text("", encoding="utf-8")
+        stale_mtime = time.time() - 999.0
+        os.utime(lock, (stale_mtime, stale_mtime))
+        result = QL.with_lock(lock, lambda: "ran", stale_after=5.0, max_wait=10.0)
+        self.assertEqual(result, "ran", "孤兒鎖沒有被回收，呼叫端被卡死")
+
+    def test_evaluate_wraps_its_read_modify_write_in_with_lock(self) -> None:
+        """接線面：兩個 `evaluate()` 都必須真的呼叫 `quota_ledger.with_lock()`，不是
+        鎖蓋好沒接電（同 `ConcurrencyDecisionPathWiringTest` 的既有判例）。"""
+        avail_src = (_REPO / "tools" / "lib" / "quota_availability.py").read_text(
+            encoding="utf-8")
+        stability_src = (_REPO / "tools" / "lib" / "quota_stability.py").read_text(
+            encoding="utf-8")
+        self.assertIn("quota_ledger.with_lock(", avail_src,
+                      "quota_availability.evaluate() 沒有用 with_lock 互斥 RMW")
+        self.assertIn("quota_ledger.with_lock(", stability_src,
+                      "quota_stability.evaluate() 沒有用 with_lock 互斥 RMW")
+
+
+class DynamicPacingBootCheckTest(unittest.TestCase):
+    """R16／PRD §15.7：動態配速跨模組不變式（H6／H7）的啟動自檢
+    （`tools/lib/quota_boot_check.py`）。三種越界情境各自觸發拒絕 ＋ 一個健康控制組。
+    """
+
+    #: 與 `.env.example` 出廠值逐格對齊（180／360／900／300），確保「什麼都沒調」時
+    #: 這條自檢本身是綠的——若這組值都不過，代表自檢的門檻本身而非任何注入值有問題。
+    _OK = {"cache_ttl_seconds": 180.0, "sentinel_interval_seconds": 900.0,
+           "fanout_window_seconds": 300.0, "step_median_wall_seconds": 60.0}
+
+    def test_the_shipped_defaults_pass_every_invariant(self) -> None:
+        problems = QBC.dynamic_pacing_invariant_problems(360.0, **self._OK)
+        self.assertEqual(problems, [], f"出廠值本身就不自洽：{problems}")
+
+    def test_h6_rejects_a_dwell_below_the_cache_ttl(self) -> None:
+        kw = dict(self._OK)
+        problems = QBC.dynamic_pacing_invariant_problems(100.0, **kw)  # < cache_ttl 180
+        self.assertTrue(any(p.startswith("[H6]") for p in problems),
+                        f"dwell 低於 cache_ttl 卻沒有觸發 H6：{problems}")
+
+    def test_h6_rejects_a_dwell_above_the_sentinel_interval(self) -> None:
+        kw = dict(self._OK)
+        problems = QBC.dynamic_pacing_invariant_problems(1000.0, **kw)  # > sentinel 900
+        self.assertTrue(any(p.startswith("[H6]") for p in problems),
+                        f"dwell 高於 sentinel_interval 卻沒有觸發 H6：{problems}")
+
+    def test_h7_rejects_a_fanout_window_narrower_than_the_cache_ttl(self) -> None:
+        kw = dict(self._OK)
+        kw["fanout_window_seconds"] = 100.0  # < cache_ttl 180
+        problems = QBC.dynamic_pacing_invariant_problems(360.0, **kw)
+        self.assertTrue(any(p.startswith("[H7]") for p in problems),
+                        f"fanout_window 比 cache_ttl 還快卻沒有觸發 H7：{problems}")
+
+    def test_h7_rejects_a_fanout_window_below_twice_the_step_median(self) -> None:
+        kw = dict(self._OK)
+        kw["step_median_wall_seconds"] = 200.0  # 2× = 400 > fanout_window 300
+        problems = QBC.dynamic_pacing_invariant_problems(360.0, **kw)
+        self.assertTrue(any(p.startswith("[H7]") for p in problems),
+                        f"fanout_window 不到 2×Step 中位時間卻沒有觸發 H7：{problems}")
+
+    # ── §6.1 不變式 4 後半：AVAILABILITY_EXIT_STREAK ≥ 2（R102 修復，四方審查 F5/F17/F25）  round-label-ok
+    def test_h6_rejects_an_exit_streak_below_two(self) -> None:
+        kw = dict(self._OK)
+        kw["availability_exit_streak"] = 1
+        problems = QBC.dynamic_pacing_invariant_problems(360.0, **kw)
+        self.assertTrue(any(p.startswith("[H6]") and "EXIT_STREAK" in p for p in problems),
+                        f"exit_streak=1 卻沒有觸發 H6 的後半段：{problems}")
+
+    def test_the_default_exit_streak_passes_when_the_caller_injects_nothing(self) -> None:
+        """控制組：不注入 `availability_exit_streak` 時走函式簽章預設值 2，必須通過
+        ——證明上一支鎖不是恆紅，且預設值本身不違反不變式（預設值只補「沒有值可餵」的
+        情境，不是「越界時靜默退回」，見函式 docstring）。"""
+        problems = QBC.dynamic_pacing_invariant_problems(360.0, **self._OK)
+        self.assertEqual(problems, [])
+
+    def test_validate_entry_point_catches_a_directly_constructed_policy_bypassing_env(
+            self) -> None:
+        """🔴 這是本修復要堵的那個洞：`quota_policy_env.py` 的 `EnvVar(lo=2.0)` 只擋
+        `.env` 解析路徑，任何直接 `Policy(availability_exit_streak=1)` 建構點會完全繞過
+        它——但接進 `validate_dynamic_pacing_invariants()` 之後必須被攔下。"""
+
+        class _BypassPolicyModule:
+            @staticmethod
+            def load_policy(_env):
+                return (dataclasses.replace(Q.DEFAULT_POLICY, availability_exit_streak=1), [])
+
+        class _BypassGate:
+            QUOTA_CACHE_TTL_SECONDS = 180.0
+            FANOUT_WINDOW_SECONDS = 300.0
+            quota_policy = _BypassPolicyModule
+
+            @staticmethod
+            def policy_env():
+                return {}
+
+        problems = QBC.validate_dynamic_pacing_invariants(_BypassGate(), 900.0)
+        self.assertTrue(any(p.startswith("[H6]") and "EXIT_STREAK" in p for p in problems),
+                        f"直接構造的越界 Policy 沒有被 R16 自檢攔下：{problems}")
+
+    def test_validate_entry_point_delegates_to_the_same_pure_problems_list(self) -> None:
+        """`validate_dynamic_pacing_invariants()` 是接線入口：注入一個假的 `gate` 模組，
+        驗證它真的把三個常數與 `Policy.availability_min_dwell_seconds`／
+        `.availability_exit_streak` 餵進同一份判準——不是另外重寫一份邏輯
+        （同一份知識只有一個家）。"""
+
+        class _FakeGate:
+            QUOTA_CACHE_TTL_SECONDS = 180.0
+            FANOUT_WINDOW_SECONDS = 300.0
+            quota_policy = Q
+
+            @staticmethod
+            def policy_env():
+                return {}
+
+        problems = QBC.validate_dynamic_pacing_invariants(_FakeGate(), 900.0)
+        self.assertEqual(problems, [], f"用真實預設值注入卻回報越界：{problems}")
+        bad = QBC.validate_dynamic_pacing_invariants(_FakeGate(), 100.0)  # sentinel<180
+        self.assertTrue(any(p.startswith("[H6]") for p in bad))
+
+
+class ConcurrencyDecisionPathWiringTest(unittest.TestCase):
+    """接線面：`quota_stability`／`quota_availability` 必須真的被**呼叫**，不是蓋好沒接電
+    （同 repo 既有『函式對了但沒人叫它』判例，見 `quota_policy.py` 對 M10 的引用）。
+
+    源碼檢查而非完整 E2E：`quota_gate()`／`pace_report()` 都依賴一整條全域暫存路徑
+    （`quota_ledger`／`quota_meter` 快取檔），完整 E2E 需要重建那整條環境；本鎖對
+    「接線存在」有鑑別力（改壞任何一邊都會紅），機制本體的行為鑑別力由
+    `ConcurrencyStabilityTest`／`AvailabilityHysteresisTest` 承擔。
+    """
+
+    _SRC = (_REPO / "tools" / "lib" / "quota_gate.py").read_text(encoding="utf-8")
+
+    def _body_of(self, func_name: str) -> str:
+        start = self._SRC.index(f"def {func_name}(")
+        rest = self._SRC[start:]
+        nxt = rest.find("\ndef ", 1)  # 找不到（本函式是檔案最後一個 def）⇒ 到檔尾
+        return rest if nxt == -1 else rest[:nxt]
+
+    def test_quota_gate_calls_both_the_availability_and_stability_layers(self) -> None:
+        body = self._body_of("quota_gate")
+        self.assertIn("quota_availability.evaluate(", body,
+                      "quota_gate() 沒有呼叫可得性軸遲滯 ⇒ (a) 沒有真的接進派發路徑")
+        self.assertIn("quota_stability.evaluate(", body,
+                      "quota_gate() 沒有呼叫平穩性機制 ⇒ (b)(c)(d) 沒有真的接進派發路徑")
+
+    def test_pace_report_calls_both_layers_before_writing_the_engine_contract(self) -> None:
+        body = self._body_of("pace_report")
+        self.assertIn("quota_stability.evaluate(", body,
+                      "pace_report() 沒有套用平穩性機制 ⇒ 引擎讀到的 pace_contract 仍是"
+                      "未平穩化的原始 cap")
+        self.assertLess(body.index("quota_stability.evaluate("),
+                        body.index("pace_contract.write("),
+                        "平穩化必須發生在寫入引擎契約**之前**，否則引擎讀到的是舊值")
 
 
 if __name__ == "__main__":

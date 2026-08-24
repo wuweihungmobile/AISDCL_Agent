@@ -695,7 +695,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 537,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 6070,
+    "test_adr_xplat001_c1c2_lock.py": 6086,
     "test_archive_defect_log.py": 4008,
     "test_bash32_compat.py": 970,
     "test_bash_probe_spec_contract.py": 983,
@@ -710,7 +710,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_check_wrapper_thinness.py": 1234,
     "test_claim_provenance_r86.py": 618,
     "test_component_sanitizer_shared_layer_lock.py": 293,
-    "test_context_budget_guard.py": 8081,
+    "test_context_budget_guard.py": 8092,
     "test_defect_id_reference_integrity.py": 261,
     "test_dev_start.py": 6910,
     "test_dev_start_ps1_lastexitcode.py": 548,
@@ -740,7 +740,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_ps51_compat.py": 565,
     "test_ps_engine_ssot.py": 954,
     "test_python_c_percent_shim.py": 119,
-    "test_quota_policy.py": 2432,
+    "test_quota_policy.py": 2993,
     "test_root_infra_parity.py": 441,
     "test_run_root_unittests.py": 2190,
     "test_sanitize_component_frozen_sdd_versions_lock.py": 340,
@@ -1051,6 +1051,19 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "不計入款(10)(11)，同輪一併兌現 `_REPIN_NET_CAP_DUE_ROUND` 到期義務。"
      "合法出口逐條實查：刪死碼不適用、抽共用層不適用（詳見理由）。"
      "逐檔清單與必要性辯護見 CrossPlatform_R101_Scan_Findings.md。"),
+    ("R102", 87784, 88356, 572,
+     "[非淨減法輪] DEF-200-204 新增 PRD §4.2.4 動態配速平穩性機制的合法功能成長（四方"
+     "終審 4/4 APPROVE_WITH_FIXES）：`test_quota_policy.py` +561（可得性軸遲滯／死區·"
+     "變化率限制·最小停留時間／啟動自檢的回歸測試，2432→2993）、"
+     "`test_context_budget_guard.py` +11（同批持久狀態隔離治具）。淨額 572 < 該輪上限"
+     " 750（`net_cap_for_round(102)`），且緊接 R101 的一次性核准例外之後——"
+     "`repin_growth_problems()` 的連續上升計數在核准輪重置為零，本輪視為 streak 第 1 "
+     "輪，未撞款(11)。無需 `_REPIN_APPROVED_ROUND_OVERAGE` 例外。逐檔清單見 "
+     "CrossPlatform_R102_Scan_Findings.md。"),
+    ("R102", 88356, 88372, 16,
+     "[非淨減法輪] 本檔自身逐檔漂移——來源是上一列新增的稽核列本身，同 R95~R98 既有"
+     "體例（合法出口逐條實查：無死碼可刪、純數字與註解無可抽結構）。逐檔清單見 "
+     "CrossPlatform_R102_Scan_Findings.md。"),
 )
 
 
@@ -1253,10 +1266,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 47
+_REPIN_LOG_FROZEN_PREFIX_LEN = 49
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "44008855c9e8da3ec2a5d2fce9ec49ea9464eccf21d52ed810647477859a40c4")
+    "c44b6a066da8fec7dc27f0218d4ed7e98b33411f6b45280f8a3aa1969a8740ce")
 
 
 def repin_log_history_digest(
@@ -1289,7 +1302,10 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # 「追加後立即自我凍結」——見 `_REPIN_LOG_FROZEN_PREFIX_LEN` 旁註），此前既有
     # 前綴內容逐字未動，但 `prefix_len` 本身改變即讓 `repin_log_history_digest()`
     # 算出不同指紋，故仍須在此留痕（判準不分辨「延伸」與「改寫」，兩者都是指紋變動）。
-    ("R101", "423d63fddc0a", "44008855c9e8", "DEF-200-208"),)
+    ("R101", "423d63fddc0a", "44008855c9e8", "DEF-200-208"),
+    # DEF-200-204：R102 收尾重釘，同 R101 體例「追加後立即自我凍結」——本輪追加兩列 round-label-ok
+    # （功能成長 +572 ＋ 本檔自身編修 +11），prefix_len 47→49 涵蓋兩列本身。
+    ("R102", "44008855c9e8", "c44b6a066da8", "DEF-200-204"),)
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。
 #: 往後指紋每變一次，都要能從本值出發、經 `_FROZEN_PREFIX_REWRITE_LEDGER` 逐列鏈接

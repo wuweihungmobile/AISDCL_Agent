@@ -84,6 +84,7 @@ sys.path.insert(0, str(_REPO_ROOT / ".claude" / "hooks"))
 # （下面兩段被 ruff 的 isort 判為不同 section：`.claude/hooks` 不在其 src 內 ⇒ 視為
 #   第三方；`tools/` 內的則是 first-party。分段是它要的形狀，不是隨手排的。）
 import context_budget_guard as guard  # noqa: E402  # 水位判定唯一實作（見上方 WHY）
+import quota_boot_check  # noqa: E402  # R102／R16：啟動自檢（H6／H7），見該檔檔頭 WHY  round-label-ok
 import quota_escalation as escalation  # noqa: E402  # R81：叫人＋扇出清單（R84／ARCH-10：改裸名）
 import quota_gate  # noqa: E402  # R84／SA-02：`--pace` 的內容產生者（額度判讀唯一入口）
 import quota_reconcile  # noqa: E402  # R100：`--reconcile` 的判準（輸入面出處守衛）
@@ -1457,6 +1458,11 @@ def main(argv: list[str]) -> int:
     # 求值。同 hook `main()` 既有的前置填充（`.claude/hooks/context_budget_guard.py`），
     # 缺席才填、真環境變數仍然贏。
     quota_gate.apply_env_defaults(os.environ)
+    # R16 啟動自檢（H6／H7；見 quota_boot_check.py 檔頭 WHY 落點）：越界即拒絕。
+    if (r16 := quota_boot_check.validate_dynamic_pacing_invariants(
+            quota_gate, SENTINEL_INTERVAL_SECONDS)):
+        print("❌ R16 啟動自檢失敗：\n" + "\n".join(r16), file=sys.stderr)
+        return 2
     args = build_parser().parse_args(argv)
 
     if args.sentinel_tick:

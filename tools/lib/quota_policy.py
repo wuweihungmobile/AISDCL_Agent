@@ -240,6 +240,26 @@ class Policy:
     # 「任何超前即減速」的現行行為（見 `quota_pace.burn_step` 的三條結構方向鎖）。
     pace_ceiling: float = 1.0
     fanout_cap_override: int | None = None
+    # 🔴 R102／PRD §4.2.4(a)：可得性軸（`measured`/`unmeasured`）遲滯的兩個門檻。  round-label-ok
+    # 消費端是 `tools/lib/quota_availability.py::advance()`（純函式，注入這兩個值）
+    # ——不是 `decide()` 本身，本欄新增**不改動**任何既有 `decide()` 呼叫路徑的行為。
+    # 新增欄位帶預設值：既有建構點皆傳位置參數在前，本欄排最後，逐字不影響任何一處
+    # （同 `degraded_cap`／`account_key` 的既有先例）。
+    availability_exit_streak: int = 2
+    # 🔴 PRD R15 不變式：`QUOTA_CACHE_TTL_SECONDS(180) ≤ 本值 ≤ SENTINEL_INTERVAL_SECONDS
+    # (900)`（後者見 `tools/session_resume_planner.py`）。出廠值取兩者之間、且是
+    # `QUOTA_CACHE_TTL_SECONDS` 的整數倍（兩個完整刷新週期才判定「真的回來了」）——
+    # 刻意**不**在本檔 import 那兩個常數來現查：`Policy` 是零 I/O 純資料，那兩個常數各自
+    # 住在 `quota_gate.py`／`session_resume_planner.py`，回頭 import 任一邊都會造成本檔
+    # 依賴一個**會執行 I/O 的模組**。這條不變式的機械驗證（R16／H6：任一值越界即拒絕
+    # 啟動）留給後續任務——本欄只交付「值本身可由 `.env` 調」，見 `quota_availability.py`
+    # 檔頭〈誠實劃界〉。
+    availability_min_dwell_seconds: float = 360.0
+    # 🔴 R102／PRD §4.2.4(d)：併發上限「增加」方向的最小停留時間。消費端＝  round-label-ok
+    # `tools/lib/quota_stability.py::stabilize()`（純函式，注入這個值）——同
+    # `availability_min_dwell_seconds` 的既有先例，`decide()` 本身不吃這個欄位、
+    # 不因本欄新增而改變任何既有呼叫路徑的輸出。PRD 逐字出廠值 300 秒。
+    min_dwell_seconds: float = 300.0
 
 
 DEFAULT_POLICY = Policy()

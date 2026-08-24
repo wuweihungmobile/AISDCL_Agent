@@ -97,6 +97,22 @@ ENV_SPEC: tuple[EnvVar, ...] = (
     # 於是結構（`attr`／`kind`）與渲染分節不再互相矛盾。
     EnvVar("AUTOSDD_QUOTA_FANOUT_CAP", "fanout_cap_override", None, "int", 1.0, None,
            "節流帶 cap 的**上限**覆寫（留空＝不覆寫）：只收緊不放寬，halt 帶不吃", "policy"),
+    # 🔴 R102／PRD §4.2.4(a)：可得性軸遲滯的兩個門檻，消費端＝  round-label-ok
+    # `tools/lib/quota_availability.py::advance()`（不進 `decide()`）。`lo=2.0` 直接把
+    # PRD 原文「≥2」焊進解析層：越界值一律退回預設，同本檔對其餘政策鍵的既有紀律。
+    EnvVar("AUTOSDD_QUOTA_AVAILABILITY_EXIT_STREAK", "availability_exit_streak", 2, "int",
+           2.0, None, "離開 unmeasured 前需連續幾次量得到（PRD §4.2.4(a)：≥2）", "policy"),
+    EnvVar("AUTOSDD_QUOTA_AVAILABILITY_MIN_DWELL_SECONDS", "availability_min_dwell_seconds",
+           360.0, "float", 0.0, None,
+           "離開 unmeasured 前至少停留幾秒（不變式：QUOTA_CACHE_TTL_SECONDS ≤ 本值 ≤ "
+           "SENTINEL_INTERVAL_SECONDS，PRD R15／R16；兩個常數的現查見那兩支檔）", "policy"),
+    # 🔴 R102／PRD §4.2.4(d)：併發上限**增加**方向的最小停留時間（消費端＝  round-label-ok
+    # `tools/lib/quota_stability.py::stabilize()`）。「減少」方向不受本鍵約束（PRD 逐字：
+    # 「僅『增加』方向」）；下界 0 是保守 fail-open（設 0 等於關掉這一道 dwell，行為退回
+    # 純變化率限制，不是本檔判定壞值的資格）。
+    EnvVar("AUTOSDD_QUOTA_MIN_DWELL_SECONDS", "min_dwell_seconds", 300.0, "float", 0.0, None,
+           "併發上限「增加」方向的最小停留時間（PRD §4.2.4(d)；「減少」方向不受此限）",
+           "policy"),
     # 🔴 R95／Pkg-D 交棒的註冊補位：消費者＝`tools/session_resume_planner.py` 的
     # choose_resume_route() os.environ 直讀（attr=None 不進 Policy）；選值見 Resume 證據檔 §2。
     EnvVar("AUTOSDD_RESUME_MAX_TRANSCRIPT_BYTES", None, None, "int", 1.0, None,

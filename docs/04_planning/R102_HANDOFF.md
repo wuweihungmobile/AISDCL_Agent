@@ -1,0 +1,94 @@
+# R102 交棒書（收尾單人窗口）
+
+<!-- guard-total:R102 --> **本輪護欄層累積淨額（稽核痕跡合計）＝ 87784 → 88372（+588）**
+——逐檔清單見 [`CrossPlatform_R102_Scan_Findings.md`](../06_quality/CrossPlatform_R102_Scan_Findings.md)。
+
+- **輪次**：R102（與 R101 治理修憲並行進行；DEF-200-204 四方終審 4/4 `APPROVE_WITH_FIXES`
+  於 R101 commit 之後由收尾單人窗口併入護欄層重釘）
+- **性質**：收斂輪——把並行完成的 PRD §4.2.4 動態配速平穩性機制併入受監測樹，並修復
+  該批工作暴露的三個跨檔案缺口（幽靈符號殘留引用、護欄層淨額未重釘、帳本輪次標籤超前）
+
+---
+
+## §1 已驗證什麼（逐字實測輸出 ＋ rc；不採信任何未附輸出的宣稱）
+
+### 1.1 幽靈符號殘留引用（`test_quota_policy.py` docstring 誤指已改名的測試函式）
+
+見主控交件回報逐字貼出的 RED／GREEN 輸出與 rc（
+`tools.tests.test_doc_loc_baseline_freshness_r60.TestR78GhostSymbolClaims.test_no_new_ghost_symbols`）；
+本檔不重複貼一份會漂移的複本。
+
+### 1.2 護欄層重釘（DEF-200-204 功能成長 572 ＋ 本檔自身編修 16，合計 +588）
+
+重釘後自我覆核（`--print-guard-lines`）：
+
+```
+# 淨額 88372→88372 (+0)
+# 逐檔漂移 0 支（淨額為 0 時本行仍會說話——那正是 R79 補它的理由）
+```
+
+淨額 588 由 `_GUARD_LINES_REPIN_LOG` 兩筆 R102 列合計而來（572 + 16），逐檔清單見
+`CrossPlatform_R102_Scan_Findings.md` §B。`net_cap_for_round(102)` ＝ 750，588 < 750，
+未觸及款(10)；緊接 R101 一次性核准例外之後，連續上升計數在核准輪重置為零，本輪為
+streak 第 1 輪，未觸及款(11)——無需 `_REPIN_APPROVED_ROUND_OVERAGE` 例外，
+`net_cap_for_round()`／`_REPIN_MAX_CONSECUTIVE_RISING_ROUNDS` 等棘輪常數本體逐字未動。
+
+### 1.3 帳本輪次標籤超前（DEF-200-204 程式碼多處自稱 R102，帳本當前輪原停在 R100）
+
+實測發現：把帳本「發現情境」欄的當前輪正式推進到 R102（例如補一筆發現情境含 `R102`
+的索引列）會**連帶**讓硬規則②（孤兒承接輪次）對 41 筆既有「承接輪次：R101」等舊列
+同時轉紅——那是一次獨立的「推輪帳本維護」工作（同型前例：`DEF-200-106`），不是這批
+散文標籤修復的射程。故本輪改採**同行具名豁免**（`round-label-ok`，同 R101 commit 對
+自身 R101 引用的既有作法）：對 `tools/lib/quota_availability.py`／`quota_stability.py`／
+`quota_boot_check.py`／`quota_gate.py`／`quota_ledger.py`／`quota_policy.py`／
+`quota_policy_env.py`／`endurance_env.py`／`governance_docs.py`／
+`session_resume_planner.py`／`test_quota_policy.py`／`test_context_budget_guard.py`
+共 38 處提及 `R102` 的散文行逐一加上豁免標記，`current_round()` 本身維持 R100 不動。
+另把 `DEF-200-204` 原列狀態欄改寫為 `fixed@R102`，誠實反映本輪實際交付與殘留
+（H1 fixture 未落地、啟動自檢 60 秒佔位值待 P0 觀測資料校準），順帶讓未結列存量
+由 97 降為 96。
+
+---
+
+## §2 全檔總覽
+
+```
+python -m unittest tools.tests.test_quota_policy tools.tests.test_context_budget_guard tools.tests.test_adr_xplat001_c1c2_lock -v
+python tools/check_defect_log_crossref.py
+```
+
+見主控交件回報逐字貼出的完整輸出與 rc；本檔不重複貼一份會漂移的複本（同
+`_PHASE2_REVIEW_LOG` 一份知識一個家的紀律）。
+
+---
+
+## §3 還沒做什麼
+
+- **H1 fixture 未落地**——H2~H7 已有回歸測試覆蓋，H1 的測試夾具本輪未補齊，已記於
+  `DEF-200-204` 狀態欄，未另開新列（帳本未結列存量已逼近 warn 線，見
+  `--unresolved-count` 現查）。
+- **啟動自檢 60 秒佔位值待校準**——`session_resume_planner.py` 的 H6／H7 目前為工程估計
+  值，非量測值，待 P0 觀測資料回填後才能改為量測校準值。
+- ADR-XPLAT-013 §7 的 U1~U7（四方獨立審查打勾）仍未執行，`R101_HANDOFF.md` §3 已承接
+  至 R102，本輪窗口未觸碰（範圍外）。
+- 🔴 **既存失敗、非本輪造成**：`TestPricingChangeExemptionExpiresOnItsOwn.
+  test_the_exemption_is_green_only_inside_its_own_round` 目前紅（`[豁免過期]`）。
+  已實測確認：把 `live_repin_round()` 固定成 R101（本輪落地前的既有磁碟狀態）一樣紅，
+  因為 `AutoClaude/.loc_baseline` 的 provenance 至今仍是 `None`——`R101_HANDOFF.md` §1.1
+  已明文「該執行明確留給 R102」（`python AutoClaude/tools/check_loc_budget.py --update`）
+  但尚未有人執行。本輪射程不含此項，未動它。
+
+## §4 下一步的確切指令
+
+```bash
+python -m unittest tools.tests.test_quota_policy tools.tests.test_context_budget_guard tools.tests.test_adr_xplat001_c1c2_lock -v
+python tools/check_defect_log_crossref.py
+```
+
+## §5 禁止事項
+
+- 不准調整 `net_cap_for_round()`／`_REPIN_MAX_CONSECUTIVE_RISING_ROUNDS`／
+  `_REPIN_ROUND_CAP_SINCE`／`UNRESOLVED_ROWS_WARN`／`UNRESOLVED_ROWS_FAIL`／
+  `ROW_MAX_BYTES` 等棘輪常數本體。
+- 不准把 H1 fixture／啟動自檢佔位值的殘留另開帳本新列以外的方式悄悄結案（例如把
+  `DEF-200-204` 狀態欄寫成完全體 `fixed` 卻不提殘留）。
