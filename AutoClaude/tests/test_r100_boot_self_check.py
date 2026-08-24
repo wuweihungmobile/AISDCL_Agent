@@ -236,7 +236,8 @@ def test_g6_the_verified_list_travels_with_the_clone():
     root = Path(__file__).resolve().parents[2]
     rel = "AutoClaude/autoclaude/utils/verified_cli_versions.py"
     tracked = subprocess.run(
-        ["git", "-C", str(root), "ls-files", "--error-unmatch", rel],
+        ["git", "-C", str(root), "-c", "core.quotepath=false",
+         "ls-files", "--error-unmatch", rel],
         capture_output=True, text=True, check=False,
         encoding="utf-8", errors="replace").returncode == 0
     if tracked:

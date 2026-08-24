@@ -4613,7 +4613,7 @@ def _TRACE_ISOLATION(test: unittest.TestCase) -> tuple:  # noqa: N802 — 與同
     # 🔴 R84 第三格（`refresh_stamp_path`）＋ R86 第四格（`burn_ledger_path`，持久目錄
     # ⇒ 漏關會汙染下一次真派工決策）。兩格立案全文＝Resume 證據檔 §L-4.11
     # （目錄前綴刻意不寫的分桶理由也在那裡）。
-    # 🔴 R102：`quota_availability`／`quota_stability` 的持久狀態（可得性遲滯／併發上限  round-label-ok
+    # 🔴 R102：`quota_availability`/`quota_stability` 的持久狀態（可得性遲滯/併發上限 round-label-ok
     # 平穩性）住 `endurance_env.trace_dir()`，**不是**上面四格那種可個別 swap 的
     # `qg.<name>` 函式——那兩個模組的 `evaluate()` 直接呼叫 `endurance_env.trace_dir()`
     # 本身（R7 的退化偵測就掛在這一呼叫上，不能繞過，否則退化偵測本身就測不到）。
@@ -4621,7 +4621,7 @@ def _TRACE_ISOLATION(test: unittest.TestCase) -> tuple:  # noqa: N802 — 與同
     # AvailabilityHysteresisTest.setUp` 的既有作法）：把它一起收進本共用格，讓已經在
     # 用 `_TRACE_ISOLATION(self)` 的六個類別自動獲得隔離，不必逐一補寫。少了這一格，
     # 這兩個模組會把真實開發機的 `~/.autosdd/traces/autosdd_quota_{availability,
-    # stability}.json` 讀出來、跨測試互相污染 cap／streak（R102 接線當回合實測抓到）。  round-label-ok
+    # stability}.json` 讀出來、跨測試互相污染 cap/streak（R102 接線當回合實測抓到）。 round-label-ok
     os.environ[endurance_env.TRACE_DIR_ENV] = str(test.tmp / "traces")
     test.addCleanup(os.environ.pop, endurance_env.TRACE_DIR_ENV, None)
     return (("quota_trace_path", lambda: test.tmp / "trace.jsonl"),

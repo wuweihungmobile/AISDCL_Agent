@@ -81,7 +81,7 @@ def test_the_vocabulary_recognises_the_real_forms(text):
     # 🔴 假紅控制組：這些都含「429」的字面，但沒有一個是撞線。
     # 判準若退回 `"429" in text`，本組會全部轉紅——而假紅會讓整道判準被關掉。
     'File "runner.py", line 429, in main',
-    "4290 passed, 62 skipped",
+    "4290 passed, 62 skipped",  # baseline-ok: 反例引文（引的是會誤命中的形態，不是基線值）
     "AssertionError: assert x == 429",
     "commit 429abc0 deadbeef",
     "",

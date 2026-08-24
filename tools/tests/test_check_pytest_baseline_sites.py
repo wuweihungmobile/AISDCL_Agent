@@ -207,6 +207,8 @@ class TestRealRepoConfigPinning(unittest.TestCase):
                 "tools/tests/test_claim_provenance_r86.py",
                 # R100：`4290 passed` 是「不可用子字串比」的反例引文，非基線值；納管＋行內豁免並用。
                 "AutoClaude/autoclaude/core/ports/quota_meter.py",
+                # R100 收尾（R102 補漏）：同一反例引文也在其回歸測試裡。  round-label-ok
+                "AutoClaude/tests/test_r100_quota_refusal_false_positive.py",
                 "CLAUDE.md",
                 "ONBOARDING.md",
                 "useMacWin.md",

@@ -1,6 +1,6 @@
 # R102 交棒書（收尾單人窗口）
 
-<!-- guard-total:R102 --> **本輪護欄層累積淨額（稽核痕跡合計）＝ 87784 → 88372（+588）**
+<!-- guard-total:R102 --> **本輪護欄層累積淨額（稽核痕跡合計）＝ 87784 → 88387（+603）**
 ——逐檔清單見 [`CrossPlatform_R102_Scan_Findings.md`](../06_quality/CrossPlatform_R102_Scan_Findings.md)。
 
 - **輪次**：R102（與 R101 治理修憲並行進行；DEF-200-204 四方終審 4/4 `APPROVE_WITH_FIXES`
@@ -47,6 +47,8 @@ streak 第 1 輪，未觸及款(11)——無需 `_REPIN_APPROVED_ROUND_OVERAGE` 
 另把 `DEF-200-204` 原列狀態欄改寫為 `fixed@R102`，誠實反映本輪實際交付與殘留
 （H1 fixture 未落地、啟動自檢 60 秒佔位值待 P0 觀測資料校準），順帶讓未結列存量
 由 97 降為 96。
+<!-- absent-if: def test_h1_ -->（H2~H7 在 `test_quota_policy.py` 皆循
+`def test_h6_…`／`def test_h7_…` 命名；H1 落地時比照同一命名慣例，此字面才會現身）
 
 ---
 
@@ -67,10 +69,14 @@ python tools/check_defect_log_crossref.py
 - **H1 fixture 未落地**——H2~H7 已有回歸測試覆蓋，H1 的測試夾具本輪未補齊，已記於
   `DEF-200-204` 狀態欄，未另開新列（帳本未結列存量已逼近 warn 線，見
   `--unresolved-count` 現查）。
+  <!-- absent-if: def test_h1_ -->（同 §1.3 註記：H1 落地時比照 H2~H7 的
+  `def test_h6_…`／`def test_h7_…` 命名慣例，此字面才會現身）
 - **啟動自檢 60 秒佔位值待校準**——`session_resume_planner.py` 的 H6／H7 目前為工程估計
   值，非量測值，待 P0 觀測資料回填後才能改為量測校準值。
 - ADR-XPLAT-013 §7 的 U1~U7（四方獨立審查打勾）仍未執行，`R101_HANDOFF.md` §3 已承接
-  至 R102，本輪窗口未觸碰（範圍外）。
+  至 R102，本輪窗口未觸碰（範圍外）。現查：
+  `python -c "import pathlib; print(pathlib.Path('docs/04_planning/ADR/ADR-XPLAT-013-loc-pricing-assertion-only.md').read_text(encoding='utf-8').count('未進行'))"`
+  應 > 0（U1~U4 逐列仍是「未進行」）。
 - 🔴 **既存失敗、非本輪造成**：`TestPricingChangeExemptionExpiresOnItsOwn.
   test_the_exemption_is_green_only_inside_its_own_round` 目前紅（`[豁免過期]`）。
   已實測確認：把 `live_repin_round()` 固定成 R101（本輪落地前的既有磁碟狀態）一樣紅，

@@ -1,7 +1,7 @@
 # CrossPlatform R102 — 掃描發現與逐檔清單（DEF-200-204 PRD §4.2.4 平穩性機制交付）
 
-<!-- guard-total:R102 --> **本輪護欄層累積淨額（稽核痕跡合計）＝ 87784 → 88372（+588）**
-——逐檔清單見下方〈§B 逐檔清單〉。
+<!-- guard-total:R102 --> **本輪護欄層累積淨額（稽核痕跡合計）＝ 87784 → 88387（+603）**
+——逐檔清單見下方〈§B 逐檔清單〉與〈§D DEF-200-218 逐檔清單〉。
 
 - **輪次**：R102（與 R101 治理修憲並行進行，R101 先落地；本輪收尾單人窗口把 DEF-200-204
   的並行成果併入護欄層重釘）
@@ -37,6 +37,8 @@
 ---
 
 ## §B 逐檔清單（護欄層 87784 → 88372，+588）
+（本節記載本輪原始交付；R102 收尾追加的 DEF-200-218 修復見下方〈§D〉，兩節合計
+即上方 guard-total 引用的 87784 → 88387，+603。）
 
 本輪淨額由兩部分組成：
 
@@ -68,3 +70,46 @@ streak 第 1 輪，未觸及款(11)。無需 `_REPIN_APPROVED_ROUND_OVERAGE` 例
 - `docs/04_planning/R102_HANDOFF.md`
 - `docs/06_quality/AutoSDD_Defect_Log.md` — `DEF-200-204`
 - `docs/04_planning/R101_HANDOFF.md`（並行輪次交棒書）
+
+---
+
+## §D DEF-200-218 逐檔清單（R102 收尾：修復 push 被擋下的三項既存缺陷，護欄層 88372 → 88387，+15）
+
+R100／R101／R102 三個 commit 從未真的 `git push` 過，本機 pre-push 閘門首次觸發
+`run_root_unittests.py` 便揪出以下三項既存缺陷（帳本索引列＝`docs/06_quality/AutoSDD_Defect_Log.md`
+的 `DEF-200-218`，本節為其逐字座標與修法，依 `ROW_MAX_BYTES` 紀律不塞回帳本列本身）：
+
+1. `test_check_pytest_baseline_sites.py` 的 `_SCAN_FILES` 只納管了
+   `AutoClaude/autoclaude/core/ports/quota_meter.py`，漏了 R100 同批新增、含同型
+   「誤配 pytest 摘要字面」反例引文的回歸測試
+   `AutoClaude/tests/test_r100_quota_refusal_false_positive.py`（未納管站點棘輪
+   114→115，逐檔清單見下方 D.1）。
+2. `AutoClaude/tests/test_r100_boot_self_check.py:239` 的
+   `git ls-files --error-unmatch` 未帶 `-c core.quotepath=false`；已補上該旗標。
+3. `docs/04_planning/R102_HANDOFF.md` 有兩筆「未落地」否定宣稱與一筆「仍未執行」宣稱
+   缺機讀證偽標的／現查指令；已補 `absent-if:` 標記與現查指令。
+
+三項皆已直接修復並回歸驗證，逐字命令與 rc 見主控交件回報；本檔不重複貼一份會漂移的
+複本（同 `_PHASE2_REVIEW_LOG` 一份知識一個家的紀律）。
+
+### D.1 未納管站點棘輪漏檔（功能修復，非漂移）
+
+| 檔案 | 舊值 | 新值 | 淨額 | 內容 |
+|------|-----:|-----:|-----:|------|
+| `test_check_pytest_baseline_sites.py` | 299 | 301 | +2 | `_SCAN_FILES` 補納管 `AutoClaude/tests/test_r100_quota_refusal_false_positive.py`（同型 `4290 passed` 反例引文，R100 只納管了受測模組 `quota_meter.py` 本身，漏了它自己的回歸測試） |
+
+小計：**+2**。
+
+### D.2 本檔自身編修（護欄層重釘自身編修）
+
+| 項目 | 淨額 | 內容 |
+|------|-----:|------|
+| `_GUARD_LINES_REPIN_LOG` 一筆新列 ＋ `_FROZEN_GUARD_LINES` 兩處數值更新 ＋ prefix_len／sha256 ／`_FROZEN_PREFIX_REWRITE_LEDGER` 新增一列（含一次理由欄改寫，避免與 `check_pytest_baseline_sites.py` 自身判準互踩） | +13 | 同 R95~R101 既有體例（合法出口逐條實查：純數字與註解無可抽結構、無死碼可刪） |
+
+小計：**+13**（本檔自身逐檔漂移，`test_adr_xplat001_c1c2_lock.py` 6086 → 6099）。
+
+**D.1 + D.2 = 2 + 13 = 15**，與 `_GUARD_LINES_REPIN_LOG` 該筆 R102 列的淨額逐字相符。
+
+另兩項既存缺陷（`AutoClaude/tests/test_r100_boot_self_check.py:239` 補
+`-c core.quotepath=false`；`docs/04_planning/R102_HANDOFF.md` 補齊 `absent-if:`／現查
+標記）不動任何護欄層檔案的行數，故不進本節逐檔清單。

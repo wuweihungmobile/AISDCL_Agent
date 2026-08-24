@@ -47,7 +47,7 @@ sys.path.insert(0, str(_REPO / "tools" / "lib"))
 # 「呼叫判準 ＋ 斷言」；理由見該檔檔頭。**鑑別力不得下降**（搬家後注入自證全數重跑）。
 import endurance_env as EE  # noqa: E402  # R102：可得性軸持久化的目錄 SSOT  round-label-ok
 import pace_contract as PC  # noqa: E402
-import quota_availability as QA  # noqa: E402  # R102：可得性軸遲滯狀態機（PRD §4.2.4(a)/R7）  round-label-ok
+import quota_availability as QA  # noqa: E402  # R102：可得性軸遲滯狀態機（§4.2.4a）  round-label-ok
 import quota_boot_check as QBC  # noqa: E402  # R102／R16：啟動自檢（H6／H7）  round-label-ok
 import quota_criteria as QC  # noqa: E402
 import quota_gate as QG  # noqa: E402  # R95 修4：halt 動作接線面（waker 注入驗證）
@@ -56,7 +56,7 @@ import quota_messages as QM  # noqa: E402  # R95 修4：halt 多軸 reset 裁決
 import quota_meter as M  # noqa: E402
 import quota_pace as W  # noqa: E402
 import quota_policy as Q  # noqa: E402
-import quota_stability as QS  # noqa: E402  # R102：併發上限死區／變化率／最小停留時間  round-label-ok
+import quota_stability as QS  # noqa: E402  # R102：併發上限死區/變化率/最小停留時間  round-label-ok
 
 _MODULE_SRC = (_REPO / "tools" / "lib" / "quota_policy.py").read_text(encoding="utf-8")
 
@@ -2439,7 +2439,7 @@ class TestAmortizationNamesTheAxisItActuallyUsed(unittest.TestCase):
 
 
 class AvailabilityHysteresisTest(unittest.TestCase):
-    """R102／PRD §4.2.4(a) ＋ R7：可得性軸遲滯狀態機與其持久化（`quota_availability.py`）。  round-label-ok
+    """R102／PRD §4.2.4(a)＋R7：可得性軸遲滯狀態機與其持久化。  round-label-ok
 
     每一支斷言**行為／方向**（同 `SentinelDecisionTest` 的既有風格），不是單純比對一個
     今天恰好如此的數字：那種鎖存在但沒有鑑別力，是本檔檔頭已點名的最大缺陷桶。
@@ -2677,7 +2677,7 @@ class ConcurrencyStabilityTest(unittest.TestCase):
         self.assertEqual(nxt.cap, 3, "目標比目前高很多，但一次只准 +1")
 
     def test_tightening_outside_the_dead_zone_jumps_straight_to_the_target(self) -> None:
-        """R102 修復（四方審查 F1/F15/F16/F23）：PRD §4.2.4(c) v2.1.8 逐字「收緊方向……  round-label-ok
+        """R102 修復（四方審查 F1/F15/F16/F23）：PRD §4.2.4(c) v2.1.8 逐字「收緊方向  round-label-ok
         不限速，允許直接到位」，沒有帶別限定詞——目標 2、目前 8，notice 帶也要直接到 2，
         不是被 ±1 變化率卡在 7。此前的實作誤把舊版（v2.0~v2.1.7）「僅升級到
         DRAINING／FREEZING 才允許直接歸零」的窄例外當成新條文，把這支鎖釘成了錯誤方向
@@ -2712,7 +2712,7 @@ class ConcurrencyStabilityTest(unittest.TestCase):
 
     def test_decrease_is_never_gated_by_dwell(self) -> None:
         """方向鎖：dwell 剛剛才開始算（0 秒），減少仍必須立即生效——(d) 只管「增加」，
-        且 R102 修復後收緊方向本身就是直接到位（不是 ±1），故預期值是目標本身（4）。 round-label-ok"""
+        且 R102 修復後收緊方向本身就是直接到位（非 ±1），預期值即目標本身（4）。 round-label-ok"""
         prev = self._state(8, at=self.NOW)
         nxt = QS.stabilize(prev, 4, Q.BAND_NOTICE, self.NOW + timedelta(seconds=1))
         self.assertEqual(nxt.cap, 4, "減少方向被 dwell 卡住了，PRD 逐字只卡『增加』")
@@ -2731,7 +2731,7 @@ class ConcurrencyStabilityTest(unittest.TestCase):
         self.assertEqual(nxt.cap, 1, "量不到時的收緊仍被變化率限速卡住，PRD 逐字要求不限速")
 
     def test_tightening_direct_jump_does_not_depend_on_the_unmeasured_flag(self) -> None:
-        """R102 修復（四方審查 F1/F15/F16/F23）後的更新版控制組：拿掉 `unmeasured=True`，  round-label-ok
+        """R102 修復（F1/F15/F16/F23）後的更新版控制組：拿掉 `unmeasured=True`，  round-label-ok
         同一組輸入仍必須直接到位——PRD §4.2.4(c) 的「收緊不限速」判準是 `target < current`
         本身（見 `test_tightening_outside_the_dead_zone_jumps_straight_to_the_target`），
         不是靠 `unmeasured` 這個旗標才生效；`unmeasured` 只管**放寬**方向（見
@@ -2894,7 +2894,7 @@ class DynamicPacingBootCheckTest(unittest.TestCase):
         self.assertTrue(any(p.startswith("[H7]") for p in problems),
                         f"fanout_window 不到 2×Step 中位時間卻沒有觸發 H7：{problems}")
 
-    # ── §6.1 不變式 4 後半：AVAILABILITY_EXIT_STREAK ≥ 2（R102 修復，四方審查 F5/F17/F25）  round-label-ok
+    # ── §6.1 不變式 4 後半：EXIT_STREAK ≥ 2（R102 修復，四方審查 F5/F17/F25）  round-label-ok
     def test_h6_rejects_an_exit_streak_below_two(self) -> None:
         kw = dict(self._OK)
         kw["availability_exit_streak"] = 1

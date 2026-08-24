@@ -695,7 +695,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 537,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 6086,
+    "test_adr_xplat001_c1c2_lock.py": 6099,
     "test_archive_defect_log.py": 4008,
     "test_bash32_compat.py": 970,
     "test_bash_probe_spec_contract.py": 983,
@@ -705,7 +705,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_check_defect_log_crossref.py": 3615,
     "test_check_gha_action_versions.py": 295,
     "test_check_hooks_liveness.py": 3598,
-    "test_check_pytest_baseline_sites.py": 299,
+    "test_check_pytest_baseline_sites.py": 301,
     "test_check_script_parity.py": 2098,
     "test_check_wrapper_thinness.py": 1234,
     "test_claim_provenance_r86.py": 618,
@@ -1064,6 +1064,16 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "[非淨減法輪] 本檔自身逐檔漂移——來源是上一列新增的稽核列本身，同 R95~R98 既有"
      "體例（合法出口逐條實查：無死碼可刪、純數字與註解無可抽結構）。逐檔清單見 "
      "CrossPlatform_R102_Scan_Findings.md。"),
+    ("R102", 88372, 88387, 15,
+     "[非淨減法輪][R102 收尾] 修復 push 被擋下的既存缺陷（DEF-200-218）：`test_check_"
+     "pytest_baseline_sites.py` 的 `_SCAN_FILES` 漏納管 R100 新增、含與 `quota_meter.py` "
+     "同型的『誤配 pytest 摘要字面』反例引文的回歸測試 "
+     "`test_r100_quota_refusal_false_positive.py`，"
+     "未納管站點棘輪因此由 114 上升為 115（該檔 299→301，+2）。其餘 +13 為本檔自身逐檔"
+     "漂移——`--print-guard-lines` 反覆覆核收斂：重釘數字、新增稽核列與 `_FROZEN_PREFIX_"
+     "REWRITE_LEDGER` 追加列本身、以及 prefix_len／digest 更新所佔的行，同 R95~R101 既有"
+     "體例。合法出口逐條實查：無死碼可刪、抽共用層不適用（純新增一筆納管清單條目、其 WHY "
+     "註解，及本身重釘）。逐檔清單見 CrossPlatform_R102_Scan_Findings.md。"),
 )
 
 
@@ -1266,10 +1276,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 49
+_REPIN_LOG_FROZEN_PREFIX_LEN = 50
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "c44b6a066da8fec7dc27f0218d4ed7e98b33411f6b45280f8a3aa1969a8740ce")
+    "605806a0d4aaa1fd7805b59dff5d8c7fcbe6e323f2dd4dcbaffc3962b6d3f475")
 
 
 def repin_log_history_digest(
@@ -1305,7 +1315,10 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R101", "423d63fddc0a", "44008855c9e8", "DEF-200-208"),
     # DEF-200-204：R102 收尾重釘，同 R101 體例「追加後立即自我凍結」——本輪追加兩列 round-label-ok
     # （功能成長 +572 ＋ 本檔自身編修 +11），prefix_len 47→49 涵蓋兩列本身。
-    ("R102", "44008855c9e8", "c44b6a066da8", "DEF-200-204"),)
+    ("R102", "44008855c9e8", "c44b6a066da8", "DEF-200-204"),
+    # DEF-200-218：R102 收尾修復 push 被擋下的三項既存缺陷，同體例「追加後立即自我 round-label-ok
+    # 凍結」——本輪追加一列（納管漏檔 +2 ＋ 本檔自身編修 +10），prefix_len 49→50 涵蓋該列本身。
+    ("R102", "c44b6a066da8", "605806a0d4aa", "DEF-200-218"),)
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。
 #: 往後指紋每變一次，都要能從本值出發、經 `_FROZEN_PREFIX_REWRITE_LEDGER` 逐列鏈接

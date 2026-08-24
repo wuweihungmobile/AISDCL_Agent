@@ -181,6 +181,8 @@ ledger 側改掛同主題既有未結列（`DEF-200-207` 尾＝E1/E3/E4、`DEF-2
 🔴 **`--reconcile` 紅綠自證未落地**（掌舵者原裁決為落地）：四個實測理由否決，見 §D-14，
 `DEF-200-213` ④ 承接。最硬的一條是**它的受測對象 `tools/lib/quota_reconcile.py` 未進版控**，
 而本窗口禁止 git 寫入 ⇒ 只有主控能解。現查 `git ls-files --error-unmatch tools/lib/quota_reconcile.py`。
+<!-- absent-if: def test_reconcile -->（`tools/tests/` 全庫現查 0 筆以 test_reconcile
+開頭的測試函式；`--reconcile` 的紅綠自證真的落地時，這個字面才會現身）
 
 ### 2.1 四方審查（唯讀）的五筆新發現 — 全文＝`Scan_Findings.md` §E，本節只列處置
 

@@ -86,6 +86,10 @@ _SCAN_FILES = [
     # R100：同型第三例（`4290 passed` 是「不可用子字串比」的**反例引文**）。單靠行內
     #      豁免不足的實測結論見上一段 ⇒ 沿用「納管 ＋ 行內豁免」並用的正解。
     "AutoClaude/autoclaude/core/ports/quota_meter.py",
+    # R100 收尾（R102 補漏）：同一個反例引文 `4290 passed, 62 skipped` 同時寫進了  round-label-ok
+    #      quota_meter.py 的合成注入回歸測試——R100 只納管了受測模組本身，漏了它自己
+    #      的測試檔，未納管站點棘輪因此由 114 上升為 115。正解同上，一併納管。
+    "AutoClaude/tests/test_r100_quota_refusal_false_positive.py",
     "CLAUDE.md",
     "ONBOARDING.md",
     "useMacWin.md",
