@@ -1,6 +1,6 @@
 # R102 交棒書（收尾單人窗口）
 
-<!-- guard-total:R102 --> **本輪護欄層累積淨額（稽核痕跡合計）＝ 87784 → 88387（+603）**
+<!-- guard-total:R102 --> **本輪護欄層累積淨額（稽核痕跡合計）＝ 87784 → 88415（+631）**
 ——逐檔清單見 [`CrossPlatform_R102_Scan_Findings.md`](../06_quality/CrossPlatform_R102_Scan_Findings.md)。
 
 - **輪次**：R102（與 R101 治理修憲並行進行；DEF-200-204 四方終審 4/4 `APPROVE_WITH_FIXES`

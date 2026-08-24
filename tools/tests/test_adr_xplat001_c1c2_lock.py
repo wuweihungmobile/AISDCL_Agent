@@ -695,7 +695,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 537,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 6099,
+    "test_adr_xplat001_c1c2_lock.py": 6127,
     "test_archive_defect_log.py": 4008,
     "test_bash32_compat.py": 970,
     "test_bash_probe_spec_contract.py": 983,
@@ -1074,6 +1074,24 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "REWRITE_LEDGER` 追加列本身、以及 prefix_len／digest 更新所佔的行，同 R95~R101 既有"
      "體例。合法出口逐條實查：無死碼可刪、抽共用層不適用（純新增一筆納管清單條目、其 WHY "
      "註解，及本身重釘）。逐檔清單見 CrossPlatform_R102_Scan_Findings.md。"),
+    ("R102", 88387, 88400, 13,
+     "[非淨減法輪] test_the_next_round_cannot_reuse_the_exemption 訂正：R102 收尾四方核准"
+     "並執行 --repin-cap／--update 後，provenance 合法轉為已重釘，該測試原借磁碟真實狀態"
+     "當『未重釘』反面測資的前提不復存在，改用合成注入訂正，不動 _PRICING_CHANGE_EXEMPT_"
+     "ROUND、不改判準本體。合法出口逐條實查：無死碼可刪、抽共用層不適用（純測試資料來源"
+     "訂正＋docstring 因果說明，含本檔自身逐檔漂移收斂列）。逐檔清單見 "
+     "CrossPlatform_R102_Scan_Findings.md。"),
+    ("R102", 88400, 88389, -11,
+     "[淨減法輪] 收斂列：把上一輪重釘過程中先前散落的多筆逐檔漂移收斂列合併為一筆，"
+     "淨減 11 行。逐檔清單見 CrossPlatform_R102_Scan_Findings.md。"),
+    ("R102", 88389, 88403, 14,
+     "[非淨減法輪] 收斂列，本檔自身逐檔漂移。逐檔清單見 CrossPlatform_R102_Scan_Findings.md。"),
+    ("R102", 88403, 88405, 2,
+     "[非淨減法輪] 收斂列。逐檔清單見 CrossPlatform_R102_Scan_Findings.md。"),
+    ("R102", 88405, 88407, 2,
+     "[非淨減法輪] 收斂列。逐檔清單見 CrossPlatform_R102_Scan_Findings.md。"),
+    ("R102", 88407, 88415, 8,
+     "[非淨減法輪] 收斂列。逐檔清單見 CrossPlatform_R102_Scan_Findings.md。"),
 )
 
 
@@ -1276,10 +1294,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 50
+_REPIN_LOG_FROZEN_PREFIX_LEN = 56
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "605806a0d4aaa1fd7805b59dff5d8c7fcbe6e323f2dd4dcbaffc3962b6d3f475")
+    "23b5b6fcc0a21052687378f6d52560c48df40d67852d73e007d4a2912fa6d367")
 
 
 def repin_log_history_digest(
@@ -1318,7 +1336,12 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R102", "44008855c9e8", "c44b6a066da8", "DEF-200-204"),
     # DEF-200-218：R102 收尾修復 push 被擋下的三項既存缺陷，同體例「追加後立即自我 round-label-ok
     # 凍結」——本輪追加一列（納管漏檔 +2 ＋ 本檔自身編修 +10），prefix_len 49→50 涵蓋該列本身。
-    ("R102", "c44b6a066da8", "605806a0d4aa", "DEF-200-218"),)
+    ("R102", "c44b6a066da8", "605806a0d4aa", "DEF-200-218"),
+    # DEF-200-207：R102 收尾（四方核准並執行 --repin-cap／--update 後）訂正
+    # test_the_next_round_cannot_reuse_the_exemption 的合成注入前提，同體例「追加後
+    # 立即自我凍結」——本輪追加多列（測試訂正＋本檔自身逐檔漂移收斂），
+    # prefix_len 50→56 涵蓋全部新列本身。
+    ("R102", "605806a0d4aa", "23b5b6fcc0a2", "DEF-200-207"),)
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。
 #: 往後指紋每變一次，都要能從本值出發、經 `_FROZEN_PREFIX_REWRITE_LEDGER` 逐列鏈接
@@ -5651,19 +5674,24 @@ class TestPricingChangeExemptionExpiresOnItsOwn(unittest.TestCase):
             f"baseline_policy_version={baseline_policy_version!r}")
 
     def test_the_next_round_cannot_reuse_the_exemption(self) -> None:
-        """🔴 主牙：時鐘走過豁免輪之後，provenance 未指向目前這把尺的 baseline 必紅。"""
-        baseline, total, baseline_policy_version = _loc_pricing_facts()
+        """🔴 主牙：時鐘走過豁免輪之後，provenance 未指向目前這把尺的 baseline 必紅。
+
+        R102 訂正：原本借磁碟真實狀態（尚未執行 `--update`）當「未重釘」的反面測資；
+        R102 收尾四方核准並執行 `--repin-cap`＋`--update` 後，磁碟合法轉為「已重釘」，
+        該巧合資料不復存在（這正是本鎖 §D-14 訂正段落自己記載的「出口永遠開著」被
+        真的走過一次）。改為合成注入一個與 `current_policy_version` 不同的
+        `baseline_policy_version`，繼續驗證同一段判準邏輯，不再依賴磁碟暫態——比照
+        `test_repinning_the_baseline_is_a_real_exit`／`test_postponing_the_exemption_round_is_red`
+        既有的合成注入模式，不改判準本體、不動 `_PRICING_CHANGE_EXEMPT_ROUND`。
+        """
+        _baseline, total, _bpv = _loc_pricing_facts()
         current_policy_version = _current_policy_version()
-        self.assertNotEqual(
-            baseline_policy_version, current_policy_version,
-            "前提已不成立：baseline 的 provenance 已等於目前這把尺（＝已重釘）⇒ "
-            "本注入量不到「未重釘」那一側。此時請把 _PRICING_CHANGE_EXEMPT_ROUND "
-            "連同本鎖一起重新評估，不要直接刪")
+        stale_policy_version = f"{current_policy_version}-r102-synthetic-stale"
         self.assertTrue(
             any("[豁免過期]" in p for p in pricing_exemption_problems(
                 latest_round=_PRICING_CHANGE_EXEMPT_ROUND + 1,
-                baseline=baseline, total=total,
-                baseline_policy_version=baseline_policy_version,
+                baseline=total, total=total,
+                baseline_policy_version=stale_policy_version,
                 current_policy_version=current_policy_version)),
             "下一輪還帶著 provenance 未指向目前這把尺的 baseline 竟然放行 ⇒ "
             "豁免又退回口頭承諾")
