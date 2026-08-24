@@ -55,8 +55,8 @@ def dynamic_pacing_invariant_problems(
     空清單＝全部通過。同 `quota_policy.policy_monotonicity_problems()` 的既有慣例
     （回「問題清單」而非布林，讀者一次看得到**哪一條**越界，不必再猜）。
 
-    🔴 R102 修復（四方審查 F5/F17/F25）：§6.1 不變式 4 逐字是**雙邊**要求——dwell 三明治  round-label-ok
-    不等式（H6）**且** `AVAILABILITY_EXIT_STREAK ≥ 2`。此前只驗了前半，後半只靠
+    🔴 R102 修復（四方審查 F5/F17/F25）：§6.1 不變式 4 逐字是**雙邊**要求——  round-label-ok
+    dwell 三明治不等式（H6）**且** `AVAILABILITY_EXIT_STREAK ≥ 2`。此前只驗了前半，後半只靠
     `quota_policy_env.py` 的 `EnvVar(lo=2.0)` 在 `.env` 解析層擋——但那條路徑對越界值是
     **靜默 clamp 回預設**，正是 §6.1 明文禁止的姿態（「不得以預設值靜默帶過」），且任何
     直接構造 `Policy(availability_exit_streak=1)` 的呼叫點會完全繞過那一層、也不會被

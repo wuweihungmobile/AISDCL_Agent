@@ -279,7 +279,7 @@ def evaluate(now: datetime, usable: bool, *, exit_streak: int | None = None,
                       exit_streak=exit_streak, min_dwell_seconds=min_dwell_seconds)
         save_state(nxt)
         return nxt
-    # 🔴 R102 修復（四方審查 F24／QA MUST FIX）：讀-算-寫整段用 `quota_ledger.with_lock()`  round-label-ok
+    # 🔴 R102 修復（四方審查 F24／QA MUST FIX）：讀-算-寫整段用 `quota_ledger.with_lock()`  round-label-ok  # noqa: E501
     # 互斥，不是只有寫入本身原子——見該函式 docstring 的立案（PRD §4.2.4 R7「不得自己寫
     # check-then-act」）。鎖檔與狀態檔同目錄、同名 `.lock` 尾碼，同 `save_state()` 的
     # `.tmp` 命名慣例。

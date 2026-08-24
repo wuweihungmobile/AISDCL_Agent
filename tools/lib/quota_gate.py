@@ -731,7 +731,7 @@ def pace_report(now: datetime | None = None, model: str | None = None) -> str:
     record_burn(state, live := live_dispatches(fanout_ledger_path(), now))
     ratio, ratio_note, plan_note = burn_ratio(state)
     decision = quota_policy.decide(state, now, policy, ratio, ratio_note, active_model=model)
-    # 🔴 R102：把 cap 寫進契約檔這一步，是引擎唯一真的會讀到 cap 的地方（`quota_gate()` 的  round-label-ok
+    # 🔴 R102：把 cap 寫進契約檔這一步，是引擎唯一真的會讀到 cap 的地方（`quota_gate()` 的  round-label-ok  # noqa: E501
     # 派發帳只擋 hook 觸發的扇出型工具呼叫，引擎自己的併發排程走這份檔案契約）——平穩性
     # 機制若只接進 `quota_gate()`，引擎那一側仍然看得到原始的、會抖動的 cap。兩處共用同一份
     # 持久狀態（`quota_availability`／`quota_stability` 皆 per-account、非 per-呼叫端），
@@ -876,7 +876,7 @@ def quota_gate(payload: dict, *, blocking, latch_read, latch_write,
     if unmeasured:
         note_degraded(state.source or "unknown",
                       "取數失敗，且逐字稿裡沒有未復原的撞線可以當地板", event=event)
-    # 🔴 R102／PRD §4.2.4：平穩性機制接線。`unmeasured` 這裡已經是「這次讀完（含 L3 地板  round-label-ok
+    # 🔴 R102／PRD §4.2.4：平穩性機制接線。`unmeasured` 這裡已經是「這次讀完（含 L3 地板  round-label-ok  # noqa: E501
     # 替補之後）到底讀不讀得到」的最終結論——`quota_availability.evaluate()` 要的正是
     # 這個訊號（不是取代它，是替它加上遲滯：單次瞬斷不足以判定「已進入不可得」，見該檔
     # `advance()`）。`quota_stability.evaluate()` 再吃可得性軸的結論：只要遲滯後仍判定

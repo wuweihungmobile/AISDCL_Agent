@@ -1,6 +1,6 @@
 """併發建議值的平穩性機制：死區／變化率限制／最小停留時間（PRD §4.2.4(b)(c)(d)）。"""
 # ─────────────────────────────────────────────────────────────────────────────
-# WHY 這一支檔存在（R102 第二棒／PRD §4.2.4(b)(c)(d)；接續 quota_availability.py 的 (a)）  round-label-ok
+# WHY 這一支檔存在（R102 第二棒／PRD §4.2.4(b)(c)(d)；接續 quota_availability.py 的 (a)）  round-label-ok  # noqa: E501
 # ---------------------------------------------------------------------------
 # 病：`quota_policy.decide()` 是**無狀態**純函式——每次呼叫只看「這一刻」的水位／horizon，
 # 對「上一次給的併發上限是多少、那個值維持了多久」零記憶。水位在帶界附近抖動一下
@@ -62,7 +62,7 @@ from quota_messages import _aware  # noqa: E402  # ISO 字串 → aware datetime
 #: `quota_policy` 的兩個帶別常數自己組——與 `quota_gate.DRAINING_BANDS` 的同步由
 #: `tools/tests/test_quota_policy.py::StabilityConstantsTest` 的方向鎖測試直接比對
 #: 兩者相等。
-#: 🔴 R102 修復（四方審查 F1/F3/F15/F16/F23）：v2.1.8 新條文的收緊不限速範圍是**任何**  round-label-ok
+#: 🔴 R102 修復（四方審查 F1/F3/F15/F16/F23）：v2.1.8 新條文的收緊不限速範圍是**任何**  round-label-ok  # noqa: E501
 #: `target < current`，不只這個集合——本常數**不再**用來限制收緊速度（`stabilize()`
 #: 已拿掉 `band in SAFETY_BANDS` 那個 gate）。保留這個常數只是因為它仍是一個誠實的
 #: 事實（「舊條文點名的帶別」），且與 `quota_gate.DRAINING_BANDS` 的同步仍值得鎖住；
@@ -185,7 +185,7 @@ def evaluate(target: int | None, band: str, now: datetime, *,
                         min_dwell_seconds=min_dwell_seconds, unmeasured=unmeasured)
         save_state(nxt)
         return nxt
-    # 🔴 R102 修復（四方審查 F24／QA MUST FIX）：同 `quota_availability.evaluate()`——  round-label-ok
+    # 🔴 R102 修復（四方審查 F24／QA MUST FIX）：同 `quota_availability.evaluate()`——  round-label-ok  # noqa: E501
     # 讀-算-寫整段互斥，理由與命名慣例見 `quota_ledger.with_lock()` docstring。
     lock_path = state_path().with_suffix(state_path().suffix + ".lock")
     return quota_ledger.with_lock(lock_path, _critical_section).cap
