@@ -77,12 +77,10 @@ python tools/check_defect_log_crossref.py
   至 R102，本輪窗口未觸碰（範圍外）。現查：
   `python -c "import pathlib; print(pathlib.Path('docs/04_planning/ADR/ADR-XPLAT-013-loc-pricing-assertion-only.md').read_text(encoding='utf-8').count('未進行'))"`
   應 > 0（U1~U4 逐列仍是「未進行」）。
-- 🔴 **既存失敗、非本輪造成**：`TestPricingChangeExemptionExpiresOnItsOwn.
-  test_the_exemption_is_green_only_inside_its_own_round` 目前紅（`[豁免過期]`）。
-  已實測確認：把 `live_repin_round()` 固定成 R101（本輪落地前的既有磁碟狀態）一樣紅，
-  因為 `AutoClaude/.loc_baseline` 的 provenance 至今仍是 `None`——`R101_HANDOFF.md` §1.1
-  已明文「該執行明確留給 R102」（`DEF-200-207`／`python AutoClaude/tools/check_loc_budget.py --update`）
-  但尚未有人執行。本輪射程不含此項，未動它。
+- ~~🔴 既存失敗、非本輪造成：`TestPricingChangeExemptionExpiresOnItsOwn...`~~
+  **已於本輪 push 收尾追加回合執行並訂正，見下方 §6**——此處保留刪除線是誠實記載
+  「本節寫下時尚未執行」，不是回頭假裝一開始就做完；不要因為看到下面 §6 已經解決
+  就誤刪這行、讓下一個讀者以為 §3 從頭就沒漏過這件事。
 
 ## §4 下一步的確切指令
 
@@ -98,3 +96,45 @@ python tools/check_defect_log_crossref.py
   `ROW_MAX_BYTES` 等棘輪常數本體。
 - 不准把 H1 fixture／啟動自檢佔位值的殘留另開帳本新列以外的方式悄悄結案（例如把
   `DEF-200-204` 狀態欄寫成完全體 `fixed` 卻不提殘留）。
+
+---
+
+## §6 push 收尾追加回合（context 重啟後續作，本輪真正的最後一段）
+
+§1~§5 寫完當時 push 尚未重試；context 逼近上限先安全收斂、重啟 session 後才完成以下
+三個 commit，一併記在這裡，避免下一輪讀者只看到 §1~§5 就誤以為 R102 在那裡結束：
+
+| commit | 內容 |
+|---|---|
+| `6fea8a3` | 落地 `--repin-cap`／`--update` 四方裁決（`DEF-200-207`）＋修復連帶的
+  `frozen_cap` 測試 fixture 與 `test_the_next_round_cannot_reuse_the_exemption`
+  前提＋護欄層重釘 |
+| `6d48a62` | `DEF-200-219`：`6fea8a3` 新增的 R102 註解漏帶 `round-label-ok`，補標後
+  觸發 `test_e501_debt_only_shrinks`，拆行修復＋護欄層重釘一次到位 |
+| `4845724` | `ONBOARDING.md` §7 表② 快照回填（`DEF-200-210` 再次觸發，因
+  `6d48a62` 動到測試樹指紋來源檔） |
+
+**push 最終狀態**（獨立驗證，非轉述）：`git fetch origin main` 後
+`git rev-list --left-right --count origin/main...HEAD` = `0 0`，
+`git rev-parse HEAD origin/main` 兩者逐字相同（`4845724...`）。10 個既有 commit ＋
+本節 3 個，共 **12 個 commit 全部確認已同步 `origin/main`**。
+
+**過程中的一次環境污染事故**：回填 ONBOARDING 快照用的乾淨 venv 建在
+`AutoClaude/.venv-onboarding-clean/`（repo 樹內），未被 `.gitignore` 涵蓋，污染 6 支
+全樹掃描型治理測試，已 `rm -rf` 清除，教訓記入 memory
+`project_onboarding_baseline_needs_clean_venv.md`：下次乾淨 venv 一律建在 repo 樹外。
+
+**尚未量測**：本次 push 觸發的雲端 CI（`macos-compat-ci`）結果——push 前最後一筆雲端
+紀錄是 failure（`DEF-101-733` advisory，不影響本機 rc），這次 push 之後的雲端結果需
+另外去 GitHub Actions 頁面查，本檔不代為宣稱。
+
+## §7 承接至 R103（本輪確認仍未做，逐項現查指令）
+
+1. **H1 fixture 未落地**（同 §3 第一項，未變）。
+2. **啟動自檢 60 秒佔位值待校準**（同 §3 第二項，未變）。
+3. **`ADR-XPLAT-013` 正式轉 `Accepted` ＋ §7 的 U1~U7 四方獨立審查打勾**——現查：
+   `python -c "import pathlib; print(pathlib.Path('docs/04_planning/ADR/ADR-XPLAT-013-loc-pricing-assertion-only.md').read_text(encoding='utf-8').count('未進行'))"`
+   應 > 0。這是 `DEF-200-207` 唯一還沒關的部分（E1/E3/E4 已在 §6 執行落地）。
+4. **雲端 CI 本次 push 的結果未查**——見 §6 最後一段。
+5. `DEF-200-209`（`.claude/hooks/`／`tools/` 缺 ruff `E701`/`E702` 閘門）、
+   `DEF-200-211`（`ADR-XPLAT-013` Phase 2 (b)(c) 未開始）——本輪皆未觸碰，帳本原樣承接。
