@@ -558,27 +558,35 @@ def row_bytes(ledger_text: str) -> dict[str, int]:
 #: 的欄內長文**逐字搬進** `CrossPlatform_R85_Ledger_Closure.md`，列上只留「結案字＋一句實查
 #: 結論＋檔名指針」；另兩筆（`101-676`／`101-870`）是**結案＋瘦身同一個動作**（見該兩列）。
 #: 十七筆瘦身後皆 ≤700 bytes ⇒ 依②向訊息**自己指名**的動作移除，不是放寬。
+#: 🔴 輪號不寫進本段散文，理由同上方 `_UNPINNED_HANDOVER_CEILING` 段：錨改用磁碟上查得到
+#: 的 `archive_67`。重釘 **62 → 45**：`--plan` 判準③ 標出的 18 筆已隨 `archive_67` 搬離
+#: 主檔，主檔實測查無此 ID ⇒ 豁免過期，依②向訊息自己指名的動作移除：`DEF-101-235`／
+#: `238`／`243`／`268`／`336`／`392`／`418`／`693`／`703`／`733`／`755`／`758`／`764`／
+#: `795`／`797`／`798`／`866`／`889`（62−18=44）；同批 `DEF-200-190` 因狀態欄追加複驗
+#: 證據（人工確認訴求仍待，未結案）跌破線至 1020 bytes，新增列入（44+1=45，實測值
+#: 與 `expiring_oversize_waivers()` 算出的 `new_ceiling` 一致，非放寬）。
 OVERSIZE_ROW_GRANDFATHERED: frozenset[str] = frozenset("""
 DEF-100-002 DEF-101-018
 DEF-101-060 DEF-101-205
-DEF-101-233 DEF-101-235 DEF-101-238
-DEF-101-243 DEF-101-263 DEF-101-268
-DEF-101-324 DEF-101-336
+DEF-101-233
+DEF-101-263
+DEF-101-324
 DEF-101-338
-DEF-101-392 DEF-101-398 DEF-101-399
-DEF-101-402 DEF-101-415 DEF-101-418
+DEF-101-398 DEF-101-399
+DEF-101-402 DEF-101-415
 DEF-101-518
 DEF-101-557 DEF-101-559
 DEF-101-610 DEF-101-649
-DEF-101-675 DEF-101-693 DEF-101-701
-DEF-101-702 DEF-101-703 DEF-101-733
+DEF-101-675 DEF-101-701
+DEF-101-702
 DEF-101-736 DEF-101-739 DEF-101-740 DEF-101-747
-DEF-101-748 DEF-101-752 DEF-101-755 DEF-101-758 DEF-101-764
-DEF-101-769 DEF-101-790 DEF-101-794 DEF-101-795
-DEF-101-796 DEF-101-797 DEF-101-798 DEF-101-801 DEF-101-802
-DEF-101-803 DEF-101-810 DEF-101-856 DEF-101-866 DEF-101-867
+DEF-101-748 DEF-101-752
+DEF-101-769 DEF-101-790 DEF-101-794
+DEF-101-796 DEF-101-801 DEF-101-802
+DEF-101-803 DEF-101-810 DEF-101-856 DEF-101-867
 DEF-101-871 DEF-101-872 DEF-101-876 DEF-101-878
-DEF-101-880 DEF-101-886 DEF-101-887 DEF-101-888 DEF-101-889
+DEF-101-880 DEF-101-886 DEF-101-887 DEF-101-888
+DEF-200-190
 """.split())
 
 #: 具名清單的**筆數**上限（形狀照抄 `check_defect_log_crossref._UNPINNED_HANDOVER_CEILING`）。
@@ -614,7 +622,10 @@ DEF-101-880 DEF-101-886 DEF-101-887 DEF-101-888 DEF-101-889
 #: 多筆原本 700+ bytes、瘦身後仍 >700（維持在清單內，僅超標量下降，詳見
 #: `OVERSIZE_ROW_EXCESS_CEILING`），故清單筆數只因這一筆過期而變動。逐筆原文逐字保全
 #: 於 `CrossPlatform_R99_Ledger_Closure.md`。
-OVERSIZE_ROW_CEILING = 62
+#: 🔴 輪號不寫進本段散文，理由同上。重釘 **62 → 45**：18 筆已隨 `archive_67`（見上方清單
+#: 註解）搬離主檔、`DEF-200-190` 新增列入，本值＝當回合實測超標列數
+#: （`expiring_oversize_waivers()` 算出的 `new_ceiling`），零加減推算。
+OVERSIZE_ROW_CEILING = 45
 
 #: 存量列的**超標總量**（Σ max(0, 列 bytes − 上限)）上限。上面三條管的是「有幾列超標」，
 #: 這一條管的是「超標多少」——少了它，一列 800 bytes 的豁免列可以長到 8,000 bytes 而
@@ -707,7 +718,11 @@ OVERSIZE_ROW_CEILING = 62
 #: 結論＋檔名指針」，詳情搬進 `CrossPlatform_R99_Ledger_Closure.md`；其中 `DEF-101-596`
 #: 額外跌破 700 bytes 門檻而自豁免清單過期（見 `OVERSIZE_ROW_CEILING`），其餘瘦身列仍
 #: 留在清單內、僅超標量下降。
-OVERSIZE_ROW_EXCESS_CEILING = 48864
+#: 🔴 帳本收斂輪重釘 **48864 → 40889**：18 筆隨本輪 archive 搬離主檔使超標總量下降；
+#: `DEF-200-190` 新增列入使超標總量增加；`DEF-101-676` 因 `test_archive_defect_log.py`
+#: 硬性要求留在主檔作掃描標的而事後保留（未超標，不影響本值）。當回合對真實主檔
+#: 逐字實測 `sum(n - ROW_MAX_BYTES for n in over.values())` 直接填入、零推算。
+OVERSIZE_ROW_EXCESS_CEILING = 40889
 
 
 def oversize_row_problems(ledger_text: str) -> list[str]:

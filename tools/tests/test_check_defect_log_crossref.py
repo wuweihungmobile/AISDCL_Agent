@@ -23,6 +23,8 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import archive_defect_log as adl  # noqa: E402
+import check_archive_required as car  # noqa: E402
 import check_defect_log_crossref as m  # noqa: E402
 from lib import ledger_closing_guards as lcg  # noqa: E402
 
@@ -2934,8 +2936,10 @@ class TestR82SealedHistoryPrefix(unittest.TestCase):
     _SEAL = _rot._SEALED_HISTORY_PREFIXES["OVERSIZE_ROW_CEILING"]
 
     def _relaxed(self) -> int:
-        """比封印末元素「放寬」一格、但仍不破壞遞減的值（注入用；不寫死數字）。"""
-        return (self._SEAL[-1] + self._SEAL[-2]) // 2
+        """比封印末元素「放寬」一格、但仍不破壞遞減的值（注入用；不寫死數字）。相鄰尾端
+        （中點退化成 `_SEAL[-1]`）時退而求其次直接取 `_SEAL[-2]`（仍非增、仍相異）。"""
+        mid = (self._SEAL[-1] + self._SEAL[-2]) // 2
+        return mid if mid != self._SEAL[-1] else self._SEAL[-2]
 
     def test_appending_needs_no_seal_change_which_is_the_whole_point(self) -> None:
         """只准延長：尾端追加一個新值 ⇒ 綠，且**不必動封印**。
@@ -3060,8 +3064,10 @@ class TestR82ComplexReviewSealTableIntegrity(unittest.TestCase):
         self.assertTrue(any("[封印被改寫]" in p for p in problems), problems)
 
     def test_rewriting_a_seal_in_place_is_red_even_though_the_length_is_unchanged(self) -> None:
-        """長度那一向沉默的情形：內容被改寫、長度不變 ⇒ 只有摘要那一向會說話。"""
-        relaxed = (self._SEAL[-1] + self._SEAL[-2]) // 2
+        """長度那一向沉默的情形：內容被改寫、長度不變 ⇒ 只有摘要那一向會說話。相鄰尾端
+        時退而求其次取 `_SEAL[-2]`（理由同 `TestR82SealedHistoryPrefix._relaxed`）。"""
+        mid = (self._SEAL[-1] + self._SEAL[-2]) // 2
+        relaxed = mid if mid != self._SEAL[-1] else self._SEAL[-2]
         problems = _rot.seal_table_problems(
             self._seals_with((*self._SEAL[:-1], relaxed)))
         self.assertEqual(len(problems), 1, problems)
@@ -3609,6 +3615,107 @@ class TestClosingRoundProblemsWiring(unittest.TestCase):
         self.assertIn("外部阻塞軌", printed)
         self.assertIn("1 筆", printed)
         self.assertIn("DEF-01-002", printed)
+
+
+class TestArchiveRequiredProblems(unittest.TestCase):
+    """`tools/check_archive_required.py::archive_required_problems()` 的紅綠自證。
+
+    背景：帳本歸檔（`archive_defect_log.py --apply`）過去完全靠人手動想起來才做，
+    commit 期零機械攔停。本判準把「bytes 落在 WARN~FAIL 帶 **且** 現在有非空可搬清單」
+    升級為 commit 期強制觸發（見該檔模組 docstring）。
+
+    三支測試各自唯一鑑別一件事（Rule 9 — 測試要驗「為什麼」不是只驗「是什麼」）：
+      ① 兩個條件同時成立 → 必須觸發（正樣本）。
+      ② bytes 在安全區（< WARN）——即使該檔內容本身可搬 → 不得觸發：證明本判準是
+         bytes 門檻 **AND** 可搬清單，不是只看其中一個就下判斷（若誤刪 bytes 門檻，
+         只剩這支會轉紅，因為它的 fixture 內容本身完全可搬）。
+      ③ bytes 落在 WARN~FAIL 帶、但清一色未結案（`open`）→ movable 為空 → 不得觸發：
+         證明「bytes 已逼近」本身不是觸發理由，「有東西可搬」才是（若誤刪可搬清單這
+         半，只剩這支會轉紅，因為它的 bytes 確實已進入該帶）。
+
+    刻意用**孤立**目錄（不複製 `docs/06_quality/` 真實帳本家族）：本判準的 bytes 門檻
+    讀 `check_defect_log_crossref._DEFECT_LOG`，可搬清單讀
+    `archive_defect_log.plan()`（其 `_LEDGER`／`_QUALITY_DIR`），兩者必須同時指向
+    **同一份**合成檔，孤立目錄讓這件事在測試裡可控、且不受真實帳本現況（其可搬列數
+    會隨每次 `--apply` 變動）影響而失去代表性。`_status_claimed_ids()`／
+    治理文件指針掃描讀的是**真實**倉庫檔（`gate._CROSSREF_TARGETS`／
+    `_GOVERNANCE_DOCS`，皆為絕對路徑、不受 `_QUALITY_DIR` 影響），沿用既有
+    `TestPlanRejectsRowsWithExternalResidencePointers`（`test_archive_defect_log.py`）
+    同款設計；合成 ID 選用倉庫內從未出現過的號碼，避免與真實治理文件的指針宣稱巧合命中。
+    """
+
+    #: WARN／FAIL 中點——確保落在帶內時有充分餘裕，不受合成列本身位元組數微幅影響。
+    _MID_BAND_BYTES = (m._LEDGER_WARN_BYTES + m._LEDGER_FAIL_BYTES) // 2
+
+    def _isolated_ledger(self, name: str, row: str, pad_to: int | None) -> Path:
+        """建一份孤立目錄下的合成帳本（表頭＋單一列），視需要 padding 到指定 bytes。"""
+        d = Path(_TMP_DIR) / name
+        d.mkdir(parents=True, exist_ok=True)
+        ledger = d / "AutoSDD_Defect_Log.md"
+        text = _ledger_text(row)
+        if pad_to is not None:
+            pad = max(0, pad_to - len(text.encode("utf-8")))
+            text += "x" * pad  # 純填充：不含 `|` 前綴，不會被誤判為表格列（既有慣例）
+        ledger.write_text(text, encoding="utf-8")
+        return ledger
+
+    def test_triggers_when_bytes_in_band_and_movable_is_nonempty(self) -> None:
+        ledger = self._isolated_ledger(
+            "archive_required_trigger",
+            _row("DEF-999-503", "fixed@x"),   # 已結、無活躍字樣、無交棒字樣 → 應可搬
+            self._MID_BAND_BYTES,
+        )
+        with mock.patch.object(m, "_DEFECT_LOG", ledger), \
+             mock.patch.object(adl, "_LEDGER", ledger), \
+             mock.patch.object(adl, "_QUALITY_DIR", ledger.parent):
+            problems = car.archive_required_problems()
+        self.assertTrue(
+            problems, "bytes 落在 WARN~FAIL 帶且存在非空可搬清單，卻回空清單——判準未觸發")
+        joined = "\n".join(problems)
+        self.assertIn("--apply", joined, "訊息未指路 `--apply`，使用者不知道下一步該做什麼")
+        self.assertIn("DEF-99-001", joined)
+
+    def test_does_not_trigger_in_safe_zone_even_when_content_is_movable(self) -> None:
+        """安全區（bytes < WARN）：即使該檔內容本身完全可搬，也不得觸發。"""
+        ledger = self._isolated_ledger(
+            "archive_required_safe_zone",
+            _row("DEF-999-504", "fixed@x"),   # 與正樣本同款、同樣可搬的內容
+            None,  # 不 padding：維持遠低於 WARN 的原始體積（安全區）
+        )
+        self.assertLess(
+            ledger.stat().st_size, m._LEDGER_WARN_BYTES,
+            "fixture 前提失效：未 padding 的合成帳本不應該自己就落在 WARN 帶以上")
+        with mock.patch.object(m, "_DEFECT_LOG", ledger):
+            problems = car.archive_required_problems()
+        self.assertEqual(
+            problems, [],
+            "安全區（bytes < WARN）觸發了——判準退化成只看可搬清單，未同時要求 bytes 門檻")
+
+    def test_does_not_trigger_when_nothing_is_movable(self) -> None:
+        """bytes 落在 WARN~FAIL 帶，但清一色未結案（`open`）→ movable 為空 → 不觸發。"""
+        ledger = self._isolated_ledger(
+            "archive_required_no_movable",
+            _row("DEF-999-505", "open（未分流）"),   # 未結案 → 判準①擋下，movable 必空
+            self._MID_BAND_BYTES,
+        )
+        with mock.patch.object(m, "_DEFECT_LOG", ledger), \
+             mock.patch.object(adl, "_LEDGER", ledger), \
+             mock.patch.object(adl, "_QUALITY_DIR", ledger.parent):
+            problems = car.archive_required_problems()
+        self.assertEqual(
+            problems, [],
+            "movable 為空時觸發了——判準退化成只看 bytes 門檻，未同時要求非空可搬清單")
+
+    def test_real_repo_ledger_does_not_falsely_trigger_today(self) -> None:
+        """對真實帳本現況跑一次（無 mock）——DEF-200 收尾包已把主檔歸檔至 WARN 帶以下，
+        本判準不應在它剛落地當下就把每個人的第一次 commit 卡住（Rule 12：驗證過的事實，
+        非「理論上不會」）。"""
+        self.assertLess(
+            m._DEFECT_LOG.stat().st_size, m._LEDGER_WARN_BYTES,
+            "真實主檔現況已落在 WARN 帶以上——本測試前提已過期，須改用會呼叫 "
+            "archive_defect_log.plan() 的路徑重新斷言（見上方 mock 版三支測試）")
+        self.assertEqual(car.archive_required_problems(), [],
+                         "真實帳本現況（安全區）不應觸發本判準")
 
 
 if __name__ == "__main__":

@@ -695,14 +695,14 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 537,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 6137,
+    "test_adr_xplat001_c1c2_lock.py": 6179,
     "test_archive_defect_log.py": 4008,
     "test_bash32_compat.py": 970,
     "test_bash_probe_spec_contract.py": 983,
     "test_block_destructive_git_r83.py": 2187,
     "test_bootstrap_core.py": 439,
     "test_bootstrap_ps1.py": 160,
-    "test_check_defect_log_crossref.py": 3615,
+    "test_check_defect_log_crossref.py": 3722,
     "test_check_gha_action_versions.py": 295,
     "test_check_hooks_liveness.py": 3598,
     "test_check_pytest_baseline_sites.py": 301,
@@ -1097,6 +1097,31 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "註解漏帶 `round-label-ok`；補標後一行顯示寬度超線觸發 `test_e501_debt_only_shrinks`，"
      "拆行修復＋本表與重釘史料自身編修合計本檔逐檔漂移。逐項見 "
      "CrossPlatform_R102_Scan_Findings.md。"),
+    ("R102", 88425, 88429, 4,
+     "[非淨減法輪] 帳本收斂輪（archive_67）：`OVERSIZE_ROW_CEILING` 封印延伸至 62 後"
+     "尾端相鄰（63,62）使兩支既有測試（`TestR82SealedHistoryPrefix._relaxed`／"
+     "`TestR82ComplexReviewSealTableIntegrity."
+     "test_rewriting_a_seal_in_place_is_red_even_though_the_length_is_unchanged`）"
+     "整數中點注入退化為 no-op，修復為相鄰時取 `_SEAL[-2]`，本檔 3615→3619（+4）。"
+     "合法出口逐條實查：無死碼可刪、抽共用層不適用。逐檔清單見 "
+     "CrossPlatform_R102_Scan_Findings.md。"),
+    ("R102", 88429, 88445, 16,
+     "[非淨減法輪][同輪追加] 護欄層重釘自身編修：上一列新增本身＋本稽核列，"
+     "本檔自身逐檔漂移，同 R95~R102 既有體例。逐檔清單見 "
+     "CrossPlatform_R102_Scan_Findings.md。"),
+    ("R103", 88445, 88548, 103,
+     "[非淨減法輪] DEF-200-221（四方複審發現）：ArchiveGate 包在 "
+     "test_check_defect_log_crossref.py 新增 TestArchiveRequiredProblems 整個測試類別"
+     "（3619→3722，+103），未回頭同步本表——LedgerClose 包稍早只為自己那筆 +4 行重釘，"
+     "兩包並行動同一支鎖檔卻只有一包重釘（同 CLAUDE.md 鐵律七）。R102 已收尾交棒"
+     "（R102_HANDOFF.md），本批是四方複審在 R103 窗口對其收尾整合缺口的訂正，故用新"
+     "輪號、不追溯改寫 R102 的稽核列。收尾單人窗口一次性訂正。逐項見 "
+     "CrossPlatform_R102_Scan_Findings.md。"),
+    ("R103", 88548, 88574, 26,
+     "[非淨減法輪][同輪追加] 護欄層重釘自身編修：上一列新增本身＋本稽核列＋到期義務"
+     "重新武裝（_REPIN_NET_CAP_SCHEDULE 追加一列＋重新武裝下一段），"
+     "本檔自身逐檔漂移，同 R95~R102 既有體例。逐檔清單見 "
+     "CrossPlatform_R102_Scan_Findings.md。"),
 )
 
 
@@ -1130,6 +1155,10 @@ _REPIN_NET_CAP_SCHEDULE: tuple[tuple[int, int], ...] = (
                   # `_REPIN_APPROVED_ROUND_OVERAGE`）——兩件事互相獨立：降 cap 是照既有
                   # 到期義務的例行維護，例外表管的是「這一輪的真實淨額超過新 cap 時
                   # 不計入款(10)(11)」，前者完全不放寬任何門檻。
+    (103, 700),   # 到期輪兌現：`_REPIN_NET_CAP_DUE_ROUND=103` 本輪剛好到期（DEF-200-221
+                  # 收尾單人窗口重釘落在本輪），cap 降到 `_REPIN_NET_CAP_DUE_TARGET`
+                  # 本身（同 R99／R101 判例：兌現值可以恰好貼齊到期目標）。同輪就地 round-label-ok
+                  # 重新武裝下一段：步伐 40 < 前一段的 50，續守「步伐刻意變小」。
 )
 #: 生效點＝首列輪號、現行上限＝末列上限，**皆由表導出不另立常數**（R73 判例：一份知識一個家）。
 _REPIN_ROUND_CAP_SINCE = _REPIN_NET_CAP_SCHEDULE[0][0]
@@ -1238,8 +1267,11 @@ def net_cap_schedule_problems(
 #: 慣例）：步伐 50 < 前一段的 100，續守「步伐刻意變小」——不使目標貼齊現行 cap，
 #: 否則 `assertLess(_REPIN_NET_CAP_DUE_TARGET, _REPIN_ROUND_NET_CAP)` 這道「到期目標
 #: 必須嚴格低於現行上限」的方向鎖會立刻恆真失效（款(12) 是一句永遠成立的話）。
-_REPIN_NET_CAP_DUE_ROUND = 103
-_REPIN_NET_CAP_DUE_TARGET = 700
+#: DEF-200-221 兌現：`_REPIN_NET_CAP_DUE_ROUND=103` 本輪到期，cap 降到目標本身 round-label-ok
+#: （700，見 `_REPIN_NET_CAP_SCHEDULE` 的 `(103, 700)` 列）。同輪就地重新武裝下一段：
+#: 步伐 40 < 前一段的 50，續守「步伐刻意變小」。
+_REPIN_NET_CAP_DUE_ROUND = 105
+_REPIN_NET_CAP_DUE_TARGET = 660
 
 #: R85：款(11)／ADR-XPLAT-002 §8.1 item 15「必須出現一次淨額 ≤ 0」的到期輪，搬成具名常數
 #: 理由同上（義務要能被看見、要有到期時點；`DEF-101-757`）。只准往前挪（更早到期＝更嚴），
@@ -1299,10 +1331,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 57
+_REPIN_LOG_FROZEN_PREFIX_LEN = 61
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "cb643af00b7a86b5479d4db96b7734135da0548488577889336a311485305930")
+    "b698a52087af7cc422f430705940919b247b45a61a5f2e2248de04e2f6a4644e")
 
 
 def repin_log_history_digest(
@@ -1350,7 +1382,17 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # DEF-200-219：R71 全樹掃描抓到漏帶 round-label-ok 的既存缺陷，同體例「追加後立即
     # 自我凍結」——本輪追加一列（補標＋E501拆行＋本表自身編修合計 +5），
     # prefix_len 56→57 涵蓋該列本身。
-    ("R102", "23b5b6fcc0a2", "cb643af00b7a", "DEF-200-219"),)
+    ("R102", "23b5b6fcc0a2", "cb643af00b7a", "DEF-200-219"),
+    # DEF-200-220：帳本收斂輪（archive_67）修復兩支相鄰封印值失明的既有測試， round-label-ok
+    # 同體例「追加後立即自我凍結」——本輪追加兩列（crossref 檔 +4 ＋ 本檔自身編修
+    # +12），prefix_len 57→59 涵蓋兩列本身。
+    ("R102", "cb643af00b7a", "bc7080dcd3f2", "DEF-200-220"),
+    # DEF-200-221：R102 收尾後的四方複審發現護欄層行數棘輪未隨 ArchiveGate 對 round-label-ok
+    # test_check_defect_log_crossref.py 的新增測試類別同步重釘（同 CLAUDE.md 鐵律七：
+    # 鎖檔持有面被切給不同並行包）；R102 已收尾交棒，本批改標 R103（不追溯改寫 round-label-ok
+    # R102 既有列），同體例「追加後立即自我凍結」——本輪追加兩列（crossref 檔 round-label-ok
+    # +103 ＋ 本檔自身編修 +18），prefix_len 59→61 涵蓋兩列本身。
+    ("R103", "bc7080dcd3f2", "b698a52087af", "DEF-200-221"),)
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。
 #: 往後指紋每變一次，都要能從本值出發、經 `_FROZEN_PREFIX_REWRITE_LEDGER` 逐列鏈接

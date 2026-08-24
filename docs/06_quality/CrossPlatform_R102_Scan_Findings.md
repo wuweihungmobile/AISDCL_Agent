@@ -1,7 +1,12 @@
 # CrossPlatform R102 — 掃描發現與逐檔清單（DEF-200-204 PRD §4.2.4 平穩性機制交付）
 
-<!-- guard-total:R102 --> **本輪護欄層累積淨額（稽核痕跡合計）＝ 87784 → 88425（+641）**
+<!-- guard-total:R102 --> **本輪護欄層累積淨額（稽核痕跡合計）＝ 87784 → 88445（+661）**
 ——逐檔清單見下方〈§B 逐檔清單〉與〈§D DEF-200-218 逐檔清單〉。
+
+<!-- guard-total:R103 --> **DEF-200-221（R102 收尾後四方複審發現）追加輪次護欄層累積淨額（稽核痕跡合計）＝ 88445 → 88574（+129）**
+——ArchiveGate 對 `test_check_defect_log_crossref.py` 的 +103 行未隨 LedgerClose 重釘同步，
+收尾單人窗口一次性訂正；逐項見 `tools/tests/test_adr_xplat001_c1c2_lock.py` 的
+`_GUARD_LINES_REPIN_LOG` R103 兩列。
 
 - **輪次**：R102（與 R101 治理修憲並行進行，R101 先落地；本輪收尾單人窗口把 DEF-200-204
   的並行成果併入護欄層重釘）
@@ -134,3 +139,25 @@ push 前的完整回歸時被 `test_no_code_file_claims_a_round_beyond_the_ledge
 | E.1 拆行（本檔淨增 1 行）＋ `_GUARD_LINES_REPIN_LOG` 一筆新列 ＋ `_FROZEN_GUARD_LINES` 一處數值更新 ＋ prefix_len／sha256／`_FROZEN_PREFIX_REWRITE_LEDGER` 新增一列 | +9 | 同 R95~R102 既有體例（合法出口逐條實查：純數字與註解無可抽結構、無死碼可刪） |
 
 小計：**+9**。**E.1 + E.2 = 1 + 9 = 10**，與 `_GUARD_LINES_REPIN_LOG` 該筆 R102 列的淨額逐字相符。
+
+## §F DEF-200-220 逐檔清單（帳本收斂輪：archive_67 落地時發現既存測試缺陷，護欄層 88425 → 88445，+20）
+
+`tools/archive_defect_log.py --apply --archive-num 67` 落地、`OVERSIZE_ROW_CEILING` 封印延伸至
+62 後，兩支既有測試對「封印尾端相鄰」失明（見 `DEF-200-220`）。
+
+### F.1 既存缺陷修復（功能修復，非漂移）
+
+| 檔案:行 | 內容 |
+|---------|------|
+| `test_check_defect_log_crossref.py::TestR82SealedHistoryPrefix._relaxed` | 整數中點退化為 `_SEAL[-1]` 時改取 `_SEAL[-2]` |
+| `test_check_defect_log_crossref.py::TestR82ComplexReviewSealTableIntegrity::test_rewriting_a_seal_in_place_is_red_even_though_the_length_is_unchanged` | 同上修法 |
+
+本檔 3615→3619（+4），已同步 `_FROZEN_GUARD_LINES`。
+
+### F.2 本檔自身編修（護欄層重釘自身編修）
+
+| 項目 | 淨額 | 內容 |
+|------|-----:|------|
+| `_GUARD_LINES_REPIN_LOG` 兩筆新列（F.1 主敘事 ＋ 自身編修）＋ `_FROZEN_GUARD_LINES` 一處數值更新 ＋ prefix_len／sha256／`_FROZEN_PREFIX_REWRITE_LEDGER` 新增一列（DEF-200-220） | +16 | 同 R95~R102 既有體例（合法出口逐條實查：純數字與註解無可抽結構、無死碼可刪） |
+
+小計：**+16**。**F.1 + F.2 = 4 + 16 = 20**，與 `_GUARD_LINES_REPIN_LOG` 該兩筆 R102 列的淨額合計（4+16）逐字相符。

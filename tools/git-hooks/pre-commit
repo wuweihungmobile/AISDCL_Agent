@@ -472,6 +472,37 @@ else
   rc=1
 fi
 
+# ── 帳本歸檔強制觸發閘（掌舵者裁決：由「等人手動想起來」改為 commit 期阻斷）───
+# 缺陷帳本主檔落在 WARN~FAIL 帶（DEF-99-001 政策）**且**現在就有非空可搬清單時，擋下
+# commit——過去只有 `pre-push` 印一行 `⚠️` warning（不擋、也不主動指路），本閘把它升級
+# 成「快滿了 + 有東西可以搬」時直接擋下並教下一步指令。判準本體與完整邊界決策（為何
+# 不含安全區、為何不含已達 FAIL 的另一個量級）見 `tools/check_archive_required.py`
+# 模組 docstring。
+# 為何**不**放進 `run_root_infra` 條件內：這是帳本自身容量狀態的檢查，與本次 commit
+# 動了哪些檔案無關（即使只改一個字元也可能剛好跨過門檻），故每次 commit 都跑；同一
+# 函式在 bytes 遠低於 WARN 的常態下第一步 `.stat()` 就短路回傳空清單，成本可忽略
+# （不需要額外的路徑判斷去省這個成本）。
+_ar_guard="$TOPLEVEL/tools/lib/windowsapps_guard.sh"
+_ar_checker="$TOPLEVEL/tools/check_archive_required.py"
+if [ -f "$_ar_guard" ] && [ -f "$_ar_checker" ]; then
+  # shellcheck disable=SC1090,SC1091  # 動態 source，理由同上方機密掃描層的同款豁免
+  . "$_ar_guard"
+  _ar_py=""
+  for _ar_cand in python python3; do
+    if is_real_python_candidate "$_ar_cand"; then _ar_py="$_ar_cand"; break; fi
+  done
+  if [ -z "$_ar_py" ]; then
+    echo "[pre-commit dispatcher] ⚠ 找不到可用的 python → 帳本歸檔強制觸發閘未執行" >&2
+  elif ! PYTHONUTF8=1 "$_ar_py" "$_ar_checker"; then
+    echo "[pre-commit dispatcher] ❌ 缺陷帳本已逼近輪替上限且現有可搬清單（見上方訊息）" >&2
+    echo "                        請先跑 python3 tools/archive_defect_log.py --plan 確認清單，" >&2
+    echo "                        再以 --apply --archive-num <N> 完成歸檔，之後重試本次 commit" >&2
+    rc=1
+  fi
+else
+  echo "[pre-commit dispatcher] ⚠ 找不到 tools/check_archive_required.py 或共用 guard → 帳本歸檔強制觸發閘未執行" >&2
+fi
+
 # ── 根層基建 leg（A4）────────────────────────────────────────────────────
 # 變更清單含根層 tools/ / .gitattributes / .editorconfig / .github/ 時，對「本次變更到的」
 # .sh 與無副檔名 hook 檔（tools/git-hooks/*）跑 bash -n 語法檢查（快速、零依賴）；

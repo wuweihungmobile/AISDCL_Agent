@@ -1,7 +1,13 @@
 # R102 交棒書（收尾單人窗口）
 
-<!-- guard-total:R102 --> **本輪護欄層累積淨額（稽核痕跡合計）＝ 87784 → 88425（+641）**
+<!-- guard-total:R102 --> **本輪護欄層累積淨額（稽核痕跡合計）＝ 87784 → 88445（+661）**
 ——逐檔清單見 [`CrossPlatform_R102_Scan_Findings.md`](../06_quality/CrossPlatform_R102_Scan_Findings.md)。
+
+<!-- guard-total:R103 --> **DEF-200-221（本輪收尾後四方複審發現的收尾整合缺口）追加輪次護欄層累積淨額（稽核痕跡合計）＝ 88445 → 88574（+129）**
+——ArchiveGate 對 `test_check_defect_log_crossref.py` 新增測試類別（+103 行）未隨本交棒書
+一併重釘，由後續收尾單人窗口一次性訂正；逐項見
+[`CrossPlatform_R102_Scan_Findings.md`](../06_quality/CrossPlatform_R102_Scan_Findings.md) 與
+`tools/tests/test_adr_xplat001_c1c2_lock.py` 的 `_GUARD_LINES_REPIN_LOG` R103 兩列。
 
 - **輪次**：R102（與 R101 治理修憲並行進行；DEF-200-204 四方終審 4/4 `APPROVE_WITH_FIXES`
   於 R101 commit 之後由收尾單人窗口併入護欄層重釘）
