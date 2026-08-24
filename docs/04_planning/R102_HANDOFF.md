@@ -79,8 +79,8 @@ python tools/check_defect_log_crossref.py
   應 > 0（U1~U4 逐列仍是「未進行」）。
 - ~~🔴 既存失敗、非本輪造成：`TestPricingChangeExemptionExpiresOnItsOwn...`~~
   **已於本輪 push 收尾追加回合執行並訂正，見下方 §6**——此處保留刪除線是誠實記載
-  「本節寫下時尚未執行」，不是回頭假裝一開始就做完；不要因為看到下面 §6 已經解決
-  就誤刪這行、讓下一個讀者以為 §3 從頭就沒漏過這件事。
+  本節初稿落筆那一刻**尚無人動手**，不是回頭假裝一開始就做完；不要因為看到下面
+  §6 已經解決就誤刪這行、讓下一個讀者以為 §3 從頭就沒漏過這件事。
 
 ## §4 下一步的確切指令
 
@@ -131,6 +131,7 @@ python tools/check_defect_log_crossref.py
 ## §7 承接至 R103（本輪確認仍未做，逐項現查指令）
 
 1. **H1 fixture 未落地**（同 §3 第一項，未變）。
+   <!-- absent-if: def test_h1_ -->
 2. **啟動自檢 60 秒佔位值待校準**（同 §3 第二項，未變）。
 3. **`ADR-XPLAT-013` 正式轉 `Accepted` ＋ §7 的 U1~U7 四方獨立審查打勾**——現查：
    `python -c "import pathlib; print(pathlib.Path('docs/04_planning/ADR/ADR-XPLAT-013-loc-pricing-assertion-only.md').read_text(encoding='utf-8').count('未進行'))"`
