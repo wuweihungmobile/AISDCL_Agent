@@ -57,7 +57,7 @@ python -m unittest tools.tests.test_adr_xplat001_c1c2_lock -v
 ## §3 還沒做什麼
 
 - `DEF-200-207` 的 E3（provenance 判準改寫）已於本輪落地，但 ADR-XPLAT-013 §7 的
-  U1~U7（四方獨立審查打勾）仍未執行，承接 R102。現查：
+  U1~U7（四方獨立審查打勾）仍未執行，`DEF-200-207` 承接 R102。現查：
   `python -c "import pathlib; print(pathlib.Path('docs/04_planning/ADR/ADR-XPLAT-013-loc-pricing-assertion-only.md').read_text(encoding='utf-8').count('未進行'))"`
   應 > 0（U1~U4 逐列仍是「未進行」）。
 - `DEF-200-209`（ruff E701/E702 閘門缺口）、`DEF-200-210`（macOS onboarding 基線回填）

@@ -36,7 +36,7 @@ streak 第 1 輪，未觸及款(11)——無需 `_REPIN_APPROVED_ROUND_OVERAGE` 
 ### 1.3 帳本輪次標籤超前（DEF-200-204 程式碼多處自稱 R102，帳本當前輪原停在 R100）
 
 實測發現：把帳本「發現情境」欄的當前輪正式推進到 R102（例如補一筆發現情境含 `R102`
-的索引列）會**連帶**讓硬規則②（孤兒承接輪次）對 41 筆既有「承接輪次：R101」等舊列
+的索引列）會**連帶**讓硬規則②（孤兒承接輪次，見 `DEF-200-204`）對 41 筆既有「承接輪次：R101」等舊列
 同時轉紅——那是一次獨立的「推輪帳本維護」工作（同型前例：`DEF-200-106`），不是這批
 散文標籤修復的射程。故本輪改採**同行具名豁免**（`round-label-ok`，同 R101 commit 對
 自身 R101 引用的既有作法）：對 `tools/lib/quota_availability.py`／`quota_stability.py`／
@@ -81,7 +81,7 @@ python tools/check_defect_log_crossref.py
   test_the_exemption_is_green_only_inside_its_own_round` 目前紅（`[豁免過期]`）。
   已實測確認：把 `live_repin_round()` 固定成 R101（本輪落地前的既有磁碟狀態）一樣紅，
   因為 `AutoClaude/.loc_baseline` 的 provenance 至今仍是 `None`——`R101_HANDOFF.md` §1.1
-  已明文「該執行明確留給 R102」（`python AutoClaude/tools/check_loc_budget.py --update`）
+  已明文「該執行明確留給 R102」（`DEF-200-207`／`python AutoClaude/tools/check_loc_budget.py --update`）
   但尚未有人執行。本輪射程不含此項，未動它。
 
 ## §4 下一步的確切指令
