@@ -405,6 +405,14 @@ on:
       - "tools/lib/guard_line_taxonomy.py"
       - "tools/lib/ledger_closing_guards.py"
       - "tools/lib/oversize_repin.py"
+      # R100/R102 收尾：本輪新建的四支根層 SSOT（動態配速可得性軸遲滯狀態機／R16 啟動
+      #      自檢不變式／死區與變化率限制平穩性機制／額度對帳，其中 quota_reconcile.py
+      #      為 R100 加入、此前漏列）。漏列的代價逐字同 DEF-101-042：只改該檔時其回歸鎖
+      #      不會跑（與 R80／R81／R86／R98／R99 同一形態、同一支判準，第六次重犯）。
+      - "tools/lib/quota_availability.py"
+      - "tools/lib/quota_boot_check.py"
+      - "tools/lib/quota_reconcile.py"
+      - "tools/lib/quota_stability.py"
       - "AutoClaude/autoclaude/execution/pre_run_validator.py"
       - "AutoClaude/autoclaude/core/ports/observability.py"
       - "AutoClaude/autoclaude/core/ports/rtm_feedback.py"
@@ -690,6 +698,14 @@ on:
       - "tools/lib/guard_line_taxonomy.py"
       - "tools/lib/ledger_closing_guards.py"
       - "tools/lib/oversize_repin.py"
+      # R100/R102 收尾：本輪新建的四支根層 SSOT（動態配速可得性軸遲滯狀態機／R16 啟動
+      #      自檢不變式／死區與變化率限制平穩性機制／額度對帳，其中 quota_reconcile.py
+      #      為 R100 加入、此前漏列）。漏列的代價逐字同 DEF-101-042：只改該檔時其回歸鎖
+      #      不會跑（與 R80／R81／R86／R98／R99 同一形態、同一支判準，第六次重犯）。
+      - "tools/lib/quota_availability.py"
+      - "tools/lib/quota_boot_check.py"
+      - "tools/lib/quota_reconcile.py"
+      - "tools/lib/quota_stability.py"
       - "AutoClaude/autoclaude/execution/pre_run_validator.py"
       - "AutoClaude/autoclaude/core/ports/observability.py"
       - "AutoClaude/autoclaude/core/ports/rtm_feedback.py"
