@@ -34,10 +34,15 @@ tests/contract/test_loc_budget_tiered.py::test_warn_band_boundary_and_rc_invaria
 `python tools/check_loc_budget.py --json` 的 `tier_warn_band`。
 
 使用：
-  python tools/check_loc_budget.py            # 檢查（CI gate）
-  python tools/check_loc_budget.py --update   # 更新 baseline；R56 註記：刻意不接線任何
-                                              # 閘門，僅供 ADR §6.3 核准後人工執行
-  python tools/check_loc_budget.py --json     # 輸出 JSON 報表
+  python tools/check_loc_budget.py             # 檢查（CI gate）
+  python tools/check_loc_budget.py --update    # 重釘 baseline；R56 註記：刻意不接線任何
+                                               # 閘門，僅供 ADR §6.3 核准後人工執行。
+                                               # 🔴 ADR-XPLAT-013 條文五（E4）：本旗標**不再**
+                                               # 連動 20% 緩衝（cap）——見 --repin-cap。
+  python tools/check_loc_budget.py --repin-cap # 獨立重釘 cap 基準（ADR-XPLAT-013 條文五）；
+                                               # 與 --update 刻意分開兩支旗標，僅供 Architect+SD
+                                               # 雙簽核准後人工執行，不得同批呼叫互相取代
+  python tools/check_loc_budget.py --json      # 輸出 JSON 報表
 """
 from __future__ import annotations
 
@@ -52,6 +57,17 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 BASELINE_FILE = PROJECT_ROOT / ".loc_baseline"
 OVERRIDE_FILE = PROJECT_ROOT / ".loc-budget.toml"
+#: ADR-XPLAT-013 條文五（E4）：cap 的獨立審核基準，刻意是**另一個檔**而非
+#: `.loc_baseline` 的第二個欄位——兩個檔各自被哪支函式讀寫，一眼就能稽核。
+CAP_BASIS_FILE = PROJECT_ROOT / ".loc_cap_basis"
+#: DEF-200-208：`.loc_baseline` 是用**哪一把尺**（`POLICY_VERSION`）釘的，同樣是
+#: **另一個檔**而非 `.loc_baseline` 的第二個欄位（理由同 `CAP_BASIS_FILE`）。非有
+#: 不可的理由見 `pricing_exemption_problems()` 的 WHY：「baseline 比 total 大/小」
+#: 這個不等式在計價規則變了之後**結構上恆假地被拿來同時代表兩件相反的事**
+#: （已重釘 vs. total 長過陳舊 baseline），因為兩者用的是不同的尺，magnitude
+#: 比較本身就沒有意義（見 `POLICY_VERSION` 上方〈通約規則〉①）。判準改成**問
+#: 「這份 baseline 是不是現在這把尺釘的」**（provenance），不再從數字大小反推狀態。
+BASELINE_POLICY_FILE = PROJECT_ROOT / ".loc_baseline_policy_version"
 
 # 強制 stdout/stderr 為 UTF-8 的唯一實作、與 ADR-XPLAT-012 條文五 §2 Phase 1 觀察模式
 # 分類器（敘事／斷言／空白）皆住 monorepo 根層 `tools/lib/`（見 `init_utf8_streams`
@@ -117,6 +133,33 @@ LOC_TIERS: dict[str, dict] = {
 ABSOLUTE_LIMIT = 750
 SCAN_ROOT = "autoclaude"
 TOTAL_INCREASE_LIMIT = 1.20
+
+#: 政策版本標記（ADR-XPLAT-013 條文六；R100 §E-3「附帶一」訂正）。**每次 `count_loc()`
+#: 的計價規則本身改變**（不是門檻數字改變）就必須跟著換版號——版號不是裝飾，是「這個
+#: `.loc_baseline`／`total` 是用哪一把尺量出來的」的唯一標記。
+#:
+#: 🔴 通約規則（不可通約的兩個版本，禁止直接相減／相除比大小）：
+#:   1. **R101／DEF-200-208 已補**（round-label-ok）：`write_baseline()` 每次重釘同時由
+#:      `write_baseline_policy_version()` 把當時的 `POLICY_VERSION` 寫進
+#:      `BASELINE_POLICY_FILE`（`read_baseline_policy_version()` 讀回）——
+#:      這就是「兩者用的是不是同一把尺」的機械答案，不必再靠人眼比對本欄位。
+#:      🔴 但**磁碟上既有的 `.loc_baseline`（17032）沒有回填**：它最後一次寫入
+#:      早於 `POLICY_VERSION` 這個符號存在（`git log -- .loc_baseline` 可查
+#:      2026-06-13），此時 `read_baseline_policy_version()` 誠實回 `None`——
+#:      `None` 必須被下游（`pricing_exemption_problems()`）當成「不是目前這把尺
+#:      釘的」處理，**不得**猜成目前版本（猜錯比誠實缺記錄更糟，同
+#:      `tools/lib/baseline_origin.py` 的既有處方）。
+#:   2. 版號**只在計價規則變更時**遞增（tier 門檔或 `TOTAL_INCREASE_LIMIT` 調整不算——
+#:      那些是「尺不變、門檻變」，不影響可比性）；本檔一份判準一個家，版號本身不做任何
+#:      自動換算，換算永遠是人審的責任（同 ADR-XPLAT-012 條文五 §3 的取值紀律）。
+#:   3. `v2-tiered+sd08-special` → `v3-assertion-only+sd08-special`：ADR-XPLAT-013 條文一
+#:      把 `count_loc()` 由「排除空行與純註解」改為「只算斷言行」，兩把尺對同一份原始碼
+#:      給出的行數**逐檔不保證相等**、且**淨方向不保證同號**（見該 ADR §1.2 三支頂格檔
+#:      實測，改動可達 −43% 以上；但 R100 §E-4 全樹實測 total 反而 17032→17079 上升
+#:      +47）——這正是 DEF-200-208 的立案理由：`baseline > total` 這個不等式在改尺
+#:      前後可能倒向任一邊，拿它反推「有沒有重釘」在結構上會恆假或恆真，必須改問①的
+#:      provenance，不能再問大小關係。
+POLICY_VERSION = "v3-assertion-only+sd08-special"
 # R56 round 5 修正：ADR-SD07-001 §6.3 觸發條件 ② 是「連續 2 輪 total ≥ cap − 10」，
 # 但本工具此前只在 total > cap 才有訊號 —— 落在預警帶時輸出與正常態一字不差，
 # 該 ADR 自己的「緣起」段記載 R53(=cap)／R55(=cap−1) 兩次都是靠審查員逐字讀輸出
@@ -594,6 +637,66 @@ def write_baseline(value: int) -> None:
     BASELINE_FILE.write_text(f"{value}\n", encoding="utf-8")
 
 
+def read_baseline_policy_version() -> str | None:
+    """`.loc_baseline` 是用哪一把尺（`POLICY_VERSION`）釘的（DEF-200-208）。
+
+    回傳 `None` 表示**尚未有人在本機制落地後跑過 `--update`**——現況磁碟上的
+    `.loc_baseline`（17032）最後一次寫入是 2026-06-13（`git log -- .loc_baseline`
+    可查），早於 `POLICY_VERSION` 這個符號存在的時間點，此時「它是哪一版尺釘的」
+    只能誠實回答「不可考」，**不得**猜成目前的 `POLICY_VERSION`（那會把一份用舊尺
+    量的數字偽裝成用新尺量的，比缺記錄更糟——同 `tools/lib/baseline_origin.py`
+    「猜的指紋比誠實的空值更危險」那條原則）。呼叫端（`pricing_exemption_problems()`）
+    對 `None` 的處置是「視為尚未用目前的尺重釘」，即安全預設，而非放行。
+    """
+    if not BASELINE_POLICY_FILE.exists():
+        return None
+    try:
+        return BASELINE_POLICY_FILE.read_text(encoding="utf-8").strip() or None
+    except OSError:
+        return None
+
+
+def write_baseline_policy_version(value: str) -> None:
+    """`write_baseline()` 的 provenance 搭檔——刻意兩支函式各寫各的檔（同
+    `write_cap_basis()` 旁的設計說明），讓「重釘 baseline 數值」與「記下釘它的尺」
+    在呼叫端是兩個可以各自被稽核、卻又總是成對出現在 `check()` 裡的動作。
+    """
+    BASELINE_POLICY_FILE.write_text(f"{value}\n", encoding="utf-8")
+
+
+def read_cap_basis() -> int | None:
+    """`cap` 的**獨立**審核基準（ADR-XPLAT-013 條文五；R100 §E-4 的修憲項）。
+
+    🔴 為什麼非有不可：改前 `cap = int(baseline * TOTAL_INCREASE_LIMIT)` 一路都是
+    **即時**從 `baseline` 算出來、從未獨立持久化過——於是每一次 `--update`（不論是
+    ADR-SD07-001 §6.3 的核准成長、還是本 ADR 條文四的計價規則變更豁免出口）都會
+    **順帶**把 cap 一起抬高，而後者的立案理由逐字是「不必重釘 baseline」，從未打算
+    核准任何新增額度。R100 §E-4 實測：`--update` 把 baseline 17032→17079 的同時，
+    cap 20438→20494（**+56**，語意反轉——條文四把它描述成「沒收陳舊餘裕的出口」，
+    實際是加碼）。
+
+    回傳 `None` 表示**尚未有人跑過** `--repin-cap`：此時 `check()` 的呼叫端會退回
+    沿用 `baseline` 當 cap 基準（維持本輪落地當下的既有行為與既有回歸測試逐字不變，
+    見 `AutoClaude/tests/contract/test_loc_budget_tiered.py::frozen_cap`），**這個
+    退回狀態下 `--update` 仍會間接移動 cap**——真正的解耦要等第一次 `--repin-cap`
+    落地才生效。本輪只落地機制本身，尚未執行那一次獨立審核（見 ADR §9 WHY）。
+    """
+    if not CAP_BASIS_FILE.exists():
+        return None
+    try:
+        return int(CAP_BASIS_FILE.read_text(encoding="utf-8").strip())
+    except (ValueError, OSError):
+        return None
+
+
+def write_cap_basis(value: int) -> None:
+    """`--repin-cap` 專用寫入口——刻意與 `write_baseline()` 是兩支不同函式、寫兩個不同
+    檔案，讓「重釘 baseline」與「重釘 cap 基準」在程式碼層面就是兩個不能被同一個呼叫
+    誤觸的動作（同 ADR-XPLAT-013 條文五的旗標分離設計）。
+    """
+    CAP_BASIS_FILE.write_text(f"{value}\n", encoding="utf-8")
+
+
 def iter_source_files() -> Iterable[Path]:
     for p in (PROJECT_ROOT / SCAN_ROOT).rglob("*.py"):
         if "__pycache__" in p.parts:
@@ -719,7 +822,9 @@ def build_reports(overrides: dict[str, dict]) -> list[FileReport]:
     return reports
 
 
-def check(update_baseline: bool = False, as_json: bool = False) -> int:
+def check(
+    update_baseline: bool = False, repin_cap: bool = False, as_json: bool = False
+) -> int:
     overrides = load_overrides()
     reports = build_reports(overrides)
 
@@ -747,9 +852,28 @@ def check(update_baseline: bool = False, as_json: bool = False) -> int:
     baseline = read_baseline()
     if update_baseline or baseline is None:
         write_baseline(total)
+        # DEF-200-208：每一次重釘 baseline 數值，同一時間就把「用哪一把尺釘的」
+        # 寫下來——provenance 與數值同一次寫入，不留「先有數字、後補尺別」的空窗。
+        write_baseline_policy_version(POLICY_VERSION)
         baseline = total
-        print(f"[baseline] 已寫入 .loc_baseline = {total}")
-    cap = int(baseline * TOTAL_INCREASE_LIMIT)
+        print(f"[baseline] 已寫入 .loc_baseline = {total}（policy_version={POLICY_VERSION}）")
+
+    # ADR-XPLAT-013 條文五（E4）：cap 基準與 baseline 重釘解耦。`cap_basis_pinned`
+    # 為 False 時（尚未有人跑過 `--repin-cap`）沿用 `baseline` 當**啟動預設**——這一步
+    # 刻意保留，讓落地當下（`.loc_cap_basis` 不存在）的 cap 數值與改前逐字相同、
+    # 零回歸；`read_cap_basis()` docstring 記載了這個退回狀態下 `--update` 仍間接連動
+    # cap 的已知殘留，尚待獨立那一次審核執行。
+    cap_basis = read_cap_basis()
+    cap_basis_pinned = cap_basis is not None
+    if repin_cap:
+        write_cap_basis(baseline)
+        cap_basis = baseline
+        cap_basis_pinned = True
+        print(f"[cap-basis] 已寫入 .loc_cap_basis = {baseline}（獨立審核步驟；"
+              "此後 --update 不再連動 cap，需再次執行 --repin-cap 才會調整）")
+    if cap_basis is None:
+        cap_basis = baseline
+    cap = int(cap_basis * TOTAL_INCREASE_LIMIT)
     total_violation = total > cap
     # 預警帶：已進 ADR §6.3 ② 的「餘裕耗盡」區間但尚未破線。**非阻塞**（不進
     # has_violation、不影響 rc），僅提示；破線後改由下方 [TOTAL] 阻塞訊息接手，
@@ -801,9 +925,19 @@ def check(update_baseline: bool = False, as_json: bool = False) -> int:
                 {**r.__dict__, "headroom": r.budget - r.loc} for r in root_tools_warn
             ],
             "root_tools_tiers": {k: v["budget"] for k, v in ROOT_TOOLS_TIERS.items()},
-            "policy_version": "v2-tiered+sd08-special",
+            "policy_version": POLICY_VERSION,
             "absolute_limit": ABSOLUTE_LIMIT,
             "special_files": SPECIAL_FILES,
+            # ADR-XPLAT-013 條文五（E4）：cap 的獨立審核基準——`cap_basis_pinned=False`
+            # 時 `cap_basis` 只是沿用 `baseline` 的**啟動預設**（尚未有人跑過
+            # `--repin-cap`），此時 `--update` 仍會間接移動 cap（見該常數旁的
+            # docstring）；`True` 之後 `--update` 才真正不再連動 cap。
+            "cap_basis": cap_basis,
+            "cap_basis_pinned": cap_basis_pinned,
+            # DEF-200-208：baseline 的 provenance——`None` 代表磁碟上的 `.loc_baseline`
+            # 是在本機制落地前釘的（不可考，非「目前這把尺」），詳見
+            # `read_baseline_policy_version()` docstring。
+            "baseline_policy_version": read_baseline_policy_version(),
         }
         # ADR-XPLAT-012 條文五 §2：Phase 1 觀察模式並存欄位——只加欄位，不動上面
         # 任何既有鍵、不影響 `has_violation`／rc（見本函式末尾組裝式，taxonomy 未入內）。
@@ -844,7 +978,8 @@ def check(update_baseline: bool = False, as_json: bool = False) -> int:
         if total_violation:
             print(
                 f"\n[TOTAL] total LOC cap violation: {SCAN_ROOT}/: {total} > "
-                f"baseline({baseline}) x {TOTAL_INCREASE_LIMIT} = {cap}"
+                f"cap_basis({cap_basis}) x {TOTAL_INCREASE_LIMIT} = {cap}"
+                + ("" if cap_basis_pinned else "（cap_basis 尚未獨立重釘，沿用 baseline）")
             )
         if total_warn_band:
             print(
@@ -966,8 +1101,9 @@ def main() -> int:
     # 「訂正註記逐字引述＝製造新事實」的機械版）。
     _init_utf8_streams()
     update = "--update" in sys.argv
+    repin_cap = "--repin-cap" in sys.argv
     as_json = "--json" in sys.argv
-    return check(update_baseline=update, as_json=as_json)
+    return check(update_baseline=update, repin_cap=repin_cap, as_json=as_json)
 
 
 if __name__ == "__main__":

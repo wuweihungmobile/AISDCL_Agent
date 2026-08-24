@@ -273,6 +273,12 @@ _GOVERNANCE_DOCS = (
     # 「餘裕從 12 行變成四位數是怎麼來的」就得讀完它（⇒ 體積守門）。
     # 即刻登記，不等下一輪（DEF-200-131 同型）。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R100_Scan_Findings.md",
+    # DEF-200-207／DEF-200-208 的逐檔清單與立案實測。資格同前一輪同名檔：
+    # `_GUARD_LINES_REPIN_LOG` 的 R101 列指名本檔為逐檔清單的家（⇒ 指針稽核，round-label-ok），
+    # 且本檔承載本輪 `guard-total:` 標記（`_GUARD_TOTAL_DOC_GLOBS` 掃描面之一）⇒
+    # 同時是行數棘輪的文件側對帳站點；複審者要重驗「baseline provenance 修法」與
+    # 「一次性例外核准淨額」就得讀完它（⇒ 體積守門）。即刻登記，不等下一輪。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R101_Scan_Findings.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/{CrossPlatform,Quota}_*.md`。這**不是**把具名

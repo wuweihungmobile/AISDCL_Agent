@@ -6,6 +6,7 @@
 - **性質**：修正 `AutoClaude/tools/check_loc_budget.py::count_loc()` 的**計價規則**——由「空行與行首 `#` 免費、其餘（含 docstring）等價計價」改為「**只算斷言行**」，計價本體委派 `tools/lib/guard_line_taxonomy.classify_file()` 的 `.assertion` 桶。
 - **關係**：本案是 ADR-XPLAT-012 條文五 §1 明文要求的「另一次修正案」（把 Phase 1 觀測欄位轉為阻斷判準），落地其 Phase 2 的**方向 (a)**；方向 (b)(c) 未落地，交棒收尾單人窗口。
 - **落地實測與逐檔清單**：[docs/06_quality/CrossPlatform_R100_Scan_Findings.md](../../06_quality/CrossPlatform_R100_Scan_Findings.md)
+- **後續修憲（R101）**：R100 收尾窗口的四方唯讀複審（同上檔案 §E）對本案提出五筆新發現（E1~E5），其中 E1／E4 已由四方重投票裁決並於本輪落地（**§9** 揭露與技術債追蹤／**§10** 條文五 cap 解耦），**§11** 條文六同時把 `policy_version` 版號跟上條文一的計價尺變更、且 `pricing_exemption_problems()` 的 provenance 判準改寫本輪已由 E3/DEF-200-208 一併落地（見 §6.2）；E2／E5 仍待處置（追蹤＝`docs/06_quality/AutoSDD_Defect_Log.md` 的 `DEF-200-207`／`DEF-200-209`）。
 
 ---
 
@@ -153,6 +154,8 @@ tier／`ABSOLUTE_LIMIT`／`SPECIAL_FILES`／`_FROZEN_GUARD_LINES` 全部門檻**
 
 **§3.5 WHY 這一格非有不可**：本 repo 已有實證，散文形態的「只限這一輪」攔阻力為 0（`feedback_promise_without_mechanism_stalls_silently`：說了「reset 後續跑」但無機制 ⇒ 三小時真空轉）。沒有機械載體的豁免＝口頭承諾。
 
+**§3.6 🔴 訂正（R100 §E-4；四方複審裁決 `decouple_buffer_from_repin`，本輪已修憲落地）**：上面「出口只有一個且永遠開著」那句把 `--update` 描述成「沒收陳舊餘裕的出口」——**這句話改前是錯的**。改前 `cap = int(baseline × TOTAL_INCREASE_LIMIT)` 一路即時算，`--update` 動 `baseline` 就**順帶**動 `cap`；當回合實測 `17032×1.2=20438` → 執行一次 `--update` 後 `17079×1.2=20494`（**+56**），語意是加碼而非沒收。修法與現況＝**§10 條文五**（cap 與 baseline 重釘解耦）。**本節這句「出口」描述在條文五落地並經一次 `--repin-cap` 獨立審核之前，實務上仍會連動 cap**——見條文五 WHY 段的殘留說明，勿誤讀為已完全解耦。
+
 ---
 
 ## §5 條文四 — ADR-XPLAT-012 條文五 §6「5 輪時效」的到期載體
@@ -205,8 +208,13 @@ tier／`ABSOLUTE_LIMIT`／`SPECIAL_FILES`／`_FROZEN_GUARD_LINES` 全部門檻**
 | U5 | §6 缺口 ⑥（多語句擠一行 × `.claude/hooks/` 無 ruff 閘門）已做出選擇並落地或明文接受 | ☐ 未選擇 | 缺口 ⑥ 的兩個選項擇一，或四方明文接受該殘留 |
 | U6 | §6 缺口 ⑤（三個 `*_WARN_MARGIN` 在新值域下是否合適）已重新評估 | ☐ 未評估 | 附當回合實測的逐層母體筆數 |
 | U7 | §8 交棒清單的自陳站點處置方針已定（逐一改寫／保留加註／搬回 docstring） | ☐ 未定 | 方針寫進 §8 表頭；逐點落地可分輪 |
+| U8 | R100 §E 五筆新發現（E1~E5）的四方重投票已完成 | ▣ **部分**：E1／E3／E4 已裁決並修憲落地（§9／§6.2／§10） | E2／E5 尚待處置（追蹤＝`DEF-200-207`／`DEF-200-209`），本欄勾稽以該兩列狀態為準 |
+| U9 | §9 四支 `[ROOT-TOOLS]` 檔的技術債已拆到舊尺不破線（或四方明文接受長期掛帳） | ☐ 未拆 | 現查§9.2 表逐檔 over_by 是否歸零；追蹤＝`DEF-200-207` |
+| U10 | §10 條文五落地後的第一次 `--repin-cap` 已由 Architect+SD 雙簽執行（否則 `--update` 仍間接連動 cap，見 §5.4） | ☐ 未執行 | 現查 `--json` 的 `cap_basis_pinned` 是否為 `true` |
 
-**四方全數 APPROVE 且 U5~U7 有明文結論之後**，才把〈狀態〉由 Proposed 改為 Accepted。**本包不得自行開複審**（那是主控／收尾單人窗口的事），本節只把條件寫成可勾稽的形狀。
+🔴 **U8 與 U1~U7 是兩個不同的四方複審批次，不得互相頂替**：U1~U7 是 ADR-XPLAT-012 條文六要求、對整份 ADR-XPLAT-013 的原始複審；U8 是 R100 §E 節唯讀交件觸發、範圍限定在五筆新發現（E1~E5）的補充複審（§9.1 已裁決 E1、§5.2 已裁決 E4、§6.2 已落地 E3 的 provenance 判準改寫）。U8 完成不代表 U1~U7 完成，反之亦然——本節〈狀態〉的 Proposed→Accepted 判準仍是**兩批皆全數通過**。
+
+**四方全數 APPROVE 且 U5~U10 有明文結論之後**，才把〈狀態〉由 Proposed 改為 Accepted。**本包不得自行開複審**（那是主控／收尾單人窗口的事），本節只把條件寫成可勾稽的形狀。
 
 ---
 
@@ -261,3 +269,67 @@ tier／`ABSOLUTE_LIMIT`／`SPECIAL_FILES`／`_FROZEN_GUARD_LINES` 全部門檻**
 `AutoClaude/docs/04_planning/ADR/ADR-SD07-001-loc-policy.md:268`、`docs/04_planning/ADR/ADR-XPLAT-002-platform-surface-reduction.md:719`、`docs/04_planning/ADR/ADR-XPLAT-003-autoclaude-platform-capability-layer.md:111`、`docs/04_planning/ADR/ADR-XPLAT-012-guard-line-taxonomy-amendment.md:28/34/40`、`docs/06_quality/CrossPlatform_R89_Closure_Evidence.md:1804`、`docs/06_quality/CrossPlatform_R96_Closure_Evidence.md:203`、`AutoClaude/docs/05_development/risk_log.md:29`、`AutoClaude/docs/04_planning/SD_Improving_02.md:511`。
 
 放寬載體後的 `.md` 面命中 **35 筆**（含 20 餘筆缺陷帳本 archive 的歷史條目）——那些是**帳本史料，不得改寫**（改了就毀了當時的實測記錄）。
+
+---
+
+## §9 揭露與技術債追蹤 — 換尺同時把四支 `[ROOT-TOOLS]` 違規檔由 4 筆變 0 筆（R100 §E-1；四方複審裁決 `disclose_and_track_debt`）
+
+**§9.1（事實，四方複審已裁決＝揭露＋掛帳，不撤尺）**：R100 收尾窗口的四方唯讀複審（`docs/06_quality/CrossPlatform_R100_Scan_Findings.md` §E-1）發現本 ADR 落地當下**未揭露**一件事——條文一的計價尺變更，同一次 commit 內**同時**把下列四支檔的 `[ROOT-TOOLS]` 分級違規由 **4 筆變成 0 筆**。四方重投票的結論（對照另一候選 `revert_ruler_change`）：**揭露＋掛技術債**，不撤尺——理由是撤尺會讓 §9.3 已釋出並被後續包消費的餘裕整批沒收（同 §7 開頭〈本案的事實與風險〉的既有分析），且四支檔的違規本質是「舊尺本來就沒有餘裕可以吸收後續合法工作」而非「新尺判準本身錯誤」（條文一 §1.4 已證新尺對現況母體零假紅）。
+
+**§9.2（逐檔對照——R100 落地當下 vs 本輪（R101）現查，皆為當回合實測）**：
+
+| 檔案 | tier（budget） | R100 落地當下（HEAD，舊尺） | R101 現查・舊尺 | R101 現查・新尺 |
+|------|---|---:|---:|---:|
+| `tools/lib/quota_meter.py` | guardrail_lib（400） | 399（貼線，over=0） | **462（over=62）** | 310（over=0） |
+| `tools/session_resume_planner.py` | guardrail_cli（750） | 750（貼線，over=0） | **789（over=39）** | 744（over=0） |
+| `tools/lib/hook_wiring.py` | guardrail_lib（400） | 395（over=0） | **428（over=28）** | 398（over=0） |
+| `tools/lib/quota_gate.py` | guardrail_hub（500） | 500（貼線，over=0） | **520（over=20）** | 366（over=0） |
+
+🔴 **讀法**：R100 落地當下這四支檔**在舊尺下已經貼著上限、餘裕為 0**（不是「還有空間」）；R100→R101 之間的後續合法工作（在新尺顯示的四位數餘裕下進行）已經讓四支檔在**舊尺下**實際**破線**（超額 20～62 行）。這正是「換尺同時掩蓋既有違規」的技術債本體：**這四支檔現在的行數，若沒有本次計價尺變更，在條文一落地當下就已無法通過**，後續增加的行更是舊尺下的直接違規。新尺下四支皆 over=0，是本 ADR 存在的直接效果，不是巧合。
+
+**§9.3（技術債義務——不得永久免費搭便車）**：四支檔的處置方針比照本檔既有的 `[ROOT-TOOLS]`／`guardrail_hub` 違規訊息一貫要求（`check_loc_budget.py` 的既有措辭：「破線後不是調高預算，而是拆職責／抽共用模組；真的不可壓縮才具名加進 `SPECIAL_FILES` 的 raw-line 棘輪」）——**新尺的貼現不改變這條既有紀律**：
+
+- 日後任一支檔要新增斷言行之前，先現查該檔在**舊尺**下的 over_by（現查：`git show HEAD:tools/lib/guard_line_taxonomy.py` 判準不變的前提下，用改前 `count_loc` 邏輯——空行與行首 `#` 免費、其餘計價——手算或用合成腳本量；本 ADR 不為此另建工具，理由是舊尺已廢，重建它只服務這一項稽核）。
+- **目標＝拆職責／抽共用模組，把四支檔的邏輯量降到舊尺（改前判準）下亦不破線**，而不是繼續依賴新尺的便宜計價無限期加碼。這是 disclose_and_track_debt 決策的字面意思：揭露＋要求日後真的付掉，不是揭露完就當作合法額度。
+- 追蹤載體＝ [`docs/06_quality/AutoSDD_Defect_Log.md`](../../06_quality/AutoSDD_Defect_Log.md) 既有未結列 `DEF-200-207`（同主題「續報 §E-1/3/4」欄位，R101 已追加本節四檔對照與義務描述——不新開列，理由見該列 R101 追記段的「未結列僅剩 0 格」實況）。該列在四支檔任一支被拆到舊尺不破線之前，不得標記與本項相關的部分為 `fixed`。
+- **本節不設具體到期輪**（四方複審決策文字未指定），但比照本 ADR 既有的 `_PHASE2_*` 到期設計慣例，若下一次獨立審查認為需要機械到期載體，屬 R102 以後承接項，不在本輪授權範圍內新增（避免無到期常數的判準憑空生出鎖檔卻無人維護）。
+
+**§9.4（不涵蓋）**：本節不涵蓋 R100 §E-1 同時指出的「母體級 −22.3%／per-file violations 4→0／預警帶 17→7」等群體統計，那些數字已完整落在 `CrossPlatform_R100_Scan_Findings.md` §E-1，本節僅承接「四支具名檔」這一個可勾稽義務，避免重複維護同一組數字兩個家。
+
+---
+
+## §10 條文五 — cap 與 baseline 重釘解耦（R100 §E-4；四方複審裁決 `decouple_buffer_from_repin`）
+
+**§5.1（缺陷本體）**：改前 `cap = int(baseline × TOTAL_INCREASE_LIMIT)` 全程**即時**由 `baseline` 算出、從未獨立持久化。於是任何一次 `--update`——不論目的是 ADR-SD07-001 §6.3 的核准成長，還是本 ADR 條文四的「計價規則變更豁免」出口——都會**順帶**把 20% 緩衝（cap）一起抬高，即使呼叫者只想單純把 `baseline` 對齊當回合實測、完全沒有申請新增額度的意圖。R100 §E-4 實測：`17032×1.2=20438` → 執行 `--update` 使 `baseline=17079` <!-- adr-measurement-historical: R100 §E-4 報告當時的實測快照，描述「若跑 --update 會怎樣」的反事實情境，非本 ADR 現況 --> 之後 `→20494`（**+56**）。§4 條文三與 `pricing_exemption_problems()` 皆把這個出口描述成「沒收陳舊餘裕」，實際效果是加碼——這是語意反轉，屬修憲範疇（非單純改程式碼能解，四方複審已裁決見 §5.2）。
+
+**§5.2（決策——與另一候選 `find_real_tightening_exit` 的取捨）**：四方複審裁決 `decouple_buffer_from_repin`：**不**另尋一個「真的會收緊」的出口取代 `--update` 的描述，而是把 cap 的 20% 緩衝基準從「即時派生自 baseline」改為「獨立持久化、需另一個明確步驟才能調整」的量。`--update` 從此**只**動 `baseline`（供條文三～四的豁免與 §6.3 成長校準比對用），不再是移動 cap 的唯一或隱性手段。
+
+**§5.3（機械載體）**：
+
+| 載體 | 位置 | 語意 |
+|------|------|------|
+| `CAP_BASIS_FILE`（`.loc_cap_basis`） | `AutoClaude/tools/check_loc_budget.py` | cap 的獨立審核基準，與 `.loc_baseline` 是**兩個檔** |
+| `read_cap_basis()` / `write_cap_basis()` | 同上 | 讀寫入口各自獨立於 `read_baseline()` / `write_baseline()` |
+| `--repin-cap` CLI 旗標 | 同上 `main()` | 唯一能移動 cap 基準的動作；與 `--update` 是兩個不同旗標，不得同義使用 |
+| `cap_basis` / `cap_basis_pinned` | `--json` payload | 機讀揭露目前 cap 是「已獨立釘住」還是「仍沿用 baseline 的啟動預設」 |
+
+**§5.4（🔴 落地當下的殘留狀態——誠實揭露，勿誤讀為「已完全解耦」）**：本輪（R101）**只落地機制本身**，尚未執行第一次 `--repin-cap`（那是「獨立於 baseline 重釘的審核步驟」，依 ADR-SD07-001 §6.2/§6.3 的既有紀律仍須 Architect + SD 雙簽核准後人工執行，非本包職權）。`.loc_cap_basis` 檔案目前**不存在**，故 `read_cap_basis()` 回 `None`、`check()` 退回沿用 `baseline` 當 cap 基準（`cap_basis_pinned=False`）——這個退回狀態下的行為與改前逐字相同（`cap = baseline × 1.20`），**零回歸、cap 數值本輪未變（仍是 20438）**。也就是說：**在有人執行第一次 `--repin-cap` 之前，`--update` 實務上仍會間接移動 cap**，§4 條文三的「出口」描述在那之前仍不完全準確。這件事本身即技術債，追蹤載體同 §9.3——掛在 `DEF-200-207`。
+
+**§5.5（下一步，交棒）**：Architect + SD 雙簽核准後，執行一次 `python AutoClaude/tools/check_loc_budget.py --repin-cap`，把 cap 基準釘為當時的 `baseline`（**不是** `total`——釘的是「已核准的成長上限起點」，不是「今天程式碼實際多重」，兩者概念不同，混用會重新引入 baseline↔cap 的耦合）。此後每次 `--update`（含條文三～四的豁免出口）都不再連動 cap；要調整 cap 須再跑一次獨立的 `--repin-cap`，且應比照 §6.2 的雙簽紀律書面留痕。
+
+---
+
+## §11 條文六 — `policy_version` 標記與通約規則（R100 §E-3；版號本身的修憲＋ provenance 判準改寫，本輪由 E3/DEF-200-208 一併落地）
+
+**§6.1（缺陷本體）**：`count_loc()` 的計價規則本身已由本 ADR 改變（條文一），但 `check_loc_budget.py` 的 `--json` payload 裡 `policy_version` 欄位在本 ADR 落地當下**仍是舊值** `"v2-tiered+sd08-special"`（R100 §E-3「附帶一」逐字指出「本輪 diff 對該行零命中」）。版號沒跟著換，等於「量到的行數是用哪一把尺量的」這件事在資料面上不可辨識——這正是 `pricing_exemption_problems()` 用同一個不等式 `baseline > total` 表達「尚未重釘」與「total 已長過陳舊 baseline」兩件相反事情、導致到期鎖永久靜音（R100 §E-3 主牙）的根本前提之一：兩個數字（`.loc_baseline`＝舊尺釘的、`total`＝新尺量的）被直接相減比大小，卻沒有任何欄位讓人先確認兩者是否可比。
+
+**§6.2（本輪落地——版號本身 ＋ provenance 判準改寫，兩者皆已完成）**：`check_loc_budget.py` 新增具名常數 `POLICY_VERSION = "v3-assertion-only+sd08-special"` 並取代 `--json` payload 內原本寫死的字面值；同時新增 `BASELINE_POLICY_FILE`／`read_baseline_policy_version()`／`write_baseline_policy_version()`，`--json` payload 新增 `baseline_policy_version` 欄位。R100 §E-3 主牙要求的「把 `baseline > total` 這個雙義不等式改判 provenance（仿 `tools/lib/baseline_origin.py` 家族既有處方）」**本輪已由 E3/DEF-200-208 落地**：`pricing_exemption_problems()` 的參數簽章已改為 `baseline_policy_version`／`current_policy_version`，判準由「比大小」改為「比對是否同一把尺釘的」（見下方 §6.3）。🔴 **誠實劃界——落地的是判準，殘留的是磁碟資料**：磁碟上 `.loc_baseline` 檔案早於 `BASELINE_POLICY_FILE` 機制存在，尚未經過一次 `--update` 回填 provenance，故 `read_baseline_policy_version()` 現查回 `None`；`pricing_exemption_problems()` 因此**誠實地判紅**（`None != current_policy_version`），這不是舊的「永久靜音」缺陷復發，而是判準正確運作下「資料尚未補齊」的正常結果。回填動作（執行一次 `--update` 讓 `.loc_baseline` 記下當下 `POLICY_VERSION`）留給 R102 執行，本輪禁止（追蹤＝`DEF-200-207` 續報）。
+
+**§6.3（通約規則——不可通約的兩個版本，禁止直接相減／相除比大小）**：
+
+1. `.loc_baseline` 檔案本身**不記錄**是哪一版 `POLICY_VERSION` 釘的（歷史包袱，本輪機制已補齊寫入入口，但尚未對既有檔案執行回填——見 §6.2 誠實劃界）。任何比較 `.loc_baseline` 與當回合 `total` 大小之前，必須先確認兩者是同一把尺量的；version 標記不同時，該次比較沒有意義。
+2. `POLICY_VERSION` **只在計價規則本身變更時**遞增；tier 門檻數字或 `TOTAL_INCREASE_LIMIT` 調整不算（尺不變、門檻變，不影響可比性），版號不做任何場自動換算——換算永遠是人審的責任（同 ADR-XPLAT-012 條文五 §3 的取值紀律，一貫立場）。
+3. `v2-tiered+sd08-special → v3-assertion-only+sd08-special` 這一次跨版比較：§1.2 三支頂格檔實測顯示同一份原始碼在兩把尺下可相差 43% 以上，**任何**跨版本的行數差直接拿來當「成長」或「縮減」解讀都是誤讀，必須先扣掉尺差再談。
+4. `.loc_baseline` 加上 provenance 標記（記錄「此值是哪一版 `POLICY_VERSION`、哪一輪釘的」）的**判準與寫入入口**已於本輪落地（見 §6.2）；剩下唯一的出口動作是對既有 `.loc_baseline` 執行一次 `--update` 把 provenance 實際回填進磁碟，該執行明確留給 R102（本輪禁止），追蹤同 `DEF-200-207`。
+
+---

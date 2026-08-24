@@ -292,7 +292,12 @@ _FROZEN_SHRINK_ONLY_BUCKET_LINES: dict[str, int] = {
     # 是死條目）。修正前 prose 量到 4464、guard_self 3566；修正後兩者**都更低**，因為原先
     # 被誤丟進散文桶的 `.claude/hooks/` 一族回到了 `root_infra`。⇒ 重釘方向是**下修＝判準
     # 更嚴**，不是為了讓紅變綠而放寬（放寬會是把值往上調）。
-    "prose": 4119,
+    # 🔴 DEF-200-208（R101，四方複審核准一次性例外，同批護欄層重釘，round-label-ok）：prose 桶 4119→4182
+    # （+63）——真實成長，非本輪造成（`tools/tests/` 逐檔漂移的散文比例本就隨判準擴充
+    # 自然增加，多輪未覆核）；guard_self 實測降到 3494（低於基準 3545 但仍在
+    # `BUCKET_STALE_SLACK` 容忍帶內，未觸發 `[分桶基準過時]`，故本列保留不動）。現查／重釘
+    # 指令：`python tools/probe/guard_layer_bucket_census.py --json`。
+    "prose": 4182,
     "guard_self": 3545,
 }
 

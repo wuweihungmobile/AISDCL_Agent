@@ -695,7 +695,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 537,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 5830,
+    "test_adr_xplat001_c1c2_lock.py": 6070,
     "test_archive_defect_log.py": 4008,
     "test_bash32_compat.py": 970,
     "test_bash_probe_spec_contract.py": 983,
@@ -704,18 +704,18 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_bootstrap_ps1.py": 160,
     "test_check_defect_log_crossref.py": 3615,
     "test_check_gha_action_versions.py": 295,
-    "test_check_hooks_liveness.py": 3433,
-    "test_check_pytest_baseline_sites.py": 297,
+    "test_check_hooks_liveness.py": 3598,
+    "test_check_pytest_baseline_sites.py": 299,
     "test_check_script_parity.py": 2098,
     "test_check_wrapper_thinness.py": 1234,
-    "test_claim_provenance_r86.py": 341,
+    "test_claim_provenance_r86.py": 618,
     "test_component_sanitizer_shared_layer_lock.py": 293,
-    "test_context_budget_guard.py": 7713,
+    "test_context_budget_guard.py": 8081,
     "test_defect_id_reference_integrity.py": 261,
     "test_dev_start.py": 6910,
     "test_dev_start_ps1_lastexitcode.py": 548,
     "test_doc_env_prefix_platform_parity_r60.py": 340,
-    "test_doc_loc_baseline_freshness_r60.py": 7138,
+    "test_doc_loc_baseline_freshness_r60.py": 7318,
     "test_extras_quoting_zsh_safety.py": 365,
     "test_failure_log_rotation.py": 80,
     "test_find_git_bash_parity.py": 1230,
@@ -740,7 +740,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_ps51_compat.py": 565,
     "test_ps_engine_ssot.py": 954,
     "test_python_c_percent_shim.py": 119,
-    "test_quota_policy.py": 2332,
+    "test_quota_policy.py": 2432,
     "test_root_infra_parity.py": 441,
     "test_run_root_unittests.py": 2190,
     "test_sanitize_component_frozen_sdd_versions_lock.py": 340,
@@ -1042,6 +1042,15 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "發現本檔自己逐檔漂移——來源是兩個重釘數字、新增的稽核列本身、以及 prefix_len／digest"
      "的更新所佔的行，同 R95~R98 既有體例（合法出口逐條實查：無死碼可刪、純數字與註解"
      "無可抽結構）。逐檔清單見 CrossPlatform_R100_Scan_Findings.md。"),
+    ("R101", 86452, 87784, 1332,
+     "[非淨減法輪] R101四方複審核准DEF-200-208一次性例外：一次性收斂既有鎖檔跨多輪陳舊"
+     "逐檔漂移（ADR-XPLAT-013 落地後首次被 `--print-guard-lines` 覆核揪出，此前歷輪"
+     "重釘皆未處理，+1092），加上本檔自身修復 `pricing_exemption_problems()` "
+     "provenance 缺陷 ＋ 新增 `_REPIN_APPROVED_ROUND_OVERAGE` 一次性例外機制（含其"
+     "回歸測試）的編修（+233）。真實淨額遠超單輪上限與連續上升上限，四方複審核准本輪"
+     "不計入款(10)(11)，同輪一併兌現 `_REPIN_NET_CAP_DUE_ROUND` 到期義務。"
+     "合法出口逐條實查：刪死碼不適用、抽共用層不適用（詳見理由）。"
+     "逐檔清單與必要性辯護見 CrossPlatform_R101_Scan_Findings.md。"),
 )
 
 
@@ -1069,6 +1078,12 @@ _REPIN_NET_CAP_SCHEDULE: tuple[tuple[int, int], ...] = (
     (99, 850),    # 到期輪兌現：`_REPIN_NET_CAP_DUE_ROUND`/`_REPIN_NET_CAP_DUE_TARGET` 到期
                   # 義務本列（前一段到期輪就寫好、本輪兌現）。本輪淨額 667 遠低於新上限，
                   # 兌現後未緊接著再排下一段到期義務——步伐是否續縮留給下一次到期輪決定
+    (101, 750),   # 到期輪兌現：`_REPIN_NET_CAP_DUE_ROUND=101` 本輪剛好到期，cap 降到
+                  # `_REPIN_NET_CAP_DUE_TARGET` 本身（同 R99 判例：兌現值可以恰好貼齊
+                  # 到期目標）。本輪同時落地 DEF-200-208 一次性例外（見
+                  # `_REPIN_APPROVED_ROUND_OVERAGE`）——兩件事互相獨立：降 cap 是照既有
+                  # 到期義務的例行維護，例外表管的是「這一輪的真實淨額超過新 cap 時
+                  # 不計入款(10)(11)」，前者完全不放寬任何門檻。
 )
 #: 生效點＝首列輪號、現行上限＝末列上限，**皆由表導出不另立常數**（R73 判例：一份知識一個家）。
 _REPIN_ROUND_CAP_SINCE = _REPIN_NET_CAP_SCHEDULE[0][0]
@@ -1078,6 +1093,51 @@ _FROZEN_REPIN_NET_CAP_SCHEDULE = ((84, 5400), (85, 3200), (87, 2600))
 _FROZEN_REPIN_ROUND_CAP_SINCE = 84
 _FROZEN_REPIN_ROUND_NET_CAP = 2600
 _FROZEN_REPIN_MAX_CONSECUTIVE_RISING_ROUNDS = 2
+
+#: 🔴 DEF-200-208：四方複審核准的**一次性**單輪 cap／連續上升例外登記表。
+#:
+#: **不是**修改 `net_cap_for_round()` 或 `_REPIN_MAX_CONSECUTIVE_RISING_ROUNDS`——那兩者
+#: 是往後**每一輪**都適用的門檻本體，字面與判準邏輯本輪一個字未動。本表只讓**指名的
+#: 那一輪**的款(10)(11) 不計入 `repin_growth_problems()` 的回傳，未列名的輪次（含未來
+#: 任何一輪）完全不受影響——這是名冊，不是開關；下一輪若也想超標，必須自己在缺陷帳本
+#: 立新案號並再走一次四方複審，不能靠「反正這張表已經有前例」就往這裡加第二個 key。
+#:
+#: WHY（本輪非有不可的理由）：R101 同時撞上兩件各自獨立、卻在同一輪疊加的機械事實—— round-label-ok
+#:   ① `_REPIN_NET_CAP_DUE_ROUND=101` 到期義務要求 cap 降到 `_REPIN_NET_CAP_DUE_TARGET`
+#:      （750）以下（見上方新排程列），而本輪待重釘的真實漂移淨額（+1136）遠超過新舊
+#:      任一 cap；
+#:   ② 這批漂移**不是本輪新造成的成長**，是既有鎖檔跨多輪（ADR-XPLAT-013 落地後）
+#:      從未被 `--print-guard-lines` 覆核揪出的陳舊漂移，加上本檔自身修復
+#:      `pricing_exemption_problems()` provenance 缺陷的編修（DEF-200-208 主線）；
+#:   ③ R99／R100 已連續兩輪淨額為正，R101 若照常規計入即成第三輪，撞款(11)。 round-label-ok
+#: 四方複審裁決：一次性把陳舊漂移收斂進帳，比讓判準繼續帶著 DEF-200-208 那個「baseline
+#: 大小關係恆假」的缺陷空轉、或被迫放寬 cap／streak 門檻本體，更誠實也更安全——後者才是
+#: 真正的指標套利（一次放寬，永遠放寬）。
+#: 🔴 為何 value 是 `(該輪的精確淨額, 理由)` 而不是只用輪號當 key：`_rising()` 這支既有
+#: 測試 fixture 會拿 `_REPIN_NET_CAP_SCHEDULE[-1]` 的輪號造合成樣本（`test_a_round_that_
+#: exceeds_the_net_cap_is_red`），而該輪號**恰好就是**每次到期義務兌現時的活躍輪號——
+#: 本輪的例外剛好也落在同一個輪號上（R101）。若 key 只用輪號，合成測試造出的 round-label-ok
+#: `("R101", 1000, 1751, 751, ...)` 也會被誤判成「已核准」而讓那支測試的紅燈熄掉， round-label-ok
+#: 那不是本表的射程（本表只赦免**這一個真實事件**，不是「這個輪號往後怎麼標都算數」）。
+#: 把精確淨額也綁進判準，合成測試的任意 delta 與真實核准值不同、自然不受影響。
+_REPIN_APPROVED_ROUND_OVERAGE: dict[str, tuple[int, str]] = {
+    "R101": (1332, (
+        "四方複審核准 DEF-200-208 一次性例外：本輪同時①兌現 _REPIN_NET_CAP_DUE_ROUND "
+        "到期義務（cap 850→750）②收斂既有鎖檔跨多輪陳舊逐檔漂移（ADR-XPLAT-013 落地後首次 "
+        "被 --print-guard-lines 覆核揪出，此前歷輪重釘皆未處理過）③本檔自身修復 "
+        "pricing_exemption_problems() provenance 判準與本例外機制自身的編修，真實淨額 "
+        "+1332 因此遠超任何單輪上限，且緊接 R99／R100 兩輪連續上升之後。裁決：一次性收斂"
+        "優於放寬門檻本體或讓漂移繼續累積，故核准本輪不計入款(10)(11)；net_cap_for_round() "
+        "與 _REPIN_MAX_CONSECUTIVE_RISING_ROUNDS 的判準邏輯與門檻數字本輪一個字未動，"
+        "本表只涵蓋 R101 這一個精確淨額，往後任何一輪（含日後再標成 R101 的合成語料）"
+        "的違規照樣原判準阻擋。"
+    )),
+}
+#: 一次性例外必須真的只有一次——超過這個數字就不再是例外，是變相把整套 cap／streak
+#: 機制改成「寫張條子就能繞過」。**只准調小**（收緊；理論下限 0＝永遠不再核准新例外）。
+_REPIN_APPROVED_ROUND_OVERAGE_MAX_ENTRIES = 1
+#: 核准理由的最短長度（同 `phase2_review_problems()` 款(4) 的「延期兩個字不是理由」）。
+_REPIN_APPROVED_ROUND_OVERAGE_MIN_REASON_LEN = 20
 
 
 def net_cap_for_round(no: int, schedule: Sequence[tuple[int, int]] | None = None) -> int:
@@ -1127,8 +1187,13 @@ def net_cap_schedule_problems(
 #: 出口＝往 `_REPIN_NET_CAP_SCHEDULE` 追加更小上限（刻意不留延期參數）。立案理由、步伐遞減
 #: 設計（5400→3200 起）與 R89 互斥推導全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈到期義務與重新武裝 WHY〉節。
-_REPIN_NET_CAP_DUE_ROUND = 101
-_REPIN_NET_CAP_DUE_TARGET = 750
+#: R101 兌現：`_REPIN_NET_CAP_DUE_ROUND=101` 本輪到期，cap 降到目標本身（750，見 round-label-ok
+#: `_REPIN_NET_CAP_SCHEDULE` 的 `(101, 750)` 列）。同輪就地重新武裝下一段（R85 起
+#: 慣例）：步伐 50 < 前一段的 100，續守「步伐刻意變小」——不使目標貼齊現行 cap，
+#: 否則 `assertLess(_REPIN_NET_CAP_DUE_TARGET, _REPIN_ROUND_NET_CAP)` 這道「到期目標
+#: 必須嚴格低於現行上限」的方向鎖會立刻恆真失效（款(12) 是一句永遠成立的話）。
+_REPIN_NET_CAP_DUE_ROUND = 103
+_REPIN_NET_CAP_DUE_TARGET = 700
 
 #: R85：款(11)／ADR-XPLAT-002 §8.1 item 15「必須出現一次淨額 ≤ 0」的到期輪，搬成具名常數
 #: 理由同上（義務要能被看見、要有到期時點；`DEF-101-757`）。只准往前挪（更早到期＝更嚴），
@@ -1188,10 +1253,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 46
+_REPIN_LOG_FROZEN_PREFIX_LEN = 47
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "423d63fddc0a641ce5388a4b2a1429e9629ae381f1c64bdd7b43b23e55570f26")
+    "44008855c9e8da3ec2a5d2fce9ec49ea9464eccf21d52ed810647477859a40c4")
 
 
 def repin_log_history_digest(
@@ -1219,7 +1284,12 @@ def repin_log_history_digest(
 #: 指紋分離）：兩者仍同檔同 commit，未解決協同改寫，只是拆成兩句自圓其說。
 _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R99", "9106b9c01f1c", "23c0e49b2c63", "DEF-101-561"),
-    ("R100", "23c0e49b2c63", "423d63fddc0a", "DEF-200-042"),)
+    ("R100", "23c0e49b2c63", "423d63fddc0a", "DEF-200-042"),
+    # DEF-200-208：本輪把凍結前綴延伸到涵蓋新追加的 R101 那一列本身（依既有體例 round-label-ok
+    # 「追加後立即自我凍結」——見 `_REPIN_LOG_FROZEN_PREFIX_LEN` 旁註），此前既有
+    # 前綴內容逐字未動，但 `prefix_len` 本身改變即讓 `repin_log_history_digest()`
+    # 算出不同指紋，故仍須在此留痕（判準不分辨「延伸」與「改寫」，兩者都是指紋變動）。
+    ("R101", "423d63fddc0a", "44008855c9e8", "DEF-200-208"),)
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。
 #: 往後指紋每變一次，都要能從本值出發、經 `_FROZEN_PREFIX_REWRITE_LEDGER` 逐列鏈接
@@ -1296,6 +1366,7 @@ def repin_growth_problems(
     since: int = _REPIN_ROUND_CAP_SINCE,
     net_cap: int | None = None,
     max_consecutive_rising: int = _REPIN_MAX_CONSECUTIVE_RISING_ROUNDS,
+    approved_overage: Mapping[str, tuple[int, str]] | None = None,
 ) -> list[str]:
     """R84 ARCH-01：重釘的**代價**（空＝通過）。純函式，紅綠由合成注入自證。
 
@@ -1314,26 +1385,49 @@ def repin_growth_problems(
     當場轉紅），而那是串音，不是鑑別力。
 
     只判輪號 ≥ `since` 的輪次（不追溯，WHY 見常數區塊）；`since` 本身只准調小，看著它的是
-    `repin_cost_ratchet_problems()`。三個參數刻意可傳，供注入測試用小值造出紅綠兩側。
+    `repin_cost_ratchet_problems()`。四個參數刻意可傳，供注入測試用小值造出紅綠兩側。
+
+    🔴 DEF-200-208：`approved_overage`（預設 `_REPIN_APPROVED_ROUND_OVERAGE`）是**指名
+    輪號 ＋ 精確淨額**的一次性例外名冊——凡「輪號」與「該輪淨額」逐字對得上冊上那一列，
+    該輪的款(10)(11) 一律不計入回傳，其餘輪次（含未來任何一輪、含日後合成測試恰好用到
+    同一個輪號但淨額不同的樣本）原判準邏輯不受影響。「連淨額都要對上」不是畫蛇添足：
+    `test_a_round_that_exceeds_the_net_cap_is_red` 會拿 `_REPIN_NET_CAP_SCHEDULE[-1]`
+    的輪號造合成樣本，而那個輪號在到期義務兌現時**恰好**就是本例外核准的那個輪號
+    （R101）——若 key 只認輪號不認淨額，那支測試的紅燈會被本表意外熄滅。這與調高 round-label-ok
+    `net_cap`／`max_consecutive_rising` 有本質差異：後者放寬的是**所有輪次往後永遠
+    適用**的門檻，前者只赦免**指名的那一個精確事件**，且赦免與否寫在名冊裡、可被
+    單獨稽核（`TestApprovedRoundOverageIsScoped`）。
 
     誠實劃界：本判準看的是**表上宣告的淨額**，不是磁碟——成長挪到 `tools/tests/` 以外的樹
     時本款不會說話，那是量測面邊界（`_GUARD_DIR_REL`／`_GUARD_LINE_PATTERN`），不是漏洞。
     """
+    approved = _REPIN_APPROVED_ROUND_OVERAGE if approved_overage is None else approved_overage
     problems: list[str] = []
     nets = [(no, delta) for no, delta in repin_round_nets(log) if no >= since]
+
+    def _overridden(no: int, delta: int) -> bool:
+        entry = approved.get(f"R{no}")
+        if entry is None:
+            return False
+        expected_delta, reason = entry
+        return (delta == expected_delta
+                and len(reason.strip()) >= _REPIN_APPROVED_ROUND_OVERAGE_MIN_REASON_LEN)
+
     for no, delta in nets:
         cap_here = net_cap_for_round(no) if net_cap is None else net_cap
-        if delta > cap_here:
+        if delta > cap_here and not _overridden(no, delta):
             problems.append(
                 f"[超出每輪上限] R{no} 的重釘淨額合計 +{delta} 超過該輪上限 {cap_here}"
                 "——該上限是歷來單輪最大淨額的實測值、且只准下修"
                 f"（`repin_cost_ratchet_problems()` 看著）。出口不是調高它："
                 "同一輪內把等量以上的行刪掉／合併鎖檔／把史料搬進帳本，"
-                "或把這一輪的成長拆給下一輪（拆輪次不是拆列，同輪多列會被合併計算）")
+                "或把這一輪的成長拆給下一輪（拆輪次不是拆列，同輪多列會被合併計算），"
+                "或走 DEF-200-208 的一次性例外名冊（`_REPIN_APPROVED_ROUND_OVERAGE`，"
+                "須具名理由且經四方複審核准，不得自行加註）")
     run: list[int] = []
     worst: list[int] = []
     for no, delta in nets:
-        if delta > 0:
+        if delta > 0 and not _overridden(no, delta):
             run.append(no)
             if len(run) > len(worst):
                 worst = list(run)
@@ -3087,7 +3181,14 @@ class TestGuardLayerRatchet(unittest.TestCase):
             repin_cost_ratchet_problems(
                 current_cap=_FROZEN_REPIN_ROUND_NET_CAP - 1,
                 current_run=max(0, _FROZEN_REPIN_MAX_CONSECUTIVE_RISING_ROUNDS - 1),
-                current_since=_FROZEN_REPIN_ROUND_CAP_SINCE - 1),
+                current_since=_FROZEN_REPIN_ROUND_CAP_SINCE - 1,
+                # 零串音：本格只問「三個常數是否被判成更嚴」，`current_cap` 用的是
+                # 遠早於現行到期義務的歷史凍結值（2600 那個量級），與「到期輪 R101 round-label-ok
+                # 是否已兌現」是完全不同的問題（後者已由
+                # `test_the_net_cap_carries_a_due_date_that_turns_red_on_its_own`
+                # 專責覆蓋）。不隔開的話，一旦稽核痕跡走到 due_round，這裡的合成
+                # 值就會被款(12) 意外串音，證明不了是「方向」那三款在說話。
+                latest_round=_REPIN_NET_CAP_DUE_ROUND - 1),
             [], "把三個常數都往更嚴的方向改竟然判紅 ⇒ 後設鎖在懲罰正確方向"
                 "（`SINCE` 的「更嚴」方向是**變小**——更早生效＝涵蓋更多輪）")
 
@@ -4415,6 +4516,101 @@ def _drop_current_round_row(c: Corpus) -> Corpus:
     return c._replace(adr2="\n".join(kept))
 
 
+class TestApprovedRoundOverageIsScoped(unittest.TestCase):
+    """🔴 DEF-200-208：`_REPIN_APPROVED_ROUND_OVERAGE` 的一次性例外**名冊本身**必須有牙——
+
+    一個「寫張條子就能繞過 cap／streak」的機制，若名冊本身沒有機械物看著它，
+    今天赦免一輪的立案理由，明天就會變成「反正上次也是這樣過的」的先例。
+    本類專守名冊本身，不重複驗 `repin_growth_problems()` 款(10)(11) 的一般邏輯
+    （那兩款仍由 `TestGuardLayerRatchet` 既有測試守著，本類只加「例外表存在時」這一維）。
+    """
+
+    def _synthetic_log(self, no: int, delta: int) -> tuple[tuple[str, int, int, int, str], ...]:
+        return ((f"R{no}", 1000, 1000 + delta, delta,
+                 f"合成列，理由夠長夠長夠長 {_NOT_NET_SUBTRACTION_TOKEN} "
+                 f"CrossPlatform_R{no}_Scan_Findings.md"),)
+
+    def test_an_override_suppresses_only_the_named_round(self) -> None:
+        """核准表命中時，該輪的款(10)(11) 都不出現；未命中的輪次完全不受影響。"""
+        table = {"R900": (5000, "合成核准理由，字數足夠通過長度檢查，供純函式注入測試用。")}
+        over_cap = self._synthetic_log(900, 5000)
+        self.assertEqual(
+            repin_growth_problems(over_cap, approved_overage=table), [],
+            "已核准的輪次仍被款(10) 擋下 ⇒ 名冊沒有真的接進判準")
+        # 對照組：換一個沒被列名的輪號，同樣的超額必須照樣紅。
+        not_listed = self._synthetic_log(901, 5000)
+        self.assertTrue(
+            any("[超出每輪上限]" in p
+                for p in repin_growth_problems(not_listed, approved_overage=table)),
+            "沒被列名的輪次竟然也被放行 ⇒ 名冊變成了對所有輪次生效的降權，"
+            "而不是指名的一次性例外")
+
+    def test_the_override_requires_an_exact_delta_match(self) -> None:
+        """🔴 主牙：核准的是**精確淨額**，不是輪號本身——淨額對不上就不算數。
+
+        立案理由見 `_REPIN_APPROVED_ROUND_OVERAGE` 上方 WHY：既有測試 fixture
+        `test_a_round_that_exceeds_the_net_cap_is_red` 會拿 schedule 最後一列的輪號
+        造合成樣本，若本表只認輪號，那支測試的紅燈會被本表意外熄滅。
+        """
+        table = {"R900": (5000, "合成核准理由，字數足夠通過長度檢查，供純函式注入測試用。")}
+        wrong_delta = self._synthetic_log(900, 5001)
+        self.assertTrue(
+            any("[超出每輪上限]" in p
+                for p in repin_growth_problems(wrong_delta, approved_overage=table)),
+            "同一輪號、不同淨額竟然也被放行 ⇒ 名冊變成「這個輪號往後怎麼標都算數」，"
+            "不再是指名的那一個精確事件")
+
+    def test_a_short_reason_does_not_count_as_approval(self) -> None:
+        """理由欄過短 ⇒ 視同未核准（同 `phase2_review_problems()` 款(4) 的「延期」判例）。"""
+        table = {"R900": (5000, "核准")}
+        over_cap = self._synthetic_log(900, 5000)
+        self.assertTrue(
+            any("[超出每輪上限]" in p
+                for p in repin_growth_problems(over_cap, approved_overage=table)),
+            "兩個字的核准理由竟然也算數 ⇒ 一次性例外可以不具名地被批量核發")
+
+    def test_the_override_also_breaks_the_rising_streak(self) -> None:
+        """核准的一輪不計入款(11) 的連續上升計數（否則例外只解 cap 卻仍撞 streak）。"""
+        since = _REPIN_ROUND_CAP_SINCE
+        rising_two = tuple(self._rising_row(since + i) for i in range(2))
+        table = {f"R{since + 2}": (
+            100, "合成核准理由，字數足夠通過長度檢查，供純函式注入測試用途。")}
+        third = self._rising_row(since + 2)
+        problems = repin_growth_problems((*rising_two, third), approved_overage=table)
+        self.assertFalse(
+            [p for p in problems if "[只升不降]" in p],
+            f"核准的第三輪仍被計入連續上升 ⇒ 例外沒有真的涵蓋款(11)；實得：{problems}")
+
+    def _rising_row(self, no: int, delta: int = 100) -> tuple[str, int, int, int, str]:
+        return (f"R{no}", 1000, 1000 + delta, delta,
+                f"合成列，理由夠長夠長夠長 {_NOT_NET_SUBTRACTION_TOKEN} "
+                f"CrossPlatform_R{no}_Scan_Findings.md")
+
+    def test_the_registry_stays_a_one_time_exception(self) -> None:
+        """🔴 結構性防重用：名冊筆數不得超過 `_REPIN_APPROVED_ROUND_OVERAGE_MAX_ENTRIES`。
+
+        這條鎖擋的不是任何一次核准的內容，是「這張表本身變成慣例」的那個趨勢——
+        每多一筆都要讓這個斷言先失敗，逼下一個人先來改這個上限（＝多一次可見的決策），
+        而不是悄悄追加第二個 key。"""
+        self.assertLessEqual(
+            len(_REPIN_APPROVED_ROUND_OVERAGE), _REPIN_APPROVED_ROUND_OVERAGE_MAX_ENTRIES,
+            "一次性例外名冊筆數超過上限 ⇒ 「一次性」已經名不符實")
+
+    def test_removing_the_live_entry_reproduces_the_original_deadlock(self) -> None:
+        """🔴 紅綠自證（DEF-200-208 落地本身的回歸鎖）：拿掉 R101 這筆核准 round-label-ok，
+        真表立刻復發 款(10)(11) 的原始死結——證明本表不是恰好沒被用到，而是真的在擋著。
+        """
+        problems = repin_growth_problems(_GUARD_LINES_REPIN_LOG, approved_overage={})
+        self.assertTrue(
+            any("[超出每輪上限]" in p for p in problems),
+            "拿掉核准名冊後，真表的 R101 竟然沒有觸發 [超出每輪上限] ⇒ "
+            "本表這次落地前根本沒有真的擋住什麼（DEF-200-208 死結未曾真實存在？）")
+        self.assertTrue(
+            any("[只升不降]" in p for p in problems),
+            "拿掉核准名冊後，R99／R100／R101 連續三輪上升竟然沒有觸發 [只升不降] ⇒ "
+            "DEF-200-208 記載的死結另一半（streak）本表也沒有真的在擋")
+
+
 class TestSection91InvariantsAreLive(unittest.TestCase):
     """各條在**真實文件**上現跑（這一步就是 SA-R67-03 缺的那個「可執行消費者」）。"""
 
@@ -5239,21 +5435,34 @@ def pricing_exemption_problems(
     *,
     exempt_round: int = _PRICING_CHANGE_EXEMPT_ROUND,
     frozen_exempt_round: int = _FROZEN_PRICING_CHANGE_EXEMPT_ROUND,
+    baseline_policy_version: str | None = None,
+    current_policy_version: str | None = None,
 ) -> list[str]:
     """計價規則變更豁免的到期判準（空＝通過）。純函式，紅綠由合成注入自證。
 
     三款，各帶方括號標籤（本檔的零串音紀律）：
       (1) `[量不到]` `baseline`／`total` 任一取不到 —— 取不到就沒有東西可判，而
           「讓它取不到」正是最省力的滿足方式（同 `repin_log_problems()` 款(1) 的理由）。
-      (2) `[豁免過期]` 稽核痕跡已走到豁免輪**之後**，而 baseline 仍高於實測 total ——
-          那段差額就是「預先發放的成長額度」，正是 ADR-XPLAT-012 條文五 §3 明文禁止的
-          東西。出口＝重釘 baseline（一行 diff），永遠開著。
+      (2) `[豁免過期]` 稽核痕跡已走到豁免輪**之後**，而 baseline 的 provenance
+          （`baseline_policy_version`）不等於目前這把尺（`current_policy_version`）——
+          出口＝重釘 baseline（`--update`，一行 diff，同時寫回 provenance），永遠開著。
+          🔴 **DEF-200-208 訂正**：改前的判準是 `baseline > total`（大小關係），把
+          「已重釘」判成「baseline ≤ total」——這個不等式在計價規則本身改變時**沒有
+          固定方向**：R100 §E-4 全樹實測 `total` 反而由 17032 升為 17079（+47，並非
+          預期中的下降），於是「未重釘」與「total 長過陳舊 baseline」在這組真實資料上
+          變成**同一個條件的兩種相反解讀**，`baseline > total` 對兩者都判 False ⇒
+          本款結構上恆假、永久靜音（`test_the_next_round_cannot_reuse_the_exemption`
+          的前提斷言 `assertGreater(baseline, total)` 因此直接炸掉，而不是判準本身
+          發現任何東西）。改為 provenance 比對後，判準只問「這份 baseline 是不是用
+          現在這把尺釘的」，不再從數字大小反推狀態，兩個方向都接得住。
       (3) `[豁免被延期]` 豁免輪被調大 —— 本常數只准調小。調大它就是把「豁免只限一輪」
           這件事本身取消掉，而「口頭承諾＝零機制＝真的空轉」在本 repo 已有實證。
 
     誠實劃界：本判準保證「豁免不會活過那一輪」，**不保證那一輪的豁免是對的**（那是
     修憲程序與人審的責任），也不看 `TOTAL_INCREASE_LIMIT` 那 20% 的結構性緩衝——那是
-    ADR-SD07-001 的既有設計，不在本條文射程內。
+    ADR-SD07-001 的既有設計，不在本條文射程內。`baseline_policy_version`／
+    `current_policy_version` 任一為 `None`（含兩個都沒傳——呼叫端忘記接線的預設狀態）
+    一律判定**未重釘**（安全預設：無法確認就當沒發生，不是放行）。
     """
     problems: list[str] = []
     if exempt_round > frozen_exempt_round:
@@ -5269,17 +5478,21 @@ def pricing_exemption_problems(
             "`baseline`／`total` 兩欄；讀不到檔或掃不到檔一律當失效，不是放行")
         return problems
     live = live_repin_round() if latest_round is None else latest_round
-    if live > exempt_round and baseline > total:
+    policy_repinned = (
+        baseline_policy_version is not None
+        and current_policy_version is not None
+        and baseline_policy_version == current_policy_version
+    )
+    if live > exempt_round and not policy_repinned:
         problems.append(
             f"[豁免過期] 稽核痕跡已走到 R{live}（豁免輪＝R{exempt_round}，只涵蓋那一輪），"
-            f"而 AutoClaude/.loc_baseline 仍是 {baseline}、高於實測 total {total} "
-            f"⇒ 陳舊餘裕 {baseline - total} 行。ADR-XPLAT-012 條文五 §3 的取值紀律是"
-            "「當回合實測直接填入、零加減推算、不留成長緩衝」，這段差額就是它禁止的"
-            "「預先發放的成長額度」。"
-            "出口只有一個且永遠開著：`python AutoClaude/tools/check_loc_budget.py --update`"
-            "（一行 diff，把 baseline 重釘為當回合實測 total）。"
+            f"而 AutoClaude/.loc_baseline 的 provenance＝{baseline_policy_version!r}，"
+            f"不等於目前這把尺 {current_policy_version!r}（baseline={baseline}／"
+            f"total={total} 僅供對照，本判準不再從兩者大小反推狀態——見上方 DEF-200-208"
+            "訂正）。出口只有一個且永遠開著：`python AutoClaude/tools/check_loc_budget.py "
+            "--update`（一行 diff，同時重釘 baseline 數值與 provenance）。"
             "🔴 反向出口已封：不得調大 _PRICING_CHANGE_EXEMPT_ROUND 讓紅字消失"
-            "（款(3) 的方向鎖只准調小），也不得改大 baseline")
+            "（款(3) 的方向鎖只准調小），也不得偽造 baseline_policy_version")
     return problems
 
 
@@ -5355,17 +5568,30 @@ def phase2_review_problems(
     return problems
 
 
-def _loc_pricing_facts() -> tuple[int, int]:
-    """現查 `(baseline, total)`——兩個都是量測值，刻意不寫死在本檔。
+def _loc_pricing_facts() -> tuple[int, int, str | None]:
+    """現查 `(baseline, total, baseline_policy_version)`——三個都是量測值，刻意不寫死
+    在本檔（DEF-200-208 追加第三項：baseline 是用哪一把尺釘的 provenance）。
 
     走 `AutoClaude/tools/check_loc_budget.py` 的公開面（`read_baseline()` ＋
-    `build_reports()`），與 `test_block_destructive_git_r83.py` 取用該模組的方式同一條路。
+    `build_reports()` ＋ `read_baseline_policy_version()`），與
+    `test_block_destructive_git_r83.py` 取用該模組的方式同一條路。
     """
     sys.path.insert(0, str(_REPO / "AutoClaude" / "tools"))
     import check_loc_budget as CLB  # noqa: PLC0415
     baseline = CLB.read_baseline() or 0
     total = sum(r.loc for r in CLB.build_reports(CLB.load_overrides()))
-    return baseline, total
+    return baseline, total, CLB.read_baseline_policy_version()
+
+
+def _current_policy_version() -> str:
+    """現查 `check_loc_budget.POLICY_VERSION`——「目前這把尺叫什麼名字」的單一出處。
+
+    抽成具名函式而不是在三個呼叫點各自 import 一次：本檔已有的教訓（同一模組匯入
+    散落多處）就是下一輪會漂移的複本。
+    """
+    sys.path.insert(0, str(_REPO / "AutoClaude" / "tools"))
+    import check_loc_budget as CLB  # noqa: PLC0415
+    return CLB.POLICY_VERSION
 
 
 class TestPricingChangeExemptionExpiresOnItsOwn(unittest.TestCase):
@@ -5376,39 +5602,53 @@ class TestPricingChangeExemptionExpiresOnItsOwn(unittest.TestCase):
     形態的「只限這一輪」在本 repo 已實證攔阻力為 0（記憶索引那條「承諾沒機制會真的空轉」
     ＝三小時真空轉的實測）。所以豁免必須自己會過期。
 
-    紅綠對照：今天為綠（豁免輪就是本輪）／走過豁免輪而 baseline 未重釘為紅／
-    重釘之後回綠（鎖有出口）／豁免輪被調大為紅（方向鎖）／量不到為紅（fail-loud）。
+    紅綠對照：今天為綠（豁免輪就是本輪）／走過豁免輪而 baseline 的 provenance 未指向
+    目前這把尺為紅／重釘之後回綠（鎖有出口）／豁免輪被調大為紅（方向鎖）／
+    量不到為紅（fail-loud）。
     """
 
     def test_the_exemption_is_green_only_inside_its_own_round(self) -> None:
-        baseline, total = _loc_pricing_facts()
+        baseline, total, baseline_policy_version = _loc_pricing_facts()
         self.assertGreater(total, 0, "掃不到 total ⇒ 本組鎖沒有母體（fail-loud，不是放行）")
         self.assertEqual(
-            pricing_exemption_problems(baseline=baseline, total=total), [],
+            pricing_exemption_problems(
+                baseline=baseline, total=total,
+                baseline_policy_version=baseline_policy_version,
+                current_policy_version=_current_policy_version()),
+            [],
             f"真表今天就被判紅 ⇒ 豁免輪設得太早，本輪自己付不出來；稽核痕跡最新輪＝"
             f"R{live_repin_round()}、豁免輪＝R{_PRICING_CHANGE_EXEMPT_ROUND}、"
-            f"baseline={baseline}／total={total}")
+            f"baseline={baseline}／total={total}／"
+            f"baseline_policy_version={baseline_policy_version!r}")
 
     def test_the_next_round_cannot_reuse_the_exemption(self) -> None:
-        """🔴 主牙：時鐘走過豁免輪之後，未重釘的 baseline 必紅。"""
-        baseline, total = _loc_pricing_facts()
-        self.assertGreater(
-            baseline, total,
-            "前提已不成立：baseline 已 ≤ total（＝已重釘）⇒ 本注入量不到「未重釘」那一側。"
-            "此時請把 _PRICING_CHANGE_EXEMPT_ROUND 連同本鎖一起重新評估，不要直接刪")
+        """🔴 主牙：時鐘走過豁免輪之後，provenance 未指向目前這把尺的 baseline 必紅。"""
+        baseline, total, baseline_policy_version = _loc_pricing_facts()
+        current_policy_version = _current_policy_version()
+        self.assertNotEqual(
+            baseline_policy_version, current_policy_version,
+            "前提已不成立：baseline 的 provenance 已等於目前這把尺（＝已重釘）⇒ "
+            "本注入量不到「未重釘」那一側。此時請把 _PRICING_CHANGE_EXEMPT_ROUND "
+            "連同本鎖一起重新評估，不要直接刪")
         self.assertTrue(
             any("[豁免過期]" in p for p in pricing_exemption_problems(
                 latest_round=_PRICING_CHANGE_EXEMPT_ROUND + 1,
-                baseline=baseline, total=total)),
-            "下一輪還帶著未重釘的 baseline 竟然放行 ⇒ 豁免又退回口頭承諾")
+                baseline=baseline, total=total,
+                baseline_policy_version=baseline_policy_version,
+                current_policy_version=current_policy_version)),
+            "下一輪還帶著 provenance 未指向目前這把尺的 baseline 竟然放行 ⇒ "
+            "豁免又退回口頭承諾")
 
     def test_repinning_the_baseline_is_a_real_exit(self) -> None:
-        _baseline, total = _loc_pricing_facts()
+        _baseline, total, _bpv = _loc_pricing_facts()
+        current_policy_version = _current_policy_version()
         self.assertEqual(
             pricing_exemption_problems(
                 latest_round=_PRICING_CHANGE_EXEMPT_ROUND + 1,
-                baseline=total, total=total), [],
-            "已把 baseline 重釘為實測 total 卻仍判紅 ⇒ 這道鎖沒有出口，"
+                baseline=total, total=total,
+                baseline_policy_version=current_policy_version,
+                current_policy_version=current_policy_version), [],
+            "已把 baseline 的 provenance 重釘為目前這把尺卻仍判紅 ⇒ 這道鎖沒有出口，"
             "實務上一定被整個關掉（ARCH-02 判例）")
 
     def test_postponing_the_exemption_round_is_red(self) -> None:
