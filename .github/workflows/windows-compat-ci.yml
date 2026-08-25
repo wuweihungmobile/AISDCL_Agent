@@ -265,6 +265,11 @@ on:
       - "tools/check_hooks_liveness.py"
       - "tools/check_defect_log_crossref.py"
       - "tools/check_wrapper_thinness.py"
+      # R103：新增 tools/check_archive_required.py（帳本歸檔 commit 期強制觸發判準，
+      # DEF-200-222）——tools/tests/test_check_defect_log_crossref.py 以
+      # `import check_archive_required as car` 消費，只改該檔時其回歸鎖不會跑
+      # （DEF-101-042 同構，test_ci_paths_cover_root_consumers.py 實測揪出）。
+      - "tools/check_archive_required.py"
       - "AutoClaude/tools/check_loc_budget.py"
       - "AutoClaude/.loc_baseline"
       - "tools/_script_scan_surface.py"
@@ -617,6 +622,11 @@ on:
       - "tools/check_hooks_liveness.py"
       - "tools/check_defect_log_crossref.py"
       - "tools/check_wrapper_thinness.py"
+      # R103：新增 tools/check_archive_required.py（帳本歸檔 commit 期強制觸發判準，
+      # DEF-200-222）——tools/tests/test_check_defect_log_crossref.py 以
+      # `import check_archive_required as car` 消費，只改該檔時其回歸鎖不會跑
+      # （DEF-101-042 同構，test_ci_paths_cover_root_consumers.py 實測揪出）。
+      - "tools/check_archive_required.py"
       - "AutoClaude/tools/check_loc_budget.py"
       - "AutoClaude/.loc_baseline"
       - "tools/_script_scan_surface.py"
