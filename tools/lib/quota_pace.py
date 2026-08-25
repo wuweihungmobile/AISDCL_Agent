@@ -568,3 +568,95 @@ def filter_by_signature(rows, signature: tuple) -> list:
     """只留 `fp == signature` 的列，回 `(ts, short, long)` 三元組（既有輸入形狀）。"""
     return [(ts, short, long) for ts, short, long, fp in rows
             if fp is not None and fp == signature]
+
+
+# ── BURSTING 突刺判準（R104／PRD §4.2.5）── round-label-ok
+# 🔴 本函式**只算、不接線**：不被 `quota_gate.py` 的 `decide()`／`pace_report()` 消費，
+# 呼叫端目前只有本檔的單元測試。是否升級為「接線生效」是留給四方複審的裁決，不是本函式
+# 自行拍板的範圍（見 R104 設計文件 C.1 節）。round-label-ok
+#
+# 六條件皆 keyword-only、皆有保守缺省值：**不傳＝不放行**（本模組一貫的「無證據不得
+# 放寬」紀律，`bursting_ok` 是本模組唯一一個「放寬」方向的判準，紀律因此更要守）。
+# 任一數值輸入為 `None`（telemetry 量不到）一律 fail-closed，不拋例外。
+V_FLOOR = 0.02            # %/min；PRD §4.2.1 冷啟動與除零防護的唯一定義
+BURN_RATE_EWMA_ALPHA = 0.25  # PRD §4.2.1 EWMA 平滑係數
+
+
+def bursting_ok(*, t_rem_minutes: float | None = None,
+                u5h_percent: float | None = None,
+                u7d_percent: float | None = None,
+                u7d_lead_pp: float | None = None,
+                queue_has_work: bool = False,
+                task_interruptible: bool = False,
+                enable_bursting: bool = False,
+                burst_window_minutes: float = 30.0,
+                burst_max_u5h_percent: float = 60.0,
+                burst_weekly_guard_percent: float = 60.0) -> tuple:
+    """PRD §4.2.5 六條件短路判定。`(是否放行, 理由)`，第一個不成立的條件即短路。
+
+    `u7d_lead_pp` 是呼叫端用本模組既有 `lead_pp(u7d_percent, 週窗剩餘分鐘, 週窗長度)`
+    算出來的差值（pp）：`<=0` ⇒ 尚未超支週線性預算（PRD 原文「U7d 的線性預算進度 ≥
+    當前 U7d」）。不在本函式內重新推導週窗長度／剩餘分鐘，避免與 `lead_pp` 出現第二份
+    算法（同一件事一個家）。
+    """
+    if t_rem_minutes is None:
+        return False, "t_rem_minutes=None ⇒ fail-closed"
+    if t_rem_minutes > float(burst_window_minutes):
+        return False, f"t_rem={t_rem_minutes:.1f}m > burst_window={burst_window_minutes:.0f}m"
+    if u5h_percent is None:
+        return False, "u5h_percent=None ⇒ fail-closed"
+    if u5h_percent > float(burst_max_u5h_percent):
+        return False, f"u5h={u5h_percent:.1f}% > burst_max_u5h={burst_max_u5h_percent:.0f}%"
+    if u7d_percent is None:
+        return False, "u7d_percent=None ⇒ fail-closed"
+    if u7d_percent > float(burst_weekly_guard_percent):
+        return False, (f"u7d={u7d_percent:.1f}% > "
+                        f"burst_weekly_guard={burst_weekly_guard_percent:.0f}%")
+    if u7d_lead_pp is None:
+        return False, "u7d_lead_pp=None ⇒ fail-closed"
+    if u7d_lead_pp > 0.0:
+        return False, f"u7d_lead_pp={u7d_lead_pp:.2f}pp > 0 ⇒ 週額度已超線性預算"
+    if not (queue_has_work and task_interruptible):
+        return False, "queue_has_work/task_interruptible 未同時成立 ⇒ 不放行突刺"
+    if not enable_bursting:
+        return False, "enable_bursting=False ⇒ 未開啟"
+    return True, "burst"
+
+
+# ── EWMA 燃燒率（R104／PRD §4.2.1；僅供診斷，PRD §4.2.8 明講 `pace_index` 才是主控  round-label-ok
+# 訊號）──────────────────────────────────────────────────────────────────────
+# 🔴 不採用 PRD 參考實作的 `ControllerState` 物件遞迴寫法：本函式是純函式，沒有跨呼叫
+# 存活的狀態，每次呼叫吃**完整落款序列**（同 `estimate_ratio()` 的既有輸入形狀）。
+# 斷點偵測**重用 `segments()` 的規則**（值下降超過 `_ROLLOVER_EPS` 容差＝視窗翻頁，
+# 同一常數、同一比較方向）；不能直接呼叫 `segments()` 本身——它的既有簽章是為跨軸換算比
+# 設計的，會把只有 1 筆的「剛翻頁」區段整段丟棄改採前一區段，那對換算比是對的（樣本不足
+# 就不採信），但對「現在的燃燒率」是錯的（會回報一個過期的數字，且外觀與新鮮讀數相同）。
+def ewma_burn_rate(rows, *, alpha: float = BURN_RATE_EWMA_ALPHA,
+                   floor: float = V_FLOOR) -> tuple:
+    """`rows`＝`[(ts_iso, pct)]`（單一軸）。回 `(V_eff %/min, note)`。**僅作診斷值**：
+    呼叫端不得把回傳值餵回任何既有 cap／決策路徑（PRD §4.2.8）。
+
+    剛翻頁、目前區段只有 1 筆讀數（算不出任何一段差值）⇒ `(floor, "cold-start")`，
+    不回報前一區段的舊數字（同 PRD 參考實作 `update_burn_rate` 的中性初值精神）。
+    """
+    ordered = sorted(
+        ((key, float(pct)) for key, pct in
+         ((_iso_key(ts), pct) for ts, pct in rows) if key is not None),
+        key=lambda r: r[0])
+    current: list = []
+    for key, pct in ordered:
+        if current and pct < current[-1][1] - _ROLLOVER_EPS:
+            current = []
+        current.append((key, pct))
+    if len(current) < 2:
+        return float(floor), "cold-start"
+    v = None
+    for (prev_key, prev_pct), (key, pct) in zip(current, current[1:]):
+        delta_min = (key - prev_key).total_seconds() / 60.0
+        if delta_min <= 0:
+            continue
+        v_sample = max(0.0, pct - prev_pct) / delta_min
+        v = v_sample if v is None else float(alpha) * v_sample + (1.0 - float(alpha)) * v
+    if v is None:
+        return float(floor), "no-interval"
+    return max(float(floor), v), f"n={len(current)}"

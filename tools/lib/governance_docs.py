@@ -285,6 +285,11 @@ _GOVERNANCE_DOCS = (
     # ⇒ 同時是行數棘輪的文件側對帳站點；複審者要重驗四方終審殘留項（H1 fixture、
     # 啟動自檢 60 秒佔位值）就得讀完它（⇒ 體積守門）。即刻登記，不等下一輪。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R102_Scan_Findings.md",
+    # PRD §4.2.5／§4.2.1 BURSTING/EWMA（只算不接線）的逐檔清單與搬遷散文全文。資格同
+    # 前幾輪同名檔：`_GUARD_LINES_REPIN_LOG` 的 R104 列指名本檔為逐檔清單的家  round-label-ok
+    # （⇒ 指針稽核），且本檔承載本輪 `guard-total:` 標記（`_GUARD_TOTAL_DOC_GLOBS`
+    # 掃描面之一）⇒ 同時是行數棘輪的文件側對帳站點。即刻登記，不等下一輪。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R104_Scan_Findings.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/{CrossPlatform,Quota}_*.md`。這**不是**把具名

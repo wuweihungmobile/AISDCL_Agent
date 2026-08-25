@@ -2989,5 +2989,67 @@ class ConcurrencyDecisionPathWiringTest(unittest.TestCase):
                         "平穩化必須發生在寫入引擎契約**之前**，否則引擎讀到的是舊值")
 
 
+# R104／PRD §4.2.5＋§4.2.1：`bursting_ok()`／`ewma_burn_rate()`——只算不接線，round-label-ok
+# 不進 `quota_gate.py` 決策鏈；本檔是這兩支函式唯一的呼叫端。
+class TestR104BurstingOkAndEwmaBurnRate(unittest.TestCase):
+    """`bursting_ok()`＝六條件短路（`None` fail-closed；佇列/旗標不傳＝不放寬）；
+    `ewma_burn_rate()`＝僅供診斷（重用 `segments()` 斷點規則，翻頁後只剩 1 筆
+    ⇒ cold-start，不回報翻頁前的舊燃燒率）。"""
+
+    _OK = dict(t_rem_minutes=30.0, u5h_percent=20.0, u7d_percent=40.0,
+              u7d_lead_pp=-5.0, queue_has_work=True, task_interruptible=True,
+              enable_bursting=True)
+
+    def test_bursting_ok_six_conditions(self) -> None:
+        cases = [
+            ({}, True),                            # 全部成立，含 T_rem=30 邊界恰好通過
+            ({"t_rem_minutes": 30.0001}, False),    # 剛好超過邊界
+            ({"t_rem_minutes": None}, False),       # 以下四條 fail-closed
+            ({"u5h_percent": None}, False),
+            ({"u7d_percent": None}, False),
+            ({"u7d_lead_pp": None}, False),
+            ({"u5h_percent": 60.0001}, False),
+            ({"u7d_percent": 60.0001}, False),
+            ({"u7d_lead_pp": 0.01}, False),         # 週額度已超線性預算（v1 最危險缺漏）
+            ({"queue_has_work": False}, False),
+            ({"task_interruptible": False}, False),
+            ({"enable_bursting": False}, False),
+        ]
+        for override, want in cases:
+            with self.subTest(override=override):
+                self.assertEqual(W.bursting_ok(**{**self._OK, **override})[0], want)
+
+    def test_bursting_ok_omitted_relaxing_params_default_closed(self) -> None:
+        kw = {k: v for k, v in self._OK.items()
+             if k not in ("queue_has_work", "task_interruptible", "enable_bursting")}
+        self.assertFalse(W.bursting_ok(**kw)[0])
+
+    def test_ewma_burn_rate_edge_cases(self) -> None:
+        cases = [
+            ([], (W.V_FLOOR, "cold-start")),
+            ([("2026-08-25T00:00:00+00:00", 10.0)], (W.V_FLOOR, "cold-start")),
+            ([("not-a-timestamp", 10.0)], (W.V_FLOOR, "cold-start")),
+            ([("2026-08-25T00:00:00+00:00", 10.0),
+              ("2026-08-25T00:01:00+00:00", 10.0)], (W.V_FLOOR, "n=2")),
+            ([("2026-08-25T00:00:00+00:00", 50.0),      # 翻頁後只剩 1 筆新讀數
+              ("2026-08-25T00:01:00+00:00", 60.0),      # ⇒ cold-start，不是翻頁前的舊值
+              ("2026-08-25T00:02:00+00:00", 5.0)], (W.V_FLOOR, "cold-start")),
+        ]
+        for rows, want in cases:
+            with self.subTest(rows=rows):
+                self.assertEqual(W.ewma_burn_rate(rows), want)
+
+    def test_ewma_burn_rate_seeds_then_blends_via_the_prd_formula(self) -> None:
+        rate2, note2 = W.ewma_burn_rate(
+            [("2026-08-25T00:00:00+00:00", 10.0), ("2026-08-25T00:01:00+00:00", 10.5)])
+        self.assertAlmostEqual(rate2, 0.5)
+        self.assertEqual(note2, "n=2")
+        # v1=0.5；v2=(11.5-10.5)/1=1.0；alpha=0.25 ⇒ 0.25*1.0+0.75*0.5=0.625
+        rate3, _note3 = W.ewma_burn_rate(
+            [("2026-08-25T00:00:00+00:00", 10.0), ("2026-08-25T00:01:00+00:00", 10.5),
+             ("2026-08-25T00:02:00+00:00", 11.5)])
+        self.assertAlmostEqual(rate3, 0.625)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -692,10 +692,10 @@ _GUARD_LINE_STALE_SLACK = 0.02
 #: 寫出淨額與理由——讓方向在 diff 上一望即知。
 #: 🔴 本表含**本檔自己**，所以動本檔就會動到本表 ⇒ 改完必須重跑一次並用實測值收斂。
 _FROZEN_GUARD_LINES: dict[str, int] = {
-    "_platform_helpers.py": 537,
+    "_platform_helpers.py": 446,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 6179,
+    "test_adr_xplat001_c1c2_lock.py": 6190,
     "test_archive_defect_log.py": 4008,
     "test_bash32_compat.py": 970,
     "test_bash_probe_spec_contract.py": 983,
@@ -740,7 +740,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_ps51_compat.py": 565,
     "test_ps_engine_ssot.py": 954,
     "test_python_c_percent_shim.py": 119,
-    "test_quota_policy.py": 2993,
+    "test_quota_policy.py": 3055,
     "test_root_infra_parity.py": 441,
     "test_run_root_unittests.py": 2190,
     "test_sanitize_component_frozen_sdd_versions_lock.py": 340,
@@ -1122,6 +1122,13 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "重新武裝（_REPIN_NET_CAP_SCHEDULE 追加一列＋重新武裝下一段），"
      "本檔自身逐檔漂移，同 R95~R102 既有體例。逐檔清單見 "
      "CrossPlatform_R102_Scan_Findings.md。"),
+    ("R104", 88574, 88556, -18,
+     "[淨減法] PRD §4.2.5／§4.2.1 BURSTING/EWMA（只算不接線）：test_quota_policy.py "
+     "+62（bursting_ok()/ewma_burn_rate() 回歸測試，2993→3055）；_platform_helpers.py "
+     "三段 forensic 沿革（usable_bash_for_fixture／PS_UTF8_PRELUDE／_PS_COMMENT_LEAD）"
+     "搬遷至 CrossPlatform_R104_Scan_Findings.md，537→446；本檔自身新增兩列（本列＋"
+     "DEF-200-223 凍結前綴延伸列）+11。三者相抵：62-91+11=-18，streak 因淨額 ≤0 歸零。"
+     "逐檔清單見 CrossPlatform_R104_Scan_Findings.md。"),
 )
 
 
@@ -1331,10 +1338,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 61
+_REPIN_LOG_FROZEN_PREFIX_LEN = 62
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "b698a52087af7cc422f430705940919b247b45a61a5f2e2248de04e2f6a4644e")
+    "967b8b322da409990566f526b874c8aca2a3a68648ccfc617c326531660708b8")
 
 
 def repin_log_history_digest(
@@ -1392,7 +1399,11 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # 鎖檔持有面被切給不同並行包）；R102 已收尾交棒，本批改標 R103（不追溯改寫 round-label-ok
     # R102 既有列），同體例「追加後立即自我凍結」——本輪追加兩列（crossref 檔 round-label-ok
     # +103 ＋ 本檔自身編修 +18），prefix_len 59→61 涵蓋兩列本身。
-    ("R103", "bc7080dcd3f2", "b698a52087af", "DEF-200-221"),)
+    ("R103", "bc7080dcd3f2", "b698a52087af", "DEF-200-221"),
+    # DEF-200-223：R104 PRD §4.2.5／§4.2.1 BURSTING/EWMA 落地，同體例「追加後立即  round-label-ok
+    # 自我凍結」——本輪淨額 -18：測試 +62 與搬遷散文 -91 相抵後，本檔自身兩列
+    # （稽核列＋本凍結前綴延伸列）+11，prefix_len 61→62 涵蓋兩列本身。
+    ("R104", "b698a52087af", "967b8b322da4", "DEF-200-223"),)
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。
 #: 往後指紋每變一次，都要能從本值出發、經 `_FROZEN_PREFIX_REWRITE_LEDGER` 逐列鏈接
