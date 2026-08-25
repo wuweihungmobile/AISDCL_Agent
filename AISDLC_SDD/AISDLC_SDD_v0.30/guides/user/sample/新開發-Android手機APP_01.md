@@ -58,10 +58,10 @@ MoneyTracker_Android/
 
 ```bash
 # 方法 1: 直接複製（推薦）
-cp -r /Users/wuweihong/Cursor_Project/AISDLC_ALL/AISDLC_v0.09 ./AISDLC
+cp -r ~/Cursor_Project/AISDLC_ALL/AISDLC_v0.09 ./AISDLC
 
 # 方法 2: 建立符號連結（進階）
-ln -s /Users/wuweihong/Cursor_Project/AISDLC_ALL/AISDLC_v0.09 ./AISDLC
+ln -s ~/Cursor_Project/AISDLC_ALL/AISDLC_v0.09 ./AISDLC
 ```
 
 ### 2.2 驗證安裝
@@ -591,7 +591,7 @@ mkdir MoneyTracker_Android && cd MoneyTracker_Android
 mkdir -p {docs,src,tests}
 
 # Step 2: 複製 AISDLC Framework
-cp -r /Users/wuweihong/Cursor_Project/AISDLC_ALL/AISDLC_v0.09 ./AISDLC
+cp -r ~/Cursor_Project/AISDLC_ALL/AISDLC_v0.09 ./AISDLC
 
 # Step 3: 開啟 Cursor AI
 # File → Open Folder → 選擇 MoneyTracker_Android

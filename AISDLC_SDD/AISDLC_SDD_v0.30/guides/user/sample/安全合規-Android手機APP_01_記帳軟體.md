@@ -100,7 +100,7 @@ ExpenseTrackerApp/
 
 ```bash
 cd ~/Projects/ExpenseTrackerApp
-ln -s /Users/wuweihong/Cursor_Project/AISDLC_ALL/AISDLC_v0.09 AISDLC_v0.09
+ln -s ~/Cursor_Project/AISDLC_ALL/AISDLC_v0.09 AISDLC_v0.09
 ls -lah | grep AISDLC
 ```
 

@@ -136,7 +136,7 @@ BnB_Booking_Platform/
 ```bash
 cd ~/Projects/BnB_Booking_Platform
 
-ln -s /Users/wuweihong/Cursor_Project/AISDLC_ALL/AISDLC_v0.09 AISDLC_v0.09
+ln -s ~/Cursor_Project/AISDLC_ALL/AISDLC_v0.09 AISDLC_v0.09
 
 ls -lah | grep AISDLC
 ```
@@ -144,7 +144,7 @@ ls -lah | grep AISDLC
 ### 2.2 方法二：複製
 
 ```bash
-cp -r /Users/wuweihong/Cursor_Project/AISDLC_ALL/AISDLC_v0.09 ~/Projects/BnB_Booking_Platform/
+cp -r ~/Cursor_Project/AISDLC_ALL/AISDLC_v0.09 ~/Projects/BnB_Booking_Platform/
 
 ls AISDLC_SDD_v0.01/
 ```

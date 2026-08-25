@@ -90,7 +90,7 @@ MoneyTracker_Pro/
 
 ```bash
 # 在專案根目錄執行
-cp -r /Users/wuweihong/Cursor_Project/AISDLC_ALL/AISDLC_v0.09 ./AISDLC
+cp -r ~/Cursor_Project/AISDLC_ALL/AISDLC_v0.09 ./AISDLC
 
 # 驗證安裝
 ls -la AISDLC/
@@ -993,7 +993,7 @@ mkdir MoneyTracker_Pro && cd MoneyTracker_Pro
 mkdir -p app/src/main/java/com/moneytracker/pro docs
 
 # Step 2: 複製 AISDLC
-cp -r /Users/wuweihong/Cursor_Project/AISDLC_ALL/AISDLC_v0.09 ./AISDLC
+cp -r ~/Cursor_Project/AISDLC_ALL/AISDLC_v0.09 ./AISDLC
 
 # Step 3: 開啟 Cursor AI
 # File → Open Folder → 選擇 MoneyTracker_Pro
