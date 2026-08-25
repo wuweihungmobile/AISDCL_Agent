@@ -3663,7 +3663,10 @@ _NON_PATH_REPLACE_OWNERS: frozenset[str] = frozenset({"dataclasses", "attr", "at
 #:   實測含凍結版時整支測試要 **133 秒**（凍結版 1,131 筆是同一批程式碼被複製 29 次），
 #:   而護欄層的執行時間本身已是本輪一筆獨立 finding。凍結版的那 1,131 筆是**已量到、
 #:   刻意不進帳**的事實，不是沒看見。
-_DIRENT_UNGUARDED_DEBT: dict[str, int] = {"live": 41}
+#: DEF-200-202 四方複審修復窗口：`QuotaGateIsWiredToTheBurnPathTest` 新增回歸測試
+#: 多用了一次既有 fixture 慣用句式 `<Path>.replace(qg.quota_cache_path())`
+#: （同檔既有測試已大量使用同一句式，未另立新形態）。
+_DIRENT_UNGUARDED_DEBT: dict[str, int] = {"live": 42}
 
 
 def dirent_primitive_sites(source: str, rel: str) -> list[tuple[str, int, str, bool]]:

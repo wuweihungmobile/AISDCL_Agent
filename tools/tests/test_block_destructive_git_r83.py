@@ -1028,11 +1028,19 @@ class TestIronLaw6CriteriaHaveTeeth(unittest.TestCase):
         self.assertEqual(G.waitform_hits(good), [])
 
     def test_the_background_amp_exclusions_are_load_bearing(self) -> None:
-        """`&&`／`2>&1`／`&>`／`|&` 四種排除各自都是實測會製造假紅的寫法。"""
+        """`&&`／`2>&1`／`&>`／`|&` 四種排除各自都是實測會製造假紅的寫法。
+
+        DEF-200-158：段首 `&`（PowerShell call operator，呼叫帶空白絕對路徑的執行檔時常見）
+        曾因 `if i and …` 對 `i==0` falsy 短路而被誤判成背景 `&`；`run_in_background=True`
+        時會誤觸「自己就會立刻返回」判準。
+        """
         for good in ("nohup make a && make b", "nohup python x.py 2>&1 | tee log",
                      "nohup bash x.sh &> /tmp/log"):
             with self.subTest(good=good):
                 self.assertEqual(G.waitform_hits(good), [])
+        self.assertEqual(
+            G.waitform_hits("& 'C:\\Program Files\\Git\\bin\\git.exe' stash list",  # platform-ok:
+                             run_in_background=True), [])
         original = G._background_amps
         try:
             G._background_amps = lambda segment: "&" in segment  # type: ignore[assignment]

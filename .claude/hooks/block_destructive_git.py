@@ -909,8 +909,10 @@ def _background_amps(segment: str) -> bool:
             continue
         if i + 1 < len(segment) and segment[i + 1] in "&>":
             continue                                   # `&&` / `&>`
-        if i and segment[i - 1] in "&><|":
-            continue                                   # `&&` 的後半 / `2>&1` / `|&`
+        if i == 0 or segment[i - 1] in "&><|":
+            continue                                   # `&&` 的後半 / `2>&1` / `|&` /
+                                                         # 段首（PowerShell call operator
+                                                         # `& 'C:\...\exe'`，前面沒有命令可背景化）
         return True
     return False
 

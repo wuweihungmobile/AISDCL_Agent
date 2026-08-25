@@ -827,14 +827,24 @@ def quota_throttle_message(decision: quota_policy.Decision, tool: str, live: int
 # 🔴 說明寫成 `#` 而不是 docstring 是**被迫也是被指示的**：`count_loc` 排除純 `#` 行但
 # 計入 docstring 行，而本檔 tier 餘裕只有 2 行；`check_loc_budget.py` 自己的輸出逐字建議
 # 「說明文字請寫成 `#` 註解而非 docstring」。第一版把這段寫進 docstring ⇒ 當場 410>400 破閘。
+# 🔴 DEF-200-202：`active_model` 補在這裡（不是新開一個呼叫端）——`MODEL_SCOPED_KINDS`
+# 軸（`weekly_scoped` 等）此前呼叫端不帶這個字，`_model_active()` 恆回 False ⇒ 那些軸
+# 結構上零煞車力（同族缺口見 `quota_policy.py:570` 的 R98 段）。呼叫端（hook 主檔）已經
+# 掃過逐字稿取本 session 的 model 字串，經 `model_family()` 正規化後（`claude-fable-5`
+# → `fable`）與 `axis.scope_model`（伺服器回的顯示名 `"Fable"`）casefold 相等——這條
+# 正規化路徑不是新造：`model_family()` 的家族清單本就含 `"fable"`（R79 既有，見該函式），
+# 本次只是把既有輸出接到這個此前沒人接的插座。
 def quota_gate(payload: dict, *, blocking, latch_read, latch_write,
-               plan_writer, waker, event: str = "PreToolUse") -> int:
+               plan_writer, waker, event: str = "PreToolUse",
+               active_model: str | None = None) -> int:
     """額度軸的**獨立**判定入口。回 0＝放行、2＝擋下。不讀 context、不碰網路以外的東西。
 
-    五個注入依賴全部來自 hook 端（見檔頭的單向規則）：`blocking`＝阻斷工具名單、
+    六個注入依賴全部來自 hook 端（見檔頭的單向規則）：`blocking`＝阻斷工具名單、
     `latch_read`／`latch_write`＝一次性閂鎖的讀寫、`plan_writer`＝任務書產生器、
     `waker`＝喚醒武裝（回 `{armed, sentinel_off, posix}`）。`event`＝本次是哪個 hook
-    事件（射程與派發帳歸屬皆由它決定，見上方那段）。
+    事件（射程與派發帳歸屬皆由它決定，見上方那段）。`active_model`＝這次要問的目標
+    模型（見上方 DEF-200-202 段）；`None`＝不知道，模型分軌軸一律不進 cap 聚合
+    （行為與此參數新增前逐字相同——既有呼叫端零改動時不受影響）。
     """
     tool = str(payload.get("tool_name") or "")
     if event == "PreToolUse" and tool not in blocking:
@@ -872,7 +882,7 @@ def quota_gate(payload: dict, *, blocking, latch_read, latch_write,
     # 🔴 **整支 hook 唯一的判讀入口，恰好呼叫一次**（M10：「函式對了但沒人叫它」是本 repo
     # 反覆記載的『機制蓋好沒接電』）。量不到時 `decide()` 回 `degraded_cap`（不是不設限、
     # 也永不 halt）：R81 複審探針實測「快取過期 600s ＋ 額度 99%」時 42 次派發放行 42。
-    decision = quota_policy.decide(state, now, policy)
+    decision = quota_policy.decide(state, now, policy, active_model=active_model)
     if unmeasured:
         note_degraded(state.source or "unknown",
                       "取數失敗，且逐字稿裡沒有未復原的撞線可以當地板", event=event)

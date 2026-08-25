@@ -72,6 +72,10 @@ on:
   push:
     branches: [main]
     paths:
+      # DEF-101-402：tools/tests/ 的 test_windowsapps_guard_cross_consistency.py／
+      # test_windows_forbidden_filename_parity.py 兩支測試 `import autoclaude`，消費
+      # 整個套件（core/decision/execution/infra/models/plugins…），窄白名單漏覆蓋。
+      - "AutoClaude/autoclaude/**"
       - "AutoClaude/autoclaude/perception/**"
       - "AutoClaude/autoclaude/utils/**"
       - "AutoClaude/pyproject.toml"
@@ -437,6 +441,10 @@ on:
       - "AutoClaude/docs/08_deployment/Local_CI_Parity_Guide.md"
   pull_request:
     paths:
+      # DEF-101-402：tools/tests/ 的 test_windowsapps_guard_cross_consistency.py／
+      # test_windows_forbidden_filename_parity.py 兩支測試 `import autoclaude`，消費
+      # 整個套件（core/decision/execution/infra/models/plugins…），窄白名單漏覆蓋。
+      - "AutoClaude/autoclaude/**"
       - "AutoClaude/autoclaude/perception/**"
       - "AutoClaude/autoclaude/utils/**"
       - "AutoClaude/pyproject.toml"

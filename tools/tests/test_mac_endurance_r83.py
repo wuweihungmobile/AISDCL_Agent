@@ -1542,6 +1542,16 @@ class MacSleepPostureIsSaidOutLoudTest(unittest.TestCase):
 # 🔴 判準刻意**不**斷言「這台機器上那個檔存在」：那是機器狀態，會讓 CI 與任何全新 clone
 # 必紅（同 `test_check_hooks_liveness.py` 對載具存在性的既有分工）。它斷言的是**居所的性質**
 # ＋ 兩個寫檔點真的用了它。
+
+
+class _DenyMkdirPath(type(Path())):
+    """DEF-200-173：`mkdir` 恆拋權限錯，只換掉 `endurance_env.Path` 這個名字看到的類別
+    ——不是 `pathlib.Path` 本尊，同一行程裡其他程式碼的 `Path.mkdir` 不受影響。"""
+
+    def mkdir(self, *args: object, **kwargs: object) -> None:
+        raise PermissionError(13, "denied")
+
+
 class DurableTraceHomeTest(unittest.TestCase):
     """痕跡的居所：比 `$TMPDIR` 持久、比 repo 不具權威。"""
 
@@ -1600,8 +1610,7 @@ class DurableTraceHomeTest(unittest.TestCase):
         fallback = Path(tempfile.gettempdir())
         want = self.tmp / "denied" / "traces"
         os.environ[endurance_env.TRACE_DIR_ENV] = str(want)
-        with mock.patch.object(endurance_env.Path, "mkdir",
-                               side_effect=PermissionError(13, "denied")):
+        with mock.patch.object(endurance_env, "Path", _DenyMkdirPath):
             self.assertEqual(endurance_env.trace_dir(), fallback,
                              "PermissionError 沒被接住 ⇒ 退化那一層對家目錄權限失明")
         # 控制組：拿掉注入之後同一個路徑必須建得起來，否則上面那個相等是恆真的。

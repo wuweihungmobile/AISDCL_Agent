@@ -253,11 +253,19 @@ def _monorepo_root() -> str:
 
 _WORKFLOWS_DIR = os.path.join(_monorepo_root(), ".github", "workflows")
 
+# DEF-101-402：autoclaude-ci.yml（`python -m pytest tests/ -q`，見該 workflow）之前
+# 未被本鎖登記——AutoClaude/tests/ 下確有 10 支測試檔使用 `_monorepo_root()`／
+# `_REPO_ROOT`／`REPO_ROOT` 慣用法消費 monorepo 根層檔案（如 AutoClaude/tests/
+# test_perception_platform_honesty.py），本鎖對它結構性零保護，同構於檔頭其他
+# 盲區的成因（消費者存在但守門忘了看它）。
+_AUTOCLAUDE_TESTS_DIR = os.path.join(_monorepo_root(), "AutoClaude", "tests")
+
 # workflow 檔名 ↔ 其實際執行的測試目錄（見各 workflow 內對應 run: 步驟）。
 _WORKFLOW_TEST_DIRS: dict[str, str] = {
     "aisdlc-sdd-ci.yml": _TESTS_DIR,
     "windows-compat-ci.yml": os.path.join(_monorepo_root(), "tools", "tests"),
     "macos-compat-ci.yml": os.path.join(_monorepo_root(), "tools", "tests"),
+    "autoclaude-ci.yml": _AUTOCLAUDE_TESTS_DIR,
 }
 
 
@@ -504,6 +512,13 @@ class _ImportRequest(NamedTuple):
     source: str         # ast.unparse 還原的原式，供 fail-loud 訊息引用
 
 
+def _is_type_checking_test(test: ast.expr) -> bool:
+    """判斷 `if <test>:` 是否為 `TYPE_CHECKING` 守衛（`TYPE_CHECKING` 或 `typing.TYPE_CHECKING`）。"""
+    if isinstance(test, ast.Name):
+        return test.id == "TYPE_CHECKING"
+    return isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING"
+
+
 def _import_requests(src: str) -> list[_ImportRequest]:
     """把原始碼中每一句 import 解析為「被消費的模組」候選（語意，不是字面排列）。
 
@@ -511,13 +526,26 @@ def _import_requests(src: str) -> list[_ImportRequest]:
     - `ast.ImportFrom`：整句一個請求，候選同時含 `<module>` 與 `<module>/<name>`，
       因此 `from lib import baseline_origin`、`from lib import a, b as c`、
       `from lib.sub import x` 三種形態都得出被消費的模組本身。
+
+    DEF-101-402：`if TYPE_CHECKING:` 區塊內的 import 只供靜態型別檢查器使用，
+    **執行期從不 import**——本鎖關心的是「跑測試會不會實際載入這個根層檔案」，
+    TYPE_CHECKING-only import 不構成這種消費，排除以避免把型別註解用途的相對路徑
+    誤判為需要 CI paths 覆蓋的執行期消費者（同時也不越權去評斷那些路徑本身
+    是否正確——那是 mypy 的職責，不是本鎖的射程）。
     """
     try:
         tree = ast.parse(src)
     except SyntaxError:  # 語法壞掉的檔案由 py_compile／ruff 負責，本鎖不重複報
         return []
+    skip_ids: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.If) and _is_type_checking_test(node.test):
+            for sub in node.body:
+                skip_ids.update(id(n) for n in ast.walk(sub))
     out: list[_ImportRequest] = []
     for node in ast.walk(tree):
+        if id(node) in skip_ids:
+            continue
         if isinstance(node, ast.Import):
             for alias in node.names:
                 segs = tuple(alias.name.split("."))
@@ -576,9 +604,17 @@ def _resolve_import_request(
     hits: list[str] = []
     for base in search:
         for segs in req.targets:
-            candidate = os.path.join(base, *segs) + ".py"
-            if os.path.isfile(candidate):
-                hits.append(candidate)
+            flat = os.path.join(base, *segs) + ".py"
+            if os.path.isfile(flat):
+                hits.append(flat)
+                continue
+            # DEF-101-402：`AutoClaude/autoclaude/` 是 package 樹（`__init__.py`），
+            # `from .infra.repositories import build_state_repository` 這類套件形態
+            # import 對「僅檢查扁平 .py」的舊判準結構性零命中——與盲區 G 同一種
+            # 「靜默丟棄」機制，補套件形態候選。
+            pkg = os.path.join(base, *segs, "__init__.py")
+            if os.path.isfile(pkg):
+                hits.append(pkg)
     return hits
 
 
@@ -586,7 +622,15 @@ def _resolve_import_request(
 # 維護）。本集合刻意保持最小：新增一個沒登記的第三方 import 會讓
 # `test_no_unresolvable_imports` 當場列名——那就是「解析不出不准靜默跳過」的意思，
 # 同 `tools/run_root_unittests.py::_THIRD_PARTY_PREREQS` 的理念（宣告清單即豁免依據）。
-_KNOWN_EXTERNAL_MODULES = frozenset({"pytest", "yaml"})
+# DEF-101-402（autoclaude-ci.yml 納入本鎖後首次掃到）新增：pydantic／sqlalchemy／click／
+# httpx／keyboard／wexpect／psycopg2／plyer／win10toast——皆為 AutoClaude 既有
+# pyproject 相依（含平台專屬選用項），非本鎖標的（本鎖只管「根層消費檔覆蓋」，不管
+# 第三方套件安裝）。
+_KNOWN_EXTERNAL_MODULES = frozenset({
+    "pytest", "yaml", "pydantic", "sqlalchemy", "click", "httpx",
+    "keyboard", "wexpect", "psycopg2", "plyer", "win10toast",
+    "claude_agent_sdk", "anyio", "pgvector", "tenacity", "cachetools",
+})
 
 # sys.path 是**行程全域**的：A 模組 import B 時把某目錄插進 sys.path，之後 C 模組的
 # `import D` 就解析得到。實例：`tools/tests/test_find_git_bash_parity.py` 的

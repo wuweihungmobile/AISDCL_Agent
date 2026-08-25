@@ -377,58 +377,19 @@ def cut_ps_inline_comment(line: str) -> str:
 
 
 def strip_ps_comments(text: str) -> str:
-    """剝除 PowerShell 註解後回傳「只剩功能碼」的文字（保留字串字面值內容）。
+    """剝除 PowerShell 註解後回傳「只剩功能碼」的文字（保留字串字面值內容），供「錨點只認
+    功能碼」的靜態鎖使用：註解裡留著舊字樣會讓錨點假陽性（真刪功能碼卻全綠）。空行一律濾除。
 
-    供「錨點只認功能碼」的靜態鎖使用：註解裡留著舊字樣會讓錨點假陽性（真刪功能碼
-    卻全綠）。空行一律濾除。
+    **已實測涵蓋**（回歸測試見 `test_find_git_bash_parity.py` 的 `StripPsComments*` Test
+    類）：整行／尾隨行內 `#` 註解（前導字元集合＝`_PS_COMMENT_LEAD`，沿革見上方該常數定義
+    處）、跨行與單行內聯 `<#…#>` 區塊註解、字串內的 `#`／`<#`／`#>`／`` `# ``／`$#`／`c#`
+    不誤剝（含跳脫）、here-string 整段原樣保留。
 
-    **已實測涵蓋**（逐項有回歸測試，見 `test_find_git_bash_parity.py` 的
-    `StripPsCommentsTest`／`StripPsCommentsBoundaryTest`）：整行 `#` 註解、尾隨行內
-    註解（**前導字元集合＝`_PS_COMMENT_LEAD`：空白／tab／`;`／`|`／`(`／`{`／`,`／
-    `)`／`}`／`]`／`"`／`'`**——R57 round 3 SD-R57R3-01 以 pwsh 真 parser 取
-    ground truth 後補上後五個；措辭刻意改為明列集合而非籠統的「尾隨行內註解」，
-    因為後者曾把「以 `)` 收尾的功能碼後的 `#`」也涵蓋進宣稱而與實作不符）、
-    跨行與單行內聯 `<#…#>` 區塊註解、單/雙引號字串內的 `#` 與 `<#`／`#>` 不
-    誤剝（含 `''`／`""` 雙寫跳脫、反引號跳脫）、反引號跳脫的 `` `# ``、`$#`／`c#`
-    這類無前置分隔的 `#` 不誤剝、here-string（`@"`／`@'` 起、`"@`／`'@` 止）整段
-    原樣保留、字串字面值以 `@` 結尾（`"user@"`）不誤開 here-string、註解內容以
-    `@"` 結尾不誤開 here-string。
-
-    **已知不涵蓋**（逐項實測確認為現行行為，不做全備宣稱；下列形態在本 repo 掃描
-    面即 137 支 git 追蹤 `.ps1` 內實掃皆不存在）：
-      1. 跨行字串（雙引號字串內含真換行）第二行起的引號狀態不追蹤，該情形下字串
-         內的 `#` 可能被誤剝。
-      2. stop-parsing 符號 `--%`：其後所有內容原樣傳給原生指令、`#` 不是註解，本
-         函式仍會剝除（R57 A-R57R2-04）。**刻意不修**：`--%` 之後不剝＝多留一段
-         「其實是註解」的文字當功能碼，等於在鎖上開一條新的 fail-open（本輪
-         A-R57R2-02／R57R2-QA-01 修的正是這一類）；反之現行的多剝只會造成假紅
-         （fail-closed）。真出現 `--%` 用法時再連同回歸測試一起處理。
-      3. `<#` 出現在**未閉合**的字串字面值中（如 `$x = "<# …` 該行無閉合引號）時，
-         引號掃描會吃到行尾，`<#` 不被視為區塊起始。
-      4. here-string 終止判定較 PowerShell 寬鬆：本函式亦接受縮排後的 `"@`
-         （`ln.strip() == '"@'`），PowerShell 只認行首。方向為提早結束＝多剝
-         （fail-closed）。
-      5. **不在 `_PS_COMMENT_LEAD` 內的前導字元**後的 `#` 一律不視為註解起點。
-         **這不是「未來可能」的風險，而是現行、已量測的結構性限制**（R57 round 4
-         Architect／SD 交叉實測後改述）：真實規則是 tokenizer 的 command/argument
-         對 expression **模式相依**，前導字元白名單原理上不可能完備——expression
-         模式下 `#` 幾乎恆為 token 終止＋註解起點，前導字元可以是任意數字／識別字／
-         `::`／`]$var`…。Architect 以 pwsh 7.6.3 真 parser 對 64 個實務形態差分得
-         **FAIL_OPEN=27**（其中 **20 案 parseErrors=0** ＝完全合法的日常寫法，如
-         `$a = 1#c`、`$env:PATH#c`、`$a = [int]$b#c`、`$a = $b?.Length#c`）、
-         **FAIL_CLOSED=0**；SD 另以約 130 條探針得 FAIL_OPEN=37，並實證仍可用
-         `$note = $x#  -WakeToRun` 繞過 `test_windows_nightly_anchor_parity.py`
-         （round 3 修掉的 `Write-Output "note"#…` 手法已確認關閉）。
-         **方向為 fail-open**（漏剝＝註解冒充功能碼），故必須明確揭露而非淡化。
-         **不在 R57 修的理由**：全語料實測洩漏數為 **0**（137 支 `.ps1`／2,847 個真
-         Comment token，Architect 與 SD 各自獨立差分皆得 0），屬 latent；真正的修法
-         是換模型——**建議（R59 改派：原寫「R58 建議」，R58 整輪作廢故無承接者；改派為 R60 起未指派 backlog，見帳本 DEF-101-521）**把 pwsh parser 對全語料的 Comment token 凍結成 golden
-         fixture 做離線差分，可在 CI 不裝 pwsh 的前提下把 ground truth 機械化，一次
-         消掉整個天花板（同法亦可解 `_ci_scan_anchors.py` 判例第 (3) 條的同型天花板）。
-         **切勿再往集合裡補字元**——那是 whack-a-mole，本條存在正是為了阻止它。
-      6. `_PS_HERE_STRING_LEAD`（`" \t=(,;|{"`）同樣未含 `]`／`)`，故
-         `[string]@"` 這類以 `]` 收尾的 here-string 起始不被辨識。方向為多剝
-         （fail-closed，不影響鎖的正確性），本輪一併登記不修（SD-R57R3-01 第 4 點）。
+    **已知不涵蓋**（全語料實掃皆不存在）：跨行字串第二行起引號狀態不追蹤而誤剝／`--%` 之後
+    仍被剝除且刻意不修／`<#` 落在未閉合字串內不被視為區塊起始／here-string 終止判定較寬鬆
+    而多剝／`_PS_COMMENT_LEAD`／`_PS_HERE_STRING_LEAD` 外的 `#` 一律不算註解起點
+    （fail-open，洩漏數 0，**切勿再補字元**）。逐條數據搬至品質文件庫的
+    `CrossPlatform_R105_Scan_Findings.md`。
     """
     out: list[str] = []
     here_delim: str | None = None

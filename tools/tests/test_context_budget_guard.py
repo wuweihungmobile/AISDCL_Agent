@@ -144,12 +144,13 @@ def _usage(inp: int, creation: int, read: int, out: int = 999_999) -> dict:
             "cache_read_input_tokens": read, "output_tokens": out}
 
 
-def _write_jsonl(path: Path, useds: list[int], *, junk: bool = False) -> Path:
+def _write_jsonl(path: Path, useds: list[int], *, junk: bool = False,
+                 model: str = "claude-opus-5") -> Path:
     """把每一筆 `used` 寫成一列 assistant 記錄（拆成 2 + 3 + 其餘三個欄位）。"""
     lines: list[str] = ['{"type":"user","message":{"role":"user"}}']
     for used in useds:
         rec = {"type": "assistant",
-               "message": {"model": "claude-opus-5", "usage": _usage(2, 3, used - 5)}}
+               "message": {"model": model, "usage": _usage(2, 3, used - 5)}}
         lines.append(json.dumps(rec, ensure_ascii=False))
     if junk:
         # 逐字稿常有半截尾行（正在寫入時被讀到）＋ 帶 usage 但型別全錯的行。
@@ -1767,7 +1768,9 @@ class EnduranceWiringTest(unittest.TestCase):
                                   f"`{name}` 被接進額度路徑了 ⇒ 兩把尺又共用早退條件")
         body = source[source.index("def main("):source.index("def block_verdict")]
         self.assertIn("quota_gate.quota_gate(", body, "hook 沒有呼叫額度閘 ⇒ 蓋好沒接電")
-        self.assertLess(body.index("quota_gate.quota_gate("), body.index("transcript_path"),
+        # 錨點理由同上一支測試：`transcript_path` 字面本身已被 DEF-200-202 的合法新讀取
+        # （取 active_model 用）搬到 `quota_gate.quota_gate(` 之前，改用第一道早退字面。
+        self.assertLess(body.index("quota_gate.quota_gate("), body.index("if transcript is None:"),
                         "額度那一呼叫落在 context 的五道早退之後 ⇒ 撞額度時 context 只有 "
                         "~18%，那一支一次都不會被執行（SA-B1 判過的死碼）")
 
@@ -4101,17 +4104,23 @@ def _quota_axis(now: datetime, kind: str, pct: float, resets_in: float | None) -
 def _quota_cache(tmp: Path, pct: float | None, kind: str = "session",
                  resets_in: float | None = 3600.0, age: float = 0.0,
                  extra: tuple[tuple[str, float, float | None], ...] = (),
-                 account_key: str | None = None) -> Path:
+                 account_key: str | None = None,
+                 scope_models: dict[str, str] | None = None) -> Path:
     """種一份合成快取（`autosdd.quota/2` 的**逐軸**形狀）。
 
     `resets_in`＝距 reset 幾秒；`age`＝這份讀數幾秒前量的；`extra`＝再加幾條
-    `(kind, pct, resets_in)` 軸；`account_key`＝R93 帳號身分欄（`None`＝不寫這一鍵）。
+    `(kind, pct, resets_in)` 軸；`account_key`＝R93 帳號身分欄（`None`＝不寫這一鍵）；
+    `scope_models`＝DEF-200-202：`{kind: 顯示名}`，補上 `weekly_scoped` 等模型分軌軸
+    的 `scope_model` 欄（伺服器實測值如 `"Fable"`），預設不寫（維持既有呼叫端行為）。
     schema 跟著 meter 走、不寫死字面（§L-3.10）；「多軸為何 R82 才表達得出來」的
     舊形狀對照全文＝Resume 證據檔 §L-4.18。
     """
     now = datetime.now(UTC).astimezone()
     axes = ([] if pct is None else [_quota_axis(now, kind, pct, resets_in)])
     axes += [_quota_axis(now, *e) for e in extra]
+    for axis in axes:
+        if scope_models and axis["kind"] in scope_models:
+            axis["scope_model"] = scope_models[axis["kind"]]
     body = {"schema": _meter().SCHEMA, "axes": axes, "source": "endpoint",
             "measured_at": (now - timedelta(seconds=age)).isoformat(timespec="seconds")}
     if account_key is not None:
@@ -4574,6 +4583,16 @@ class QuotaCacheContractHomeTest(unittest.TestCase):
         meter = _meter()
         self.assertEqual(qg.quota_cache_path(), meter.cache_path())
         self.assertEqual(qg.quota_schema(), meter.SCHEMA)
+        # 🔴 DEF-200-012：不同 `TMPDIR` 不得算出不同快取路徑（那正是互動 session 與
+        # launchd 哨兵彼此看不見對方水位的根因）；逃生口環境變數仍可覆寫。
+        with unittest.mock.patch.dict(os.environ, {"TMPDIR": str(Path(tempfile.mkdtemp()))}):
+            same_a = meter.cache_path()
+        with unittest.mock.patch.dict(os.environ, {"TMPDIR": str(Path(tempfile.mkdtemp()))}):
+            same_b = meter.cache_path()
+        self.assertEqual(same_a, same_b, "cache_path() 隨 TMPDIR 漂移（DEF-200-012 復發）")
+        override = Path(tempfile.mkdtemp())
+        with unittest.mock.patch.dict(os.environ, {meter.CACHE_DIR_ENV: str(override)}):
+            self.assertEqual(meter.cache_path(), override / meter.CACHE_NAME)
         old_name, old_schema = meter.CACHE_NAME, meter.SCHEMA
         try:
             meter.CACHE_NAME, meter.SCHEMA = "autosdd_q_INJ.json", "autosdd.quota/INJ"
@@ -5154,7 +5173,11 @@ class QuotaGateIsIndependentOfContextTest(unittest.TestCase):
         # 註解**（裡面逐字提到 `tier_of()`）就成了第一個命中點，判準當場誤紅。
         # 這正是本 repo 反覆判過的「掃描器把說明文字當程式碼」——只是這次它抓到的是我。
         body = "\n".join(ln for ln in body.splitlines() if not ln.lstrip().startswith("#"))
-        self.assertLess(body.index("quota_gate("), body.index("transcript_path"),
+        # 🔴 DEF-200-202：`transcript_path` 這個字面此前只出現在五道早退那一段，改當
+        # 錨點用；接電模型分軌軸之後，`quota_gate()` 呼叫**之前**多了一次合法的
+        # `payload.get("transcript_path")`（取 model 用，不是早退），錨點改成第一道
+        # 早退本身的字面（`if transcript is None:`），不再受這次合法新讀取影響。
+        self.assertLess(body.index("quota_gate("), body.index("if transcript is None:"),
                         "quota_gate 被排到 context 早退之後了 ⇒ 低 context 時是死碼")
         # `may_block(` 刻意不在這一組：它住在 `block_verdict()` 裡、根本不在 `main()` 的
         # 射程內，硬塞進來只會讓判準因為「找不到子字串」而 ValueError（＝一條分母為 0 的鎖）。
@@ -5270,9 +5293,9 @@ class QuotaDecisionEntryIsSingleTest(unittest.TestCase):
         calls = []
         real = quota_policy.decide
 
-        def spy(state, now, policy):
+        def spy(state, now, policy, *args, **kwargs):
             calls.append(state)
-            return real(state, now, policy)
+            return real(state, now, policy, *args, **kwargs)
 
         self._swap(quota_policy, "decide", spy)
         _gate(self._payload())
@@ -5836,6 +5859,12 @@ class RateLimitIsAFloorNotAnUnknownTest(unittest.TestCase):
         self._fake_429(meter, {})
         self.assertIsNone(meter.measure_detail(4, **creds)[0]["axes"][0]["resets_at"],
                           "標頭缺席時憑空生出一個時刻＝在猜 reset（憲法禁止）")
+        # 🔴 DEF-200-196：`Retry-After: 0`（或負值）不可信，此前落入
+        # `now + timedelta(seconds=secs)` ⇒ `resets_at≈measured_at`，讀起來像「立刻重
+        # 置」——同樣是在猜，只是猜出來的時刻恰好貼著現在。
+        self._fake_429(meter, {"Retry-After": "0"})
+        self.assertIsNone(meter.measure_detail(4, **creds)[0]["axes"][0]["resets_at"],
+                          "Retry-After:0 不得被讀成「現在」——那不是伺服器給的觀測值")
 
 
 class ThrottleBandSaysHowLongItLastsTest(unittest.TestCase):
@@ -6947,6 +6976,42 @@ class QuotaGateIsWiredToTheBurnPathTest(unittest.TestCase):
                     and getattr(c.func, "attr", "") == "quota_gate")
         self.assertIn("event", [kw.arg for kw in call.keywords],
                       "沒把事件名傳下去 ⇒ 射程與 D3 的事件名兩者同時失效")
+
+    def test_the_model_scoped_axis_only_brakes_when_the_transcript_names_it(self) -> None:
+        """DEF-200-202：`weekly_scoped`（Fable）軸此前 `active_model` 缺席 ⇒ 恆被排除在
+        cap 聚合外，即使它自己已經爬到 halt 水位也零煞車力。逐字稿真的用 `claude-fable-5`
+        時，`main()` 現在會把正規化後的家族字接進 `quota_gate()`，讓這軸真的能 halt；
+        逐字稿用別的模型時，它依舊被正確排除（R98 的「不節流沒在用的模型」不能被本輪誤傷）。
+        """
+        wide = (("session", 5.0, 3600.0),)  # 寬鬆軸：不命中時應該是它決定 cap，不是 halt
+        cache = _quota_cache(self.tmp, None, extra=(*wide, ("weekly_scoped", 99.0, 60.0)),
+                             scope_models={"weekly_scoped": "Fable"})
+        cache.replace(qg.quota_cache_path())
+        sink = open(os.devnull, "w", encoding="utf-8")
+        self.addCleanup(sink.close)
+        old_err, sys.stderr = sys.stderr, sink
+        self.addCleanup(setattr, sys, "stderr", old_err)
+        for name, value in (("write_resume_plan", lambda t: str(self.tmp / "p.md")),
+                            ("arm_when_earned", lambda t: None),
+                            ("arm_quota_wakeup", lambda t, p: {"armed": True})):
+            old = getattr(guard, name)
+            setattr(guard, name, value)
+            self.addCleanup(setattr, guard, name, old)
+        # 對照組：`active_model` 缺席（紅端本身）——weekly_scoped 撞 halt 也不擋。
+        self.assertEqual(_gate(self._post("Read"), event="PostToolUse"), 0,
+                         "紅端前提不成立：不帶 active_model 時本該零煞車力")
+        other_ts = _write_jsonl(self.tmp / "other.jsonl", [36_000], model="claude-sonnet-5")
+        old_read = guard.read_payload
+        guard.read_payload = lambda: {"hook_event_name": "PostToolUse", "tool_name": "Read",
+                                      "transcript_path": str(other_ts)}
+        self.addCleanup(setattr, guard, "read_payload", old_read)
+        self.assertEqual(guard.main(), 0,
+                         "模型不同時 Fable 軸仍被誤煞車 ⇒ R98 的既有排除被本輪弄壞了")
+        fable_ts = _write_jsonl(self.tmp / "fable.jsonl", [36_000], model="claude-fable-5")
+        guard.read_payload = lambda: {"hook_event_name": "PostToolUse", "tool_name": "Read",
+                                      "transcript_path": str(fable_ts)}
+        self.assertEqual(guard.main(), 2,
+                         "逐字稿真的用 Fable、該軸也真的撞 halt，卻沒被擋 ⇒ 接線沒生效")
 
     def test_post_tool_use_at_halt_writes_a_plan_and_says_so(self) -> None:
         """紅端這裡是 rc=0／stderr 0B／零任務書——那正是訴求 6c 至今沒生效的那一格。"""

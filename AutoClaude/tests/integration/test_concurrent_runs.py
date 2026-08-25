@@ -30,6 +30,8 @@ from __future__ import annotations
 
 import threading
 import uuid
+from pathlib import Path
+from unittest import mock
 
 import pytest
 
@@ -238,3 +240,62 @@ def test_isolation_survives_a_fresh_repository_over_the_same_directory(repo, fiv
     )
     assert {cp.step_idx for cp in survivors.values()} == set(range(_RUNS)) - {_ABORTED}
     assert {cp.goal_task_id for cp in survivors.values()} == {goal_task_id}
+
+
+def test_two_concurrent_writers_to_the_same_playbook_id_do_not_share_a_tmp_file(repo):
+    """DEF-200-043：`.tmp` 命名此前只由 `playbook_id` 推導，同一個 `playbook_id`
+    的兩個行程／執行緒併發 `save_checkpoint` 會共用同一份 tmp 檔——其中一邊的
+    `open("w")` truncate 掉另一邊尚未寫完的內容，先完成 `replace()` 的那邊會讓
+    tmp 檔案消失，另一邊隨後的 `replace()` 因此 `FileNotFoundError`；更壞的是
+    量測到「回報失敗」的那次寫入內容反而可能是最後留在磁碟上的那份（R103 收尾  round-label-ok
+    重現實測：`ok` 回報的是 idx=2，最終落盤卻是拋例外的 idx=1）。
+
+    本測試把兩支 writer 用 `Barrier` 逼到同時在 `open("w")` 之後停留，強迫兩邊
+    的 tmp 檔案生命週期真的重疊，斷言：① 兩次呼叫算出的 tmp 路徑必須不同（修法
+    本體）；② 兩邊都不拋例外；③ 事後無 `.tmp` 殘檔；④ 最終檔案是合法 JSON 且
+    step_idx 落在兩邊寫入值之一（last-write-wins，容許順序不定，但不容許被①
+    的競態污染成第三種值或整檔壞掉）。
+    """
+    playbook_id = "same_pb_concurrent_write"
+    tmp_paths_opened: list[str] = []
+    orig_open = Path.open
+    barrier = threading.Barrier(2)
+
+    def _synced_open(self, *args, **kwargs):
+        f = orig_open(self, *args, **kwargs)
+        if self.suffix == ".tmp":
+            tmp_paths_opened.append(str(self))
+            barrier.wait(timeout=10)  # 逼兩邊的 tmp 檔案生命週期真的重疊
+        return f
+
+    results: list[tuple[str, int]] = []
+
+    def _writer(idx: int) -> None:
+        try:
+            repo.save_checkpoint(playbook_id, _checkpoint(idx, run_id=str(idx),
+                                                            goal_task_id="gt"))
+            results.append(("ok", idx))
+        except BaseException as exc:  # noqa: BLE001 — 競態失敗也要能被斷言到
+            results.append(("err", idx))
+            raise AssertionError(f"idx={idx} 因競態拋出例外：{exc!r}") from exc
+
+    with mock.patch.object(Path, "open", _synced_open):
+        threads = [threading.Thread(target=_writer, args=(1,)),
+                   threading.Thread(target=_writer, args=(2,))]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=30)
+        assert not any(t.is_alive() for t in threads), "有 writer thread 未在 30s 內結束"
+
+    assert len(tmp_paths_opened) == 2, f"應各自開一次 tmp 檔：{tmp_paths_opened}"
+    assert tmp_paths_opened[0] != tmp_paths_opened[1], (
+        "DEF-200-043 回歸：兩個併發呼叫算出**同一個** tmp 檔名——"
+        f"{tmp_paths_opened}"
+    )
+    assert {r[0] for r in results} == {"ok"}, f"併發寫入不應拋例外：{results}"
+    assert _residue(repo) == [], "併發寫入同一 playbook_id 留下 .tmp 殘檔"
+
+    final = repo.load_latest_by_playbook(playbook_id)
+    assert final is not None, "同一 playbook_id 併發寫入後主檔消失"
+    assert final.step_idx in (1, 2), f"落盤內容被競態污染：step_idx={final.step_idx}"

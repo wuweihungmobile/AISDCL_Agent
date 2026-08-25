@@ -14,7 +14,10 @@
 # 只改一側的人會讓本 adapter 讀不到檔，而它對「檔不在」的反應是回 None（＝量不到），
 # 且那個 None 被它自己的測試釘成正確行為 ⇒ 失效全綠、完全靜默。
 # 現查另一個家：`grep -n "CACHE_NAME" tools/lib/quota_meter.py`
-#   路徑    Path(tempfile.gettempdir()) / "autosdd_quota.json"
+#   路徑    🔴 DEF-200-012：不再是 `tempfile.gettempdir()`——macOS 上每個 launchd 服務
+#           有各自獨立的 `$TMPDIR`，會讓 hook 與哨兵各自寫讀不同檔而彼此看不見。改走
+#           `(os.environ.get("AUTOSDD_QUOTA_CACHE_DIR") 或 Path.home()) /
+#           "autosdd_quota.json"`（見 `__init__` 本行）。
 #   schema  必須等於 "autosdd.quota/2"
 #   axes[]  每一格＝一條計費線：{kind, pct(0..100 float，**不是** 0..1), resets_at, group…}
 #   resets_at  ISO 8601 自帶 offset；缺席（該線沒有 reset 可以等）時為 null
@@ -30,7 +33,7 @@ from __future__ import annotations
 
 import json
 import logging
-import tempfile
+import os
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -49,6 +52,11 @@ from ...core.ports.quota_meter import (
 _LOG = logging.getLogger(__name__)
 
 SCHEMA = "autosdd.quota/2"
+#: 🔴 DEF-200-012：字面**兩個家**（見檔頭），必須與根層 `quota_meter.CACHE_DIR_ENV`
+#: 逐字相同——`TestM8bCacheHomeStaysInSync` 只比目錄運算式，不比這個常數名本身，
+#: 但兩側環境變數名不同會讓「覆寫快取目錄」這件事在兩側各自指向不同的家，同型於
+#: 檔名／schema 漂開的那個病。
+CACHE_DIR_ENV = "AUTOSDD_QUOTA_CACHE_DIR"
 # R86 配速契約的檔名。與 `autosdd_quota.json` **同目錄、不同檔**，刻意不擠進同一份：
 # 那份是「原始量測」（schema /2，有既有消費者與既有的兩處字面同步鎖），這份是「已算好的
 # 決策」。升 /3 塞進去要改根層量測器的 schema 字面 ⇒ 會與別包的工作面相撞，而兩份檔的
@@ -79,7 +87,9 @@ class FileQuotaMeterAdapter:
         # 搬家或改名必須與根層 `tools/lib/quota_meter.py::CACHE_NAME` **同一次 commit** 一起動，
         # 否則 `tools/tests/test_quota_policy.py::TestM8bCacheHomeStaysInSync` 會紅——
         # 那道鎖比的是本行的**目錄運算式**，不是檔名字串，所以改本行的寫法前先讀它。
-        self._path = Path(path) if path else Path(tempfile.gettempdir()) / "autosdd_quota.json"
+        override = os.environ.get(CACHE_DIR_ENV)
+        self._path = Path(path) if path else (
+            Path(override) if override else Path.home()) / "autosdd_quota.json"
         self._ttl = float(ttl_seconds)
         # 配速契約住同一個目錄 ⇒ 測試把 `path` 指到 tmp_path 時兩份契約會一起搬過去，
         # 不必再開第二個參數（少一個可以只設一半的旋鈕）。

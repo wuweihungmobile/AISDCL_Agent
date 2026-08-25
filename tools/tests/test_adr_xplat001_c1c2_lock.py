@@ -692,14 +692,14 @@ _GUARD_LINE_STALE_SLACK = 0.02
 #: 寫出淨額與理由——讓方向在 diff 上一望即知。
 #: 🔴 本表含**本檔自己**，所以動本檔就會動到本表 ⇒ 改完必須重跑一次並用實測值收斂。
 _FROZEN_GUARD_LINES: dict[str, int] = {
-    "_platform_helpers.py": 446,
+    "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 6190,
+    "test_adr_xplat001_c1c2_lock.py": 6231,
     "test_archive_defect_log.py": 4008,
     "test_bash32_compat.py": 970,
     "test_bash_probe_spec_contract.py": 983,
-    "test_block_destructive_git_r83.py": 2187,
+    "test_block_destructive_git_r83.py": 2195,
     "test_bootstrap_core.py": 439,
     "test_bootstrap_ps1.py": 160,
     "test_check_defect_log_crossref.py": 3722,
@@ -710,8 +710,8 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_check_wrapper_thinness.py": 1234,
     "test_claim_provenance_r86.py": 618,
     "test_component_sanitizer_shared_layer_lock.py": 293,
-    "test_context_budget_guard.py": 8092,
-    "test_defect_id_reference_integrity.py": 261,
+    "test_context_budget_guard.py": 8157,
+    "test_defect_id_reference_integrity.py": 274,
     "test_dev_start.py": 6910,
     "test_dev_start_ps1_lastexitcode.py": 548,
     "test_doc_env_prefix_platform_parity_r60.py": 340,
@@ -723,7 +723,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_git_hooks_install_common.py": 393,
     "test_guard_line_taxonomy_r99.py": 148,
     "test_install_windows_nightly.py": 1479,
-    "test_mac_endurance_r83.py": 1780,
+    "test_mac_endurance_r83.py": 1789,
     "test_mac_readiness_r82.py": 621,
     "test_macos_smoke_skip_honesty.py": 225,
     "test_maturity_criteria_r79.py": 431,
@@ -732,7 +732,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_no_invalid_escape_sequences.py": 329,
     "test_ntfs_trailing_space_device_name.py": 770,
     "test_onboarding_parity_interlock.py": 233,
-    "test_platform_neutral_paths.py": 5724,
+    "test_platform_neutral_paths.py": 5727,
     "test_platform_utils_dedup.py": 1123,
     "test_pre_commit_dispatcher_sigpipe.py": 964,
     "test_pre_push_dispatcher.py": 686,
@@ -1129,6 +1129,29 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "搬遷至 CrossPlatform_R104_Scan_Findings.md，537→446；本檔自身新增兩列（本列＋"
      "DEF-200-223 凍結前綴延伸列）+11。三者相抵：62-91+11=-18，streak 因淨額 ≤0 歸零。"
      "逐檔清單見 CrossPlatform_R104_Scan_Findings.md。"),
+    ("R105", 88556, 88556, 0,
+     "[淨零] 四檔新增 DEF-200-158/012/196/015/173 回歸測試 +34（block_destructive_git_r83"
+     " +8／context_budget_guard +16／defect_id_reference_integrity +1／"
+     "mac_endurance_r83 +9）；strip_ps_comments 已知不涵蓋沿革搬遷至 "
+     "CrossPlatform_R105_Scan_Findings.md，446→403（-43）；本檔自身新增本列＋"
+     "DEF-200-224 到期義務兌現 +9，三者相抵：34-43+9=0。"),
+    ("R105", 88556, 88605, 49,
+     "[非淨減法輪][同輪追加] 四方複審 REJECT 修復（DEF-200-202）：quota_gate.py 補齊 "
+     "active_model 接線＋新增回歸測試，逐項見 CrossPlatform_R105_FourParty_Fix.md。"),
+    ("R105", 88605, 88617, 12,
+     "[非淨減法輪][同輪追加] 護欄層重釘自身編修：上一列新增本身＋本稽核列＋凍結前綴"
+     "延伸（`_REPIN_LOG_FROZEN_PREFIX_LEN` 63→65，一次涵蓋上一列與本列）＋"
+     "`_FROZEN_PREFIX_REWRITE_LEDGER` 追加一列，本檔自身逐檔漂移，同 R95~R105 既有"
+     "體例。逐項見 CrossPlatform_R105_FourParty_Fix.md。"),
+    ("R105", 88617, 88645, 28,
+     "[非淨減法輪][同輪追加] 四方複審修復續：`_platform_helpers.py` 的 `strip_ps_comments`"
+     " docstring 折長行（403→407，+4）＋`test_defect_id_reference_integrity.py`"
+     " DEF-200-015 姊妹帳本（`AutoSDD_External_Blocked_Log.md`）擴面（262→274，+12）＋"
+     "本檔自身編修 +12。逐項見 CrossPlatform_R105_FourParty_Fix.md。"),
+    ("R105", 88645, 88656, 11,
+     "[非淨減法輪][同輪追加] 帳本狀態欄回填 fixed@R105 觸發 test_platform_neutral_paths.py"
+     " 的 _DIRENT_UNGUARDED_DEBT（41→42，新增回歸測試多用一次既有 .replace() 慣用句式）＋"
+     "本檔自身編修 +8。逐項見 CrossPlatform_R105_FourParty_Fix.md。"),
 )
 
 
@@ -1166,6 +1189,8 @@ _REPIN_NET_CAP_SCHEDULE: tuple[tuple[int, int], ...] = (
                   # 收尾單人窗口重釘落在本輪），cap 降到 `_REPIN_NET_CAP_DUE_TARGET`
                   # 本身（同 R99／R101 判例：兌現值可以恰好貼齊到期目標）。同輪就地 round-label-ok
                   # 重新武裝下一段：步伐 40 < 前一段的 50，續守「步伐刻意變小」。
+    (105, 660),   # 到期輪兌現（DEF-200-224）：cap 降到 `_REPIN_NET_CAP_DUE_TARGET` round-label-ok
+                  # 本身。同輪重新武裝下一段：步伐 30 < 前一段的 40，續守「步伐變小」。
 )
 #: 生效點＝首列輪號、現行上限＝末列上限，**皆由表導出不另立常數**（R73 判例：一份知識一個家）。
 _REPIN_ROUND_CAP_SINCE = _REPIN_NET_CAP_SCHEDULE[0][0]
@@ -1277,8 +1302,10 @@ def net_cap_schedule_problems(
 #: DEF-200-221 兌現：`_REPIN_NET_CAP_DUE_ROUND=103` 本輪到期，cap 降到目標本身 round-label-ok
 #: （700，見 `_REPIN_NET_CAP_SCHEDULE` 的 `(103, 700)` 列）。同輪就地重新武裝下一段：
 #: 步伐 40 < 前一段的 50，續守「步伐刻意變小」。
-_REPIN_NET_CAP_DUE_ROUND = 105
-_REPIN_NET_CAP_DUE_TARGET = 660
+#: DEF-200-224 兌現：cap 降到目標本身（660，見 `(105, 660)` 列）。同輪重新武裝下一段： round-label-ok
+#: 步伐 30 < 前一段的 40，續守「步伐刻意變小」。
+_REPIN_NET_CAP_DUE_ROUND = 107
+_REPIN_NET_CAP_DUE_TARGET = 630
 
 #: R85：款(11)／ADR-XPLAT-002 §8.1 item 15「必須出現一次淨額 ≤ 0」的到期輪，搬成具名常數
 #: 理由同上（義務要能被看見、要有到期時點；`DEF-101-757`）。只准往前挪（更早到期＝更嚴），
@@ -1338,10 +1365,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 62
+_REPIN_LOG_FROZEN_PREFIX_LEN = 67
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "967b8b322da409990566f526b874c8aca2a3a68648ccfc617c326531660708b8")
+    "a64463e662c1a8bbc43ceadb36b9dc3188c495f7132b303e1c7be0a28181f5e8")
 
 
 def repin_log_history_digest(
@@ -1403,7 +1430,21 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # DEF-200-223：R104 PRD §4.2.5／§4.2.1 BURSTING/EWMA 落地，同體例「追加後立即  round-label-ok
     # 自我凍結」——本輪淨額 -18：測試 +62 與搬遷散文 -91 相抵後，本檔自身兩列
     # （稽核列＋本凍結前綴延伸列）+11，prefix_len 61→62 涵蓋兩列本身。
-    ("R104", "b698a52087af", "967b8b322da4", "DEF-200-223"),)
+    ("R104", "b698a52087af", "967b8b322da4", "DEF-200-223"),
+    # DEF-200-224：R105 淨額 34-43+9=0，prefix_len 62→63 涵蓋本列本身，逐項見 _GUARD_LINES_REPIN_LOG 同輪列。round-label-ok
+    ("R105", "967b8b322da4", "cae90354814a", "DEF-200-224"),
+    # DEF-200-202：四方複審 REJECT 修復（quota_gate.py 補 active_model 接線＋  round-label-ok
+    # 回歸測試），同體例「追加後立即自我凍結」——本輪追加兩列（功能淨額 +49 ＋
+    # 本檔自身編修 +12），prefix_len 63→65 一次涵蓋兩列本身。
+    ("R105", "cae90354814a", "763624f17dde", "DEF-200-202"),
+    # DEF-200-202：四方複審修復續（`_platform_helpers.py` 折長行＋  round-label-ok
+    # `test_defect_id_reference_integrity.py` DEF-200-015 姊妹帳本擴面），同體例
+    # 「追加後立即自我凍結」——本輪追加一列，prefix_len 65→66 涵蓋本列本身。
+    ("R105", "763624f17dde", "a520bdcef8b7", "DEF-200-202"),
+    # DEF-200-202：帳本狀態欄回填 fixed@R105 觸發 dirent-primitive 債表 round-label-ok
+    # 微幅上升，同體例「追加後立即自我凍結」——本輪追加一列，prefix_len 66→67
+    # 涵蓋本列本身。
+    ("R105", "a520bdcef8b7", "a64463e662c1", "DEF-200-202"),)
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。
 #: 往後指紋每變一次，都要能從本值出發、經 `_FROZEN_PREFIX_REWRITE_LEDGER` 逐列鏈接

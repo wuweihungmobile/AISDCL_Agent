@@ -41,9 +41,13 @@ except ImportError:  # pragma: no cover - 另一種 sys.path 形態，兩者擇�
 #: `archive_67`。追加 45：18 筆隨 `archive_67` 搬離主檔過期、`DEF-200-190` 因狀態欄
 #: 追加複驗證據新增列入（62−18+1=45，`expiring_oversize_waivers()` 實測值）。
 OVERSIZE_ROW_CEILING_HISTORY: tuple[int, ...] = (105, 101, 98, 85, 83, 66, 63, 62, 45)
+#: DEF-200-202 四方複審修復窗口：`archive_defect_log.py --repin-oversize` 實測
+#: 40889 → 40884（帳本本輪措辭精簡使既有超標列略瘦，非本輪新增列所致）。
+#: 追加 40759：帳本 8 筆缺陷狀態欄回填 fixed@R105（四方複審 REJECT 修復）改用  round-label-ok
+#: 「見具名證據檔」極簡指標句，既有超標列（含 DEF-101-402）淨瘦身。
 OVERSIZE_ROW_EXCESS_CEILING_HISTORY: tuple[int, ...] = (
     162282, 147944, 147455, 146210, 143303, 140957, 138938, 138936, 123867,
-    121758, 82896, 77186, 75047, 69122, 48864, 40889,
+    121758, 82896, 77186, 75047, 69122, 48864, 40889, 40884, 40759,
 )
 # 🔴 誠實劃界：本序列只收錄 `check_defect_log_crossref.py` 註解**自己留下證據**的那幾次
 # （34→28 見該檔 R80 包 C 段、17 見「第六次轉動」段、6 為 R82 實測）。第三～第五次轉動的
@@ -81,7 +85,7 @@ _SEALED_HISTORY_PREFIXES: dict[str, tuple[int, ...]] = {
     "OVERSIZE_ROW_CEILING": (105, 101, 98, 85, 83, 66, 63, 62),
     "OVERSIZE_ROW_EXCESS_CEILING": (
         162282, 147944, 147455, 146210, 143303, 140957, 138938, 138936, 123867,
-    121758, 82896, 77186, 75047, 69122, 48864,
+    121758, 82896, 77186, 75047, 69122, 48864, 40889, 40884,
     ),
     # 帳本減半波：史料尾端追加 0，故把 2 一併封入（同上，只在尾端延長、零改寫）。
     "_UNPINNED_HANDOVER_CEILING": (34, 28, 17, 6, 5, 4, 2),
@@ -127,13 +131,18 @@ def seal_table_digest(seals: Mapping[str, tuple[int, ...]]) -> str:
 #: 🔴 輪號不寫進本段散文，理由同上；錨＝磁碟上查得到的 `archive_67`。重釘 **28 → 30**：
 #: `OVERSIZE_ROW_CEILING`／`OVERSIZE_ROW_EXCESS_CEILING` 兩條封印各延長一格
 #: （8+15+7=30），當回合實測值直接填入。
-_SEAL_TOTAL_MIN_LEN = 30
+#: 🔴 DEF-200-202 四方複審修復窗口重釘 **30 → 31**：`OVERSIZE_ROW_EXCESS_CEILING` 封印
+#: 延長一格納入 40889（8+16+7=31），當回合實測值直接填入。
+#: 🔴 同窗口帳本狀態欄回填續（DEF-101-402 瘦身）重釘 **31 → 32**：`OVERSIZE_ROW_
+#: EXCESS_CEILING` 封印再延長一格納入 40884（8+17+7=32），當回合實測值直接填入。
+_SEAL_TOTAL_MIN_LEN = 32
 
 #: 封印表的內容摘要（`seal_table_digest(_SEALED_HISTORY_PREFIXES)` 的當回合實測值）。
 #: 追加新值到某條封印是合法動作，但必須在**同一次變更內**把上面那個長度與這個摘要一起
 #: 重釘——不重釘即紅，故「改封印」在結構上不可能是無聲的。
 #: 🔴 帳本收斂輪（archive_67）重釘（封印延長導致摘要改變，當回合 `seal_table_digest()` 實測值）。
-_SEAL_TABLE_SHA256 = "07d8f299cce96025"
+#: 🔴 DEF-200-202 四方複審修復窗口再重釘（同上理由，當回合 `seal_table_digest()` 實測值）。
+_SEAL_TABLE_SHA256 = "6f23a48fdcba3be4"
 
 
 def seal_table_problems(

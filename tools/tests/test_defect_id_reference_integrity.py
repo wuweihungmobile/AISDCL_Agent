@@ -13,7 +13,8 @@ WHY（為何非得有這道鎖）：
   改錯位數、或帳本歸檔時搬檔搬掉，追溯鏈就靜默斷掉且沒有任何訊號。
 
 🔴 判準邊界（誠實劃界——這道鎖能抓什麼、抓不到什麼）：
-  ✅ 能抓：引用的 `DEF-101-NNN` 在帳本家族（主檔 ＋ 全部 `*_archive_NN.md`）裡
+  ✅ 能抓：引用的 `DEF-101-NNN` 在帳本家族（主檔 ＋ 全部 `*_archive_NN.md` ＋
+     姊妹帳本 `AutoSDD_External_Blocked_Log.md`，見 DEF-200-015 四方複審續）裡
      **找不到對應列**。判準＝該 ID 出現在某檔某列的**第一欄**（表格主鍵位置），
      即「有一列以它為主鍵」，而不是隨便被別列的內文提到。
   ❌ 抓不到：引用的號**存在但內容不對**（＝R60 那 21 處的實際形態）。判斷「這段
@@ -58,12 +59,17 @@ _REPO_ROOT = _TESTS_DIR.parents[1]
 _LEDGER_DIR = _REPO_ROOT / "docs" / "06_quality"
 _LEDGER_GLOB = "AutoSDD_Defect_Log*.md"
 _LEDGER_PREFIX = "docs/06_quality/AutoSDD_Defect_Log"
+# 🔴 DEF-200-015 四方複審續：`AutoSDD_External_Blocked_Log.md` 是主帳本以外**另一份
+# 真的以 DEF-ID 為主鍵**的姊妹帳本（拆自主帳本、專記外部條件阻塞項），此前不在
+# `_LEDGER_GLOB` 掃描面內 ⇒ 拆過去的號（如 DEF-200-185／186）對本鎖結構上必為懸空。
+_EXTERNAL_LEDGER_REL = "docs/06_quality/AutoSDD_External_Blocked_Log.md"
 
 # 帳本「某一列以此 ID 為主鍵」＝該 ID 出現在 markdown 表格第一欄。
 _LEDGER_ROW_RE = re.compile(r"^\s*\|\s*(DEF-\d+-\d+)\s*\|")
 
-# 引用形態。尾碼 lookahead 排除家族占位寫法（見 docstring ⚪ 項）。
-_REF_RE = re.compile(r"DEF-101-\d+(?![0-9A-Za-z])")
+# 引用形態。DEF-200-015：101 家族滿號後改配的 200 家族原本零覆蓋，一併納管。
+# 尾碼 lookahead 排除家族占位寫法（見 docstring ⚪ 項）。
+_REF_RE = re.compile(r"DEF-(?:101|200)-\d+(?![0-9A-Za-z])")
 _PLACEHOLDER_RE = re.compile(r"DEF-101-\d+[A-Za-z]")
 
 # 反空轉下限（保守留裕度；只在「掃描面崩塌」時說話，不是精確計數釘選）。
@@ -81,9 +87,15 @@ def _syn(number: str) -> str:
 
 
 def ledger_primary_ids(ledger_dir: Path = _LEDGER_DIR) -> set[str]:
-    """帳本家族（主檔＋全部 archive）中「以該 ID 為主鍵的列」所定義的 ID 全集。"""
+    """帳本家族（主檔＋全部 archive＋外部阻塞姊妹帳本）中「以該 ID 為主鍵的列」
+
+    所定義的 ID 全集。"""
     ids: set[str] = set()
-    for path in sorted(ledger_dir.glob(_LEDGER_GLOB)):
+    paths = sorted(ledger_dir.glob(_LEDGER_GLOB))
+    external = ledger_dir / Path(_EXTERNAL_LEDGER_REL).name
+    if external.is_file():
+        paths.append(external)
+    for path in paths:
         for line in path.read_text(encoding="utf-8-sig").splitlines():
             m = _LEDGER_ROW_RE.match(line)
             if m:
@@ -112,7 +124,7 @@ def parse_grep_output(text: str) -> list[tuple[str, str, str]]:
 def _git_grep(repo_root: Path) -> str:
     """跑 `git grep`；rc=0（有命中）與 rc=1（無命中）皆正常，其餘 fail-loud。"""
     proc = subprocess.run(
-        ["git", "grep", "-I", "-n", "--untracked", "-E", r"DEF-101-[0-9]+"],
+        ["git", "grep", "-I", "-n", "--untracked", "-E", r"DEF-(101|200)-[0-9]+"],
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -129,7 +141,8 @@ def _git_grep(repo_root: Path) -> str:
 
 def is_ledger_path(path: str) -> bool:
     """該路徑是否屬帳本家族（ID 的定義處，不計為引用）。"""
-    return path.replace("\\", "/").startswith(_LEDGER_PREFIX)
+    posix = path.replace("\\", "/")
+    return posix.startswith(_LEDGER_PREFIX) or posix == _EXTERNAL_LEDGER_REL
 
 
 def scan_references(repo_root: Path = _REPO_ROOT) -> tuple[list[tuple[str, str, str]], int]:

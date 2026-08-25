@@ -61,7 +61,6 @@ import json
 import os
 import subprocess
 import sys
-import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -157,6 +156,10 @@ REASON_RATE_LIMITED = "http-429-floor"
 #: ⇒ 失效全綠、完全靜默。現查另一個家：`grep -rn "autosdd_quota.json" AutoClaude`
 CACHE_NAME = "autosdd_quota.json"
 
+#: 🔴 DEF-200-012：快取目錄的逃生口環境變數。CI／沙箱測試指到自己的暫存目錄；人設得到、
+#: 模型改不到自己那一份（同 `endurance_env.TRACE_DIR_ENV` 的既有先例，見 `cache_path()`）。
+CACHE_DIR_ENV = "AUTOSDD_QUOTA_CACHE_DIR"
+
 #: 內部唯一表示：**0..100 的 float**。每個通道在自己的入口寫死該通道的單位。
 #: 🔴 這是本包唯一能抓到「差 100 倍」的地方：`0.3` 拿去比 `80` 永遠不觸發（閘門恆綠）、
 #: `30.0` 拿去比 `0.8` 永遠觸發（閘門恆紅），兩個方向都在 rc=0 的外觀下失效。
@@ -181,10 +184,21 @@ SCHEMA = "autosdd.quota/2"
 
 
 def cache_path() -> Path:
-    # `tempfile.gettempdir()` 而不是 `$env:TEMP`：後者在 macOS/Linux 的 PS Core 上
-    # **不存在**，`Join-Path $env:TEMP …` 會直接拋 null 綁定例外（鐵律三，本 repo 已有
-    # 專屬判準 `TestPowerShellPlatformSensitiveSites`）。
-    return Path(tempfile.gettempdir()) / CACHE_NAME
+    # 🔴 DEF-200-012：此前走 `tempfile.gettempdir()`，而 macOS 上**每個 launchd 服務有
+    # 各自獨立的 `$TMPDIR`**（per-session 派生值）⇒ 互動 session 的 hook 與 launchd 哨兵
+    # 各自寫讀不同的暫存目錄、彼此看不見對方剛量到的水位——靜默不節流（立案：兩個不同
+    # `TMPDIR` 下 `tempfile.gettempdir()` 各自落在不同目錄，實測可重現）。改走與
+    # `endurance_env.trace_dir()` 同型的「固定使用者目錄＋逃生口環境變數」：家目錄不受
+    # `TMPDIR` 影響，同一帳號的所有行程（互動 session、launchd 排程）共用同一份。
+    # 🔴 刻意**不**多加一層子目錄（如 `.autosdd/cache/`）：本 repo 既有測試母體
+    # （`tools/tests/test_context_budget_guard.py` 的 `_isolated_env()`／`_quota_cache()`）
+    # 早就把「子行程的家目錄」當成隔離沙箱使用、且直接把合成快取寫在該目錄**根**下——
+    # 那是沿用舊版 `tempfile.gettempdir()` 也是平鋪一層的既有慣例。多加子目錄會讓一大片
+    # 既有 e2e 對不上（fixture 寫在 `tmp/CACHE_NAME`，取數器卻讀 `tmp/.autosdd/cache/
+    # CACHE_NAME`），而那不是本缺陷的射程。目錄若不存在，`write_cache()` 會在寫入前建立；
+    # 建不出來（唯讀環境）時走既有容忍（回 `False`，不升級為失敗）。
+    override = os.environ.get(CACHE_DIR_ENV)
+    return (Path(override) if override else Path.home()) / CACHE_NAME
 
 
 def _token_of(blob: object) -> str:
@@ -672,9 +686,17 @@ def retry_after_at(headers: object, now: datetime) -> str | None:
         # 純數字，而 epoch 一定 > 一年的秒數 ⇒ 用量級分辨，不用標頭名字猜。
         if raw.isdigit():
             secs = int(raw)
-            when = (datetime.fromtimestamp(secs, UTC).astimezone()
-                    if secs > 10 ** 9 else now + timedelta(seconds=secs))
-            return when.isoformat(timespec="seconds")
+            if secs > 10 ** 9:
+                return datetime.fromtimestamp(secs, UTC).astimezone().isoformat(
+                    timespec="seconds")
+            # 🔴 DEF-200-196：`secs<=0`（例如 `Retry-After: 0`）此前落入
+            # `now + timedelta(seconds=secs)` ⇒ `resets_at≈measured_at`，語意錯誤——
+            # 這不代表「立刻重置」，是伺服器給了一個不可信的非正值。試下一個候選標頭；
+            # 全部候選都不可信時，迴圈外的 `return None` 會接手（呼叫端既有紀律：
+            # 沒值 ⇒ `escalate`，不得假裝立刻重置）。
+            if secs <= 0:
+                continue
+            return (now + timedelta(seconds=secs)).isoformat(timespec="seconds")
         try:
             return datetime.fromisoformat(raw.replace("Z", "+00:00")).isoformat(
                 timespec="seconds")
@@ -806,6 +828,9 @@ def write_cache(reading: dict, path: Path | None = None) -> bool:
     payload = dict(reading)
     payload["schema_new_keys"] = drift_against(read_cache(target), reading)
     try:
+        # 🔴 DEF-200-012：`cache_path()` 改走固定使用者目錄後，第一次寫入時該目錄可能
+        # 還不存在（不像 `tempfile.gettempdir()` 保證早已存在）⇒ 必須在寫入前建立。
+        target.parent.mkdir(parents=True, exist_ok=True)
         # `newline="\n"`：本 repo 判過「Python 寫檔不指定 newline，Windows 會寫出 CRLF」。
         target.write_text(json.dumps(payload, ensure_ascii=False, indent=2),
                           encoding="utf-8", newline="\n")

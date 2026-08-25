@@ -994,10 +994,18 @@ def main() -> int:
         # 那條路，而 PostToolUse 的 matcher（`Read|Task|Grep|Glob|…|Bash|PowerShell`）
         # **本來就覆蓋**那條路 ⇒ `settings.json` 一個字都不用改，缺的只有這裡的條件與參數。
         # 射程的第二半在 `quota_gate()` 內（PostToolUse 不記派發帳、不擋節流帶），兩邊要一起讀。
+        raw_path = payload.get("transcript_path")
+        transcript = Path(raw_path) if isinstance(raw_path, str) and raw_path.strip() else None
+        # 🔴 DEF-200-202：模型分軌軸需要 `active_model` 才進 cap 聚合；提前掃逐字稿讓兩把
+        # 尺共用同一次結果（`model_family()` 正規化到與 `axis.scope_model` casefold 相等
+        # 的家族字，依據見 `quota_gate.quota_gate` 檔頭）。
+        scanned = (scan_transcript(transcript) if measuring and transcript
+                  and transcript.is_file() else None)
+        active_model = model_family(scanned[2]) if scanned and scanned[2] else None
         if measuring and quota_gate is not None and (quota_stop := quota_gate.quota_gate(
                 payload, blocking=BLOCKING_TOOLS, latch_read=announced_latches,
                 latch_write=remember_latch, plan_writer=write_resume_plan,
-                waker=arm_quota_wakeup, event=event)):
+                waker=arm_quota_wakeup, event=event, active_model=active_model or None)):
             # 🔴 R83／Δ13：**接電引入的新缺陷，必須在同一個 commit 處理。** halt 帶在
             # PostToolUse 會**每一次**回 2 ⇒ 本 hook 在這裡提早 return ⇒ 下面那個
             # `arm_when_earned()` 在整個 halt 期間（一直到 reset）一次都不會執行，
@@ -1005,14 +1013,11 @@ def main() -> int:
             # **第一次**觸發時試一次、失敗不重試（見 `quota_gate` 的 D2 重排）⇒ 兩層都沒了。
             # 兩層續航是不同的東西（一次性 reset 喚醒 vs 900s 巡邏），不得因為額度那層
             # 說了話就把 context 那層吃掉。`arm_when_earned` 自身有閂鎖與 fail-open。
-            raw = payload.get("transcript_path")
-            if not blocking and isinstance(raw, str) and Path(raw).is_file():
-                arm_when_earned(Path(raw))
+            if not blocking and transcript is not None and transcript.is_file():
+                arm_when_earned(transcript)
             return quota_stop
-        raw_path = payload.get("transcript_path")
-        if not isinstance(raw_path, str) or not raw_path.strip():
+        if transcript is None:
             return 0  # 量測暫時不可得 ≠ 輸入壞掉，見模組 docstring 的行為契約
-        transcript = Path(raw_path)
         if not transcript.is_file():
             return 0
         # 🔴 哨兵武裝掛在這裡（不是 SessionStart，理由見 `arm_when_earned` 上方那段），而且
@@ -1022,7 +1027,7 @@ def main() -> int:
         if not blocking:
             arm_when_earned(transcript)
 
-        used, peak, model = scan_transcript(transcript)
+        used, peak, model = scanned if scanned is not None else scan_transcript(transcript)
         if used is None:
             return 0  # 掃不到任何 usage：量不到 ≠ 量到零，不做任何宣稱
         window, source = resolve_window(peak, **window_evidence(model))

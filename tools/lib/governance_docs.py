@@ -290,6 +290,16 @@ _GOVERNANCE_DOCS = (
     # （⇒ 指針稽核），且本檔承載本輪 `guard-total:` 標記（`_GUARD_TOTAL_DOC_GLOBS`
     # 掃描面之一）⇒ 同時是行數棘輪的文件側對帳站點。即刻登記，不等下一輪。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R104_Scan_Findings.md",
+    # tools/tests/ 護欄層行數棘輪維護輪（DEF-200-224）的逐檔清單與搬遷散文全文。資格同
+    # 前幾輪同名檔：`_GUARD_LINES_REPIN_LOG` 的 R105 列指名本檔為逐檔清單的家  round-label-ok
+    # （⇒ 指針稽核），且本檔承載本輪 `guard-total:` 標記（`_GUARD_TOTAL_DOC_GLOBS`
+    # 掃描面之一）⇒ 同時是行數棘輪的文件側對帳站點。即刻登記，不等下一輪。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R105_Scan_Findings.md",
+    # 四方複審 REJECT 修復（DEF-200-202）同輪追加的逐檔清單與 WHY。資格同前幾輪
+    # 同名檔：`_GUARD_LINES_REPIN_LOG` 的 R105 追加列指名本檔為逐檔清單的家  round-label-ok
+    # （⇒ 指針稽核）；本檔不承載 `guard-total:` 標記（避免與上一列同名檔重複被
+    # `_GUARD_TOTAL_DOC_GLOBS` 掃到造成雙重對帳站點）⇒ 只受體積守門管。即刻登記。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R105_FourParty_Fix.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/{CrossPlatform,Quota}_*.md`。這**不是**把具名

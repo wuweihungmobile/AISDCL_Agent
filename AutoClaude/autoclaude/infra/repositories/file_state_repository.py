@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import uuid
 from contextlib import suppress
 from dataclasses import asdict
 from datetime import datetime, timedelta
@@ -112,7 +113,14 @@ class FileStateRepository:
             # 契約（tests/equivalence/test_sdd_checkpoint_equivalence.py）在**記憶體**
             # 這一側也失衡，而那道鎖守的是真的東西。值只住磁碟。
             payload[CHECKSUM_FIELD] = checkpoint_digest(payload)
-            tmp_p = p.with_suffix(".tmp")
+            # DEF-200-043：純用 playbook_id 推導 tmp 檔名時，同一 playbook_id 的兩個
+            # 行程／執行緒併發呼叫本函式會共用同一份 tmp 檔——兩邊的 `open("w")` 互相
+            # truncate 對方尚未寫完的內容，其中一邊的 `replace()` 先把 tmp 檔換名走，
+            # 另一邊隨後的 `replace()` 就會因 tmp 檔已不存在而 FileNotFoundError；更壞
+            # 的是先失敗的那份反而可能是最後留在磁碟上的內容（見 R103 收尾重現實測）。round-label-ok
+            # 加 pid + uuid4 讓每次呼叫的 tmp 檔名互不相同，同一 playbook_id 的併發寫入
+            # 各自佔用獨立檔案，不再共用同一個 tmp 資源。
+            tmp_p = p.with_suffix(f".{os.getpid()}.{uuid.uuid4().hex}.tmp")
             # 舊主檔的內容先讀進記憶體：下一行的 replace 會原子覆蓋掉它，而保留版本
             # 只准在 replace **成功之後**才動（見 _retain_previous 的 docstring）。
             prev: bytes | None = None

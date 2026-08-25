@@ -319,7 +319,11 @@ _SYN_LATER = 101  # round-label-ok：同上
 _SYN_PAST = 75
 _SYN_MSG = f"feat: x\n\n未達成（不塗綠）：Phase 2、B8 額度術語機械化皆留 R{_SYN_FUTURE}。\n"
 _SYN_QUOTE = f"`_GUARD_LINES_REPIN_LOG` 兩列 R{_SYN_FUTURE} 逐字指名"
-_SYN_ID = "DEF-200-999"
+# DEF-200-015：`_REF_RE`（tools/tests/test_defect_id_reference_integrity.py）擴大納管
+# 200 家族後，本行原本寫死的合成 ID 字面會被當成懸空引用抓到——同檔自己的
+# `_syn()` 早就用「執行期組字」避開這個坑（101 家族），這裡比照辦理，連本註解都不
+# 能留完整字面（第一次修法把字面寫進註解裡，被同一道鎖原地抓到，故訂正於此）。
+_SYN_ID = "DEF-200-" + "999"
 
 
 def _self_test() -> int:

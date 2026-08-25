@@ -11,6 +11,12 @@ on:
     paths:
       - "AutoClaude/**"
       - ".github/workflows/autoclaude-ci.yml"
+      # DEF-101-402：AutoClaude/tests/ 下多支測試（含 test_windowsapps_guard_
+      # cross_consistency.py 系列）以 `_monorepo_root()`／`REPO_ROOT` 慣用法消費
+      # 根層 tools/lib/ 治理 SSOT，窄 "AutoClaude/**" 未覆蓋。
+      - "tools/lib/**"
+      - "tools/_stdio_utf8.py"
+      - "tools/check_defect_log_crossref.py"
       # 跨專案 bridge 測試盲區補洞（2026-07-11）：tests/integration/test_sdd_bridge/
       # 實際消費 AISDLC_SDD 凍結版檔案（test_topology_bridge_e2e.py subprocess 跑
       # v0.05 tools/fsm_runtime；test_rollback_compat.py 跑 v0.01/v0.02 state_loader）。
@@ -23,6 +29,12 @@ on:
     paths:
       - "AutoClaude/**"
       - ".github/workflows/autoclaude-ci.yml"
+      # DEF-101-402：AutoClaude/tests/ 下多支測試（含 test_windowsapps_guard_
+      # cross_consistency.py 系列）以 `_monorepo_root()`／`REPO_ROOT` 慣用法消費
+      # 根層 tools/lib/ 治理 SSOT，窄 "AutoClaude/**" 未覆蓋。
+      - "tools/lib/**"
+      - "tools/_stdio_utf8.py"
+      - "tools/check_defect_log_crossref.py"
       # 同 push paths：bridge 測試消費的 AISDLC_SDD 凍結版（v0.01/v0.02/v0.05）
       - "AISDLC_SDD/AISDLC_SDD_v0.01/**"
       - "AISDLC_SDD/AISDLC_SDD_v0.02/**"
