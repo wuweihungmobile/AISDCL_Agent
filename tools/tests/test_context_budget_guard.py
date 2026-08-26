@@ -3105,7 +3105,7 @@ class ConsoleFreeSpawnTest(unittest.TestCase):
                 capture_output=True, encoding="utf-8", errors="replace", timeout=90,
                 check=False, creationflags=guard.NO_WINDOW).stdout
         if "�" not in outs["bare"]:
-            self.skipTest("本機 codepage 已是 UTF-8（或 PS 的算繪不含非 ASCII）⇒ "
+            self.skipTest("[ENV-DISABLED] 本機 codepage 已是 UTF-8（或 PS 的算繪不含非 ASCII）⇒ "
                           "缺陷在這台機器上重現不了；不得把『重現不了』讀成『已修好』")
         self.assertNotIn("�", outs["fixed"],
                          "加了 UTF-8 前置行仍然降解 ⇒ 這個修法對本機無效")

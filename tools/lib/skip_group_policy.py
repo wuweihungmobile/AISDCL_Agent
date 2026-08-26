@@ -389,10 +389,19 @@ _RUNTIME_SKIP_CEILING: dict[str, dict[str, int]] = {
     # 累積在暗處，沒有任何機械物會提前說話。⇒ 判準形狀本身有改善空間（把「總量計數」換成
     # 「test-id 集合」，先例＝R86 把 M6 判準粒度升為 test-id 集合），但那會同時改動 mac 側的
     # 判定、且無法在本平台驗，故本輪只誠實上修並留下這段診斷，不擅自改判準形狀。
+    # 🔴 R100（DEF-200-228）：`env-disabled` 1 → **2**——本輪在
+    # `tools/tests/test_context_budget_guard.py:3108` 新增第二個具名 `[ENV-DISABLED]`
+    # 站點（`ConsoleFreeSpawnTest`：本機 codepage 已是 UTF-8 時的 skip 分支），與既有
+    # `tools/tests/_platform_helpers.py:258`（R81，`create_symlink_or_skip`）同群但條件
+    # 互不相依。🔴 誠實劃界：本輪**沒有**真 Windows CI 跑出新的 census 逐格照填（不像
+    # R100 linux 表那樣）——這裡是**站點盤點式**上修：兩個具名站點各自成立即代表這一群
+    # 至少會有 2，不是從聚合 census 推算。下次 windows-compat-ci 真跑時仍須覆核實測值，
+    # 若兩支同時觸發以外的組合出現（例如只觸發一支），本格會偏保守（上限給多了不會判紅，
+    # 只有反向才會）。
     "tools/tests@win32": {
         SKIP_GROUP_PLATFORM: 41,
         SKIP_GROUP_TOOL_ABSENCE: 0,
-        SKIP_GROUP_ENV_DISABLED: 1,
+        SKIP_GROUP_ENV_DISABLED: 2,
         SKIP_GROUP_STRUCTURAL: 0,
         SKIP_GROUP_DEBT: 0,
         SKIP_GROUP_UNTAGGED: 0,
@@ -414,6 +423,12 @@ _RUNTIME_SKIP_CEILING: dict[str, dict[str, int]] = {
     # 六格的形狀本身就是本輪主結論的證據：`platform` 獨大而其餘五格皆 0 ⇒ mac 側的 skip
     # **全部**是「在這個平台沒有標的」（`schtasks`／具名 Mutex／PS 5.1 原生 argv 語意…），
     # 零欠債、零未標籤 ⇒ 單機零 skip 結構上不可能，可達成的是**兩平台聯集**零 skip。
+    # 🔴 R100（三方 CI 全紅收尾）：本輪在 mac 真機上重跑 `python3 tools/run_root_unittests.py`
+    # 驗證 darwin 值——實測 `[skip census] tools/tests@darwin 共 44 支：platform=44／
+    # tool-absence=0／env-disabled=0／structural-pair=0／debt=0／untagged=0`，逐格與現值
+    # 相同（含 `untagged` 本就是 0，證實 darwin 這棵樹的 9 支 CI-only untagged 純粹是雲端
+    # `actions/checkout@v5` 預設 `fetch-depth: 1` 淺層 clone 造成，真機全歷史 checkout 下
+    # 結構上不會重現）⇒ **本表本輪不動**，只留此註記佐證。
     "tools/tests@darwin": {
         SKIP_GROUP_PLATFORM: 44,
         SKIP_GROUP_TOOL_ABSENCE: 0,
@@ -422,13 +437,47 @@ _RUNTIME_SKIP_CEILING: dict[str, dict[str, int]] = {
         SKIP_GROUP_DEBT: 0,
         SKIP_GROUP_UNTAGGED: 0,
     },
+    # 🔴 R100（root-infra-ci／macos-compat-ci／windows-compat-ci 三方 CI 全紅收尾）上修：
+    # 63→**77**、`untagged` 9→**0**、`tool-absence` 0→**2**。取得方式＝本機 `act`（重建
+    # `aisdcl-act/ubuntu:act-latest` 為 **linux/amd64**——舊映像是本機 Apple Silicon 原生
+    # arm64 build，與 `.actrc` 釘的 `--container-architecture linux/amd64` 不符，pull 會
+    # 401；`docker build --platform linux/amd64 …` 重建後才真的跑得動）真跑
+    # `root-infra-ci.yml` 的 `root-infra` job（`.github/workflows/root-infra-ci.yml` 同輪已
+    # 補 `actions/checkout@v5` 的 `fetch-depth: 0`），`run_root_unittests.py` 當場印出：
+    #   `[skip census] tools/tests@linux 共 79 支：platform=77／tool-absence=2／
+    #    env-disabled=0／structural-pair=0／debt=0／untagged=0／欠債型 2 支（目標 0）`
+    # 逐格照填、零加減推算（本表既有紀律）。
+    # ① `untagged` 9→0：這 9 支正是 `test_sanitize_component_frozen_sdd_versions_lock.py`
+    #    的 7 支 ＋ `test_doc_loc_baseline_freshness_r60.TestR74CloudCiStatusIsRecorded` 的
+    #    2 支——它們的 skip 理由都寫著「可能是淺層 clone 缺歷史」（判準讀
+    #    `git rev-parse --is-shallow-repository`），而 `fetch-depth: 0` 讓歷史變完整後這 9
+    #    支全部真的跑了，不再落 untagged。
+    # ② `platform` 63→77（+14）：**合法新增，非 regression**——`git log -S` 逐一查證，14 支
+    #    全部是既有 mac-only（`[MAC-NATIVE-ONLY]`）／win-only（`[WINDOWS-NATIVE-ONLY]`）測試
+    #    在 linux 剖面的必然互補結果，其中 4 支（`TestMacNightlyMachineStateCapabilities`）
+    #    正是 R96 已經讓 win32 的 `platform` 37→41 上修過的同一批——**linux 表自 R80 登記後
+    #    未跟著同步重測**，這次補齊差額，不是本輪新長出的測試。
+    # ③ `tool-absence` 0→2：`TestRealSubMinInterpreterPrelude.test_dev_start_prelude_loads_
+    #    and_gate_fires_friendly` ／ `.test_documented_bootstrap_remediation_actually_loads`
+    #    ——`root-infra-ci.yml` 的 `root-infra` job 只用 `setup-python` 裝單一 3.11，
+    #    PATH 上找不到 < 3.11 的直譯器（無 pyenv、無 `py` launcher、無 python3.7~3.10）。
+    #    真實環境缺件，不是判準誤判；`SKIP_TARGET_ZERO` 群理論上可歸零（CI job 多裝一支
+    #    舊直譯器即可），本輪未動 workflow，故如實登記為現況而非上修判準去遷就它。
+    # 🔴 誠實劃界：本次 `act` 用 Docker Desktop 的 Rosetta amd64 加速（非純 QEMU），跑出
+    # `FAILED (failures=1, skipped=79)`——那 1 支失敗
+    # （`test_context_budget_guard.PlannerCliTest.test_check_prints_usage_and_writes_
+    # nothing`）斷言一個隔離 HOME 底下的目錄樹在 CLI no-op 呼叫後保持不變，而 Rosetta 在
+    # 該 HOME 底下生出 `home/.cache/rosetta` 快取目錄，是**本機 Docker Desktop Rosetta
+    # 轉譯層的副作用**、與被測程式碼邏輯無關、真 GitHub ubuntu-latest runner（原生 amd64，
+    # 無 Rosetta）不會重現——故本輪未動該測試，也未把它算進上面的 skip census（它是
+    # failure 不是 skip）。
     "tools/tests@linux": {
-        SKIP_GROUP_PLATFORM: 63,
-        SKIP_GROUP_TOOL_ABSENCE: 0,
+        SKIP_GROUP_PLATFORM: 77,
+        SKIP_GROUP_TOOL_ABSENCE: 2,
         SKIP_GROUP_ENV_DISABLED: 0,
         SKIP_GROUP_STRUCTURAL: 0,
         SKIP_GROUP_DEBT: 0,
-        SKIP_GROUP_UNTAGGED: 9,
+        SKIP_GROUP_UNTAGGED: 0,
     },
 }
 
@@ -473,10 +522,12 @@ _RUNTIME_SKIP_CEILING_MAX: dict[str, dict[str, int]] = {
     # （本表上方那條規則要的就是這個「兩個常數都得動、會出現在 diff 裡」）。完整理由、來源
     # commit（`bc024e3`／R83）、以及「為什麼這 4 支不走『讓它們真的會跑』那條出口」逐項寫在
     # `_RUNTIME_SKIP_CEILING` 同鍵那一段，此處不複寫第二份（同一份知識只准一個家）。
+    # 🔴 R100（DEF-200-228）：`env-disabled` 1 → **2**，與 `_RUNTIME_SKIP_CEILING` 同鍵
+    # 同一個 commit 一起上修；理由（站點盤點式、非聚合 census）見同鍵那一段。
     "tools/tests@win32": {
         SKIP_GROUP_PLATFORM: 41,
         SKIP_GROUP_TOOL_ABSENCE: 0,
-        SKIP_GROUP_ENV_DISABLED: 1,
+        SKIP_GROUP_ENV_DISABLED: 2,
         SKIP_GROUP_STRUCTURAL: 0,
         SKIP_GROUP_DEBT: 0,
         SKIP_GROUP_UNTAGGED: 0,
@@ -489,13 +540,15 @@ _RUNTIME_SKIP_CEILING_MAX: dict[str, dict[str, int]] = {
         SKIP_GROUP_DEBT: 0,
         SKIP_GROUP_UNTAGGED: 0,
     },
+    # 🔴 R100：連同基線一起上修 63→77／`untagged` 9→0／`tool-absence` 0→2——理由、
+    # provenance、逐項交代皆見 `_RUNTIME_SKIP_CEILING` 同鍵那一段，此處不複寫第二份。
     "tools/tests@linux": {
-        SKIP_GROUP_PLATFORM: 63,
-        SKIP_GROUP_TOOL_ABSENCE: 0,
+        SKIP_GROUP_PLATFORM: 77,
+        SKIP_GROUP_TOOL_ABSENCE: 2,
         SKIP_GROUP_ENV_DISABLED: 0,
         SKIP_GROUP_STRUCTURAL: 0,
         SKIP_GROUP_DEBT: 0,
-        SKIP_GROUP_UNTAGGED: 9,
+        SKIP_GROUP_UNTAGGED: 0,
     },
 }
 

@@ -63,7 +63,7 @@ _FROZEN_CEILING_MAX: dict[str, dict[str, int]] = {
     "tools/tests@win32": {
         S.SKIP_GROUP_PLATFORM: 41,
         S.SKIP_GROUP_TOOL_ABSENCE: 0,
-        S.SKIP_GROUP_ENV_DISABLED: 1,
+        S.SKIP_GROUP_ENV_DISABLED: 2,
         S.SKIP_GROUP_STRUCTURAL: 0,
         S.SKIP_GROUP_DEBT: 0,
         S.SKIP_GROUP_UNTAGGED: 0,
@@ -77,12 +77,12 @@ _FROZEN_CEILING_MAX: dict[str, dict[str, int]] = {
         S.SKIP_GROUP_UNTAGGED: 0,
     },
     "tools/tests@linux": {
-        S.SKIP_GROUP_PLATFORM: 63,
-        S.SKIP_GROUP_TOOL_ABSENCE: 0,
+        S.SKIP_GROUP_PLATFORM: 77,
+        S.SKIP_GROUP_TOOL_ABSENCE: 2,
         S.SKIP_GROUP_ENV_DISABLED: 0,
         S.SKIP_GROUP_STRUCTURAL: 0,
         S.SKIP_GROUP_DEBT: 0,
-        S.SKIP_GROUP_UNTAGGED: 9,
+        S.SKIP_GROUP_UNTAGGED: 0,
     },
 }
 

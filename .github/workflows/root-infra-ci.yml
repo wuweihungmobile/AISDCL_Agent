@@ -220,7 +220,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20   # R68：第 8 道 unittest 現在會真的跑完全套（見檔頭訂正段）
     steps:
+      # R100：fetch-depth: 0（完整歷史）—— test_sanitize_component_frozen_sdd_versions_lock.py
+      # 的 7 支測試需要讀到 commit 5ccccb065a8209e430eaba25c6e8e4ba1727e4e6 這段歷史才能真的
+      # 跑起來；預設 fetch-depth=1（淺層 clone）讓它們全數落入「可能是淺層 clone 缺歷史」
+      # 這條 skip 分支，撐大 tools/tests@linux／@darwin 的 untagged skip 分群（R106 三平台
+      # CI 全紅之一）。取捨要誠實講：完整 clone 比淺層多抓歷史物件，頻寬與時間都會增加，
+      # 量級本輪已實測、非臆測——本機對同一 GitHub 遠端各跑一次乾淨 clone：
+      # `git clone --depth 1` ⇒ `.git` 22M／real 7.31s；`git clone`（全歷史）⇒ `.git`
+      # 31M／real 7.69s。差距＝多傳約 9MB、多花約 0.4s（落在本機網路抖動量級內，非結構性
+      # 拉長）；用「這筆小額頻寬與可忽略的時間」換「這 7 支鎖真的跑而不是空判 skip」。
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: bash -n 語法檢查（active tracked *.sh + 三處 git-hooks 目錄；凍結版排除）
         # R56 修正（Architect finding）：原範圍是 `find tools …`＝10 檔，只涵蓋
