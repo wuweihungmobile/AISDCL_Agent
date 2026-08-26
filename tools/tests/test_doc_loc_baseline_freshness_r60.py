@@ -4521,10 +4521,10 @@ def resolve_doc_path(rel: str, repo_root: Path) -> str | None:
     for base in path_claim_bases(repo_root):
         current = repo_root if base == "." else repo_root / base
         exact = True
-        for part in rel.split("/"):
-            entries = _entries(current)
-            exact = exact and part in entries
-            current = current / (part if part in entries else next((e for e in entries if e.lower() == part.lower()), part))  # 用目錄項實際字面疊路徑；原始字面在大小寫不敏感系統上會讓 exists() 誤判
+        for p in rel.split("/"):
+            ent = _entries(current)  # 目錄項實際字面；避免大小寫不敏感系統誤判 exists()
+            exact = (hit := p in ent) and exact
+            current = current / (p if hit else next((e for e in ent if e.lower() == p.lower()), p))
         if not current.exists():
             continue
         if exact:
