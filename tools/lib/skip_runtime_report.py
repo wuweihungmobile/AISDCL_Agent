@@ -179,8 +179,9 @@ SKIP_ID_LEDGER = Path(__file__).resolve().parents[2] / "docs" / "06_quality" / "
 #: 都等於宣稱「這支測試永遠不會被執行」，那是缺陷不是豁免，故門檻刻意訂得很高。
 #:
 #: 🔴 R100 例外（唯一一筆，性質與上述門檻不完全相同，故在此誠實交代，不是靜默放行）：
-#: `test_context_budget_guard.ConsoleFreeSpawnTest.test_the_prelude_really_stops_the_evidence_from_degrading`
-#: 是**機台狀態相依**（console codepage 是否為 legacy CP950/936）而非**平台相依**——它不是
+#: `test_context_budget_guard.ConsoleFreeSpawnTest`
+#: `.test_the_prelude_really_stops_the_evidence_from_degrading` 是**機台狀態相依**
+#: （console codepage 是否為 legacy CP950/936）而非**平台相依**——它不是
 #: 「永遠不會被執行」，是「本輪三個已測環境（本機 mac、本機 act-linux 容器、GitHub-hosted
 #: Windows runner）剛好都是 UTF-8 codepage，沒有一處踩中它要驗的降解情境」。M6 的三態設計
 #: 沒有「已知、機台相依、待未來驗證」這第四態，而它此刻會讓 `tools/tests@darwin`／
