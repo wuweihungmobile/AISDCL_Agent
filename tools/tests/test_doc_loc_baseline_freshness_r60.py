@@ -4523,19 +4523,8 @@ def resolve_doc_path(rel: str, repo_root: Path) -> str | None:
         exact = True
         for part in rel.split("/"):
             entries = _entries(current)
-            # 🔴 R106：往下疊路徑必須用**目錄項實際回報的大小寫字面**（`real`），不是
-            # `rel` 裡原始（可能拼錯大小寫）的那個字面。用原始字面重建 current 只在
-            # 大小寫不敏感的檔案系統（macOS/Windows）上會誤打誤撞被 exists() 判成 True；
-            # 在大小寫敏感的檔案系統（Linux／ubuntu-latest CI runner）上 exists() 必為
-            # False，"case" 判決因而落回 "missing"——判決結果變成看檔案系統而非看
-            # repo 內容。用實際目錄項字面重建，exists() 在任何檔案系統上都問得到同一個
-            # 答案，"case" 才是 repo 的性質而不是這台機器的巧合。
-            if part in entries:
-                real = part
-            else:
-                exact = False
-                real = next((e for e in entries if e.lower() == part.lower()), part)
-            current = current / real
+            exact = exact and part in entries
+            current = current / (part if part in entries else next((e for e in entries if e.lower() == part.lower()), part))  # 用目錄項實際字面疊路徑；原始字面在大小寫不敏感系統上會讓 exists() 誤判
         if not current.exists():
             continue
         if exact:
