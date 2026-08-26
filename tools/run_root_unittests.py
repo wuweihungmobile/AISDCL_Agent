@@ -107,6 +107,7 @@ _THIRD_PARTY_PREREQS: tuple[tuple[str, str], ...] = (
     ("yaml", "pyyaml"),
     ("pydantic", "pydantic"),
     ("httpx", "httpx"),
+    ("pytest", "pytest"),
 )
 
 # `[WINDOWS-NATIVE-ONLY]` skip 標籤家族（R43／R67-F11／R72）已於 R72 整組抽進

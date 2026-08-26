@@ -424,7 +424,7 @@ jobs:
           python-version: "3.11"
 
       - name: tools/tests 第三方相依（清單 SSOT＝tools/run_root_unittests.py 的 _THIRD_PARTY_PREREQS；漏裝時該 runner 會 fail-fast 指路）
-        run: python3 -m pip install --quiet --disable-pip-version-check pyyaml pydantic httpx
+        run: python3 -m pip install --quiet --disable-pip-version-check pyyaml pydantic httpx pytest
 
       # 第 16 道。刻意排在 unittest **之前**：tools/tests/test_subprocess_encoding_hygiene.py
       # 的 `test_the_config_actually_covers_the_root_tools_tree` 需要 PATH 上有 ruff 才驗得動
