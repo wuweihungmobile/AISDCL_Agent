@@ -542,7 +542,7 @@ jobs:
           # TestRootInfraNightlyStalenessSentinel 機械禁止該欄再出現日曆日期。
           # WAIVER_UNTIL 仍是日期——那是**豁免視窗的界線**（反 fail-open 三道保險之一，
           # 到期即自動恢復阻斷），不是對世界的事實宣稱，兩者不可混為一談。
-          WAIVER_UNTIL: "2026-08-26"
+          WAIVER_UNTIL: "2026-09-10"
           WAIVER_REASON: "DEF-101-703／DEF-101-081：根因＝GitHub 帳務／額度平面阻擋 runner 配置（非 workflow 定義缺陷，本 repo 無可修處）。解除判準=本 step 印出的 never-started 統計回到 0/N（＝runner 真的被配置）後，把 WAIVER_UNTIL 清成空字串；不得以「日期到了」當解除依據"
           MAX_WAIVER_DAYS: "21"
           # advisory 巡檢的粗門檻（見 run: 內該段的取捨說明）。刻意單一數字而非
