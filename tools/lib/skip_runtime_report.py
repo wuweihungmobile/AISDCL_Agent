@@ -200,6 +200,21 @@ def ledger_ids(ledger: Mapping[str, object], profile: str) -> set[str] | None:
 # 落款裡有 id 的模組已不在樹上（同一棵樹的落款可從**任一**平台驗證，這是 mac 上唯一抓得到
 # Windows 落款腐化的一向）③`[全世界沒跑過]` 交集非空 ⇒ M6 本體被破壞。① 先於 ③：落款與
 # 磁碟不符時 ③ 的兩個輸入都不可信（同 `skip_measurement_problems` 對「量測塌掉」的排序）。
+#
+# 🔴 ③ 是**多邊**交集，不是逐 counterpart 各自判斷後取聯集（R100 修復；此前的臭蟲：linux
+# 對 win32、對 darwin 各自求交集，任一非空就報。一支測試只要在**任一** counterpart 上有跑
+# （不在它的落款裡）就已經是「有人跑過」的證據；只有在**所有** counterpart 都同樣 skip 掉它
+# 時才算「全世界沒跑過」——判準本體 `skip(A) ⊆ run(B) ∪ 合法平台專屬集合` 裡的 B 指的是
+# 「任一互補剖面」，移項後 `nowhere` 必須是 `live ∩ counterpart_1 ∩ counterpart_2 ∩ …` 的
+# 交集，不是 `(live∩counterpart_1) ∪ (live∩counterpart_2)`）。三剖面真落款驗證：linux 對
+# win32 的交集 34 支（win32 專屬測試，家在 darwin）、對 darwin 的交集 44 支（darwin 專屬
+# 測試，家在 win32）——這兩組互不相干，都不是「全世界沒跑過」；真正的多邊交集只有 1 支。
+#
+# 缺 counterpart 落款時的處理：那個 counterpart 對 ③ **跳過**（用「有落款的那些」做交集），
+# 不讓整條 ③ 一起退回不可求值——`[缺互補落款]` 已經用 `blocked` 誠實記下這件事，讀者看得到
+# 「這是不完整證據」；但已落款的那些互補剖面之間仍能算出目前可求值的最佳交集。誠實劃界：
+# 這個方向是**保守偏嚴**（少一個 counterpart 的資料只會讓交集偏大，不會偏小），今天三個
+# 剖面都已落款，這個分支在現有資料上不會被觸發，只有注入測試在守它。
 def m6_id_set_problems(
     profile: str, live_ids: Sequence[str], counterparts: Sequence[str],
     ledger: Mapping[str, object], *, tests_dir: Path,
@@ -217,6 +232,8 @@ def m6_id_set_problems(
             "這一向照樣說話**，那正是集合粒度取代計數粒度的理由。合法出口：確認差異是預期的"
             "（新增／改名測試）後把可貼落款重釘進落款檔")
     tree = profile.split("@", 1)[0]
+    evaluable_counterparts: list[str] = []
+    other_sets: list[set[str]] = []
     for counterpart in counterparts:
         other = ledger_ids(ledger, counterpart)
         if other is None:
@@ -232,12 +249,16 @@ def m6_id_set_problems(
                 problems.append(f"[落款過時] `{counterpart}` 的落款有 {len(stale)} 支 id 的"
                                 f"模組已不在樹上：{stale}——那批 id 永遠對不上任何測試，"
                                 "③ 的交集因此低報")
-        nowhere = sorted((live & other) - set(exempt))
+        evaluable_counterparts.append(counterpart)
+        other_sets.append(other)
+    if other_sets:
+        nowhere = sorted(set.intersection(live, *other_sets) - set(exempt))
         if nowhere:
+            names = "、".join(f"`{cp}`" for cp in evaluable_counterparts)
             problems.append(
-                f"[全世界沒跑過] {len(nowhere)} 支在 `{profile}` 與 `{counterpart}` **都** "
-                f"skip：{nowhere}——M6 的本體是 skip(A) ⊆ run(B) ∪ 合法平台專屬集合，這幾支"
-                "落在差集裡 ⇒ 沒有任何機械證據顯示它們在世界上任何一處跑過")
+                f"[全世界沒跑過] {len(nowhere)} 支在 `{profile}` 與**所有**已落款的互補剖面"
+                f"（{names}）都 skip：{nowhere}——M6 的本體是 skip(A) ⊆ run(B) ∪ 合法平台專屬"
+                "集合，這幾支落在差集裡 ⇒ 沒有任何機械證據顯示它們在世界上任何一處跑過")
     if problems:
         return M6_VIOLATION, problems + blocked
     return (M6_UNEVALUABLE, blocked) if blocked else (M6_OK, [])

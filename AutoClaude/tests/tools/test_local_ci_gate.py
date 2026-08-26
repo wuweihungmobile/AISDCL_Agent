@@ -1628,3 +1628,95 @@ def test_the_tracked_ledger_only_names_test_modules_that_still_exist() -> None:
     assert ids, f"落款檔缺 `{_M6_PROF}`"
     missing = sorted(i for i in ids if not (_ROOT_TESTS / f"{i.split('.')[0]}.py").is_file())
     assert missing == [], f"落款指向已不存在的測試模組：{missing}"
+
+
+# =====================================================================
+# (m-2) R100 修復：③「全世界沒跑過」必須是**多邊**交集，不是逐 counterpart 各自求交集
+#       後取聯集。立案＝三份真落款實測：`tools/tests@linux` 對 `win32` 的交集 34 支
+#       （win32 專屬測試，家在 darwin）、對 `darwin` 的交集 44 支（darwin 專屬測試，
+#       家在 win32）——這 78 支修前全部被誤判「全世界沒跑過」，修後只剩三邊真交集 1 支。
+# =====================================================================
+
+_M6_PROF_TWO_COUNTERPARTS = "tools/tests@linux"
+_M6_COUNTERPART_A = "tools/tests@win32"
+_M6_COUNTERPART_B = "tools/tests@darwin"
+
+
+def test_skipped_on_only_some_counterparts_is_not_a_false_red() -> None:
+    """🔴 R100 本體：A 只跟兩個 counterpart 之一重疊 ⇒ 不該判違規。
+
+    還原真實資料裡的形狀——一支測試在 `profile` 與 `counterpart_A` 都 skip，但在
+    `counterpart_B` **沒有** skip（＝在 B 上真的跑過）。修前的臭蟲是逐 counterpart 各自
+    求交集、非空就報，於是這支測試會被誤判「全世界沒跑過」；但它明明在 B 上跑過，判準
+    本體 `skip(A) ⊆ run(B) ∪ 合法平台專屬集合` 裡只要有**任一** counterpart 跑過它就不
+    該算「全世界沒人跑過」。
+    """
+    live = _live_ids()
+    only_a_and_profile = live[:1]  # 這支只在 profile 與 counterpart_A 上 skip
+    status, problems = M.m6_id_set_problems(
+        _M6_PROF_TWO_COUNTERPARTS, live,
+        (_M6_COUNTERPART_A, _M6_COUNTERPART_B),
+        {
+            _M6_PROF_TWO_COUNTERPARTS: {"skipped": live},
+            _M6_COUNTERPART_A: {"skipped": only_a_and_profile},
+            _M6_COUNTERPART_B: {"skipped": []},
+        },
+        tests_dir=_ROOT_TESTS,
+    )
+    hit = [p for p in problems if p.startswith("[全世界沒跑過]")]
+    assert hit == [], (
+        f"只跟一個 counterpart 重疊就被判『全世界沒跑過』——這正是 R100 的臭蟲："
+        f"status={status}／problems={problems}"
+    )
+    assert status == M.M6_OK, f"沒有任何真違規，卻不是 M6_OK：{status}／{problems}"
+
+
+def test_skipped_on_every_counterpart_is_a_true_multiway_violation() -> None:
+    """真正三邊都 skip 才判違規——多邊交集的正面案例（對照上一支的反面案例）。"""
+    live = _live_ids()
+    everywhere = live[:1]  # 這支在 profile、counterpart_A、counterpart_B 全部 skip
+    status, problems = M.m6_id_set_problems(
+        _M6_PROF_TWO_COUNTERPARTS, live,
+        (_M6_COUNTERPART_A, _M6_COUNTERPART_B),
+        {
+            _M6_PROF_TWO_COUNTERPARTS: {"skipped": live},
+            _M6_COUNTERPART_A: {"skipped": everywhere},
+            _M6_COUNTERPART_B: {"skipped": everywhere},
+        },
+        tests_dir=_ROOT_TESTS,
+    )
+    assert status == M.M6_VIOLATION, f"三邊都 skip 竟沒轉紅：{status}／{problems}"
+    hit = [p for p in problems if p.startswith("[全世界沒跑過]")]
+    assert hit and everywhere[0] in hit[0], problems
+    assert _M6_COUNTERPART_A in hit[0] and _M6_COUNTERPART_B in hit[0], (
+        f"訊息應點名**所有**已落款的互補剖面，不只其中一個：{hit[0]}"
+    )
+
+
+def test_a_counterpart_missing_ledger_is_skipped_for_the_multiway_intersection() -> None:
+    """邊界分支：兩個 counterpart 之一缺落款時，多邊交集只用有落款的那個算，不整片退回
+    不可求值——`[缺互補落款]` 仍會誠實記在 `blocked` 裡，讀者看得到證據不完整。"""
+    live = _live_ids()
+    everywhere_among_available = live[:1]
+    status, problems = M.m6_id_set_problems(
+        _M6_PROF_TWO_COUNTERPARTS, live,
+        (_M6_COUNTERPART_A, _M6_COUNTERPART_B),
+        {
+            _M6_PROF_TWO_COUNTERPARTS: {"skipped": live},
+            _M6_COUNTERPART_A: {"skipped": everywhere_among_available},
+            # _M6_COUNTERPART_B 刻意不落款
+        },
+        tests_dir=_ROOT_TESTS,
+    )
+    assert status == M.M6_VIOLATION, (
+        f"有落款的那個 counterpart 已構成真交集，不該因為另一個缺落款就整片消音：{status}"
+    )
+    hit = [p for p in problems if p.startswith("[全世界沒跑過]")]
+    assert hit and everywhere_among_available[0] in hit[0], problems
+    assert _M6_COUNTERPART_B not in hit[0], (
+        f"缺落款的 counterpart 不該出現在『已落款的互補剖面』點名清單裡：{hit[0]}"
+    )
+    blocked = [p for p in problems if p.startswith("[缺互補落款]")]
+    assert blocked and _M6_COUNTERPART_B in blocked[0], (
+        f"缺落款這件事必須誠實留痕，不能被交集算出來的違規訊息蓋過：{problems}"
+    )
