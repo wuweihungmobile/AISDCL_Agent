@@ -3550,13 +3550,19 @@ class TestTheStopGuardIsTheAutomaticReaderOfThatEvidence(unittest.TestCase):
     讓任何閘門轉紅。
     """
 
+    # R100：真子行程無 on_windows 注入接縫，native／alien 隨真實 os.name 而定。
+    _SPEAKS_FIXTURE, _SILENT_FIXTURE, _SPEAKS_TARGET = (
+        (_ALIEN_CARRIER_ENOENT, _NATIVE_CARRIER_EACCES, "check_claim_provenance.py")
+        if os.name == "nt" else
+        (_NATIVE_CARRIER_EACCES, _ALIEN_CARRIER_ENOENT, "block_destructive_git.py"))
+
     def test_the_stop_guard_speaks_when_the_native_carrier_failed(self) -> None:
         hook = _REPO_ROOT / ".claude" / "hooks" / "check_claim_provenance.py"
         with tempfile.TemporaryDirectory() as tmp:
             transcript = Path(tmp) / "t.jsonl"
             transcript.write_text("\n".join(json.dumps(r) for r in [
-                {"type": "system", "attachment": _ALIEN_CARRIER_ENOENT},
-                {"type": "system", "attachment": _NATIVE_CARRIER_EACCES}]) + "\n",
+                {"type": "system", "attachment": self._SPEAKS_FIXTURE},
+                {"type": "system", "attachment": self._SILENT_FIXTURE}]) + "\n",
                 encoding="utf-8")
             payload = json.dumps({"hook_event_name": "Stop", "stop_hook_active": False,
                                   "last_assistant_message": "收工。",
@@ -3566,7 +3572,7 @@ class TestTheStopGuardIsTheAutomaticReaderOfThatEvidence(unittest.TestCase):
                                   env={**os.environ, "AUTOSDD_TRACE_DIR": tmp},
                                   encoding="utf-8", errors="replace")
         self.assertEqual(done.returncode, 0, "本守衛永不阻斷")
-        self.assertIn("block_destructive_git.py", done.stderr,
+        self.assertIn(self._SPEAKS_TARGET, done.stderr,
                       "本平台自己那條載具失敗，這支讀者沒說話 ⇒ 證據又回到零讀者狀態")
         self.assertIn("hookSpecificOutput", done.stdout,
                       "只寫 stderr 等於沒說（exit 0 的 stderr 不進模型 context）")
@@ -3580,7 +3586,7 @@ class TestTheStopGuardIsTheAutomaticReaderOfThatEvidence(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             transcript = Path(tmp) / "t.jsonl"
             transcript.write_text(json.dumps(
-                {"type": "system", "attachment": _ALIEN_CARRIER_ENOENT}) + "\n",
+                {"type": "system", "attachment": self._SILENT_FIXTURE}) + "\n",
                 encoding="utf-8")
             payload = json.dumps({"hook_event_name": "Stop", "stop_hook_active": False,
                                   "last_assistant_message": "收工。",

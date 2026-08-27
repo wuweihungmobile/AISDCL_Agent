@@ -93,7 +93,43 @@ _WINDOWS_LIKE_SKIP_HINTS = ("windows", "win32", "pathext", "bash.exe", "mutex", 
 # 是空的所以看起來乾淨，第一筆進去的那天起它就是一張**只進不出**的永久豁免表。
 # 對照組：姊妹表 `_COLLECTION_EXEMPT` 早就有牙（多餘的豁免會被抓）。同一個 repo
 # 對「豁免表要有 stale 自檢」有明確認知，卻只實作在兩張表中的一張。
-_WINDOWS_SKIP_TAG_EXEMPT: dict[str, str] = {}
+_WINDOWS_SKIP_TAG_EXEMPT: dict[str, str] = {
+    "test_dev_start.TestPickPythonGeMin."
+    "test_candidate_chain_word_splits_under_zsh": (
+        "R100：[MAC-NATIVE-ONLY]（驗 zsh 的 SH_WORD_SPLIT off 語意），reason 提到"
+        "「在 Windows 上把 zsh 裝起來也跑不出有意義的結果」只是比較性陳述，不是"
+        "這支測試的驗證平台。"
+    ),
+    "test_dev_start.TestRealSubMinInterpreterPrelude."
+    "test_dev_start_prelude_loads_and_gate_fires_friendly": (
+        "R100：[TOOL-ABSENCE]（找不到 < 3.11 的真直譯器），reason 裡的"
+        "「Windows Python Launcher py -3.X」只是掃描過的候選路徑之一，不代表"
+        "本測試只在 Windows 有驗證價值。"
+    ),
+    "test_dev_start.TestRealSubMinInterpreterPrelude."
+    "test_documented_bootstrap_remediation_actually_loads": (
+        "R100：同一個 [TOOL-ABSENCE] reason 模板、同一個理由（見上一筆）。"
+    ),
+    "test_dev_start_ps1_lastexitcode.TestDevStartShShellCarrier."
+    "test_zsh_core_failure_propagates_and_does_not_activate": (
+        "R100：[MAC-NATIVE-ONLY]（本機無 zsh），reason 提到「Windows 與 act 的"
+        "ubuntu 映像實測皆無 zsh」只是列出其他同樣沒有 zsh 的平台，不是"
+        "Windows 專屬判準。"
+    ),
+    "test_dev_start_ps1_lastexitcode.TestDevStartShShellCarrier."
+    "test_zsh_executed_not_sourced": (
+        "R100：同一個 [MAC-NATIVE-ONLY] reason 模板、同一個理由（見上一筆）。"
+    ),
+    "test_dev_start_ps1_lastexitcode.TestDevStartShShellCarrier."
+    "test_zsh_sourced_happy_path": (
+        "R100：同一個 [MAC-NATIVE-ONLY] reason 模板、同一個理由（見上一筆）。"
+    ),
+    "test_smoke_ci_sync.TestMacSmokeCliContract."
+    "test_zsh_invocation_fails_loud_with_the_correct_reason": (
+        "R100：[MAC-NATIVE-ONLY]（本機無 zsh），reason 提到「在 Windows 上把 zsh"
+        "裝起來也不是這道鎖的主場」只是比較性陳述，不是 Windows 專屬判準。"
+    ),
+}
 
 #: 豁免理由必須寫出**承接輪次**（形態＝大寫 R 後接兩位以上數字）。沒有承接輪次的
 #: 豁免＝沒有人負責把它拿掉，也就是永久豁免——Scan-H 必跑項② 對每一個豁免的要求。

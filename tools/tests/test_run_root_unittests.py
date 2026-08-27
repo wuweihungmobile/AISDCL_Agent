@@ -405,7 +405,9 @@ class UntaggedWindowsLikeSkipsTest(unittest.TestCase):
         # 新 import 的模組呼叫 `Path()`，patch 期間那必定拋 `PosixPath` 例外 ⇒ 下面
         # 合成出來的樹 import 失敗、塌成 `_FailedTest`、收集數低於下限 ⇒ **兩次**
         # `run_with_floor` 都回 1：紅的那一半理由是錯的，綠的那一半永遠綠不了。
-        with mock.patch.object(windows_skip_tags, "running_on_windows", lambda: False):
+        # R100：真表自本輪起非空，隔離它避免合成樹被 stale 自檢誤判 rc=1。
+        with mock.patch.object(windows_skip_tags, "running_on_windows", lambda: False), \
+             mock.patch.dict(run_root_unittests._WINDOWS_SKIP_TAG_EXEMPT, {}, clear=True):
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
                 rc_untagged = run_root_unittests.run_with_floor(base, min_tests=2)
             sys.modules.pop(mod, None)
@@ -499,11 +501,12 @@ class WindowsSkipTagExemptionSelfCheckTest(unittest.TestCase):
         （見 `test_hints_and_tag_are_shared_with_the_runtime_lock_not_copied`）
         已經悄悄退化成兩份副本。
         """
+        # R100：`clear=True`——真表非空，`clear=False` 會讓既有筆數疊進 `problems`。
         result = self._result_with_skips(("m.C.test_x", "一般性 skip，與平台無關"))
         buf = io.StringIO()
         with mock.patch.object(windows_skip_tags, "running_on_windows", lambda: False), \
              mock.patch.dict(run_root_unittests._WINDOWS_SKIP_TAG_EXEMPT,
-                             {"m.C.test_gone": "R70 暫時豁免"}, clear=False), \
+                             {"m.C.test_gone": "R70 暫時豁免"}, clear=True), \
              contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
             problems = run_root_unittests.report_windows_skip_tag_exemption_problems(result)
         self.assertEqual(len(problems), 1, problems)
