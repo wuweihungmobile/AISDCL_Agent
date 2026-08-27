@@ -197,6 +197,13 @@ _M6_EXEMPT: dict[str, str] = {
         "codepage，結構上驗不到 legacy codepage 降解情境；不豁免會鎖死本機每一次 push。"
         "解除判準＝真 legacy codepage（CP950/936）Windows 機器實跑此測試後移除本項"
     ),
+    "test_dev_start.TestStepSwitchCacheCleanup.test_env_changed_removes_cache_dir_and_symlink": (
+        "[R106 暫時豁免] 機台 Developer Mode／symlink 特殊權限相依（非平台相依）：本機該"
+        "權限未啟用（開發人員模式關閉）故本測試 skip，GitHub-hosted windows-latest "
+        "runner 該權限已啟用故不 skip——同一支測試在兩個真 win32 機器上的活體結果本就"
+        "相反，任何單一 tools/tests@win32 落款都會讓另一邊判 [漂移]。解除判準＝兩邊機台"
+        "權限狀態一致後移除本項"
+    ),
 }
 
 
@@ -245,12 +252,13 @@ def m6_id_set_problems(
     if own is None:
         blocked.append(f"[未落款] `{profile}` 還沒有 id 落款 ⇒ 它的 skip 集合無從對帳。"
                        "取得＝把下面那份可貼落款填進落款檔")
-    elif own != live:
+    elif (live - set(exempt)) != (own - set(exempt)):
         problems.append(
-            f"[漂移] `{profile}` live 集合 ≠ 落款集合（計數 {len(live)} vs {len(own)}）："
-            f"落款缺 {sorted(live - own)}／落款多 {sorted(own - live)}——🔴 **兩邊計數相等時"
-            "這一向照樣說話**，那正是集合粒度取代計數粒度的理由。合法出口：確認差異是預期的"
-            "（新增／改名測試）後把可貼落款重釘進落款檔")
+            f"[漂移] `{profile}` live 集合 ≠ 落款集合（計數 {len(live)} vs {len(own)}，"
+            f"已扣除 _M6_EXEMPT）：落款缺 {sorted((live - own) - set(exempt))}／落款多 "
+            f"{sorted((own - live) - set(exempt))}——🔴 **兩邊計數相等時這一向照樣說話**，"
+            "那正是集合粒度取代計數粒度的理由。合法出口：確認差異是預期的（新增／改名測試）"
+            "後把可貼落款重釘進落款檔")
     tree = profile.split("@", 1)[0]
     evaluable_counterparts: list[str] = []
     other_sets: list[set[str]] = []

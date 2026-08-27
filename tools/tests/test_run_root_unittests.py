@@ -129,7 +129,9 @@ class RunRootUnittestsTest(unittest.TestCase):
 
     def test_at_floor_runs_and_passes(self):
         d = self._make_fixture("rru_at_", 3)
-        rc = run_root_unittests.run_with_floor(d, min_tests=3)
+        # R100：真表非空，隔離它避免合成樹被 stale 自檢誤判 rc=1。
+        with mock.patch.dict(run_root_unittests._WINDOWS_SKIP_TAG_EXEMPT, {}, clear=True):
+            rc = run_root_unittests.run_with_floor(d, min_tests=3)
         self.assertEqual(rc, 0)
 
     def test_real_repo_meets_pinned_floor(self):
@@ -538,8 +540,10 @@ class WindowsSkipTagExemptionSelfCheckTest(unittest.TestCase):
             ),
             encoding="utf-8",
         )
+        # R100：真表自本輪起非空，隔離它避免合成樹被 stale 自檢誤判 rc=1。
         with contextlib.redirect_stdout(io.StringIO()), \
-             contextlib.redirect_stderr(io.StringIO()):
+             contextlib.redirect_stderr(io.StringIO()), \
+             mock.patch.dict(run_root_unittests._WINDOWS_SKIP_TAG_EXEMPT, {}, clear=True):
             rc_clean = run_root_unittests.run_with_floor(base, min_tests=2)
             with mock.patch.dict(run_root_unittests._WINDOWS_SKIP_TAG_EXEMPT,
                                  {"m.C.test_x": "沒有承接者的理由"}, clear=False):
@@ -1227,9 +1231,13 @@ class CollectionIntegrityTest(unittest.TestCase):
     @staticmethod
     def _quiet_run(start_dir: Path, min_tests: int) -> tuple[int, str]:
         """跑 run_with_floor 並吞掉輸出——fixture 的假檔名不該印進真實終端混淆複審者
-        （沿用本檔 `windows_native_skips` 一系列測試已建立的紀律）。"""
+        （沿用本檔 `windows_native_skips` 一系列測試已建立的紀律）。
+
+        R100：真表非空，隔離它避免合成樹被 stale 自檢誤判 rc=1。
+        """
         out, err = io.StringIO(), io.StringIO()
-        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err), \
+             mock.patch.dict(run_root_unittests._WINDOWS_SKIP_TAG_EXEMPT, {}, clear=True):
             rc = run_root_unittests.run_with_floor(start_dir, min_tests=min_tests)
         return rc, out.getvalue() + err.getvalue()
 

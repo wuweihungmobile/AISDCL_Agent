@@ -695,7 +695,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 6251,
+    "test_adr_xplat001_c1c2_lock.py": 6256,
     "test_archive_defect_log.py": 4008,
     "test_bash32_compat.py": 970,
     "test_bash_probe_spec_contract.py": 983,
@@ -742,7 +742,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_python_c_percent_shim.py": 119,
     "test_quota_policy.py": 3055,
     "test_root_infra_parity.py": 441,
-    "test_run_root_unittests.py": 2193,
+    "test_run_root_unittests.py": 2201,
     "test_sanitize_component_frozen_sdd_versions_lock.py": 340,
     "test_schedule_capability_parity.py": 635,
     "test_script_scan_surface_ssot.py": 391,
@@ -1167,6 +1167,11 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
     ("R106", 88679, 88685, 6,
      "[非淨減法輪][同輪追加] 本檔自身逐檔漂移——來源是 _PHASE2_REVIEW_LOG 追加列"
      "（重新武裝下一個 5 輪視窗）與本稽核列本身。逐項見 CrossPlatform_R106_Scan_Findings.md。"),
+    ("R106", 88685, 88698, 13,
+     "[非淨減法輪][同輪追加] windows-compat-ci 真缺陷二次驗證抓到漏網之魚："
+     "test_run_root_unittests.py +8（三處合成樹測試補隔離活體 _WINDOWS_SKIP_TAG_EXEMPT"
+     "表，避免非 Windows 平台被污染而假紅）；本檔自身 +5（本稽核列本身）。逐項見"
+     "CrossPlatform_R106_Scan_Findings.md。"),
 )
 
 
@@ -1380,10 +1385,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 70
+_REPIN_LOG_FROZEN_PREFIX_LEN = 71
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "c77fb8d45cdbafcdcffa2bc24efc07a46a1f1be7d8ff8ba8d51bd61358f2ffc6")
+    "76bb05948f274501d80f70a74d4f33a8b7d4963372c9bd5f96681e2a695b6394")
 
 
 def repin_log_history_digest(
@@ -1460,7 +1465,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # 微幅上升，同體例「追加後立即自我凍結」——本輪追加一列，prefix_len 66→67
     # 涵蓋本列本身。
     ("R105", "a520bdcef8b7", "a64463e662c1", "DEF-200-202"),
-    ("R106", "a64463e662c1", "c77fb8d45cdb", "DEF-101-561"),
+    ("R106", "a64463e662c1", "76bb05948f27", "DEF-101-561"),
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。
