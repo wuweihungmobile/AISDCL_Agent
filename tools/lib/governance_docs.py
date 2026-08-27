@@ -300,6 +300,11 @@ _GOVERNANCE_DOCS = (
     # （⇒ 指針稽核）；本檔不承載 `guard-total:` 標記（避免與上一列同名檔重複被
     # `_GUARD_TOTAL_DOC_GLOBS` 掃到造成雙重對帳站點）⇒ 只受體積守門管。即刻登記。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R105_FourParty_Fix.md",
+    # Windows 11 交接輪兩筆真缺陷（root-infra-ci／windows-compat-ci）逐檔清單與根因。
+    # 資格同前幾輪同名檔：`_GUARD_LINES_REPIN_LOG` 的本輪列指名本檔為逐檔清單的家  round-label-ok
+    # （⇒ 指針稽核），且本檔承載本輪 `guard-total:` 標記（`_GUARD_TOTAL_DOC_GLOBS`
+    # 掃描面之一）⇒ 同時是行數棘輪的文件側對帳站點。即刻登記，不等下一輪。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R106_Scan_Findings.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/{CrossPlatform,Quota}_*.md`。這**不是**把具名

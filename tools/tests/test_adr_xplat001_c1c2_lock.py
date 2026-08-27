@@ -695,7 +695,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 6231,
+    "test_adr_xplat001_c1c2_lock.py": 6251,
     "test_archive_defect_log.py": 4008,
     "test_bash32_compat.py": 970,
     "test_bash_probe_spec_contract.py": 983,
@@ -704,7 +704,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_bootstrap_ps1.py": 160,
     "test_check_defect_log_crossref.py": 3722,
     "test_check_gha_action_versions.py": 295,
-    "test_check_hooks_liveness.py": 3598,
+    "test_check_hooks_liveness.py": 3604,
     "test_check_pytest_baseline_sites.py": 301,
     "test_check_script_parity.py": 2098,
     "test_check_wrapper_thinness.py": 1234,
@@ -742,7 +742,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_python_c_percent_shim.py": 119,
     "test_quota_policy.py": 3055,
     "test_root_infra_parity.py": 441,
-    "test_run_root_unittests.py": 2190,
+    "test_run_root_unittests.py": 2193,
     "test_sanitize_component_frozen_sdd_versions_lock.py": 340,
     "test_schedule_capability_parity.py": 635,
     "test_script_scan_surface_ssot.py": 391,
@@ -1152,6 +1152,21 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "[非淨減法輪][同輪追加] 帳本狀態欄回填 fixed@R105 觸發 test_platform_neutral_paths.py"
      " 的 _DIRENT_UNGUARDED_DEBT（41→42，新增回歸測試多用一次既有 .replace() 慣用句式）＋"
      "本檔自身編修 +8。逐項見 CrossPlatform_R105_FourParty_Fix.md。"),
+    ("R106", 88656, 88674, 18,
+     "[非淨減法輪] windows-compat-ci／root-infra-ci 兩筆真缺陷修復（R105 交接留給 Windows"
+     "11 輪的兩個獨立問題）：test_check_hooks_liveness.py +6（Stop guard 的 native／alien"
+     "分類測試補平台感知——真子行程無 on_windows 注入接縫，原版寫死 POSIX 方向在"
+     "windows-compat-ci 真機上必然反過來）；test_run_root_unittests.py +3"
+     "（_WINDOWS_SKIP_TAG_EXEMPT 補上具名豁免後首次非空，兩處合成樹測試需隔離活體"
+     "全域表避免被污染而假紅）；本檔自身 +9（本稽核列本身）。合法出口逐條實查：無死碼"
+     "可刪、抽共用層不適用（皆為既有測試方法內針對真實平台差異的修正，無等量舊邏輯可"
+     "退場）。逐項見 CrossPlatform_R106_Scan_Findings.md。"),
+    ("R106", 88674, 88679, 5,
+     "[非淨減法輪][同輪追加] 本檔自身逐檔漂移——來源是 _FROZEN_PREFIX_REWRITE_LEDGER"
+     "追加列（DEF-101-561）與本稽核列本身。逐項見 CrossPlatform_R106_Scan_Findings.md。"),
+    ("R106", 88679, 88685, 6,
+     "[非淨減法輪][同輪追加] 本檔自身逐檔漂移——來源是 _PHASE2_REVIEW_LOG 追加列"
+     "（重新武裝下一個 5 輪視窗）與本稽核列本身。逐項見 CrossPlatform_R106_Scan_Findings.md。"),
 )
 
 
@@ -1365,10 +1380,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 67
+_REPIN_LOG_FROZEN_PREFIX_LEN = 70
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "a64463e662c1a8bbc43ceadb36b9dc3188c495f7132b303e1c7be0a28181f5e8")
+    "c77fb8d45cdbafcdcffa2bc24efc07a46a1f1be7d8ff8ba8d51bd61358f2ffc6")
 
 
 def repin_log_history_digest(
@@ -1444,7 +1459,9 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # DEF-200-202：帳本狀態欄回填 fixed@R105 觸發 dirent-primitive 債表 round-label-ok
     # 微幅上升，同體例「追加後立即自我凍結」——本輪追加一列，prefix_len 66→67
     # 涵蓋本列本身。
-    ("R105", "a520bdcef8b7", "a64463e662c1", "DEF-200-202"),)
+    ("R105", "a520bdcef8b7", "a64463e662c1", "DEF-200-202"),
+    ("R106", "a64463e662c1", "c77fb8d45cdb", "DEF-101-561"),
+)
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。
 #: 往後指紋每變一次，都要能從本值出發、經 `_FROZEN_PREFIX_REWRITE_LEDGER` 逐列鏈接
@@ -5567,6 +5584,9 @@ _PHASE2_REVIEW_LOG: tuple[tuple[int, str, str], ...] = (
      "Phase 2 方向 (a) 落地（ADR-XPLAT-013）：`check_loc_budget.count_loc()` 改為以分類器的"
      "斷言桶計價 ⇒ 觀測欄位自此參與 rc／violations，阻斷模式對這一個方向已生效。方向 (b)(c) "
      "未落地、交棒收尾單人窗口，故視窗依 §6 重新武裝一次（到期輪隨末列前移）。"),
+    (106, "[維持觀察]",
+     "本輪是 windows-compat-ci／root-infra-ci 兩筆跨平台缺陷修復輪，未觸碰 ADR-XPLAT-013"
+     "方向 (b)(c)，亦未提出新 Phase 2 提案，依 §6 重新武裝下一個視窗。"),
 )
 #: 到期輪由末列導出、不另立常數（一份知識一個家；同 `_REPIN_NET_CAP_SCHEDULE` 的
 #: 「生效點＝首列、現值＝末列，皆由表導出」）。

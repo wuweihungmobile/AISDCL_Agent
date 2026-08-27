@@ -136,9 +136,8 @@
     ]
   },
   "tools/tests@win32": {
-    "measured-at": "2026-08-26T16:37:44+00:00",
+    "measured-at": "2026-08-27T03:43:40+00:00",
     "skipped": [
-      "test_context_budget_guard.ConsoleFreeSpawnTest.test_the_prelude_really_stops_the_evidence_from_degrading",
       "test_dev_start.TestBootstrapProcessGroupSurvivesDirectChildKill.test_lock_stays_busy_via_killpg_while_any_grandchild_alive_then_clears",
       "test_dev_start.TestMacNightlyCoverageContinuity.test_continuous_coverage_reports_green",
       "test_dev_start.TestMacNightlyCoverageContinuity.test_gap_days_are_listed_by_date",
@@ -173,6 +172,7 @@
       "test_dev_start.TestNormalBootstrapFlowUnaffectedByProcessGroupChange.test_successful_bootstrap_with_short_lived_grandchild_releases_lock_cleanly",
       "test_dev_start.TestPickPythonGeMin.test_candidate_chain_word_splits_under_zsh",
       "test_dev_start.TestSigintForwardsToBootstrapProcessGroup.test_real_sigint_terminates_direct_child_and_grandchild",
+      "test_dev_start.TestStepSwitchCacheCleanup.test_env_changed_removes_cache_dir_and_symlink",
       "test_dev_start.TestStreamNewProcessGroup.test_new_process_group_false_does_not_isolate",
       "test_dev_start.TestStreamNewProcessGroup.test_posix_child_pid_equals_its_own_pgid",
       "test_dev_start.TestStreamNewProcessGroupSurvivesDirectChildDeath.test_killpg_survives_direct_child_kill_while_grandchild_alive",
