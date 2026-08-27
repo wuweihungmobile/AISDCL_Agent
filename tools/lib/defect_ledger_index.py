@@ -710,7 +710,22 @@ OVERSIZE_ROW_CEILING = 45
 #: `DEF-200-190` 新增列入使超標總量增加；`DEF-101-676` 因 `test_archive_defect_log.py`
 #: 硬性要求留在主檔作掃描標的而事後保留（未超標，不影響本值）。當回合對真實主檔
 #: 逐字實測 `sum(n - ROW_MAX_BYTES for n in over.values())` 直接填入、零推算。
-OVERSIZE_ROW_EXCESS_CEILING = 40759
+#: 🔴 R82（`DEF-101-752`）重釘 **40759 → 37082**（−3677，當回合實測值直接填入、零推算）。
+#: 淨額**只有降沒有升**：`DEF-101-752` 一列狀態欄瘦身成索引（欄內長文逐字搬進
+#: `docs/06_quality/CrossPlatform_R82_DEF101752_Untracked_Scan_Closure.md`），該列仍在
+#: `OVERSIZE_ROW_GRANDFATHERED`（瘦身後仍 >700 bytes，membership 不變），僅超標量下降；
+#: 本輪未動任何其他豁免列。
+#: 🔴 收尾窗口重釘 **37082 → 37081**（−1，當回合實測值直接填入、零推算）。來源單一：
+#: `DEF-200-190` 狀態欄複審後由 `fixed@R100` 退回 `open`（覆蓋範圍疑點未消，見該列），
+#: 附記改寫較舊版精簡 1 byte；該列仍在 `OVERSIZE_ROW_GRANDFATHERED`（960 bytes，membership
+#: 不變），僅超標量下降。本輪未動任何其他豁免列。
+#: 🔴 帳本結案輪重釘 **37081 → 37058**（−23，當回合實測值直接填入、零推算）。來源＝
+#: `DEF-101-752` 一列的指標句：改名 `docs/06_quality/DEF101752_R82_Untracked_Scan_
+#: Closure.md` → `CrossPlatform_R82_DEF101752_Untracked_Scan_Closure.md`（+14 bytes，
+#: 修正登記面／發現面不一致），同一次變更內把該列另一段已在具名證據檔重複交代的冗句
+#: （macos_smoke_local.sh 排除理由的括號附註）刪掉（−37 bytes）抵銷，淨額 −23。該列
+#: 仍在 `OVERSIZE_ROW_GRANDFATHERED`，僅超標量下降；本輪未動任何其他豁免列。
+OVERSIZE_ROW_EXCESS_CEILING = 37058
 
 
 def oversize_row_problems(ledger_text: str) -> list[str]:

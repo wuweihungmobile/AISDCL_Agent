@@ -1,6 +1,30 @@
 # R106 掃描發現 — Windows 11 交接兩筆跨平台真缺陷收斂
 
-<!-- guard-total:R106 --> **本輪護欄層累積淨額（稽核痕跡合計，同輪多列合併）＝ 88656 → 88698（+42）**
+<!-- guard-total:R106 --> **本輪護欄層累積淨額（稽核痕跡合計，同輪多列合併）＝ 88656 → 89125（+469）**
+
+## 附記（DEF-101-752 收斂）
+
+本輪稍後又追加一筆與上述兩項 Windows 11 真機修復無關的獨立收斂：`DEF-101-752`
+（驗證載具掃描面 untracked 盲區）的殘餘承接站點本輪收斂，多支 `tools/tests/` 掃描面
+函式由 tracked-only 改為 tracked ∪ untracked-not-ignored。逐站點紅綠實測與跳過站點
+理由見 `docs/06_quality/CrossPlatform_R82_DEF101752_Untracked_Scan_Closure.md`；護欄層淨額
+88698 → 88817（+119，含本檔自身逐檔漂移與凍結前綴延伸，逐筆重釘過程已收斂合併為
+單列）已併入上方總量。
+
+## 附記二（帳本結案輪修復包補 DEF-101-752 問題 3）
+
+帳本結案輪的四方複審修復包為 `DEF-101-752` 殘餘站點（見上一節）逐一補上永久回歸測試
+類別（驗證 untracked 探針真的被掃描面看見），落地時未同步重釘護欄層行數棘輪，讓
+淨額 +287 一度不出現在任何地方（ARCH-01 同型復發）。逐檔更動：
+`test_windowsapps_guard_cross_consistency.py` +38、`test_ps1_bom.py` +36、
+`test_bash32_compat.py` +35、`test_ps51_compat.py` +35、
+`test_windows_forbidden_filename_parity.py` +40、`test_find_git_bash_parity.py` +25、
+`test_workflow_permission_concurrency_lock.py` +37、
+`test_windowsapps_guard_bash_parity.py` +41。合法出口逐條實查：刪死碼不適用（新增的是
+此前不存在的永久回歸鎖，無等量舊邏輯可退場）、抽共用層不適用（逐站各自守自己站點的
+既有 union 掃描面，測試形狀各異無法合併）。本輪就地重釘後護欄層淨額
+88817 → 89125（+308，含本檔自身逐檔漂移與凍結前綴延伸，逐筆重釘過程已收斂合併為
+三列）已併入上方總量。
 
 ## 背景
 

@@ -8,6 +8,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
+import time
 import uuid
 from contextlib import suppress
 from dataclasses import asdict
@@ -38,6 +40,39 @@ _SUFFIX = ".checkpoint.json"
 # 最新）。刻意不進 `*{_SUFFIX}` 的 glob 面 ⇒ list_recent_checkpoints 不會把它們當獨立條目。
 STATE_RETAIN_VERSIONS = max(0, min(9, int(
     os.environ.get("AUTOCLAUDE_STATE_RETAIN_VERSIONS", "2") or 0)))
+
+
+#: DEF-200-226：`.tmp` 檔名自 DEF-200-043 起帶 pid+uuid4，寫入中途行程崩潰
+#: （OOM／SIGKILL）留下的 tmp 不再被「下一次同 playbook_id 寫入」自然覆蓋清理，
+#: 會逐次累積孤兒檔。正常寫入的 tmp 檔案齡是毫秒級，遠低於此門檻，故只清「夠舊」
+#: 的檔不會誤刪正在進行中的併發寫入。
+_STALE_TMP_SECONDS = 3600
+
+
+#: `tmp_p` 的實際命名格式（見 `save_checkpoint`）：`{stem}.{pid}.{uuid4().hex}.tmp`。
+#: pid 恆為十進位數字、`uuid4().hex` 恆為小寫十六進位字串——兩者的字元集皆不含 `.`，
+#: 故以 `.` 分隔後可精確反解，不會與 `stem` 本身混淆。
+_ORPHAN_TMP_SUFFIX_RE = r"\.\d+\.[0-9a-f]+\.tmp\Z"
+
+
+def _cleanup_orphan_tmp(p: Path) -> None:
+    """清掉 `p` 這個 checkpoint 路徑遺留的孤兒 `.tmp` 檔（見 `_STALE_TMP_SECONDS`）。
+
+    🔴 `glob(f"{p.stem}.*.tmp")` 本身是**前綴**匹配：若某個 playbook 的 sanitized
+    stem 恰好是另一個 playbook stem 的前綴（例如 `nightly_run.checkpoint` 是
+    `nightly_run.checkpoint.retry.checkpoint.json` 的前綴），寬鬆的 `*` 會連對方的
+    孤兒 tmp 一併掃進來、進而誤刪——SD 已用兩個 playbook 實際重現。改用
+    `re.fullmatch()` 精確比對 `p.stem` 之後緊接的 tmp 檔名格式（見 `_ORPHAN_TMP_SUFFIX_RE`），
+    只有 stem 逐字相等的檔案才會被當成 `p` 自己的孤兒；glob 只用來縮小候選集合，
+    不再是唯一的判準。
+    """
+    pattern = re.compile(re.escape(p.stem) + _ORPHAN_TMP_SUFFIX_RE)
+    for orphan in p.parent.glob(f"{p.stem}.*.tmp"):
+        if not pattern.fullmatch(orphan.name):
+            continue
+        with suppress(OSError):
+            if time.time() - orphan.stat().st_mtime > _STALE_TMP_SECONDS:
+                orphan.unlink()
 
 
 def retained_paths(p: Path) -> list[Path]:
@@ -106,6 +141,7 @@ class FileStateRepository:
         """符合 StateRepositoryPort 契約：回傳 None。"""
         try:
             p = self._path(playbook_id)
+            _cleanup_orphan_tmp(p)
             checkpoint.saved_at = datetime.now().isoformat(timespec="seconds")
             payload = asdict(checkpoint)
             # 刻意**不**回寫 `checkpoint.checksum_sha256`：那是對呼叫端傳進來的物件

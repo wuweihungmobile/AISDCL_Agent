@@ -76,6 +76,7 @@ import subprocess
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 _TESTS_DIR = Path(__file__).resolve().parent
 _REPO_ROOT = _TESTS_DIR.parents[1]
@@ -140,18 +141,28 @@ def _latest_root() -> Path:
 
 
 def _git_tracked_ps1(rel_prefix: str) -> list[str]:
-    """該樹下 git-tracked `*.ps1` 相對路徑（git 失敗即 AssertionError）。"""
-    proc = subprocess.run(
-        ["git", "-C", str(_REPO_ROOT), "-c", "core.quotePath=false",
-         "ls-files", "--", f"{rel_prefix}/*.ps1"],
-        capture_output=True, text=True, encoding="utf-8", errors="replace",
-    )
-    if proc.returncode != 0:
-        raise AssertionError(
-            f"git ls-files 失敗（{rel_prefix}；rc={proc.returncode}；"
-            f"stderr={proc.stderr.strip()!r}）——掃描邊界不得靜默縮小"
+    """該樹下 git tracked ∪ untracked-not-ignored 的 `*.ps1` 相對路徑（git 失敗
+    即 AssertionError）。
+
+    🔴 R82（`DEF-101-752`）：原本只認 tracked，尚未 `git add` 的新 `.ps1` 天生
+    不可見（同姊妹鎖 `test_bash32_compat.py`／`test_ps1_bom.py` 已修復的同型
+    fail-open）。加 `-o --exclude-standard` 一併掃 untracked-not-ignored，
+    `.gitignore` 排除的 `.venv`／快取不受影響。
+    """
+    rels: set[str] = set()
+    for extra_args in (("--",), ("-o", "--exclude-standard", "--")):
+        proc = subprocess.run(
+            ["git", "-C", str(_REPO_ROOT), "-c", "core.quotePath=false",
+             "ls-files", *extra_args, f"{rel_prefix}/*.ps1"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
         )
-    return sorted(line for line in proc.stdout.splitlines() if line)
+        if proc.returncode != 0:
+            raise AssertionError(
+                f"git ls-files 失敗（{rel_prefix}；rc={proc.returncode}；"
+                f"stderr={proc.stderr.strip()!r}）——掃描邊界不得靜默縮小"
+            )
+        rels.update(line for line in proc.stdout.splitlines() if line)
+    return sorted(rels)
 
 
 # per-tree 檔數下限。R79 ARCH：本表原為本檔自持的字面值（理由「各鎖自己的靈敏度
@@ -558,6 +569,40 @@ class TestPs51BehaviouralLockCannotSilentlyVanish(unittest.TestCase):
             "skip，PS 5.1 覆蓋退回純靜態掃描。powershell.exe 是 Windows 內建、且是本 "
             "repo 文件教使用者用的引擎，解析不到代表 PATH 已壞（典型：System32 被移出 "
             "PATH）——請修環境，不要改本鎖的述詞",
+        )
+
+
+class TestGitTrackedPs1ScanSurfaceCoversUntracked(unittest.TestCase):
+    """DEF-101-752 站點覆蓋（問題 3，永久回歸鎖）：`_git_tracked_ps1()` 的 union
+    迴圈必須真的把 `-o --exclude-standard`（untracked-not-ignored）那一次 `git
+    ls-files` 呼叫的結果併進最終回傳值，不是只呼叫了卻沒接住。此前只靠人工注入
+    探針檔案驗證、事後刪除，沒有留下永久回歸測試——本 class 機械化、常駐化。
+
+    手法：`unittest.mock.patch("subprocess.run")` 依 argv 是否帶 `-o` 分流兩次
+    `git ls-files` 呼叫的假輸出，不需要真的建立磁碟上的 disposable git repo。
+    """
+
+    @staticmethod
+    def _fake_run(tracked_line: str, untracked_line: str):
+        def _run(argv, *args, **kwargs):
+            stdout = untracked_line if "-o" in argv else tracked_line
+            return subprocess.CompletedProcess(argv, 0, stdout=stdout + "\n", stderr="")
+        return _run
+
+    def test_untracked_not_ignored_hit_is_included_in_the_final_scan_surface(self) -> None:
+        with mock.patch(
+            "subprocess.run",
+            side_effect=self._fake_run(
+                "tools/probe_tracked.ps1", "tools/probe_untracked_only.ps1"
+            ),
+        ):
+            rels = _git_tracked_ps1("tools")
+        self.assertIn(
+            "tools/probe_tracked.ps1", rels, "tracked-only 呼叫的結果沒有被併進最終清單")
+        self.assertIn(
+            "tools/probe_untracked_only.ps1", rels,
+            "`-o --exclude-standard`（untracked-not-ignored）呼叫的結果沒有被併進"
+            "最終清單——union 邏輯若退化成只認 tracked 呼叫，本測試會抓到",
         )
 
 

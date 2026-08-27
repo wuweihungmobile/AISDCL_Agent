@@ -1,5 +1,8 @@
 """子專案 import 邊界鎖：AISDLC_SDD ↮ AutoClaude 不得互相 import（R69）.
 
+決策依據：`docs/04_planning/ADR/ADR-XPLAT-010-root-subproject-boundary.md` §2.1
+（追認式決策紀錄，DEF-101-748 指名的雙向可追回指）。
+
 WHY 這道鎖存在（真實付出的代價，非前瞻假設）：
 `AISDLC_SDD` 與 `AutoClaude` 是兩個**獨立可發布**子專案（各自 `releases/` 打包、各自
 CI 相依清單），根 CLAUDE.md 明文載明。R68 有兩處測試越界直接 import AutoClaude 生產

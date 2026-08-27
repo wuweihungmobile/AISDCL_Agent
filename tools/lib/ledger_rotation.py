@@ -45,9 +45,20 @@ OVERSIZE_ROW_CEILING_HISTORY: tuple[int, ...] = (105, 101, 98, 85, 83, 66, 63, 6
 #: 40889 → 40884（帳本本輪措辭精簡使既有超標列略瘦，非本輪新增列所致）。
 #: 追加 40759：帳本 8 筆缺陷狀態欄回填 fixed@R105（四方複審 REJECT 修復）改用  round-label-ok
 #: 「見具名證據檔」極簡指標句，既有超標列（含 DEF-101-402）淨瘦身。
+#: 追加 37082（R82，`DEF-101-752`）：該列狀態欄瘦身成索引（欄內長文搬進
+#: `docs/06_quality/CrossPlatform_R82_DEF101752_Untracked_Scan_Closure.md`），仍在
+#: `OVERSIZE_ROW_GRANDFATHERED`（瘦身後仍 >700 bytes），僅超標量下降。
+#: 追加 37081：`DEF-200-190` 狀態欄由 `fixed@R100` 退回 `open`（覆蓋範圍疑點未消），
+#: 改寫後較舊版精簡 1 byte，該列仍在 `OVERSIZE_ROW_GRANDFATHERED`。
+#: 追加 37058：帳本結案輪修復包重釘。`DEF-101-752` 指標句改名 `docs/06_quality/
+#: DEF101752_R82_Untracked_Scan_Closure.md` → `CrossPlatform_R82_DEF101752_
+#: Untracked_Scan_Closure.md`（+14 bytes，修正登記面／發現面不一致）；同一次變更內
+#: 把同一列已在具名證據檔重複交代的冗句刪掉（−37 bytes）抵銷，該列仍在
+#: `OVERSIZE_ROW_GRANDFATHERED`，淨額下降 23。
 OVERSIZE_ROW_EXCESS_CEILING_HISTORY: tuple[int, ...] = (
     162282, 147944, 147455, 146210, 143303, 140957, 138938, 138936, 123867,
-    121758, 82896, 77186, 75047, 69122, 48864, 40889, 40884, 40759,
+    121758, 82896, 77186, 75047, 69122, 48864, 40889, 40884, 40759, 37082,
+    37081, 37058,
 )
 # 🔴 誠實劃界：本序列只收錄 `check_defect_log_crossref.py` 註解**自己留下證據**的那幾次
 # （34→28 見該檔 R80 包 C 段、17 見「第六次轉動」段、6 為 R82 實測）。第三～第五次轉動的
@@ -85,7 +96,8 @@ _SEALED_HISTORY_PREFIXES: dict[str, tuple[int, ...]] = {
     "OVERSIZE_ROW_CEILING": (105, 101, 98, 85, 83, 66, 63, 62),
     "OVERSIZE_ROW_EXCESS_CEILING": (
         162282, 147944, 147455, 146210, 143303, 140957, 138938, 138936, 123867,
-    121758, 82896, 77186, 75047, 69122, 48864, 40889, 40884,
+    121758, 82896, 77186, 75047, 69122, 48864, 40889, 40884, 40759, 37082,
+    37081,
     ),
     # 帳本減半波：史料尾端追加 0，故把 2 一併封入（同上，只在尾端延長、零改寫）。
     "_UNPINNED_HANDOVER_CEILING": (34, 28, 17, 6, 5, 4, 2),
@@ -135,14 +147,23 @@ def seal_table_digest(seals: Mapping[str, tuple[int, ...]]) -> str:
 #: 延長一格納入 40889（8+16+7=31），當回合實測值直接填入。
 #: 🔴 同窗口帳本狀態欄回填續（DEF-101-402 瘦身）重釘 **31 → 32**：`OVERSIZE_ROW_
 #: EXCESS_CEILING` 封印再延長一格納入 40884（8+17+7=32），當回合實測值直接填入。
-_SEAL_TOTAL_MIN_LEN = 32
+#: 🔴 R82（`DEF-101-752`）重釘 **32 → 33**：`OVERSIZE_ROW_EXCESS_CEILING` 封印再延長
+#: 一格納入 40759（8+18+7=33），當回合實測值直接填入。
+#: 🔴 收尾窗口重釘 **33 → 34**：`OVERSIZE_ROW_EXCESS_CEILING` 封印再延長一格納入 37082
+#: （8+19+7=34），當回合實測值直接填入。
+#: 🔴 帳本結案輪修復包重釘 **34 → 35**：`OVERSIZE_ROW_EXCESS_CEILING` 封印再延長一格
+#: 納入 37081（8+20+7=35），當回合實測值直接填入。
+_SEAL_TOTAL_MIN_LEN = 35
 
 #: 封印表的內容摘要（`seal_table_digest(_SEALED_HISTORY_PREFIXES)` 的當回合實測值）。
 #: 追加新值到某條封印是合法動作，但必須在**同一次變更內**把上面那個長度與這個摘要一起
 #: 重釘——不重釘即紅，故「改封印」在結構上不可能是無聲的。
 #: 🔴 帳本收斂輪（archive_67）重釘（封印延長導致摘要改變，當回合 `seal_table_digest()` 實測值）。
 #: 🔴 DEF-200-202 四方複審修復窗口再重釘（同上理由，當回合 `seal_table_digest()` 實測值）。
-_SEAL_TABLE_SHA256 = "6f23a48fdcba3be4"
+#: 🔴 R82（`DEF-101-752`）重釘（封印延長納入 40759，當回合 `seal_table_digest()` 實測值）。
+#: 🔴 收尾窗口重釘（封印延長納入 37082，當回合 `seal_table_digest()` 實測值）。
+#: 🔴 帳本結案輪修復包重釘（封印延長納入 37081，當回合 `seal_table_digest()` 實測值）。
+_SEAL_TABLE_SHA256 = "ac1230e3db39aa60"
 
 
 def seal_table_problems(

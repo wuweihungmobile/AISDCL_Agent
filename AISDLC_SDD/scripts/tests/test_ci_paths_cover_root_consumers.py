@@ -1591,14 +1591,19 @@ def test_root_infra_ci_bash_and_py_scan_roots_have_no_stray_scripts():
     若日後在 monorepo 根新增另一個含 .sh／.py 腳本、且不屬於 AutoClaude/、
     AISDLC_SDD/、.claude/ 的目錄，該目錄會完全逃過 root-infra-ci 的守門而不自知
     ——與 DEF-101-042／DEF-101-068(a) 同一類「消費者存在但守門忘了看它」缺陷，
-    只是發生在掃描根目錄清單而非觸發 paths 清單。本鎖機械斷言：git 追蹤的全部
-    .sh／.py 檔，扣除上述三個有獨立覆蓋的子專案／目錄後，必須全部落在 tools/
-    之下。豁免依據見 `_ROOT_INFRA_SCAN_EXEMPT_PREFIXES` 上方註解（R56 修正：
-    `.sh` 靠第 1 道全庫 bash -n、`.py` 靠 AutoClaude ruff/pytest 與 AISDLC_SDD
-    ci-gate；「子專案 hook 把關 .sh」已被 R56 實查證偽，勿再援引）。
+    只是發生在掃描根目錄清單而非觸發 paths 清單。本鎖機械斷言：git（tracked ∪
+    untracked-not-ignored）的全部 .sh／.py 檔，扣除上述三個有獨立覆蓋的子專案／
+    目錄後，必須全部落在 tools/ 之下。豁免依據見 `_ROOT_INFRA_SCAN_EXEMPT_PREFIXES`
+    上方註解（R56 修正：`.sh` 靠第 1 道全庫 bash -n、`.py` 靠 AutoClaude ruff/pytest
+    與 AISDLC_SDD ci-gate；「子專案 hook 把關 .sh」已被 R56 實查證偽，勿再援引）。
+
+    🔴 R82（`DEF-101-752`）：原本只走 `_git_ls_files`（tracked-only），改用本檔已有的
+    `_git_enumerate`（`:1514` 起，`DEF-101-752` 在本 repo 最早封閉此盲區的先例——
+    tracked ∪ untracked-not-ignored）而非另寫一份複本；尚未 `git add` 的無主新腳本
+    現在也會被本鎖看到。
     """
     for ext in (".sh", ".py"):
-        tracked = _git_ls_files(f"*{ext}")
+        tracked = _git_enumerate(f"*{ext}")
         stray = [
             p
             for p in tracked

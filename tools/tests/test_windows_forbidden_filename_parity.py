@@ -41,6 +41,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 _TOOLS_DIR = REPO_ROOT / "tools"
@@ -649,8 +650,10 @@ class TestEscalationModulesReuseSharedSanitizer(unittest.TestCase):
 #     `test_*.py`；測試檔出現清單是「對 SSOT 做斷言」，沿用姊妹檔 `_is_test_py` 同款判準）；
 #     ② 凍結版 v0.01~v0.29（Copy-on-Evolve 不回改）——實測當前凍結版內**零**錨命中，故該
 #     分支改以等價路徑實測：把 LATEST 傳成不存在的版本號後，v0.30 整棵樹 105 份候選（含真實
-#     錨命中的生產檔 `counterfactual_replay.py`）全數掉出候選面；③ 尚未 `git add` 的新檔
-#     （ls-files 固有性質）；④ 三種副檔名與三處 hook 目錄之外的檔案（`*.md`／`*.yml` 刻意不
+#     錨命中的生產檔 `counterfactual_replay.py`）全數掉出候選面；③（R82 訂正，`DEF-101-752`：
+#     原「尚未 `git add` 的新檔——ls-files 固有性質」已改列入【已實測涵蓋】——`_ntfs_scan_candidates`
+#     現以 `-o --exclude-standard` 併掃 untracked-not-ignored，未 add 的新檔不再是盲區）；
+#     ④ 三種副檔名與三處 hook 目錄之外的檔案（`*.md`／`*.yml` 刻意不
 #     納入：帳本與文件遍地提及——實測 tracked `*.md`/`*.yml` 中錨命中 6 份，納入只製造偽陽性）。
 #     ⑤（R59 SD-R59-02 補，實測）**跨行排版與非正典順序的第 5 份實作**：兩錨都要求
 #     字面依序出現且間隙 ≤5 字元，故 PEP8 4 空白縮排的「一名一行」寫法必逃（間隙 8>5）、
@@ -746,24 +749,31 @@ def _normalize_latest(rel: str, latest_name: str) -> str:
 
 
 def _ntfs_scan_candidates(latest_name: str) -> list[str]:
-    """候選檔＝git tracked ∩（三種副檔名 ∪ 三處 hook 目錄），扣除凍結版與測試檔。
+    """候選檔＝git（tracked ∪ untracked-not-ignored）∩（三種副檔名 ∪ 三處 hook 目錄），
+    扣除凍結版與測試檔。
 
     用 `git ls-files` 而非 `rglob`（天然排除 `.git`／`.venv`／`__pycache__`）；rc≠0 一律
     fail-loud，**不可**靜默回空——掃描邊界不得靜默縮小（姊妹檔 `_tracked_files()` 判準）。
+
+    🔴 R82（`DEF-101-752`）：本檔頭〈已實測不涵蓋〉③曾明文記載「尚未 `git add` 的新檔
+    （ls-files 固有性質）」為已知邊界，但姊妹鎖已證明那是真 fail-open（R69 的
+    `platform_caps.py` 全程 untracked，躲過四輪複審）。加 `-o --exclude-standard`
+    納入 untracked-not-ignored，`.gitignore` 排除的 `.venv`／快取不受影響。
     """
-    proc = subprocess.run(
-        ["git", "-C", str(REPO_ROOT), "-c", "core.quotepath=false", "ls-files", "-z",
-         "--", *_SCAN_PATHSPECS, *_NTFS_HOOK_DIRS],
-        capture_output=True, text=True, encoding="utf-8", errors="replace",
-    )
-    if proc.returncode != 0:
-        raise AssertionError(
-            f"git ls-files 失敗（rc={proc.returncode}；stderr={proc.stderr.strip()!r}）"
-            "——掃描邊界不得靜默縮小"
+    candidates: set[str] = set()
+    for extra_args in ((), ("-o", "--exclude-standard")):
+        proc = subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "-c", "core.quotepath=false", "ls-files",
+             *extra_args, "-z", "--", *_SCAN_PATHSPECS, *_NTFS_HOOK_DIRS],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
         )
-    non_test = [
-        rel for rel in proc.stdout.split("\0") if rel and not _is_ntfs_test_file(rel)
-    ]
+        if proc.returncode != 0:
+            raise AssertionError(
+                f"git ls-files 失敗（rc={proc.returncode}；stderr={proc.stderr.strip()!r}）"
+                "——掃描邊界不得靜默縮小"
+            )
+        candidates.update(rel for rel in proc.stdout.split("\0") if rel)
+    non_test = [rel for rel in candidates if not _is_ntfs_test_file(rel)]
     # 凍結版依 Copy-on-Evolve 鐵律不回改，不被新規則追殺歷史快照。
     return sdd_latest.exclude_frozen_sdd_versions(non_test, latest_name)
 
@@ -999,6 +1009,45 @@ class TestSddSanitizeComponentVsLoggerSecurityParity(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertEqual(self.ours(name), name)
                 self.assertEqual(self.theirs(name), name)
+
+
+class TestNtfsScanCandidatesScanSurfaceCoversUntracked(unittest.TestCase):
+    """DEF-101-752 站點覆蓋（問題 3，永久回歸鎖）：`_ntfs_scan_candidates()` 的
+    union 迴圈必須真的把 `-o --exclude-standard`（untracked-not-ignored）那一次
+    `git ls-files -z` 呼叫的結果併進最終回傳值，不是只呼叫了卻沒接住。此前只靠
+    人工注入探針檔案驗證、事後刪除，沒有留下永久回歸測試——本 class 機械化、常駐化。
+
+    手法：`unittest.mock.patch("subprocess.run")` 依 argv 是否帶 `-o` 分流兩次
+    `git ls-files -z` 呼叫的假輸出（NUL 分隔），不需要真的建立磁碟上的 disposable
+    git repo；假路徑刻意避開 `_is_ntfs_test_file()`（不含 `/tests/`、檔名不以
+    `test_` 開頭）與凍結版路徑，才不會被後續過濾層擋掉。
+    """
+
+    @staticmethod
+    def _fake_run(tracked_line: str, untracked_line: str):
+        def _run(argv, *args, **kwargs):
+            stdout = untracked_line if "-o" in argv else tracked_line
+            return subprocess.CompletedProcess(argv, 0, stdout=stdout + "\0", stderr="")
+        return _run
+
+    def test_untracked_not_ignored_hit_is_included_in_the_final_scan_surface(self) -> None:
+        latest_name = _latest_sdd_version_name()
+        with mock.patch(
+            "subprocess.run",
+            side_effect=self._fake_run(
+                "tools/probe_tracked.py", "tools/probe_untracked_only.py"
+            ),
+        ):
+            candidates = _ntfs_scan_candidates(latest_name)
+        self.assertIn(
+            "tools/probe_tracked.py", candidates,
+            "tracked-only 呼叫的結果沒有被併進最終清單",
+        )
+        self.assertIn(
+            "tools/probe_untracked_only.py", candidates,
+            "`-o --exclude-standard`（untracked-not-ignored）呼叫的結果沒有被併進"
+            "最終清單——union 邏輯若退化成只認 tracked 呼叫，本測試會抓到",
+        )
 
 
 if __name__ == "__main__":

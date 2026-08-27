@@ -57,6 +57,7 @@ import subprocess
 import sys
 import unittest
 from pathlib import Path, PurePosixPath
+from unittest import mock
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _GUARD_SH = _REPO_ROOT / "tools" / "lib" / "windowsapps_guard.sh"
@@ -209,9 +210,20 @@ def _has_unmigrated_raw_check(text: str) -> bool:
 
 
 def _tracked_sh_files() -> list[str]:
-    """git tracked 的全部 `*.sh` repo-relative 路徑（含子專案），比照既有
-    `test_windowsapps_guard_cross_consistency.py::_tracked_files` 慣例，用
-    `git ls-files` 而非 `Path.rglob`（天然排除 `.git`/`.venv`/`__pycache__`）。"""
+    """git tracked ∪ untracked-not-ignored 的全部 `*.sh` repo-relative 路徑（含
+    子專案），比照既有 `test_windowsapps_guard_cross_consistency.py::_tracked_files`
+    慣例，用 `git ls-files` 而非 `Path.rglob`（天然排除 `.git`/`.venv`/`__pycache__`）。
+
+    🔴 R82（`DEF-101-752`）：擴為 union 上 `-o --exclude-standard`——尚未 `git add`
+    的新 `.sh` 原本天生不可見（同 `test_platform_utils_dedup.py` 檔頭②事故形狀）。
+    本函式只餵「offender 必須為空」形態的掃描（`test_no_raw_unguarded_python_check_remains`
+    等），加寬掃描面只會多抓真違規，無副作用。**姊妹函式
+    `_tracked_non_sh_shell_scripts()`／`_tracked_files()` 刻意不比照**：它們餵的是
+    `test_hook_dir_roster_matches_repo_state` 這種「名冊 vs 實況」等值斷言，任何本機
+    未加入 git 的草稿 `.sh`（不論放在哪個目錄）都會被判成「名冊外的新 hooks 目錄」而
+    偽陽——那不是同一種掃描語意，需要拆成獨立判準才能安全擴面，非本輪處置範圍（見
+    帳本 `DEF-101-752` 該列）。
+    """
     proc = subprocess.run(
         ["git", "-C", str(_REPO_ROOT), "-c", "core.quotePath=false",
          "ls-files", "--", "*.sh"],
@@ -222,7 +234,21 @@ def _tracked_sh_files() -> list[str]:
             f"git ls-files 失敗（rc={proc.returncode}；stderr={proc.stderr.strip()!r}）"
             "——掃描邊界不得靜默縮小"
         )
-    return [line for line in proc.stdout.splitlines() if line]
+    tracked = [line for line in proc.stdout.splitlines() if line]
+
+    proc_untracked = subprocess.run(
+        ["git", "-C", str(_REPO_ROOT), "-c", "core.quotePath=false",
+         "ls-files", "-o", "--exclude-standard", "--", "*.sh"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    if proc_untracked.returncode != 0:
+        raise AssertionError(
+            f"git ls-files -o --exclude-standard 失敗（rc={proc_untracked.returncode}；"
+            f"stderr={proc_untracked.stderr.strip()!r}）——掃描邊界不得靜默縮小"
+        )
+    untracked = [line for line in proc_untracked.stdout.splitlines() if line]
+
+    return sorted(set(tracked) | set(untracked))
 
 
 # 檔頭 shebang 是否指向某種 shell（`#!/usr/bin/env bash`／`#!/bin/sh`／`#!/bin/zsh`
@@ -900,6 +926,46 @@ class TestBashCallersEnrollment(unittest.TestCase):
             f"command -v 判斷）卻直接呼叫 python/python3 的檔案：{unmigrated}"
             f"——請改用 is_real_python_candidate（source tools/lib/"
             f"windowsapps_guard.sh），或於 _EXEMPT_SH_FILES 附理由登記豁免",
+        )
+
+
+class TestTrackedShFilesScanSurfaceCoversUntracked(unittest.TestCase):
+    """DEF-101-752 站點覆蓋（問題 3，永久回歸鎖）：`_tracked_sh_files()` 的兩次
+    `git ls-files` 呼叫（tracked-only ＋ `-o --exclude-standard`）必須真的把
+    untracked-not-ignored 那一次的結果併進最終回傳值，不是只呼叫了卻沒接住。
+    此前只靠人工注入探針檔案驗證、事後刪除，沒有留下永久回歸測試——本 class
+    機械化、常駐化。
+
+    🔴 誠實劃界：本站點刻意只覆蓋 `_tracked_sh_files()`。姊妹函式 `_tracked_files()`
+    ／`_tracked_non_sh_shell_scripts()` 依其自身 docstring **刻意維持 tracked-only**
+    （帳本 `DEF-101-752` 已記載為需要獨立判準才能安全擴面、非本輪處置範圍），替它們
+    補一個「應含 untracked」的測試會斷言錯誤的行為，故不在本站點處理範圍內。
+
+    手法：`unittest.mock.patch("subprocess.run")` 依 argv 是否帶 `-o` 分流兩次
+    `git ls-files` 呼叫的假輸出，不需要真的建立磁碟上的 disposable git repo。
+    """
+
+    @staticmethod
+    def _fake_run(tracked_line: str, untracked_line: str):
+        def _run(argv, *args, **kwargs):
+            stdout = untracked_line if "-o" in argv else tracked_line
+            return subprocess.CompletedProcess(argv, 0, stdout=stdout + "\n", stderr="")
+        return _run
+
+    def test_untracked_not_ignored_hit_is_included_in_the_final_scan_surface(self) -> None:
+        with mock.patch(
+            "subprocess.run",
+            side_effect=self._fake_run(
+                "probe_tracked.sh", "probe_untracked_only.sh"
+            ),
+        ):
+            rels = _tracked_sh_files()
+        self.assertIn(
+            "probe_tracked.sh", rels, "tracked-only 呼叫的結果沒有被併進最終清單")
+        self.assertIn(
+            "probe_untracked_only.sh", rels,
+            "`-o --exclude-standard`（untracked-not-ignored）呼叫的結果沒有被併進"
+            "最終清單——union 邏輯若退化成只認 tracked 呼叫，本測試會抓到",
         )
 
 

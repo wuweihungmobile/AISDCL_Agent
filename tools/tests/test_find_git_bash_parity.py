@@ -783,16 +783,25 @@ class TestFindGitBashCallSites(unittest.TestCase):
         return strip_ps_comments(text)
 
     def _tracked_ps1(self) -> list[str]:
+        """git tracked ∪ untracked-not-ignored 的 `*.ps1` 相對路徑清單。
+
+        🔴 R82（`DEF-101-752`）：原本只認 tracked，尚未 `git add` 的新呼叫端天生
+        不可見——同姊妹鎖已修復的同型 fail-open（見
+        `test_windowsapps_guard_cross_consistency.py::_tracked_files` 檔頭）。
+        """
         import subprocess
 
-        out = subprocess.run(
-            # `-c core.quotepath=false`（R81 XPL-S1-01）：非 ASCII 路徑的 C-quoted 形態
-            # 會讓下方逐檔讀取拿到打不開的字串（`is_file()` 實測回 False）。
-            ["git", "-c", "core.quotepath=false", "ls-files", "*.ps1"],
-            cwd=_REPO_ROOT, capture_output=True, text=True,
-            encoding="utf-8", errors="replace", check=True,  # 非 UTF-8 終端下的 mojibake 防護
-        ).stdout
-        return [ln for ln in out.splitlines() if ln.strip()]
+        rels: set[str] = set()
+        for extra_args in ((), ("-o", "--exclude-standard")):
+            out = subprocess.run(
+                # `-c core.quotepath=false`（R81 XPL-S1-01）：非 ASCII 路徑的 C-quoted 形態
+                # 會讓下方逐檔讀取拿到打不開的字串（`is_file()` 實測回 False）。
+                ["git", "-c", "core.quotepath=false", "ls-files", *extra_args, "*.ps1"],
+                cwd=_REPO_ROOT, capture_output=True, text=True,
+                encoding="utf-8", errors="replace", check=True,  # 非 UTF-8 終端下的 mojibake 防護
+            ).stdout
+            rels.update(ln for ln in out.splitlines() if ln.strip())
+        return sorted(rels)
 
     def test_call_site_registry_matches_repo_scan(self) -> None:
         """登記表 ≡ 全 repo 實況（等值，非下限）：新增第 4 個呼叫端而未登記 → 紅；
@@ -809,6 +818,31 @@ class TestFindGitBashCallSites(unittest.TestCase):
             f"Find-GitBash 呼叫端實況 {sorted(found)} 與登記 {sorted(self._CALLERS)} "
             "不符——多出者請登記進 `_CALLERS`（並確認它走的是共用 helper 而非自己"
             "重寫偵測），少掉者代表該呼叫端已繞過 S11 抽出的單一真相源",
+        )
+
+    def test_tracked_ps1_scan_surface_covers_untracked_not_ignored(self) -> None:
+        """DEF-101-752 站點覆蓋（問題 3，永久回歸鎖）：`_tracked_ps1()` 的 union
+        迴圈必須真的把 `-o --exclude-standard`（untracked-not-ignored）那一次
+        `git ls-files` 呼叫的結果併進最終回傳值，不是只呼叫了卻沒接住。此前只靠
+        人工注入探針檔案驗證、事後刪除，沒有留下永久回歸測試——本測試機械化、常駐化。
+
+        手法：`unittest.mock.patch("subprocess.run")` 依 argv 是否帶 `-o` 分流
+        兩次 `git ls-files` 呼叫的假輸出，不需要真的建立磁碟上的 disposable git repo。
+        """
+        def _fake_run(argv, *args, **kwargs):
+            stdout = (
+                "probe_untracked_only.ps1\n" if "-o" in argv else "probe_tracked.ps1\n"
+            )
+            return subprocess.CompletedProcess(argv, 0, stdout=stdout, stderr="")
+
+        with mock.patch("subprocess.run", side_effect=_fake_run):
+            rels = self._tracked_ps1()
+        self.assertIn(
+            "probe_tracked.ps1", rels, "tracked-only 呼叫的結果沒有被併進最終清單")
+        self.assertIn(
+            "probe_untracked_only.ps1", rels,
+            "`-o --exclude-standard`（untracked-not-ignored）呼叫的結果沒有被併進"
+            "最終清單——union 邏輯若退化成只認 tracked 呼叫，本測試會抓到",
         )
 
     def test_each_call_site_dot_sources_and_invokes_helper(self) -> None:

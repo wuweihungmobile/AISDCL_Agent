@@ -695,9 +695,9 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 6256,
+    "test_adr_xplat001_c1c2_lock.py": 6289,
     "test_archive_defect_log.py": 4008,
-    "test_bash32_compat.py": 970,
+    "test_bash32_compat.py": 1020,
     "test_bash_probe_spec_contract.py": 983,
     "test_block_destructive_git_r83.py": 2195,
     "test_bootstrap_core.py": 439,
@@ -718,7 +718,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_doc_loc_baseline_freshness_r60.py": 7318,
     "test_extras_quoting_zsh_safety.py": 365,
     "test_failure_log_rotation.py": 80,
-    "test_find_git_bash_parity.py": 1230,
+    "test_find_git_bash_parity.py": 1264,
     "test_gha_action_versions.py": 703,
     "test_git_hooks_install_common.py": 393,
     "test_guard_line_taxonomy_r99.py": 148,
@@ -736,8 +736,8 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_platform_utils_dedup.py": 1123,
     "test_pre_commit_dispatcher_sigpipe.py": 964,
     "test_pre_push_dispatcher.py": 686,
-    "test_ps1_bom.py": 204,
-    "test_ps51_compat.py": 565,
+    "test_ps1_bom.py": 248,
+    "test_ps51_compat.py": 610,
     "test_ps_engine_ssot.py": 954,
     "test_python_c_percent_shim.py": 119,
     "test_quota_policy.py": 3055,
@@ -751,12 +751,12 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_smoke_ci_sync.py": 1350,
     "test_stdio_utf8.py": 76,
     "test_subprocess_encoding_hygiene.py": 1599,
-    "test_windows_forbidden_filename_parity.py": 1005,
+    "test_windows_forbidden_filename_parity.py": 1054,
     "test_windows_nightly_anchor_parity.py": 135,
     "test_windows_smoke_heartbeat_doc_sync.py": 197,
-    "test_windowsapps_guard_bash_parity.py": 907,
-    "test_windowsapps_guard_cross_consistency.py": 2152,
-    "test_workflow_permission_concurrency_lock.py": 1360,
+    "test_windowsapps_guard_bash_parity.py": 973,
+    "test_windowsapps_guard_cross_consistency.py": 2201,
+    "test_workflow_permission_concurrency_lock.py": 1417,
     "test_workflow_schedule_sync.py": 309,
     "test_workflow_timeout_coverage.py": 158,
     "test_worktree_paths.py": 104,
@@ -1172,6 +1172,31 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "test_run_root_unittests.py +8（三處合成樹測試補隔離活體 _WINDOWS_SKIP_TAG_EXEMPT"
      "表，避免非 Windows 平台被污染而假紅）；本檔自身 +5（本稽核列本身）。逐項見"
      "CrossPlatform_R106_Scan_Findings.md。"),
+    ("R106", 88698, 88817, 119,
+     "[非淨減法輪] DEF-101-752 收斂：多支 tools/tests/ 掃描面站點由 tracked-only 改為"
+     "tracked ∪ untracked-not-ignored（`git ls-files` ∪ `git ls-files -o "
+     "--exclude-standard`），逐處補 WHY 註解與雙次列舉迴圈；另含本檔自身逐檔漂移（新增"
+     "稽核列＋凍結表數字更新＋凍結前綴延伸所需的 _FROZEN_PREFIX_REWRITE_LEDGER 追加列，"
+     "含收斂重釘過程本身的多輪迭代）。合法出口逐條實查：刪死碼不適用（新增的是此前不"
+     "存在的 untracked 覆蓋，無等量舊邏輯可退場）、抽共用層不適用（同 repo 既有慣例，"
+     "R70 起的先例皆各自就地實作、未抽共用層）。逐項見 CrossPlatform_R106_Scan_Findings.md。"),
+    ("R106", 88817, 89104, 287,
+     "[非淨減法輪][同輪追加] 帳本結案輪修復包補 DEF-101-752 問題 3 的殘餘：四方複審點名"
+     "的 8 站點（test_windowsapps_guard_cross_consistency.py／test_ps1_bom.py／"
+     "test_bash32_compat.py／test_ps51_compat.py／test_windows_forbidden_filename_"
+     "parity.py／test_find_git_bash_parity.py／test_workflow_permission_concurrency_"
+     "lock.py／test_windowsapps_guard_bash_parity.py）各自補一個永久回歸測試類別（驗證"
+     "untracked 探針真的被掃描面看見），落地時未重釘本表 ⇒ 淨額 +287 一度不出現在任何"
+     "地方（ARCH-01 同型復發）。合法出口逐條實查：刪死碼不適用（新增的是此前不存在的"
+     "永久回歸鎖，無等量舊邏輯可退場）、抽共用層不適用（逐站各自守自己站點的既有 union"
+     "掃描面，測試形狀各異無法合併）。逐項見 CrossPlatform_R106_Scan_Findings.md。"),
+    ("R106", 89104, 89114, 10,
+     "[非淨減法輪][同輪追加] 本檔自身逐檔漂移——來源是上一列新增稽核列本身的行數。"
+     "逐項見 CrossPlatform_R106_Scan_Findings.md。"),
+    ("R106", 89114, 89125, 11,
+     "[非淨減法輪][同輪追加] 本檔自身逐檔漂移——來源是前兩列新增稽核列＋"
+     "_FROZEN_PREFIX_REWRITE_LEDGER 追加列（DEF-101-752）。"
+     "逐項見 CrossPlatform_R106_Scan_Findings.md。"),
 )
 
 
@@ -1385,10 +1410,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 71
+_REPIN_LOG_FROZEN_PREFIX_LEN = 75
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "76bb05948f274501d80f70a74d4f33a8b7d4963372c9bd5f96681e2a695b6394")
+    "6d3be18839b6a224da2f7376a7a0da9fc78472b72b76831843d1e7a67c544ee7")
 
 
 def repin_log_history_digest(
@@ -1466,6 +1491,14 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # 涵蓋本列本身。
     ("R105", "a520bdcef8b7", "a64463e662c1", "DEF-200-202"),
     ("R106", "a64463e662c1", "76bb05948f27", "DEF-101-561"),
+    # DEF-101-752：R82 收斂殘餘承接站點，同體例「追加後立即自我凍結」——本輪追加一列
+    # （多支 tools/tests/ 掃描面站點改為 tracked ∪ untracked-not-ignored，含本檔自身
+    # 逐檔漂移，逐筆重釘過程已收斂合併為單列），prefix_len 71→72 涵蓋該列本身。
+    ("R106", "76bb05948f27", "026523f64c92", "DEF-101-752"),
+    # DEF-101-752 問題 3 收斂（帳本結案輪修復包重釘漏補）：8 站點永久回歸測試類別 round-label-ok
+    # 落地時未重釘本表（ARCH-01 同型復發），本輪補一列（含本檔自身逐檔漂移的兩列
+    # 追加），prefix_len 73→75 涵蓋全部新列本身。
+    ("R106", "026523f64c92", "6d3be18839b6", "DEF-101-752"),
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

@@ -1,5 +1,8 @@
 # monorepo **根層護欄層**（`tools/` 與 `tools/tests/`）的 ruff 設定。
 #
+# 決策依據：docs/04_planning/ADR/ADR-XPLAT-010-root-subproject-boundary.md §2.2
+# （追認式決策紀錄，DEF-101-748 指名的雙向可追回指）。
+#
 # 🔴 為何需要這支檔（R68-38，R69 P3 落地）：本 repo 此前**全 monorepo 只有一份 ruff 設定**
 # ——`AutoClaude/pyproject.toml` 的 `[tool.ruff]`。ruff 是「由每個檔往上找最近的設定檔」，
 # 而根層 `tools/` 的上方一路到 repo 根都沒有任何 ruff 設定，於是它套用的是 ruff 的

@@ -28,14 +28,19 @@ WHY 這一支非補不可，而不是拿既有測試充數（Rule 9 — 測意�
 """
 from __future__ import annotations
 
+import os
 import threading
+import time
 import uuid
 from pathlib import Path
 from unittest import mock
 
 import pytest
 
-from autoclaude.infra.repositories.file_state_repository import FileStateRepository
+from autoclaude.infra.repositories.file_state_repository import (
+    _STALE_TMP_SECONDS,
+    FileStateRepository,
+)
 from autoclaude.utils.checkpoint_manager import PlaybookCheckpoint
 
 #: AC3-4 門檻裡的「5 run」——並存 run 數，全檔共用（不得散寫魔術數字）。
@@ -299,3 +304,72 @@ def test_two_concurrent_writers_to_the_same_playbook_id_do_not_share_a_tmp_file(
     final = repo.load_latest_by_playbook(playbook_id)
     assert final is not None, "同一 playbook_id 併發寫入後主檔消失"
     assert final.step_idx in (1, 2), f"落盤內容被競態污染：step_idx={final.step_idx}"
+
+
+def test_a_stale_orphan_tmp_is_swept_on_the_next_save(repo):
+    """DEF-200-226：`.tmp` 命名帶 pid+uuid4 後，寫入中途崩潰（OOM／SIGKILL）留下的
+    孤兒 tmp 不再被「下一次同 playbook_id 寫入」自然覆蓋清理，需由清理邏輯主動清掉
+    ——但只清「夠舊」的（見 `_STALE_TMP_SECONDS`），避免誤刪正在進行中的併發寫入。
+    """
+    playbook_id = "orphan_tmp_cleanup"
+    p = repo._path(playbook_id)  # noqa: SLF001 — 取證需算出真實路徑
+    orphan = p.with_suffix(".12345.deadbeef.tmp")
+    orphan.write_bytes(b"{}")
+    stale_at = time.time() - _STALE_TMP_SECONDS - 1
+    os.utime(orphan, (stale_at, stale_at))
+
+    repo.save_checkpoint(playbook_id, _checkpoint(
+        0, run_id=str(uuid.uuid4()), goal_task_id=str(uuid.uuid4())))
+
+    assert not orphan.exists(), "夠舊的孤兒 tmp 檔在下一次同 playbook_id 寫入時應被清掉"
+
+
+def test_a_fresh_tmp_is_not_mistaken_for_an_orphan(repo):
+    """對照組：年輕的 tmp 檔（可能是另一個併發寫入尚在進行中）不得被誤刪。"""
+    playbook_id = "orphan_tmp_no_false_positive"
+    p = repo._path(playbook_id)  # noqa: SLF001
+    fresh = p.with_suffix(".99999.cafef00d.tmp")
+    fresh.write_bytes(b"{}")
+
+    repo.save_checkpoint(playbook_id, _checkpoint(
+        0, run_id=str(uuid.uuid4()), goal_task_id=str(uuid.uuid4())))
+
+    assert fresh.exists(), "年輕的 tmp 檔（可能是併發寫入中）不該被清理誤刪"
+    fresh.unlink()
+
+
+def test_cleanup_does_not_delete_another_playbooks_orphan_tmp_on_stem_prefix_collision(repo):
+    """SD 於本輪複審重現：`_cleanup_orphan_tmp` 的 glob 是**前綴**匹配，不是精確匹配。
+
+    playbook A 的 sanitized 檔名（`nightly_run` → stem `nightly_run.checkpoint`）恰好是
+    playbook B 的 sanitized 檔名（`nightly_run.checkpoint.retry` → 檔名
+    `nightly_run.checkpoint.retry.checkpoint.json`）的前綴，於是 A 呼叫 `save_checkpoint`
+    觸發的 `_cleanup_orphan_tmp(A 的路徑)` 若沿用 `glob(f"{stem}.*.tmp")` 當唯一判準，
+    會把 B 的孤兒 tmp 也掃進候選集合並誤刪——即使兩者理論上互不相干，只是恰巧共用
+    同一個 `checkpoint_dir`。本測試把 B 的孤兒 tmp 刻意設為「夠舊」（超過
+    `_STALE_TMP_SECONDS`），確保它落在會被清理的年齡帶內，藉此把「前綴匹配」與
+    「年齡不足」兩種可能的假陰性原因分開：若修復失敗，本測試會因為 B 的孤兒被誤刪而紅；
+    若只是年齡判準的問題，這裡的設定已排除該可能。
+    """
+    a_id = "nightly_run"
+    b_id = "nightly_run.checkpoint.retry"
+    a_path = repo._path(a_id)  # noqa: SLF001
+    b_path = repo._path(b_id)  # noqa: SLF001
+    assert b_path.name.startswith(a_path.stem + "."), (
+        "測試前提不成立：B 的檔名須以 A 的 stem 為前綴，本測試才能重現該缺陷"
+    )
+
+    b_orphan = b_path.with_suffix(".54321.feedface.tmp")
+    b_orphan.write_bytes(b"{}")
+    stale_at = time.time() - _STALE_TMP_SECONDS - 1
+    os.utime(b_orphan, (stale_at, stale_at))
+
+    repo.save_checkpoint(a_id, PlaybookCheckpoint(
+        playbook_path=f"{a_id}.yaml", step_idx=0, step_id="T00", total_steps=1,
+        run_id=str(uuid.uuid4()), goal_task_id=str(uuid.uuid4()),
+    ))
+
+    assert b_orphan.exists(), (
+        "A 的 _cleanup_orphan_tmp 誤刪了 B 的孤兒 tmp——glob 前綴碰撞導致跨 playbook 誤刪"
+    )
+    b_orphan.unlink()

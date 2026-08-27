@@ -38,6 +38,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 # 🔴 R80 S5-03：`_bash_exe()` 原本在本檔獨立寫一份，docstring 逐字宣稱那是「各消費者
@@ -483,17 +484,31 @@ def _latest_sdd_root() -> Path:
 
 
 def _tracked_files(pattern: str) -> list[str]:
-    """git tracked 且符合 glob pattern 的 repo-relative 路徑清單（fail-loud）。
+    """git tracked ∪ untracked-not-ignored 且符合 glob pattern 的 repo-relative
+    路徑清單（fail-loud）。
 
     用 `git ls-files` 而非 `Path.rglob`：天然排除 `.git`／`.venv`／
-    `__pycache__`／`node_modules`（只要未被 commit）。
+    `__pycache__`／`node_modules`（只要未被 commit 或被 `.gitignore` 排除）。
 
     🔴 R85／訴求 2：取數本體改委派 `tools/lib/git_paths.py`（根 CLAUDE.md 鐵律三表
     逐字指定的唯一取數層）——「每個站點各自記得帶 quotepath 旗標」正是該 SSOT 立案時
     要消滅的形態。fail-loud 留在本層（該 SSOT 刻意不代呼叫端決定 rc≠0 怎麼處置）。
+
+    🔴 R82（`DEF-101-752`）：掃描面原本只有 tracked（`git ls-files -- pattern`），
+    尚未 `git add` 的新檔天然不可見——R69 的 `platform_caps.py` 全程 untracked，
+    使一個真實違規躲過四輪四方複審與多次全套實跑，直到 `git add -A` 才顯形（見
+    `tools/tests/test_platform_utils_dedup.py` 檔頭②）。現改為 union 上
+    `-o --exclude-standard`（tracked ∪ untracked-not-ignored），手法與該檔同政策；
+    `--exclude-standard` 仍尊重 `.gitignore`，故 `.venv/`／`__pycache__/` 等排除不受影響。
     """
-    rels = git_paths.ls_files(_REPO_ROOT, "--", pattern)
-    assert rels, f"git ls-files -- {pattern} 回空 ⇒ 掃描邊界不得靜默縮小"
+    rels = sorted(
+        set(git_paths.ls_files(_REPO_ROOT, "--", pattern))
+        | set(git_paths.ls_files(_REPO_ROOT, "-o", "--exclude-standard", "--", pattern))
+    )
+    assert rels, (
+        f"git ls-files -- {pattern}（tracked）與 git ls-files -o --exclude-standard -- "
+        f"{pattern}（untracked-not-ignored）兩次呼叫皆回空 ⇒ 掃描邊界不得靜默縮小"
+    )
     return rels
 
 
@@ -2146,6 +2161,40 @@ class TestFourWayVerdictParity(unittest.TestCase):
                     set(verdicts.values()), {expected},
                     f"四方雖一致但與判準不符（{why}）：{verdicts}，判準={expected}",
                 )
+
+
+class TestTrackedFilesScanSurfaceCoversUntracked(unittest.TestCase):
+    """DEF-101-752 站點覆蓋（問題 3，永久回歸鎖）：`_tracked_files()` 的 union 邏輯
+    必須真的把 `-o --exclude-standard`（untracked-not-ignored）那一次 `git ls-files`
+    呼叫的結果併進最終回傳值，不是只呼叫了卻沒接住。此前的驗證手法是「注入探針檔案
+    → 確認變紅 → 刪除探針 → 確認變綠」，探針沒有留下，帳本只留文字記載——本 class
+    把它機械化、常駐化，不依賴事後人工操作。
+
+    手法：`unittest.mock.patch("subprocess.run")` 讓兩次底層 `git ls-files` 呼叫各自
+    回傳可控的假輸出（依 argv 是否帶 `-o` 分流 tracked-only 呼叫 vs untracked 呼叫），
+    不需要真的建立磁碟上的 disposable git repo。
+    """
+
+    @staticmethod
+    def _fake_run(tracked_line: str, untracked_line: str):
+        def _run(argv, *args, **kwargs):
+            stdout = untracked_line if "-o" in argv else tracked_line
+            return subprocess.CompletedProcess(argv, 0, stdout=stdout + "\n", stderr="")
+        return _run
+
+    def test_untracked_not_ignored_hit_is_included_in_the_final_scan_surface(self) -> None:
+        with mock.patch(
+            "subprocess.run",
+            side_effect=self._fake_run("probe_tracked.py", "probe_untracked_only.py"),
+        ):
+            rels = _tracked_files("*.py")
+        self.assertIn(
+            "probe_tracked.py", rels, "tracked-only 呼叫的結果沒有被併進最終清單")
+        self.assertIn(
+            "probe_untracked_only.py", rels,
+            "`-o --exclude-standard`（untracked-not-ignored）呼叫的結果沒有被併進"
+            "最終清單——union 邏輯若退化成只認 tracked 呼叫，本測試會抓到",
+        )
 
 
 if __name__ == "__main__":

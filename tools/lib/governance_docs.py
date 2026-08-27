@@ -305,6 +305,19 @@ _GOVERNANCE_DOCS = (
     # （⇒ 指針稽核），且本檔承載本輪 `guard-total:` 標記（`_GUARD_TOTAL_DOC_GLOBS`
     # 掃描面之一）⇒ 同時是行數棘輪的文件側對帳站點。即刻登記，不等下一輪。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R106_Scan_Findings.md",
+    # 外部阻塞軌複查（2026-08-27）：DEF-200-185 已依 `ROW_MAX_BYTES` 瘦身成索引，本檔是
+    # 唯一還能重驗該筆結案的地方（⇒ 體積守門），且逐節寫出「DEF-200-185 現居本檔」的
+    # 座標宣稱（⇒ 指針稽核）。即刻登記，不等下一輪。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_External_Blocked_Recheck_20260827.md",
+    # DEF-101-752（R82）帳本瘦身的接收端：帳本該列 R82 前的「狀態」欄原文（逐字保全）＋
+    # R82 三處收斂的紅綠自證輸出，皆已從主檔搬出。資格同上——帳本列已瘦身成索引 ⇒ 唯一還
+    # 能重驗該次結案的地方就是它（⇒ 體積守門），且它逐節寫出「DEF-101-752 原文現居本檔
+    # 某節」的座標宣稱（⇒ 指針稽核）。🔴 本檔命名曾刻意不循 `CrossPlatform_*.md` 慣例
+    # 以迴避這道登記；四方複審 Architect 發現後先改為僅登記、不改名，但帳本結案輪修復
+    # 包發現「僅登記」本身仍讓登記面（本清單）與發現面（`_GOVERNANCE_DOC_GLOBS` 掃描
+    # 磁碟）不一致——與本機制原本要防的「磁碟上有卻沒登記」方向相反。正確做法是讓檔名
+    # 符合 glob 樣式，故已改名為下列檔名（該檔頭自述已一併訂正）。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R82_DEF101752_Untracked_Scan_Closure.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/{CrossPlatform,Quota}_*.md`。這**不是**把具名

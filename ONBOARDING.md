@@ -223,7 +223,7 @@ $env:PYTHONUTF8=1; lint-imports       # 架構約束（契約條數 SSOT＝AutoC
 powershell -ExecutionPolicy Bypass -File scripts\ci-gate.ps1   # 偵測到 Git Bash 即薄委派 ci-gate.sh＝完整對等，見 §6
 ```
 
-> 🔴 **看到 `N skipped` 先讀 §7.1（本節末）**：那個數字裡有**一整類**（PG 相依）既不是缺件、也不是平台差或退化，解法是**一行 docker 指令、零程式改動、零環境變數**。它佔多少支是**量測值**，§7.1 附現查指令，本行刻意不寫死。
+> 🔴 **看到 `N skipped` 先讀 §7.1（本節末）**：那個數字裡有**一整類**（PG 相依）既不是缺件、也不是平台差或退化，解法是**拉起 docker 容器＋跑一次 `alembic upgrade head`（容器是 tmpfs、每次重建都要重 migrate）、零程式改動、零常駐環境變數**。它佔多少支是**量測值**，§7.1 附現查指令，本行刻意不寫死。
 
 > 🔴 **本節為全 repo pytest 基線數字唯一站點**（R13 ARCH-R13-1 收斂：其他活文件〔根/AutoClaude CLAUDE.md、AutoClaude/README、useMacWin〕一律指向本節不重複數字，由 `tools/check_pytest_baseline_sites.py` 機械守門；歷史紀錄檔〔缺陷帳本、sprint_history、improving 系列等時代快照〕不在納管範圍）。
 >

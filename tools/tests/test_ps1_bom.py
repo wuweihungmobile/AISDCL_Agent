@@ -31,6 +31,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 _TESTS_DIR = Path(__file__).resolve().parent
 _REPO_ROOT = _TESTS_DIR.parents[1]
@@ -67,24 +68,32 @@ def _scan_prefixes() -> tuple[str, ...]:
 
 
 def _active_ps1_files() -> list[str]:
-    """git tracked 且位於掃描樹內的 .ps1 相對路徑清單（fail-loud）。"""
-    proc = subprocess.run(
-        ["git", "-C", str(_REPO_ROOT), "-c", "core.quotePath=false",
-         "ls-files", "--", "*.ps1"],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    if proc.returncode != 0:
-        raise AssertionError(
-            f"git ls-files 失敗（rc={proc.returncode}；stderr="
-            f"{proc.stderr.strip()!r}）——掃描邊界不得靜默縮小"
+    """git tracked ∪ untracked-not-ignored、且位於掃描樹內的 .ps1 相對路徑清單
+    （fail-loud）。
+
+    🔴 R82（`DEF-101-752`）：原本只認 tracked，尚未 `git add` 的新 `.ps1` 天生
+    不可見（同 `test_platform_utils_dedup.py` 檔頭②事故形狀）。加 `-o
+    --exclude-standard` 一併掃 untracked-not-ignored，`.gitignore` 排除的
+    `.venv`／快取不受影響。
+    """
+    rels: set[str] = set()
+    for extra_args in (("--",), ("-o", "--exclude-standard", "--")):
+        proc = subprocess.run(
+            ["git", "-C", str(_REPO_ROOT), "-c", "core.quotePath=false",
+             "ls-files", *extra_args, "*.ps1"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
         )
+        if proc.returncode != 0:
+            raise AssertionError(
+                f"git ls-files 失敗（rc={proc.returncode}；stderr="
+                f"{proc.stderr.strip()!r}）——掃描邊界不得靜默縮小"
+            )
+        rels.update(line for line in proc.stdout.splitlines() if line)
     prefixes = _scan_prefixes()
-    return sorted(
-        line for line in proc.stdout.splitlines() if line.startswith(prefixes)
-    )
+    return sorted(rel for rel in rels if rel.startswith(prefixes))
 
 
 def classify_ps1_bytes(data: bytes) -> str | None:
@@ -197,6 +206,41 @@ class TestScanConfigPinning(unittest.TestCase):
                 "AISDLC_SDD/scripts/",
                 "AISDLC_SDD/LATEST/",
             },
+        )
+
+
+class TestActivePs1FilesScanSurfaceCoversUntracked(unittest.TestCase):
+    """DEF-101-752 站點覆蓋（問題 3，永久回歸鎖）：`_active_ps1_files()` 的 union
+    迴圈必須真的把 `-o --exclude-standard`（untracked-not-ignored）那一次 `git
+    ls-files` 呼叫的結果併進最終回傳值，不是只呼叫了卻沒接住。此前只靠人工注入
+    探針檔案驗證、事後刪除，沒有留下永久回歸測試——本 class 機械化、常駐化。
+
+    手法：`unittest.mock.patch("subprocess.run")` 依 argv 是否帶 `-o` 分流兩次
+    `git ls-files` 呼叫的假輸出，不需要真的建立磁碟上的 disposable git repo；
+    假路徑刻意落在 `tools/` 掃描樹前綴內，才不會被 `_scan_prefixes()` 濾掉。
+    """
+
+    @staticmethod
+    def _fake_run(tracked_line: str, untracked_line: str):
+        def _run(argv, *args, **kwargs):
+            stdout = untracked_line if "-o" in argv else tracked_line
+            return subprocess.CompletedProcess(argv, 0, stdout=stdout + "\n", stderr="")
+        return _run
+
+    def test_untracked_not_ignored_hit_is_included_in_the_final_scan_surface(self) -> None:
+        with mock.patch(
+            "subprocess.run",
+            side_effect=self._fake_run(
+                "tools/probe_tracked.ps1", "tools/probe_untracked_only.ps1"
+            ),
+        ):
+            rels = _active_ps1_files()
+        self.assertIn(
+            "tools/probe_tracked.ps1", rels, "tracked-only 呼叫的結果沒有被併進最終清單")
+        self.assertIn(
+            "tools/probe_untracked_only.ps1", rels,
+            "`-o --exclude-standard`（untracked-not-ignored）呼叫的結果沒有被併進"
+            "最終清單——union 邏輯若退化成只認 tracked 呼叫，本測試會抓到",
         )
 
 

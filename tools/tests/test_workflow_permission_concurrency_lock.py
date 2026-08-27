@@ -1033,6 +1033,13 @@ def _gh_filter_pattern_to_re(pattern: str) -> re.Pattern[str]:
 
 
 def _tracked_scripts() -> list[str]:
+    """git tracked ∪ untracked-not-ignored 的 `*.sh`／`*.ps1` 相對路徑清單。
+
+    🔴 R82（`DEF-101-752`）：原本只認 tracked——一支新腳本若落在既有 CI paths
+    覆蓋面之外，得等到 `git add`／commit 後本鎖才會出聲，錯過提早發現的機會
+    （同姊妹鎖已修復的同型 fail-open）。加 `-o --exclude-standard` 一併掃
+    untracked-not-ignored。
+    """
     proc = subprocess.run(
         # `-c core.quotepath=false`（R81 XPL-S1-01）：否則非 ASCII 路徑以 C-quoted
         # 形態回來，下方的下限釘選會把「靜默縮面」讀成「檔案變少」。
@@ -1042,7 +1049,20 @@ def _tracked_scripts() -> list[str]:
     )
     if proc.returncode != 0:
         raise AssertionError(f"git ls-files 失敗（rc={proc.returncode}）：{proc.stderr}")
-    return sorted(ln for ln in proc.stdout.splitlines() if ln)
+    rels = set(ln for ln in proc.stdout.splitlines() if ln)
+
+    proc_untracked = subprocess.run(
+        ["git", "-C", str(_REPO_ROOT), "-c", "core.quotepath=false",
+         "ls-files", "-o", "--exclude-standard", "--", "*.sh", "*.ps1"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    if proc_untracked.returncode != 0:
+        raise AssertionError(
+            f"git ls-files -o --exclude-standard 失敗（rc={proc_untracked.returncode}）："
+            f"{proc_untracked.stderr}"
+        )
+    rels.update(ln for ln in proc_untracked.stdout.splitlines() if ln)
+    return sorted(rels)
 
 
 class TestCompatCiScriptTriggerSymmetry(unittest.TestCase):
@@ -1354,6 +1374,43 @@ class TestPushGateNeverStartedRatio(unittest.TestCase):
                            "門檻 0 會讓任何一筆抖動都出聲 ⇒ 天天狼來了、然後被忽略")
         self.assertLessEqual(c.NEVER_STARTED_MAX_SECONDS, 10.0,
                              "上界放寬會開始把真紅（實測 15 秒 steps=26）誤判成帳務阻擋")
+
+
+class TestTrackedScriptsScanSurfaceCoversUntracked(unittest.TestCase):
+    """DEF-101-752 站點覆蓋（問題 3，永久回歸鎖）：`_tracked_scripts()` 的兩次
+    `git ls-files` 呼叫（tracked-only ＋ `-o --exclude-standard`）必須真的把
+    untracked-not-ignored 那一次的結果併進最終回傳值，不是只呼叫了卻沒接住。
+    此前只靠人工注入探針檔案驗證、事後刪除，沒有留下永久回歸測試——本 class
+    機械化、常駐化。
+
+    手法：`unittest.mock.patch("subprocess.run")` 依 argv 是否帶 `-o` 分流兩次
+    `git ls-files` 呼叫的假輸出，不需要真的建立磁碟上的 disposable git repo。
+    """
+
+    @staticmethod
+    def _fake_run(tracked_line: str, untracked_line: str):
+        def _run(argv, *args, **kwargs):
+            stdout = untracked_line if "-o" in argv else tracked_line
+            return subprocess.CompletedProcess(argv, 0, stdout=stdout + "\n", stderr="")
+        return _run
+
+    def test_untracked_not_ignored_hit_is_included_in_the_final_scan_surface(self) -> None:
+        from unittest import mock  # noqa: PLC0415
+
+        with mock.patch(
+            "subprocess.run",
+            side_effect=self._fake_run(
+                "probe_tracked.sh", "probe_untracked_only.sh"
+            ),
+        ):
+            rels = _tracked_scripts()
+        self.assertIn(
+            "probe_tracked.sh", rels, "tracked-only 呼叫的結果沒有被併進最終清單")
+        self.assertIn(
+            "probe_untracked_only.sh", rels,
+            "`-o --exclude-standard`（untracked-not-ignored）呼叫的結果沒有被併進"
+            "最終清單——union 邏輯若退化成只認 tracked 呼叫，本測試會抓到",
+        )
 
 
 if __name__ == "__main__":

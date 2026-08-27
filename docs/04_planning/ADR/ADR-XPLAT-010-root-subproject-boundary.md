@@ -50,5 +50,5 @@
 ## 3. 誠實劃界
 
 - **本 ADR 不新增任何機械鎖**，兩項機制本身已各自有完整的測試覆蓋（見上方「機械執行者」段）；本 ADR 純粹是**追認式決策紀錄**，把散落在 docstring／toml 註解裡的理由收斂成一份可被回指的文件。
-- **雙向可追尚未完全達成**：本 ADR 完成後，理想狀態是 `AISDLC_SDD/scripts/tests/test_cross_subproject_import_isolation.py` 的 docstring 與 `tools/ruff.toml` 的檔頭註解各自加一行回指本 ADR 編號（`ADR-XPLAT-010`），使兩邊雙向可追。**本輪未執行這一步**：`tools/ruff.toml` 與 `AISDLC_SDD/scripts/tests/test_cross_subproject_import_isolation.py` 皆不在本輪修復包的射程內（前者屬根層護欄層既有檔案、後者屬 `AISDLC_SDD/` 子專案 scope，兩者皆非本輪指派的可觸碰檔案清單成員）——留待下一個有該射程的修復包補上回指，避免跨包越界改動彼此持有的檔案。
+- **雙向可追已達成**（DEF-101-748 收斂）：`AISDLC_SDD/scripts/tests/test_cross_subproject_import_isolation.py` 的 docstring 與 `tools/ruff.toml` 的檔頭註解已各自補上一行回指本 ADR 編號（`ADR-XPLAT-010` §2.1／§2.2），兩邊雙向可追。當回合實跑：`pytest AISDLC_SDD/scripts/tests/test_cross_subproject_import_isolation.py -q` → `24 passed`；`python -m unittest tools.tests.test_subprocess_encoding_hygiene.TestRootToolsLintPolicy` → `Ran 6 tests OK`。
 - **是否需要合併成單一「根層與子專案邊界」ADR 或保留分節**：本 ADR 選擇**合併為一份**（帳本原文列出「兩項各補一份 ADR（或合併為一份）」為可接受的二擇一），因兩者本質上是同一類決策（根層 vs 子專案的治理邊界）在不同載體上的體現，分成兩份 ADR 反而會讓讀者需要交叉比對才能看到「這是同一條邊界原則」。

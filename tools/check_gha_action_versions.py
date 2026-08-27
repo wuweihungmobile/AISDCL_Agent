@@ -202,25 +202,32 @@ def scan(workflows_dir: Path) -> dict[str, dict[str, list[str]]]:
 
 
 def _tracked_workflow_files() -> list[str]:
-    """git-tracked 的全部 workflow 檔（相對 repo 根的 POSIX 路徑，未排序）。
+    """git tracked ∪ untracked-not-ignored 的全部 workflow 檔（相對 repo 根的
+    POSIX 路徑，未排序）。
 
     R60 自 `_audit_scan_surface()` 抽出：巢狀排除區的世代稽核需要同一份清單的
     **另一半**（被排除者），抽出後兩邊共用同一次 `git ls-files`、同一組正則，
     不會出現「兩處各自維護一份 workflow 檔判準」這種本 repo 反覆吃過的漂移。
     git 不可用時 raise RuntimeError——本工具是 CI 閘門，寧可 fail-loud 也不靜默跳過。
+
+    🔴 R82（`DEF-101-752`）：加掃 `-o --exclude-standard`——尚未 `git add` 的新
+    workflow 檔（例如新子專案的巢狀 CI 尚未登記排除樣式前）原本天生不可見。
     """
-    try:
-        out = subprocess.run(
-            ["git", "-c", "core.quotepath=false", "ls-files", "-z"],
-            cwd=_REPO_ROOT, check=True, capture_output=True,
-            text=True, encoding="utf-8", errors="replace",
-        ).stdout
-    # R57 round 3：本分支已由 tools/tests/test_gha_action_versions.py
-    # ::TestAuditScanSurface::test_git_unavailable_is_fail_loud_not_silent_skip
-    # 覆蓋（原標 `pragma: no cover - 環境層`，已不再是無法覆蓋的環境層分支）。
-    except (OSError, subprocess.CalledProcessError) as exc:
-        raise RuntimeError(f"無法以 `git ls-files` 實查掃描面邊界：{exc}") from exc
-    return [rel for rel in out.split("\0") if rel and _ANY_WORKFLOW_FILE_RE.search(rel)]
+    rels: set[str] = set()
+    for extra_args in ((), ("-o", "--exclude-standard")):
+        try:
+            out = subprocess.run(
+                ["git", "-c", "core.quotepath=false", "ls-files", *extra_args, "-z"],
+                cwd=_REPO_ROOT, check=True, capture_output=True,
+                text=True, encoding="utf-8", errors="replace",
+            ).stdout
+        # R57 round 3：本分支已由 tools/tests/test_gha_action_versions.py
+        # ::TestAuditScanSurface::test_git_unavailable_is_fail_loud_not_silent_skip
+        # 覆蓋（原標 `pragma: no cover - 環境層`，已不再是無法覆蓋的環境層分支）。
+        except (OSError, subprocess.CalledProcessError) as exc:
+            raise RuntimeError(f"無法以 `git ls-files` 實查掃描面邊界：{exc}") from exc
+        rels.update(rel for rel in out.split("\0") if rel and _ANY_WORKFLOW_FILE_RE.search(rel))
+    return list(rels)
 
 
 def _audit_scan_surface() -> list[str]:
