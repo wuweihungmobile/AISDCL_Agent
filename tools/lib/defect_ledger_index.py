@@ -725,7 +725,16 @@ OVERSIZE_ROW_CEILING = 45
 #: 修正登記面／發現面不一致），同一次變更內把該列另一段已在具名證據檔重複交代的冗句
 #: （macos_smoke_local.sh 排除理由的括號附註）刪掉（−37 bytes）抵銷，淨額 −23。該列
 #: 仍在 `OVERSIZE_ROW_GRANDFATHERED`，僅超標量下降；本輪未動任何其他豁免列。
-OVERSIZE_ROW_EXCESS_CEILING = 37058
+#: 🔴 帳本結案輪（結案包 #1）重釘 **37058 → 36796**（−262，當回合實測值直接填入、
+#: 零推算）。來源＝逐筆結案把多列超標豁免列的狀態欄瘦身成「短句＋指針」（長證據
+#: 移入 CrossPlatform_R107_Ledger_Closure.md），membership 不變（45 列皆仍 >700），
+#: 僅超標量下降。
+#: 🔴 帳本結案輪（收尾書記落列，2026-08-28）重釘 **36796 → 36440**（−356，當回合
+#: 實測值直接填入、零推算）。來源＝13 筆結案列狀態欄改寫為「首詞＋指針」（敘事全
+#: 移入 CrossPlatform_R107_Ledger_Closure.md 對照節）：`DEF-101-338` 瘦身 −381、
+#: `DEF-101-559` 結案語 +25，兩列仍在 `OVERSIZE_ROW_GRANDFATHERED`（皆仍 >700，
+#: membership 不變）；其餘被改列與 2 筆新增承接列皆 ≤700 不入分子。
+OVERSIZE_ROW_EXCESS_CEILING = 36440
 
 
 def oversize_row_problems(ledger_text: str) -> list[str]:

@@ -1389,6 +1389,20 @@ class TestM8bCacheHomeStaysInSync(unittest.TestCase):
                 _METER.read_text(encoding="utf-8"),
                 _ADAPTER.read_text(encoding="utf-8")), [])
 
+    def test_the_cache_dir_env_literal_matches_verbatim_in_both_homes(self) -> None:
+        """DEF-200-225：上面的目錄運算式判準**掃不到常數字串本身**——任一側單獨改
+        `CACHE_DIR_ENV` 字面，另一側的快取目錄覆寫從此靜默讀不到 ⇒ 逐字比對兩家。"""
+        if not (_METER.exists() and _ADAPTER.exists()):
+            return  # 同 M8 體例：adapter 不屬本包，存在才判
+        found = {p.name: re.search(r'^CACHE_DIR_ENV\s*=\s*"([^"]*)"',
+                                   p.read_text(encoding="utf-8"), re.M)
+                 for p in (_METER, _ADAPTER)}
+        missing = sorted(name for name, mo in found.items() if mo is None)
+        self.assertEqual(missing, [], "抽不到 CACHE_DIR_ENV 字面——判準基底失效，不是「已同步」")
+        self.assertEqual(found[_METER.name].group(1), found[_ADAPTER.name].group(1),
+                         "CACHE_DIR_ENV 兩家字面不同步（DEF-200-225）："
+                         f"{ {n: m.group(1) for n, m in found.items()} }")
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # M9 「量不到」不得等於「不設限」
@@ -2187,10 +2201,12 @@ class TestR95PaceIndexAndTunableCeiling(unittest.TestCase):
         self.assertEqual(bad.pace_ceiling, 1.0, "壞值必須採用預設")
         self.assertIn("AUTOSDD_QUOTA_PACE_CEILING", Q.render_env_example())
 
-    def test_explain_carries_the_pace_index(self) -> None:
-        amort = W.amortize((("five_hour", 16.0), ("seven_day", 75.0)),
-                           (2520.0, 4320.0), (300.0, 10080.0), 7.0, "n")
-        self.assertIn("pace_index=", W.explain(amort))
+    def test_explain_carries_the_pace_index_with_its_own_axis_semantics(self) -> None:
+        """DEF-200-201：index 與本窗餘裕不同軸，同行同印必須自帶語意（不可讀成互抵）。"""
+        text = W.explain(W.amortize((("five_hour", 16.0), ("seven_day", 75.0)),
+                                    (2520.0, 4320.0), (300.0, 10080.0), 7.0, "n"))
+        self.assertIn("pace_index=", text)
+        self.assertIn("不同軸", text, "index 片段沒說出自己的分母軸 ⇒ 相反符號同印再現")
 
 
 # ═══════════════════════════════════════════════════════════════════════════

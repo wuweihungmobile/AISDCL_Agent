@@ -2629,24 +2629,13 @@ def _foreign_api_uses(
 
 
 # ── 站點級守衛（R79 修 P1：檔案級＋純文字特赦的鑑別力只有 20%）─────────────────
-# 舊判準：「整檔第一個含守衛字樣的**行號** < 使用點行號 ⇒ 特赦」。三個結構性後果：
-#   ① 檔案級——任何一段與違規完全無關的守衛（隔壁函式、檔頭的一句 `if
-#      sys.platform == "win32"`）會把它後面**整檔**的違規全部赦免；
-#   ② 純文字——守衛字樣寫在字串常數或訊息裡即可開後門，而本 repo 的中文 WHY
-#      大量逐字提到 `sys.platform == "win32"` 這種字樣，開後門完全不像在繞過；
-#   ③ 只看「之前出現過」——連「同一個作用域」都不要求。
-# 新判準只問一句：**這個使用點在語法上被平台守衛罩住了嗎**。四種罩法（皆為
-# repo 內既存的真實寫法，不是發明出來的）：
-#   enclosing-if       祖先鏈上有 `If`/`IfExp`/`While`，其 test 在判平台
-#   early-return-guard 同一個 block 內、排在它**之前**的 `if <守衛>: … return`
-#                      （`platform_caps.kill_process_tree()` 就是這個形狀）
-#   guarded-decorator  所在 def/class（含**同檔基底類別**）帶平台守衛 decorator
-#                      （`@unittest.skipUnless(sys.platform == "darwin", …)`）
-#   try-capability     使用點在 `try:` 本體、而 handler 捕 ImportError／
-#                      ModuleNotFoundError／AttributeError＝作者明示這是可選能力
-# 🔴 刻意劃界：不做方向判定（`if is_windows():` 的 else 分支放 POSIX 碼是對的、
-#   body 放 POSIX 碼是錯的，兩者本判準都算「有守衛」）。方向那一半屬控制流語意，
-#   靜態誤判的代價是假紅，而假紅會逼下一輪把整條鎖關掉（本檔第五道判準同樣取捨）。
+# 新判準只問一句：**這個使用點在語法上被平台守衛罩住了嗎**。四種罩法（皆 repo 既存
+# 真實寫法）＝ enclosing-if（祖先鏈的 If/IfExp/While 在判平台）／early-return-guard
+# （同 block、排在其前且帶走控制流的 `if <守衛>: … return`）／guarded-decorator
+# （含**同檔基底類別**的平台守衛 decorator）／try-capability（handler 捕 ImportError
+# 族＝作者明示可選能力）。舊判準三個結構性後果（檔案級整檔赦免／純文字後門／不看
+# 作用域）與「刻意不做方向判定」的劃界，全文搬至
+# CrossPlatform_Guard_Line_History.md〈站點級守衛四種罩法 WHY〉節。
 #: 平台守衛在 **AST** 上的形狀：只認「決定平台的**程式碼符號**」。
 #: 為何不沿用 `_PLATFORM_GUARDS`（行文字 SSOT）做比對：那份清單是給**行掃描**用的，
 #: 在 AST 上照用會把 `if "IS_WINDOWS" in env:`／`if "OSTYPE" in line:` 這種**字串**
@@ -2830,24 +2819,13 @@ def guard_scope_for(
 
 
 # ── R85／A-3：單平台專屬**外部執行檔**的 argv[0] 字面 ────────────────────────
-# 上面那個判準結構上看不到這一族：它的詞彙表收的是 **Python 符號**，而「送給 OS 的外部
-# 程式名」不是符號——AST 看到的只是一個 `ast.Constant` 字串 ⇒ 那一族從來不在分母裡
-# （與 R81 訂正的 `ctypes.*` 失明逐字同型；失明是靜默的：掃描器照跑照綠照回報命中數）。
-#
-# 🔴 **詞彙表刻意不在這裡再寫一份**：它是量測本身，唯一的家＝
-# `tools/probe/xplat_hazard_census.py`。本檔只提供「門」，不提供第二份詞彙。
-#
-# 🔴 **transitive 可達性是本族的必要條件，不是加值**（P7 逐筆查完 AutoClaude 那一棵的
-# 實測結論）：守衛有四種形狀，其中一種是**跨 1~3 層的 helper**——`_run_ps1`／
-# `_run_powershell`／`_try_osascript` 自己一個守衛都沒有，安全性完全寄託在呼叫端。
-# 只認站點級守衛的判準對全庫 24 筆噴 **3 筆假紅**（實測），而假紅到需要逐一辯護的鎖
-# 活不過一輪。深度上界 3 是量出來的：`check_scheduled_task_drift._run_powershell` 的
-# 真實鏈是 `main`（帶 `sys.platform != "win32"` 早退）→ 三個中介 → 它，恰好 3 層。
-#
-# 🔴 transitive **只**用在本族，不回頭套到上面那個符號判準：那張債表
-# （`_FOREIGN_API_SCOPE_DEBT`）是**雙向精確比對**，而它登記的 `dev_start.py:1051`
-# 正好就是這個形狀 ⇒ 套過去會把一筆**有人登記過的**債靜默抹掉。要不要抹是那筆債的
-# 所有者的決定，不是本判準的副作用。
+# 上面那個判準的詞彙表收的是 **Python 符號**，「送給 OS 的外部程式名」只是一個
+# `ast.Constant` 字串 ⇒ 那一族從來不在分母裡（失明是靜默的）。🔴 詞彙表刻意不在這裡
+# 再寫一份：唯一的家＝`tools/probe/xplat_hazard_census.py`，本檔只提供「門」。
+# 🔴 transitive 可達性（深度上界 3＝實測值）是本族**必要條件**、且**只**用在本族，
+# 不回頭套到上面那個符號判準（那張債表是雙向精確比對，套過去會把登記過的債靜默抹掉）
+# ——P7 逐筆實測、3 筆假紅普查與 `_FOREIGN_API_SCOPE_DEBT` 互斥理由全文搬至
+# CrossPlatform_Guard_Line_History.md〈外部執行檔 argv[0] transitive WHY〉節。
 _EXE_ARGV_TRANSITIVE_DEPTH = 3
 
 
@@ -2971,18 +2949,10 @@ def scan_foreign_platform_api(source: str, rel: str) -> tuple[list[str], list[st
 #: 合法出口只有兩條：① 把站點改成作用域內守衛；② 該行行尾加 `_XPLAT_OK_MARKER` 標記。
 #: （本註解刻意不寫出那個標記的字面值——本檔自己也在掃描面內，寫出來就會被
 #:   `_xplat_markers()` 當成一個真的豁免標記而判 stale。）
-#: 🔴 R79 誠實劃界：表內這支檔不屬 R79 XPLAT 包的所有權（`tools/dev_start.py` 的
-#:   `_forward_signal_to_bootstrap()` 是 POSIX-only 的訊號 handler，只在 POSIX 側
-#:   `signal.signal()` 註冊——那個註冊點在別的函式裡，靜態上罩不到它），故本輪只
-#:   登記不代改；處置已列入交棒（加行尾豁免標記即可歸零）。
-#: 🔴 R81（XPL-S1-04）由 4 升到 5：詞彙表補上 `ctypes.*` 之後，`tools/dev_start.py`
-#:   9 個 `ctypes.windll` 站點裡有 **8 個**被既有作用域守衛正確罩住（enclosing-if 5、
-#:   try-capability 1、guarded-decorator 2 —— 逐點實測），剩下 `:1051`
-#:   `kernel32 = ctypes.windll.kernel32` 位在 `_list_pid_ppid_pairs_windows()` 函式體
-#:   最上層，**函式自己沒有內部守衛**，安全性完全寄託在兩個呼叫端（`:1120`／`:1141`）
-#:   ——那正好是靜態上證不出來、而且下一個人新增第三個呼叫端時不會有任何東西轉紅的形態。
-#:   本包不代改 `dev_start.py`（不在所有權內），故據實登記；歸零動作＝在該行行尾加
-#:   豁免標記並寫明呼叫端契約，或把守衛搬進函式本體（後者才是真的修好）。
+#: 🔴 表列債的逐筆沿革——R79 誠實劃界（`tools/dev_start.py` 訊號 handler 不屬包所有權、
+#:   只登記不代改）與 R81（XPL-S1-04）詞彙表補 `ctypes.*` 後 4→5 的逐點實測（9 站點
+#:   8 個被既有作用域守衛罩住、`:1051` 安全性寄託呼叫端）——
+#:   全文搬至 CrossPlatform_Guard_Line_History.md〈作用域級存量債表沿革〉節。
 _FOREIGN_API_SCOPE_DEBT: dict[str, int] = {
     "tools/dev_start.py": 5,
 }
@@ -3632,6 +3602,26 @@ class TestWorktreeEolPolicyIsMeasuredFromGitattributes(unittest.TestCase):
         """逐副檔名下限不得指向射程外的副檔名（那種下限永遠是 0 支、等於沒有）。"""
         orphan = sorted(set(_WORKTREE_EOL_FLOORS) - set(_WORKTREE_EOL_POLICY))
         self.assertEqual(orphan, [], f"下限表指向射程外的副檔名：{orphan}")
+
+    def test_the_ps1_hooks_private_crlf_targets_match_the_declaration(self) -> None:
+        """DEF-101-950：hook 側（check_ps1_encoding.py）私藏的 CRLF 知識對 SSOT 對帳。
+
+        本閘政策值自 R79 起已現查 `.gitattributes`（上方 `worktree_eol_policy`），字面
+        複本只剩 hook 那一家（`PS_SUFFIXES` ＋ 位元組展開，屬實作細節可留——R80 證據檔
+        S5-09 裁決）；本格把殘餘的那一家釘回 SSOT：hook 正規化成 CRLF 的每個副檔名，
+        都必須在 `.gitattributes` 逐字宣告 `eol=crlf`，兩家從此不可能靜默漂移。
+        """
+        hook = (_REPO_ROOT / "AutoClaude" / "tools" / "hooks" / "check_ps1_encoding.py")
+        mo = re.search(r"^PS_SUFFIXES\s*=\s*\{([^}]*)\}",
+                       hook.read_text(encoding="utf-8"), re.M)
+        self.assertIsNotNone(mo, "hook 的 PS_SUFFIXES 常數消失／改形 ⇒ 對帳基底失效")
+        targets = set(re.findall(r'"(\.[a-z0-9]+)"', mo.group(1)))
+        self.assertGreaterEqual(len(targets), 3, f"抽到的 hook 射程可疑地小：{targets}")
+        undeclared = {s: self.declared.get(s) for s in sorted(targets)
+                      if self.declared.get(s) != "crlf"}
+        self.assertEqual(undeclared, {},
+                         "hook 會把這些副檔名就地改寫成 CRLF，但 `.gitattributes` 並未"
+                         f"如此宣告（宣告值）：{undeclared}——兩家字面已漂移（DEF-101-950）")
 
 
 # ══════════════════════════════════════════════════════════════════════════════

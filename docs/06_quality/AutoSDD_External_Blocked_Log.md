@@ -41,6 +41,7 @@
 | DEF-200-063 | Windows 實機 | 2026-08-21 | Windows 真機執行 `claude -p --debug hooks` 取得 `Hook SessionStart.*success`，同時檢查負面表徵（彈窗真的停止、`pythonw.exe` 載具解析成功、`-WindowStyle Hidden` 實效） | 2026-08-21 |
 | DEF-200-147 | Windows 實機 | 2026-08-21 | Windows 真機重跑 govwrite 九格 rc 矩陣＋NTFS 大小寫繞行探針（`.ENV` 等形態）＋修3/修4 的 schtasks 取證（`NextRunTime` 值憑證）三項 | 2026-08-21 |
 | DEF-200-174 | GitHub Actions 帳務 | 2026-08-21 | 帳號所有者查 GitHub Billing 頁面確認 spend limit 已調高或 runner 計費已恢復，`gh api repos/.../actions/runs` 觀測對應 job 的 `runner_id≠0` | 2026-08-27 |
+| DEF-200-075 | 其他-macOS實機（darwin執行面量測值，Windows結構上量不到也修不了） | 2026-08-27 | 回 mac 真機後第一動作＝重量 AutoClaude 樹 skip census（量測入口見主帳本該列配方）；macos-compat-ci 長期紅不可依賴 | 2026-08-27 |
 
 ## 複查記錄
 

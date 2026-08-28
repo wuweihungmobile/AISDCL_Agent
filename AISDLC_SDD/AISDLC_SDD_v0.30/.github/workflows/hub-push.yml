@@ -9,6 +9,13 @@
 #
 # 在 framework repo 內保留此檔僅作為治理範例 — 實際觸發於 Hub repo 端。
 #
+# 🔴 action 版本升級決策（R107，掌舵者 2026-08-28 裁決；DEF-101-559／ADR-XPLAT-011 §4）：
+#    本檔會被下游複製到自家 Hub repo 後**真實執行**（見上方用途段與 REGISTRY-SPEC.md
+#    §肆），非純展示 ⇒ 依裁決「是否以後會用…該升」落在「會用⇒升」分支。action 版本
+#    自此對齊根層 .github/workflows/ 基準（checkout@v5／setup-python@v6／
+#    upload-artifact@v6）；v0.01~v0.29 凍結版依 Copy-on-Evolve 不動，「30 版此檔同一
+#    git blob」不變量正式分裂（凍結區一顆 + LATEST 一顆），已記入本版 EVOLUTION_LOG.md。
+#
 # 對應規格：
 #   - knowledge/hub/REGISTRY-SPEC.md §肆 PR-review Gate 流程
 #   - docs/06_quality/HUB-GOVERNANCE-SPEC.md G-30.7（雙層掃描）
@@ -53,13 +60,13 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout PR with full history
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
           submodules: recursive   # framework submodule（路徑 A）
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -89,7 +96,7 @@ jobs:
 
       - name: Upload quarantine artifact on hit
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: pii-rescan-quarantine
           path: build/hub-rescan-report.yaml
@@ -106,7 +113,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Checkout PR with full history
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -153,11 +160,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: recursive
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -195,12 +202,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
           submodules: recursive
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 

@@ -2,6 +2,8 @@
 
 <!-- guard-total:R106 --> **本輪護欄層累積淨額（稽核痕跡合計，同輪多列合併）＝ 88656 → 89125（+469）**
 
+<!-- guard-total:R107 --> **R107（帳本結案輪，寄居本檔＝R103 寄居 R102 檔的既有判例）護欄層累積淨額＝ 89125 → 89124（-1）** —— 結案包 #3 四筆判準落地（相異檔數／SC-10 內容禁詞／CACHE_DIR_ENV 逐字鎖／hook CRLF 字面對帳），抵銷詳見 `CrossPlatform_R106_Scan_Findings.md` 同標記行與 `CrossPlatform_Guard_Line_History.md`〈站點級守衛四種罩法 WHY〉至〈SC-2/3/5 射程收窄 WHY〉八節。
+
 ## 本輪範圍
 
 R105 交接留給 Windows 11 輪的兩個獨立問題：`root-infra-ci`（windows 標籤跨平台驗證

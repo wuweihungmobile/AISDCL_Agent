@@ -541,26 +541,13 @@ _SELF_REL = f"tools/tests/{_HERE.name}"  # git 路徑一律 posix，不用 os.se
 _RATCHET_MAX_RE = re.compile(r"^_MAX_BASELINE_ENTRIES\s*=\s*(\d+)", re.M)
 _RATCHET_CEILING_RE = re.compile(r"^_BASELINE_ID_CEILING\s*=\s*\"(DEF-\d+-\d+)\"", re.M)
 
-# 🔴🔴 R67 round 2（SA-R67-08）凍結基準：兩個 shrink-only 常數的「上一版」不再由 git 導出。
-#
-# 病灶（SA 沙箱實證：git 導出基準對每一個跑在 commit 之後的閘門恆真，放大十餘倍門檻
-# 零訊號）——實測原文＝Guard_Repin 證據檔 §B-11。
-#
-# 為什麼凍結常數不會重蹈恆真覆轍：git 導出的基準會被「commit」這個動作自己同步過去，而
-# 每個閘門都在那之後才跑；簽入原始碼的字面常數則 commit 不動它、checkout 不動它、CI 乾淨樹
-# 也不動它——只有人手改那一行才會變。於是「門檻」與「基準」是兩個獨立可變的量，比較在任何
-# 時點、任何消費者（髒樹／pre-commit／pre-push／CI）都非退化。整條 git 依賴一併消失，
-# 連帶消滅舊實作的另一面 fail-open：`previous is None`（git 取不到）時整支 skip。
-# 論證與形狀逐字同 `tools/check_script_parity.py` 的 `_TIER_BASELINE`（R67-H14），
-# 該處是照抄本檔而來的下游——本輪把上游本體也修了。
-#
-# 殘餘面（誠實揭露，與 R67-H14 同一句）：同一個 commit 內**同時**改門檻與本組凍結基準仍可
-# 通過——這是所有釘選式棘輪共有的邊界，與「零成本、隱形、自動」的舊行為是不同量級；且本組
-# 是純量，調升在 diff 上就是一個變大的數字，方向一望即知（不像 tier 名稱那樣需要對照表）。
-# 本性質有機械鎖：`TestShrinkOnlyRatchet::test_ratchet_is_independent_of_git_state`
+# 🔴🔴 R67 round 2（SA-R67-08）凍結基準：兩個 shrink-only 常數的「上一版」不再由 git 導出
+# ——git 導出基準對跑在 commit 之後的每個閘門恆真（SA 沙箱實證＝Guard_Repin 證據檔 §B-11），
+# 簽入字面常數才讓「門檻」與「基準」是兩個獨立可變的量。病灶、殘餘面（同 commit 內同時改
+# 門檻與基準仍可通過——釘選式棘輪共有邊界）與 `_BASELINE_ID_CEILING` 連動 ADR §4.3.4 的
+# 第三站點張力，全文搬至 CrossPlatform_Guard_Line_History.md〈凍結基準不由 git 導出 WHY〉節。
+# 機械鎖＝`TestShrinkOnlyRatchet::test_ratchet_is_independent_of_git_state`
 # （禁用 subprocess 仍須完整運作），舊實作在該鎖下會直接紅。
-# 另有一道獨立張力：`_BASELINE_ID_CEILING` 同時被 `TestCriterionIsBoundToAdrProse` 綁在
-# ADR §4.3.4 的宣告句上 ⇒ 調升它還得動 ADR，那是本檔之外的第三個站點。
 _FROZEN_MAX_BASELINE_ENTRIES = 2
 _FROZEN_BASELINE_ID_CEILING = "DEF-101-526"
 
@@ -695,7 +682,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 6289,
+    "test_adr_xplat001_c1c2_lock.py": 6282,
     "test_archive_defect_log.py": 4008,
     "test_bash32_compat.py": 1020,
     "test_bash_probe_spec_contract.py": 983,
@@ -732,7 +719,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_no_invalid_escape_sequences.py": 329,
     "test_ntfs_trailing_space_device_name.py": 770,
     "test_onboarding_parity_interlock.py": 233,
-    "test_platform_neutral_paths.py": 5727,
+    "test_platform_neutral_paths.py": 5717,
     "test_platform_utils_dedup.py": 1123,
     "test_pre_commit_dispatcher_sigpipe.py": 964,
     "test_pre_push_dispatcher.py": 686,
@@ -740,7 +727,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_ps51_compat.py": 610,
     "test_ps_engine_ssot.py": 954,
     "test_python_c_percent_shim.py": 119,
-    "test_quota_policy.py": 3055,
+    "test_quota_policy.py": 3071,
     "test_root_infra_parity.py": 441,
     "test_run_root_unittests.py": 2201,
     "test_sanitize_component_frozen_sdd_versions_lock.py": 340,
@@ -1197,6 +1184,11 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "[非淨減法輪][同輪追加] 本檔自身逐檔漂移——來源是前兩列新增稽核列＋"
      "_FROZEN_PREFIX_REWRITE_LEDGER 追加列（DEF-101-752）。"
      "逐項見 CrossPlatform_R106_Scan_Findings.md。"),
+    ("R107", 89125, 89124, -1, "帳本結案包 #3 四筆判準落地（DEF-200-166／171／225、"
+     "DEF-101-950），同輪兌現 (107, 630) 到期義務並重新武裝 (109, 610)。淨額 ≤ 0 的抵銷＝"
+     "八段散文搬遷 CrossPlatform_Guard_Line_History.md〈站點級守衛四種罩法 WHY〉至〈SC-2/3/5 "
+     "射程收窄 WHY〉八節（原文全文保全、知識零刪除；僅指稱詞隨載體必要調整）；逐檔對照見 "
+     "CrossPlatform_R106_Scan_Findings.md 的 R107 標記行。"),
 )
 
 
@@ -1236,6 +1228,8 @@ _REPIN_NET_CAP_SCHEDULE: tuple[tuple[int, int], ...] = (
                   # 重新武裝下一段：步伐 40 < 前一段的 50，續守「步伐刻意變小」。
     (105, 660),   # 到期輪兌現（DEF-200-224）：cap 降到 `_REPIN_NET_CAP_DUE_TARGET` round-label-ok
                   # 本身。同輪重新武裝下一段：步伐 30 < 前一段的 40，續守「步伐變小」。
+    (107, 630),   # 到期輪兌現（DEF-200-166／171 結案窗口）：cap 降到到期目標本身。
+                  # 同輪重新武裝下一段：步伐 20 < 前一段的 30，續守「步伐變小」。
 )
 #: 生效點＝首列輪號、現行上限＝末列上限，**皆由表導出不另立常數**（R73 判例：一份知識一個家）。
 _REPIN_ROUND_CAP_SINCE = _REPIN_NET_CAP_SCHEDULE[0][0]
@@ -1246,32 +1240,11 @@ _FROZEN_REPIN_ROUND_CAP_SINCE = 84
 _FROZEN_REPIN_ROUND_NET_CAP = 2600
 _FROZEN_REPIN_MAX_CONSECUTIVE_RISING_ROUNDS = 2
 
-#: 🔴 DEF-200-208：四方複審核准的**一次性**單輪 cap／連續上升例外登記表。
-#:
-#: **不是**修改 `net_cap_for_round()` 或 `_REPIN_MAX_CONSECUTIVE_RISING_ROUNDS`——那兩者
-#: 是往後**每一輪**都適用的門檻本體，字面與判準邏輯本輪一個字未動。本表只讓**指名的
-#: 那一輪**的款(10)(11) 不計入 `repin_growth_problems()` 的回傳，未列名的輪次（含未來
-#: 任何一輪）完全不受影響——這是名冊，不是開關；下一輪若也想超標，必須自己在缺陷帳本
-#: 立新案號並再走一次四方複審，不能靠「反正這張表已經有前例」就往這裡加第二個 key。
-#:
-#: WHY（本輪非有不可的理由）：R101 同時撞上兩件各自獨立、卻在同一輪疊加的機械事實—— round-label-ok
-#:   ① `_REPIN_NET_CAP_DUE_ROUND=101` 到期義務要求 cap 降到 `_REPIN_NET_CAP_DUE_TARGET`
-#:      （750）以下（見上方新排程列），而本輪待重釘的真實漂移淨額（+1136）遠超過新舊
-#:      任一 cap；
-#:   ② 這批漂移**不是本輪新造成的成長**，是既有鎖檔跨多輪（ADR-XPLAT-013 落地後）
-#:      從未被 `--print-guard-lines` 覆核揪出的陳舊漂移，加上本檔自身修復
-#:      `pricing_exemption_problems()` provenance 缺陷的編修（DEF-200-208 主線）；
-#:   ③ R99／R100 已連續兩輪淨額為正，R101 若照常規計入即成第三輪，撞款(11)。 round-label-ok
-#: 四方複審裁決：一次性把陳舊漂移收斂進帳，比讓判準繼續帶著 DEF-200-208 那個「baseline
-#: 大小關係恆假」的缺陷空轉、或被迫放寬 cap／streak 門檻本體，更誠實也更安全——後者才是
-#: 真正的指標套利（一次放寬，永遠放寬）。
-#: 🔴 為何 value 是 `(該輪的精確淨額, 理由)` 而不是只用輪號當 key：`_rising()` 這支既有
-#: 測試 fixture 會拿 `_REPIN_NET_CAP_SCHEDULE[-1]` 的輪號造合成樣本（`test_a_round_that_
-#: exceeds_the_net_cap_is_red`），而該輪號**恰好就是**每次到期義務兌現時的活躍輪號——
-#: 本輪的例外剛好也落在同一個輪號上（R101）。若 key 只用輪號，合成測試造出的 round-label-ok
-#: `("R101", 1000, 1751, 751, ...)` 也會被誤判成「已核准」而讓那支測試的紅燈熄掉， round-label-ok
-#: 那不是本表的射程（本表只赦免**這一個真實事件**，不是「這個輪號往後怎麼標都算數」）。
-#: 把精確淨額也綁進判準，合成測試的任意 delta 與真實核准值不同、自然不受影響。
+#: 🔴 DEF-200-208：四方複審核准的**一次性**單輪 cap／連續上升例外登記表——名冊不是開關：
+#: 只赦免「指名輪號＋精確淨額」逐字對上的那一個真實事件，未列名輪次（含未來任何一輪、
+#: 含合成語料撞同輪號）原判準不受影響；門檻本體與判準邏輯一個字未動。立案三事實、裁決
+#: 理由與「為何 key 綁精確淨額」全文搬至 CrossPlatform_Guard_Line_History.md
+#: 〈DEF-200-208 一次性例外名冊 WHY〉節（本檔不複寫）。
 _REPIN_APPROVED_ROUND_OVERAGE: dict[str, tuple[int, str]] = {
     "R101": (1332, (
         "四方複審核准 DEF-200-208 一次性例外：本輪同時①兌現 _REPIN_NET_CAP_DUE_ROUND "
@@ -1338,19 +1311,12 @@ def net_cap_schedule_problems(
 #: 出現輪號 ≥ `_REPIN_NET_CAP_DUE_ROUND` 而上限未降到 `_REPIN_NET_CAP_DUE_TARGET` 以下即紅；
 #: 出口＝往 `_REPIN_NET_CAP_SCHEDULE` 追加更小上限（刻意不留延期參數）。立案理由、步伐遞減
 #: 設計（5400→3200 起）與 R89 互斥推導全文搬至
-#: CrossPlatform_R97_Scan_Findings.md〈到期義務與重新武裝 WHY〉節。
-#: R101 兌現：`_REPIN_NET_CAP_DUE_ROUND=101` 本輪到期，cap 降到目標本身（750，見 round-label-ok
-#: `_REPIN_NET_CAP_SCHEDULE` 的 `(101, 750)` 列）。同輪就地重新武裝下一段（R85 起
-#: 慣例）：步伐 50 < 前一段的 100，續守「步伐刻意變小」——不使目標貼齊現行 cap，
-#: 否則 `assertLess(_REPIN_NET_CAP_DUE_TARGET, _REPIN_ROUND_NET_CAP)` 這道「到期目標
-#: 必須嚴格低於現行上限」的方向鎖會立刻恆真失效（款(12) 是一句永遠成立的話）。
-#: DEF-200-221 兌現：`_REPIN_NET_CAP_DUE_ROUND=103` 本輪到期，cap 降到目標本身 round-label-ok
-#: （700，見 `_REPIN_NET_CAP_SCHEDULE` 的 `(103, 700)` 列）。同輪就地重新武裝下一段：
-#: 步伐 40 < 前一段的 50，續守「步伐刻意變小」。
-#: DEF-200-224 兌現：cap 降到目標本身（660，見 `(105, 660)` 列）。同輪重新武裝下一段： round-label-ok
-#: 步伐 30 < 前一段的 40，續守「步伐刻意變小」。
-_REPIN_NET_CAP_DUE_ROUND = 107
-_REPIN_NET_CAP_DUE_TARGET = 630
+#: CrossPlatform_R97_Scan_Findings.md〈到期義務與重新武裝 WHY〉節；R101 起歷次兌現的 round-label-ok
+#: 逐段沿革搬至 CrossPlatform_Guard_Line_History.md〈到期義務兌現沿革〉節。
+#: 本次兌現（DEF-200-166／171 結案窗口）：cap 降到目標本身（630，見 `(107, 630)` 列），
+#: 同輪重新武裝下一段：步伐 20 < 前一段的 30，續守「步伐刻意變小」且目標嚴格低於現行 cap。
+_REPIN_NET_CAP_DUE_ROUND = 109
+_REPIN_NET_CAP_DUE_TARGET = 610
 
 #: R85：款(11)／ADR-XPLAT-002 §8.1 item 15「必須出現一次淨額 ≤ 0」的到期輪，搬成具名常數
 #: 理由同上（義務要能被看見、要有到期時點；`DEF-101-757`）。只准往前挪（更早到期＝更嚴），
@@ -1410,10 +1376,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 75
+_REPIN_LOG_FROZEN_PREFIX_LEN = 76
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "6d3be18839b6a224da2f7376a7a0da9fc78472b72b76831843d1e7a67c544ee7")
+    "abd0dc217e2bb82ced57084a2f3b46b0fa61d3b879164040f3bacfd69d015045")
 
 
 def repin_log_history_digest(
@@ -1499,6 +1465,9 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # 落地時未重釘本表（ARCH-01 同型復發），本輪補一列（含本檔自身逐檔漂移的兩列
     # 追加），prefix_len 73→75 涵蓋全部新列本身。
     ("R106", "026523f64c92", "6d3be18839b6", "DEF-101-752"),
+    # 帳本結案包 #3（DEF-200-166 窗口）：追加本輪稽核列並把它納入前綴（prefix_len 75→76）。
+    ("R107", "6d3be18839b6", "b42d19e1db20", "DEF-200-166"),
+    ("R107", "b42d19e1db20", "abd0dc217e2b", "DEF-200-141"),  # B2/B3 措辭與指針訂正（2026-08-28）
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。
@@ -1829,8 +1798,10 @@ def doc_guard_total_problems(
 
     四款，形狀照款(4)`[未對帳]`（那一款守的是稽核痕跡 ↔ 凍結表，本款守的是
     **人讀的那個數字** ↔ 凍結表）：
-      (1) `[未登記]` 本輪的標記站點少於 `min_sites` —— 沒有站點就沒有東西可判，
+      (1) `[未登記]` 帶本輪標記的**相異檔數**少於 `min_sites` —— 沒有站點就沒有東西可判，
           而「把那一行刪掉」正是最省力的滿足方式（同款(1)`[空表]` 的理由）。
+          🔴 DEF-200-166：數行數時同檔兩行即滿足（R87／R89~R96 九輪實況），刪那一份檔
+          就關掉判準 ⇒ 改數相異檔（同檔重複標記不重複計）。
       (2) `[形態不符]` 標記行上讀不出 `<起點> → <總量>（+<淨額>` 三元組。
       (3) `[總量不符]` 標記行引用的總量 != `sum(_FROZEN_GUARD_LINES.values())`。
       (4) `[淨額不符]` 該行自己的算術不自洽（終點 − 起點 != 行上宣告的淨額）。
@@ -1840,13 +1811,13 @@ def doc_guard_total_problems(
     全文搬至 CrossPlatform_R97_Scan_Findings.md〈文件總量對帳判準 WHY〉節。
     """
     problems: list[str] = []
-    sites = 0
+    sites: set[str] = set()
     for rel in sorted(docs):
         for lineno, line in enumerate(docs[rel].splitlines(), 1):
             mark = _GUARD_TOTAL_MARK_RE.search(line)
             if mark is None or mark.group(1) != latest_round:
                 continue
-            sites += 1
+            sites.add(rel)
             triple = _GUARD_TOTAL_TRIPLE_RE.search(line)
             if triple is None:
                 problems.append(
@@ -1866,11 +1837,13 @@ def doc_guard_total_problems(
                     f"[淨額不符] {rel}:{lineno} 的 {start} → {total} 淨額應為 "
                     f"{total - start}，行上寫 {delta}——三個數字擺在同一行卻對不起來，"
                     "正是 R80 二審抓到的那個形態（兩次重釘相加算錯）")
-    if sites < min_sites:
+    if len(sites) < min_sites:
         problems.append(
-            f"[未登記] 帶 `{_GUARD_TOTAL_DOC_MARK}{latest_round}` 標記的行只有 {sites} 處，"
-            f"少於 {min_sites} —— 本輪的累積淨額必須在計畫書與掃描發現文件**兩邊**都寫得"
-            f"出來。掃描面：{'、'.join(_GUARD_TOTAL_DOC_GLOBS)}")
+            f"[未登記] 帶 `{_GUARD_TOTAL_DOC_MARK}{latest_round}` 標記的**相異檔**只有 "
+            f"{len(sites)} 份（{sorted(sites) or '無'}），少於 {min_sites} —— 本輪的累積"
+            f"淨額必須在**兩份不同的檔**都寫得出來；同一份檔內寫兩行不算兩站點"
+            f"（DEF-200-166：刪那一份檔即關掉本判準）。"
+            f"掃描面：{'、'.join(_GUARD_TOTAL_DOC_GLOBS)}")
     return problems
 
 
@@ -3265,22 +3238,11 @@ class TestGuardLayerRatchet(unittest.TestCase):
             f"R{_REPIN_ROUND_CAP_SINCE} 之前，請檢查生效點是否被改動")
         nets = repin_round_nets(_GUARD_LINES_REPIN_LOG)
         self.assertTrue(nets, "稽核痕跡空了 ⇒ 淨額又回到「不出現在任何地方」")
-        #: 🔴 R85 收尾單人窗口訂正（把動工中的預測寫成契約、當輪即被證偽）——
-        #: 立案原文＝Guard_Repin 證據檔 §B-12。
-        #:
-        #: 🔴 **為何是訂正而不是放寬**——三件事逐條攤開，供下一輪覆核：
-        #:   ① 「必須有一輪 ≤ 0」這個**要求本身保留**，一個字都沒拿掉；
-        #:   ② 到期時點**釘死在 `_NET_SUBTRACTION_DUE_ROUND`**，且照款(12) 的體例
-        #:      **刻意不留延期參數**（「可延期的到期日不是到期日」）；
-        #:   ③ 今天的斷言內容由「已經達成」改成「**尚未到期**」——後者今天為真，前者為假。
-        #: 真正的義務居所本來就是**到期日形狀**：ADR-XPLAT-002 §8.1 item 15 要求的是
-        #: 「**到期輪之前**必須出現一次淨額 ≤ 0」（輪號現查 `_NET_SUBTRACTION_DUE_ROUND`，
-        #: 本註解刻意不複寫那個字面——寫出來就會超前帳本當前輪而被輪號鎖擋下，
-        #: 而那條鎖是對的：程式碼註解不該宣稱一個帳本上還不存在的輪次）。
-        #: 本斷言原文比該義務嚴，且嚴在一個被證偽的前提上。
-        #:
-        #: 🔴 **R85 為何達不到（是算術不是判斷）**：全部出口用盡 ≈ 442 < 需刪 588——
-        #:   兩份獨立量測原文＝Guard_Repin 證據檔 §B-12（原逐筆交棒＝R85 同名檔 §4）。
+        #: 🔴 R85 收尾單人窗口訂正（把動工中的預測寫成契約、當輪即被證偽）——立案原文＝
+        #: Guard_Repin 證據檔 §B-12。「為何是訂正不是放寬」三條論證（要求保留／到期時點
+        #: 釘死於 `_NET_SUBTRACTION_DUE_ROUND` 且不留延期參數、刻意不複寫該字面以免超前
+        #: 帳本輪號／斷言由「已達成」改「尚未到期」）與「R85 為何達不到（算術非判斷）」
+        #: 全文搬至 CrossPlatform_Guard_Line_History.md〈淨減法到期斷言訂正 WHY〉節。
         latest_round = max(no for no, _ in nets)
         self.assertTrue(
             any(delta <= 0 for _no, delta in nets)
@@ -3701,6 +3663,14 @@ class TestGuardLayerRatchet(unittest.TestCase):
             any("[形態不符]" in p for p in doc_guard_total_problems(vague, 1500, "R99")),
             "標了卻讀不出三元組竟然放行 ⇒ 標記變成一句不必兌現的宣告")
 
+    def test_two_marks_in_one_file_are_still_one_site(self) -> None:
+        """DEF-200-166：「兩邊都寫得出來」數的是**相異檔數**——同檔兩行＝刪一檔即關判準。"""
+        same = {"a.md": "x <!-- guard-total:R99 --> 1000 → 1500（**+500**）\n"
+                        "y <!-- guard-total:R99 --> 1000 → 1500（+500 兩次重釘）"}
+        self.assertTrue(
+            any("[未登記]" in p for p in doc_guard_total_problems(same, 1500, "R99")),
+            "同一份檔擠兩行標記竟然滿足兩站點門檻——R87／R89~R96 九輪就是這樣全綠的")
+
     def test_the_criterion_is_deliberately_not_retroactive(self) -> None:
         """射程鎖：`_NET_DELTA_ACCOUNTING_SINCE` 之前的輪次不受款(9) 管，**這是刻意的**。
 
@@ -3979,16 +3949,11 @@ _SPEC_SCAN = "CrossPlatform_Scan_Dimensions.md〈常設自檢〉"
 # §8 的區段界線。SC-2／SC-3／SC-5 **一律**只掃「交棒表本體」（`## 8.` 起至 `### 8.1` 止）：
 # §8 表頭規則 1／3 的標的逐字就是表內的「承接者欄」與「完成判準欄」，規則 2 的容器是 §8.1。
 #
-# 🔴 R67 round 4（SA2-R67-01）把 SC-2／SC-3 的下界由 `_SEC8_END_ALL` 收窄到此。原版掃 §8 全區，
-# 於是 §8.3——本 repo 自己指定的「逐字保全散文區」——也落在射程內，而這三條**都沒有同行豁免**
-# （只有 SC-1／SC-4 走 `_line_hits_with_waiver`）。後果可列舉：下一次照本輪體例把一句含
-# `**R62+**` 或千分位常數的 §8 原文保全進 §8.3，該鎖即**永紅**，而唯二出路都是本 repo 已判過
-# 更糟的——改寫保全原文（違反逐字保全紀律），或臨時加豁免（「誤報的鎖最後一定被加豁免繞過，
-# 比沒有鎖更糟」，見本檔多處與 `DEF-101-700` 的拒收理由）。
-# ⇒ 豁免路徑刻意**不是**新加一枚標記，而是沿用 §9.1 邊界 (b) 已裁決的既有出口：**把逐字原句
-#   移進 §8.3 散文區**。界線對齊後，「§8.3 是這幾條共同的保全區」才從口號變成一句真話。
-# `_SEC8_END_ALL` 保留給 `test_the_scan_surface_did_not_collapse`——它以「全區嚴格長於本體」
-# 反證 `### 8.1` 界線還活著（界線一旦失效，這幾條會一起退化回掃全區，正是本次修掉的形態）。
+# 🔴 R67 round 4（SA2-R67-01）把 SC-2／SC-3 的下界由 `_SEC8_END_ALL` 收窄到此：原版掃 §8
+# 全區會讓 §8.3 逐字保全散文區落入無豁免射程 ⇒ 永紅；豁免路徑刻意沿用既有出口（原句移進
+# §8.3），不新加標記。後果列舉與拒收理由全文搬至 CrossPlatform_Guard_Line_History.md
+# 〈SC-2/3/5 射程收窄 WHY〉節。`_SEC8_END_ALL` 保留給 `test_the_scan_surface_did_not_collapse`
+# ——以「全區嚴格長於本體」反證 `### 8.1` 界線還活著。
 _SEC8_START = r"^## 8\."
 _SEC8_END_ALL = r"^## 9\."
 _SEC8_END_TABLE = r"^### 8\.1"
@@ -4473,6 +4438,9 @@ def sc8_no_dead_letter_waiver_marker(c: Corpus) -> list[str]:
 # R74 開輪時該表停在 R72。SC-1~SC-9 全是「壞形態不得出現」，對「該出現的沒出現」零覆蓋。
 # 輪號**現查**（帳本「發現情境」欄最大 `R\d+`），寫死就是下一輪的 stale 站點。
 _SC10_ROW_RE = re.compile(r"^\s*\|\s*R(\d+)", re.M)
+#: 🔴 DEF-200-171：當前輪那一列的**內容**禁詞（缺席型判準的另一半）。R96 實例逐字掛著
+#: 「本列為進行中輪次、收輪時必須複驗本列」直到四方複審才被指出；R85／R90／R91 三列同形。
+_SC10_DRAFT_TOKENS = ("進行中", "待補齊", "收輪時必須複驗")
 
 
 def _coverage_table_rounds(adr2: str) -> set[int]:
@@ -4489,6 +4457,9 @@ def _coverage_table_rounds(adr2: str) -> set[int]:
 def sc10_coverage_table_has_a_row_for_the_current_round(c: Corpus) -> list[str]:
     """WHY：那張表的唯一用途是回答「哪一輪在哪個平台、雲端 CI 什麼狀態」。缺當前輪的列，
     讀者就會改用別的來源反推——`DEF-101-756` 就是這樣得出與開發史相反的結論的。
+    🔴 DEF-200-171：純缺席型之外補**內容**判準——當前輪那一列不得含 `_SC10_DRAFT_TOKENS`
+    草稿字樣（自稱未定案的列照樣全綠＝R96 實況）；史料輪的列刻意不判（那些警語在
+    它們身上是誠實的歷史，回頭改寫＝改史料）。
     """
     rounds = _coverage_table_rounds(c.adr2)
     if not rounds:
@@ -4497,7 +4468,15 @@ def sc10_coverage_table_has_a_row_for_the_current_round(c: Corpus) -> list[str]:
     if current is None:
         return []  # 帳本推不出輪次時不猜（無訊號 ≠ 壞訊號），與 ci_liveness 同紀律
     if current in rounds:
-        return []
+        row_re = re.compile(rf"^\s*\|\s*R{current}\b")
+        return [
+            f"SC-10：§6 R{current} 列（ADR 第 {lineno} 行）含草稿字樣「{tok}」——當前輪"
+            "列自稱未定案卻能全綠，正是 DEF-200-171 的缺陷本體（R96 該列掛到四方複審"
+            "才被指出）；收輪窗口須先把該列定案，或先不要建列"
+            for lineno, ln in awk_range(c.adr2, r"^## 6\.", r"^## 7\.")
+            if row_re.match(ln)
+            for tok in _SC10_DRAFT_TOKENS if tok in ln
+        ]
     return [
         f"SC-10：§6 邊界 1 逐輪覆蓋表缺 R{current} 那一列（現有最大 R{max(rounds)}）。"
         f"該表自陳「逐輪補列是收輪必做項」，而缺列此前不會讓任何東西轉紅 ⇒ R73 就是這樣"
@@ -4713,6 +4692,8 @@ _SECTION_91_INJECTIONS: tuple[Injection, ...] = (
               lambda c: _append_to_wide(c, _SC9_INJECT)),
     Injection("SC-10", "規格記載的修復前實況：§6 逐輪覆蓋表停在較早輪次、缺當前輪那一列",
               lambda c: _drop_current_round_row(c)),
+    Injection("SC-10", "DEF-200-171 的修復前實況：當前輪列逐字自稱草稿（R96 掛到複審才被指出）",
+              lambda c: _taint_current_round_row(c)),
 )
 
 
@@ -4724,6 +4705,18 @@ def _drop_current_round_row(c: Corpus) -> Corpus:
             if not re.match(rf"^\s*\|\s*R{current}\b", ln)]
     assert len(kept) < len(c.adr2.splitlines()), f"注入未刪到任何 R{current} 列"
     return c._replace(adr2="\n".join(kept))
+
+
+def _taint_current_round_row(c: Corpus) -> Corpus:
+    """往當前輪那一列**行內**補上 R96 逐字警語＝DEF-200-171 立案的修復前實況。"""
+    current = _current_round_from_ledger(c)
+    assert current is not None, "SC-10 注入需要帳本能推出輪次"
+    lines = c.adr2.splitlines()
+    idx = next((i for i, ln in enumerate(lines)
+                if re.match(rf"^\s*\|\s*R{current}\b", ln)), None)
+    assert idx is not None, f"注入找不到 R{current} 列——基底失效，拒絕無效注入"
+    lines[idx] += " ⚠️ 本列為進行中輪次，收輪時必須複驗本列 |"
+    return c._replace(adr2="\n".join(lines))
 
 
 class TestApprovedRoundOverageIsScoped(unittest.TestCase):

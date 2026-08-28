@@ -74,6 +74,37 @@
 | **具名殘留（不修，非疏漏）** | **`v0.02`~`v0.29` 共 95 個同型站點未修**。判準：`ADR-XPLAT-001 §2` 已機械確認這 28 版**不在任何自動閘門的執行面內**（`ci-gate` 只跑 v0.01 凍結基線與 LATEST），回補不會讓任何測試變綠或變紅。C3 鎖已明文排除該區，並在 docstring 寫明「那 95 個站點確實存在且未修，是待裁決項，不是本鎖宣稱乾淨的區域」。**另有一個同型但根因不同的殘留交 R61**：`AutoClaude/tools/hub_sync.py:478` 把 outbox 路徑寫死在**生產碼**裡，使 `test_hub_sync.py` 有同型並行競態——那不能靠改測試根治，見 `DEF-101-596`（routed@R61）。 |
 | **回退指引** | 還原兩支測試檔的暫存目錄取得方式即可；**不建議回退**——回退會讓 `TestNoInTreeWritableTmpDir` 立刻轉紅，且重新打開四方複審並行重跑必假紅的路徑。回退不影響任何版本的 API／FSM 狀態／`*.tla`（純測試檔暫存目錄變更）。 |
 
+## 凍結基線例外：v0.01 測試假 SHA drift 殘留檔移除（R107，2026-08-28）
+
+> **注意**：本節經掌舵者明確核准（見 signoff 欄），但與 R44／R45／R46 三節性質不同——那三節是動**生產碼**的破例回補，本節是**純刪除 4 支從不該入庫的測試產物**（零程式碼變更）。依 R60 節補注的計數判準（`git log` 撈凍結版樹 commit 後逐支對照本檔章節分類）：**「經核准的破例回補」次數不因本節改變（仍以該判準逐支人工判讀）**，含本次刪除的 commit 應歸入本節、不得計為回補。完整缺陷沿革見根層 `docs/06_quality/AutoSDD_Defect_Log.md` 的 `DEF-101-338`（R40 發現、R60 查證仍 tracked、R107 掌舵者裁決結案）。
+
+| 欄位 | 內容 |
+|------|------|
+| **範圍** | `AISDLC_SDD_v0.01/build/reports/drift/` 下 4 支測試假 SHA 檔：`COMMIT-sha-3rd.yaml`／`COMMIT-sha-high.yaml`／`COMMIT-sha-low.yaml`／`COMMIT-testsha-001.yaml`。**不含**同目錄 `COMMIT-769eea4e3f66.yaml`（真 SHA 形態、性質不同〔`DEF-101-329` 族〕，保留不動）。 |
+| **日期／signoff** | 2026-08-28（R107 帳本結案輪）；🔴 人工 signoff：掌舵者 2026-08-28 就 `DEF-101-338` needs-user 裁決，原話「核准 git rm（推薦）」——依 `ADR-XPLAT-001` 先例（R44/R45/R46）取得凍結版例外核准後執行。 |
+| **打破 Copy-on-Evolve 的理由** | 4 檔命名為測試假 SHA（`sha-low`／`sha-high`／`sha-3rd`／`testsha-001`），是早期測試執行未隔離、誤寫入真實 repo 路徑而被意外 commit 的歷史殘留 artifact；現行 `AISDLC_SDD_v0.01/tools/fsm_runtime/tests/test_drift_monitor.py` 全數用 `tmp_path`（R107 實查 34 處、全檔零 `build/reports` 引用），寫出這些檔的根因已不存在。留著它們＝凍結版樹內掛著假資料誤導「drift 報告長什麼樣」的讀者。刪除不是回補，是把從不該入庫的東西移出去。 |
+| **修法** | `git rm` 該 4 檔（index 與工作樹同步移除）；**不升版、不新增版本目錄、零程式碼變更**。 |
+| **TLC 證據** | N/A——純刪除 4 支 YAML 測試產物，未觸碰任一版本的 `_HAPPY_PATH` 或任何 `*.tla`／`.cfg`，各版既有五軌 TLC 證明維持有效。 |
+| **驗證** | 刪除前查證：檔名全庫 Grep 僅 `docs/06_quality/` 三支帳本／證據檔命中（歷史記載，非消費者），**零程式碼消費者**；`reports/drift` 路徑字面全庫 `*.py` 零命中（無任何 Python 鎖／生產碼掃該目錄）。刪除後實跑：`git status --short` 該目錄 4 列 `D `；v0.01 `pytest tools/fsm_runtime/tests/test_drift_monitor.py -q` → **10 passed, rc=0**。 |
+| **回退指引** | 自刪除前的 commit 以 `git checkout <該 commit> -- 'AISDLC_SDD/AISDLC_SDD_v0.01/build/reports/drift/COMMIT-sha-*.yaml' '.../COMMIT-testsha-001.yaml'` 逐檔取回即可；**不建議回退**——回退等於把假 SHA 測試產物重新放回凍結版樹。回退不影響任何版本的 API／FSM 狀態／`*.tla`（純資料檔增刪）。 |
+
+## LATEST 修改備忘：hub-push.yml sample action 升版＝「30 版同一 blob」不變量正式分裂（R107，2026-08-28）
+
+> **注意**：本節**不是**凍結基線例外（只動 LATEST v0.30，LATEST 本就可原地改）；立節是因為
+> `docs/04_planning/ADR/ADR-XPLAT-011-r99-known-boundary-declarations.md` §4 條件② 明文要求
+> 「若升，須同時接受『30 版此檔不再是同一 git blob』並在該版 EVOLUTION_LOG.md 記錄」。
+> 🔴 人工 signoff：掌舵者 2026-08-28 就 `DEF-101-559` needs-user 裁決，原話「是否以後會用,
+> 最佳化是否該升? 若真的都用不到, 當然不升」——查證落在「會用」分支：該檔檔頭與
+> `knowledge/hub/REGISTRY-SPEC.md` 明文指示下游「將此檔複製到 Hub repo 的
+> `.github/workflows/hub-push.yml`」後真實執行，且 REGISTRY-SPEC 驗收清單要求其 4 job 全綠
+> 才可 merge（非純展示），故升。
+> **改動**＝`AISDLC_SDD_v0.30/.github/workflows/hub-push.yml` 對齊根層 `.github/workflows/`
+> 基準：`checkout@v4→v5`（4 站點）、`setup-python@v5→v6`（3 站點）、`upload-artifact@v4→v6`
+> （1 站點）；v0.01~v0.29 凍結版依 Copy-on-Evolve 不動（維持 Node20 世代）。機械鎖同步：
+> 根層 `tools/check_gha_action_versions.py` 的 `_NESTED_DISCLOSED_GENERATION` 改登記兩世代
+> 聯集（該檔〈掃描面邊界〉⚠️ 段同步改寫）。**回退**＝還原該檔 8 處版本字串並把上述快照
+> 改回單世代登記；不影響任何版本的 API／FSM 狀態／`*.tla`（sample 在本 repo 永不執行）。
+
 
 ## v0.29 → v0.30
 

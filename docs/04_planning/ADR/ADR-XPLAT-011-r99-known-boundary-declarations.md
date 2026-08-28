@@ -68,6 +68,7 @@
 **原始記載**（R60 round 2，自 `DEF-101-541` 拆出）：`tools/check_gha_action_versions.py` 掃描面邊界已載明「LATEST（`AISDLC_SDD_v0.30`）的 `hub-push.yml` sample 是否要升 action 版本，刻意不由 CI 工具鏈側代決」——真實待決事項是：升 LATEST 會讓「各版此檔為同一 git blob」這個目前可機械核對的不變量首次分裂。
 
 **🔴 R99 現場重驗**：`AISDLC_SDD/AISDLC_SDD_v0.30/.github/workflows/hub-push.yml` 現況檔頭仍註明「This is a sample workflow for the Hub Registry repo, not for the AISDLC-SDD framework repo itself」「在 framework repo 內保留此檔僅作為治理範例——實際觸發於 Hub repo 端」，未發現任何後續輪次針對此檔的版本升級決策記錄。原始待決事項依然懸而未決。
+【2026-08-28 訂正注：掌舵者已裁決**升版**（DEF-101-559 查證落「會被複製使用」分支——該 sample 明文供下游複製到 Hub repo 真實執行）；LATEST `hub-push.yml` 8 站點已升版對齊根層基準，「30 版同一 git blob」不變量隨之分裂並已記錄。詳 `AISDLC_SDD/AISDLC_SDD_v0.30/EVOLUTION_LOG.md`「LATEST 修改備忘」節。原文保留為 R99 當時現況。】
 
 **裁決**：**本 ADR 不代為做出該項政策決定**——升不升版是 AISDLC_SDD 凍結／LATEST 版本政策擁有者的裁決權限，理由有二：(a) 這是**真實的取捨**（升版打破「30 版此檔同一 git blob」不變量 vs 不升版累積 action 版本落後），不是可由程式邏輯推導出唯一正解的工程問題；(b) 該檔屬 `AISDLC_SDD/` 子專案 scope，其凍結／LATEST 版本政策依 monorepo 根 CLAUDE.md「路徑陷阱」節載明的邊界，非本輪根層帳本收斂包的裁決權限範圍。本 ADR 的貢獻僅止於：把此前散落在帳本狀態欄的解鎖條件正式落地為可長期回指的文件，避免懸而未決的政策問題被誤讀為「無人知曉」或被靜默遺忘。
 
@@ -77,6 +78,7 @@
 ③ 若不升，把理由寫進該檔檔頭以免下一輪重複發現。
 
 **給帳本的建議狀態**：`routed（承接輪次：未指派——待政策擁有者裁決；解鎖條件見本 ADR §4）`，不建議標記 `closed-by-decision`：政策問題尚未被實際裁決，只是被正式登記為「這是一個懸而未決的政策問題，不是工程缺陷」，若標記 `closed-by-decision` 容易被誤讀為「已經有人做了決定」。
+【2026-08-28 訂正注：政策擁有者已實際裁決（升版），上方「不建議 closed-by-decision」的前提（尚未裁決）自此不再成立——§4 解鎖條件①②已履行、③不適用（升版分支），帳本該列據此改 `closed-by-decision`。裁決存證＝`AISDLC_SDD/AISDLC_SDD_v0.30/EVOLUTION_LOG.md`「LATEST 修改備忘」節。原文保留為裁決前史料。】
 
 ---
 

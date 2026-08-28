@@ -67,31 +67,32 @@ _WORKFLOWS_DIR = _REPO_ROOT / ".github" / "workflows"
 #      與「凍結版不可改」兩條政策直接互斥、本工具將永久紅燈且無合法解法；
 #   ③ LATEST（v0.30）的 action 版本屬「散佈給下游的模板品質」命題，與本工具要守的
 #      「本 repo 各 workflow 版本不得互相漂移」是不同命題，混在一起會兩邊都守不好。
-# ⚠️ 誠實揭露的到期風險（**R60 已完成分流，不再是懸空請求**）：那些巢狀檔實測全為
-#   Node20 世代（`checkout@v4`／`setup-python@v5`／`upload-artifact@v4`；份數由
-#   `nested_excluded_workflows()` 每次執行實查後印出，**刻意不在註解寫死支數**——寫死
-#   即下一輪必過期，同 R57 立下的政策）。GitHub 官方時程（R60 以 WebSearch 重新查證，
-#   與 R57／DEF-101-434 所載一致）：2026-06-16 runner 預設改用 Node24、**2026-09-16 自
-#   runner 完全移除 Node20**（過渡期可用 `ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true`
-#   續用 Node20，但該旁路在移除後失效）。下游使用者複製 LATEST 模板後會踩到。
-#   分流結論（R60 Scan-C C-03；延伸自 DEF-101-490／DEF-101-434，已記入
-#   `docs/06_quality/AutoSDD_Defect_Log.md`）：
+# ⚠️ 誠實揭露的到期風險（R60 完成分流；**政策擁有者已於 2026-08-28 裁決，見分流結論**）：
+#   凍結版巢狀檔（v0.01~v0.29）實測為 Node20 世代（`checkout@v4`／`setup-python@v5`／
+#   `upload-artifact@v4`；份數由 `nested_excluded_workflows()` 每次執行實查後印出，
+#   **刻意不在註解寫死支數**——寫死即下一輪必過期，同 R57 立下的政策）。GitHub 官方
+#   時程（R60 以 WebSearch 重新查證，與 R57／DEF-101-434 所載一致）：2026-06-16 runner
+#   預設改用 Node24、**2026-09-16 自 runner 完全移除 Node20**（過渡期旁路
+#   `ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true` 在移除後失效）。
+#   分流結論（R60 Scan-C C-03）＋ 🔴 掌舵者 2026-08-28 裁決（DEF-101-559）：
 #     - 凍結版（`v0.01`~ 前一版）依 Copy-on-Evolve **不動**，這一點無爭議；
-#     - LATEST 那份**是否**隨根層升版，本工具刻意**不代為決定**——該檔自述是「給尚未
-#       存在的 Hub Registry repo 的 sample」（見其檔頭），要不要升版屬**框架散佈品質**
-#       命題，擁有者是 AISDLC_SDD 凍結/LATEST 政策側，不是 CI 工具鏈側；且升 LATEST
-#       會讓「各版此檔為同一 git blob」這個目前可機械核對的不變量首次分裂，代價需由
-#       該側評估。
+#     - LATEST 那份**已依掌舵者裁決隨根層升版**（checkout@v5／setup-python@v6／
+#       upload-artifact@v6）。判定依據＝該檔檔頭與 `knowledge/hub/REGISTRY-SPEC.md`
+#       明文指示下游「複製到自家 Hub repo 後真實執行」（非純展示），依裁決原話
+#       「是否以後會用…該升；若真的都用不到，當然不升」落在「會用⇒升」分支。
+#       「各版此檔為同一 git blob」不變量自此**正式分裂**（凍結區一顆 + LATEST 一顆），
+#       已依 ADR-XPLAT-011 §4 條件② 記入 `AISDLC_SDD/AISDLC_SDD_v0.30/EVOLUTION_LOG.md`。
 #   ⚠️→🔒 為避免本段再退化成寫一次就沒人看的孤兒揭露（C-03 的實質指控就是「承接者
 #   不存在」），`_NESTED_DISCLOSED_GENERATION` 把上述「Node20 世代」這個事實宣稱升為
 #   **機械斷言**：巢狀排除區的 action 版本一旦與登記快照不符（有人升了 LATEST、或新版
 #   目錄帶進不同世代），本工具即紅燈並要求同步更新本段揭露與帳本狀態。也就是說，這段
 #   文字從此不可能與實況靜默背離。
-# 📌 複核者陷阱（R60 實測，寫下以免下一輪重蹈）：用 `md5sum` 比對這些巢狀檔會看到**兩
-#   群不同雜湊**，很像「內容已分裂」的鐵證——那是本機 checkout 的 CRLF 殘留
-#   （`git ls-files --eol` 顯示部分版本工作樹為 `w/crlf`）。正確的載具是
+# 📌 複核者陷阱（R60 實測；2026-08-28 升版後語意更新）：用 `md5sum` 比對這些巢狀檔會看到
+#   CRLF 殘留造成的假分裂（`git ls-files --eol` 顯示部分版本工作樹為 `w/crlf`）。
+#   正確的載具是
 #   `git ls-files -s -- '*/.github/workflows/hub-push.yml' | awk '{print $2}' | sort -u`
-#   ——實測收斂為**單一 blob**，committed 內容逐位元組相同。
+#   ——R60 實測收斂為單一 blob；2026-08-28 升 LATEST 後**預期恰為兩顆**（凍結 29 版
+#   一顆 + LATEST 一顆），多於兩顆才是異常。
 # 為避免上述「排除」日後退化回「沒人想過」：`_audit_scan_surface()` 實查 git-tracked
 # 檔案，凡掃描面外、又不符下列已登記排除樣式的 workflow 檔一律 fail-loud（新冒出的
 # 巢狀 `.github/workflows/`——例如 AutoClaude 側日後自建一份——不會再靜默漏掉）。
@@ -100,14 +101,17 @@ _EXCLUDED_NESTED_WORKFLOW_RE = re.compile(
 )
 _ANY_WORKFLOW_FILE_RE = re.compile(r"(?:^|/)\.github/workflows/[^/]+\.ya?ml$")
 
-# 巢狀排除區「目前實況」的登記快照（R60 Scan-C C-03）。語意＝上方 ⚠️ 段那句
-# 「實測全為 Node20 世代」的機械化身：值必須是該區**唯一**出現的版本（多版本即分裂）。
-# 紅燈指路：本快照與實查不符時，正確的處置**不是**改這裡了事，而是先回答「LATEST 該不該
-# 升版」（見 ⚠️ 段的分流結論與擁有者），再把答案同步進 ⚠️ 段與缺陷帳本，最後才更新本快照。
+# 巢狀排除區「目前實況」的登記快照（R60 Scan-C C-03 立鎖；2026-08-28 依掌舵者裁決升
+# LATEST 後，改登記「凍結區＋LATEST」兩世代的**聯集**）。語意＝上方 ⚠️ 段事實宣稱的機械化身：
+# 值必須與該區實測出現的版本集合**完全一致**（多一種、少一種都紅）。誠實劃界：聯集級
+# 登記分辨不出「哪一份檔是哪個版本」——凍結區單檔被改成 LATEST 同款版本不會轉紅，該面
+# 由 Copy-on-Evolve 政策與人工複審守（升版裁決時已知情接受）。紅燈指路：本快照與實查
+# 不符時，正確的處置**不是**改這裡了事，而是先取得政策擁有者裁決（見 ⚠️ 段），再把
+# 答案同步進 ⚠️ 段與缺陷帳本，最後才更新本快照。
 _NESTED_DISCLOSED_GENERATION = {
-    "checkout": "v4",
-    "setup-python": "v5",
-    "upload-artifact": "v4",
+    "checkout": ("v4", "v5"),
+    "setup-python": ("v5", "v6"),
+    "upload-artifact": ("v4", "v6"),
 }
 
 # R56 修正（三名獨立審查員各自以 bug-injection／fixture 實測揪出的三個靜默繞過）：
@@ -278,9 +282,11 @@ def nested_generation_drift(generation: dict[str, set[str]]) -> list[str]:
         if expected is None:
             problems.append(f"actions/{action}：實測 {actual}，但登記快照未列此 action")
         elif not actual:
-            problems.append(f"actions/{action}：登記快照列為 {expected}，但實測已不存在")
-        elif actual != [expected]:
-            problems.append(f"actions/{action}：登記快照 {expected} ≠ 實測 {actual}")
+            problems.append(
+                f"actions/{action}：登記快照列為 {sorted(expected)}，但實測已不存在"
+            )
+        elif actual != sorted(expected):
+            problems.append(f"actions/{action}：登記快照 {sorted(expected)} ≠ 實測 {actual}")
     return problems
 
 
@@ -371,8 +377,8 @@ def main(argv: list[str] | None = None) -> int:
             # ②與①共用同一次 `git ls-files`：①拿不到清單時②結構上無從執行。
             unrun.append(f"{_CHECK_ORDER[1]}（前置：①的 `git ls-files` 未成功）")
         else:
-            # R60 Scan-C C-03：巢狀排除區的「Node20 世代」事實宣稱由此升為機械斷言，
-            # 讓 ⚠️ 段那份到期風險揭露不可能與實況靜默背離（原缺陷＝承接者不存在）。
+            # R60 Scan-C C-03：巢狀排除區的世代事實宣稱（2026-08-28 起＝凍結區 Node20
+            # ＋LATEST 已升版的兩世代聯集）由此升為機械斷言，讓 ⚠️ 段揭露不可能靜默背離。
             nested = nested_excluded_workflows()
             try:
                 generation = nested_action_generation(nested)
@@ -391,7 +397,7 @@ def main(argv: list[str] | None = None) -> int:
                     )
                 else:
                     gen_text = "／".join(
-                        f"{a}@{_NESTED_DISCLOSED_GENERATION[a]}"
+                        f"{a}@{'+'.join(sorted(_NESTED_DISCLOSED_GENERATION[a]))}"
                         for a in sorted(_NESTED_DISCLOSED_GENERATION)
                     )
                     notes.append(

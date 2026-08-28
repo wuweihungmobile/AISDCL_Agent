@@ -429,10 +429,14 @@ def explain(amort, converge_pct: float | None = None) -> str:
             f"{amort.allowance_pp:.1f}pp；kind={amort.rate_kind} 已用 "
             f"{amort.used_pp:.0f}pp 剩 {int(amort.rate_minutes)} 分鐘 ⇒ 本窗餘裕 "
             f"{amort.headroom_pp:+.1f}pp")
-    # R95：比值供人讀與校準（對照 PRD §4.2.8 的 CLI 內建參考值），差值仍是決策輸入。
+    # R95：比值供人讀與校準；差值仍是決策輸入。DEF-200-201：本片段必須自帶語意——
+    # 它的分母是**短窗自身**的流逝比，與前面的本窗餘裕（攤提配額軸）不同軸，同行同印時
+    # 「餘裕為負、index<1」並非矛盾，更不可拿 index 抵銷負餘裕（已造成一次錯誤裁決）。
     index = pace_index(amort.used_pp, amort.rate_minutes, amort.rate_window)
     if index is not None:
-        text += f"；短窗 pace_index={index:.2f}"
+        text += (f"；短窗自軸 pace_index={index:.2f}"
+                 f"（{'>1＝超前' if index > 1.0 else '≤1＝短窗自身未超線性'}；"
+                 "分母是短窗流逝比，與本窗餘裕不同軸、不可互抵）")
     if amort_relaxed(amort, converge_pct):
         text += (f"；長窗自軸 {100.0 - amort.remaining_pp:.0f}pp 未達 converge "
                  f"{float(converge_pct):.0f}pp ⇒ 出聲不收緊（本次未壓制短窗水位）")

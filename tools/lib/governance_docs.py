@@ -318,6 +318,15 @@ _GOVERNANCE_DOCS = (
     # 磁碟）不一致——與本機制原本要防的「磁碟上有卻沒登記」方向相反。正確做法是讓檔名
     # 符合 glob 樣式，故已改名為下列檔名（該檔頭自述已一併訂正）。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R82_DEF101752_Untracked_Scan_Closure.md",
+    # R107 結案輪逐筆結案證據（結案包 #1）：主帳本各結案列的狀態欄  round-label-ok
+    # 已瘦身成「短句＋指針」，驗證指令逐字／rc／輸出關鍵行全數只住本檔 ⇒ 唯一還能重驗
+    # 這批結案的地方就是它（⇒ 體積守門），且它逐節寫出「證據見本檔 §DEF-XXX-XXX」的
+    # 座標宣稱（⇒ 指針稽核）。即刻登記，不等下一輪。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R107_Ledger_Closure.md",
+    # R107 兩場四方複審的磁碟固化載體（2026-08-28）：PRD v2.1.4 修憲批次與收尾複審 round-label-ok
+    # 的四鏡判決全文唯一長存處——PRD 落款與帳本 DEF-200-141/142/157 結案列引據的就是它
+    # （⇒ 體積守門＋指針稽核），逐字轉存自 session 逐字稿、僅路徑匿名化。即刻登記。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R107_Review.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/{CrossPlatform,Quota}_*.md`。這**不是**把具名

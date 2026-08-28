@@ -6,12 +6,12 @@
 | **v2.1.1 (R92 修憲)** | 2026-08-16 | Ready for Implementation | 掌舵者裁決：`CONTEXT_COMPACT_PERCENT` 75→84（§4.3、§6 兩站點），並首次把 context 硬線 94% 入憲（此前僅存在於實作層 `HARD_RATIO`，PRD 未定義）；與額度尺 85/95 錯開保鑑別力。機械 autocompact 設定之取捨見 ADR-XPLAT-008 |
 | **v2.1.2（R93 新增）** | 2026-08-16 | Ready for Implementation | 新增 §4.1.4：跨窗攤提的核心指紋隨帳號/方案核心桶集合變化自動分區，解決 `DEF-200-122`（換方案上升跳變污染燃燒率估計）；`DEF-200-114` 的機制本體同輪落地。設計細節見 ADR-XPLAT-009 |
 | **v2.1.3（R93 二次訂正）** | 2026-08-16 | Ready for Implementation | 獨立 Architect 複審 REJECT 承接：§4.1.4「同方案換帳號需帳號識別，非本節範圍」與 `docs/06_quality/Quota_R90_CrossAccount_Experiment.md` 實測不符（核心桶集合指紋本身不具身分鑑別力：3 命中 2 假陽性、29% 偽陰性），訂正為已解決——帳號身份訊號（回應標頭雜湊，零額外網路/token/憑證處理）併入核心指紋；補齊「不同方案桶名集合相同」邊界。設計細節見 ADR-XPLAT-009 §6 |
-| **v2.1.4（T5 修憲）** | 2026-08-16 | 經掌舵者 2026-08-16 拍板、待四方複審後生效 | 解除 PRD 內部三角衝突（§15.5 紅線 1「不碰未公開端點」↔ 現行唯一取數源即 §4.1.1 T5 ↔ §12「不得讀 OAuth token」為呼叫 T5 的必要前提所必違）：T5 升格為認可主源（零 token、帳號層級權威讀數、R90 四通道實測勝出、失效 fail-safe 降級 cap=4，見 §4.1.1〈T5 升格依據〉）；紅線 1 加收窄豁免（唯讀 GET／單一程式站點 `tools/lib/quota_meter.py`／TTL≥180s 節流／失效降級出聲）；§12 憑證條改為「允許唯讀取用、禁止落痕跡」劃界。§0.6 表與附錄 B-05 的「T5 可整條刪除」保留為 v2.1 核實當時的歷史紀錄，不再是現行規範 |
+| **v2.1.4（T5 修憲）** | 2026-08-16 | 經掌舵者 2026-08-16 拍板；**R107 四方複審通過（Architect／SA／SD／QA 各自獨立，4×APPROVE_WITH_CONDITIONS，條件已於同批落款；紀錄＝`docs/06_quality/CrossPlatform_R107_Review.md`）＝已生效**（2026-08-28；機械驗證同日有人窗口重跑：`tools.tests.test_quota_policy` 全綠＋`tools/check_defect_log_crossref.py` rc=0） | 解除 PRD 內部三角衝突（§15.5 紅線 1「不碰未公開端點」↔ 現行唯一取數源即 §4.1.1 T5 ↔ §12「不得讀 OAuth token」為呼叫 T5 的必要前提所必違）：T5 升格為認可主源（零 token、帳號層級權威讀數、R90 四通道實測勝出、失效 fail-safe 降級 cap＝`Policy.degraded_cap` 現查（SSOT＝`tools/lib/quota_policy.py`；上界不變式見 §4.1.5），見 §4.1.1〈T5 升格依據〉）；紅線 1 加收窄豁免（唯讀 GET／單一程式站點 `tools/lib/quota_meter.py`／TTL≥180s 節流／失效降級出聲）；§12 憑證條改為「允許唯讀取用、禁止落痕跡」劃界。§0.6 表與附錄 B-05 的「T5 可整條刪除」保留為 v2.1 核實當時的歷史紀錄，不再是現行規範 |
 | **v2.1.5（撞線喚醒閉環修憲）** | 2026-08-17 | 經掌舵者 2026-08-17 立案（「Token 用盡時，為何沒有啟動下一個 Reset 的喚醒機制，不需要人類介入」）、待四方複審後生效 | 新增 §4.5.6：需求層明確化「任一執行層級撞線 → 零人工 → reset 喚醒續跑」，覆蓋面必含 (a) subagent／workflow agent 撞線、(b) **主 session 活著但帳號級撞線**（該回合死於 API 層、hook 體系零觸發點）兩情境；喚醒機制自身失效必須 fail-loud 且可自癒（禁止 fail-quiet 自我解除）；可重啟點任務書的骨架重寫不得摧毀機器可讀狀態塊（單檔雙寫者禁令）。立案證據＝2026-08-16/17 事件（哨兵武裝且巡邏十次全綠，卻在撞線落地後 4 分鐘死於被 halt 動作覆寫的任務書而自我解除，03:50 reset 時機器上零排程，空轉至人工介入；逐字證據與逐環驗證見 ADR-XPLAT-004 §2.9）。設計細節與實作工作清單見 ADR-XPLAT-004 §2.9 |
 | **v2.1.6（主控閒置盲區修憲）** | 2026-08-17/18 | 經掌舵者定級 P0「會破產的嚴重 BUG」立案、規格化後待實作 | 新增 §4.5.7：撞線那一刻**之前**主控完全不知道水位已逼近（等 subagent 回覆期間零工具呼叫，`context_budget_guard.py` 只掛 Pre/PostToolUse，該窗口結構上不會被觸發），且撞線那一刻通知能不能送達也未受保障。立案＝`DEF-200-148`，2026-08-16/17 收尾包與修復包兩次實證（皆為「subagent 背景耗至 session 38% 期間主控零喚醒」）。三條規範性要求：R-4.5.7-1（主控閒置盲區量測）／R-4.5.7-2（prepare 帶預防性提醒、不寫任務書骨架）／R-4.5.7-3（通知走桌面通道、不依賴主控下一次工具呼叫）。本版僅完成規格化，實作與回歸鎖見 v2.1.7 |
 | **v2.1.7（哨兵武裝狀態漂移自癒 ＋ §4.5.7 落地）** | 2026-08-20 | 經本輪落地並回歸鎖驗證通過 | §4.5.7（B1~B3）與新增 §4.5.8（C1~C4）**全數完整實作**：主控閒置量測、prepare 帶預防性桌面通知、哨兵武裝狀態對排程器現查漂移時的自動重新武裝。落地在 `tools/lib/quota_escalation.py`（`patrol_housekeeping()` 一族）與 `tools/lib/sentinel_lifecycle.py`（`armed_but_missing()`），由 `tools/session_resume_planner.py` 的 `_sentinel_tick()` 接線；回歸鎖見 `tools/tests/test_context_budget_guard.py` 的 `ControllerIdlePrepareWatchTest`／`PatrolNoticeIsDesktopNotHookTest`／`ArmedDriftSelfHealTest` |
 | **v2.1.8（四段結構性修憲：救援序列／管家事項／醒來確認／平穩機制運算元）** | 2026-08-22 | 經掌舵者裁決「走理想版」立案，本版僅完成規格化，實作由後續階段接手 | 四段原條文與本 repo 憲法或本實作結構直接衝突，一律**不降規**改寫為更強解，並各自保留「原條文 → 改後條文 → 為什麼（含實測數字）」對照：**(A) §8-8 存檔救援序列**——原文前兩步 `commit --no-verify`／`git stash` 被憲法直接禁止（鐵律五機械阻斷 stash 全族、根 CLAUDE.md 逐字列 `--no-verify` 為禁止事項），刪除該兩步並把第三步升級為「patch 寫完必須重新開檔讀回驗 SHA-256、驗不過 fail-loud」（新增 §4.5.9）；**(B) §8-11／§8-13／§8-14**——三項以「長駐 Daemon」為前提而本 repo 刻意不做 Daemon，**意圖全部保留、只換實現**，塌成「開機自檢」形態掛上 §6.1（新增 §6.2、§6.1 不變式 11~13）；**(C) §8-2 醒來確認**——固定級距 30s→300s×10 是在猜 reset 時刻（與「reset 只能觀測不能算」直接衝突），而現行實作「解不出就硬停」會永眠 ⇒ 改為觀測優先、解不出**掛回零成本哨兵巡邏**兜底（新增 §4.5.10）；**(D) §4.2.4 平穩機制**——運算元 `C_current`／`C_target`（持久併發設定點）在本實作結構上不存在，且 watermark 遲滯要防的病量不到（本包當回合實測 `~/.autosdd/traces/quota_burn.jsonl` 十天 119 筆／8 軸／819 個逐軸讀數：band 變動 77 次，其中下降 33 次**全部**是視窗翻頁（跌幅 ≥ 20pp），小幅擺動反轉 **0** 次），真正在抖的是量測可得性（同段痕跡合併實測：12 小時內 measured⇄unmeasured 翻動 **19** 次）⇒ (a)(b)(c)(d) 改寫為 cap 語意、遲滯與最小停留時間**改掛量測可得性軸**，(e) 保留並列為優先實作；順帶兩項：§8-6 全失效姿態按 fail-safe 修憲為「收斂到 `cap_prepare` 語意」（新增 §4.1.5；立案＝實測 `degraded_cap == cap_converge` 為 `True`、`cap_prepare=2`，且 `draining()` 對 `unmeasured` 明文回 `"unknown"` ⇒ 原文「全失效 → DRAINING」在本實作結構上到不了），以及「訊息中的姿態字面必須與 `decide()` 實際 cap 一致」（`tools/lib/quota_gate.py:551` 逐字「本次不節流，扇出照常放行」與同檔 `:832` 註解自述互相矛盾） |
-| **v2.1.9（v2.1.8 四段修憲的否決權複審承接：1 blocker ＋ 6 major ＋ 4 minor）** | 2026-08-23 | 經獨立複審 **REJECT** 承接、逐條修訂後待再審 | v2.1.8 四段條文本身帶有**與它自己要獵的那一族同型**的缺陷（判準會綠、而它要防的事照樣發生），一律不降規改寫，並保留「原條文 → 改後 → 為什麼（含實測數字）」對照。**🔴 BLOCKER §4.5.9 救援序列救不到未追蹤檔案，而四道斷言全部會綠**——R-4.5.9-1 把救援釘死成 `git diff HEAD --binary --no-color`，而該指令的射程**結構上**只有 index 與 HEAD 認識的路徑；當回合合成 worktree 實測：`?? brand_new.py` 存在時 patch 仍為 `135` bytes 非空、`grep -c 'brand_new'` ⇒ **`0`**、SHA-256／位元組數／非空／語意閘全過 ⇒ 「已驗證存檔成功」與「全新工作被靜默丟掉」外觀完全相同。修法＝母體改為「tracked 變更 ∪ untracked 新檔」（② 走 `ls-files --others --exclude-standard -z` 逐檔 `diff --no-index`，實測 `status --porcelain` 前後字串相等 ⇒ 同時滿足原禁令「救援不得改動工作樹」），新增斷言 (d) 覆蓋率與判準 **D8**（紅綠自證＝退回單一來源必須讓 D8 轉紅）、D5b、D9（自我遞迴）。順帶治好第二道語意閘：天真寫法在髒工作樹上**實測恆紅**（rc=1），改為「臨時索引 read-tree 到記錄的 base_sha ＋ `apply --check --cached`」（實測 rc=0，真索引與工作樹皆未動），並禁用 `--3way`（實測會把套不上 fuzz 成 rc=0）、判準改為 `rc == 0`（截半 patch 實測回 **128** 而非 1）。**MAJOR**：① §4.5.10 具名它正在改的 `tools/session_resume_planner.py::tick_plan()` 與兩個既有常數（`MAX_PROBE_ATTEMPTS` 實查 5、`TRANSIENT_RETRY_SECONDS` 實查 300；三者此前全 PRD `grep` 命中 **0**），並逐一登記三支既有鎖的「現在斷言什麼 → 該斷言什麼 → 為什麼改是對的」——其中 transient 那一支判為**一字不改**（兩個數字量的不是同一段時間：行程內 vs 跨醒來），並同步收窄 R-4.5.10-1 的射程免除衝突；② §6.2 掃描集合的 `QUEUED`／`VERIFY_FAILED` 在 §7 schema 不存在（唯一定義過的字面是 `PENDING_VERIFY`）⇒ 照原文實作會掃出 **0 筆**而 G1 注入 `QUEUED` 仍綠＝**結構性假綠**，改以 `PENDING_VERIFY` 為注入值、枚舉補進 §7 並要求「注入值必須是生產真的會寫出來的字面」；③ §4.2.4 挑的 `endurance_env.trace_dir()` **本身就有兩處靜默退回** `tempfile.gettempdir()`（OSError 分支 ＋ `os.access` 三元運算），正是同節花整段論證絕不能用的那個失效 ⇒ 加規範性 loud ＋ 降級標示 ＋ 收緊側 cap，並把 **H4 拆成 H4a／H4b 兩格**（沙箱那格結構上踩不到退回，退回真的發生時仍是綠的）；④ §4.2.4 指定的寫入原語`quota_ledger.append_record()` 自陳〈誠實劃界〉「**仍可能掉行**……不是唯一那一半」、`claim_once()` 是 TTL 閂鎖而非狀態存取器，兩者都承載不了「dwell 判決的唯一真相源」⇒ 改寫死 tmp → fsync → `os.replace` 原子換名（與 §4.5.1 步驟 4 及 R-4.5.9-3 一致）；⑤ R-4.5.10-4 的既有分支枚舉寫「四」而 `sentinel_decide()` AST 實查有 **5** 個相異 action（缺 **`probe`**，且同節 R-4.5.10-3 自己就引用了它＝節內自相矛盾）⇒ 實作者把新事件命名為 `probe` 會**通過 E5** 卻撞名，正好摧毀本條要保護的東西；補齊五元素並要求 E5 的集合由 AST 現查、不得手抄。**MINOR**：`DIRTY_SAVE_RETRIES` 補進 §6 區塊 12（出廠 1、值域 0~3；此前 D6 斷言一個沒有家的鍵）；訂正三處引文／事實（「非 halt 一律 ≥1：禁止靜默鎖死」歸屬 `_clamp()` **不是** `_bound()`——後者函式體實查只有 `min(rec, cap)` 沒有下界／刪除「unmeasured→measured 是**唯一**沒有中間級的躍遷」（`notice → free` 同型，`BAND_FREE` 三個 horizon 皆 `None`）並改由既有的「重置後不暴衝」承重／F3 補上「`None`＝不設限不受此條約束」——照原字面寫成測試會在 `BAND_FREE` 那格 `TypeError`）；`TELEMETRY_UNMEASURED_CAP` 與既有 `AUTOSDD_QUOTA_DEGRADED_CAP`（→ `Policy.degraded_cap`，實查出廠 4、下界 1.0）判為**同一旋鈕的兩個命名面**（沿用本文件既有的 `_PAIRS` 對映判例），三候選逐一記錄取捨，並修掉「留空＝取 cap_prepare」與「留空＝取實作預設」的矛盾（前者在實作面不成立：留空得 4 > cap_prepare 2）；H1／§11.2「無抖動」的 37 字元 U/M 序列補時間戳（dwell 以秒計，序列本身決定不了那一半），fixture 須 git-tracked 且自帶 `len==37`／`flips==19` 不變式。🔴 本輪只改 `.md`，零 `.py` 改動；三道閘門的實測輸出與「PRD 不在治理面清單內」的唯讀證明見交件回報 |
+| **v2.1.9（v2.1.8 四段修憲的否決權複審承接：1 blocker ＋ 6 major ＋ 4 minor）** | 2026-08-23 | 經獨立複審 **REJECT** 承接、逐條修訂後待再審 | v2.1.8 四段條文本身帶有**與它自己要獵的那一族同型**的缺陷（判準會綠、而它要防的事照樣發生），一律不降規改寫，並保留「原條文 → 改後 → 為什麼（含實測數字）」對照。**🔴 BLOCKER §4.5.9 救援序列救不到未追蹤檔案，而四道斷言全部會綠**——R-4.5.9-1 把救援釘死成 `git diff HEAD --binary --no-color`，而該指令的射程**結構上**只有 index 與 HEAD 認識的路徑；當回合合成 worktree 實測：`?? brand_new.py` 存在時 patch 仍為 `135` bytes 非空、`grep -c 'brand_new'` ⇒ **`0`**、SHA-256／位元組數／非空／語意閘全過 ⇒ 「已驗證存檔成功」與「全新工作被靜默丟掉」外觀完全相同。修法＝母體改為「tracked 變更 ∪ untracked 新檔」（② 走 `ls-files --others --exclude-standard -z` 逐檔 `diff --no-index`，實測 `status --porcelain` 前後字串相等 ⇒ 同時滿足原禁令「救援不得改動工作樹」），新增斷言 (d) 覆蓋率與判準 **D8**（紅綠自證＝退回單一來源必須讓 D8 轉紅）、D5b、D9（自我遞迴）。順帶治好第二道語意閘：天真寫法在髒工作樹上**實測恆紅**（rc=1），改為「臨時索引 read-tree 到記錄的 base_sha ＋ `apply --check --cached`」（實測 rc=0，真索引與工作樹皆未動），並禁用 `--3way`（實測會把套不上 fuzz 成 rc=0）、判準改為 `rc == 0`（截半 patch 實測回 **128** 而非 1）。**MAJOR**：① §4.5.10 具名它正在改的 `tools/session_resume_planner.py::tick_plan()` 與兩個既有常數（`MAX_PROBE_ATTEMPTS` 實查 5、`TRANSIENT_RETRY_SECONDS` 實查 300；三者此前全 PRD `grep` 命中 **0**），並逐一登記三支既有鎖的「現在斷言什麼 → 該斷言什麼 → 為什麼改是對的」——其中 transient 那一支判為**一字不改**（兩個數字量的不是同一段時間：行程內 vs 跨醒來），並同步收窄 R-4.5.10-1 的射程免除衝突；② §6.2 掃描集合的 `QUEUED`／`VERIFY_FAILED` 在 §7 schema 不存在（唯一定義過的字面是 `PENDING_VERIFY`）⇒ 照原文實作會掃出 **0 筆**而 G1 注入 `QUEUED` 仍綠＝**結構性假綠**，改以 `PENDING_VERIFY` 為注入值、枚舉補進 §7 並要求「注入值必須是生產真的會寫出來的字面」；③ §4.2.4 挑的 `endurance_env.trace_dir()` **本身就有兩處靜默退回** `tempfile.gettempdir()`（OSError 分支 ＋ `os.access` 三元運算），正是同節花整段論證絕不能用的那個失效 ⇒ 加規範性 loud ＋ 降級標示 ＋ 收緊側 cap，並把 **H4 拆成 H4a／H4b 兩格**（沙箱那格結構上踩不到退回，退回真的發生時仍是綠的）；④ §4.2.4 指定的寫入原語`quota_ledger.append_record()` 自陳〈誠實劃界〉「**仍可能掉行**……不是唯一那一半」、`claim_once()` 是 TTL 閂鎖而非狀態存取器，兩者都承載不了「dwell 判決的唯一真相源」⇒ 改寫死 tmp → fsync → `os.replace` 原子換名（與 §4.5.1 步驟 4 及 R-4.5.9-3 一致）；⑤ R-4.5.10-4 的既有分支枚舉寫「四」而 `sentinel_decide()` AST 實查有 **5** 個相異 action（缺 **`probe`**，且同節 R-4.5.10-3 自己就引用了它＝節內自相矛盾）⇒ 實作者把新事件命名為 `probe` 會**通過 E5** 卻撞名，正好摧毀本條要保護的東西；補齊五元素並要求 E5 的集合由 AST 現查、不得手抄。**MINOR**：`DIRTY_SAVE_RETRIES` 補進 §6 區塊 12（出廠 1、值域 0~3；此前 D6 斷言一個沒有家的鍵）；訂正三處引文／事實（「非 halt 一律 ≥1：禁止靜默鎖死」歸屬 `_clamp()` **不是** `_bound()`——後者函式體實查只有 `min(rec, cap)` 沒有下界／刪除「unmeasured→measured 是**唯一**沒有中間級的躍遷」（`notice → free` 同型，`BAND_FREE` 三個 horizon 皆 `None`）並改由既有的「重置後不暴衝」承重／F3 補上「`None`＝不設限不受此條約束」——照原字面寫成測試會在 `BAND_FREE` 那格 `TypeError`）；`TELEMETRY_UNMEASURED_CAP` 與既有 `AUTOSDD_QUOTA_DEGRADED_CAP`（→ `Policy.degraded_cap`，實查出廠 4【v2.1.4 落款注：此為 v2.1.9 立案當時實測，保留為歷史證據；R100 已收緊出廠值，現值一律現查 `ENV_SPEC`】、下界 1.0）判為**同一旋鈕的兩個命名面**（沿用本文件既有的 `_PAIRS` 對映判例），三候選逐一記錄取捨，並修掉「留空＝取 cap_prepare」與「留空＝取實作預設」的矛盾（前者在實作面不成立：留空得 4 > cap_prepare 2）；H1／§11.2「無抖動」的 37 字元 U/M 序列補時間戳（dwell 以秒計，序列本身決定不了那一半），fixture 須 git-tracked 且自帶 `len==37`／`flips==19` 不變式。🔴 本輪只改 `.md`，零 `.py` 改動；三道閘門的實測輸出與「PRD 不在治理面清單內」的唯讀證明見交件回報 |
 
 > **v2.1 的變更**：附錄 B 的事實核對清單已**實際核實完成**（方法見附錄 B 開頭）。核實結果顯示 Claude Code v2.1.x **已內建**本 PRD 原本打算自建的多項能力（原生 worktree 隔離、任務 DAG、排程喚醒、零 Token 用量遙測、併發上限、官方配速門檻）。因此新增 [§15 執行方法論](#15-執行方法論與注意事項v21-新增)，並將建議架構從「大型自建 Daemon」縮減為「薄治理層 + 採用原生能力」。**§15 是實際動工時應遵循的章節**（含動工前置檢查、採用 vs 自建決策矩陣、P0–P5 分階段步驟、12 條紅線注意事項、參數校準方法與交付目錄結構）。
 
@@ -73,7 +73,7 @@
 
 | PRD 原計畫自建 | CLI 已內建（已核實） | 建議 |
 | :---- | :---- | :---- |
-| §4.1 遙測引擎（含未公開端點） | statusLine hook 的輸入 JSON 直接含 `rate_limits.five_hour.used_percentage` / `.resets_at`、`rate_limits.seven_day.*`、`subscription_type`、`session.total_cost_usd` | **採用**。原 T5（未公開端點）整條刪除 |
+| §4.1 遙測引擎（含未公開端點） | statusLine hook 的輸入 JSON 直接含 `rate_limits.five_hour.used_percentage` / `.resets_at`、`rate_limits.seven_day.*`、`subscription_type`、`session.total_cost_usd` | **採用**。原 T5（未公開端點）整條刪除【v2.1.4 指針：本格「整條刪除」為 v2.1 核實當時的結論，保留為歷史紀錄、**不再是現行規範**——v2.1.4 起 T5 已升格認可主源（§4.1.1〈T5 升格依據〉、§15.5 紅線 1 豁免四條件）；statusLine 只回 five_hour／seven_day 兩軸，看不到 R87 事故軸 `spend`／`extra_usage`】 |
 | §9 可觀測性 | `CLAUDE_CODE_ENABLE_TELEMETRY` + OpenTelemetry 匯出，含 `claude_code.token.usage`、`claude_code.cost.usage`、`claude_code.compaction`、`claude_code.subagent.spawn` 等；支援 OTLP 與 **Prometheus exporter** | **採用**。自建指標只補「治理決策」層 |
 | §4.4.1 自建 git worktree 管理 | `Agent` 工具的 `isolation: "worktree"`；`EnterWorktree` / `ExitWorktree`（含未提交變更的拒絕保護與 `discard_changes` 二次確認） | **採用**。自建 worktree 腳本刪除 |
 | §7 `state.json` 內的 task DAG | `TaskCreate` / `TaskUpdate` / `TaskList` / `TaskGet` / `TaskStop`，支援 `addBlocks` / `addBlockedBy` / `metadata` / `owner` | **採用**為主，`state.json` 只保留治理層狀態 |
@@ -238,14 +238,16 @@
 | **T4** | 官方用量查詢介面（如 CLI 的用量指令）之程式化解析 | 低（輸出格式可能變動） | 需容錯解析，格式變動時降級而非崩潰 |
 | **T5（v2.1.4 升格：認可主源）** | 未公開的 OAuth usage HTTP 端點（唯讀 `GET /api/oauth/usage`） | 中高（未公開介面仍可能變動，故失效降級路徑不可拆除） | v1 列為主要方案、v2 降為選用；**v2.1.4 經掌舵者 2026-08-16 拍板升格為認可主源**（依據見下方〈T5 升格依據〉；使用邊界受 §15.5 紅線 1 豁免條款四條件約束） |
 
-**T5 升格依據（v2.1.4，掌舵者 2026-08-16 拍板、待四方複審後生效）**——四項皆為實測結論，不是偏好：
+**T5 升格依據（v2.1.4，掌舵者 2026-08-16 拍板；R107 四方複審通過＝4×APPROVE_WITH_CONDITIONS，條件已同批落款，已生效；紀錄＝`docs/06_quality/CrossPlatform_R107_Review.md`）**——四項皆為實測結論，不是偏好：
 
 1. **零 token 成本**：該呼叫不是模型推論，不吃額度、不進 5 小時視窗（`tools/lib/quota_meter.py` 檔內 `USAGE_URL` 註解逐字；R90 探針同一結論）。
 2. **帳號層級權威讀數**：server 依帳號方案自己算好 utilization 回百分比，本機不自行推導分母；且回應含**全部**計費軸（R90 實測頂層 17 鍵）。對照 T3 statusLine 只回 five_hour／seven_day 兩軸的 `used_percentage`／`resets_at`，結構上看不到 `spend`／`extra_usage`——正是 §15.1 第 3 項認定「本專案最危險的單一失敗模式」所在的軸（R87 事故：該軸撞頂時 13 個 subagent 全滅、燒 1,319,703 tokens，而訂閱窗還有 37% 餘裕）。
 3. **R90 四通道實測勝出**：本機可達四通道（端點 body／同 API 回應標頭／statusLine stdin JSON／逐字稿）逐一量測，唯端點 body 給出全軸讀數；見 `docs/06_quality/Quota_R90_CrossAccount_Experiment.md` §一。
-4. **失效 fail-safe**：任何失效（斷網／401／schema 變動／無憑證）一律回「量不到」且各有可分辨的失效字面；量不到**不是不設限**——降級 cap=4（`tools/lib/quota_policy.py` 的 `Policy.degraded_cap`），方向保守。
+4. **失效 fail-safe**：任何失效（斷網／401／schema 變動／無憑證）一律回「量不到」且各有可分辨的失效字面；量不到**不是不設限**——降級 cap＝`Policy.degraded_cap` 現查（SSOT＝`tools/lib/quota_policy.py`，本 PRD 不複寫數字；上界不變式 `1 ≤ degraded_cap ≤ cap_prepare` 見 §4.1.5），方向保守。
 
-T5 的實作站點唯一（端點知識不得有第二個家）＝`tools/lib/quota_meter.py`。§6 的 `TELEMETRY_ALLOW_UNDOCUMENTED_ENDPOINT=false` 出廠預設與本節升格的整合，留待四方複審一併裁決（v2.1.4 刻意不動 §6，避免修憲生效前先改變執行面預設）。
+**T1／T5 劃界（v2.1.4 落款補注）**：T5 升格不改變 T1 的「首選」地位——兩者量的不是同一軸：T1（OTEL）匯出的是**本機行程**的消耗指標，T5 給的是**帳號層級**全計費軸權威讀數（含 R87 事故軸 `spend`／`extra_usage`）；帳號層級水位治理以 T5 為認可主源，T1 是官方支援的本機遙測正途，兩者並行、不互為替代。
+
+T5 的實作站點唯一（端點知識不得有第二個家）＝`tools/lib/quota_meter.py`。§6 與本節升格的整合已由 R107 四方複審一併裁決（4×APPROVE_WITH_CONDITIONS，同批落款；紀錄＝`docs/06_quality/CrossPlatform_R107_Review.md`）：**不做 `TELEMETRY_ALLOW_UNDOCUMENTED_ENDPOINT` kill-switch 旗標**——該旗標全庫零實作（2026-08-28 現查：全庫命中僅文件 3 處、零程式／設定消費端），紙上開關只會製造「有守衛」的假外觀；未文件化端點（T5）的遙測**恆啟用**，防護不靠開關、靠 §15.5 紅線 1 豁免四條件（唯讀 GET／單一程式站點／TTL≥180s 節流／失效降級出聲），落字見 §6 區塊 2。
 
 **關鍵限制（必須寫入文件並告知使用者）**：`U5h`／`U7d` 是**帳號層級**指標。T2/T3 只能觀測本機用量。若同一帳號在其他裝置或 Claude 網頁端使用，本機推估會**低估**真實用量。因此：
 - 必須支援「權威來源」（T1/T4/T5）與「本機推估」（T2/T3）的差異偵測；
@@ -339,7 +341,7 @@ ADR-XPLAT-005/007 既有定義）」的 kind 集合作為指紋。伺服器新�
 
 | 觀測 | 實測值／逐字 | 為什麼這讓原條文在本實作裡到不了 |
 | :---- | :---- | :---- |
-| 量不到時的 cap | `tools/lib/quota_policy.py` 出廠 `degraded_cap=4`、`cap_converge=4`、`cap_prepare=2`；本包實跑 `degraded_cap == cap_converge` ⇒ **`True`** | 「完全量不到」與「量到 70% CONVERGE 帶」在致動器上是**同一個 cap** ⇒ 量不到沒有換來任何收緊 |
+| 量不到時的 cap | `tools/lib/quota_policy.py` 出廠 `degraded_cap=4`、`cap_converge=4`、`cap_prepare=2`；本包實跑 `degraded_cap == cap_converge` ⇒ **`True`**【v2.1.4 落款注：此欄為 v2.1.8 立案當時實測，保留為歷史證據；R100 已依 R-4.1.5-1 收緊出廠值至 ≤ `cap_prepare`，現值一律現查 `ENV_SPEC`】 | 「完全量不到」與「量到 70% CONVERGE 帶」在致動器上是**同一個 cap** ⇒ 量不到沒有換來任何收緊 |
 | 量不到時的帶別 | `tools/lib/quota_gate.py::draining()` 對 `BAND_UNMEASURED` 明文 `return "unknown"` | `draining()` 結構上永遠不會對量不到回 `"yes"` ⇒「全失效 → `DRAINING`」在本實作**沒有可達路徑** |
 | 訊息面 | `tools/lib/quota_gate.py:551` 逐字：`⚠️  額度水位**量不到**（source=...）⇒ 本次不節流，扇出照常放行。`；同檔 `:832` 註解自述「量不到時 `decide()` 回 `degraded_cap`（不是不設限、也永不 halt）」 | 同一個決策有兩份互相矛盾的敘述，而**只有訊息那一份有讀者** |
 
@@ -469,6 +471,8 @@ C_target   = clamp(C_raw, C_min, C_cap(state))              # ← v1 缺少狀�
 8. 其他                                   → C = C_target
 ```
 
+🔴 **model-scoped 軸的 cap 聚合劃界（v2.1.4 落款補注；`DEF-200-157`）**：cap 聚合對 model-scoped 軸（第 7 步的 `U7d_model`，如 `seven_day_opus`）依 `active_model` 過濾——僅當該軸對應模型與當前活躍模型相符才進 cap 聚合（R98 `MODEL_SCOPED_KINDS`＋`_in_cap_gate`、R105 `active_model` 接線，皆已落地：`tools/lib/quota_policy.py`、`tools/lib/quota_gate.py`）⇒ 模型降級後，高階模型的週軸真的退出 cap，降級換得到放行空間。
+
 **致動器不只有「併發數」**（v1 只有一個致動器，控制力不足）：
 
 | 致動器 | 效果 | 觸發時機 |
@@ -478,7 +482,7 @@ C_target   = clamp(C_raw, C_min, C_cap(state))              # ← v1 缺少狀�
 | **任務類別過濾** | 暫停「大規模重構」「全庫檢索」等高成本類別，只放行小型任務 | `THROTTLING` 起 |
 | **Agent 硬性預算** | 單一 Step 的 turn 數／時間／估計 token 上限，防止單一 Agent 在 `DRAINING` 期間衝破 `HALT` | 全程，`DRAINING` 期間收緊 |
 
-> `[需核對]` 模型降級的具體旗標，以及訂閱制方案是否已內建自動降級行為（若已內建，本模組應以「不牴觸」為原則，僅在更早的水位主動降級）。
+> `[需核對]` 模型降級的具體旗標，以及訂閱制方案是否已內建自動降級行為（若已內建，本模組應以「不牴觸」為原則，僅在更早的水位主動降級）。【v2.1.4 指針：前半「具體旗標」已於附錄 B-11 核實（`--model`／`Agent` 工具 `model` 欄／`CLAUDE_CODE_SUBAGENT_MODEL`），模型分軌額度見 B-02；後半「訂閱制方案是否已內建自動降級行為」仍未核實，保留待核對】
 
 #### 4.2.4 平穩性機制（v1 完全缺漏，是實務上最會出事的部分）
 
@@ -1726,13 +1730,21 @@ AUTOCLAUDE_ACCOUNT_TYPE=MAX                 # 僅作為預設值提示；實際�
 # ------------------------------------------------------------------------------
 # 2. 遙測來源（依序嘗試，全部失敗則 fail-safe）
 # ------------------------------------------------------------------------------
-TELEMETRY_SOURCE_ORDER=OTEL,TRANSCRIPT,STATUSLINE,CLI_USAGE
-TELEMETRY_ALLOW_UNDOCUMENTED_ENDPOINT=false # v1 的主要方案，v2 降為選用（風險自負）
+TELEMETRY_SOURCE_ORDER=OAUTH_USAGE,OTEL,TRANSCRIPT,STATUSLINE,CLI_USAGE
+#   ↑【v2.1.4 落款補 T5】OAUTH_USAGE＝§4.1.1 T5 認可主源（帳號層級全計費軸權威讀數，故列首）；
+#   T1（OTEL）官方正途地位不變——兩者量測軸不同，劃界見 §4.1.1〈T1／T5 劃界〉。
+# 【v2.1.4 落款裁決（R107 四方複審）】原 `TELEMETRY_ALLOW_UNDOCUMENTED_ENDPOINT` kill-switch
+#   旗標**不做、已移除**：該旗標全庫零實作（2026-08-28 現查：命中僅文件 3 處、零程式／設定
+#   消費端），紙上開關＝「有守衛」的假外觀。未文件化端點（T5）的遙測**恆啟用**；防護不靠
+#   開關，靠 §15.5 紅線 1 豁免四條件（唯讀 GET／單一程式站點 tools/lib/quota_meter.py／
+#   TTL≥180s 節流／失效降級出聲），任一條件破缺即回到禁令本身。
 MONITOR_POLL_INTERVAL_SECONDS=60
 TELEMETRY_TIMEOUT_SECONDS=600               # 超時 → 收斂到 cap_prepare 語意（v2.1.8：原文寫 DRAINING，本實作無該狀態物件，見 §4.1.5）
 TELEMETRY_UNMEASURED_CAP=                   # 【v2.1.8 新增／v2.1.9 訂正】留空＝取實作面出廠值。
 #   🔴 這**不是新旋鈕**：它與實作面既有的 `AUTOSDD_QUOTA_DEGRADED_CAP`（→ `Policy.degraded_cap`，
-#   實查出廠值 4、值域下界 1.0，`ENV_SPEC` 逐字說明「量不到時的上限（絕不是『不設限』）」）
+#   出廠值不複寫、一律現查 `ENV_SPEC`【v2.1.4 落款訂正：原「實查出廠值 4」寫於 R100 收緊前，
+#   R100 已依 R-4.1.5-1 收緊至 ≤ cap_prepare】；值域下界 1.0，`ENV_SPEC` 逐字說明
+#   「量不到時的上限（絕不是『不設限』；≤ cap_prepare）」）
 #   是**同一個旋鈕的兩個命名面**——PRD 面／實作面。三個候選處置裡選這一個的理由，以及被否決
 #   的兩個，見 §4.1.5〈這個旋鈕有幾個家〉。值域：1 ≤ 本鍵 ≤ cap_prepare（下界沿用實作面
 #   ENV_SPEC，上界為 v2.1.8 修憲新增）。數值一律以實作面為 SSOT，本檔不複寫。
@@ -2415,7 +2427,7 @@ Q3. 是否真的需要一個常駐 Daemon？
 
 ### 15.5 執行注意事項（紅線清單）
 
-1. **不要碰未公開的 HTTP 端點。** 🔴 **唯一豁免（v2.1.4 修憲，掌舵者 2026-08-16 拍板、待四方複審後生效）**：§4.1.1 T5 之唯讀 `GET /api/oauth/usage`，且必須**同時**滿足四條件，缺一即回到禁令本身：(a) **僅限唯讀 GET**，不得對該端點發任何寫入型請求；(b) **端點知識只准有一個程式站點**＝`tools/lib/quota_meter.py`（`USAGE_URL` 常數；不得出現第二個家，現查：全庫 `.py` 內完整 URL 字面僅該檔一處，其餘命中皆為指向該常數的註解與文件）；(c) **TTL≥180 秒節流**（現行 `tools/lib/quota_gate.py` 的 `QUOTA_CACHE_TTL_SECONDS=180`，每 TTL 視窗至多補量一次）；(d) **端點失效時必須降級出聲**（回「量不到」＋降級 cap，見 §4.1.1〈T5 升格依據〉第 4 項），**禁止重試轟炸**。豁免範圍外的未公開端點依然全面禁止。本條原文「statusLine 已提供你需要的一切」經 R90 實測證偽——statusLine 只回 five_hour／seven_day 兩軸，看不到 R87 事故軸 `spend`／`extra_usage`（見 `docs/06_quality/Quota_R90_CrossAccount_Experiment.md`）；原文不再是現行規範，保留於版本歷史。
+1. **不要碰未公開的 HTTP 端點。** 🔴 **唯一豁免（v2.1.4 修憲，掌舵者 2026-08-16 拍板；R107 四方複審通過＝4×APPROVE_WITH_CONDITIONS，紀錄＝`docs/06_quality/CrossPlatform_R107_Review.md`，已生效）**：§4.1.1 T5 之唯讀 `GET /api/oauth/usage`，且必須**同時**滿足四條件，缺一即回到禁令本身：(a) **僅限唯讀 GET**，不得對該端點發任何寫入型請求；(b) **端點知識只准有一個程式站點**＝`tools/lib/quota_meter.py`（`USAGE_URL` 常數；不得出現第二個家，現查：全庫 `.py` 內完整 URL 字面僅該檔一處，其餘命中皆為指向該常數的註解與文件）；(c) **TTL≥180 秒節流**（現行 `tools/lib/quota_gate.py` 的 `QUOTA_CACHE_TTL_SECONDS=180`，每 TTL 視窗至多補量一次）；(d) **端點失效時必須降級出聲**（回「量不到」＋降級 cap，見 §4.1.1〈T5 升格依據〉第 4 項），**禁止重試轟炸**。豁免範圍外的未公開端點依然全面禁止。本條原文「statusLine 已提供你需要的一切」經 R90 實測證偽——statusLine 只回 five_hour／seven_day 兩軸，看不到 R87 事故軸 `spend`／`extra_usage`（見 `docs/06_quality/Quota_R90_CrossAccount_Experiment.md`）；原文不再是現行規範，保留於版本歷史。
 2. **超額用量必須是顯式的 opt-in。** 預設 `OVERAGE_POLICY=FREEZE`。一個「自動繞過限制繼續跑」的系統，配上啟用的付費超額，等於自動花錢機器。
 3. **`ScheduleWakeup` 的延遲被夾在 60–3600 秒。** 別以為傳 18000 就會睡 5 小時 —— 它會被靜默夾成 3600，然後你的系統會提早 4 小時醒來、看到還在限流、可能陷入迴圈。
 4. **`CronCreate` 的 durable 任務 7 天後自動過期。** 不能當成永久排程。
@@ -2570,7 +2582,7 @@ P0 收完資料後，依序推導、不要憑感覺設定：
 | B-02 | 週額度與模型分軌 | ✅ | `seven_day`（`windowSeconds = 604800`）、`seven_day_opus`、`seven_day_sonnet`、`seven_day_overage_included`；UI 標題為「Current session」「Current week (all models)」「Current week (Sonnet only)」，後者於 max / team 方案顯示 | 週閘門與模型降級致動器**確認可實作**；分軌額度是 v2 未預期的細節 |
 | B-03 | 官方遙測機制 | ✅ | `CLAUDE_CODE_ENABLE_TELEMETRY`；完整 OTLP 環境變數族；**含 `OTEL_EXPORTER_PROMETHEUS_HOST/PORT`**；指標含 `claude_code.token.usage`、`claude_code.cost.usage`、`claude_code.compaction`、`claude_code.subagent.spawn`、`claude_code.llm_request`、`claude_code.hook`、`claude_code.tool.execution`、`claude_code.active_time.total` 等 | §9 可觀測性**大部分免費取得**；T1 為首選確認正確 |
 | B-04 | 對話記錄檔路徑與格式 | ✅ | `~/.claude/projects/<sanitized-cwd>/*.jsonl`，每行一個 JSON 物件；工具呼叫出現在 `assistant` 訊息的 `message.content[]` | T2 遙測與上下文估算可實作 |
-| B-05 | statusLine 輸入結構 | ✅ **關鍵** | stdin JSON 含 `rate_limits.five_hour.used_percentage`、`.resets_at`、`rate_limits.seven_day.*`、`rate_limits.model_scoped`、`rate_limits_available`、`subscription_type`、`session.total_cost_usd` / `.total_api_duration_ms` / `.model_usage` / `.total_lines_added`；二進位內含 jq 範例腳本 | **這是零 Token 遙測的正解**。T5（未公開端點）可完全刪除 |
+| B-05 | statusLine 輸入結構 | ✅ **關鍵** | stdin JSON 含 `rate_limits.five_hour.used_percentage`、`.resets_at`、`rate_limits.seven_day.*`、`rate_limits.model_scoped`、`rate_limits_available`、`subscription_type`、`session.total_cost_usd` / `.total_api_duration_ms` / `.model_usage` / `.total_lines_added`；二進位內含 jq 範例腳本 | **這是零 Token 遙測的正解**。T5（未公開端點）可完全刪除【v2.1.4 指針：本格結論為 v2.1 核實當時的歷史紀錄、**不再是現行規範**——v2.1.4 起 T5 已升格認可主源（§4.1.1）；statusLine 缺 R87 事故軸 `spend`／`extra_usage`（R90 實測），「可完全刪除」已被推翻】 |
 | B-06 | 用量查詢指令 | ⚠️ 部分 | `/usage` 存在且有「非互動模式的格式化成本摘要」；另有 `/usage-credits`、`/status`、`/model`、`/compact` | 可用但格式非契約；優先用 B-05 |
 | B-07 | 壓縮觸發與 hook | ✅ | 自動壓縮相關：`CLAUDE_CODE_AUTO_COMPACT_WINDOW`、`CLAUDE_CODE_COLD_COMPACT`、`CLAUDE_CODE_DISABLE_PRECOMPACT_SKIP`；hook 事件含 **`PreCompact` 與 `PostCompact`** | §4.3 的擔憂成立：**不需自行下達壓縮指令**，改用 hook 在壓縮前寫 checkpoint |
 | B-08 | `--resume` 行為 | ⚠️ 部分 | `--resume`、`--continue`、`--session-id`、**`--fork-session`** 皆存在；另有 `CLAUDE_CODE_RESUME_TOKEN_THRESHOLD`、`CLAUDE_CODE_RESUME_INTERRUPTED_TURN`、`CLAUDE_CODE_RESUME_PROMPT`、`CLAUDE_CODE_RESUME_INTERRUPTED_TURN_MAX_AGE_MS` | 旗標確認；**但「續接是否重新計費完整歷史」仍需實測**（§11.3 已納入量測）。`--fork-session` 是 v2 未考慮的選項：可在不變更原 session 的前提下續接 |

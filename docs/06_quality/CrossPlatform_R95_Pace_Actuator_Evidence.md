@@ -64,7 +64,9 @@
 | `TestR93PlanChangeAdaptiveAmortization` | 指紋分區 | `filter_by_signature`／`estimate_ratio` 零改動 |
 
 **判定**：本修正不需要改任何一條既有鎖的斷言 ⇒ 無「靜默改鎖」問題。整包（含放寬語意
-本身＝掌舵者裁決的授權放寬）仍標注**待四方複審**。
+本身＝掌舵者裁決的授權放寬）原標注待四方複審；**已於 R107 四方複審通過（與 PRD v2.1.4
+修憲批次併批點名，4×APPROVE_WITH_CONDITIONS，2026-08-28 落款；機械面同日重跑
+`tools.tests.test_quota_policy` 全綠；紀錄＝`CrossPlatform_R107_Review.md`）**。
 
 新行為為何仍 fail-safe：免除只在「長窗自軸 free/notice 帶」成立——那正是長窗自己的
 `pct_band` 都還不節流的水位；免除後短窗回到自己的真實水位與 horizon 判定（缺陷 A/B 的
