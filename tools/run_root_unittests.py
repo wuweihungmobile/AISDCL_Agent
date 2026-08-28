@@ -517,7 +517,7 @@ def run_with_floor(start_dir: Path, min_tests: int) -> int:
     if gaps:
         report_collection_gaps(gaps, start_dir)
         return 1  # 量測本身已不可信，fail-closed：不放行、也不假裝跑完
-    placeholders = report_discovery_placeholders(suite)
+    placeholders, known_ids = report_discovery_placeholders(suite), {t.id() for t in _flatten(suite)}  # DEF-200-233：兩者都必須在 run() **之前**讀——`TestSuite.run()` 會把跑完的每一支就地換成 `None`（`_removeTestAtIndex`），WHY 全文見 `windows_skip_tags.report_windows_skip_tag_exemption_problems`
     warn_ratchet_drift(count, min_tests)
     result = unittest.TextTestRunner(verbosity=1).run(suite)
     report_windows_native_skips(result)
@@ -527,7 +527,7 @@ def run_with_floor(start_dir: Path, min_tests: int) -> int:
     untagged = report_untagged_windows_like_skips(result)
     # 本輪：具名豁免表的 stale／格式自檢。刻意**不**提早 return——早退會遮蔽下面
     # 的執行落差與失敗明細，而遮蔽的方向是「看起來變乾淨」（Scan-H⑦）。
-    exempt_problems = report_windows_skip_tag_exemption_problems(result)
+    exempt_problems = report_windows_skip_tag_exemption_problems(result, known_ids=known_ids)
     # R80 包 A（S3-04）：把這 43 支 skip 納入天花板管轄。同樣刻意不提早 return。
     census_rc = report_skip_census(result, start_dir)
     # 無法歸因的「收集了卻沒執行」＝量測不完整（例如 result.stop() 中途中止）。

@@ -450,10 +450,12 @@ class WindowsSkipTagExemptionSelfCheckTest(unittest.TestCase):
         return result
 
     def test_an_exemption_that_suppresses_nothing_is_stale(self) -> None:
-        """注入：豁免指向的站點在「當表是空的」重掃裡根本不會被判違規 ⇒ 必紅。"""
+        """注入：豁免指向的站點**在本平台真的 skip 了**，卻在「當表是空的」重掃裡
+        根本不會被判違規 ⇒ 必紅（reason 改寫／已補標籤，豁免已無壓制對象）。"""
         problems = windows_skip_tags.exemption_problems(
             {"m.C.test_gone": "R70 起改走別的路，暫時豁免"},
             flagged_without_exempt={},
+            skipped_here={"m.C.test_gone"},
         )
         self.assertEqual(len(problems), 1, problems)
         self.assertIn("stale", problems[0])
@@ -464,9 +466,50 @@ class WindowsSkipTagExemptionSelfCheckTest(unittest.TestCase):
             windows_skip_tags.exemption_problems(
                 {"m.C.test_x": "R70 複查：本機 docker 供給問題，非平台語意"},
                 flagged_without_exempt={"m.C.test_x": "需要 Windows 主開發機才有的 docker"},
+                skipped_here={"m.C.test_x"},
             ),
             [],
         )
+
+    def test_an_exemption_is_not_stale_where_its_test_actually_ran(self) -> None:
+        """🔴 DEF-200-233 迴歸鎖（macos-compat-ci 連續紅的真因，方向鎖不是門檻鎖）。
+
+        WHY（Rule 9 — 鎖的是意圖）：stale 面的輸入是**本平台這一次真的 skip 了什麼**。
+        一支測試在本平台**跑掉了**（例：zsh 站點在 darwin 上，zsh 是預設殼）時，它當然
+        不會出現在重掃結果裡——但那是「本平台對這筆豁免沒話可說」，**不是**「豁免過期」。
+        修前兩者塌成同一個結論，於是 darwin 把 7 筆**仍在 linux 上承重**的豁免全判 stale；
+        照那個判決移除會當場讓 root-infra-ci 轉紅（同一份判準在兩個平台給出互斥的指示）。
+        本鎖釘住方向：`skipped_here` 不含它 ⇒ 一個字都不准說。
+        """
+        self.assertEqual(
+            windows_skip_tags.exemption_problems(
+                {"m.C.test_ran_here": "R100：reason 只是拿 Windows 做比較性陳述"},
+                flagged_without_exempt={},          # 本平台沒 skip ⇒ 不可能在重掃結果裡
+                skipped_here=set(),                 # ← 判準的分水嶺：它這次真的跑了
+                known_ids={"m.C.test_ran_here"},    # 收集面仍有它 ⇒ 也不是改名／刪除
+            ),
+            [],
+            "測試在本平台跑掉了不等於豁免過期——這正是 macos-compat-ci 那 7 筆假紅",
+        )
+
+    def test_an_exemption_whose_test_left_the_tree_is_stale_on_every_platform(self) -> None:
+        """🔴 DEF-200-233 補位鎖：收窄 stale 面之後，「測試改名／刪除」不得因此變成永久豁免。
+
+        這一面刻意**不分平台**（連 Windows 都說話，修前那裡整組早退），故豁免表的
+        「只進不出」防線射程比修前更大，不是被放寬。
+        """
+        problems = windows_skip_tags.exemption_problems(
+            {"m.C.test_renamed_away": "R100：曾經需要豁免"},
+            known_ids={"m.C.test_something_else"},
+        )
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("stale", problems[0])
+        self.assertIn("收集面", problems[0], "訊息須說清楚是哪一種過期，否則讀者無從下手")
+
+    def test_the_vanished_face_is_off_when_the_caller_has_no_collection_surface(self) -> None:
+        """對照組：拿不到收集面（合成樹呼叫端）時消失面不判——否則整片假紅。"""
+        self.assertEqual(
+            windows_skip_tags.exemption_problems({"m.C.test_x": "R100：理由"}), [])
 
     def test_an_exemption_without_a_handover_round_is_flagged(self) -> None:
         """格式面：沒寫承接輪次的豁免＝沒有人負責拿掉它。"""
@@ -504,15 +547,17 @@ class WindowsSkipTagExemptionSelfCheckTest(unittest.TestCase):
         已經悄悄退化成兩份副本。
         """
         # R100：`clear=True`——真表非空，`clear=False` 會讓既有筆數疊進 `problems`。
+        # DEF-200-233：注入的豁免必須指向**本次真的 skip 掉**的那一支，否則新判準（正確地）
+        # 判它「本平台沒話可說」而回空——接線鎖會退化成恆綠。
         result = self._result_with_skips(("m.C.test_x", "一般性 skip，與平台無關"))
         buf = io.StringIO()
         with mock.patch.object(windows_skip_tags, "running_on_windows", lambda: False), \
              mock.patch.dict(run_root_unittests._WINDOWS_SKIP_TAG_EXEMPT,
-                             {"m.C.test_gone": "R70 暫時豁免"}, clear=True), \
+                             {"m.C.test_x": "R70 暫時豁免"}, clear=True), \
              contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
             problems = run_root_unittests.report_windows_skip_tag_exemption_problems(result)
         self.assertEqual(len(problems), 1, problems)
-        self.assertIn("m.C.test_gone", buf.getvalue(), "必須逐筆點名，否則讀者不知道刪哪一筆")
+        self.assertIn("m.C.test_x", buf.getvalue(), "必須逐筆點名，否則讀者不知道刪哪一筆")
 
     def test_real_run_with_floor_reds_on_a_bad_exemption(self) -> None:
         """端到端常駐對照組：合成樹本身乾淨，只有豁免表壞掉 ⇒ rc 必須由 0 變 1。
@@ -550,6 +595,43 @@ class WindowsSkipTagExemptionSelfCheckTest(unittest.TestCase):
                 rc_bad = run_root_unittests.run_with_floor(base, min_tests=2)
         self.assertEqual(rc_clean, 0, "乾淨樹必須 rc=0——否則下一條比較沒有意義")
         self.assertEqual(rc_bad, 1, "豁免表壞掉時 rc 仍為 0 ⇒ 判準沒有接進 rc（fail-open）")
+
+    def test_run_with_floor_really_hands_the_collection_surface_to_the_check(self) -> None:
+        """🔴 DEF-200-233 接線鎖：`known_ids` 是消失面的**唯一**輸入，沒傳等於那一面不存在。
+
+        判別力來源：注入的豁免指向一個**收集面裡沒有**的 id，而它同時**沒有** skip
+        （合成樹根本不認識它）⇒ 只有拿到收集面的判準說得出話。runner 若漏傳
+        `known_ids`，本支恆綠——那正是收窄 stale 面之後最容易靜默出現的退化。
+        """
+        base = Path(tempfile.mkdtemp(prefix="rru_exempt_known_"))
+        self.addCleanup(lambda: shutil.rmtree(base, ignore_errors=True))
+        mod = "test_fixture_clean_for_known_ids"
+        self.addCleanup(lambda: sys.modules.pop(mod, None))
+        (base / f"{mod}.py").write_text(
+            textwrap.dedent(
+                """\
+                import unittest
+
+
+                class Dummy(unittest.TestCase):
+                    def test_a(self):
+                        self.assertTrue(True)
+
+                    def test_b(self):
+                        self.assertTrue(True)
+                """
+            ),
+            encoding="utf-8",
+        )
+        with contextlib.redirect_stdout(io.StringIO()), \
+             contextlib.redirect_stderr(io.StringIO()), \
+             mock.patch.dict(run_root_unittests._WINDOWS_SKIP_TAG_EXEMPT,
+                             {"m.C.test_never_collected": "R108 複查：注入用"}, clear=True):
+            rc = run_root_unittests.run_with_floor(base, min_tests=2)
+        self.assertEqual(
+            rc, 1,
+            "豁免指向一個不在收集面裡的 test id，rc 仍為 0 ⇒ runner 沒把收集面傳給判準",
+        )
 
 
 class UnregisteredSkipTagVocabularyTest(unittest.TestCase):

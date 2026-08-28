@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import os  # 只由 `running_on_windows()` 讀（唯一站點）；**不再**是 patch 目標，WHY 見該函式
 import sys
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from pathlib import Path
 
 # 本檔住 `<repo>/tools/lib/`：與四支實作模組同層，故直接以模組名 import（呼叫端一律
@@ -158,13 +158,26 @@ def untagged_tool_absence_sites(sources: Mapping[str, str]):
     return _untagged_tool_absence_sites(sources, tag=TOOL_ABSENCE_SKIP_TAG)
 
 
-def report_windows_skip_tag_exemption_problems(result) -> list[str]:
+def report_windows_skip_tag_exemption_problems(
+    result, known_ids: Collection[str] | None = None
+) -> list[str]:
     """具名豁免表的自檢（本輪；回傳非空 ⇒ 呼叫端須讓 rc 為 1）。
 
     stale 那一面的資料由**同一支偵測器**在「豁免表當成空的」條件下重跑取得——
     不另寫一份等價實作，否則證明的只是我重寫的那份是對的。
     它在 Windows 上整組早退（見 `untagged_windows_like_skips`），故那一面只在
     非 Windows 上啟用；格式面不分平台。
+
+    DEF-200-233：另傳兩份資料進判準——`skipped_here`（本次真的 skip 掉的 id，用來把「這支
+    測試在本平台跑了」與「豁免過期」分開）與 `known_ids`（本次收集面的全部 id，接手「測試
+    已改名／刪除」那一種真過期，**不分平台**）。WHY 全文＝`exemption_problems` 的立案段；
+    `known_ids` 為 None 時消失面不判（合成樹呼叫端沿用既有契約）。
+
+    🔴 呼叫端取 `known_ids` 的時機是有陷阱的：`unittest.TestSuite.run()` 會把跑完的每一支
+    測試**就地換成 `None`**（`_removeTestAtIndex`，`_cleanup=True` 的預設行為）以釋放記憶體
+    ⇒ 收集面必須在 `run()` **之前**取。放到之後取不是靜默的空集合，而是
+    `AttributeError: 'NoneType' object has no attribute 'id'`（DEF-200-233 落地當回合被
+    `test_run_root_unittests.py` 的端到端測試當場抓到）。
     """
     on_windows = running_on_windows()
     flagged = None
@@ -177,7 +190,9 @@ def report_windows_skip_tag_exemption_problems(result) -> list[str]:
             )
         }
     problems = exemption_problems(_WINDOWS_SKIP_TAG_EXEMPT,
-                                  flagged_without_exempt=flagged)
+                                  flagged_without_exempt=flagged,
+                                  skipped_here={tid for tid, _ in all_skips(result)},
+                                  known_ids=known_ids)
     if problems:
         print(
             f"❌ 具名豁免表 `_WINDOWS_SKIP_TAG_EXEMPT` 有 {len(problems)} 筆問題"

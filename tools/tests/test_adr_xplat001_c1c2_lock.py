@@ -682,7 +682,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 6295,
+    "test_adr_xplat001_c1c2_lock.py": 6309,
     "test_archive_defect_log.py": 4008,
     "test_bash32_compat.py": 1020,
     "test_bash_probe_spec_contract.py": 983,
@@ -729,7 +729,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_python_c_percent_shim.py": 119,
     "test_quota_policy.py": 3152,
     "test_root_infra_parity.py": 441,
-    "test_run_root_unittests.py": 2201,
+    "test_run_root_unittests.py": 2283,
     "test_sanitize_component_frozen_sdd_versions_lock.py": 340,
     "test_schedule_capability_parity.py": 635,
     "test_script_scan_surface_ssot.py": 391,
@@ -1199,6 +1199,17 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "消費端，抽層只會多一個沒人維護的家）；散文搬遷不適用（新增全是判準本體與注入語料，"
      "本輪未新增可搬的史料散文）。逐檔清單見 CrossPlatform_R108_Review.md"
      "〈護欄層重釘逐檔清單〉節。"),
+    ("R108", 89218, 89314, 96,
+     "[非淨減法輪][同輪追加] DEF-200-233 修復（macos-compat-ci 連續紅的真因）："
+     "`exemption_problems()` 的 stale 面把「豁免指向的測試在本平台**沒 skip**（它跑了）」"
+     "讀成「豁免過期」，於是 darwin 把整批仍在 linux 承重的豁免全判 stale ＝假紅。"
+     "test_run_root_unittests.py 2201→2283（+82）＝一支 R108 方向鎖（測試跑掉≠豁免過期）"
+     "＋一支消失面補位鎖＋一支消失面關閉對照＋一支 known_ids 接線鎖，另兩處既有注入改指向"
+     "「本次真的 skip 掉」的 id（否則新判準正確地回空、接線鎖退化成恆綠）；本檔自身 +14＝"
+     "本稽核列＋_FROZEN_PREFIX_REWRITE_LEDGER 追加列＋凍結前綴延伸（77→78 涵蓋本列）。"
+     "合法出口逐條實查：無死碼可刪；抽共用層不適用（判準只有 report_windows_skip_tag_"
+     "exemption_problems 一個消費端）；散文搬遷不適用（新增全是判準本體與注入語料）。"
+     "逐檔清單見 CrossPlatform_R108_Review.md〈護欄層重釘逐檔清單〉節。"),
 )
 
 
@@ -1386,10 +1397,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 77
+_REPIN_LOG_FROZEN_PREFIX_LEN = 78
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "21c85dff06f9c1dcbc182817b1bfb2ec7e9b43a5edf4e58c6dfdd98b82035f58")
+    "4e039783346353ddc498a0118b3e861c36fe53eb9c04f392aadff52f0e39f54d")
 
 
 def repin_log_history_digest(
@@ -1481,6 +1492,9 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # DEF-200-230 回歸鎖窗口：追加本輪稽核列並把它納入前綴（prefix_len 76→77），同體例
     # 「追加後立即自我凍結」——延伸本身即讓指紋改變，故仍須在此留痕。
     ("R108", "abd0dc217e2b", "21c85dff06f9", "DEF-200-230"),
+    # DEF-200-233 修復窗口（macos-compat-ci）：追加本輪稽核列並把它納入前綴 round-label-ok
+    # （prefix_len 77→78），同體例「追加後立即自我凍結」——延伸本身即讓指紋改變，故留痕。
+    ("R108", "21c85dff06f9", "4e0397833463", "DEF-200-233"),
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

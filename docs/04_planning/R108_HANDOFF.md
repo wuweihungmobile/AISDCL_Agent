@@ -1,6 +1,6 @@
 # R108 交接書 — 架構輪（續跑鏈設計批交付＋DEF-200-230 回歸鎖落地）
 
-<!-- guard-total:R108 --> **本輪護欄層累積淨額（稽核痕跡合計，同輪多列合併）＝ 89124 → 89218（+94）** —— DEF-200-230 回歸鎖落地（`test_quota_policy.py` 3071→3152）＋鎖檔自身稽核列與凍結前綴延伸（`test_adr_xplat001_c1c2_lock.py` 6282→6295）。逐檔清單見 `CrossPlatform_R108_Review.md`〈護欄層重釘逐檔清單〉節。
+<!-- guard-total:R108 --> **本輪護欄層累積淨額（稽核痕跡合計，同輪多列合併）＝ 89124 → 89314（+190）** —— DEF-200-230 回歸鎖落地（`test_quota_policy.py` 3071→3152）＋DEF-200-233 修復（macos-compat-ci：`test_run_root_unittests.py` 2201→2283）＋鎖檔自身稽核列與凍結前綴延伸（`test_adr_xplat001_c1c2_lock.py` 6282→6309）。逐檔清單見 `CrossPlatform_R108_Review.md`〈護欄層重釘逐檔清單〉節。
 
 > 本輪是 **C 架構輪**：產出以「設計 + 提案 + 取證」為主，程式面只落一道回歸鎖。
 > 修憲批與 ADR 皆為 **Proposed**，**未生效**——本檔任何一處都不得被讀成「已實作」。
@@ -145,8 +145,20 @@ python d:\CursorProject\AISDCL_Agent\tools\tests\test_adr_xplat001_c1c2_lock.py 
 | `_REPIN_LOG_FROZEN_PREFIX_LEN` | 76 | 77 |
 | `_REPIN_LOG_HISTORY_SHA256`（前 12 碼） | `abd0dc217e2b` | `21c85dff06f9` |
 
-- 單輪淨額上限 **630**（`_REPIN_NET_CAP_SCHEDULE` 末列 `(107, 630)`），本輪 +94 未越線；
-  上一輪淨額為負 ⇒ 連續上升輪數自本輪起算 1（`_REPIN_MAX_CONSECUTIVE_RISING_ROUNDS=2`）。
+- **同輪追加（DEF-200-233／macos-compat-ci 修復窗口）**——上表是 DEF-200-230 那一包的重釘，
+  逐字保留；本包的重釘另計，兩包合計即頂部標記行的 89124 → 89314（+190）：
+
+| 標的 | 舊 | 新 |
+|---|---|---|
+| `_FROZEN_GUARD_LINES["test_run_root_unittests.py"]` | 2201 | 2283 |
+| `_FROZEN_GUARD_LINES["test_adr_xplat001_c1c2_lock.py"]` | 6295 | 6309 |
+| 稽核痕跡總量（`_GUARD_LINES_REPIN_LOG` 表尾） | 89218 | 89314（+96） |
+| `_REPIN_LOG_FROZEN_PREFIX_LEN` | 77 | 78 |
+| `_REPIN_LOG_HISTORY_SHA256`（前 12 碼） | `21c85dff06f9` | `4e0397833463` |
+
+- 單輪淨額上限 **630**（`_REPIN_NET_CAP_SCHEDULE` 末列 `(107, 630)`），本輪兩包合計 +190
+  未越線；上一輪淨額為負 ⇒ 連續上升輪數自本輪起算 1
+  （`_REPIN_MAX_CONSECUTIVE_RISING_ROUNDS=2`）。
 - 逐檔清單與「合法出口逐條實查」＝`CrossPlatform_R108_Review.md`〈護欄層重釘逐檔清單〉節。
 - 非護欄層改動（不入上表）：`tools/lib/governance_docs.py` 現為 **350 行**（`guardrail_lib`
   tier 上限 400，本輪實測餘裕 50）——`tools/lib/` 不在 `tools/tests/*.py` 行數棘輪掃描面內。

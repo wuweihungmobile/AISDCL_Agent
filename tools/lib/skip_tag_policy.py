@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import re
 import sys
-from collections.abc import Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping
 from pathlib import Path
 
 # 本檔住 `<repo>/tools/lib/`：與 `sdd_latest` 同層，呼叫端一律已把 `tools/lib`
@@ -84,8 +84,15 @@ ALL_SKIP_TAGS: tuple[str, ...] = (
 _WINDOWS_LIKE_SKIP_HINTS = ("windows", "win32", "pathext", "bash.exe", "mutex", "ntfs")
 
 # 具名豁免：reason 命中關鍵詞但**確實不是** Windows 專屬的 skip（鍵＝test id，
-# 值＝理由）。現況為空集合。刻意保留這個空常數而非省略——例外必須逐支具名並附
-# 理由，不接受「整批略過」的通用開關。
+# 值＝理由）。例外必須逐支具名並附理由，不接受「整批略過」的通用開關。
+#
+# 🔴 DEF-200-233 給下一個讀到「請自表中移除」那句訊息的人：**現存這幾筆都不是 stale**。
+# 它們全是 zsh／舊直譯器站點，reason 拿別的平台做**比較性陳述**（「Windows 與 act 的
+# ubuntu 映像實測皆無 zsh」）而命中關鍵詞。這批豁免的承重面是 **linux**（無 zsh ⇒ 真的
+# skip ⇒ 沒有豁免就被判漏標，root-infra-ci 當場紅）；在 **darwin** 上 zsh 是預設殼、
+# `/usr/bin/python3` 是 3.9.x ⇒ 這 7 支測試**真的有跑**，於是修前的 stale 面把「本平台
+# 沒話可說」讀成「已經過期」，macos-compat-ci 連續紅。判準已收窄（見
+# `exemption_problems`）；要動這張表前，先確認你是在**它真的 skip 的那個平台**上讀判決。
 #
 # 🔴 本輪補上自檢（此前**零 stale 自檢、零牙**）：注入實測顯示，往本表塞一筆指向
 # 不存在檔案的豁免、或一筆指向真檔但根本不需要豁免的條目，整支
@@ -140,13 +147,27 @@ def exemption_problems(
     exempt: Mapping[str, str],
     *,
     flagged_without_exempt: Mapping[str, str] | None = None,
+    skipped_here: Collection[str] | None = None,
+    known_ids: Collection[str] | None = None,
 ) -> list[str]:
-    """`_WINDOWS_SKIP_TAG_EXEMPT` 的雙面自檢（純函式）。回空 list ＝合格。
+    """`_WINDOWS_SKIP_TAG_EXEMPT` 的三面自檢（純函式）。回空 list ＝合格。
 
     · **格式面**（不分平台）：值必須寫出承接輪次，否則就是只進不出的永久豁免。
-    · **stale 面**（`flagged_without_exempt` 為 None 時**不判**）：該筆豁免若在
-      「假裝豁免表是空的」的重掃結果裡根本不會被判違規，代表它壓的東西已經不在
-      （測試改名／reason 改寫／已補標籤）⇒ 必須移除。
+    · **消失面**（不分平台，DEF-200-233）：`known_ids`＝本次**收集面**的全部 test id。豁免
+      指向的 id 不在裡面 ⇒ 那支測試已改名或刪除，這筆豁免再也壓不住任何東西 ⇒ 必須移除。
+    · **stale 面**（`flagged_without_exempt` 或 `skipped_here` 為 None 時**不判**）：該筆
+      豁免指向的測試**在本平台這一次真的 skip 了**，卻在「假裝豁免表是空的」重掃裡不會
+      被判違規 ⇒ 它壓的東西已經不在（reason 改寫／已補標籤）⇒ 必須移除。
+
+    🔴 DEF-200-233 立案（macos-compat-ci 的紅：mac runner 那一場**測試全過**、44 支 skip
+    之後才報問題）：stale 面原本的判準是「不在重掃結果裡就是 stale」，而重掃結果的
+    輸入是**本平台這一次真的 skip 了什麼** ⇒ 「這支測試在本平台根本沒 skip（它跑了）」與
+    「它 skip 了但已經不該被判違規」塌成同一個結論。現存 7 筆豁免全落在前者：linux 無 zsh
+    ⇒ 真的 skip ⇒ 豁免承重；darwin 上 zsh 是預設殼 ⇒ 測試真的跑了 ⇒ 同一批豁免被判 stale
+    ＝整片假紅，而**照它的指示移除會當場讓 root-infra-ci 轉紅**（judgment 的方向是錯的，
+    不是門檻太嚴）。修法是把「本平台沒話可說」與「真的過期」分開：測試沒 skip 的那些由
+    `skipped_here` 排除，而「改名／刪除」這一種真過期改由**不分平台**的消失面接手——它在
+    Windows 上也說話，故豁免表的「只進不出」防線射程比修前**更大**，不是被放寬。
 
     🔴 為何 stale 面要能被關掉（Scan-H⑥ 互鎖）：它的資料來源
     `untagged_windows_like_skips` 在 **Windows 上整組早退回空清單**（那個早退本身
@@ -160,10 +181,17 @@ def exemption_problems(
                 f"豁免 `{test_id}` 的理由沒有寫承接輪次——沒有承接者的豁免就是永久豁免。"
                 "請在理由裡寫明由哪一輪回來複查（形態：大寫 R 加輪號）"
             )
-        if flagged_without_exempt is not None and test_id not in flagged_without_exempt:
+        if known_ids is not None and test_id not in known_ids:
             problems.append(
-                f"豁免 `{test_id}` 已 stale：把本表當成空的重掃，這一筆根本不會被判違規"
-                "（測試改名／reason 改寫／已補標籤）⇒ 請自表中移除，不要留著佔位"
+                f"豁免 `{test_id}` 已 stale：這個 test id 不在本次收集面裡（測試已改名或"
+                "刪除）⇒ 它再也壓不住任何東西 ⇒ 請自表中移除，不要留著佔位"
+            )
+        elif (flagged_without_exempt is not None and skipped_here is not None
+                and test_id in skipped_here and test_id not in flagged_without_exempt):
+            problems.append(
+                f"豁免 `{test_id}` 已 stale：本平台這一次確實 skip 了它，但把本表當成空的"
+                "重掃，這一筆根本不會被判違規（reason 改寫／已補標籤）⇒ 請自表中移除，"
+                "不要留著佔位"
             )
     return problems
 

@@ -40,8 +40,8 @@ def _monorepo_root() -> str:
 _LAUNCHER = os.path.join(_monorepo_root(), ".claude", "hooks", "_hook_launcher.py")
 
 
-def _running_venv_pythonw() -> str:
-    """Windows 側「自己那一半」材料化用：**目前正在跑**這個測試的直譯器所在 venv 的
+def _running_pythonw() -> str:
+    """Windows 側「自己那一半」材料化用：**目前正在跑**這個測試的直譯器旁邊那支
     GUI 子系統 sibling（`sys.executable` 同目錄）。
 
     刻意不用 repo-root 相對 join 拼出這個路徑：那個目錄是 gitignore 排除的本機產物，
@@ -54,10 +54,28 @@ def _running_venv_pythonw() -> str:
     return os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
 
 
-def _running_venv_pyvenv_cfg() -> str:
-    """對應的 `pyvenv.cfg`（venv 根目錄＝`Scripts/` 的上一層；venv 啟動器靠它找 base
-    install，複本搬到別處仍解析得到——`home` 是絕對路徑，經本機實測驗證）。"""
-    return os.path.join(os.path.dirname(os.path.dirname(sys.executable)), "pyvenv.cfg")
+def _pyvenv_cfg_text() -> str:
+    """材料化用的 `pyvenv.cfg` 內容 — **合成**，不是複製本機既有那一份。
+
+    🔴 DEF-200-232（windows-compat-ci 連續 6 次紅的第一支）：原實作是
+    `shutil.copy(<sys.executable 上兩層>/pyvenv.cfg, …)`，內含一個沒說出口的前提
+    「跑本測試的直譯器一定住在 venv 裡」。那個前提在 CI 上為假——GitHub
+    `actions/setup-python` 交出來的是 **base install**（直譯器直接住在 prefix 底下、
+    旁邊與上一層都沒有 `pyvenv.cfg`）⇒ `FileNotFoundError` 在載具材料化就炸，
+    一條 hook 都還沒驗到，而炸點與被測物完全無關。
+
+    合成才是對的形狀：`pyvenv.cfg` 的內容本來就只是「指回 base install」，而那個值
+    `sys.base_prefix` **兩種情境都答得出來**（在 venv 裡＝它的 base；在 base install
+    裡＝自己）。複製只是「剛好在 venv 裡時取得同一個值」的脆弱寫法。
+    本機實測（Windows，以 pyenv base install 當來源模擬 CI 形狀）：合成 cfg ＋ 複製
+    `pythonw.exe` 的假 venv 起得來，缺目標腳本時 rc=0（fail-open）。
+    """
+    v = sys.version_info
+    return (
+        f"home = {sys.base_prefix}\n"
+        "include-system-site-packages = false\n"
+        f"version = {v.major}.{v.minor}.{v.micro}\n"
+    )
 
 
 def _settings_paths() -> list[str]:
@@ -123,9 +141,66 @@ def _run(hook: dict, cwd: str, extra_env: dict[str, str] | None = None,
     return subprocess.run(wiring.expand_tokens(argv, project_dir), **common)
 
 
-def _viable(hook: dict, project_dir: str) -> bool:
-    """本平台上這個條目的載具跑不跑得起來（跨平台配對的另一半是刻意 fail-open）。"""
-    return lint._hook_wiring().carrier_available(hook, project_dir)
+def _viable(hook: dict, project_dir: str, *, exists=os.path.exists) -> bool:
+    """本平台上這個條目的載具跑不跑得起來（跨平台配對的另一半是刻意 fail-open）。
+
+    `exists` 是注入點：用來構造「這台機器上 venv 沒被材料化」情境（見
+    `_resolve_carriers()` 與其紅綠自證兩支測試），不是給生產路徑用的。
+    """
+    return lint._hook_wiring().carrier_available(hook, project_dir, exists=exists)
+
+
+def _as_running_interpreter(hook: dict) -> dict | None:
+    """把「宣告 Windows venv 載具」的條目換成用**目前這個直譯器**跑同一條 shim 鏈的
+    等價條目；不是那一種載具就回 `None`（不代換）。
+
+    🔴 DEF-200-232（windows-compat-ci 連續 6 次紅的第二支）：這裡要切開兩件被
+    `carrier_available()` 綁在一起、但責任歸屬完全不同的事——
+
+      (a) **佈線缺陷**：本平台那一半的載具從 settings 消失／被寫成別的東西。
+          那是 repo 內容問題，任何機器上都必須紅。
+      (b) **機器姿態**：載具形態正確，但它指到的 venv 是 gitignored 的**本機產物**，
+          在 fresh clone 與 CI runner 上本來就不在。**這不是 repo 缺陷**——CI 從不
+          執行 Claude Code hook（根 CLAUDE.md〈hook 載具〉逐字如此劃界），而
+          「這台機器上載具在不在」早就有自己的家：
+          `tools/check_hooks_liveness.py::check_claude_hook_carriers`（對三份活躍
+          settings 逐份查存在性，CI 刻意跳過那一層）。
+
+    原本的 `assert runnable` 把 (b) 也判成紅，於是 windows-compat-ci 在
+    `AutoClaude/.venv` 從未被建立的 runner 上連續 6 次紅，紅的內容與當輪改動無關；
+    而同一份「載具存在嗎」的知識同時住在兩個家，正是本 repo 的頭號病。
+
+    代換的射程刻意收到最窄，這樣它遮得住的只有 (b)：**只有 Windows、且 argv[0] 正是
+    那個唯一合法的 venv 載具**（`win_carrier_kind()=="venv"`，字面被改壞就對不上）
+    才代換。POSIX 那一半的載具是 **git tracked 的檔**，它缺席就是真缺陷 ⇒ 由
+    `os.name` 守住、一律不代換。
+    """
+    wiring = lint._hook_wiring()
+    argv = wiring.hook_entry_argv(hook)
+    if os.name != "nt" or len(argv) < 2 or not wiring.is_exec_form(hook):
+        return None
+    if wiring.win_carrier_kind(argv[0]) != "venv":
+        return None
+    return {"type": "command", "command": sys.executable, "args": list(argv[1:])}
+
+
+def _resolve_carriers(hooks: list[dict], project_dir: str,
+                      *, exists=os.path.exists) -> list[dict]:
+    """把條目清單收斂成「本平台真的 spawn 得動」的那些（必要時代換成目前直譯器）。
+
+    條目數刻意**不因代換而增減**：可跑的原樣留下，只有「宣告正確但沒材料化」的
+    Windows venv 載具被代換，另一個平台那一半仍照樣被丟掉（fail-open 的那一半）。
+    回空清單＝本平台在這份佈線裡已無任何跑得動的條目 ⇒ 呼叫端必須出聲。
+    """
+    out: list[dict] = []
+    for hook in hooks:
+        if _viable(hook, project_dir, exists=exists):
+            out.append(hook)
+            continue
+        substitute = _as_running_interpreter(hook)
+        if substitute is not None:
+            out.append(substitute)
+    return out
 
 
 def _fake_project_root(tmp: str) -> str:
@@ -159,8 +234,8 @@ def _materialise_carrier(hook: dict, project_root: str) -> None:
     （在**另一個**平台上執行到才會需要它，而那正是它應該保持 fail-open 的一半）。
 
     Windows 側材料化需要兩個檔（缺一 GUI 子系統直譯器啟動不了、找不到 base install）：
-    直譯器本體＋緊鄰的 `pyvenv.cfg`（venv 啟動器靠它定位 base Python install，`home`
-    是絕對路徑、複本搬到別處仍解析得到，經本機實測驗證）。只材料化 `kind=="venv"` 的
+    直譯器本體＋緊鄰的 `pyvenv.cfg`（venv 啟動器靠它定位 base Python install；內容
+    **合成**而非複製，理由見 `_pyvenv_cfg_text()`）。只材料化 `kind=="venv"` 的
     條目：`kind=="path"`（裸執行檔名，靠 PATH 解析）`carrier_available()` 本就無條件
     視為 viable，不需要、也不該材料化任何檔案。
     """
@@ -185,10 +260,11 @@ def _materialise_carrier(hook: dict, project_root: str) -> None:
         exe = wiring.expand_tokens([argv[0]], project_root)[0]
         if not os.path.exists(exe):
             os.makedirs(os.path.dirname(exe), exist_ok=True)
-            shutil.copy(_running_venv_pythonw(), exe)
+            shutil.copy(_running_pythonw(), exe)
             cfg = os.path.join(os.path.dirname(os.path.dirname(exe)), "pyvenv.cfg")
             if not os.path.exists(cfg):
-                shutil.copy(_running_venv_pyvenv_cfg(), cfg)
+                with open(cfg, "w", encoding="utf-8", newline="\n") as f:
+                    f.write(_pyvenv_cfg_text())
         if len(argv) > 1:
             launcher = wiring.expand_tokens([argv[1]], project_root)[0]
             if not os.path.exists(launcher):
@@ -231,7 +307,7 @@ def test_claude_project_dir_anchors_root_router():
                for rel in wiring.hook_entry_targets(h, include_launcher=True))
     ]
     assert hooks, "根 settings.json 找不到 sdd_hook_router 佈線"
-    runnable = [h for h in hooks if _viable(h, root)]
+    runnable = _resolve_carriers(hooks, root)
     assert runnable, (
         "根 settings.json 有 sdd_hook_router 佈線，但**本平台一條都跑不起來** ⇒ "
         f"router 在這台機器上整支靜默失效。條目：{[_describe(h) for h in hooks]}"
@@ -250,8 +326,8 @@ def test_claude_project_dir_anchors_root_router():
             )
 
 
-def test_claude_project_dir_anchors_autoclaude_deny_semantics():
-    """AutoClaude 錨定情境：enforce_docs_path 經 shim 仍真執行且保留 exit 2 阻斷語意。"""
+def _autoclaude_enforce_docs_path_hooks() -> tuple[str, list[dict]]:
+    """(AutoClaude 專案根, 佈線裡**實際會跑到** `enforce_docs_path` 的那些條目)。"""
     ac_root = os.path.join(_monorepo_root(), "AutoClaude")
     settings = os.path.join(ac_root, ".claude", "settings.json")
     with open(settings, encoding="utf-8") as f:
@@ -264,26 +340,81 @@ def test_claude_project_dir_anchors_autoclaude_deny_semantics():
         if any("enforce_docs_path" in rel
                for rel in wiring.hook_entry_targets(h, include_launcher=True))
     ]
-    assert hooks, "AutoClaude settings.json 找不到 enforce_docs_path 佈線"
-    # 🔴 R81：本檔轉成 exec form 之後，這裡不能再拿 `hooks[0]` 就跑——那是**Windows 載具**
-    # 那一條（`.venv/Scripts/pythonw.exe`），在 mac/Linux 上 spawn 直接 FileNotFoundError，
-    # 而跨平台配對的另一半本來就是刻意 fail-open、不是缺陷。與同檔 root router 那個 case
-    # 用同一個 `_viable()` 篩選；篩完為空要出聲（不得靜默跳過＝本平台整支失去 hook）。
-    runnable = [h for h in hooks if _viable(h, ac_root)]
-    assert runnable, (
-        "AutoClaude settings.json 有 enforce_docs_path 佈線，但**本平台一條都跑不起來** ⇒ "
-        f"這台機器上該守衛整支靜默失效。條目：{[_describe(h) for h in hooks]}"
-    )
+    return ac_root, hooks
+
+
+def _assert_deny_semantics(entry: dict, ac_root: str) -> None:
+    """跑一條已解析好的條目，斷言 shim 原樣傳遞目標腳本的 exit 2。"""
     payload = json.dumps(
         {"tool_name": "Write", "tool_input": {"file_path": "evil_probe.md", "content": "x"}}
     )
     with tempfile.TemporaryDirectory() as tmp:
-        res = _run(runnable[0], cwd=tmp, extra_env={"CLAUDE_PROJECT_DIR": ac_root},
+        res = _run(entry, cwd=tmp, extra_env={"CLAUDE_PROJECT_DIR": ac_root},
                    stdin_payload=payload)
         assert res.returncode == 2, (
             f"錨定情境下 enforce_docs_path 未保留阻斷語意（rc={res.returncode}）——"
             f"shim 必須原樣傳遞目標腳本的 exit 2\n{res.stderr[:400]}"
         )
+
+
+def test_claude_project_dir_anchors_autoclaude_deny_semantics():
+    """AutoClaude 錨定情境：enforce_docs_path 經 shim 仍真執行且保留 exit 2 阻斷語意。"""
+    ac_root, hooks = _autoclaude_enforce_docs_path_hooks()
+    assert hooks, "AutoClaude settings.json 找不到 enforce_docs_path 佈線"
+    # 🔴 R81：本檔轉成 exec form 之後，這裡不能再拿 `hooks[0]` 就跑——那是**Windows 載具**
+    # 那一條（`.venv/Scripts/pythonw.exe`），在 mac/Linux 上 spawn 直接 FileNotFoundError，
+    # 而跨平台配對的另一半本來就是刻意 fail-open、不是缺陷。與同檔 root router 那個 case
+    # 用同一個 `_resolve_carriers()`；解析完為空要出聲（不得靜默跳過＝本平台整支失去 hook）。
+    # 🔴 DEF-200-232：解析器對「宣告正確但本機沒材料化的 venv 載具」會代換成目前直譯器——
+    # 「載具在這台機器上存不存在」的判定住 `tools/check_hooks_liveness.py`，不住這裡。
+    runnable = _resolve_carriers(hooks, ac_root)
+    assert runnable, (
+        "AutoClaude settings.json 有 enforce_docs_path 佈線，但**本平台那一半連代換都"
+        f"湊不出來** ⇒ 佈線裡已沒有本平台跑得動的條目。條目：{[_describe(h) for h in hooks]}"
+    )
+    _assert_deny_semantics(runnable[0], ac_root)
+
+
+def test_autoclaude_deny_semantics_survives_a_machine_without_the_local_venv():
+    """紅綠自證（綠面）：載具指到的 venv 未材料化時，阻斷語意仍必須被**真的驗到**。
+
+    這就是 CI runner 的條件（`AutoClaude/.venv` 從未被建立）。刻意不是 skip：
+    把「本機沒有那個 gitignored 產物」變成靜默跳過，等於用看不見換綠燈。
+    """
+    ac_root, hooks = _autoclaude_enforce_docs_path_hooks()
+
+    def _no_venv(path: str) -> bool:
+        return False if ".venv" in path.replace("\\", "/") else os.path.exists(path)
+
+    runnable = _resolve_carriers(hooks, ac_root, exists=_no_venv)
+    assert runnable, "無 venv 的機器上湊不出可跑的載具 ⇒ 上一支測試在 CI runner 上必炸"
+    _assert_deny_semantics(runnable[0], ac_root)
+
+
+def test_deny_carrier_resolution_stays_red_when_the_local_platform_half_is_missing():
+    """紅綠自證（紅面）：本平台那一半從佈線消失時，代換必須湊不出來（真缺陷仍紅）。
+
+    Windows 上餵它 POSIX 載具那一條、POSIX 上餵它 Windows 載具那一條——兩邊都必須
+    解析成空。若代換被寫得太寬（例如不看 `win_carrier_kind`、或漏掉 `os.name` 守門），
+    這裡會當場變綠。
+    """
+    wiring = lint._hook_wiring()
+    ac_root, hooks = _autoclaude_enforce_docs_path_hooks()
+
+    def _is_local_half(hook: dict) -> bool:
+        argv = wiring.hook_entry_argv(hook)
+        if not argv:
+            return False
+        if os.name == "nt":
+            return wiring.win_carrier_kind(argv[0]) is not None
+        return wiring.is_posix_carrier(argv[0])
+
+    foreign_only = [h for h in hooks if not _is_local_half(h)]
+    assert foreign_only, "前提不成立：佈線裡找不到另一個平台那一半，構造不出證偽情境"
+    assert _resolve_carriers(foreign_only, ac_root) == [], (
+        "只剩另一個平台那一半時仍解析出可跑的載具 ⇒ 代換的射程過寬，"
+        f"會遮住真正的佈線缺陷。條目：{[_describe(h) for h in foreign_only]}"
+    )
 
 
 def test_claude_project_dir_anchors_latest_version_session_start():
@@ -299,8 +430,8 @@ def test_claude_project_dir_anchors_latest_version_session_start():
     # 🔴 R84 W3：本份 settings 轉 exec form 之後，`hooks[0]` 是 **Windows 載具**那一條
     # （`../../.venv/Scripts/pythonw.exe`），在 mac/Linux 上 spawn 直接 FileNotFoundError。
     # 跨平台配對的另一半是刻意 fail-open、不是缺陷 ⇒ 與同檔 root router／AutoClaude
-    # 兩個 case 用同一個 `_viable()` 篩選；篩完為空要出聲（不得靜默跳過＝本平台整支失去 hook）。
-    runnable = [h for h in hooks if _viable(h, v_root)]
+    # 兩個 case 用同一個 `_resolve_carriers()`；解析完為空要出聲（不得靜默跳過＝整支失去 hook）。
+    runnable = _resolve_carriers(hooks, v_root)
     assert runnable, (
         f"{latest} settings.json 有 SessionStart 佈線，但**本平台一條都跑不起來** ⇒ "
         f"這台機器上該版 session_start 整支靜默失效。條目：{[_describe(h) for h in hooks]}"

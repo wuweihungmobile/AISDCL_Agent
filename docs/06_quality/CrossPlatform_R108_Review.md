@@ -96,7 +96,11 @@
 |---|---|---|---|---|
 | `tools/tests/test_quota_policy.py` | 3071 | 3152 | +81 | DEF-200-230 回歸鎖：`usage_url_homes()` 純函式＋`usage_url_scan_surface()` 全樹 tracked `*.py` 現查＋兩支測試（現況斷言、合成注入紅綠自證） |
 | `tools/tests/test_adr_xplat001_c1c2_lock.py` | 6282 | 6295 | +13 | 本輪稽核列（10）＋`_FROZEN_PREFIX_REWRITE_LEDGER` 追加列與其 WHY（3）；`_REPIN_LOG_FROZEN_PREFIX_LEN` 76→77、`_REPIN_LOG_HISTORY_SHA256` abd0dc217e2b→21c85dff06f9（就地改值，不計行） |
-| **合計** | **89124** | **89218** | **+94** | 單輪上限 630（`_REPIN_NET_CAP_SCHEDULE` 末列 `(107, 630)`）；`_REPIN_NET_CAP_DUE_ROUND=109` 於本輪尚未到期 |
+| `tools/tests/test_run_root_unittests.py` | 2201 | 2283 | +82 | DEF-200-233（macos-compat-ci）：豁免表 stale 面**方向鎖**（測試在本平台跑掉 ≠ 豁免過期）＋消失面補位鎖（改名／刪除，不分平台）＋消失面關閉對照＋`known_ids` 接線鎖；另兩處既有注入改指向「本次真的 skip 掉」的 id，否則新判準正確地回空而接線鎖退化成恆綠 |
+| `tools/tests/test_adr_xplat001_c1c2_lock.py` | 6295 | 6309 | +14 | DEF-200-233 稽核列（11）＋`_FROZEN_PREFIX_REWRITE_LEDGER` 追加列與其 WHY（3）；`_REPIN_LOG_FROZEN_PREFIX_LEN` 77→78、`_REPIN_LOG_HISTORY_SHA256` 21c85dff06f9→4e0397833463（就地改值，不計行） |
+| **合計** | **89124** | **89314** | **+190** | 單輪上限 630（`_REPIN_NET_CAP_SCHEDULE` 末列 `(107, 630)`）；`_REPIN_NET_CAP_DUE_ROUND=109` 於本輪尚未到期 |
+
+DEF-200-233 的非護欄層改動（不計入上表）：`tools/lib/skip_tag_policy.py`（判準本體收窄＋豁免表 WHY 補註）、`tools/lib/windows_skip_tags.py`（facade 傳入 `skipped_here`／`known_ids`）、`tools/run_root_unittests.py`（收集面在 `TestSuite.run()` **之前**取——run 之後每一支會被就地換成 `None`）。三支皆住 `tools/`／`tools/lib/`，不在 `tools/tests/*.py` 行數棘輪掃描面內。
 
 合法出口逐條實查（款(9) 要求的「不是淨減法輪」的明文承認）：無死碼可刪；抽共用層不適用（本判準只有一個消費端，抽層只會多一個沒人維護的家）；散文搬遷不適用（新增全是判準本體與注入語料，本輪未新增可搬的史料散文）。
 
