@@ -294,6 +294,10 @@ on:
       - "AutoClaude/tools/run_act_core.py"
       - "AutoClaude/tools/git-hooks/pre-commit"
       - "AutoClaude/tools/git-hooks/pre-push"
+      # tools/tests/test_platform_neutral_paths.py 的 hook CRLF 字面對帳判準
+      # （DEF-101-950，2026-08-28）逐字讀這支 hook ⇒ 它成為根層消費檔：只改它時
+      # 本 workflow 的回歸鎖必須跑（DEF-101-042 同構，test_ci_paths_cover_root_consumers.py 釘住）。
+      - "AutoClaude/tools/hooks/check_ps1_encoding.py"
       # R19 修復包 D：tools/tests/test_install_windows_nightly.py（同活在本
       # workflow 執行的 tools/tests/ 樹內）以字串引用這三支 .ps1 根層消費檔，
       # windows-compat-ci.yml 側已被既有 **/*.ps1 覆蓋，本檔無 .ps1 兜底 glob，
@@ -646,6 +650,10 @@ on:
       - "AutoClaude/tools/run_act_core.py"
       - "AutoClaude/tools/git-hooks/pre-commit"
       - "AutoClaude/tools/git-hooks/pre-push"
+      # tools/tests/test_platform_neutral_paths.py 的 hook CRLF 字面對帳判準
+      # （DEF-101-950，2026-08-28）逐字讀這支 hook ⇒ 它成為根層消費檔：只改它時
+      # 本 workflow 的回歸鎖必須跑（DEF-101-042 同構，test_ci_paths_cover_root_consumers.py 釘住）。
+      - "AutoClaude/tools/hooks/check_ps1_encoding.py"
       # R19 修復包 D：同上 push 區塊說明
       - "AutoClaude/tools/fix_nightly_catchup.ps1"
       - "AutoClaude/tools/run_local_nightly.ps1"

@@ -437,6 +437,10 @@ on:
       - "AutoClaude/tools/run_mutmut_in_docker.sh"
       - "AutoClaude/tools/git-hooks/pre-commit"
       - "AutoClaude/tools/git-hooks/pre-push"
+      # tools/tests/test_platform_neutral_paths.py 的 hook CRLF 字面對帳判準
+      # （DEF-101-950，2026-08-28）逐字讀這支 hook ⇒ 它成為根層消費檔：只改它時
+      # 本 workflow 的回歸鎖必須跑（DEF-101-042 同構，test_ci_paths_cover_root_consumers.py 釘住）。
+      - "AutoClaude/tools/hooks/check_ps1_encoding.py"
       - "tools/bootstrap_core.py"
       - "AutoClaude/tools/run_act_core.py"
       - "**/*.ps1"
@@ -790,6 +794,10 @@ on:
       - "AutoClaude/tools/run_mutmut_in_docker.sh"
       - "AutoClaude/tools/git-hooks/pre-commit"
       - "AutoClaude/tools/git-hooks/pre-push"
+      # tools/tests/test_platform_neutral_paths.py 的 hook CRLF 字面對帳判準
+      # （DEF-101-950，2026-08-28）逐字讀這支 hook ⇒ 它成為根層消費檔：只改它時
+      # 本 workflow 的回歸鎖必須跑（DEF-101-042 同構，test_ci_paths_cover_root_consumers.py 釘住）。
+      - "AutoClaude/tools/hooks/check_ps1_encoding.py"
       - "tools/bootstrap_core.py"
       - "AutoClaude/tools/run_act_core.py"
       - "**/*.ps1"
