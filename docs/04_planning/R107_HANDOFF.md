@@ -12,8 +12,8 @@
 
 ## 還沒做什麼（交棒項，R108 開場必讀）
 
-1. **DEF-200-230**（紅線 1 條件 (b) 單站點回歸鎖）**尚未落地**：現況不變式成立（全庫 .py 完整端點 URL 字面恰 1 命中＝`tools/lib/quota_meter.py:72`，現查 `Select-String -Path tools -Filter *.py -Pattern 'api\.anthropic\.com/api/oauth/usage' -Recurse`），落點 `tools/tests/test_quota_policy.py`；🔴 須同窗付 `test_adr_xplat001_c1c2_lock.py:743` raw-line 釘值 3055 重釘稅＋append-only 稽核列——鐵律七，只能收尾單人窗口做。
-   <!-- absent-if: usage_url_single_home -->（上一條「尚未落地」的證偽標的：本交棒書指定落地測試名必須含這個字面——照 R81 QuotaAwarePlugin 慣例＝交付時必然出現的符號，由交棒書自己指定使錨與宣稱同軸；它一旦在任何 tracked 檔搜得到，該宣稱當場為假）
+1. **DEF-200-230**（紅線 1 條件 (b) 單站點回歸鎖）——🔴 **本項已由 R108 收尾單人窗口兌現**（原文為交棒項，狀態欄現為 `fixed@R108`）：落點 `tools/tests/test_quota_policy.py::TestUsageUrlHasExactlyOneHome`；同窗付重釘稅（`_FROZEN_GUARD_LINES["test_quota_policy.py"]` 3071→3152，稽核列 89124→89218）。現況不變式仍成立（全庫 tracked `*.py` 恰 1 命中＝`tools/lib/quota_meter.py`）。⚠️ 交棒當時所記的釘值 3055 是 R107 之前的陳值，兌現當回合實測為 3071，以實測為準。
+   （原掛在本項的 `absent-if` 證偽錨已兌現並隨宣稱一併退場：錨的字面 `usage_url_single_home` 由落地測試名逐字帶出，一被搜到就代表交棒項完成；錨若留著而宣稱已改寫，下一個讀者會以為那件事還開著。）
 2. **DEF-200-231**（自動化續跑鏈三缺陷，P1）**尚未修復**（現查列況：`python tools/check_defect_log_crossref.py --unresolved-count`，230/231 應在未結清單）：① planner `--register-schtasks` 時刻退回 now+5h 假設值未讀實測 resets_at；② headless 續跑窗口許可層無 Edit/Write ⇒ 喚醒後空轉（架構裁決：`--permission-mode acceptEdits` 帶受控授權 vs 安全防線）；③ 哨兵武裝後死亡無存活監測。取證＝`docs/04_planning/R107_RESUME.md` 根因節；附帶教訓＝修排程時刻唯一安全路徑是 unregister→planner 重註冊（`schtasks /change` 與 `Set-ScheduledTask -Trigger` 都會把 Interactive principal 的 NextRunTime 弄空，實測三次）。
 3. **R108 候選**：SD 鏡 F4——「30 版 hub-push.yml 同一 blob 分裂為恰 2 顆」的散文預期**尚未機械化**（現查 `git ls-files -s -- 'AISDLC_SDD/*/.github/workflows/hub-push.yml'`）；🔴 分裂在收尾 commit 後才 materialize，**須 commit 後落地**（commit 前寫斷言必假紅）。
 4. ADR-XPLAT-013 Phase 2 (b)(c) 到期義務**尚未開始**：載體 DEF-200-211，到期輪現查 `Select-String -Path tools\tests\test_adr_xplat001_c1c2_lock.py -Pattern '_PHASE2_DUE_ROUND'`；「維持觀察」名額已用罄。

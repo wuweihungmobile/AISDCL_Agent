@@ -3067,5 +3067,86 @@ class TestR104BurstingOkAndEwmaBurnRate(unittest.TestCase):
         self.assertAlmostEqual(rate3, 0.625)
 
 
+# ── DEF-200-230：額度取數端點的「單一家」回歸鎖（PRD §15.5 紅線 1 條件 (b)） ──────────
+#
+# 立案（帳本 DEF-200-230 逐字）：紅線 1 要求額度取數只有一個站點，而在本鎖之前那件事
+# **只是散文**——任何人在別處再貼一份 `USAGE_URL` 就多一個取數端點，而兩份字面一旦漂移
+# （版本路徑不同、少一段 `/api`），失效方向是「本機恆綠、真的量到的是兩個不同的數」。
+# 現況不變式（落地當回合實測）：全庫 tracked `*.py` 中帶完整端點 URL 字面者恰 1 支＝
+# `tools/lib/quota_meter.py`。
+#
+# 🔴 為何 needle 是**組出來**的、不寫成一個完整字面：本檔自己也在掃描面上（tracked `.py`），
+# 寫全就成了第二個家、鎖對自己轉紅——把判準寫成「除了本檔以外」則是自己給自己開豁免，
+# 那條出口一開，下一個人照抄就多一個豁免。組回處只有 `_usage_url_needle()` 一個。
+#
+# 誠實劃界：本鎖判「完整 URL 字面」的相異檔數，**不判**有人把 host 與 path 分成兩個常數
+# 拼起來（那與本檔自己的做法同形，機械上分不出來）；也不管 `.md`／`.ps1`（文件引述端點
+# 是合法的，實測 `docs/` 下 6 處皆為史料與 ADR 引用）。
+_USAGE_URL_HALVES = ("api.anthropic.com", "/api/oauth/usage")
+#: 唯一合法的家（相對 repo 根的 posix 路徑）。
+_USAGE_URL_HOME = "tools/lib/quota_meter.py"
+
+
+def _usage_url_needle() -> str:
+    """端點 URL 的完整字面——**全檔唯一的組回處**（見上方 WHY）。"""
+    return "".join(_USAGE_URL_HALVES)
+
+
+def usage_url_homes(files: dict[str, str]) -> list[str]:
+    """帶完整端點 URL 字面的檔（排序）。純函式，紅綠由合成注入自證。"""
+    needle = _usage_url_needle()
+    return sorted(rel for rel, text in files.items() if needle in text)
+
+
+def usage_url_scan_surface() -> dict[str, str]:
+    """掃描面現查：`{repo 相對路徑: 全文}`，全部 tracked `*.py`。
+
+    刻意**整棵樹全讀**而不先用 `git grep` 過濾候選：過濾器漏掉的檔對判準結構上不可見，
+    而「靜默縮面」的表徵正是「看起來更乾淨」。實測整棵樹 5,572 支讀完 0.44s，不值得
+    為這點成本換一個盲區。列舉走 `git_paths`（quotepath SSOT，見該模組檔頭）。
+    """
+    import git_paths  # noqa: PLC0415  # 只有本鎖需要，避免 import 期擴大本檔相依面
+
+    out: dict[str, str] = {}
+    for rel in git_paths.ls_files(_REPO, "--", "*.py"):
+        try:
+            out[rel] = (_REPO / rel).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+    return out
+
+
+class TestUsageUrlHasExactlyOneHome(unittest.TestCase):
+    """DEF-200-230 的機械物：取數端點字面只准住一個家。"""
+
+    def test_usage_url_single_home_is_quota_meter(self) -> None:
+        surface = usage_url_scan_surface()
+        self.assertGreater(len(surface), 1000,
+                           f"掃描面只有 {len(surface)} 支 tracked .py ⇒ 取數管道壞掉"
+                           "（列舉失敗回空 list），此時「恰 1 命中」是被空集合滿足的假綠")
+        self.assertEqual(
+            usage_url_homes(surface), [_USAGE_URL_HOME],
+            f"額度取數端點的完整 URL 字面不再是「恰好住在 {_USAGE_URL_HOME} 一支檔」——"
+            "多一個家＝多一個取數站點（PRD §15.5 紅線 1 條件 (b)）；少一個家＝那個 SSOT "
+            "被改名或刪掉，本鎖從此無物可守，兩個方向都必須有人來看")
+
+    def test_usage_url_single_home_detector_is_not_vacuous(self) -> None:
+        """紅綠自證：第二個家出現即紅；改名／消失亦紅；判準本身抓得到子字串。"""
+        needle = _usage_url_needle()
+        one = {_USAGE_URL_HOME: f'USAGE_URL = "https://{needle}"'}
+        self.assertEqual(usage_url_homes(one), [_USAGE_URL_HOME])
+        second = {**one, "tools/lib/some_new_meter.py": f"URL = '{needle}'"}
+        self.assertEqual(usage_url_homes(second),
+                         [_USAGE_URL_HOME, "tools/lib/some_new_meter.py"],
+                         "第二個家竟然沒被看見 ⇒ 本鎖對它要防的那個形態失明")
+        self.assertNotEqual(usage_url_homes(second), [_USAGE_URL_HOME],
+                            "注入第二個家後判準結果與現況相同 ⇒ 鑑別力為零")
+        self.assertEqual(usage_url_homes({"a.py": "https://api.anthropic.com/v1/messages"}),
+                         [], "只要 host 相同就命中 ⇒ 判準寬到會把訊息 API 也算成取數端點")
+        self.assertEqual(usage_url_homes({}), [],
+                         "空掃描面必須回空清單（由上一支測試的下限斷言 fail-loud，"
+                         "不在本純函式裡代為決定）")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

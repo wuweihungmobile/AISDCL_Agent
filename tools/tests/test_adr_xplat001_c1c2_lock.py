@@ -682,7 +682,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 6282,
+    "test_adr_xplat001_c1c2_lock.py": 6295,
     "test_archive_defect_log.py": 4008,
     "test_bash32_compat.py": 1020,
     "test_bash_probe_spec_contract.py": 983,
@@ -727,7 +727,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_ps51_compat.py": 610,
     "test_ps_engine_ssot.py": 954,
     "test_python_c_percent_shim.py": 119,
-    "test_quota_policy.py": 3071,
+    "test_quota_policy.py": 3152,
     "test_root_infra_parity.py": 441,
     "test_run_root_unittests.py": 2201,
     "test_sanitize_component_frozen_sdd_versions_lock.py": 340,
@@ -1189,6 +1189,16 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "八段散文搬遷 CrossPlatform_Guard_Line_History.md〈站點級守衛四種罩法 WHY〉至〈SC-2/3/5 "
      "射程收窄 WHY〉八節（原文全文保全、知識零刪除；僅指稱詞隨載體必要調整）；逐檔對照見 "
      "CrossPlatform_R106_Scan_Findings.md 的 R107 標記行。"),
+    ("R108", 89124, 89218, 94,
+     "[非淨減法輪] DEF-200-230 回歸鎖落地（PRD §15.5 紅線 1 條件 (b) 的機械面）："
+     "test_quota_policy.py 新增「額度取數端點字面只准住一個家」判準——純函式 "
+     "usage_url_homes()＋整棵樹 tracked *.py 掃描面現查＋合成注入紅綠自證（第二個家出現"
+     "即紅、判準寬到誤收 /v1/messages 亦紅），3071→3152（+81）；本檔自身 +13＝本稽核列＋"
+     "_FROZEN_PREFIX_REWRITE_LEDGER 追加列＋凍結前綴延伸（_REPIN_LOG_FROZEN_PREFIX_LEN "
+     "76→77，涵蓋本列本身）。合法出口逐條實查：無死碼可刪；抽共用層不適用（判準只有一個"
+     "消費端，抽層只會多一個沒人維護的家）；散文搬遷不適用（新增全是判準本體與注入語料，"
+     "本輪未新增可搬的史料散文）。逐檔清單見 CrossPlatform_R108_Review.md"
+     "〈護欄層重釘逐檔清單〉節。"),
 )
 
 
@@ -1376,10 +1386,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 76
+_REPIN_LOG_FROZEN_PREFIX_LEN = 77
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "abd0dc217e2bb82ced57084a2f3b46b0fa61d3b879164040f3bacfd69d015045")
+    "21c85dff06f9c1dcbc182817b1bfb2ec7e9b43a5edf4e58c6dfdd98b82035f58")
 
 
 def repin_log_history_digest(
@@ -1468,6 +1478,9 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # 帳本結案包 #3（DEF-200-166 窗口）：追加本輪稽核列並把它納入前綴（prefix_len 75→76）。
     ("R107", "6d3be18839b6", "b42d19e1db20", "DEF-200-166"),
     ("R107", "b42d19e1db20", "abd0dc217e2b", "DEF-200-141"),  # B2/B3 措辭與指針訂正（2026-08-28）
+    # DEF-200-230 回歸鎖窗口：追加本輪稽核列並把它納入前綴（prefix_len 76→77），同體例
+    # 「追加後立即自我凍結」——延伸本身即讓指紋改變，故仍須在此留痕。
+    ("R108", "abd0dc217e2b", "21c85dff06f9", "DEF-200-230"),
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

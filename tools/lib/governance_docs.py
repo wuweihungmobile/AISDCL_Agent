@@ -327,6 +327,15 @@ _GOVERNANCE_DOCS = (
     # 的四鏡判決全文唯一長存處——PRD 落款與帳本 DEF-200-141/142/157 結案列引據的就是它
     # （⇒ 體積守門＋指針稽核），逐字轉存自 session 逐字稿、僅路徑匿名化。即刻登記。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R107_Review.md",
+    # 架構輪四方複審一審紀錄（19 blocking 的逐筆判決與收斂鏈）：WHY 屬本類＝五份設計產出
+    # 的每一筆 blocking 處置只住這裡，複審者要重驗「哪一筆被誰打回、修在哪」就得讀完它
+    # （⇒ 體積守門），且它逐筆寫出「某 finding 的處置落在某檔某節」的座標宣稱（⇒ 指針稽核）。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R108_Review.md",
+    # DEF-200-231 哨兵死因實機取證：WHY 屬本類＝該列已依 ROW_MAX_BYTES 瘦身成索引，
+    # 「哨兵為何自刪排程」的四疊加缺陷 D1~D4 與當回合實測值（User/Machine/行程三層環境變數、
+    # 自刪時刻）唯一還能重驗的地方就是它（⇒ 體積守門），且它寫出「該 DEF-ID 詳情現居本檔
+    # 某節」的座標宣稱（⇒ 指針稽核）。即刻登記，不等下一輪（DEF-200-131 同型）。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R108_Sentinel_Forensics.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/{CrossPlatform,Quota}_*.md`。這**不是**把具名
