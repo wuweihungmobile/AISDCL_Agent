@@ -682,7 +682,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 6309,
+    "test_adr_xplat001_c1c2_lock.py": 6341,
     "test_archive_defect_log.py": 4008,
     "test_bash32_compat.py": 1020,
     "test_bash_probe_spec_contract.py": 983,
@@ -697,9 +697,9 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_check_wrapper_thinness.py": 1234,
     "test_claim_provenance_r86.py": 618,
     "test_component_sanitizer_shared_layer_lock.py": 293,
-    "test_context_budget_guard.py": 8157,
+    "test_context_budget_guard.py": 8178,
     "test_defect_id_reference_integrity.py": 274,
-    "test_dev_start.py": 6910,
+    "test_dev_start.py": 7007,
     "test_dev_start_ps1_lastexitcode.py": 548,
     "test_doc_env_prefix_platform_parity_r60.py": 340,
     "test_doc_loc_baseline_freshness_r60.py": 7318,
@@ -719,7 +719,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_no_invalid_escape_sequences.py": 329,
     "test_ntfs_trailing_space_device_name.py": 770,
     "test_onboarding_parity_interlock.py": 233,
-    "test_platform_neutral_paths.py": 5717,
+    "test_platform_neutral_paths.py": 5720,
     "test_platform_utils_dedup.py": 1123,
     "test_pre_commit_dispatcher_sigpipe.py": 964,
     "test_pre_push_dispatcher.py": 686,
@@ -1210,6 +1210,30 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "合法出口逐條實查：無死碼可刪；抽共用層不適用（判準只有 report_windows_skip_tag_"
      "exemption_problems 一個消費端）；散文搬遷不適用（新增全是判準本體與注入語料）。"
      "逐檔清單見 CrossPlatform_R108_Review.md〈護欄層重釘逐檔清單〉節。"),
+    ("R109", 89314, 89430, 116,
+     "[非淨減法輪] Gap C 單一窗口：ONBOARDING §7 表② 指紋檢查接進 dev_start [6/7]"
+     "（邏輯本體住 tools/lib/onboarding_snapshot_note.py；dev_start.py raw-line 持平——"
+     "新增行以史料搬遷 CrossPlatform_Guard_Line_History.md〈dev_start 史料搬遷〉節抵銷）："
+     "test_dev_start.py 新增 TestOnboardingSnapshotProbe（rc 三態、逾時降級、整合、佈線"
+     "存在鎖）＋既有 step_platform 測試補 mock 隔離真 subprocess；"
+     "test_platform_neutral_paths.py 重釘 tools/lib 掃描面下限帶（新 lib 檔落地越過腐化"
+     "上界，重釘值＝下限帶訊息逐字要求）；本檔自身＝本稽核列＋rewrite ledger 追加列＋"
+     "(109, 610) 到期義務兌現與重新武裝＋凍結前綴延伸。合法出口逐條實查：無死碼可刪；"
+     "抽共用層不適用（哨兵只有 step_platform 一個消費端）；散文搬遷已做在 dev_start.py "
+     "側。逐檔行數對照見 CrossPlatform_R106_Scan_Findings.md 的 R109 標記行。"),
+    ("R109", 89430, 89467, 37,
+     "[非淨減法輪][同輪追加] F2 三次量測矛盾診斷修復（根因＝測試不 hermetic，活體態滲入）："
+     "test_context_budget_guard.py 8157→8178（+21）＝兩處活體隔離夾具："
+     "①QuotaDegradationIsAudibleTest.setUp 補 swap endurance_env.trace_dir／trace_dir_status"
+     "（availability／stability 兩台狀態機的持久檔住帳號級 trace_dir，qg 六個 swap 蓋不到；"
+     "真 hook 釘下的 stability cap=0 滲入 ⇒ unmeasured 封鎖放寬 ⇒ live(1)>cap(0) ⇒ rc=2，"
+     "同一棵樹紅綠隨活體檔內容翻動）；②QuotaEnvFileIsActuallyLoadedTest.setUp 補 ENV_SPEC "
+     "鍵刷除（同檔既有判例同型）：planner.main() 的 apply_env_defaults(os.environ) 把真 "
+     ".env 鍵永久灌進行程 ⇒ pytest 定義序紅／unittest 字母序綠。不改守衛行為、不改測試錨。"
+     "本檔自身 +16＝本稽核列＋rewrite ledger 追加列＋凍結前綴延伸（79→80）。合法出口"
+     "逐條實查：無死碼可刪；抽共用層不適用（兩處隔離夾具各只有一個消費類）；散文搬遷"
+     "不適用（新增全是隔離夾具本體與 WHY）。逐檔行數對照見 "
+     "CrossPlatform_R106_Scan_Findings.md 的 R109 標記行。"),
 )
 
 
@@ -1251,6 +1275,8 @@ _REPIN_NET_CAP_SCHEDULE: tuple[tuple[int, int], ...] = (
                   # 本身。同輪重新武裝下一段：步伐 30 < 前一段的 40，續守「步伐變小」。
     (107, 630),   # 到期輪兌現（DEF-200-166／171 結案窗口）：cap 降到到期目標本身。
                   # 同輪重新武裝下一段：步伐 20 < 前一段的 30，續守「步伐變小」。
+    (109, 610),   # 到期輪兌現（Gap C 接線窗口）：cap 降到到期目標本身。
+                  # 同輪重新武裝下一段：步伐 15 < 前一段的 20，續守「步伐變小」。
 )
 #: 生效點＝首列輪號、現行上限＝末列上限，**皆由表導出不另立常數**（R73 判例：一份知識一個家）。
 _REPIN_ROUND_CAP_SINCE = _REPIN_NET_CAP_SCHEDULE[0][0]
@@ -1334,10 +1360,10 @@ def net_cap_schedule_problems(
 #: 設計（5400→3200 起）與 R89 互斥推導全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈到期義務與重新武裝 WHY〉節；R101 起歷次兌現的 round-label-ok
 #: 逐段沿革搬至 CrossPlatform_Guard_Line_History.md〈到期義務兌現沿革〉節。
-#: 本次兌現（DEF-200-166／171 結案窗口）：cap 降到目標本身（630，見 `(107, 630)` 列），
-#: 同輪重新武裝下一段：步伐 20 < 前一段的 30，續守「步伐刻意變小」且目標嚴格低於現行 cap。
-_REPIN_NET_CAP_DUE_ROUND = 109
-_REPIN_NET_CAP_DUE_TARGET = 610
+#: 本次兌現（Gap C 接線窗口）：cap 降到目標本身（610，見 `(109, 610)` 列），
+#: 同輪重新武裝下一段：步伐 15 < 前一段的 20，續守「步伐刻意變小」且目標嚴格低於現行 cap。
+_REPIN_NET_CAP_DUE_ROUND = 111
+_REPIN_NET_CAP_DUE_TARGET = 595
 
 #: R85：款(11)／ADR-XPLAT-002 §8.1 item 15「必須出現一次淨額 ≤ 0」的到期輪，搬成具名常數
 #: 理由同上（義務要能被看見、要有到期時點；`DEF-101-757`）。只准往前挪（更早到期＝更嚴），
@@ -1397,10 +1423,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 78
+_REPIN_LOG_FROZEN_PREFIX_LEN = 80
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "4e039783346353ddc498a0118b3e861c36fe53eb9c04f392aadff52f0e39f54d")
+    "42b28e14a0b8c540bde981d12b933ae7d3dfbfda10e9d9688496684e53eadc12")
 
 
 def repin_log_history_digest(
@@ -1495,6 +1521,12 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # DEF-200-233 修復窗口（macos-compat-ci）：追加本輪稽核列並把它納入前綴 round-label-ok
     # （prefix_len 77→78），同體例「追加後立即自我凍結」——延伸本身即讓指紋改變，故留痕。
     ("R108", "21c85dff06f9", "4e0397833463", "DEF-200-233"),
+    # DEF-101-747 換載體（Gap C：表② 指紋 stale 的發現時點提前到 dev_start [6/7]）：
+    # 追加本輪稽核列並把它納入前綴（prefix_len 78→79），同體例「追加後立即自我凍結」。
+    ("R109", "4e0397833463", "dc62ee5d1822", "DEF-101-747"),
+    # F2 修復窗口（quota 測試活體態滲入；載體＝DEF-200-232）：R109 追加本輪稽核列 round-label-ok
+    # 並把它納入前綴（prefix_len 79→80），同體例「追加後立即自我凍結」。
+    ("R109", "dc62ee5d1822", "42b28e14a0b8", "DEF-200-232"),
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

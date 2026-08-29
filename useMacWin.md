@@ -7,6 +7,16 @@
 
 > 兩份提示詞刻意各自完整（要能整段貼上），故有重複；差異只在載具、venv 路徑與平台專屬健檢項。核心紀律相同：不硬做、不自動 push/stash、先讀子專案 CLAUDE.md、繁體中文回覆。
 
+> 🔴 **啟動成本不是常數，動手前先對號入座**——照下表預期今天要花多久，免得把「照規矩跑完的驗證協定」誤讀成「切換壞掉了」：
+>
+> | 情境 | 條件（第 1、2 步結束時就已確定） | 這次還要做什麼 |
+> |---|---|---|
+> | **A** | 第 1 步 merge 沒拉到東西 ＋ nightly 心跳無 FAIL ＋ 第 7 步 `--check-snapshot` 綠 | 無。dev_start 跑完就能開發 |
+> | **B** | merge 有拉到東西，但 nightly 無 FAIL | 多一次表② 回填（另建乾淨 venv ＋ 實跑 ci-gate ＋ AutoClaude pytest，分鐘級） |
+> | **C** | merge 有拉到東西 ＋ nightly 有 FAIL | B 的全部 ＋ 在**新 HEAD** 上重跑那幾個失敗 stage（第 3 步三態判定） |
+>
+> **B、C 不是異常，是兩件既有設計的必然產物**：①nightly 半夜跑的是**同步前**的 code，所以只要它紅過就一定要在新 HEAD 重跑一次才有推論力；②表② 是**逐機器 dated snapshot**，對面那台一動受監測的樹，這一台就 stale。⇒ 看到 B/C 不要去找「哪裡壞了」，那兩道攔的都是真東西。
+
 ---
 
 ## 🍎 macOS 版
@@ -33,8 +43,9 @@
    source tools/dev_start.sh
    （bash/zsh 皆可；勿用 POSIX sh/dash，wrapper 明文不支援）
    它會依序做七件事：[1/7] 偵測是否跨平台切換 ／ [2/7] GitHub 同步（髒工作樹／分叉／離線只提醒，不自動 stash/rebase/push；偵測到 nightly 在跑時即使落後也**不自動 pull**）／ [3/7] 切換時清除失效快取 ／ [4/7] 整備或修復 .venv（跨平台換手保留、依賴 hash 比對、必要時自動 bootstrap）／ [5/7] 檢查並修復 git hooks（core.hooksPath）／ [6/7] 平台健檢 ／ [7/7] 狀態寫回。
-   [6/7] 有三件事要注意：
+   [6/7] 有四件事要注意：
      · nightly 心跳三態：mac 上用 launchctl 消歧「已載入尚未首跑」vs「未安裝」；查不到就印「未偵測＝排程未啟用或尚未跑過第一輪」，屬 advisory 不會 ❌。
+     · [6/7] 已自動跑 --check-snapshot（ONBOARDING §7 表② 指紋），紅了照第 7 步回填；它是 advisory 不會 ❌，但同一件事在 pre-push 是阻斷項，別等 push 才處理。
      · **心跳「新鮮」不等於「上一輪跑成功」**——心跳未過期時，若上一輪實際有失敗仍會另印一行「⚠️ nightly 最近一輪有 FAIL=N」，看到心跳正常也要讀那一行。
      · GitHub CI 可能印兩種 ⚠️（最新一筆 run 非 success／排程軌長期未成功，兩種粒度）。**都不要當背景雜訊**：雲端 CI 是否活著是輪次屬性、不是常數 ⇒ 看到就當場唯讀現查 `gh run list --limit 10` 再判讀。（僅在本機有 gh 且 fetch 未離線時才嘗試。）
 
@@ -54,7 +65,7 @@
 7. **ONBOARDING §7 表② macOS 欄回填**——🔴 **判斷依據是機械判準，不是記憶、也不是 dev_start [1/7]**（`[1/7]` 讀本機 .dev_env_state.json，雙機各自 clone 的拓撲永遠印「無切換」，用它判斷必然漏做）。**每次啟動都跑這一條**：
      .venv/bin/python tools/sync_onboarding_baselines.py --check-snapshot
    讀 **macOS 欄**：只要它是 `presumed stale`、或 `baseline-origin` 不是 `self-recorded`，本欄就需要回填；三項都新鮮才可跳過。
-   🔴 **綠了也不代表本輪不必做**：只要你本輪 commit 動到受監測的樹（tools/、AutoClaude/、AISDLC_SDD/），指紋就會漂移、這一條會由綠翻紅，而它是 pre-push 的阻斷項 ⇒ **回填要排在 commit/push 之前，且回填之後不要再改那些樹**（改了就得再回填一次）。
+   🔴 **綠了也不代表本輪不必做，而且主要觸發源不是你**：指紋漂移有**兩個**來源——①你本輪 commit 動到受監測的樹（tools/、AutoClaude/、AISDLC_SDD/）；②**第 1 步那個 `git merge --ff-only` 把另一台機器的 commit 拉了進來**。②在雙機交替拓撲下是**主要來源**，而且它發生在你還沒寫任何一行程式碼之前（2026-08-29 macOS 實測：本機零改動，merge 完這一條就 rc=1；且漂移後的 live 指紋與 Windows 欄當日錨的值逐字相同＝對面已經在這個樹狀態量過了）。⇒ **只要第 1 步真的 ff 進了東西，就直接預期本欄要回填**，別等第 7 步才發現。它是 pre-push 的阻斷項 ⇒ **回填要排在 commit/push 之前，且回填之後不要再改那些樹**（改了就得再回填一次）。
    回填只能在 macOS 本機做（跨平台代填＝假 provenance，工具 rc=2 拒絕），且必須用**不含 postgres/pgvector 的出廠環境 venv**，**不准**加 --allow-pg-extras 繞過。🔴 那個 venv **不是**本機 .venv（本機 .venv 幾乎必然已被 pg extras 汙染，工具會 rc=2 拒跑）⇒ 必須另建臨時乾淨 venv（建法與污染探針見 B 段第 3 點；本機**沒有** uv，用 venv 自帶的 pip）。動手前把 B 段整段讀完，不要只照這一行做；做完把工具輸出貼給我。
 
 完成後跟我簡短回報環境狀態（是否首次執行、是否偵測到跨平台切換、GitHub 同步結果、.venv 是否重建、hooks 是否正常、有沒有需要我處理的警告），然後等我下達實際任務，不要自己先開始做事。
@@ -88,9 +99,10 @@
      powershell -ExecutionPolicy Bypass -File tools/dev_start.ps1
      一定要 -File，**不要**用 -Command 包 dot-source（dot-source 模式的 wrapper 刻意不呼叫 exit 以免關掉使用者 shell，經 -Command 呼叫時失敗的 exit code 會被吞掉、外層恆拿到 0＝假綠）。
    它會依序做七件事：[1/7] 偵測是否跨平台切換 ／ [2/7] GitHub 同步（髒工作樹／分叉／離線只提醒，不自動 stash/rebase/push；偵測到 nightly 在跑時即使落後也**不自動 pull**）／ [3/7] 切換時清除失效快取 ／ [4/7] 整備或修復 .venv ／ [5/7] 檢查並修復 git hooks ／ [6/7] 平台健檢 ／ [7/7] 狀態寫回。
-   [6/7] 有四件事要注意：
+   [6/7] 有五件事要注意：
      · 自動設定 core.longpaths=true——🔴 **別讀成「有人在管了」**：這裡設的是 --local，`git clone` 當下它還不存在（三層 config 實查只有 --local 是 true ⇒ fresh clone 零保護）。實測未帶旗標 clone 到深路徑會 rc=128、tracked 檔只落地零星幾百支且 tools\bootstrap.ps1 根本不在磁碟上，那種工作樹上第 2 點那條指令毫無意義。⇒ **clone 當下必須自己帶** `git clone -c core.longpaths=true <url>`，並建議一次性 `git config --global core.longpaths true`；完整開箱見 ONBOARDING.md §2 第 0 步。
      · nightly 心跳三態：「未偵測」＝排程未啟用**或**已安裝但尚未跑過第一輪，屬 advisory 不會 ❌。
+     · [6/7] 已自動跑 --check-snapshot（ONBOARDING §7 表② 指紋），紅了照第 7 步回填；它是 advisory 不會 ❌，但同一件事在 pre-push 是阻斷項，別等 push 才處理。
      · **心跳「新鮮」不等於「上一輪跑成功」**——心跳未過期時，若上一輪實際有失敗仍會另印「⚠️ …有失敗…exit=1（failed stages: …）」，看到心跳正常也要讀那一行。
      · GitHub CI 可能印兩種 ⚠️（最新一筆 run 非 success／排程軌長期未成功，兩種粒度）。**都不要當背景雜訊**：雲端 CI 是否活著是輪次屬性、不是常數 ⇒ 看到就當場唯讀現查 `gh run list --limit 10` 再判讀。（僅在本機有 gh 且 fetch 未離線時才嘗試。）
 
@@ -111,7 +123,7 @@
 7. **ONBOARDING §7 表② Windows 欄回填**——🔴 **判斷依據是機械判準，不是記憶、也不是 dev_start [1/7]**（`[1/7]` 讀本機 .dev_env_state.json，雙機各自 clone 的拓撲永遠印「無切換」）。**每次啟動都跑這一條**：
      .venv\Scripts\python.exe tools/sync_onboarding_baselines.py --check-snapshot
    讀 **Windows 欄**：只要它是 `presumed stale`、或 `baseline-origin` 不是 `self-recorded`，本欄就需要回填；三項都新鮮才可跳過。
-   🔴 **綠了也不代表本輪不必做**：只要你本輪 commit 動到受監測的樹（tools/、AutoClaude/、AISDLC_SDD/），指紋就會漂移、這一條會由綠翻紅，而它是 pre-push 的阻斷項 ⇒ **回填要排在 commit/push 之前，且回填之後不要再改那些樹**。
+   🔴 **綠了也不代表本輪不必做，而且主要觸發源不是你**：指紋漂移有**兩個**來源——①你本輪 commit 動到受監測的樹（tools/、AutoClaude/、AISDLC_SDD/）；②**第 1 步那個 `git merge --ff-only` 把另一台機器的 commit 拉了進來**。②在雙機交替拓撲下是**主要來源**，而且它發生在你還沒寫任何一行程式碼之前（2026-08-29 於 macOS 側實測到本形態，兩平台同構）。⇒ **只要第 1 步真的 ff 進了東西，就直接預期本欄要回填**，別等第 7 步才發現。它是 pre-push 的阻斷項 ⇒ **回填要排在 commit/push 之前，且回填之後不要再改那些樹**。
    回填只能在 Windows 本機做（跨平台代填＝假 provenance，工具 rc=2 拒絕），且必須用**不含 postgres/pgvector 的出廠環境 venv**，**不准**加 --allow-pg-extras 繞過。🔴 那個 venv **不是**本機 .venv（主 .venv 只要曾裝過 [postgres,pgvector] 就會讓工具 rc=2 拒跑）⇒ 必須另建臨時乾淨 venv（建法與污染探針見 B 段第 3 點）。動手前把 B 段整段讀完；做完把工具輸出貼給我。
 
 完成後跟我簡短回報環境狀態（是否首次執行、是否偵測到跨平台切換、GitHub 同步結果、.venv 是否重建、hooks 是否正常、有沒有需要我處理的警告），然後等我下達實際任務，不要自己先開始做事。

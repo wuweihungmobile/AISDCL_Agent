@@ -5414,6 +5414,17 @@ class QuotaEnvFileIsActuallyLoadedTest(unittest.TestCase):
 
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp(prefix="quota-env-"))
+        # 🔴 活體隔離（同檔判例：`EnvFileReachesEveryEscapeHatchTest.setUp`）：
+        # `policy_env()` 的合併視圖是 env > `.env`，本類判準要的是「檔案那一半」，而
+        # 行程級 env 是活體——同行程較早的測試經 `planner.main()` →
+        # `apply_env_defaults(os.environ)` 會把真 `.env` 的鍵（如 HALT_PCT=95）永久
+        # 灌進來（pytest 定義序下污染類在本類之前 ⇒ 紅；unittest 字母序相反 ⇒ 綠），
+        # 開發機 shell 也可能自帶這些鍵。不刷掉，本類量到的是機器姿態不是程式行為。
+        patcher = unittest.mock.patch.dict(os.environ, {}, clear=False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        for spec in quota_policy.ENV_SPEC:
+            os.environ.pop(spec.name, None)
 
     def _with_dotenv(self, body: str) -> dict:
         """把 `policy_env()` 指到沙箱裡的一份 `.env`，回它讀出來的 mapping。"""
@@ -5515,6 +5526,16 @@ class QuotaDegradationIsAudibleTest(unittest.TestCase):
                             ("degraded_stamp_path",
                              lambda source: self.tmp / f"stamp-{source}")):
             self._swap(qg, name, value)
+        # 🔴 活體隔離：availability／stability 兩台狀態機的持久檔（含 `.lock`）住
+        # `endurance_env.trace_dir()`（帳號級，如 `~/.autosdd/traces`），**不經** qg 的
+        # 路徑函式 ⇒ 上面六個 swap 蓋不到。不 swap 這兩個，本類讀寫的是開發機的真實
+        # 狀態：真 hook（或本類 throttle 測試自己）把 stability cap 釘 0 之後，unmeasured
+        # 封鎖放寬方向 ⇒ `live(1) > cap(0)` ⇒ rc=2——同一棵樹的紅綠隨活體檔內容翻動
+        # （實測三次量測互相矛盾的根因）。swap 對象是 `endurance_env`（兩台狀態機都在
+        # 呼叫時做屬性查找），一次蓋住 state／lock 兩面；`degraded=False` 讓「持久目錄
+        # 退化」那條收緊側旁路（它會無條件回 unmeasured）也不受本機姿態影響。
+        self._swap(endurance_env, "trace_dir", lambda: self.tmp)
+        self._swap(endurance_env, "trace_dir_status", lambda: (self.tmp, False))
 
     def _swap(self, obj: object, name: str, value: object) -> None:
         old = getattr(obj, name)

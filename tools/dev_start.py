@@ -68,14 +68,8 @@ _TOTAL = 7
 WARNINGS: list[str] = []
 SUMMARY: dict[str, str] = {}
 
-# R3 四方複審 QA 發現：tools/tests/ 先前從未在真實 Windows 上執行過，本輪首次
-# 真實執行後，_warn()/_hr() 的 print() 在 Windows 非 UTF-8 終端（如 zh-TW 預設
-# cp1252 codepage、或任何非互動/被導向的 stdout）下對 ⚠️/✅ 等符號直接
-# UnicodeEncodeError 崩潰——先前只有 main()（CLI 入口）內重設編碼，測試套件與
-# 任何未經 main() 直接呼叫模組內部函式的呼叫端（未來的 import 使用者）不會套用
-# 到這道保護。改在模組載入當下就重設，涵蓋所有呼叫路徑，且與 main() 原本的保護
-# 邏輯等價。R4 複審 S7 發現：此保護抽成 tools/_stdio_utf8.py 共用 helper（避免
-# check_ntfs_paths.py / check_script_parity.py 各自複製貼上第三份同款程式碼）。
+# 模組載入當下重設 stdout/stderr 為 UTF-8（R3 四方複審立案＋R4 複審 S7 抽共用；沿革
+# 原文見 docs/06_quality/CrossPlatform_Guard_Line_History.md〈dev_start 史料搬遷〉節）
 import _stdio_utf8  # noqa: E402,F401
 
 # 🔴 R68：Python 版本前置閘（macOS 真機重現的 P1）。薄殼 dev_start.sh 在 .venv 尚未
@@ -113,6 +107,7 @@ sys.path.insert(0, str(ROOT / "tools" / "lib"))
 # 數十個測試案例；真正的呼叫端已搬到 `ci_run_status.py`（見下一行 import）。
 import ci_liveness  # noqa: E402,F401
 import ci_run_status  # noqa: E402  # DEF-101-758：最新 run 判讀本體（LOC 死結搬遷）
+import onboarding_snapshot_note  # noqa: E402  # §7 表② 指紋哨兵本體（同上搬遷形態）
 import platform_utils  # noqa: E402
 
 
@@ -1740,13 +1735,8 @@ def _check_nightly_heartbeat(now: str) -> str:
               f"或已安裝但尚未跑過第一輪（查證：{verify_cmd}），設定見 ONBOARDING §8；"
               f"CI 停擺期間本地 nightly 為唯一每日兜底")
         return "nightly 心跳未偵測（排程未啟用？或尚未首跑？見 ONBOARDING §8）"
-    # R67-M40：年齡先收斂為「整數秒差」再換算天數，與 install_mac_nightly.sh
-    # report_heartbeat() 的秒級語意精確對齊。WHY：BSD `stat -f %m` 與 `date +%s`
-    # 都只給整數秒，而 `os.stat().st_mtime` 保留次秒精度——當心跳檔 mtime 恰為整秒、
-    # 年齡恰落在 [8 天, 8 天+1 秒) 時，bash 側算出 691200（`-gt 691200` 為偽→新鮮）
-    # 而 python 側算出 691200.0x（`> 8` 為真→過期），同一台機器同一顆心跳檔兩個
-    # 官方工具給出相反結論，且實測 10/10 必然重現（不是 flaky，是確定性分歧）。
-    # 兩端同樣先截成整數秒即結構性消除該邊界，無須為 1 秒窗口新增任何跨檔耦合。
+    # R67-M40：先收斂為「整數秒差」再換算天數，與 installer 秒級語意對齊（1 秒窗口
+    # 確定性分歧實測沿革見 CrossPlatform_Guard_Line_History.md〈dev_start 史料搬遷〉節）。
     age_days = (int(time.time()) - int(mtime)) / 86400.0
     # ARCH-R15-1：mtime 只證明「在跑」不證明「在綠」——CI 停擺期間 nightly 是唯一
     # 每日活體，連續全紅時晨間 dev_start 仍 ✅ 是盲區。心跳存在（新鮮或過期皆檢查）
@@ -1794,6 +1784,13 @@ def _check_ci_liveness(is_repo: bool) -> str | None:
     )
 
 
+def _check_onboarding_snapshot() -> str | None:
+    """§7 表② 指紋哨兵（Gap C，純 advisory）——邏輯本體住 onboarding_snapshot_note.py
+    （本檔為 SPECIAL_FILES raw-line 棘輪）；簽章比照 _check_ci_liveness，供
+    mock.patch.object(dev_start, "_check_onboarding_snapshot", ...) 隔離真 subprocess。"""
+    return onboarding_snapshot_note.check_onboarding_snapshot(ROOT, _warn)
+
+
 def step_platform(now: str, is_repo: bool) -> None:
     _hr(6, "平台專屬健檢")
     notes = []
@@ -1815,6 +1812,9 @@ def step_platform(now: str, is_repo: bool) -> None:
     ci_note = _check_ci_liveness(is_repo)
     if ci_note is not None:
         parts.append(ci_note)
+    ob_note = _check_onboarding_snapshot()
+    if ob_note is not None:
+        parts.append(ob_note)
     SUMMARY["platform"] = "；".join(parts)
 
 

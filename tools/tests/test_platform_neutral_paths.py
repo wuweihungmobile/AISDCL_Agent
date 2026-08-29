@@ -137,8 +137,11 @@ def _scan_roots() -> list[tuple[Path, bool, int]]:
         # R81 10→21（`quota_ledger.py`／`quota_limits.py` 落地）；R85／P12 21→30
         # （`unattended_authz.py` 落地）；R98 30→41（`quota_policy_env.py`／
         # `schedule_backend_calendar.py`／`sentinel_lifecycle_arm.py` 三支新子模組落地，
-        # 本樹 43 支越過腐化上界 40，重釘理由與淨額詳見 `CrossPlatform_R98_Scan_Findings.md`）。
-        (_REPO_ROOT / "tools" / "lib", True, 41),
+        # 本樹 43 支越過腐化上界 40，重釘理由與淨額詳見 `CrossPlatform_R98_Scan_Findings.md`）；
+        # Gap C 接線輪 41→49（`onboarding_snapshot_note.py` 落地，本樹 52 支越過腐化
+        # 上界 51，重釘值＝下限帶訊息逐字要求，詳見 `CrossPlatform_R106_Scan_Findings.md`
+        # 的 R109 標記行）。  # round-label-ok: 指涉護欄層重釘落款輪，非超前宣稱
+        (_REPO_ROOT / "tools" / "lib", True, 49),
         (latest / "tools" / "arch_fitness", True, 2),
         (latest / ".claude" / "hooks", True, 5),
     ]

@@ -58,6 +58,11 @@ Architect 複審（R98 三審）點名了根因：**逐輪重釘的敘事不該�
 27. [淨減法到期斷言訂正 WHY](#淨減法到期斷言訂正-why)
 28. [SC-2/3/5 射程收窄 WHY](#sc-235-射程收窄-why)
 
+**R109 追加**（Gap C：ONBOARDING §7 表② 指紋檢查接進 dev_start [6/7]；`tools/dev_start.py`
+是 SPECIAL_FILES raw-line 棘輪＝同一道「行數只准往下」的機械物，接線新增行以本節搬遷抵銷）：
+
+29. [dev_start 史料搬遷](#dev_start-史料搬遷)
+
 ---
 
 ## `_scan_roots` 三處修正 WHY
@@ -948,3 +953,30 @@ ADR §4.3.4 的宣告句上 ⇒ 調升它還得動 ADR，那是該檔之外的�
 原句移進 §8.3 散文區**。界線對齊後，「§8.3 是這幾條共同的保全區」才從口號變成一句真話。
 `_SEC8_END_ALL` 保留給 `test_the_scan_surface_did_not_collapse`——它以「全區嚴格長於本體」
 反證 `### 8.1` 界線還活著（界線一旦失效，這幾條會一起退化回掃全區，正是該次修掉的形態）。
+
+## dev_start 史料搬遷
+
+> 搬遷自 `tools/dev_start.py` 的兩段沿革註解（Gap C 接線輪：ONBOARDING §7 表② 指紋
+> 檢查接進 [6/7] 平台健檢，新增行以本節搬遷抵銷、該檔 raw-line 維持 1952 不變；
+> 原文全文保全、知識零刪除；僅指稱詞隨載體必要調整）。
+
+### `import _stdio_utf8` 模組載入期重設（原址：版本閘前 prelude）
+
+R3 四方複審 QA 發現：tools/tests/ 先前從未在真實 Windows 上執行過，本輪首次
+真實執行後，`_warn()`/`_hr()` 的 `print()` 在 Windows 非 UTF-8 終端（如 zh-TW 預設
+cp1252 codepage、或任何非互動/被導向的 stdout）下對 ⚠️/✅ 等符號直接
+UnicodeEncodeError 崩潰——先前只有 `main()`（CLI 入口）內重設編碼，測試套件與
+任何未經 `main()` 直接呼叫模組內部函式的呼叫端（未來的 import 使用者）不會套用
+到這道保護。改在模組載入當下就重設，涵蓋所有呼叫路徑，且與 `main()` 原本的保護
+邏輯等價。R4 複審 S7 發現：此保護抽成 `tools/_stdio_utf8.py` 共用 helper（避免
+`check_ntfs_paths.py` / `check_script_parity.py` 各自複製貼上第三份同款程式碼）。
+
+### R67-M40 心跳年齡整數秒差（原址：`_check_nightly_heartbeat()` 內 `age_days` 計算行）
+
+R67-M40：年齡先收斂為「整數秒差」再換算天數，與 `install_mac_nightly.sh`
+`report_heartbeat()` 的秒級語意精確對齊。WHY：BSD `stat -f %m` 與 `date +%s`
+都只給整數秒，而 `os.stat().st_mtime` 保留次秒精度——當心跳檔 mtime 恰為整秒、
+年齡恰落在 [8 天, 8 天+1 秒) 時，bash 側算出 691200（`-gt 691200` 為偽→新鮮）
+而 python 側算出 691200.0x（`> 8` 為真→過期），同一台機器同一顆心跳檔兩個
+官方工具給出相反結論，且實測 10/10 必然重現（不是 flaky，是確定性分歧）。
+兩端同樣先截成整數秒即結構性消除該邊界，無須為 1 秒窗口新增任何跨檔耦合。

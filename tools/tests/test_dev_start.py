@@ -2402,9 +2402,12 @@ class TestStepPlatformLongpaths(DevStartTestCase):
         with tempfile.TemporaryDirectory() as td:
             repo = self._make_repo(Path(td))
             # R15 起 step_platform 尾端接 CI 活性哨兵——本測試意圖只鎖 longpaths，
-            # mock 掉避免測試中打真實 gh 網路呼叫（SUMMARY["sync"] 未設時三閘不攔）。
+            # mock 掉避免測試中打真實 gh 網路呼叫（SUMMARY["sync"] 未設時三閘不攔）；
+            # 表② 指紋哨兵同理 mock 掉，隔離真 subprocess（Gap C）。
             with mock.patch.object(dev_start, "ROOT", repo), \
                  mock.patch.object(dev_start, "_check_ci_liveness",
+                                   return_value=None), \
+                 mock.patch.object(dev_start, "_check_onboarding_snapshot",
                                    return_value=None):
                 dev_start.step_platform("windows", is_repo=True)
             r = subprocess.run(
@@ -2418,9 +2421,11 @@ class TestStepPlatformLongpaths(DevStartTestCase):
             repo = self._make_repo(Path(td))
             subprocess.run(["git", "-C", str(repo), "config", "core.longpaths", "true"],
                             check=True)
-            # 同上：mock 掉 CI 活性哨兵避免真實 gh 網路呼叫
+            # 同上：mock 掉 CI 活性哨兵避免真實 gh 網路呼叫；表② 指紋哨兵同理
             with mock.patch.object(dev_start, "ROOT", repo), \
                  mock.patch.object(dev_start, "_check_ci_liveness",
+                                   return_value=None), \
+                 mock.patch.object(dev_start, "_check_onboarding_snapshot",
                                    return_value=None):
                 dev_start.step_platform("windows", is_repo=True)
             # R12 起 summary 尾端附 nightly 心跳註記——本測試意圖只鎖「已是 true
@@ -2706,9 +2711,12 @@ class TestNightlyHeartbeat(DevStartTestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             # _launchd_nightly_loaded 固定 None：鎖既有缺席文案不隨本機 launchd
-            # 狀態漂移；_check_ci_liveness 走 is_repo=False 閘自然回 None。
+            # 狀態漂移；_check_ci_liveness 走 is_repo=False 閘自然回 None；
+            # 表② 指紋哨兵 mock 掉隔離真 subprocess（Gap C）。
             with mock.patch.object(dev_start, "ROOT", root), \
                  mock.patch.object(dev_start, "_launchd_nightly_loaded",
+                                   return_value=None), \
+                 mock.patch.object(dev_start, "_check_onboarding_snapshot",
                                    return_value=None), \
                  mock.patch("builtins.print") as fake_print:
                 dev_start.step_platform("mac", is_repo=False)
@@ -2719,6 +2727,95 @@ class TestNightlyHeartbeat(DevStartTestCase):
         self.assertIn("nightly 心跳", dev_start.SUMMARY["platform"])
         self.assertIn("無需調整", dev_start.SUMMARY["platform"],
                       "既有『無需調整』語意必須保留（心跳為附加片段）")
+
+
+class TestOnboardingSnapshotProbe(DevStartTestCase):
+    """Gap C：ONBOARDING §7 表② 指紋哨兵接進 step_platform [6/7]（純 advisory）。
+
+    測意圖（Rule 9）：表② 指紋 stale 是 pre-push 的**阻斷項**，而主要漂移來源是
+    merge 拉進對面機器的 commit——發生在本輪寫任何程式碼之前（useMacWin.md 第 7 步）。
+    [6/7] 是每次開工必經之地，這裡不出聲的話，發現時點就只剩 push 被擋當場。
+    邏輯本體住 tools/lib/onboarding_snapshot_note.py（dev_start.py 為 raw-line 棘輪，
+    僅留 thin adapter），故 (a)~(c) 經真 adapter 打到 lib、只 mock subprocess.run。
+    """
+
+    @staticmethod
+    def _completed(rc: int, stderr: str = "") -> subprocess.CompletedProcess:
+        return subprocess.CompletedProcess(
+            args=[], returncode=rc, stdout="ℹ️ 別平台欄恆亮段\n", stderr=stderr)
+
+    def _probe(self, **run_kwargs):
+        with mock.patch.object(dev_start.onboarding_snapshot_note.subprocess,
+                               "run", **run_kwargs), \
+             mock.patch("builtins.print") as fake_print:
+            note = dev_start._check_onboarding_snapshot()
+        printed = " ".join(
+            str(arg) for call in fake_print.call_args_list for arg in call.args)
+        return note, printed
+
+    def test_stale_rc1_warns_with_routing_and_note(self):
+        """(a) rc=1：note 非 None、指路句入 WARNINGS、stderr ❌ 條列有轉印。"""
+        note, printed = self._probe(return_value=self._completed(
+            1, stderr="❌ ONBOARDING.md §7 表② presumed stale：\n  - autoclaude 格指紋漂移\n"))
+        self.assertIsNotNone(note)
+        self.assertIn("stale", note)
+        joined = "\n".join(dev_start.WARNINGS)
+        self.assertIn("useMacWin.md 第 7 步", joined, "指路句必須入 WARNINGS")
+        self.assertIn("回填要排在 commit/push 之前", joined)
+        self.assertIn("autoclaude 格指紋漂移", printed, "stderr ❌ 條列須轉印")
+        self.assertNotIn("恆亮段", printed, "stdout ℹ️ 恆亮段不得轉印（背景噪音紀律）")
+
+    def test_fresh_rc0_is_quiet_and_note_says_match(self):
+        """(b) rc=0：零 warn、note 含「相符」。"""
+        note, _printed = self._probe(return_value=self._completed(0))
+        self.assertIn("相符", note)
+        self.assertEqual(dev_start.WARNINGS, [])
+
+    def test_oserror_and_timeout_degrade_silently(self):
+        """(c) OSError/TimeoutExpired：不拋例外、回 None、不入 WARNINGS。"""
+        for effect in (OSError("I/O error"),
+                       subprocess.TimeoutExpired(cmd="x", timeout=60)):
+            with self.subTest(effect=type(effect).__name__):
+                dev_start.WARNINGS.clear()
+                note, _printed = self._probe(side_effect=effect)
+                self.assertIsNone(note)
+                self.assertEqual(dev_start.WARNINGS, [])
+
+    def test_rc2_tool_refusal_is_not_a_verdict(self):
+        """(c') rc=2 是工具自身模式錯誤／平台拒絕，不是指紋判決 → None、零 warn。"""
+        note, _printed = self._probe(return_value=self._completed(
+            2, stderr="❌ 模式旗標互斥\n"))
+        self.assertIsNone(note)
+        self.assertEqual(dev_start.WARNINGS, [])
+
+    def test_step_platform_summary_includes_snapshot_note(self):
+        """(d) 整合：SUMMARY["platform"] 含新片段（mock lib 函式、真 adapter＋真接線）。"""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            with mock.patch.object(dev_start, "ROOT", root), \
+                 mock.patch.object(dev_start, "_launchd_nightly_loaded",
+                                   return_value=None), \
+                 mock.patch.object(dev_start.onboarding_snapshot_note,
+                                   "check_onboarding_snapshot",
+                                   return_value="表② 指紋相符"), \
+                 mock.patch("builtins.print"):
+                dev_start.step_platform("mac", is_repo=False)
+        self.assertIn("表② 指紋相符", dev_start.SUMMARY["platform"])
+
+    def test_step_platform_calls_probe_exactly_once(self):
+        """(e) 佈線存在鎖：step_platform 恰呼叫一次；None 時不入 summary。"""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            with mock.patch.object(dev_start, "ROOT", root), \
+                 mock.patch.object(dev_start, "_launchd_nightly_loaded",
+                                   return_value=None), \
+                 mock.patch.object(dev_start, "_check_onboarding_snapshot",
+                                   return_value=None) as probe, \
+                 mock.patch("builtins.print"):
+                dev_start.step_platform("mac", is_repo=False)
+        probe.assert_called_once()
+        self.assertNotIn("表②", dev_start.SUMMARY["platform"],
+                         "None＝無法判定，不得入 summary（靜默降級語意）")
 
 
 class TestGitTimeoutExpired(DevStartTestCase):

@@ -6,6 +6,8 @@
 
 <!-- guard-total:R108 --> **R108（架構輪，寄居本檔＝R107 寄居本檔的既有判例）護欄層累積淨額＝ 89124 → 89314（+190）** —— ①DEF-200-230 回歸鎖落地：`test_quota_policy.py` 新增「額度取數端點字面只准住一個家」判準（3071→3152，+81）＋鎖檔自身稽核列與凍結前綴延伸（+13）；②DEF-200-233 修復（macos-compat-ci 連續紅）：`test_run_root_unittests.py` 豁免表 stale 面方向鎖＋消失面補位鎖（2201→2283，+82）＋鎖檔自身（+14）。逐檔清單見 `CrossPlatform_R108_Review.md`〈護欄層重釘逐檔清單〉節。
 
+<!-- guard-total:R109 --> **R109（Gap C 接線輪，寄居本檔＝R107／R108 寄居本檔的既有判例）護欄層累積淨額＝ 89314 → 89467（+153）** —— ①ONBOARDING §7 表② 指紋檢查接進 dev_start [6/7]（DEF-101-747 換載體：發現時點由「人記得跑第 7 步／push 被擋」提前到每次開工必經的平台健檢；邏輯本體住 `tools/lib/onboarding_snapshot_note.py`，`tools/dev_start.py` raw-line 1952 持平，新增行以史料搬遷 `CrossPlatform_Guard_Line_History.md`〈dev_start 史料搬遷〉節抵銷）；②F2 三次量測矛盾診斷修復（QuotaDegradationIsAudibleTest 同樹三次量測紅綠互斥＝測試不 hermetic，活體態滲入）。逐檔清單：`test_dev_start.py` 6910→7007（+97，TestOnboardingSnapshotProbe 六支＋既有三支 step_platform 測試補 mock 隔離真 subprocess）；`test_platform_neutral_paths.py` 5717→5720（+3，tools/lib 掃描面下限帶 41→49 重釘——新 lib 檔落地使本樹 52 支越過腐化上界 51，重釘值＝下限帶訊息逐字要求）；`test_context_budget_guard.py` 8157→8178（+21，F2 兩處活體隔離夾具：QuotaDegradationIsAudibleTest.setUp 補 swap `endurance_env.trace_dir`／`trace_dir_status` 隔離 availability／stability 兩台狀態機的帳號級持久檔——真 hook 釘下的 stability cap=0 滲入使 unmeasured 封鎖放寬、live(1)>cap(0)→rc=2，紅綠隨活體檔內容翻動；QuotaEnvFileIsActuallyLoadedTest.setUp 補 ENV_SPEC 鍵刷除——planner.main() 的 apply_env_defaults(os.environ) 把真 .env 鍵永久灌進行程，pytest 定義序紅／unittest 字母序綠）；`test_adr_xplat001_c1c2_lock.py` 6309→6341（+32＝+16 本輪首列稽核列＋`_FROZEN_PREFIX_REWRITE_LEDGER` 追加列＋(109, 610) 到期義務兌現與重新武裝＋凍結前綴延伸 78→79，再 +16 F2 同輪追加稽核列＋rewrite ledger 追加列＋凍結前綴延伸 79→80）。
+
 ## 附記（DEF-101-752 收斂）
 
 本輪稍後又追加一筆與上述兩項 Windows 11 真機修復無關的獨立收斂：`DEF-101-752`
