@@ -550,6 +550,11 @@ on:
       - "tools/lib/quota_boot_check.py"
       - "tools/lib/quota_reconcile.py"
       - "tools/lib/quota_stability.py"
+      # R109：本輪新建的根層 SSOT（ONBOARDING §7 表② 指紋哨兵邏輯本體，由
+      #      tools/dev_start.py import、tools/tests/test_dev_start.py 消費）。漏列的代價
+      #      逐字同 DEF-101-042：只改該檔時其回歸鎖不會跑（與 R80／R81／R86／R98／
+      #      R99／R100 同一形態、同一支判準，第七次重犯）。
+      - "tools/lib/onboarding_snapshot_note.py"
       - "AutoClaude/autoclaude/execution/pre_run_validator.py"
       - "AutoClaude/autoclaude/core/ports/observability.py"
       - "AutoClaude/autoclaude/core/ports/rtm_feedback.py"
@@ -858,6 +863,11 @@ on:
       - "tools/lib/quota_boot_check.py"
       - "tools/lib/quota_reconcile.py"
       - "tools/lib/quota_stability.py"
+      # R109：本輪新建的根層 SSOT（ONBOARDING §7 表② 指紋哨兵邏輯本體，由
+      #      tools/dev_start.py import、tools/tests/test_dev_start.py 消費）。漏列的代價
+      #      逐字同 DEF-101-042：只改該檔時其回歸鎖不會跑（與 R80／R81／R86／R98／
+      #      R99／R100 同一形態、同一支判準，第七次重犯）。
+      - "tools/lib/onboarding_snapshot_note.py"
       - "AutoClaude/autoclaude/execution/pre_run_validator.py"
       - "AutoClaude/autoclaude/core/ports/observability.py"
       - "AutoClaude/autoclaude/core/ports/rtm_feedback.py"
