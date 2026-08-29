@@ -128,3 +128,44 @@ untracked 探針驗證：注入前對應測試綠燈 → 注入後翻紅（列�
 (b) 明文裁決本站點與六處「加 untracked 反而有害」站點同列，`partial` 首詞可能因此轉
 `fixed`（因為屆時全部非刻意排除站點皆已處理）——本輪不逕自下此裁決，留給下一個有
 macOS 真機或明確裁決權的執行者。
+
+## §3 R110 結案（2026-08-29，macOS 窗口）
+
+### §3.1 結案前主檔列原文（逐字保全，零改寫）
+
+結案當下（HEAD `7cb8421`）主檔 `DEF-101-752` 列（結案前 2,428 bytes，逐欄如下；R110
+起主檔列瘦身為 ≤700 bytes 的索引，`ROW_MAX_BYTES` 政策，原文自此只住本節）。
+
+**「發現情境」欄原文**：
+
+> R70（同一次 pre-push 阻斷的**元層級**根因；發現情境本身即本筆的主要價值）
+
+**「現象與證據」欄原文**：
+
+> 🔴 **驗證載具自己有盲區，讓一個真實違規躲過整輪的全部把關**：`test_platform_utils_dedup.py:101` 以 `git ls-files "*.py"` 當掃描面 ⇒ **未追蹤（untracked）的 .py 天然不可見**。`platform_caps.py` 在 R69 **全程都是 untracked**，於是 `DEF-101-751` 那個衝突：**在 R69 四輪四方複審全數通過、且收尾者多次 `python tools/run_root_unittests.py` 全套實跑皆綠（多次 `Ran 1581 … OK`）之後，才在 `git add` 使該檔變成 tracked 的那一刻顯形**——四輪複審、四位審查員、多次全套閘門，沒有任何一次看得到它。**這不是鎖寫錯，是鎖看不到該看的地方**（同 Nightly 取證紀律 #4「驗證載具本身要被驗證」）。擴大盤點（`grep -rn ls-files`，19 個 Python 站點＋6 個 shell/CI 站點）確認同款盲區另有 11 處，其中 `AISDLC_SDD/scripts/tests/test_cross_subproject_import_isolation.py:122` 與事故檔**結構同構**（repo-wide `*.py` ＋ 禁用樣式掃描）；`tools/tests/test_extras_quoting_zsh_safety.py` 的檔頭更逐字把該盲區寫成「與 `test_platform_utils_dedup.py` 同政策」的**刻意取捨**——R69 證明那個取捨是錯的
+
+**「分流去向」欄原文**：
+
+> `tools/tests/test_platform_utils_dedup.py`／`AISDLC_SDD/scripts/tests/test_cross_subproject_import_isolation.py`／`tools/tests/test_extras_quoting_zsh_safety.py`（本輪修）＋ 其餘站點見下方盤點（本輪**未修**，誠實劃界）
+
+**「狀態」欄原文（`partial@R82` 全文）**：
+
+> partial@R82（承接：未指派）。R70 起 3 站點＋R82 本輪 9 站點**全量修復**＋1 站點**拆帳分工**（`test_windowsapps_guard_bash_parity.py`：offender 掃描已補 union，roster 比對比照六處刻意排除維持 tracked-only）。手法同構：掃描面改 `git ls-files` ∪ `-o --exclude-standard`，逐站點以注入 untracked 探針驗證修前不可見／修後可見且觸發，驗畢移除，全部測試綠燈。六處「加 untracked 反而有害」站點不動。唯一未觸及：`tools/macos_smoke_local.sh`——docstring 已明文「刻意，非疏漏」排除 untracked，且與 `test_smoke_ci_sync.py` pathspec 逐字互鎖，需 macOS 真機驗證。R70 前原文與 R82 逐站點紅綠實測全文見 `docs/06_quality/CrossPlatform_R82_DEF101752_Untracked_Scan_Closure.md`。
+
+### §3.2 R110 本回合驗證（macOS 真機，逐字）
+
+- `.venv/bin/python -m pytest tools/tests/test_smoke_ci_sync.py -q` →
+  `29 passed, 2 subtests passed in 0.18s`（rc=0）：`tools/macos_smoke_local.sh` 與 CI
+  第 1 道的 pathspec／釘選值逐字互鎖在 macOS 真機上綠燈。
+- `sed -n '169,172p' tools/macos_smoke_local.sh` → 引句仍在原位：「取捨（刻意，非疏漏）：
+  改用 ls-files 後『完全未追蹤』的草稿 .sh 不再被掃到……新檔一經 `git add` 即入 index、
+  立刻納入本檢查」。
+
+### §3.3 結案裁決
+
+§2.3 的解鎖條件 (b) 於 R110 成立：明文裁決 `tools/macos_smoke_local.sh` 的 untracked
+排除與六處「加 untracked 反而有害」站點**同列**——:169 起的取捨為具名設計（與 CI 第 1
+道同一判準、本地暫存草稿零假紅、新檔一經 `git add` 即入 index 立刻納入檢查），非本缺陷
+「掃描面看不到該看的地方」的疏漏形態，不在本缺陷射程。至此全部非刻意排除站點皆已處置
+（R70 三站點＋R82 九站點全量修復＋一站點拆帳分工，紅綠實測見 §2），`partial` 首詞轉
+`fixed@R110`。主檔列各欄同回合瘦身成索引，原文全文即上方 §3.1。
