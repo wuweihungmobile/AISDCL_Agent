@@ -576,6 +576,38 @@ argv = [claude, "-p", ("-r", sid)?, "<prompt>", "--permission-mode", "acceptEdit
   不足」的手動應對——取證報告 §5-6 明文不裁決此事），只指出：**它的去留決定了
   ①③ 落地後喚醒鏈能不能真的閉環**，因此不能留在裁決清單外。
 
+  【2026-08-29 訂正注：掌舵者已裁決 (a)①＝清除 Windows User 層 `AUTOSDD_RESUME_OFF` 值
+  （射程依三審 A5：只清值，`RESUME_OFF_ENV` 機制一字不動）。執行面在 Windows 機，
+  承接載體＝DEF-200-231；(a)② D1~D4 與 Q1~Q6 仍未裁決，本 ADR Status 維持 Proposed。
+  原文保留為裁決前史料。
+
+  Windows 端確切執行指令（PowerShell；`<repo>` 換成該機 checkout 的絕對路徑；讀 rc 不接管線）：
+
+  ```powershell
+  # 1) 清除 User 層持久值（只清「值」；RESUME_OFF_ENV 逃生口機制一字不動）
+  [Environment]::SetEnvironmentVariable('AUTOSDD_RESUME_OFF', $null, 'User')
+
+  # 2) 三層驗證：User／Machine 兩層應回空（無輸出即空）。行程層＝執行清除的那個
+  #    舊 session 仍讀到 1（行程環境是啟動時快照），這不是清除失敗——必須開新 session
+  #    行程層才會消失，勿在舊 session 裡驗第三層
+  [Environment]::GetEnvironmentVariable('AUTOSDD_RESUME_OFF', 'User')
+  [Environment]::GetEnvironmentVariable('AUTOSDD_RESUME_OFF', 'Machine')
+
+  # 3) 開新 session 後重武裝哨兵
+  python <repo>\tools\session_resume_planner.py --arm-sentinel
+
+  # 4) 憑證兩件，缺一不算武裝成功：
+  #    (a) 新狀態塊 "allow_resume" 翻 true（最新一份 plan 應見 "allow_resume": true）
+  Select-String -Path "$env:TEMP\autosdd_resume_plan_*.md" -Pattern '"allow_resume"'
+  #    (b) NextRunTime 是「非空值」——rc=0 不算憑證（Get-ScheduledTask 對不存在的工作也回 rc=0）
+  Get-ScheduledTask | Where-Object TaskName -like 'AutoSDD_Sentinel_*' | Get-ScheduledTaskInfo |
+    Select-Object TaskName,NextRunTime
+  ```
+
+  三條警示：(i) 中間態——② 的 headless 授權未落地前，額度回來那一跑是唯讀 `claude -r`
+  空轉，屬已知過渡行為，**不得把變數設回去「修」它**；(ii) D1~D4 未修（(a)② 未裁決）；
+  (iii) 禁止事項沿用 R108_HANDOFF §四其餘各條。】
+
 ### 3.6 跨平台：兩側的授權載體不同，不得互相推論
 
 | | Windows（schtasks） | macOS（launchd） |

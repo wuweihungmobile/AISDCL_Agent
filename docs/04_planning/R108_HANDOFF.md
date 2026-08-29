@@ -72,6 +72,7 @@
    - BurnDown 增補 QB1~QB6（清倉模式）；
    - Phase 2 提案 D-1~D-6（DEF-200-211）；
    - `AUTOSDD_RESUME_OFF` User 層值的去留（本輪**明令不得動**）。
+     【2026-08-29 訂正注：掌舵者已裁決清除，本禁令自此失效；執行指令見 ADR-XPLAT-014 §3.5 Q7 訂正注，帳本載體 DEF-200-231。原文保留。】
 3. **SD 鏡 F4**：「30 版 `hub-push.yml` 同一 blob 分裂為恰 2 顆」尚未機械化。🔴 分裂在收尾
    commit 之後才 materialize ⇒ **commit 前寫斷言必假紅**，只能在 commit 後落地。無帳本列。
    現查（數目前有幾顆相異 blob）：
@@ -108,6 +109,7 @@ python d:\CursorProject\AISDCL_Agent\tools\tests\test_adr_xplat001_c1c2_lock.py 
 - 不准 `--no-verify`；不准 `AUTOCLAUDE_SKIP_HOOKS=1`；不准 `AUTOSDD_QUOTA_GUARD_OFF=1`
   （額度閘門攔下時等視窗，不關守衛）。
 - 不准動 `AUTOSDD_RESUME_OFF` User 層變數（掌舵者裁決項）。
+  【2026-08-29 訂正注：掌舵者已裁決清除，本禁令自此失效；執行指令見 ADR-XPLAT-014 §3.5 Q7 訂正注，帳本載體 DEF-200-231。原文保留。】
 - 修憲案／ADR-XPLAT-014／BurnDown 增補／Phase 2 提案**一律不得落款生效**，須先有裁決。
 - 不得把本檔任何「已交付」讀成「已實作」；重啟後第一件事是重驗，不採信本檔任何宣稱
   （zero-trust 對自己上一段亦然）。
