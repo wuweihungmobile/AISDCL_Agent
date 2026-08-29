@@ -39,9 +39,11 @@
 
 ## 三、還沒做／已知風險（每項附可查載體或現查指令；本節不新增帳本列、不佔分母）
 
-1. **收尾 commit/push 尚未執行**：本輪改動已全數落盤且窄範圍驗證全綠，但**尚未** commit/push。
-   工作樹現況現查：`git status --porcelain --untracked-files=all`；push 前全套根層閘門照
-   `python tools/run_root_unittests.py` 重驗。
+1. **收尾 commit 已執行、push 由主控執行**：首三顆＝`51e8a8f`／`6ea032e`／`bd277f5`，
+   第四顆＝本檔補證偽錨那一顆（sha 見交件回報；寫本檔時其 sha 尚不存在，結構上寫不進來）。
+   push 完成與否住 remote ref、tracked 面無機讀字串可作 absent-if 標的，現查：
+   `git log origin/main..HEAD --oneline`（非空＝本地領先，還沒推上去）；push 前全套根層
+   閘門照 `python tools/run_root_unittests.py` 重驗。
 2. **Q7 Windows 執行面**（載體＝DEF-200-231）：清 `AUTOSDD_RESUME_OFF` User 層值只能在
    Windows 本機做；指令與兩件憑證＝ADR-XPLAT-014 §3.5 Q7 訂正注。現查：
    `git grep -n "DEF-200-231" docs/06_quality/AutoSDD_Defect_Log.md`。
