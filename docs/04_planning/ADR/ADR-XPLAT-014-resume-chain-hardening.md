@@ -29,6 +29,8 @@
   **本 ADR 不主張新增檔案**，理由同 ADR-XPLAT-004 §3 第三列（往 `tools/` 新增 `*.py`
   同時污染 ruff／LOC 棘輪／`_script_scan_surface` 三個面）。
 
+【2026-08-29 訂正注：掌舵者已對 §3.5 Q1~Q6 完成方向裁決（Q1+Q2＝開 `acceptEdits` 並簽收最壞情況；Q7 稍早已裁，見該題既有訂正注；逐題見 `AutoSDD_Adjudication_Record_R110.md`）。本 ADR Status 維持 Proposed，待落地批完成後轉換。原文保留。】
+
 > **本檔所有數字的性質**：`〔實讀〕`＝本輪以 Read／Grep 工具讀出的 `檔案:行號`；
 > `〔本輪實測〕`＝本輪在本機真跑指令得到的輸出；其餘一律標 `〔現查〕` 並附指令。
 > **本檔不複寫任何可能漂移的量測值當常數**（根 CLAUDE.md 鐵律三、ADR-XPLAT-004 §2.7 同紀律）。
