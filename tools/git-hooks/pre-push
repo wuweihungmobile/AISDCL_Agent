@@ -9,9 +9,10 @@
 #     - push 範圍變更含 AISDLC_SDD/ → 執行 AISDLC_SDD/.githooks/pre-push
 #     - root-infra leg（對齊 root-infra-ci.yml 的本地接線；R9 複審：原本純根層變更
 #       push 一個閘門都不跑，CI 停擺期間零防護）自 R69 起**快慢分層**：
-#         · 快層＝十支守門工具 ＋ `ruff check tools/`（R69 補：對齊 root-infra-ci.yml
-#           第 16 道；`tools/ruff.toml` 落地時全 repo 零執行者，同機實測冷 cache 0.02s／
-#           熱 cache 0.01s，比任一支守門都便宜），**任何 push 都跑**（含純子專案 push）。理由：這八支
+#         · 快層＝十支守門工具 ＋ `ruff check tools/ .claude/hooks/`（R69 補：對齊
+#           root-infra-ci.yml 第 16 道；`tools/ruff.toml` 落地時全 repo 零執行者，同機實測
+#           冷 cache 0.02s／熱 cache 0.01s，比任一支守門都便宜；`.claude/hooks/` 面＝
+#           DEF-200-209 補，設定走 `.claude/ruff.toml` extend），**任何 push 都跑**（含純子專案 push）。理由：這八支
 #           守的全是跨子專案不變式（腳本對等／NTFS 路徑／薄殼 hash／帳本互參…），
 #           掃描面本來就涵蓋 AutoClaude/tools 與 AISDLC_SDD/scripts；R69 前的觸發
 #           條件是「存在不在兩子專案底下的變更路徑」，於是最常見的純子專案 push
@@ -373,6 +374,8 @@ if [ "$run_rootinfra" -eq 1 ] || [ "$run_rootinfra_guards" -eq 1 ]; then
       # ④ 根層護欄層 ruff（**快層**，R69）：對齊 root-infra-ci.yml 第 16 道。
       #    `tools/ruff.toml` 落地當下全 repo 零執行者——設定檔正確但沒人跑它，
       #    等於把假綠從「ruff 出廠預設」換成「根本沒人跑 ruff」，本段即該道的本地執行者。
+      #    射程含 `.claude/hooks/`（DEF-200-209：該樹此前零 ruff 閘門＝出廠預設假綠；
+      #    設定走 `.claude/ruff.toml` 的 extend，一份規則一個家）。
       #    刻意不寫 `--config tools/ruff.toml`：帶 `--config` 會把 project root 挪到 cwd，
       #    per-file-ignores 與 isort src 判定全部錯位（同機實測 140 errors vs 0），
       #    走 ruff 自己的「由檔往上尋找」才會解析到 tools/ruff.toml（判定見
@@ -400,9 +403,9 @@ if [ "$run_rootinfra" -eq 1 ] || [ "$run_rootinfra_guards" -eq 1 ]; then
           echo "[pre-push dispatcher] ❌ root-infra：無法建立暫存檔（mktemp '${TMPDIR:-/tmp}/prepush_ruff.XXXXXX' 失敗）→ ruff 的 stderr 無處落地，本道無法驗證，擋下" >&2
           echo "                        真因在暫存目錄不是 ruff：請確認 TMPDIR（現值 '${TMPDIR:-/tmp}'）存在且可寫" >&2
           leg_rc=1
-        elif ! ruff check tools/ --no-cache 2>"$_ruff_err"; then
+        elif ! ruff check tools/ .claude/hooks/ --no-cache 2>"$_ruff_err"; then
           cat "$_ruff_err" >&2
-          echo "[pre-push dispatcher] ❌ root-infra：ruff check tools/ 失敗（設定＝tools/ruff.toml）" >&2
+          echo "[pre-push dispatcher] ❌ root-infra：ruff check tools/ .claude/hooks/ 失敗（設定＝tools/ruff.toml＋.claude/ruff.toml）" >&2
           leg_rc=1
         elif grep -q '^warning:' "$_ruff_err"; then
           cat "$_ruff_err" >&2

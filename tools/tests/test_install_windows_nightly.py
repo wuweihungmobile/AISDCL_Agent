@@ -444,21 +444,11 @@ class TestInstallWindowsNightlyStructure(unittest.TestCase):
         )
 
 
-# R59 DEF-101-509：本條件原為 `shutil.which("pwsh")`（**只認 PS 7**）。後果是本檔
-# 唯一真的解析語法的測試，在「一台標準 Windows 11 開發機」上必定 skip——ONBOARDING §1
-# 明列 pwsh 7 為**選用**（`winget install Microsoft.PowerShell` 才有），Windows 11 內建
-# 的是 Windows PowerShell 5.1。於是一支 **Windows 專屬**腳本的語法閘門，恰恰在它唯一
-# 能真正執行的平台上不跑，且因該 skip 未帶 `[WINDOWS-NATIVE-ONLY]` 標籤而被
-# `run_root_unittests.py` 的可見度機制漏掉（同 DEF-101-343~345／R43 的缺陷類別）。
-# 唯一還會跑到它的環境是 GitHub-hosted runner（ubuntu/windows 皆預裝 pwsh）——而 CI
-# 因帳務停擺（DEF-101-081/208）目前不啟動 runner，等於此閘門現況零活體覆蓋。
-#
-# 改用 `powershell or pwsh`（與同目錄 `test_bootstrap_ps1.py::_windows_pwsh_available`／
-# `test_dev_start_ps1_lastexitcode.py` 既有慣例逐字同構）不只是「讓它別 skip」，語意上
-# **更貼近生產**：本腳本在生產是以 `powershell -ExecutionPolicy Bypass -File` 執行（＝5.1），
-# 而 `pwsh` 解析用的是 PS 7 文法。5.1 的 parser 才是真正的目標文法，且本檔所在的
-# `tools/` 樹受 `test_ps51_compat.py` 的「PS 5.1 相容」政策約束，故以 5.1 優先解析
-# 與該政策一致（R59 實測：PS 5.1 `Parser::ParseFile` 對本腳本 errs=0）。
+# R59 DEF-101-509：本條件原為 `shutil.which("pwsh")`（**只認 PS 7**）。判例史
+# （標準 Win11 開發機必 skip、零活體覆蓋、為何改 `powershell or pwsh` 更貼近生產）
+# 全文搬至 docs/06_quality/CrossPlatform_Guard_Line_History.md
+# 〈DEF-101-509 pwsh→5.1 判例史〉節。5.1 的 parser 才是真正的目標文法（生產以
+# `powershell -ExecutionPolicy Bypass -File` 執行＝5.1），故以 5.1 優先解析。
 def _ps_engine() -> str | None:
     """回傳本機可用的 PowerShell 解析引擎路徑，Windows 上優先 5.1（見上方 WHY）。
 

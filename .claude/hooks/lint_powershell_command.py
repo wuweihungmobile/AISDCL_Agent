@@ -129,15 +129,17 @@ except Exception:  # noqa: BLE001 — 共用層不可達＝退化，不是崩潰
 # 無人看管的回合在共用層不可達時靜默取得 commit／push 權限——而那正是本條要防的事。
 # 硬 import 失敗時本 hook 以 traceback ＋ 非 0/2 的 rc 收場，在 Claude Code 是「出聲但
 # 不阻斷」＝**看得見**的失效，比靜默放行好。
-from unattended_authz import (  # type: ignore[import-not-found] # noqa: E402
-    UNATTENDED_ENV, authz_header, authz_hits)
-
 # 🔴 R85／SD-B3：「引號包住的執行檔絕對路徑」正規化，唯一的家＝`tools/lib/shell_tokens.py`
 # （姊妹 hook 消費同一支）。它必須跑在 `mask_regions()` **之前**——鐵律二明訂的
 # `& '<Git 安裝目錄的絕對路徑>\git.exe' push` 整段會被遮蔽抹掉，於是本檔的授權邊界
 # 對**本 repo 自己規定的寫法**漏擋（本輪實測）。硬 import，姿態同上一格：正規化失效
 # 等於授權邊界對那一族靜默放行，而那正是這兩格 import 刻意不給 fallback 的理由。
 from shell_tokens import unquote_exe_paths  # type: ignore[import-not-found] # noqa: E402
+from unattended_authz import (  # type: ignore[import-not-found] # noqa: E402
+    UNATTENDED_ENV,
+    authz_header,
+    authz_hits,
+)
 
 #: 本守衛只認這一個工具名（本輪以拋棄式 dump hook 實測 PreToolUse payload 確認）。
 OWN_TOOL = "PowerShell"
@@ -255,7 +257,7 @@ _RC_HINT = (
 )
 _CD_HINT = (
     "🔴 禁裸 cd／Set-Location（鐵律二）。PowerShell 工具的 cwd **會跨呼叫持續**，"
-    "裸 cd 之後的每一個相對路徑都會找錯地方（曾單輪因此失誤 3 次，其中一次誤判成「檔案不存在」）。\n"
+    "裸 cd 之後的每一個相對路徑都會找錯地方（曾單輪失誤 3 次，一次誤判成「檔案不存在」）。\n"
     "  出口：一律用絕對路徑；真的要切目錄就 Push-Location <絕對路徑>; …; Pop-Location"
     "（同一次呼叫內成對，不遺留狀態）。"
 )

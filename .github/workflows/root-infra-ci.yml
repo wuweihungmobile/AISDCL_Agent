@@ -170,15 +170,16 @@
 #                      本 step 的 rc**。同段順帶標記「同檔多條 cron 驅動不相交 job 集合」
 #                      這個 run 層天生分辨不出的盲區。誠實劃界：advisory 是提醒不是閘門，
 #                      它擋不住任何人無視；要當場擋下的判準請放進阻斷段並承擔其代價。
-#   16. 根層護欄層 ruff — `ruff check tools/`（設定＝`tools/ruff.toml`，由 ruff 自己
+#   16. 根層護欄層 ruff — `ruff check tools/ .claude/hooks/`（設定＝`tools/ruff.toml`
+#                      ＋`.claude/ruff.toml`（extend，DEF-200-209），由 ruff 自己
 #                      「從檔往上找最近設定檔」解析到）。R69 立此道的直接理由：該設定檔
 #                      是 R69 新增的，落地時**全 repo 零執行者**——於是它自陳要治的病
 #                      （「政策有宣告、卻沒有任何機械物在根層執行它」）原樣留著，只是把
 #                      假綠從「ruff 出廠預設」換成「根本沒人跑 ruff」。本道與 pre-push
 #                      dispatcher 的 root-infra **快層**互為本地/雲端兜底。
-#                      ⚠️ 誠實劃界：射程只到根層 `tools/` 樹；`AISDLC_SDD/` 今日仍是零
-#                      ruff 設定、零 ruff 閘門（納管它是另一個授權面的決定，見
-#                      tools/ruff.toml 檔頭）。
+#                      ⚠️ 誠實劃界：射程＝根層 `tools/` 樹＋`.claude/hooks/`；
+#                      `AISDLC_SDD/` 今日仍是零 ruff 設定、零 ruff 閘門（納管它是
+#                      另一個授權面的決定，見 tools/ruff.toml 檔頭）。
 #
 # 注：上列編號為清單序，與 job 內實際執行順序無關（如第 7 道 py_compile 實體 step
 # 緊接第 1 道 bash -n 之後執行）——R11 文件掃描[關注-3]澄清。
@@ -216,7 +217,7 @@ permissions:
 
 jobs:
   root-infra:
-    name: root infra guard (bash -n + pwsh parse/BOM + EOL(.sh) + EOL(.ps1) + NTFS + parity + py_compile + unittest + defect-log-crossref + wrapper-thinness + pytest-baseline-sites + gha-action-versions + defect-log-preservation + onboarding-snapshot-fingerprint + nightly-schedule-staleness + ruff(tools/))
+    name: root infra guard (bash -n + pwsh parse/BOM + EOL(.sh) + EOL(.ps1) + NTFS + parity + py_compile + unittest + defect-log-crossref + wrapper-thinness + pytest-baseline-sites + gha-action-versions + defect-log-preservation + onboarding-snapshot-fingerprint + nightly-schedule-staleness + ruff(tools/+.claude/hooks/))
     runs-on: ubuntu-latest
     timeout-minutes: 20   # R68：第 8 道 unittest 現在會真的跑完全套（見檔頭訂正段）
     steps:
@@ -440,7 +441,7 @@ jobs:
       # 第 16 道。刻意排在 unittest **之前**：tools/tests/test_subprocess_encoding_hygiene.py
       # 的 `test_the_config_actually_covers_the_root_tools_tree` 需要 PATH 上有 ruff 才驗得動
       # （沒有就 `[TOOL-MISSING]` skip），先裝好本道才是「真的有在跑」而非 skip 假綠。
-      - name: 根層護欄層 ruff（tools/ruff.toml 的執行者；見檔頭第 16 道）
+      - name: 根層護欄層 ruff（tools/ruff.toml＋.claude/ruff.toml 的執行者；見檔頭第 16 道）
         run: |
           set -euo pipefail
           python3 -m pip install --quiet --disable-pip-version-check 'ruff==0.15.21'
@@ -460,7 +461,7 @@ jobs:
           # 第二次跑起就靜默 ⇒ 不帶它的話這道閘門的鑑別力取決於「這台機器剛好有沒有
           # cache」，那是最糟的一種閘門。本樹冷跑實測 0.02s，成本可忽略。
           set +e
-          ruff check tools/ --no-cache 2>/tmp/ruff_stderr.txt
+          ruff check tools/ .claude/hooks/ --no-cache 2>/tmp/ruff_stderr.txt
           rc=$?
           set -e
           cat /tmp/ruff_stderr.txt >&2

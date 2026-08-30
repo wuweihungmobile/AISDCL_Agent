@@ -99,7 +99,7 @@ tier／`ABSOLUTE_LIMIT`／`SPECIAL_FILES`／`_FROZEN_GUARD_LINES` 全部門檻**
 | **多語句擠一行（分號串三個 assign）** | 1 | **1** | 3 | 🔴 **仍省** —— 見 §6 缺口 ⑥（行數制共有性質，非本案開的門） |
 | 對照組：正常 3 行 module docstring | 4 | **1** | 1 | 零假紅（敘事仍免費） |
 
-⇒ 「門在值域上關閉」這句話在補 M1 之前是**假的**，門只是搬家並變寬，而且方向由懲罰翻成獎勵。修法＝條文一 §1.4（見下），機械物＝`guard_line_taxonomy._shared_code_lines()`。唯一原本擋得住這招的 ruff E701/E702 在 `.claude/hooks/` 沒有任何閘門（見 §6 缺口 ⑥），不能當依靠。
+⇒ 「門在值域上關閉」這句話在補 M1 之前是**假的**，門只是搬家並變寬，而且方向由懲罰翻成獎勵。修法＝條文一 §1.4（見下），機械物＝`guard_line_taxonomy._shared_code_lines()`。唯一原本擋得住這招的 ruff E701/E702 在 `.claude/hooks/` 沒有任何閘門（見 §6 缺口 ⑥），不能當依靠。（R111 訂正：`.claude/hooks/` 已納 ruff 射程——`.claude/ruff.toml` extend `tools/ruff.toml`，E701/E702 隨 select `E` 生效，執行者＝pre-push 快層④＋root-infra-ci 第 16 道；DEF-200-209。本句原文照舊保全＝寫成當時的現況。）
 
 ---
 
@@ -187,7 +187,7 @@ tier／`ABSOLUTE_LIMIT`／`SPECIAL_FILES`／`_FROZEN_GUARD_LINES` 全部門檻**
    - `test_the_warn_band_machinery_has_a_live_population`：**只驗母體**（三層聯集非空），並把逐層筆數印進失敗訊息，讓「哪一層在承重」看得見。
    - `test_the_semantic_owners_delegated_to_by_the_real_data_lock_still_exist`：把「語意由合成鎖負責」這句委派**釘住**——合成鎖被刪／改名即紅，否則那句委派是散文。
    - 篩選語意本體仍由本檔既有的**合成資料**鎖負責（`_SEMANTIC_OWNERS` 具名五支），它們對空層照樣有牙。
-6. **🔴 行數制計價的共有殘留：多語句擠一行（`a=1;b=2;c=3`）在任何行數制下都是省錢的**（三個 statement 只算一行）。這**不是本案開的門**——舊計價下同樣省錢，而且它同時**減少 raw 行數**，所以在 raw-line 棘輪那一軸也是省的。本案不宣稱關掉它。**擋它的唯一現成工具是 ruff E701/E702，而 `.claude/hooks/`（受 `root_tools` tier 計價）沒有任何 ruff 閘門**——`AutoClaude/` 側 pre-commit 的整檔 ruff 不涵蓋根層 `.claude/hooks/` 與 `tools/`。交棒選項：①把 E701/E702 接到根層 pre-commit 的 `.claude/hooks/`＋`tools/` 面（本包不做：pre-commit dispatcher 與 workflow 不在本包授權檔案面，且該類鎖的常數／史料／消費端分屬不同持有面＝鐵律七）；②在 `guard_line_taxonomy` 加「一行多 statement 起點 ⇒ 按 statement 數計價」的判準（射程更大、假紅風險未量測，須另案立案）。**未做選擇＝缺口原樣登記。**
+6. **🔴 行數制計價的共有殘留：多語句擠一行（`a=1;b=2;c=3`）在任何行數制下都是省錢的**（三個 statement 只算一行）。這**不是本案開的門**——舊計價下同樣省錢，而且它同時**減少 raw 行數**，所以在 raw-line 棘輪那一軸也是省的。本案不宣稱關掉它。**擋它的唯一現成工具是 ruff E701/E702，而 `.claude/hooks/`（受 `root_tools` tier 計價）沒有任何 ruff 閘門**——`AutoClaude/` 側 pre-commit 的整檔 ruff 不涵蓋根層 `.claude/hooks/` 與 `tools/`。交棒選項：①把 E701/E702 接到根層 pre-commit 的 `.claude/hooks/`＋`tools/` 面（本包不做：pre-commit dispatcher 與 workflow 不在本包授權檔案面，且該類鎖的常數／史料／消費端分屬不同持有面＝鐵律七）；②在 `guard_line_taxonomy` 加「一行多 statement 起點 ⇒ 按 statement 數計價」的判準（射程更大、假紅風險未量測，須另案立案）。**未做選擇＝缺口原樣登記。**（R111 訂正兩件：ⓐ本段「不涵蓋根層 `.claude/hooks/` 與 `tools/`」的 `tools/` 半句寫下時已過時——`ruff check tools/` 自 R69 起就有 pre-push 快層④＋root-infra-ci 第 16 道兩執行者，見 `tools/ruff.toml` 檔頭；ⓑ`.claude/hooks/` 半句自 DEF-200-209 落地起不再成立——選項①已以 `.claude/ruff.toml`（extend）＋兩執行者擴射程落地，E701/E702 隨 select `E` 生效、存量債 16 筆同批清零；`S102` 刻意不在本次射程（select 動一字兩樹連動，屬 DEF-200-217 E2 軸）。原文照舊保全。）
 
 ---
 
@@ -205,7 +205,7 @@ tier／`ABSOLUTE_LIMIT`／`SPECIAL_FILES`／`_FROZEN_GUARD_LINES` 全部門檻**
 | U2 | SA 獨立審查 APPROVE | ☐ 未進行 | 同上 |
 | U3 | SD 獨立審查 APPROVE | ☐ 未進行 | 同上 |
 | U4 | QA 獨立審查 APPROVE | ☐ 未進行 | 同上 |
-| U5 | §6 缺口 ⑥（多語句擠一行 × `.claude/hooks/` 無 ruff 閘門）已做出選擇並落地或明文接受 | ☐ 未選擇 | 缺口 ⑥ 的兩個選項擇一，或四方明文接受該殘留 |
+| U5 | §6 缺口 ⑥（多語句擠一行 × `.claude/hooks/` 無 ruff 閘門）已做出選擇並落地或明文接受 | ▣ **已落地（R111／DEF-200-209）**：選項①之閘門半——`.claude/ruff.toml`（extend）＋pre-push 快層④／root-infra-ci 第 16 道擴射程，E701/E702 隨 select `E` 生效；同步鎖＝`TestRootToolsLintPolicy` 兩支新斷言 | `S102` 與 taxonomy 計價判準（選項②）不在本次射程——載體＝DEF-200-217 E2 |
 | U6 | §6 缺口 ⑤（三個 `*_WARN_MARGIN` 在新值域下是否合適）已重新評估 | ☐ 未評估 | 附當回合實測的逐層母體筆數 |
 | U7 | §8 交棒清單的自陳站點處置方針已定（逐一改寫／保留加註／搬回 docstring） | ☐ 未定 | 方針寫進 §8 表頭；逐點落地可分輪 |
 | U8 | R100 §E 五筆新發現（E1~E5）的四方重投票已完成 | ▣ **部分**：E1／E3／E4 已裁決並修憲落地（§9／§6.2／§10） | E2／E5 尚待處置（追蹤＝`DEF-200-207`／`DEF-200-209`），本欄勾稽以該兩列狀態為準 |

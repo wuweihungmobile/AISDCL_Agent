@@ -149,7 +149,7 @@ R78 版的鏈條是「印一段話 → 模型自己記得去 compact」，而「
 本檔只剩一把尺——**context 水位**：量它、判 window、越線時出聲／擋展開型工具／寫任務書，
 外加哨兵武裝的**觸發面**（R82／HELM-02 起：SessionStart 只清閂鎖，真正註冊延後到
 PostToolUse 且要通過 `tools/lib/sentinel_lifecycle` 的雙門檻——立案是掌舵者當場截圖的
-「排程器裡三支哨兵，兩支屬於活 5 秒／12 秒的 session」）。**額度水位那把尺整條住 `tools/lib/quota_gate.py`**，本檔對
+「排程器裡三支哨兵，兩支屬於活 5 秒／12 秒的 session」）。額度尺整條住 `quota_gate.py`，本檔對
 它只有兩件事：①`main()` 在五道 context 早退**之前**呼叫它一次（撞額度那刻 context 水位
 可能只有 ~18%，掛在早退之後的分支一次都不會被執行——那是 SA-B1 判過的死碼）；
 ②把它需要的四個 hook 端能力注入進去（阻斷名單／閂鎖讀寫／任務書／喚醒武裝）。
@@ -181,16 +181,12 @@ for _stream in (sys.stdout, sys.stderr):
     except Exception:  # noqa: BLE001 — 見上
         pass
 
-# payload 讀取接上共用層 `tools/lib/platform_utils.py`（R81／SUB-S1-04 的交棒項）：
-# 本檔此前自帶一份手抄本，與 SSOT 逐行等價但**沒有任何機械關係** ⇒ 只要有一邊被改，
-# 阻斷級守衛就會安靜地與其他 hook 走不同的判定。`_STDIN_OWN_READER_ALLOWED` 當時把
-# 本檔具名排除，理由逐字是「R81 包 A 正在改，本包不得動 ⇒ 交棒收尾接上共用層」。
-#
+# payload 讀取接上共用層 `tools/lib/platform_utils.py`（R81／SUB-S1-04 的交棒項；
+# 手抄本漂移立案史搬至 CrossPlatform_Guard_Line_History.md〈context_budget_guard 立案史彙整〉節）。
 # 🔴 與上方「零外部相依」**不衝突**：那條要的是 fail-open 而不是「不准 import」。
 # 共用層不可達時（`run_path` 起、`tools/lib` 不在 sys.path）下面的 except 讓它退化成
 # `read_payload() -> None`，正好走本檔既有的「讀不出來 → 出聲不阻斷、rc=1」分支；
-# 模組層不會爆掉，也不留第二份 JSON 解析實作。形態與 `lint_powershell_command.py`
-# 逐字相同（那支是本形態的首個消費者）。
+# 模組層不會爆掉，也不留第二份 JSON 解析實作（形態同 `lint_powershell_command.py`）。
 sys.path.insert(0, os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
     "tools", "lib"))
@@ -240,23 +236,31 @@ def _has_carrier() -> bool:
     """這台機器上有沒有排程載具（Windows schtasks／macOS launchd）。"""
     return schedule_backend is not None and schedule_backend.has_carrier()
 
-# 額度**撞線判讀**（`SYNTHETIC_MODEL`／`LIMIT_*`／`classify_limit`／`parse_reset_at`／
-# `unhandled_limit_event` …）唯一的家＝`tools/lib/quota_limits.py`。它是 R81 收斂把本檔
-# 從 1,730 行壓回棘輪之內的那一次減法：搬走的是一個完整主題（輸入是撞線訊息／逐字稿，
-# 輸出是判讀結果），一行都不碰 context 水位與阻斷決策。**為什麼這一格沒有 try/except**
-# （與上面兩格刻意不同）見該檔 docstring 最後一段：能力提供者可以降級，判讀原語不行——
+# 額度**撞線判讀**唯一的家＝`tools/lib/quota_limits.py`（R81 收斂沿革與 R82／Q2-01
+# 刪 15 行 tuple 常數的史料搬至 CrossPlatform_Guard_Line_History.md
+# 〈context_budget_guard 立案史彙整〉節）。**為什麼這一格沒有 try/except**（與上面兩格
+# 刻意不同）見該檔 docstring 最後一段：能力提供者可以降級，判讀原語不行——
 # 給它 fallback stub 等於讓同一份字面有第二個家，而且會用錯的答案靜默通過。
 # `tools/session_resume_planner.py` 以 `guard.<name>` 取用這些符號 ⇒ 這裡把它們 import
 # 回本檔的命名空間，呼叫端與既有回歸鎖一個字都不必改。
 # 🔴 下面 11 個在本檔內一次都不會被呼叫：它們是給 planner 的純再匯出（`guard.
 # classify_limit` 這種取法），刪掉任一個 planner 會在無人看管的排程路徑上 AttributeError。
-# R82（Q2-01）刪掉了此前替它們背書的 15 行 tuple 常數——它零消費者（全 repo 只命中定義
-# 那一行），真正在做事的只有 lint 那一半，而那件事下一行的 F401 抑制一個字就說得完。
 from quota_limits import (  # noqa: E402,F401
-    LIMIT_NONE, LIMIT_SESSION, LIMIT_SPEND, LIMIT_TRANSIENT, LIMIT_UNKNOWN,
+    LIMIT_NONE,
+    LIMIT_SESSION,
+    LIMIT_SPEND,
+    LIMIT_TRANSIENT,
+    LIMIT_UNKNOWN,
     SYNTHETIC_MODEL,
-    classify_limit, declared_zone, latest_limit_event, latest_success_at,
-    newest_activity_at, parse_reset_at, session_transcripts, unhandled_limit_event)
+    classify_limit,
+    declared_zone,
+    latest_limit_event,
+    latest_success_at,
+    newest_activity_at,
+    parse_reset_at,
+    session_transcripts,
+    unhandled_limit_event,
+)
 
 #: 佔用當前 context 的三個 usage 欄。`output_tokens` 刻意不在內，理由見模組 docstring。
 USAGE_FIELDS = ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
@@ -331,7 +335,7 @@ WIDE_WINDOW = 1_000_000
 #: 已釘 `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=90`；其分母是 auto-compact window，「84 早於
 #: 壓縮點」不可證、只有方向安全——ADR-XPLAT-008 §4）；94＝「壓縮沒發生」的失效警報
 #: （autocompact 正常時結構上走不到）。**刻意與額度尺 85／95 錯開
-#: 1pp**：分母不同，同值會讓讀者認錯尺（`test_quota_thresholds_are_not_the_context_thresholds` 釘住不得同值）。
+#: 1pp**：分母不同，同值＝認錯尺（鎖：`test_quota_thresholds_are_not_the_context_thresholds`）。
 WARN_RATIO = 0.84
 HARD_RATIO = 0.94
 
@@ -774,20 +778,15 @@ def arm_sentinel(payload: dict) -> None:
                      f"｜孤兒回收 spawn={swept} ===\n")
 
 
-# 🔴 R84／C3-P4b：`sentinel_lifecycle.gc()` 此前**零自動呼叫端**——它只從 `main()` 的
-# CLI 走得到，而那條路要有人記得去跑。後果實測得到：本機留著一支 session 早就結束的
-# `AutoSDD_Sentinel_*`，每 15 分鐘照樣醒來一次（掌舵者看到的黑框就是它）。收拾別人的
-# 殘骸這件事**只能由後來的人做**（哨兵自己那一支若卡在讀不出狀態，見 `_sentinel_tick`
-# 的 abort 分支），所以呼叫點選在 SessionStart：那正好是「後來的人開工」的那一刻，
-# 也是本函式已經在清閂鎖的地方（同一族的清理，不另開第二個時機）。
+# 🔴 R84／C3-P4b：`sentinel_lifecycle.gc()` 此前**零自動呼叫端**，殘骸哨兵每 15 分鐘
+# 照樣醒來（立案實測全文搬至 docs/06_quality/CrossPlatform_Guard_Line_History.md
+# 〈context_budget_guard 立案史彙整〉節）；呼叫點選在 SessionStart＝「後來的人開工」
+# 那一刻，也是本函式已經在清閂鎖的地方（同一族的清理，不另開第二個時機）。
 #
 # 三個刻意的取捨，與 `spawn_sentinel` 逐條同構（同一族的風險，同一組處置）：
-#  ① **detached 子行程**：`gc()` 要列舉排程器（外呼 `launchctl`／`schtasks`），同步做等於
-#     每次開 session 先卡幾秒。
-#  ② **`keep=(當前 sid,)`**：本 session 自己的哨兵絕不能被自己收掉。`gc()` 內另有一層
-#     「最新 session」保護，這一層是顯式的那一份——兩層獨立成立。
-#  ③ **一切例外吞掉**：`.claude/settings.json` 記載過的 P0（hook 誤觸會把所有工具硬鎖死）。
-#     回收失敗最多是殘骸多留一輪，絕不可反過來變成故障源。
+#  ① **detached 子行程**（`gc()` 要外呼排程器列舉，同步做＝每次開 session 先卡幾秒）；
+#  ② **`keep=(當前 sid,)`**（自己的哨兵不能被自己收掉；`gc()` 內另有一層保護，兩層獨立）；
+#  ③ **一切例外吞掉**（P0：hook 誤觸鎖死所有工具；回收失敗最多殘骸多留一輪，不可變故障源）。
 def spawn_sentinel_gc(keep_sid: str) -> bool:
     """Detached 起 `sentinel_lifecycle --gc --apply`；回「有沒有真的 spawn 出去」。"""
     lifecycle = repo_root() / "tools" / "lib" / "sentinel_lifecycle.py"
@@ -856,8 +855,8 @@ def _headline(used: int, window: int, source: str) -> str:
 #: 84% 那一格的**下一步**，依額度相對 PRD `DRAIN_PERCENT` 的位置三分（`quota_gate.draining()`）。
 #:
 #: 🔴 立案（R91，PRD 前置條件）：PRD §4.3 的壓縮觸發是**三個 AND**——
-#: `K_ctx ≥ CONTEXT_COMPACT_PERCENT`（R92 修訂為 84） ∧ `U5h + COMPACT_COST_BUDGET_PP ≤ DRAIN_PERCENT` ∧ `距上次壓縮 ≥
-#: COMPACT_MIN_INTERVAL_SECONDS`——而本 hook 原本只實作了第一條，於是它在額度高位照樣
+#: `K_ctx ≥ CONTEXT_COMPACT_PERCENT`（R92＝84） ∧ `U5h + COMPACT_COST_BUDGET_PP ≤ DRAIN_PERCENT` ∧
+#: `距上次壓縮 ≥ COMPACT_MIN_INTERVAL_SECONDS`——而本 hook 原本只實作了第一條，於是它在額度高位照樣
 #: 喊 `/compact`。PRD §0 第 1 條把那件事列為 **🔴 阻斷級**，理由在 §2「關鍵釐清」：壓縮
 #: 本身要模型讀完整段對話並產生摘要 ⇒ **會顯著推升 U5h**，高位壓縮是反向操作。
 #: 本輪之前這個缺陷是**良性的，正因為它壞著**（訊息走沒有讀者的 stderr）；一旦換上模型
@@ -869,8 +868,9 @@ def _headline(used: int, window: int, source: str) -> str:
 #: `"unknown"` 不折進 `"no"`：PRD §0 第 6 條明定遙測失效方向為 fail-safe，而「證不出
 #: 第二個 AND 成立」與「已證明它成立」是兩件事（同本檔通篇「量不到 ≠ 量到零」的紀律）。
 _NEXT_STEP = {
-    "no": ("   機械 autocompact 將於觸發點自動壓縮（模型自身打不了 `/compact`，人在旁可手動——ADR-XPLAT-008；"
-           "額度現查：未越過 DRAIN 線；🔴 未計入 PRD `COMPACT_COST_BUDGET_PP` 邊際 ⇒ 貼線時自行判斷）。此時仍可開新工作。\n"),
+    "no": ("   機械 autocompact 將於觸發點自動壓縮（模型自身打不了 `/compact`，人在旁可手動——"
+           "ADR-XPLAT-008；額度現查：未越過 DRAIN 線；🔴 未計入 PRD `COMPACT_COST_BUDGET_PP` "
+           "邊際 ⇒ 貼線時自行判斷）。此時仍可開新工作。\n"),
     "yes": ("   🔴 **不要 `/compact`**——額度已越過 PRD `DRAIN_PERCENT`（prepare／halt 帶）。"
             "壓縮要模型讀完整段對話再產摘要 ⇒ 會顯著推升 U5h，在這一帶壓縮是反向操作"
             "（PRD §0 第 1 條：阻斷級）。\n"
@@ -889,8 +889,9 @@ def warn_message(used: int, window: int, source: str, drain: str = "unknown") ->
     return (
         f"⚠️  context 水位 {_headline(used, window, source)}——已越過 {WARN_RATIO:.0%}。\n"
         f"{_NEXT_STEP.get(drain, _NEXT_STEP['unknown'])}"
-        f"   （根 CLAUDE.md〈Token 將耗盡時的無害暫停〉三段式水位，R92 起 {WARN_RATIO:.0%}＝收斂前置、"
-        f"{HARD_RATIO:.0%}＝壓縮未發生警報、撞上限才重啟。🔴 那張表量的是 context，額度是另一把尺——本行已把兩者都問過了。）\n"
+        f"   （根 CLAUDE.md〈Token 將耗盡時的無害暫停〉三段式水位，R92 起 {WARN_RATIO:.0%}"
+        f"＝收斂前置、{HARD_RATIO:.0%}＝壓縮未發生警報、撞上限才重啟。"
+        "🔴 該表量的是 context，額度是另一把尺——本行已把兩者都問過了。）\n"
         f"   要精確判定分母就設 {WINDOW_ENV}；本行的 window 來源已標在括號裡。\n"
         "   （同一門檻本 session 只喊這一次）\n"
     )

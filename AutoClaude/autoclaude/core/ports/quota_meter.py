@@ -191,7 +191,8 @@ NO_RESET = datetime.max.replace(tzinfo=UTC)
 #   band            str            —— free／notice／converge／prepare／halt／unmeasured
 #   measured_at     ISO 8601 自帶 offset —— 🔴 底層**量測**時刻，不是寫檔時刻（見下）
 #   source          str            —— endpoint／cache／degraded（這份數字怎麼來的）
-#   headroom_pct        float|null —— 本窗還能燒多少（halt 水位 − 最緊那軸的水位）
+#   headroom_pct        float|null —— 本窗還能燒多少（halt 水位 − binding（gate 面）軸
+#                                      的水位；保險軸不進本欄，與 band/cap 同一取樣面）
 #   headroom_pct_per_hour float|null —— 攤提餘裕＝headroom_pct ÷ (距 reset 小時數)
 #   binding_kind    str|null       —— 最緊的是哪一軸（診斷用）
 #

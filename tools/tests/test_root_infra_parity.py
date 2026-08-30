@@ -407,7 +407,7 @@ class TestRootToolsRuffHasExecutors(unittest.TestCase):
         self.assertTrue(_runs_ruff_over_root_tools(real), "正控：真檔必須判綠")
         echo_only = "\n".join(
             line for line in real.splitlines()
-            if "if ! ruff check tools/ --no-cache" not in line
+            if "if ! ruff check tools/ .claude/hooks/ --no-cache" not in line
         )
         self.assertNotEqual(echo_only, real, "注入無效：找不到快層第 ④ 段的執行行")
         self.assertIn(

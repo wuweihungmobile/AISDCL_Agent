@@ -354,3 +354,58 @@ def cli(spec: str, at: str | None) -> int:
     verdict, rendered = reconcile_report(spec, when, ledger_text=text, axes=axes)
     print(rendered, end="")
     return 0 if verdict else 2
+
+
+# ── `--self-test`：合成注入紅綠自證（DEF-200-213④；體例照 `check_handoff_carriers.py`）。
+# R100 §D-14 否決 scratchpad 版測試的理由①③，反例明文：不得讀 `os.environ[...]` 下標
+# （零 env 依賴），不得在 import 期開機器本地檔（語料全合成、只在函式內組字）。
+def _self_test() -> int:
+    """紅綠自證：R1/R2 聯合判準＋三態不可折疊，全部打在合成落款上（不碰任何真檔）。"""
+    fails: list[str] = []
+
+    def expect(side: str, cond: bool, what: str) -> None:
+        print(f"  {side}  {'PASS' if cond else 'FAIL'}  {what}")
+        if not cond:
+            fails.append(what)
+
+    rows = [("10:00", 10), ("11:00", 30), ("12:00", 50), ("12:30", 2),
+            ("13:00", 5), ("14:00", 40), ("15:00", 3), ("15:30", 6)]
+    text = "\n".join(json.dumps({"ts": f"2026-08-23T{hm}:00+08:00",
+                                 "pct": {"session": pct}}) for hm, pct in rows)
+    when = lambda hm: datetime.fromisoformat(f"2026-08-23T{hm}:00+08:00")  # noqa: E731
+    print("[self-test] R1/R2 聯合判準（合成落款 8 列、兩次觀測翻頁；窗長=300）")
+    red1 = reconcile("session", 1.0, 240.0, when("13:30"), text=text, window=300.0)
+    expect("RED", red1["verdict"] == INCOMPATIBLE
+           and any("R1" in why for why in red1["reasons"]),
+           "R1：隱含視窗內有早於宣稱且更高的落款列 ⇒ incompatible")
+    red2 = reconcile("session", 7.0, 60.0, when("15:45"), text=text, window=300.0)
+    expect("RED", red2["verdict"] == INCOMPATIBLE
+           and any("R2" in why for why in red2["reasons"]),
+           "R2：隱含視窗包住一次**非本 run 開頁**的觀測 reset ⇒ incompatible")
+    green = reconcile("session", 4.0, 120.0, when("12:50"), text=text, window=300.0)
+    expect("GREEN", green["verdict"] == COMPATIBLE and green["inside"] >= 1,
+           "與落款單調相容、視窗內有證據列、開啟本 run 的那次下降被排除 ⇒ compatible")
+    print("[self-test] 三態不可折疊（undecidable 不得折進任一邊）＋聯合式對照")
+    for what, result in (
+        ("倒數缺席 ⇒ undecidable（不猜）",
+         reconcile("session", 4.0, None, when("12:50"), text=text, window=300.0)),
+        ("窗長解不出 ⇒ undecidable（不猜）",
+         reconcile("session", 4.0, 120.0, when("12:50"), text=text, window=None)),
+        ("拿掉 pct 半邊 ⇒ 紅側樣本失去鑑別力（兩條判準是聯合式）",
+         reconcile("session", 1.0, 240.0, when("13:30"), text=text, window=300.0,
+                   rules=("reset",))),
+    ):
+        expect("GREEN", result["verdict"] == UNDECIDABLE, what)
+    print(f"[self-test] {'❌ ' + str(len(fails)) + ' 項失敗' if fails else '✅ 全部通過'}")
+    return 1 if fails else 0
+
+
+if __name__ == "__main__":  # `--self-test` 是本檔唯一的直接執行入口（判準面走 import）。
+    # 非 UTF-8 終端印 ✅/❌ 防崩潰（DEF-101-789 族）；走唯一實作而非就地 reconfigure——
+    # `test_platform_utils_dedup.py` 的 per-tree 複本棘輪只准變少（落地當回合 6→7 實測紅）。
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    import _stdio_utf8  # noqa: F401
+    if sys.argv[1:] != ["--self-test"]:
+        print("用法：python tools/lib/quota_reconcile.py --self-test", file=sys.stderr)
+        sys.exit(2)
+    sys.exit(_self_test())

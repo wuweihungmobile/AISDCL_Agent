@@ -183,15 +183,10 @@ class SelectIsTheOnlyPlatformQuestionTest(unittest.TestCase):
 # ═══════════════════════════════════════════════════════════════════════════
 # 🔴 R83 複審 A-02／F-6：「唯一提問點」這句宣稱原本**只有一支檔在守**
 # ═══════════════════════════════════════════════════════════════════════════
-#
-# 立案實測史料搬遷，原文＝Guard_Repin 證據檔 §E-2。
-#
-# 🔴 判準為什麼問「誰在驅動排程器」而不是「誰在問 `os.name`」
-# ---------------------------------------------------------
-# 因為那個病**不會**被「誰在問 `os.name`」抓到：`sentinel_lifecycle` 一次都沒問平台，它是
-# 直接把一個平台的原語寫死。收斂當回合實測（獨立探針、與本檔同一份判準）：「同一個函式
-# 既問平台又碰載具」這個形狀在全庫只有 5 個命中，而**沒有一個是 A-01**。
-# ⇒ 判準改成：凡把排程器原語（argv 首字 `launchctl`／`schtasks`，或腳本含 `-ScheduledTask`
+# 立案實測史料（原文＝Guard_Repin 證據檔 §E-2）與「判準為什麼問誰在驅動排程器而不是
+# 誰在問 os.name」的推導，全文搬至 docs/06_quality/CrossPlatform_Guard_Line_History.md
+# 〈mac endurance 唯一提問點段落史〉節。
+# ⇒ 判準：凡把排程器原語（argv 首字 `launchctl`／`schtasks`，或腳本含 `-ScheduledTask`
 # cmdlet）餵給 runner 的站點，一律只能住在**宣告過的家**裡。分母是現查出來的檔集合。
 _SCHED_CMDLET = "-ScheduledTask"
 _SCHED_ARGV0 = ("launchctl", "schtasks", "schtasks.exe")

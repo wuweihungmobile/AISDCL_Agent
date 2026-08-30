@@ -103,18 +103,9 @@ def _win_switch_names(src: str) -> set[str]:
 
 
 # ── `(expected …)` 能力列的**兩側靜態**抽取（R72，原 darwin-only 鎖搬家至此）──────
-#
-# 搬家理由：原鎖 `test_dev_start.py::TestMacNightlyPlistCapabilityTable::
-# test_capability_row_count_reaches_windows_side_parity` 是「mac 列數 ≥ Windows 列數」
-# 的**跨平台對稱**斷言，卻繼承了類別層的 `@skipUnless(sys.platform == "darwin")`
-# ⇒ Windows／Linux 上一律 SKIPPED，三道非 mac 閘門全部看不到它。而兩側取值方式本來
-# 就不對稱：Windows 側是純讀檔 regex（不需平台），mac 側走 `--status` 真跑 bash
-# （需 Darwin）。可是 mac 那幾列在 `.sh` 裡**全是字面 echo**，靜態可列舉——也就是
-# 這道對稱鎖從來不需要 Darwin，只是搭錯了車。
-#
-# 本檔是搬家的落點而非新開檔：本檔本來就是「mac ↔ Windows 安裝器語意能力對照」的
-# 靜態鎖、零平台條件、且自帶鏡子自證慣例；`DEF-101-561③` 亦禁止新增鎖檔。
-#
+# 搬家史（原鎖繼承 darwin skip 而三道非 mac 閘門全盲、mac 列靜態可列舉故從不需要
+# Darwin）全文搬至 docs/06_quality/CrossPlatform_Guard_Line_History.md
+# 〈R72 darwin-only 鎖搬家史〉節。
 # 行為驗證那一半**留在原處**（darwin-only）：`--status` 真的印得出能力表、每列皆 ✅、
 # 且執行期列數與本檔靜態抽取的預測相等——那一條才是本抽取器的現實對帳單。
 class CapabilityRow(NamedTuple):

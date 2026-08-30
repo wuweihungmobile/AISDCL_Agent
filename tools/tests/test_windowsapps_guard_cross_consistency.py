@@ -1630,7 +1630,8 @@ class TestZeroGuardBarePythonDetectorDiscriminatingPower(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # ④ 四份實作的**行為表 parity**（R67 B3）
 #
-# WHY 這一節必須存在（不是「再加一層保險」，是既有鎖的結構性盲區）：
+# WHY 全文（結構性盲區立案、1 對 3 相反裁決實測、ADR-XPLAT-002 §3.2 裁決引文）搬至
+# docs/06_quality/CrossPlatform_Guard_Line_History.md〈R67 B3 四實作行為表 parity 立案史〉節。
 # `real_python_candidate` 家族有四份獨立實作（ADR-XPLAT-002 §3.2 明列，bootstrap
 # 悖論定案不收斂）——
 #
@@ -1639,25 +1640,6 @@ class TestZeroGuardBarePythonDetectorDiscriminatingPower(unittest.TestCase):
 #   ③ `tools/bootstrap_core.py::_is_windows_apps_stub`（Python，根層）
 #   ④ `AutoClaude/autoclaude/execution/pre_run_validator.py::
 #      _is_windows_apps_alias_stub`（Python，子專案；刻意不 import 根層 tools/*.py）
-#
-# R67 之前，四份之間**沒有任何一支測試餵同一組輸入、比對四方裁決**：本檔上面的
-# ② 節驗 ① 自身行為（但 4 個樣本全是反斜線）、`test_windowsapps_guard_bash_parity.py`
-# 驗 ②、`test_bootstrap_core.py` 驗 ③。三處各自全綠，卻對「四份對同一條路徑給相反
-# 答案」完全零訊號——R67 B3 實測就落在這個縫裡：
-#
-#     輸入 `C:/Users/me/AppData/Local/Microsoft/WindowsApps\python.exe`
-#       ①（PS）判「真 Python」  ／  ②③④ 判「Store 空殼」
-#
-# ——1 對 3 相反裁決，且**可觸達**：`(Get-Command python).Source` 是「PATH 條目 +
-# 檔名」拼出來的，PATH 條目以正斜線書寫時 Source 就帶正斜線（同一機制在姊妹
-# capability 已有真 Windows 實測，見 `tools/lib/Find-GitBash.ps1` 檔頭 R60 P10-2
-# 段）。姊妹缺陷（System32／`Find-GitBash.ps1`）R60 P10-2 修好時**一併補了同款行為表
-# parity 鎖**（`test_find_git_bash_parity.py::TestSystem32VerdictParity`），WindowsApps
-# 這半漏修 7 輪（R60→R66）——**因為那半有行為表鎖、這半沒有**。
-#
-# ADR-XPLAT-002 §3.2 明令：「強制機制改為行為表 parity（餵同一組輸入給各語言實作、
-# 比對裁決），取代現行的字面 parity……字面比對型 parity 鎖自本 ADR 起不計為機械
-# 釘選」。本節即該裁決在 `real_python_candidate` 家族的落地。
 #
 # 手法（與姊妹鎖同款）：**真的起 PowerShell／bash 去執行生產實作**，不比對原始碼
 # 字面；四份吃同一張 `_VERDICT_CASES`（同一個暫存樣本檔同時餵 PS 與 bash，連「兩邊

@@ -199,13 +199,19 @@ GUARD_OFF_ENV = "AUTOSDD_GIT_GUARD_OFF"
 # 處置逐字同構——授權邊界不是能力提供者，給它 fallback stub 等於在共用層不可達時
 # 靜默放行。硬 import 失敗＝traceback ＋ 非 0/2 的 rc＝出聲但不阻斷（看得見的失效）。
 from unattended_authz import (  # type: ignore[import-not-found] # noqa: E402
-    UNATTENDED_ENV, authz_header, authz_hits, waiver_void_note)
+    UNATTENDED_ENV,
+    authz_header,
+    authz_hits,
+    waiver_void_note,
+)
 
 # 🔴 P0-1：拋棄式 worktree 根目錄的正規化與包含判斷搬到 `tools/lib/
 # worktree_paths.py`（理由同上——`guardrail_cli<=750` 零餘裕，且它與 `is_foreign_tree()`
 # 同族，抽出去才不會第二次長出自己的正規化邏輯）。同 `unattended_authz` 刻意不包
 # try/except：這是安全判準，import 失敗要 traceback 而不是靜默退化成放行。
-from worktree_paths import is_under_disposable_worktree  # type: ignore[import-not-found] # noqa: E402
+from worktree_paths import (  # type: ignore[import-not-found] # noqa: E402
+    is_under_disposable_worktree,
+)
 
 #: 行內豁免：`# git-guard-ok: <WHY>`，WHY 必填（空白理由不算豁免，讓「刻意這樣寫」
 #: 與「沒注意」分得開）。

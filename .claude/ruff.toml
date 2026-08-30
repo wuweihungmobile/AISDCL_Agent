@@ -1,0 +1,14 @@
+# `.claude/`（hooks）樹的 ruff 設定——**只做 extend，不自創第二套規則**（DEF-200-209）。
+# ruff 由每個檔往上找最近的設定檔：本樹此前沒有任何 ruff 設定 ⇒ 執行者把 `.claude/hooks/`
+# 塞進射程時套的是 ruff 出廠預設＝假綠（同 `tools/ruff.toml` 檔頭記載的 R68-38 同型病）。
+# `extend` 安全性（落地當回合對照）：上游 `[lint.per-file-ignores]` 兩條 pattern
+# （`run_root_unittests.py`／`tests/*.py`）對本樹零命中，extend 不會誤放行任何檔。
+# 執行者與 `tools/` 同兩處（皆不帶 `--config`，理由見上游檔頭）：pre-push root-infra
+# 快層④ 與 root-infra-ci 第 16 道；同步鎖＝
+# `tools/tests/test_subprocess_encoding_hygiene.py::TestRootToolsLintPolicy`。
+extend = "../tools/ruff.toml"
+# 🔴 唯一的本地覆寫（不是第二套規則，是本樹的**真實 runtime**）：hook 鏈必須能在 mac
+# 預設直譯器載入（`test_mac_readiness_r82.py::TestHookChainLoadsOnTheMacDefaultInterpreter`
+# 機械釘住）。沿用上游 py311 時 UP017 的自動修會把 `timezone.utc` 改成 `datetime.UTC`
+# ＝py311-only 構件，落地當回合實測該鎖當場紅。select／line-length 一律不覆寫。
+target-version = "py39"

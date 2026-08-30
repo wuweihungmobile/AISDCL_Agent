@@ -826,28 +826,9 @@ _STDIO_TREE_PREFIXES: tuple[str, ...] = (
 #: per-tree 仍保有「新增一處即紅」的牙，失去的只是「訊息逐字指名哪一支」——而那個由
 #: 斷言失敗時當場現查的明細補回（見 `stdio_force_problems` 的訊息）。
 _FROZEN_STDIO_FORCE_TREES: dict[str, int] = {
-    # 本輪 2→3：新增 `.claude/hooks/lint_powershell_command.py`（PowerShell 指令字串的
-    # 極窄 lint，鐵律二的第一個機械物）。**這一處複本不是偷懶，是三道約束相乘的結果**，
-    # 逐條附當回合實測，因為本棘輪明文要求「新增一處必須先論證為何不能用唯一實作」：
-    #   ① `test_subprocess_encoding_hygiene` 判準四要求 `.claude/settings.json` 註冊的
-    #      每一支 hook 腳本自帶 UTF-8 stdio 保護（否則非 CJK locale 下指引降解）；
-    #   ② hook 的 fail-open 是 P0（誤觸 PreToolUse deny 會把所有工具硬鎖死），故不得有
-    #      任何可能在 import 期爆掉的外部相依；
-    #   ③ 實測：hook 由 shim 以 `runpy.run_path(...)` 起，該行程的 `sys.path[:3]` 為
-    #      `['', '<python>/python311.zip', '<python>/DLLs']` ——`tools/` 與
-    #      `.claude/hooks/` 皆不在路徑上，`import _stdio_utf8` 與 import 同目錄姊妹模組
-    #      都會 ModuleNotFoundError。
-    # ⇒ 三條相乘後，`.claude/hooks/` 這一格的合法形態**只剩**就地 reconfigure。同格的
-    #   另外兩支（sdd_hook_router／block_bash_on_windows）本來就是同一個理由。
-    #   收斂方向仍存在但不在本輪射程：要讓這一格回到 1，得先改 shim 的起法（那是
-    #   PreToolUse deny 面的變更，另有 P0 判例）。
-    # R78 3→4：新增 `.claude/hooks/context_budget_guard.py`（session context 水位觀測者，
-    # 掌舵者連續多輪明令「注意上下文是否超出 90%、不要爆」的機械化）。理由與上方三條**逐字相同**
-    # ——同一支 shim、同一個 fail-open P0、同一個 `runpy.run_path` 不供 sys.path 的實測。
-    # 也就是說：這一格會長到 4，不是因為多了一種新情況，而是因為那三條約束對**每一支**
-    # 註冊進 PreToolUse／PostToolUse 的 hook 都成立 ⇒ 每加一支 hook 就必然 +1。
-    # 🔴 這是本格的結構性性質，不是本輪的疏忽：真正的收斂點仍是「改 shim 的起法」，
-    #    而那是 PreToolUse deny 面的變更（另有 P0 判例），不在任何單一輪次的射程內。
+    # `.claude/hooks` 格 2→3→4 的擴面沿革（三道約束相乘＝合法形態只剩就地 reconfigure、
+    # 每加一支 hook 必然 +1 的結構性性質、收斂點＝改 shim 起法）全文搬至
+    # docs/06_quality/CrossPlatform_Guard_Line_History.md〈stdio 複本棘輪擴面沿革〉節。
     ".claude/hooks": 4,
     _FROZEN_SDD_TREE_KEY: 36,
     "AISDLC_SDD/scripts": 10,

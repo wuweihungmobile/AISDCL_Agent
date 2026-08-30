@@ -231,7 +231,7 @@ ADR-XPLAT-013 已登記三道套利門，逐條看它們對 (b) 的意義：
 | U2 | SA APPROVE | ☐ | ☐ 仍未進行 | 同上 |
 | U3 | SD APPROVE | ☐ | ☐ 仍未進行 | 同上 |
 | U4 | QA APPROVE | ☐ | ☐ 仍未進行 | 同上 |
-| U5 | 缺口 ⑥（多語句擠一行 × `.claude/hooks/` 無 ruff 閘門）已選擇並落地或明文接受 | ☐ | ☐ **未選擇**；帳本 `DEF-200-209` 現查 `open`，續報第三道門 `exec(__doc__)` 實測 200→1（−99.5%） | 🔴 本提案主張**升為 (b) 的前置**（§1.5）。最小動作＝把 ruff `E701/E702`＋`S102` 接到根層 pre-commit 的 `.claude/hooks/`＋`tools/` 面；**鐵律七：dispatcher／workflow／select 清單三個持有面** ⇒ 收尾單人窗口做 |
+| U5 | 缺口 ⑥（多語句擠一行 × `.claude/hooks/` 無 ruff 閘門）已選擇並落地或明文接受 | ☐ | ▣ **已落地（R111／DEF-200-209）**：`.claude/ruff.toml`（extend `tools/ruff.toml`）＋兩執行者（pre-push 快層④／root-infra-ci 第 16 道）擴 `.claude/hooks/`，E701/E702 隨 select `E` 生效、存量債 16 筆同批清零、同步鎖=`TestRootToolsLintPolicy` | `S102` 不在本次射程（select 動一字兩樹連動＝DEF-200-217 E2 軸）；門③ `exec(__doc__)` 因此**仍開著**，E2 續由該列承接 |
 | U6 | 三個 `*_WARN_MARGIN` 在新值域下是否合適，已重新評估（勾稽＝附當回合實測的逐層母體筆數） | ☐ | ▣ **母體筆數本輪已現查**：AutoClaude tier `tier_warn_band` = **0 筆**（仍空）／`special_warn_band` = **7 筆**／`root_tools_warn_band` = **2 筆**（`session_resume_planner.py` headroom 1、`hook_wiring.py` headroom 2）；門檻現值 `total_warn_margin=10`／`tier_warn_margin=6`／`special_warn_margin=5` | 剩「是否合適」的人審判斷。**可在 U1~U4 同批一次裁決**（資料已備齊，零額外工程） |
 | U7 | §8 交棒清單 25 個自陳站點的處置方針已定 | ☐ | ☐ **未定**（§8.2 表除 2 列 ✅ 外仍全為「待訂正」） | 純方針決策、零工程：四方選一（逐一改寫／保留加註／搬回 docstring），寫進 §8 表頭 |
 | U8 | R100 §E 五筆（E1~E5）四方重投票 | ▣ 部分（E1/E3/E4 已落地） | ▣ 部分：**E3 的資料面殘留已補齊**——現查 `baseline_policy_version = "v3-assertion-only+sd08-special"` == `policy_version` ⇒ `pricing_exemption_problems()` 本輪注入實測回**空**（ADR §11 §6.2 自陳的「現查回 None、誠實判紅」已不再是現況）。E2／E5 仍待處置（＝`DEF-200-209`／U5） | 隨 U5 一併結 |

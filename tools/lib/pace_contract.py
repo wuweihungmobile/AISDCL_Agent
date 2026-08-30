@@ -58,19 +58,23 @@ def contract_path() -> Path:
 def payload(decision, state, max_fanout: int, halt_pct: float) -> dict:
     """`Decision` → 契約 dict（純函式；欄位語意的權威＝引擎側 port 的 docstring）。
 
-    `headroom_pct`＝halt 水位 − 最緊那軸的水位（**非負**）；
+    `headroom_pct`＝halt 水位 − **binding（gate 面）軸**的水位（**非負**）；保險軸
+    （`quota_policy.FALLBACK_KINDS`：`spend`/`extra_usage`）刻意不進本欄，與 `band`/`cap`
+    同一取樣面（DEF-200-116：舊實作取 `max(全部軸 pct)` 混入保險軸，同一份 payload 會
+    同時說「還可派 8 個」與「餘裕 0.0」）。unmeasured（`binding=None`）→ None 不變。
+    fail-safe 分支：全部軸皆保險軸時 `quota_policy` 會讓保險軸進 gate ⇒ `binding` 可為
+    保險軸——本欄照讀之，不變式是「與 `band`/`cap` 同一取樣面」，不是「永不讀保險軸」。
     `headroom_pct_per_hour`＝它除以「距 reset 幾小時」。
-    🔴 這兩格的語意是 Dev 包在 port docstring 上鎖住的那一個，**不是**本輪
+    🔴 這兩格的語意是 Dev 包在 port docstring 上鎖住的那一個，**不是**
     `quota_pace.amortize()` 算的跨窗餘裕（後者帶正負號、單位是長窗攤提後的短窗 pp）。
-    兩者不可互換：把帶負號的量寫進一個宣告為非負的欄位是靜默的語意漂移。統一成同一個
-    量是下一輪的事（要動的是 port 那份 docstring，而它不在本包的持有面內）。
+    兩者不可互換：把帶負號的量寫進一個宣告為非負的欄位是靜默的語意漂移。
     """
     cap = decision.cap
     binding = decision.binding.kind if decision.binding is not None else None
     minutes = next((r.minutes for r in decision.per_axis
                     if binding is not None and r.axis.kind == binding), None)
-    headroom = (None if not decision.per_axis else
-                max(0.0, float(halt_pct) - max(r.axis.pct for r in decision.per_axis)))
+    headroom = (None if decision.binding is None else
+                max(0.0, float(halt_pct) - float(decision.binding.pct)))
     return {
         "schema": CONTRACT_SCHEMA,
         "cap": 0 if cap is None and decision.band == "halt" else (

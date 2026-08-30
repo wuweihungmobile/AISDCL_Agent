@@ -126,24 +126,13 @@ _GNU_ONLY: list[tuple[re.Pattern[str], str]] = [
 ]
 
 #: 🔴 R84 包 W5（SD-03）：**環境變數設值**這一軸另加一道「對面平台的實際指令在不在」的配對。
-#:
-#: 缺陷本體（R83 交棒書開的處方 ＋ 本輪實測）：R83 建議把配對由「有沒有提到兩個平台標籤」
-#: 收緊成「有沒有對面平台的實際指令」。原話版（POSIX 側只認 `export X=`）**原樣落地＝5/5 假紅**
-#: ——CLAUDE.md:354／ONBOARDING.md:215／useMacWin.md:192／AutoClaude/README.md:367／
-#: docs/AISDLC_Agent_UserGuide.md:142，逐筆讀單位後五處**都已經**寫出了 bash 側的正確對照，
-#: 只是那個對照長成 `PYTHONUTF8=1 lint-imports`（行內 `VAR=value <cmd>` 前綴）而不是 `export`。
-#: ⇒ 根因不是「收緊太嚴」，是**對面詞彙表漏了 POSIX 真正的對應寫法**：`$env:X = v` 的對面是
-#: 行內前綴，`export` 只是它的另一種形態。補齊之後同一份掃描面實測 **.md 0 筆／.py 0 筆**。
+#: 立案史（原話版 5/5 假紅實測、根因＝對面詞彙表漏行內前綴、射程刻意單向的 28 筆量測）
+#: 全文搬至 docs/06_quality/CrossPlatform_Guard_Line_History.md〈R84 W5/SD-03 立案史〉節。
 #:
 #: pattern 的 var/val 形狀**不抄第二份**：直接取姊妹鎖 `test_doc_env_prefix_platform_parity_r60`
 #: 的 `_PREFIX_RE`，只機械去掉行首／行尾錨（那支掃 fence 內的整行，本檔要在段落與字串裡找
 #: 同一個形態，常出現在反引號中間）。去錨失敗一律 fail-loud——悄悄留著 `^` 會讓這一軸只在
 #: 「前綴剛好獨佔一行」時才成立，那是靜默縮面（本 repo 判過的形態）。
-#:
-#: 🔴 射程刻意**單向**（`$env:X = v` ⇒ 要求 POSIX 側實際指令），反向不判。這是量出來的決定：
-#: 反向在同一份掃描面實測 **28 筆**（.md 6／.py 22），逐筆看過皆為假紅——POSIX 專屬的用法字串
-#: 與 `.py` 檔頭配方本來就沒有 `$env:` 對照可寫，而它們已經受「兩個平台標籤」那一道管。
-#: 一次判 28 筆假紅的鎖活不過一輪（本 repo 已有 148 筆的判例）。
 def _unanchored(pattern: str) -> re.Pattern[str]:
     if not (pattern.startswith(r"^\s*") and pattern.endswith("$")):
         raise AssertionError(

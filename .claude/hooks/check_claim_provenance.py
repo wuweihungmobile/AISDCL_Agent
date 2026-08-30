@@ -35,7 +35,7 @@ dump hook 實測確認兩個欄位都在，且逐字稿當下**已經含**那一
 命中 **13 筆／470 筆量化判決宣稱**（2.8%），逐筆人工判讀 **12 筆真陽性**（全部是把別包
 交件的數字當自己的話講）、**1 筆假陽性**（在描述某個機制的門檻值時寫出 `pmset rc=127`）。
 收斂過程中修掉的兩類假紅**都是量出來的、不是猜的**：
-  ① 千分位逗號——`3,566 passed` 的 `\\b(\\d+)` 只抓到 `566`，與輸出裡的 `3566` 對不上。  # baseline-ok:語料
+  ① 千分位逗號——`3,566 passed` 的 `\\b(\\d+)` 只抓到 `566`（≠`3566`）。  # baseline-ok:語料
      正規化刻意只吃**數字之間**的半角逗號：先前版本連全角「，」一起吃，把
      `rc=0，44 skip` 併成 `rc=044` 而自製一筆假紅。
   ② 已帶出處標記的轉述——那正是本判準要的行為，命中它等於處罰正解。
@@ -198,6 +198,8 @@ import json
 import os
 import re
 import sys
+
+# `timezone.utc` 不用 `datetime.UTC`（py311+）：hook 鏈須在 mac 預設直譯器載入。
 from datetime import datetime, timezone
 
 # payload 讀取與 UTF-8 stdio 都住共用層 `tools/lib/platform_utils.py`，形態逐字對齊姊妹檔
@@ -365,8 +367,8 @@ _STALE_AWARE_RE = re.compile(
 
 #: 「軸 ＋ 百分比」。`[%％]` 收全角（覆蓋成本一個字元）；裸數字刻意不收（見檔頭 M6）。
 _PACE_READING_RE = re.compile(
-    "(" + "|".join(PACE_AXES) + r")[^\n]{0,%d}?(\d{1,3}(?:\.\d+)?)\s*[%%％]"
-    % PACE_VALUE_WINDOW)
+    "(" + "|".join(PACE_AXES)
+    + rf")[^\n]{{0,{PACE_VALUE_WINDOW}}}?(\d{{1,3}}(?:\.\d+)?)\s*[%％]")
 
 #: 作者自己貼出來的量測時刻。**要求帶 offset**：不帶 offset 的字串算 age 要猜時區，而
 #: naive 本地時間戳在本 repo 是明文禁止持久化的形態（鐵律三的機械物之一）。解析不到就
@@ -387,7 +389,7 @@ def _parse_aware(text: str):
 
 def _anchor_time(axis: str, value: str, stamped: list):
     """本場工具輸出裡「這個軸綁這個值」最後一次出現的落款時刻（`None`＝全場無錨點）。"""
-    needle = re.compile(re.escape(axis) + r"[^\n]{0,%d}" % PACE_VALUE_WINDOW
+    needle = re.compile(re.escape(axis) + rf"[^\n]{{0,{PACE_VALUE_WINDOW}}}"
                         + re.escape(value))
     for when, text in reversed(stamped):
         if when is not None and needle.search(text):

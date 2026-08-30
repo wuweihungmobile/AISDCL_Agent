@@ -432,17 +432,8 @@ def unclassifiable_first_word_problems() -> list[str]:
 # 兩邊由 `tools/tests/test_check_defect_log_crossref.py::TestHardRule2IsBoundToSpecProse`
 # 雙向綁定：散文改寫或本函式改名而另一邊沒跟 → 紅。
 #
-# 🔴 這道鎖非踩不可的坑（R59 二審 ARCH-R59-NB4 明文警告，規格段落亦轉述）：缺陷帳本是
-# **逐字保全的歷史檔**，`DEF-101-500` 那列會永遠留著「列 R58 backlog」字樣。所以判準
-# **不能**寫成「不得提及不存在的輪次」——那會讓閘門**永紅**。合法出口有二：
-#   (a) 該列狀態已非 open／routed（歷史列多半如此，本檔直接排除）；
-#   (b) 該列或**更後面**（append-only ⇒ 更新）的任一列載明「改派」／「回執」。
-#
-# 🔴 第二個坑（R67 落地前實測，掃描員的 proposed_fix 正是踩在這裡）：**不可以拿整列的
-# 任一個 `R\d+` 當承接者**。實測把「列內最大 `R\d+`」當承接輪次套回主檔，70 列未結列中
-# **60 列**會被判孤兒——因為「發現情境」「R60 實測」「R25 Scan-A 複核」這些是**發現/佐證
-# 輪次**，不是承接者。故本檔只認**承接語境**的樣式（下表），寧可漏抓也不製造假紅：一道
-# 永紅或大量假紅的閘門會被整個關掉，那比沒有鎖更糟。
+# 兩個非踩不可的坑（永紅坑 ARCH-R59-NB4／60 列假紅坑）全文搬至 docs/06_quality/
+# CrossPlatform_Guard_Line_History.md〈硬規則② 兩個坑沿革〉節；結論仍承重：只認承接語境樣式。
 _ROUND_RE = re.compile(r"(?<![A-Za-z0-9])R(\d+)(?![0-9])")
 # 承接語境與輪號之間允許的裝飾（markdown 粗體／反引號／空白）。
 _HANDOVER_DECOR = r"[*＊`\s]{0,4}"
@@ -457,13 +448,23 @@ _HANDOVER_ROUND_RES: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("交棒／移交／交由 R…",
      re.compile(r"(?:交棒|移交|交由)(?:給|至|到|由)?" + _HANDOVER_DECOR + r"R(\d+)")),
 )
-# 🔴 刻意**不**把 `routed@R61`／`deferred@R59` 當承接者：實測 `DEF-101-518` 寫
-# `**routed（deferred@R59，附解鎖條件）**`，那個 `@R59` 是「在 R59 這一輪被 defer」的
-# **時點**，不是被指派的對象（同族寫法 `fixed@R57` 更明顯）。把時點當承接者會製造假紅。
+# 🔴 `@R<n>` 是時點不是承接者（沿革同上〈硬規則② 兩個坑沿革〉節；取數面＝`_receipt_rounds()`）。
 # 🔴 R74 PKG-2：出口判準本體與它五種「白拿豁免」形態的處置外移至
 # `_ledger_index.reassign_hit()`（只判**狀態欄**、先遮 code span、擋否定語意）——WHY 見該處。
 _REASSIGN_RE, _reassign_hit = _ledger_index.REASSIGN_RE, _ledger_index.reassign_hit
 _UNRESOLVED_CLASSES = _ledger_index.UNRESOLVED_CLASSES
+
+
+def _receipt_rounds(status_cell: str) -> list[int]:
+    """狀態欄裡的輪號，排除 `@R<n>` 時點標籤（`fixed@R100` 的 `@R100` 是時點不是承接者）。
+
+    DEF-200-195：跨列回執新鮮度曾以 `_ROUND_RE` 對整欄取 max ⇒ 首詞 `fixed@R<當輪>`
+    自我滿足；本函式補齊取數面。DEF-200-129 自列出口共用本函式，輪號下限**暫未接線**
+    ——當前輪滯後 R100 時實測轉紅 14 筆（DEF-101-018/060/398/796/856/863/867/887/938/
+    951/960/974/980/981），接線＝結案輪重量轉紅=0 後的動作（載體＝DEF-200-129 回執）。
+    """
+    return [int(m.group(1)) for m in _ROUND_RE.finditer(status_cell)
+            if not (m.start() > 0 and status_cell[m.start() - 1] == "@")]
 
 
 def current_round(ledger_text: str) -> int | None:
@@ -558,15 +559,14 @@ def orphan_backlog_problems(ledger_text: str) -> list[str]:
         if _reassign_hit(cells[status_idx]):
             continue
         def_id = cells[id_idx]
-        # 🔴 R84（`DEF-200-088`）：跨列出口先前只取布林 ⇒ 回執一寫就永久免比輪號。輪號從
-        # 回執列狀態欄以 `_ROUND_RE` **粗抓取最大值**（回執體例「一律改派 **R<n>**」不落在
-        # `_HANDOVER_ROUND_RES` 的承接樣式內），刻意偏寬＝漏抓而非假紅，同本檔既有方向。
-        # 回執寫字面「未指派」者照放——那是硬規則② 後半句自己給的二擇一，判它等於關掉出口。
+        # 🔴 R84（`DEF-200-088`）：跨列出口先前只取布林 ⇒ 回執一寫就永久免比輪號。輪號以
+        # `_receipt_rounds()` 粗抓取最大值（偏寬＝漏抓而非假紅，同本檔既有方向；`@R<n>`
+        # 時點排除＝DEF-200-195，落地當回合以真帳本重量、轉紅 0 筆）。
+        # 回執寫字面「未指派」者照放——硬規則② 後半句自己給的二擇一，判它等於關掉出口。
         floor = cur if cur is not None else -1
         if any(def_id in ln and _reassign_hit(c[status_idx])
                and (_UNASSIGNED_LITERAL in c[status_idx]
-                    or max((int(x.group(1)) for x in _ROUND_RE.finditer(c[status_idx])),
-                           default=-1) >= floor)
+                    or max(_receipt_rounds(c[status_idx]), default=-1) >= floor)
                for _, c, ln in rows[i + 1:]):
             continue
         if cur is None:

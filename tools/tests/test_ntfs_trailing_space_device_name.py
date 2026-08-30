@@ -603,19 +603,9 @@ class TestRootDocsPathRefsAreCaseExact(unittest.TestCase):
 
 
 # ------------------------------------- R72／DEF-101-770：迭代四件套歸檔的轉址解析
-# 慣例（兩支 `Archive/README.md`）：整合迭代（軌道①）的計畫 `AutoSDD_improving_<N>.md`
-# 與審計 `AutoSDD_ZeroTrust_Audit_<N>.md` 結案後搬進**同層** `Archive/`，只留最新一輪。
-#
-# 🔴 為何不「搬檔同時把引用一起改掉」（R72 逐案評比後的裁決）：
-# 斷鏈引用的持有者有兩類是**明文禁止就地改寫**的，而且兩類都非空——
-#   · `docs/06_quality/AutoSDD_Defect_Log_archive_*.md`
-#     ——`DEF-101-633` 明訂歷史歸檔帳本逐字保全、不得改寫其散文；
-#   · `AISDLC_SDD/AISDLC_SDD_v0.XX/` 凍結版 ——受 Copy-on-Evolve 禁止就地改寫。
-# 兩類各只要有一處，「同步更新引用」就在規則上不可能做完；而「留轉址 stub」會憑空
-# 長出上百個必須跟著搬檔維護的新檔案（＝新的會過期站點）。
-# 規模是**會漂移的量測值，刻意不寫進註解**（初稿寫死的四個數字同輪複查即全部對不上）——
-# dated snapshot 與複查方法見 `docs/04_planning/Archive/README.md`。
-#
+# 裁決沿革（為何不搬檔同時改引用——兩類持有者明文禁止就地改寫、stub 會長出上百個
+# 會過期站點）全文搬至 docs/06_quality/CrossPlatform_Guard_Line_History.md
+# 〈R72 歸檔轉址裁決沿革〉節。
 # 採用的是**可推導的轉址規則**而非列舉式映射表：`<dir>/<name>` → `<dir>/Archive/<name>`。
 # 表要有人維護、會 stale；規則不用維護，且下面三支鎖讓它「成不成立」變成機械事實。
 _ARCHIVABLE_DOC_RE = re.compile(

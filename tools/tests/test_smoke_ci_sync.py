@@ -556,26 +556,10 @@ class TestSmokeCiSync(unittest.TestCase):
 
 
 # --- R67-C19：compat-CI step ↔ 本地載具「覆蓋差集」登記表 ------------------------
-#
-# WHY 這張表必須存在（測意圖非僅行為，Rule 9）：ONBOARDING §6.1 對兩支 smoke 腳本的
-# 措辭是「**本地補償對等**＝…」。R67 Scan-C 逐步比對後實測：macos-smoke 22 step 扣掉
-# checkout／setup-python／PATH 三個非驗證步後為 19 個實質驗證，其中 **5 步在本地零承載**
-# （bootstrap 全新建立／bootstrap 重跑／dev_start 實跑／zsh source dev_start／
-# integration_gate 實跑），另有 1 步只有部分承載（真實 git commit 經 core.hooksPath 觸發
-# dispatcher——本地 smoke [2/7] 只做 dispatcher 直呼，`grep -n "git commit"
-# tools/macos_smoke_local.sh` 空輸出）。「對等」二字讓讀者以為本地綠燈 ≈ CI 綠燈，而
-# compat-CI 已因帳務停擺多輪未真正執行 ⇒ 這是一句**會讓人停止追問**的話。
-#
-# 而更關鍵的是**零機械訊號**：Scan-C 在乾淨 clone 注入一個全新、本地零對等的 CI step 後，
-# 8 支根層守門全部 rc=0、`run_root_unittests.py` `Ran 1139 / OK`——包含本檔在內。本檔
-# docstring 自述的職責是「抽取 PASS 下限釘選值與 `--- [n/m]` 分組標籤交叉斷言」，本來就
-# 不是覆蓋差集鎖。故本節補的正是那條缺口：**CI 多一步而本地沒跟上，必須當場紅**。
-#
-# 為何登記表住在本檔而非新開掃描器：本檔已同時讀四份檔案（兩 smoke ＋ 兩 compat-CI），
-# 是同一條軸、同一份輸入；DEF-101-519 定下的折中是「不新建掃描器檔案，併進既有鎖」。
-#
-# 為何 ONBOARDING 不再重抄一份對照表：44 列 markdown 表格＝保證下一輪就 stale 的站點
-# （正是本輪在治的病）。文件改為**指向本表**這個 live 來源，數字/名單一律不寫進散文。
+# WHY 敘事段（表必須存在的立案、住本檔的理由、ONBOARDING 不重抄對照表的理由）搬至
+# docs/06_quality/CrossPlatform_Guard_Line_History.md〈R67-C19 覆蓋差集登記表 WHY〉節；
+# 取證邊界段（下方）依 `test_registry_discloses_its_evidentiary_boundary` 的要求**留在本檔**
+# ——揭露被刪掉就會退回零揭露，該鎖機械守住它還在，故不隨敘事段搬遷。
 #
 # 值的四種形態（前三種是「有載具」，`NO-LOCAL-CARRIER`／`PARTIAL` 必須附非空理由）：
 #   INFRA:            非驗證步（checkout／setup-python／PATH／裝依賴），無需本地對等

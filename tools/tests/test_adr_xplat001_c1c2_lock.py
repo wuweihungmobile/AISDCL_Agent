@@ -682,16 +682,16 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 6341,
-    "test_archive_defect_log.py": 4008,
+    "test_adr_xplat001_c1c2_lock.py": 6391,
+    "test_archive_defect_log.py": 3986,
     "test_bash32_compat.py": 1020,
     "test_bash_probe_spec_contract.py": 983,
     "test_block_destructive_git_r83.py": 2195,
     "test_bootstrap_core.py": 439,
     "test_bootstrap_ps1.py": 160,
-    "test_check_defect_log_crossref.py": 3722,
+    "test_check_defect_log_crossref.py": 3794,
     "test_check_gha_action_versions.py": 295,
-    "test_check_hooks_liveness.py": 3604,
+    "test_check_hooks_liveness.py": 3581,
     "test_check_pytest_baseline_sites.py": 301,
     "test_check_script_parity.py": 2098,
     "test_check_wrapper_thinness.py": 1234,
@@ -709,40 +709,40 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_gha_action_versions.py": 703,
     "test_git_hooks_install_common.py": 393,
     "test_guard_line_taxonomy_r99.py": 148,
-    "test_install_windows_nightly.py": 1479,
-    "test_mac_endurance_r83.py": 1789,
+    "test_install_windows_nightly.py": 1469,
+    "test_mac_endurance_r83.py": 1784,
     "test_mac_readiness_r82.py": 621,
     "test_macos_smoke_skip_honesty.py": 225,
     "test_maturity_criteria_r79.py": 431,
     "test_negative_existence_claims_r82.py": 380,
     "test_nightly_interpreter_determinism.py": 278,
     "test_no_invalid_escape_sequences.py": 329,
-    "test_ntfs_trailing_space_device_name.py": 770,
+    "test_ntfs_trailing_space_device_name.py": 760,
     "test_onboarding_parity_interlock.py": 233,
     "test_platform_neutral_paths.py": 5720,
-    "test_platform_utils_dedup.py": 1123,
+    "test_platform_utils_dedup.py": 1104,
     "test_pre_commit_dispatcher_sigpipe.py": 964,
     "test_pre_push_dispatcher.py": 686,
     "test_ps1_bom.py": 248,
     "test_ps51_compat.py": 610,
     "test_ps_engine_ssot.py": 954,
     "test_python_c_percent_shim.py": 119,
-    "test_quota_policy.py": 3152,
+    "test_quota_policy.py": 3198,
     "test_root_infra_parity.py": 441,
-    "test_run_root_unittests.py": 2283,
+    "test_run_root_unittests.py": 2272,
     "test_sanitize_component_frozen_sdd_versions_lock.py": 340,
-    "test_schedule_capability_parity.py": 635,
+    "test_schedule_capability_parity.py": 626,
     "test_script_scan_surface_ssot.py": 391,
     "test_skip_ceiling_ratchet_direction.py": 165,
-    "test_skip_discoverability_r83.py": 755,
-    "test_smoke_ci_sync.py": 1350,
+    "test_skip_discoverability_r83.py": 744,
+    "test_smoke_ci_sync.py": 1334,
     "test_stdio_utf8.py": 76,
     "test_subprocess_encoding_hygiene.py": 1599,
-    "test_windows_forbidden_filename_parity.py": 1054,
+    "test_windows_forbidden_filename_parity.py": 1025,
     "test_windows_nightly_anchor_parity.py": 135,
     "test_windows_smoke_heartbeat_doc_sync.py": 197,
     "test_windowsapps_guard_bash_parity.py": 973,
-    "test_windowsapps_guard_cross_consistency.py": 2201,
+    "test_windowsapps_guard_cross_consistency.py": 2183,
     "test_workflow_permission_concurrency_lock.py": 1417,
     "test_workflow_schedule_sync.py": 309,
     "test_workflow_timeout_coverage.py": 158,
@@ -1234,6 +1234,17 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "逐條實查：無死碼可刪；抽共用層不適用（兩處隔離夾具各只有一個消費類）；散文搬遷"
      "不適用（新增全是隔離夾具本體與 WHY）。逐檔行數對照見 "
      "CrossPlatform_R106_Scan_Findings.md 的 R109 標記行。"),
+    ("R111", 89467, 89452, -15,
+     "R111 護欄層判準修補輪（單人窗口；DEF-200-116/121/129/195/209/212/213④）。淨額為負："
+     "16 塊史料搬遷 CrossPlatform_Guard_Line_History.md（〈R67-C19 覆蓋差集登記表 WHY〉起"
+     "16 節）抵掉全部新增判準，連續上升計數（R108 +190、R109 +153）歸零。新增面：116 "
+     "headroom 值域紅綠＋213④ 薄調用（test_quota_policy.py 3152→3198）；129/195 "
+     "_receipt_rounds() 取數面＋2×2（test_check_defect_log_crossref.py 3722→3794；129 "
+     "自列出口暫未接線＝cur 滯後窗口的轉紅名單逐字在案，載體 DEF-200-129 回執）；209 "
+     "同步鎖兩支（test_subprocess_encoding_hygiene.py 1599 持平＝同檔搬遷抵銷）；121 "
+     "lookahead 後設鎖＋紅綠＋兌現 (111, 595) 並重新武裝 113／585（步伐 10<15）。"
+     "本檔自身＝搬遷 −21 ＋ 121 面 +57 ＋ 本稽核列、rewrite ledger 追加與凍結前綴延伸"
+     "（80→81）。逐檔清單見 CrossPlatform_R106_Scan_Findings.md 的 R111 標記行。"),
 )
 
 
@@ -1277,6 +1288,9 @@ _REPIN_NET_CAP_SCHEDULE: tuple[tuple[int, int], ...] = (
                   # 同輪重新武裝下一段：步伐 20 < 前一段的 30，續守「步伐變小」。
     (109, 610),   # 到期輪兌現（Gap C 接線窗口）：cap 降到到期目標本身。
                   # 同輪重新武裝下一段：步伐 15 < 前一段的 20，續守「步伐變小」。
+    (111, 595),   # 到期輪兌現（DEF-200-121 修復窗口）：cap 降到到期目標本身（同 R99 判例）。
+                  # 同輪重新武裝下一段：步伐 10 < 前一段的 15，續守「步伐變小」；並補上
+                  # 到期輪自身的 lookahead 後設鎖（見 `_REPIN_DUE_ROUND_MAX_LOOKAHEAD`）。
 )
 #: 生效點＝首列輪號、現行上限＝末列上限，**皆由表導出不另立常數**（R73 判例：一份知識一個家）。
 _REPIN_ROUND_CAP_SINCE = _REPIN_NET_CAP_SCHEDULE[0][0]
@@ -1360,10 +1374,17 @@ def net_cap_schedule_problems(
 #: 設計（5400→3200 起）與 R89 互斥推導全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈到期義務與重新武裝 WHY〉節；R101 起歷次兌現的 round-label-ok
 #: 逐段沿革搬至 CrossPlatform_Guard_Line_History.md〈到期義務兌現沿革〉節。
-#: 本次兌現（Gap C 接線窗口）：cap 降到目標本身（610，見 `(109, 610)` 列），
-#: 同輪重新武裝下一段：步伐 15 < 前一段的 20，續守「步伐刻意變小」且目標嚴格低於現行 cap。
-_REPIN_NET_CAP_DUE_ROUND = 111
-_REPIN_NET_CAP_DUE_TARGET = 595
+#: 本次兌現（DEF-200-121 修復窗口）：cap 降到目標本身（595，見 `(111, 595)` 列），
+#: 同輪重新武裝下一段：步伐 10 < 前一段的 15，續守「步伐刻意變小」且目標嚴格低於現行 cap。
+_REPIN_NET_CAP_DUE_ROUND = 113  # round-label-ok：到期輪＝兌現輪+2（lookahead 判準的活體對照）
+_REPIN_NET_CAP_DUE_TARGET = 585
+
+#: DEF-200-121：到期輪自身的後設鎖——`_REPIN_NET_CAP_DUE_ROUND` 只准落在「最近稽核輪
+#: ＋ lookahead」以內（歷史母體 85..113 的到期輪一律＝上一次兌現輪 +2）。可延期的到期日
+#: 不是到期日：帳本注入實測「到期輪改 9999 紅 0」＝款(12) 的 `live_round >= due_round`
+#: 永假、靜默熄滅，而同檔逐字宣稱「刻意沒有『延期』參數」。lookahead 自身 shrink-only。
+_REPIN_DUE_ROUND_MAX_LOOKAHEAD = 2
+_FROZEN_REPIN_DUE_ROUND_MAX_LOOKAHEAD = 2
 
 #: R85：款(11)／ADR-XPLAT-002 §8.1 item 15「必須出現一次淨額 ≤ 0」的到期輪，搬成具名常數
 #: 理由同上（義務要能被看見、要有到期時點；`DEF-101-757`）。只准往前挪（更早到期＝更嚴），
@@ -1423,10 +1444,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 80
+_REPIN_LOG_FROZEN_PREFIX_LEN = 81
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "42b28e14a0b8c540bde981d12b933ae7d3dfbfda10e9d9688496684e53eadc12")
+    "db3448c59433981f6ace6e556bac1ae39676850e2ced89829af56a763280195d")
 
 
 def repin_log_history_digest(
@@ -1527,6 +1548,9 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # F2 修復窗口（quota 測試活體態滲入；載體＝DEF-200-232）：R109 追加本輪稽核列 round-label-ok
     # 並把它納入前綴（prefix_len 79→80），同體例「追加後立即自我凍結」。
     ("R109", "dc62ee5d1822", "42b28e14a0b8", "DEF-200-232"),
+    # DEF-200-121 修復窗口（護欄層判準修補輪）：追加本輪稽核列並把它納入前綴
+    # （prefix_len 80→81），同體例「追加後立即自我凍結」——延伸本身即讓指紋改變，故留痕。
+    ("R111", "42b28e14a0b8", "db3448c59433", "DEF-200-121"),
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。
@@ -1695,6 +1719,8 @@ def repin_cost_ratchet_problems(
     latest_round: int | None = None,
     due_round: int = _REPIN_NET_CAP_DUE_ROUND,
     due_target: int = _REPIN_NET_CAP_DUE_TARGET,
+    due_lookahead: int = _REPIN_DUE_ROUND_MAX_LOOKAHEAD,
+    frozen_lookahead: int = _FROZEN_REPIN_DUE_ROUND_MAX_LOOKAHEAD,
 ) -> list[str]:
     """R84 ARCH-01 的**後設鎖**：三個代價常數只准往「更嚴」的方向改（空＝通過）。
 
@@ -1736,6 +1762,20 @@ def repin_cost_ratchet_problems(
             f"往 _REPIN_NET_CAP_SCHEDULE 追加一列 (R<本輪>, ≤{due_target})"
             "（分段生效⇒下修不追溯，不會把已收輪次回頭判紅；後設鎖只擋調升）。"
             "刻意沒有「延期」參數——可延期的到期日不是到期日")
+    # DEF-200-121：款(12) 的 `live_round >= due_round` 對「到期輪自己被推遲」全盲——
+    # 改 9999 即永假（帳本注入實測紅 0），於是上一句「刻意沒有延期參數」只是散文。
+    if due_round > live_round + due_lookahead:
+        problems.append(
+            f"[到期日被推遲] 到期輪 R{due_round} 距最近稽核輪 R{live_round} 超過 "
+            f"{due_lookahead} 輪——可延期的到期日不是到期日（DEF-200-121：把到期輪改成"
+            "遠未來，款(12) 的比較式永假、靜默熄滅）。出口＝先兌現現行到期義務再重新"
+            f"武裝下一段，且新到期輪只能落在「兌現輪＋{due_lookahead}」以內"
+            "（歷史母體：85 起每一段到期輪一律＝上一次兌現輪 +2）")
+    if due_lookahead > frozen_lookahead:
+        problems.append(
+            f"_REPIN_DUE_ROUND_MAX_LOOKAHEAD 由 {frozen_lookahead} 調升為 {due_lookahead}"
+            "——本常數只准下修（同 `_REPIN_ROUND_CAP_SINCE` 款式）：調大它＝把"
+            "「不可延期」改寫成「可以晚一點」，款(12) 的到期語意跟著蒸發")
     if cap > base_cap:
         problems.append(
             f"_REPIN_ROUND_NET_CAP 由 {base_cap} 調升為 {cap}——本常數只准往下改。"
@@ -3487,6 +3527,35 @@ class TestGuardLayerRatchet(unittest.TestCase):
             "到期目標不低於現行上限 ⇒ 款(12) 是一句永遠成立的話（R85 兌現 5400→3200 之後"
             "必須就地重新武裝下一段，否則這款從此恆綠＝機制靜默退役）")
 
+    def test_the_due_round_itself_cannot_be_postponed(self) -> None:
+        """🔴 DEF-200-121：到期輪自己被推遲時必須有東西轉紅（帳本立案那把注入的常駐化）。
+
+        立案注入實測：到期輪改 500 紅 0、改 9999 紅 0、到期目標 1600→1999 紅 0——
+        款(12) 的 `live_round >= due_round` 對「把到期日搬到遠未來」永假，而同檔逐字
+        宣稱「刻意沒有『延期』參數」。與 F3／B-1（`_REPIN_ROUND_CAP_SINCE`）逐字同型：
+        修了 SINCE、沒修 DUE_ROUND。四格：立案那把注入轉紅／合法重新武裝（兌現輪+2）
+        為綠／真常數今天為綠／lookahead 自身 shrink-only。
+        """
+        live = max(no for no, _d in repin_round_nets(_GUARD_LINES_REPIN_LOG))
+        self.assertTrue(
+            any("[到期日被推遲]" in p for p in repin_cost_ratchet_problems(
+                due_round=9999, latest_round=live)),
+            "到期輪改成 9999 竟然紅 0 ⇒ 帳本立案的那把注入原樣復活"
+            "（款(12) 永假、到期義務靜默熄滅）")
+        self.assertEqual(
+            [p for p in repin_cost_ratchet_problems(
+                due_round=live + _REPIN_DUE_ROUND_MAX_LOOKAHEAD, latest_round=live)
+             if "[到期日被推遲]" in p], [],
+            "兌現輪＋lookahead 的合法重新武裝竟然判紅 ⇒ 這道鎖沒有出口（ARCH-02 形態）")
+        self.assertEqual(
+            [p for p in repin_cost_ratchet_problems() if "[到期日被推遲]" in p], [],
+            f"真常數今天就被判紅——DUE_ROUND=R{_REPIN_NET_CAP_DUE_ROUND}、"
+            f"最新稽核輪=R{live}、lookahead={_REPIN_DUE_ROUND_MAX_LOOKAHEAD}")
+        self.assertTrue(
+            any("_REPIN_DUE_ROUND_MAX_LOOKAHEAD" in p for p in repin_cost_ratchet_problems(
+                due_lookahead=_FROZEN_REPIN_DUE_ROUND_MAX_LOOKAHEAD + 1)),
+            "lookahead 被調大竟然放行 ⇒ 「不可延期」可以被一行 diff 改寫成「可以晚一點」")
+
     # ── R80 二審（NEW-SA2-01＝QA2-N2）：文件側引用的累積總量也要對帳 ────────────
     def _latest_round(self) -> str:
         return _GUARD_LINES_REPIN_LOG[-1][0]
@@ -3971,28 +4040,9 @@ class TestGuardLayerRatchet(unittest.TestCase):
 
 
 # ================================================================ ADR §9.1／掃描維度 常設自檢（SC-*）
-# 🔴 本段落地的是 **SA-R67-03**：`ADR-XPLAT-002` §9.1 與 `CrossPlatform_Scan_Dimensions.md`
-# 〈常設自檢〉把本輪三項頭號架構異動（Phase 3 解封／平台前提中立化／§8 交棒表機制化）的
-# **唯一防回流機制**寫成了幾條 grep 指令，而那些指令在全 repo **沒有任何可執行消費者**——
-# 複審員注入違規形態後，根層測試與根層工具全數綠燈。依 `CrossPlatform_Scan_Dimensions.md`
-# Scan-H 判準⑤「可重跑但沒有任何閘門看它的 rc ＝ 不可重跑」，它們嚴格說是「規格 ＋ 已驗證
-# 的實作」，**不是活體守門**。本段把它們接上閘門的 rc（本檔在 `run_root_unittests.py` 的
-# discover 收集面內 ⇒ 自動被 pre-push root-infra leg 與三支 CI 消費）。
-#
-# 宿主選擇（§9.1 末段已具名指派，本段沿用）：**擴充本檔而非新增鎖檔**——
-# `TestGuardLayerRatchet` 的護欄層棘輪要求 `tools/tests/` 的**淨行數**不得上升
-# （DEF-101-561③；新增檔案本身不違規，淨額上升才違規），
-# 且 `ADR-XPLAT-002` §4.2 rule 1 明文「不要一個 finding 一支鎖」。
-#
-# 🔴 從 shell 規格搬進 Python 時**刻意改掉的語意**（照抄原形態會得到假鎖）：
-#   (1) SC-7 的規格形態尾巴掛著 `| grep .`，因為 `comm` **無論有無差集都 exit 0**，直接讀它的
-#       rc 會恆綠（規格自己已逐字警告這一點）。本檔改用 **Python 集合差集**，不依賴 shell 方言
-#       （規格末段也建議這麼搬），rc 語意由「回傳的違規清單是否為空」決定。
-#   (2) 其餘各條的規格形態是 `grep`（rc=1 且零輸出＝通過）。本檔一律回傳「違規說明字串的
-#       list」，空 list ＝通過——測試失敗訊息因此能逐條印出違規行，比一個 rc 更能指路。
-#   (3) 各條的**掃描面崩塌**（章節標題被改寫、帳本家族枚舉壞掉、維度表表頭形態被改）一律
-#       回報成違規而非靜默零命中：`grep`／`awk` 對「找不到區段」回的是空輸出＝在原語意下
-#       等同通過，那正是本 repo 已多次踩到的 fail-open。
+# SA-R67-03 立案（grep 指令零可執行消費者＝非活體守門）、宿主選擇（DEF-101-561③ 棘輪）
+# 與 shell 規格搬 Python 時刻意改掉的三處語意，全文搬至
+# docs/06_quality/CrossPlatform_Guard_Line_History.md〈ADR §9.1 常設自檢落地沿革〉節。
 # 一處**刻意不改**：SC-2／SC-3／SC-5 的區段界線逐字複刻 `awk` 的 range pattern 語意
 # （含兩端界線列、且區段結束後可再次觸發），見 `awk_range()`——判準搬家不得順手改語意。
 _ADR2 = (_REPO / "docs" / "04_planning" / "ADR"

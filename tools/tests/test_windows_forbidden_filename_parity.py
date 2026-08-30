@@ -372,19 +372,9 @@ BENIGN_TRAILING_SPACE_SEGMENTS = [
 ]
 
 # ── R60：「保留名 + **前導**空白」＝四處實作統一決策的樣本電池 ──────────────────
-# WHY 需要這一組：R57 修的是「保留名 + **尾隨**空白 + 副檔名」（DEF-101-478），本輪掃描
-# 把前導空白當成它的鏡像形態回報「四處實作 1 擋 3 放」。現象為真（下方逐一釘住），但
-# **方向不是「三處漏擋」而是「一處多擋」**，理由由本機實測決定，不由對稱性推論決定：
-#   ① git for Windows（core.protectNTFS=true，Windows 預設）對本清單全部形態 **ACCEPT**
-#      ——git 只在路徑段**起頭**比對保留名，前導空白使比對失配。只含前導形態的 repo
-#      實測 `git clone` rc=0、工作樹有檔、`git status --porcelain` 空、內容讀回正確。
-#      對照組（'CON .txt'／'CONIN$.log' 等 git REJECT 的形態）clone rc=128、工作樹全空。
-#   ② Win32 只吞**尾隨**空白/句點，不吞前導：本機實測 ' CON.txt'／' CON'／'CON.txt'／
-#      ' CON .txt' 四者同時共存於同一目錄（os.listdir 全部列出、各 10 bytes 可讀回）。
-# 故兩個 **validator**（check_ntfs_paths.py／pre-commit）與 **logger**（sanitizer，但不做
-# 前導正規化）一律放行＝正確；`component_sanitizer.sanitize_component()` 因 `.strip()`
-# 會剝前導空白而加 `_` 前綴＝更嚴格，對「產生檔名」的 sanitizer 無害且不改既有行為，
-# 刻意保留（該處註解載有兩層理由）。
+# 立案史（DEF-101-478 鏡像回報、git ACCEPT／Win32 不吞前導的本機實測、「三放一擋」
+# 方向裁決）全文搬至 docs/06_quality/CrossPlatform_Guard_Line_History.md
+# 〈R60 前導空白樣本電池立案史〉節。
 #
 # 本清單的作用是把這個「三放一擋」釘成**雙向**斷言而非放任：任一 validator 開始擋它會
 # 翻紅（新偽陽性），`component_sanitizer` 停止前綴也會翻紅（既有行為悄悄改變）。下輪掃描
@@ -671,29 +661,10 @@ _SCAN_PATHSPECS = ("*.py", "*.sh", "*.ps1")
 # 無副檔名的 hook 檔（`pre-commit` 是 4 份權威實作之一）：以目錄 pathspec 納入，
 # 沿用 `tools/tests/test_extras_quoting_zsh_safety.py::_HOOK_DIRS` 既有慣例。
 _NTFS_HOOK_DIRS = ("tools/git-hooks", "AutoClaude/tools/git-hooks", "AISDLC_SDD/.githooks")
-# R66 ADR-XPLAT-002 Phase 2-D 收斂（DEF-101-624）：本行原是本家族的第 5 份逐字
-# 複本（另四份原在 test_component_sanitizer_shared_layer_lock.py／
-# test_sanitize_component_frozen_sdd_versions_lock.py／test_windowsapps_guard_bash_parity.py／
-# test_windowsapps_guard_cross_consistency.py）。R59 SA-R59-03／ARCH-R59-03 就地標註
-# 「收斂時五份應一併處理，勿只改本份」——本次即為該收斂：5 份改為共同 import
-# `tools/lib/sdd_latest.py::FROZEN_SDD_PATH_PREFIX_RE`（單一定義，見下方
-# `_ntfs_scan_candidates` 改用 `sdd_latest.exclude_frozen_sdd_versions`）。
-#
-# R59 當時「刻意複製而非 import」的理由——tools/tests/ 無 __init__.py，`-m unittest
-# <module>` 與 run_root_unittests.py 的 discover 兩種模式下模組名不同，**跨測試檔**
-# import 需 sys.path 手術（R59 主控實跑 `-m unittest tools.tests.test_dev_start` 撞
-# ModuleNotFoundError: No module named _platform_helpers 坐實此限制）——不適用於本次
-# 收斂：本次是各測試檔改為 import `tools/lib/` 底下的一個共用模組（同
-# `bash_probe_spec`／`platform_utils` 既有慣例，走
-# `sys.path.insert(0, tools/lib)` 後 `import <module>`），不是測試檔互相 import，
-# 故不觸及該限制（R66 Architect 確認）。
-#
-# 🔴 ARCH-R57R3-04 指出 `\d+\.\d+` 抓不到三段版號（如 v1.0.1）時「N 份會同時靜默
-# 誤分類」——這個既知缺口未隨當時的收斂修復，只是換成「1 份會誤分類」。
-# 🔴 R80 訂正本段原有的狀態宣稱（DEF-101-870 ①）：原文逐字寫「帳本 DEF-101-521，仍
-# open」，而當回合實查該列是 `fixed@R59` 且已搬進 `AutoSDD_Defect_Log_archive_50.md`
-# （`DEF-101-500` 亦為 `fixed@R57 round 3`）⇒ 被指名的 open 載體在帳本裡不存在。
-# 現行唯一載體＝`DEF-101-870`（三段版號漏抓本身仍未修，只是不再假裝有人在追）。
+# R66 ADR-XPLAT-002 Phase 2-D 收斂（DEF-101-624）：5 份凍結版排除複本改共同 import
+# `tools/lib/sdd_latest.py::FROZEN_SDD_PATH_PREFIX_RE`（見下方 `_ntfs_scan_candidates`）。
+# 收斂沿革全文（R59 刻意複製的理由為何不適用、三段版號既知缺口的現行載體＝DEF-101-870）
+# 搬至 docs/06_quality/CrossPlatform_Guard_Line_History.md〈R66 Phase 2-D 收斂沿革〉節。
 
 # 錨①保留裝置名清單字面值：要求 CON→PRN→AUX→NUL 依序出現，之間只隔少量引號／逗號／
 # 分隔符，故 regex 交替（`CON|PRN|...`）、Python set、PowerShell 陣列、bash case pattern

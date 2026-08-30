@@ -1804,6 +1804,52 @@ class TestR86ThePaceContractWriterMatchesTheEngineReader(unittest.TestCase):
             self.assertIn(key, free)
 
 
+class TestDef200116HeadroomExcludesFallbackAxes(unittest.TestCase):
+    """DEF-200-116：`headroom_pct` 必須讀 gate 面的 binding 軸，與 `band`/`cap` 同一取樣面。
+
+    立案形態：`decision.per_axis` 含保險軸（`Q.FALLBACK_KINDS`），舊實作取
+    `max(全部軸 pct)` ⇒ 同一份 payload 對引擎同時說「還可派 N 個」與「餘裕 0.0」。
+    斷言**值域**而非 docstring 字面——值域鎖比字面鎖強（字面鎖只證明兩邊抄了同一句話）。
+    """
+
+    def test_a_fallback_axis_at_100_pct_does_not_zero_the_headroom(self) -> None:
+        """gate 軸 72% ＋ 保險軸 100%、halt=95 ⇒ 餘裕必須是 23.0（修復前實跑＝0.0）。"""
+        st = state(("session", 72, 30), ("spend", 100, None))
+        decision = Q.decide(st, NOW, P)
+        assert decision.binding is not None
+        self.assertEqual(decision.binding.kind, "session",
+                         "保險軸不得成為 binding（`_in_cap_gate` 排除它）——前提壞了")
+        contract = PC.payload(decision, st, P.max_fanout, P.halt_pct)
+        self.assertEqual(contract["headroom_pct"], 23.0)
+
+    def test_unmeasured_still_yields_a_null_headroom(self) -> None:
+        """邊界：量不到（binding=None）⇒ None 不變，不得折成 0.0。"""
+        st = state(reason="quota_unavailable", source="degraded")
+        contract = PC.payload(Q.decide(st, NOW, P), st, P.max_fanout, P.halt_pct)
+        self.assertIsNone(contract["headroom_pct"])
+
+    def test_a_binding_axis_at_the_halt_line_keeps_the_nonnegative_floor(self) -> None:
+        """邊界：binding 100% ⇒ `max(0,…)`＝0.0，非負契約保持。"""
+        st = state(("session", 100, 30))
+        contract = PC.payload(Q.decide(st, NOW, P), st, P.max_fanout, P.halt_pct)
+        self.assertEqual(contract["headroom_pct"], 0.0)
+
+
+class TestDef200213QuotaReconcileSelfTest(unittest.TestCase):
+    """DEF-200-213④ 的薄調用：紅綠本體住 `quota_reconcile.py --self-test`（零 env 依賴、
+    零機器本地路徑——R100 §D-14 否決 scratchpad 版測試的理由①③反例落在該檔）。"""
+
+    def test_quota_reconcile_self_test_is_green(self) -> None:
+        proc = subprocess.run(
+            [sys.executable, str(_REPO / "tools" / "lib" / "quota_reconcile.py"),
+             "--self-test"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=120)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("RED  PASS", proc.stdout, "紅側標記缺席＝自證失去鑑別力那半")
+        self.assertIn("GREEN  PASS", proc.stdout, "綠側標記缺席＝自證失去對照組那半")
+
+
 class TestR87TheMeterMayNotDropAThrottlingAxis(unittest.TestCase):
     """R87 事故鎖：**取數層不得把「已撞頂但自報 `enabled:false`」的軸丟掉**（判讀層
     只保證給定的軸不被放寬，不保證軸不消失）。立案史料原文＝R89 收尾證據檔

@@ -1445,6 +1445,78 @@ class TestOrphanBacklogProblems(unittest.TestCase):
         self.assertIn("找不到合格表頭", problems[0])
 
 
+class TestReceiptRoundsExcludeTimepointLabels(unittest.TestCase):
+    """DEF-200-195 取數面：`@R<n>` 是時點不是承接者（`_REASSIGN_RE` 註解早已載明，
+    判準此前沒跟上自己的註解）。DEF-200-129 的自列出口與跨列出口共用本函式。"""
+
+    def test_the_at_prefixed_round_does_not_enter_the_receipt_rounds(self) -> None:
+        self.assertEqual(m._receipt_rounds("fixed@R66（一律改派 **R64**）"), [64])
+
+    def test_a_bare_receipt_round_still_counts(self) -> None:
+        self.assertEqual(m._receipt_rounds("一律改派 **R66**"), [66])
+
+    def test_a_status_with_only_timepoint_labels_yields_nothing(self) -> None:
+        self.assertEqual(m._receipt_rounds("fixed@R57 round 3"), [])
+
+
+class TestDef200195CrossRowReceiptFreshnessIsNotSelfSatisfied(unittest.TestCase):
+    """DEF-200-195 的 2×2：跨列回執新鮮度不得被首詞 `fixed@R<當輪>` 自我滿足。
+
+    帳本立案那把注入（`check_defect_log_crossref.py` 跨列出口的 2×2）在此釘成常駐：
+    合成當前輪＝R66（「發現情境」欄現查推得，與本節其他測試同一慣例）。
+    """
+
+    _CONTEXT = _row4("DEF-01-998", "R66 Review round 2", "去向", "fixed")
+    _ORPHAN = _row4("DEF-01-999", "R60 r3 Pkg-X", "去向",
+                    "open（承接輪次：**R2**，明文指派，R2 早已結束）")
+
+    def _with_receipt(self, status: str) -> str:
+        return _ledger_text(
+            self._CONTEXT + self._ORPHAN
+            + _row4("DEF-01-1000", "R66 收尾", "根層治理", status))
+
+    def test_a_current_round_receipt_clears_the_orphan(self) -> None:
+        """(a) 改派 **R<cur>** ⇒ 綠（新鮮回執仍是合法出口）。"""
+        text = self._with_receipt("fixed（本列**改派** DEF-01-999：一律改派 **R66**）")
+        self.assertEqual(m.orphan_backlog_problems(text), [])
+
+    def test_a_stale_receipt_round_does_not_clear_it(self) -> None:
+        """(b) 改派 R<cur-2> ⇒ 紅（對照組：不靠 @R 也過不了新鮮度）。"""
+        text = self._with_receipt("fixed（本列**改派** DEF-01-999：一律改派 **R64**）")
+        self.assertEqual(len(m.orphan_backlog_problems(text)), 1)
+
+    def test_an_unassigned_receipt_clears_it(self) -> None:
+        """(c) 改派＋未指派 ⇒ 綠（硬規則② 後半句自己給的二擇一）。"""
+        text = self._with_receipt(
+            "fixed（本列**改派** DEF-01-999：轉**未指派** backlog＋解鎖條件）")
+        self.assertEqual(m.orphan_backlog_problems(text), [])
+
+    def test_the_first_word_timepoint_no_longer_self_satisfies(self) -> None:
+        """(d) `fixed@R<cur>` 首詞＋改派 R<cur-2> ⇒ 紅（修復前本注入為綠＝假綠重演）。"""
+        text = self._with_receipt("fixed@R66（本列**改派** DEF-01-999：一律改派 **R64**）")
+        problems = m.orphan_backlog_problems(text)
+        self.assertEqual(
+            len(problems), 1,
+            "首詞 fixed@R66 的 @R66 是時點不是承接者，不得滿足「回執輪號 ≥ 當前輪」")
+
+
+class TestDef200129SelfRowExitAwaitsWiring(unittest.TestCase):
+    """DEF-200-129：自列「改派」出口的輪號下限**尚未接線**——本測試把債釘成可見。
+
+    `_receipt_rounds()` 已落地並由跨列出口消費；自列出口仍是純布林。當前輪滯後在
+    R100 的窗口以真帳本重量：上鎖即轉紅 14 筆（逐筆 ID 見主檔 `_receipt_rounds()`
+    docstring），依「大量假紅的閘門會被整個關掉」紀律，接線排在結案輪帳本收斂、
+    重量轉紅=0 之後（載體＝DEF-200-129 回執）。接線落地時本測試必須翻紅並改寫——
+    那正是它存在的目的（現狀被誰改變都不得無聲）。
+    """
+
+    def test_a_stale_self_row_reassignment_still_exits_today(self) -> None:
+        row = _row4("DEF-01-999", "R60 r3 Pkg-X", "去向",
+                    "open（承接輪次：**R2**）🔴 **改派為：R3 backlog**（過期輪號）")
+        context = _row4("DEF-01-998", "R66 Review round 2", "去向", "fixed")
+        self.assertEqual(m.orphan_backlog_problems(_ledger_text(context + row)), [])
+
+
 class TestOrphanBacklogAgainstTheRealLedger(unittest.TestCase):
     """對真實帳本的 live 斷言——構造輸入證明「有牙」，這裡證明「不亂咬」。"""
 

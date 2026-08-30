@@ -266,16 +266,8 @@ def scan_files(files: list[Path], repo_root: Path) -> tuple[list[str], list[str]
 # ══════════════════════════════════════════════════════════════════════════
 # 判準二：**child 編碼**方向（R74／DEF-101-789）
 # ══════════════════════════════════════════════════════════════════════════
-# 本檔原有的判準只守「parent 解碼」一半：`text=True` 要不要帶 `encoding`。
-# 出事那一行 `subprocess.run(cmd, …, text=True, encoding="utf-8",
-# errors="replace")` 對它**百分之百合規**，卻仍在 GitHub windows-latest 上紅——
-# 因為 parent 宣告以 UTF-8 解碼時，沒有任何東西保證 **child 以 UTF-8 編碼**：
-# child 是一支 Python 腳本，它的 stdout/stderr 編碼由 locale 決定，`sys.stderr`
-# 的預設 `errors` 還是 `backslashreplace`，於是
-#   · locale 表達不了 CJK（en-US ＝ cp1252）→ 輸出變 `\uXXXX` 逃脫字面；
-#   · locale 表達得了但非 UTF-8（zh-TW ＝ cp950）→ parent 讀到亂碼。
-# 兩者都不是「亂碼而已」：對 stdout 而言預設 `errors` 是 **strict**，同一條件下
-# 是直接 UnicodeEncodeError 崩潰。**同一份知識在樹裡活了很久、只守了一個方向。**
+# 立案史（parent 合規仍紅的 GitHub windows-latest 實測、cp1252/cp950 兩向失效形態）
+# 搬至 docs/06_quality/CrossPlatform_Guard_Line_History.md〈child 編碼方向立案史〉節。
 #
 # 判準（刻意與判準一同一種豁免體例，只是標記字樣不同）：
 #   - 呼叫的 argv 第一個元素是 `sys.executable`（＝以當前直譯器起 Python child）；
@@ -290,12 +282,7 @@ def scan_files(files: list[Path], repo_root: Path) -> tuple[list[str], list[str]
 #     `rfc_lifecycle_lint.py`——該島因跨子專案 import 隔離搆不到根層
 #     `tools/_stdio_utf8.py`，故島內自留唯一一份實作））。
 #
-# 🔴 R84：第四種形態是**委派**而非新實作，與第二種（`init_utf8_streams`）同型——
-# 不加它，`test_platform_utils_dedup` 的 per-tree shrink-only 棘輪（島內行內複本
-# 只准變少）與本判準會互相抵觸：要收斂就必然要有人改成呼叫委派，而委派名不被認得
-# 就當場被本判準判成「無保護」。兩鎖同時成立的唯一形狀就是讓本表認得委派名。
-# 這不是放寬——被認的仍必須是**真的會 reconfigure** 的呼叫（未 import 即 NameError，
-# 失敗是響的），與第二種形態的強度逐字相同。
+# 🔴 R84：第四種形態是**委派**而非新實作（兩鎖抵觸的推導全文同上節）。
 #
 # 刻意的 heuristic 邊界（都是「不追」而非「放行」，且以下限釘選防靜默縮面）：
 #   - `-m pytest` / `-c <code>` 這類旗標形態不追：child 不是 repo 內某支 .py；
@@ -1099,22 +1086,11 @@ class TestEntryPointStdioProtection(unittest.TestCase):
 # ══════════════════════════════════════════════════════════════════════════
 # 判準四：**production 的 hook 呼叫形態**（R75／DEF-101-802）
 # ══════════════════════════════════════════════════════════════════════════
-# 🔴 缺陷本體：判準二只認「argv 第一個非旗標元素能解析成 repo 內某支 .py」的形態，
-# `-m`／`-c` 明文不追（見該處劃界，那個劃界本身沒錯）。而 `.claude/settings.json`
-# 註冊 hook 用的**正是** `python -c "...runpy.run_path(p)..."` ＋ 把腳本路徑當成
-# 給 `-c` 程式碼的引數——判準二對它結構性全盲。
-#
-# 後果是：R74 那筆 P0（`block_bash_on_windows.py` 的中文指引在 cp1252 下降解成
-# `\uXXXX`）之所以被 child 編碼判準覆蓋到，**唯一原因**是
-# `tools/tests/test_check_hooks_liveness.py` 這支**測試**恰好用
-# `[sys.executable, str(_HOOK)]` 直接執行形態起它（R75 QA 突變時 offender 訊息
-# 逐字指向該行）。那一行改寫成 `-c`、或改用別的起法，判準就**靜默失去 production
-# 唯一的那個站點**——而 production 一直都是 `-c` 形態，從來沒進過射程。
-#
-# 「量測載具只認棄用路徑的 marker、production 走另一條路所以真跑恆 0」是本 repo
-# 已有前例的缺陷形態（DEF-76-001）。本判準把 production 的**註冊表自己**當成掃描
-# 面：settings.json 內每一支被註冊的 hook 腳本都要有 UTF-8 stdio 保護，與誰在測
-# 試裡怎麼起它完全無關。
+# 立案沿革（判準二對 `-c` 形態結構性全盲、R74 P0 只靠測試起法恰好覆蓋、DEF-76-001
+# 同型前例）全文搬至 docs/06_quality/CrossPlatform_Guard_Line_History.md
+# 〈hook 呼叫形態判準立案史〉節。本判準把 production 的**註冊表自己**當成掃描面：
+# settings.json 內每一支被註冊的 hook 腳本都要有 UTF-8 stdio 保護，
+# 與誰在測試裡怎麼起它完全無關。
 _SETTINGS_JSON = _REPO_ROOT / ".claude" / "settings.json"
 
 def hook_command_scripts(settings: dict) -> list[tuple[str, str]]:
@@ -1482,6 +1458,30 @@ class TestRootToolsLintPolicy(unittest.TestCase):
             _RUFF_TOML.is_file(),
             f"{_RUFF_TOML.name} 不存在 ⇒ 根層護欄層又回到「套 ruff 出廠預設」的假綠狀態",
         )
+
+    def test_the_claude_hooks_tree_extends_the_same_config(self) -> None:
+        """DEF-200-209：`.claude/` 樹的設定只做 extend——一份規則一個家。
+
+        沒有這支檔時，執行者把 `.claude/hooks/` 塞進射程套的是 ruff 出廠預設＝假綠
+        （同本類 WHY 的 R68-38 同型病）；改成自帶第二套規則則是漂移的起點。
+        """
+        claude_toml = _REPO_ROOT / ".claude" / "ruff.toml"
+        self.assertTrue(claude_toml.is_file(),
+                        ".claude/ruff.toml 不存在 ⇒ .claude/hooks/ 回到出廠預設假綠")
+        cfg = tomllib.loads(claude_toml.read_text(encoding="utf-8"))
+        self.assertEqual(cfg.get("extend"), "../tools/ruff.toml",
+                         "`.claude/ruff.toml` 必須 extend 根層設定（一份規則一個家），"
+                         "不得自帶第二套 select/line-length")
+
+    def test_both_executors_cover_the_claude_hooks_tree(self) -> None:
+        """兩執行者各一向（防單邊退回）：pre-push 快層④ 與 root-infra-ci 第 16 道。"""
+        for rel in ("tools/git-hooks/pre-push", ".github/workflows/root-infra-ci.yml"):
+            with self.subTest(executor=rel):
+                text = (_REPO_ROOT / rel).read_text(encoding="utf-8")
+                self.assertIn(
+                    "ruff check tools/ .claude/hooks/", text,
+                    f"{rel} 的 ruff 指令不再涵蓋 .claude/hooks/ —— 該樹退回零 ruff "
+                    "閘門（DEF-200-209 的病原樣回來，另一邊還綠著＝單邊退回）")
 
     def test_rule_set_is_identical_to_the_autoclaude_side(self) -> None:
         """規則集**逐字**對齊 AutoClaude；兩邊各走各的門檻就是下一次漂移。"""

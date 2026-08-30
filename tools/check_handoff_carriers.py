@@ -68,6 +68,9 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import git_paths  # noqa: E402  # git 路徑列舉 SSOT（quotepath 安全；DEF-200-212②）
+
 import _cli_flags  # noqa: E402
 import _stdio_utf8  # noqa: E402,F401  # 非 UTF-8 終端 print(✅/❌) 防崩潰
 import check_defect_log_crossref as gate  # noqa: E402
@@ -169,11 +172,23 @@ def ledger_carrier_rounds(ledger_text: str) -> set[int]:
     return rounds
 
 
-def ledger_def_ids(ledger_text: str, archive_texts: list[str]) -> set[str]:
+def ledger_def_ids(ledger_text: str, archive_texts: list[str], *,
+                   unresolved_only: bool = False) -> set[str]:
     """帳本家族（主檔 ∪ archive）內**真的有列**的 DEF-ID 集合。
 
     走 `_ROW_RE` 而不是全文 `_ID_RE`：散文裡提到一個 ID 不等於它有列，而「有沒有一列」
     才是本檔要問的（`DEF-200-015` 已記在案：引用一個不存在的 ID 沒有任何東西轉紅）。
+
+    🔴 DEF-200-212①：`unresolved_only=True` 時**未結列才算承接載體**——本函式要證明的
+    是「有未結承接單位」，一列 `fixed` 的歷史列不承接任何未來工作，拿它滿足判準② 是
+    假綠（與同檔 `ledger_carrier_rounds()` 同一個過濾，先前一個有濾一個沒濾）。
+    ⚠ 閘門面暫**不**預設開啟：當前輪滯後在 R100 時實測轉紅 3 筆
+    （R102_HANDOFF.md:45→DEF-200-204／  ← round-label-ok：引述既有文件檔名，非自稱輪號
+    CrossPlatform_R100_Scan_Findings.md:252→DEF-200-208／
+    CrossPlatform_R107_Ledger_Closure.md:125→DEF-101-559，三筆皆前瞻行指向已結列＝
+    真紅，但其目標輪都早於修復輪 ⇒ 帳本當前輪一走到修復輪即自動祖父化出局）
+    ⇒ 函式已落、閘門接線待結案輪帳本收斂（載體＝DEF-200-212 回執），紅綠由
+    `--self-test` 以 strict 路徑自證。
     """
     ids: set[str] = set()
     for text in [ledger_text, *archive_texts]:
@@ -183,6 +198,9 @@ def ledger_def_ids(ledger_text: str, archive_texts: list[str]) -> set[str]:
                 continue
             cells = gate._row_cells(line)
             if layout is not None and len(cells) != layout[0]:
+                continue
+            if (unresolved_only and layout is not None
+                    and gate._classify(cells[layout[2]]) not in gate._UNRESOLVED_CLASSES):
                 continue
             m = _DEF_ID_RE.search(cells[1] if len(cells) > 1 else line)
             if m:
@@ -233,12 +251,34 @@ def commit_carrier_problems(msgs: list[tuple[str, str]], cur: int | None,
     return problems
 
 
-def carrier_files() -> list[Path]:
-    """註冊 glob 命中的 tracked 交接載體（排序、去重）。"""
+def _tracked_hits(hits: set[Path], tracked: set[str] | None) -> tuple[list[Path], bool]:
+    """glob 命中 ∩ tracked 集合（repo 相對 posix 鍵）。純函式，供 `--self-test` 注入。
+
+    `tracked=None`＝取數管道壞掉 ⇒ 退回 glob 並回報 `fallback=True`（fail-loud not
+    fail-closed，同檔 `commit_messages()` 既有姿態：由判準③ 出聲，不假裝成綠）。
+    """
+    if tracked is None:
+        return sorted(hits), True
+    return (sorted(h for h in hits
+                   if h.relative_to(_REPO_ROOT).as_posix() in tracked), False)
+
+
+def carrier_files() -> tuple[list[Path], bool]:
+    """註冊 glob 命中 ∩ git tracked 的交接載體（排序、去重）＋是否退回純 glob。
+
+    🔴 DEF-200-212②：先前只走 `_REPO_ROOT.glob()`（檔案系統）卻自稱 tracked ⇒ 未追蹤
+    檔被計為 tracked（實證：未追蹤的 `R100_HANDOFF.md` 使普查 85→86 並通過驗證）。
+    保留 pathlib glob 語意（避免 git pathspec 的 `**` 歧義），tracked 集合走 SSOT
+    `git_paths.ls_files()`（quotepath 安全）後取交集。
+    """
     hits: set[Path] = set()
     for g in _CARRIER_GLOBS:
         hits.update(_REPO_ROOT.glob(g))
-    return sorted(hits)
+    try:
+        listed = git_paths.ls_files(_REPO_ROOT, "docs")
+    except OSError:
+        listed = []
+    return _tracked_hits(hits, set(listed) if listed else None)
 
 
 def carrier_doc_problems(paths: list[Path], cur: int | None,
@@ -277,7 +317,8 @@ def carrier_doc_problems(paths: list[Path], cur: int | None,
 
 
 def census_notes(msgs: list[tuple[str, str]], paths: list[Path],
-                 cur: int | None, carriers: set[int]) -> list[str]:
+                 cur: int | None, carriers: set[int],
+                 glob_fallback: bool = False) -> list[str]:
     """判準③：把分母印出來。**「零命中」必須可見**，理由見模組 docstring。"""
     fwd_docs = sum(
         1 for p in paths
@@ -295,6 +336,10 @@ def census_notes(msgs: list[tuple[str, str]], paths: list[Path],
         f"其中前瞻延後行 {fwd_docs} 筆",
         f"commit 訊息＝{len(msgs)} 則；其中含前瞻延後宣告 {fwd_commits} 筆",
     ]
+    if glob_fallback:
+        notes.append(
+            "🔴 [tracked 取數退化] `git ls-files` 取不到 tracked 集合 ⇒ 載體面退回檔案"
+            "系統 glob（未追蹤檔會被計入，上一行的「tracked」此刻不成立；DEF-200-212②）")
     if len(msgs) <= 1:
         notes.append(
             "🔴 [淺 clone] `git log` 只回到 "
@@ -373,6 +418,23 @@ def _self_test() -> int:
                    "指名一個帳本裡查無列的 DEF-ID ⇒ 仍紅（引用 ≠ 有列）")
         finally:
             _REPO_ROOT = keep
+
+    print("[self-test] 判準② 取數面兩假綠（DEF-200-212；strict 路徑，閘門接線待結案輪）")
+    syn_fixed = f"| ID | 狀態 |\n|----|------|\n| {_SYN_ID} | fixed@R{_SYN_CUR} |\n"
+    expect(_SYN_ID not in ledger_def_ids(syn_fixed, [], unresolved_only=True),
+           "已結（fixed）列的 ID 不算承接載體（改前本注入為綠＝假綠重演）")
+    syn_open = (f"| ID | 狀態 |\n|----|------|\n"
+                f"| {_SYN_ID} | open（承接輪次：**R{_SYN_LATER}**） |\n")
+    expect(_SYN_ID in ledger_def_ids(syn_open, [], unresolved_only=True),
+           "未結列的 ID 仍是承接載體（對照組）")
+    syn_hits = {_REPO_ROOT / "docs" / "04_planning" / "R997_HANDOFF.md",  # round-label-ok：合成檔名
+                _REPO_ROOT / "docs" / "04_planning" / "R996_HANDOFF.md"}  # round-label-ok：合成檔名
+    got, fell_back = _tracked_hits(syn_hits, {"docs/04_planning/R997_HANDOFF.md"})
+    expect([p.name for p in got] == ["R997_HANDOFF.md"] and not fell_back,
+           "glob 命中 ∩ tracked：未追蹤路徑被剔除（tracked 語意補真）")
+    got_all, fell_back_all = _tracked_hits(syn_hits, None)
+    expect(len(got_all) == 2 and fell_back_all,
+           "tracked 取不到 ⇒ 退回 glob 並標記 fallback（fail-loud，判準③ 出聲）")
     print(f"\n[self-test] {'❌ ' + str(len(fails)) + ' 項失敗' if fails else '✅ 全部通過'}")
     return 1 if fails else 0
 
@@ -398,8 +460,8 @@ def main(argv: list[str] | None = None) -> int:
     cur = gate.current_round(ledger)
     carriers = ledger_carrier_rounds(ledger)
     msgs = commit_messages()
-    paths = carrier_files()
-    for note in census_notes(msgs, paths, cur, carriers):
+    paths, glob_fallback = carrier_files()
+    for note in census_notes(msgs, paths, cur, carriers, glob_fallback):
         print(f"[census] {note}")
     if "--census" in args:
         return 0
