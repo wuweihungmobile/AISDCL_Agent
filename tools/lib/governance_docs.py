@@ -336,6 +336,11 @@ _GOVERNANCE_DOCS = (
     # 自刪時刻）唯一還能重驗的地方就是它（⇒ 體積守門），且它寫出「該 DEF-ID 詳情現居本檔
     # 某節」的座標宣稱（⇒ 指針稽核）。即刻登記，不等下一輪（DEF-200-131 同型）。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R108_Sentinel_Forensics.md",
+    # R111 哨兵事故鑑識（mac 429 同池同死）：WHY 屬本類＝ round-label-ok
+    # DEF-200-231③/234 的時間軸取證與 D3+D4 mac 重演證據唯一的家（⇒ 體積守門），
+    # 且帳本兩列以「＝R111鑑識檔」座標宣稱指向本檔（⇒ 指針稽核）。 round-label-ok
+    # 即刻登記，同 R108 姊妹檔判例。 round-label-ok
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R111_Sentinel_Forensics_Mac.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/{CrossPlatform,Quota}_*.md`。這**不是**把具名
