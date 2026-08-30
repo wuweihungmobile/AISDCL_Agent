@@ -14,7 +14,8 @@ WHY（為何非得有這道鎖）：
 
 🔴 判準邊界（誠實劃界——這道鎖能抓什麼、抓不到什麼）：
   ✅ 能抓：引用的 `DEF-101-NNN` 在帳本家族（主檔 ＋ 全部 `*_archive_NN.md` ＋
-     姊妹帳本 `AutoSDD_External_Blocked_Log.md`，見 DEF-200-015 四方複審續）裡
+     姊妹帳本 `AutoSDD_External_Blocked_Log.md`／`AutoSDD_Structural_Debt_Log.md`，
+     見 DEF-200-015 四方複審續與 `_SISTER_LEDGER_RELS` 註解）裡
      **找不到對應列**。判準＝該 ID 出現在某檔某列的**第一欄**（表格主鍵位置），
      即「有一列以它為主鍵」，而不是隨便被別列的內文提到。
   ❌ 抓不到：引用的號**存在但內容不對**（＝R60 那 21 處的實際形態）。判斷「這段
@@ -62,7 +63,12 @@ _LEDGER_PREFIX = "docs/06_quality/AutoSDD_Defect_Log"
 # 🔴 DEF-200-015 四方複審續：`AutoSDD_External_Blocked_Log.md` 是主帳本以外**另一份
 # 真的以 DEF-ID 為主鍵**的姊妹帳本（拆自主帳本、專記外部條件阻塞項），此前不在
 # `_LEDGER_GLOB` 掃描面內 ⇒ 拆過去的號（如 DEF-200-185／186）對本鎖結構上必為懸空。
-_EXTERNAL_LEDGER_REL = "docs/06_quality/AutoSDD_External_Blocked_Log.md"
+# 🔴 結構性長債軌（掌舵者 2026-08-30 核准分軌）：同為以 DEF-ID 為主鍵的姊妹帳本，
+# 不納管則遷入的列對「懸空引用」鎖結構上必紅（DEF-200-227 同型判例），故一併列入。
+_SISTER_LEDGER_RELS = (
+    "docs/06_quality/AutoSDD_External_Blocked_Log.md",
+    "docs/06_quality/AutoSDD_Structural_Debt_Log.md",
+)
 
 # 帳本「某一列以此 ID 為主鍵」＝該 ID 出現在 markdown 表格第一欄。
 _LEDGER_ROW_RE = re.compile(r"^\s*\|\s*(DEF-\d+-\d+)\s*\|")
@@ -92,9 +98,10 @@ def ledger_primary_ids(ledger_dir: Path = _LEDGER_DIR) -> set[str]:
     所定義的 ID 全集。"""
     ids: set[str] = set()
     paths = sorted(ledger_dir.glob(_LEDGER_GLOB))
-    external = ledger_dir / Path(_EXTERNAL_LEDGER_REL).name
-    if external.is_file():
-        paths.append(external)
+    for rel in _SISTER_LEDGER_RELS:
+        sister = ledger_dir / Path(rel).name
+        if sister.is_file():
+            paths.append(sister)
     for path in paths:
         for line in path.read_text(encoding="utf-8-sig").splitlines():
             m = _LEDGER_ROW_RE.match(line)
@@ -142,7 +149,7 @@ def _git_grep(repo_root: Path) -> str:
 def is_ledger_path(path: str) -> bool:
     """該路徑是否屬帳本家族（ID 的定義處，不計為引用）。"""
     posix = path.replace("\\", "/")
-    return posix.startswith(_LEDGER_PREFIX) or posix == _EXTERNAL_LEDGER_REL
+    return posix.startswith(_LEDGER_PREFIX) or posix in _SISTER_LEDGER_RELS
 
 
 def scan_references(repo_root: Path = _REPO_ROOT) -> tuple[list[tuple[str, str, str]], int]:

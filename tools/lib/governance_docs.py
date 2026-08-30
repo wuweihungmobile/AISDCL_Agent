@@ -309,6 +309,19 @@ _GOVERNANCE_DOCS = (
     # 唯一還能重驗該筆結案的地方（⇒ 體積守門），且逐節寫出「DEF-200-185 現居本檔」的
     # 座標宣稱（⇒ 指針稽核）。即刻登記，不等下一輪。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_External_Blocked_Recheck_20260827.md",
+    # 外部阻塞軌帳本本體（漏登已久，結構性長債分軌輪一併補登）：它是主帳本以外以 DEF-ID
+    # 為主鍵的姊妹帳本，承擔與帳本同等的可讀性義務（列進去的每一筆都要能被複查者讀完
+    # ⇒ 體積守門），且逐列寫出「解鎖條件在哪、複查證據在哪」的座標宣稱（⇒ 指針稽核）。
+    # 檔名不符 CrossPlatform_*／Quota_* 發現面 glob，故此前「磁碟上有卻沒登記」對
+    # unregistered_governance_docs() 結構上不可見——具名補登即本行。
+    _REPO_ROOT / "docs" / "06_quality" / "AutoSDD_External_Blocked_Log.md",
+    # 結構性長債軌帳本本體（掌舵者 2026-08-30 核准分軌，存證＝AutoSDD_TechDebt_Paydown_
+    # Playbook.md §6 第 3 條）：資格同上一列——以 DEF-ID 為主鍵的姊妹帳本，受體積守門
+    # 與指針稽核。判準與成長棘輪見 tools/lib/ledger_closing_guards.py 機械物②-b。
+    _REPO_ROOT / "docs" / "06_quality" / "AutoSDD_Structural_Debt_Log.md",
+    # 結構性長債分軌輪證據檔：帳本 7 筆遷軌列與 DEF-200-212 結案列皆已瘦身為索引，逐字
+    # 證據唯一居所在本檔（⇒ 體積守門），且逐節寫出「哪筆結案的憑證在哪一節」（⇒ 指針稽核）。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R113_Ledger_Closure.md",
     # DEF-101-752（R82）帳本瘦身的接收端：帳本該列 R82 前的「狀態」欄原文（逐字保全）＋
     # R82 三處收斂的紅綠自證輸出，皆已從主檔搬出。資格同上——帳本列已瘦身成索引 ⇒ 唯一還
     # 能重驗該次結案的地方就是它（⇒ 體積守門），且它逐節寫出「DEF-101-752 原文現居本檔
@@ -351,5 +364,13 @@ _GOVERNANCE_DOCS = (
 # `Path.glob()` 不支援單一字串內的前綴交替（無 `{a,b}` 語法），故改為**樣式元組**、
 # 呼叫端逐一 glob 後聯集。新增樣式前先確認不會誤撈 `docs/06_quality/` 既有其他慣例
 # （已現查：`Quota_*.md` 今日在該目錄下唯一命中即 `Quota_R90_CrossAccount_Experiment.md`）。
-_GOVERNANCE_DOC_GLOBS = ("CrossPlatform_*.md", "Quota_*.md")
+_GOVERNANCE_DOC_GLOBS = (
+    "CrossPlatform_*.md", "Quota_*.md",
+    # 分軌帳本本體（外部阻塞軌／結構性長債軌）：以 DEF-ID 為主鍵的姊妹帳本，承擔帳本級
+    # 義務卻不循 CrossPlatform_*/Quota_* 命名（它們是常設帳本、不是輪次證據檔）。glob 取
+    # **逐字檔名**＝發現面與登記面對這兩支恆等；刻意不用 `AutoSDD_*` 寬樣式——那會把
+    # 主帳本與 archive 家族也撈進來，而那個家族另有自己的體積守門與輪替程序。
+    "AutoSDD_External_Blocked_Log.md",
+    "AutoSDD_Structural_Debt_Log.md",
+)
 _GOVERNANCE_DOC_DIR = _REPO_ROOT / "docs" / "06_quality"

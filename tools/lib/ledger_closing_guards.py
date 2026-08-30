@@ -176,6 +176,18 @@ EXTERNAL_BLOCKED_LOG_NAME = "AutoSDD_External_Blocked_Log.md"
 NAMED_BLOCKER_SOURCE_RE = re.compile(
     r"(GitHub Actions 帳務|Windows 實機|上游套件|其他-\S+)"
 )
+# ---------------------------------------------- 機械物②-b 結構性長債軌（同判準、scoped 枚舉）
+# 掌舵者 2026-08-30 核准分軌（存證＝docs/04_planning/AutoSDD_TechDebt_Paydown_Playbook.md
+# §6 第 3 條）：把「跨輪工程／內部授權」型長債自主帳本未結列分軌出去，讓未結列數量到的
+# 是「單輪可修的債」。判準**共用** `external_blocked_log_problems()`（依賴注入 log_name／
+# source_re），不另寫第二份三向判準——差異只在枚舉值的射程：
+# 🔴 **兩軌枚舉刻意互斥**（互為後門是要防的形態）：外部軌四值不匹配 `結構性長債-\S+`、
+# 長債 token 也不匹配外部軌四形態，任何一筆想「換一本帳混出警戒線」都會在該軌被 fullmatch 拒絕。
+STRUCTURAL_DEBT_LOG_NAME = "AutoSDD_Structural_Debt_Log.md"
+STRUCTURAL_DEBT_SOURCE_RE = re.compile(r"結構性長債-\S+")
+#: 成長棘輪：長債軌不得成為「比外部軌更好用的後門」。新列必須先有掌舵者具名裁決，
+#: 裁決落款後才准把本常數重釘為新值（重釘與新列須在同一次變更內，理由寫在裁決存證處）。
+_STRUCTURAL_DEBT_MAX_ROWS = 7
 _EXT_ROW_RE = re.compile(r"^\|\s*(DEF-\d+-\d+)\s*\|")
 _EXT_CELL_SPLIT_RE = re.compile(r"(?<!\\)\|")
 _DEF_ID_RE = re.compile(r"DEF-\d+-\d+")
@@ -203,11 +215,15 @@ def _ext_rows(text: str) -> list[tuple[int, list[str]]]:
 
 
 def external_blocked_log_problems(
-    text: str, main_unresolved_ids: set[str], today: date | None = None,
+    text: str, main_unresolved_ids: set[str], today: date | None = None, *,
+    log_name: str = EXTERNAL_BLOCKED_LOG_NAME,
+    source_re: re.Pattern[str] = NAMED_BLOCKER_SOURCE_RE,
 ) -> tuple[list[str], list[str]]:
-    """外部阻塞軌的三向判準；回傳 `(fail 清單, warn 清單)`（純函式，可構造輸入驗牙）。
+    """外部阻塞軌／結構性長債軌共用的三向判準；回傳 `(fail 清單, warn 清單)`（純函式）。
 
-    ① 具名阻塞源限枚舉（`NAMED_BLOCKER_SOURCE_RE`）——防「把 A 類偽裝成 E 類混出警戒線」。
+    ① 具名阻塞源限枚舉（`source_re.fullmatch`，R-01 教訓：只錨頭不錨尾＝防線不存在）
+       ——防「把 A 類偽裝成 E 類／長債混出警戒線」。枚舉射程由呼叫端注入：外部軌＝
+       `NAMED_BLOCKER_SOURCE_RE`（預設），長債軌＝`STRUCTURAL_DEBT_SOURCE_RE`，兩軌互斥。
     ② 交叉鎖——同一 DEF-ID 不得同時出現在主帳本未結列與本表（出現即 fail：那代表這筆
        缺陷「既算我們欠的債、又宣稱不算」，兩本帳各說各話）。
     ③ 「最近複查日」逾期（`STALE_REVIEW_DAYS`）——warn，不 fail（見上）。
@@ -220,36 +236,54 @@ def external_blocked_log_problems(
     for lineno, cells in _ext_rows(text):
         if len(cells) != _EXPECTED_CELLS:
             fails.append(
-                f"{EXTERNAL_BLOCKED_LOG_NAME}:{lineno}：該列切出 {len(cells)} 個切片 "
+                f"{log_name}:{lineno}：該列切出 {len(cells)} 個切片 "
                 f"≠ 表頭 {_EXPECTED_CELLS} 個（欄位定位失效，本列不判讀）")
             continue
         def_id = cells[_COL_ID]
         source = cells[_COL_SOURCE]
         review = cells[_COL_REVIEW]
-        if not NAMED_BLOCKER_SOURCE_RE.fullmatch(source):
+        if not source_re.fullmatch(source):
             fails.append(
-                f"{EXTERNAL_BLOCKED_LOG_NAME}:{lineno} {def_id}：阻塞源 {source!r} 不是"
-                "具名枚舉值（合法：`GitHub Actions 帳務`／`Windows 實機`／`上游套件`／"
-                "`其他-<具體理由>`）——自由文字一律 fail，這是防止把可修的真缺陷"
-                "偽裝成外部阻塞混出未結列警戒線的唯一機械物")
+                f"{log_name}:{lineno} {def_id}：阻塞源 {source!r} 不是"
+                f"具名枚舉值（本表合法形態＝fullmatch r'{source_re.pattern}'；"
+                "兩軌枚舉刻意互斥，不得拿另一軌的值當後門）——自由文字一律 fail，"
+                "這是防止把可修的真缺陷偽裝成阻塞／長債混出未結列警戒線的唯一機械物")
         if def_id in main_unresolved_ids:
             fails.append(
-                f"{EXTERNAL_BLOCKED_LOG_NAME}:{lineno} {def_id}：同時出現在主帳本"
-                "未結列與外部阻塞軌——兩本帳對同一筆缺陷各說各話。若已外部阻塞，"
-                "主帳本該列應收斂為指向本表的索引，不應仍以未結狀態留在主帳本")
+                f"{log_name}:{lineno} {def_id}：同時出現在主帳本"
+                f"未結列與本表（{log_name}）——兩本帳對同一筆缺陷各說各話。"
+                "若已分軌，主帳本該列應收斂為指向本表的索引，不應仍以未結狀態留在主帳本")
         try:
             days = (today - date.fromisoformat(review)).days
         except ValueError:
             fails.append(
-                f"{EXTERNAL_BLOCKED_LOG_NAME}:{lineno} {def_id}：「最近複查日」"
+                f"{log_name}:{lineno} {def_id}：「最近複查日」"
                 f"{review!r} 不是可解析的 ISO 日期（YYYY-MM-DD）")
             continue
         if days > STALE_REVIEW_DAYS:
             warns.append(
-                f"{EXTERNAL_BLOCKED_LOG_NAME}:{lineno} {def_id}：最近複查日 {review} "
+                f"{log_name}:{lineno} {def_id}：最近複查日 {review} "
                 f"距今 {days} 天 > {STALE_REVIEW_DAYS} 天，請確認阻塞是否仍成立"
-                "（外部阻塞軌若沒人回頭看，會變成永久垃圾桶）")
+                "（分軌帳本若沒人回頭看，會變成永久垃圾桶）")
     return fails, warns
+
+
+def structural_debt_growth_problems(
+    count: int, ceiling: int = _STRUCTURAL_DEBT_MAX_ROWS,
+) -> list[str]:
+    """長債軌成長棘輪（純函式；`count > ceiling` 即 fail，回空＝合規）。
+
+    防的形態＝長債軌變成「比外部軌更好用的後門」：外部軌有 14 天複查與枚舉互斥擋著，
+    長債軌若可無聲加列，未結列警戒線就多了一個免裁決的洩壓口。
+    """
+    if count <= ceiling:
+        return []
+    return [
+        f"{STRUCTURAL_DEBT_LOG_NAME}：登記 {count} 筆 > 成長棘輪上限 {ceiling}。"
+        "長債軌不是免裁決的洩壓口：新增一列必須先取得**掌舵者具名裁決**"
+        "（存證比照 AutoSDD_TechDebt_Paydown_Playbook.md §6 的落款體例），"
+        "裁決落款後才准把 _STRUCTURAL_DEBT_MAX_ROWS 重釘為新值（重釘與新列同一次變更）"
+    ]
 
 
 def external_blocked_ids(text: str) -> list[str]:
@@ -261,18 +295,22 @@ def external_blocked_ids(text: str) -> list[str]:
     return sorted(cells[_COL_ID] for _, cells in _ext_rows(text) if len(cells) == _EXPECTED_CELLS)
 
 
-def _read_external_log(quality_dir: Path) -> str:
-    path = quality_dir / EXTERNAL_BLOCKED_LOG_NAME
+def _read_track_log(quality_dir: Path, name: str = EXTERNAL_BLOCKED_LOG_NAME) -> str:
+    path = quality_dir / name
     return path.read_text(encoding="utf-8-sig") if path.exists() else ""
 
 
 def print_external_blocked_count(quality_dir: Path) -> None:
-    """`--unresolved-count` 的補充輸出：外部軌筆數必須永遠可見（任務書明講「不可以讓它
+    """`--unresolved-count` 的補充輸出：兩軌筆數必須永遠可見（任務書明講「不可以讓它
     悄悄消失」）——本函式即那句話的機械化，由 caller 在印主帳本未結數的同一個入口呼叫。
+    外部軌那一行的字面**逐字不變**（既有測試字面斷言），長債軌比照格式另起一行。
     """
-    ids = external_blocked_ids(_read_external_log(quality_dir))
+    ids = external_blocked_ids(_read_track_log(quality_dir))
     print(f"外部阻塞軌（{EXTERNAL_BLOCKED_LOG_NAME}，不計入未結列 warn/fail 分母）："
           f"{len(ids)} 筆" + (f"｜{'、'.join(ids)}" if ids else ""))
+    sd_ids = external_blocked_ids(_read_track_log(quality_dir, STRUCTURAL_DEBT_LOG_NAME))
+    print(f"結構性長債軌（{STRUCTURAL_DEBT_LOG_NAME}，不計入未結列 warn/fail 分母）："
+          f"{len(sd_ids)} 筆" + (f"｜{'、'.join(sd_ids)}" if sd_ids else ""))
 
 
 # ============================================================ 兩個判準的統一入口
@@ -290,11 +328,17 @@ def closing_round_problems(
     """
     problems = list(net_new_vs_closed_problems(
         repo_root, ledger_path, curr_ledger, table_layout, row_cells, classify, row_re, id_re))
-    ext_text = _read_external_log(ledger_path.parent)
+    ext_text = _read_track_log(ledger_path.parent)
     unresolved = _idx.UNRESOLVED_CLASSES
     main_unresolved = {i for i, c in curr_ledger.items() if c in unresolved}
     fails, warns = external_blocked_log_problems(ext_text, main_unresolved)
-    for w in warns:
+    # 長債軌跑**同一支**三向判準（scoped source_re）＋成長棘輪（見機械物②-b 常數區）。
+    sd_text = _read_track_log(ledger_path.parent, STRUCTURAL_DEBT_LOG_NAME)
+    sd_fails, sd_warns = external_blocked_log_problems(
+        sd_text, main_unresolved,
+        log_name=STRUCTURAL_DEBT_LOG_NAME, source_re=STRUCTURAL_DEBT_SOURCE_RE)
+    sd_fails += structural_debt_growth_problems(len(external_blocked_ids(sd_text)))
+    for w in warns + sd_warns:
         print(f"⚠️  {w}", file=sys.stderr)
-    problems += fails
+    problems += fails + sd_fails
     return problems

@@ -566,15 +566,15 @@ def row_bytes(ledger_text: str) -> dict[str, int]:
 #: 證據（人工確認訴求仍待，未結案）跌破線至 1020 bytes，新增列入（44+1=45，實測值
 #: 與 `expiring_oversize_waivers()` 算出的 `new_ceiling` 一致，非放寬）。
 OVERSIZE_ROW_GRANDFATHERED: frozenset[str] = frozenset("""
-DEF-100-002 DEF-101-018 DEF-101-060 DEF-101-205 DEF-101-233
-DEF-101-263 DEF-101-324 DEF-101-338 DEF-101-398 DEF-101-399
-DEF-101-402 DEF-101-415 DEF-101-518 DEF-101-557 DEF-101-559
-DEF-101-610 DEF-101-649 DEF-101-675 DEF-101-701 DEF-101-702
-DEF-101-736 DEF-101-739 DEF-101-740 DEF-101-747 DEF-101-748
-DEF-101-769 DEF-101-790 DEF-101-794 DEF-101-796 DEF-101-801
-DEF-101-802 DEF-101-803 DEF-101-810 DEF-101-856 DEF-101-867
-DEF-101-871 DEF-101-872 DEF-101-876 DEF-101-878 DEF-101-880
-DEF-101-886 DEF-101-887 DEF-101-888 DEF-200-190
+DEF-100-002 DEF-101-060 DEF-101-205 DEF-101-233 DEF-101-263
+DEF-101-324 DEF-101-338 DEF-101-398 DEF-101-399 DEF-101-402
+DEF-101-415 DEF-101-518 DEF-101-557 DEF-101-559 DEF-101-610
+DEF-101-649 DEF-101-675 DEF-101-701 DEF-101-702 DEF-101-736
+DEF-101-739 DEF-101-740 DEF-101-747 DEF-101-748 DEF-101-769
+DEF-101-790 DEF-101-794 DEF-101-796 DEF-101-801 DEF-101-802
+DEF-101-803 DEF-101-810 DEF-101-856 DEF-101-867 DEF-101-871
+DEF-101-872 DEF-101-876 DEF-101-878 DEF-101-880 DEF-101-886
+DEF-101-887 DEF-101-888 DEF-200-190
 """.split())
 
 #: 具名清單的**筆數**上限（形狀照抄 `check_defect_log_crossref._UNPINNED_HANDOVER_CEILING`）。
@@ -617,7 +617,7 @@ DEF-101-886 DEF-101-887 DEF-101-888 DEF-200-190
 #: 索引（原文逐字保全於 `CrossPlatform_R82_DEF101752_Untracked_Scan_Closure.md` §3.1）
 #: ⇒ 豁免過期，依②向訊息自己指名的動作自上方清單移除（`--repin-oversize` 機械收緊），
 #: 不是放寬。本值＝當回合實測超標列數，零加減推算。
-OVERSIZE_ROW_CEILING = 44
+OVERSIZE_ROW_CEILING = 43
 
 #: 存量列的**超標總量**（Σ max(0, 列 bytes − 上限)）上限。上面三條管的是「有幾列超標」，
 #: 這一條管的是「超標多少」——少了它，一列 800 bytes 的豁免列可以長到 8,000 bytes 而
@@ -742,7 +742,7 @@ OVERSIZE_ROW_CEILING = 44
 #: 700 以下的搬離量，`--repin-oversize` 當回合實測值直接填入、零推算）。方向只有降：
 #: 該列長文逐字搬進 `CrossPlatform_R82_DEF101752_Untracked_Scan_Closure.md` §3.1，
 #: 走的是本判準訊息自己指定的合法出口（結案與瘦身同一動作）。
-OVERSIZE_ROW_EXCESS_CEILING = 34712
+OVERSIZE_ROW_EXCESS_CEILING = 27657
 
 
 def oversize_row_problems(ledger_text: str) -> list[str]:

@@ -3587,6 +3587,7 @@ class TestExternalBlockedLog(unittest.TestCase):
         with contextlib.redirect_stdout(buf):
             lcg.print_external_blocked_count(quality_dir)
         self.assertIn("0 筆", buf.getvalue())
+        self.assertIn("結構性長債軌", buf.getvalue())
 
     def test_print_external_blocked_count_lists_ids(self) -> None:
         quality_dir = Path(tempfile.mkdtemp(prefix="ext_present_"))
@@ -3599,13 +3600,123 @@ class TestExternalBlockedLog(unittest.TestCase):
         out = buf.getvalue()
         self.assertIn("1 筆", out)
         self.assertIn("DEF-9-001", out)
+        self.assertIn("結構性長債軌", out)
 
-    def test_the_real_doc_is_well_formed_and_currently_empty(self) -> None:
-        """本輪落地的真檔：空表頭即合規（資料列由書記填）。"""
+    def test_the_real_doc_is_well_formed(self) -> None:
+        """真檔判準只斷言 `fails == []`——warn 屬 advisory 非阻斷級，日期引信已拆。
+
+        WHY（結構性長債分軌輪拆彈，2026-08-30）：本測試原以 `date.today()` 斷言
+        `([], [])`，等於把 warn 升級成 fail 且帶時間引信——外部軌任一列複查日停更
+        14 天後（純粹時間流逝、零程式改動）本測試在 pre-push 與 CI 同時轉紅。
+        warn 行為本身的鑑別力由上方注入固定日期的 `test_stale_review_is_warn_not_fail`
+        守著，拆彈不減鑑別力。
+        """
         path = m._REPO_ROOT / "docs" / "06_quality" / lcg.EXTERNAL_BLOCKED_LOG_NAME
         self.assertTrue(path.exists(), f"找不到 {path}")
         text = path.read_text(encoding="utf-8-sig")
-        self.assertEqual(lcg.external_blocked_log_problems(text, set()), ([], []))
+        fails, _warns = lcg.external_blocked_log_problems(text, set())
+        self.assertEqual(fails, [])
+
+
+class TestStructuralDebtLog(unittest.TestCase):
+    """結構性長債軌（掌舵者 2026-08-30 分軌裁決；判準共用外部軌、注入 scoped source_re）。
+
+    🔴 本組**全部注入固定日期** `date(2026, 8, 30)`：14 天複查 warn 是日期的函式，走
+    `date.today()` 的斷言會變成時間引信（上一支真檔測試拆彈的正是這個形態），故本組
+    一支都不走系統時鐘。
+    """
+
+    HEAD = TestExternalBlockedLog.HEAD
+    TODAY = date(2026, 8, 30)
+
+    def _row(self, def_id: str, source: str, review: str = "2026-08-30") -> str:
+        return f"| {def_id} | {source} | 2026-08-30 | 見解鎖條件說明 | {review} |\n"
+
+    def _problems(
+        self, text: str, unresolved: set[str] | None = None,
+    ) -> tuple[list[str], list[str]]:
+        return lcg.external_blocked_log_problems(
+            text, unresolved or set(), self.TODAY,
+            log_name=lcg.STRUCTURAL_DEBT_LOG_NAME,
+            source_re=lcg.STRUCTURAL_DEBT_SOURCE_RE)
+
+    def test_structural_token_is_accepted(self) -> None:
+        """`結構性長債-<具名理由>` 是本軌唯一合法形態（fullmatch，R-01 教訓沿用）。"""
+        text = self.HEAD + self._row("DEF-9-001", "結構性長債-ruff存量分批清")
+        self.assertEqual(self._problems(text), ([], []))
+
+    def test_external_enum_values_are_rejected_in_this_track(self) -> None:
+        """兩軌枚舉互斥的前半：外部軌四值寫進長債軌一律 fail（互為後門是要防的形態）。"""
+        for source in ("GitHub Actions 帳務", "Windows 實機", "上游套件", "其他-供應商停服"):
+            with self.subTest(source=source):
+                fails, _ = self._problems(self.HEAD + self._row("DEF-9-001", source))
+                self.assertEqual(len(fails), 1)
+                self.assertIn("不是具名枚舉值", fails[0])
+
+    def test_structural_token_is_rejected_in_the_external_track(self) -> None:
+        """互斥的後半：長債 token 寫進外部軌（預設 source_re）同樣 fail。"""
+        text = self.HEAD + self._row("DEF-9-001", "結構性長債-任意理由")
+        fails, _ = lcg.external_blocked_log_problems(text, set(), self.TODAY)
+        self.assertEqual(len(fails), 1)
+        self.assertIn("不是具名枚舉值", fails[0])
+
+    def test_bare_prefix_without_a_token_is_rejected(self) -> None:
+        """裸「結構性長債」不是萬用桶（`\\S+` 要求連字號後至少一個非空白字元）。"""
+        for source in ("結構性長債", "結構性長債-", "結構性長債-有 空白"):
+            with self.subTest(source=source):
+                fails, _ = self._problems(self.HEAD + self._row("DEF-9-001", source))
+                self.assertEqual(len(fails), 1, fails)
+
+    def test_crosslock_rejects_id_also_unresolved_in_main(self) -> None:
+        """同 ID 不得雙帳並存：主帳本未結列 × 長債軌同時出現 ⇒ fail。"""
+        text = self.HEAD + self._row("DEF-9-001", "結構性長債-x")
+        fails, _ = self._problems(text, {"DEF-9-001"})
+        self.assertEqual(len(fails), 1)
+        self.assertIn("同時出現", fails[0])
+
+    def test_stale_review_is_warn_not_fail(self) -> None:
+        """14 天複查逾期 ⇒ warn 不 fail（注入日期：2026-08-01 → 2026-08-30 為 29 天）。"""
+        text = self.HEAD + self._row("DEF-9-001", "結構性長債-x", review="2026-08-01")
+        fails, warns = self._problems(text)
+        self.assertEqual(fails, [])
+        self.assertEqual(len(warns), 1)
+        self.assertIn("距今", warns[0])
+
+    def test_growth_ratchet_red_green(self) -> None:
+        """成長棘輪：count > ceiling 紅（訊息要求具名裁決後才准重釘）、= ceiling 綠。"""
+        self.assertEqual(lcg.structural_debt_growth_problems(7, ceiling=7), [])
+        problems = lcg.structural_debt_growth_problems(8, ceiling=7)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("具名裁決", problems[0])
+
+    def test_the_real_doc_is_well_formed(self) -> None:
+        """真檔（缺陷總表 7 列）：只斷言 `fails == []`（warn 屬 advisory）＋成長棘輪綠。
+
+        交叉鎖餵**真主帳本**的未結集合：遷軌的 7 筆若仍以未結狀態留在主帳本，這裡當場紅。
+        """
+        path = m._REPO_ROOT / "docs" / "06_quality" / lcg.STRUCTURAL_DEBT_LOG_NAME
+        self.assertTrue(path.exists(), f"找不到 {path}")
+        text = path.read_text(encoding="utf-8-sig")
+        ledger = m._load_ledger_status()
+        unresolved = {i for i, c in ledger.items() if c in m._UNRESOLVED_CLASSES}
+        fails, _warns = self._problems(text, unresolved)
+        self.assertEqual(fails, [])
+        self.assertEqual(
+            lcg.structural_debt_growth_problems(len(lcg.external_blocked_ids(text))), [])
+
+    def test_print_lists_the_structural_debt_track(self) -> None:
+        """print 函式必須列出長債軌筆數與 ID（「永遠可見、不得悄悄消失」的機械化）。"""
+        quality_dir = Path(tempfile.mkdtemp(prefix="sd_present_"))
+        self.addCleanup(shutil.rmtree, quality_dir, ignore_errors=True)
+        (quality_dir / lcg.STRUCTURAL_DEBT_LOG_NAME).write_text(
+            self.HEAD + self._row("DEF-9-001", "結構性長債-x"), encoding="utf-8")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            lcg.print_external_blocked_count(quality_dir)
+        out = buf.getvalue()
+        self.assertIn("結構性長債軌", out)
+        self.assertIn("1 筆", out)
+        self.assertIn("DEF-9-001", out)
 
 
 class TestClosingRoundProblemsWiring(unittest.TestCase):
@@ -3687,6 +3798,7 @@ class TestClosingRoundProblemsWiring(unittest.TestCase):
         self.assertIn("外部阻塞軌", printed)
         self.assertIn("1 筆", printed)
         self.assertIn("DEF-01-002", printed)
+        self.assertIn("結構性長債軌", printed)
 
 
 class TestArchiveRequiredProblems(unittest.TestCase):

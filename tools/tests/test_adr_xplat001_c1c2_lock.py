@@ -682,14 +682,14 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 6391,
+    "test_adr_xplat001_c1c2_lock.py": 6412,
     "test_archive_defect_log.py": 3986,
     "test_bash32_compat.py": 1020,
     "test_bash_probe_spec_contract.py": 983,
     "test_block_destructive_git_r83.py": 2195,
     "test_bootstrap_core.py": 439,
     "test_bootstrap_ps1.py": 160,
-    "test_check_defect_log_crossref.py": 3794,
+    "test_check_defect_log_crossref.py": 3906,
     "test_check_gha_action_versions.py": 295,
     "test_check_hooks_liveness.py": 3581,
     "test_check_pytest_baseline_sites.py": 301,
@@ -698,7 +698,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_claim_provenance_r86.py": 618,
     "test_component_sanitizer_shared_layer_lock.py": 293,
     "test_context_budget_guard.py": 8178,
-    "test_defect_id_reference_integrity.py": 274,
+    "test_defect_id_reference_integrity.py": 281,
     "test_dev_start.py": 7007,
     "test_dev_start_ps1_lastexitcode.py": 548,
     "test_doc_env_prefix_platform_parity_r60.py": 340,
@@ -1245,6 +1245,16 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "lookahead 後設鎖＋紅綠＋兌現 (111, 595) 並重新武裝 113／585（步伐 10<15）。"
      "本檔自身＝搬遷 −21 ＋ 121 面 +57 ＋ 本稽核列、rewrite ledger 追加與凍結前綴延伸"
      "（80→81）。逐檔清單見 CrossPlatform_R106_Scan_Findings.md 的 R111 標記行。"),
+    ("R113", 89452, 89592, 140,
+     "[非淨減法輪] R113 結構性長債分軌輪（收尾單人窗口；掌舵者 2026-08-30 核准，存證＝"
+     "AutoSDD_TechDebt_Paydown_Playbook.md §6 第 3 條）。新增面：TestStructuralDebtLog "
+     "九支（scoped source_re 紅綠／兩軌枚舉互斥／交叉鎖／成長棘輪／真檔 well-formed／"
+     "print 可見性）＋外部軌真檔測試拆 date.today() 日期引信＋三支既有 print 測試擴斷言"
+     "（test_check_defect_log_crossref.py 3794→3906）；姊妹帳本擴面 _SISTER_LEDGER_RELS"
+     "（test_defect_id_reference_integrity.py 274→281）；本檔自身＝本稽核列＋兌現 "
+     "(113, 585) 並重新武裝 115／577（步伐 8<10）。淨額為正＝streak 第 1 輪（前一輪 "
+     "-15 已歸零），未逾每輪上限。逐檔清單見 CrossPlatform_R106_Scan_Findings.md 的 "
+     "R113 標記行。"),
 )
 
 
@@ -1291,6 +1301,8 @@ _REPIN_NET_CAP_SCHEDULE: tuple[tuple[int, int], ...] = (
     (111, 595),   # 到期輪兌現（DEF-200-121 修復窗口）：cap 降到到期目標本身（同 R99 判例）。
                   # 同輪重新武裝下一段：步伐 10 < 前一段的 15，續守「步伐變小」；並補上
                   # 到期輪自身的 lookahead 後設鎖（見 `_REPIN_DUE_ROUND_MAX_LOOKAHEAD`）。
+    (113, 585),   # 到期輪兌現（結構性長債分軌輪，2026-08-30）：cap 降到到期目標本身。
+                  # 同輪重新武裝下一段：步伐 8 < 前一段的 10，續守「步伐變小」，見 due 常數旁註。
 )
 #: 生效點＝首列輪號、現行上限＝末列上限，**皆由表導出不另立常數**（R73 判例：一份知識一個家）。
 _REPIN_ROUND_CAP_SINCE = _REPIN_NET_CAP_SCHEDULE[0][0]
@@ -1374,10 +1386,10 @@ def net_cap_schedule_problems(
 #: 設計（5400→3200 起）與 R89 互斥推導全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈到期義務與重新武裝 WHY〉節；R101 起歷次兌現的 round-label-ok
 #: 逐段沿革搬至 CrossPlatform_Guard_Line_History.md〈到期義務兌現沿革〉節。
-#: 本次兌現（DEF-200-121 修復窗口）：cap 降到目標本身（595，見 `(111, 595)` 列），
-#: 同輪重新武裝下一段：步伐 10 < 前一段的 15，續守「步伐刻意變小」且目標嚴格低於現行 cap。
-_REPIN_NET_CAP_DUE_ROUND = 113  # round-label-ok：到期輪＝兌現輪+2（lookahead 判準的活體對照）
-_REPIN_NET_CAP_DUE_TARGET = 585
+#: 本次兌現（結構性長債分軌輪，2026-08-30）：cap 降到目標本身（585，見 `(113, 585)` 列），
+#: 同輪重新武裝下一段：步伐 8 < 前一段的 10，續守「步伐刻意變小」且目標嚴格低於現行 cap。
+_REPIN_NET_CAP_DUE_ROUND = 115  # round-label-ok：到期輪＝兌現輪+2（lookahead 判準的活體對照）
+_REPIN_NET_CAP_DUE_TARGET = 577
 
 #: DEF-200-121：到期輪自身的後設鎖——`_REPIN_NET_CAP_DUE_ROUND` 只准落在「最近稽核輪
 #: ＋ lookahead」以內（歷史母體 85..113 的到期輪一律＝上一次兌現輪 +2）。可延期的到期日
@@ -1444,10 +1456,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 81
+_REPIN_LOG_FROZEN_PREFIX_LEN = 82
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "db3448c59433981f6ace6e556bac1ae39676850e2ced89829af56a763280195d")
+    "369320d0f7f9baa87eae0389d693729fe8d3a482dfc82f638ff794f7e078836e")
 
 
 def repin_log_history_digest(
@@ -1551,6 +1563,9 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # DEF-200-121 修復窗口（護欄層判準修補輪）：追加本輪稽核列並把它納入前綴
     # （prefix_len 80→81），同體例「追加後立即自我凍結」——延伸本身即讓指紋改變，故留痕。
     ("R111", "42b28e14a0b8", "db3448c59433", "DEF-200-121"),
+    # 結構性長債分軌輪（2026-08-30）：追加本輪稽核列並依「追加後立即自我凍結」判例
+    # 延伸前綴涵蓋該列本身（81→82）；Phase2 到期義務同窗記入 [提案]，載體＝該 DEF。
+    ("R113", "db3448c59433", "369320d0f7f9", "DEF-200-211"),
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。
@@ -5727,6 +5742,12 @@ _PHASE2_REVIEW_LOG: tuple[tuple[int, str, str], ...] = (
     (106, "[維持觀察]",
      "本輪是 windows-compat-ci／root-infra-ci 兩筆跨平台缺陷修復輪，未觸碰 ADR-XPLAT-013"
      "方向 (b)(c)，亦未提出新 Phase 2 提案，依 §6 重新武裝下一個視窗。"),
+    (113, "[提案]",
+     "掌舵者已裁決 ADR-XPLAT-013 三方向全做（存證＝AutoSDD_TechDebt_Paydown_Playbook.md"
+     " §6 第 1 條：Phase 1 assertion-only 已落地；(b)(c) 為到期義務、載體 DEF-200-211，"
+     "『維持觀察』名額已被上一列用罄——該條逐字寫『到期只能提案或落地』）。本列把該既存"
+     "裁決記入機械載體＝提案成立；四方複審與 (b)(c) 落地由 DEF-200-211 承接（與 "
+     "DEF-200-207 ADR 轉 Accepted 同批四方複審），不隨結構性長債分軌輪落地。"),
 )
 #: 到期輪由末列導出、不另立常數（一份知識一個家；同 `_REPIN_NET_CAP_SCHEDULE` 的
 #: 「生效點＝首列、現值＝末列，皆由表導出」）。
