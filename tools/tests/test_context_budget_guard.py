@@ -1861,7 +1861,7 @@ class _StatefulFakeSchedulerBackend:
         self.name = "test-fake"
         self.credential_key = sb.CRED_KEY_SCHTASKS
 
-    def seed(self, *tasks: str) -> "_StatefulFakeSchedulerBackend":
+    def seed(self, *tasks: str) -> _StatefulFakeSchedulerBackend:
         self._jobs.update(tasks)
         return self
 

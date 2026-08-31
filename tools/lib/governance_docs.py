@@ -327,7 +327,8 @@ _GOVERNANCE_DOCS = (
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R114_WakeChain_Review.md",
     # 技術債結案輪證據檔：三筆結案（235/238/239）憑證、四方一二審逐字、實彈演練事件鏈與
     # 前輪自報訂正的唯一居所（⇒ 體積守門），且逐節寫出「哪筆結案的憑證在哪一節」（⇒ 指針稽核）。
-    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R115_Debt_Closure.md",  # round-label-ok：檔名輪標
+    (_REPO_ROOT / "docs" / "06_quality"
+     / "CrossPlatform_R115_Debt_Closure.md"),  # round-label-ok：檔名輪標
     # DEF-101-752（R82）帳本瘦身的接收端：帳本該列 R82 前的「狀態」欄原文（逐字保全）＋
     # R82 三處收斂的紅綠自證輸出，皆已從主檔搬出。資格同上——帳本列已瘦身成索引 ⇒ 唯一還
     # 能重驗該次結案的地方就是它（⇒ 體積守門），且它逐節寫出「DEF-101-752 原文現居本檔

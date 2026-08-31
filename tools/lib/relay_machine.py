@@ -147,7 +147,7 @@ def files_changed(before: frozenset[str] | None, after: frozenset[str] | None) -
 
 
 def snapshot_log_fields(snapshot: frozenset[str] | None) -> dict:
-    """R115 修復 F3：把一次 porcelain 快照壓成稽核痕跡可負擔的欄位（施工圖 §3(c) 判準④ round-label-ok
+    """R115 修復 F3：把一次 porcelain 快照壓成稽核痕跡可負擔欄位（施工圖§3(c)判準④ round-label-ok
     「前快照落 resume log 痕跡」，此前只活在 `_run_resume()` 的行程記憶體，差集數字
     事後不可稽核）。回行數＋內容雜湊，**不灌 porcelain 全文**進 log——全文可能含使用者
     路徑／檔名且無上限成長，同誠實劃界第 8 條「量不到 ≠ 有改動」的保守紀律：`snapshot`

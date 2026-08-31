@@ -74,14 +74,13 @@ if str(_REPO_ROOT / "tools") not in sys.path:
 # `tools/lib`／`.claude/hooks`）取用——同一個行程內只有一份模組物件，
 # `unittest.mock.patch.object` 才會打中被生產路徑實際引用的那一份（同檔既有
 # `ModuleIdentityIsSingleTest` 那條判例）。
-import session_resume_planner as planner  # noqa: E402
-
 import context_budget_guard as guard  # noqa: E402
 import quota_policy  # noqa: E402
 import relay_machine  # noqa: E402
 import resume_route  # noqa: E402
 
 import _stdio_utf8  # noqa: E402,F401  — Windows 非 UTF-8 終端印中文防崩潰
+import session_resume_planner as planner  # noqa: E402
 
 
 class _FakeSubprocessModule:

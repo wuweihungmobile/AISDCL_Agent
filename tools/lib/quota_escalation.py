@@ -325,7 +325,8 @@ def _heal_armed_drift(state: dict, now: datetime, idle_threshold: float, tick: s
     # armed stamp、不 loud，會留下一個「stamp 說已武裝、排程器現查卻沒有」的假閂鎖
     # （與 `relay_machine._rearm_after_stop()` 判準1同型的那個病，此前只有那一條有藥）。
     # 清 stamp 讓下一個互動 session 的 `maybe_arm()` 走正常武裝路，不留一個宣稱已重掛
-    # 的假閂鎖（R112 §3-5「自癒的自癒」同型；fail-safe 方向：寧可重新評估，不可假裝好了）。  # round-label-ok：引述既有交接書章節號，非本批自稱輪號
+    # 的假閂鎖（fail-safe 方向：寧可重新評估，不可假裝好了；
+    # R112 §3-5「自癒的自癒」同型）。  # round-label-ok：引述章節號非自稱輪號
     if rc != 0:
         import sentinel_lifecycle_arm  # noqa: PLC0415 — 只在失敗路徑才需要（同 relay_machine 既有手法）  # noqa: E501
 

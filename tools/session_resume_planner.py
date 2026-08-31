@@ -1458,7 +1458,7 @@ def _sentinel_tick(args) -> int:
         append_log(log, "sentinel_" + decision["action"], unregister_rc=rc, why=decision["reason"], **told)  # noqa: E501
         return 1 if loud else rc
     if decision["action"] == "arm_reset":
-        relay_machine.apply_reset_at(state, decision["reset_at"].isoformat()); state.update(state="waiting", reset_source=decision["reset_source"])  # noqa: E501 — R115 修復 F4：歸零邊界（同 _resume_tick rearm 分支） round-label-ok
+        relay_machine.apply_reset_at(state, decision["reset_at"].isoformat()); state.update(state="waiting", reset_source=decision["reset_source"])  # noqa: E501,E702 — R115 修復 F4：歸零邊界（同 _resume_tick rearm 分支） round-label-ok
     rc, moment = _register_and_record(plan, state, decision["at"], SENTINEL_TICK)
     append_log(log, "sentinel_rearmed", action=decision["action"],
                fire_at=decision["at"].isoformat(), credential=moment)
