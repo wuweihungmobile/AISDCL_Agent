@@ -46,7 +46,7 @@ python tools/session_resume_planner.py --pace
 
 ## 附件二：護欄層淨額落款
 
-<!-- guard-total:R113 --> 89452 → 89592（+140）。重釘清單：test_check_defect_log_crossref.py 3794→3906、test_defect_id_reference_integrity.py 274→281、test_adr_xplat001_c1c2_lock.py 6391→6412；MIN_TESTS 3631→3735 同行重釘；OVERSIZE 豁免 44→43、excess 34712→27682→27657（兩段皆 --repin-oversize 機械收緊＋rotation 封印同步 _SEAL_TOTAL_MIN_LEN 39→42）。
+<!-- guard-total:R113 --> 89452 → 89910（+458）。重釘清單：test_check_defect_log_crossref.py 3794→3906、test_defect_id_reference_integrity.py 274→281、test_adr_xplat001_c1c2_lock.py 6391→6412；MIN_TESTS 3631→3735 同行重釘；OVERSIZE 豁免 44→43、excess 34712→27682→27657（兩段皆 --repin-oversize 機械收緊＋rotation 封印同步 _SEAL_TOTAL_MIN_LEN 39→42）。同輪追加（v2.1.13 G1 實作批 (a)，2026-08-31）：test_context_budget_guard.py 8178→8307、test_adr_xplat001_c1c2_lock.py 6412→6424（稽核列＋rewrite ledger 接鏈＋凍結前綴延伸 82→83）。同輪追加（v2.1.13 G2 實作批 (b)，2026-08-31）：test_context_budget_guard.py 8307→8468（HandbackVisibilityTest＋HandbackSessionStartAnnounceTest 六格＋_isolated_env 補 AUTOSDD_HANDBACK_DIR 隔離）、test_adr_xplat001_c1c2_lock.py 6424→6440（稽核列＋rewrite ledger 接鏈 DEF-200-236＋凍結前綴延伸 83→84）；MIN_TESTS 3741→3747 同行重釘。
 
 ## 附件三：輪內暫存清單裁決
 

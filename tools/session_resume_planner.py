@@ -88,6 +88,8 @@ import quota_boot_check  # noqa: E402  # R102／R16：啟動自檢（H6／H7）�
 import quota_escalation as escalation  # noqa: E402  # R81：叫人＋扇出清單（R84／ARCH-10：改裸名）
 import quota_gate  # noqa: E402  # R84／SA-02：`--pace` 的內容產生者（額度判讀唯一入口）
 import quota_reconcile  # noqa: E402  # R100：`--reconcile` 的判準（輸入面出處守衛）
+import relay_machine  # noqa: E402  # v2.1.13 G3+G4：接力狀態機＋哨兵自癒的家（tools/lib）
+import resume_route  # noqa: E402  # v2.1.13 G1：喚醒 argv 權限姿態＋A-PRE 預檢的家（tools/lib）
 import schedule_backend  # noqa: E402  # R83：平台差異（schtasks／launchd）唯一收斂點
 import sentinel_lifecycle  # noqa: E402  # R95 修3：哨兵活性欄（armed stamp vs 現查）
 
@@ -1088,7 +1090,7 @@ STRATEGY_REFUSE = "REFUSE"
 #: 少帶護欄句＝FRESH 那一跑比 RESUME 少一層約束，而漏帶是靜默的。
 _RESUME_RULES = ("🔴 第一件事是重驗，不採信該檔任何「已通過」宣稱。遵守第 4 節〈禁止事項〉。"
                  "🔴 本回合無人看管，禁止 commit／push"
-                 "（已由 PreToolUse 守衛硬擋，不是請求）——改動留在工作樹讓人回來收。")
+                 "（已由 PreToolUse 守衛硬擋，不是請求）——改動留在工作樹讓人回來收。🔴 收窗前必寫 handback 檔（路徑由 prompt 注入），四節齊備：## 做了什麼／## 驗了什麼（附實測 rc）／## 卡在哪／## 下一步指令。")  # noqa: E501 — v2.1.13 G2 批 (b)：收尾義務句行內擴寫（planner LOC 餘裕 1，不開新行）
 
 
 # m5（R95 修復包）：ENV 病態值（非整數字串／零／負值）此前直接 `int()` 炸在喚醒路徑上
@@ -1109,8 +1111,9 @@ def _transcript_cap() -> tuple[int, str]:
     return RESUME_MAX_TRANSCRIPT_DEFAULT, note
 
 
-# 🔴 選路是純函式（stat 一次逐字稿，不 spawn、不寫檔；m5 起病態 ENV 會印一行 stderr，
-# 那是出聲不是副作用升級）：四種輸入態（可用／缺檔／為空／超上限）都要能在測試裡注入。
+# 🔴 選路近乎純函式（stat 一次逐字稿，不 spawn；m5 起病態 ENV 會印一行 stderr，那是出聲
+# 不是副作用升級；G2 起另有一次**冪等 mkdir**——handback 目錄解析經 resume_route→
+# endurance_env，「不寫檔」的舊宣稱已據實訂正）：四種輸入態都要能在測試裡注入。
 # 方向鎖：降級只准 RESUME→FRESH 單向——逐字稿可用時**必須**回 SESSION_RESUME（把可用
 # 的 session context 丟掉＝資訊損失），且 FRESH 的 argv 不得帶 `-r`。任務書缺席＝REFUSE：
 # 兩條路的 prompt 都指向任務書，它缺席時派出去的是一個空承諾（R59 事故同形），呼叫端
@@ -1127,20 +1130,22 @@ def choose_resume_route(claude: str, session_id: str, transcript: Path | None,
                           "FRESH 兩條路都無法成立 ⇒ 拒絕武裝（不得靜默派空 prompt）"}
     limit, cap_note = (max_bytes, "") if max_bytes is not None else _transcript_cap()
     suffix = f"；{cap_note}" if cap_note else ""
+    # G2：交接檔路徑在**這裡**算一次（prompt 注入與 `_run_resume` 後檢共用 route["handback"]
+    # 同一份字串）；解析經 resume_route→endurance_env（冪等 mkdir，見上方純函式註記的訂正）。
+    # session id 缺席（FRESH 降級因之一）時退 plan.stem——任務書檔名本就以 sid 命名。
+    hb = resume_route.handback_report(str(session_id or "") or plan.stem)
     size = transcript.stat().st_size if (transcript and transcript.is_file()) else None
     if session_id and size and size <= limit:
-        return {"strategy": STRATEGY_RESUME,
+        return {"strategy": STRATEGY_RESUME, "handback": str(hb),
                 "reason": f"逐字稿可用（{size:,}B ≤ 上限 {limit:,}B）⇒ 帶完整 context 續跑{suffix}",  # noqa: E501
-                "argv": [claude, "-p", "-r", str(session_id),
-                         f"讀 {plan}，照它第 3 節做。{_RESUME_RULES}",
-                         "--add-dir", str(plan.parent)]}
+                # v2.1.13 G1：argv 組裝（含 --permission-mode/--settings 權限姿態旗標）
+                # 下沉 tools/lib/resume_route.py——兩路同一份真相，旗標不可能只補到一路。
+                "argv": resume_route.resume_argv(claude, str(session_id), f"讀 {plan}，照它第 3 節做。{_RESUME_RULES}🔴 handback 檔路徑＝{hb}", plan.parent)}  # noqa: E501
     why = ("session id 缺席" if not session_id else "逐字稿缺檔" if size is None else
            "逐字稿為空" if size == 0 else f"逐字稿 {size:,}B 超上限 {limit:,}B")
-    return {"strategy": STRATEGY_FRESH,
+    return {"strategy": STRATEGY_FRESH, "handback": str(hb),
             "reason": f"{why} ⇒ 降級開全新 session，state 由磁碟任務書交棒{suffix}",
-            "argv": [claude, "-p",
-                     f"按磁碟任務書繼續：讀 {plan}，照它第 3 節做。{_RESUME_RULES}",
-                     "--add-dir", str(plan.parent)]}
+            "argv": resume_route.fresh_argv(claude, f"按磁碟任務書繼續：讀 {plan}，照它第 3 節做。{_RESUME_RULES}🔴 handback 檔路徑＝{hb}", plan.parent)}  # noqa: E501
 
 
 # 真的開一個無人看管的模型回合（R79 起**預設開啟**，見上方 Auto Pilot 區塊的 WHY 與
@@ -1154,16 +1159,22 @@ def choose_resume_route(claude: str, session_id: str, transcript: Path | None,
 # `_resume_tick` 必須據此判斷，`None` 時不得把狀態塊寫成 `"resumed"`。
 def _run_resume(args, state: dict, log: Path) -> int | None:
     """額度回來且已授權時，真的把工作續跑起來（帶無人看管訊號）。"""
-    sid = str(state.get("session_id") or "")
+    sid = str(state.get("session_id") or ""); spawn_at = datetime.now().timestamp(); state["handback_verdict"], state["files_changed"] = "missing", 0  # noqa: E501,E702 — G2 後檢的 mtime 錨；v2.1.13 G3：本窗乾淨初值（防承接上一窗殘值）
     transcript = (Path(str(state["transcript"])) if state.get("transcript")
                   else resolve_transcript(sid) if sid else None)
     route = choose_resume_route(args.probe_command, sid, transcript,
                                 str(state.get("plan_path") or ""))
     # 痕跡必記策略與原因：降級是靜默失效的高風險點，「走了哪條路」必須事後可稽核。
-    append_log(log, "route_chosen", strategy=route["strategy"], why=route["reason"])
+    append_log(log, "route_chosen", strategy=route["strategy"], why=route["reason"]); state["route_strategy"] = route["strategy"]  # noqa: E501,E702 — v2.1.13 G3：REFUSE 需可辨（見 _resume_tick）
     if route["argv"] is None:
-        print(f"❌ {route['reason']}", file=sys.stderr)
-        return 1
+        print(f"❌ {route['reason']}", file=sys.stderr); return 1  # noqa: E702 — ⓿ 瘦身（G2 挪 LOC 額度）
+    # v2.1.13 G1／A-PRE 增格（出處＝PRD_Amendment_R112_WakeChain.md §2 P-3）：spawn 前檢
+    # 「unattended settings 檔存在 ∧ JSON 可解析」，缺一拒 spawn——缺席時 spawn 出去的
+    # 無頭窗口退回無人核准權限牆（2026-08-30 實戰 G1 形態：收不了尾還照燒額度）。
+    # 判準本體住 tools/lib/resume_route.py（planner 只接線）；通過面順帶 mkdir handback。
+    if (bad := resume_route.preflight_problem()) is not None:
+        append_log(log, "resume_authz_preflight_failed", strategy=route["strategy"], why=bad)
+        print(f"❌ A-PRE 拒 spawn：{bad}", file=sys.stderr); return 1  # noqa: E702
     # 🔴 R80 P0 的第二層（兩層都補才算修好，缺任一層續跑那一跑都做不了事）。
     # · `cwd=_REPO_ROOT`：沒有它時 cwd 繼承自排程行程＝system32，而 Claude Code 用 cwd
     #   決定「本 session 允許的工作目錄」⇒ 續跑碰不到 repo 一個檔。**排程 Action 的
@@ -1189,14 +1200,18 @@ def _run_resume(args, state: dict, log: Path) -> int | None:
     # 整支行程消失，而呼叫端此前已經把狀態塊寫成 `"resumed"`、排程也刪了（謊稱成功、
     # 無法重試）。同 `probe_quota()` 既有的 except 寫法。
     try:
-        proc = subprocess.run(route["argv"], capture_output=True, encoding="utf-8", errors="replace", timeout=3600, check=False, creationflags=guard.NO_WINDOW, cwd=str(_REPO_ROOT), env={**os.environ, UNATTENDED_ENV: "1"})  # noqa: E501
+        before = relay_machine.git_status_snapshot(_REPO_ROOT); proc = subprocess.run(route["argv"], capture_output=True, encoding="utf-8", errors="replace", timeout=3600, check=False, creationflags=guard.NO_WINDOW, cwd=str(_REPO_ROOT), env={**os.environ, UNATTENDED_ENV: "1"})  # noqa: E501,E702 — v2.1.13 G3：spawn 前快照（判準④ files_changed 差集）
     except (OSError, subprocess.SubprocessError) as exc:
         append_log(log, "resume_spawn_failed", strategy=route["strategy"], error=str(exc))
         print(f"❌ 續跑呼叫本身失敗：{exc}", file=sys.stderr); return None  # noqa: E702
+    # v2.1.13 G2 批 (b)：spawn 返回後的交接後檢（不依賴模型合作；判準本體住 resume_route，
+    # 非 written ⇒ `handback_missing` 事件＋alert loud——痕跡與叫人載體由本檔注入）。
+    after = relay_machine.git_status_snapshot(_REPO_ROOT); state["files_changed"] = relay_machine.files_changed(before, after)  # noqa: E501,E702 — v2.1.13 G3：spawn 後快照
+    hbv = resume_route.handback_postcheck(route, spawn_at, state, log, append_log, escalation.alert); state["handback_verdict"] = hbv  # noqa: E501,E702 — v2.1.13 G3
     # 🔴 `err=` 是 R80 補的：此前只記 stdout，而上面那個 argv 缺陷的表現正好是
     # 「rc=1、stdout 全空」⇒ 稽核痕跡看得到「失敗了」卻看不到**為什麼**，我是靠手工
     # 重跑一次才找出原因的。無人看管的那一跑沒有人在看 stderr，它只有這一個家。
-    append_log(log, "resumed", rc=proc.returncode, strategy=route["strategy"],
+    append_log(log, "resumed", rc=proc.returncode, strategy=route["strategy"], handback_path=str(route.get("handback") or ""), handback_written=hbv == "written",  # noqa: E501 — G2 增欄
                err=(proc.stderr or "")[:300], out=(proc.stdout or "")[:400])
     print((proc.stdout or "")[:2000])
     return proc.returncode
@@ -1304,14 +1319,13 @@ def _resume_tick(args) -> int:
     # ——此前先寫 "resumed"、排程也刪了，才呼叫它；它此前沒有 try/except，中途拋例外時
     # 整支行程消失，卻已經謊稱成功、排程已刪，無法重試。`rc=None` 專屬「沒真的跑成」。
     if state.get("allow_resume"):
-        rc = _run_resume(args, state, log); state["state"] = "resumed" if rc is not None else "resume_failed"  # noqa: E501,E702
-    else:
-        rc, state["state"] = 0, "resumed"
-        append_log(log, "quota_back_no_resume")
-        print(f"✅ 額度已恢復。狀態塊記著 allow_resume=false（帶了 --no-allow-resume／{RESUME_OFF_ENV}，或它是 R79 之前武裝的）⇒ 人回來跑：claude -r {state['session_id']}")  # noqa: E501
+        rc = _run_resume(args, state, log); state["state"] = "resume_failed" if (rc is None or state.get("route_strategy") == STRATEGY_REFUSE) else "resumed"  # noqa: E501,E702 — v2.1.13 G3：REFUSE 不得寫成 resumed
+        return relay_machine.settle_window(args, state, plan, log, rc)  # noqa: E501 — v2.1.13 G3+G4：接力狀態機＋重掛哨兵
+    rc, state["state"] = 0, "resumed"; append_log(log, "quota_back_no_resume")  # noqa: E702 — ⓿ 瘦身（v2.1.13 G3 讓出額度）
+    print(f"✅ 額度已恢復。狀態塊記著 allow_resume=false（帶了 --no-allow-resume／{RESUME_OFF_ENV}，或它是 R79 之前武裝的）⇒ 人回來跑：claude -r {state['session_id']}")  # noqa: E501
     state.update(_cleared_credentials())
     write_relay(plan, state)
-    _schtasks_remove(state["task_name"])  # -Once 已觸發、不會再響，無論成敗都不再需要它
+    _schtasks_remove(state["task_name"])  # noqa: E501 — -Once 已觸發、不會再響（relay 路徑已在 settle_window 內自行處理）
     return rc if rc is not None else 1
 
 
@@ -1491,8 +1505,7 @@ def main(argv: list[str]) -> int:
 
     # 這三個模式不需要逐字稿，先處理（否則在找不到 session 的機器上連查姿態都做不到）。
     if args.check_autocompact:
-        posture = autocompact_posture()
-        print(autocompact_report(posture), end="")
+        posture = autocompact_posture(); print(autocompact_report(posture), end="")  # noqa: E702 — ⓿ 瘦身（v2.1.13 G3 讓出 import 額度）
         return 0 if posture["effective"] else 1
     if args.verify_schtasks and not args.register_schtasks:
         return _schtasks_verify(args.task_name)

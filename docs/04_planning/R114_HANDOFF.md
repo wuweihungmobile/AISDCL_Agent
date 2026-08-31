@@ -3,7 +3,8 @@
 > 輪次性質：架構輪（開場量測：未結 53、帳本 150,509 bytes、守衛線 +0 ⇒ A/B 條件未觸發；
 > R113 交棒書指定喚醒鏈 PRD 複審最優先）＋Windows 實機取證批（交棒書第 3 步）。
 > 證據檔＝`docs/06_quality/CrossPlatform_R114_WakeChain_Review.md`（本輪唯一逐字證據載體）。
-> 本輪**零生產碼改動**：改動面＝PRD 修憲案＋帳本兩軌＋證據檔＋本檔。
+> 改動面前半＝PRD 修憲案＋帳本兩軌＋證據檔＋本檔（零生產碼）；掌舵者落款後同日解凍，
+> **後半＝G1~G4 實作批落地**（生產碼＋測試，見 §一 7 與證據檔 §8）。
 
 ## 一、已驗證什麼（附實測）
 
@@ -25,16 +26,24 @@
 5. 文件閘門（帳本編修後實跑）：crossref rc=0（未結 54/167、外部軌 6、長債軌 7）；
    `check_archive_required` rc=0；`check_handoff_carriers` rc=0（109 份載體）。
 6. 收尾全套閘門數字見本檔〈附件一〉（依 R96 教訓，最後一次全套在最後一次寫文件之後跑）。
+7. **G1~G4 實作批三棒全部落地（2026-08-31 落款後同日）**，各棒獨立全套皆綠：
+   G1 權限姿態（`settings.unattended.json`＋`resume_route.py`＋A-PRE 預檢＋V-a 測試；全套
+   `Ran 3741` rc=0）→ G2 handback 可見性（`endurance_env` SSOT 對齊＋planner 後檢三值＋
+   SessionStart 未讀偵測、hook ⓿ 瘦身免 repin；全套 `Ran 3747` rc=0）→ G3+G4 接力狀態機＋
+   哨兵自癒（`relay_machine.py` 判定序 ③→④→②→①＋REFUSE 契約＋ENV 常數二枚＋fire 後重掛；
+   全套 `Ran 3767` rc=0）。每棒皆做突變驗紅；逐棒明細＝證據檔 §8。
 
 ## 二、還沒做什麼（每項附載體與現查指令）
 
-- **喚醒鏈 G1~G4 實作尚未完成**：v2.1.13 已於 2026-08-31 由掌舵者互動裁決**落款生效**（原呈報
-  單第 1 件、實作批同日解凍），但四缺口的程式面尚未閉合；載體＝`DEF-200-234`／`DEF-200-235`／
-  `DEF-200-236`；現查
+- 🔴 **G1~G4 實作批尚未過四方複審**（程式面已落地＝§一 7，但依 §6 品質流程未經 Architect/SA/
+  SD/QA 獨立複審不得視為完成）——**下輪開場第一件事**；載體＝`DEF-200-234`／`DEF-200-235`／
+  `DEF-200-236`（解鎖條件皆含「並過四方」）；現查
   `git grep -n "Status：Adopted" docs/04_planning/PRD_Amendment_R113_WakeChain_LastMile.md`
-  （有命中＝已落款）＋ `python tools/session_resume_planner.py --pace`。同日實戰再證根因：本
-  session 撞線死亡後喚醒鏈四段全通、斷點＝`quota_back_no_resume`（`AUTOSDD_RESUME_OFF` User
-  層=1）＋G1~G4，取證＝證據檔 §7。
+  ＋ `python -m pytest tools/tests/test_context_budget_guard.py -k "Relay or Handback or UnattendedPermission" -q`。
+- **`AUTOSDD_RESUME_OFF`（User 層=1）尚未移除**＝自動續跑總閥仍關：刻意留待實作批過四方後
+  才開（未經複審的煞車不上路）；移除後須做一次實彈演練（合成撞線→喚醒→接力→handback 可讀）。
+  現查 `powershell -Command "[Environment]::GetEnvironmentVariable('AUTOSDD_RESUME_OFF','User')"`。
+  根因取證＝證據檔 §7（本 session 撞線死亡、喚醒鏈四段全通、斷點即此閥＋G1~G4）。
 - **DEF-200-238 修復尚未動工**：大小寫正規化＋紅綠自證＋假紅普查；設計上與 `_GOV_EXACT` 納管
   二檔（PRD v2.1.13 §3(a)）同批、治理面動作由收尾單人窗口做。現查
   `python tools/check_defect_log_crossref.py --unresolved-count`（238 仍列未結）＋證據檔 §4 探針。
@@ -62,9 +71,11 @@ python tools/check_defect_log_crossref.py --unresolved-count
 python tools/check_archive_required.py
 python tools/tests/test_adr_xplat001_c1c2_lock.py --print-guard-lines
 python tools/session_resume_planner.py --pace
-# 2. 若掌舵者已落款 v2.1.13：依 PRD 案 §5 順序動工（(a)→(b)→(c)，(d) 並行；
-#    DEF-200-238 正規化與 _GOV_EXACT 納管二檔同批，由收尾單人窗口做治理面）
-# 3. 若未落款：催辦呈報單；改跑 DEF-200-211 四方批或長債軌複查（2026-09-13 前）
+# 2. 第一件事＝G1~G4 實作批四方複審（審 diff：resume_route/relay_machine/endurance_env/
+#    quota_policy_env/planner/settings.unattended.json/測試四類；施工圖＝v2.1.13）
+# 3. 複審過後：(a) 治理批＝_GOV_EXACT 納管二檔＋DEF-200-238 大小寫正規化（收尾單人窗口）
+#    (b) 移除 AUTOSDD_RESUME_OFF（User 層）＋實彈演練一次（合成撞線→喚醒→接力→handback）
+# 4. 其餘：DEF-200-239 測試隔離修復／DEF-200-211 四方批／長債軌複查（2026-09-13 前）
 ```
 
 ## 四、禁止事項
@@ -83,10 +94,12 @@ v2.1.13 為唯一施工圖（2026-08-31 已落款；無頭專屬 settings 檔屬
   交棒書指定的架構輪＋實機取證批，取證過程誠實立案新缺陷（238＝govwrite 大小寫繞過；239＝
   全套測試在真機種下自續排程 T-r95），本質屬判準自述的「發現輪」形態；不立案才是砸溫度計。
   逃生口使用僅限本輪收尾窗口，下輪不繼承。
-- 文件閘門：crossref rc=0／archive rc=0／carriers rc=0（帳本編修後實跑）。
-- 全套根層 unittest（最後一次寫文件之後跑）：結果由收尾窗口回填於 commit 訊息與輪末回報
-  （本檔不預寫未跑出的數字）。
-- 守衛線：89592→89592（+0，本輪零生產碼/鎖檔改動）。
+- 文件閘門：crossref rc=0／archive rc=0／carriers rc=0（帳本編修後實跑；收輪窗口重跑再驗）。
+- 全套根層 unittest：本輪四次全套皆綠——落款前 `Ran 3735` rc=0、G1 後 `Ran 3741` rc=0、
+  G2 後 `Ran 3747` rc=0、G3+G4 後 `Ran 3767` rc=0（皆乾淨環境；MIN_TESTS 同步重釘 3767）。
+- 守衛線：89592→**90351**（G1 +141＋G2 +177 記 R113 同輪追加、G3+G4 +441 記 R114，
+  皆走重釘儀式＋sha 接鏈；`--print-guard-lines` 收斂 +0、逐檔漂移 0）。
+- <!-- guard-total:R114 --> **守衛線追記（v2.1.13 G3+G4 實作批 (c)+(d)，同日 2026-08-31 落款後解凍，寄居本輪號）：護欄層累積淨額＝ 89910 → 90351（+441）** —— G1 批 (a) +141、G2 批 (b) +177 兩者記入稽核痕跡 R113 列同輪追加；本次 G3+G4 批 +441 標號改用 R114（非回頭改寫 R113，理由見 `_GUARD_LINES_REPIN_LOG` 該列）。逐檔清單見 `docs/06_quality/CrossPlatform_R106_Scan_Findings.md` 的 R114 標記行。
 
 ## 呈報單（需掌舵者本人核准）
 

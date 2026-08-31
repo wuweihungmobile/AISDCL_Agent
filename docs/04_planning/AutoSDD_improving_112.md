@@ -59,4 +59,4 @@ ADR §2.9 stale 宣稱、read_text fail-quiet 形態（Windows 一次性觸發�
 
 ## §6 R113 結構性長債分軌（寄居附記）
 
-<!-- guard-total:R113 --> R113 護欄層累積淨額＝ 89452 → 89592（+140）——結構性長債軌落地（`AutoSDD_Structural_Debt_Log.md` 建軌＋主帳本 7 列遷軌＋`TestStructuralDebtLog` 九支＋外部軌真檔測試拆日期引信＋姊妹帳本擴面）；逐項見 `CrossPlatform_R106_Scan_Findings.md` 的 R113 標記行與 `_GUARD_LINES_REPIN_LOG` 的 R113 列。裁決存證＝`AutoSDD_TechDebt_Paydown_Playbook.md` §6 第 3 條（掌舵者 2026-08-30 核准）。
+<!-- guard-total:R113 --> R113 護欄層累積淨額＝ 89452 → 89910（+458）——結構性長債軌落地 +140（`AutoSDD_Structural_Debt_Log.md` 建軌＋主帳本 7 列遷軌＋`TestStructuralDebtLog` 九支＋外部軌真檔測試拆日期引信＋姊妹帳本擴面）＋ v2.1.13 G1 實作批 (a) 同輪追加 +141（`UnattendedPermissionPostureTest` V-a 六格＋鎖檔自身編修）＋ v2.1.13 G2 實作批 (b) 同輪追加 +177（`HandbackVisibilityTest`＋`HandbackSessionStartAnnounceTest` V-b 六格＋鎖檔自身編修）；逐項見 `CrossPlatform_R106_Scan_Findings.md` 的 R113 標記行與 `_GUARD_LINES_REPIN_LOG` 的 R113 三列。裁決存證＝`AutoSDD_TechDebt_Paydown_Playbook.md` §6 第 3 條（掌舵者 2026-08-30 核准）；G1 批施工圖＝`PRD_Amendment_R113_WakeChain_LastMile.md` §3(a)、G2 批 (b) 施工圖＝同檔 §3(b)（皆 2026-08-31 落款）。

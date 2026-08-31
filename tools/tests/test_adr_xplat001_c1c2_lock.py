@@ -682,7 +682,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 6412,
+    "test_adr_xplat001_c1c2_lock.py": 6454,
     "test_archive_defect_log.py": 3986,
     "test_bash32_compat.py": 1020,
     "test_bash_probe_spec_contract.py": 983,
@@ -697,7 +697,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_check_wrapper_thinness.py": 1234,
     "test_claim_provenance_r86.py": 618,
     "test_component_sanitizer_shared_layer_lock.py": 293,
-    "test_context_budget_guard.py": 8178,
+    "test_context_budget_guard.py": 8895,
     "test_defect_id_reference_integrity.py": 281,
     "test_dev_start.py": 7007,
     "test_dev_start_ps1_lastexitcode.py": 548,
@@ -1255,6 +1255,38 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "(113, 585) 並重新武裝 115／577（步伐 8<10）。淨額為正＝streak 第 1 輪（前一輪 "
      "-15 已歸零），未逾每輪上限。逐檔清單見 CrossPlatform_R106_Scan_Findings.md 的 "
      "R113 標記行。"),
+    ("R113", 89592, 89733, 141,
+     "[非淨減法輪][同輪追加] v2.1.13 G1 V-a 測試落地（喚醒鏈最後一哩實作批 (a)；施工圖＝"
+     "PRD_Amendment_R113_WakeChain_LastMile.md §3(a)／§4）：test_context_budget_guard.py "
+     "8178→8307（+129）＝UnattendedPermissionPostureTest 六格（V-a1 兩路 argv 權限姿態、"
+     "V-a2 A-PRE 缺席／壞檔拒 spawn＋通過面 mkdir handback、V-a4 allow＝L2×雙載具雙向對齊、"
+     "V-a3 靜態半格 deny 三檔×三寫入形態；V-a1／V-a2 皆突變驗紅後還原）＋resume_route lib "
+     "import。本檔自身 +12＝本稽核列＋rewrite ledger 追加列＋凍結前綴延伸（82→83）。合法"
+     "出口逐條實查：無死碼可刪；抽共用層不適用（判準只有 resume_route 一個消費端）；散文"
+     "搬遷不適用（新增全是判準本體）。逐檔清單見 CrossPlatform_R106_Scan_Findings.md 的 R113 標記行。"),
+    ("R113", 89733, 89910, 177,
+     "[非淨減法輪][同輪追加] v2.1.13 G2 handback 落地（喚醒鏈最後一哩實作批 (b)；施工圖＝"
+     "PRD_Amendment_R113_WakeChain_LastMile.md §3(b)／§4 V-b1~V-b3）："
+     "test_context_budget_guard.py 8307→8468（+161）＝HandbackVisibilityTest 三格"
+     "（V-b1 合規交接四 marker＋resumed 記欄、V-b2 沒寫交接逐字 handback_missing＋alert "
+     "憑證欄〔突變驗紅後以 Edit 還原〕、stale 半格舊檔不得冒充）＋"
+     "HandbackSessionStartAnnounceTest 三格（V-b3 未讀出聲含「下一步指令」節＋.ack 轉安靜、"
+     "emit 拒收不落 .ack、guard.main() SessionStart 接線實跑）＋_isolated_env 補 "
+     "AUTOSDD_HANDBACK_DIR 隔離。本檔自身 +16＝本稽核列＋rewrite ledger 追加列＋"
+     "凍結前綴延伸（83→84）。合法出口逐條實查：無死碼可刪；抽共用層已做（判準本體住 "
+     "resume_route／endurance_env／sentinel_lifecycle，hook 與 planner 只接線且 raw 淨 0）；"
+     "散文搬遷不適用（新增全是判準本體與注入語料）。逐檔清單見 "
+     "CrossPlatform_R106_Scan_Findings.md 的 R113 標記行。"),
+    ("R114", 89910, 90351, 441,
+     "[非淨減法輪] v2.1.13 G3+G4 接力狀態機＋哨兵自癒落地（喚醒鏈最後一哩實作批 (c)+(d)；"
+     "施工圖＝PRD_Amendment_R113_WakeChain_LastMile.md §3(c)/(d)／§4 V-c1~V-d4）。標號改用 "
+     "R114（非回頭改寫 R113 三列：R113 淨額合計 458 已逼近其上限 585，本輪 441 若仍記 "
+     "R113 會單輪超出上限；R114 語意對應 PRD §0「四方複審後落款、G1~G4 實作批解凍」時點）。"
+     "淨額 441＝test_context_budget_guard.py +427（RelayStateMachineTruthTableTest／"
+     "RelayProgressAndCapTest／RelaySettleWindowTest／RelayFailurePathsTest／"
+     "SentinelArmingCriterionTest 擴面、兩處既有 spawn-mock 補 git 快照分流、E501 存量債"
+     "棘輪兩處折行）＋本檔自身 +14（本稽核列＋rewrite ledger 接鏈列 DEF-200-234＋凍結"
+     "前綴延伸 84→85）。逐檔清單見 CrossPlatform_R106_Scan_Findings.md 的 R114 標記行。"),
 )
 
 
@@ -1456,10 +1488,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 82
+_REPIN_LOG_FROZEN_PREFIX_LEN = 85
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "369320d0f7f9baa87eae0389d693729fe8d3a482dfc82f638ff794f7e078836e")
+    "ea038ea6ff4e69b96a36cf48edf4af207422db550da9f690daad5455cf65a577")
 
 
 def repin_log_history_digest(
@@ -1566,6 +1598,16 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # 結構性長債分軌輪（2026-08-30）：追加本輪稽核列並依「追加後立即自我凍結」判例
     # 延伸前綴涵蓋該列本身（81→82）；Phase2 到期義務同窗記入 [提案]，載體＝該 DEF。
     ("R113", "db3448c59433", "369320d0f7f9", "DEF-200-211"),
+    # v2.1.13 G1 實作批 (a)（喚醒鏈最後一哩）：追加本輪稽核列並依「追加後立即自我凍結」
+    # 判例延伸前綴涵蓋該列本身（82→83）；載體＝DEF-200-231②（headless 窗口許可層）。
+    ("R113", "369320d0f7f9", "7301deef344e", "DEF-200-231"),
+    # v2.1.13 G2 實作批 (b)（handback 交接可見性）：追加本輪稽核列並依「追加後立即
+    # 自我凍結」判例延伸前綴涵蓋該列本身（83→84）；載體＝DEF-200-236（交接可見面）。
+    ("R113", "7301deef344e", "4b6d79935d12", "DEF-200-236"),
+    # v2.1.13 G3+G4 實作批 (c)+(d)（接力狀態機＋哨兵自癒）：追加本輪稽核列並依「追加
+    # 後立即自我凍結」判例延伸前綴涵蓋該列本身（84→85）；標號改用 R114（理由見 round-label-ok
+    # `_GUARD_LINES_REPIN_LOG` 該列）；載體＝DEF-200-234（受統籌自循環，PRD §3(c)）。
+    ("R114", "4b6d79935d12", "ea038ea6ff4e", "DEF-200-234"),
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

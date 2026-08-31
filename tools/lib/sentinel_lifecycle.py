@@ -91,6 +91,59 @@ TASK_PREFIX = "AutoSDD_Sentinel_"
 # 本檔不重寫第二份邏輯。
 
 
+# ──────────────────────────── SessionStart 交接可見性（v2.1.13 G2 批 (b)，施工圖 §3(b)5）
+# 落點 WHY：SessionStart 的 additionalContext 只能由 hook 行程自身 stdout 發出，而
+# `context_budget_guard.py` raw-line 棘輪餘裕 0 ⇒ 邏輯本體住本檔（hook 已 import 的家族），
+# hook 側只接一行線。判準面（marker／目錄解析）住 `resume_route`→`endurance_env`，本檔
+# 不抄第二份；`.ack` sidecar＝「人已看過」的磁碟憑證，同名換副檔名（`<sid>.md`→`<sid>.ack`）。
+def announce_handbacks(emit, base: Path | None = None) -> str:
+    """SessionStart 臂：未讀 handback（無 `.ack` sidecar）⇒ `emit` 出聲＋落 `.ack`；回出聲文字。
+
+    · `emit` 回 False（訊息沒被排入）⇒ **不落 `.ack`**：下一個 session 再說一次——寧可
+      重複出聲，不可靜默吞掉交接（「沒觸發＝可偵測」同向）。誠實劃界：`emit_to_model`
+      是排隊、flush 在 atexit，「排入」是本層可驗的最強憑證，flush 失敗那一半本層看不見。
+    · 永不拋例外、壞掉退安靜（回 ``""``）：hook 誤觸鎖死所有工具是判過的 P0
+      （同 `spawn_sentinel` 取捨③）；lazy import 的理由同 `_planner_module()`。
+    """
+    try:
+        import resume_route  # noqa: PLC0415 — 見 docstring（lazy：壞掉不得拖垮武裝側）
+        home = base if base is not None else resume_route.handback_dir()
+        rows = [p for p in sorted(home.glob("*.md"))
+                if not p.with_suffix(".ack").exists()]
+        if not rows:
+            return ""
+        text = "\n".join(_handback_note(p) for p in rows)
+        if not emit(text):
+            return ""
+        for report in rows:
+            report.with_suffix(".ack").write_text(
+                f"acked {time.time()}\n", encoding="utf-8", newline="\n")
+        return text
+    except Exception:  # noqa: BLE001 — 見 docstring
+        return ""
+
+
+def _handback_note(path: Path) -> str:
+    """一支 handback 檔的出聲摘要：檔名＋「## 做了什麼」首行＋「## 下一步指令」節全文。"""
+    text = path.read_text(encoding="utf-8", errors="replace")
+    did = next((ln for ln in _section(text, "## 做了什麼").splitlines() if ln.strip()), "")
+    nxt = _section(text, "## 下一步指令")
+    return (f"🔴 未讀 handback（無頭續跑窗口的交接檔）：{path}\n"
+            f"  做了什麼：{did or '（節空白）'}\n  ## 下一步指令\n{nxt or '（節空白）'}")
+
+
+def _section(text: str, heading: str) -> str:
+    """取 `heading` 之後、下一個 `## ` 之前的內容（不含標題行；找不到標題回 ``""``）。"""
+    lines = text.splitlines()
+    starts = [i for i, ln in enumerate(lines) if ln.strip() == heading]
+    if not starts:
+        return ""
+    start = starts[0] + 1
+    end = next((i for i in range(start, len(lines)) if lines[i].startswith("## ")),
+               len(lines))
+    return "\n".join(lines[start:end]).strip()
+
+
 # ───────────────────────────────────────────────────────── 回收側（CLI，hook 不會呼叫）
 def sentinel_task_names() -> list[str] | None:
     """現存的哨兵工作名；`None`＝**量不到**（載具不可達／列舉指令 rc 非 0）。

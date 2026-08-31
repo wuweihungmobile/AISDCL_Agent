@@ -148,3 +148,16 @@ G1~G4（v2.1.13）落地前開啟自動續跑確實不安全，落地後應移�
   根層全套都會重新種下（時間軸吻合：本日post-commit 全套結束 ≈16:09，首個 woken=16:24）。
 - 裁決：**立列 `DEF-200-239`（P2）**——手動清除不解決「下次全套再種」的結構問題；修法＝
   該測試族注入假 scheduler 後端＋回歸鎖斷言測試結束後排程器查無 T-r95。
+
+## 8. G1~G4 實作批紀錄（2026-08-31 落款後同日，三棒串行、鐵律七單檔單持有）
+
+| 批 | 交付重點 | 全套 | 突變驗紅 |
+|---|---|---|---|
+| G1 權限姿態 | `.claude/settings.unattended.json`（allow 16/deny 15）＋`tools/lib/resume_route.py`（argv 增補＋A-PRE 預檢＋通過面 mkdir handback）＋planner 兩路旗標（749→749）＋V-a1/a2/a4＋V-a3 靜態半格；紅線 10 測試零改動 152 passed | `Ran 3741` rc=0 | 兩向（斷 A-PRE／argv 回空皆紅） |
+| G2 handback | `endurance_env.py` 抽 `_durable_dir_status` 共用層＋`handback_dir_status()`（SSOT 共用判決落實）；planner `_RESUME_RULES` 行內擴寫四節義務＋後檢三值 `handback_verdict`（written/missing/stale）＋`resumed` 事件增欄；SessionStart 未讀偵測本體住 `sentinel_lifecycle.announce_handbacks`、hook ⓿ 瘦身保 1089/1089 免 repin；V-b1/b2/b3 | `Ran 3747` rc=0 | 斷後檢接線 2 紅 |
+| G3+G4 接力＋自癒 | `tools/lib/relay_machine.py`（判定序 ③→④→②→①、五次態、`settle_window()` 停止次態全重掛＋重掛失敗清閂＋loud）；`quota_policy_env.ENV_SPEC` 增 `AUTOSDD_RELAY_MAX_SPAWNS=2`／`AUTOSDD_RELAY_NO_PROGRESS_LIMIT=1`；REFUSE 契約（`route_strategy` 寫回 state，REFUSE≠resumed）；files_changed＝spawn 前後 porcelain 差集（git_paths SSOT）；relay_seq/streak 入 relay 狀態塊、reset_at 變更歸零；planner 750→750 淨增 0；V-c1 十六格/V-c2/V-c3/V-d3/V-d4 共 19 支 | `Ran 3767` rc=0 | 判定序反轉 5 subtests＋1 支紅 |
+
+- 三棒皆完成守衛線重釘儀式：89592→89733（G1，R113 同輪追加）→89910（G2，同）→**90351**（G3+G4，改掛 R114 標——R113 三列已計 458/585 cap，+441 掛回會單輪爆上限，agent 判斷正確）；sha 接鏈三段（369320d0→7301deef→4b6d7993→ea038ea6）。
+- MIN_TESTS 3735→3741→3747→**3767** 逐棒同行重釘＋ONBOARDING 基線回填（`--write`→`--check` 皆綠）。
+- 誠實劃界（承各棒自報）：G1 的 mkdir 失敗拒 spawn＝保守裁量（fail-safe 同向）；G2 的 `.ack` 時點只能驗到「排入 additionalContext」層；G3 判準③ 資料源＝handback「## 下一步指令」節非空（任務書 TODO 佔位選項會恆真，實作裁量已記 docstring）；`QuotaPrepareBandActuallyPreparesTest` 全套情境依賴型 flaky 一筆（與本批零重疊、單獨 3 跑全綠，如實記錄未動判準）；T-r95 於每次全套後重種、皆已清（DEF-200-239 待修）。
+- 🔴 **本批尚未過四方複審**（M3 作者自證不計分）＝ DEF-200-234/235/236 維持 open 的理由；`AUTOSDD_RESUME_OFF` 總閥維持關閉，複審過後才開＋實彈演練。

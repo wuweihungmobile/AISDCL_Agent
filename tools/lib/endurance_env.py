@@ -101,10 +101,13 @@ NOT_APPLICABLE = -1
 # 開第二個家：兩層判斷（`mkdir` 失敗／建了但不可寫）原封不動留在這裡，`trace_dir()` 改為
 # 對第二格布林的相容包裝，行為對既有呼叫端逐字不變（回歸鎖＝本檔既有的
 # `DurableTraceHomeTest` 五支，皆呼叫 `trace_dir()` 本身，未改動任何一支）。
-def trace_dir_status() -> tuple[Path, bool]:
-    """`(目錄, 是否已退回系統暫存)`。`degraded=True` 時目錄恆為 `Path(tempfile.gettempdir())`。"""
-    override = os.environ.get(TRACE_DIR_ENV, "").strip()
-    want = Path(override) if override else Path.home().joinpath(*TRACE_HOME_PARTS)
+# v2.1.13 G2（PRD_Amendment_R113_WakeChain_LastMile.md §3(b)1「共用」判決）：持久目錄的
+# 解析形態（ENV 逃生口 → 家目錄居所 → 唯讀／建不出來時退回系統暫存）抽成**單一定義**，
+# traces 與 handback 兩個居所共用——「同一句話兩個家」是本 repo 反覆判過的形態。兩層
+# 判斷（`mkdir` 失敗／建了但不可寫）逐字承接自 `trace_dir_status()` 原文，行為零變。
+def _durable_dir_status(env_var: str, parts: tuple[str, ...]) -> tuple[Path, bool]:
+    override = os.environ.get(env_var, "").strip()
+    want = Path(override) if override else Path.home().joinpath(*parts)
     try:
         want.mkdir(parents=True, exist_ok=True)
     except OSError:
@@ -114,8 +117,30 @@ def trace_dir_status() -> tuple[Path, bool]:
     return want, False
 
 
+def trace_dir_status() -> tuple[Path, bool]:
+    """`(目錄, 是否已退回系統暫存)`。`degraded=True` 時目錄恆為 `Path(tempfile.gettempdir())`。"""
+    return _durable_dir_status(TRACE_DIR_ENV, TRACE_HOME_PARTS)
+
+
 def trace_dir() -> Path:
     return trace_dir_status()[0]
+
+
+#: handback 交接檔目錄的逃生口（v2.1.13 G2；慣例同 `TRACE_DIR_ENV`：測試／CI 指到沙箱，
+#: 人設得到、模型改不到自己那一份）。
+HANDBACK_DIR_ENV = "AUTOSDD_HANDBACK_DIR"
+
+#: 家目錄下的持久交接居所（相對於 `Path.home()`；＝`~/.autosdd/handback`）。
+HANDBACK_HOME_PARTS = (".autosdd", "handback")
+
+
+def handback_dir_status() -> tuple[Path, bool]:
+    """`(目錄, 是否已退回系統暫存)`——與 `trace_dir_status()` 同一份解析形態（見上）。
+
+    消費端（`tools/lib/resume_route.py::handback_dir` 與 SessionStart 偵測）一律委派本檔，
+    不得自帶第二份解析——壽命／逃生口紀律與 `~/.autosdd/traces` 同一條（§3(b)1）。
+    """
+    return _durable_dir_status(HANDBACK_DIR_ENV, HANDBACK_HOME_PARTS)
 
 
 # `pmset -g custom` 裡「睡眠設定不是 0」的那幾行。回 `(rc, 逐行原文)`。

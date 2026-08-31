@@ -764,8 +764,7 @@ def arm_sentinel(payload: dict) -> None:
     """
     if not _has_carrier() or os.environ.get(SENTINEL_OFF_ENV):
         return  # 沒有排程載具就沒有續航可言（見 `_has_carrier`）；人要關就關得掉
-    raw = payload.get("transcript_path")
-    if not isinstance(raw, str) or not raw.strip():
+    if not isinstance(raw := payload.get("transcript_path"), str) or not raw.strip():
         return
     sid = session_id_of(Path(raw))
     if sentinel_lifecycle is not None:
@@ -774,8 +773,7 @@ def arm_sentinel(payload: dict) -> None:
     with (Path(tempfile.gettempdir()) / f"autosdd_sentinel_boot_{sid}.log").open(
             "a", encoding="utf-8", errors="replace") as handle:
         handle.write(f"\n=== session-start {datetime.now().isoformat(timespec='seconds')}"
-                     " （閂鎖已清；武裝延後到累積夠工作量的那一刻）"
-                     f"｜孤兒回收 spawn={swept} ===\n")
+                     f" （閂鎖已清；武裝延後到累積夠工作量的那一刻）｜孤兒回收 spawn={swept} ===\n")
 
 
 # 🔴 R84／C3-P4b：`sentinel_lifecycle.gc()` 此前**零自動呼叫端**，殘骸哨兵每 15 分鐘
@@ -973,9 +971,11 @@ def main() -> int:
             return 1
         event = str(payload.get("hook_event_name") or "")
         if event == "SessionStart":
-            # 這一支不量水位、不出聲、恆 exit 0：它只負責把上一輪的武裝閂鎖清掉
-            # （R82／HELM-02：真正的武裝已延後到 PostToolUse，見 `arm_when_earned`）。
+            # 清武裝閂鎖（R82／HELM-02：真正武裝延後到 PostToolUse）＋ v2.1.13 G2 未讀
+            # handback 以 additionalContext 出聲（本體住 sentinel_lifecycle，此處只接線）。
             arm_sentinel(payload)
+            if sentinel_lifecycle is not None:
+                sentinel_lifecycle.announce_handbacks(lambda m: emit_to_model(event, m))
             return 0
         blocking = event == "PreToolUse"
         # 🔴 R83：額度軸只在**我們真的推理過的那兩個事件**上動作。少了這一格，接電會順手

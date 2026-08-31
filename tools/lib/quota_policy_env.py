@@ -117,6 +117,13 @@ ENV_SPEC: tuple[EnvVar, ...] = (
     # choose_resume_route() os.environ 直讀（attr=None 不進 Policy）；選值見 Resume 證據檔 §2。
     EnvVar("AUTOSDD_RESUME_MAX_TRANSCRIPT_BYTES", None, None, "int", 1.0, None,
            "喚醒選路：逐字稿超此位元組數即降級 FRESH（留空＝內建 32MiB）", "policy"),
+    # 🔴 v2.1.13 G3（PRD_Amendment_R113_WakeChain_LastMile.md §3(c)）：接力狀態機的
+    # 兩個常數。消費端＝`tools/lib/relay_machine.py`（`attr=None`：不進 `Policy`，那支
+    # 檔自己讀 `os.environ`，同 `AUTOSDD_RESUME_MAX_TRANSCRIPT_BYTES` 既有判例）。
+    EnvVar("AUTOSDD_RELAY_MAX_SPAWNS", None, 2, "int", 1.0, None,
+           "接力：每個 reset 視窗最多自動續跑幾次（出廠 2）", "policy"),
+    EnvVar("AUTOSDD_RELAY_NO_PROGRESS_LIMIT", None, 1, "int", 1.0, None,
+           "接力：連續幾窗零新進度即停止（出廠 1＝零推進即停，對齊 R112 語意）", "policy"),
     EnvVar("AUTOSDD_QUOTA_GUARD_OFF", None, "", "flag", None, None, "1 ⇒ 額度節流全關", "escape"),
     EnvVar("AUTOSDD_SENTINEL_OFF", None, "", "flag", None, None, "1 ⇒ 額度續航哨兵關掉", "escape"),
     EnvVar("AUTOSDD_CONTEXT_GUARD_OFF", None, "", "flag", None, None, "1 ⇒ context 阻斷關掉（**與上一個不同的東西**）", "escape"),  # noqa: E501
