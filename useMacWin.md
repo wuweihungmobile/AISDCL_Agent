@@ -12,10 +12,12 @@
 > | 情境 | 條件（第 1、2 步結束時就已確定） | 這次還要做什麼 |
 > |---|---|---|
 > | **A** | 第 1 步 merge 沒拉到東西 ＋ nightly 心跳無 FAIL ＋ 第 7 步 `--check-snapshot` 綠 | 無。dev_start 跑完就能開發 |
-> | **B** | merge 有拉到東西，但 nightly 無 FAIL | 多一次表② 回填（另建乾淨 venv ＋ 實跑 ci-gate ＋ AutoClaude pytest，分鐘級） |
-> | **C** | merge 有拉到東西 ＋ nightly 有 FAIL | B 的全部 ＋ 在**新 HEAD** 上重跑那幾個失敗 stage（第 3 步三態判定） |
+> | **B** | merge 拉到的 commit **動到指紋監測面**（見下注），nightly 無 FAIL | 多一次表② 回填（另建乾淨 venv ＋ 實跑 ci-gate ＋ AutoClaude pytest，分鐘級） |
+> | **C** | nightly 有 FAIL（與指紋是否漂移**無關**） | 在**新 HEAD** 上重跑那幾個失敗 stage（第 3 步三態判定）；指紋若也漂移，再加 B |
 >
 > **B、C 不是異常，是兩件既有設計的必然產物**：①nightly 半夜跑的是**同步前**的 code，所以只要它紅過就一定要在新 HEAD 重跑一次才有推論力；②表② 是**逐機器 dated snapshot**，對面那台一動受監測的樹，這一台就 stale。⇒ 看到 B/C 不要去找「哪裡壞了」，那兩道攔的都是真東西。
+>
+> 🔴 ②的「受監測的樹」射程很窄——**只有四棵測試樹**（各 `tests/**/*.py`）＋其 rootdir `conftest.py`（SSOT＝`tools/sync_onboarding_baselines.py` 的 `_FINGERPRINT_TREES`）；根層 `tools/`、兩子專案的生產碼與 docs 都**不在面內**。ff 拉進的 commit 全落在面外時指紋不漂移、該次免回填——「要不要回填」一律以第 7 步 `--check-snapshot` 的機械判準為準（2026-08-31 Windows 實測：ff 進 15 個 commit、動了 tools/ 與 AutoClaude 生產碼，指紋照樣綠）。
 
 ---
 
@@ -65,7 +67,7 @@
 7. **ONBOARDING §7 表② macOS 欄回填**——🔴 **判斷依據是機械判準，不是記憶、也不是 dev_start [1/7]**（`[1/7]` 讀本機 .dev_env_state.json，雙機各自 clone 的拓撲永遠印「無切換」，用它判斷必然漏做）。**每次啟動都跑這一條**：
      .venv/bin/python tools/sync_onboarding_baselines.py --check-snapshot
    讀 **macOS 欄**：只要它是 `presumed stale`、或 `baseline-origin` 不是 `self-recorded`，本欄就需要回填；三項都新鮮才可跳過。
-   🔴 **綠了也不代表本輪不必做，而且主要觸發源不是你**：指紋漂移有**兩個**來源——①你本輪 commit 動到受監測的樹（tools/、AutoClaude/、AISDLC_SDD/）；②**第 1 步那個 `git merge --ff-only` 把另一台機器的 commit 拉了進來**。②在雙機交替拓撲下是**主要來源**，而且它發生在你還沒寫任何一行程式碼之前（2026-08-29 macOS 實測：本機零改動，merge 完這一條就 rc=1；且漂移後的 live 指紋與 Windows 欄當日錨的值逐字相同＝對面已經在這個樹狀態量過了）。⇒ **只要第 1 步真的 ff 進了東西，就直接預期本欄要回填**，別等第 7 步才發現。它是 pre-push 的阻斷項 ⇒ **回填要排在 commit/push 之前，且回填之後不要再改那些樹**（改了就得再回填一次）。
+   🔴 **綠了也不代表本輪不必做，而且主要觸發源不是你**：指紋漂移有**兩個**來源——①你本輪 commit 動到指紋監測面（**只有四棵測試樹**＋rootdir conftest，SSOT＝`tools/sync_onboarding_baselines.py` 的 `_FINGERPRINT_TREES`；根層 tools/ 與生產碼不在面內，見開頭注記）；②**第 1 步那個 `git merge --ff-only` 把另一台機器的 commit 拉了進來**。②在雙機交替拓撲下是**主要來源**，而且它發生在你還沒寫任何一行程式碼之前（2026-08-29 macOS 實測：本機零改動，merge 完這一條就 rc=1；且漂移後的 live 指紋與 Windows 欄當日錨的值逐字相同＝對面已經在這個樹狀態量過了）。⇒ **只要第 1 步 ff 進的 commit 動到監測面，就直接預期本欄要回填**，別等第 7 步才發現；全落在面外則指紋不動、免回填（2026-08-31 Windows 實測 ff 15 commit 仍綠）。它是 pre-push 的阻斷項 ⇒ **回填要排在 commit/push 之前，且回填之後不要再改那些樹**（改了就得再回填一次）。
    回填只能在 macOS 本機做（跨平台代填＝假 provenance，工具 rc=2 拒絕），且必須用**不含 postgres/pgvector 的出廠環境 venv**，**不准**加 --allow-pg-extras 繞過。🔴 那個 venv **不是**本機 .venv（本機 .venv 幾乎必然已被 pg extras 汙染，工具會 rc=2 拒跑）⇒ 必須另建臨時乾淨 venv（建法與污染探針見 B 段第 3 點；本機**沒有** uv，用 venv 自帶的 pip）。動手前把 B 段整段讀完，不要只照這一行做；做完把工具輸出貼給我。
 
 完成後跟我簡短回報環境狀態（是否首次執行、是否偵測到跨平台切換、GitHub 同步結果、.venv 是否重建、hooks 是否正常、有沒有需要我處理的警告），然後等我下達實際任務，不要自己先開始做事。
@@ -123,7 +125,7 @@
 7. **ONBOARDING §7 表② Windows 欄回填**——🔴 **判斷依據是機械判準，不是記憶、也不是 dev_start [1/7]**（`[1/7]` 讀本機 .dev_env_state.json，雙機各自 clone 的拓撲永遠印「無切換」）。**每次啟動都跑這一條**：
      .venv\Scripts\python.exe tools/sync_onboarding_baselines.py --check-snapshot
    讀 **Windows 欄**：只要它是 `presumed stale`、或 `baseline-origin` 不是 `self-recorded`，本欄就需要回填；三項都新鮮才可跳過。
-   🔴 **綠了也不代表本輪不必做，而且主要觸發源不是你**：指紋漂移有**兩個**來源——①你本輪 commit 動到受監測的樹（tools/、AutoClaude/、AISDLC_SDD/）；②**第 1 步那個 `git merge --ff-only` 把另一台機器的 commit 拉了進來**。②在雙機交替拓撲下是**主要來源**，而且它發生在你還沒寫任何一行程式碼之前（2026-08-29 於 macOS 側實測到本形態，兩平台同構）。⇒ **只要第 1 步真的 ff 進了東西，就直接預期本欄要回填**，別等第 7 步才發現。它是 pre-push 的阻斷項 ⇒ **回填要排在 commit/push 之前，且回填之後不要再改那些樹**。
+   🔴 **綠了也不代表本輪不必做，而且主要觸發源不是你**：指紋漂移有**兩個**來源——①你本輪 commit 動到指紋監測面（**只有四棵測試樹**＋rootdir conftest，SSOT＝`tools/sync_onboarding_baselines.py` 的 `_FINGERPRINT_TREES`；根層 tools/ 與生產碼不在面內，見開頭注記）；②**第 1 步那個 `git merge --ff-only` 把另一台機器的 commit 拉了進來**。②在雙機交替拓撲下是**主要來源**，而且它發生在你還沒寫任何一行程式碼之前（2026-08-29 於 macOS 側實測到本形態，兩平台同構）。⇒ **只要第 1 步 ff 進的 commit 動到監測面，就直接預期本欄要回填**，別等第 7 步才發現；全落在面外則指紋不動、免回填（2026-08-31 Windows 實測 ff 15 commit 仍綠）。它是 pre-push 的阻斷項 ⇒ **回填要排在 commit/push 之前，且回填之後不要再改那些樹**。
    回填只能在 Windows 本機做（跨平台代填＝假 provenance，工具 rc=2 拒絕），且必須用**不含 postgres/pgvector 的出廠環境 venv**，**不准**加 --allow-pg-extras 繞過。🔴 那個 venv **不是**本機 .venv（主 .venv 只要曾裝過 [postgres,pgvector] 就會讓工具 rc=2 拒跑）⇒ 必須另建臨時乾淨 venv（建法與污染探針見 B 段第 3 點）。動手前把 B 段整段讀完；做完把工具輸出貼給我。
 
 完成後跟我簡短回報環境狀態（是否首次執行、是否偵測到跨平台切換、GitHub 同步結果、.venv 是否重建、hooks 是否正常、有沒有需要我處理的警告），然後等我下達實際任務，不要自己先開始做事。
