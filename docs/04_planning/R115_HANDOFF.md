@@ -33,29 +33,30 @@
 
 ## 二、還沒做什麼（每項附載體與現查指令）
 
-- **DEF-200-234／236 維持 open**（234 餘 ADR-XPLAT-014 §4 巡邏分支、236 餘 R112 §3-4
-  補投佇列——兩者皆 Proposed 零實作）；現查
+- 🔴 **DEF-200-234／236 尚未結案**（234 仍缺 ADR-XPLAT-014 §4 巡邏分支、236 仍缺 R112
+  §3-4 補投佇列——兩者皆 Proposed 尚未實作）；現查
   `python tools/check_defect_log_crossref.py --unresolved-count`（兩列仍列未結）。
-- **SA-4 條件**：unattended settings 的 allow `PowerShell(...)` 前綴語意仍待 runtime 驗證
-  （deny 語法已實彈驗證有效）；載體＝證據檔 §4；現查＝下次無頭窗口的 resume log
+- **unattended settings 的 allow `PowerShell(...)` 前綴語意尚未 runtime 驗證**（SA-4
+  條件；deny 語法已實彈驗證有效）；載體＝證據檔 §4；現查下次無頭窗口的 resume log
   `Select-String -Path <log> -Pattern 'Permission'` 或 headless 窗口內實跑 allow 清單指令。
-- **handback 未讀出聲半格**：實彈演練的 handback 檔刻意留存
+- **SessionStart 的 handback 未讀出聲半格尚未驗證**：實彈演練的 handback 檔刻意留存
   `C:\Users\wuwei\.autosdd\handback\74403d0c-0c20-4b1e-ae36-da690dc062b7.md`——下個互動
-  session 開場 SessionStart 應出聲一次（G2 SessionStart 面自然驗證），看到即結；現查
+  session 開場應出聲一次（G2 面自然驗證），看到即結；現查
   `Get-ChildItem $env:USERPROFILE\.autosdd\handback`（`.ack` 落地後轉安靜）。
-- **SD-4／SD-8 advisory 未修**（RELAY_NEXT 排程失敗無 fallback 重掛＝
+- **SD-4／SD-8 兩筆 advisory 仍未修復**（RELAY_NEXT 排程失敗無 fallback 重掛＝
   `tools/lib/relay_machine.py` `settle_window` 的 RELAY_NEXT 分支；settle_window 無外圈
   例外保護＝planner resume 分支呼叫端）；二審 SD 確認座標未位移；現查
   `git grep -n "_register_and_record" tools/lib/relay_machine.py`。
-- **淨減 3 ＜ 目標 7**：本輪主力被交棒書指定的最優先三件（複審→開閥→演練）佔用；
-  231／232 經查解鎖條件未熟不硬湊。下輪結案輪繼續；現查
+- **未結列尚未降到本輪目標**（淨減 3 ＜ 目標 7）：本輪主力被交棒書指定的最優先三件
+  （複審→開閥→演練）佔用；231／232 經查解鎖條件未熟不硬湊，下輪結案輪繼續；現查
   `python tools/check_defect_log_crossref.py --unresolved-count`（現值 52）。
-- **v2.1.10／v2.1.11／v2.1.12 三批修憲維持 Proposed**（沿 R114 未動）；現查
+- **v2.1.10／v2.1.11／v2.1.12 三批修憲仍未落款**（維持 Proposed）；現查
   `git grep -n "Status：Proposed" docs/04_planning/PRD_Amendment_R112_WakeChain.md`。
-- **DEF-200-211／212① 沿 R114 未動**；現查 `python AutoClaude/tools/check_loc_budget.py --json`
-  與 `python tools/check_handoff_carriers.py --self-test`。
-- **DEF-101-693 bootstrap／integration 實跑紀錄沿 R114 未補**（外部軌）；現查
-  `python tools/check_defect_log_crossref.py`（外部軌逐字列出 693）。
+- **DEF-200-211／212① 尚未動工**（承 R114 交棒原樣）；現查
+  `python AutoClaude/tools/check_loc_budget.py --json` 與
+  `python tools/check_handoff_carriers.py --self-test`。
+- **DEF-101-693 的 bootstrap／integration 數列仍缺獨立 Windows 實跑紀錄**（外部軌）；
+  現查 `python tools/check_defect_log_crossref.py`（外部軌逐字列出 693）。
 
 ## 三、下一步確切指令（下輪開場）
 
