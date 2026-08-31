@@ -321,6 +321,18 @@ def _heal_armed_drift(state: dict, now: datetime, idle_threshold: float, tick: s
         str(state.get("plan_path") or ""), task, at_expr, tick, at)
     audit = {"armed_drift_healed": rc == 0, "armed_drift_rc": rc, "armed_drift_credential": moment}
     _append_trace(log, "sentinel_armed_drift_healed", task=task, **audit)
+    # v2.1.13 G4／V-d2 後半：漂移自癒的重掛也可能失敗——修前此分支只記 audit，不清
+    # armed stamp、不 loud，會留下一個「stamp 說已武裝、排程器現查卻沒有」的假閂鎖
+    # （與 `relay_machine._rearm_after_stop()` 判準1同型的那個病，此前只有那一條有藥）。
+    # 清 stamp 讓下一個互動 session 的 `maybe_arm()` 走正常武裝路，不留一個宣稱已重掛
+    # 的假閂鎖（R112 §3-5「自癒的自癒」同型；fail-safe 方向：寧可重新評估，不可假裝好了）。  # round-label-ok：引述既有交接書章節號，非本批自稱輪號
+    if rc != 0:
+        import sentinel_lifecycle_arm  # noqa: PLC0415 — 只在失敗路徑才需要（同 relay_machine 既有手法）  # noqa: E501
+
+        session_id = sentinel_lifecycle.session_of(task) or str(state.get("session_id") or "")
+        sentinel_lifecycle_arm.clear_arm_latch(session_id)
+        alert(f"武裝狀態漂移自癒重掛失敗（rc={rc}）：喚醒鏈斷線，已清 arm latch 供下次 "
+              "SessionStart 重新評估", state, loud=True)
     return audit
 
 

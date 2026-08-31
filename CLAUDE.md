@@ -160,7 +160,7 @@ Get-ScheduledTask | Where-Object TaskName -like 'AutoSDD_Sentinel_*' | Get-Sched
 
 - **引擎差異**：PowerShell 工具跑的是 pwsh 7.x（Core）；凡標的是 **PS 5.1 語意**者（`tools/windows_smoke_local.ps1`、`tools/install_windows_nightly.ps1`、任何 schtasks Action）**一律顯式外呼** `powershell.exe -NoProfile -ExecutionPolicy Bypass -File <絕對路徑>`。
 - **讀 rc 不接管線**：提前結束管線的元素會污染 `$LASTEXITCODE`，且污染值隨引擎而異（pwsh 7.x 保留前值＝真紅讀成綠；5.1 寫入 -1）——沒有一個方向可以靠記憶避開。要看輸出就先接到變數，或讓 Python 用 `subprocess.run(...).returncode` 取。機械物＝`lint_powershell_command.py`。
-- **執行 `.sh`**：PowerShell 內用 repo SSOT 解析 Git Bash ＋ 正斜線路徑：`. "$(git rev-parse --show-toplevel)/tools/lib/Find-GitBash.ps1"; & (Find-GitBash) -n '<正斜線腳本路徑>'`。❌ 不可裸 `bash <script>`（`Get-Command bash` 解析到 system32 的 WSL 佔位版、反斜線分隔符會被吃掉）；❌ 不可寫死安裝路徑（一台機器的偶然事實不得成為本檔常數，`Find-GitBash` 才是 SSOT）。
+- **執行 `.sh`**：PowerShell 內用 repo SSOT 解析 Git Bash ＋ 正斜線路徑：`. "$(git rev-parse --show-toplevel)/tools/lib/Find-GitBash.ps1"; & (Find-GitBash) '<正斜線腳本路徑>'`。❌ 不可帶 bash 的 `-n` 旗標（noexec＝只檢查語法不執行，rc=0 是假綠——本檔曾教錯此形態，2026-09-01 實測踩坑後訂正）；❌ 不可裸 `bash <script>`（`Get-Command bash` 解析到 system32 的 WSL 佔位版、反斜線分隔符會被吃掉）；❌ 不可寫死安裝路徑（一台機器的偶然事實不得成為本檔常數，`Find-GitBash` 才是 SSOT）。
 - **讀檔／搜尋／算行數用 Read／Grep 工具**，不經 shell：編碼邊界**雙向**都會出錯（CP950↔UTF-8 兩向皆有實證假數字）；要在 shell 內讀就必須指名 `-Encoding utf8`。
 
 ### 鐵律二：一律絕對路徑，禁用裸 `cd`

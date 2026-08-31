@@ -408,12 +408,8 @@ class TestOnboardingLiveBaselineFreshness(unittest.TestCase):
 
 
 class TestLockedLineProseIsAlsoManaged(unittest.TestCase):
-    """R60 round 3（DEF-101-562）：受鎖行的**散文**也受管。
-
-    產生器 ＋ `--check` 只保證「被抽取的那個 token」新鮮，**不保證同一行的散文新鮮**；
-    正樣本刻意用真實缺陷的逐字形態（`R60=756`）。立案史料＝
-    `docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    doc_loc TestLockedLineProseIsAlsoManaged WHY〉節。"""
 
     #: 受鎖行的最小合成骨架（帶 rootunit 錨點與受管 token）。
     _SKELETON = "| **{v} tests OK** {prose} <!-- rootunit-baseline-live: --> |"
@@ -504,23 +500,8 @@ class TestLockedLineProseIsAlsoManaged(unittest.TestCase):
 
 
 class TestSnapshotFingerprintTripwire(unittest.TestCase):
-    """R60 round 3（DEF-101-563）：表②（dated snapshot）的 presumed-stale 觸發器。
-
-    四方複審 round 2 **全部四位獨立命中同一根因**（ARCH-R60R2-02／SA-R60R2-02／
-    SD-R60-R2-02／QA2-R60-01）：round 1 填了 ci-gate v0.30 的當時值、round 2 動了該
-    測試樹使實測改變而**沒人回填**，而表頭同時宣稱「四格皆經 SA 複審者獨立覆核相符」
-    ⇒ 假宣稱。根治＝把「靠人記得」換成因果式觸發器：測試計數只可能因測試樹變動而變。
-
-    🔴 **本類別刻意不斷言「真實文件的指紋現在是新鮮的」**（與上方表① 那幾支不同）：
-    那樣會讓根層 unittest 閘門在**任何一輪動到任何測試檔時立刻紅**，而回填要付分鐘級
-    代價 ⇒ 必然養成忽略紅燈的習慣，比沒有鎖更糟。故該斷言的住址是 **pre-push 第 8 支
-    守門 ＋ root-infra-ci 第 14 道**（收輪＝push 時點付代價才合理），其接線完整性由
-    `test_root_infra_parity.py` 的雙向鎖機械保證。本類別驗的是**機制本身有牙**。
-
-    ⚠️ **root-infra-ci 現因 CI 帳務停擺（DEF-101-081）在數秒內失敗，那一半從未在雲端
-    真正執行**（R60 r3 QA-R60R3-04 以 gh run list 實查／DEF-101-597）。故上句是
-    **接線完整性**的宣稱，不是活體守門的宣稱；今日真正會跑的只有 pre-push 那一半。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    doc_loc TestSnapshotFingerprintTripwire WHY〉節。"""
 
     def test_all_fingerprint_trees_exist_and_hash_stably(self) -> None:
         live = SYNC.measure_fingerprints()
@@ -611,18 +592,8 @@ class TestSnapshotFingerprintTripwire(unittest.TestCase):
 
 
 class TestR67R2RootdirConftestIsFingerprintInput(unittest.TestCase):
-    """R67 round 2（SD-R67-02）：決定收集結果的 rootdir `conftest.py` 也必須是指紋輸入。
-
-    WHY（Rule 9 — 測意圖非僅行為）：指紋錨的字面語意是「**該欄的數字是在哪一棵測試樹上
-    量的**」，它存在的唯一理由是「計數只可能因測試樹變動而變」這條因果判準。而 pytest
-    依 rootdir 隱式載入的 `conftest.py` **同樣決定那次執行收集到什麼**（一句
-    `collect_ignore_glob` 就能讓計數改變），卻住在四棵 glob 的覆蓋面之外 ⇒ 判準的「因」
-    漏了一半。SD-R67-02 已實測：在 `AISDLC_SDD_v0.30/conftest.py` 末尾加一行
-    `collect_ignore_glob`，實測計數改變、四格指紋**逐字不變**、`--check-snapshot` ✅ rc=0。
-
-    這與 R60 SD-R60R3-03 修的是**同一類缺口的另一個入口**（那次是樹**內**子目錄、這次是
-    樹**外** rootdir），故一併鎖住，而不是只把當下這一支檔補進去。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    doc_loc TestR67R2RootdirConftestIsFingerprintInput WHY〉節。"""
 
     def test_every_tree_declares_a_rootdir_conftest_and_it_sits_at_the_rootdir(self) -> None:
         """四棵樹各自都要登記 rootdir conftest，且該檔必須真的住在那棵樹的 rootdir 上。
@@ -808,16 +779,8 @@ class TestSlowSnapshotCellsRoundTrip(unittest.TestCase):
 
 
 class TestProseClaimDialectsAreNotBoundToOnePunctuation(unittest.TestCase):
-    """R60 round 3（ARCH-R60R3-01／SD-R60R3-01 二方獨立命中）：判準(2) 不得綁死 `=`。
-
-    round 2 版本寫死 `R(\\d+)\\s*=\\s*(\\d+)`，於是**只要換一個標點就繞過整道判準**。
-    這與同輪 ARCH 指出的架構反模式是同一個：**鎖比對表面形式、不比對語意**
-    （`Find-GitBash` parity 只比字面值、本判準只認一種字面）。修法是把「主詞 × 連接」
-    拆開，讓收一種新方言＝往集合裡加一個字。
-
-    🔴 對抗式樣本一律以 `historical=()` 驅動：受鎖行上那些**真實的**歷史值在放寬判準後
-    已依機制設計登記進 `_SPECS`，沿用真實登記會讓樣本被白名單合法放行而失去鑑別力。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    doc_loc TestProseClaimDialectsAreNotBoundToOnePunctuation WHY〉節。"""
 
     #: 逐字取自 R60 round 3 複審回報的逸出樣本（放寬前**全部 GREEN**，全部應該要 RED）。
     _ESCAPED_DIALECTS = (
@@ -934,15 +897,8 @@ class TestProseClaimDialectsAreNotBoundToOnePunctuation(unittest.TestCase):
 
 
 class TestHistoricalWaiverHasStaleSelfCheck(unittest.TestCase):
-    """R60 round 3（QA-R60R3-02／ARCH-R60R3-01 附帶／SA-R60R3-04／SD-R60R3-02）。
-
-    🔴 **四方全數獨立命中同一筆**：round 2 為判準(2) 新增 `Spec.historical` 這張豁免表，
-    卻沒有給它任何 stale 自檢。諷刺點在於**同一個函式的判準(1)** 錯誤訊息自己寫著
-    「本鎖刻意不設個別豁免——豁免表本身就是下一個 stale 站點」，而判準(2) 就設了一張。
-    同 repo 兩張姊妹豁免表都有自檢（`_BASELINE_WAIVERS` 的
-    `test_baseline_waivers_are_not_stale`、`archive_defect_log._ARITY_BASELINE` 的
-    「實測 < 登記即紅」），本表是唯一例外 ⇒ 同輪內標準不一致。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    doc_loc TestHistoricalWaiverHasStaleSelfCheck WHY〉節。"""
 
     def _spec(self) -> SYNC.Spec:
         return next(s for s in SYNC._SPECS if s.anchor == "rootunit-baseline-live:")
@@ -1050,13 +1006,8 @@ class TestHistoricalWaiverHasStaleSelfCheck(unittest.TestCase):
 
 
 class TestFingerprintGlobsAreSymmetricAndRecursive(unittest.TestCase):
-    """R60 round 3（SD-R60R3-03）：四棵指紋樹的 glob 不得不對稱。
-
-    round 2 版本三棵 SDD 樹用非遞迴 `*.py`、只有 AutoClaude 用 `**/*.py`，**無 WHY**。
-    而表② 四格的計數全部來自 pytest，**pytest 收集測試是遞迴的** ⇒ 在任一棵的子目錄
-    新增測試會改變計數而指紋不動＝觸發器漏。修法選「把三棵對齊成遞迴」而非「補一條
-    WHY 說明會漏」：這是消除不對稱，不是加機制。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    doc_loc TestFingerprintGlobsAreSymmetricAndRecursive WHY〉節。"""
 
     def test_all_trees_use_the_same_recursive_glob(self) -> None:
         """對稱性鎖：四棵 glob 必須一致且為遞迴（有人改回非遞迴即紅）。"""
@@ -1122,18 +1073,8 @@ class TestFingerprintGlobsAreSymmetricAndRecursive(unittest.TestCase):
 
 
 class TestFingerprintIsLineEndingAgnostic(unittest.TestCase):
-    """R60 round 3（DEF-101-613）：指紋不得隨 checkout 的行尾而變。
-
-    原版直接 hash `read_bytes()`。而 `.gitattributes` 宣告 `* text=auto eol=lf`
-    ⇒ 索引一律 LF，但本機 Windows 工作樹大量檔案是 CRLF（`git ls-files --eol` 數
-    `i/lf w/crlf`：v0.01 樹 48／v0.30 樹 72／AutoClaude 樹 92）⇒ **任何 fresh clone／
-    CI runner／macOS 機器 checkout 出來都是 LF，四格指紋必然全部對不上，
-    `--check-snapshot` 開箱即紅**。今日零後果純粹因為只有這一台 Windows 機器在跑。
-
-    本類別兩個方向都要鎖，缺一即是半套：
-      - **跨平台等價**：同內容不同行尾 ⇒ 指紋必須**相同**（沒有 `_normalize_eol` 就紅）。
-      - **未縮面**：真的改內容 ⇒ 指紋必須**不同**（證明沒把鑑別力連同行尾一起正規化掉）。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    doc_loc TestFingerprintIsLineEndingAgnostic WHY〉節。"""
 
     _LINES = (b"import os", b"", b"def test_x():", b"    assert os.sep", b"")
 
@@ -1253,22 +1194,8 @@ class TestFingerprintIsLineEndingAgnostic(unittest.TestCase):
 
 
 class TestR67PlatformColumnIsFirstClass(unittest.TestCase):
-    """R67-D1（本輪唯一 P1）：回填必須**只寫本機平台那一欄**，寫到別欄要在結構上不可能。
-
-    WHY（測意圖非僅行為，Rule 9）：§7 表② 存在的**唯一**理由是「讓開發者分辨『平台差異』
-    與『退化』」。R67 之前 `render_slow()` 的四組正則一律以 `**…**` 粗體錨定 Windows 欄
-    （原註解自陳「以 `**` 包裝限定在 Windows 欄」），而 `measure_slow()` 量的是本機——於是
-    在 macOS 上執行文件與 `--check-snapshot` 紅燈訊息**都指路**的那條回填指令，會把 macOS
-    實測值靜默寫進標示「Windows 11 實測」的格子：表格還是滿的、指令還是 rc=0，但它從此
-    在說謊。這比空著更糟——空著至少看得出來沒人量。
-
-    故本類別鎖的不是「render_slow 會改字」，而是**「另一個平台欄逐字不動」**這條不變量：
-    這是「平台差異可讀」這個目的在程式碼裡唯一能被機械檢查的形式。
-
-    邊界（誠實劃界）：本鎖保證「不會寫到別欄」，**不保證**寫進來的數字本身是在對的環境
-    量的（那由 `snapshot-fingerprints-<平台>` 錨的 provenance ＋ `--write --with-slow` 的
-    pgextras 守門負責，見 TestR67PerPlatformFingerprints／TestR67CliFailsLoud）。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    doc_loc TestR67PlatformColumnIsFirstClass WHY〉節。"""
 
     def setUp(self) -> None:
         self.text = _ONBOARDING.read_text(encoding="utf-8-sig")
@@ -1376,17 +1303,8 @@ def _insert_cell(line: str, position: int, cell: str) -> str:
 
 
 class TestR67PerPlatformFingerprints(unittest.TestCase):
-    """R67-D6：指紋/provenance 逐平台記帳——另一欄的 stale 不得在結構上永遠測不到。
-
-    WHY：原版只有一條全域 `snapshot-fingerprints:` 錨，語意是「上一次回填時的測試樹」；
-    但回填在結構上只寫得到一欄（見 R67-D1）⇒ 另一欄的 stale **永遠不可能被偵測**。
-    實測（Scan-D）：把 macOS 欄三格灌成 9999，`--check-snapshot` 照樣印 ✅ rc=0。
-    一個「該紅時結構上不可能紅」的守門比沒有守門更糟：它會讓人以為那一欄被看著。
-
-    本類別一律以**合成的「兩欄皆新鮮」文本**驅動（把 live 指紋寫進兩欄），刻意不依賴
-    真實文件當下是否新鮮——否則本鎖會在任何一輪動到測試樹時連帶假紅，而回填要付分鐘級
-    代價（同 TestSnapshotFingerprintTripwire 的既定紀律）。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    doc_loc TestR67PerPlatformFingerprints WHY〉節。"""
 
     def setUp(self) -> None:
         text = _ONBOARDING.read_text(encoding="utf-8-sig")
@@ -1579,23 +1497,8 @@ class TestR67PerPlatformFingerprints(unittest.TestCase):
 
 
 class TestR67R2OtherPlatformNoticeIsNotAStandingWarning(unittest.TestCase):
-    """R67 round 2（QA-R67-05）：別平台欄那一則**結構上恆亮**，故不得掛在警告頻道。
-
-    WHY（Rule 9 — 測意圖）：單機交替工作流（R66 在 Windows、R67 在 macOS、下一輪再換）下，
-    任一輪都會動到四棵樹之一 ⇒ 另一平台欄的指紋必然對不上，且**本機無論如何都清不掉**
-    （回填必須在那台機器上實跑）。於是它是一則「系統完全正常時也永遠亮著」的訊號。本 repo
-    已明文論證過後果（`tools/run_root_unittests.py`：「常亮的警告＝背景噪音」）——讀者學會
-    略過這一段，就會連同段真正有牙的「本機平台欄轉紅」一起略過。
-
-    本類別鎖的三條不變量：訊息**在 stdout 的資訊頻道**（不是 stderr 的 ⚠️）、**從未回填過**
-    與**回填過但過期**兩種狀態措辭可區分、且後者帶「距上次量測幾天」這個唯一可行動的量。
-
-    🔴 R67 round 3：視角欄由「本機平台欄」改為**固定挑一對受管欄**。原版 `setUp` 斷言
-    `current_platform_key()` 不得為 None，於是整類三支在無欄平台（Linux CI runner）上
-    全紅——但本類別驗的是 `snapshot_report()` 的「別欄提醒」機制，它吃「以哪一欄為視角」
-    當參數，跟本機是哪個平台無關。詳見 `TestSnapshotFingerprintTripwire.
-    test_check_snapshot_reds_on_documented_drift` 的同款論證。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    doc_loc TestR67R2OtherPlatformNoticeIsNotAStandingWarning WHY〉節。"""
 
     def setUp(self) -> None:
         keys = sorted(SYNC._PLATFORM_COLUMN_LABELS)
@@ -1726,13 +1629,8 @@ class TestR67R2OtherPlatformNoticeIsNotAStandingWarning(unittest.TestCase):
 
 
 class TestR67CliFailsLoud(unittest.TestCase):
-    """R67-D20：CLI 改 argparse——未知旗標／打錯字一律 rc=2，文件不得引用不存在的旗標。
-
-    WHY：原版 `"--flag" in argv` 手搓解析，未知旗標一律靜默掉進 default 分支並 rc=0
-    ⇒ 少打一個字母就把該紅的守門變成綠燈（假綠）。修法選「把 `--check` 實作為真旗標」
-    而非改引用它的文件——那是本 repo 既有慣例（`snapshot_sync.py`）。實測 rc 與
-    立案原文＝`docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    doc_loc TestR67CliFailsLoud WHY〉節。"""
 
     def test_unknown_flag_is_rejected_with_rc2(self) -> None:
         for bogus in ("--totally-bogus-flag", "--wtih-slow", "--checks"):
@@ -1923,15 +1821,8 @@ def _slow_window_sandbox(mutate_during_window: bool):
 
 
 class TestR67SlowMeasurementWindowIsFingerprintBracketed(unittest.TestCase):
-    """R67 收尾 Scan-H（DEF-101-677）：`--write --with-slow` 的量測窗口 TOCTOU。
-
-    這不是「指紋這種觸發器本來就會漏」那一類（那是已揭露的邊界：docker 狀態、
-    生產碼改 parametrize 都能改變計數而指紋不動）。這一類是**回填路徑親手把觸發器
-    拆掉**：樹確實變動了——那正是本觸發器唯一認得的事件——卻被寫進錨當成基準。
-    既有契約已是「指紋一變即判 presumed stale」，唯獨回填路徑替自己免除了這一條；
-    修法是取消那個豁免，**不是**提高嚴格度。缺陷機制詳述與活體證據（兩個對不上的
-    計數）＝`docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    doc_loc TestR67SlowMeasurementWindowIsFingerprintBracketed WHY〉節。"""
 
     def test_mutation_inside_window_fails_loud_and_writes_nothing(self) -> None:
         """窗口內樹變動 ⇒ 拋 `BaselineToolError`，且 ONBOARDING **一個 byte 都沒被改**。
@@ -2458,29 +2349,8 @@ def _flatten_suite(suite: unittest.TestSuite) -> list[unittest.TestCase]:
 
 
 class TestR67R3ThisFileMakesNoUnstatedPlatformAssumption(unittest.TestCase):
-    """🔴 R67 round 3 回歸鎖：本檔的每一支鎖，在**任何**平台上都必須得出同一個結果。
-
-    WHY（缺陷類別，不是單一缺陷）：R67 把 `sync_onboarding_baselines.py` 平台化之後，
-    本檔多支鎖改用 `current_platform_key()`／`main(["--write", "--with-slow"])` 驅動，
-    等於各自悄悄加上一條**未言明的前提**——「本機必須是 §7 表② 有對應欄的平台」。
-    在作者的 macOS 上三個月都是綠的；直到 root-infra-ci 的相依缺口被補、這些鎖第一次
-    真的在 ubuntu runner 上執行，7 支同時紅。而那 7 個紅燈說的都不是「受測物壞了」，
-    是「測試自己的前提在這台機器上不成立」——**假紅比假綠更快讓人學會忽略紅燈**。
-
-    這一類不可能靠人審抓：它的症狀只在「沒人跑過的平台」上出現，而「沒人跑過」正是它
-    能活下來的原因（同 DEF-101-343~345「Windows 專屬測試連續 5+ 輪全 APPROVE 卻從未在
-    Windows 跑過」的形態，只是方向換成 Linux）。故本鎖把「換平台」變成**本機當場可跑**
-    的事：以模擬的 `sys.platform` 重跑本檔全部鎖，任一平台下的失敗即當場點名。
-
-    邊界（誠實劃界）：
-      - 只注入 `sys.platform`。`os.name`、真實檔案系統、路徑分隔符、是否有 pwsh 等
-        **不在**模擬範圍內 ⇒ 本鎖綠**不等於**「本檔在真 Linux/Windows 上必綠」，只等於
-        「本檔不因 `sys.platform` 而異」。對受測物而言這已是全部——
-        `sync_onboarding_baselines.py` 的平台輸入只有 `sys.platform`
-        （`platform_mod.*` 僅供 provenance 的 host 字串，不進任何判準）。
-      - 代價＝本檔跑 `len(_NEUTRALITY_PLATFORMS)` 倍。可接受的理由：本檔是純字串/雜湊
-        運算，實測全檔僅數秒；而它換回來的是「跨平台缺陷在**動工的那台機器上**就會紅」。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    doc_loc TestR67R3ThisFileMakesNoUnstatedPlatformAssumption WHY〉節。"""
 
     def _sibling_suite(self) -> unittest.TestSuite:
         """本模組除本類別以外的全部測試（排除自己＝防無限遞迴）。"""
@@ -2610,19 +2480,8 @@ class _ReadAccountingPath:
 
 
 class TestR71NightlyProbeActuallyParsesEachPlatformsOwnFormat(unittest.TestCase):
-    """🔴 DEF-101-763：讓平台覆蓋不再靠人記憶的那道機械守，自己一天都沒量到過東西。
-
-    `nightly_evidence()` 隨 `fbc9bb5`（DEF-101-756/757/758）落地，首版彙總行解析是
-    `read_text().splitlines()[:3]` 找 `"PASS="`——那是 **mac 心跳**的形狀。win32 讀的卻是
-    `run_local_nightly.ps1` 的**全量 log 複本**，彙總行在第 491 行、字面是
-    `END nightly summary: …`，兩個致命點各自獨立、任一個都足以讓它恆不命中。
-    於是 `--check-snapshot` 的 Windows 欄每天都印「（心跳無彙總行）」——而那句話讀起來
-    像資料現況，不像探針壞掉。**fallback 文案把自己的失效偽裝成正常**，這是最難被發現的
-    一種壞法：沒有紅燈、沒有 traceback，只有一句看似合理的話。
-
-    本類別鎖的**意圖**（Rule 9）：探針必須拿**該平台自己的**格式去解析，且「解析不到」
-    與「檔裡真的沒有」必須說得出差別——兩者的處置相反（改探針 vs 去看那台機器）。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    doc_loc TestR71NightlyProbeActuallyParsesEachPlatformsOwnFormat WHY〉節。"""
 
     def _probe(self, platform_key: str, body: str) -> str:
         with tempfile.TemporaryDirectory() as td:
@@ -2731,21 +2590,8 @@ class TestR71NightlyProbeActuallyParsesEachPlatformsOwnFormat(unittest.TestCase)
 
 
 class TestR71StaleFingerprintMustNotSwallowTheCoverageDetail(unittest.TestCase):
-    """🔴 D-3：**一個無關的漂移不得讓整段平台覆蓋明細消失**（與 DEF-101-763 同族）。
-
-    實測立案（本批以 production 入口重現）：`tools/sync_onboarding_baselines.py
-    --check-snapshot` → rc=1，輸出**停在 ❌ 指紋區塊**，逐欄明細（baseline-origin 三態、
-    provenance、nightly 證據、四格記載值）一行都沒印。原因是 `main()` 在 `problems`
-    非空時當場 `return 1`，而那段明細排在 return 之後。
-
-    為何這是設計缺陷而不只是「順序不巧」：指紋 stale 在單機交替工作流下是**日常態**
-    （動到四棵測試樹任一棵就觸發，本批實測就是被另一個並行包改動 AutoClaude/tests/ 觸發的）
-    ⇒ 專門為根治 DEF-101-756 誤讀而加的那段說明，**在最常見的那條路徑上結構性看不見**；
-    讀者拿到的只有「某棵樹指紋變了」，於是又得自己腦補「那這平台到底驗過沒有」——回到
-    事故原點。**掩蓋的形態與 fallback 文案一樣：沒有紅燈、沒有 traceback，只是資訊沒了。**
-
-    修法（rc 語意**不放寬**）：明細兩條路都印，判決行標明它屬 presumed stale。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    doc_loc TestR71StaleFingerprintMustNotSwallowTheCoverageDetail WHY〉節。"""
 
     def _run(self, problems: list[str]) -> tuple[int, str, str]:
         """以替身 `snapshot_report` 驅動，讓本鎖與「真實文件此刻是否過期」解耦。
@@ -3735,13 +3581,8 @@ class TestR74IronLawMechanismAccounting(unittest.TestCase):
 
 
 class TestR75IronLawMechanismSubstance(unittest.TestCase):
-    """鐵律三具名的機械物必須**真的在守該列的主題**（第 ③ 面：實質假機械物）。
-
-    🔴 為何「檔案存在」不夠：`行尾` 列先前具名的是 `tools/tests/test_ps1_bom.py`，而該檔
-    全篇是 .ps1 的 UTF-8 BOM 政策，對 CRLF／行尾**零判準**（實測 `crlf`／`eol`／`\\r\\n`／
-    `line ending` 在該檔命中 0）。路徑點得開、檔案打得開，只有讀完才知道守錯東西——
-    這比指向一個不存在的檔更難看見，而只斷言存在的鎖照樣放行。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    doc_loc TestR75IronLawMechanismSubstance WHY〉節。"""
 
     def test_every_named_mechanism_actually_guards_its_row_topic(self) -> None:
         problems = iron_law3_substance_problems(
@@ -3875,7 +3716,6 @@ _SYMBOL_ASSIGN_RE = re.compile(r"^\s*(\w+)\s*(?::[^=\n]+)?=", re.M)
 #:     `test_subprocess_encoding_hygiene._ENTRY_WAIVER_CEILING`）。
 _GHOST_SYMBOL_BASELINE: frozenset[str] = frozenset({
     "TestGuardFileCountShrinkOnlyRatchet",   # R79-docs：ADR-XPLAT-002 §8 item 12 的沿革
-    "TestMultiGrandchildLockNotPrematurelyStale",
     "_CALL",
     "_CELL",
     "_FROZEN_GUARD_FILE_COUNT",             # R79-docs：R77 退場的檔數棘輪（史料引用）
@@ -3918,7 +3758,13 @@ _GHOST_SYMBOL_BASELINE: frozenset[str] = frozenset({
 #: does_not_fail` 那一筆的唯一引用是一段史料敘述，該段本輪已遷入 R89 收尾證據檔 ⇒ 全引用
 #: 面歸零、幽靈清乾淨，依 stale 向的指示刪除，天花板同步降到現值。
 #: 🔴 R95 收尾：31→30（收緊，體例同上）——DescendantWatcher 樣本類的唯一引用已隨史料搬遷離開掃描面。
-_GHOST_SYMBOL_BASELINE_CEILING = 30
+#: 🔴 R115 收斂棒 round-label-ok：30→29（收緊，體例同上）——上一筆已刪除那個舊測試類名字的唯一引用
+#: （`test_dev_start.py` 內某類 docstring 的一句歷史敘述）本輪隨類級 docstring 沿革
+#: 搬遷（見 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok dev_start
+#: TestAcquireBootstrapLockPartialAliveMiddleState WHY〉節）離開掃描面，全引用面歸零、
+#: 幽靈清乾淨，依 stale 向的指示刪除，天花板同步降到現值（本行刻意不覆述那個名字本身
+#: ——反引號包住它會讓本檔自己的幽靈符號掃描器把這句 WHY 誤判成新的一筆待清幽靈）。
+_GHOST_SYMBOL_BASELINE_CEILING = 29
 
 _SYMBOL_INDEX_CACHE: dict[str, frozenset[str]] = {}
 
@@ -4007,13 +3853,8 @@ def stale_ghost_baseline_problems(
 
 
 class TestR78GhostSymbolClaims(unittest.TestCase):
-    """第四面：以**裸識別字**指認機械物時，那個符號必須真的存在。
-
-    🔴 這一類是 R78 本包最重要的交付。ARCH-03／SD-07 的十餘處逃逸全部從同一個縫出去：
-    上面三面的擷取器只認「帶副檔名的路徑」，而「裸常數名」這種寫法既不是
-    路徑、也不帶 `::`，於是「專門偵測懸空引用的那道鎖」對它結構上盲。只補個案不補判準，
-    同型缺陷下一輪必然再來——本 repo 已有多次同型復發的紀錄。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    doc_loc TestR78GhostSymbolClaims WHY〉節。"""
 
     def test_no_new_ghost_symbols(self) -> None:
         """主牙：引用面不得出現基線之外的幽靈符號。"""
@@ -5943,22 +5784,8 @@ _MOVING_REF_TOKENS: tuple[str, ...] = (
 
 
 class TestR75CloudCriteriaAreSatisfiableAtAnyCommit(unittest.TestCase):
-    """🔴 **本輪最貴的一課，升為機械物**（比個案修復更重要）：
-
-    **判準的比較對象若會隨「被該判準所判的那個動作」本身而改變，這個判準結構上不可滿足。**
-
-    實證（R75，代價＝main 上三支 workflow 全紅）：表③ 的覆蓋面判準第一版拿
-    `git rev-parse origin/main` 當比較對象，要求錨的 `head-sha` 等於它。推導只有兩步——
-    CI 在 push **之後**執行，那時 `origin/main` 已經等於被測的那個 commit；於是要讓
-    commit X 通過，X 的檔案內容必須寫進 X 自己的 sha，而 sha 是 X 內容的雜湊 ⇒ **自我
-    指涉，任何 commit 都滿足不了**。本機 pre-push 時 `origin/main` 還沒前進所以是綠的，
-    push 完就紅——「本機全綠、雲端紅」在同一輪內第二次發生，而且兩次都出在**用來防這件事
-    的那個機制自己身上**。
-
-    本鎖讀 `cloud_*` 判準家族的**執行碼**（以 AST 去掉 docstring 與註解——教訓必須能寫在
-    散文裡，但不得寫進判準），任一支只要碰到 remote-tracking 參照就當場點名。這樣下一個
-    人想加「跟 origin 比一下」的判準時，會在寫完的那一刻就紅，而不是在 push 之後才紅。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    doc_loc TestR75CloudCriteriaAreSatisfiableAtAnyCommit WHY〉節。"""
 
     def _executable_source(self, fn: object) -> str:
         """函式的執行碼（剝掉 docstring 與註解），用來與散文分開判定。"""
@@ -6344,13 +6171,8 @@ def repo_exit_criterion_problems(repo_root: Path) -> tuple[list[str], list[str]]
 
 
 class TestR76ExitCriteriaSurviveTheirOwnAction(unittest.TestCase):
-    """🔴 R75 頭號教訓的**家族層**承接者：退場／解除條件也適用同一條規則。
-
-    **判準的量測對象若會隨「被它所判的動作」而改變，這個判準結構上不可滿足。**
-    上方 `TestR75CloudCriteriaAreSatisfiableAtAnyCommit` 讀的是本模組內 `cloud_*` 家族的
-    Python 執行碼；本類別讀的是**任何語言的退場判準散文**——第三次復發正是從那兩個縫
-    （非 Python、非 cloud_ 前綴）走掉的。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    doc_loc TestR76ExitCriteriaSurviveTheirOwnAction WHY〉節。"""
 
     def _live(self) -> tuple[list[str], list[str]]:
         return repo_exit_criterion_problems(_REPO_ROOT)
@@ -6481,20 +6303,8 @@ class TestR76ExitCriteriaSurviveTheirOwnAction(unittest.TestCase):
 
 
 class TestR71SmokeTripwireIsInViewWithTheHonestReading(unittest.TestCase):
-    """D-4：smoke 這條每日證據要進讀者視野，且不得憑空多出一條假通道。
-
-    🔴 **R74 重寫（DEF-101-786 殘留收尾）**：本類別的舊敘述把「win32 smoke 讀不到、
-    故只印說明」寫成現況——而落點自 R71 的 `1e5214b` 起就存在（`Start-Transcript`
-    ＋ 14 天輪替），R73 已查證並訂正敘述，判定邏輯卻沒動。也就是說**這組鎖守的是一個
-    已經不成立的設計取捨**，於是那條每日真機證據又多兩輪留在平台覆蓋判定之外。
-
-    現行判準（逐平台不同，因為兩邊的 smoke 不是同一種東西）：
-      · win32  ＝ `SMOKE_HEARTBEATS` 真探針，smoke 那行必須是**量測值**；
-      · darwin ＝ 刻意無探針（它的 smoke 是同一輪 nightly 的 stage [1/4]），只印解讀
-        守則；接一條探針會讓同一件事被量兩次、看起來像兩條獨立證據。
-    兩種誤讀都要擋：「本機無此檔」不得讀成「該平台沒在跑」（DEF-101-756 換載體），
-    「有說明文字」也不得讀成「已納入判定」。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    doc_loc TestR71SmokeTripwireIsInViewWithTheHonestReading WHY〉節。"""
 
     _SMOKE_ACTION = "$smokeAction = New-ScheduledTaskAction"
     _REDIRECTS = ("Tee-Object", "Start-Transcript", "Out-File", ">>", "1>", "2>")
@@ -6640,17 +6450,8 @@ def _rate_problems(lines: list[tuple[str, int, str]], live: dict) -> tuple[list[
 
 
 class TestR78MaturityCriteriaSsot(unittest.TestCase):
-    """M1〜M6 只有一個家，且 M5 的數字只能來自載具（R78 ARCH-05）。
-
-    🔴 為何是 blocking 級：這六條是**治理層判「這一輪算不算成熟」的判準**，而它們原本
-    寄生在 `CrossPlatform_R76_Scan_Findings.md` ——一份輪次專屬的掃描發現文件。輪次文件
-    按定義是凍結記錄，不會有人回頭維護；活判準寄生在凍結記錄裡，等於**沒有家**。
-    後果已經發生：M5 的攔截率同時住三個地方（判準表／交棒書 Q3／ADR 逐輪覆蓋表 R77 列），
-    三處全部停在**修復前**的值——而讓它們過期的，正是同一個 commit 落地的第六道判準。
-    低報自己的成果不是好事：下一輪跑載具會看到「一輪暴衝」，然後去找一個不存在的原因。
-
-    四道判準（前三道守歸屬，第四道守新鮮度）＋ 一道掃描器自檢。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    doc_loc TestR78MaturityCriteriaSsot WHY〉節。"""
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -6882,20 +6683,8 @@ def _handoff_perdoc_problems(
 
 
 class TestR78HandoffClaimsCarryLiveCommands(unittest.TestCase):
-    """交棒書凡述及「尚未做」，一律附現查指令（R78 SA-04／SA-05 的體例層修法）。
-
-    🔴 為何是體例而不是個案：立案的兩筆 finding 都不是「寫錯了」，是**把量測值當常數
-    寫**——交棒書記的是收輪那一刻的狀態，讀者卻在數天後、由別人動過的樹上讀它。
-    附上現查指令，讀者的第一動作就會是重量而不是採信。
-
-    逃生口是 `handoff-claim-verified:`（WHY 必填）：有些事（例如「這一輪有沒有做複審」）
-    真的沒有機械現查管道，逼人編一個指令比誠實說沒有更糟。
-
-    現行形狀：取材面加收**標題塊／散文塊**（見 `_handoff_claim_blocks`），反崩塌改成
-    **逐文件**（見 `_handoff_perdoc_problems`），並對「最新一份」再加一道不得豁免的牙。
-    兩筆 finding 的原文、以及 R82 Q4-01 修掉的那兩個縫＝
-    `docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    doc_loc TestR78HandoffClaimsCarryLiveCommands WHY〉節。"""
 
     def _docs(self) -> list[tuple[str, str]]:
         return [
@@ -7056,25 +6845,9 @@ def live_check_entries(text: str) -> list[str]:
 
 
 class TestR85DocNamedLiveCheckEntriesActuallyRun(unittest.TestCase):
-    """本檔指名的現查入口壞掉時，今天**完全靜默**——沒有人在跑它，直到有人照文件跑一次。
-
-    🔴 立案（R85／C5，不是假想）：根 CLAUDE.md 有**兩處**寫「reset 分佈的數字一律現查
-    `python tools/probe/reset_window_distribution.py`」，而該指令當時 rc=1
-    （`AttributeError: _RESET_RE`——R81 把判讀原語搬家、hook 那側改成具名 import 清單，
-    私有符號結構上進不了清單）。⇒ 那條紀律**結構上執行不了**，而它正是本 repo 反覆強調的
-    「數字是量測值不是常數」的載具。三支 probe 當時一支 smoke 測試都沒有。
-
-    🔴 **判準刻意不判 rc**（假紅普查的直接結果，不是客氣）：以本輪落地當回合的入口集合
-    逐支實跑 `--help`，**6 支裡 2 支合法回非 0**——`AutoClaude/tools/check_loc_budget.py`
-    不吃 `--help`、會真的去跑預算檢查並以「超標」回 rc=1（那是真實預算狀態，不是壞掉）；
-    `tools/lib/quota_policy.py` 對未知引數印用法回 rc=2。判 rc=0 就是 2/6 假紅，而
-    「擋到讓人無法工作的守衛會被整個關掉」。⇒ 改判**有沒有噴 Python traceback**：
-    import 期腐爛（模組搬家／符號改名／語法錯）一律以它現形，而合法的用法錯誤不會。
-
-    🔴 誠實劃界：`--help` 這一層抓得到 **import 期**腐爛，抓不到 C5 那種**執行期**
-    AttributeError（argparse 在走到那段之前就退出了）。所以下面第二支測試對 C5 的
-    那支 probe 做**合成語料端到端**——那才是會抓到 C5 的那一條。其餘入口今天沒有同級
-    的行為測試，這裡不假裝有。
+    """射程含 `tools/probe/reset_window_distribution.py`。WHY 全文搬至
+    CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    doc_loc TestR85DocNamedLiveCheckEntriesActuallyRun WHY〉節。
     """
 
     #: 端到端那一支的合成撞線語料（一次 episode：兩個觀測者、同一個 reset）。
@@ -7231,22 +7004,8 @@ def stale_write_mode_exemptions(source: str) -> list[str]:
 
 
 class TestWriteModeNeverAimsAtTheTrackedBaselineFile(unittest.TestCase):
-    """跑根層閘門不得讓 git-tracked 的 `ONBOARDING.md` 漂移。
-
-    🔴 **立案假設先被證偽，本鎖守的是另一件事**。立案判讀是「跑測試會回寫
-    ONBOARDING.md」。實測反過來：把該格改成 stale（`total=20426` vs 實測 16483）後跑
-    本檔 262 支，得到 **4 支 FAIL、零寫入、檔案一個 byte 都沒動**——`--check` 才是預設
-    模式（`main()`：`mode = selected[0] if selected else "--check"`），寫入只有
-    `--write` 一條路，而 pre-push 消費的是唯讀的 `--check-snapshot`。那次漂移的真兇是
-    **有人手動跑了 `--write`**：改了 LOC 計價規則後保鮮鎖正確地轉紅，而該格自己的散文
-    就寫著「一鍵回填」。
-
-    ⇒ 今天沒有「測試會寫檔」這個 bug，有的是**沒有任何機械物阻止它明天出現**：本檔已
-    有四個合法的 `--write` 呼叫站點，它們安全**只因為慣例**（外層 `_slow_window_sandbox`
-    把 `_ONBOARDING` 改到 tmp）。第五個站點漏了改道，真檔就會被改寫，而後果不只是髒
-    工作樹——本 repo 的 pre-push 驗**工作樹**而非 commit，被意外漂移擋下的人無法自救。
-    本鎖把那條慣例升成判準：漏改道在**閘門時**轉紅，而不是等漂移發生。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    doc_loc TestWriteModeNeverAimsAtTheTrackedBaselineFile WHY〉節。"""
 
     def test_no_root_test_aims_write_mode_at_the_real_repo_file(self) -> None:
         offenders = {

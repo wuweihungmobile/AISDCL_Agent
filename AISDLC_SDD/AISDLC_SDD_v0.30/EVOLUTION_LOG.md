@@ -88,6 +88,20 @@
 | **驗證** | 刪除前查證：檔名全庫 Grep 僅 `docs/06_quality/` 三支帳本／證據檔命中（歷史記載，非消費者），**零程式碼消費者**；`reports/drift` 路徑字面全庫 `*.py` 零命中（無任何 Python 鎖／生產碼掃該目錄）。刪除後實跑：`git status --short` 該目錄 4 列 `D `；v0.01 `pytest tools/fsm_runtime/tests/test_drift_monitor.py -q` → **10 passed, rc=0**。 |
 | **回退指引** | 自刪除前的 commit 以 `git checkout <該 commit> -- 'AISDLC_SDD/AISDLC_SDD_v0.01/build/reports/drift/COMMIT-sha-*.yaml' '.../COMMIT-testsha-001.yaml'` 逐檔取回即可；**不建議回退**——回退等於把假 SHA 測試產物重新放回凍結版樹。回退不影響任何版本的 API／FSM 狀態／`*.tla`（純資料檔增刪）。 |
 
+## 凍結基線例外：v0.02～v0.04 測試假 SHA drift 殘留檔移除（R115，2026-09-01）
+
+> **注意**：本節與上方 R107 節**同類**（純刪除從不該入庫的測試產物，零程式碼變更；非破例回補）——R78 Debt_Audit :122 已記載 DEF-101-338 的實際污染面比 v0.01 更廣（v0.02/v0.03/v0.04 各 4 支、共 12 支），R113 立呈報單、R114 掌舵者裁「下輪再議」、R115 重呈獲核。依 R60 節補注的計數判準：**「經核准的破例回補」次數不因本節改變**，含本次刪除的 commit 應歸入本節、不得計為回補。完整缺陷沿革見根層 `docs/06_quality/AutoSDD_Defect_Log.md` 的 `DEF-101-338`（R107 已結案；本節為其污染面掃尾）。
+
+| 欄位 | 內容 |
+|------|------|
+| **範圍** | `AISDLC_SDD_v0.02/`～`AISDLC_SDD_v0.04/` 三版 `build/reports/drift/` 下各 4 支測試假 SHA 檔：`COMMIT-sha-3rd.yaml`／`COMMIT-sha-high.yaml`／`COMMIT-sha-low.yaml`／`COMMIT-testsha-001.yaml`，共 12 支。**不含**同目錄 `COMMIT-769eea4e3f66.yaml`（真 SHA 形態、`DEF-101-329` 族，三版皆保留不動）。 |
+| **日期／signoff** | 2026-09-01（R115 技術債結案輪）；🔴 人工 signoff：掌舵者 2026-09-01 就 R114_HANDOFF 呈報單第 2 件互動裁決，選項原文「核准 git rm（Recommended）」——同 R107 判例（DEF-101-338 v0.01 四支之掌舵者核准先例）。 |
+| **打破 Copy-on-Evolve 的理由** | 與 R107 節同一根因：早期測試執行未隔離、誤寫入真實 repo 路徑而被意外 commit 的歷史殘留 artifact，隨 Copy-on-Evolve 複製被帶進 v0.02～v0.04 三版。寫出這些檔的根因已不存在（R107 實查 `test_drift_monitor.py` 34 處全用 `tmp_path`）。刪除不是回補，是把從不該入庫的東西移出去；且 R89 判例已載明 Copy-on-Evolve 管「改」、刪除誤入污染物不在其射程。 |
+| **修法** | `git rm` 該 12 檔（index 與工作樹同步移除）；**不升版、不新增版本目錄、零程式碼變更**。 |
+| **TLC 證據** | N/A——純刪除 12 支 YAML 測試產物，未觸碰任一版本的 `_HAPPY_PATH` 或任何 `*.tla`／`.cfg`，各版既有五軌 TLC 證明維持有效。 |
+| **驗證** | 刪除前查證：`COMMIT-sha-(high\|low\|3rd)`／`COMMIT-testsha-001` 樣式於 `AISDLC_SDD/` 全樹 Grep 僅命中本檔（存證文件自身），**零程式碼消費者**；`git ls-files` 現查 12 支確實仍被追蹤（R114 快照與 R115 開場皆現查一致）。刪除後實跑：`git status --porcelain` 該三目錄恰 **12 列 `D `**、真 SHA 檔與 `DAILY-*.md` 全數健在（`git ls-files` 逐列覆核）。根層全套 unittest 於 R115 收輪窗口統一重跑（ci-gate 不測中間歷史版，無版內測試軌可跑——此點與 R107 的 v0.01 凍結基線不同，如實記載）。 |
+| **回退指引** | 自刪除前的 commit 以 `git checkout <該 commit> -- 'AISDLC_SDD/AISDLC_SDD_v0.0[234]/build/reports/drift/COMMIT-sha-*.yaml' '.../COMMIT-testsha-001.yaml'` 逐檔取回即可；**不建議回退**——回退等於把假 SHA 測試產物重新放回凍結版樹。回退不影響任何版本的 API／FSM 狀態／`*.tla`（純資料檔增刪）。 |
+
 ## LATEST 修改備忘：hub-push.yml sample action 升版＝「30 版同一 blob」不變量正式分裂（R107，2026-08-28）
 
 > **注意**：本節**不是**凍結基線例外（只動 LATEST v0.30，LATEST 本就可原地改）；立節是因為

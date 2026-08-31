@@ -1140,7 +1140,36 @@ _GOV_EXACT = frozenset({
     "tools/lib/sentinel_lifecycle.py", "tools/lib/schedule_backend.py",
     "tools/lib/quota_messages.py", "tools/lib/quota_escalation.py",
     "tools/lib/platform_utils.py", "tools/session_resume_planner.py",
+    # R115／PRD_Amendment_R113_WakeChain_LastMile.md §3(a) L3：無頭窗口權限姿態  round-label-ok
+    # 三層白名單的 L3（永遠禁止）新增二檔——前者是無人值守 settings 的載入面本身，
+    # 後者是護欄層淨額棘輪判準本身，改任一個都能直接改變「無人值守下的權限姿態」或
+    # 「守衛自身行為」，符合本清單既有收錄判準（見上方 R95 修復包 m4 論證）。動 hook
+    # 檔＝治理面，故本次納管由收尾單人窗口執行（PRD 原文明列此二檔須同批入 `_GOV_EXACT`）。
+    ".claude/settings.unattended.json",
+    "tools/tests/test_adr_xplat001_c1c2_lock.py",
 })
+
+def _fold_gov_path(rel: str) -> str:
+    """R115／DEF-200-238 比對摺疊：`os.path.normcase` 在 Windows 上把 `/` 併成  round-label-ok
+    `\\` 再轉小寫（NTFS 預設大小寫不敏感的正解摺法），摺完再換回 `/` 對齊
+    `_GOV_EXACT`／`_GOV_DIR_PREFIX`／`_GOV_HOOK_PREFIX` 既有的正斜線字面慣例；
+    在 posix 上 `posixpath.normcase` 是逐位元組 identity（原樣回傳）——**不改變**
+    既有大小寫敏感行為，射程只收斂 Windows 那一格的漏洞。分隔符特意取
+    `os.path.sep`（不是 `os.sep`）：本函式的平台行為必須完全由 `os.path` 決定，
+    測試才能用 `mock.patch.object(os, "path", ntpath／posixpath)` 整包注入
+    （同 `tools/lib/worktree_paths.py` 模組頭的既有論證，避免造出「路徑用一種
+    平台語意、分隔符用另一種」的混血平台）。
+
+    立案：`govwrite_hit()` 對**尚不存在**的保護面目標，Windows `realpath` 無檔
+    可還原大小寫 ⇒ `.AUTOCLAUDE/state.json`（目錄前綴比對失手）與
+    `.claude/hooks/NEW_GUARD.PY`（`endswith(".py")` 大小寫敏感）兩形態實測繞過
+    （逐字取證＝docs/06_quality/CrossPlatform_R114_WakeChain_Review.md §4）。
+    只摺「比對」這一步——`govwrite_hit()` 回傳給訊息用的 `rel` 仍是 realpath
+    解出的原始大小寫，不因本函式而改變；已存在檔的大小寫變體本就由 realpath
+    問磁碟還原（此面不受本函式影響，不得退化）。
+    """
+    return os.path.normcase(rel).replace(os.path.sep, "/")
+
 
 _GOVWRITE_BLOCK_MSG = (
     "🔴 治理檔在無人值守下唯讀（PRD §15.5 紅線 10），已擋下：{rel}\n"
@@ -1168,8 +1197,13 @@ def govwrite_hit(tool_input: object) -> str | None:
         if not target.startswith(_dir_prefix(root)):
             return None  # 專案根之外的同名檔不是治理檔（沙盒樹照常可寫）
         rel = target[len(_dir_prefix(root)):].replace(os.sep, "/")
-        if rel in _GOV_EXACT or rel.startswith(_GOV_DIR_PREFIX) or (
-                rel.startswith(_GOV_HOOK_PREFIX) and rel.endswith(".py")):
+        # R115／DEF-200-238：比對前摺大小寫（見 `_fold_gov_path` docstring）——  round-label-ok
+        # `rel` 本身（回傳值／訊息用字面）維持 realpath 解出的原始大小寫不變，
+        # 只有下面這一格三個判準改比對 `folded`。
+        folded = _fold_gov_path(rel)
+        if folded in {_fold_gov_path(p) for p in _GOV_EXACT} or \
+                folded.startswith(_GOV_DIR_PREFIX) or (
+                folded.startswith(_GOV_HOOK_PREFIX) and folded.endswith(".py")):
             return rel
         return None
     except Exception:  # noqa: BLE001 — 判不出＝不在保護面，見上方 P0 理由

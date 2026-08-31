@@ -36,6 +36,7 @@ SessionStart 的武裝評估重新來過，不留一個「宣稱已重掛」的�
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import subprocess
 import sys
@@ -145,6 +146,19 @@ def files_changed(before: frozenset[str] | None, after: frozenset[str] | None) -
     return len(after - before)
 
 
+def snapshot_log_fields(snapshot: frozenset[str] | None) -> dict:
+    """R115 修復 F3：把一次 porcelain 快照壓成稽核痕跡可負擔的欄位（施工圖 §3(c) 判準④ round-label-ok
+    「前快照落 resume log 痕跡」，此前只活在 `_run_resume()` 的行程記憶體，差集數字
+    事後不可稽核）。回行數＋內容雜湊，**不灌 porcelain 全文**進 log——全文可能含使用者
+    路徑／檔名且無上限成長，同誠實劃界第 8 條「量不到 ≠ 有改動」的保守紀律：`snapshot`
+    為 `None`（量不到）時兩鍵誠實回 `None`，不得偽裝成「0 筆改動」。
+    """
+    if snapshot is None:
+        return {"lines": None, "digest": None}
+    return {"lines": len(snapshot),
+            "digest": hashlib.sha256("\n".join(sorted(snapshot)).encode("utf-8")).hexdigest()}
+
+
 def _section_text(text: str, heading: str) -> str:
     """取 `heading` 之後、下一個 `## ` 之前的內容（不含標題行；找不到標題回空字串）。
 
@@ -232,6 +246,20 @@ def resolve(state: dict, band: str, *, max_spawns: int, no_progress_limit: int) 
                         band_is_ok=band_ok(band), under_cap=seq < max_spawns)
     return {"next_state": outcome, "relay_no_progress_streak": streak, "files_changed": changed,
             "relay_seq": seq + 1 if outcome == STATE_RELAY_NEXT else seq}
+
+
+def apply_reset_at(state: dict, new_reset_at: str) -> None:
+    """R115 修復 F4：寫入新 `reset_at` 前先比對舊值（施工圖 §3(c)「計數持久化」—— round-label-ok
+    「歸零邊界＝觀測到 `reset_at` 變更」此前只是散文，`_resume_tick` rearm 分支與
+    `_sentinel_tick` arm_reset 分支各自就地改寫 `reset_at` 卻從未歸零 `relay_seq`／
+    `relay_no_progress_streak`）。真的變更 ⇒ 兩個計數歸零，不得沿用上一個額度視窗的
+    接力計數；未變更（如同一撞線事件的重複巡邏、或 transient 退避不動 reset_at）⇒
+    保留既有計數。兩個呼叫站點共用同一份判準，不留第二個家。
+    """
+    if str(state.get("reset_at") or "") != str(new_reset_at or ""):
+        state["relay_seq"] = 0
+        state["relay_no_progress_streak"] = 0
+    state["reset_at"] = new_reset_at
 
 
 def _planner():

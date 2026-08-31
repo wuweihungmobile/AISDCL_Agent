@@ -549,7 +549,14 @@ _SITE_CLASS_CENSUS: dict[str, dict[str, int]] = {
         # 兩支皆以函式體內 `self.skipTest("[TOOL-ABSENCE] …")` 對「解不出 LATEST／該樹無
         # hook」退場——那是「量不到 ≠ 量到合格」的正確形態（解不出來時不得假綠），
         # 不是隱藏失敗。定位方式同上：對該檔各以 HEAD 版與工作樹版跑 `site_class_counts()` 相減。
-        "runtime-skipTest": 22,
+        # 🔴 R115 重釘 `runtime-skipTest` 22→24（**非放寬**，同上：本表判準是「相等」）。  # round-label-ok：本批輪號早於帳本歸檔輪
+        # DEF-200-239 立案窗口（棒 B）在 `test_context_budget_guard.py` 新增
+        # `LiveWindowsScheduledTaskFingerprintTest` 相關方法，函式體內以三段
+        # `self.skipTest(...)`（非 Windows／找不到 powershell／殘留清場失敗）分層退場，
+        # 三段量測抽取後落在同一目標函式的站點被合併計數，實測淨增 2 個
+        # `runtime-skipTest` 站點——量不到就明說跳過的正確形態，不是隱藏失敗。
+        # 定位方式同上：對該檔各以 HEAD 版與工作樹版跑 `site_class_counts()` 相減。
+        "runtime-skipTest": 24,
         "unclassified": 0,
     },
     # 🔴 R81 包 F 重釘 `windows-only` 9→10：並行包在

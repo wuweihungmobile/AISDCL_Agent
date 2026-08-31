@@ -265,7 +265,7 @@ _BASH_HINT = (
     "🔴 不要寫裸 bash <script>.sh。Get-Command bash 會解析到 system32 的 WSL 佔位版，"
     "且反斜線路徑的分隔符會被整批吃掉（雙引擎各實測過一次）。\n"
     "  出口：. \"$(git rev-parse --show-toplevel)/tools/lib/Find-GitBash.ps1\"; "
-    "& (Find-GitBash) -n '<正斜線腳本路徑>'"
+    "& (Find-GitBash) '<正斜線腳本路徑>'（不帶 -n——那是 noexec 假綠）"
 )
 #: 🔴 出口寫在**第一行**（R78／SA-01 附帶）：上一版把它放在頁尾，第一次撞到的人
 #: 先讀到的是三段責備、最後才看到出口——而「窄守衛必須有出口」正是本檔的設計前提，

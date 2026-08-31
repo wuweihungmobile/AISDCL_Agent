@@ -682,11 +682,11 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 6454,
+    "test_adr_xplat001_c1c2_lock.py": 6476,
     "test_archive_defect_log.py": 3986,
     "test_bash32_compat.py": 1020,
     "test_bash_probe_spec_contract.py": 983,
-    "test_block_destructive_git_r83.py": 2195,
+    "test_block_destructive_git_r83.py": 2288,
     "test_bootstrap_core.py": 439,
     "test_bootstrap_ps1.py": 160,
     "test_check_defect_log_crossref.py": 3906,
@@ -697,12 +697,12 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_check_wrapper_thinness.py": 1234,
     "test_claim_provenance_r86.py": 618,
     "test_component_sanitizer_shared_layer_lock.py": 293,
-    "test_context_budget_guard.py": 8895,
+    "test_context_budget_guard.py": 9381,
     "test_defect_id_reference_integrity.py": 281,
-    "test_dev_start.py": 7007,
+    "test_dev_start.py": 6636,
     "test_dev_start_ps1_lastexitcode.py": 548,
     "test_doc_env_prefix_platform_parity_r60.py": 340,
-    "test_doc_loc_baseline_freshness_r60.py": 7318,
+    "test_doc_loc_baseline_freshness_r60.py": 7077,
     "test_extras_quoting_zsh_safety.py": 365,
     "test_failure_log_rotation.py": 80,
     "test_find_git_bash_parity.py": 1264,
@@ -1287,6 +1287,19 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "SentinelArmingCriterionTest 擴面、兩處既有 spawn-mock 補 git 快照分流、E501 存量債"
      "棘輪兩處折行）＋本檔自身 +14（本稽核列＋rewrite ledger 接鏈列 DEF-200-234＋凍結"
      "前綴延伸 84→85）。逐檔清單見 CrossPlatform_R106_Scan_Findings.md 的 R114 標記行。"),
+    ("R115", 90351, 90340, -11,
+     "[收斂棒] 棒A／棒B／治理批累積漂移一次性收束："
+     "test_block_destructive_git_r83.py +93（DEF-200-238＋R115 L3 保護面新增二檔）、"
+     "test_context_budget_guard.py 原始 +684（R115 修復 F1~F4／DEF-200-239／v2.1.13 C5），"
+     "以類級 docstring 沿革搬遷抵銷 -930（三檔合計，全文搬至 "
+     "CrossPlatform_Guard_Line_History.md〈R115 追加〉節，程式碼內只留一行指標；"
+     "三支補回一句真實 root_infra 路徑指標，修復分桶棘輪 `prose` 桶誤判 +6；"
+     "全部指標行因 E501 折成兩行 +111；DEF-200-239 現查測試補 encoding= 與 "
+     "_ps_engine SSOT 各 +3，修復 subprocess 編碼／ps_engine 存量鎖）"
+     "＋本檔自身 +22。淨額 -11，兌現款(11)（終止 R113/R114 連兩輪上升 streak）；"
+     "同輪兌現款(12)：cap 585→577，重新武裝 117／570。doc_loc 同輪修復 "
+     "_GHOST_SYMBOL_BASELINE 30→29（史料搬遷後唯一引用歸零，依 stale 向指示刪除）。"
+     "逐項見 CrossPlatform_R106_Scan_Findings.md 的 R115 標記行。"),
 )
 
 
@@ -1335,6 +1348,9 @@ _REPIN_NET_CAP_SCHEDULE: tuple[tuple[int, int], ...] = (
                   # 到期輪自身的 lookahead 後設鎖（見 `_REPIN_DUE_ROUND_MAX_LOOKAHEAD`）。
     (113, 585),   # 到期輪兌現（結構性長債分軌輪，2026-08-30）：cap 降到到期目標本身。
                   # 同輪重新武裝下一段：步伐 8 < 前一段的 10，續守「步伐變小」，見 due 常數旁註。
+    (115, 577),   # 到期輪兌現（收斂棒，三個修復棒＋治理批累積漂移一次性合法收束）：
+                  # cap 降到到期目標本身（同 R99/R101/R113 判例 round-label-ok）。
+                  # 同輪重新武裝下一段：步伐 7 < 前一段的 8，續守「步伐刻意變小」，見 due 常數旁註。
 )
 #: 生效點＝首列輪號、現行上限＝末列上限，**皆由表導出不另立常數**（R73 判例：一份知識一個家）。
 _REPIN_ROUND_CAP_SINCE = _REPIN_NET_CAP_SCHEDULE[0][0]
@@ -1420,8 +1436,10 @@ def net_cap_schedule_problems(
 #: 逐段沿革搬至 CrossPlatform_Guard_Line_History.md〈到期義務兌現沿革〉節。
 #: 本次兌現（結構性長債分軌輪，2026-08-30）：cap 降到目標本身（585，見 `(113, 585)` 列），
 #: 同輪重新武裝下一段：步伐 8 < 前一段的 10，續守「步伐刻意變小」且目標嚴格低於現行 cap。
-_REPIN_NET_CAP_DUE_ROUND = 115  # round-label-ok：到期輪＝兌現輪+2（lookahead 判準的活體對照）
-_REPIN_NET_CAP_DUE_TARGET = 577
+#: R115 收斂棒兌現 round-label-ok：cap 降到目標本身（577，見 `(115, 577)` 列），同輪重新武裝下一段：
+#: 步伐 7 < 前一段的 8，續守「步伐刻意變小」且目標嚴格低於現行 cap。
+_REPIN_NET_CAP_DUE_ROUND = 117  # round-label-ok：到期輪＝兌現輪+2（lookahead 判準的活體對照）
+_REPIN_NET_CAP_DUE_TARGET = 570
 
 #: DEF-200-121：到期輪自身的後設鎖——`_REPIN_NET_CAP_DUE_ROUND` 只准落在「最近稽核輪
 #: ＋ lookahead」以內（歷史母體 85..113 的到期輪一律＝上一次兌現輪 +2）。可延期的到期日
@@ -1488,10 +1506,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 85
+_REPIN_LOG_FROZEN_PREFIX_LEN = 86
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "ea038ea6ff4e69b96a36cf48edf4af207422db550da9f690daad5455cf65a577")
+    "4e5f11565d2364f6fa08ffda5af85b1df440435d4d2769a0f4cd7fc2ff12f3d5")
 
 
 def repin_log_history_digest(
@@ -1608,6 +1626,10 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # 後立即自我凍結」判例延伸前綴涵蓋該列本身（84→85）；標號改用 R114（理由見 round-label-ok
     # `_GUARD_LINES_REPIN_LOG` 該列）；載體＝DEF-200-234（受統籌自循環，PRD §3(c)）。
     ("R114", "4b6d79935d12", "ea038ea6ff4e", "DEF-200-234"),
+    # R115 收斂棒 round-label-ok（三個修復棒＋治理批累積漂移一次性合法收束）：追加本輪稽核列並依
+    # 「追加後立即自我凍結」判例延伸前綴涵蓋該列本身（85→86）；載體＝DEF-200-239
+    # （排程孤兒回歸鎖，本輪 test_context_budget_guard.py 內容主要新增項之一）。
+    ("R115", "ea038ea6ff4e", "4e5f11565d23", "DEF-200-239"),
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

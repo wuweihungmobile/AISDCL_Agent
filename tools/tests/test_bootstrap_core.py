@@ -355,7 +355,7 @@ class TestWindowsGuidanceNeverTeachesBareBash(unittest.TestCase):
     """
 
     # 「裸 bash」＝前面沒有路徑/識別字元的 `bash`，後接一個 .sh 檔。刻意放過
-    # `/abs/path/bash x.sh` 與 `& (Find-GitBash) -n x.sh`：問題從來不是 bash 本身，
+    # `/abs/path/bash x.sh` 與 `& (Find-GitBash) x.sh`：問題從來不是 bash 本身，
     # 而是「靠 PATH 去猜哪個 bash」。
     _BARE_BASH = re.compile(r"(?<![\w.\\/-])bash\s+[\w./\\-]*\.sh\b")
 
@@ -390,7 +390,7 @@ class TestWindowsGuidanceNeverTeachesBareBash(unittest.TestCase):
         )
         self.assertNotRegex(
             '. "$(git rev-parse --show-toplevel)/tools/lib/Find-GitBash.ps1"; '
-            "& (Find-GitBash) -n 'x/y.sh'",
+            "& (Find-GitBash) 'x/y.sh'",
             self._BARE_BASH,
             "經 SSOT 解析出的 bash 絕對路徑是正解，不得被判違規",
         )

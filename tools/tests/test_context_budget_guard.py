@@ -69,6 +69,7 @@ import quota_meter  # noqa: E402  # R82／HELM-02：`NO_WINDOW` 相等鎖的另�
 import quota_policy  # noqa: E402  # R82：門檻／階梯的唯一的家，本檔不再持有任何數字
 import schedule_backend as sb  # noqa: E402  # R83：取證指引的家（見 halt 訊息接線鎖）
 import sentinel_lifecycle  # noqa: E402  # R82／HELM-02：哨兵生命週期判準
+from _ps_engine import production_engine  # noqa: E402  # R60 E-A-03：5.1 優先（DEF-101-509 判準）
 
 
 def setUpModule() -> None:  # noqa: N802 — unittest 的固定名稱
@@ -1060,6 +1061,7 @@ sys.path.insert(0, str(_REPO_ROOT / "tools"))
 import quota_escalation as escalation  # noqa: E402
 import relay_machine  # noqa: E402  # v2.1.13 G3+G4：接力狀態機＋哨兵自癒的家
 import resume_route  # noqa: E402  # v2.1.13 G1：喚醒 argv 權限姿態＋A-PRE 預檢的家
+import sentinel_lifecycle_arm  # noqa: E402  # armed stamp 存取的家
 
 import session_resume_planner as planner  # noqa: E402
 
@@ -1097,12 +1099,8 @@ def _quota_transcript(path: Path, text: str, *, real_usage: int = 178_604) -> Pa
 
 
 class SyntheticUsageBlindnessTest(unittest.TestCase):
-    """🔴 R79 P1：水位計在**額度耗盡的那一刻**讀成 0%，於是守衛整支靜默。
-
-    為什麼這一條是 P1 而不是精度問題：90% 那條路正是負責寫「可重啟點任務書」的
-    （`write_resume_plan`）。最需要任務書的那一刻，恰好是它結構上不會被產生的那一刻。
-    成因是「量不到 ≠ 量到零」在上游又犯一次——合成記錄的 0 不是用量，是佔位。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    cbg SyntheticUsageBlindnessTest WHY〉節。"""
 
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp())
@@ -1200,12 +1198,8 @@ _NOON = datetime(2026, 8, 7, 8, 44, 0, tzinfo=UTC).astimezone(_TAIPEI)
 
 
 class ResetArithmeticTest(unittest.TestCase):
-    """`resets 9am` **不帶日期也不帶年**，所以「下一個尚未發生的該時刻」是唯一正確規則。
-
-    天真解成「今天的 9am」在下午跑會得到一個已經過去的時刻 ⇒ 觸發時刻算成負值 ⇒
-    立刻探測、立刻再撞，把剛回來的額度再吃光。實測值裡已有 `11pm` 與 `3:50am`，
-    跨午夜這條路徑真的會走到。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    cbg ResetArithmeticTest WHY〉節。"""
 
     def _at(self, hour: int, minute: int = 0) -> datetime:
         return datetime(2026, 8, 7, hour, minute, tzinfo=UTC).astimezone(_TAIPEI)
@@ -1447,13 +1441,8 @@ class PatrolHandbackIsItsOwnOutcomeTest(unittest.TestCase):
 
 
 class ProbeOpennessIsAPositiveVerdictTest(unittest.TestCase):
-    """R100 止血 B：`probe_quota()` 的 **`is_open` 計算面**——此前無人覆蓋的那一行。
-
-    立案：`is_open = rc == 0 and kind == guard.LIMIT_UNKNOWN`（改前逐字）讓
-    `LIMIT_UNKNOWN` 同時承載兩個相反語意。既有測試全部**直接注入** `open`
-    （`TickDecisionTest` 實測 `Ran 19 tests / OK`），於是那一行的計算面結構上沒有讀者
-    ⇒ 措辭漂移＋rc 恰為 0 這個組合永遠不會被任何一支測試看到。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    cbg ProbeOpennessIsAPositiveVerdictTest WHY〉節。"""
 
     def _probe(self, rc: int, text: str) -> dict:
         """打真的 `probe_quota()`，只把它的 `subprocess.run` 換掉（＝計算面全程真跑）。"""
@@ -1862,6 +1851,42 @@ def _wait_for(path: Path, seconds: float) -> bool:
     return path.is_file()
 
 
+class _StatefulFakeSchedulerBackend:
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    cbg _StatefulFakeSchedulerBackend WHY〉節。"""
+
+    def __init__(self) -> None:
+        self._jobs: set[str] = set()
+        self.arm_calls: list[tuple] = []
+        self.name = "test-fake"
+        self.credential_key = sb.CRED_KEY_SCHTASKS
+
+    def seed(self, *tasks: str) -> "_StatefulFakeSchedulerBackend":
+        self._jobs.update(tasks)
+        return self
+
+    def arm(self, plan_path, task_name, at_expr, tick, at=None):
+        self.arm_calls.append((plan_path, task_name, tick))
+        self._jobs.add(task_name)
+        return 0, "cred-test-fake"
+
+    def disarm(self, task_name: str) -> int:
+        self._jobs.discard(task_name)
+        return 0
+
+    def verify_cli(self, task_name: str) -> int:
+        return 0 if task_name in self._jobs else 1
+
+    def list_jobs(self, prefix: str) -> list[str]:
+        return [j for j in sorted(self._jobs) if j.startswith(prefix)]
+
+    def credential_line(self, moment: str) -> str:
+        return f"✅（測試假後端）cred={moment}"
+
+    def evidence_hint(self) -> str:
+        return "test-fake-backend：現查 self._jobs（記憶體集合，非真排程器）"
+
+
 class SentinelDecisionTest(unittest.TestCase):
     """哨兵四分支的唯一判定。每一支單獨可注入，且兩個閾值的**方向**各自被釘住。"""
 
@@ -2009,11 +2034,26 @@ class SentinelDecisionTest(unittest.TestCase):
         self.assertGreater(planner.SENTINEL_IDLE_SECONDS, 5 * 3600)
 
     # ── R95「哨兵存活四修」修1／修2（ADR §2.9；PRD §4.5.6 A1/A2/A4/A5；立案＝§L-4）──
-    def _tick(self, plan: Path, live: Path, tmp: Path, task: str = "T-r95") -> dict:
-        """跑一次 `_sentinel_tick`：排程器／告警／逐字稿定位全部注入（不碰真排程器）。"""
+    def _tick(self, plan: Path, live: Path, tmp: Path, task: str = "T-r95",
+              scheduler: object = None) -> dict:
+        """跑一次 `_sentinel_tick`：排程器／告警／逐字稿定位全部注入（不碰真排程器）。
+
+        🔴 DEF-200-239：`register_endurance`／`_schtasks_remove` 是 planner 層級的假貨，
+        但 `patrol_housekeeping()` → `_heal_armed_drift()` 摸到的 `schedule_backend.
+        select()` 此前完全沒被注入，落到**真的**後端（`list_jobs()`／條件式 `arm()`）
+        ——`task` 預設字面 `"T-r95"` 從不符合 `AutoSDD_Sentinel_` 前綴查詢，真後端因此
+        結構上永遠判定「這支工作不在」⇒ 每次呼叫都真的重新 `.arm()`，在 Windows 上
+        真跑 `schtasks /create`，於真機種下自續排程工作（見 `_StatefulFakeSchedulerBackend`
+        docstring）。`scheduler` 未提供時一律套用該惰性替身；需要控制排程器現查回什麼
+        （如 `ArmedDriftSelfHealTest` 的漂移／非漂移情境）的呼叫端改走本參數注入自己的
+        替身，不再對 `sb.select` 額外掛一層外部 patch（那會與本函式的內部 patch 疊加、
+        誰蓋過誰取決於巢狀順序，改參數注入才是單一真相源）。
+        """
         args = planner.build_parser().parse_args(
             ["--sentinel-tick", "--plan", str(plan), "--task-name", task])
         calls: dict = {"alert": [], "remove": [], "register": []}
+        backend = scheduler if scheduler is not None else _StatefulFakeSchedulerBackend()
+        calls["scheduler"] = backend
         with contextlib.ExitStack() as stack:
             stack.enter_context(unittest.mock.patch.object(
                 planner.escalation, "alert", side_effect=lambda reason, *a, **k:
@@ -2026,6 +2066,8 @@ class SentinelDecisionTest(unittest.TestCase):
                 calls["register"].append(tick) or (0, "cred-stub")))
             stack.enter_context(unittest.mock.patch.object(
                 planner, "resolve_transcript", return_value=live))
+            stack.enter_context(unittest.mock.patch.object(
+                sb, "select", return_value=backend))
             stack.enter_context(
                 unittest.mock.patch("tempfile.gettempdir", return_value=str(tmp)))
             stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
@@ -2430,12 +2472,8 @@ class AllowResumeDefaultTest(unittest.TestCase):
 
 
 class ResumeSpawnCarriesTheUnattendedSignalTest(unittest.TestCase):
-    """續跑那一跑的 spawn 必須帶 `AUTOSDD_UNATTENDED=1`（掌舵者開 Auto Pilot 的條件）。
-
-    走 `subprocess.run` 的攔截而不是真的 spawn 一個 `claude`：這裡要證的是
-    **注入有沒有發生**，那是本檔這一端的責任；「訊號送到之後 hook 會不會擋」是另一端
-    的責任，由那一端自己的注入證明負責。兩端各證各的，中間靠共同的字面對上。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    cbg ResumeSpawnCarriesTheUnattendedSignalTest WHY〉節。"""
 
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp())
@@ -2525,9 +2563,15 @@ class ResumeSpawnCarriesTheUnattendedSignalTest(unittest.TestCase):
         self.assertLess(
             prompt_at[0], idx,
             "prompt 排在 --add-dir 後面 ⇒ 會被那個變長參數吃掉，那一跑會拿不到 prompt")
+        # v2.1.13 C5：`--add-dir` 之後現在是**兩個**目錄值（任務書目錄＋現解後的
+        # handback 目錄），但仍是同一個旗標吃掉之後的全部剩餘值——尾端形狀不變，只是
+        # 值的個數從 1 變 2；姊妹鎖 test_fresh_keeps_the_prompt_before_add_dir 同型更新。
         self.assertEqual(
-            len(argv) - idx, 2,
-            f"--add-dir 後面必須**只有**一個目錄值，否則多出來的東西會被它吃掉：{argv}")
+            len(argv) - idx, 3,
+            f"--add-dir 後面必須剛好兩個目錄值（任務書＋handback），否則多出來的東西"
+            f"會被它吃掉，或 handback 目錄漏帶：{argv}")
+        self.assertEqual(argv[idx + 2], str(resume_route.handback_dir()),
+                         f"--add-dir 第二個值不是現解後的 handback 目錄：{argv}")
 
     def test_the_resumed_run_does_not_pop_a_console_window(self) -> None:
         """無人看管的那一跑不該在使用者桌面上開一個視窗（旗標語意見 guard.NO_WINDOW）。"""
@@ -2535,12 +2579,8 @@ class ResumeSpawnCarriesTheUnattendedSignalTest(unittest.TestCase):
 
 
 class ResumeRouteDegradesOneWayTest(unittest.TestCase):
-    """R95／Pkg-D：喚醒降級選路（PRD §4.5.4／§8-10）的方向鎖。
-
-    立案缺口敘事原文＝Resume 證據檔 §1（R95 修復包批補搬）。三判準：①可用**必**
-    SESSION_RESUME（降級只准 RESUME→FRESH 單向）；②FRESH 不得帶 `-r`、prompt 指向
-    磁碟任務書；③任務書缺席＝REFUSE、argv=None（不得靜默派空 prompt，R59 同形）。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    cbg ResumeRouteDegradesOneWayTest WHY〉節。"""
 
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp())
@@ -2625,8 +2665,11 @@ class ResumeRouteDegradesOneWayTest(unittest.TestCase):
         idx = argv.index("--add-dir")
         prompt_at = [i for i, a in enumerate(argv) if "第 3 節" in a]
         self.assertTrue(prompt_at and prompt_at[0] < idx)
-        self.assertEqual(len(argv) - idx, 2,
-                         f"--add-dir 後面必須只有一個目錄值：{argv}")
+        # v2.1.13 C5：同上（RESUME 路姊妹鎖）——現在是兩個目錄值。
+        self.assertEqual(len(argv) - idx, 3,
+                         f"--add-dir 後面必須剛好兩個目錄值（任務書＋handback）：{argv}")
+        self.assertEqual(argv[idx + 2], str(resume_route.handback_dir()),
+                         f"--add-dir 第二個值不是現解後的 handback 目錄：{argv}")
 
     def test_fresh_carries_the_same_guard_rules_as_resume(self) -> None:
         """降級不減損護欄：FRESH 那一跑的 prompt 必須帶同一份重驗＋禁 commit/push 句。"""
@@ -2638,16 +2681,8 @@ class ResumeRouteDegradesOneWayTest(unittest.TestCase):
 
 
 class UnattendedPermissionPostureTest(unittest.TestCase):
-    """v2.1.13 G1（PRD_Amendment_R113_WakeChain_LastMile.md §3(a)）：無頭窗口權限姿態。
-
-    立案＝2026-08-30 實戰最後一哩四缺口之 G1：哨兵四段全通，reset 後的無頭續跑窗口
-    卻被無人核准權限牆擋住（Write 新檔全擋，含 scratchpad 任務書）⇒ 收不了尾。
-    機械根因＝spawn argv 兩路皆無 `--permission-mode`。修法三件套，各有一格看守：
-      · V-a1：兩路 argv 同補 `--permission-mode acceptEdits --settings <姿態檔>`；
-      · V-a2：A-PRE 預檢（姿態檔存在 ∧ JSON 可解析）缺一拒 spawn＋落痕跡＋出聲；
-      · V-a4／V-a3 靜態半格：姿態檔本體的 allow（L2×雙載具）與 deny（L3×三寫入形態）。
-    hook 那一半（合成無頭回合 exit 2）由 test_block_destructive_git_r83.py 原樣看守。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    cbg UnattendedPermissionPostureTest WHY〉節。"""
 
     #: 施工圖 §3(a) L2 唯讀清單（V-a4 期望面）；雙平台孿生由測試展開，不在此複寫。
     _L2 = ("python tools/session_resume_planner.py --pace*",
@@ -2765,16 +2800,51 @@ class UnattendedPermissionPostureTest(unittest.TestCase):
                       "additionalDirectories 沒指向 handback 目錄＝L1 ② 斷")
 
 
-class HandbackVisibilityTest(unittest.TestCase):
-    """v2.1.13 G2 批 (b)（施工圖 §3(b) 判準 1/2/4）：交接可見性——planner 側後檢。
+class HandbackAddDirIsResolvedDynamicallyTest(unittest.TestCase):
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    cbg HandbackAddDirIsResolvedDynamicallyTest WHY〉節。"""
 
-    V-b1：合規續跑（模擬 spawn 寫出四節齊備的交接檔）⇒ 檔在、四 marker 齊、`resumed`
-    事件 `handback_written=true`＋`handback_path` 與 prompt 注入的是同一支檔。
-    V-b2：模型沒寫 handback 的收窗 ⇒ resume log 逐字 `handback_missing`＋alert 痕跡
-    （loud；note_written 進事件欄）。另補三值鑑別的 stale 半格（舊檔不得冒充本窗交接）。
-    突變驗紅（斷開 `_run_resume` 的後檢接線 ⇒ V-b2 必紅）由交件驗證手動執行——
-    突變不得長駐工作樹（git checkout 還原突變是判過的事故形態，以 Edit 改回）。
-    """
+    def test_resume_argv_carries_the_currently_resolved_handback_dir(self) -> None:
+        argv = resume_route.resume_argv("claude", "sid-9", "prompt",
+                                        Path(tempfile.gettempdir()) / "task-dir")
+        idx = argv.index("--add-dir")
+        self.assertEqual(argv[idx + 2], str(resume_route.handback_dir()),
+                         f"RESUME 路 argv 沒有帶現解後的 handback 目錄：{argv}")
+
+    def test_fresh_argv_carries_the_currently_resolved_handback_dir(self) -> None:
+        argv = resume_route.fresh_argv("claude", "prompt",
+                                       Path(tempfile.gettempdir()) / "task-dir")
+        idx = argv.index("--add-dir")
+        self.assertEqual(argv[idx + 2], str(resume_route.handback_dir()),
+                         f"FRESH 路 argv 沒有帶現解後的 handback 目錄：{argv}")
+
+    def test_the_env_override_changes_the_resolved_dir_at_spawn_time(self) -> None:
+        """`AUTOSDD_HANDBACK_DIR` 覆寫（不 export 到 shell，`mock.patch.dict` 環境）
+        時 argv 的 handback 值必須跟著動——每次 spawn 現解，不依賴 settings 檔字面
+        是否被 harness 展開；settings 檔本身刻意不因此改動（repo 檔不寫死機器路徑）。
+        """
+        override = Path(tempfile.mkdtemp(prefix="handback-override-"))
+        self.addCleanup(shutil.rmtree, override, True)
+        with unittest.mock.patch.dict(
+                os.environ, {endurance_env.HANDBACK_DIR_ENV: str(override)}):
+            resume = resume_route.resume_argv("claude", "sid-9", "prompt",
+                                              Path(tempfile.gettempdir()) / "task-dir")
+            fresh = resume_route.fresh_argv("claude", "prompt",
+                                            Path(tempfile.gettempdir()) / "task-dir")
+        for argv in (resume, fresh):
+            idx = argv.index("--add-dir")
+            self.assertEqual(argv[idx + 2], str(override),
+                             f"AUTOSDD_HANDBACK_DIR 覆寫沒有反映到 spawn argv：{argv}")
+        settings = json.loads(resume_route.UNATTENDED_SETTINGS.read_text(encoding="utf-8"))
+        self.assertIn("~/.autosdd/handback",
+                      settings["permissions"]["additionalDirectories"],
+                      "settings 檔字面不該因為 ENV 覆寫而被動態改寫——repo 檔不可寫死"
+                      "機器絕對路徑，動態半格只在 spawn argv 這一層")
+
+
+class HandbackVisibilityTest(unittest.TestCase):
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    cbg HandbackVisibilityTest WHY〉節。"""
 
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp())
@@ -2860,12 +2930,8 @@ class HandbackVisibilityTest(unittest.TestCase):
 
 
 class HandbackSessionStartAnnounceTest(unittest.TestCase):
-    """v2.1.13 G2 批 (b)（施工圖 §3(b) 判準 5）：SessionStart 偵測未讀 handback——V-b3。
-
-    出聲載體＝additionalContext（emit 注入；hook 側只接一行線，見 `main()` SessionStart
-    分支）；已讀憑證＝`.ack` sidecar：出聲且被收下 ⇒ 落 `.ack` ⇒ 重跑轉安靜。
-    emit 沒收下（回 False）⇒ 不落 `.ack`——寧可重複出聲，不可靜默吞掉交接。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    cbg HandbackSessionStartAnnounceTest WHY〉節。"""
 
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp())
@@ -3000,12 +3066,8 @@ class RunResumeConsumesTheRouteTest(unittest.TestCase):
 
 
 class RunResumeSurvivesASpawnExceptionTest(unittest.TestCase):
-    """🔴 R97：`subprocess.run` 本身炸掉（`TimeoutExpired`／`FileNotFoundError`）不得 round-label-ok
-    一路往上炸穿——本函式被無 console 的 pythonw 排程行程呼叫（`sys.stderr is None`），
-    未捕捉例外會讓整支行程無聲消失，而呼叫端（`_resume_tick`）此前已經把狀態塊寫成
-    `"resumed"`（見 `ResumeTickWritesStateOnlyAfterConfirmingTest`）。同 `probe_quota()`
-    既有的 except 寫法（`OSError`／`SubprocessError`）。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    cbg RunResumeSurvivesASpawnExceptionTest WHY〉節。"""
 
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp())
@@ -3280,12 +3342,8 @@ class RelayProgressAndCapTest(unittest.TestCase):
 
 
 class RelaySettleWindowTest(unittest.TestCase):
-    """`settle_window()` 端到端：RELAY_NEXT 重排一窗；四個停止次態各自的事件與重掛哨兵。
-
-    🔴 全部呼叫走 `_resume_tick()`（而不是直接呼叫 `settle_window()`）：這樣才驗到
-    `_run_resume()` 之後的接線也真的通（REFUSE／rc=None 的辨識見另一個測試類）。
-    真排程器一律 mock 掉（`setUpModule` 的既有紀律：本模組不准碰真的排程器）。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    cbg RelaySettleWindowTest WHY〉節。"""
 
     def _handback(self, tmp: Path, *, next_step: str) -> Path:
         path = tmp / "handback.md"
@@ -3513,6 +3571,395 @@ class RelayFailurePathsTest(unittest.TestCase):
         self.assertEqual(written.get("files_changed"), 0)
         self.assertEqual(len(arm_calls), 1, "REFUSE 仍必須重掛哨兵（G4 判準1／失敗態歸屬）")
         self.assertEqual(rc, 1, "REFUSE 的既有 rc（choose_resume_route 早退回的 1）必須沿用")
+
+
+class RearmAfterStopFailureClearsTheArmedStampTest(unittest.TestCase):
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    cbg RearmAfterStopFailureClearsTheArmedStampTest WHY〉節。"""
+
+    def test_rc_nonzero_clears_the_latch_and_alerts_loudly(self) -> None:
+        tmp = Path(tempfile.mkdtemp(prefix="rearm-fail-"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        plan = tmp / "plan.md"
+        hb = tmp / "handback.md"
+        hb.write_text("## 下一步指令\n\n", encoding="utf-8", newline="\n")  # 完工 ⇒ 走 DONE
+        state = {**RelayStateTest.GOOD, "plan_path": str(plan), "session_id": "sid-rearm-fail",
+                 "allow_resume": True, "task_name": "T-rearm-fail",
+                 "transcript": str(tmp / "sid-rearm-fail.jsonl"),
+                 "handback_verdict": "written", "handback_path": str(hb), "files_changed": 1}
+        plan.write_text("# 任務書\n\n" + planner.render_relay(state),
+                        encoding="utf-8", newline="\n")
+        args = planner.build_parser().parse_args(
+            ["--resume-tick", "--plan", str(plan), "--task-name", "T-rearm-fail"])
+        events: list[dict] = []
+        alert_calls: list[dict] = []
+        clear_calls: list[str] = []
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(unittest.mock.patch.object(
+                planner, "append_log",
+                side_effect=lambda _l, e, **f: events.append({"event": e, **f})))
+            stack.enter_context(unittest.mock.patch.object(
+                planner.escalation, "alert",
+                side_effect=lambda r, s, *, loud=True, plan=None, **_:
+                    (alert_calls.append({"reason": r, "loud": loud}), {})[1]))
+            stack.enter_context(unittest.mock.patch.object(
+                planner, "_schtasks_remove", side_effect=lambda t: 0))
+            stack.enter_context(unittest.mock.patch.object(
+                planner, "_arm_sentinel", side_effect=lambda a, t, pl: 7))
+            stack.enter_context(unittest.mock.patch.object(
+                sentinel_lifecycle_arm, "clear_arm_latch",
+                side_effect=lambda sid, *a, **k: clear_calls.append(sid) or True))
+            stack.enter_context(unittest.mock.patch.object(
+                relay_machine, "current_band", lambda *_a, **_k: quota_policy.BAND_FREE))
+            rc = relay_machine.settle_window(args, state, plan, tmp / "log.jsonl", 0)
+        self.assertEqual(len(clear_calls), 1,
+                         "重掛失敗沒有清 arm latch——下一次 SessionStart 撿不到重新評估")
+        self.assertEqual(clear_calls[0], "sid-rearm-fail")
+        loud = [c for c in alert_calls if c["loud"] and "重掛哨兵失敗" in c["reason"]]
+        self.assertTrue(loud, f"重掛失敗沒有 loud alert：{alert_calls}")
+        failed = [e for e in events if e["event"] == "relay_rearm_failed"]
+        self.assertTrue(failed, f"沒有落 relay_rearm_failed 痕跡：{events}")
+        self.assertEqual(failed[-1]["rc"], 7)
+        self.assertEqual(rc, 0, "resume_rc=0 的既有契約不得被重掛哨兵的 rc 覆蓋")
+
+
+class RearmAfterStopSuccessLeavesAVerifiableArmedJobTest(unittest.TestCase):
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    cbg RearmAfterStopSuccessLeavesAVerifiableArmedJobTest WHY〉節。"""
+
+    def test_success_path_leaves_the_stamp_and_a_discoverable_job(self) -> None:
+        tmp = Path(tempfile.mkdtemp(prefix="rearm-success-"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        session_id = "sid-rearm-ok"
+        live = tmp / f"{session_id}.jsonl"
+        live.write_text('{"type":"assistant"}\n', encoding="utf-8")
+        plan = tmp / "plan.md"
+        plan.write_text("# 任務書\n", encoding="utf-8", newline="\n")
+        state = {"session_id": session_id, "transcript": str(live), "plan_path": str(plan)}
+        args = planner.build_parser().parse_args(
+            ["--resume-tick", "--plan", str(plan), "--task-name", "T-whatever"])
+        backend = _StatefulFakeSchedulerBackend()
+        with unittest.mock.patch.object(sb, "select", return_value=backend), \
+             unittest.mock.patch("tempfile.gettempdir", return_value=str(tmp)):
+            marker = sentinel_lifecycle_arm.arm_marker_path(session_id)
+            marker.write_text("{}", encoding="utf-8")
+            rc = relay_machine._rearm_after_stop(planner, args, state, plan, tmp / "log.jsonl")
+        self.assertEqual(rc, 0, "假後端的 arm() 回 0，重掛不該回非零")
+        self.assertTrue(marker.is_file(),
+                        "成功路徑不該動 armed stamp——它此前就存在，理當原樣留著")
+        expected_task = f"AutoSDD_Sentinel_{session_id}"
+        self.assertIn(expected_task, backend.list_jobs(sentinel_lifecycle.TASK_PREFIX),
+                     "重掛成功後，排程器現查應含該工作，而不能只看警語是否出聲")
+
+
+# ═══════════════════════ R115 修復波：G1~G4 實作批四方複審 blocking（F1~F4） round-label-ok
+# 施工圖同上（PRD_Amendment_R113_WakeChain_LastMile.md）。四筆 blocking 各自的立案見
+# 各測試類 docstring；F1~F3 的共同紀律＝**不 mock `_run_resume()`**（既有回歸鎖群體
+# 全數 mock 掉它、直接把 handback_verdict/handback_path/files_changed/route_strategy
+# 塞進 state，於是 `_run_resume()` 內部真正的接線缺口對整個既有鎖群體隱形）。
+
+
+class RunResumeWritesHandbackPathIntoStateTest(unittest.TestCase):
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    cbg RunResumeWritesHandbackPathIntoStateTest WHY〉節。"""
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="relay-f1-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        old = os.environ.get(endurance_env.HANDBACK_DIR_ENV)
+        os.environ[endurance_env.HANDBACK_DIR_ENV] = str(self.tmp / "handback")
+        self.addCleanup(lambda: os.environ.pop(endurance_env.HANDBACK_DIR_ENV, None)
+                        if old is None else os.environ.update(
+                            {endurance_env.HANDBACK_DIR_ENV: old}))
+        self.plan = self.tmp / "plan.md"
+        self.transcript = self.tmp / "sid-f1.jsonl"
+        self.transcript.write_text('{"type":"assistant"}\n', encoding="utf-8")
+        self.scratch = (_REPO_ROOT / "tools" / "tests"
+                        / f".r115_f1_scratch_{os.getpid()}.tmp")
+        self.addCleanup(lambda: self.scratch.unlink(missing_ok=True))
+
+    def test_state_handback_path_is_populated_and_relay_next_is_reached(self) -> None:
+        report = resume_route.handback_report("sid-f1")
+
+        class _Done:
+            returncode, stdout, stderr = 0, "", ""
+
+        real = planner.subprocess.run
+
+        def _fake_run(argv, **kwargs):
+            if isinstance(argv, list) and argv[:1] == ["git"]:
+                return real(argv, **kwargs)
+            report.write_text(
+                "## 做了什麼\n測試\n## 驗了什麼\nrc=0\n## 卡在哪\n無\n"
+                "## 下一步指令\n還有第 4 步\n", encoding="utf-8")
+            self.scratch.write_text("scratch", encoding="utf-8")  # 判準④：真實 files_changed>0
+            return _Done()
+
+        planner.subprocess.run = _fake_run
+        self.addCleanup(setattr, planner.subprocess, "run", real)
+
+        state = {**RelayStateTest.GOOD, "plan_path": str(self.plan), "session_id": "sid-f1",
+                 "allow_resume": True, "task_name": "T-f1", "transcript": str(self.transcript),
+                 "log_path": str(self.tmp / "log.jsonl")}
+        self.plan.write_text("# 任務書\n\n" + planner.render_relay(state),
+                             encoding="utf-8", newline="\n")
+        args = planner.build_parser().parse_args(
+            ["--resume-tick", "--plan", str(self.plan), "--task-name", "T-f1"])
+        registered: list = []
+        arm_calls: list = []
+
+        # 🔴 mock 的是 `register_endurance`（真正的排程器呼叫），不是 `_register_and_record`
+        # ——後者自己會呼叫 `write_relay()` 把 state 落盤，整支 mock 掉會讓本測試要驗的
+        # 「state['handback_path'] 有沒有真的寫回磁碟」失去鑑別力（實測：mock 掉
+        # `_register_and_record` 時，即使生產碼把 handback_path 塞進 state，最終讀出來的
+        # plan.md 仍是 `_resume_tick()` 呼叫前寫入的舊內容，因為沒有任何東西再寫過它）。
+        def _fake_register_endurance(st, at, tick):
+            registered.append((st.get("relay_seq"), tick))
+            return 0, "已回讀（測試）"
+
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(unittest.mock.patch.object(
+                planner, "probe_quota", lambda *_a, **_k: {
+                    "open": True, "kind": guard.LIMIT_NONE, "rc": 0, "text": "ok"}))
+            stack.enter_context(unittest.mock.patch.object(
+                planner, "register_endurance", side_effect=_fake_register_endurance))
+            stack.enter_context(unittest.mock.patch.object(
+                planner, "_schtasks_remove", side_effect=lambda t: 0))
+            stack.enter_context(unittest.mock.patch.object(
+                planner, "_arm_sentinel",
+                side_effect=lambda a, t, pl: (arm_calls.append(t), 0)[1]))
+            stack.enter_context(unittest.mock.patch.object(
+                planner.escalation, "alert", side_effect=lambda *a, **k: {}))
+            stack.enter_context(unittest.mock.patch.object(
+                relay_machine, "current_band", lambda *_a, **_k: quota_policy.BAND_FREE))
+            stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
+            stack.enter_context(contextlib.redirect_stderr(io.StringIO()))
+            planner._resume_tick(args)
+        written = planner.parse_relay(self.plan.read_text(encoding="utf-8"))
+        self.assertTrue(written.get("handback_path"),
+                        "state['handback_path'] 仍是空字串——生產路徑沒有把它寫回 state")
+        self.assertEqual(written["handback_path"], str(report),
+                         "state['handback_path'] 與 prompt 注入的不是同一支交接檔")
+        self.assertEqual(registered, [(1, planner.RESUME_TICK)],
+                         "判準①②③④合成全真卻沒有重排下一窗 ⇒ RELAY_NEXT 生產面不可達"
+                         "（handback_path 恆空會讓判準③恆判無未完項而誤收斂到 DONE）")
+        self.assertEqual(arm_calls, [], "RELAY_NEXT 不該重掛哨兵——下一窗自己會接手")
+
+
+class APreFailureIsNeverWrittenAsResumedTest(unittest.TestCase):
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    cbg APreFailureIsNeverWrittenAsResumedTest WHY〉節。"""
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="relay-f2-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.plan = self.tmp / "plan.md"
+        self.transcript = self.tmp / "sid-f2.jsonl"
+        self.transcript.write_text('{"type":"assistant"}\n', encoding="utf-8")
+        self.calls: list = []
+        real = planner.subprocess.run
+
+        def _fake_run(argv, **kwargs):
+            if isinstance(argv, list) and argv[:1] == ["git"]:
+                return real(argv, **kwargs)
+            self.calls.append(argv)
+            return unittest.mock.MagicMock(returncode=0, stdout="", stderr="")
+
+        planner.subprocess.run = _fake_run
+        self.addCleanup(setattr, planner.subprocess, "run", real)
+
+    def test_a_pre_failure_is_recorded_as_resume_failed_not_resumed(self) -> None:
+        state = {**RelayStateTest.GOOD, "plan_path": str(self.plan), "session_id": "sid-f2",
+                 "allow_resume": True, "task_name": "T-f2", "transcript": str(self.transcript),
+                 "log_path": str(self.tmp / "log.jsonl")}
+        self.plan.write_text("# 任務書\n\n" + planner.render_relay(state),
+                             encoding="utf-8", newline="\n")
+        args = planner.build_parser().parse_args(
+            ["--resume-tick", "--plan", str(self.plan), "--task-name", "T-f2"])
+        arm_calls: list = []
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(unittest.mock.patch.object(
+                planner, "probe_quota", lambda *_a, **_k: {
+                    "open": True, "kind": guard.LIMIT_NONE, "rc": 0, "text": "ok"}))
+            stack.enter_context(unittest.mock.patch.object(
+                resume_route, "UNATTENDED_SETTINGS", self.tmp / "ghost-settings.json"))
+            stack.enter_context(unittest.mock.patch.object(
+                planner, "_schtasks_remove", side_effect=lambda t: 0))
+            stack.enter_context(unittest.mock.patch.object(
+                planner, "_arm_sentinel",
+                side_effect=lambda a, t, pl: (arm_calls.append(t), 0)[1]))
+            stack.enter_context(unittest.mock.patch.object(
+                planner.escalation, "alert", side_effect=lambda *a, **k: {}))
+            stack.enter_context(unittest.mock.patch.object(
+                relay_machine, "current_band", lambda *_a, **_k: quota_policy.BAND_FREE))
+            stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
+            stack.enter_context(contextlib.redirect_stderr(io.StringIO()))
+            rc = planner._resume_tick(args)
+        written = planner.parse_relay(self.plan.read_text(encoding="utf-8"))
+        self.assertEqual(self.calls, [], "A-PRE 拒絕卻仍 spawn 了——預檢沒有真的擋在 spawn 之前")
+        self.assertNotEqual(written["state"], "resumed",
+                            "A-PRE 拒 spawn 被寫成 resumed ⇒「拒絕≠跑過」的紀律又破了一次")
+        self.assertEqual(written["state"], "resume_failed")
+        self.assertEqual(len(arm_calls), 1, "A-PRE 拒絕仍屬失敗態，須重掛哨兵（G4 判準1）")
+        self.assertEqual(rc, 1)
+
+
+class RelaySnapshotBeforeIsLoggedTest(unittest.TestCase):
+    """R115 修復 F3（V-c3 半格）：spawn 前的 porcelain 快照此前只活在 `_run_resume()` round-label-ok
+    的行程記憶體——`relay_spawned.files_changed_prev` 只留下差集的**數字**，事後沒有
+    任何痕跡可以稽核那個數字是不是算對了（窗前到底髒成什麼樣子沒有留底）。
+    """
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="relay-f3-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        (self.tmp / "p.md").write_text("# 任務書", encoding="utf-8")
+        self.transcript = self.tmp / "sid-f3.jsonl"
+        self.transcript.write_text('{"type":"assistant"}\n', encoding="utf-8")
+
+        class _Done:
+            returncode, stdout, stderr = 0, "", ""
+
+        real = planner.subprocess.run
+
+        def _fake_run(argv, **kwargs):
+            if isinstance(argv, list) and argv[:1] == ["git"]:
+                return real(argv, **kwargs)
+            return _Done()
+
+        planner.subprocess.run = _fake_run
+        self.addCleanup(setattr, planner.subprocess, "run", real)
+
+    def test_the_before_snapshot_lands_in_the_resume_log(self) -> None:
+        args = planner.build_parser().parse_args(["--probe-command", "claude"])
+        state = {"plan_path": str(self.tmp / "p.md"), "session_id": "sid-f3",
+                 "transcript": str(self.transcript)}
+        log = self.tmp / "log.jsonl"
+        planner._run_resume(args, state, log)
+        events = [json.loads(line) for line in
+                  log.read_text(encoding="utf-8").splitlines() if line.strip()]
+        before = next((e for e in events if e["event"] == "relay_snapshot_before"), None)
+        self.assertIsNotNone(before, "spawn 前快照沒有落 resume log ⇒ 差集數字事後不可稽核")
+        self.assertIn("lines", before)
+        self.assertIn("digest", before)
+        # 本 repo 是一個真的 git 工作樹，快照量得到 ⇒ 兩鍵不得是「量不到」的 None。
+        self.assertIsNotNone(before["lines"])
+        self.assertIsNotNone(before["digest"])
+        idx_before = events.index(before)
+        idx_resumed = next(i for i, e in enumerate(events) if e["event"] == "resumed")
+        self.assertLess(idx_before, idx_resumed, "前快照事件必須先於 resumed 事件落地")
+
+
+class RelayCountsResetOnResetAtChangeTest(unittest.TestCase):
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    cbg RelayCountsResetOnResetAtChangeTest WHY〉節。"""
+
+    def test_pure_function_zeros_the_counts_when_reset_at_changes(self) -> None:
+        state = {"reset_at": "2026-08-07T09:00:00", "relay_seq": 3,
+                 "relay_no_progress_streak": 2}
+        relay_machine.apply_reset_at(state, "2026-08-08T09:00:00")
+        self.assertEqual(state["relay_seq"], 0, "reset_at 變更卻沒有歸零 relay_seq")
+        self.assertEqual(state["relay_no_progress_streak"], 0,
+                         "reset_at 變更卻沒有歸零 relay_no_progress_streak")
+        self.assertEqual(state["reset_at"], "2026-08-08T09:00:00")
+
+    def test_pure_function_preserves_the_counts_when_reset_at_is_unchanged(self) -> None:
+        state = {"reset_at": "2026-08-07T09:00:00", "relay_seq": 3,
+                 "relay_no_progress_streak": 2}
+        relay_machine.apply_reset_at(state, "2026-08-07T09:00:00")
+        self.assertEqual(state["relay_seq"], 3, "reset_at 沒變卻歸零了 relay_seq"
+                         "——同一撞線事件的重複巡邏／transient 退避不該清空既有接力計數")
+        self.assertEqual(state["relay_no_progress_streak"], 2)
+
+    def test_base_state_skeleton_carries_no_relay_counters(self) -> None:
+        """鎖：`_base_state` 骨架不得含 relay 計數鍵——停止次態靠 `_arm_sentinel` →
+        `_base_state` 重建狀態塊隱式歸零（見 `relay_machine` 檔頭 WHY），未來若有人替
+        這兩個鍵加了預設值，會在不知不覺間破壞這個隱式歸零。
+        """
+        tmp = Path(tempfile.mkdtemp(prefix="relay-basestate-"))
+        try:
+            plan = tmp / "plan.md"
+            args = planner.build_parser().parse_args([])
+            skeleton = planner._base_state("sid-base", plan, args, "sentinel", "T-base")
+            self.assertNotIn("relay_seq", skeleton,
+                             "_base_state 骨架混進了 relay_seq ⇒ 停止次態重建時不再隱式歸零")
+            self.assertNotIn("relay_no_progress_streak", skeleton)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_the_resume_tick_rearm_branch_actually_wires_the_reset_boundary(self) -> None:
+        """接線鎖：只驗純函式不夠——若 `_resume_tick` 忘了呼叫 `apply_reset_at`（例如
+        改回直接 `state["reset_at"] = ...`），這支測試才會紅；純函式測試因為根本沒被
+        呼叫到而察覺不了漏接線。"""
+        tmp = Path(tempfile.mkdtemp(prefix="relay-f4-wire-"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        plan = tmp / "plan.md"
+        state = {**RelayStateTest.GOOD, "plan_path": str(plan), "session_id": "sid-f4",
+                 "allow_resume": True, "task_name": "T-f4", "relay_seq": 3,
+                 "relay_no_progress_streak": 2, "log_path": str(tmp / "log.jsonl")}
+        plan.write_text("# 任務書\n\n" + planner.render_relay(state),
+                        encoding="utf-8", newline="\n")
+        args = planner.build_parser().parse_args(
+            ["--resume-tick", "--plan", str(plan), "--task-name", "T-f4"])
+        fresh_reset = datetime.now().astimezone() + timedelta(hours=5)
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(unittest.mock.patch.object(
+                planner, "probe_quota", lambda *_a, **_k: {
+                    "open": False, "kind": guard.LIMIT_SESSION, "rc": 1, "text": "hit"}))
+            stack.enter_context(unittest.mock.patch.object(
+                planner, "tick_plan", lambda *_a, **_k: {
+                    "action": "rearm", "state": "waiting", "at": fresh_reset,
+                    "reason": "測試合成：新觀測 reset"}))
+            stack.enter_context(unittest.mock.patch.object(
+                planner, "register_endurance",
+                lambda st, at, tick: (0, "已回讀（測試）")))
+            stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
+            stack.enter_context(contextlib.redirect_stderr(io.StringIO()))
+            planner._resume_tick(args)
+        written = planner.parse_relay(plan.read_text(encoding="utf-8"))
+        self.assertEqual(written.get("relay_seq"), 0,
+                         "rearm 分支換了新 reset_at 卻沒有透過 apply_reset_at 歸零 relay_seq"
+                         "——新視窗沿用了上一個視窗的接力計數")
+        self.assertEqual(written.get("relay_no_progress_streak"), 0)
+        self.assertNotEqual(written.get("reset_at"), "2026-08-07T09:00:00",
+                           "reset_at 沒有被換成新觀測值")
+
+    def test_the_sentinel_tick_arm_reset_branch_also_wires_the_reset_boundary(self) -> None:
+        """接線鎖（第二站點）：`_sentinel_tick` 的 arm_reset 分支與 `_resume_tick` 的
+        rearm 分支各自就地改寫 `reset_at`，是兩個各自獨立的接線站點——修一邊不蘊含
+        另一邊也修好，必須各自有測試。"""
+        tmp = Path(tempfile.mkdtemp(prefix="relay-f4-wire2-"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        plan = tmp / "plan.md"
+        live = tmp / "sid-f4b.jsonl"
+        live.write_text('{"type":"assistant"}\n', encoding="utf-8")
+        state = {**RelayStateTest.GOOD, "plan_path": str(plan), "session_id": "sid-f4b",
+                 "task_name": "T-f4b", "kind": "sentinel", "relay_seq": 5,
+                 "relay_no_progress_streak": 4, "transcript": str(live),
+                 "log_path": str(tmp / "log.jsonl")}
+        plan.write_text("# 任務書\n\n" + planner.render_relay(state),
+                        encoding="utf-8", newline="\n")
+        args = planner.build_parser().parse_args(
+            ["--sentinel-tick", "--plan", str(plan), "--task-name", "T-f4b"])
+        fresh_reset = datetime.now().astimezone() + timedelta(hours=5)
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(unittest.mock.patch.object(
+                planner, "sentinel_decide", lambda *_a, **_k: {
+                    "action": "arm_reset",
+                    "at": fresh_reset + timedelta(seconds=planner.RESET_SKEW_SECONDS),
+                    "reset_at": fresh_reset, "reset_source": "transcript-verbatim",
+                    "reason": "測試合成：新觀測 reset"}))
+            stack.enter_context(unittest.mock.patch.object(
+                planner, "register_endurance",
+                lambda st, at, tick: (0, "已回讀（測試）")))
+            stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
+            stack.enter_context(contextlib.redirect_stderr(io.StringIO()))
+            planner._sentinel_tick(args)
+        written = planner.parse_relay(plan.read_text(encoding="utf-8"))
+        self.assertEqual(written.get("relay_seq"), 0,
+                         "arm_reset 分支換了新 reset_at 卻沒有透過 apply_reset_at 歸零 relay_seq")
+        self.assertEqual(written.get("relay_no_progress_streak"), 0)
+        self.assertNotEqual(written.get("reset_at"), "2026-08-07T09:00:00")
 
 
 # ────────────────── R80：無 console 父行程下的 spawn（類級機械物，不是逐站點補丁）
@@ -3889,12 +4336,8 @@ out.write_text(json.dumps(res), encoding="utf-8")
     "[WINDOWS-NATIVE-ONLY] console 配置是 Windows 專屬概念（POSIX 上 creationflags 恆為 0，"
     "本鎖的判準在那裡沒有標的）——鐵律三：單平台判準不外推")
 class NoWindowBehaviourTest(unittest.TestCase):
-    """🔴 **行為**鎖，不是靜態掃描：真的從無 console 父行程 spawn，看子行程有沒有 console。
-
-    為何靜態掃描不夠：`ConsoleFreeSpawnTest` 只證「作者寫了那個旗標」，證不到「那個旗標
-    真的有效」。而 R80 的缺陷本體恰恰是**旗標有寫但被抵銷掉**（`DETACHED|CNW`）——那個
-    形態對任何「有沒有寫」的判準都是綠的。所以這一層量的是結果，不是意圖。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    cbg NoWindowBehaviourTest WHY〉節。"""
 
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp(prefix="nowin-behaviour-"))
@@ -3965,12 +4408,8 @@ class NoWindowBehaviourTest(unittest.TestCase):
 
 
 class UnhandledLimitDetectionTest(unittest.TestCase):
-    """🔴 R80 P0：哨兵整晚失明那一格的回歸鎖（事故見 `unhandled_limit_event` 上方 WHY；
-    R80 驗屍敘事原文＝Resume 證據檔 §L-3.30）。被守的性質三條，各對應一個實際發生過的失效：
-      ① 「已處理」必須是**證據**（事後真的有成功 API 回應），不是推論；
-      ② 偵測面必須含 subagent（扇出模式下撞線主要打在那裡）；
-      ③ 必須看**所有**未處理事件，不是只看最後一筆。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    cbg UnhandledLimitDetectionTest WHY〉節。"""
 
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp(prefix="unhandled-"))
@@ -4311,12 +4750,8 @@ class SpendLimitReachesAHumanTest(unittest.TestCase):
 
 
 class FanoutCasualtyRecordTest(unittest.TestCase):
-    """缺口 B：可續跑的工作單位從 session **降到 workflow run**。
-
-    R80 四次撞線主迴圈一次都沒死，死的是 subagent（42／55／1 個）⇒ 續跑那一段永遠不會
-    觸發、也**不該**觸發（session 還活著時再起一個 headless 回合只會互相干擾）。真正
-    需要被記下來的是「哪一個 run、哪幾個 agent 被打死」，而那件事讀檔就知道、成本為零。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    cbg FanoutCasualtyRecordTest WHY〉節。"""
 
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp(prefix="r81-fanout-"))
@@ -4429,12 +4864,8 @@ class FanoutCasualtyRecordTest(unittest.TestCase):
 
 
 class ControllerIdlePrepareWatchTest(unittest.TestCase):
-    """PRD §4.5.7（v2.1.6，R-4.5.7-1／-2／-3）：主控閒置盲區與預防性水位提醒。
-
-    B1／B2 兩支驗收判準（PRD 該節表格）：B1＝閒置秒數只讀**主**逐字稿；B2＝閒置＋
-    prepare 帶才提醒、且不寫任務書骨架（紅綠自證：分支開關本身）。B3（走桌面通道、
-    不依賴 hook）見下面 `PatrolNoticeIsDesktopNotHookTest` 的整合測試。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    cbg ControllerIdlePrepareWatchTest WHY〉節。"""
 
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp(prefix="idle-prepare-"))
@@ -4585,12 +5016,8 @@ class PatrolNoticeIsDesktopNotHookTest(unittest.TestCase):
 
 
 class ArmedDriftSelfHealTest(unittest.TestCase):
-    """PRD §4.5.8（v2.1.7 新增）：哨兵武裝狀態漂移自癒。
-
-    立案：`sentinel_lifecycle.liveness_line()` 此前只在人手動跑 `--pace`／`--check`
-    時出聲、且只印警語不動作。本節把同一個判準（`armed_but_missing`）掛進巡邏 tick，
-    偵測到漂移就地自動重新武裝，不需要人手動重跑 `--arm-sentinel`。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    cbg ArmedDriftSelfHealTest WHY〉節。"""
 
     def _plan_and_state(self, tmp: Path, live: Path, task: str) -> Path:
         plan = tmp / f"{guard.PLAN_PREFIX}{live.stem}.md"
@@ -4620,9 +5047,9 @@ class ArmedDriftSelfHealTest(unittest.TestCase):
                 return 0, "cred-heal"
 
         with unittest.mock.patch.object(sentinel_lifecycle, "sentinel_task_names",
-                                        return_value=[]), \
-             unittest.mock.patch.object(sb, "select", return_value=_StubBackend()):
-            calls = SentinelDecisionTest()._tick(plan, live, tmp, task)
+                                        return_value=[]):
+            calls = SentinelDecisionTest()._tick(plan, live, tmp, task,
+                                                 scheduler=_StubBackend())
         self.assertEqual(calls["rc"], 0)
         self.assertTrue(armed, "armed stamp 有、排程器查無此工作，卻沒有自動重新武裝")
         self.assertEqual(armed[0][1], task)
@@ -4655,9 +5082,8 @@ class ArmedDriftSelfHealTest(unittest.TestCase):
                 return 0, "cred-should-not-happen"
 
         with unittest.mock.patch.object(sentinel_lifecycle, "sentinel_task_names",
-                                        return_value=[task]), \
-             unittest.mock.patch.object(sb, "select", return_value=_StubBackend()):
-            SentinelDecisionTest()._tick(plan, live, tmp, task)
+                                        return_value=[task]):
+            SentinelDecisionTest()._tick(plan, live, tmp, task, scheduler=_StubBackend())
         self.assertEqual(armed, [], "排程器現查確實還在，卻仍觸發了自癒重新武裝")
 
     def test_unmeasurable_scheduler_listing_is_not_mistaken_for_drift(self) -> None:
@@ -4679,10 +5105,138 @@ class ArmedDriftSelfHealTest(unittest.TestCase):
                 return 0, "cred-should-not-happen"
 
         with unittest.mock.patch.object(sentinel_lifecycle, "sentinel_task_names",
-                                        return_value=None), \
-             unittest.mock.patch.object(sb, "select", return_value=_StubBackend()):
-            SentinelDecisionTest()._tick(plan, live, tmp, task)
+                                        return_value=None):
+            SentinelDecisionTest()._tick(plan, live, tmp, task, scheduler=_StubBackend())
         self.assertEqual(armed, [], "量不到（None）被誤判成漂移而重新武裝")
+
+    def test_v_d2_second_half_a_failed_rearm_clears_the_stamp_and_alerts_loudly(
+            self) -> None:
+        """V-d2 後半：漂移自癒重掛失敗（rc≠0）此前只記 audit、不清 stamp 不 loud——
+        現在補齊與 `relay_machine._rearm_after_stop()` 判準1同型的行為：清 armed
+        stamp（供下次 SessionStart 重新評估）＋loud alert。直接呼叫
+        `quota_escalation._heal_armed_drift()`（略過整條 `_sentinel_tick` 管線），
+        聚焦在這個新分支本身。
+        """
+        tmp = Path(tempfile.mkdtemp(prefix="drift-fail-"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        session_id = "sess-drift-fail"
+        task = f"{sentinel_lifecycle.TASK_PREFIX}{session_id}"
+        state = {"task_name": task, "session_id": session_id, "state": "armed",
+                 "plan_path": str(tmp / "plan.md")}
+
+        class _FailingArmBackend:
+            name = "stub-failing"
+            credential_key = sb.CRED_KEY_SCHTASKS
+
+            def arm(self, *_a, **_k):
+                return 9, ""
+
+        alert_calls: list[dict] = []
+        with unittest.mock.patch("tempfile.gettempdir", return_value=str(tmp)), \
+             unittest.mock.patch.object(sentinel_lifecycle, "sentinel_task_names",
+                                        return_value=[]), \
+             unittest.mock.patch.object(sb, "select", return_value=_FailingArmBackend()), \
+             unittest.mock.patch.object(
+                 escalation, "alert",
+                 side_effect=lambda r, s, *, loud=True, **_:
+                     (alert_calls.append({"reason": r, "loud": loud}), {})[1]):
+            marker = sentinel_lifecycle_arm.arm_marker_path(session_id)
+            marker.write_text("{}", encoding="utf-8")
+            audit = escalation._heal_armed_drift(
+                state, datetime.now().astimezone(), 900.0, planner.SENTINEL_TICK,
+                tmp / "trail.jsonl")
+            marker_survived = marker.is_file()
+        self.assertFalse(audit["armed_drift_healed"])
+        self.assertEqual(audit["armed_drift_rc"], 9)
+        self.assertFalse(marker_survived, "重掛失敗沒有清掉 armed stamp marker 檔")
+        loud = [c for c in alert_calls if c["loud"]]
+        self.assertTrue(loud, f"重掛失敗沒有 loud alert：{alert_calls}")
+
+
+class SchedulerBackendNeverTouchesRealSchtasksTest(unittest.TestCase):
+    """判準本體住 `tools/lib/schedule_backend.py`。WHY 全文搬至
+    CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    cbg SchedulerBackendNeverTouchesRealSchtasksTest WHY〉節。
+    """
+
+    def _plan_and_state(self, tmp: Path, live: Path, task: str = "T-r95") -> Path:
+        """重演立案最小條件：狀態塊非終態（`armed`）∧ 有 `task_name`——這兩個條件
+        就足以讓 `_heal_armed_drift()` 往下摸到 `schedule_backend.select()`，不需要
+        重跑那四支洩漏測試（2050/2066/2088/2105）的完整案例。
+        """
+        plan = tmp / f"{guard.PLAN_PREFIX}{live.stem}.md"
+        plan.write_text("# 任務書\n", encoding="utf-8", newline="\n")
+        planner.write_relay(plan, {**RelayStateTest.GOOD, "kind": "sentinel",
+                                   "session_id": live.stem, "plan_path": str(plan),
+                                   "reset_source": "operator", "reset_at": "",
+                                   "task_name": task, "transcript": str(live)})
+        return plan
+
+    def test_the_concrete_backend_classes_are_never_invoked_without_explicit_injection(
+            self) -> None:
+        """CI 安全的核心回歸鎖：真後端具體類的 `arm`／`list_jobs` 一旦被呼叫即拋例外
+        ——平台中性、零副作用，不依賴這台機器目前的排程器狀態。"""
+        def _boom(*_a, **_k):
+            raise AssertionError(
+                "真排程器後端被摸到了——DEF-200-239 沒修好，_tick() 的預設路徑洩漏到"
+                "具體實作類（SchtasksBackend／LaunchdBackend）")
+
+        tmp = Path(tempfile.mkdtemp(prefix="def200239-"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        live = _fresh_transcript(tmp, "sess-239.jsonl")
+        plan = self._plan_and_state(tmp, live)
+        with unittest.mock.patch.object(sb.SchtasksBackend, "arm", side_effect=_boom), \
+             unittest.mock.patch.object(sb.SchtasksBackend, "list_jobs", side_effect=_boom), \
+             unittest.mock.patch.object(sb.LaunchdBackend, "arm", side_effect=_boom), \
+             unittest.mock.patch.object(sb.LaunchdBackend, "list_jobs", side_effect=_boom):
+            calls = SentinelDecisionTest()._tick(plan, live, tmp, "T-r95")
+        self.assertEqual(calls["rc"], 0)
+        # 假後端確實被摸到（證明本測試真的重演了會觸發漂移檢查的路徑，不是空跑）。
+        self.assertTrue(calls["scheduler"].arm_calls,
+                        "假後端一次都沒被呼叫——本測試沒有重演到 DEF-200-239 的觸發條件，"
+                        "上面『真後端沒被摸到』的斷言因此沒有鑑別力")
+
+    def test_no_ghost_t_r95_task_survives_a_real_windows_scheduler_query(self) -> None:
+        """正面現查（CLAUDE.md 反事後諸葛紀律）：真跑一次 `_tick()`（不注入 `scheduler`，
+        重演立案最小條件）之後，`Get-ScheduledTask -TaskName T-r95` 必須查無——這是
+        DEF-200-239 修好的直接證據，而不只是『沒有例外』。非 Windows 或 schtasks 不可達
+        ⇒ 安全跳過。
+        """
+        if sys.platform != "win32":
+            self.skipTest("僅 Windows 有 schtasks 可現查（DEF-200-239 立案平台）")
+        probe = production_engine()  # R60 E-A-03：5.1 優先（DEF-101-509 判準）
+        if probe is None:
+            self.skipTest("這台機器找不到 powershell，無法現查排程器")
+
+        def _query() -> str:
+            proc = subprocess.run(
+                [probe, "-NoProfile", "-NonInteractive", "-Command",
+                 "(Get-ScheduledTask -TaskName 'T-r95' -ErrorAction SilentlyContinue "
+                 "| Measure-Object).Count"],
+                capture_output=True, text=True, timeout=30, check=False,
+                encoding="utf-8", errors="replace")
+            return (proc.stdout or "").strip()
+
+        # 開跑前先清場：不得讓上一輪殘留（若有——正是本鎖要防的那個洩漏）冒充成本輪
+        # 修好的證據。清不掉（例如這台機器沒有 schtasks 寫入權限）就整支跳過，不假綠。
+        subprocess.run(
+            [probe, "-NoProfile", "-NonInteractive", "-Command",
+             "Unregister-ScheduledTask -TaskName 'T-r95' -Confirm:$false "
+             "-ErrorAction SilentlyContinue"],
+            capture_output=True, text=True, timeout=30, check=False,
+            encoding="utf-8", errors="replace")
+        before = _query()
+        if before != "0":
+            self.skipTest(f"清場失敗（現查到 {before} 支殘留），這台機器上驗不了本鎖")
+        tmp = Path(tempfile.mkdtemp(prefix="def200239-live-"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        live = _fresh_transcript(tmp, "sess-239-live.jsonl")
+        plan = self._plan_and_state(tmp, live)
+        SentinelDecisionTest()._tick(plan, live, tmp, "T-r95")
+        after = _query()
+        self.assertEqual(after, "0",
+                         f"T-r95 在真排程器現查到了（count={after!r}）——DEF-200-239 沒修好，"
+                         "_tick() 的預設路徑仍在真機種下自續排程工作")
 
 
 # ════════════════════ R80：時區框架（act 在 Linux 容器抓到、Windows 本機看不見的兩個紅）
@@ -5251,12 +5805,8 @@ class QuotaStaleCacheTest(unittest.TestCase):
 
 
 class QuotaCacheContractHomeTest(unittest.TestCase):
-    """🔴 R81 收斂（Architect-B2）：快取的檔案契約（檔名＋schema）只能有**一個家**。
-
-    立案的形狀不是「兩處現在不一致」，而是**那個綁定從來沒有被測過**：meter 是唯一寫者、
-    hook 是唯一讀者，而所有既有快取測試都傳明確 `path` 給 `read_quota()` ⇒ 改掉 meter 的
-    `CACHE_NAME`，meter 寫新檔、hook 讀不到 → `pct=None` → **永遠不節流**，而全套照綠。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    cbg QuotaCacheContractHomeTest WHY〉節。"""
 
     def test_the_hook_follows_the_meter_instead_of_copying_it(self) -> None:
         """紅綠自證：把 meter 的兩個常數改掉，hook 必須**跟著動**；持有複本者當場紅。"""
@@ -5461,13 +6011,8 @@ class ZSentinelPinOutlivesEveryNestedRunnerTest(unittest.TestCase):
 
 
 class QuotaUnmeasurableFanoutTest(unittest.TestCase):
-    """🔴 R81 收斂（Architect-B1）：「量不到」時**不得**對任意規模的扇出全數放行。
-    複審探針實測缺口原文＝Resume 證據檔 §L-3.15。
-
-    本類的四條刻意涵蓋**兩個方向**：量得到就要擋（前三條），真的量不到又沒有任何證據
-    時仍然放行（最後一條）。只鎖前者會讓下一個人用「一律 fail-closed」滿足它，而那正是
-    L4 當初被否決的形態（斷網與額度滿了外觀相同）。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    cbg QuotaUnmeasurableFanoutTest WHY〉節。"""
 
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp(prefix="quota-gate-"))
@@ -5664,12 +6209,8 @@ class FanoutLedgerConcurrencyTest(unittest.TestCase):
 
 
 class PhantomCountNoLongerBlocksTest(unittest.TestCase):
-    """🔴 SD-B1 的**端到端**那一半：幽靈計數會把遠低於 cap 的一次派發擋下來。
-
-    SD 實測（合成 90% 快取、20 個平行 Agent）：帳本 `try=20 undo=17`（各應為 20）⇒
-    `live_dispatches()` 讀回 **3**，而 cap=2、設計意圖 0 ⇒ 接著單獨派 1 個 Agent
-    （遠低於 cap）拿到 **rc=2**。這正是 SA-B6 要治的永久過度節流換了成因復發。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    cbg PhantomCountNoLongerBlocksTest WHY〉節。"""
 
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp(prefix="phantom-"))
@@ -5692,12 +6233,8 @@ class PhantomCountNoLongerBlocksTest(unittest.TestCase):
 
 
 class RefreshSlotConcurrencyTest(unittest.TestCase):
-    """🔴 SD-B3：成本節流器在它**唯一要治的情境**下完全失效。
-
-    落地前實測（16 個獨立行程、壁鐘 barrier）：**CLAIM=16 SKIP=0**，設計意圖 1
-    ⇒ 一則訊息平行派 42 個 Agent、快取剛過期時，42 個 hook 各自同步打一次端點。
-    根因是 check-then-act（先 `is_file()`＋比 mtime，再 `write_text`），零原子性。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    cbg RefreshSlotConcurrencyTest WHY〉節。"""
 
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp(prefix="claim-mp-"))
@@ -5741,13 +6278,8 @@ class FanoutLedgerTest(unittest.TestCase):
 
 
 class QuotaGateIsIndependentOfContextTest(unittest.TestCase):
-    """🔴 SA-B1：本包唯一存在理由的那個場景——**低 context × 高 quota**。
-
-    ADR 原設計把 quota 分支放進 `block_verdict()`，而 `main()` 在呼叫它之前有五道
-    context 語意的早退（`tier_of` 在 context <75% 回 `None` ⇒ `return 0`）。撞額度那
-    一刻 context 只有 ~18~20% ⇒ 那段程式**永遠跑不到**。沒有下面這組低-context 注入，
-    任何「80% 擋得住」的判準在真實故障場景下都恆綠。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    cbg QuotaGateIsIndependentOfContextTest WHY〉節。"""
 
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp())
@@ -6487,13 +7019,8 @@ class MeterFailureShapesTest(unittest.TestCase):
 
 
 class RateLimitIsAFloorNotAnUnknownTest(unittest.TestCase):
-    """PRD §8 第 1 列／R100 止血 A：**429 此前被折成「量不到」，方向與條文完全相反。**
-
-    立案實測（本輪動手前）：`measure_detail()` 對 429 回 `(None, "http-429")` ⇒
-    `read_quota()` 判 `BAND_UNMEASURED` ⇒ `decide()` 給 `degraded_cap`（出廠 4，
-    實測 `== cap_converge`）⇒ 429 換來的姿態比「量到 70% CONVERGE 帶」還寬鬆，而 429
-    是額度吃緊最強的**直接**證據。`git grep Retry-After` 於 tools/ 全庫命中 **0**。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    cbg RateLimitIsAFloorNotAnUnknownTest WHY〉節。"""
 
     def _fake_429(self, meter: object, headers: dict) -> None:
         """注入一個**回 429 的假 opener**（不是替掉 `fetch_usage`）。
@@ -6571,13 +7098,8 @@ class RateLimitIsAFloorNotAnUnknownTest(unittest.TestCase):
 
 
 class ThrottleBandSaysHowLongItLastsTest(unittest.TestCase):
-    """SD 非 blocking ①：halt 帶用 `reset_branch` 分得出三支，**throttle 帶完全不分**。
-
-    週額度越 80% 時 cap 會連續套用**好幾天**，與 five_hour 80%（最多 5 小時）代價差一個
-    數量級，而訊息裡讀不出差別。本輪只把差別說出來，**不動 cap 的階梯**（那是掌舵者訂的
-    政策，挑一個數字塞進來就是本檔一路在治的「挑的不是量出來的」）——已登記交由下一輪
-    承接（輪號寫在帳本那一列）。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    cbg ThrottleBandSaysHowLongItLastsTest WHY〉節。"""
 
     def _msg(self, resets_in: float | None) -> str:
         return qg.quota_throttle_message(
@@ -6793,12 +7315,8 @@ class QuotaDegradationReachesTheModelTest(unittest.TestCase):
 
 
 class MacCredentialSourceTest(unittest.TestCase):
-    """🔴 L4-03：mac 的 Claude Code 憑證在 login Keychain，不在檔案系統上。
-
-    守得住判定邏輯；守不住「沒有 Keychain 條目的真 mac」（那一半只由 `_runner` 注入
-    模擬）。射程劃界全文＝Resume 證據檔 §L-4.15；R89 減法史料＝R89 收尾證據檔
-    §護欄層減法；實測值唯一的家＝`quota_meter.KEYCHAIN_SERVICE` 的註解（不複寫）。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    cbg MacCredentialSourceTest WHY〉節。"""
 
     def setUp(self) -> None:
         self.meter = _meter()
@@ -6976,12 +7494,8 @@ def _transcript(tmp: Path, name: str, turns: int, span_seconds: float) -> Path:
 
 
 class SentinelArmingCriterionTest(unittest.TestCase):
-    """🔴 被守的性質：**短命 session 不得留下一支每 15 分鐘醒來的 schtasks**。
-
-    立案是量出來的，不是推測：掌舵者截圖的三支哨兵裡有兩支屬於活了 5 秒與 12 秒的
-    session；本輪把該逐字稿目錄全部 83 支逐支量過 `(回合數, 首尾跨度)`——六支元凶一律
-    **2 回合 / ≤12 秒**，真正在做事的最少 **38 回合 / 853 秒**。門檻取在那道縫裡。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    cbg SentinelArmingCriterionTest WHY〉節。"""
 
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
@@ -7286,13 +7800,8 @@ _WMI_FOREIGN = (r'C:\WINDOWS\system32\cmd.exe'  # platform-ok: WMI 語料
 
 
 class ConsoleSpawnAttributionTest(unittest.TestCase):
-    """`tools/probe/console_spawn_watch.py` 的歸因判準。
-
-    🔴 被守的性質是**「無法歸因」必須是一等公民**。掌舵者兩度回報黑框，而第一輪的處置是
-    純推論（逐一檢查我們自己的 spawn 站點）——那種做法對「我們不知道的那條路」結構上失明。
-    量測器的價值全押在「它把說不清楚的東西誠實放進第三格」上：一旦那些被硬塞進
-    `foreign`，報表就會給出「本 repo 側乾淨」這個看起來很好、但沒有支撐的結論。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    cbg ConsoleSpawnAttributionTest WHY〉節。"""
 
     @staticmethod
     def _watch():
@@ -7667,12 +8176,8 @@ class PlannerMainAlsoPrefillsFromDotEnvTest(unittest.TestCase):
 
 
 class QuotaGateIsWiredToTheBurnPathTest(unittest.TestCase):
-    """🔴 R83：額度那把尺造好了，卻接在一條**幾乎不通電**的線上——本類守的就是那條線。
-
-    它守的是「我要不要多派人」，燒掉額度的卻是「我自己在做事」。R83 實測與紅端逐字
-    原文＝Resume 證據檔 §L-3.27。⇒ 判例 #3「機制蓋好沒接電」已復發三次，故本類不驗
-    「程式碼在不在」，只驗「它真的做了動作」。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    cbg QuotaGateIsWiredToTheBurnPathTest WHY〉節。"""
 
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp(prefix="wired-burn-"))
@@ -8087,12 +8592,8 @@ class AutoClaudeHookSpawnIsInScopeTest(unittest.TestCase):
 # R84／6C：prepare 帶（85~95%）真的要做準備動作 —— SA-03
 # ═══════════════════════════════════════════════════════════════════════════
 class QuotaPrepareBandActuallyPreparesTest(unittest.TestCase):
-    """🔴 SA-03 紅端：prepare 帶在 HEAD 上兩個事件都靜默、外觀與「額度很健康」相同
-    （紅端逐字原文＝Resume 證據檔 §L-3.29）。
-
-    本類刻意不驗「程式碼在不在」，只驗它真的做了那三件事（出聲／落磁碟／一個視窗一次），
-    以及**沒有**做第四件事（改 rc）——85% 擋下收斂型工作會讓人連收斂都做不完。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    cbg QuotaPrepareBandActuallyPreparesTest WHY〉節。"""
 
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp(prefix="prepare-band-"))
@@ -8481,12 +8982,8 @@ def _emitted(stdout: str) -> list[dict]:
 
 
 class ContextWarnReachesTheModelTest(unittest.TestCase):
-    """🔴 M1 送達形態鎖（R91）：WARN 分支此前是 `stderr + exit 0`＝模型結構上收不到。
-
-    守兩件實測過的失效面：① `hookEventName` 逐字等於 payload 的事件名（不符時 CC 把
-    整段 `additionalContext` 丟掉）；② 兩軸同火時 stdout 必須是**單一** JSON 物件
-    （兩個相接物件 ⇒ 兩則一起消失）。立案數字與對照實驗逐字見證據檔 §B／§B-4。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    cbg ContextWarnReachesTheModelTest WHY〉節。"""
 
     def _tmp(self, name: str) -> Path:
         root = Path(tempfile.mkdtemp(prefix=f"r91-emit-{name}-"))
@@ -8653,13 +9150,8 @@ class WarnGuidanceFollowsTheQuotaBandTest(unittest.TestCase):
 
 
 class PrdDrainPercentMapsToTheBandsTest(unittest.TestCase):
-    """🔴 R91：PRD 的 `DRAIN_PERCENT` ↔ `tools/lib/quota_policy.py` 四道帶的對映，
-    落地前**全庫實查為零登記**（`DRAIN_PERCENT` 只出現在 PRD 那一份 `.md`，`tools/` 下
-    一次都沒有）⇒ 任何要用「PRD 那條線」判斷的程式碼只能靠讀者自行推論，而推論不會轉紅。
-
-    本組把它變成可證的：分母**直接讀 PRD 檔**。兩邊漂開時該紅的是
-    `tools/lib/quota_gate.py::DRAINING_BANDS` 那一側——PRD 是憲法，改它要走修憲程序。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    cbg PrdDrainPercentMapsToTheBandsTest WHY〉節。"""
 
     _PRD = (_REPO_ROOT / "docs" / "01_requirements"
             / "AutoClaude_Token_監控與喚醒機制_PRD_v2.1.md")
@@ -8748,14 +9240,8 @@ def flush_site_problems(sources: dict[str, str]) -> list[str]:
 
 
 class UnmeasuredConvergesToThePrepareBandTest(unittest.TestCase):
-    """PRD §4.1.5（§8-6 修憲）F1~F5：**量不到必須換來收緊，而訊息必須說真話。**
-
-    立案實測（改前）：`degraded_cap == cap_converge` ⇒ `True`（兩者皆 4）⇒「完全量不到」
-    與「量到 70% CONVERGE 帶」在致動器上是同一個 cap；而 `note_degraded()` 的訊息逐字
-    寫 `⇒ 本次不節流，扇出照常放行。`，同檔 `quota_gate()` 註解卻自述「量不到時
-    `decide()` 回 `degraded_cap`（不是不設限、也永不 halt）」——同一個決策兩份敘述，
-    而**只有訊息那一份有讀者**。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    cbg UnmeasuredConvergesToThePrepareBandTest WHY〉節。"""
 
     _PRD = PrdDrainPercentMapsToTheBandsTest._PRD
     #: 🔴 PRD 面 ↔ 實作面的**對映登記**（F5）。刻意**不**併進 `_PAIRS`：那張表的消費者

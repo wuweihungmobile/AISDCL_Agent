@@ -234,13 +234,8 @@ class TestDepsHashBuildSystemGap(DevStartTestCase):
 
 
 class TestDepsHashEntryPointGap(DevStartTestCase):
-    """2026-07-27 Windows 實機揪出的同 bug class 殘留缺口（見
-    TestDepsHashBuildSystemGap）：console script / entry point 只在**安裝當下**
-    產生實體 shim，但舊白名單只看 dependencies／optional-dependencies／
-    build-system，純新增 [project.scripts] 時 hash 不變 → 判「依賴新鮮」跳過重裝
-    → 既有 venv 永遠長不出那支命令（R52 的 autoclaude-artifact-check 即為此在
-    本機缺席）。三塊各自獨立驗證，避免只鎖到其中一塊。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    dev_start TestDepsHashEntryPointGap WHY〉節。"""
 
     _BASE = '[project]\nname = "x"\ndependencies = ["pyyaml"]\n'
 
@@ -472,14 +467,8 @@ class TestStepVenvForceCrossFlavor(DevStartTestCase):
 
 
 class TestHooksConstantsConsistency(DevStartTestCase):
-    """Architect 複審 P2：dev_start.py 與 git hooks 安裝腳本各自硬編碼同一組
-    「dispatcher 目錄名＋三支 hook 檔名」假設，過去無機械比對——本測試補上這道守門。
-
-    獨立複審 finding（GitHooksInstallCommon.ps1 雙軌重寫）修復後，判定邏輯的單一
-    真相源改為 tools/git_hooks_install_common.py（tools/lib/GitHooksInstallCommon.ps1
-    與 tools/lib/git_hooks_install_common.sh 皆改為呼叫它的薄殼層，各自不再宣告
-    HOOKS_DIR／hook 檔名），本測試改比對該 Python 檔。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    dev_start TestHooksConstantsConsistency WHY〉節。"""
 
     def test_hooks_dir_and_filenames_match_install_script(self):
         common_py = dev_start.ROOT / "tools" / "git_hooks_install_common.py"
@@ -568,12 +557,8 @@ class TestLoadStateOSErrorSafety(DevStartTestCase):
 
 
 class TestStepHooksIsFileOSError(DevStartTestCase):
-    """P1-2 迴歸測試：step_hooks() 內 hooks 檔案存在性檢查原本是
-    `(hooks_dir / h).is_file()` 裸呼叫。本輪修復把 hooks_dir 改成可能指向「主
-    checkout」（跨掛載點，例如主 checkout 在外接碟/網路磁碟），比修復前風險更高卻
-    沒同步套用 _safe_* 防護。改用 _safe_is_file() 後，此處驗證檔案系統暫時不可讀
-    （如外接碟/網路磁碟抖動）拋 OSError 時不會讓整支工具裸崩潰。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    dev_start TestStepHooksIsFileOSError WHY〉節。"""
 
     def test_is_file_oserror_does_not_crash(self):
         with tempfile.TemporaryDirectory() as td:
@@ -658,26 +643,8 @@ class TestBootstrapLock(DevStartTestCase):
 
 
 class TestAcquireBootstrapLockPartialAliveMiddleState(DevStartTestCase):
-    """MUST FIX C（QA 複審發現的測試覆蓋缺口）：現有測試只涵蓋
-    `_acquire_bootstrap_lock()` 的『單一 PID 全存活』（見上方
-    `test_alive_pid_holder_blocks_acquisition`）與『全部 PID 死透』（見上方
-    `test_stale_lock_is_cleared_and_acquired`）兩端；`TestMultiGrandchildLockNotPrematurelyStale`
-    (MUST FIX A 重寫前) 對『A 死 B 活』中間態只透過 `_peek_bootstrap_lock()`
-    （讀取端）驗證，從未在同一中間態下直接呼叫 `_acquire_bootstrap_lock()`
-    （取得端）。QA 把 `_acquire_bootstrap_lock()` 的邏輯改成『全部存活才忙碌』
-    （不安全反轉：只要有一個死的就會誤判整把鎖陳舊）後，既有測試套件零失敗，
-    證實這是真實的覆蓋盲區。
-
-    本測試直接建構一個鎖檔內容含『一個已死 PID + 一個存活 PID』的情境，直接
-    呼叫 `_acquire_bootstrap_lock()`（不透過 `_peek_bootstrap_lock()`），斷言
-    回傳 None（拿不到鎖，因為還有存活成員）——且鎖檔不應被清除。
-
-    MUST FIX A 之後鎖檔語意隨平台改變（POSIX 可能是 process group id、Windows
-    是個別 PID），但 `_lock_target_alive()` 對『一般存活 PID』（非 pgid）一律
-    先用 `_pid_alive()` 判斷即回真，不需要動用 killpg——故本測試無需區分平台、
-    用一個單純的存活子行程即可等價驗證『部分存活即忙碌』這個核心語意，兩平台
-    通用。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    dev_start TestAcquireBootstrapLockPartialAliveMiddleState WHY〉節。"""
 
     def test_partial_alive_pid_list_blocks_acquisition_via_acquire_not_just_peek(self):
         with tempfile.TemporaryDirectory() as td:
@@ -925,16 +892,8 @@ class TestStepSyncRealGitRepo(DevStartTestCase):
 
 
 class TestPyprojectTopLevelTableRoster(DevStartTestCase):
-    """SD-R59-10：`_toml_deps_snapshot` 的白名單對「未來新增的安裝期表」是 fail-silent。
-
-    WHY：白名單對**中繼資料**是正確的（不會漏未來新增的 name/description 之類），但對
-    **新的安裝期 key** 反而是它的固有弱點——DEF-101-502 就是這個弱點的第二次發作
-    （第一次是 `build-system`）。現存候選缺口：`[tool.setuptools] packages`／`packages.find`
-    （決定哪些套件被裝進去）、`[dependency-groups]`（PEP 735，uv 已支援）、
-    `[tool.uv] override-dependencies`／`constraint-dependencies`、`project.dynamic`
-    ——R59 實查 `AutoClaude/pyproject.toml` **一項都不存在**，故非現行缺陷；但沒有任何鎖會在
-    有人新增一個頂層表時逼人做決定。本鎖用的是本輪 NTFS 前瞻鎖同一個手法（等值 roster）。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    dev_start TestPyprojectTopLevelTableRoster WHY〉節。"""
 
     _KNOWN_TOP_LEVEL = {"build-system", "project", "tool"}
 
@@ -955,12 +914,8 @@ class TestPyprojectTopLevelTableRoster(DevStartTestCase):
 
 
 class TestNightlyRunningDetection(DevStartTestCase):
-    """`_nightly_running()` 三態（True/False/None）判定。
-
-    Windows 分支查的是 run_local_nightly.ps1 的具名 Mutex、posix 分支查
-    run_local_nightly.sh 的鎖目錄；此處固定走 posix 分支測邏輯（Windows 分支
-    需要真的有 nightly 在跑才測得到 True，用真環境會變成 flaky）。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    dev_start TestNightlyRunningDetection WHY〉節。"""
 
     def _force_posix(self):
         return mock.patch.object(dev_start.platform_utils, "is_windows", return_value=False)
@@ -1263,12 +1218,8 @@ class TestPeekBootstrapLock(DevStartTestCase):
 
 
 class TestStreamOnStartCallback(DevStartTestCase):
-    """_stream() 改用 subprocess.Popen 後，on_start 必須在子行程建立當下就拿到
-    真實子行程 PID（而非等到程序結束才知道），這樣呼叫端（_run_bootstrap）才能
-    在 bootstrap 真正執行期間就把 PID 寫入鎖檔，不留時間差讓孤兒行程繞過鎖。
-    用真實 subprocess（而非函式層級 mock）驗證，因為這正是本輪要修的『行程樹
-    存活語意』問題本身。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    dev_start TestStreamOnStartCallback WHY〉節。"""
 
     def test_on_start_receives_real_child_pid(self):
         captured_pids = []
@@ -1290,17 +1241,8 @@ class TestStreamOnStartCallback(DevStartTestCase):
 
 
 class TestStreamOtherOSErrorDoesNotCrash(DevStartTestCase):
-    """MUST FIX 3（SA 複審發現，P2）：`_stream()` 過去只 catch `FileNotFoundError`。
-    若執行環境限制 `setsid()`（例如受限 seccomp/沙盒設定拒絕該系統呼叫），
-    `Popen(..., start_new_session=True)` 會在子行程端呼叫失敗、經內部 pipe
-    回報，父行程端拋出 `PermissionError`（`OSError` 子類別，但不是
-    `FileNotFoundError`）——SA 用函式層級 mock 實測驗證這個例外先前完全沒被
-    攔截，會直接向上傳播讓整支工具在 `_run_bootstrap()`/`step_venv()`/`main()`
-    裸崩潰。
-
-    本測試 mock `subprocess.Popen` 拋出 `PermissionError`，驗證 `_stream()` 不
-    裸崩潰、回傳合理的非零 rc 並印出警告，而不是讓例外往上炸穿。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    dev_start TestStreamOtherOSErrorDoesNotCrash WHY〉節。"""
 
     def test_permission_error_from_popen_returns_nonzero_without_crashing(self):
         with mock.patch.object(
@@ -1417,13 +1359,8 @@ class TestStreamNewProcessGroup(DevStartTestCase):
 
 
 class TestOrphanChildLockRegression(DevStartTestCase):
-    """收尾要求：本輪核心修法（子行程 PID 追蹤 + step_venv 頂部 busy-lock 檢查）
-    的端到端迴歸測試。Architect 明確指出上一輪測試抓不到問題正是因為只用函式
-    層級 mock（如 mock.patch.object(dev_start, "_run_bootstrap", ...)）——這類
-    『行程樹存活語意』的 bug（orchestrator 死亡但子行程變孤兒仍存活）本質上
-    無法被函式層級 mock 看見，必須用真實 subprocess.Popen 起一個真的會存活數秒
-    的子行程才能驗證鎖真正追蹤的是誰。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    dev_start TestOrphanChildLockRegression WHY〉節。"""
 
     def test_peek_reflects_real_child_process_lifetime(self):
         with tempfile.TemporaryDirectory() as td:
@@ -1533,20 +1470,8 @@ class TestOrphanChildLockRegression(DevStartTestCase):
 
 
 class TestStreamNewProcessGroupSurvivesDirectChildDeath(DevStartTestCase):
-    """MUST FIX A 核心迴歸測試（Architect 第三輪複審用真實驗證證明「事後 ppid
-    回溯」在因果上必然太晚：production 呼叫鏈是 `_stream()` 的 `proc.wait()`
-    等到直接子行程確實死亡才返回 → `_run_bootstrap()` 返回 → `step_venv()` 才
-    呼叫回溯邏輯，此時直接子行程的 ppid 早已被核心過繼給 subreaper，以其 PID
-    為根的事後回溯注定撲空）。
-
-    根本重做：`_stream(new_process_group=True)` 讓 bootstrap 直接子行程呼叫
-    `start_new_session=True`（POSIX 對應 `setsid()`），使其成為新 session 的
-    group leader——其自身 PID 同時即為 process group id。之後不論該子行程
-    fork 出多少層、多少個孫行程，只要仍有任一成員存活，`os.killpg(pgid, 0)`
-    就會成功；這不受「父行程死亡時子行程 ppid 被核心過繼」影響，因為過繼只
-    改變 ppid，不改變 process group membership。本測試用真實 subprocess（非
-    函式層級 mock）直接驗證這個核心因果宣稱本身。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    dev_start TestStreamNewProcessGroupSurvivesDirectChildDeath WHY〉節。"""
 
     @unittest.skipIf(os.name == "nt",
                       "[POSIX-NATIVE-ONLY] process group / os.killpg 僅適用 POSIX；Windows 維持既有"
@@ -1615,23 +1540,8 @@ class TestStreamNewProcessGroupSurvivesDirectChildDeath(DevStartTestCase):
 
 
 class TestBootstrapProcessGroupSurvivesDirectChildKill(DevStartTestCase):
-    """MUST FIX A 迴歸測試（取代舊版對『事後 ppid 回溯』的測試方式——Architect
-    第三輪複審立案，原文＝Guard_Repin 證據檔 §D-7）。
-
-    新設計：`_run_bootstrap()` 對 POSIX 呼叫 `_stream(..., new_process_group=True)`，
-    讓直接子行程以 `start_new_session=True` 成為新 session 的 group leader
-    （pgid == 自身 PID）。`step_venv()` 不再需要背景輪詢採樣後代 PID——直接用
-    `os.killpg(pgid, 0)` 判斷整個 group（含任意數量、任意深度的孫行程）是否
-    仍有成員存活，鎖檔內容全程維持記錄這一個 pgid 不變，不需要『事後發現多個
-    孫行程 PID 再改寫鎖檔』（舊設計 MUST FIX #2 修的『只記錄 min(live) 單一
-    PID』整個 bug class，在 pgid + killpg 設計下結構性不可能發生）。
-
-    本測試模擬兩個孫行程（壽命不同）一次驗證：①任一孫行程存活時鎖不釋放；
-    ②鎖檔內容全程是最初的 pgid（不像舊設計需要改寫成觀察到的孫行程 PID）；
-    ③下一輪 `_peek_bootstrap_lock()` 透過 `_lock_target_alive()` 的 killpg
-    fallback 仍正確判斷忙碌；④兩個孫行程都結束後鎖能被正常清除重新取得，不
-    會永久卡死。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    dev_start TestBootstrapProcessGroupSurvivesDirectChildKill WHY〉節。"""
 
     @unittest.skipIf(os.name == "nt",
                       "[POSIX-NATIVE-ONLY] process group / os.killpg 僅適用 POSIX；Windows 維持既有"
@@ -1742,17 +1652,8 @@ class TestBootstrapProcessGroupSurvivesDirectChildKill(DevStartTestCase):
 
 
 class TestSigintForwardsToBootstrapProcessGroup(DevStartTestCase):
-    """MUST FIX A 必要配套的迴歸測試（POSIX only）：`_stream(new_process_group=True)`
-    讓 bootstrap 直接子行程脫離終端機 foreground process group 後，使用者按
-    Ctrl-C（SIGINT 只送到 foreground process group）將不再自然傳到 bootstrap
-    樹，可能讓它在背景孤兒繼續跑而使用者誤以為已中止。
-
-    本測試用『真實訊號』（而非函式層級 mock）驗證：dev_start.py 安裝
-    `_forward_signal_to_bootstrap_group` 為 SIGINT handler 後，模擬使用者在
-    bootstrap 執行期間按 Ctrl-C（對自己送出真實 SIGINT），驗證整個 bootstrap
-    process group（含直接子行程與孫行程）確實收到訊號終止，不會變成背景孤兒
-    繼續執行。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    dev_start TestSigintForwardsToBootstrapProcessGroup WHY〉節。"""
 
     def setUp(self) -> None:
         super().setUp()
@@ -1834,14 +1735,8 @@ class TestSigintForwardsToBootstrapProcessGroup(DevStartTestCase):
 
 
 class TestNormalBootstrapFlowUnaffectedByProcessGroupChange(DevStartTestCase):
-    """交付要求 2(i)：MUST FIX A 是一個牽涉「子行程怎麼被產生」的結構性改動
-    （`_stream()` 新增 `new_process_group=True` 分支、`step_venv()` 改走 pgid/
-    killpg 路徑），必須用真實 subprocess 端到端驗證『正常成功的 bootstrap 流程
-    完全不受影響』——不能只驗證新機制本身，還要證明沒有把好路徑弄壞：rc 仍
-    正確傳遞（0）、真實孫行程仍能正常結束、鎖仍會在成功後正常釋放（不會被
-    誤判為『process group 仍有人存活』而卡住）、`_ACTIVE_BOOTSTRAP_PGID` 仍會
-    在流程結束後正確清除。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    dev_start TestNormalBootstrapFlowUnaffectedByProcessGroupChange WHY〉節。"""
 
     @unittest.skipIf(os.name == "nt", "[POSIX-NATIVE-ONLY] pgid 語意僅適用 POSIX；Windows 分支未變動")
     def test_successful_bootstrap_with_short_lived_grandchild_releases_lock_cleanly(self):
@@ -1912,18 +1807,8 @@ class TestNormalBootstrapFlowUnaffectedByProcessGroupChange(DevStartTestCase):
 
 
 class TestDescendantWatcherFinalSyncSampleWindows(DevStartTestCase):
-    """MUST FIX #3 迴歸測試（Windows 版）：`_DescendantWatcher` 自 MUST FIX A
-    起僅供 Windows 使用；舊版測試命中的是已移除的 POSIX 分支、繼續測它沒有意義
-    的沿革，原文＝Guard_Repin 證據檔 §D-8。
-
-    本測試改用 `mock ctypes.windll` 的既有慣例（比照 `TestPidAliveWindowsBranch`）
-    模擬 Windows Toolhelp32 API，在 Windows 分支上重新驗證 MUST FIX #3 這個
-    「stop_and_collect() 必須自己補一次同步採樣、不能只靠背景執行緒排程」的
-    修復——這個機制對 Windows 而言仍然成立且仍在生產程式碼路徑上（見
-    `_DescendantWatcher` docstring：Windows 的 th32ParentProcessID 是靜態
-    快照，事後回溯本身沒有 POSIX 那個因果性缺陷，但『背景輪詢的取樣空窗』
-    這個獨立問題兩平台通用，仍需要 stop_and_collect() 的同步補採樣）。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    dev_start TestDescendantWatcherFinalSyncSampleWindows WHY〉節。"""
 
     def test_child_born_in_polling_gap_is_still_captured_on_windows(self):
         root_pid = 42
@@ -2044,14 +1929,8 @@ class TestStepVenvPrevNoneHealthCheck(DevStartTestCase):
 
 
 class TestBootstrapIncompleteMarker(DevStartTestCase):
-    """MUST FIX #2 迴歸測試：Architect 發現 venv 建立成功但 pip install 失敗時
-    （tools/bootstrap.sh 用 set -euo pipefail，兩步驟獨立），bootstrap 回傳非 0
-    → main() 跳過 step_finalize()，狀態檔不寫入。使用者重跑時 state={}（prev=None）
-    但 .venv/bin/python 已存在 → 過去只做 _venv_healthy()（只驗證 python --version
-    能跑，不驗證套件是否裝好）就沿用，把「其實半殘」的 venv 靜默漂白成功。
-    修復後：bootstrap 失敗且 .venv 已建立時寫入哨兵；下次即使健檢通過，哨兵
-    存在也要視同壞損、改走正常 bootstrap 路徑。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    dev_start TestBootstrapIncompleteMarker WHY〉節。"""
 
     def test_partial_failure_leaves_marker_and_forces_rebootstrap_next_run(self):
         with tempfile.TemporaryDirectory() as td:
@@ -2141,15 +2020,8 @@ class TestBootstrapIncompleteMarker(DevStartTestCase):
 
 
 class TestRootLevelBootstrapIncompleteMarker(DevStartTestCase):
-    """MUST FIX #4 迴歸測試（Architect 複審發現，門檻遠低於原本描述的 P1）：
-    首次建置期間，最普通的 Ctrl-C 會讓 SIGINT 同時打中 dev_start.py 本體與
-    bootstrap 子行程（前景 process group），dev_start.py 立即死亡，
-    `_run_bootstrap()` 內 `rc = _stream(...)` 之後的「rc!=0 補寫哨兵」程式碼
-    永遠執行不到——過去 `.venv` 內部哨兵只在 `.venv` 目錄「已存在」時才會於
-    呼叫 bootstrap 前先寫入，對「首次建置、.venv 完全不存在」這個情境完全沒有
-    防護。修復後 ROOT 層級哨兵無條件於呼叫 `_stream()` 之前落地，不受 `.venv`
-    是否存在限制、也不依賴任何「`_stream()` 之後」才執行到的程式碼。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    dev_start TestRootLevelBootstrapIncompleteMarker WHY〉節。"""
 
     def test_root_marker_survives_process_death_before_stream_returns(self):
         with tempfile.TemporaryDirectory() as td:
@@ -2232,17 +2104,8 @@ class TestRootLevelBootstrapIncompleteMarker(DevStartTestCase):
 
 
 class TestRunBootstrapWiresRootMarkerBeforeStream(DevStartTestCase):
-    """MUST FIX B（QA 複審發現的測試覆蓋缺口）：既有
-    `TestRootLevelBootstrapIncompleteMarker` 都是直接呼叫
-    `_mark_root_bootstrap_incomplete()` 手動模擬「哨兵已經落地」的終態，從未
-    驗證 `_run_bootstrap()` 本身真的有在呼叫 `_stream()` 之前無條件呼叫這個
-    函式——QA 把 `_run_bootstrap()` 裡那行呼叫拿掉後，全套既有測試零失敗，
-    證實這是真實的覆蓋盲區（只驗證了消費端/讀取端行為，沒驗證生產端接線）。
-
-    本測試 mock 掉 `_stream()`，讓它在被呼叫的當下記錄「此刻 ROOT 層級哨兵
-    是否已落地」，直接呼叫真正的 `_run_bootstrap()`（不是 fake），證明生產端
-    接線順序正確：哨兵先落地、才開始跑 bootstrap（而不是事後才補寫）。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    dev_start TestRunBootstrapWiresRootMarkerBeforeStream WHY〉節。"""
 
     def test_root_marker_present_at_the_moment_stream_is_invoked(self):
         with tempfile.TemporaryDirectory() as td:
@@ -2279,19 +2142,8 @@ class TestRunBootstrapWiresRootMarkerBeforeStream(DevStartTestCase):
 
 
 class TestRunBootstrapPassesNewProcessGroupToStream(DevStartTestCase):
-    """MUST FIX 1（QA 第四輪複審發現的測試覆蓋缺口）：既有涉及 process group
-    語意的測試（`TestBootstrapProcessGroupSurvivesDirectChildKill`、
-    `TestNormalBootstrapFlowUnaffectedByProcessGroupChange` 等）都是 mock 掉
-    `_stream()` 並在假實作裡『自己』手動設定 `start_new_session=True`，從未
-    驗證 production `_run_bootstrap()` 本身是否真的把 `new_process_group=True`
-    傳給 `_stream()`——QA 把 `_run_bootstrap()` 裡那個實參改成 `False` 後，
-    92 個既有測試零失敗，證實這是真實的覆蓋盲區（只驗證了消費端/假實作行為，
-    沒驗證生產端接線本身）。
-
-    本測試直接 mock `_stream()`（單純記錄呼叫參數、不用假實作模擬效果），
-    呼叫真正的 `_run_bootstrap()`，斷言傳給 `_stream()` 的呼叫確實包含
-    `new_process_group=True`。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    dev_start TestRunBootstrapPassesNewProcessGroupToStream WHY〉節。"""
 
     def test_run_bootstrap_passes_new_process_group_true(self):
         with tempfile.TemporaryDirectory() as td:
@@ -2334,12 +2186,8 @@ class TestNowLabelPlatformMapping(DevStartTestCase):
 
 
 class TestStepSwitchCacheCleanup(DevStartTestCase):
-    """MUST FIX #4a：QA 用 bug-injection 重現——把 `if not env_changed:` 反轉成
-    `if env_changed:` 後現有 54 個測試全過。用真實 tmp 目錄建立假的
-    .pytest_cache/.ruff_cache（含 symlink 與一般目錄兩種情況），驗證
-    env_changed=True 時確實被清除、env_changed=False 時確實不動——絕不觸碰
-    這個 repo 真正的快取目錄，全程沙盒化。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    dev_start TestStepSwitchCacheCleanup WHY〉節。"""
 
     def test_env_changed_removes_cache_dir_and_symlink(self):
         with tempfile.TemporaryDirectory() as td:
@@ -2505,20 +2353,8 @@ class TestMainIntegrationGate(DevStartTestCase):
 
 
 class TestMainInstallsSignalHandlerReference(DevStartTestCase):
-    """MUST FIX 2（QA 第四輪複審發現的測試覆蓋缺口）：既有
-    `TestSigintForwardsToBootstrapProcessGroup` 底下兩個測試都是自己手動呼叫
-    `signal.signal(signal.SIGINT, dev_start._forward_signal_to_bootstrap_group)`
-    模擬「已安裝好 handler」的狀態，從未透過 `main()` 走完整安裝路徑——QA 把
-    `main()`（約 1462-1463 行）安裝 handler 那兩行改裝成 `signal.SIG_DFL`（保留
-    正確的還原邏輯，不觸發任何裸崩潰）後，92 個既有測試零失敗，證實這是真實
-    的覆蓋盲區：沒有任何測試驗證 production `main()` 本身真的有做這件事。
-
-    本測試呼叫真正的 `main()`，mock 掉 `step_venv()` 讓它在被呼叫的當下（此刻
-    handler 理應已安裝、且尚未被 `finally` 還原）記錄
-    `signal.getsignal(SIGINT/SIGTERM)`，斷言兩者確實『引用等於』
-    `dev_start._forward_signal_to_bootstrap_group`——不是只驗證「裝了某個非
-    預設 handler」，而是驗證裝的正是這個函式本身。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    dev_start TestMainInstallsSignalHandlerReference WHY〉節。"""
 
     @unittest.skipIf(os.name == "nt", "[POSIX-NATIVE-ONLY] 本 handler 僅在 POSIX 安裝（見 main() 內"
                       "對應條件判斷與其 docstring）")
@@ -2730,13 +2566,9 @@ class TestNightlyHeartbeat(DevStartTestCase):
 
 
 class TestOnboardingSnapshotProbe(DevStartTestCase):
-    """Gap C：ONBOARDING §7 表② 指紋哨兵接進 step_platform [6/7]（純 advisory）。
-
-    測意圖（Rule 9）：表② 指紋 stale 是 pre-push 的**阻斷項**，而主要漂移來源是
-    merge 拉進對面機器的 commit——發生在本輪寫任何程式碼之前（useMacWin.md 第 7 步）。
-    [6/7] 是每次開工必經之地，這裡不出聲的話，發現時點就只剩 push 被擋當場。
-    邏輯本體住 tools/lib/onboarding_snapshot_note.py（dev_start.py 為 raw-line 棘輪，
-    僅留 thin adapter），故 (a)~(c) 經真 adapter 打到 lib、只 mock subprocess.run。
+    """判準本體住 `tools/lib/onboarding_snapshot_note.py`（本檔為 thin adapter）。
+    WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    dev_start TestOnboardingSnapshotProbe WHY〉節。
     """
 
     @staticmethod
@@ -2886,14 +2718,8 @@ class TestNightlyHeartbeatFilenameContract(unittest.TestCase):
 
 
 class TestVenvPythonVersionSentinel(DevStartTestCase):
-    """R15 DEF-101-207：venv Python 版本比對哨兵。
-
-    WHY：.python-version 升版後 bootstrap 對「既有 .venv 沿用」路徑不換直譯器，
-    pin 檔不在 DEPS_FILES 內、hash 觸發是無效藥——唯一可見點是整備成功收尾塊
-    對 venv 直譯器實測版本。驅動真實 step_venv()（hash 未變的沿用路徑），
-    monkeypatch 兩支新純函式鎖三態：不一致→警告；一致→零警告；pin 缺席→
-    零警告且不得 spawn 直譯器（短路）。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    dev_start TestVenvPythonVersionSentinel WHY〉節。"""
 
     def _run_step_venv(self, target, minor_mock) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -2936,13 +2762,8 @@ class TestVenvPythonVersionSentinel(DevStartTestCase):
 
 
 class TestVenvPythonVersionRealBody(DevStartTestCase):
-    """QA-R15-REV-3：_python_version_target()／_venv_python_minor() 真身驅動。
-
-    WHY：TestVenvPythonVersionSentinel 只驗證 step_venv 依兩支函式回傳值決定
-    要不要 _warn，兩支函式本身（讀 .python-version 截斷邏輯、subprocess 呼叫
-    子行程取版本）全程被 mock 掉、零真身覆蓋（R15 四方一審 QA-R15-REV-3 揭露）。
-    本測試以 tempfile 真檔案＋sys.executable 真直譯器直接驅動函式本體。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    dev_start TestVenvPythonVersionRealBody WHY〉節。"""
 
     def test_target_two_segment_version(self):
         with tempfile.TemporaryDirectory() as td:
@@ -3117,12 +2938,8 @@ class TestLaunchdNightlyLoaded(DevStartTestCase):
 
 
 class TestHeartbeatFailSentinel(DevStartTestCase):
-    """R15 ARCH-R15-1：心跳 FAIL 內容哨兵（mac 側）。
-
-    WHY：mtime 只證明「在跑」不證明「在綠」——CI 停擺期間 nightly 是唯一每日
-    活體，連續全紅晨間 dev_start 仍 ✅ 是盲區。心跳前 3 行是
-    run_local_nightly.sh write_heartbeat() 的固定契約。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    dev_start TestHeartbeatFailSentinel WHY〉節。"""
 
     @staticmethod
     def _write_heartbeat(root: Path, fail: int) -> None:
@@ -3160,13 +2977,8 @@ class TestHeartbeatFailSentinel(DevStartTestCase):
 
 
 class TestWindowsHeartbeatFailSentinel(DevStartTestCase):
-    """DEF-101-200 rider ARCH-R15-1（Windows 側，R23 補完）：Windows nightly log
-    是全量 log（含完整 pytest/mutmut 輸出）非 mac 的 3 行心跳契約，改 tail 掃描
-    `run_local_nightly.ps1` 既有（非本輪新增）的 `END exit decision: exit=N
-    (failed stages: ...)` 收尾行。驗證涵蓋：exit=1 有 failed stages → 警告＋
-    summary 片段；exit=0 → 零警告；大型全量 log（tail 窗格前有雜訊）仍能命中
-    尾端錨點；找不到錨點時安全回 None（advisory，不得讓 dev_start 崩潰）。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    dev_start TestWindowsHeartbeatFailSentinel WHY〉節。"""
 
     @staticmethod
     def _write_windows_log(root: Path, body: str) -> Path:
@@ -3466,12 +3278,8 @@ class TestCiLiveness(DevStartTestCase):
 
 
 class TestCrossSiteLiteralLocks(unittest.TestCase):
-    """R15 雙站點字面互鎖（機械鎖漂移；同 TestNightlyHeartbeatFilenameContract 病灶）。
-
-    dev_start.py 與 install_mac_nightly.sh 各硬編一份 launchd label 與心跳門檻，
-    單側改動另一側零訊號——regex 自兩側原始碼抽字面值斷言相等。
-    install_mac_nightly.sh 本測試只讀不寫。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    dev_start TestCrossSiteLiteralLocks WHY〉節。"""
 
     _REPO = Path(dev_start.__file__).resolve().parents[1]
 
@@ -3503,20 +3311,8 @@ class TestCrossSiteLiteralLocks(unittest.TestCase):
 
 
 class _NightlyHeartbeatDimensionMixin:
-    """心跳「維度契約」的共用面：**純字串／純讀檔**，一行 subprocess 都沒有。
-
-    R72 為何要把這一段拆出來：下面那個行為等價鎖整組掛著
-    `@skipUnless(sys.platform == "darwin")`（理由正當——它真的要跑 bash 並依賴
-    BSD `stat -f %m`），但 `test_lock_covers_every_dimension_claimed_by_installer`
-    只做 `read_text` ＋ regex ＋ 純字串分類，**整支在任何平台都跑得起來**，卻因為
-    住在那個類別裡而在 Windows／Linux 閘門上一律 SKIPPED。那是「搭錯車」造成的
-    覆蓋損失，不是平台語意使然——同 `test_capability_row_count_reaches_windows_
-    side_parity`（R72 已搬至 `test_schedule_capability_parity.py`）的形態。
-
-    做成 mixin 而非讓 darwin 類別繼承新類別：後者會讓那支測試被 `discover` 收兩份
-    （父類一份、darwin 子類一份，且子類那份在非 mac 平台永遠 skip），憑空製造一支
-    永遠不跑的重複測試與一行沒有意義的 skip 明細。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    dev_start _NightlyHeartbeatDimensionMixin WHY〉節。"""
 
     _REPO = Path(dev_start.__file__).resolve().parents[1]
     _INSTALLER = _REPO / "tools" / "install_mac_nightly.sh"
@@ -3626,14 +3422,8 @@ class TestNightlyHeartbeatDimensionContract(_NightlyHeartbeatDimensionMixin, uni
 class TestNightlyHeartbeatCrossSiteBehavioralEquivalence(
     _NightlyHeartbeatDimensionMixin, unittest.TestCase
 ):
-    """R50 四方複審發現：兩側各自獨立實作的心跳判斷，舊字面值鎖比對不到『判定結果』
-    是否一致（R50／R67-E21／R67-M40 三筆立案沿革，原文＝Guard_Repin 證據檔 §D-9）。
-
-    本測試直接從 install_mac_nightly.sh 原始碼**動態擷取** `report_heartbeat()`
-    函式本體（非另外複製一份到測試檔——避免測試與生產程式碼各自漂移），在獨立
-    bash 子行程中對同一顆心跳檔執行，並與 python 側 `_check_nightly_heartbeat()`
-    在同一顆心跳檔上的輸出逐維度比對。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    dev_start TestNightlyHeartbeatCrossSiteBehavioralEquivalence WHY〉節。"""
 
     # 維度契約面（`_REPO`／`_INSTALLER`／`_DIMENSIONS_RE`／`_installer_claimed_
     # dimensions()`／`_classify()`）已於 R72 移入 `_NightlyHeartbeatDimensionMixin`
@@ -3896,16 +3686,8 @@ _MACNIGHTLY_DEGENERATE_PLIST = """<?xml version="1.0" encoding="UTF-8"?>
     "執行本身即為無意義假訊號，跳過而非假綠",
 )
 class MacNightlyStatusTestCase(unittest.TestCase):
-    """`--status` 報表契約共用夾具。
-
-    背景：修前「三行全綠」判準看不到已安裝產物內容、也看不到中間漏跑
-    （R67-M37／R67-F29 立案，原文＝Guard_Repin 證據檔 §D-10）。
-
-    夾具在暫存目錄搭一棵最小 repo 樹 + fake HOME + stub launchctl，跑**真實的**
-    `install_mac_nightly.sh --status`（複製自真檔，非另抄一份邏輯）。絕不觸碰真實
-    `~/Library/LaunchAgents` 或真實 launchctl——`--status` 雖是純讀取路徑，但 fake
-    HOME 才能讓「已安裝 plist 的內容」成為測試可控的自變數。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    dev_start MacNightlyStatusTestCase WHY〉節。"""
 
     _REPO = Path(dev_start.__file__).resolve().parents[1]
     _INSTALLER = _REPO / "tools" / "install_mac_nightly.sh"
@@ -4199,16 +3981,8 @@ class TestMacNightlyPlistCapabilityTable(MacNightlyStatusTestCase):
 
 
 class TestMacNightlyMachineStateCapabilities(MacNightlyStatusTestCase):
-    """R82：能力表裡**輸入是機器狀態而非 plist 內容**的那兩列（WakeToRun／NextRunTime）。
-
-    為何獨立成一類、而不是塞回上面那一類：上面那一類的自變數是「已安裝 plist 的內容」，
-    這裡的自變數是「這台 Mac 的電源排程」——兩者連要造出「壞掉的樣子」的手法都不同
-    （前者寫一份退化 plist，後者換掉 pmset）。混在一起的代價已經實證過一次：
-    `test_healthy_plist_passes_every_capability_row` 因此在真 mac 上結構性必紅。
-
-    這一類同時是上面那一類的**紅綠自證**：健康控制組會綠，只證明兩列**能**印 ✅；
-    要證明它們不是橡皮圖章，就得有輸入壞掉時真的轉 ⚠️ 的對照組。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    dev_start TestMacNightlyMachineStateCapabilities WHY〉節。"""
 
     def _cap_lines(self, out: str) -> str:
         """只取那兩列，避免斷言被其他列的文字誤命中。"""
@@ -4323,17 +4097,8 @@ class TestMacNightlyMachineStateCapabilities(MacNightlyStatusTestCase):
 
 
 class TestMacNightlyPmsetMarkerIsNotProse(unittest.TestCase):
-    """R82：pmset 判準的字面值鎖——**純讀檔，刻意不掛 `@skipUnless(darwin)`**。
-
-    為何獨立成一個平台中立的類別，而不是塞進上面那個 darwin-only 類別：本判準只做
-    `read_text` ＋ 字串比對，一行 subprocess 都沒有，在任何平台都跑得起來。搭上
-    darwin 的車就會在 Windows／Linux 閘門上一律 SKIPPED——同 `_NightlyHeartbeat
-    DimensionMixin` 檔頭記載的那個「搭錯車造成覆蓋損失」形態（R72 已為
-    `test_capability_row_count_reaches_windows_side_parity` 處理過一次）。
-
-    這件事在本輪特別要緊：被撤回的字面值當初就是在錯的那一岸寫下的
-    （沿革原文＝Guard_Repin 證據檔 §D-18）。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    dev_start TestMacNightlyPmsetMarkerIsNotProse WHY〉節。"""
 
     _INSTALLER = Path(dev_start.__file__).resolve().parents[1] / "tools" / "install_mac_nightly.sh"
 
@@ -4437,13 +4202,8 @@ class TestMacNightlyCoverageContinuity(MacNightlyStatusTestCase):
 
 
 class TestMacNightlyStatusWiring(MacNightlyStatusTestCase):
-    """接線鎖：兩段報表必須真的被 `cmd_status()` 呼叫，且 advisory 語意不變。
-
-    WHY 單獨立一類：R67 上一輪半套修改的失敗形態就是「函式寫好了、沒接線」——
-    `bash -n` 與所有既有測試全綠，`--status` 行為卻與修前一模一樣。行為鎖（上面
-    兩類）其實已涵蓋，但靜態鎖給的是**可直接讀懂的失敗訊息**，不必從「輸出少了
-    一段」反推是哪一步漏了。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    dev_start TestMacNightlyStatusWiring WHY〉節。"""
 
     def test_cmd_status_invokes_both_reports(self) -> None:
         m = re.search(r"^cmd_status\(\) \{(.*?)^\}", self.installer_source(),
@@ -4495,17 +4255,8 @@ class TestMacNightlyStatusWiring(MacNightlyStatusTestCase):
 
 
 class TestMacNightlyStatusPersistenceGate(MacNightlyStatusTestCase):
-    """R68-M31：「launchd 已載入、但磁碟上的 plist 已不存在」是 macOS 專屬的
-    「載入 ≠ 已持久化」狀態——載入只活在當前 login session 的記憶體裡，磁碟沒有
-    plist 就不會在下次登入/重開機時被重新載入。修前 `--status` 對這個註定死掉的
-    排程回報 rc=0 全綠、並且整段跳過能力表（唯一的機讀判準說它健康）。
-
-    這不是「沒人想到的交集狀態」，而是**實作違反自家已寫下的契約**：安裝器檔頭
-    自 R13 起逐字承諾「1＝失敗（--status 時＝未載入或 plist 缺席）」，實作卻只看
-    launchctl。上游可達性也成立：`launchctl unload` 失敗時仍 exit 0，修前的
-    `cmd_uninstall` 在 `|| true` 之後無條件 `rm -f` plist，自己就會製造這個孤兒
-    狀態（該路徑由 `TestMacNightlyLoadSelfVerification` 一併封住）。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    dev_start TestMacNightlyStatusPersistenceGate WHY〉節。"""
 
     def test_loaded_but_plist_absent_from_disk_is_a_hard_failure(self) -> None:
         # 預設 stub 已回報「已載入」；刻意不安裝 plist＝重現孤兒狀態。
@@ -4544,15 +4295,8 @@ class TestMacNightlyStatusPersistenceGate(MacNightlyStatusTestCase):
 
 
 class TestMacNightlyLastExitStatusColumn(MacNightlyStatusTestCase):
-    """R68-M30：`launchctl list` 第 2 欄（last exit status）必須被解讀，而不是原樣
-    印出就算數。
-
-    缺陷形狀：載體每晚照跑、每晚在寫出心跳之前就非零退出 ⇒ 心跳檔與 RunId log
-    **從第一天起就永遠不存在** ⇒ 兩段報表齊聲宣告「排程可能未啟用或尚未跑過第一輪」
-    且 rc=0。那句因果確定為假，而且因為心跳檔永遠不生成，8 天過期哨兵永遠不會啟動
-    ——這個假宣稱是無上界的，不是一個 8 天窗口。第 2 欄的值當時就印在螢幕上
-    （`-\\t3\\tcom.autoclaude.nightly`），只是沒有任何一行程式碼去讀它。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    dev_start TestMacNightlyLastExitStatusColumn WHY〉節。"""
 
     def test_nonzero_last_exit_replaces_the_false_first_run_claim(self) -> None:
         self.set_launchctl(self.stub_list_reports("3"))
@@ -4588,16 +4332,8 @@ class TestMacNightlyLastExitStatusColumn(MacNightlyStatusTestCase):
 
 
 class TestMacNightlyLoadSelfVerification(MacNightlyStatusTestCase):
-    """R68-M64：`launchctl load/unload` 失敗時**仍 exit 0**（本機實測
-    `Load failed: 5: Input/output error` 配 rc=0），`set -e` 結構上攔不到，於是修前
-    的 `cmd_install` 會在排程根本沒載入的情況下印「✅ 已安裝並載入」並 rc=0——
-    它就是 R67 一路在防的「死排程」的上游製造機。修法是不相信 rc，改用
-    `cmd_status` 從 R13 起就有的那道現成查核式（`launchctl list` 第 3 欄精確等值）
-    自證，✅ 只能印在自證通過之後。
-
-    修前這兩條路徑在測試側是**零行為覆蓋**：`test_schedule_capability_parity.py`
-    對 install 只做原始碼字串比對，`macos_smoke_local.sh` 只跑 `--render-only`。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    dev_start TestMacNightlyLoadSelfVerification WHY〉節。"""
 
     _LOAD_FAILS_SILENTLY = (
         'if [ "$1" = "load" ]; then echo "Load failed: 5: Input/output error" >&2; fi\n'
@@ -4663,13 +4399,8 @@ exit 0
 
 
 class TestCopyFunctionalInterpreterDllCopy(unittest.TestCase):
-    """QA 要求的環境無關自證測試（R21 四方一審，DEF-101-256）：直接驗證
-    `_copy_functional_interpreter()`（`tools/tests/_platform_helpers.py`）新增
-    的 DLL 複製行為本身，不依賴本機當前 Python 安裝佈局是否恰好是裸
-    pyenv-win——monkeypatch `sys.executable` 指向暫時假來源目錄，不論在哪台
-    機器跑都能抓到退化（QA 明確要求：不能只靠「機器剛好是裸 pyenv-win 佈局」
-    才會抓到退化）。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    dev_start TestCopyFunctionalInterpreterDllCopy WHY〉節。"""
 
     def test_copies_named_dll_patterns_beside_dest(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -4735,20 +4466,8 @@ class TestCopyFunctionalInterpreterDllCopy(unittest.TestCase):
 
 
 class TestRmtreeWindowsSafe(DevStartTestCase):
-    """R66 P2（DEF-101-620）：`_ensure_venv_shape()`/`step_venv()` 三處自我修復
-    路徑（換手保留失敗殘留的 `.venv-cache-<other>/`、兩平台直譯器皆缺的壞損
-    `.venv/`、跨 OS 同 flavor 切換要清掉的舊 `.venv/`）過去用裸
-    `shutil.rmtree()`。技巧同款移植自
-    `AISDLC_SDD/AISDLC_SDD_v0.30/tools/fsm_runtime/hub_sync.py::_rmtree_windows_safe`
-    （R15 SCAN-B-2 首次建立、R60 A-04 沿用）。
-
-    Bug-injection 紅綠實測（本機 Windows 11 Pro 26200 真機驗證，非模擬）：
-      RED（修復前，對同一份含唯讀檔 fixture 呼叫裸 `shutil.rmtree`）：
-        `RAISED PermissionError: [WinError 5] 存取被拒。: '...\\.venv\\bin\\python'`
-        且事後 `venv.exists()` 仍為 True（半殘目錄未被清除）。
-      GREEN（修復後，改呼叫 `_rmtree_windows_safe`）：
-        無例外拋出，且 `venv.exists()` 為 False（目錄確實整個被移除）。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    dev_start TestRmtreeWindowsSafe WHY〉節。"""
 
     def _make_readonly_fixture(self, root: Path) -> tuple[Path, Path]:
         venv = root / ".venv"
@@ -4801,12 +4520,8 @@ class TestRmtreeWindowsSafe(DevStartTestCase):
 
 
 class TestVenvSelfHealCallSitesUseSafeRmtree(DevStartTestCase):
-    """平台中立 call-site 鎖（同
-    `AISDLC_SDD/AISDLC_SDD_v0.30/tools/fsm_runtime/tests/test_hub_sync.py::
-    TestMirrorLocalWindowsResilience::test_mirror_local_does_not_call_bare_rmtree`
-    的鎖法）：`_rmtree_windows_safe` 硬化只有在呼叫端真的走過去才有意義，防止
-    未來有人「順手」改回裸 `shutil.rmtree()` 而沒人發現。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    dev_start TestVenvSelfHealCallSitesUseSafeRmtree WHY〉節。"""
 
     def test_ensure_venv_shape_routes_through_safe_rmtree(self):
         src = inspect.getsource(dev_start._ensure_venv_shape)
@@ -4830,16 +4545,8 @@ class TestVenvSelfHealCallSitesUseSafeRmtree(DevStartTestCase):
 
 
 class TestStaleScheduleTracks(unittest.TestCase):
-    """`tools/lib/ci_liveness.py`（R68 新增）的鑑別力鎖。
-
-    🔴 為何非有不可：R68 Scan-C／Scan-N 判定的最嚴重一筆（P1）是「兩支 *-nightly-full
-    自 2026-07-14 起 18 天零成功、而三道既有哨兵在結構上都偵測不到」——本模組就是補
-    那個盲區的東西。它落地時**零測試**（`grep` 全 `tools/tests/` 零命中），也就是說
-    「用來偵測哨兵已死的哨兵」自己沒有任何東西保證它還活著，正是它要消滅的那個形狀。
-
-    本類別以純函式雙向驗：陳舊必報（正向注入）、新鮮不報（還原）、無訊號不報
-    （查不到 ≠ 壞掉），並釘住「dormant（被註解掉的 cron）不得算進期望軌」。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    dev_start TestStaleScheduleTracks WHY〉節。"""
 
     # 🔴 R71：本類別 4 支既有鎖新增 `_latest_attempt` 的 mock（`return_value=None`
     # ＝「該軸無訊號」）。這**不是**放寬既有斷言——每一條原斷言逐字保留，加 mock 的
@@ -5171,14 +4878,8 @@ class TestStaleScheduleTracks(unittest.TestCase):
 
 
 class TestLivenessEventFilter(unittest.TestCase):
-    """R69（DEF-101-703）：`_latest_success_run` 的事件過濾面。
-
-    🔴 為何非有不可：R68 版只查 `--event schedule`，而「陳舊了怎麼辦」的唯一處置是
-    `gh workflow run <wf>.yml`——它產生的是 `event=workflow_dispatch` 的 run。兩集合
-    實證互斥 ⇒ **照著處置做也永遠解不開**，哨兵會永遠喊陳舊、最後被當成狼來了而被
-    忽略，正好複製它要消滅的那個病。本類別鎖住「補跑算數」這個語意，以及「查詢全滅
-    ≠ 通道已死」的無訊號紀律（否則離線就整排假紅）。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    dev_start TestLivenessEventFilter WHY〉節。"""
 
     @staticmethod
     def _run(stdout: str, rc: int = 0) -> subprocess.CompletedProcess:
@@ -5426,31 +5127,8 @@ def scan_ps_utf8_prelude(path: Path) -> tuple[int, list[tuple[int, str]], list[s
 
 
 class TestPsUtf8PreludeIsSingleSpelling(unittest.TestCase):
-    """PowerShell 輸出編碼前置全 repo 只准有**一種寫法**（R71 C-2）。
-
-    WHY（Rule 9 — 鎖的是意圖不是行為）：這條規則不是風格潔癖。前置本身是
-    DEF-101-350／DEF-101-760 的修復，「行內各抄一份」讓它變成 N 份可獨立漂移的
-    修復：R71 就抄出了第 4 份、寫法不同——逐字是
-
-        $OutputEncoding = [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false;
-
-    ——並在註解裡寫下一條**經實測證偽**的 BOM 理由。分歧本身還不致命，致命的是分歧
-    伴隨著一條沒人驗證過的理由——下一個人會照著那條理由再長出第 5 種。本鎖讓
-    「多一種寫法」在本機當場翻紅，理由與量測則集中在 `PS_UTF8_PRELUDE` 一處。
-
-    ⚠️ 上面那行**反例逐字寫在 docstring 裡是刻意的**：它同時是
-    `_narrative_node_ids()` 的活體覆蓋。docstring 不會被執行，講解一種寫法不等於
-    多一份複本；少了那層過濾，本鎖會對「解釋自己在防什麼」的文字翻紅（自噬），
-    而作者為了消紅只能把反例刪掉——鎖因此反過來消滅了它自己存在的理由。
-    R71 把同一層過濾擴到斷言訊息與 skip reason（WHY 見該函式），並為「必須逐字引述
-    生產碼拼法」的那一類加了具名豁免 `_PS_UTF8_OK_MARKER`（WHY 必填、stale 會紅）。
-
-    誠實劃界：本鎖鎖的是**不得分歧**，不是**必須改用 helper**。R71 射程只涵蓋
-    `test_dev_start.py`／`test_bootstrap_ps1.py` 兩個呼叫端，另外三處行內複本
-    （`test_dev_start_ps1_lastexitcode.py`、`test_windowsapps_guard_cross_consistency.py`、
-    `AISDLC_SDD/scripts/tests/test_install_post_commit_windowsapps_guard.py` ×2）
-    未收斂——但它們與 SSOT 常數**逐字相同**，故本鎖對它們是綠的，不是被豁免的。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    dev_start TestPsUtf8PreludeIsSingleSpelling WHY〉節。"""
 
     def _scan(self) -> tuple[int, int, dict[str, list[tuple[int, str]]], list[str]]:
         scanned = sites = 0
@@ -5593,16 +5271,8 @@ elif args:
 
 @unittest.skipIf(usable_bash_for_fixture() is None, "需要可用的 bash")
 class TestPickPythonGeMin(unittest.TestCase):
-    """R69 P2 迴歸鎖：`tools/dev_start.sh` 的直譯器候選鏈必須挑 >= 3.11。
-
-    為何這是缺陷而不是設定問題（macOS 真機重現）：Homebrew 的 `python@3.11` 是
-    keg-only，`brew install python@3.11` **不會**改寫 `python3`（macOS 的
-    `python3` 恆為系統 3.9.6），只放一支 `python3.11`。修復前 dev_start.sh 的
-    候選清單只有 `python3` / `python`，於是「照 ONBOARDING §1 逐字裝完 3.11」
-    之後仍撿到 3.9 → `tools/dev_start.py` 版本前置閘 rc=2 ⇒ ONBOARDING §2.1
-    宣稱的「全新機器可直接執行 dev_start」在 mac 上為假。R68（DEF-101-628）只
-    把 traceback 換成友善訊息，沒動選擇邏輯，缺陷本體原封不動。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    dev_start TestPickPythonGeMin WHY〉節。"""
 
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp())
@@ -5778,13 +5448,8 @@ class TestPickPythonGeMin(unittest.TestCase):
 
 
 class TestMinPythonVersionSsotSync(unittest.TestCase):
-    """版本下限只有一份權威（`dev_start.py::_MIN_PY`），三處字面值須同步。
-
-    為何需要：候選鏈的版本判斷寫在 shell/PowerShell 裡（挑直譯器時 Python 還
-    沒得跑，無法讀核心常數），天生是複製過去的第二/第三份字面值——沒有機械鎖
-    的話，下一次調高下限（3.11 → 3.12）時兩支殼會靜默停在舊值，退化成「殼挑了
-    一支核心不接受的直譯器」，使用者又看到 rc=2。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    dev_start TestMinPythonVersionSsotSync WHY〉節。"""
 
     def test_min_python_version_is_consistent_across_dev_start_ssots(self) -> None:
         core_mm = "{}.{}".format(*dev_start._MIN_PY)
@@ -5904,14 +5569,8 @@ _PASSTHROUGH_CMD = '@echo off\r\n"{real}" %*\r\n'
 
 @unittest.skipUnless(_ps_any_engine(), "需要 PowerShell 引擎（pwsh/powershell）")
 class TestGetPythonGeMinPowerShell(unittest.TestCase):
-    """Windows 側同構實作的**行為**鎖：`.ps1` 的候選鏈必須真的被執行過。
-
-    ADR-XPLAT-002 §3.2 的紀律：字面比對型 parity 不算機械釘選。
-
-    🔴 R71（DEF-101-755 結案）：本類原本在唯一真正出貨的平台上鑑別力等於零、
-    DEF-101-760 就是躲在那個 skip 後面出貨的（沿革原文＝Guard_Repin 證據檔 §D-16）。
-    現改為依 `os.name` 造合適形態的假直譯器，Windows 上真的執行（解鎖條件 (a)）。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    dev_start TestGetPythonGeMinPowerShell WHY〉節。"""
 
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp())
@@ -6157,14 +5816,8 @@ def _find_sub_min_interpreter() -> tuple[list[str] | None, tuple[int, ...] | Non
 
 
 class TestRealSubMinInterpreterPrelude(unittest.TestCase):
-    """第一道（有鑑別力的那道）：拿**真的** < `_MIN_PY` 直譯器 subprocess 實跑。
-
-    斷言三件事，缺一不可：
-      (a) 退出碼恰為版本閘定義的 2 —— 不是「非零就好」，1/70/-11 都代表走的是
-          崩潰路徑而非閘門路徑；
-      (b) stderr 含友善訊息與**逐字可執行**的補救指令；
-      (c) stderr **不含 `Traceback`** —— 這一條就是本輪缺陷的直接反面。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    dev_start TestRealSubMinInterpreterPrelude WHY〉節。"""
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -6228,14 +5881,8 @@ class TestRealSubMinInterpreterPrelude(unittest.TestCase):
 
 
 class TestPy39PreludeStaticScan(unittest.TestCase):
-    """第二道（恆跑、零環境依賴）：靜態掃描「下限版可載入」射程內的所有原始碼。
-
-    射程是**推導出來的**而不是寫死清單：從 `_PY39_ENTRYPOINTS` 出發，凡是被 import
-    的 `tools/*.py` 或 `tools/lib/*.py` 一律遞迴納入整支檔。這一點是本鎖的鑑別力
-    來源——今天 `tools/lib/ci_liveness.py` 自己就有 `from datetime import UTC`，它
-    現在**合法**純粹是因為 dev_start 在版本閘**之後**才 import 它；哪天有人把那行
-    上移到 prelude，射程會自動把 ci_liveness 整支吸進來並當場報紅。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    dev_start TestPy39PreludeStaticScan WHY〉節。"""
 
     def _prelude_source(self, path: Path) -> tuple[str, ast.Module]:
         """回傳 dev_start.py「版本閘（含）以前」的原始碼切片。"""
@@ -6505,12 +6152,8 @@ $raw = & python '{_PY_SSOT}' get-hooks-dir
 
 
 class TestNativeStdoutDecodingRoutingLock(unittest.TestCase):
-    """靜態備援（任何平台都會跑）：帶 UTF-8 釘選的入口不得被繞過。
-
-    誠實劃界：字面比對不是行為證明（ADR-XPLAT-002 §3.2）。本類別只擋「把包裝拆掉、
-    退回裸呼叫」這條最可能的回歸路，讓 macOS/Linux 開發者改壞這裡時也有訊號——真正
-    的行為證據在 TestGetDispatcherHooksDirUnderCp950。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    dev_start TestNativeStdoutDecodingRoutingLock WHY〉節。"""
 
     def test_shim_routes_every_python_call_through_invoke_commonpy(self) -> None:
         """四個子指令全部經 `Invoke-CommonPy`；裸呼叫只准存在於該函式內部那一處。"""
@@ -6855,18 +6498,8 @@ def _real_pwsh7() -> str | None:
     "TestResolveNativeExecutableNonWindowsBranch）",
 )
 class TestResolveNativeExecutableOnRealPwsh7(unittest.TestCase):
-    """🔴 `DEF-101-769` 殘留項的補驗：`Major >= 6` 分支以**真 pwsh 7 行程**跑一次。
-
-    WHY 這一支非補不可（帳本逐字指派 R74，解鎖條件於 R73 成立的沿革原文＝
-    Guard_Repin 證據檔 §D-15）。
-
-    🔴 誠實劃界（勿超譯）：真 pwsh 7 在 Windows 上 `$IsWindows` **恆為真**（自動變數是
-    唯讀常數，`Set-Variable -Force` 亦蓋不掉——同檔上方 harness 區段已實測記載）。
-    故本組能真機補驗的是「`Major >= 6` 且在 Windows」這一格：分支確實走得到、且
-    Windows 語意（PATHEXT 過濾）沒有因為版本判斷而被跳過。「`Major >= 6` 且非 Windows」
-    那一格在本平台結構性不可達，仍只有 harness 鎖 ＋ macos/ubuntu CI 兜底。
-    把這句寫進 docstring 而不是宣稱「已用真引擎全面補驗」，正是本輪主軸本身。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    dev_start TestResolveNativeExecutableOnRealPwsh7 WHY〉節。"""
 
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp())
@@ -6953,12 +6586,8 @@ class TestResolveNativeExecutableOnRealPwsh7(unittest.TestCase):
 
 
 class TestResolveNativeExecutableShortCircuitOrder(unittest.TestCase):
-    """順序鎖（任何平台都跑）：短路必須存在，且排在 PATHEXT 過濾**之前**。
-
-    誠實劃界：本類別讀的是原始碼，不是行為證明（ADR-XPLAT-002 §3.2）。它存在的理由
-    不是「行為鎖跑不到的平台要有備援」那種例行搭配，而是行為鎖對「短路被搬到過濾之後」
-    這種改法**實測全綠**（見本節檔頭）——兩道鎖的射程真的不重疊。
-    """
+    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    dev_start TestResolveNativeExecutableShortCircuitOrder WHY〉節。"""
 
     def test_production_short_circuit_is_present_and_ordered(self) -> None:
         problems = non_windows_short_circuit_problems(_production_resolve_body())

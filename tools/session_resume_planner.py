@@ -1165,7 +1165,7 @@ def _run_resume(args, state: dict, log: Path) -> int | None:
     route = choose_resume_route(args.probe_command, sid, transcript,
                                 str(state.get("plan_path") or ""))
     # 痕跡必記策略與原因：降級是靜默失效的高風險點，「走了哪條路」必須事後可稽核。
-    append_log(log, "route_chosen", strategy=route["strategy"], why=route["reason"]); state["route_strategy"] = route["strategy"]  # noqa: E501,E702 — v2.1.13 G3：REFUSE 需可辨（見 _resume_tick）
+    append_log(log, "route_chosen", strategy=route["strategy"], why=route["reason"]); state["route_strategy"] = route["strategy"]; state["handback_path"] = str(route.get("handback") or "")  # noqa: E501,E702 — v2.1.13 G3：REFUSE 需可辨（見 _resume_tick）；R115 修復 F1：settle_window() 讀 state["handback_path"] 判準③，此前恆未寫入 state ⇒ 讀空文本 round-label-ok
     if route["argv"] is None:
         print(f"❌ {route['reason']}", file=sys.stderr); return 1  # noqa: E702 — ⓿ 瘦身（G2 挪 LOC 額度）
     # v2.1.13 G1／A-PRE 增格（出處＝PRD_Amendment_R112_WakeChain.md §2 P-3）：spawn 前檢
@@ -1174,7 +1174,7 @@ def _run_resume(args, state: dict, log: Path) -> int | None:
     # 判準本體住 tools/lib/resume_route.py（planner 只接線）；通過面順帶 mkdir handback。
     if (bad := resume_route.preflight_problem()) is not None:
         append_log(log, "resume_authz_preflight_failed", strategy=route["strategy"], why=bad)
-        print(f"❌ A-PRE 拒 spawn：{bad}", file=sys.stderr); return 1  # noqa: E702
+        print(f"❌ A-PRE 拒 spawn：{bad}", file=sys.stderr); state["route_strategy"] = STRATEGY_REFUSE; return 1  # noqa: E501,E702 — R115 修復 F2：A-PRE 拒絕視同 REFUSE，供 :1322 三元式判 resume_failed（拒絕≠跑過） round-label-ok
     # 🔴 R80 P0 的第二層（兩層都補才算修好，缺任一層續跑那一跑都做不了事）。
     # · `cwd=_REPO_ROOT`：沒有它時 cwd 繼承自排程行程＝system32，而 Claude Code 用 cwd
     #   決定「本 session 允許的工作目錄」⇒ 續跑碰不到 repo 一個檔。**排程 Action 的
@@ -1200,7 +1200,7 @@ def _run_resume(args, state: dict, log: Path) -> int | None:
     # 整支行程消失，而呼叫端此前已經把狀態塊寫成 `"resumed"`、排程也刪了（謊稱成功、
     # 無法重試）。同 `probe_quota()` 既有的 except 寫法。
     try:
-        before = relay_machine.git_status_snapshot(_REPO_ROOT); proc = subprocess.run(route["argv"], capture_output=True, encoding="utf-8", errors="replace", timeout=3600, check=False, creationflags=guard.NO_WINDOW, cwd=str(_REPO_ROOT), env={**os.environ, UNATTENDED_ENV: "1"})  # noqa: E501,E702 — v2.1.13 G3：spawn 前快照（判準④ files_changed 差集）
+        before = relay_machine.git_status_snapshot(_REPO_ROOT); append_log(log, "relay_snapshot_before", **relay_machine.snapshot_log_fields(before)); proc = subprocess.run(route["argv"], capture_output=True, encoding="utf-8", errors="replace", timeout=3600, check=False, creationflags=guard.NO_WINDOW, cwd=str(_REPO_ROOT), env={**os.environ, UNATTENDED_ENV: "1"})  # noqa: E501,E702 — v2.1.13 G3：spawn 前快照（判準④ files_changed 差集）；R115 修復 F3：前快照落 resume log（V-c3 半格，不灌 porcelain 全文） round-label-ok
     except (OSError, subprocess.SubprocessError) as exc:
         append_log(log, "resume_spawn_failed", strategy=route["strategy"], error=str(exc))
         print(f"❌ 續跑呼叫本身失敗：{exc}", file=sys.stderr); return None  # noqa: E702
@@ -1311,7 +1311,7 @@ def _resume_tick(args) -> int:
         if verdict["kind"] != guard.LIMIT_TRANSIENT:
             state["attempts"] = int(state.get("attempts") or 0) + 1
             state["reset_source"] = "probe-verbatim"
-            state["reset_at"] = (decision["at"] - timedelta(seconds=RESET_SKEW_SECONDS)).isoformat()  # noqa: E501
+            relay_machine.apply_reset_at(state, (decision["at"] - timedelta(seconds=RESET_SKEW_SECONDS)).isoformat())  # noqa: E501 — R115 修復 F4：歸零邊界＝觀測到 reset_at 變更 round-label-ok
         rc, moment = _register_and_record(plan, state, decision["at"], RESUME_TICK)
         append_log(log, "rearmed", fire_at=decision["at"].isoformat(), credential=moment, attempts=state["attempts"])  # noqa: E501
         return rc
@@ -1458,7 +1458,7 @@ def _sentinel_tick(args) -> int:
         append_log(log, "sentinel_" + decision["action"], unregister_rc=rc, why=decision["reason"], **told)  # noqa: E501
         return 1 if loud else rc
     if decision["action"] == "arm_reset":
-        state.update(state="waiting", reset_source=decision["reset_source"], reset_at=decision["reset_at"].isoformat())  # noqa: E501
+        relay_machine.apply_reset_at(state, decision["reset_at"].isoformat()); state.update(state="waiting", reset_source=decision["reset_source"])  # noqa: E501 — R115 修復 F4：歸零邊界（同 _resume_tick rearm 分支） round-label-ok
     rc, moment = _register_and_record(plan, state, decision["at"], SENTINEL_TICK)
     append_log(log, "sentinel_rearmed", action=decision["action"],
                fire_at=decision["at"].isoformat(), credential=moment)

@@ -101,20 +101,33 @@ def handback_postcheck(route: dict, spawn_at: float, state: dict,
 
 def _posture_argv() -> list[str]:
     # 🔴 順序約束：這一段必須排在 prompt 之後、`--add-dir` 之**前**——
-    # `--add-dir <directories...>` 是變長參數，其後只准剩一個目錄值（姊妹鎖
+    # `--add-dir <directories...>` 是變長參數，其後只准剩目錄值（姊妹鎖
     # test_the_variadic_add_dir_does_not_swallow_the_prompt 釘住整條 argv 的尾端形狀）。
     return ["--permission-mode", "acceptEdits", "--settings", str(UNATTENDED_SETTINGS)]
 
 
+# v2.1.13 C5：settings 檔 `additionalDirectories` 的 `~` 展開 [需核對]（施工圖 §3(a)
+# 草案註記②）——harness 是否展開 `~/.autosdd/handback` 這個字面無取證，且 handback
+# 目錄的**實際**解析是動態的（`endurance_env.handback_dir_status()`：`AUTOSDD_HANDBACK_DIR`
+# 逃生口覆寫／唯讀時退回系統暫存），靜態字面與動態現解可能分歧。修法（SD 複審建議）：
+# spawn argv 組裝處**每次現解** `handback_dir()`，讓 L1② 不依賴 `~` 展開這個未經核對的
+# harness 行為；settings 檔本身保留原樣字面（repo 檔不可寫死機器絕對路徑）。
+# `--add-dir` 是變長參數，兩個目錄值放同一個旗標之後（而不是開第二個 `--add-dir`）——
+# 尾端仍是「一個旗標＋其後全部剩餘值」的形狀，姊妹鎖只需認得值的**個數**變成 2。
+def _add_dir_argv(task_dir: Path) -> list[str]:
+    return ["--add-dir", str(task_dir), str(handback_dir())]
+
+
 def resume_argv(claude: str, session_id: str, prompt: str, add_dir: Path) -> list[str]:
-    """SESSION_RESUME 的完整 argv（prompt 在變長旗標之前；尾端＝--add-dir＋唯一目錄值）。"""
+    """SESSION_RESUME 的完整 argv（prompt 在變長旗標之前；尾端＝--add-dir＋任務書目錄
+    ＋現解後的 handback 目錄，v2.1.13 C5）。"""
     return [claude, "-p", "-r", session_id, prompt, *_posture_argv(),
-            "--add-dir", str(add_dir)]
+            *_add_dir_argv(add_dir)]
 
 
 def fresh_argv(claude: str, prompt: str, add_dir: Path) -> list[str]:
     """FRESH_SESSION_WITH_STATE 的完整 argv（不帶 `-r`，其餘形狀與 RESUME 路對稱）。"""
-    return [claude, "-p", prompt, *_posture_argv(), "--add-dir", str(add_dir)]
+    return [claude, "-p", prompt, *_posture_argv(), *_add_dir_argv(add_dir)]
 
 
 def preflight_problem(settings: Path | None = None) -> str | None:

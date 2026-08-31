@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import ntpath  # R96／B-8：Windows 路徑語意的**真實實作**，注入用（不是手捏的假貨）
 import os
+import posixpath  # DEF-200-238：posix 路徑語意的真實實作，注入用（同上，不是手捏的假貨）
 import re
 import shutil
 import subprocess
@@ -2071,6 +2072,10 @@ class TestGovernanceFilesAreReadOnlyWhenUnattended(unittest.TestCase):
         "tools/lib/schedule_backend.py",
         "tools/lib/quota_messages.py", "tools/lib/quota_escalation.py",
         "tools/lib/platform_utils.py", "tools/session_resume_planner.py",
+        # R115 新增二檔（PRD_Amendment_R113_WakeChain_LastMile.md §3(a) L3）：  round-label-ok
+        # 見 `test_the_r115_l3_additions_are_protected_when_unattended` 的專屬紅綠自證。
+        ".claude/settings.unattended.json",
+        "tools/tests/test_adr_xplat001_c1c2_lock.py",
     )
     #: 誤擋是守衛被整個關掉的路徑——放行面與擋下面同等重要。
     NOT_PROTECTED = (
@@ -2189,6 +2194,94 @@ class TestGovernanceFilesAreReadOnlyWhenUnattended(unittest.TestCase):
         with mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(_REPO_ROOT)}):
             self.assertEqual(G.govwrite_hit({"file_path": sneaky}),
                              ".claude/settings.json")
+
+    def test_the_r115_l3_additions_are_protected_when_unattended(self) -> None:
+        """R115／PRD_Amendment_R113_WakeChain_LastMile.md §3(a) L3  round-label-ok
+        （`_GOV_EXACT` 新增二檔：無頭姿態 settings 載入面／護欄層淨額棘輪判準本身）——
+        改任一個都能直接改變無人值守下的權限姿態或守衛自身行為，理應與既有保護面同判。
+        專屬測試（不只靠 `PROTECTED` 元組裡的通用迴圈）是刻意的：紅綠自證要能單獨
+        對這兩個新成員跑，不必牽動整個既有清單。
+        """
+        for rel in (".claude/settings.unattended.json",
+                    "tools/tests/test_adr_xplat001_c1c2_lock.py"):
+            with self.subTest(rel=rel):
+                proc = run_hook(self._payload(rel), env=self._env(**{G.UNATTENDED_ENV: "1"}))
+                self.assertEqual(proc.returncode, 2, proc.stderr)
+                self.assertIn("唯讀", proc.stderr, "訊息沒說這是唯讀保護")
+
+    # ══════════════════════════════════════════════════════════════════════
+    # DEF-200-238：govwrite 對「尚不存在」保護面目標的 Windows 大小寫繞過
+    # ══════════════════════════════════════════════════════════════════════
+    def test_fold_gov_path_lowers_only_on_windows_and_is_identity_on_posix(self) -> None:
+        """`_fold_gov_path()` 平台契約單測：用
+        `mock.patch.object(os, "path", ntpath／posixpath)` 整包注入 Windows／posix
+        語意（同 `tools/lib/worktree_paths.py` 模組頭的既有論證），不依賴實際跑測試
+        的 host OS，兩個方向都能在同一台機器上驗到——這是本鎖「posix 不得加寬」
+        這條要求的核心證據：`posixpath.normcase` 是逐位元組 identity。
+        """
+        with mock.patch.object(G.os, "path", ntpath):
+            self.assertEqual(G._fold_gov_path(".AUTOCLAUDE/state.json"),
+                              ".autoclaude/state.json")
+            self.assertEqual(G._fold_gov_path(".claude/hooks/NEW_GUARD.PY"),
+                              ".claude/hooks/new_guard.py")
+        with mock.patch.object(G.os, "path", posixpath):
+            self.assertEqual(G._fold_gov_path(".AUTOCLAUDE/state.json"),
+                              ".AUTOCLAUDE/state.json")
+            self.assertEqual(G._fold_gov_path(".claude/hooks/NEW_GUARD.PY"),
+                              ".claude/hooks/NEW_GUARD.PY")
+
+    def test_the_two_r114_bypass_shapes_are_blocked_on_windows(self) -> None:
+        """紅綠自證：對**尚不存在**的保護面目標，Windows `realpath` 無檔可還原
+        大小寫 ⇒ `.AUTOCLAUDE/state.json`（目錄前綴比對失手）與
+        `.claude/hooks/NEW_GUARD.PY`（`endswith(".py")` 大小寫敏感）兩形態實測繞過
+        （逐字取證＝docs/06_quality/CrossPlatform_R114_WakeChain_Review.md §4）。
+        摺大小寫後 Windows 上應轉為擋下；posix 上 `normcase` 是 no-op，這兩個大寫
+        變體字面上本來就是**不同**檔名（posix 大小寫敏感）——維持不擋是 posix 應有
+        的行為，不是本鎖要收斂的範圍，不得因本次修法而改變。
+        """
+        expect_blocked = sys.platform == "win32"
+        for rel in (".AUTOCLAUDE/state.json", ".claude/hooks/NEW_GUARD.PY"):
+            with self.subTest(rel=rel):
+                proc = run_hook(self._payload(rel), env=self._env(**{G.UNATTENDED_ENV: "1"}))
+                self.assertEqual(proc.returncode, 2 if expect_blocked else 0, proc.stderr)
+
+    def test_existing_file_case_variants_still_hit(self) -> None:
+        """既存檔的大小寫變體必須全數命中（DEF-200-238 立案時已確認此面成立，不得
+        因本次修法退化）——三個探針原始案例（逐字取證見
+        docs/06_quality/CrossPlatform_R114_WakeChain_Review.md §3.2）：
+        `.ENV`／`Tools/Lib/Quota_Gate.py`／`.claude/SETTINGS.JSON`。這個面只在
+        Windows 上有意義：NTFS 大小寫不敏感，`realpath` 對已存在的檔會問磁碟還原
+        正確大小寫；posix 上大小寫敏感，這些變體字面上是不同檔名，不受本次修法
+        影響，維持不擋。
+        """
+        expect_blocked = sys.platform == "win32"
+        for rel in (".ENV", "Tools/Lib/Quota_Gate.py", ".claude/SETTINGS.JSON"):
+            with self.subTest(rel=rel):
+                proc = run_hook(self._payload(rel), env=self._env(**{G.UNATTENDED_ENV: "1"}))
+                self.assertEqual(proc.returncode, 2 if expect_blocked else 0, proc.stderr)
+
+    def test_case_folding_does_not_widen_the_protected_set(self) -> None:
+        """摺大小寫不得把「原本就不受保護」的檔案，因為換個大小寫寫法就變成受保護——
+        這裡刻意選一個跟保護面字面**不同名**（不是同名不同大小寫）的檔案，任何大小寫
+        寫法在任何平台上都不該命中。"""
+        for rel in ("TOOLS/LIB/GIT_PATHS.PY", "tools/lib/git_paths.py",
+                    "Tools/Lib/Git_Paths.py"):
+            with self.subTest(rel=rel):
+                proc = run_hook(self._payload(rel), env=self._env(**{G.UNATTENDED_ENV: "1"}))
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+
+    def test_the_fold_is_load_bearing_for_the_two_bypass_shapes(self) -> None:
+        """反 vacuity：把 `_fold_gov_path` 換成 identity（＝修法前的等效狀態）後，
+        `govwrite_hit()` 對這兩個繞過形態必須變回放行——證明擋下真的是摺大小寫在
+        承重，不是巧合命中其他判準（在 posix 上這個斷言本來就恆成立，因為 posix
+        本來就不摺——不影響本測試作為 Windows 承重證據的有效性）。
+        """
+        with mock.patch.object(G, "_fold_gov_path", lambda rel: rel), \
+                mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(_REPO_ROOT)}):
+            self.assertIsNone(G.govwrite_hit({"file_path": ".AUTOCLAUDE/state.json"}),
+                               "拿掉摺疊後這個形態應該變回放行——否則摺疊沒有承重")
+            self.assertIsNone(G.govwrite_hit({"file_path": ".claude/hooks/NEW_GUARD.PY"}),
+                               "拿掉摺疊後這個形態應該變回放行——否則摺疊沒有承重")
 
 
 if __name__ == "__main__":  # pragma: no cover

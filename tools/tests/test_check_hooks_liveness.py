@@ -918,7 +918,7 @@ class TestLintPowerShellHookBehaviour(unittest.TestCase):
         ("純管線、沒讀 rc", "Get-ChildItem | Select-Object Name"),
         ("純管線用別名、沒讀 rc", "Get-ChildItem | select Name"),
         ("Find-GitBash SSOT 形態",
-         ". '/repo/tools/lib/Find-GitBash.ps1'; & (Find-GitBash) -n 'a.sh'"),
+         ". '/repo/tools/lib/Find-GitBash.ps1'; & (Find-GitBash) 'a.sh'"),
         ("rc 在管線**之前**就展開了（QA-01：安全卻被硬擋）",
          '"rc=$LASTEXITCODE" | Out-File a.txt'),
         ("rc 讀在前、管線在後一句",
@@ -1684,7 +1684,7 @@ _PARITY_GAP_RANGE = range(5)
 _PARITY_CLEAN = (
     "Push-Location /repo/a; & py a.py; $LASTEXITCODE; Pop-Location",
     "Get-ChildItem",
-    ". /repo/tools/lib/Find-GitBash.ps1; & (Find-GitBash) -n /repo/a.sh",
+    ". /repo/tools/lib/Find-GitBash.ps1; & (Find-GitBash) /repo/a.sh",
     "git log --oneline -3",
 )
 

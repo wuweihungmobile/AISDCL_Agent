@@ -44,13 +44,13 @@
 
 | DEF-ID | 具名阻塞源 | 阻塞起始日 | 解鎖條件（可機械查） | 最近複查日 |
 |---|---|---|---|---|
-| DEF-101-018 | 結構性長債-ruff存量分批清 | 2026-08-30 | `.venv/bin/ruff check . 2>&1 \| tail -1` 回「Found 0 errors.」或殘量 shrink-only 棘輪進閘（掌舵者 2026-08-29 裁維持逐筆清，未來輪照撥額度批量清） | 2026-08-30 |
-| DEF-101-398 | 結構性長債-dev_start拆分 | 2026-08-30 | `python AutoClaude/tools/check_loc_budget.py --json` 之 dev_start.py loc<1952 且 tools/lib/bootstrap_lock.py 與 tools/lib/nightly_heartbeat.py 存在 | 2026-08-30 |
-| DEF-101-701 | 結構性長債-run_root_unittests行數死結 | 2026-08-30 | 同上指令之 run_root_unittests.py headroom>0 且 MIN_TESTS 重釘路徑存在指紋一致性斷言 | 2026-08-30 |
-| DEF-101-702 | 結構性長債-R68稽核波 | 2026-08-30 | CrossPlatform_R68_Scan_Findings.md「狀態@R69」欄 open/partial 計數＝0（2026-08-30 現值 28） | 2026-08-30 |
-| DEF-101-886 | 結構性長債-工作樹序列化待裁決 | 2026-08-30 | 根 CLAUDE.md 或 ADR 出現具名共用工作樹序列化條款，且 tools/tests/ 存在對應規則鎖 | 2026-08-30 |
-| DEF-101-960 | 結構性長債-skip剖面需Windows實機 | 2026-08-30 | docs/06_quality/skip_id_ledger.json 出現 nightly(solo win32) 與 CI(ubuntu) 剖面鍵 | 2026-08-30 |
-| DEF-101-980 | 結構性長債-ADR-XPLAT-005待裁決 | 2026-08-30 | docs/04_planning/ADR/ADR-XPLAT-005-quota-aware-throttling-and-fanout-resume.md 檔頭狀態行不再是 Proposed | 2026-08-30 |
+| DEF-101-018 | 結構性長債-ruff存量分批清 | 2026-08-30 | `.venv/bin/ruff check . 2>&1 \| tail -1` 回「Found 0 errors.」或殘量 shrink-only 棘輪進閘（掌舵者 2026-08-29 裁維持逐筆清，未來輪照撥額度批量清） | 2026-09-01 |
+| DEF-101-398 | 結構性長債-dev_start拆分 | 2026-08-30 | `python AutoClaude/tools/check_loc_budget.py --json` 之 dev_start.py loc<1952 且 tools/lib/bootstrap_lock.py 與 tools/lib/nightly_heartbeat.py 存在 | 2026-09-01 |
+| DEF-101-701 | 結構性長債-run_root_unittests行數死結 | 2026-08-30 | 同上指令之 run_root_unittests.py headroom>0 且 MIN_TESTS 重釘路徑存在指紋一致性斷言（後半 2026-09-01 複查已達成：`run_root_unittests.py` 之 `min_tests_note_stale_tokens()` 接 fail-fast；前半 headroom 現值 0 未達成，AND 整體未解鎖） | 2026-09-01 |
+| DEF-101-702 | 結構性長債-R68稽核波 | 2026-08-30 | CrossPlatform_R68_Scan_Findings.md「狀態@R69」欄 open/partial 計數＝0（2026-08-30 現值 28；2026-09-01 複查仍 28） | 2026-09-01 |
+| DEF-101-886 | 結構性長債-工作樹序列化待裁決 | 2026-08-30 | （2026-09-01 條件改寫：原條件「出現具名序列化條款」已無可達成路徑——ADR-XPLAT-006 §7 已明文否決單寫者序列化、§8 明載 last-writer-wins 仍在）改為：掌舵者對 Paydown Playbook :346 三形態（強制 worktree／收輪鎖／檢查表）之一具名裁決，落款後同一變更內於 tools/tests/ 建對應規則鎖；若裁決「維持現狀不機械化」則本列 closed-by-decision 移出 | 2026-09-01 |
+| DEF-101-960 | 結構性長債-skip剖面需Windows實機 | 2026-08-30 | docs/06_quality/skip_id_ledger.json 出現 nightly(solo win32) 與 CI(ubuntu) 剖面鍵（2026-09-01 複查：仍僅 darwin/linux/win32 三鍵） | 2026-09-01 |
+| DEF-101-980 | 結構性長債-ADR-XPLAT-005待裁決 | 2026-08-30 | docs/04_planning/ADR/ADR-XPLAT-005-quota-aware-throttling-and-fanout-resume.md 檔頭狀態行不再是 Proposed（2026-09-01 複查：仍 Proposed（R81）） | 2026-09-01 |
 
 ## 登記備注
 

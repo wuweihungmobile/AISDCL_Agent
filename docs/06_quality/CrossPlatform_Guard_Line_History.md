@@ -1426,3 +1426,1293 @@ payload 讀取接上共用層 `tools/lib/platform_utils.py`（R81／SUB-S1-04 �
 水位與阻斷決策。R82（Q2-01）刪掉了此前替再匯出符號背書的 15 行 tuple 常數——它零
 消費者（全 repo 只命中定義那一行），真正在做事的只有 lint 那一半，而那件事 import
 行的 F401 抑制一個字就說得完。
+
+---
+
+**R115 追加**（收斂棒：三個修復棒＋治理批累積的護欄層行數棘輪一次性收束，兌現
+款(11)「必須出現一次淨額 ≤ 0」與款(12) 到期義務——見
+`tools/tests/test_adr_xplat001_c1c2_lock.py` 的 `_GUARD_LINES_REPIN_LOG` 該輪列。
+以下三節把 `test_context_budget_guard.py`／`test_dev_start.py`／
+`test_doc_loc_baseline_freshness_r60.py` 三檔內、docstring 長度 ≥6 行的
+**類級**歷史論證原文一字不漏搬遷至此，程式碼內原地只留一行指標
+`"""WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 <label> <ClassName> WHY〉節。"""`；
+只搬散文，斷言／判準常數／測試邏輯一個字未動）：
+
+## test_context_budget_guard.py 類級 docstring 沿革搬遷（R115）
+
+### R115 cbg SyntheticUsageBlindnessTest WHY
+
+🔴 R79 P1：水位計在**額度耗盡的那一刻**讀成 0%，於是守衛整支靜默。
+
+    為什麼這一條是 P1 而不是精度問題：90% 那條路正是負責寫「可重啟點任務書」的
+    （`write_resume_plan`）。最需要任務書的那一刻，恰好是它結構上不會被產生的那一刻。
+    成因是「量不到 ≠ 量到零」在上游又犯一次——合成記錄的 0 不是用量，是佔位。
+
+### R115 cbg ResetArithmeticTest WHY
+
+`resets 9am` **不帶日期也不帶年**，所以「下一個尚未發生的該時刻」是唯一正確規則。
+
+    天真解成「今天的 9am」在下午跑會得到一個已經過去的時刻 ⇒ 觸發時刻算成負值 ⇒
+    立刻探測、立刻再撞，把剛回來的額度再吃光。實測值裡已有 `11pm` 與 `3:50am`，
+    跨午夜這條路徑真的會走到。
+
+### R115 cbg ProbeOpennessIsAPositiveVerdictTest WHY
+
+R100 止血 B：`probe_quota()` 的 **`is_open` 計算面**——此前無人覆蓋的那一行。
+
+    立案：`is_open = rc == 0 and kind == guard.LIMIT_UNKNOWN`（改前逐字）讓
+    `LIMIT_UNKNOWN` 同時承載兩個相反語意。既有測試全部**直接注入** `open`
+    （`TickDecisionTest` 實測 `Ran 19 tests / OK`），於是那一行的計算面結構上沒有讀者
+    ⇒ 措辭漂移＋rc 恰為 0 這個組合永遠不會被任何一支測試看到。
+
+### R115 cbg _StatefulFakeSchedulerBackend WHY
+
+DEF-200-239／V-d1(正面) 共用注入面：一個會**記住狀態**的假排程器後端。
+
+    立案：`_sentinel_tick()` 每次都經 `patrol_housekeeping()` → `_heal_armed_drift()`
+    摸到 `schedule_backend.select()`（`list_jobs()`／條件式 `arm()`），`SentinelDecisionTest.
+    _tick()` 此前只餵了 `register_endurance`／`_schtasks_remove` 兩個 planner 層級的假貨，
+    這一條摸到的仍是**真的**後端——在 Windows 上真呼叫 `Get-ScheduledTask`／
+    `schtasks /create`，於真機種下自續的 `T-r95` 排程工作（帳本 DEF-200-239：測試隔離
+    洩漏，每次全套重種）。真後端的 `.list_jobs(prefix)` 是**前綴過濾**查詢，而洩漏測試
+    的 `task_name` 字面（`"T-r95"`）從不符合 `AutoSDD_Sentinel_` 前綴 ⇒ 真查詢結構上
+    永遠回傳「查無此工作」⇒ `armed_but_missing` 永遠判真 ⇒ 每次都無條件重新 `.arm()`
+    ——這正是「每次全套重種」的成因，不是機率性的。
+
+    本類把 `.arm()`／`.list_jobs()` 兩個唯一會真的碰觸排程器的動作收進記憶體集合，
+    `V-d1(正面)`（`.arm()` 之後 `.list_jobs()` 現查得到剛剛那個工作）與本檔 `_tick()`
+    的預設注入（不讓 `_heal_armed_drift()` 摸到真貨）共用同一份最小狀態機語意，而不是
+    兩份各自的啞巴 spy——啞巴 spy 只證「被呼叫過」，證不了「呼叫之後查得到」。
+
+### R115 cbg ResumeSpawnCarriesTheUnattendedSignalTest WHY
+
+續跑那一跑的 spawn 必須帶 `AUTOSDD_UNATTENDED=1`（掌舵者開 Auto Pilot 的條件）。
+
+    走 `subprocess.run` 的攔截而不是真的 spawn 一個 `claude`：這裡要證的是
+    **注入有沒有發生**，那是本檔這一端的責任；「訊號送到之後 hook 會不會擋」是另一端
+    的責任，由那一端自己的注入證明負責。兩端各證各的，中間靠共同的字面對上。
+
+### R115 cbg ResumeRouteDegradesOneWayTest WHY
+
+R95／Pkg-D：喚醒降級選路（PRD §4.5.4／§8-10）的方向鎖。
+
+    立案缺口敘事原文＝Resume 證據檔 §1（R95 修復包批補搬）。三判準：①可用**必**
+    SESSION_RESUME（降級只准 RESUME→FRESH 單向）；②FRESH 不得帶 `-r`、prompt 指向
+    磁碟任務書；③任務書缺席＝REFUSE、argv=None（不得靜默派空 prompt，R59 同形）。
+
+### R115 cbg UnattendedPermissionPostureTest WHY
+
+v2.1.13 G1（PRD_Amendment_R113_WakeChain_LastMile.md §3(a)）：無頭窗口權限姿態。
+
+    立案＝2026-08-30 實戰最後一哩四缺口之 G1：哨兵四段全通，reset 後的無頭續跑窗口
+    卻被無人核准權限牆擋住（Write 新檔全擋，含 scratchpad 任務書）⇒ 收不了尾。
+    機械根因＝spawn argv 兩路皆無 `--permission-mode`。修法三件套，各有一格看守：
+      · V-a1：兩路 argv 同補 `--permission-mode acceptEdits --settings <姿態檔>`；
+      · V-a2：A-PRE 預檢（姿態檔存在 ∧ JSON 可解析）缺一拒 spawn＋落痕跡＋出聲；
+      · V-a4／V-a3 靜態半格：姿態檔本體的 allow（L2×雙載具）與 deny（L3×三寫入形態）。
+    hook 那一半（合成無頭回合 exit 2）由 test_block_destructive_git_r83.py 原樣看守。
+
+### R115 cbg HandbackAddDirIsResolvedDynamicallyTest WHY
+
+v2.1.13 C5：settings 檔 `additionalDirectories` 的 `~` 展開 [需核對]（施工圖
+    §3(a) 草案註記②）與 handback 目錄**動態**解析（`AUTOSDD_HANDBACK_DIR` 逃生口／
+    唯讀退回系統暫存）之間的分歧——靜態字面是否被 harness 展開無取證，而實際居所
+    每次都可能不同。修法：spawn argv 組裝處每次現解 `handback_dir()`，兩路 argv
+    都要帶著現解後的絕對路徑，且逃生口覆寫時 argv 要跟著動（不是套用 settings 檔
+    裡那個沒被驗證過的 `~` 字面）。
+
+### R115 cbg HandbackVisibilityTest WHY
+
+v2.1.13 G2 批 (b)（施工圖 §3(b) 判準 1/2/4）：交接可見性——planner 側後檢。
+
+    V-b1：合規續跑（模擬 spawn 寫出四節齊備的交接檔）⇒ 檔在、四 marker 齊、`resumed`
+    事件 `handback_written=true`＋`handback_path` 與 prompt 注入的是同一支檔。
+    V-b2：模型沒寫 handback 的收窗 ⇒ resume log 逐字 `handback_missing`＋alert 痕跡
+    （loud；note_written 進事件欄）。另補三值鑑別的 stale 半格（舊檔不得冒充本窗交接）。
+    突變驗紅（斷開 `_run_resume` 的後檢接線 ⇒ V-b2 必紅）由交件驗證手動執行——
+    突變不得長駐工作樹（git checkout 還原突變是判過的事故形態，以 Edit 改回）。
+
+### R115 cbg HandbackSessionStartAnnounceTest WHY
+
+v2.1.13 G2 批 (b)（施工圖 §3(b) 判準 5）：SessionStart 偵測未讀 handback——V-b3。
+
+    出聲載體＝additionalContext（emit 注入；hook 側只接一行線，見 `main()` SessionStart
+    分支）；已讀憑證＝`.ack` sidecar：出聲且被收下 ⇒ 落 `.ack` ⇒ 重跑轉安靜。
+    emit 沒收下（回 False）⇒ 不落 `.ack`——寧可重複出聲，不可靜默吞掉交接。
+
+### R115 cbg RunResumeSurvivesASpawnExceptionTest WHY
+
+🔴 R97：`subprocess.run` 本身炸掉（`TimeoutExpired`／`FileNotFoundError`）不得 round-label-ok
+    一路往上炸穿——本函式被無 console 的 pythonw 排程行程呼叫（`sys.stderr is None`），
+    未捕捉例外會讓整支行程無聲消失，而呼叫端（`_resume_tick`）此前已經把狀態塊寫成
+    `"resumed"`（見 `ResumeTickWritesStateOnlyAfterConfirmingTest`）。同 `probe_quota()`
+    既有的 except 寫法（`OSError`／`SubprocessError`）。
+
+### R115 cbg RelaySettleWindowTest WHY
+
+`settle_window()` 端到端：RELAY_NEXT 重排一窗；四個停止次態各自的事件與重掛哨兵。
+
+    🔴 全部呼叫走 `_resume_tick()`（而不是直接呼叫 `settle_window()`）：這樣才驗到
+    `_run_resume()` 之後的接線也真的通（REFUSE／rc=None 的辨識見另一個測試類）。
+    真排程器一律 mock 掉（`setUpModule` 的既有紀律：本模組不准碰真的排程器）。
+
+### R115 cbg RearmAfterStopFailureClearsTheArmedStampTest WHY
+
+修法波 C6(i)：`_rearm_after_stop()` 重掛失敗分支（rc≠0）此前零測試注入。
+
+    施工圖 §3(d) 判準1「重掛失敗 ⇒ loud＋清 arm stamp（供下次 SessionStart 重新
+    評估）」的程式碼**已經**落地（`relay_machine._rearm_after_stop` 的 `if rc != 0:`
+    分支），但既有 `RelaySettleWindowTest`／`RelayFailurePathsTest` 的 `_arm_sentinel`
+    mock 全部寫死回 0——這條分支此前完全沒有被任何測試踩過（改壞它也不會有任何測試
+    轉紅）。本測試直接呼叫 `relay_machine.settle_window()`（略過完整 `_resume_tick`
+    管線，聚焦在收窗尾段本身），鎖三件事：①`sentinel_lifecycle_arm.clear_arm_latch`
+    被呼叫且帶對的 session_id；②`escalation.alert(..., loud=True, ...)` 被呼叫；
+    ③`relay_rearm_failed` 事件落痕跡，`rc` 欄位＝重掛失敗那個 rc。
+
+### R115 cbg RearmAfterStopSuccessLeavesAVerifiableArmedJobTest WHY
+
+V-d1(正面)：rearm 成功路徑補正面斷言——armed stamp 存在 ∧ 排程器現查含該工作。
+
+    🔴 `--pace` liveness 警語空字串**不得作成功憑證**：`liveness_problem()` 對「這個
+    session 沒宣稱過武裝」與「宣稱過且排程器現查一致」兩種情況都回空字串——重掛失敗
+    （見上一條測試）清掉 stamp 之後，跟成功路徑一樣有可能讓警語看起來一片安靜。
+    本測試因此不看警語，直接查兩個正面事實：①armed stamp marker 檔仍在（成功路徑
+    不動它，只有失敗路徑才清）；②假排程器後端（與 DEF-200-239 共用注入面
+    `_StatefulFakeSchedulerBackend`）`list_jobs()` 現查得到剛剛這支工作。
+
+### R115 cbg RunResumeWritesHandbackPathIntoStateTest WHY
+
+R115 修復 F1：`state["handback_path"]` 在 production 路徑此前從未寫入—— round-label-ok
+    `_run_resume()` 只把 handback 路徑寫進 route dict（`route["handback"]`）與
+    `resumed` log 事件的欄位，state 上這個鍵恆缺席 ⇒ `relay_machine.resolve()` 讀
+    `state.get("handback_path")` 恆讀到空字串，判準③（`plan_has_remaining_work`）
+    在 `verdict == "written"` 時因此恆讀空文本、恆判「無未完項」⇒ RELAY_NEXT 在
+    生產路徑上結構上不可達、DONE 是一則假宣稱。
+
+    本測試刻意**不 mock `_run_resume()`**——只 mock 邊界（`subprocess.run`），讓真正
+    的 `_run_resume()` 跑一遍；判準④用一個真實的 repo 內 scratch 檔（清完即刪）造出
+    非零 `files_changed`，讓①②③④合成全真情境，端到端驗到 RELAY_NEXT。
+
+### R115 cbg APreFailureIsNeverWrittenAsResumedTest WHY
+
+R115 修復 F2：A-PRE 預檢拒 spawn（unattended settings 缺席／壞掉）此前只擋下了 round-label-ok
+    spawn 本身，卻沒有把拒絕訊號寫回 state——`_resume_tick`（`state["state"] =
+    "resume_failed" if (rc is None or route_strategy == STRATEGY_REFUSE) else
+    "resumed"`）只認得到兩種失敗訊號，而 A-PRE 拒絕發生在**選路成功之後**
+    （`route_strategy` 已經是 RESUME／FRESH，不是 REFUSE），於是 rc=1 這個明確的
+    拒絕被判成 `"resumed"`——「拒絕≠跑過」同語意家族在新分支復發。
+
+    刻意不 mock `_run_resume()` 或 `choose_resume_route()`：要證的正是**選路成功、
+    A-PRE 才擋下**這個特定次序，跟 V-d4（選路本身就 REFUSE）是不同的失敗形狀。
+
+### R115 cbg RelayCountsResetOnResetAtChangeTest WHY
+
+R115 修復 F4：施工圖 §3(c)「計數持久化」——「歸零邊界＝觀測到 `reset_at` 變更」 round-label-ok
+    此前只是散文：`_resume_tick` rearm 分支與 `_sentinel_tick` arm_reset 分支各自
+    就地改寫 `reset_at`，卻從未歸零 `relay_seq`／`relay_no_progress_streak`；鐵律四
+    要求的「量化宣稱要有 tool_result 撐」在此對應到「這句規格要有程式碼撐」，而歸零
+    邊界本身此前零測試。
+
+### R115 cbg NoWindowBehaviourTest WHY
+
+🔴 **行為**鎖，不是靜態掃描：真的從無 console 父行程 spawn，看子行程有沒有 console。
+
+    為何靜態掃描不夠：`ConsoleFreeSpawnTest` 只證「作者寫了那個旗標」，證不到「那個旗標
+    真的有效」。而 R80 的缺陷本體恰恰是**旗標有寫但被抵銷掉**（`DETACHED|CNW`）——那個
+    形態對任何「有沒有寫」的判準都是綠的。所以這一層量的是結果，不是意圖。
+
+### R115 cbg UnhandledLimitDetectionTest WHY
+
+🔴 R80 P0：哨兵整晚失明那一格的回歸鎖（事故見 `unhandled_limit_event` 上方 WHY；
+    R80 驗屍敘事原文＝Resume 證據檔 §L-3.30）。被守的性質三條，各對應一個實際發生過的失效：
+      ① 「已處理」必須是**證據**（事後真的有成功 API 回應），不是推論；
+      ② 偵測面必須含 subagent（扇出模式下撞線主要打在那裡）；
+      ③ 必須看**所有**未處理事件，不是只看最後一筆。
+
+### R115 cbg FanoutCasualtyRecordTest WHY
+
+缺口 B：可續跑的工作單位從 session **降到 workflow run**。
+
+    R80 四次撞線主迴圈一次都沒死，死的是 subagent（42／55／1 個）⇒ 續跑那一段永遠不會
+    觸發、也**不該**觸發（session 還活著時再起一個 headless 回合只會互相干擾）。真正
+    需要被記下來的是「哪一個 run、哪幾個 agent 被打死」，而那件事讀檔就知道、成本為零。
+
+### R115 cbg ControllerIdlePrepareWatchTest WHY
+
+PRD §4.5.7（v2.1.6，R-4.5.7-1／-2／-3）：主控閒置盲區與預防性水位提醒。
+
+    B1／B2 兩支驗收判準（PRD 該節表格）：B1＝閒置秒數只讀**主**逐字稿；B2＝閒置＋
+    prepare 帶才提醒、且不寫任務書骨架（紅綠自證：分支開關本身）。B3（走桌面通道、
+    不依賴 hook）見下面 `PatrolNoticeIsDesktopNotHookTest` 的整合測試。
+
+### R115 cbg ArmedDriftSelfHealTest WHY
+
+PRD §4.5.8（v2.1.7 新增）：哨兵武裝狀態漂移自癒。
+
+    立案：`sentinel_lifecycle.liveness_line()` 此前只在人手動跑 `--pace`／`--check`
+    時出聲、且只印警語不動作。本節把同一個判準（`armed_but_missing`）掛進巡邏 tick，
+    偵測到漂移就地自動重新武裝，不需要人手動重跑 `--arm-sentinel`。
+
+### R115 cbg SchedulerBackendNeverTouchesRealSchtasksTest WHY
+
+回歸鎖（帳本 DEF-200-239）：`SentinelDecisionTest._tick()` 未注入 `scheduler=`
+    時，`_heal_armed_drift()` 摸到的 `schedule_backend.select()` 此前落到**真的**後端，
+    在真機（Windows）上真呼叫 `Get-ScheduledTask`／`schtasks /create`，種下自續的
+    `T-r95` 排程工作、測試結束不清理、每次全套重種。修法見 `_tick()` 與
+    `_StatefulFakeSchedulerBackend`（本檔上方）——本類只鎖「不再發生」這件事。
+
+    兩支測試分工：①CI 安全、平台中性的核心回歸鎖（patch 具體後端類，一旦被摸到就
+    當場拋例外，不依賴任何一台機器現有的排程器狀態）；②Windows 正面現查（CLAUDE.md
+    〈反事後諸葛取證規則〉：查無 `T-r95` 才是修好的直接證據，不是「沒有例外」這種
+    間接證據）——非 Windows 或 schtasks 不可達時安全跳過，不假裝驗證了做不到驗證的
+    平台。
+
+### R115 cbg QuotaCacheContractHomeTest WHY
+
+🔴 R81 收斂（Architect-B2）：快取的檔案契約（檔名＋schema）只能有**一個家**。
+
+    立案的形狀不是「兩處現在不一致」，而是**那個綁定從來沒有被測過**：meter 是唯一寫者、
+    hook 是唯一讀者，而所有既有快取測試都傳明確 `path` 給 `read_quota()` ⇒ 改掉 meter 的
+    `CACHE_NAME`，meter 寫新檔、hook 讀不到 → `pct=None` → **永遠不節流**，而全套照綠。
+
+### R115 cbg QuotaUnmeasurableFanoutTest WHY
+
+🔴 R81 收斂（Architect-B1）：「量不到」時**不得**對任意規模的扇出全數放行。
+    複審探針實測缺口原文＝Resume 證據檔 §L-3.15。
+
+    本類的四條刻意涵蓋**兩個方向**：量得到就要擋（前三條），真的量不到又沒有任何證據
+    時仍然放行（最後一條）。只鎖前者會讓下一個人用「一律 fail-closed」滿足它，而那正是
+    L4 當初被否決的形態（斷網與額度滿了外觀相同）。
+
+### R115 cbg PhantomCountNoLongerBlocksTest WHY
+
+🔴 SD-B1 的**端到端**那一半：幽靈計數會把遠低於 cap 的一次派發擋下來。
+
+    SD 實測（合成 90% 快取、20 個平行 Agent）：帳本 `try=20 undo=17`（各應為 20）⇒
+    `live_dispatches()` 讀回 **3**，而 cap=2、設計意圖 0 ⇒ 接著單獨派 1 個 Agent
+    （遠低於 cap）拿到 **rc=2**。這正是 SA-B6 要治的永久過度節流換了成因復發。
+
+### R115 cbg RefreshSlotConcurrencyTest WHY
+
+🔴 SD-B3：成本節流器在它**唯一要治的情境**下完全失效。
+
+    落地前實測（16 個獨立行程、壁鐘 barrier）：**CLAIM=16 SKIP=0**，設計意圖 1
+    ⇒ 一則訊息平行派 42 個 Agent、快取剛過期時，42 個 hook 各自同步打一次端點。
+    根因是 check-then-act（先 `is_file()`＋比 mtime，再 `write_text`），零原子性。
+
+### R115 cbg QuotaGateIsIndependentOfContextTest WHY
+
+🔴 SA-B1：本包唯一存在理由的那個場景——**低 context × 高 quota**。
+
+    ADR 原設計把 quota 分支放進 `block_verdict()`，而 `main()` 在呼叫它之前有五道
+    context 語意的早退（`tier_of` 在 context <75% 回 `None` ⇒ `return 0`）。撞額度那
+    一刻 context 只有 ~18~20% ⇒ 那段程式**永遠跑不到**。沒有下面這組低-context 注入，
+    任何「80% 擋得住」的判準在真實故障場景下都恆綠。
+
+### R115 cbg RateLimitIsAFloorNotAnUnknownTest WHY
+
+PRD §8 第 1 列／R100 止血 A：**429 此前被折成「量不到」，方向與條文完全相反。**
+
+    立案實測（本輪動手前）：`measure_detail()` 對 429 回 `(None, "http-429")` ⇒
+    `read_quota()` 判 `BAND_UNMEASURED` ⇒ `decide()` 給 `degraded_cap`（出廠 4，
+    實測 `== cap_converge`）⇒ 429 換來的姿態比「量到 70% CONVERGE 帶」還寬鬆，而 429
+    是額度吃緊最強的**直接**證據。`git grep Retry-After` 於 tools/ 全庫命中 **0**。
+
+### R115 cbg ThrottleBandSaysHowLongItLastsTest WHY
+
+SD 非 blocking ①：halt 帶用 `reset_branch` 分得出三支，**throttle 帶完全不分**。
+
+    週額度越 80% 時 cap 會連續套用**好幾天**，與 five_hour 80%（最多 5 小時）代價差一個
+    數量級，而訊息裡讀不出差別。本輪只把差別說出來，**不動 cap 的階梯**（那是掌舵者訂的
+    政策，挑一個數字塞進來就是本檔一路在治的「挑的不是量出來的」）——已登記交由下一輪
+    承接（輪號寫在帳本那一列）。
+
+### R115 cbg MacCredentialSourceTest WHY
+
+🔴 L4-03：mac 的 Claude Code 憑證在 login Keychain，不在檔案系統上。
+
+    守得住判定邏輯；守不住「沒有 Keychain 條目的真 mac」（那一半只由 `_runner` 注入
+    模擬）。射程劃界全文＝Resume 證據檔 §L-4.15；R89 減法史料＝R89 收尾證據檔
+    §護欄層減法；實測值唯一的家＝`quota_meter.KEYCHAIN_SERVICE` 的註解（不複寫）。
+
+### R115 cbg SentinelArmingCriterionTest WHY
+
+🔴 被守的性質：**短命 session 不得留下一支每 15 分鐘醒來的 schtasks**。
+
+    立案是量出來的，不是推測：掌舵者截圖的三支哨兵裡有兩支屬於活了 5 秒與 12 秒的
+    session；本輪把該逐字稿目錄全部 83 支逐支量過 `(回合數, 首尾跨度)`——六支元凶一律
+    **2 回合 / ≤12 秒**，真正在做事的最少 **38 回合 / 853 秒**。門檻取在那道縫裡。
+
+### R115 cbg ConsoleSpawnAttributionTest WHY
+
+`tools/probe/console_spawn_watch.py` 的歸因判準。
+
+    🔴 被守的性質是**「無法歸因」必須是一等公民**。掌舵者兩度回報黑框，而第一輪的處置是
+    純推論（逐一檢查我們自己的 spawn 站點）——那種做法對「我們不知道的那條路」結構上失明。
+    量測器的價值全押在「它把說不清楚的東西誠實放進第三格」上：一旦那些被硬塞進
+    `foreign`，報表就會給出「本 repo 側乾淨」這個看起來很好、但沒有支撐的結論。
+
+### R115 cbg QuotaGateIsWiredToTheBurnPathTest WHY
+
+🔴 R83：額度那把尺造好了，卻接在一條**幾乎不通電**的線上——本類守的就是那條線。
+
+    它守的是「我要不要多派人」，燒掉額度的卻是「我自己在做事」。R83 實測與紅端逐字
+    原文＝Resume 證據檔 §L-3.27。⇒ 判例 #3「機制蓋好沒接電」已復發三次，故本類不驗
+    「程式碼在不在」，只驗「它真的做了動作」。
+
+### R115 cbg QuotaPrepareBandActuallyPreparesTest WHY
+
+🔴 SA-03 紅端：prepare 帶在 HEAD 上兩個事件都靜默、外觀與「額度很健康」相同
+    （紅端逐字原文＝Resume 證據檔 §L-3.29）。
+
+    本類刻意不驗「程式碼在不在」，只驗它真的做了那三件事（出聲／落磁碟／一個視窗一次），
+    以及**沒有**做第四件事（改 rc）——85% 擋下收斂型工作會讓人連收斂都做不完。
+
+### R115 cbg ContextWarnReachesTheModelTest WHY
+
+🔴 M1 送達形態鎖（R91）：WARN 分支此前是 `stderr + exit 0`＝模型結構上收不到。
+
+    守兩件實測過的失效面：① `hookEventName` 逐字等於 payload 的事件名（不符時 CC 把
+    整段 `additionalContext` 丟掉）；② 兩軸同火時 stdout 必須是**單一** JSON 物件
+    （兩個相接物件 ⇒ 兩則一起消失）。立案數字與對照實驗逐字見證據檔 §B／§B-4。
+
+### R115 cbg PrdDrainPercentMapsToTheBandsTest WHY
+
+🔴 R91：PRD 的 `DRAIN_PERCENT` ↔ `tools/lib/quota_policy.py` 四道帶的對映，
+    落地前**全庫實查為零登記**（`DRAIN_PERCENT` 只出現在 PRD 那一份 `.md`，`tools/` 下
+    一次都沒有）⇒ 任何要用「PRD 那條線」判斷的程式碼只能靠讀者自行推論，而推論不會轉紅。
+
+    本組把它變成可證的：分母**直接讀 PRD 檔**。兩邊漂開時該紅的是
+    `tools/lib/quota_gate.py::DRAINING_BANDS` 那一側——PRD 是憲法，改它要走修憲程序。
+
+### R115 cbg UnmeasuredConvergesToThePrepareBandTest WHY
+
+PRD §4.1.5（§8-6 修憲）F1~F5：**量不到必須換來收緊，而訊息必須說真話。**
+
+    立案實測（改前）：`degraded_cap == cap_converge` ⇒ `True`（兩者皆 4）⇒「完全量不到」
+    與「量到 70% CONVERGE 帶」在致動器上是同一個 cap；而 `note_degraded()` 的訊息逐字
+    寫 `⇒ 本次不節流，扇出照常放行。`，同檔 `quota_gate()` 註解卻自述「量不到時
+    `decide()` 回 `degraded_cap`（不是不設限、也永不 halt）」——同一個決策兩份敘述，
+    而**只有訊息那一份有讀者**。
+
+---
+
+## test_dev_start.py 類級 docstring 沿革搬遷（R115）
+
+### R115 dev_start TestDepsHashEntryPointGap WHY
+
+2026-07-27 Windows 實機揪出的同 bug class 殘留缺口（見
+    TestDepsHashBuildSystemGap）：console script / entry point 只在**安裝當下**
+    產生實體 shim，但舊白名單只看 dependencies／optional-dependencies／
+    build-system，純新增 [project.scripts] 時 hash 不變 → 判「依賴新鮮」跳過重裝
+    → 既有 venv 永遠長不出那支命令（R52 的 autoclaude-artifact-check 即為此在
+    本機缺席）。三塊各自獨立驗證，避免只鎖到其中一塊。
+
+### R115 dev_start TestHooksConstantsConsistency WHY
+
+Architect 複審 P2：dev_start.py 與 git hooks 安裝腳本各自硬編碼同一組
+    「dispatcher 目錄名＋三支 hook 檔名」假設，過去無機械比對——本測試補上這道守門。
+
+    獨立複審 finding（GitHooksInstallCommon.ps1 雙軌重寫）修復後，判定邏輯的單一
+    真相源改為 tools/git_hooks_install_common.py（tools/lib/GitHooksInstallCommon.ps1
+    與 tools/lib/git_hooks_install_common.sh 皆改為呼叫它的薄殼層，各自不再宣告
+    HOOKS_DIR／hook 檔名），本測試改比對該 Python 檔。
+
+### R115 dev_start TestStepHooksIsFileOSError WHY
+
+P1-2 迴歸測試：step_hooks() 內 hooks 檔案存在性檢查原本是
+    `(hooks_dir / h).is_file()` 裸呼叫。本輪修復把 hooks_dir 改成可能指向「主
+    checkout」（跨掛載點，例如主 checkout 在外接碟/網路磁碟），比修復前風險更高卻
+    沒同步套用 _safe_* 防護。改用 _safe_is_file() 後，此處驗證檔案系統暫時不可讀
+    （如外接碟/網路磁碟抖動）拋 OSError 時不會讓整支工具裸崩潰。
+
+### R115 dev_start TestAcquireBootstrapLockPartialAliveMiddleState WHY
+
+MUST FIX C（QA 複審發現的測試覆蓋缺口）：現有測試只涵蓋
+    `_acquire_bootstrap_lock()` 的『單一 PID 全存活』（見上方
+    `test_alive_pid_holder_blocks_acquisition`）與『全部 PID 死透』（見上方
+    `test_stale_lock_is_cleared_and_acquired`）兩端；`TestMultiGrandchildLockNotPrematurelyStale`
+    (MUST FIX A 重寫前) 對『A 死 B 活』中間態只透過 `_peek_bootstrap_lock()`
+    （讀取端）驗證，從未在同一中間態下直接呼叫 `_acquire_bootstrap_lock()`
+    （取得端）。QA 把 `_acquire_bootstrap_lock()` 的邏輯改成『全部存活才忙碌』
+    （不安全反轉：只要有一個死的就會誤判整把鎖陳舊）後，既有測試套件零失敗，
+    證實這是真實的覆蓋盲區。
+
+    本測試直接建構一個鎖檔內容含『一個已死 PID + 一個存活 PID』的情境，直接
+    呼叫 `_acquire_bootstrap_lock()`（不透過 `_peek_bootstrap_lock()`），斷言
+    回傳 None（拿不到鎖，因為還有存活成員）——且鎖檔不應被清除。
+
+    MUST FIX A 之後鎖檔語意隨平台改變（POSIX 可能是 process group id、Windows
+    是個別 PID），但 `_lock_target_alive()` 對『一般存活 PID』（非 pgid）一律
+    先用 `_pid_alive()` 判斷即回真，不需要動用 killpg——故本測試無需區分平台、
+    用一個單純的存活子行程即可等價驗證『部分存活即忙碌』這個核心語意，兩平台
+    通用。
+
+### R115 dev_start TestPyprojectTopLevelTableRoster WHY
+
+SD-R59-10：`_toml_deps_snapshot` 的白名單對「未來新增的安裝期表」是 fail-silent。
+
+    WHY：白名單對**中繼資料**是正確的（不會漏未來新增的 name/description 之類），但對
+    **新的安裝期 key** 反而是它的固有弱點——DEF-101-502 就是這個弱點的第二次發作
+    （第一次是 `build-system`）。現存候選缺口：`[tool.setuptools] packages`／`packages.find`
+    （決定哪些套件被裝進去）、`[dependency-groups]`（PEP 735，uv 已支援）、
+    `[tool.uv] override-dependencies`／`constraint-dependencies`、`project.dynamic`
+    ——R59 實查 `AutoClaude/pyproject.toml` **一項都不存在**，故非現行缺陷；但沒有任何鎖會在
+    有人新增一個頂層表時逼人做決定。本鎖用的是本輪 NTFS 前瞻鎖同一個手法（等值 roster）。
+
+### R115 dev_start TestNightlyRunningDetection WHY
+
+`_nightly_running()` 三態（True/False/None）判定。
+
+    Windows 分支查的是 run_local_nightly.ps1 的具名 Mutex、posix 分支查
+    run_local_nightly.sh 的鎖目錄；此處固定走 posix 分支測邏輯（Windows 分支
+    需要真的有 nightly 在跑才測得到 True，用真環境會變成 flaky）。
+
+### R115 dev_start TestStreamOnStartCallback WHY
+
+_stream() 改用 subprocess.Popen 後，on_start 必須在子行程建立當下就拿到
+    真實子行程 PID（而非等到程序結束才知道），這樣呼叫端（_run_bootstrap）才能
+    在 bootstrap 真正執行期間就把 PID 寫入鎖檔，不留時間差讓孤兒行程繞過鎖。
+    用真實 subprocess（而非函式層級 mock）驗證，因為這正是本輪要修的『行程樹
+    存活語意』問題本身。
+
+### R115 dev_start TestStreamOtherOSErrorDoesNotCrash WHY
+
+MUST FIX 3（SA 複審發現，P2）：`_stream()` 過去只 catch `FileNotFoundError`。
+    若執行環境限制 `setsid()`（例如受限 seccomp/沙盒設定拒絕該系統呼叫），
+    `Popen(..., start_new_session=True)` 會在子行程端呼叫失敗、經內部 pipe
+    回報，父行程端拋出 `PermissionError`（`OSError` 子類別，但不是
+    `FileNotFoundError`）——SA 用函式層級 mock 實測驗證這個例外先前完全沒被
+    攔截，會直接向上傳播讓整支工具在 `_run_bootstrap()`/`step_venv()`/`main()`
+    裸崩潰。
+
+    本測試 mock `subprocess.Popen` 拋出 `PermissionError`，驗證 `_stream()` 不
+    裸崩潰、回傳合理的非零 rc 並印出警告，而不是讓例外往上炸穿。
+
+### R115 dev_start TestOrphanChildLockRegression WHY
+
+收尾要求：本輪核心修法（子行程 PID 追蹤 + step_venv 頂部 busy-lock 檢查）
+    的端到端迴歸測試。Architect 明確指出上一輪測試抓不到問題正是因為只用函式
+    層級 mock（如 mock.patch.object(dev_start, "_run_bootstrap", ...)）——這類
+    『行程樹存活語意』的 bug（orchestrator 死亡但子行程變孤兒仍存活）本質上
+    無法被函式層級 mock 看見，必須用真實 subprocess.Popen 起一個真的會存活數秒
+    的子行程才能驗證鎖真正追蹤的是誰。
+
+### R115 dev_start TestStreamNewProcessGroupSurvivesDirectChildDeath WHY
+
+MUST FIX A 核心迴歸測試（Architect 第三輪複審用真實驗證證明「事後 ppid
+    回溯」在因果上必然太晚：production 呼叫鏈是 `_stream()` 的 `proc.wait()`
+    等到直接子行程確實死亡才返回 → `_run_bootstrap()` 返回 → `step_venv()` 才
+    呼叫回溯邏輯，此時直接子行程的 ppid 早已被核心過繼給 subreaper，以其 PID
+    為根的事後回溯注定撲空）。
+
+    根本重做：`_stream(new_process_group=True)` 讓 bootstrap 直接子行程呼叫
+    `start_new_session=True`（POSIX 對應 `setsid()`），使其成為新 session 的
+    group leader——其自身 PID 同時即為 process group id。之後不論該子行程
+    fork 出多少層、多少個孫行程，只要仍有任一成員存活，`os.killpg(pgid, 0)`
+    就會成功；這不受「父行程死亡時子行程 ppid 被核心過繼」影響，因為過繼只
+    改變 ppid，不改變 process group membership。本測試用真實 subprocess（非
+    函式層級 mock）直接驗證這個核心因果宣稱本身。
+
+### R115 dev_start TestBootstrapProcessGroupSurvivesDirectChildKill WHY
+
+MUST FIX A 迴歸測試（取代舊版對『事後 ppid 回溯』的測試方式——Architect
+    第三輪複審立案，原文＝Guard_Repin 證據檔 §D-7）。
+
+    新設計：`_run_bootstrap()` 對 POSIX 呼叫 `_stream(..., new_process_group=True)`，
+    讓直接子行程以 `start_new_session=True` 成為新 session 的 group leader
+    （pgid == 自身 PID）。`step_venv()` 不再需要背景輪詢採樣後代 PID——直接用
+    `os.killpg(pgid, 0)` 判斷整個 group（含任意數量、任意深度的孫行程）是否
+    仍有成員存活，鎖檔內容全程維持記錄這一個 pgid 不變，不需要『事後發現多個
+    孫行程 PID 再改寫鎖檔』（舊設計 MUST FIX #2 修的『只記錄 min(live) 單一
+    PID』整個 bug class，在 pgid + killpg 設計下結構性不可能發生）。
+
+    本測試模擬兩個孫行程（壽命不同）一次驗證：①任一孫行程存活時鎖不釋放；
+    ②鎖檔內容全程是最初的 pgid（不像舊設計需要改寫成觀察到的孫行程 PID）；
+    ③下一輪 `_peek_bootstrap_lock()` 透過 `_lock_target_alive()` 的 killpg
+    fallback 仍正確判斷忙碌；④兩個孫行程都結束後鎖能被正常清除重新取得，不
+    會永久卡死。
+
+### R115 dev_start TestSigintForwardsToBootstrapProcessGroup WHY
+
+MUST FIX A 必要配套的迴歸測試（POSIX only）：`_stream(new_process_group=True)`
+    讓 bootstrap 直接子行程脫離終端機 foreground process group 後，使用者按
+    Ctrl-C（SIGINT 只送到 foreground process group）將不再自然傳到 bootstrap
+    樹，可能讓它在背景孤兒繼續跑而使用者誤以為已中止。
+
+    本測試用『真實訊號』（而非函式層級 mock）驗證：dev_start.py 安裝
+    `_forward_signal_to_bootstrap_group` 為 SIGINT handler 後，模擬使用者在
+    bootstrap 執行期間按 Ctrl-C（對自己送出真實 SIGINT），驗證整個 bootstrap
+    process group（含直接子行程與孫行程）確實收到訊號終止，不會變成背景孤兒
+    繼續執行。
+
+### R115 dev_start TestNormalBootstrapFlowUnaffectedByProcessGroupChange WHY
+
+交付要求 2(i)：MUST FIX A 是一個牽涉「子行程怎麼被產生」的結構性改動
+    （`_stream()` 新增 `new_process_group=True` 分支、`step_venv()` 改走 pgid/
+    killpg 路徑），必須用真實 subprocess 端到端驗證『正常成功的 bootstrap 流程
+    完全不受影響』——不能只驗證新機制本身，還要證明沒有把好路徑弄壞：rc 仍
+    正確傳遞（0）、真實孫行程仍能正常結束、鎖仍會在成功後正常釋放（不會被
+    誤判為『process group 仍有人存活』而卡住）、`_ACTIVE_BOOTSTRAP_PGID` 仍會
+    在流程結束後正確清除。
+
+### R115 dev_start TestDescendantWatcherFinalSyncSampleWindows WHY
+
+MUST FIX #3 迴歸測試（Windows 版）：`_DescendantWatcher` 自 MUST FIX A
+    起僅供 Windows 使用；舊版測試命中的是已移除的 POSIX 分支、繼續測它沒有意義
+    的沿革，原文＝Guard_Repin 證據檔 §D-8。
+
+    本測試改用 `mock ctypes.windll` 的既有慣例（比照 `TestPidAliveWindowsBranch`）
+    模擬 Windows Toolhelp32 API，在 Windows 分支上重新驗證 MUST FIX #3 這個
+    「stop_and_collect() 必須自己補一次同步採樣、不能只靠背景執行緒排程」的
+    修復——這個機制對 Windows 而言仍然成立且仍在生產程式碼路徑上（見
+    `_DescendantWatcher` docstring：Windows 的 th32ParentProcessID 是靜態
+    快照，事後回溯本身沒有 POSIX 那個因果性缺陷，但『背景輪詢的取樣空窗』
+    這個獨立問題兩平台通用，仍需要 stop_and_collect() 的同步補採樣）。
+
+### R115 dev_start TestBootstrapIncompleteMarker WHY
+
+MUST FIX #2 迴歸測試：Architect 發現 venv 建立成功但 pip install 失敗時
+    （tools/bootstrap.sh 用 set -euo pipefail，兩步驟獨立），bootstrap 回傳非 0
+    → main() 跳過 step_finalize()，狀態檔不寫入。使用者重跑時 state={}（prev=None）
+    但 .venv/bin/python 已存在 → 過去只做 _venv_healthy()（只驗證 python --version
+    能跑，不驗證套件是否裝好）就沿用，把「其實半殘」的 venv 靜默漂白成功。
+    修復後：bootstrap 失敗且 .venv 已建立時寫入哨兵；下次即使健檢通過，哨兵
+    存在也要視同壞損、改走正常 bootstrap 路徑。
+
+### R115 dev_start TestRootLevelBootstrapIncompleteMarker WHY
+
+MUST FIX #4 迴歸測試（Architect 複審發現，門檻遠低於原本描述的 P1）：
+    首次建置期間，最普通的 Ctrl-C 會讓 SIGINT 同時打中 dev_start.py 本體與
+    bootstrap 子行程（前景 process group），dev_start.py 立即死亡，
+    `_run_bootstrap()` 內 `rc = _stream(...)` 之後的「rc!=0 補寫哨兵」程式碼
+    永遠執行不到——過去 `.venv` 內部哨兵只在 `.venv` 目錄「已存在」時才會於
+    呼叫 bootstrap 前先寫入，對「首次建置、.venv 完全不存在」這個情境完全沒有
+    防護。修復後 ROOT 層級哨兵無條件於呼叫 `_stream()` 之前落地，不受 `.venv`
+    是否存在限制、也不依賴任何「`_stream()` 之後」才執行到的程式碼。
+
+### R115 dev_start TestRunBootstrapWiresRootMarkerBeforeStream WHY
+
+MUST FIX B（QA 複審發現的測試覆蓋缺口）：既有
+    `TestRootLevelBootstrapIncompleteMarker` 都是直接呼叫
+    `_mark_root_bootstrap_incomplete()` 手動模擬「哨兵已經落地」的終態，從未
+    驗證 `_run_bootstrap()` 本身真的有在呼叫 `_stream()` 之前無條件呼叫這個
+    函式——QA 把 `_run_bootstrap()` 裡那行呼叫拿掉後，全套既有測試零失敗，
+    證實這是真實的覆蓋盲區（只驗證了消費端/讀取端行為，沒驗證生產端接線）。
+
+    本測試 mock 掉 `_stream()`，讓它在被呼叫的當下記錄「此刻 ROOT 層級哨兵
+    是否已落地」，直接呼叫真正的 `_run_bootstrap()`（不是 fake），證明生產端
+    接線順序正確：哨兵先落地、才開始跑 bootstrap（而不是事後才補寫）。
+
+### R115 dev_start TestRunBootstrapPassesNewProcessGroupToStream WHY
+
+MUST FIX 1（QA 第四輪複審發現的測試覆蓋缺口）：既有涉及 process group
+    語意的測試（`TestBootstrapProcessGroupSurvivesDirectChildKill`、
+    `TestNormalBootstrapFlowUnaffectedByProcessGroupChange` 等）都是 mock 掉
+    `_stream()` 並在假實作裡『自己』手動設定 `start_new_session=True`，從未
+    驗證 production `_run_bootstrap()` 本身是否真的把 `new_process_group=True`
+    傳給 `_stream()`——QA 把 `_run_bootstrap()` 裡那個實參改成 `False` 後，
+    92 個既有測試零失敗，證實這是真實的覆蓋盲區（只驗證了消費端/假實作行為，
+    沒驗證生產端接線本身）。
+
+    本測試直接 mock `_stream()`（單純記錄呼叫參數、不用假實作模擬效果），
+    呼叫真正的 `_run_bootstrap()`，斷言傳給 `_stream()` 的呼叫確實包含
+    `new_process_group=True`。
+
+### R115 dev_start TestStepSwitchCacheCleanup WHY
+
+MUST FIX #4a：QA 用 bug-injection 重現——把 `if not env_changed:` 反轉成
+    `if env_changed:` 後現有 54 個測試全過。用真實 tmp 目錄建立假的
+    .pytest_cache/.ruff_cache（含 symlink 與一般目錄兩種情況），驗證
+    env_changed=True 時確實被清除、env_changed=False 時確實不動——絕不觸碰
+    這個 repo 真正的快取目錄，全程沙盒化。
+
+### R115 dev_start TestMainInstallsSignalHandlerReference WHY
+
+MUST FIX 2（QA 第四輪複審發現的測試覆蓋缺口）：既有
+    `TestSigintForwardsToBootstrapProcessGroup` 底下兩個測試都是自己手動呼叫
+    `signal.signal(signal.SIGINT, dev_start._forward_signal_to_bootstrap_group)`
+    模擬「已安裝好 handler」的狀態，從未透過 `main()` 走完整安裝路徑——QA 把
+    `main()`（約 1462-1463 行）安裝 handler 那兩行改裝成 `signal.SIG_DFL`（保留
+    正確的還原邏輯，不觸發任何裸崩潰）後，92 個既有測試零失敗，證實這是真實
+    的覆蓋盲區：沒有任何測試驗證 production `main()` 本身真的有做這件事。
+
+    本測試呼叫真正的 `main()`，mock 掉 `step_venv()` 讓它在被呼叫的當下（此刻
+    handler 理應已安裝、且尚未被 `finally` 還原）記錄
+    `signal.getsignal(SIGINT/SIGTERM)`，斷言兩者確實『引用等於』
+    `dev_start._forward_signal_to_bootstrap_group`——不是只驗證「裝了某個非
+    預設 handler」，而是驗證裝的正是這個函式本身。
+
+### R115 dev_start TestOnboardingSnapshotProbe WHY
+
+Gap C：ONBOARDING §7 表② 指紋哨兵接進 step_platform [6/7]（純 advisory）。
+
+    測意圖（Rule 9）：表② 指紋 stale 是 pre-push 的**阻斷項**，而主要漂移來源是
+    merge 拉進對面機器的 commit——發生在本輪寫任何程式碼之前（useMacWin.md 第 7 步）。
+    [6/7] 是每次開工必經之地，這裡不出聲的話，發現時點就只剩 push 被擋當場。
+    邏輯本體住 tools/lib/onboarding_snapshot_note.py（dev_start.py 為 raw-line 棘輪，
+    僅留 thin adapter），故 (a)~(c) 經真 adapter 打到 lib、只 mock subprocess.run。
+
+### R115 dev_start TestVenvPythonVersionSentinel WHY
+
+R15 DEF-101-207：venv Python 版本比對哨兵。
+
+    WHY：.python-version 升版後 bootstrap 對「既有 .venv 沿用」路徑不換直譯器，
+    pin 檔不在 DEPS_FILES 內、hash 觸發是無效藥——唯一可見點是整備成功收尾塊
+    對 venv 直譯器實測版本。驅動真實 step_venv()（hash 未變的沿用路徑），
+    monkeypatch 兩支新純函式鎖三態：不一致→警告；一致→零警告；pin 缺席→
+    零警告且不得 spawn 直譯器（短路）。
+
+### R115 dev_start TestVenvPythonVersionRealBody WHY
+
+QA-R15-REV-3：_python_version_target()／_venv_python_minor() 真身驅動。
+
+    WHY：TestVenvPythonVersionSentinel 只驗證 step_venv 依兩支函式回傳值決定
+    要不要 _warn，兩支函式本身（讀 .python-version 截斷邏輯、subprocess 呼叫
+    子行程取版本）全程被 mock 掉、零真身覆蓋（R15 四方一審 QA-R15-REV-3 揭露）。
+    本測試以 tempfile 真檔案＋sys.executable 真直譯器直接驅動函式本體。
+
+### R115 dev_start TestHeartbeatFailSentinel WHY
+
+R15 ARCH-R15-1：心跳 FAIL 內容哨兵（mac 側）。
+
+    WHY：mtime 只證明「在跑」不證明「在綠」——CI 停擺期間 nightly 是唯一每日
+    活體，連續全紅晨間 dev_start 仍 ✅ 是盲區。心跳前 3 行是
+    run_local_nightly.sh write_heartbeat() 的固定契約。
+
+### R115 dev_start TestWindowsHeartbeatFailSentinel WHY
+
+DEF-101-200 rider ARCH-R15-1（Windows 側，R23 補完）：Windows nightly log
+    是全量 log（含完整 pytest/mutmut 輸出）非 mac 的 3 行心跳契約，改 tail 掃描
+    `run_local_nightly.ps1` 既有（非本輪新增）的 `END exit decision: exit=N
+    (failed stages: ...)` 收尾行。驗證涵蓋：exit=1 有 failed stages → 警告＋
+    summary 片段；exit=0 → 零警告；大型全量 log（tail 窗格前有雜訊）仍能命中
+    尾端錨點；找不到錨點時安全回 None（advisory，不得讓 dev_start 崩潰）。
+
+### R115 dev_start TestCrossSiteLiteralLocks WHY
+
+R15 雙站點字面互鎖（機械鎖漂移；同 TestNightlyHeartbeatFilenameContract 病灶）。
+
+    dev_start.py 與 install_mac_nightly.sh 各硬編一份 launchd label 與心跳門檻，
+    單側改動另一側零訊號——regex 自兩側原始碼抽字面值斷言相等。
+    install_mac_nightly.sh 本測試只讀不寫。
+
+### R115 dev_start _NightlyHeartbeatDimensionMixin WHY
+
+心跳「維度契約」的共用面：**純字串／純讀檔**，一行 subprocess 都沒有。
+
+    R72 為何要把這一段拆出來：下面那個行為等價鎖整組掛著
+    `@skipUnless(sys.platform == "darwin")`（理由正當——它真的要跑 bash 並依賴
+    BSD `stat -f %m`），但 `test_lock_covers_every_dimension_claimed_by_installer`
+    只做 `read_text` ＋ regex ＋ 純字串分類，**整支在任何平台都跑得起來**，卻因為
+    住在那個類別裡而在 Windows／Linux 閘門上一律 SKIPPED。那是「搭錯車」造成的
+    覆蓋損失，不是平台語意使然——同 `test_capability_row_count_reaches_windows_
+    side_parity`（R72 已搬至 `test_schedule_capability_parity.py`）的形態。
+
+    做成 mixin 而非讓 darwin 類別繼承新類別：後者會讓那支測試被 `discover` 收兩份
+    （父類一份、darwin 子類一份，且子類那份在非 mac 平台永遠 skip），憑空製造一支
+    永遠不跑的重複測試與一行沒有意義的 skip 明細。
+
+### R115 dev_start TestNightlyHeartbeatCrossSiteBehavioralEquivalence WHY
+
+R50 四方複審發現：兩側各自獨立實作的心跳判斷，舊字面值鎖比對不到『判定結果』
+    是否一致（R50／R67-E21／R67-M40 三筆立案沿革，原文＝Guard_Repin 證據檔 §D-9）。
+
+    本測試直接從 install_mac_nightly.sh 原始碼**動態擷取** `report_heartbeat()`
+    函式本體（非另外複製一份到測試檔——避免測試與生產程式碼各自漂移），在獨立
+    bash 子行程中對同一顆心跳檔執行，並與 python 側 `_check_nightly_heartbeat()`
+    在同一顆心跳檔上的輸出逐維度比對。
+
+### R115 dev_start MacNightlyStatusTestCase WHY
+
+`--status` 報表契約共用夾具。
+
+    背景：修前「三行全綠」判準看不到已安裝產物內容、也看不到中間漏跑
+    （R67-M37／R67-F29 立案，原文＝Guard_Repin 證據檔 §D-10）。
+
+    夾具在暫存目錄搭一棵最小 repo 樹 + fake HOME + stub launchctl，跑**真實的**
+    `install_mac_nightly.sh --status`（複製自真檔，非另抄一份邏輯）。絕不觸碰真實
+    `~/Library/LaunchAgents` 或真實 launchctl——`--status` 雖是純讀取路徑，但 fake
+    HOME 才能讓「已安裝 plist 的內容」成為測試可控的自變數。
+
+### R115 dev_start TestMacNightlyMachineStateCapabilities WHY
+
+R82：能力表裡**輸入是機器狀態而非 plist 內容**的那兩列（WakeToRun／NextRunTime）。
+
+    為何獨立成一類、而不是塞回上面那一類：上面那一類的自變數是「已安裝 plist 的內容」，
+    這裡的自變數是「這台 Mac 的電源排程」——兩者連要造出「壞掉的樣子」的手法都不同
+    （前者寫一份退化 plist，後者換掉 pmset）。混在一起的代價已經實證過一次：
+    `test_healthy_plist_passes_every_capability_row` 因此在真 mac 上結構性必紅。
+
+    這一類同時是上面那一類的**紅綠自證**：健康控制組會綠，只證明兩列**能**印 ✅；
+    要證明它們不是橡皮圖章，就得有輸入壞掉時真的轉 ⚠️ 的對照組。
+
+### R115 dev_start TestMacNightlyPmsetMarkerIsNotProse WHY
+
+R82：pmset 判準的字面值鎖——**純讀檔，刻意不掛 `@skipUnless(darwin)`**。
+
+    為何獨立成一個平台中立的類別，而不是塞進上面那個 darwin-only 類別：本判準只做
+    `read_text` ＋ 字串比對，一行 subprocess 都沒有，在任何平台都跑得起來。搭上
+    darwin 的車就會在 Windows／Linux 閘門上一律 SKIPPED——同 `_NightlyHeartbeat
+    DimensionMixin` 檔頭記載的那個「搭錯車造成覆蓋損失」形態（R72 已為
+    `test_capability_row_count_reaches_windows_side_parity` 處理過一次）。
+
+    這件事在本輪特別要緊：被撤回的字面值當初就是在錯的那一岸寫下的
+    （沿革原文＝Guard_Repin 證據檔 §D-18）。
+
+### R115 dev_start TestMacNightlyStatusWiring WHY
+
+接線鎖：兩段報表必須真的被 `cmd_status()` 呼叫，且 advisory 語意不變。
+
+    WHY 單獨立一類：R67 上一輪半套修改的失敗形態就是「函式寫好了、沒接線」——
+    `bash -n` 與所有既有測試全綠，`--status` 行為卻與修前一模一樣。行為鎖（上面
+    兩類）其實已涵蓋，但靜態鎖給的是**可直接讀懂的失敗訊息**，不必從「輸出少了
+    一段」反推是哪一步漏了。
+
+### R115 dev_start TestMacNightlyStatusPersistenceGate WHY
+
+R68-M31：「launchd 已載入、但磁碟上的 plist 已不存在」是 macOS 專屬的
+    「載入 ≠ 已持久化」狀態——載入只活在當前 login session 的記憶體裡，磁碟沒有
+    plist 就不會在下次登入/重開機時被重新載入。修前 `--status` 對這個註定死掉的
+    排程回報 rc=0 全綠、並且整段跳過能力表（唯一的機讀判準說它健康）。
+
+    這不是「沒人想到的交集狀態」，而是**實作違反自家已寫下的契約**：安裝器檔頭
+    自 R13 起逐字承諾「1＝失敗（--status 時＝未載入或 plist 缺席）」，實作卻只看
+    launchctl。上游可達性也成立：`launchctl unload` 失敗時仍 exit 0，修前的
+    `cmd_uninstall` 在 `|| true` 之後無條件 `rm -f` plist，自己就會製造這個孤兒
+    狀態（該路徑由 `TestMacNightlyLoadSelfVerification` 一併封住）。
+
+### R115 dev_start TestMacNightlyLastExitStatusColumn WHY
+
+R68-M30：`launchctl list` 第 2 欄（last exit status）必須被解讀，而不是原樣
+    印出就算數。
+
+    缺陷形狀：載體每晚照跑、每晚在寫出心跳之前就非零退出 ⇒ 心跳檔與 RunId log
+    **從第一天起就永遠不存在** ⇒ 兩段報表齊聲宣告「排程可能未啟用或尚未跑過第一輪」
+    且 rc=0。那句因果確定為假，而且因為心跳檔永遠不生成，8 天過期哨兵永遠不會啟動
+    ——這個假宣稱是無上界的，不是一個 8 天窗口。第 2 欄的值當時就印在螢幕上
+    （`-\t3\tcom.autoclaude.nightly`），只是沒有任何一行程式碼去讀它。
+
+### R115 dev_start TestMacNightlyLoadSelfVerification WHY
+
+R68-M64：`launchctl load/unload` 失敗時**仍 exit 0**（本機實測
+    `Load failed: 5: Input/output error` 配 rc=0），`set -e` 結構上攔不到，於是修前
+    的 `cmd_install` 會在排程根本沒載入的情況下印「✅ 已安裝並載入」並 rc=0——
+    它就是 R67 一路在防的「死排程」的上游製造機。修法是不相信 rc，改用
+    `cmd_status` 從 R13 起就有的那道現成查核式（`launchctl list` 第 3 欄精確等值）
+    自證，✅ 只能印在自證通過之後。
+
+    修前這兩條路徑在測試側是**零行為覆蓋**：`test_schedule_capability_parity.py`
+    對 install 只做原始碼字串比對，`macos_smoke_local.sh` 只跑 `--render-only`。
+
+### R115 dev_start TestCopyFunctionalInterpreterDllCopy WHY
+
+QA 要求的環境無關自證測試（R21 四方一審，DEF-101-256）：直接驗證
+    `_copy_functional_interpreter()`（`tools/tests/_platform_helpers.py`）新增
+    的 DLL 複製行為本身，不依賴本機當前 Python 安裝佈局是否恰好是裸
+    pyenv-win——monkeypatch `sys.executable` 指向暫時假來源目錄，不論在哪台
+    機器跑都能抓到退化（QA 明確要求：不能只靠「機器剛好是裸 pyenv-win 佈局」
+    才會抓到退化）。
+
+### R115 dev_start TestRmtreeWindowsSafe WHY
+
+R66 P2（DEF-101-620）：`_ensure_venv_shape()`/`step_venv()` 三處自我修復
+    路徑（換手保留失敗殘留的 `.venv-cache-<other>/`、兩平台直譯器皆缺的壞損
+    `.venv/`、跨 OS 同 flavor 切換要清掉的舊 `.venv/`）過去用裸
+    `shutil.rmtree()`。技巧同款移植自
+    `AISDLC_SDD/AISDLC_SDD_v0.30/tools/fsm_runtime/hub_sync.py::_rmtree_windows_safe`
+    （R15 SCAN-B-2 首次建立、R60 A-04 沿用）。
+
+    Bug-injection 紅綠實測（本機 Windows 11 Pro 26200 真機驗證，非模擬）：
+      RED（修復前，對同一份含唯讀檔 fixture 呼叫裸 `shutil.rmtree`）：
+        `RAISED PermissionError: [WinError 5] 存取被拒。: '...\.venv\bin\python'`
+        且事後 `venv.exists()` 仍為 True（半殘目錄未被清除）。
+      GREEN（修復後，改呼叫 `_rmtree_windows_safe`）：
+        無例外拋出，且 `venv.exists()` 為 False（目錄確實整個被移除）。
+
+### R115 dev_start TestVenvSelfHealCallSitesUseSafeRmtree WHY
+
+平台中立 call-site 鎖（同
+    `AISDLC_SDD/AISDLC_SDD_v0.30/tools/fsm_runtime/tests/test_hub_sync.py::
+    TestMirrorLocalWindowsResilience::test_mirror_local_does_not_call_bare_rmtree`
+    的鎖法）：`_rmtree_windows_safe` 硬化只有在呼叫端真的走過去才有意義，防止
+    未來有人「順手」改回裸 `shutil.rmtree()` 而沒人發現。
+
+### R115 dev_start TestStaleScheduleTracks WHY
+
+`tools/lib/ci_liveness.py`（R68 新增）的鑑別力鎖。
+
+    🔴 為何非有不可：R68 Scan-C／Scan-N 判定的最嚴重一筆（P1）是「兩支 *-nightly-full
+    自 2026-07-14 起 18 天零成功、而三道既有哨兵在結構上都偵測不到」——本模組就是補
+    那個盲區的東西。它落地時**零測試**（`grep` 全 `tools/tests/` 零命中），也就是說
+    「用來偵測哨兵已死的哨兵」自己沒有任何東西保證它還活著，正是它要消滅的那個形狀。
+
+    本類別以純函式雙向驗：陳舊必報（正向注入）、新鮮不報（還原）、無訊號不報
+    （查不到 ≠ 壞掉），並釘住「dormant（被註解掉的 cron）不得算進期望軌」。
+
+### R115 dev_start TestLivenessEventFilter WHY
+
+R69（DEF-101-703）：`_latest_success_run` 的事件過濾面。
+
+    🔴 為何非有不可：R68 版只查 `--event schedule`，而「陳舊了怎麼辦」的唯一處置是
+    `gh workflow run <wf>.yml`——它產生的是 `event=workflow_dispatch` 的 run。兩集合
+    實證互斥 ⇒ **照著處置做也永遠解不開**，哨兵會永遠喊陳舊、最後被當成狼來了而被
+    忽略，正好複製它要消滅的那個病。本類別鎖住「補跑算數」這個語意，以及「查詢全滅
+    ≠ 通道已死」的無訊號紀律（否則離線就整排假紅）。
+
+### R115 dev_start TestPsUtf8PreludeIsSingleSpelling WHY
+
+PowerShell 輸出編碼前置全 repo 只准有**一種寫法**（R71 C-2）。
+
+    WHY（Rule 9 — 鎖的是意圖不是行為）：這條規則不是風格潔癖。前置本身是
+    DEF-101-350／DEF-101-760 的修復，「行內各抄一份」讓它變成 N 份可獨立漂移的
+    修復：R71 就抄出了第 4 份、寫法不同——逐字是
+
+        $OutputEncoding = [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false;
+
+    ——並在註解裡寫下一條**經實測證偽**的 BOM 理由。分歧本身還不致命，致命的是分歧
+    伴隨著一條沒人驗證過的理由——下一個人會照著那條理由再長出第 5 種。本鎖讓
+    「多一種寫法」在本機當場翻紅，理由與量測則集中在 `PS_UTF8_PRELUDE` 一處。
+
+    ⚠️ 上面那行**反例逐字寫在 docstring 裡是刻意的**：它同時是
+    `_narrative_node_ids()` 的活體覆蓋。docstring 不會被執行，講解一種寫法不等於
+    多一份複本；少了那層過濾，本鎖會對「解釋自己在防什麼」的文字翻紅（自噬），
+    而作者為了消紅只能把反例刪掉——鎖因此反過來消滅了它自己存在的理由。
+    R71 把同一層過濾擴到斷言訊息與 skip reason（WHY 見該函式），並為「必須逐字引述
+    生產碼拼法」的那一類加了具名豁免 `_PS_UTF8_OK_MARKER`（WHY 必填、stale 會紅）。
+
+    誠實劃界：本鎖鎖的是**不得分歧**，不是**必須改用 helper**。R71 射程只涵蓋
+    `test_dev_start.py`／`test_bootstrap_ps1.py` 兩個呼叫端，另外三處行內複本
+    （`test_dev_start_ps1_lastexitcode.py`、`test_windowsapps_guard_cross_consistency.py`、
+    `AISDLC_SDD/scripts/tests/test_install_post_commit_windowsapps_guard.py` ×2）
+    未收斂——但它們與 SSOT 常數**逐字相同**，故本鎖對它們是綠的，不是被豁免的。
+
+### R115 dev_start TestPickPythonGeMin WHY
+
+R69 P2 迴歸鎖：`tools/dev_start.sh` 的直譯器候選鏈必須挑 >= 3.11。
+
+    為何這是缺陷而不是設定問題（macOS 真機重現）：Homebrew 的 `python@3.11` 是
+    keg-only，`brew install python@3.11` **不會**改寫 `python3`（macOS 的
+    `python3` 恆為系統 3.9.6），只放一支 `python3.11`。修復前 dev_start.sh 的
+    候選清單只有 `python3` / `python`，於是「照 ONBOARDING §1 逐字裝完 3.11」
+    之後仍撿到 3.9 → `tools/dev_start.py` 版本前置閘 rc=2 ⇒ ONBOARDING §2.1
+    宣稱的「全新機器可直接執行 dev_start」在 mac 上為假。R68（DEF-101-628）只
+    把 traceback 換成友善訊息，沒動選擇邏輯，缺陷本體原封不動。
+
+### R115 dev_start TestMinPythonVersionSsotSync WHY
+
+版本下限只有一份權威（`dev_start.py::_MIN_PY`），三處字面值須同步。
+
+    為何需要：候選鏈的版本判斷寫在 shell/PowerShell 裡（挑直譯器時 Python 還
+    沒得跑，無法讀核心常數），天生是複製過去的第二/第三份字面值——沒有機械鎖
+    的話，下一次調高下限（3.11 → 3.12）時兩支殼會靜默停在舊值，退化成「殼挑了
+    一支核心不接受的直譯器」，使用者又看到 rc=2。
+
+### R115 dev_start TestGetPythonGeMinPowerShell WHY
+
+Windows 側同構實作的**行為**鎖：`.ps1` 的候選鏈必須真的被執行過。
+
+    ADR-XPLAT-002 §3.2 的紀律：字面比對型 parity 不算機械釘選。
+
+    🔴 R71（DEF-101-755 結案）：本類原本在唯一真正出貨的平台上鑑別力等於零、
+    DEF-101-760 就是躲在那個 skip 後面出貨的（沿革原文＝Guard_Repin 證據檔 §D-16）。
+    現改為依 `os.name` 造合適形態的假直譯器，Windows 上真的執行（解鎖條件 (a)）。
+
+### R115 dev_start TestRealSubMinInterpreterPrelude WHY
+
+第一道（有鑑別力的那道）：拿**真的** < `_MIN_PY` 直譯器 subprocess 實跑。
+
+    斷言三件事，缺一不可：
+      (a) 退出碼恰為版本閘定義的 2 —— 不是「非零就好」，1/70/-11 都代表走的是
+          崩潰路徑而非閘門路徑；
+      (b) stderr 含友善訊息與**逐字可執行**的補救指令；
+      (c) stderr **不含 `Traceback`** —— 這一條就是本輪缺陷的直接反面。
+
+### R115 dev_start TestPy39PreludeStaticScan WHY
+
+第二道（恆跑、零環境依賴）：靜態掃描「下限版可載入」射程內的所有原始碼。
+
+    射程是**推導出來的**而不是寫死清單：從 `_PY39_ENTRYPOINTS` 出發，凡是被 import
+    的 `tools/*.py` 或 `tools/lib/*.py` 一律遞迴納入整支檔。這一點是本鎖的鑑別力
+    來源——今天 `tools/lib/ci_liveness.py` 自己就有 `from datetime import UTC`，它
+    現在**合法**純粹是因為 dev_start 在版本閘**之後**才 import 它；哪天有人把那行
+    上移到 prelude，射程會自動把 ci_liveness 整支吸進來並當場報紅。
+
+### R115 dev_start TestNativeStdoutDecodingRoutingLock WHY
+
+靜態備援（任何平台都會跑）：帶 UTF-8 釘選的入口不得被繞過。
+
+    誠實劃界：字面比對不是行為證明（ADR-XPLAT-002 §3.2）。本類別只擋「把包裝拆掉、
+    退回裸呼叫」這條最可能的回歸路，讓 macOS/Linux 開發者改壞這裡時也有訊號——真正
+    的行為證據在 TestGetDispatcherHooksDirUnderCp950。
+
+### R115 dev_start TestResolveNativeExecutableOnRealPwsh7 WHY
+
+🔴 `DEF-101-769` 殘留項的補驗：`Major >= 6` 分支以**真 pwsh 7 行程**跑一次。
+
+    WHY 這一支非補不可（帳本逐字指派 R74，解鎖條件於 R73 成立的沿革原文＝
+    Guard_Repin 證據檔 §D-15）。
+
+    🔴 誠實劃界（勿超譯）：真 pwsh 7 在 Windows 上 `$IsWindows` **恆為真**（自動變數是
+    唯讀常數，`Set-Variable -Force` 亦蓋不掉——同檔上方 harness 區段已實測記載）。
+    故本組能真機補驗的是「`Major >= 6` 且在 Windows」這一格：分支確實走得到、且
+    Windows 語意（PATHEXT 過濾）沒有因為版本判斷而被跳過。「`Major >= 6` 且非 Windows」
+    那一格在本平台結構性不可達，仍只有 harness 鎖 ＋ macos/ubuntu CI 兜底。
+    把這句寫進 docstring 而不是宣稱「已用真引擎全面補驗」，正是本輪主軸本身。
+
+### R115 dev_start TestResolveNativeExecutableShortCircuitOrder WHY
+
+順序鎖（任何平台都跑）：短路必須存在，且排在 PATHEXT 過濾**之前**。
+
+    誠實劃界：本類別讀的是原始碼，不是行為證明（ADR-XPLAT-002 §3.2）。它存在的理由
+    不是「行為鎖跑不到的平台要有備援」那種例行搭配，而是行為鎖對「短路被搬到過濾之後」
+    這種改法**實測全綠**（見本節檔頭）——兩道鎖的射程真的不重疊。
+
+---
+
+## test_doc_loc_baseline_freshness_r60.py 類級 docstring 沿革搬遷（R115）
+
+### R115 doc_loc TestLockedLineProseIsAlsoManaged WHY
+
+R60 round 3（DEF-101-562）：受鎖行的**散文**也受管。
+
+    產生器 ＋ `--check` 只保證「被抽取的那個 token」新鮮，**不保證同一行的散文新鮮**；
+    正樣本刻意用真實缺陷的逐字形態（`R60=756`）。立案史料＝
+    `docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`。
+
+### R115 doc_loc TestSnapshotFingerprintTripwire WHY
+
+R60 round 3（DEF-101-563）：表②（dated snapshot）的 presumed-stale 觸發器。
+
+    四方複審 round 2 **全部四位獨立命中同一根因**（ARCH-R60R2-02／SA-R60R2-02／
+    SD-R60-R2-02／QA2-R60-01）：round 1 填了 ci-gate v0.30 的當時值、round 2 動了該
+    測試樹使實測改變而**沒人回填**，而表頭同時宣稱「四格皆經 SA 複審者獨立覆核相符」
+    ⇒ 假宣稱。根治＝把「靠人記得」換成因果式觸發器：測試計數只可能因測試樹變動而變。
+
+    🔴 **本類別刻意不斷言「真實文件的指紋現在是新鮮的」**（與上方表① 那幾支不同）：
+    那樣會讓根層 unittest 閘門在**任何一輪動到任何測試檔時立刻紅**，而回填要付分鐘級
+    代價 ⇒ 必然養成忽略紅燈的習慣，比沒有鎖更糟。故該斷言的住址是 **pre-push 第 8 支
+    守門 ＋ root-infra-ci 第 14 道**（收輪＝push 時點付代價才合理），其接線完整性由
+    `test_root_infra_parity.py` 的雙向鎖機械保證。本類別驗的是**機制本身有牙**。
+
+    ⚠️ **root-infra-ci 現因 CI 帳務停擺（DEF-101-081）在數秒內失敗，那一半從未在雲端
+    真正執行**（R60 r3 QA-R60R3-04 以 gh run list 實查／DEF-101-597）。故上句是
+    **接線完整性**的宣稱，不是活體守門的宣稱；今日真正會跑的只有 pre-push 那一半。
+
+### R115 doc_loc TestR67R2RootdirConftestIsFingerprintInput WHY
+
+R67 round 2（SD-R67-02）：決定收集結果的 rootdir `conftest.py` 也必須是指紋輸入。
+
+    WHY（Rule 9 — 測意圖非僅行為）：指紋錨的字面語意是「**該欄的數字是在哪一棵測試樹上
+    量的**」，它存在的唯一理由是「計數只可能因測試樹變動而變」這條因果判準。而 pytest
+    依 rootdir 隱式載入的 `conftest.py` **同樣決定那次執行收集到什麼**（一句
+    `collect_ignore_glob` 就能讓計數改變），卻住在四棵 glob 的覆蓋面之外 ⇒ 判準的「因」
+    漏了一半。SD-R67-02 已實測：在 `AISDLC_SDD_v0.30/conftest.py` 末尾加一行
+    `collect_ignore_glob`，實測計數改變、四格指紋**逐字不變**、`--check-snapshot` ✅ rc=0。
+
+    這與 R60 SD-R60R3-03 修的是**同一類缺口的另一個入口**（那次是樹**內**子目錄、這次是
+    樹**外** rootdir），故一併鎖住，而不是只把當下這一支檔補進去。
+
+### R115 doc_loc TestProseClaimDialectsAreNotBoundToOnePunctuation WHY
+
+R60 round 3（ARCH-R60R3-01／SD-R60R3-01 二方獨立命中）：判準(2) 不得綁死 `=`。
+
+    round 2 版本寫死 `R(\d+)\s*=\s*(\d+)`，於是**只要換一個標點就繞過整道判準**。
+    這與同輪 ARCH 指出的架構反模式是同一個：**鎖比對表面形式、不比對語意**
+    （`Find-GitBash` parity 只比字面值、本判準只認一種字面）。修法是把「主詞 × 連接」
+    拆開，讓收一種新方言＝往集合裡加一個字。
+
+    🔴 對抗式樣本一律以 `historical=()` 驅動：受鎖行上那些**真實的**歷史值在放寬判準後
+    已依機制設計登記進 `_SPECS`，沿用真實登記會讓樣本被白名單合法放行而失去鑑別力。
+
+### R115 doc_loc TestHistoricalWaiverHasStaleSelfCheck WHY
+
+R60 round 3（QA-R60R3-02／ARCH-R60R3-01 附帶／SA-R60R3-04／SD-R60R3-02）。
+
+    🔴 **四方全數獨立命中同一筆**：round 2 為判準(2) 新增 `Spec.historical` 這張豁免表，
+    卻沒有給它任何 stale 自檢。諷刺點在於**同一個函式的判準(1)** 錯誤訊息自己寫著
+    「本鎖刻意不設個別豁免——豁免表本身就是下一個 stale 站點」，而判準(2) 就設了一張。
+    同 repo 兩張姊妹豁免表都有自檢（`_BASELINE_WAIVERS` 的
+    `test_baseline_waivers_are_not_stale`、`archive_defect_log._ARITY_BASELINE` 的
+    「實測 < 登記即紅」），本表是唯一例外 ⇒ 同輪內標準不一致。
+
+### R115 doc_loc TestFingerprintGlobsAreSymmetricAndRecursive WHY
+
+R60 round 3（SD-R60R3-03）：四棵指紋樹的 glob 不得不對稱。
+
+    round 2 版本三棵 SDD 樹用非遞迴 `*.py`、只有 AutoClaude 用 `**/*.py`，**無 WHY**。
+    而表② 四格的計數全部來自 pytest，**pytest 收集測試是遞迴的** ⇒ 在任一棵的子目錄
+    新增測試會改變計數而指紋不動＝觸發器漏。修法選「把三棵對齊成遞迴」而非「補一條
+    WHY 說明會漏」：這是消除不對稱，不是加機制。
+
+### R115 doc_loc TestFingerprintIsLineEndingAgnostic WHY
+
+R60 round 3（DEF-101-613）：指紋不得隨 checkout 的行尾而變。
+
+    原版直接 hash `read_bytes()`。而 `.gitattributes` 宣告 `* text=auto eol=lf`
+    ⇒ 索引一律 LF，但本機 Windows 工作樹大量檔案是 CRLF（`git ls-files --eol` 數
+    `i/lf w/crlf`：v0.01 樹 48／v0.30 樹 72／AutoClaude 樹 92）⇒ **任何 fresh clone／
+    CI runner／macOS 機器 checkout 出來都是 LF，四格指紋必然全部對不上，
+    `--check-snapshot` 開箱即紅**。今日零後果純粹因為只有這一台 Windows 機器在跑。
+
+    本類別兩個方向都要鎖，缺一即是半套：
+      - **跨平台等價**：同內容不同行尾 ⇒ 指紋必須**相同**（沒有 `_normalize_eol` 就紅）。
+      - **未縮面**：真的改內容 ⇒ 指紋必須**不同**（證明沒把鑑別力連同行尾一起正規化掉）。
+
+### R115 doc_loc TestR67PlatformColumnIsFirstClass WHY
+
+R67-D1（本輪唯一 P1）：回填必須**只寫本機平台那一欄**，寫到別欄要在結構上不可能。
+
+    WHY（測意圖非僅行為，Rule 9）：§7 表② 存在的**唯一**理由是「讓開發者分辨『平台差異』
+    與『退化』」。R67 之前 `render_slow()` 的四組正則一律以 `**…**` 粗體錨定 Windows 欄
+    （原註解自陳「以 `**` 包裝限定在 Windows 欄」），而 `measure_slow()` 量的是本機——於是
+    在 macOS 上執行文件與 `--check-snapshot` 紅燈訊息**都指路**的那條回填指令，會把 macOS
+    實測值靜默寫進標示「Windows 11 實測」的格子：表格還是滿的、指令還是 rc=0，但它從此
+    在說謊。這比空著更糟——空著至少看得出來沒人量。
+
+    故本類別鎖的不是「render_slow 會改字」，而是**「另一個平台欄逐字不動」**這條不變量：
+    這是「平台差異可讀」這個目的在程式碼裡唯一能被機械檢查的形式。
+
+    邊界（誠實劃界）：本鎖保證「不會寫到別欄」，**不保證**寫進來的數字本身是在對的環境
+    量的（那由 `snapshot-fingerprints-<平台>` 錨的 provenance ＋ `--write --with-slow` 的
+    pgextras 守門負責，見 TestR67PerPlatformFingerprints／TestR67CliFailsLoud）。
+
+### R115 doc_loc TestR67PerPlatformFingerprints WHY
+
+R67-D6：指紋/provenance 逐平台記帳——另一欄的 stale 不得在結構上永遠測不到。
+
+    WHY：原版只有一條全域 `snapshot-fingerprints:` 錨，語意是「上一次回填時的測試樹」；
+    但回填在結構上只寫得到一欄（見 R67-D1）⇒ 另一欄的 stale **永遠不可能被偵測**。
+    實測（Scan-D）：把 macOS 欄三格灌成 9999，`--check-snapshot` 照樣印 ✅ rc=0。
+    一個「該紅時結構上不可能紅」的守門比沒有守門更糟：它會讓人以為那一欄被看著。
+
+    本類別一律以**合成的「兩欄皆新鮮」文本**驅動（把 live 指紋寫進兩欄），刻意不依賴
+    真實文件當下是否新鮮——否則本鎖會在任何一輪動到測試樹時連帶假紅，而回填要付分鐘級
+    代價（同 TestSnapshotFingerprintTripwire 的既定紀律）。
+
+### R115 doc_loc TestR67R2OtherPlatformNoticeIsNotAStandingWarning WHY
+
+R67 round 2（QA-R67-05）：別平台欄那一則**結構上恆亮**，故不得掛在警告頻道。
+
+    WHY（Rule 9 — 測意圖）：單機交替工作流（R66 在 Windows、R67 在 macOS、下一輪再換）下，
+    任一輪都會動到四棵樹之一 ⇒ 另一平台欄的指紋必然對不上，且**本機無論如何都清不掉**
+    （回填必須在那台機器上實跑）。於是它是一則「系統完全正常時也永遠亮著」的訊號。本 repo
+    已明文論證過後果（`tools/run_root_unittests.py`：「常亮的警告＝背景噪音」）——讀者學會
+    略過這一段，就會連同段真正有牙的「本機平台欄轉紅」一起略過。
+
+    本類別鎖的三條不變量：訊息**在 stdout 的資訊頻道**（不是 stderr 的 ⚠️）、**從未回填過**
+    與**回填過但過期**兩種狀態措辭可區分、且後者帶「距上次量測幾天」這個唯一可行動的量。
+
+    🔴 R67 round 3：視角欄由「本機平台欄」改為**固定挑一對受管欄**。原版 `setUp` 斷言
+    `current_platform_key()` 不得為 None，於是整類三支在無欄平台（Linux CI runner）上
+    全紅——但本類別驗的是 `snapshot_report()` 的「別欄提醒」機制，它吃「以哪一欄為視角」
+    當參數，跟本機是哪個平台無關。詳見 `TestSnapshotFingerprintTripwire.
+    test_check_snapshot_reds_on_documented_drift` 的同款論證。
+
+### R115 doc_loc TestR67CliFailsLoud WHY
+
+R67-D20：CLI 改 argparse——未知旗標／打錯字一律 rc=2，文件不得引用不存在的旗標。
+
+    WHY：原版 `"--flag" in argv` 手搓解析，未知旗標一律靜默掉進 default 分支並 rc=0
+    ⇒ 少打一個字母就把該紅的守門變成綠燈（假綠）。修法選「把 `--check` 實作為真旗標」
+    而非改引用它的文件——那是本 repo 既有慣例（`snapshot_sync.py`）。實測 rc 與
+    立案原文＝`docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`。
+
+### R115 doc_loc TestR67SlowMeasurementWindowIsFingerprintBracketed WHY
+
+R67 收尾 Scan-H（DEF-101-677）：`--write --with-slow` 的量測窗口 TOCTOU。
+
+    這不是「指紋這種觸發器本來就會漏」那一類（那是已揭露的邊界：docker 狀態、
+    生產碼改 parametrize 都能改變計數而指紋不動）。這一類是**回填路徑親手把觸發器
+    拆掉**：樹確實變動了——那正是本觸發器唯一認得的事件——卻被寫進錨當成基準。
+    既有契約已是「指紋一變即判 presumed stale」，唯獨回填路徑替自己免除了這一條；
+    修法是取消那個豁免，**不是**提高嚴格度。缺陷機制詳述與活體證據（兩個對不上的
+    計數）＝`docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`。
+
+### R115 doc_loc TestR67R3ThisFileMakesNoUnstatedPlatformAssumption WHY
+
+🔴 R67 round 3 回歸鎖：本檔的每一支鎖，在**任何**平台上都必須得出同一個結果。
+
+    WHY（缺陷類別，不是單一缺陷）：R67 把 `sync_onboarding_baselines.py` 平台化之後，
+    本檔多支鎖改用 `current_platform_key()`／`main(["--write", "--with-slow"])` 驅動，
+    等於各自悄悄加上一條**未言明的前提**——「本機必須是 §7 表② 有對應欄的平台」。
+    在作者的 macOS 上三個月都是綠的；直到 root-infra-ci 的相依缺口被補、這些鎖第一次
+    真的在 ubuntu runner 上執行，7 支同時紅。而那 7 個紅燈說的都不是「受測物壞了」，
+    是「測試自己的前提在這台機器上不成立」——**假紅比假綠更快讓人學會忽略紅燈**。
+
+    這一類不可能靠人審抓：它的症狀只在「沒人跑過的平台」上出現，而「沒人跑過」正是它
+    能活下來的原因（同 DEF-101-343~345「Windows 專屬測試連續 5+ 輪全 APPROVE 卻從未在
+    Windows 跑過」的形態，只是方向換成 Linux）。故本鎖把「換平台」變成**本機當場可跑**
+    的事：以模擬的 `sys.platform` 重跑本檔全部鎖，任一平台下的失敗即當場點名。
+
+    邊界（誠實劃界）：
+      - 只注入 `sys.platform`。`os.name`、真實檔案系統、路徑分隔符、是否有 pwsh 等
+        **不在**模擬範圍內 ⇒ 本鎖綠**不等於**「本檔在真 Linux/Windows 上必綠」，只等於
+        「本檔不因 `sys.platform` 而異」。對受測物而言這已是全部——
+        `sync_onboarding_baselines.py` 的平台輸入只有 `sys.platform`
+        （`platform_mod.*` 僅供 provenance 的 host 字串，不進任何判準）。
+      - 代價＝本檔跑 `len(_NEUTRALITY_PLATFORMS)` 倍。可接受的理由：本檔是純字串/雜湊
+        運算，實測全檔僅數秒；而它換回來的是「跨平台缺陷在**動工的那台機器上**就會紅」。
+
+### R115 doc_loc TestR71NightlyProbeActuallyParsesEachPlatformsOwnFormat WHY
+
+🔴 DEF-101-763：讓平台覆蓋不再靠人記憶的那道機械守，自己一天都沒量到過東西。
+
+    `nightly_evidence()` 隨 `fbc9bb5`（DEF-101-756/757/758）落地，首版彙總行解析是
+    `read_text().splitlines()[:3]` 找 `"PASS="`——那是 **mac 心跳**的形狀。win32 讀的卻是
+    `run_local_nightly.ps1` 的**全量 log 複本**，彙總行在第 491 行、字面是
+    `END nightly summary: …`，兩個致命點各自獨立、任一個都足以讓它恆不命中。
+    於是 `--check-snapshot` 的 Windows 欄每天都印「（心跳無彙總行）」——而那句話讀起來
+    像資料現況，不像探針壞掉。**fallback 文案把自己的失效偽裝成正常**，這是最難被發現的
+    一種壞法：沒有紅燈、沒有 traceback，只有一句看似合理的話。
+
+    本類別鎖的**意圖**（Rule 9）：探針必須拿**該平台自己的**格式去解析，且「解析不到」
+    與「檔裡真的沒有」必須說得出差別——兩者的處置相反（改探針 vs 去看那台機器）。
+
+### R115 doc_loc TestR71StaleFingerprintMustNotSwallowTheCoverageDetail WHY
+
+🔴 D-3：**一個無關的漂移不得讓整段平台覆蓋明細消失**（與 DEF-101-763 同族）。
+
+    實測立案（本批以 production 入口重現）：`tools/sync_onboarding_baselines.py
+    --check-snapshot` → rc=1，輸出**停在 ❌ 指紋區塊**，逐欄明細（baseline-origin 三態、
+    provenance、nightly 證據、四格記載值）一行都沒印。原因是 `main()` 在 `problems`
+    非空時當場 `return 1`，而那段明細排在 return 之後。
+
+    為何這是設計缺陷而不只是「順序不巧」：指紋 stale 在單機交替工作流下是**日常態**
+    （動到四棵測試樹任一棵就觸發，本批實測就是被另一個並行包改動 AutoClaude/tests/ 觸發的）
+    ⇒ 專門為根治 DEF-101-756 誤讀而加的那段說明，**在最常見的那條路徑上結構性看不見**；
+    讀者拿到的只有「某棵樹指紋變了」，於是又得自己腦補「那這平台到底驗過沒有」——回到
+    事故原點。**掩蓋的形態與 fallback 文案一樣：沒有紅燈、沒有 traceback，只是資訊沒了。**
+
+    修法（rc 語意**不放寬**）：明細兩條路都印，判決行標明它屬 presumed stale。
+
+### R115 doc_loc TestR75IronLawMechanismSubstance WHY
+
+鐵律三具名的機械物必須**真的在守該列的主題**（第 ③ 面：實質假機械物）。
+
+    🔴 為何「檔案存在」不夠：`行尾` 列先前具名的是 `tools/tests/test_ps1_bom.py`，而該檔
+    全篇是 .ps1 的 UTF-8 BOM 政策，對 CRLF／行尾**零判準**（實測 `crlf`／`eol`／`\r\n`／
+    `line ending` 在該檔命中 0）。路徑點得開、檔案打得開，只有讀完才知道守錯東西——
+    這比指向一個不存在的檔更難看見，而只斷言存在的鎖照樣放行。
+
+### R115 doc_loc TestR78GhostSymbolClaims WHY
+
+第四面：以**裸識別字**指認機械物時，那個符號必須真的存在。
+
+    🔴 這一類是 R78 本包最重要的交付。ARCH-03／SD-07 的十餘處逃逸全部從同一個縫出去：
+    上面三面的擷取器只認「帶副檔名的路徑」，而「裸常數名」這種寫法既不是
+    路徑、也不帶 `::`，於是「專門偵測懸空引用的那道鎖」對它結構上盲。只補個案不補判準，
+    同型缺陷下一輪必然再來——本 repo 已有多次同型復發的紀錄。
+
+### R115 doc_loc TestR75CloudCriteriaAreSatisfiableAtAnyCommit WHY
+
+🔴 **本輪最貴的一課，升為機械物**（比個案修復更重要）：
+
+    **判準的比較對象若會隨「被該判準所判的那個動作」本身而改變，這個判準結構上不可滿足。**
+
+    實證（R75，代價＝main 上三支 workflow 全紅）：表③ 的覆蓋面判準第一版拿
+    `git rev-parse origin/main` 當比較對象，要求錨的 `head-sha` 等於它。推導只有兩步——
+    CI 在 push **之後**執行，那時 `origin/main` 已經等於被測的那個 commit；於是要讓
+    commit X 通過，X 的檔案內容必須寫進 X 自己的 sha，而 sha 是 X 內容的雜湊 ⇒ **自我
+    指涉，任何 commit 都滿足不了**。本機 pre-push 時 `origin/main` 還沒前進所以是綠的，
+    push 完就紅——「本機全綠、雲端紅」在同一輪內第二次發生，而且兩次都出在**用來防這件事
+    的那個機制自己身上**。
+
+    本鎖讀 `cloud_*` 判準家族的**執行碼**（以 AST 去掉 docstring 與註解——教訓必須能寫在
+    散文裡，但不得寫進判準），任一支只要碰到 remote-tracking 參照就當場點名。這樣下一個
+    人想加「跟 origin 比一下」的判準時，會在寫完的那一刻就紅，而不是在 push 之後才紅。
+
+### R115 doc_loc TestR76ExitCriteriaSurviveTheirOwnAction WHY
+
+🔴 R75 頭號教訓的**家族層**承接者：退場／解除條件也適用同一條規則。
+
+    **判準的量測對象若會隨「被它所判的動作」而改變，這個判準結構上不可滿足。**
+    上方 `TestR75CloudCriteriaAreSatisfiableAtAnyCommit` 讀的是本模組內 `cloud_*` 家族的
+    Python 執行碼；本類別讀的是**任何語言的退場判準散文**——第三次復發正是從那兩個縫
+    （非 Python、非 cloud_ 前綴）走掉的。
+
+### R115 doc_loc TestR71SmokeTripwireIsInViewWithTheHonestReading WHY
+
+D-4：smoke 這條每日證據要進讀者視野，且不得憑空多出一條假通道。
+
+    🔴 **R74 重寫（DEF-101-786 殘留收尾）**：本類別的舊敘述把「win32 smoke 讀不到、
+    故只印說明」寫成現況——而落點自 R71 的 `1e5214b` 起就存在（`Start-Transcript`
+    ＋ 14 天輪替），R73 已查證並訂正敘述，判定邏輯卻沒動。也就是說**這組鎖守的是一個
+    已經不成立的設計取捨**，於是那條每日真機證據又多兩輪留在平台覆蓋判定之外。
+
+    現行判準（逐平台不同，因為兩邊的 smoke 不是同一種東西）：
+      · win32  ＝ `SMOKE_HEARTBEATS` 真探針，smoke 那行必須是**量測值**；
+      · darwin ＝ 刻意無探針（它的 smoke 是同一輪 nightly 的 stage [1/4]），只印解讀
+        守則；接一條探針會讓同一件事被量兩次、看起來像兩條獨立證據。
+    兩種誤讀都要擋：「本機無此檔」不得讀成「該平台沒在跑」（DEF-101-756 換載體），
+    「有說明文字」也不得讀成「已納入判定」。
+
+### R115 doc_loc TestR78MaturityCriteriaSsot WHY
+
+M1〜M6 只有一個家，且 M5 的數字只能來自載具（R78 ARCH-05）。
+
+    🔴 為何是 blocking 級：這六條是**治理層判「這一輪算不算成熟」的判準**，而它們原本
+    寄生在 `CrossPlatform_R76_Scan_Findings.md` ——一份輪次專屬的掃描發現文件。輪次文件
+    按定義是凍結記錄，不會有人回頭維護；活判準寄生在凍結記錄裡，等於**沒有家**。
+    後果已經發生：M5 的攔截率同時住三個地方（判準表／交棒書 Q3／ADR 逐輪覆蓋表 R77 列），
+    三處全部停在**修復前**的值——而讓它們過期的，正是同一個 commit 落地的第六道判準。
+    低報自己的成果不是好事：下一輪跑載具會看到「一輪暴衝」，然後去找一個不存在的原因。
+
+    四道判準（前三道守歸屬，第四道守新鮮度）＋ 一道掃描器自檢。
+
+### R115 doc_loc TestR78HandoffClaimsCarryLiveCommands WHY
+
+交棒書凡述及「尚未做」，一律附現查指令（R78 SA-04／SA-05 的體例層修法）。
+
+    🔴 為何是體例而不是個案：立案的兩筆 finding 都不是「寫錯了」，是**把量測值當常數
+    寫**——交棒書記的是收輪那一刻的狀態，讀者卻在數天後、由別人動過的樹上讀它。
+    附上現查指令，讀者的第一動作就會是重量而不是採信。
+
+    逃生口是 `handoff-claim-verified:`（WHY 必填）：有些事（例如「這一輪有沒有做複審」）
+    真的沒有機械現查管道，逼人編一個指令比誠實說沒有更糟。
+
+    現行形狀：取材面加收**標題塊／散文塊**（見 `_handoff_claim_blocks`），反崩塌改成
+    **逐文件**（見 `_handoff_perdoc_problems`），並對「最新一份」再加一道不得豁免的牙。
+    兩筆 finding 的原文、以及 R82 Q4-01 修掉的那兩個縫＝
+    `docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`。
+
+### R115 doc_loc TestR85DocNamedLiveCheckEntriesActuallyRun WHY
+
+本檔指名的現查入口壞掉時，今天**完全靜默**——沒有人在跑它，直到有人照文件跑一次。
+
+    🔴 立案（R85／C5，不是假想）：根 CLAUDE.md 有**兩處**寫「reset 分佈的數字一律現查
+    `python tools/probe/reset_window_distribution.py`」，而該指令當時 rc=1
+    （`AttributeError: _RESET_RE`——R81 把判讀原語搬家、hook 那側改成具名 import 清單，
+    私有符號結構上進不了清單）。⇒ 那條紀律**結構上執行不了**，而它正是本 repo 反覆強調的
+    「數字是量測值不是常數」的載具。三支 probe 當時一支 smoke 測試都沒有。
+
+    🔴 **判準刻意不判 rc**（假紅普查的直接結果，不是客氣）：以本輪落地當回合的入口集合
+    逐支實跑 `--help`，**6 支裡 2 支合法回非 0**——`AutoClaude/tools/check_loc_budget.py`
+    不吃 `--help`、會真的去跑預算檢查並以「超標」回 rc=1（那是真實預算狀態，不是壞掉）；
+    `tools/lib/quota_policy.py` 對未知引數印用法回 rc=2。判 rc=0 就是 2/6 假紅，而
+    「擋到讓人無法工作的守衛會被整個關掉」。⇒ 改判**有沒有噴 Python traceback**：
+    import 期腐爛（模組搬家／符號改名／語法錯）一律以它現形，而合法的用法錯誤不會。
+
+    🔴 誠實劃界：`--help` 這一層抓得到 **import 期**腐爛，抓不到 C5 那種**執行期**
+    AttributeError（argparse 在走到那段之前就退出了）。所以下面第二支測試對 C5 的
+    那支 probe 做**合成語料端到端**——那才是會抓到 C5 的那一條。其餘入口今天沒有同級
+    的行為測試，這裡不假裝有。
+
+### R115 doc_loc TestWriteModeNeverAimsAtTheTrackedBaselineFile WHY
+
+跑根層閘門不得讓 git-tracked 的 `ONBOARDING.md` 漂移。
+
+    🔴 **立案假設先被證偽，本鎖守的是另一件事**。立案判讀是「跑測試會回寫
+    ONBOARDING.md」。實測反過來：把該格改成 stale（`total=20426` vs 實測 16483）後跑
+    本檔 262 支，得到 **4 支 FAIL、零寫入、檔案一個 byte 都沒動**——`--check` 才是預設
+    模式（`main()`：`mode = selected[0] if selected else "--check"`），寫入只有
+    `--write` 一條路，而 pre-push 消費的是唯讀的 `--check-snapshot`。那次漂移的真兇是
+    **有人手動跑了 `--write`**：改了 LOC 計價規則後保鮮鎖正確地轉紅，而該格自己的散文
+    就寫著「一鍵回填」。
+
+    ⇒ 今天沒有「測試會寫檔」這個 bug，有的是**沒有任何機械物阻止它明天出現**：本檔已
+    有四個合法的 `--write` 呼叫站點，它們安全**只因為慣例**（外層 `_slow_window_sandbox`
+    把 `_ONBOARDING` 改到 tmp）。第五個站點漏了改道，真檔就會被改寫，而後果不只是髒
+    工作樹——本 repo 的 pre-push 驗**工作樹**而非 commit，被意外漂移擋下的人無法自救。
+    本鎖把那條慣例升成判準：漏改道在**閘門時**轉紅，而不是等漂移發生。
+
