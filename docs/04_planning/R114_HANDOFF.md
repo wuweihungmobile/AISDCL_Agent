@@ -28,25 +28,31 @@
 
 ## 二、還沒做什麼（每項附載體與現查指令）
 
-- **喚醒鏈 G1~G4 實作**：v2.1.13 已於 2026-08-31 由掌舵者互動裁決**落款生效**（原呈報單第 1 件），
-  實作批同日解凍；載體＝`DEF-200-234`／`DEF-200-235`／`DEF-200-236`；現查
+- **喚醒鏈 G1~G4 實作尚未完成**：v2.1.13 已於 2026-08-31 由掌舵者互動裁決**落款生效**（原呈報
+  單第 1 件、實作批同日解凍），但四缺口的程式面尚未閉合；載體＝`DEF-200-234`／`DEF-200-235`／
+  `DEF-200-236`；現查
   `git grep -n "Status：Adopted" docs/04_planning/PRD_Amendment_R113_WakeChain_LastMile.md`
-  （有命中＝已落款）。同日實戰再證根因：本 session 撞線死亡後喚醒鏈四段全通、斷點＝
-  `quota_back_no_resume`（`AUTOSDD_RESUME_OFF` User 層=1）＋G1~G4，取證＝證據檔 §7。
-- **DEF-200-238 修復未動工**：大小寫正規化＋紅綠自證＋假紅普查；設計上與 `_GOV_EXACT` 納管二檔
-  （PRD v2.1.13 §3(a)）同批、治理面動作由收尾單人窗口做。現查＝跑證據檔 §4 之可重跑探針。
-- **DEF-200-239 修復未動工**：全套測試在真機種下自續排程 T-r95（孤兒本體已手動清除，但下次
-  全套會重種）；修法＝該測試族注入假 scheduler 後端＋回歸鎖。現查
+  （有命中＝已落款）＋ `python tools/session_resume_planner.py --pace`。同日實戰再證根因：本
+  session 撞線死亡後喚醒鏈四段全通、斷點＝`quota_back_no_resume`（`AUTOSDD_RESUME_OFF` User
+  層=1）＋G1~G4，取證＝證據檔 §7。
+- **DEF-200-238 修復尚未動工**：大小寫正規化＋紅綠自證＋假紅普查；設計上與 `_GOV_EXACT` 納管
+  二檔（PRD v2.1.13 §3(a)）同批、治理面動作由收尾單人窗口做。現查
+  `python tools/check_defect_log_crossref.py --unresolved-count`（238 仍列未結）＋證據檔 §4 探針。
+- **DEF-200-239 修復尚未動工**：全套測試在真機種下自續排程 T-r95（孤兒本體已手動清除，但每跑
+  一次全套就重種）；修法＝該測試族注入假 scheduler 後端＋回歸鎖。現查
   `Get-ScheduledTask -TaskName 'T-r95'`（跑過全套後仍查無＝已修）。
-- **DEF-200-211（ADR-XPLAT-013 Phase 2 (b)(c)）**：仍待四方批；現查
-  `python AutoClaude/tools/check_loc_budget.py --json`（policy_version 未含 (b)(c) 即未落）。
-- **DEF-200-212① main() 接線**：續等帳本時鐘（本輪實測 clock=100、strict 3）；現查＝重跑證據檔
-  §5 探針；strict 紅綠現查 `python tools/check_handoff_carriers.py --self-test`。
-- **DEF-101-693「22 步逐列覆核」缺口列**：bootstrap 往返／dev_start／AutoClaude 子集／SDD
-  ci-gate 雙軌無獨立 Windows 實跑紀錄；載體＝外部軌該列（複查日 2026-08-31）。
-- **長債軌 14 天複查時鐘**：2026-09-13 前須複查（DEF-101-886 P1 優先）；現查
+- **DEF-200-211（ADR-XPLAT-013 Phase 2 (b)(c)）仍未過四方批**；現查
+  `python AutoClaude/tools/check_loc_budget.py --json`（policy_version 未含 (b)(c) 即仍未落）。
+- **DEF-200-212① main() 接線尚未接**（續等帳本時鐘；本輪實測 clock=100、strict 3）；現查＝重跑
+  證據檔 §5 探針；strict 紅綠現查 `python tools/check_handoff_carriers.py --self-test`。
+- **DEF-101-693「22 步逐列覆核」尚未完成**：bootstrap 往返／dev_start／AutoClaude 子集／SDD
+  ci-gate 雙軌仍未取得獨立 Windows 實跑紀錄；載體＝外部軌該列（複查日 2026-08-31）；現查
+  `python tools/check_defect_log_crossref.py`（外部軌逐字列出 693）。
+- **長債軌 14 天複查本輪尚未做**：2026-09-13 前須複查一次（DEF-101-886 P1 優先）；現查
   `python tools/check_defect_log_crossref.py`（逾期 warn 級自動出聲）。
-- **v2.1.10／v2.1.11／v2.1.12 三批修憲仍 Proposed**（PRD 修訂表現查止於 v2.1.9）。
+- **v2.1.10／v2.1.11／v2.1.12 三批修憲仍未落款**（Proposed；PRD 修訂表現查有 v2.1.9 與
+  v2.1.13、無此三批）；現查
+  `git grep -n "Status：Proposed" docs/04_planning/PRD_Amendment_R112_WakeChain.md`。
 
 ## 三、下一步確切指令（下輪開場）
 
