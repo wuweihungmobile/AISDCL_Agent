@@ -36,11 +36,9 @@
 | DEF-ID | 具名阻塞源 | 阻塞起始日 | 解鎖條件（可機械查） | 最近複查日 |
 |---|---|---|---|---|
 | DEF-101-518 | GitHub Actions 帳務 | 2026-08-21 | 帳務恢復後一次真實 `windows-latest` run 觀測到 bootstrap 之後步驟確實用到 `.venv` 的 python（`gh run list --workflow=windows-compat-ci.yml` 見 `conclusion=success` 且 `steps>0`） | 2026-08-27 |
-| DEF-101-693 | Windows 實機 | 2026-08-21 | 下一個 Windows 真機輪逐列覆核 windows-smoke 22 步（`tools/tests/test_smoke_ci_sync.py::test_registered_smoke_groups_exist_in_that_script` 先行，另需真機執行紀錄） | 2026-08-30 |
+| DEF-101-693 | Windows 實機 | 2026-08-21 | 下一個 Windows 真機輪逐列覆核 windows-smoke 22 步（`tools/tests/test_smoke_ci_sync.py::test_registered_smoke_groups_exist_in_that_script` 先行，另需真機執行紀錄） | 2026-08-31 |
 | DEF-101-703 | GitHub Actions 帳務 | 2026-08-21 | `*-nightly-full`（windows-compat-ci.yml／macos-compat-ci.yml）至少一次排程視窗成功（`gh run list --workflow=windows-compat-ci.yml --event schedule` 見 `conclusion=success` 且 `steps>0`），之後移除 `WAIVER_UNTIL` | 2026-08-27 |
 | DEF-200-186 | GitHub Actions 帳務 | 2026-08-21 | 拆自 `DEF-101-866` 條件 (b)：`gh workflow run windows-compat-ci.yml --ref main` 確認 nightly-full job 真的有 `steps`，端到端全綠 | 2026-08-27 |
-| DEF-200-063 | Windows 實機 | 2026-08-21 | Windows 真機執行 `claude -p --debug hooks` 取得 `Hook SessionStart.*success`，同時檢查負面表徵（彈窗真的停止、`pythonw.exe` 載具解析成功、`-WindowStyle Hidden` 實效） | 2026-08-30 |
-| DEF-200-147 | Windows 實機 | 2026-08-21 | Windows 真機重跑 govwrite 九格 rc 矩陣＋NTFS 大小寫繞行探針（`.ENV` 等形態）＋修3/修4 的 schtasks 取證（`NextRunTime` 值憑證）三項 | 2026-08-30 |
 | DEF-200-174 | GitHub Actions 帳務 | 2026-08-21 | 帳號所有者查 GitHub Billing 頁面確認 spend limit 已調高或 runner 計費已恢復，`gh api repos/.../actions/runs` 觀測對應 job 的 `runner_id≠0` | 2026-08-27 |
 | DEF-200-075 | 其他-macOS實機（darwin執行面量測值，Windows結構上量不到也修不了） | 2026-08-27 | 回 mac 真機後第一動作＝重量 AutoClaude 樹 skip census（量測入口見主帳本該列配方）；macos-compat-ci 長期紅不可依賴 | 2026-08-27 |
 
@@ -48,6 +46,33 @@
 
 > 「最近複查日」欄僅存放純 ISO 日期；完整複查敘事（機械取證細節）逐字搬遷至本節，
 > 依 DEF-ID 分節保全，不刪減任何已驗證內容，僅搬遷位置。
+
+### DEF-200-063（複查 2026-08-31＝解鎖條件達成，列已移出本表）
+
+R114 Windows 真機取證：`claude -p --model haiku --debug hooks --debug-file h.log "ok"` 取得逐字
+`Hook SessionStart:startup (SessionStart) success:`＋`provided additionalContext (191 chars)`；
+`pythonw.exe` 載具 `Test-Path`＝True；同 log 兩筆 `EFTYPE` 屬雙載具佈線之異平台條目設計性失敗
+（`tools/lib/hook_wiring.py:149/:166` 記載），非缺陷；哨兵 schtasks `LastTaskResult=0`、
+`NextRunTime=2026/8/31 14:23:02`（15 分鐘巡邏靜默運行＝彈窗表徵消失的機械旁證）；
+`-WindowStyle Hidden` 機械物實機重跑 `test_check_hooks_liveness.py`＝170 passed＋132 subtests。
+逐字證據＝`CrossPlatform_R114_WakeChain_Review.md` §3.1。
+
+### DEF-200-147（複查 2026-08-31＝解鎖條件達成，列已移出本表）
+
+R114 Windows 真機取證三項全達成：①12 列 rc 矩陣
+`TestGovernanceFilesAreReadOnlyWhenUnattended`＝12 passed＋24 subtests passed；
+②NTFS 大小寫繞行探針＝已存在檔變體全數命中（`.ENV`→`.env` 等）——原始疑慮解除；
+探針同時揭露「尚不存在的保護面目標」兩形態繞過＝新缺口另立 `DEF-200-238`（主帳本）；
+③schtasks 取證＝哨兵 `NextRunTime` 值憑證到手，halt 多軸武裝 argv 由
+`test_context_budget_guard.py` SentinelWiring 實機 12 passed 釘住（真 halt 本窗未發生，誠實留白）。
+逐字證據＝`CrossPlatform_R114_WakeChain_Review.md` §3.2。
+
+### DEF-101-693（複查 2026-08-31）
+
+複查：R114 真機已跑先行判準（sync 測試 1 passed）＋`windows_smoke_local.ps1` 原生 PS 5.1 載具
+實跑 PASS=12 FAIL=0 rc=0（本地可化步驟全綠）；但 CI windows-smoke 22 步中 bootstrap 往返、
+dev_start、AutoClaude 子集／integration_gate、SDD ci-gate 雙軌數列本輪無獨立實跑紀錄 ⇒
+「逐列覆核」未完成，阻塞仍成立、列保留。證據＝`CrossPlatform_R114_WakeChain_Review.md` §3.3。
 
 ### DEF-101-518（複查 2026-08-27）
 
