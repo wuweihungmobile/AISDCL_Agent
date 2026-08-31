@@ -28,12 +28,16 @@
 
 ## 二、還沒做什麼（每項附載體與現查指令）
 
-- 🔴 **喚醒鏈 G1~G4 實作仍零行**：PRD 案已過四方但**未落款**（修憲程序：掌舵者落款後才准動工）。
-  載體＝`DEF-200-234`／`DEF-200-235`／`DEF-200-236`；現查
-  `git grep -n "Status：Proposed" docs/04_planning/PRD_Amendment_R113_WakeChain_LastMile.md`
-  （有命中＝仍未落款，動工即違規）。
+- **喚醒鏈 G1~G4 實作**：v2.1.13 已於 2026-08-31 由掌舵者互動裁決**落款生效**（原呈報單第 1 件），
+  實作批同日解凍；載體＝`DEF-200-234`／`DEF-200-235`／`DEF-200-236`；現查
+  `git grep -n "Status：Adopted" docs/04_planning/PRD_Amendment_R113_WakeChain_LastMile.md`
+  （有命中＝已落款）。同日實戰再證根因：本 session 撞線死亡後喚醒鏈四段全通、斷點＝
+  `quota_back_no_resume`（`AUTOSDD_RESUME_OFF` User 層=1）＋G1~G4，取證＝證據檔 §7。
 - **DEF-200-238 修復未動工**：大小寫正規化＋紅綠自證＋假紅普查；設計上與 `_GOV_EXACT` 納管二檔
   （PRD v2.1.13 §3(a)）同批、治理面動作由收尾單人窗口做。現查＝跑證據檔 §4 之可重跑探針。
+- **DEF-200-239 修復未動工**：全套測試在真機種下自續排程 T-r95（孤兒本體已手動清除，但下次
+  全套會重種）；修法＝該測試族注入假 scheduler 後端＋回歸鎖。現查
+  `Get-ScheduledTask -TaskName 'T-r95'`（跑過全套後仍查無＝已修）。
 - **DEF-200-211（ADR-XPLAT-013 Phase 2 (b)(c)）**：仍待四方批；現查
   `python AutoClaude/tools/check_loc_budget.py --json`（policy_version 未含 (b)(c) 即未落）。
 - **DEF-200-212① main() 接線**：續等帳本時鐘（本輪實測 clock=100、strict 3）；現查＝重跑證據檔
@@ -59,19 +63,20 @@ python tools/session_resume_planner.py --pace
 
 ## 四、禁止事項
 
-不准 `--no-verify`；不准 `AUTOCLAUDE_SKIP_HOOKS=1`；不准調高任何棘輪常數換綠；PRD 修憲未落款
-前不准動工 G1~G4 實作（含無頭專屬 settings 檔的建立——該檔屬落款後保護面成員，檔名見 PRD 案
-§3(a)）；Windows 側禁用 Bash 工具（鐵律一）；不得為消 DEF-200-212 的 strict 假陽性而改寫歷史
-文件或帳本時鐘輸入。
+不准 `--no-verify`；不准 `AUTOCLAUDE_SKIP_HOOKS=1`；不准調高任何棘輪常數換綠；G1~G4 實作以
+v2.1.13 為唯一施工圖（2026-08-31 已落款；無頭專屬 settings 檔屬保護面成員，建立後即納管，檔名
+見 PRD 案 §3(a)）；Windows 側禁用 Bash 工具（鐵律一）；不得為消 DEF-200-212 的 strict 假陽性
+而改寫歷史文件或帳本時鐘輸入。
 
 ## 附件一：收尾閘門與帳本前後量測
 
 - 開場（2026-08-31 14:07）：未結 **53**／166，外部軌 8、長債軌 7。
-- 收尾：未結 **54**／167（新增 1＝DEF-200-238／結案 0——外部軌 063/147 不計分母；淨 +1，
-  性質＝架構輪順帶取證的誠實立案，非結案輪失效訊號）；外部軌 **6**、長債軌 7。
-- 淨額棘輪逃生口：本輪收尾以 `AUTOSDD_NET_RATCHET_OFF=1` 跑 crossref——理由＝本輪為交棒書
-  指定的架構輪＋實機取證批，取證過程誠實立案新缺陷（DEF-200-238），本質屬判準自述的
-  「發現輪」形態；不立案才是砸溫度計。逃生口使用僅限本輪收尾窗口，下輪不繼承。
+- 收尾：未結 **55**／168（新增 2＝DEF-200-238、DEF-200-239／結案 0——外部軌 063/147 不計
+  分母；淨 +2，性質＝架構輪順帶取證的誠實立案，非結案輪失效訊號）；外部軌 **6**、長債軌 7。
+- 淨額棘輪逃生口：本輪收尾以 `AUTOSDD_NET_RATCHET_OFF=1` 跑 crossref／commit——理由＝本輪為
+  交棒書指定的架構輪＋實機取證批，取證過程誠實立案新缺陷（238＝govwrite 大小寫繞過；239＝
+  全套測試在真機種下自續排程 T-r95），本質屬判準自述的「發現輪」形態；不立案才是砸溫度計。
+  逃生口使用僅限本輪收尾窗口，下輪不繼承。
 - 文件閘門：crossref rc=0／archive rc=0／carriers rc=0（帳本編修後實跑）。
 - 全套根層 unittest（最後一次寫文件之後跑）：結果由收尾窗口回填於 commit 訊息與輪末回報
   （本檔不預寫未跑出的數字）。
@@ -79,10 +84,10 @@ python tools/session_resume_planner.py --pace
 
 ## 呈報單（需掌舵者本人核准）
 
-1. **喚醒鏈 PRD 修憲案落款**（`PRD_Amendment_R113_WakeChain_LastMile.md`，批次序 v2.1.13）：
-   四方複審已收斂（一輪 2×REJECT+2×AWC → 修訂三批 → 二輪 4×AWC → SD 定點 APPROVE）。
-   落款後 G1~G4 實作批才准動工。
+1. ~~喚醒鏈 PRD 修憲案落款~~ ✅ **已落款**（掌舵者 2026-08-31 互動裁決「落款生效」；落款程序
+   同日執行：PRD v2.1 修訂表 v2.1.13 列＋修憲案 Status→Adopted＋帳本三列解鎖條件改寫）。
 2. **v0.02/v0.03/v0.04 各 4 支假 SHA drift 檔（共 12 支）`git rm` 例外**（R113 呈報單原件，
    R114 已以 `git ls-files` 現查 12 支仍被追蹤；形態如
    `AISDLC_SDD/AISDLC_SDD_v0.02/build/reports/drift/COMMIT-sha-high.yaml`，另有 sha-low／
-   sha-3rd／testsha-001 三名，×3 版目錄）：Copy-on-Evolve 例外核准後 <30 分鐘可清。
+   sha-3rd／testsha-001 三名，×3 版目錄）：掌舵者 2026-08-31 裁決**下輪再議**，本呈報單
+   原樣交棒。

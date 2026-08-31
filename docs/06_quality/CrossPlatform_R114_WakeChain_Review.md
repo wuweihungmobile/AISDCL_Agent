@@ -110,3 +110,41 @@ loose problems = 0
 
 - 本檔 §3～§5 全部數字為主控當回合工具輸出逐字轉錄；四方複審與修訂的逐字轉錄住 session workflow/agent 轉錄檔（`wf_3fbcebef-499` 及後續三個 agent），未逐字搬入本檔（量級 68 萬 tokens），本檔只收判決與去重後清單。
 - pace 讀數在本輪兩度被 Stop hook 判過期（TTL 135s）並即時重量訂正——守衛工作正常，主控不得引用陳舊額度讀數的紀律經實測有效。
+
+## 7. 落款當日實戰再證：本 session 撞線死亡的死亡視窗取證（2026-08-31）
+
+主控（本 session）於收輪回報後撞 session 撞線死亡（五小時窗 96%→100%），死前落款程序僅執行一半。
+掌舵者 18:20 後回到終端質問「Token 有繼續耗用但主 agent 沒起來」。逐字取證（resume log
+`autosdd_resume_log_autosdd_resume_plan_8c007a0f-….jsonl`，時間皆 +08:00）：
+
+- 17:32:06 `sentinel_decided {action: arm_reset}`「偵測到未處理的撞線；觀測 reset=18:00 尚未到 ⇒
+  要求排程器改在那個時刻醒」→ 17:32:07 `sentinel_rearmed {fire_at: 18:02:00, credential: 06:02:00}`
+- 18:02:00 `sentinel_woken` → 18:02:01 `sentinel_decided {action: probe}`「reset 已過 ⇒ 花一次探測」
+- 18:02:05 `probed {rc: 0, quota_open: true}` → **`quota_back_no_resume`**（額度確認回來、但不 spawn 續跑）
+
+⇒ 也就是：**「usage 高水位→武裝→reset 喚醒→探測確認」四段全通（Windows 第二次實戰全通）**，
+斷點只剩一格＝`quota_back_no_resume`：`AUTOSDD_RESUME_OFF` 現查 **User 層=1**（R108 已立案
+D1~D4、預言會重演——本日重演）。該開關是先前輪次為防「無頭窗口不可控亂燒」而設的人為安全閥；
+G1~G4（v2.1.13）落地前開啟自動續跑確實不安全，落地後應移除該閥讓鏈路閉合（掌舵者本日指令
+「不需要人類介入」＝方向已定）。
+
+其餘取證：
+- 死亡視窗內 **HEAD 不變（ee98a6b）、工作樹乾淨** ⇒ 沒有任何背景 agent 亂改；token 消耗來源＝
+  死亡前主控自身的收輪工作（複審/修訂 fan-out）＋喚醒鏈的一次零成本探測，非無主 agent 亂燒。
+- `quota_back_no_resume` 後排程任務自刪但 armed stamp 未清 ⇒ 18:20 `--pace` 的 `liveness_problem`
+  警語命中「stamp 說已武裝、排程器查無工作＝喚醒鏈斷線」——**G4 的活體證據**。已以
+  `--arm-sentinel` 重新武裝（NextRunTime=2026/8/31 18:36:56 值憑證，arm rc=0）。
+- 順手捕獲排程孤兒 **`T-r95`**：R95 時代測試建立的真 schtasks 工作（argv 指向 temp trace 目錄
+  `trace-forms-s815td1w` 的合成任務書），每 15 分鐘空轉至今（其 log `…sess-forms.jsonl` 16:24~18:09
+  連續 `sentinel_woken`）。屬測試隔離洩漏（測試建立真排程未清理）；處置與洩漏源定位見 §7.1。
+
+### 7.1 T-r95 孤兒處置
+
+- 處置：`Unregister-ScheduledTask -TaskName 'T-r95' -Confirm:$false` 後複驗
+  `Get-ScheduledTask -TaskName 'T-r95'` 查無此工作（逐字輸出「T-r95 confirmed gone」）。
+- 洩漏源定位（Grep 實測）：`tools/tests/test_context_budget_guard.py:2010`
+  `def _tick(self, plan, live, tmp, task: str = "T-r95")`＋`:2118` 直接以 `task_name: "T-r95"`
+  餵 tick——該測試族在真機走到**真 schtasks 註冊**，工作自我重掛、測試結束不清理 ⇒ 每次跑
+  根層全套都會重新種下（時間軸吻合：本日post-commit 全套結束 ≈16:09，首個 woken=16:24）。
+- 裁決：**立列 `DEF-200-239`（P2）**——手動清除不解決「下次全套再種」的結構問題；修法＝
+  該測試族注入假 scheduler 後端＋回歸鎖斷言測試結束後排程器查無 T-r95。
