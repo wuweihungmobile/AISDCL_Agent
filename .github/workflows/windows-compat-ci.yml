@@ -542,6 +542,12 @@ on:
       - "tools/lib/guard_line_taxonomy.py"
       - "tools/lib/ledger_closing_guards.py"
       - "tools/lib/oversize_repin.py"
+      # R114 收尾：v2.1.13 G1~G4 實作批兩支新建 tools/lib/ 共用層（同 R80~R102 連續多輪
+      #      的同一形態、同一支判準 test_ci_paths_cover_root_consumers——本次在雲端攔下）。
+      #      resume_route.py＝無頭續跑權限姿態 argv／A-PRE 預檢／handback 載體；
+      #      relay_machine.py＝配額內接力狀態機＋fire 後重掛（v2.1.13 §3(c)(d)）。
+      - "tools/lib/resume_route.py"
+      - "tools/lib/relay_machine.py"
       # R100/R102 收尾：本輪新建的四支根層 SSOT（動態配速可得性軸遲滯狀態機／R16 啟動
       #      自檢不變式／死區與變化率限制平穩性機制／額度對帳，其中 quota_reconcile.py
       #      為 R100 加入、此前漏列）。漏列的代價逐字同 DEF-101-042：只改該檔時其回歸鎖
@@ -855,6 +861,12 @@ on:
       - "tools/lib/guard_line_taxonomy.py"
       - "tools/lib/ledger_closing_guards.py"
       - "tools/lib/oversize_repin.py"
+      # R114 收尾：v2.1.13 G1~G4 實作批兩支新建 tools/lib/ 共用層（同 R80~R102 連續多輪
+      #      的同一形態、同一支判準 test_ci_paths_cover_root_consumers——本次在雲端攔下）。
+      #      resume_route.py＝無頭續跑權限姿態 argv／A-PRE 預檢／handback 載體；
+      #      relay_machine.py＝配額內接力狀態機＋fire 後重掛（v2.1.13 §3(c)(d)）。
+      - "tools/lib/resume_route.py"
+      - "tools/lib/relay_machine.py"
       # R100/R102 收尾：本輪新建的四支根層 SSOT（動態配速可得性軸遲滯狀態機／R16 啟動
       #      自檢不變式／死區與變化率限制平穩性機制／額度對帳，其中 quota_reconcile.py
       #      為 R100 加入、此前漏列）。漏列的代價逐字同 DEF-101-042：只改該檔時其回歸鎖
