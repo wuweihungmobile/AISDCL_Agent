@@ -354,6 +354,11 @@ _GOVERNANCE_DOCS = (
     # 且帳本兩列以「＝R111鑑識檔」座標宣稱指向本檔（⇒ 指針稽核）。 round-label-ok
     # 即刻登記，同 R108 姊妹檔判例。 round-label-ok
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R111_Sentinel_Forensics_Mac.md",
+    # dry_run_e2e perf 連紅鑑識與基線重播種（2026-08-31，刻意零輪號＝不推當前輪時鐘）：
+    # WHY 屬本類＝帳本 DEF-200-237（立案即結）與 DEF-200-229（結案）皆以座標宣稱指向本檔
+    # （⇒ 指針稽核），而 A/B 歸因實測、環境現查、重播種機制路徑的逐字帳唯一居所在本檔——
+    # 複審者要重驗「非 code 迴歸」判定與 229 的修法就得讀完它（⇒ 體積守門）。即刻登記。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_DryRunE2E_Perf_Env_Reseed.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/{CrossPlatform,Quota}_*.md`。這**不是**把具名

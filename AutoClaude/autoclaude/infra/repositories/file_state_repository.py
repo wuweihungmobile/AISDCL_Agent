@@ -55,6 +55,28 @@ _STALE_TMP_SECONDS = 3600
 _ORPHAN_TMP_SUFFIX_RE = r"\.\d+\.[0-9a-f]+\.tmp\Z"
 
 
+#: DEF-200-229：Windows 上 CPython 開檔不帶 FILE_SHARE_DELETE ⇒ 任何讀者（本函式
+#: 自己的 prev 讀取、load_latest_by_playbook、外部檢視器）持有目的檔把手的瞬間，
+#: `os.replace` 會以 PermissionError（winerror=5）拒絕換名——POSIX 的 rename 對開著
+#: 的檔恆成功，故本缺口只在 Windows 真機現形（首見＝pre-push 全套＋雙重負載下
+#: DEF-200-043 的併發測試機率性紅）。讀者把手是毫秒級瞬態 ⇒ 有界重試等它放手
+#: （預算 15×20ms=300ms），等不到再如實拋出、由呼叫端照舊收斂成 StateRepositoryError。
+_REPLACE_RETRIES = 15
+_REPLACE_RETRY_INTERVAL_S = 0.02
+
+
+def _replace_waiting_out_readers(tmp_p: Path, p: Path) -> None:
+    """`tmp_p.replace(p)`，容忍 Windows 讀者短暫持有 `p` 把手（見 `_REPLACE_RETRIES`）。"""
+    for attempt in range(_REPLACE_RETRIES):
+        try:
+            tmp_p.replace(p)
+            return
+        except PermissionError:
+            if attempt == _REPLACE_RETRIES - 1:
+                raise
+            time.sleep(_REPLACE_RETRY_INTERVAL_S)
+
+
 def _cleanup_orphan_tmp(p: Path) -> None:
     """清掉 `p` 這個 checkpoint 路徑遺留的孤兒 `.tmp` 檔（見 `_STALE_TMP_SECONDS`）。
 
@@ -173,7 +195,7 @@ class FileStateRepository:
                     # 與**內容是否已落地**是兩件正交的事，缺 fsync 這一半沒有任何表徵。
                     f.flush()
                     os.fsync(f.fileno())
-                tmp_p.replace(p)
+                _replace_waiting_out_readers(tmp_p, p)
             except Exception:
                 tmp_p.unlink(missing_ok=True)
                 raise

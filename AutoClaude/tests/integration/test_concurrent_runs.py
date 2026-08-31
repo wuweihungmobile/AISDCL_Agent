@@ -373,3 +373,37 @@ def test_cleanup_does_not_delete_another_playbooks_orphan_tmp_on_stem_prefix_col
         "A 的 _cleanup_orphan_tmp 誤刪了 B 的孤兒 tmp——glob 前綴碰撞導致跨 playbook 誤刪"
     )
     b_orphan.unlink()
+
+
+def test_a_reader_briefly_holding_the_destination_open_does_not_fail_the_writer(repo):
+    """DEF-200-229：Windows 上 CPython 開檔不帶 FILE_SHARE_DELETE ⇒ 任何讀者（另一個
+    writer 讀 prev、`load_latest_by_playbook`、外部檢視器）持有**目的檔**把手的瞬間，
+    裸 `os.replace` 會以 PermissionError（winerror=5）拒絕換名；POSIX 的 rename 對
+    開著的檔恆成功 ⇒ 本測試在 POSIX 上天然綠（那正是鐵律三登記的平台落差本體），
+    在 Windows 上未修時**確定性紅**（把手持續 0.1s，遠短於寫入者的重試預算）。
+
+    斷言意圖（Rule 9）：讀者「短暫」持把手是毫秒級瞬態、不是失敗——寫入者必須等它
+    放手後成功落盤，而不是把瞬態把手如實拋成 StateRepositoryError（DEF-200-043 的
+    併發測試首次於 pre-push 全套＋雙重負載下機率性打中的就是這一段）。
+    """
+    playbook_id = "reader_holds_destination"
+    repo.save_checkpoint(
+        playbook_id, _checkpoint(1, run_id="r1", goal_task_id="gt"))
+
+    dest = repo._path(playbook_id)  # noqa: SLF001 — 取證需看真實目錄
+    handle = dest.open("rb")        # 讀者：模擬併發讀取端短暫持有目的檔把手
+    release = threading.Timer(0.1, handle.close)
+    release.start()
+    try:
+        repo.save_checkpoint(
+            playbook_id,
+            _checkpoint(1, run_id="r2", goal_task_id="gt", step_idx=3))
+    finally:
+        release.join()
+        if not handle.closed:
+            handle.close()
+
+    final = repo.load_latest_by_playbook(playbook_id)
+    assert final is not None, "讀者放手後主檔消失"
+    assert final.step_idx == 3, f"寫入未落盤：step_idx={final.step_idx}"
+    assert _residue(repo) == [], "重試路徑留下 .tmp 殘檔"

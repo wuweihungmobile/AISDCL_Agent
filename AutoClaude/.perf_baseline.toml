@@ -9,14 +9,6 @@ samples = 20
 git_sha = "032bb42"
 captured_at = "2026-08-28T14:49:19.197443+00:00"
 
-[dry_run_e2e]
-p50_ms = 3.164
-p95_ms = 4.55
-p99_ms = 4.55
-samples = 20
-git_sha = "8314939"
-captured_at = "2026-08-08T14:35:27.919224+00:00"
-
 [token_halt_roundtrip]
 p50_ms = 0.497
 p95_ms = 1.018
