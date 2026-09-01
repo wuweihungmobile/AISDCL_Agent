@@ -274,6 +274,12 @@ on:
       # `import check_archive_required as car` 消費，只改該檔時其回歸鎖不會跑
       # （DEF-101-042 同構，test_ci_paths_cover_root_consumers.py 實測揪出）。
       - "tools/check_archive_required.py"
+      # R118：新增 tools/check_handoff_carriers.py（DEF-200-212 具名豁免面落地）——
+      # tools/tests/test_check_defect_log_crossref.py 以
+      # `import check_handoff_carriers as hc` 消費，只改該檔時其回歸鎖不會跑
+      # （DEF-101-042 同構，與上一則 R103 同款；本輪由雲端
+      # test_ci_paths_cover_root_consumers.py 實測揪出，根層全套的收集面不含該判準）。
+      - "tools/check_handoff_carriers.py"
       - "AutoClaude/tools/check_loc_budget.py"
       - "AutoClaude/.loc_baseline"
       - "tools/_script_scan_surface.py"
@@ -650,6 +656,12 @@ on:
       # `import check_archive_required as car` 消費，只改該檔時其回歸鎖不會跑
       # （DEF-101-042 同構，test_ci_paths_cover_root_consumers.py 實測揪出）。
       - "tools/check_archive_required.py"
+      # R118：新增 tools/check_handoff_carriers.py（DEF-200-212 具名豁免面落地）——
+      # tools/tests/test_check_defect_log_crossref.py 以
+      # `import check_handoff_carriers as hc` 消費，只改該檔時其回歸鎖不會跑
+      # （DEF-101-042 同構，與上一則 R103 同款；本輪由雲端
+      # test_ci_paths_cover_root_consumers.py 實測揪出，根層全套的收集面不含該判準）。
+      - "tools/check_handoff_carriers.py"
       - "AutoClaude/tools/check_loc_budget.py"
       - "AutoClaude/.loc_baseline"
       - "tools/_script_scan_surface.py"
