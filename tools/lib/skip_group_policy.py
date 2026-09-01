@@ -429,8 +429,14 @@ _RUNTIME_SKIP_CEILING: dict[str, dict[str, int]] = {
     # 相同（含 `untagged` 本就是 0，證實 darwin 這棵樹的 9 支 CI-only untagged 純粹是雲端
     # `actions/checkout@v5` 預設 `fetch-depth: 1` 淺層 clone 造成，真機全歷史 checkout 下
     # 結構上不會重現）⇒ **本表本輪不動**，只留此註記佐證。
+    # 🔴 R115 round-label-ok 上修：`platform` 44→**45**——與 linux 鍵同一支新 skip
+    # （DEF-200-239 Windows 現查回歸鎖，`[WINDOWS-NATIVE-ONLY]`）在 darwin 剖面的必然
+    # 互補（+1）。取得方式＝真 GitHub macos-compat-ci run 當場印出逐字：
+    #   `[skip census] tools/tests@darwin 共 45 支：platform=45／tool-absence=0／
+    #    env-disabled=0／structural-pair=0／debt=0／untagged=0／欠債型 0 支（目標 0）`
+    # 逐格照填、零加減推算；MAX 表同 commit 同鍵上修（R96/R100 判例）。
     "tools/tests@darwin": {
-        SKIP_GROUP_PLATFORM: 44,
+        SKIP_GROUP_PLATFORM: 45,
         SKIP_GROUP_TOOL_ABSENCE: 0,
         SKIP_GROUP_ENV_DISABLED: 0,
         SKIP_GROUP_STRUCTURAL: 0,
@@ -471,8 +477,17 @@ _RUNTIME_SKIP_CEILING: dict[str, dict[str, int]] = {
     # 轉譯層的副作用**、與被測程式碼邏輯無關、真 GitHub ubuntu-latest runner（原生 amd64，
     # 無 Rosetta）不會重現——故本輪未動該測試，也未把它算進上面的 skip census（它是
     # failure 不是 skip）。
+    # 🔴 R115 round-label-ok 上修：`platform` 77→**78**——合法新增，非 regression：
+    # DEF-200-239 的 Windows 現查回歸鎖 `SchedulerBackendNeverTouchesRealSchtasksTest.
+    # test_no_ghost_t_r95_task_survives_a_real_windows_scheduler_query`（本輪新增、
+    # 已帶 `[WINDOWS-NATIVE-ONLY]` 標籤）在 linux 剖面的必然互補 skip（+1）。取得方式＝
+    # 真 GitHub root-infra-ci run（ubuntu-latest）當場印出逐字：
+    #   `[skip census] tools/tests@linux 共 80 支：platform=78／tool-absence=2／
+    #    env-disabled=0／structural-pair=0／debt=0／untagged=0／欠債型 2 支（目標 0）`
+    # 逐格照填、零加減推算（本表既有紀律；R96/R100 同型判例＝設計性平台 skip 兩表
+    # 同 commit 同鍵上修並逐項交代）。
     "tools/tests@linux": {
-        SKIP_GROUP_PLATFORM: 77,
+        SKIP_GROUP_PLATFORM: 78,
         SKIP_GROUP_TOOL_ABSENCE: 2,
         SKIP_GROUP_ENV_DISABLED: 0,
         SKIP_GROUP_STRUCTURAL: 0,
@@ -532,8 +547,9 @@ _RUNTIME_SKIP_CEILING_MAX: dict[str, dict[str, int]] = {
         SKIP_GROUP_DEBT: 0,
         SKIP_GROUP_UNTAGGED: 0,
     },
+    # 🔴 R115 round-label-ok：`platform` 44→45 同 commit 上修，理由同見主表同鍵段。
     "tools/tests@darwin": {
-        SKIP_GROUP_PLATFORM: 44,
+        SKIP_GROUP_PLATFORM: 45,
         SKIP_GROUP_TOOL_ABSENCE: 0,
         SKIP_GROUP_ENV_DISABLED: 0,
         SKIP_GROUP_STRUCTURAL: 0,
@@ -542,8 +558,9 @@ _RUNTIME_SKIP_CEILING_MAX: dict[str, dict[str, int]] = {
     },
     # 🔴 R100：連同基線一起上修 63→77／`untagged` 9→0／`tool-absence` 0→2——理由、
     # provenance、逐項交代皆見 `_RUNTIME_SKIP_CEILING` 同鍵那一段，此處不複寫第二份。
+    # 🔴 R115 round-label-ok：`platform` 77→78 同 commit 上修，理由同見主表同鍵段。
     "tools/tests@linux": {
-        SKIP_GROUP_PLATFORM: 77,
+        SKIP_GROUP_PLATFORM: 78,
         SKIP_GROUP_TOOL_ABSENCE: 2,
         SKIP_GROUP_ENV_DISABLED: 0,
         SKIP_GROUP_STRUCTURAL: 0,

@@ -69,7 +69,7 @@ _FROZEN_CEILING_MAX: dict[str, dict[str, int]] = {
         S.SKIP_GROUP_UNTAGGED: 0,
     },
     "tools/tests@darwin": {
-        S.SKIP_GROUP_PLATFORM: 44,
+        S.SKIP_GROUP_PLATFORM: 45,  # R115 round-label-ok：provenance 見 policy 主表同鍵段
         S.SKIP_GROUP_TOOL_ABSENCE: 0,
         S.SKIP_GROUP_ENV_DISABLED: 0,
         S.SKIP_GROUP_STRUCTURAL: 0,
@@ -77,7 +77,7 @@ _FROZEN_CEILING_MAX: dict[str, dict[str, int]] = {
         S.SKIP_GROUP_UNTAGGED: 0,
     },
     "tools/tests@linux": {
-        S.SKIP_GROUP_PLATFORM: 77,
+        S.SKIP_GROUP_PLATFORM: 78,  # R115 round-label-ok：provenance 見 policy 主表同鍵段
         S.SKIP_GROUP_TOOL_ABSENCE: 2,
         S.SKIP_GROUP_ENV_DISABLED: 0,
         S.SKIP_GROUP_STRUCTURAL: 0,
