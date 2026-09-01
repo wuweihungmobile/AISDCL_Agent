@@ -5152,6 +5152,280 @@ class ArmedDriftSelfHealTest(unittest.TestCase):
         self.assertTrue(loud, f"重掛失敗沒有 loud alert：{alert_calls}")
 
 
+# ═══ P1-2／DEF-200-234：巡邏 tick「主控死亡但背景 agent 有活體」分支（R116 round-label-ok）═══
+# 施工圖＝ADR-XPLAT-014 §4（哨兵存活監測框架）＋PRD_Amendment_R112_WakeChain.md
+# §3-1 A-4（ownerless_verdict 三值、零侵入心跳、claim_once 節流叫人）。
+class OrphanModeWatchTest(unittest.TestCase):
+    """紅綠自證：主控死亡＋背景 agent 仍有活體 ⇒ 轉紅（此前無任何機制標記）；
+    落地後轉綠（`orphan_agents_detected` 痕跡＋條件解除即清標記）。
+    """
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="orphan-watch-"))
+        self.transcript = self.tmp / "sid-orphan.jsonl"
+        self.log = self.tmp / "trail.jsonl"
+        os.environ[endurance_env.TRACE_DIR_ENV] = str(self.tmp / "traces")
+        self.addCleanup(os.environ.pop, endurance_env.TRACE_DIR_ENV, None)
+
+    def _write_main(self) -> None:
+        self.transcript.write_text(json.dumps({
+            "type": "assistant", "timestamp": "2026-08-07T18:00:00Z",
+            "message": {"model": "claude-opus-5"}}) + "\n", encoding="utf-8", newline="\n")
+
+    def _agent(self, run: str = "wf_live", name: str = "agent-a") -> Path:
+        path = (self.transcript.with_suffix("") / "subagents" / "workflows" / run
+               / f"{name}.jsonl")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{}\n", encoding="utf-8", newline="\n")
+        return path
+
+    @staticmethod
+    def _hit() -> dict:
+        return {"kind": guard.LIMIT_SESSION, "timestamp": "x", "text": _REAL_SESSION_LIMIT}
+
+    def test_main_dead_with_a_live_agent_is_flagged_ownerless(self) -> None:
+        """核心：主控死亡（撞線未解）且背景 agent mtime 新鮮 ⇒ ownerless，且留痕跡。"""
+        self._write_main()
+        self._agent()
+        now = datetime.now().astimezone()
+        state = {"session_id": "sid-orphan"}
+        audit = escalation._orphan_watch(self.transcript, self._hit(), now, 900.0,
+                                         state, self.log)
+        self.assertEqual(audit["ownerless_verdict"], "ownerless")
+        self.assertTrue(audit["orphan_agents_detected"])
+        self.assertTrue(escalation.orphan_mark_path("sid-orphan").is_file(),
+                        "偵測到無主卻沒有留下條件標記 ⇒ 下一巡無從判斷『條件還在不在』")
+        rows = [json.loads(ln) for ln in self.log.read_text(encoding="utf-8").splitlines()]
+        self.assertTrue(any(r["event"] == "orphan_agents_detected" for r in rows),
+                        f"沒有留下 orphan_agents_detected 這一筆——事後無從歸因：{rows}")
+
+    def test_main_alive_is_never_ownerless_even_with_active_agents(self) -> None:
+        """控制組：主控沒事（`event=None`）⇒ 無論背景 agent 多活躍都不是無主。"""
+        self._write_main()
+        self._agent()
+        now = datetime.now().astimezone()
+        audit = escalation._orphan_watch(self.transcript, None, now, 900.0,
+                                         {"session_id": "sid-orphan"}, self.log)
+        self.assertNotIn("orphan_agents_detected", audit)
+
+    def test_no_observable_agents_is_unmeasurable_not_owned(self) -> None:
+        """量不到 ≠ 無主，但也 ≠ owned——PRD 逐字要求三值不得塌成二值。"""
+        self._write_main()
+        now = datetime.now().astimezone()
+        state = {"session_id": "sid-orphan"}
+        audit = escalation._orphan_watch(self.transcript, self._hit(), now, 900.0,
+                                         state, self.log)
+        self.assertEqual(audit, {}, "量不到活體時留下了斷言——不是 owned 也不是 ownerless")
+        self.assertEqual(escalation.ownerless_verdict(True, "unmeasurable"), "unmeasurable")
+
+    def test_condition_clearing_removes_the_mark_and_logs_ownerless_cleared(self) -> None:
+        """條件解除 ⇒ 清標記＋`ownerless_cleared`（不留一個永遠不會被清的假閂鎖）。"""
+        self._write_main()
+        agent = self._agent()
+        now = datetime.now().astimezone()
+        state = {"session_id": "sid-orphan"}
+        escalation._orphan_watch(self.transcript, self._hit(), now, 900.0, state, self.log)
+        self.assertTrue(escalation.orphan_mark_path("sid-orphan").is_file())
+        stale = time.time() - 1000
+        os.utime(agent, (stale, stale))
+        audit = escalation._orphan_watch(self.transcript, self._hit(), now, 900.0,
+                                         state, self.log)
+        self.assertTrue(audit.get("ownerless_cleared"))
+        self.assertFalse(escalation.orphan_mark_path("sid-orphan").is_file(),
+                         "條件已解除卻留著標記 ⇒ 下次巡邏誤判成仍在無主")
+        rows = [json.loads(ln) for ln in self.log.read_text(encoding="utf-8").splitlines()]
+        self.assertTrue(any(r["event"] == "ownerless_cleared" for r in rows))
+
+    def test_notify_is_throttled_across_consecutive_patrol_ticks(self) -> None:
+        """SD-1：以正式 tick 週期（900s）連跑四巡，節流窗（3600s）內只准敲一次——
+        撤 `ORPHAN_NOTIFY_THROTTLE_SECONDS` 改回借用 idle_threshold 本測試當場紅
+        （SD 鏡探針實測該形態連續多巡全部重敲）。"""
+        self._write_main()
+        agent = self._agent()
+        state = {"session_id": "sid-orphan"}
+        base = datetime.now().astimezone()
+        fired = 0
+        for i in range(4):
+            now = base + timedelta(seconds=900 * i)
+            os.utime(agent, (now.timestamp(), now.timestamp()))
+            audit = escalation._orphan_watch(self.transcript, self._hit(), now, 900.0,
+                                             state, self.log)
+            fired += 1 if audit.get("orphan_agents_detected") else 0
+        self.assertEqual(fired, 1, "四巡（跨 45 分鐘）內敲了不止一次＝節流失效（SD-1）")
+
+    def test_unmeasurable_keeps_the_mark_and_is_not_cleared(self) -> None:
+        """A-2（Architect 鏡承接）：ownerless→unmeasurable 標記必須原樣保留——量不到
+        ≠ 條件解除；清標記只准由 owned 觸發（合成注入＝刪光 run 目錄使活體量不到）。"""
+        self._write_main()
+        self._agent()
+        now = datetime.now().astimezone()
+        state = {"session_id": "sid-orphan"}
+        escalation._orphan_watch(self.transcript, self._hit(), now, 900.0, state, self.log)
+        self.assertTrue(escalation.orphan_mark_path("sid-orphan").is_file())
+        shutil.rmtree(self.transcript.with_suffix("") / "subagents", ignore_errors=True)
+        audit = escalation._orphan_watch(self.transcript, self._hit(), now, 900.0,
+                                         state, self.log)
+        self.assertEqual(audit.get("ownerless_verdict"), "unmeasurable")
+        self.assertNotIn("ownerless_cleared", audit)
+        self.assertTrue(escalation.orphan_mark_path("sid-orphan").is_file(),
+                        "量不到被當成條件解除清掉標記＝A-2 重現")
+        rows = [json.loads(ln) for ln in self.log.read_text(encoding="utf-8").splitlines()]
+        self.assertFalse(any(r["event"] == "ownerless_cleared" for r in rows))
+
+    def test_a_failed_loud_notify_is_queued_for_the_next_patrol(self) -> None:
+        """投遞失敗不終結條件：`notify()` 失敗時排進 §3-4 補投佇列，不是白白丟掉。
+
+        `queue_notify()` 對 `NOTIFY_ENV` 未設一律短路（見該函式 WHY），本條測的是
+        「使用者已開啟桌面通知、但這一次投遞失敗」那個情境，故需顯式開啟。
+        """
+        os.environ[escalation.NOTIFY_ENV] = "1"
+        self.addCleanup(os.environ.pop, escalation.NOTIFY_ENV, None)
+        self._write_main()
+        self._agent()
+        now = datetime.now().astimezone()
+        state = {"session_id": "sid-orphan"}
+        with unittest.mock.patch.object(escalation, "notify", return_value=127):
+            escalation._orphan_watch(self.transcript, self._hit(), now, 900.0, state, self.log)
+        items = json.loads(escalation.notify_queue_path().read_text(encoding="utf-8"))
+        self.assertEqual(len(items), 1, "偵測到無主但通知失敗，卻沒有落進補投佇列")
+
+    def test_patrol_tick_wiring_flags_ownerless_end_to_end(self) -> None:
+        """整合：真的跑一次 `_sentinel_tick`，證明這個分支接上電——不是只有直接呼叫
+        函式庫時才會發生（同 R77『機制蓋好沒接電』判例）。
+        """
+        _quota_transcript(self.transcript, _REAL_SPEND_LIMIT)
+        self._agent()
+        plan = self.tmp / f"{guard.PLAN_PREFIX}sid-orphan.md"
+        plan.write_text("# 任務書\n", encoding="utf-8", newline="\n")
+        planner.write_relay(plan, {**RelayStateTest.GOOD, "kind": "sentinel",
+                                   "session_id": "sid-orphan", "plan_path": str(plan),
+                                   "reset_source": "operator", "reset_at": "",
+                                   "task_name": "T-orphan", "transcript": str(self.transcript)})
+        SentinelDecisionTest()._tick(plan, self.transcript, self.tmp, "T-orphan")
+        log = self.tmp / f"autosdd_resume_log_{guard.session_id_of(plan)}.jsonl"
+        rows = [json.loads(ln) for ln in log.read_text(encoding="utf-8").splitlines()]
+        decided = [r for r in rows if r.get("event") == "sentinel_decided"]
+        self.assertTrue(decided, f"沒有 sentinel_decided 事件：{rows}")
+        self.assertTrue(decided[-1].get("orphan_agents_detected"),
+                        f"巡邏 tick 真的跑過一輪，卻沒有標記無主：{decided[-1]}")
+
+
+# ═══ P1-3／DEF-200-236：halt 期通知投遞失敗補投佇列（R116 round-label-ok）═══
+# 施工圖＝PRD_Amendment_R112_WakeChain.md §3-4。重現形狀逐字＝
+# CrossPlatform_R115_Debt_Closure.md §4 開閥實彈演練：
+# `relay_stopped {why:no_progress, note_written:true, notify_rc:-2}`。
+class NotifyQueueRedeliveryTest(unittest.TestCase):
+    """`alert()` 對『沒有東西要救』的 loud 情境刻意不呼叫 `notify()`，此前那個
+    `NOTIFY_NO_RESCUE_RC` 因此永遠沒有第二次機會送達。本類別釘住：入列、下一次
+    巡邏重投、送達即止（憑證落地）、逾期／逾次上限一律**出聲**丟棄（不靜默）。
+    """
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="notify-queue-"))
+        self.log = self.tmp / "trail.jsonl"
+        os.environ[endurance_env.TRACE_DIR_ENV] = str(self.tmp / "traces")
+        self.addCleanup(os.environ.pop, endurance_env.TRACE_DIR_ENV, None)
+        # 佇列本身只在使用者**已開啟**桌面通知時才有意義（`queue_notify()` 對
+        # `NOTIFY_ENV` 未設一律短路，避免每一支從未設過這個變數的既有測試都把
+        # 記錄寫進真的 `endurance_env.trace_dir()`——本輪落地當回合真的撞見過）。
+        os.environ[escalation.NOTIFY_ENV] = "1"
+        self.addCleanup(os.environ.pop, escalation.NOTIFY_ENV, None)
+
+    def _queue_items(self) -> list[dict]:
+        path = escalation.notify_queue_path()
+        return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else []
+
+    def test_a_deliberately_skipped_notify_is_queued_not_lost(self) -> None:
+        """🔴 重現核心：`notify_rc=-2` 此前直接丟掉，現在必須落佇列——這正是實彈演練
+        實測到、DEF-200-236 判定不可結案的那一格。
+        """
+        now = time.time()
+        queued = escalation.queue_notify("t", "b", escalation.NOTIFY_NO_RESCUE_RC, now)
+        self.assertTrue(queued, "notify_rc=-2 沒有被排進補投佇列 ⇒ R115 §4 的活體重現"
+                                "會原樣重演")
+        self.assertEqual(len(self._queue_items()), 1)
+
+    def test_the_user_disabled_channel_is_not_queued(self) -> None:
+        """控制組：`NOTIFY_OFF_RC` 是使用者**刻意**關掉的管道，不是失敗——排進去會讓
+        『預設不敲』的直接指令變成『預設敲三次才放棄』。
+        """
+        queued = escalation.queue_notify("t", "b", escalation.NOTIFY_OFF_RC, time.time())
+        self.assertFalse(queued)
+        self.assertEqual(self._queue_items(), [])
+
+    def test_a_delivered_notification_is_never_queued(self) -> None:
+        self.assertFalse(escalation.queue_notify("t", "b", 0, time.time()))
+        self.assertEqual(self._queue_items(), [])
+
+    def test_the_next_patrol_tick_redelivers_and_leaves_a_credential(self) -> None:
+        """巡邏 tick 重投：送達後**落憑證**（`delivered=True`）且**不再重投**（出隊）。"""
+        now = time.time()
+        escalation.queue_notify("t", "b", escalation.NOTIFY_NO_RESCUE_RC, now)
+        with unittest.mock.patch.object(escalation, "notify", return_value=0):
+            audit = escalation.redeliver_queued(now + 10, self.log)
+        self.assertEqual(audit.get("notify_queue_pending", 0), 0, "送達了卻還留在佇列裡")
+        self.assertEqual(self._queue_items(), [], "送達了卻沒有出隊")
+        rows = [json.loads(ln) for ln in self.log.read_text(encoding="utf-8").splitlines()]
+        redelivered = [r for r in rows if r["event"] == "notify_redelivered"]
+        self.assertTrue(redelivered and redelivered[-1]["delivered"] is True,
+                        "送達沒有落下 delivered=True 的憑證")
+        with unittest.mock.patch.object(escalation, "notify") as spy:
+            escalation.redeliver_queued(now + 20, self.log)
+        spy.assert_not_called()
+
+    def test_a_failure_stays_queued_for_the_next_patrol_within_ttl(self) -> None:
+        """條件在＝每巡必再投：失敗且未逾 TTL／次數上限時原樣留著。"""
+        now = time.time()
+        escalation.queue_notify("t", "b", 127, now)
+        with unittest.mock.patch.object(escalation, "notify", return_value=127):
+            audit = escalation.redeliver_queued(now + 10, self.log)
+        self.assertEqual(audit.get("notify_queue_pending"), 1, "還沒逾期／逾次卻被丟棄")
+        self.assertEqual(len(self._queue_items()), 1)
+
+    def test_ttl_expiry_drops_loudly_not_silently(self) -> None:
+        now = time.time()
+        escalation.queue_notify("t", "b", 127, now)
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            audit = escalation.redeliver_queued(
+                now + escalation.NOTIFY_QUEUE_TTL_SECONDS + 1, self.log)
+        self.assertEqual(audit.get("notify_queue_pending", 0), 0)
+        self.assertEqual(self._queue_items(), [], "逾期卻沒有出隊")
+        self.assertIn("已丟棄", buf.getvalue(), "逾期丟棄卻沒有出聲——與『靜默丟棄』分不開")
+        rows = [json.loads(ln) for ln in self.log.read_text(encoding="utf-8").splitlines()]
+        self.assertTrue(any(r["event"] == "notify_redelivered" and r.get("dropped") == "ttl"
+                           for r in rows))
+
+    def test_repeated_failures_are_dropped_after_the_attempt_cap(self) -> None:
+        now = time.time()
+        escalation.queue_notify("t", "b", 127, now)
+        with unittest.mock.patch.object(escalation, "notify", return_value=127):
+            for i in range(escalation.NOTIFY_QUEUE_MAX_ATTEMPTS - 1):
+                audit = escalation.redeliver_queued(now + 1 + i, self.log)
+                self.assertEqual(audit.get("notify_queue_pending"), 1)
+            buf = io.StringIO()
+            with contextlib.redirect_stderr(buf):
+                final = escalation.redeliver_queued(
+                    now + escalation.NOTIFY_QUEUE_MAX_ATTEMPTS, self.log)
+        self.assertEqual(final.get("notify_queue_pending", 0), 0)
+        self.assertIn("已丟棄", buf.getvalue())
+
+    def test_alert_wires_a_failed_notify_into_the_queue(self) -> None:
+        """整合：真的呼叫 `alert()`（不 mock 它自己），證明 §3-4 真的接上電——不是只有
+        直接呼叫 `queue_notify()` 時才會發生。重現 §4 的 `relay_stopped` 那句原話。
+        """
+        state = {"session_id": "sid-alert", "plan_path": str(self.tmp / "plan.md"),
+                 "log_path": str(self.log)}
+        self.addCleanup(setattr, escalation, "note_path", escalation.note_path)
+        escalation.note_path = lambda: self.tmp / "AUTOSDD_ATTENTION.md"
+        self.addCleanup(setattr, escalation, "fanout_path", escalation.fanout_path)
+        escalation.fanout_path = lambda sid: self.tmp / f"fanout_{sid}.json"
+        told = escalation.alert("接力已連續無新進度達停止門檻，停止自動續跑", state, loud=True)
+        self.assertEqual(told["notify_rc"], escalation.NOTIFY_NO_RESCUE_RC)
+        self.assertTrue(told["notify_queued"], "alert() 的 -2 分支沒有把通知排進補投佇列")
+        self.assertEqual(len(self._queue_items()), 1)
+
+
 class SchedulerBackendNeverTouchesRealSchtasksTest(unittest.TestCase):
     """判準本體住 `tools/lib/schedule_backend.py`。WHY 全文搬至
     CrossPlatform_Guard_Line_History.md〈R115 round-label-ok

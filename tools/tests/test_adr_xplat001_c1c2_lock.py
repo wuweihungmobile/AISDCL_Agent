@@ -682,7 +682,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 7064,
+    "test_adr_xplat001_c1c2_lock.py": 7079,
     "test_archive_defect_log.py": 3989,
     "test_bash32_compat.py": 1020,
     "test_bash_probe_spec_contract.py": 983,
@@ -697,7 +697,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_check_wrapper_thinness.py": 1234,
     "test_claim_provenance_r86.py": 618,
     "test_component_sanitizer_shared_layer_lock.py": 293,
-    "test_context_budget_guard.py": 9371,
+    "test_context_budget_guard.py": 9645,
     "test_defect_id_reference_integrity.py": 281,
     "test_dev_start.py": 6636,
     "test_dev_start_ps1_lastexitcode.py": 548,
@@ -1328,6 +1328,11 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "[非淨減法輪] Architect 鏡一審承接（同輪補釘，含本稽核列與接鏈列自身）：A-1 三行 "
      "E501 縮短（行數不變）＋A-2 到期輪 lookahead 後設鎖（紅綠自證）＋N-1 cap_basis "
      "失蹤兜底；散文壓縮抵銷後 +577＝cap 貼線。CrossPlatform_R116_Scan_Findings.md。"),
+    ("R117", 90921, 91210, 289,
+     "[非淨減法輪] P1-2/P1-3 喚醒鏈落地（DEF-200-234/236 驗收批）：巡邏 tick 無主分支＋"
+     "持久 notify_queue 的落款驗收回歸鎖記回歸鎖軌（軌表同輪申報 238，分軌第一次實戰"
+     "消費；功能軌淨額＝稽核與儀式行＋複審承接 A-2/N-3/SD-1 自身）；同輪兌現款(12)"
+     "＝(117,570) 並重新武裝 119/564（步伐 6<7）。CrossPlatform_R116_Scan_Findings.md。"),
 )
 
 
@@ -1379,6 +1384,9 @@ _REPIN_NET_CAP_SCHEDULE: tuple[tuple[int, int], ...] = (
     (115, 577),   # 到期輪兌現（收斂棒，三個修復棒＋治理批累積漂移一次性合法收束）：
                   # cap 降到到期目標本身（同 R99/R101/R113 判例 round-label-ok）。
                   # 同輪重新武裝下一段：步伐 7 < 前一段的 8，續守「步伐刻意變小」，見 due 常數旁註。
+    (117, 570),   # 到期輪兌現（P1-2/P1-3 喚醒鏈批）：cap 降到到期目標本身 round-label-ok
+                  # （同 R99/R101/R115 判例 round-label-ok）。同輪重新武裝：步伐 6 < 前段 7，
+                  # 續守「步伐刻意變小」，見 due 常數旁註。
 )
 #: 生效點＝首列輪號、現行上限＝末列上限，**皆由表導出不另立常數**（R73 判例：一份知識一個家）。
 _REPIN_ROUND_CAP_SINCE = _REPIN_NET_CAP_SCHEDULE[0][0]
@@ -1427,7 +1435,11 @@ _REPIN_APPROVED_ROUND_OVERAGE_MIN_REASON_LEN = 20
 #: 平行表：`(輪號, 該輪回歸鎖軌淨額, 理由)`，append-only。**刻意從空表開始**——
 #: 不追溯既有歷史（§1.4：「生效輪次，不追溯」），落地當輪（R116）自己的工作全額算進 round-label-ok
 #: 功能軌（見 `_REGRESSION_LANE_SINCE` 的 WHY：不得用自己剛開的減免軌豁免自己）。
-_REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = ()
+_REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
+    ("R117", 238, "P1-2/P1-3 落款 PRD/ADR 指定驗收測試（ADR-XPLAT-014 §4 紅綠＋"
+     "v2.1.12 §3-4 notify_rc=-2 重演＝OrphanModeWatchTest＋NotifyQueueRedeliveryTest "
+     "兩類全體，全數住 test_context_budget_guard.py 測試行；分軌機制第一次實戰消費）"),
+)
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
 #: 輪號 ≥ 本值才享有「回歸鎖軌淨額不算進款(10)(11)」這個減免，調小＝把減免向更早的
@@ -1562,8 +1574,9 @@ def net_cap_schedule_problems(
 #: 同輪重新武裝下一段：步伐 8 < 前一段的 10，續守「步伐刻意變小」且目標嚴格低於現行 cap。
 #: R115 收斂棒兌現 round-label-ok：cap 降到目標本身（577，見 `(115, 577)` 列），同輪重新武裝下一段：
 #: 步伐 7 < 前一段的 8，續守「步伐刻意變小」且目標嚴格低於現行 cap。
-_REPIN_NET_CAP_DUE_ROUND = 117  # round-label-ok：到期輪＝兌現輪+2（lookahead 判準的活體對照）
-_REPIN_NET_CAP_DUE_TARGET = 570
+#: R117 喚醒鏈批兌現 round-label-ok：cap 降到目標本身（570，見 `(117, 570)` 列），同輪重新武裝：
+_REPIN_NET_CAP_DUE_ROUND = 119  # round-label-ok：到期輪＝兌現輪+2（lookahead 判準的活體對照）
+_REPIN_NET_CAP_DUE_TARGET = 564  # 步伐 6 < 前一段的 7，續守「步伐刻意變小」且嚴格低於現行 cap
 
 #: DEF-200-121：到期輪自身的後設鎖——`_REPIN_NET_CAP_DUE_ROUND` 只准落在「最近稽核輪
 #: ＋ lookahead」以內（歷史母體 85..113 的到期輪一律＝上一次兌現輪 +2）。可延期的到期日
@@ -1630,10 +1643,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 90
+_REPIN_LOG_FROZEN_PREFIX_LEN = 91
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "a08e0c7043be0ef8a9e230c1995ec5284ca12bd141237ce76dcb6af5c21cd0aa")
+    "d16dc6498956b19dd267eec7041585bce62e9bf82005b0745ae2cd304ebc9643")
 
 
 def repin_log_history_digest(
@@ -1762,6 +1775,8 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # Architect 鏡一審承接補釘，同體例「追加後立即自我凍結」（prefix_len 89→90 涵蓋 round-label-ok
     # 該列本身；A-1/A-2/N-1 詳 CrossPlatform_R116_Scan_Findings.md）。
     ("R116", "1bd8f0d4e396", "a08e0c7043be", "DEF-200-211"),
+    # P1-2/P1-3 批追加 R117 稽核紀錄＋分軌首次申報，同體例「追加後立即自我凍結」。round-label-ok
+    ("R117", "a08e0c7043be", "d16dc6498956", "DEF-200-234"),
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

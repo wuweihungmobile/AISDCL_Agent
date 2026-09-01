@@ -72,7 +72,13 @@ import context_budget_guard as guard  # noqa: E402  # 逐字稿判讀的唯一�
 # `schedule_backend` 皆不 import 本檔（`quota_gate.py` 檔頭明文「本檔不得 import 那支
 # hook」，方向反過來才對）；`sentinel_lifecycle` 對本檔的唯一參照是函式層 lazy import
 # （`_sweep_artifacts` 內的 `from quota_escalation import reap_plans`），模組層不會成環。
+# `endurance_env`／`quota_ledger` 是 PRD_Amendment_R112_WakeChain.md §3-1 A-4／§3-4
+# （無主分支與通知補投佇列）共用的兩支 sibling（持久目錄 SSOT＋TTL 閂鎖原語），同
+# `quota_availability.py`／`quota_stability.py` 既有依賴面，本檔不重抄第二份路徑解析
+# 或互斥邏輯（六支依 ruff isort 字母序排列，順手併成一個區塊）。
+import endurance_env  # noqa: E402
 import quota_gate  # noqa: E402
+import quota_ledger  # noqa: E402
 import quota_policy  # noqa: E402
 import schedule_backend  # noqa: E402
 import sentinel_lifecycle  # noqa: E402
@@ -96,6 +102,33 @@ NOTIFY_ENV = "AUTOSDD_DESKTOP_NOTIFY"
 #: 分得出「開關關著」「不值得打斷人」「敲了但失敗」，否則通知的失效仍然是靜默的。
 NOTIFY_OFF_RC = -1
 NOTIFY_NO_RESCUE_RC = -2
+
+# ══════════════════════════════════════════════════════════════════════════
+# PRD_Amendment_R112_WakeChain.md §3-4（DEF-200-236）：通知補投佇列
+# ══════════════════════════════════════════════════════════════════════════
+# 立案：`alert()` 對 `dead_agents == 0` 的 loud 情境刻意**不呼叫** `notify()`（HELM-01：
+# 沒有東西要救就不敲桌面），回的 `NOTIFY_NO_RESCUE_RC` 因此從來沒有機會變成真的送達——
+# 而 `relay_stopped {why:no_progress}` 這一種**正是**值得人知道的 halt（R115 開閥實彈 round-label-ok
+# 演練實測逐字：`notify_rc=-2`，見 CrossPlatform_R115_Debt_Closure.md §4）。此前那個 -2
+# 就此**永久丟失**，不會有第二次機會。修法（QA 鏡 N-SA-1 劃界訂正：接線範圍＝`alert()`
+# 與 `_orphan_watch()` 兩處；`_idle_prepare_watch()` 的預警失投**尚未**入列，掛
+# R116_HANDOFF §二 round-label-ok）：非「使用者關掉這條管道」（`NOTIFY_OFF_RC`）失投入列
+# （居所同 `endurance_env.trace_dir()`），由既有 900 秒巡邏 tick 重投，逾 TTL 或重試
+# 次數用盡才出隊——出隊必須**出聲**（stderr），不得靜默丟棄。
+NOTIFY_QUEUE_NAME = "autosdd_notify_queue.json"
+
+#: 佇列項目多久沒送達就放棄（不得無上限累積）。取值同 `PLAN_GC_AGE_SECONDS` 的量級理由：
+#: 遠大於一個額度視窗（5 小時），確保跨一次 reset 仍有機會被下一次巡邏送達。
+NOTIFY_QUEUE_TTL_SECONDS = 24 * 3600
+
+#: 逐則重試上限（PRD §3-4 逐字「重試上限 3 次，次數落痕跡」）。
+NOTIFY_QUEUE_MAX_ATTEMPTS = 3
+
+#: 無主模式「叫人」節流窗（SD 鏡 SD-1 承接；PRD v2.1.12 :206 本要求 ownerless 專屬
+#: 常數）。🔴 不得與巡邏 tick 間隔（`SENTINEL_INTERVAL_SECONDS`＝900）共用同一值：
+#: TTL＝tick 週期時下一巡到達必然 age≈ttl ⇒ 幾乎每巡重敲（探針實測連續多 tick 全部
+#: claimed）。取 4×tick＝人類響應時間尺度：被叫後一小時內不重敲，條件仍在則再叫。
+ORPHAN_NOTIFY_THROTTLE_SECONDS = 3600
 
 #: 任務書殘骸的回收年齡。取值理由：一支**還在等**的哨兵，其任務書可能整整一個額度視窗
 #: （5 小時）都不會被寫到，所以門檻必須遠大於它；7 天則遠小於「這些檔已經在 %TEMP% 躺了
@@ -337,15 +370,122 @@ def _heal_armed_drift(state: dict, now: datetime, idle_threshold: float, tick: s
     return audit
 
 
+# ══════════════════════════════════════════════════════════════════════════
+# PRD_Amendment_R112_WakeChain.md §3-1 A-4（DEF-200-234）：無主模式偵測
+# ══════════════════════════════════════════════════════════════════════════
+# 立案：主控死於 API 層 429 時，存活的背景 agent／Workflow 扇出沒有任何機制轉入
+# 「無主」——續航協定救的是**排程**（等額度回來重新叫醒），對「這一刻正在燒 token
+# 而沒有人統籌」這件事結構上是瞎的（`CrossPlatform_R111_Sentinel_Forensics_Mac.md`
+# §4-6）。判準三值 {ownerless, owned, unmeasurable}——**量不到 ≠ 無主**，與本檔通篇
+# `reap_verdict`／`armed_but_missing` 同一條紀律：看不到活體不等於沒有活體。
+def _agents_liveness(transcript: Path, now: float, idle_threshold: float) -> str:
+    """背景 workflow agent 逐字稿有沒有活體：`"alive"／"idle"／"unmeasurable"`。
+
+    零侵入心跳＝**逐字稿檔案 mtime 新鮮度**（根 CLAUDE.md 鐵律六：比對面不含自己，
+    裸 `pgrep` 在多支並行時會自己命中自己）；`workflow_runs()` 是既有的目錄佈局解析，
+    本函式不重抄第二份。連 `subagents/workflows/` 目錄都定位不到＝**量不到**，不得
+    誤判成「沒有活體」。
+
+    🔴 已被 `quota_killed()` 判定為死者的 agent 從 mtime 候選中**排除**：一支 agent
+    最後一次寫入往往正是它自己撞線的那一刻，mtime 因此結構上「新鮮」，若不排除會把
+    「主控與這支 agent 同一次撞線一起死掉」誤判成「主控死了、agent 還活著」——本函式
+    落地當回合在 `SpendLimitReachesAHumanTest` 真的撞見過這個假陽性（`_dead_agent()`
+    造出的死者被算成 alive，把一支既有測試的既有主體撞線流程誤標成無主）。有 run
+    可觀測、但排除死者後空無一物＝`"idle"`（**已經觀測到、且觀測到的是沒有活體**），
+    不是 `"unmeasurable"`（那是保留給「連 run 目錄都找不到」的）。
+    """
+    if not transcript.is_file():
+        return "unmeasurable"
+    runs = workflow_runs(transcript)
+    if not runs:
+        return "unmeasurable"
+    try:
+        mtimes = [p.stat().st_mtime for run in runs for p in run["agents"]
+                 if _exists(p) and not quota_killed(p)]
+    except OSError:
+        return "unmeasurable"  # N-3：_exists 與 stat 之間的 TOCTOU 競態，量不到就說量不到
+    if not mtimes:
+        return "idle"
+    return "alive" if (now - max(mtimes)) < idle_threshold else "idle"
+
+
+def _exists(path: Path) -> bool:
+    try:
+        return path.is_file()
+    except OSError:
+        return False
+
+
+def ownerless_verdict(main_dead: bool, agents_state: str) -> str:
+    """純判準：{ownerless, owned, unmeasurable}。`agents_state="unmeasurable"` 時
+    一律回 `unmeasurable`——量不到背景活體不得被讀成「沒有活體」（＝owned）。
+    簽名對 PRD §3-1 A-4 三參數形態的化簡（N-2）：`main_dead = unhandled_limit_event
+    is not None` 已內含「主控閒置×未處理撞線」合取，語意等價。
+    """
+    if agents_state == "unmeasurable":
+        return "unmeasurable"
+    return "ownerless" if main_dead and agents_state == "alive" else "owned"
+
+
+def orphan_mark_path(session_id: str) -> Path:
+    """該 session 的無主條件標記（`claim_once` 的閂鎖，同時是「條件在不在」的憑證）。"""
+    return endurance_env.trace_dir() / f"autosdd_orphan_{session_id}.json"
+
+
+def _orphan_watch(transcript: Path, event: object, now: datetime, idle_threshold: float,
+                  state: dict, log: Path) -> dict:
+    """DEF-200-234：主控死亡（`event` 非 `None`）且背景 agent 仍有活體 ⇒ 無主分支。
+
+    `claim_once` 節流「叫人」的頻率（同一 TTL 視窗只敲一次桌面），**不**節流痕跡本身
+    ——`ownerless_verdict` 每次巡邏都算一次，讓「條件解除」能被即時偵測並清標記
+    （`ownerless_cleared`）。投遞失敗不終結條件：失敗的通知交給 `queue_notify()`，
+    由本檔既有的 `redeliver_queued()` 在下一次巡邏（≤900s）自動重投，不必等這裡再敲一次。
+    """
+    session_id = str(state.get("session_id") or guard.session_id_of(transcript))
+    mark = orphan_mark_path(session_id)
+    verdict = ownerless_verdict(event is not None, _agents_liveness(
+        transcript, now.timestamp(), idle_threshold))
+    if verdict == "unmeasurable":
+        # A-2（Architect 鏡承接）：量不到 ≠ 條件解除——既有標記原樣保留、不清不投、
+        # 不記 ownerless_cleared，留待下一巡能量到時再判（清標記只准由 "owned" 觸發）；
+        # 無標記時維持既有安靜姿態（回空＝本次巡邏無事可記）。
+        return {"ownerless_verdict": verdict} if mark.is_file() else {}
+    if verdict != "ownerless":
+        if not mark.is_file():
+            return {}
+        try:
+            mark.unlink()
+        except OSError:
+            return {"ownerless_verdict": verdict}
+        _append_trace(log, "ownerless_cleared", session_id=session_id, verdict=verdict)
+        return {"ownerless_verdict": verdict, "ownerless_cleared": True}
+    audit = {"ownerless_verdict": verdict}
+    # SD-1：節流窗用專屬常數，不得借用 idle_threshold（那是活體新鮮度的尺，值＝tick 週期）。
+    if quota_ledger.claim_once(mark, ORPHAN_NOTIFY_THROTTLE_SECONDS, now.timestamp()):
+        rc = notify("AutoSDD 無主模式",
+                   "主控已因額度撞線退場，背景任務仍在執行，目前無人統籌")
+        if rc != 0:
+            queue_notify("AutoSDD 無主模式",
+                        "主控已因額度撞線退場，背景任務仍在執行，目前無人統籌",
+                        rc, now.timestamp())
+        _append_trace(log, "orphan_agents_detected", session_id=session_id, notify_rc=rc)
+        audit["orphan_agents_detected"] = True
+        audit["orphan_notify_rc"] = rc
+    return audit
+
+
 def patrol_housekeeping(transcript: Path, event: object, now: datetime, state: dict,
                         idle_threshold: float, tick: str, log: Path) -> dict:
-    """每次巡邏的三件事：扇出死亡快照（既有）＋主控閒置預防提醒（§4.5.7）＋武裝狀態
-    漂移自癒（§4.5.8）。合成一個字典，直接 `**` 進 `sentinel_decided` 痕跡。
+    """每次巡邏的五件事：扇出死亡快照（既有）＋主控閒置預防提醒（§4.5.7）＋無主模式
+    偵測（PRD_Amendment_R112 §3-1 A-4）＋武裝狀態漂移自癒（§4.5.8）＋通知補投佇列
+    重投（§3-4）。合成一個字典，直接 `**` 進 `sentinel_decided` 痕跡。
     """
     audit = dict(snapshot_fanout(transcript, event))
     if event is None:
         audit.update(_idle_prepare_watch(transcript, now, idle_threshold))
+    audit.update(_orphan_watch(transcript, event, now, idle_threshold, state, log))
     audit.update(_heal_armed_drift(state, now, idle_threshold, tick, log))
+    audit.update(redeliver_queued(now.timestamp(), log))
     return audit
 
 
@@ -375,6 +515,99 @@ def notify(title: str, body: str) -> int:
                               creationflags=guard.NO_WINDOW).returncode
     except (OSError, subprocess.SubprocessError):
         return 127
+
+
+def notify_queue_path() -> Path:
+    """通知補投佇列的居所（同 `endurance_env.trace_dir()`，壽命與逃生口紀律一致）。"""
+    return endurance_env.trace_dir() / NOTIFY_QUEUE_NAME
+
+
+def _load_queue(path: Path) -> list[dict]:
+    """讀佇列；讀不到／格式不對一律回空清單（量不到 ≠ 佇列裡真的沒有東西，但這裡的
+    最壞代價只是少送一輪通知，不得升級為故障——同 `_write` 的既有紀律）。
+    """
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return raw if isinstance(raw, list) else []
+
+
+def _save_queue(path: Path, items: list[dict]) -> bool:
+    return _write(path, json.dumps(items, ensure_ascii=False, indent=2))
+
+
+def queue_notify(title: str, body: str, rc: int, now: float) -> bool:
+    """把一則投遞失敗的通知落進持久佇列；回「有沒有排進去」。
+
+    `rc == NOTIFY_OFF_RC`（使用者**刻意**關掉這條管道，`NOTIFY_ENV` 未設）不入列——
+    入列會讓預設關閉的桌面通知在每一次 loud 情境都排一則、重試三次後又出聲丟棄一次，
+    與 R82／HELM-01「預設就不敲」的直接指令背道而馳。`rc == 0`（已送達）自然不入列。
+    🔴 `NOTIFY_ENV` 未設時整支**提早短路**——不只是 `rc == NOTIFY_OFF_RC` 那一格：
+    `alert()` 的 `NOTIFY_NO_RESCUE_RC`（沒東西要救時**根本不呼叫** `notify()`）與
+    `NOTIFY_ENV` 無關、任何 `loud=True` 呼叫都會撞到它，若這裡不重複同一道關卡，
+    佇列會在**每一個**現有測試（本檔數百支從未設過 `NOTIFY_ENV` 也從未預期本檔會碰
+    `endurance_env.trace_dir()`）跑過 `alert()` 時，把記錄寫進**開發者真正的家目錄**
+    ——本輪落地當回合全套實跑親自撞見：`SpendLimitReachesAHumanTest` 讀到同一台機器
+    上其他測試遺留的 19 筆真實佇列項目並把它們全部標記「送達」。桌面通知本來就整條
+    預設關閉，關掉時談「補投」沒有意義——沒有人在等一個永遠不會顯示的通知。
+    """
+    if rc == 0 or rc == NOTIFY_OFF_RC or not os.environ.get(NOTIFY_ENV):
+        return False
+    path = notify_queue_path()
+
+    def _append() -> bool:
+        items = _load_queue(path)
+        items.append({"title": title, "body": body, "queued_at": now,
+                     "attempts": 0, "last_rc": rc})
+        return _save_queue(path, items)
+
+    return quota_ledger.with_lock(path.with_suffix(".lock"), _append)
+
+
+def redeliver_queued(now: float, log: Path, *, ttl: float = NOTIFY_QUEUE_TTL_SECONDS,
+                     max_attempts: int = NOTIFY_QUEUE_MAX_ATTEMPTS) -> dict:
+    """PRD_Amendment_R112 §3-4：每次巡邏重投佇列裡每一則。回稽核欄位（`{}`＝佇列空）。
+
+    三個結局，逐則各自落痕跡（事件名與既有家族互異，同本檔一貫紀律）：
+    送達＝`delivered=True`，移出佇列；逾 TTL 或重試次數用盡＝**出聲丟棄**（stderr，
+    不靜默）＋移出佇列；仍失敗且未到上限＝原樣留著，下一次巡邏（≤900s）再試。
+    """
+    path = notify_queue_path()
+
+    def _drain() -> tuple[list[dict], list[dict]]:
+        items = _load_queue(path)
+        if not items:
+            return [], []
+        kept: list[dict] = []
+        results: list[dict] = []
+        for item in items:
+            title, body = str(item.get("title") or ""), str(item.get("body") or "")
+            if now - float(item.get("queued_at") or 0) > ttl:
+                print(f"🔴 通知逾期未送達，已丟棄（不靜默）：{title}", file=sys.stderr)
+                results.append({"title": title, "delivered": False, "dropped": "ttl"})
+                continue
+            rc = notify(title, body)
+            attempt = int(item.get("attempts") or 0) + 1
+            if rc == 0:
+                results.append({"title": title, "delivered": True, "attempt": attempt, "rc": rc})
+                continue
+            if attempt >= max_attempts:
+                print(f"🔴 通知重投 {attempt} 次仍失敗，已丟棄（不靜默）：{title}",
+                     file=sys.stderr)
+                results.append({"title": title, "delivered": False,
+                               "dropped": "max_attempts", "attempt": attempt, "rc": rc})
+                continue
+            kept.append({**item, "attempts": attempt, "last_rc": rc})
+            results.append({"title": title, "delivered": False, "attempt": attempt, "rc": rc})
+        _save_queue(path, kept)
+        return kept, results
+
+    kept, results = quota_ledger.with_lock(path.with_suffix(".lock"), _drain)
+    for row in results:
+        _append_trace(log, "notify_redelivered",
+                      **{k: v for k, v in row.items() if k != "title"})
+    return {"notify_queue_pending": len(kept)} if results else {}
 
 
 # 🔴 R82／HELM-01 的第三面（殘骸）。前兩面（判定面、載具面）治的是「不該叫人的時候
@@ -510,8 +743,13 @@ def alert(reason: str, state: dict, *, loud: bool = True, plan: object = None,
         f"## 重啟指令\n```\nclaude -r {state.get('session_id')}\n```",
     ]) + "\n")
     rc = notify("AutoSDD 需要你", reason) if dead_agents else NOTIFY_NO_RESCUE_RC
+    # DEF-200-236：`rc` 若不是「已送達」也不是「使用者刻意關掉」，落佇列讓下一次巡邏
+    # 重投——`NOTIFY_NO_RESCUE_RC` 此前**永遠**到不了 `notify()`，等於這一類 halt
+    # 通知結構上沒有第二次機會（R115 開閥實彈演練逐字重現 round-label-ok，見本檔 §3-4 立案段）。
+    queued = queue_notify("AutoSDD 需要你", reason, rc, time.time())
     print(f"🔴 {reason}\n   ⚠️ 只有人做得到的動作 → {note}", file=sys.stderr)
-    return {"note": str(note) if ok else "", "note_written": ok, "notify_rc": rc}
+    return {"note": str(note) if ok else "", "note_written": ok, "notify_rc": rc,
+            "notify_queued": queued}
 
 
 def main(argv: list[str]) -> int:
