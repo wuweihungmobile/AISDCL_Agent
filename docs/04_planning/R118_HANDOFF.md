@@ -45,6 +45,7 @@ raw 主表淨額已 ≤0（十七支 docstring 分四批搬遷抵銷 -184，超�
    （狀態欄仍是未結字面＝仍未結案）。
 2. **P1-6 尚未實作**（本輪改為規格形式交下一投續作，見下節）。現查
    `git grep -rn "skip_id_ledger" tools/tests/`（零命中＝共同變更鎖仍未落地）。
+   <!-- absent-if: def test_skip_ledger_co_change -->
 3. **P1-7 的 SD-4 面仍未接線**（無主模式處置面 cap 收斂）。現查
    `git grep -n "cap_prepare" tools/lib/quota_escalation.py`（零命中＝仍未接）。
 4. **P1-8 盤點仍未進行**（Pacing／BurnDown 落款後與現行實作的逐條差異）。現查
