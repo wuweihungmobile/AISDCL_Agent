@@ -84,7 +84,7 @@ Bash 工具（鐵律一；`.sh` 執行形態禁帶 bash `-n`——noexec 假綠�
 - 開場（2026-09-01 01:02）：未結 **55**／168，外部軌 6、長債軌 7；守衛線 90351。
 - 收尾：未結 **52**／168（結 3＝238/239/235、新增 0；淨 **-3**）；外部軌 6、長債軌 7
   （複查日全更新）；守衛線 **90340**（R115 淨額 -11）。
-- <!-- guard-total:R115 --> **守衛線追記（R115 修復波＋治理批＋收斂棒＋收輪補釘）：護欄層累積淨額＝ 90351 → 90350（**-1**）** —— 修復波 +807 以史料搬遷 -930 抵銷（-11，款(11) 連升 streak 終止＋款(12) 到期兌現 `(115, 577)`＋重新武裝 117/570），加收輪補釘 +10（雲端首紅修復：假 scheduler 後端 credential_key 對齊當平台後端＋DEF-200-239 skip 補 `[WINDOWS-NATIVE-ONLY]` 標籤與 EAW 折行，cbg +3；稽核列與 rewrite ledger 接鏈列自身 +7）；逐檔清單見 `docs/06_quality/CrossPlatform_R106_Scan_Findings.md` 的 R115 標記行。
+- <!-- guard-total:R115 --> **守衛線追記（R115 修復波＋治理批＋收斂棒＋收輪補釘）：護欄層累積淨額＝ 90351 → 90344（**-7**，含補釘二 -6＝DEF-200-239 姊妹漏網修復＋搬遷抵銷）** —— 修復波 +807 以史料搬遷 -930 抵銷（-11，款(11) 連升 streak 終止＋款(12) 到期兌現 `(115, 577)`＋重新武裝 117/570），加收輪補釘 +10（雲端首紅修復：假 scheduler 後端 credential_key 對齊當平台後端＋DEF-200-239 skip 補 `[WINDOWS-NATIVE-ONLY]` 標籤與 EAW 折行，cbg +3；稽核列與 rewrite ledger 接鏈列自身 +7）；逐檔清單見 `docs/06_quality/CrossPlatform_R106_Scan_Findings.md` 的 R115 標記行。
 - 文件閘門：crossref rc=0／archive rc=0／carriers rc=0（帳本編修後實跑）。
 - 全套根層 unittest：修復波後 `Ran 3789 tests` rc=0（收輪窗口於交棒書落檔後重跑最終次，
   結果補記於 commit 訊息）。

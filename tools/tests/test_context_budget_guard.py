@@ -485,22 +485,8 @@ class HookExitContractTest(unittest.TestCase):
                          "window 被指定為 1M 後 190K 只有 19%，不該有任何輸出")
 
 
-#: 🔴 R96／B-4：第三方在沙箱家目錄下的副作用，**逐個具名**（不是「忽略一切」）。
-#: 唯一成員是量出來的：Windows 上 `--check` 會 spawn PowerShell 判排程載具活性，而
-#: PowerShell 一啟動就在家目錄底下建出空的 `AppData` 骨架。🔴 R96 二審訂正這份「本輪實測」
-#: 清單（QA 兩次可重現，主控本輪獨立複核兩次同值）：新增路徑逐字＝**3 筆目錄、0 個檔案**
-#: ——`home/AppData`、`home/AppData/Local`、`home/AppData/Roaming`。原文只寫了其中兩筆、
-#: 漏掉 `home/AppData/Local` 卻結語「別無他物」⇒ 一句標著「本輪實測」而重現不出來的宣稱
-#: （數字不影響判準行為，但本 repo 判過「訂正註記逐字引述假話＝製造新假話」）。
-#: mac 走 launchctl，這一格不會出現。
-#: 誠實劃界：判準因此看不見「planner 開始往 `AppData` 底下寫東西」——那是**一個目錄名**的
-#: 盲區，而 R96 原方案（把 HOME 移出被觀測目錄）盲掉的是**整棵 HOME 子樹**，嚴格更大。
-#: 🔴 **豁免形狀可以更小，但本輪刻意不收**（R96 二審／QA 提案，承接輪次見缺陷帳本）：
-#: 判準吃的是「任意深度的元件名、**含檔案**」，而實際只需放過上面那 3 個目錄。收窄的兩個
-#: 候選（只豁免目錄／錨定 `home/AppData/` 前綴）都會讓「第三方在別人機器上往 `AppData` 底下
-#: 寫一個檔」變成假紅，而那是**只能在那台機器上量得到**的事（本機兩次實測 0 個檔案，證明
-#: 不了別台機器同樣是 0）。本 repo 判過「擋到讓人無法工作的守衛會被整個關掉，比沒有守衛
-#: 更糟」⇒ 拿一個量不到的前提去收窄，風險方向與收益不對稱。
+#: R115 round-label-ok（WHY 全文搬遷，比照收斂棒體例）
+#: 見 CrossPlatform_Guard_Line_History.md〈R115 cbg _HOME_ARTIFACT_DIRS WHY〉節。
 _HOME_ARTIFACT_DIRS = frozenset({"AppData"})
 
 
@@ -4614,8 +4600,19 @@ class SpendLimitReachesAHumanTest(unittest.TestCase):
             "reset_at": "", "plan_path": str(self.plan), "task_name": "T_R81",
             "session_id": transcript.stem, "transcript": str(transcript),
             "log_path": str(self.log)})
-        return planner._sentinel_tick(planner.build_parser().parse_args(
-            ["--sentinel-tick", "--plan", str(self.plan)]))
+        # 🔴 R115 修復（同 DEF-200-239／`SentinelDecisionTest._tick` 既有藥方） round-label-ok
+        # 本類別的 `task_name` 是固定字面 "T_R81"，永遠不符合任何真後端的 `AutoSDD_Sentinel_`
+        # 前綴查詢 ⇒ `patrol_housekeeping()` → `_heal_armed_drift()` 摸到未注入的
+        # `schedule_backend.select()` 時，真後端會結構上判定「這支工作不在」並嘗試真的
+        # `.arm()`——posix 上真後端無條件失敗（`NoCarrierBackend`／CI 沙箱裡的
+        # `LaunchdBackend`），觸發本輪新增的 rc≠0 loud alert 分支，於是普通的排程／靜默
+        # 下班 tick 也被誤判成「漂移重掛失敗」而騷擾人（雲端 posix 首跑才紅，Windows
+        # 本機因真後端行為不同而看不見）。與 `SentinelDecisionTest._tick` 同一帖藥：
+        # 注入一支確定性假後端，讓漂移健檢摸到的是可控的假象，不是真排程器。
+        with unittest.mock.patch.object(sb, "select",
+                                        return_value=_StatefulFakeSchedulerBackend()):
+            return planner._sentinel_tick(planner.build_parser().parse_args(
+                ["--sentinel-tick", "--plan", str(self.plan)]))
 
     def _rows(self) -> list[dict]:
         return [json.loads(line) for line
@@ -5862,18 +5859,8 @@ def _TRACE_ISOLATION(test: unittest.TestCase) -> tuple:  # noqa: N802 — 與同
     做成**共用的一格**而不是各類別自己抄一份：抄的那個形態正是這個缺陷的成因（兩個
     類別各抄了四格、各漏了同樣的兩格）。漏用它會被下面那道鎖抓到。
     """
-    # 🔴 R84 第三格（`refresh_stamp_path`）＋ R86 第四格（`burn_ledger_path`，持久目錄
-    # ⇒ 漏關會汙染下一次真派工決策）。兩格立案全文＝Resume 證據檔 §L-4.11
-    # （目錄前綴刻意不寫的分桶理由也在那裡）。
-    # 🔴 R102：`quota_availability`/`quota_stability` 的持久狀態（可得性遲滯/併發上限 round-label-ok
-    # 平穩性）住 `endurance_env.trace_dir()`，**不是**上面四格那種可個別 swap 的
-    # `qg.<name>` 函式——那兩個模組的 `evaluate()` 直接呼叫 `endurance_env.trace_dir()`
-    # 本身（R7 的退化偵測就掛在這一呼叫上，不能繞過，否則退化偵測本身就測不到）。
-    # 唯一的沙箱點是既有的 `AUTOSDD_TRACE_DIR` 覆寫（同 `test_quota_policy.py::
-    # AvailabilityHysteresisTest.setUp` 的既有作法）：把它一起收進本共用格，讓已經在
-    # 用 `_TRACE_ISOLATION(self)` 的六個類別自動獲得隔離，不必逐一補寫。少了這一格，
-    # 這兩個模組會把真實開發機的 `~/.autosdd/traces/autosdd_quota_{availability,
-    # stability}.json` 讀出來、跨測試互相污染 cap/streak（R102 接線當回合實測抓到）。 round-label-ok
+    # R115 round-label-ok（WHY 全文搬遷，比照收斂棒體例）
+    # 見 CrossPlatform_Guard_Line_History.md〈R115 cbg _TRACE_ISOLATION 共用格沿革 WHY〉節。
     os.environ[endurance_env.TRACE_DIR_ENV] = str(test.tmp / "traces")
     test.addCleanup(os.environ.pop, endurance_env.TRACE_DIR_ENV, None)
     return (("quota_trace_path", lambda: test.tmp / "trace.jsonl"),

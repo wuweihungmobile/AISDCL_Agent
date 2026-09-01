@@ -682,7 +682,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 6483,
+    "test_adr_xplat001_c1c2_lock.py": 6490,
     "test_archive_defect_log.py": 3986,
     "test_bash32_compat.py": 1020,
     "test_bash_probe_spec_contract.py": 983,
@@ -697,7 +697,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_check_wrapper_thinness.py": 1234,
     "test_claim_provenance_r86.py": 618,
     "test_component_sanitizer_shared_layer_lock.py": 293,
-    "test_context_budget_guard.py": 9384,
+    "test_context_budget_guard.py": 9371,
     "test_defect_id_reference_integrity.py": 281,
     "test_dev_start.py": 6636,
     "test_dev_start_ps1_lastexitcode.py": 548,
@@ -1306,6 +1306,12 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "launchd 憑證欄、硬編致空憑證紅）＋DEF-200-239 skip 補 [WINDOWS-NATIVE-ONLY] 標籤"
      "（cbg +3 含 skip 行 EAW 寬度折行）＋本稽核列與 rewrite ledger 接鏈列自身（本檔 "
      "+7）；同輪合併淨額 -11+10=-1 仍 ≤0。逐項見 CrossPlatform_R115_Debt_Closure.md。"),
+    ("R115", 90350, 90344, -6,
+     "[收輪補釘二] posix 雲端紅第二根因（DEF-200-239 姊妹漏網）："
+     "SpendLimitReachesAHumanTest._tick 未隨 239 注入假 scheduler 後端，posix "
+     "NoCarrierBackend（list_jobs 確定空＋arm 恆敗）走進 _heal_armed_drift 新 loud 分支"
+     "誤觸兩測試（cbg +11）；同批搬遷兩塊 WHY 散文 -24 抵銷＋本稽核列與接鏈列自身（本檔 "
+     "+7）。同輪合併淨額 -1-6=-7 仍 ≤0。逐項見 CrossPlatform_R115_Debt_Closure.md。"),
 )
 
 
@@ -1512,10 +1518,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 87
+_REPIN_LOG_FROZEN_PREFIX_LEN = 88
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "0c0aa49677995de5ffbe082695ed33cdd189988f3aa99b4d4d21dc0e483dc22d")
+    "9316ce4e91ed15775b3e67576ba025626ca3562f6f35cb53147323c3bfdb0b69")
 
 
 def repin_log_history_digest(
@@ -1637,6 +1643,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # （排程孤兒回歸鎖，本輪 test_context_budget_guard.py 內容主要新增項之一）。
     ("R115", "ea038ea6ff4e", "4e5f11565d23", "DEF-200-239"),
     ("R115", "4e5f11565d23", "0c0aa4967799", "DEF-200-239"),
+    ("R115", "0c0aa4967799", "9316ce4e91ed", "DEF-200-239"),
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。
