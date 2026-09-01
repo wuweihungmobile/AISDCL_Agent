@@ -297,8 +297,12 @@ _FROZEN_SHRINK_ONLY_BUCKET_LINES: dict[str, int] = {
     # 自然增加，多輪未覆核）；guard_self 實測降到 3494（低於基準 3545 但仍在
     # `BUCKET_STALE_SLACK` 容忍帶內，未觸發 `[分桶基準過時]`，故本列保留不動）。現查／重釘
     # 指令：`python tools/probe/guard_layer_bucket_census.py --json`。
+    # 🔴 R118 round-label-ok 收尾單人窗口：guard_self 3545→3246（DEF-200-212 P1-5 史料搬遷抵銷批，
+    # test_check_defect_log_crossref.py 十七支 class-level docstring 搬離 tools/tests/
+    # 使該桶實測明顯低於基準，觸發 `[分桶基準過時]`，依判準第三向要求重釘為實測值；
+    # 這是判準設計的正常收斂動作，非放寬）。
     "prose": 4182,
-    "guard_self": 3545,
+    "guard_self": 3246,
 }
 
 #: 棘輪吃的粒度與估計量。寫成常數而不是散文，是為了讓 probe 與棘輪不可能各讀一種

@@ -2750,3 +2750,261 @@ AvailabilityHysteresisTest.setUp` 的既有作法）：把它一起收進本共�
 用 `_TRACE_ISOLATION(self)` 的六個類別自動獲得隔離，不必逐一補寫。少了這一格，
 這兩個模組會把真實開發機的 `~/.autosdd/traces/autosdd_quota_{availability,
 stability}.json` 讀出來、跨測試互相污染 cap/streak（R102 接線當回合實測抓到）。
+
+## test_check_defect_log_crossref.py 類級 docstring 沿革搬遷（R118）
+
+R118 收尾單人窗口的史料搬遷抵銷窗口（DEF-200-212 P1-5 落地後的淨額回補）：本檔此前從未
+被搬遷過，九支 class-level docstring（皆為 Rule 9「意圖」敘事，非判準邏輯本體）原文
+一字不漏搬到本節，測試檔原處只留兩行指標。逐支對照見下。
+
+### R118 crossref TestArchiveRequiredProblems WHY
+
+`tools/check_archive_required.py::archive_required_problems()` 的紅綠自證。
+
+    背景：帳本歸檔（`archive_defect_log.py --apply`）過去完全靠人手動想起來才做，
+    commit 期零機械攔停。本判準把「bytes 落在 WARN~FAIL 帶 **且** 現在有非空可搬清單」
+    升級為 commit 期強制觸發（見該檔模組 docstring）。
+
+    三支測試各自唯一鑑別一件事（Rule 9 — 測試要驗「為什麼」不是只驗「是什麼」）：
+      ① 兩個條件同時成立 → 必須觸發（正樣本）。
+      ② bytes 在安全區（< WARN）——即使該檔內容本身可搬 → 不得觸發：證明本判準是
+         bytes 門檻 **AND** 可搬清單，不是只看其中一個就下判斷（若誤刪 bytes 門檻，
+         只剩這支會轉紅，因為它的 fixture 內容本身完全可搬）。
+      ③ bytes 落在 WARN~FAIL 帶、但清一色未結案（`open`）→ movable 為空 → 不得觸發：
+         證明「bytes 已逼近」本身不是觸發理由，「有東西可搬」才是（若誤刪可搬清單這
+         半，只剩這支會轉紅，因為它的 bytes 確實已進入該帶）。
+
+    刻意用**孤立**目錄（不複製 `docs/06_quality/` 真實帳本家族）：本判準的 bytes 門檻
+    讀 `check_defect_log_crossref._DEFECT_LOG`，可搬清單讀
+    `archive_defect_log.plan()`（其 `_LEDGER`／`_QUALITY_DIR`），兩者必須同時指向
+    **同一份**合成檔，孤立目錄讓這件事在測試裡可控、且不受真實帳本現況（其可搬列數
+    會隨每次 `--apply` 變動）影響而失去代表性。`_status_claimed_ids()`／
+    治理文件指針掃描讀的是**真實**倉庫檔（`gate._CROSSREF_TARGETS`／
+    `_GOVERNANCE_DOCS`，皆為絕對路徑、不受 `_QUALITY_DIR` 影響），沿用既有
+    `TestPlanRejectsRowsWithExternalResidencePointers`（`test_archive_defect_log.py`）
+    同款設計；合成 ID 選用倉庫內從未出現過的號碼，避免與真實治理文件的指針宣稱巧合命中。
+
+### R118 crossref TestR82SealedHistoryPrefix WHY
+
+史料前綴不可變（`DEF-101-995`）。
+
+    意圖（Rule 9）：上一組（`DEF-101-993`）補的方向鎖只判「相鄰段不上升 ＋ 末元素對得上
+    現值」，於是 R82 掃描 §F 以四組實跑對照量到它自己留的縫——`REWRITE-last`
+    `(105,101,98,85)→(105,101,98,90)` 與 `truncate` `(999,)` **兩組都是綠的**。
+    也就是說：一條專門用來擋「砸溫度計」的鎖，擋得住老實追加一個更大的數，擋不住把
+    溫度計的刻度表整張換掉。同一輪、同一個主題、第二次。
+
+    所以本組守的不是方向，是**已經寫下來的那幾個值還在不在**。缺了它，
+    `ledger_rotation.py` 檔頭那句「歷史不得回填、不得改寫」與它所治的病同型：
+    規則寫在註解裡，觀測者一個都沒有。
+
+    🔴 R82 複審 QA B1（`DEF-101-997`）訂正本組自己的兩個病：
+      ① `_SEAL` 原本是硬編的第三份複本 `(105, 101, 98, 85)`，**從不與
+         `_SEALED_HISTORY_PREFIXES` 對帳** ⇒ 封印被改動時本組 7 支全過。現改為讀活體表，
+         下面每一條注入體與斷言都由它機械推導：封印一動，注入跟著動。
+      ② 本組只驗 `sealed_prefix_problems()`，而那支對「封印**比上一次短**」零判準
+         ⇒ 把封印砍掉一格（一行的差別）就能讓超長列上限的放寬整個變綠。那一向由
+         `seal_table_problems()` 接手，下面四支是它的紅綠自證。
+
+### R118 crossref TestStatusFirstWordProblems WHY
+
+`status_first_word_problems()`（SA-R60R2-06 新增的硬斷言）的正負樣本。
+
+    🔴 落地時這道鎖是**零測試覆蓋**上線的（R60 round 3 實查 `合法首詞`／
+    `status_first_word` 在本檔零命中），本類補齊。
+
+    🔴 先釘住概念分野——「含糊」與「首詞非法」是**兩個獨立軸**，本輪逐一實測：
+
+    | 狀態欄文字 | `_classify()` | 首詞 | 合法？ |
+    |---|---|---|---|
+    | `partial@R60（降級出口）` | `None`（含糊） | `partial` | ✅ |
+    | `pending-reassessment（…）` | `None`（含糊） | `pending-reassessment` | ❌ |
+    | `partially-fixed@R60` | `fixed`（不含糊） | `partially-fixed` | ❌ |
+
+    第二列同時命中兩軸，所以**不能**拿它當任一軸的 fixture（誰的期望都說不清）；
+    第一列是「只驗含糊」該用的樣本，第三列是本鎖真正要擋的形態。
+    例外：`TestLoadLedgerStatus::test_last_row_unclassifiable_does_not_inherit_earlier_row`
+    刻意留用第二列形態——它只走 `_load_ledger_status()`、不經首詞鎖，要驗的正是
+    「連 `_classify` 都完全辨識不出」這種極端，兩軸交疊在那裡無害。
+
+### R118 crossref TestR82ComplexReviewSealTableIntegrity WHY
+
+封印表**自己**的完整性（`DEF-101-997`；R82 複審 QA B1）。
+
+    意圖（Rule 9）：上一組（`DEF-101-995`）把「史料被改寫／被砍短」補上了觀測者，但它
+    只從**史料**那一側看——判準是 `history[:len(seal)] == seal` ＋「封印不得比史料長」。
+    稽核者以 `mock.patch` 記憶體內注入實測到它自己留的縫：
+
+      · A（只改史料＋常數 `(105,101,98,85)→(105,101,98,90)`，封印完整）→ 1 筆 → 紅 ✅
+      · B（**同時把封印砍成 `(105,101,98)`**，一行的差別）        → 0 筆 → **綠** ❌
+
+    也就是說：把超長列上限 85 放寬成 90 這種事，改兩行就全綠。`_SEAL_TAIL_MAX = 1`
+    剛好讓砍一格之後的尾巴合法，於是「封印比上一次短」這一向從頭到尾沒有人在看。
+    更難看見的是守它的那組測試把封印硬編成第三份複本、從不與活體表對帳 ⇒ 封印被改動時
+    7 支全過；而 `sealed_prefix_problems()` 的紅燈訊息逐字寫著「若你正打算改
+    `_SEALED_HISTORY_PREFIXES` 讓它變綠：那正是本判準要擋的動作」——**那句話零觀測者**，
+    與它所治的 `DEF-101-993` 同型。同一個主題，第三次。
+
+    本組是 `seal_table_problems()` 的紅綠自證：三個方向各一支紅、出廠現況一支綠、
+    合法動作（尾端追加＋同步重釘）一支綠，另加一支以實際注入驗的接電鎖。
+
+### R118 crossref TestAdrClosureClaimsAreMechanicallyChecked WHY
+
+R69 `DEF-101-735` — ADR 的散文式結案宣稱 vs 帳本狀態。
+
+    **原始缺陷**：`ADR-XPLAT-002` §1 與 `ADR-XPLAT-003` 表頭各自寫「`DEF-101-706`
+    隨之結案」，而同輪帳本該列狀態欄是 `partial`（明寫「解鎖條件①未達標故不結案」）
+    ——兩份活文件對同一個 ID 各說各話。當時 ADR 目錄**不在** `_CROSSREF_TARGETS` 內，
+    機械上完全盲。
+
+    **本鎖守的是兩件事，缺一都還原不了缺陷**：
+      (甲) ADR 目錄在掃描面內（且是 glob 自動註冊——具名清單必漏掉下一支新 ADR，
+           而漏掉零訊號，正是本缺陷的形狀）。
+      (乙) 掃描面內**看得見散文宣稱**。`_scan_target()` 的 `_CLAIM_RE` 只認
+           「DEF-ID 緊接括號」，ADR 那句是純散文 ⇒ 只做 (甲) 不做 (乙)，閘門仍然全綠。
+           這一條是本鎖的重點：**納入掃描面不等於看得見**。
+
+### R118 crossref TestUnpinnedHandoverAndStaleGrandfather WHY
+
+硬規則② 後半句（R68）與其存量豁免 stale 自檢的鑑別力鎖。
+
+    🔴 為何必須以**純函式**驗、不經 `main()`：這兩道與 `_UNPINNED_HANDOVER_
+    GRANDFATHERED` 是一體的，而該名單列的是相對於真實主檔的存量 ID。經 `main()`
+    就得餵合成帳本，名單對它全不匹配 ⇒ 兩個方向同時假紅（fixture 的未結列一律被判
+    「缺承接指派」、名單每一筆一律被判「已 stale」），紅因與被驗行為無關。主檔因此
+    把這兩道綁在 `_DEFECT_LOG == _DEFAULT_DEFECT_LOG`；**代價是 `main()` 路徑上
+    這兩道對合成帳本沒有覆蓋**，本類別就是補上那塊覆蓋的地方——少了它，綁定就從
+    「隔離假紅」變成「靜默關掉一條規則」。
+
+    R68 補立的直接原因：這兩道在被加進主檔時**零測試**（`grep` 全 `tools/tests/`
+    零命中），等於新規則自己不符合本 repo 對「鎖已落地」的認定門檻（Scan-H）。
+
+### R118 crossref TestRowArityAndHeaderAnchoredStatusColumn WHY
+
+欄位切分 arity ＋「狀態欄由表頭定位」（Pkg-P6）的正負樣本。
+
+    🔴 這道修復治的是**本工具自己的假綠面**——它存在的目的就是抓「跨文件假綠」，而它
+    自己切欄時寫 `[c.strip() for c in re.split(...) if c.strip()]`：`if c.strip()` 把空欄
+    整個濾掉，且全程沒有任何「欄數 == 表頭欄數」的檢查，於是狀態欄留空時 `cells[-1]`
+    靜默位移到左鄰的「分流去向」欄。同型漏洞長在照妖鏡自己身上。
+
+    🔴 先釘住一件極容易搞錯的事（`test_arity_check_alone_would_not_have_caught_...`
+    坐實）：前兩個復現輸入的**欄數是對的**，所以「只加 arity 斷言」根本抓不到它們；
+    真正承重的是「保留空欄 ＋ 由表頭定位狀態欄」。arity 斷言治的是另一種列（欄內未轉義
+    字面豎線 ⇒ 欄數變多，DEF-101-560）。兩者互補、缺一不可，不可互相冒充。
+
+### R118 crossref TestR82RatchetDirectionLock WHY
+
+三條 shrink-only 棘輪的**方向鎖**（`DEF-101-993`）。
+
+    意圖（Rule 9）：`OVERSIZE_ROW_CEILING`／`OVERSIZE_ROW_EXCESS_CEILING`／
+    `_UNPINNED_HANDOVER_CEILING` 三者的散文自 R68／R79 起逐輪自稱「只准往下改、零成長
+    容忍」，而那句話**沒有任何觀測者**——當回合實測：把某一列改長 85 bytes ⇒
+    `oversize_row_problems()` 紅；**接著把常數調高到新實測值** ⇒ 四向全綠，且唯一釘住
+    常數的 `test_the_real_ledger_baselines_are_exact_not_padded` 是「常數 == 當回合實測」
+    的相等斷言 ⇒ 帳本一長，那支測試**要求**你把常數調高。相等自檢在這件事上是幫兇不是守衛。
+
+    所以本組守的不是「常數對不對」，是**常數相對它自己上一個值的方向**。缺了它，
+    這三條棘輪擋得住「忘了重釘」，擋不住「往上重釘」——而後者正是砸溫度計的那個動作。
+
+### R118 crossref TestEveryLegalFirstWordIsClassifiable WHY
+
+B5 / SA-R60R3-07：`_STATUS_FIRST_WORDS` 與 `_STATUS_KEYWORDS` 兩份常數硬綁定。
+
+    原始缺陷：`partial` 是合法首詞卻無分類器對應 ⇒ `_classify` 回 None ⇒ 該列落進
+    `main()` 的「狀態含糊」桶，而含糊**只印 warning、永不 fail**。零白名單的宣稱字面
+    成立（逐條盤點確實沒有任何白名單），但**軟出口**還在，只是換了門牌。
+
+    🔴 為何要立通用鎖而不是只補一個分類器（主控傾向 (b)，本包採「(a)+(b) 都做」）：
+      · 只補分類器 ⇒ 修的是這一個實例，下一個新增的合法首詞會走完全一樣的路徑再溜一次；
+      · 只加硬斷言 ⇒ 上線當場紅（因為 `partial` 真的沒有分類器），根本無法落地。
+    兩者不是二擇一：分類器是**修復**，硬斷言是**防復發**。手法比照本檔既有的
+    「散文 ↔ `_STATUS_FIRST_WORDS` 雙向綁定」，串起來即「散文 → 程式常數 → 分類器」全鏈。
+
+### R118 crossref TestVagueBucketCountingStillWorksWhenReached WHY
+
+R9 的「含糊列不計入有效狀態紀錄」行為 —— 在**新鎖被停用**的情況下仍須成立。
+
+    🔴 為何要這樣測：B5 落地後「合法首詞 ⇒ 必可分類」，於是 `main()` 的含糊桶在結構上
+    不可能被真實帳本填到（首詞非法的列早在前一道硬閘就 rc=1）。若直接刪掉 R9 那支測試，
+    等於把一個仍存在的分支變成零覆蓋；若硬造 fixture，又會造出一個現實中不存在的形態。
+    折衷＝**把新鎖停用一次**：這同時是 R9 行為的回歸測試，也是 B5 的**反向控制組**
+    ——它逐字證明「站在帳本與那個軟出口之間的，就是本輪新加的那道鎖」。
+
+### R118 crossref TestClosingRoundProblemsWiring WHY
+
+`closing_round_problems()` 的統一入口，以及與 `main()` 的接線。
+
+    🔴 **接線刻意不是獨立的 `_CHECK_ORDER` 名目**（設計取捨，非疏忽）：
+    `check_defect_log_crossref.py` 的 raw-line 棘輪餘裕本輪動工前只剩個位數
+    （`TestActionableMessagesHaveLocHeadroom` 要求至少 5 行），獨立一道新名目需要
+    一個新的 `_bail()` 分支（至少 3 行），會把餘裕打到那條鎖的下限之下。故本輪把兩個
+    判準的結果併入**既有**的「帳本體積與逐列位元組上限」`deferred` 收斂點——與 R79
+    把「主檔體積」＋「逐列位元組上限」併成同一個名目是同一個理由、同一個先例（見該檢查
+    上方註解「逐列位元組上限同屬帳本體積語意，故共用同一個名目」）。代價：命中時
+    `_bail()` 的標頭文字對「淨額棘輪」不夠精準，但 `closing_round_problems()` 回傳的
+    每一則訊息本身已把真正發生了什麼講清楚。
+
+### R118 crossref TestSpecDocShellCommandsAreZshSafe WHY
+
+R67：規格文件自己的示範指令在 macOS 預設 zsh 下必須真的跑得起來。
+
+    🔴 原始缺陷：硬規則③ 用來示範判準的兩條指令寫成 `grep -rn "…" --include=*.md .`，
+    在 zsh 下 `nomatch` 會在 **grep 被執行之前**中止整條命令列（實測 `zsh:1: no matches
+    found: --include=*.md`、rc=1、連 `2>` 重導向都沒被建立）。而該規則正是以「零命中」
+    推論「容器不存在」——於是**判準的示範指令在 mac 上恆答『不存在』**。
+    未加引號時的零輸出**不是**零命中，是指令根本沒跑。
+
+### R118 crossref TestR79RowByteCeiling WHY
+
+帳本「單列 ≤700 bytes」的四向判準（`DEF-101-890`）。
+
+    意圖（Rule 9）：這條政策被連續三份交棒書寫進「禁止事項」，卻**沒有任何東西在看它**
+    ——實測 120 列有 110 列違反，主檔因此被推到距 pre-push 硬閘 ≈2 列。所以本組鎖守的
+    不是「列太長很難看」，而是**帳本主檔的可用容量**：長列吃掉的是下一輪能不能寫帳本。
+    四向缺任一向都會退化：缺① 新列可以隨便長；缺② 豁免清單變成永久額度；缺③ 「膨脹了
+    就把 ID 補進清單」是免費的；缺④ 一列 800 bytes 的豁免列可以長到 8,000 而全綠。
+
+### R118 crossref TestFamilyHeaderUniformity WHY
+
+B2 / SA-R60R3-02：表頭同形性的斷言對象必須是「具表頭的檔」，且檔數不寫死。
+
+    🔴 兩層錯（主控親自複驗 CONFIRMED）：
+      (i)  訂正前本檔散文寫死「帳本家族 32 檔」，而實查家族更多，且每跑一次 `--apply` 就再變；
+      (ii) 更重的一層——該句斷言的「表頭欄數全部同形」**只對其中具表格表頭的那些檔成立**，
+           家族內另有一批純散文 archive 根本沒有表格。把只對子集成立的性質宣稱到全集上，
+           比數字過期更重：讀者會以為「家族每一份檔都有表頭」而據此推論。
+    違反的是本輪自己落地的 Scan-H 必跑項 #3（鎖的散文不得寫死可由程式現查的數字）。
+
+### R118 crossref TestEvidenceFamilyPointersResolve WHY
+
+帳本裡「見 `<檔>` 的 `## DEF-101-NNN` 節」必須真的找得到那個錨（DEF-101-587）。
+
+    R60 round 3 把證據檔拆成入口檔＋姊妹檔。拆分**當下**零失實（具名節指針全部 ≤560、
+    都留在入口檔），但那是**手驗**的結果——下一次有人再搬一節、或帳本新增一個指向已搬走
+    節次的指針，就會靜默失實。本鎖把那次手驗機械化。
+
+    與 `archive_defect_log.py` 判準④／⑥ 的差別：那兩項守的是**帳本家族內**的居所宣稱，
+    本項守的是**帳本 → 證據檔**的跨檔錨點。同一個病（指針失實），不同的邊。
+
+### R118 crossref TestCrossRowReassignMustAlsoNameAFreshRound WHY
+
+`DEF-200-088`：`DEF-200-041` 的收緊只做了**自己這一列**那一半。
+
+    🔴 立案量測（QA 複審，cur=84／85／90 三組）：`orphan_backlog_problems()` 的跨列出口
+    `any(def_id in ln and _reassign_hit(...))` **只取布林、不比輪號** ⇒ 只要有任何一列
+    寫過「改派」並提到本列 ID，本列的承接輪號此後永遠不再被比較。實測 10 列
+    （`DEF-101-796`／`912`／`917`／`918`／`919`／`926`／`980`／`981`／`992`／`998`）
+    自身承接輪號已是 R80~R83（早於當前輪）卻永不轉紅——與 `DEF-200-041` 描述的病同型，
+    只是換了一個入口。修法＝把輪號比較同時套到跨列出口（真主檔實測**假紅 0 列**）。
+
+### R118 crossref TestGovernanceDocOversizeGuard WHY
+
+R60 round 3（DEF-101-587）：具名治理文件的體積守門。
+
+    為何需要：本輪把帳本改「兩層化」——帳本列只寫摘要、完整證據落在
+    `CrossPlatform_R60_Fix_Evidence*.md`。那些檔於是承擔了與帳本**同等**的可讀性義務
+    （四方複審者要逐條重驗就得讀它們），卻**完全不在任何體積守門的涵蓋面內**：實測它
+    一度達 260,963 bytes、距 262,144（Read 工具單次讀取上限）僅 1,181 bytes。
+    ⇒ **把資料搬到另一支檔就繞過守門**，等於守門只綁在檔名上、沒綁在義務上。
+    與 `DEF-99-001`／`DEF-101-123` 同型：政策有上限、卻無機械守門。

@@ -370,6 +370,14 @@ _GOVERNANCE_DOCS = (
     # 逐項落地紀錄與逐檔行數異動表唯一居所在本檔（⇒ 體積守門），且它逐節寫出
     # 「哪一項裁決的憑證在哪一節」的座標宣稱（⇒ 指針稽核）。即刻登記，同既有姊妹檔判例。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R116_Scan_Findings.md",
+    # R118 round-label-ok 收尾單人窗口（DEF-200-212 P1-5 落地批）證據檔：本輪四方複審
+    # C1/C2/C3 收斂、史料搬遷抵銷逐檔清單與淨額記帳唯一居所在本檔（⇒ 體積守門）， round-label-ok
+    # `_GUARD_LINES_REPIN_LOG` 全部七列與 `_REGRESSION_LANE_LOG` 該輪列皆指名 round-label-ok
+    # 本檔（⇒ 指針稽核）。即刻登記。 round-label-ok
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R118_Debt_Closure.md",
+    # 上列的護欄層淨額標記姊妹檔（`guard-total:` 站點之一，`_GUARD_TOTAL_DOC_GLOBS` round-label-ok
+    # 掃描面），與同輪 `R118_HANDOFF.md` 共同滿足「兩份不同檔」的最低站數。 round-label-ok
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R118_Scan_Findings.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/{CrossPlatform,Quota}_*.md`。這**不是**把具名

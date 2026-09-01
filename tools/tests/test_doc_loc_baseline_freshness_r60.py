@@ -7109,6 +7109,18 @@ class TestParallelDispatchChecklistIsPinnedInClaudeMd(unittest.TestCase):
         self.assertEqual(len(hits), 1, hits)
         self.assertIn("收尾單人窗口", hits[0])
 
+    def test_a_term_present_only_outside_the_section_is_still_red(self) -> None:
+        """R118 round-label-ok 回歸鎖：`_a_missing_term_...` 的合成語料節外**完全沒有文字**可撿，
+        `_the_real_claude_md_...` 的節外**剛好也有**四個詞——兩支對「切節退化成全檔
+        搜尋」這個首版真踩過的坑（見 `dispatch_checklist_problems` docstring）恆綠。
+        本測試把「收尾單人窗口」只放在節**外**、節內拿掉，退化版必須仍判紅。"""
+        text = ("收尾單人窗口在鐵律七已有慣例敘述。\n\n"
+                "並行派工防互踩檢查表\n"
+                "1. **結案單線**：x\n2. **修復棒串行**：x\n3. **複審唯讀**：x\n"
+                "\n## 下一節\n")
+        hits = dispatch_checklist_problems(text)
+        self.assertTrue(any("收尾單人窗口" in h for h in hits), hits)
+
 
 if __name__ == "__main__":
     unittest.main()

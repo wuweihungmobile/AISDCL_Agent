@@ -50,10 +50,21 @@
 （含它那個 `(?<![本該此上前系])列` 的敘事引述負向回顧），本檔只**加**三族它沒有的措辭。
 反向濾網見 `_narrative_hit()`——存量假紅是量測出來的，不是想像的。
 
-## 自動祖父化（為何不需要維護豁免名單）
+## 自動祖父化的射程邊界（DEF-200-212 訂正）
 
-射程判準是「宣告的目標輪 ≥ 當前輪」。歷史文件寫「交給 R75」在當前輪 98 時自動出局，
-**不需要**任何 grandfather 清單、也不會隨輪次腐敗。存量普查實數見 `--census`。
+射程判準是「宣告的目標輪 ≥ 當前輪」，前提是**當前輪會隨輪次前進**。本節原自陳
+「不需要任何 grandfather 清單、也不會隨輪次腐敗」；實測 `gate.current_round()` 讀的
+是帳本「發現情境」欄的最大 `R\\d+`，而本 repo 後續紀律是該欄零輪號（時鐘凍結），
+實測凍結在 **R100**——當前輪不再前進，「≥ 當前輪」不會因時間流逝而讓歷史前瞻行
+自動出局。strict 路徑（`unresolved_only=True`）接線後，三筆歷史交接文件的前瞻行卡
+在假陽性：目標輪（R101／R108，引述既有歷史事件非自稱輪號 round-label-ok）早已過去、
+指名的 DEF-ID 也已在後續輪次結案，但時鐘沒有前進，判準本身看不到這件事，故改走
+**具名豁免面工程解**（掌舵者裁決 D4）：把這 3 筆登記進 `_CARRIER_DOC_EXEMPTIONS`
+（shrink-only；鍵＝`(檔案相對路徑, 指名的 DEF-ID)`），**不改寫歷史文件本身**。這不是
+走回「維護豁免名單」的舊病——豁免只在（路徑, DEF-ID）精確相符時生效，同一份文件裡
+任何其他未登記的前瞻行仍照判（不是整檔放行）；帳本時鐘若日後真的前進過那三筆的目標輪
+（引述，非自稱），這三筆會自然變成 no-op（判準本身先讓它們出局，豁免表閒置不動仍
+安全）。存量普查實數見 `--census`。
 
 使用：
   python3 tools/check_handoff_carriers.py            # 不合規印清單並 exit 1
@@ -109,6 +120,55 @@ _QUANTIFIED_ROW_RE = re.compile(r"[0-9一二三四五六七八九十兩數幾多
 #: HTML 註解行（`<!-- guard-total:... -->` 這類機讀錨點）不是交接散文。
 _HTML_COMMENT_RE = re.compile(r"^\s*<!--.*-->\s*$")
 _DEF_ID_RE = re.compile(r"DEF-\d+-\d+")
+
+#: DEF-200-212 授權豁免面工程解（掌舵者裁決 D4）：strict 路徑（`unresolved_only=True`）
+#: 對三筆歷史交接文件的假陽性具名登記——**不改寫歷史文件本身**，只在判準面豁免。
+#:
+#: 🔴 假陽性成因（真因，非表面症狀）：見模組 docstring〈自動祖父化的射程邊界〉——帳本
+#: 「發現情境」欄的輪次時鐘凍結在 R100，三筆前瞻交棒行的目標輪與指名 DEF-ID 皆已在
+#: 後續輪次結案，卻因時鐘不再前進而永遠滿足不了「目標輪 < 當前輪 ⇒ 自動出局」的祖父化
+#: 條件。
+#:
+#: 🔴 鍵設計＝`(檔案相對 posix 路徑, 指名的 DEF-ID)`，**不是** `(路徑, 行號)`：行號會
+#: 隨檔案編輯漂移，寫死行號的豁免在檔案被編輯後會靜默失效（放行整份文件，或誤殺無關
+#: 行）。用 (path, DEF-ID) 配對，且豁免只在**該行確實命中這個 DEF-ID**時才生效
+#: （`carrier_doc_problems()` 用該行 `named` 集合與已登記 DEF-ID 集合取交集判定），
+#: 故同一份文件裡任何其他未登記的前瞻行（不論有沒有 DEF-ID）依然照判——不是整檔放行。
+_CARRIER_DOC_EXEMPTIONS: dict[tuple[str, str], str] = {
+    ("docs/04_planning/R102_HANDOFF.md", "DEF-200-204"): (
+        "本行是在敘述帳本既有列的歷史狀態（『既有「承接輪次：R101」等舊列』，回顧語氣），"
+        "不是本文件自己在交派新工作；DEF-200-204 本身已 fixed@R102（見帳本 "
+        "AutoSDD_Defect_Log_archive_67.md）。目標輪 R101 早於修復輪，本應自動祖父化"
+        "出局，但帳本時鐘凍結在 R100 使其失效。"
+    ),
+    ("docs/06_quality/CrossPlatform_R100_Scan_Findings.md", "DEF-200-208"): (
+        "R100 收尾窗口把淨額死結的三個候選處置交棒 R101、承接列具名 DEF-200-208；"
+        "該筆已 fixed@R101（一次性例外名冊落地，凍結表重釘，見帳本 "
+        "AutoSDD_Defect_Log_archive_67.md）。目標輪 R101 早於修復輪，本應自動祖父化"
+        "出局，但帳本時鐘凍結在 R100 使其失效。"
+    ),
+    ("docs/06_quality/CrossPlatform_R107_Ledger_Closure.md", "DEF-101-559"): (
+        "R107 收尾窗口把『30 版同一 blob』材質化確認列為交棒 R108 候選、承接列具名 "
+        "DEF-101-559；該筆已 closed-by-decision@R107（掌舵者條件式裁決，見帳本本文"
+        "第 93 行）。目標輪 R108 早於修復輪，本應自動祖父化出局，但帳本時鐘凍結在 "
+        "R100 使其失效。"
+    ),
+}
+#: 一次性豁免必須真的維持在少數幾筆——超過這個數字就不再是「具名逐筆核准」，是變相
+#: 把整套祖父化機制改成「寫張條子就能繞過」。**只准調小**（收緊；理論下限 0＝
+#: 不再核准新的歷史假陽性豁免，回頭修正時鐘前進機制才是正解）。
+_CARRIER_DOC_EXEMPTIONS_MAX_ENTRIES = 3
+#: 核准理由的最短長度（同 `_REPIN_APPROVED_ROUND_OVERAGE_MIN_REASON_LEN` 款式：
+#: 兩個字的「核准」不算數，理由太短視同未登記——見 `_exemption_covers()`）。
+_CARRIER_DOC_EXEMPTIONS_MIN_REASON_LEN = 20
+
+
+def _exemption_covers(rel: str, def_id: str,
+                      exemptions: dict[tuple[str, str], str]) -> bool:
+    """`(rel, def_id)` 是否被具名豁免涵蓋（理由太短視同未登記，同 DEF-200-208 款式）。"""
+    reason = exemptions.get((rel, def_id))
+    return reason is not None and len(reason.strip()) >= _CARRIER_DOC_EXEMPTIONS_MIN_REASON_LEN
+
 
 #: 本工具接受的旗標。接 `tools/_cli_flags` 的 SSOT 而非手搓 `in argv`：後者讓打錯的旗標
 #: 靜默掉進預設分支並 rc=0（R67-D20 的假綠形態），且 `test_check_wrapper_thinness.py::
@@ -182,13 +242,16 @@ def ledger_def_ids(ledger_text: str, archive_texts: list[str], *,
     🔴 DEF-200-212①：`unresolved_only=True` 時**未結列才算承接載體**——本函式要證明的
     是「有未結承接單位」，一列 `fixed` 的歷史列不承接任何未來工作，拿它滿足判準② 是
     假綠（與同檔 `ledger_carrier_rounds()` 同一個過濾，先前一個有濾一個沒濾）。
-    ⚠ 閘門面暫**不**預設開啟：當前輪滯後在 R100 時實測轉紅 3 筆
-    （R102_HANDOFF.md:45→DEF-200-204／  ← round-label-ok：引述既有文件檔名，非自稱輪號
-    CrossPlatform_R100_Scan_Findings.md:252→DEF-200-208／
-    CrossPlatform_R107_Ledger_Closure.md:125→DEF-101-559，三筆皆前瞻行指向已結列＝
-    真紅，但其目標輪都早於修復輪 ⇒ 帳本當前輪一走到修復輪即自動祖父化出局）
-    ⇒ 函式已落、閘門接線待結案輪帳本收斂（載體＝DEF-200-212 回執），紅綠由
-    `--self-test` 以 strict 路徑自證。
+    🔴 閘門面**已接線**（`main()` 走本參數）。原節自陳「閘門接線待結案輪帳本收斂」，
+    意思是等帳本當前輪自然前進到 R101（引述，非自稱 round-label-ok）之後讓下述三筆
+    自動祖父化出局；實測帳本「發現情境」欄的輪次紀律已改為零輪號（時鐘凍結，見模組
+    docstring〈自動祖父化的射程邊界〉），時鐘不會再前進，故改走 DEF-200-212 D4 裁決
+    的具名豁免面工程解（`_CARRIER_DOC_EXEMPTIONS`，消費點在 `carrier_doc_problems()`）：
+    三筆假陽性（R102_HANDOFF.md:45→DEF-200-204／  ← round-label-ok：引述既有文件檔名
+    CrossPlatform_R100_Scan_Findings.md:252→DEF-200-208／CrossPlatform_R107_Ledger_
+    Closure.md:125→DEF-101-559，皆前瞻行指向已在後續輪次結案的 DEF-ID）逐筆具名登記
+    後歸零。紅綠由 `--self-test` 與 `tools/tests/test_check_defect_log_crossref.py`
+    的 DEF-200-212 系列自證。
     """
     ids: set[str] = set()
     for text in [ledger_text, *archive_texts]:
@@ -282,10 +345,17 @@ def carrier_files() -> tuple[list[Path], bool]:
 
 
 def carrier_doc_problems(paths: list[Path], cur: int | None,
-                         known_ids: set[str]) -> list[str]:
-    """判準②：交接載體內的前瞻延後行必須指名帳本家族內存在的 DEF-ID。"""
+                         known_ids: set[str], *,
+                         exemptions: dict[tuple[str, str], str] | None = None) -> list[str]:
+    """判準②：交接載體內的前瞻延後行必須指名帳本家族內存在的 DEF-ID。
+
+    `exemptions`（預設 `_CARRIER_DOC_EXEMPTIONS`）＝DEF-200-212 具名豁免面：`(檔案
+    相對路徑, DEF-ID)` 精確相符且理由夠長時，即使該 DEF-ID 在帳本家族內查無列，仍不算
+    problem。刻意可傳供 `--self-test` 與回歸鎖注入用。
+    """
     if cur is None:
         return []
+    exempt = _CARRIER_DOC_EXEMPTIONS if exemptions is None else exemptions
     problems: list[str] = []
     for p in paths:
         try:
@@ -293,6 +363,7 @@ def carrier_doc_problems(paths: list[Path], cur: int | None,
         except OSError:
             continue
         fence = False
+        rel = p.relative_to(_REPO_ROOT).as_posix()
         for lineno, line in enumerate(text.splitlines(), 1):
             if line.lstrip().startswith("```"):
                 fence = not fence
@@ -305,14 +376,20 @@ def carrier_doc_problems(paths: list[Path], cur: int | None,
             named = {m.group(0) for m in _DEF_ID_RE.finditer(line)}
             if named & known_ids:
                 continue
-            rel = p.relative_to(_REPO_ROOT).as_posix()
+            if any(_exemption_covers(rel, def_id, exempt) for def_id in named):
+                continue
             detail = "；".join(f"[{lb}] R{n}" for lb, n, _ in fwd)
             extra = (f"（本行提到的 {sorted(named)} 在帳本家族內查無列）" if named else
                      "（本行完全沒有 DEF-ID）")
             problems.append(
                 f"{rel}:{lineno} 這一行把工作延後到未來輪（{detail}），卻沒有帳本承接列"
-                f"{extra} ⇒ 交接項無機械承接載體。出口：補一列帳本並在本行指名該 DEF-ID"
-                f"（射程判準＝目標輪 ≥ 當前輪 R{cur}，歷史交棒自動出局，不需豁免名單）")
+                f"{extra} ⇒ 交接項無機械承接載體。出口二選一："
+                f"①補一列帳本並在本行指名該 DEF-ID（射程判準＝目標輪 ≥ 當前輪 R{cur}）；"
+                f"②若目標輪與 DEF-ID 皆已是後續輪次結案的塵封史料，依 DEF-200-212 D4 "
+                f"裁決逐筆登記進 `_CARRIER_DOC_EXEMPTIONS`（shrink-only，鍵＝(路徑, DEF-ID)，"
+                f"不改寫歷史文件本身）。🔴 前提：帳本『發現情境』欄輪次時鐘已凍結（見模組 "
+                f"docstring〈自動祖父化的射程邊界〉），歷史交棒不會隨輪次前進自動出局，"
+                f"故①對已成塵封史料的行永遠不會轉綠——那種情況只有②是真出口")
     return problems
 
 
@@ -419,7 +496,7 @@ def _self_test() -> int:
         finally:
             _REPO_ROOT = keep
 
-    print("[self-test] 判準② 取數面兩假綠（DEF-200-212；strict 路徑，閘門接線待結案輪）")
+    print("[self-test] 判準② 取數面兩假綠（DEF-200-212；strict 路徑，main() 已接線）")
     syn_fixed = f"| ID | 狀態 |\n|----|------|\n| {_SYN_ID} | fixed@R{_SYN_CUR} |\n"
     expect(_SYN_ID not in ledger_def_ids(syn_fixed, [], unresolved_only=True),
            "已結（fixed）列的 ID 不算承接載體（改前本注入為綠＝假綠重演）")
@@ -435,6 +512,44 @@ def _self_test() -> int:
     got_all, fell_back_all = _tracked_hits(syn_hits, None)
     expect(len(got_all) == 2 and fell_back_all,
            "tracked 取不到 ⇒ 退回 glob 並標記 fallback（fail-loud，判準③ 出聲）")
+
+    print("[self-test] 判準② 具名豁免（DEF-200-212 D4：strict 假陽性歸零，非整檔放行）")
+    exempt_td = tempfile.TemporaryDirectory(prefix="handoff_exempt_")
+    keep, _REPO_ROOT = _REPO_ROOT, Path(exempt_td.name)
+    try:
+        for (rel, def_id) in _CARRIER_DOC_EXEMPTIONS:
+            fp = _REPO_ROOT / rel
+            fp.parent.mkdir(parents=True, exist_ok=True)
+            fp.write_text(f"- 交給 R{_SYN_LATER} 處理（{def_id}）\n", encoding="utf-8")
+        exempted_paths = [_REPO_ROOT / rel for (rel, _did) in _CARRIER_DOC_EXEMPTIONS]
+        expect(carrier_doc_problems(exempted_paths, _SYN_CUR, set()) == [],
+               "三筆登記豁免各自命中（路徑＋DEF-ID 精確相符）⇒ 不算 problem")
+
+        first_rel = next(iter(_CARRIER_DOC_EXEMPTIONS))[0]
+        first_fp = _REPO_ROOT / first_rel
+        first_fp.write_text(
+            first_fp.read_text(encoding="utf-8")
+            + f"- 另一件不相干的事交給 R{_SYN_LATER} 處理（{_SYN_ID}）\n", encoding="utf-8")
+        expect(len(carrier_doc_problems([first_fp], _SYN_CUR, set())) == 1,
+               "同一份文件裡一個未登記的同型前瞻行 ⇒ 仍紅（防整檔放行、防 vacuous）")
+
+        second_rel = next(iter(_CARRIER_DOC_EXEMPTIONS))[0]
+        wrong_fp = _REPO_ROOT / second_rel
+        wrong_fp.write_text(f"- 交給 R{_SYN_LATER} 處理（{_SYN_ID}）\n", encoding="utf-8")
+        expect(len(carrier_doc_problems([wrong_fp], _SYN_CUR, set())) == 1,
+               "豁免鍵指向的 DEF-ID 與該行實際指名的不符 ⇒ 不豁免、仍紅")
+
+        short_table = {next(iter(_CARRIER_DOC_EXEMPTIONS)): "太短"}
+        third_rel, third_id = next(iter(_CARRIER_DOC_EXEMPTIONS))
+        third_fp = _REPO_ROOT / third_rel
+        third_fp.write_text(f"- 交給 R{_SYN_LATER} 處理（{third_id}）\n", encoding="utf-8")
+        expect(len(carrier_doc_problems([third_fp], _SYN_CUR, set(),
+                                        exemptions=short_table)) == 1,
+               "理由太短視同未登記 ⇒ 即使 key 對得上也不豁免（防空話核准）")
+    finally:
+        _REPO_ROOT = keep
+        exempt_td.cleanup()
+
     print(f"\n[self-test] {'❌ ' + str(len(fails)) + ' 項失敗' if fails else '✅ 全部通過'}")
     return 1 if fails else 0
 
@@ -466,7 +581,8 @@ def main(argv: list[str] | None = None) -> int:
     if "--census" in args:
         return 0
     problems = commit_carrier_problems(msgs, cur, carriers)
-    problems += carrier_doc_problems(paths, cur, ledger_def_ids(ledger, arch))
+    problems += carrier_doc_problems(
+        paths, cur, ledger_def_ids(ledger, arch, unresolved_only=True))
     if problems:
         print(f"\n❌ 交接項無機械承接載體：{len(problems)} 筆", file=sys.stderr)
         for p in problems:

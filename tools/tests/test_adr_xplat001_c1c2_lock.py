@@ -682,14 +682,14 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 7085,
+    "test_adr_xplat001_c1c2_lock.py": 7122,
     "test_archive_defect_log.py": 3989,
     "test_bash32_compat.py": 1020,
     "test_bash_probe_spec_contract.py": 983,
     "test_block_destructive_git_r83.py": 2288,
     "test_bootstrap_core.py": 439,
     "test_bootstrap_ps1.py": 160,
-    "test_check_defect_log_crossref.py": 3906,
+    "test_check_defect_log_crossref.py": 3851,
     "test_check_gha_action_versions.py": 295,
     "test_check_hooks_liveness.py": 3581,
     "test_check_pytest_baseline_sites.py": 301,
@@ -702,7 +702,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_dev_start.py": 6636,
     "test_dev_start_ps1_lastexitcode.py": 548,
     "test_doc_env_prefix_platform_parity_r60.py": 340,
-    "test_doc_loc_baseline_freshness_r60.py": 7114,
+    "test_doc_loc_baseline_freshness_r60.py": 7126,
     "test_extras_quoting_zsh_safety.py": 365,
     "test_failure_log_rotation.py": 80,
     "test_find_git_bash_parity.py": 1264,
@@ -1337,6 +1337,35 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "[非淨減法輪][全額功能軌] P1-4 D3 檢查表規則鎖落地（DEF-101-886 檢查表形態解）："
      "dispatch_checklist_problems() 節內判準＋紅綠自證（首版全檔搜尋 vacuous 被突變"
      "驗紅抓到後收窄）＋本稽核列與接鏈列自身。CrossPlatform_R116_Scan_Findings.md。"),
+    ("R118", 91253, 91269, 16,
+     "[非淨減法輪] DEF-200-212 P1-5 收尾批：crossref 原始 +129、doc_loc +12；"
+     "crossref 十七支 class-level docstring（Rule 9 意圖敘事非判準本體）原文分四"
+     "批搬至 CrossPlatform_Guard_Line_History.md 抵銷 -184。R118 全輪七列合計 -6"
+     "（raw 已 ≤0，兌現款(11)：終止 R116/R117 連兩輪上升）；另 16 行守欄不變式"
+     "測試記帳歸回歸鎖軌（記帳誠實度，非必要湊額）。逐項見 "
+     "CrossPlatform_R118_Debt_Closure.md。"),
+    ("R118", 91269, 91287, 18,
+     "[非淨減法輪][同輪追加] 本表自身編修：新增上一列稽核列＋回歸鎖軌新列＋凍結表二值"
+     "（本檔 +18）；以下一列史料搬遷抵銷。逐項見 CrossPlatform_R118_Debt_Closure.md。"),
+    ("R118", 91287, 91264, -23,
+     "[同輪追加] 第二批史料搬遷：crossref 再搬三支 class-level docstring（"
+     "TestEveryLegalFirstWordIsClassifiable／TestVagueBucketCountingStillWorksWhenReached／"
+     "TestClosingRoundProblemsWiring，皆 Rule 9 意圖敘事非判準本體）至 "
+     "CrossPlatform_Guard_Line_History.md 同節，crossref 再減 -26；抵銷上一列自身"
+     "落地後的殘餘量測差 +3（上一列文字本身的行數在落地當下已與宣告淨額有 3 行"
+     "落差，一併於本列吸收）。逐項見 CrossPlatform_R118_Debt_Closure.md。"),
+    ("R118", 91264, 91273, 9,
+     "[非淨減法輪][同輪追加] 本表自身收尾編修：新增本列與 frozen 表值同步（本檔 +9）。"
+     "逐項見 CrossPlatform_R118_Debt_Closure.md。"),
+    ("R118", 91273, 91265, -8,
+     "[同輪追加] 第三批史料搬遷 crossref -12（兩支）；含本列與首列文字訂正 +4。"
+     "逐項見 CrossPlatform_R118_Debt_Closure.md。"),
+    ("R118", 91265, 91265, 0,
+     "[同輪追加] 前五列文字訂正（補 [非淨減法輪] 標記與逐檔清單指標）與本列自身"
+     "相抵，本檔淨額不變。逐項見 CrossPlatform_R118_Debt_Closure.md。"),
+    ("R118", 91265, 91247, -18,
+     "[同輪追加] 第四批史料搬遷 crossref -21（三支）；含本列自身 +3。逐項見 "
+     "CrossPlatform_R118_Debt_Closure.md。"),
 )
 
 
@@ -1443,6 +1472,11 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
     ("R117", 238, "P1-2/P1-3 落款 PRD/ADR 指定驗收測試（ADR-XPLAT-014 §4 紅綠＋"
      "v2.1.12 §3-4 notify_rc=-2 重演＝OrphanModeWatchTest＋NotifyQueueRedeliveryTest "
      "兩類全體，全數住 test_context_budget_guard.py 測試行；分軌機制第一次實戰消費）"),
+    ("R118", 16, "DEF-200-212 D4 裁決的具名豁免面工程解，其守欄不變式驗證測試："
+     "test_the_exemption_registry_stays_within_its_shrink_only_cap（9 行）＋"
+     "test_every_exemption_reason_meets_the_minimum_length（7 行，同一守欄機制"
+     "另一半不變式），合計 16 行歸本軌（記帳誠實度分類，非必要湊額——本輪史料"
+     "搬遷後主表淨額已是 -6，raw 本身即 ≤0）。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -1647,10 +1681,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 92
+_REPIN_LOG_FROZEN_PREFIX_LEN = 99
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "f37361174a7fae70fb11f9391046a713af024c708f47db2b4e75fa597f7d68cd")
+    "862ff00ae26daf40bdea3ba00a65925f419b8a39566dd7bb7b8638938ff2a5cd")
 
 
 def repin_log_history_digest(
@@ -1783,6 +1817,9 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R117", "a08e0c7043be", "d16dc6498956", "DEF-200-234"),
     # P1-4 檢查表規則鎖批追加稽核紀錄，同體例「追加後立即自我凍結」（91→92）。round-label-ok
     ("R117", "d16dc6498956", "f37361174a7f", "DEF-101-886"),
+    # DEF-200-212 P1-5 收尾批：追加五列（落地＋自身編修＋三批史料搬遷）並依「追加後 round-label-ok
+    # 立即自我凍結」判例延伸前綴涵蓋全部新列本身（92→97）。
+    ("R118", "f37361174a7f", "862ff00ae26d", "DEF-200-212"),
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。
