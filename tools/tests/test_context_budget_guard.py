@@ -485,8 +485,8 @@ class HookExitContractTest(unittest.TestCase):
                          "window 被指定為 1M 後 190K 只有 19%，不該有任何輸出")
 
 
-#: R115 round-label-ok（WHY 全文搬遷，比照收斂棒體例）
-#: 見 CrossPlatform_Guard_Line_History.md〈R115 cbg _HOME_ARTIFACT_DIRS WHY〉節。
+#: WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+#: cbg _HOME_ARTIFACT_DIRS WHY〉節。
 _HOME_ARTIFACT_DIRS = frozenset({"AppData"})
 
 
@@ -5859,8 +5859,8 @@ def _TRACE_ISOLATION(test: unittest.TestCase) -> tuple:  # noqa: N802 — 與同
     做成**共用的一格**而不是各類別自己抄一份：抄的那個形態正是這個缺陷的成因（兩個
     類別各抄了四格、各漏了同樣的兩格）。漏用它會被下面那道鎖抓到。
     """
-    # R115 round-label-ok（WHY 全文搬遷，比照收斂棒體例）
-    # 見 CrossPlatform_Guard_Line_History.md〈R115 cbg _TRACE_ISOLATION 共用格沿革 WHY〉節。
+    # WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    # cbg _TRACE_ISOLATION 共用格沿革 WHY〉節。
     os.environ[endurance_env.TRACE_DIR_ENV] = str(test.tmp / "traces")
     test.addCleanup(os.environ.pop, endurance_env.TRACE_DIR_ENV, None)
     return (("quota_trace_path", lambda: test.tmp / "trace.jsonl"),
