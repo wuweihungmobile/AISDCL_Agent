@@ -1,7 +1,7 @@
 {
   "_why": "M6（每一支測試都至少在某條軌上真的跑過一次）的落款：**每個剖面各自記下它 skip 掉的 test-id 集合**，判準＝skip(A) ⊆ run(B) ∪ 合法平台專屬集合（等價於 skip(A) ∩ skip(B) − 豁免 = ∅）。判準的家＝tools/lib/skip_runtime_report.py::m6_id_set_problems；本檔只是史料。缺任一剖面時判準回『不可求值』而不是回綠。落款取得＝在該剖面上跑 python tools/run_root_unittests.py，它會印出可直接貼進本檔的區塊；重釘＝把該剖面那一格換成新的可貼落款（逐 id 差異會出現在 diff 裡，這就是稽核痕跡）。刻意不記『跑過的 id 全集』：那是數千筆、每輪都在變，而 run(B) 由『B 的落款裡沒有它』推得即足以回答 M6（誠實劃界見判準檔）。",
   "tools/tests@darwin": {
-    "measured-at": "2026-08-12T13:40:29+00:00",
+    "measured-at": "2026-09-01（真 GitHub run：root-infra-ci/macos-compat-ci 對 commit 7f8c96a 的 skip census 落款；新增 id＝DEF-200-239 現查回歸鎖的平台互補 skip）",
     "host": "macOS-26.5.2-arm64-arm-64bit",
     "ran": 3284,
     "skipped": [
@@ -20,6 +20,7 @@
       "test_context_budget_guard.NoWindowBehaviourTest.test_suppressing_the_window_does_not_cost_observability",
       "test_context_budget_guard.NoWindowBehaviourTest.test_the_quiet_carrier_needs_no_flags_at_all",
       "test_context_budget_guard.NoWindowBehaviourTest.test_the_shipped_flag_really_suppresses_the_console",
+      "test_context_budget_guard.SchedulerBackendNeverTouchesRealSchtasksTest.test_no_ghost_t_r95_task_survives_a_real_windows_scheduler_query",
       "test_context_budget_guard.SentinelWiringTest.test_a_short_lived_session_never_spawns",
       "test_context_budget_guard.SentinelWiringTest.test_an_earned_session_actually_spawns_the_arming_run",
       "test_context_budget_guard.SentinelWiringTest.test_sessionstart_no_longer_spawns_the_arming_run",
@@ -52,7 +53,7 @@
     ]
   },
   "tools/tests@linux": {
-    "measured-at": "2026-08-26T16:23:40+00:00",
+    "measured-at": "2026-09-01（真 GitHub run：root-infra-ci/macos-compat-ci 對 commit 7f8c96a 的 skip census 落款；新增 id＝DEF-200-239 現查回歸鎖的平台互補 skip）",
     "skipped": [
       "test_bash_probe_spec_contract.TestBinBashLauncherSelfInjectsPathContract.test_export_path_empty_makes_probe_fail",
       "test_bash_probe_spec_contract.TestBinBashLauncherSelfInjectsPathContract.test_restricted_external_path_alone_is_ineffective",
@@ -69,6 +70,7 @@
       "test_context_budget_guard.NoWindowBehaviourTest.test_suppressing_the_window_does_not_cost_observability",
       "test_context_budget_guard.NoWindowBehaviourTest.test_the_quiet_carrier_needs_no_flags_at_all",
       "test_context_budget_guard.NoWindowBehaviourTest.test_the_shipped_flag_really_suppresses_the_console",
+      "test_context_budget_guard.SchedulerBackendNeverTouchesRealSchtasksTest.test_no_ghost_t_r95_task_survives_a_real_windows_scheduler_query",
       "test_context_budget_guard.SentinelWiringTest.test_a_short_lived_session_never_spawns",
       "test_context_budget_guard.SentinelWiringTest.test_an_earned_session_actually_spawns_the_arming_run",
       "test_context_budget_guard.SentinelWiringTest.test_sessionstart_no_longer_spawns_the_arming_run",
