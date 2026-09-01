@@ -682,7 +682,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 7079,
+    "test_adr_xplat001_c1c2_lock.py": 7085,
     "test_archive_defect_log.py": 3989,
     "test_bash32_compat.py": 1020,
     "test_bash_probe_spec_contract.py": 983,
@@ -702,7 +702,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_dev_start.py": 6636,
     "test_dev_start_ps1_lastexitcode.py": 548,
     "test_doc_env_prefix_platform_parity_r60.py": 340,
-    "test_doc_loc_baseline_freshness_r60.py": 7077,
+    "test_doc_loc_baseline_freshness_r60.py": 7114,
     "test_extras_quoting_zsh_safety.py": 365,
     "test_failure_log_rotation.py": 80,
     "test_find_git_bash_parity.py": 1264,
@@ -1333,6 +1333,10 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "持久 notify_queue 的落款驗收回歸鎖記回歸鎖軌（軌表同輪申報 238，分軌第一次實戰"
      "消費；功能軌淨額＝稽核與儀式行＋複審承接 A-2/N-3/SD-1 自身）；同輪兌現款(12)"
      "＝(117,570) 並重新武裝 119/564（步伐 6<7）。CrossPlatform_R116_Scan_Findings.md。"),
+    ("R117", 91210, 91253, 43,
+     "[非淨減法輪][全額功能軌] P1-4 D3 檢查表規則鎖落地（DEF-101-886 檢查表形態解）："
+     "dispatch_checklist_problems() 節內判準＋紅綠自證（首版全檔搜尋 vacuous 被突變"
+     "驗紅抓到後收窄）＋本稽核列與接鏈列自身。CrossPlatform_R116_Scan_Findings.md。"),
 )
 
 
@@ -1643,10 +1647,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 91
+_REPIN_LOG_FROZEN_PREFIX_LEN = 92
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "d16dc6498956b19dd267eec7041585bce62e9bf82005b0745ae2cd304ebc9643")
+    "f37361174a7fae70fb11f9391046a713af024c708f47db2b4e75fa597f7d68cd")
 
 
 def repin_log_history_digest(
@@ -1777,6 +1781,8 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R116", "1bd8f0d4e396", "a08e0c7043be", "DEF-200-211"),
     # P1-2/P1-3 批追加 R117 稽核紀錄＋分軌首次申報，同體例「追加後立即自我凍結」。round-label-ok
     ("R117", "a08e0c7043be", "d16dc6498956", "DEF-200-234"),
+    # P1-4 檢查表規則鎖批追加稽核紀錄，同體例「追加後立即自我凍結」（91→92）。round-label-ok
+    ("R117", "d16dc6498956", "f37361174a7f", "DEF-101-886"),
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

@@ -7073,5 +7073,42 @@ class TestWriteModeNeverAimsAtTheTrackedBaselineFile(unittest.TestCase):
         self.assertEqual(stale_write_mode_exemptions(attached), [], "真呼叫上的標記被誤判")
 
 
+#: DEF-101-886（D3 裁決＝檢查表形態）：根 CLAUDE.md 的〈並行派工防互踩檢查表〉四格
+#: 缺一即紅。純函式吃文字，紅綠由合成注入自證；標籤唯一（本檔零串音紀律）。
+_DISPATCH_CHECKLIST_TERMS = ("結案單線", "修復棒串行", "複審唯讀", "收尾單人窗口")
+
+
+def dispatch_checklist_problems(claude_md_text: str) -> list[str]:
+    """空＝通過。四格關鍵詞必須在〈檢查表〉**節內**逐字存在——全檔搜尋會被別處
+    同字面（鐵律七尾句、鐵律三表的「收尾單人窗口」）撐綠＝零鑑別力（本函式首版
+    親測踩到：突變節內一格、全檔判準仍綠），故先切節再驗。"""
+    head, sep, tail = claude_md_text.partition("並行派工防互踩檢查表")
+    if not sep:
+        return ["[檢查表缺節] 根 CLAUDE.md 找不到〈並行派工防互踩檢查表〉節——"
+                "D3 裁決的明文化條款被移除或改名（DEF-101-886 解鎖條件的家）"]
+    section = tail.split("\n#", 1)[0]  # 節射程＝到下一個標題為止
+    return [
+        f"[檢查表缺格] 檢查表節內缺「{term}」格——四格缺一即紅（D3 裁決）"
+        for term in _DISPATCH_CHECKLIST_TERMS if term not in section]
+
+
+class TestParallelDispatchChecklistIsPinnedInClaudeMd(unittest.TestCase):
+    """DEF-101-886：檢查表條款的存在性鎖（掌舵者 D3 裁決＝三形態中的檢查表形態）。"""
+
+    def test_the_real_claude_md_carries_the_checklist(self) -> None:
+        text = (_REPO_ROOT / "CLAUDE.md").read_text(encoding="utf-8")
+        self.assertEqual(dispatch_checklist_problems(text), [])
+
+    def test_a_missing_section_is_red(self) -> None:
+        hits = dispatch_checklist_problems("# CLAUDE.md\n（整節被刪）\n")
+        self.assertTrue(any("[檢查表缺節]" in h for h in hits), hits)
+
+    def test_a_missing_term_is_red_and_names_the_term(self) -> None:
+        text = "並行派工防互踩檢查表\n結案單線 修復棒串行 複審唯讀\n"
+        hits = dispatch_checklist_problems(text)
+        self.assertEqual(len(hits), 1, hits)
+        self.assertIn("收尾單人窗口", hits[0])
+
+
 if __name__ == "__main__":
     unittest.main()

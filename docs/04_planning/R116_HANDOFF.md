@@ -36,7 +36,10 @@
 
 巡邏 tick「主控死亡但 tasks/ 有活體」分支（`_orphan_watch()` 族，DEF-200-234 驗收）＋
 持久 notify_queue（TTL＋delivered 憑證＋巡邏重投，DEF-200-236 驗收，含 notify_rc=-2
-活體重演轉綠）。<!-- guard-total:R117 --> **守衛線累積淨額＝90921 → 91210（+289）**：
+活體重演轉綠）。P1-4（D3 檢查表）＝根 CLAUDE.md 增〈並行派工防互踩檢查表〉四格條款
+＋`dispatch_checklist_problems()` 節內判準規則鎖（首版全檔搜尋 vacuous 被突變驗紅抓到
+後收窄＝鎖自身的紅綠自證）→ 結 DEF-101-886（長債軌）。
+<!-- guard-total:R117 --> **守衛線累積淨額＝90921 → 91253（+332，含 P1-4 規則鎖 +43 全額功能軌）**：
 驗收回歸鎖 238 行申報回歸鎖軌（`_REGRESSION_LANE_LOG` 首列＝分軌機制第一次實戰消費，
 `_REGRESSION_LANE_SINCE=117` 故本批掛 R117 輪籤）；功能軌淨額＝稽核與儀式行＋複審
 承接（A-2 unmeasurable 保標記、SD-1 節流專屬常數等測試）自身 +51 ≤ cap(117)=570；
@@ -55,6 +58,9 @@ QA（末棒）：AWC 零新 blocking＋全套親跑 `Ran 3821 tests`／`OK (skip
 
 ## 二、還沒做什麼
 
+0. P1-4（D3 檢查表＋規則鎖）落地但其四方定點複審併入下一批同審（為單一純函式鎖
+   單獨開四棒不成比例；鎖已含紅綠自證與 vacuous 修正史）；現查
+   `python -m pytest tools/tests/test_doc_loc_baseline_freshness_r60.py -k ParallelDispatchChecklist -q`。
 1. U7：25 個自陳站點中 23 個尚未逐一改寫；現查
    `git grep -n "落地未完成" docs/04_planning/ADR/ADR-XPLAT-013-loc-pricing-assertion-only.md`
    （有命中＝仍未完成；清單住該 ADR §8）。
