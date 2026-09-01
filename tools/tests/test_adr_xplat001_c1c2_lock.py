@@ -682,7 +682,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 6476,
+    "test_adr_xplat001_c1c2_lock.py": 6483,
     "test_archive_defect_log.py": 3986,
     "test_bash32_compat.py": 1020,
     "test_bash_probe_spec_contract.py": 983,
@@ -697,7 +697,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_check_wrapper_thinness.py": 1234,
     "test_claim_provenance_r86.py": 618,
     "test_component_sanitizer_shared_layer_lock.py": 293,
-    "test_context_budget_guard.py": 9381,
+    "test_context_budget_guard.py": 9383,
     "test_defect_id_reference_integrity.py": 281,
     "test_dev_start.py": 6636,
     "test_dev_start_ps1_lastexitcode.py": 548,
@@ -1300,6 +1300,12 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "同輪兌現款(12)：cap 585→577，重新武裝 117／570。doc_loc 同輪修復 "
      "_GHOST_SYMBOL_BASELINE 30→29（史料搬遷後唯一引用歸零，依 stale 向指示刪除）。"
      "逐項見 CrossPlatform_R106_Scan_Findings.md 的 R115 標記行。"),
+    ("R115", 90340, 90349, +9,
+     "[非淨減法輪][同輪追加] 雲端首紅修復：假 scheduler 後端 credential_key 由硬編 "
+     "schtasks 家改為 sb.select().credential_key 對齊當平台 production 後端（posix 讀 "
+     "launchd 憑證欄、硬編致空憑證紅）＋DEF-200-239 skip 補 [WINDOWS-NATIVE-ONLY] 標籤"
+     "（cbg +2）＋本稽核列與 rewrite ledger 接鏈列自身（本檔 +7）；同輪合併淨額 "
+     "-11+9=-2 仍 ≤0。逐項見 CrossPlatform_R115_Debt_Closure.md。"),
 )
 
 
@@ -1506,10 +1512,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 86
+_REPIN_LOG_FROZEN_PREFIX_LEN = 87
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "4e5f11565d2364f6fa08ffda5af85b1df440435d4d2769a0f4cd7fc2ff12f3d5")
+    "f96ee69ec751d1c8e2584b4deb1f93179e8fbe529597ab50e72cb1b5e650f10f")
 
 
 def repin_log_history_digest(
@@ -1630,6 +1636,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # 「追加後立即自我凍結」判例延伸前綴涵蓋該列本身（85→86）；載體＝DEF-200-239
     # （排程孤兒回歸鎖，本輪 test_context_budget_guard.py 內容主要新增項之一）。
     ("R115", "ea038ea6ff4e", "4e5f11565d23", "DEF-200-239"),
+    ("R115", "4e5f11565d23", "f96ee69ec751", "DEF-200-239"),
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。
