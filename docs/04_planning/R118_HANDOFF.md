@@ -43,9 +43,10 @@ raw 主表淨額已 ≤0（十七支 docstring 分四批搬遷抵銷 -184，超�
    滿載於 3 且裁決 D4 明令 shrink-only。現查
    `git grep -n "DEF-200-212" docs/06_quality/AutoSDD_Defect_Log.md`
    （狀態欄仍是未結字面＝仍未結案）。
-2. **P1-6 尚未實作**（本輪改為規格形式交下一投續作，見下節）。現查
-   `git grep -rn "skip_id_ledger" tools/tests/`（零命中＝共同變更鎖仍未落地）。
-   <!-- absent-if: def test_skip_ledger_co_change -->
+2. **P1-6 已於 R119 落地**：共同變更鎖 `skip_ledger_co_change_problems()` ＋
+   `_origin_main_head_diff()` 落在 `tools/tests/test_skip_ceiling_ratchet_direction.py`
+   （`TestSkipLedgerCoChangeLock`）。現查
+   `git grep -rn "skip_id_ledger" tools/tests/`（非零命中＝共同變更鎖已落地）。
 3. **P1-7 的 SD-4 面仍未接線**（無主模式處置面 cap 收斂）。現查
    `git grep -n "cap_prepare" tools/lib/quota_escalation.py`（零命中＝仍未接）。
 4. **P1-8 盤點仍未進行**（Pacing／BurnDown 落款後與現行實作的逐條差異）。現查

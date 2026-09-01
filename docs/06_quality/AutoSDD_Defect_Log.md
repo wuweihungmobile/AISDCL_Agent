@@ -238,6 +238,7 @@
 | DEF-200-237 | 2026-08-31 | Windows 切換啟動的 nightly 三態判定（本欄刻意零輪號） | nightly perf 自 08-27 連四晚 BLOCK（dry_run_e2e p95 +105%~+184%）；A/B 交錯實測 p50 差 <5% ⇒ **非 code 迴歸＝環境位移** | P3 | 掌舵者拍板：刪基線段走首次播種路徑，當晚自動重鎖、環境恢復後自動收緊 | fixed@2026-08-31：基線段已刪；詳 CrossPlatform_DryRunE2E_Perf_Env_Reseed.md |
 | DEF-200-238 | 2026-08-31 | NTFS 探針延伸（本欄刻意零輪號＝不推時鐘） | `govwrite_hit()` 對**尚不存在**的保護面目標，Windows realpath 無檔可還原大小寫 ⇒ `.AUTOCLAUDE/state.json` 與 `.claude/hooks/NEW_GUARD.PY` 兩形態實測繞過；既存檔變體全命中 | P2 | 比對前大小寫正規化（射程先普查，防 R96 教訓）；與 `_GOV_EXACT` 納管二檔同批 | fixed（本欄刻意零輪號延續）：`_fold_gov_path()` 併入 `govwrite_hit()` 比對鏈；`test_block_destructive_git_r83.py` +6 測試 5 passed／8 subtests，紅綠自證＝撤修復後兩形態重現 rc=0、復原後轉 rc=2，既存檔變體未退化 |
 | DEF-200-239 | 2026-08-31 | 死亡視窗取證的排程孤兒回溯（本欄刻意零輪號） | 根層全套在真機**種下自續排程**：`test_context_budget_guard.py:2010` 族 `_tick` 以真名 `T-r95` 走到真 schtasks 註冊，工作每 15 分鐘自我重掛、測試結束仍長存（實測 16:24~18:09 連續 woken；已手動 unregister） | P2 | 該測試族注入假 scheduler 後端（禁真註冊）；回歸鎖斷言測試結束後排程器查無 T-r95 | fixed（本欄刻意零輪號延續）：測試族注入假 scheduler 後端＋回歸鎖；全套後現查 T-r95 為空；詳 CrossPlatform_R115_Debt_Closure.md §2 |
+| DEF-200-240 | 2026-09-01 | P1-6 派工前現查（本欄刻意零輪號＝不推當前輪時鐘） | skip 天花板①②③四層登記漏補④ M6 落款無共同變更防護，漏一層紅一輪（`7f8c96a` 漏、`5d5dd37` 補） | P2 | 共同變更鎖：①②③動了、④須同清單，否則紅 | fixed：`skip_ledger_co_change_problems()`；詳 CrossPlatform_R119_Guard_Repin_Evidence.md |
 
 > **R41「四方複審裁決總結」敘事段落已搬遷至 [`AutoSDD_Defect_Log_archive_17.md`](AutoSDD_Defect_Log_archive_17.md)（R43 帳本 housekeeping，逐字保全）。**
 

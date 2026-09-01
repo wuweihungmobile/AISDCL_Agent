@@ -378,6 +378,13 @@ _GOVERNANCE_DOCS = (
     # 上列的護欄層淨額標記姊妹檔（`guard-total:` 站點之一，`_GUARD_TOTAL_DOC_GLOBS` round-label-ok
     # 掃描面），與同輪 `R118_HANDOFF.md` 共同滿足「兩份不同檔」的最低站數。 round-label-ok
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R118_Scan_Findings.md",
+    # R119 P1-6（skip 天花板①②③與 M6 落款④共同變更鎖）逐檔清單與必要性辯護唯一居所在 round-label-ok
+    # 本檔（⇒ 體積守門），`_GUARD_LINES_REPIN_LOG`／`_FROZEN_PREFIX_REWRITE_LEDGER` R119 round-label-ok
+    # 列皆指名本檔（⇒ 指針稽核）。即刻登記。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R119_Guard_Repin_Evidence.md",
+    # 上列的護欄層淨額標記姊妹檔（`guard-total:` 站點之一，`_GUARD_TOTAL_DOC_GLOBS`
+    # 掃描面），與同輪 `R119_HANDOFF.md` 共同滿足「兩份不同檔」的最低站數。 round-label-ok
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R119_Scan_Findings.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/{CrossPlatform,Quota}_*.md`。這**不是**把具名

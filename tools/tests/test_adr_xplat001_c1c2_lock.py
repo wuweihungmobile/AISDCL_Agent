@@ -682,7 +682,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 7122,
+    "test_adr_xplat001_c1c2_lock.py": 7153,
     "test_archive_defect_log.py": 3989,
     "test_bash32_compat.py": 1020,
     "test_bash_probe_spec_contract.py": 983,
@@ -733,7 +733,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_sanitize_component_frozen_sdd_versions_lock.py": 340,
     "test_schedule_capability_parity.py": 626,
     "test_script_scan_surface_ssot.py": 391,
-    "test_skip_ceiling_ratchet_direction.py": 165,
+    "test_skip_ceiling_ratchet_direction.py": 304,
     "test_skip_discoverability_r83.py": 744,
     "test_smoke_ci_sync.py": 1334,
     "test_stdio_utf8.py": 76,
@@ -1366,6 +1366,24 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
     ("R118", 91265, 91247, -18,
      "[同輪追加] 第四批史料搬遷 crossref -21（三支）；含本列自身 +3。逐項見 "
      "CrossPlatform_R118_Debt_Closure.md。"),
+    ("R119", 91247, 91384, 137,
+     "[非淨減法輪][全額功能軌] P1-6 落地：skip 天花板①②③與 M6 落款④共同變更鎖，逐項見 "
+     "CrossPlatform_R119_Guard_Repin_Evidence.md（test_skip_ceiling_ratchet_direction.py "
+     "165→302，+137）。"),
+    ("R119", 91384, 91402, 18,
+     "[非淨減法輪] 本表自身編修（新增上一列稽核列＋本列自身＋凍結表值同步＋"
+     "_REPIN_NET_CAP_SCHEDULE 到期義務兌現列 `(119, 564)` 與重新武裝註解＋"
+     "_FROZEN_PREFIX_REWRITE_LEDGER 新列），逐項見 "
+     "CrossPlatform_R119_Guard_Repin_Evidence.md（本檔 +18：7122→7140）。"),
+    ("R119", 91402, 91410, 8,
+     "[非淨減法輪] test_subprocess_encoding_hygiene 覆審揪出 "
+     "_origin_main_head_diff() 兩處 subprocess.run(text=True) 缺 encoding，補 "
+     "encoding=\"utf-8\", errors=\"replace\"（+2：302→304）＋本表本列自身編修＋"
+     "凍結表值同步，逐項見 "
+     "CrossPlatform_R119_Guard_Repin_Evidence.md（本檔 +6：7140→7146）。"),
+    ("R119", 91410, 91417, 7,
+     "[非淨減法輪] 前綴協同改寫帳本新列＋本表值同步，逐項見 "
+     "CrossPlatform_R119_Guard_Repin_Evidence.md（本檔 +7：7146→7153）。"),
 )
 
 
@@ -1420,6 +1438,9 @@ _REPIN_NET_CAP_SCHEDULE: tuple[tuple[int, int], ...] = (
     (117, 570),   # 到期輪兌現（P1-2/P1-3 喚醒鏈批）：cap 降到到期目標本身 round-label-ok
                   # （同 R99/R101/R115 判例 round-label-ok）。同輪重新武裝：步伐 6 < 前段 7，
                   # 續守「步伐刻意變小」，見 due 常數旁註。
+    (119, 564),   # 到期輪兌現（P1-6 skip 天花板①②③與 M6 落款④共同變更鎖批）：cap 降到
+                  # 到期目標本身（同 R99/R101/R115/R117 判例 round-label-ok）。同輪重新
+                  # 武裝下一段：步伐 5 < 前段 6，續守「步伐刻意變小」，見 due 常數旁註。
 )
 #: 生效點＝首列輪號、現行上限＝末列上限，**皆由表導出不另立常數**（R73 判例：一份知識一個家）。
 _REPIN_ROUND_CAP_SINCE = _REPIN_NET_CAP_SCHEDULE[0][0]
@@ -1613,8 +1634,10 @@ def net_cap_schedule_problems(
 #: R115 收斂棒兌現 round-label-ok：cap 降到目標本身（577，見 `(115, 577)` 列），同輪重新武裝下一段：
 #: 步伐 7 < 前一段的 8，續守「步伐刻意變小」且目標嚴格低於現行 cap。
 #: R117 喚醒鏈批兌現 round-label-ok：cap 降到目標本身（570，見 `(117, 570)` 列），同輪重新武裝：
-_REPIN_NET_CAP_DUE_ROUND = 119  # round-label-ok：到期輪＝兌現輪+2（lookahead 判準的活體對照）
-_REPIN_NET_CAP_DUE_TARGET = 564  # 步伐 6 < 前一段的 7，續守「步伐刻意變小」且嚴格低於現行 cap
+#: 步伐 6 < 前一段的 7，續守「步伐刻意變小」且嚴格低於現行 cap。
+#: R119 P1-6 批兌現 round-label-ok：cap 降到目標本身（564，見 `(119, 564)` 列），同輪重新武裝：
+_REPIN_NET_CAP_DUE_ROUND = 121  # round-label-ok：到期輪＝兌現輪+2（lookahead 判準的活體對照）
+_REPIN_NET_CAP_DUE_TARGET = 559  # 步伐 5 < 前一段的 6，續守「步伐刻意變小」且嚴格低於現行 cap
 
 #: DEF-200-121：到期輪自身的後設鎖——`_REPIN_NET_CAP_DUE_ROUND` 只准落在「最近稽核輪
 #: ＋ lookahead」以內（歷史母體 85..113 的到期輪一律＝上一次兌現輪 +2）。可延期的到期日
@@ -1681,10 +1704,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 99
+_REPIN_LOG_FROZEN_PREFIX_LEN = 103
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "862ff00ae26daf40bdea3ba00a65925f419b8a39566dd7bb7b8638938ff2a5cd")
+    "21bdbf9b959537f797783bdad46a29d11d34d9fe880df6835bf0debc12a12c16")
 
 
 def repin_log_history_digest(
@@ -1820,6 +1843,14 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # DEF-200-212 P1-5 收尾批：追加五列（落地＋自身編修＋三批史料搬遷）並依「追加後 round-label-ok
     # 立即自我凍結」判例延伸前綴涵蓋全部新列本身（92→97）。
     ("R118", "f37361174a7f", "862ff00ae26d", "DEF-200-212"),
+    # P1-6 批：skip 天花板①②③與 M6 落款④共同變更鎖落地，追加本輪稽核紀錄（落地＋
+    # 本表自身編修二列）並依「追加後立即自我凍結」判例延伸前綴涵蓋全部新列本身
+    # （99→101）；載體＝DEF-200-240。
+    ("R119", "862ff00ae26d", "7f11c682ae08", "DEF-200-240"),
+    # P1-6 批續（round-label-ok）：全套背景跑揪出兩項真違規（R119_HANDOFF.md 零 stale
+    # 宣稱、subprocess text=True 缺 encoding）修復後追加稽核列，依「追加後立即自我
+    # 凍結」判例延伸前綴涵蓋本列本身（101→102）；載體＝DEF-200-240（同批延續）。
+    ("R119", "7f11c682ae08", "21bdbf9b9595", "DEF-200-240"),
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

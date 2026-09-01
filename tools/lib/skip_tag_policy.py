@@ -557,7 +557,11 @@ _SITE_CLASS_CENSUS: dict[str, dict[str, int]] = {
         # 三段量測抽取後落在同一目標函式的站點被合併計數，實測淨增 2 個
         # `runtime-skipTest` 站點——量不到就明說跳過的正確形態，不是隱藏失敗。
         # 定位方式同上：對該檔各以 HEAD 版與工作樹版跑 `site_class_counts()` 相減。
-        "runtime-skipTest": 24,
+        # 🔴 P1-6 重釘 `runtime-skipTest` 24→25（**非放寬**，同上：本表判準是「相等」）。
+        # 新增 `test_skip_ceiling_ratchet_direction.py::TestSkipLedgerCoChangeLock.
+        # test_skip_ledger_co_change_against_the_real_push_range` 的 `self.skipTest(...)`
+        # ——`origin/main` 解不出時（全新 clone 未 fetch main）明說跳過，不是隱藏失敗。
+        "runtime-skipTest": 25,
         "unclassified": 0,
     },
     # 🔴 R81 包 F 重釘 `windows-only` 9→10：並行包在
