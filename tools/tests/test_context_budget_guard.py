@@ -1859,7 +1859,9 @@ class _StatefulFakeSchedulerBackend:
         self._jobs: set[str] = set()
         self.arm_calls: list[tuple] = []
         self.name = "test-fake"
-        self.credential_key = sb.CRED_KEY_SCHTASKS
+        # key 必須對齊**當平台** production 後端：posix 的讀方查 launchd 家的
+        # credential 欄，硬編 schtasks 家會讓 posix 斷言讀到空字串（雲端首紅實證）。
+        self.credential_key = sb.select().credential_key
 
     def seed(self, *tasks: str) -> _StatefulFakeSchedulerBackend:
         self._jobs.update(tasks)
@@ -5203,7 +5205,7 @@ class SchedulerBackendNeverTouchesRealSchtasksTest(unittest.TestCase):
         ⇒ 安全跳過。
         """
         if sys.platform != "win32":
-            self.skipTest("僅 Windows 有 schtasks 可現查（DEF-200-239 立案平台）")
+            self.skipTest("[WINDOWS-NATIVE-ONLY] 僅 Windows 有 schtasks 可現查（DEF-200-239 立案平台）")
         probe = production_engine()  # R60 E-A-03：5.1 優先（DEF-101-509 判準）
         if probe is None:
             self.skipTest("這台機器找不到 powershell，無法現查排程器")
