@@ -32,8 +32,20 @@ line-length = 100
 target-version = "py311"
 
 [lint]
-# 與 AutoClaude/pyproject.toml `[tool.ruff.lint] select` 同一份清單（勿單邊修改）。
-select = ["E", "F", "I", "UP", "W"]
+# 與 AutoClaude/pyproject.toml `[tool.ruff.lint] select` 同一份清單（勿單邊修改；
+# 兩邊同步由 `TestRootToolsLintPolicy::test_rule_set_is_identical_to_the_autoclaude_side`
+# 機械鎖住）。
+#
+# 🔴 `S102`（R116／ADR-XPLAT-013 Phase2 D-3；DEF-200-209／DEF-200-217 E2）：只選這一條
+# bandit 規則字面，不選整個 `S` 家族——ADR-XPLAT-013_Phase2_Proposal_R108.md §1.5 記載
+# 的「第三道套利門」是 `exec(__doc__)`：把功能碼藏進敘事載體（docstring／字串），執行期
+# 才取出，靜態掃描器對字串內容結構上看不到。(b) 若開一條回歸鎖軌而這道門不關，該軌會
+# 直接繼承一個既有的 −99.5% 套利門（`exec(__doc__)` 200→1 的落地前實測）。落地前現查
+# `ruff check --extend-select S102 tools/ .claude/hooks/`：三筆命中皆在
+# `tools/tests/test_archive_defect_log.py`（compile+exec 驗證生成原始碼語法正確的既有
+# 測試慣用句，逐處已加 `# noqa: S102` 並註明理由），`.claude/hooks/` 零命中；
+# `AutoClaude/` 側同步加選後現查（`ruff check --select S102 AutoClaude`）亦零命中。
+select = ["E", "F", "I", "UP", "W", "S102"]
 
 # 🔴 逐條有理由的豁免——**不是**整包 noqa，兩條各自的射程與到期日都寫在這裡。
 # 落地當下的存量分佈（`ruff check tools/ --statistics`）：`F` 系列（會造成執行期錯誤的

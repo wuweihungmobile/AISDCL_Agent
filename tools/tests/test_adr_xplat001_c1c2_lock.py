@@ -682,8 +682,8 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 6490,
-    "test_archive_defect_log.py": 3986,
+    "test_adr_xplat001_c1c2_lock.py": 7064,
+    "test_archive_defect_log.py": 3989,
     "test_bash32_compat.py": 1020,
     "test_bash_probe_spec_contract.py": 983,
     "test_block_destructive_git_r83.py": 2288,
@@ -1312,6 +1312,22 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "NoCarrierBackend（list_jobs 確定空＋arm 恆敗）走進 _heal_armed_drift 新 loud 分支"
      "誤觸兩測試（cbg +11）；同批搬遷兩塊 WHY 散文 -24 抵銷＋本稽核列與接鏈列自身（本檔 "
      "+7）。同輪合併淨額 -1-6=-7 仍 ≤0。逐項見 CrossPlatform_R115_Debt_Closure.md。"),
+    ("R116", 90344, 90917, 573,
+     "[非淨減法輪] ADR-XPLAT-013 Phase2 (b)(c) 分軌計價落地（DEF-200-211；裁決存證＝"
+     "AutoSDD_Adjudication_Record_R110.md §1.4 D-1~D-6）：D-1(S-2) 回歸鎖軌分軌計價"
+     "（新平行表 _REGRESSION_LANE_LOG＋lane_split_problems()＋repin_growth_problems() "
+     "擴 regression_lane 參數，已接進生產閘門）；D-2 M1 拆雙指標（既有門檻不動）；"
+     "D-3 ruff S102 接 .claude/hooks/／tools/／AutoClaude/（既有 compile+exec 慣用句"
+     "補 noqa 理由）；D-4 (c) 降級觀測欄（guard_line_composition()，只印不擋）；"
+     "D-5 U6 核准現值門檻／U7 方針定案（逐一改寫，落地未完成）／U9 到期輪常數機械"
+     "保底（真拆未做）；D-6 回歸鎖軌上限實測取值（`_regression_lane_cap_basis()`）。"
+     "合法出口逐條實查：刪死碼不適用；抽共用層不適用（各自單一消費端）；散文搬遷"
+     "不適用（新增皆判準本體與注入語料）。本檔自身編修含本稽核列與凍結前綴延伸。"
+     "逐檔清單見 CrossPlatform_R116_Scan_Findings.md。"),
+    ("R116", 90917, 90921, 4,
+     "[非淨減法輪] Architect 鏡一審承接（同輪補釘，含本稽核列與接鏈列自身）：A-1 三行 "
+     "E501 縮短（行數不變）＋A-2 到期輪 lookahead 後設鎖（紅綠自證）＋N-1 cap_basis "
+     "失蹤兜底；散文壓縮抵銷後 +577＝cap 貼線。CrossPlatform_R116_Scan_Findings.md。"),
 )
 
 
@@ -1396,6 +1412,102 @@ _REPIN_APPROVED_ROUND_OVERAGE: dict[str, tuple[int, str]] = {
 _REPIN_APPROVED_ROUND_OVERAGE_MAX_ENTRIES = 1
 #: 核准理由的最短長度（同 `phase2_review_problems()` 款(4) 的「延期兩個字不是理由」）。
 _REPIN_APPROVED_ROUND_OVERAGE_MIN_REASON_LEN = 20
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ADR-XPLAT-013 Phase 2 (b)：回歸鎖軌分軌計價（D-1＝S-2，DEF-200-211 落地批；R116） round-label-ok
+# ══════════════════════════════════════════════════════════════════════════════
+# 立案＝ADR-XPLAT-013_Phase2_Proposal_R108.md §0~§1；裁決＝AutoSDD_Adjudication_
+# Record_R110.md §1.4 D-1/D-2/D-6（皆住 docs/04_planning/）。射程只延伸記帳語意，
+# raw-line 度量一字不動：款(10)(11) 的輸入從「主表淨額」改為「主表淨額 − 同輪
+# 回歸鎖軌淨額」，回歸鎖軌另有自己上限、且不受款(11) 連續上升鎖管（結案的證據理應
+# 連續增加）。🔴 不得在 `_GUARD_LINES_REPIN_LOG` 加欄（撞指紋）：改用平行表
+# `_REGRESSION_LANE_LOG`，與主表以輪號對帳（`lane_split_problems()`）。
+
+#: 平行表：`(輪號, 該輪回歸鎖軌淨額, 理由)`，append-only。**刻意從空表開始**——
+#: 不追溯既有歷史（§1.4：「生效輪次，不追溯」），落地當輪（R116）自己的工作全額算進 round-label-ok
+#: 功能軌（見 `_REGRESSION_LANE_SINCE` 的 WHY：不得用自己剛開的減免軌豁免自己）。
+_REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = ()
+
+#: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
+#: 輪號 ≥ 本值才享有「回歸鎖軌淨額不算進款(10)(11)」這個減免，調小＝把減免向更早的
+#: 輪次追溯延伸＝追溯放寬（三審 A2 訂正：上一版誤把它與課稅軌類常數共用「只准調小」，
+#: 極性抄反——`_NET_DELTA_ACCOUNTING_SINCE` 那種課稅軌調小才是更嚴，本常數相反）。
+_REGRESSION_LANE_SINCE = 117
+_FROZEN_REGRESSION_LANE_SINCE = 117
+
+#: D-6：回歸鎖軌單輪上限，取值紀律＝「落地時實測直接填入、零加減推算、不留成長緩衝」
+#: （ADR-XPLAT-012 條文五 §3；**禁止沿用** R108 提案的舊快照 287）。基準＝ round-label-ok
+#: `_regression_lane_cap_basis()` 現查得到的 R97 那一列（見該函式 docstring 的
+#: 逐項算術驗證）。只准往下改（同 `_REPIN_ROUND_NET_CAP` 款式）。
+_REGRESSION_LANE_ROUND_CAP = 309
+_FROZEN_REGRESSION_LANE_ROUND_CAP = 309
+
+#: 形狀照抄 `_REPIN_APPROVED_ROUND_OVERAGE`（誤課稅的具名出口）：空表起始，只有指名
+#: 輪號＋精確淨額＋≥20 字理由才赦免，其餘一律原判準阻擋。
+_REGRESSION_LANE_APPROVED_OVERAGE: dict[str, tuple[int, str]] = {}
+_REGRESSION_LANE_APPROVED_OVERAGE_MAX_ENTRIES = 1
+_REGRESSION_LANE_APPROVED_OVERAGE_MIN_REASON_LEN = 20
+
+#: 款「軌別未申報」的明文出口：主表某輪淨額 > 0 而回歸鎖軌表無對應列時，允許在**主表**
+#: 那一列的理由欄寫這個字面標記，宣告該輪全額歸功能軌（不必為淨額 0 的規律結案輪
+#: 硬擠一列進 `_REGRESSION_LANE_LOG`）。申報是強制的，不是選填——見 §1.5 第四道套利門。
+_LANE_FULL_FUNCTIONAL_TOKEN = "[全額功能軌]"
+
+
+def _regression_lane_cap_basis() -> tuple[str, int]:
+    """D-6 取值基準——回傳撐起 `_REGRESSION_LANE_ROUND_CAP` 的那一列（證明非憑空取數）。
+
+    候選＝歷來單列淨額**全部**由回歸鎖新增組成的列：R97 +309（103+81+107+18=309，
+    與列淨額逐字相等）；R106 +287 同型但較小（cap 語意＝實測最大，故取 R97）；其餘 round-label-ok
+    含「回歸」字樣的更大列皆混合列，整列採計會把功能成長算進減稅軌（§1.5 套利門方向）。
+    誠實劃界：不是候選 2（C1~C4）全自動分類器（未做，登記在提案 §4 item 2）；只重驗
+    這一列自陳成分算術與淨額相符。N-1（Architect 鏡承接）：列失蹤時拋可讀訊息。
+    """
+    row = next((r for r in _GUARD_LINES_REPIN_LOG if r[0] == "R97" and r[3] == 309), None)
+    # N-4（SA 鏡登記，未修）：本分支缺合成注入紅側測試——cap 貼線故延後，收尾窗口再評。
+    if row is None:
+        raise AssertionError("[cap 基準失蹤] _GUARD_LINES_REPIN_LOG 找不到取值基準（R97 "
+                             "那一列）——cap 基準浮動，須重新實測取值並同步更新本函式與常數")
+    return row[0], row[3]
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ADR-XPLAT-013 §9.3／U9（D-5 裁決，R116 round-label-ok）：四支 `[ROOT-TOOLS]` 檔舊尺債到期輪。
+# 本批只落地「到期輪常數＋機械保底」半格；真拆未做、over_by 現查 187（逐檔數字、判準
+# 出處與惡化態勢＝`CrossPlatform_R116_Scan_Findings.md` §D-5，本檔不重抄史料）。
+_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND = 121
+#: 清償旗標——真拆完成後改 True。刻意用布林而非重建舊尺計數器（ADR §9.3「舊尺已廢」）。
+_ROOT_TOOLS_OLD_SCALE_DEBT_RESOLVED = False
+#: A-2 後設鎖：到期輪只准落在「現查輪＋lookahead」內，推遠（如 9999）當場紅；shrink-only
+#: 凍結雙生子（同 `_REPIN_DUE_ROUND_MAX_LOOKAHEAD`／DEF-200-121 同族）。
+_ROOT_TOOLS_DEBT_DUE_MAX_LOOKAHEAD = 5
+_FROZEN_ROOT_TOOLS_DEBT_DUE_MAX_LOOKAHEAD = 5
+
+
+def root_tools_debt_due_problems(
+    resolved: bool = _ROOT_TOOLS_OLD_SCALE_DEBT_RESOLVED,
+    due_round: int = _ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND,
+    latest_round: int | None = None,
+) -> list[str]:
+    """空＝通過。純函式，紅綠由合成注入自證。機械保底不是「已真拆」的證明——只保證
+    「到了到期輪還沒清償」不被靜默遺忘（紀律同 `_REPIN_NET_CAP_DUE_ROUND`：可延期的
+    到期日不是到期日，出口只有清償或由複審具名展延且仍受 lookahead 界約束）。"""
+    live = live_repin_round() if latest_round is None else latest_round
+    bound = live + _ROOT_TOOLS_DEBT_DUE_MAX_LOOKAHEAD
+    if due_round > bound:
+        return [f"[到期輪超界] U9 到期輪 R{due_round} > 現查輪＋lookahead（R{bound}）——"
+                "展延必須具名寫理由且仍受本界約束，不得把常數推遠"]
+    if not resolved and live >= due_round:
+        return [
+            f"[技術債逾期] ADR-XPLAT-013 §9.3／U9 的四支 [ROOT-TOOLS] 檔舊尺技術債"
+            f"到期輪已是 R{due_round}（現查 R{live}）而尚未清償——出口二擇一："
+            "①真拆到舊尺不破線後把 `_ROOT_TOOLS_OLD_SCALE_DEBT_RESOLVED` 改 True"
+            "（同批訂正現查 over_by 為 0）；②由下一次複審具名展延"
+            "（追加更大的 `_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND` 並寫明理由，"
+            "不得靜默沿用）"
+        ]
+    return []
 
 
 def net_cap_for_round(no: int, schedule: Sequence[tuple[int, int]] | None = None) -> int:
@@ -1518,10 +1630,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 88
+_REPIN_LOG_FROZEN_PREFIX_LEN = 90
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "9316ce4e91ed15775b3e67576ba025626ca3562f6f35cb53147323c3bfdb0b69")
+    "a08e0c7043be0ef8a9e230c1995ec5284ca12bd141237ce76dcb6af5c21cd0aa")
 
 
 def repin_log_history_digest(
@@ -1644,6 +1756,12 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R115", "ea038ea6ff4e", "4e5f11565d23", "DEF-200-239"),
     ("R115", "4e5f11565d23", "0c0aa4967799", "DEF-200-239"),
     ("R115", "0c0aa4967799", "9316ce4e91ed", "DEF-200-239"),
+    # ADR-XPLAT-013 Phase2 (b)(c) 分軌計價落地：追加本輪稽核列並依「追加後立即自我
+    # 凍結」判例延伸前綴涵蓋該列本身（88→89）；載體＝DEF-200-211。
+    ("R116", "9316ce4e91ed", "1bd8f0d4e396", "DEF-200-211"),
+    # Architect 鏡一審承接補釘，同體例「追加後立即自我凍結」（prefix_len 89→90 涵蓋 round-label-ok
+    # 該列本身；A-1/A-2/N-1 詳 CrossPlatform_R116_Scan_Findings.md）。
+    ("R116", "1bd8f0d4e396", "a08e0c7043be", "DEF-200-211"),
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。
@@ -1722,8 +1840,18 @@ def repin_growth_problems(
     net_cap: int | None = None,
     max_consecutive_rising: int = _REPIN_MAX_CONSECUTIVE_RISING_ROUNDS,
     approved_overage: Mapping[str, tuple[int, str]] | None = None,
+    regression_lane: Sequence[tuple[str, int, str]] | None = None,
+    regression_lane_since: int = _REGRESSION_LANE_SINCE,
 ) -> list[str]:
     """R84 ARCH-01：重釘的**代價**（空＝通過）。純函式，紅綠由合成注入自證。
+
+    🔴 ADR-XPLAT-013 Phase2 (b)（D-1＝S-2）：`regression_lane` 不傳或傳空 ⇒ 行為與分軌前
+    **逐字相同**（`test_the_split_does_not_widen_the_functional_lane` 的機械面）——這是
+    刻意的向後相容設計，不是巧合。傳入時，款(10)(11) 判的淨額改為「該輪主表淨額 −
+    該輪回歸鎖軌淨額」，但只對 `no >= regression_lane_since` 的輪次生效：
+    `regression_lane_since` 之前的輪次即使回歸鎖軌表宣告了淨額也**不會被扣**——這是
+    「(b) 不得用自己剛落地的減免軌豁免自己」（§1.6.3 第 3 題）的機械面：落地輪本身
+    永遠落在 SINCE 之前，把落地輪自己的淨額謊報成回歸鎖軌也救不了它。
 
     兩款，各帶方括號標籤（本檔的零串音紀律）：
       (10) `[超出每輪上限]` 某一輪的淨額合計 > **該輪當時在位的**上限
@@ -1759,6 +1887,10 @@ def repin_growth_problems(
     approved = _REPIN_APPROVED_ROUND_OVERAGE if approved_overage is None else approved_overage
     problems: list[str] = []
     nets = [(no, delta) for no, delta in repin_round_nets(log) if no >= since]
+    if regression_lane:
+        lane_nets = {no: d for no, d in regression_lane_round_nets(regression_lane)
+                     if no >= regression_lane_since}
+        nets = [(no, delta - lane_nets.get(no, 0)) for no, delta in nets]
 
     def _overridden(no: int, delta: int) -> bool:
         entry = approved.get(f"R{no}")
@@ -1881,6 +2013,125 @@ def repin_cost_ratchet_problems(
     return problems
 
 
+def regression_lane_round_nets(
+    log: Sequence[tuple[str, int, str]]
+) -> list[tuple[int, int]]:
+    """`_REGRESSION_LANE_LOG` 版的 `repin_round_nets()`——三欄表（無 old/new 鏈，只有淨額），
+    同輪連續多列合併，輪號無法解析的列（合成語料）跳過。理由同 `repin_round_nets()`。
+    """
+    out: list[tuple[int, int]] = []
+    for rnd, delta, _reason in log:
+        if not (rnd[:1] == "R" and rnd[1:].isdigit()):
+            continue
+        no = int(rnd[1:])
+        if out and out[-1][0] == no:
+            out[-1] = (no, out[-1][1] + delta)
+        else:
+            out.append((no, delta))
+    return out
+
+
+def lane_split_problems(
+    main_log: Sequence[tuple[str, int, int, int, str]] | None = None,
+    lane_log: Sequence[tuple[str, int, str]] | None = None,
+    *,
+    since: int = _REGRESSION_LANE_SINCE,
+    frozen_since: int = _FROZEN_REGRESSION_LANE_SINCE,
+    cap: int = _REGRESSION_LANE_ROUND_CAP,
+    frozen_cap: int = _FROZEN_REGRESSION_LANE_ROUND_CAP,
+    approved_overage: Mapping[str, tuple[int, str]] | None = None,
+    latest_round: int | None = None,
+) -> list[str]:
+    """(b) D-1(S-2) 分軌申報守衛（空＝通過）。純函式，紅綠合成注入自證（提案 §5.1）。
+
+    六款（標籤唯一、零串音；規格 SSOT＝提案 §5.1 的表，本處只留標籤與一句話，詳述
+    不重抄——第 6 款是 §1.6.3 第 3 題的機械面，§5.1 沒單獨編號故延伸標號）：
+      1. `[空表]` 生效輪後主表有非零淨額而軌表整張不存在（生效輪前表空合規）。
+      2. `[軌別未申報]` 主表淨額 > 0 而軌表無列、理由欄也無全額功能軌標記（§1.5）。
+      3. `[子項大於母項]` 軌淨額 > 同輪主表淨額；僅判母項 > 0（母項負＝淨減法輪，
+         子集上界語意失效，套利面由款 4 承接——SD-1）。
+      4. `[回歸鎖軌超上限]` 軌淨額 > `cap` 且不在具名核准名冊。
+      5. `[減免軌被追溯]`／`[上限被放寬]` 方向鎖：`since` 只准大、`cap` 只准小。
+      6. `[生效前宣告]` 軌表宣告 `since` 前輪次——不追溯，封死落地輪自我豁免
+         （`repin_growth_problems()` 減法側同步過濾，本款是申報面回聲）。
+
+    誠實劃界：只看表上宣告淨額，不驗分類本身（C1~C4 分類器未落地，提案 §4 item 2）。
+    """
+    main = _GUARD_LINES_REPIN_LOG if main_log is None else main_log
+    lane = _REGRESSION_LANE_LOG if lane_log is None else lane_log
+    approved = (_REGRESSION_LANE_APPROVED_OVERAGE if approved_overage is None
+                else approved_overage)
+    problems: list[str] = []
+
+    if since < frozen_since:
+        problems.append(
+            f"[減免軌被追溯] _REGRESSION_LANE_SINCE 由 R{frozen_since} 調小為 R{since}"
+            "——只准調大：調小＝把減免向更早輪次追溯延伸，等於追溯放寬")
+    if cap > frozen_cap:
+        problems.append(
+            f"[上限被放寬] _REGRESSION_LANE_ROUND_CAP 由 {frozen_cap} 調升為 {cap}"
+            "——只准往下改（同 `_REPIN_ROUND_NET_CAP` 款式）")
+
+    live = live_repin_round(main) if latest_round is None else latest_round
+    main_nets = dict(repin_round_nets(main))
+    lane_nets = dict(regression_lane_round_nets(lane))
+
+    for no in lane_nets:
+        if no < since:
+            problems.append(
+                f"[生效前宣告] 回歸鎖軌表對 R{no} 有宣告，但生效輪是 R{since}——本軌"
+                "刻意不追溯（落地輪不得用自己剛開的減免軌豁免自己，見 "
+                "ADR-XPLAT-013_Phase2_Proposal_R108.md §1.6.3 第 3 題）。"
+                f"R{since} 之前的輪次一律全額算進功能軌，不接受任何回歸鎖軌宣告")
+
+    if not lane:
+        if live >= since and any(no >= since and d != 0 for no, d in main_nets.items()):
+            problems.append(
+                f"[空表] _REGRESSION_LANE_LOG 一列都沒有，而稽核痕跡已走到 R{live}"
+                f"（生效輪 R{since}）——本輪之後只要主表淨額非零就必須申報屬於哪一軌"
+                "（見 `[軌別未申報]`）。整張表都不存在，是比漏報單一輪更粗的 fail-open")
+        return problems
+
+    for no, delta in main_nets.items():
+        if no < since or delta <= 0:
+            continue
+        if no in lane_nets:
+            continue
+        reasons = [r for rnd, _o, _n, _d, r in main if rnd == f"R{no}"]
+        if any(_LANE_FULL_FUNCTIONAL_TOKEN in r for r in reasons):
+            continue
+        problems.append(
+            f"[軌別未申報] R{no} 主表淨額 +{delta}，回歸鎖軌表無對應列，理由欄也沒有 "
+            f"`{_LANE_FULL_FUNCTIONAL_TOKEN}` 標記——申報是強制的，不是選填：要嘛在 "
+            "_REGRESSION_LANE_LOG 補一列（哪怕淨額 0），要嘛在主表理由欄寫明"
+            f"`{_LANE_FULL_FUNCTIONAL_TOKEN}`")
+
+    for no, lane_delta in lane_nets.items():
+        if no < since:
+            continue
+        main_delta = main_nets.get(no, 0)
+        if main_delta > 0 and lane_delta > main_delta:
+            problems.append(
+                f"[子項大於母項] R{no} 回歸鎖軌淨額 {lane_delta:+d} 大於同輪主表淨額 "
+                f"{main_delta:+d}——回歸鎖軌是主表的子集，不能比母項還大")
+
+    for no, lane_delta in lane_nets.items():
+        if no < since:
+            continue
+        entry = approved.get(f"R{no}")
+        overridden = (entry is not None and lane_delta == entry[0]
+                      and len(entry[1].strip())
+                      >= _REGRESSION_LANE_APPROVED_OVERAGE_MIN_REASON_LEN)
+        if lane_delta > cap and not overridden:
+            problems.append(
+                f"[回歸鎖軌超上限] R{no} 回歸鎖軌淨額 +{lane_delta} 超過上限 {cap}——"
+                "出口：同輪把等量以上的行刪掉／合併鎖檔，或走 "
+                "_REGRESSION_LANE_APPROVED_OVERAGE 的一次性例外名冊（須具名理由且經"
+                "四方複審核准）")
+
+    return problems
+
+
 def repin_log_problems(
     log: Sequence[tuple[str, int, int, int, str]],
     frozen_total: int,
@@ -1891,6 +2142,7 @@ def repin_log_problems(
     cost_since: int = _REPIN_ROUND_CAP_SINCE,
     net_cap: int | None = None,
     max_consecutive_rising: int = _REPIN_MAX_CONSECUTIVE_RISING_ROUNDS,
+    regression_lane: Sequence[tuple[str, int, str]] | None = None,
 ) -> list[str]:
     """重釘稽核痕跡的違規清單（空＝通過）。純函式，紅綠由合成注入自證。
 
@@ -1968,7 +2220,8 @@ def repin_log_problems(
                     "訊息沒有牙，於是同一輪內可以反覆自助放行（掃描 S5-02：收費站不是棘輪）")
     problems.extend(repin_growth_problems(
         log, since=cost_since, net_cap=net_cap,
-        max_consecutive_rising=max_consecutive_rising))
+        max_consecutive_rising=max_consecutive_rising,
+        regression_lane=regression_lane))
     if log[-1][2] != frozen_total:
         problems.append(
             f"[未對帳] 稽核痕跡表尾的新總量 {log[-1][2]} 不等於 _FROZEN_GUARD_LINES 實際總量 "
@@ -3364,7 +3617,8 @@ class TestGuardLayerRatchet(unittest.TestCase):
             _GUARD_LINES_REPIN_LOG, sum(_FROZEN_GUARD_LINES.values()),
             history_digest=_REPIN_LOG_HISTORY_SHA256,
             prefix_len=_REPIN_LOG_FROZEN_PREFIX_LEN,
-            max_unfrozen_tail=_REPIN_LOG_MAX_UNFROZEN_TAIL)
+            max_unfrozen_tail=_REPIN_LOG_MAX_UNFROZEN_TAIL,
+            regression_lane=_REGRESSION_LANE_LOG)
         self.assertEqual(problems, [], "重釘稽核痕跡不合規：\n  " + "\n  ".join(problems))
 
     def test_repinning_without_logging_a_reason_is_red(self) -> None:
@@ -5826,6 +6080,13 @@ _PHASE2_REVIEW_LOG: tuple[tuple[int, str, str], ...] = (
      "『維持觀察』名額已被上一列用罄——該條逐字寫『到期只能提案或落地』）。本列把該既存"
      "裁決記入機械載體＝提案成立；四方複審與 (b)(c) 落地由 DEF-200-211 承接（與 "
      "DEF-200-207 ADR 轉 Accepted 同批四方複審），不隨結構性長債分軌輪落地。"),
+    (116, "[落地]",
+     "(b) 分軌計價落地（D-1＝S-2）：`_REGRESSION_LANE_LOG`／`lane_split_problems()`／"
+     "`repin_growth_problems(regression_lane=...)`，`_REGRESSION_LANE_SINCE=117`"
+     "（不追溯）；D-2 M1 拆雙指標；D-6 cap 實測取值 309。(c) 依 D-4 裁決**降級為觀測"
+     "欄**（`guard_line_composition()`，只印不擋）而非全量落地——裁決存證＝"
+     "AutoSDD_Adjudication_Record_R110.md §1.4；(c) 是否轉阻斷留待 R117+ 依觀測資料"
+     "再議，不再佔用本表的『維持觀察』名額。"),
 )
 #: 到期輪由末列導出、不另立常數（一份知識一個家；同 `_REPIN_NET_CAP_SCHEDULE` 的
 #: 「生效點＝首列、現值＝末列，皆由表導出」）。
@@ -6163,12 +6424,40 @@ class TestPhase2FiveRoundDeadlineIsMechanical(unittest.TestCase):
             "輪號不遞增竟然放行 ⇒ 「到期輪由末列導出」的語意不成立")
 
 
+def guard_line_composition() -> dict[str, tuple[int, int]]:
+    """ADR-XPLAT-013 Phase2 (c)（D-4：降級為觀測欄）：逐檔 `(def test* 函式數,
+    assert 呼叫數)`——提案 §2.1 候選 c1／c2，**只印不擋、不接任何棘輪**。裁決理由
+    （`AutoSDD_Adjudication_Record_R110.md` §1.4 D-4）：換算係數跨檔離散度達 6.52×，
+    單一實測上限在半數母體上必然失準，先觀察一輪再由四方裁定是否轉阻斷。誠實劃界：
+    `assert` 判準＝裸 `assert` ∪ `.assertXxx(` 呼叫，`subTest` 站點不併計（同提案）。
+    """
+    root = _REPO / _GUARD_DIR_REL
+    out: dict[str, tuple[int, int]] = {}
+    for p in sorted(root.glob(_GUARD_LINE_PATTERN)):
+        try:
+            tree = ast.parse(p.read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError:
+            continue
+        test_count = sum(
+            1 for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+            and node.name.startswith("test"))
+        assert_count = sum(
+            1 for node in ast.walk(tree)
+            if isinstance(node, ast.Assert)
+            or (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr.startswith("assert")))
+        out[p.name] = (test_count, assert_count)
+    return out
+
+
 def _print_guard_lines() -> None:
     """印出可直接貼回 `_FROZEN_GUARD_LINES` 的 dict 字面 ＋ 淨額 ＋ 稽核列草稿。
 
     三段輸出對應重釘要動的三個地方，照貼即可：淨額註解行、新的凍結表、
     `_GUARD_LINES_REPIN_LOG` 的新列（理由欄留空給人填——**刻意不代填**，
-    ARCH-01 要的就是有人為那個淨額負責）。
+    ARCH-01 要的就是有人為那個淨額負責）。第四段是 (c) 觀測欄（D-4），純印出、
+    不影響前三段的任何判準或數字。
     """
     current = guard_lines_in_worktree()
     old, new = sum(_FROZEN_GUARD_LINES.values()), sum(current.values())
@@ -6197,6 +6486,291 @@ def _print_guard_lines() -> None:
     for label, items in (("逃逸", guard_surface_escapes()), ("涵蓋缺口", guard_baseline_gaps())):
         if items:
             print(f"# [{label}] {items}")
+    comp = guard_line_composition()
+    total_tests = sum(t for t, _a in comp.values())
+    total_asserts = sum(a for _t, a in comp.values())
+    print(f"# [觀測欄][D-4] test 函式數={total_tests} assert 呼叫數={total_asserts}"
+          "（只印不擋，ADR-XPLAT-013 Phase2 (c) 降級觀測；不接任何棘輪）")
+
+
+class TestRegressionLaneSplit(unittest.TestCase):
+    """ADR-XPLAT-013 Phase2 (b)（D-1＝S-2）：回歸鎖軌／功能軌分軌計價（DEF-200-211）。
+
+    驗收判準對齊 `ADR-XPLAT-013_Phase2_Proposal_R108.md` §5.1／§5.2；裁決存證見
+    `AutoSDD_Adjudication_Record_R110.md` §1.4 D-1/D-6。落地輪＝R116； round-label-ok
+    `_REGRESSION_LANE_SINCE = 117`（下一輪起才真的生效，落地輪自己不追溯）。
+    """
+
+    # ── 真實資料現查（生產閘門）──────────────────────────────────────────
+    def test_the_real_tables_pass_the_split_guard(self) -> None:
+        problems = lane_split_problems()
+        self.assertEqual(problems, [], "分軌申報守衛：\n  " + "\n  ".join(problems))
+
+    # ── §5.1 五款逐款突變驗紅 ────────────────────────────────────────────
+    def test_clause_1_empty_table_past_since_is_red(self) -> None:
+        main = (("R117", 100, 150, 50, "[非淨減法輪] 逐檔清單＝x.md 全額功能軌工作"),)
+        problems = lane_split_problems(main, (), since=117, latest_round=117)
+        self.assertTrue(any("[空表]" in p for p in problems), problems)
+
+    def test_clause_1_green_before_since(self) -> None:
+        main = (("R116", 100, 150, 50, "[非淨減法輪] 逐檔清單＝x.md"),)
+        problems = lane_split_problems(main, (), since=117, latest_round=116)
+        self.assertFalse([p for p in problems if "[空表]" in p], problems)
+
+    def test_clause_2_unreported_lane_is_red(self) -> None:
+        """🔴 `lane` 帶一列占位（R118 round-label-ok）避撞款1——本款測「表非空但這輪沒申報」。"""
+        main = (
+            ("R117", 100, 150, 50, "[非淨減法輪] 逐檔清單＝x.md"),
+            ("R118", 150, 200, 20, "[非淨減法輪][全額功能軌] 逐檔清單＝x.md"),
+        )
+        lane = (("R118", 20, "占位列：R118 全額回歸鎖軌，僅用來讓表非空"),)
+        problems = lane_split_problems(main, lane, since=117, latest_round=118)
+        self.assertTrue(any("[軌別未申報]" in p for p in problems), problems)
+
+    def test_clause_2_green_with_full_functional_marker(self) -> None:
+        main = (
+            ("R117", 100, 150, 50, "[非淨減法輪][全額功能軌] 逐檔清單＝x.md"),
+            ("R118", 150, 200, 20, "[非淨減法輪] 逐檔清單＝x.md"),
+        )
+        lane = (("R118", 20, "占位列：R118 全額回歸鎖軌，僅用來讓表非空"),)
+        problems = lane_split_problems(main, lane, since=117, latest_round=118)
+        self.assertFalse([p for p in problems if "[軌別未申報]" in p], problems)
+
+    def test_clause_2_green_with_lane_entry(self) -> None:
+        main = (("R117", 100, 150, 50, "[非淨減法輪] 逐檔清單＝x.md"),)
+        lane = (("R117", 30, "逐檔清單＝x.md 回歸鎖軌部分"),)
+        problems = lane_split_problems(main, lane, since=117, latest_round=117)
+        self.assertFalse([p for p in problems if "[軌別未申報]" in p], problems)
+
+    def test_clause_3_lane_exceeding_parent_is_red(self) -> None:
+        main = (("R117", 100, 150, 50, "[非淨減法輪] 逐檔清單＝x.md"),)
+        lane = (("R117", 60, "逐檔清單＝x.md（刻意大於母項，驗證款3）"),)
+        problems = lane_split_problems(main, lane, since=117, latest_round=117)
+        self.assertTrue(any("[子項大於母項]" in p for p in problems), problems)
+
+    def test_clause_3_green_when_lane_equals_parent(self) -> None:
+        main = (("R117", 100, 150, 50, "[非淨減法輪] 逐檔清單＝x.md"),)
+        lane = (("R117", 50, "逐檔清單＝x.md 全額回歸鎖軌"),)
+        problems = lane_split_problems(main, lane, since=117, latest_round=117)
+        self.assertFalse([p for p in problems if "[子項大於母項]" in p], problems)
+
+    def test_clause_3_negative_main_round_skips_the_subset_bound(self) -> None:
+        """SD-1（R117 合成 round-label-ok）：母項負⇒款3綠（誠實毛增量）；套利面款4承接。"""
+        main = (("R117", 500, 450, -50, "[非淨減法輪] 淨減法輪誠實申報，逐檔清單＝x.md"),)
+        ok = lane_split_problems(main, (("R117", 30, "毛增量申報"),),
+                                 since=117, latest_round=117)
+        self.assertFalse([p for p in ok if "[子項大於母項]" in p], ok)
+        hot = lane_split_problems(main, (("R117", 999, "母項為負而子項爆表"),),
+                                  since=117, cap=309, latest_round=117)
+        self.assertFalse([p for p in hot if "[子項大於母項]" in p], hot)
+        self.assertTrue(any("[回歸鎖軌超上限]" in p for p in hot), hot)
+
+    def test_clause_4_lane_over_cap_is_red(self) -> None:
+        main = (("R117", 100, 500, 400, "[非淨減法輪] 逐檔清單＝x.md"),)
+        lane = (("R117", 400, "逐檔清單＝x.md（刻意超過上限，驗證款4）"),)
+        problems = lane_split_problems(main, lane, since=117, cap=309, latest_round=117)
+        self.assertTrue(any("[回歸鎖軌超上限]" in p for p in problems), problems)
+
+    def test_clause_4_green_when_pinned_to_the_cap(self) -> None:
+        """貼齊上限即合法（同 R99/R101/R113 判例：兌現值可以恰好貼齊到期目標）。round-label-ok"""
+        main = (("R117", 100, 409, 309, "[非淨減法輪] 逐檔清單＝x.md"),)
+        lane = (("R117", 309, "逐檔清單＝x.md 全額回歸鎖軌"),)
+        problems = lane_split_problems(main, lane, since=117, cap=309, latest_round=117)
+        self.assertFalse([p for p in problems if "[回歸鎖軌超上限]" in p], problems)
+
+    def test_clause_4_approved_overage_is_the_named_escape(self) -> None:
+        main = (("R117", 100, 500, 400, "[非淨減法輪] 逐檔清單＝x.md"),)
+        lane = (("R117", 400, "逐檔清單＝x.md"),)
+        overage = {"R117": (400, "合成注入測試：核准 R117 回歸鎖軌一次性例外")}
+        problems = lane_split_problems(main, lane, since=117, cap=309,
+                                        approved_overage=overage, latest_round=117)
+        self.assertFalse([p for p in problems if "[回歸鎖軌超上限]" in p], problems)
+
+    def test_clause_5_since_decreased_is_red(self) -> None:
+        problems = lane_split_problems((), (), since=116, frozen_since=117, latest_round=116)
+        self.assertTrue(any("[減免軌被追溯]" in p for p in problems), problems)
+
+    def test_clause_5_since_increased_or_same_is_green(self) -> None:
+        problems = lane_split_problems((), (), since=118, frozen_since=117, latest_round=116)
+        self.assertFalse([p for p in problems if "[減免軌被追溯]" in p], problems)
+        problems = lane_split_problems((), (), since=117, frozen_since=117, latest_round=116)
+        self.assertFalse([p for p in problems if "[減免軌被追溯]" in p], problems)
+
+    def test_clause_5_cap_increased_is_red(self) -> None:
+        problems = lane_split_problems((), (), cap=400, frozen_cap=309, latest_round=116)
+        self.assertTrue(any("[上限被放寬]" in p for p in problems), problems)
+
+    def test_clause_5_cap_decreased_or_same_is_green(self) -> None:
+        problems = lane_split_problems((), (), cap=300, frozen_cap=309, latest_round=116)
+        self.assertFalse([p for p in problems if "[上限被放寬]" in p], problems)
+        problems = lane_split_problems((), (), cap=309, frozen_cap=309, latest_round=116)
+        self.assertFalse([p for p in problems if "[上限被放寬]" in p], problems)
+
+    # ── 延伸款：[生效前宣告]（§1.6.3 第 3 題的申報面） ────────────────────
+    def test_clause_6_pre_since_lane_declaration_is_red(self) -> None:
+        main = (("R116", 100, 350, 250, "[非淨減法輪] 落地輪本身逐檔清單＝x.md"),)
+        lane = (("R116", 250, "刻意把落地輪自己的淨額全記進回歸鎖軌，驗證款6"),)
+        problems = lane_split_problems(main, lane, since=117, latest_round=116)
+        self.assertTrue(any("[生效前宣告]" in p for p in problems), problems)
+
+    def test_clause_6_green_at_or_after_since(self) -> None:
+        main = (("R117", 100, 350, 250, "[非淨減法輪] 逐檔清單＝x.md"),)
+        lane = (("R117", 250, "逐檔清單＝x.md 全額回歸鎖軌"),)
+        problems = lane_split_problems(main, lane, since=117, latest_round=117)
+        self.assertFalse([p for p in problems if "[生效前宣告]" in p], problems)
+
+    # ── §5.2 分軌不放寬既有門檻的機械自證 ─────────────────────────────────
+    def test_the_split_does_not_widen_the_functional_lane(self) -> None:
+        """空的回歸鎖軌表 ⇒ `repin_growth_problems()` 的結果必須與分軌前逐字相同。"""
+        before = repin_growth_problems(_GUARD_LINES_REPIN_LOG)
+        after = repin_growth_problems(_GUARD_LINES_REPIN_LOG, regression_lane=())
+        self.assertEqual(before, after,
+                          "傳空的回歸鎖軌表卻改變了判定結果 ⇒ 分軌退化為現制這件事沒有做到")
+        after_none = repin_growth_problems(_GUARD_LINES_REPIN_LOG, regression_lane=None)
+        self.assertEqual(before, after_none)
+
+    def test_the_split_cannot_be_used_by_its_own_landing_round(self) -> None:
+        """落地輪（R116 round-label-ok）不得把淨額全記回歸鎖軌豁免自己（§1.6.3 第 3 題）。
+
+        注入面：合成一張主表，其唯一一輪就是落地輪字面 116，淨額 +400（遠超上限）；
+        回歸鎖軌表把這 +400 全額申報。用 `latest_round=116` 呼叫
+        （**不從 `_REGRESSION_LANE_SINCE` 算出**，避免 R75 頭號教訓：比較對象隨被判的
+        常數一起滑走）：必須紅（因為 116 < SINCE=117，減法不生效）。第二臂
+        `latest_round=117`（SINCE 本身）：同一張表必須綠（減法生效，證明紅不是無條件的）。
+        """
+        main = (("R116", 100, 500, 400, "[非淨減法輪] 落地輪本體：分軌判準與平行表本身"),)
+        lane = (("R116", 400, "刻意把落地輪全部淨額謊報成回歸鎖軌，驗證自我豁免防線"),)
+        red = repin_growth_problems(main, since=100, net_cap=300,
+                                     regression_lane=lane, regression_lane_since=117)
+        self.assertTrue(any("[超出每輪上限]" in p for p in red), red)
+        green = repin_growth_problems(main, since=100, net_cap=300,
+                                       regression_lane=lane, regression_lane_since=116)
+        self.assertFalse([p for p in green if "[超出每輪上限]" in p], green)
+
+    def test_the_regression_lane_cap_is_taken_from_measurement_not_invention(self) -> None:
+        """cap 常數必須等於一個可由 `_GUARD_LINES_REPIN_LOG` 現查導出的實測值（零加減推算）。"""
+        basis_round, basis_delta = _regression_lane_cap_basis()
+        self.assertEqual(basis_delta, _REGRESSION_LANE_ROUND_CAP)
+        matches = [r for r in _GUARD_LINES_REPIN_LOG
+                   if r[0] == basis_round and r[3] == basis_delta]
+        self.assertTrue(matches, f"{basis_round} 那一列（淨額 {basis_delta}）"
+                        "已不在 _GUARD_LINES_REPIN_LOG 裡 ⇒ cap 的取值基準憑空浮動")
+
+    # ── 對抗性探針（逐形態，不只量一種——ADR §1.5 教訓）─────────────────────
+    def test_adversarial_probe_functional_code_written_as_test_method_is_not_a_free_pass(
+        self,
+    ) -> None:
+        """探針①：把一輪的功能成長申報成回歸鎖軌（純靠嘴說「這是回歸測試」）不能豁免上限——
+        `lane_split_problems()` 的款「回歸鎖軌超上限」只認淨額與名冊，不採信理由欄的自稱。
+        """
+        main = (("R117", 100, 900, 800,
+                 "[非淨減法輪] 全部宣稱為回歸測試，實為新判準面（探針①語料）"),)
+        lane = (("R117", 800, "全部宣稱為回歸測試（探針①：口頭宣稱不是名冊核准）"),)
+        problems = lane_split_problems(main, lane, since=117, cap=309, latest_round=117)
+        self.assertTrue(any("[回歸鎖軌超上限]" in p for p in problems), problems)
+
+    def test_adversarial_probe_round_and_lane_split_combo_is_caught(self) -> None:
+        """探針④：拆輪次 × 拆軌別組合套利——把功能成長全塞進回歸鎖軌、企圖用「回歸鎖軌
+        不受連續上升鎖管」躲開款(11)。本探針宣告的回歸鎖軌淨額同時大於同輪主表淨額
+        （款3 該擋）且超過上限（款4 該擋），驗證兩款同時開火時不會互相掩蓋——不能靠
+        觸發其中一款掩護另一款失效。
+        """
+        main = (("R117", 100, 900, 800, "[非淨減法輪] 逐檔清單＝x.md"),)
+        lane = (("R117", 850, "刻意宣告超過母項，企圖以回歸鎖軌吃下全部再豁免自己"),)
+        problems = lane_split_problems(main, lane, since=117, cap=309, latest_round=117)
+        self.assertTrue(any("[子項大於母項]" in p for p in problems), problems)
+        self.assertTrue(any("[回歸鎖軌超上限]" in p for p in problems), problems)
+
+    def test_adversarial_probe_exec_docstring_arbitrage_is_a_known_gap(self) -> None:
+        """探針②（誠實劃界，非通過項）：`exec(__doc__)` 把功能碼藏進敘事載體、執行期才
+        取出——`lane_split_problems()`／候選 2 的 C2~C4 掃的是 AST 節點與字面，看不到
+        字串內容。此格明文記為已知缺口而非通過，承接＝ADR-XPLAT-013 Phase2 D-3
+        （ruff S102，DEF-200-209／DEF-200-217 E2）——本測試只確認「本判準確實對此
+        沒有鑑別力」這件事被誠實記著，不假裝已經擋住。
+        """
+        main = (
+            ("R117", 100, 150, 50,
+             '[非淨減法輪][全額功能軌] exec(__doc__) 型套利語料（探針②）'),
+            ("R118", 150, 170, 20, "[非淨減法輪] 逐檔清單＝x.md"),
+        )
+        # lane 帶一列占位（避免撞款1）；R117（round-label-ok）主表已標「全額功能
+        # 軌」，本判準結構上看不出這行理由背後藏著 exec(__doc__)——這正是本探針要誠實
+        # 記錄的缺口：判準綠燈，缺口仍在。
+        lane = (("R118", 20, "占位列：R118 全額回歸鎖軌，僅用來讓表非空"),)
+        problems = lane_split_problems(main, lane, since=117, latest_round=118)
+        self.assertEqual(problems, [],
+                          "本判準對 exec(__doc__) 套利沒有鑑別力是已知且誠實登記的缺口，"
+                          "若此斷言開始失敗代表判準行為已變化，請回頭核對本測試是否仍對應"
+                          "誠實劃界的敘述")
+
+
+class TestObservationColumnsAreDisplayOnly(unittest.TestCase):
+    """ADR-XPLAT-013 Phase2 (c)（D-4）：觀測欄只印不擋（`guard_line_composition()`）。"""
+
+    def test_composition_reports_plausible_numbers_for_this_file(self) -> None:
+        comp = guard_line_composition()
+        self.assertIn(_HERE.name, comp)
+        test_count, assert_count = comp[_HERE.name]
+        self.assertGreater(test_count, 0, "本檔明明有大量 test 方法，卻算出 0")
+        self.assertGreater(assert_count, 0, "本檔明明有大量斷言，卻算出 0")
+
+    def test_print_guard_lines_includes_the_observation_line(self) -> None:
+        """(c) 的輸出必須真的印得出來（同 ARCH-02 的既有紀律：宣稱的東西要真的跑得動）。"""
+        import io  # noqa: PLC0415
+        from contextlib import redirect_stdout  # noqa: PLC0415
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            _print_guard_lines()
+        self.assertIn("[觀測欄][D-4]", buf.getvalue())
+
+    def test_the_observation_line_does_not_gate_anything(self) -> None:
+        """反 vacuity：`guard_line_composition()` 只能被 `_print_guard_lines()` 消費——
+        任何一支 `*_problems()` 判準函式的原始碼裡都不得出現這個名字，否則「只印不擋」
+        就只是文件宣稱，不是結構事實（D-4 裁決：不換分母、不全量落地，只加觀測欄）。
+        """
+        text = _HERE.read_text(encoding="utf-8")
+        tree = ast.parse(text)
+        offenders = [
+            node.name for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name.endswith("_problems")
+            and "guard_line_composition" in (ast.get_source_segment(text, node) or "")
+        ]
+        self.assertEqual(offenders, [],
+                          f"這些判準函式引用了觀測欄：{offenders} ⇒ (c) 不再是「只印不擋」")
+
+
+class TestRootToolsOldScaleDebtDueRound(unittest.TestCase):
+    """ADR-XPLAT-013 §9.3／U9（D-5）：技術債到期輪的機械保底（不是「已真拆」的證明）。"""
+
+    def test_the_real_state_is_not_yet_due(self) -> None:
+        """生產閘門：R116 現查未清償，但到期輪 R121 尚未到，故現在必須是綠的。round-label-ok"""
+        problems = root_tools_debt_due_problems()
+        self.assertEqual(problems, [], "\n  ".join(problems))
+
+    def test_unresolved_past_due_is_red(self) -> None:
+        problems = root_tools_debt_due_problems(resolved=False, due_round=121,
+                                                 latest_round=121)
+        self.assertTrue(any("[技術債逾期]" in p for p in problems), problems)
+
+    def test_resolved_past_due_is_green(self) -> None:
+        problems = root_tools_debt_due_problems(resolved=True, due_round=121,
+                                                 latest_round=121)
+        self.assertEqual(problems, [])
+
+    def test_unresolved_before_due_is_green(self) -> None:
+        problems = root_tools_debt_due_problems(resolved=False, due_round=121,
+                                                 latest_round=116)
+        self.assertEqual(problems, [])
+
+    def test_the_due_round_cannot_be_silently_pushed_out(self) -> None:
+        """A-2 後設鎖紅綠自證：到期輪推到 9999 必紅；真實模組常數必須在界內。"""
+        hits = root_tools_debt_due_problems(due_round=9999, latest_round=116)
+        self.assertTrue(any("[到期輪超界]" in h for h in hits), hits)
+        real = [h for h in root_tools_debt_due_problems() if "[到期輪超界]" in h]
+        self.assertEqual(real, [], real)
+        self.assertLessEqual(_ROOT_TOOLS_DEBT_DUE_MAX_LOOKAHEAD,
+                             _FROZEN_ROOT_TOOLS_DEBT_DUE_MAX_LOOKAHEAD)
 
 
 class TestRepinCommandIsReal(unittest.TestCase):

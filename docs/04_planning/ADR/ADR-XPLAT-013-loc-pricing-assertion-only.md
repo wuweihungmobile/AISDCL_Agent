@@ -205,11 +205,11 @@ tier／`ABSOLUTE_LIMIT`／`SPECIAL_FILES`／`_FROZEN_GUARD_LINES` 全部門檻**
 | U2 | SA 獨立審查 APPROVE | ☐ 未進行 | 同上 |
 | U3 | SD 獨立審查 APPROVE | ☐ 未進行 | 同上 |
 | U4 | QA 獨立審查 APPROVE | ☐ 未進行 | 同上 |
-| U5 | §6 缺口 ⑥（多語句擠一行 × `.claude/hooks/` 無 ruff 閘門）已做出選擇並落地或明文接受 | ▣ **已落地（R111／DEF-200-209）**：選項①之閘門半——`.claude/ruff.toml`（extend）＋pre-push 快層④／root-infra-ci 第 16 道擴射程，E701/E702 隨 select `E` 生效；同步鎖＝`TestRootToolsLintPolicy` 兩支新斷言 | `S102` 與 taxonomy 計價判準（選項②）不在本次射程——載體＝DEF-200-217 E2 |
-| U6 | §6 缺口 ⑤（三個 `*_WARN_MARGIN` 在新值域下是否合適）已重新評估 | ☐ 未評估 | 附當回合實測的逐層母體筆數 |
-| U7 | §8 交棒清單的自陳站點處置方針已定（逐一改寫／保留加註／搬回 docstring） | ☐ 未定 | 方針寫進 §8 表頭；逐點落地可分輪 |
+| U5 | §6 缺口 ⑥（多語句擠一行 × `.claude/hooks/` 無 ruff 閘門）已做出選擇並落地或明文接受 | ▣ **已落地（R111／DEF-200-209）**：選項①之閘門半——`.claude/ruff.toml`（extend）＋pre-push 快層④／root-infra-ci 第 16 道擴射程，E701/E702 隨 select `E` 生效；同步鎖＝`TestRootToolsLintPolicy` 兩支新斷言 | 兩軸全收：選項② `S102` 軸已於 R116 落地（`tools/ruff.toml`＋`AutoClaude/pyproject.toml` select 同步加 S102、既有 3 站點 noqa 具名；載體＝DEF-200-209 fixed@R116／DEF-200-217 E2） |
+| U6 | §6 缺口 ⑤（三個 `*_WARN_MARGIN` 在新值域下是否合適）已重新評估 | ▣ **已核准（R116／`AutoSDD_Adjudication_Record_R110.md` §1.4 D-5）**：母體實測 `tier_warn_band`=0 筆／`special_warn_band`=7 筆／`root_tools_warn_band`=2 筆，門檻現值 `total_warn_margin=10`／`tier_warn_margin=6`／`special_warn_margin=5` 維持現值（掌舵者最佳理想化裁決：現值在此母體規模下仍合適，無需調整） | 已結。若母體筆數日後大幅變動需重新評估 |
+| U7 | §8 交棒清單的自陳站點處置方針已定（逐一改寫／保留加註／搬回 docstring） | ▣ **方針已定（R116／D-5）：逐一改寫**（推翻 §8 原文「刻意不逐一改寫」的舊方針） | **落地未完成**（誠實 not_done）：25 個自陳站點僅原有 2 列（`hook_wiring.py:4`／`escalation.py:79`）已訂正，其餘 23 個尚待逐一改寫——規模大，本批未做，交下一收尾單人窗口 |
 | U8 | R100 §E 五筆新發現（E1~E5）的四方重投票已完成 | ▣ **部分**：E1／E3／E4 已裁決並修憲落地（§9／§6.2／§10） | E2／E5 尚待處置（追蹤＝`DEF-200-207`／`DEF-200-209`），本欄勾稽以該兩列狀態為準 |
-| U9 | §9 四支 `[ROOT-TOOLS]` 檔的技術債已拆到舊尺不破線（或四方明文接受長期掛帳） | ☐ 未拆 | 現查§9.2 表逐檔 over_by 是否歸零；追蹤＝`DEF-200-207` |
+| U9 | §9 四支 `[ROOT-TOOLS]` 檔的技術債已拆到舊尺不破線（或四方明文接受長期掛帳） | ▣ **裁決已定（R116／D-5）：真拆 −186 行為目標＋到期輪常數機械保底**。到期輪常數已落地（`_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND=121`，載體＝`tools/tests/test_adr_xplat001_c1c2_lock.py::root_tools_debt_due_problems()`）；**真拆本身未做**（誠實 not_done） | 現查§9.2 表逐檔 over_by（R116 現查合計 **187**，見 §9.2 訂正列）；到期輪 R121 前若未真拆，`root_tools_debt_due_problems()` 轉紅；追蹤＝`DEF-200-207` |
 | U10 | §10 條文五落地後的第一次 `--repin-cap` 已由 Architect+SD 雙簽執行（否則 `--update` 仍間接連動 cap，見 §5.4） | ☐ 未執行 | 現查 `--json` 的 `cap_basis_pinned` 是否為 `true` |
 
 🔴 **U8 與 U1~U7 是兩個不同的四方複審批次，不得互相頂替**：U1~U7 是 ADR-XPLAT-012 條文六要求、對整份 ADR-XPLAT-013 的原始複審；U8 是 R100 §E 節唯讀交件觸發、範圍限定在五筆新發現（E1~E5）的補充複審（§9.1 已裁決 E1、§5.2 已裁決 E4、§6.2 已落地 E3 的 provenance 判準改寫）。U8 完成不代表 U1~U7 完成，反之亦然——本節〈狀態〉的 Proposed→Accepted 判準仍是**兩批皆全數通過**。
@@ -220,7 +220,7 @@ tier／`ABSOLUTE_LIMIT`／`SPECIAL_FILES`／`_FROZEN_GUARD_LINES` 全部門檻**
 
 ## §8 交棒清單（自陳「刻意寫成 `#` 以避開 count_loc」的程式碼站點）— **普查已重建（否決權複審 M3）**
 
-**處置方針（U7 待四方確認）**：本案刻意不逐一改寫——那是史料，逐一改寫會製造大量無語意 diff 且與本案的判準改動混在同一批。**例外**：會讓下一個人做出錯誤決定的站點（宣稱一件已被實測推翻的事、或引用一句已被刪除的訊息）當輪修掉，見下表 ✅ 兩列。
+**處置方針（🔴 R116／`AutoSDD_Adjudication_Record_R110.md` §1.4 D-5 已定案：逐一改寫，推翻本段原文）**：原方針主張「刻意不逐一改寫」，掌舵者以最佳理想化原則裁決推翻——**改為逐一改寫**。**落地現況（誠實 not_done）**：25 個自陳站點中僅原有 ✅ 兩列（`hook_wiring.py:4`／`escalation.py:79`）已訂正，其餘 23 個尚未逐一改寫；規模跨全庫多檔，本批（DEF-200-211 落地批）未完成，交下一收尾單人窗口分批處理。
 
 ### 8.1 原表怎麼漏的（方法訂正）
 
@@ -285,6 +285,8 @@ tier／`ABSOLUTE_LIMIT`／`SPECIAL_FILES`／`_FROZEN_GUARD_LINES` 全部門檻**
 | `tools/lib/hook_wiring.py` | guardrail_lib（400） | 395（over=0） | **428（over=28）** | 398（over=0） |
 | `tools/lib/quota_gate.py` | guardrail_hub（500） | 500（貼線，over=0） | **520（over=20）** | 366（over=0） |
 
+🔴 **R116 訂正（D-5，7 輪後再現查，惡化持續）**：現查舊尺 over_by 合計已由 R101 的 149 進一步惡化為 **187**（`quota_meter.py` over=67／`session_resume_planner.py` over=45／`hook_wiring.py` over=28／`quota_gate.py` over=47），較 R108 提案當時的 186 又 +1。**零償還、連續 8 輪方向持續惡化**的實況不變（見裁決存證 `AutoSDD_Adjudication_Record_R110.md` §1.4 D-5：「U9 明文掛帳是次佳，真拆才還債」）。本輪（DEF-200-211 落地批）**先落地到期輪常數作機械保底**——`_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND=121`（載體＝`tools/tests/test_adr_xplat001_c1c2_lock.py::root_tools_debt_due_problems()`，到期而未清償即紅），真拆本身尚未做，交下一收尾單人窗口。
+
 🔴 **讀法**：R100 落地當下這四支檔**在舊尺下已經貼著上限、餘裕為 0**（不是「還有空間」）；R100→R101 之間的後續合法工作（在新尺顯示的四位數餘裕下進行）已經讓四支檔在**舊尺下**實際**破線**（超額 20～62 行）。這正是「換尺同時掩蓋既有違規」的技術債本體：**這四支檔現在的行數，若沒有本次計價尺變更，在條文一落地當下就已無法通過**，後續增加的行更是舊尺下的直接違規。新尺下四支皆 over=0，是本 ADR 存在的直接效果，不是巧合。
 
 **§9.3（技術債義務——不得永久免費搭便車）**：四支檔的處置方針比照本檔既有的 `[ROOT-TOOLS]`／`guardrail_hub` 違規訊息一貫要求（`check_loc_budget.py` 的既有措辭：「破線後不是調高預算，而是拆職責／抽共用模組；真的不可壓縮才具名加進 `SPECIAL_FILES` 的 raw-line 棘輪」）——**新尺的貼現不改變這條既有紀律**：
@@ -292,7 +294,7 @@ tier／`ABSOLUTE_LIMIT`／`SPECIAL_FILES`／`_FROZEN_GUARD_LINES` 全部門檻**
 - 日後任一支檔要新增斷言行之前，先現查該檔在**舊尺**下的 over_by（現查：`git show HEAD:tools/lib/guard_line_taxonomy.py` 判準不變的前提下，用改前 `count_loc` 邏輯——空行與行首 `#` 免費、其餘計價——手算或用合成腳本量；本 ADR 不為此另建工具，理由是舊尺已廢，重建它只服務這一項稽核）。
 - **目標＝拆職責／抽共用模組，把四支檔的邏輯量降到舊尺（改前判準）下亦不破線**，而不是繼續依賴新尺的便宜計價無限期加碼。這是 disclose_and_track_debt 決策的字面意思：揭露＋要求日後真的付掉，不是揭露完就當作合法額度。
 - 追蹤載體＝ [`docs/06_quality/AutoSDD_Defect_Log.md`](../../06_quality/AutoSDD_Defect_Log.md) 既有未結列 `DEF-200-207`（同主題「續報 §E-1/3/4」欄位，R101 已追加本節四檔對照與義務描述——不新開列，理由見該列 R101 追記段的「未結列僅剩 0 格」實況）。該列在四支檔任一支被拆到舊尺不破線之前，不得標記與本項相關的部分為 `fixed`。
-- **本節不設具體到期輪**（四方複審決策文字未指定），但比照本 ADR 既有的 `_PHASE2_*` 到期設計慣例，若下一次獨立審查認為需要機械到期載體，屬 R102 以後承接項，不在本輪授權範圍內新增（避免無到期常數的判準憑空生出鎖檔卻無人維護）。
+- 🔴 **R116 訂正（D-5）：本節「不設具體到期輪」的立場已由裁決推翻**——`AutoSDD_Adjudication_Record_R110.md` §1.4 D-5 明文「U9 真拆 −186 行為目標＋同批先補到期輪常數作機械保底」。到期輪常數已落地：`_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND=121`（`tools/tests/test_adr_xplat001_c1c2_lock.py`，形狀比照 `_PHASE2_REVIEW_LOG`／`_REPIN_NET_CAP_DUE_ROUND` 既有紀律：到期而未清償即由 `root_tools_debt_due_problems()` 轉紅，出口二擇一——真拆清償或由下一次複審具名展延，刻意不留無條件延期參數）。**這是機械保底，不是「已真拆」的證明**：四支檔本身本輪未動一行，187 行的 over_by 原樣保留，到期輪 R121 前必須有人真的拆完，否則到期即紅。
 
 **§9.4（不涵蓋）**：本節不涵蓋 R100 §E-1 同時指出的「母體級 −22.3%／per-file violations 4→0／預警帶 17→7」等群體統計，那些數字已完整落在 `CrossPlatform_R100_Scan_Findings.md` §E-1，本節僅承接「四支具名檔」這一個可勾稽義務，避免重複維護同一組數字兩個家。
 

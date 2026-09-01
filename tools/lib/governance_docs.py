@@ -366,6 +366,10 @@ _GOVERNANCE_DOCS = (
     # （⇒ 指針稽核），而 A/B 歸因實測、環境現查、重播種機制路徑的逐字帳唯一居所在本檔——
     # 複審者要重驗「非 code 迴歸」判定與 229 的修法就得讀完它（⇒ 體積守門）。即刻登記。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_DryRunE2E_Perf_Env_Reseed.md",
+    # ADR-XPLAT-013 Phase2 (b)(c) 分軌計價落地輪證據檔（DEF-200-211，R116）：D-1~D-6 round-label-ok
+    # 逐項落地紀錄與逐檔行數異動表唯一居所在本檔（⇒ 體積守門），且它逐節寫出
+    # 「哪一項裁決的憑證在哪一節」的座標宣稱（⇒ 指針稽核）。即刻登記，同既有姊妹檔判例。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R116_Scan_Findings.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/{CrossPlatform,Quota}_*.md`。這**不是**把具名

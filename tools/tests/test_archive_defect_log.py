@@ -3890,7 +3890,8 @@ class TestOversizeRepinDirectionLock(unittest.TestCase):
                                frozenset({"DEF-9-001", "DEF-9-002", "DEF-9-003"})):
             new_text = self.repin.apply_tighten(self._INDEX_SRC, 2, 250, {"DEF-9-002"})
         ns = {}
-        exec(compile(new_text, "x.py", "exec"), ns)
+        # noqa: S102 -- 驗證生成原始碼語法正確的既有慣用句，非藏碼套利（DEF-200-217 E2）
+        exec(compile(new_text, "x.py", "exec"), ns)  # noqa: S102
         self.assertEqual(ns["OVERSIZE_ROW_CEILING"], 2)
         self.assertEqual(ns["OVERSIZE_ROW_EXCESS_CEILING"], 250)
         self.assertEqual(ns["OVERSIZE_ROW_GRANDFATHERED"], {"DEF-9-001", "DEF-9-003"})
@@ -3935,7 +3936,8 @@ class TestOversizeRepinDirectionLock(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIsNotNone(new_text)
         ns = {}
-        exec(compile(new_text, "x.py", "exec"), ns)
+        # noqa: S102 -- 驗證生成原始碼語法正確的既有慣用句，非藏碼套利（DEF-200-217 E2）
+        exec(compile(new_text, "x.py", "exec"), ns)  # noqa: S102
         self.assertEqual(ns["OVERSIZE_ROW_CEILING"], 5)
 
     def test_the_real_scenario_from_the_task_brief(self):
@@ -3965,7 +3967,8 @@ class TestOversizeRepinDirectionLock(unittest.TestCase):
         new_text = self.repin.apply_tighten(
             index_text, state["new_ceiling"], state["new_excess"], set(state["expiring"]))
         ns = {}
-        exec(compile(new_text, "x.py", "exec"), ns)
+        # noqa: S102 -- 驗證生成原始碼語法正確的既有慣用句，非藏碼套利（DEF-200-217 E2）
+        exec(compile(new_text, "x.py", "exec"), ns)  # noqa: S102
         self.assertEqual(ns["OVERSIZE_ROW_CEILING"], state["new_ceiling"])
         self.assertEqual(ns["OVERSIZE_ROW_EXCESS_CEILING"], state["new_excess"])
         self.assertEqual(ns["OVERSIZE_ROW_GRANDFATHERED"],
