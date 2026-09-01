@@ -5205,7 +5205,8 @@ class SchedulerBackendNeverTouchesRealSchtasksTest(unittest.TestCase):
         ⇒ 安全跳過。
         """
         if sys.platform != "win32":
-            self.skipTest("[WINDOWS-NATIVE-ONLY] 僅 Windows 有 schtasks 可現查（DEF-200-239 立案平台）")
+            self.skipTest(
+                "[WINDOWS-NATIVE-ONLY] 僅 Windows 有 schtasks 可現查（DEF-200-239 立案平台）")
         probe = production_engine()  # R60 E-A-03：5.1 優先（DEF-101-509 判準）
         if probe is None:
             self.skipTest("這台機器找不到 powershell，無法現查排程器")
