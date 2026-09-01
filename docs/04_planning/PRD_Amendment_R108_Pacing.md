@@ -2,7 +2,7 @@
 
 | 欄位 | 值 |
 | :---- | :---- |
-| 狀態 | **Proposed（三審＝終審承接修訂完成）**。一審判決＝Architect **REJECT**／SA・SD・QA APPROVE_WITH_CONDITIONS；二審判決＝Architect／SA／SD 三鏡共 7 筆 blocking，紀錄 `docs/06_quality/CrossPlatform_R108_Review.md`；本版逐條承接一審 B9~B19、二審 6 筆 blocking ＋ 兩輪標（→修憲）的 non-blocking |
+| 狀態 | **Adopted（掌舵者 2026-09-01 技術債總清償循環令 D1/D2 落款生效；PRD v2.1 修訂表 v2.1.10 列同日補列，BURN-DOWN 增補隨本批合併落款）**。原狀態＝Proposed（三審＝終審承接修訂完成）。一審判決＝Architect **REJECT**／SA・SD・QA APPROVE_WITH_CONDITIONS；二審判決＝Architect／SA／SD 三鏡共 7 筆 blocking，紀錄 `docs/06_quality/CrossPlatform_R108_Review.md`；本版逐條承接一審 B9~B19、二審 6 筆 blocking ＋ 兩輪標（→修憲）的 non-blocking |
 | 提案輪 | R108（架構輪；本文件產出時**零生產碼改動、零帳本改動、零 PRD 改動**） |
 | 標的 PRD | `docs/01_requirements/AutoClaude_Token_監控與喚醒機制_PRD_v2.1.md` |
 | 提議落款版本 | **v2.1.10**。🔴 **狀態欄必須具名寫出前置**（B18／SA→修憲）：本批多處前提取自 **v2.1.8**（§4.1.5／§4.2.4）與 **v2.1.9**（§11.2 (a)~(d)、`:549-555` 訂正），而修訂表現查〔實讀 `:9-14`〕**只有 v2.1.4 標「已生效」**（`:9`）；v2.1.5「待四方複審後生效」、v2.1.6「規格化後待實作」、v2.1.8「僅完成規格化」、v2.1.9「經獨立複審 **REJECT** 承接、逐條修訂後**待再審**」（`:14`，修訂表最後一列）⇒ v2.1.10 是**疊在一疊未生效修憲上**的第五層（🔴 **v2.1.7 刻意不列入這個計數也不算已生效**——它的措辭既非「已生效」亦非任何待審字面，歸類判準與理由的唯一出處＝**§10.2**，三審 QA 承接） |

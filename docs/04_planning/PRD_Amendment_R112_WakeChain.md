@@ -1,8 +1,10 @@
 # PRD 修憲草案 — Token 用盡自動喚醒閉環（usage 水位喚醒閉環設計）
 
-> **Status：Proposed**（待四方同審＋掌舵者落款；落款載體＝
-> `docs/01_requirements/AutoClaude_Token_監控與喚醒機制_PRD_v2.1.md`，批次序＝
-> v2.1.10（配速）→ v2.1.11（ADR-XPLAT-014 五歧異）→ **本批 v2.1.12**）。
+> **Status：Adopted**（掌舵者 2026-09-01 技術債總清償循環令 D2 落款生效；獨立四方複審紀錄＝零、
+> 由掌舵者直接落款。落款載體＝
+> `docs/01_requirements/AutoClaude_Token_監控與喚醒機制_PRD_v2.1.md` 修訂表 v2.1.12 列（同日補列），批次序＝
+> v2.1.10（配速）→ v2.1.11（ADR-XPLAT-014 五歧異）→ **本批 v2.1.12**。
+> 原 Status＝Proposed（待四方同審＋掌舵者落款））。
 > 本檔＝設計波四職能產出（Architect／SA／SD／Developer，2026-08-30）的合成草案；
 > 檔名刻意不含版號字面、不匹配 `R*_HANDOFF` glob（非交棒書）。
 > 量測數字凡標「R111 量測值」者＝設計波當回合實測快照，**落地時一律現查，不得引用為常數**。
