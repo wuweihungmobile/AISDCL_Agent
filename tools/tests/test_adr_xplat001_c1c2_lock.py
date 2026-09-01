@@ -682,7 +682,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 7153,
+    "test_adr_xplat001_c1c2_lock.py": 7178,
     "test_archive_defect_log.py": 3989,
     "test_bash32_compat.py": 1020,
     "test_bash_probe_spec_contract.py": 983,
@@ -733,7 +733,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_sanitize_component_frozen_sdd_versions_lock.py": 340,
     "test_schedule_capability_parity.py": 626,
     "test_script_scan_surface_ssot.py": 391,
-    "test_skip_ceiling_ratchet_direction.py": 304,
+    "test_skip_ceiling_ratchet_direction.py": 508,
     "test_skip_discoverability_r83.py": 744,
     "test_smoke_ci_sync.py": 1334,
     "test_stdio_utf8.py": 76,
@@ -1384,6 +1384,27 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
     ("R119", 91410, 91417, 7,
      "[非淨減法輪] 前綴協同改寫帳本新列＋本表值同步，逐項見 "
      "CrossPlatform_R119_Guard_Repin_Evidence.md（本檔 +7：7146→7153）。"),
+    ("R119", 91417, 91621, 204,
+     "[非淨減法輪] P1-6 批修復包（DEF-200-240 同批延續，push 被 pre-push 擋下後修復）："
+     "F1 共同變更鎖判準粒度由檔案級改為剖面鍵值級——原判準連自己新增這道鎖的變更"
+     "（`a1fbbba`）都誤判為違規（層③檔案被 touch 但 `_FROZEN_CEILING_MAX` 字面零"
+     "變動），新增 `_extract_dict_literal`／`_dict_literal_changed`／"
+     "`_source_path_value_changed` 等取數函式與五格反事實測試（含真實重演 "
+     "`7f8c96a`／`origin/main..HEAD`）；F2 為 `governance_docs.py` E501 拆行，"
+     "零貢獻本檔。逐項見 CrossPlatform_R119_Guard_Repin_Evidence.md"
+     "（test_skip_ceiling_ratchet_direction.py 304→508，+204）。"),
+    ("R119", 91621, 91630, 9,
+     "[非淨減法輪][同輪追加] 本表自身編修（新增上一列稽核列＋凍結表值同步＋"
+     "prefix_len 更新本身），同 R95~R101 既有體例。逐項見 "
+     "CrossPlatform_R119_Guard_Repin_Evidence.md（本檔 +9：7153→7162）。"),
+    ("R119", 91630, 91634, 4,
+     "[非淨減法輪][同輪追加] 本表自身編修（上一列稽核列自身＋凍結表值同步），"
+     "同 R95~R101 既有體例。逐項見 CrossPlatform_R119_Guard_Repin_Evidence.md"
+     "（本檔 +4：7162→7166）。"),
+    ("R119", 91634, 91646, 12,
+     "[非淨減法輪][同輪追加] 本表自身編修收斂（上一列稽核列自身 +4／"
+     "_FROZEN_PREFIX_REWRITE_LEDGER 新列 +4／本列自身 +4），逐項見 "
+     "CrossPlatform_R119_Guard_Repin_Evidence.md（本檔 +12：7166→7178）。"),
 )
 
 
@@ -1704,10 +1725,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 103
+_REPIN_LOG_FROZEN_PREFIX_LEN = 107
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "21bdbf9b959537f797783bdad46a29d11d34d9fe880df6835bf0debc12a12c16")
+    "4554dbed8bf56cd3e71a1d209986a0f74915bd0e77cf56d4e9292a73907dda89")
 
 
 def repin_log_history_digest(
@@ -1851,6 +1872,10 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # 宣稱、subprocess text=True 缺 encoding）修復後追加稽核列，依「追加後立即自我
     # 凍結」判例延伸前綴涵蓋本列本身（101→102）；載體＝DEF-200-240（同批延續）。
     ("R119", "7f11c682ae08", "21bdbf9b9595", "DEF-200-240"),
+    # P1-6 批修復包（DEF-200-240 同批延續）：F1 共同變更鎖判準粒度由檔案級改為剖面
+    # 鍵值級，F2 governance_docs.py E501 拆行，同體例「追加後立即自我凍結」——
+    # 本輪追加三列（落地列＋本表自身編修二列）並延伸前綴涵蓋全部新列本身（103→107）。
+    ("R119", "21bdbf9b9595", "4554dbed8bf5", "DEF-200-240"),
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

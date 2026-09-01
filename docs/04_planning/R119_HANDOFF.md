@@ -27,7 +27,7 @@
    的下游紅）；② `_origin_main_head_diff()` 兩處 `subprocess.run(text=True)` 缺
    `encoding=`（已補 `encoding="utf-8", errors="replace"`）。四筆逐一以目標測試檔覆核轉綠。
 
-<!-- guard-total:R119 --> **守衛線追記：護欄層累積淨額＝ 91247 → 91417（+170）** ——
+<!-- guard-total:R119 --> **守衛線追記：護欄層累積淨額＝ 91247 → 91646（+399）** ——
 逐項見 `docs/06_quality/CrossPlatform_R119_Guard_Repin_Evidence.md`。
 
 ## 已驗證（本包親跑，非轉述）

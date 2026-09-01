@@ -14,10 +14,11 @@ WHY：該表上方散文自陳「天花板只准降」，但當回合實查全 r
 from __future__ import annotations
 
 import copy
+import re
 import subprocess
 import sys
 import unittest
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from unittest import mock
 
@@ -175,39 +176,151 @@ class TestCeilingMaxDirectionLock(unittest.TestCase):
 #: 互查——後者判準是 `total_got > total_cap` 的上限語意，漏補只會讓 ④ 更小，對
 #: 目標痛點恆綠）逐項見 `docs/04_planning/R118_HANDOFF.md` 的 P1-6 節，此處不重複。round-label-ok
 #:
-#: 判準語意：**若某次變更動了①②③任一檔案，④ 也必須在同一次變更中被動過**，
-#: 否則紅。刻意是**檔案級**而非「剖面鍵值」級——R118_HANDOFF.md 給的反事實素材 round-label-ok
-#: （commit `7f8c96a`／`5d5dd37`）本身就是以檔案集合為顆粒度提供的，檔案級判準
-#: 已足以擋下立案的那個具體缺陷；再往下切到剖面鍵值需解析 diff hunk，複雜度換不到
-#: 額外鑑別力（①②③三個檔是 skip 天花板家族專用檔，改它們幾乎不可能是為了別的事）。
+#: 🔴 R119 修復包 round-label-ok：判準粒度由**檔案級**改為**剖面鍵值級**。原版寫成「①②③任一
+#: 檔案出現在變更清單即紅」，落地當回合就抓到了自己——本鎖自身的程式碼就住在
+#: `_CO_CHANGE_SOURCE_PATHS` 其中一個檔案裡，commit `a1fbbba`（新增本節程式碼）
+#: 只是在幫這道鎖本身加程式碼，`_FROZEN_CEILING_MAX` 一個字元都沒有動過，檔案級
+#: 判準卻照樣要求同動 ④——往後任何對這兩個檔案的無關改動（加註解、加測試、修
+#: typo）都會被誤擋，而「擋到讓人無法工作的守衛會被整個關掉，比沒有守衛更糟」
+#: 正是 `block_destructive_git.py` 檔頭自己講的道理，不該只在那一支鎖上算數。
+#:
+#: 新判準：**只有當①②③所轄的剖面鍵值 dict（`_RUNTIME_SKIP_CEILING`／
+#: `_RUNTIME_SKIP_CEILING_MAX`／`_FROZEN_CEILING_MAX`）字面本身在 `origin/main..HEAD`
+#: 之間有實質差異（正規化掉註解與空白後逐字比對），才要求同動 ④**；純粹 touch
+#: 檔案（新增程式碼、改註解、加測試）不觸發。取數方式＝`git show <rev>:<path>`
+#: 拿兩版原始碼文字、以括號配對切出目標 dict 賦值的字面區塊（`_extract_dict_literal`）。
+#: 找不到證據（檔案在某一版不存在、擷取不到賦值、`origin/main` 解不出來）一律保守
+#: 判定為「已變動」——寧可多要求一次同動 ④，不可在沒有證據時判定為綠，同
+#: `_origin_main_head_diff` 對無法解析時回 `None` 的既有紀律。
 #:
 #: 誠實劃界：本鎖擋不到「①②③與④兩邊都改了、但④改錯／改漏某個剖面」——那仍須
 #: `skip_runtime_report.m6_id_set_problems()` 在該平台 CI 實跑才驗得出來。本鎖只管
-#: 「有沒有同動」，不管「動得對不對」。
+#: 「剖面鍵值有沒有真的變、有變的話有沒有同動④」，不管「動得對不對」。
 _CO_CHANGE_SOURCE_PATHS = frozenset({
     "tools/lib/skip_group_policy.py",
     "tools/tests/test_skip_ceiling_ratchet_direction.py",
 })
 _CO_CHANGE_LEDGER_PATH = "docs/06_quality/skip_id_ledger.json"
 
+#: `_CO_CHANGE_SOURCE_PATHS` 各檔所轄的「剖面鍵值」dict 賦值名稱——判準只在這些
+#: 具名 dict 的字面上比對，不是整個檔案的逐位元組差異。
+_CO_CHANGE_DICT_NAMES: dict[str, tuple[str, ...]] = {
+    "tools/lib/skip_group_policy.py": ("_RUNTIME_SKIP_CEILING", "_RUNTIME_SKIP_CEILING_MAX"),
+    "tools/tests/test_skip_ceiling_ratchet_direction.py": ("_FROZEN_CEILING_MAX",),
+}
 
-def skip_ledger_co_change_problems(changed_paths: Sequence[str]) -> list[str]:
+
+def _strip_line_comments(text: str) -> str:
+    """逐行砍掉第一個 `#` 之後的內容——本檔三張目標 dict 的字面只有 int／模組
+    常數鍵，不含帶 `#` 的字串值，故逐行砍尾是安全的。在括號配對之前先跑這一步，
+    讓註解裡偶然出現的 `{`／`}`（例：provenance 說明文字）不會污染配對深度。"""
+    return "\n".join(line.split("#", 1)[0] for line in text.splitlines())
+
+
+def _extract_dict_literal(text: str, name: str) -> str | None:
+    """從原始碼字面文字中擷取 `name: dict[...] = {...}` 這個頂層賦值的完整字典
+    字面（含左右大括號）。用括號配對找右邊界；找不到該賦值（名稱不存在、或右邊界
+    配對不完整）時回 `None`——呼叫端須把它與『內容相同』分開處理。"""
+    stripped = _strip_line_comments(text)
+    match = re.search(
+        rf"^{re.escape(name)}\s*:\s*dict\[[^\n]*?\]\s*=\s*\{{", stripped, re.MULTILINE)
+    if match is None:
+        return None
+    start = match.end() - 1  # 指向那個開括號 `{`
+    depth = 0
+    for i in range(start, len(stripped)):
+        ch = stripped[i]
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return stripped[start:i + 1]
+    return None
+
+
+def _normalize_dict_literal(literal: str) -> str:
+    """去掉空白行與行首尾空白（註解已在 `_strip_line_comments` 階段砍掉），
+    只留下對字典內容有意義的字元——縮排調整、空行增減不構成「值變了」。"""
+    return "\n".join(line.strip() for line in literal.splitlines() if line.strip())
+
+
+def _dict_literal_changed(old_text: str | None, new_text: str | None, name: str) -> bool:
+    """單一 dict 賦值字面在兩版之間是否有實質差異（正規化掉註解／空白後比對）。
+
+    任一版本的文字缺席、或擷取不到該賦值 ⇒ 保守回 `True`（「找不到證據」不等於
+    「沒有變化」——同 `_origin_main_head_diff` 對 `origin/main` 解不出時回 `None`
+    的既有紀律：結構上不可求值時，寧可多要求一次同動 ④，不可判定為綠）。
+    """
+    if old_text is None or new_text is None:
+        return True
+    old_literal = _extract_dict_literal(old_text, name)
+    new_literal = _extract_dict_literal(new_text, name)
+    if old_literal is None or new_literal is None:
+        return True
+    return _normalize_dict_literal(old_literal) != _normalize_dict_literal(new_literal)
+
+
+def _source_path_value_changed(path: str, old_text: str | None, new_text: str | None) -> bool:
+    """`path`（`_CO_CHANGE_SOURCE_PATHS` 之一）在兩版之間，其所轄的剖面鍵值 dict
+    是否真的變了——判準核心：把「檔案被 touch」與「剖面鍵值有實質變動」分開。
+    未登記於 `_CO_CHANGE_DICT_NAMES` 的路徑沒有已知 dict 可比對，保守回 `True`。
+    """
+    names = _CO_CHANGE_DICT_NAMES.get(path, ())
+    if not names:
+        return True
+    return any(_dict_literal_changed(old_text, new_text, name) for name in names)
+
+
+def skip_ledger_co_change_problems(
+    changed_paths: Sequence[str],
+    value_changed: Mapping[str, bool] | None = None,
+) -> list[str]:
     """純函式：`changed_paths`（repo 相對 posix 路徑清單）若含 `_CO_CHANGE_SOURCE_PATHS`
-    任一檔，`_CO_CHANGE_LEDGER_PATH` 也必須在同一份清單裡，否則回問題清單。
+    任一檔、且該檔所轄的剖面鍵值**真的變動**（見 `value_changed`），
+    `_CO_CHANGE_LEDGER_PATH` 也必須在同一份清單裡，否則回問題清單。
 
     純函式（不碰 git）是刻意的：反事實測試只需要餵字面清單即可驗證鑑別力，不必真的
     重演 commit（同本檔上方 `ceiling_max_direction_problems` 的既有設計慣例——取數
-    與判定分離）。真實接線（怎麼拿到 `changed_paths`）見 `_origin_main_head_diff`。
+    與判定分離）。真實接線（怎麼拿到 `changed_paths`／`value_changed`）見
+    `_origin_main_head_diff`／`_co_change_value_changed_map`。
+
+    `value_changed`：`_CO_CHANGE_SOURCE_PATHS` 各檔在本次變更中，其所轄的剖面鍵值
+    dict 是否真的變動（由 `_source_path_value_changed` 解 git 內容後填入）。缺省
+    （`None`）或漏了某個 touched 路徑的鍵時，該路徑保守視為「已變動」——判準由
+    檔案級過渡到剖面鍵值級時，向下相容的安全預設：呼叫端沒有能力算出剖面鍵值
+    有沒有變時，不得因此把紅判成綠。
     """
     changed = set(changed_paths)
     touched = sorted(changed & _CO_CHANGE_SOURCE_PATHS)
-    if touched and _CO_CHANGE_LEDGER_PATH not in changed:
+    if not touched:
+        return []
+    value_changed = value_changed or {}
+    materially_touched = [p for p in touched if value_changed.get(p, True)]
+    if materially_touched and _CO_CHANGE_LEDGER_PATH not in changed:
         return [
-            f"變更了 {touched} 卻未同動 {_CO_CHANGE_LEDGER_PATH}"
-            "（R115 red-4 同型漏補：skip 天花板①②③與 M6 落款④須同一次變更；"
-            "見 docs/04_planning/R118_HANDOFF.md 的 P1-6 節）"
+            f"變更了 {materially_touched}（剖面鍵值有實質變動）卻未同動 "
+            f"{_CO_CHANGE_LEDGER_PATH}（R115 red-4 同型漏補：skip 天花板①②③與 "
+            "M6 落款④須同一次變更；見 docs/04_planning/R118_HANDOFF.md 的 P1-6 節）"
         ]
     return []
+
+
+def _merge_base_with_origin_main(repo_root: Path) -> str | None:
+    """`merge-base(origin/main, HEAD)` 的 sha；解不出時（全新 clone 未 fetch main、
+    或本機從未 `git fetch origin`）回 `None`——與 `_origin_main_head_diff` 共用同一
+    份誠實劃界，見該函式 docstring。"""
+    try:
+        result = subprocess.run(
+            ["git", "merge-base", "origin/main", "HEAD"],
+            cwd=repo_root, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0 or not result.stdout.strip():
+        return None
+    return result.stdout.strip()
 
 
 def _origin_main_head_diff(repo_root: Path) -> list[str] | None:
@@ -234,16 +347,15 @@ def _origin_main_head_diff(repo_root: Path) -> list[str] | None:
     `origin/main` 解不出時（全新 clone 未 fetch 過 main、或本機從未 `git fetch
     origin`）回傳 `None`——呼叫端必須把它與空清單分開處理（`None` ⇒ 結構上不可
     求值，不得判定為綠；見 `TestSkipLedgerCoChangeLock` 的 wiring 測試 `skipTest`）。
+
+    🔴 R119 round-label-ok：`_co_change_value_changed_map` 用同一個 merge-base（見
+    `_merge_base_with_origin_main`）逐檔取兩版內容，判斷「剖面鍵值有沒有真的變」
+    ——那才是決定要不要同動 ④ 的依據，本函式只負責「哪些檔案被動過」這一半。
     """
+    base = _merge_base_with_origin_main(repo_root)
+    if base is None:
+        return None
     try:
-        merge_base = subprocess.run(
-            ["git", "merge-base", "origin/main", "HEAD"],
-            cwd=repo_root, capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=15,
-        )
-        if merge_base.returncode != 0 or not merge_base.stdout.strip():
-            return None
-        base = merge_base.stdout.strip()
         diff = subprocess.run(
             ["git", "-c", "core.quotepath=false", "diff", "--name-only",
              "--no-renames", base, "HEAD"],
@@ -257,25 +369,78 @@ def _origin_main_head_diff(repo_root: Path) -> list[str] | None:
     return [line.strip().replace("\\", "/") for line in diff.stdout.splitlines() if line.strip()]
 
 
+def _show_file_at_rev(repo_root: Path, rev: str, path: str) -> str | None:
+    """`git show <rev>:<path>` 的內容；檔案在該版不存在或 git 出錯時回 `None`
+    （呼叫端＝`_dict_literal_changed` 對缺席內容保守回「已變動」，不宣稱「沒變」）。
+    """
+    try:
+        result = subprocess.run(
+            ["git", "-c", "core.quotepath=false", "show", f"{rev}:{path}"],
+            cwd=repo_root, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout
+
+
+def _co_change_value_changed_map(
+    repo_root: Path, base: str, touched: Sequence[str],
+) -> dict[str, bool]:
+    """production 接線：對 `touched`（`_CO_CHANGE_SOURCE_PATHS` 與變更清單的交集）
+    逐檔取 `base`（merge-base）與 `HEAD` 兩版內容，交給 `_source_path_value_changed`
+    判定剖面鍵值是否真的變了。"""
+    return {
+        path: _source_path_value_changed(
+            path, _show_file_at_rev(repo_root, base, path),
+            _show_file_at_rev(repo_root, "HEAD", path))
+        for path in touched
+    }
+
+
 class TestSkipLedgerCoChangeLock(unittest.TestCase):
-    """反事實四格（動工前必做的證偽，見 R118_HANDOFF.md P1-6 節）：以 commit round-label-ok
-    `7f8c96a`（R115 漏補④）／`5d5dd37`（補回④）的真實檔案集合重演。round-label-ok"""
+    """反事實五格 round-label-ok（第 1~4 格見 R118_HANDOFF.md P1-6 節；第 5 格＝R119 修復包自證，
+    判準粒度必須是「剖面鍵值是否真的變動」而非「檔案是否被 touch」——原版檔案級
+    判準連自己新增這道鎖的那次變更（`a1fbbba`）都會誤判為違規）。"""
 
     def test_skip_ledger_co_change_catches_the_r115_red4_commit_alone(self) -> None:
-        """`7f8c96a` 單獨重演：只動①②，未動④ ⇒ 必須紅。"""
-        problems = skip_ledger_co_change_problems([
+        """`7f8c96a` 單獨重演，餵真實 diff 內容（該棒真的改了剖面鍵值：darwin
+        44→45、linux 77→78）：只動①②③，未動④ ⇒ 必須紅。"""
+        touched = [
             "tools/lib/skip_group_policy.py",
             "tools/tests/test_skip_ceiling_ratchet_direction.py",
-        ])
-        self.assertTrue(problems, "R115 red-4 的檔案集合竟未被判紅 ⇒ 這條鎖沒有承重")
+        ]
+        value_changed = {
+            path: _source_path_value_changed(
+                path,
+                _show_file_at_rev(_REPO_ROOT, "7f8c96a^", path),
+                _show_file_at_rev(_REPO_ROOT, "7f8c96a", path))
+            for path in touched
+        }
+        self.assertEqual(
+            value_changed, dict.fromkeys(touched, True),
+            "前提檢查：7f8c96a 對兩檔都應判為「剖面鍵值有變」，否則下面的紅斷言"
+            "沒有意義（見 commit 訊息：darwin 44→45／linux 77→78）")
+        problems = skip_ledger_co_change_problems(touched, value_changed)
+        self.assertTrue(problems, "R115 red-4 的真實 diff 竟未被判紅 ⇒ 這條鎖沒有承重")
 
     def test_skip_ledger_co_change_is_clean_once_the_ledger_joins(self) -> None:
         """`7f8c96a` ∪ `5d5dd37`：①②③④ 同一次變更全部到齊 ⇒ 必須綠。"""
-        problems = skip_ledger_co_change_problems([
+        touched = [
             "tools/lib/skip_group_policy.py",
             "tools/tests/test_skip_ceiling_ratchet_direction.py",
-            _CO_CHANGE_LEDGER_PATH,
-        ])
+        ]
+        value_changed = {
+            path: _source_path_value_changed(
+                path,
+                _show_file_at_rev(_REPO_ROOT, "7f8c96a^", path),
+                _show_file_at_rev(_REPO_ROOT, "7f8c96a", path))
+            for path in touched
+        }
+        problems = skip_ledger_co_change_problems(
+            [*touched, _CO_CHANGE_LEDGER_PATH], value_changed)
         self.assertEqual(problems, [])
 
     def test_skip_ledger_co_change_allows_touching_only_the_ledger(self) -> None:
@@ -287,16 +452,55 @@ class TestSkipLedgerCoChangeLock(unittest.TestCase):
         self.assertEqual(
             skip_ledger_co_change_problems(["README.md", "tools/lib/other_module.py"]), [])
 
+    def test_skip_ledger_co_change_ignores_a_touch_with_no_value_change(self) -> None:
+        """🔴 第 5 格 round-label-ok（R119 核心）：層③檔案被 touch，但 `_FROZEN_CEILING_MAX`
+        字面本身零變動（本輪 `a1fbbba` 的真實形態——只是新增這道鎖自己的程式碼）
+        ⇒ 判準不得要求同動④。重演對象＝真實 `origin/main..HEAD` 對本檔的 diff：
+        只新增 import／新函式／新 class，`_FROZEN_CEILING_MAX` 一個字元都沒有動過。
+        """
+        path = "tools/tests/test_skip_ceiling_ratchet_direction.py"
+        old_text = _show_file_at_rev(_REPO_ROOT, "origin/main", path)
+        new_text = _show_file_at_rev(_REPO_ROOT, "HEAD", path)
+        if old_text is None or new_text is None:
+            self.skipTest(
+                "origin/main 或 HEAD 對本檔的內容取不到——本鎖真正的執行點是本機"
+                " pre-push，見 `_origin_main_head_diff` docstring 的誠實劃界")
+        self.assertFalse(
+            _dict_literal_changed(old_text, new_text, "_FROZEN_CEILING_MAX"),
+            "前提檢查：本輪對 _FROZEN_CEILING_MAX 字面應該零變動，若這裡變 True，"
+            "代表本輪真的動了剖面鍵值，下面的綠斷言就不成立了")
+        value_changed = {path: _source_path_value_changed(path, old_text, new_text)}
+        problems = skip_ledger_co_change_problems([path], value_changed)
+        self.assertEqual(problems, [], "\n".join(problems))
+
+    def test_skip_ledger_co_change_defaults_to_conservative_when_value_changed_omitted(
+        self,
+    ) -> None:
+        """未提供 `value_changed`（呼叫端沒有能力算出剖面鍵值有沒有變，例如舊呼叫
+        點）時必須保守視為「已變動」——找不到證據不能判定為綠，這是本鎖由檔案級
+        判準過渡到剖面鍵值級判準時，向下相容的安全預設。"""
+        problems = skip_ledger_co_change_problems([
+            "tools/lib/skip_group_policy.py",
+            "tools/tests/test_skip_ceiling_ratchet_direction.py",
+        ])
+        self.assertTrue(problems)
+
     def test_skip_ledger_co_change_against_the_real_push_range(self) -> None:
         """生產接線：對真實 `origin/main..HEAD` 跑一次（見 `_origin_main_head_diff`
-        docstring 的誠實劃界——CI 上結構性 no-op，真正的執行點是本機 pre-push）。"""
+        docstring 的誠實劃界——CI 上結構性 no-op，真正的執行點是本機 pre-push）。
+        剖面鍵值是否真變動，逐檔以 `_show_file_at_rev` 解兩版內容判定——這是
+        R119 修復的核心 round-label-ok：檔案級判準會把「只 touch 沒改值」誤判為違規（見上面
+        `test_skip_ledger_co_change_ignores_a_touch_with_no_value_change`）。"""
+        base = _merge_base_with_origin_main(_REPO_ROOT)
         changed = _origin_main_head_diff(_REPO_ROOT)
-        if changed is None:
+        if base is None or changed is None:
             self.skipTest(
                 "origin/main 無法解析（全新 clone 未 fetch main，或本機未曾 "
                 "`git fetch origin`）——本鎖真正的執行點是本機 pre-push，"
                 "見 `_origin_main_head_diff` docstring 的誠實劃界")
-        problems = skip_ledger_co_change_problems(changed)
+        touched = sorted(set(changed) & _CO_CHANGE_SOURCE_PATHS)
+        value_changed = _co_change_value_changed_map(_REPO_ROOT, base, touched)
+        problems = skip_ledger_co_change_problems(changed, value_changed)
         self.assertEqual(problems, [], "\n".join(problems))
 
 

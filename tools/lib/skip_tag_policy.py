@@ -561,7 +561,12 @@ _SITE_CLASS_CENSUS: dict[str, dict[str, int]] = {
         # 新增 `test_skip_ceiling_ratchet_direction.py::TestSkipLedgerCoChangeLock.
         # test_skip_ledger_co_change_against_the_real_push_range` 的 `self.skipTest(...)`
         # ——`origin/main` 解不出時（全新 clone 未 fetch main）明說跳過，不是隱藏失敗。
-        "runtime-skipTest": 25,
+        # 🔴 P1-6 修復包重釘 `runtime-skipTest` 25→26（**非放寬**，同上：本表判準是
+        # 「相等」）。新增 `test_skip_ceiling_ratchet_direction.py::TestSkipLedgerCoChangeLock.
+        # test_skip_ledger_co_change_ignores_a_touch_with_no_value_change` 的
+        # `self.skipTest(...)`——`origin/main`／`HEAD` 對本檔內容取不到時明說跳過，
+        # 不是隱藏失敗。
+        "runtime-skipTest": 26,
         "unclassified": 0,
     },
     # 🔴 R81 包 F 重釘 `windows-only` 9→10：並行包在
