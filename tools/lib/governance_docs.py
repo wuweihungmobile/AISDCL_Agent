@@ -391,6 +391,10 @@ _GOVERNANCE_DOCS = (
     # 上列的護欄層淨額標記姊妹檔（`guard-total:` 站點之一），與同輪 `R120_HANDOFF.md` round-label-ok
     # 共同滿足「兩份不同檔」的最低站數。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R120_Scan_Findings.md",
+    # R121 純結案輪結案證據檔（round-label-ok）：本輪 8 筆 closed-by-decision 的裁決依據
+    # 與對抗式證偽（工作流 wf_5d8ebbc6-3d3）當回合親查座標唯一居所在本檔（⇒ 體積守門），
+    # 帳本 8 列以座標宣稱 `§DEF-ID` 指向本檔（⇒ 指針稽核）。即刻登記，同既有姊妹檔判例。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R121_Debt_Closure.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/{CrossPlatform,Quota}_*.md`。這**不是**把具名
