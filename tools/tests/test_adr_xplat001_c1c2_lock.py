@@ -682,7 +682,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 7178,
+    "test_adr_xplat001_c1c2_lock.py": 7195,
     "test_archive_defect_log.py": 3989,
     "test_bash32_compat.py": 1020,
     "test_bash_probe_spec_contract.py": 983,
@@ -697,7 +697,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_check_wrapper_thinness.py": 1234,
     "test_claim_provenance_r86.py": 618,
     "test_component_sanitizer_shared_layer_lock.py": 293,
-    "test_context_budget_guard.py": 9645,
+    "test_context_budget_guard.py": 9775,
     "test_defect_id_reference_integrity.py": 281,
     "test_dev_start.py": 6636,
     "test_dev_start_ps1_lastexitcode.py": 548,
@@ -1405,6 +1405,19 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "[非淨減法輪][同輪追加] 本表自身編修收斂（上一列稽核列自身 +4／"
      "_FROZEN_PREFIX_REWRITE_LEDGER 新列 +4／本列自身 +4），逐項見 "
      "CrossPlatform_R119_Guard_Repin_Evidence.md（本檔 +12：7166→7178）。"),
+    ("R120", 91646, 91776, 130,
+     "[非淨減法輪][全額功能軌] P1-7 SD-4/SD-8 落地：RELAY_NEXT 排程失敗視同停止次態"
+     "重掛哨兵＋settle_window 外圈例外兜底（新測試三案＋突變六發驗紅，+126）；"
+     "SA-4 實彈取證揪出 deny 死規則，va3 鎖改為 Edit 規則承重語意（+4）。逐項見 "
+     "CrossPlatform_R120_Debt_Closure.md（test_context_budget_guard.py 9645→9775）。"),
+    ("R120", 91776, 91785, 9,
+     "[非淨減法輪][同輪追加] 本表自身編修（上一列稽核列＋本列自身＋凍結表值同步＋"
+     "prefix_len 更新），同既有體例。逐項見 CrossPlatform_R120_Debt_Closure.md"
+     "（本檔 +9：7178→7187）。"),
+    ("R120", 91785, 91793, 8,
+     "[非淨減法輪][同輪追加] 全套揪出 sha 鏈未接：_FROZEN_PREFIX_REWRITE_LEDGER 追加 "
+     "R120 列（4554dbed→現值）＋本稽核列＋凍結表值同步＋prefix_len 109→110，逐項見 "
+     "CrossPlatform_R120_Debt_Closure.md（本檔 +8：7187→7195）。"),
 )
 
 
@@ -1725,10 +1738,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 107
+_REPIN_LOG_FROZEN_PREFIX_LEN = 110
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "4554dbed8bf56cd3e71a1d209986a0f74915bd0e77cf56d4e9292a73907dda89")
+    "31861e428414aadeba2eb1ee9be8fa58f873dd0cf02fcbc96e8678a64cacba7f")
 
 
 def repin_log_history_digest(
@@ -1876,6 +1889,10 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # 鍵值級，F2 governance_docs.py E501 拆行，同體例「追加後立即自我凍結」——
     # 本輪追加三列（落地列＋本表自身編修二列）並延伸前綴涵蓋全部新列本身（103→107）。
     ("R119", "21bdbf9b9595", "4554dbed8bf5", "DEF-200-240"),
+    # R120 收尾：212 結案批＋P1-7 SD-4/SD-8＋SA-4 的守衛線重釘使 round-label-ok
+    # `_REPIN_LOG_HISTORY_SHA256` 前進，同體例「追加後立即自我凍結」——本輪追加
+    # 本列＋一個 repin 稽核列，prefix_len 109→110 涵蓋新 repin 列本身。
+    ("R120", "4554dbed8bf5", "31861e428414", "DEF-200-241"),
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

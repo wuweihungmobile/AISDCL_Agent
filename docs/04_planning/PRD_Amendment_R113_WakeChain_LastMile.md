@@ -115,6 +115,8 @@
 | WINDOW_DONE | ④ 假（連續 ≥ `AUTOSDD_RELAY_NO_PROGRESS_LIMIT` 窗零推進） | NO_PROGRESS_STOP | `escalate(loud)` 恰一次＋`relay_stopped {why=no_progress}`，不再燒 |
 | WINDOW_DONE | ② 假（band 收緊/量不到） | QUOTA_STOP | `relay_stopped {why=band}`＋交回哨兵巡邏（§3(d) 判準1） |
 | WINDOW_DONE | ① 假（達上限） | RELAY_EXHAUSTED | `relay_stopped {why=cap}`＋loud（留任務書給人） |
+| WINDOW_DONE | ①②③④ 全真但重排失敗（`_register_and_record` rc≠0） | 視同停止次態（SD-4） | `relay_spawn_failed {seq, band, rc}`＋loud＋拆 -Once＋重掛哨兵（§3(d) 判準1）；不記 `relay_spawned`、回傳沿用排程 rc |
+| WINDOW_DONE | 收窗主體未捕捉例外（SD-8 兜底） | 視同停止次態 | `relay_settle_crashed {error}`＋loud＋拆 -Once＋重掛哨兵；回傳沿用 resume_rc 既有契約 |
 
 **表列判定順序＝③→④→②→①（自上而下短路）**：正常結束優先，其次連續零推進（故障訊號、loud），再 band 收緊（交回哨兵），達 spawn 上限最後；多判準同時為假時以此序取唯一次態。
 **失敗態歸屬**：rc=None（spawn 例外）／`resume_failed`／REFUSE 一律進 WINDOW_DONE 判定（`handback_verdict` 必 `missing`、`files_changed` 視同 0），依上序走狀態機；**所有停止次態（含失敗路徑）皆重掛哨兵**（§3(d) 判準1）。實作前置：`_run_resume`（:1155-1202）現行只回傳 `int | None`，REFUSE 分支（:1164-1166 `return 1`）與「子行程真的跑完但回非零 rc」型別上無法區分、:1307 三元判斷會把 REFUSE 也寫成 `state="resumed"`——**回傳需附帶 route strategy（或等價訊號，例如把 `route["strategy"]` 寫回 state），供收窗判定辨識 REFUSE；REFUSE 不得寫成 `state="resumed"`**。
@@ -145,7 +147,7 @@ R112 §3-3 三布林 AND 承接；煞車一以出廠值 1 對齊 R112「零推�
 | V-b1 | §3(b) | 合成續跑（模擬 spawn）後 `ls ~/.autosdd/handback/<sid>.md` ＋ grep 四 marker | 檔在、四節齊；`resumed` 事件含 `handback_written=true` |
 | V-b2 | §3(b) | 注入「模型沒寫 handback」的合成收窗 | resume log 逐字出現 `handback_missing` ＋ alert 痕跡（loud） |
 | V-b3 | §3(b) | 注入未讀 handback 後跑 SessionStart hook | stdout/additionalContext 含該檔「下一步指令」節；`.ack` 落地後重跑轉安靜 |
-| V-c1 | §3(c) | 狀態機真值表單元測試（①②③④ 十六格，依 ③→④→②→① 判定序） | **十六格各寫死唯一期望次態＋期望痕跡事件（`relay_spawned`／`relay_done`／`relay_stopped.why=…`）**；僅全真格產生 RELAY_NEXT；連續 ≥ `AUTOSDD_RELAY_NO_PROGRESS_LIMIT` 窗零推進格斷言 escalate 恰一次＋零續排 |
+| V-c1 | §3(c) | 狀態機真值表單元測試（①②③④ 十六格，依 ③→④→②→① 判定序） | **十六格各寫死唯一期望次態＋期望痕跡事件（`relay_spawned`／`relay_done`／`relay_stopped.why=…`；SD-4/SD-8 追補：全真格重排失敗＝`relay_spawn_failed`、收窗主體例外兜底＝`relay_settle_crashed`）**；僅全真格產生 RELAY_NEXT；連續 ≥ `AUTOSDD_RELAY_NO_PROGRESS_LIMIT` 窗零推進格斷言 escalate 恰一次＋零續排 |
 | V-c2 | §3(c) | 合成第 `AUTOSDD_RELAY_MAX_SPAWNS+1` 窗 | 必不排；`relay_stopped {why=cap}` 落痕跡 |
 | V-c3 | §3(c) 判準④ | 窗前注入既有髒污＋窗內零改動 | 斷言 `files_changed=0`（前快照痕跡在 resume log）——守「兩次 porcelain 快照差集」量法，事後單量必把窗前髒污誤計成進度 |
 | V-d1(mac) | §3(d) | 重演 fire→resume→收窗後 `launchctl list \| grep AutoSDD_Sentinel_`＋plist 回讀（照 §6-2） | rc=0（**mac 憑證是 rc 不是時間值**）＋plist 回讀吻合 |

@@ -27,15 +27,9 @@
       "PowerShell(git commit*)",
       "PowerShell(git push*)",
       "PowerShell(git rebase*)",
-      "Write(./tools/tests/test_adr_xplat001_c1c2_lock.py)",
       "Edit(./tools/tests/test_adr_xplat001_c1c2_lock.py)",
-      "NotebookEdit(./tools/tests/test_adr_xplat001_c1c2_lock.py)",
-      "Write(./.claude/settings.json)",
       "Edit(./.claude/settings.json)",
-      "NotebookEdit(./.claude/settings.json)",
-      "Write(./.claude/settings.unattended.json)",
-      "Edit(./.claude/settings.unattended.json)",
-      "NotebookEdit(./.claude/settings.unattended.json)"
+      "Edit(./.claude/settings.unattended.json)"
     ]
   }
 }

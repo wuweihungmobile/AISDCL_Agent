@@ -60,7 +60,9 @@
 在假陽性：目標輪（R101／R108，引述既有歷史事件非自稱輪號 round-label-ok）早已過去、
 指名的 DEF-ID 也已在後續輪次結案，但時鐘沒有前進，判準本身看不到這件事，故改走
 **具名豁免面工程解**（掌舵者裁決 D4）：把這 3 筆登記進 `_CARRIER_DOC_EXEMPTIONS`
-（shrink-only；鍵＝`(檔案相對路徑, 指名的 DEF-ID)`），**不改寫歷史文件本身**。這不是
+（shrink-only；鍵＝`(檔案相對路徑, 指名的 DEF-ID)`），**不改寫歷史文件本身**；其後
+212 自身的結案動作再生 2 筆同型假陽性，經 D8 一次性核准併入本面（3→5，存證
+AutoSDD_Adjudication_Record_R120.md，例外已耗用、不得援引）。這不是
 走回「維護豁免名單」的舊病——豁免只在（路徑, DEF-ID）精確相符時生效，同一份文件裡
 任何其他未登記的前瞻行仍照判（不是整檔放行）；帳本時鐘若日後真的前進過那三筆的目標輪
 （引述，非自稱），這三筆會自然變成 no-op（判準本身先讓它們出局，豁免表閒置不動仍
@@ -122,7 +124,9 @@ _HTML_COMMENT_RE = re.compile(r"^\s*<!--.*-->\s*$")
 _DEF_ID_RE = re.compile(r"DEF-\d+-\d+")
 
 #: DEF-200-212 授權豁免面工程解（掌舵者裁決 D4）：strict 路徑（`unresolved_only=True`）
-#: 對三筆歷史交接文件的假陽性具名登記——**不改寫歷史文件本身**，只在判準面豁免。
+#: 對歷史交接文件的假陽性具名登記——**不改寫歷史文件本身**，只在判準面豁免。
+#: 初始 3 筆＝歷史交接文件；第 4、5 筆＝212 自身結案動作再生的同型假陽性（D8 一次性
+#: 核准，存證 AutoSDD_Adjudication_Record_R120.md）。
 #:
 #: 🔴 假陽性成因（真因，非表面症狀）：見模組 docstring〈自動祖父化的射程邊界〉——帳本
 #: 「發現情境」欄的輪次時鐘凍結在 R100，三筆前瞻交棒行的目標輪與指名 DEF-ID 皆已在
@@ -153,11 +157,27 @@ _CARRIER_DOC_EXEMPTIONS: dict[tuple[str, str], str] = {
         "第 93 行）。目標輪 R108 早於修復輪，本應自動祖父化出局，但帳本時鐘凍結在 "
         "R100 使其失效。"
     ),
+    ("docs/04_planning/R113_HANDOFF.md", "DEF-200-212"): (
+        "本檔 :8 與 :18 兩行以「交由R114」記錄 R113 收輪時 R3 複審把本筆改判回 open "
+        "的歷史事實（敘事非交派）；DEF-200-212 已於後續輪次結案（strict 接線＋豁免面"
+        "落地）。目標輪 R114 早於修復輪，本應自動祖父化出局，但帳本時鐘凍結在 R100 "
+        "使其失效；本筆即 212 結案動作自身產生的同型假陽性（D8 一次性核准，存證 "
+        "AutoSDD_Adjudication_Record_R120.md）。"
+    ),
+    ("docs/06_quality/CrossPlatform_R113_Ledger_Closure.md", "DEF-200-212"): (
+        "本檔 :44 與 :116 兩行以「交由R114」記錄同一次 R3 複審改判（發現原文逐字所在"
+        "檔）；DEF-200-212 已於後續輪次結案。目標輪 R114 早於修復輪，本應自動祖父化"
+        "出局，但帳本時鐘凍結在 R100 使其失效；本筆即 212 結案動作自身產生的同型"
+        "假陽性（D8 一次性核准，存證 AutoSDD_Adjudication_Record_R120.md）。"
+    ),
 }
 #: 一次性豁免必須真的維持在少數幾筆——超過這個數字就不再是「具名逐筆核准」，是變相
 #: 把整套祖父化機制改成「寫張條子就能繞過」。**只准調小**（收緊；理論下限 0＝
-#: 不再核准新的歷史假陽性豁免，回頭修正時鐘前進機制才是正解）。
-_CARRIER_DOC_EXEMPTIONS_MAX_ENTRIES = 3
+#: 不再核准新的歷史假陽性豁免，回頭修正時鐘前進機制才是正解）。D8 一次性核准 3→5
+#: （掌舵者裁決，存證 AutoSDD_Adjudication_Record_R120.md）：第 4、5 筆＝212 結案動作
+#: 自身產生的同型假陽性，非新增歷史豁免類別；本例外已耗用、不得援引為再調高的先例，
+#: 治本載體＝DEF-200-241（時鐘前進機制／祖父化改讀結案事實，二擇一過四方前不動）。
+_CARRIER_DOC_EXEMPTIONS_MAX_ENTRIES = 5
 #: 核准理由的最短長度（同 `_REPIN_APPROVED_ROUND_OVERAGE_MIN_REASON_LEN` 款式：
 #: 兩個字的「核准」不算數，理由太短視同未登記——見 `_exemption_covers()`）。
 _CARRIER_DOC_EXEMPTIONS_MIN_REASON_LEN = 20
@@ -250,7 +270,8 @@ def ledger_def_ids(ledger_text: str, archive_texts: list[str], *,
     三筆假陽性（R102_HANDOFF.md:45→DEF-200-204／  ← round-label-ok：引述既有文件檔名
     CrossPlatform_R100_Scan_Findings.md:252→DEF-200-208／CrossPlatform_R107_Ledger_
     Closure.md:125→DEF-101-559，皆前瞻行指向已在後續輪次結案的 DEF-ID）逐筆具名登記
-    後歸零。紅綠由 `--self-test` 與 `tools/tests/test_check_defect_log_crossref.py`
+    後歸零；其後 212 自身結案動作再生 2 筆同型假陽性，經 D8 核准同面登記（見
+    `_CARRIER_DOC_EXEMPTIONS` 旁註）。紅綠由 `--self-test` 與 `tools/tests/test_check_defect_log_crossref.py`
     的 DEF-200-212 系列自證。
     """
     ids: set[str] = set()
@@ -523,7 +544,7 @@ def _self_test() -> int:
             fp.write_text(f"- 交給 R{_SYN_LATER} 處理（{def_id}）\n", encoding="utf-8")
         exempted_paths = [_REPO_ROOT / rel for (rel, _did) in _CARRIER_DOC_EXEMPTIONS]
         expect(carrier_doc_problems(exempted_paths, _SYN_CUR, set()) == [],
-               "三筆登記豁免各自命中（路徑＋DEF-ID 精確相符）⇒ 不算 problem")
+               "全部登記豁免各自命中（路徑＋DEF-ID 精確相符）⇒ 不算 problem")
 
         first_rel = next(iter(_CARRIER_DOC_EXEMPTIONS))[0]
         first_fp = _REPO_ROOT / first_rel

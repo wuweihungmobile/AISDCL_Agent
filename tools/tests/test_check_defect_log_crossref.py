@@ -1490,9 +1490,9 @@ class TestDef200212StrictIsWiredIntoMain(unittest.TestCase):
 
 
 class TestDef200212NamedExemptionsZeroOutTheKnownFalsePositives(unittest.TestCase):
-    """DEF-200-212 D4（掌舵者裁決）：strict 路徑對三筆歷史交接文件的假陽性，
-    走**具名豁免面工程解**歸零——不改寫歷史文件本身。本類鎖住：①豁免清單真的在
-    承重（拿掉任一筆會復發）；②清單形狀有牙（shrink-only 上限、理由長度門檻）；
+    """DEF-200-212 D4/D8（掌舵者裁決）：strict 路徑對五筆假陽性（三筆歷史交接文件
+    ＋兩筆 212 結案自生）走**具名豁免面工程解**歸零——不改寫歷史文件本身。本類鎖住：
+    ①豁免清單真的在承重（拿掉任一筆會復發）；②清單形狀有牙（shrink-only 上限、理由長度門檻）；
     ③豁免不是整檔放行（同檔未登記的前瞻行仍照判，同 `check_handoff_carriers.py`
     `--self-test` 那一組合成注入，這裡另外對**真倉庫**做端到端對照）。
     """
@@ -1513,7 +1513,7 @@ class TestDef200212NamedExemptionsZeroOutTheKnownFalsePositives(unittest.TestCas
             f"strict 路徑接線＋具名豁免後，真倉庫理應零假陽性，實得：{problems}")
 
     def test_removing_any_named_exemption_reproduces_its_own_false_positive(self) -> None:
-        """🔴 紅綠自證的主牙：逐一拿掉三筆豁免，各自對應的假陽性必須立刻復發——
+        """🔴 紅綠自證的主牙：逐一拿掉每筆豁免，各自對應的假陽性必須立刻復發——
         證明清單真的在擋著，不是恰好沒被用到的裝飾。"""
         for key in hc._CARRIER_DOC_EXEMPTIONS:
             reduced = dict(hc._CARRIER_DOC_EXEMPTIONS)
@@ -1527,8 +1527,8 @@ class TestDef200212NamedExemptionsZeroOutTheKnownFalsePositives(unittest.TestCas
     def test_the_exemption_registry_stays_within_its_shrink_only_cap(self) -> None:
         """名冊筆數不得超過 `_CARRIER_DOC_EXEMPTIONS_MAX_ENTRIES`（現值只准調小）：
         每多一筆都要先改這個上限（＝一次可見的決策），不是悄悄追加第四個 key。"""
-        self.assertLessEqual(hc._CARRIER_DOC_EXEMPTIONS_MAX_ENTRIES, 3,
-                             "DEF-200-212 具名豁免上限只准調小（現值 3）")
+        self.assertLessEqual(hc._CARRIER_DOC_EXEMPTIONS_MAX_ENTRIES, 5,
+                             "DEF-200-212 具名豁免上限只准調小（現值 5；D8 已耗用）")
         self.assertLessEqual(
             len(hc._CARRIER_DOC_EXEMPTIONS), hc._CARRIER_DOC_EXEMPTIONS_MAX_ENTRIES,
             "具名豁免名冊筆數超過上限 ⇒ 「逐筆核准」已經名不符實")

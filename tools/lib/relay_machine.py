@@ -28,8 +28,9 @@ WHY 住這裡而不是 `tools/session_resume_planner.py`：`guardrail_cli` 餘�
   ① `relay_seq < AUTOSDD_RELAY_MAX_SPAWNS`？
 
 四個判準全真 ⇒ RELAY_NEXT（重排下一窗）；否則依判定序落 DONE／NO_PROGRESS_STOP／
-QUOTA_STOP／RELAY_EXHAUSTED 四個停止次態之一——**除 RELAY_NEXT 外，全部重掛哨兵**
-（G4 判準1，含失敗路徑）：`_rearm_after_stop()` 沿用既有 PATROL_HANDBACK 手法
+QUOTA_STOP／RELAY_EXHAUSTED 四個停止次態之一——**除「RELAY_NEXT 且排程成功」外，全部
+重掛哨兵**（G4 判準1，含失敗路徑；RELAY_NEXT 排程失敗＝喚醒鏈斷線，視同停止次態同樣
+重掛，SD-4）：`_rearm_after_stop()` 沿用既有 PATROL_HANDBACK 手法
 （`session_resume_planner._resume_tick` 內同型邏輯的第二個呼叫點，本檔不重寫第二份）。
 重掛失敗 ⇒ 清 arm latch（`sentinel_lifecycle_arm.clear_arm_latch`）＋loud——讓下一次
 SessionStart 的武裝評估重新來過，不留一個「宣稱已重掛」的假閂鎖（R112 §3-5 同型）。round-label-ok
@@ -310,29 +311,74 @@ def settle_window(args, state: dict, plan: Path, log: Path, resume_rc: int | Non
     不得覆蓋掉「claude 這次到底有沒有真的跑完」這個既有語意。`RELAY_NEXT` 是本批新增
     的次態、沒有既有契約要沿用，回傳排程 rc（同 `_resume_tick` 既有 `rearm`／
     `patrol_handback` 兩支的既有慣例：排出去的動作用它自己的 rc）。
+
+    SD-4：`RELAY_NEXT` 排程失敗（`_register_and_record` rc≠0）**視同停止次態**——
+    不記 `relay_spawned`（那是含憑證的成功痕跡）、改記 `relay_spawn_failed`＋loud、
+    best-effort 拆自己的 -Once 排程、走 `_rearm_after_stop()`；回傳仍沿用排程 rc
+    （rearm rc 不得覆蓋，同上段契約）。`relay_seq` 不回退：fail-safe 方向，失敗窗
+    燒掉一格只會讓接力更早停。
+
+    SD-8：主體自 `now = ...` 起整段 try/except——本函式由 pythonw 無 console 行程
+    執行（stderr=None），未捕捉例外＝行程靜默消失：-Once 排程沒拆、哨兵沒重掛、
+    arm latch 沒清、零痕跡。`_planner()` 留在 try 外：它壞掉時 handler 內也沒有
+    任何可用的處置手段。災難 handler 的結構理由見 except 內註解。
     """
     planner = _planner()
-    now = datetime.now().astimezone()
-    band = current_band(now)
-    outcome = resolve(state, band, max_spawns=max_spawns(), no_progress_limit=no_progress_limit())
-    next_st = outcome.pop("next_state")
-    state.update(outcome)
-    if next_st == STATE_RELAY_NEXT:
+    try:
+        now = datetime.now().astimezone()
+        band = current_band(now)
+        outcome = resolve(state, band, max_spawns=max_spawns(),
+                          no_progress_limit=no_progress_limit())
+        next_st = outcome.pop("next_state")
+        state.update(outcome)
+        if next_st == STATE_RELAY_NEXT:
+            state.update(planner._cleared_credentials())
+            at = now + timedelta(seconds=planner.RESET_SKEW_SECONDS)
+            rc, moment = planner._register_and_record(plan, state, at, planner.RESUME_TICK)
+            if rc == 0:
+                planner.append_log(log, "relay_spawned", seq=state["relay_seq"], band=band,
+                                   files_changed_prev=int(state.get("files_changed") or 0),
+                                   credential=moment)
+                return rc
+            # SD-4：排程失敗＝喚醒鏈斷線，視同停止次態——不得留下含憑證的成功痕跡。
+            planner.append_log(log, "relay_spawn_failed", seq=state["relay_seq"], band=band,
+                               rc=rc, credential=moment)
+            planner.escalation.alert(
+                f"接力排程失敗（rc={rc}）：喚醒鏈斷線，拆 -Once 排程並重掛哨兵",
+                state, loud=True, plan=plan)
+            unregister_rc = planner._schtasks_remove(state["task_name"])
+            rearm_rc = _rearm_after_stop(planner, args, state, plan, log)
+            planner.append_log(log,
+                               "relay_rearmed" if rearm_rc == 0 else "relay_rearm_failed",
+                               rc=rearm_rc, unregister_rc=unregister_rc, next_state=next_st)
+            return rc  # 沿用排程 rc；rearm rc 不得覆蓋（docstring 既有契約）
+        told = planner.escalation.alert(_STOP_REASON[next_st], state,
+                                        loud=next_st in _LOUD_STATES, plan=plan)
+        planner.append_log(log, _STOP_EVENT[next_st], why=_STOP_WHY.get(next_st, ""),
+                           band=band, **told)
         state.update(planner._cleared_credentials())
-        at = now + timedelta(seconds=planner.RESET_SKEW_SECONDS)
-        rc, moment = planner._register_and_record(plan, state, at, planner.RESUME_TICK)
-        planner.append_log(log, "relay_spawned", seq=state["relay_seq"], band=band,
-                           files_changed_prev=int(state.get("files_changed") or 0),
-                           credential=moment)
-        return rc
-    told = planner.escalation.alert(_STOP_REASON[next_st], state,
-                                    loud=next_st in _LOUD_STATES, plan=plan)
-    planner.append_log(log, _STOP_EVENT[next_st], why=_STOP_WHY.get(next_st, ""),
-                       band=band, **told)
-    state.update(planner._cleared_credentials())
-    planner.write_relay(plan, state)
-    unregister_rc = planner._schtasks_remove(state["task_name"])
-    rearm_rc = _rearm_after_stop(planner, args, state, plan, log)
-    planner.append_log(log, "relay_rearmed" if rearm_rc == 0 else "relay_rearm_failed",
-                       rc=rearm_rc, unregister_rc=unregister_rc, next_state=next_st)
-    return resume_rc if resume_rc is not None else 1
+        planner.write_relay(plan, state)
+        unregister_rc = planner._schtasks_remove(state["task_name"])
+        rearm_rc = _rearm_after_stop(planner, args, state, plan, log)
+        planner.append_log(log, "relay_rearmed" if rearm_rc == 0 else "relay_rearm_failed",
+                           rc=rearm_rc, unregister_rc=unregister_rc, next_state=next_st)
+        return resume_rc if resume_rc is not None else 1
+    except Exception as exc:
+        # SD-8 兜底：pythonw 行程 stderr=None，例外炸穿＝靜默消失。兩個 disposal
+        # 呼叫裸放在最前——結構鎖 `test_the_settle_window_delegate_really_disposes`
+        # 的支配演算法對 Try 給 handler 的 pre-seen 是空集，disposal 被窄 try 包住
+        # 時它看不見（實測紅）；alert／落痕跡殿後、各自窄 try（alert 有 notify_rc=-2
+        # 前科，二次例外不得讓回傳契約跑不到——disposal 已在其前跑完）。
+        planner._schtasks_remove(str(state.get("task_name") or ""))
+        _rearm_after_stop(planner, args, state, plan, log)
+        try:
+            planner.escalation.alert(
+                f"settle_window 崩潰（{exc!r}）：已拆 -Once 排程並重掛哨兵",
+                state, loud=True, plan=plan)
+        except Exception:
+            pass  # 二次例外不得擋住落痕跡與回傳（見上方 WHY）
+        try:
+            planner.append_log(log, "relay_settle_crashed", error=repr(exc))
+        except Exception:
+            pass  # 同上：回傳契約優先
+        return resume_rc if resume_rc is not None else 1

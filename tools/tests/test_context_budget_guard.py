@@ -2770,19 +2770,23 @@ class UnattendedPermissionPostureTest(unittest.TestCase):
                          "allow 集合與 L2×{Bash,PowerShell} 不對齊（缺或多都不行）")
         self.assertEqual(len(allow), len(expected), f"allow 有重複條目：{allow}")
 
-    def test_va3_static_deny_covers_l3_files_times_three_write_tools(self) -> None:
-        """V-a3 靜態半格：deny 須含三個 L3 檔 × Write/Edit/NotebookEdit 共九條。
-
-        acceptEdits 語意下 Edit 是自動放行的主要寫入通道，只列 Write 罩不住
-        （施工圖草案註記 ③）。動態半格（合成無頭回合 git push 被 hook exit 2）
-        住 test_block_destructive_git_r83.py，本條不重複、只驗 deny 靜態面。
+    def test_va3_static_deny_covers_l3_files_via_edit_rules(self) -> None:
+        """V-a3 靜態半格：deny 須含三個 L3 檔的 `Edit(path)` 形態，且**不得**殘留
+        Write/NotebookEdit 檔案形態——harness 的檔案權限只比對 `Edit(path)` 規則，
+        且其涵蓋所有檔案編修工具（SA-4 實彈：無頭窗口以 Write 工具攻 L3 檔被 Edit
+        規則拒、檔案零改動；死規則每次 spawn 噴 6 行 stderr 警告，正是先前吃掉
+        err[:300] 取證通道的噪音源）。取證逐字＝CrossPlatform_R120_Debt_Closure.md。
+        動態半格住 test_block_destructive_git_r83.py，本條不重複、只驗 deny 靜態面。
         """
         posture = self._posture()
         deny = set(posture["deny"])
-        need = {f"{t}({f})" for t in ("Write", "Edit", "NotebookEdit")
-                for f in self._L3_FILES}
+        need = {f"Edit({f})" for f in self._L3_FILES}
         self.assertEqual(need - deny, set(),
-                         f"deny 缺 L3 檔的寫入形態：{sorted(need - deny)}")
+                         f"deny 缺 L3 檔的 Edit 形態：{sorted(need - deny)}")
+        dead = {d for d in deny if d.startswith(("Write(", "NotebookEdit("))}
+        self.assertEqual(dead, set(),
+                         "Write/NotebookEdit 檔案規則是死規則（harness 不比對），只會"
+                         f"污染 stderr 取證通道：{sorted(dead)}")
         self.assertEqual(posture["defaultMode"], "acceptEdits")
         self.assertIn("~/.autosdd/handback", posture["additionalDirectories"],
                       "additionalDirectories 沒指向 handback 目錄＝L1 ② 斷")
@@ -3638,6 +3642,132 @@ class RearmAfterStopSuccessLeavesAVerifiableArmedJobTest(unittest.TestCase):
         expected_task = f"AutoSDD_Sentinel_{session_id}"
         self.assertIn(expected_task, backend.list_jobs(sentinel_lifecycle.TASK_PREFIX),
                      "重掛成功後，排程器現查應含該工作，而不能只看警語是否出聲")
+
+
+class RelaySpawnFailureIsTreatedAsAStopStateTest(unittest.TestCase):
+    """SD-4：`RELAY_NEXT` 排程失敗＝喚醒鏈斷線，必須視同停止次態。
+
+    立案：舊版 `settle_window()` 的 RELAY_NEXT 分支在 `_register_and_record` 回
+    rc≠0 時仍無條件記 `relay_spawned`（含憑證的成功痕跡）然後裸 `return rc`——
+    不重掛哨兵、不清閂、不 loud：下一窗永遠不會來，痕跡上卻寫著「已排」。
+    """
+
+    def _settle(self, *, arm_rc: int) -> tuple:
+        tmp = Path(tempfile.mkdtemp(prefix="spawn-fail-"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        plan = tmp / "plan.md"
+        hb = tmp / "handback.md"
+        hb.write_text("## 下一步指令\n還有第 4 步\n", encoding="utf-8", newline="\n")
+        state = {**RelayStateTest.GOOD, "plan_path": str(plan), "session_id": "sid-spawn-fail",
+                 "allow_resume": True, "task_name": "T-spawn-fail",
+                 "transcript": str(tmp / "sid-spawn-fail.jsonl"),
+                 "handback_verdict": "written", "handback_path": str(hb),
+                 "files_changed": 2, "relay_seq": 0}
+        plan.write_text("# 任務書\n\n" + planner.render_relay(state),
+                        encoding="utf-8", newline="\n")
+        args = planner.build_parser().parse_args(
+            ["--resume-tick", "--plan", str(plan), "--task-name", "T-spawn-fail"])
+        events: list[dict] = []
+        alert_calls: list[dict] = []
+        arm_calls: list = []
+        clear_calls: list[str] = []
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(unittest.mock.patch.object(
+                planner, "append_log",
+                side_effect=lambda _l, e, **f: events.append({"event": e, **f})))
+            stack.enter_context(unittest.mock.patch.object(
+                planner.escalation, "alert",
+                side_effect=lambda r, s, *, loud=True, plan=None, **_:
+                    (alert_calls.append({"reason": r, "loud": loud}), {})[1]))
+            stack.enter_context(unittest.mock.patch.object(
+                planner, "_schtasks_remove", side_effect=lambda t: 0))
+            stack.enter_context(unittest.mock.patch.object(
+                planner, "_register_and_record",
+                side_effect=lambda pl, st, at, tick: (1, "合成失敗")))
+            stack.enter_context(unittest.mock.patch.object(
+                planner, "_arm_sentinel",
+                side_effect=lambda a, t, pl: (arm_calls.append(t), arm_rc)[1]))
+            stack.enter_context(unittest.mock.patch.object(
+                sentinel_lifecycle_arm, "clear_arm_latch",
+                side_effect=lambda sid, *a, **k: clear_calls.append(sid) or True))
+            stack.enter_context(unittest.mock.patch.object(
+                relay_machine, "current_band", lambda *_a, **_k: quota_policy.BAND_FREE))
+            rc = relay_machine.settle_window(args, state, plan, tmp / "log.jsonl", 0)
+        return rc, state, events, alert_calls, arm_calls, clear_calls
+
+    def test_spawn_failure_never_logs_a_success_trace_and_rearms(self) -> None:
+        rc, state, events, alert_calls, arm_calls, _ = self._settle(arm_rc=0)
+        self.assertFalse(any(e["event"] == "relay_spawned" for e in events),
+                         f"排程失敗仍記 relay_spawned＝含憑證的假成功痕跡：{events}")
+        failed = [e for e in events if e["event"] == "relay_spawn_failed"]
+        self.assertTrue(failed, f"沒有落 relay_spawn_failed 痕跡：{events}")
+        self.assertEqual(failed[-1]["rc"], 1)
+        self.assertEqual(len(arm_calls), 1, "排程失敗＝停止次態，必須重掛哨兵恰一次")
+        self.assertTrue([c for c in alert_calls if c["loud"]],
+                        f"喚醒鏈斷線沒有 loud alert：{alert_calls}")
+        self.assertEqual(rc, 1, "必須沿用排程 rc；回 rearm rc（此處為 0）＝假綠")
+        self.assertEqual(state["relay_seq"], 1,
+                         "seq 不回退（fail-safe：失敗窗燒掉一格，讓接力更早停）")
+
+    def test_double_failure_still_clears_the_arm_latch(self) -> None:
+        rc, _state, events, _alerts, arm_calls, clear_calls = self._settle(arm_rc=1)
+        self.assertEqual(len(arm_calls), 1)
+        self.assertEqual(clear_calls, ["sid-spawn-fail"],
+                         "重掛也失敗時必須清 arm latch，供下次 SessionStart 重新評估")
+        failed = [e for e in events if e["event"] == "relay_rearm_failed"]
+        self.assertTrue(failed, f"沒有落 relay_rearm_failed 痕跡：{events}")
+        self.assertEqual(failed[-1]["rc"], 1)
+
+
+class SettleWindowCrashStillDisposesTest(unittest.TestCase):
+    """SD-8：`settle_window()` 主體炸掉時不得靜默炸穿。
+
+    立案：本函式由 pythonw 無 console 行程執行（stderr=None），未捕捉例外＝行程
+    靜默消失：-Once 排程沒拆、哨兵沒重掛、arm latch 沒清、零痕跡。兜底 handler
+    必須先做處置（拆排程＋重掛哨兵）再落痕跡，回傳沿用 `resume_rc` 既有契約。
+    """
+
+    def test_a_crash_inside_the_body_still_disposes_and_leaves_a_trace(self) -> None:
+        tmp = Path(tempfile.mkdtemp(prefix="settle-crash-"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        plan = tmp / "plan.md"
+        state = {**RelayStateTest.GOOD, "plan_path": str(plan), "session_id": "sid-crash",
+                 "allow_resume": True, "task_name": "T-crash",
+                 "transcript": str(tmp / "sid-crash.jsonl")}
+        plan.write_text("# 任務書\n\n" + planner.render_relay(state),
+                        encoding="utf-8", newline="\n")
+        args = planner.build_parser().parse_args(
+            ["--resume-tick", "--plan", str(plan), "--task-name", "T-crash"])
+        events: list[dict] = []
+        alert_calls: list[dict] = []
+        arm_calls: list = []
+        remove_calls: list[str] = []
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(unittest.mock.patch.object(
+                planner, "append_log",
+                side_effect=lambda _l, e, **f: events.append({"event": e, **f})))
+            stack.enter_context(unittest.mock.patch.object(
+                planner.escalation, "alert",
+                side_effect=lambda r, s, *, loud=True, plan=None, **_:
+                    (alert_calls.append({"reason": r, "loud": loud}), {})[1]))
+            stack.enter_context(unittest.mock.patch.object(
+                planner, "_schtasks_remove",
+                side_effect=lambda t: (remove_calls.append(t), 0)[1]))
+            stack.enter_context(unittest.mock.patch.object(
+                planner, "_arm_sentinel",
+                side_effect=lambda a, t, pl: (arm_calls.append(t), 0)[1]))
+            stack.enter_context(unittest.mock.patch.object(
+                relay_machine, "current_band",
+                side_effect=RuntimeError("合成崩潰：band 現查炸掉")))
+            rc = relay_machine.settle_window(args, state, plan, tmp / "log.jsonl", 0)
+        self.assertEqual(rc, 0, "崩潰兜底的回傳必須沿用 resume_rc 既有契約")
+        self.assertEqual(remove_calls, ["T-crash"], "崩潰時必須 best-effort 拆 -Once 排程")
+        self.assertEqual(len(arm_calls), 1, "崩潰時必須重掛哨兵（喚醒鏈不得斷線）")
+        self.assertTrue([c for c in alert_calls if c["loud"]],
+                        f"崩潰沒有 loud alert：{alert_calls}")
+        crashed = [e for e in events if e["event"] == "relay_settle_crashed"]
+        self.assertTrue(crashed, f"沒有落 relay_settle_crashed 痕跡：{events}")
+        self.assertIn("RuntimeError", crashed[-1].get("error", ""))
 
 
 # ═══════════════════════ R115 修復波：G1~G4 實作批四方複審 blocking（F1~F4） round-label-ok

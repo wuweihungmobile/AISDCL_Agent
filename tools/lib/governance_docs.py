@@ -385,6 +385,12 @@ _GOVERNANCE_DOCS = (
     # 上列的護欄層淨額標記姊妹檔（`guard-total:` 站點之一，`_GUARD_TOTAL_DOC_GLOBS`
     # 掃描面），與同輪 `R119_HANDOFF.md` 共同滿足「兩份不同檔」的最低站數。 round-label-ok
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R119_Scan_Findings.md",
+    # R120 P1-7/212/SA-4/P1-8 收尾證據檔：結案脈絡與逐項取證唯一居所（⇒ 體積守門）， round-label-ok
+    # 帳本 DEF-200-241/245 與 va3 鎖指名本檔（⇒ 指針稽核）。即刻登記。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R120_Debt_Closure.md",
+    # 上列的護欄層淨額標記姊妹檔（`guard-total:` 站點之一），與同輪 `R120_HANDOFF.md` round-label-ok
+    # 共同滿足「兩份不同檔」的最低站數。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R120_Scan_Findings.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/{CrossPlatform,Quota}_*.md`。這**不是**把具名
