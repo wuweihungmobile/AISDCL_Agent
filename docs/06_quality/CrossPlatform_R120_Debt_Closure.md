@@ -72,7 +72,7 @@ D8 裁決（存證 AutoSDD_Adjudication_Record_R120.md）：
   +9 本表首輪編修、+8 sha 鏈列與收斂）。`test_context_budget_guard.py` 9645→9775、
   `test_adr_xplat001_c1c2_lock.py` 7178→7195；`_REPIN_LOG_FROZEN_PREFIX_LEN` 107→110、
   `_FROZEN_PREFIX_REWRITE_LEDGER` 追加 R120 鏈列（`4554dbed`→`31861e`）、
-  `_REPIN_LOG_HISTORY_SHA256` 重釘 `31861e...`。`--print-guard-lines` 淨額對帳 +0、
+  `_REPIN_LOG_HISTORY_SHA256` 重釘 `dc94d1a...`。`--print-guard-lines` 淨額對帳 +0、
   逐檔漂移 0 支。
 - 🔴 款(11)：R118 淨額 -6 已終止 streak、R119 +399＝第 1 連升、R120 +147＝第 2 連升（合規，
   `_REPIN_MAX_CONSECUTIVE_RISING_ROUNDS = 2`）⇒ **下一輪（`R121`）淨額必須 ≤0**。

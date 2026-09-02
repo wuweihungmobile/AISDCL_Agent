@@ -19,7 +19,7 @@
 4. **P1-8**：兩案檔盤點注＋Playbook Q3 同步＋R110 另案三筆立列（DEF-200-242/243/244）。
 5. **守衛線重釘**：`test_context_budget_guard.py` 9645→9775（P1-7 +126、va3 +4）、
    本表自身三列合計 +21（sha 鏈 `_FROZEN_PREFIX_REWRITE_LEDGER` 追加 R120 列＋稽核）；
-   `--print-guard-lines` 淨額 +0 逐檔漂移 0；sha 重釘 `31861e...`。款(11)：R120＝第 2
+   `--print-guard-lines` 淨額 +0 逐檔漂移 0；sha 重釘 `dc94d1a...`。款(11)：R120＝第 2
    連升（合規），**`R121` 必須 ≤0**。
 
 <!-- guard-total:R120 --> **守衛線追記：護欄層累積淨額＝ 91646 → 91793（+147）** ——

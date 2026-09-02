@@ -1741,7 +1741,7 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 _REPIN_LOG_FROZEN_PREFIX_LEN = 110
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "31861e428414aadeba2eb1ee9be8fa58f873dd0cf02fcbc96e8678a64cacba7f")
+    "dc94d1a10d4fbd39c94ae90334c91b9e1b84144264f16a5304aafd6f6e90ac20")
 
 
 def repin_log_history_digest(
@@ -1892,7 +1892,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # R120 收尾：212 結案批＋P1-7 SD-4/SD-8＋SA-4 的守衛線重釘使 round-label-ok
     # `_REPIN_LOG_HISTORY_SHA256` 前進，同體例「追加後立即自我凍結」——本輪追加
     # 本列＋一個 repin 稽核列，prefix_len 109→110 涵蓋新 repin 列本身。
-    ("R120", "4554dbed8bf5", "31861e428414", "DEF-200-241"),
+    ("R120", "4554dbed8bf5", "dc94d1a10d4f", "DEF-200-241"),
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。
