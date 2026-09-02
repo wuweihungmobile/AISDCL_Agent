@@ -38,13 +38,13 @@
 
 ## 還沒做的（不塗綠）
 
-1. **四方複審尚未執行**——被額度 band=prepare／cap=1 擋下（Workflow 不執行）；改逐個
+1. **四方複審仍未進行**——被額度 band=prepare／halt 擋下（扇出工具不執行）；改逐個
    Agent 派或 reset 後補，收輪必要關卡（指令第 6 節）。現查
    `python tools/session_resume_planner.py --pace`（band 回 free 才並行派）。
-2. **DEF-200-241 治本尚未落地**（時鐘前進機制／祖父化改讀結案事實，二擇一，過四方前不動碼）。
-   現查 `git grep -n "DEF-200-241" docs/06_quality/AutoSDD_Defect_Log.md`（狀態欄 open＝仍未治本）。
-3. **DEF-200-242／243／244（P1-8 R110 另案三筆）尚未落地**。現查
-   `git grep -n "DEF-200-242" docs/06_quality/AutoSDD_Defect_Log.md`（三列狀態欄 open）。
+2. **DEF-200-241 治本仍未著手**（時鐘前進機制／祖父化改讀結案事實，二擇一，過四方前不動碼）。
+   現查 `git grep -n "DEF-200-241" docs/06_quality/AutoSDD_Defect_Log.md`（狀態欄 open＝根因仍在）。
+3. **DEF-200-242／243／244（P1-8 R110 另案三列）仍未著手**。現查
+   `git grep -n "DEF-200-242" docs/06_quality/AutoSDD_Defect_Log.md`（狀態欄 open）。
 
 ## 重啟後第一件事（zero-trust，不採信上方任何「已通過」宣稱）
 

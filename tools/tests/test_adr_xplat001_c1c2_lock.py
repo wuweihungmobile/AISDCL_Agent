@@ -1415,8 +1415,8 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "prefix_len 更新），同既有體例。逐項見 CrossPlatform_R120_Debt_Closure.md"
      "（本檔 +9：7178→7187）。"),
     ("R120", 91785, 91793, 8,
-     "[非淨減法輪][同輪追加] 全套揪出 sha 鏈未接：_FROZEN_PREFIX_REWRITE_LEDGER 追加 "
-     "R120 列（4554dbed→現值）＋本稽核列＋凍結表值同步＋prefix_len 109→110，逐項見 "
+     "[非淨減法輪][同輪追加] 全套揪出 sha 鏈未接：_FROZEN_PREFIX_REWRITE_LEDGER 追加本輪"
+     "鏈接一筆（4554dbed→現值）＋本稽核列＋凍結表值同步＋prefix_len 109→110，逐項見 "
      "CrossPlatform_R120_Debt_Closure.md（本檔 +8：7187→7195）。"),
 )
 
