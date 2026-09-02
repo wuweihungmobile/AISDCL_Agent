@@ -195,3 +195,86 @@ def warn_if_sleepy(runner, platform_name: str | None = None) -> str:
     if trouble:
         print("⚠️ " + trouble, file=sys.stderr)
     return trouble
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# ③ harness autocompact 姿態（ADR-XPLAT-014 §7.0-a/§7.0-b ⓿：自 session_resume_planner
+#   搬入，讓出 planner 的 LOC 額度給缺陷① 的時刻解析階梯）
+# ══════════════════════════════════════════════════════════════════════════
+# 🔴 為什麼搬到本檔：這三支（autocompact_posture／report／check_report）與續航／排程／額度
+# 三條主線無關——它們讀的是 harness 自己的 settings／env 與逐字稿水位，正是本檔的主題
+# 「這台機器的環境姿態」。ADR §7.0-a 實測 planner 已 750/750（headroom 0），①② 一行寫不進去。
+# 🔴 `guard` 一律**注入**（不 import）：本檔要維持 stdlib-only，才能被任何一側匯入而不成環
+# （ADR §7.0-b：「import 期相依換成呼叫期相依」）。`HARD_RATIO` 進了比較式（:_report），
+# 故為必填參數、不給預設兜底（給了＝在 lib 側複寫一份硬線＝同一份知識兩個家）。
+# 原文逐字承接自 planner（僅簽章加 `guard`、常數改由本檔持有），行為零變。
+
+#: harness 的 autocompact 開關判定（`claude.exe` 二進位內逐字）：
+#: `if(DISABLE_COMPACT)return!1; if(env.DISABLE_AUTO_COMPACT)return!1;
+#:  return config("autoCompactEnabled", true)` ⇒ 缺席即開啟。
+_AUTOCOMPACT_KILL_ENVS = ("DISABLE_AUTO_COMPACT", "DISABLE_COMPACT")
+_GLOBAL_CONFIG_KEY = "autoCompactEnabled"
+#: R92：repo settings 的 env 區塊釘了這支（=90），posture 要能把現值秀出來（官方語意：
+#: auto-compact window 的該百分比觸發、只能調低——見 ADR-XPLAT-008）。
+_PCT_OVERRIDE_ENV = "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"
+
+
+def autocompact_posture(guard) -> dict:
+    """harness 自己那一半：現在到底有沒有東西在自動 compact，window 是多少。"""
+    kills = {name: os.environ.get(name) for name in _AUTOCOMPACT_KILL_ENVS if os.environ.get(name)}
+    config_path = Path(os.path.expanduser("~")) / ".claude.json"
+    configured = guard.settings_value(_GLOBAL_CONFIG_KEY, [config_path])
+    layer_off = [str(p) for p in guard.settings_chain() if guard.settings_value(_GLOBAL_CONFIG_KEY, [p]) is False]  # noqa: E501
+    effective = not kills and guard.settings_value(_GLOBAL_CONFIG_KEY, guard.settings_chain()) is not False  # noqa: E501
+    # B-02：行程 env 沒有時退而掃 settings 鏈各層的 env 區塊（宣告值；行程 env 有值優先）。
+    pct = os.environ.get(_PCT_OVERRIDE_ENV) or next(
+        (str(blk[_PCT_OVERRIDE_ENV]) for blk in (guard.settings_value("env", [p]) for p in guard.settings_chain())  # noqa: E501
+         if isinstance(blk, dict) and blk.get(_PCT_OVERRIDE_ENV) is not None), None)
+    window_env, window_setting = os.environ.get(guard.CC_WINDOW_ENV), guard.settings_value(guard.CC_WINDOW_KEY)  # noqa: E501
+    return {"effective": effective, "kill_envs": kills, "config_path": str(config_path), "configured": configured,  # noqa: E501
+            "window_env": window_env, "pct_override": pct, "window_setting": window_setting, "layer_off": layer_off,  # noqa: E501
+            "window": window_env or window_setting or "auto"}
+
+
+def autocompact_report(posture: dict, guard) -> str:
+    state, seen = ("開啟" if posture["effective"] else "🔴 關閉"), ("未設（＝採用預設 true）" if posture["configured"] is None else repr(posture["configured"]))  # noqa: E501
+    lines = [
+        f"harness autocompact   {state}", "  判定鏈（依 claude.exe 二進位內的順序）",
+        f"    1. 環境變數 {list(_AUTOCOMPACT_KILL_ENVS)} 任一為真 ⇒ 關閉　現況：{posture['kill_envs'] or '皆未設'}",  # noqa: E501
+        f"    2. {posture['config_path']} 的 {_GLOBAL_CONFIG_KEY}（僅供稽核，非官方 settings 階層）　現況：{seen}",  # noqa: E501
+        f"    3. settings 鏈 first-wins {_GLOBAL_CONFIG_KEY}（本欄即 `effective` 的依據）　現況："
+        + ("🔴 有層設 false：" + "；".join(posture["layer_off"]) if posture["layer_off"] else "無任何一層設 false"),  # noqa: E501
+        f"  pct override          {_PCT_OVERRIDE_ENV}={posture['pct_override']!r}（未設＝harness 預設觸發點；設了＝在 auto-compact window 的該百分比觸發，只能調低）",  # noqa: E501
+        f"  window                {posture['window']}（{guard.CC_WINDOW_ENV}={posture['window_env']!r}；settings.{guard.CC_WINDOW_KEY}={posture['window_setting']!r}；兩者皆無時 CC 走 auto，且大於模型上限時由 CC 自己 capped）",  # noqa: E501
+    ]
+    # R92／D4（SD 複審 P3）：PCT_OVERRIDE 值域 1-100 無官方下界保證，調到 ≥ 硬線時
+    # 94% 那則「壓縮未發生」警報會誤判一個只是「觸發點設得晚」的正常 autocompact。
+    try:
+        pct_val = float(posture["pct_override"]) if posture["pct_override"] is not None else None
+    except ValueError:
+        pct_val = None
+    if pct_val is not None and pct_val >= guard.HARD_RATIO * 100:
+        lines.append(f"  ⚠️  {_PCT_OVERRIDE_ENV}={pct_val:g} ≥ 硬線 {guard.HARD_RATIO:.0%}——94% 的「壓縮未發生」警報這裡可能只是觸發點設得比較晚，不是真失效，請對照這個值再下判斷。")  # noqa: E501
+    # R92／D2：`effective` 已是 first-wins 算過的真值，不再需要「可能仍開啟」的模糊仗
+    # ——只有 layer_off 非空但 effective 仍 True 時才提醒「你以為關了，其實沒關」。
+    if not posture["effective"]:
+        lines.append("  🔴 autocompact 目前的有效值是關閉：撞到 context 上限時會直接失去對話，而不是自動摘要。請在 /config 開回來，或拿掉相關環境變數／設定層。")  # noqa: E501
+    elif posture["layer_off"]:
+        lines.append("  ℹ️  有層宣告 false 但被更高優先層蓋過，目前有效值仍是開啟（僅供稽核）：" + "；".join(posture["layer_off"]))  # noqa: E501
+    return "\n".join(lines) + "\n"
+
+
+def check_report(data: dict, guard) -> str:
+    """`--check` 的輸出。量不到時**明說量不到**，不印一個看起來像 0% 的數字。"""
+    if data["used"] is None:
+        return (f"❌ {data['transcript']}\n   掃不到任何帶 message.usage 的 assistant 記錄"
+                " —— 「量不到」與「量到零」必須分得開，故不印百分比。"
+                "逐字稿剛建立、或欄位格式已變更都會走到這裡。\n")
+    tier = {None: f"低於 {guard.WARN_RATIO:.0%}", guard.TIER_WARN: f"≥{guard.WARN_RATIO:.0%}（建議 compact）",  # noqa: E501
+            guard.TIER_HARD: f"≥{guard.HARD_RATIO:.0%}（停止開新戰場）"}[data["tier"]]
+    return (
+        f"session   {data['session_id']}\n逐字稿    {data['transcript']}\n"
+        f"used      {data['used']:,}（input + cache_creation + cache_read；output_tokens 不計）\npeak      {data['peak_used']:,}（本 session 歷來最大，window 下界推論的輸入）\n"  # noqa: E501
+        f"model     {data['model'] or '（逐字稿裡讀不到）'}（window 交叉否決的依據）\nwindow    {data['window']:,}〔{data['window_source']}〕\n水位      {data['ratio']:.1%}  → {tier}\n"  # noqa: E501
+        f"硬擋資格  {'有' if data['may_block'] else '無（分母是保守下界猜測 ⇒ 只出聲不擋）'}（PreToolUse 阻斷模式的第三道放行條件）\n重啟指令  claude -r {data['session_id']}\nharness   姿態現查：--check-autocompact（autocompact 才是真正在做 compact 的東西）\n"  # noqa: E501
+    )
