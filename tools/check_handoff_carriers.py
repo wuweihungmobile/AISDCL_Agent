@@ -271,8 +271,8 @@ def ledger_def_ids(ledger_text: str, archive_texts: list[str], *,
     CrossPlatform_R100_Scan_Findings.md:252→DEF-200-208／CrossPlatform_R107_Ledger_
     Closure.md:125→DEF-101-559，皆前瞻行指向已在後續輪次結案的 DEF-ID）逐筆具名登記
     後歸零；其後 212 自身結案動作再生 2 筆同型假陽性，經 D8 核准同面登記（見
-    `_CARRIER_DOC_EXEMPTIONS` 旁註）。紅綠由 `--self-test` 與 `tools/tests/test_check_defect_log_crossref.py`
-    的 DEF-200-212 系列自證。
+    `_CARRIER_DOC_EXEMPTIONS` 旁註）。紅綠由 `--self-test` 與
+    `tools/tests/test_check_defect_log_crossref.py` 的 DEF-200-212 系列自證。
     """
     ids: set[str] = set()
     for text in [ledger_text, *archive_texts]:
