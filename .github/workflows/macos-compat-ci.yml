@@ -294,6 +294,9 @@ on:
       # workflow 的 unittest step 也必須跑（同一支判準 test_ci_paths_cover_root_consumers）。
       - "tools/lib/apply_lock.py"
       - "tools/archive_apply_locked.py"
+      # 🔴 DEF-200-183：skip 剖面鍵的文法 SSOT，由 skip_group_policy 與 run_root_unittests
+      # 消費 ⇒ 只改它時本 workflow 的 unittest step 也必須跑（同一支判準）。
+      - "tools/lib/skip_profile_key.py"
       - ".env.example"
       - "tools/_cli_flags.py"
       - "tools/check_scheduled_task_drift.py"
@@ -676,6 +679,9 @@ on:
       # workflow 的 unittest step 也必須跑（同一支判準 test_ci_paths_cover_root_consumers）。
       - "tools/lib/apply_lock.py"
       - "tools/archive_apply_locked.py"
+      # 🔴 DEF-200-183：skip 剖面鍵的文法 SSOT，由 skip_group_policy 與 run_root_unittests
+      # 消費 ⇒ 只改它時本 workflow 的 unittest step 也必須跑（同一支判準）。
+      - "tools/lib/skip_profile_key.py"
       - ".env.example"
       - "tools/_cli_flags.py"
       - "tools/check_scheduled_task_drift.py"
