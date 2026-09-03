@@ -405,6 +405,10 @@ _GOVERNANCE_DOCS = (
     # 宣稱指向它 ⇒ 指針稽核）與護欄層淨額承認（款(9) 標記行的家 ⇒ 兩者皆受體積守門）。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R123_Debt_Closure.md",
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R123_Scan_Findings.md",
+    # R124 列瘦身輪的接收檔（round-label-ok）：帳本超標／貼線列的史料原文逐字保全在此
+    # （⇒ 體積守門），而帳本列改以 `§DEF-ID` 座標宣稱指向它（⇒ 指針稽核）。它是
+    # ROW_MAX_BYTES 判準訊息自己指定的合法出口——「把長文搬進 docs/06_quality/ 的具名證據檔」。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R124_Row_Slimming.md",
     # R122 守衛線搬遷抵銷包：八支鎖檔的歷史沿革散文**逐字保全**的唯一居所 round-label-ok
     # （⇒ 體積守門——原處只留一行指標，那些沿革除了本檔已無第二份），且逐節寫出「某段
     # 原文原處是哪支檔哪個符號」的座標宣稱（⇒ 指針稽核）。資格與 R86/R87/R90/R95 同名
