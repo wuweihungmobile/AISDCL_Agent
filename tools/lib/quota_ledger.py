@@ -151,6 +151,34 @@ def count_dispatches(root: Path, floor: float) -> tuple[int, int]:
     return live, unreadable
 
 
+def oldest_dispatch(root: Path, floor: float) -> float | None:
+    """視窗內**最舊**那一筆派發的時刻（epoch 秒）；`None`＝視窗內一筆都沒有。
+
+    🔴 立案（`DEF-200-169`）：滾動視窗「還剩幾秒」這個量，唯一的推算依據就是**最舊那
+    一筆什麼時候滾出去**——視窗一滾出一筆就釋出一個名額。此前這個量在整條額度軸上
+    結構性不存在：`count_dispatches()` 只回筆數，時刻在 `entry_moment()` 解出來之後
+    當場被丟掉，於是 `--pace` 只講得出「額度軸的 reset 期程」（**小時**尺度的另一件
+    事），講不出「這個 300 秒的視窗還剩幾秒」⇒ 使用者只能猜要再等多久才派得動。
+
+    🔴 **`floor` 是參數不是這裡算的**（同 `count_dispatches`／`prune_dispatches` 的既有
+    形態）：本模組一個時鐘都不呼叫，`now` 由呼叫端注入 ⇒ 測試可重現。
+    🔴 判準與 `count_dispatches()` 的 `live` 那一半**逐字同一條**（`moment >= floor`），
+    否則會出現「帳上數得到 3 筆、卻說視窗是空的」這種兩個出口互相矛盾的形態。
+    讀不懂的目錄項一律不參與（它們沒有時刻可言）；「有東西壞掉」那個訊號仍由
+    `count_dispatches()` 的第二個回傳值承接，不在這裡重複一份。
+    """
+    oldest: float | None = None
+    try:
+        entries = list(os.scandir(root))
+    except OSError:
+        return None
+    for entry in entries:
+        moment = entry_moment(entry.name)
+        if moment is not None and moment >= floor and (oldest is None or moment < oldest):
+            oldest = moment
+    return oldest
+
+
 def prune_dispatches(root: Path, floor: float) -> int:
     """清掉已經滾出視窗的目錄項；回清掉幾個。append-only 不等於永遠長大。
 

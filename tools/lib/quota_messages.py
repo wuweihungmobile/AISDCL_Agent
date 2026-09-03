@@ -261,6 +261,28 @@ def pace_line(decision: quota_policy.Decision, live: int) -> str:
     return head + f"｜最緊的一條＝{axis.kind} {axis.pct:g}% {when}"
 
 
+# 🔴 `DEF-200-169`：扇出滾動視窗那一行的**渲染面**。取數／推算住 `quota_gate.
+# fanout_window_left()`（那裡才碰得到派發帳與 `FANOUT_WINDOW_SECONDS`）；本檔只把它講成人話。
+# 🔴 `window` 是**參數**而不是 import：`FANOUT_WINDOW_SECONDS` 住 `quota_gate`，而本檔
+# 依檔頭那條單向規則**不得** import 它（會成環）。同 `quota_throttle_message()` 留在
+# `quota_gate` 的理由，只是方向相反：那一支搬不過來，這一支把常數當參數收進來。
+# 🔴 三支分支的字串**必須彼此不同**（同 `quota_halt_message()` 的既有不變式）：
+# 「量不到」與「視窗全空」在畫面上同形，就等於把一個 fail-open 講成一句好消息。
+# 🔴 措辭刻意不含「這道節流」——那個字面是額度軸節流期程句的專屬字樣，free 帶對它有
+# 具名的 `assertNotIn` 對照組（`test_a_free_band_keeps_its_own_wording` 同族），而本行
+# 在**每一帶**都會印（滾動視窗與額度帶無關），混用會讓那道對照組的語意漂掉。
+def fanout_window_line(left: tuple | None, live: int, window: int) -> str:
+    """扇出視窗那一行：`left` 直接吃 `quota_gate.fanout_window_left()` 的三態回傳值。"""
+    if left is None:
+        return (f"   ⏱ 扇出視窗：派發帳原語不可達 ⇒ 這 {window}s 視窗**量不到**"
+                "（不是「還很空」）\n")
+    seconds, age = left
+    if seconds is None:
+        return f"   ⏱ 扇出視窗：{window}s 內帳上 0 筆 ⇒ **視窗全空**，現在派不必等\n"
+    return (f"   ⏱ 扇出視窗：剩 {seconds} 秒（帳上 {live} 筆，最舊 {age} 秒前）⇒ 再等 "
+            f"{seconds} 秒，最舊那筆就滾出 {window}s 視窗、釋出 1 個名額\n")
+
+
 # 🔴 R95／PRD §4.2.3 第 7 步的人話面：模型降級**建議**行。觸發判定住 `quota_policy.
 # decide()`（converge 帶起、或模型分軌 kind 進 notice 帶起），這裡只渲染。空 hint ⇒
 # 空字串——free 帶印一行降級建議就是一句假話（「訊息裡混一句假話比少一欄更難看見」）。

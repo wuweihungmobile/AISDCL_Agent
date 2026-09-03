@@ -3794,9 +3794,16 @@ class TestArchiveRequiredProblems(unittest.TestCase):
             _row("DEF-999-503", "fixed@x"),   # 已結、無活躍字樣、無交棒字樣 → 應可搬
             self._MID_BAND_BYTES,
         )
+        # DEF-200-222 判準①：本次 commit 是否觸碰帳本家族現由 `car._staged_paths()`
+        # 決定，本測試驗的是 bytes×movable 這一半，故顯式 mock 成「有觸碰」，
+        # 不依賴跑測試當下真實工作樹的 git 暫存狀態（判準①本身的正負案例見
+        # `tools/tests/test_check_archive_required.py::TestArchiveRequiredProblemsNarrowing`）。
         with mock.patch.object(m, "_DEFECT_LOG", ledger), \
              mock.patch.object(adl, "_LEDGER", ledger), \
-             mock.patch.object(adl, "_QUALITY_DIR", ledger.parent):
+             mock.patch.object(adl, "_QUALITY_DIR", ledger.parent), \
+             mock.patch.object(
+                 car, "_staged_paths",
+                 return_value=["docs/06_quality/AutoSDD_Defect_Log.md"]):
             problems = car.archive_required_problems()
         self.assertTrue(
             problems, "bytes 落在 WARN~FAIL 帶且存在非空可搬清單，卻回空清單——判準未觸發")

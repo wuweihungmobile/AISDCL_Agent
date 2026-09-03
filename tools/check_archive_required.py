@@ -57,6 +57,8 @@ gate` 這條依賴方向本來就有多支既有檔在用，不是新模式。**
 """
 from __future__ import annotations
 
+import fnmatch
+import subprocess
 import sys
 from pathlib import Path
 
@@ -70,16 +72,66 @@ import check_defect_log_crossref as _gate  # noqa: E402
 _KNOWN_ARGV: tuple[str, ...] = ()
 
 
+def _staged_paths() -> list[str] | None:
+    """本次 commit 暫存區的檔名清單（git 慣用正斜線相對路徑）；取不到回 `None`。
+
+    DEF-200-222 判準①：commit 期阻斷過去對**每一次** commit 都跑（含與帳本無關者），
+    誤傷面過大。取得暫存清單是縮小阻斷面的前提——取不到（`git` 不存在、非 git 目錄、
+    子行程失敗）一律回 `None`，呼叫端必須把它當「不明」而**維持既有阻斷判準**（fail-loud
+    的其中一種形態：寧可多擋、不可靜默縮小阻斷面，見 `archive_required_problems()`）。
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "-c", "core.quotepath=false", "diff", "--cached",
+             "--name-only", "--no-renames"],
+            cwd=_gate._REPO_ROOT, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", check=False,
+        )
+    except OSError:
+        return None
+    if proc.returncode != 0:
+        return None
+    return [ln for ln in proc.stdout.splitlines() if ln]
+
+
+def _touches_ledger_family(staged: list[str]) -> bool:
+    """`staged` 內是否有任一檔屬於帳本家族（主檔／archive_NN／歸檔索引）。
+
+    判準刻意只比對**檔名**、不比對所在目錄：家族成員名稱本身已具高度特徵性
+    （`AutoSDD_Defect_Log*.md`），比對目錄會在既有測試沙箱慣例（`mock.patch.object(
+    m, "_DEFECT_LOG", <repo 外的 tmp 路徑>)`）下對 `_REPO_ROOT` 做 `relative_to()`
+    直接拋例外，反而製造新的脆弱點——本函式不重蹈。
+
+    SSOT：主檔名、歸檔索引名、archive glob 樣式一律取自既有模組物件（`_gate`／
+    `_archiver`），不得在此另寫一份判斷準則。
+    """
+    names = {Path(p).name for p in staged}
+    if _gate._DEFECT_LOG.name in names:
+        return True
+    if _archiver._ledger_index.ARCHIVE_INDEX_NAME in names:
+        return True
+    return any(fnmatch.fnmatch(n, _archiver._ARCHIVE_GLOB) for n in names)
+
+
 def archive_required_problems() -> list[str]:
-    """帳本主檔落在 WARN~FAIL 帶**且**現在有非空可搬清單時，回傳非空問題清單。
+    """帳本主檔落在 WARN~FAIL 帶**且**現在有非空可搬清單**且**本次 commit 有碰帳本家族時，
+    回傳非空問題清單。
 
     空清單＝安全區（bytes < WARN）、已達 FAIL 硬線（另案處理，見模組 docstring）、
-    或此刻無可搬項（例如全部未結案／全部需要 `--ack-handoff` 人工承認）三種情況之一。
+    此刻無可搬項（例如全部未結案／全部需要 `--ack-handoff` 人工承認），或（DEF-200-222
+    判準①）本次 commit 的暫存清單**確定**未觸碰帳本家族（主檔／archive_NN／歸檔索引）
+    四種情況之一。
 
     刻意先判 bytes 門檻、成立才呼叫 `_archiver.plan()`：`plan()` 會讀四份 crossref
     掃描目標 ＋ 帳本家族 ＋ 全部具名治理文件，屬於相對昂貴的操作；bytes 遠低於 WARN
     的常態（本檔落地當下實測主檔 152042 bytes，WARN 線 245760）下第一行 `.stat()`
     就短路，本判準因此在 commit 的常態路徑上幾乎零成本。
+
+    🔴 DEF-200-222 判準①（縮小阻斷面）：過去每一次 commit（含與帳本無關者）都導向
+    同一條 `--apply` 指令，誤傷面過大。取得暫存清單失敗（`_staged_paths()` 回 `None`）
+    時**不**當成「未觸碰」放行——那是 fail-open，會讓縮小阻斷面的立意反過來變成新的
+    漏洞。改為**維持既有阻斷判準**（bytes+movable 兩項照舊決定要不要擋）並在訊息內
+    附一句 fail-loud 說明，讓「為什麼沒縮小」是看得見的，不是靜默的。
     """
     if not _gate._DEFECT_LOG.exists():
         return []
@@ -89,17 +141,32 @@ def archive_required_problems() -> list[str]:
     movable = _archiver.plan()["movable"]
     if not movable:
         return []
+    staged = _staged_paths()
+    narrowing_note = ""
+    if staged is not None:
+        if not _touches_ledger_family(staged):
+            return []
+    else:
+        narrowing_note = (
+            "⚠️ DEF-200-222：無法取得本次 commit 的暫存檔清單（git diff --cached "
+            "失敗），無法判斷本次是否觸碰帳本家族 → 維持既有阻斷判準（不縮小阻斷面）。"
+        )
     total = sum(v["bytes"] for v in movable)
-    return [
+    msg = (
         f"缺陷帳本主檔 {ledger_bytes} bytes 已逼近輪替上限 {_gate._LEDGER_FAIL_BYTES}"
         f"（DEF-99-001 政策），且現有 {len(movable)} 筆／{total} bytes 可搬遷"
         "（archive_defect_log.py 的 --plan 判準①②③⑤⑥全過，非交接待人工承認、"
         "亦非指針反向依賴阻擋）—— commit 前請先跑 "
-        "`python3 tools/archive_defect_log.py --apply --archive-num <N>` "
+        "`python3 tools/archive_apply_locked.py --archive-num <N>`"
+        "（DEF-200-222 判準②：序列化保護版的 --apply 入口，多 agent 共用工作樹時"
+        "請一律走此入口、不要直接呼叫 archive_defect_log.py --apply） "
         "完成歸檔騰出容量，再重試本次 commit"
         "（可先跑 `python3 tools/archive_defect_log.py --plan` 確認可搬清單與下一個"
         "archive 編號）"
-    ]
+    )
+    if narrowing_note:
+        msg = f"{msg}\n    {narrowing_note}"
+    return [msg]
 
 
 def cli(argv: list[str]) -> int:

@@ -118,6 +118,7 @@ from quota_messages import (  # noqa: E402,F401
     binding_resets_at,
     core_signature_change_note,
     evidence_hint,
+    fanout_window_line,
     halt_resets_at,
     model_hint_line,
     pace_line,
@@ -496,6 +497,31 @@ def live_dispatches(root: Path, now: datetime, window: int = FANOUT_WINDOW_SECON
     return live
 
 
+# 🔴 `DEF-200-169`：這個滾動視窗**還剩幾秒**。此前 `--pace` 只印得出 `throttle_horizon_line()`
+# ——那報的是**額度軸的 reset 期程**（五小時／七天尺度），不是 `FANOUT_WINDOW_SECONDS` 這個
+# 300 秒的視窗還剩幾秒。兩個量差三個數量級，而畫面上只有前者 ⇒ 舵手被擋下之後不知道「再等
+# 幾秒就能多派一個」，只能猜（DEF-200-156 修前診斷逐字記過這一格，當輪只補了 `live`）。
+# 🔴 **三態而不是一個數字**（同本檔對 `draining()` 三態的既有判準）：「帳讀不到」與「視窗
+# 全空」要求 operator 做的事不同，把前者折進後者就是「沒量到卻宣稱量到」。
+# 🔴 `now` 一律由呼叫端注入、本函式一個時鐘都不叫 ⇒ 可重現（同 `live_dispatches`）。
+# 🔴 秒數取 `int()` 截斷 **age**、再由 `window - age` 回推剩餘：兩個印在同一行的數字因此
+# 恆相加為 `window`（自洽），而截斷讓剩餘**只會多報不到 1 秒**——等滿了名額必定已釋出，
+# 那是這一族唯一安全的方向（少報會讓人早一步再撞一次牆）。
+def fanout_window_left(root: Path, now: datetime,
+                       window: int = FANOUT_WINDOW_SECONDS) -> tuple[int | None, int | None] | None:
+    """`(還剩幾秒, 最舊那一筆幾秒前)`；`(None, None)`＝視窗內一筆都沒有；`None`＝帳讀不到。"""
+    if quota_ledger is None:
+        return None
+    oldest = quota_ledger.oldest_dispatch(root, now.timestamp() - window)
+    if oldest is None:
+        # 🔴 「最舊一筆已經超過 `window` 秒」走的**就是這一支**：那些目錄項在 `floor` 那一刀
+        # 就已經不算數（`live_dispatches()` 同一刀還會把它們 prune 掉）⇒ 視窗確實是空的，
+        # 而不是「剩 0 秒」。印 0 會讀成「滿了、正要放行」，方向剛好相反。
+        return None, None
+    age = int(now.timestamp() - oldest)
+    return max(0, window - age), age
+
+
 def claim_refresh_slot() -> bool:
     """本 TTL 視窗內還沒有人量過 ⇒ 佔住這個位子回 `True`。這是**成本節流器**。
 
@@ -728,7 +754,12 @@ def pace_report(now: datetime | None = None, model: str | None = None) -> str:
     # ⇒ 實測「`--pace` 印可派 2 個」與「`Agent` 被擋、本視窗已用 2 次」同一刻並存。
     # 用 walrus 而不是多一行 `live = …`：本檔 `guardrail_hub` tier 餘裕為 0（500/500），
     # 取數次數與時點逐字不變（同一次呼叫、同一個 `now`），只是把值留下來給第二個消費者。
-    record_burn(state, live := live_dispatches(fanout_ledger_path(), now))
+    root = fanout_ledger_path()
+    record_burn(state, live := live_dispatches(root, now))
+    # 🔴 `DEF-200-169`：**先** `live_dispatches()`（它會 prune 掉滾出視窗的目錄項）**再**問
+    # 最舊那一筆，兩者吃同一個 `now`／同一把 `floor` ⇒ 「帳上 N 筆」與「最舊 M 秒前」在同
+    # 一行裡結構上不可能互相矛盾（先問最舊再數也對，但兩次取數之間會多一個競態窗）。
+    window = fanout_window_left(root, now)
     ratio, ratio_note, plan_note = burn_ratio(state)
     decision = quota_policy.decide(state, now, policy, ratio, ratio_note, active_model=model)
     # 🔴 R102：把 cap 寫進契約檔這一步，是引擎唯一真的會讀到 cap 的地方（`quota_gate()` 的  round-label-ok  # noqa: E501
@@ -762,7 +793,9 @@ def pace_report(now: datetime | None = None, model: str | None = None) -> str:
     # R95：攤提行帶 converge 錨點（出聲不收緊時說出口）；hint 行空字串＝不印（見渲染端）。
     return (f"{pace_line(decision, live)}\n  {quota_policy.describe(decision)}\n"
             f"  {quota_pace.explain(decision.amort, policy.converge_pct)}\n"
-            f"  {posture_line()}\n{horizon}{model_hint_line(decision)}"
+            f"  {posture_line()}\n"
+            f"{fanout_window_line(window, live, FANOUT_WINDOW_SECONDS)}"
+            f"{horizon}{model_hint_line(decision)}"
             f"  來源={state.source} 量測於={state.measured_at or '(無)'}{tail}\n{plan_note}")
 
 

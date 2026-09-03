@@ -235,20 +235,8 @@ _SETTINGS = _REPO_ROOT / ".claude" / "settings.json"
 def _child_env(extra: dict[str, str] | None = None) -> dict[str, str]:
     """子行程環境：**顯式剝除** `PYTHONUTF8` / `PYTHONIOENCODING`（可再疊 `extra`）。
 
-    🔴 為何不能靠繼承（DEF-101-789）：`_run_hook` 原本不傳 `env=`，於是子行程的
-    UTF-8 串流設定由**外層環境供應**——本機唯一來源是 `.claude/settings.json` 的
-    `env.PYTHONUTF8=1`（User/Machine scope 實測皆空），也就是說這支鎖的綠燈是
-    agent harness 注入的，不是被測物的性質。同一份知識 repo 內早有兩處落地：
-    `test_find_git_bash_parity.py` 對 `PYTHONUTF8` 的 `env.pop`（該處逐字寫明
-    「不能靠繼承而假綠」）與 `test_git_hooks_install_common.py` 的
-    `_env_without_utf8_overrides()`。**知識在樹裡、只有一處有鎖，新站點照樣踩進去**
-    ——本函式把它補齊到第三處。
-
-    🔴 R75 補記（DEF-101-803）：上一段逐字指名「本機唯一 UTF-8 來源是
-    `.claude/settings.json` 的 `env.PYTHONUTF8=1`」，而那個 env 條目**當時零鎖看守**
-    ——被誰刪掉都不會有任何測試變紅，R74 P0 就靜默復發。**在註記裡指出一個關鍵依賴
-    卻不給它鎖，等於把它標成「已知且已接受」**。該鎖現在在
-    `TestSettingsProvideUtf8ForHookChildren`。
+    沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+    〈_child_env 沿革（DEF-101-789／DEF-101-803）〉。
     """
     env = {k: v for k, v in os.environ.items()
            if k not in ("PYTHONUTF8", "PYTHONIOENCODING")}
@@ -265,19 +253,8 @@ def _run_hook(
 ) -> tuple[int, str]:
     """以子行程真跑 hook，回 `(rc, stderr)`。
 
-    刻意走子行程而非 import + monkeypatch：hook 的契約是「被 Claude Code 以獨立行程
-    呼叫、讀 stdin、以 exit code 表態」，import 進來直接呼叫 `main()` 會繞過
-    `sys.stdin` 與 exit code 這兩個契約面（本 repo 有「驗證載具必須對齊 production
-    真正執行路徑」的既有紀律）。
-
-    子行程環境一律走 `_child_env()`（剝除 UTF-8 覆寫），理由見該函式。`env_extra`
-    用來**指定**一個非 UTF-8 的 locale 編碼，重現 en-US Windows／GitHub
-    windows-latest 的條件。
-
-    `force_os_name` 用來驗非 Windows 分支：hook 讀 `os.name`，而測試機是 Windows。
-    以 `-c` 前置注入假 `os.name` 再 exec hook 本體，是唯一能在單一平台上驗到
-    **兩個平台方向**的做法（同 `test_ps_engine_ssot.py` 用合成 `shutil.which`
-    偽造雙引擎的理由：判準的方向不該取決於這台機器剛好是什麼）。
+    沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+    〈_run_hook 走子行程與 force_os_name 的立案〉。
     """
     if force_os_name is None:
         cmd = [sys.executable, str(_HOOK)]
@@ -296,29 +273,8 @@ def _run_hook(
     return proc.returncode, proc.stderr or ""
 
 
-# ══════════════════════════════════════════════════════════════════════════
-# 退化 payload × matcher 射程：兩道鎖的交界（本輪，DEF 待登記）
-# ══════════════════════════════════════════════════════════════════════════
-# 這一段取代了此前兩條「退化 payload 一律 exit 2」的平坦斷言。**不是放寬**，是把
-# 它們真正要防的東西寫清楚，順便解掉一組互鎖。
-#
-#   · 那兩條要防的是**守衛靜默失效**：讀不懂輸入時放行，等於讓「送壞 payload」
-#     成為讓守衛整支消失的免費手段，而且失效不會有任何人看見。這個意圖不變。
-#   · 但它們寫成「一律 exit 2」，於是硬擋的爆炸半徑完全由**註冊面的 matcher**
-#     決定，而 matcher 由另一道鎖在管（子代理注入曾要求每個 matcher 都含 Task）。
-#     兩者相乘的結果：一份解析不出工具名的 payload 會讓一支與子代理無關的守衛
-#     硬擋派工，訊息還指向不相干的原因。七輸入實測逐字重現過該狀態。
-#
-# 新判準把兩件事綁成一個不可拆的組合：
-#   ① 退化 payload **不得被靜默放行**（rc==0 即紅——原意保住）；
-#   ② 若守衛選擇硬擋（rc==2），它註冊的 matcher **不得圈到射程外的工具**。
-# 想放寬 matcher 的人會被逼著同時面對退化行為，反之亦然，交界處不再有無人同意的
-# 狀態。對稱的另一半在 AISDLC_SDD/scripts/tests/test_pretooluse_matcher_task.py
-# （全稱約定收斂為只約束承載子代理注入的那些條目）。
-#
-# 誠實劃界：本判準**不**釘住「某支守衛必須選 rc==2 而不是 rc==1」。rc 2→1 是行為
-# 變更但不是靜默失效（仍會出聲），要不要那樣改屬設計決定，記在各 hook 自己的
-# docstring 裡；本判準只保證兩者永遠是配套的。
+# 沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+# 〈退化 payload × matcher 射程兩道鎖交界的立案〉。
 
 
 def matcher_tokens(matcher: str) -> set[str]:
@@ -471,19 +427,8 @@ class TestBlockBashHookDoesNotHurtOtherPlatforms(unittest.TestCase):
 class TestBlockBashHookGuidanceSurvivesNonUtf8Locale(unittest.TestCase):
     """阻斷指引在**非 UTF-8 locale** 下仍必須可讀（DEF-101-789）。
 
-    WHY：`sys.stderr` 的預設 `errors` 是 `backslashreplace`，所以 locale 編碼
-    表達不了 CJK 時（en-US Windows／GitHub windows-latest 的 cp1252）整段指引
-    會變成 `\\uXXXX` 逃脫字面；locale 表達得了但不是 UTF-8 時（zh-TW 的 cp950）
-    則是讀者端亂碼。兩種都不是「測試紅」而是**功能缺陷**：這支 hook 的存在理由
-    就是「純文件約束無攔阻力」，指引不可讀＝阻斷有了、教學沒了，使用者被 exit 2
-    硬擋卻拿不到替代指令。
-
-    判準刻意寫在**測試名**上，不隱含在環境裡——上一版的綠燈來自 harness 注入的
-    `PYTHONUTF8`，而環境是會變的，沒有人會去讀它。
-
-    兩案皆以 `force_os_name="nt"` 驅動，因此在 mac/Linux 也真的會跑：這個缺陷
-    的成因是「locale 不是 UTF-8」，不是「作業系統是 Windows」（`DEF-101-766`
-    的反面教訓——判準的射程不該被當下這台機器的平台綁住）。
+    沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+    〈TestBlockBashHookGuidanceSurvivesNonUtf8Locale WHY〉。
     """
 
     _NEEDLE = "Windows 上已禁用 Bash 工具"
@@ -667,19 +612,8 @@ def settings_utf8_env_verdict(settings: dict) -> str | None:
 class TestSettingsProvideUtf8ForHookChildren(unittest.TestCase):
     """`.claude/settings.json` 的 `env.PYTHONUTF8=1` 回歸鎖（R75／DEF-101-803）。
 
-    WHY 這道非有不可：本檔上方 `_child_env()` 的註記逐字宣告「本機唯一 UTF-8 來源
-    是 `.claude/settings.json` 的 `env.PYTHONUTF8=1`」，而該 env 條目此前**零鎖
-    看守**（R75 QA 全域搜尋 `tools/tests` 內對 settings.json 的 `PYTHONUTF8` 斷言：
-    零命中；旁邊那道 `TestBlockBashHookIsActuallyRegistered` 只驗 hook 註冊）。
-    也就是說：把那三行刪掉，全庫測試一片綠，而 R74 那筆 P0（hook 中文指引在非
-    UTF-8 codepage 下降解）就靜默復發。**在註記裡點名一個關鍵依賴、卻不給它鎖，
-    等於把它登記成「已知且已接受」。**
-
-    🔴 為何注入案走「讀真實內容 → 在記憶體裡拿掉那把鑰匙」而不是真的改磁碟上的
-    settings.json：該檔自己記載過 P0「hook 誤觸 PreToolUse deny 會把所有工具硬鎖
-    死」，而 R75 是多 agent 同時在同一棵樹作業的輪次——把 hook 子行程的編碼設定
-    真的拔掉幾秒鐘，影響面是**全部** agent 的工具呼叫。記憶體注入對「判準有沒有
-    鑑別力」的證明力完全相同（被注入的是真實檔案的內容），風險卻是零。
+    沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+    〈TestSettingsProvideUtf8ForHookChildren WHY〉。
     """
 
     def _real(self) -> dict:
@@ -736,21 +670,8 @@ class TestSettingsProvideUtf8ForHookChildren(unittest.TestCase):
         )
 
 
-# ══════════════════════════════════════════════════════════════════════════
-# `.claude/hooks/lint_powershell_command.py` 的回歸鎖（本輪新增）
-# ══════════════════════════════════════════════════════════════════════════
-# 為何併進本檔：`tools/tests/` 檔數是 shrink-only 棘輪，明文禁止新增鎖檔；而本檔
-# 本來就是「hook 有沒有註冊、是不是活的」那一層的家。
-#
-# 為何非有這支守衛不可（本輪立案量測）：session 逐字稿實測到一組乾淨的對照——
-# **有觀測者的那條規則違規 1 次且被當場擋下，沒有觀測者的那些違規率 20~35%**。
-# PowerShell 工具面在它出現之前**零觀測者**：禁裸 cd 那條規則的違規面在**指令
-# 字串的內容**裡，而那個字串永遠不會變成 repo 裡的檔案，於是全庫靜態掃描器
-# 結構上都看不見它。差別不在紀律寫得夠不夠嚴厲。
-#
-# 本鎖守五件事：①三條檢查各自真的會擋；②合法形態不得誤擋（誤報會讓整個機制被
-# 關掉，那比漏擋更糟）；③不早退——三條命中要一次報齊；④射程不得擴大；
-# ⑤退化 payload 走「出聲但不阻斷」，且與 matcher 射程配套（見上方判準）。
+# 沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+# 〈lint_powershell_command 回歸鎖的立案量測〉。
 
 _LINT_HOOK = _REPO_ROOT / ".claude" / "hooks" / "lint_powershell_command.py"
 
@@ -1067,22 +988,7 @@ class TestLintPowerShellHookDoesNotHurtOtherPlatforms(unittest.TestCase):
         self.assertEqual(rc, 0, f"非 Windows 上誤擋；rc={rc}\n{err}")
 
 
-# ══════════════════════════════════════════════════════════════════════════
-# R79 Auto Pilot：無人看管那一跑的 commit／push 阻斷
-# ══════════════════════════════════════════════════════════════════════════
-# 為何併進本檔：`tools/tests/` 檔數是 shrink-only 棘輪（禁新增鎖檔），而這條規則
-# 住在本檔已經在守的那支 hook 裡。
-#
-# 立案：掌舵者 R79 逐字裁決「現在開，但禁止 commit/push」——開的是 planner 的
-# `--allow-resume` 預設。條件不是建議，所以它必須有牙；而「那一跑要遵守任務書第 4 節」
-# 是散文，本 repo 對散文的攔阻力已有三次實證（都是 0）。
-#
-# 本鎖守四件事，**每一件都帶反向**（只帶一個方向的鎖必然在另一個方向恆綠）：
-#   ① 有訊號 × 會動 git 歷史 → 必須 exit 2；
-#   ② **沒有訊號** × 同一條指令 → 必須 exit 0（互動 session 零附帶面。這一條若壞掉，
-#      掌舵者自己的 commit 會被鎖死，而那會讓整個機制當場被關掉）；
-#   ③ 有訊號 × 無關指令（`git status`／`git log`）→ 必須 exit 0；
-#   ④ 行內豁免對本條**無效**（無人看管的那個回合可以自己寫豁免註解）。
+# 沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md〈R79 Auto Pilot commit／push 阻斷的立案〉。
 class TestUnattendedCommitPushBlock(unittest.TestCase):
     """R79 Auto Pilot 的授權邊界（WHY 與四件事見上方區塊註記）。"""
 
@@ -1562,16 +1468,7 @@ class TestSessionAuditProbeContract(unittest.TestCase):
         )
 
 
-# ══════════════════════════════════════════════════════════════════════════
-# 失誤歸因分群器的契約鎖（R79 新增）
-# ══════════════════════════════════════════════════════════════════════════
-# 為何住在本檔：`tools/tests/` 不得新增鎖檔（DEF-101-561③），而這支分群器是同一組
-# 觀測者的第三件——攔截（hook）／量測（probe）／歸因（本項）。
-#
-# 🔴 它要守的那件事很窄但很關鍵：根 CLAUDE.md 逐字要求「每輪重跑一次，分群腳本與桶的
-# 判準要具名可重跑」，而 R77 那次分群**沒有留下任何產物**（來源清單不在 repo 內、
-# 全庫零分群腳本）⇒ 那條要求結構上永遠滿足不了，於是那組百分比變成不可稽核的常數，
-# 正是 R71 的 n=8 模型被當現行結論用五輪的同一個形態。
+# 沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md〈失誤歸因分群器契約鎖的立案〉。
 
 _ATTRIBUTION = _REPO_ROOT / "tools" / "probe" / "misstep_attribution.py"
 
@@ -1642,24 +1539,8 @@ class TestMisstepAttributionContract(unittest.TestCase):
             self.assertIn(needle, out, f"輸出沒有自陳判準性質，缺 {needle!r}")
 
 
-# ══════════════════════════════════════════════════════════════════════════
-# 攔截器 × 量測器：同一條規則的兩份複本必須綁在一起（R78／SA-02）
-# ══════════════════════════════════════════════════════════════════════════
-# 現象：`lint_powershell_command.py`（事中攔截）與 `tools/probe/audit_session.py`
-# （事後量測）判的是同一組規則，卻各存一份判準字面，而 R77 交付時**已經不一致**
-# ——hook 那份有 `Tee-Object`、探針那份沒有，兩份零比對。後果不是「少擋一種」而是
-# 更難看見的那一種：同一段違規**攔得下、卻量不到**，於是量出來的違規率偏低，
-# 而那個數字正是拿來寫進根 CLAUDE.md 下結論用的。
-#
-# 為何不抽共用模組：hook 由 `runpy.run_path` 起，`sys.path` 上沒有 `tools/`，
-# import 期爆掉會破壞它的 fail-open 契約（settings.json 記載過的 P0）。複本是
-# **結構上被逼出來的**。既然只能留複本，就把複本的一致性變成會轉紅的事件。
-#
-# 兩向都要，缺一即有繞道：
-#   ① 字面相等——兩份 `SHARED_PATTERN_SOURCE` 必須逐字相同。抽不到（改名／改寫成
-#      非字面）也算紅，否則「把常數拿掉」就是一條無聲的出口。
-#   ② 行為一致——同一批指令餵進兩邊，判定必須相同。這一向抓得到「字典同步了，
-#      但某一邊另外藏了第二份複本／組裝時漏接」，字面相等抓不到那個。
+# 沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+# 〈攔截器 × 量測器兩份複本綁定的立案（R78／SA-02）〉。
 
 _PARITY_HITS = (
     ("naked-cd", "cd AutoClaude"),
@@ -1780,36 +1661,7 @@ class TestHookAndProbeShareOneCriterion(unittest.TestCase):
                     )
 
 
-# ══════════════════════════════════════════════════════════════════════════
-# 註冊面棘輪：hook 的觸發射程只准擴大、不准縮小（R78／QA-03）
-# ══════════════════════════════════════════════════════════════════════════
-# 🔴 這一筆比「鎖沒有鑑別力」再深一層：**鎖本身可以被無聲拆掉**。
-#
-# QA 的突變測試 M4 實測：把根 `.claude/settings.json` 的 PostToolUse
-# `matcher: "Write|Edit"` 改成 `"Write"`——這會讓 `check_ps1_encoding.py` 與
-# `check_sh_eol.py` 對 **Edit 工具整支失效**（Edit 寫出的 CRLF `.sh`、無 BOM `.ps1`
-# 從此無人守）——全套閘門 **rc=0 全綠，零鑑別力**。同時實查：本檔上方的
-# `matchers_for_script()` 只掃 PreToolUse；全 `tools/tests/` 除本輪新建的
-# `test_context_budget_guard.py` 外，沒有任何檔案提到 `PostToolUse`。
-# ⇒ PostToolUse 的註冊面（matcher 射程、條目存在性）在此之前**完全無人守**，
-# 而根 CLAUDE.md 花了整整一節在講「已橋接的 2 支 hook 在根 session 會跑」。
-#
-# 與 `test_doc_loc_baseline_freshness_r60.py::TestR74RootClaudeMdHookClaimsMatchRegistration`
-# 的**分工**（兩者都讀同一份 settings.json，但問的問題不同，不重複）：
-#   · 那一道守「**文件怎麼寫**」——根 CLAUDE.md 對某支 hook 的射程宣稱，與它在
-#     settings.json 裡「有沒有被註冊」是否雙向一致。它的判定面是**腳本 basename 的
-#     存在性**，對 matcher 圈了哪些工具、掛在哪個事件**完全不看**（M4 那個突變在它
-#     眼裡毫無變化：hook 還在，只是不再對 Edit 觸發）。
-#   · 本道守「**註冊面怎麼變**」——每支已註冊 hook 的 (事件, 觸發工具集合) 相對釘選
-#     基準只准擴大。它不讀任何 .md，不管文件怎麼寫。
-#
-# 🔴 為何是「釘現況＋只硬擋劣化方向」而不是「必須等於某個理想集合」：本 repo 明文
-# 判例——**永紅的閘門會被整個關掉，比沒有鎖更糟**。擴大 matcher（多守一個工具）與
-# 換成 `*` 一律綠；只有「某支 hook 不再被它原本守著的工具觸發」與「條目整個消失」
-# 會紅。要合法縮小射程，就得在同一次變更裡動下面那張表，讓那個決定被複審看見。
-#
-# 誠實劃界：本鎖只讀 repo 內的 `.claude/settings.json`。`settings.local.json`／
-# 使用者層設定的合併結果不在射程內（那些不進版控，鎖不到也不該鎖）。
+# 沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md〈註冊面棘輪的立案與分工（R78／QA-03）〉。
 
 #: hook command 字串裡的腳本路徑。與 `test_subprocess_encoding_hygiene._PY_ARG_RE`
 #: 同一形態，兩者由 `test_two_enumerators_agree_on_the_script_set` 綁在一起。
@@ -1856,21 +1708,8 @@ _REGISTRATION_BASELINE: dict[tuple[str, str], frozenset[str]] = {
     ("PreToolUse", ".claude/hooks/lint_powershell_command.py"): frozenset(
         {"PowerShell"}),
     ("PreToolUse", ".claude/hooks/block_bash_on_windows.py"): frozenset({"Bash"}),
-    # 🔴 R83 新增：毀滅性 git 指令阻斷器的**註冊面回填**（由並行的另一個包新增條目，
-    # `.claude/settings.json` 不在那個包的檔案所有權內時本表就會落後——同上方 R79 那格的
-    # 既有紀律，收輪者負責讓帳對得上）。
-    # 立案是本輪的真實事故：一個 subagent 在**六包並行共用的工作樹**上跑
-    # `git stash -q -u --keep-index`，瞬間清空 16 個修改檔 + 4 個未追蹤檔（含其他包正在
-    # 寫的檔），靠 `stash pop` 還原、未偵測到資料遺失——**但那是運氣不是設計**。
-    # 任務書當時已寫「不要 git add / commit / push」⇒ **禁令沒涵蓋到的那個動詞就是被踩的
-    # 那個**，而 R71 已實證純文件約束對「當下的模型」零攔阻力。
-    # matcher 取 `{Bash, PowerShell}` 的依據是**逐字稿實查**而非推測：本機 60 份逐字稿、
-    # 7,189 次 tool_use 中 Bash 4,083 次、PowerShell 0 次（Windows 側是另一個 project dir，
-    # 且該平台依鐵律一禁用 Bash ⇒ 一律走 PowerShell）。兩者相加＝腳本自己的 OWN_TOOLS；
-    # 🔴 R95 起 matcher＝OWN_TOOLS ∪ GOV_TOOLS（治理檔禁寫；下限同步升格，射程縮回即紅）。
-    # 該守衛對退化 payload 走 rc=1（出聲不阻斷）故不受「rc==2 必須配窄 matcher」那條約束，
-    # 但仍取窄 matcher；且腳本內**刻意沒有 `os.name` 閘**——照抄
-    # `block_bash_on_windows.py` 的平台閘等於「在事故現場（macOS）把它關掉」。
+    # 沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+    # 〈R83 毀滅性 git 阻斷器註冊面回填的立案〉。
     ("PreToolUse", ".claude/hooks/block_destructive_git.py"): frozenset(
         {"Bash", "PowerShell", "Write", "Edit", "NotebookEdit"}),
     ("PostToolUse", ".claude/hooks/sdd_hook_router.py"): frozenset(
@@ -2070,64 +1909,15 @@ class TestHookRegistrationScopeIsShrinkOnly(unittest.TestCase):
             "兩支枚舉器對同一份 settings.json 給出不同的 (事件, 腳本) 集合")
 
 
-# ══════════════════════════════════════════════════════════════════════════
-# R80：hook 條目形態（exec form）與載具存在性的回歸鎖
-# ══════════════════════════════════════════════════════════════════════════
-# 病：Windows 上 shell form 的 hook 經 Git Bash 的 `bash.exe -c` 起，而 `bash.exe`
-# 是 console 子系統程式 ⇒ **每觸發一次 hook 就閃一個 console 視窗**（實測：一個量測
-# 視窗內 39 支 bash.exe、其中 22 支自帶 conhost＝22 次閃窗）。exec form（條目帶
-# `args`）不經 shell、直接 spawn，指到 GUI 子系統的 `pythonw.exe` 即零視窗。
-#
-# 🔴 這道鎖真正在防的**不是**「有人把形態改回去」，是**修好與全毀的表徵相同**：
-# exec form 的載具解析不到時 CC 只記一行 ERROR、工具照跑（**fail-open**），螢幕上
-# 看起來就是「終於不閃窗了」。所以本節每一條判準的方向都是「少一半也要有人喊」，
-# 而不是「壞了會紅」。
+# 沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md〈R80 exec form 與載具存在性回歸鎖的立案〉。
 _LAUNCHER = _REPO_ROOT / ".claude" / "hooks" / "_hook_launcher.py"
 
 
 def _same_path(a: str | os.PathLike[str], b: str | os.PathLike[str]) -> bool:
     """兩個路徑是否指向**同一個檔案系統實體**（比 inode，不比字面字串）。
 
-    🔴 **為什麼不能比字面**（R83 於真 Mac 首跑抓到，判準本身是跨平台缺陷）：
-    「我把 cwd 設成 X」與「子行程回報 cwd 是 X」之間隔著一層核心正規化，**兩個平台
-    各有一種讓字面不等、語意相同的機制**，而且兩種都出現在測試最常用的暫存目錄上：
-
-      · **macOS**：`/var` 是 `/private/var` 的 symlink。`tempfile.mkdtemp()` 回
-        `/var/folders/.../T/xxx`（未解析），而 POSIX `getcwd(3)` 依規格回**已解析**
-        的絕對路徑 ⇒ 子行程必然回 `/private/var/folders/.../T/xxx`。實測本機
-        `os.path.samefile()` 為 True、字串比較為 False。
-      · **Windows**：`%TEMP%` 在多數機器上是 `C:\\Users\\<user>\\AppData\\Local\\Temp`，
-        使用者名稱超過 8 字元時 API 之間會混用 8.3 短檔名（`RUNNE~1`）；再加上
-        NTFS 大小寫不敏感（`C:\\` vs `c:\\`）與 GitHub runner 的目錄 junction，
-        同樣是「語意相同、字面不等」。
-
-    ⇒ 本判準要問的事情從頭到尾都是**「是不是同一個目錄」**，那件事的平台中立量法
-    只有一種：問檔案系統，不要問字串。`os.path.samefile()` 兩個平台都走
-    `os.stat()` 的 `(st_dev, st_ino)`——POSIX 是 device+inode；**Windows 上 CPython
-    的 `os.stat()` 走 `GetFileInformationByHandle`**，`st_ino` 是檔案索引、`st_dev`
-    是磁碟區序號，兩者都是**開檔後由核心回報的實體身分**，所以 8.3 短檔名／大小寫／
-    junction 三種變形全部自動被吃掉，不需要為 Windows 另寫一欄。
-
-    🔴 **刻意不用 `Path.resolve()` 當正規化**：它在 Windows 上是「字串正規化 + 查詢」
-    的混合體，行為隨版本與路徑是否存在而變（不存在的路徑會 fallback 成純字串處理）；
-    而 `samefile` 的語意只有一種、且在路徑不存在時是**明確失敗**而不是悄悄退化——
-    後者正是本 repo 反覆判過的「判準悄悄變成恆綠」形態。
-
-    OSError（任一側不存在／權限不足）一律回 `False`＝**fail-closed**：測試寧可紅在
-    「兩個路徑對不起來」，也不要因為量測失敗而放行。
-
-    🔴 **`samefile` 唯一會 fail-OPEN 的那個縫，以及誰在守它**（獨立複驗 R83 補記）：
-    上面「比 inode」的前提是**檔案系統真的給得出檔案 ID**。MSDN 對
-    `BY_HANDLE_FILE_INFORMATION` 逐字載明「不支援 file ID 的檔案系統一律回 0」——
-    FAT／部分 SMB 網路磁碟即屬此類 ⇒ 那種機器上 `st_ino` 兩邊同為 0、`st_dev` 又是
-    同一個磁碟區序號，`samefile` 會把**兩個不同的檔案判成同一個**。方向是放行，
-    不是誤擋，所以它不會自己叫出來（本輪只有 darwin，這一段是 MSDN 文件語意，
-    **不是實測值**）。
-    ⇒ 守它的是 `TestSamePathIsNotVacuous.test_two_different_directories_are_not_the_same`：
-    那一格在**本機真正的暫存檔案系統**上建兩個貨真價實不同的目錄再問一次，
-    檔案 ID 退化時它就地轉紅。**所以那一格不是可有可無的形式主義，刪掉它等於把
-    Windows 側唯一的 fail-open 偵測器一起刪掉**（本 repo 反覆踩的「鎖還在、但沒人
-    知道它在守什麼，於是下一輪被當成廢話刪掉」）。
+    沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+    〈_same_path 為何不能比字面（R83 真 Mac 首跑）〉。
     """
     try:
         return os.path.samefile(a, b)
@@ -2343,25 +2133,8 @@ class TestParsersSurviveTheExecFormConversion(unittest.TestCase):
 def _make_directory_link(target: Path, link: Path) -> str:
     """在 `link` 建一個「走過去會抵達 `target` 同一個目錄」的連結，回傳所用機制名。
 
-    🔴 **為什麼要分平台，而不是兩邊都 `os.symlink`**（鐵律三「這在另一個平台是什麼
-    值？」）：`os.symlink` 在 Windows 上**存在**（不是 `AttributeError`），但底層的
-    `CreateSymbolicLinkW` 需要開發者模式或 `SeCreateSymbolicLinkPrivilege`，一般
-    Windows 機器與未開啟開發者模式的 runner 上必回 `OSError`（WinError 1314）。
-    ⇒ 只寫 `os.symlink` 的話，Windows 側的結果**恆為 skip**——而 skip 不是覆蓋，
-    它只是把「這台機器從來沒驗過」寫得比較好看（`DEF-101-343~345` 的形態：連續
-    5+ 輪全 APPROVE、卻一次都沒在原生 Windows 上跑過）。
-
-    Windows 上**不需要任何權限**、且語意等價的機制是**目錄 junction**：`_same_path`
-    的 docstring 逐字點名「GitHub runner 的目錄 junction」是讓字面比較失效的三種
-    Windows 變形之一 ⇒ junction 正是這一格要涵蓋的真實情境，不是為了繞過權限硬找的
-    替代品。junction 沒有 `os` 公開 API（`_winapi.CreateJunction` 是私有的），標準
-    建法是 cmd 內建的 `mklink /J`。
-
-    🔴 **誠實劃界**：Windows 那一支在本輪的開發機（darwin）上**只驗到分派**（見
-    `test_the_windows_branch_uses_a_junction_not_a_symlink`）；`mklink /J` 的實際 rc、
-    以及 `samefile(junction, target)` 是否為 True，**未在原生 Windows 上實測**
-    （junction 是 reparse point，開檔預設會跟隨 ⇒ `GetFileInformationByHandle` 應回
-    目標的檔案索引，這是文件語意推論，不是量測值）。
+    沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+    〈_make_directory_link 為何分平台（junction vs symlink）〉。
     """
     if os.name == "nt":
         # `mklink` 是 cmd 的**內建**指令，不是獨立執行檔 ⇒ 必須經 `cmd /c`。
@@ -2579,36 +2352,8 @@ class TestHookLauncherContract(unittest.TestCase):
 class TestDeclaredWindowsCarrierExists(unittest.TestCase):
     """🔴 方案書 §4.3 自陳「連 `.venv` 都沒有仍無機械物看守」那個缺口的補丁。
 
-    為什麼這個缺口比閃窗嚴重：載具解析不到 ⇒ 六支守衛**全部靜默失效**，而螢幕上的
-    表徵就是「終於不閃窗了」。把缺口寫下來卻不給判準，等於把它登記成「已知且已接受」。
-
-    判準的形狀是**宣告 ↔ 實況雙向綁定**（不是硬編一個路徑）：settings.json 宣告了
-    venv 載具 ⇒ 那個路徑必須存在。這樣「有人把載具改成別的東西」也會被同一條守到。
-
-    🔴 為何不用 `skipUnless`／不用「偵測到 CI 就跳過」：
-      · 判準本體 `carrier_liveness_problems()` 自帶 `on_windows` 參數，兩個平台方向
-        都在**同一台機器上**以注入驗到（`DEF-101-766`：單平台判準不可無條件外推）；
-        用 `skipUnless` 反而會讓另一個方向永遠沒人跑過。
-      · 非 Windows 不看 venv 載具是**語意上的**理由：`.venv/Scripts/pythonw.exe` 在
-        mac/Linux 本來就不存在，那條在該平台是設計上的 fail-open，不是缺陷。
-        （該平台自己那條載具另有 `TestPosixCarrierLiveness`。）
-      · CI 的豁免同樣是語意的、且不由本測試負責：hook 只在「Claude Code 會跑的地方」
-        有意義，CI 從不跑 hook——所以會出聲的那一層落在
-        `tools/check_hooks_liveness.py`（開發機的閘門會跑、CI 由呼叫端整段跳過），
-        本測試只負責證明那個判準有牙。
-
-    🔴 **R80 ARCH-01：本類刻意不再有「這台機器上載具在不在」那一格**。原本那一格是
-    `assertEqual(carrier_liveness_problems(real, repo_root), [])`，它量的是**機器狀態**
-    而不是 repo 內容，於是在兩種完全正常的情境下必紅：
-      · windows-compat-ci／windows-smoke：`python tools/run_root_unittests.py` 跑在
-        `./tools/bootstrap.ps1` **之前**，那時 `.venv` 還不存在；而且該 workflow 稍後
-        會把 `.venv` 更名為 `.venv-cache-windows`——所以「把測試挪到 bootstrap 之後」
-        只是換一種方式再紅一次，不是修法。
-      · 任何**尚未跑過 bootstrap 的全新 clone**（含開發者第一次 clone 後直接跑根層
-        unittest）。複驗實測：project_dir 指向無 `.venv` 的暫存目錄 → problems len = 1。
-    機器狀態的正確通報者是 `tools/check_hooks_liveness.py`（advisory：印警告、不阻擋，
-    四個呼叫端在 `$CI` 有值時整段跳過）。判準本體**一個字都沒有放寬**——牙由下面三格
-    注入自證；換上來的是一件機器無關、而且原本沒有任何人在守的事（見下一格）。
+    沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+    〈TestDeclaredWindowsCarrierExists 立案與 R80 ARCH-01 訂正〉。
     """
 
     def test_the_declared_carrier_is_what_bootstrap_produces(self) -> None:
@@ -2685,15 +2430,8 @@ class TestDeclaredWindowsCarrierExists(unittest.TestCase):
 class TestPosixCarrierLiveness(unittest.TestCase):
     """POSIX 側載具的存在性判準（R80 SA-05）。
 
-    🔴 立案理由（缺口與 Windows 側**不對稱**，所以不是「順手補對稱」）：Windows 條目
-    釘死一個確定的檔案，POSIX 條目吃的是 **`PATH` 上任意一個 `python3`**——macOS 內建
-    那支常年是 3.9，而本 repo 的 bootstrap 門檻是 3.11。此前 `carrier_liveness_problems()`
-    在非 Windows **一律回空**，等於把「這個平台沒有 Windows 載具」寫成「這個平台沒有
-    載具問題」。三種失效（檔不在／沒有執行位元／直譯器太舊）表徵完全相同：CC 只記一行
-    ERROR 就放行，六支守衛一起消失，螢幕上就是「終於不閃窗了」。
-
-    四格全部以注入驅動、`on_windows=False` 強制走 POSIX 分支——判準的方向不該取決於
-    這台機器剛好是什麼（同本檔 `TestBlockBashHookDoesNotHurtOtherPlatforms` 的理由）。
+    沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+    〈TestPosixCarrierLiveness 立案（與 Windows 側不對稱）〉。
     """
 
     def _posix(self, **kwargs) -> list[str]:
@@ -2750,20 +2488,8 @@ class TestPosixCarrierLiveness(unittest.TestCase):
 class TestExecFormConversionScope(unittest.TestCase):
     """exec form 轉換的**射程**——哪一份 settings 轉了、哪一份還沒（R80 QA-03）。
 
-    🔴 立案理由（史實）：R80 只轉了**根層**那一份，根 `CLAUDE.md`〈鐵律一之二〉一度寫成
-    通則。兩個後果：①AutoClaude 子專案 session 下閃窗一次都沒少；②「那 6 條退回 shell
-    form」永遠不會轉紅。處置＝把「還沒轉的有幾條」變成**可查的量測值**：掃描面現查磁碟，
-    判準是相等——多了＝退步、少了＝轉好了卻沒回來改表。凍結版（Copy-on-Evolve）具名排除。
-    R81 已把 AutoClaude 那份轉完（普查表兩格皆 0）⇒ 本類職責由「登記還沒轉的」變成
-    「不准有人退回去」。
-
-    🔴 R84 訂正上一段那個「兩格皆 0」——**它是假的安心**（訴求 7「session 結束仍有彈跳
-    視窗」窮舉出來的第一名）：`FROZEN_SETTINGS_PREFIX` 把 `AISDLC_SDD/AISDLC_SDD_v*` 這
-    **30 份**全部結構性排除在掃描面之外，而其中一份是 **LATEST**——真的會被 Claude Code
-    載入的活躍檔（框架 skills 掛在版本目錄下，以它為 cwd 開 session 是常態）。實測那 30
-    份**全數仍是 shell form** ⇒ 對那種 session，R80／R81 的修法一次都沒生效，而普查表
-    照樣兩格全綠。處置分兩半：LATEST 進掃描面（以**版本中性鍵**登記，不把版號寫成常數）、
-    凍結歷史面登記成 shrink-only 的已知豁免（`TestFrozenShellFormIsAShrinkOnlyExemption`）。
+    沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+    〈TestExecFormConversionScope 史實與 R84 訂正〉。
     """
 
     def _counts(self) -> dict[str, int]:
@@ -3192,19 +2918,8 @@ _CARRIER_NAME_RE = re.compile(r"[{$]\(?\$?\s*([A-Za-z_][A-Za-z0-9_]*)")
 def _certified_carrier_names(text: str, suffix: str) -> set[str]:
     """該檔內**賦值來源含 `quiet_python`** 的變數名 ＝ 站點級白名單。
 
-    🔴 R84／SD-05：舊判準是 `_GUI_CARRIER_SYMBOL in text` ——那是**整檔通行證**，只要
-    檔案裡任何地方（連註解）出現過 `quiet_python` 這七個字，該檔所有內插載具一律放行。
-    實測注入：只在**註解**提到它 ＋ 一個內插出 `powershell.exe` 的 Action ⇒ **0 筆命中**，
-    而 `windowless_action_problems` 自己的 docstring 分支③ 逐字寫著「白名單不得變成
-    萬用通行證」⇒ 宣稱射程 ≠ 實作射程。這比沒有鎖更難看見：檔案在、判準在、測試全綠。
-
-    `.py` 走 AST：註解結構上不可能出現在 `ast.Assign.value` 裡 ⇒「註解不得認證」是
-    **性質**，不是靠剝註解的正則去逼近（`_decommented` 對 `.py` 只剝整行註解，行尾註解
-    照樣留著，用它會把同一個洞縮小而不是關掉）。`.ps1` 沒有現成 parser，退回「剝過註解
-    的行首賦值」比對。
-    誠實劃界：只追**一層**賦值——`x = _q(guard.quiet_python())` 認得，
-    `a = quiet_python(); x = a` 不認得（會判紅）。今日全庫唯一的內插站點是前者；
-    追賦值鏈要的是資料流分析，射程遠大於本輪，且假紅方向是安全的那一邊。
+    沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+    〈_certified_carrier_names R84／SD-05 沿革〉。
     """
     names: set[str] = set()
     if suffix == ".py":

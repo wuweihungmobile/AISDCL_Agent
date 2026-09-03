@@ -32,34 +32,11 @@ from _platform_helpers import (  # noqa: E402
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-# 探測本機一支「真正可用」的 bash 供本檔 `_BASH` fixture 使用。
-#
-# WHY（R64／DEF-101-617）：舊版 `_BASH = shutil.which("bash")` 在「PATH 上 `bash`
-# 解析到 WSL System32 佔位版、真正的 Git Bash 未直接掛在 PATH、只能透過 `git.exe`
-# 相對路徑找到」這種真實可重現的 Windows 設定下，會把該被排除的佔位版錯當成可用
-# bash——`_BASH` 本身就是錯的，本檔在這種機器上有 6/8 測試確定性失敗。
-#
-# R69 後續（DEF-101-753）：該修復當時以私有函式落在本檔，
-# `test_macos_smoke_skip_honesty.py` 另有一份判準不一致的複本，而
-# `test_smoke_ci_sync.py` 連探測都沒有 ⇒ 三處收斂至 `_platform_helpers.
-# usable_bash_for_fixture()`。**這不違反本檔頭 docstring 的「三份消費者各自獨立
-# 重寫」慣例**：那條慣例的射程是「驗證探測規則本身」的三份回歸鎖（本檔的
-# `usable_bash_with_probe_spy()` 仍直呼生產端 `bash_probe.usable_bash()`，鑑別力
-# 不受影響）；本行要的只是「給我一支能跑的 bash」當 fixture，用途不同。
-# 找不到就 `@unittest.skipUnless(_BASH, ...)` 跳過，不是失敗。
+# 沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md〈_BASH fixture 探測的 R64／R69 沿革〉。
 _BASH = usable_bash_for_fixture()
 
-# 手法 A（`env={"PATH": <只有空目錄>}` 讓 `dirname` 查不到）專用的載具，與 `_BASH` 分開取
-# （DEF-101-762，R71 於 Windows 11 真機收斂 DEF-101-618(a) 的殘留）。
-#
-# WHY 不能沿用 `_BASH`：兩者要的性質不同，而在 Windows 上它們**經常不是同一支**。
-# `_BASH` 要的是「跑得動 repo 的 .sh」，於是當呼叫端 ambient PATH 不含 coreutils 目錄時，
-# `Git\usr\bin\bash.exe` 會因驗活找不到 `dirname` 被淘汰，`_BASH` 落到會自我注入
-# `/mingw64/bin:/usr/bin` 的 `Git\bin\bash.exe`——那支**外部 PATH 管不住**，手法 A 對它
-# 是 no-op（`_platform_helpers.honours_external_path()` docstring 有兩支的實測對照）。
-# 於是同一份工作樹、同一支測試，在 Git Bash 殼層下跑是綠的、在 PowerShell 殼層下跑是紅的
-# ——紅的那次量到的是載具失效，不是被測物缺陷。本常數改以「載具性質」機械挑選，讓結果
-# 不再隨呼叫端殼層的 ambient PATH 漂移。
+# 沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+# 〈_PATH_HONOURING_BASH 為何不能沿用 _BASH〉。
 _PATH_HONOURING_BASH = path_honouring_bash_for_fixture()
 
 # 🔴 這個 skip **不是**「這支測試會失敗就跳過」——述詞完全不看 `PROBE_CMD` 的內容或結果，
@@ -105,24 +82,8 @@ def _build_coreutils_less_bash_clone(tmp_root: Path) -> Path | None:
     """在 `tmp_root` 下建構一份「刻意缺 coreutils 的 `Git\\bin\\bash.exe` 複製品」
     （手法 B，DEF-101-618(a)）。
 
-    WHY：`export PATH=` 限縮外部傳入 PATH 這招對真實 `Git\\bin\\bash.exe`
-    完全無效——該啟動器啟動時會**無條件**把 `/mingw64/bin:/usr/bin`（相對自身
-    安裝根目錄）注入到自己內部 PATH 最前面，不受外部傳入 PATH 內容影響（實測：
-    `env={"PATH": <單一空目錄>}` 呼叫後，bash 內部 `echo $PATH` 仍印出
-    `/mingw64/bin:/usr/bin:...`）。要讓這款啟動器對 `dirname` 確定性失敗，須讓
-    它自我注入的目標目錄本身缺 coreutils，而非限縮外部 PATH（那是手法 A，只對
-    `usr/bin/bash.exe` 這類不自我注入的解譯器有效，見 `TestProbeCmdRealSubprocessBehavior`）。
-
-    複製品結構（皆複製自本機真實 Git 安裝，路徑相對 `tmp_root`）：
-      bin/bash.exe          <- 啟動器本體（真實 `<install_root>/bin/bash.exe`）
-      usr/bin/bash.exe      <- 真解譯器（真實 `<install_root>/usr/bin/bash.exe`）
-      usr/bin/msys-2.0.dll  <- 解譯器執行期依賴（缺了會啟動失敗，非本測試要模擬
-                                的「找不到 dirname」情境，兩者性質不同）
-      etc/                  <- 空目錄（MSYS root 偵測標記）
-      mingw64/bin/          <- 空目錄（自我注入目標之一，刻意不放 coreutils）
-
-    找不到本機真實 Git 安裝（例如非 Windows 平台）回傳 `None`，呼叫端應
-    `skipTest`。
+    沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+    〈_build_coreutils_less_bash_clone 手法 B 的 WHY 與複製品結構〉。
     """
     install_root = _find_real_git_bash_install_root()
     if install_root is None:
@@ -149,22 +110,8 @@ def usable_bash_with_probe_spy(
 ) -> tuple[str | None, list[tuple[int, str]], list[OSError]]:
     """真跑生產端 `usable_bash()`，同時記錄它對 `subprocess.run` 的每一次呼叫結果。
 
-    WHY（R60 A-01／DEF-101-531）：生產端 `bash_probe.usable_bash()` 的 `except
-    Exception: continue`（`AISDLC_SDD/scripts/bash_probe.py:79-80`）把兩種語意
-    完全不同的情況壓成同一個 `None`——
-      ① 子行程真的起來、跑完 `PROBE_CMD` 而**驗活失敗** → 候選被正確拒絕（我們要驗的）；
-      ② 子行程**根本沒起來**（`OSError`）→ 載具壞掉，對生產端 wiring 零資訊。
-    只用 `assertIsNone(result)` 的測試無法分辨兩者，於是可以在 ② 之下長年假綠。
-    本 helper 把兩種來源分流回傳，讓斷言端**必須**表態。
-
-    回傳 `(result, completed, spawn_errors)`：
-      `completed`    = `[(returncode, stdout), ...]`（子行程起來並跑完）
-      `spawn_errors` = `[OSError, ...]`（`CreateProcess`／`execve` 失敗，載具壞掉）
-
-    `candidate_bash`（DEF-101-618(a) 新增，選用）：指定要驗的候選 bash 路徑；
-    省略時沿用既有預設值 `_BASH`，對既有呼叫端零行為變化。用於讓
-    `TestUsableBashRejectsCoreutilsLessBinBashClone` 可以指定手法 B 建構出的
-    「缺 coreutils 複製品」作為候選，而非本檔 fixture 探測到的真實可用 bash。
+    沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+    〈usable_bash_with_probe_spy WHY（R60 A-01／DEF-101-531）〉。
     """
     real_bash = candidate_bash if candidate_bash is not None else _BASH
     completed: list[tuple[int, str]] = []
@@ -250,22 +197,9 @@ class TestProbeCmdRealSubprocessBehavior(unittest.TestCase):
 )
 class TestBinBashLauncherSelfInjectsPathContract(unittest.TestCase):
     """行為層防線（DEF-101-618(a)）：直接鎖住「限縮外部 PATH（手法 A 的原始形態）
-    對 `bin/bash.exe` 這類會自我注入 PATH 的啟動器無效，但讓 bash **自己**在
-    啟動器完成自我注入之後、於自身行程內部執行 `export PATH=` 則可讓它確定性
-    失敗」這個現象本身，證明 R64 殘留發現（`TestProbeCmdRealSubprocessBehavior`
-    的兩支「拒絕」測試在 pwsh 下選到 `bin/bash.exe` 時失去鑑別力）的前提是真的，
-    也證明手法 A 的解法（"export PATH= ; " 前綴）對它真的有效。
 
-    此類與 `TestProbeCmdRealSubprocessBehavior`（驗證 `usr/bin/bash.exe` 這類
-    不自我注入的解譯器）互補、不重複：兩者驗證的是兩款不同二進位對同一種模擬
-    手法的不同反應，各自對不同候選類型維持鑑別力。
-
-    🔴 **R71／DEF-101-762 收斂上述「R64 殘留發現」**：該殘留當時只被記載、沒被修，
-    因為它在 macOS 與 Git Bash 殼層下不顯形。真正的觸發條件不是 pwsh，而是**呼叫端
-    ambient PATH 有沒有 coreutils 目錄**——沒有時 `usr/bin/bash.exe` 會驗活失敗，
-    `_BASH` 就落到這支自我注入的啟動器上。修法是讓那兩支「拒絕」測試改用依載具性質
-    機械挑選的 `_PATH_HONOURING_BASH`，不再沿用 `_BASH`；上面那句「互補」因此從
-    **巧合**變成**被強制**的事實。
+    沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+    〈TestBinBashLauncherSelfInjectsPathContract 互補關係與 R71 收斂〉。
     """
 
     def test_restricted_external_path_alone_is_ineffective(self) -> None:
@@ -392,19 +326,8 @@ class TestUsableBashEndToEndWithRestrictedPath(unittest.TestCase):
 
     @_needs_path_honouring_bash
     def test_usable_bash_rejects_candidate_when_path_lacks_dirname(self) -> None:
-        # DEF-101-762：候選明確指定 `_PATH_HONOURING_BASH`，不再沿用 `_BASH`。生產端
-        # `usable_bash()` 把候選當黑盒子呼叫（argv 寫死 `[cand, "-c", PROBE_CMD]`），測試側
-        # 唯一能施力的就是「餵它一個外部 PATH 管得住的候選」；餵到自我注入的啟動器時，
-        # 下面那條 `assertNotEqual(rc, 0)` 量到的是載具失效（見類別上方 skip 述詞）。
-        # R60 A-01 修正載具：舊版用 `{"PATH": ""}` + `clear=True`，在 Windows 上**兩段都壞**——
-        #   ① Windows 的 `os.environ["PATH"] = ""` 是「**刪除**該變數」而非「設為空字串」
-        #      （本機實測：設完 `GetEnvironmentVariableW("PATH")` 回 0／ERROR_ENVVAR_NOT_FOUND），
-        #      而子 MSYS bash 在**完全沒有 PATH** 時會自行合成 `/usr/local/bin:/usr/bin:...`
-        #      → `dirname` 照樣找得到、驗活成功 → 本測試該紅（pytest 載具下實測就是紅的）；
-        #   ② 再加 `clear=True` 清空整個環境區塊 → `CreateProcess` 回 `[WinError 87]`，
-        #      子行程根本沒起來、`except Exception` 吞掉 → `None` → 誤綠（官方 unittest 閘門）。
-        # 改用「PATH 指向一個真實存在但空無一物的目錄」：兩平台皆讓 bash 用得到 PATH 這個
-        # 變數、卻找不到 `dirname`（本機實測 rc=127 / `dirname: command not found`）。
+        # 沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+        # 〈DEF-101-762 候選指定與 R60 A-01 載具修正〉。
         with tempfile.TemporaryDirectory(prefix="probe_no_coreutils_") as empty_dir:
             result, completed, spawn_errors = usable_bash_with_probe_spy(
                 self.bash_probe, empty_dir, candidate_bash=_PATH_HONOURING_BASH
@@ -522,17 +445,8 @@ class TestNoneSourceIsDistinguishable(unittest.TestCase):
 class TestRestrictedPathCarrierCannotSilentlyVanish(unittest.TestCase):
     """反向哨兵（DEF-101-762）：手法 A 的載具不得在無人察覺下全數失去鑑別力。
 
-    WHY（R69 教訓的直接套用）：上面兩支「拒絕」測試現在掛著 `_needs_path_honouring_bash`
-    這個帶述詞的 skip。帶述詞的 skip 解決了「在無鑑別力載具上報誤導性紅燈」，卻開了另一
-    個口子——**若哪天所有候選都變成自我注入形態，述詞會恆假、兩支測試永久空轉，而
-    `run_root_unittests.py` 的 rc 仍是 0**。那正是 R69 付過學費的形狀（樣本被搬光後靜默
-    skip），只是換成從載具側觸發。本類把「該 skip 述詞恆假」本身變成紅燈。
-
-    誠實劃界：本類只看**手法 A**這條通道。手法 B（`TestUsableBashRejectsCoreutilsLess
-    BinBashClone`，複製一份缺 coreutils 的 Git 樹）是對自我注入啟動器仍有效的互補通道，
-    它自己的存活由該類 `setUp()` 的具名 `skipTest` 呈現，不併入本哨兵——兩條通道驗的是
-    不同層（手法 A 兼顧 PROBE_CMD 本身與生產端 wiring，手法 B 只到 wiring 層），任一條
-    斷掉都該各自具名，混成一條會讓「斷了哪一條」變得不可讀。
+    沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+    〈TestRestrictedPathCarrierCannotSilentlyVanish WHY 與誠實劃界〉。
     """
 
     def test_a_path_honouring_bash_exists_whenever_any_bash_does(self) -> None:
@@ -606,25 +520,8 @@ _WINDOWS_LAUNCHABLE_SUFFIXES = (".com", ".exe", ".bat", ".cmd")
 class TestWslStubIsNeverAcceptedAsRealBash(unittest.TestCase):
     """`usable_bash_for_fixture()` 必須以**路徑規則**排除 System32 段的 bash。
 
-    WHY 這支測試要讓 stub「驗活成功」（Rule 9 — 鎖的是意圖不是行為）：真實世界的
-    WSL 佔位 bash 在**未安裝發行版**時會 `exit 1`（R69 雲端實測輸出即為 UTF-16LE 的
-    `Windows Subsystem for Linux has no installed distributions.`），於是任何帶驗活的
-    探針都會**碰巧**拒絕它——收斂前 `test_macos_smoke_skip_honesty._usable_bash()`
-    的裸 bash 分支根本沒有 System32 排除，卻一直是綠的，靠的正是這個僥倖。一旦機器
-    真的裝了發行版，驗活就會在 Linux 裡成功，該探針便會把 repo 的 Windows 腳本丟進
-    WSL 跑。本鎖因此刻意把僥倖拿掉：stub 驗活成功，**只剩路徑規則能救**。
-
-    可在 macOS 上跑（`PureWindowsPath` 對 POSIX 路徑同樣依段切分，見
-    `bash_probe_spec.SYSTEM32_SEGMENT` 的消費端註解），不需要 Windows 真機。
-
-    🔴 **但「可在 macOS 上跑」不等於「在 Windows 上跑得起來」**（DEF-101-754）：
-    本類最初把 stub 一律寫成 shebang 腳本、Windows 上只把檔名改成 `bash.exe`，
-    於是下方正控在真 Windows 上以 `WinError 216` **error 收場**——本類自己就是
-    `improving_103` §9.5 那條新規則（「只在某平台成立的判斷，回歸鎖必須有本機可
-    重現該平台語意的路徑」）落地的第一個實例，而它違反了該規則的**對偶方向**：
-    只顧本機重現得了，沒顧目標平台跑不跑得動。stub 形態改由 `_STUB_FORMS` 依
-    `os.name` 分派，兩平台皆為真執行；形態本身由
-    `TestStubFormIsLaunchableOnItsOwnPlatform` 在**任一平台**機械看守。
+    沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+    〈TestWslStubIsNeverAcceptedAsRealBash WHY 與 DEF-101-754〉。
     """
 
     def _make_stub(self, parent_dir_name: str) -> Path:
@@ -710,15 +607,8 @@ class TestWslStubIsNeverAcceptedAsRealBash(unittest.TestCase):
 class TestStubFormIsLaunchableOnItsOwnPlatform(unittest.TestCase):
     """meta 鎖：`_STUB_FORMS` 每一種形態都必須真的被**該平台**的行程建立語意啟動。
 
-    WHY（DEF-101-754，Rule 9 — 鎖的是意圖不是行為）：`improving_103` §9.5 訂立
-    「凡只在某平台才成立的判斷，回歸鎖必須有一條能在本機重現該平台語意的路徑」，
-    而 `TestWslStubIsNeverAcceptedAsRealBash` 是它落地的第一個實例——**結果它自己
-    只在 macOS 跑得動，在 Windows 上以 `WinError 216` 炸掉**。這揭露 §9.5 的規則
-    寫得不完整：只要求「本機重現得了」，沒要求「目標平台上真的執行得起來」，於是
-    規則只活在文件裡，沒有任何機械物在看它。
-
-    本類就是那個機械物：它把「某形態能不能被某平台啟動」變成**在任何平台上都可判
-    定**的斷言，因此 macOS 上的開發者不必等雲端 CI 就會知道 Windows 分支寫壞了。
+    沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+    〈TestStubFormIsLaunchableOnItsOwnPlatform WHY（§9.5 的對偶方向）〉。
     """
 
     def test_each_form_meets_its_platform_launch_precondition(self) -> None:
@@ -773,16 +663,8 @@ class TestStubFormIsLaunchableOnItsOwnPlatform(unittest.TestCase):
     def test_windows_form_is_findable_by_the_production_helper(self) -> None:
         """Windows 形態必須仍在 `shutil.which("bash")` 的 PATHEXT 解析範圍內。
 
-        WHY 這支獨立於上一支：上一支只看副檔名字串，看不到「生產端 helper 到底找
-        不找得到它」。若 Windows 形態改名成 `bash.sh`，`usable_bash_for_fixture()`
-        會回 `None`，於是 `test_system32_stub_is_rejected` 的 `assertIsNone` 會因為
-        **根本沒找到任何候選**而通過＝假綠，主判準（System32 段規則）一次都沒被執行。
-
-        本機 macOS 以 `sys.platform` + `PATHEXT` 驅動**真正的** `shutil.which()`
-        （不是重寫一份它的邏輯）來重現 Windows 解析語意。誠實劃界：這裡重現的是
-        「PATHEXT 展開」這一段，**不含** `CreateProcess` 真的把 `.cmd` 交給 cmd.exe
-        執行那一段——後者本機無法重現，由 Windows CI 上的
-        `test_stub_is_live_so_only_the_path_rule_can_reject_it` 真執行覆蓋。
+        沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+        〈test_windows_form_is_findable_by_the_production_helper 為何獨立一支〉。
         """
         filename, _, _ = _STUB_FORMS["nt"]
         tmp = Path(tempfile.mkdtemp())

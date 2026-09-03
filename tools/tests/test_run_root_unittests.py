@@ -28,6 +28,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import run_root_unittests  # noqa: E402
 from lib import windows_skip_tags  # noqa: E402  # R72：skip 標籤家族的 SSOT（見該檔頭）
 
+#: DEF-200-170：刻意取 **runner 手上的那一個** module 物件。`tools/lib` 同時也在 `sys.path`
+#: 上（runner 自己插的），改寫成 `from lib import min_tests_margin` 會拿到**第二個副本**，
+#: 於是「測試驗的常數」與「runner 讀的常數」是兩個物件、日後任何 patch 都會靜默失效——
+#: 同 `test_hints_and_tag_are_shared_with_the_runtime_lock_not_copied` 已付過學費的形態。
+min_tests_margin = run_root_unittests.min_tests_margin
+
 
 class RatchetDriftWarningTest(unittest.TestCase):
     """R57 新增：下限 ratchet 過期提醒（`ratchet_drift_message`）。
@@ -91,6 +97,29 @@ class RatchetDriftWarningTest(unittest.TestCase):
             ),
             f"MIN_TESTS={run_root_unittests.MIN_TESTS} 相對實況 {count} 已過期到紅線，"
             "請重釘（R57 起本斷言即為 ratchet 的機械保鮮期）",
+        )
+
+    def test_current_pin_still_has_zero_dep_discrimination_headroom(self) -> None:
+        """🔴 DEF-200-170：真正會先響的那道紅線——綁的是**零相依餘裕**，不是比例。
+
+        WHY 上面那支不夠（不是重複，是它結構上到不了）：上面的紅線比 `count ÷ MIN_TESTS
+        > 1.25`，而零相依沙箱只蒸發 `collapse_loss` 支（落地當回合實測 178，遠小於
+        `0.25 × MIN_TESTS`）⇒ 下限失去零相依鑑別力那一刻，比例線連 WARN 都還沒到，
+        五輪同型復發每次都是環境判準先炸並把讀者指往「相依沒裝齊」。
+
+        本斷言是那五輪缺的那道線：餘裕剩不到四分之一就紅，**早於**環境判準失效，
+        紅字直接帶著該重釘成多少。重釘一律由收尾單人窗口在所有並行包停工後做一次。
+        """
+        suite = run_root_unittests.discover_suite(run_root_unittests._TESTS_DIR)
+        self.assertIsNone(
+            min_tests_margin.headroom_message(
+                suite.countTestCases(),
+                run_root_unittests.MIN_TESTS,
+                run_root_unittests.suite_modules(suite),
+                min_tests_margin.HEADROOM_STALE_FRACTION,
+            ),
+            "↑ 這則訊息本身就是修法（含該重釘成多少）。它出現＝零相依鑑別力餘裕已剩不到"
+            "四分之一，再放著就會輪到 ZeroDepEnvironmentDiscriminationTest 用錯的歸因先炸",
         )
 
 
@@ -248,17 +277,8 @@ class ReportWindowsNativeSkipsTest(unittest.TestCase):
 class UntaggedWindowsLikeSkipsTest(unittest.TestCase):
     """R67-F11：`[WINDOWS-NATIVE-ONLY]` **標籤完整性**前瞻鎖。
 
-    WHY（為何上面那組鎖不夠）：`ReportWindowsNativeSkipsTest` 全組都只驗「已經帶
-    標籤的 skip 會被點名」——對「該帶而沒帶」結構性盲目，而那正是低報的來源。
-    R67 動工實測：macOS 上 15 支 skip 全為 Windows 專屬，標題只印 10（低報 33%），
-    其中 4 支是 R65（`01fd8c3`）、1 支是 R66（`8654975`）落地時漏標；R59 已在
-    `tools/tests/test_install_windows_nightly.py:344-350` 逐字記過同一形態，兩輪後
-    原地復發。掃描員動工前另做過反證：把一支帶滿 Windows 關鍵詞、**未標籤**的
-    skip 附加進既有鎖檔，全套 1140 支測試**無一支轉紅**（rc=0）——前瞻鎖確實不存在。
-
-    本組鎖的是那個新判準本身，含四個方向：命中要抓、標籤要放行、不相關的 skip
-    不得誤殺、以及「在 Windows 上必須整組閉嘴」（否則 POSIX-only skip 的理由幾乎
-    都會提到 Windows，會在真 Windows 機器上製造整片假紅）。
+    沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+    〈UntaggedWindowsLikeSkipsTest WHY（低報 33% 的實測）〉。
     """
 
     def _result_with_skips(self, *skips: tuple[str, str]) -> unittest.TestResult:
@@ -722,22 +742,8 @@ class UnregisteredSkipTagVocabularyTest(unittest.TestCase):
 class StaticWindowsSkipTagScanTest(unittest.TestCase):
     """R72：`[WINDOWS-NATIVE-ONLY]` 標籤完整性的**靜態、跨平台**鎖。
 
-    WHY（為何上面那組 runtime 鎖不夠——而且不是它寫錯）：
-    `untagged_windows_like_skips` 在 Windows 上整組早退（`if on_windows: return []`），
-    上面 `test_on_windows_the_check_is_silent` 正是在**要求**它這麼做，理由也成立
-    （Windows 上會 skip 的是 POSIX-only 測試，其 reason 幾乎必然提到 Windows，照掃
-    必然假紅）。但代價是結構性的：三道 Windows 側閘門（本機 pytest／pre-push／
-    windows-compat-ci）從此是**同一個瞎點的三份複本**——R71 在 Windows 落地的漏標，
-    三處都看不見，只能等別的平台跑到才發現，而那正好是 R43 DEF-101-348 那條
-    「Windows 專屬測試連續 5+ 輪全 APPROVE 卻從未在 Windows 跑過」的同款延遲。
-
-    本組鎖的是那個補位判準：不看「現在跑在哪個平台」，改看 skip 條件的**方向**
-    （`skipUnless(<Windows 述詞>)` vs `skipIf(<Windows 述詞>)`）。方向資訊寫在原始碼
-    裡，三個平台讀到的是同一份，所以這道掃描在哪裡跑都會說話。
-
-    落地前的鑑別力反證（Windows 11 實測）：不含方向判準的版本對同一棵樹報 **7 筆**
-    假紅，全數是 `skipIf(os.name == "nt")` 的 POSIX-only 測試；加上方向判準後歸零。
-    也就是說「方向」不是可有可無的精緻化，它是這道鎖能不能存在的前提。
+    沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+    〈StaticWindowsSkipTagScanTest WHY（三道閘門同一個瞎點）〉。
     """
 
     _WIN_PRED = 'os.name == "nt"'
@@ -1003,20 +1009,8 @@ class StaticWindowsSkipTagScanTest(unittest.TestCase):
 class ProblemReportItemizationTest(unittest.TestCase):
     """R83：「表頭報 N 筆，明細只印其中兩類」的回歸鎖（舵手當回合實測到的 2 行輸出）。
 
-    修前實況：`report_untagged_windows_skip_decorators` 的 `problems` 是**七個類別的
-    總和**，總表頭印 `len(problems)`，而它後面的明細迴圈只涵蓋 `unregistered` 與
-    `offenders` ⇒ 唯一的問題落在別的類別時，讀者看到「發現 1 個問題：」之後一片空白，
-    於是去找一個根本不存在的第二筆。七類之中 `掃描面為空` 更是從頭到尾**沒有任何一段
-    程式碼印它**，而既有的 `test_empty_scan_surface_is_fail_closed` 只讀回傳值、把
-    stderr 丟進垃圾桶 ⇒ 結構上看不到這件事（一道鎖看得見缺陷的一半，就會讓人以為
-    整件事有人在守）。
-
-    本組鎖的是**不變量本身**，不是今天那一筆：
-      ① 進到 buckets 的每一筆明細都必須逐字出現在輸出裡——**含未登記的類別**；
-      ② 表頭數字必須等於印出來的明細行數（同一個來源，不得再各算一次而脫鉤）；
-      ③ 生產端的類別鍵 ↔ `_PROBLEM_CATEGORY_WHY` 必須**雙向**相等 ⇒ 「新增一類卻忘了
-         印」在寫出來的**當回合**就轉紅，不必等那一類真的觸發（`掃描面為空` 在真 repo
-         上永遠不觸發，靠「等它發生」等於永遠不會發現）。
+    沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+    〈ProblemReportItemizationTest 修前實況〉。
     """
 
     @staticmethod
@@ -1106,23 +1100,8 @@ class ProblemReportItemizationTest(unittest.TestCase):
     def test_the_returned_problems_are_derived_only_from_the_buckets(self) -> None:
         """封住旁路：問題只能經 buckets 出去。
 
-        `render_problem_report` 只保證「進到 buckets 的一定被印」；若有人另攢一份扁平
-        清單再併進 return（修前正是那個形狀：`problems` 同時裝七類、印列面只走兩類），
-        不變量①②當場失效而本檔其他測試都看不到。故判三件**形態**：
-          ① 函式內沒有名為 `problems` 的累積器（修前那個名字，也是最可能的復發形）；
-          ② 每一條非空 return 都必須取自 `buckets`——這一條才是通則，換個變數名也擋得住；
-          ③ 非空 return 不得是**併接**（`A + B` 或多個 `*` 展開）。
-
-        🔴 ③ 是獨立複審實測補上的（R83 驗證者注入 case G）：只判 ②「dump 裡出現
-        `buckets`」時，`return [… for … in buckets …] + bypass` 這個形狀**照樣通過**
-        ——`buckets` 確實出現了，旁路那一半卻沒有任何人印它。該注入當時是靠兩支**行為**
-        鎖轉紅才被抓到，而那兩支只在旁路那一筆**恰好在本次觸發**時才有鑑別力（條件式的
-        旁路仍會靜默溜過）⇒ 形態面必須自己封住。今天的實作既非併接也無 `*` 展開，故 ③
-        是零成本；`return list(_flatten(buckets))` 這類正當重構仍然放行（不判「必須是
-        某個特定形狀」，只判「buckets 之外還有第二個來源」這一件事）。
-
-        🔴 刻意判 AST 而非 grep 字串：本函式的註解逐字提到 `problems.append` 以說明
-        修前形態，第一版用字串比對時被自己的散文判紅（實測），而守的標的是**程式碼**。
+        沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+        〈test_the_returned_problems_are_derived_only_from_the_buckets 三形態與 R83 補款〉。
         """
         fn = ast.parse(textwrap.dedent(inspect.getsource(
             windows_skip_tags.report_untagged_windows_skip_decorators))).body[0]
@@ -1261,15 +1240,8 @@ class DumpFailureDetailTest(unittest.TestCase):
 class CollectionIntegrityTest(unittest.TestCase):
     """R60 Pkg-P8：收集面完整性——「有檔沒被收到」必須紅，且不得被 MIN_TESTS 漏掉。
 
-    WHY（測意圖，非僅行為）：R60 並行修復期間三次量測分別得到 894／906／916，被立案
-    當成「並行負載下 discovery 收集數不決定性、疑為第四個並行假紅成因」追查。實際根因
-    是**磁碟真的變了**——同一支 `test_check_defect_log_crossref.py` 被另一個並行包從
-    29 支測試逐步擴充到 51 支，而其餘 52 支檔固定貢獻 865 支，故
-    865+29=894、865+41=906、865+51=916，三個數字是三個時間切片，沒有一次是 race。
-    追查過程暴露兩個**與該事件無關、但真實存在且當時完全無守門**的缺口，本類別鎖住：
-      ① **下限語意的盲區**：實況 916 vs 下限 845 ⇒ 可靜默蒸發 71 支測試仍印 ✅；
-      ② **沒被收集的測試不出現在任何一行輸出裡**——它從未被 loader 交給 runner，
-         故既不在 `skipped=N`、也不在 `report_all_skips` 明細裡（這就是「靜默」的核心）。
+    沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+    〈CollectionIntegrityTest WHY（894／906／916 三個時間切片）〉。
     """
 
     _seq = 0
@@ -1596,19 +1568,7 @@ class ExecutionGapTest(unittest.TestCase):
         )
 
 
-# ── R68：零相依環境（＝CI 實況）的鑑別力鎖 ────────────────────────────────────
-#
-# 缺陷（三支 CI 自 2026-07-14 起連續全紅，無人察覺）：`tools/tests/` 有三支測試
-# import `autoclaude.*`，連帶拉進 yaml→pydantic→httpx；而 CI 三個 job 都不裝任何
-# 第三方套件。缺相依時 `unittest` discovery **不報錯**，只把該模組整份覆蓋塌成一支
-# `_FailedTest` 佔位測試——122 支 Windows 迴歸鎖靜默不跑，而閘門紅在一句「測試疑似
-# 大規模靜默消失（目錄改名/pattern 不符/路徑錯）」上，三條指路全錯。
-#
-# 本組鎖的**模擬手法**：往 `sys.meta_path` 插一個對指定 top-level 模組拋
-# `ModuleNotFoundError` 的 finder，即可在**任何**環境裡重現零相依環境，不需要真的
-# 建一個乾淨 venv。落地時實測：此法對真實 `tools/tests/` 樹產生的收集數與佔位模組
-# 集合，與 stdlib-only venv 實跑、以及三個 CI 平台回報的數字**三方完全一致**。
-# 因為要隔離 `sys.meta_path` 與 `sys.modules` 的污染，一律在子行程裡跑。
+# 沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md〈R68 零相依環境鑑別力鎖的立案與模擬手法〉。
 _ZERO_DEP_PROBE = '''\
 import json, sys
 _blocked = set(json.loads(sys.argv[1]))
@@ -1625,6 +1585,13 @@ sys.meta_path.insert(0, _Blocker())
 sys.path.insert(0, sys.argv[3])
 import run_root_unittests as R
 
+if sys.argv[2] == "collect":
+    # DEF-200-170：**只 discover、不執行任何測試**的收集面快照（秒級），回答「沙箱裡哪幾支
+    # 模組塌了、各留幾支」——`min_tests_margin` 唯一的釘選面就靠它保鮮，不靠靜態猜測。
+    _s = R.discover_suite(R._TESTS_DIR)
+    print(json.dumps({"count": _s.countTestCases(), "mods": R.suite_modules(_s),
+                      "placeholders": [m for m, _k in R.discovery_placeholders(_s)]}))
+    sys.exit(0)
 if sys.argv[2] == "main":
     sys.exit(R.main())
 # "floor"：刻意繞過 main() 的 fail-fast，直接叩下限守門本身——證明**即使**前置
@@ -1666,6 +1633,243 @@ def _run_zero_dep_probe(mode: str, blocked: list[str]) -> subprocess.CompletedPr
     而它每跑一次的代價是整套時間，兩支測試各跑一次是純粹的浪費。
     """
     return _zero_dep_probe_cached(mode, tuple(blocked))
+
+
+def _blocked_prereqs() -> list[str]:
+    return [imp for imp, _pip in run_root_unittests._THIRD_PARTY_PREREQS]
+
+
+def _zero_dep_collect() -> dict:
+    """零相依沙箱的**收集面**快照（`collect` 模式：只 discover、不執行任何測試）。
+
+    與 `floor`／`main` 的差別是代價：那兩個會把整棵樹再跑一次，這個是秒級 ⇒
+    「拿真沙箱當保鮮看守」對每一次全套執行都負擔得起。
+    """
+    proc = _run_zero_dep_probe("collect", _blocked_prereqs())
+    if proc.returncode != 0:  # fail-loud：探針壞掉時不得讓依賴它的斷言靜默通過
+        raise AssertionError(
+            f"零相依 collect 探針 rc={proc.returncode}——依賴它的保鮮鎖失去取值面。\n"
+            f"stderr 尾段：{proc.stderr[-1200:]}"
+        )
+    return json.loads(proc.stdout.strip().splitlines()[-1])
+
+
+@unittest.skipIf(
+    os.environ.get(_ZERO_DEP_PROBE_ENV) == "1",
+    "本類別與 ZeroDepEnvironmentDiscriminationTest 同樣會 spawn 零相依探針；在探針**內部**"
+    "再跑一次就會遞迴生出孫探針（DEF-101-803 實測：整套牆鐘 823s→3813s 且仍逾時）。"
+    "此 skip 是**斷遞迴**，不是放棄覆蓋——外層那一次照跑，本組斷言全部在外層被驗證。",
+)
+class MinTestsMarginCriterionTest(unittest.TestCase):
+    """🔴 DEF-200-170 的回歸鎖：`MIN_TESTS` 的重釘提醒改綁**零相依餘裕**這根軸。
+
+    沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md〈MinTestsMarginCriterionTest 四個方向〉。
+    """
+
+    @staticmethod
+    def _live_suite_modules() -> dict[str, int]:
+        return run_root_unittests.suite_modules(
+            run_root_unittests.discover_suite(run_root_unittests._TESTS_DIR)
+        )
+
+    def test_the_criterion_speaks_before_the_environment_check_dies(self) -> None:
+        """① 可達性：在環境判準失效的**前一支**，新判準必須已經開口、舊判準必須還沒。
+
+        判準刻意寫成「叩真的那兩個函式」而不是在測試裡重算一次門檻公式——第二份公式
+        就是下一次漂移（本 repo 對「鎖抄一份自己的判準」已有多次判例）。
+        """
+        min_tests = run_root_unittests.MIN_TESTS
+        mods = self._live_suite_modules()
+        loss = min_tests_margin.collapse_loss(mods)
+        self.assertGreater(
+            loss, 0,
+            "本 repo 的零相依沙箱竟然一支模組都不塌 ⇒ 整個判準不適用，"
+            "請先確認 _THIRD_PARTY_PREREQS 與 PREREQ_DEPENDENT_MODULES 是否已失實",
+        )
+        dead = min_tests_margin.discrimination_lost_count(min_tests, loss)
+        self.assertIsNotNone(
+            min_tests_margin.headroom_message(dead - 1, min_tests, mods),
+            f"收集數 {dead - 1}（環境判準失效的前一支）時新判準還不說話 ⇒ "
+            "換了公式但沒換到「先說話」這件事，DEF-200-170 沒被修掉",
+        )
+        self.assertIsNone(
+            run_root_unittests.ratchet_drift_message(dead - 1, min_tests),
+            f"舊比例 WARN 在收集數 {dead - 1} 就已經說話了？那 DEF-200-170 的前提"
+            "（緩衝帶結構上到不了）已經改變，本鎖的對照組失效，請重新驗算再改判準",
+        )
+        for label, fraction in (
+            ("WARN", min_tests_margin.HEADROOM_WARN_FRACTION),
+            ("STALE", min_tests_margin.HEADROOM_STALE_FRACTION),
+        ):
+            with self.subTest(layer=label):
+                self.assertLess(
+                    min_tests_margin.first_speaking_count(min_tests, loss, fraction), dead,
+                    f"{label} 層第一次說話的收集數不早於環境判準失效點 ⇒ 又是一個死判準",
+                )
+
+    def test_growth_into_the_warn_band_says_repin_not_environment(self) -> None:
+        """② 「成長到該 WARN、但還沒到 FAIL」的情境：判準要說話，且說的是重釘。
+
+        合成輸入（不動真樹）：一支宣告內的模組貢獻 201 支 ⇒ `collapse_loss` 為 200。
+        """
+        min_tests, mods = 1000, {"test_gha_action_versions": 201}
+        self.assertEqual(min_tests_margin.collapse_loss(mods), 200)
+        count = min_tests_margin.first_speaking_count(
+            min_tests, 200, min_tests_margin.HEADROOM_WARN_FRACTION)
+        msg = min_tests_margin.headroom_message(count, min_tests, mods)
+        self.assertIsNotNone(msg, "成長進 WARN 帶卻一個字都沒說＝這一層又是死的")
+        assert msg is not None
+        self.assertIn("MIN_TESTS", msg)
+        self.assertIn("重釘", msg)
+        self.assertIn(
+            str(count), msg,
+            "訊息必須直接給出「該重釘成多少」，否則讀者還要自己算——"
+            "而那正是五輪都沒有人動手的原因之一",
+        )
+        self.assertNotIn(
+            "環境問題", msg,
+            "新判準的歸因不得與環境判準混用同一句話：`report_floor_failure` 的"
+            "「環境問題」是另一件事，兩邊講同一句就等於沒有修掉歸錯因",
+        )
+        self.assertIsNone(
+            min_tests_margin.headroom_message(
+                count, min_tests, mods, min_tests_margin.HEADROOM_STALE_FRACTION),
+            "WARN 帶內紅線層就開口 ⇒ 緩衝區為空、退化成單一門檻"
+            "（R57 round 1 ARCH-06 判過的那個形態，換一根軸也不准復發）",
+        )
+        self.assertIsNone(
+            min_tests_margin.headroom_message(count - 1, min_tests, mods),
+            "帶下緣之前一支就開口 ⇒ 常亮警告會退化成背景噪音，等於沒有",
+        )
+
+    def test_a_genuinely_incomplete_environment_stays_the_environment_checks_job(self) -> None:
+        """③ 環境真的不完整時：新判準必須閉嘴，環境判準必須照樣說得出「環境問題」。
+
+        沒有這一支，最可能的退化是「新判準把兩件事都攬過去講」——那不是修好歸錯因，
+        是把錯歸因換一個方向再犯一次。
+        """
+        sandbox = {name: 1 for name in min_tests_margin.PREREQ_DEPENDENT_MODULES}
+        sandbox["test_not_dependent_on_third_party"] = 900
+        self.assertEqual(
+            min_tests_margin.collapse_loss(sandbox), 0,
+            "沙箱形狀（每支已塌成一支佔位測試）下 collapse loss 必須為 0＝判準不適用",
+        )
+        self.assertIsNone(
+            min_tests_margin.headroom_message(5000, 1000, sandbox),
+            "相依真的缺席時新判準竟然開口 ⇒ 它搶走了環境判準的歸因，製造第二個錯方向",
+        )
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            run_root_unittests.report_floor_failure(
+                Path("/fake/tests"), 900, 1000,
+                [("test_gha_action_versions", "_FailedTest")], [("yaml", "pyyaml")],
+            )
+        out = buf.getvalue()
+        self.assertIn("環境問題", out, "環境判準被新判準蓋掉了——那一面的覆蓋不得有淨損失")
+        self.assertIn("pyyaml", out, "環境歸因仍必須給得出可直接複製的安裝指令")
+
+    def test_the_runner_does_not_cry_repin_on_real_sandbox_counts(self) -> None:
+        """③ 的真資料半格：餵**真沙箱量到的**逐模組收集數給提醒層，不得喊重釘。
+
+        WHY 不看沙箱 `floor` 的 stdout（第一版就那樣寫、當場自查發現它今天**恆真**）：
+        沙箱裡收集數低於下限 ⇒ `run_with_floor` 在 `report_floor_failure` 就 `return 1`，
+        根本走不到提醒層 ⇒ 那是一道 vacuous 鎖。改餵真沙箱計數，判準就得自己撐住。
+        `count` 刻意取遠高於下限的值，讓「不適用」是判準的決定而非數字不夠大。
+        """
+        sandbox_mods = _zero_dep_collect()["mods"]
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            run_root_unittests.warn_ratchet_drift(
+                99999, run_root_unittests.MIN_TESTS, sandbox_mods)
+        self.assertNotIn(
+            "零相依沙箱的鑑別力餘裕", buf.getvalue(),
+            "相依缺席的環境裡竟然喊重釘 ⇒ 新判準搶走了環境判準的歸因，"
+            "那是把 DEF-200-170 的錯歸因換個方向再犯一次",
+        )
+        self.assertIn(
+            "環境問題", _run_zero_dep_probe("floor", _blocked_prereqs()).stderr,
+            "沙箱裡該說話的仍然是環境判準——它的覆蓋不得因為本輪新增判準而有淨損失",
+        )
+
+    def test_the_declared_collapsing_set_matches_the_real_sandbox(self) -> None:
+        """④ 唯一釘選面的保鮮：宣告的「會塌模組集合」必須逐字等於真沙箱量到的那一組。
+
+        這是本模組敢只釘集合、不釘支數的前提。落地當回合實測過反例：改用 top-level
+        import 靜態掃描會漏掉 `test_ntfs_trailing_space_device_name`（**間接**拉進相依）
+        ⇒ 猜測面不可信，只有真沙箱能當保鮮看守。
+        """
+        got = set(_zero_dep_collect()["placeholders"])
+        want = set(min_tests_margin.PREREQ_DEPENDENT_MODULES)
+        self.assertEqual(
+            got, want,
+            f"宣告集合與真沙箱不符（沙箱多出 {sorted(got - want)}／宣告多出 {sorted(want - got)}）"
+            "⇒ collapse loss 算錯 ⇒ 餘裕與兩層門檻全部失真。"
+            "修法：把 min_tests_margin.PREREQ_DEPENDENT_MODULES 改成沙箱實測的那一組",
+        )
+
+    def test_the_loss_arithmetic_matches_the_real_sandbox(self) -> None:
+        """④ 的第二半：`collapse_loss` 的「減掉模組數」修正項必須對得上真沙箱。
+
+        刻意逐模組比對而**不**比兩邊總數：總數是跨行程的兩次量測，並行包在那幾秒內動樹
+        就會讓真鎖變 flaky（DEF-101-886 判例）。而本判準的內容就是「集合 ＋ 每支塌成 1」，
+        逐模組比對正好等價。
+        """
+        sandbox_mods = _zero_dep_collect()["mods"]
+        live = self._live_suite_modules()
+        for name in sorted(min_tests_margin.PREREQ_DEPENDENT_MODULES):
+            with self.subTest(module=name):
+                self.assertEqual(
+                    sandbox_mods.get(name), 1,
+                    "沙箱裡必須恰好塌成一支佔位測試——不是 1 就代表 collapse_loss 的"
+                    "「−模組數」修正項用錯了模型",
+                )
+                self.assertGreater(
+                    live.get(name, 0), 1,
+                    "相依齊備時它必須貢獻不只一支，否則把它列進宣告集合毫無意義",
+                )
+
+    def test_the_criterion_is_wired_into_the_runner_not_just_unit_tested(self) -> None:
+        """接線鎖：單元測了卻沒接線是本 repo 最常見的假綠形狀（比照本檔既有數處手法）。
+
+        兩條缺一不可：漏傳逐模組收集數 ⇒ `collapse_loss` 恆為 0 ⇒ 新判準永遠閉嘴而
+        本檔其餘合成斷言照樣全綠；接了參數卻仍只叩舊比例判準 ⇒ 換了模組沒換判準。
+        """
+        self.assertIn(
+            "warn_ratchet_drift(count, min_tests, suite_modules(suite))",
+            inspect.getsource(run_root_unittests.run_with_floor),
+            "runner 沒把逐模組收集數交給判準 ⇒ collapse loss 恆為 0 ⇒ 新判準永遠不說話",
+        )
+        self.assertIn(
+            "min_tests_margin.headroom_message",
+            inspect.getsource(run_root_unittests.warn_ratchet_drift),
+            "第一層仍是舊比例判準 ⇒ 模組建好了但沒有人叩它，等於沒有",
+        )
+
+    def test_the_ratio_layers_remain_as_the_outer_fallback(self) -> None:
+        """不適用的樹（loss 為 0：合成樹、探針內部）必須由外層後備接手，不得整個啞掉。
+
+        這是「把第一層換掉」與「把提醒整個拆掉」的分界線——沒有這一支，
+        用一個恆回 None 的新判準取代舊層也會全綠。
+        """
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            msg = run_root_unittests.warn_ratchet_drift(1000, 100, {})
+        self.assertIsNotNone(msg, "loss 為 0 時後備層也不說話 ⇒ 這棵樹上完全沒有提醒了")
+        self.assertIn("MIN_TESTS", msg or "")
+        self.assertIn("1000", buf.getvalue(), "後備層同樣必須印出該重釘成多少")
+
+    def test_the_new_layer_takes_precedence_when_both_apply(self) -> None:
+        """兩層都適用時，說話的必須是新判準——否則讀者拿到的仍是量錯分母的那個數字。"""
+        mods = {"test_gha_action_versions": 201}
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            run_root_unittests.warn_ratchet_drift(5000, 1000, mods)
+        out = buf.getvalue()
+        self.assertIn("零相依", out, "印出來的不是零相依餘裕那一層")
+        self.assertNotIn(
+            "下限的鑑別力只剩", out,
+            "印出來的是舊比例判準的訊息 ⇒ 優先序寫反，新判準被後備蓋掉",
+        )
 
 
 class ThirdPartyPrereqDeclarationTest(unittest.TestCase):
@@ -1797,21 +2001,8 @@ class ZeroDepEnvironmentDiscriminationTest(unittest.TestCase):
 class ZeroDepProbeFlagIsNotAFailOpenTest(unittest.TestCase):
     """上一組的自我 skip 是 **fail-open**，本組是它唯一的看守者。
 
-    WHY（Rule 12 fail-loud）：用 `RRU_IN_ZERO_DEP_PROBE=1` 斷遞迴本身是對的（R74 實測：
-    探針在套件內重跑整棵樹，放寬逾時只把整套牆鐘從 823s 放大到 3813s 且仍 TimeoutExpired）。
-    問題在**沒有任何東西斷言「外層那一次真的跑了」**：`unittest` 的 `Ran N tests` 把 skipped
-    計入，所以 `MIN_TESTS` 下限對「整組被 skip 掉」結構性失明；而該變數全 repo 只出現在本檔
-    數行，一旦以任何方式漏進外層環境（開發者 shell／CI 的 `env:`／包裝腳本／schtasks 排程的
-    使用者環境），那三支「零相依鑑別力鎖」會靜默全滅而閘門照樣印綠——**閘門自己壞掉卻不吭聲**。
-    實測（本輪）：`$env:RRU_IN_ZERO_DEP_PROBE='1'` 後跑那個類別得到 `Ran 3 tests / OK
-    (skipped=3) / rc=0`，三支鑑別力鎖等於不存在。
-
-    🔴 本組刻意**不 spawn 任何子行程**（唯讀環境查詢），所以它不可能遞迴、也因此**不需要**
-    自我 skip——它在探針內部與外部都跑得起來，兩種環境各有一條為真的斷言。這正是它有資格
-    看守 fail-open 的前提：看守者自己若也帶同一個豁免，等於沒有看守者。
-
-    誠實劃界：若外層環境**同時**漏了旗標又真的缺相依，本組不會紅（兩側都成立）。那種環境
-    早已被 `main()` 的 fail-fast 與 `report_missing_third_party_prereqs()` 判紅，不是靜默面。
+    沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+    〈ZeroDepProbeFlagIsNotAFailOpenTest WHY（fail-open 看守者）〉。
     """
 
     def test_probe_flag_implies_dependencies_really_blocked(self) -> None:
@@ -1882,15 +2073,8 @@ _EXTERNAL_TOOL_PREREQS: tuple[tuple[str, str], ...] = (
 class CiPrereqInstallLockTest(unittest.TestCase):
     """CI 安裝步驟鎖：跑本 runner 的每個 CI job 都必須先裝齊宣告的相依（R68）。
 
-    WHY（本組最重要的一道；測意圖非僅行為）：前面幾道鎖只讓失敗**可讀**，攔不住
-    「下次再多一個相依、CI 又沒裝」的復發——本輪的缺陷正是這個形狀，而且它躲過了
-    連續多輪的四方複審。本鎖把「`_THIRD_PARTY_PREREQS` 這份宣告」與「CI 實際安裝
-    的東西」機械綁在一起：往常數加一個相依而忘了改 workflow，這裡立刻紅。
-
-    🔴 判準邊界（誠實劃界）：以純文字掃描認「同一個 job 內、該 step 之前出現的
-    `pip install` 行」，刻意不引 YAML parser（本檔須能在最小環境下自我檢查）。
-    因此它**不涵蓋**：把安裝寫進 composite action／reusable workflow／外部腳本、
-    或以 `requirements.txt` 間接安裝——那些形態它一律看不到，仍是人審責任。
+    沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+    〈CiPrereqInstallLockTest WHY 與判準邊界〉。
     """
 
     _WORKFLOWS = Path(run_root_unittests.__file__).resolve().parents[1] / ".github" / "workflows"
@@ -1963,17 +2147,8 @@ class CiPrereqInstallLockTest(unittest.TestCase):
     def test_every_ci_job_running_the_runner_installs_all_external_tools(self) -> None:
         """外部**執行檔**相依（`_EXTERNAL_TOOL_PREREQS`）也必須在每一支 workflow 裝齊。
 
-        WHY（R69 終審 SD 實測；測意圖非僅行為）：上面那道鎖只看得見 import 相依，對
-        「PATH 上要有某支執行檔」結構性盲目。R69 把 `ruff check tools/` 接進 pre-push
-        快層（缺 ruff＝fail-loud），而 `test_pre_push_dispatcher.py` 有 5 支測試在 tmp
-        repo 內真跑該 dispatcher 並斷言 rc==0 ⇒ tools/tests 自此隱性需要 ruff。當時
-        三支跑本 runner 的 workflow 只有 root-infra-ci 裝了 ruff ⇒ **同一批測試在三個
-        平台有兩種結果**，而且原本綠著的 macos-compat-ci 會被打紅（SD 單變因 A/B：
-        PATH 上放假 ruff → Ran 17 OK；唯一差別拿掉 ruff → FAILED〔failures=5〕）。
-
-        本鎖擋的不是那一次，是**下一次**：再往清單加一個外部工具而忘了同步某一支
-        workflow，這裡立刻紅並點名是哪一支。判準邊界同上面那道（純文字掃描，看不到
-        composite action／requirements.txt 間接安裝）。
+        沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+        〈test_every_ci_job_running_the_runner_installs_all_external_tools〉。
         """
         sites = self._runner_call_sites()
         self.assertGreaterEqual(
@@ -2089,24 +2264,7 @@ def carrier_parity_problems(label: str, rc_unittest: int, rc_pytest: int) -> lis
 class CarrierVerdictParityTest(unittest.TestCase):
     """🔴 同一組測試在 `unittest` 與 `pytest` 兩個載具下的判決必須一致（R82／SA B-1）。
 
-    WHY（實測，不是理論）：`UntaggedWindowsLikeSkipsTest::test_real_run_with_floor_reds_
-    on_an_untagged_windows_skip` 自稱是本 repo 的**常駐缺陷注入對照組**，而複審者當回合
-    量到它在 `pytest tools/tests` 下 FAIL、在 `python -m unittest` 下 OK。根因是那支測試
-    用 `mock.patch.object(windows_skip_tags.os, "name", "posix")` 改掉**行程全域**的
-    `os.name`（再匯出的 `os` 就是 stdlib 那一個模組物件），而 CPython 3.11 的
-    `pathlib.Path.__new__` 靠它挑 flavour ⇒ patch 期間任何 `Path()` 都會拋
-    `NotImplementedError`。unittest 載具下沒有人在那段期間呼叫 `Path()`，pytest 載具下
-    `AssertionRewritingHook.find_spec()` 對每一支新 import 的模組都會呼叫 ⇒ 合成樹
-    import 失敗、塌成 `_FailedTest`、收集數低於下限：**該紅的那一半紅得理由是錯的
-    （不是漏標，是 import 炸了），該綠的那一半永遠綠不了。**
-
-    為何非有這道鎖不可：push 閘門（`tools/run_root_unittests.py`／pre-push／三支
-    compat-CI）走的**只有 unittest**，所以 pytest 那一側是紅是綠沒有任何人會看到。
-    「有鎖在守假話」＋「驗證載具本身要被驗證」——本 repo 已判過的兩條，這次同時發生。
-
-    射程（誠實劃界）：本鎖只覆蓋**會 monkeypatch 模組屬性**的類別（由
-    `classes_that_monkeypatch()` 自原始碼機械抽出，不是手寫清單），因為那是已知會製造
-    載具分歧的那一類動作。全檔逐類跑兩個載具在時間上不划算，且分母會隨檔案成長而漂移。
+    沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md〈CarrierVerdictParityTest WHY 與射程〉。
     """
 
     _SELF = "CarrierVerdictParityTest"
@@ -2194,16 +2352,8 @@ class CarrierVerdictParityTest(unittest.TestCase):
     def test_a_synthesized_carrier_divergence_is_caught(self) -> None:
         """🔴 合成注入（**紅**這一半）：判決取決於「誰在跑」的模組必須被抓出來。
 
-        注入體刻意是**平台中立且決定性**的（斷言「跑我的人不是 pytest」）：unittest 下綠、
-        pytest 下紅，在三個平台都成立。不用讓本鎖誕生的那個真實形態當注入體，是實測後的
-        決定，不是偷懶——那個形態（`mock.patch.object(<模組>.os, "name", …)` ＋ 期間 import
-        新模組）的**觸發**是 Windows 專屬的：pytest 的 `fnmatch_ex` 在 `PurePosixPath`
-        誤解析反斜線路徑後才落到 `absolutepath()` → `Path()` 而爆炸；POSIX 上
-        `PureWindowsPath` 認得 `/`，同一條路走得通、不會分歧（當回合實測：Windows 上
-        rc 0/1 分歧，改用非 `test_*.py` 的目標模組名則 0/0 不分歧）。拿一個只在單一平台
-        成立的注入體當紅綠自證，等於在另外兩個平台上讓這支測試恆綠——鐵律三。
-        真實形態由 `test_the_live_monkeypatching_locks_agree_across_carriers` 承接
-        （它跑的是活體類別，缺陷一旦被寫回去，在 Windows 上當場分歧）。
+        沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+        〈test_a_synthesized_carrier_divergence_is_caught 注入體選型〉。
         """
         rc_u, rc_p, diag = self._synth(
             "carrier_parity_red_", "test_carrier_injected",

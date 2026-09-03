@@ -3646,19 +3646,8 @@ class TestNightlyHeartbeatCrossSiteBehavioralEquivalence(
 # `import test_windows_forbidden_filename_parity as _parity`）。
 import test_schedule_capability_parity as _cap_parity  # noqa: E402
 
-# 為何長在 test_dev_start.py 而不是自成一支 test_install_mac_nightly.py：
-# `DEF-101-561③`／`DEF-101-565` 已裁定「R61 開輪起 tools/tests 禁止新增鎖檔、只准
-# 合併／刪除」，並由 test_adr_xplat001_c1c2_lock.TestGuardLayerRatchet 機械強制
-# （當時的實測：新開一支檔案即翻紅）。
-# 🔴 R78 ARCH-03 訂正：那道棘輪 R77 起改量逐檔行數的**淨額**、也不再比 HEAD——
-# 新增檔案本身不違規，淨行數上升才違規。本節併入本檔的理由與量測面無關，仍然成立。
-# 本檔本來就是 install_mac_nightly.sh 三道跨站鎖的所在地（`test_installer_third_
-# site_filename_and_threshold`／`TestCrossSiteLiteralLocks`／上方的行為等價鎖），
-# 新判準擴充進來與既有同源鎖相鄰，正是該裁定指定的「合法作法」。
-#
-# 退化 plist：逐字重現「R15 之前安裝、且 repo 已搬過家」的機器實況——無 RunAtLoad、
-# ProgramArguments 指向不存在的舊 checkout、StandardOutPath 導 /tmp（R14 ARCH-GAP-3
-# 遷出前的落點，會被 macOS 週期清理）。三個缺陷都真實發生過，非杜撰。
+# 沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+# 〈mac nightly 判準為何長在 test_dev_start.py／退化 plist 來源〉。
 _MACNIGHTLY_DEGENERATE_PLIST = """<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" \
 "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -3739,19 +3728,7 @@ class MacNightlyStatusTestCase(unittest.TestCase):
         )
         os.chmod(self.launchctl, 0o755)
 
-        # stub pmset：與 launchctl stub 同理由、同預設姿態（預設回報「健康」，讓
-        # 其餘維度的訊號不被機器狀態掩蓋）。
-        #
-        # 🔴 R82 這道縫為何非有不可：WakeToRun／NextRunTime 兩列的輸入是**這台機器的
-        # 電源排程狀態**（`pmset -g sched`），不是 plist 檔案內容。沒有這道縫，
-        # `install_healthy_plist()` 就只定義了「健康」的一半，而
-        # `test_healthy_plist_passes_every_capability_row` 那句「每列皆 ✅」實際上
-        # 隱含要求「跑測試這台 Mac 剛好排過 pmset repeat」——那需要 sudo、安裝器
-        # 刻意不代跑，是多數 Mac 的**非**常態 ⇒ 該鎖在真 mac 上結構性必紅。
-        # 實證：本輪之前這兩支測試從未在真 mac 上跑綠過（R82 及更早都在 Windows
-        # 完成，整組被 class 上的 @skipUnless(darwin) 跳掉），紅是第一次真的跑才浮出來的。
-        # 縫換掉的是**量測面的來源**，不是覆蓋：兩列仍在「每列皆 ✅」的斷言裡，
-        # 而且下面另有一組把它們打成 ⚠️ 的紅控制組，證明這裡不是橡皮圖章。
+        # 沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md〈pmset stub 這道縫的 R82 立案〉。
         self.pmset = self.root / "stub_pmset.sh"
         self.set_pmset(self.PMSET_HEALTHY)
 
@@ -3949,16 +3926,8 @@ class TestMacNightlyPlistCapabilityTable(MacNightlyStatusTestCase):
     def test_status_prints_exactly_the_rows_static_extraction_predicts(self) -> None:
         """行為驗證（darwin-only）＋ 靜態抽取器的**現實對帳單**。
 
-        跨平台對稱斷言（mac 列數 ≥ Windows 列數）住
-        `test_schedule_capability_parity.py`（兩側只讀原始碼、不需要 Darwin）。
-        留在這裡的是**只有 macOS 才做得到的那一半**，且刻意做成對帳而非重複斷言：
-        真跑一次 `--status`，驗 ① 能力表整段印得出來、② 每一列 `(expected …)` 都是
-        ✅（健康 plist 不該有任何告警）、③ **執行期列數逐一等於**靜態抽取器對同一支
-        安裝器的預測。③ 才是關鍵——靜態抽取器是那道跨平台鎖的量測面，而量測面本身
-        必須被驗證（若它多算/少算，跨平台鎖會在 mac 以外的所有平台默默失準，
-        而沒有任何人有辦法發現）。② 同樣吃 plist 內容與 pmset 排程兩個自變數，
-        夾具的 stub 已把後者收進測試手裡；③ 不受影響（它比的是列**數**）。
-        搬遷前的原文＝`docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`。
+        沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+        〈test_status_prints_exactly_the_rows_static_extraction_predicts 三項對帳〉。
         """
         static_rows = _cap_parity.mac_capability_rows(self.installer_source())
         self.install_healthy_plist()
@@ -4041,22 +4010,8 @@ class TestMacNightlyMachineStateCapabilities(MacNightlyStatusTestCase):
     def test_a_one_shot_wake_event_does_not_count_as_the_daily_repeat(self) -> None:
         """假綠防線：一次性 wake 事件不得被算成「已排定」。
 
-        macOS 自己就常年掛著 user-invisible 的一次性 wake（本機
-        `plutil -p /Library/Preferences/SystemConfiguration/com.apple.AutoWake.plist`
-        實查到 calaccessd／osanalytics 兩則）。修前的判準對 `pmset -g sched` **全文**
-        做子字串比對 ⇒ 只要輸出裡出現那個字樣就算數，不分區段。一次性事件跑完就沒了，
-        撐不起「每天 02:00 前把機器叫醒」這個語意；把它算成已排定，等於在唯一的每日
-        回饋通道上宣告一個不存在的保護。
-
-        🔴 本鎖的鑑別力射程（**複審實測訂正**，不是推論）：本測試此前自陳的鑑別力宣稱
-        經複審實測證偽，本支保留的價值是情境覆蓋而非形態鑑別力（原文＝Guard_Repin
-        證據檔 §D-17）；真正吃得下全文比對假綠的輸入已補成獨立一支
-        （`test_a_one_shot_wakeorpoweron_is_not_mistaken_for_the_daily_repeat`）。
-
-        🔴 仍然沒有測試在守的那一半（不變）：合成注入「只拿掉安裝器的區段錨定、保留
-        tolower($1) 欄位判準」→ 全綠。因為一次性段的 $1 結構上恆為 `[N]`
-        （樣板 ` [%ld]  %s at %s`），欄位判準單獨就排除了它。區段錨定是縱深防禦、
-        目前無鎖——寫在這裡是因為「以為有鎖在守」比「知道沒有」更貴。
+        沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+        〈test_a_one_shot_wake_event_does_not_count_as_the_daily_repeat 射程與未守的一半〉。
         """
         self.set_pmset(self.PMSET_ONESHOT_ONLY)
         self.install_healthy_plist()
@@ -4070,18 +4025,8 @@ class TestMacNightlyMachineStateCapabilities(MacNightlyStatusTestCase):
     def test_a_one_shot_wakeorpoweron_is_not_mistaken_for_the_daily_repeat(self) -> None:
         """真正的假綠防線：一次性的 **wakeorpoweron** 不得被算成每日重複喚醒。
 
-        為何非要獨立一支（上一支不是已經測過一次性事件了嗎）：上一支的 eventtype 是
-        `wake`，**不是**詞彙表任何一項的子字串 ⇒ 連最爛的全文比對都不會在它身上出錯，
-        它證不了任何形態上的鑑別力（複審實測：忠實還原全文比對 → 24 tests OK）。
-        本支的輸入才會讓全文比對回報「已排定」，也就是修前那個判準真正的破口。
-
-        情境是真的會發生的：`pmset schedule`（一次性）與 `pmset repeat`（重複）只差一個
-        動詞，打錯就落在這一格。一次性事件跑完就沒了，撐不起「每天 02:00 前把機器叫醒」；
-        把它算成已排定，等於在唯一的每日回饋通道上宣告一個不存在的保護——而使用者會
-        因為看到 ✅ 而**停止**去做那件他其實還沒做的事。
-
-        輸入不是編的（見 `PMSET_ONESHOT_WAKEORPOWERON` 上方的反組譯證據鏈）：一次性段
-        會把 eventtype `wakepoweron` 代換成字面值 `wakeorpoweron` 再印，重複段則直印原值。
+        沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+        〈test_a_one_shot_wakeorpoweron_is_not_mistaken_for_the_daily_repeat 為何要獨立一支〉。
         """
         self.set_pmset(self.PMSET_ONESHOT_WAKEORPOWERON)
         self.install_healthy_plist()
@@ -4106,15 +4051,8 @@ class TestMacNightlyPmsetMarkerIsNotProse(unittest.TestCase):
         """R82 那個判準字面值不得回來：`pmset` 從不印「wake or poweron」
         （真 mac 實測數字，原文＝Guard_Repin 證據檔 §D-18）。
 
-        本斷言與那幾支行為測試不是重複——行為測試用的是 stub 的輸出，
-        stub 可以被改成配合任何字面值；這一支直接讀原始碼，釘的是
-        「判準不得押一個 OS 不會產出的字串」這件事本身。
-
-        🔴 判斷面刻意**剝掉註解行**（同 test_mac_readiness_r82.pmset_capability_rows
-        的既有慣例）：訂正紀錄本來就得逐字寫出被撤回的那個字面值，否則下一位讀者
-        無從知道當初錯在哪、也就會再錯一次。本判準要禁的是「拿它當判準／印給使用者
-        去找」，不是「提到它」。第一版沒剝，於是它把本檔自己的訂正註解判成違規——
-        那種鎖的下場是被人把註解刪掉來滿足它，等於用刪除歷史換綠燈。
+        沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+        〈test_the_installer_does_not_pin_a_prose_marker_that_pmset_never_prints〉。
         """
         code = "\n".join(
             line for line in self._INSTALLER.read_text(encoding="utf-8").splitlines()
@@ -5531,21 +5469,7 @@ class TestMinPythonVersionSsotSync(unittest.TestCase):
         return m_sh.group("probe"), m_ps.group("probe")
 
 
-# ── R71（DEF-101-755 解鎖）：PowerShell 行為鎖用的假直譯器，依 `os.name` 分派 ──
-#
-# 為何 `os.name` 而不是 `sys.platform`：要分的是**行程建立語意**——POSIX 的 `execve`
-# 認 shebang，Windows 的 `CreateProcess` 只認 PE 映像＋PATHEXT 副檔名。判例＝
-# `tools/tests/test_bash_probe_spec_contract.py::_STUB_FORMS`（DEF-101-754）。
-#
-# 為何 Windows 的 3.9 冒充者拆成「`.cmd` ＋ 旁邊一支 `.py`」而不是把 spoof 程式塞進
-# `.cmd` 一行：`.cmd` 內若再寫一層 `-c "<python 程式碼>"`，cmd.exe 的跳脫規則會疊在
-# PowerShell 重組命令列的規則上——而本類要驗的正是「引數原封不動送到直譯器」
-# （DEF-101-760），載具自己絕不能引入第二層引號變因。`%*` 只是把 PowerShell 交來的
-# 參數原樣轉手，不新增任何一層。
-#
-# 內文全 ASCII（WHY 一律寫在本 Python 檔）：`.cmd` 由 cmd.exe 以 OEM code page 解讀，
-# 本機為 CP950，寫中文註解等於自找亂碼。換行 CRLF：cmd.exe 對純 LF 批次檔的行為在
-# 部分構造下未定義。兩項皆同 DEF-101-754 判例。
+# 沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md〈R71 假直譯器依 os.name 分派的立案〉。
 _FAKE_39_SPOOF_PY = '''\
 import os
 import runpy
@@ -5732,17 +5656,8 @@ _POST_39_FROM_NAMES = {
 def _sub_min_interpreter_candidates() -> list[list[str]]:
     """候選直譯器的 argv（順序＝先便宜後昂貴）。
 
-    🔴 R81 包 F（S3-06）：原本只有一串 PATH 名稱，而那串在 Windows 上結構上找不到
-    任何可用的東西（pyenv-win shim 本機實測細節，原文＝Guard_Repin 證據檔 §D-13）。
-
-    三種發現路徑並存，缺一都會在某類機器上失明：
-      · `/usr/bin/python3`：macOS 主場（3.9.x），POSIX 上第一順位就命中。
-      · pyenv：win 佈局 `<root>/versions/<ver>/python.exe` 與 posix 佈局
-        `<root>/versions/<ver>/bin/python3` 兩種都掃，不存在的那一種自然掃不到東西
-        （鐵律三：判準不得只在一個平台成立）。
-      · Windows Python Launcher `py -3.X`：本機今天 `Get-Command py` 為空，所以它
-        **不能**是唯一依靠，但別的 Windows 機器上常常只有它。
-      · PATH 上的 `python3.X` 名稱：保留原行為（它在 CI 的 Linux 映像上就是主場）。
+    沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+    〈_sub_min_interpreter_candidates 三種發現路徑〉。
     """
     out: list[list[str]] = [["/usr/bin/python3"]]
 
@@ -6220,32 +6135,8 @@ class TestNativeStdoutDecodingRoutingLock(unittest.TestCase):
                 )
 
 
-# ================================================ 非 Windows 平台短路（DEF-101-766）
-# 缺陷本體：PATHEXT 過濾在非 Windows 上讓 Get-PythonGeMin 恆回 $null（與 DEF-101-759
-# 同病換平台發作），原文＝Guard_Repin 證據檔 §D-11。
-#
-# 🔴 為何用「參數化 harness」而不是真的起一支 PS Core：缺陷只在
-# 「`$PSVersionTable.PSVersion.Major >= 6` 且 `$IsWindows` 為假」時顯形，而在 Windows
-# 上**任何**引擎都讓 `$IsWindows` 為真（它是唯讀常數），故那個組合在此平台結構性
-# 不可達——引擎裝了什麼一律現查 `tools/tests/_ps_engine.py::available_engines()`，
-# 不寫進本檔（R74：原句把量測當時的機器屬性寫成了常數，DEF-101-777 同型）。
-# 替身變數這條路本包**實測走不通**：`$PSVersionTable` 在
-# PS 5.1 是 read-only，`$PSVersionTable = …`／`$local:PSVersionTable = …`／
-# `New-Variable -Force` 三種寫法皆回 `Cannot overwrite variable PSVersionTable because
-# it is read-only or constant.`，連子作用域都蓋不掉（函式內看到的仍是 Major=5）。
-# 故改為把**生產函式原始碼原封搬進 harness**，只把那一個蓋不掉的運算式換成可設定的
-# `$FakePsMajor`（替換恰 1 處，數目不對即 fail-loud）。`$IsWindows` 不必替換——它在
-# PS 5.1 本來就是未定義變數，harness 直接賦值即可，模擬 5.1 時則刻意**不定義**它。
-#
-# 🔴 被否決的第三種做法（誠實記錄，免下一個人再走一遍；本包實測結果原文＝
-# Guard_Repin 證據檔 §D-11）：「在 PS 5.1 下清空 `$env:PATHEXT` 跑生產函式、斷言
-# 它不回 $null」**零鑑別力**。
-#
-# 兩道鎖分工（缺一即有缺口，且此處**不是**「行為＋字面」的例行搭配）：①行為鎖真的執行
-# 函式本體，抓「短路不存在／不生效」；②順序鎖抓「短路存在但落在 PATHEXT 過濾之後」。
-# ②不是①的字面備援：本包實測把短路整段**搬到 PATHEXT 迴圈之後**，①仍回
-# `RESULT_NULL=False`（迴圈在 POSIX 上濾光後落空、短路照樣接住）＝①對這種改法全綠，
-# 只有②看得見。反之刪掉整段短路時①當場紅（實測 `RESULT_NULL=True`）。
+# 沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+# 〈DEF-101-766 非 Windows 平台短路的立案與被否決作法〉。
 
 _RESOLVE_FN = "Resolve-NativeExecutable"
 _PS_MAJOR_EXPR = "$PSVersionTable.PSVersion.Major"

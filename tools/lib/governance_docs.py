@@ -395,6 +395,17 @@ _GOVERNANCE_DOCS = (
     # 與對抗式證偽（工作流 wf_5d8ebbc6-3d3）當回合親查座標唯一居所在本檔（⇒ 體積守門），
     # 帳本 8 列以座標宣稱 `§DEF-ID` 指向本檔（⇒ 指針稽核）。即刻登記，同既有姊妹檔判例。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R121_Debt_Closure.md",
+    # R122 精準修復輪結案證據檔（round-label-ok）：三筆 `fixed` 的落地取證、邊界態表與突變
+    # 驗紅唯一居所在本檔（⇒ 體積守門），帳本 3 列以座標宣稱 `§DEF-ID` 指向本檔（⇒ 指針稽核）。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R122_Debt_Closure.md",
+    # R122 護欄層淨額承認與途中發現（round-label-ok）：款(9) 強制的 `guard-total` 標記行
+    # 與逐檔清單住本檔（⇒ 指針稽核），複審者要重驗淨額對帳就得讀完它（⇒ 體積守門）。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R122_Scan_Findings.md",
+    # R122 守衛線搬遷抵銷包：八支鎖檔的歷史沿革散文**逐字保全**的唯一居所 round-label-ok
+    # （⇒ 體積守門——原處只留一行指標，那些沿革除了本檔已無第二份），且逐節寫出「某段
+    # 原文原處是哪支檔哪個符號」的座標宣稱（⇒ 指針稽核）。資格與 R86/R87/R90/R95 同名
+    # Guard_Repin_Evidence 逐字同一份。即刻登記，不等下一輪（DEF-200-131 同型）。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R122_Guard_Prose_Migration.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/{CrossPlatform,Quota}_*.md`。這**不是**把具名

@@ -682,24 +682,27 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 7195,
-    "test_archive_defect_log.py": 3989,
+    "test_adr_xplat001_c1c2_lock.py": 7246,
+    "test_apply_lock.py": 167,
+    "test_archive_apply_locked.py": 102,
+    "test_archive_defect_log.py": 3839,
     "test_bash32_compat.py": 1020,
-    "test_bash_probe_spec_contract.py": 983,
+    "test_bash_probe_spec_contract.py": 865,
     "test_block_destructive_git_r83.py": 2288,
     "test_bootstrap_core.py": 439,
     "test_bootstrap_ps1.py": 160,
-    "test_check_defect_log_crossref.py": 3851,
+    "test_check_archive_required.py": 160,
+    "test_check_defect_log_crossref.py": 3858,
     "test_check_gha_action_versions.py": 295,
-    "test_check_hooks_liveness.py": 3581,
+    "test_check_hooks_liveness.py": 3296,
     "test_check_pytest_baseline_sites.py": 301,
     "test_check_script_parity.py": 2098,
     "test_check_wrapper_thinness.py": 1234,
     "test_claim_provenance_r86.py": 618,
     "test_component_sanitizer_shared_layer_lock.py": 293,
-    "test_context_budget_guard.py": 9775,
+    "test_context_budget_guard.py": 9835,
     "test_defect_id_reference_integrity.py": 281,
-    "test_dev_start.py": 6636,
+    "test_dev_start.py": 6527,
     "test_dev_start_ps1_lastexitcode.py": 548,
     "test_doc_env_prefix_platform_parity_r60.py": 340,
     "test_doc_loc_baseline_freshness_r60.py": 7126,
@@ -709,7 +712,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_gha_action_versions.py": 703,
     "test_git_hooks_install_common.py": 393,
     "test_guard_line_taxonomy_r99.py": 148,
-    "test_install_windows_nightly.py": 1469,
+    "test_install_windows_nightly.py": 1385,
     "test_mac_endurance_r83.py": 1784,
     "test_mac_readiness_r82.py": 621,
     "test_macos_smoke_skip_honesty.py": 225,
@@ -729,13 +732,13 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_python_c_percent_shim.py": 119,
     "test_quota_policy.py": 3198,
     "test_root_infra_parity.py": 441,
-    "test_run_root_unittests.py": 2272,
+    "test_run_root_unittests.py": 2422,
     "test_sanitize_component_frozen_sdd_versions_lock.py": 340,
     "test_schedule_capability_parity.py": 626,
     "test_script_scan_surface_ssot.py": 391,
     "test_skip_ceiling_ratchet_direction.py": 508,
     "test_skip_discoverability_r83.py": 744,
-    "test_smoke_ci_sync.py": 1334,
+    "test_smoke_ci_sync.py": 1258,
     "test_stdio_utf8.py": 76,
     "test_subprocess_encoding_hygiene.py": 1599,
     "test_windows_forbidden_filename_parity.py": 1025,
@@ -1418,6 +1421,33 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "[非淨減法輪][同輪追加] 全套揪出 sha 鏈未接：_FROZEN_PREFIX_REWRITE_LEDGER 追加本輪"
      "鏈接一筆（4554dbed→現值）＋本稽核列＋凍結表值同步＋prefix_len 109→110，逐項見 "
      "CrossPlatform_R120_Debt_Closure.md（本檔 +8：7187→7195）。"),
+    ("R122", 91793, 92646, 853,
+     "[非淨減法輪][全額功能軌] 精準修復輪三筆 fixed 落地——DEF-200-169 扇出視窗剩餘秒數"
+     "（test_context_budget_guard.py +131）／DEF-200-170 MIN_TESTS 判準改綁零相依餘裕軸"
+     "（test_run_root_unittests.py +286）／DEF-200-222 archive 併發鎖與縮窄阻斷面（新檔 "
+     "test_apply_lock.py +167、test_check_archive_required.py +160、"
+     "test_archive_apply_locked.py +102，既有 test_check_defect_log_crossref.py +7）。"
+     "逐項見 CrossPlatform_R122_Debt_Closure.md。"),
+    ("R122", 92646, 92660, 14,
+     "[非淨減法輪][同輪追加] 本表自身編修：凍結表值同步、上一列與本列自身、"
+     "prefix_len 110→112，同 R119／R120 既有體例（貼表當下本檔尚未含這兩列，故淨額分兩"
+     "列記）。逐項見 CrossPlatform_R122_Debt_Closure.md（本檔 7195→7209）。"),
+    ("R122", 92660, 91649, -1011,
+     "[淨減法] 護欄層散文搬遷抵銷（款(10)(11) 的合法出口，同 R89／R104 判例）：下列鎖檔"
+     "的歷史沿革段落逐塊逐字保全搬至 CrossPlatform_R122_Guard_Prose_Migration.md——"
+     "test_check_hooks_liveness.py 3581→3296／test_archive_defect_log.py 3989→3839／"
+     "test_run_root_unittests.py 2558→2422／test_bash_probe_spec_contract.py 983→865／"
+     "test_dev_start.py 6636→6527／test_install_windows_nightly.py 1469→1385／"
+     "test_smoke_ci_sync.py 1334→1258／test_context_budget_guard.py 9906→9835。與本輪"
+     "前兩列合計淨額 ≤0 ⇒ 款(11) 連續上升 streak 歸零；同輪兌現 _REPIN_NET_CAP_SCHEDULE "
+     "到期義務 (122, 559)。搬遷安全邊界、rejected 清單（四支檔整檔排除＋七段就地還原，"
+     "皆因該段落是別的機械物的逐字比對面）與保全檢查見該搬遷檔檔頭。"),
+    ("R122", 91649, 91668, 19,
+     "[非淨減法輪][同輪追加] 本檔自身編修：兩筆到期義務就地兌現（`_PHASE2_REVIEW_LOG` "
+     "追加 `[維持觀察]` 列／`_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND` 具名展延並把理由逐字"
+     "寫在該常數旁）＋凍結表值同步＋prefix_len 與指紋鏈同步＋本列自身＋裸計數措辭訂正"
+     "（本檔自訂紀律「散文不得寫死可機械算出的計數」在上一列落地的當回合把作者抓到一次，"
+     "照實記）。逐項見 CrossPlatform_R122_Debt_Closure.md。"),
 )
 
 
@@ -1475,6 +1505,10 @@ _REPIN_NET_CAP_SCHEDULE: tuple[tuple[int, int], ...] = (
     (119, 564),   # 到期輪兌現（P1-6 skip 天花板①②③與 M6 落款④共同變更鎖批）：cap 降到
                   # 到期目標本身（同 R99/R101/R115/R117 判例 round-label-ok）。同輪重新
                   # 武裝下一段：步伐 5 < 前段 6，續守「步伐刻意變小」，見 due 常數旁註。
+    (122, 559),   # 到期輪兌現（精準修復輪：三筆缺陷回歸鎖＋護欄層散文搬遷抵銷）：cap 降到
+                  # 到期目標本身（同 R99/R101/R115/R117/R119 判例 round-label-ok）。上一段
+                  # 到期輪落在稽核痕跡未走到的輪次，本輪是它之後第一次重釘故就地兌現。
+                  # 同輪重新武裝下一段：步伐 4 < 前段 5，續守「步伐刻意變小」，見 due 常數旁註。
 )
 #: 生效點＝首列輪號、現行上限＝末列上限，**皆由表導出不另立常數**（R73 判例：一份知識一個家）。
 _REPIN_ROUND_CAP_SINCE = _REPIN_NET_CAP_SCHEDULE[0][0]
@@ -1581,7 +1615,14 @@ def _regression_lane_cap_basis() -> tuple[str, int]:
 # ADR-XPLAT-013 §9.3／U9（D-5 裁決，R116 round-label-ok）：四支 `[ROOT-TOOLS]` 檔舊尺債到期輪。
 # 本批只落地「到期輪常數＋機械保底」半格；真拆未做、over_by 現查 187（逐檔數字、判準
 # 出處與惡化態勢＝`CrossPlatform_R116_Scan_Findings.md` §D-5，本檔不重抄史料）。
-_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND = 121
+# 🔴 精準修復輪具名展延 121 → 127（判準出口②，**不得靜默沿用**故理由逐字寫在這裡）：
+# 本輪標的是帳本三筆缺陷結案，四支 `[ROOT-TOOLS]` 檔的真拆屬獨立重構持有面——依鐵律七，
+# 其常數／史料／消費端跨檔，任一並行包手上都做不完，只能由獨立的收尾單人窗口做。本輪實際
+# 完成的是**同族的另一半**：護欄層散文搬遷抵銷（見 `_GUARD_LINES_REPIN_LOG` 末列），它證實
+# 「把史料逐字搬進具名證據檔」在本 repo 是可行且安全的路徑，而那正是真拆要用的手法 ⇒ 展延
+# 換到的不是時間而是一個已驗證的手法。取 `_ROOT_TOOLS_DEBT_DUE_MAX_LOOKAHEAD` 的上界而非
+# 更近的輪次，理由是真拆需要一個不與缺陷結案競爭的獨立窗口；再展延須另附理由，不得沿用本段。
+_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND = 127
 #: 清償旗標——真拆完成後改 True。刻意用布林而非重建舊尺計數器（ADR §9.3「舊尺已廢」）。
 _ROOT_TOOLS_OLD_SCALE_DEBT_RESOLVED = False
 #: A-2 後設鎖：到期輪只准落在「現查輪＋lookahead」內，推遠（如 9999）當場紅；shrink-only
@@ -1670,8 +1711,8 @@ def net_cap_schedule_problems(
 #: R117 喚醒鏈批兌現 round-label-ok：cap 降到目標本身（570，見 `(117, 570)` 列），同輪重新武裝：
 #: 步伐 6 < 前一段的 7，續守「步伐刻意變小」且嚴格低於現行 cap。
 #: R119 P1-6 批兌現 round-label-ok：cap 降到目標本身（564，見 `(119, 564)` 列），同輪重新武裝：
-_REPIN_NET_CAP_DUE_ROUND = 121  # round-label-ok：到期輪＝兌現輪+2（lookahead 判準的活體對照）
-_REPIN_NET_CAP_DUE_TARGET = 559  # 步伐 5 < 前一段的 6，續守「步伐刻意變小」且嚴格低於現行 cap
+_REPIN_NET_CAP_DUE_ROUND = 124  # round-label-ok：到期輪＝兌現輪+2（lookahead 判準的活體對照）
+_REPIN_NET_CAP_DUE_TARGET = 555  # 步伐 4 < 前一段的 5，續守「步伐刻意變小」且嚴格低於現行 cap
 
 #: DEF-200-121：到期輪自身的後設鎖——`_REPIN_NET_CAP_DUE_ROUND` 只准落在「最近稽核輪
 #: ＋ lookahead」以內（歷史母體 85..113 的到期輪一律＝上一次兌現輪 +2）。可延期的到期日
@@ -1738,10 +1779,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 110
+_REPIN_LOG_FROZEN_PREFIX_LEN = 114
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "dc94d1a10d4fbd39c94ae90334c91b9e1b84144264f16a5304aafd6f6e90ac20")
+    "7d9eb06de5a75e425f54dbe63b744d20690c6d183e00ab66e2f84747b1a55acc")
 
 
 def repin_log_history_digest(
@@ -1893,6 +1934,10 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # `_REPIN_LOG_HISTORY_SHA256` 前進，同體例「追加後立即自我凍結」——本輪追加
     # 本列＋一個 repin 稽核列，prefix_len 109→110 涵蓋新 repin 列本身。
     ("R120", "4554dbed8bf5", "dc94d1a10d4f", "DEF-200-241"),
+    # 精準修復輪收尾：三筆缺陷落地＋散文搬遷抵銷的守衛線重釘使 round-label-ok
+    # `_REPIN_LOG_HISTORY_SHA256` 前進，同體例「追加後立即自我凍結」——本輪追加三個
+    # repin 稽核列＋本列，prefix_len 110→113 涵蓋全部新列本身。
+    ("R122", "dc94d1a10d4f", "7d9eb06de5a7", "DEF-200-222"),
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。
@@ -6218,6 +6263,12 @@ _PHASE2_REVIEW_LOG: tuple[tuple[int, str, str], ...] = (
      "欄**（`guard_line_composition()`，只印不擋）而非全量落地——裁決存證＝"
      "AutoSDD_Adjudication_Record_R110.md §1.4；(c) 是否轉阻斷留待 R117+ 依觀測資料"
      "再議，不再佔用本表的『維持觀察』名額。"),
+    (122, "[維持觀察]",
+     "本輪是精準修復輪（帳本三筆缺陷結案＋護欄層散文搬遷抵銷），未觸碰 ADR-XPLAT-013 "
+     "方向 (c) 是否由觀測轉阻斷的議題，亦未提出新 Phase 2 提案。(c) 依 R110 §1.4 裁決"
+     "仍為觀測欄，其轉阻斷所需的觀測資料由 `guard_line_composition()` 持續累積（本輪"
+     "收尾窗口的觀測欄實測值見 `--print-guard-lines` 末行）。上一列是 `[落地]` ⇒ 款(5) "
+     "的連續『維持觀察』計數自本列起算為一，未觸上限。依 §6 重新武裝下一個視窗。"),
 )
 #: 到期輪由末列導出、不另立常數（一份知識一個家；同 `_REPIN_NET_CAP_SCHEDULE` 的
 #: 「生效點＝首列、現值＝末列，皆由表導出」）。

@@ -364,7 +364,15 @@ _TREE_FILE_FLOORS: dict[str, int] = {
     # `test_failure_log_rotation.py`／`test_skip_ceiling_ratchet_direction.py` 三支鎖檔，
     # `tools/tests` 由 62 支長到 **65**，49 只剩實測的 75%〔低於 `TREE_FLOOR_RATIO` 80%〕，
     # 第三向判紅並逐字指示「重釘為 52」⇒ 照填、零加減推算）。
-    "tools/tests": 52,
+    # 🔴 本輪重釘 52 → 55（機制與上四段逐字相同：`tree_floor_problems()` 第三向「下限已
+    # 過期」判紅並**逐字**指示「重釘為 55」⇒ 本行照填、零加減推算）。成長來源＝本輪三個
+    # 並行實作包各自新增的回歸鎖：`test_apply_lock.py`／`test_archive_apply_locked.py`／
+    # `test_check_archive_required.py`（皆為 `DEF-200-222` 的併發鎖與縮窄阻斷面判準之落點），
+    # `tools/tests` 由 66 支長到 **69**，52 只剩實測的 75%（低於 `TREE_FLOOR_RATIO` 的 80%）。
+    # 方向是**上修＝判準更嚴**（下限愈高，對「掃描面靜默縮小」的鑑別力愈強），不是放寬。
+    # 🔴 55 只在實測恰為 69 時成立（`int(69×0.8)=55`、`int(70×0.8)=56`）——本行是在三個
+    # 並行包**全部停工後**的收尾單人窗口量的，69 即本輪定案值。
+    "tools/tests": 55,
     # 🔴 R82 包 A2（DEBT-01）：204 → 205。新增 `AutoClaude/tests/contract/test_w6_deletion.py`
     # （AC2-2 的真斷言落點）後掃描面變 257，下限只剩實測的 79% ⇒ 依 `TREE_FLOOR_RATIO` 的
     # 防腐那一向轉紅。這正是它的設計意圖：下限不跟著長就會愈來愈鬆而沒有任何東西說話。
@@ -543,7 +551,15 @@ _SITE_CLASS_CENSUS: dict[str, dict[str, int]] = {
     "tools/tests": {
         "windows-only": 14,
         "posix-only": 10,
-        "tool-absence": 36,
+        # 🔴 本輪重釘 `tool-absence` 36 → 37（**非放寬**：本表判準是「相等」，任一格變動都
+        # 必須有人回來改，失敗訊息自己會印出該填的數字 ⇒ 重釘是設計好的流程）。新站點＝
+        # `test_run_root_unittests.py::MinTestsMarginCriterionTest` 的類別層
+        # `@unittest.skipIf(os.environ.get(_ZERO_DEP_PROBE_ENV) == "1", …)`：`DEF-200-170` 的
+        # 新判準鎖與 `ZeroDepEnvironmentDiscriminationTest` 一樣會 spawn 零相依探針，在探針
+        # **內部**再跑一次會遞迴生出孫探針（`DEF-101-803` 實測牆鐘 823s→3813s 且仍逾時）。
+        # 該 skip 是**斷遞迴**、不是放棄覆蓋——外層那一次照跑，該組斷言全數在外層被驗證；
+        # 述詞讀的是環境變數而非平台，故歸 `tool-absence` 而非任一平台格。
+        "tool-absence": 37,
         # 🔴 R88 重釘 `runtime-skipTest` 20→22（**非放寬**，同上：本表判準是「相等」）。
         # DEF-200-104 的第三個掃描面（SDD LATEST hook 樹的 console-spawn 判準）新增兩支測試，
         # 兩支皆以函式體內 `self.skipTest("[TOOL-ABSENCE] …")` 對「解不出 LATEST／該樹無

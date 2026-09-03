@@ -1,17 +1,7 @@
 #!/usr/bin/env python3
 """tools/install_windows_nightly.ps1 結構驗證（R19 修復包 D）。
 
-背景：mac 側 tools/install_mac_nightly.sh 提供一鍵 install/uninstall/status/
-render-only 排程安裝器；Windows 側先前只有 AutoClaude/tools/fix_nightly_catchup.ps1
-——假設 AutoClaude_Nightly 這個 schtasks 任務已存在，只能校正設定、不能從零建立。
-本測試驗證新補上的 tools/install_windows_nightly.ps1 結構正確且與既有生態系（
-fix_nightly_catchup.ps1 的補跑保護目標值、run_local_nightly.ps1 檔頭記載的排程慣例）
-不漂移。
-
-`Register-ScheduledTask`/`Get-ScheduledTask` 屬 Windows ScheduledTasks 模組，非
-Windows 主機（含本專案開發常用的 macOS/Linux pwsh）無法真的執行——本測試刻意只做
-靜態文字結構驗證（＋若本機有 powershell/pwsh 則額外做語法解析，純解析不執行，
-跨平台安全），不嘗試真的呼叫排程 API。
+沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md〈模組背景與靜態驗證的設計取捨〉。
 
 執行：python3 -m unittest discover -s tools/tests -p "test_*.py" -v
 """
@@ -167,16 +157,8 @@ class TestInstallWindowsNightlyStructure(unittest.TestCase):
         （StartWhenAvailable=True / WakeToRun=True / DisallowStartIfOnBatteries=False /
         StopIfGoingOnBatteries=False），新機器不必再手動跑一次 fix 腳本。
 
-        DEF-101-249（R20 真 Windows 機器驗證）：`fix_nightly_catchup.ps1` 讀寫既有
-        任務走「物件屬性賦值」（`$t.Settings.DisallowStartIfOnBatteries = $false`），
-        物件屬性名就是 DisallowStartIfOnBatteries／StopIfGoingOnBatteries，那裡沒錯；
-        但 `install_windows_nightly.ps1` 是用「建構」cmdlet
-        `New-ScheduledTaskSettingsSet` 從零產生同一份設定，這個 cmdlet 的參數名
-        極性相反、名稱也不同——`-AllowStartIfOnBatteries`／
-        `-DontStopIfGoingOnBatteries`，原參數名在此 cmdlet 上根本不存在，真機呼叫
-        會拋 ParameterBindingException（見同檔 TestInstallWindowsNightlySettingsConstruction
-        的真機呼叫驗證）。此處只做語意對齊靜態檢查：目標值透過描述性註解與正確的
-        cmdlet 參數名雙重確認一致，不斷言（也不可斷言）兩支腳本使用同一組參數字面。
+        沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+        〈DEF-101-249 兩支腳本參數名極性相反的沿革〉。
         """
         fix_text = _read(_FIX_CATCHUP)
         for expected_setting in (
@@ -282,16 +264,8 @@ class TestInstallWindowsNightlyStructure(unittest.TestCase):
     def test_help_block_contains_no_hardcoded_clock_time(self) -> None:
         """🔴 R73 二審（DEF-101-781）：`<# … #>` help 區塊不得出現任何 `HH:mm` 字面值。
 
-        意圖（Rule 9）：DEF-101-779 把觸發時刻從程式碼裡的寫死值改成參數，但 R73 首版
-        **同時在 help 區塊寫下一組錯的預設值**（`② … 預設 23:30`，實際 param 是 21:30），
-        且同段又寫「預設值＝本機現行實況」——與 param 區塊「刻意不把兩個預設都設成現況」
-        直接互相打臉。方向仍是危險側：讀 help 的人以為不帶參數跑不會動 smoke，實際會被
-        搬走。**「靜默改掉時間」這個陷阱沒被消滅，只是從程式碼搬進了說明文字**
-        （Architect／SA／SD 三方二審獨立命中同一筆）。
-
-        所以鎖的判準不是「說明要正確」（那無法機械判定），而是「說明裡**不准有時刻**」
-        ——預設值只有 param 區塊一個權威源，現行排程只有 `Get-ScheduledTaskInfo` 一個
-        權威源。只靠自律的話，這個形態已證實會在同一支檔、同一個 commit 內重生。
+        沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+        〈test_help_block_contains_no_hardcoded_clock_time 意圖〉。
         """
         # `<#` 不在檔案第一行（第 1 行是 `#Requires -Version 5.1`），故不加 `^` 錨點。
         m = re.search(r"(?s)<#(.*?)#>", self.text)
@@ -342,14 +316,8 @@ class TestInstallWindowsNightlyStructure(unittest.TestCase):
         想拿結束代碼做自動化判斷（CI／監控腳本）在 Windows 上會拿到假陽性。修復後須
         依實際存在性決定 exit 0/1，而非寫死 exit 0。
 
-        🔴 R60 DEF-101-542：本斷言原文要求 `$loaded = Show-NightlyStatus`，而該修法
-        **在 PowerShell 上根本不成立**——函式內所有 `Write-Output` 都會併入回傳值，
-        `$loaded` 實得 `Object[]`（報表字串 + 布林），`if ($loaded)` 對非空陣列恆為真
-        ⇒ `-Status` 又變回「恆 exit 0」，DEF-101-248 的修復被語意打敗且**本測試看不到**
-        （它只比對原始碼字面，從不執行）。修法：把「印報表」與「判定存在」拆成兩支
-        函式（`Show-TaskDetail`／`Test-TaskPresent`，沿用 run_root_unittests.py
-        `report_windows_native_skips`／`windows_native_skips` 的既有慣例），並由
-        `TestStatusExitCodeRuntime` 以真的執行取代字面比對來守這條不變量。
+        沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+        〈test_status_exit_code_reflects_task_existence R60 DEF-101-542 訂正〉。
         """
         status_block_match = re.search(
             r"if \(\$Status\) \{(.*?)\n\}", self.text, re.DOTALL,
@@ -397,19 +365,8 @@ class TestInstallWindowsNightlyStructure(unittest.TestCase):
         REAL_EXITCODE=1），與 mac 側 `install_mac_nightly.sh` 的 `cmd_uninstall()`
         （完全不檢查底層腳本是否存在）行為不對稱。
 
-        本測試鎖住結構層不變量：真正的 `-Uninstall` 處理區塊——以行首（無縮排）的
-        `if ($Uninstall) {` 為起點錨點（真正區塊頂格書寫；`-Status` 區塊內那個只印
-        警告、同名但不同語意的巢狀 `if ($Uninstall)` 有縮排，`^` + `re.MULTILINE`
-        會跳過它），以其內含的 `foreach ($name in @($TaskName, $SmokeTaskName))`
-        迴圈為終點錨點——本體不得包含任何 `Test-Path -LiteralPath $NightlyPs1` /
-        `$SmokePs1` 呼叫，且兩個存在性檢查必須出現在該區塊**之後**（即收斂進
-        install-only 段落）。
-
-        錨點修訂記錄：原始版本起點無 `^`／`re.MULTILINE`，`re.search` 實際抓到的是
-        `-Status` 區塊內那個縮排的巢狀 `if ($Uninstall)`（第一個出現的匹配），而非
-        本文件宣稱排除的對象；因兩者在原始碼中相鄰、捕獲範圍恰好完整涵蓋真正區塊，
-        對 DEF-101-619 這個特定回歸仍有鑑別力，但與文件描述的機制不符（Review round
-        1 發現）。加 `^` 錨點後才是文件宣稱的行為。
+        沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+        〈test_uninstall_branch_does_not_depend_on_carrier_script_existence 結構不變量與錨點修訂〉。
         """
         uninstall_block_match = re.search(
             r"^if \(\$Uninstall\) \{"
@@ -613,15 +570,8 @@ class TestInstallWindowsNightlySettingsConstruction(unittest.TestCase):
 class TestStatusExitCodeRuntime(unittest.TestCase):
     """DEF-101-542 回歸鎖：`-Status` 的結束代碼必須**真的**反映任務存在性。
 
-    WHY 一定要用執行而不能用字面比對：原本的靜態斷言（比對 `$loaded = Show-...`）
-    在腳本行為完全壞掉（恆 exit 0）的情況下照樣全綠——R60 實測把 `$TaskName` 換成
-    一個不存在的名字後跑 `-Status`，真實結束代碼是 **0**。「字面對了但語意反了」
-    是 PowerShell 特有的陷阱（函式輸出串併入回傳值），只有跑起來才看得到。
-
-    方法：把安裝器複製到 temp、把兩個任務名改寫成保證不存在的名字後執行——
-    **不註冊、不移除任何排程任務**（純唯讀查詢；本 repo 紀律：真安裝屬使用者 ops，
-    須另行核可）。`-Status` 區塊在腳本中位於載體存在性檢查之前，故複本雖然算出錯的
-    $RepoRoot 也不影響本測試（R60 實測確認）。
+    沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+    〈TestStatusExitCodeRuntime 為何要用執行而非字面比對〉。
     """
 
     _ABSENT_NIGHTLY = "AutoClaude_Nightly_R60AbsentProbe"
@@ -1069,17 +1019,7 @@ class TestScheduledTaskDriftChecker(unittest.TestCase):
         self.assertEqual(report["status"], "skip")
         self.assertEqual(sorted(report["absent"]), sorted(self.expectations))
 
-    # ──────────────────────────────────────────────────────────────────────
-    # 🔴 R75（SD 複審 blocking）：「部分缺席」這一格此前沒有登記、沒有判準、沒有測試
-    #
-    # 缺陷實測（修復前，唯讀即可證）：一支存在且七項設定全符 ＋ 一支整支不存在
-    #   → status=ok、drifts=[]、main() rc=0（全綠），
-    #     而同一份人類可讀輸出照實印著「AutoClaude_WindowsSmoke: 不存在（未安裝）」。
-    # 也就是**印得出來卻判它綠**：判準與被判準物錯配——偵測器要守的是「排程會不會漏
-    # 跑」，而「任務不見了」是漏跑的最強形態（R71 真的從本機移除過一支 AutoClaude*
-    # 任務），卻是它唯一看不到的形態。上方 test_absent_tasks_are_skip_not_drift 只覆蓋
-    # **全**缺席，剛好把這一格繞過去。
-    # ──────────────────────────────────────────────────────────────────────
+    # 沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md〈R75「部分缺席」這一格的缺陷實測〉。
 
     def test_partial_absence_is_not_green(self) -> None:
         """一支完美 ＋ 一支整支不存在 → 非 ok、非 skip，且缺席那支要點名。
@@ -1244,25 +1184,8 @@ def _nightly_drift_pass_whitelist(wiring: str) -> set[str]:
 class TestNamedExemptionRetiresWhenItsUnlockConditionHolds(unittest.TestCase):
     """R76：具名豁免的**解除條件一旦成立，豁免就必須消失**——由機械物盯，不靠人讀 WARN。
 
-    🔴 缺陷本體（DEF-101-794 的第二段）：R75 為排程漂移立了一條具名豁免（`status=drift`
-    只印 WARN、不計 nightly 失敗），理由是修法卡在未執行的系統管理員提權。那條豁免**自己
-    寫下了**可判定的解除條件——「偵測器回報 status=ok 之後，本項應移回 finalFailures」
-    ——並且只安排了一個承接者：nightly log 裡一行給人看的 WARN。提權於 2026-08-05 執行、
-    偵測器實測 `status=ok` / rc=0 之後，那行 WARN 每晚都在印，而豁免**照樣生效**。
-    ⇒ 承接者是「人記得讀一行 WARN」的豁免，一律等於永久豁免。
-
-    本鎖是那個教訓的一般化：**豁免的解除條件必須有東西在條件成立當天說話**。三個方向：
-      ① 靜態（平台中立，三個平台都說話）：接線層已記載那次觀測 ⇒ 白名單不得再含 drift。
-      ② 真機交叉核對：偵測器**現在**若也回 status=ok，同一結論必須成立。
-      ③ 鑑別力（合成輸入）：把豁免加回去的白名單必須被本鎖判紅——否則①②都只是恆綠。
-
-    🔴 為何本鎖**不用 `skipUnless` / `skipTest`**（誠實劃界，這是刻意的取捨）：
-    ② 在非 Windows／未安裝受管排程的機器上量不出來，慣例作法是 `self.skipTest`。但
-    `tools/lib/skip_tag_policy.py::_SITE_CLASS_CENSUS` 是**相等**棘輪，新增任何一個字面
-    reason 的 skip 站點都必須同步重釘那張表，而該檔不在本包的檔案所有權內（跨界改動＝
-    並行包互踩）。故 ② 改為「量不出來時退回①的靜態結論並把原因印到 stderr」——**兩條
-    分支都真的斷言**，沒有任何一條是 `return` 靜默通過。代價誠實記在這裡：量不出來這件
-    事不會出現在 unittest 的 skipped 統計裡，只會出現在 stderr。
+    沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+    〈TestNamedExemptionRetiresWhenItsUnlockConditionHolds 缺陷本體與三個方向〉。
     """
 
     #: 偵測器回這個狀態＝受管任務都在、每一項設定都符合期望＝提權修復已完成。
@@ -1364,15 +1287,8 @@ class TestNamedExemptionRetiresWhenItsUnlockConditionHolds(unittest.TestCase):
 class TestWindowsSmokeTaskHasWrittenExitCriteria(unittest.TestCase):
     """R74 F 項：AutoClaude_WindowsSmoke 這支排程任務必須有成文、可機械查的退出判準。
 
-    🔴 缺陷本體：該任務自 R60 建立起，全庫查不到任何一條退出判準——於是「這個測試
-    測完了嗎、能不能結束」這個問題**在結構上無法回答**，使用者連問三輪都得不到答案。
-    補償控制沒有退場條件，就會從「暫時的補償」腐化成「永久的儀式」。
-
-    本鎖釘住三件事（都在 tools/windows_smoke_local.ps1 的檔頭）：
-      ① 判準存在且分清「腳本（永久）」與「每日排程任務（有退場）」；
-      ② 判準是可機械查的（點名 gh 查詢與既有的兩支檢查器），不是「覺得夠了就撤」；
-      ③ **不得**以「連續 N 天零發現」當退場依據——R74 同輪雲端 windows-compat-ci
-         抓到一筆本機十道閘門全綠的 P0，證明零發現只代表這一層看不到那一類缺陷。
+    沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+    〈TestWindowsSmokeTaskHasWrittenExitCriteria 缺陷本體與三件事〉。
     """
 
     def setUp(self) -> None:

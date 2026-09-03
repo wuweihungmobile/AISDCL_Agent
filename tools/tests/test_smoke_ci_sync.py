@@ -150,27 +150,8 @@ class TestWindowsCiShellClaimConsistency(unittest.TestCase):
     """`windows-compat-ci.yml` 全檔不得再出現「全部／其餘步驟一律 shell: pwsh」式的
     絕對宣稱（訂正引述區除外）。
 
-    WHY（DEF-101-540，R60 Scan-C C-02）：同一句宣稱已**三度失實**——R5 原文寫死、
-    R57 round 1 改寫成「windows-latest 的步驟一律」仍被 pyyaml 稽核證偽、R57 收輪只改
-    了檔頭而 step name 與兩處 step 註解逐字存活到 R60。實測分佈：windows-smoke
-    ＝pwsh 19／bash 1，windows-nightly-full＝powershell 2／pwsh 3（其中 2 步原生
-    PS 5.1 正是該宣稱的直接反例，且其中一步的 name 自己就掛著那句宣稱）。
-    現行機械鎖 `test_gha_action_versions.py::TestWindowsCiHeaderSnapshotLock` 只比對
-    **檔頭那張快照表** vs YAML 實況，對散文（step name／註解）零訊號。
-
-    為何鎖住「措辭」而不是「數字」：R57 已立政策——不得寫死支數（寫死＝下一輪必再
-    過期）。本鎖因此不驗任何計數，只禁止「一律／全部」這種不依賴實測就成立不了的
-    絕對詞出現在宣稱句裡；要陳述分佈就去看檔頭那張由姊妹鎖看守的實測表。
-
-    為何住在本檔：本檔 docstring 立的正是「四份手寫實作互相宣稱同步維護、零機械
-    互鎖」這條軸，且本檔已在 `test_sync_maintenance_comments_present` 讀取
-    `_WIN_CI` 做散文斷言——同一條軸、同一份輸入。姊妹鎖（檔頭快照表 vs YAML 實況）
-    在 `tools/tests/test_gha_action_versions.py::TestWindowsCiHeaderSnapshotLock`，
-    兩者互補：那支管「表要對」，本支管「別在表以外再自己講一遍」。
-
-    鑑別力（鏡子自證，不靠改壞檔案）：豁免區內**必須**至少命中一次——那裡刻意逐字
-    引述舊宣稱以資訂正。若有人把 `_ABSOLUTE_SHELL_CLAIM_RE` 改寬鬆到抓不到東西，
-    正控會先紅；sentinel 兩端缺一、或豁免區被撐大到超過上限，也都會紅。
+    沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+    〈TestWindowsCiShellClaimConsistency WHY（同一句宣稱三度失實）〉。
     """
 
     @classmethod
@@ -258,16 +239,8 @@ class TestWindowsSmokeCarrierGuard(unittest.TestCase):
     def test_engine_mismatch_guard_present_and_before_any_work(self):
         """🔴 R73（DEF-101-784）：ENGINE-MISMATCH 引擎守門必須有回歸鎖。
 
-        WHY 與上一支同構（QA-R59-04 的原話直接適用）：「守門本身若沒有鎖，刪掉它
-        全套照綠——那就與註解同級，主張自我否定」。R73 為 DEF-101-776 補了守門
-        卻**沒補鎖**，而同一輪的 DEF-101-773 結案語才剛寫下「已知缺口不得只以劃界
-        結案（DEF-101-757）」——同輪自我違反，QA 二審點名。實測本鎖之前全庫
-        `*test*.py` 對 `ENGINE-MISMATCH` **零命中**。
-
-        為何這個守門特別需要鎖：它的鑑別力來源是「[1/9] 的 Parser 解析必須用 5.1
-        的文法」，而 5.1 對「UTF-8 無 BOM ＋ 中文註解」的 .ps1 會 parse 死、pwsh 7
-        不會（R73 全庫 137 支實測 5.1 ERR=29 / 7.6.4 ERR=0）。守門被刪掉時**不會
-        有任何紅燈**——本機照跑、CI 不執行這支腳本——直到某天有人在 mac/CI 上炸掉。
+        沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+        〈test_engine_mismatch_guard_present_and_before_any_work WHY〉。
         """
         ps1 = _REPO_ROOT / "tools" / "windows_smoke_local.ps1"
         text = ps1.read_text(encoding="utf-8-sig", errors="replace")
@@ -356,13 +329,8 @@ class TestSmokeCiSync(unittest.TestCase):
         而非只交叉比對「文件宣稱＝腳本釘選」（那一半由
         test_onboarding_pass_claims_match_script_pins 鎖）。
 
-        兩腳本「原始碼字面 pass/Pass-Item 次數」與「實際執行到的步驟數」不直接相等：
-        - macos_smoke_local.sh 有互斥分支（兩條路徑各一次 pass、實際命中其一）⇒ 字面偏多；
-        - windows_smoke_local.ps1 有共用函式被呼叫多次、函式體內只 1 個字面 ⇒ 字面偏少。
-        故不寫通用剖析器（易在改版時悄悄算錯而製造假的安全感），改用顯式登記表 ＋
-        fail-loud 存在性檢查：錨點消失（訊息改寫／函式改名）即紅，逼人工重新核算。
-        立案史料（含 QA 二審 bug-injection 的實測）＝
-        `docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`。
+        沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+        〈test_min_pass_equals_actual_step_count 為何用登記表不用剖析器〉。
         """
         sh_text = _read(_SH)
         all_sh_msgs = _SH_PASS_RE.findall(sh_text)
@@ -857,20 +825,8 @@ class TestCiStepLocalCarrierCoverage(unittest.TestCase):
     def test_registry_discloses_its_evidentiary_boundary(self) -> None:
         """三段式取證邊界必須留在 repo 內（R67 round 2 / QA-R67-04）。
 
-        WHY 這也要上鎖：R67 之前，「windows-smoke 那半張表是零 Windows 實機的讀碼推論」
-        與「這些鎖只驗載具存在、不驗它真的做了那件事」兩項限制**只存在於當輪的修復回報
-        JSON 裡**，repo 內 `grep` 零命中。下一輪的讀者只看得到一張兩邊等寬的表，會把推論
-        讀成實測——而本輪各處（`snapshot-fingerprints-win32` 整欄 `unrecorded`、
-        ADR-XPLAT-002 §6 逐輪覆蓋表、DEF-101-659）都已逐項標示推論／實測，體例是存在的，
-        只有這裡漏了。註解被刪掉就會退回零揭露，故機械守住它還在。
-
-        🔴 **判定範圍刻意只取登記表之前那段註解**，不是整檔 `in src`：本測試自己的 marker
-        清單就寫著那幾個詞，整檔比對會被**自己**滿足而恆真——那正是本輪三度踩到的「換上的
-        驗證自己也是假驗證」。實測佐證：整檔版在「把註解裡的字樣改掉」的注入下仍 rc=0
-        （自我滿足），改成本段切片後同一注入 rc=1。**第二次踩到同一形態**：改成「登記表
-        之前的全部原始碼」仍 rc=0——本檔第 638 行另一支測試的失敗訊息裡剛好也寫著「已實測
-        涵蓋／已實測不涵蓋」（那是 Get-ChildItem 列舉途徑的邊界說明，與本表無關）。故切片
-        **兩端都要錨**：只取取證邊界那一段註解本身。
+        沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+        〈test_registry_discloses_its_evidentiary_boundary WHY 與切片兩端錨定〉。
         """
         src = Path(__file__).read_text(encoding="utf-8")
         head = "這張表的取證邊界"
@@ -894,15 +850,8 @@ class TestCiStepLocalCarrierCoverage(unittest.TestCase):
     def test_registered_smoke_groups_exist_in_that_script(self) -> None:
         """比「檔案存在」強一階：登記成 `<smoke 腳本> [n/m]` 者，該組號必須真的在那支腳本裡。
 
-        WHY（R67 round 2 / QA-R67-04）：`test_named_local_carriers_actually_exist` 只驗
-        「檔名存在」——smoke 腳本本身幾乎不可能被刪，所以那條鎖在實務上**接近恆真**；而真正
-        會發生的腐化是「情境分組被重新編號／被刪掉一組」，此時檔案還在、登記卻已指向不存在
-        的組號，這張表就開始說謊而無人知曉。本鎖把判準往前推到組號層級（`[3/7]` 這種標籤
-        本來就是腳本自己 echo 出來的字面，`_GROUP_RE` 已在本檔他處消費同一來源）。
-
-        **仍未買到的**（誠實劃界，見上方 `_CI_STEP_LOCAL_CARRIER` 邊界 (c)）：本鎖不驗
-        「[3/7] 那一組做的事＝該 CI step 做的事」。語意等價要嘛實跑（破壞性、分鐘級），
-        要嘛比對散文（另一種推論）——兩者都不是本鎖能誠實宣稱的東西。
+        沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+        〈test_registered_smoke_groups_exist_in_that_script WHY 與未買到的部分〉。
         """
         # 歸屬**不靠文字鄰近**（實測會歸錯：windows 側某筆 NO-LOCAL-CARRIER 理由句在提到
         # `windows_smoke_local.ps1` 之後又引用 macOS 的 `[2/7]` 作對照），改由**分母**判定
@@ -1022,16 +971,7 @@ class TestMacSmokeCliContract(unittest.TestCase):
     def _run(self, argv: list[str], shell: str | None = None) -> subprocess.CompletedProcess[str]:
         """以**真正的 bash**（`shell=None` 時）跑受測腳本。
 
-        🔴 R69 後續（DEF-101-753）：本方法原本寫死 `shell: str = "bash"`，把**裸名**
-        交給 `subprocess`。Windows 上這條路必敗——`CreateProcess` 解析裸名時把
-        `System32` 排在 PATH **之前**，於是 `C:\\Windows\\System32\\bash.exe`
-        （WSL 啟動器）必定先命中，無發行版時以 UTF-16LE 印
-        `Windows Subsystem for Linux has no installed distributions.` 並 `exit 1`。
-        受測腳本**一行都沒被執行**，本組三支卻據此斷言「腳本回了非預期 rc」——
-        雲端 windows-compat-ci 上是三筆歸因完全錯誤的紅燈（本機 macOS 全綠、
-        R69 四輪四方複審亦未發現）。改走 `_platform_helpers.usable_bash_for_fixture()`
-        單一真相源（回傳**絕對路徑**：git 相鄰優先 + System32 整段排除 + coreutils
-        驗活；完整機制與同輪對照組取證見該函式 docstring）。
+        沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md〈_run 的 DEF-101-753 沿革〉。
         """
         exe = shell or _BASH
         if exe is None:
@@ -1151,23 +1091,7 @@ class TestNightlyCarrierReferencesResolve(unittest.TestCase):
         )
 
 
-# --- act 地端通道：workflow 可達性 ＋ 零通道 job 逐個具名登記（本輪 Scan-F）--------
-#
-# WHY：`AutoClaude/tools/run_act_core.py` 原先把 workflow 寫死成模組常數，於是薄殼
-# 只指得到 autoclaude-ci.yml 一支；同一時間根層有 11 支 workflow 共 25 個 job，其中
-# root-infra-ci.yml（承載根層全部守門）與兩支 compat-CI 的 nightly 告警鏈**一個都碰
-# 不到**。本輪實測：`run_act.ps1 -List` 印 9 個 job、repo 根 `act -l` 印 25 個。而根
-# CLAUDE.md 與 ONBOARDING 都把 act 寫成「Linux 容器跑真 CI」且無任何限定詞 ⇒ 讀者會
-# 把 9/25 讀成全部。雲端帳務停擺期間，這個差是實質的驗證真空。
-#
-# 本節鎖三件事：
-#   ① 每一支帶 ubuntu runs-on 的 workflow 都指得到（`--workflow` 真的被消費）；
-#   ② 未指定旗標時的執行標的**維持原值**——零行為變更的機械證明，不是宣稱；
-#   ③ runs-on 非 ubuntu 的 job 逐個具名登記為「結構上零本機通道」，不留白。
-#
-# 邊界（誠實劃界）：只驗「指得到」與「登記完整」，**不驗那支在 act 上跑得完**。跑得完
-# 與否取決於 runner 映像缺件（pwsh/gh/ruff）與 act 0.2.89 對 `services:` 的上游 panic，
-# 兩者由 `run_act_core.preflight()` 在燒掉幾分鐘之前逐項講明，不由本節代為裁決。
+# 沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md〈act 地端通道 Scan-F 的立案與邊界〉。
 _ACT_CORE_PATH = _REPO_ROOT / "AutoClaude" / "tools" / "run_act_core.py"
 
 #: runs-on 不是 ubuntu 的 job ⇒ act 結構上零通道。值＝為何零通道 ＋ 該平台的替代出口。

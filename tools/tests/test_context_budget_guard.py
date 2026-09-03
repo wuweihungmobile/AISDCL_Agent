@@ -214,16 +214,8 @@ def _isolated_env(tmp: Path, *, real_scheduler: bool = False) -> dict[str, str]:
         "XDG_DATA_HOME": str(tmp / ".local" / "share"),
         "XDG_STATE_HOME": str(tmp / ".local" / "state"),
     })
-    # 🔴 R81：額度那兩個旗標也要清。少清它們時，開發者自己機器上設過 `AUTOSDD_QUOTA_
-    # GUARD_OFF=1` 就會讓下面所有 quota e2e **靜默轉綠**（守衛整支被關掉，rc 一律 0），
-    # 而在 CI 上又是紅的——「污染的方向正好是看起來通過」同一條紀律。
-    # 🔴 R91 補 `AUTOSDD_CONTEXT_SIGNAL_OFF`：它關掉的正是本輪新增的那條 stdout 通道 ⇒
-    # 開發者機器上設過就會讓每一條「訊息必須送進模型」的 e2e **靜默轉綠**，方向同上。
-    # 🔴 R96／B-4 尾項補 `AUTOSDD_TRACE_DIR`：開發者機器上設過它，`endurance_env.trace_dir()`
-    # 就會把痕跡（含 `quota_gate.burn_ledger_path()` 的落款）整個寫到**沙箱之外** ⇒ 下面
-    # `PlannerCliTest` 那道「`--check` 不寫檔」的全樹相等判準會**靜默轉綠**（方向同上面那
-    # 兩條旗標：污染的方向正好是看起來通過）。pop 掉之後它落回 `HOME/.autosdd/traces`，
-    # 而 `HOME` 已經在沙箱裡 ⇒ 真的寫了痕跡就會被看見。
+    # 沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+    # 〈沙箱要清哪幾個旗標（R81／R91／R96）〉。
     for flag in ("AUTOSDD_CONTEXT_WINDOW", "SDD_ACTIVE_VERSION",
                  "CLAUDE_CODE_AUTO_COMPACT_WINDOW", "AUTOSDD_CONTEXT_GUARD_OFF",
                  "AUTOSDD_CONTEXT_SIGNAL_OFF", "AUTOSDD_TRACE_DIR",
@@ -562,15 +554,8 @@ class PlannerCliTest(unittest.TestCase):
     def test_every_home_shaped_env_key_points_inside_the_sandbox(self) -> None:
         """R96／B-5 的沙箱化本身要有回歸鎖——落地當回合它一支都沒有。
 
-        SD 二審注射實測：把 `_isolated_env()` 的 `APPDATA`／`LOCALAPPDATA` 兩行還原成
-        「原封繼承開發者的真家目錄」⇒ **GREEN**；`tools/tests` 全樹對這幾個鍵零斷言，也就是
-        那兩行可以被無聲刪掉而沒有任何東西轉紅。而它們正是「走 `%APPDATA%` 的第三方
-        （PowerShell 模組快取／.NET／pip）寫進**真的**那一棵樹」這件事的唯一擋板：副作用既
-        污染開發者機器，又完全落在任何斷言的射程之外（沙箱目錄裡看不到 ⇒ 「沒有副作用」
-        是假的）。形態與第一輪 D7 點名的「修法沒有具名回歸鎖」同構。
-        XDG 那一族同理：開發者若顯式匯出過絕對路徑，它們**不隨 `HOME` 走**。
-        判準是「每一個家目錄形狀的鍵都必須落在沙箱底下」而不是逐鍵比對字面值——後者會在
-        沙箱佈局微調時假紅，前者只在「某個鍵指回真家目錄」時才紅，正是要守的那一件事。
+        沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+        〈test_every_home_shaped_env_key_points_inside_the_sandbox SD 二審注射實測〉。
         """
         env = _isolated_env(self.tmp)
         for key in ("USERPROFILE", "HOME", "HOMEPATH", "TMPDIR", "TEMP", "TMP",
@@ -2026,16 +2011,7 @@ class SentinelDecisionTest(unittest.TestCase):
               scheduler: object = None) -> dict:
         """跑一次 `_sentinel_tick`：排程器／告警／逐字稿定位全部注入（不碰真排程器）。
 
-        🔴 DEF-200-239：`register_endurance`／`_schtasks_remove` 是 planner 層級的假貨，
-        但 `patrol_housekeeping()` → `_heal_armed_drift()` 摸到的 `schedule_backend.
-        select()` 此前完全沒被注入，落到**真的**後端（`list_jobs()`／條件式 `arm()`）
-        ——`task` 預設字面 `"T-r95"` 從不符合 `AutoSDD_Sentinel_` 前綴查詢，真後端因此
-        結構上永遠判定「這支工作不在」⇒ 每次呼叫都真的重新 `.arm()`，在 Windows 上
-        真跑 `schtasks /create`，於真機種下自續排程工作（見 `_StatefulFakeSchedulerBackend`
-        docstring）。`scheduler` 未提供時一律套用該惰性替身；需要控制排程器現查回什麼
-        （如 `ArmedDriftSelfHealTest` 的漂移／非漂移情境）的呼叫端改走本參數注入自己的
-        替身，不再對 `sb.select` 額外掛一層外部 patch（那會與本函式的內部 patch 疊加、
-        誰蓋過誰取決於巢狀順序，改參數注入才是單一真相源）。
+        沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md〈_tick 的 DEF-200-239 沿革〉。
         """
         args = planner.build_parser().parse_args(
             ["--sentinel-tick", "--plan", str(plan), "--task-name", task])
@@ -7229,15 +7205,8 @@ class QuotaDegradationIsAudibleTest(unittest.TestCase):
     def test_the_same_source_does_not_shout_on_every_call(self) -> None:
         """出聲要有閂鎖：每次工具呼叫都吵的守衛會被關掉（同 90% 那道的既有判例）。
 
-        🔴 R100 訂正判準的**觀測面**（不是放寬）：從「後續呼叫零 stderr」換成「後續呼叫
-        零新增痕跡」。兩個理由：
-          1. `degraded_cap` 依 PRD §4.1.5 收到 2 之後，第 3、4 次扇出會**合法地**被節流
-             而說出**節流**訊息——那是另一個發言者（同檔
-             `test_the_throttle_message_is_not_the_degraded_message` 就是在守兩者要分得
-             開）。拿 stderr 當判準會把它誤讀成閂鎖壞掉。
-          2. 兩個發言者的字面**互相包含**（節流訊息裡也有「額度量不到（reason=…）」）
-             ⇒ 用措辭去分辨它們本來就不可靠。痕跡才是 `note_degraded()` 專屬的觀測面
-             （節流那條路實測 `trace == []`，見上一支控制組）。
+        沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+        〈test_the_same_source_does_not_shout_on_every_call R100 觀測面訂正〉。
         """
         first_rc, _, first_trace = self._gate()
         later = [self._gate()[2] for _ in range(3)]
@@ -7364,16 +7333,8 @@ class MeterFailureShapesTest(unittest.TestCase):
     def test_a_good_reading_carries_ok_and_the_narrow_measure_is_unchanged(self) -> None:
         """既有呼叫端的窄介面不得被改壞——`measure()` 仍然回 dict／None。
 
-        🔴 R82：讀數形狀由頂層 `pct` 純量換成 `axes[]`，斷言跟著換到**每一軸自帶**
-        `resets_at` 那一層——那正是該輪的缺陷本體（舊形狀在投影時把它丟掉）。
-        🔴 R82：最後那一行驗的是**窄介面**（`measure()` 只吃 timeout、仍回 dict／None，
-        新參數沒有改掉它）。替身必須掛在 `measure()` **真正的取數點**上，否則判準會退化成
-        「這台機器現在登入了沒有」，而判準不得依賴一台機器的登入狀態（憑證來源本身的覆蓋
-        在上面的雙欄矩陣，不在這一行）。
-        🔴 R96 訂正：替身原掛 `access_token`，而 R82 把平台分支併回 `token_detail()` 後它
-        已不在 `measure()` 的鏈上 ⇒ 自 R82 起一次都沒生效（mac 靠主機真實 Keychain 憑證假綠、
-        Windows 真紅）。鏈路、成因與實測見
-        `CrossPlatform_R96_Closure_Evidence.md` §2①。
+        沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+        〈test_a_good_reading_carries_ok_and_the_narrow_measure_is_unchanged R82／R96 訂正〉。
         """
         payload = {"five_hour": {"utilization": 61.0, "resets_at": None},
                    "limits": [{"kind": "session", "percent": 61,
@@ -9211,17 +9172,7 @@ class QuotaPaceOutletIsReachableTest(unittest.TestCase):
                     self.assertNotIn(deny, report, f"{name}：{report}")
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# 🔴 R96／B-3：兩個出口（派工**前**查的 `--pace`、被擋**當下**的節流訊息）必須說同一句話
-# ═══════════════════════════════════════════════════════════════════════════
-# 立案（QA 當回合實測）：本組落地之前，`tools/tests/` 全樹 grep `本視窗已用` **零命中**
-# ⇒ 把那兩行 revert 回去沒有任何一支測試會紅（唯一觸及 Workflow 分支的
-# `test_the_throttle_message_qualifies_every_percentage` 只斷言「每個百分比都帶 kind 與
-# 分鐘」，`live` 印不印完全不判）。同一份實測還量到：`recommended_fanout` 22 處全在
-# `test_quota_policy.py`、`live_dispatches` 8 處全在本檔 ⇒ **兩組永不相遇**，於是
-# 「cap 側說可派 N 個」與「派發帳說已用 N 次」可以無限期互相矛盾而沒有東西轉紅。
-# 本類的全部價值就是讓它們相遇：三條分別守渲染面、呼叫點、跨層一致性，缺一個就會留下
-# 一種「改壞了照樣綠」的形態（下面每一條的 docstring 各自寫出它守的是哪一種）。
+# 沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md〈R96／B-3 兩個出口必須說同一句話的立案〉。
 class WindowUsageIsToldTheSameWayByBothOutletsTest(unittest.TestCase):
     """節流訊息的 live 欄、`--pace` 的可派數、真閘的 rc——三者對同一份派發帳對帳。"""
 
@@ -9317,20 +9268,8 @@ class WindowUsageIsToldTheSameWayByBothOutletsTest(unittest.TestCase):
     def test_an_empty_window_is_paced_by_the_recommendation_not_by_the_raw_cap(self) -> None:
         """④ **公式面**：畫面數字＝`min(rec, cap−live)`，既不是 `rec` 也不是 `cap−live`。
 
-        `pace_line()` 上方那一整段 WHY 逐字宣稱「畫面數字恆 ≤ 守衛真的會放行的量
-        （`live_dispatches() >= cap` 即擋），也恆 ≤ 配速建議」，而 R96 落地當時**沒有任何
-        測試在守這個公式**：SD 與 QA 各自獨立把它注射成純差值 `max(0, cap−live)`，四支新增
-        鎖全部 GREEN。結構成因是 ③ 刻意構造 `live == cap`，而在那一格 `min(rec, cap−live)`
-        與純差值同為 0 ⇒ 兩式在唯一被斷言的格子上重合；①②則一格都不碰 `--pace` 的數字。
-
-        本條用**兩格**把三種實作分開，缺一格就會漏掉一種：
-          · `live=0`（視窗還空著）⇒ 必須印 `rec`。純差值在這裡印 `cap`＝**放大**（實測
-            cap=8／rec=4 時放大 2 倍），而放大是這一族唯一不准無證據發生的方向。
-          · `live = cap − (rec − 1)`（視窗吃掉一部分、剩餘刻意壓到 `rec` 以下）⇒ 必須印
-            `rec − 1`。`rec` 純量在這裡印 `rec`＝報一個守衛當場就會擋下的數字（B-2 立案的
-            那個病）。
-        兩道前提斷言（`cap > rec >= 2`、且 `rec != rec − 1`）是刻意的：階梯常數哪天一改讓
-        `cap == rec`，三式在兩格上就會全部重合而本條靜默失去鑑別力。
+        沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+        〈test_an_empty_window_is_paced_by_the_recommendation_not_by_the_raw_cap 兩格設計〉。
         """
         decision = _decision((("session", 55.0, 3600.0),))
         cap, rec = decision.cap, decision.recommended_fanout
@@ -9359,6 +9298,127 @@ class WindowUsageIsToldTheSameWayByBothOutletsTest(unittest.TestCase):
         line = qg.pace_line(free, 7)
         self.assertIn("cap=不設限", line)
         self.assertNotIn("本視窗已用", line, f"free 帶印出了一道不存在的節流：{line}")
+
+
+# 沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md〈DEF-200-169 滾動視窗剩餘秒數的立案〉。
+class FanoutWindowRemainingSecondsTest(unittest.TestCase):
+    """派發帳最舊那一筆 → 視窗剩餘秒；三態渲染；`--pace` 真的印得出來。"""
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="fanout-window-"))
+        # 🔴 `now` 截到整秒：目錄項名字只到毫秒，帶微秒的 `now` 會讓 `int()` 截斷在 ±1 秒
+        # 之間漂 ⇒ 斷言變 flaky，而 flaky 的鎖最後一定被刪掉（本 repo 既有判例）。
+        self.now = datetime.now(UTC).astimezone().replace(microsecond=0)
+        for name, value in (("quota_cache_path", lambda: self.tmp / quota_meter.CACHE_NAME),
+                            ("fanout_ledger_path", lambda: self.tmp / "ledger.d"),
+                            ("quota_latch_path", lambda: self.tmp / "latch.json"),
+                            *_TRACE_ISOLATION(self)):
+            old = getattr(qg, name)
+            setattr(qg, name, value)
+            self.addCleanup(setattr, qg, name, old)
+
+    def _seed(self, *ages: int) -> Path:
+        """走 production 的 `claim_dispatch()` 種幾筆派發，每筆各自幾秒前。"""
+        root = qg.fanout_ledger_path()
+        for age in ages:
+            self.assertIsNotNone(
+                qg.claim_dispatch(root, self.now - timedelta(seconds=age)),
+                f"派發帳種不進去（age={age}）⇒ 底下的斷言會退化成在空帳上恆真")
+        return root
+
+    def test_the_countdown_anchors_on_the_oldest_dispatch_not_the_newest(self) -> None:
+        """① **推算面**：剩餘秒＝`window −` 最舊那一筆的年齡，不是最新那一筆。
+
+        三筆年齡（163／100／40）刻意互不相同且都在視窗內：錨點取錯成最新那一筆會得到
+        260、取成中間那筆會得到 200，三個答案兩兩不同 ⇒ 這一格分得出來。若只種一筆，
+        「最舊」與「最新」是同一個東西，判準會靜默失去鑑別力。
+        """
+        root = self._seed(163, 100, 40)
+        self.assertEqual(qg.live_dispatches(root, self.now), 3,
+                         "三筆沒有全部落在視窗內 ⇒ 本條的前提不成立")
+        self.assertEqual(qg.fanout_window_left(root, self.now), (137, 163),
+                         "剩餘秒沒有錨在最舊那一筆上（錨成最新會是 260）")
+
+    def test_the_clock_is_injected_so_the_countdown_is_reproducible(self) -> None:
+        """② **時鐘面**：同一份帳、兩個不同的 `now` 必須給出兩個不同的答案。
+
+        紅端形態：實作若自己去叫 `datetime.now()`／`time.time()`，這兩格會回**同一個**
+        答案（帳沒動、真實時鐘在兩次呼叫之間幾乎沒走）⇒ 第二個 `assertEqual` 當場紅。
+        這是「時間可注入」這件事唯一測得到的形狀——它同時也是這支函式能被重現測試的前提。
+        """
+        root = self._seed(163)
+        self.assertEqual(qg.fanout_window_left(root, self.now), (137, 163))
+        later = self.now + timedelta(seconds=60)
+        self.assertEqual(qg.fanout_window_left(root, later), (77, 223),
+                         "`now` 往後推 60 秒，剩餘秒卻沒跟著少 60 ⇒ 實作在讀真實時鐘")
+
+    def test_an_empty_ledger_says_the_window_is_empty_instead_of_zero_seconds(self) -> None:
+        """③ **空帳邊界**：帳上一筆都沒有時**不得**印 `剩 0 秒`。
+
+        `0` 在這一行的語意剛好相反：它讀起來是「視窗滿了、正要放行」，而真相是「視窗
+        完全是空的、現在派不必等」。兩者要求 operator 做的事恰好相反 ⇒ 用一個獨立的
+        字面（`視窗全空`）承接，而不是讓 `None` 靜默塌成 `0`。
+        本格也一併覆蓋「派發帳目錄還不存在」（`scandir` OSError）那一支。
+        """
+        root = qg.fanout_ledger_path()
+        self.assertFalse(root.exists(), "帳目錄已存在 ⇒ 這一格測不到「目錄還沒建」那一支")
+        self.assertEqual(qg.fanout_window_left(root, self.now), (None, None))
+        line = qg.fanout_window_line((None, None), 0, qg.FANOUT_WINDOW_SECONDS)
+        self.assertIn("視窗全空", line, f"空帳沒說自己是空的：{line}")
+        self.assertNotIn("剩 0 秒", line,
+                         f"空帳印成「剩 0 秒」⇒ 讀起來像視窗滿了正要放行，方向相反：{line}")
+
+    def test_an_entry_past_the_window_neither_holds_it_open_nor_anchors_it(self) -> None:
+        """④ **超期邊界**：年齡已超過 `window` 的目錄項不算數，兩格分開驗。
+
+        🔴 順序是刻意的：**先**問 `fanout_window_left()`、**後**才 `live_dispatches()`。
+        反過來的話 `live_dispatches()` 會先把超期項 prune 掉，於是「本函式自己有沒有套
+        `floor`」這件事就測不到了（帳目變空之後，漏套 floor 的實作也會回 `(None, None)`）。
+        第二格（超期 ＋ 兩筆還算數）才是真的鑑別力所在：漏套 floor 會錨到 350 秒那筆、
+        算出 `max(0, 300−350)` ＝ `(0, 350)`——一個「剩 0 秒」的假話。
+        """
+        stale = qg.FANOUT_WINDOW_SECONDS + 50
+        root = self._seed(stale)
+        self.assertEqual(qg.fanout_window_left(root, self.now), (None, None),
+                         f"{stale}s 前那一筆早該滾出 {qg.FANOUT_WINDOW_SECONDS}s 視窗了")
+        self.assertEqual(qg.live_dispatches(root, self.now), 0,
+                         "超期那筆還被算成 live ⇒ 兩個出口對同一把 floor 說不同話")
+        root = self._seed(stale, 120, 30)
+        self.assertEqual(qg.fanout_window_left(root, self.now), (180, 120),
+                         "錨點被超期那一筆搶走 ⇒ 會印出「剩 0 秒」這句假話")
+
+    def test_an_unreachable_ledger_is_not_reported_as_an_empty_window(self) -> None:
+        """⑤ **三態面**：「帳讀不到」與「視窗全空」不得同形。
+
+        `quota_ledger` 是 try/except 降級成 `None` 的能力提供者（見 `quota_gate` 檔頭）。
+        把那一支折進「視窗全空」就是把一個 fail-open 講成一句好消息——同本 repo 對
+        「量不到 ≠ 量到零」的既有判準（`posture_line()`／`note_degraded()` 同族）。
+        """
+        old = qg.quota_ledger
+        qg.quota_ledger = None
+        self.addCleanup(setattr, qg, "quota_ledger", old)
+        self.assertIsNone(qg.fanout_window_left(qg.fanout_ledger_path(), self.now),
+                          "帳本原語不可達卻回了一個看起來像量到的答案")
+        line = qg.fanout_window_line(None, 0, qg.FANOUT_WINDOW_SECONDS)
+        self.assertIn("量不到", line, f"讀不到帳卻沒說：{line}")
+        self.assertNotIn("視窗全空", line,
+                         f"「帳讀不到」講成「視窗全空」＝把 fail-open 講成好消息：{line}")
+
+    def test_the_pace_outlet_actually_prints_the_window_line(self) -> None:
+        """⑥ **接電面**：函式對了但沒人叫它，是本 repo 反覆記載的形態（M10）。
+
+        ①~⑤ 全部直接呼叫那兩支函式 ⇒ 把 `pace_report()` 裡那一行整段刪掉，五條都還是
+        綠的。這一條走真的 `--pace` 全文，並順帶釘住既有鎖的前提：新那一行**不得**擠到
+        第一行去（`test_the_one_line_carries_all_five_facts` 讀的是 `splitlines()[0]`）。
+        """
+        _quota_cache(self.tmp, 75.0, kind="session", resets_in=2 * 3600)
+        self._seed(163, 40)
+        report = qg.pace_report(self.now)
+        self.assertIn("扇出視窗：剩 137 秒", report, f"`--pace` 沒印視窗剩餘秒：{report}")
+        self.assertIn("帳上 2 筆", report, f"帳上筆數不見了：{report}")
+        self.assertIn("最舊 163 秒前", report, f"最舊那一筆的年齡不見了：{report}")
+        self.assertIn("可派", report.splitlines()[0],
+                      "新那一行擠掉了第一行 ⇒ 既有的「一行五項事實」鎖會被連帶打紅")
 
 
 # ═══════════════════════════════════════════════════════════════════════════

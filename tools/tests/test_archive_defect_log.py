@@ -180,22 +180,8 @@ def _is_bare_whole_file_read(node: ast.expr) -> bool:
 def wholefile_text_notin_sites(source: str) -> list[str]:
     """AST 掃描「對整份文件斷言某段**文字**不出現」的斷言；回傳命中位置（空＝乾淨）。
 
-    認的形狀＝`assertNotIn(<文字 needle>, <整份檔案內容>)`，haystack 會往回解析同一個
-    函式內的區域變數賦值（Pkg-P12 的原始缺陷正是
-    `header = dest.read_text(...)[:4000]` ＋ `assertNotIn(stale, header)` 這種間接形態，
-    只看斷言那一行是抓不到的）。
-
-    刻意**不**認 bytes needle：`assertNotIn(b"\\r", raw)` 是位元組級不變量（帳本不可能
-    「合法地」含 CR），不受「文件合法引用該字樣」影響，本檔第 ~1300 行就有一處。
-
-    誠實劃界（做不到的部分，別把本掃描器當完整覆蓋）：
-      1. 只解析**同一個函式內**、目標為單純 `Name` 的賦值。經 `setUpClass` 存成
-         `cls.xxx` 再由 `self.xxx` 取用、或包一層自訂 helper 函式的間接形態抓不到——
-         `tools/tests/test_adr_xplat001_c1c2_lock.py` 的 `self.adr` 就是這種形狀（本輪
-         已列為跨包請求，不在本檔所有權內）。
-      2. 一支「具名但其實沒收窄」的抽取器（例如 `def _narrow(t): return t`）會被誤放。
-         那種東西在 code review 前不隱形，而本鎖要擋的是「順手拿整檔去比對」這個真實
-         復發路徑。
+    沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+    〈wholefile_text_notin_sites 認的形狀與誠實劃界〉。
     """
     tree = ast.parse(source)
     hits: list[str] = []
@@ -807,18 +793,8 @@ class TestGateSsotCouplingContract(unittest.TestCase):
 class TestStatusColumnIsHeaderPositionedNotLastCell(unittest.TestCase):
     """Pkg-P7 P7-1／P7-3 的正樣本：狀態欄留空時**不得**位移到「分流去向」欄。
 
-    構造輸入沿用 Pkg-P6 在閘門側用的那兩個（(a)(b)），差別是這裡套在**本工具**的
-    `classify_row()`／`_row_id()` 上。修復前實測（同一組輸入、未動任何 tracked 檔）：
-
-      (a) 狀態欄空白 ＋ 分流去向＝「已於上游 fixed 故不另修」
-          → `_cells()` 只切出 6 欄、`cells[-1]` 取到「分流去向」
-          → `classify_row()` 回 `cls='fixed'`、`blockers=[]` ⇒ **判為可搬**
-      (b) 狀態欄空白 ＋ 分流去向＝「open 待下輪處理」
-          → 回 `cls='open'`，恰好擋下但**擋的理由是錯的**（讀的是別欄）
-
-    🔴 (a) 的危害比閘門那一側更重：閘門只是把狀態讀錯並印出來，本工具會依這個裁決
-    **真的把該列寫進 archive** —— 一筆狀態欄空白（＝狀態不明）的缺陷就此靜默下葬，
-    正是 R60 立本工具要消滅的那個病（`DEF-101-517`／`526` 誤搬）的同型復發。
+    沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+    〈TestStatusColumnIsHeaderPositionedNotLastCell 修復前實測〉。
     """
 
     _HEADER = "| ID | 發現日期 | 發現情境 | 現象與證據（file:line） | 嚴重度 | 分流去向 | 狀態 |"
@@ -876,18 +852,8 @@ class TestStatusColumnIsHeaderPositionedNotLastCell(unittest.TestCase):
     def test_reverting_row_cells_to_the_filtering_version_is_detected(self):
         """突變：把 `gate._row_cells` runtime monkeypatch 回「濾空欄」版 → 裁決必須改變。
 
-        這一條把正樣本的鑑別力**釘在具體那一行**（`if c.strip()`）上：若有人主張「狀態欄
-        本來就讀得對、跟濾不濾空欄無關」，本測試證明不是。
-
-        🔴 實測校正（我原本的預期是錯的，記在此以免下輪重犯）：我原先預期突變後該列會像
-        修復前一樣「被判可搬」。實際不會 —— 濾空欄使該列只切出 6 欄，於是**判準⑤ 的 arity
-        守門（第二層縱深）當場攔下**。也就是說 Pkg-P7 對這個缺陷佈了兩道獨立防線：表頭定位
-        ＋欄數守門，任一道單獨被破都還有另一道。故本測試斷言的是「突變被偵測到」（裁決改變、
-        且改變成具名的欄位定位失效），而不是「突變後仍被擋下」那種恆真寫法。
-        修復前**整條**管線（無 arity 守門）確實會判可搬，由姊妹測試
-        `test_the_pre_p7_pipeline_would_have_judged_sample_a_movable` 逐步重建坐實。
-
-        🔴 突變一律走 runtime monkeypatch（`try/finally` 復原），**不**就地改 tracked 檔。
+        沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+        〈test_reverting_row_cells_to_the_filtering_version_is_detected 實測校正〉。
         """
         _, rows, layout = self._mini_ledger()
         pristine = ADL.gate._row_cells
@@ -1110,15 +1076,8 @@ class TestRowArityIsAHardGateWithANamedBaseline(unittest.TestCase):
     def test_arity_check_body_comes_from_the_gate_not_a_local_copy(self):
         """突變：把 `gate.row_arity_problems` monkeypatch 成恆回 `[]`。
 
-        兩件事同時被坐實：
-          (a) 判準(7) 真的在消費**閘門那支純函式**——掏空它之後，注入那一列的偵測訊息必須
-              消失。若本檔偷偷自己算了一份，該訊息會照舊出現，本斷言就紅。
-          (b) 掏空它**不會**讓稽核靜默轉綠：具名基線的 stale 自檢會全面翻紅（登記 N 筆、
-              實測 0 筆）。這是刻意的——「把檢查關掉」必須是一個吵鬧的動作。
-
-        🔴 實測校正（原本的預期是錯的）：我原先斷言突變後 rc 應變 0。實際是 rc 仍為 1，
-        因為 stale 自檢先叫起來了。恆真式地斷言「rc 仍為 1」則毫無鑑別力，故改為比對
-        **problem 訊息集合的差異**。
+        沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+        〈test_arity_check_body_comes_from_the_gate_not_a_local_copy 兩件事與實測校正〉。
         """
         pristine = ADL.gate.row_arity_problems
         injected = "DEF-" + "999-" + "9" + "15"
@@ -1221,17 +1180,8 @@ class TestPointerRegexIsTheProductionOne(unittest.TestCase):
     def test_residence_branch_hits_the_real_ledger_family(self):
         """對**真實帳本家族**斷言「（現居 archive_NN）」分支有命中，該分支被改窄即紅。
 
-        R60 round 1 的測試自寫正則只認 `立帳見本表 DEF-x`，真實 6 個指針只驗到 1 個，
-        漏掉的 5 筆全是「（現居 archive_NN）」形態——而那正是 Scan-G 反駁者 #2 抓到的
-        缺陷型。故這裡刻意以真實語料當守門樣本，而不是只靠合成樣本。
-
-        🔴 刻意**不**在此對 `立帳見主檔` 分支下同樣的語料斷言：帳本正在把該形態逐步
-        統一成「（現居 archive_NN）」（本輪 round 2 已把最後幾處改完，語料歸零），
-        對「正在被淘汰的形態」下語料下限＝把鎖綁在會合法消失的東西上，那是自製誤紅。
-        該分支的覆蓋改由兩處承擔且都不依賴語料：`_CASES` 的合成樣本（含 `立帳見主檔
-        **DEF-101-491**`）＋ `TestCheckModeBugInjection.
-        test_stale_main_scope_pointer_inside_an_archive_is_caught` 的真注入（該支另以
-        「R60 前的窄樣式對同一段文字不命中」反向坐實本分支確為本輪新增）。
+        沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+        〈test_residence_branch_hits_the_real_ledger_family 語料選型〉。
         """
         with_archive, total = 0, 0
         for path in ADL._family_files():
@@ -1950,20 +1900,8 @@ class TestCriteriaListIsASingleSsot(unittest.TestCase):
     def test_the_ledger_may_quote_the_retracted_wording_verbatim_without_a_false_red(self):
         """🔴 Pkg-P12 硬驗收（綠向）：帳本**逐字**寫回那句被作廢的字面，主鎖必須仍綠。
 
-        為何這一條比「消掉紅燈」重要：修復前的取樣範圍讓**帳本永遠無法逐字保存自己要
-        消滅的那句話**——Pkg-P11 撞到同一支紅時的處置就是把 `DEF-101-584` 的現象散文從
-        逐字引用改成描述性寫法、逐字原文只留在證據檔（實測：活體主檔現在對「共七項」
-        零命中）。那是**在資料側繞道**：讓帳本為了討好一支有 bug 的載具而扭曲自己的缺陷
-        描述，與「原文逐字保全、零刪除」的史料紀律直接衝突。本測試解除該限制並釘死它。
-
-        構造：合成列的「現象與證據」欄逐字含 `_STALE_NEEDLES` **全部三項**（含被推翻的
-        方案(乙) 全稱）→ 跑 `apply()` → 該列被逐字搬進 archive → 主鎖判準（同一支
-        `_retracted_claims_in()`，不是另寫一套）必須回**空清單**。
-
-        雙向自證（缺一則本測試恆真）：
-          (i)  整份 archive 全文**確實含**那三項字面 ⇒ 事故形狀真的被重現到；
-          (ii) 取樣範圍**不是**被收成空字串／極短片段（否則 assertNotIn 廉價全過）。
-        紅向由 `test_the_retracted_claim_lock_has_teeth_on_a_header_borne_claim` 負責。
+        沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+        〈test_the_ledger_may_quote_the_retracted_wording_verbatim_without_a_false_red 立案〉。
         """
         canary = ("現象散文逐字引用作廢字樣「共七項」「四項判準」與方案(乙) 全稱"
                   f"「{self._RETRACTED_LABEL}」（重現 DEF-101-584 的假紅形態）")
@@ -2589,31 +2527,8 @@ class TestCheckIsWiredIntoGates(unittest.TestCase):
 class TestNoAssertionSamplesALiveDocumentWholesale(unittest.TestCase):
     """🔴 取樣範圍紀律（Pkg-P12 P12-3）——本檔所有「某字串不得出現」斷言的共通約束。
 
-    **紀律**：斷言「某字串不得出現」時，取樣範圍必須**排除「合法引用該字串的區域」**。
-    讀活體治理文件（缺陷帳本、archive、ADR、ONBOARDING）的鎖尤其如此，因為**那些文件的
-    職責就是引用缺陷字樣**——帳本存在的目的是記錄缺陷，而記錄一個「某處寫了 X」的缺陷，
-    必然要逐字寫出 X。把整份文件當 haystack，等於要求文件永遠不准談論自己要消滅的東西。
-
-    **本輪實際付過的代價**（不是假想風險）史料搬遷，原文＝Guard_Repin 證據檔 §E-14。
-
-    **同族**：與本輪已立帳的「載具量測 production 盲區」（載具只認棄用路徑的 marker，
-    真跑恆 0）、「驗證載具本身要被驗證」是同一族——**問題都在量測面而非被測面**，而綠燈／
-    紅燈都無法自己指出這件事。判定一處是否屬本族，問兩個問題：
-      (i)  haystack 是否含「該字串會合法出現」的區域？
-      (ii) 那個區域是否**不是**被測對象？兩者皆是 ⇒ 取樣範圍畫錯了。
-
-    **既有的正確做法**（本 repo 已有先例，不必另創）：
-      - 結構收窄：`_generated_header_of()`（切到第一列可解析缺陷列之前）、
-        `test_nightly_interpreter_determinism` 只取「零命中分支」的 body、
-        `test_ps_engine_ssot` 取 `ast.unparse` 後的函式本體（不含 docstring／註解）、
-        `test_find_git_bash_parity._code_only()`（剝掉註解）。
-      - 逐行 ＋ 例外出口：`test_no_stale_criterion_seven_reference_remains_in_the_tool`
-        允許「判準⑦」出現在**帶『訂正』字樣的行**——歷史紀錄與現行指涉分開判。
-      - 生產側同型解法：`check()` 判準(4)(6) 的 (甲) code span ／ (丙) ``` 圍籬例外，
-        存在的理由一模一樣（帳本條目本來就會逐字引述判準語法）。
-
-    本類別把上述紀律機械化，並用**合成違規片段**自證掃描器真的會說話（否則「掃描面乾淨」
-    與「掃描器壞了」在綠燈上長得一樣）。
+    沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+    〈TestNoAssertionSamplesALiveDocumentWholesale 紀律與既有先例〉。
     """
 
     #: 掃描面＝本檔所在的根層測試目錄（非遞迴）。刻意**不**擴到整個 monorepo：
@@ -2934,27 +2849,7 @@ class TestCriterion2Narrowing(unittest.TestCase):
             with self.subTest(cell=cell):
                 self.assertIsNotNone(ADL.active_status_hit(cell))
 
-    # 判準④ 安全網的鑑別力鎖 —— 🔴 **R74 重構：驗證對象由「現行主檔的具名 DEF 樣本」改為
-    # 構造輸入**。以下逐字記錄為何這**不是**把鎖放寬，以免下一輪誤讀成退讓：
-    #
-    #   · 舊設計把樣本釘成一組活體 DEF-ID，並對「還有幾筆沒被歸檔」設 fail-loud 下限。
-    #     它防的是「鎖無聲退化到零樣本」——那個顧慮完全正確，處置方向卻與工具的目的衝突：
-    #     `archive_defect_log.py` 存在的意義就是把已結列搬走，而樣本**只能**取自「已結
-    #     ＋ 帶交棒字樣」的列，也就是判準④ 一旦被具名承認就會離開主檔的那一批。於是
-    #     「把該歸檔的都歸檔」與「保住足夠樣本」在結構上不可能同時成立：R74 要做最大化
-    #     歸檔時，存活樣本必然歸零，而鎖自己的訊息同時禁止 skip、禁止下修下限、只准補新
-    #     樣本——可是能補的樣本正好也都在這一次歸檔清單裡。三條出路全被堵住。
-    #   · 真正該被鎖住的性質是**函式的行為**（「散文帶交棒字樣的列必須落在 needs_ack、
-    #     不得落進 movable」），那是 `classify_row()`／`plan()` 的性質，與現行主檔裡剛好
-    #     還剩幾筆無關。改用構造輸入之後，這條鎖**永遠有驗證對象**，不會隨歸檔流失——
-    #     形狀沿用本 repo 既有的「抽成純函式即可用構造輸入證明有牙」慣例
-    #     （`conservation_problems()`／`status_first_word_problems()` 皆如此）。
-    #   · 生產面沒有因此失去覆蓋：`test_live_needs_ack_rows_really_carry_their_marker()`
-    #     對現行主檔逐筆驗「工具報的 marker 逐字存在於該列、且該列不在 movable」，且它在
-    #     needs_ack 為空時**不是靜默通過**——那時它改為斷言「主檔確實不存在任何
-    #     (已結 ∧ 判準①②③⑤⑥ 全過 ∧ 帶交棒字樣) 的列」，兩種狀態下都是真斷言。
-    #
-    # marker 詞彙表：逐項取自 `ADL.HANDOFF_PROSE_RE`，每個 alternative 一個樣本。
+    # 沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md〈判準④ 安全網 R74 重構為何不是放寬〉。
     _HANDOFF_MARKER_SAMPLES = (
         "R99 候選", "下一輪再評估", "下輪處理", "解鎖條件＝有真機的一輪",
         "留待後續", "承接者為 X", "改派為：未指派", "deferred", "backlog",
@@ -3089,18 +2984,8 @@ class TestUnlockConditionIsMechanicallyChecked(unittest.TestCase):
     def test_headroom_matches_what_def676_claims(self):
         """解鎖判準本體，但問的是**宣稱與現況是否一致**，不是「餘裕必須永遠健康」。
 
-        🔴 R68 訂正（本鎖原形態會逼出它自己要防的行為）：原斷言是「餘裕恆 ≥ 門檻」。
-        它在 R68 當場失效——本輪十二維掃描 9 列入帳後，兩次合法輪替仍只買回約 8000
-        bytes 餘裕。此時原鎖給的**唯一**轉綠路徑是「再具名承認幾列去湊過線」，而那
-        正是 DEF-101-676 立這條判準要防的事（R67 round 4 已因「量測快照當判準」被四方
-        交叉命中過一次）。一個只能靠做壞事才能轉綠的鎖，不是護欄。
-
-        改為對帳型斷言（形狀取自 DEF-101-689「修復包自報 status ↔ 帳本狀態欄」）：
-          · DEF-101-676 宣稱**已結** ⇒ 判準必須當場成立（抓的是假宣稱，這才是重點）；
-          · 宣稱**未結** ⇒ 餘裕不足是誠實揭露、不轉紅，但仍強制它帶承接指派
-            （硬規則② 後半句），不得變成沒人接的永久停車位。
-        兩個方向都留了牙：把狀態改回 `fixed` 卻不解決容量 → 紅；改成未結卻不寫承接
-        → 紅。唯一的綠燈路徑是「要嘛真的解決、要嘛誠實掛帳並指名承接」。
+        沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+        〈test_headroom_matches_what_def676_claims R68 訂正〉。
         """
         p = ADL.plan()
         after = p["ledger_bytes"] - sum(v["bytes"] for v in p["movable"])
@@ -3125,23 +3010,8 @@ class TestUnlockConditionIsMechanicallyChecked(unittest.TestCase):
             )
 
 
-# ------------------------------------------- archive 內未結列的常設複驗（本輪新增）
-#: 存量具名基線：`(archive 檔名, DEF-ID)`，本輪實查現況釘死。**只准變小**。
-#:
-#: 🔴 本鎖為何住在測試檔、而不是 `archive_defect_log.py --check` 的第 (9) 項判準
-#: （本輪實際撞到的硬約束，寫下來以免下一輪重走一次）：那支工具受
-#: `AutoClaude/tools/check_loc_budget.py` 的 `SPECIAL_FILES` **raw-line 棘輪**管，
-#: 本輪動工前實測 1501 行／上限 1507 ⇒ 餘裕 6 行，而一項新判準（常數＋docstring 條目
-#: ＋`# (N)` 實作段，三者由 `TestCriteriaListIsASingleSsot` 綁死、缺一即紅）實測要
-#: 73 行。合法出口只剩「調高棘輪」，而那是本輪明令禁止的方向（棘輪只准變少），
-#: 且該棘輪住在別包持有的檔。⇒ 判準改以測試側落地：射程由「pre-push 守門迴圈＋
-#: root-infra-ci 的 --check step」縮為「根層 unittest 樹」，**誠實記載這個縮小**。
-#: 🔴 R81 帳本清債包轉動一格（4 → 3）：`("…archive_01.md", "DEF-42-001")` 移除。
-#: 該列在主檔與 archive 各有一份，主檔那份本輪結為 `closed-by-decision`（凍結版 v0.17
-#: 依 Copy-on-Evolve 不修、原文自記隔離 3/3 全綠＝非回歸 flaky），archive 那份同批訂正
-#: 首詞、原文逐字接於後 ⇒ 已不再是未結列。**這一格是被本鎖自己逼出來的**：只改主檔的
-#: 那一刻 `test_archive_ids_are_disjoint_from_or_consistent_with_main` 立刻紅並指名
-#: 「兩邊各說各話，只讀主檔者會誤判」——正是它存在的理由。
+# 沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+# 〈archive 內未結列常設複驗的住所裁決與 R81 轉格〉。
 _ARCHIVE_UNRESOLVED_BASELINE: frozenset[tuple[str, str]] = frozenset({
     ("AutoSDD_Defect_Log_archive_01.md", "DEF-24-001"),
     ("AutoSDD_Defect_Log_archive_16.md", "DEF-101-089"),
@@ -3174,15 +3044,8 @@ def _archive_unresolved_now() -> set[tuple[str, str]]:
 class TestArchiveUnresolvedRowsAreRatcheted(unittest.TestCase):
     """歸檔之後仍要有人問「這一列是不是還沒結」。
 
-    原始缺陷（本輪 Scan-G）：搬遷判準① 只在 `plan()`／`classify_row()` 執行一次，
-    也就是**搬遷當下**；此後那一列的狀態欄怎麼變都沒有任何東西會看。而
-    `--unresolved-count` 與三道承接判準又都只讀主檔 ⇒ 進了 archive 就等於離開稽核。
-    實測現況：archive 內有未結分類列，全 repo 沒有任何閘門對它們說一個字。
-
-    棘輪為何是**雙向**：只擋「表外新增」會讓具名基線變成只進不出的死名單，
-    「archive 裡還剩幾列未結」永遠不會下降（同 crossref 的
-    `stale_grandfather_problems()` 判例）。刻意不一次全紅：存量是歷史事實，
-    硬擋會讓鎖上線即永紅（ARCH-R59-NB4），比沒有鎖更糟。
+    沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+    〈TestArchiveUnresolvedRowsAreRatcheted 原始缺陷與雙向棘輪〉。
     """
 
     def test_named_baseline_matches_the_measured_reality(self):
@@ -3350,21 +3213,8 @@ class TestOpenBacklogArchiveIsRejected(unittest.TestCase):
 class TestArchiveIndexDocIsExternalized(unittest.TestCase):
     """R69 `DEF-101-734` — 歸檔索引段外移的三條結構不變量。
 
-    **原始缺陷**：索引 bullet 是**單調增長且永遠無法靠歸檔回收**的一段（每次 `--apply`
-    往主檔多寫約 0.9KB，近幾輪每輪建 3~5 支 archive），卻與缺陷總表共用主檔那條
-    262,144 bytes 硬線。R69 動工時主檔距硬線只剩 250 bytes 而 `--plan` 可搬 **0 筆**
-    ——把單調增長項放進有硬上限的檔，數學上保證撞牆，而歸檔吞吐再高也救不了它。
-
-    **本鎖要守的是「搬出去之後守門沒有變弱」**，因為那才是這次外移的前提：
-      (甲) 索引檔仍屬**帳本家族** ⇒ 指針稽核（判準④⑥）、體積守門、compat-CI 的
-           `AutoSDD_Defect_Log_archive_*.md` `paths:` glob、沙箱複製面**全部零改動即涵蓋**。
-           若有人把它改名成家族 glob 外的形態（例如 `..._INDEX.md` 不帶 `archive_`），
-           這四道守門會同時、靜默地漏掉它 —— 正是 `DEF-101-587`「搬到另一支檔就繞過
-           守門」的形狀，故用測試把「它必須在家族內」釘住。
-      (乙) 索引檔**自己不需要 bullet**（它是目錄不是史料檔），判準⑤ 對它具名排除；
-           排除若寫成「零表格列就跳過」這種模糊判準，真正忘記登記的史料檔也會被吞掉。
-      (丙) 主檔內**不得再殘留**任何索引 bullet：殘留＝兩份索引並存，判準⑤ 只讀其中
-           一份，另一份腐化零訊號。
+    沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
+    〈TestArchiveIndexDocIsExternalized 原始缺陷與三項前提〉。
     """
 
     def test_index_doc_is_inside_the_ledger_family(self):

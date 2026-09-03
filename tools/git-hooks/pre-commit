@@ -496,7 +496,9 @@ if [ -f "$_ar_guard" ] && [ -f "$_ar_checker" ]; then
   elif ! PYTHONUTF8=1 "$_ar_py" "$_ar_checker"; then
     echo "[pre-commit dispatcher] ❌ 缺陷帳本已逼近輪替上限且現有可搬清單（見上方訊息）" >&2
     echo "                        請先跑 python3 tools/archive_defect_log.py --plan 確認清單，" >&2
-    echo "                        再以 --apply --archive-num <N> 完成歸檔，之後重試本次 commit" >&2
+    echo "                        再以 python3 tools/archive_apply_locked.py --archive-num <N>" >&2
+    echo "                        完成歸檔（DEF-200-222：序列化保護版 --apply，多 agent 共用" >&2
+    echo "                        工作樹時請一律走此入口），之後重試本次 commit" >&2
     rc=1
   fi
 else
