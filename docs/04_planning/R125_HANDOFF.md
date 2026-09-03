@@ -59,6 +59,9 @@
    `CrossPlatform_R81_Ledger_Triage.md` §`LDG-S1-22`）屬真實重構工作，與本輪「純查證即結案」
    性質不同，故未在本輪動手，帳本列保持 open。現查零消費者：
    `git grep -n "verify_token_guard_e2e" -- AutoClaude .github`（預期只命中該檔自身與其單元測試）。
+   下一個真的執行刪除的窗口完成後，請在任一 tracked 檔留下對應紀錄，本節宣稱即可被下方
+   標記機械打臉。
+   <!-- absent-if: verify_token_guard_e2e.py 已刪除 -->
 2. **31 筆候選中的 19 筆 needs-work、3 筆 needs-decision 未結案**——完整逐筆證據存在本輪
    兩個 Workflow 的 journal（未落盤進 repo，僅存於本機 session 暫存，見下方〈證據位置〉），
    下一輪若要挑其中幾筆進落地輪，建議先讀 journal 而非重新分診。needs-decision 3 筆
@@ -67,7 +70,7 @@
 3. **帳本仍有 49 筆未結**，其中不少（如 `DEF-200-242`／`243`／`244`）帳本文字本身已過期
    ——R121 裁決包（`AutoSDD_Adjudication_Packet_R121.md`）已對這幾筆選定落地方向，但帳本
    列狀態欄措辭仍停在「待裁決」，尚未更新反映裁決包已存在。現查：
-   `Select-String -Path docs/06_quality/AutoSDD_Defect_Log.md -Pattern "^\| DEF-200-24[234] \|"`。
+   `Select-String -Path docs/06_quality/AutoSDD_Defect_Log.md -Pattern "^\| DEF-200-(242|243|244) \|"`。
 
 ## 證據位置（未落盤，session 暫存）
 
