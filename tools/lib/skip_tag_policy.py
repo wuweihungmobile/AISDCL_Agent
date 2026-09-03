@@ -423,7 +423,12 @@ _TREE_FILE_FLOORS: dict[str, int] = {
     # quota_refusal_false_positive}.py`），`int(271×0.8)=216 > 213` ⇒ 第三向逐字指示重釘為
     # 216，本行照填、零加減推算。方向是**上修＝判準更嚴**。216 對 270／271 兩個檔數皆成立
     # （`int(270×0.8)=216`），第 272 支會再次判紅——那是它的設計意圖。
-    "AutoClaude/tests": 216,
+    # 🔴 本棒重釘 216 → 217（上一段末句「第 272 支會再次判紅——那是它的設計意圖」當場
+    # 應驗）：`DEF-200-205` 的生產接線包新增
+    # `tests/integration/test_def_200_205_production_wiring.py`，該樹由 271 支長到 **272**，
+    # 216 只剩實測的 79%（低於 `TREE_FLOOR_RATIO` 的 80%），第三向逐字指示重釘為 217
+    # ⇒ 本行照填、零加減推算。方向是**上修＝判準更嚴**，不是放寬。
+    "AutoClaude/tests": 217,
     # 🔴 R84 包 W5：23 → 24。**非本包造成**——`AISDLC_SDD/scripts/tests` 由 29 支長到 30
     # （並行包新增鎖檔），下限只剩實測的 77%、低於 `TREE_FLOOR_RATIO` 的 80% ⇒
     # `tree_floor_problems()` 的第三向（下限已過期）當場判紅並**逐字**指示重釘為 24，本行

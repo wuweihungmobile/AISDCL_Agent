@@ -682,7 +682,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 7246,
+    "test_adr_xplat001_c1c2_lock.py": 7258,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 3839,
@@ -730,13 +730,13 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_ps51_compat.py": 610,
     "test_ps_engine_ssot.py": 954,
     "test_python_c_percent_shim.py": 119,
-    "test_quota_policy.py": 3198,
+    "test_quota_policy.py": 3316,
     "test_root_infra_parity.py": 441,
     "test_run_root_unittests.py": 2422,
     "test_sanitize_component_frozen_sdd_versions_lock.py": 340,
     "test_schedule_capability_parity.py": 626,
     "test_script_scan_surface_ssot.py": 391,
-    "test_skip_ceiling_ratchet_direction.py": 508,
+    "test_skip_ceiling_ratchet_direction.py": 700,
     "test_skip_discoverability_r83.py": 744,
     "test_smoke_ci_sync.py": 1258,
     "test_stdio_utf8.py": 76,
@@ -1448,6 +1448,15 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "寫在該常數旁）＋凍結表值同步＋prefix_len 與指紋鏈同步＋本列自身＋裸計數措辭訂正"
      "（本檔自訂紀律「散文不得寫死可機械算出的計數」在上一列落地的當回合把作者抓到一次，"
      "照實記）。逐項見 CrossPlatform_R122_Debt_Closure.md。"),
+    ("R123", 91668, 91990, 322,
+     "[非淨減法輪][全額功能軌] 精準修復輪第二棒落地：DEF-200-200「已過期」述詞四層共用並"
+     "分流時刻已過去／時鐘偏移兩義（test_quota_policy.py 3198→3316）／DEF-200-183 剖面鍵"
+     "文法 SSOT＋pgextras 軸＋方向鎖 re-key 破洞（test_skip_ceiling_ratchet_direction.py "
+     "508→700）／DEF-200-205 PRD §6.2 與 §4.5.9 的模組接上生產呼叫端（回歸鎖落 "
+     "AutoClaude/tests，不計本層）。🔴 為何另立輪號而非併入上一棒：上一棒已 commit／push／"
+     "雲端全綠＝已收輪，本棒是其後的新一批；併列會讓上一棒的 -125 被本棒抵銷回正、款(11) "
+     "的 streak 歸零判定失實——判準本身把「拆輪次」列為合法出口（拆輪次不是拆列）。"
+     "逐項見 CrossPlatform_R123_Debt_Closure.md。"),
 )
 
 
@@ -1779,10 +1788,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 114
+_REPIN_LOG_FROZEN_PREFIX_LEN = 115
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "7d9eb06de5a75e425f54dbe63b744d20690c6d183e00ab66e2f84747b1a55acc")
+    "4ec1e958f341a837c260b3455447d6d22656d110ad9074c50a84520f88256906")
 
 
 def repin_log_history_digest(
@@ -1938,6 +1947,9 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # `_REPIN_LOG_HISTORY_SHA256` 前進，同體例「追加後立即自我凍結」——本輪追加三個
     # repin 稽核列＋本列，prefix_len 110→113 涵蓋全部新列本身。
     ("R122", "dc94d1a10d4f", "7d9eb06de5a7", "DEF-200-222"),
+    # 精準修復輪第二棒收尾：三筆落地的守衛線重釘使指紋前進，同體例 round-label-ok
+    # 「追加後立即自我凍結」——本棒追加一個 repin 稽核列＋本列，prefix_len 114→115。
+    ("R123", "7d9eb06de5a7", "4ec1e958f341", "DEF-200-205"),
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

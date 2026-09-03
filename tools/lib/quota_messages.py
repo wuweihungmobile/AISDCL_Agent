@@ -46,6 +46,9 @@ try:  # 排程載具：拿不到時只影響 `evidence_hint()` 那一句，不�
 except Exception:  # noqa: BLE001
     schedule_backend = None  # type: ignore[assignment]
 
+# `quota_pace` 是本族的葉子（它一支同層模組都不 import）⇒ 相依方向仍是單向的，
+# 且 `quota_policy` 早就 import 它（`as W`）：本行沒有新增任何一條相依邊的方向。
+import quota_pace  # noqa: E402
 import quota_policy  # noqa: E402
 
 #: reset 多遠以內才值得「排程等它」。5 小時視窗最遠 5h、週視窗最遠 7 天，中間這個
@@ -115,7 +118,22 @@ def evidence_hint() -> str:
                  "在拿到憑證之前不要把它當成已排程。")
 
 
-def reset_horizon_phrase(branch: str, resets_at: object) -> str:
+# 🔴 DEF-200-200 ③：`reset_branch()` 對**已經過去**的時刻回 `arm`（負的 delta 當然
+# `<= 6h`），於是這三支句子把一個死掉的時刻播報成「6 小時內／很快就會自己解除」。`now`
+# 是選配（既有呼叫端一個字都不改）：**有給才判得出來**已過期，沒給就沿用舊句子——但
+# 生產路徑（`throttle_horizon_line`）一律有 `now`，故缺省值不是靜默漏洞。
+def expiry_phrase(resets_at: object, minutes: float, note: str) -> str:
+    """已過期那一句：說出**過去多久**與**該做什麼**，兩義各自指向不同的子系統。"""
+    ago = int(abs(minutes))
+    if note == quota_pace.EXPIRY_SKEW:
+        return (f"reset 在 {resets_at}，比這份讀數的量測時刻**還早** {ago} 分鐘 ⇒ "
+                "本機鐘與伺服器不一致（先校時，不是等它）")
+    return (f"reset 在 {resets_at}，**已經過去 {ago} 分鐘** ⇒ 這份讀數屬於已經翻頁的"
+            "死視窗（重量一次即可，不是等它自己解除）")
+
+
+def reset_horizon_phrase(branch: str, resets_at: object, now: datetime | None = None,
+                         measured_at: object = None) -> str:
     """三支分支各自的「這條線的 reset 有多遠」——**唯一的家**（R82／Q2-07 的減法那一半）。
 
     🔴 halt 與 throttle 此前各自寫了一份幾乎逐字相同的三分支句子（含兩處硬寫的 URL），
@@ -126,6 +144,10 @@ def reset_horizon_phrase(branch: str, resets_at: object) -> str:
     """
     if branch == QUOTA_BRANCH_ESCALATE:
         return f"**沒有 reset 可以等**（例：月度支出上限）；只有人去提額：{USAGE_URL}"
+    if now is not None:
+        minutes, note = quota_pace.expiry_of(resets_at, now, measured_at)
+        if quota_pace.expired(note):
+            return expiry_phrase(resets_at, minutes, note)
     hours = RESET_ARM_HORIZON_SECONDS // 3600
     if branch == QUOTA_BRANCH_NOTIFY:
         return f"reset 在 {resets_at}（**遠超 {hours} 小時**）"
@@ -143,7 +165,10 @@ def quota_halt_message(decision: quota_policy.Decision, act: dict) -> str:
             f"   {quota_policy.describe(decision)}\n"
             f"   任務書：{act['plan'] or '（寫不出來——逐字稿路徑不可得）'}\n")
     # 修4：期程句印**被選中的** reset（≥halt 最早可 reset 軸），不再印 binding 的 None。
-    horizon = reset_horizon_phrase(act["branch"], halt_resets_at(decision))
+    # DEF-200-200 ③：`now` 走 `act.get`（`quota_halt_actions` 已把它放進去）——既有直接
+    # 組 act dict 的呼叫端沒有這一鍵時沿用舊句子，不會因為缺鍵就炸掉。
+    horizon = reset_horizon_phrase(act["branch"], halt_resets_at(decision),
+                                   act.get("now"), act.get("measured_at"))
     if act["posix"]:
         # 🔴 SA-B7：沒有排程載具的平台若沿用 weekly 那支「不排程」的靜默路徑，
         # 「不排程」與「排不了」會長得一模一樣。
@@ -174,14 +199,19 @@ def quota_halt_message(decision: quota_policy.Decision, act: dict) -> str:
 # 距離分檔是政策決定」——那句話已被裁決推翻，故不留著當現行說法）：cap 現在**本來就**是
 # `f(pct, horizon)` 的函式，reset 距離已經進了階梯本身；本行說的是同一件事的人話面，
 # 兩者同源於 `quota_policy`，不是兩個判準。
-def throttle_horizon_line(decision: quota_policy.Decision, now: datetime) -> str:
-    """節流帶要說出「這道限制會套多久」。"""
+def throttle_horizon_line(decision: quota_policy.Decision, now: datetime,
+                          measured_at: object = None) -> str:
+    """節流帶要說出「這道限制會套多久」。已過期的時刻**不得**說「很快就會自己解除」。"""
     # 修4：halt 帶改讀多軸選擇——撞牆期間人唯一持續看得到的就是這一則（R89 判例），
     # binding 無 reset 時印「不會自己解除」而喚醒其實已武裝＝訊息說假話。
     resets_at = (halt_resets_at(decision) if decision.band == quota_policy.BAND_HALT
                  else binding_resets_at(decision))
     branch = reset_branch(resets_at, now)
-    horizon = reset_horizon_phrase(branch, resets_at)
+    horizon = reset_horizon_phrase(branch, resets_at, now, measured_at)
+    # 🔴 DEF-200-200 ③：這一行此前對已過去的時刻逐字說「很快就會自己解除」——那是假話，
+    # 而假話的方向是**叫人繼續等**一個不會發生的事件（DEF-200-044 的無做工空轉同形）。
+    if quota_pace.expired(quota_pace.expiry_of(resets_at, now, measured_at)[1]):
+        return f"   ⏳ 這一條的 {horizon}。\n"
     if branch == QUOTA_BRANCH_ESCALATE:
         return f"   ⏳ 這一條{horizon} ⇒ 這道節流不會自己解除。\n"
     if branch == QUOTA_BRANCH_NOTIFY:

@@ -33,12 +33,17 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+from ...core.ports.worktree_rescue import CLEAN, DIRTY_UNSAVED, SAVED
 from ...utils.disk_space import InsufficientSpaceError, require_space
 
 logger = logging.getLogger("autoclaude.infra.adapters.dirty_worktree_rescue")
 
-SAVED = "SAVED"
-DIRTY_UNSAVED = "DIRTY_UNSAVED"
+# 🔴 DEF-200-205：`SAVED`／`DIRTY_UNSAVED` 兩個字面**搬去 `core/ports/worktree_rescue.py`**，
+# 上面那行 import 同時是本模組的 re-export（既有 `R.SAVED`／`R.DIRTY_UNSAVED` 讀者拿到的
+# 是同一個物件，行為位元級不變）。理由：消費端（`core/services/auto_resume.py`）要拿
+# `status` 比對才知道敢不敢睡，而 core/ 依 core-purity contract 讀不到本模組。字面留兩份時
+# 漂移方向是「消費端那份沒跟著改」⇒ 比不中 ⇒ 一律當成救援成功（fail-open），正是
+# R-4.5.9-4 逐字禁止的那一件事。
 
 # PRD §6 區塊 12：值域 0 ≤ 本值 ≤ 3；0＝不重試（合法）。總寫入嘗試 = 本值 + 1。
 # 🔴 上界不是風格問題：磁碟滿是最可能的失敗成因，每一次重試再吃一份空間
@@ -342,6 +347,57 @@ def _with(base: RescueResult, reason: str, status: str = DIRTY_UNSAVED) -> Rescu
         bytes_written=base.bytes_written, bytes_read_back=base.bytes_read_back,
         base_sha=base.base_sha, attempts=base.attempts, reason=reason,
         expected_paths=base.expected_paths)
+
+
+class DirtyWorktreeRescueAdapter:
+    """`IWorktreeRescue` 實作（DEF-200-205 的接電面）。
+
+    把「patch 落哪／retries 幾次／agent_id 是誰／通知走哪個通道」四件**組裝期知識**綁在
+    建構時，讓消費端只需要呼叫零參數的 `rescue()`——否則 `core/` 就得知道 patch 目錄長
+    什麼樣，而那正是本 Port 要隔開的東西。
+    """
+
+    def __init__(
+        self,
+        worktree: str | Path,
+        checkpoint_dir: str | Path,
+        *,
+        agent_id: str = "agent",
+        retries: int | None = None,
+        notifier: Callable[[str], None] | None = None,
+    ) -> None:
+        self._worktree = Path(worktree)
+        self._checkpoint_dir = Path(checkpoint_dir)
+        self._agent_id = agent_id
+        self._retries = retries
+        self._notifier = notifier
+
+    def rescue(self) -> RescueResult:
+        """兩道前置守衛 ＋ 委派 `rescue_dirty_worktree`。
+
+        🔴 **守衛一（工作樹根）**：救援序列的路徑語意要求 `worktree` 就是 repo 頂層。
+        `git -C <子目錄> diff HEAD --name-only` 回的是**根相對**路徑，而
+        `ls-files --others` 回的是**cwd 相對**路徑 ⇒ 從子目錄跑會讓 ② 那半的
+        `diff --no-index -- /dev/null <path>` 找不到檔（rc>1 → _GitError）。所以這裡先
+        `rev-parse --show-toplevel` 把它正規化，而不是相信呼叫端傳對了。
+
+        🔴 **守衛二（乾淨就不要進去）**：R-4.5.9 的進入條件是「worktree 有未提交變更」。
+        乾淨工作樹送進救援序列 ⇒ patch 是 0 bytes ⇒ (c) 斷言判 DIRTY_UNSAVED ⇒ 每一次
+        乾淨的 halt 都被讀成「工作沒保全、禁止自動喚醒」＝假紅。回 `CLEAN` 而不是 `SAVED`：
+        「沒有東西要救」與「救到了」是兩件事，混在一起下一個讀者就分不出來。
+        """
+        try:
+            root = _git_text(self._worktree, "rev-parse", "--show-toplevel")
+            dirty = status_porcelain(root)
+        except (_GitError, OSError) as exc:
+            # 不在 git 工作樹內／git 不可用 ⇒ 沒有「未提交變更」這個概念，不是救援失敗。
+            return RescueResult(status=CLEAN, reason=f"不在 git 工作樹內或 git 不可用：{exc}")
+        if not dirty:
+            return RescueResult(status=CLEAN,
+                                reason="工作樹乾淨（status --porcelain 為空），無需救援")
+        return rescue_dirty_worktree(
+            root, self._checkpoint_dir, agent_id=self._agent_id,
+            retries=self._retries, notifier=self._notifier)
 
 
 def _unsaved(res: RescueResult, notifier: Callable[[str], None] | None) -> RescueResult:

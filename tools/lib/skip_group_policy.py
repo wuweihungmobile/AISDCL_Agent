@@ -25,6 +25,7 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from skip_profile_key import platform_of, profile_axis_problems  # noqa: E402
 from skip_tag_policy import (  # noqa: E402
     _EXEMPT_HANDOVER_RE,
     DEBT_SKIP_TAG,
@@ -666,7 +667,7 @@ _HANDOVER_POINTER_RE = re.compile(r"DEF-\d+-\d+")
 #: 既有回歸鎖讀的是它們（`AutoClaude/tests/tools/test_local_ci_gate.py`）。派生規則：一個
 #: 平台上任一執行者未量測，該平台即算「未量測」。
 def _platform_of(profile: str) -> str:
-    return profile.split("@", 1)[1].split("+", 1)[0]
+    return platform_of(profile)  # 文法只有一個家＝skip_profile_key（DEF-200-183）
 
 
 _CI_FULL_SUITE_PLATFORMS: dict[str, str] = {
@@ -775,10 +776,14 @@ def skip_group_census_problems(
     ceilings = _RUNTIME_SKIP_CEILING.get(profile)
     ceiling_max = _RUNTIME_SKIP_CEILING_MAX.get(profile)
     if ceilings is None or ceiling_max is None:
+        # 🔴 DEF-200-183：軸判準只掛在**未登記**這一支與 `skip_target_report`，兩者都是
+        # advisory（消費端對未登記剖面只印不判，rc 不變）。掛進下面那些有牙的向會讓
+        # 「鍵少一軸」當場擋 push，而掌舵者裁決逐字是「修好前維持 advisory 不登記」。
         return [
             f"剖面 `{profile}` 未登記於 skip_group_policy._RUNTIME_SKIP_CEILING"
             f"／_RUNTIME_SKIP_CEILING_MAX（實測 {dict(census)}）——新剖面必須顯式入表，"
-            "否則它的 skip 數靜默不受管轄"
+            "否則它的 skip 數靜默不受管轄",
+            *profile_axis_problems(profile),
         ]
     budget = retag_budget(profile, census)
     total_got = sum(census.get(g, 0) for g in set(census) | set(ceilings))
@@ -929,7 +934,9 @@ def complementary_profiles(profile: str) -> tuple[str, ...]:
 # 兩者混在一起，就會變成「為了讓閘門綠而把目標訂低」，那正是 S3-03 的病根。
 # 純函式：這個剖面**距離目標還有多遠**（不是「有沒有違規」）。回空 list ＝已達標。
 def skip_target_report(profile: str, census: Mapping[str, int]) -> list[str]:
-    out: list[str] = []
+    # 🔴 DEF-200-183 先於欠債／結構性兩行：鍵少一軸時，下面兩行比的是**兩個母體的混合**
+    # ——先說「這個數字指的是哪個母體還沒定義好」，再談離目標多遠。
+    out: list[str] = list(profile_axis_problems(profile))
     debt = open_debt(census)
     if debt:
         detail = "／".join(f"{g}={census.get(g, 0)}" for g in ZERO_TARGET_GROUPS)

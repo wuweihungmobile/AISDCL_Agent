@@ -15,6 +15,7 @@ import argparse
 import logging
 import os
 import sys
+from pathlib import Path
 
 # SD_Improving_06 W6（T6-6）：_runner_compat.py 已物理刪除，DeprecationWarning
 # filter 一併拔除（不再有下游間接 import 觸發噪音）。
@@ -22,15 +23,24 @@ import sys
 import yaml
 
 from .core.services.auto_resume import AutoResumeService
-from .core.wiring import build_kernel, build_quota_meter
+from .core.wiring import build_kernel, build_quota_meter, build_worktree_rescue
 from .decision.minimax_client import MinimaxClient, MinimaxError
+from .execution.boot_self_check import (
+    boot_self_check,
+    cleanup_merged_worktrees,
+    cli_version_verdict,
+    estimate_freeze_bytes,
+    read_cli_version,
+)
 from .infra.adapters.minimax_brain import MinimaxBrainAdapter
 from .infra.adapters.pty_executor import PtyExecutor
 from .infra.adapters.shell_evaluator import ShellEvaluator
 from .infra.repositories import build_state_repository
+from .infra.repositories.factory import canonical_playbook_id
 from .perception.hotkey_handler import HotkeyHandler
 from .utils.config import load_config
 from .utils.logger import setup_logger
+from .utils.notifier import notify
 
 
 def _validate_playbook_format(path: str) -> None:
@@ -80,6 +90,54 @@ def build_executor(cfg, hotkey=None, logger=None):
             )
         return SdkExecutorAdapter(cfg, can_use_tool=predicate)
     return PtyExecutor(cfg.claude, cfg.loop, log_dir=cfg.log_dir, hotkey=hotkey)
+
+
+# 🔴 DEF-200-205：`execution/boot_self_check.py`（PRD §6.2／§6.1 不變式 11~13）修前**零生產
+# 呼叫端**——機制蓋好沒接電。接點選 `main()` 而不是 AutoResumeService，理由有兩層：
+#   ① 語意：§6.2 的三項（殘留整合佇列／CLI 版本／可用空間）逐字都寫「**啟動時**判一次」，
+#      而本實作的「一次啟動」就是一個被叫起來的行程 ⇒ 行程入口才是那一刻。放進
+#      AutoResumeService.run() 會變成「每一輪 auto-resume 迴圈重判一次」＝另一個語意。
+#   ② 機械：`problems` 非空時呼叫端須以非零退出碼結束（boot_self_check 自己的 docstring
+#      逐字要求），而全程只有 `main()` 握得到行程的 rc。
+# 🔴 `dry_run` **刻意不接到執行器**：R-6.2-2 同時要求「未知版本不阻止啟動」，而已驗證清單
+#    現況只有 2 個版號 ⇒ 接上去等於幾乎所有使用者的 playbook 都被靜默降級成不動作，那種
+#    守衛會被整個關掉，比沒有守衛更糟。本輪只交付 R-6.2-2 的另一半（loud 一次＋自檢輸出
+#    印出「本次以 DRY_RUN 執行」與確認方式）；「DRY_RUN 真的不動作」那一半仍未接電。
+def run_boot_self_check(cfg, *, state_repo, playbook_path: str, quota_meter,
+                        logger: logging.Logger) -> int:
+    """§6.2 開機自檢。回 0＝可以啟動；非 0＝呼叫端須以此值退出（不變式 11~13 有違反）。"""
+    # 「DRAINING 以上只登記不重排」要的是**啟動當下**的帶位（R-6.2-1 末段）。
+    read_pace = getattr(quota_meter, "read_pace", None)
+    band = read_pace().band if read_pace is not None else ""
+    # 🔴 版本在這裡讀**一次**，再經 `cli_runner` 把同一個讀數餵回去，理由是 G5：
+    #    「DRY_RUN 真的不動作」逐字含「零 worktree 寫入」，而 `cleanup` 是一個 opaque
+    #    callable ——`boot_self_check` 沒辦法替它決定要不要 dry-run，那件事只有組裝端做得到
+    #    （`cleanup_merged_worktrees` 的 `dry_run` 參數就是為此存在）。要在傳 `cleanup`
+    #    之前就知道 dry_run，就得先有版本裁決 ⇒ 順序被判準決定，不是被方便決定。
+    #    餵回去（而不是讓它自己再跑一次 `claude --version`）是因為同一次啟動只能有一個
+    #    版本讀數：兩次 spawn 之間版本若不同，自檢輸出與 cleanup 的依據就會各說各話。
+    version = read_cli_version(cfg.claude.command)
+    dry_run, _ = cli_version_verdict(version)
+    # 🔴 空間檢查的量測面是 `checkpoint_dir` 所在的檔案系統（patch／state.json 都寫在那），
+    #    預估量的是**工作樹**（R-6.2-3 ②：各 worktree `git diff HEAD --binary` 的位元組數）。
+    #    兩者刻意是不同的路徑，寫成同一個就量錯磁碟。
+    report = boot_self_check(
+        repo=state_repo,
+        playbook_id=canonical_playbook_id(playbook_path, mode=cfg.storage.mode),
+        band=band,
+        cli_command=cfg.claude.command,
+        cli_runner=lambda _argv: (0, version) if version else (127, ""),
+        space_target=cfg.checkpoint_dir,
+        estimate_bytes=estimate_freeze_bytes([Path.cwd()]),
+        cleanup=lambda: cleanup_merged_worktrees(Path.cwd(), dry_run=dry_run),
+        notifier=lambda msg: notify(
+            "AutoClaude — 開機自檢", msg, enabled=cfg.notification.enabled),
+    )
+    if report.ok:
+        return 0
+    for problem in report.problems:
+        logger.error("開機自檢未過 | %s", problem)
+    return 1
 
 
 def main() -> int:
@@ -148,6 +206,14 @@ def main() -> int:
     executor = build_executor(cfg, hotkey=hotkey, logger=logger)
     evaluator = ShellEvaluator(cfg.playbook)
     state_repo = build_state_repository(cfg.checkpoint_dir, cfg.storage)
+    # R82（ACQ-05）：額度水位量測器建**一個**，開機自檢與 AutoResumeService 共用同一份
+    # 讀數來源（各自 new 一個等於同一份知識住兩個家）。
+    quota_meter = build_quota_meter()
+    # DEF-200-205：§6.2 開機自檢接上生產啟動路徑；不變式 11~13 有違反即以非零退出碼停機。
+    boot_rc = run_boot_self_check(cfg, state_repo=state_repo, playbook_path=args.playbook,
+                                  quota_meter=quota_meter, logger=logger)
+    if boot_rc:
+        return boot_rc
     # DEF-01-008：flag-gated brain 注入。預設 enable_kernel_brain=False → brain=None，
     # 維持既有 production 行為（無 Minimax 逐步 correction、SddGovernance escalation 諮詢
     # 不啟用），零退化。顯式啟用後死碼轉為可達能力（行為差異見 improving_03 §2.1）。
@@ -157,8 +223,11 @@ def main() -> int:
                           state_repository=state_repo)
     # R82（ACQ-05）：注入額度水位量測器，讓 halt 後的等待時間由**觀測到的 resets_at** 決定，
     # 而不是寫死的 resume_delay_minutes（實測額度視窗 min 0.5 分／max 253 分，30 分沒有一段對）。
+    # DEF-200-205：注入 IWorktreeRescue（PRD §4.5.9）——halt 後轉入等待前，先把髒污工作樹
+    # 存成 patch；救援失敗（DIRTY_UNSAVED）時 AutoResumeService 就地返回、不排自動喚醒。
     service = AutoResumeService(kernel, cfg, state_repository=state_repo,
-                                quota_meter=build_quota_meter())
+                                quota_meter=quota_meter,
+                                worktree_rescue=build_worktree_rescue(cfg))
     result = service.run(args.playbook, fresh=args.fresh)
 
     logger.info("Playbook 結束 | %s", result)

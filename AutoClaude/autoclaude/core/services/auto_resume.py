@@ -29,6 +29,7 @@ import yaml
 from ...models.playbook import Playbook
 from ...utils.resume_clock import seconds_until as resume_clock_seconds_until
 from ..kernel_state import KernelResult
+from ..ports.worktree_rescue import UNSAFE_TO_FREEZE
 from ._auto_resume_metrics import AutoResumeMetrics, record_wake_and_emit
 
 if TYPE_CHECKING:
@@ -69,6 +70,7 @@ class AutoResumeService:
         *,
         state_repository: Any | None = None,
         quota_meter: Any | None = None,
+        worktree_rescue: Any | None = None,
     ):
         """初始化 AutoResumeService。
 
@@ -78,12 +80,16 @@ class AutoResumeService:
             state_repository: 可選的 IStateRepository 實例（W2-T9 新增）；
                               未提供時 _resolve_start 永遠回 (0, [], False, None)
                               以維持向後相容（舊測試 / dry-run）
+            worktree_rescue: 可選的 IWorktreeRescue（DEF-200-205）；未注入時
+                              `_freeze_is_safe` 恆回 True，行為與修前位元級相同
         """
         self._kernel = kernel
         self._cfg = config
         self._state_repo = state_repository
         # R82（ACQ-05）：QuotaMeterPort（可選）。None＝額度那一軸不存在，行為與修前相同。
         self._quota = quota_meter
+        # DEF-200-205：IWorktreeRescue（可選）。None＝救援那一軸不存在，行為與修前相同。
+        self._rescue = worktree_rescue
         # SD_05 W5 批3-C / M-9：metrics observability
         self._metrics = AutoResumeMetrics()
 
@@ -248,6 +254,14 @@ class AutoResumeService:
                     _current_path, playbook, result
                 )
 
+            # 🔴 DEF-200-205（PRD §4.5.9 R-4.5.9-4）：halt ＝ 即將凍結，而凍結前必須先把
+            # 髒污工作樹保全。救援失敗（DIRTY_UNSAVED）時**絕不 fail-open**——不得往下走
+            # 到等待／自動喚醒，因為那兩個狀態的語意是「工作已保全，可以安全睡」，而此刻
+            # 工作沒有保全。順序刻意排在 `_persist_halt_checkpoint` **之後**：state.json
+            # 是診斷用的索引，patch 是工作本體，索引先落地才有東西指向 patch。
+            if result.halted and not self._freeze_is_safe():
+                return result
+
             # Token HALT → 等待排程時間後自動恢復
             if (
                 result.halted
@@ -271,6 +285,42 @@ class AutoResumeService:
                 continue
 
             return result
+
+    # 🔴 DEF-200-205：「敢不敢睡」這個判斷。回 False ＝ 工作沒保全 ⇒ 呼叫端必須就地返回，
+    # 不得轉入 WAITING_RESET／LONG_HIBERNATE（R-4.5.9-4 逐字：絕不 fail-open）。
+    # 🔴 判準是「status ∈ UNSAFE_TO_FREEZE」而不是「status == SAVED」：後者會把 adapter 的
+    # `CLEAN`（工作樹本來就乾淨、沒東西要救）判成不安全 ⇒ 每一次乾淨的 halt 都拒絕續跑，
+    # 那是假紅，而假紅會讓整道判準被關掉。兩個方向都要對，所以判準收在「明確不安全」那一側。
+    # 🔴 例外一律當成不安全（fail-closed）：救援自己拋錯時「工作有沒有保全」是**不知道**，
+    # 而 R-4.5.9-4 的整段出發點就是不准把「量不到」讀成「量到零」。
+    def _freeze_is_safe(self) -> bool:
+        if self._rescue is None:
+            return True
+        try:
+            outcome = self._rescue.rescue()
+        except Exception as exc:                     # noqa: BLE001 — 見上方 fail-closed 註解
+            logger.error(
+                "AutoResumeService | 髒污工作樹救援拋錯（%s: %s）⇒ 工作是否保全不明，"
+                "禁止自動喚醒", type(exc).__name__, exc,
+            )
+            return False
+        status = getattr(outcome, "status", "")
+        if status in UNSAFE_TO_FREEZE:
+            logger.error(
+                "AutoResumeService | %s：髒污工作樹未保全 ⇒ 禁止自動喚醒（patch=%s，"
+                "expected=%s，actual=%s，bytes=%s/%s，attempts=%s）：%s",
+                status, getattr(outcome, "patch_path", ""),
+                getattr(outcome, "expected_checksum", ""),
+                getattr(outcome, "actual_checksum", ""),
+                getattr(outcome, "bytes_written", 0),
+                getattr(outcome, "bytes_read_back", 0),
+                getattr(outcome, "attempts", 0),
+                getattr(outcome, "reason", ""),
+            )
+            return False
+        logger.info("AutoResumeService | 凍結前工作樹保全：status=%s patch=%s",
+                    status, getattr(outcome, "patch_path", ""))
+        return True
 
     # 🔴 R82（ACQ-05／ACA-01）：halt 之後「等多久」。
     # 修前一律讀寫死的 `resume_delay_minutes=30`，而實測額度視窗 min 0.5 分／max 253 分

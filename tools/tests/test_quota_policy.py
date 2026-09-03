@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import ast
 import dataclasses
+import inspect
 import json
 import os
 import random
@@ -363,11 +364,15 @@ class TestR89ObservationFieldsAreWiredButInert(unittest.TestCase):
                       "`False` 被壓成 `None` ⇒ 「沒給」與「給了 false」分不開")
         self.assertIsNone(by["five_hour"]["is_active"], "頂層真的沒有它，不得偽造")
         path = Path(tempfile.mkdtemp()) / M.CACHE_NAME
+        # 🔴 時刻改釘 `NOW`（原本兩處都讀掛鐘）：`_R89_TEAM` 的 `resets_at` 全部由 `at()`
+        # 相對 `NOW` 算出，拿掛鐘去讀就是把一份凍結的舊 payload 重播成「現值」——
+        # DEF-200-200 ① 的死窗降級（`expired-window`）會**正確地**把它整份判掉。本鎖驗的
+        # 是欄位通電，不是期程 ⇒ 讓它與自己的 fixture 同一個時間框，age 仍為 0（未過 TTL）。
         self.assertTrue(M.write_cache({"schema": M.SCHEMA, "axes": rows,
-                                       "source": "endpoint", "measured_at":
-                                       datetime.now(UTC).astimezone().isoformat()}, path))
+                                       "source": "endpoint",
+                                       "measured_at": NOW.isoformat()}, path))
         got = {a.kind: (a.is_active, a.severity)
-               for a in G.read_quota(datetime.now(UTC), path).axes}
+               for a in G.read_quota(NOW, path).axes}
         self.assertEqual((got["session"], got["spend"]),
                          ((True, "normal"), (None, "normal")))
 
@@ -710,7 +715,7 @@ class TestM3bImplementationDefects(unittest.TestCase):
         """時鐘偏移的負號必須**真的走進** `horizon_band`，那道防線才不是死碼（舊實作
         提前夾 0 ⇒ 負值分支任何生產路徑都到不了＝同一份知識的第二個家）。"""
         past = (NOW - timedelta(minutes=5)).isoformat()
-        raw, note = Q._delta_minutes(past, NOW)
+        raw, note = Q._delta_minutes(past, NOW, NOW.isoformat())   # 量測當下就已過去＝偏移
         self.assertLess(raw, 0.0, "負號沒有傳到 horizon_band ⇒ 那道防線是死碼")
         self.assertEqual(note, Q.NOTE_SKEW)
         self.assertEqual(Q.horizon_band(raw, P), Q.AXIS_MID)
@@ -3192,6 +3197,119 @@ class TestUsageUrlHasExactlyOneHome(unittest.TestCase):
         self.assertEqual(usage_url_homes({}), [],
                          "空掃描面必須回空清單（由上一支測試的下限斷言 fail-loud，"
                          "不在本純函式裡代為決定）")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# DEF-200-200：一個「已過期」述詞供四層共用，且它必須**分流兩義**
+# 立案實測（四層今日皆複驗成立）＝本輪交付報告；判準的理由逐條寫在方法名與一行摘要。
+# ═══════════════════════════════════════════════════════════════════════════
+def _past_cache(tmp: Path, reset_offset_s: float, age_s: float = 60.0) -> Path:
+    """一份**未過 TTL**（age < 180s）但該軸 reset 已在過去的合成快取。"""
+    path = tmp / "autosdd_quota.json"
+    path.write_text(json.dumps({
+        "schema": QG.quota_schema(),
+        "measured_at": (NOW - timedelta(seconds=age_s)).isoformat(),
+        "axes": [{"kind": "five_hour", "pct": 97.0,
+                  "resets_at": (NOW + timedelta(seconds=reset_offset_s)).isoformat()}]}),
+        encoding="utf-8", newline="\n")
+    return path
+
+
+class TestDef200200ExpiryPredicate(unittest.TestCase):
+    """四層共用一個述詞；「時刻已過去」與「時鐘歪了」必須是兩個**不同**的回答。"""
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+    def test_a_rolled_over_window_and_a_skewed_clock_are_different_answers(self) -> None:
+        """②：量測**之後**才到期＝翻頁（重量）；量測**之前**就到期＝鐘不一致（校時）。
+        兩者共用一個字面時，operator 會被指向一個沒壞的子系統（本缺陷 ② 的病灶）。"""
+        past = at(-5)
+        rolled = W.expiry_of(past, NOW, at(-10))
+        skewed = W.expiry_of(past, NOW, NOW.isoformat())
+        self.assertEqual((rolled[1], skewed[1]), (W.EXPIRY_ELAPSED, W.EXPIRY_SKEW))
+        self.assertNotEqual(rolled[1], skewed[1], "兩義共用一個字面 ⇒ 只是把 bug 集中一處")
+        self.assertLess(rolled[0], 0.0, "負號被夾掉 ⇒ 下游 horizon 的負值分支變死碼")
+        self.assertEqual(W.expiry_of(past, NOW)[1], W.EXPIRY_ELAPSED,
+                         "沒有參考時刻卻指控時鐘 ⇒ 無證據的歸因，正是 ② 的形態")
+        self.assertEqual([W.expiry_of(x, NOW, NOW.isoformat())[1]
+                          for x in (at(5), None, "", "2026-13-99")],
+                         [W.EXPIRY_FUTURE, W.EXPIRY_MISSING, W.EXPIRY_MISSING, W.EXPIRY_BAD],
+                         "未到期／缺席／解不出被併進『已過期』⇒ 述詞失去鑑別力")
+        self.assertEqual([W.expired(n) for n in (W.EXPIRY_ELAPSED, W.EXPIRY_SKEW,
+                                                 W.EXPIRY_FUTURE, W.EXPIRY_MISSING)],
+                         [True, True, False, False])
+
+    def test_the_predicate_has_exactly_one_home_and_takes_an_injected_now(self) -> None:
+        """述詞只有一個家（`quota_policy` 的 note 常數轉引它），且 `now` 必須注入。"""
+        self.assertEqual((Q.NOTE_SKEW, Q.NOTE_ELAPSED, Q.NOTE_MISSING, Q.NOTE_BAD),
+                         (W.EXPIRY_SKEW, W.EXPIRY_ELAPSED, W.EXPIRY_MISSING, W.EXPIRY_BAD))
+        self.assertEqual(Q._delta_minutes(at(-5), NOW, at(-10))[1], W.EXPIRY_ELAPSED,
+                         "判讀層沒有走共用述詞 ⇒ 又是第二個家")
+        self.assertIs(inspect.signature(W.expiry_of).parameters["now"].default,
+                      inspect.Parameter.empty,
+                      "`now` 有預設值 ⇒ 生產碼會偷偷去讀掛鐘，測試就注入不了時間")
+        with self.assertRaises(ValueError):   # naive now 相減跨 DST 會靜默差一小時
+            W.expiry_of(at(-5), NOW.replace(tzinfo=None))
+
+    def test_a_reading_whose_window_already_rolled_over_is_not_taken_as_current(self) -> None:
+        """①：cache age 60s < TTL 180s **但**該軸 reset 已過去 ⇒ 不得把死窗 97% 當現值。
+        對照組（reset 在未來）必須照樣可用，否則這道降級把好讀數也一起吃掉。"""
+        dead = QG.read_quota(NOW, _past_cache(self.tmp, -30.0))
+        self.assertFalse(dead.usable(), "跨窗的 97% 被當現值 ⇒ 憑死窗值判 halt")
+        self.assertEqual(dead.source, "expired-window")
+        self.assertNotEqual(dead.source, "stale-cache",
+                            "與『太舊』共用字面 ⇒ 兩者要求 operator 做的事不同卻分不出")
+        self.assertIn("已過去", dead.reason)
+        live = QG.read_quota(NOW, _past_cache(self.tmp, 3600.0))
+        self.assertTrue(live.usable(), "reset 在未來的讀數也被降級 ⇒ 判準寬到無法工作")
+        self.assertEqual(live.axes[0].pct, 97.0)
+
+    def test_the_presentation_layer_never_calls_a_past_moment_soon_self_releasing(self) -> None:
+        """③：已過去的時刻不得播報成「很快就會自己解除」——那句話的方向是**叫人繼續等**
+        一個不會發生的事件（DEF-200-044 無做工空轉同形）。未來的時刻必須照樣說得出來。"""
+        def _line(reset_min: float, measured_min: float) -> str:
+            state = Q.QuotaState((Q.Axis("five_hour", 97.0, at(reset_min)),),
+                                 at(measured_min), "test")
+            return QM.throttle_horizon_line(Q.decide(state, NOW, P), NOW, at(measured_min))
+        rolled, skewed, future = _line(-5, -10), _line(-5, 0), _line(20, 0)
+        for label, line in (("翻頁", rolled), ("偏移", skewed)):
+            self.assertNotIn("很快就會自己解除", line, f"{label}：對死掉的時刻說它快好了")
+            self.assertNotIn("6 小時內", line, f"{label}：把已過去的時刻算成還有 6 小時")
+        self.assertIn("已經過去", rolled)
+        self.assertIn("校時", skewed)
+        self.assertNotEqual(rolled, skewed, "兩義在畫面上同形 ⇒ 分流沒有到達呈現層")
+        self.assertIn("很快就會自己解除", future,
+                      "未來的時刻也不說了 ⇒ 本鎖只是把那句話刪掉，不是分得出兩件事")
+
+    def test_row_of_persists_resets_at_and_old_rows_without_it_still_read(self) -> None:
+        """④（①②③ 的前提）：落款要記下逐軸 `resets_at`；缺這一鍵的舊列仍可讀成空 dict。
+        時間戳一律**原字串**寫下（naive 本地時間戳跨 DST 相減會靜默差一小時）。"""
+        raw = at(-5)
+        # 兩條**窗長不同**的軸是 `rows_from_jsonl` 收列的既有前提（單軸列本來就會被略過）。
+        new = W.row_of(NOW.isoformat(), (("five_hour", 97.0), ("seven_day", 30.0)), 0,
+                       ("five_hour",), resets=(("five_hour", raw), ("spend", None)))
+        self.assertEqual(json.loads(new)["resets_at"], {"five_hour": raw, "spend": None},
+                         "④ 沒落欄位 ⇒ ①②③ 三層事後結構上無資料可驗")
+        old = ('{"fp": [], "live": 0, "pct": {"five_hour": 1.0, "seven_day": 20.0}, '
+               '"ts": "2026-08-01T00:00:00+08:00"}\n')
+        self.assertEqual(W.resets_from_jsonl(old), {"2026-08-01T00:00:00+08:00": {}},
+                         "缺欄位的舊列整批變無效／炸掉 ⇒ 既有 quota_burn.jsonl 報廢")
+        self.assertEqual(W.resets_from_jsonl(new)[NOW.isoformat()]["five_hour"], raw)
+        self.assertEqual(len(W.rows_from_jsonl(old + new)), 2,
+                         "新欄位讓既有取數層讀不到列 ⇒ 換算比樣本池被清空")
+
+    def test_record_burn_actually_writes_the_axis_resets_at(self) -> None:
+        """④ 的接線半：純函式落得下欄位，但生產呼叫端沒帶＝欄位永遠是空的。"""
+        ledger = self.tmp / "quota_burn.jsonl"
+        with mock.patch.object(QG, "burn_ledger_path", lambda: ledger):
+            self.assertTrue(QG.record_burn(Q.QuotaState(
+                (Q.Axis("five_hour", 40.0, at(30)), Q.Axis("seven_day", 30.0, at(9000))),
+                NOW.isoformat(), "cache"), 0))
+        written = json.loads(ledger.read_text(encoding="utf-8").splitlines()[-1])
+        self.assertEqual(written["resets_at"], {"five_hour": at(30), "seven_day": at(9000)},
+                         "`record_burn` 沒把 resets_at 餵進 `row_of` ⇒ ④ 只是形式上落地")
 
 
 if __name__ == "__main__":

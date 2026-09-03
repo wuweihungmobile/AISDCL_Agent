@@ -16,6 +16,7 @@
 #   - 整合 GotoCounterPlugin + CheckpointPlugin（Gap-042/048/049 計數器持久化）
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from ..plugins import (
@@ -61,6 +62,30 @@ from .services.mutation.service import MutationApplyService
 def build_quota_meter(degraded_cap: int = DEGRADED_CAP) -> Any:
     from ..infra.adapters.file_quota_meter import FileQuotaMeterAdapter
     return FileQuotaMeterAdapter(degraded_cap=degraded_cap)
+
+
+# 🔴 DEF-200-205：髒污工作樹救援（PRD §4.5.9）的唯一建構點。理由與 build_quota_meter 同型
+# ——消費端 AutoResumeService 住 core/、依 core-purity contract 不得 import infra，於是
+# 「哪一種救援實作、patch 落哪、通知走哪個通道」這幾件知識必須有唯一的家；各呼叫端自己
+# new 一個就是同一份知識住兩個家（本 repo 一路在治的形態）。
+# 🔴 `notifier` 必須在這裡把 `config.notification.enabled` 綁進去：`utils.notifier.notify`
+# 的 `enabled` 預設 True ⇒ 不綁就等於這條路徑無視使用者的通知設定（同 build_goal_decomposer
+# 那一格 R84 踩過的坑）。而 R-4.5.9-4 第 3 點要求 DIRTY_UNSAVED 走桌面通道 loud 恰好一次，
+# 所以通道**必須**接上，不能因為怕吵就不傳 notifier。
+def build_worktree_rescue(
+    cfg: AppConfig, *, worktree: str | Path | None = None, agent_id: str = "agent",
+) -> Any:
+    from ..infra.adapters.dirty_worktree_rescue import (  # noqa: PLC0415
+        DirtyWorktreeRescueAdapter,
+    )
+    from ..utils.notifier import notify  # noqa: PLC0415
+    return DirtyWorktreeRescueAdapter(
+        Path.cwd() if worktree is None else worktree,
+        cfg.checkpoint_dir,
+        agent_id=agent_id,
+        notifier=lambda msg: notify(
+            "AutoClaude — 髒污工作樹", msg, enabled=cfg.notification.enabled),
+    )
 
 # Plugin 註冊順序（SSOT — 兩條組裝路徑共用，避免 M-3 漂移）
 #

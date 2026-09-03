@@ -401,6 +401,10 @@ _GOVERNANCE_DOCS = (
     # R122 護欄層淨額承認與途中發現（round-label-ok）：款(9) 強制的 `guard-total` 標記行
     # 與逐檔清單住本檔（⇒ 指針稽核），複審者要重驗淨額對帳就得讀完它（⇒ 體積守門）。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R122_Scan_Findings.md",
+    # R123 精準修復輪第二棒的兩份（round-label-ok）：結案存證（帳本四列以 `§DEF-ID` 座標
+    # 宣稱指向它 ⇒ 指針稽核）與護欄層淨額承認（款(9) 標記行的家 ⇒ 兩者皆受體積守門）。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R123_Debt_Closure.md",
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R123_Scan_Findings.md",
     # R122 守衛線搬遷抵銷包：八支鎖檔的歷史沿革散文**逐字保全**的唯一居所 round-label-ok
     # （⇒ 體積守門——原處只留一行指標，那些沿革除了本檔已無第二份），且逐節寫出「某段
     # 原文原處是哪支檔哪個符號」的座標宣稱（⇒ 指針稽核）。資格與 R86/R87/R90/R95 同名

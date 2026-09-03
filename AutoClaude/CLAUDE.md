@@ -174,7 +174,6 @@ DSN 解析優先級：`AUTOCLAUDE_DB_DSN` > `AUTOCLAUDE_PG_DSN`（deprecated）>
 
 **最新狀態（improving_101 校正，2026-06-30）**：**ADR-SD09-011 解除 mutation 鎖定的日曆綁定**（掌舵者質疑「空轉一個月」）。根因＝M-05 同 UTC 日去重（`mutation_baseline_lock.py`）+ 每日 nightly → unique sha 每日上限 1、7 個需 ≥7 日曆天、idle 稀釋 → 空轉數週（DEF-101-001 P2 fixed@101）。**修法**：去重鍵 UTC日期→`source_sha256`（`_dedup_key`，同日多 sha 皆計入/同 sha 留最新），unique-sha 累積改由 token_guard 源碼變動觸發（新 `autoclaude-mutation-on-change.yml`+pre-push opt-in），nightly 角色轉 kill_rate 漂移監控/flaky（紀律#6 分軌）；**反作弊不減**（unique sha 守門/0.68 threshold/CONSECUTIVE_RUNS=7 全保留，ADR-SD09-011 §3）。既有 30 筆 history 方案A壓縮（`--migrate-compact-sha`）→ 6 筆/真實 **4 unique sha**，距 7 待 3 次真實 token_guard 演進（隨開發節奏累積、不熬日曆；如 DEF-100-002 L49 重構即+1），最終鎖定/退出仍需 PM 決策。零退化 3618→**3622**/0/122、lint 8 kept、零碰 autoclaude/ 微核心、三鏡 audit PASS。improving_100（殺 token_guard 真缺口 survived + L49 等價變異標記）見 sprint_history.md。
 
-
 ## 📊 模型欄位（核心參考）
 
 ### Playbook / PlaybookTask（`autoclaude/models/playbook.py`）
@@ -369,7 +368,7 @@ tasks:
 18. goto_counter
 19. checkpoint
 
-### Port 列表（19 個，autoclaude/core/ports/）
+### Port 列表（20 個，autoclaude/core/ports/）
 - brain
 - embedder
 - evaluator
@@ -389,6 +388,7 @@ tasks:
 - topology_dashboard
 - translation_learning
 - vector_search
+- worktree_rescue
 
 ### DAL 三後端 storage.mode 矩陣（autoclaude/infra/repositories/factory.py）
 | Mode | 行為 |

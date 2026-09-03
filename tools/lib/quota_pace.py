@@ -481,6 +481,45 @@ def _iso_key(text: str):
     return moment if moment.tzinfo is not None else None
 
 
+# ── DEF-200-200：「已過期」述詞的**唯一的家**（此前四層各自誤判同一個欄位）──────────
+# 🔴 為什麼一定要**分流兩義**：`resets_at` 落在過去有兩個成因，而它們要求 operator 做
+# **不同的事**——視窗翻頁（`elapsed`）只要重量一次；鐘與伺服器不一致（`clock-skew`）要
+# 去校時。舊實作把任何負值一律標 `clock-skew`（而本機時鐘實測無偏移）⇒ 指向錯的子系統。
+# 判準是**可證的**、不是猜的：`resets_at < measured_at` ⇒ 伺服器在我們發問的那一刻就給
+# 了一個已經過去的視窗，活著的視窗結構上不可能如此 ⇒ 兩邊的鐘不一致。
+# `measured_at <= resets_at < now` ⇒ 量的時候還沒到、現在到了 ⇒ 純粹是翻頁。
+# 🔴 參考時刻解不出時**不得**歸因時鐘（無證據不得指控）：退回 `elapsed`——它的處置
+#   （重量一次）無害，而誤報 skew 會讓人去查一個沒壞的子系統，那正是本缺陷 ② 的病灶。
+# 🔴 負號**原樣回**（不夾 0）：夾完之後下游 `horizon()` 的負值分支就再也到不了＝死碼，
+#   而「偏移不得加速」那道方向鎖就只剩宣稱（`quota_policy._delta_minutes` 檔內同一判詞）。
+EXPIRY_FUTURE = ""            # 還沒到（正常）
+EXPIRY_ELAPSED = "elapsed"    # 已過去：視窗翻頁 ⇒ 讀數屬死窗，重量一次
+EXPIRY_SKEW = "clock-skew"    # 量測當下就已過去 ⇒ 鐘與伺服器不一致，先校時
+EXPIRY_MISSING = "missing"    # 這條線沒有 reset 可以等（實測 spend 就是）
+EXPIRY_BAD = "bad-horizon"    # 有值但解不出（伺服器改格式／naive 時間戳）
+
+
+def expiry_of(resets_at: object, now: datetime, measured_at: object = None) -> tuple:
+    """`(帶號分鐘|None, 述詞)`——四層共用的「已過期」述詞。`now` 必須 aware。"""
+    if now.tzinfo is None:
+        raise ValueError("now 必須是 aware datetime（naive 相減跨 DST 會靜默差一小時）")
+    if resets_at is None or not str(resets_at).strip():
+        return None, EXPIRY_MISSING
+    when = _iso_key(str(resets_at))
+    if when is None:
+        return None, EXPIRY_BAD
+    minutes = (when - now).total_seconds() / 60.0
+    if minutes >= 0.0:
+        return minutes, EXPIRY_FUTURE
+    taken = _iso_key(str(measured_at)) if measured_at is not None else None
+    return minutes, (EXPIRY_SKEW if taken is not None and when < taken else EXPIRY_ELAPSED)
+
+
+def expired(note: str) -> bool:
+    """述詞是否表示「這個時刻已經過去」——**兩義皆算**（快取層與呈現層共用的那道閘）。"""
+    return note in (EXPIRY_ELAPSED, EXPIRY_SKEW)
+
+
 def segments(rows) -> list:
     """把 `(ts, short, long)` 切成「沒有翻頁」的區段。任一軸下降＝視窗翻頁＝斷點。
 
@@ -552,15 +591,45 @@ def rows_from_jsonl(text: str) -> list:
     return rows
 
 
-def row_of(measured_at: str, pcts, live: int = 0, fp: tuple = ()) -> str:
+# 🔴 DEF-200-200 ④：`resets` 這一欄是驗證 ①②③ 的**前提**——落款此前一列都沒有寫下
+# 逐軸的 `resets_at`，於是「這一列是哪一個視窗量到的」在磁碟上結構上不可知，跨窗與時鐘
+# 偏移兩者事後都無從分辨（`quota_reconcile.py` 檔頭已把這點記成硬結論）。
+# 🔴 伺服器原字串**原封不動**寫下（不轉本地、不重新格式化）：naive 本地時間戳跨 DST 相減
+# 實測差 3600 秒且完全靜默，本 repo 有具名機械物禁止持久化它（`TestNaiveLocal...`）。
+def row_of(measured_at: str, pcts, live: int = 0, fp: tuple = (), resets=()) -> str:
     """一列落款（含尾端換行）。`live`＝當時的併發派發數；`fp`＝寫入時的**核心方案指紋**
     （R93／DEF-200-122：見 `quota_gate.core_signature`。預設 `()` 給既有呼叫端相容，
-    真正的生產呼叫端 `quota_gate.record_burn` 一律顯式帶入）。
+    真正的生產呼叫端 `quota_gate.record_burn` 一律顯式帶入）；`resets`＝`[(kind,
+    resets_at)]`，預設 `()` ⇒ 寫出空 dict（與「這一列沒有記」語意一致，不憑空補時刻）。
     """
     return json.dumps({"ts": str(measured_at),
                        "pct": {str(k): float(v) for k, v in pcts},
-                       "live": int(live), "fp": list(fp)},
+                       "live": int(live), "fp": list(fp),
+                       "resets_at": {str(k): (None if v is None else str(v))
+                                     for k, v in resets}},
                       ensure_ascii=False, sort_keys=True) + "\n"
+
+
+def resets_from_jsonl(text: str) -> dict:
+    """`{ts: {kind: resets_at}}`。**缺這一鍵的舊列一律回空 dict**（④ 落地之前寫下的每一
+    列都沒有它）⇒ 舊樣本照樣可讀、不整批作廢，也不憑空補一個時刻。壞列一律略過。
+    """
+    out: dict = {}
+    for line in str(text).splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("{"):
+            continue
+        try:
+            data = json.loads(stripped)
+            when = str(data["ts"]).strip()
+        except (AttributeError, KeyError, TypeError, ValueError):
+            continue
+        raw = data.get("resets_at")
+        if not when or when in out:
+            continue
+        out[when] = ({str(k): (None if v is None else str(v)) for k, v in raw.items()}
+                     if isinstance(raw, dict) else {})
+    return out
 
 
 # 🔴 這就是雙向對稱性的來源（R93／DEF-200-122／ADR-XPLAT-009）：換方案不論方向為何，

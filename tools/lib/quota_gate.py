@@ -341,9 +341,12 @@ def record_burn(state: quota_policy.QuotaState, live: int = 0) -> bool:
         if path.exists() and state.measured_at in path.read_text(encoding="utf-8"):
             return False
         with path.open("a", encoding="utf-8") as handle:
+            # DEF-200-200 ④：逐軸 `resets_at` 一起落款——沒有它，事後就分不出「這一列是
+            # 哪一個視窗量到的」，①②③ 三層的判讀全部無資料可驗（本欄是那三層的前提）。
             handle.write(quota_pace.row_of(
                 state.measured_at, [(a.kind, a.pct) for a in state.axes], live,
-                fp=core_signature(state)))
+                fp=core_signature(state),
+                resets=[(a.kind, a.resets_at) for a in state.axes]))
     except OSError:
         return False
     return True
@@ -421,6 +424,22 @@ def read_quota(now: datetime, path: Path | None = None) -> quota_policy.QuotaSta
         return _blank("stale-cache", f"stale-cache（資料在，但已 "
                       f"{int((now - measured).total_seconds())}s > TTL "
                       f"{QUOTA_CACHE_TTL_SECONDS}s ⇒ 重量一次即可，不是取數壞掉）")
+    # 🔴 DEF-200-200 ①：TTL 只量「這份讀數幾秒前抓的」，量不到「它描述的那個視窗還在不
+    # 在」。實測（本缺陷複驗）：cache age 60s < TTL 180s、而 `five_hour` 的 resets_at 是
+    # 30 秒**之前** ⇒ `usable()` 為真、97% 被當現值 ⇒ band=halt cap=0，而該軸其實剛歸零。
+    # ⇒ 跨窗的讀數與 `stale-cache` 同一種處置（降級到「量不到」，走 `degraded_cap`；那個
+    # 量非單調、翻頁會驟降，「上調一個安全邊際」同樣是猜）。**兩者的 reason 必須分得開**：
+    # stale＝重量一次；expired-window＝視窗翻頁／鐘不一致，述詞由 `expiry_of` 分流。
+    expired = [(a.kind, a.resets_at, note) for a in axes
+               for note in (quota_pace.expiry_of(a.resets_at, now,
+                                                 data.get("measured_at"))[1],)
+               if quota_pace.expired(note)]
+    if expired:
+        return _blank("expired-window", "expired-window（資料在且未過 TTL，但 "
+                      + "；".join(f"kind={k} 的 reset {at} 已過去（{n}）"
+                                  for k, at, n in expired)
+                      + " ⇒ 這份讀數描述的是已經翻頁的死視窗，重量一次；"
+                        "note=clock-skew 者請先校時）")
     # 🔴 R93／DEF-200-114：`account_key` 是**帶預設值的新欄**，舊快取（本輪之前寫下的、
     # 沒有這一鍵）一律讀成 `None`——與缺席語意一致，不得猜一個值出來。
     key = data.get("account_key")
@@ -693,7 +712,9 @@ def quota_halt_actions(payload: dict, decision: quota_policy.Decision, now: date
     transcript = Path(raw) if isinstance(raw, str) and raw.strip() else None
     plan = plan_writer(transcript) if transcript and transcript.is_file() else ""
     arm = waker(transcript, plan) if branch == QUOTA_BRANCH_ARM else {}
-    return {"branch": branch, "plan": plan, "armed": bool(arm.get("armed")),
+    # DEF-200-200 ③：`now` 帶進稽核欄，讓 `quota_halt_message()` 判得出「這個 reset 其實
+    # 已經過去」——訊息層自己沒有時鐘（那是刻意的，它必須是純渲染）。
+    return {"branch": branch, "plan": plan, "armed": bool(arm.get("armed")), "now": now,
             "sentinel_off": bool(arm.get("sentinel_off")), "posix": bool(arm.get("posix")),
             "kind": decision.binding.kind if decision.binding is not None else ""}
 
@@ -789,7 +810,10 @@ def pace_report(now: datetime | None = None, model: str | None = None) -> str:
     # 語意（halt 撞線訊息已在用），這裡只是把同一個家接到第二個出口。
     # 🔴 free 帶（`cap is None`）刻意不印：那一行逐字說「這道節流…」，而 free 帶沒有任何
     # 節流 ⇒ 印出來就是一句假話，而「訊息裡混一句假話比少一欄更難看見」是本 repo 的判例。
-    horizon = "" if decision.cap is None else throttle_horizon_line(decision, now)
+    # DEF-200-200 ③：`state.measured_at` 是分流兩義的參考時刻（見 `quota_pace.expiry_of`）
+    # ——`--pace` 是唯一同時握有它與 `now` 的出口，不帶就只能回「已過去、成因未定」。
+    horizon = ("" if decision.cap is None
+               else throttle_horizon_line(decision, now, state.measured_at))
     # R95：攤提行帶 converge 錨點（出聲不收緊時說出口）；hint 行空字串＝不印（見渲染端）。
     return (f"{pace_line(decision, live)}\n  {quota_policy.describe(decision)}\n"
             f"  {quota_pace.explain(decision.amort, policy.converge_pct)}\n"

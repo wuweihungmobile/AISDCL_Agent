@@ -24,6 +24,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
 import skip_group_policy as S  # noqa: E402
+import skip_profile_key as K  # noqa: E402  ← DEF-200-183：剖面鍵文法 SSOT
 
 #: tools/tests/ → tools/ → monorepo 根（同檔案家族 `test_negative_existence_claims_r82.py`
 #: 既有寫法）。P1-6 共同變更鎖的 `_origin_main_head_diff()` 用它定位 `git` cwd。round-label-ok
@@ -94,6 +95,18 @@ _FROZEN_CEILING_MAX: dict[str, dict[str, int]] = {
 }
 
 
+def _live_descendants(live: dict[str, dict[str, int]]) -> dict[str, list[str]]:
+    """live 鍵依 `skip_profile_key.legacy_profile()` 分群：舊鍵 → 對應它的 live 鍵清單。
+
+    🔴 DEF-200-183：re-key（每個鍵多帶一段 pgextras token）之後，凍結快照的鍵**不會**
+    再直接出現在 live 表裡。映回舊鍵才問得出「這個凍結值今天約束著哪幾個 live 剖面」。
+    """
+    groups: dict[str, list[str]] = {}
+    for key in live:
+        groups.setdefault(K.legacy_profile(key), []).append(key)
+    return groups
+
+
 def ceiling_max_direction_problems(
     live: dict[str, dict[str, int]] | None = None,
 ) -> list[str]:
@@ -101,19 +114,35 @@ def ceiling_max_direction_problems(
 
     只判**既有鍵**（凍結快照裡有的 profile／group）；新增的 profile 或 group 不受限制
     ——它們沒有凍結值可比，方向鎖管不到「首次登記給多少」，只管「登記過的能不能無聲調大」。
+
+    🔴 DEF-200-183 修的破洞（本輪實測）：原版寫成 `live.get(profile)`，取不到就
+    `continue`。而剖面軸的修法就是 re-key，re-key 會讓凍結快照裡**每一個**鍵都取不到
+    ⇒ 整張凍結表被跳過、本鎖回零違規＝一次改名把「天花板只准降」整片關掉，而表徵與
+    「本來就沒有違規」完全相同。兩處收斂：①比對面改成 `legacy_profile()` 映回舊鍵；
+    ②一個舊鍵裂成多個 live 鍵時，**每一個後代**都受同一個凍結值約束（裂鍵不得成為加大
+    額度的手段——DEF-200-183 的 162 支正是靠裂鍵才可能被寫成合法額度）；③凍結鍵在
+    live 表裡連一個後代都沒有時**出聲**，不再靜默 `continue`。
     """
     live = S._RUNTIME_SKIP_CEILING_MAX if live is None else live
+    descendants = _live_descendants(live)
     problems: list[str] = []
     for profile, groups in _FROZEN_CEILING_MAX.items():
-        live_groups = live.get(profile)
-        if live_groups is None:
-            continue  # profile 被整個移除不在本鎖射程（那是另一種變更，另案處理）
-        for group, frozen_val in groups.items():
-            live_val = live_groups.get(group)
-            if live_val is not None and live_val > frozen_val:
-                problems.append(
-                    f"_RUNTIME_SKIP_CEILING_MAX['{profile}']['{group}'] "
-                    f"= {live_val} > 凍結值 {frozen_val}（只准變小）")
+        live_keys = sorted(descendants.get(profile, []))
+        if not live_keys:
+            problems.append(
+                f"凍結鍵 `{profile}` 在 _RUNTIME_SKIP_CEILING_MAX 裡連一個後代都沒有"
+                "（比對面＝skip_profile_key.legacy_profile）——凍結快照的鍵一旦在 live 表"
+                "裡落空，這一列就退出射程而本鎖零違規，表徵與『本來就沒有違規』相同。"
+                "合法出口＝改鍵時連同本檔凍結快照一起改，不是讓它靜默落空")
+            continue
+        for live_key in live_keys:
+            for group, frozen_val in groups.items():
+                live_val = live[live_key].get(group)
+                if live_val is not None and live_val > frozen_val:
+                    via = "" if live_key == profile else f"（凍結鍵＝`{profile}`）"
+                    problems.append(
+                        f"_RUNTIME_SKIP_CEILING_MAX['{live_key}']['{group}'] "
+                        f"= {live_val} > 凍結值 {frozen_val}（只准變小）{via}")
     return problems
 
 
@@ -153,6 +182,62 @@ class TestCeilingMaxDirectionLock(unittest.TestCase):
         self.assertGreaterEqual(len(_FROZEN_CEILING_MAX), 4)
         total_cells = sum(len(g) for g in _FROZEN_CEILING_MAX.values())
         self.assertGreaterEqual(total_cells, 20)
+
+    def _rekeyed(self, *, pgextras: str = "pgext") -> dict[str, dict[str, int]]:
+        """把 live 表的 `AutoClaude/tests@…` 各鍵都補上 pgextras 軸（＝DEF-200-183 的
+        re-key 形態），其餘樹不動。"""
+        out: dict[str, dict[str, int]] = {}
+        for key, groups in copy.deepcopy(S._RUNTIME_SKIP_CEILING_MAX).items():
+            tree = K.profile_parts(key)[0]
+            out[f"{key}+{pgextras}" if tree == "AutoClaude/tests" else key] = groups
+        return out
+
+    def test_a_rekey_alone_is_not_a_way_out_of_the_frozen_snapshot(self) -> None:
+        """🔴 DEF-200-183 的核心紅向：re-key 之後把某格調大，方向鎖仍必須有牙。
+
+        原版判準 `live.get(profile)` 對 re-key 後的表**一個鍵都對不上** ⇒ 回零違規；
+        那正是「修剖面軸」這件事會親手關掉的那道鎖。
+        """
+        clean = self._rekeyed()
+        self.assertEqual(ceiling_max_direction_problems(clean), [],
+                         "純 re-key（值一格未動）不得被誤判成放寬")
+        target = next(k for k in clean if k.startswith("AutoClaude/tests@"))
+        group = next(iter(clean[target]))
+        clean[target][group] += 1
+        problems = ceiling_max_direction_problems(clean)
+        self.assertTrue(problems, "re-key 後調大竟未被判紅 ⇒ 一次改名就把本鎖整片關掉")
+        self.assertIn(target, problems[0])
+        self.assertIn("凍結鍵", problems[0], "訊息必須指出它是經舊鍵映射比出來的")
+
+    def test_splitting_one_key_binds_every_descendant_to_the_same_frozen_value(self) -> None:
+        """裂鍵不得成為加大額度的手段：`+nopg+nested` 裂成 `+pgext`／`+nopgext` 之後，
+        **兩個後代**都受同一個凍結值約束。
+
+        DEF-200-183 實測就是這個形狀——同一鍵在 pg extras ABSENT 時 `untagged=162`、
+        PRESENT 時 96；若只要求「其中一個後代」不超過凍結值 118，那 162 就能靠裂鍵被
+        寫成合法額度，而本鎖對它會是綠的。
+        """
+        live = copy.deepcopy(S._RUNTIME_SKIP_CEILING_MAX)
+        legacy = "AutoClaude/tests@win32+nopg+nested"
+        frozen_untagged = _FROZEN_CEILING_MAX[legacy][S.SKIP_GROUP_UNTAGGED]
+        cells = live.pop(legacy)
+        live[f"{legacy}+pgext"] = {**cells, S.SKIP_GROUP_UNTAGGED: 96}
+        live[f"{legacy}+nopgext"] = {**cells, S.SKIP_GROUP_UNTAGGED: 162}
+        problems = ceiling_max_direction_problems(live)
+        self.assertTrue(
+            any("+nopgext" in p and str(frozen_untagged) in p for p in problems),
+            f"ABSENT 那個後代（162 > 凍結 {frozen_untagged}）必須被點名：{problems}")
+        self.assertFalse(any("+pgext'" in p for p in problems),
+                         f"PRESENT 那個後代（96）合法，不得誤擋：{problems}")
+
+    def test_a_frozen_key_that_falls_through_is_said_out_loud(self) -> None:
+        """凍結鍵在 live 表裡連一個後代都沒有時必須出聲——原版靜默 `continue`，
+        於是「把鍵刪掉／改成映不回來的名字」是零阻力的繞道。"""
+        live = copy.deepcopy(S._RUNTIME_SKIP_CEILING_MAX)
+        dropped = next(iter(live))
+        del live[dropped]
+        problems = ceiling_max_direction_problems(live)
+        self.assertTrue(any(dropped in p and "落空" in p for p in problems), problems)
 
     def test_both_raised_together_is_still_caught(self) -> None:
         """立案情境本身：`_RUNTIME_SKIP_CEILING` 與 `_RUNTIME_SKIP_CEILING_MAX` 兩張表一起
@@ -502,6 +587,113 @@ class TestSkipLedgerCoChangeLock(unittest.TestCase):
         value_changed = _co_change_value_changed_map(_REPO_ROOT, base, touched)
         problems = skip_ledger_co_change_problems(changed, value_changed)
         self.assertEqual(problems, [], "\n".join(problems))
+
+
+# ── DEF-200-183：剖面鍵的**軸宣告**（`tools/lib/skip_profile_key.py`）─────────────
+class TestSkipProfileKeyAxes(unittest.TestCase):
+    """鍵少一軸時，天花板在比兩個母體的混合值。
+
+    本輪 Windows 真機實測（`AUTOCLAUDE_NO_PG_AUTODETECT=1`，同一棵樹、相隔數分鐘、
+    唯一變因是 pg extras 是否可 import）——兩份 census 逐字：
+      · extras PRESENT：`AutoClaude/tests@win32+nopg+nested 共 107 支：… untagged=96`
+        → `local_ci_gate.py --census-only` rc=**0**（綠，且離上限 118 還有 22 的空窗）
+      · extras ABSENT ：`AutoClaude/tests@win32+nopg+nested 共 172 支：… untagged=162`
+        → 同一支載具 rc=**1**（紅：總量 172 > 136、untagged 162 > 118）
+    同一鍵、兩個值、差 66 支 ⇒ 任填一值必然「一邊零鑑別力、另一邊恆假紅」。這與帳本
+    DEF-200-183 記載的 darwin 實測（96／162）同數，⇒ 缺陷在鍵的文法、不是某個平台的特例。
+    """
+
+    _AMBIGUOUS = "AutoClaude/tests@win32+nopg+nested"
+
+    def test_the_pgextras_axis_tells_the_two_measured_profiles_apart(self) -> None:
+        """新軸必須能把 PRESENT／ABSENT 兩個剖面分成兩個鍵，且兩者映回同一個舊鍵。"""
+        present = K.census_profile("AutoClaude/tests", "win32",
+                                   pg="nopg", nested="nested", pgextras="pgext")
+        absent = K.census_profile("AutoClaude/tests", "win32",
+                                  pg="nopg", nested="nested", pgextras="nopgext")
+        self.assertNotEqual(present, absent)
+        self.assertEqual(K.legacy_profile(present), self._AMBIGUOUS)
+        self.assertEqual(K.legacy_profile(absent), self._AMBIGUOUS)
+        self.assertEqual(K.profile_axis_problems(present), [])
+        self.assertEqual(K.profile_axis_problems(absent), [])
+
+    def test_a_key_without_the_pgextras_axis_is_named_ambiguous(self) -> None:
+        """今天生產者吐出來的那個鍵必須被點名（`local_ci_gate._skip_profile` 尚未帶軸）。"""
+        self.assertEqual(K.missing_axes(self._AMBIGUOUS), (K.AXIS_PGEXTRAS,))
+        problems = K.profile_axis_problems(self._AMBIGUOUS)
+        self.assertTrue(problems)
+        self.assertIn(K.AXIS_PGEXTRAS, problems[0])
+        # 零軸樹不得被誤擋（`tools/tests` 已實查無 pg／巢狀相依）
+        self.assertEqual(K.profile_axis_problems("tools/tests@win32"), [])
+        # 未宣告軸的樹回 None＝不可求值，且刻意不產生 advisory（合成剖面零串音）
+        self.assertIsNone(K.missing_axes("brand/new@profile"))
+        self.assertEqual(K.profile_axis_problems("brand/new@profile"), [])
+
+    def test_the_axis_verdict_stays_advisory_and_never_reaches_a_gate(self) -> None:
+        """掌舵者裁決「修好前維持 advisory 不登記、不擋 push」的機械形態：
+        軸判準只出現在 advisory 通道（`skip_target_report`／未登記那一支），
+        **不得**出現在會讓 rc 變 1 的 `skip_group_census_problems` 有牙向。"""
+        at_ceiling = dict(S._RUNTIME_SKIP_CEILING[self._AMBIGUOUS])
+        self.assertEqual(
+            S.skip_group_census_problems(self._AMBIGUOUS, at_ceiling), [],
+            "已登記剖面在上限值上必須零問題——軸 advisory 若滲進這一向就是當場擋 push")
+        self.assertTrue(
+            any(K.AXIS_PGEXTRAS in line
+                for line in S.skip_target_report(self._AMBIGUOUS, at_ceiling)),
+            "advisory 通道必須說話，否則這道判準沒有任何production 出口")
+        unregistered = S.skip_group_census_problems(
+            "AutoClaude/tests@linux+nopg+nested", at_ceiling)
+        self.assertTrue(any("未登記" in p for p in unregistered))
+        self.assertTrue(any(K.AXIS_PGEXTRAS in p for p in unregistered))
+
+    def test_the_builder_refuses_a_key_its_grammar_does_not_cover(self) -> None:
+        """鍵不得靠字串拼接：未宣告的樹／軸給少了／token 不合法都必須 fail-loud。"""
+        with self.assertRaises(ValueError):
+            K.census_profile("no/such/tree", "win32")
+        with self.assertRaises(ValueError):
+            K.census_profile("AutoClaude/tests", "win32", pg="pg", nested="nested")
+        with self.assertRaises(ValueError):
+            K.census_profile("AutoClaude/tests", "win32",
+                             pg="pg", nested="nested", pgextras="yes")
+        with self.assertRaises(ValueError):
+            K.census_profile("tools/tests", "win32", pg="pg")
+
+    def test_pgextras_tokens_may_not_collide_with_the_pg_axis(self) -> None:
+        """🔴 若 pgextras 的 token 沿用 `pg`／`nopg`，`missing_axes` 會把 `+nopg+nested`
+        誤讀成「pgextras 已帶上」⇒ 本判準對它要抓的那個缺陷恆綠。釘住兩軸 token 不相交。"""
+        self.assertFalse(
+            set(K.axis_tokens(K.AXIS_PG)) & set(K.axis_tokens(K.AXIS_PGEXTRAS)))
+        self.assertTrue(K.axis_tokens(K.AXIS_PGEXTRAS))
+
+    def test_no_new_ambiguous_key_may_join_the_tables(self) -> None:
+        """re-key 完成度棘輪：缺軸的鍵只准變少，新增一個當場紅（見
+        `skip_profile_key.PRE_AXIS_KEY_DEBT_MAX` 的 WHY）。"""
+        tables = (S._RUNTIME_SKIP_CEILING, S._RUNTIME_SKIP_CEILING_MAX,
+                  S._FULL_SUITE_RUNNERS, S._COMPLEMENTARY_PROFILE)
+        debt = K.keys_missing_axes(*tables)
+        self.assertLessEqual(
+            len(debt), K.PRE_AXIS_KEY_DEBT_MAX,
+            f"缺軸的鍵變多了（{debt}）——DEF-200-183 未修完期間不得再長出新的歧義鍵；"
+            "re-key 之後請把 PRE_AXIS_KEY_DEBT_MAX 一起下修")
+        self.assertTrue(debt, "棘輪若已歸零，請把常數降到 0 並移除本前提斷言")
+        self.assertEqual(
+            K.keys_missing_axes({"tools/tests@win32": 1, "brand/new@x": 1}), [],
+            "零軸樹與未宣告軸的樹不得被算成欠債（否則棘輪會被雜訊填滿）")
+
+    def test_the_root_tree_producer_now_goes_through_the_grammar(self) -> None:
+        """根層生產者已改為消費文法 SSOT，且鍵字面零變更（re-key 不得偷偷發生）。
+
+        鑑別力來自第二段：把 `tools/tests` 的軸宣告改成「需要一軸」之後，生產者必須
+        當場 `ValueError`。只斷言字面值的版本對「改回字串拼接」恆綠（那條路吐同一個字串）。
+        """
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        import run_root_unittests  # noqa: PLC0415
+        self.assertEqual(run_root_unittests.skip_census_profile(),
+                         f"tools/tests@{sys.platform}")
+        with mock.patch.dict(K._TREE_REQUIRED_AXES,
+                             {"tools/tests": (K.AXIS_PG,)}, clear=False), \
+                self.assertRaises(ValueError):
+            run_root_unittests.skip_census_profile()
 
 
 if __name__ == "__main__":

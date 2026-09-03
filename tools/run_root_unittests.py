@@ -130,6 +130,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import failure_log_rotation  # noqa: E402  ← DEF-200-162：失敗明細檔名／輪替 SSOT
 import min_tests_margin  # noqa: E402  ← DEF-200-170：MIN_TESTS 重釘提醒的判準（零相依餘裕軸）
 import skip_group_policy  # noqa: E402  ← R80 包 A（S3-04）：skip 分群天花板的政策 SSOT
+import skip_profile_key  # noqa: E402  ← DEF-200-183：剖面鍵的文法（軸宣告）SSOT
 import skip_runtime_report  # noqa: E402  ← M6 的 id 集合面（計數面答不了「有沒有跑過」）
 
 _PATTERN = "test_*.py"
@@ -304,8 +305,10 @@ def report_execution_gap(collected: int, result: unittest.TestResult) -> int:
 def skip_census_profile() -> str:
     """本棵樹的剖面鍵。刻意**不**帶 `AutoClaude/tests` 那邊的 `+nested` 維度：
     當回合以 Grep 對 `tools/tests` 全樹搜 `CLAUDECODE` 命中 0 ⇒ 這棵樹的 skip 集合
-    不隨「是否巢狀 Claude Code session」改變（誠實劃界，不是漏寫）。"""
-    return f"tools/tests@{sys.platform}"
+    不隨「是否巢狀 Claude Code session」改變（誠實劃界，不是漏寫）。
+    🔴 DEF-200-183：鍵改由文法 SSOT `skip_profile_key` 產生，本樹的「零能力軸」因此是
+    那張表裡的一筆**宣告**，不再只是這裡的一句註解（註解不會因為情況變了而轉紅）。"""
+    return skip_profile_key.census_profile("tools/tests", sys.platform)
 
 
 def report_skip_census(result: unittest.TestResult, start_dir: Path | None = None) -> int:

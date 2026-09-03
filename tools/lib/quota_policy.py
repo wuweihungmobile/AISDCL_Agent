@@ -146,7 +146,11 @@ KNOWN_KINDS = FALLBACK_KINDS | frozenset({"session", "five_hour", "5h", "seven_d
 #: 逐軸解析的失效字面。`missing`（欄位缺席＝**正常**，實測 weekly_scoped／spend 都是）
 #: 與 `bad-horizon`（有字串但解不出 aware＝**伺服器格式變了**）必須分得開——今天兩者
 #: 共用一個 `None`，於是格式變更是靜默的。
-NOTE_OK, NOTE_MISSING, NOTE_BAD, NOTE_SKEW = "", "missing", "bad-horizon", "clock-skew"
+#: 🔴 DEF-200-200：字面**一律轉引** `quota_pace` 的述詞常數（那裡是唯一的家）。本行寫死
+#: 第二份字面就會讓「已過期」在兩個模組裡漂開，而漂開的那一天不會有任何東西轉紅。
+NOTE_OK, NOTE_MISSING, NOTE_BAD = W.EXPIRY_FUTURE, W.EXPIRY_MISSING, W.EXPIRY_BAD
+#: `clock-skew`（鐘不一致）與 `elapsed`（視窗翻頁）是**兩個不同的回答**，見 `expiry_of`。
+NOTE_SKEW, NOTE_ELAPSED = W.EXPIRY_SKEW, W.EXPIRY_ELAPSED
 #: 水位本身不是量測值（NaN／±inf／非數字／越界）。與上面三個同樣不得靜默。
 #: `unknown-kind`＝伺服器吐出一個本 repo 從未列舉過的 kind（見 `KNOWN_KINDS`）。它與上面
 #: 幾個同族：**都只描述取數面發生了什麼，一個都不參與分類**。多重情形以 `+` 串接。
@@ -299,30 +303,21 @@ class Decision:
 
 
 # ── 時間：只把伺服器給的瞬時字串轉成「現在還剩幾分鐘」，不持久化任何時長 ──────────
-# 解析 ISO-8601；**naive 一律視為解不出**（不可與 aware 相減）。
-def _parse_aware(text: str) -> datetime | None:
-    try:
-        parsed = datetime.fromisoformat(text.strip().replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    return parsed if parsed.tzinfo is not None else None
-
-
+# ISO-8601 的解析（**naive 一律視為解不出**，不可與 aware 相減）住 `quota_pace._iso_key`：
+# DEF-200-200 把述詞收成一個家之後，本檔原本那份 `_parse_aware` 就成了同一件事的第二個
+# 家且零呼叫端 ⇒ 一併刪除（留著才是缺陷，不是保險）。
 # 🔴 為何 `_delta_minutes` 不在這裡把負值夾成 0：夾完之後 `horizon_band` 的負值分支
 # 就再也到不了（＝死碼），而「時鐘偏移不得加速」那條方向鎖只剩 `axes_of` 裡的一個
 # if——同一份知識兩個家、只有一個家被釘住。負號一路帶到 `horizon_band`，那道防線才是
 # **活的**（拿掉它，偏移就會落進 near）。對外的 `minutes_to_reset()` 仍照規格回 0.0。
-def _delta_minutes(resets_at: str | None, now: datetime) -> tuple[float | None, str]:
-    """`(帶號分鐘, note)`。缺席與解不出**分開**；負值原樣回並標 `clock-skew`。"""
-    if now.tzinfo is None:
-        raise ValueError("now 必須是 aware datetime（naive 相減跨 DST 會靜默差一小時）")
-    if resets_at is None or not str(resets_at).strip():
-        return None, NOTE_MISSING
-    when = _parse_aware(str(resets_at))
-    if when is None:
-        return None, NOTE_BAD
-    minutes = (when - now).total_seconds() / 60.0
-    return minutes, (NOTE_SKEW if minutes < 0 else NOTE_OK)
+# 🔴 DEF-200-200 ②：本函式此前把**任何**負值標 `clock-skew`（而本機時鐘實測無偏移）⇒
+# 讀訊息的人被指向一個沒壞的子系統。述詞本體已搬到 `quota_pace.expiry_of()`（四層共用
+# 的唯一的家），它按 `measured_at` 這個參考時刻把「視窗翻頁」與「鐘不一致」分成兩個
+# **不同**的回答；本函式只保留自己的簽章與 note 字面對映，不再自己判一次。
+def _delta_minutes(resets_at: str | None, now: datetime,
+                   measured_at: object = None) -> tuple[float | None, str]:
+    """`(帶號分鐘, note)`。缺席／解不出／翻頁／鐘偏移**四者分開**；負值原樣回。"""
+    return W.expiry_of(resets_at, now, measured_at)
 
 
 # 🔴 R86：`quota_pace.resolve()`／`amort_for()` 的輸入形狀只有一個家。`pct_note` 由本檔
@@ -512,7 +507,8 @@ def axes_of(state: QuotaState, now: datetime, p: Policy,
             ratio: float | None = None, ratio_note: str = "") -> tuple[AxisReading, ...]:
     """逐軸解析的**唯一正規路徑**：`minutes` 只能從 `axis.resets_at` 導出。"""
     resolved = W.resolve(  # 🔴 帶號分鐘進去：負值的 mid 強制在 `horizon()`，不在這裡
-        _rows(state), tuple(_delta_minutes(a.resets_at, now) for a in state.axes),
+        _rows(state), tuple(_delta_minutes(a.resets_at, now, state.measured_at)
+                            for a in state.axes),
         ratio, ratio_note, p.accel_window_minutes, p.far_horizon_minutes, p.halt_pct,
         p.pace_ceiling, p.converge_pct)
     readings = []
@@ -688,8 +684,9 @@ def decide(state: QuotaState, now: datetime, p: Policy,
         # 🔴 餵**帶號**分鐘（不是 `minutes_to_reset` 那個夾 0 的版本）：時鐘偏移的軸必須
         # 被攤提整個排除。夾 0 之後長窗軸會變成「窗數 1、配額＝全部剩餘」＝**放寬**，
         # 而放寬是本案唯一不准無證據發生的方向（同 `horizon_band` 負值分支的判詞）。
-        amort=W.amort_for(_rows(state), tuple(_delta_minutes(a.resets_at, now)
-                                              for a in state.axes), ratio, ratio_note),
+        amort=W.amort_for(_rows(state),
+                          tuple(_delta_minutes(a.resets_at, now, state.measured_at)
+                                for a in state.axes), ratio, ratio_note),
         model_hint=hint)
 
 
