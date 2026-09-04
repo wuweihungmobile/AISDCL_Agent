@@ -68,6 +68,10 @@
    判準），改用真搬遷達標；是否要讓該測試也吃分軌屬設計裁決，記於此不當場展開。
 8. **`test_doc_loc_baseline_freshness_r60.py` 的沿革散文本輪已搬十四段**（−165），上方第 3 點的候選清單
    應改讀為 `test_platform_neutral_paths.py`／`test_check_defect_log_crossref.py`。
+9. **「原文逐字保全」會把舊狀態欄的前瞻輪號句型帶進 tracked 證據檔**：`check_handoff_carriers.py` 的
+   載體 glob 只掃 tracked 檔，commit 前（untracked）rc=0、pre-push 才抓到 `CrossPlatform_R127_Debt_Closure.md`
+   兩行「承接輪次：R101」無承接載體 ⇒ 第一次 push 被擋。處置＝狀態欄原文改為敘述（現象欄仍逐字保全）；
+   下輪保全舊列時先把狀態欄的承接句型改寫，並在 commit 後、push 前再跑一次 `check_handoff_carriers.py`。
 
 ---
 

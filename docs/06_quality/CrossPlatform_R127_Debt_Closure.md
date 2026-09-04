@@ -29,7 +29,7 @@
 「修實作」或「修憲」**：① `STATE_RETAIN_VERSIONS`（PRD §8-4 無前綴／值 5 vs `file_state_repository.py:37-38`
 帶 `AUTOCLAUDE_`／值 2）；② `CONFLICT_POLICY`（PRD 三值 vs `boot_self_check.py:36` 兩值，互有對方沒有的值）；
 ③ 該兩鍵與 `DIRTY_SAVE_RETRIES` **零 env 讀取路徑** ⇒ 改設定不生效；④ §4.1.5 F5／§5／§7／§9 見§D-11」；
-狀態欄原文：「open（承接輪次：**R101**）：①②③ 已複驗」。
+狀態欄原文為 open、載明承接輪號一〇一並註「①②③ 已複驗」（本檔依體例不逐字重現前瞻輪號句型）。
 
 **裁決鏈**：掌舵者 2026-09-02 採 R121 呈報單方向 A（③②修實作、①修憲、預設值 2 vs 5 留四方定案、
 ④ 留待下一結案窗口複驗）。R121 裁決卡指向的「`CrossPlatform_R121_Debt_Closure.md §DEF-200-206`」
@@ -94,7 +94,8 @@ Architect non-blocking「測試檔無讀 PRD 文字的比對」與現況不符�
 `tests/test_gap039_049.py:27` 於 module 層 import ⇒ 漏 `git add` 時 CI 收集期 ImportError，實測波及 **83 支**
 （57+26，非僅 fixture 那 11 支），本機恆綠。既有 `TestR81GhostPathClaims` 只在檔真的不在時才說話（問磁碟＋
 gitignore，不問 `git ls-files`），射程亦不含 import」；分流去向原文：「判準＝「解析得到、但標的既非 tracked
-亦非 gitignored」；材料 `repo_known_paths()` 已在同模組內」；狀態欄原文：「open（承接輪次：**R95**） 承接R101」。
+亦非 gitignored」；材料 `repo_known_paths()` 已在同模組內」；狀態欄原文為 open、先後載明承接輪號九五與一〇一
+（本檔依體例不逐字重現前瞻輪號句型）。
 
 **落地**（`tools/tests/test_doc_loc_baseline_freshness_r60.py`，不新增鎖檔）：
 - `python_import_targets(source, rel)`：AST 解析 `import a.b`／`from a.b import c`（含相對 import），候選＝
