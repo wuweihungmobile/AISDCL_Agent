@@ -432,6 +432,13 @@ _GOVERNANCE_DOCS = (
     # 上列的護欄層淨額標記姊妹檔（`guard-total:` 站點之一），與同輪 `R127_HANDOFF.md` round-label-ok
     # 共同滿足「兩份不同檔」的最低站數；回歸鎖軌對帳、途中發現與 U9 勘查座標亦住此。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R127_Scan_Findings.md",
+    # R128 落地輪結案存證（round-label-ok）：呈報單七項的落款取證、兩筆「裁決前提經現查
+    # 不成立」的逐節證據、與接線缺陷的紅綠自證唯一居所在本檔（⇒ 體積守門），帳本各列以
+    # `§DEF-ID` 座標宣稱指向本檔（⇒ 指針稽核）。同 R121～R127 姊妹檔判例。 round-label-ok
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R128_Debt_Closure.md",
+    # 上列的護欄層淨額標記姊妹檔（`guard-total:` 站點之一），與同輪 `R128_HANDOFF.md` round-label-ok
+    # 共同滿足「兩份不同檔」的最低站數；本輪零重釘的理由與途中發現亦住此。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R128_Scan_Findings.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/{CrossPlatform,Quota}_*.md`。這**不是**把具名

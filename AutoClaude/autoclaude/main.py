@@ -38,6 +38,7 @@ from .infra.adapters.pty_executor import PtyExecutor
 from .infra.adapters.shell_evaluator import ShellEvaluator
 from .infra.repositories import build_state_repository
 from .infra.repositories.factory import canonical_playbook_id
+from .infra.repositories.file_state_repository import STATE_RETAIN_VERSIONS
 from .perception.hotkey_handler import HotkeyHandler
 from .utils.config import load_config
 from .utils.logger import setup_logger
@@ -122,16 +123,29 @@ def run_boot_self_check(cfg, *, state_repo, playbook_path: str, quota_meter,
     # 🔴 空間檢查的量測面是 `checkpoint_dir` 所在的檔案系統（patch／state.json 都寫在那），
     #    預估量的是**工作樹**（R-6.2-3 ②：各 worktree `git diff HEAD --binary` 的位元組數）。
     #    兩者刻意是不同的路徑，寫成同一個就量錯磁碟。
+    playbook_id = canonical_playbook_id(playbook_path, mode=cfg.storage.mode)
+    # DEF-200-264：R-6.2-3 ② 的「state.json ×（1＋保留份數）」此前**從未計入**——呼叫端
+    # 沒傳這兩個參數，於是 `STATE_RETAIN_VERSIONS` 的出廠值改動對預估零效果。
+    # 🔴 用鴨子型別探測、不加進 `StateRepositoryPort` 契約。哪些後端回 0 是**正確值**：
+    #    `db_only`（純 PG）與 InMemory 不在本機磁碟留 state 檔，回 0 正確；`state_repo=None`
+    #    （測試組裝）同理。而 `yaml_only` 與 `both` **都會**留——`both` 的主端就是
+    #    `FileStateRepository`，所以 `DualStateRepository` 必須把這個方法轉發下去，
+    #    否則探測拿不到方法就靜默退回 0（`DEF-200-264` 的同一個病灶換一層再犯；本輪
+    #    Architect 鏡實查發現並補上轉發）。
+    read_state_bytes = getattr(state_repo, "state_bytes", None)
+    state_bytes = read_state_bytes(playbook_id) if read_state_bytes is not None else 0
     report = boot_self_check(
         repo=state_repo,
-        playbook_id=canonical_playbook_id(playbook_path, mode=cfg.storage.mode),
+        playbook_id=playbook_id,
         # DEF-200-206 ③：PRD §6 的 CONFLICT_POLICY 從 env 讀（非法值由不變式 11 報紅）。
         conflict_policy=conflict_policy_from_env(),
         band=band,
         cli_command=cfg.claude.command,
         cli_runner=lambda _argv: (0, version) if version else (127, ""),
         space_target=cfg.checkpoint_dir,
-        estimate_bytes=estimate_freeze_bytes([Path.cwd()]),
+        estimate_bytes=estimate_freeze_bytes(
+            [Path.cwd()], state_bytes=state_bytes,
+            retain_versions=STATE_RETAIN_VERSIONS),
         cleanup=lambda: cleanup_merged_worktrees(Path.cwd(), dry_run=dry_run),
         notifier=lambda msg: notify(
             "AutoClaude — 開機自檢", msg, enabled=cfg.notification.enabled),

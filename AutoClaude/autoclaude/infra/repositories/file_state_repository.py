@@ -160,6 +160,19 @@ class FileStateRepository:
         # 與 rtm_file_sink.py / translation_learning_sink.py / pty_executor.py 同一先例。
         return self._dir / f"{_sanitize_log_filename(playbook_id)}{_SUFFIX}"
 
+    def state_bytes(self, playbook_id: str) -> int:
+        """現存 state 檔的位元組數（檔不存在＝0）。供 PRD R-6.2-3 ② 的空間預估用。
+
+        🔴 刻意是**公開方法**而不是讓呼叫端自己拼路徑：檔名經 `_sanitize_log_filename`
+        正規化過（見 `_path`），把那段規則複製到呼叫端，下一次改規則就會靜默漂移到
+        「量了一個不存在的檔」＝恆回 0 的假預估。`DEF-200-264`。
+        """
+        p = self._path(playbook_id)
+        try:
+            return p.stat().st_size
+        except OSError:      # 不存在／無權限：預估用途下 0 是安全值（不是靜默降級）
+            return 0
+
     def save_checkpoint(self, playbook_id: str, checkpoint: PlaybookCheckpoint) -> None:
         """符合 StateRepositoryPort 契約：回傳 None。"""
         try:

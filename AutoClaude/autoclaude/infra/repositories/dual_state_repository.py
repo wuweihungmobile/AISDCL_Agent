@@ -132,6 +132,17 @@ class DualStateRepository:
         self.metrics = DualMetrics()
 
     # ──────────────────────────────────────────────
+    def state_bytes(self, playbook_id: str) -> int:
+        """轉發給 File 主端：`both` 模式**真的**在本機磁碟留 state.json。
+
+        🔴 本類別逐一手寫委派、沒有 `__getattr__` 萬用轉發 ⇒ 主端新增的公開方法**不會**
+        自動出現在這裡。漏轉發的失效形態是靜默的：呼叫端的鴨子型別探測拿不到方法就退回
+        0，於是 `both` 模式的空間預估恆少算一份 state.json ×（1＋保留份數）——那正是
+        `DEF-200-264` 立案要修的病灶，只是換到這一層再犯一次（本輪 Architect 鏡實查發現）。
+        """
+        getter = getattr(self._primary, "state_bytes", None)
+        return getter(playbook_id) if getter is not None else 0
+
     def save_checkpoint(self, playbook_id: str, checkpoint: PlaybookCheckpoint) -> None:
         if self._dual_write_mode == "pg_first":
             self._save_pg_first(playbook_id, checkpoint)

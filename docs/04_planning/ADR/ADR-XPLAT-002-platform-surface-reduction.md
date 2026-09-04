@@ -326,7 +326,7 @@ REAL_RC=0      openjdk version "21.0.10" 2026-01-20
 | 主判準 `GFC` | ❌ **已由三鏡一致攻破（定義錯 + 對 `_*.py` 全盲），不採用** | §2.7 |
 | S2（`TOTAL_INCREASE_LIMIT=1.20` 的 tools/ LOC 預算） | ⚠️ **方向採用、參數與範圍全部否決**，降為 R61 設計項（§5 Phase 2-E） | 我實測 `tools/**/*.py` = 74 檔／**32,708** 行 ⇒ cap = 39,249 ⇒ **免費餘裕 6,541 行**；對照 §1.1 十分鐘 298 行的成長速率，這道「讓多寫一支鎖有代價」的閘門要好幾輪才第一次咬到人。治理契合鏡另實測 `AutoClaude/tests` = 279 檔／57,351 行同樣零預算 ⇒ 「tools/tests 是唯一沒有 LOC 預算的層」為假 |
 | S5／S6（LATEST 解析樣板 10 份 → 1、frozen 正則 5 份 → 1） | **採用方向，排到 Phase 2**（§5 Phase 2-C/2-D） | 三鏡皆複驗重複為真（`grep -rln '"sdd_version.py"' tools/tests/*.py` → 10）；但必須等並行包停工（改 12 支 `tools/tests/*.py`，共用 `__pycache__` 已知互踩三次） |
-| S1 的 894 測試數基線 | ❌ 錯值，不採用 | `tools/run_root_unittests.py:48` 實查 `MIN_TESTS = 845`；兩鏡各自實跑 discover 得 **916** 與 **901**（一鏡另遇 rc=1／14 errors，根因是並行包 `archive_defect_log` 缺 `_CELL_SPLIT_RE` 的半套接線）。三個數字互不相同 ⇒ 見 §6 邊界 8 與 §8 交棒。🔴 **R66 訂正**：本列與 §6 邊界 8 記載的「三值不一致」問題**已於 R60/R61 一般日常維護中解決**（詳見 §8 交棒表第 6 列），本列數字（845/916/901）僅為 R60 當下的史料快照，逐字保留不改，現況請一律以 `tools/run_root_unittests.py:48` 現查 `MIN_TESTS` 為準，勿沿用本行寫死數字 |
+| S1 的 894 測試數基線 | ❌ 錯值，不採用 | `tools/run_root_unittests.py:48` 實查 `MIN_TESTS = 845`；兩鏡各自實跑 discover 得 **916** 與 **901**（一鏡另遇 rc=1／14 errors，根因是並行包 `archive_defect_log` 缺 `_CELL_SPLIT_RE` 的半套接線）。三個數字互不相同 ⇒ 見 §6 邊界 8 與 §8 交棒。🔴 **R66 訂正**：本列與 §6 邊界 8 記載的「三值不一致」問題**已於 R60/R61 一般日常維護中解決**（詳見 §8 交棒表第 6 列），本列數字（845/916/901）僅為 R60 當下的史料快照，逐字保留不改，現況請一律以 `tools/run_root_unittests.py` 的 `MIN_TESTS` 現查為準（符號名錨；行號會漂移，`DEF-200-259` 落地時把本列這句祈使指示的行號錨換掉，同列前半「實查」字樣屬 R60 史料，逐字保留），勿沿用本行寫死數字 |
 
 #### 為何不選 B
 
@@ -1162,12 +1162,17 @@ python -m pytest tools/tests/test_dev_start.py -k CrossSiteBehavioralEquivalence
    根因是並行包 `archive_defect_log` 缺 `_CELL_SPLIT_RE` 的半套接線）。
    **我刻意未重跑全套**（與並行包共用 `tools/tests/` 與 `__pycache__`，已重演三次互踩假紅）。
    ⇒ 任何以測試數為「等價證明」的 gate_proof，**必須在並行包停工後於乾淨樹重取基線**
-   （`run_root_unittests.py:48` 的註解本身就明文規定了這個取值程序）。
+   （`run_root_unittests.py` 的 `MIN_TESTS` 註解本身就明文規定了這個取值程序）。
    🔴 **R66 訂正**：上述「三個互不相同的值」是 R60 當下的史料快照，**已於 R60/R61 一般日常維護中解決**
    （詳見 §8 交棒表第 6 列：`MIN_TESTS` 已重釘為 **1069**，`ONBOARDING.md` §7 同步，R63 複驗三值一致、
    `tools/sync_onboarding_baselines.py --check` rc=0）。本條逐字保留不改寫（保留「GLC 在並行寫入下無法
    跨時點比較」這個結構性判準本身仍成立，只是舉例用的三個數字已過期）；測試數基線現況**只剩單一權威值**，
-   一律以 `tools/run_root_unittests.py:48` 現查為準，勿沿用本條所引任何數字。
+   一律以 `tools/run_root_unittests.py` 的 `MIN_TESTS` 現查為準，勿沿用本條所引任何數字。
+   🔴 **`DEF-200-259` 落地訂正（座標錨換符號錨）**：本條這句**祈使指示**原以行號為錨，而該行號
+   已隨後續編修漂移到別的內容上 ⇒ 照著查會查到不相干的東西。同條上方那句「我實查」是 R60
+   當下的史料，行號逐字保留不改；此處改的是**仍在生效的指路牌**，兩者不同軸。依據＝
+   `PRD_Amendment_R108_Pacing.md`〔現查碼〕欄與 `PRD_Amendment_R108_BurnDown_Addendum.md`
+   同欄逐字要求「行號會漂移，錨是函式名／節號」。
 9. ❌ **Copy-on-Evolve 1/30。** `run_tlc`／`init_project`／`run_self_evolution`／`install_post_commit`
    都在版本目錄下，收斂只覆蓋 LATEST；v0.01~v0.29 各留一份不回改（除非走 `ADR-XPLAT-001` §4 的破例流程）。
    R45 的 `component_sanitizer.py` 手法只適用**同語言同 runtime**，對跨語言的 `.sh`/`.ps1` 對子不適用。

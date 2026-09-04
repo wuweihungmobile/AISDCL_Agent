@@ -476,6 +476,86 @@ class TestDryRunDoesNotWriteWorktrees:
         assert reads == ["claude"], f"CLI 版本被讀了 {len(reads)} 次：{reads}"
 
 
+class TestDef200264StateBytesReachTheSpaceEstimate:
+    """R-6.2-3 ② 的「state.json ×（1＋保留份數）」必須真的進到空間預估。
+
+    立案時的失效形態不是崩潰，是**靜默低估**：呼叫端沒傳這兩個參數，
+    `estimate_freeze_bytes` 的預設值讓那一項恆為 0 ⇒ `STATE_RETAIN_VERSIONS`
+    怎麼調都不影響預估，一台快滿的磁碟會先通過自檢、再在凍結那一刻寫不下去。
+    拔掉 `main.run_boot_self_check` 的那兩個 kwarg 即轉紅。`DEF-200-264`。
+    """
+
+    @staticmethod
+    def _spy(monkeypatch, seen: dict) -> None:
+        monkeypatch.setattr(main_mod, "read_cli_version", lambda *a, **k: "2.1.233")
+        monkeypatch.setattr(main_mod, "estimate_freeze_bytes",
+                            lambda *a, **kw: seen.update(kw) or 0)
+        monkeypatch.setattr(main_mod, "boot_self_check", lambda **kw: BootReport())
+
+    def test_the_estimate_receives_the_state_size_and_the_retain_count(
+            self, tmp_path, monkeypatch):
+        seen: dict = {}
+        self._spy(monkeypatch, seen)
+
+        class _Repo:
+            def state_bytes(self, playbook_id: str) -> int:
+                seen["asked_id"] = playbook_id
+                return 4096
+
+        cfg = AppConfig(checkpoint_dir=str(tmp_path / "ckpt"))
+        main_mod.run_boot_self_check(
+            cfg, state_repo=_Repo(), playbook_path=str(tmp_path / "pb.yaml"),
+            quota_meter=None, logger=logging.getLogger("test"))
+        assert seen.get("state_bytes") == 4096, (
+            f"state 檔大小沒進到預估（收到 {seen.get('state_bytes')!r}）"
+            " ⇒ R-6.2-3 ② 那一項恆為 0")
+        assert seen.get("retain_versions") == main_mod.STATE_RETAIN_VERSIONS, (
+            "保留份數沒進到預估 ⇒ STATE_RETAIN_VERSIONS 的出廠值對預估零效果")
+        assert seen.get("asked_id"), "沒有拿 canonical playbook_id 去問 repo"
+
+    def test_a_backend_without_state_files_is_zero_not_a_crash(
+            self, tmp_path, monkeypatch):
+        """PG／InMemory 後端不留本機 state 檔 ⇒ 0 是正確值，不是降級、也不該爆。"""
+        seen: dict = {}
+        self._spy(monkeypatch, seen)
+        cfg = AppConfig(checkpoint_dir=str(tmp_path / "ckpt"))
+        rc = main_mod.run_boot_self_check(
+            cfg, state_repo=None, playbook_path=str(tmp_path / "pb.yaml"),
+            quota_meter=None, logger=logging.getLogger("test"))
+        assert rc == 0 and seen.get("state_bytes") == 0
+
+    def test_the_file_backend_measures_the_real_file_and_zero_when_absent(self, tmp_path):
+        """量的必須是 `_path()` 正規化後的那個檔——呼叫端自己拼路徑就會恆回 0。"""
+        from autoclaude.infra.repositories.file_state_repository import (
+            FileStateRepository,
+        )
+        repo = FileStateRepository(checkpoint_dir=str(tmp_path))
+        assert repo.state_bytes("nope") == 0, "檔不存在時要回 0，不是丟例外"
+        # 刻意經 `_path()` 落檔：正是要證明公開方法與私有路徑規則同源。
+        repo._path("pb").write_bytes(b"x" * 123)
+        assert repo.state_bytes("pb") == 123
+
+    def test_the_dual_backend_forwards_to_its_file_primary(self, tmp_path):
+        """`both` 模式的主端就是 File backend ⇒ 漏轉發會讓那一份靜默不計。
+
+        本支由本輪 Architect 鏡實查補上：原本三支只用自製 stub 與 `state_repo=None`
+        兩種情境，對「一個**真的** backend 漏了這個方法」零射程——而
+        `DualStateRepository` 逐一手寫委派、沒有 `__getattr__`，正是會漏的那一種。
+        """
+        from autoclaude.infra.repositories.dual_state_repository import (
+            DualStateRepository,
+        )
+        from autoclaude.infra.repositories.file_state_repository import (
+            FileStateRepository,
+        )
+        primary = FileStateRepository(checkpoint_dir=str(tmp_path))
+        dual = DualStateRepository(primary=primary, shadow=None)
+        assert dual.state_bytes("pb") == 0, "檔不存在時 `both` 也要回 0"
+        primary._path("pb").write_bytes(b"y" * 77)
+        assert dual.state_bytes("pb") == 77, (
+            "`both` 模式漏轉發 state_bytes ⇒ 主端磁碟上真的有 state.json 卻被算成 0")
+
+
 @pytest.mark.parametrize("status,expect_safe", [(SAVED, True), (CLEAN, True),
                                                 (DIRTY_UNSAVED, False)])
 def test_freeze_gate_truth_table(status: str, expect_safe: bool):
