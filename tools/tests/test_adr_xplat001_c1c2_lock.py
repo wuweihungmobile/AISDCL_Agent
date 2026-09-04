@@ -682,7 +682,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 7278,
+    "test_adr_xplat001_c1c2_lock.py": 7298,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 3839,
@@ -700,12 +700,12 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_check_wrapper_thinness.py": 1234,
     "test_claim_provenance_r86.py": 618,
     "test_component_sanitizer_shared_layer_lock.py": 293,
-    "test_context_budget_guard.py": 9902,
+    "test_context_budget_guard.py": 9860,
     "test_defect_id_reference_integrity.py": 281,
     "test_dev_start.py": 6527,
     "test_dev_start_ps1_lastexitcode.py": 548,
     "test_doc_env_prefix_platform_parity_r60.py": 340,
-    "test_doc_loc_baseline_freshness_r60.py": 7131,
+    "test_doc_loc_baseline_freshness_r60.py": 7125,
     "test_extras_quoting_zsh_safety.py": 365,
     "test_failure_log_rotation.py": 80,
     "test_find_git_bash_parity.py": 1264,
@@ -730,7 +730,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_ps51_compat.py": 610,
     "test_ps_engine_ssot.py": 954,
     "test_python_c_percent_shim.py": 119,
-    "test_quota_policy.py": 3406,
+    "test_quota_policy.py": 3396,
     "test_root_infra_parity.py": 441,
     "test_run_root_unittests.py": 2428,
     "test_sanitize_component_frozen_sdd_versions_lock.py": 340,
@@ -1468,6 +1468,14 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "基線一筆）。款(11)：R123 為連續上升第 1 輪、R124／R125 淨額 0 未記列，本輪為第 2 輪 ⇒ "
      "下一輪淨額必須 ≤ 0（交棒書已明寫）。同輪兌現到期義務 (126, 555) 並重新武裝 128／552。"
      "逐項見 CrossPlatform_R126_Debt_Closure.md。"),
+    ("R127", 92306, 92268, -38,
+     "[淨減法] 落地輪：DEF-200-133 未追蹤 import 判準落地（test_doc_loc_baseline_freshness_r60.py "
+     "新增回歸鎖，全額申報於 _REGRESSION_LANE_LOG 同輪列）；同輪散文搬遷抵銷把主表壓到負值——"
+     "test_doc_loc_baseline_freshness_r60.py 7131→7125（同檔沿革散文搬出量大於回歸鎖新增）／"
+     "test_context_budget_guard.py 9902→9860（含 DEF-200-260 的 mkdtemp helper 把既有 addCleanup "
+     "行併入）／test_quota_policy.py 3406→3396；保全＝CrossPlatform_R127_Guard_Prose_Migration.md。"
+     "本檔自身重釘與 U9 到期輪具名展延（7278→7298）。主表淨額 ≤ 0 ⇒ 款(11) 連續上升 streak"
+     "（R123／R126）歸零；款(10) 上限 555 未撞。逐項見 CrossPlatform_R127_Debt_Closure.md。"),
 )
 
 
@@ -1590,6 +1598,11 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "test_every_exemption_reason_meets_the_minimum_length（7 行，同一守欄機制"
      "另一半不變式），合計 16 行歸本軌（記帳誠實度分類，非必要湊額——本輪史料"
      "搬遷後主表淨額已是 -6，raw 本身即 ≤0）。"),
+    ("R127", 159, "DEF-200-133 結案的回歸鎖：test_doc_loc_baseline_freshness_r60.py 新增的 "
+     "python_import_targets／collect_import_claims／files_on_disk／untracked_import_problems "
+     "純函式群＋TestDef200133TrackedImportsDoNotPointAtUntrackedFiles（含合成注入紅綠與真倉庫綠），"
+     "新增行數全額歸本軌（記帳誠實度分類）；同檔同輪另有沿革散文搬出，故該檔與主表淨額皆為負，"
+     "「子項不得大於母項」那一款對母項 ≤ 0 不判（淨減法輪語意）。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -1646,7 +1659,13 @@ def _regression_lane_cap_basis() -> tuple[str, int]:
 # 「把史料逐字搬進具名證據檔」在本 repo 是可行且安全的路徑，而那正是真拆要用的手法 ⇒ 展延
 # 換到的不是時間而是一個已驗證的手法。取 `_ROOT_TOOLS_DEBT_DUE_MAX_LOOKAHEAD` 的上界而非
 # 更近的輪次，理由是真拆需要一個不與缺陷結案競爭的獨立窗口；再展延須另附理由，不得沿用本段。
-_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND = 127
+# 🔴 落地輪具名展延 127 → 130（新理由）：本輪以舊尺（空行與行首 # 免費）實測 round-label-ok
+# 三支檔 over_by＝quota_gate 90／quota_meter 67／hook_wiring 28（planner 已在 750 tier 下為 0），
+# 並逐檔勘查「docstring 搬證據檔」手法的可及面：quota_gate／quota_meter 的 docstring 敘事
+# 各約 84／111 行可覆蓋自身超額，**hook_wiring 全檔 docstring 皆為單行、敘事全住 # 註解 ⇒
+# 該手法對它零效益**，28 行只能靠真拆（抽共用模組）解。真拆屬獨立重構持有面（鐵律七），
+# 本輪主軸為款(11) 護欄層淨額義務與五筆結案；逐檔勘查座標見 CrossPlatform_R127_Scan_Findings.md §3。
+_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND = 130
 #: 清償旗標——真拆完成後改 True。刻意用布林而非重建舊尺計數器（ADR §9.3「舊尺已廢」）。
 _ROOT_TOOLS_OLD_SCALE_DEBT_RESOLVED = False
 #: A-2 後設鎖：到期輪只准落在「現查輪＋lookahead」內，推遠（如 9999）當場紅；shrink-only
@@ -1805,10 +1824,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 116
+_REPIN_LOG_FROZEN_PREFIX_LEN = 117
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "faddc843e04246118915d909fc68085a7bb3b1f343a7bcb9dc40bf091d537743")
+    "a4b92fe15365235e97d08440c75c09aa83f88b242ca9a7f36a4661eacb871dca")
 
 
 def repin_log_history_digest(
@@ -1970,6 +1989,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # 落地輪收尾：結案批回歸鎖＋到期義務兌現的守衛線重釘使指紋前進，同體例 round-label-ok
     # 「追加後立即自我凍結」——本輪追加一個 repin 稽核列＋本列，prefix_len 115→116。
     ("R126", "4ec1e958f341", "faddc843e042", "DEF-200-241"),
+    ("R127", "faddc843e042", "a4b92fe15365", "DEF-200-133"),
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

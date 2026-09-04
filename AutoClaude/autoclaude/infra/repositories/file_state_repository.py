@@ -38,8 +38,9 @@ _SUFFIX = ".checkpoint.json"
 # 而 fail-loud 的正解是**先退回上一個驗得過的版本**，不是停機，也不是靜默從 0 重跑。
 # 值域 0..9；0＝不保留（合法，退化成純 fail-loud）。保留檔名＝`<原名>.v1`、`.v2`…（`.v1`
 # 最新）。刻意不進 `*{_SUFFIX}` 的 glob 面 ⇒ list_recent_checkpoints 不會把它們當獨立條目。
+# 出廠值 5＝PRD §6 區塊 12 字面（DEF-200-206 ①：鍵名前綴修憲、數值三方定案採 PRD）。
 STATE_RETAIN_VERSIONS = max(0, min(9, int(
-    os.environ.get("AUTOCLAUDE_STATE_RETAIN_VERSIONS", "2") or 0)))
+    os.environ.get("AUTOCLAUDE_STATE_RETAIN_VERSIONS", "5") or 0)))
 
 
 #: DEF-200-226：`.tmp` 檔名自 DEF-200-043 起帶 pid+uuid4，寫入中途行程崩潰

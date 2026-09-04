@@ -77,12 +77,15 @@ def build_worktree_rescue(
 ) -> Any:
     from ..infra.adapters.dirty_worktree_rescue import (  # noqa: PLC0415
         DirtyWorktreeRescueAdapter,
+        dirty_save_retries_from_env,
     )
     from ..utils.notifier import notify  # noqa: PLC0415
     return DirtyWorktreeRescueAdapter(
         Path.cwd() if worktree is None else worktree,
         cfg.checkpoint_dir,
         agent_id=agent_id,
+        # DEF-200-206 ③：PRD §6 區塊 12 的 DIRTY_SAVE_RETRIES 從 env 讀；未設 ⇒ 出廠值。
+        retries=dirty_save_retries_from_env(),
         notifier=lambda msg: notify(
             "AutoClaude — 髒污工作樹", msg, enabled=cfg.notification.enabled),
     )

@@ -28,7 +28,7 @@ import hashlib
 import logging
 import os
 import subprocess
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -50,6 +50,29 @@ logger = logging.getLogger("autoclaude.infra.adapters.dirty_worktree_rescue")
 # ⇒ 重試本身會讓它更不可能成功。
 DIRTY_SAVE_RETRIES_DEFAULT = 1
 DIRTY_SAVE_RETRIES_MAX = 3
+# 🔴 DEF-200-206 ③：PRD §6 區塊 12 的鍵此前**零 env 讀取路徑**（改設定不生效）。鍵名
+# 跟隨全庫 `AUTOCLAUDE_*` 慣例（PRD 同批對齊）；讀取點＝`core/wiring.build_worktree_rescue`。
+DIRTY_SAVE_RETRIES_ENV = "AUTOCLAUDE_DIRTY_SAVE_RETRIES"
+
+
+def dirty_save_retries_from_env(environ: Mapping[str, str] | None = None) -> int | None:
+    """`DIRTY_SAVE_RETRIES` 的讀取路徑。未設 ⇒ `None`（呼叫端取出廠值）；不是整數 ⇒
+    WARNING 出聲並回 `None`（不得靜默）；超出 0..MAX ⇒ WARNING 出聲、由
+    `rescue_dirty_worktree()` 既有的夾取收回值域（值域理由見上方註解：重試吃空間）。"""
+    env = os.environ if environ is None else environ
+    raw = (env.get(DIRTY_SAVE_RETRIES_ENV) or "").strip()
+    if not raw:
+        return None
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("%s=%r 不是整數 ⇒ 沿用出廠值 %d",
+                       DIRTY_SAVE_RETRIES_ENV, raw, DIRTY_SAVE_RETRIES_DEFAULT)
+        return None
+    if not 0 <= value <= DIRTY_SAVE_RETRIES_MAX:
+        logger.warning("%s=%d 超出值域 0..%d ⇒ 夾回值域內",
+                       DIRTY_SAVE_RETRIES_ENV, value, DIRTY_SAVE_RETRIES_MAX)
+    return value
 
 # git 路徑列舉一律 `-z` ＋ `core.quotepath=false`（根 CLAUDE.md 鐵律三該列）：
 # 非 ASCII 檔名在預設組態下會被 git 引號化成 `"\346\226\207"`，逐字拿去當路徑必定找不到檔。
@@ -369,6 +392,8 @@ class DirtyWorktreeRescueAdapter:
         self._worktree = Path(worktree)
         self._checkpoint_dir = Path(checkpoint_dir)
         self._agent_id = agent_id
+        # 原始值（可為 None 或超出值域）：唯一合法消費點是 `rescue_dirty_worktree()` 的夾取，
+        # 不得在別處直接把它當已夾取的次數用（DEF-200-206 定點複審 SD 鏡提醒）。
         self._retries = retries
         self._notifier = notifier
 

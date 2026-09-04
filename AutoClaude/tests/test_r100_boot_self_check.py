@@ -36,7 +36,7 @@ def test_g1_every_pending_literal_is_requeued(tmp_path, status):
     """遍歷要求：待處理集合的**每一個**字面各注入一次，漏一個就是漏一種殘留項。"""
     repo = _repo_with_queue(tmp_path, [_q(status)])
     queue, unknown = B.read_queue(repo, "pb")
-    out = B.scan_queue(queue, conflict_policy="AUTO_AGENT", unknown_reason=unknown)
+    out = B.scan_queue(queue, conflict_policy="RETRY_WITH_AGENT", unknown_reason=unknown)
     assert out.requeued == ("autoclaude/agent-1",), out
     assert any("重排" in ln for ln in out.lines)
 
@@ -69,7 +69,7 @@ def test_g1_control_i_human_review_lists_without_requeueing(tmp_path):
 def test_g1_control_ii_a_terminal_status_is_not_swept_up(tmp_path):
     repo = _repo_with_queue(tmp_path, [_q("MERGED")])
     queue, unknown = B.read_queue(repo, "pb")
-    out = B.scan_queue(queue, conflict_policy="AUTO_AGENT", unknown_reason=unknown)
+    out = B.scan_queue(queue, conflict_policy="RETRY_WITH_AGENT", unknown_reason=unknown)
     assert out.requeued == () and out.listed_only == ()
     assert out.lines == ("待整合殘留項 0 筆",)
 
@@ -104,7 +104,7 @@ def test_g2_an_unreadable_queue_says_unknown_and_never_says_zero(tmp_path):
 def test_g2_an_unknown_status_literal_is_treated_as_unreadable_not_skipped(tmp_path):
     # §6.1 不變式 11（v2.1.9）：未知字面**視為讀不出來**而非略過——
     # 略過等於把一筆殘留整合靜默丟掉。
-    out = B.scan_queue([_q("QUEUED")], conflict_policy="AUTO_AGENT")
+    out = B.scan_queue([_q("QUEUED")], conflict_policy="RETRY_WITH_AGENT")
     assert out.state_unknown is True
     assert "QUEUED" in out.unknown_reason
     assert "0 筆" not in "\n".join(out.lines)
@@ -125,7 +125,7 @@ def test_g2_a_genuinely_absent_checkpoint_is_zero_not_unknown(tmp_path):
 # ══════════════════════════════════════════════════════════════════════════════
 @pytest.mark.parametrize("band", list(B.DRAINING_BANDS))
 def test_g3_draining_or_above_only_registers(band):
-    out = B.scan_queue([_q("CONFLICT")], conflict_policy="AUTO_AGENT", band=band)
+    out = B.scan_queue([_q("CONFLICT")], conflict_policy="RETRY_WITH_AGENT", band=band)
     assert out.requeued == ()
     assert out.listed_only == ("autoclaude/agent-1",)
     assert any(f"band={band}" in ln for ln in out.lines)
@@ -147,7 +147,7 @@ def test_g3_the_draining_bands_mirror_the_root_declaration():
 
 
 def test_a_measurable_band_below_draining_still_requeues():
-    out = B.scan_queue([_q("CONFLICT")], conflict_policy="AUTO_AGENT", band="warn")
+    out = B.scan_queue([_q("CONFLICT")], conflict_policy="RETRY_WITH_AGENT", band="warn")
     assert out.requeued == ("autoclaude/agent-1",)
 
 
@@ -204,7 +204,7 @@ def test_g5_dry_run_dispatches_nothing_writes_nothing_registers_nothing(tmp_path
     repo = _repo_with_queue(tmp_path, [_q("PENDING_VERIFY"), _q("CONFLICT", "b2")])
     dispatched: list[str] = []
     report = B.boot_self_check(
-        repo=repo, playbook_id="pb", conflict_policy="AUTO_AGENT",
+        repo=repo, playbook_id="pb", conflict_policy="RETRY_WITH_AGENT",
         cli_runner=lambda _a: (127, ""),                 # ⇒ 版本未知 ⇒ DRY_RUN
         cleanup=lambda: dispatched.append("cleanup") or [],
         notifier=dispatched.append)
@@ -365,3 +365,82 @@ def test_g10_enough_space_notifies_nobody(tmp_path):
         space_target=tmp_path, estimate_bytes=0, margin_bytes=0, notifier=seen.append,
         cli_runner=lambda _a: (0, next(iter(B.VERIFIED_CLI_VERSIONS))))
     assert report.ok and seen == []
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# DEF-200-206 ②③：枚舉對齊 PRD §6 區塊 11 的字面 ＋ CONFLICT_POLICY 的 env 讀取路徑
+# ══════════════════════════════════════════════════════════════════════════════
+_PRD_REL = "docs/01_requirements/AutoClaude_Token_監控與喚醒機制_PRD_v2.1.md"
+
+
+def _prd_conflict_policy_literals() -> list[str]:
+    """PRD §6 區塊 11 那一行（`…CONFLICT_POLICY=<出廠值>  # … A|B|C`）的 [出廠值, *枚舉]。"""
+    prd = Path(__file__).resolve().parents[2] / _PRD_REL
+    if not prd.exists():
+        pytest.skip("不在 monorepo 內（pip install 後 PRD 不存在）")
+    pattern = re.compile(r"^(?:AUTOCLAUDE_)?CONFLICT_POLICY=(\w+)\s+#.*?([A-Z_]+(?:\|[A-Z_]+)+)")
+    for line in prd.read_text(encoding="utf-8").splitlines():
+        m = pattern.match(line)
+        if m:
+            return [m.group(1), *m.group(2).split("|")]
+    raise AssertionError("PRD §6 找不到 CONFLICT_POLICY 那一行 ⇒ 鏡射鎖失去分母")
+
+
+def test_def_200_206_the_policy_enum_mirrors_the_prd_literal():
+    """②：實作枚舉必須逐字等於 PRD §6 區塊 11 的三值（順序亦同）；出廠值也對得上。"""
+    default, *literals = _prd_conflict_policy_literals()
+    assert tuple(literals) == B.CONFLICT_POLICIES, (literals, B.CONFLICT_POLICIES)
+    assert default == B.CONFLICT_POLICY_DEFAULT
+    assert "AUTO_AGENT" not in B.CONFLICT_POLICIES      # 自造名已退場
+
+
+def test_def_200_206_abort_with_pending_items_refuses_to_boot_and_lists_them():
+    """ABORT：有殘留項 ⇒ boot problem（呼叫端非零退出碼）、清單照列、一筆都不重排。"""
+    out = B.scan_queue([_q("CONFLICT"), _q("PENDING_VERIFY", "b2")], conflict_policy="ABORT")
+    assert out.requeued == ()
+    assert out.listed_only == ("autoclaude/agent-1", "b2")
+    assert out.problems and "ABORT" in out.problems[0]
+    assert sum("ABORT：" in ln for ln in out.lines) == 2
+
+
+def test_def_200_206_abort_with_an_empty_queue_boots_normally():
+    out = B.scan_queue([], conflict_policy="ABORT")
+    assert out.problems == () and out.lines == ("待整合殘留項 0 筆",)
+
+
+def test_def_200_206_abort_is_not_softened_by_dry_run_or_draining():
+    """對照組：HUMAN_REVIEW／DRY_RUN／DRAINING 是「只登記」，ABORT 是「拒絕啟動」。"""
+    for kw in ({"dry_run": True}, {"band": B.DRAINING_BANDS[0]}):
+        out = B.scan_queue([_q("CONFLICT")], conflict_policy="ABORT", **kw)
+        assert out.problems and out.requeued == (), kw
+    soft = B.scan_queue([_q("CONFLICT")], conflict_policy="HUMAN_REVIEW")
+    assert soft.problems == () and soft.listed_only == ("autoclaude/agent-1",)
+
+
+def test_def_200_206_conflict_policy_is_read_from_env():
+    """③：未設 ⇒ 出廠值；設了 ⇒ 去空白後逐字採用；非法值原樣回傳、交給不變式 11 報紅。"""
+    assert B.CONFLICT_POLICY_ENV.startswith("AUTOCLAUDE_")
+    assert B.conflict_policy_from_env({}) == B.CONFLICT_POLICY_DEFAULT
+    assert B.conflict_policy_from_env({B.CONFLICT_POLICY_ENV: " ABORT "}) == "ABORT"
+    bad = B.conflict_policy_from_env({B.CONFLICT_POLICY_ENV: "WHATEVER"})
+    assert bad == "WHATEVER"
+    assert B.scan_queue([], conflict_policy=bad).problems
+
+
+def test_def_200_206_an_illegal_policy_with_pending_items_never_requeues():
+    """SD 定點複審：非法字面 ＋ 非空佇列不得落到預設重排分支（problem 與「重排」同時
+    印出是自相矛盾的輸出）——只登記，並讓不變式 11 的 problem 帶著它一起回去。"""
+    out = B.scan_queue([_q("CONFLICT")], conflict_policy="WHATEVER")
+    assert out.problems and "CONFLICT_POLICY" in out.problems[0]
+    assert out.requeued == ()
+    assert out.listed_only == ("autoclaude/agent-1",)
+    assert any("CONFLICT_POLICY=WHATEVER" in ln for ln in out.lines)
+
+
+def test_def_200_206_main_wires_the_env_reader_into_the_boot_check():
+    """接線鎖：`main.run_boot_self_check` 必須把 env 讀數餵進 `boot_self_check(...)`，
+    否則讀取路徑蓋好沒接電（DEF-200-205 的同型失效）。"""
+    from autoclaude import main as M
+    src = Path(M.__file__).read_text(encoding="utf-8")
+    body = src.split("def run_boot_self_check")[1].split("\ndef ")[0]
+    assert "conflict_policy=conflict_policy_from_env()" in body

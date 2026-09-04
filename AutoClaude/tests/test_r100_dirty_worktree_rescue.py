@@ -239,6 +239,21 @@ def test_d6_the_retry_ceiling_is_clamped_to_the_declared_range():
     assert 0 <= R.DIRTY_SAVE_RETRIES_DEFAULT <= R.DIRTY_SAVE_RETRIES_MAX
 
 
+def test_def_200_206_dirty_save_retries_is_read_from_env(caplog):
+    """DEF-200-206 ③：PRD §6 區塊 12 的鍵此前零 env 讀取路徑。
+    未設 ⇒ None（出廠值）；整數 ⇒ 採用；非整數 ⇒ WARNING ＋ None；超界 ⇒ WARNING（夾取在
+    `rescue_dirty_worktree` 既有那一行）。"""
+    assert R.DIRTY_SAVE_RETRIES_ENV.startswith("AUTOCLAUDE_")
+    assert R.dirty_save_retries_from_env({}) is None
+    assert R.dirty_save_retries_from_env({R.DIRTY_SAVE_RETRIES_ENV: " 2 "}) == 2
+    with caplog.at_level("WARNING", logger=R.logger.name):
+        assert R.dirty_save_retries_from_env({R.DIRTY_SAVE_RETRIES_ENV: "two"}) is None
+        assert R.dirty_save_retries_from_env({R.DIRTY_SAVE_RETRIES_ENV: "9"}) == 9
+    messages = [rec.getMessage() for rec in caplog.records]
+    assert sum("不是整數" in m for m in messages) == 1, messages
+    assert sum("超出值域" in m for m in messages) == 1, messages
+
+
 def test_d6_the_space_check_runs_before_the_write(tmp_path):
     # G7 同型：以呼叫順序斷言。順序反了必須紅——這正是本條的全部價值。
     wt, ck = _repo(tmp_path), tmp_path / "ck"

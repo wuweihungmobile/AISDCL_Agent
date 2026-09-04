@@ -1119,9 +1119,7 @@ class TestM6EnvExampleBidirectionalLock(unittest.TestCase):
 # ═══════════════════════════════════════════════════════════════════════════
 # R82／C1：產生器 ↔ **消費者** 的 round-trip（此前整條不存在）
 # ═══════════════════════════════════════════════════════════════════════════
-#
-# 病：判準拿生成物跟自己比、從不呼叫消費者的解析器 ⇒ 兩個家互相一致、都沒對消費者測。
-# 複審鏡實測（12 個帶值鍵全部解析失敗、照抄範例檔會關掉整條節流）原文＝R95 Pace 證據檔 §7.5。
+# 病與複審鏡實測：沿革已搬至 CrossPlatform_R127_Guard_Prose_Migration.md。
 class TestM6TheGeneratedFileSurvivesItsOwnConsumer(unittest.TestCase):
     #: 帶值且真的會進 `Policy` 的鍵數（機械導出，不寫死——ENV_SPEC 長大時自己跟著走）。
     def _valued(self) -> list[Q.EnvVar]:
@@ -2427,11 +2425,8 @@ class TestR98ModelScopedAxisDoesNotBindWithoutDispatch(unittest.TestCase):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 攤提（`quota_pace.amortize`）與 binding（`_in_cap_gate`，R98）對 `MODEL_SCOPED_KINDS`
-# 的處置**刻意不同**，而 `explain()` 的字面把兩件事混成一句假話：實測 `--pace` 逐字
-# 「攤提：kind=weekly_all 剩 39pp」，而 weekly_all 當時 52%（剩 48pp）——39pp 來自
-# weekly_scoped(61%，Fable，binding 側已排除)。兩條鎖：① 具名必須是真的被用到的那一軸；
-# ② 納入的方向必須是**保守側**（只會更緊）＝不排除它的實質判詞，見 `amortize()` 上方。
+# `explain()` 必須具名真的被用到的那一軸、且納入方向為保守側；立案沿革已搬至
+# CrossPlatform_R127_Guard_Prose_Migration.md〈TestAmortizationNamesTheAxisItActuallyUsed〉。
 # ═══════════════════════════════════════════════════════════════════════════
 class TestAmortizationNamesTheAxisItActuallyUsed(unittest.TestCase):
     """輸入＝2026-08-22T11:46:51 `--pace` 實測軸集合（session/five_hour 37%＠212 分鐘；
@@ -3119,12 +3114,7 @@ class TestR104BurstingOkAndEwmaBurnRate(unittest.TestCase):
 
 
 # ── DEF-200-230：額度取數端點的「單一家」回歸鎖（PRD §15.5 紅線 1 條件 (b)） ──────────
-#
-# 立案（帳本 DEF-200-230 逐字）：紅線 1 要求額度取數只有一個站點，而在本鎖之前那件事
-# **只是散文**——任何人在別處再貼一份 `USAGE_URL` 就多一個取數端點，而兩份字面一旦漂移
-# （版本路徑不同、少一段 `/api`），失效方向是「本機恆綠、真的量到的是兩個不同的數」。
-# 現況不變式（落地當回合實測）：全庫 tracked `*.py` 中帶完整端點 URL 字面者恰 1 支＝
-# `tools/lib/quota_meter.py`。
+# 立案敘事（帳本 DEF-200-230 逐字）已搬至 CrossPlatform_R127_Guard_Prose_Migration.md。
 #
 # 🔴 為何 needle 是**組出來**的、不寫成一個完整字面：本檔自己也在掃描面上（tracked `.py`），
 # 寫全就成了第二個家、鎖對自己轉紅——把判準寫成「除了本檔以外」則是自己給自己開豁免，

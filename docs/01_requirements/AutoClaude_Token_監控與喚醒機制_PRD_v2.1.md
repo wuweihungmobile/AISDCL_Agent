@@ -16,6 +16,7 @@
 | **v2.1.11（ADR-XPLAT-014 續跑鏈加固＋PRD 五歧異對齊）** | 2026-09-01 | **經 R108 二審承接修訂（blocking 2 筆全修、紀錄見該 ADR 檔頭）＋掌舵者 R110 方向裁決（§3.5 Q1~Q6）後，掌舵者 2026-09-01 技術債總清償循環令 D1 落款生效**。§7 Q4 的 ①②③⑤ 四處 PRD 內文對齊＝生效後施工項（④ 只登記；對齊完成前，內文與本列不一致處以施工圖為準） | 續跑鏈三道縫加固＋PRD 與現況五歧異修正：施工圖＝`docs/04_planning/ADR/ADR-XPLAT-014-resume-chain-hardening.md`（§7 Q4／§8 工作表），本表不重抄。批次序在 v2.1.10 之後、兩批間無承重依賴（該 ADR §7 Q4 逐條核對） |
 | **v2.1.12（usage 水位喚醒閉環）** | 2026-09-01 | **R111 設計波四職能（Architect／SA／SD／Developer）合成產出；獨立四方複審紀錄＝零（`docs/06_quality/` 對本案零命中，落款當日現查）；掌舵者 2026-09-01 技術債總清償循環令 D2 裁決直接落款生效**。批次序＝v2.1.10→v2.1.11→本批（R110 裁決鏈） | 撞線→喚醒閉環的 usage 水位監控機制化：施工圖＝`docs/04_planning/PRD_Amendment_R112_WakeChain.md`（§3-4 持久 notify_queue＋巡邏重投＋TTL＋delivered 憑證＝`DEF-200-236` 載體），本表不重抄 |
 | **v2.1.14（§4.2.2-b (4c) gate 聚合面切換為設計內例外）** | 2026-09-04 | **掌舵者 2026-09-02 採 R121 呈報單 `DEF-200-244` 方向 B；R126 四方設計複審 4×APPROVE（Architect／SA／SD／QA，紀錄＝`docs/06_quality/CrossPlatform_R126_Debt_Closure.md` §D）；程式面同批落地並過定點複審** | 新增 (4c)：排除 `FALLBACK_KINDS`／未命中 `MODEL_SCOPED_KINDS` 屬取數層裁決（R89／R98），不受 (4) 多軸單調律約束；`gate = gate_list or readings` fail-safe 保留；實作義務＝`Decision.reason` 帶 `gate_excluded=<kinds>` 可觀測。施工圖＝`docs/04_planning/PRD_Amendment_R126_GateExclusion.md`（本表不重抄）。依 R110 判例不疊層：只加條文與痕跡，不改 v2.1.10 既有條文 |
+| **v2.1.15（DEF-200-206：§6 三鍵前綴對齊＋CONFLICT_POLICY 三值行為補述）** | 2026-09-04 | **掌舵者 2026-09-02 採 R121 呈報單 `DEF-200-206` 方向 A（③②修實作、①修憲）；R127 三方設計複審（Architect／SA／SD，`model: sonnet`）Q1 出廠值定案採 PRD 的 5、Q2 前綴、Q3 ABORT 語意；程式面同批落地並過定點複審** | §6 區塊 11／12 三鍵改為 `AUTOCLAUDE_CONFLICT_POLICY`／`AUTOCLAUDE_STATE_RETAIN_VERSIONS`／`AUTOCLAUDE_DIRTY_SAVE_RETRIES`（跟隨全庫 `AUTOCLAUDE_*` 慣例；此前 PRD 同區塊有無前綴混用、且後兩鍵在實作零讀取路徑）；R-6.2-1 補述三值各一種行為（`ABORT`＝拒絕啟動）並在 G1 驗收表加控制組 (iii)(iv)；§8 列 4／列 11 同步。實作：`execution/boot_self_check.py`（枚舉對齊＋`conflict_policy_from_env`）、`infra/adapters/dirty_worktree_rescue.py`（`dirty_save_retries_from_env`）、`core/wiring.py`／`main.py` 接線、`file_state_repository.py` 出廠值 2→5。施工圖＝`docs/04_planning/PRD_Amendment_R127_EnvKeyAlignment.md`（本表不重抄）。依 R110 判例不疊層：只改鍵名字面、補述與痕跡，不改既有條文語意 |
 | **v2.1.13（R113/R114 喚醒鏈最後一哩）** | 2026-08-31 | **經 R114 四方複審收斂後，掌舵者 2026-08-31 落款生效**（一輪 Architect/QA REJECT＋SA/SD AWC＝去重 13 blocking；修訂三批；二輪 4×AWC；SD 定點複核 APPROVE；紀錄＝`docs/06_quality/CrossPlatform_R114_WakeChain_Review.md` §2） | 喚醒鏈最後一哩四缺口閉合：G1 無頭窗口權限姿態（三層白名單＋雙平台孿生 allow/deny）／G2 handback 交接可見性（雙載體＋SessionStart 偵測）／G3 配額內接力狀態機（判定序 ③→④→②→①、煞車一出廠 1、失敗態全重掛）／G4 哨兵 fire 後重掛＋patrol 自檢。設計全文與驗收 V-a1~V-e2e＝`docs/04_planning/PRD_Amendment_R113_WakeChain_LastMile.md`（本表不重抄，該檔為 v2.1.13 唯一施工圖）。依 R110 判例不疊層：v2.1.10~12 仍 Proposed、未隨本批生效，與本批的前置關係見該檔 §0。2026-08-31 實戰佐證（本 repo 當日 session）：偵測撞線→武裝→reset 後準時醒→探測 rc=0 全通，斷點＝`quota_back_no_resume`（`AUTOSDD_RESUME_OFF` User 層）＋G1~G4，見同檔 §7 |
 
 > **v2.1 的變更**：附錄 B 的事實核對清單已**實際核實完成**（方法見附錄 B 開頭）。核實結果顯示 Claude Code v2.1.x **已內建**本 PRD 原本打算自建的多項能力（原生 worktree 隔離、任務 DAG、排程喚醒、零 Token 用量遙測、併發上限、官方配速門檻）。因此新增 [§15 執行方法論](#15-執行方法論與注意事項v21-新增)，並將建議架構從「大型自建 Daemon」縮減為「薄治理層 + 採用原生能力」。**§15 是實際動工時應遵循的章節**（含動工前置檢查、採用 vs 自建決策矩陣、P0–P5 分階段步驟、12 條紅線注意事項、參數校準方法與交付目錄結構）。
@@ -1866,7 +1867,10 @@ KEEP_AWAKE_VERIFY_ON_START=true             # 【新增】啟動自檢是否真�
 ENABLE_WORKTREE_ISOLATION=true
 AUTOCLAUDE_WORKTREE_DIR=.autoclaude/worktrees
 INTEGRATION_BRANCH=autoclaude/integration    # 【新增】不直接動 main
-CONFLICT_POLICY=HUMAN_REVIEW                 # 【新增】ABORT|RETRY_WITH_AGENT|HUMAN_REVIEW
+AUTOCLAUDE_CONFLICT_POLICY=HUMAN_REVIEW      # 【新增；v2.1.15 前綴對齊】ABORT|RETRY_WITH_AGENT|HUMAN_REVIEW
+#   開機自檢對殘留整合項的處置：ABORT＝拒絕啟動（非零退出碼、清單照列、零重排）／
+#   RETRY_WITH_AGENT＝重排給 agent 重試（DRAINING 以上與 DRY_RUN 改只登記）／HUMAN_REVIEW＝只登記。
+#   非法字面 ⇒ §6.1 不變式 11 報紅、拒絕啟動（不得靜默退回出廠值）。
 INTEGRATION_VERIFY_CMD="npm run lint && npm test"  # 【新增】合併前閘門
 
 # ------------------------------------------------------------------------------
@@ -1875,8 +1879,8 @@ INTEGRATION_VERIFY_CMD="npm run lint && npm test"  # 【新增】合併前閘門
 AUTOCLAUDE_STATE_FILE=.autoclaude/state.json
 AUTOCLAUDE_CHECKPOINT_DIR=.autoclaude/checkpoints
 STATE_WRITE_MODE=ATOMIC                      # 【新增】tmp → fsync → rename
-STATE_RETAIN_VERSIONS=5                      # 【新增】保留歷史版本供人工回溯
-DIRTY_SAVE_RETRIES=1                         # 【v2.1.9 新增】存檔救援驗證失敗時的**重試**次數
+AUTOCLAUDE_STATE_RETAIN_VERSIONS=5           # 【新增；v2.1.15 前綴對齊】保留歷史版本供人工回溯，值域 0..9
+AUTOCLAUDE_DIRTY_SAVE_RETRIES=1              # 【v2.1.9 新增；v2.1.15 前綴對齊】存檔救援驗證失敗時的**重試**次數
 #   （總寫入嘗試 = 本值 + 1）。值域 0 ≤ 本值 ≤ 3；0＝不重試（合法）。
 #   🔴 上界不是風格問題：磁碟滿是最可能的失敗成因，每一次重試再吃一份空間 ⇒ 重試本身會讓
 #   它更不可能成功。第二次寫入**之前**必須先跑一次 §6.2 R-6.2-3 的可用空間檢查。全文見 §4.5.9
@@ -1973,7 +1977,11 @@ API_AUTO_CONTINUE_NEXT_PERIOD=false          # 【新增】
 - **新實現**：佇列本身改為**磁碟上的狀態**，住 state.json 的既有結構（§7）——不新開一個檔
   （一份檔一個寫者，同 §4.5.6 R-4.5.6-3）。啟動自檢時掃一次：任何 status 落在**待處理集合**
   的整合項，依 `CONFLICT_POLICY` 重排；`CONFLICT_POLICY=HUMAN_REVIEW`（出廠值）者
-  **不自動重排**，只在自檢輸出裡逐項列出並要求人工處置。
+  **不自動重排**，只在自檢輸出裡逐項列出並要求人工處置。**【v2.1.15 補述】** 三值各一種
+  行為：`RETRY_WITH_AGENT` ⇒ 重排（`DRAINING` 以上與 DRY_RUN 改只登記）；`HUMAN_REVIEW` ⇒
+  只登記；`ABORT` ⇒ **拒絕啟動**（非零退出碼、清單照列、零重排、零 worktree 寫入）——它是
+  使用者顯式 opt-in 的硬停，與不變式 12「CLI 版本未知不阻止啟動」（防守衛被整個關掉）方向
+  相反是刻意的：前者是人選的策略，後者是系統被動漂移。
 
 - 🔴 **待處理集合的枚舉（v2.1.9 訂正；此前寫錯，且錯法會讓 G1 結構性假綠）**：
 
@@ -2050,7 +2058,7 @@ API_AUTO_CONTINUE_NEXT_PERIOD=false          # 【新增】
 
 | # | 判準 | 查證方式 |
 | :---- | :---- | :---- |
-| G1 | 佇列有殘留項時，啟動自檢**真的**重排（不是只印一行） | 整合測試：注入 `status=PENDING_VERIFY` 一筆 ⇒ 斷言重排動作發生。🔴 注入值刻意用 **`PENDING_VERIFY`**（§7 schema 既有、生產路徑真的會寫出來的那個字面）而不是 `QUEUED`——後者在本實作沒有寫者，注入它會讓本列**測試綠而生產零覆蓋**（立案見 R-6.2-1 末段）。**遍歷要求**：待處理集合的**每一個**字面各注入一次（`PENDING_VERIFY`／`CONFLICT`／`VERIFY_FAILED`），漏一個就是漏一種殘留項。**控制組兩格**：(i) `CONFLICT_POLICY=HUMAN_REVIEW` ⇒ 不重排但必須逐項列出；(ii) `status=MERGED`（終態）⇒ **不得**被掃出來重排 |
+| G1 | 佇列有殘留項時，啟動自檢**真的**重排（不是只印一行） | 整合測試：注入 `status=PENDING_VERIFY` 一筆 ⇒ 斷言重排動作發生。🔴 注入值刻意用 **`PENDING_VERIFY`**（§7 schema 既有、生產路徑真的會寫出來的那個字面）而不是 `QUEUED`——後者在本實作沒有寫者，注入它會讓本列**測試綠而生產零覆蓋**（立案見 R-6.2-1 末段）。**遍歷要求**：待處理集合的**每一個**字面各注入一次（`PENDING_VERIFY`／`CONFLICT`／`VERIFY_FAILED`），漏一個就是漏一種殘留項。**控制組兩格**：(i) `CONFLICT_POLICY=HUMAN_REVIEW` ⇒ 不重排但必須逐項列出；(ii) `status=MERGED`（終態）⇒ **不得**被掃出來重排。**【v2.1.15】再加兩格**：(iii) `CONFLICT_POLICY=ABORT` ＋ 有殘留項 ⇒ 自檢 `problems` 非空（拒絕啟動）、清單照列、零重排；空佇列 ⇒ 照常放行；(iv) `RETRY_WITH_AGENT` 在 `DRAINING` 以上或 DRY_RUN ⇒ 改只登記（既有 G3／G5 的同一判準） |
 | G2 | 佇列讀不出來 ≠ 0 筆 | 單元測試：注入壞 checksum ⇒ 輸出含「狀態不明」，且**不得**含「0 筆」。**這一格是本節最容易寫成假綠的地方** |
 | G3 | 啟動當下已在 `DRAINING` 以上 ⇒ 只登記不重排 | 單元測試（注入 band=prepare／halt 兩例） |
 | G4 | `claude --version` 讀不到 ⇒ 視為未知版本並進 DRY_RUN（fail-safe） | 單元測試（讀取失敗注入）。**紅綠自證**：把它改成「讀不到就當已驗證」必須轉紅 |
@@ -2176,14 +2184,14 @@ API_AUTO_CONTINUE_NEXT_PERIOD=false          # 【新增】
 | 1 | **非預期 429** | 遙測落後於真實用量，或其他裝置同時消耗 | 優先**遵循回應中的重試建議標頭**；無標頭時採 full jitter 退避：`sleep = rand(0, min(300, 10·2^n))`，最多 5 次。v1 的固定 10/30/90s 無 jitter，多 Agent 同時撞牆會同步重試造成雷群。重試耗盡 → `FREEZING`。**且必須把 429 視為遙測低估的證據**，將 `U5h` 推估值上修 |
 | 2 | **重置時間漂移** | 後端重置延遲 | **【v2.1.8 修憲，全文見 §4.5.10】** 觀測優先：醒來重新觀測 `U5h < RESET_CONFIRM_PERCENT`；確認不了**既不猜也不終止**，掛回零成本哨兵巡邏兜底重試（掛點＝`tools/session_resume_planner.py --arm-sentinel`）。**原條文的固定級距（30s→300s、最多 10 次）已降級**為「單次量測失敗」的重試（≤3 次／≤90s，🔴 **【v2.1.9】射程限於「同一次醒來的行程內」**——跨醒來的重排間隔是另一層，家＝既有常數 `tools/session_resume_planner.py::TRANSIENT_RETRY_SECONDS`，兩層不得折成一個數字），不再是「等 reset」的主路——固定級距是在猜 reset 時刻，與「reset 只能觀測不能算」直接衝突。例外：月度支出上限仍 `escalate`（等不回來） |
 | 3 | **Git index.lock 殘留** | 中斷時 git 操作未完成 | 檢查鎖檔 **mtime 與持有 PID 是否存活**；僅清理確認陳舊者。v1 的「清理陳舊鎖」若無存活檢查，可能刪掉正在使用的鎖而毀損 repo |
-| 4 | **斷電／強制重啟** | — | `INIT` 掃描 state.json + checksum 驗證；提供 `autoclaude resume` 與 `--force-fresh`。若 checksum 失敗 → 回退到 `STATE_RETAIN_VERSIONS` 中最近的有效版本 |
+| 4 | **斷電／強制重啟** | — | `INIT` 掃描 state.json + checksum 驗證；提供 `autoclaude resume` 與 `--force-fresh`。若 checksum 失敗 → 回退到 `AUTOCLAUDE_STATE_RETAIN_VERSIONS`（【v2.1.15】前綴對齊全庫慣例，出廠值 5）中最近的有效版本 |
 | 5 | **【新增】機器在等待中睡著** | 防休眠失效 / Modern Standby | 醒來偵測時鐘跳躍 → 立即重新輪詢 → 若已過重置點直接 `RESUMING`；記錄防休眠失效事件並告警 |
 | 6 | **【新增】遙測來源永久失效** | 未公開端點被移除、記錄檔格式變更 | **【v2.1.8 修憲，全文見 §4.1.5】** 依 `TELEMETRY_SOURCE_ORDER` 降級；全部失效 → **cap 收斂到 `cap_prepare` 語意**（且 ≥1，禁止靜默鎖死）＋ 告警，**絕不**猜測用量繼續派工。原文寫 `DRAINING` 是**狀態機的字**，本實作只有 band + cap 且實測 `degraded_cap == cap_converge` 為 `True`、`draining()` 對 `unmeasured` 明文回 `"unknown"` ⇒ 原條文在本實作結構上沒有可達路徑。🔴 `band` 必須繼續是 `unmeasured`（「量不到 ≠ 量到零」只禁造假讀數，不禁收緊） |
 | 7 | **【新增】同帳號多 Daemon 超燒** | 兩個專案同時跑 | §4.7 帳號配額仲裁鎖 + 租約 |
 | 8 | **【新增】Worktree 有未提交變更且無法提交** | 檔案權限、pre-commit hook 失敗 | **【v2.1.8 修憲，全文見 §4.5.9】** 救援序列**只有一個動作且不動工作樹**：產生 patch 檔存入 `AUTOCLAUDE_CHECKPOINT_DIR`，**寫完必須重新開檔讀回並驗 SHA-256**（＋位元組數相等、＋非空、＋**覆蓋率**、＋第二道語意閘）；🔴 **【v2.1.9】patch 的母體是「tracked 變更 ∪ untracked 新檔」**——`git diff HEAD` 從不含 untracked，只用它會讓四道斷言全綠而全新工作被靜默丟掉（實測 patch `135` bytes 非空、`grep -c` 目標檔名 `0`）；第二道語意閘走「臨時索引 read-tree 到記錄的 `base_sha` ＋ `apply --check --cached`」，天真寫法在髒工作樹上實測恆紅；任一不成立 → fail-loud 進 `DIRTY_UNSAVED`（state.json 帶齊四個可重驗值 ＋ 桌面通知一次 ＋ 禁止自動喚醒），**絕不** fail-open 轉入 `WAITING_RESET`／`LONG_HIBERNATE`。原條文前兩步（`commit --no-verify`、`git stash`）**已刪除**——本 repo 憲法直接禁止（鐵律五機械阻斷 stash 全族；`--no-verify` 為逐字禁止事項） |
 | 9 | **【新增】Agent 無回應／卡死** | 等待外部指令、無限循環 | 硬性預算逾時 → 優雅終止序列；連續 `N` 次卡死同一 Step → 標記 `NEEDS_HUMAN` |
 | 10 | **【新增】喚醒後上下文已不可用** | session 記錄被清理、CLI 升級不相容 | 自動降級為 `FRESH_SESSION_WITH_STATE`；此為 `SESSION_RESUME` 的必備退路（v1 無退路） |
-| 11 | **【新增】整合驗證失敗** | 測試在合併前不通過 | 退回佇列並記錄；`CONFLICT_POLICY` 決定是否派 Agent 修復（並計入額度預算）。**【v2.1.8 修憲，全文見 §6.2 R-6.2-1】** 原實現前提（長駐 Daemon 持整合鎖）在本 repo 不存在 ⇒ **意圖保留、實現換成開機自檢**：佇列住 state.json，醒來時掃一次殘留項並重排；`DRAINING` 以上只登記不重排；**讀不出來必須回報「狀態不明」，不得印成「0 筆」**。掛 §6.1 不變式 11 |
+| 11 | **【新增】整合驗證失敗** | 測試在合併前不通過 | 退回佇列並記錄；`CONFLICT_POLICY` 決定是否派 Agent 修復（並計入額度預算）。**【v2.1.8 修憲，全文見 §6.2 R-6.2-1】** 原實現前提（長駐 Daemon 持整合鎖）在本 repo 不存在 ⇒ **意圖保留、實現換成開機自檢**：佇列住 state.json，醒來時掃一次殘留項並重排；`DRAINING` 以上只登記不重排；**讀不出來必須回報「狀態不明」，不得印成「0 筆」**。掛 §6.1 不變式 11。**【v2.1.15】** `ABORT` ⇒ 有殘留項即拒絕啟動（見 R-6.2-1 補述） |
 | 12 | **【新增】Prompt injection** | Agent 讀入 repo 中含惡意指令的檔案／依賴 | 工具白名單 + 寫入範圍限制在 worktree + 禁止未經確認的網路存取；Daemon 對 Agent 產出的「狀態回報」做 schema 驗證，不直接信任自然語言 |
 | 13 | **【新增】CLI 版本升級破壞相容性** | 旗標／輸出格式改變 | 啟動時記錄 CLI 版本並比對已驗證清單；未知版本 → 進入 `DRY_RUN` 並要求人工確認。**【v2.1.8 修憲，全文見 §6.2 R-6.2-2】** 本列原文已是「啟動時」形態 ⇒ 意圖不動，補齊三件缺項：版本讀自 `claude --version`（讀不到＝未知，**不得** fail-open）、已驗證清單須為 **git-tracked** 且帶「這一版核實過什麼」欄位、`DRY_RUN` 必須真的零派工／零 worktree 寫入／零排程註冊。未知版本**不阻止啟動**但必須 loud。掛 §6.1 不變式 12 |
 | 14 | **【新增】磁碟空間不足** | worktrees 與記錄檔累積 | 啟動與凍結前檢查可用空間；不足則清理已合併 worktree 並告警。**【v2.1.8 修憲，全文見 §6.2 R-6.2-3】** 本列原文已是「啟動與凍結前」形態 ⇒ 意圖不動，補齊四件缺項：凍結前那一次是**寫 patch 的硬前置**（順序錯了這道檢查在它唯一要治的情境下跑不到）、門檻改為 **bytes 對 bytes**（不是百分比）、清理**只准動已 `--ff-only` 併入**者且不得用 `git clean`／`reset --hard`（鐵律五）、清理後仍不足即桌面通知。掛 §6.1 不變式 13 |

@@ -11,8 +11,9 @@
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -32,8 +33,25 @@ PENDING_STATUSES = QUEUE_STATUSES[:3]
 # 🔴 本次**不引入** `QUEUED`：它與 `PENDING_VERIFY` 語意重疊，而 §7 已經有後者
 # ⇒ 引入前者等於給同一個狀態開第二個家，並需要一次沒有必要的資料遷移。
 
-CONFLICT_POLICIES = ("HUMAN_REVIEW", "AUTO_AGENT")
-CONFLICT_POLICY_DEFAULT = "HUMAN_REVIEW"        # §6 出廠值
+# 🔴 DEF-200-206 ②：枚舉對齊 PRD §6 區塊 11 的字面 `ABORT|RETRY_WITH_AGENT|HUMAN_REVIEW`。
+# 原實作的 `AUTO_AGENT` 是同一語意（重排給 agent 重試）的自造名，更名為 PRD 的
+# `RETRY_WITH_AGENT`；`ABORT` 補入＝有殘留整合項就拒絕啟動（列出清單並回非零退出碼）。
+# 鏡射鎖＝`tests/test_r100_boot_self_check.py` 讀 PRD §6 那一行的註解字面比對本 tuple。
+CONFLICT_POLICIES = ("ABORT", "RETRY_WITH_AGENT", "HUMAN_REVIEW")
+POLICY_ABORT, POLICY_RETRY_WITH_AGENT, POLICY_HUMAN_REVIEW = CONFLICT_POLICIES
+CONFLICT_POLICY_DEFAULT = POLICY_HUMAN_REVIEW   # §6 出廠值
+# 🔴 DEF-200-206 ③：PRD §6 的鍵此前**零 env 讀取路徑**（改設定不生效）。鍵名跟隨全庫
+# `AUTOCLAUDE_*` 慣例（同 ① 對 `STATE_RETAIN_VERSIONS` 的修憲方向），PRD 同批對齊。
+CONFLICT_POLICY_ENV = "AUTOCLAUDE_CONFLICT_POLICY"
+
+
+def conflict_policy_from_env(environ: Mapping[str, str] | None = None) -> str:
+    """`CONFLICT_POLICY` 的讀取路徑。未設 ⇒ 出廠值；設了非法值**原樣回傳**——讓
+    `scan_queue()` 的不變式 11 把它報成 boot problem（fail-loud、非零退出碼），而不是
+    在這裡靜默退回出廠值（那會讓「設錯」與「沒設」外觀相同）。"""
+    env = os.environ if environ is None else environ
+    raw = (env.get(CONFLICT_POLICY_ENV) or "").strip()
+    return raw or CONFLICT_POLICY_DEFAULT
 
 # 🔴 「DRAINING 以上」在本實作的等價述詞。根層唯一對映登記在
 # `tools/lib/quota_gate.py::DRAINING_BANDS = (BAND_PREPARE, BAND_HALT)`；`.importlinter`
@@ -104,12 +122,25 @@ def scan_queue(queue: Sequence[dict], *, conflict_policy: str = CONFLICT_POLICY_
     # 🔴 重排必須先過額度閘：重排會派工、派工會燒額度。啟動當下已在 DRAINING 以上
     # ⇒ **只登記不重排**（§4.4.2 逐字既有的「DRAINING 以上禁止啟動衝突解決任務」，
     # 此處只是把它接到開機這一刻）。DRY_RUN 同樣只登記（G5：真的不動作）。
-    hold = band in DRAINING_BANDS or dry_run or conflict_policy == "HUMAN_REVIEW"
+    # 非法字面已由上方不變式 11 記成 problem ⇒ 這裡把它當 hold（只登記）：不得落到預設的
+    # 重排分支去派工（SD 定點複審：問題與「重排：X」同時印出是自相矛盾的輸出）。
+    hold = (band in DRAINING_BANDS or dry_run or conflict_policy == POLICY_HUMAN_REVIEW
+            or conflict_policy not in CONFLICT_POLICIES)
     if not pending:
         return QueueOutcome(lines=tuple(lines), problems=tuple(problems))
+    if conflict_policy == POLICY_ABORT:
+        # PRD §6 區塊 11 的第三值：有殘留整合項就**拒絕啟動**——不重排（那是派工）、
+        # 也不只是登記（那是 HUMAN_REVIEW）；清單照列，讓人知道要清什麼。band／DRY_RUN
+        # 不改變這個判決：拒絕啟動不派工、不寫 worktree，與兩者的守則相容。
+        lines += [f"ABORT：{b}" for b in pending]
+        problems.append(
+            f"CONFLICT_POLICY=ABORT 且有 {len(pending)} 筆待整合殘留項 ⇒ 拒絕啟動"
+            "（先清掉佇列，或改 RETRY_WITH_AGENT／HUMAN_REVIEW）")
+        return QueueOutcome(listed_only=tuple(pending), lines=tuple(lines),
+                            problems=tuple(problems))
     if hold:
         why = ("band=" + band if band in DRAINING_BANDS else
-               "DRY_RUN" if dry_run else "CONFLICT_POLICY=HUMAN_REVIEW")
+               "DRY_RUN" if dry_run else f"CONFLICT_POLICY={conflict_policy}")
         lines += [f"只登記不重排（{why}）：{b}" for b in pending]
         return QueueOutcome(listed_only=tuple(pending), lines=tuple(lines),
                             problems=tuple(problems))

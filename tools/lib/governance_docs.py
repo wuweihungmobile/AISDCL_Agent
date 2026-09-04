@@ -421,6 +421,17 @@ _GOVERNANCE_DOCS = (
     # 上列的護欄層淨額標記姊妹檔（`guard-total:` 站點之一），與同輪 `R126_HANDOFF.md` round-label-ok
     # 共同滿足「兩份不同檔」的最低站數；途中發現亦住此（⇒ 體積守門）。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R126_Scan_Findings.md",
+    # R127 守衛線搬遷抵銷包（round-label-ok）：兩支鎖檔＋三支生產護欄檔的歷史沿革散文
+    # **逐字保全**的唯一居所（⇒ 體積守門——原處只留一行指標），且逐節寫出「某段原文原處
+    # 是哪支檔哪個符號」的座標宣稱（⇒ 指針稽核）。資格與 R122 同名檔逐字同一份。 round-label-ok
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R127_Guard_Prose_Migration.md",
+    # R127 落地輪結案存證（round-label-ok）：三筆 fixed 的落地取證、三方設計複審條件承接與
+    # 逐筆針對測試實跑輸出唯一居所在本檔（⇒ 體積守門），帳本各列以 `§DEF-ID` 座標宣稱指向
+    # 本檔（⇒ 指針稽核）。即刻登記，同 R121～R126 姊妹檔判例。 round-label-ok
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R127_Debt_Closure.md",
+    # 上列的護欄層淨額標記姊妹檔（`guard-total:` 站點之一），與同輪 `R127_HANDOFF.md` round-label-ok
+    # 共同滿足「兩份不同檔」的最低站數；回歸鎖軌對帳、途中發現與 U9 勘查座標亦住此。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R127_Scan_Findings.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/{CrossPlatform,Quota}_*.md`。這**不是**把具名

@@ -2,27 +2,7 @@
 """ONBOARDING.md §7「表① live 格」↔ 機器實測值的新鮮度機械鎖
 （R60 Scan-D D-01 根治 → R60 ARCH-R60-03／SA-R60-01／SD-R60-09 擴面與改形）。
 
-WHY（為何非得有這道鎖）：
-  「文件裡寫死機器可以現場算出來的數字」在本 repo 已是**慣犯家族**——
-    - DEF-101-289：ONBOARDING §7 基線落後實測（P3）；
-    - DEF-101-515：§7 整張表只有 macOS 單邊、容差宣稱主動誤導（P2）；
-    - R60 Scan-D D-01：§7 Windows 基線表的 LOC 那格寫 `total=20356`，實測 `20359`
-      ——而且在 **R59 自己的收尾 commit 樹上就已經 stale**；
-    - R60 ARCH-R60-03／SA-R60-01：**本鎖的第一版只鎖一格**，同一張表另外四格全部
-      stale（3740→3756、661→756、1725→1736、248→249），其中根層那格更與同 repo 的
-      `tools/run_root_unittests.MIN_TESTS`（已重釘 756）直接矛盾。「為一格加鎖」反而
-      讓另外四格更容易被誤讀成「有鎖所以可信」。
-  歷輪的處置全是「人工回填一次」，所以家族每隔幾輪就原地復發。
-
-本輪（R60 round 2）改形三件事：
-  1. **改為錨點表驅動**：判定邏輯與「有幾格受鎖」解耦，收在
-     `tools/sync_onboarding_baselines.py::_SPECS`。表格新增一格 ≠ 新增一支鎖
-     （ARCH-R60-09(d) 的方向），只需在該處加一筆錨點。
-  2. **新增第二格**：根層 `run_root_unittests` 測試數，取值來源＝該檔的 `MIN_TESTS`
-     （現成 SSOT，import 後比對，成本近零）。
-  3. **補上產生器那半邊**（SD-R60-09）：`sync_onboarding_baselines.py --write` 一鍵
-     回填，`--check` 供本鎖與人工消費，兩者共用同一份取值邏輯 ⇒ 不可能一邊算 A、
-     另一邊算 B。形狀對齊 repo 既有慣例（`snapshot_sync.py` + CI `--check`）。
+WHY 與 R60 round 2 改形三件事：沿革已搬至 CrossPlatform_R127_Guard_Prose_Migration.md。
 
 判準邊界（誠實劃界，比照 check_pytest_baseline_sites.py docstring 風格）：
   - **只鎖帶錨點的行**：`loc-baseline-live:`（LOC 三數字）與 `rootunit-baseline-live:`
@@ -44,10 +24,8 @@ WHY（為何非得有這道鎖）：
     （SD-R60-09 附帶項）。取值來源真的壞掉（印不出 JSON）則拋 `BaselineToolError`，
     與 stale 分開回報。
 
-檔名說明：本檔名沿用 R60 落地時的 `..._loc_baseline_...`，內容已泛化為整張表①。
-  刻意不改名——改名會動到 ONBOARDING §7 內對本檔的具名引用與其他包的並行變更面，
-  屬無淨收益的擾動（Rule 3）。要判斷本鎖實際守了哪幾格，看
-  `sync_onboarding_baselines._SPECS`，不要看檔名。
+檔名說明：沿用 R60 檔名、內容已泛化為整張表①；要判斷本鎖守了哪幾格看
+  `sync_onboarding_baselines._SPECS`，不要看檔名（不改名的理由已搬至同上搬遷檔）。
 
 執行：python3 -m unittest discover -s tools/tests -p "test_*.py" -v
 """
@@ -60,6 +38,7 @@ import hashlib
 import inspect
 import io
 import json
+import os
 import re
 import subprocess
 import sys
@@ -1995,17 +1974,7 @@ class TestR67SlowMeasurementWindowIsFingerprintBracketed(unittest.TestCase):
 
 
 # ---------------------------------------------------------------- R69：ADR 內量測 token ↔ 現查
-# 🔴 為何非得有這一條（R69 Architect 實測命中，同型第三次復發）：
-#   R68 把「閘門全綠」寫進 commit message，事後複現不出來；R69 的 `ADR-XPLAT-003` 把同一個
-#   毛病**搬進了 ADR**——該 ADR 表頭自陳「記錄的是已合入工作樹並實測綠的異動」、§3 又逐字
-#   引述 `ADR-XPLAT-002` §1.1「以行數下降為成果的宣稱必須前後各量一次」並宣稱「本節照辦」，
-#   而它寫下的 `total=20415`／`3923 passed` 在交付樹上一個都複現不出來（實測 20436／3929）。
-#   受害者不是潔癖：ADR 是**寫給未來每一輪照抄重跑**的文件，數字錯了，照它驗證的人會把
-#   正常狀態讀成退化，或反過來把凍結讀成已解除（本例正是後者：「餘裕 23 行」讓讀者以為
-#   生產碼可以再寫，實際餘裕 2 行、凍結完全沒解除）。
-#   同族前科：DEF-101-289／DEF-101-515（ONBOARDING §7）、`ADR-XPLAT-002` §4.3.1 的成長率
-#   常數（R67 round 4 拔除）、`run_root_unittests.MIN_TESTS` 一輪三釘。**共同形態＝
-#   「文件寫死機器當場可以算出來的數字」**，故本鎖與本檔正職同源、同檔、共用取值來源。
+# 為何非得有這一條（R69 立案）：沿革已搬至 CrossPlatform_R127_Guard_Prose_Migration.md。
 #
 # 判準（誠實劃界）：
 #   ① `total=／baseline=／cap=` ⇒ 必須**逐字等於**現查值。取值來源＝本檔正職已在用的
@@ -2399,14 +2368,7 @@ class TestR67R3ThisFileMakesNoUnstatedPlatformAssumption(unittest.TestCase):
 #: 逐字取自 `AutoClaude/logs/nightly_latest.log` 第 488~494 行（2026-08-02 那一輪的真實
 #: 收尾段，Windows 11 真機 Task Scheduler `AutoClaude_Nightly` 產出）。整支 log 實測 494 行，
 #: 彙總行落在**第 491 行**——首版探針只讀前 3 行，這就是它結構上永遠打不中的那 488 行差距。
-#:
-#: 🔴 provenance 訂正（本批）：上一批的同一句註解宣稱「488~494 行」，實際**靜默丟掉了第
-#: 493 行**（`END observation progress: …`）——七行只放了六行。這種「宣稱逐字、其實刪過」
-#: 正是本檔整章在治的病（宣稱與資料不符），且丟掉的偏偏是**唯一帶 `unique-sha` 觀察期進度
-#: 的那行**：它與 win32 strict 樣式擦身而過（`END observation …` 不是 `END nightly
-#: summary:`），若當初就在樣本裡，反而能多證一件事——strict 不會誤吃同前綴的鄰行。現已補回。
-#: 該檔 untracked（`AutoClaude/.gitignore: logs/`）故本測試不能讀它比對；落地當下以
-#: `python -c "...read().splitlines()[487:494]"` 逐行核對過，輸出貼在本批回報中。
+#: provenance 訂正（七行曾只放六行）沿革已搬至 CrossPlatform_R127_Guard_Prose_Migration.md。
 _REAL_WIN_NIGHTLY_TAIL = """\
 [2026-08-02 21:54:01][INFO] ===== Stage start: Cleanup =====
 [2026-08-02 21:54:01][INFO] 保留既有 container: autoclaude_pg（非本腳本建立）
@@ -2662,31 +2624,8 @@ _IRON_LAW3_UNCOVERED: tuple[str, ...] = (
     # `tools/tests/test_platform_neutral_paths.py::TestIronLaw3NoMechanismClaimsAreFalsifiable`
     # ——每一格自陳沒人守者必須登記一組證偽探針（token × 已審視清單）並通過它。
     #
-    # 🔴 R85：`shell=True` 的原生殼差異**已補上機械物**，故自本清單移出 ⇒ 分子 +1
-    # （合法路徑：補了掃描器就改該列的機械物欄，不是把整列拿掉——拿掉會讓分母降而轉紅）。
-    # 機械物＝`AutoClaude/tests/execution/test_shell_portability_contract_r85.py`
-    # （執行期診斷 `portability_note()` ＋ 兩個執行面的射程普查 ＋ 以真實 playbook 為母體
-    # 的假紅普查）。同時訂正 R80 登記時寫下的兩句話：①「存量掃描**結構上**量不到它」
-    # 過寬——指令內容確實不在 repo 裡，但**入口只有 2 個、可列舉**，且 `evaluator_command`
-    # 的真實母體就在 repo 裡（實測 9 支 playbook／19 值）；真正不在 repo 裡的只有
-    # `condition_evaluator`（全庫 YAML 內 0 次，唯一產生者是 LLM 突變 schema），已由該段
-    # prompt 的正規化涵蓋。②與 `test_evaluator_kill_tree.py` 的「同關鍵字不同主題」判讀
-    # 仍然成立，故那筆留在證偽探針的「已審視並判定不算」清單裡——**不是**因為它被推翻，
-    # 而是那張清單隨本列一起移除（見 `_IRON_LAW3_UNCOVERED_EVIDENCE` 的 stale 判準）。
-    # 🔴 R79：`.ps1` 方向的行尾**已補上機械物**（PostToolUse hook 寫入當下補回 CRLF ＋
-    # 根層 unittest 事後量工作樹），故從本清單移出、該列的機械物欄同步改寫 ⇒ 分子 +1。
-    # 這是本表雙單邊棘輪設計裡唯一合法的「分子上升」路徑：補了掃描器就改機械物欄，
-    # 不是把整列拿掉（拿掉會讓分母降而轉紅）。
-    #
-    # 🔴 R80（包 B）：`行尾（**`.py` 方向**` 也自本清單移出——但它與上面三項的成因不同，
-    # 值得分開記：R79 把它登記成「新發現的無守門危害類」，而**那句話本身就不真**。
-    # 守門的類別（`TestWorktreeEolMatchesPolicy`）一直都在，只是被 `_EOL_LF_SCOPE` 窄化成
-    # 只看 `.sh`／`.bash`，而且該類還有一條 `assertNotIn(".py", policy)` 把「`.py` 必須被
-    # 放行」釘成契約 ⇒ **有鎖在守假話**：檔案在、判準在、測試全綠，只有讀完那個常數才知道
-    # `.py` 從來不在射程裡。本輪以獨立射程承接（`TestActiveSourceEolIsRatchetedSeparately…`：
-    # 活躍面止血、凍結面只登記），分子 +1。
-    # 同時訂正它的量：R79 記的 4,176 只是 `.py` 這一塊，全庫工作樹行尾與宣告不符者當回合
-    # 實測 18,255 支、其中約 95% 落在 Copy-on-Evolve 凍結面 ⇒「全部就地轉 LF」不是修法。
+    # R79／R80／R85 三筆自本清單移出的沿革（含「有鎖在守假話」的 .py 行尾一案）已搬至
+    # CrossPlatform_R127_Guard_Prose_Migration.md；合法路徑不變＝補了掃描器就改機械物欄。
 )
 #: 鐵律三對照表的表頭（定位那**一張**表，不是 CLAUDE.md 內所有表格）。
 _IRON_LAW3_TABLE_HEAD = "| 觸發項 |"
@@ -2703,51 +2642,16 @@ _IRON_LAW3_NO_MECHANISM = "無機械物"
 #: 以及兩個新登記且**當輪就有掃描器**的危害類中的 shebang×行尾；naive 本地時間戳那一列
 #: 同樣是新增即有掃描器 ⇒ 實際分子為 13，此處只釘到 12 是**刻意留一格**：並行工作包
 #: 若在本輪同時動到這張表，釘到剛好等於現值會讓兩邊互相判紅。地板是下界不是等號。
-#: R81（包 G）：12 → 17。分子 +5＝git 路徑列舉的非 ASCII 引號化、BSD/GNU coreutils
-#: （`.sh` 那面本來就有掃描器，本輪補上 workflow inline `run:` 這第二個掃描面）、
-#: 單平台專屬 API 詞彙表（表驅動＋後設鎖）、排序鍵影響雜湊、文字模式檔案 I/O 編碼
-#: （最後一項是**訂正低報分子**：判準與逐檔棘輪早就在，R81 掃描路把它讀成「無人守」）。
-#: 實際分子為 18，仍照既有慣例留一格給並行包。
-#: 🔴 R84（W8／SD-08）：17 → **18**（＝當輪現值，緩衝歸零）。理由是實測的：
-#: `iron_law3_coverage()` 回 `(18, 20)` 而兩個 floor 是 `(17, 19)` ⇒ CLAUDE.md 該段逐字
-#: 承諾的「拆掉一支掃描器 ⇒ 分子降 ⇒ 紅」「刪掉一列已知危害 ⇒ 分母降 ⇒ 紅」**今天各有
-#: 一次免費額度**（18→17、20→19 皆靜默通過），而單向性正是這條棘輪唯一的存在理由。
-#: 落後的成因是結構性的、會反覆發生：補了掃描器的人只改表，沒有任何東西提醒他調 floor
-#: ⇒ 同輪一併補上「floor 自己過期」的上界判準（`_IRON_LAW3_FLOOR_STALE_SLACK`），
-#: 讓下一次忘記調 floor 當場轉紅，而不是又留一格給下一輪。
-#: 🔴 R84（C2 收斂）：18 → **19**（＝重釘為當輪現值）。分子 +1＝新登記的「hook 行程生出來
-#: 的子行程配到 console 視窗」那一列**連同兩支掃描器一起落地** ⇒ 分子與分母同步各 +1。
-#: 🔴 R85 收尾單人窗口：19 → **21**（＝當輪現值，`_IRON_LAW3_FLOOR_STALE_SLACK` 逐字指示）。
-#: 分子 +2，兩筆成因不同，刻意分開記：
-#:   ① `shell=True` 原生殼差異——R80 誠實登記為無人守（分母 +1 分子不動），**R85 補上機械物**
-#:      （`AutoClaude/tests/execution/test_shell_portability_contract_r85.py`）
-#:      ⇒ 分子 +1 而分母不動。
-#:      這是本表雙單邊棘輪唯一合法的「只有分子上升」路徑。
-#:   ② 新登記的危害類「單平台專屬**外部執行檔的 argv[0] 字面**」**連同掃描器一起落地**
-#:      ⇒ 分子分母同步 +1（同 R84 console 視窗那一列的形狀）。
+#: R81 12→17／R84 17→18→19／R85 19→21 的逐格沿革已搬至 CrossPlatform_R127_Guard_Prose_Migration.md。
 _IRON_LAW3_COVERED_FLOOR = 21
 #: 分母＝**已登記**的危害類數，只准上升（刪列來讓數字好看即紅）。未覆蓋數＝分母−分子，
 #: 刻意**不設上限**——那正是舊判準把「還有幾類沒人守」與「我們知道有幾類危害」綁死的地方。
-#: R79：8 → 12（`.py` 行尾、exec bit、目錄項原語三類新登記；`.ps1` 行尾那一列原本就在表上）。
-#: R80（包 B）：12 → 14。分母 +3＝shebang×行尾、naive 本地時間戳被持久化、
-#: `shell=True` 原生殼差異（三類此前一格判準都沒有，前兩類本輪連同掃描器一起落地、
-#: 第三類誠實登記為無人守）。同上，釘到比現值低一格以容忍並行包同時擴表。
-#: R81（包 G）：14 → 19。分母 +5＝與上面同五列（五類此前一格都不在這張表上，
-#: 其中四類本輪連同掃描器一起落地、一類是訂正低報）。實際分母為 20，同樣留一格。
-#: 🔴 R84（W8／SD-08）：19 → **20**（＝當輪現值）。理由同上一個常數，不重複。
-#: 🔴 R84（C2 收斂）：20 → **21**。分母 +1＝上一個常數註解裡那一列（新危害類「hook 子行程
-#: 配到 console 視窗」），該列本輪連同掃描器一起落地，故分子分母同升。
-#: 🔴 R85 收尾單人窗口：21 → **22**。分母 +1＝新危害類「單平台專屬外部執行檔的 argv[0]
-#: 字面」（見上一個常數的 ② 條）。**注意分子本輪 +2 而分母只 +1**——差額來自 `shell=True`
-#: 那一列由「已登記但無人守」轉為「已登記且有人守」，那一列早在 R80 就進了分母。
+#: R79 8→12／R80 12→14／R81 14→19／R84 19→21／R85 21→22 的逐格沿革已搬至
+#: CrossPlatform_R127_Guard_Prose_Migration.md。
 _IRON_LAW3_KNOWN_FLOOR = 22
 
-#: 🔴 R84（W8／SD-08）：兩個 floor **自己過期**的上界判準（阻塞）。
-#:
-#: 缺陷本體與 `SPECIAL_STALE_SLACK`／`_GUARD_LINE_STALE_SLACK` 逐字同型：單邊棘輪只會腐化
-#: ——現值往上跑而 floor 留在原地時，那段落差就是**預先發放的成長額度**，日後可以無聲地
-#: 用回去，而 CLAUDE.md 對外承諾的單向性在那段區間內是假的。R84 實測：落差各 1 格，
-#: 於是「拆掉一支掃描器就紅」需要拆**兩支**才會紅。
+#: 🔴 R84（W8／SD-08）：兩個 floor **自己過期**的上界判準（阻塞）。缺陷本體與 R84 實測
+#: 沿革已搬至 CrossPlatform_R127_Guard_Prose_Migration.md。
 #:
 #: 為什麼是 1（三個邊界都可查，故這個數字不是載重件）：
 #:   ① **下界**：必須 ≥ 1。本檔既有慣例明文「釘到比現值低一格以容忍並行包同時擴表」
@@ -2989,15 +2893,9 @@ def unnamed_registered_hook_problems(
 ) -> list[str]:
     """根 `.claude/settings.json` 註冊了、而根 CLAUDE.md 一行都沒提到的 hook（空＝通過）。
 
-    🔴 **這是 `hook_claim_problems()` 的第三向（R79 收斂包）**。前兩向的掃描面都是
-    `hook_scripts_named_in(CLAUDE.md, …)`——**只檢查文件裡有被點名的那幾支**。於是
-    「已註冊、但文件從頭到尾沒提」這個組合結構上落在兩向之外：兩向都不會觸及它。
-
-    代價已實測：`lint_powershell_command.py` 自 R77 上線起就在根層攔 PowerShell 指令
-    （鐵律二與「讀 rc 不接管線」的唯一機械物），而 R79 掃描時根 CLAUDE.md 全檔提到
-    hook 的地方只有鐵律一那一處 ⇒ 那兩節讀起來都像純自律。方向與慣見的相反但同樣是
-    假圖像：不是「宣稱一個不存在的機械物」，是**有機械物卻被記成沒有**，而下一輪很
-    可能為它們再蓋一支攔截器（同一份知識住兩個家，R73 `Find-GitBash` 的復發形態）。
+    這是 `hook_claim_problems()` 的第三向（R79 收斂包）：前兩向只檢查文件裡被點名的那幾支，
+    「已註冊、但文件從頭到尾沒提」落在兩向之外。立案實測沿革已搬至
+    CrossPlatform_R127_Guard_Prose_Migration.md。
 
     分母刻意是 `settings.json` 現查出來的註冊集合（會變的量測值），不是寫死清單——
     新增 hook 忘了寫文件會當場紅，而拿掉 hook 不會留下一筆要人回收的登記。
@@ -3068,20 +2966,8 @@ class TestR79EveryRegisteredHookIsNamedInClaudeMd(unittest.TestCase):
 
 # ── R75 訂正：具名機械物鎖的三面擴張（幽靈機械物 4 筆的逃逸路徑）─────────────
 #
-# 🔴 缺陷本體：原判準是「掃根 CLAUDE.md、要求反引號、副檔名只認 `.py`、只斷言檔案存在」。
-# 四個縫各自漏了東西，實測逃逸 4 筆（Architect／SA 實查，本輪以探針全部重現）：
-#   ① 掃描面只有根 CLAUDE.md ⇒ `tools/*.py` 註解與 `tools/*.json` 的 `_why` 裡指認機械物
-#      的宣稱完全不在視野內。逃逸：`archive_defect_log.py` 與 `check_defect_log_crossref.py`
-#      各指向一支從未存在的 `test_defect_log_capacity_policy_r68.py`（R68 落地時
-#      `tools/tests` 鎖檔數棘輪擋下新增鎖檔，判準併進了 `test_archive_defect_log.py`，
-#      指標卻留在原本打算開的檔名上）；`scheduled_task_expectations.json` 同型。
-#   ② 副檔名只認 `.py` ⇒ 根 CLAUDE.md 對 `install_windows_nightly.ps1` 寫了 `AutoClaude/`
-#      前綴（該安裝器住 monorepo 根層 `tools/`），三個解析基準都找不到，卻因為是 `.ps1`
-#      而不被檢查。
-#   ③ 只斷言「檔案存在」⇒ **「檔案在、但守的是別的東西」照樣通過**。鐵律三 `行尾` 列
-#      具名 `test_ps1_bom.py`，而該檔全篇是 .ps1 的 UTF-8 BOM 政策，對 CRLF／行尾零判準。
-#      這一種比指向不存在的檔更難看見：路徑點得開、檔案打得開，只有讀完才知道守錯東西。
-#   ④ `::Symbol` 從不驗證 ⇒ 類別改名／搬家後指標靜默失效。
+# 缺陷本體（原判準四個縫、實測逃逸四筆的逐條）已搬至 CrossPlatform_R127_Guard_Prose_Migration.md；
+# 三面擴張＝掃描面加 `tools/*.py`／`*.json`、副檔名加 ps1／sh／json、`::Symbol` 也驗。
 _MECHANISM_CLAIM_MARKS: tuple[str, ...] = ("機械鎖", "機械釘")
 _MECHANISM_EXTS = "py|ps1|sh|json"
 #: 具名機械物引用的形狀：`<路徑>.<副檔名>` ＋ 可選的 `::Symbol`（可多段）。
@@ -3653,14 +3539,8 @@ _SYMBOL_CLAIM_RE = re.compile(
 #: unittest 自己的類名——它們不是本 repo 的符號，卻長得一模一樣。
 _SYMBOL_STDLIB_OK: frozenset[str] = frozenset(
     {"TestCase", "TestLoader", "TestResult", "TestSuite", "TestProgram"})
-#: 引用面（誰會寫出「指認機械物」的句子）。
-#:
-#: 🔴 **R79 收斂包擴面（第二條逃逸縫）**：R78 把判準的**token 形狀**由「反引號路徑」擴到
-#: 「反引號 Python 識別字」，但引用面自始至終只有 `.py`。實測後果：引發整個 R78 C 包的
-#: 那個常數（護欄層檔數棘輪，全庫零定義）當時仍活在 10 支 `docs/` 檔共 14 處，其中
-#: `Skipped_Test_Inventory_R76.md` 把它當**現行**約束在陳述，而那個語意早已被推翻
-#: ——照著讀的人會把新鎖放到別的樹去（R79 實測這件事已經發生）。
-#: 「形狀對了、但那個形狀出現的地方不在掃描面內」＝同一個病的第二個住所。
+#: 引用面（誰會寫出「指認機械物」的句子）。R79 擴面（第二條逃逸縫）的立案沿革已搬至
+#: CrossPlatform_R127_Guard_Prose_Migration.md。
 #:
 #: 為何是**活文件白名單**而不是整棵 `docs/`（誠實劃界，不是偷懶）：
 #:   · 收錄的四類都是**下一輪會被當指令讀**的檔——成熟度 SSOT、skip 盤點、交棒書、ADR。
@@ -3675,15 +3555,8 @@ _SYMBOL_REF_GLOBS: tuple[str, ...] = (
     "docs/04_planning/ADR/*.md",
 )
 #: 定義面（符號可能住在哪）。刻意比引用面寬：跨層引用（測試提生產碼的常數）是常態。
-#:
-#: 🔴 **R79 收斂包補三棵樹**（每一棵都是當回合實測抓到的偽陽性來源，不是預防性擴面）：
-#:   · `.claude/hooks/*.py`——**整個 hook 層的符號在本索引裡等於不存在**。實證：R79 的
-#:     觀測者包在鎖檔裡以反引號指名 `_RC_RESET_RE`（真的定義在
-#:     `.claude/hooks/lint_powershell_command.py`），主牙把它判成幽靈符號並讓根層閘門轉紅。
-#:     偽陽性比漏報更致命——它會逼下一個人把整道鎖關掉（本檔上方已為此付過學費）。
-#:   · `AutoClaude/tests/**/*.py`／`AISDLC_SDD/scripts/**/*.py`——skip 盤點與 ADR 大量以
-#:     **模組名**指認測試（`test_pgvector_recall_perf` 這種），那些模組真的存在、只是住在
-#:     這兩棵沒被收進來的樹裡。擴面後 20 個此類名字一次消失。
+#: R79 補三棵樹（每一棵都是當回合實測抓到的偽陽性來源）的沿革已搬至
+#: CrossPlatform_R127_Guard_Prose_Migration.md。
 #: 刻意**不**收整棵 `AISDLC_SDD/`：該樹底下有數千支 venv／快取 `.py`（姊妹鎖
 #: `test_platform_utils_dedup._scan_repo_py_for` 實測 4,829 支），全掃既慢又得養排除清單。
 _SYMBOL_DEF_GLOBS: tuple[str, ...] = (
@@ -3695,25 +3568,15 @@ _SYMBOL_ASSIGN_RE = re.compile(r"^\s*(\w+)\s*(?::[^=\n]+)?=", re.M)
 #: 🔴 **具名基線豁免**（grandfathered）——形狀與理由逐字沿用本 repo 既有慣例
 #: （`test_adr_xplat001_c1c2_lock._BASELINE_WAIVERS`：舊列具名登記、新列一律硬擋）。
 #:
-#: 為何不是「一上線就全紅」：本判準落地當回合實測，`tools/**` 既有的幽靈符號有數十個
-#: 名字、散在六十餘處，全部來自歷輪的重構與改名。鎖若一上線就對它們全紅，下一個人會直接
-#: 把鎖關掉／加 `@skip`——那樣連「硬擋新幽靈」這個真正的價值也一起賠掉（R60 為同一個取捨
-#: 寫過同一段話）。
+#: 為何不是「一上線就全紅」（存量數十個名字、散在六十餘處）：沿革已搬至
+#: CrossPlatform_R127_Guard_Prose_Migration.md。
 #:
 #: 兩道自檢確保它不會變成永久豁免（`TestR78GhostSymbolClaims` 各有一支）：
 #:   (a) **只准變少**：不在表上的幽靈名一律硬擋，表本身不得因為「順手加一筆」而長大。
 #:   (b) **stale 自檢**：表上的名字若①現在解析得到了（有人把符號補回來／改對了），或
 #:       ②整個 repo 已經沒有任何一處引用它了，都必須把那一筆**刪掉**，否則紅。
 #:       豁免只能因為「還沒清乾淨」而存在，不能因為「沒人記得回收」而存在。
-#: 🔴 **R79 收斂包同一次變更的兩個方向**（兩個方向都必須做，只做一半會是假帳）：
-#:   · **刪 4 筆**（`_ADDITIONAL_RISKY_NAMES`／`_PG_REAL_ENABLED`／`_SDD_PRESENT`／
-#:     `test_enforce_docs_path_blocks_chinese_path_under_cp950`）——定義面擴到三棵新樹之後
-#:     它們**解析得到了**，(b) 那道 stale 自檢會直接判紅要求刪除。
-#:   · **加 5 筆**（下方標 `R79-docs` 者）——引用面擴到 `docs/` 活文件之後才**第一次看得見**
-#:     的存量。這不是「問題變多」而是「視野變大」，同 `_IRON_LAW3_KNOWN_FLOOR` 那條雙單邊
-#:     棘輪的立案理由；為了不讓這個藉口被重複使用，加筆的代價由下方
-#:     `_GHOST_SYMBOL_BASELINE_CEILING` 這道 shrink-only 天花板承擔（形狀抄
-#:     `test_subprocess_encoding_hygiene._ENTRY_WAIVER_CEILING`）。
+#: R79 同一次變更「刪四加五」兩個方向的沿革已搬至 CrossPlatform_R127_Guard_Prose_Migration.md。
 _GHOST_SYMBOL_BASELINE: frozenset[str] = frozenset({
     "TestGuardFileCountShrinkOnlyRatchet",   # R79-docs：ADR-XPLAT-002 §8 item 12 的沿革
     "_CALL",
@@ -3752,18 +3615,8 @@ _GHOST_SYMBOL_BASELINE: frozenset[str] = frozenset({
 #: 對「順手多登記一筆新幽靈」零訊號，而那正是這道鎖最省力的關法。
 #: 擴掃描面而多看見存量時，重釘本值並在交件回報寫出前後值與理由（同 `_FROZEN_GUARD_LINES`
 #: 的重釘紀律）；**不得**為了讓一筆新寫下的懸空引用過關而調高它。
-#: 🔴 R85 P2：33→32（**收緊**）。TREE_FLOOR_RATIO 那一筆已無引用（本輪把 schedule
-#: parity 的下限第二個家改成直取 SSOT）⇒ 依 stale 向的指示刪除，天花板同步降到現值。
-#: 🔴 R89 收尾：32→31（**收緊**）。`test_main_separates_vague_rows_from_valid_count_and_
-#: does_not_fail` 那一筆的唯一引用是一段史料敘述，該段本輪已遷入 R89 收尾證據檔 ⇒ 全引用
-#: 面歸零、幽靈清乾淨，依 stale 向的指示刪除，天花板同步降到現值。
-#: 🔴 R95 收尾：31→30（收緊，體例同上）——DescendantWatcher 樣本類的唯一引用已隨史料搬遷離開掃描面。
-#: 🔴 R115 收斂棒 round-label-ok：30→29（收緊，體例同上）——上一筆已刪除那個舊測試類名字的唯一引用
-#: （`test_dev_start.py` 內某類 docstring 的一句歷史敘述）本輪隨類級 docstring 沿革
-#: 搬遷（見 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok dev_start
-#: TestAcquireBootstrapLockPartialAliveMiddleState WHY〉節）離開掃描面，全引用面歸零、
-#: 幽靈清乾淨，依 stale 向的指示刪除，天花板同步降到現值（本行刻意不覆述那個名字本身
-#: ——反引號包住它會讓本檔自己的幽靈符號掃描器把這句 WHY 誤判成新的一筆待清幽靈）。
+#: 33→32→31→30→29 的逐格收緊沿革（R85／R89／R95／R115）已搬至 round-label-ok
+#: CrossPlatform_R127_Guard_Prose_Migration.md。
 _GHOST_SYMBOL_BASELINE_CEILING = 29
 
 _SYMBOL_INDEX_CACHE: dict[str, frozenset[str]] = {}
@@ -4140,13 +3993,8 @@ def _entries(directory: Path) -> frozenset[str]:
 #: 這一問要跑 subprocess，而本檔的平台中立性鎖會把全檔重跑 3 次。
 _MACHINE_LOCAL_CACHE: dict[str, bool] = {}
 
-#: git 取數失敗時的紅燈訊息。🔴 **為何這一條 fail-loud，而同檔的 `_git()` 對「git 不在」
-#: 是回 None**——兩種政策不衝突，因為 git 在兩處扮演的角色根本不同：
-#:   · `_git()` 拿 git 當**證據**（這個 sha 是不是真 commit）。驗不動時「未驗證」不等於
-#:     「宣稱為假」，硬判紅就是 `DEF-101-756` 那個誤讀（本機沒有心跳檔 ≠ 該平台沒跑）。
-#:   · 這裡的 git 是**判準本身的輸入**。沒有它就沒有第三態，而少了第三態的判準會靜默
-#:     退回舊行為——也就是「Windows 綠、mac 紅」那個本節正在治的缺陷本體。降級無聲、
-#:     失效方向又是假綠假紅各半（生成物在的機器假綠、不在的機器假紅）⇒ 只能出聲。
+#: git 取數失敗時的紅燈訊息。為何這一條 fail-loud、而同檔 `_git()` 對「git 不在」回 None
+#: （證據 vs 判準輸入兩種角色）：沿革已搬至 CrossPlatform_R127_Guard_Prose_Migration.md。
 _GIT_CHECK_IGNORE_UNAVAILABLE = (
     "幽靈路徑判準的第三態需要 `git check-ignore`，而它取不到數（{reason}）。"
     "本判準刻意不在此降級：少了第三態，gitignored 的機器本地生成物會依「這台機器跑過"
@@ -4300,22 +4148,10 @@ def prime_machine_local_cache(rels: Iterable[str], repo_root: Path) -> None:
 def is_machine_local_artifact(rel: str, repo_root: Path) -> bool:
     """這條宣稱指的是不是「repo 自己宣告為忽略」的機器本地生成物？
 
-    🔴 這是幽靈路徑判準的**第三態**，不是豁免，兩者的差別是本函式存在的全部理由。
-    立案（R82／P4，mac 側實測 3 支紅）：
-      · `AutoClaude/.g0_readiness.json` 是每晚重生的量測檔且已 gitignore ⇒ 在跑過
-        nightly 的那台 Windows 上**檔在**、在剛 clone 的 mac 上**檔不在**。
-      · `AISDLC_SDD/.claude/settings.local.json` 是 Claude Code 的機器本地設定 ⇒ 方向
-        **恰好相反**（Windows 沒有、mac 有），於是它被登記進豁免表之後，在 mac 上被
-        `stale_path_baseline_problems()` 判成「已解析得到，請刪除登記」。
-    兩筆是同一個病的兩個方向：**判準的分母含機器本地狀態**。舊判準只問「這台機器的檔案
-    系統上現在有沒有這個檔」，所以同一棵樹在兩個平台上一個綠一個紅——而「幽靈與否」本該
-    是 repo 的性質，不是這台機器跑過什麼的性質。
-
-    正解是換掉量測面而不是換掉常數：問 **repo 自己**（`.gitignore` 是 tracked 內容，每台
-    機器逐字相同）「這條路徑是不是生成物」。答 True 的既不是幽靈也不是實體——它是**第三態**：
-    指向它的文件沒有寫錯（讀者在產出它的機器上真的找得到），但這棵樹不保證有它。
-    ⇒ 逐筆加豁免是錯的修法（同一筆登記在 A 機器必要、在 B 機器 stale，兩邊都紅）；
-    ⇒ 改成「mac 上量到的值」更錯（那只是把紅從 mac 搬去 Windows）。
+    🔴 這是幽靈路徑判準的**第三態**，不是豁免。問 **repo 自己**（`.gitignore` 是 tracked
+    內容，每台機器逐字相同）「這條路徑是不是生成物」：答 True 的既不是幽靈也不是實體——
+    指向它的文件沒有寫錯，但這棵樹不保證有它。立案（R82／P4，mac 側兩筆方向相反的紅）與
+    兩種錯誤修法的沿革已搬至 CrossPlatform_R127_Guard_Prose_Migration.md。
     """
     if rel not in _MACHINE_LOCAL_CACHE:
         prime_machine_local_cache([rel], repo_root)
@@ -7125,6 +6961,164 @@ class TestParallelDispatchChecklistIsPinnedInClaudeMd(unittest.TestCase):
                 "\n## 下一節\n")
         hits = dispatch_checklist_problems(text)
         self.assertTrue(any("收尾單人窗口" in h for h in hits), hits)
+
+
+# ── DEF-200-133：tracked 檔的靜態 import 指向「在磁碟、不在 index、也沒被 ignore」的檔 ──
+#: 掃描面（posix 前綴）。刻意不含 `AISDLC_SDD/AISDLC_SDD_v*/`：三十個版本樹的 import 面
+#: 由各版 pytest 自己承擔，且凍結版不可原地改（根 CLAUDE.md〈路徑陷阱〉）。
+_IMPORT_SCAN_ROOTS = ("AutoClaude/", "tools/", ".claude/hooks/", "AISDLC_SDD/scripts/")
+
+
+def python_import_targets(source: str, rel: str) -> list[str]:
+    """一支 `.py` 的靜態 import 展開成候選 repo 相對路徑（posix）。純函式。
+
+    解析 `import a.b`／`from a.b import c`（含相對 import）。候選＝每個解析基準下的
+    `a/b.py`、`a/b/__init__.py`、`a/b/c.py`；基準＝該檔所在目錄的每一層祖先直到 repo 根
+    （對應 pytest rootdir／`sys.path` 常見的注入面：`AutoClaude/tests/x.py` 寫
+    `from tests.helpers import fake_pty` 解到 `AutoClaude/tests/helpers/fake_pty.py`）。
+    誠實劃界：動態 import（`importlib.import_module`／`__import__`／字串拼名）不在射程。
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return []
+    here = PurePosixPath(rel).parent
+    bases = [str(p) for p in (here, *here.parents)]
+    out: set[str] = set()
+
+    def emit(base: str, parts: list[str], names: list[str]) -> None:
+        prefix = "" if base == "." else f"{base}/"
+        stem = "/".join(parts)
+        if stem:
+            out.add(f"{prefix}{stem}.py")
+            out.add(f"{prefix}{stem}/__init__.py")
+        for name in names:
+            out.add(f"{prefix}{stem}/{name}.py" if stem else f"{prefix}{name}.py")
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                for base in bases:
+                    emit(base, alias.name.split("."), [])
+        elif isinstance(node, ast.ImportFrom):
+            parts = node.module.split(".") if node.module else []
+            names = [a.name for a in node.names if a.name != "*"]
+            if node.level:
+                anchor = here
+                for _ in range(node.level - 1):
+                    anchor = anchor.parent
+                emit(str(anchor), parts, names)
+            else:
+                for base in bases:
+                    emit(base, parts, names)
+    return sorted(out)
+
+
+def collect_import_claims(repo_root: Path) -> list[tuple[str, str]]:
+    """掃描面內每支 tracked `.py` 的 (來源檔, 候選路徑)。"""
+    claims: list[tuple[str, str]] = []
+    for rel in sorted(tracked_files(repo_root)):
+        if not rel.endswith(".py") or not rel.startswith(_IMPORT_SCAN_ROOTS):
+            continue
+        try:
+            source = (repo_root / rel).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        claims.extend((rel, cand) for cand in python_import_targets(source, rel))
+    return claims
+
+
+def files_on_disk(repo_root: Path) -> frozenset[str]:
+    """掃描面內磁碟上實際存在的 `.py`，大小寫逐字。
+
+    刻意不用 `Path.exists()`：它在 Windows 不分大小寫，會把只差大小寫的候選當成存在
+    （同 `TestR81GhostPathClaims` 的跨平台牙）。
+    """
+    found: set[str] = set()
+    for root_rel in _IMPORT_SCAN_ROOTS:
+        top = repo_root / root_rel
+        if not top.is_dir():
+            continue
+        for dirpath, dirnames, filenames in os.walk(top):
+            dirnames[:] = [d for d in dirnames
+                           if not d.startswith(".") and d != "__pycache__"]
+            for name in filenames:
+                if name.endswith(".py"):
+                    found.add(Path(dirpath, name).relative_to(repo_root).as_posix())
+    return frozenset(found)
+
+
+def untracked_import_problems(claims, *, tracked, present, ignored) -> list[str]:
+    """判準：候選在磁碟上、不在 index、也沒被 `.gitignore` 排除 ⇒ 漏 `git add`。純函式。
+
+    失效形態＝本機恆綠、fresh clone 的收集期 ImportError（DEF-200-133 立案實測波及 83 支）。
+    """
+    return [
+        f"[未追蹤 import] `{src}` import 到 `{cand}`：檔在磁碟上、不在 git index、"
+        "也沒被 .gitignore 排除 ⇒ 漏 `git add`，fresh clone 的收集期會 ImportError"
+        for src, cand in sorted(set(claims))
+        if cand in present and cand not in tracked and cand not in ignored
+    ]
+
+
+class TestDef200133TrackedImportsDoNotPointAtUntrackedFiles(unittest.TestCase):
+    """DEF-200-133：「已追蹤檔引用未追蹤檔」這一向的判準（Python import 層，AST）。
+
+    受測面＝本檔 `collect_import_claims()`／`untracked_import_problems()`。立案＝
+    `AutoClaude/tests/helpers/fake_pty.py` 漏 `git add`、被兩支 tracked 測試 module 層
+    import。既有 `TestR81GhostPathClaims` 問「檔在不在」，這裡問「檔在、但 repo 不認識它」
+    ——兩個判準的失效方向相反，缺一不可。
+    """
+
+    def test_no_tracked_import_points_at_an_untracked_file(self) -> None:
+        claims = collect_import_claims(_REPO_ROOT)
+        present = files_on_disk(_REPO_ROOT)
+        tracked = tracked_files(_REPO_ROOT)
+        suspects = sorted({c for _s, c in claims if c in present and c not in tracked})
+        ignored = _check_ignore(_REPO_ROOT, suspects) if suspects else frozenset()
+        problems = untracked_import_problems(
+            claims, tracked=tracked, present=present, ignored=ignored)
+        self.assertEqual(problems, [], "\n  ".join(problems))
+
+    def test_the_extractor_is_not_vacuous(self) -> None:
+        claims = collect_import_claims(_REPO_ROOT)
+        self.assertGreater(len(claims), 500, f"只展開出 {len(claims)} 筆候選 ⇒ 擷取器失效")
+        self.assertIn(("tools/tests/test_doc_loc_baseline_freshness_r60.py",
+                       "tools/lib/git_paths.py"), claims,
+                      "連本檔自己的 `from lib import git_paths` 都解不到 ⇒ 基準展開壞了")
+
+    def test_a_present_untracked_unignored_target_is_red(self) -> None:
+        cand = "AutoClaude/tests/helpers/fake_pty.py"
+        hits = untracked_import_problems(
+            [("AutoClaude/tests/test_x.py", cand)],
+            tracked=frozenset(), present={cand}, ignored=frozenset())
+        self.assertEqual(len(hits), 1, hits)
+        self.assertIn("fake_pty", hits[0])
+
+    def test_tracked_ignored_or_absent_targets_are_green(self) -> None:
+        cand = "AutoClaude/tests/helpers/fake_pty.py"
+        claims = [("AutoClaude/tests/test_x.py", cand)]
+        cases = (
+            ("tracked", {"tracked": {cand}, "present": {cand}, "ignored": frozenset()}),
+            ("ignored", {"tracked": frozenset(), "present": {cand}, "ignored": {cand}}),
+            ("absent", {"tracked": frozenset(), "present": frozenset(),
+                        "ignored": frozenset()}),
+        )
+        for label, kw in cases:
+            with self.subTest(label=label):
+                self.assertEqual(untracked_import_problems(claims, **kw), [])
+
+    def test_relative_and_absolute_imports_expand_to_the_expected_candidates(self) -> None:
+        src = ("from .helpers import fake_pty\n"
+               "from tests.helpers.fake_pty import X\n"
+               "import lib.git_paths\n")
+        cands = python_import_targets(src, "AutoClaude/tests/test_x.py")
+        for want in ("AutoClaude/tests/helpers/fake_pty.py",
+                     "AutoClaude/tests/helpers/fake_pty/X.py",
+                     "AutoClaude/lib/git_paths.py", "lib/git_paths/__init__.py"):
+            with self.subTest(want=want):
+                self.assertIn(want, cands)
+        self.assertEqual(python_import_targets("def broken(:\n", "a/b.py"), [])
 
 
 if __name__ == "__main__":

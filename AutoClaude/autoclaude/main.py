@@ -29,6 +29,7 @@ from .execution.boot_self_check import (
     boot_self_check,
     cleanup_merged_worktrees,
     cli_version_verdict,
+    conflict_policy_from_env,
     estimate_freeze_bytes,
     read_cli_version,
 )
@@ -124,6 +125,8 @@ def run_boot_self_check(cfg, *, state_repo, playbook_path: str, quota_meter,
     report = boot_self_check(
         repo=state_repo,
         playbook_id=canonical_playbook_id(playbook_path, mode=cfg.storage.mode),
+        # DEF-200-206 ③：PRD §6 的 CONFLICT_POLICY 從 env 讀（非法值由不變式 11 報紅）。
+        conflict_policy=conflict_policy_from_env(),
         band=band,
         cli_command=cfg.claude.command,
         cli_runner=lambda _argv: (0, version) if version else (127, ""),

@@ -19,13 +19,7 @@ WHY 這支鎖必須有鑑別力（而不只是「有測試」）
 4. **去重**：同一門檻同一 session 只喊一次。少了它，≥94% 之後每次工具呼叫都 exit 2，
    而被關掉的守衛比沒有守衛更糟。
 
-🔴 為何新增一支檔案而不是併進既有鎖檔（照實寫）
-------------------------------------------------
-`tools/tests/test_adr_xplat001_c1c2_lock.py` 的 `_FROZEN_GUARD_LINES` 是逐檔行數棘輪，
-**任何**淨行數上升都會紅（不論新檔或擴充既有檔），合法出口只有「同一次變更刪等量的
-行」或「重釘基準並在交件回報寫出淨額」。本包不刪別人的行，故走後者；而該棘輪自己
-的紀律是「重釘一律由收尾包在所有包停工後做一次」⇒ **重釘不在本包射程內**，交由收尾者。
-本檔因此可能讓該棘輪暫時紅，這是已知且已回報的狀態，不是漏看。
+為何新增一支檔案而不是併進既有鎖檔：沿革已搬至 CrossPlatform_R127_Guard_Prose_Migration.md。
 """
 from __future__ import annotations
 
@@ -178,6 +172,41 @@ def _root_settings() -> dict:
     return json.loads( (_REPO_ROOT / ".claude" / "settings.json").read_text(encoding="utf-8-sig"))
 
 
+def _tmpdir(case: unittest.TestCase, prefix: str = "ctxguard-") -> Path:
+    """`mkdtemp` ＋ `addCleanup(rmtree)`（DEF-200-260）：暫存目錄在測試結束即回收，不留給 OS。
+    `ignore_errors=True`——Windows 上被子行程握住的檔不得讓本體已過的測試轉紅。"""
+    path = Path(tempfile.mkdtemp(prefix=prefix))
+    case.addCleanup(shutil.rmtree, path, True)
+    return path
+
+
+class TmpdirHygieneTest(unittest.TestCase):
+    """DEF-200-260：本檔的 `tempfile.mkdtemp` 只准出現在 `_tmpdir` 內（AST，非字串搜尋）。
+
+    立案＝R96 實測本檔 `mkdtemp` 61 處、`rmtree` 7 處，其餘全靠 OS 回收；改走 helper 後
+    「新站點忘了收」在結構上不可能。
+    """
+
+    def test_every_mkdtemp_in_this_module_goes_through_the_helper(self) -> None:
+        tree = ast.parse(Path(__file__).read_text(encoding="utf-8"))
+        sites = [n.lineno for n in ast.walk(tree)
+                 if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                 and n.func.attr == "mkdtemp"]
+        helper = next(n for n in ast.walk(tree)
+                      if isinstance(n, ast.FunctionDef) and n.name == "_tmpdir")
+        stray = [ln for ln in sites if not helper.lineno <= ln <= helper.end_lineno]
+        self.assertEqual(stray, [], f"裸 mkdtemp 站點（不會被 addCleanup 回收）：{stray}")
+        self.assertEqual(len(sites), 1, "helper 自己那一處不見了 ⇒ 掃描器空轉")
+
+    def test_the_helper_registers_cleanup(self) -> None:
+        """行為驗：掛在另一個 TestCase 上，跑完它的 cleanups 目錄就該不在了。"""
+        case = unittest.TestCase()
+        path = _tmpdir(case, "hygiene-")
+        self.assertTrue(path.is_dir())
+        case.doCleanups()
+        self.assertFalse(path.exists(), "helper 沒把 rmtree 掛進 addCleanup")
+
+
 def _wiring():
     """hook 佈線解析的唯一真相源（延後 import，不進本檔 import 期路徑）。"""
     sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
@@ -199,13 +228,8 @@ def _isolated_env(tmp: Path, *, real_scheduler: bool = False) -> dict[str, str]:
         "TMPDIR": str(tmp), "TEMP": str(tmp), "TMP": str(tmp),
         "USERPROFILE": str(tmp), "HOME": str(tmp), "HOMEPATH": str(tmp),
         "CLAUDE_PROJECT_DIR": str(_REPO_ROOT),
-        # 🔴 R96／B-5：`DEF-200-153` 的根因自陳是「第三方在家目錄下的副作用」，而此前被
-        # 隔離的只有 `USERPROFILE`／`HOME` 那一條路——`APPDATA`／`LOCALAPPDATA` 一律**原封
-        # 繼承開發者的真家目錄**（實測：子行程看到的 APPDATA 逐字是
-        # `C:\Users\<人>\AppData\Roaming`）。任何走 `%APPDATA%` 的第三方（PowerShell 模組
-        # 快取、.NET、pip）因此仍會寫進**真的**那一棵樹：既污染開發者機器，又完全落在
-        # 任何斷言的射程之外（沙箱目錄裡看不到 ⇒ 「沒有副作用」是假的）。
-        # 一個家、兩個呼叫端（`_run_hook3` 與 `PlannerCliTest._run`）自動受益。
+        # APPDATA／LOCALAPPDATA 為何要一起隔離（R96／B-5）：沿革已搬至
+        # CrossPlatform_R127_Guard_Prose_Migration.md〈_isolated_env〉。
         "APPDATA": str(tmp / "AppData" / "Roaming"),
         "LOCALAPPDATA": str(tmp / "AppData" / "Local"),
         # POSIX 側的同一件事：開發者若把 `XDG_*` 顯式匯出成絕對路徑，它們同樣不隨 `HOME`
@@ -354,7 +378,7 @@ class ScanUsageTest(unittest.TestCase):
     """逐行掃描：最後一筆 ＋ 歷來最大，且壞行不得讓整支守衛崩潰。"""
 
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp(prefix="ctxguard-scan-"))
+        self.tmp = _tmpdir(self, "ctxguard-scan-")
 
     def test_last_wins_and_peak_is_the_max(self) -> None:
         path = _write_jsonl(self.tmp / "a.jsonl", [100, 900, 300])
@@ -384,7 +408,7 @@ class HookExitContractTest(unittest.TestCase):
     """端到端：真子行程 × 真 stdin × 真 exit code。"""
 
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp(prefix="ctxguard-e2e-"))
+        self.tmp = _tmpdir(self, "ctxguard-e2e-")
         # 🔴 種 free 帶健康快取＝把額度軸收斂回「量得到且寬鬆」，否則沙箱裡「量不到」
         # 的出聲會打紅三條「必須完全靜默」而紅因與被測性質無關；斷言一個字都沒放寬
         # （`err == ""` 仍逐字成立）。完整 WHY 見證據檔 §I-8（R92 搬出）。
@@ -498,7 +522,7 @@ class PlannerCliTest(unittest.TestCase):
     """交付物 B 的 CLI 契約：`--check` 不寫檔、排程指令只印不執行。"""
 
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp(prefix="ctxguard-cli-"))
+        self.tmp = _tmpdir(self, "ctxguard-cli-")
         self.transcript = _write_jsonl(self.tmp / "s.jsonl", [123_456])
         # 家目錄與被觀測目錄分開（R96），但**觀測面仍是整棵 `self.tmp`**——R96 第一版把
         # HOME 搬進 `self.tmp/home` 之後沿用非遞迴的頂層檔名快照，而 `home` 這個名字在
@@ -628,8 +652,7 @@ class AutocompactPostureTest(unittest.TestCase):
     """
 
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp(prefix="r92-posture-"))
-        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.tmp = _tmpdir(self, "r92-posture-")
 
     def _run(self, extra: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
         env = _isolated_env(self.tmp)
@@ -760,7 +783,7 @@ class SettingsChainTest(unittest.TestCase):
     """settings 鏈的讀取順序，以及本檔 e2e 隔離所依賴的那個前提。"""
 
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp(prefix="ctxguard-settings-"))
+        self.tmp = _tmpdir(self, "ctxguard-settings-")
 
     def _write(self, name: str, body: dict) -> Path:
         path = self.tmp / name
@@ -804,7 +827,7 @@ class LatchRearmTest(unittest.TestCase):
     """R79：分母被修正之後，硬線必須重新武裝。"""
 
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp(prefix="ctxguard-latch-"))
+        self.tmp = _tmpdir(self, "ctxguard-latch-")
 
     def test_a_corrected_window_re_arms_the_hard_tier(self) -> None:
         """R79 缺陷的另一半逐字重建：閂鎖鍵漏了分母，分母修正後硬線再也不喊。
@@ -841,8 +864,7 @@ class CompactBoundaryLatchTest(unittest.TestCase):
     """
 
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp(prefix="ctxguard-compact-"))
-        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.tmp = _tmpdir(self, "ctxguard-compact-")
         _quota_cache(self.tmp, 20.0)
 
     def _run(self, path: Path) -> tuple[int, str]:
@@ -901,7 +923,7 @@ class PreToolUseBlockTest(unittest.TestCase):
     """
 
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp(prefix="ctxguard-block-"))
+        self.tmp = _tmpdir(self, "ctxguard-block-")
         # 🔴 R81 收斂：種健康快取＝額度**量得到而且很寬鬆**，不是把守衛關掉（關掉會讓
         # `stderr == ""` 那幾條失去對額度誤擋的鑑別力）。完整 WHY 見證據檔 §I-8。
         _quota_cache(self.tmp, 10.0)
@@ -1074,7 +1096,7 @@ class SyntheticUsageBlindnessTest(unittest.TestCase):
     cbg SyntheticUsageBlindnessTest WHY〉節。"""
 
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp())
+        self.tmp = _tmpdir(self)
 
     def test_the_synthetic_record_must_not_zero_the_water_line(self) -> None:
         path = _quota_transcript(self.tmp / "hit.jsonl", _REAL_SESSION_LIMIT)
@@ -1224,7 +1246,7 @@ class ResetArithmeticTest(unittest.TestCase):
 
 class LimitEventScanTest(unittest.TestCase):
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp())
+        self.tmp = _tmpdir(self)
 
     def test_the_authoritative_record_is_found(self) -> None:
         path = _quota_transcript(self.tmp / "a.jsonl", _REAL_SESSION_LIMIT)
@@ -1369,8 +1391,7 @@ class PatrolHandbackIsItsOwnOutcomeTest(unittest.TestCase):
         正是用那個前綴篩「哨兵那一種」工作。失效外觀＝哨兵在，但沒有人看得到它（R80
         整晚失明的同一個形狀）。本包實作時就是靠一次手動 smoke 才發現，故補這道鎖。
         """
-        tmp = Path(tempfile.mkdtemp(prefix="handback-"))
-        self.addCleanup(shutil.rmtree, tmp, True)
+        tmp = _tmpdir(self, "handback-")
         plan = tmp / f"{planner.PLAN_PREFIX}sid-lock.md"
         (tmp / "sid-lock.jsonl").write_text("", encoding="utf-8")
         state = {**RelayStateTest.GOOD, "session_id": "sid-lock", "state": "waiting",
@@ -1666,12 +1687,8 @@ class EnduranceWiringTest(unittest.TestCase):
                             f"Windows 上的無 console 載具解析錯了：{guard.quiet_python()}")
 
     def test_the_principal_is_s4u_first_with_a_non_elevated_fallback(self) -> None:
-        """與 `tools/install_windows_nightly.ps1` 的兩支既有工作對齊（該檔 R69 S-5 段）：
-        Interactive 的工作在使用者未登入時整輪不跑，且視窗開在使用者桌面上。
-
-        兩個方向都要鎖：① S4U 必須是**先試的**那一支（回退分支才有意義，否則等於沒改）；
-        ② 回退分支必須存在（非提權下 S4U 會被拒，只掛 S4U 會讓哨兵整條武裝斷掉——
-        那是把一個干擾缺陷換成一個功能缺陷，不是修好）。"""
+        """雙向鎖：S4U 先試、非提權回退分支必須存在（對齊 install_windows_nightly.ps1）。
+        沿革已搬至 CrossPlatform_R127_Guard_Prose_Migration.md。"""
         script = planner.endurance_schtasks_script(_A_PLAN, "T", "'09:00'")
         self.assertIn("-LogonType S4U", script)
         self.assertNotIn("-LogonType Interactive", script)
@@ -1684,7 +1701,7 @@ class EnduranceWiringTest(unittest.TestCase):
         失敗」那一行剛好落在沒人看的那個檔 ⇒ 鍵只能是任務書路徑。
         全文＝Resume 證據檔 §L-4.26。
         """
-        plan = Path(tempfile.mkdtemp()) / "some_plan.md"
+        plan = _tmpdir(self) / "some_plan.md"
         self.assertEqual(planner.endurance_log_path(plan),
                          planner.endurance_log_path(Path(str(plan))))
         self.assertIn("some_plan", planner.endurance_log_path(plan).name)
@@ -1768,8 +1785,7 @@ class ArmEnduranceUsesPerSessionTaskNameTest(unittest.TestCase):
     """
 
     def _armed_task_name(self, session_id: str) -> str:
-        tmp = Path(tempfile.mkdtemp(prefix="arm-endurance-"))
-        self.addCleanup(shutil.rmtree, tmp, True)
+        tmp = _tmpdir(self, "arm-endurance-")
         hit = "You've hit your session limit · resets 3:50am (Asia/Taipei)"
         transcript = tmp / f"{session_id}.jsonl"
         transcript.write_text(json.dumps({
@@ -1971,14 +1987,9 @@ class SentinelDecisionTest(unittest.TestCase):
         self.assertEqual(window, 16 * 60, "語料變了 ⇒ 這個常數的立案量測要重做")
 
     def test_the_audit_timestamp_cannot_be_overwritten_by_a_caller(self) -> None:
-        """🔴 R79 補洞包端到端實測抓到的真缺陷（既有 `_resume_tick` 也中招）。
-
-        `append_log(..., at=decision["at"])` 那個 kwarg 直接覆寫了記錄自己的時間戳
-        ⇒ 痕跡上寫著一個**未來**的時刻（實測：事件發生在 21:24、記錄寫成 23:26）。
-        「這件事何時發生」正是整條稽核痕跡唯一在回答的問題——讓「觸發了但失敗」與
-        「根本沒觸發」分得開的那一格。把 `at`／`event` 移回 `**fields` 之前即紅。
-        """
-        log = Path(tempfile.mkdtemp()) / "trail.jsonl"
+        """`append_log` 的 `at`／`event` 不得被呼叫端覆寫（把兩者移回 `**fields` 之前即紅）。
+        R79 實測沿革已搬至 CrossPlatform_R127_Guard_Prose_Migration.md。"""
+        log = _tmpdir(self) / "trail.jsonl"
         before = datetime.now(UTC)
         planner.append_log(log, "rearmed", at="2099-01-01T00:00:00+08:00",
                            fire_at="2099-01-01T00:00:00+08:00")
@@ -2050,7 +2061,7 @@ class SentinelDecisionTest(unittest.TestCase):
 
     def test_a_skeleton_rewrite_preserves_an_existing_relay_block(self) -> None:
         """修1／R-4.5.6-3（A1，紅綠自證：修前整檔覆寫必紅）：骨架重寫不得摧毀 RELAY。"""
-        tmp = Path(tempfile.mkdtemp(prefix="relay-keep-"))
+        tmp = _tmpdir(self, "relay-keep-")
         transcript = _write_jsonl(tmp / "sess-keep.jsonl", [1000])
         plan = tmp / f"{guard.PLAN_PREFIX}sess-keep.md"
         plan.write_text("# 舊任務書\n\n" + planner.render_relay(RelayStateTest.GOOD),
@@ -2067,7 +2078,7 @@ class SentinelDecisionTest(unittest.TestCase):
         """修2／R-4.5.6-4（A2）：狀態塊缺席×逐字稿存在 ⇒ 自癒續巡，不得 unregister，
         且告警注入點必須被叫到（修前直接自我解除＝事故 00:55——哨兵是「主 session
         活著但帳號級撞線」那一格唯一的機械物，它下班＝整格失效）。"""
-        tmp = Path(tempfile.mkdtemp(prefix="selfheal-"))
+        tmp = _tmpdir(self, "selfheal-")
         live = _transcript(tmp, "sess-heal.jsonl", 40, 900.0)
         plan = tmp / f"{guard.PLAN_PREFIX}sess-heal.md"
         plan.write_text("# 骨架（halt 覆寫後：狀態塊沒了）\n", encoding="utf-8", newline="\n")
@@ -2081,7 +2092,7 @@ class SentinelDecisionTest(unittest.TestCase):
 
     def test_the_three_read_failures_and_the_heal_leave_distinct_traces(self) -> None:
         """A5＋R-4.5.6-4c：三種讀不出與自癒／解除在痕跡檔各自可辨（事故當晚同形）。"""
-        tmp = Path(tempfile.mkdtemp(prefix="trace-forms-"))
+        tmp = _tmpdir(self, "trace-forms-")
         live = _transcript(tmp, "sess-forms.jsonl", 40, 900.0)
         plan = tmp / f"{guard.PLAN_PREFIX}sess-forms.md"
         for content in (None, "# 只有骨架\n",
@@ -2103,7 +2114,7 @@ class SentinelDecisionTest(unittest.TestCase):
 
     def test_a_torn_multibyte_plan_self_heals_as_the_fourth_fault(self) -> None:
         """M2：撕裂多位元組任務書＝第四分形（UnicodeDecodeError ⊂ ValueError；原文＝§L-4.29）。"""
-        tmp = Path(tempfile.mkdtemp(prefix="torn-"))
+        tmp = _tmpdir(self, "torn-")
         live = _transcript(tmp, "sess-torn.jsonl", 40, 900.0)
         plan = tmp / f"{guard.PLAN_PREFIX}sess-torn.md"
         plan.write_bytes("# 任務書\n中".encode()[:-1])  # 砍尾 byte＝撕裂多位元組
@@ -2120,7 +2131,7 @@ class SentinelDecisionTest(unittest.TestCase):
 
     def test_the_incident_replay_arms_to_the_observed_reset_with_evidence(self) -> None:
         """A4／R-4.5.6-1/2/6：事故重演（撞線原文逐字）→ 下一巡 arm_reset＋憑證非空。"""
-        tmp = Path(tempfile.mkdtemp(prefix="replay-"))
+        tmp = _tmpdir(self, "replay-")
         hit = "You've hit your session limit · resets 3:50am (Asia/Taipei)"
         live = tmp / "sess-replay.jsonl"
         live.write_text(json.dumps({
@@ -2169,7 +2180,7 @@ class SentinelLivenessColumnTest(unittest.TestCase):
 
     def test_both_cli_outlets_are_wired_to_the_column(self) -> None:
         """接線面：`--check` 行為驗證＋`--pace` 結構驗證（pace_report 會記帳，測試內不跑）。"""
-        tmp = Path(tempfile.mkdtemp(prefix="liveness-wire-"))
+        tmp = _tmpdir(self, "liveness-wire-")
         transcript = _write_jsonl(tmp / "sid-b.jsonl", [1000])
         err = io.StringIO()
         with unittest.mock.patch.object(sentinel_lifecycle, "liveness_line",
@@ -2190,7 +2201,7 @@ class SentinelWiringTest(unittest.TestCase):
     """接線：Action 叫得回哨兵、工作名不互相覆蓋、SessionStart 真的會按下去。"""
 
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp(prefix="sentinel-wire-"))
+        self.tmp = _tmpdir(self, "sentinel-wire-")
 
     def test_the_action_calls_the_sentinel_tick_not_the_resume_tick(self) -> None:
         """兩支 tick 的差別只有一件事：要不要花額度。掛錯就是每 15 分鐘燒一次探測。"""
@@ -2273,7 +2284,7 @@ class SentinelWiringTest(unittest.TestCase):
         schtasks，而測試不該有那種副作用。要驗的是接線（有沒有真的被叫起來、參數對不對），
         不是註冊本身——註冊由端到端手工實證負責。
         """
-        root = Path(tempfile.mkdtemp(prefix="fake-repo-"))
+        root = _tmpdir(self, "fake-repo-")
         (root / "tools").mkdir()
         (root / "tools" / "session_resume_planner.py").write_text(
             "import json,sys,pathlib\n"
@@ -2385,7 +2396,7 @@ class SentinelWiringTest(unittest.TestCase):
     def test_a_missing_planner_is_fail_open_not_a_crash(self) -> None:
         """`.claude/settings.json` 記載過的 P0：hook 誤觸會把所有工具硬鎖死。
         武裝失敗最多是少一層保護，絕不可反過來變成故障源。"""
-        empty = Path(tempfile.mkdtemp(prefix="no-planner-"))
+        empty = _tmpdir(self, "no-planner-")
         self.assertEqual(self._sessionstart(empty).returncode, 0)
 
     def test_arming_accepts_a_transcript_that_does_not_exist_yet(self) -> None:
@@ -2468,7 +2479,7 @@ class ResumeSpawnCarriesTheUnattendedSignalTest(unittest.TestCase):
     cbg ResumeSpawnCarriesTheUnattendedSignalTest WHY〉節。"""
 
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp())
+        self.tmp = _tmpdir(self)
         # 🔴 R95：選路要求任務書與逐字稿**真的存在**（缺任一會走 REFUSE／FRESH 而不是
         # RESUME）。本類鎖的是 RESUME 那條路的 spawn 形狀，所以前置把兩者都建出來。
         (self.tmp / "p.md").write_text("# 任務書", encoding="utf-8")
@@ -2575,7 +2586,7 @@ class ResumeRouteDegradesOneWayTest(unittest.TestCase):
     cbg ResumeRouteDegradesOneWayTest WHY〉節。"""
 
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp())
+        self.tmp = _tmpdir(self)
         self.plan = self.tmp / "plan.md"
         self.plan.write_text("# 任務書", encoding="utf-8")
         self.transcript = self.tmp / "sid-9.jsonl"
@@ -2687,7 +2698,7 @@ class UnattendedPermissionPostureTest(unittest.TestCase):
                  "./.claude/settings.json", "./.claude/settings.unattended.json")
 
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp())
+        self.tmp = _tmpdir(self)
         self.plan = self.tmp / "plan.md"
         self.plan.write_text("# 任務書", encoding="utf-8")
         self.transcript = self.tmp / "sid-9.jsonl"
@@ -2819,8 +2830,7 @@ class HandbackAddDirIsResolvedDynamicallyTest(unittest.TestCase):
         時 argv 的 handback 值必須跟著動——每次 spawn 現解，不依賴 settings 檔字面
         是否被 harness 展開；settings 檔本身刻意不因此改動（repo 檔不寫死機器路徑）。
         """
-        override = Path(tempfile.mkdtemp(prefix="handback-override-"))
-        self.addCleanup(shutil.rmtree, override, True)
+        override = _tmpdir(self, "handback-override-")
         with unittest.mock.patch.dict(
                 os.environ, {endurance_env.HANDBACK_DIR_ENV: str(override)}):
             resume = resume_route.resume_argv("claude", "sid-9", "prompt",
@@ -2843,8 +2853,7 @@ class HandbackVisibilityTest(unittest.TestCase):
     cbg HandbackVisibilityTest WHY〉節。"""
 
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp())
-        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.tmp = _tmpdir(self)
         old = os.environ.get(endurance_env.HANDBACK_DIR_ENV)
         os.environ[endurance_env.HANDBACK_DIR_ENV] = str(self.tmp / "handback")
         self.addCleanup(lambda: os.environ.pop(endurance_env.HANDBACK_DIR_ENV, None)
@@ -2930,8 +2939,7 @@ class HandbackSessionStartAnnounceTest(unittest.TestCase):
     cbg HandbackSessionStartAnnounceTest WHY〉節。"""
 
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp())
-        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.tmp = _tmpdir(self)
         (self.tmp / "sid-x.md").write_text(
             "## 做了什麼\n修好 Y\n細節第二行\n## 驗了什麼\nrc=0\n"
             "## 卡在哪\n無\n## 下一步指令\npython tools/run_root_unittests.py\n",
@@ -2992,7 +3000,7 @@ class RunResumeConsumesTheRouteTest(unittest.TestCase):
     """R95／Pkg-D 消費端：`_run_resume` 只認選路結果——REFUSE 不 spawn、策略落痕跡。"""
 
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp())
+        self.tmp = _tmpdir(self)
         self.calls: list[dict] = []
 
         class _Done:
@@ -3066,8 +3074,7 @@ class RunResumeSurvivesASpawnExceptionTest(unittest.TestCase):
     cbg RunResumeSurvivesASpawnExceptionTest WHY〉節。"""
 
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp())
-        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.tmp = _tmpdir(self)
         (self.tmp / "p.md").write_text("# 任務書", encoding="utf-8")
         self.transcript = self.tmp / "sid-1.jsonl"
         self.transcript.write_text('{"type":"assistant"}\n', encoding="utf-8")
@@ -3122,8 +3129,7 @@ class ResumeTickWritesStateOnlyAfterConfirmingTest(unittest.TestCase):
     """
 
     def _tick(self, *, run_resume_result, allow_resume: bool = True) -> tuple:
-        tmp = Path(tempfile.mkdtemp(prefix="resume-tick-"))
-        self.addCleanup(shutil.rmtree, tmp, True)
+        tmp = _tmpdir(self, "resume-tick-")
         plan = tmp / "plan.md"
         state = {**RelayStateTest.GOOD, "plan_path": str(plan), "session_id": "sid-r97",
                  "allow_resume": allow_resume, "task_name": "T-r97"}
@@ -3168,8 +3174,7 @@ class ResumeTickWritesStateOnlyAfterConfirmingTest(unittest.TestCase):
         """控制組：`allow_resume=False` 這條既有路徑不應被本輪改動——不呼叫
         `_run_resume()`，仍正確終結（狀態 "resumed"、排程被拆）。"""
         calls: list = []
-        tmp = Path(tempfile.mkdtemp(prefix="resume-tick-noop-"))
-        self.addCleanup(shutil.rmtree, tmp, True)
+        tmp = _tmpdir(self, "resume-tick-noop-")
         plan = tmp / "plan.md"
         state = {**RelayStateTest.GOOD, "plan_path": str(plan), "session_id": "sid-r97b",
                  "allow_resume": False, "task_name": "T-r97b"}
@@ -3325,8 +3330,7 @@ class RelayProgressAndCapTest(unittest.TestCase):
         handback 給非空「## 下一步指令」節，讓判準③（remaining=True）成立，
         才是真的在孤立測判準①（cap）——否則③先短路，測到的其實是別格。
         """
-        tmp = Path(tempfile.mkdtemp(prefix="relay-c2-"))
-        self.addCleanup(shutil.rmtree, tmp, True)
+        tmp = _tmpdir(self, "relay-c2-")
         hb = tmp / "hb.md"
         hb.write_text("## 下一步指令\n還有事沒做\n", encoding="utf-8", newline="\n")
         state = {"handback_verdict": "written", "handback_path": str(hb), "files_changed": 3,
@@ -3351,8 +3355,7 @@ class RelaySettleWindowTest(unittest.TestCase):
 
     def _run(self, *, run_resume_result: dict, band: str) -> tuple:
         """跑一次 `_resume_tick()`，回 `(rc, written_state, events, alert_calls, arm_calls)`。"""
-        tmp = Path(tempfile.mkdtemp(prefix="relay-settle-"))
-        self.addCleanup(shutil.rmtree, tmp, True)
+        tmp = _tmpdir(self, "relay-settle-")
         plan = tmp / "plan.md"
         state = {**RelayStateTest.GOOD, "plan_path": str(plan), "session_id": "sid-relay",
                  "allow_resume": True, "task_name": "T-relay",
@@ -3407,7 +3410,7 @@ class RelaySettleWindowTest(unittest.TestCase):
         return rc, written, events, alert_calls, arm_calls, registered
 
     def test_relay_next_reschedules_instead_of_rearming_the_sentinel(self) -> None:
-        hb = self._handback(Path(tempfile.mkdtemp(prefix="relay-hb-")), next_step="還有第 4 步")
+        hb = self._handback(_tmpdir(self, "relay-hb-"), next_step="還有第 4 步")
         rc, written, events, alert_calls, arm_calls, registered = self._run(
             run_resume_result={"handback_verdict": "written", "handback_path": str(hb),
                                "files_changed": 2, "route_strategy": planner.STRATEGY_RESUME},
@@ -3418,7 +3421,7 @@ class RelaySettleWindowTest(unittest.TestCase):
         self.assertEqual(arm_calls, [], "RELAY_NEXT 不該重掛哨兵——下一窗自己會接手")
 
     def test_done_state_fires_relay_done_and_rearms_the_sentinel(self) -> None:
-        hb = self._handback(Path(tempfile.mkdtemp(prefix="relay-hb-")), next_step="")
+        hb = self._handback(_tmpdir(self, "relay-hb-"), next_step="")
         rc, written, events, alert_calls, arm_calls, registered = self._run(
             run_resume_result={"handback_verdict": "written", "handback_path": str(hb),
                                "files_changed": 1, "route_strategy": planner.STRATEGY_RESUME},
@@ -3443,7 +3446,7 @@ class RelaySettleWindowTest(unittest.TestCase):
 
     def test_quota_stop_hands_back_to_the_sentinel_quietly(self) -> None:
         """② 假格：band 收緊（此處用 unmeasured 模擬「量不到 ≠ free」）⇒ 交回巡邏，不吵。"""
-        hb = self._handback(Path(tempfile.mkdtemp(prefix="relay-hb-")), next_step="還沒做完")
+        hb = self._handback(_tmpdir(self, "relay-hb-"), next_step="還沒做完")
         rc, written, events, alert_calls, arm_calls, registered = self._run(
             run_resume_result={"handback_verdict": "written", "handback_path": str(hb),
                                "files_changed": 1, "route_strategy": planner.STRATEGY_RESUME},
@@ -3455,10 +3458,9 @@ class RelaySettleWindowTest(unittest.TestCase):
 
     def test_relay_exhausted_stops_loudly_and_leaves_the_plan_for_a_human(self) -> None:
         """① 假格：`relay_seq` 已在上限 ⇒ 不再續排，loud 告警＋仍重掛哨兵。"""
-        hb = self._handback(Path(tempfile.mkdtemp(prefix="relay-hb-")), next_step="還沒做完")
+        hb = self._handback(_tmpdir(self, "relay-hb-"), next_step="還沒做完")
         with unittest.mock.patch.object(relay_machine, "max_spawns", lambda: 1):
-            tmp = Path(tempfile.mkdtemp(prefix="relay-settle-cap-"))
-            self.addCleanup(shutil.rmtree, tmp, True)
+            tmp = _tmpdir(self, "relay-settle-cap-")
             plan = tmp / "plan.md"
             state = {**RelayStateTest.GOOD, "plan_path": str(plan), "session_id": "sid-cap",
                      "allow_resume": True, "task_name": "T-cap",
@@ -3509,8 +3511,7 @@ class RelayFailurePathsTest(unittest.TestCase):
     """V-d3／V-d4：失敗態一律進 WINDOW_DONE 判定並重掛哨兵；`state` 不得寫成 resumed。"""
 
     def _run(self, *, mock_run_resume=None, mock_choose_route=None) -> tuple:
-        tmp = Path(tempfile.mkdtemp(prefix="relay-fail-"))
-        self.addCleanup(shutil.rmtree, tmp, True)
+        tmp = _tmpdir(self, "relay-fail-")
         plan = tmp / "plan.md"
         state = {**RelayStateTest.GOOD, "plan_path": str(plan), "session_id": "sid-fail",
                  "allow_resume": True, "task_name": "T-fail",
@@ -3574,8 +3575,7 @@ class RearmAfterStopFailureClearsTheArmedStampTest(unittest.TestCase):
     cbg RearmAfterStopFailureClearsTheArmedStampTest WHY〉節。"""
 
     def test_rc_nonzero_clears_the_latch_and_alerts_loudly(self) -> None:
-        tmp = Path(tempfile.mkdtemp(prefix="rearm-fail-"))
-        self.addCleanup(shutil.rmtree, tmp, True)
+        tmp = _tmpdir(self, "rearm-fail-")
         plan = tmp / "plan.md"
         hb = tmp / "handback.md"
         hb.write_text("## 下一步指令\n\n", encoding="utf-8", newline="\n")  # 完工 ⇒ 走 DONE
@@ -3624,8 +3624,7 @@ class RearmAfterStopSuccessLeavesAVerifiableArmedJobTest(unittest.TestCase):
     cbg RearmAfterStopSuccessLeavesAVerifiableArmedJobTest WHY〉節。"""
 
     def test_success_path_leaves_the_stamp_and_a_discoverable_job(self) -> None:
-        tmp = Path(tempfile.mkdtemp(prefix="rearm-success-"))
-        self.addCleanup(shutil.rmtree, tmp, True)
+        tmp = _tmpdir(self, "rearm-success-")
         session_id = "sid-rearm-ok"
         live = tmp / f"{session_id}.jsonl"
         live.write_text('{"type":"assistant"}\n', encoding="utf-8")
@@ -3657,8 +3656,7 @@ class RelaySpawnFailureIsTreatedAsAStopStateTest(unittest.TestCase):
     """
 
     def _settle(self, *, arm_rc: int) -> tuple:
-        tmp = Path(tempfile.mkdtemp(prefix="spawn-fail-"))
-        self.addCleanup(shutil.rmtree, tmp, True)
+        tmp = _tmpdir(self, "spawn-fail-")
         plan = tmp / "plan.md"
         hb = tmp / "handback.md"
         hb.write_text("## 下一步指令\n還有第 4 步\n", encoding="utf-8", newline="\n")
@@ -3732,8 +3730,7 @@ class SettleWindowCrashStillDisposesTest(unittest.TestCase):
     """
 
     def test_a_crash_inside_the_body_still_disposes_and_leaves_a_trace(self) -> None:
-        tmp = Path(tempfile.mkdtemp(prefix="settle-crash-"))
-        self.addCleanup(shutil.rmtree, tmp, True)
+        tmp = _tmpdir(self, "settle-crash-")
         plan = tmp / "plan.md"
         state = {**RelayStateTest.GOOD, "plan_path": str(plan), "session_id": "sid-crash",
                  "allow_resume": True, "task_name": "T-crash",
@@ -3786,8 +3783,7 @@ class RunResumeWritesHandbackPathIntoStateTest(unittest.TestCase):
     cbg RunResumeWritesHandbackPathIntoStateTest WHY〉節。"""
 
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp(prefix="relay-f1-"))
-        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.tmp = _tmpdir(self, "relay-f1-")
         old = os.environ.get(endurance_env.HANDBACK_DIR_ENV)
         os.environ[endurance_env.HANDBACK_DIR_ENV] = str(self.tmp / "handback")
         self.addCleanup(lambda: os.environ.pop(endurance_env.HANDBACK_DIR_ENV, None)
@@ -3873,8 +3869,7 @@ class APreFailureIsNeverWrittenAsResumedTest(unittest.TestCase):
     cbg APreFailureIsNeverWrittenAsResumedTest WHY〉節。"""
 
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp(prefix="relay-f2-"))
-        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.tmp = _tmpdir(self, "relay-f2-")
         self.plan = self.tmp / "plan.md"
         self.transcript = self.tmp / "sid-f2.jsonl"
         self.transcript.write_text('{"type":"assistant"}\n', encoding="utf-8")
@@ -3933,8 +3928,7 @@ class RelaySnapshotBeforeIsLoggedTest(unittest.TestCase):
     """
 
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp(prefix="relay-f3-"))
-        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.tmp = _tmpdir(self, "relay-f3-")
         (self.tmp / "p.md").write_text("# 任務書", encoding="utf-8")
         self.transcript = self.tmp / "sid-f3.jsonl"
         self.transcript.write_text('{"type":"assistant"}\n', encoding="utf-8")
@@ -3998,7 +3992,7 @@ class RelayCountsResetOnResetAtChangeTest(unittest.TestCase):
         `_base_state` 重建狀態塊隱式歸零（見 `relay_machine` 檔頭 WHY），未來若有人替
         這兩個鍵加了預設值，會在不知不覺間破壞這個隱式歸零。
         """
-        tmp = Path(tempfile.mkdtemp(prefix="relay-basestate-"))
+        tmp = _tmpdir(self, "relay-basestate-")
         try:
             plan = tmp / "plan.md"
             args = planner.build_parser().parse_args([])
@@ -4013,8 +4007,7 @@ class RelayCountsResetOnResetAtChangeTest(unittest.TestCase):
         """接線鎖：只驗純函式不夠——若 `_resume_tick` 忘了呼叫 `apply_reset_at`（例如
         改回直接 `state["reset_at"] = ...`），這支測試才會紅；純函式測試因為根本沒被
         呼叫到而察覺不了漏接線。"""
-        tmp = Path(tempfile.mkdtemp(prefix="relay-f4-wire-"))
-        self.addCleanup(shutil.rmtree, tmp, True)
+        tmp = _tmpdir(self, "relay-f4-wire-")
         plan = tmp / "plan.md"
         state = {**RelayStateTest.GOOD, "plan_path": str(plan), "session_id": "sid-f4",
                  "allow_resume": True, "task_name": "T-f4", "relay_seq": 3,
@@ -4050,8 +4043,7 @@ class RelayCountsResetOnResetAtChangeTest(unittest.TestCase):
         """接線鎖（第二站點）：`_sentinel_tick` 的 arm_reset 分支與 `_resume_tick` 的
         rearm 分支各自就地改寫 `reset_at`，是兩個各自獨立的接線站點——修一邊不蘊含
         另一邊也修好，必須各自有測試。"""
-        tmp = Path(tempfile.mkdtemp(prefix="relay-f4-wire2-"))
-        self.addCleanup(shutil.rmtree, tmp, True)
+        tmp = _tmpdir(self, "relay-f4-wire2-")
         plan = tmp / "plan.md"
         live = tmp / "sid-f4b.jsonl"
         live.write_text('{"type":"assistant"}\n', encoding="utf-8")
@@ -4346,7 +4338,7 @@ class ConsoleFreeSpawnTest(unittest.TestCase):
                 "[pscustomobject]@{ NextRunTime = $d } | Format-List NextRunTime\n")
         outs = {}
         for label, script in (("bare", body), ("fixed", guard.PS_UTF8_PRELUDE + body)):
-            holder = Path(tempfile.mkdtemp(prefix=f"psenc-{label}-")) / "run.ps1"
+            holder = _tmpdir(self, f"psenc-{label}-") / "run.ps1"
             holder.write_text(script, encoding="utf-8-sig", newline="\r\n")
             outs[label] = subprocess.run(
                 ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
@@ -4462,7 +4454,7 @@ class NoWindowBehaviourTest(unittest.TestCase):
     cbg NoWindowBehaviourTest WHY〉節。"""
 
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp(prefix="nowin-behaviour-"))
+        self.tmp = _tmpdir(self, "nowin-behaviour-")
         self.pythonw = Path(sys.executable).with_name("pythonw.exe")
         if not self.pythonw.is_file():
             self.skipTest(f"[TOOL-ABSENCE] 這個直譯器旁沒有 pythonw.exe（{self.pythonw}）"
@@ -4534,7 +4526,7 @@ class UnhandledLimitDetectionTest(unittest.TestCase):
     cbg UnhandledLimitDetectionTest WHY〉節。"""
 
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp(prefix="unhandled-"))
+        self.tmp = _tmpdir(self, "unhandled-")
         self.main = self.tmp / "sid.jsonl"
 
     @staticmethod
@@ -4686,7 +4678,7 @@ class SpendLimitReachesAHumanTest(unittest.TestCase):
     """
 
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp(prefix="r81-alert-"))
+        self.tmp = _tmpdir(self, "r81-alert-")
         self.plan = self.tmp / "plan.md"
         self.plan.write_text("# 可重啟點任務書\n", encoding="utf-8", newline="\n")
         self.note = self.tmp / "AUTOSDD_ATTENTION.md"
@@ -4734,15 +4726,8 @@ class SpendLimitReachesAHumanTest(unittest.TestCase):
             "reset_at": "", "plan_path": str(self.plan), "task_name": "T_R81",
             "session_id": transcript.stem, "transcript": str(transcript),
             "log_path": str(self.log)})
-        # 🔴 R115 修復（同 DEF-200-239／`SentinelDecisionTest._tick` 既有藥方） round-label-ok
-        # 本類別的 `task_name` 是固定字面 "T_R81"，永遠不符合任何真後端的 `AutoSDD_Sentinel_`
-        # 前綴查詢 ⇒ `patrol_housekeeping()` → `_heal_armed_drift()` 摸到未注入的
-        # `schedule_backend.select()` 時，真後端會結構上判定「這支工作不在」並嘗試真的
-        # `.arm()`——posix 上真後端無條件失敗（`NoCarrierBackend`／CI 沙箱裡的
-        # `LaunchdBackend`），觸發本輪新增的 rc≠0 loud alert 分支，於是普通的排程／靜默
-        # 下班 tick 也被誤判成「漂移重掛失敗」而騷擾人（雲端 posix 首跑才紅，Windows
-        # 本機因真後端行為不同而看不見）。與 `SentinelDecisionTest._tick` 同一帖藥：
-        # 注入一支確定性假後端，讓漂移健檢摸到的是可控的假象，不是真排程器。
+        # 注入確定性假後端（同 `SentinelDecisionTest._tick` 的藥方）；R115 立案沿革 round-label-ok
+        # 已搬至 CrossPlatform_R127_Guard_Prose_Migration.md〈SpendLimitReachesAHumanTest._tick〉。
         with unittest.mock.patch.object(sb, "select",
                                         return_value=_StatefulFakeSchedulerBackend()):
             return planner._sentinel_tick(planner.build_parser().parse_args(
@@ -4887,7 +4872,7 @@ class FanoutCasualtyRecordTest(unittest.TestCase):
     cbg FanoutCasualtyRecordTest WHY〉節。"""
 
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp(prefix="r81-fanout-"))
+        self.tmp = _tmpdir(self, "r81-fanout-")
         self.main = self.tmp / "sid.jsonl"
         self.main.write_text(UnhandledLimitDetectionTest._ok("2026-08-07T18:00:00Z") + "\n",
                              encoding="utf-8", newline="\n")
@@ -5001,7 +4986,7 @@ class ControllerIdlePrepareWatchTest(unittest.TestCase):
     cbg ControllerIdlePrepareWatchTest WHY〉節。"""
 
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp(prefix="idle-prepare-"))
+        self.tmp = _tmpdir(self, "idle-prepare-")
         self.transcript = self.tmp / "sid.jsonl"
         self.notified: list[tuple[str, str]] = []
 
@@ -5120,7 +5105,7 @@ class PatrolNoticeIsDesktopNotHookTest(unittest.TestCase):
     """
 
     def test_the_prepare_notice_fires_from_the_patrol_tick_alone(self) -> None:
-        tmp = Path(tempfile.mkdtemp(prefix="b3-patrol-"))
+        tmp = _tmpdir(self, "b3-patrol-")
         live = _transcript(tmp, "sess-b3.jsonl", 40, 900.0)
         task = "AutoSDD_Sentinel_sess-b3"
         plan = tmp / f"{guard.PLAN_PREFIX}sess-b3.md"
@@ -5165,7 +5150,7 @@ class ArmedDriftSelfHealTest(unittest.TestCase):
         """紅綠自證核心：`sentinel_task_names()` 回空清單（漂移）⇒ 自動重新武裝，
         且痕跡檔留下與『巡邏／武裝／自癒（RELAY 版）／解除』互異的事件名。
         """
-        tmp = Path(tempfile.mkdtemp(prefix="drift-heal-"))
+        tmp = _tmpdir(self, "drift-heal-")
         live = _fresh_transcript(tmp, "sess-drift.jsonl")
         task = "AutoSDD_Sentinel_sess-drift"
         plan = self._plan_and_state(tmp, live, task)
@@ -5200,7 +5185,7 @@ class ArmedDriftSelfHealTest(unittest.TestCase):
 
     def test_when_the_scheduler_still_shows_the_task_nothing_is_re_armed(self) -> None:
         """控制組：task 確實還在排程器清單裡 ⇒ 不是漂移，不該多此一舉重新武裝。"""
-        tmp = Path(tempfile.mkdtemp(prefix="no-drift-"))
+        tmp = _tmpdir(self, "no-drift-")
         live = _fresh_transcript(tmp, "sess-nodrift.jsonl")
         task = "AutoSDD_Sentinel_sess-nodrift"
         plan = self._plan_and_state(tmp, live, task)
@@ -5223,7 +5208,7 @@ class ArmedDriftSelfHealTest(unittest.TestCase):
         """量不到（`None`）≠ 漂移——載具本身查不到清單時不該誤判成『排程器沒有這支
         工作』而胡亂重新武裝（同 `sentinel_lifecycle.sentinel_task_names()` 既有紀律）。
         """
-        tmp = Path(tempfile.mkdtemp(prefix="unmeasurable-"))
+        tmp = _tmpdir(self, "unmeasurable-")
         live = _fresh_transcript(tmp, "sess-unmeasurable.jsonl")
         task = "AutoSDD_Sentinel_sess-unmeasurable"
         plan = self._plan_and_state(tmp, live, task)
@@ -5250,8 +5235,7 @@ class ArmedDriftSelfHealTest(unittest.TestCase):
         `quota_escalation._heal_armed_drift()`（略過整條 `_sentinel_tick` 管線），
         聚焦在這個新分支本身。
         """
-        tmp = Path(tempfile.mkdtemp(prefix="drift-fail-"))
-        self.addCleanup(shutil.rmtree, tmp, True)
+        tmp = _tmpdir(self, "drift-fail-")
         session_id = "sess-drift-fail"
         task = f"{sentinel_lifecycle.TASK_PREFIX}{session_id}"
         state = {"task_name": task, "session_id": session_id, "state": "armed",
@@ -5295,7 +5279,7 @@ class OrphanModeWatchTest(unittest.TestCase):
     """
 
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp(prefix="orphan-watch-"))
+        self.tmp = _tmpdir(self, "orphan-watch-")
         self.transcript = self.tmp / "sid-orphan.jsonl"
         self.log = self.tmp / "trail.jsonl"
         os.environ[endurance_env.TRACE_DIR_ENV] = str(self.tmp / "traces")
@@ -5455,7 +5439,7 @@ class NotifyQueueRedeliveryTest(unittest.TestCase):
     """
 
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp(prefix="notify-queue-"))
+        self.tmp = _tmpdir(self, "notify-queue-")
         self.log = self.tmp / "trail.jsonl"
         os.environ[endurance_env.TRACE_DIR_ENV] = str(self.tmp / "traces")
         self.addCleanup(os.environ.pop, endurance_env.TRACE_DIR_ENV, None)
@@ -5588,8 +5572,7 @@ class SchedulerBackendNeverTouchesRealSchtasksTest(unittest.TestCase):
                 "真排程器後端被摸到了——DEF-200-239 沒修好，_tick() 的預設路徑洩漏到"
                 "具體實作類（SchtasksBackend／LaunchdBackend）")
 
-        tmp = Path(tempfile.mkdtemp(prefix="def200239-"))
-        self.addCleanup(shutil.rmtree, tmp, True)
+        tmp = _tmpdir(self, "def200239-")
         live = _fresh_transcript(tmp, "sess-239.jsonl")
         plan = self._plan_and_state(tmp, live)
         with unittest.mock.patch.object(sb.SchtasksBackend, "arm", side_effect=_boom), \
@@ -5636,8 +5619,7 @@ class SchedulerBackendNeverTouchesRealSchtasksTest(unittest.TestCase):
         before = _query()
         if before != "0":
             self.skipTest(f"清場失敗（現查到 {before} 支殘留），這台機器上驗不了本鎖")
-        tmp = Path(tempfile.mkdtemp(prefix="def200239-live-"))
-        self.addCleanup(shutil.rmtree, tmp, True)
+        tmp = _tmpdir(self, "def200239-live-")
         live = _fresh_transcript(tmp, "sess-239-live.jsonl")
         plan = self._plan_and_state(tmp, live)
         SentinelDecisionTest()._tick(plan, live, tmp, "T-r95")
@@ -5899,7 +5881,7 @@ class QuotaUnmeasurableTest(unittest.TestCase):
 
     def test_a_missing_or_corrupt_cache_reads_as_none_not_zero(self) -> None:
         now = datetime.now(UTC).astimezone()
-        tmp = Path(tempfile.mkdtemp())
+        tmp = _tmpdir(self)
         self.assertFalse(qg.read_quota(now, tmp / "nope.json").usable())
         bad = tmp / "bad.json"
         for text in ("{", '{"schema":"other","axes":[{"kind":"s","pct":99}]}',
@@ -6180,7 +6162,7 @@ class QuotaStaleCacheTest(unittest.TestCase):
         方向刻意選「量不到」而不是「上調一個安全邊際」：這個量非單調（視窗翻頁時
         實測驟降 48pp）也非等速，任何邊際都是猜的。
         """
-        tmp = Path(tempfile.mkdtemp())
+        tmp = _tmpdir(self)
         now = datetime.now(UTC).astimezone()
         path = _quota_cache(tmp, 78.0, age=qg.QUOTA_CACHE_TTL_SECONDS + 60)
         state = qg.read_quota(now, path)
@@ -6191,7 +6173,7 @@ class QuotaStaleCacheTest(unittest.TestCase):
 
     def test_a_fresh_78_is_used_as_measured(self) -> None:
         """控制組：只測「過期不採信」而不測「新鮮的照用」的鎖沒有鑑別力。"""
-        tmp = Path(tempfile.mkdtemp())
+        tmp = _tmpdir(self)
         now = datetime.now(UTC).astimezone()
         state = qg.read_quota(now, _quota_cache(tmp, 78.0, age=1))
         self.assertEqual([a.pct for a in state.axes], [78.0])
@@ -6206,7 +6188,7 @@ class QuotaStaleCacheTest(unittest.TestCase):
         （「量不到」本身仍有 `degraded_cap`，見 `QuotaUnmeasurableTest`——不採信舊值
         與不設限是兩件事，R82 只推翻了後者。）
         """
-        tmp = Path(tempfile.mkdtemp())
+        tmp = _tmpdir(self)
         state = qg.read_quota(datetime.now(UTC).astimezone(),
                               _quota_cache(tmp, 96.0, age=99_999))
         self.assertFalse(state.usable())
@@ -6223,12 +6205,12 @@ class QuotaCacheContractHomeTest(unittest.TestCase):
         self.assertEqual(qg.quota_schema(), meter.SCHEMA)
         # 🔴 DEF-200-012：不同 `TMPDIR` 不得算出不同快取路徑（那正是互動 session 與
         # launchd 哨兵彼此看不見對方水位的根因）；逃生口環境變數仍可覆寫。
-        with unittest.mock.patch.dict(os.environ, {"TMPDIR": str(Path(tempfile.mkdtemp()))}):
+        with unittest.mock.patch.dict(os.environ, {"TMPDIR": str(_tmpdir(self))}):
             same_a = meter.cache_path()
-        with unittest.mock.patch.dict(os.environ, {"TMPDIR": str(Path(tempfile.mkdtemp()))}):
+        with unittest.mock.patch.dict(os.environ, {"TMPDIR": str(_tmpdir(self))}):
             same_b = meter.cache_path()
         self.assertEqual(same_a, same_b, "cache_path() 隨 TMPDIR 漂移（DEF-200-012 復發）")
-        override = Path(tempfile.mkdtemp())
+        override = _tmpdir(self)
         with unittest.mock.patch.dict(os.environ, {meter.CACHE_DIR_ENV: str(override)}):
             self.assertEqual(meter.cache_path(), override / meter.CACHE_NAME)
         old_name, old_schema = meter.CACHE_NAME, meter.SCHEMA
@@ -6239,7 +6221,7 @@ class QuotaCacheContractHomeTest(unittest.TestCase):
                              "而 pct=None 的淨效果是永遠不節流（且全套測試照綠）")
             self.assertEqual(qg.quota_schema(), meter.SCHEMA)
             # 同一次注入下，hook 必須認得 meter **現在**會寫出來的 schema。
-            tmp = Path(tempfile.mkdtemp())
+            tmp = _tmpdir(self)
             path = _quota_cache(tmp, 91.0)
             state = qg.read_quota(datetime.now(UTC).astimezone(), path)
             self.assertEqual([(a.kind, a.pct) for a in state.axes], [("session", 91.0)])
@@ -6413,7 +6395,7 @@ class QuotaUnmeasurableFanoutTest(unittest.TestCase):
     cbg QuotaUnmeasurableFanoutTest WHY〉節。"""
 
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp(prefix="quota-gate-"))
+        self.tmp = _tmpdir(self, "quota-gate-")
         self.calls: list[int] = []
         for name, value in (("quota_cache_path", lambda: self.tmp / "c.json"),
                             ("fanout_ledger_path", lambda: self.tmp / "l.jsonl"),
@@ -6481,14 +6463,8 @@ class QuotaUnmeasurableFanoutTest(unittest.TestCase):
         self.assertEqual(self._burst(transcript=str(main)), 42)
 
     def test_a_dead_endpoint_with_no_evidence_falls_back_to_the_degraded_cap(self) -> None:
-        """🔴 R82 具名改寫（裁決 D-8，駁回本條 R81 版的斷言；R81 版斷言原文與複審探針
-        數字＝Resume 證據檔 §L-3.16）。裁決把那個矛盾拆成三層，各自的失效方向不同：
-          · 守衛**行程**：永遠不得崩、不得誤 deny ⇒ fail-open（**這一層一行都沒動**）；
-          · **節流決策**：不得靜默全放行 ⇒ 量不到時 `cap = degraded_cap`；
-          · **halt 決策**：絕不對沒量到的值開火 ⇒ 量不到時**永不** halt。
-        改判之後 cap 之內仍然全放行（所以「網路壞了 ≠ 停機」還在），
-        超出 cap 才擋——而且它**永遠不會變成 0**（`decide` 保證 `>=1`，禁止靜默鎖死）。
-        """
+        """量不到時 cap 退回 `degraded_cap`、永不 halt、永不為 0（`decide` 保證 `>=1`）。
+        R82 裁決 D-8 的三層拆解沿革已搬至 CrossPlatform_R127_Guard_Prose_Migration.md。"""
         self._endpoint(None)
         cap = quota_policy.DEFAULT_POLICY.degraded_cap
         blocked = self._burst()
@@ -6549,7 +6525,7 @@ class FanoutLedgerConcurrencyTest(unittest.TestCase):
     四組 barrier 實測數字原文＝Resume 證據檔 §L-3.18。"""
 
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp(prefix="ledger-mp-"))
+        self.tmp = _tmpdir(self, "ledger-mp-")
         self.root = self.tmp / "dispatch.d"
         self.now = datetime.now(UTC).astimezone()
 
@@ -6611,7 +6587,7 @@ class PhantomCountNoLongerBlocksTest(unittest.TestCase):
     cbg PhantomCountNoLongerBlocksTest WHY〉節。"""
 
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp(prefix="phantom-"))
+        self.tmp = _tmpdir(self, "phantom-")
         self.transcript = str(_write_jsonl(self.tmp / "s.jsonl", [36_000]))
         _quota_cache(self.tmp, 90.0)
 
@@ -6635,7 +6611,7 @@ class RefreshSlotConcurrencyTest(unittest.TestCase):
     cbg RefreshSlotConcurrencyTest WHY〉節。"""
 
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp(prefix="claim-mp-"))
+        self.tmp = _tmpdir(self, "claim-mp-")
 
     def test_exactly_one_of_sixteen_wins_the_ttl_slot(self) -> None:
         out = _barrier_run(self.tmp, "claim", str(self.tmp / "unused"), 16)
@@ -6655,7 +6631,7 @@ class FanoutLedgerTest(unittest.TestCase):
     """SA-B6：帳是 per-account 的一份，且壞掉的帳不得被讀成「擋下來」。"""
 
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp())
+        self.tmp = _tmpdir(self)
         self.ledger = self.tmp / "ledger.jsonl"
         self.now = datetime.now(UTC).astimezone()
 
@@ -6680,7 +6656,7 @@ class QuotaGateIsIndependentOfContextTest(unittest.TestCase):
     cbg QuotaGateIsIndependentOfContextTest WHY〉節。"""
 
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp())
+        self.tmp = _tmpdir(self)
         # 18% context：遠低於 WARN_RATIO(0.84) ⇒ 走 context 那條路一定 `return 0`。
         self.transcript = _write_jsonl(self.tmp / "s.jsonl", [36_000])
 
@@ -6842,7 +6818,7 @@ class WorkflowFanoutIsOutOfReachTest(unittest.TestCase):
     """
 
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp())
+        self.tmp = _tmpdir(self)
         self.transcript = _write_jsonl(self.tmp / "s.jsonl", [36_000])
 
     def test_workflow_is_denied_in_the_throttle_band_even_on_the_first_call(self) -> None:
@@ -6872,7 +6848,7 @@ class QuotaDecisionEntryIsSingleTest(unittest.TestCase):
     """
 
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp(prefix="quota-entry-"))
+        self.tmp = _tmpdir(self, "quota-entry-")
         self.transcript = str(_write_jsonl(self.tmp / "s.jsonl", [36_000]))
         for name, value in (("quota_cache_path", lambda: self.tmp / "c.json"),
                             ("fanout_ledger_path", lambda: self.tmp / "l.d"),
@@ -7023,7 +6999,7 @@ class QuotaEnvFileIsActuallyLoadedTest(unittest.TestCase):
     """
 
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp(prefix="quota-env-"))
+        self.tmp = _tmpdir(self, "quota-env-")
         # 🔴 活體隔離（同檔判例：`EnvFileReachesEveryEscapeHatchTest.setUp`）：
         # `policy_env()` 的合併視圖是 env > `.env`，本類判準要的是「檔案那一半」，而
         # 行程級 env 是活體——同行程較早的測試經 `planner.main()` →
@@ -7128,7 +7104,7 @@ class QuotaDegradationIsAudibleTest(unittest.TestCase):
     """SD-B2：量不到必須出聲、量得到不准吵；四種失效注入矩陣見證據檔 §I-20（R92 搬出）。"""
 
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp(prefix="degraded-"))
+        self.tmp = _tmpdir(self, "degraded-")
         self.trace = self.tmp / "trace.jsonl"
         for name, value in (("quota_cache_path", lambda: self.tmp / "c.json"),
                             ("fanout_ledger_path", lambda: self.tmp / "l.d"),
@@ -7138,14 +7114,8 @@ class QuotaDegradationIsAudibleTest(unittest.TestCase):
                             ("degraded_stamp_path",
                              lambda source: self.tmp / f"stamp-{source}")):
             self._swap(qg, name, value)
-        # 🔴 活體隔離：availability／stability 兩台狀態機的持久檔（含 `.lock`）住
-        # `endurance_env.trace_dir()`（帳號級，如 `~/.autosdd/traces`），**不經** qg 的
-        # 路徑函式 ⇒ 上面六個 swap 蓋不到。不 swap 這兩個，本類讀寫的是開發機的真實
-        # 狀態：真 hook（或本類 throttle 測試自己）把 stability cap 釘 0 之後，unmeasured
-        # 封鎖放寬方向 ⇒ `live(1) > cap(0)` ⇒ rc=2——同一棵樹的紅綠隨活體檔內容翻動
-        # （實測三次量測互相矛盾的根因）。swap 對象是 `endurance_env`（兩台狀態機都在
-        # 呼叫時做屬性查找），一次蓋住 state／lock 兩面；`degraded=False` 讓「持久目錄
-        # 退化」那條收緊側旁路（它會無條件回 unmeasured）也不受本機姿態影響。
+        # 活體隔離：兩台狀態機的持久檔住 `endurance_env.trace_dir()`，上面六個 swap 蓋不到
+        # ⇒ 另 swap 兩面。沿革已搬至 CrossPlatform_R127_Guard_Prose_Migration.md。
         self._swap(endurance_env, "trace_dir", lambda: self.tmp)
         self._swap(endurance_env, "trace_dir_status", lambda: (self.tmp, False))
 
@@ -7267,7 +7237,7 @@ def _cred_kwargs(test: unittest.TestCase, meter: object, platform: str,
     """
     old_creds = meter.CREDENTIALS
     test.addCleanup(setattr, meter, "CREDENTIALS", old_creds)
-    missing = Path(tempfile.mkdtemp(prefix="nocreds-")) / "nope.json"
+    missing = _tmpdir(test, "nocreds-") / "nope.json"
 
     def trap(argv: list) -> tuple:
         raise AssertionError(f"非 darwin 平台不得去問 Keychain：{argv}")
@@ -7281,7 +7251,7 @@ def _cred_kwargs(test: unittest.TestCase, meter: object, platform: str,
                 "runner": (lambda argv: (0, blob)) if readable
                 else (lambda argv: (1, ""))}
     if readable:
-        tmp = Path(tempfile.mkdtemp(prefix="creds-")) / "c.json"
+        tmp = _tmpdir(test, "creds-") / "c.json"
         tmp.write_text(json.dumps({"claudeAiOauth": {"accessToken": _FAKE_TOKEN}}),
                        encoding="utf-8", newline="\n")
         meter.CREDENTIALS = tmp
@@ -7428,7 +7398,7 @@ class RateLimitIsAFloorNotAnUnknownTest(unittest.TestCase):
         """把 `measure_detail()` 的產物走完**真正的**下游（快取 → 判讀 → 決策）。"""
         policy, gate = quota_policy, qg
         now = datetime.now(UTC).astimezone()
-        path = Path(tempfile.mkdtemp(prefix="q429-")) / "cache.json"
+        path = _tmpdir(self, "q429-") / "cache.json"
         if reading is None:      # 舊行為的對照組：量不到就是沒有快取
             return policy.decide(gate.read_quota(now, path), now, policy.Policy())
         meter.write_cache(reading, path)
@@ -7596,7 +7566,7 @@ class PlanGarbageCollectionTest(unittest.TestCase):
     """HELM-01 的殘骸面：終態收掉自己那一份，另加一個可重跑的年齡門檻。"""
 
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp(prefix="r82-gc-"))
+        self.tmp = _tmpdir(self, "r82-gc-")
 
     def _plan(self, name: str, age_days: float) -> Path:
         path = self.tmp / f"{guard.PLAN_PREFIX}{name}.md"
@@ -7636,7 +7606,7 @@ class QuotaDegradationReachesTheModelTest(unittest.TestCase):
     """
 
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp(prefix="r82-l4-02-"))
+        self.tmp = _tmpdir(self, "r82-l4-02-")
         self.buf = io.StringIO()
         saved = (sys.stdout, qg.degraded_stamp_path, qg.quota_trace_path)
         sys.stdout = self.buf
@@ -8347,7 +8317,7 @@ class SentinelReapVerdictTest(unittest.TestCase):
         逐字稿目錄刻意「定位得到、那支檔不存在」＝可收那一條路；殘骸也真的落在磁碟上，
         所以掃殘骸與寫痕跡的先後順序是被真的走過一次的，不是靠讀原始碼推論的。
         """
-        tmp = Path(tempfile.mkdtemp(prefix="gc-trace-"))
+        tmp = _tmpdir(self, "gc-trace-")
         plan = tmp / f"autosdd_resume_plan_{sid}.md"
         plan.write_text("state: disarmed\n", encoding="utf-8", newline="\n")
         trace = planner.endurance_log_path(plan)
@@ -8357,7 +8327,7 @@ class SentinelReapVerdictTest(unittest.TestCase):
                 return_value=[sentinel_lifecycle.TASK_PREFIX + sid]), \
              unittest.mock.patch.object(
                 sentinel_lifecycle, "_transcript_dir",
-                return_value=Path(tempfile.mkdtemp(prefix="gc-tx-"))), \
+                return_value=_tmpdir(self, "gc-tx-")), \
              unittest.mock.patch.object(sentinel_lifecycle, "_remove_task",
                                         return_value=0):
             return sentinel_lifecycle.gc(apply=True, tmp_dir=str(tmp))[0], trace
@@ -8403,13 +8373,8 @@ class SentinelReapVerdictTest(unittest.TestCase):
 # 住在 `arm_sentinel()` 裡，逐點改寫必然留下一個改不到的縫，而那個縫**正是本條在治的
 # 靜默失效**。填充之後，每一個 `os.environ.get(<ENV_SPEC 宣告過的鍵>)` 都看得到 `.env`。
 class EnvFileReachesEveryEscapeHatchTest(unittest.TestCase):
-    # 🔴 R91 加入第五個逃生口 `AUTOSDD_CONTEXT_SIGNAL_OFF`（送達形態）。本清單是**手寫**
-    # 的：新增一個逃生口卻忘了補這一列時，本組不會紅（它只走自己列的那幾個）——所以真正
-    # 守「宣告過的逃生口都要在 `ENV_SPEC` 裡」的是
-    # `EveryHookEscapeHatchIsDeclaredTest`（R91 新增，分母現查 `.claude/hooks/*.py`）。
-    # 🔴 R97：`AUTOSDD_RESUME_OFF` 的讀取點不住這支 hook（住 round-label-ok
-    # `tools/session_resume_planner.py`），但 `qg.apply_env_defaults` 是它們共用的同一份
-    # 前置填充機制——併進這張清單一併驗證泛用性，不必為它另開一組測試。
+    # 手寫清單；真正守「逃生口都在 `ENV_SPEC`」的是 `EveryHookEscapeHatchIsDeclaredTest`。
+    # 沿革（R91／R97）已搬至 CrossPlatform_R127_Guard_Prose_Migration.md。 round-label-ok
     _FLAGS = ("AUTOSDD_QUOTA_GUARD_OFF", "AUTOSDD_SENTINEL_OFF",
               "AUTOSDD_CONTEXT_GUARD_OFF", "AUTOSDD_CONTEXT_SIGNAL_OFF",
               "AUTOSDD_RESUME_OFF")
@@ -8428,8 +8393,7 @@ class EnvFileReachesEveryEscapeHatchTest(unittest.TestCase):
         """🔴 R84／SA84-06：夾具**自己收自己的垃圾**（測試不得在開發者機器上留下真實
         副作用）。量測數字原文＝Resume 證據檔 §L-3.26。
         """
-        root = Path(tempfile.mkdtemp(prefix="autosdd_dotenv_"))
-        self.addCleanup(shutil.rmtree, root, True)
+        root = _tmpdir(self, "autosdd_dotenv_")
         return root
 
     def _dotenv(self, body: str) -> Path:
@@ -8546,8 +8510,7 @@ class PlannerMainAlsoPrefillsFromDotEnvTest(unittest.TestCase):
         """單元層級：直接驗證 `apply_env_defaults` 填完之後，`RESUME_OFF_ENV` 的讀取點
         （`build_parser()` 的 `--allow-resume` 預設）真的看得到它。
         """
-        root = Path(tempfile.mkdtemp(prefix="resume-off-unit-"))
-        self.addCleanup(shutil.rmtree, root, True)
+        root = _tmpdir(self, "resume-off-unit-")
         (root / ".env").write_text("AUTOSDD_RESUME_OFF=1\n", encoding="utf-8", newline="\n")
         env: dict[str, str] = {}
         filled = qg.apply_env_defaults(env, root=root)
@@ -8563,7 +8526,7 @@ class QuotaGateIsWiredToTheBurnPathTest(unittest.TestCase):
     cbg QuotaGateIsWiredToTheBurnPathTest WHY〉節。"""
 
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp(prefix="wired-burn-"))
+        self.tmp = _tmpdir(self, "wired-burn-")
         # 18% context：遠低於 WARN_RATIO ⇒ context 那把尺全程靜默，rc 只可能來自額度軸。
         self.transcript = _write_jsonl(self.tmp / "s.jsonl", [36_000])
         for name, value in (("quota_cache_path", lambda: self.tmp / quota_meter.CACHE_NAME),
@@ -8979,7 +8942,7 @@ class QuotaPrepareBandActuallyPreparesTest(unittest.TestCase):
     cbg QuotaPrepareBandActuallyPreparesTest WHY〉節。"""
 
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp(prefix="prepare-band-"))
+        self.tmp = _tmpdir(self, "prepare-band-")
         self.transcript = _write_jsonl(self.tmp / "s.jsonl", [36_000])
         for name, value in (("quota_cache_path", lambda: self.tmp / quota_meter.CACHE_NAME),
                             ("fanout_ledger_path", lambda: self.tmp / "l.d"),
@@ -9083,7 +9046,7 @@ class QuotaPaceOutletIsReachableTest(unittest.TestCase):
     ⇒ 要拿到那個數字唯一的途徑是**先被守衛擋下**（訴求 6a 在人機面等於不存在）。"""
 
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp(prefix="pace-outlet-"))
+        self.tmp = _tmpdir(self, "pace-outlet-")
         for name, value in (("quota_cache_path", lambda: self.tmp / quota_meter.CACHE_NAME),
                             *_TRACE_ISOLATION(self)):
             old = getattr(qg, name)
@@ -9205,7 +9168,7 @@ class WindowUsageIsToldTheSameWayByBothOutletsTest(unittest.TestCase):
     """節流訊息的 live 欄、`--pace` 的可派數、真閘的 rc——三者對同一份派發帳對帳。"""
 
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp(prefix="window-usage-"))
+        self.tmp = _tmpdir(self, "window-usage-")
         # 18% context：遠低於 WARN_RATIO ⇒ context 那把尺全程靜默（同 `…WiredToTheBurnPath`）。
         self.transcript = _write_jsonl(self.tmp / "s.jsonl", [36_000])
         for name, value in (("quota_cache_path", lambda: self.tmp / quota_meter.CACHE_NAME),
@@ -9333,7 +9296,7 @@ class FanoutWindowRemainingSecondsTest(unittest.TestCase):
     """派發帳最舊那一筆 → 視窗剩餘秒；三態渲染；`--pace` 真的印得出來。"""
 
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp(prefix="fanout-window-"))
+        self.tmp = _tmpdir(self, "fanout-window-")
         # 🔴 `now` 截到整秒：目錄項名字只到毫秒，帶微秒的 `now` 會讓 `int()` 截斷在 ±1 秒
         # 之間漂 ⇒ 斷言變 flaky，而 flaky 的鎖最後一定被刪掉（本 repo 既有判例）。
         self.now = datetime.now(UTC).astimezone().replace(microsecond=0)
@@ -9468,8 +9431,7 @@ class ContextWarnReachesTheModelTest(unittest.TestCase):
     cbg ContextWarnReachesTheModelTest WHY〉節。"""
 
     def _tmp(self, name: str) -> Path:
-        root = Path(tempfile.mkdtemp(prefix=f"r91-emit-{name}-"))
-        self.addCleanup(shutil.rmtree, root, True)
+        root = _tmpdir(self, f"r91-emit-{name}-")
         return root
 
     def test_the_signal_declares_the_event_it_was_actually_called_from(self) -> None:
@@ -9544,8 +9506,7 @@ class WarnBandLatchTest(unittest.TestCase):
     """
 
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp(prefix="r91-warnband-"))
-        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.tmp = _tmpdir(self, "r91-warnband-")
         _quota_cache(self.tmp, 20.0)   # free 帶 ⇒ 額度軸全程靜默，stdout 只會有 context 那一則
 
     def _run(self, used: int, name: str) -> str:
@@ -9589,8 +9550,7 @@ class WarnGuidanceFollowsTheQuotaBandTest(unittest.TestCase):
     """
 
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp(prefix="r91-drain-"))
-        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.tmp = _tmpdir(self, "r91-drain-")
 
     def _guidance(self, quota_pct: float | None) -> str:
         if quota_pct is not None:
@@ -9673,8 +9633,7 @@ class PrdDrainPercentMapsToTheBandsTest(unittest.TestCase):
 
     def test_the_three_state_answer_never_folds_unmeasurable_into_no(self) -> None:
         """`draining()` 三態各自可達，且「量不到」不得長得像「額度很低」。"""
-        tmp = Path(tempfile.mkdtemp(prefix="r91-draining-"))
-        self.addCleanup(shutil.rmtree, tmp, True)
+        tmp = _tmpdir(self, "r91-draining-")
         # 🔴 三個路徑一起關進沙箱（`TraceIsolationTest` 在守）：`draining()` 今天走不到
         # `note_degraded()`，但「今天走不到」不是隔離；下一次它多一條降級分支時，本測試
         # 就會吃掉 production 那個 180 秒閂鎖，而失效是靜默的。
@@ -9710,8 +9669,7 @@ class PrdDrainPercentMapsToTheBandsTest(unittest.TestCase):
         """DEF-200-137 行為：五小時軸 `pct + 3 > 85` ⇒ `"yes"`（band 仍是 converge）；
         `81.9` ⇒ `"no"`；`session`（文法解不出、靠同 reset 繼承＋kind 字面）同樣套邊際；
         只有週軸 83% ⇒ `"no"`（PRD 的 `U5h` 不是週軸，不套）。"""
-        tmp = Path(tempfile.mkdtemp(prefix="r126-drain-margin-"))
-        self.addCleanup(shutil.rmtree, tmp, True)
+        tmp = _tmpdir(self, "r126-drain-margin-")
         with (unittest.mock.patch.object(qg, "quota_cache_path",
                                          lambda: tmp / "autosdd_quota.json"),
               unittest.mock.patch.object(qg, "quota_trace_path",

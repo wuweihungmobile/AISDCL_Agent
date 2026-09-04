@@ -277,6 +277,16 @@ class TestTheRescuePortIsARealBoundary:
         assert spy.call_args is not None, "notifier 沒有走 utils.notifier.notify"
         assert spy.call_args.kwargs["enabled"] is False
 
+    def test_wiring_reads_dirty_save_retries_from_env(self, tmp_path, monkeypatch):
+        """DEF-200-206 ③：PRD §6 區塊 12 的 DIRTY_SAVE_RETRIES 必須在 wiring 就接進 adapter，
+        否則讀取路徑蓋好沒接電（本檔上方 DEF-200-205 的同型）。"""
+        from autoclaude.infra.adapters import dirty_worktree_rescue as R
+        cfg = AppConfig(checkpoint_dir=str(tmp_path / "ckpt"))
+        monkeypatch.delenv(R.DIRTY_SAVE_RETRIES_ENV, raising=False)
+        assert build_worktree_rescue(cfg, worktree=tmp_path)._retries is None
+        monkeypatch.setenv(R.DIRTY_SAVE_RETRIES_ENV, "3")
+        assert build_worktree_rescue(cfg, worktree=tmp_path)._retries == 3
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 二、CLI 啟動路徑（§6.2 開機自檢 ＋ 救援 Port 的注入）
