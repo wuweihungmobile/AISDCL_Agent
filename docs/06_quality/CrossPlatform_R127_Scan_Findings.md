@@ -70,8 +70,9 @@
    應改讀為 `test_platform_neutral_paths.py`／`test_check_defect_log_crossref.py`。
 9. **「原文逐字保全」會把舊狀態欄的前瞻輪號句型帶進 tracked 證據檔**：`check_handoff_carriers.py` 的
    載體 glob 只掃 tracked 檔，commit 前（untracked）rc=0、pre-push 才抓到 `CrossPlatform_R127_Debt_Closure.md`
-   兩行「承接輪次：R101」無承接載體 ⇒ 第一次 push 被擋。處置＝狀態欄原文改為敘述（現象欄仍逐字保全）；
-   下輪保全舊列時先把狀態欄的承接句型改寫，並在 commit 後、push 前再跑一次 `check_handoff_carriers.py`。
+   兩行舊狀態欄的「承接輪次＋輪號」句型無承接載體 ⇒ 第一次 push 被擋；第二次 push 又被本點初稿逐字
+   引述那個句型擋下（同一個坑連踩兩次）。處置＝狀態欄原文改為敘述（現象欄仍逐字保全）；下輪保全舊列
+   或描述這個坑時都不要逐字寫出該句型，並在 commit 後、push 前再跑一次 `check_handoff_carriers.py`。
 
 ---
 
