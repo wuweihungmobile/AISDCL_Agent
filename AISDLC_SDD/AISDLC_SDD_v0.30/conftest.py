@@ -54,4 +54,8 @@ finally:
 
 WINDOWS_NATIVE_SKIP_TAG = _shared.WINDOWS_NATIVE_SKIP_TAG
 windows_native_skips = _shared.windows_native_skips
+# DEF-200-248：反方向標籤族同樣借用共用層（`pytest_terminal_summary` 本就是同一支函式物件，
+# 反方向區塊隨之在版本樹 rootdir 生效；這兩行只是讓版本樹的測試也能直接引用常數與純函式）。
+NON_WINDOWS_SKIP_TAGS = _shared.NON_WINDOWS_SKIP_TAGS
+non_windows_native_skips = _shared.non_windows_native_skips
 pytest_terminal_summary = _shared.pytest_terminal_summary

@@ -264,6 +264,12 @@ class Policy:
     # `availability_min_dwell_seconds` 的既有先例，`decide()` 本身不吃這個欄位、
     # 不因本欄新增而改變任何既有呼叫路徑的輸出。PRD 逐字出廠值 300 秒。
     min_dwell_seconds: float = 300.0
+    # 🔴 DEF-200-137／PRD §4.3・§6：一次 `/compact` 預估消耗的額度百分點（出廠 3）。消費端
+    # ＝`quota_gate.draining()`（五小時軸 `pct + 本值 > prepare_pct` ⇒ 不得壓縮），`decide()`
+    # 不吃它。進 `Policy` 而非 quota_gate 裸常數（R126 四方 Architect 條件 round-label-ok）：
+    # 帶跨欄位不變式（PRD §6.1 第 6 條：`< prepare_pct − converge_pct`），住這裡才受 `load_policy()`
+    # 的 live fail-safe 保護——`.env` 把邊際或錨點調到違反不變式時整組退回預設並出聲。
+    compact_cost_budget_pp: float = 3.0
 
 
 DEFAULT_POLICY = Policy()
@@ -629,6 +635,11 @@ def decide(state: QuotaState, now: datetime, p: Policy,
     # ——fallback 觸發時等於沒有排除，note 不該說一句與事實不符的「被排除」。
     gate_list = [r for r in readings if _in_cap_gate(r, active_model)]
     gate = gate_list or readings
+    # 🔴 DEF-200-244／PRD §4.2.2-b (4c)：gate 聚合面切換是設計內例外（R89／R98），實作義務只有
+    # 「可觀測」——被排除的軸 kind 進 `reason`（`gate_excluded=a+b`，去重排序）。fallback 觸發
+    # （`gate_list` 空）時等於沒有排除 ⇒ 不寫，同下方「note 不該說一句與事實不符」的紀律。
+    excluded = (sorted({r.axis.kind for r in readings} - {r.axis.kind for r in gate_list})
+                if gate_list else [])
     if gate_list:
         # 🔴 R98：未命中的模型分軌軸**不得靜默消失**——note 補一句，per_axis 仍全帶
         # （見 `_axis_phrase()` 一併印出 `scope_model`）。`band`／`cap`／`rec` 不受影響，
@@ -641,7 +652,9 @@ def decide(state: QuotaState, now: datetime, p: Policy,
     # 🔴 `if notes else` 分支是冗餘的（`",".join(["x"])` 不產生尾逗號）——R89 就地簡化，
     # 行為逐字等價。（此處原先接著一句「騰出的餘裕給下面那道地板」，那道地板已於本輪
     # 拆除，故該句一併刪去——留著就是一個指向不存在物的散文。）
-    reason = ",".join([state.reason, *sorted({r.note for r in readings if r.note})])
+    reason = ",".join([state.reason, *sorted(
+        {r.note for r in readings if r.note}
+        | ({f"gate_excluded={'+'.join(excluded)}"} if excluded else set()))])
     base = min(_base_rec(r.band, p) for r in gate)
     # R95：hint 的取樣面＝`gate`（保險軸不進 cap 聚合，也不由它觸發降級建議——R89 同判）。
     hint = ",".join(sorted({r.axis.kind for r in gate if r.band in MODEL_HINT_BANDS or (

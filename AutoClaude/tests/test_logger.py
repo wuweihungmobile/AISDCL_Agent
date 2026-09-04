@@ -111,6 +111,38 @@ def test_rtm_89_5_setup_logger_uses_safe_handler_idempotent(tmp_path):
         lg.handlers.extend(saved)
 
 
+def test_def_200_263_switching_log_dir_is_loud_not_silent(tmp_path, caplog):
+    """DEF-200-263（R96 §F-⑧）：第二次以不同 `log_dir` 呼叫 `setup_logger` 時，握把沿用舊目錄
+    這件事必須**出聲**（WARNING 具名新舊目錄），而不是把 `log_dir` 無聲丟掉；同一目錄再呼叫
+    則維持冪等、不出聲（否則每次匯入都會多一行噪音，機制會被關掉）。"""
+    lg = logging.getLogger("autoclaude")
+    saved = lg.handlers[:]
+    lg.handlers.clear()
+    try:
+        first = setup_logger(log_dir=str(tmp_path / "a"))
+        with caplog.at_level(logging.WARNING, logger="autoclaude"):
+            again = setup_logger(log_dir=str(tmp_path / "b"))
+        assert again is first
+        loud = [r for r in caplog.records if "DEF-200-263" in r.getMessage()]
+        assert loud, "換 log_dir 卻沒有任何 WARNING ⇒ 舊握把被靜默沿用（缺陷原樣）"
+        assert str(tmp_path / "b") in loud[0].getMessage(), "警告必須點名被忽略的新目錄"
+        assert str(tmp_path / "a") in loud[0].getMessage(), "警告必須點名實際生效的舊目錄"
+        assert not (tmp_path / "b").exists(), "不重建握把 ⇒ 新目錄不該被建立（行為維持）"
+        caplog.clear()
+        with caplog.at_level(logging.WARNING, logger="autoclaude"):
+            setup_logger(log_dir=str(tmp_path / "a"))
+        assert not [r for r in caplog.records if "DEF-200-263" in r.getMessage()], \
+            "同一目錄再呼叫不得出聲（冪等維持）"
+    finally:
+        for h in lg.handlers:  # 關掉本測試自己開的檔柄，Windows 上 tmp_path 才清得掉
+            try:
+                h.close()
+            except Exception:  # noqa: BLE001 — 清理路徑，不得反過來變成故障源
+                pass
+        lg.handlers.clear()
+        lg.handlers.extend(saved)
+
+
 def test_def_87_002_handleerror_fallback_on_broken_stream():
     """補測 except 兜底：stream.write 自身崩潰時仍走 handleError，不向上拋
     （沿用父類 StreamHandler 容錯語意，確保 logging 永不打斷主流程）。"""

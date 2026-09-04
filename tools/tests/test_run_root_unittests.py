@@ -1974,6 +1974,10 @@ class ZeroDepEnvironmentDiscriminationTest(unittest.TestCase):
             proc.returncode, 1,
             f"零相依環境下 run_with_floor 必須判紅（stdout={proc.stdout[-500:]!r}）",
         )
+        # DEF-101-803 方向 B：守門真的失守（數量下限竟然通過、整棵樹被跑起來）時，
+        # 要變成這一條具名 fail，而不是難以歸因的 TimeoutExpired error。
+        self.assertNotIn("unittest 數量下限釘選通過", proc.stdout,
+                         "floor 探針在零相依環境下竟通過數量下限 ⇒ 整棵真實樹被跑起來了")
 
     def test_zero_dep_message_says_environment_not_disappearance(self) -> None:
         """本輪缺陷的**直接**回歸鎖：在 CI 的等價環境下，閘門印的必須是「環境不完整」
@@ -1982,6 +1986,8 @@ class ZeroDepEnvironmentDiscriminationTest(unittest.TestCase):
         proc = _run_zero_dep_probe("floor", blocked)
         self.assertIn("環境問題", proc.stderr)
         self.assertNotIn("真的大規模消失", proc.stderr)
+        self.assertNotIn("unittest 數量下限釘選通過", proc.stdout,
+                         "同上（DEF-101-803）：守門失守須轉為具名 fail")
         for import_name, _pip in run_root_unittests._THIRD_PARTY_PREREQS:
             self.assertIn(import_name, proc.stderr, "必須點名缺哪一個相依")
 

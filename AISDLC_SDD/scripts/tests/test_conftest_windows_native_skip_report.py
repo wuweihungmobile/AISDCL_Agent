@@ -43,9 +43,12 @@ _FROZEN_BASELINE = "AISDLC_SDD_v0.01"
 _LATEST = sdd_version.latest_version_name(_SDD_ROOT, warn=lambda _m: None)
 
 
-def _make_sandbox(pytester, *, tagged_skip: bool, plain_skip: bool) -> None:
+def _make_sandbox(pytester, *, tagged_skip: bool, plain_skip: bool,
+                  posix_tagged_skip: bool | None = None) -> None:
     """在 pytester 沙盒內佈署「真實 conftest.py 原始碼」+ 其相依模組 + 一支迷你
     測試套件。`tagged_skip`/`plain_skip` 控制對應測試是否真的觸發 skip（True＝skip）。
+    `posix_tagged_skip`（DEF-200-248）＝`None` 時**不**生成反方向探針（既有三案例的
+    收集數逐字不變）；`True`／`False` 時多生成一支帶 `[POSIX-NATIVE-ONLY]` 標籤的測試。
     """
     pytester.makeconftest(_CONFTEST_SOURCE)
     scripts_dir = pytester.path / "scripts"
@@ -53,6 +56,11 @@ def _make_sandbox(pytester, *, tagged_skip: bool, plain_skip: bool) -> None:
     (scripts_dir / "cross_version_guard.py").write_text(
         _CROSS_VERSION_GUARD_SOURCE, encoding="utf-8"
     )
+    posix_probe = "" if posix_tagged_skip is None else f'''
+@pytest.mark.skipif({posix_tagged_skip!r}, reason="[POSIX-NATIVE-ONLY] 僅 POSIX 才具驗證價值")
+def test_posix_tagged():
+    pass
+'''
     pytester.makepyfile(
         test_fixture_suite=f'''
 import pytest
@@ -64,7 +72,7 @@ def test_tagged():
 @pytest.mark.skipif({plain_skip!r}, reason="本機缺某工具，一般性 skip")
 def test_plain():
     pass
-
+{posix_probe}
 def test_always_runs():
     assert True
 '''
@@ -99,6 +107,52 @@ def test_no_skips_prints_nothing(pytester):
     result = pytester.runpytest("-q")
     result.assert_outcomes(passed=3)
     assert "WINDOWS-NATIVE-ONLY" not in result.stdout.str()
+
+
+# ──────────────────────────────────────────────────────────────
+# DEF-200-248（原 DEF-101-856 ③）：反方向（[POSIX-NATIVE-ONLY]／[MAC-NATIVE-ONLY]）報表
+# ──────────────────────────────────────────────────────────────
+# WHY：此前 AISDLC_SDD 側只彙整 [WINDOWS-NATIVE-ONLY]；在 Windows 上跑時真正失去的覆蓋
+# （他平台專屬 skip）零訊號，「兩平台 skip 行為對齊」宣稱無從佐證。三支對稱 AutoClaude 側
+# `tests/test_conftest_windows_native_skip_report.py` 的反方向設計：正向（真的印且點名）、
+# 負向（沒 skip 就沉默）、雙向同時（兩個區塊各自獨立、互不吞掉）。
+
+
+def test_posix_tagged_skip_prints_reverse_section(pytester):
+    """帶反方向標籤的 skip 必須被獨立點名——區塊標題帶 POSIX/MAC，清單含該 nodeid，
+    且**不得**被誤歸進 WINDOWS-NATIVE-ONLY 區塊。"""
+    _make_sandbox(pytester, tagged_skip=False, plain_skip=False, posix_tagged_skip=True)
+    result = pytester.runpytest("-q")
+    result.assert_outcomes(passed=3, skipped=1)
+    result.stdout.fnmatch_lines([
+        "*POSIX/MAC-NATIVE-ONLY SKIPS*",
+        "*1 *DEF-200-248*",
+        "*test_posix_tagged*",
+    ])
+    assert "WINDOWS-NATIVE-ONLY SKIPS" not in result.stdout.str()
+
+
+def test_posix_probe_that_runs_prints_no_reverse_section(pytester):
+    """反方向探針真的跑了（沒 skip）⇒ 反方向區塊必須沉默（零 skip＝零雜訊，且證明區塊
+    不是「有這個 reason 字串就印」而是真的看 skipped 統計）。"""
+    _make_sandbox(pytester, tagged_skip=False, plain_skip=False, posix_tagged_skip=False)
+    result = pytester.runpytest("-q")
+    result.assert_outcomes(passed=4)
+    assert "POSIX/MAC-NATIVE-ONLY" not in result.stdout.str()
+
+
+def test_both_directions_print_two_independent_sections(pytester):
+    """雙向同時 skip ⇒ 兩個區塊各自出現、各自只列自己那一邊（改成「全收」或漏印任一邊
+    都會當場紅）。"""
+    _make_sandbox(pytester, tagged_skip=True, plain_skip=False, posix_tagged_skip=True)
+    result = pytester.runpytest("-q")
+    result.assert_outcomes(passed=2, skipped=2)
+    out = result.stdout.str()
+    assert "WINDOWS-NATIVE-ONLY SKIPS" in out and "POSIX/MAC-NATIVE-ONLY SKIPS" in out
+    win_section = out.split("WINDOWS-NATIVE-ONLY SKIPS", 1)[1].split("POSIX/MAC-NATIVE-ONLY", 1)[0]
+    assert "test_tagged" in win_section and "test_posix_tagged" not in win_section
+    posix_section = out.split("POSIX/MAC-NATIVE-ONLY SKIPS", 1)[1]
+    assert "test_posix_tagged" in posix_section and "test_tagged\n" not in posix_section
 
 
 # ──────────────────────────────────────────────────────────────

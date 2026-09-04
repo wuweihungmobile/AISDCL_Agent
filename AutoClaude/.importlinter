@@ -282,6 +282,10 @@ ignore_imports =
 ;   那個缺口由純語法判準補：tests/test_r82_quota_axis_and_shipped_defaults.py::TestNoHarnessImport
 ;   （ast.walk 掃 autoclaude/**/*.py，模組名首段落在 {tools,_claude} 或字面含 .claude 即紅；
 ;    該判準自帶合成注入自證，不依賴模組是否 import 得到）。兩者是互補不是重複。
+;   第三形態（DEF-200-217 E5）：`sys.path.insert(<含 tools／.claude 的路徑>)` ＋ 裸模組名
+;   `import quota_limits`——grimp 與上述首段判準都看不到（R100 §E-5 實測 laundered -> []）。
+;   同一支判準已補：檔內有帶 harness 路徑片段的 sys.path 操弄時，裸 import 首段命中
+;   monorepo harness 模組基名集合（tools/、tools/lib/、.claude/hooks/ 現查）即紅。
 [importlinter:contract:no-harness-import]
 name = autoclaude must not import monorepo harness modules (consume the file contract instead)
 type = forbidden

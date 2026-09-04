@@ -3312,5 +3312,95 @@ class TestDef200200ExpiryPredicate(unittest.TestCase):
                          "`record_burn` 沒把 resets_at 餵進 `row_of` ⇒ ④ 只是形式上落地")
 
 
+class TestDef200244GateExclusionIsObservable(unittest.TestCase):
+    """PRD §4.2.2-b (4c)（v2.1.14；`DEF-200-244` 方向 B）：gate 聚合面排除 FALLBACK／
+    未命中 MODEL_SCOPED 軸是設計內例外（R89／R98），實作義務只有一條＝**可觀測**——
+    `Decision.reason` 帶 `gate_excluded=<kind+kind>`。band／cap／rec 一個位元不變由對照組釘住。
+    """
+
+    def test_a_fallback_axis_leaves_a_trace_and_changes_nothing_else(self) -> None:
+        base = Q.decide(state(("session", 20, 60)), NOW, P)
+        with_spend = Q.decide(state(("session", 20, 60), ("spend", 90, None)), NOW, P)
+        self.assertIn("gate_excluded=spend", with_spend.reason)
+        self.assertNotIn("gate_excluded", base.reason, "沒有排除就不得寫「被排除」")
+        for field in ("cap", "recommended_fanout", "band"):
+            self.assertEqual(getattr(base, field), getattr(with_spend, field),
+                             f"(4c) 只補痕跡，{field} 不得因保險軸而變")
+
+    def test_when_every_axis_is_fallback_the_gate_falls_back_and_writes_no_trace(self) -> None:
+        """`gate = gate_list or readings` 的 fail-safe：全部被排除 ⇒ 退回全部參與 ⇒ 等於沒排除。"""
+        d = Q.decide(state(("spend", 90, None), ("extra_usage", 10, None)), NOW, P)
+        self.assertNotIn("gate_excluded", d.reason, "fallback 觸發時寫「被排除」與事實不符")
+
+    def test_an_unmatched_model_scoped_axis_is_named_next_to_the_model_note(self) -> None:
+        scoped = Q.Axis("weekly_scoped", 30.0, at(8000), scope_model="Fable")
+        st = Q.QuotaState((axis("session", 20, 60), scoped), NOW.isoformat(), "endpoint")
+        d = Q.decide(st, NOW, P, active_model="Sonnet")
+        self.assertIn(Q.NOTE_MODEL_EXCLUDED, d.reason)
+        self.assertIn("gate_excluded=weekly_scoped", d.reason)
+        hit = Q.decide(st, NOW, P, active_model="Fable")
+        self.assertNotIn("gate_excluded", hit.reason, "命中的模型軸有進 gate ⇒ 沒有排除")
+
+    def test_excluded_kinds_are_deduplicated_and_sorted(self) -> None:
+        d = Q.decide(state(("session", 20, 60), ("spend", 90, None), ("spend", 91, None),
+                           ("extra_usage", 5, None)), NOW, P)
+        self.assertIn("gate_excluded=extra_usage+spend", d.reason)
+
+
+class TestDef200243InheritedWindowMayOnlyTighten(unittest.TestCase):
+    """`DEF-200-243` 方向 B（R121 裁決；R126 四方修正 round-label-ok）：`windows()` 鄰軸繼承來的
+    窗長對**自身文法解不出**的軸只准讓 horizon 更緊——與 window=None 的完整 `effective_horizon()`
+    取 `tightest`。四方以真函式實測否決「純絕對門檻」：那會把 session（繼承 300）在剩
+    (150, 360] 分整段由 far 放寬成 mid（每個 5 小時窗的後半、任何水位），再經 `_pace_of()`
+    的 `max()` 外溢成全域 rec 翻倍，並牴觸 R110 Q9(i) 接受的 A2=4 round-label-ok。本類三支：缺陷本體
+    （spend）修好、session 逐位元不變（掃描式）、攤提仍吃繼承值。
+    """
+
+    def _horizon_of(self, decision: Q.Decision, kind: str) -> str:
+        return next(r.horizon for r in decision.per_axis if r.axis.kind == kind)
+
+    def test_spend_inheriting_a_week_window_no_longer_accelerates(self) -> None:
+        """修憲檔 §8-11 首例：spend 剩 504 分、無鄰軸 ⇒ far；加同 `resets_at` 的 `weekly_all`
+        ⇒ 改前繼承 10080 分窗翻成 near（rec 4→16），改後仍 far，rec 不得變大。"""
+        alone = Q.decide(state(("spend", 10, 504)), NOW, P)
+        paired = Q.decide(state(("spend", 10, 504), ("weekly_all", 10, 504)), NOW, P)
+        self.assertEqual(self._horizon_of(alone, "spend"), Q.AXIS_FAR)
+        self.assertEqual(self._horizon_of(paired, "spend"), Q.AXIS_FAR,
+                         "繼承來的週窗讓 spend 加速 ⇒ DEF-200-243 缺陷本體仍在")
+        # 🔴 rec 不是本案的觀測面：`weekly_all` 剩 504 分（自己的文法窗 10080 ⇒ near 門檻 1008）
+        # 本來就合法加速（rec 16），與 spend 無關。本案關的是「spend 自己不得因繼承而加速」——
+        # 有牙的斷言是 spend 的 horizon（舊碼給 near），以及 spend 的乘數不得高於鄰軸單獨時的節奏。
+        neighbour_only = Q.decide(state(("weekly_all", 10, 504)), NOW, P)
+        self.assertEqual(paired.recommended_fanout, neighbour_only.recommended_fanout,
+                         "spend 靠繼承窗長替全域節奏加碼 ⇒ 通道 B 未關")
+        self.assertEqual(Q._mult(self._horizon_of(paired, "spend"), P), P.pace_far)
+        # 程式碼複審（SD）抓到：只覆寫 horizon 會留下「far ＋ burn-thrifty」自相矛盾的 note。
+        spend_note = next(r.note for r in paired.per_axis if r.axis.kind == "spend")
+        self.assertNotIn(W.NOTE_THRIFTY, spend_note,
+                         "被絕對門檻壓回 far 的軸不得仍掛「省著點可放寬」的 burn note")
+
+    def test_session_classification_is_bit_for_bit_unchanged(self) -> None:
+        """🔴 四方點名的那個軸：session 與 five_hour 同 reset（繼承 300），掃 minutes∈[5,300]
+        × pct 跨 burn_step 三支路徑，horizon 必須與「今天」（用繼承窗 300 跑完整
+        `effective_horizon`）逐位元相同——尤其 (150, 300] 這一半不得由 far 變 mid。"""
+        for minutes in range(5, 301, 5):
+            for pct in (0, 20, 50, 80, 95):
+                d = Q.decide(state(("session", pct, minutes), ("five_hour", pct, minutes)), NOW, P)
+                expected = W.effective_horizon(float(pct), float(minutes), 300.0,
+                                               P.accel_window_minutes, P.far_horizon_minutes,
+                                               P.pace_ceiling)[0]
+                self.assertEqual(self._horizon_of(d, "session"), expected,
+                                 f"session@{minutes}min/{pct}% 與今天不同 ⇒ 放寬或收緊都不對")
+                self.assertEqual(self._horizon_of(d, "five_hour"), expected,
+                                 "文法解得出的軸不得被本修法碰到")
+
+    def test_amortization_still_sees_the_inherited_window(self) -> None:
+        """只拆 horizon 這一條通道：跨窗攤提（速率軸／總量軸分類）仍吃繼承後的窗長。"""
+        d = Q.decide(state(("session", 60, 120), ("five_hour", 60, 120), ("weekly_all", 50, 8000)),
+                     NOW, P, ratio=1.0)
+        self.assertIsNotNone(d.amort, "三軸含短窗與長窗卻算不出攤提 ⇒ 攤提通道被本修法弄壞")
+        self.assertEqual(d.amort.rate_window, 300.0, "速率軸窗長不再是繼承後的 300 ⇒ 攤提也被拆了")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

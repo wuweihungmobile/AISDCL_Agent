@@ -70,6 +70,11 @@ ENV_SPEC: tuple[EnvVar, ...] = (
            "float", 0.0, None, "reset 在這麼近之內 ⇒ 加速（使用者原文的 30m）", "policy"),
     EnvVar("AUTOSDD_QUOTA_FAR_HORIZON_MINUTES", "far_horizon_minutes", 360.0,
            "float", 0.0, None, "超過這麼遠 ⇒ 減速（6h）", "policy"),
+    # DEF-200-137／PRD §4.3・§6：壓縮成本邊際。不變式 6（`< prepare − converge`）由
+    # `load_policy()` 守，違反即整組退回預設（同四個錨點的既有 live fail-safe）。
+    EnvVar("AUTOSDD_QUOTA_COMPACT_COST_BUDGET_PP", "compact_cost_budget_pp", 3.0,
+           "float", 0.0, 100.0,
+           "一次 /compact 預估消耗的額度百分點（PRD §4.3；須 < prepare − converge）", "policy"),
     EnvVar("AUTOSDD_QUOTA_CAP_NOTICE", "cap_notice", 8, "int", 1.0, None,
            "notice 帶的 base cap", "policy"),
     EnvVar("AUTOSDD_QUOTA_CAP_CONVERGE", "cap_converge", 4, "int", 1.0, None,
@@ -268,6 +273,14 @@ def load_policy(env: Mapping[str, str]) -> tuple[Policy, list[str]]:
         problems.append(
             f"accel_window({policy.accel_window_minutes}) 必須小於 "
             f"far_horizon({policy.far_horizon_minutes})，否則 mid 檔是空的 ⇒ 整組採用預設")
+        return DEFAULT_POLICY, problems
+    # DEF-200-137／PRD §6.1 不變式 6：壓縮成本邊際必須小於 (DRAIN − WARN)，否則邊際吃掉整個
+    # converge 帶，`draining()` 會在 WARN 線上就禁止壓縮（收緊到失去鑑別力）。
+    if policy.compact_cost_budget_pp >= policy.prepare_pct - policy.converge_pct:
+        problems.append(
+            f"compact_cost_budget_pp({policy.compact_cost_budget_pp}) 必須小於 "
+            f"prepare({policy.prepare_pct}) − converge({policy.converge_pct})"
+            "（PRD §6.1 不變式 6）⇒ 整組採用預設")
         return DEFAULT_POLICY, problems
     mono = policy_monotonicity_problems(policy)
     if mono:

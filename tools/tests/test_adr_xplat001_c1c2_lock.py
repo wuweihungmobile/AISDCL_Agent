@@ -682,7 +682,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 7258,
+    "test_adr_xplat001_c1c2_lock.py": 7278,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 3839,
@@ -692,7 +692,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_bootstrap_core.py": 439,
     "test_bootstrap_ps1.py": 160,
     "test_check_archive_required.py": 160,
-    "test_check_defect_log_crossref.py": 3858,
+    "test_check_defect_log_crossref.py": 3891,
     "test_check_gha_action_versions.py": 295,
     "test_check_hooks_liveness.py": 3296,
     "test_check_pytest_baseline_sites.py": 301,
@@ -700,12 +700,12 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_check_wrapper_thinness.py": 1234,
     "test_claim_provenance_r86.py": 618,
     "test_component_sanitizer_shared_layer_lock.py": 293,
-    "test_context_budget_guard.py": 9835,
+    "test_context_budget_guard.py": 9902,
     "test_defect_id_reference_integrity.py": 281,
     "test_dev_start.py": 6527,
     "test_dev_start_ps1_lastexitcode.py": 548,
     "test_doc_env_prefix_platform_parity_r60.py": 340,
-    "test_doc_loc_baseline_freshness_r60.py": 7126,
+    "test_doc_loc_baseline_freshness_r60.py": 7131,
     "test_extras_quoting_zsh_safety.py": 365,
     "test_failure_log_rotation.py": 80,
     "test_find_git_bash_parity.py": 1264,
@@ -730,15 +730,15 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_ps51_compat.py": 610,
     "test_ps_engine_ssot.py": 954,
     "test_python_c_percent_shim.py": 119,
-    "test_quota_policy.py": 3316,
+    "test_quota_policy.py": 3406,
     "test_root_infra_parity.py": 441,
-    "test_run_root_unittests.py": 2422,
+    "test_run_root_unittests.py": 2428,
     "test_sanitize_component_frozen_sdd_versions_lock.py": 340,
     "test_schedule_capability_parity.py": 626,
     "test_script_scan_surface_ssot.py": 391,
     "test_skip_ceiling_ratchet_direction.py": 700,
     "test_skip_discoverability_r83.py": 744,
-    "test_smoke_ci_sync.py": 1258,
+    "test_smoke_ci_sync.py": 1353,
     "test_stdio_utf8.py": 76,
     "test_subprocess_encoding_hygiene.py": 1599,
     "test_windows_forbidden_filename_parity.py": 1025,
@@ -1457,6 +1457,17 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "雲端全綠＝已收輪，本棒是其後的新一批；併列會讓上一棒的 -125 被本棒抵銷回正、款(11) "
      "的 streak 歸零判定失實——判準本身把「拆輪次」列為合法出口（拆輪次不是拆列）。"
      "逐項見 CrossPlatform_R123_Debt_Closure.md。"),
+    ("R126", 91990, 92306, 316,
+     "[非淨減法輪][全額功能軌] 落地輪：R121 裁決包 needs-dev 五筆（241／137／244／243 過四方"
+     "設計複審後動碼；213 隨 241 治本解除死結）＋八筆小項的回歸鎖同批落地（含本檔自身重釘 +20）——"
+     "test_check_defect_log_crossref.py 3858→3891（241 done_ids 兩判準）／"
+     "test_context_budget_guard.py 9835→9902（257 等待窗方向鎖＋137 PRD 邊際）／"
+     "test_quota_policy.py 3316→3406（244 gate_excluded＋243 tightest 掃描鎖）／"
+     "test_smoke_ci_sync.py 1258→1353（951 skip 模組清單同步鎖）／test_run_root_unittests.py "
+     "2422→2428（803 具名 fail）／test_doc_loc_baseline_freshness_r60.py 7126→7131（247 幽靈路徑"
+     "基線一筆）。款(11)：R123 為連續上升第 1 輪、R124／R125 淨額 0 未記列，本輪為第 2 輪 ⇒ "
+     "下一輪淨額必須 ≤ 0（交棒書已明寫）。同輪兌現到期義務 (126, 555) 並重新武裝 128／552。"
+     "逐項見 CrossPlatform_R126_Debt_Closure.md。"),
 )
 
 
@@ -1518,6 +1529,10 @@ _REPIN_NET_CAP_SCHEDULE: tuple[tuple[int, int], ...] = (
                   # 到期目標本身（同 R99/R101/R115/R117/R119 判例 round-label-ok）。上一段
                   # 到期輪落在稽核痕跡未走到的輪次，本輪是它之後第一次重釘故就地兌現。
                   # 同輪重新武裝下一段：步伐 4 < 前段 5，續守「步伐刻意變小」，見 due 常數旁註。
+    (126, 555),   # 到期輪兌現（落地輪：結案批的回歸鎖同批落地）：到期輪 124 落在稽核痕跡未走到的
+                  # 輪次（R124／R125 淨額 0 未記列 round-label-ok），本輪首次重釘就地兌現，cap 降到
+                  # 到期目標本身（同 R99/R101/R115/R117/R119/R122 判例 round-label-ok）。
+                  # 同輪重新武裝下一段：步伐 3 < 前段 4，續守「步伐刻意變小」，見 due 常數旁註。
 )
 #: 生效點＝首列輪號、現行上限＝末列上限，**皆由表導出不另立常數**（R73 判例：一份知識一個家）。
 _REPIN_ROUND_CAP_SINCE = _REPIN_NET_CAP_SCHEDULE[0][0]
@@ -1720,8 +1735,10 @@ def net_cap_schedule_problems(
 #: R117 喚醒鏈批兌現 round-label-ok：cap 降到目標本身（570，見 `(117, 570)` 列），同輪重新武裝：
 #: 步伐 6 < 前一段的 7，續守「步伐刻意變小」且嚴格低於現行 cap。
 #: R119 P1-6 批兌現 round-label-ok：cap 降到目標本身（564，見 `(119, 564)` 列），同輪重新武裝：
-_REPIN_NET_CAP_DUE_ROUND = 124  # round-label-ok：到期輪＝兌現輪+2（lookahead 判準的活體對照）
-_REPIN_NET_CAP_DUE_TARGET = 555  # 步伐 4 < 前一段的 5，續守「步伐刻意變小」且嚴格低於現行 cap
+#: 步伐 4 < 前一段的 5（R122 兌現於 `(122, 559)`，重新武裝 124／555 round-label-ok）。
+#: R126 落地輪兌現 round-label-ok：cap 降到目標本身（555，見 `(126, 555)` 列），同輪重新武裝：
+_REPIN_NET_CAP_DUE_ROUND = 128  # round-label-ok：到期輪＝兌現輪+2（lookahead 判準的活體對照）
+_REPIN_NET_CAP_DUE_TARGET = 552  # 步伐 3 < 前一段的 4，續守「步伐刻意變小」且嚴格低於現行 cap
 
 #: DEF-200-121：到期輪自身的後設鎖——`_REPIN_NET_CAP_DUE_ROUND` 只准落在「最近稽核輪
 #: ＋ lookahead」以內（歷史母體 85..113 的到期輪一律＝上一次兌現輪 +2）。可延期的到期日
@@ -1788,10 +1805,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 115
+_REPIN_LOG_FROZEN_PREFIX_LEN = 116
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "4ec1e958f341a837c260b3455447d6d22656d110ad9074c50a84520f88256906")
+    "faddc843e04246118915d909fc68085a7bb3b1f343a7bcb9dc40bf091d537743")
 
 
 def repin_log_history_digest(
@@ -1950,6 +1967,9 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # 精準修復輪第二棒收尾：三筆落地的守衛線重釘使指紋前進，同體例 round-label-ok
     # 「追加後立即自我凍結」——本棒追加一個 repin 稽核列＋本列，prefix_len 114→115。
     ("R123", "7d9eb06de5a7", "4ec1e958f341", "DEF-200-205"),
+    # 落地輪收尾：結案批回歸鎖＋到期義務兌現的守衛線重釘使指紋前進，同體例 round-label-ok
+    # 「追加後立即自我凍結」——本輪追加一個 repin 稽核列＋本列，prefix_len 115→116。
+    ("R126", "4ec1e958f341", "faddc843e042", "DEF-200-241"),
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

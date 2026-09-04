@@ -861,14 +861,14 @@ def _headline(used: int, window: int, source: str) -> str:
 #: 通道，它就會**真的被執行** ⇒ 補這一條與換通道必須同一個 commit，否則等於啟動一個
 #: 休眠的阻斷級違反。第三條 AND（距上次壓縮的間隔）本 hook 量不到，由「同一門檻本
 #: session 只喊一次」的閂鎖近似——**誠實劃界：那是 per (tier, window)，不是 per 時間間隔**。
-#: 🔴 第二條 AND 也**只實作到** `U5h ≥ DRAIN`：PRD §6 的 `COMPACT_COST_BUDGET_PP=3` 邊際
-#: 全庫實查零實作 ⇒ `U5h ∈ (82, 85]` 這 3pp 帶內 `"no"` 勸的是 PRD 不允許的事（QA／R91）。
+#: 🔴 第二條 AND 的 3pp 邊際（PRD §6 `COMPACT_COST_BUDGET_PP`）已由 `quota_gate.draining()`
+#: 實作（DEF-200-137）：五小時軸 `pct + 邊際 > DRAIN` 亦回 `"yes"`，`(82, 85]` 帶不再勸壓縮。
 #: `"unknown"` 不折進 `"no"`：PRD §0 第 6 條明定遙測失效方向為 fail-safe，而「證不出
 #: 第二個 AND 成立」與「已證明它成立」是兩件事（同本檔通篇「量不到 ≠ 量到零」的紀律）。
 _NEXT_STEP = {
     "no": ("   機械 autocompact 將於觸發點自動壓縮（模型自身打不了 `/compact`，人在旁可手動——"
-           "ADR-XPLAT-008；額度現查：未越過 DRAIN 線；🔴 未計入 PRD `COMPACT_COST_BUDGET_PP` "
-           "邊際 ⇒ 貼線時自行判斷）。此時仍可開新工作。\n"),
+           "ADR-XPLAT-008；額度現查：五小時軸連同 PRD `COMPACT_COST_BUDGET_PP` 邊際仍在 "
+           "DRAIN 線下）。此時仍可開新工作。\n"),
     "yes": ("   🔴 **不要 `/compact`**——額度已越過 PRD `DRAIN_PERCENT`（prepare／halt 帶）。"
             "壓縮要模型讀完整段對話再產摘要 ⇒ 會顯著推升 U5h，在這一帶壓縮是反向操作"
             "（PRD §0 第 1 條：阻斷級）。\n"

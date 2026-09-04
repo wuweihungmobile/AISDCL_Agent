@@ -1489,97 +1489,130 @@ class TestDef200212StrictIsWiredIntoMain(unittest.TestCase):
             "main() 呼叫 ledger_def_ids() 的敘述（含後續兩行）沒有帶 unresolved_only=True")
 
 
-class TestDef200212NamedExemptionsZeroOutTheKnownFalsePositives(unittest.TestCase):
-    """DEF-200-212 D4/D8（掌舵者裁決）：strict 路徑對五筆假陽性（三筆歷史交接文件
-    ＋兩筆 212 結案自生）走**具名豁免面工程解**歸零——不改寫歷史文件本身。本類鎖住：
-    ①豁免清單真的在承重（拿掉任一筆會復發）；②清單形狀有牙（shrink-only 上限、理由長度門檻）；
-    ③豁免不是整檔放行（同檔未登記的前瞻行仍照判，同 `check_handoff_carriers.py`
-    `--self-test` 那一組合成注入，這裡另外對**真倉庫**做端到端對照）。
+#: DEF-200-241 治本前，具名豁免面承載的五筆真實假陽性座標（DEF-200-212 D4／D8）。
+#: 治本後生產表為空，這五筆改由 `done_ids`（帳本已結事實）自然出局；本表在此只當
+#: 回歸鎖的**注入母體**：拿掉 done_ids 時它們必須逐筆復發，證明新判準真的在承重。
+_DEF_200_241_FORMER_FALSE_POSITIVES: tuple[tuple[str, str], ...] = (
+    ("docs/04_planning/R102_HANDOFF.md", "DEF-200-204"),
+    ("docs/06_quality/CrossPlatform_R100_Scan_Findings.md", "DEF-200-208"),
+    ("docs/06_quality/CrossPlatform_R107_Ledger_Closure.md", "DEF-101-559"),
+    ("docs/04_planning/R113_HANDOFF.md", "DEF-200-212"),
+    ("docs/06_quality/CrossPlatform_R113_Ledger_Closure.md", "DEF-200-212"),
+)
+
+
+class TestDef200241GrandfatheringReadsLedgerClosureNotTheClock(unittest.TestCase):
+    """DEF-200-241 方向 B（R121 裁決卡；R126 四方設計複審 4×APPROVE 後動碼 round-label-ok）：
+    受測＝`tools/check_handoff_carriers.py` 判準② 的祖父化改讀**帳本結案事實**——前瞻行指名的
+    DEF-ID 一旦在帳本家族內結案（狀態欄首詞分類 ∉ `_UNRESOLVED_CLASSES`）即出局，
+    不比輪號、不依賴凍結的時鐘；DEF-200-212 時期的具名豁免面（5 筆，天花板 5）隨之
+    清空、天花板降 0。本類鎖住：①真倉庫 strict＋done_ids 零假陽性；②拿掉 done_ids
+    時五筆舊假陽性逐筆復發（新判準真的在承重，不是恰好沒用到）；③豁免表清空且天花板 0
+    （shrink-only 方向）；④合成：已結出局／未結仍承接／查無列仍紅／版面解析不到不猜；
+    ⑤豁免**機制**三性質以合成表驗（精確命中、不整檔放行、理由太短不算登記）——生產表
+    為空不代表機制可以退化。
     """
 
     def setUp(self) -> None:
         self.ledger, self.arch = hc._load()
         self.cur = m.current_round(self.ledger)
         self.assertIsNotNone(self.cur, "真帳本抽不到當前輪 ⇒ 下游斷言失去依據")
-        self.ids = hc.ledger_def_ids(self.ledger, self.arch, unresolved_only=True)
+        self.known = hc.ledger_def_ids(self.ledger, self.arch, unresolved_only=True)
+        self.done = hc.ledger_def_ids(self.ledger, self.arch, resolved_only=True)
         self.paths, fallback = hc.carrier_files()
         self.assertFalse(fallback, "真倉庫的 tracked 取數退化 ⇒ 本類的真倉庫斷言失去依據")
 
-    def test_the_real_repo_is_green_under_strict_with_named_exemptions(self) -> None:
-        """對照組：真倉庫在 strict＋具名豁免下必須零假陽性（DEF-200-212 結案判準）。"""
-        problems = hc.carrier_doc_problems(self.paths, self.cur, self.ids)
-        self.assertEqual(
-            problems, [],
-            f"strict 路徑接線＋具名豁免後，真倉庫理應零假陽性，實得：{problems}")
+    def test_the_two_id_sets_partition_the_ledger_family(self) -> None:
+        """known（未結）與 done（已結）互斥且皆非空——任一邊空掉，下面的斷言就是在測空氣。"""
+        self.assertTrue(self.known and self.done)
+        self.assertEqual(self.known & self.done, set(), "同一個 ID 同時算未結又算已結")
+        with self.assertRaises(ValueError):
+            hc.ledger_def_ids(self.ledger, self.arch, unresolved_only=True, resolved_only=True)
 
-    def test_removing_any_named_exemption_reproduces_its_own_false_positive(self) -> None:
-        """🔴 紅綠自證的主牙：逐一拿掉每筆豁免，各自對應的假陽性必須立刻復發——
-        證明清單真的在擋著，不是恰好沒被用到的裝飾。"""
-        for key in hc._CARRIER_DOC_EXEMPTIONS:
-            reduced = dict(hc._CARRIER_DOC_EXEMPTIONS)
-            del reduced[key]
-            problems = hc.carrier_doc_problems(
-                self.paths, self.cur, self.ids, exemptions=reduced)
-            self.assertTrue(
-                problems, f"拿掉豁免 {key} 後理應復發假陽性，卻仍是空清單 ⇒ 這一筆"
-                "根本沒有真的在擋任何東西（DEF-200-212 的假陽性當初是否真實存在？）")
+    def test_the_real_repo_is_green_under_strict_with_closure_facts(self) -> None:
+        """對照組：真倉庫在 strict＋done_ids 下零假陽性（DEF-200-241 結案判準）。"""
+        problems = hc.carrier_doc_problems(self.paths, self.cur, self.known, done_ids=self.done)
+        self.assertEqual(problems, [], f"改讀結案事實後真倉庫理應零假陽性，實得：{problems}")
 
-    def test_the_exemption_registry_stays_within_its_shrink_only_cap(self) -> None:
-        """名冊筆數不得超過 `_CARRIER_DOC_EXEMPTIONS_MAX_ENTRIES`（現值只准調小）：
-        每多一筆都要先改這個上限（＝一次可見的決策），不是悄悄追加第四個 key。"""
-        self.assertLessEqual(hc._CARRIER_DOC_EXEMPTIONS_MAX_ENTRIES, 5,
-                             "DEF-200-212 具名豁免上限只准調小（現值 5；D8 已耗用）")
-        self.assertLessEqual(
-            len(hc._CARRIER_DOC_EXEMPTIONS), hc._CARRIER_DOC_EXEMPTIONS_MAX_ENTRIES,
-            "具名豁免名冊筆數超過上限 ⇒ 「逐筆核准」已經名不符實")
+    def test_without_closure_facts_every_former_false_positive_comes_back(self) -> None:
+        """🔴 紅綠自證的主牙：拿掉 done_ids（傳空集合）⇒ 五筆舊假陽性座標必須逐筆復發。
+        任一筆不復發＝該筆從來不是被 done_ids 救的（那就得回頭查是誰在放行）。"""
+        problems = hc.carrier_doc_problems(self.paths, self.cur, self.known, done_ids=set())
+        for rel, def_id in _DEF_200_241_FORMER_FALSE_POSITIVES:
+            with self.subTest(rel=rel, def_id=def_id):
+                self.assertIn(def_id, self.done, f"{def_id} 在帳本家族內不是已結列 ⇒ 前提失效")
+                self.assertTrue(
+                    any(p.startswith(rel + ":") and def_id in p for p in problems),
+                    f"拿掉 done_ids 後 {rel}／{def_id} 理應復發，卻沒有 ⇒ 新判準對這一筆"
+                    "沒有承重（是別的東西在放行）")
 
-    def test_every_exemption_reason_meets_the_minimum_length(self) -> None:
-        for key, reason in hc._CARRIER_DOC_EXEMPTIONS.items():
-            self.assertGreaterEqual(
-                len(reason.strip()), hc._CARRIER_DOC_EXEMPTIONS_MIN_REASON_LEN,
-                f"{key} 的豁免理由過短，等同未登記（carrier_doc_problems() 的長度"
-                "門檻會拒收，見 _exemption_covers()）")
+    def test_the_exemption_registry_is_empty_and_its_cap_is_zero(self) -> None:
+        """治本後的形狀：表空、天花板 0（只准調小；D8 一次性核准已耗用、不得援引）。"""
+        self.assertEqual(hc._CARRIER_DOC_EXEMPTIONS, {})
+        self.assertEqual(hc._CARRIER_DOC_EXEMPTIONS_MAX_ENTRIES, 0)
+        self.assertEqual(len(hc._CARRIER_DOC_EXEMPTIONS), 0, "表非空卻宣稱天花板 0")
 
-    def test_a_too_short_reason_does_not_actually_exempt(self) -> None:
-        """理由太短時，即使 (path, DEF-ID) 對得上也不豁免——長度門檻要真的咬。"""
-        key = next(iter(hc._CARRIER_DOC_EXEMPTIONS))
-        short_table = {key: "太短"}
-        problems = hc.carrier_doc_problems(
-            self.paths, self.cur, self.ids, exemptions=short_table)
-        self.assertTrue(
-            any(key[0] in p for p in problems),
-            f"理由僅兩字的豁免竟然也放行 {key} ⇒ 長度門檻沒有真的接進 "
-            "carrier_doc_problems()")
-
-    def test_an_unregistered_forward_line_in_an_exempted_file_still_fails(self) -> None:
-        """③ 防整檔放行：合成一份與已登記豁免同一相對路徑的檔案，第一行是登記過的
-        (路徑, DEF-ID)、第二行是未登記的同型前瞻行（無 DEF-ID）——後者必須仍被判紅，
-        證明豁免鍵是逐筆 (路徑, DEF-ID)，不是整份路徑的通行證。
-
-        🔴 用暫時挪動 `hc._REPO_ROOT` 造合成檔（同 `check_handoff_carriers.py`
-        `--self-test` 既有手法），不動真倉庫檔案、也不用 mock 全域 patch
-        `Path.read_text`（後者會連帶餵假內容給 `carrier_doc_problems()` 同批讀到的
-        其他 114 份真檔案，污染面過大）。
-        """
-        rel, def_id = next(iter(hc._CARRIER_DOC_EXEMPTIONS))
-        with tempfile.TemporaryDirectory(prefix="handoff_exempt_lock_") as td:
+    def _synthetic(self, body: str, **kw) -> list[str]:
+        """合成一份交接載體（暫時挪 `hc._REPO_ROOT`，不動真倉庫、不 patch `Path.read_text`）。"""
+        with tempfile.TemporaryDirectory(prefix="handoff_241_") as td:
             root = Path(td)
-            fp = root / rel
+            fp = root / "docs" / "04_planning" / "R990_HANDOFF.md"  # round-label-ok：合成檔名
             fp.parent.mkdir(parents=True, exist_ok=True)
-            fp.write_text(
-                f"- 交給 R{self.cur + 1} 處理（{def_id}）\n"
-                f"- 另一件不相干的事交給 R{self.cur + 1} 處理\n",
-                encoding="utf-8",
-            )
+            fp.write_text(body, encoding="utf-8")
             keep, hc._REPO_ROOT = hc._REPO_ROOT, root
             try:
-                problems = hc.carrier_doc_problems([fp], self.cur, set())
+                return hc.carrier_doc_problems([fp], self.cur, set(), **kw)
             finally:
                 hc._REPO_ROOT = keep
+
+    def test_synthetic_closure_semantics(self) -> None:
+        """④ 已結出局／未結仍承接／查無列仍紅／版面解析不到不貢獻 ID。"""
+        syn_id = "DEF-200-" + "999"
+        line = f"- 這件事交給 R{self.cur + 1} 處理（{syn_id}）\n"
+        self.assertEqual(len(self._synthetic(line)), 1, "查無列 ⇒ 紅（引用 ≠ 有列）")
+        self.assertEqual(self._synthetic(line, done_ids={syn_id}), [], "已結 ⇒ 出局")
+        self.assertEqual(len(self._synthetic(line, done_ids=set())), 1, "done 空 ⇒ 退回原判準")
+        closed = f"| ID | 狀態 |\n|----|------|\n| {syn_id} | wontfix（合成）；2026-01-01 |\n"
+        self.assertIn(syn_id, hc.ledger_def_ids(closed, [], resolved_only=True))
+        self.assertNotIn(syn_id, hc.ledger_def_ids(closed, [], unresolved_only=True))
+        half = f"| ID | 狀態 |\n|----|------|\n| {syn_id} | partial（合成；判準計為未結） |\n"
+        self.assertNotIn(syn_id, hc.ledger_def_ids(half, [], resolved_only=True),
+                         "partial 只修一半不是結案，不得進 done_ids")
+        self.assertNotIn(syn_id, hc.ledger_def_ids(f"散文提到 {syn_id} 但沒有表格\n", [],
+                                                    resolved_only=True),
+                         "版面解析不到的檔不猜狀態")
+
+    def test_commit_criterion_also_reads_closure_facts_per_paragraph(self) -> None:
+        """判準①（commit 訊息 → 帳本承接輪）同一原則：宣告所在段落指名已結 DEF-ID ⇒ 出局。
+        立案實例＝commit `0398226`（「已列 R118 交棒書呈報裁決」段落指名 212） round-label-ok
+        212／241 結案後帳本再無承接輪 ≥ R118 的未結列 ⇒ 沒這條，做完事讓判準① 轉紅 round-label-ok
+        """
+        real = [m for m in hc.commit_messages() if m[0].startswith("0398226")]
+        self.assertEqual(len(real), 1, "真倉庫找不到立案 commit ⇒ 本測試失去對象（淺 clone？）")
+        self.assertIn("DEF-200-212", self.done, "DEF-200-212 不是已結列 ⇒ 前提失效")
         self.assertEqual(
-            len(problems), 1,
-            f"{rel} 裡登記過的那行應被豁免涵蓋，但同檔追加的未登記前瞻行必須仍轉紅；"
-            f"實得 {len(problems)} 筆：{problems}")
+            hc.commit_carrier_problems(real, self.cur, hc.ledger_carrier_rounds(self.ledger),
+                                       done_ids=self.done), [],
+            "指名已結 ID 的段落仍被判紅 ⇒ 判準① 沒有讀結案事實")
+        self.assertTrue(
+            hc.commit_carrier_problems(real, self.cur, set(), done_ids=set()),
+            "拿掉 done_ids 與承接輪後仍綠 ⇒ 該 commit 已無前瞻宣告，本測試在測空氣")
+        syn_id = "DEF-200-" + "999"
+        m = [("s", f"x\n\n- {syn_id} 列 R{self.cur + 1}。\n\n- 另件皆留 R{self.cur + 1}。\n")]
+        self.assertEqual(len(hc.commit_carrier_problems(m, self.cur, set(), done_ids={syn_id})), 1,
+                         "粒度必須是段落：無關段落不得被同一則訊息裡的已結 ID 背書")
+
+    def test_exemption_mechanism_keeps_its_three_properties_via_synthetic_table(self) -> None:
+        """⑤ 生產表為空，機制本身仍須有牙：精確命中才豁免、不整檔放行、理由太短不算登記。"""
+        rel = "docs/04_planning/R990_HANDOFF.md"  # round-label-ok：與 _synthetic 同一合成檔名
+        syn_id = "DEF-200-" + "999"
+        table = {(rel, syn_id): "合成豁免理由，長度刻意超過二十個字元以通過門檻檢查。"}
+        hit = f"- 交給 R{self.cur + 1} 處理（{syn_id}）\n"
+        self.assertEqual(self._synthetic(hit, exemptions=table), [], "精確命中 ⇒ 豁免")
+        self.assertEqual(len(self._synthetic(hit + f"- 另一件事交給 R{self.cur + 1} 處理\n",
+                                             exemptions=table)), 1, "同檔未登記行仍紅")
+        self.assertEqual(len(self._synthetic(hit, exemptions={(rel, syn_id): "太短"})), 1,
+                         "理由太短視同未登記")
 
 
 class TestOrphanBacklogAgainstTheRealLedger(unittest.TestCase):

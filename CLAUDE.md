@@ -32,6 +32,7 @@ monorepo 根目錄（`AISDCL_Agent/`，各機器 checkout 路徑不同）＝**�
 | **① 整合迭代**（範本唯一驅動器） | 根層 [docs/04_planning/AutoSDD_improving_NN.md](docs/04_planning/) | 三柱對齊北極星：**A 軌**＝雙向協作橋接（SDD→Playbook）；**B 軌**＝手腳框架 dogfooding v0.0X 並回流缺陷；**C 軌**＝指揮官 AutoClaude 自身能力。由 [docs/04_planning/AutoSDD_Iteration_Prompt_Template.md](docs/04_planning/AutoSDD_Iteration_Prompt_Template.md) 驅動，每輪四件套（improving_NN + ZeroTrust_Audit_NN + Defect_Log 累積 + 框架改進落 `v0.0(X+1)/`） | `docs/04_planning/` 現存最大號＋1（動工前以 `ls` 實查；本欄不快照號次——快照必 stale） |
 | **② 框架內部 RFC**（AISDLC_SDD 自身演進） | `AISDLC_SDD/AISDLC_SDD_v0.01/build/planning/active/SDD_improving_Automation_NN.md` | ①B 軌缺陷回流路徑之一；迭代的**下游帳本，不是驅動器** | 隨缺陷回流產生（非定期遞增） |
 | **③ AutoClaude 內部能力**（＝① 的 **C 軌工作流帳本**） | `AutoClaude/docs/04_planning/AutoClaude_Improving_0NN.md` + `SD_Improving_NN.md` | 2026-06-15 起納入①範本 C 軌統籌驅動；本欄檔案為 C 軌工作流帳本（沿用 AutoClaude 自身 docs/ 編號與 G0~G6 Gate） | 以 `AutoClaude/docs/04_planning/` 現存最大號實查 |
+| **（附）跨平台整合輪 R 系列**（帳本驅動，不屬 ①②③ 任一計畫書） | 交棒書 `docs/04_planning/R<N>_HANDOFF.md` ＋ 證據檔 `docs/06_quality/CrossPlatform_R<N>_*.md`；驅動器＝ [docs/06_quality/AutoSDD_Defect_Log.md](docs/06_quality/) 未結列與 [docs/04_planning/TechDebt_Paydown_Cycle_Prompt.md](docs/04_planning/TechDebt_Paydown_Cycle_Prompt.md) | 跨平台／護欄層的掃描—修復—結案輪（本 repo 實際運轉的主線）；輪號獨立遞增。DEF-200-172 ③ 補列：此前三軌表未收它，讀者無從把 `CrossPlatform_R*` 對上任何一軌 | 現存 `R*_HANDOFF.md` 最大號＋1（**數字排序**；`Sort-Object Name` 會把 R124 排在 R90 前） |
 
 **鐵律**：
 - 要「推進整合／開新一輪迭代」→ **走軌道①**：複製範本、續 `AutoSDD_improving_NN`。**絕不**把 `SDD_improving_Automation_NN`（軌道②）當迭代計畫。

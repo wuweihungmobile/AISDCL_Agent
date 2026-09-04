@@ -1822,6 +1822,16 @@ def _wait_for(path: Path, seconds: float) -> bool:
     return path.is_file()
 
 
+#: DEF-200-257：`SentinelWiringTest` 正／負向等待時間**具名且同源**。負向斷言
+#: （「不該武裝」）等 `_SENTINEL_NO_ARM_WAIT_S` 秒沒等到才算綠——若這個值短於正向
+#: spawn 的真實延遲，負向就會因「還沒來得及生出來」而假綠。方向鎖兩道：靜態
+#: `NO_ARM < ARM`（`test_the_wait_windows_are_ordered`）＋ 動態：正向測試把實測
+#: spawn 延遲量出來，斷言 `延遲 × 安全係數 ≤ NO_ARM`（等待時間不再是兩個互不相干的字面）。
+_SENTINEL_ARM_WAIT_S = 30.0
+_SENTINEL_NO_ARM_WAIT_S = 8.0
+_SENTINEL_SPAWN_SAFETY_FACTOR = 3.0
+
+
 class _StatefulFakeSchedulerBackend:
     """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
     cbg _StatefulFakeSchedulerBackend WHY〉節。"""
@@ -2306,7 +2316,7 @@ class SentinelWiringTest(unittest.TestCase):
         proc = self._sessionstart(self._fake_repo(marker))
         self.assertEqual((proc.returncode, proc.stderr), (0, ""),
                          "SessionStart 這一支必須恆靜默、恆 exit 0")
-        self.assertFalse(_wait_for(marker, 8.0),
+        self.assertFalse(_wait_for(marker, _SENTINEL_NO_ARM_WAIT_S),
                          "SessionStart 又在武裝了 ⇒ 每一支短命探針都會留一支排程")
 
     def test_an_earned_session_actually_spawns_the_arming_run(self) -> None:
@@ -2323,8 +2333,16 @@ class SentinelWiringTest(unittest.TestCase):
         live = _transcript(self.tmp, "earned.jsonl", 40, 900.0)
         proc = self._posttooluse(self._fake_repo(marker), live)
         self.assertEqual(proc.returncode, 0)
-        self.assertTrue(_wait_for(marker, 30.0),
+        started = time.monotonic()
+        self.assertTrue(_wait_for(marker, _SENTINEL_ARM_WAIT_S),
                         "夠格的 session 也沒被武裝 ⇒ 續航整條斷掉")
+        # DEF-200-257 動態方向鎖：負向等待窗必須吃得下實測 spawn 延遲（含安全係數），
+        # 否則同類別三支負向斷言都可能在武裝真的發生之前就先宣告「沒武裝」。
+        spawn_latency = time.monotonic() - started
+        self.assertLessEqual(
+            spawn_latency * _SENTINEL_SPAWN_SAFETY_FACTOR, _SENTINEL_NO_ARM_WAIT_S,
+            f"正向 spawn 實測 {spawn_latency:.2f}s × {_SENTINEL_SPAWN_SAFETY_FACTOR} 已超過"
+            f"負向等待窗 {_SENTINEL_NO_ARM_WAIT_S}s ⇒ 三支負向斷言此刻可能是假綠")
         argv = json.loads(marker.read_text(encoding="utf-8"))
         self.assertIn("--arm-sentinel", argv)
         self.assertIn("--transcript", argv)
@@ -2337,7 +2355,7 @@ class SentinelWiringTest(unittest.TestCase):
         marker = self.tmp / "argv_short.json"
         live = _transcript(self.tmp, "short.jsonl", 2, 12.0)
         self.assertEqual(self._posttooluse(self._fake_repo(marker), live).returncode, 0)
-        self.assertFalse(_wait_for(marker, 8.0), "短命 session 仍然被武裝了")
+        self.assertFalse(_wait_for(marker, _SENTINEL_NO_ARM_WAIT_S), "短命 session 仍然被武裝了")
 
     def test_the_off_switch_really_stops_it(self) -> None:
         """人的逃生口。與 context 阻斷那一個刻意分開：兩者關掉的是不同的東西。
@@ -2352,7 +2370,17 @@ class SentinelWiringTest(unittest.TestCase):
         proc = self._posttooluse(self._fake_repo(marker), live,
                                  {"AUTOSDD_SENTINEL_OFF": "1"})
         self.assertEqual(proc.returncode, 0)
-        self.assertFalse(_wait_for(marker, 8.0), "逃生口沒有真的擋住武裝")
+        self.assertFalse(_wait_for(marker, _SENTINEL_NO_ARM_WAIT_S), "逃生口沒有真的擋住武裝")
+
+    def test_the_wait_windows_are_ordered(self) -> None:
+        """DEF-200-257 靜態方向鎖：負向窗 < 正向窗，且兩者皆為正數——四個站點共用同一對
+        具名常數，改其中一個而讓關係反轉時這裡當場紅（原本是 3 處 8.0／1 處 30.0 的字面，
+        彼此之間零判準）。"""
+        self.assertGreater(_SENTINEL_NO_ARM_WAIT_S, 0.0)
+        self.assertLess(_SENTINEL_NO_ARM_WAIT_S, _SENTINEL_ARM_WAIT_S,
+                        "負向等待窗不得長於正向等待窗——否則正向那一條反而是較弱的斷言")
+        self.assertGreaterEqual(_SENTINEL_SPAWN_SAFETY_FACTOR, 1.0,
+                                "安全係數 < 1 等於把實測延遲打折，動態鎖失去意義")
 
     def test_a_missing_planner_is_fail_open_not_a_crash(self) -> None:
         """`.claude/settings.json` 記載過的 P0：hook 誤觸會把所有工具硬鎖死。
@@ -9661,6 +9689,45 @@ class PrdDrainPercentMapsToTheBandsTest(unittest.TestCase):
             self.assertEqual(qg.draining(), "yes")
             _quota_cache(tmp, 20.0)
             self.assertEqual(qg.draining(), "no")
+
+    def test_the_compact_cost_margin_lives_in_policy_and_matches_the_prd(self) -> None:
+        """DEF-200-137：邊際常數的家＝`Policy.compact_cost_budget_pp`（PRD §6 出廠值對帳），
+        且 PRD §6.1 不變式 6（`< DRAIN − WARN`）由 `load_policy()` 的 live fail-safe 守——
+        `.env` 把邊際調到吃掉整個帶時整組退回預設並出聲，不是只有一支靜態測試在看。"""
+        p = quota_policy.DEFAULT_POLICY
+        self.assertEqual(self._prd_value("COMPACT_COST_BUDGET_PP"), p.compact_cost_budget_pp)
+        self.assertLess(p.compact_cost_budget_pp, p.prepare_pct - p.converge_pct,
+                        "出廠值自己就違反 PRD §6.1 不變式 6")
+        bad, problems = quota_policy.load_policy(
+            {"AUTOSDD_QUOTA_COMPACT_COST_BUDGET_PP": str(p.prepare_pct - p.converge_pct)})
+        self.assertEqual(bad, quota_policy.DEFAULT_POLICY, "違反不變式 6 卻沒有整組退回預設")
+        self.assertTrue(any("不變式 6" in x for x in problems), f"退回預設卻沒出聲：{problems}")
+        good, problems = quota_policy.load_policy({"AUTOSDD_QUOTA_COMPACT_COST_BUDGET_PP": "5"})
+        self.assertEqual((good.compact_cost_budget_pp, problems), (5.0, []),
+                         "合法值必須真的被採用（不然 .env 鍵是裝飾）")
+
+    def test_draining_applies_the_margin_on_the_five_hour_axis_only(self) -> None:
+        """DEF-200-137 行為：五小時軸 `pct + 3 > 85` ⇒ `"yes"`（band 仍是 converge）；
+        `81.9` ⇒ `"no"`；`session`（文法解不出、靠同 reset 繼承＋kind 字面）同樣套邊際；
+        只有週軸 83% ⇒ `"no"`（PRD 的 `U5h` 不是週軸，不套）。"""
+        tmp = Path(tempfile.mkdtemp(prefix="r126-drain-margin-"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        with (unittest.mock.patch.object(qg, "quota_cache_path",
+                                         lambda: tmp / "autosdd_quota.json"),
+              unittest.mock.patch.object(qg, "quota_trace_path",
+                                         lambda: tmp / "trace.jsonl"),
+              unittest.mock.patch.object(qg, "degraded_stamp_path",
+                                         lambda source: tmp / f"stamp-{source}")):
+            _quota_cache(tmp, 83.0, kind="five_hour")
+            self.assertEqual(qg.draining(), "yes", "(82, 85] 帶內壓縮會推過 DRAIN 線")
+            _quota_cache(tmp, 81.9, kind="five_hour")
+            self.assertEqual(qg.draining(), "no", "邊際以下仍可壓縮")
+            _quota_cache(tmp, 83.0, kind="session")
+            self.assertEqual(qg.draining(), "yes", "session 是五小時軸的別名，同樣套邊際")
+            _quota_cache(tmp, 83.0, kind="seven_day", resets_in=6 * 24 * 3600.0)
+            self.assertEqual(qg.draining(), "no", "週軸不是 PRD 的 U5h，不套 3pp 邊際")
+        self.assertFalse(qg.compact_margin_breached((), quota_policy.DEFAULT_POLICY),
+                         "沒有任何軸 ⇒ 不發明數字、退回 band-only")
 
 
 def flush_site_problems(sources: dict[str, str]) -> list[str]:

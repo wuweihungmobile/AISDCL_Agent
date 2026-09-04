@@ -11,6 +11,7 @@ check_script_parity._MIN_EXTRACT_COUNTS 慣例）。
 """
 from __future__ import annotations
 
+import fnmatch
 import importlib.util
 import os
 import re
@@ -1256,3 +1257,97 @@ class TestActWorkflowReachability(unittest.TestCase):
         )
         for key, reason in _ACT_NO_LOCAL_RUNNER_JOBS.items():
             self.assertIn("替代", reason, f"{key} 的登記沒寫替代出口——只說「不行」不夠")
+
+
+# ── DEF-101-951（R121 裁決方向 B round-label-ok）：compat-CI paths 複本 ↔ `tools/lib/*skip*.py`
+# skip 判準族被 LOC tier 切成多支 `tools/lib/*skip*.py`，清單在 windows-／macos-compat-ci 的
+# push／pull_request 各抄一份（實查 4 處複本）。此前唯一看著它的鎖住 AISDLC_SDD 側、不在
+# 根層 unittest 閘門射程 ⇒ 新增一支 skip 模組漏列 paths 時根層零訊號（同位置實踩兩次）。
+# 判準：每一處含 skip 模組的 paths 塊，其 skip 模組集合 == tools/lib 磁碟上的 `*skip*.py` 集合。
+_SKIP_MODULE_GLOB = "*skip*.py"
+#: 含 skip 模組的 paths 塊數下限（win push／win pr／mac push／mac pr）。抽不到即抽取式漂移，
+#: 不得靜默降級成「0 塊全對」的假綠。
+_MIN_SKIP_PATH_BLOCKS = 4
+_PATHS_HEADER_RE = re.compile(r"^paths:\s*$")
+_PATHS_ITEM_RE = re.compile(r"""^-\s*["']?([^"'#]+?)["']?\s*(?:#.*)?$""")
+
+
+def _paths_blocks(text: str) -> list[list[str]]:
+    """抽出 workflow 內每一個 `paths:` 清單塊的路徑項（去引號）。塊以縮排回退到 header 以內
+    結束；註解行與空行不中斷塊（本 repo 的 paths 清單大量夾註解）。`paths-ignore:` 不算。"""
+    blocks: list[list[str]] = []
+    cur: list[str] | None = None
+    header_indent = -1
+    for line in text.splitlines():
+        stripped = line.strip()
+        indent = len(line) - len(line.lstrip())
+        if _PATHS_HEADER_RE.match(stripped):
+            cur = []
+            blocks.append(cur)
+            header_indent = indent
+            continue
+        if cur is None or not stripped or stripped.startswith("#"):
+            continue
+        m = _PATHS_ITEM_RE.match(stripped)
+        if m and indent > header_indent:
+            cur.append(m.group(1).strip())
+            continue
+        cur = None
+    return blocks
+
+
+def _skip_modules_in(block: list[str]) -> set[str]:
+    return {Path(p).name for p in block
+            if p.startswith("tools/lib/") and fnmatch.fnmatch(Path(p).name, _SKIP_MODULE_GLOB)}
+
+
+class TestSkipModuleListsMirrorToolsLib(unittest.TestCase):
+    """DEF-101-951：四處 compat-CI paths 複本的 skip 模組清單必須與 `tools/lib/*skip*.py` 相等。"""
+
+    def _expected(self) -> set[str]:
+        names = {p.name for p in (_REPO_ROOT / "tools" / "lib").glob(_SKIP_MODULE_GLOB)}
+        self.assertGreaterEqual(
+            len(names), 5,
+            "tools/lib 的 skip 模組族不到 5 支 ⇒ glob 漂移或模組族已合併，先更新本鎖")
+        return names
+
+    def _blocks_with_skip(self) -> list[tuple[str, int, set[str]]]:
+        out: list[tuple[str, int, set[str]]] = []
+        for wf in (_WIN_CI, _MAC_CI):
+            for i, block in enumerate(_paths_blocks(_read(wf))):
+                listed = _skip_modules_in(block)
+                if listed:
+                    out.append((wf.name, i, listed))
+        return out
+
+    def test_every_paths_copy_lists_exactly_the_skip_modules(self) -> None:
+        expected = self._expected()
+        found = self._blocks_with_skip()
+        self.assertGreaterEqual(
+            len(found), _MIN_SKIP_PATH_BLOCKS,
+            f"只抽到 {len(found)} 個含 skip 模組的 paths 塊（下限 {_MIN_SKIP_PATH_BLOCKS}）"
+            "⇒ 不是 workflow 真的少了複本，就是本鎖的抽取式漂移而失明")
+        for wf, i, listed in found:
+            with self.subTest(workflow=wf, block=i):
+                self.assertEqual(
+                    listed, expected,
+                    f"{wf} 第 {i} 個 paths 塊：缺 {sorted(expected - listed)}／"
+                    f"多 {sorted(listed - expected)}——新增或改名 skip 模組須同步兩支 "
+                    "compat-CI 各兩處 paths")
+
+    def test_red_a_dropped_module_is_caught(self) -> None:
+        """合成注入：拿真塊、刪掉任一 skip 模組 ⇒ 集合必不等（判準不是恆真）。"""
+        expected = self._expected()
+        wf, i, listed = self._blocks_with_skip()[0]
+        self.assertEqual(listed, expected, f"對照組：{wf} 第 {i} 塊本身必須先是綠的")
+        self.assertNotEqual(listed - {sorted(listed)[0]}, expected)
+
+    def test_the_parser_ignores_paths_ignore_and_comments(self) -> None:
+        """抽取式保真度：`paths-ignore:` 不是 `paths:`；註解行／空行不中斷塊；縮排回退結束塊。"""
+        text = ("on:\n  push:\n    paths-ignore:\n      - \"docs/**\"\n    paths:\n"
+                "      # 註解\n      - \"tools/lib/skip_a.py\"\n\n      - 'tools/lib/other.py'\n"
+                "  pull_request:\n    paths:\n      - \"tools/lib/skip_b.py\"\n")
+        blocks = _paths_blocks(text)
+        self.assertEqual(blocks, [["tools/lib/skip_a.py", "tools/lib/other.py"],
+                                  ["tools/lib/skip_b.py"]])
+        self.assertEqual(_skip_modules_in(blocks[0]), {"skip_a.py"})

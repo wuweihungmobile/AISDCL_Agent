@@ -49,6 +49,17 @@ pytest_plugins = ["pytester"]
 
 WINDOWS_NATIVE_SKIP_TAG = "[WINDOWS-NATIVE-ONLY]"
 
+# DEF-200-248（原 DEF-101-856 ③）：**反方向**的對稱標籤。SSOT＝根層
+# `tools/lib/windows_skip_tags.py`（`POSIX_NATIVE_SKIP_TAG`／`MAC_NATIVE_SKIP_TAG`）；本檔比照
+# 上一行 `WINDOWS_NATIVE_SKIP_TAG` 的既有慣例各持一份字面值，理由同 AutoClaude/tests/conftest.py
+# ——pytest root 不同、刻意不 import 根層模組。此前本側只彙整 `[WINDOWS-NATIVE-ONLY]`，於是
+# **在 Windows 上跑**（這台機器每天在跑的那一側）真正失去的覆蓋（他平台專屬 skip）零訊號，
+# 「兩平台 skip 行為對齊」的宣稱因此無從佐證。回歸鎖＝
+# `scripts/tests/test_conftest_windows_native_skip_report.py` 的反方向三支。
+POSIX_NATIVE_SKIP_TAG = "[POSIX-NATIVE-ONLY]"
+MAC_NATIVE_SKIP_TAG = "[MAC-NATIVE-ONLY]"
+NON_WINDOWS_SKIP_TAGS = (POSIX_NATIVE_SKIP_TAG, MAC_NATIVE_SKIP_TAG)
+
 
 def _skip_reason(report) -> str | None:
     """從一則 skipped ``TestReport`` 取出 reason 文字（同 AutoClaude/tests/conftest.py
@@ -75,20 +86,44 @@ def windows_native_skips(terminalreporter) -> list[str]:
     return tagged
 
 
+def non_windows_native_skips(terminalreporter) -> list[str]:
+    """純函式（與印出分離，比照 ``windows_native_skips``）：篩出帶
+    ``[POSIX-NATIVE-ONLY]``／``[MAC-NATIVE-ONLY]`` 的 skip，回傳 nodeid 清單（DEF-200-248）。
+    """
+    tagged: list[str] = []
+    for report in terminalreporter.stats.get("skipped", []):
+        reason = _skip_reason(report)
+        if reason and any(tag in reason for tag in NON_WINDOWS_SKIP_TAGS):
+            tagged.append(report.nodeid)
+    return tagged
+
+
 def pytest_terminal_summary(terminalreporter, exitstatus, config):  # noqa: ARG001
     """在一般 ``skipped=N`` 摘要之外，另印出「僅原生 Windows 上才具驗證價值」的
-    skip 清單（對等 AutoClaude/tests/conftest.py::pytest_terminal_summary）。刻意
+    skip 清單（對等 AutoClaude/tests/conftest.py::pytest_terminal_summary），以及
+    **反方向**（他平台專屬、本次因跑在本平台而沒跑）的清單（DEF-200-248）。刻意
     不用 emoji——`terminalreporter` 底層 TerminalWriter 在非 UTF-8 終端下無防護，
     印 emoji 會 UnicodeEncodeError 崩潰（見 DEF-101-069），純 ASCII 分隔線換取同等
     醒目效果更安全。
     """
     tagged_ids = windows_native_skips(terminalreporter)
-    if not tagged_ids:
-        return
-    terminalreporter.write_sep("=", "WINDOWS-NATIVE-ONLY SKIPS (未在原生 Windows 環境驗證)")
-    terminalreporter.write_line(
-        f"{len(tagged_ids)} 個 Windows 專屬測試本次「未在原生 Windows 環境驗證」"
-        f"（非一般 skip，見 DEF-101-363/368）："
-    )
-    for node_id in tagged_ids:
-        terminalreporter.write_line(f"  - {node_id}")
+    if tagged_ids:
+        terminalreporter.write_sep("=", "WINDOWS-NATIVE-ONLY SKIPS (未在原生 Windows 環境驗證)")
+        terminalreporter.write_line(
+            f"{len(tagged_ids)} 個 Windows 專屬測試本次「未在原生 Windows 環境驗證」"
+            f"（非一般 skip，見 DEF-101-363/368）："
+        )
+        for node_id in tagged_ids:
+            terminalreporter.write_line(f"  - {node_id}")
+    posix_ids = non_windows_native_skips(terminalreporter)
+    if posix_ids:
+        # 平台名由 sys.platform 動態組字，不得寫死（同 AutoClaude 側 R82 DOC-01 的教訓：
+        # 標題寫死「Windows」會讓 macOS 上的讀者以為這一段與自己無關）。
+        terminalreporter.write_sep(
+            "=", f"POSIX/MAC-NATIVE-ONLY SKIPS (本次跑在 {sys.platform} 上失去的覆蓋)")
+        terminalreporter.write_line(
+            f"{len(posix_ids)} 個他平台專屬測試本次「因為跑在 {sys.platform} 上而沒跑」"
+            f"（DEF-200-248：反方向的覆蓋損失此前在 AISDLC_SDD 側無任何標籤／摘要／計數）："
+        )
+        for node_id in posix_ids:
+            terminalreporter.write_line(f"  - {node_id}")

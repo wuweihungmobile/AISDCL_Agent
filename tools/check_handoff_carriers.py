@@ -50,7 +50,7 @@
 （含它那個 `(?<![本該此上前系])列` 的敘事引述負向回顧），本檔只**加**三族它沒有的措辭。
 反向濾網見 `_narrative_hit()`——存量假紅是量測出來的，不是想像的。
 
-## 自動祖父化的射程邊界（DEF-200-212 訂正）
+## 自動祖父化的射程邊界（DEF-200-212 訂正；DEF-200-241 治本）
 
 射程判準是「宣告的目標輪 ≥ 當前輪」，前提是**當前輪會隨輪次前進**。本節原自陳
 「不需要任何 grandfather 清單、也不會隨輪次腐敗」；實測 `gate.current_round()` 讀的
@@ -58,15 +58,22 @@
 實測凍結在 **R100**——當前輪不再前進，「≥ 當前輪」不會因時間流逝而讓歷史前瞻行
 自動出局。strict 路徑（`unresolved_only=True`）接線後，三筆歷史交接文件的前瞻行卡
 在假陽性：目標輪（R101／R108，引述既有歷史事件非自稱輪號 round-label-ok）早已過去、
-指名的 DEF-ID 也已在後續輪次結案，但時鐘沒有前進，判準本身看不到這件事，故改走
-**具名豁免面工程解**（掌舵者裁決 D4）：把這 3 筆登記進 `_CARRIER_DOC_EXEMPTIONS`
-（shrink-only；鍵＝`(檔案相對路徑, 指名的 DEF-ID)`），**不改寫歷史文件本身**；其後
-212 自身的結案動作再生 2 筆同型假陽性，經 D8 一次性核准併入本面（3→5，存證
-AutoSDD_Adjudication_Record_R120.md，例外已耗用、不得援引）。這不是
-走回「維護豁免名單」的舊病——豁免只在（路徑, DEF-ID）精確相符時生效，同一份文件裡
-任何其他未登記的前瞻行仍照判（不是整檔放行）；帳本時鐘若日後真的前進過那三筆的目標輪
-（引述，非自稱），這三筆會自然變成 no-op（判準本身先讓它們出局，豁免表閒置不動仍
-安全）。存量普查實數見 `--census`。
+指名的 DEF-ID 也已在後續輪次結案，但時鐘沒有前進，判準本身看不到這件事。
+
+DEF-200-212 時期的過渡解＝**具名豁免面**（掌舵者裁決 D4／D8）：把假陽性逐筆登記進
+`_CARRIER_DOC_EXEMPTIONS`（鍵＝`(檔案相對路徑, 指名的 DEF-ID)`，shrink-only），
+不改寫歷史文件本身；表一度長到 5 筆、天花板被明文「不得再調高」，於是結案任何被前瞻行
+指名的列都會再生同型假陽性（`DEF-200-213` 實質已解卻結不了案＝DEF-200-241 的死結）。
+
+**治本（DEF-200-241 方向 B，R121 裁決卡 round-label-ok）：祖父化改讀「帳本結案事實」而非時鐘。**
+`carrier_doc_problems()` 多吃一個 `done_ids`＝帳本家族內狀態欄首詞分類 ∉
+`gate._UNRESOLVED_CLASSES` 的 DEF-ID（fixed／closed-by-decision／wontfix／no_action_needed
+…）。前瞻行指名的 DEF-ID 若已結 ⇒ 那件事真的做完了 ⇒ 出局，不比較輪號、不依賴任何時鐘；
+仍未結 ⇒ 照舊要求承接載體。判準只讀狀態欄首詞分類、不讀其他欄位（防「寫帳本改變閘門
+輸入」型迴圈：結案只會讓 problem 變少；把已結列改回 open 會讓前瞻行重新要求承接——那是
+正確語意）。五筆豁免登記的 DEF-ID 全屬已結 ⇒ 全數 no-op ⇒ 表清空、天花板降為 0
+（機制與注入口保留，供 self-test 與回歸鎖以合成表驗證；生產表為空＝不再核准新的歷史
+假陽性豁免）。存量普查實數見 `--census`。
 
 使用：
   python3 tools/check_handoff_carriers.py            # 不合規印清單並 exit 1
@@ -123,61 +130,22 @@ _QUANTIFIED_ROW_RE = re.compile(r"[0-9一二三四五六七八九十兩數幾多
 _HTML_COMMENT_RE = re.compile(r"^\s*<!--.*-->\s*$")
 _DEF_ID_RE = re.compile(r"DEF-\d+-\d+")
 
-#: DEF-200-212 授權豁免面工程解（掌舵者裁決 D4）：strict 路徑（`unresolved_only=True`）
-#: 對歷史交接文件的假陽性具名登記——**不改寫歷史文件本身**，只在判準面豁免。
-#: 初始 3 筆＝歷史交接文件；第 4、5 筆＝212 自身結案動作再生的同型假陽性（D8 一次性
-#: 核准，存證 AutoSDD_Adjudication_Record_R120.md）。
+#: DEF-200-212 授權的豁免面（掌舵者裁決 D4／D8）：strict 路徑對歷史交接文件的假陽性具名
+#: 登記——鍵＝`(檔案相對 posix 路徑, 指名的 DEF-ID)`（**不是**行號：行號隨編輯漂移，寫死
+#: 行號的豁免會靜默失效），且只在該行確實命中該 DEF-ID 時生效（`carrier_doc_problems()`
+#: 取交集判定），同檔其他未登記前瞻行照判——不是整檔放行。
 #:
-#: 🔴 假陽性成因（真因，非表面症狀）：見模組 docstring〈自動祖父化的射程邊界〉——帳本
-#: 「發現情境」欄的輪次時鐘凍結在 R100，三筆前瞻交棒行的目標輪與指名 DEF-ID 皆已在
-#: 後續輪次結案，卻因時鐘不再前進而永遠滿足不了「目標輪 < 當前輪 ⇒ 自動出局」的祖父化
-#: 條件。
-#:
-#: 🔴 鍵設計＝`(檔案相對 posix 路徑, 指名的 DEF-ID)`，**不是** `(路徑, 行號)`：行號會
-#: 隨檔案編輯漂移，寫死行號的豁免在檔案被編輯後會靜默失效（放行整份文件，或誤殺無關
-#: 行）。用 (path, DEF-ID) 配對，且豁免只在**該行確實命中這個 DEF-ID**時才生效
-#: （`carrier_doc_problems()` 用該行 `named` 集合與已登記 DEF-ID 集合取交集判定），
-#: 故同一份文件裡任何其他未登記的前瞻行（不論有沒有 DEF-ID）依然照判——不是整檔放行。
-_CARRIER_DOC_EXEMPTIONS: dict[tuple[str, str], str] = {
-    ("docs/04_planning/R102_HANDOFF.md", "DEF-200-204"): (
-        "本行是在敘述帳本既有列的歷史狀態（『既有「承接輪次：R101」等舊列』，回顧語氣），"
-        "不是本文件自己在交派新工作；DEF-200-204 本身已 fixed@R102（見帳本 "
-        "AutoSDD_Defect_Log_archive_67.md）。目標輪 R101 早於修復輪，本應自動祖父化"
-        "出局，但帳本時鐘凍結在 R100 使其失效。"
-    ),
-    ("docs/06_quality/CrossPlatform_R100_Scan_Findings.md", "DEF-200-208"): (
-        "R100 收尾窗口把淨額死結的三個候選處置交棒 R101、承接列具名 DEF-200-208；"
-        "該筆已 fixed@R101（一次性例外名冊落地，凍結表重釘，見帳本 "
-        "AutoSDD_Defect_Log_archive_67.md）。目標輪 R101 早於修復輪，本應自動祖父化"
-        "出局，但帳本時鐘凍結在 R100 使其失效。"
-    ),
-    ("docs/06_quality/CrossPlatform_R107_Ledger_Closure.md", "DEF-101-559"): (
-        "R107 收尾窗口把『30 版同一 blob』材質化確認列為交棒 R108 候選、承接列具名 "
-        "DEF-101-559；該筆已 closed-by-decision@R107（掌舵者條件式裁決，見帳本本文"
-        "第 93 行）。目標輪 R108 早於修復輪，本應自動祖父化出局，但帳本時鐘凍結在 "
-        "R100 使其失效。"
-    ),
-    ("docs/04_planning/R113_HANDOFF.md", "DEF-200-212"): (
-        "本檔 :8 與 :18 兩行以「交由R114」記錄 R113 收輪時 R3 複審把本筆改判回 open "
-        "的歷史事實（敘事非交派）；DEF-200-212 已於後續輪次結案（strict 接線＋豁免面"
-        "落地）。目標輪 R114 早於修復輪，本應自動祖父化出局，但帳本時鐘凍結在 R100 "
-        "使其失效；本筆即 212 結案動作自身產生的同型假陽性（D8 一次性核准，存證 "
-        "AutoSDD_Adjudication_Record_R120.md）。"
-    ),
-    ("docs/06_quality/CrossPlatform_R113_Ledger_Closure.md", "DEF-200-212"): (
-        "本檔 :44 與 :116 兩行以「交由R114」記錄同一次 R3 複審改判（發現原文逐字所在"
-        "檔）；DEF-200-212 已於後續輪次結案。目標輪 R114 早於修復輪，本應自動祖父化"
-        "出局，但帳本時鐘凍結在 R100 使其失效；本筆即 212 結案動作自身產生的同型"
-        "假陽性（D8 一次性核准，存證 AutoSDD_Adjudication_Record_R120.md）。"
-    ),
-}
-#: 一次性豁免必須真的維持在少數幾筆——超過這個數字就不再是「具名逐筆核准」，是變相
-#: 把整套祖父化機制改成「寫張條子就能繞過」。**只准調小**（收緊；理論下限 0＝
-#: 不再核准新的歷史假陽性豁免，回頭修正時鐘前進機制才是正解）。D8 一次性核准 3→5
-#: （掌舵者裁決，存證 AutoSDD_Adjudication_Record_R120.md）：第 4、5 筆＝212 結案動作
-#: 自身產生的同型假陽性，非新增歷史豁免類別；本例外已耗用、不得援引為再調高的先例，
-#: 治本載體＝DEF-200-241（時鐘前進機制／祖父化改讀結案事實，二擇一過四方前不動）。
-_CARRIER_DOC_EXEMPTIONS_MAX_ENTRIES = 5
+#: 🔴 DEF-200-241 治本後**表為空**：五筆登記（R102_HANDOFF／DEF-200-204、 round-label-ok
+#: R100_Scan_Findings／DEF-200-208、R107_Ledger_Closure／DEF-101-559、R113_HANDOFF 與 round-label-ok
+#: R113_Ledger_Closure／DEF-200-212）指名的 ID 全屬已結列，`done_ids` 讓它們自然 round-label-ok
+#: 出局，逐筆理由原文逐字保全於 CrossPlatform_R126_Debt_Closure.md §DEF-200-241。機制與
+#: `exemptions=` 注入口保留：`--self-test` 與回歸鎖以**合成表**驗證「豁免只精確命中、理由
+#: 太短視同未登記、不整檔放行」三條性質，生產表則不再承載任何一筆。
+_CARRIER_DOC_EXEMPTIONS: dict[tuple[str, str], str] = {}
+#: 一次性豁免的天花板，**只准調小**：D8 一次性核准 3→5（存證 AutoSDD_Adjudication_Record_R120.md，
+#: 例外已耗用），DEF-200-241 治本後降為 **0**＝不再核准任何新的歷史假陽性豁免——歷史前瞻行
+#: 指名的 DEF-ID 一旦結案即自動出局，豁免面沒有存在理由。
+_CARRIER_DOC_EXEMPTIONS_MAX_ENTRIES = 0
 #: 核准理由的最短長度（同 `_REPIN_APPROVED_ROUND_OVERAGE_MIN_REASON_LEN` 款式：
 #: 兩個字的「核准」不算數，理由太短視同未登記——見 `_exemption_covers()`）。
 _CARRIER_DOC_EXEMPTIONS_MIN_REASON_LEN = 20
@@ -253,7 +221,8 @@ def ledger_carrier_rounds(ledger_text: str) -> set[int]:
 
 
 def ledger_def_ids(ledger_text: str, archive_texts: list[str], *,
-                   unresolved_only: bool = False) -> set[str]:
+                   unresolved_only: bool = False,
+                   resolved_only: bool = False) -> set[str]:
     """帳本家族（主檔 ∪ archive）內**真的有列**的 DEF-ID 集合。
 
     走 `_ROW_RE` 而不是全文 `_ID_RE`：散文裡提到一個 ID 不等於它有列，而「有沒有一列」
@@ -262,30 +231,33 @@ def ledger_def_ids(ledger_text: str, archive_texts: list[str], *,
     🔴 DEF-200-212①：`unresolved_only=True` 時**未結列才算承接載體**——本函式要證明的
     是「有未結承接單位」，一列 `fixed` 的歷史列不承接任何未來工作，拿它滿足判準② 是
     假綠（與同檔 `ledger_carrier_rounds()` 同一個過濾，先前一個有濾一個沒濾）。
-    🔴 閘門面**已接線**（`main()` 走本參數）。原節自陳「閘門接線待結案輪帳本收斂」，
-    意思是等帳本當前輪自然前進到 R101（引述，非自稱 round-label-ok）之後讓下述三筆
-    自動祖父化出局；實測帳本「發現情境」欄的輪次紀律已改為零輪號（時鐘凍結，見模組
-    docstring〈自動祖父化的射程邊界〉），時鐘不會再前進，故改走 DEF-200-212 D4 裁決
-    的具名豁免面工程解（`_CARRIER_DOC_EXEMPTIONS`，消費點在 `carrier_doc_problems()`）：
-    三筆假陽性（R102_HANDOFF.md:45→DEF-200-204／  ← round-label-ok：引述既有文件檔名
-    CrossPlatform_R100_Scan_Findings.md:252→DEF-200-208／CrossPlatform_R107_Ledger_
-    Closure.md:125→DEF-101-559，皆前瞻行指向已在後續輪次結案的 DEF-ID）逐筆具名登記
-    後歸零；其後 212 自身結案動作再生 2 筆同型假陽性，經 D8 核准同面登記（見
-    `_CARRIER_DOC_EXEMPTIONS` 旁註）。紅綠由 `--self-test` 與
-    `tools/tests/test_check_defect_log_crossref.py` 的 DEF-200-212 系列自證。
+    🔴 DEF-200-241：`resolved_only=True` 取**已結列**（狀態欄首詞分類 ∉
+    `gate._UNRESOLVED_CLASSES`）——那是 `carrier_doc_problems()` 的 `done_ids`：前瞻行
+    指名的事若已在帳本結案，該行即出局（治本，取代具名豁免面；沿革見模組 docstring
+    〈自動祖父化的射程邊界〉）。兩個旗標互斥；版面解析不到（`layout is None`）的檔案
+    一律**不猜狀態**：兩條過濾路徑都把它整份排除（只有 `layout` 解析得到的家族成員才
+    貢獻 ID）。紅綠由 `--self-test` 與 `tools/tests/test_check_defect_log_crossref.py`
+    的 DEF-200-212／241 系列自證。
     """
+    if unresolved_only and resolved_only:
+        raise ValueError("unresolved_only 與 resolved_only 互斥")
     ids: set[str] = set()
     for text in [ledger_text, *archive_texts]:
         layout = gate._table_layout(text)
+        if layout is None and (unresolved_only or resolved_only):
+            continue
         for line in text.splitlines():
             if not gate._ROW_RE.match(line):
                 continue
             cells = gate._row_cells(line)
             if layout is not None and len(cells) != layout[0]:
                 continue
-            if (unresolved_only and layout is not None
-                    and gate._classify(cells[layout[2]]) not in gate._UNRESOLVED_CLASSES):
-                continue
+            if layout is not None and (unresolved_only or resolved_only):
+                unresolved = gate._classify(cells[layout[2]]) in gate._UNRESOLVED_CLASSES
+                if unresolved_only and not unresolved:
+                    continue
+                if resolved_only and unresolved:
+                    continue
             m = _DEF_ID_RE.search(cells[1] if len(cells) > 1 else line)
             if m:
                 ids.add(m.group(0))
@@ -312,26 +284,51 @@ def commit_messages(limit: int = 4000) -> list[tuple[str, str]]:
     return msgs
 
 
+_PARAGRAPH_RE = re.compile(r"\n\s*\n")
+
+
 def commit_carrier_problems(msgs: list[tuple[str, str]], cur: int | None,
-                            carriers: set[int]) -> list[str]:
-    """判準①：commit 訊息宣告延後到 R<N>（N ≥ cur）⇒ 帳本須有未結列承接 ≥ N。純函式。"""
+                            carriers: set[int], *,
+                            done_ids: set[str] | None = None) -> list[str]:
+    """判準①：commit 訊息宣告延後到 R<N>（N ≥ cur）⇒ 帳本須有未結列承接 ≥ N。純函式。
+
+    🔴 DEF-200-241 同一原則套到本判準：宣告所在的**段落**（空行分隔）若指名一個帳本已結
+    的 DEF-ID（`done_ids`），那件被延後的事已在帳本結案 ⇒ 出局。立案實例＝commit `0398226`
+    的「已列 R118 交棒書呈報裁決」段落指名 `DEF-200-212`；212／241 結案後 round-label-ok
+    帳本裡再也沒有承接輪次 ≥ R118 的未結列（時鐘凍結在 R100，`n < cur` 永不祖父化）， round-label-ok
+    判準① 就因「把事情做完」而轉紅——正是 241 要治的迴圈。以段落而非整則訊息為粒度，避免一則訊息
+    裡一個已結 ID 替所有無關延後背書。
+    """
     if cur is None:
         return []
+    done = done_ids or set()
     problems: list[str] = []
     for sha, body in msgs:
-        for label, n, snippet in defer_rounds(body):
-            if n < cur:
+        for para in _PARAGRAPH_RE.split(body):
+            if {m.group(0) for m in _DEF_ID_RE.finditer(para)} & done:
                 continue
-            if any(r >= n for r in carriers):
-                continue
-            problems.append(
+            problems.extend(_commit_para_problems(sha, para, cur, carriers))
+    return problems
+
+
+def _commit_para_problems(sha: str, para: str, cur: int,
+                          carriers: set[int]) -> list[str]:
+    """判準① 對單一段落的本體（拆出來只為了讓段落過濾與訊息組字各自可讀）。"""
+    problems: list[str] = []
+    for label, n, snippet in defer_rounds(para):
+        if n < cur:
+            continue
+        if any(r >= n for r in carriers):
+            continue
+        problems.append(
                 f"commit {sha}：訊息宣告把工作延後到 **R{n}**（[{label}] …{snippet.strip()}…），"
                 f"但帳本家族內**沒有任何未結案列**的承接輪次 ≥ R{n}"
                 f"（現有未結承接輪號＝{sorted(carriers) or '空'}）⇒ 這一項只活在交接散文裡，"
                 f"沒有機械承接載體，下一輪沒做也不會有任何東西轉紅（`DEF-200-188` 立案形態）。"
                 f"🔴 出口**不是**改 commit 訊息（不可改，且不該改）：在 "
                 f"`docs/06_quality/AutoSDD_Defect_Log.md` 補一列，狀態欄寫 "
-                f"`open（承接輪次：**R{n}**）` 或更後面的輪次即綠")
+                f"`open（承接輪次：**R{n}**）` 或更後面的輪次即綠；若該段落指名的 DEF-ID "
+                f"已在帳本結案，本判準會自動放行（DEF-200-241）")
     return problems
 
 
@@ -367,16 +364,21 @@ def carrier_files() -> tuple[list[Path], bool]:
 
 def carrier_doc_problems(paths: list[Path], cur: int | None,
                          known_ids: set[str], *,
-                         exemptions: dict[tuple[str, str], str] | None = None) -> list[str]:
-    """判準②：交接載體內的前瞻延後行必須指名帳本家族內存在的 DEF-ID。
+                         exemptions: dict[tuple[str, str], str] | None = None,
+                         done_ids: set[str] | None = None) -> list[str]:
+    """判準②：交接載體內的前瞻延後行必須指名帳本家族內**未結**的 DEF-ID，**或**
+    指名一個**已結**的 DEF-ID（＝那件事真的做完了，DEF-200-241 治本）。
 
-    `exemptions`（預設 `_CARRIER_DOC_EXEMPTIONS`）＝DEF-200-212 具名豁免面：`(檔案
-    相對路徑, DEF-ID)` 精確相符且理由夠長時，即使該 DEF-ID 在帳本家族內查無列，仍不算
-    problem。刻意可傳供 `--self-test` 與回歸鎖注入用。
+    `known_ids`＝未結列 ID（承接載體）；`done_ids`＝已結列 ID（`ledger_def_ids(...,
+    resolved_only=True)`）。祖父化讀的是**結案事實**，不是輪號、不是時鐘。
+    `exemptions`（預設 `_CARRIER_DOC_EXEMPTIONS`，治本後為空）＝DEF-200-212 具名豁免面：
+    `(檔案相對路徑, DEF-ID)` 精確相符且理由夠長時不算 problem；刻意可傳供 `--self-test`
+    與回歸鎖以合成表注入。
     """
     if cur is None:
         return []
     exempt = _CARRIER_DOC_EXEMPTIONS if exemptions is None else exemptions
+    done = done_ids or set()
     problems: list[str] = []
     for p in paths:
         try:
@@ -397,6 +399,9 @@ def carrier_doc_problems(paths: list[Path], cur: int | None,
             named = {m.group(0) for m in _DEF_ID_RE.finditer(line)}
             if named & known_ids:
                 continue
+            # DEF-200-241：指名的事已在帳本結案 ⇒ 那件交接真的做完了 ⇒ 出局（不比輪號）。
+            if named & done:
+                continue
             if any(_exemption_covers(rel, def_id, exempt) for def_id in named):
                 continue
             detail = "；".join(f"[{lb}] R{n}" for lb, n, _ in fwd)
@@ -404,13 +409,11 @@ def carrier_doc_problems(paths: list[Path], cur: int | None,
                      "（本行完全沒有 DEF-ID）")
             problems.append(
                 f"{rel}:{lineno} 這一行把工作延後到未來輪（{detail}），卻沒有帳本承接列"
-                f"{extra} ⇒ 交接項無機械承接載體。出口二選一："
-                f"①補一列帳本並在本行指名該 DEF-ID（射程判準＝目標輪 ≥ 當前輪 R{cur}）；"
-                f"②若目標輪與 DEF-ID 皆已是後續輪次結案的塵封史料，依 DEF-200-212 D4 "
-                f"裁決逐筆登記進 `_CARRIER_DOC_EXEMPTIONS`（shrink-only，鍵＝(路徑, DEF-ID)，"
-                f"不改寫歷史文件本身）。🔴 前提：帳本『發現情境』欄輪次時鐘已凍結（見模組 "
-                f"docstring〈自動祖父化的射程邊界〉），歷史交棒不會隨輪次前進自動出局，"
-                f"故①對已成塵封史料的行永遠不會轉綠——那種情況只有②是真出口")
+                f"{extra} ⇒ 交接項無機械承接載體。出口：補一列帳本並在本行指名該 DEF-ID"
+                f"（射程判準＝目標輪 ≥ 當前輪 R{cur}）；該列日後結案時本行自動出局"
+                f"（DEF-200-241：祖父化讀帳本結案事實，不讀時鐘——帳本『發現情境』欄輪次"
+                f"時鐘已凍結，見模組 docstring〈自動祖父化的射程邊界〉）。🔴 引用一個帳本"
+                f"家族內查無列的 DEF-ID 不算承接（引用 ≠ 有列）")
     return problems
 
 
@@ -488,6 +491,12 @@ def _self_test() -> int:
            "承接輪號比宣告目標小一輪 ⇒ 不足以接手 ⇒ 紅")
     expect(commit_carrier_problems([("c", f"交給 R{_SYN_PAST} 的待辦")], _SYN_CUR, set()) == [],
            "歷史宣告的目標輪 < 當前輪 ⇒ 自動出局（無需豁免名單）")
+    para_msg = [("d", f"feat: y\n\n- {_SYN_ID} 結案受阻，已列 R{_SYN_FUTURE} 交棒書。\n\n"
+                      f"- 另一件事皆留 R{_SYN_FUTURE}。\n")]
+    expect(len(commit_carrier_problems(para_msg, _SYN_CUR, set(), done_ids={_SYN_ID})) == 1,
+           "段落指名的 DEF-ID 已結 ⇒ 該段落出局；另一段落沒指名 ⇒ 仍紅（粒度＝段落，非整則）")
+    expect(len(commit_carrier_problems(para_msg, _SYN_CUR, set())) == 2,
+           "done_ids 為空 ⇒ 兩段皆紅（判準① 的 done 判準真的在承重）")
 
     print("[self-test] `defer_rounds()` 樣式與敘事濾網")
     expect([n for _, n, _ in defer_rounds(f"皆留 R{_SYN_FUTURE}。")] == [_SYN_FUTURE],
@@ -534,38 +543,60 @@ def _self_test() -> int:
     expect(len(got_all) == 2 and fell_back_all,
            "tracked 取不到 ⇒ 退回 glob 並標記 fallback（fail-loud，判準③ 出聲）")
 
-    print("[self-test] 判準② 具名豁免（DEF-200-212 D4：strict 假陽性歸零，非整檔放行）")
+    print("[self-test] 判準② 祖父化改讀帳本結案事實（DEF-200-241 治本）")
+    syn_done = (f"| ID | 狀態 |\n|----|------|\n"
+                f"| {_SYN_ID} | closed-by-decision（合成）；2026-01-01 |\n")
+    expect(_SYN_ID in ledger_def_ids(syn_done, [], resolved_only=True),
+           "已結列的 ID 進 done_ids（closed-by-decision）")
+    expect(_SYN_ID not in ledger_def_ids(syn_done, [], unresolved_only=True),
+           "同一列不會同時進 known_ids（兩個集合互補）")
+    expect(_SYN_ID not in ledger_def_ids(syn_open, [], resolved_only=True),
+           "未結列的 ID 不進 done_ids（partial／open 仍算未結）")
+    expect(_SYN_ID not in ledger_def_ids("沒有表格的散文提到 " + _SYN_ID, [],
+                                         resolved_only=True),
+           "版面解析不到的檔不猜狀態 ⇒ 一個 ID 都不貢獻給 done_ids")
+    done_td = tempfile.TemporaryDirectory(prefix="handoff_done_")
+    keep, _REPO_ROOT = _REPO_ROOT, Path(done_td.name)
+    try:
+        d2 = _REPO_ROOT / "docs" / "06_quality"
+        d2.mkdir(parents=True)
+        f2 = d2 / "CrossPlatform_R998_Scan_Findings.md"  # round-label-ok：合成檔名
+        f2.write_text(f"- 這件事交給 R{_SYN_LATER} 處理（{_SYN_ID}）\n", encoding="utf-8")
+        expect(len(carrier_doc_problems([f2], _SYN_CUR, set())) == 1,
+               "指名的 ID 既非未結亦非已結 ⇒ 紅（對照組）")
+        expect(carrier_doc_problems([f2], _SYN_CUR, set(), done_ids={_SYN_ID}) == [],
+               "指名的 ID 已結案 ⇒ 那件事做完了 ⇒ 出局、綠（不比輪號）")
+        expect(len(carrier_doc_problems([f2], _SYN_CUR, set(), done_ids=set())) == 1,
+               "done_ids 為空 ⇒ 判準退回原行為、仍紅（新判準真的在承重）")
+    finally:
+        _REPO_ROOT = keep
+        done_td.cleanup()
+
+    print("[self-test] 判準② 具名豁免機制（合成表；生產表治本後為空，天花板 0）")
+    expect(_CARRIER_DOC_EXEMPTIONS == {} and _CARRIER_DOC_EXEMPTIONS_MAX_ENTRIES == 0,
+           "生產豁免表為空、天花板 0（DEF-200-241 治本後不再核准歷史假陽性豁免）")
+    syn_exempt = {("docs/04_planning/R997_HANDOFF.md", _SYN_ID):  # round-label-ok：合成鍵
+                  "合成豁免：理由長度須達門檻才算登記，本句刻意寫滿二十字以上。"}
     exempt_td = tempfile.TemporaryDirectory(prefix="handoff_exempt_")
     keep, _REPO_ROOT = _REPO_ROOT, Path(exempt_td.name)
     try:
-        for (rel, def_id) in _CARRIER_DOC_EXEMPTIONS:
-            fp = _REPO_ROOT / rel
-            fp.parent.mkdir(parents=True, exist_ok=True)
-            fp.write_text(f"- 交給 R{_SYN_LATER} 處理（{def_id}）\n", encoding="utf-8")
-        exempted_paths = [_REPO_ROOT / rel for (rel, _did) in _CARRIER_DOC_EXEMPTIONS]
-        expect(carrier_doc_problems(exempted_paths, _SYN_CUR, set()) == [],
-               "全部登記豁免各自命中（路徑＋DEF-ID 精確相符）⇒ 不算 problem")
-
-        first_rel = next(iter(_CARRIER_DOC_EXEMPTIONS))[0]
-        first_fp = _REPO_ROOT / first_rel
-        first_fp.write_text(
-            first_fp.read_text(encoding="utf-8")
-            + f"- 另一件不相干的事交給 R{_SYN_LATER} 處理（{_SYN_ID}）\n", encoding="utf-8")
-        expect(len(carrier_doc_problems([first_fp], _SYN_CUR, set())) == 1,
+        rel, def_id = next(iter(syn_exempt))
+        fp = _REPO_ROOT / rel
+        fp.parent.mkdir(parents=True, exist_ok=True)
+        fp.write_text(f"- 交給 R{_SYN_LATER} 處理（{def_id}）\n", encoding="utf-8")
+        expect(carrier_doc_problems([fp], _SYN_CUR, set(), exemptions=syn_exempt) == [],
+               "登記豁免命中（路徑＋DEF-ID 精確相符）⇒ 不算 problem")
+        fp.write_text(fp.read_text(encoding="utf-8")
+                      + f"- 另一件不相干的事交給 R{_SYN_LATER} 處理\n", encoding="utf-8")
+        expect(len(carrier_doc_problems([fp], _SYN_CUR, set(), exemptions=syn_exempt)) == 1,
                "同一份文件裡一個未登記的同型前瞻行 ⇒ 仍紅（防整檔放行、防 vacuous）")
-
-        second_rel = next(iter(_CARRIER_DOC_EXEMPTIONS))[0]
-        wrong_fp = _REPO_ROOT / second_rel
-        wrong_fp.write_text(f"- 交給 R{_SYN_LATER} 處理（{_SYN_ID}）\n", encoding="utf-8")
-        expect(len(carrier_doc_problems([wrong_fp], _SYN_CUR, set())) == 1,
+        other = "DEF-200-" + "998"
+        fp.write_text(f"- 交給 R{_SYN_LATER} 處理（{other}）\n", encoding="utf-8")
+        expect(len(carrier_doc_problems([fp], _SYN_CUR, set(), exemptions=syn_exempt)) == 1,
                "豁免鍵指向的 DEF-ID 與該行實際指名的不符 ⇒ 不豁免、仍紅")
-
-        short_table = {next(iter(_CARRIER_DOC_EXEMPTIONS)): "太短"}
-        third_rel, third_id = next(iter(_CARRIER_DOC_EXEMPTIONS))
-        third_fp = _REPO_ROOT / third_rel
-        third_fp.write_text(f"- 交給 R{_SYN_LATER} 處理（{third_id}）\n", encoding="utf-8")
-        expect(len(carrier_doc_problems([third_fp], _SYN_CUR, set(),
-                                        exemptions=short_table)) == 1,
+        fp.write_text(f"- 交給 R{_SYN_LATER} 處理（{def_id}）\n", encoding="utf-8")
+        expect(len(carrier_doc_problems([fp], _SYN_CUR, set(),
+                                        exemptions={(rel, def_id): "太短"})) == 1,
                "理由太短視同未登記 ⇒ 即使 key 對得上也不豁免（防空話核准）")
     finally:
         _REPO_ROOT = keep
@@ -601,9 +632,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[census] {note}")
     if "--census" in args:
         return 0
-    problems = commit_carrier_problems(msgs, cur, carriers)
-    problems += carrier_doc_problems(
-        paths, cur, ledger_def_ids(ledger, arch, unresolved_only=True))
+    # 🔴 順序有鎖：`unresolved_only=True` 那一次呼叫必須是 main() 裡文字面上的第一次
+    # （`TestDef200212StrictIsWiredIntoMain` 讀第一個呼叫行的三行視窗）。
+    known_ids = ledger_def_ids(ledger, arch, unresolved_only=True)
+    done_ids = ledger_def_ids(ledger, arch, resolved_only=True)  # DEF-200-241
+    problems = commit_carrier_problems(msgs, cur, carriers, done_ids=done_ids)
+    problems += carrier_doc_problems(paths, cur, known_ids, done_ids=done_ids)
     if problems:
         print(f"\n❌ 交接項無機械承接載體：{len(problems)} 筆", file=sys.stderr)
         for p in problems:

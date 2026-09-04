@@ -414,6 +414,13 @@ _GOVERNANCE_DOCS = (
     # 原文原處是哪支檔哪個符號」的座標宣稱（⇒ 指針稽核）。資格與 R86/R87/R90/R95 同名
     # Guard_Repin_Evidence 逐字同一份。即刻登記，不等下一輪（DEF-200-131 同型）。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R122_Guard_Prose_Migration.md",
+    # R126 落地輪結案存證（round-label-ok）：needs-dev 項的落地取證、四方設計複審結論與
+    # 逐筆針對測試實跑輸出唯一居所在本檔（⇒ 體積守門），帳本各列以 `§DEF-ID` 座標宣稱指向
+    # 本檔（⇒ 指針稽核）。即刻登記，同 R121～R124 姊妹檔判例。 round-label-ok
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R126_Debt_Closure.md",
+    # 上列的護欄層淨額標記姊妹檔（`guard-total:` 站點之一），與同輪 `R126_HANDOFF.md` round-label-ok
+    # 共同滿足「兩份不同檔」的最低站數；途中發現亦住此（⇒ 體積守門）。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R126_Scan_Findings.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/{CrossPlatform,Quota}_*.md`。這**不是**把具名

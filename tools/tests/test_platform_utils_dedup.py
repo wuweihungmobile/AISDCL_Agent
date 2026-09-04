@@ -835,7 +835,7 @@ _FROZEN_STDIO_FORCE_TREES: dict[str, int] = {
     # R75 收輪下修 26→24：`AutoClaude/tmp_lint_check.py` 是 tracked 的一次性除錯腳本
     # （內容＝重跑 `lint-imports` CLI 已有的行為），本輪依「暫存檔直接刪」慣例 `git rm`，
     # 連帶少掉它自帶的 2 處行內複本。棘輪只准變少，故同步下修而非留餘裕。
-    "AutoClaude": 24,
+    "AutoClaude": 23,  # DEF-200-247：刪 verify_token_guard_e2e.py（1 處 stderr reconfigure）24→23
     "tools": 6,
 }
 

@@ -842,12 +842,42 @@ class TestTheQuotaAxisHasNoEngineSideRefresher:
 # ACQ-02：autoclaude 不得反向依賴 monorepo harness（tools / .claude）
 # ─────────────────────────────────────────────────────────────
 _FORBIDDEN_ROOTS = {"tools", "_claude"}
+# DEF-200-217 E5：第三種洗白形態＝ `sys.path.insert/append(<含 tools／.claude 的路徑>)` ＋
+# **裸模組名** import（`import quota_limits`）。裸名首段不落在 `_FORBIDDEN_ROOTS`、也不含
+# `.claude` ⇒ 上面那道判準與 importlinter 都結構上看不到（R100 §E-5 合成注入實測
+# `laundered -> []`）。判準：檔內任一 `sys.path.*()` 呼叫的字串常數含 `tools` 或 `.claude`
+# 時，裸 import 首段若命中 monorepo harness 模組**基名**集合即紅。基名集合現查磁碟、不寫死。
+_HARNESS_MODULE_DIRS = (REPO.parent / "tools", REPO.parent / "tools" / "lib",
+                        REPO.parent / ".claude" / "hooks")
+_SYS_PATH_MUTATORS = {"insert", "append", "extend"}
+
+
+def _harness_basenames() -> set[str]:
+    return {p.stem for d in _HARNESS_MODULE_DIRS if d.is_dir() for p in d.glob("*.py")}
+
+
+def _launders_sys_path(tree: ast.AST) -> bool:
+    """檔內是否有 `sys.path.<insert|append|extend>(...)` 且引數字面帶 harness 路徑片段。"""
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr in _SYS_PATH_MUTATORS
+                and isinstance(node.func.value, ast.Attribute)
+                and node.func.value.attr == "path"
+                and isinstance(node.func.value.value, ast.Name)
+                and node.func.value.value.id == "sys"):
+            continue
+        literals = " ".join(c.value for c in ast.walk(node)
+                            if isinstance(c, ast.Constant) and isinstance(c.value, str))
+        if "tools" in literals or ".claude" in literals:
+            return True
+    return False
 
 
 def _harness_imports(path: Path) -> list[str]:
-    """判準本體：回傳該檔中指向 harness 的 import 模組名。"""
+    """判準本體：回傳該檔中指向 harness 的 import 模組名（含 E5 的洗白形態）。"""
     hits = []
     tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+    laundered_bases = _harness_basenames() if _launders_sys_path(tree) else set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             names = [a.name for a in node.names]
@@ -857,7 +887,7 @@ def _harness_imports(path: Path) -> list[str]:
             continue
         for n in names:
             head = n.split(".", 1)[0]
-            if head in _FORBIDDEN_ROOTS or ".claude" in n:
+            if head in _FORBIDDEN_ROOTS or ".claude" in n or head in laundered_bases:
                 hits.append(n)
     return hits
 
@@ -869,6 +899,30 @@ class TestNoHarnessImport:
         p.write_text("import tools.lib.quota_meter\nimport json\n",
                      encoding="utf-8", newline="\n")
         assert _harness_imports(p) == ["tools.lib.quota_meter"]
+
+    def test_the_judge_catches_sys_path_laundering(self, tmp_path):
+        """DEF-200-217 E5：`sys.path.insert(…"tools"/"lib")` ＋ 裸名 `import quota_limits` 是
+        第三種洗白形態——importlinter 與上一條判準都看不到（R100 §E-5 實測 `laundered -> []`）。
+        基名集合現查磁碟 ⇒ 先證明它非空且含這個真實模組，判準才不是在對空集合比對。"""
+        assert "quota_limits" in _harness_basenames(), "harness 基名集合抽不到 quota_limits"
+        p = tmp_path / "laundered.py"
+        p.write_text(
+            "import sys\nfrom pathlib import Path\n"
+            'sys.path.insert(0, str(Path(__file__).parents[2] / "tools" / "lib"))\n'
+            "import quota_limits\nimport json\n",
+            encoding="utf-8", newline="\n")
+        assert _harness_imports(p) == ["quota_limits"]
+
+    def test_a_bare_name_without_sys_path_laundering_is_not_flagged(self, tmp_path):
+        """對照組：沒動 `sys.path` 的裸名 import（可能是套件內同名模組）不得誤判；
+        動了 `sys.path` 但路徑與 harness 無關者亦然。"""
+        plain = tmp_path / "plain.py"
+        plain.write_text("import quota_limits\n", encoding="utf-8", newline="\n")
+        assert _harness_imports(plain) == []
+        unrelated = tmp_path / "unrelated.py"
+        unrelated.write_text('import sys\nsys.path.append("vendor")\nimport quota_limits\n',
+                             encoding="utf-8", newline="\n")
+        assert _harness_imports(unrelated) == []
 
     def test_no_module_under_autoclaude_imports_the_harness(self):
         offenders = {}

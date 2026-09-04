@@ -31,12 +31,29 @@ class _EncodingSafeStreamHandler(logging.StreamHandler):
             self.handleError(record)
 
 
+def _warn_if_log_dir_diverges(root: logging.Logger, log_dir: str) -> None:
+    """既有 file handler 不落在新 `log_dir` 底下時出聲一次（DEF-200-263；純觀測，不改握把）。"""
+    wanted = Path(log_dir).resolve()
+    for handler in root.handlers:
+        base = getattr(handler, "baseFilename", None)
+        if base and Path(base).resolve().parent != wanted:
+            root.warning(
+                "setup_logger(log_dir=%s) 被忽略：logger 已掛在 %s，log 會繼續寫進舊目錄"
+                "（DEF-200-263：換目錄不重建握把，但不得靜默）", log_dir, Path(base).parent)
+            return
+
+
 def setup_logger(log_dir: str = "logs", level: int = logging.DEBUG) -> logging.Logger:
     root = logging.getLogger("autoclaude")
     root.setLevel(level)
 
     # 避免重複註冊 handler（pytest / REPL 多次匯入時導致雙倍輸出）
     if root.handlers:
+        # DEF-200-263（R96 §F-⑧）：第二次以**不同** log_dir 呼叫時，此前是靜默沿用舊握把、
+        # log 繼續寫進舊目錄而 log_dir 被無聲丟棄。維持「不重建 handler」（重建會在 Windows
+        # 留下未關閉的舊檔柄，且讓多次匯入的呼叫端拿到不同 handler），但改成 fail-loud：
+        # 以 WARNING 具名說出新舊目錄，「換了目錄卻沒生效」不再是靜默事件。
+        _warn_if_log_dir_diverges(root, log_dir)
         return root
 
     log_path = Path(log_dir)

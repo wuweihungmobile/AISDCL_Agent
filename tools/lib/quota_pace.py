@@ -390,13 +390,24 @@ def resolve(rows, deltas, ratio, ratio_note: str, accel_abs: float, far_abs: flo
             converge_pct: float | None = None) -> tuple:
     """`[(餵給 pct_band 的水位, 視野檔位, 夾 0 的剩餘分鐘|None, 合併後的 note)]`。"""
     wins = windows(tuple((kind, at) for kind, _pct, at, _n in rows))
+    grammar = tuple(window_minutes(kind) for kind, _pct, _at, _n in rows)
     shown = band_inputs(tuple((kind, pct) for kind, pct, _at, _n in rows),
                         tuple(d[0] for d in deltas), wins, ratio, halt_pct, ratio_note,
                         converge_pct)[0]
     out = []
-    for (_kind, pct, _at, pct_note), (raw, note), win, feed in zip(
-            rows, deltas, wins, shown):
+    for (_kind, pct, _at, pct_note), (raw, note), win, gwin, feed in zip(
+            rows, deltas, wins, grammar, shown):
         horizon, burn = effective_horizon(pct, raw, win, accel_abs, far_abs, pace_ceiling)
+        # 🔴 DEF-200-243（方向 B；R126 四方修正 round-label-ok：「與絕對門檻取較緊」，非純絕對）：
+        # 自身文法解不出窗長的軸，鄰軸繼承來的窗長**只准讓它更緊**——與 window=None 的完整
+        # `effective_horizon()` 取 `tightest`。spend 剩 504 分繼承週窗 ⇒ near 壓回 far（缺陷本體）；
+        # session 繼承 300 ⇒ 逐位元不變（純絕對會把 (150, 360] 分整段 far→mid，四方實測否決）。
+        # 攤提（`band_inputs`）仍吃繼承值：它的方向本就是只調高水位、永不放寬。
+        if gwin is None:
+            floor_h, floor_burn = effective_horizon(pct, raw, None, accel_abs, far_abs,
+                                                    pace_ceiling)
+            if tightest(horizon, floor_h) != horizon:
+                horizon, burn = floor_h, floor_burn  # note 跟最終分類走，不留 far＋thrifty 矛盾
         joined = "+".join(x for x in (pct_note, note, burn,
                                       NOTE_AMORT if feed > pct else "") if x)
         out.append((feed, horizon, None if raw is None else max(0.0, raw), joined))

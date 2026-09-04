@@ -458,6 +458,22 @@ def read_quota(now: datetime, path: Path | None = None) -> quota_policy.QuotaSta
 #: 直接讀 PRD 對帳（PRD 是憲法、改它要走修憲程序 ⇒ 兩邊漂開時該紅的是這裡）。
 #: `notice_pct` 刻意沒有 PRD 對應物：它比 PRD 更早開始出聲，方向是收緊，安全。
 DRAINING_BANDS = (quota_policy.BAND_PREPARE, quota_policy.BAND_HALT)
+#: DEF-200-137：PRD §4.3 的 `U5h`＝**五小時軸**。軸的辨識由窗長導出（同 `quota_pace.windows()`
+#: 紀律：`session` 文法解不出、由同 reset 的 `five_hour` 繼承 300 分），再以 kind 字面當
+#: belt-and-suspenders（R126 四方 QA 條件 round-label-ok：只靠繼承會在單軸出現時漏抓，方向錯）。
+_FIVE_HOUR_MINUTES = 300.0
+_FIVE_HOUR_KINDS = frozenset({"session", "five_hour", "5h"})
+
+
+def compact_margin_breached(readings: tuple, policy: quota_policy.Policy) -> bool:
+    """PRD §4.3 第二個 AND 的另一半（DEF-200-137）：任一五小時軸 `pct + COMPACT_COST_BUDGET_PP
+    > DRAIN` ⇒ 壓縮成本會把水位推過 DRAIN 線 ⇒ 不得壓縮。用 `axis.pct`（伺服器原值），不用
+    攤提後的 feed。找不到任何五小時軸 ⇒ `False`（退回 band-only，不發明數字）。"""
+    wins = quota_pace.windows(tuple((r.axis.kind, r.axis.resets_at) for r in readings))
+    return any(
+        (r.axis.kind in _FIVE_HOUR_KINDS or win == _FIVE_HOUR_MINUTES)
+        and r.axis.pct + policy.compact_cost_budget_pp > policy.prepare_pct
+        for r, win in zip(readings, wins))
 
 
 def draining(now: datetime | None = None) -> str:
@@ -468,16 +484,21 @@ def draining(now: datetime | None = None) -> str:
     就是「沒量到卻宣稱量到」（`quota_policy` 檔頭對 `BAND_UNMEASURED` 的原話），而 PRD
     §4.3 的壓縮條件是 `U5h + COMPACT_COST_BUDGET_PP ≤ DRAIN_PERCENT`——**證不出成立就不
     該壓縮**（PRD §0 第 6 條明定遙測失效方向為 fail-safe）。呼叫端必須把三態各自處理。
+    🔴 `"yes"` 的兩個來源：band ∈ `DRAINING_BANDS`（`U5h ≥ DRAIN`），**或**五小時軸
+    `pct + Policy.compact_cost_budget_pp > DRAIN`（DEF-200-137：`(DRAIN−3, DRAIN]` 帶內
+    壓縮會把水位推過線，PRD 不允許）。
     """
     at = now or datetime.now().astimezone()
     try:
         policy, _problems = quota_policy.load_policy(policy_env())
-        band = quota_policy.decide(read_quota(at), at, policy).band
+        decision = quota_policy.decide(read_quota(at), at, policy)
     except Exception:  # noqa: BLE001 — 判不出來就說判不出來，不得反過來變成故障源
         return "unknown"
-    if band == quota_policy.BAND_UNMEASURED:
+    if decision.band == quota_policy.BAND_UNMEASURED:
         return "unknown"
-    return "yes" if band in DRAINING_BANDS else "no"
+    if decision.band in DRAINING_BANDS or compact_margin_breached(decision.per_axis, policy):
+        return "yes"
+    return "no"
 
 
 # 🔴 為什麼是「滾動視窗的派發率」而不是「in-flight 併發數」（SD-B1 的正面答覆）：
