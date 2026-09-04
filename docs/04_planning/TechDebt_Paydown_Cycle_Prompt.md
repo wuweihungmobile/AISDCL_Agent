@@ -1,116 +1,163 @@
-# 技術債總清償循環令（可重複投放；掌舵者裁決存證＋開工 Prompt 本體）
+# 技術債總清償循環令（可重複投放；流程定義版）
 
-> 用途：掌舵者開新 session 時，將本檔〈Prompt 本體〉整段貼入即可；可重複投放直到
-> 〈終止條件〉達成由執行者宣告 DONE。
-> 裁決存證：以下 D1~D7 為掌舵者 2026-09-01 於 R115 收輪後以互動選項逐項裁決
->（載體＝R115 session 逐字稿；本檔為其權威轉錄），後續輪次直接執行、不得重問。
+> 用途：掌舵者開新 session 時，將〈Prompt 本體〉整段貼入即可；可重複投放，直到
+> 帳本降到〈終止條件〉由執行者宣告 DONE。
+>
+> **版本紀事** v2（2026-09-04，R125 收輪後）：移除 2026-09-01 D1~D7 一次性裁決與
+> R114/R115 特定數字快照。核對後發現：多數已執行完畢（`DEF-200-211`／`212`／
+> `236`、CLAUDE.md 並行派工檢查表）；少數仍卡著（`DEF-200-234`／`241`）；甚至
+> 有帳本自己的「closed-by-decision」宣告與原始檔案內容對不上（某 ADR 頂層
+> Status 已寫 Adopted，內文某節卻仍是 Proposed）。這正是「把某一刻的狀態寫死
+> 進可重複使用的 prompt」必然發生的事——資訊會過時，而過時資訊比沒有資訊更
+> 危險（會被誤當成「已驗證」直接採信）。**v2 起本檔只定義流程，不記錄現況**；
+> 現況一律現查，包括帳本自己「已結案」的宣告，起疑就回頭讀原始檔案驗證。
+> 歷史裁決存證：`docs/04_planning/AutoSDD_Adjudication_*.md`（現查最新檔名）
+> 與各輪 `docs/04_planning/R*_HANDOFF.md`。v2 生效時未結列數＝**49**（起點，
+> 見〈終止條件〉）。
 
 ---
 
 ## Prompt 本體（自此行起整段複製投放）
 
-# 技術債總清償循環令（RNN 自舉版；2026-09-01 掌舵者七項裁決已固化，勿再重問）
-本指令可重複投放：每次開新 session 貼入即可，直到達成〈終止條件〉由你明確宣告 DONE。
-與記憶／舊交棒書衝突時以本檔為準；本檔與帳本字面衝突時以帳本為準並回報。
+# 技術債總清償循環令
+本指令可重複投放：每次開新 session 貼入即可，直到達成〈終止條件〉宣告 DONE。
+**本檔不含任何「現在狀態」的快照**——「現在幾筆未結」「哪個裁決生效了沒」
+「某 ADR 是什麼狀態」一律現查，不要相信本檔或記憶裡的舊數字。與記憶／舊
+交棒書衝突時以**現查結果**為準；帳本裡「closed-by-decision」的宣告也可能是
+錯的，起疑就直接讀該宣告指向的原始檔案核對。
 
-## 0. 你的角色：舵手，不下場
-不親寫代碼、不親審文件——派專職 sub-agent（Architect／SA／SD／QA／實作各司其職）。
-遇不可預期狀況先自行分析、做當下最佳判斷推進；只有「毀滅性／不可逆」或「本檔未固化的
-新裁決」才互動問我。pace band=notice 起改逐一 Agent（每 300s ≤4）；實作批可用
-model: sonnet（R114/R115 實證可扛細規格）。
+## 0. 角色：舵手，讀寫分流
+- **唯讀查證／分診**：可平行派多個小包（`model:'sonnet'`，每包 ≤6~8 項、
+  schema 化輸出）——安全、鼓勵的用法。
+- **帳本編修／實際結案／commit**：只准**單一窗口序列處理**，不得平行派工
+  （根 CLAUDE.md〈並行派工防互踩檢查表〉第 1 項；此為其具體實踐）。
+- 只有「毀滅性／不可逆」或需要掌舵者拍板的設計分歧才互動問；其餘自行判斷
+  推進。pace band=notice 起改逐一 Agent 派工。
+- 若本 session 在 Windows：mac 專屬未結列（標籤含 darwin／mac 或需要 mac
+  真機）只能唯讀分診整理，不能結案，留給 mac session。
 
-## 1. 掌舵者已裁決事項（2026-09-01 互動裁決，逐項固化——直接執行，不重問）
-D1. 四份 Proposed 設計**全落款**：ADR-XPLAT-014／PRD_Amendment_R108_Pacing／
-    PRD_Amendment_R108_BurnDown_Addendum／ADR-XPLAT-013_Phase2_Proposal_R108
-    → Status 全改 Adopted。
-D2. 三批修憲**全落款**：PRD v2.1.10／v2.1.11／v2.1.12 → 修訂表補列＋案檔 Status→Adopted
-    （依 R110「未生效修憲不疊層」補齊落款程序；v2.1.10 與現行 --pace 實作重疊處＝落款後
-    對齊帳，差異列缺陷）。
-D3. DEF-101-886＝**檢查表形態**：CLAUDE.md 增「並行派工防互踩檢查表」條款（結案單線／
-    修復棒串行／複審唯讀／收尾單人窗口四條現行慣例明文化）＋ tools/tests/ 對應規則鎖
-    → 886 結案。
-D4. DEF-200-212＝**授權豁免面工程解**：strict 的 3 筆歷史文件假陽性登記進具名豁免清單
-    （shrink-only；不改寫歷史文件本身）→ strict 假陽性歸零 → 接 main() → 212 結案。
-D5. R113/R114 守衛線分掛＝**追認**（掌舵者 2026-09-01 裁決即存證；證據檔記一筆，
-    不重掛標號）。
-D6. 目標＝**分階段**：落地輪（P0~P1）計「解鎖件落地數」不計淨減；結案輪（P2）目標
-    每輪淨減 5~8。
-D7. 平台＝**先 Windows 落地（P0~P2），再交棒 MAC 驗收輪（P3）**。
+## 1. 開工程序（機械化，缺一不動工）
+1. 找最新交棒書：**用數字排序**，不要用檔名字典序——
+   🔴 `Sort-Object Name` 會把 `R124` 排在 `R90` 前面（實際踩過的坑）：
+   ```powershell
+   Get-ChildItem docs/04_planning -Filter "R*_HANDOFF.md" |
+     ForEach-Object { [PSCustomObject]@{ Num = [int]($_.Name -replace '^R(\d+)_.*','$1'); Name = $_.Name } } |
+     Sort-Object Num -Descending | Select-Object -First 1
+   ```
+2. 讀該交棒書＋其指向的證據檔／journal。
+3. 現查三本帳：
+   ```powershell
+   python tools/check_defect_log_crossref.py --unresolved-count
+   python tools/check_archive_required.py
+   python tools/tests/test_adr_xplat001_c1c2_lock.py --print-guard-lines
+   python tools/session_resume_planner.py --pace
+   ```
+4. 若要引用某個歷史裁決是否已生效：現查 `docs/04_planning/AutoSDD_Adjudication_*.md`
+   最新內容，或直接讀該裁決指向的 ADR／PRD 原始檔案的 Status 欄——不要相信
+   帳本字面。
 
-## 2. 開工必讀（依序）
-docs/04_planning/ 最新一份 R*_HANDOFF.md（用 `ls` 現查最大號）→ 其指定證據檔 →
-docs/06_quality/CrossPlatform_R115_Debt_Closure.md（本循環起點的裁決脈絡）→
-三本帳（AutoSDD_Defect_Log／External_Blocked_Log／Structural_Debt_Log）。
+## 2. 每次投放：判斷這輪是「落地輪」還是「結案輪」
+- **落地輪**：未結列裡有「裁決已存在、只差實作」的項目（現查候選：帳本狀態欄
+  提到某個 `AutoSDD_Adjudication_Packet_R*.md` 已選定方向，但列本身仍 open）
+  → 實作 → 過四方定點複審 → 結案。計「解鎖件落地數」，不強求淨減。
+- **結案輪**（優先；目標每輪淨減 5~8）：只查證、只結案，不開新戰場。
 
-## 3. 起手式（機械化，缺一不動工）
-```powershell
-python tools/check_defect_log_crossref.py --unresolved-count
-python tools/check_archive_required.py
-python tools/tests/test_adr_xplat001_c1c2_lock.py --print-guard-lines
-python tools/session_resume_planner.py --pace
-```
-另：開場若見 SessionStart 的 handback 未讀出聲（74403d0c…）＝R115 演練殘留，確認後
-.ack＝G2 半格自然結案。請掌舵者以系統管理員 PowerShell 手動執行一次（R115 遺留，需提權）：
-`Unregister-ScheduledTask -TaskName 'T-r95','T-f4b' -Confirm:$false`
+### 純結案輪三訣竅（R121~R125 實戰驗證有效）
+1. **一筆一筆結，不要派一堆幫手同時衝寫帳本**（唯讀分診可平行，見上方 0）。
+2. **挑「重跑一個指令就綠＝結案」的先清**——最快、風險最低。
+3. **結案時不順便挖新問題**——找到就記下來留給落地輪，當場不展開。
 
-## 4. 階段機（每次投放：起手式 → 讀最新交棒書 → 定位到未完成的最小階段續跑）
-**P0 落款程序**（一次性，純文件＋帳本，收尾單人窗口做）：
-  依 D1/D2 逐份落款（Status→Adopted＋PRD 修訂表補列）→ 改寫 234/236/211 解鎖條件的
-  「Proposed」指向 → 結案 DEF-200-232（四檔 Status 落定即其解鎖條件）→ 文件閘門三支
-  rc=0 → commit。
-**P1 實作佇列**（嚴格依序、每項落地→過四方定點複審→結對應列→commit；一輪塞不下就
-  交棒續投）：
-  P1-1 ADR-XPLAT-013 Phase2 (b)(c) 減稅落地 → 結 DEF-200-211（小）
-  P1-2 ADR-XPLAT-014 §4 巡邏 tick「主控死亡但 tasks/ 有活體」分支＋存活監測紅綠
-       → 結 DEF-200-234
-  P1-3 v2.1.12 §3-4 持久 notify_queue＋巡邏重投＋TTL＋delivered 憑證 → 結 DEF-200-236
-       （R115 實彈已重現 notify_rc=-2 活體，驗收必含該情境重演轉綠）
-  P1-4 D3 檢查表條款＋規則鎖 → 結 DEF-101-886
-  P1-5 D4 豁免面＋strict 接 main() → 結 DEF-200-212
-  P1-6 「平台專屬 skip 四層登記」收斂為單一 SSOT 派生（census 主表／MAX 表／凍結快照／
-       skip_id_ledger M6——R115 漏一層紅一輪的結構解）
-  P1-7 SD-4（RELAY_NEXT 排程失敗視同停止次態走 _rearm_after_stop）＋SD-8（settle_window
-       外圈 try/except→清閂＋loud）＋SA-4 殘格（headless 窗口實跑 allow PowerShell(...)
-       清單取證一次）
-  P1-8 Pacing／BurnDown 落款後的實作差異盤點：與現行 --pace/--arm-endurance 實作逐條
-       對齊，已被超越的條款在案檔加「已由實作超越」註記，未覆蓋的立列（誠實立案，不硬做）
-**P2 Windows 驗證型結案**（單線逐筆，D6 目標淨減 5~8/輪）：
-  挑解鎖條件＝「重跑指令綠即結」或 P2 級驗證型；每筆：現查解鎖條件→實測→結案編修
-  （≤700 bytes、零輪號、指標指證據檔）→ crossref rc=0。
-**P3 交棒 MAC 驗收輪**：P0~P2 完成後，交棒書明列 mac 積壓（235 mac launchd 重掛驗收半格／
-  DEF-101-693 mac 面／darwin 剖面實機回填／useMacWin.md 對照），指示下一 session 在 MAC 開。
+### 結案輪標準流程
+1. 現查未結列表全貌（`--unresolved-count` 印出的 ID 清單）。
+2. 唯讀分診：把候選 ID 分成幾個小包（Workflow 工具 `parallel()`，
+   每包 ≤6~8 項、`model:'sonnet'`），逐筆判 `closeable-now` /
+   `needs-work` / `needs-decision`，附 `evidence` 與 `verify_command`。
+3. 單線逐筆：親自重跑每個 `verify_command`，確認 rc=0 才動筆改帳本狀態欄
+   （一次一筆，不平行）。每改完一批立刻跑一次
+   `check_defect_log_crossref.py`（不帶參數）——某列超過 700 bytes 就當場
+   刪減文字，**不要**塞進 grandfather／豁免清單。
+4. 全部改完：`check_archive_required.py` / `check_handoff_carriers.py` /
+   `--print-guard-lines` 皆 rc=0 → 全套 `python tools/run_root_unittests.py`
+   （背景跑，見下方 4）全綠才 commit。
+5. 寫交棒書前先過下方〈交棒書自查清單〉，避免自己製造新回歸。
+6. commit → 背景 push → 背景輪詢雲端 CI 到全部 completed，逐支查
+   `conclusion`（不是只看有沒有觸發）。
 
-## 5. 品質與驗證（不可省）
-每項實作：突變驗紅＋針對測試綠＋全套 `python tools/run_root_unittests.py` rc=0
-（>10 分鐘用背景跑）。實作項過四方定點複審（一審全查、二審驗修復；sonnet 可）；
-收斂標準＝四方無新 blocking。push 前本機全套綠；push 後必等雲端全部 completed
-（等待用背景阻塞迴圈，不裸睡）；紅了先查是否本輪造成（❌ 不得套「長期紅」豁免；
-paths 沒觸發的 workflow 用 workflow_dispatch 補驗）。
+## 3. 交棒書自查清單（R125 實戰踩過，皆為真回歸不是雜訊）
+寫完交棒書、commit 前，這三類寫法**必定**被機械鎖攔下：
+1. **DEF 編號別寫成正規表示式片段**：把多個編號縮寫成
+   「共同前綴 ＋ 方括號列出尾碼」的正規表示式（例如把 242／243／244 縮寫成
+   前綴加中括號），會被 `test_defect_id_reference_integrity.py` 從方括號前
+   截斷、讀成一個帳本裡不存在的殘缺編號而判紅。要列多個 ID，要嘛用
+   `` `DEF-200-(242|243|244)` `` 這種圓括號＋直線分隔的正規表示式，要嘛
+   各自完整反引號分開列（如 `DEF-200-242`／`DEF-200-243`／`DEF-200-244`）。
+2. **反引號別繼續引用本輪剛改名／刪除的舊符號**：`TestR78GhostSymbolClaims`
+   （幽靈符號掃描器）會判紅。舊名稱改用純文字敘述，不要包反引號。
+3. **否定宣稱要有機讀證偽錨**：出現「尚未落地／未落地／尚未執行／尚未建立／
+   零交付／零實作／零覆蓋／零消費者／零載體／沒有任何一行／一行都沒有／
+   一次都沒跑」這些字眼，光附一句「現查指令」**不算數**——要加
+   `<!-- absent-if: <目前 repo 搜不到、一旦出現就代表宣稱失效的字面> -->`。
+   🔴 先跑 `python tools/tests/test_negative_existence_claims_r82.py --print-baseline`
+   看逃生口 `handoff-claim-verified:` 天花板還有沒有餘裕——沒有餘裕就必須
+   用真正的 `absent-if` 錨，不能靠逃生口過關。
+   修好上述 1~3 通常會連帶清掉旁支平台模擬鎖的紅（同源問題）。
 
-## 6. 教訓固化（R114＋R115，機械遵守）
-- 新增平台專屬 skip＝**四層登記義務**（skip_group_policy 主表＋MAX 表＋test_skip_ceiling
-  凍結快照＋skip_id_ledger 兩剖面 M6 id）——P1-6 完成前每次新增手動四層齊補
-  （R115 漏一層紅一輪 ×4）。
-- E501 存量債棘輪量 **EAW 顯示寬度**（中文佔 2 欄）；round-label-ok 豁免 token 必須與
-  輪號**同行**。
-- `.sh` 執行禁帶 bash `-n`（noexec 假綠）；讀 rc 不接管線；逃生口環境變數只掛單一指令。
-- 守衛線款(11)：R115 已 -7 終止 streak；正淨額輪重新起算、連兩輪後下一輪必須 ≤0——
-  實作批預先規劃搬遷抵銷（Guard_Line_History 體例）。款(12) 下一到期輪＝R117（cap→570）。
-- 帳本「發現情境」欄零輪號（時鐘刻意凍結）；狀態欄 ≤700 bytes＝索引；交棒書 stale
-  觸發字（尚未/仍未/仍缺…）＋現查指令動詞 code span＋不指名不存在路徑。
-- 測試假 scheduler 後端 credential_key 一律 `sb.select().credential_key`（勿硬編平台家）；
-  DEF-200-239 修復有姊妹 helper 前科——新增 tick 類測試 helper 必查是否已注入假後端。
-- 淨額棘輪比「工作樹 vs HEAD」：先 commit 再跑全套自然轉綠。
-- 帳本主檔編修後、最後一次全套之前，不再寫任何文件（R96）。
+## 4. 品質與驗證（不可省）
+- 每項實作：突變驗紅＋針對測試綠＋全套 `python tools/run_root_unittests.py`
+  rc=0（親自讀 log **尾端** `rc=` 值，不要相信 harness 通知摘要字面；
+  >10 分鐘用 `run_in_background: true`）。
+- 實作項過四方定點複審（一審全查、二審驗修復；`model: sonnet` 可）；
+  收斂標準＝四方無新 blocking。
+- **push 必背景執行**（pre-push 會重跑全套閘門，常態 15~30 分鐘，前景等待
+  幾乎必逾時）：
+  ```powershell
+  git push *> <log路徑>
+  "push_rc=$LASTEXITCODE" | Out-File -Append <log路徑>
+  ```
+  完成後讀 log **尾端**確認 `push_rc=`；若逾時被工具砍掉（rc=143 等），用
+  `git fetch` + `git log origin/main..HEAD` 判斷是否真的送達，不要盲目重推。
+- push 後用**背景阻塞迴圈**（`gh run list --branch main --json
+  headSha,status,conclusion` 比對本次 sha）等到全部 completed，逐支查
+  `conclusion=success`，不要裸睡也不要人工反覆檢查。紅了先查是否本輪造成
+  （不得套「長期紅」豁免；paths 沒觸發的 workflow 用 `workflow_dispatch` 補驗）。
 
-## 7. 每輪結尾必須輸出
-1. 階段機現位（P0~P3 各項 done/塞不下交棒）；2. PRD/ADR 尚未完成清單；3. 帳本起訖未結
-列數與淨額（＋主檔 bytes 變化）；4. commit＋push＋雲端 CI 結論表；5. 呈報單（僅本檔
-未固化的新裁決件）；6. context 近滿則找乾淨點收輪並把「下次從 P 幾續跑」寫進交棒書。
+## 5. 常踩陷阱（機械遵守；只增不減，過時的數字快照隨版本移除）
+- 讀 rc 不接管線（pwsh 7.x 中斷管線不更新 `$LASTEXITCODE`）；`.sh` 執行禁帶
+  `-n`（noexec 假綠）；逃生口環境變數只掛單一指令。
+- 🔴 `context_budget_guard.py` 的水位百分比用**假設的 200k window** 算，
+  Sonnet/Opus 5 等模型實際多為 1M——收到 94% 警報**先現查真實水位**
+  （使用者的 `/context` 面板，或 `python tools/session_resume_planner.py --check`）
+  才決定要不要真的觸發收斂 SOP。已在多個 session 誤觸發、提前砍掉進行中
+  的工作，這不是「保守總沒錯」——半套收斂本身就是代價。
+- 新增平台專屬 skip 是四層登記義務（`skip_group_policy` 主表／MAX 表／
+  凍結快照／`skip_id_ledger` M6 id）——現查 `skip_*` 六模組族收斂
+  （相關列：`DEF-200-251`／`DEF-101-951`）是否已解決，未解決前仍要走四層。
+- 帳本「發現情境」欄零輪號（時鐘刻意凍結，現查 `current_round` 用
+  `check_defect_log_crossref.py`）；狀態欄 ≤700 bytes＝索引，長文搬進
+  `docs/06_quality/CrossPlatform_R*.md` 具名證據檔；程式碼註解提輪號需帶
+  `round-label-ok` 標籤。
+- 交棒書「還沒做」節每筆帶現查指令 code span；否定宣稱帶 `absent-if` 錨
+  （見上方〈交棒書自查清單〉）。
+- 帳本主檔編修後、最後一次全套之前，不再寫任何文件。
+- 淨額棘輪比對用「工作樹 vs HEAD」：先 commit 再跑全套會自然轉綠，不必慌。
 
-## 8. 終止條件（達成即宣告 DONE，建議停止投放本 prompt）
-P0~P1 八項全落地結案 ∧ 主帳本未結 ≤30 且其中零筆屬「本 prompt 已授權可解」形態
-∧ mac 積壓已交棒 P3 輪。屆時輸出總結帳（起點 52 → 終點 N，逐階段淨減歸因）。
+## 6. 每輪結尾必須輸出
+1. 這輪是落地輪還是結案輪，做了哪些項目；
+2. 帳本起訖未結列數與淨額（＋外部阻塞軌／結構性長債軌現況一句話，含最近
+   複查日——帳本本身會警告複查日 >14 天的側軌列，別放著變垃圾桶）；
+3. commit＋push＋雲端 CI 逐支結論；
+4. 呈報單（僅需要掌舵者拍板的新裁決件，附現查依據）；
+5. 若這輪順手發現需要落地輪處理的候選，列出 ID＋一句話理由，交給下一輪，
+   不要當場展開；
+6. 交棒書寫入 `docs/04_planning/R<N>_HANDOFF.md`（N＝現查最新號 +1），並過
+   一次上方〈交棒書自查清單〉；
+7. 給我下輪可以大力降帳本的策略建議。
 
-## 9. Token 資訊
-（每次投放時貼上當時 /usage 快照）
+## 7. 終止條件
+主帳本未結列數（`--unresolved-count`）降到 **0**，且外部阻塞軌／結構性長債
+軌兩條側軌（不計入前述分母）在交棒書中逐筆列出現況與最近複查日。屆時輸出
+總結帳：起點 49（v2 生效時，R125）→ 終點 0，逐輪淨減歸因。
+
+
+## 8. Token 資訊
+（每次投放時貼上當時 `/usage` 快照）
