@@ -54,6 +54,12 @@ dev = [
     # 使用 click；其單元測試 tests/tools/test_run_bridge_e2e.py 於 collection 期即 import。
     # 原先未宣告、靠環境 ambient 安裝，fresh clone 會 ModuleNotFoundError（跨平台重現性缺口）。
     "click>=8.0",
+    # 2026-09-05 掌舵者裁決：Claude Agent SDK 納入 dev 出廠環境，與根層
+    # .github/workflows/autoclaude-ci.yml 的 `pip install -e ".[dev,sdk]"` 對齊；本機
+    # bootstrap 目標 `.[dev,notifications,lint]` 不必改。以自我參照 extra 帶入，釘選只住
+    # 下方 `sdk` 一處。此前走 bootstrap 的環境永遠缺它 ⇒ SdkExecutorAdapter 三支測試結構上
+    # 恆 skip、零真機覆蓋。pyproject 變動即改變 dev_start 依賴 hash ⇒ 各機器下次 dev_start 補裝。
+    "autoclaude[sdk]",
 ]
 # Mutation testing（SD_08 W3 / ADR-SD08-002 — TokenGuardPlugin pilot）
 # 鎖 2.4.3：mutmut 3.x CLI 重寫不支援 --paths-to-mutate / --tests-dir，

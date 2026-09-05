@@ -185,9 +185,11 @@ def test_result_message_is_error_maps_exit_code_1():
 # 它們此前用裸 `pytest.importorskip("claude_agent_sdk")`，產出的 skip 理由是 pytest 自動
 # 生成的 `could not import 'claude_agent_sdk': …` ⇒ **不帶任何標籤**，落進 `untagged` 群，
 # 而 `untagged` 的意思是「還沒有人說得出這支為什麼不跑」。實際上說得出來，而且說得很精確：
-# 這個套件住在 `[sdk]` extra 裡，而 `tools/bootstrap_core.py` 的安裝 target 逐字是
-# `.[dev,notifications,lint]` ⇒ **走 bootstrap 建立的環境結構上永遠拿不到它**，
-# 不是「這台機器剛好沒裝」。改成具名 skipif ＋ `[TOOL-ABSENCE]` 標籤 ＋ 可直接複製的
+# 這個套件住在 `[sdk]` extra 裡；2026-09-05 前 `tools/bootstrap_core.py` 的安裝 target
+# `.[dev,notifications,lint]` 不含它 ⇒ 走 bootstrap 的環境結構上永遠拿不到（不是
+# 「這台機器剛好沒裝」）。同日起 `dev` extra 以 `autoclaude[sdk]` 自我參照帶入，出廠環境
+# 即含 SDK，本 skip 只剩「未裝 dev/sdk extra 的環境」會觸發。
+# 改成具名 skipif ＋ `[TOOL-ABSENCE]` 標籤 ＋ 可直接複製的
 # 安裝指令：分群從 untagged 移到 tool-absence（可歸零的那一半），理由本身也變成配方。
 # 🔴 載具刻意仍是 `pytest.importorskip`（帶 `reason=`）而**不是**改寫成 `skipif` 裝飾器：
 # 後者在 `skip_tag_policy._SITE_CLASS_CENSUS` 那張站點普查表上是**新的一個站點**
@@ -197,9 +199,9 @@ def test_result_message_is_error_maps_exit_code_1():
 _SDK_SKIP_REASON = (
     "[TOOL-ABSENCE] 需要 claude-agent-sdk（選配 `[sdk]` extra；本測試要真的 "
     "PermissionResultAllow／Deny 型別，換成假物件等於不驗那個 isinstance 斷言）。"
-    "🔴 這不是「這台機器剛好沒裝」——tools/bootstrap_core.py 的安裝 target 是 "
-    "`.[dev,notifications,lint]`，不含 sdk ⇒ 走 bootstrap 的環境一律拿不到。"
-    "跑法：在 AutoClaude/ 執行 `uv pip install -e '.[sdk]'` 後重跑本檔"
+    "出廠環境自 2026-09-05 起經 `dev` extra 的 `autoclaude[sdk]` 自我參照帶入，"
+    "走 bootstrap 的 .venv 應已有它；仍 skip ⇒ 這個環境沒裝 dev/sdk extra。"
+    "跑法：在 AutoClaude/ 執行 `uv pip install -e '.[dev]'`（或 `'.[sdk]'`）後重跑本檔"
 )
 
 
