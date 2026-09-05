@@ -115,6 +115,7 @@ gh run list --limit 10 --json workflowName,conclusion,event,createdAt,headSha   
    - **不准 `--allow-pg-extras`**：會把 provenance 記成 `pgextras=present`，等於悄悄改掉「出廠環境」的定義，且沒有機械物會察覺。
    - **回填排在 commit/push 之前，回填後不再改那四棵樹**（改了就再回填一次）。
    - 驗收：`--check-snapshot` 本平台欄綠。非本平台欄在單機交替下結構上恆 stale，那則 ℹ️ 是常態；`unrecorded` 只表示不是同世代值，不代表該平台沒有開發史。
+   - **收尾（不要漏）**：回填完立刻刪掉樹外 venv；Docker 若只是為回填才開的就關掉（mac：`osascript -e 'quit app "Docker"'`，再用 `docker info` 確認連不上；Windows：Docker Desktop 系統匣 Quit），別讓它留著吃 1 GB 記憶體。
 
 ### C. 兩平台語法雷區（實際踩過；完整對照 ONBOARDING §5／§6／§7）
 
