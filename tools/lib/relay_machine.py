@@ -264,6 +264,33 @@ def other_owner_for_session(session_id: str, existing_jobs, my_task: str) -> str
     return ""
 
 
+#: M-13：`_register_and_record`／`--register-schtasks` 共用的「已被 INV5 擋下」信號。
+#: 呼叫端須把它當「無事發生的成功」（不武裝、不誤報 armed），不得當一般憑證印出。
+DEFERRED_CREDENTIAL = "deferred(single-owner)"
+
+
+def single_owner_conflict(session_id: str, my_task: str, plan: Path) -> bool:
+    """INV5 下沉（M-13，掌舵者 2026-09-05 事故續修）：`_arm_sentinel` 此前是**唯一**查
+    `other_owner_for_session` 的一站；`_arm_endurance`（經 `_register_and_record`）與
+    `--register-schtasks` 手動路徑完全不查，同一 session 兩支排程各自探測/spawn 的
+    事故從這兩條手動路徑依然可以重現。
+
+    真的有另一支（跨族）owner ⇒ 落 `sentinel_single_owner_deferred` 痕跡（與
+    `_arm_sentinel` 既有痕跡同一個事件名）並回 `True`；`list_jobs` 量不到（`None`）
+    ⇒ fail-open 回 `False`（寧可多一支也不要沒有哨兵，同 `_arm_sentinel` 既有紀律）。
+    """
+    planner = _planner()
+    jobs = planner.schedule_backend.select().list_jobs("AutoSDD_")
+    if jobs is None:
+        return False
+    owner = other_owner_for_session(str(session_id or ""), jobs, my_task)
+    if not owner:
+        return False
+    planner.append_log(planner.endurance_log_path(plan), "sentinel_single_owner_deferred",
+                       owner=owner, mine=my_task, session_id=str(session_id or ""))
+    return True
+
+
 def advance_no_progress_streak(streak: int, progressed: bool) -> int:
     """新 streak：本窗有進度歸零，否則 +1。"""
     return 0 if progressed else streak + 1

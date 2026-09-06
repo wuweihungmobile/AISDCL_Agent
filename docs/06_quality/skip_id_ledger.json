@@ -17,6 +17,7 @@
       "test_check_hooks_liveness.TestBlockBashHookBehaviourOnWindows.test_missing_tool_name_key_is_not_silently_allowed",
       "test_check_hooks_liveness.TestBlockBashHookBehaviourOnWindows.test_non_bash_tool_is_allowed",
       "test_context_budget_guard.ConsoleFreeSpawnTest.test_the_prelude_really_stops_the_evidence_from_degrading",
+      "test_context_budget_guard.Inv5SingleOwnerTest.test_real_get_scheduledtask_listing_feeds_other_owner_for_session",
       "test_context_budget_guard.NoWindowBehaviourTest.test_suppressing_the_window_does_not_cost_observability",
       "test_context_budget_guard.NoWindowBehaviourTest.test_the_quiet_carrier_needs_no_flags_at_all",
       "test_context_budget_guard.NoWindowBehaviourTest.test_the_shipped_flag_really_suppresses_the_console",

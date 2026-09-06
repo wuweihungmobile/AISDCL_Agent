@@ -25,11 +25,14 @@ AutoSDD_Sentinel_* 工作…）」＝假陰性——專門用來發現增生的�
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import sys
 import tempfile
 import time
 from pathlib import Path
 
+import endurance_env
 import schedule_backend
 from sentinel_lifecycle_arm import (
     ARM_MARKER_PREFIX,
@@ -445,6 +448,48 @@ def main(argv: list[str]) -> int:
         print(f"\n以上是 dry-run。要真的收：加 --apply（載具＝{backend.name}，"
               "會解除排程並刪殘骸；解除是否成立由後端自己回讀驗證，rc 不是憑證）")
     return 0
+
+
+#: M-03（精簡版，不是 M-04 的完整 SandboxBackend）：CI／pre-push 呼叫根層測試 runner
+#: 的漏斗點此前完全沒有一層偵測「這次測試執行期間是否真的觸碰了真的
+#: launchd/schtasks」。`autosdd_leak_fence.jsonl` 與其他持久痕跡同居所（`endurance_env.
+#: trace_dir()`），不開第二個家。
+LEAK_FENCE_LOG_NAME = "autosdd_leak_fence.jsonl"
+
+
+def leak_fence(run):
+    """底線防護＋可稽核觀察痕跡（只做「印出來讓人看得到」這一半）。
+
+    🔴 誠實劃界：本函式**不會**因為偵測到真排程被寫入就讓 rc 變非 0——那需要
+    M-04 的 SandboxBackend 才能決定性判斷「新增的 autosdd_* 暫存檔」與「真的多了一支
+    排程工作」是不是同一件事。這裡只做兩件事：(1) 忘記加 `AUTOSDD_SENTINEL_OFF=1`
+    的測試也有個底線（`setdefault`，不覆寫已設的值）；(2) 把 `run()` 前後 `$TMPDIR`
+    頂層 `autosdd_*` 檔名的差集印出來＋落一行持久痕跡，讓「有沒有變多」從此可稽核，
+    而不是像 DEF-200-239 事故那樣事後只能憑記憶重建時間線。
+    """
+    # 字面（不 import `.claude/hooks/context_budget_guard.SENTINEL_OFF_ENV`）：本檔
+    # 對 planner／hook 鏈一律走函式內 lazy import 以避免模組層成環（見 `_planner_module()`
+    # 既有理由），這一個環境變數名不值得為它開一條新的耦合路徑。
+    os.environ.setdefault("AUTOSDD_SENTINEL_OFF", "1")
+    tmp = Path(tempfile.gettempdir())
+    before = set(tmp.glob("autosdd_*"))
+    rc = run()
+    after = set(tmp.glob("autosdd_*"))
+    new_files = sorted(str(p) for p in (after - before))
+    if new_files:
+        print(f"[leak_fence] 執行期間 $TMPDIR 新增 {len(new_files)} 個 autosdd_* 檔案"
+              "（只列不刪，M-04 完整版才會據此決定性判死）：")
+        for p in new_files:
+            print(f"  {p}")
+    record = {"at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "rc": rc,
+             "new_temp_files": len(new_files)}
+    try:
+        path = endurance_env.trace_dir() / LEAK_FENCE_LOG_NAME
+        with path.open("a", encoding="utf-8", newline="\n") as handle:
+            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except OSError:
+        pass  # 落痕跡失敗不得反過來變成測試跑不完的故障源（同既有 append_log 紀律）
+    return max(rc, 0)
 
 
 if __name__ == "__main__":

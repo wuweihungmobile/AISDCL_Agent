@@ -32,6 +32,21 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 #: 方向錯（施工圖 §3(a) 鍵名草案前言）。僅由 spawn argv 以 `--settings <本檔>` 載入。
 UNATTENDED_SETTINGS = _REPO_ROOT / ".claude" / "settings.unattended.json"
 
+#: M-06：第一窗（`allow_followup=False`）專屬姿態檔——deny 清單多帶 `Task`／`Agent`／
+#: `Workflow` 三個 fan-out 工具。此前 INV2（續跑不得以 fan-out 為第一動作）只靠
+#: `resume_argv()` 決定要不要在 prompt 文字裡塞 Workflow 提示句，模型仍可自行決定呼叫
+#: 這三個工具——prompt 提示只是「不主動建議」，不是機械硬擋。本檔把它下沉成
+#: harness 權限層的真擋（`--settings` 指到不同檔），不是只改 prompt 文字。
+UNATTENDED_FIRST_WINDOW_SETTINGS = _REPO_ROOT / ".claude" / "settings.unattended_first_window.json"  # noqa: E501
+
+
+def posture_settings_path(*, allow_followup: bool) -> Path:
+    """spawn 這一跑該用哪份權限姿態檔——`_posture_argv()` 與呼叫端的 A-PRE 預檢
+    （`session_resume_planner._run_resume`）共用同一個判準，不得各自各解一次
+    （各解一次＝其中一邊漏跟著新檔走，preflight 驗的檔與 argv 實際指到的檔可能不同檔）。
+    """
+    return UNATTENDED_SETTINGS if allow_followup else UNATTENDED_FIRST_WINDOW_SETTINGS
+
 
 def handback_dir() -> Path:
     """持久交接目錄（施工圖 §3(b) L1 ②；姿態檔 additionalDirectories 指向它）。
@@ -99,11 +114,12 @@ def handback_postcheck(route: dict, spawn_at: float, state: dict,
     return verdict
 
 
-def _posture_argv() -> list[str]:
+def _posture_argv(*, allow_followup: bool = False) -> list[str]:
     # 🔴 順序約束：這一段必須排在 prompt 之後、`--add-dir` 之**前**——
     # `--add-dir <directories...>` 是變長參數，其後只准剩目錄值（姊妹鎖
     # test_the_variadic_add_dir_does_not_swallow_the_prompt 釘住整條 argv 的尾端形狀）。
-    return ["--permission-mode", "acceptEdits", "--settings", str(UNATTENDED_SETTINGS)]
+    return ["--permission-mode", "acceptEdits", "--settings",
+            str(posture_settings_path(allow_followup=allow_followup))]
 
 
 # v2.1.13 C5：settings 檔 `additionalDirectories` 的 `~` 展開 [需核對]（施工圖 §3(a)
@@ -135,11 +151,17 @@ def resume_argv(claude: str, session_id: str, prompt: str, add_dir: Path,
     """
     hint = workflow_resume_hint(session_id) if allow_followup else ""
     return [claude, "-p", "-r", session_id, prompt + hint,
-            *_posture_argv(), *_add_dir_argv(add_dir)]
+            *_posture_argv(allow_followup=allow_followup), *_add_dir_argv(add_dir)]
 
 
 def fresh_argv(claude: str, prompt: str, add_dir: Path) -> list[str]:
-    """FRESH_SESSION_WITH_STATE 的完整 argv（不帶 `-r`，其餘形狀與 RESUME 路對稱）。"""
+    """FRESH_SESSION_WITH_STATE 的完整 argv（不帶 `-r`，其餘形狀與 RESUME 路對稱）。
+
+    🔴 M-06：FRESH 路沒有「前一窗確實起來」這個概念可言（它本來就是降級開的全新
+    session，沒有可確認的接力進度）⇒ 一律用第一窗姿態檔（`allow_followup` 恆
+    `False`），不接受呼叫端傳入——與 RESUME 路 `allow_followup=True` 需要
+    `relay_machine.followup_allowed(state)` 正面證據對稱。
+    """
     return [claude, "-p", prompt, *_posture_argv(), *_add_dir_argv(add_dir)]
 
 

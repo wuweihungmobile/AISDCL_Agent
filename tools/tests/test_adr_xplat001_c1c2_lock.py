@@ -682,7 +682,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 7352,
+    "test_adr_xplat001_c1c2_lock.py": 7373,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 3839,
@@ -700,7 +700,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_check_wrapper_thinness.py": 1234,
     "test_claim_provenance_r86.py": 618,
     "test_component_sanitizer_shared_layer_lock.py": 293,
-    "test_context_budget_guard.py": 11169,
+    "test_context_budget_guard.py": 11628,
     "test_defect_id_reference_integrity.py": 281,
     "test_dev_start.py": 6527,
     "test_dev_start_ps1_lastexitcode.py": 548,
@@ -732,7 +732,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_python_c_percent_shim.py": 119,
     "test_quota_policy.py": 3396,
     "test_root_infra_parity.py": 441,
-    "test_run_root_unittests.py": 2428,
+    "test_run_root_unittests.py": 2451,
     "test_sanitize_component_frozen_sdd_versions_lock.py": 340,
     "test_schedule_capability_parity.py": 626,
     "test_script_scan_surface_ssot.py": 391,
@@ -1492,6 +1492,17 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "Inv1ScheduledTickMarksUnattendedTest＋Inv2Inv3 接線測試）。本檔自身＝R130 稽核列。"
      "淨額 ≤ cap 552（net_cap_for_round(130)）；連升 streak 第 1／2（前輪 R129＝approved-overage "
      "不計）。逐檔清單見 CrossPlatform_R130_FourParty_Salvage.md。"),
+    ("R131", 93734, 94237, 503,  # round-label-ok：本檔對帳列有既有豁免（同 R126/R129/R130）
+     "[非淨減法輪][全額功能軌] 喚醒鏈四方審計與三大問題最相關的一批發現經多位小幫手對抗查證"
+     "（每項各兩位互不見面獨立重查），其中確認仍是破洞的一批（M-03/M-06/M-07/M-13/M-15/M-16/"
+     "M-20）本輪修復並經主控獨立重跑驗證：test_context_budget_guard.py 11169→11628（+459；"
+     "INV2 硬擋姿態測試＋INV5 owner 下沉測試＋INV4 端到端測試＋leak_fence 行為測試＋INV/FIX "
+     "存在性清單＋Windows 真機 skip 測試）＋test_run_root_unittests.py 2428→2451（+23；"
+     "leak_fence AST 接線鎖）＋本檔自身＝R131 稽核列（同 R130 判例）。淨額 ≤ cap 550"
+     "（net_cap_for_round(131)）；連升 streak 第 2／2（前輪 R130 為第 1／2，R129＝"
+     "approved-overage 不計；下一輪起須 ≤0 或再核准例外）。逐檔清單見 "
+     "CrossPlatform_R131_Scan_Findings.md（規則驗證檢查表見 "
+     "WakeChain_IronLaws_Verification.md）。"),
 )
 
 
@@ -1561,6 +1572,9 @@ _REPIN_NET_CAP_SCHEDULE: tuple[tuple[int, int], ...] = (
                   # 同 R99/R101/R126 等判例（兌現值貼齊到期目標）。  round-label-ok
                   # 到期輪 128 落在稽核痕跡未走到的輪次（R128 淨額 0 未記列）， round-label-ok
                   # 本輪首次重釘就地兌現，重新武裝下一段：步伐 2 < 前段 3。
+    (131, 550),   # 到期輪兌現（喚醒鏈四方審計對抗查證收尾，2026-09-07）：cap 降到到期目標
+                  # 本身（同既有判例：兌現值貼齊到期目標）。本輪剛好到期， round-label-ok
+                  # 同輪重新武裝下一段：步伐 1 < 前段 2，續守「步伐刻意變小」。
 )
 #: 生效點＝首列輪號、現行上限＝末列上限，**皆由表導出不另立常數**（R73 判例：一份知識一個家）。
 _REPIN_ROUND_CAP_SINCE = _REPIN_NET_CAP_SCHEDULE[0][0]
@@ -1794,8 +1808,10 @@ def net_cap_schedule_problems(
 #: R126 落地輪兌現 round-label-ok：cap 降到目標本身（555，見 `(126, 555)` 列），同輪重新武裝：
 #: R129 喚醒鏈零浪費收尾兌現 round-label-ok：cap 降到目標本身（552，見 `(129, 552)` 列），同輪重新
 #: 武裝下一段：步伐 2 < 前一段的 3，續守「步伐刻意變小」且目標嚴格低於現行 cap。
-_REPIN_NET_CAP_DUE_ROUND = 131  # round-label-ok：到期輪＝兌現輪+2（lookahead 判準的活體對照）
-_REPIN_NET_CAP_DUE_TARGET = 550  # 步伐 2 < 前一段的 3，續守「步伐刻意變小」且嚴格低於現行 cap
+#: R131 喚醒鏈四方審計對抗查證收尾兌現 round-label-ok：cap 降到目標本身（550，見 `(131, 550)`
+#: 列），同輪重新武裝下一段：步伐 1 < 前一段的 2，續守「步伐刻意變小」且目標嚴格低於現行 cap。
+_REPIN_NET_CAP_DUE_ROUND = 133  # round-label-ok：到期輪＝兌現輪+2（lookahead 判準的活體對照）
+_REPIN_NET_CAP_DUE_TARGET = 549  # 步伐 1 < 前一段的 2，續守「步伐刻意變小」且嚴格低於現行 cap
 
 #: DEF-200-121：到期輪自身的後設鎖——`_REPIN_NET_CAP_DUE_ROUND` 只准落在「最近稽核輪
 #: ＋ lookahead」以內（歷史母體 85..113 的到期輪一律＝上一次兌現輪 +2）。可延期的到期日
@@ -1862,10 +1878,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 119
+_REPIN_LOG_FROZEN_PREFIX_LEN = 120
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "79ab4a9a386e7df0c3247ab390068968efd75c2a001b146cd49521cd7ee12ce2")
+    "73adade3c9bd6f4760edf9127690c616d09169864b7e72d073fa9f9671949cd0")
 
 
 def repin_log_history_digest(
@@ -2036,6 +2052,11 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # 重釘使指紋前進，同體例「追加後立即自我凍結」——本輪追加一個 repin 稽核列＋本列，
     # prefix_len 118→119 涵蓋新 repin 列本身；載體＝DEF-200-266（喚醒鏈同家族）。
     ("R130", "1bff7d5bf52e", "79ab4a9a386e", "DEF-200-266"),  # round-label-ok
+    # R131 喚醒鏈四方審計對抗查證與確認破洞修復：cbg／run_root_unittests round-label-ok
+    # 回歸鎖的守衛線重釘。重釘使指紋前進，同體例「追加後立即自我凍結」——本輪追加一個
+    # repin 稽核列＋本列＋本檔自身編修，prefix_len 119→120 涵蓋新 repin 列本身；
+    # 載體＝DEF-200-272（四方審計撿回同家族）。
+    ("R131", "79ab4a9a386e", "73adade3c9bd", "DEF-200-272"),  # round-label-ok
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

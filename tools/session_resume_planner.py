@@ -969,7 +969,16 @@ def _base_state(session_id: str, plan: Path, args, kind: str, task: str) -> dict
 # 武裝／重排的共同尾段。三條路走同一份，是因為「拿不到 `NextRunTime` 卻仍把 state
 # 寫成 armed」這種假綠只要有一條路漏掉就等於沒有防；集中一處才有辦法一次證完。
 def _register_and_record(plan: Path, state: dict, at: datetime, tick: str) -> tuple[int, str]:
-    """寫狀態 → 註冊排程 → 取憑證 → 把憑證（或 abandoned）寫回狀態。"""
+    """寫狀態 → 註冊排程 → 取憑證 → 把憑證（或 abandoned）寫回狀態。
+
+    🔴 M-13：INV5 單一擁有者檢查下沉到此（`_arm_sentinel` 自己另有一站更早的同款檢查，
+    此站補的是 `_arm_endurance` 手動路徑此前完全不查的洞）。同 session 已有另一支
+    （跨族）owner ⇒ 不真的武裝，回 `(0, relay_machine.DEFERRED_CREDENTIAL)`（呼叫端
+    須辨識這個哨兵值，不得誤報 armed；`relay_machine.single_owner_conflict` 自己已經
+    落痕跡，這裡不重寫第二份）。
+    """
+    if relay_machine.single_owner_conflict(state.get("session_id"), state.get("task_name"), plan):  # noqa: E501
+        return 0, relay_machine.DEFERRED_CREDENTIAL
     write_relay(plan, state)
     rc, moment = register_endurance(state, at, tick)
     # 憑證寫進**該後端自己的鍵**（Windows＝next_run_time、mac＝schedule_credential）。
@@ -1010,6 +1019,9 @@ def _arm_endurance(args, transcript: Path, plan: Path) -> int:
     rc, moment = _register_and_record(plan, state, reset_at + timedelta(seconds=RESET_SKEW_SECONDS), RESUME_TICK)  # noqa: E501
     if rc != 0:
         return 1
+    if moment == relay_machine.DEFERRED_CREDENTIAL:
+        print(f"ℹ️  INV5 單一擁有者：session {guard.session_id_of(transcript)} 已由其他排程巡邏/續跑，不重複武裝（擇一擁有，零重複探測）。")  # noqa: E501
+        return 0
     append_log(endurance_log_path(plan), "armed", reset_at=reset_at.isoformat(), credential=moment, allow_resume=bool(args.allow_resume))  # noqa: E501
     print(schedule_backend.select().credential_line(moment))
     print(f"   觀測到的 reset：{reset_at}（來源：逐字稿原文，非推算）\n   任務書＋狀態塊：{plan}\n   稽核痕跡：{state['log_path']}（沒觸發＝這個檔不會長大，是可偵測的）")  # noqa: E501
@@ -1126,7 +1138,12 @@ def _run_resume(args, state: dict, log: Path) -> int | None:
     # 「unattended settings 檔存在 ∧ JSON 可解析」，缺一拒 spawn——缺席時 spawn 出去的
     # 無頭窗口退回無人核准權限牆（2026-08-30 實戰 G1 形態：收不了尾還照燒額度）。
     # 判準本體住 tools/lib/resume_route.py（planner 只接線）；通過面順帶 mkdir handback。
-    if (bad := resume_route.preflight_problem()) is not None:
+    # 🔴 M-06：預檢的檔必須與 argv 實際會用的那一份**同一份**——FRESH 路與「followup
+    # 未證實」的 RESUME 第一窗一律用第一窗姿態檔（見 `resume_route.fresh_argv`／
+    # `resume_argv` 的 WHY），否則會驗過 A 檔、spawn 卻吃 B 檔（兩者可能不同時存在）。
+    posture_followup = followup if route["strategy"] == STRATEGY_RESUME else False
+    if (bad := resume_route.preflight_problem(
+            resume_route.posture_settings_path(allow_followup=posture_followup))) is not None:
         append_log(log, "resume_authz_preflight_failed", strategy=route["strategy"], why=bad)
         print(f"❌ A-PRE 拒 spawn：{bad}", file=sys.stderr); state["route_strategy"] = STRATEGY_REFUSE; return 1  # noqa: E501,E702 — R115 修復 F2：A-PRE 拒絕視同 REFUSE，供 :1322 三元式判 resume_failed（拒絕≠跑過） round-label-ok
     # 🔴 R80 P0 的第二層（兩層都補才算修好，缺任一層續跑那一跑都做不了事）。
@@ -1556,7 +1573,14 @@ def main(argv: list[str]) -> int:
         print("\n" + schtasks_command(str(out), resume_task_name(data["session_id"], args.task_name), args.at), end="")  # noqa: E501
     if args.register_schtasks:
         print()
-        rc, moment = _register_at_expr(str(out), resume_task_name(data["session_id"], args.task_name), args.at, RESUME_TICK)  # noqa: E501
+        task = resume_task_name(data["session_id"], args.task_name)
+        # 🔴 M-13：`--register-schtasks` 不經 `_register_and_record`（直接呼叫
+        # `_register_at_expr`），INV5 檢查此前完全漏查這條手動路徑；顯式補一站，
+        # 與 `_arm_endurance` 共用同一個判準函式，不重寫第二份。
+        if relay_machine.single_owner_conflict(data["session_id"], task, out):
+            print(f"ℹ️  INV5 單一擁有者：session {data['session_id']} 已由其他排程巡邏/續跑，不重複武裝（擇一擁有，零重複探測）。")  # noqa: E501
+            return 0
+        rc, moment = _register_at_expr(str(out), task, args.at, RESUME_TICK)
         if rc != 0:
             return 1
         print(schedule_backend.select().credential_line(moment))

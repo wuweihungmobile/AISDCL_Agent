@@ -168,6 +168,29 @@ class RunRootUnittestsTest(unittest.TestCase):
         suite = run_root_unittests.discover_suite(run_root_unittests._TESTS_DIR)
         self.assertGreaterEqual(suite.countTestCases(), run_root_unittests.MIN_TESTS)
 
+    def test_main_is_wrapped_by_the_leak_fence(self) -> None:
+        """M-03：`main()` 的最終 `return` 必須真的呼叫 `sentinel_lifecycle.leak_fence(...)`
+        包住 `run_with_floor(...)`——CI／pre-push 唯一呼叫的漏斗點若漏接這一層，
+        leak_fence 的底線防護（`AUTOSDD_SENTINEL_OFF` 補位＋可稽核暫存檔痕跡）就是
+        死碼、永遠不會被觸發。走 AST 而非字串比對：字串比對對格式重排（換行／空白）
+        敏感，AST 只認呼叫形狀，改個縮排或加個註解都不影響本測試。
+        """
+        tree = ast.parse(Path(run_root_unittests.__file__).read_text(encoding="utf-8"))
+        main_fn = next(
+            node for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "main")
+        last_stmt = main_fn.body[-1]
+        self.assertIsInstance(
+            last_stmt, ast.Return,
+            "main() 最後一句不是 return（結構被改了，先讀懂新結構再改本測試）")
+        call = last_stmt.value
+        self.assertIsInstance(call, ast.Call, "main() 的最終 return 不是函式呼叫")
+        self.assertEqual(getattr(call.func, "attr", None), "leak_fence",
+                         f"main() 的最終 return 沒有呼叫 leak_fence(...)：{ast.dump(call.func)}")
+        self.assertEqual(getattr(getattr(call.func, "value", None), "id", None),
+                         "sentinel_lifecycle",
+                         "呼叫的不是 sentinel_lifecycle.leak_fence")
+
 
 class ReportWindowsNativeSkipsTest(unittest.TestCase):
     """R43 Architect P1（DEF-101-348 方向①）：`[WINDOWS-NATIVE-ONLY]` 標籤的 skip

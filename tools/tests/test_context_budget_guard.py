@@ -3057,6 +3057,13 @@ class UnattendedPermissionPostureTest(unittest.TestCase):
         缺旗標＝G1 原事故形態：spawn 出去的無頭窗口落在預設權限牆後、寫不了新檔。
         旗標值也一併釘住（acceptEdits／姿態檔絕對路徑），且必須排在變長的
         `--add-dir` 之前——排在其後會被那個變長參數吃掉（同姊妹鎖的立案缺陷）。
+
+        🔴 M-06 訂正：兩路呼叫都**不帶** `followup_ok`（預設 `False`）——RESUME 第一窗
+        與 FRESH（結構上永遠沒有可證實的前一窗進度）現在一律指向
+        `UNATTENDED_FIRST_WINDOW_SETTINGS`（deny 帶 Task／Agent／Workflow 三個 fan-out
+        工具）；只有 RESUME 路且 `relay_machine.followup_allowed(state)` 為真時才會指向
+        原本的 `UNATTENDED_SETTINGS`（見 `UnattendedPermissionPostureTest` 的
+        `test_followup_window_posture_allows_fanout_tools`）。
         """
         resume = planner.choose_resume_route(
             "claude", "sid-9", self.transcript, str(self.plan))
@@ -3069,8 +3076,9 @@ class UnattendedPermissionPostureTest(unittest.TestCase):
                 self.assertIn(flag, argv, f"argv 缺 {flag}：{argv}")
             self.assertEqual(argv[argv.index("--permission-mode") + 1], "acceptEdits")
             self.assertEqual(argv[argv.index("--settings") + 1],
-                             str(resume_route.UNATTENDED_SETTINGS),
-                             "姿態旗標沒有指向 .claude/settings.unattended.json")
+                             str(resume_route.UNATTENDED_FIRST_WINDOW_SETTINGS),
+                             "第一窗（未證實 followup）沒有指向"
+                             " .claude/settings.unattended_first_window.json")
             self.assertLess(argv.index("--settings") + 1, argv.index("--add-dir"),
                             f"姿態旗標必須在變長的 --add-dir 之前：{argv}")
 
@@ -3089,8 +3097,10 @@ class UnattendedPermissionPostureTest(unittest.TestCase):
                  "transcript": str(self.transcript)}
         log = self.tmp / "log.jsonl"
         err = io.StringIO()
+        # M-06：本 state 未證實 followup（無 relay_seq／last_window_made_progress）
+        # ⇒ 第一窗，preflight 驗的是 `UNATTENDED_FIRST_WINDOW_SETTINGS`，不是原檔。
         with unittest.mock.patch.object(
-                resume_route, "UNATTENDED_SETTINGS", self.tmp / "ghost.json"):
+                resume_route, "UNATTENDED_FIRST_WINDOW_SETTINGS", self.tmp / "ghost.json"):
             with contextlib.redirect_stderr(err):
                 rc = planner._run_resume(args, state, log)
         self.assertEqual(calls, [], "settings 缺席仍 spawn 了——A-PRE 沒有擋在 spawn 之前")
@@ -3148,6 +3158,38 @@ class UnattendedPermissionPostureTest(unittest.TestCase):
         self.assertEqual(posture["defaultMode"], "acceptEdits")
         self.assertIn("~/.autosdd/handback", posture["additionalDirectories"],
                       "additionalDirectories 沒指向 handback 目錄＝L1 ② 斷")
+
+    def test_va4_first_window_posture_denies_fanout_tools(self) -> None:
+        """M-06：`resume_argv()` 此前只決定「要不要在 prompt 文字裡塞 Workflow 提示句」
+        （`allow_followup`），完全沒有真的阻擋模型自己決定呼叫 Task／Agent／Workflow
+        工具——prompt 不塞提示句只是「不主動建議」，不是機械硬擋。第一窗
+        （`allow_followup=False`，即 RESUME 未證實 followup ∧ FRESH 全部）的姿態檔
+        必須在 harness 權限層把這三個 fan-out 工具真的 deny 掉。"""
+        posture = json.loads(resume_route.UNATTENDED_FIRST_WINDOW_SETTINGS.read_text(
+            encoding="utf-8"))["permissions"]
+        deny = set(posture["deny"])
+        for tool in ("Task", "Agent", "Workflow"):
+            self.assertIn(tool, deny,
+                         f"第一窗姿態檔 deny 清單缺 {tool}——INV2 沒有機械硬擋，"
+                         "只剩 prompt 提示句這種軟約束")
+
+    def test_followup_window_posture_allows_fanout_tools(self) -> None:
+        """控制組（鑑別力）：`allow_followup=True`（前一窗確實起來）組出來的 argv 指向
+        原本 `UNATTENDED_SETTINGS`（沒有這三個 deny），證明上一條的紅不是恆真——
+        確實有兩份不同姿態檔在分流，不是同一份檔換了個名字。"""
+        argv = resume_route.resume_argv("claude", "sid-9", "prompt",
+                                        Path(tempfile.gettempdir()) / "task-dir",
+                                        allow_followup=True)
+        self.assertEqual(argv[argv.index("--settings") + 1],
+                         str(resume_route.UNATTENDED_SETTINGS),
+                         "followup=True 卻沒有指向原本的 .claude/settings.unattended.json")
+        posture = json.loads(
+            resume_route.UNATTENDED_SETTINGS.read_text(encoding="utf-8"))["permissions"]
+        deny = set(posture["deny"])
+        for tool in ("Task", "Agent", "Workflow"):
+            self.assertNotIn(tool, deny,
+                             f"followup 姿態檔不該也 deny {tool}——否則兩份檔案沒有"
+                             "分流意義（跟第一窗姿態檔沒差別）")
 
 
 class HandbackAddDirIsResolvedDynamicallyTest(unittest.TestCase):
@@ -4043,6 +4085,92 @@ class Inv4UnattendedStopsOnFirstNoProgressTest(unittest.TestCase):
         self.assertEqual(outcome["next_state"], relay_machine.STATE_NO_PROGRESS_STOP)
         self.assertEqual(outcome["relay_seq"], 0, "停止時不得推進 seq（不會再 spawn）")
 
+    def _run(self, *, run_resume_result: dict, band: str,
+             task_name: str = "T-relay-inv4") -> tuple:
+        """跑一次 `_resume_tick()`（同 `RelaySettleWindowTest._run` 骨架，獨立一份因為要
+        注入的環境變數不同，且刻意不與該類別建立跨測試類別的隱性依賴）。回
+        `(written_state, events, registered)`——`registered` 空代表沒有真的又排下一窗。
+        """
+        tmp = _tmpdir(self, "inv4-tick-")
+        plan = tmp / "plan.md"
+        state = {**RelayStateTest.GOOD, "plan_path": str(plan), "session_id": "sid-inv4",
+                 "allow_resume": True, "task_name": task_name,
+                 "transcript": str(tmp / "sid-inv4.jsonl")}
+        plan.write_text("# 任務書\n\n" + planner.render_relay(state),
+                        encoding="utf-8", newline="\n")
+        args = planner.build_parser().parse_args(
+            ["--resume-tick", "--plan", str(plan), "--task-name", task_name])
+        events: list[dict] = []
+        registered: list = []
+
+        def _fake_run_resume(a, st, lg):
+            st.update(run_resume_result)
+            return run_resume_result.get("_rc", 0)
+
+        def _fake_register(pl, st, at, tick):
+            registered.append((st.get("relay_seq"), tick))
+            return 0, "已回讀（測試）"
+
+        with contextlib.ExitStack() as stack:
+            _isolate_trace_dir(self, stack)
+            stack.enter_context(unittest.mock.patch.object(
+                planner, "probe_quota", lambda *_a, **_k: {
+                    "open": True, "kind": guard.LIMIT_NONE, "rc": 0, "text": "ok"}))
+            stack.enter_context(unittest.mock.patch.object(
+                planner, "_run_resume", side_effect=_fake_run_resume))
+            stack.enter_context(unittest.mock.patch.object(
+                planner, "append_log",
+                side_effect=lambda _l, e, **f: events.append({"event": e, **f})))
+            stack.enter_context(unittest.mock.patch.object(
+                planner.escalation, "alert",
+                side_effect=lambda r, s, *, loud=True, plan=None, **_: {"note_written": loud}))
+            stack.enter_context(unittest.mock.patch.object(
+                planner, "_schtasks_remove", side_effect=lambda t: 0))
+            stack.enter_context(unittest.mock.patch.object(
+                planner, "_arm_sentinel", side_effect=lambda a, t, pl: 0))
+            stack.enter_context(unittest.mock.patch.object(
+                planner, "_register_and_record", side_effect=_fake_register))
+            stack.enter_context(unittest.mock.patch.object(
+                relay_machine, "current_band", lambda *_a, **_k: band))
+            stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
+            stack.enter_context(contextlib.redirect_stderr(io.StringIO()))
+            planner._resume_tick(args)
+        written = planner.parse_relay(plan.read_text(encoding="utf-8"))
+        return written, events, registered
+
+    def test_resume_tick_under_unattended_stops_on_first_window_despite_env_limit_5(
+            self) -> None:
+        """真實串接（非純函式手餵）：`_resume_tick()` → `settle_window()` 內部自己呼叫
+        `no_progress_limit()`；`AUTOSDD_UNATTENDED=1` 時就算 `AUTOSDD_RELAY_NO_PROGRESS_LIMIT=5`
+        想放寬，仍必須夾到 1 ⇒ 第一窗沒進度就停，不得續燒到第 5 窗。此前只測過把
+        `no_progress_limit=1` 這個數字手餵給 `resolve()`，從沒測過 env 串接本身。"""
+        with unittest.mock.patch.dict(
+                os.environ,
+                {planner.UNATTENDED_ENV: "1",
+                 relay_machine.RELAY_NO_PROGRESS_LIMIT_ENV: "5"}):
+            written, events, registered = self._run(
+                run_resume_result={"_rc": None}, band=quota_policy.BAND_FREE)
+        self.assertEqual(written["state"], "resume_failed")
+        self.assertTrue(any(e["event"] == "relay_stopped" and e.get("why") == "no_progress"
+                            for e in events), events)
+        self.assertEqual(registered, [], "無人模式被 env 放寬放行，真的又排了下一窗")
+
+    def test_resume_tick_without_unattended_env_limit_5_survives_first_window(
+            self) -> None:
+        """控制組（鑑別力）：同一情境（rc=None、第一窗零進度）但不設 `AUTOSDD_UNATTENDED`
+        ⇒ `AUTOSDD_RELAY_NO_PROGRESS_LIMIT=5` 照舊生效（streak 1 < 5）、不該在第一窗就停。
+        證明上一支測試的紅不是恆真——不設旗標時本情境本就不該停。"""
+        os.environ.pop(planner.UNATTENDED_ENV, None)
+        with unittest.mock.patch.dict(
+                os.environ, {relay_machine.RELAY_NO_PROGRESS_LIMIT_ENV: "5"}, clear=False):
+            os.environ.pop(planner.UNATTENDED_ENV, None)
+            written, events, registered = self._run(
+                run_resume_result={"_rc": None}, band=quota_policy.BAND_FREE)
+        self.assertFalse(
+            any(e["event"] == "relay_stopped" and e.get("why") == "no_progress"
+                for e in events), events)
+        self.assertEqual(len(registered), 1, "streak 1 < limit 5 應繼續續排下一窗")
+
 
 class Inv5SingleOwnerTest(unittest.TestCase):
     """INV5：同一 session 不得同時有兩支排程各自探測/spawn（事故當日 20:00~22:54 逐字稿
@@ -4051,6 +4179,21 @@ class Inv5SingleOwnerTest(unittest.TestCase):
     誠實劃界：schtasks 的 `Register-ScheduledTask -Force`＝原子覆蓋、launchd 的
     bootout+bootstrap 亦冪等覆蓋，故**同名**不算衝突；判準只認**不同工作名 × 同 session**。
     """
+
+    def test_job_session_recognises_both_planner_task_name_families(self) -> None:
+        """M-07(b)：`job_session()` 的 `_JOB_PREFIXES` 是抄自 planner 兩支命名函式的字面
+        （`sentinel_task_name`／`resume_task_name`），從沒有測過**真的餵那兩支函式的輸出**
+        進去——此前只手寫 `"AutoSDD_Sentinel_sidA"` 這類字面，兩邊字面各自漂移也測不出來。
+        """
+        sid = "sidReal"
+        sentinel_name = planner.sentinel_task_name(sid)
+        resume_name = planner.resume_task_name(sid)
+        self.assertEqual(relay_machine.job_session(sentinel_name), sid,
+                         f"哨兵命名 {sentinel_name!r} 抽不回同一個 session_id")
+        self.assertEqual(relay_machine.job_session(resume_name), sid,
+                         f"續跑命名 {resume_name!r} 抽不回同一個 session_id")
+        # 鑑別力：兩族名字必須真的不同（否則上面兩條斷言恆真，測不出任何一族漂移）。
+        self.assertNotEqual(sentinel_name, resume_name)
 
     def test_cross_family_same_session_is_a_conflict_on_both_backends(self) -> None:
         jobs = ["AutoSDD_Sentinel_sidA", "AutoSDD_SessionResume_sidA"]
@@ -4099,9 +4242,13 @@ class Inv5SingleOwnerTest(unittest.TestCase):
         class _Fake:
             name = "fake"
             credential_key = "next_run_time"
+            _jobs = ["AutoSDD_SessionResume_" + sid]
 
             def list_jobs(self, prefix):
-                return ["AutoSDD_SessionResume_" + sid]
+                # M-07：真的尊重 `prefix`——若 `_arm_sentinel` 呼叫時的前綴字串被改壞
+                # （如誤縮成 `AutoSDD_Sentinel_`，看不到 `AutoSDD_SessionResume_` 族），
+                # 本測試才會真的抓到（此前不論傳什麼 prefix 都照樣回同一份寫死清單）。
+                return [j for j in self._jobs if j.startswith(prefix)]
 
         args = planner.build_parser().parse_args(
             ["--arm-sentinel", "--plan", str(plan), "--transcript", str(transcript)])
@@ -4135,9 +4282,11 @@ class Inv5SingleOwnerTest(unittest.TestCase):
         class _Fake:
             name = "fake"
             credential_key = "next_run_time"
+            _jobs = ["AutoSDD_Sentinel_" + sid]  # 只有自己同名
 
             def list_jobs(self, prefix):
-                return ["AutoSDD_Sentinel_" + sid]  # 只有自己同名
+                # M-07：同上一支 _Fake——真的尊重 prefix，不再對任何前綴一律回同一份清單。
+                return [j for j in self._jobs if j.startswith(prefix)]
 
             def credential_line(self, moment):
                 return "cred（測試）"
@@ -4155,6 +4304,137 @@ class Inv5SingleOwnerTest(unittest.TestCase):
                 contextlib.redirect_stderr(io.StringIO()):
             planner._arm_sentinel(args, transcript, plan)
         self.assertEqual(len(registered), 1, "同名冪等覆蓋被誤判成衝突 ⇒ 哨兵重掛被擋死")
+
+    def test_arm_endurance_defers_when_a_sentinel_owns_the_session(self) -> None:
+        """M-13：INV5 此前只在 `_arm_sentinel` 一站查——`_arm_endurance`（`--arm-endurance`
+        手動路徑）完全不查，同一 session 兩支排程各自探測/spawn 的事故從這條手動路徑
+        依然可以重現。修法把檢查下沉到 `_register_and_record`；假後端種一筆
+        `AutoSDD_Sentinel_<sid>`（跨族），斷言 `_arm_endurance` 沒有真的又跑去註冊
+        （底層 `register_endurance` 呼叫次數為 0），且留下 `sentinel_single_owner_deferred`
+        痕跡（與 `_arm_sentinel` 既有痕跡同一個事件名）。"""
+        tmp = _tmpdir(self, "inv5-endurance-")
+        hit = "You've hit your session limit · resets 3:50am (Asia/Taipei)"
+        transcript = tmp / "sidEndurance.jsonl"
+        transcript.write_text(json.dumps({
+            "type": "assistant",
+            "timestamp": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+            "message": {"model": guard.SYNTHETIC_MODEL, "content": [{"text": hit}]}}) + "\n",
+            encoding="utf-8", newline="\n")
+        plan = tmp / "plan.md"
+        plan.write_text("# 任務書\n", encoding="utf-8", newline="\n")
+        args = planner.build_parser().parse_args(
+            ["--transcript", str(transcript), "--out", str(plan), "--arm-endurance"])
+        sid = guard.session_id_of(transcript)
+        events: list = []
+        register_calls: list = []
+
+        class _Fake:
+            name = "fake"
+            credential_key = "next_run_time"
+
+            def list_jobs(self, prefix):
+                return [j for j in ("AutoSDD_Sentinel_" + sid,) if j.startswith(prefix)]
+
+        with unittest.mock.patch.object(planner.schedule_backend, "select",
+                                        return_value=_Fake()), \
+                unittest.mock.patch.object(
+                    planner, "register_endurance",
+                    side_effect=lambda *a, **k: (register_calls.append(a), (0, "x"))[1]), \
+                unittest.mock.patch.object(
+                    planner, "append_log",
+                    side_effect=lambda _l, e, **f: events.append(e)), \
+                contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            rc = planner._arm_endurance(args, transcript, plan)
+        self.assertEqual(rc, 0)
+        self.assertEqual(register_calls, [],
+                         "同 session 已有哨兵 owner 卻仍武裝第二個 prober"
+                         "（--arm-endurance 手動路徑，M-13 修前的洞）")
+        self.assertIn("sentinel_single_owner_deferred", events)
+
+    def test_register_schtasks_cli_defers_when_a_sentinel_owns_the_session(self) -> None:
+        """M-13：`--register-schtasks` 手動路徑**不經** `_register_and_record`（直接呼叫
+        `_register_at_expr`），INV5 檢查此前完全漏查這條路（現查 `grep -n
+        register_schtasks tools/session_resume_planner.py` 可證：真正的分派早於
+        `_register_and_record` 就直接呼叫底層函式）。假後端種一筆同 session 的哨兵，
+        斷言 CLI 沒有真的又跑去註冊（`_register_at_expr` 呼叫次數為 0），且留下
+        `sentinel_single_owner_deferred` 痕跡。"""
+        tmp = _tmpdir(self, "inv5-cli-")
+        transcript = _write_jsonl(tmp / "sidCli.jsonl", [1000])
+        plan = tmp / "plan.md"
+        sid = guard.session_id_of(transcript)
+        events: list = []
+        registered: list = []
+
+        class _Fake:
+            name = "fake"
+            credential_key = "next_run_time"
+
+            def list_jobs(self, prefix):
+                return [j for j in ("AutoSDD_Sentinel_" + sid,) if j.startswith(prefix)]
+
+        with unittest.mock.patch.object(planner.schedule_backend, "select",
+                                        return_value=_Fake()), \
+                unittest.mock.patch.object(
+                    planner, "_register_at_expr",
+                    side_effect=lambda *a, **k: (registered.append(a), (0, "x"))[1]), \
+                unittest.mock.patch.object(
+                    planner, "append_log",
+                    side_effect=lambda _l, e, **f: events.append(e)), \
+                contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            rc = planner.main(["--transcript", str(transcript), "--out", str(plan),
+                              "--register-schtasks"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(registered, [],
+                         "同 session 已有哨兵 owner 卻仍武裝第二個 prober"
+                         "（--register-schtasks CLI，M-13 修前的洞）")
+        self.assertIn("sentinel_single_owner_deferred", events)
+
+    def test_real_get_scheduledtask_listing_feeds_other_owner_for_session(self) -> None:
+        """[WINDOWS-NATIVE-ONLY]（M-19）：本檔 INV5 所有測試此前只餵過
+        `_StatefulFakeSchedulerBackend.list_jobs()` 或裸 Python list 字面——「雙後端」
+        目前只是雙後端**注入**（`_both_backends()` 換真的 class 名做主體，但 list_jobs
+        本身仍是記憶體集合），從沒有真的用 Windows 真機 `Get-ScheduledTask` 的輸出格式
+        餵過 `other_owner_for_session`。本測試在真 Windows 上註冊一支真排程工作，
+        用 `SchtasksBackend.list_jobs()`（真跑 `Get-ScheduledTask`）取得真實輸出，
+        餵進 `other_owner_for_session` 驗證真機列舉行為正確辨識同 session 的另一支
+        排程。非 Windows 或這台機器現查不到 schtasks ⇒ 安全跳過（見範本
+        `test_no_ghost_t_r95_task_survives_a_real_windows_scheduler_query`）；在 mac 上
+        這支測試只會顯示 skipped，之後 windows-latest CI 跑到時才會第一次真的驗證。
+        """
+        if sys.platform != "win32":
+            self.skipTest(
+                "[WINDOWS-NATIVE-ONLY] Get-ScheduledTask 只在 Windows 成立（M-19 立案平台）")
+        probe = production_engine()  # R60 E-A-03：5.1 優先（DEF-101-509 判準）
+        if probe is None:
+            self.skipTest("這台機器找不到 powershell，無法現查排程器")
+        sid = "sess-r119"
+        my_task = f"AutoSDD_Sentinel_{sid}"
+        other_task = f"AutoSDD_SessionResume_{sid}"
+        backend = sb.SchtasksBackend()
+
+        def _cleanup() -> None:
+            backend.disarm(my_task)
+            backend.disarm(other_task)
+
+        _cleanup()  # 開跑前先清場：不得讓上一輪殘留冒充成本輪的證據。
+        self.addCleanup(_cleanup)
+        tmp = _tmpdir(self, "m19-real-win-")
+        plan = tmp / "plan.md"
+        plan.write_text("# 任務書\n", encoding="utf-8", newline="\n")
+        rc, _moment = backend.arm(str(plan), other_task, "(Get-Date).AddHours(5)",
+                                  planner.RESUME_TICK)
+        if rc != 0:
+            self.skipTest(f"這台機器上真註冊排程失敗（rc={rc}），無法現查列舉行為")
+        real_jobs = backend.list_jobs("AutoSDD_")
+        self.assertIsNotNone(real_jobs, "真 Get-ScheduledTask 列舉量不到，無法驗證本鎖")
+        self.assertIn(other_task, real_jobs,
+                     f"剛註冊的 {other_task} 沒有出現在真 Get-ScheduledTask 列舉結果")
+        owner = relay_machine.other_owner_for_session(sid, real_jobs, my_task)
+        self.assertEqual(owner, other_task,
+                         "真機 Get-ScheduledTask 輸出餵進 other_owner_for_session"
+                         " 沒有正確辨識同 session 的另一支排程")
 
 
 class Fix4FirstWindowCannotFanOutEndToEndTest(unittest.TestCase):
@@ -4181,7 +4461,12 @@ class Fix4FirstWindowCannotFanOutEndToEndTest(unittest.TestCase):
             credential_key = "next_run_time"
 
             def list_jobs(self, prefix):
-                return jobs_result
+                # M-07：`jobs_result` 本就只餵 `[]`／`None`（無其他 owner／量不到）兩種控制
+                # 情境，不是真的 job 名清單；即便如此仍尊重 prefix（`None` 這個「量不到」
+                # 語意不因 prefix 而變）以與另兩支 _Fake 同一套紀律，不留一支例外。
+                if jobs_result is None:
+                    return None
+                return [j for j in jobs_result if str(j).startswith(prefix)]
 
             def credential_line(self, moment):
                 return "cred（測試）"
@@ -4556,6 +4841,46 @@ class Fix3UnattendedOutcomeBannerTest(unittest.TestCase):
         self.assertIn("上次無人續跑", out, "--check 沒印無人續跑結局警語（蓋好沒接電）")
         self.assertLess(out.index("上次無人續跑"), out.index("session"),
                         "警語必須在輸出開頭（在 check_report body 之前）")
+
+    def test_pace_cli_subprocess_prints_banner_first(self) -> None:
+        """M-16：既有測試全都用 `patch.object` 在同一個 Python 行程裡呼叫
+        `planner.main([...])`，從沒有真的另開一個獨立 CLI 行程驗證過 banner 真的會印
+        出來——同行程呼叫測不到「獨立行程讀不讀得到同一份 trace_dir()」這一類只有真
+        子行程才會踩到的坑（環境變數有沒有真的傳過去、cwd、sys.path）。本測試用
+        `subprocess.run` 真開一支 `python tools/session_resume_planner.py --pace`，斷言
+        banner 真的印在 stdout 第一行；第二次執行同樣指令不再印（游標已推進，看過一次
+        就消化掉了）。"""
+        tmp = _tmpdir(self, "fix3-subproc-")
+        trace = tmp / "trace"
+        trace.mkdir()
+        transcript = tmp / "sidSub.jsonl"
+        transcript.write_text('{"type":"assistant"}\n', encoding="utf-8", newline="\n")
+        with unittest.mock.patch.dict(os.environ, {endurance_env.TRACE_DIR_ENV: str(trace)}):
+            self.assertTrue(endurance_env.record_unattended_outcome(
+                "sidSub", "no_progress", reset_returned=True,
+                handback_path="/h/sub.md"),  # posix-abs-ok: 資料值原樣回顯，同型見 :4794
+                "結局檔沒寫成 ⇒ 本測試對後面的斷言沒有鑑別力")
+        env = _isolated_env(tmp)
+        env[endurance_env.TRACE_DIR_ENV] = str(trace)
+
+        def _run_pace() -> subprocess.CompletedProcess[str]:
+            return subprocess.run(
+                [sys.executable, str(_PLANNER), "--pace", "--transcript", str(transcript)],
+                env=env, capture_output=True, encoding="utf-8", errors="replace",
+                timeout=180, check=False)
+
+        first = _run_pace()
+        self.assertEqual(first.returncode, 0, first.stderr)
+        first_lines = first.stdout.splitlines()
+        self.assertTrue(first_lines, "子行程沒印任何東西 ⇒ banner 沒接到 --pace")
+        self.assertIn("上次無人續跑", first_lines[0],
+                     f"banner 沒有印在 stdout 第一行：{first.stdout[:200]!r}")
+        self.assertIn("no_progress", first.stdout)
+
+        second = _run_pace()
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertNotIn("上次無人續跑", second.stdout,
+                         "游標沒有推進 ⇒ 第二次執行又把同一筆結局洗了一次版")
 
 
 class RelayFailurePathsTest(unittest.TestCase):
@@ -4987,8 +5312,12 @@ class APreFailureIsNeverWrittenAsResumedTest(unittest.TestCase):
             stack.enter_context(unittest.mock.patch.object(
                 planner, "probe_quota", lambda *_a, **_k: {
                     "open": True, "kind": guard.LIMIT_NONE, "rc": 0, "text": "ok"}))
+            # M-06：`RelayStateTest.GOOD` 未證實 followup（無 relay_seq／
+            # last_window_made_progress）⇒ 第一窗，preflight 驗的是
+            # `UNATTENDED_FIRST_WINDOW_SETTINGS`，不是原檔。
             stack.enter_context(unittest.mock.patch.object(
-                resume_route, "UNATTENDED_SETTINGS", self.tmp / "ghost-settings.json"))
+                resume_route, "UNATTENDED_FIRST_WINDOW_SETTINGS",
+                self.tmp / "ghost-settings.json"))
             stack.enter_context(unittest.mock.patch.object(
                 planner, "_schtasks_remove", side_effect=lambda t: 0))
             stack.enter_context(unittest.mock.patch.object(
@@ -7613,15 +7942,29 @@ class ZSentinelPinOutlivesEveryNestedRunnerTest(unittest.TestCase):
         釘住「失效的時間點在 teardown」這個機制。
         本條若哪天轉紅，代表載具的 module fixture 語意變了，`_run_nested_suite` 的立案
         前提消失——那時要重讀它的 WHY 再決定它還要不要存在，而不是把這一格刪掉。
+
+        🔴 M-03（leak_fence）之後不能再硬編 `assertIsNone`：`run_root_unittests.main()`
+        現在會在整套測試最外層先幫這個環境變數 `setdefault` 成 `"1"`（見
+        `sentinel_lifecycle.leak_fence`），所以「`setUpModule` 進來前的原值」（真跑一次
+        全套時）可能本來就是 `"1"`，跟 `_sentinel_off_lifted()` 那句「開發機 shell 常年
+        帶 `AUTOSDD_SENTINEL_OFF=1`」是同一種情況——這支測試需要一個「flush 後會變成的值」
+        跟「目前 pin 住的值」可以互相區分，因此改成暫時把 `_SENTINEL_PIN_ORIGINAL` 換成
+        一個不可能是真環境值的哨兵字串，flush 有沒有發生就看還原值是不是這個哨兵字串，
+        不受外圍環境（有沒有 leak_fence／開發機 shell 慣例）影響。
         """
+        global _SENTINEL_PIN_ORIGINAL
+        probe_original = "0-test-red-probe-not-a-real-env-value"
+        saved_original = _SENTINEL_PIN_ORIGINAL
+        _SENTINEL_PIN_ORIGINAL = probe_original
         suite = unittest.TestLoader().loadTestsFromNames(
             [f"{__name__}.{type(self).__name__}"
              ".test_after_the_nested_runner_the_pin_is_still_up"])
         try:
             unittest.TextTestRunner(stream=io.StringIO(), verbosity=0).run(suite)
-            self.assertIsNone(os.environ.get(guard.SENTINEL_OFF_ENV),
-                              "巢狀 runner 竟然沒有 flush module cleanup")
+            self.assertEqual(os.environ.get(guard.SENTINEL_OFF_ENV), probe_original,
+                             "巢狀 runner 竟然沒有 flush module cleanup")
         finally:
+            _SENTINEL_PIN_ORIGINAL = saved_original
             _pin_sentinel_off()
             unittest.addModuleCleanup(_unpin_sentinel_off)
 
@@ -11151,6 +11494,122 @@ class EveryHookEscapeHatchIsDeclaredTest(unittest.TestCase):
         self.assertTrue(declared, "一個 `*_OFF_ENV` 都抓不到 ⇒ 本判準的錨已經漂掉")
         self.assertEqual(sorted(declared - names), [],
                          "本 hook 宣告的逃生口沒進 ENV_SPEC ⇒ 使用者照 .env.example 設了也關不掉")
+
+
+class LeakFenceTest(unittest.TestCase):
+    """M-03（精簡版）：`sentinel_lifecycle.leak_fence()` 本身的行為——不是 M-04 完整
+    `SandboxBackend`，只驗「印出來讓人看得到」這一半（見該函式 docstring 的誠實劃界）。
+    """
+
+    def test_reports_and_logs_a_new_temp_file(self) -> None:
+        """正面現查：`run()` 期間真的多出一個 `autosdd_*` 暫存檔 ⇒ 印出來＋落痕跡。"""
+        tmp = _tmpdir(self, "leak-fence-")
+        leaked = tmp / "autosdd_smoke_leak.jsonl"
+
+        def _fake_run() -> int:
+            leaked.write_text("{}\n", encoding="utf-8")
+            return 0
+
+        buf = io.StringIO()
+        with unittest.mock.patch.object(tempfile, "gettempdir", return_value=str(tmp)), \
+                unittest.mock.patch.dict(os.environ, {endurance_env.TRACE_DIR_ENV: str(tmp)}), \
+                contextlib.redirect_stdout(buf):
+            rc = sentinel_lifecycle.leak_fence(_fake_run)
+        self.assertEqual(rc, 0)
+        self.assertIn(str(leaked), buf.getvalue(),
+                     "新增的 autosdd_* 暫存檔沒有被印出來——leak_fence 判準空轉")
+        trace = tmp / sentinel_lifecycle.LEAK_FENCE_LOG_NAME
+        self.assertTrue(trace.is_file(), "leak_fence 沒有落痕跡到 trace_dir()")
+        records = [json.loads(ln) for ln in trace.read_text(encoding="utf-8").splitlines()
+                  if ln.strip()]
+        self.assertEqual(records[-1]["new_temp_files"], 1)
+        self.assertEqual(records[-1]["rc"], 0)
+
+    def test_stays_quiet_when_nothing_new_appears(self) -> None:
+        """控制組（鑑別力）：`run()` 沒有製造新暫存檔 ⇒ 不印任何 leak_fence 訊息，
+        證明上一條的輸出不是恆印——真的是差集比對，不是每次都印一段固定文字。"""
+        tmp = _tmpdir(self, "leak-fence-quiet-")
+        buf = io.StringIO()
+        with unittest.mock.patch.object(tempfile, "gettempdir", return_value=str(tmp)), \
+                unittest.mock.patch.dict(os.environ, {endurance_env.TRACE_DIR_ENV: str(tmp)}), \
+                contextlib.redirect_stdout(buf):
+            rc = sentinel_lifecycle.leak_fence(lambda: 0)
+        self.assertEqual(rc, 0)
+        self.assertNotIn("leak_fence", buf.getvalue(),
+                         "沒有新增暫存檔卻印了 leak_fence 訊息（恆印＝沒有鑑別力）")
+
+    def test_sentinel_off_is_setdefault_not_overwrite(self) -> None:
+        """`AUTOSDD_SENTINEL_OFF` 缺席時補 `1`（底線防護）；已存在的值**不得**被覆寫
+        （否則會蓋掉呼叫端故意要打開真排程器的顯式選擇）。"""
+        tmp = _tmpdir(self, "leak-fence-env-")
+        with unittest.mock.patch.object(tempfile, "gettempdir", return_value=str(tmp)), \
+                unittest.mock.patch.dict(os.environ, {endurance_env.TRACE_DIR_ENV: str(tmp)}):
+            with _sentinel_off_lifted():
+                os.environ.pop(guard.SENTINEL_OFF_ENV, None)
+                sentinel_lifecycle.leak_fence(lambda: 0)
+                self.assertEqual(os.environ.get(guard.SENTINEL_OFF_ENV), "1",
+                                 "缺席時沒有補上 AUTOSDD_SENTINEL_OFF=1 底線防護")
+            with _sentinel_off_lifted():
+                os.environ[guard.SENTINEL_OFF_ENV] = "0"
+                sentinel_lifecycle.leak_fence(lambda: 0)
+                self.assertEqual(os.environ.get(guard.SENTINEL_OFF_ENV), "0",
+                                 "已存在的值被覆寫了（setdefault 語意被破壞）")
+
+    def test_propagates_exceptions_from_run_instead_of_swallowing_them(self) -> None:
+        """設計決策（誠實劃界，非疏漏）：`run()` 炸掉時 `leak_fence` 目前**不吞例外**
+        ——CI／pre-push 的真實崩潰必須照樣可見，不得被偽裝成一個乾淨的 rc。"""
+        def _boom() -> int:
+            raise RuntimeError("boom")
+
+        with self.assertRaises(RuntimeError):
+            sentinel_lifecycle.leak_fence(_boom)
+
+    def test_clamps_a_negative_rc_to_zero_but_keeps_positive_rc(self) -> None:
+        tmp = _tmpdir(self, "leak-fence-rc-")
+        with unittest.mock.patch.object(tempfile, "gettempdir", return_value=str(tmp)), \
+                unittest.mock.patch.dict(os.environ, {endurance_env.TRACE_DIR_ENV: str(tmp)}), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(sentinel_lifecycle.leak_fence(lambda: -1), 0)
+            self.assertEqual(sentinel_lifecycle.leak_fence(lambda: 3), 3)
+
+
+class InvariantLocksArePresentTest(unittest.TestCase):
+    """M-20：`tools/run_root_unittests.py` 只用 `MIN_TESTS`（測試總數下限）守門，其餘裕
+    大於 INV1~5 相關測試類別的數量——整批刪掉這批測試，`MIN_TESTS` 也不會變紅。本測試
+    把每個 INV/FIX 測試類別與「至少應有幾支測試方法」的清單釘住：類別消失，或方法數
+    掉到清單數字以下，都必須紅；合法地替同一類別**新增**測試（後續各輪常態）不踩線
+    （斷言用 `>=` 不是 `==`）。
+    """
+
+    #: 現查快照（2026-09-07，`grep -n 'class Inv[0-9]\|class Fix[0-9]'
+    #: tools/tests/test_context_budget_guard.py`）：本檔目前存在的 8 個 INV/FIX 類別，
+    #: 逐一登記其**當下**測試方法數下限。數字是量測值不是常數——之後合法新增測試會讓
+    #: 現值大於此表（不紅）；本表只在有人整批刪除／砍到低於下限時才出聲。
+    _EXPECTED_MIN_TEST_COUNTS = {
+        "Inv1UnattendedZeroPaidProbeTest": 3,
+        "Inv1ScheduledTickMarksUnattendedTest": 3,
+        "Inv2Inv3WorkflowFanoutGateTest": 6,
+        "Fix2ResumeCallScriptPathIsJsSafeTest": 2,
+        "Inv4UnattendedStopsOnFirstNoProgressTest": 5,
+        "Inv5SingleOwnerTest": 6,
+        "Fix4FirstWindowCannotFanOutEndToEndTest": 2,
+        "Fix3UnattendedOutcomeBannerTest": 4,
+    }
+
+    def test_each_inv_and_fix_has_a_named_lock_that_is_collected(self) -> None:
+        loader = unittest.defaultTestLoader
+        for class_name, min_count in self._EXPECTED_MIN_TEST_COUNTS.items():
+            with self.subTest(cls=class_name):
+                try:
+                    suite = loader.loadTestsFromName(
+                        f"{__name__}.{class_name}")
+                except (AttributeError, ImportError):
+                    self.fail(f"{class_name} 消失了（整批刪除未被偵測）")
+                count = suite.countTestCases()
+                self.assertGreaterEqual(
+                    count, min_count,
+                    f"{class_name} 只剩 {count} 支測試方法（下限 {min_count}）"
+                    "——INV/FIX 鎖被削弱且沒有任何守門變紅")
 
 
 def tearDownModule() -> None:

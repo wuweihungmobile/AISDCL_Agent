@@ -443,8 +443,15 @@ _RUNTIME_SKIP_CEILING: dict[str, dict[str, int]] = {
     #   `[skip census] tools/tests@darwin 共 45 支：platform=45／tool-absence=0／
     #    env-disabled=0／structural-pair=0／debt=0／untagged=0／欠債型 0 支（目標 0）`
     # 逐格照填、零加減推算；MAX 表同 commit 同鍵上修（R96/R100 判例）。
+    # 🔴 喚醒鏈四方審計修復包上修：`platform` 45→**46**——M-19 新增
+    # `Inv5SingleOwnerTest.test_real_get_scheduledtask_listing_feeds_other_owner_for_session`
+    # （`[WINDOWS-NATIVE-ONLY]`，INV5 `list_jobs` 真機驗證缺口補測）在 darwin 剖面的必然
+    # skip（+1）。取得方式＝本機真跑 `tools/run_root_unittests.py` 當場印出逐字：
+    #   `[skip census] tools/tests@darwin 共 46 支：platform=46／tool-absence=0／
+    #    env-disabled=0／structural-pair=0／debt=0／untagged=0／欠債型 0 支（目標 0）`
+    # 逐格照填、零加減推算；MAX 表同 commit 同鍵上修。
     "tools/tests@darwin": {
-        SKIP_GROUP_PLATFORM: 45,
+        SKIP_GROUP_PLATFORM: 46,
         SKIP_GROUP_TOOL_ABSENCE: 0,
         SKIP_GROUP_ENV_DISABLED: 0,
         SKIP_GROUP_STRUCTURAL: 0,
@@ -556,8 +563,9 @@ _RUNTIME_SKIP_CEILING_MAX: dict[str, dict[str, int]] = {
         SKIP_GROUP_UNTAGGED: 0,
     },
     # 🔴 R115 round-label-ok：`platform` 44→45 同 commit 上修，理由同見主表同鍵段。
+    # 🔴 喚醒鏈四方審計修復包：`platform` 45→46 同 commit 上修，理由同見主表同鍵段。
     "tools/tests@darwin": {
-        SKIP_GROUP_PLATFORM: 45,
+        SKIP_GROUP_PLATFORM: 46,
         SKIP_GROUP_TOOL_ABSENCE: 0,
         SKIP_GROUP_ENV_DISABLED: 0,
         SKIP_GROUP_STRUCTURAL: 0,

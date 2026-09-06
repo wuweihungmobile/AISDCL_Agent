@@ -587,7 +587,16 @@ _SITE_CLASS_CENSUS: dict[str, dict[str, int]] = {
         # test_skip_ledger_co_change_ignores_a_touch_with_no_value_change` 的
         # `self.skipTest(...)`——`origin/main`／`HEAD` 對本檔內容取不到時明說跳過，
         # 不是隱藏失敗。
-        "runtime-skipTest": 26,
+        # 🔴 喚醒鏈四方審計修復包重釘 `runtime-skipTest` 26→28（**非放寬**，同上：本表
+        # 判準是「相等」）。新增 `Inv5SingleOwnerTest.
+        # test_real_get_scheduledtask_listing_feeds_other_owner_for_session`（M-19：
+        # INV5 `list_jobs` 消費從未在真 Windows 機器上驗證過，補一支
+        # `[WINDOWS-NATIVE-ONLY]` 真機測試，仿 `test_no_ghost_t_r95_task_survives_a_
+        # real_windows_scheduler_query` 形態）的兩個字面 reason 站點：平台判準本體
+        # （非 win32 明說跳過）＋ powershell 找不到時的探針站點。第三個
+        # `self.skipTest(f"...rc={rc}...")` 是 f-string 非字面 reason，落
+        # `_NONLITERAL_TAG_DEBT` 另一本帳，不計入本表。
+        "runtime-skipTest": 28,
         "unclassified": 0,
     },
     # 🔴 R81 包 F 重釘 `windows-only` 9→10：並行包在

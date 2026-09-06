@@ -129,6 +129,7 @@ from lib.windows_skip_tags import (  # noqa: E402, I001
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import failure_log_rotation  # noqa: E402  ← DEF-200-162：失敗明細檔名／輪替 SSOT
 import min_tests_margin  # noqa: E402  ← DEF-200-170：MIN_TESTS 重釘提醒的判準（零相依餘裕軸）
+import sentinel_lifecycle  # noqa: E402  ← M-03：leak_fence 底線防護（真排程觸碰可稽核）
 import skip_group_policy  # noqa: E402  ← R80 包 A（S3-04）：skip 分群天花板的政策 SSOT
 import skip_profile_key  # noqa: E402  ← DEF-200-183：剖面鍵的文法（軸宣告）SSOT
 import skip_runtime_report  # noqa: E402  ← M6 的 id 集合面（計數面答不了「有沒有跑過」）
@@ -717,7 +718,7 @@ def main() -> int:
     #      `python tools/run_root_unittests.py` 傳到 pre-push root-infra leg 與三支 CI。
     if report_untagged_windows_skip_decorators(_TESTS_DIR, _PATTERN):
         return _bail("靜態標籤掃描（不分平台）")
-    return run_with_floor(_TESTS_DIR, MIN_TESTS)
+    return sentinel_lifecycle.leak_fence(lambda: run_with_floor(_TESTS_DIR, MIN_TESTS))
 
 
 #: 本 runner 的 CLI 契約＝**零旗標**（呼叫端實查：`tools/git-hooks/pre-push` root-infra
