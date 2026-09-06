@@ -80,6 +80,14 @@ MIN_SPAN_SECONDS = 600.0
 #: 武裝閂鎖的檔名前綴（放系統暫存，與其餘哨兵痕跡同一個家）。
 ARM_MARKER_PREFIX = "autosdd_sentinel_armed_"
 
+#: latched 分支「現查排程器」的節流間隔（秒）。DEF-200-269 F4：stamp 說已武裝、排程器現查
+#: 卻沒有 ⇒ 互動 session 此前**不自癒**（`--pace` 紅字要有人跑；`_heal_armed_drift` 掛在已死
+#: 的 tick 裡，而「job 消失型」漂移正是 tick 死掉的那一種）。列舉是一次外呼（`launchctl list`／
+#: `Get-ScheduledTask`）⇒ 每 session 每 interval 最多一次；取哨兵巡邏同量級，不另立第二個
+#: 週期常數的家（planner 的 `SENTINEL_INTERVAL_SECONDS` 是 CLI 側、本檔是 hook 鏈側，兩者
+#: 刻意不互 import——成環）。
+RELATCH_INTERVAL_SECONDS = 900.0
+
 
 def session_evidence(transcript: Path) -> tuple[int, float]:
     """單趟掃逐字稿，回 `(assistant 回合數, 首尾跨度秒)`。掃不動一律回 `(0, 0.0)`。
@@ -158,29 +166,79 @@ def clear_arm_latch(session_id: str, tmp_dir: str | None = None) -> bool:
     return True
 
 
+def _relatch_stamp(marker: Path) -> Path:
+    """節流佔位檔（與 marker 同目錄；`claim_once` 的 O_EXCL 語意）。名字刻意**不帶** `.json`
+    也不以 `ARM_MARKER_PREFIX` 開頭：GC 掃 `autosdd_sentinel_armed_<sid>.json` 那一格不會把
+    它誤認成另一個 session 的 stamp。"""
+    return marker.with_name(f"autosdd_sentinel_relatch_{marker.stem[len(ARM_MARKER_PREFIX):]}")
+
+
+def _write_marker(marker: Path, session_id: str, transcript: Path, event: str,
+                  **fields: object) -> bool:
+    try:
+        marker.write_text(json.dumps(
+            {"session_id": session_id, "event": event,
+             "armed_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "transcript": str(transcript),
+             **fields}, ensure_ascii=False), encoding="utf-8", newline="\n")
+    except OSError:
+        return False
+    return True
+
+
+def _relatch_if_vanished(marker: Path, transcript: Path, session_id: str, plan_path: str,
+                         spawn, tmp_dir: str | None, list_jobs, interval: float) -> str:
+    """DEF-200-269 F4：latched 分支節流現查排程器；stamp 說有、排程器說沒有 ⇒ 清閂＋重 spawn。
+
+    三值紀律與 `sentinel_lifecycle.armed_but_missing` 同源：`jobs is None`（量不到）⇒ 維持
+    `latched`，不得誤判成漂移（量不到 ≠ 沒有）。節流用 `quota_ledger.claim_once`（原子 TTL
+    佔位；武裝當下即佔位——detached spawn 尚未把 job 註冊完成時立刻現查會得到假漂移）。
+    重 spawn 成功 ⇒ marker 改記 `event=sentinel_relatched`（與首次武裝互異，事後可辨）。
+    lazy import 兩支 sibling：`sentinel_lifecycle` 在模組層 import 本檔（成環）；
+    `quota_ledger` 只有這條路才需要。
+    """
+    import quota_ledger  # noqa: PLC0415 — 見 docstring
+    import sentinel_lifecycle  # noqa: PLC0415 — 見 docstring（成環）
+
+    if not quota_ledger.claim_once(_relatch_stamp(marker), interval):
+        return "latched"
+    jobs = (sentinel_lifecycle.sentinel_task_names if list_jobs is None else list_jobs)()
+    if not sentinel_lifecycle.armed_but_missing(sentinel_lifecycle.TASK_PREFIX + session_id, jobs):
+        return "latched"
+    clear_arm_latch(session_id, tmp_dir)
+    if not spawn(str(transcript), plan_path):
+        return "relatch-spawn-failed"
+    return ("relatched" if _write_marker(marker, session_id, transcript, "sentinel_relatched",
+                                         relatched_from="armed_but_missing")
+            else "relatched-unlatched")
+
+
 def maybe_arm(transcript: Path, session_id: str, *, plan_path: str, spawn,
               tmp_dir: str | None = None, min_turns: int = MIN_TURNS,
-              min_span: float = MIN_SPAN_SECONDS) -> str:
+              min_span: float = MIN_SPAN_SECONDS, list_jobs=None,
+              relatch_interval: float = RELATCH_INTERVAL_SECONDS) -> str:
     """PostToolUse 呼叫：夠格才武裝。回一個**理由字串**（供痕跡與測試斷言）。
 
     `spawn` 是注入點（production 傳 `guard.spawn_sentinel`）：單元測試因此驗得到整條
     決策，而不會在開發機上真的註冊一支排程——「驗證載具自己就是副作用來源」是本 repo
     判過的形態（`quota_escalation.gc_plans` 的 `root` 注入點同一條理由）。
+    `list_jobs`／`relatch_interval`（DEF-200-269 F4）同為注入點：production 走
+    `sentinel_lifecycle.sentinel_task_names`（載具現查）與 `RELATCH_INTERVAL_SECONDS`；
+    hook 端呼叫點零改動（`.claude/hooks/context_budget_guard.py` 餘裕 0）。
     """
     marker = arm_marker_path(session_id, tmp_dir)
     if marker.exists():
-        return "latched"
+        return _relatch_if_vanished(marker, transcript, session_id, plan_path, spawn, tmp_dir,
+                                    list_jobs, relatch_interval)
     turns, span = session_evidence(transcript)
     if not should_arm(turns, span, min_turns=min_turns, min_span=min_span):
         return f"below-threshold(turns={turns}/{min_turns},span={span:.0f}/{min_span:.0f}s)"
     if not spawn(str(transcript), plan_path):
         return "spawn-failed"
-    try:
-        marker.write_text(json.dumps(
-            {"session_id": session_id, "turns": turns, "span_seconds": round(span, 1),
-             "armed_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "transcript": str(transcript)},
-            ensure_ascii=False), encoding="utf-8", newline="\n")
-    except OSError:
+    import quota_ledger  # noqa: PLC0415 — 只為佔住第一個節流視窗（見 `_relatch_if_vanished`）
+
+    quota_ledger.claim_once(_relatch_stamp(marker), relatch_interval)
+    if not _write_marker(marker, session_id, transcript, "sentinel_armed",
+                         turns=turns, span_seconds=round(span, 1)):
         # 閂鎖寫不進去＝下一次工具呼叫會再武裝一次（`Force=$true`，冪等）。
         # 明說而不是靜默：兩者的痕跡必須分得開。
         return "armed-unlatched"

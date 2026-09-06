@@ -439,6 +439,8 @@ _GOVERNANCE_DOCS = (
     # 上列的護欄層淨額標記姊妹檔（`guard-total:` 站點之一），與同輪 `R128_HANDOFF.md` round-label-ok
     # 共同滿足「兩份不同檔」的最低站數；本輪零重釘的理由與途中發現亦住此。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R128_Scan_Findings.md",
+    # R129 收尾：護欄 +1300 回歸鎖逐檔對帳（overage 授權證據）round-label-ok
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R129_Scan_Findings.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/{CrossPlatform,Quota}_*.md`。這**不是**把具名

@@ -116,6 +116,11 @@
 #                          見 `_calendar_of`）。
 # 收斂掉的量：`arm_reset` 之後「reset 到了卻沒有人動作」的最壞死等時間，由**一整個巡邏
 # 間隔**（900s；本輪實測 reset 23:00、實際動作 23:06:33 ＝ 393 秒死等）降到 ≤60 秒
+# 〔🔴 DEF-200-268 訂正適用條件：這句只在「截止距今 > interval」的 tick 由 `_calendar_of` 寫
+#   calendar 保證；**截止前最後一格**（距今 ≤ interval）`_calendar_of` 回 None，若照舊判不符
+#   就會 bootout+bootstrap 把已排時刻拆掉、`StartInterval` 重計（2026-09-05 17:57:03 實跡：
+#   18:02 被拆、18:12:04 才醒＝12 分 4 秒）。那一格由 `arm()` 以 `_calendar_still_ahead` 保留
+#   live calendar、不 relaunch 補上；兩格合起來「≤60 秒」才成立。〕
 # （calendar 是分鐘粒度，且 `_calendar_of` 只往後取整、絕不提早）。根 CLAUDE.md
 # 〈額度耗盡〉那一節把這個量講成「巡邏間隔決定的是 reset 之後最壞多久才有人動作」，
 # 所以它正是這一節在意的那個數字。
@@ -145,6 +150,7 @@ import endurance_env
 from schedule_backend_calendar import (
     _append_trace,
     _calendar_of,
+    _calendar_still_ahead,
     _descriptor_problems,
     _first_int,
     _labels_with_prefix,
@@ -172,6 +178,11 @@ LAUNCH_AGENTS_DIR = Path.home() / "Library" / "LaunchAgents"
 #: 由 launchd **自己**陳述的憑證，而不是我們回讀自己剛寫的 plist——後者正是〈反事後諸葛〉
 #: 那條規則要防的形態。四個鍵刻意全部釘住（見 `_calendar_of` 為何連 Month/Day 一起寫）。
 _CAL_KEYS = ("Month", "Day", "Hour", "Minute")
+
+#: DEF-200-267 F2-②：本行程內已對自己排了延後 disarm 的 label → 那支腳本的痕跡檔。
+#: `LaunchdBackend.arm()` 對同名再武裝時據此**不**另排腳本、憑證改走 `_deferred_credential`。
+#: 行程層狀態（tick 是一支短命行程），不持久化；測試各案自行 `clear()`。
+_SELF_DISARMED: dict[str, Path] = {}
 
 #: 延後子行程「等父行程真的退場」的上界（秒）。
 #: 🔴 這個常數取代的是一個**寫死的 3 秒 sleep**，而那 3 秒是 R83-B 這個 P0 的根因：
@@ -418,14 +429,28 @@ class LaunchdBackend:
         want = self._argv(planner, plan_path, task_name, tick)
         want_cal = _calendar_of(at, interval)
         want_path = str(self.plist_path(task_name))
-        # 🔴 plist **每次都重寫**，而且寫在讀回讀之前。理由是 macOS 專屬的一個狀態：
+        live = self._readback(task_name)
+        # 🔴 DEF-200-268 F5：截止前最後一格。`_calendar_of` 在 `(at-now) ≤ interval` 回 None
+        # （省 relaunch 的捷徑），而 live 裡還排著前幾個 tick 寫進去的那個時刻 ⇒ 照舊判「要求
+        # 無、回讀有」不符會把它拆掉並讓 `StartInterval` 重計（實跡：18:02 被拆、18:12 才醒）。
+        # live calendar 仍在未來且距今 ≤ interval ⇒ 視為相符、保留、plist 重寫時也帶著它。
+        # 已過去／> interval 的殘留仍照 `_descriptor_problems` 雙向判準走（不放寬）。
+        if want_cal is None and live is not None and _calendar_still_ahead(live.get("calendar"),
+                                                                            interval):
+            want_cal = dict(live["calendar"])
+        # 🔴 plist **每次都重寫**（回讀之後、比對之前）。理由是 macOS 專屬的一個狀態：
         # 「已載入、但磁碟上的 plist 已被刪」——`launchctl print` 照樣印出 `path = …`
         # （它報的是當初載入的來源），於是憑證的第 ③ 件（已持久化）會是**假的**，而那支
         # 排程登出／重開機後就再也不會回來。`install_mac_nightly.sh` 檔頭把這個狀態記成
         # 硬判準（R68-M31）。寫檔不會動到記憶體裡那一份 ⇒ 對正在跑的 tick 完全安全。
         if not self._write_plist(task_name, want, interval, want_cal):
             return 1, ""
-        live = self._readback(task_name)
+        if os.environ.get("XPC_SERVICE_NAME") == task_name and task_name in _SELF_DISARMED:
+            # 🔴 DEF-200-267 F2-②：本行程稍早已對**自己** `disarm()`（延後腳本待父退場）。
+            # 那支腳本會 bootout，並在看到 plist 仍在（＝上一行剛重寫＝有接班者）時 bootstrap
+            # 它 ⇒ 不另排第二支腳本（兩支競態）、不走冪等 no-op 發「此刻存在 state = running」
+            # 的憑證（它對一秒後的死亡失明——18:12:09 實跡）。憑證只陳述「已落地、重載待完成」。
+            return 0, self._deferred_credential(task_name, want_cal, _SELF_DISARMED[task_name])
         if live is not None and not _descriptor_problems(live, want, interval, want_path,
                                                         want_cal):
             # 冪等路徑：已載入且參數完全相符 ⇒ **不碰排程器**。這一格不是效能優化，是
@@ -538,7 +563,15 @@ class LaunchdBackend:
         if os.environ.get("XPC_SERVICE_NAME") == task_name:
             # 自我解除：延後拆掉記憶體裡那一份。`_defer` 現在等的是「父行程真的退場」，
             # 這正是本呼叫點需要的語意——見 `DEFER_WAIT_CAP_SECONDS`（R83-B 的 P0 根因）。
-            self._defer(task_name, f'launchctl bootout "{target}"; echo "bootout rc=$?";')
+            # 🔴 DEF-200-267 F2-②：**plist 存在即為「應該活著」的 SSOT**——上面已同步 unlink；
+            # 父退場那一刻若 plist 又在了，就是同一行程稍後 `arm()` 了接班者（PATROL_HANDBACK／
+            # settle_window 的重掛）⇒ 同一支腳本改做 bootstrap×3＋print，而不是只 bootout
+            # 把接班者拆掉（2026-09-05 18:12:10 bootout log 單行實跡）。真的 disarm（沒人再
+            # arm）時 `[ -f plist ]` 為假 ⇒ 行為與修前逐字相同。
+            relaunch = _relaunch_cmds(self.domain(), task_name, str(plist))
+            _SELF_DISARMED[task_name] = self._defer(task_name, (
+                f'launchctl bootout "{target}"; echo "bootout rc=$?"; '
+                f'if [ -f "{plist}" ]; then {relaunch} fi;'))
             # 🔴 回 0 的**射程**：同步驗到的是「持久化已斷」（plist 不在了 ⇒ 下次登入不會
             # 回來）。記憶體裡那一份的拆除是延後的，它的 rc 由子行程寫進下面那支痕跡檔
             # ——「沒觸發＝這個檔不會長大」，仍然是可偵測的，不是靜默假設。
@@ -759,9 +792,16 @@ class LaunchdBackend:
         dom = self.domain()
         return self._defer(task_name, (
             f'launchctl bootout "{dom}/{task_name}"; echo "bootout rc=$?"; '
-            f'i=1; while [ $i -le 3 ]; do launchctl bootstrap "{dom}" "{plist}" && break; '
+            + _relaunch_cmds(dom, task_name, plist)))
+
+
+# bootstrap×3＋print 那一段（三個 rc 之二）。抽成模組層純函式是因為它現在有**兩個**呼叫端：
+# `_defer_relaunch`（arm 在 job 內偵測到漂移）與 `disarm` 的自我路徑（DEF-200-267：plist 仍在
+# ⇒ 有接班者 ⇒ 同一支腳本改做 relaunch）。兩處各抄一份就是「同一份 shell 知識兩個家」。
+def _relaunch_cmds(dom: str, task_name: str, plist: str) -> str:
+    return (f'i=1; while [ $i -le 3 ]; do launchctl bootstrap "{dom}" "{plist}" && break; '
             f'sleep 2; i=$((i+1)); done; echo "bootstrap rc=$? tries=$i"; '
-            f'launchctl print "{dom}/{task_name}" >/dev/null; echo "print rc=$?";'))
+            f'launchctl print "{dom}/{task_name}" >/dev/null; echo "print rc=$?";')
 
 
 # ─────────────────────────────────────────────────── 其餘平台：明說沒有載具

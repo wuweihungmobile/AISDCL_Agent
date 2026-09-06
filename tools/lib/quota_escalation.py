@@ -26,14 +26,17 @@
 #   不會觸發、也**不該**觸發。真正需要被記下來的是「哪一個 workflow run、哪幾個 agent
 #   被打死」，而那件事**讀檔就知道、成本為零**（同哨兵「巡邏不花 token」的前提）。
 #
-# 🔴 誠實劃界（`resumeFromRunId` 是**同 session only**，這是硬約束不是實作偷懶）：
-# 本檔**不會**也不能自動把死掉的扇出重派。理由有兩層，兩層都擋得死：
-#   ① 那個能力住在 Workflow 工具裡，只有**還活著的那個 session 內的模型回合**按得到；
-#      本檔是一個 OS 排程器叫起來的 subprocess，沒有任何管道可以把工具呼叫注入進去。
-#   ② session 真的死掉時，`runId` 對 `resumeFromRunId` 已無效（同 session only）。
-# ⇒ 本檔交付的是**誠實的半自動**：把「續跑這件事需要的全部資訊」落到磁碟上的一個固定
-# 位置，讓下一個舵手（人、或 R81-1／R81-2 的 AutoClaude）看得到、按得下去。
-# 宣稱全自動會是一句在結構上就不成立的話，那比沒有功能更糟。
+# 🔴 誠實劃界（DEF-200-270 訂正措辭；上一版寫「同 session only／沒有任何排程器按得到」）：
+# 本檔自己**不會**重派死掉的扇出——它是 OS 排程器叫起來的 subprocess，沒有管道把工具呼叫
+# 注入模型回合。但「硬約束」前提（沒有同 session 無頭續跑）已被 R111／R113 推翻 round-label-ok
+# 推翻：`claude -p -r <sid>` 就是同一個 session、run 目錄住 `<sid>/` 底下 ⇒ 續跑窗口自己
+# 可以呼叫 `Workflow({scriptPath, resumeFromRunId})`（掌舵者 2026-09-05 裁決：無頭窗口
+# 可自行呼叫，零人介入）。現行劃界＝**session 已死且無法 `-p -r` 續跑時**，`runId` 對
+# `resumeFromRunId` 才無效。⇒ 本檔交付的是：把「續跑需要的全部資訊」（scriptPath／runId／
+# journal 計數／可直接貼的呼叫）落到磁碟固定位置，`resume_route.workflow_resume_hint()`
+# 再把它接進續跑 prompt。🔴 前提待實測：`-p -r` 內 `resumeFromRunId` 是否真的命中 cache
+# （本包禁 spawn claude，未測；證偽點＝`<run>/journal.jsonl` 的 `started` 增量只該對
+# failed 的 key 新增）。
 from __future__ import annotations
 
 import json
@@ -188,16 +191,21 @@ def _write(path: Path, text: str) -> bool:
 def workflow_runs(transcript: Path) -> list[dict]:
     """本 session 底下每一個 workflow run 的 `runId`／名稱／agent 逐字稿清單。"""
     root = transcript.with_suffix("")
-    scripts: dict[str, str] = {}
+    scripts: dict[str, tuple[str, str]] = {}
     script_dir = root / "workflows" / "scripts"
     if script_dir.is_dir():
         for js in script_dir.glob("*wf_*.js"):
-            name, _, run = js.stem.rpartition("-")
-            scripts[run] = name
+            # 🔴 DEF-200-270：runId 自帶連字號（實跡 `wf_67d8d57c-076`）⇒ `rpartition("-")`
+            # 切出 `run="076"`、對不上目錄名 ⇒ workflow／scriptPath 結構上永遠帶不出去。
+            # 切點取第一個 `-wf_`（runId 前綴固定 `wf_`，workflow 名可含任意連字號）。
+            cut = js.stem.find("-wf_")
+            name, run = (js.stem[:cut], js.stem[cut + 1:]) if cut >= 0 else ("", js.stem)
+            scripts[run] = (name, str(js))
     folder = root / "subagents" / "workflows"
     if not folder.is_dir():
         return []
-    return [{"run_id": run.name, "workflow": scripts.get(run.name, ""),
+    return [{"run_id": run.name, "workflow": scripts.get(run.name, ("", ""))[0],
+             "script_path": scripts.get(run.name, ("", ""))[1], "dir": run,
              "agents": sorted(run.glob("agent-*.jsonl"))}
             for run in sorted(folder.iterdir()) if run.is_dir()]
 
@@ -221,13 +229,18 @@ def snapshot_fanout(transcript: Path, event: object) -> dict:
     """撞線當下記下「哪個 run、哪幾個 agent 被打死」；回稽核欄位（沒有死者就回 `{}`）。"""
     if not event or not transcript.is_file():
         return {}  # 巡邏那一支（99% 的呼叫）走這裡：零 I/O、零成本
+    import resume_route  # noqa: PLC0415 — 只在撞線那一支才需要；模組層 import 會把本檔拖進 hook 鏈普查
+
     runs = []
     for run in workflow_runs(transcript):
         dead = [{"agent": p.stem, "kind": kind} for p in run["agents"]
                 if (kind := quota_killed(p))]
         if dead:
+            # DEF-200-270：每個 run 帶 scriptPath／journal 去重計數／resume_ready／可直接貼
+            # 的 `resume_call`（判準與組裝住 `resume_route`，續跑 prompt 讀的是同一份）。
             runs.append({"run_id": run["run_id"], "workflow": run["workflow"],
-                         "agents_total": len(run["agents"]), "dead": dead})
+                         "agents_total": len(run["agents"]), "dead": dead,
+                         **resume_route.workflow_resume_facts(run["dir"], run["script_path"])})
     if not runs:
         return {}
     path = fanout_path(guard.session_id_of(transcript))
@@ -241,10 +254,16 @@ def snapshot_fanout(transcript: Path, event: object) -> dict:
             "① session 還活著（R80 四次撞線主迴圈都沒死，這是常態）：在**那個 session 內**"
             f"用 Workflow 的 resumeFromRunId={[r['run_id'] for r in runs]}"
             "——已完成的 agent 從 cache 回放，只重跑下面 dead 清單裡的那些。",
-            "② session 已死：runId 對 resumeFromRunId **已無效**（同 session only），"
-            "此時本檔的用途是重派清單——照 dead 逐一重新指派。",
-            "🔴 兩種情況都**不會**由排程器自動按下：它是 OS 行程，沒有管道把工具呼叫"
-            "注入進一個活著的 session。這是硬約束，不是還沒做。"],
+            "② 主控死於撞線、喚醒鏈以 `claude -p -r <sid>` 續跑：那是**同一個 session**，"
+            "續跑窗口第一句話就照各 run 的 `resume_call` 呼叫 Workflow（`resume_ready` 者；"
+            "prompt 由 resume_route.workflow_resume_hint() 注入）。🔴 前提待實測："
+            "`-p -r` 內 resumeFromRunId 是否命中 cache，證偽點＝journal.jsonl 的 started "
+            "增量只該對 failed 的 key 新增。",
+            "③ session 已死**且無法 `-p -r` 續跑**（逐字稿缺檔／超上限 ⇒ FRESH 降級）："
+            "runId 對 resumeFromRunId 才無效，此時本檔的用途是重派清單——照 dead 逐一重新指派。",
+            "🔴 排程器（OS 行程）自己不會按 Workflow；它做的是把續跑窗口叫起來並把本清單"
+            "接進 prompt。`wf_<runId>.json` 的 status 不可當完成判準（實測 completed 而 40 個"
+            " agent 失敗）——完成判準＝journal started∖result 為空。"],
     }, ensure_ascii=False, indent=2))
     return {"fanout": str(path) if ok else "", "fanout_written": ok,
             "dead_agents": sum(len(r["dead"]) for r in runs),
@@ -334,6 +353,19 @@ def _append_trace(path: Path, event: str, **fields: object) -> None:
         pass
 
 
+def _exact_listing(task: str) -> list[str] | None:
+    """對 `task` **精確查名**：只回 `[task]`／`[]`／`None`（量不到）。
+
+    🔴 DEF-200-239 mac 孿生：`select().list_jobs(prefix)` 是**前綴**查（`_labels_with_prefix`
+    的 `startswith`）。此前 `_heal_armed_drift` 以哨兵前綴 `sentinel_task_names()` 判漂移，
+    非前綴 label（`T-f4b`／自訂 `--task-name`）結構上永遠不在前綴清單裡 ⇒ 每 tick 誤判漂移、
+    真的重掛（＝T-f4b 每次全套自我永續的機制）。改對 `task` 自己查、再過濾 `== task`：
+    `None` 原樣向上（量不到 ≠ 漂移，同 `sentinel_task_names()`／`armed_but_missing` 既有紀律）。
+    """
+    jobs = schedule_backend.select().list_jobs(task)
+    return None if jobs is None else [name for name in jobs if name == task]
+
+
 def _heal_armed_drift(state: dict, now: datetime, idle_threshold: float, tick: str,
                       log: Path) -> dict:
     """armed stamp 說已武裝但排程器查無此工作 ⇒ 自動重新武裝；回稽核欄位（`{}`＝沒漂移）。
@@ -346,8 +378,15 @@ def _heal_armed_drift(state: dict, now: datetime, idle_threshold: float, tick: s
     task = str(state.get("task_name") or "")
     if not task or state.get("state") in sentinel_lifecycle.TERMINAL_STATES:
         return {}
-    if not sentinel_lifecycle.armed_but_missing(task, sentinel_lifecycle.sentinel_task_names()):
+    if not sentinel_lifecycle.armed_but_missing(task, _exact_listing(task)):
         return {}  # 量不到／確實還在 ⇒ 沒有漂移可自癒（量不到不得誤判成漂移）
+    if os.environ.get(guard.SENTINEL_OFF_ENV):
+        # §4-2（DEF-200-239 mac 孿生）：真漂移，但哨兵被關掉（setUpModule 的釘／使用者逃生
+        # 口）⇒ 本第二接縫（直呼 select().arm，不經 register_endurance）不重掛，落一筆與自癒
+        # 族互異的痕跡讓「pin 擋下了它」可稽核。與 §3.2 沙箱互為備援（沙箱在 select()、此在
+        # 呼叫端；任一層被繞過另一層仍在）。
+        _append_trace(log, "sentinel_armed_drift_skipped_pinned", task=task)
+        return {}
     at = (now + timedelta(seconds=idle_threshold)).astimezone()
     at_expr = f"'{at.strftime('%Y-%m-%d %H:%M:%S')}'"
     rc, moment = schedule_backend.select().arm(
@@ -712,7 +751,8 @@ def gc_plans(current: object = None, age: float = PLAN_GC_AGE_SECONDS,
 #     只把殘骸收掉。這一層就是 HELM-01 的本體——它此前會走到最吵的那一層。
 #   · `loud=True` 但 `dead_agents == 0`：寫紙（零打擾、人回來看得到），**不敲桌面**。
 #   · `loud=True` 且 `dead_agents > 0`：這才是「有未處理撞線 **且** 有扇出待救」那個
-#     合取——唯一值得主動打斷人的情形，因為只有人按得下 `resumeFromRunId`。
+#     合取——唯一值得主動打斷人的情形（`-p -r` 續跑窗口能自行按 `resumeFromRunId`，但
+#     那條路需要額度先回來；人是這一刻唯一能提額／改路的）。
 # `**_` 吃掉 `snapshot_fanout()` 回的其餘稽核欄位（`fanout`／`runs`／`fanout_written`），
 # 讓呼叫端可以直接 `**fan` 攤進來而不必逐格挑——挑格子是下一個漏接的地方。
 def alert(reason: str, state: dict, *, loud: bool = True, plan: object = None,
@@ -737,8 +777,9 @@ def alert(reason: str, state: dict, *, loud: bool = True, plan: object = None,
         "",
         "## 被打死的扇出（若有）",
         f"- 清單：`{fanout}`" if fanout.is_file() else "- （本次沒有扇出續跑清單）",
-        "- 🔴 `resumeFromRunId` 是**同 session only**，且沒有任何排程器按得到它。"
-        "續跑要在活著的那個 session 內、由人或 AutoClaude 發動。",
+        "- 🔴 `resumeFromRunId` 只在**同一個 session** 內有效：`claude -r <sid>`（人）或"
+        "喚醒鏈的 `claude -p -r <sid>`（無頭，prompt 已帶 Workflow 呼叫）都算同 session；"
+        "session 已死且無法 `-p -r` 續跑時才無效（改照清單逐一重派）。",
         "",
         f"## 重啟指令\n```\nclaude -r {state.get('session_id')}\n```",
     ]) + "\n")
@@ -750,6 +791,18 @@ def alert(reason: str, state: dict, *, loud: bool = True, plan: object = None,
     print(f"🔴 {reason}\n   ⚠️ 只有人做得到的動作 → {note}", file=sys.stderr)
     return {"note": str(note) if ok else "", "note_written": ok, "notify_rc": rc,
             "notify_queued": queued}
+
+
+def probe_unclassified(verdict: dict, state: dict) -> dict:
+    """DEF-200-266 L4：探針 rc=0 卻三層憑證都給不出正向（`kind=unknown`）⇒ 呼叫端仍掛回
+    巡邏（不猜），但**必須 loud alert 附輸出**——這一格是「機制蓋好了但輸出漂移」唯一的
+    可偵測點（2026-09-05 事故靜默掛回巡邏 25 分鐘，觸發字串一個字都沒留）。
+    回 `alert()` 的稽核欄位；不是這一格回 `{}`（呼叫端 `**` 進 `probed` 事件）。"""
+    if verdict.get("rc") != 0 or verdict.get("kind") != guard.LIMIT_UNKNOWN:
+        return {}
+    return alert("探針 rc=0 卻分類不出（kind=unknown）：成功信封／字樣層皆給不出正向結論 ⇒ "
+                 "已掛回零成本巡邏（不猜）。請人核對輸出是否漂移，逐字："
+                 f"{str(verdict.get('text') or '')[:600]}", state, loud=True)
 
 
 def main(argv: list[str]) -> int:

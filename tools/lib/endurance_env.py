@@ -66,9 +66,11 @@
 #   `pmset` rc 非 0 時**必須**出聲，而不是靜默當成「沒問題」。
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 #: 痕跡目錄的逃生口（測試／CI 指到沙箱用）。人設得到、模型改不到自己那一份。
@@ -141,6 +143,117 @@ def handback_dir_status() -> tuple[Path, bool]:
     不得自帶第二份解析——壽命／逃生口紀律與 `~/.autosdd/traces` 同一條（§3(b)1）。
     """
     return _durable_dir_status(HANDBACK_DIR_ENV, HANDBACK_HOME_PARTS)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# F3-FIX3（複審必修，正中使用者原始痛點）：無人續跑「停下來時使用者收不到」
+# ══════════════════════════════════════════════════════════════════════════
+# 病：INV4 無人 no_progress／exhausted 停下時走 quota_escalation.alert(loud=True)，但
+# dead_agents==0 ⇒ alert 不呼叫 notify()（HELM-01：沒東西要救不敲桌面），只寫暫存目錄的
+# AUTOSDD_ATTENTION.md（無程式 surfacing、暫存目錄會蒸發）＋印到 pythonw 死 stderr ⇒
+# 預設組態下使用者完全不知道「額度回來了但主 agent 起不來、已停」。掌舵者裁決：**不動 R82
+# 桌面通知預設**（不亂敲），改成**持久＋回來時主動印**——(a) 停下即 append 一行持久結局到
+# trace_dir()（沒觸發＝檔不長大，可偵測）；(b) `--pace`／`--check` 輸出開頭比對「已讀游標」，
+# 有未讀新結局就印一則醒目警語，讀過即標記、不重複洗版。與 R82 不衝突（桌面通知仍 opt-in）。
+
+#: 無人續跑結局的持久記錄檔名（住 trace_dir()；與 traces 同居所——都是「無人看管期間這台
+#: 機器真的發生了什麼」的痕跡，G2 §3(b)1 共用居所紀律）。
+UNATTENDED_OUTCOME_NAME = "autosdd_unattended_outcome.jsonl"
+#: 「已讀到第幾行」游標檔名（避免每次 --pace／--check 都把同一筆結局重印）。
+UNATTENDED_OUTCOME_CURSOR = "autosdd_unattended_outcome.cursor"
+#: 時間戳格式（走 time.strftime，不引入 datetime.now(UTC)——同 quota_escalation._append_trace
+#: 對 ARCH-06 py3.9 hook 鏈 census 的既有避雷）。
+_OUTCOME_STAMP = "%Y-%m-%dT%H:%M:%S%z"
+
+
+def unattended_outcome_path() -> Path:
+    return trace_dir() / UNATTENDED_OUTCOME_NAME
+
+
+def record_unattended_outcome(session_id: str, reason: str, *,
+                              reset_returned: bool, handback_path: str) -> bool:
+    """(a) 無人續跑在 no_progress／exhausted 停下時，append 一行持久結局；回「寫了沒」。
+
+    `reason`＝no_progress／exhausted（呼叫端 `relay_machine.settle_window` 只在 _LOUD_STATES
+    ——需要人知道的兩個停止次態——才呼叫本函式）。寫不進去不得升級為失敗（同 `_durable_dir_status`
+    退化紀律、`quota_escalation._write`）——最壞是這次沒留痕，不能反過來變成續航故障源。
+    """
+    record = {"event": "unattended_stop", "session": str(session_id or ""),
+              "reason": str(reason or ""), "reset_returned": bool(reset_returned),
+              "handback": str(handback_path or ""), "at": time.strftime(_OUTCOME_STAMP)}
+    try:
+        with unattended_outcome_path().open("a", encoding="utf-8", newline="\n") as handle:
+            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except OSError:
+        return False
+    return True
+
+
+def _read_outcome_cursor(path: Path) -> int:
+    try:
+        return max(0, int(path.read_text(encoding="utf-8").strip() or "0"))
+    except (OSError, ValueError):
+        return 0
+
+
+def _outcome_read_dirs() -> tuple[Path, ...]:
+    """🔴 讀取端**唯讀**目錄候選（不 mkdir）：`--pace`／`--check` 是唯讀查詢，不得像
+    `trace_dir()` 那樣建目錄（`_durable_dir_status` 會 mkdir——那是**寫入端**的契約，
+    回歸鎖＝`PlannerCliTest::test_check_prints_usage_and_writes_nothing` 要求 --check 零寫檔）。
+    候選＝寫入端會落腳的兩處：主居所（ENV 逃生口 or 家目錄）＋退化後的系統暫存。順序＝
+    寫入端的偏好序，讀第一個真的有結局檔的那處。常數逐字沿用（不開第二個家）。
+    """
+    override = os.environ.get(TRACE_DIR_ENV, "").strip()
+    primary = Path(override) if override else Path.home().joinpath(*TRACE_HOME_PARTS)
+    return (primary, Path(tempfile.gettempdir()))
+
+
+def _find_outcome_files() -> tuple[Path | None, Path | None]:
+    """回 `(結局檔, 游標檔)`——第一個真的有結局檔的候選目錄；都沒有回 `(None, None)`。
+    唯讀、不建目錄。"""
+    for base in _outcome_read_dirs():
+        candidate = base / UNATTENDED_OUTCOME_NAME
+        if candidate.is_file():
+            return candidate, base / UNATTENDED_OUTCOME_CURSOR
+    return None, None
+
+
+def unattended_outcome_banner() -> str:
+    """(b) 有「未讀」新結局 ⇒ 回一則醒目警語（**末帶換行**，供 planner 一行
+    `print(unattended_outcome_banner(), end="")` 直接接線）並推進已讀游標；沒有未讀／檔讀不動
+    ⇒ 回 `""`（`print("", end="")` 什麼都不印）。
+
+    🔴 唯讀：沒有結局檔就**一個目錄都不建**（走 `_find_outcome_files()` 而非 `trace_dir()`）——
+    否則 `--pace`／`--check` 這種唯讀查詢會偷偷建出 `~/.autosdd/traces`（回歸鎖見該函式）。
+    「未讀」＝結局檔行數 > 游標記的已讀行數（append-only 檔、行數單調成長；游標走**行數**而非
+    時間戳 ⇒ 同秒多筆不互相吃掉）。壞行照樣算「讀過」（游標一律推到現有行數），不卡在壞行上
+    重複洗版。游標讀不動一律當已讀 0（保守：寧可重印一次也不吞掉真結局）。
+    """
+    outcome, cursor_path = _find_outcome_files()
+    if outcome is None:
+        return ""
+    try:
+        lines = [ln for ln in outcome.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    except OSError:
+        return ""
+    unread = lines[_read_outcome_cursor(cursor_path):]
+    try:
+        cursor_path.write_text(str(len(lines)), encoding="utf-8", newline="\n")
+    except OSError:
+        pass  # 游標寫不進去最多下次重印一次，不得反過來變故障源
+    parts = []
+    for raw in unread:
+        try:
+            rec = json.loads(raw)
+        except ValueError:
+            continue
+        quota = "已回" if rec.get("reset_returned") else "未回"
+        parts.append(f"於 {rec.get('at') or '（時間不明）'} 停在 {rec.get('reason') or '（原因不明）'}"  # noqa: E501
+                     f"，額度{quota}，handback={rec.get('handback') or '（無）'}")
+    if not parts:
+        return ""
+    lead = "⚠️ 上次無人續跑" if len(parts) == 1 else f"⚠️ 上次無人續跑（{len(parts)} 筆未讀結局）"
+    return f"🔴 {lead}：" + "；".join(parts) + "，請重驗（zero-trust：不採信『已通過』宣稱）\n"
 
 
 # `pmset -g custom` 裡「睡眠設定不是 0」的那幾行。回 `(rc, 逐行原文)`。

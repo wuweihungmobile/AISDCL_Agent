@@ -103,7 +103,7 @@ import quota_stability  # noqa: E402  # R102／PRD §4.2.4(b)(c)(d)：死區／�
 # `test_quota_is_not_wired_into_the_context_blocking_path` 在守。`flush_to_model` 只被
 # 測試與 `atexit` 呼叫，在本檔是純 re-export（讓消費端沿用 `quota_gate.<name>`）。
 from platform_utils import emit_to_model, flush_to_model  # noqa: E402,F401
-from quota_limits import parse_reset_at, unhandled_limit_event  # noqa: E402
+from quota_limits import LIMIT_NONE, parse_reset_at, unhandled_limit_event  # noqa: E402
 
 # 🔴 R88／LOC-01：**人話面**整族搬到 `quota_messages.py`（立案與射程劃界見該檔檔頭）。
 # 這裡 re-export 是為了讓四個既有消費端與測試沿用 `quota_gate.<name>` 零改動；
@@ -692,6 +692,32 @@ def refresh_quota_blocking(timeout: int = QUOTA_SYNC_TIMEOUT_SECONDS, *,
     except Exception:  # noqa: BLE001 — 取數失敗最多是仍然量不到，不得變成故障源
         note_degraded("meter-crashed", "取數器自己拋了例外（已吞掉，不阻斷）", event=event)
         return False
+
+
+def endpoint_probe_verdict(now: datetime | None = None, *, read=None, refresh=None) -> dict | None:
+    """L0 零成本探針（ADR-XPLAT-005 §3.3「先讀零成本快取、讀不到才付費探測」的落地）：
+    端點快取新鮮、未跨窗、且**每一軸都 < 100%** ⇒ 額度開著，付費探針（`claude -p`，本機
+    實測一次 ~31,847 tokens）整支省下。回 `None`＝端點給不出**正向**結論（量不到／stale／
+    跨窗／任一軸 ≥100%）⇒ 呼叫端照舊走付費探針。
+
+    🔴 本函式**從不回 closed**：負向結論仍由付費探針拍板——它帶得出 `resets <hh>am` 字面
+    供 `tick_plan` 重排，端點這一格帶的是 ISO `resets_at`，兩者的解析器不同家；先只接
+    正向那一半（DEF-200-266 事故 18:12 用它就會判 open、一個 token 都不用花）。
+    stale／缺快取時最多同步刷新**一次**（HTTP 一次、零 token；`refresh_quota_blocking` 內部
+    已 fail-soft）。`read`／`refresh` 是注入縫：測試不得打真網路、不得依賴這台機器的快取。
+    """
+    now = datetime.now().astimezone() if now is None else now
+    read = read_quota if read is None else read
+    refresh = refresh_quota_blocking if refresh is None else refresh
+    state = read(now)
+    if not state.axes and refresh():
+        state = read(now)
+    if not state.axes or any(a.pct >= 100 for a in state.axes):
+        return None
+    worst = max(state.axes, key=lambda a: a.pct)
+    return {"open": True, "kind": LIMIT_NONE, "rc": 0, "source": "endpoint",
+            "text": (f"endpoint@{state.measured_at}: {len(state.axes)} 軸皆 <100%（最高 "
+                     f"{worst.kind}={worst.pct:.1f}% resets_at={worst.resets_at}）")}
 
 
 def quota_floor_reading(payload: dict, now: datetime) -> quota_policy.QuotaState | None:

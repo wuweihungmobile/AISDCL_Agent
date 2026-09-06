@@ -682,7 +682,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 7298,
+    "test_adr_xplat001_c1c2_lock.py": 7340,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 3839,
@@ -700,7 +700,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_check_wrapper_thinness.py": 1234,
     "test_claim_provenance_r86.py": 618,
     "test_component_sanitizer_shared_layer_lock.py": 293,
-    "test_context_budget_guard.py": 9860,
+    "test_context_budget_guard.py": 11057,
     "test_defect_id_reference_integrity.py": 281,
     "test_dev_start.py": 6527,
     "test_dev_start_ps1_lastexitcode.py": 548,
@@ -713,7 +713,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_git_hooks_install_common.py": 393,
     "test_guard_line_taxonomy_r99.py": 148,
     "test_install_windows_nightly.py": 1385,
-    "test_mac_endurance_r83.py": 1784,
+    "test_mac_endurance_r83.py": 1887,
     "test_mac_readiness_r82.py": 621,
     "test_macos_smoke_skip_honesty.py": 225,
     "test_maturity_criteria_r79.py": 431,
@@ -1476,6 +1476,16 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "行併入）／test_quota_policy.py 3406→3396；保全＝CrossPlatform_R127_Guard_Prose_Migration.md。"
      "本檔自身重釘與 U9 到期輪具名展延（7278→7298）。主表淨額 ≤ 0 ⇒ 款(11) 連續上升 streak"
      "（R123／R126）歸零；款(10) 上限 555 未撞。逐項見 CrossPlatform_R127_Debt_Closure.md。"),
+    ("R129", 92268, 93610, 1342,
+     "[非淨減法輪][全額功能軌] 喚醒鏈零浪費（INV1~5／FIX1~4）＋T-f4b 洩漏止血四個包新增 "
+     "+1300 行回歸鎖：test_context_budget_guard.py 9860→11057（+1197）＋"
+     "test_mac_endurance_r83.py 1784→1887（+103）；本檔自身＝本 R129 稽核列＋"
+     "_REPIN_APPROVED_ROUND_OVERAGE 名冊列＋_REPIN_NET_CAP_SCHEDULE 兌現列 (129,552)＋DUE "
+     "重新武裝＋_FROZEN_PREFIX_REWRITE_LEDGER 接鏈列＋_REPIN_APPROVED_ROUND_OVERAGE_MAX_ENTRIES "
+     "上修 1→2＋凍結前綴延伸。淨額遠超款(10) 單輪上限 552 ⇒ 走 DEF-200-208 一次性例外名冊（該表 "
+     "R129 那一列，主控本 session 核准，精確淨額逐字對上，款(10)(11) 對本輪不計入）；款(11) 另因"
+     "前一輪 R127 淨額 −38 已斷 streak 而未觸發。同輪兌現到期義務 (129,552) 並重新武裝 131／550。"
+     "逐檔清單見 CrossPlatform_R129_Scan_Findings.md。"),
 )
 
 
@@ -1541,6 +1551,10 @@ _REPIN_NET_CAP_SCHEDULE: tuple[tuple[int, int], ...] = (
                   # 輪次（R124／R125 淨額 0 未記列 round-label-ok），本輪首次重釘就地兌現，cap 降到
                   # 到期目標本身（同 R99/R101/R115/R117/R119/R122 判例 round-label-ok）。
                   # 同輪重新武裝下一段：步伐 3 < 前段 4，續守「步伐刻意變小」，見 due 常數旁註。
+    (129, 552),   # 到期輪兌現（喚醒鏈零浪費收尾，2026-09-06）：cap 降到到期目標本身。
+                  # 同 R99/R101/R126 等判例（兌現值貼齊到期目標）。  round-label-ok
+                  # 到期輪 128 落在稽核痕跡未走到的輪次（R128 淨額 0 未記列）， round-label-ok
+                  # 本輪首次重釘就地兌現，重新武裝下一段：步伐 2 < 前段 3。
 )
 #: 生效點＝首列輪號、現行上限＝末列上限，**皆由表導出不另立常數**（R73 判例：一份知識一個家）。
 _REPIN_ROUND_CAP_SINCE = _REPIN_NET_CAP_SCHEDULE[0][0]
@@ -1568,10 +1582,24 @@ _REPIN_APPROVED_ROUND_OVERAGE: dict[str, tuple[int, str]] = {
         "本表只涵蓋 R101 這一個精確淨額，往後任何一輪（含日後再標成 R101 的合成語料）"
         "的違規照樣原判準阻擋。"
     )),
+    "R129": (1342, (  # round-label-ok：主控核准的一次性例外，非帳本追蹤輪號
+        "主控（掌舵者本 session 明令『完成任務、設計嚴密測試、不放行』）核准本輪一次性例外："
+        "喚醒鏈零浪費（INV1~5／FIX1~4）＋T-f4b 洩漏止血四個包新增 +1300 行回歸鎖測試，"
+        "經 2 輪獨立對抗複審（bypass 鏡＋Windows/測試嚴密度鏡）全數修訖、全套絆線 3990 測試 "
+        "REAL_PLIST_WRITE=0 實證止血、主控零信任逐項重跑驗過。一次性收斂優於讓漂移累積；"
+        "net_cap_for_round() 與 _REPIN_MAX_CONSECUTIVE_RISING_ROUNDS 的判準邏輯與門檻數字本輪"
+        "一個字未動，本表只涵蓋 R129 這一個精確淨額，往後任何一輪照原判準阻擋。round-label-ok"
+    )),
 }
 #: 一次性例外必須真的只有一次——超過這個數字就不再是例外，是變相把整套 cap／streak
-#: 機制改成「寫張條子就能繞過」。**只准調小**（收緊；理論下限 0＝永遠不再核准新例外）。
-_REPIN_APPROVED_ROUND_OVERAGE_MAX_ENTRIES = 1
+#: 機制改成「寫張條子就能繞過」。名冊筆數只能靠**可見的門檻上修**成長（`test_the_registry_
+#: stays_a_one_time_exception` 的設計：每多一筆都先讓那個斷言失敗，逼下一個人改這個上限＝
+#: 一次可見決策，不得悄悄追加第二個 key）。本值由 1 上修為 2 的兩筆載體如下。
+#: R101（cap 收斂）永久留在真表——拿掉即復發款(10)(11)（見  round-label-ok
+#: `test_removing_the_live_entry_reproduces_the_original_deadlock` 釘住），故只能另占一格。
+#: R129（喚醒鏈零浪費 +1300 行回歸鎖，主控本 session 明令核准）另占那一格。  round-label-ok
+#: 理論下限仍是 0：往後不再核准新例外時應把本值下修回 1／0，並移除已失效的例外列。
+_REPIN_APPROVED_ROUND_OVERAGE_MAX_ENTRIES = 2
 #: 核准理由的最短長度（同 `phase2_review_problems()` 款(4) 的「延期兩個字不是理由」）。
 _REPIN_APPROVED_ROUND_OVERAGE_MIN_REASON_LEN = 20
 
@@ -1756,8 +1784,10 @@ def net_cap_schedule_problems(
 #: R119 P1-6 批兌現 round-label-ok：cap 降到目標本身（564，見 `(119, 564)` 列），同輪重新武裝：
 #: 步伐 4 < 前一段的 5（R122 兌現於 `(122, 559)`，重新武裝 124／555 round-label-ok）。
 #: R126 落地輪兌現 round-label-ok：cap 降到目標本身（555，見 `(126, 555)` 列），同輪重新武裝：
-_REPIN_NET_CAP_DUE_ROUND = 128  # round-label-ok：到期輪＝兌現輪+2（lookahead 判準的活體對照）
-_REPIN_NET_CAP_DUE_TARGET = 552  # 步伐 3 < 前一段的 4，續守「步伐刻意變小」且嚴格低於現行 cap
+#: R129 喚醒鏈零浪費收尾兌現 round-label-ok：cap 降到目標本身（552，見 `(129, 552)` 列），同輪重新
+#: 武裝下一段：步伐 2 < 前一段的 3，續守「步伐刻意變小」且目標嚴格低於現行 cap。
+_REPIN_NET_CAP_DUE_ROUND = 131  # round-label-ok：到期輪＝兌現輪+2（lookahead 判準的活體對照）
+_REPIN_NET_CAP_DUE_TARGET = 550  # 步伐 2 < 前一段的 3，續守「步伐刻意變小」且嚴格低於現行 cap
 
 #: DEF-200-121：到期輪自身的後設鎖——`_REPIN_NET_CAP_DUE_ROUND` 只准落在「最近稽核輪
 #: ＋ lookahead」以內（歷史母體 85..113 的到期輪一律＝上一次兌現輪 +2）。可延期的到期日
@@ -1824,10 +1854,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 117
+_REPIN_LOG_FROZEN_PREFIX_LEN = 118
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "a4b92fe15365235e97d08440c75c09aa83f88b242ca9a7f36a4661eacb871dca")
+    "1bff7d5bf52ee5c7409dd28d9c3f8127a3824303ec41aaa37a623c9d0bd11b3a")
 
 
 def repin_log_history_digest(
@@ -1990,6 +2020,10 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # 「追加後立即自我凍結」——本輪追加一個 repin 稽核列＋本列，prefix_len 115→116。
     ("R126", "4ec1e958f341", "faddc843e042", "DEF-200-241"),
     ("R127", "faddc843e042", "a4b92fe15365", "DEF-200-133"),
+    # R129 喚醒鏈零浪費收尾：4 包 +1300 行回歸鎖的守衛線重釘使指紋前進， round-label-ok
+    # 同體例「追加後立即自我凍結」——本輪追加一個 repin 稽核列＋本列，
+    # prefix_len 117→118 涵蓋新 repin 列本身。
+    ("R129", "a4b92fe15365", "1bff7d5bf52e", "DEF-200-266"),
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。
@@ -6321,6 +6355,14 @@ _PHASE2_REVIEW_LOG: tuple[tuple[int, str, str], ...] = (
      "仍為觀測欄，其轉阻斷所需的觀測資料由 `guard_line_composition()` 持續累積（本輪"
      "收尾窗口的觀測欄實測值見 `--print-guard-lines` 末行）。上一列是 `[落地]` ⇒ 款(5) "
      "的連續『維持觀察』計數自本列起算為一，未觸上限。依 §6 重新武裝下一個視窗。"),
+    (129, "[提案]",
+     "喚醒鏈零浪費收尾輪把 _GUARD_LINES_REPIN_LOG 推進到 R129，越過條文五 §6 的到期輪 R127"
+     "（末列 R122 ＋ 視窗五輪），而『維持觀察』名額（上限一次、有 frozen 孿生鎖不可調大）已由 "
+     "R122 用罄 ⇒ §6 僅剩 [提案]／[落地] 兩條合法出路。方向 (c) 自 R116 依 D-4 裁決降級為觀測欄、"
+     "逐字約定『R117+ 依觀測資料再議』，觀測資料（guard_line_composition() 末行）已累積逾十輪。"
+     "本列即依該既有約定提出 Phase 2 提案：ADR-XPLAT-013 (c) 觀測→阻斷的轉換決定送四方複審。"
+     "🔴 複審本身由主控承接、非本收尾窗口執行（本輪只記入機械載體，同 R113 [提案] 由 "
+     "DEF-200-211 承接的體例）；[提案] 使連續『維持觀察』計數歸零並重新武裝下一個視窗。"),
 )
 #: 到期輪由末列導出、不另立常數（一份知識一個家；同 `_REPIN_NET_CAP_SCHEDULE` 的
 #: 「生效點＝首列、現值＝末列，皆由表導出」）。

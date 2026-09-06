@@ -21,7 +21,7 @@ WHY 住這裡而不是 `tools/session_resume_planner.py`：planner 的 `guardrai
 from __future__ import annotations
 
 import json
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 import endurance_env
 
@@ -118,11 +118,24 @@ def _add_dir_argv(task_dir: Path) -> list[str]:
     return ["--add-dir", str(task_dir), str(handback_dir())]
 
 
-def resume_argv(claude: str, session_id: str, prompt: str, add_dir: Path) -> list[str]:
+def resume_argv(claude: str, session_id: str, prompt: str, add_dir: Path,
+                *, allow_followup: bool = False) -> list[str]:
     """SESSION_RESUME 的完整 argv（prompt 在變長旗標之前；尾端＝--add-dir＋任務書目錄
-    ＋現解後的 handback 目錄，v2.1.13 C5）。"""
-    return [claude, "-p", "-r", session_id, prompt, *_posture_argv(),
-            *_add_dir_argv(add_dir)]
+    ＋現解後的 handback 目錄，v2.1.13 C5）。
+
+    🔴 INV2＋INV3（掌舵者 2026-09-05 事故訂正，取代 DEF-200-270 ③的**無條件**注入）：
+    事故當日額度回來後，headless 續跑窗口一起手就被「第一句話呼叫 `Workflow(resumeFromRunId)`」
+    這個無條件注入驅使、重跑一個 34-agent 的 Workflow，撞無人核准權限牆前先燒掉一輪 token。
+    修法＝把 fan-out 注入 **gate 起來**：預設 `allow_followup=False` ⇒ prompt 一個 Workflow
+    字都不多（續跑不得以 fan-out 為第一動作）；只有呼叫端確認**前一窗確實起來**
+    （`relay_machine.followup_allowed(state)`＝前一窗 `made_progress` ∧ 非第一窗）時才傳
+    `allow_followup=True`，此時才接 `workflow_resume_hint(session_id)`。
+    只接在 RESUME 路：FRESH（不帶 `-r`）是別的 session，runId 對它結構上無效
+    （見 `quota_escalation` 檔頭劃界 ③），故 `fresh_argv` 不帶本參數。
+    """
+    hint = workflow_resume_hint(session_id) if allow_followup else ""
+    return [claude, "-p", "-r", session_id, prompt + hint,
+            *_posture_argv(), *_add_dir_argv(add_dir)]
 
 
 def fresh_argv(claude: str, prompt: str, add_dir: Path) -> list[str]:
@@ -156,3 +169,87 @@ def preflight_problem(settings: Path | None = None) -> str | None:
         return (f"handback 目錄建不出來：{handback_dir()}——{exc}"
                 "（additionalDirectories 指向它，缺席＝交接檔無處落）")
     return None
+
+
+# ─────────────── DEF-200-270：中斷的 Workflow 要跟著續跑（任務書／prompt 攜帶 resume 資訊）
+# 資料來源皆磁碟可讀、零 token（佈局是**觀察到的**，故逐層 fail-soft）：
+#   · `<sid>/workflows/scripts/<workflowName>-<runId>.js`＝scriptPath（啟動時就落地）；
+#   · `<sid>/subagents/workflows/<runId>/journal.jsonl`＝進度：`{"type": started|result|failed,
+#     "key": …}`，同一 key 會重複出現（本案 85/45/40 行）⇒ 以 key 去重；
+#     **`started ∖ result ≠ ∅` ⇒ 未完成**。
+# 🔴 `<sid>/workflows/wf_<runId>.json` 的 `status` **不可**當完成判準：本案該檔
+# `status="completed"` 而 40 個 agent 失敗（它記的是 run 收尾了沒，不是每個 agent 成了沒）。
+# 住本檔而不是 `quota_escalation`：那一支 377/400（現查 check_loc_budget），且「續跑 prompt
+# 帶什麼」本來就是本檔（喚醒 argv 組裝）的主題；`quota_escalation.snapshot_fanout()` 對本檔
+# 走函式內 lazy import（本檔對它亦然），模組層互不依賴。
+_JOURNAL_TYPES = ("started", "result", "failed")
+
+
+def journal_counts(run_dir: Path) -> dict:
+    """`<run>/journal.jsonl` 以 key 去重後的 `{started, result, failed, unfinished}`；讀不動＝全 0
+    （量不到 ⇒ `unfinished=0` ⇒ 不會被判成 resume_ready——保守向：不憑空叫人重跑）。"""
+    seen: dict[str, set] = {kind: set() for kind in _JOURNAL_TYPES}
+    try:
+        with (run_dir / "journal.jsonl").open(encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                try:
+                    record = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(record, dict) and record.get("type") in seen and record.get("key"):
+                    seen[record["type"]].add(str(record["key"]))
+    except OSError:
+        pass
+    counts = {kind: len(keys) for kind, keys in seen.items()}
+    counts["unfinished"] = len(seen["started"] - seen["result"])
+    return counts
+
+
+def workflow_resume_facts(run_dir: Path, script_path: str) -> dict:
+    """單一 run 的續跑事實：`script_path`／`journal`／`resume_ready`／`resume_call`。
+
+    `resume_ready`＝有 scriptPath ∧ journal 有未完成 key。`resume_call` 是可直接貼進 prompt
+    的 Workflow 呼叫字面（cache 回放已完成者、只重跑失敗者）；不 ready 時為空字串。
+    🔴 前提待實測：`claude -p -r <sid>` 無頭窗口內 `resumeFromRunId` 是否真的命中 cache
+    （本包禁 spawn claude；Workflow 文件只說「same script + same args ⇒ cache hit」）。
+
+    🔴 F3-FIX2（複審必修，真 Windows bug）：`script_path` 在 Windows 上是 `str(WindowsPath)`
+    ＝反斜線（例 `C:\\Users\\x\\wf_r-1.js`）。直接嵌進 JS 字串 `scriptPath: "..."` 後，`\\U`／
+    `\\n` 會被當成 JS 字串跳脫 ⇒ 路徑 mangle ⇒ `resumeFromRunId` 的 scriptPath 精確比對
+    cache-miss ⇒ 重跑整個 Workflow（正是要防的燒 token）。故嵌入前一律正規化成正斜線
+    （正斜線在 JS 字串內無跳脫問題）。
+    🔴 誠實劃界（一）用 `PureWindowsPath(...).as_posix()` 而非 `Path(...).as_posix()`：後者在
+    **POSIX 直譯器**（本機 mac／CI）上不把反斜線當分隔符 ⇒ `as_posix()` 與 `str()` 對反斜線
+    輸入**逐字相同**（已實測），釘死用的測試因此對此 bug 結構性失明（＝複審抓到的假綠）。
+    `PureWindowsPath` 兩種分隔符都認、跨平台皆把反斜線收斂成正斜線，正斜線輸入原樣通過。
+    邊界：POSIX 檔名裡合法的字面反斜線會被一起轉成正斜線——harness 產的 wf 腳本名不含它，可忽略。
+    🔴 誠實劃界（二）Workflow cache 在 Windows 上究竟以哪種分隔符做 scriptPath 精確比對
+    **待實測**（本包禁 spawn claude）；正斜線是 JS 字串內唯一無跳脫風險的形態，故取之。
+    """
+    journal = journal_counts(run_dir)
+    ready = bool(script_path) and journal["unfinished"] > 0
+    js_path = PureWindowsPath(script_path).as_posix() if ready else ""
+    return {"script_path": script_path, "journal": journal, "resume_ready": ready,
+            "resume_call": (f'Workflow({{scriptPath: "{js_path}", '
+                            f'resumeFromRunId: "{run_dir.name}"}})') if ready else ""}
+
+
+def workflow_resume_hint(session_id: str) -> str:
+    """續跑 prompt 的附句：fanout 清單裡有 `resume_ready` 的 run ⇒ 第一句話就呼叫它們；
+    沒有清單／沒有 ready 的 run ⇒ 空字串（prompt 一個字都不多）。清單路徑的家＝
+    `quota_escalation.fanout_path()`（lazy import，避免模組層成環）。"""
+    import quota_escalation  # noqa: PLC0415 — 見上方區塊註解（互相 lazy，模組層不成環）
+
+    path = quota_escalation.fanout_path(session_id)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    calls = [str(run["resume_call"]) for run in (data.get("runs") or [])
+             if isinstance(run, dict) and run.get("resume_ready") and run.get("resume_call")]
+    if not calls:
+        return ""
+    return (f"🔴 fanout 清單（{path}）有被撞線打斷的 Workflow：**第一句話**就呼叫 "
+            + "；".join(calls)
+            + "（cache 回放已完成的 agent、只重跑失敗者；args 若原本有帶，從主逐字稿的 Workflow "
+              "tool_use input 取），完成後再照任務書第 3 節。")

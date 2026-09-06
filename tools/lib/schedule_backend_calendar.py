@@ -57,11 +57,41 @@ def _labels_with_prefix(text: str, prefix: str) -> list[str]:
 #
 # 🔴 **只往後取整，絕不提早**（`+59s` 再切掉秒）：calendar 是分鐘粒度，而截止時刻的語意是
 # 「在這之前額度還沒回來」⇒ 提早觸發會白燒一次探測，而探測是這整套唯一花 token 的動作。
+#
+# 🔴 DEF-200-268（2026-09-05 17:57:03 實跡）——`<= interval ⇒ None` 這條捷徑在**截止前最後
+# 一格**是錯的：前七個 tick 已把 18:02 排進 calendar（launchd 六次自報 descriptor），最後一格
+# 距截止 297s ≤ 900 ⇒ 本函式回 None ⇒ `_descriptor_problems` 判「要求無、回讀有」不符 ⇒
+# bootout+bootstrap 把 18:02 拆掉、`StartInterval` 從 17:57:04 重計 ⇒ 18:12:04 才醒（死等
+# 12 分 4 秒）。本函式**刻意不改**（TRANSIENT 300s 省 relaunch 的意圖仍成立）；那一格由
+# `LaunchdBackend.arm()` 以 `_calendar_still_ahead` 保留 live calendar 補上——「最壞死等
+# ≤60 秒」（`schedule_backend.py` 檔頭）的適用條件因此是兩格合起來才成立：截止距今 > interval
+# 時由本函式寫 calendar 保證；≤ interval 的最後一格由 `arm()` 不拆已排時刻保證。
 def _calendar_of(at: datetime | None, interval: int) -> dict | None:
     if at is None or (at - datetime.now(at.tzinfo)).total_seconds() <= interval:
         return None
     at = (at + timedelta(seconds=59)).replace(second=0, microsecond=0)
     return {"Month": at.month, "Day": at.day, "Hour": at.hour, "Minute": at.minute}
+
+
+def _calendar_still_ahead(cal: dict | None, interval: int, now: datetime | None = None) -> bool:
+    """launchd 回讀的 calendar 是否**仍在未來、且距今 ≤ interval**（＝截止前最後一格）。
+
+    純函式（`now` 可注入）。descriptor 沒有年份：先取今年，落在過去就試明年（跨年那一格
+    ≤ interval 才可能為真）。已過去／> interval／缺鍵／無效日期一律 False ⇒ 呼叫端照舊
+    走「殘留 ⇒ 不符 ⇒ 重載」（`test_red_a_stale_moment_left_behind_is_not_a_credential`
+    的方向不變）。
+    """
+    if not cal or any(key not in cal for key in ("Month", "Day", "Hour", "Minute")):
+        return False
+    now = datetime.now().astimezone() if now is None else now
+    try:
+        moment = now.replace(month=int(cal["Month"]), day=int(cal["Day"]), hour=int(cal["Hour"]),
+                             minute=int(cal["Minute"]), second=0, microsecond=0)
+        if moment < now:
+            moment = moment.replace(year=now.year + 1)
+    except ValueError:
+        return False
+    return 0 < (moment - now).total_seconds() <= interval
 
 
 def _first_int(text: str) -> int | None:

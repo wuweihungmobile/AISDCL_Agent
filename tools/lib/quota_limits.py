@@ -56,7 +56,7 @@ LIMIT_SPEND = "quota_spend"
 LIMIT_TRANSIENT = "transient"
 #: 認不出來。**一律當不可等待處理**（fail-closed）：寧可叫人，也不要排一支永遠不成的工作。
 LIMIT_UNKNOWN = "unknown"
-#: 🔴 **正向答案**：掃過 `_LIMIT_MARKS` 全部條目、連 `_LIMIT_HINTS` 的泛型撞線字樣都
+#: 🔴 **正向答案**：掃過 `_LIMIT_MARKS` 全部條目、連 `_LIMIT_HINT_RE` 的泛型撞線字樣都
 #: 沒中 ⇒ 這則輸出裡真的**沒有**撞線訊號。與 `LIMIT_UNKNOWN` 刻意是**兩個不同的值**。
 #:
 #: 立案（R100 止血 B）：`tools/session_resume_planner.py::probe_quota()` 此前逐字寫
@@ -74,7 +74,22 @@ LIMIT_NONE = "none"
 #: limit` 的**共同**前綴逐字是 `You've hit your `。
 #: 方向刻意保守：正常的探針輸出（`claude -p ok`）誤含這些字時只會多等一輪，而反向的
 #: 誤判會白燒一次主 session 的續跑成本（見 `probe_quota()` 的 fail-closed WHY）。
-_LIMIT_HINTS = ("you've hit your", "limit", "quota", "429", "too many requests")
+#:
+#: 🔴 DEF-200-266（2026-09-05 18:12 事故）訂正本段的**射程**：上一版是五個裸子字串
+#: （`"limit"`／`"429"`…）掃整段 stdout+stderr，而 `claude -p --output-format json` 的
+#: result 信封是一份帶 `duration_ms`／`total_cost_usd`／uuid 的 JSON ⇒ 一次**真的成功**的
+#: 呼叫（真 model、真 usage、額度已開）被 `3429` 這種數值裡的 `429` 判成 `unknown` ⇒
+#: open=False（假陰性）⇒ 掛回巡邏、零續跑 2h43m。「多等一輪」在這裡不是多等一輪——
+#: 巡邏路上沒有人會再探第二次。修法兩層：
+#:   ① 字樣層只在**非成功信封**上跑（見 `classify_probe_output`：成功信封是結構性正向
+#:      憑證，字樣掃描對它沒有發言權）；
+#:   ② 字樣本身改字邊界：`\blimits?\b`（`unlimited` 不算）、`\b429\b` 且鄰接
+#:      `error|status|http|rate` 任一（`3429`／uuid 裡的 429 不算）。
+#: 具名 mark（`_LIMIT_MARKS`）仍是裸子字串：它們都是多字詞組，不會被數值誤中。
+_LIMIT_HINT_RE = re.compile(
+    r"you've hit your|\blimits?\b|\bquota\b|\btoo many requests\b"
+    r"|\b(?:error|status|http|rate)\b\W{0,3}429\b|\b429\b\W{0,3}(?:error|status|http|rate)\b",
+    re.IGNORECASE)
 
 #: 判讀順序即優先序。spend 必須排在 session 前面——見 `LIMIT_SPEND` 的 WHY。
 _LIMIT_MARKS: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -151,7 +166,49 @@ def classify_limit(text: object) -> str:
     for kind, marks in _LIMIT_MARKS:
         if any(mark in low for mark in marks):
             return kind
-    return LIMIT_UNKNOWN if any(h in low for h in _LIMIT_HINTS) else LIMIT_NONE
+    return LIMIT_UNKNOWN if _LIMIT_HINT_RE.search(low) else LIMIT_NONE
+
+
+def result_envelope(stdout: object) -> dict | None:
+    """`claude -p --output-format json` 的 **result 信封**（`type == "result"`）；不是那個
+    形狀（非 JSON、非 dict、type 不對）一律 `None`。純函式，零 I/O。"""
+    try:
+        data = json.loads(str(stdout or ""))
+    except ValueError:
+        return None
+    return data if isinstance(data, dict) and data.get("type") == "result" else None
+
+
+def classify_probe_output(rc: int, stdout: str, stderr: str) -> dict:
+    """付費探針（`claude -p ok --output-format json`）的判讀：回 `{open, kind, rc, text, source}`。
+
+    🔴 DEF-200-266：判準從**字樣**移到**證據等級**，三層由強到弱、任一層給出正向結論即停
+    （規格洞的實作面：`LIMIT_NONE` 此前的定義是「掃不到字樣」＝負向定義，從未定義「正向
+    憑證是什麼」）。
+      L1 成功信封（`type=="result" ∧ is_error is False`）⇒ open。那一次呼叫真的花到 token，
+         是「額度開著」最強的物理證據，**結構上不可能假陽性**；字樣層對它沒有發言權
+         （rc 在這一格不參與：信封是伺服器回的，rc 是 CLI 收尾時的事）。
+      L1' 錯誤信封（`is_error` 非 False）⇒ 只對 `result` 文字＋stderr 跑字樣層；認得出來
+         就照類別（session 可等／spend 不可等／transient 退避），認不出來 ⇒ `unknown`
+         （錯誤信封本身就否定了 open，字樣層在這裡只決定「哪一種不開」）。
+      L2 非 JSON 輸出才走整段字樣層（stderr、崩潰訊息、`--output-format` 被改）：沿用
+         fail-closed——`open = rc == 0 ∧ kind == LIMIT_NONE`。
+    `text` 保留給呼叫端**落痕跡**（`probed` 事件必記；§5-1 那次「哪個子字串命中」量不到
+    正是因為它此前算好卻沒寫）；`source` 說得出正向／負向結論來自哪一層，供事後稽核
+    「L0（端點）有沒有被用到、L1 有沒有生效」。
+    """
+    text = ((stdout or "") + "\n" + (stderr or "")).strip()[:2000]
+    envelope = result_envelope(stdout)
+    if envelope is not None and envelope.get("is_error") is False:
+        return {"open": True, "kind": LIMIT_NONE, "rc": rc, "text": text,
+                "source": "claude-p/envelope"}
+    if envelope is not None:
+        kind = classify_limit(str(envelope.get("result") or "") + "\n" + (stderr or ""))
+        return {"open": False, "kind": kind if kind != LIMIT_NONE else LIMIT_UNKNOWN,
+                "rc": rc, "text": text, "source": "claude-p/error-envelope"}
+    kind = classify_limit(text)
+    return {"open": rc == 0 and kind == LIMIT_NONE, "kind": kind, "rc": rc, "text": text,
+            "source": "claude-p/text"}
 
 
 def parse_reset_at(text: object, now: datetime) -> datetime | None:

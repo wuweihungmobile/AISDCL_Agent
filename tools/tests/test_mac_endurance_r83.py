@@ -963,6 +963,71 @@ class SelfDisarmTest(unittest.TestCase):
         sb.LaunchdBackend().disarm("AutoSDD_Sentinel_self")
         self.assertIs(recorded.get("start_new_session"), True)
 
+    def _self_disarm_then_arm(self, task: str, *, at_seconds: int = 900) -> tuple:
+        """在 job 內先 `disarm(自己)` 再 `arm(自己)`；回 `(rc, cred)`，延後腳本落在 `self.spawned`。
+
+        回讀（假 launchctl print）與請求逐項相符 ⇒ 修前 `arm()` 走冪等 no-op 並發
+        `state = …` 憑證，而同一行程一秒前已排好純 bootout 的延後腳本。
+        """
+        getattr(sb, "_SELF_DISARMED", {}).clear()
+        self.addCleanup(lambda: getattr(sb, "_SELF_DISARMED", {}).clear())
+        os.environ["XPC_SERVICE_NAME"] = task
+        plan = sb.LAUNCH_AGENTS_DIR / "plan.md"
+        plan.parent.mkdir(parents=True, exist_ok=True)
+        plan.write_text("# plan\n", encoding="utf-8", newline="\n")
+        backend = sb.LaunchdBackend()
+        out = _print_output(planner.SENTINEL_INTERVAL_SECONDS,
+                            backend._argv(planner, str(plan), task, planner.SENTINEL_TICK),
+                            str(backend.plist_path(task)))
+        sb._run = _fake_runner({"-lint": (0, ""), "print": (0, out)}, self.seen)
+        self.assertEqual(backend.disarm(task), 0)
+        return backend.arm(str(plan), task, "", planner.SENTINEL_TICK,
+                           datetime.now().astimezone() + timedelta(seconds=at_seconds))
+
+    def test_disarm_then_arm_of_the_same_label_inside_the_job_relaunches_instead_of_killing(
+            self) -> None:
+        """DEF-200-267 F2-②（2026-09-05 18:12:09→18:12:10 實跡）：`_resume_tick` 的
+        PATROL_HANDBACK 對哨兵自己 `disarm()`（延後純 bootout）再 `_arm_sentinel()`
+        （回讀相符 ⇒ 冪等 no-op）⇒ 父退場 1s 後 bootout 拆掉剛認證 `state = running` 的
+        job；bootout log 只有一行、無 bootstrap。載具層修法：**plist 存在即為「應該活著」
+        的 SSOT**——自我 disarm 的延後腳本改成 `bootout; [ -f plist ] && bootstrap×3 + print`
+        （`disarm` 已同步 unlink；之後有人 `arm()` 會重寫 plist ⇒ 父退場那一刻「plist 在」
+        ＝有接班者）。同一支腳本改做 relaunch ⇒ **不會有兩支腳本競態**。"""
+        rc, cred = self._self_disarm_then_arm("AutoSDD_Sentinel_self")
+        self.assertEqual(rc, 0, cred)
+        scripts = [argv[-1] for argv in self.spawned]
+        self.assertEqual(len(scripts), 1, f"排了兩支延後腳本（競態）：{scripts}")
+        self.assertIn("launchctl bootout", scripts[0])
+        self.assertIn("launchctl bootstrap", scripts[0],
+                      "延後腳本只有 bootout ⇒ 父退場後接班者被拆（修前實跡）")
+        self.assertRegex(scripts[0], r'\[ -f "[^"]+\.plist" \]',
+                         "bootstrap 沒有以「plist 仍在磁碟」為條件 ⇒ 真的 disarm 也會被復活")
+        self.assertIn('echo "print rc=$?"', scripts[0], "三個 rc 沒有全部落痕跡")
+        self.assertEqual([a for a in self.seen if "bootout" in a or "bootstrap" in a], [],
+                         "在自己身上同步動了排程器（真機會當場被終止）")
+
+    def test_the_idempotent_arm_credential_is_deferred_when_a_self_disarm_is_pending(
+            self) -> None:
+        """憑證紀律：同一行程已排延後 disarm ⇒ 冪等分支**不得**發「此刻存在 state = running」
+        的憑證（它對一秒後的死亡失明）；只能陳述「plist 已落地、重載由子行程執行、rc 寫入
+        痕跡檔」（`_deferred_credential` 形態）。"""
+        _rc, cred = self._self_disarm_then_arm("AutoSDD_Sentinel_self")
+        self.assertIn("不宣稱重載已完成", cred)
+        self.assertIn("autosdd_sentinel_bootout_AutoSDD_Sentinel_self", cred,
+                      "憑證沒指向那支會寫 rc 的痕跡檔 ⇒ 「沒觸發」不可偵測")
+        for lie in ("launchctl print rc=0", "與請求相符", "state = "):
+            self.assertNotIn(lie, cred, f"憑證混進一句它證明不了的話：{lie}")
+
+    def test_a_self_disarm_followed_by_an_arm_with_a_new_deadline_reuses_the_one_script(
+            self) -> None:
+        """回讀不符（新截止時刻）時也**不**另排 `_defer_relaunch`：plist 已帶新參數、待生效的
+        那支腳本 bootstrap 的就是它 ⇒ 仍然只有一支延後腳本。"""
+        rc, cred = self._self_disarm_then_arm("AutoSDD_Sentinel_self", at_seconds=56 * 60)
+        self.assertEqual(rc, 0, cred)
+        self.assertEqual(len(self.spawned), 1, "同名 disarm→arm 排出兩支延後腳本（競態）")
+        body = plistlib.loads((sb.LAUNCH_AGENTS_DIR / "AutoSDD_Sentinel_self.plist").read_bytes())
+        self.assertIn("StartCalendarInterval", body, "新截止時刻沒寫進待 bootstrap 的 plist")
+
     def test_disarming_from_outside_verifies_by_readback_not_by_rc(self) -> None:
         os.environ.pop("XPC_SERVICE_NAME", None)
         sb._run = _fake_runner({"bootout": (0, ""),
@@ -1083,6 +1148,44 @@ class CalendarMomentReachesThePlistTest(unittest.TestCase):
         self.assertIn(str(planner.SENTINEL_INTERVAL_SECONDS), cred)
         self.assertEqual([a for a in self.seen if "bootstrap" in a], [],
                          "巡邏走到了非冪等路徑 ⇒ 每一次 tick 都會動排程器")
+
+    def test_a_live_calendar_inside_the_last_interval_is_not_torn_down(self) -> None:
+        """DEF-200-268 F5（2026-09-05 17:57:03 實跡）：`arm_reset` 連續七個 tick 把 18:02
+        排進 calendar（launchd 六次自報 descriptor），截止前最後一格 `_calendar_of` 因
+        `(at-now) ≤ interval` 回 None ⇒ 「要求無、回讀有」判不符 ⇒ bootout+bootstrap 把
+        18:02 拆掉、`StartInterval` 重計 ⇒ 18:12:04 才醒（死等 12 分 4 秒，檔頭「≤60 秒」
+        在此格為假）。修法：live calendar 仍在未來且距今 ≤ interval ⇒ 視為相符、保留、
+        不 relaunch；plist 重寫時也要把它帶著（重開機後仍是同一份）。"""
+        popen = subprocess.Popen
+        spawned: list = []
+        subprocess.Popen = lambda argv, **kw: spawned.append(argv)  # type: ignore[assignment]
+        self.addCleanup(setattr, subprocess, "Popen", popen)
+        at = self.now + timedelta(seconds=297)
+        live_cal = sb._calendar_of(at, 0)  # interval=0 ⇒ 一定給 dict＝launchd 裡已排的那個時刻
+        rc, cred = self._arm(at, live_cal)
+        self.assertEqual(rc, 0, cred)
+        self.assertEqual([a for a in self.seen if "bootout" in a or "bootstrap" in a], [],
+                         "截止前最後一格把已排的 calendar 拆掉並重載（修前實跡）")
+        self.assertEqual(spawned, [], "延後重載被排了 ⇒ StartInterval 重計、死等變回整個 interval")
+        self.assertEqual(self._plist().get("StartCalendarInterval"), live_cal,
+                         "plist 重寫時丟掉了仍有效的 calendar ⇒ 重開機後那個時刻就不在了")
+        self.assertIn("StartCalendarInterval", cred)
+        self.assertIn("launchd 自報", cred)
+
+    def test_a_live_calendar_already_in_the_past_is_still_torn_down(self) -> None:
+        """控制組：回讀的 calendar 已過去（或在 interval 之外）⇒ 仍是殘留、照舊判不符並重載
+        （`test_red_a_stale_moment_left_behind_is_not_a_credential` 的方向不變）。"""
+        stale = sb._calendar_of(self.now - timedelta(minutes=10), -100000)
+        rc, _cred = self._arm(self.now + timedelta(seconds=900), stale)
+        self.assertEqual(rc, 1, "過去的 calendar 被當成仍有效而保留")
+        self.assertTrue([a for a in self.seen if "bootstrap" in a])
+        self.assertTrue(sb._calendar_still_ahead(
+            sb._calendar_of(self.now + timedelta(seconds=299), 0), 900, self.now))
+        self.assertFalse(sb._calendar_still_ahead(stale, 900, self.now))
+        self.assertFalse(sb._calendar_still_ahead(
+            sb._calendar_of(self.now + timedelta(seconds=1000), 0), 900, self.now),
+            "距今 > interval 的 calendar 不歸本格（那一格 `_calendar_of` 自己會要求它）")
+        self.assertFalse(sb._calendar_still_ahead(None, 900, self.now))
 
     def test_the_transient_retry_stays_coarse_on_purpose(self) -> None:
         """`TRANSIENT_RETRY_SECONDS`（<interval）刻意不配 calendar——代價已登記在檔頭。

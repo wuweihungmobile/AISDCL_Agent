@@ -44,9 +44,11 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import endurance_env  # FIX3：無人續跑結局的持久記錄居所（stdlib-only，模組層 import 不成環）
 import git_paths
 import quota_gate
 import quota_policy
+import unattended_authz  # INV1/INV4：無人看管旗標名的 SSOT（不在本檔開第三個字面家）
 
 #: 每 reset 視窗 spawn 上限；出廠 2（施工圖 §3(c) 常數表）。
 RELAY_MAX_SPAWNS_ENV = "AUTOSDD_RELAY_MAX_SPAWNS"
@@ -85,6 +87,9 @@ _STOP_REASON = {
 #: DONE（正常結束）與 QUOTA_STOP（交回既有哨兵巡邏）不吵——同 `_resume_tick` 既有
 #: `disarm` 分支 `loud=False` 仍呼叫 `escalation.alert()` 收殘骸的紀律。
 _LOUD_STATES = frozenset({STATE_NO_PROGRESS_STOP, STATE_RELAY_EXHAUSTED})
+#: FIX3(a)：持久結局檔記的 reason 字面（恰對應 _LOUD_STATES 兩個「需要人知道」的停止次態）。
+#: 刻意與 `_STOP_WHY` 分開（後者 exhausted＝"cap"；本檔結局檔對外語意用 "exhausted"）。
+_OUTCOME_REASON = {STATE_NO_PROGRESS_STOP: "no_progress", STATE_RELAY_EXHAUSTED: "exhausted"}
 
 
 def _int_env(name: str, default: int) -> int:
@@ -102,6 +107,15 @@ def max_spawns() -> int:
 
 
 def no_progress_limit() -> int:
+    """連續零新進度的停止門檻。
+
+    🔴 INV4（掌舵者 2026-09-05 事故）：**無人看管回合一律夾到 1**——第一次沒進度（權限牆／
+    沒起來／沒改檔 ⇒ `made_progress` 為假）就停，不得靠 `AUTOSDD_RELAY_NO_PROGRESS_LIMIT`
+    放寬成多窗續燒。掌舵者原則「主 agent 沒成功，哪來的後續；沒起來就不要浪費 token」。
+    互動回合（無旗標）仍讀 env（射程只在無人回合）。旗標名走 `unattended_authz` SSOT。
+    """
+    if os.environ.get(unattended_authz.UNATTENDED_ENV):
+        return 1
     return _int_env(RELAY_NO_PROGRESS_LIMIT_ENV, RELAY_NO_PROGRESS_LIMIT_DEFAULT)
 
 
@@ -198,6 +212,58 @@ def made_progress(handback_verdict: str, files_changed_count: int) -> bool:
     return handback_verdict == "written" and files_changed_count > 0
 
 
+def followup_allowed(state: dict) -> bool:
+    """🔴 INV3（掌舵者 2026-09-05）：把「重跑被打斷的 Workflow（fan-out）／續跑本身以外的
+    下游任務」gate 在**前一窗確實起來**之後。判準兩條、缺一不可：
+
+      · `last_window_made_progress` 為真——前一窗 handback 寫成 ∧ 真有改檔，證明主 agent
+        真的起來且能做事（掌舵者：「主 agent 沒成功，哪來的後續」）；
+      · `relay_seq >= 1`——不是本額度視窗的**第一窗**。第一窗一律不 fan-out（INV2：續跑不得
+        以 fan-out 為第一動作），且這條也擋住跨額度視窗殘留的 `last_window_made_progress`
+        （`apply_reset_at` 於 reset 變更時把 `relay_seq` 歸零 ⇒ 新視窗第一窗恆 seq=0）。
+
+    純函式（只讀 state），供 argv 組裝端（`resume_route.resume_argv(allow_followup=...)`）取用。
+    """
+    return (bool(state.get("last_window_made_progress"))
+            and int(state.get("relay_seq") or 0) >= 1)
+
+
+# ─────────────── INV5（掌舵者 2026-09-05）：單一擁有者——同 session 不得雙 job 各自探測
+#: 續航兩族排程的工作名前綴（哨兵＝`AutoSDD_Sentinel_<sid>`；續跑＝`AutoSDD_SessionResume_<sid>`，
+#: 見 `session_resume_planner.sentinel_task_name`／`resume_task_name`）。兩者皆 per-session。
+_JOB_PREFIXES = ("AutoSDD_Sentinel_", "AutoSDD_SessionResume_")
+
+
+def job_session(task_name: str) -> str:
+    """從排程工作名抽出 session id（兩族前綴皆認）；認不出回 ""。"""
+    name = str(task_name or "")
+    for prefix in _JOB_PREFIXES:
+        if name.startswith(prefix):
+            return name[len(prefix):]
+    return ""
+
+
+def other_owner_for_session(session_id: str, existing_jobs, my_task: str) -> str:
+    """🔴 INV5：回同一 session 但**不同工作名**的既有排程（＝第二個會獨立探測/spawn 的
+    做工者）；無則回 ""。存在 ⇒ 呼叫端不得再武裝第二個 prober（擇一擁有）。
+
+    誠實劃界：**同名不算衝突**——schtasks 的 `Register-ScheduledTask -Force` 是原子覆蓋、
+    launchd 的 bootout+bootstrap 亦冪等覆蓋，同名重掛本就是「確保已武裝」語意（哨兵正常
+    重掛必須放行，否則自己擋死自己）。判準只認「不同工作名 × 同 session」。`existing_jobs`
+    為 `None`（list_jobs 量不到）或空 ⇒ 回 ""（fail-open：呼叫端寧可多一支也不要沒有哨兵）。
+    `session_id` 為空時一律回 ""（抽不出可比對的 session ⇒ 不誤判成衝突）。
+    """
+    sid = str(session_id or "")
+    if not sid:
+        return ""
+    mine = str(my_task or "")
+    for job in existing_jobs or ():
+        candidate = str(job)
+        if candidate and candidate != mine and job_session(candidate) == sid:
+            return candidate
+    return ""
+
+
 def advance_no_progress_streak(streak: int, progressed: bool) -> int:
     """新 streak：本窗有進度歸零，否則 +1。"""
     return 0 if progressed else streak + 1
@@ -246,6 +312,7 @@ def resolve(state: dict, band: str, *, max_spawns: int, no_progress_limit: int) 
                         streak_ok=no_progress_ok(streak, no_progress_limit),
                         band_is_ok=band_ok(band), under_cap=seq < max_spawns)
     return {"next_state": outcome, "relay_no_progress_streak": streak, "files_changed": changed,
+            "last_window_made_progress": progressed,  # INV3：供下一窗 followup gate 讀（落盤持久）
             "relay_seq": seq + 1 if outcome == STATE_RELAY_NEXT else seq}
 
 
@@ -273,6 +340,21 @@ def _planner():
     import session_resume_planner as planner  # noqa: PLC0415 — 見 docstring（成環）
 
     return planner
+
+
+def _remove_unless_self(planner, state: dict) -> int | None:
+    """拆掉狀態塊記的那支排程——**除非它就是即將重掛的同名哨兵**（回 `None`＝原地重掛）。
+
+    DEF-200-267 F2-①（與 `planner._resume_tick` PATROL_HANDBACK 同型）：mac 上 resume-tick
+    就跑在哨兵 job 內（`_sentinel_tick` probe 分支直接委派），`state["task_name"]`＝哨兵
+    自己。「先拆再武裝」＝延後 bootout ＋ 冪等 no-op 武裝 ⇒ 父退場後接班者被拆（喚醒鏈
+    斷線、stamp 說謊）。同名 ⇒ 不拆，`_rearm_after_stop()` 的 `arm()` 本就是「確保已武裝」。
+    Windows 的 `-Once` 續航排程名字不是哨兵 ⇒ 照舊拆（不得反過來永不釋放）。
+    """
+    task = str(state.get("task_name") or "")
+    if task and task == planner.sentinel_task_name(str(state.get("session_id") or "")):
+        return None
+    return planner._schtasks_remove(task)
 
 
 def _rearm_after_stop(planner, args, state: dict, plan: Path, log: Path) -> int:
@@ -346,22 +428,32 @@ def settle_window(args, state: dict, plan: Path, log: Path, resume_rc: int | Non
             planner.escalation.alert(
                 f"接力排程失敗（rc={rc}）：喚醒鏈斷線，拆 -Once 排程並重掛哨兵",
                 state, loud=True, plan=plan)
-            unregister_rc = planner._schtasks_remove(state["task_name"])
+            unregister_rc = _remove_unless_self(planner, state)
             rearm_rc = _rearm_after_stop(planner, args, state, plan, log)
             planner.append_log(log,
                                "relay_rearmed" if rearm_rc == 0 else "relay_rearm_failed",
-                               rc=rearm_rc, unregister_rc=unregister_rc, next_state=next_st)
+                               rc=rearm_rc, unregister_rc=unregister_rc, next_state=next_st,
+                               rearmed_inplace=unregister_rc is None)
             return rc  # 沿用排程 rc；rearm rc 不得覆蓋（docstring 既有契約）
         told = planner.escalation.alert(_STOP_REASON[next_st], state,
                                         loud=next_st in _LOUD_STATES, plan=plan)
         planner.append_log(log, _STOP_EVENT[next_st], why=_STOP_WHY.get(next_st, ""),
                            band=band, **told)
+        if next_st in _LOUD_STATES:
+            # FIX3(a)：無人需知的停止次態（no_progress／exhausted）落一行持久結局到
+            # trace_dir()——alert 的桌面通知在 dead_agents==0 時不敲、AUTOSDD_ATTENTION.md
+            # 會蒸發，這份是使用者回來跑 --pace／--check 一定看得到的那一條（FIX3(b)）。
+            endurance_env.record_unattended_outcome(
+                str(state.get("session_id") or ""), _OUTCOME_REASON[next_st],
+                reset_returned=band_ok(band),
+                handback_path=str(state.get("handback_path") or ""))
         state.update(planner._cleared_credentials())
         planner.write_relay(plan, state)
-        unregister_rc = planner._schtasks_remove(state["task_name"])
+        unregister_rc = _remove_unless_self(planner, state)
         rearm_rc = _rearm_after_stop(planner, args, state, plan, log)
         planner.append_log(log, "relay_rearmed" if rearm_rc == 0 else "relay_rearm_failed",
-                           rc=rearm_rc, unregister_rc=unregister_rc, next_state=next_st)
+                           rc=rearm_rc, unregister_rc=unregister_rc, next_state=next_st,
+                           rearmed_inplace=unregister_rc is None)
         return resume_rc if resume_rc is not None else 1
     except Exception as exc:
         # SD-8 兜底：pythonw 行程 stderr=None，例外炸穿＝靜默消失。兩個 disposal
@@ -369,7 +461,7 @@ def settle_window(args, state: dict, plan: Path, log: Path, resume_rc: int | Non
         # 的支配演算法對 Try 給 handler 的 pre-seen 是空集，disposal 被窄 try 包住
         # 時它看不見（實測紅）；alert／落痕跡殿後、各自窄 try（alert 有 notify_rc=-2
         # 前科，二次例外不得讓回傳契約跑不到——disposal 已在其前跑完）。
-        planner._schtasks_remove(str(state.get("task_name") or ""))
+        _remove_unless_self(planner, state)
         _rearm_after_stop(planner, args, state, plan, log)
         try:
             planner.escalation.alert(

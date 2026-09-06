@@ -88,6 +88,7 @@ import endurance_env  # noqa: E402  # ⓿（ADR-XPLAT-014 §7.0）：autocompact
 import quota_boot_check  # noqa: E402  # R102／R16：啟動自檢（H6／H7），見該檔檔頭 WHY  round-label-ok
 import quota_escalation as escalation  # noqa: E402  # R81：叫人＋扇出清單（R84／ARCH-10：改裸名）
 import quota_gate  # noqa: E402  # R84／SA-02：`--pace` 的內容產生者（額度判讀唯一入口）
+import quota_limits  # noqa: E402  # DEF-200-266：探針三層判讀 `classify_probe_output`（裸名，同 hook；勿改 `from lib import`）
 import quota_reconcile  # noqa: E402  # R100：`--reconcile` 的判準（輸入面出處守衛）
 import relay_machine  # noqa: E402  # v2.1.13 G3+G4：接力狀態機＋哨兵自癒的家（tools/lib）
 import resume_route  # noqa: E402  # v2.1.13 G1：喚醒 argv 權限姿態＋A-PRE 預檢的家（tools/lib）
@@ -474,7 +475,21 @@ def append_log(path: Path, event: str, **fields: object) -> None:
 # 的續航決策，判錯的代價是白燒一次主 session。⇒ 已登記交由下一輪承接（承接輪號寫在帳本
 # 那一列，不寫進程式碼檔——程式碼裡的輪號會超前帳本時鐘）。
 def probe_quota(claude: str = "claude", model: str = "haiku") -> dict:
-    """花**一次**最便宜的呼叫問「額度回來了沒」。回 `{open, kind, rc, text}`。"""
+    """問「額度回來了沒」：L0 零成本端點先答（正向才算）；否則花**一次**最便宜的呼叫。
+    回 `{open, kind, rc, text, source}`。"""
+    # 🔴 DEF-200-266／ADR-XPLAT-005 §3.3（上方 DEF-101-990(b) 那段「至今未做」自此結清）：
+    # 端點快取新鮮且每一軸 <100% ⇒ open、零 token；給不出正向結論才付費探測。
+    if (l0 := quota_gate.endpoint_probe_verdict()) is not None:
+        return l0
+    # 🔴 INV1（掌舵者 2026-09-05 事故）：**無人看管**回合等額度＝零付費呼叫。免費端點給不出
+    # 正向結論（None＝量不到／stale／某軸≥100%）時，**絕不** spawn 付費 `claude -p`（本機
+    # 一次 ≈ 31,847 tokens）；當「還沒回來」處理即可。text 刻意不含 reset 字面 ⇒ `tick_plan`
+    # 走 `PATROL_HANDBACK`（零成本巡邏兜底、繼續等），不猜時刻、不永眠。互動回合（無旗標）
+    # 仍照舊付費探測（射程只在無人回合，否則會把 `--probe-quota` 也靜音）。
+    if os.environ.get(UNATTENDED_ENV):
+        return {"open": False, "kind": guard.LIMIT_UNKNOWN, "rc": 0,
+                "text": "無人模式：免費端點未給正向結論，依 INV1 不付費探測，維持零成本巡邏",
+                "source": "endpoint/unattended-no-paid-probe"}
     workdir = Path(tempfile.mkdtemp(prefix="autosdd_probe_"))
     try:
         proc = subprocess.run(
@@ -483,22 +498,17 @@ def probe_quota(claude: str = "claude", model: str = "haiku") -> dict:
             # 🔴 R80：這一站此前漏帶旗標。它由哨兵那一跑（pythonw ⇒ 無 console）呼叫，
             # 而 `claude.exe` 是 console 子系統應用 ⇒ 每一次真撞線後的探測都會彈一個視窗。
             errors="replace", timeout=180, check=False, creationflags=guard.NO_WINDOW)
-        text = (proc.stdout or "") + "\n" + (proc.stderr or "")
-        rc = proc.returncode
+        # 🔴 判讀三層（成功信封 ⇒ open／錯誤信封 ⇒ 字樣層／非 JSON ⇒ 字邊界字樣層，fail-closed）
+        # 住 `quota_limits.classify_probe_output`：R100 止血 B 的「正向條件用專屬常數」原封保留，
+        # 修的是正向憑證從字樣改成結構（成功信封裡 `duration_ms=3429` 的 `429` 曾判成未恢復）。
+        return quota_limits.classify_probe_output(proc.returncode, proc.stdout or "", proc.stderr or "")  # noqa: E501
     except (OSError, subprocess.SubprocessError) as exc:
-        return {"open": False, "kind": guard.LIMIT_UNKNOWN, "rc": 127, "text": str(exc)}
+        return {"open": False, "kind": guard.LIMIT_UNKNOWN, "rc": 127, "text": str(exc), "source": "claude-p/spawn-failed"}  # noqa: E501
     finally:
         try:
             workdir.rmdir()
         except OSError:
             pass
-    kind = guard.classify_limit(text)
-    # 🔴 R100 止血 B：正向條件用**專屬的正向常數** `LIMIT_NONE`，不再借 `LIMIT_UNKNOWN`。
-    # 那個借用讓同一個常數承載兩個相反語意（`quota_limits` 的契約是「認不出來 ⇒
-    # fail-closed 不得排程等待」，這裡卻當成「沒有撞線字樣 ⇒ 額度已開」）⇒ 限流訊息
-    # 措辭一漂移（分類器認不出）＋ rc 恰為 0，就判成「額度已恢復」而喚醒撞牆。
-    is_open = rc == 0 and kind == guard.LIMIT_NONE
-    return {"open": is_open, "kind": kind, "rc": rc, "text": text[:2000]}
 
 
 #: R-4.5.10-2／R-4.5.10-4 的新結局：**確認失敗但刻意不終止**——掛回零成本巡邏。
@@ -910,7 +920,12 @@ def _schtasks_verify(task_name: str) -> int:
 
 
 def _schtasks_remove(task_name: str) -> int:
-    return schedule_backend.select().disarm(task_name)
+    rc = schedule_backend.select().disarm(task_name)
+    # ADR-XPLAT-014 C5'／C10'（DEF-200-269 併修）：拆哨兵必同步清 armed stamp——三條會拆哨兵的臂
+    # 全經本漏斗，一次證完；非哨兵前綴（`-Once` 續航排程）`session_of` 回空 ⇒ 不動任何 stamp。
+    if (sid := sentinel_lifecycle.session_of(task_name)):
+        sentinel_lifecycle.clear_arm_latch(sid)
+    return rc
 
 
 # 必須換到「解讀 `resets 9am` 的那個框架」：那個字串是牆上時刻（括號裡就寫著
@@ -1053,8 +1068,15 @@ def _transcript_cap() -> tuple[int, str]:
 # --add-dir 後只能有一個值）的立案見 `_run_resume` 上方 R80 段與姊妹鎖
 # test_the_variadic_add_dir_does_not_swallow_the_prompt。
 def choose_resume_route(claude: str, session_id: str, transcript: Path | None,
-                        plan_path: str, max_bytes: int | None = None) -> dict:
-    """喚醒選路：回 `{strategy, reason, argv}`；REFUSE 時 argv=None（呼叫端 fail-loud）。"""
+                        plan_path: str, max_bytes: int | None = None, *,
+                        followup_ok: bool = False) -> dict:
+    """喚醒選路：回 `{strategy, reason, argv}`；REFUSE 時 argv=None（呼叫端 fail-loud）。
+
+    🔴 INV3（掌舵者 2026-09-05）：`followup_ok`＝前一窗確實起來（`relay_machine.
+    followup_allowed(state)`）。為真才讓 RESUME 路的 argv 帶 fan-out 注入（`allow_followup`）；
+    預設 False ⇒ 續跑不得以 fan-out 為第一動作（INV2）。FRESH 路是別的 session、runId 對它
+    結構上無效，一律不帶。
+    """
     plan = Path(str(plan_path or ""))
     if not plan.is_file():
         return {"strategy": STRATEGY_REFUSE, "argv": None,
@@ -1072,7 +1094,7 @@ def choose_resume_route(claude: str, session_id: str, transcript: Path | None,
                 "reason": f"逐字稿可用（{size:,}B ≤ 上限 {limit:,}B）⇒ 帶完整 context 續跑{suffix}",  # noqa: E501
                 # v2.1.13 G1：argv 組裝（含 --permission-mode/--settings 權限姿態旗標）
                 # 下沉 tools/lib/resume_route.py——兩路同一份真相，旗標不可能只補到一路。
-                "argv": resume_route.resume_argv(claude, str(session_id), f"讀 {plan}，照它第 3 節做。{_RESUME_RULES}🔴 handback 檔路徑＝{hb}", plan.parent)}  # noqa: E501
+                "argv": resume_route.resume_argv(claude, str(session_id), f"讀 {plan}，照它第 3 節做。{_RESUME_RULES}🔴 handback 檔路徑＝{hb}", plan.parent, allow_followup=followup_ok)}  # noqa: E501 — INV3：fan-out 注入 gate 在前一窗確實起來之後
     why = ("session id 缺席" if not session_id else "逐字稿缺檔" if size is None else
            "逐字稿為空" if size == 0 else f"逐字稿 {size:,}B 超上限 {limit:,}B")
     return {"strategy": STRATEGY_FRESH, "handback": str(hb),
@@ -1091,11 +1113,11 @@ def choose_resume_route(claude: str, session_id: str, transcript: Path | None,
 # `_resume_tick` 必須據此判斷，`None` 時不得把狀態塊寫成 `"resumed"`。
 def _run_resume(args, state: dict, log: Path) -> int | None:
     """額度回來且已授權時，真的把工作續跑起來（帶無人看管訊號）。"""
-    sid = str(state.get("session_id") or ""); spawn_at = datetime.now().timestamp(); state["handback_verdict"], state["files_changed"] = "missing", 0  # noqa: E501,E702 — G2 後檢的 mtime 錨；v2.1.13 G3：本窗乾淨初值（防承接上一窗殘值）
+    sid = str(state.get("session_id") or ""); spawn_at = datetime.now().timestamp(); followup = relay_machine.followup_allowed(state); state["handback_verdict"], state["files_changed"] = "missing", 0  # noqa: E501,E702 — G2 後檢的 mtime 錨；v2.1.13 G3：本窗乾淨初值；INV3：followup 讀「前一窗」值，必在本窗 handback_verdict 歸零前算
     transcript = (Path(str(state["transcript"])) if state.get("transcript")
                   else resolve_transcript(sid) if sid else None)
     route = choose_resume_route(args.probe_command, sid, transcript,
-                                str(state.get("plan_path") or ""))
+                                str(state.get("plan_path") or ""), followup_ok=followup)
     # 痕跡必記策略與原因：降級是靜默失效的高風險點，「走了哪條路」必須事後可稽核。
     append_log(log, "route_chosen", strategy=route["strategy"], why=route["reason"]); state["route_strategy"] = route["strategy"]; state["handback_path"] = str(route.get("handback") or "")  # noqa: E501,E702 — v2.1.13 G3：REFUSE 需可辨（見 _resume_tick）；R115 修復 F1：settle_window() 讀 state["handback_path"] 判準③，此前恆未寫入 state ⇒ 讀空文本 round-label-ok
     if route["argv"] is None:
@@ -1191,7 +1213,9 @@ def _resume_tick(args) -> int:
         return _abort_and_unregister(log, args.task_name, "；".join(problems), "aborted", "❌ 狀態塊體檢不過：\n  - " + "\n  - ".join(problems))  # noqa: E501
 
     verdict = probe_quota(args.probe_command)
-    append_log(log, "probed", rc=verdict["rc"], kind=verdict["kind"], quota_open=verdict["open"])  # noqa: E501
+    # DEF-200-266 L4：`text`／`source` 必記（此前只記 rc/kind/open ⇒ 假陰性那次「哪個子字串命中」
+    # 量不到）；rc=0 ∧ unknown ⇒ `probe_unclassified` loud alert 附輸出（仍掛回巡邏，不猜）。
+    append_log(log, "probed", rc=verdict["rc"], kind=verdict["kind"], quota_open=verdict["open"], text=verdict.get("text", ""), source=verdict.get("source", ""), **escalation.probe_unclassified(verdict, state))  # noqa: E501
     decision = tick_plan(state, verdict, datetime.now().astimezone())
     print(f"探針 rc={verdict['rc']} kind={verdict['kind']} open={verdict['open']}")
     print(f"判定 {decision['action']}：{decision['reason']}")
@@ -1219,7 +1243,13 @@ def _resume_tick(args) -> int:
         # 射程內（`armed`／`waiting` 才是），所以清空不會反過來造出一筆違規。
         state.update(_cleared_credentials())
         write_relay(plan, state)
-        removed = _schtasks_remove(state["task_name"])
+        # 🔴 DEF-200-267 F2-①：`_sentinel_tick` 的 probe 分支直接 `return _resume_tick(args)`
+        # ⇒ 這裡的 `state["task_name"]` 常是**哨兵自己**。同名時「先拆再武裝」在 launchd 上＝延後
+        # bootout 拆掉剛被冪等路徑認證 `state = running` 的接班者（2026-09-05 18:12 實跡）⇒ 同名
+        # 不拆只重掛（`arm()` 本就是「確保已武裝」語意：Windows `-Force` 覆蓋、
+        # launchd 冪等或 relaunch）。
+        inplace = state["task_name"] == sentinel_task_name(str(state.get("session_id") or ""))
+        removed = 0 if inplace else _schtasks_remove(state["task_name"])
         # 逐字稿先吃狀態塊記的那一份（哨兵路寫得進去），退回 session id 反查；兩者都拿
         # 不到時**明說**——`_arm_sentinel()` 會對 `None` 拋 AttributeError，而在一支由
         # pythonw 起的無人看管行程裡，那個例外的表徵與「掛回去了」完全相同。
@@ -1236,7 +1266,7 @@ def _resume_tick(args) -> int:
         if seen is None:
             print("❌ 掛回巡邏失敗：定位不到逐字稿 ⇒ 哨兵沒有可讀的檔。"
                   "請人工 `--arm-sentinel --transcript <路徑>`", file=sys.stderr)
-        append_log(log, "patrol_handback", why=decision["reason"], transcript=str(seen or ""), unregister_rc=removed, rearm_rc=rc)  # noqa: E501
+        append_log(log, "patrol_handback", why=decision["reason"], transcript=str(seen or ""), unregister_rc=removed, rearm_rc=rc, rearmed_inplace=inplace)  # noqa: E501
         return rc
     if decision["action"] == "rearm":
         state["state"] = decision["state"]
@@ -1268,6 +1298,17 @@ def _resume_tick(args) -> int:
 def _arm_sentinel(args, transcript: Path, plan: Path) -> int:
     """哨兵武裝：註冊一支一次性 schtasks，到點只讀檔（零 token）。"""
     session_id = guard.session_id_of(transcript)
+    my_task = sentinel_task_name(session_id, args.task_name)
+    # 🔴 INV5（掌舵者 2026-09-05 事故）：單一擁有者——同 session 已有**另一支**排程（跨族：
+    # 續跑 job 或別名哨兵）在探測/spawn ⇒ 不武裝第二個 prober（事故當日 20:00~22:54 逐字稿
+    # 成對 woken/probed＝雙 job 重複做工）。判準走 `relay_machine.other_owner_for_session`
+    # （同名不算衝突：-Force／bootout 皆冪等覆蓋）；`list_jobs` 量不到（None）⇒ fail-open
+    # （寧可多一支也不要沒有哨兵）。列舉經唯一提問點 `schedule_backend.select()`。
+    jobs = schedule_backend.select().list_jobs("AutoSDD_")
+    if jobs is not None and (owner := relay_machine.other_owner_for_session(session_id, jobs, my_task)):  # noqa: E501
+        append_log(endurance_log_path(plan), "sentinel_single_owner_deferred", owner=owner, mine=my_task, session_id=session_id)  # noqa: E501
+        print(f"ℹ️  INV5 單一擁有者：session {session_id} 已由 {owner} 巡邏/續跑，不重複武裝 {my_task}（擇一擁有，零重複探測）。")  # noqa: E501
+        return 0
     # 🔴 R80：`handled_through` 改記「全域最後一次成功 API 回應」，不再記「最後一筆撞線」。
     # 舊寫法的立案理由是「我此刻跑得動武裝指令 ⇒ 額度是通的 ⇒ 既有撞線必然都已解決」——
     # 那句話**是假的**（武裝零 API 呼叫），而它正是哨兵整晚失明的主因。本欄現在只作稽核，
@@ -1426,6 +1467,7 @@ def main(argv: list[str]) -> int:
     # 人機入口。放在最前面那幾道之後、逐字稿解析之前：它**不需要逐字稿**，掛在需要逐字稿
     # 的路徑上會讓「這台機器上找不到 session」變成查不到額度（同 --check-autocompact 的理由）。
     if args.pace:
+        print(endurance_env.unattended_outcome_banner(), end="")  # noqa: E501 — FIX3(b)：無人續跑停下未讀結局，開頭主動印
         print(quota_gate.pace_report(model=args.model), end="")
         # 修3（R95；ADR §2.9）：哨兵活性欄。定位不到 session 時靜默跳過（本旗標的
         # 「不依賴逐字稿」契約不變）；定位得到而 stamp 與排程器現查不一致才出聲。
@@ -1458,6 +1500,7 @@ def main(argv: list[str]) -> int:
     data = measure(transcript)
 
     if args.check:
+        print(endurance_env.unattended_outcome_banner(), end="")  # noqa: E501 — FIX3(b)：無人續跑停下未讀結局，開頭主動印
         print(endurance_env.check_report(data, guard), end="")
         liveness = sentinel_lifecycle.liveness_line(data["session_id"])  # 修3：同 --pace
         if liveness:
