@@ -3997,9 +3997,9 @@ class Fix2ResumeCallScriptPathIsJsSafeTest(unittest.TestCase):
                               "反斜線未被逐段收斂成正斜線")
 
     def test_forward_slash_posix_script_path_passes_through_unchanged(self) -> None:
-        """控制組（鑑別力）：生產路徑（mac／CI 皆正斜線）原樣通過，PureWindowsPath 不 mangle。"""
+        """正斜線路徑原樣通過（用 as_posix()：str() 在 Windows 回反斜線，DEF-101-925）。"""
         run = self._run_dir_with_unfinished(_tmpdir(self, "fix2-posix-"))
-        posix = str(run / "scan-wf_r-1.js")  # 本機真實正斜線路徑
+        posix = (run / "scan-wf_r-1.js").as_posix()  # 跨平台皆保證正斜線
         call = resume_route.workflow_resume_facts(run, posix)["resume_call"]
         self.assertIn(posix, call, "正斜線 POSIX 路徑被 PureWindowsPath 動到了")
 
