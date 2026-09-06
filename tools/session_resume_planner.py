@@ -1452,6 +1452,15 @@ def main(argv: list[str]) -> int:
         return 2
     args = build_parser().parse_args(argv)
 
+    # 🔴 M-01（DEF-200-272）：排程器叫起的 tick 行程結構上沒有 AUTOSDD_UNATTENDED
+    # （launchd plist EnvironmentVariables 只帶 PATH／schtasks -Once 同），於是 INV1 零付費
+    # 探針（probe_quota 的 os.environ.get(UNATTENDED_ENV) 分支）與 INV4 no_progress_limit()
+    # 夾 1 在**真喚醒路徑**上是死碼：免費端點答不出時 fall-through 到付費 claude -p、
+    # no_progress 讀 env override 而非夾 1。tick＝排程自動路徑、無人看管本行程 ⇒ 在此把旗標
+    # 補成**缺席才填**（setdefault：子行程若已由 _run_resume spawn 帶入不覆寫）。互動
+    # --probe-quota 不經此分支 ⇒ 射程不外溢（付費探針仍為互動 session 保留）。
+    if args.sentinel_tick or args.resume_tick:
+        os.environ.setdefault(UNATTENDED_ENV, "1")
     if args.sentinel_tick:
         return _sentinel_tick(args)
     if args.resume_tick:

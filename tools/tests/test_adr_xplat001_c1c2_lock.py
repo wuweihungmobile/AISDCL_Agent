@@ -682,7 +682,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 7340,
+    "test_adr_xplat001_c1c2_lock.py": 7352,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 3839,
@@ -700,7 +700,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_check_wrapper_thinness.py": 1234,
     "test_claim_provenance_r86.py": 618,
     "test_component_sanitizer_shared_layer_lock.py": 293,
-    "test_context_budget_guard.py": 11057,
+    "test_context_budget_guard.py": 11169,
     "test_defect_id_reference_integrity.py": 281,
     "test_dev_start.py": 6527,
     "test_dev_start_ps1_lastexitcode.py": 548,
@@ -1486,6 +1486,12 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "R129 那一列，主控本 session 核准，精確淨額逐字對上，款(10)(11) 對本輪不計入）；款(11) 另因"
      "前一輪 R127 淨額 −38 已斷 streak 而未觸發。同輪兌現到期義務 (129,552) 並重新武裝 131／550。"
      "逐檔清單見 CrossPlatform_R129_Scan_Findings.md。"),
+    ("R130", 93610, 93734, 124,  # round-label-ok：本檔對帳列有既有豁免（同 R126/R129）
+     "[非淨減法輪][全額功能軌] M-01 喚醒 tick 自標無人（規則 1 死碼修復）＋M-05 followup "
+     "接線端到端測試：test_context_budget_guard.py 11057→11169（+112；"
+     "Inv1ScheduledTickMarksUnattendedTest＋Inv2Inv3 接線測試）。本檔自身＝R130 稽核列。"
+     "淨額 ≤ cap 552（net_cap_for_round(130)）；連升 streak 第 1／2（前輪 R129＝approved-overage "
+     "不計）。逐檔清單見 CrossPlatform_R130_FourParty_Salvage.md。"),
 )
 
 
@@ -1693,7 +1699,9 @@ def _regression_lane_cap_basis() -> tuple[str, int]:
 # 各約 84／111 行可覆蓋自身超額，**hook_wiring 全檔 docstring 皆為單行、敘事全住 # 註解 ⇒
 # 該手法對它零效益**，28 行只能靠真拆（抽共用模組）解。真拆屬獨立重構持有面（鐵律七），
 # 本輪主軸為款(11) 護欄層淨額義務與五筆結案；逐檔勘查座標見 CrossPlatform_R127_Scan_Findings.md §3。
-_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND = 130
+# 🔴 R130 具名展延（鐵律七，不得靜默沿用）round-label-ok：喚醒鏈死碼修復窗口，
+# 非 root-tools 重構持有面；真拆待獨立窗口，130 → 132。
+_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND = 132
 #: 清償旗標——真拆完成後改 True。刻意用布林而非重建舊尺計數器（ADR §9.3「舊尺已廢」）。
 _ROOT_TOOLS_OLD_SCALE_DEBT_RESOLVED = False
 #: A-2 後設鎖：到期輪只准落在「現查輪＋lookahead」內，推遠（如 9999）當場紅；shrink-only
@@ -1854,10 +1862,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 118
+_REPIN_LOG_FROZEN_PREFIX_LEN = 119
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "1bff7d5bf52ee5c7409dd28d9c3f8127a3824303ec41aaa37a623c9d0bd11b3a")
+    "79ab4a9a386e7df0c3247ab390068968efd75c2a001b146cd49521cd7ee12ce2")
 
 
 def repin_log_history_digest(
@@ -2024,6 +2032,10 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # 同體例「追加後立即自我凍結」——本輪追加一個 repin 稽核列＋本列，
     # prefix_len 117→118 涵蓋新 repin 列本身。
     ("R129", "a4b92fe15365", "1bff7d5bf52e", "DEF-200-266"),
+    # R130 M-01/M-05 喚醒鏈死碼修復：cbg +112 回歸鎖的守衛線重釘 round-label-ok
+    # 重釘使指紋前進，同體例「追加後立即自我凍結」——本輪追加一個 repin 稽核列＋本列，
+    # prefix_len 118→119 涵蓋新 repin 列本身；載體＝DEF-200-266（喚醒鏈同家族）。
+    ("R130", "1bff7d5bf52e", "79ab4a9a386e", "DEF-200-266"),  # round-label-ok
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

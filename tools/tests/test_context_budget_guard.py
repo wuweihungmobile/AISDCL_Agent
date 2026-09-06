@@ -3769,6 +3769,63 @@ class Inv1UnattendedZeroPaidProbeTest(unittest.TestCase):
         self.assertEqual(spawned[0][:3], ["claude", "-p", "ok"])
 
 
+class Inv1ScheduledTickMarksUnattendedTest(unittest.TestCase):
+    """M-01（DEF-200-272）：排程器叫起的 tick 行程結構上沒有 `AUTOSDD_UNATTENDED`
+    （launchd plist EnvironmentVariables 只帶 PATH／schtasks -Once 同）⇒ INV1 零付費探針
+    （`probe_quota` 的 `os.environ.get(UNATTENDED_ENV)` 分支）與 INV4 `no_progress_limit()`
+    夾 1 在**真喚醒路徑**上是死碼：免費端點答不出時 fall-through 到付費 `claude -p`（≈31,847
+    tokens）、no_progress 讀 env override 而非夾 1。修法＝`main()` 分派 tick 模式前把旗標
+    補成**缺席才填**（`setdefault`；互動 `--probe-quota` 不經此分支 ⇒ 射程不外溢）。
+
+    紅綠自證：修前 `main()` 不設 ⇒ dispatch 當下 stub 看到 `None`（紅）；接上後看到 `"1"`（綠）。
+    這一支補的正是既有 `Inv1UnattendedZeroPaidProbeTest` 自己 `patch.dict` 塞旗標所**假設、
+    但真路徑沒人設**的那一格。
+    """
+
+    def _env_seen_at_dispatch(self, argv, attr):
+        seen = {}
+
+        def _stub(_a):
+            seen["v"] = os.environ.get(planner.UNATTENDED_ENV)
+            return 0
+
+        with unittest.mock.patch.dict(os.environ), \
+                unittest.mock.patch.object(planner, attr, _stub):
+            os.environ.pop(planner.UNATTENDED_ENV, None)
+            rc = planner.main(argv)
+        return seen.get("v"), rc
+
+    def test_a_scheduled_sentinel_tick_marks_the_process_unattended(self) -> None:
+        v, rc = self._env_seen_at_dispatch(
+            ["--sentinel-tick", "--plan", "x.md", "--task-name", "AutoSDD_Sentinel_t"],
+            "_sentinel_tick")
+        self.assertEqual(
+            v, "1", "launchd 叫起的 --sentinel-tick 未標成無人 ⇒ INV1/INV4 在真喚醒路死碼")
+        self.assertEqual(rc, 0)
+
+    def test_a_scheduled_resume_tick_marks_the_process_unattended(self) -> None:
+        v, rc = self._env_seen_at_dispatch(
+            ["--resume-tick", "--plan", "x.md", "--task-name", "AutoSDD_SessionResume_t"],
+            "_resume_tick")
+        self.assertEqual(v, "1", "schtasks 叫起的 --resume-tick 未標成無人")
+        self.assertEqual(rc, 0)
+
+    def test_an_interactive_probe_quota_is_not_forced_unattended(self) -> None:
+        """控制組（鑑別力）：互動 `--probe-quota` 不得被強制成無人，否則會把互動 session 的
+        付費探針一起靜音（射程過寬，正是 `probe_quota` 註解警告的那一面）。"""
+        seen = {}
+
+        def _stub(*_a, **_k):
+            seen["v"] = os.environ.get(planner.UNATTENDED_ENV)
+            return {"open": True, "kind": "ok", "rc": 0, "text": "", "source": "t"}
+
+        with unittest.mock.patch.dict(os.environ), \
+                unittest.mock.patch.object(planner, "probe_quota", _stub):
+            os.environ.pop(planner.UNATTENDED_ENV, None)
+            planner.main(["--probe-quota"])
+        self.assertIsNone(seen.get("v"), "互動 --probe-quota 被強制標成無人（射程過寬）")
+
+
 class Inv2Inv3WorkflowFanoutGateTest(unittest.TestCase):
     """INV2＋INV3（F3 訂正）：續跑 argv **不得**無條件把 `Workflow(resumeFromRunId)` 當
     第一句話注入（INV2）；該 fan-out 只准在**前一窗確實起來**（`made_progress`）之後才出現
@@ -3843,6 +3900,61 @@ class Inv2Inv3WorkflowFanoutGateTest(unittest.TestCase):
              "relay_seq": 0, "relay_no_progress_streak": 0},
             quota_policy.BAND_FREE, max_spawns=2, no_progress_limit=5)
         self.assertIs(no["last_window_made_progress"], False)
+
+
+    def test_choose_resume_route_passes_followup_ok_through_to_argv(self) -> None:
+        """M-05（DEF-200-272）：`choose_resume_route` 必須把 `followup_ok` **原封**傳給
+        `resume_argv(allow_followup=…)`——接線被改壞（硬編 True／丟參數）時，既有的
+        argv 縫測試與純判準測試都抓不到。紅綠自證：把 `choose_resume_route` 改成硬編
+        `allow_followup=True`，followup_ok=False 這一輪即 `captured==[True]≠[False]` 判紅。"""
+        plan = self.tmp / "plan.md"
+        plan.write_text("x", encoding="utf-8", newline="\n")
+        tr = self.tmp / "sid.jsonl"
+        tr.write_text("{}\n", encoding="utf-8", newline="\n")
+        real = resume_route.resume_argv
+        captured: list = []
+
+        def _cap(*a, **kw):
+            captured.append(kw.get("allow_followup"))
+            return real(*a, **kw)
+
+        for want in (True, False):
+            captured.clear()
+            with unittest.mock.patch.object(resume_route, "resume_argv", _cap):
+                route = planner.choose_resume_route(
+                    "claude", "sid", tr, str(plan), followup_ok=want)
+            self.assertEqual(route["strategy"], planner.STRATEGY_RESUME)
+            self.assertEqual(captured, [want],
+                             f"choose_resume_route 沒把 followup_ok={want} 傳給 resume_argv")
+
+    def test_run_resume_derives_followup_from_previous_window_progress(self) -> None:
+        """M-05 深層接線：`_run_resume` 必須用 `followup_allowed(state)` 算出 followup_ok
+        再傳給 `choose_resume_route`——不是恆傳。紅綠自證：把 `_run_resume` 改成
+        `followup = True`（不看 state），第 2／3 組即判紅。"""
+        log = self.tmp / "rr.jsonl"
+        captured: list = []
+
+        def _cap_route(claude, sid, tr, plan, max_bytes=None, *, followup_ok=False):
+            captured.append(followup_ok)
+            return {"strategy": planner.STRATEGY_REFUSE, "argv": None, "reason": "test-stop"}
+
+        args = type("_Args", (), {"probe_command": "claude"})()
+        t = str(self.tmp / "t.jsonl")
+        cases = [
+            ({"session_id": "sid", "transcript": t,
+              "last_window_made_progress": True, "relay_seq": 1}, True),
+            ({"session_id": "sid", "transcript": t,
+              "last_window_made_progress": False, "relay_seq": 3}, False),
+            ({"session_id": "sid", "transcript": t,
+              "last_window_made_progress": True, "relay_seq": 0}, False),
+        ]
+        for state, want in cases:
+            captured.clear()
+            with unittest.mock.patch.object(planner, "choose_resume_route", _cap_route):
+                rc = planner._run_resume(args, dict(state), log)
+            self.assertEqual(rc, 1, "REFUSE（argv=None）應早退回 rc=1")
+            self.assertEqual(captured, [want],
+                             f"_run_resume followup 推導錯：state={state} 期望 {want}")
 
 
 class Fix2ResumeCallScriptPathIsJsSafeTest(unittest.TestCase):

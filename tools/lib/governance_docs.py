@@ -441,6 +441,10 @@ _GOVERNANCE_DOCS = (
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R128_Scan_Findings.md",
     # R129 收尾：護欄 +1300 回歸鎖逐檔對帳（overage 授權證據）round-label-ok
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R129_Scan_Findings.md",
+    # R130 收尾：喚醒鏈死碼修復（M-01／M-05）＋護欄層對帳＋U9 到期展延 round-label-ok
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R130_Scan_Findings.md",
+    # R130 四方審計撿回稿（b1ef81f 兩項功能 22 筆缺口清單）round-label-ok
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R130_FourParty_Salvage.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/{CrossPlatform,Quota}_*.md`。這**不是**把具名
