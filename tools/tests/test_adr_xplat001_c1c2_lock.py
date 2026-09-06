@@ -736,7 +736,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_sanitize_component_frozen_sdd_versions_lock.py": 340,
     "test_schedule_capability_parity.py": 626,
     "test_script_scan_surface_ssot.py": 391,
-    "test_skip_ceiling_ratchet_direction.py": 700,
+    "test_skip_ceiling_ratchet_direction.py": 702,
     "test_skip_discoverability_r83.py": 744,
     "test_smoke_ci_sync.py": 1353,
     "test_stdio_utf8.py": 76,
@@ -1492,7 +1492,7 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "Inv1ScheduledTickMarksUnattendedTest＋Inv2Inv3 接線測試）。本檔自身＝R130 稽核列。"
      "淨額 ≤ cap 552（net_cap_for_round(130)）；連升 streak 第 1／2（前輪 R129＝approved-overage "
      "不計）。逐檔清單見 CrossPlatform_R130_FourParty_Salvage.md。"),
-    ("R131", 93734, 94237, 503,  # round-label-ok：本檔對帳列有既有豁免（同 R126/R129/R130）
+    ("R131", 93734, 94239, 505,  # round-label-ok：本檔對帳列有既有豁免（同 R126/R129/R130）
      "[非淨減法輪][全額功能軌] 喚醒鏈四方審計與三大問題最相關的一批發現經多位小幫手對抗查證"
      "（每項各兩位互不見面獨立重查），其中確認仍是破洞的一批（M-03/M-06/M-07/M-13/M-15/M-16/"
      "M-20）本輪修復並經主控獨立重跑驗證：test_context_budget_guard.py 11169→11628（+459；"
@@ -1881,7 +1881,7 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 _REPIN_LOG_FROZEN_PREFIX_LEN = 120
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "73adade3c9bd6f4760edf9127690c616d09169864b7e72d073fa9f9671949cd0")
+    "3a6d5d17cd327911ca09807e848ba89610305be25fa0d49a6526454048b7e967")
 
 
 def repin_log_history_digest(
@@ -2056,7 +2056,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # 回歸鎖的守衛線重釘。重釘使指紋前進，同體例「追加後立即自我凍結」——本輪追加一個
     # repin 稽核列＋本列＋本檔自身編修，prefix_len 119→120 涵蓋新 repin 列本身；
     # 載體＝DEF-200-272（四方審計撿回同家族）。
-    ("R131", "79ab4a9a386e", "73adade3c9bd", "DEF-200-272"),  # round-label-ok
+    ("R131", "79ab4a9a386e", "3a6d5d17cd32", "DEF-200-272"),  # round-label-ok
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

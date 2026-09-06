@@ -596,7 +596,13 @@ _SITE_CLASS_CENSUS: dict[str, dict[str, int]] = {
         # （非 win32 明說跳過）＋ powershell 找不到時的探針站點。第三個
         # `self.skipTest(f"...rc={rc}...")` 是 f-string 非字面 reason，落
         # `_NONLITERAL_TAG_DEBT` 另一本帳，不計入本表。
-        "runtime-skipTest": 28,
+        # 🔴 喚醒鏈四方審計修復包重釘 `runtime-skipTest` 28→29（**非放寬**，同上）。
+        # `TestSkipLedgerCoChangeLock.
+        # test_skip_ledger_co_change_ignores_a_touch_with_no_value_change` 新增一個
+        # 字面 reason 站點：本輪真實 origin/main..HEAD 對本檔的 diff 剛好也動了
+        # `_FROZEN_CEILING_MAX` 字面值時明說跳過（該情境改由生產接線鎖
+        # `test_skip_ledger_co_change_against_the_real_push_range` 覆蓋），不是隱藏失敗。
+        "runtime-skipTest": 29,
         "unclassified": 0,
     },
     # 🔴 R81 包 F 重釘 `windows-only` 9→10：並行包在

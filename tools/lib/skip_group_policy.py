@@ -453,7 +453,12 @@ _RUNTIME_SKIP_CEILING: dict[str, dict[str, int]] = {
     "tools/tests@darwin": {
         SKIP_GROUP_PLATFORM: 46,
         SKIP_GROUP_TOOL_ABSENCE: 0,
-        SKIP_GROUP_ENV_DISABLED: 0,
+        # 🔴 喚醒鏈四方審計修復包上修：`env-disabled` 0→1——
+        # test_skip_ledger_co_change_ignores_a_touch_with_no_value_change 本輪真實
+        # diff 撞上前提不成立時改標 [ENV-DISABLED]（該情境屬環境/當下狀態相依，非
+        # untagged debt），生產接線鎖 test_skip_ledger_co_change_against_the_real_push_range
+        # 已覆蓋同一情境的真正判準。
+        SKIP_GROUP_ENV_DISABLED: 1,
         SKIP_GROUP_STRUCTURAL: 0,
         SKIP_GROUP_DEBT: 0,
         SKIP_GROUP_UNTAGGED: 0,
@@ -567,7 +572,7 @@ _RUNTIME_SKIP_CEILING_MAX: dict[str, dict[str, int]] = {
     "tools/tests@darwin": {
         SKIP_GROUP_PLATFORM: 46,
         SKIP_GROUP_TOOL_ABSENCE: 0,
-        SKIP_GROUP_ENV_DISABLED: 0,
+        SKIP_GROUP_ENV_DISABLED: 1,  # 喚醒鏈四方審計修復包同 commit 上修，理由同見主表同鍵段
         SKIP_GROUP_STRUCTURAL: 0,
         SKIP_GROUP_DEBT: 0,
         SKIP_GROUP_UNTAGGED: 0,

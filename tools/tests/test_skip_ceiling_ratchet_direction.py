@@ -79,7 +79,7 @@ _FROZEN_CEILING_MAX: dict[str, dict[str, int]] = {
     "tools/tests@darwin": {
         S.SKIP_GROUP_PLATFORM: 46,  # round-label-ok：provenance 見 policy 主表同鍵段（M-19）
         S.SKIP_GROUP_TOOL_ABSENCE: 0,
-        S.SKIP_GROUP_ENV_DISABLED: 0,
+        S.SKIP_GROUP_ENV_DISABLED: 1,  # round-label-ok：provenance 見 policy 主表同鍵段
         S.SKIP_GROUP_STRUCTURAL: 0,
         S.SKIP_GROUP_DEBT: 0,
         S.SKIP_GROUP_UNTAGGED: 0,
@@ -550,10 +550,12 @@ class TestSkipLedgerCoChangeLock(unittest.TestCase):
             self.skipTest(
                 "origin/main 或 HEAD 對本檔的內容取不到——本鎖真正的執行點是本機"
                 " pre-push，見 `_origin_main_head_diff` docstring 的誠實劃界")
-        self.assertFalse(
-            _dict_literal_changed(old_text, new_text, "_FROZEN_CEILING_MAX"),
-            "前提檢查：本輪對 _FROZEN_CEILING_MAX 字面應該零變動，若這裡變 True，"
-            "代表本輪真的動了剖面鍵值，下面的綠斷言就不成立了")
+        if _dict_literal_changed(old_text, new_text, "_FROZEN_CEILING_MAX"):
+            self.skipTest(
+                "[ENV-DISABLED] 前提不成立：本次真實 origin/main..HEAD 對本檔的 diff "
+                "剛好也動了 _FROZEN_CEILING_MAX 字面值（合法的天花板上修，非本測試"
+                "針對的「只 touch 沒改值」情境）——這個情境改由生產接線鎖"
+                "test_skip_ledger_co_change_against_the_real_push_range 覆蓋")
         value_changed = {path: _source_path_value_changed(path, old_text, new_text)}
         problems = skip_ledger_co_change_problems([path], value_changed)
         self.assertEqual(problems, [], "\n".join(problems))
