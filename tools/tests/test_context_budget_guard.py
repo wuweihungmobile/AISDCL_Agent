@@ -5024,6 +5024,124 @@ class RearmAfterStopSuccessLeavesAVerifiableArmedJobTest(unittest.TestCase):
                      "重掛成功後，排程器現查應含該工作，而不能只看警語是否出聲")
 
 
+class RegisterAndRecordSurvivesAVanishedPlanFileTest(unittest.TestCase):
+    """喚醒鏈規則6事故複本（2026-09-05 23:03）：`write_relay()` 只接 `ValueError`，
+    任務書檔不存在時丟 `FileNotFoundError` 未被接住，炸穿整支無人巡邏行程。"""
+
+    def test_a_plan_file_that_never_existed_short_circuits_without_registering(self) -> None:
+        tmp = _tmpdir(self, "register-vanish-a-")
+        plan = tmp / "autosdd_resume_plan_sid-vanish-a.md"  # 刻意不建立
+        state = {**RelayStateTest.GOOD, "plan_path": str(plan), "session_id": "sid-vanish-a",
+                 "task_name": "T-vanish-a"}
+        at = datetime.now().astimezone() + timedelta(hours=1)
+        register_calls: list = []
+        with unittest.mock.patch.object(
+                relay_machine, "single_owner_conflict", return_value=False), \
+             unittest.mock.patch.object(
+                planner, "register_endurance",
+                side_effect=lambda *a, **k: (register_calls.append(1), (0, "x"))[1]):
+            rc, cred = planner._register_and_record(plan, state, at, planner.RESUME_TICK)
+        self.assertEqual((rc, cred), (1, ""), "應短路回報失敗，而不是崩潰或誤報成功")
+        self.assertEqual(state.get("state"), "abandoned")
+        self.assertFalse(register_calls, "不該繼續向 OS 排程器真的註冊")
+
+    def test_the_plan_file_vanishing_between_the_two_writes_still_reports_failure(self) -> None:
+        tmp = _tmpdir(self, "register-vanish-b-")
+        plan = tmp / "autosdd_resume_plan_sid-vanish-b.md"
+        state = {**RelayStateTest.GOOD, "plan_path": str(plan), "session_id": "sid-vanish-b",
+                 "task_name": "T-vanish-b"}
+        plan.write_text("# 任務書\n\n" + planner.render_relay(state),
+                        encoding="utf-8", newline="\n")
+        at = datetime.now().astimezone() + timedelta(hours=1)
+
+        def _vanish_during_register(st, at_, tick):
+            plan.unlink()  # 模擬 register_endurance() 執行期間檔案被系統清掉
+            return 0, "已回讀（測試）"
+
+        with unittest.mock.patch.object(
+                relay_machine, "single_owner_conflict", return_value=False), \
+             unittest.mock.patch.object(
+                planner, "register_endurance", side_effect=_vanish_during_register), \
+             unittest.mock.patch.object(
+                sb, "select", return_value=_StatefulFakeSchedulerBackend()):
+            rc, cred = planner._register_and_record(plan, state, at, planner.RESUME_TICK)
+        self.assertEqual((rc, cred), (1, ""),
+                         "第二次 write_relay 才是最終持久化，失敗必須讓整體回報失敗")
+
+
+class RearmAfterStopAndSentinelEscalateSurviveAVanishedPlanFileTest(unittest.TestCase):
+    """喚醒鏈規則6事故（2026-09-05 23:03）的兩個真實觸發路徑：`_rearm_after_stop`
+    （事故本體）與 `_sentinel_tick` 的 `escalate` 分支（四個裸 `write_relay` 站點中
+    優先度最高的一個，靠它才能大聲叫人）；兩者都經 `_write_relay_best_effort`／
+    `_register_and_record` 保護，此前皆會未捕捉崩潰。"""
+
+    def test_rearm_after_stop_does_not_crash_and_recovers_loudly(self) -> None:
+        tmp = _tmpdir(self, "rearm-vanish-")
+        plan = tmp / "plan.md"
+        live = tmp / "sid-rearm-vanish.jsonl"
+        live.write_text('{"type":"assistant"}\n', encoding="utf-8")
+        state = {**RelayStateTest.GOOD, "plan_path": str(plan), "session_id": "sid-rearm-vanish",
+                 "task_name": "T-rearm-vanish", "transcript": str(live)}
+        plan.write_text("# 任務書\n\n" + planner.render_relay(state),
+                        encoding="utf-8", newline="\n")
+        args = planner.build_parser().parse_args(
+            ["--resume-tick", "--plan", str(plan), "--task-name", "T-rearm-vanish"])
+        alert_calls: list[dict] = []
+        clear_calls: list[str] = []
+        plan.unlink()  # 事故重現：等待期間任務書已被系統（易失暫存目錄）清掉
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(unittest.mock.patch.object(
+                sb, "select", return_value=_StatefulFakeSchedulerBackend()))
+            stack.enter_context(unittest.mock.patch.object(
+                planner.escalation, "alert",
+                side_effect=lambda r, s, *, loud=True, plan=None, **_:
+                    (alert_calls.append({"reason": r, "loud": loud}), {})[1]))
+            stack.enter_context(unittest.mock.patch.object(
+                sentinel_lifecycle_arm, "clear_arm_latch",
+                side_effect=lambda sid, *a, **k: clear_calls.append(sid) or True))
+            rc = relay_machine._rearm_after_stop(planner, args, state, plan, tmp / "log.jsonl")
+        self.assertEqual(rc, 1, "應回報失敗，而不是崩潰或誤報成功")
+        self.assertEqual(clear_calls, ["sid-rearm-vanish"], "既有『清 latch』復原邏輯要真的跑到")
+        loud = [c for c in alert_calls if c["loud"] and "重掛哨兵失敗" in c["reason"]]
+        self.assertTrue(loud, f"沒有 loud alert：{alert_calls}")
+
+    def test_sentinel_escalate_still_alerts_and_removes_the_schtask(self) -> None:
+        tmp = _tmpdir(self, "sentinel-escalate-vanish-")
+        plan = tmp / "plan.md"
+        live = tmp / "sid-escalate-vanish.jsonl"
+        live.write_text('{"type":"assistant"}\n', encoding="utf-8")
+        state = {**RelayStateTest.GOOD, "plan_path": str(plan),
+                 "session_id": "sid-escalate-vanish", "task_name": "T-escalate-vanish",
+                 "kind": "sentinel", "transcript": str(live),
+                 "log_path": str(tmp / "log.jsonl")}
+        plan.write_text("# 任務書\n\n" + planner.render_relay(state),
+                        encoding="utf-8", newline="\n")
+        args = planner.build_parser().parse_args(
+            ["--sentinel-tick", "--plan", str(plan), "--task-name", "T-escalate-vanish"])
+        alert_calls: list[dict] = []
+        removed: list[str] = []
+        plan.unlink()  # 事故重現：write_relay 在 escalate 分支當下找不到任務書檔
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(unittest.mock.patch.object(
+                sb, "select", return_value=_StatefulFakeSchedulerBackend()))
+            stack.enter_context(unittest.mock.patch.object(
+                planner, "sentinel_decide",
+                lambda *_a, **_k: {"action": "escalate", "reason": "測試合成"}))
+            stack.enter_context(unittest.mock.patch.object(
+                planner, "_schtasks_remove",
+                side_effect=lambda t: (removed.append(t), 0)[1]))
+            stack.enter_context(unittest.mock.patch.object(
+                planner.escalation, "alert",
+                side_effect=lambda r, s, *, loud=True, plan=None, **_:
+                    (alert_calls.append({"reason": r, "loud": loud}), {})[1]))
+            stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
+            rc = planner._sentinel_tick(args)
+        self.assertEqual(rc, 1, "escalate 分支的既有契約：loud 一定回 1")
+        self.assertEqual(removed, ["T-escalate-vanish"], "write_relay 失敗不得連累收尾動作")
+        loud = [c for c in alert_calls if c["loud"]]
+        self.assertTrue(loud, f"write_relay 失敗導致連告警都發不出去：{alert_calls}")
+
+
 class DisarmClearsTheArmedStampTest(unittest.TestCase):
     """ADR-XPLAT-014 C5'／C10'（DEF-200-269 併修）：拆掉一支哨兵**必須同步清 armed stamp**。
 

@@ -506,7 +506,7 @@ _RUNTIME_SKIP_CEILING: dict[str, dict[str, int]] = {
     #    env-disabled=0／structural-pair=0／debt=0／untagged=0／欠債型 2 支（目標 0）`
     # 逐格照填、零加減推算（本表既有紀律；R96/R100 同型判例＝設計性平台 skip 兩表
     # 同 commit 同鍵上修並逐項交代）。
-    # 🔴 R131 收尾包漏同步：`platform` 78→**79**——M-19 新增 `Inv5SingleOwnerTest.
+    # 🔴 R131 round-label-ok 收尾包漏同步：`platform` 78→**79**——M-19 新增 `Inv5SingleOwnerTest.
     # test_real_get_scheduledtask_listing_feeds_other_owner_for_session`
     # （`[WINDOWS-NATIVE-ONLY]`）在 linux 剖面的必然互補 skip（+1）；上一輪只同步了
     # darwin 的天花板（45→46），漏了同一支測試在 linux 這一格的互補（DEF-200-272 同型
@@ -589,7 +589,7 @@ _RUNTIME_SKIP_CEILING_MAX: dict[str, dict[str, int]] = {
     # 🔴 R100：連同基線一起上修 63→77／`untagged` 9→0／`tool-absence` 0→2——理由、
     # provenance、逐項交代皆見 `_RUNTIME_SKIP_CEILING` 同鍵那一段，此處不複寫第二份。
     # 🔴 R115 round-label-ok：`platform` 77→78 同 commit 上修，理由同見主表同鍵段。
-    # 🔴 R131 收尾包漏同步：`platform` 78→79 同 commit 上修，理由同見主表同鍵段。
+    # 🔴 R131 round-label-ok 收尾包漏同步：`platform` 78→79 同 commit 上修，理由同見主表同鍵段。
     "tools/tests@linux": {
         SKIP_GROUP_PLATFORM: 79,
         SKIP_GROUP_TOOL_ABSENCE: 2,

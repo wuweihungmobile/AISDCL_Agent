@@ -145,6 +145,25 @@ def handback_dir_status() -> tuple[Path, bool]:
     return _durable_dir_status(HANDBACK_DIR_ENV, HANDBACK_HOME_PARTS)
 
 
+#: 可重啟點任務書目錄的逃生口（慣例同 TRACE_DIR_ENV／HANDBACK_DIR_ENV）。
+PLAN_DIR_ENV = "AUTOSDD_PLAN_DIR"
+
+#: 家目錄下的持久任務書居所（＝`~/.autosdd/plans`）。喚醒鏈規則6事故根因（2026-09-05
+#: 23:03）：任務書此前預設落在 `tempfile.gettempdir()`，等額度 reset 期間被系統清掉，
+#: `write_relay()` 讀不到檔而 FileNotFoundError——與 traces／handback 同一類「無人看管
+#: 期間這台機器真的發生了什麼」的持久狀態，理應同居所（§3(b)1）。
+PLAN_HOME_PARTS = (".autosdd", "plans")
+
+
+def plan_dir_status() -> tuple[Path, bool]:
+    """`(目錄, 是否已退回系統暫存)`——與 `trace_dir_status()` 同一份解析形態（見上）。"""
+    return _durable_dir_status(PLAN_DIR_ENV, PLAN_HOME_PARTS)
+
+
+def plan_dir() -> Path:
+    return plan_dir_status()[0]
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # F3-FIX3（複審必修，正中使用者原始痛點）：無人續跑「停下來時使用者收不到」
 # ══════════════════════════════════════════════════════════════════════════

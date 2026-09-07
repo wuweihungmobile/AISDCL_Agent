@@ -1762,6 +1762,68 @@ class DurableTraceHomeTest(unittest.TestCase):
                          "job 自己的 stdout（＝分支歷程）仍落在 $TMPDIR")
 
 
+class PlanDirWiringTest(unittest.TestCase):
+    """喚醒鏈規則6根因處理（Q2）：任務書居所延伸 `_durable_dir_status()` 既有 SSOT，
+    不重新設計兩層降級邏輯——那已經被 `DurableTraceHomeTest` 證過。本組只鎖**接線**：
+    plans 有自己獨立的逃生口與家目錄居所，不與 traces／handback 共用同一個鍵。
+    """
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="r131_plandir_"))
+        self.addCleanup(os.environ.pop, endurance_env.PLAN_DIR_ENV, None)
+
+    def test_plan_dir_env_is_distinct_from_traces_and_handback(self) -> None:
+        self.assertNotEqual(endurance_env.PLAN_DIR_ENV, endurance_env.TRACE_DIR_ENV)
+        self.assertNotEqual(endurance_env.PLAN_DIR_ENV, endurance_env.HANDBACK_DIR_ENV)
+        self.assertNotEqual(endurance_env.PLAN_HOME_PARTS, endurance_env.TRACE_HOME_PARTS)
+        self.assertNotEqual(endurance_env.PLAN_HOME_PARTS, endurance_env.HANDBACK_HOME_PARTS)
+
+    def test_the_override_is_honoured_and_created(self) -> None:
+        want = self.tmp / "sandbox" / "plans"
+        os.environ[endurance_env.PLAN_DIR_ENV] = str(want)
+        self.assertEqual(endurance_env.plan_dir(), want)
+        self.assertTrue(want.is_dir(), "逃生口指定的目錄沒有被建出來")
+
+    def test_the_default_home_is_not_the_volatile_tmpdir(self) -> None:
+        """本組鎖的核心價值：規則6事故根因——預設居所不得落在會被 OS 清掉的那一棵樹底下。"""
+        os.environ.pop(endurance_env.PLAN_DIR_ENV, None)
+        default = Path.home().joinpath(*endurance_env.PLAN_HOME_PARTS)
+        self.assertNotEqual(default.resolve(strict=False),
+                            Path(tempfile.gettempdir()).resolve(strict=False))
+        self.assertIn(Path.home(), default.parents, "預設居所不在家目錄底下")
+
+    def test_status_reports_degradation_like_its_siblings(self) -> None:
+        """`plan_dir_status()` 與 `trace_dir_status()`／`handback_dir_status()` 同一份
+        `_durable_dir_status()` 解析形態——兩層降級本身已被既有測試證過，這裡只驗
+        本函式真的委派過去（第二格布林在正常情況下為 False）。"""
+        want = self.tmp / "ok"
+        os.environ[endurance_env.PLAN_DIR_ENV] = str(want)
+        directory, degraded = endurance_env.plan_dir_status()
+        self.assertEqual(directory, want)
+        self.assertFalse(degraded)
+
+
+class ReapPlansDefaultRootFollowsPlanDirTest(unittest.TestCase):
+    """喚醒鏈規則6根因處理的必修耦合點（Architect 交叉審視發現、經現查屬實）：只搬
+    寫入端（`session_resume_planner.main()` 的 `--out` 預設值）不搬回收端，新任務書
+    會落在新目錄卻永遠沒人回收——重演本檔既有記載的『`%TEMP%` 累積 26 份任務書』
+    舊事故，只是換一個目錄發生。"""
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="r131_reap_plandir_"))
+        self.addCleanup(os.environ.pop, endurance_env.PLAN_DIR_ENV, None)
+
+    def test_reap_plans_with_no_root_scans_the_durable_plan_dir_not_system_tmp(self) -> None:
+        os.environ[endurance_env.PLAN_DIR_ENV] = str(self.tmp)
+        stray = self.tmp / f"{guard.PLAN_PREFIX}reap-plandir-probe.md"
+        stray.write_text("# 任務書\n", encoding="utf-8", newline="\n")
+        old = time.time() - escalation.PLAN_GC_AGE_SECONDS * 2
+        os.utime(stray, (old, old))
+        gone = escalation.reap_plans()  # 不傳 root ⇒ 必須落在 endurance_env.plan_dir()
+        self.assertIn(stray.name, gone,
+                      "reap_plans() 的預設 root 沒有跟著寫入端一起搬到 endurance_env.plan_dir()")
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # 🔴 R84／ARCH-06：「什麼時候可以刪任務書」只准有一個判準、一個 unlink 站點
 # ═══════════════════════════════════════════════════════════════════════════

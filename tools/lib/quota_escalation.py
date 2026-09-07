@@ -707,11 +707,14 @@ def reap_plans(*, session_id: str = "", root: object = None, now: float | None =
                extra: tuple = ()) -> list[str]:
     """**唯一**會刪 `autosdd_resume_plan_*.md` 的地方。回實際刪掉的檔名（可直接稽核）。
 
-    `root` 是注入點：預設掃系統暫存（production 唯一的落點），測試把它指到沙箱——
-    一支會真的去刪開發者 `%TEMP%` 的單元測試，是把驗證載具做成了副作用來源。
+    `root` 是注入點：預設掃 `endurance_env.plan_dir()`（production 唯一的落點，與
+    寫入端 `session_resume_planner.main()` 的預設落點同一份 SSOT——只搬寫入端不搬
+    這裡，會讓新任務書永遠落在新目錄卻永遠沒人回收，重演本檔既有記載的「`%TEMP%`
+    累積 26 份任務書」舊事故），測試把它指到沙箱——一支會真的去刪開發者持久目錄的
+    單元測試，是把驗證載具做成了副作用來源。
     `extra` 收「呼叫端手上那一份可能不在 `root` 底下」的情形（`gc_plans` 的 `current`）。
     """
-    base = Path(str(root) if root else tempfile.gettempdir())
+    base = Path(str(root) if root else endurance_env.plan_dir())
     victims = dict.fromkeys(base.glob(f"{guard.PLAN_PREFIX}*.md"), False)
     victims.update({Path(str(p)): True for p in extra})
     gone = []

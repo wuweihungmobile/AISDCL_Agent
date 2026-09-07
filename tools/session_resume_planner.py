@@ -787,6 +787,16 @@ def write_relay(plan: Path, state: dict) -> None:
     plan.write_text(text, encoding="utf-8", newline="\n")
 
 
+# 無人巡邏行程（_resume_tick／_sentinel_tick 的終態分支）寫任務書失敗時不得整支崩潰——
+# 後續清理動作（_schtasks_remove／escalation.alert／append_log）不依賴這次有沒有真的
+# 寫進磁碟，一律照跑；同 _register_and_record／_heal_relay 既有的 except OSError 寬度。
+def _write_relay_best_effort(plan: Path, state: dict) -> None:
+    try:
+        write_relay(plan, state)
+    except OSError:
+        pass
+
+
 def render_plan(data: dict, now: str) -> str:
     """任務書骨架。四項欄位齊備；無法自動得知的一律 `TODO:`，本檔不代填。"""
     used = f"{data['used']:,}" if data["used"] is not None else "（量不到）"
@@ -979,14 +989,28 @@ def _register_and_record(plan: Path, state: dict, at: datetime, tick: str) -> tu
     """
     if relay_machine.single_owner_conflict(state.get("session_id"), state.get("task_name"), plan):  # noqa: E501
         return 0, relay_machine.DEFERRED_CREDENTIAL
-    write_relay(plan, state)
+    # 🔴 事故座標（2026-09-05 23:03）：任務書檔在等待期間消失（易失暫存目錄）⇒
+    # write_relay() 的 read_text() 丟 FileNotFoundError（OSError 子類別，write_relay
+    # 只接 ValueError）未捕捉往外拋，整支無人巡邏行程崩潰——呼叫端既有的
+    # 「rc!=0 ⇒ 清 latch + loud alert」正確復原路徑因此完全沒機會執行到。與既有
+    # _heal_relay（同檔）的 except OSError 同寬度：任何 I/O 層失敗都視為「這次
+    # 武裝/重掛不算數」，不分成因。第一次失敗即短路，不繼續向 OS 排程器註冊，
+    # 避免留下「job 活著、狀態卻寫不出來」的孤兒。
+    try:
+        write_relay(plan, state)
+    except OSError:
+        state["state"] = "abandoned"
+        return 1, ""
     rc, moment = register_endurance(state, at, tick)
     # 憑證寫進**該後端自己的鍵**（Windows＝next_run_time、mac＝schedule_credential）。
     # 兩者語意不同，共用一個鍵會讓「推算值」與「排程器回報值」在狀態檔裡分不開。
     state[schedule_backend.select().credential_key] = moment
     if rc != 0:
         state["state"] = "abandoned"
-    write_relay(plan, state)
+    try:
+        write_relay(plan, state)
+    except OSError:
+        return 1, ""
     return rc, moment
 
 
@@ -1240,7 +1264,7 @@ def _resume_tick(args) -> int:
     if decision["action"] == "stop":
         state["state"] = decision["state"]
         state.update(_cleared_credentials())
-        write_relay(plan, state)
+        _write_relay_best_effort(plan, state)
         # 終態要把排程收掉。`-Once` 觸發器不會再響，但留著一支死工作會讓下一個人
         # 用 `Get-ScheduledTask` 查現況時看到一支「還在」的續航工作——而它其實已經
         # 放棄了。本 repo 對「查詢載具給出過期事實」有判例，這裡不留那個坑。
@@ -1259,7 +1283,7 @@ def _resume_tick(args) -> int:
         # 查詢載具交出一個過期事實（本 repo 對此有判例）。`patrolling` 不在憑證閘的
         # 射程內（`armed`／`waiting` 才是），所以清空不會反過來造出一筆違規。
         state.update(_cleared_credentials())
-        write_relay(plan, state)
+        _write_relay_best_effort(plan, state)
         # 🔴 DEF-200-267 F2-①：`_sentinel_tick` 的 probe 分支直接 `return _resume_tick(args)`
         # ⇒ 這裡的 `state["task_name"]` 常是**哨兵自己**。同名時「先拆再武裝」在 launchd 上＝延後
         # bootout 拆掉剛被冪等路徑認證 `state = running` 的接班者（2026-09-05 18:12 實跡）⇒ 同名
@@ -1303,7 +1327,7 @@ def _resume_tick(args) -> int:
     rc, state["state"] = 0, "resumed"; append_log(log, "quota_back_no_resume")  # noqa: E702 — ⓿ 瘦身（v2.1.13 G3 讓出額度）
     print(f"✅ 額度已恢復。狀態塊記著 allow_resume=false（帶了 --no-allow-resume／{RESUME_OFF_ENV}，或它是 R79 之前武裝的）⇒ 人回來跑：claude -r {state['session_id']}")  # noqa: E501
     state.update(_cleared_credentials())
-    write_relay(plan, state)
+    _write_relay_best_effort(plan, state)
     _schtasks_remove(state["task_name"])  # noqa: E501 — -Once 已觸發、不會再響（relay 路徑已在 settle_window 內自行處理）
     return rc if rc is not None else 1
 
@@ -1442,7 +1466,7 @@ def _sentinel_tick(args) -> int:
         # `%TEMP%` 累積 26 份任務書的原因。`**fan` 把扇出死者數帶進叫人的門檻。
         loud = decision["action"] == "escalate"
         state.update(state="abandoned" if loud else "disarmed", **_cleared_credentials())
-        write_relay(plan, state)
+        _write_relay_best_effort(plan, state)
         rc = _schtasks_remove(state["task_name"])
         told = escalation.alert(decision["reason"], state, loud=loud, plan=plan, **fan)
         append_log(log, "sentinel_" + decision["action"], unregister_rc=rc, why=decision["reason"], **told)  # noqa: E501
@@ -1540,7 +1564,7 @@ def main(argv: list[str]) -> int:
         return 0
 
     out = Path(args.out) if args.out else (
-        Path(tempfile.gettempdir()) / f"{PLAN_PREFIX}{data['session_id']}.md"
+        endurance_env.plan_dir() / f"{PLAN_PREFIX}{data['session_id']}.md"
     )
     now = datetime.now(UTC).astimezone().isoformat(timespec="seconds")
     try:

@@ -682,7 +682,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 7373,
+    "test_adr_xplat001_c1c2_lock.py": 7399,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 3839,
@@ -700,7 +700,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_check_wrapper_thinness.py": 1234,
     "test_claim_provenance_r86.py": 618,
     "test_component_sanitizer_shared_layer_lock.py": 293,
-    "test_context_budget_guard.py": 11628,
+    "test_context_budget_guard.py": 11746,
     "test_defect_id_reference_integrity.py": 281,
     "test_dev_start.py": 6527,
     "test_dev_start_ps1_lastexitcode.py": 548,
@@ -713,7 +713,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_git_hooks_install_common.py": 393,
     "test_guard_line_taxonomy_r99.py": 148,
     "test_install_windows_nightly.py": 1385,
-    "test_mac_endurance_r83.py": 1887,
+    "test_mac_endurance_r83.py": 1949,
     "test_mac_readiness_r82.py": 621,
     "test_macos_smoke_skip_honesty.py": 225,
     "test_maturity_criteria_r79.py": 431,
@@ -736,7 +736,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_sanitize_component_frozen_sdd_versions_lock.py": 340,
     "test_schedule_capability_parity.py": 626,
     "test_script_scan_surface_ssot.py": 391,
-    "test_skip_ceiling_ratchet_direction.py": 702,
+    "test_skip_ceiling_ratchet_direction.py": 706,
     "test_skip_discoverability_r83.py": 744,
     "test_smoke_ci_sync.py": 1353,
     "test_stdio_utf8.py": 76,
@@ -1503,6 +1503,17 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "approved-overage 不計；下一輪起須 ≤0 或再核准例外）。逐檔清單見 "
      "CrossPlatform_R131_Scan_Findings.md（規則驗證檢查表見 "
      "WakeChain_IronLaws_Verification.md）。"),
+    ("R131", 94239, 94449, 210,
+     "[非淨減法輪][回歸鎖軌全額申報，見 _REGRESSION_LANE_LOG 同輪列] 規則6崩潰根因修復"
+     "（_register_and_record／_write_relay_best_effort 四站點／endurance_env.plan_dir）"
+     "的回歸鎖：test_context_budget_guard.py 11628→11746（+118；RegisterAndRecordSurvives"
+     "AVanishedPlanFileTest＋RearmAfterStopAndSentinelEscalateSurviveAVanishedPlanFileTest）"
+     "＋test_mac_endurance_r83.py 1887→1949（+62；PlanDirWiringTest＋"
+     "ReapPlansDefaultRootFollowsPlanDirTest）＋test_skip_ceiling_ratchet_direction.py "
+     "702→706（+4；R131 round-label-ok 註解）＋本檔自身逐檔漂移（+25；本稽核列＋回歸鎖軌列＋"
+     "四處 repin_log_problems／repin_growth_problems 呼叫點補 regression_lane 參數＋"
+     "_FROZEN_PREFIX_REWRITE_LEDGER 接鏈列）。逐檔清單見 CrossPlatform_R131_Scan_Findings.md"
+     "（根因分析見 WakeChain_IronLaws_Verification.md）。"),
 )
 
 
@@ -1651,6 +1662,11 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "純函式群＋TestDef200133TrackedImportsDoNotPointAtUntrackedFiles（含合成注入紅綠與真倉庫綠），"
      "新增行數全額歸本軌（記帳誠實度分類）；同檔同輪另有沿革散文搬出，故該檔與主表淨額皆為負，"
      "「子項不得大於母項」那一款對母項 ≤ 0 不判（淨減法輪語意）。"),
+    ("R131", 210, "規則6崩潰根因修復（write_relay 在任務書檔消失時未捕捉例外炸穿無人巡邏"
+     "行程）的回歸測試：RegisterAndRecordSurvivesAVanishedPlanFileTest＋"
+     "RearmAfterStopAndSentinelEscalateSurviveAVanishedPlanFileTest（test_context_budget_"
+     "guard.py）＋PlanDirWiringTest／ReapPlansDefaultRootFollowsPlanDirTest（test_mac_"
+     "endurance_r83.py）＋本檔自身稽核列（記帳誠實度分類，非必要湊額）。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -1878,10 +1894,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 120
+_REPIN_LOG_FROZEN_PREFIX_LEN = 121
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "3a6d5d17cd327911ca09807e848ba89610305be25fa0d49a6526454048b7e967")
+    "1d5bb6d4bec121753c6d275f2793806d2d8d8816fd412e9215e50b97333fbcae")
 
 
 def repin_log_history_digest(
@@ -2057,6 +2073,11 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # repin 稽核列＋本列＋本檔自身編修，prefix_len 119→120 涵蓋新 repin 列本身；
     # 載體＝DEF-200-272（四方審計撿回同家族）。
     ("R131", "79ab4a9a386e", "3a6d5d17cd32", "DEF-200-272"),  # round-label-ok
+    # R131 收尾：喚醒鏈規則6崩潰根因修復（write_relay 任務書消失未捕捉例外）回歸鎖 round-label-ok
+    # ＋本檔自身編修（cost-envelope 測試補 regression_lane 參數）使指紋再前進；
+    # 同輪追加一個 repin 稽核列＋一個回歸鎖軌列＋本列，prefix_len 120→121 涵蓋新列本身；
+    # 載體＝DEF-200-272（同家族）。
+    ("R131", "3a6d5d17cd32", "1d5bb6d4bec1", "DEF-200-272"),  # round-label-ok
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。
@@ -3974,9 +3995,11 @@ class TestGuardLayerRatchet(unittest.TestCase):
         下一個人唯一的出路是把整道鎖刪掉（ARCH-02 已判過這個形狀）。
         """
         self.assertEqual(
-            repin_growth_problems(_GUARD_LINES_REPIN_LOG), [],
+            repin_growth_problems(_GUARD_LINES_REPIN_LOG,
+                                  regression_lane=_REGRESSION_LANE_LOG), [],
             "款(10)(11) 對真表說話了——它們刻意不追溯到 "
-            f"R{_REPIN_ROUND_CAP_SINCE} 之前，請檢查生效點是否被改動")
+            f"R{_REPIN_ROUND_CAP_SINCE} 之前，請檢查生效點是否被改動（R117 起分軌："
+            "回歸鎖軌淨額不計入本款，見 _REGRESSION_LANE_LOG）")
         nets = repin_round_nets(_GUARD_LINES_REPIN_LOG)
         self.assertTrue(nets, "稽核痕跡空了 ⇒ 淨額又回到「不出現在任何地方」")
         #: 🔴 R85 收尾單人窗口訂正（把動工中的預測寫成契約、當輪即被證偽）——立案原文＝
@@ -4512,7 +4535,8 @@ class TestGuardLayerRatchet(unittest.TestCase):
             tuple(rows), sum(_FROZEN_GUARD_LINES.values()),
             history_digest=_REPIN_LOG_HISTORY_SHA256,
             prefix_len=_REPIN_LOG_FROZEN_PREFIX_LEN,
-            max_unfrozen_tail=_REPIN_LOG_MAX_UNFROZEN_TAIL)
+            max_unfrozen_tail=_REPIN_LOG_MAX_UNFROZEN_TAIL,
+            regression_lane=_REGRESSION_LANE_LOG)
         self.assertEqual(
             [p for p in problems if "[歷史被改寫]" in p], problems,
             f"應恰為 [歷史被改寫] 一款（零串音）；實得：{problems}")
@@ -4529,7 +4553,8 @@ class TestGuardLayerRatchet(unittest.TestCase):
         problems = repin_log_problems(
             tuple(rows), sum(_FROZEN_GUARD_LINES.values()),
             history_digest=coordinated_digest, prefix_len=_REPIN_LOG_FROZEN_PREFIX_LEN,
-            max_unfrozen_tail=_REPIN_LOG_MAX_UNFROZEN_TAIL)
+            max_unfrozen_tail=_REPIN_LOG_MAX_UNFROZEN_TAIL,
+            regression_lane=_REGRESSION_LANE_LOG)
         self.assertEqual(problems, [], "前提不成立：協同改寫本該讓既有判準沉默")
 
     def test_frozen_prefix_rewrite_ledger_chains_and_validates_def_ids(self) -> None:
@@ -4590,7 +4615,8 @@ class TestGuardLayerRatchet(unittest.TestCase):
                 appended, total,
                 history_digest=_REPIN_LOG_HISTORY_SHA256,
                 prefix_len=_REPIN_LOG_FROZEN_PREFIX_LEN,
-                max_unfrozen_tail=_REPIN_LOG_MAX_UNFROZEN_TAIL),
+                max_unfrozen_tail=_REPIN_LOG_MAX_UNFROZEN_TAIL,
+                regression_lane=_REGRESSION_LANE_LOG),
             [], "追加一列是正常動作，不得有任何一款說話")
 
     def test_letting_the_unfrozen_tail_grow_is_red(self) -> None:
