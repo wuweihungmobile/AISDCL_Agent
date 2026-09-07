@@ -1,7 +1,7 @@
 {
   "_why": "M6（每一支測試都至少在某條軌上真的跑過一次）的落款：**每個剖面各自記下它 skip 掉的 test-id 集合**，判準＝skip(A) ⊆ run(B) ∪ 合法平台專屬集合（等價於 skip(A) ∩ skip(B) − 豁免 = ∅）。判準的家＝tools/lib/skip_runtime_report.py::m6_id_set_problems；本檔只是史料。缺任一剖面時判準回『不可求值』而不是回綠。落款取得＝在該剖面上跑 python tools/run_root_unittests.py，它會印出可直接貼進本檔的區塊；重釘＝把該剖面那一格換成新的可貼落款（逐 id 差異會出現在 diff 裡，這就是稽核痕跡）。刻意不記『跑過的 id 全集』：那是數千筆、每輪都在變，而 run(B) 由『B 的落款裡沒有它』推得即足以回答 M6（誠實劃界見判準檔）。",
   "tools/tests@darwin": {
-    "measured-at": "2026-09-07T04:46:32+00:00（本機 push 前置閘門實測：`test_skip_ceiling_ratchet_direction.TestSkipLedgerCoChangeLock.test_skip_ledger_co_change_ignores_a_touch_with_no_value_change` 因本輪真實 diff 動了同檔 `_FROZEN_CEILING_MAX` 字面值而轉為 `[ENV-DISABLED]` skip，重新計入——逐格照填、零加減推算）",
+    "measured-at": "2026-09-07T05:30:05+00:00（真 GitHub run：macos-compat-ci 對本次 push 的 skip census 落款；訂正本輪先前的誤植——`test_skip_ledger_co_change_ignores_a_touch_with_no_value_change` 的 [ENV-DISABLED] skip 只在本機分支領先 origin/main 時暫態成立，push 落地後 HEAD＝origin/main、diff 清空即恆常態執行，CI 上不 skip——逐格照填、零加減推算）",
     "host": "macOS-26.5.2-arm64-arm-64bit",
     "ran": 3284,
     "skipped": [
@@ -47,7 +47,6 @@
       "test_ps51_compat.TestPs51BehaviouralLockCannotSilentlyVanish.test_native_ps51_predicate_holds_on_windows",
       "test_ps51_compat.TestPs51NativeArgvRoundTrip.test_carrier_has_teeth_embedded_double_quotes_really_are_eaten",
       "test_ps51_compat.TestPs51NativeArgvRoundTrip.test_production_version_probe_survives_native_argv_round_trip",
-      "test_skip_ceiling_ratchet_direction.TestSkipLedgerCoChangeLock.test_skip_ledger_co_change_ignores_a_touch_with_no_value_change",
       "test_windows_forbidden_filename_parity.TestReservedNameVsGitOracle.test_every_over_block_is_named_with_a_reason",
       "test_windows_forbidden_filename_parity.TestReservedNameVsGitOracle.test_named_over_blocks_are_still_real_divergences",
       "test_windows_forbidden_filename_parity.TestReservedNameVsGitOracle.test_repo_is_never_looser_than_the_oracle",

@@ -1564,7 +1564,15 @@ def test_swapping_one_test_id_at_a_constant_count_is_red_but_the_count_ceiling_i
     assert any(p.startswith("[漂移]") for p in problems), problems
 
     # 對照組：舊判準（計數面）對同一件事。census 由 reason 分群而來，換 id 不改任何一格。
-    census = P.skip_group_census([f"{P.WINDOWS_NATIVE_SKIP_TAG} x"] * len(live))
+    # 🔴 reason 分佈須照登記天花板的分群比例合成（而非全灌 platform）：darwin 落款一旦
+    # 含非 platform 群（如 [ENV-DISABLED]），len(live) 就不再等於 platform 群天花板本身。
+    ceiling = P._RUNTIME_SKIP_CEILING[_M6_PROF]
+    reasons = (
+        [f"{P.WINDOWS_NATIVE_SKIP_TAG} x"] * ceiling[P.SKIP_GROUP_PLATFORM]
+        + [f"{P.ENV_DISABLED_SKIP_TAG} x"] * ceiling[P.SKIP_GROUP_ENV_DISABLED]
+    )
+    assert len(reasons) == len(live), "對照組合成分佈須與 live 計數一致，否則失去對照意義"
+    census = P.skip_group_census(reasons)
     assert P.skip_group_census_problems(_M6_PROF, census) == [], (
         "計數面居然也紅了——那本支的對照組就不成立，請重新確認注入是否真的保持計數不變"
     )
