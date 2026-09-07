@@ -122,6 +122,47 @@ class RatchetDriftWarningTest(unittest.TestCase):
             "四分之一，再放著就會輪到 ZeroDepEnvironmentDiscriminationTest 用錯的歸因先炸",
         )
 
+    def test_the_absolute_gap_criterion_reds_a_pin_that_lags_too_far(self) -> None:
+        """紅綠自證（合成注入，不依賴當回合實況）＋兩條門檻的相對位置。
+
+        WHY 本軸與上面兩支不重複（`min_tests_margin.ABSOLUTE_GAP_FRACTION` 的 WHY 的
+        測試面）：餘裕軸的分母是 `collapse_loss`，`loss <= 0` 時它逐字回 `None`＝
+        **不適用**——那幾支相依模組哪天不再整份塌，整條軸靜音，後備只剩 25% 比例線。
+        本軸的分母是實跑數自己，結構上不會變成「不適用」。
+        """
+        self.assertLess(
+            min_tests_margin.ABSOLUTE_GAP_FRACTION,
+            run_root_unittests.RATCHET_STALE_RATIO - 1.0,
+            "絕對餘裕軸的容忍度必須嚴格緊於比例紅線，否則它永遠輪不到說話＝沒有牙",
+        )
+        allowed = int(1000 * min_tests_margin.ABSOLUTE_GAP_FRACTION)
+        self.assertIsNone(
+            min_tests_margin.absolute_gap_message(1000, 1000 - allowed),
+            "剛好用完容忍額度就判紅＝緩衝帶為空，合法的單輪成長會被誤傷",
+        )
+        msg = min_tests_margin.absolute_gap_message(1000, 1000 - allowed - 1)
+        self.assertIsNotNone(msg)
+        assert msg is not None
+        self.assertIn("1000", msg, "提醒必須直接給出該重釘的數字，否則還要人自己算")
+        self.assertIn("MIN_TESTS", msg)
+
+    def test_current_pin_gap_is_within_the_absolute_tolerance(self) -> None:
+        """棘輪本體（實況面）：`實跑收集數 − MIN_TESTS` 不得吃掉超過實跑數的容忍比例。
+
+        WHY 這一支要存在（M-20 的另一半）：`InvariantLocksArePresentTest` 已讓「整批刪掉
+        INV 測試類別」變成會紅的事，但**下限自己的餘裕大小**沒人守——下限落後實跑數越
+        遠，「可靜默蒸發幾支測試仍不紅」就越大，而那個數字就是本 runner 唯一的地板的
+        鑑別力。紅字直接帶著該重釘成多少；重釘一律由收尾單人窗口在並行包停工後做一次。
+        """
+        count = run_root_unittests.discover_suite(
+            run_root_unittests._TESTS_DIR
+        ).countTestCases()
+        self.assertIsNone(
+            min_tests_margin.absolute_gap_message(count, run_root_unittests.MIN_TESTS),
+            "↑ 這則訊息本身就是修法（含該重釘成多少）。它出現＝MIN_TESTS 已被實跑數"
+            "甩開太遠，地板的鑑別力被榨乾，請重釘那個常數而不是放寬本容忍度",
+        )
+
 
 class RunRootUnittestsTest(unittest.TestCase):
     def _make_fixture(self, tmp_name: str, n_tests: int) -> Path:

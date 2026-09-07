@@ -682,7 +682,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 7414,
+    "test_adr_xplat001_c1c2_lock.py": 7440,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 3839,
@@ -698,9 +698,9 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_check_pytest_baseline_sites.py": 301,
     "test_check_script_parity.py": 2098,
     "test_check_wrapper_thinness.py": 1234,
-    "test_claim_provenance_r86.py": 618,
+    "test_claim_provenance_r86.py": 806,
     "test_component_sanitizer_shared_layer_lock.py": 293,
-    "test_context_budget_guard.py": 11830,
+    "test_context_budget_guard.py": 11861,
     "test_defect_id_reference_integrity.py": 281,
     "test_dev_start.py": 6527,
     "test_dev_start_ps1_lastexitcode.py": 548,
@@ -732,7 +732,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_python_c_percent_shim.py": 119,
     "test_quota_policy.py": 3396,
     "test_root_infra_parity.py": 441,
-    "test_run_root_unittests.py": 2451,
+    "test_run_root_unittests.py": 2492,
     "test_sanitize_component_frozen_sdd_versions_lock.py": 340,
     "test_schedule_capability_parity.py": 626,
     "test_script_scan_surface_ssot.py": 391,
@@ -1523,6 +1523,18 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "RearmAndSentinelRearmedBranchesAlsoAlertLoudOnFailureTest）＋本檔自身逐檔漂移"
      "（+15；本稽核列＋回歸鎖軌列＋_FROZEN_PREFIX_REWRITE_LEDGER 接鏈列）。逐檔清單見 "
      "CrossPlatform_R131_Scan_Findings.md（根因分析見 WakeChain_IronLaws_Verification.md）。"),
+    ("R132", 94548, 94808, 260,
+     "[非淨減法輪][回歸鎖軌全額申報，見 _REGRESSION_LANE_LOG 同輪列] 另起 R132 而非續記 R131 "
+     "係因 R131 的 cap(550)／lane(309) 兩額度已由既有列用盡，非開新一輪迭代四件套。"
+     "掌舵者裁決收尾：規則2/3分階段fan-out限制拆除（訂閱制風險模型下主agent喚醒即完全信任，"
+     "經SA/SD雙審通過並實測巢狀權限層仍擋git push）＋規則7 leak_fence決定性判死（M-04：改比對"
+     "真排程器工作清單前後差集，非僅觀察暫存檔）＋規則8無值宣稱偵測（NAKED_VERDICT_RE，以真實"
+     "逐字稿母體校準門檻）＋規則5補macOS真launchd串接測試（此前只有Windows側有）。逐檔清單見 "
+     "CrossPlatform_R131_Scan_Findings.md §5（根因分析見 WakeChain_IronLaws_Verification.md）。"),
+    ("R132", 94808, 94834, 26,
+     "[非淨減法輪][回歸鎖軌全額申報，見 _REGRESSION_LANE_LOG 同輪列] 本檔自身逐檔漂移"
+     "（前一筆 R132 稽核列＋對應 _REGRESSION_LANE_LOG 列本身的行數）。詳 "
+     "CrossPlatform_R131_Scan_Findings.md §5。"),
 )
 
 
@@ -1679,6 +1691,14 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
     ("R131", 99, "對抗式複審發現的收尾修復回歸鎖："
      "RearmAndSentinelRearmedBranchesAlsoAlertLoudOnFailureTest"
      "（test_context_budget_guard.py）＋本檔自身稽核列（記帳誠實度分類，非必要湊額）。"),
+    ("R132", 260, "掌舵者裁決收尾四項的回歸鎖全數歸本軌（記帳誠實度分類，非必要湊額）："
+     "LeakFenceTest／RatchetDriftWarningTest（leak_fence M-04 決定性判死）＋"
+     "TestTheNakedVerdictWithNoEvidenceIsFlagged／TestTheNakedGuardIsItsOwnProcessLevelContract"
+     "（check_claim_provenance.py 無值宣稱偵測）＋test_real_launchd_listing_feeds_other_owner_"
+     "for_session（規則5 macOS真機串接）＋本檔自身稽核列。"),
+    ("R132", 26, "本檔自身逐檔漂移（追加的第二筆 R132 稽核列＋本列自身＋"
+     "_FROZEN_PREFIX_REWRITE_LEDGER 接鏈列）全額歸本軌"
+     "（記帳誠實度分類，非必要湊額）。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -1743,7 +1763,9 @@ def _regression_lane_cap_basis() -> tuple[str, int]:
 # 本輪主軸為款(11) 護欄層淨額義務與五筆結案；逐檔勘查座標見 CrossPlatform_R127_Scan_Findings.md §3。
 # 🔴 R130 具名展延（鐵律七，不得靜默沿用）round-label-ok：喚醒鏈死碼修復窗口，
 # 非 root-tools 重構持有面；真拆待獨立窗口，130 → 132。
-_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND = 132
+# 🔴 R132 具名展延（鐵律七，不得靜默沿用）round-label-ok：喚醒鏈規則2/3/5/7/8收尾窗口，
+# 非 root-tools 重構持有面；真拆待獨立窗口，132 → 133。
+_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND = 133
 #: 清償旗標——真拆完成後改 True。刻意用布林而非重建舊尺計數器（ADR §9.3「舊尺已廢」）。
 _ROOT_TOOLS_OLD_SCALE_DEBT_RESOLVED = False
 #: A-2 後設鎖：到期輪只准落在「現查輪＋lookahead」內，推遠（如 9999）當場紅；shrink-only
@@ -1906,10 +1928,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 122
+_REPIN_LOG_FROZEN_PREFIX_LEN = 124
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "2b26192695382c0c0c76d5727f039cabc129ce77abe62a42b19b3e6a92c7caed")
+    "60a3d5bf721ba552147294db064c6f569605943205104042550a850731d00d2e")
 
 
 def repin_log_history_digest(
@@ -2093,6 +2115,10 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # R131 二度收尾：對抗式複審發現的收尾修復回歸鎖＋本檔自身編修，prefix_len round-label-ok
     # 121→122 涵蓋新列本身；載體＝DEF-200-272（同家族）。
     ("R131", "1d5bb6d4bec1", "2b2619269538", "DEF-200-272"),  # round-label-ok
+    # R132 三度收尾：規則2/3拆除／規則7 leak_fence／規則8無值宣稱／規則5 macOS round-label-ok
+    # 串接測試四項回歸鎖＋本檔自身兩筆稽核列，prefix_len 122→124 涵蓋新列本身；
+    # 載體＝DEF-200-272（同家族）。
+    ("R132", "2b2619269538", "60a3d5bf721b", "DEF-200-272"),  # round-label-ok
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

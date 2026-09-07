@@ -3058,12 +3058,15 @@ class UnattendedPermissionPostureTest(unittest.TestCase):
         旗標值也一併釘住（acceptEdits／姿態檔絕對路徑），且必須排在變長的
         `--add-dir` 之前——排在其後會被那個變長參數吃掉（同姊妹鎖的立案缺陷）。
 
-        🔴 M-06 訂正：兩路呼叫都**不帶** `followup_ok`（預設 `False`）——RESUME 第一窗
-        與 FRESH（結構上永遠沒有可證實的前一窗進度）現在一律指向
-        `UNATTENDED_FIRST_WINDOW_SETTINGS`（deny 帶 Task／Agent／Workflow 三個 fan-out
-        工具）；只有 RESUME 路且 `relay_machine.followup_allowed(state)` 為真時才會指向
-        原本的 `UNATTENDED_SETTINGS`（見 `UnattendedPermissionPostureTest` 的
-        `test_followup_window_posture_allows_fanout_tools`）。
+        🔴 2026-09-07 掌舵者裁決（INV2＋INV3 拆除）：姿態檔**只有一份**——
+        `UNATTENDED_SETTINGS`。此前 M-06 另立 `.claude/settings.unattended_first_window.json`
+        給「第一窗」用（deny 帶 Task／Agent／Workflow），現已刪除：訂閱制風險模型下，
+        一旦主 agent 確認喚醒即與互動 session 同等信任，不分窗次。額度風險由
+        `RELAY_MAX_SPAWNS`（每視窗 spawn 上限）＋1 小時牆鐘 timeout＋INV4（無人看管一次
+        沒進度就停）界住，不需要分階段 fan-out 解鎖。故本條一併釘住「兩路指向同一份檔」
+        與「那一份檔的 deny 不含 fan-out 三工具」——本類原有的兩支 fan-out 姿態測試
+        （第一窗 deny 三工具 ＋ followup 窗 allow 三工具的控制組）證明的是「兩份檔有
+        分流」，該前提已不成立，故連同姿態檔一起刪除；它們的核心斷言併進本條。
         """
         resume = planner.choose_resume_route(
             "claude", "sid-9", self.transcript, str(self.plan))
@@ -3076,11 +3079,16 @@ class UnattendedPermissionPostureTest(unittest.TestCase):
                 self.assertIn(flag, argv, f"argv 缺 {flag}：{argv}")
             self.assertEqual(argv[argv.index("--permission-mode") + 1], "acceptEdits")
             self.assertEqual(argv[argv.index("--settings") + 1],
-                             str(resume_route.UNATTENDED_FIRST_WINDOW_SETTINGS),
-                             "第一窗（未證實 followup）沒有指向"
-                             " .claude/settings.unattended_first_window.json")
+                             str(resume_route.UNATTENDED_SETTINGS),
+                             "兩路沒有指向唯一的 .claude/settings.unattended.json"
+                             "（INV2/INV3 拆除後不該再有第二份姿態檔）")
             self.assertLess(argv.index("--settings") + 1, argv.index("--add-dir"),
                             f"姿態旗標必須在變長的 --add-dir 之前：{argv}")
+        deny = set(self._posture()["deny"])
+        for tool in ("Task", "Agent", "Workflow"):
+            self.assertNotIn(tool, deny,
+                             f"唯一姿態檔的 deny 仍擋著 {tool}——2026-09-07 裁決是「主 agent "
+                             "活著就什麼都能做，含呼叫朋友」，fan-out 不得再被權限層擋")
 
     def test_va2_missing_settings_refuses_to_spawn(self) -> None:
         """V-a2 紅綠自證：本注入在 A-PRE 落地**前**必然全綠側——`_run_resume` 此前
@@ -3097,10 +3105,10 @@ class UnattendedPermissionPostureTest(unittest.TestCase):
                  "transcript": str(self.transcript)}
         log = self.tmp / "log.jsonl"
         err = io.StringIO()
-        # M-06：本 state 未證實 followup（無 relay_seq／last_window_made_progress）
-        # ⇒ 第一窗，preflight 驗的是 `UNATTENDED_FIRST_WINDOW_SETTINGS`，不是原檔。
+        # 2026-09-07（INV2/INV3 拆除）：姿態檔只有一份 ⇒ preflight 驗的就是
+        # `UNATTENDED_SETTINGS`，換成不存在的路徑即模擬「姿態檔缺席」。
         with unittest.mock.patch.object(
-                resume_route, "UNATTENDED_FIRST_WINDOW_SETTINGS", self.tmp / "ghost.json"):
+                resume_route, "UNATTENDED_SETTINGS", self.tmp / "ghost.json"):
             with contextlib.redirect_stderr(err):
                 rc = planner._run_resume(args, state, log)
         self.assertEqual(calls, [], "settings 缺席仍 spawn 了——A-PRE 沒有擋在 spawn 之前")
@@ -3158,38 +3166,6 @@ class UnattendedPermissionPostureTest(unittest.TestCase):
         self.assertEqual(posture["defaultMode"], "acceptEdits")
         self.assertIn("~/.autosdd/handback", posture["additionalDirectories"],
                       "additionalDirectories 沒指向 handback 目錄＝L1 ② 斷")
-
-    def test_va4_first_window_posture_denies_fanout_tools(self) -> None:
-        """M-06：`resume_argv()` 此前只決定「要不要在 prompt 文字裡塞 Workflow 提示句」
-        （`allow_followup`），完全沒有真的阻擋模型自己決定呼叫 Task／Agent／Workflow
-        工具——prompt 不塞提示句只是「不主動建議」，不是機械硬擋。第一窗
-        （`allow_followup=False`，即 RESUME 未證實 followup ∧ FRESH 全部）的姿態檔
-        必須在 harness 權限層把這三個 fan-out 工具真的 deny 掉。"""
-        posture = json.loads(resume_route.UNATTENDED_FIRST_WINDOW_SETTINGS.read_text(
-            encoding="utf-8"))["permissions"]
-        deny = set(posture["deny"])
-        for tool in ("Task", "Agent", "Workflow"):
-            self.assertIn(tool, deny,
-                         f"第一窗姿態檔 deny 清單缺 {tool}——INV2 沒有機械硬擋，"
-                         "只剩 prompt 提示句這種軟約束")
-
-    def test_followup_window_posture_allows_fanout_tools(self) -> None:
-        """控制組（鑑別力）：`allow_followup=True`（前一窗確實起來）組出來的 argv 指向
-        原本 `UNATTENDED_SETTINGS`（沒有這三個 deny），證明上一條的紅不是恆真——
-        確實有兩份不同姿態檔在分流，不是同一份檔換了個名字。"""
-        argv = resume_route.resume_argv("claude", "sid-9", "prompt",
-                                        Path(tempfile.gettempdir()) / "task-dir",
-                                        allow_followup=True)
-        self.assertEqual(argv[argv.index("--settings") + 1],
-                         str(resume_route.UNATTENDED_SETTINGS),
-                         "followup=True 卻沒有指向原本的 .claude/settings.unattended.json")
-        posture = json.loads(
-            resume_route.UNATTENDED_SETTINGS.read_text(encoding="utf-8"))["permissions"]
-        deny = set(posture["deny"])
-        for tool in ("Task", "Agent", "Workflow"):
-            self.assertNotIn(tool, deny,
-                             f"followup 姿態檔不該也 deny {tool}——否則兩份檔案沒有"
-                             "分流意義（跟第一窗姿態檔沒差別）")
 
 
 class HandbackAddDirIsResolvedDynamicallyTest(unittest.TestCase):
@@ -3780,6 +3756,36 @@ class Inv1UnattendedZeroPaidProbeTest(unittest.TestCase):
                 self.assertEqual(verdict["rc"], 0, f"[{label}] {verdict}")
                 self.assertIn("unattended", verdict["source"], f"[{label}] {verdict}")
 
+    def test_empty_string_unattended_env_is_still_treated_as_unattended(self) -> None:
+        """R11X（本輪對抗式稽核破洞）邊界值：`AUTOSDD_UNATTENDED=""`（鍵存在但值為空
+        ——上游 wrapper script 誤寫／殘留 shell profile 都可能造成這個狀態）。修復前
+        `probe_quota` 用 Python 真值測試 `if os.environ.get(...):`，空字串判定為假 ⇒
+        誤判成『非無人模式』⇒ INV1 這道付費探測煞車失效（`main()` 分派 tick 前的
+        `setdefault` 也救不了它：鍵已存在，`setdefault` 不覆寫）。讀取端改成鍵存在性
+        判準（`UNATTENDED_ENV in os.environ`）後，這個邊界值必須仍然被視為無人模式——
+        這是縱深防禦：即使某個呼叫路徑忘了先強制覆寫成 `"1"`，讀取端自己也不會被這個
+        空字串誤判成攻擊者／殘留值想要的『非無人模式』。
+        """
+        spawned: list = []
+
+        def _spy(argv, **kw):
+            spawned.append(argv)
+            return subprocess.CompletedProcess(argv, 0, stdout="{}", stderr="")
+
+        with unittest.mock.patch.object(qg, "endpoint_probe_verdict",
+                                        return_value=None), \
+                unittest.mock.patch.dict(os.environ,
+                                         {planner.UNATTENDED_ENV: ""}), \
+                unittest.mock.patch.object(planner.subprocess, "run",
+                                           side_effect=_spy):
+            verdict = planner.probe_quota("claude")
+        self.assertEqual(
+            spawned, [],
+            f"空字串旗標（鍵存在但值為空）仍應視為無人模式，卻 spawn 了付費探針：{spawned}")
+        self.assertFalse(verdict["open"], verdict)
+        self.assertEqual(verdict["rc"], 0, verdict)
+        self.assertIn("unattended", verdict["source"], verdict)
+
     def test_the_zero_cost_verdict_routes_to_patrol_not_a_guessed_rearm(self) -> None:
         """INV1 續：不含 reset 字面 ⇒ `tick_plan` 落 `PATROL_HANDBACK`（零成本巡邏兜底），
         **不**走 `rearm`（那會排一個猜出來的時刻）也不走 `stop`（永眠）。"""
@@ -3852,6 +3858,29 @@ class Inv1ScheduledTickMarksUnattendedTest(unittest.TestCase):
         self.assertEqual(v, "1", "schtasks 叫起的 --resume-tick 未標成無人")
         self.assertEqual(rc, 0)
 
+    def test_a_pre_existing_empty_string_flag_is_forced_to_one_not_left_alone(
+            self) -> None:
+        """R11X：修復前 `main()` 用 `setdefault`（缺席才填）——鍵已存在就不覆寫，於是
+        行程環境進來時若已帶著 `AUTOSDD_UNATTENDED=""`（殘留／上游誤寫），這道『排程叫起
+        ＝無人模式』的宣告會被那個殘留值蓋過。修復後改成無條件強制設定：不管分派 tick
+        之前那個鍵是什麼（含空字串），分派那一刻必須把它蓋成 `"1"`。"""
+        seen = {}
+
+        def _stub(_a):
+            seen["v"] = os.environ.get(planner.UNATTENDED_ENV)
+            return 0
+
+        with unittest.mock.patch.dict(os.environ), \
+                unittest.mock.patch.object(planner, "_sentinel_tick", _stub):
+            os.environ[planner.UNATTENDED_ENV] = ""
+            rc = planner.main(
+                ["--sentinel-tick", "--plan", "x.md",
+                 "--task-name", "AutoSDD_Sentinel_t"])
+        self.assertEqual(
+            seen.get("v"), "1",
+            "殘留的空字串旗標未被 main() 強制覆寫成 '1'（setdefault 語意的破洞未修）")
+        self.assertEqual(rc, 0)
+
     def test_an_interactive_probe_quota_is_not_forced_unattended(self) -> None:
         """控制組（鑑別力）：互動 `--probe-quota` 不得被強制成無人，否則會把互動 session 的
         付費探針一起靜音（射程過寬，正是 `probe_quota` 註解警告的那一面）。"""
@@ -3866,137 +3895,6 @@ class Inv1ScheduledTickMarksUnattendedTest(unittest.TestCase):
             os.environ.pop(planner.UNATTENDED_ENV, None)
             planner.main(["--probe-quota"])
         self.assertIsNone(seen.get("v"), "互動 --probe-quota 被強制標成無人（射程過寬）")
-
-
-class Inv2Inv3WorkflowFanoutGateTest(unittest.TestCase):
-    """INV2＋INV3（F3 訂正）：續跑 argv **不得**無條件把 `Workflow(resumeFromRunId)` 當
-    第一句話注入（INV2）；該 fan-out 只准在**前一窗確實起來**（`made_progress`）之後才出現
-    （INV3）。gate＝`relay_machine.followup_allowed(state)`；載入 argv 的縫＝
-    `resume_argv(..., allow_followup=...)`。雙後端各驗（純判準，平台中性）。
-    """
-
-    def setUp(self) -> None:
-        self.tmp = _tmpdir(self, "inv23-")
-        self.out = self.tmp / "fanout.json"
-        old = escalation.fanout_path
-        escalation.fanout_path = lambda sid: self.out
-        self.addCleanup(setattr, escalation, "fanout_path", old)
-        self.out.write_text(json.dumps({
-            "schema": "autosdd.fanout.v1", "session_id": "sid",
-            "runs": [{"run_id": "wf_r-1", "resume_ready": True,
-                      "resume_call": 'Workflow({scriptPath: "/x/scan-wf_r-1.js", '
-                                     'resumeFromRunId: "wf_r-1"})'}]}),
-            encoding="utf-8")
-
-    def test_default_resume_argv_never_injects_the_fanout_unconditionally(self) -> None:
-        """INV2：預設（未 gate）續跑 prompt 一個 Workflow 字都不多——即使 fanout 清單有
-        resume_ready 的 run。這正是 F3 禍首被移除的那一半。"""
-        for label, backend in _both_backends():
-            with self.subTest(backend=label), \
-                    unittest.mock.patch.object(sb, "select", return_value=backend):
-                argv = resume_route.resume_argv("claude", "sid",
-                                                "讀 plan，照它第 3 節做。", self.tmp)
-                self.assertEqual(argv[4], "讀 plan，照它第 3 節做。",
-                                 f"[{label}] 預設續跑 prompt 被無條件塞 fan-out：{argv[4]!r}")
-                self.assertNotIn("resumeFromRunId", argv[4], label)
-                self.assertNotIn("Workflow(", argv[4], label)
-
-    def test_gated_resume_argv_injects_only_when_allow_followup(self) -> None:
-        """INV3：明確 gate（前一窗 made_progress）為真時 fan-out 才出現，且 argv 形狀不變
-        （prompt 之後仍是 `--permission-mode`，姊妹鎖 UnattendedPermissionPostureTest）。"""
-        for label, backend in _both_backends():
-            with self.subTest(backend=label), \
-                    unittest.mock.patch.object(sb, "select", return_value=backend):
-                argv = resume_route.resume_argv("claude", "sid", "讀 plan。",
-                                                self.tmp, allow_followup=True)
-                self.assertIn('resumeFromRunId: "wf_r-1"', argv[4], label)
-                self.assertIn("/x/scan-wf_r-1.js", argv[4], label)  # posix-abs-ok: JS 字串字面
-                self.assertEqual(argv[5], "--permission-mode",
-                                 f"[{label}] prompt 之後的 argv 形狀被動到了")
-
-    def test_followup_allowed_requires_made_progress_and_not_first_window(self) -> None:
-        """INV3 gate 純判準：前一窗 made_progress 為真 **且** 非本額度視窗第一窗
-        （relay_seq≥1）才准。第一窗（relay_seq=0）一律不 fan-out（INV2）。"""
-        self.assertTrue(relay_machine.followup_allowed(
-            {"last_window_made_progress": True, "relay_seq": 1}))
-        self.assertFalse(relay_machine.followup_allowed(
-            {"last_window_made_progress": True, "relay_seq": 0}),
-            "第一窗竟然被允許 fan-out（沒有任何前一窗成功可佐證）")
-        self.assertFalse(relay_machine.followup_allowed(
-            {"last_window_made_progress": False, "relay_seq": 3}),
-            "前一窗沒進度卻允許 fan-out")
-        self.assertFalse(relay_machine.followup_allowed({}))
-
-    def test_resolve_persists_last_window_made_progress(self) -> None:
-        """INV3 接線：`resolve()` 把本窗 made_progress 落進 state（供下一窗的 gate 讀）。"""
-        hb = self.tmp / "hb.md"
-        hb.write_text("## 做了什麼\nx\n\n## 驗了什麼\nrc=0\n\n## 卡在哪\n無\n\n"
-                      "## 下一步指令\n還有事\n", encoding="utf-8", newline="\n")
-        progressed = relay_machine.resolve(
-            {"handback_verdict": "written", "handback_path": str(hb), "files_changed": 2,
-             "relay_seq": 0, "relay_no_progress_streak": 0},
-            quota_policy.BAND_FREE, max_spawns=2, no_progress_limit=5)
-        self.assertIs(progressed["last_window_made_progress"], True)
-        no = relay_machine.resolve(
-            {"handback_verdict": "missing", "handback_path": "", "files_changed": 0,
-             "relay_seq": 0, "relay_no_progress_streak": 0},
-            quota_policy.BAND_FREE, max_spawns=2, no_progress_limit=5)
-        self.assertIs(no["last_window_made_progress"], False)
-
-
-    def test_choose_resume_route_passes_followup_ok_through_to_argv(self) -> None:
-        """M-05（DEF-200-272）：`choose_resume_route` 必須把 `followup_ok` **原封**傳給
-        `resume_argv(allow_followup=…)`——接線被改壞（硬編 True／丟參數）時，既有的
-        argv 縫測試與純判準測試都抓不到。紅綠自證：把 `choose_resume_route` 改成硬編
-        `allow_followup=True`，followup_ok=False 這一輪即 `captured==[True]≠[False]` 判紅。"""
-        plan = self.tmp / "plan.md"
-        plan.write_text("x", encoding="utf-8", newline="\n")
-        tr = self.tmp / "sid.jsonl"
-        tr.write_text("{}\n", encoding="utf-8", newline="\n")
-        real = resume_route.resume_argv
-        captured: list = []
-
-        def _cap(*a, **kw):
-            captured.append(kw.get("allow_followup"))
-            return real(*a, **kw)
-
-        for want in (True, False):
-            captured.clear()
-            with unittest.mock.patch.object(resume_route, "resume_argv", _cap):
-                route = planner.choose_resume_route(
-                    "claude", "sid", tr, str(plan), followup_ok=want)
-            self.assertEqual(route["strategy"], planner.STRATEGY_RESUME)
-            self.assertEqual(captured, [want],
-                             f"choose_resume_route 沒把 followup_ok={want} 傳給 resume_argv")
-
-    def test_run_resume_derives_followup_from_previous_window_progress(self) -> None:
-        """M-05 深層接線：`_run_resume` 必須用 `followup_allowed(state)` 算出 followup_ok
-        再傳給 `choose_resume_route`——不是恆傳。紅綠自證：把 `_run_resume` 改成
-        `followup = True`（不看 state），第 2／3 組即判紅。"""
-        log = self.tmp / "rr.jsonl"
-        captured: list = []
-
-        def _cap_route(claude, sid, tr, plan, max_bytes=None, *, followup_ok=False):
-            captured.append(followup_ok)
-            return {"strategy": planner.STRATEGY_REFUSE, "argv": None, "reason": "test-stop"}
-
-        args = type("_Args", (), {"probe_command": "claude"})()
-        t = str(self.tmp / "t.jsonl")
-        cases = [
-            ({"session_id": "sid", "transcript": t,
-              "last_window_made_progress": True, "relay_seq": 1}, True),
-            ({"session_id": "sid", "transcript": t,
-              "last_window_made_progress": False, "relay_seq": 3}, False),
-            ({"session_id": "sid", "transcript": t,
-              "last_window_made_progress": True, "relay_seq": 0}, False),
-        ]
-        for state, want in cases:
-            captured.clear()
-            with unittest.mock.patch.object(planner, "choose_resume_route", _cap_route):
-                rc = planner._run_resume(args, dict(state), log)
-            self.assertEqual(rc, 1, "REFUSE（argv=None）應早退回 rc=1")
-            self.assertEqual(captured, [want],
-                             f"_run_resume followup 推導錯：state={state} 期望 {want}")
 
 
 class Fix2ResumeCallScriptPathIsJsSafeTest(unittest.TestCase):
@@ -4066,6 +3964,20 @@ class Inv4UnattendedStopsOnFirstNoProgressTest(unittest.TestCase):
                     unittest.mock.patch.object(sb, "select", return_value=backend):
                 self.assertEqual(relay_machine.no_progress_limit(), 1,
                                  f"[{label}] 無人模式沒有把 no_progress_limit 夾到 1")
+
+    def test_empty_string_unattended_env_still_clamps_no_progress_limit_to_one(
+            self) -> None:
+        """同一破洞（R11X）打穿 INV4：修復前 `AUTOSDD_UNATTENDED=""` 這個邊界值會讓
+        `no_progress_limit()` 的真值測試誤判成『非無人模式』，於是
+        `AUTOSDD_RELAY_NO_PROGRESS_LIMIT=5` 真的放行連燒 5 窗而非夾在 1。讀取端改成
+        鍵存在性判準後，這個邊界值必須仍然夾到 1。"""
+        with unittest.mock.patch.dict(
+                os.environ,
+                {planner.UNATTENDED_ENV: "",
+                 relay_machine.RELAY_NO_PROGRESS_LIMIT_ENV: "5"}):
+            self.assertEqual(
+                relay_machine.no_progress_limit(), 1,
+                "空字串旗標未被夾到 1，AUTOSDD_RELAY_NO_PROGRESS_LIMIT=5 繞過了安全煞車")
 
     def test_attended_mode_honours_the_env_override(self) -> None:
         """控制組：沒有無人旗標時 env 仍算數（射程只在無人回合）。"""
@@ -4436,23 +4348,57 @@ class Inv5SingleOwnerTest(unittest.TestCase):
                          "真機 Get-ScheduledTask 輸出餵進 other_owner_for_session"
                          " 沒有正確辨識同 session 的另一支排程")
 
+    def test_real_launchd_listing_feeds_other_owner_for_session(self) -> None:
+        """[MAC-NATIVE-ONLY]（規則 5／M-19 的 macOS 對照）：上一支測試（M-19）在真
+        Windows 上補了 `SchtasksBackend.list_jobs()` 的真實串接測試，但 macOS `launchd`
+        側當時完全沒有對等的真實串接測試——只有邏輯正確、平台會 skip 的測試（見
+        `docs/06_quality/WakeChain_IronLaws_Verification.md` 規則 5／規則 7 小節與
+        第四節「待辦」第 6 項登記的雙平台不對稱破洞）。
+        本測試在真 macOS 上用 `LaunchdBackend` 真的 `arm()` 一支排程工作（真跑
+        `launchctl bootstrap`），再真的呼叫 `list_jobs()`（真跑 `launchctl list`）取得真實
+        輸出，餵進 `other_owner_for_session` 驗證真機列舉行為正確辨識同 session 的另一支
+        排程。與上一支不同：這支測試**在這台 mac 開發機上真的會執行並通過**，不是
+        「邏輯正確、平台會 skip」——這正是它存在的價值：macOS 這一側終於有真機驗證。
+        """
+        if sys.platform != "darwin":
+            self.skipTest("[MAC-NATIVE-ONLY] launchd 只在 macOS 成立")
+        sid = "sess-inv5-mac"
+        my_task = f"AutoSDD_Sentinel_{sid}"
+        other_task = f"AutoSDD_SessionResume_{sid}"
+        backend = sb.LaunchdBackend()
 
-class Fix4FirstWindowCannotFanOutEndToEndTest(unittest.TestCase):
-    """F3-FIX4（複審必修）：`followup_allowed` 的 INV2 保證（新 reset 視窗第一窗不 fan-out）
-    此前只有純函式測試（seq/made_progress 手餵）＋ `_base_state` 骨架測試（assertNotIn relay_seq），
-    兩者之間**沒有端到端的縫**——保證實際靠 `_base_state` 不含 `relay_seq`（第一窗隱式 seq=0，
-    使 followup gate 第二條 `relay_seq≥1` 不成立），docstring 卻歸因 `apply_reset_at`。若有人替
-    `_base_state` 補了 `relay_seq` 預設，純函式測試手餵 seq 察覺不到、骨架 assertNotIn 雖會紅
-    卻與 `followup_allowed` 無因果連結。這裡把哨兵武裝路徑（`_arm_sentinel` → `_base_state`）
-    造出的 state **直接餵給 followup_allowed**，端到端釘死「新視窗第一窗恆不 fan-out」。
-    思想突變：給 `_base_state` 塞 `relay_seq=5` ⇒ 第二段 assertFalse 轉紅。
-    """
+        def _cleanup() -> None:
+            backend.disarm(my_task)
+            backend.disarm(other_task)
+
+        _cleanup()  # 開跑前先清場：不得讓上一輪殘留冒充成本輪的證據。
+        self.addCleanup(_cleanup)
+        tmp = _tmpdir(self, "m19-real-mac-")
+        plan = tmp / "plan.md"
+        plan.write_text("# 任務書\n", encoding="utf-8", newline="\n")
+        # `at_expr` 是 SchtasksBackend 專屬的 PowerShell 運算式，LaunchdBackend.arm() 的
+        # 簽章雖同名保留該參數卻整支不使用（見 schedule_backend.py 檔頭與 arm() 本體：
+        # 時刻改走結構化的 `at` datetime 參數，這裡不傳＝只要巡邏用的 StartInterval）。
+        rc, _cred = backend.arm(str(plan), other_task, "", planner.RESUME_TICK)
+        if rc != 0:
+            self.skipTest(f"這台機器上真註冊 launchd job 失敗（rc={rc}），無法現查列舉行為")
+        real_jobs = backend.list_jobs("AutoSDD_")
+        self.assertIsNotNone(real_jobs, "真 launchctl list 列舉量不到，無法驗證本鎖")
+        self.assertIn(other_task, real_jobs,
+                     f"剛註冊的 {other_task} 沒有出現在真 launchctl list 列舉結果")
+        owner = relay_machine.other_owner_for_session(sid, real_jobs, my_task)
+        self.assertEqual(owner, other_task,
+                         "真機 launchctl list 輸出餵進 other_owner_for_session"
+                         " 沒有正確辨識同 session 的另一支排程")
 
     def _arm_and_capture(self, jobs_result: object) -> tuple[int, list]:
-        tmp = _tmpdir(self, "fix4-e2e-")
+        """跑一次 `_arm_sentinel`（假後端），回 `(rc, 被交給 _register_and_record 的 state)`。
+        `jobs_result` 是假後端 `list_jobs()` 要回的東西：`None`＝量不到（fail-open 情境）。
+        """
+        tmp = _tmpdir(self, "inv5-failopen-")
         plan = tmp / "plan.md"
         plan.write_text("# 任務書", encoding="utf-8")
-        transcript = tmp / "sidF4.jsonl"
+        transcript = tmp / "sidFO.jsonl"
         transcript.write_text('{"type":"assistant"}\n', encoding="utf-8")
         captured: list = []
 
@@ -4461,9 +4407,8 @@ class Fix4FirstWindowCannotFanOutEndToEndTest(unittest.TestCase):
             credential_key = "next_run_time"
 
             def list_jobs(self, prefix):
-                # M-07：`jobs_result` 本就只餵 `[]`／`None`（無其他 owner／量不到）兩種控制
-                # 情境，不是真的 job 名清單；即便如此仍尊重 prefix（`None` 這個「量不到」
-                # 語意不因 prefix 而變）以與另兩支 _Fake 同一套紀律，不留一支例外。
+                # M-07：仍尊重 prefix（`None` 這個「量不到」語意不因 prefix 而變）以與本類
+                # 另兩支 _Fake 同一套紀律，不留一支例外。
                 if jobs_result is None:
                     return None
                 return [j for j in jobs_result if str(j).startswith(prefix)]
@@ -4485,26 +4430,12 @@ class Fix4FirstWindowCannotFanOutEndToEndTest(unittest.TestCase):
             rc = planner._arm_sentinel(args, transcript, plan)
         return rc, captured
 
-    def test_a_freshly_armed_new_window_cannot_fan_out(self) -> None:
-        rc, captured = self._arm_and_capture([])  # 無其他 owner ⇒ 正常武裝第一窗
-        self.assertEqual(rc, 0)
-        self.assertEqual(len(captured), 1,
-                         "哨兵武裝路徑沒把 state 交給 _register_and_record（測試前提壞了）")
-        state = captured[0]
-        # INV2：新視窗第一窗、前一窗沒起來 ⇒ followup 必 False（兩條 gate 皆不成立）
-        self.assertFalse(relay_machine.followup_allowed(state),
-                         "哨兵剛武裝的第一窗 state 竟被判成可 fan-out（INV2 破防）")
-        # 思想突變鎖：即使殘留跨視窗的 last_window_made_progress，第一窗（隱式 seq=0）仍不得
-        # fan-out——這條唯一靠 `_base_state` 不含 relay_seq 成立。塞 relay_seq=5 ⇒ 這條紅。
-        stale = {**state, "last_window_made_progress": True}
-        self.assertFalse(
-            relay_machine.followup_allowed(stale),
-            "第一窗殘留 made_progress 仍被允許 fan-out ⇒ _base_state 混進了 relay_seq 預設"
-            "（INV2 的 relay_seq gate 靠第一窗隱式 seq=0）")
-
     def test_arm_sentinel_arms_fail_open_when_job_list_is_unmeasured(self) -> None:
-        """其餘（低）：`list_jobs=None`（量不到）⇒ fail-open 仍武裝（寧可多一支也不要沒有
-        哨兵），不誤判成衝突而 defer。控制組＝Inv5 的 defer（異名同 session）與同名冪等覆蓋。"""
+        """`list_jobs=None`（量不到）⇒ fail-open 仍武裝（寧可多一支也不要沒有哨兵），
+        不誤判成衝突而 defer。控制組＝本類的 defer（異名同 session）與同名冪等覆蓋兩支。
+        （2026-09-07 INV2/INV3 拆除前住 `Fix4FirstWindowCannotFanOutEndToEndTest`，該類
+        另一支測的是已移除的第一窗 fan-out 禁令；本支與那條禁令無關，故遷入 INV5 本家。）
+        """
         rc, captured = self._arm_and_capture(None)
         self.assertEqual(rc, 0)
         self.assertEqual(len(captured), 1,
@@ -5514,11 +5445,10 @@ class APreFailureIsNeverWrittenAsResumedTest(unittest.TestCase):
             stack.enter_context(unittest.mock.patch.object(
                 planner, "probe_quota", lambda *_a, **_k: {
                     "open": True, "kind": guard.LIMIT_NONE, "rc": 0, "text": "ok"}))
-            # M-06：`RelayStateTest.GOOD` 未證實 followup（無 relay_seq／
-            # last_window_made_progress）⇒ 第一窗，preflight 驗的是
-            # `UNATTENDED_FIRST_WINDOW_SETTINGS`，不是原檔。
+            # 2026-09-07（INV2/INV3 拆除）：姿態檔只有一份，preflight 驗的就是
+            # `UNATTENDED_SETTINGS`；換成不存在的路徑即模擬 A-PRE 拒 spawn。
             stack.enter_context(unittest.mock.patch.object(
-                resume_route, "UNATTENDED_FIRST_WINDOW_SETTINGS",
+                resume_route, "UNATTENDED_SETTINGS",
                 self.tmp / "ghost-settings.json"))
             stack.enter_context(unittest.mock.patch.object(
                 planner, "_schtasks_remove", side_effect=lambda t: 0))
@@ -6664,17 +6594,17 @@ class FanoutCasualtyRecordTest(unittest.TestCase):
         self.assertIs(run["resume_ready"], False)
         self.assertEqual(run["resume_call"], "")
 
-    def test_the_resume_prompt_names_the_workflow_resume_call_when_fanout_has_unfinished_runs(
-            self) -> None:
-        """🔴 INV2＋INV3（掌舵者 2026-09-05 事故訂正，取代 DEF-200-270 ③的**無條件**注入）：
-        F3 禍首＝續跑 prompt 第一句就無條件呼叫 `Workflow(resumeFromRunId)`，導致 headless
-        窗口一起手就重跑 34-agent Workflow、撞權限牆前先燒掉一輪 token。現行契約＝**gated**：
-        · 預設（未 gate，即前一窗未確認成功）⇒ 即使 fanout 有 `resume_ready` 的 run，prompt
-          一個 Workflow 字都不多（INV2）；
-        · `allow_followup=True`（＝前一窗 `made_progress`，INV3）時才注入，且 argv 形狀不變
-          （prompt 之後仍是 `--permission-mode`，姊妹鎖 UnattendedPermissionPostureTest）。
-        「無頭窗口可自行呼叫 Workflow(resumeFromRunId)」（2026-09-05 裁決）這個**能力**保留，
-        只是不再是第一動作、且 gate 在『主 agent 確認成功』之後。"""
+    def test_the_resume_prompt_never_names_a_workflow_resume_call(self) -> None:
+        """🔴 2026-09-07 掌舵者裁決：**續跑 prompt 完全不注入 Workflow 續跑提示**（連
+        gated 注入也移除）。史料兩層：DEF-200-270 ③ 原本**無條件**注入 ⇒ headless 窗口
+        一起手就重跑 34-agent Workflow、撞權限牆前先燒掉一輪 token；2026-09-05 改成
+        gated（INV2＋INV3）；2026-09-07 連 gate 一起拆——醒來的主 agent 與互動 session
+        同等信任，要不要 fan-out 由它自己讀任務書／handback 判斷，系統不再用提示句驅使
+        特定工具呼叫。fanout 清單（`resume_call` 欄）仍然照寫，那是給人／給模型自己讀的
+        磁碟事實，不是 prompt 注入。
+        鑑別力：本條與 `test_the_resume_prompt_is_unchanged_without_a_fanout_record` 不同
+        ——那支是「沒有清單」的控制組，本支是「清單**有** resume_ready 的 run」仍不注入，
+        把注入邏輯加回來（無條件或 gated 皆然）當場紅。"""
         self.out.write_text(json.dumps({
             "schema": "autosdd.fanout.v1", "session_id": "sid",
             "runs": [{"run_id": "wf_r-1", "resume_ready": True,
@@ -6682,21 +6612,16 @@ class FanoutCasualtyRecordTest(unittest.TestCase):
                                      'resumeFromRunId: "wf_r-1"})'},
                      {"run_id": "wf_done", "resume_ready": False, "resume_call": ""}]}),
             encoding="utf-8")
-        # INV2：預設不 gate ⇒ prompt 逐字，零 fan-out（F3 禍首移除的那一半）。
-        default = resume_route.resume_argv("claude", "sid", "讀 plan，照它第 3 節做.",
-                                           self.tmp)
-        self.assertEqual(default[4], "讀 plan，照它第 3 節做.",
-                         f"預設續跑仍被無條件塞 fan-out（F3 未移除）：{default[4]!r}")
-        self.assertNotIn("resumeFromRunId", default[4])
-        # INV3：gate 為真才注入，且只點名未完成的 run、argv 形狀不變。
-        gated = resume_route.resume_argv("claude", "sid", "讀 plan，照它第 3 節做.",
-                                         self.tmp, allow_followup=True)
-        prompt = gated[4]
-        self.assertTrue(prompt.startswith("讀 plan"), gated)
-        self.assertIn('resumeFromRunId: "wf_r-1"', prompt)
-        self.assertIn("/x/scan-wf_r-1.js", prompt)  # posix-abs-ok: JS 字串字面
-        self.assertNotIn("wf_done", prompt, "已完成的 run 不該被叫去重跑")
-        self.assertEqual(gated[5], "--permission-mode", "prompt 之後的 argv 形狀被動到了")
+        argv = resume_route.resume_argv("claude", "sid", "讀 plan，照它第 3 節做.", self.tmp)
+        self.assertEqual(argv[4], "讀 plan，照它第 3 節做.",
+                         f"續跑 prompt 被塞了 fan-out 提示：{argv[4]!r}")
+        self.assertNotIn("resumeFromRunId", argv[4])
+        self.assertNotIn("Workflow(", argv[4])
+        self.assertEqual(argv[5], "--permission-mode", "prompt 之後的 argv 形狀被動到了")
+        # 注入函式本體也必須不存在——留著一支沒人呼叫的 `workflow_resume_hint()` 等於
+        # 把禍首擺在手邊，下一個人接線回去時本檔上面那幾條斷言未必跑得到那條新路。
+        self.assertFalse(hasattr(resume_route, "workflow_resume_hint"),
+                         "resume_route.workflow_resume_hint() 還在——注入邏輯應整支移除")
 
     def test_the_resume_prompt_is_unchanged_without_a_fanout_record(self) -> None:
         """控制組：沒有 fanout 清單（99% 的續跑）⇒ prompt 一個字都不多。"""
@@ -11698,10 +11623,106 @@ class EveryHookEscapeHatchIsDeclaredTest(unittest.TestCase):
                          "本 hook 宣告的逃生口沒進 ENV_SPEC ⇒ 使用者照 .env.example 設了也關不掉")
 
 
+class _FenceJobs:
+    """圍籠 A 面的假排程後端：`jobs` 由測試在 `run()` 內就地改，模擬「跑到一半真的多了
+    一支工作」。`jobs is None` 代表列舉失敗（量不到），與三個真後端 `list_jobs()` 的
+    三值語意（`[label…]`／`[]`／`None`）逐字一致，不自創第四種。"""
+
+    name = "fake-carrier"
+
+    def __init__(self, jobs: list[str] | None) -> None:
+        self.jobs = jobs
+        self.prefixes: list[str] = []
+
+    def list_jobs(self, prefix: str) -> list[str] | None:
+        self.prefixes.append(prefix)
+        return None if self.jobs is None else list(self.jobs)
+
+    def evidence_hint(self) -> str:
+        return "（假後端：本測試不對真載具取證）"
+
+
 class LeakFenceTest(unittest.TestCase):
-    """M-03（精簡版）：`sentinel_lifecycle.leak_fence()` 本身的行為——不是 M-04 完整
-    `SandboxBackend`，只驗「印出來讓人看得到」這一半（見該函式 docstring 的誠實劃界）。
+    """M-04：`sentinel_lifecycle.leak_fence()` 本身的行為——判死面＝**真排程器工作清單
+    的前後差集**，暫存檔差集降級為只印不判的輔助訊號（見該函式 docstring 的誠實劃界）。
     """
+
+    def _fence_backend(self, jobs: list[str] | None) -> _FenceJobs:
+        """A 面注入縫。整個類別預設走假後端（`setUp`），理由是量測面而非潔癖：不注入時
+        每一支 leak_fence 測試都會真的叩 `launchctl list`／`Get-ScheduledTask`（Windows
+        側是每次圍籠兩趟 PowerShell），而真排程器在測試期間的**合法**變動會讓它們間歇
+        假紅——會間歇假紅的判死面第一件事就是被整個關掉。"""
+        backend = _FenceJobs(jobs)
+        patcher = unittest.mock.patch.object(sb, "select", return_value=backend)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return backend
+
+    def setUp(self) -> None:
+        self._fence_backend([])
+
+    def test_a_job_that_appears_during_the_run_and_stays_reds_the_run(self) -> None:
+        """🔴 判死面（M-04 的核心）：真排程器在 `run()` 期間多了一支工作、且**收尾時
+        仍然在** ⇒ rc 必須非零，即使 `run()` 自己回 0。這就是 T-f4b 那類「測試真的種下
+        排程、沒有人收」的洩漏，而 M-03 版對它結構上零反應（只印暫存檔、rc 不動）。"""
+        tmp = _tmpdir(self, "leak-fence-leak-")
+        backend = self._fence_backend(["AutoSDD_Sentinel_already_there"])
+        leaked = "AutoSDD_Sentinel_T-leak"
+
+        def _fake_run() -> int:
+            backend.jobs.append(leaked)
+            return 0
+
+        buf = io.StringIO()
+        with unittest.mock.patch.object(tempfile, "gettempdir", return_value=str(tmp)), \
+                unittest.mock.patch.dict(os.environ, {endurance_env.TRACE_DIR_ENV: str(tmp)}), \
+                contextlib.redirect_stderr(buf):
+            rc = sentinel_lifecycle.leak_fence(_fake_run)
+        self.assertEqual(rc, 1, "測試期間種下、收尾仍在的排程工作沒讓 rc 變非零＝判死面空轉")
+        self.assertIn(leaked, buf.getvalue(), "判紅了卻沒點名是哪一支工作洩漏（無從歸因）")
+        trace = tmp / sentinel_lifecycle.LEAK_FENCE_LOG_NAME
+        record = json.loads(trace.read_text(encoding="utf-8").splitlines()[-1])
+        self.assertEqual(record["leaked_jobs"], [leaked])
+        self.assertEqual(record["fence_rc"], 1)
+        self.assertEqual(backend.prefixes,
+                         [sentinel_lifecycle.LEAK_FENCE_JOB_PREFIX] * 2,
+                         "前後兩張快照必須都用同一個前綴問同一個載具，否則差集不可比")
+
+    def test_a_job_registered_and_removed_during_the_run_is_not_a_leak(self) -> None:
+        """鑑別力（不誤判）：某支測試合法地註冊完又立刻登出 ⇒ 收尾快照裡它已經不在、
+        差集為空 ⇒ rc 維持 `run()` 原本的值。判準取「新增**且還在**」而不是「有沒有碰過
+        排程器」，正是為了讓這一格結構上不必另寫豁免（豁免清單會腐化，形狀不會）。"""
+        tmp = _tmpdir(self, "leak-fence-transient-")
+        backend = self._fence_backend(["AutoSDD_Sentinel_already_there"])
+        transient = "AutoSDD_Sentinel_T-transient"
+
+        def _fake_run() -> int:
+            backend.jobs.append(transient)
+            backend.jobs.remove(transient)
+            return 0
+
+        with unittest.mock.patch.object(tempfile, "gettempdir", return_value=str(tmp)), \
+                unittest.mock.patch.dict(os.environ, {endurance_env.TRACE_DIR_ENV: str(tmp)}), \
+                contextlib.redirect_stderr(io.StringIO()):
+            rc = sentinel_lifecycle.leak_fence(_fake_run)
+        self.assertEqual(rc, 0, "暫時性工作被誤判成洩漏——會誤傷的判死面活不過一輪")
+
+    def test_unmeasurable_enumeration_is_said_out_loud_and_never_reds(self) -> None:
+        """控制組（fail-open）：`list_jobs()` 回 `None`＝量不到 ⇒ **不判死**（沒有證據不能
+        扣帽子，同 `_arm_sentinel` 對 `None` 的既有紀律），但必須出聲說「量不到」——把它
+        讀成「沒有洩漏」正是 R83 複審 A-01 那則假陰性回報的病，痕跡也不得寫成一個數字。"""
+        tmp = _tmpdir(self, "leak-fence-blind-")
+        self._fence_backend(None)
+        buf = io.StringIO()
+        with unittest.mock.patch.object(tempfile, "gettempdir", return_value=str(tmp)), \
+                unittest.mock.patch.dict(os.environ, {endurance_env.TRACE_DIR_ENV: str(tmp)}), \
+                contextlib.redirect_stderr(buf):
+            rc = sentinel_lifecycle.leak_fence(lambda: 0)
+        self.assertEqual(rc, 0, "量不到卻判死＝沒有證據就扣帽子（fail-open 紀律被破壞）")
+        self.assertIn("量不到", buf.getvalue(), "量不到卻一個字都不說＝假陰性回報")
+        trace = tmp / sentinel_lifecycle.LEAK_FENCE_LOG_NAME
+        record = json.loads(trace.read_text(encoding="utf-8").splitlines()[-1])
+        self.assertIsNone(record["jobs_after"], "痕跡把「量不到」寫成了一個數字")
 
     def test_reports_and_logs_a_new_temp_file(self) -> None:
         """正面現查：`run()` 期間真的多出一個 `autosdd_*` 暫存檔 ⇒ 印出來＋落痕跡。"""
@@ -11784,17 +11805,27 @@ class InvariantLocksArePresentTest(unittest.TestCase):
     """
 
     #: 現查快照（2026-09-07，`grep -n 'class Inv[0-9]\|class Fix[0-9]'
-    #: tools/tests/test_context_budget_guard.py`）：本檔目前存在的 8 個 INV/FIX 類別，
+    #: tools/tests/test_context_budget_guard.py`）：本檔目前存在的 6 個 INV/FIX 類別，
     #: 逐一登記其**當下**測試方法數下限。數字是量測值不是常數——之後合法新增測試會讓
     #: 現值大於此表（不紅）；本表只在有人整批刪除／砍到低於下限時才出聲。
+    #:
+    #: 🔴 2026-09-07 掌舵者裁決（INV2＋INV3 拆除，SA＋SD 兩位獨立審查通過）：
+    #: `Inv2Inv3WorkflowFanoutGateTest`（6 支）與 `Fix4FirstWindowCannotFanOutEndToEndTest`
+    #: （2 支）兩列**整列移除**——被守的行為（第一無人視窗禁 fan-out／需前一窗證明有進度
+    #: 才解鎖）已不存在，留著列就會讓判準對「不存在的類別」拋例外而恆紅（`loadTestsFromName`
+    #: 對缺類別是拋例外，不是回 0，所以不能只把數字改成 0）。Fix4 唯一與該禁令無關的
+    #: 那一支（`test_arm_sentinel_arms_fail_open_when_job_list_is_unmeasured`）已遷入
+    #: `Inv5SingleOwnerTest`，其下限因而 6→7（遷入的那一支在新家一樣被守著，不是淨損）。
     _EXPECTED_MIN_TEST_COUNTS = {
         "Inv1UnattendedZeroPaidProbeTest": 3,
         "Inv1ScheduledTickMarksUnattendedTest": 3,
-        "Inv2Inv3WorkflowFanoutGateTest": 6,
         "Fix2ResumeCallScriptPathIsJsSafeTest": 2,
         "Inv4UnattendedStopsOnFirstNoProgressTest": 5,
-        "Inv5SingleOwnerTest": 6,
-        "Fix4FirstWindowCannotFanOutEndToEndTest": 2,
+        # 🔴 收尾單人窗口重釘 7→11（實測 2026-09-07：12 支，見上方 loader 現查指令）——
+        # 規則 5 的 macOS 真機測試（`test_real_launchd_listing_feeds_other_owner_for_
+        # session`）＋既有 M-19 Windows 對照＋失敗開放族測試併入本類別後累積 12 支，
+        # 留 1 支裕度（同其餘各列既有慣例：下限＝現測值−1，非湊整）。
+        "Inv5SingleOwnerTest": 11,
         "Fix3UnattendedOutcomeBannerTest": 4,
     }
 

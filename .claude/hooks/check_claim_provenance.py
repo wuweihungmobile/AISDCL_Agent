@@ -160,11 +160,54 @@ TTL 取「期望漂移 1pp」⇒ `3600 / rate`（見 `PACE_TTL_S`）。
 2 次 Stop、1 次發射、恰好 1 個額外回合。**這個夾具不是優化，沒有它這支守衛會在額度吃緊
 的那一刻製造它要防的傷害。**
 
+第四個判準：**不帶值**的完工判決，而本場一個佐證動作都沒有（逃生口自己一個）
+--------------------------------------------------------------------------
+立案（`docs/06_quality/WakeChain_IronLaws_Verification.md` 規則 8）：前三個判準全部收在
+「值」上 ⇒ 「完成／已驗證／全綠／零損失」這種**不帶值**的判決結構上看不見，而
+commit `b1ef81f` 的誇大宣稱正是走這個盲區溜過去的。落地前實測（本檔第四個判準之前）：
+`{"last_assistant_message": "完成：全部修復完畢，已驗證，全綠，零損失。"}` ⇒ **rc=0、
+stderr 全空**。
+
+判準的形狀是**兩次收斂**的結果，兩次都由本機全母體的實測逼出來（母體＝
+`~/.claude/projects/**/*.jsonl` **1,017** 支／502.7 MB，assistant 文字塊 **11,812**；
+🔴 **rglob 不可換成 glob**：916 支住 `<session>/subagents/`，用 `*/*.jsonl` 只掃到 10%）：
+  ① **證據面收斂**：不問「這句話有沒有佐證」，問「**本場有沒有任何工具輸出**」——
+     `tool_output` 全空（零 `tool_result`）才判。實測驅逐了較寬的那一版：改判「有跑工具
+     但本場沒有任何正面判決字面（`rc=0`／`N passed`／`All checks passed`／行首 `OK`
+     ＝`audit_session.EVIDENCE_RE`）」⇒ 命中 **33** 筆，逐筆判讀 **28 筆完工類全是假紅**
+     （「任務 W4 完成」「環境確認完成」「研究完成」「Workflow 已完成」＝真實進度陳述，
+     不是驗證判決），判決類 5 筆亦僅 1 筆勉強算真（其餘是計畫、設計性質敘述、引號內
+     討論）⇒ **精確率 ≈3%**，那就是 `audit_session.py` 自陳「只能當量測器、不得接成閘門」
+     的原因本身：它的證據面是「往回看 3 個 `tool_result`」，而正常收工的那一則本來就常
+     在總結前幾輪跑過的事。本判準因此不借它的窗，只借它的詞。
+  ② **宣稱面收斂**：單一判決詞零鑑別力——實測 **1,804** 句帶詞句子中，零工具輸出的有 **3**
+     句，逐筆判讀 **3 筆全部假紅**且全是**單一詞**（「我來幫你**完成**從 Windows 切到 Mac
+     的切換程序」＝意圖動詞；「寫明**已驗證**什麼、未做什麼」＝在引述任務書體例；
+     「不採信備忘錄裡的「**已驗證**」字樣」＝在談論那個詞本身）。⇒ 判準要求同一句**堆疊
+     ≥2 個相異**判決詞（`NAKED_MIN_TOKENS`），並排除**被引號包起來**的詞（引號內的詞是
+     被談論的對象，不是斷言）。
+
+落地版判準（本檔 `naked_verdict_hits()`，普查向本檔借）在同一母體上重跑：**堆疊句 57
+句、最終命中 0 筆** ⇒ 假陽性 0。🔴 **那個 57 就是鑑別力的憑證**：堆疊型宣稱在本 repo
+是常態（「收尾完成，10 道閘門全綠。」「六筆落地…第三次全套 3726 OK rc=0…零損失」），
+而 57 → 0 全部是**證據面**那一條在抑制、不是詞表本身在挑 ⇒ 判準沒有把常態當違規，
+也證明它是可滿足的。（`assistant_blocks` 兩次量到 11,812／11,817：母體是活的——本輪
+自己的逐字稿邊寫邊被掃到，所以這是量測值不是常數，重跑方式見上方母體定義。）
+
+可滿足性同前三個判準，而且比它們更低廉：**跑任何一個工具**即抑制（本判準的證據面是
+「本場有沒有工具輸出」，不是「輸出裡有沒有你要的字」）；轉述別包交件則標 `[他包回報]`。
+🔴 **誠實劃界（不藏）**：本判準治的是**赤裸宣稱**（連一個佐證動作都不存在）這一型，
+**不**治「有跑工具但宣稱誇大」——後者需要判斷既有證據是否支撐那句話，而那要理解語意，
+是本檔三次收斂一致拒絕做的事（`b1ef81f` 那一則若跑過工具，本判準看不到它）。全母體
+真陽性 **0 筆**（沒有第二個實例）⇒ 召回率在本機母體上**無從量測**，紅綠自證只能靠合成
+注入（`tools/tests/test_claim_provenance_r86.py` 的 `TestTheNakedVerdictWithNoEvidence*`）。
+處置同第一個判準：**只出聲，永不阻斷**。
+
 誠實劃界（本檔抓不到什麼）
 ------------------------
-· **只看數字**。「全綠」「已驗證」「零損失」這種**不帶值**的判決一律看不到——它們沒有
-  可比對的值域，而那正是 `audit_session.py` 那支事後量測器的射程（兩者刻意分工，不是
-  同一份知識住兩個家）。
+· **不帶值的判決只治「赤裸」那一型**（第四個判準）：本場零工具輸出 ＋ 同句堆疊 ≥2 個
+  判決詞才判。跑了任何一個工具（哪怕是 `ls`）就結構上看不到 ⇒ 「有動作但宣稱誇大」
+  仍是 `audit_session.py` 那支事後量測器的射程（兩者刻意分工，不是同一份知識住兩個家）。
 · 第二個判準只認**反引號包起來的英文**錯誤字面。同一句話改寫成中文轉述（「死於月度支出
   上限」）或拿掉反引號就完全看不到 ⇒ 它守的是**這一型的複發**，不是整類因果謬誤。
 · 第二個判準**不判斷因果是對是錯**，只判斷「你把機器的話當成了自己的結論」。上面兩筆
@@ -499,6 +542,60 @@ def unsourced_verdict_hits(claim_text: str, tool_output: str,
     return hits
 
 
+#: **不帶值**的完工／全綠／零損失判決詞。長的排在短的前面：`finditer` 是左到右非重疊，
+#: `已完成` 必須整段吃掉，否則同一個詞會被 `完成` 再算一次而自製一筆「堆疊 ≥2」。
+NAKED_VERDICT_RE = re.compile(
+    r"(全部完成|全部通過|全數通過|驗證通過|沒有遺漏|沒有問題|已完成|已驗證|"
+    r"零損失|零遺漏|全綠|完畢|做完|完成)")
+
+#: 同一句要堆疊幾個**相異**判決詞才算數。🔴 這個 2 是量出來的不是挑的：全母體零工具
+#: 輸出的帶詞句子 3 句、逐筆判讀 3 筆全是假紅**且全是單一詞**（意圖動詞／引述體例／
+#: 談論那個詞本身）；要求 ≥2 之後同一母體命中 0 筆假紅。改成 1 就是把那 3 筆收回來。
+NAKED_MIN_TOKENS = 2
+
+#: 引號對。引號內的詞是**被談論的對象**，不是斷言——實測 3 筆假紅有 1 筆正是這一型
+#: （「不採信備忘錄裡的「已驗證」字樣」）。半角引號與反引號一併收：成本一個 dict 條目。
+_QUOTE_PAIRS = {"「": "」", "『": "』", "“": "”", "‘": "’",
+                '"': '"', "'": "'", "`": "`"}
+
+
+def _is_quoted(text: str, start: int, end: int) -> bool:
+    """`text[start:end]` 剛好被一對引號夾住（＝它是被引述的詞，不是斷言）。"""
+    before = text[start - 1] if start > 0 else ""
+    after = text[end] if end < len(text) else ""
+    return bool(before) and _QUOTE_PAIRS.get(before) == after
+
+
+def stacked_verdict_tokens(sentence: str) -> set[str]:
+    """句子裡**未被引號夾住**的相異無值判決詞。純函式，判準的可測面。"""
+    return {m.group(0) for m in NAKED_VERDICT_RE.finditer(sentence)
+            if not _is_quoted(sentence, m.start(), m.end())}
+
+
+def naked_verdict_hits(claim_text: str, tool_output: str,
+                       unattended: bool = False) -> list[dict]:
+    """`claim_text` 裡「本場零佐證動作」的無值完工判決（`[]`＝沒有）。
+
+    純函式，供攔截端（本檔 Stop 分支）與普查端共用同一份判準。與第一個判準的異同：
+    第一個問「這個**數字**的出處在哪」（值域比對），本判準的宣稱不帶值 ⇒ 改問「本場
+    **有沒有任何工具輸出**」（`tool_output` 全空才判）＋「這句話是不是**堆疊**了判決詞」。
+    兩條件都是字串比對，沒有一項需要理解語意；兩者的收斂實測見檔頭第四個判準節。
+    """
+    if tool_output.strip():
+        return []  # 本場有工具輸出 ⇒ 不是「赤裸宣稱」，本判準結構上不判（登記的劃界）
+    marker = UNATTENDED_PROVENANCE_RE if unattended else PROVENANCE_RE
+    hits: list[dict] = []
+    for sentence in _SENTENCE_RE.split(claim_text):
+        sentence = sentence.strip()
+        if not sentence or marker.search(sentence):
+            continue
+        tokens = stacked_verdict_tokens(sentence)
+        if len(tokens) < NAKED_MIN_TOKENS:
+            continue
+        hits.append({"tokens": sorted(tokens), "sentence": sentence[:200]})
+    return hits
+
+
 def error_literal_mechanism_hits(claim_text: str, tool_output: str) -> list[dict]:
     """`claim_text` 裡「把機器吐出來的錯誤字面當成機制結論」的句子（`[]`＝沒有）。
 
@@ -649,11 +746,11 @@ def main() -> int:
         stamped, records = _read_transcript(transcript)
         output = "\n".join(text for _when, text in stamped)
         messages: list[str] = []
+        # 抑制詞表的選擇對第一與第四個判準是同一個問題（見檔頭：無人看管時縮到只認方括號
+        # 標記），所以只讀一次、兩邊共用——多一個讀取站點就多一份會漂移的判準。
+        unattended = bool(os.environ.get("AUTOSDD_UNATTENDED"))
         if not os.environ.get("AUTOSDD_CLAIM_GUARD_OFF"):
-            hits = unsourced_verdict_hits(
-                claim, output,
-                unattended=bool(os.environ.get("AUTOSDD_UNATTENDED")),
-            )
+            hits = unsourced_verdict_hits(claim, output, unattended=unattended)
             if hits:
                 listed = "／".join(f"{h['value']}" for h in hits[:4])
                 messages.append(
@@ -661,6 +758,19 @@ def main() -> int:
                     f"找不到出處。若是轉述別包交件，請標 `[他包回報]`；若是自己跑的，請把那次"
                     f"執行的指令與 rc 一起貼出來。（判準：.claude/hooks/check_claim_provenance.py"
                     f"；關閉：AUTOSDD_CLAIM_GUARD_OFF=1）")
+        if not os.environ.get("AUTOSDD_NAKED_GUARD_OFF"):
+            naked = naked_verdict_hits(claim, output, unattended=unattended)
+            if naked:
+                listed = "／".join("＋".join(h["tokens"]) for h in naked[:3])
+                messages.append(
+                    f"🔴 這一則有 {len(naked)} 句**不帶值**的完工判決（{listed}），而本場"
+                    f"逐字稿裡**一次工具輸出都沒有**（零 tool_result）⇒ 這是赤裸宣稱："
+                    f"不是「數字對不上」，是連一個佐證動作都不存在。請把真的跑過那次的"
+                    f"指令與輸出貼出來（跑任何一個工具即抑制本判準）；若是轉述別包交件，"
+                    f"請標 `[他包回報]`。⚠️ 本判準**只**治這一型：跑了工具但宣稱誇大，它"
+                    f"結構上看不到（登記的劃界，不是通過）。"
+                    f"（判準：.claude/hooks/check_claim_provenance.py"
+                    f"；關閉：AUTOSDD_NAKED_GUARD_OFF=1）")
         if not os.environ.get("AUTOSDD_CAUSAL_GUARD_OFF"):
             causal = error_literal_mechanism_hits(claim, output)
             if causal:

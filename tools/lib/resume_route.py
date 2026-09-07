@@ -30,22 +30,13 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 #: 無頭 spawn 專屬的權限姿態檔（三層白名單載體：L1 可寫／L2 可跑／L3 永遠禁止）。
 #: 刻意**不動**主 `.claude/settings.json`——無頭姿態塞主檔會讓互動 session 一起變寬，
 #: 方向錯（施工圖 §3(a) 鍵名草案前言）。僅由 spawn argv 以 `--settings <本檔>` 載入。
+#: 🔴 2026-09-07 掌舵者裁決（SA＋SD 兩位獨立審查通過）：姿態檔**只有這一份**。
+#: 此前 M-06 另有 `.claude/settings.unattended_first_window.json`（deny 多帶 `Task`／
+#: `Agent`／`Workflow`）給「第一窗」用，配一支 `posture_settings_path(allow_followup=…)`
+#: 選檔——連同 INV2／INV3 一併移除、檔案已刪。理由＝訂閱制風險模型下，主 agent 一旦確認
+#: 喚醒即與互動 session 同等信任，不分窗次；額度風險由 `relay_machine.max_spawns()`
+#: ＋1 小時牆鐘 timeout＋INV4（無人回合一次沒進度就停）三層界住。
 UNATTENDED_SETTINGS = _REPO_ROOT / ".claude" / "settings.unattended.json"
-
-#: M-06：第一窗（`allow_followup=False`）專屬姿態檔——deny 清單多帶 `Task`／`Agent`／
-#: `Workflow` 三個 fan-out 工具。此前 INV2（續跑不得以 fan-out 為第一動作）只靠
-#: `resume_argv()` 決定要不要在 prompt 文字裡塞 Workflow 提示句，模型仍可自行決定呼叫
-#: 這三個工具——prompt 提示只是「不主動建議」，不是機械硬擋。本檔把它下沉成
-#: harness 權限層的真擋（`--settings` 指到不同檔），不是只改 prompt 文字。
-UNATTENDED_FIRST_WINDOW_SETTINGS = _REPO_ROOT / ".claude" / "settings.unattended_first_window.json"  # noqa: E501
-
-
-def posture_settings_path(*, allow_followup: bool) -> Path:
-    """spawn 這一跑該用哪份權限姿態檔——`_posture_argv()` 與呼叫端的 A-PRE 預檢
-    （`session_resume_planner._run_resume`）共用同一個判準，不得各自各解一次
-    （各解一次＝其中一邊漏跟著新檔走，preflight 驗的檔與 argv 實際指到的檔可能不同檔）。
-    """
-    return UNATTENDED_SETTINGS if allow_followup else UNATTENDED_FIRST_WINDOW_SETTINGS
 
 
 def handback_dir() -> Path:
@@ -114,12 +105,13 @@ def handback_postcheck(route: dict, spawn_at: float, state: dict,
     return verdict
 
 
-def _posture_argv(*, allow_followup: bool = False) -> list[str]:
+def _posture_argv() -> list[str]:
     # 🔴 順序約束：這一段必須排在 prompt 之後、`--add-dir` 之**前**——
     # `--add-dir <directories...>` 是變長參數，其後只准剩目錄值（姊妹鎖
     # test_the_variadic_add_dir_does_not_swallow_the_prompt 釘住整條 argv 的尾端形狀）。
-    return ["--permission-mode", "acceptEdits", "--settings",
-            str(posture_settings_path(allow_followup=allow_followup))]
+    # 2026-09-07：不再選檔（見 `UNATTENDED_SETTINGS` 上方裁決），兩路同一份姿態檔 ⇒
+    # A-PRE 預檢（`preflight_problem()` 預設值）與 argv 實際指到的檔結構上必然同一份。
+    return ["--permission-mode", "acceptEdits", "--settings", str(UNATTENDED_SETTINGS)]
 
 
 # v2.1.13 C5：settings 檔 `additionalDirectories` 的 `~` 展開 [需核對]（施工圖 §3(a)
@@ -134,33 +126,33 @@ def _add_dir_argv(task_dir: Path) -> list[str]:
     return ["--add-dir", str(task_dir), str(handback_dir())]
 
 
-def resume_argv(claude: str, session_id: str, prompt: str, add_dir: Path,
-                *, allow_followup: bool = False) -> list[str]:
+def resume_argv(claude: str, session_id: str, prompt: str, add_dir: Path) -> list[str]:
     """SESSION_RESUME 的完整 argv（prompt 在變長旗標之前；尾端＝--add-dir＋任務書目錄
     ＋現解後的 handback 目錄，v2.1.13 C5）。
 
-    🔴 INV2＋INV3（掌舵者 2026-09-05 事故訂正，取代 DEF-200-270 ③的**無條件**注入）：
-    事故當日額度回來後，headless 續跑窗口一起手就被「第一句話呼叫 `Workflow(resumeFromRunId)`」
-    這個無條件注入驅使、重跑一個 34-agent 的 Workflow，撞無人核准權限牆前先燒掉一輪 token。
-    修法＝把 fan-out 注入 **gate 起來**：預設 `allow_followup=False` ⇒ prompt 一個 Workflow
-    字都不多（續跑不得以 fan-out 為第一動作）；只有呼叫端確認**前一窗確實起來**
-    （`relay_machine.followup_allowed(state)`＝前一窗 `made_progress` ∧ 非第一窗）時才傳
-    `allow_followup=True`，此時才接 `workflow_resume_hint(session_id)`。
-    只接在 RESUME 路：FRESH（不帶 `-r`）是別的 session，runId 對它結構上無效
-    （見 `quota_escalation` 檔頭劃界 ③），故 `fresh_argv` 不帶本參數。
+    🔴 2026-09-07 掌舵者裁決：**無人續跑一旦確認 spawn 成功即與互動 session 同等信任，
+    不分窗次**。prompt 逐字就是呼叫端給的那一句，本檔不再往裡面加任何東西——
+    此前的 `allow_followup` 參數（INV2／INV3 的 gate）與它控制的
+    `workflow_resume_hint()` 注入已整支移除。
+
+    移除注入而不是「恆注入」的理由（史料兩層）：DEF-200-270 ③ 原本**無條件**把
+    `Workflow(resumeFromRunId)` 塞成第一句話 ⇒ 事故當日 headless 窗口一起手就重跑一個
+    34-agent Workflow，撞無人核准權限牆前先燒掉一輪 token；2026-09-05 改成 gated；
+    2026-09-07 連 gate 一起拆時，掌舵者裁決注入本身也移除——要不要用 Task／Agent／
+    Workflow 交給醒來的主 agent 自己讀任務書／handback 判斷（與一般互動 session 同），
+    系統不用提示句驅使特定工具呼叫。fanout 清單（`quota_escalation.fanout_path()`）仍
+    照寫，那是磁碟上可讀的事實，不是 prompt 注入。
     """
-    hint = workflow_resume_hint(session_id) if allow_followup else ""
-    return [claude, "-p", "-r", session_id, prompt + hint,
-            *_posture_argv(allow_followup=allow_followup), *_add_dir_argv(add_dir)]
+    return [claude, "-p", "-r", session_id, prompt,
+            *_posture_argv(), *_add_dir_argv(add_dir)]
 
 
 def fresh_argv(claude: str, prompt: str, add_dir: Path) -> list[str]:
     """FRESH_SESSION_WITH_STATE 的完整 argv（不帶 `-r`，其餘形狀與 RESUME 路對稱）。
 
-    🔴 M-06：FRESH 路沒有「前一窗確實起來」這個概念可言（它本來就是降級開的全新
-    session，沒有可確認的接力進度）⇒ 一律用第一窗姿態檔（`allow_followup` 恆
-    `False`），不接受呼叫端傳入——與 RESUME 路 `allow_followup=True` 需要
-    `relay_machine.followup_allowed(state)` 正面證據對稱。
+    2026-09-07 起兩路的權限姿態逐字相同（同一份 `UNATTENDED_SETTINGS`）；FRESH 路與
+    RESUME 路的唯一差別仍只是 `-r <session_id>`——FRESH 是降級開的全新 session，
+    runId 對它結構上無效（見 `quota_escalation` 檔頭劃界 ③）。
     """
     return [claude, "-p", prompt, *_posture_argv(), *_add_dir_argv(add_dir)]
 
@@ -201,9 +193,10 @@ def preflight_problem(settings: Path | None = None) -> str | None:
 #     **`started ∖ result ≠ ∅` ⇒ 未完成**。
 # 🔴 `<sid>/workflows/wf_<runId>.json` 的 `status` **不可**當完成判準：本案該檔
 # `status="completed"` 而 40 個 agent 失敗（它記的是 run 收尾了沒，不是每個 agent 成了沒）。
-# 住本檔而不是 `quota_escalation`：那一支 377/400（現查 check_loc_budget），且「續跑 prompt
-# 帶什麼」本來就是本檔（喚醒 argv 組裝）的主題；`quota_escalation.snapshot_fanout()` 對本檔
-# 走函式內 lazy import（本檔對它亦然），模組層互不依賴。
+# 住本檔而不是 `quota_escalation`：那一支 377/400（現查 check_loc_budget），且這兩支判準
+# 原是本檔「續跑 prompt 帶什麼」那條路的取數層。🔴 2026-09-07 訂正：prompt 注入已整支移除
+# （見下方 `workflow_resume_hint` 移除註記）⇒ 唯一消費端只剩 `quota_escalation.
+# snapshot_fanout()`（它對本檔走函式內 lazy import；本檔對它已無任何 import），依賴單向。
 _JOURNAL_TYPES = ("started", "result", "failed")
 
 
@@ -256,22 +249,12 @@ def workflow_resume_facts(run_dir: Path, script_path: str) -> dict:
                             f'resumeFromRunId: "{run_dir.name}"}})') if ready else ""}
 
 
-def workflow_resume_hint(session_id: str) -> str:
-    """續跑 prompt 的附句：fanout 清單裡有 `resume_ready` 的 run ⇒ 第一句話就呼叫它們；
-    沒有清單／沒有 ready 的 run ⇒ 空字串（prompt 一個字都不多）。清單路徑的家＝
-    `quota_escalation.fanout_path()`（lazy import，避免模組層成環）。"""
-    import quota_escalation  # noqa: PLC0415 — 見上方區塊註解（互相 lazy，模組層不成環）
-
-    path = quota_escalation.fanout_path(session_id)
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return ""
-    calls = [str(run["resume_call"]) for run in (data.get("runs") or [])
-             if isinstance(run, dict) and run.get("resume_ready") and run.get("resume_call")]
-    if not calls:
-        return ""
-    return (f"🔴 fanout 清單（{path}）有被撞線打斷的 Workflow：**第一句話**就呼叫 "
-            + "；".join(calls)
-            + "（cache 回放已完成的 agent、只重跑失敗者；args 若原本有帶，從主逐字稿的 Workflow "
-              "tool_use input 取），完成後再照任務書第 3 節。")
+# 🔴 2026-09-07 掌舵者裁決：此處原有 `workflow_resume_hint(session_id)`——把 fanout 清單
+# 裡 `resume_ready` 的 run 組成一句「**第一句話**就呼叫它們」附加到續跑 prompt 尾端。整支
+# 移除（不是改成恆注入、也不是保留條件注入）：系統不該用提示句驅使醒來的主 agent 做特定
+# 工具呼叫，那正是 DEF-200-270 ③ 燒掉一輪 token 的機制。判準面（`journal_counts`／
+# `workflow_resume_facts`）保留——它們的消費端是 `quota_escalation.snapshot_fanout()`
+# 寫出的磁碟清單，主 agent 要續跑 Workflow 時自己去讀那份清單即可。
+# 附帶結論：本檔對 `quota_escalation` 的**函式內 lazy import 因此全數消失**（上方區塊註解
+# 原寫「本檔對它亦然」已據實訂正）；單向依賴（`quota_escalation` → 本檔，走它那側的 lazy
+# import）仍不成環。

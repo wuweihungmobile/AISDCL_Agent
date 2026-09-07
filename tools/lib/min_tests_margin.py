@@ -101,6 +101,38 @@ def discrimination_lost_count(min_tests: int, loss: int) -> int:
     return min_tests + loss
 
 
+#: 絕對餘裕軸的容忍度：`實跑收集數 − MIN_TESTS` 不得超過「實跑收集數 × 本比例」。
+#: 🔴 為何需要**第三條軸**（不是重複上面那兩條）：上面那條餘裕軸的分母是 `collapse_loss`，
+#: 而 `loss <= 0` 時 `headroom_message()` 逐字回 `None`＝**不適用**（見檔頭〈誠實劃界〉）
+#: ——那幾支相依模組哪天不再整份塌（相依內建化／測試改寫），整條餘裕軸靜音，後備只剩
+#: `RATCHET_STALE_RATIO`（1.25，＝可靜默蒸發四分之一的測試仍不紅）。本軸的分母是實跑數
+#: 自己，結構上永遠不會變成「不適用」，這是它與另兩條的分工。
+#: 🔴 為何訂 5%：本 repo 單輪成長實測可達 167 支（R96→R100，同 `HEADROOM_WARN_FRACTION`
+#: 的依據），而 5% 對 4000 級的實跑數 ≈ 200 支 ⇒ 一輪合法成長不會把它變紅（會吵人的門檻
+#: 會被無視，等於沒有門檻）；同時 5% 嚴格緊於比例線的 25%，所以它在那條線之前就先咬。
+ABSOLUTE_GAP_FRACTION = 0.05
+
+
+def absolute_gap_message(
+    count: int, min_tests: int, fraction: float = ABSOLUTE_GAP_FRACTION
+) -> str | None:
+    """`count − min_tests` 吃掉超過 `fraction × count` 時回傳可直接印的提醒，否則 `None`。
+
+    純函式、無 I/O（同本檔其餘判準）。量的就是「這個下限還能讓幾支測試靜默蒸發而不紅」
+    ——那是下限的鑑別力本身；`floor` 而非 `round`，門檻寧可略嚴不可略鬆（同
+    `headroom_threshold`）。訊息直接帶出該重釘成多少，讓讀者不必自己再算一次。
+    """
+    allowed = math.floor(count * fraction)
+    gap = count - min_tests
+    if gap <= allowed:
+        return None
+    return (
+        f"⚠️  MIN_TESTS 已落後實跑收集數 {gap} 支（容忍上限 {allowed}"
+        f"＝實跑 {count} 的 {fraction:.0%}）：本下限的鑑別力只剩「可靜默蒸發"
+        f" {gap} 支測試仍不紅」。請把 tools/run_root_unittests.py 的 MIN_TESTS 重釘為 {count}"
+    )
+
+
 def headroom_message(
     count: int,
     min_tests: int,

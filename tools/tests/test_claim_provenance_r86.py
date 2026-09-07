@@ -614,5 +614,193 @@ class TestThePaceGuardHasItsOwnEscapeHatch(unittest.TestCase):
         self.assertIn("99991", done.stderr, "另一個判準被順手關掉了")
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 第四個判準：不帶值的完工判決 ＋ 本場零佐證動作（`WakeChain_IronLaws_Verification.md`
+# 規則 8 的破洞）
+# ─────────────────────────────────────────────────────────────────────────────
+
+#: 立案句：`docs/06_quality/WakeChain_IronLaws_Verification.md` 第四節規則 8 那一列**逐字
+#: 記載**它在修復前是 `rc=0、stderr/stdout 完全空白`（本輪落地前重放實測確認）。
+_NAKED = "完成：全部修復完畢，已驗證，全綠，零損失。"
+
+#: 全母體實測的 **3 筆假紅**（單一判決詞）。逐字留樣：這三句是判準必須**保持靜默**的
+#: 形態，`NAKED_MIN_TOKENS` 由 1 改成 2 的全部理由就是它們。
+_SINGLE_WORD_FALSE_REDS = (
+    "我來幫你完成從 Windows 切到 Mac 的切換程序。",
+    "2. **任務書磁碟化** — 寫明已驗證什麼、未做什麼、下一步確切指令",
+    "R104 交接書尚未讀取，先核實內容再決定下一步，"
+    "不採信備忘錄裡的「已驗證」字樣。",
+)
+
+#: 全母體實測 **57 句**堆疊型宣稱裡的真實樣本（去識別後保留形態）。它們全部發生在
+#: **有**工具輸出的場次 ⇒ 必須靜默。這一組守的是「常態不得被當成違規」。
+_BACKED_WRAP_UPS = (
+    "收尾完成，10 道閘門全綠。",
+    "收尾包完成：全套 3435 tests 全綠（rc=0），18 筆紅歸零。",  # baseline-ok:語料
+    "**規則6（喚醒鏈自動續跑）修復：完成，已驗證**",
+)
+
+
+class TestTheNakedVerdictWithNoEvidenceIsFlagged(unittest.TestCase):
+    """規則 8 的破洞本體：**不帶值**的完工判決 ＋ 本場一次工具輸出都沒有。
+
+    守的是什麼（Rule 9）：前三個判準全部收在「值」上 ⇒ 這一型結構上看不見，而
+    `commit b1ef81f` 的誇大宣稱正是走這個盲區溜過去的。判準與第一個的異同：第一個問
+    「這個**數字**的出處在哪」（值域比對）；本判準的宣稱不帶值，改問「本場**有沒有任何
+    工具輸出**」＋「這句話是不是**堆疊**了判決詞」——兩者都是字串比對，不理解語意。
+    """
+
+    def test_the_incident_sentence_with_zero_tool_output_is_flagged(self) -> None:
+        """缺陷復發即紅。沒有這一條，整支判準可以恆回 `[]` 而 rc 一模一樣。"""
+        hits = G.naked_verdict_hits(_NAKED, "")
+        self.assertTrue(hits, "赤裸宣稱（零 tool_result）沒被指出來")
+        self.assertEqual(hits[0]["tokens"],
+                         ["全綠", "完成", "完畢", "已驗證", "零損失"],
+                         "訊息必須指名是哪幾個詞堆疊起來的")
+
+    def test_the_same_sentence_is_silent_once_the_session_really_ran_something(
+            self) -> None:
+        """🔴 對照組＝**正常收工**（有貼真實輸出、句尾說了完成）。
+
+        這一條是本組的生死線：把它判紅就是把本 repo 的常態當違規，而
+        `audit_session.py` 自陳「不得接成閘門」的原因正是它那個判準會這樣做
+        （實測：往回看 3 個 tool_result 的證據面 ⇒ 28.4% 判無佐證）。
+        """
+        self.assertEqual(G.naked_verdict_hits(_NAKED, _OWN_OUTPUT), [],
+                         "本場真的跑過工具卻被判赤裸宣稱 ⇒ 這道守衛會被整個關掉")
+
+    def test_real_backed_wrap_ups_from_the_corpus_stay_silent(self) -> None:
+        """全母體 57 句堆疊型宣稱**全部**發生在有工具輸出的場次 ⇒ 全部必須靜默。
+
+        那個 57 就是鑑別力的憑證：57 → 0 是**證據面**在抑制，不是詞表在挑。
+        """
+        for sentence in _BACKED_WRAP_UPS:
+            with self.subTest(sentence=sentence):
+                self.assertEqual(G.naked_verdict_hits(sentence, _OWN_OUTPUT), [],
+                                 f"{sentence!r} 是有佐證的常態，命中它等於處罰正解")
+
+    def test_a_single_verdict_word_is_a_registered_bypass_not_an_oversight(
+            self) -> None:
+        """`NAKED_MIN_TOKENS` 的紅綠自證：實測 3 筆單一詞假紅必須靜默。
+
+        三筆的成因是結構性的（意圖動詞／引述任務書體例／談論那個詞本身），全部不是
+        斷言。門檻改回 1 就是把它們收回來——而「一個永遠在響的警報等於沒有警報」
+        本 repo 已有判例。
+        """
+        self.assertEqual(G.NAKED_MIN_TOKENS, 2)
+        for sentence in _SINGLE_WORD_FALSE_REDS:
+            with self.subTest(sentence=sentence):
+                self.assertEqual(G.naked_verdict_hits(sentence, ""), [],
+                                 f"{sentence!r} 只有一個判決詞，判它就是那 3 筆假紅")
+
+    def test_a_quoted_verdict_word_is_being_discussed_not_asserted(self) -> None:
+        """引號內的詞是**被談論的對象**：3 筆假紅有 1 筆正是這一型。
+
+        紅綠自證的另一半在下一行——拿掉引號、湊足兩個詞就必須命中，否則這個抑制器
+        等於把判準關掉。
+        """
+        self.assertEqual(
+            G.naked_verdict_hits("任務書要求寫明「已驗證」與「全綠」兩個字樣。", ""),
+            [], "引號內的詞被當成斷言了")
+        self.assertTrue(G.naked_verdict_hits("已驗證，全綠。", ""),
+                        "拿掉引號後仍不命中 ⇒ 抑制器恆真，判準被關掉了")
+
+    def test_an_attributed_relay_is_the_desired_behaviour_here_too(self) -> None:
+        """邊界：帶出處標記的轉述必須放行（與第一個判準同一個逃生口語意）。
+
+        無人看管時抑制詞縮到只認方括號標記——句子裡塞一個「回報」就能靜音，而無人
+        看管的回合可以自己寫出那兩個字（同 `# git-guard-ok:` 的已知弱點與處置）。
+        """
+        for sentence in (f"`[他包回報]` {_NAKED}", f"修復包 C 回報：{_NAKED}",
+                         f"QA 宣稱{_NAKED}"):
+            with self.subTest(sentence=sentence):
+                self.assertEqual(G.naked_verdict_hits(sentence, ""), [],
+                                 f"{sentence!r} 已標出處卻被判違規")
+        self.assertTrue(
+            G.naked_verdict_hits(f"修復包 C 回報：{_NAKED}", "", unattended=True),
+            "無人看管時『回報』不得再構成抑制——否則模型可以自己寫出豁免")
+        self.assertEqual(
+            G.naked_verdict_hits(f"`[他包回報]` {_NAKED}", "", unattended=True), [],
+            "方括號標記在無人看管時仍須抑制")
+
+    def test_the_value_domain_criterion_is_unchanged_by_this_one(self) -> None:
+        """迴歸：新判準不得動到第一個判準的**任何**方向（含正反兩面）。
+
+        兩個判準的證據面不同（值 vs 有無輸出），共用同一份 `PROVENANCE_RE` 與
+        `_SENTENCE_RE` ⇒ 動到抑制詞或斷句就會同時改壞兩邊，而只有一邊有人看。
+        """
+        self.assertTrue(G.unsourced_verdict_hits("修復包 2 完成，1703 passed。",  # baseline-ok:語料
+                                                 _OWN_OUTPUT))
+        self.assertEqual(
+            G.unsourced_verdict_hits("回歸 3748 passed。", _OWN_OUTPUT), [])  # baseline-ok:語料
+        self.assertEqual(G.unsourced_verdict_hits("回歸 3,748 passed。",  # baseline-ok:語料
+                                                  _OWN_OUTPUT), [])
+        self.assertEqual(G.normalize_digits("rc=0，44 skip"), "rc=0，44 skip")
+        self.assertEqual(G.unsourced_verdict_hits(_NAKED, ""), [],
+                         "不帶值的句子不得開始命中第一個判準——那是另一個判準的射程")
+
+
+class TestTheNakedGuardIsItsOwnProcessLevelContract(unittest.TestCase):
+    """程序層：真違規要出聲、rc 仍為 0、逃生口不與其他判準共用。"""
+
+    def setUp(self) -> None:
+        self._dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._dir.cleanup)
+        self.transcript = Path(self._dir.name) / "t.jsonl"
+        self.transcript.write_text("", encoding="utf-8")  # 零 tool_result
+
+    def _run(self, claim: str, env_extra: dict | None = None):
+        payload = json.dumps({"hook_event_name": "Stop",
+                              "last_assistant_message": claim,
+                              "transcript_path": str(self.transcript)})
+        env = {**os.environ, "AUTOSDD_TRACE_DIR": self._dir.name,
+               **(env_extra or {})}
+        return subprocess.run([sys.executable, str(_HOOK)], input=payload, env=env,
+                              capture_output=True, text=True, timeout=60,
+                              encoding="utf-8", errors="replace")
+
+    def test_it_speaks_on_stderr_but_still_exits_zero(self) -> None:
+        """修復前實測 `rc=0` **且 stderr 全空**（規則 8 那一列逐字記載的破洞）。"""
+        done = self._run(_NAKED)
+        self.assertEqual(done.returncode, 0, "本守衛永不阻斷")
+        self.assertIn("赤裸宣稱", done.stderr, "破洞句仍然靜默 ⇒ 規則 8 沒修好")
+        self.assertIn("零 tool_result", done.stderr, "必須說出為什麼算赤裸")
+        self.assertIn("跑任何一個工具即抑制", done.stderr,
+                      "訊息必須給出可滿足的出路，否則讀者只能把守衛關掉")
+
+    def test_turning_off_the_naked_guard_leaves_the_value_guard_armed(self) -> None:
+        """逃生口刻意不共用：共用會讓「別唸我這件事」順手關掉另一件。"""
+        claim = _NAKED + " 收工：99991 passed。"  # baseline-ok: 合成語料
+        done = self._run(claim, {"AUTOSDD_NAKED_GUARD_OFF": "1"})
+        self.assertEqual(done.returncode, 0)
+        self.assertNotIn("赤裸宣稱", done.stderr, "逃生口沒有真的關掉本判準")
+        self.assertIn("99991", done.stderr, "另一個判準被順手關掉了")
+
+    def test_the_claim_guard_hatch_does_not_silence_this_one(self) -> None:
+        """反向：關掉第一個判準時本判準必須**還在**（否則兩個名字同一個開關）。"""
+        done = self._run(_NAKED, {"AUTOSDD_CLAIM_GUARD_OFF": "1"})
+        self.assertEqual(done.returncode, 0)
+        self.assertIn("赤裸宣稱", done.stderr)
+
+    def test_the_new_hatch_is_read_and_is_not_a_shared_name(self) -> None:
+        """判準問的是本檔**讀**了哪個環境變數（AST 站點），不是文字面出現過。"""
+        read_names = {
+            node.args[0].value
+            for node in ast.walk(ast.parse(_HOOK.read_text(encoding="utf-8")))
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute) and node.func.attr == "get"
+            and isinstance(node.func.value, ast.Attribute)
+            and node.func.value.attr == "environ"
+            and node.args and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[0].value, str)
+        }
+        self.assertIn("AUTOSDD_NAKED_GUARD_OFF", read_names,
+                      "第四個判準必須有自己的逃生口")
+        for foreign in ("AUTOSDD_CLAIM_GUARD_OFF", "AUTOSDD_CAUSAL_GUARD_OFF",
+                        "AUTOSDD_PACE_GUARD_OFF"):
+            self.assertIn(foreign, read_names,
+                          f"{foreign} 消失了 ⇒ 那個判準被順手併進別人的開關")
+
+
 if __name__ == "__main__":
     unittest.main()

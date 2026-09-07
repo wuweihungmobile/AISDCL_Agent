@@ -33,8 +33,8 @@
 # 可以呼叫 `Workflow({scriptPath, resumeFromRunId})`（掌舵者 2026-09-05 裁決：無頭窗口
 # 可自行呼叫，零人介入）。現行劃界＝**session 已死且無法 `-p -r` 續跑時**，`runId` 對
 # `resumeFromRunId` 才無效。⇒ 本檔交付的是：把「續跑需要的全部資訊」（scriptPath／runId／
-# journal 計數／可直接貼的呼叫）落到磁碟固定位置，`resume_route.workflow_resume_hint()`
-# 再把它接進續跑 prompt。🔴 前提待實測：`-p -r` 內 `resumeFromRunId` 是否真的命中 cache
+# journal 計數／可直接貼的呼叫）落到磁碟固定位置，**續跑窗口自己去讀它**（2026-09-07：原
+# 有的 prompt 注入已隨 INV2／INV3 拆除移除）。🔴 待實測：`-p -r` 內 `resumeFromRunId` 命中 cache
 # （本包禁 spawn claude，未測；證偽點＝`<run>/journal.jsonl` 的 `started` 增量只該對
 # failed 的 key 新增）。
 from __future__ import annotations
@@ -255,14 +255,14 @@ def snapshot_fanout(transcript: Path, event: object) -> dict:
             f"用 Workflow 的 resumeFromRunId={[r['run_id'] for r in runs]}"
             "——已完成的 agent 從 cache 回放，只重跑下面 dead 清單裡的那些。",
             "② 主控死於撞線、喚醒鏈以 `claude -p -r <sid>` 續跑：那是**同一個 session**，"
-            "續跑窗口第一句話就照各 run 的 `resume_call` 呼叫 Workflow（`resume_ready` 者；"
-            "prompt 由 resume_route.workflow_resume_hint() 注入）。🔴 前提待實測："
+            "續跑窗口可照各 run 的 `resume_call` 自行呼叫 Workflow（`resume_ready` 者）。"
+            "🔴 2026-09-07 起本清單不再注入續跑 prompt，重跑由主 agent 讀本檔自決。前提待實測："
             "`-p -r` 內 resumeFromRunId 是否命中 cache，證偽點＝journal.jsonl 的 started "
             "增量只該對 failed 的 key 新增。",
             "③ session 已死**且無法 `-p -r` 續跑**（逐字稿缺檔／超上限 ⇒ FRESH 降級）："
             "runId 對 resumeFromRunId 才無效，此時本檔的用途是重派清單——照 dead 逐一重新指派。",
-            "🔴 排程器（OS 行程）自己不會按 Workflow；它做的是把續跑窗口叫起來並把本清單"
-            "接進 prompt。`wf_<runId>.json` 的 status 不可當完成判準（實測 completed 而 40 個"
+            "🔴 排程器（OS 行程）自己不會按 Workflow，也不把本清單接進 prompt；它只把續跑"
+            "窗口叫起來。`wf_<runId>.json` 的 status 不可當完成判準（實測 completed 而 40 個"
             " agent 失敗）——完成判準＝journal started∖result 為空。"],
     }, ensure_ascii=False, indent=2))
     return {"fanout": str(path) if ok else "", "fanout_written": ok,

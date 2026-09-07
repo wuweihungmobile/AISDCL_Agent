@@ -486,7 +486,14 @@ def probe_quota(claude: str = "claude", model: str = "haiku") -> dict:
     # 一次 ≈ 31,847 tokens）；當「還沒回來」處理即可。text 刻意不含 reset 字面 ⇒ `tick_plan`
     # 走 `PATROL_HANDBACK`（零成本巡邏兜底、繼續等），不猜時刻、不永眠。互動回合（無旗標）
     # 仍照舊付費探測（射程只在無人回合，否則會把 `--probe-quota` 也靜音）。
-    if os.environ.get(UNATTENDED_ENV):
+    # 🔴 R11X 縱深防禦：判準故意不用 Python 真值測試（`if os.environ.get(...):`）——那個
+    # 寫法會把「鍵存在但空字串」誤判成「鍵不存在」，讓這道煞車在邊界值上失效（即使
+    # `main()` 那一端已經改成強制覆寫，這裡仍要獨立擋住：任何未來忘記強制覆寫的呼叫
+    # 路徑也不能靠這裡的判準漏過去）。改成鍵存在性判準：`AUTOSDD_UNATTENDED` 在本專案
+    # 唯二的合法狀態是「完全不存在」（互動）或「存在＝無人模式」（`_run_resume`／`main()`
+    # 一律寫字面 `"1"`），沒有第三種「存在但代表 off」的合法用法——邊界值（空字串等殘留）
+    # 落在安全的那一側（視為無人模式），而不是落在會讓煞車失效的那一側。
+    if UNATTENDED_ENV in os.environ:
         return {"open": False, "kind": guard.LIMIT_UNKNOWN, "rc": 0,
                 "text": "無人模式：免費端點未給正向結論，依 INV1 不付費探測，維持零成本巡邏",
                 "source": "endpoint/unattended-no-paid-probe"}
@@ -1116,14 +1123,13 @@ def _transcript_cap() -> tuple[int, str]:
 # --add-dir 後只能有一個值）的立案見 `_run_resume` 上方 R80 段與姊妹鎖
 # test_the_variadic_add_dir_does_not_swallow_the_prompt。
 def choose_resume_route(claude: str, session_id: str, transcript: Path | None,
-                        plan_path: str, max_bytes: int | None = None, *,
-                        followup_ok: bool = False) -> dict:
+                        plan_path: str, max_bytes: int | None = None) -> dict:
     """喚醒選路：回 `{strategy, reason, argv}`；REFUSE 時 argv=None（呼叫端 fail-loud）。
 
-    🔴 INV3（掌舵者 2026-09-05）：`followup_ok`＝前一窗確實起來（`relay_machine.
-    followup_allowed(state)`）。為真才讓 RESUME 路的 argv 帶 fan-out 注入（`allow_followup`）；
-    預設 False ⇒ 續跑不得以 fan-out 為第一動作（INV2）。FRESH 路是別的 session、runId 對它
-    結構上無效，一律不帶。
+    🔴 2026-09-07 掌舵者裁決（SA＋SD 兩位獨立審查通過）：此前有一個 `followup_ok` 參數
+    （＝INV3「前一窗確實起來」的判準結果，往下傳成 `resume_argv(allow_followup=…)`），
+    連同 INV2 一併移除——無人續跑一旦確認 spawn 成功即與互動 session 同等信任，不分窗次。
+    兩路的 argv 因此只差 `-r <session_id>`，權限姿態逐字相同。
     """
     plan = Path(str(plan_path or ""))
     if not plan.is_file():
@@ -1142,7 +1148,7 @@ def choose_resume_route(claude: str, session_id: str, transcript: Path | None,
                 "reason": f"逐字稿可用（{size:,}B ≤ 上限 {limit:,}B）⇒ 帶完整 context 續跑{suffix}",  # noqa: E501
                 # v2.1.13 G1：argv 組裝（含 --permission-mode/--settings 權限姿態旗標）
                 # 下沉 tools/lib/resume_route.py——兩路同一份真相，旗標不可能只補到一路。
-                "argv": resume_route.resume_argv(claude, str(session_id), f"讀 {plan}，照它第 3 節做。{_RESUME_RULES}🔴 handback 檔路徑＝{hb}", plan.parent, allow_followup=followup_ok)}  # noqa: E501 — INV3：fan-out 注入 gate 在前一窗確實起來之後
+                "argv": resume_route.resume_argv(claude, str(session_id), f"讀 {plan}，照它第 3 節做。{_RESUME_RULES}🔴 handback 檔路徑＝{hb}", plan.parent)}  # noqa: E501
     why = ("session id 缺席" if not session_id else "逐字稿缺檔" if size is None else
            "逐字稿為空" if size == 0 else f"逐字稿 {size:,}B 超上限 {limit:,}B")
     return {"strategy": STRATEGY_FRESH, "handback": str(hb),
@@ -1161,11 +1167,11 @@ def choose_resume_route(claude: str, session_id: str, transcript: Path | None,
 # `_resume_tick` 必須據此判斷，`None` 時不得把狀態塊寫成 `"resumed"`。
 def _run_resume(args, state: dict, log: Path) -> int | None:
     """額度回來且已授權時，真的把工作續跑起來（帶無人看管訊號）。"""
-    sid = str(state.get("session_id") or ""); spawn_at = datetime.now().timestamp(); followup = relay_machine.followup_allowed(state); state["handback_verdict"], state["files_changed"] = "missing", 0  # noqa: E501,E702 — G2 後檢的 mtime 錨；v2.1.13 G3：本窗乾淨初值；INV3：followup 讀「前一窗」值，必在本窗 handback_verdict 歸零前算
+    sid = str(state.get("session_id") or ""); spawn_at = datetime.now().timestamp(); state["handback_verdict"], state["files_changed"] = "missing", 0  # noqa: E501,E702 — G2 後檢的 mtime 錨；v2.1.13 G3：本窗乾淨初值
     transcript = (Path(str(state["transcript"])) if state.get("transcript")
                   else resolve_transcript(sid) if sid else None)
     route = choose_resume_route(args.probe_command, sid, transcript,
-                                str(state.get("plan_path") or ""), followup_ok=followup)
+                                str(state.get("plan_path") or ""))
     # 痕跡必記策略與原因：降級是靜默失效的高風險點，「走了哪條路」必須事後可稽核。
     append_log(log, "route_chosen", strategy=route["strategy"], why=route["reason"]); state["route_strategy"] = route["strategy"]; state["handback_path"] = str(route.get("handback") or "")  # noqa: E501,E702 — v2.1.13 G3：REFUSE 需可辨（見 _resume_tick）；R115 修復 F1：settle_window() 讀 state["handback_path"] 判準③，此前恆未寫入 state ⇒ 讀空文本 round-label-ok
     if route["argv"] is None:
@@ -1174,12 +1180,10 @@ def _run_resume(args, state: dict, log: Path) -> int | None:
     # 「unattended settings 檔存在 ∧ JSON 可解析」，缺一拒 spawn——缺席時 spawn 出去的
     # 無頭窗口退回無人核准權限牆（2026-08-30 實戰 G1 形態：收不了尾還照燒額度）。
     # 判準本體住 tools/lib/resume_route.py（planner 只接線）；通過面順帶 mkdir handback。
-    # 🔴 M-06：預檢的檔必須與 argv 實際會用的那一份**同一份**——FRESH 路與「followup
-    # 未證實」的 RESUME 第一窗一律用第一窗姿態檔（見 `resume_route.fresh_argv`／
-    # `resume_argv` 的 WHY），否則會驗過 A 檔、spawn 卻吃 B 檔（兩者可能不同時存在）。
-    posture_followup = followup if route["strategy"] == STRATEGY_RESUME else False
-    if (bad := resume_route.preflight_problem(
-            resume_route.posture_settings_path(allow_followup=posture_followup))) is not None:
+    # 🔴 2026-09-07（INV2／INV3 拆除）：姿態檔只有一份 ⇒ 免參數呼叫（預設就是
+    # `resume_route.UNATTENDED_SETTINGS`）。「驗過 A 檔、spawn 卻吃 B 檔」這個 M-06 憂慮
+    # 隨第二份姿態檔一起消失——兩路的 `_posture_argv()` 與本預檢現在結構上同一份檔。
+    if (bad := resume_route.preflight_problem()) is not None:
         append_log(log, "resume_authz_preflight_failed", strategy=route["strategy"], why=bad)
         print(f"❌ A-PRE 拒 spawn：{bad}", file=sys.stderr); state["route_strategy"] = STRATEGY_REFUSE; return 1  # noqa: E501,E702 — R115 修復 F2：A-PRE 拒絕視同 REFUSE，供 :1322 三元式判 resume_failed（拒絕≠跑過） round-label-ok
     # 🔴 R80 P0 的第二層（兩層都補才算修好，缺任一層續跑那一跑都做不了事）。
@@ -1513,10 +1517,16 @@ def main(argv: list[str]) -> int:
     # 探針（probe_quota 的 os.environ.get(UNATTENDED_ENV) 分支）與 INV4 no_progress_limit()
     # 夾 1 在**真喚醒路徑**上是死碼：免費端點答不出時 fall-through 到付費 claude -p、
     # no_progress 讀 env override 而非夾 1。tick＝排程自動路徑、無人看管本行程 ⇒ 在此把旗標
-    # 補成**缺席才填**（setdefault：子行程若已由 _run_resume spawn 帶入不覆寫）。互動
-    # --probe-quota 不經此分支 ⇒ 射程不外溢（付費探針仍為互動 session 保留）。
+    # 補上。
+    # 🔴 R11X（本輪對抗式稽核破洞）：此前用 `setdefault`（缺席才填）——若行程環境進來時
+    # 已經帶著 `AUTOSDD_UNATTENDED=""`（鍵存在但空字串，例如上游 wrapper script 誤寫／
+    # 殘留 shell profile），`setdefault` 不會覆寫，讀取端的真值測試又把空字串判成假 ⇒
+    # INV1／INV4 兩道安全煞車同時失效。`main()` 分派 `--sentinel-tick`/`--resume-tick`
+    # 這一刻本身就是「現在確定進入無人模式」的權威宣告，不該被任何預先存在、可能是
+    # 殘留／誤寫的舊值蓋過 ⇒ 改成無條件強制設定。互動 --probe-quota 不經此分支 ⇒ 射程
+    # 不外溢（付費探針仍為互動 session 保留）。
     if args.sentinel_tick or args.resume_tick:
-        os.environ.setdefault(UNATTENDED_ENV, "1")
+        os.environ[UNATTENDED_ENV] = "1"
     if args.sentinel_tick:
         return _sentinel_tick(args)
     if args.resume_tick:

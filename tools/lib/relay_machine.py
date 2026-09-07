@@ -113,8 +113,12 @@ def no_progress_limit() -> int:
     沒起來／沒改檔 ⇒ `made_progress` 為假）就停，不得靠 `AUTOSDD_RELAY_NO_PROGRESS_LIMIT`
     放寬成多窗續燒。掌舵者原則「主 agent 沒成功，哪來的後續；沒起來就不要浪費 token」。
     互動回合（無旗標）仍讀 env（射程只在無人回合）。旗標名走 `unattended_authz` SSOT。
+
+    🔴 R11X 縱深防禦：判準是鍵存在性（`in os.environ`），不是 Python 真值測試——同
+    `session_resume_planner.probe_quota()` 那一側的理由：`AUTOSDD_UNATTENDED=""`
+    （鍵存在但空字串）用真值測試會被誤判成「非無人模式」，讓這道煞車在邊界值上失效。
     """
-    if os.environ.get(unattended_authz.UNATTENDED_ENV):
+    if unattended_authz.UNATTENDED_ENV in os.environ:
         return 1
     return _int_env(RELAY_NO_PROGRESS_LIMIT_ENV, RELAY_NO_PROGRESS_LIMIT_DEFAULT)
 
@@ -212,21 +216,16 @@ def made_progress(handback_verdict: str, files_changed_count: int) -> bool:
     return handback_verdict == "written" and files_changed_count > 0
 
 
-def followup_allowed(state: dict) -> bool:
-    """🔴 INV3（掌舵者 2026-09-05）：把「重跑被打斷的 Workflow（fan-out）／續跑本身以外的
-    下游任務」gate 在**前一窗確實起來**之後。判準兩條、缺一不可：
-
-      · `last_window_made_progress` 為真——前一窗 handback 寫成 ∧ 真有改檔，證明主 agent
-        真的起來且能做事（掌舵者：「主 agent 沒成功，哪來的後續」）；
-      · `relay_seq >= 1`——不是本額度視窗的**第一窗**。第一窗一律不 fan-out（INV2：續跑不得
-        以 fan-out 為第一動作），且這條也擋住跨額度視窗殘留的 `last_window_made_progress`
-        （`apply_reset_at` 於 reset 變更時把 `relay_seq` 歸零 ⇒ 新視窗第一窗恆 seq=0）。
-
-    純函式（只讀 state），供 argv 組裝端（`resume_route.resume_argv(allow_followup=...)`）取用。
-    """
-    return (bool(state.get("last_window_made_progress"))
-            and int(state.get("relay_seq") or 0) >= 1)
-
+# 🔴 2026-09-07 掌舵者裁決（SA＋SD 兩位獨立審查通過）：此處原有 `followup_allowed(state)`
+# ＝INV3 判準本體（`last_window_made_progress ∧ relay_seq≥1` 才准 fan-out），連同 INV2
+# （第一無人視窗禁呼叫 Task／Agent／Workflow）一併**移除**。掌舵者原話：「若是主 Agent 是
+# 活的，主 Agent 要執行啥都可以，要呼叫朋友的可以」——訂閱制帳號，額度風險已由
+# `max_spawns()`（每視窗 spawn 上限）＋1 小時牆鐘 timeout＋INV4（`no_progress_limit()` 在
+# 無人回合夾到 1）三層界住，不需要再加一層分階段信任機制。
+# 🔴 保留不動：INV1（無人等額度時零付費探測）與 INV4（一次沒進度就停）——後者的判準本體
+# 就在上面的 `no_progress_limit()`，其「鍵存在性而非真值測試」的空字串繞過修補不得回退。
+# `relay_seq` 因此只剩一個讀取點：`resolve()` 內的 `under_cap = seq < max_spawns`（spawn
+# 上限，與已移除的 followup gate 完全獨立），該讀取點必須保留。
 
 # ─────────────── INV5（掌舵者 2026-09-05）：單一擁有者——同 session 不得雙 job 各自探測
 #: 續航兩族排程的工作名前綴（哨兵＝`AutoSDD_Sentinel_<sid>`；續跑＝`AutoSDD_SessionResume_<sid>`，
@@ -338,8 +337,9 @@ def resolve(state: dict, band: str, *, max_spawns: int, no_progress_limit: int) 
     outcome = next_state(has_remaining=remaining,
                         streak_ok=no_progress_ok(streak, no_progress_limit),
                         band_is_ok=band_ok(band), under_cap=seq < max_spawns)
+    # 2026-09-07：`last_window_made_progress` 落盤鍵一併移除——它唯一的讀者是已拆除的
+    # INV3 gate（`followup_allowed`）。`progressed` 本身仍在用：它是判準④（streak）的輸入。
     return {"next_state": outcome, "relay_no_progress_streak": streak, "files_changed": changed,
-            "last_window_made_progress": progressed,  # INV3：供下一窗 followup gate 讀（落盤持久）
             "relay_seq": seq + 1 if outcome == STATE_RELAY_NEXT else seq}
 
 

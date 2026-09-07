@@ -450,46 +450,103 @@ def main(argv: list[str]) -> int:
     return 0
 
 
-#: M-03（精簡版，不是 M-04 的完整 SandboxBackend）：CI／pre-push 呼叫根層測試 runner
-#: 的漏斗點此前完全沒有一層偵測「這次測試執行期間是否真的觸碰了真的
+#: M-04（決定性判死版；M-03 的暫存檔差集降級為輔助訊號）：CI／pre-push 呼叫根層測試
+#: runner 的漏斗點此前完全沒有一層偵測「這次測試執行期間是否真的觸碰了真的
 #: launchd/schtasks」。`autosdd_leak_fence.jsonl` 與其他持久痕跡同居所（`endurance_env.
 #: trace_dir()`），不開第二個家。
 LEAK_FENCE_LOG_NAME = "autosdd_leak_fence.jsonl"
 
+#: 圍籠掃描真排程器時用的工作名前綴。刻意**不收窄**成 `TASK_PREFIX`
+#: （`AutoSDD_Sentinel_`）：洩漏源不只哨兵——續跑 job 與測試自造的別名同屬本 repo
+#: 種下的排程，前綴收窄一格就等於對它們失明。字面與 `_arm_sentinel` 的既有判準
+#: （`session_resume_planner.py` 的 `select().list_jobs("AutoSDD_")`）同一個，不發明第二種。
+LEAK_FENCE_JOB_PREFIX = "AutoSDD_"
+
+
+def _leak_fence_jobs(backend) -> list[str] | None:
+    """真排程器上 `AutoSDD_*` 工作的快照。`None`＝**量不到**，不是「量到零」。
+
+    列舉一律只經 `schedule_backend.select()`（本檔一行平台知識都不留，見檔頭
+    R83 複審 A-01）。載具自己炸掉時吞成「量不到」：圍籠是量測器，量測器故障
+    不得反過來變成測試跑不完的故障源——而「量不到」在下面**結構上不會判死**。
+    """
+    try:
+        return backend.list_jobs(LEAK_FENCE_JOB_PREFIX)
+    except OSError:
+        return None
+
 
 def leak_fence(run):
-    """底線防護＋可稽核觀察痕跡（只做「印出來讓人看得到」這一半）。
+    """底線防護 ＋ **決定性**排程洩漏判死（M-04 A 面）。
 
-    🔴 誠實劃界：本函式**不會**因為偵測到真排程被寫入就讓 rc 變非 0——那需要
-    M-04 的 SandboxBackend 才能決定性判斷「新增的 autosdd_* 暫存檔」與「真的多了一支
-    排程工作」是不是同一件事。這裡只做兩件事：(1) 忘記加 `AUTOSDD_SENTINEL_OFF=1`
-    的測試也有個底線（`setdefault`，不覆寫已設的值）；(2) 把 `run()` 前後 `$TMPDIR`
-    頂層 `autosdd_*` 檔名的差集印出來＋落一行持久痕跡，讓「有沒有變多」從此可稽核，
-    而不是像 DEF-200-239 事故那樣事後只能憑記憶重建時間線。
+    三件事，會讓 rc 變非零的只有第二件：
+
+    (1) 忘記加 `AUTOSDD_SENTINEL_OFF=1` 的測試也有個底線（`setdefault`，不覆寫已設的值）。
+    (2) 🔴 **判死面＝真排程器工作清單的前後差集**：`run()` 期間新增、**且收尾時仍然在**
+        的 `AutoSDD_*` 工作＝沒有人收的殘骸 ⇒ rc 判非零（即使 `run()` 自己回 0）。
+        收尾快照在 `run()` 之後才取，所以「註冊完又在同一次執行內解除」的合法暫時性
+        工作結構上就不在差集裡，不必另寫一條判準去放行它。列舉回 `None`（量不到）
+        ⇒ **不判死**：沒有證據不能扣帽子（同 `reap_verdict` ② 與 `_arm_sentinel` 對
+        `list_jobs` 回 `None` 的既有 fail-open 紀律），只出聲說「量不到」，並明說那
+        不等於「沒有洩漏」。
+    (3) 輔助訊號＝`$TMPDIR` 頂層 `autosdd_*` 檔名差集：**只印不判**。新增的暫存檔證明
+        不了排程被寫（並行 session 在武裝之前也會落檔），它只是更早期的警訊；M-03 曾
+        把它當唯一訊號，弱判準當判死用正是本輪修掉的那件事。
+
+    🔴 誠實劃界（兩面都是機率式，不是決定性的全部）：
+      · **假陰性**：測試種下的 job 若在收尾快照前自己自我解除（tick 讀不到任務書
+        ⇒ 拆掉自己），這裡看不到它曾經存在——T-f4b 事後 `launchctl list` 查無、卻在
+        bootout log 留下五筆，就是這個形態。那一半要等 ADR-XPLAT-015 §3.6 的 ledger
+        面（`SandboxBackend` 記下每一次被攔下的武裝）落地。
+      · **假陽性**：另一個活 session 在本次執行期間**合法**武裝的哨兵也會落在差集裡
+        （ADR §3.6 的 `alive`／`dead` 真值表未落地）。判紅時第一步先看 label 裡的
+        session id 是不是自己這一場的。
     """
     # 字面（不 import `.claude/hooks/context_budget_guard.SENTINEL_OFF_ENV`）：本檔
     # 對 planner／hook 鏈一律走函式內 lazy import 以避免模組層成環（見 `_planner_module()`
     # 既有理由），這一個環境變數名不值得為它開一條新的耦合路徑。
     os.environ.setdefault("AUTOSDD_SENTINEL_OFF", "1")
+    backend = schedule_backend.select()
+    jobs_before = _leak_fence_jobs(backend)
     tmp = Path(tempfile.gettempdir())
     before = set(tmp.glob("autosdd_*"))
     rc = run()
     after = set(tmp.glob("autosdd_*"))
+    jobs_after = _leak_fence_jobs(backend)
     new_files = sorted(str(p) for p in (after - before))
     if new_files:
         print(f"[leak_fence] 執行期間 $TMPDIR 新增 {len(new_files)} 個 autosdd_* 檔案"
-              "（只列不刪，M-04 完整版才會據此決定性判死）：")
+              "（輔助訊號：只列不刪、**不判死**，判死看的是排程器清單）：")
         for p in new_files:
             print(f"  {p}")
+    leaked: list[str] = []
+    fence_rc = 0
+    if jobs_before is None or jobs_after is None:
+        print(f"[leak_fence] ⚠️  排程面**量不到**（載具＝{backend.name}）⇒ 本輪不判排程"
+              "洩漏。不要把「量不到」讀成「沒有洩漏」。"
+              f"現查：{backend.evidence_hint()}", file=sys.stderr)
+    elif leaked := sorted(set(jobs_after) - set(jobs_before)):
+        fence_rc = 1
+        print(f"[leak_fence] ❌ 排程洩漏（決定性）：本次執行期間真排程器（載具＝"
+              f"{backend.name}）多了 {len(leaked)} 支 {LEAK_FENCE_JOB_PREFIX}* 工作，"
+              "且收尾時仍然在（沒有人收）⇒ 本次 rc 判非零：", file=sys.stderr)
+        for label in leaked:
+            print(f"  {label}", file=sys.stderr)
+        print("   修法：種下它的測試要注入假後端（`patch.object(schedule_backend, "
+              '"select", …)`）或 `addCleanup` 真的把它拆掉；人工清＝'
+              "`python tools/lib/sentinel_lifecycle.py --apply`", file=sys.stderr)
     record = {"at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "rc": rc,
-             "new_temp_files": len(new_files)}
+              "new_temp_files": len(new_files), "carrier": backend.name,
+              "jobs_before": None if jobs_before is None else len(jobs_before),
+              "jobs_after": None if jobs_after is None else len(jobs_after),
+              "leaked_jobs": leaked, "fence_rc": fence_rc}
     try:
         path = endurance_env.trace_dir() / LEAK_FENCE_LOG_NAME
         with path.open("a", encoding="utf-8", newline="\n") as handle:
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
     except OSError:
         pass  # 落痕跡失敗不得反過來變成測試跑不完的故障源（同既有 append_log 紀律）
-    return max(rc, 0)
+    return max(rc, 0, fence_rc)
 
 
 if __name__ == "__main__":

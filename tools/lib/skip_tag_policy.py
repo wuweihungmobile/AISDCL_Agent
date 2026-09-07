@@ -602,7 +602,15 @@ _SITE_CLASS_CENSUS: dict[str, dict[str, int]] = {
         # 字面 reason 站點：本輪真實 origin/main..HEAD 對本檔的 diff 剛好也動了
         # `_FROZEN_CEILING_MAX` 字面值時明說跳過（該情境改由生產接線鎖
         # `test_skip_ledger_co_change_against_the_real_push_range` 覆蓋），不是隱藏失敗。
-        "runtime-skipTest": 29,
+        # 🔴 收尾單人窗口重釘 `runtime-skipTest` 29→30（**非放寬**，同上：本表判準是
+        # 「相等」）。新增 `Inv5SingleOwnerTest.
+        # test_real_launchd_listing_feeds_other_owner_for_session`（規則 5／M-19 的
+        # macOS 對照：`LaunchdBackend.list_jobs()` 補真機串接測試）的一個字面 reason
+        # 站點：`if sys.platform != "darwin": self.skipTest("[MAC-NATIVE-ONLY] …")`。
+        # 第二個 `self.skipTest(f"...rc={rc}...")` 是 f-string 非字面 reason 且無方括號
+        # 標籤前綴，不落 `_NONLITERAL_TAG_DEBT`（該帳只認帶標籤者），不計入本表（同上一批
+        # windows schtasks 對照站點的既有判例）。
+        "runtime-skipTest": 30,
         "unclassified": 0,
     },
     # 🔴 R81 包 F 重釘 `windows-only` 9→10：並行包在
