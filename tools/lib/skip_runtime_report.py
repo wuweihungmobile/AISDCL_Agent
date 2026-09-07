@@ -204,6 +204,16 @@ _M6_EXEMPT: dict[str, str] = {
         "相反，任何單一 tools/tests@win32 落款都會讓另一邊判 [漂移]。解除判準＝兩邊機台"
         "權限狀態一致後移除本項"
     ),
+    "test_skip_ceiling_ratchet_direction.TestSkipLedgerCoChangeLock."
+    "test_skip_ledger_co_change_ignores_a_touch_with_no_value_change": (
+        "[喚醒鏈四方審計修復包豁免] diff-範圍相依（非平台相依）：本測試比較 "
+        "`origin/main..HEAD` 對自身 `_FROZEN_CEILING_MAX` 字面值有沒有變動——本機分支"
+        "領先 origin/main 且該領先範圍剛好動了這個字面值時會自我 skip（[ENV-DISABLED]），"
+        "merge 落地、diff 清空後同一支測試在 CI 上又恆常態執行。同一支測試在『本機 pre-push"
+        "（有領先 diff）』與『CI（merge 後零 diff）』兩種時刻的活體結果本就相反，任何單一"
+        "落款都會讓另一邊判 [漂移]。解除判準＝不再有未落地的 `_FROZEN_CEILING_MAX` 異動"
+        "後移除本項（結構上會隨每次改動這個字面值而重新出現，非一次性）"
+    ),
 }
 
 

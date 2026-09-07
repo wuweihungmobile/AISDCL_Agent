@@ -456,9 +456,10 @@ _RUNTIME_SKIP_CEILING: dict[str, dict[str, int]] = {
         # 🔴 誠實劃界（喚醒鏈四方審計修復包收尾訂正）：`test_skip_ledger_co_change_
         # ignores_a_touch_with_no_value_change` 只在本機分支領先 origin/main 且該
         # 領先範圍剛好動了 `_FROZEN_CEILING_MAX` 字面值時才轉 [ENV-DISABLED]——這是
-        # 領先狀態相依的暫態，push 落地後 HEAD＝origin/main、diff 清空，CI 上這支
-        # 測試恆常態執行（不 skip）。故 darwin 穩態值＝0，不登記暫態觀測。
-        SKIP_GROUP_ENV_DISABLED: 0,
+        # diff-範圍相依的暫態（真實值在 0／1 間來回），非平台事實。天花板本身是**上界**，
+        # 訂 1 可同時容納兩態（0 ≤ 1、1 ≤ 1 皆綠）；M6 的**精確集合**判準另以
+        # `skip_runtime_report._M6_EXEMPT` 豁免這支測試（同一份 provenance，見該檔）。
+        SKIP_GROUP_ENV_DISABLED: 1,
         SKIP_GROUP_STRUCTURAL: 0,
         SKIP_GROUP_DEBT: 0,
         SKIP_GROUP_UNTAGGED: 0,
@@ -581,7 +582,7 @@ _RUNTIME_SKIP_CEILING_MAX: dict[str, dict[str, int]] = {
     "tools/tests@darwin": {
         SKIP_GROUP_PLATFORM: 46,
         SKIP_GROUP_TOOL_ABSENCE: 0,
-        SKIP_GROUP_ENV_DISABLED: 0,  # 誠實劃界訂正：暫態觀測不登記，理由同見主表同鍵段
+        SKIP_GROUP_ENV_DISABLED: 1,  # diff-範圍相依暫態，天花板可同時容納 0/1，理由同見主表同鍵段
         SKIP_GROUP_STRUCTURAL: 0,
         SKIP_GROUP_DEBT: 0,
         SKIP_GROUP_UNTAGGED: 0,
