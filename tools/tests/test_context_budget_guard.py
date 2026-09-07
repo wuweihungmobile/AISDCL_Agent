@@ -5142,6 +5142,90 @@ class RearmAfterStopAndSentinelEscalateSurviveAVanishedPlanFileTest(unittest.Tes
         self.assertTrue(loud, f"write_relay 失敗導致連告警都發不出去：{alert_calls}")
 
 
+class RearmAndSentinelRearmedBranchesAlsoAlertLoudOnFailureTest(unittest.TestCase):
+    """對抗式複審發現（規則6修復收尾）：`_resume_tick` 的 `rearm` 分支與 `_sentinel_tick`
+    的 `arm_reset`／尾段分支此前只把失敗寫進同名 log 事件（`"rearmed"`／
+    `"sentinel_rearmed"`）就直接 return，不清 arm latch、不 loud alert——喚醒鏈在每一輪
+    巡邏都可能悄悄斷線且無人知曉，是比崩潰更隱蔽的同型缺口（上面兩支測試守的
+    `_rearm_after_stop`／escalate 分支不涵蓋這兩站）。"""
+
+    def test_resume_tick_rearm_branch_alerts_loud_when_register_fails(self) -> None:
+        tmp = _tmpdir(self, "rearm-branch-fail-")
+        plan = tmp / "plan.md"
+        state = {**RelayStateTest.GOOD, "plan_path": str(plan), "session_id": "sid-rearm-fail",
+                 "task_name": "T-rearm-fail", "log_path": str(tmp / "log.jsonl")}
+        plan.write_text("# 任務書\n\n" + planner.render_relay(state),
+                        encoding="utf-8", newline="\n")
+        args = planner.build_parser().parse_args(
+            ["--resume-tick", "--plan", str(plan), "--task-name", "T-rearm-fail"])
+        fresh_reset = datetime.now().astimezone() + timedelta(hours=5)
+        alert_calls: list[dict] = []
+        clear_calls: list[str] = []
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(unittest.mock.patch.object(
+                planner, "probe_quota", lambda *_a, **_k: {
+                    "open": False, "kind": guard.LIMIT_SESSION, "rc": 1, "text": "hit"}))
+            stack.enter_context(unittest.mock.patch.object(
+                planner, "tick_plan", lambda *_a, **_k: {
+                    "action": "rearm", "state": "waiting", "at": fresh_reset,
+                    "reason": "測試合成"}))
+            stack.enter_context(unittest.mock.patch.object(
+                planner, "register_endurance", lambda st, at, tick: (1, "")))
+            stack.enter_context(unittest.mock.patch.object(
+                planner.escalation, "alert",
+                side_effect=lambda r, s, *, loud=True, plan=None, **_:
+                    (alert_calls.append({"reason": r, "loud": loud}), {})[1]))
+            stack.enter_context(unittest.mock.patch.object(
+                sentinel_lifecycle_arm, "clear_arm_latch",
+                side_effect=lambda sid, *a, **k: clear_calls.append(sid) or True))
+            stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
+            stack.enter_context(contextlib.redirect_stderr(io.StringIO()))
+            rc = planner._resume_tick(args)
+        self.assertEqual(rc, 1, "應回報失敗，而不是誤報成功")
+        self.assertEqual(clear_calls, ["sid-rearm-fail"], "rearm 分支失敗也要清 arm latch")
+        loud = [c for c in alert_calls if c["loud"] and "重掛哨兵失敗" in c["reason"]]
+        self.assertTrue(loud, f"rearm 分支失敗卻沒有 loud alert：{alert_calls}")
+
+    def test_sentinel_tick_arm_reset_branch_alerts_loud_when_register_fails(self) -> None:
+        tmp = _tmpdir(self, "sentinel-rearm-fail-")
+        plan = tmp / "plan.md"
+        live = tmp / "sid-sentinel-rearm-fail.jsonl"
+        live.write_text('{"type":"assistant"}\n', encoding="utf-8")
+        state = {**RelayStateTest.GOOD, "plan_path": str(plan),
+                 "session_id": "sid-sentinel-rearm-fail", "task_name": "T-sentinel-rearm-fail",
+                 "kind": "sentinel", "transcript": str(live), "log_path": str(tmp / "log.jsonl")}
+        plan.write_text("# 任務書\n\n" + planner.render_relay(state),
+                        encoding="utf-8", newline="\n")
+        args = planner.build_parser().parse_args(
+            ["--sentinel-tick", "--plan", str(plan), "--task-name", "T-sentinel-rearm-fail"])
+        alert_calls: list[dict] = []
+        clear_calls: list[str] = []
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(unittest.mock.patch.object(
+                sb, "select", return_value=_StatefulFakeSchedulerBackend()))
+            stack.enter_context(unittest.mock.patch.object(
+                planner, "sentinel_decide",
+                lambda *_a, **_k: {"action": "arm_reset",
+                                    "reset_at": datetime.now().astimezone() + timedelta(hours=5),
+                                    "reset_source": "測試合成", "at": datetime.now().astimezone(),
+                                    "reason": "測試合成"}))
+            stack.enter_context(unittest.mock.patch.object(
+                planner, "register_endurance", lambda st, at, tick: (1, "")))
+            stack.enter_context(unittest.mock.patch.object(
+                planner.escalation, "alert",
+                side_effect=lambda r, s, *, loud=True, plan=None, **_:
+                    (alert_calls.append({"reason": r, "loud": loud}), {})[1]))
+            stack.enter_context(unittest.mock.patch.object(
+                sentinel_lifecycle_arm, "clear_arm_latch",
+                side_effect=lambda sid, *a, **k: clear_calls.append(sid) or True))
+            stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
+            rc = planner._sentinel_tick(args)
+        self.assertEqual(rc, 1, "應回報失敗，而不是誤報成功")
+        self.assertEqual(clear_calls, ["sid-sentinel-rearm-fail"], "尾段失敗也要清 arm latch")
+        loud = [c for c in alert_calls if c["loud"] and "哨兵重掛失敗" in c["reason"]]
+        self.assertTrue(loud, f"尾段失敗卻沒有 loud alert：{alert_calls}")
+
+
 class DisarmClearsTheArmedStampTest(unittest.TestCase):
     """ADR-XPLAT-014 C5'／C10'（DEF-200-269 併修）：拆掉一支哨兵**必須同步清 armed stamp**。
 

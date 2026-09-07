@@ -797,6 +797,18 @@ def _write_relay_best_effort(plan: Path, state: dict) -> None:
         pass
 
 
+# 對抗式複審發現（規則6修復收尾）：_register_and_record／_arm_sentinel 失敗時只回傳
+# rc!=0，「rearm」／「sentinel_rearmed」／PATROL_HANDBACK 三個分支此前只把它寫進同名
+# log 事件就 return，不會清 arm latch、不會 loud alert——喚醒鏈在下一輪之前悄悄斷線，
+# 沒人知道。同款正確復原已見 relay_machine._rearm_after_stop，這裡補齊同一份。
+def _alert_on_rearm_failure(state: dict, plan: Path, rc: int, context: str) -> None:
+    if rc == 0: return  # noqa: E701
+    import sentinel_lifecycle_arm  # noqa: PLC0415 — 只在失敗路徑才需要
+
+    sentinel_lifecycle_arm.clear_arm_latch(str(state.get("session_id") or ""))
+    escalation.alert(f"{context}（rc={rc}）：喚醒鏈斷線，已清 arm latch 供下次 SessionStart 重新評估", state, loud=True, plan=plan)  # noqa: E501
+
+
 def render_plan(data: dict, now: str) -> str:
     """任務書骨架。四項欄位齊備；無法自動得知的一律 `TODO:`，本檔不代填。"""
     used = f"{data['used']:,}" if data["used"] is not None else "（量不到）"
@@ -1308,6 +1320,7 @@ def _resume_tick(args) -> int:
             print("❌ 掛回巡邏失敗：定位不到逐字稿 ⇒ 哨兵沒有可讀的檔。"
                   "請人工 `--arm-sentinel --transcript <路徑>`", file=sys.stderr)
         append_log(log, "patrol_handback", why=decision["reason"], transcript=str(seen or ""), unregister_rc=removed, rearm_rc=rc, rearmed_inplace=inplace)  # noqa: E501
+        _alert_on_rearm_failure(state, plan, rc, "掛回巡邏失敗")
         return rc
     if decision["action"] == "rearm":
         state["state"] = decision["state"]
@@ -1317,6 +1330,7 @@ def _resume_tick(args) -> int:
             relay_machine.apply_reset_at(state, (decision["at"] - timedelta(seconds=RESET_SKEW_SECONDS)).isoformat())  # noqa: E501 — R115 修復 F4：歸零邊界＝觀測到 reset_at 變更 round-label-ok
         rc, moment = _register_and_record(plan, state, decision["at"], RESUME_TICK)
         append_log(log, "rearmed", fire_at=decision["at"].isoformat(), credential=moment, attempts=state["attempts"])  # noqa: E501
+        _alert_on_rearm_failure(state, plan, rc, "重掛哨兵失敗")
         return rc
     # action == resume。🔴 R97（round-label-ok：非帳本追蹤的正式輪，僅沿用便於追蹤的標籤）：狀態塊必須等 `_run_resume()` 真的跑完（不論成敗）才寫  # noqa: E501
     # ——此前先寫 "resumed"、排程也刪了，才呼叫它；它此前沒有 try/except，中途拋例外時
@@ -1476,6 +1490,7 @@ def _sentinel_tick(args) -> int:
     rc, moment = _register_and_record(plan, state, decision["at"], SENTINEL_TICK)
     append_log(log, "sentinel_rearmed", action=decision["action"],
                fire_at=decision["at"].isoformat(), credential=moment)
+    _alert_on_rearm_failure(state, plan, rc, "哨兵重掛失敗")
     return rc
 
 

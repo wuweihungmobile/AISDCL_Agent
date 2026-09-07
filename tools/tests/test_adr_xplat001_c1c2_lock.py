@@ -682,7 +682,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 7399,
+    "test_adr_xplat001_c1c2_lock.py": 7414,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 3839,
@@ -700,7 +700,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_check_wrapper_thinness.py": 1234,
     "test_claim_provenance_r86.py": 618,
     "test_component_sanitizer_shared_layer_lock.py": 293,
-    "test_context_budget_guard.py": 11746,
+    "test_context_budget_guard.py": 11830,
     "test_defect_id_reference_integrity.py": 281,
     "test_dev_start.py": 6527,
     "test_dev_start_ps1_lastexitcode.py": 548,
@@ -1514,6 +1514,15 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "四處 repin_log_problems／repin_growth_problems 呼叫點補 regression_lane 參數＋"
      "_FROZEN_PREFIX_REWRITE_LEDGER 接鏈列）。逐檔清單見 CrossPlatform_R131_Scan_Findings.md"
      "（根因分析見 WakeChain_IronLaws_Verification.md）。"),
+    ("R131", 94449, 94548, 99,
+     "[非淨減法輪][回歸鎖軌全額申報，見 _REGRESSION_LANE_LOG 同輪列] 對抗式複審發現：規則6"
+     "修復的 rearm／sentinel_rearmed 兩分支此前只把 _register_and_record 失敗寫進同名 log "
+     "事件就 return，不清 arm latch、不 loud alert——喚醒鏈可能每輪巡邏悄悄斷線。修復"
+     "（session_resume_planner.py 新增 _alert_on_rearm_failure）的回歸鎖："
+     "test_context_budget_guard.py 11746→11830（+84；"
+     "RearmAndSentinelRearmedBranchesAlsoAlertLoudOnFailureTest）＋本檔自身逐檔漂移"
+     "（+15；本稽核列＋回歸鎖軌列＋_FROZEN_PREFIX_REWRITE_LEDGER 接鏈列）。逐檔清單見 "
+     "CrossPlatform_R131_Scan_Findings.md（根因分析見 WakeChain_IronLaws_Verification.md）。"),
 )
 
 
@@ -1667,6 +1676,9 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "RearmAfterStopAndSentinelEscalateSurviveAVanishedPlanFileTest（test_context_budget_"
      "guard.py）＋PlanDirWiringTest／ReapPlansDefaultRootFollowsPlanDirTest（test_mac_"
      "endurance_r83.py）＋本檔自身稽核列（記帳誠實度分類，非必要湊額）。"),
+    ("R131", 99, "對抗式複審發現的收尾修復回歸鎖："
+     "RearmAndSentinelRearmedBranchesAlsoAlertLoudOnFailureTest"
+     "（test_context_budget_guard.py）＋本檔自身稽核列（記帳誠實度分類，非必要湊額）。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -1894,10 +1906,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 121
+_REPIN_LOG_FROZEN_PREFIX_LEN = 122
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "1d5bb6d4bec121753c6d275f2793806d2d8d8816fd412e9215e50b97333fbcae")
+    "2b26192695382c0c0c76d5727f039cabc129ce77abe62a42b19b3e6a92c7caed")
 
 
 def repin_log_history_digest(
@@ -2078,6 +2090,9 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # 同輪追加一個 repin 稽核列＋一個回歸鎖軌列＋本列，prefix_len 120→121 涵蓋新列本身；
     # 載體＝DEF-200-272（同家族）。
     ("R131", "3a6d5d17cd32", "1d5bb6d4bec1", "DEF-200-272"),  # round-label-ok
+    # R131 二度收尾：對抗式複審發現的收尾修復回歸鎖＋本檔自身編修，prefix_len round-label-ok
+    # 121→122 涵蓋新列本身；載體＝DEF-200-272（同家族）。
+    ("R131", "1d5bb6d4bec1", "2b2619269538", "DEF-200-272"),  # round-label-ok
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。
