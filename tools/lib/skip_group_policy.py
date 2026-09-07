@@ -497,7 +497,7 @@ _RUNTIME_SKIP_CEILING: dict[str, dict[str, int]] = {
     # 轉譯層的副作用**、與被測程式碼邏輯無關、真 GitHub ubuntu-latest runner（原生 amd64，
     # 無 Rosetta）不會重現——故本輪未動該測試，也未把它算進上面的 skip census（它是
     # failure 不是 skip）。
-    # 🔴 R115 round-label-ok 上修：`platform` 77→**78**——合法新增，非 regression：
+    # 🔴 R115 round-label-ok 上修：`platform` 77→78——合法新增，非 regression：
     # DEF-200-239 的 Windows 現查回歸鎖 `SchedulerBackendNeverTouchesRealSchtasksTest.
     # test_no_ghost_t_r95_task_survives_a_real_windows_scheduler_query`（本輪新增、
     # 已帶 `[WINDOWS-NATIVE-ONLY]` 標籤）在 linux 剖面的必然互補 skip（+1）。取得方式＝
@@ -506,8 +506,17 @@ _RUNTIME_SKIP_CEILING: dict[str, dict[str, int]] = {
     #    env-disabled=0／structural-pair=0／debt=0／untagged=0／欠債型 2 支（目標 0）`
     # 逐格照填、零加減推算（本表既有紀律；R96/R100 同型判例＝設計性平台 skip 兩表
     # 同 commit 同鍵上修並逐項交代）。
+    # 🔴 R131 收尾包漏同步：`platform` 78→**79**——M-19 新增 `Inv5SingleOwnerTest.
+    # test_real_get_scheduledtask_listing_feeds_other_owner_for_session`
+    # （`[WINDOWS-NATIVE-ONLY]`）在 linux 剖面的必然互補 skip（+1）；上一輪只同步了
+    # darwin 的天花板（45→46），漏了同一支測試在 linux 這一格的互補（DEF-200-272 同型
+    # 復發：四張棘輪表只改了一張)。取得方式＝真 GitHub root-infra-ci #225 run
+    # （ubuntu-latest，commit d617f8f）當場印出逐字：
+    #   `[skip census] tools/tests@linux 共 81 支：platform=79／tool-absence=2／
+    #    env-disabled=0／structural-pair=0／debt=0／untagged=0／欠債型 2 支（目標 0）`
+    # 逐格照填、零加減推算；MAX 表同 commit 同鍵上修。
     "tools/tests@linux": {
-        SKIP_GROUP_PLATFORM: 78,
+        SKIP_GROUP_PLATFORM: 79,
         SKIP_GROUP_TOOL_ABSENCE: 2,
         SKIP_GROUP_ENV_DISABLED: 0,
         SKIP_GROUP_STRUCTURAL: 0,
@@ -580,8 +589,9 @@ _RUNTIME_SKIP_CEILING_MAX: dict[str, dict[str, int]] = {
     # 🔴 R100：連同基線一起上修 63→77／`untagged` 9→0／`tool-absence` 0→2——理由、
     # provenance、逐項交代皆見 `_RUNTIME_SKIP_CEILING` 同鍵那一段，此處不複寫第二份。
     # 🔴 R115 round-label-ok：`platform` 77→78 同 commit 上修，理由同見主表同鍵段。
+    # 🔴 R131 收尾包漏同步：`platform` 78→79 同 commit 上修，理由同見主表同鍵段。
     "tools/tests@linux": {
-        SKIP_GROUP_PLATFORM: 78,
+        SKIP_GROUP_PLATFORM: 79,
         SKIP_GROUP_TOOL_ABSENCE: 2,
         SKIP_GROUP_ENV_DISABLED: 0,
         SKIP_GROUP_STRUCTURAL: 0,
