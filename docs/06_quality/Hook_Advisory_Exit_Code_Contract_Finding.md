@@ -1,17 +1,20 @@
-# DEF-200-273 — `block_destructive_git.py` 誤用 rc=1 當「出聲不阻斷」的合法出口
+# `block_destructive_git.py` 誤用 rc=1 當「出聲不阻斷」的合法出口
 
 - **發現日期**：2026-09-07
 - **發現情境**：使用者實測（本場逐字稿 Stop hook 出聲），非本輪工作內容，屬旁支發現
-- **狀態**：open（未指派）
-- 🔴 **誠實劃界**：本檔案編號預先取用 `AutoSDD_Defect_Log.md` 的下一個可用 ID，但**尚未**
-  正式落款進主帳本那張表——嘗試落款時撞上帳本自己的「淨額棘輪」（本輪新增未結列須有
-  對應結案列，否則需設 `AUTOSDD_NET_RATCHET_OFF=1`），而該環境變數若對整個
-  `git push`／`run_root_unittests.py` 行程生效，會滲進 `test_check_defect_log_crossref.py`
-  自己的 `TestNetNewVsClosedRatchet` 等測試（它們用 `{**os.environ, …}` 複製環境、未顯式
-  清掉這個變數，假設環境乾淨），造成那些測試的正樣本斷言失效。這個環境變數滲漏本身也
-  是一個值得後續處理的小缺口，但範圍已經超出本次要處理的規則6修復，故本檔**只以獨立
-  證據檔存在，未落款主帳本**——下一輪要嘛先修好這個滲漏（測試改用顯式 `os.environ.pop`
-  隔離），要嘛在確定沒有其他背景測試行程共用同一個 shell 環境的情況下單獨跑落款檢查。
+- **狀態**：未落款主帳本（`AutoSDD_Defect_Log.md`）的獨立發現記錄
+- 🔴 **誠實劃界**：本檔案原本想落款進 `AutoSDD_Defect_Log.md` 取一個 DEF-200-27x 編號，
+  但落款會撞上帳本自己的「淨額棘輪」（本輪新增未結列須有對應結案列，否則需設
+  `AUTOSDD_NET_RATCHET_OFF=1`），而該環境變數若對整個 `git push`／
+  `run_root_unittests.py` 行程生效，會滲進 `test_check_defect_log_crossref.py` 自己的
+  `TestNetNewVsClosedRatchet` 等測試（它們用 `{**os.environ, …}` 複製環境、未顯式清掉
+  這個變數，假設環境乾淨），造成那些測試的正樣本斷言失效（已現查重現：單獨跑
+  `TestNetNewVsClosedRatchet` 並設該環境變數，5/7 支測試失效）。這個環境變數滲漏本身
+  也是一個值得後續處理的小缺口，但範圍已經超出本次要處理的規則6修復，故本檔**只以
+  獨立發現記錄存在，不佔用 DEF-ID、不落款主帳本**——下一輪若要正式收進帳本：先修好
+  這個滲漏（測試改用顯式 `os.environ.pop` 隔離，或落款時單獨跑
+  `check_defect_log_crossref.py`、不與 `run_root_unittests.py` 共用同一個 shell 環境），
+  再取用當時帳本的下一個可用 DEF-ID（現查，不得沿用本檔曾經預留的號碼）。
 
 ## 現象
 
