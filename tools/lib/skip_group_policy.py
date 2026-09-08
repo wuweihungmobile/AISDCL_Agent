@@ -406,8 +406,18 @@ _RUNTIME_SKIP_CEILING: dict[str, dict[str, int]] = {
     # 至少會有 2，不是從聚合 census 推算。下次 windows-compat-ci 真跑時仍須覆核實測值，
     # 若兩支同時觸發以外的組合出現（例如只觸發一支），本格會偏保守（上限給多了不會判紅，
     # 只有反向才會）。
+    # 🔴 對抗式稽核收尾追加（windows-compat-ci #205 對 commit a3360f7 紅）：`platform`
+    # 41→**42**——a3360f7 新增 `Inv5SingleOwnerTest.
+    # test_real_launchd_listing_feeds_other_owner_for_session`（`[MAC-NATIVE-ONLY]`，
+    # INV5 launchd 分支真機驗證缺口補測，`test_real_get_scheduledtask_listing_
+    # feeds_other_owner_for_session` 的 launchd 對應版）在 win32 剖面的必然互補 skip
+    # （+1）——這支只在 darwin 上真的跑，win32／linux 兩邊都必然 skip。取得方式＝真
+    # GitHub windows-compat-ci #205 run 當場印出逐字：
+    #   `[skip census] tools/tests@win32 共 43 支：platform=42／tool-absence=0／
+    #    env-disabled=1／structural-pair=0／debt=0／untagged=0／欠債型 1 支（目標 0）`
+    # 逐格照填、零加減推算；MAX 表同 commit 同鍵上修（R96/R100/R131 同型判例）。
     "tools/tests@win32": {
-        SKIP_GROUP_PLATFORM: 41,
+        SKIP_GROUP_PLATFORM: 42,
         SKIP_GROUP_TOOL_ABSENCE: 0,
         SKIP_GROUP_ENV_DISABLED: 2,
         SKIP_GROUP_STRUCTURAL: 0,
@@ -516,8 +526,17 @@ _RUNTIME_SKIP_CEILING: dict[str, dict[str, int]] = {
     #   `[skip census] tools/tests@linux 共 81 支：platform=79／tool-absence=2／
     #    env-disabled=0／structural-pair=0／debt=0／untagged=0／欠債型 2 支（目標 0）`
     # 逐格照填、零加減推算；MAX 表同 commit 同鍵上修。
+    # 🔴 對抗式稽核收尾追加（root-infra-ci #229 對 commit a3360f7 紅）：`platform`
+    # 79→**80**——同一支 `Inv5SingleOwnerTest.
+    # test_real_launchd_listing_feeds_other_owner_for_session`（`[MAC-NATIVE-ONLY]`）
+    # 在 linux 剖面的必然互補 skip（+1），與上面 win32 鍵同一顆新測試、同一個 commit
+    # 漏同步（DEF-200-272 同型再復發：只掛了 win32 沒補 linux 這一格互補）。取得方式＝
+    # 真 GitHub root-infra-ci #229 run（ubuntu-latest，commit a3360f7）當場印出逐字：
+    #   `[skip census] tools/tests@linux 共 82 支：platform=80／tool-absence=2／
+    #    env-disabled=0／structural-pair=0／debt=0／untagged=0／欠債型 2 支（目標 0）`
+    # 逐格照填、零加減推算；MAX 表同 commit 同鍵上修（R96/R100/R131 同型判例）。
     "tools/tests@linux": {
-        SKIP_GROUP_PLATFORM: 79,
+        SKIP_GROUP_PLATFORM: 80,
         SKIP_GROUP_TOOL_ABSENCE: 2,
         SKIP_GROUP_ENV_DISABLED: 0,
         SKIP_GROUP_STRUCTURAL: 0,
@@ -569,8 +588,9 @@ _RUNTIME_SKIP_CEILING_MAX: dict[str, dict[str, int]] = {
     # `_RUNTIME_SKIP_CEILING` 同鍵那一段，此處不複寫第二份（同一份知識只准一個家）。
     # 🔴 R100（DEF-200-228）：`env-disabled` 1 → **2**，與 `_RUNTIME_SKIP_CEILING` 同鍵
     # 同一個 commit 一起上修；理由（站點盤點式、非聚合 census）見同鍵那一段。
+    # 🔴 對抗式稽核收尾追加：`platform` 41→42 同 commit 上修，理由同見主表同鍵段。
     "tools/tests@win32": {
-        SKIP_GROUP_PLATFORM: 41,
+        SKIP_GROUP_PLATFORM: 42,
         SKIP_GROUP_TOOL_ABSENCE: 0,
         SKIP_GROUP_ENV_DISABLED: 2,
         SKIP_GROUP_STRUCTURAL: 0,
@@ -591,8 +611,9 @@ _RUNTIME_SKIP_CEILING_MAX: dict[str, dict[str, int]] = {
     # provenance、逐項交代皆見 `_RUNTIME_SKIP_CEILING` 同鍵那一段，此處不複寫第二份。
     # 🔴 R115 round-label-ok：`platform` 77→78 同 commit 上修，理由同見主表同鍵段。
     # 🔴 R131 round-label-ok 收尾包漏同步：`platform` 78→79 同 commit 上修，理由同見主表同鍵段。
+    # 🔴 對抗式稽核收尾追加：`platform` 79→80 同 commit 上修，理由同見主表同鍵段。
     "tools/tests@linux": {
-        SKIP_GROUP_PLATFORM: 79,
+        SKIP_GROUP_PLATFORM: 80,
         SKIP_GROUP_TOOL_ABSENCE: 2,
         SKIP_GROUP_ENV_DISABLED: 0,
         SKIP_GROUP_STRUCTURAL: 0,

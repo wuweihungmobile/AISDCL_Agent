@@ -185,8 +185,17 @@ def _worker_main(start_dir: str, modules: list[str]) -> int:
     測試**之前**把 fd 1 導向 devnull、留一份原始 fd 的副本，測試跑完只用那份副本
     寫出協定行——不管測試本身或它的子行程往「stdout」寫了什麼，都進 devnull。
     """
-    if start_dir not in sys.path:
-        sys.path.insert(0, start_dir)
+    # 靜態可解析形態（AISDLC_SDD test_ci_paths_cover_root_consumers.py 的
+    # _eval_path_expr 要求）：`start_dir` 本身來自 argv、無法靜態解析；但本 worker
+    # 在生產路徑上恆被叫來跑 tools/tests（見 run_root_unittests._TESTS_DIR），
+    # 故改用可靜態解析的同義表達式，`start_dir` 僅留作跑偏時的 fail-loud 對帳。
+    tests_dir = str(Path(__file__).resolve().parents[1] / "tests")
+    assert start_dir == tests_dir, (
+        f"parallel_shard worker 收到非預期的 start_dir={start_dir!r}"
+        f"（預期 {tests_dir!r}）——本 worker 目前只為 tools/tests 設計"
+    )
+    if tests_dir not in sys.path:
+        sys.path.insert(0, tests_dir)
     protocol_fd = os.dup(1)
     devnull_fd = os.open(os.devnull, os.O_WRONLY)
     os.dup2(devnull_fd, 1)
