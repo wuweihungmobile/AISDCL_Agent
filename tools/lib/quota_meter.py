@@ -67,6 +67,10 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+#: 下方三處 `timezone.utc` 用法皆帶 noqa（規則 UP017）：ruff 建議的 `datetime.UTC`
+#: 別名要 3.11+ 才有，套用會在 mac 系統預設 python3（常年 3.9）上重新引入崩潰
+#: （R135 立案：`isinstance(x, int | float)` 那類 3.10+ 構造也在同一批修過）。
+
 #: 權威端點。來源不是猜的：`claude.exe` 內的實作逐字 `fetchUtilization: GET
 #: /api/oauth/usage`。**這個呼叫不是模型推論** ⇒ 不吃額度、不進 5 小時視窗。
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
@@ -687,7 +691,7 @@ def retry_after_at(headers: object, now: datetime) -> str | None:
         if raw.isdigit():
             secs = int(raw)
             if secs > 10 ** 9:
-                return datetime.fromtimestamp(secs, timezone.utc).astimezone().isoformat(
+                return datetime.fromtimestamp(secs, timezone.utc).astimezone().isoformat(  # noqa: UP017
                     timespec="seconds")
             # 🔴 DEF-200-196：`secs<=0`（例如 `Retry-After: 0`）此前落入
             # `now + timedelta(seconds=secs)` ⇒ `resets_at≈measured_at`，語意錯誤——
@@ -768,7 +772,7 @@ def measure_detail(timeout: int = HTTP_TIMEOUT_SECONDS,
         # 🔴 這一格的順序是判準的一部分：擺在 `status != 200` 之後就永遠到不了
         # （429 會先被折成 `http-429` ⇒ `None` ⇒ 量不到），而那正是本修法要治的缺陷。
         return rate_limited_reading(headers,
-                                    datetime.now(timezone.utc).astimezone()), REASON_RATE_LIMITED
+                                    datetime.now(timezone.utc).astimezone()), REASON_RATE_LIMITED  # noqa: UP017
     if status != 200 or not isinstance(payload, dict):
         return None, f"http-{status}"
     axes = bucket_readings(payload)
@@ -780,7 +784,7 @@ def measure_detail(timeout: int = HTTP_TIMEOUT_SECONDS,
     return {
         "schema": SCHEMA, "axes": axes, "source": "endpoint",
         "http_status": status,
-        "measured_at": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
+        "measured_at": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),  # noqa: UP017
         "denominator": denominator_of(payload),
         "schema_keys": sorted(payload),
         # 🔴 R87：派工前置檢查的資料來源（見 `account_posture`）。快取裡沒有它，
