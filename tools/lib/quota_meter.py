@@ -69,7 +69,7 @@ from pathlib import Path
 
 #: 下方三處 `timezone.utc` 用法皆帶 noqa（規則 UP017）：ruff 建議的 `datetime.UTC`
 #: 別名要 3.11+ 才有，套用會在 mac 系統預設 python3（常年 3.9）上重新引入崩潰
-#: （R135 立案：`isinstance(x, int | float)` 那類 3.10+ 構造也在同一批修過）。
+#: （2026-09-08 立案：`isinstance(x, int | float)` 那類 3.10+ 構造也在同一批修過）。
 
 #: 權威端點。來源不是猜的：`claude.exe` 內的實作逐字 `fetchUtilization: GET
 #: /api/oauth/usage`。**這個呼叫不是模型推論** ⇒ 不吃額度、不進 5 小時視窗。
