@@ -491,9 +491,8 @@ def posix_carrier_problems(
                 "狀態（系統 python3 常年 3.9），所以這行話在 mac 上 day 1 就會響——"
                 "正因如此它必須說真話，否則只是在訓練你忽略它。\n"
                 "    實測後果（R82 MAC-03；`tools/tests/test_mac_readiness_r82.py` 現查）："
-                "現行 hook 集**載入得起來**，但 `.claude/hooks/context_budget_guard.py` 依賴的 "
-                "`tools/lib/quota_meter.py` 帶 3.11+ 構造，會走該檔的 try/except 退化成 "
-                "`None` ⇒ **額度軸整條靜默消失**（hook 仍回 rc=0，螢幕表徵與健康完全相同）。\n"
+                "現行 hook 集**載入得起來**（`tools/lib/quota_meter.py` 2026-09-08 起已改用 "
+                "3.9 相容寫法，不再是退化實例）。\n"
                 "    真正的風險面：hook 鏈上**沒有 try/except 保護**的那幾格（例如同檔的 "
                 "`from quota_limits import …`，該處刻意不給 fallback）一旦被加進任何 3.11 "
                 "專屬 import，六支守衛會一起靜默消失——而 spawn／import 失敗是 fail-open"
@@ -556,10 +555,35 @@ def hook_result_attachments(records) -> list[dict]:
 #     ⇒ 也算真的壞了，因為形態判準只看 settings.json，看不到「實際被執行的是別的東西」。
 # 上限 8 筆是訊息長度的防呆：同一場同一條載具會重複失敗上百次，逐筆列出等於把訊息變成
 # 沒有人會讀的一片牆（計數欄仍然是全量，不受這個上限影響）。
+#
+# 🔴 R135 訂正：M9 立案時「本平台自己那條失敗 ⇒ 一定是真的壞了」這個推論的**前提**是
+# 「全母體 217 筆 `hook_non_blocking_error` 的 stderr 全部是同一句 ENOENT」（見上方
+# 立案筆記）——那時 100% 樣本都是「行程根本沒 spawn 起來」。但 `block_destructive_git.py`
+# 自己就有一條**設計上刻意**的非阻斷失敗路徑（治理檔保護，PRD §15.5 紅線 10）：有人值守
+# 時印一句提醒（`_GOVWRITE_NOTE_MSG`）就 `return 1`——這也會落盤成同一種
+# `hook_non_blocking_error`，command 也命中本平台自己那條載具，卻不是「沒跑」，是「跑了、
+# 印了、故意不阻斷地結束」。實測（2026-09-08）：直接重放同一份 payload，exit 1、stderr
+# 逐字是 `_GOVWRITE_NOTE_MSG` 的內容，不含任何 spawn 層錯誤字樣。舊判準把這種情況
+# 誤判成 native_fail，對每一次「編輯治理檔＋有人值守」都會誤報一次守衛沒跑。
+# 修法：真的 spawn 失敗必然帶 OS／runtime 的 spawn 層錯誤字樣（ENOENT／EACCES／EPERM／
+# ENOEXEC／EFTYPE 這類 errno 名，緊跟著 `spawn`）；hook 自己的訊息不會湊巧長這樣
+# （本 repo 具名的 hook 提醒訊息一律以 `[<hook 名>]` 開頭，見 `_GOVWRITE_NOTE_MSG` 等）。
+#: `\bspawn\b`（帶尾端字界）會漏掉 `posix_spawn`——底線兩側都是 `\w`，字界判不出來
+#: （實測：對兩筆真實 ENOENT／EACCES 樣本原判準零命中）。故尾端刻意不帶字界。
+_SPAWN_FAILURE_RE = re.compile(
+    r"\b(?:ENOENT|EACCES|EPERM|ENOEXEC|EFTYPE|ENOTDIR)\b[^\n]{0,80}spawn", re.IGNORECASE)
+
+
+def _is_spawn_failure(stderr: str) -> bool:
+    """`stderr` 讀起來像不像行程根本沒 spawn 起來（而不是跑了但故意回非零）。"""
+    return bool(_SPAWN_FAILURE_RE.search(stderr))
+
+
 def runtime_carrier_verdict(attachments, *, on_windows: bool = os.name == "nt"
                             ) -> tuple[list[str], dict[str, int]]:
     """執行期證據 → `(真的壞了的問題清單, 分類計數)`；問題清單非空即紅。"""
-    counts = dict.fromkeys(("native_fail", "by_design_fail", "alien_fail", "success"), 0)
+    counts = dict.fromkeys(
+        ("native_fail", "by_design_fail", "alien_fail", "advisory_exit", "success"), 0)
     problems: list[str] = []
     for att in attachments:
         command = str(att.get("command") or "")
@@ -569,12 +593,18 @@ def runtime_carrier_verdict(attachments, *, on_windows: bool = os.name == "nt"
             continue
         win, posix = bool(win_carrier_kind(head)), is_posix_carrier(head)
         where = f"[{att.get('hookEvent') or att.get('hookName') or '?'}]"
+        stderr = str(att.get("stderr") or "")
         if win if on_windows else posix:
+            if not _is_spawn_failure(stderr):
+                # 載具真的跑起來了，是 hook 自己選擇非阻斷地回非零（例如治理檔保護
+                # 有人值守時只提醒），不是「這次沒跑」——不計入問題清單。
+                counts["advisory_exit"] += 1
+                continue
             counts["native_fail"] += 1
             problems.append(
                 f"{where} 本平台自己那條 hook 載具失敗 ⇒ "
                 f"{(hook_entry_targets({'command': command}) or ['?'])[0]} 這一次**沒有跑**"
-                f"（CC 只記一行 ERROR 就放行，fail-open）：{str(att.get('stderr') or '')[:200]}")
+                f"（CC 只記一行 ERROR 就放行，fail-open）：{stderr[:200]}")
         elif win or posix:
             counts["by_design_fail"] += 1
         else:
