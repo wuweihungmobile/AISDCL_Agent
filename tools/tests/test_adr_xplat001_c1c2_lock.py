@@ -682,7 +682,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 7472,
+    "test_adr_xplat001_c1c2_lock.py": 7498,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 3839,
@@ -732,7 +732,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_python_c_percent_shim.py": 119,
     "test_quota_policy.py": 3396,
     "test_root_infra_parity.py": 441,
-    "test_run_root_unittests.py": 2679,
+    "test_run_root_unittests.py": 3116,
     "test_sanitize_component_frozen_sdd_versions_lock.py": 340,
     "test_schedule_capability_parity.py": 626,
     "test_script_scan_surface_ssot.py": 391,
@@ -1559,6 +1559,25 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
     ("R134", 95053, 95057, 4,
      "[非淨減法輪] 本檔自身逐檔漂移第二次收斂（本列＋前一筆收斂列自身的行數，同 R131 "
      "多列收斂體例）。逐項見 docs/06_quality/CrossPlatform_R131_Scan_Findings.md §7。"),
+    ("R134", 95057, 95494, 437,
+     "[非淨減法輪][回歸鎖軌部分申報，見 _REGRESSION_LANE_LOG 同輪列] DEF-200-274 第三輪"
+     "對抗式複審收斂批：test_run_root_unittests.py 新增回歸測試"
+     "（ParallelShardStderrBackpressureRegressionTest／"
+     "ParallelShardMergeResultsMissingKeyStillRaisesTest／"
+     "ParallelShardRunParallelExceptionSafetyTest／"
+     "ParallelShardMergeExceptionLeakFenceIntegrationTest／"
+     "ParallelShardPopenFailureKillsAlreadyStartedProcsTest／"
+     "ParallelShardRealSubprocessProtocolIntegrationTest）覆蓋 stderr backpressure "
+     "修復、run_parallel() 例外安全網、Popen 失敗孤兒行程清理與真實子行程協定通道。逐項見 "
+     "docs/06_quality/CrossPlatform_R131_Scan_Findings.md §8 與 "
+     "docs/06_quality/CrossPlatform_DEF200274_Parallel_Tests_Evidence.md。"),
+    ("R134", 95494, 95505, 11,
+     "[非淨減法輪] 本檔自身逐檔漂移（新增前一筆稽核列本身的行數，同 R131/R133 既有"
+     "體例）。逐項見 docs/06_quality/CrossPlatform_R131_Scan_Findings.md §8。"),
+    ("R134", 95505, 95507, 2,
+     "[非淨減法輪] 本檔自身逐檔漂移第二次收斂（本列＋前一筆收斂列自身的行數，同 R131 "
+     "多列收斂體例）。逐項見 docs/06_quality/CrossPlatform_R131_Scan_Findings.md §8。"),
+    ("R134", 95507, 95520, 13, "[非淨減法輪] 詳 CrossPlatform_R131_Scan_Findings.md。"),
 )
 
 
@@ -1726,6 +1745,10 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
     ("R132", 26, "本檔自身逐檔漂移（追加的第二筆 R132 稽核列＋本列自身＋"
      "_FROZEN_PREFIX_REWRITE_LEDGER 接鏈列）全額歸本軌"
      "（記帳誠實度分類，非必要湊額）。"),
+    ("R134", 158, "DEF-200-274 第三輪：ParallelShardRealSubprocessProtocolIntegrationTest"
+     "（不 mock subprocess.Popen 的真實整合測試，一次涵蓋協定通道與 stderr backpressure "
+     "兩情境）全額歸本軌（記帳誠實度分類）。逐項見 "
+     "docs/06_quality/CrossPlatform_R131_Scan_Findings.md §8。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -1957,10 +1980,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 129
+_REPIN_LOG_FROZEN_PREFIX_LEN = 133
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "e069a86b7750c7945da7ef53511ff14a7bf6dc202d7b45ee3c93aa9eabfd141a")
+    "5f040dde89da173b1f88589bc9ff8834980802c3e823d6611efa6f6ccbb526ad")
 
 
 def repin_log_history_digest(
@@ -2151,6 +2174,9 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # R133：DEF-200-274 落地——凍結前綴延伸 124→126 涵蓋新兩列本身，同既有體例。round-label-ok
     ("R133", "60a3d5bf721b", "b7448766903c", "DEF-200-274"),
     ("R134", "b7448766903c", "e069a86b7750", "DEF-200-274"),
+    # R134 續：DEF-200-274 第三輪對抗式複審收斂批——新增真實 subprocess round-label-ok
+    # 回歸測試使護欄層行數重釘，凍結前綴延伸涵蓋新增列本身。
+    ("R134", "e069a86b7750", "5f040dde89da", "DEF-200-274"),
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

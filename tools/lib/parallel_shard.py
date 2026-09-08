@@ -36,6 +36,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import unittest
 from pathlib import Path
 
@@ -226,6 +227,41 @@ def _worker_main(start_dir: str, modules: list[str]) -> int:
     return 0
 
 
+def _communicate_all(procs: list[subprocess.Popen]) -> list[tuple[str, str]]:
+    """對每個 `proc` 各開一條 thread 呼叫自己的 `.communicate()`，讓所有 shard 的
+    stdout/stderr 從 Popen 啟動當下就**同時**被排空（第三輪複審 Problem 1／
+    stderr backpressure 修復）。
+
+    修復前 `run_parallel()` 是序列 `for` 迴圈依序 `communicate()`，但全部 subprocess
+    早已用 list comprehension 一次性併發啟動、stderr 全程走真實 OS pipe（`_worker_main`
+    只重導向了自己的 stdout）。任一 shard 若在輪到自己被 `communicate()` 之前對 stderr
+    寫出超過 OS pipe buffer（常見 64KB）的內容，其 `write()` 系統呼叫會被核心阻塞，
+    直到 parent 依序輪到它為止——四方獨立重現腳本皆量到「較晚被 communicate 的 shard，
+    其 stderr 寫入耗時 ≈ 另一 shard 的 sleep 秒數」，等同把「平行」的 shard 靜默串行化。
+    改用執行緒後每個 shard 的管線各自有一條專屬 thread 持續讀取，不再有誰先誰後的問題。
+    子執行緒內的例外（如 `proc.communicate()` 本身拋出 `OSError`）不會自動傳到主執行緒，
+    故收集起來、join 完後在主執行緒重新拋出，讓 `run_parallel()` 既有的例外處理路徑
+    （見下）接手。
+    """
+    results: list[tuple[str, str]] = [("", "")] * len(procs)
+    errors: list[BaseException] = []
+
+    def _run(i: int, proc: subprocess.Popen) -> None:
+        try:
+            results[i] = proc.communicate()
+        except BaseException as exc:  # noqa: BLE001 — 蒐集後在主執行緒重拋，故意不窄化
+            errors.append(exc)
+
+    threads = [threading.Thread(target=_run, args=(i, proc)) for i, proc in enumerate(procs)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    if errors:
+        raise errors[0]
+    return results
+
+
 def run_parallel(
     suite: unittest.TestSuite, start_dir: Path, module_counts: dict[str, int]
 ) -> _MergedResult:
@@ -250,46 +286,78 @@ def run_parallel(
     test_module_level_skiptest_collapses_module_and_is_named` 當場 rc=1 崩潰。拔掉
     這個變數讓 worker 內的任何遞迴呼叫都乖乖走序列路徑，行為與「不開平行模式」時
     逐字相同。
+
+    🔴 第三輪複審 Problem 2（併發安全的另一半）：本函式整段（Popen 迴圈／
+    `_communicate_all`／`merge_results`）包 `try/except Exception`——`merge_results()`
+    對缺鍵 payload 用中括號直接存取（無 `.get()` 防護）會拋 `KeyError`，這類例外並非
+    `SystemExit`，一樣會穿透 `leak_fence()` 的 `rc = run()` 而讓收尾整段失靈，與上一段
+    修掉的失效模式同型、只是觸發條件換成例外類型。任何例外都比照既有 shard-crash 處理
+    方式，合成一筆 `errors` 條目後正常 return，維持 `wasSuccessful()`＝False 語意。
+    Popen 迴圈同時改成一般 `for`（而非 list comprehension）並記錄已啟動的 `proc`：
+    任一次 `Popen()` 失敗時，對已啟動的子行程逐一 `kill()`＋`wait()` 再併入同一條例外
+    處理路徑，避免半途放生的孤兒子行程。
     """
     known_tests_by_id = {t.id(): t for t in _flatten(suite)}
     shards = weighted_shards(module_counts, worker_count())
     child_env = dict(os.environ)
     child_env.pop(_ENV_ON, None)
-    procs = [
-        (shard, subprocess.Popen(
-            [sys.executable, str(Path(__file__).resolve()), str(start_dir), *shard],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-            encoding="utf-8", errors="replace", env=child_env,
-        ))
-        for shard in shards
-    ]
-    payloads: list[dict] = []
-    crashes: list[tuple[list[str], int, str, str]] = []
-    for shard, proc in procs:
-        stdout, stderr = proc.communicate()
-        parsed = None
-        if proc.returncode == 0 and stdout.strip():
-            try:
-                parsed = json.loads(stdout.strip().splitlines()[-1])
-            except json.JSONDecodeError:
-                parsed = None
-        if parsed is None or parsed.get("shard_crashed"):
-            print(
-                f"❌ 平行分片失敗（模組：{', '.join(shard)}，rc={proc.returncode}）：",
-                file=sys.stderr,
+    started: list[subprocess.Popen] = []
+    try:
+        procs: list[tuple[list[str], subprocess.Popen]] = []
+        for shard in shards:
+            proc = subprocess.Popen(
+                [sys.executable, str(Path(__file__).resolve()), str(start_dir), *shard],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                encoding="utf-8", errors="replace", env=child_env,
             )
-            print(f"--- stdout ---\n{stdout}\n--- stderr ---\n{stderr}", file=sys.stderr)
-            crashes.append((shard, proc.returncode, stdout, stderr))
-            continue
-        payloads.append(parsed)
-    merged = merge_results(payloads, known_tests_by_id)
-    for shard, rc, stdout, stderr in crashes:
-        reason = (
-            f"平行分片崩潰（模組：{', '.join(shard)}，rc={rc}）\n"
-            f"--- stdout ---\n{stdout}\n--- stderr ---\n{stderr}"
+            started.append(proc)
+            procs.append((shard, proc))
+        outputs = _communicate_all([proc for _, proc in procs])
+        payloads: list[dict] = []
+        crashes: list[tuple[list[str], int, str, str]] = []
+        for (shard, proc), (stdout, stderr) in zip(procs, outputs):
+            parsed = None
+            if proc.returncode == 0 and stdout.strip():
+                try:
+                    parsed = json.loads(stdout.strip().splitlines()[-1])
+                except json.JSONDecodeError:
+                    parsed = None
+            if parsed is None or parsed.get("shard_crashed"):
+                print(
+                    f"❌ 平行分片失敗（模組：{', '.join(shard)}，rc={proc.returncode}）：",
+                    file=sys.stderr,
+                )
+                print(f"--- stdout ---\n{stdout}\n--- stderr ---\n{stderr}", file=sys.stderr)
+                crashes.append((shard, proc.returncode, stdout, stderr))
+                continue
+            payloads.append(parsed)
+        merged = merge_results(payloads, known_tests_by_id)
+        for shard, rc, stdout, stderr in crashes:
+            reason = (
+                f"平行分片崩潰（模組：{', '.join(shard)}，rc={rc}）\n"
+                f"--- stdout ---\n{stdout}\n--- stderr ---\n{stderr}"
+            )
+            merged.errors.append((_FixtureStub(f"shard_crash::{','.join(shard)}"), reason))
+        return merged
+    except Exception as exc:  # noqa: BLE001 — 見上方 docstring：任何例外都不得穿透 leak_fence
+        for proc in started:
+            try:
+                proc.kill()
+                proc.wait(timeout=5)
+            except Exception:  # noqa: BLE001 — 收尾動作本身不得再拋例外
+                pass
+        print(
+            f"❌ run_parallel() 本身發生未預期例外（非個別 shard 崩潰，已啟動的子行程已"
+            f" kill）：{exc!r}",
+            file=sys.stderr,
         )
-        merged.errors.append((_FixtureStub(f"shard_crash::{','.join(shard)}"), reason))
-    return merged
+        fallback = _MergedResult()
+        fallback.errors.append((
+            _FixtureStub("shard_crash::run_parallel"),
+            f"run_parallel() 本身發生未預期例外（非個別 shard 崩潰，已啟動的子行程已"
+            f" kill）：{exc!r}",
+        ))
+        return fallback
 
 
 if __name__ == "__main__":

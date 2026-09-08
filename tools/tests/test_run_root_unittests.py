@@ -20,6 +20,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -2673,6 +2674,442 @@ class ParallelShardCrashLeakFenceIntegrationTest(unittest.TestCase):
         )
         trace = tmp / sentinel_lifecycle.LEAK_FENCE_LOG_NAME
         self.assertTrue(trace.is_file(), "leak_fence 沒有落痕跡——收尾沒跑完")
+
+
+class ParallelShardStderrBackpressureRegressionTest(unittest.TestCase):
+    """DEF-200-274 第三輪複審 Problem 1：stderr backpressure 真實子行程回歸測試。
+
+    刻意**不** mock `subprocess.Popen`——三支既有 `ParallelShard*` 測試全部 mock 掉
+    Popen，因此從未真的碰到 `_worker_main()` 的 fd 重導向與真實 OS pipe 行為，正是
+    QA 複審點名「這正是 Problem 1 能存活至今未被任何既有自動化測試抓到的直接原因」
+    的那個缺口。本測試用兩支**寫進磁碟**的合成模組（`_worker_main()` 硬性要求
+    `start_dir` 必須是真正的 `tools/tests/`，無法用假路徑繞過）：
+
+      · SLOW（檔名字典序在前 ⇒ `weighted_shards()` 相同權重時分進 shard 0，
+        序列 `communicate()` 迴圈第一輪處理）：只 `time.sleep()`。
+      · LOUD（檔名字典序在後 ⇒ 分進 shard 1，第二輪處理）：立即對 `sys.stderr`
+        寫超過 OS pipe buffer（常見 64KB）的內容，自行量測這次 `write()` 的耗時
+        並落到一支結果檔——量測結果不能借道 stdout 協定通道回傳，那條通道被
+        `_worker_main()` 拿去印一行 JSON，混進任何額外位元組會讓 `json.loads`
+        當場炸掉。
+
+    修復前：shard 1 的 stderr `write()` 會被核心阻塞到 shard 0 的 `communicate()`
+    完成為止（parent 依序輪到它），量到的耗時應 ≈ SLOW 的 sleep 秒數。
+    修復後：兩個 shard 的 stdout/stderr 各有專屬 thread 從 Popen 一啟動就同時被
+    排空，LOUD 的耗時應與 SLOW 的 sleep 秒數無關（近乎瞬間完成）。
+    """
+
+    _SLOW_MODULE = f"_zzz_backpressure_repro_a_slow_{os.getpid()}"
+    _LOUD_MODULE = f"_zzz_backpressure_repro_z_loud_{os.getpid()}"
+    _SLEEP_SECONDS = 2.5
+    _PAYLOAD_BYTES = 5_000_000
+
+    def setUp(self) -> None:
+        self._tests_dir = Path(__file__).resolve().parent
+        fd, result_path = tempfile.mkstemp(prefix="backpressure_elapsed_", suffix=".txt")
+        os.close(fd)
+        self._result_path = Path(result_path)
+        self._slow_path = self._tests_dir / f"{self._SLOW_MODULE}.py"
+        self._loud_path = self._tests_dir / f"{self._LOUD_MODULE}.py"
+        self._slow_path.write_text(
+            "import time\n"
+            "import unittest\n\n\n"
+            "class SlowTest(unittest.TestCase):\n"
+            f"    def test_sleep(self):\n        time.sleep({self._SLEEP_SECONDS})\n",
+            encoding="utf-8",
+        )
+        self._loud_path.write_text(
+            "import sys\n"
+            "import time\n"
+            "import unittest\n"
+            "from pathlib import Path\n\n\n"
+            f"_RESULT = Path({str(self._result_path)!r})\n\n\n"
+            "class LoudTest(unittest.TestCase):\n"
+            "    def test_write_big_stderr(self):\n"
+            "        start = time.monotonic()\n"
+            f"        sys.stderr.write('X' * {self._PAYLOAD_BYTES})\n"
+            "        sys.stderr.flush()\n"
+            "        _RESULT.write_text(str(time.monotonic() - start), encoding='utf-8')\n",
+            encoding="utf-8",
+        )
+        self.addCleanup(self._slow_path.unlink, missing_ok=True)
+        self.addCleanup(self._loud_path.unlink, missing_ok=True)
+        self.addCleanup(self._result_path.unlink, missing_ok=True)
+
+    def test_loud_shard_stderr_write_does_not_block_on_slow_shard_sleep(self) -> None:
+        parallel_shard = run_root_unittests.parallel_shard
+        module_counts = {self._SLOW_MODULE: 1, self._LOUD_MODULE: 1}
+        suite = unittest.TestSuite()
+
+        with mock.patch.object(parallel_shard, "worker_count", return_value=2):
+            merged = parallel_shard.run_parallel(suite, self._tests_dir, module_counts)
+
+        self.assertTrue(
+            merged.wasSuccessful(),
+            f"合成 shard 應該全部通過：errors={merged.errors} failures={merged.failures}",
+        )
+        self.assertEqual(merged.testsRun, 2)
+        elapsed = float(self._result_path.read_text(encoding="utf-8"))
+        self.assertLess(
+            elapsed, self._SLEEP_SECONDS / 2,
+            f"LOUD shard 的 stderr write() 耗時 {elapsed:.3f}s 過於接近 SLOW shard 的"
+            f" sleep（{self._SLEEP_SECONDS}s）——stderr backpressure 回歸復發",
+        )
+
+
+class ParallelShardMergeResultsMissingKeyStillRaisesTest(unittest.TestCase):
+    """DEF-200-274 第三輪複審 Problem 2 基準：`merge_results()` 本身維持嚴格、不做
+    `.get()` 防護——防護移到呼叫端 `run_parallel()`（見下一支測試）。本測試釘住這個
+    現況，證明修復前後 `merge_results()` 對缺鍵 payload 的行為沒有改變：改的是呼叫端
+    有沒有把這個例外接住，不是把它吞掉。
+    """
+
+    def test_merge_results_raises_keyerror_on_missing_testsrun(self) -> None:
+        parallel_shard = run_root_unittests.parallel_shard
+        with self.assertRaises(KeyError):
+            parallel_shard.merge_results(
+                [{"skipped": [], "errors": [], "failures": [], "unexpectedSuccesses": []}], {},
+            )
+
+
+class ParallelShardRunParallelExceptionSafetyTest(unittest.TestCase):
+    """DEF-200-274 第三輪複審 Problem 2：`run_parallel()` 對 Popen／communicate／
+    `merge_results()` 整段缺 try/except；`merge_results()` 對缺鍵 payload 拋出的
+    `KeyError` 並非 `SystemExit`，一樣會穿透 `sentinel_lifecycle.leak_fence()` 的
+    `rc = run()`（該行無 try/except），讓收尾快照／洩漏比對整段不執行——與已修復的
+    `raise SystemExit` 繞過屬同一失效模式，只是觸發條件換成例外類型。修復後任何例外
+    都轉成一筆 `errors` 條目、正常 return。
+    """
+
+    def test_a_payload_missing_required_keys_does_not_raise_out_of_run_parallel(self) -> None:
+        parallel_shard = run_root_unittests.parallel_shard
+
+        class _Case(unittest.TestCase):
+            def test_ok(self):
+                pass
+
+        suite = unittest.TestSuite([_Case("test_ok")])
+        # 故意缺 "testsRun" 鍵——merge_results() 對它會 KeyError。
+        bad_payload = json.dumps(
+            {"skipped": [], "errors": [], "failures": [], "unexpectedSuccesses": []}
+        )
+
+        class _OkProc:
+            returncode = 0
+
+            def communicate(self):
+                return bad_payload + "\n", ""
+
+        def fake_popen(argv, **_kwargs):
+            return _OkProc()
+
+        with mock.patch.object(parallel_shard, "worker_count", return_value=1), \
+                mock.patch.object(parallel_shard.subprocess, "Popen", side_effect=fake_popen):
+            try:
+                result = parallel_shard.run_parallel(
+                    suite, Path(__file__).resolve().parent, {"mod.bad": 1},
+                )
+            except KeyError as exc:
+                self.fail(f"run_parallel() 讓 merge_results() 的 KeyError 穿透，未被攔截：{exc}")
+
+        self.assertFalse(result.wasSuccessful(), "缺鍵 payload 應被記成失敗而非靜默通過")
+        self.assertEqual(len(result.errors), 1)
+        _, reason = result.errors[0]
+        self.assertIn("KeyError", reason)
+
+
+class ParallelShardMergeExceptionLeakFenceIntegrationTest(unittest.TestCase):
+    """端到端：`merge_results()` 因缺鍵 payload 拋出 `KeyError` 的情境，真的包進
+    `sentinel_lifecycle.leak_fence()`，斷言收尾快照／洩漏比對確實跑完——與既有的
+    `ParallelShardCrashLeakFenceIntegrationTest`（shard crash 情境）成對，涵蓋
+    Problem 2 指出的「例外而非 SystemExit」這條穿透路徑。
+    """
+
+    def test_leak_fence_completes_its_teardown_when_merge_results_raises(self) -> None:
+        parallel_shard = run_root_unittests.parallel_shard
+        sentinel_lifecycle = run_root_unittests.sentinel_lifecycle
+
+        class _FakeBackend:
+            name = "fake-carrier"
+
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def list_jobs(self, _prefix: str) -> list[str]:
+                self.calls += 1
+                return []
+
+            def evidence_hint(self) -> str:
+                return "（假後端：本測試不對真載具取證）"
+
+        backend = _FakeBackend()
+
+        class _Case(unittest.TestCase):
+            def test_ok(self):
+                pass
+
+        suite = unittest.TestSuite([_Case("test_ok")])
+        bad_payload = json.dumps(
+            {"skipped": [], "errors": [], "failures": [], "unexpectedSuccesses": []}
+        )
+
+        class _OkProc:
+            returncode = 0
+
+            def communicate(self):
+                return bad_payload + "\n", ""
+
+        def fake_popen(argv, **_kwargs):
+            return _OkProc()
+
+        captured: list = []
+
+        def _run() -> int:
+            result = parallel_shard.run_parallel(
+                suite, Path(__file__).resolve().parent, {"mod.bad": 1},
+            )
+            captured.append(result)
+            return 0 if result.wasSuccessful() else 1
+
+        tmp = Path(tempfile.mkdtemp(prefix="leak-fence-merge-exc-"))
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        trace_env = sentinel_lifecycle.endurance_env.TRACE_DIR_ENV
+
+        with mock.patch.object(parallel_shard, "worker_count", return_value=1), \
+                mock.patch.object(parallel_shard.subprocess, "Popen", side_effect=fake_popen), \
+                mock.patch.object(sentinel_lifecycle.schedule_backend, "select",
+                                  return_value=backend), \
+                mock.patch.object(tempfile, "gettempdir", return_value=str(tmp)), \
+                mock.patch.dict(os.environ, {trace_env: str(tmp)}):
+            try:
+                rc = sentinel_lifecycle.leak_fence(_run)
+            except KeyError as exc:
+                self.fail(f"leak_fence() 的 rc = run() 被 KeyError 打斷：{exc}")
+
+        self.assertEqual(len(captured), 1, "run() 沒有被 leak_fence 真的呼叫到")
+        self.assertFalse(captured[0].wasSuccessful())
+        self.assertEqual(rc, 1, "run() 判失敗卻沒有傳遞到 leak_fence() 的 rc")
+        self.assertEqual(
+            backend.calls, 2,
+            "leak_fence 前後兩次真排程器快照沒有都執行——"
+            "代表 rc = run() 那行被例外打斷，收尾沒跑完",
+        )
+        trace = tmp / sentinel_lifecycle.LEAK_FENCE_LOG_NAME
+        self.assertTrue(trace.is_file(), "leak_fence 沒有落痕跡——收尾沒跑完")
+
+
+class ParallelShardPopenFailureKillsAlreadyStartedProcsTest(unittest.TestCase):
+    """SD 複審 finding 2（順手處理，未獨立復現，收斂進同一批修復）：Popen() 迴圈若在
+    啟動到一半時失敗，已啟動的子行程不應被放生成孤兒——`run_parallel()` 必須
+    `kill()`＋`wait()` 已啟動的 procs 再把這次失敗併入統一的例外處理路徑（合成一筆
+    `errors` 條目、正常 return）。
+    """
+
+    def test_a_later_popen_failure_kills_already_started_procs(self) -> None:
+        parallel_shard = run_root_unittests.parallel_shard
+
+        class _FakeProc:
+            def __init__(self) -> None:
+                self.killed = False
+                self.waited = False
+
+            def kill(self) -> None:
+                self.killed = True
+
+            def wait(self, timeout=None) -> None:
+                self.waited = True
+
+            def communicate(self):
+                return "", ""
+
+        started: list = []
+
+        def fake_popen(argv, **_kwargs):
+            if not started:
+                proc = _FakeProc()
+                started.append(proc)
+                return proc
+            raise OSError("boom: second Popen failed")
+
+        class _Case(unittest.TestCase):
+            def test_ok(self):
+                pass
+
+        suite = unittest.TestSuite([_Case("test_ok")])
+
+        with mock.patch.object(parallel_shard, "worker_count", return_value=2), \
+                mock.patch.object(parallel_shard.subprocess, "Popen", side_effect=fake_popen):
+            try:
+                result = parallel_shard.run_parallel(
+                    suite, Path(__file__).resolve().parent, {"mod.a": 1, "mod.b": 1},
+                )
+            except OSError as exc:
+                self.fail(f"run_parallel() 讓 Popen() 失敗的例外穿透，未被攔截：{exc}")
+
+        self.assertEqual(len(started), 1, "應該只成功啟動第一個 shard")
+        self.assertTrue(
+            started[0].killed,
+            "第二個 Popen 失敗時，已啟動的第一個子行程沒有被 kill()——孤兒子行程",
+        )
+        self.assertFalse(result.wasSuccessful())
+
+
+class ParallelShardRealSubprocessProtocolIntegrationTest(unittest.TestCase):
+    """DEF-200-274 第三輪複審 Problem 3：涵蓋 `run_parallel()`/`_worker_main()` JSON
+    協定通道本身的真實子行程整合測試，刻意**不** mock `subprocess.Popen`。
+
+    與既有 `ParallelShardStderrBackpressureRegressionTest` 的差異：那支測試只用
+    2 個 shard（1 個 sleep、1 個寫 stderr）驗證「後面的沒被前面的卡住」這一個訊號。
+    本測試改成 3 個 shard 同時涵蓋兩件事：
+
+      (a) **協定通道本身**：`shard0`（`_zzz_protocol_repro_a_mixed`）在**同一個**
+          shard payload 裡塞進 pass／fail／error／skip／unexpectedFailure-但實際
+          通過（unexpectedSuccess）五種結果型態，證明 parent 從真實 subprocess
+          的 stdout 收到的單行 JSON 能被正確 `json.loads` 並經 `merge_results()`
+          彙總成數量與型別正確的 `testsRun`/`skipped`/`errors`/`failures`/
+          `unexpectedSuccesses`——三支既有 mock 版測試都用假 payload，從未真的
+          走過 `_worker_main()` 序列化＋parent 反序列化這條真實路徑。
+      (b) **stderr 管線行為不會卡死**：`shard1`／`shard2` 各自在模組匯入當下（即
+          worker subprocess 一啟動就執行，早於任何 `communicate()`）對 stderr
+          （`shard2` 額外加碼 stdout）寫入遠超過 OS pipe buffer（常見 64KB）的
+          內容，各自量測這次寫入耗時；`shard0` 同時跑一個會 `sleep()` 的測試。
+          若 stderr backpressure 回歸，`shard1`／`shard2` 的寫入會被卡到
+          `shard0` 的 `communicate()` 完成為止（耗時 ≈ sleep 秒數）。另外包一層
+          硬性逾時（背景 thread + `join(timeout=...)`），逾時本身就是測試失敗，
+          避免真的卡死時把整個測試行程一起拖住。
+    """
+
+    _MIXED_MODULE = f"_zzz_protocol_repro_a_mixed_{os.getpid()}"
+    _LOUD_STDERR_MODULE = f"_zzz_protocol_repro_b_loud_stderr_{os.getpid()}"
+    _LOUD_STDOUT_STDERR_MODULE = f"_zzz_protocol_repro_c_loud_stdout_stderr_{os.getpid()}"
+    _SLEEP_SECONDS = 2.0
+    _PAYLOAD_BYTES = 5_000_000
+    _HARD_TIMEOUT_SECONDS = _SLEEP_SECONDS + 15
+
+    def setUp(self) -> None:
+        self._tests_dir = Path(__file__).resolve().parent
+
+        fd_b, result_path_b = tempfile.mkstemp(prefix="protocol_loud_b_elapsed_", suffix=".txt")
+        os.close(fd_b)
+        fd_c, result_path_c = tempfile.mkstemp(prefix="protocol_loud_c_elapsed_", suffix=".txt")
+        os.close(fd_c)
+        self._result_path_b = Path(result_path_b)
+        self._result_path_c = Path(result_path_c)
+
+        self._mixed_path = self._tests_dir / f"{self._MIXED_MODULE}.py"
+        self._loud_stderr_path = self._tests_dir / f"{self._LOUD_STDERR_MODULE}.py"
+        self._loud_stdout_stderr_path = self._tests_dir / f"{self._LOUD_STDOUT_STDERR_MODULE}.py"
+
+        self._mixed_path.write_text(
+            "import time\n"
+            "import unittest\n\n\n"
+            "class MixedResultsTest(unittest.TestCase):\n"
+            f"    def test_a_sleep(self):\n        time.sleep({self._SLEEP_SECONDS})\n\n"
+            "    def test_b_pass(self):\n        pass\n\n"
+            "    def test_c_fail(self):\n"
+            "        self.assertEqual(1, 2, 'deliberate failure for protocol test')\n\n"
+            "    def test_d_error(self):\n"
+            "        raise RuntimeError('deliberate error for protocol test')\n\n"
+            "    def test_e_skip(self):\n"
+            "        self.skipTest('deliberate skip for protocol test')\n\n"
+            "    @unittest.expectedFailure\n"
+            "    def test_f_unexpected_success(self):\n        pass\n",
+            encoding="utf-8",
+        )
+        self._loud_stderr_path.write_text(
+            "import sys\n"
+            "import time\n"
+            "import unittest\n"
+            "from pathlib import Path\n\n\n"
+            f"_RESULT = Path({str(self._result_path_b)!r})\n"
+            "_start = time.monotonic()\n"
+            f"sys.stderr.write('Y' * {self._PAYLOAD_BYTES})\n"
+            "sys.stderr.flush()\n"
+            "_RESULT.write_text(str(time.monotonic() - _start), encoding='utf-8')\n\n\n"
+            "class LoudStderrTest(unittest.TestCase):\n"
+            "    def test_pass(self):\n        pass\n",
+            encoding="utf-8",
+        )
+        self._loud_stdout_stderr_path.write_text(
+            "import sys\n"
+            "import time\n"
+            "import unittest\n"
+            "from pathlib import Path\n\n\n"
+            f"_RESULT = Path({str(self._result_path_c)!r})\n"
+            "_start = time.monotonic()\n"
+            f"sys.stdout.write('Z' * {self._PAYLOAD_BYTES})\n"
+            "sys.stdout.flush()\n"
+            f"sys.stderr.write('Z' * {self._PAYLOAD_BYTES})\n"
+            "sys.stderr.flush()\n"
+            "_RESULT.write_text(str(time.monotonic() - _start), encoding='utf-8')\n\n\n"
+            "class LoudStdoutStderrTest(unittest.TestCase):\n"
+            "    def test_pass(self):\n        pass\n",
+            encoding="utf-8",
+        )
+        self.addCleanup(self._mixed_path.unlink, missing_ok=True)
+        self.addCleanup(self._loud_stderr_path.unlink, missing_ok=True)
+        self.addCleanup(self._loud_stdout_stderr_path.unlink, missing_ok=True)
+        self.addCleanup(self._result_path_b.unlink, missing_ok=True)
+        self.addCleanup(self._result_path_c.unlink, missing_ok=True)
+
+    def test_real_subprocess_protocol_channel_and_stderr_backpressure(self) -> None:
+        parallel_shard = run_root_unittests.parallel_shard
+        module_counts = {
+            self._MIXED_MODULE: 6,
+            self._LOUD_STDERR_MODULE: 1,
+            self._LOUD_STDOUT_STDERR_MODULE: 1,
+        }
+        suite = unittest.TestSuite()
+        result_holder: dict = {}
+
+        def _call() -> None:
+            result_holder["merged"] = parallel_shard.run_parallel(
+                suite, self._tests_dir, module_counts,
+            )
+
+        with mock.patch.object(parallel_shard, "worker_count", return_value=3):
+            thread = threading.Thread(target=_call, daemon=True)
+            thread.start()
+            thread.join(timeout=self._HARD_TIMEOUT_SECONDS)
+
+        self.assertFalse(
+            thread.is_alive(),
+            f"run_parallel() 逾時 {self._HARD_TIMEOUT_SECONDS}s 未返回——"
+            "疑似 stderr backpressure 死鎖復發，真實子行程被 pipe buffer 卡死",
+        )
+        self.assertIn("merged", result_holder, "run_parallel() 沒有正常回傳結果")
+        merged = result_holder["merged"]
+
+        # (a) 協定通道本身：三個真實 subprocess 各自印出的一行 JSON 都被正確
+        # json.loads 並經 merge_results() 彙總成數量與型別正確的結果。
+        self.assertEqual(merged.testsRun, 8)
+        self.assertFalse(merged.wasSuccessful())
+        self.assertEqual(len(merged.skipped), 1, f"skipped={merged.skipped}")
+        self.assertIn("test_e_skip", merged.skipped[0][0].id())
+        self.assertEqual(len(merged.errors), 1, f"errors={merged.errors}")
+        self.assertIn("test_d_error", merged.errors[0][0].id())
+        self.assertEqual(len(merged.failures), 1, f"failures={merged.failures}")
+        self.assertIn("test_c_fail", merged.failures[0][0].id())
+        self.assertEqual(
+            len(merged.unexpectedSuccesses), 1, f"unexpectedSuccesses={merged.unexpectedSuccesses}"
+        )
+        self.assertIn("test_f_unexpected_success", merged.unexpectedSuccesses[0].id())
+
+        # (b) stderr 管線行為：兩個「LOUD」shard 各自寫入遠超過 OS pipe buffer
+        # （常見 64KB）的內容，量到的耗時應與 SLOW shard 的 sleep 秒數無關
+        # （近乎瞬間完成），而非被卡到 SLOW shard 的 communicate() 完成才解除。
+        elapsed_b = float(self._result_path_b.read_text(encoding="utf-8"))
+        elapsed_c = float(self._result_path_c.read_text(encoding="utf-8"))
+        self.assertLess(
+            elapsed_b, self._SLEEP_SECONDS / 2,
+            f"LOUD(stderr) shard 的寫入耗時 {elapsed_b:.3f}s 過於接近 SLOW shard 的"
+            f" sleep（{self._SLEEP_SECONDS}s）——stderr backpressure 回歸復發",
+        )
+        self.assertLess(
+            elapsed_c, self._SLEEP_SECONDS / 2,
+            f"LOUD(stdout+stderr) shard 的寫入耗時 {elapsed_c:.3f}s 過於接近 SLOW shard 的"
+            f" sleep（{self._SLEEP_SECONDS}s）——stderr backpressure 回歸復發",
+        )
 
 
 if __name__ == "__main__":

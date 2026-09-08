@@ -48,8 +48,11 @@ Windows/macOS 上一致。
   [M6 id 集合] ✅ 集合關係成立；RC=0 ELAPSED=257s
 ```
 
-**加速比**：740s → 257s（約 2.9x，8 worker；遠低於 8x 理論值——最重的一組 shard 依 LOC
-權重仍獨占約 210s，屬已知、留待後續優化的效率議題，非正確性問題）。
+**加速比**：740s → 257s（約 2.9x，8 worker；遠低於 8x 理論值——最重的一組 shard 依
+`weighted_shards()` 現行權重（**測試方法數**，非 LOC；程式碼與 docstring 逐字如此，本行
+2026-09-08 第三輪複審訂正此前「依 LOC 權重」的誤述）仍獨占約 210s，屬已知、留待後續優化的
+效率議題，非正確性問題；第三輪複審另以乾淨環境重測見下節，實測到同一失衡現象更明顯的
+一次復現）。
 
 **正確性核對**：兩次收集數／指紋皆相同（`8e1c7c5370f8`）；rc 皆 0；skip 46 支集合排序後
 逐行 diff 為空（僅輸出順序不同，因平行模式依 shard 完成順序而非模組字母序，屬預期差異）。
@@ -94,10 +97,10 @@ SystemExit`，改為印出完整崩潰診斷（哪個 shard、哪些模組、完
 範疇，非本次修法引入的邏輯錯誤）。獨立審查者複核：**APPROVE**（僅 1 筆 note 級發現，
 即上述 guard-line 棘輪待重釘，非阻塞）。
 
-**誠實劃界（修復後仍未涵蓋的邊角）**：`run_parallel()` 對 `Popen()` 呼叫前本身拋出的
-非 `SystemExit` 例外，或 `merge_results()` 因不完整 payload 拋 `KeyError`，本輪未處理，
-`leak_fence()` 對它們仍無 try/except；不屬本次「shard 崩潰以 SystemExit 回報」這一條
-具體路徑的目標範圍。
+**誠實劃界（修復後仍未涵蓋的邊角，第二輪落地當時）**：`run_parallel()` 對 `Popen()` 呼叫前
+本身拋出的非 `SystemExit` 例外，或 `merge_results()` 因不完整 payload 拋 `KeyError`，本輪
+未處理，`leak_fence()` 對它們仍無 try/except；不屬本次「shard 崩潰以 SystemExit 回報」這一條
+具體路徑的目標範圍。**（2026-09-08 第三輪複審已修復此邊角，見下節。）**
 
 ## 帳本 ROW_MAX_BYTES 超標處置（本輪一併收斂）
 
@@ -109,16 +112,105 @@ SystemExit`，改為印出完整崩潰診斷（哪個 shard、哪些模組、完
 `CrossPlatform_*.md` 樣式，`unregistered_governance_docs()` 對它結構上可見）；帳本列已
 縮回一句話＋本檔指針，未把 ID 補進 `OVERSIZE_ROW_GRANDFATHERED`（那是砸溫度計）。
 
-## 結案前待辦（尚未做，誠實列出）
+## 第三輪：對抗式獨立複審收斂（收尾單人窗口，2026-09-08）
 
-1. 排查/證明跨 shard 並發執行時，涉及真實 OS 排程器狀態或共享追蹤目錄的測試模組不會互踩
-   （或改良分片邏輯讓這類模組必定同 shard 串行）。
-2. 補一支會真的 spawn subprocess 的整合測試，覆蓋 `run_parallel()`/`_worker_main()` 協定
-   通道本身（目前的崩潰測試 mock 了 `subprocess.Popen`，未涵蓋真實子行程 stdout/stderr
-   管線行為）。
-3. 至少一次 Windows 真機驗證，才能解除「僅 macOS 驗證」的限制、宣稱雙平台可用。
-4. `test_adr_xplat001_c1c2_lock.py` 的 guard-line 行數棘輪需重釘（本輪新增測試行數所致，
-   屬既有機械物的收尾單人窗口範疇）。
-5. `stderr` backpressure（未重導向、pipe buffer 理論上限）風險評估與必要時的緩解。
+**任務前提**：本輪明文要求不採信前兩輪的自我陳述（作者自證不計分），對上一節列出的
+五項待辦逐一獨立重新查證，並自行對照現有程式碼與實測結果，找出前兩輪未覆蓋的其他問題。
 
-在上述五項未完成前，DEF-200-274 維持 `partial`，不宣稱 `fixed`/`closed`。
+**問題 5（stderr backpressure）——查證結果：真實可重現缺陷，已修復。**
+`run_parallel()` 用 list comprehension 一次性併發啟動全部 shard 的 `Popen`（stdout/stderr
+皆設 `PIPE`），卻用序列 `for` 迴圈依序呼叫每個 shard 的 `.communicate()`；`_worker_main()`
+只把自己的 stdout（fd1）重導向 devnull，stderr（fd2）完全沒被排空。用兩個合成模組
+（SLOW 只 `sleep`；LOUD 立即寫入超過 OS pipe buffer 的內容到 stderr）逼進不同 shard 且
+LOUD 排在 SLOW 之後被 `communicate()`，修復前 LOUD 的 stderr 寫入耗時（實測 2.520s）幾乎
+精確等於 SLOW 的 `sleep` 秒數（2.5s）——證實 backpressure 真的會把「平行」的 shard 靜默
+串行化。**修法**：新增 `_communicate_all()`，改用每個 shard 各一條 thread 呼叫自己的
+`.communicate()`，取代原本的序列迴圈；修復後 LOUD 的寫入耗時降到 < 0.5s，與 SLOW 的
+`sleep` 秒數解耦。回歸測試：`ParallelShardStderrBackpressureRegressionTest`（先在暫時
+還原序列版本上跑過一次確認會紅，再切回修復版確認轉綠）＋
+`ParallelShardRealSubprocessProtocolIntegrationTest`（同時覆蓋協定通道 happy path 與此
+情境，`join(timeout=17s)` 作死鎖硬性防線）。
+
+**誠實劃界延伸（第二輪遺留的「Popen 前例外／`merge_results()` KeyError」邊角）——查證
+結果：非立即可觸發的線上事故，但防禦性硬化缺口，已修復。** `merge_results()` 對缺鍵
+payload 直接拋 `KeyError`（可執行復現：餵一筆缺 `testsRun` 鍵的 payload 即拋），而
+`run_parallel()` 對 Popen 迴圈與 `merge_results()` 呼叫全程無 `try/except`，此類例外會
+一路穿透到 `sentinel_lifecycle.leak_fence()` 未受保護的 `rc = run()`，重演與已修復
+「shard 崩潰 raise SystemExit」同型的 leak_fence 繞過失效——只是觸發條件換成例外類型。
+**修法**：把 Popen 迴圈／`_communicate_all`／`merge_results()` 整段包
+`try/except Exception`，任何例外都合成一筆 `errors` 條目後正常 `return`；同時把 Popen
+迴圈由 list comprehension 改為一般 `for` 迴圈，任一次 `Popen()` 失敗時對已啟動的 shard
+逐一 `kill()`＋`wait()`，不留孤兒行程。回歸測試：
+`ParallelShardRunParallelExceptionSafetyTest`（`KeyError` 不再穿透）、
+`ParallelShardMergeExceptionLeakFenceIntegrationTest`（端到端包進真正的
+`leak_fence()`，證明此類例外情境下收尾快照仍完整執行）、
+`ParallelShardPopenFailureKillsAlreadyStartedProcsTest`（已啟動的 shard 行程被
+`kill()`，非孤兒）。
+
+**問題 2（真實 subprocess 整合測試）——已補齊。** 新增
+`ParallelShardRealSubprocessProtocolIntegrationTest`：全程不 mock `subprocess.Popen`，
+一次涵蓋協定通道 happy path（3 shard，涵蓋 pass/fail/error/skip/`expectedFailure`-但-
+passes 五種結果型別的正確彙總）與 stderr backpressure 情境。此前三支既有 Parallel*
+測試（`ParallelShardMergeSmokeTest`／`ParallelShardCrashDoesNotRaiseTest`／
+`ParallelShardCrashLeakFenceIntegrationTest`）全數 mock `subprocess.Popen`，這正是
+問題 5 能存活到本輪才被抓到的直接原因。
+
+**問題 1（跨 shard 共享資源互踩）——獨立重做排查，結論：現階段風險已收斂，未發現需要
+新增釘選邏輯的真實衝突。** 不採信任一方的既有結論，自行對全 repo grep
+`AUTOSDD_TRACE_DIR`／`schtasks`／`launchctl` 命中的候選檔案逐一 Read 分類：其中大多數
+只把這些字串當成 AST 掃描判準的合成注入語料（從未在執行期真正呼叫過），真正在執行期
+觸碰 `AUTOSDD_TRACE_DIR` 的兩支（`test_claim_provenance_r86.py`、
+`test_context_budget_guard.py`）皆用每次呼叫獨立的 `tempfile` 隨機路徑隔離，且後者另有
+`SchedulerHygieneTest` 這道 AST 強制守衛（實跑 `pytest -k SchedulerHygieneTest` 全綠）；
+額外排查固定埠號／鎖檔／`pg_real` 三類共享資源，`tools/tests/` 範圍內同樣未發現未隔離
+的真實共用單例。誠實劃界：候選面是否窮盡（其他共享資源類別）仍不保證，僅是本輪已知
+排查範圍內零命中。
+
+**問題 4（guard-line 行數棘輪）——已重釘。** 本輪新增測試使
+`test_run_root_unittests.py` +437 行，`test_adr_xplat001_c1c2_lock.py` 自身逐檔漂移
++26 行，護欄層累積淨額 94902 → 95520（+618，其中
+`ParallelShardRealSubprocessProtocolIntegrationTest` +158 全額歸回歸鎖軌，扣除後 460
+遠低於單輪上限 549）。**刻意沿用同一輪號、未另立新輪**：另立會讓
+`live_repin_round()` 同時撞上三項與本缺陷完全無關的到期義務（Phase 2 §6 時效、U9
+root-tools 舊尺技術債到期輪、`_REPIN_NET_CAP_DUE_ROUND`，三者的展延或清償皆非本任務
+範圍），故沿用既有輪號延伸記帳，避免手術式修改範圍外溢。逐項見
+`docs/06_quality/CrossPlatform_R131_Scan_Findings.md` §8。
+
+**問題 3（Windows 真機驗證）——維持未解，誠實標記。** 本輪全程 macOS session，三份 CI
+workflow 均未設定 `AUTOSDD_PARALLEL_TESTS`，平行路徑在 Windows CI 上零自動化涵蓋；本項
+性質上無法在本次任務內完成，需要有人在實體或虛擬 Windows 機器上手動驗證 fd 重導向與
+pipe backpressure 修復在 Windows CRT text-mode fd 語意下是否仍成立。
+
+**加速比再測（乾淨環境，2026-09-08 第三輪）——誠實揭露一個與既有「2.9x」宣稱不符的
+新發現，而非重申舊數字。** 重測前 `ps aux` 確認無殘留 `run_root_unittests`／
+`parallel_shard.py` 行程、`git status --porcelain` 乾淨。本次環境
+`AUTOSDD_PARALLEL_TESTS_WORKERS` 被 shell 環境預設釘在 4（非上一輪量測時使用的 8），
+在此 4-worker 設定下實測：序列 572s（4042 測試，MIN_TESTS 4034→4042）；平行（4
+workers）570s——**幾乎零加速比**。即時觀察：4 個 shard 行程中 3 個在數十秒內完成，
+剩下一個（含 `test_doc_loc_baseline_freshness_r60.py`／`test_platform_neutral_paths.py`
+／`test_pre_push_dispatcher.py` 等全樹掃描型重量檔）獨占了與序列總耗時相當的 CPU
+時間，其餘 worker 提早收工後閒置——這正是 `weighted_shards()` 現行「依測試方法數」
+權重（而非實際耗時）分片時，少量測試但單支耗時極長的模組會被錯配成輕量、破壞負載
+平衡的具體重現，而非本輪修法引入的新回歸（兩次量測的收集數 4042、skip 46 支、rc 皆為
+0，逐項比對後 skip 集合排序後 diff 為空，完全一致）。**結論**：舊「2.9x」數字很可能是
+在 8-worker、且當時模組分佈剛好較均衡的情境下量得，本身未必不實，但**不具跨環境／跨
+worker 數的穩定性保證**；`weighted_shards()` 的權重演算法（依測試方法數而非實測耗時）
+本輪查證確認就是 evidence 檔原先記載的既知限制本體，非新增缺陷。
+
+## 結案前待辦（誠實列出現況）
+
+1. ~~排查跨 shard 共享資源互踩~~ ——第三輪已獨立重做排查，現階段未發現需要新增釘選
+   邏輯的真實衝突（見上節「問題 1」）；候選面窮盡度未 100% 保證，留供後續複審延伸。
+2. ~~補真實 subprocess 整合測試~~ ——已補齊（`ParallelShardRealSubprocessProtocolIntegrationTest`，
+   見上節「問題 2」）。
+3. **Windows 真機驗證——仍未解，維持 partial**：需要人在 Windows 機器上手動驗證，見上節
+   「問題 3」，不可用靜態分析或既有跨平台掃描器通過來替代。
+4. ~~guard-line 行數棘輪重釘~~ ——本輪已重釘（見上節「問題 4」）。
+5. ~~stderr backpressure~~ ——已修復並有回歸鎖證明改前會紅、改後會綠（見上節「問題 5」）。
+6. **`weighted_shards()` 權重演算法效率優化（非正確性缺陷，選擇性）**：若要把權重來源
+   由「測試方法數」改為「歷史實測耗時」，或把已知重量級檔案個別拆成獨立 shard，屬效率
+   優化項目，本輪未落地，留供容量決策後續處理。
+
+僅剩第 3 項（Windows 真機驗證）與第 6 項（效率優化，非阻塞）未解。DEF-200-274 於本輪
+維持 `partial`，不宣稱 `fixed`/`closed`——Windows 真機驗證這一項的性質決定它無法由
+macOS-only session 完成，需交棒。

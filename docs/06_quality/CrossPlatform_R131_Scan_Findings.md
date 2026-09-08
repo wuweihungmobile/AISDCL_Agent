@@ -141,7 +141,7 @@ AutoSDD_improving_NN.md` 四件套）——本節只是同一收尾窗口內的 
 
 ## §7 R134 收尾：DEF-200-274 收尾複審修復——leak_fence 繞過（2026-09-08）
 
-<!-- guard-total:R134 --> R134 護欄層累積淨額＝ 94902 → 95057（+155）：對抗式獨立
+R134 護欄層累積淨額（第一批，見 §8 續記合併總計）＝ 94902 → 95057（+155）：對抗式獨立
 複審抓到 `parallel_shard.run_parallel()` 在 shard 崩潰時 `raise SystemExit(1)`，會
 穿透 `sentinel_lifecycle.leak_fence()` 的 `rc = run()`（無 try/except），讓其收尾
 快照與洩漏比對整段沒有執行——牴觸 DEF-200-274 原始「leak_fence 在平行下不失真」的
@@ -164,3 +164,86 @@ AutoSDD_improving_NN.md` 四件套）——本節只是同一收尾窗口內的 
 `docs/06_quality/CrossPlatform_DEF200274_Parallel_Tests_Evidence.md`。此附記為
 doc-total 對帳（≥2 站點）寄居本檔，同 R129~R133 寄居體例；R134 本輪僅為單一缺陷
 收尾複審附帶的 guard-line 記帳延伸、非開新一輪 CrossPlatform 掃描輪四件套。
+
+## §8 R134 續：DEF-200-274 第三輪對抗式複審收斂批（2026-09-08，收尾單人窗口）
+
+背景：DEF-200-274 第三輪複審任務書要求獨立（不採信作者自證）重新查證 evidence 檔
+「結案前待辦」五項現況。查證結論：問題 1（stderr backpressure，`run_parallel()`
+依序 `communicate()` 而全部 shard 的 stderr 走真實 OS pipe，未被排空、可被 backpressure
+卡住 write()）與問題 2（`run_parallel()` 對 Popen 迴圈與 `merge_results()` 無
+`try/except`，惡意/畸形 payload 的 `KeyError` 會穿透 `sentinel_lifecycle.leak_fence()`
+未受保護的 `rc = run()`）皆為真實可重現缺陷，已修復；問題 3（缺一支不 mock
+`subprocess.Popen` 的真實協定通道整合測試）已補齊。
+
+修法（`tools/lib/parallel_shard.py`）：
+1. 新增 `_communicate_all()`，改為每個 shard 各起一條 thread 呼叫自己的
+   `.communicate()`，取代原本依序阻塞的 `for` 迴圈——每個 shard 的 stdout/stderr
+   自 `Popen` 啟動當下就持續被排空，不再有任何 shard 能因為排在後面而被前一個
+   shard 的 pipe backpressure 卡住。
+2. 把 Popen 迴圈／`_communicate_all`／`merge_results()` 整段包
+   `try/except Exception`：任何解析失敗（含 `KeyError`）都合成一筆 `errors`
+   條目後正常 `return`，不讓例外穿透 `leak_fence()` 的收尾。同時把 Popen 迴圈由
+   list comprehension 改為一般 `for` 迴圈，任一次 `Popen()` 失敗時對已啟動的
+   shard 逐一 `kill()`＋`wait()`，不留孤兒行程。
+
+回歸測試（`tools/tests/test_run_root_unittests.py`，2679→3116，+437）：
+- `ParallelShardStderrBackpressureRegressionTest`：真實（不 mock）subprocess，
+  兩個合成模組（SLOW 只 `sleep`；LOUD 立即寫 5MB 到 stderr），修復前 LOUD 的
+  寫入耗時（≈2.52s）幾乎精確等於 SLOW 的 `sleep` 秒數（2.5s）——證明修復前確實
+  backpressure；修復後 < 1.25s，與 SLOW 秒數解耦。
+- `ParallelShardMergeResultsMissingKeyStillRaisesTest`：釘住 `merge_results()`
+  本身保持嚴格（不動它，修法在呼叫端）。
+- `ParallelShardRunParallelExceptionSafetyTest`：證明 `run_parallel()` 不再讓
+  畸形 payload 的 `KeyError` 穿透。
+- `ParallelShardMergeExceptionLeakFenceIntegrationTest`：端到端包進真正的
+  `sentinel_lifecycle.leak_fence()`，證明此類例外情境下收尾快照仍完整執行。
+- `ParallelShardPopenFailureKillsAlreadyStartedProcsTest`：證明後面某次
+  `Popen()` 失敗時，已啟動的 shard 行程被 `kill()`，不是孤兒。
+- `ParallelShardRealSubprocessProtocolIntegrationTest`（+158，全額歸回歸鎖軌）：
+  唯一一支全程不 mock `subprocess.Popen` 的整合測試，同時涵蓋協定通道 happy
+  path（3 shard，涵蓋 pass/fail/error/skip/`expectedFailure`-但-passes 五種
+  結果型別的正確彙總）與 stderr backpressure 情境（兩個 shard 各寫 5MB），並用
+  `join(timeout=17s)` 作為死鎖的硬性 fail-loud 防線。曾暫時把
+  `_communicate_all()` 呼叫改回序列 `[proc.communicate() for ...]` 驗證此測試
+  真的會轉紅（`2 failed`），再改回確認轉綠且與修復前 diff 為零。
+
+跨 shard 共享資源互踩排查（獨立重做，不採信作者自證的排查結論）：全 repo grep
+`AUTOSDD_TRACE_DIR`／`schtasks`／`launchctl` 命中 16 支候選檔案，逐一 Read 分類：
+14 支僅將這些字串作為 AST 掃描判準的合成注入語料（從未在執行期真正呼叫），真正
+在執行期觸碰 `AUTOSDD_TRACE_DIR` 的 2 支（`test_claim_provenance_r86.py`、
+`test_context_budget_guard.py`）皆用每次呼叫獨立的 `tempfile` 隨機路徑隔離，
+且後者另有 `SchedulerHygieneTest` AST 強制守衛；額外排查固定埠號／鎖檔／`pg_real`
+三類共享資源，`tools/tests/` 範圍內同樣未發現未隔離的真實共用單例。結論：
+`weighted_shards()` 現階段不需要為此新增釘選邏輯。
+
+Guard-line 記帳：本批新增內容（+437）延續同一 R134（**不另立 R135**——另立會讓
+`live_repin_round()` 同時撞上三項與本缺陷無關的到期義務：Phase 2 §6 時效
+（`_PHASE2_REVIEW_LOG` 末列輪號為 R129，加視窗 5 得到到期輪 134，R135 即超過）、U9
+root-tools 舊尺技術債（`_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND=135`）、與
+`_REPIN_NET_CAP_DUE_ROUND=135`——三者皆非本任務範圍，逾期需要的展延/清償工作
+與 DEF-200-274 無關，故沿用 R134 續記，避免手術式修改範圍外溢）＋本檔自身逐檔
+漂移 +26（新增三筆稽核列＋兩輪收斂＋凍結前綴延伸 132→133＋
+`_REPIN_LOG_HISTORY_SHA256` 重釘＋`_FROZEN_PREFIX_REWRITE_LEDGER` 接鏈列）。
+其中 `ParallelShardRealSubprocessProtocolIntegrationTest`（+158）全額歸回歸
+鎖軌（`_REGRESSION_LANE_LOG` 本輪列，未逾上限 309）。
+
+<!-- guard-total:R134 --> R134 護欄層累積淨額＝ 94902 → 95520（+618，含 §7 第一批
++155）：扣回歸鎖軌 158 後 460 遠低於 `net_cap_for_round(134)=549`
+（`_REPIN_NET_CAP_DUE_ROUND=135` 尚未到期，因本輪未跨入 R135）。逐項與凍結
+前綴/指紋重釘草稿一律現查
+`python tools/tests/test_adr_xplat001_c1c2_lock.py --print-guard-lines`；缺陷
+帳本見 `docs/06_quality/AutoSDD_Defect_Log.md` DEF-200-274，完整證據見
+`docs/06_quality/CrossPlatform_DEF200274_Parallel_Tests_Evidence.md`。此附記
+為 doc-total 對帳（≥2 站點）寄居本檔，同 R129~R133 寄居體例；本輪僅為單一缺陷
+第三輪收尾複審附帶的 guard-line 記帳延伸、非開新一輪 CrossPlatform 掃描輪
+四件套。
+
+**未解／partial 誠實劃界**：Windows 真機驗證仍未完成（本 session 全程 macOS，
+三份 CI workflow 皆未設定 `AUTOSDD_PARALLEL_TESTS`，平行路徑在 Windows CI 上
+零自動化涵蓋）；`weighted_shards()` 的權重來源是「測試方法數」而非 LOC（若要
+改成 LOC 或歷史實測耗時，屬效率優化非正確性缺陷，未落地）；`docs/06_quality/
+CrossPlatform_DEF200274_Parallel_Tests_Evidence.md` 記載的 2.9x 加速比／
+最重 shard 約 210s 基準是否受量測環境雜訊污染，本輪已在乾淨環境重測：4-worker
+設定下序列 572s、平行 570s，加速比趨近於零，根因為 `weighted_shards()` 依
+測試方法數而非實測耗時分片，詳見該檔〈第三輪：對抗式獨立複審收斂〉段落
+「加速比再測（乾淨環境，2026-09-08 第三輪）」。
