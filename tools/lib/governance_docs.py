@@ -447,6 +447,11 @@ _GOVERNANCE_DOCS = (
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R130_FourParty_Salvage.md",
     # R131 收尾：喚醒鏈四方審計對抗查證與破洞修復＋護欄層對帳＋到期展延 round-label-ok
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R131_Scan_Findings.md",
+    # DEF-200-274（根層 tools/tests 平行執行 opt-in）證據檔：帳本該列已依 ROW_MAX_BYTES
+    # 瘦身成索引 ⇒ 逐條重驗所需的架構決策、逐字終端輸出、雙審發現與 leak_fence 修復驗證
+    # 唯一居所在本檔（⇒ 體積守門），且它寫出「該 DEF-ID 詳情現居本檔」的座標宣稱（⇒ 指針
+    # 稽核）。命名刻意不帶 R<N> 輪號（非帳本輪次迭代序列產物，見該檔頭 WHY）。即刻登記。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_DEF200274_Parallel_Tests_Evidence.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/{CrossPlatform,Quota}_*.md`。這**不是**把具名

@@ -682,7 +682,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 7440,
+    "test_adr_xplat001_c1c2_lock.py": 7472,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 3839,
@@ -732,7 +732,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_python_c_percent_shim.py": 119,
     "test_quota_policy.py": 3396,
     "test_root_infra_parity.py": 441,
-    "test_run_root_unittests.py": 2492,
+    "test_run_root_unittests.py": 2679,
     "test_sanitize_component_frozen_sdd_versions_lock.py": 340,
     "test_schedule_capability_parity.py": 626,
     "test_script_scan_surface_ssot.py": 391,
@@ -740,7 +740,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_skip_discoverability_r83.py": 744,
     "test_smoke_ci_sync.py": 1353,
     "test_stdio_utf8.py": 76,
-    "test_subprocess_encoding_hygiene.py": 1599,
+    "test_subprocess_encoding_hygiene.py": 1603,
     "test_windows_forbidden_filename_parity.py": 1025,
     "test_windows_nightly_anchor_parity.py": 135,
     "test_windows_smoke_heartbeat_doc_sync.py": 197,
@@ -1535,6 +1535,30 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "[非淨減法輪][回歸鎖軌全額申報，見 _REGRESSION_LANE_LOG 同輪列] 本檔自身逐檔漂移"
      "（前一筆 R132 稽核列＋對應 _REGRESSION_LANE_LOG 列本身的行數）。詳 "
      "CrossPlatform_R131_Scan_Findings.md §5。"),
+    ("R133", 94834, 94886, 52,
+     "[非淨減法輪][全額功能軌] DEF-200-274（本機平行執行 opt-in 落地，2026-09-08）："
+     "test_run_root_unittests.py 2492→2540（+48）新增 ParallelShardMergeSmokeTest 一支"
+     "（AC8：JSON 彙總協定純函式回歸鎖，不真的 spawn subprocess）＋"
+     "test_subprocess_encoding_hygiene.py 1599→1603（+4，`tools` 樹掃描檔數下限"
+     "131→156 重釘註記）。逐項見 docs/06_quality/CrossPlatform_R131_Scan_Findings.md §6。"),
+    ("R133", 94886, 94902, 16,
+     "[非淨減法輪] 本檔自身逐檔漂移（前一筆稽核列本身的行數，同 R131/R132 既有體例）。"
+     "逐項見 docs/06_quality/CrossPlatform_R131_Scan_Findings.md §6。"),
+    ("R134", 94902, 95041, 139,
+     "[非淨減法輪][全額功能軌] DEF-200-274 收尾複審修復：leak_fence 繞過（shard 崩潰時 "
+     "parallel_shard.run_parallel() 改為正常回傳失敗態 result，不再 raise SystemExit "
+     "穿透 sentinel_lifecycle.leak_fence() 的 rc = run()）之回歸鎖："
+     "test_run_root_unittests.py 2540→2679（+139；ParallelShardCrashDoesNotRaiseTest "
+     "與 ParallelShardCrashLeakFenceIntegrationTest 兩支，含端到端把假崩潰包進真正 "
+     "leak_fence() 驗證收尾快照確實跑完）。逐項見 "
+     "docs/06_quality/CrossPlatform_R131_Scan_Findings.md §7 與 "
+     "docs/06_quality/CrossPlatform_DEF200274_Parallel_Tests_Evidence.md。"),
+    ("R134", 95041, 95053, 12,
+     "[非淨減法輪] 本檔自身逐檔漂移（新增兩筆稽核列＋前一筆的行數，同 R131/R133 既有"
+     "體例）。逐項見 docs/06_quality/CrossPlatform_R131_Scan_Findings.md §7。"),
+    ("R134", 95053, 95057, 4,
+     "[非淨減法輪] 本檔自身逐檔漂移第二次收斂（本列＋前一筆收斂列自身的行數，同 R131 "
+     "多列收斂體例）。逐項見 docs/06_quality/CrossPlatform_R131_Scan_Findings.md §7。"),
 )
 
 
@@ -1607,6 +1631,9 @@ _REPIN_NET_CAP_SCHEDULE: tuple[tuple[int, int], ...] = (
     (131, 550),   # 到期輪兌現（喚醒鏈四方審計對抗查證收尾，2026-09-07）：cap 降到到期目標
                   # 本身（同既有判例：兌現值貼齊到期目標）。本輪剛好到期， round-label-ok
                   # 同輪重新武裝下一段：步伐 1 < 前段 2，續守「步伐刻意變小」。
+    (133, 549),   # 到期輪兌現（DEF-200-274 guard-line 記帳，2026-09-08）：cap 降到到期
+                  # 目標本身（同既有判例：兌現值貼齊到期目標，`cap > due_target` 轉 round-label-ok
+                  # False ⇒ 款(12) 不再說話）。本輪剛好到期。
 )
 #: 生效點＝首列輪號、現行上限＝末列上限，**皆由表導出不另立常數**（R73 判例：一份知識一個家）。
 _REPIN_ROUND_CAP_SINCE = _REPIN_NET_CAP_SCHEDULE[0][0]
@@ -1765,7 +1792,9 @@ def _regression_lane_cap_basis() -> tuple[str, int]:
 # 非 root-tools 重構持有面；真拆待獨立窗口，130 → 132。
 # 🔴 R132 具名展延（鐵律七，不得靜默沿用）round-label-ok：喚醒鏈規則2/3/5/7/8收尾窗口，
 # 非 root-tools 重構持有面；真拆待獨立窗口，132 → 133。
-_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND = 133
+# 🔴 R133 具名展延（鐵律七，不得靜默沿用）round-label-ok：DEF-200-274 本機平行執行落地
+# 窗口，非 root-tools 重構持有面；真拆待獨立窗口，133 → 135（在 lookahead=5 內）。
+_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND = 135
 #: 清償旗標——真拆完成後改 True。刻意用布林而非重建舊尺計數器（ADR §9.3「舊尺已廢」）。
 _ROOT_TOOLS_OLD_SCALE_DEBT_RESOLVED = False
 #: A-2 後設鎖：到期輪只准落在「現查輪＋lookahead」內，推遠（如 9999）當場紅；shrink-only
@@ -1860,8 +1889,8 @@ def net_cap_schedule_problems(
 #: 武裝下一段：步伐 2 < 前一段的 3，續守「步伐刻意變小」且目標嚴格低於現行 cap。
 #: R131 喚醒鏈四方審計對抗查證收尾兌現 round-label-ok：cap 降到目標本身（550，見 `(131, 550)`
 #: 列），同輪重新武裝下一段：步伐 1 < 前一段的 2，續守「步伐刻意變小」且目標嚴格低於現行 cap。
-_REPIN_NET_CAP_DUE_ROUND = 133  # round-label-ok：到期輪＝兌現輪+2（lookahead 判準的活體對照）
-_REPIN_NET_CAP_DUE_TARGET = 549  # 步伐 1 < 前一段的 2，續守「步伐刻意變小」且嚴格低於現行 cap
+_REPIN_NET_CAP_DUE_ROUND = 135  # round-label-ok：到期輪＝兌現輪+2（lookahead 判準的活體對照）
+_REPIN_NET_CAP_DUE_TARGET = 548  # 步伐 1，嚴格低於 cap 549（R133 重新武裝） round-label-ok
 
 #: DEF-200-121：到期輪自身的後設鎖——`_REPIN_NET_CAP_DUE_ROUND` 只准落在「最近稽核輪
 #: ＋ lookahead」以內（歷史母體 85..113 的到期輪一律＝上一次兌現輪 +2）。可延期的到期日
@@ -1928,10 +1957,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 124
+_REPIN_LOG_FROZEN_PREFIX_LEN = 129
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "60a3d5bf721ba552147294db064c6f569605943205104042550a850731d00d2e")
+    "e069a86b7750c7945da7ef53511ff14a7bf6dc202d7b45ee3c93aa9eabfd141a")
 
 
 def repin_log_history_digest(
@@ -2119,6 +2148,9 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # 串接測試四項回歸鎖＋本檔自身兩筆稽核列，prefix_len 122→124 涵蓋新列本身；
     # 載體＝DEF-200-272（同家族）。
     ("R132", "2b2619269538", "60a3d5bf721b", "DEF-200-272"),  # round-label-ok
+    # R133：DEF-200-274 落地——凍結前綴延伸 124→126 涵蓋新兩列本身，同既有體例。round-label-ok
+    ("R133", "60a3d5bf721b", "b7448766903c", "DEF-200-274"),
+    ("R134", "b7448766903c", "e069a86b7750", "DEF-200-274"),
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

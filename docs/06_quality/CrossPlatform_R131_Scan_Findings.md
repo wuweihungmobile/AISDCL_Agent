@@ -116,3 +116,51 @@ AutoSDD_improving_NN.md` 四件套）——本節只是同一收尾窗口內的 
 - 逐檔行數與對帳一律現查 `python tools/tests/test_adr_xplat001_c1c2_lock.py --print-guard-lines`。
 - `_EXPECTED_MIN_TEST_COUNTS`／`MIN_TESTS`／`skip_tag_policy._SITE_CLASS_CENSUS` 同輪收尾
   重釘記錄見 `docs/06_quality/WakeChain_IronLaws_Verification.md`〈六、收尾重釘記錄〉。
+
+## §6 R133 收尾：DEF-200-274 本機平行執行 opt-in 落地的 guard-line 記帳延伸（2026-09-08）
+
+<!-- guard-total:R133 --> R133 護欄層累積淨額＝ 94834 → 94902（+68）：DEF-200-274（根層
+`tools/run_root_unittests.py` 本機平行執行 opt-in，`AUTOSDD_PARALLEL_TESTS=1`）新增
+`tools/lib/parallel_shard.py`（本檔不進 `tools/tests/` 逐檔行數表，非鎖檔）與一支回歸
+冒煙測試 `ParallelShardMergeSmokeTest`（AC8）：`test_run_root_unittests.py 2492→2540
+（+48）`＋`test_subprocess_encoding_hygiene.py 1599→1603（+4，`tools` 樹掃描檔數下限
+131→156 重釘註記，因新增 `tools/lib/parallel_shard.py` 使該樹檔數 163→164）`＋本檔
+（`test_adr_xplat001_c1c2_lock.py`）自身逐檔漂移 +16（新增兩筆稽核列＋凍結前綴延伸
+124→126＋`_REPIN_LOG_HISTORY_SHA256` 重釘＋`_REPIN_NET_CAP_SCHEDULE` 到期義務兌現列
+`(133, 549)`＋`_FROZEN_PREFIX_REWRITE_LEDGER` 接鏈列）。
+
+[非淨減法輪] 淨額 68 遠低於 `net_cap_for_round(133)=549`；連升 streak 因本輪標籤刻意
+不佔用連續計數之外的判斷不適用（`repin_growth_problems()` 對本表照算：R133 兩列合計
++68，`nets` 最新一輪為正，惟本輪起點延續 R132 的「連升 streak 已於 R132 歸零」判例，
+未觸發款(11)）。到期輪 R133 剛好到期，cap 降到到期目標本身 549（同 R99/R101/…/R131
+判例：兌現值貼齊到期目標）。逐項與凍結前綴/指紋重釘草稿一律現查
+`python tools/tests/test_adr_xplat001_c1c2_lock.py --print-guard-lines`；缺陷帳本見
+`docs/06_quality/AutoSDD_Defect_Log.md` DEF-200-274。此附記為 doc-total 對帳（≥2 站點）
+寄居本檔，同 R129/R130/R131/R132 寄居體例；R133 本輪僅為單一功能落地附帶的 guard-line
+記帳延伸、非開新一輪 CrossPlatform 掃描輪四件套。
+
+## §7 R134 收尾：DEF-200-274 收尾複審修復——leak_fence 繞過（2026-09-08）
+
+<!-- guard-total:R134 --> R134 護欄層累積淨額＝ 94902 → 95057（+155）：對抗式獨立
+複審抓到 `parallel_shard.run_parallel()` 在 shard 崩潰時 `raise SystemExit(1)`，會
+穿透 `sentinel_lifecycle.leak_fence()` 的 `rc = run()`（無 try/except），讓其收尾
+快照與洩漏比對整段沒有執行——牴觸 DEF-200-274 原始「leak_fence 在平行下不失真」的
+要求。修法：崩潰時不再 `raise`，改為印出完整診斷後正常 `return` 一個帶合成 `errors`
+條目的 `_MergedResult`，`wasSuccessful()` 自然為 `False`，`rc` 仍非零，但 `leak_fence()`
+能執行完畢。回歸鎖（端到端真測，非僅結構推理）：
+`test_run_root_unittests.py 2540→2679（+139）`（`ParallelShardCrashDoesNotRaiseTest`
+斷言崩潰路徑不拋例外、`wasSuccessful()==False`；
+`ParallelShardCrashLeakFenceIntegrationTest` 把會崩潰的 `run_parallel()` 呼叫包進
+真正的 `sentinel_lifecycle.leak_fence()`，斷言假排程後端 `list_jobs()` 恰被呼叫
+2 次〔收尾前後各一次〕、痕跡檔落地——兩支測試皆先在暫時改回 `raise SystemExit` 的
+版本上跑過一次確認會失敗，再切回修復版確認轉綠）＋本檔（`test_adr_xplat001_c1c2_lock.py`）
+自身逐檔漂移 +16（新增三筆稽核列＋兩輪收斂＋凍結前綴延伸 126→129＋
+`_REPIN_LOG_HISTORY_SHA256` 重釘兩次＋`_FROZEN_PREFIX_REWRITE_LEDGER` 接鏈列）。
+
+[非淨減法輪] 淨額 155 遠低於 `net_cap_for_round(134)=549`（`_REPIN_NET_CAP_DUE_ROUND=135`
+尚未到期）。逐項與凍結前綴/指紋重釘草稿一律現查
+`python tools/tests/test_adr_xplat001_c1c2_lock.py --print-guard-lines`；缺陷帳本見
+`docs/06_quality/AutoSDD_Defect_Log.md` DEF-200-274，完整證據見
+`docs/06_quality/CrossPlatform_DEF200274_Parallel_Tests_Evidence.md`。此附記為
+doc-total 對帳（≥2 站點）寄居本檔，同 R129~R133 寄居體例；R134 本輪僅為單一缺陷
+收尾複審附帶的 guard-line 記帳延伸、非開新一輪 CrossPlatform 掃描輪四件套。

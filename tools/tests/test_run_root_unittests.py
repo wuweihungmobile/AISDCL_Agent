@@ -2488,5 +2488,192 @@ class CarrierVerdictParityTest(unittest.TestCase):
         )
 
 
+class ParallelShardMergeSmokeTest(unittest.TestCase):
+    """DEF-200-274 AC8：JSON 彙總協定的純函式驗證——**不**真的 spawn subprocess
+
+    （那會測到 Popen 本身而非彙總邏輯）。直接餵兩份手造 shard payload 給
+    `merge_results`，斷言 testsRun 加總正確、fixture 筆 isinstance 為 False、
+    非 fixture 筆為 True 且 id 相符。恆跑、不用 skip/skipUnless。
+    """
+
+    def test_two_shards_merge_counts_and_fixture_flag_correctly(self) -> None:
+        parallel_shard = run_root_unittests.parallel_shard
+
+        class _Case(unittest.TestCase):
+            def test_ok(self):
+                pass
+
+        case = _Case("test_ok")
+        known = {case.id(): case}
+        shard_a = {
+            "testsRun": 3,
+            "skipped": [[case.id(), "只在 CI 跑", False]],
+            "errors": [],
+            "failures": [],
+            "unexpectedSuccesses": [],
+        }
+        shard_b = {
+            "testsRun": 2,
+            "skipped": [],
+            "errors": [["setUpClass (mod.Cls)", "boom", True]],
+            "failures": [],
+            "unexpectedSuccesses": [],
+        }
+        merged = parallel_shard.merge_results([shard_a, shard_b], known)
+
+        self.assertEqual(merged.testsRun, 5, "兩個 shard 的 testsRun 未正確加總")
+        self.assertEqual(len(merged.skipped), 1)
+        skipped_test, skipped_reason = merged.skipped[0]
+        self.assertIsInstance(skipped_test, unittest.TestCase)
+        self.assertEqual(skipped_test.id(), case.id())
+        self.assertEqual(skipped_reason, "只在 CI 跑")
+
+        self.assertEqual(len(merged.errors), 1)
+        error_test, error_detail = merged.errors[0]
+        self.assertNotIsInstance(error_test, unittest.TestCase)
+        self.assertEqual(str(error_test), "setUpClass (mod.Cls)")
+        self.assertEqual(error_detail, "boom")
+        self.assertFalse(merged.wasSuccessful(), "有 1 筆 error ⇒ 不應判為成功")
+
+
+def _fake_shard_procs(crash_shard: list[str], crash_stderr: str, ok_payload: str):
+    """建一個 `subprocess.Popen` 替身：命中 `crash_shard` 的呼叫回崩潰態
+    （rc=1、空 stdout），其餘一律回 `ok_payload` 這份合法 JSON。"""
+
+    class _CrashProc:
+        returncode = 1
+
+        def communicate(self):
+            return "", crash_stderr
+
+    class _OkProc:
+        returncode = 0
+
+        def communicate(self):
+            return ok_payload + "\n", ""
+
+    def fake_popen(argv, **_kwargs):
+        return _CrashProc() if argv[3:] == crash_shard else _OkProc()
+
+    return fake_popen
+
+
+class ParallelShardCrashDoesNotRaiseTest(unittest.TestCase):
+    """DEF-200-274 收尾複審發現：shard 崩潰時 `run_parallel()` 曾 `raise
+    SystemExit(1)`，直接穿透 `sentinel_lifecycle.leak_fence()` 的 `rc = run()`
+    這一行（無 try/except），讓收尾快照／洩漏比對整段沒有執行。修法＝崩潰改記
+    一筆 `errors` 條目正常 return，`wasSuccessful()` 因此為 False，呼叫方讀到
+    的 rc 依然非零，但不再犧牲 `leak_fence()` 的收尾動作。
+    """
+
+    def test_shard_crash_returns_failed_result_instead_of_raising(self) -> None:
+        parallel_shard = run_root_unittests.parallel_shard
+
+        class _Case(unittest.TestCase):
+            def test_ok(self):
+                pass
+
+        suite = unittest.TestSuite([_Case("test_ok")])
+        ok_payload = json.dumps({
+            "testsRun": 1, "skipped": [], "errors": [], "failures": [],
+            "unexpectedSuccesses": [],
+        })
+        stderr = "boom: shard interpreter crashed"
+        fake_popen = _fake_shard_procs(["mod.crash"], stderr, ok_payload)
+        module_counts = {"mod.crash": 1, "tests.mod_ok": 1}
+
+        with mock.patch.object(parallel_shard, "worker_count", return_value=2), \
+                mock.patch.object(parallel_shard.subprocess, "Popen", side_effect=fake_popen):
+            try:
+                result = parallel_shard.run_parallel(
+                    suite, Path(__file__).resolve().parent, module_counts,
+                )
+            except SystemExit as exc:  # 這正是本測試要鎖住的回歸
+                self.fail(f"run_parallel() 仍以 SystemExit 中斷呼叫鏈：{exc}")
+
+        self.assertFalse(
+            result.wasSuccessful(),
+            "崩潰的 shard 沒有讓彙總結果判為失敗——rc 會被靜默蓋成綠燈",
+        )
+        self.assertEqual(len(result.errors), 1)
+        crashed_test, reason = result.errors[0]
+        self.assertNotIsInstance(crashed_test, unittest.TestCase)
+        self.assertIn("mod.crash", str(crashed_test))
+        self.assertIn(stderr, reason, "崩潰診斷（stderr）沒有被帶進彙總結果")
+
+
+class ParallelShardCrashLeakFenceIntegrationTest(unittest.TestCase):
+    """端到端：把一個會 shard 崩潰的 `run_parallel()` 呼叫真的包進
+    `sentinel_lifecycle.leak_fence()`，斷言收尾快照／洩漏比對確實跑完，不是被
+    `SystemExit` 中斷。假排程後端只認 `list_jobs()` 呼叫次數：兩次（收尾前後
+    各一次）即證明 `rc = run()` 那一行沒有被例外打斷。
+    """
+
+    def test_leak_fence_completes_its_teardown_when_a_shard_crashes(self) -> None:
+        parallel_shard = run_root_unittests.parallel_shard
+        sentinel_lifecycle = run_root_unittests.sentinel_lifecycle
+
+        class _FakeBackend:
+            name = "fake-carrier"
+
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def list_jobs(self, _prefix: str) -> list[str]:
+                self.calls += 1
+                return []
+
+            def evidence_hint(self) -> str:
+                return "（假後端：本測試不對真載具取證）"
+
+        backend = _FakeBackend()
+
+        class _Case(unittest.TestCase):
+            def test_ok(self):
+                pass
+
+        suite = unittest.TestSuite([_Case("test_ok")])
+        ok_payload = json.dumps({
+            "testsRun": 1, "skipped": [], "errors": [], "failures": [],
+            "unexpectedSuccesses": [],
+        })
+        fake_popen = _fake_shard_procs(["mod.crash"], "boom", ok_payload)
+        captured: list = []
+
+        def _run() -> int:
+            result = parallel_shard.run_parallel(
+                suite, Path(__file__).resolve().parent,
+                {"mod.crash": 1, "tests.mod_ok": 1},
+            )
+            captured.append(result)
+            return 0 if result.wasSuccessful() else 1
+
+        tmp = Path(tempfile.mkdtemp(prefix="leak-fence-shard-crash-"))
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        trace_env = sentinel_lifecycle.endurance_env.TRACE_DIR_ENV
+
+        with mock.patch.object(parallel_shard, "worker_count", return_value=2), \
+                mock.patch.object(parallel_shard.subprocess, "Popen", side_effect=fake_popen), \
+                mock.patch.object(sentinel_lifecycle.schedule_backend, "select",
+                                  return_value=backend), \
+                mock.patch.object(tempfile, "gettempdir", return_value=str(tmp)), \
+                mock.patch.dict(os.environ, {trace_env: str(tmp)}):
+            try:
+                rc = sentinel_lifecycle.leak_fence(_run)
+            except SystemExit as exc:  # 這正是本測試要鎖住的回歸
+                self.fail(f"leak_fence() 的 rc = run() 被 SystemExit 打斷：{exc}")
+
+        self.assertEqual(len(captured), 1, "run() 沒有被 leak_fence 真的呼叫到")
+        self.assertFalse(captured[0].wasSuccessful())
+        self.assertEqual(rc, 1, "run() 判失敗卻沒有傳遞到 leak_fence() 的 rc")
+        self.assertEqual(
+            backend.calls, 2,
+            "leak_fence 前後兩次真排程器快照沒有都執行——"
+            "代表 rc = run() 那行被例外打斷，收尾沒跑完",
+        )
+        trace = tmp / sentinel_lifecycle.LEAK_FENCE_LOG_NAME
+        self.assertTrue(trace.is_file(), "leak_fence 沒有落痕跡——收尾沒跑完")
+
+
 if __name__ == "__main__":
     unittest.main()
