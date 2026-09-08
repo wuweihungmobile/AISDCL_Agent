@@ -620,11 +620,10 @@ def remember_latch(state: Path, key: str) -> None:
     """把 (門檻, 分母) 記進 state 檔。寫失敗不得升級為守衛失敗——最壞情況是下次再喊一次。"""
     tiers = sorted(announced_latches(state) | {key})
     try:
-        state.write_text(
-            json.dumps({"tiers": tiers}, ensure_ascii=False),
-            encoding="utf-8",
-            newline="\n",
-        )
+        # `Path.write_text(newline=)` 要 3.10+ 才有；改用 `.open()`（委派給內建 `open()`，
+        # `newline=` 3.9 就支援）以維持 mac 系統預設直譯器（常年 3.9）相容。
+        with state.open("w", encoding="utf-8", newline="\n") as f:
+            f.write(json.dumps({"tiers": tiers}, ensure_ascii=False))
     except OSError:
         pass
 

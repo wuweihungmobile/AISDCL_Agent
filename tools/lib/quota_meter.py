@@ -64,7 +64,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 #: 權威端點。來源不是猜的：`claude.exe` 內的實作逐字 `fetchUtilization: GET
@@ -500,7 +500,7 @@ def _credit_pool(payload: dict, key: str) -> dict | None:
         used = (val.get("used") or {}).get("amount_minor")
         limit = (val.get("limit") or {}).get("amount_minor")
         enabled = val.get("enabled")
-    if not isinstance(used, int | float) or not isinstance(limit, int | float):
+    if not isinstance(used, (int, float)) or not isinstance(limit, (int, float)):
         return None
     return {"enabled": enabled is True, "used": float(used), "limit": float(limit)}
 
@@ -687,7 +687,7 @@ def retry_after_at(headers: object, now: datetime) -> str | None:
         if raw.isdigit():
             secs = int(raw)
             if secs > 10 ** 9:
-                return datetime.fromtimestamp(secs, UTC).astimezone().isoformat(
+                return datetime.fromtimestamp(secs, timezone.utc).astimezone().isoformat(
                     timespec="seconds")
             # 🔴 DEF-200-196：`secs<=0`（例如 `Retry-After: 0`）此前落入
             # `now + timedelta(seconds=secs)` ⇒ `resets_at≈measured_at`，語意錯誤——
@@ -768,7 +768,7 @@ def measure_detail(timeout: int = HTTP_TIMEOUT_SECONDS,
         # 🔴 這一格的順序是判準的一部分：擺在 `status != 200` 之後就永遠到不了
         # （429 會先被折成 `http-429` ⇒ `None` ⇒ 量不到），而那正是本修法要治的缺陷。
         return rate_limited_reading(headers,
-                                    datetime.now(UTC).astimezone()), REASON_RATE_LIMITED
+                                    datetime.now(timezone.utc).astimezone()), REASON_RATE_LIMITED
     if status != 200 or not isinstance(payload, dict):
         return None, f"http-{status}"
     axes = bucket_readings(payload)
@@ -780,7 +780,7 @@ def measure_detail(timeout: int = HTTP_TIMEOUT_SECONDS,
     return {
         "schema": SCHEMA, "axes": axes, "source": "endpoint",
         "http_status": status,
-        "measured_at": datetime.now(UTC).astimezone().isoformat(timespec="seconds"),
+        "measured_at": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
         "denominator": denominator_of(payload),
         "schema_keys": sorted(payload),
         # 🔴 R87：派工前置檢查的資料來源（見 `account_posture`）。快取裡沒有它，
@@ -832,8 +832,10 @@ def write_cache(reading: dict, path: Path | None = None) -> bool:
         # 還不存在（不像 `tempfile.gettempdir()` 保證早已存在）⇒ 必須在寫入前建立。
         target.parent.mkdir(parents=True, exist_ok=True)
         # `newline="\n"`：本 repo 判過「Python 寫檔不指定 newline，Windows 會寫出 CRLF」。
-        target.write_text(json.dumps(payload, ensure_ascii=False, indent=2),
-                          encoding="utf-8", newline="\n")
+        # `Path.write_text()` 的 `newline=` 參數要 3.10+ 才有（3.9 呼叫會 TypeError），
+        # 改用 `Path.open()`（一路委派給內建 `open()`，`newline=` 3.9 就支援）。
+        with target.open("w", encoding="utf-8", newline="\n") as f:
+            f.write(json.dumps(payload, ensure_ascii=False, indent=2))
     except OSError:
         return False
     return True

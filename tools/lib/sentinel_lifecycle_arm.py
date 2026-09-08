@@ -176,10 +176,11 @@ def _relatch_stamp(marker: Path) -> Path:
 def _write_marker(marker: Path, session_id: str, transcript: Path, event: str,
                   **fields: object) -> bool:
     try:
-        marker.write_text(json.dumps(
-            {"session_id": session_id, "event": event,
-             "armed_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "transcript": str(transcript),
-             **fields}, ensure_ascii=False), encoding="utf-8", newline="\n")
+        with marker.open("w", encoding="utf-8", newline="\n") as f:
+            f.write(json.dumps(
+                {"session_id": session_id, "event": event,
+                 "armed_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "transcript": str(transcript),
+                 **fields}, ensure_ascii=False))
     except OSError:
         return False
     return True

@@ -257,7 +257,8 @@ def unattended_outcome_banner() -> str:
         return ""
     unread = lines[_read_outcome_cursor(cursor_path):]
     try:
-        cursor_path.write_text(str(len(lines)), encoding="utf-8", newline="\n")
+        with cursor_path.open("w", encoding="utf-8", newline="\n") as f:
+            f.write(str(len(lines)))
     except OSError:
         pass  # 游標寫不進去最多下次重印一次，不得反過來變故障源
     parts = []

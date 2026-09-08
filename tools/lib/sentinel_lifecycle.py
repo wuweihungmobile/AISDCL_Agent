@@ -119,8 +119,8 @@ def announce_handbacks(emit, base: Path | None = None) -> str:
         if not emit(text):
             return ""
         for report in rows:
-            report.with_suffix(".ack").write_text(
-                f"acked {time.time()}\n", encoding="utf-8", newline="\n")
+            with report.with_suffix(".ack").open("w", encoding="utf-8", newline="\n") as f:
+                f.write(f"acked {time.time()}\n")
         return text
     except Exception:  # noqa: BLE001 — 見 docstring
         return ""

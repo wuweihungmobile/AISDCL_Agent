@@ -297,9 +297,8 @@ def hook_chain_py39_census() -> tuple[dict[str, list[str]], dict[str, list[str]]
 #: 包在 `quota_meter.py` 上游插了一行，本鎖當場紅在一個與它守的主題完全無關的事情上。
 #: 「同一個構造換了行號」不是缺陷，判它只會製造要人去改表的假紅——而被改怕的表最後
 #: 一定被改寬。行號留在**必須為空**的那一半（`hard`）：那裡不會有存量，故不會腐化。
-_PY39_DEGRADATION_DEBT: dict[str, list[str]] = {
-    "tools/lib/quota_meter.py": ["from datetime import UTC"],
-}
+#: 2026-09-08 起淨空：quota_meter.py 改用 3.9 相容寫法，此前唯一一筆退化已還清。
+_PY39_DEGRADATION_DEBT: dict[str, list[str]] = {}
 
 
 def _without_linenos(items: list[str]) -> list[str]:
@@ -432,12 +431,13 @@ class TestPosixCarrierWarningTellsTheTruth(unittest.TestCase):
         for token in ("3.9", "bootstrap_core", "fail-open", "quota_meter"):
             self.assertIn(token, message, f"版本告警缺少「{token}」——{message}")
 
-    def test_the_measured_degradation_named_in_the_message_is_real(self) -> None:
-        """訊息點名 `quota_meter` 不得是空話：它必須真的在退化債表上。"""
-        self.assertIn(
+    def test_the_quota_meter_fixed_claim_is_real(self) -> None:
+        """訊息現在說 `quota_meter.py` 已修好、不再退化：這句話必須為真。"""
+        self.assertNotIn(
             "tools/lib/quota_meter.py", _PY39_DEGRADATION_DEBT,
-            "版本告警點名了 quota_meter，但退化債表沒有它 ⇒ 訊息在講一件已經不存在的事",
+            "版本告警宣稱 quota_meter.py 已修好，但退化債表還留著它 ⇒ 訊息在講假話",
         )
+        self.assertIn("quota_meter", self._below_floor_message())
 
 
 class TestMacosCiRegistersTheDefaultStateMasking(unittest.TestCase):

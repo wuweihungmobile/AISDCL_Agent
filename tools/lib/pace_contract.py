@@ -105,9 +105,9 @@ def write(decision, state, max_fanout: int, halt_pct: float,
     target = path or contract_path()
     staging = target.with_name(f"{target.name}.{os.getpid()}.tmp")
     try:
-        staging.write_text(json.dumps(payload(decision, state, max_fanout, halt_pct),
-                                      ensure_ascii=False, indent=2),
-                           encoding="utf-8", newline="\n")
+        with staging.open("w", encoding="utf-8", newline="\n") as f:
+            f.write(json.dumps(payload(decision, state, max_fanout, halt_pct),
+                                ensure_ascii=False, indent=2))
         os.replace(staging, target)
     except OSError as why:
         sys.stderr.write(WRITE_FAILED_HINT.format(path=target, why=why))

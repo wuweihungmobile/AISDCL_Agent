@@ -174,7 +174,8 @@ def fanout_path(session_id: str) -> Path:
 def _write(path: Path, text: str) -> bool:
     """寫一支 UTF-8／LF 文字檔；回「寫成功了沒」。"""
     try:
-        path.write_text(text, encoding="utf-8", newline="\n")
+        with path.open("w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
     except OSError:
         return False
     return True
