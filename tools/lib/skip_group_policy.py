@@ -415,7 +415,7 @@ _RUNTIME_SKIP_CEILING: dict[str, dict[str, int]] = {
     # GitHub windows-compat-ci #205 run 當場印出逐字：
     #   `[skip census] tools/tests@win32 共 43 支：platform=42／tool-absence=0／
     #    env-disabled=1／structural-pair=0／debt=0／untagged=0／欠債型 1 支（目標 0）`
-    # 逐格照填、零加減推算；MAX 表同 commit 同鍵上修（R96/R100/R131 同型判例）。
+    # 逐格照填、零加減推算；MAX 表同 commit 同鍵上修（R96/R100 同型判例）。
     "tools/tests@win32": {
         SKIP_GROUP_PLATFORM: 42,
         SKIP_GROUP_TOOL_ABSENCE: 0,
@@ -534,7 +534,7 @@ _RUNTIME_SKIP_CEILING: dict[str, dict[str, int]] = {
     # 真 GitHub root-infra-ci #229 run（ubuntu-latest，commit a3360f7）當場印出逐字：
     #   `[skip census] tools/tests@linux 共 82 支：platform=80／tool-absence=2／
     #    env-disabled=0／structural-pair=0／debt=0／untagged=0／欠債型 2 支（目標 0）`
-    # 逐格照填、零加減推算；MAX 表同 commit 同鍵上修（R96/R100/R131 同型判例）。
+    # 逐格照填、零加減推算；MAX 表同 commit 同鍵上修（R96/R100 同型判例）。
     "tools/tests@linux": {
         SKIP_GROUP_PLATFORM: 80,
         SKIP_GROUP_TOOL_ABSENCE: 2,
