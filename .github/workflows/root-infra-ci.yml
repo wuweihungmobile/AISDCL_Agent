@@ -473,6 +473,11 @@ jobs:
           fi
 
       - name: unittest（tools/tests/：dev_start.py 純邏輯函式 + 已修復迴歸點；含數量下限釘選）
+        # DEF-200-274 第七輪：四方獨立複審共同點名「CI 從未在平行模式下執行，
+        # 負載不均自動偵測永遠不會被人看見」——本行接上 opt-in 開關（ubuntu-latest
+        # runner）。worker 數沿用 `parallel_shard.worker_count()` 出廠公式，不寫死數字。
+        env:
+          AUTOSDD_PARALLEL_TESTS: "1"
         run: python3 tools/run_root_unittests.py
 
       - name: 缺陷帳本跨文件狀態一致（ONBOARDING.md 對 DEF-* 狀態宣稱 vs 帳本實況）

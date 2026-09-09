@@ -916,6 +916,13 @@ jobs:
       - name: tools/tests/（SIGPIPE 回歸鎖 + dev_start.py 平台邏輯；R3 QA 發現：paths 雖已涵蓋 tools/tests/**，但先前從未有任何 step 真的執行過，只在 root-infra-ci.yml 的 ubuntu-latest 上以 mock 跑過）
         # R10 QA-2（DEF-101-127）：裸 discover 對「發現 0 個測試」回 rc=0——改走
         # tools/run_root_unittests.py（數量下限釘選，低於下限紅燈不執行）。
+        # DEF-200-274 第七輪：四方獨立複審共同點名「CI 從未在平行模式下執行，
+        # 負載不均自動偵測永遠不會被人看見」——本行接上 opt-in 開關，讓
+        # `tools/lib/dispatch_imbalance.py` 的警告真的有機會出現在 CI log。
+        # worker 數沿用 `parallel_shard.worker_count()` 出廠公式（依 runner 實際
+        # cpu_count 自動調整），不寫死數字。
+        env:
+          AUTOSDD_PARALLEL_TESTS: "1"
         run: python3 tools/run_root_unittests.py
 
       - name: install_mac_nightly.sh --render-only（plist 產出＋plutil -lint；鏡射本機 smoke [6]，QA-R13-3 補齊四向互鎖缺角）

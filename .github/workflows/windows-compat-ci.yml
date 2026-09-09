@@ -1118,6 +1118,14 @@ jobs:
         shell: pwsh
         # R10 QA-2（DEF-101-127）：裸 discover 對「發現 0 個測試」回 rc=0——改走
         # tools/run_root_unittests.py（數量下限釘選，低於下限紅燈不執行）。
+        # DEF-200-274 第七輪：四方獨立複審共同點名「CI 從未在平行模式下執行，
+        # 負載不均自動偵測永遠不會被人看見」——本行接上 opt-in 開關。這也是
+        # `AUTOSDD_PARALLEL_TESTS` 第一次真的在 Windows 真機（windows-latest
+        # runner）跑到，六輪以來記載的「Windows 真機驗證未解」缺口由此第一次
+        # 有機械訊號（非人工驗證，僅是自動化路徑第一次真的被執行）。worker 數
+        # 沿用 `parallel_shard.worker_count()` 出廠公式，不寫死數字。
+        env:
+          AUTOSDD_PARALLEL_TESTS: "1"
         run: python tools/run_root_unittests.py
 
       - name: install_windows_nightly.ps1 -WhatIf 預覽（R26 Scan-C 發現：從未在真實 CI 執行過；鏡射 macos-compat-ci.yml install_mac_nightly.sh --render-only 步驟，DEF-101-269）

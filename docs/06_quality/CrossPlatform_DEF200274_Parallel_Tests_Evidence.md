@@ -680,19 +680,24 @@ worker_count, ratio_threshold=1.5)` 讀 `parallel_shard.run_parallel()` 已收�
 
 ### 🔴 誠實劃界（本輪仍未解決，不可宣稱已完備）
 
-- **這不是真正的「自動」偵測，而是「自動化了計算，沒有自動化觸發」**（SA／
-  Architect 各自獨立指出、QA 佐證）：`tools/git-hooks/pre-push` 與四支
-  `.github/workflows/*.yml`（`windows-compat-ci.yml`／`macos-compat-ci.yml`／
-  `root-infra-ci.yml`／`autoclaude-ci.yml`）逐一查證，沒有任何一處在平行模式
-  下執行 `tools/run_root_unittests.py`。`report_dispatch_imbalance()` 只印
-  stdout、不落檔、不影響 rc、不升級——目前的真實觸發路徑只有「開發者自己手動
-  設 `AUTOSDD_PARALLEL_TESTS=1` 並親眼看 terminal 輸出」這一種，比 CI 更稀疏、
-  更依賴個人記性。要真正達成「不必再靠人眼發現新熱點」，下一輪至少需要：讓
-  某個排程（nightly 或 CI）在平行模式下真的跑一次，並讓偵測結果有機械可稽核
-  的落點（落檔／回寫帳本／或至少讓已知的偵測結果不會隨終端機關閉而消失），
-  而非僅止於本輪「把心算自動化成函式」這一步。
-- **Windows 真機驗證**：仍未解，沿用第五、六輪既有記載，本輪未觸及（掌舵者
-  已表示會自行在 Windows 11 驗證）。
+- **同日追加（收尾單人窗口）**：掌舵者提問「把 CI 也接進去用多CPU模式跑一次」
+  之後，`windows-compat-ci.yml`／`macos-compat-ci.yml`／`root-infra-ci.yml`
+  三支 CI 呼叫 `tools/run_root_unittests.py` 的 step 皆已加上
+  `env: AUTOSDD_PARALLEL_TESTS: "1"`（worker 數沿用出廠公式，不寫死），使下一
+  次推上 main 起，這三個平台每次 CI 都會真的跑平行模式、`report_dispatch_
+  imbalance()` 的輸出會出現在 CI log 裡——原本「這不是真正的自動，只是自動化了
+  計算，沒有自動化觸發」這道缺口在**CI 曝光**這個面向已解除。**仍未解除的部分**：
+  `tools/git-hooks/pre-push`（本機開發者日常 push 前的閘門）刻意未動——那是
+  另一個更大的行為變更（會改變一個被多處註解引用的既有序列耗時基準
+  「111.89s」），未在本輪範圍內；`report_dispatch_imbalance()` 仍只印 stdout、
+  不落檔、不影響 rc、不升級——CI log 裡出現警告後，仍需要有人主動去讀那份 log
+  才會被看見，並非會主動推播或讓 CI 變紅的「真正無人值守也會被通知」。
+- **Windows 真機驗證**：本機（macOS）仍未解，沿用第五、六輪既有記載（掌舵者
+  已表示會自行在 Windows 11 驗證）。**但**上述 CI 接線讓 `windows-compat-ci.yml`
+  的 `windows-latest` runner 第一次真的執行 `AUTOSDD_PARALLEL_TESTS=1` 路徑——
+  這是六輪以來記載的「Windows 真機驗證未解」缺口的第一個機械訊號（雲端 CI
+  runner，非掌舵者本人的 Windows 11 真機；兩者不可互相替代，此處誠實劃界不
+  含糊帶過）。
 - **`AutoClaude/tests/`／`AISDLC_SDD` 的 pytest 套件不受本機制惠及**：SA 獨立
   核實 `AutoClaude/pyproject.toml` 與全部 `AISDLC_SDD_v0.*/pytest.ini` 皆無
   平行化設定；DEF-200-274 立案文字本身即限定「根層測試 runner」，範圍本身不算
