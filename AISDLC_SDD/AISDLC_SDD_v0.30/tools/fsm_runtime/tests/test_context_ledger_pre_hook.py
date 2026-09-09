@@ -285,6 +285,272 @@ class MaxContextGuardTests(unittest.TestCase):
             self.assertEqual(mod.MAX_CONTEXT, 50000)
 
 
+class WideContextWindowInferenceTests(unittest.TestCase):
+    """DEF-200-275: SDD_MAX_CONTEXT unset (real-world default) must NOT treat
+    the stale 200000 (old Claude-3-era context window) as the true ceiling
+    once cumulative has actually exceeded it — that misread the real 2026-09
+    incident (cumulative=200994, ratio=1.00 reported) as 100% full while the
+    session's real /context reading was 378.8k/1,000,000 (38%)."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+
+        # Isolate FSM state from the repo's real FSM-STATE-*.yaml so the hook
+        # doesn't see a live ESCALATION / HUMAN_PENDING from another session.
+        from tools.fsm_runtime.fsm_runtime import FSMRuntime
+        from tools.fsm_runtime.state_loader import load_state
+        self._fsm_state_path = self.root / "FSM-STATE-widectx.yaml"
+        state = load_state("widectx-proj", path=self._fsm_state_path)
+        state.current = "SPEC_DRAFTING"  # benign state; Bash is allowed
+        self._isolated_rt = FSMRuntime(state)
+
+        import tools.fsm_runtime.fsm_runtime as fsm_rt_mod
+        self._boot_patch = patch.object(
+            fsm_rt_mod.FSMRuntime, "bootstrap",
+            classmethod(lambda cls, project=None: self._isolated_rt),
+        )
+        self._boot_patch.start()
+
+    def tearDown(self) -> None:
+        self._boot_patch.stop()
+        self._tmp.cleanup()
+
+    def _seed_ledger(self, cumulative: int) -> None:
+        import datetime as _dt
+        import yaml  # noqa: WPS433
+
+        path = self.root / f"CONTEXT-LEDGER-{_dt.date.today().isoformat()}.yaml"
+        doc = {
+            "date": _dt.date.today().isoformat(),
+            "cumulative_tokens": cumulative,
+            "entries": [{"tokens": cumulative, "phase": "pre", "tool": "Seed"}],
+        }
+        path.write_text(yaml.safe_dump(doc, allow_unicode=True), encoding="utf-8")
+
+    def test_real_incident_cumulative_does_not_falsely_escalate(self) -> None:
+        """Reproduces the 2026-09-10 incident exactly: cumulative=200994 with
+        SDD_MAX_CONTEXT unset (guaranteed absent at import time via clear=True,
+        not just ambient-environment luck). Pre-fix this computed ratio=1.00
+        (>= CRIT_RATIO) and denied every tool call. Post-fix, 200994 is
+        inferred to be under a 1,000,000-token window (ratio ≈ 0.20) — well
+        under WARN_RATIO — so no deny and no AUTO-COMPACT notice should fire."""
+        self._seed_ledger(200994)
+        env_no_pin = dict(os.environ)
+        env_no_pin.pop("SDD_MAX_CONTEXT", None)
+        env_no_pin.update({
+            "SDD_HOOKS_DISABLE": "",
+            "SDD_HOOKS_DRY_RUN": "",
+            "SDD_SUBAGENT_CONTRACT": "0",
+        })
+        with patch.dict(os.environ, env_no_pin, clear=True):
+            mod = _load_hook_module(self.root)
+            self.assertEqual(mod.MAX_CONTEXT, 200000)  # sanity: floor unchanged
+            runner = _MainRunner(mod)
+            payload = {"tool_name": "Bash", "tool_input": {"command": ""}}
+            out = runner.run(payload)
+        hook_out = out.get("hookSpecificOutput", {})
+        self.assertNotIn(
+            "permissionDecision", hook_out,
+            msg=f"expected no deny for real-incident cumulative, got: {hook_out}",
+        )
+        self.assertNotIn("AUTO-COMPACT", hook_out.get("additionalContext", ""))
+
+    def test_explicit_sdd_max_context_pin_still_denies_at_200k(self) -> None:
+        """An operator who explicitly sets SDD_MAX_CONTEXT=200000 (e.g. testing
+        against a genuinely small-window model) must still get the strict
+        200000 ceiling enforced — the DEF-200-275 inference must not silently
+        override an explicit operator choice."""
+        self._seed_ledger(200994)
+        with patch.dict(os.environ, {
+            "SDD_HOOKS_DISABLE": "",
+            "SDD_HOOKS_DRY_RUN": "",
+            "SDD_SUBAGENT_CONTRACT": "0",
+            "SDD_MAX_CONTEXT": "200000",
+        }, clear=False):
+            mod = _load_hook_module(self.root)
+            runner = _MainRunner(mod)
+            payload = {"tool_name": "Bash", "tool_input": {"command": ""}}
+            out = runner.run(payload)
+        hook_out = out.get("hookSpecificOutput", {})
+        self.assertEqual(
+            hook_out.get("permissionDecision"), "deny",
+            msg=f"expected deny when SDD_MAX_CONTEXT is explicitly pinned to 200000, got: {hook_out}",
+        )
+        self.assertIn("TOKEN_BUDGET_CRITICAL", hook_out.get("permissionDecisionReason", ""))
+
+
+class MaxContextConfirmedUnitTests(unittest.TestCase):
+    """Direct unit coverage for `_max_context_confirmed` (DEF-200-275 第二輪) —
+    the gate that decides whether the current denominator is trustworthy
+    enough to drive CRIT/AUTO_COMPACT, mirroring the sister guard's
+    `may_block(source) != SOURCE_INFERRED_FLOOR` semantics."""
+
+    def test_unpinned_at_or_below_conservative_default_is_unconfirmed(self) -> None:
+        env_no_pin = dict(os.environ)
+        env_no_pin.pop("SDD_MAX_CONTEXT", None)
+        with patch.dict(os.environ, env_no_pin, clear=True):
+            mod = _load_hook_module(Path(tempfile.gettempdir()))
+            for cum in (0, 170000, 180000, 190000, 199999, 200000):
+                self.assertFalse(mod._max_context_confirmed(cum), msg=f"cumulative={cum}")
+
+    def test_unpinned_above_conservative_default_is_confirmed(self) -> None:
+        env_no_pin = dict(os.environ)
+        env_no_pin.pop("SDD_MAX_CONTEXT", None)
+        with patch.dict(os.environ, env_no_pin, clear=True):
+            mod = _load_hook_module(Path(tempfile.gettempdir()))
+            for cum in (200001, 250000, 500000, 999999):
+                self.assertTrue(mod._max_context_confirmed(cum), msg=f"cumulative={cum}")
+
+    def test_pinned_is_always_confirmed_even_at_the_default_value(self) -> None:
+        with patch.dict(os.environ, {"SDD_MAX_CONTEXT": "200000"}, clear=False):
+            mod = _load_hook_module(Path(tempfile.gettempdir()))
+            for cum in (0, 100000, 190000, 200000, 500000):
+                self.assertTrue(mod._max_context_confirmed(cum), msg=f"cumulative={cum}")
+
+    def test_malformed_pin_at_190000_is_unconfirmed(self) -> None:
+        """DEF-200-275 第三輪（四方複審 QA/SA 各自獨立發現、SA 判 REJECT 後
+        訂正）：SDD_MAX_CONTEXT 設成解析失敗或非正整數的壞值（操作者打錯字）
+        不得被誤判為「已釘住」。壞值集合沿用 MaxContextGuardTests 既有測資
+        （"abc"/"1.5"/"12k"/空字串/"0"/"-5"）——這些值都會讓 _RAW_MAX_CONTEXT
+        正確 fallback 回 200000（MaxContextGuardTests 已驗證這一半），但修復前
+        _SDD_MAX_CONTEXT_PINNED 只問「環境變數是否存在」，錯誤地讀作 True，
+        導致 190000（真實 1,000,000 視窗下僅 19% 用量）被誤判為已確認分母而
+        硬鎖 ESCALATION——本測試釘住 `_max_context_confirmed(190000)` 在這組
+        壞值下必須是 False（未確認，不應硬鎖）。"""
+        for bad in ("abc", "1.5", "12k", "", "0", "-5"):
+            with patch.dict(os.environ, {"SDD_MAX_CONTEXT": bad}, clear=False):
+                mod = _load_hook_module(Path(tempfile.gettempdir()))
+                self.assertFalse(mod._SDD_MAX_CONTEXT_PINNED, msg=f"value={bad!r}")
+                self.assertFalse(
+                    mod._max_context_confirmed(190000), msg=f"value={bad!r}"
+                )
+
+    def test_valid_pin_at_190000_is_confirmed(self) -> None:
+        """對照組：SDD_MAX_CONTEXT 設成有效正整數（"200000"）時，190000 仍應
+        正確回傳 True（已確認）——修復不能連帶修壞這個正常情境。"""
+        with patch.dict(os.environ, {"SDD_MAX_CONTEXT": "200000"}, clear=False):
+            mod = _load_hook_module(Path(tempfile.gettempdir()))
+            self.assertTrue(mod._SDD_MAX_CONTEXT_PINNED)
+            self.assertTrue(mod._max_context_confirmed(190000))
+
+
+class DEF200275NaturalClimbTests(unittest.TestCase):
+    """DEF-200-275 第二輪（四方獨立複審 REJECT 後訂正）：SA／QA 兩位審查員實測
+    證實第一版修復（只在 cumulative > 200000 才切分母）留了一個區間性回歸——
+    CRIT_RATIO(0.95) × 200000 = 190000，比切換點 200001 早一萬。cumulative
+    單調爬升，任何 session 必然先經過 190000~200000 才可能到 200001，因此在
+    切換生效之前就已經在 190000 被 ratio=0.95 鎖進 ESCALATION（對真實
+    1,000,000 視窗而言僅 19% 用量）——同一個缺陷只是把觸發點從 ~100% 移到
+    ~95%，本質重演。
+
+    本測試模擬 cumulative 依序爬過 170000 → 180000 → 190000 → 199999 →
+    200000 → 200001 → 250000（SDD_MAX_CONTEXT 未顯式設定的真實情境，非單點
+    seed），驗證整條路徑上 FSM state 都不會被鎖進 ESCALATION；並保留對照組：
+    操作者顯式設定 SDD_MAX_CONTEXT=200000 時，190000（ratio=0.95）仍應正常
+    觸發 CRIT／ESCALATION——那是操作者自己選的小視窗，不是誤判。
+    """
+
+    _PATH = (170000, 180000, 190000, 199999, 200000, 200001, 250000)
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+
+        # Isolate FSM state so the natural-climb assertions observe only this
+        # test's transitions, not a live ESCALATION from another session.
+        from tools.fsm_runtime.fsm_runtime import FSMRuntime
+        from tools.fsm_runtime.state_loader import load_state
+        self._fsm_state_path = self.root / "FSM-STATE-climb.yaml"
+        state = load_state("climb-proj", path=self._fsm_state_path)
+        state.current = "SPEC_DRAFTING"  # benign state; Bash is allowed
+        self._isolated_rt = FSMRuntime(state)
+
+        import tools.fsm_runtime.fsm_runtime as fsm_rt_mod
+        self._boot_patch = patch.object(
+            fsm_rt_mod.FSMRuntime, "bootstrap",
+            classmethod(lambda cls, project=None: self._isolated_rt),
+        )
+        self._boot_patch.start()
+
+    def tearDown(self) -> None:
+        self._boot_patch.stop()
+        self._tmp.cleanup()
+
+    def _seed_ledger(self, cumulative: int) -> None:
+        import datetime as _dt
+        import yaml  # noqa: WPS433
+
+        path = self.root / f"CONTEXT-LEDGER-{_dt.date.today().isoformat()}.yaml"
+        doc = {
+            "date": _dt.date.today().isoformat(),
+            "cumulative_tokens": cumulative,
+            "entries": [{"tokens": cumulative, "phase": "pre", "tool": "Seed"}],
+        }
+        path.write_text(yaml.safe_dump(doc, allow_unicode=True), encoding="utf-8")
+
+    def test_natural_climb_never_escalates_when_denominator_unconfirmed(self) -> None:
+        env_no_pin = dict(os.environ)
+        env_no_pin.pop("SDD_MAX_CONTEXT", None)
+        env_no_pin.update({
+            "SDD_HOOKS_DISABLE": "",
+            "SDD_HOOKS_DRY_RUN": "",
+            "SDD_SUBAGENT_CONTRACT": "0",
+        })
+        with patch.dict(os.environ, env_no_pin, clear=True):
+            mod = _load_hook_module(self.root)
+            self.assertFalse(mod._SDD_MAX_CONTEXT_PINNED)  # sanity: truly unset
+            runner = _MainRunner(mod)
+            prev = 0
+            for target in self._PATH:
+                delta = target - prev
+                prev = target
+                # Fix the per-step token delta deterministically so cumulative
+                # lands exactly on each checkpoint — real /context growth is
+                # continuous, this pins it to the exact reported incident values.
+                with patch.object(mod, "_estimate_tokens", lambda *_a, tokens=delta, **_k: tokens):
+                    out = runner.run({"tool_name": "Bash", "tool_input": {"command": "x"}})
+                hook_out = out.get("hookSpecificOutput", {})
+                self.assertNotEqual(
+                    hook_out.get("permissionDecision"), "deny",
+                    msg=f"cumulative={target}: unexpectedly denied — {hook_out}",
+                )
+                self.assertEqual(
+                    self._isolated_rt.state.current, "SPEC_DRAFTING",
+                    msg=(
+                        f"cumulative={target}: FSM state unexpectedly transitioned to "
+                        f"{self._isolated_rt.state.current!r} while the denominator was "
+                        "still an unconfirmed guess (DEF-200-275 regression reproduced)"
+                    ),
+                )
+
+    def test_explicit_pin_still_escalates_at_190000(self) -> None:
+        """Control group: an operator who explicitly sets SDD_MAX_CONTEXT=200000
+        (a genuinely small-window session) must still get real CRIT/ESCALATION
+        protection at 190000/200000 = 95% — the unconfirmed-denominator downgrade
+        must never silently swallow a deliberate small-window configuration."""
+        self._seed_ledger(189000)  # next +1000 lands exactly on 190000
+        env = {
+            "SDD_HOOKS_DISABLE": "",
+            "SDD_HOOKS_DRY_RUN": "",
+            "SDD_SUBAGENT_CONTRACT": "0",
+            "SDD_MAX_CONTEXT": "200000",
+        }
+        with patch.dict(os.environ, env, clear=False):
+            mod = _load_hook_module(self.root)
+            self.assertTrue(mod._SDD_MAX_CONTEXT_PINNED)
+            runner = _MainRunner(mod)
+            with patch.object(mod, "_estimate_tokens", lambda *_a, **_k: 1000):
+                out = runner.run({"tool_name": "Bash", "tool_input": {"command": "x"}})
+        hook_out = out.get("hookSpecificOutput", {})
+        self.assertEqual(
+            hook_out.get("permissionDecision"), "deny",
+            msg=f"expected deny at 190000/200000=95% with SDD_MAX_CONTEXT pinned, got: {hook_out}",
+        )
+        self.assertIn("TOKEN_BUDGET_CRITICAL", hook_out.get("permissionDecisionReason", ""))
+        self.assertEqual(self._isolated_rt.state.current, "ESCALATION")
+
+
 class NonStringSubagentTypeTests(unittest.TestCase):
     """DEF-CLDREV-020: a non-string subagent_type/agent (list / dict / int) on a
     Task payload must NOT crash the pre hook. Pre-fix `_build_subagent_notice`

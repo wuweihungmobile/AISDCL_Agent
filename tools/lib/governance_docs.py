@@ -458,6 +458,11 @@ _GOVERNANCE_DOCS = (
     # DEF-200-275（SDD-FSM context/budget 計量誤差）證據檔：帳本該列已瘦身成索引 ⇒
     # 現象、建議處置與狀態全文唯一居所在本檔（⇒ 體積守門＋指針稽核）。即刻登記。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_DEF200275_Context_Metering_Evidence.md",
+    # DEF-200-277（跨平台假設 meta-test 撞見 sysconfig 快取暖機時機）證據檔：帳本該列
+    # 已瘦身成索引 ⇒ 現象、根因、修法與殘留待辦全文唯一居所在本檔（⇒ 體積守門＋指針
+    # 稽核）。即刻登記。
+    _REPO_ROOT / "docs" / "06_quality"
+    / "CrossPlatform_DEF200277_Sysconfig_Platform_Sim_Evidence.md",
     # R135 收尾：DEF-200-274 第四輪四方複審收尾＋護欄層對帳＋到期義務兌現與展延 round-label-ok
     # （_REPIN_NET_CAP_SCHEDULE／_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND／_PHASE2_REVIEW_LOG）。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R135_Scan_Findings.md",
@@ -479,6 +484,8 @@ _GOVERNANCE_DOCS = (
     # R141 收尾：DEF-200-274 第八輪（special-tier LOC 棘輪超額修復＋worker_count() round-label-ok
     # 公式測試＋CI 接線回歸鎖）＋護欄層對帳。即刻登記。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R141_Scan_Findings.md",
+    # R142 收尾：DEF-200-275／DEF-200-277 兩個獨立缺陷收尾附帶的護欄層對帳。即刻登記。round-label-ok
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R142_Scan_Findings.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/{CrossPlatform,Quota}_*.md`。這**不是**把具名

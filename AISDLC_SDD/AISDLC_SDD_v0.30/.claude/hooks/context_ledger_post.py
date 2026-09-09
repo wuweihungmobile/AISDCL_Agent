@@ -30,9 +30,82 @@ if str(_SDD_ROOT) not in sys.path:
 # time and disable the gate. Both degrade gracefully to the 200000 default.
 try:
     _RAW_MAX_CONTEXT = int(os.environ.get("SDD_MAX_CONTEXT", "200000"))
+    _RAW_MAX_CONTEXT_PARSE_OK = True
 except (TypeError, ValueError):
     _RAW_MAX_CONTEXT = 200000
+    _RAW_MAX_CONTEXT_PARSE_OK = False
 MAX_CONTEXT = _RAW_MAX_CONTEXT if _RAW_MAX_CONTEXT > 0 else 200000
+
+# DEF-200-275（2026-09-10）：symmetric with context_ledger_pre.py — MAX_CONTEXT
+# 沒被操作者顯式釘住時，200000 只是舊模型（Claude 3 世代）200K context
+# window 年代留下的保守預設值，現行模型視窗常是 1,000,000。硬套過時預設會
+# 讓 cumulative 一過 200000 就被誤判成「100% 滿」（實測 cumulative=200994,
+# ratio=1.00，/context 當場量到真實只有 38%）。比照姊妹守衛
+# .claude/hooks/context_budget_guard.py 的 resolve_window()（可證下界推論）：
+# 觀測到 cumulative 超過保守預設 ⇒ 真實視窗必然大於它，改採下一檔已知變體；
+# 操作者顯式設定 SDD_MAX_CONTEXT 時一律尊重、不做推論覆寫。
+#
+# DEF-200-275 第三輪（四方複審 QA/SA 各自獨立發現、SA 判定 REJECT 後訂正，
+# 2026-09-10；symmetric with context_ledger_pre.py）：原判準只問「環境變數有
+# 沒有被設」，操作者打錯字（SDD_MAX_CONTEXT=abc/1.5/12k/空字串/0/-5）也會讓
+# 這裡讀到 True，導致 190000（真實 1,000,000 視窗下僅 19% 用量）被當成已確認
+# 分母去觸發 AUTO_COMPACT/CRIT——與 DEF-200-275 原始 bug 同一種「未經確認的
+# 分母被拿去硬擋」路徑重演。比照姊妹守衛 .claude/hooks/context_budget_guard.py
+# 的 `_positive_int(raw) > 0`：一個值要算「已指定」，必須解析成功**且**是正
+# 整數。這裡不重新猜一次，直接掛鉤上面 try/except 已經算出的解析結果
+# （_RAW_MAX_CONTEXT_PARSE_OK 且 _RAW_MAX_CONTEXT > 0）。
+_SDD_MAX_CONTEXT_PINNED = (
+    os.environ.get("SDD_MAX_CONTEXT") is not None
+    and _RAW_MAX_CONTEXT_PARSE_OK
+    and _RAW_MAX_CONTEXT > 0
+)
+_CONSERVATIVE_DEFAULT_MAX_CONTEXT = 200_000
+WIDE_MAX_CONTEXT = 1_000_000
+
+
+def _effective_max_context(cumulative: int) -> int:
+    """DEF-200-275：見上方常數區塊註解——可證下界推論，避免拿舊模型 200K
+    常數誤判現行大視窗模型已 100% 滿。"""
+    if (
+        not _SDD_MAX_CONTEXT_PINNED
+        and MAX_CONTEXT == _CONSERVATIVE_DEFAULT_MAX_CONTEXT
+        and cumulative > _CONSERVATIVE_DEFAULT_MAX_CONTEXT
+    ):
+        return WIDE_MAX_CONTEXT
+    return MAX_CONTEXT
+
+
+# DEF-200-275 第二輪（四方複審 REJECT 後訂正，2026-09-10）：symmetric with
+# context_ledger_pre.py — 第一版只切了分母，沒有切「這個分母能不能拿去硬擋」。
+# CRIT_RATIO=0.95、0.95×200000=190000，比切換點 200001 早一萬；cumulative 單調
+# 爬升，任何 session 必然先經過 190000~200000 才可能到 200001，於是在切換生效
+# 之前就已經在 190000 被鎖進 AUTO_COMPACT/ESCALATION（真實 1,000,000 視窗下僅
+# 19% 用量）。比照姊妹守衛 .claude/hooks/context_budget_guard.py 的
+# may_block(source) 語意：只有分母來源已確認（顯式設定 SDD_MAX_CONTEXT，或已
+# 觀測到 cumulative 超過保守預設而推得下界為 WIDE）才准觸發 AUTO_COMPACT/CRIT；
+# 未確認（＝SOURCE_INFERRED_FLOOR 等價物）時只降級為 stderr/additionalContext
+# 警告，FSM 狀態不變。
+def _max_context_confirmed(cumulative: int) -> bool:
+    """分母來源是否已確認到可以拿來觸發 AUTO_COMPACT／CRIT（見上方 WHY）。"""
+    if _SDD_MAX_CONTEXT_PINNED:
+        return True
+    return _effective_max_context(cumulative) != _CONSERVATIVE_DEFAULT_MAX_CONTEXT
+
+
+def _unconfirmed_notice(cumulative: int, ratio: float, tier: str) -> str:
+    """AUTO_COMPACT／CRIT 門檻在分母尚未確認時的降級提示（symmetric with
+    context_ledger_pre.py 同名函式）。只出聲，不觸發 FSM 狀態變更。"""
+    return (
+        f"[SDD-CTX][WARN][UNCONFIRMED-DENOM] {tier} 門檻在保守預設分母"
+        f"（{_CONSERVATIVE_DEFAULT_MAX_CONTEXT:,}）下已達 ratio={ratio:.2f}"
+        f"（cumulative={cumulative}），但此分母尚未確認——未顯式設定 SDD_MAX_CONTEXT，"
+        f"且本 session 尚未觀測到用量超過 {_CONSERVATIVE_DEFAULT_MAX_CONTEXT:,}。"
+        f"現行模型視窗常是 {WIDE_MAX_CONTEXT:,}，若貿然觸發 AUTO_COMPACT／CRIT 可能在"
+        "真實用量僅一到兩成時就誤鎖整個 session（DEF-200-275）。本次僅示警，FSM 狀態"
+        "不變。若這是操作者刻意選擇的小視窗，請顯式設定 SDD_MAX_CONTEXT 以啟用正常防護。"
+    )
+
+
 SOFT_RATIO = 0.70
 WARN_RATIO = 0.85
 AUTO_COMPACT_RATIO = 0.90
@@ -168,49 +241,60 @@ def main() -> int:
     except Exception:  # noqa: BLE001
         pass
 
-    ratio = cumulative / MAX_CONTEXT if cumulative else 0.0
+    ratio = cumulative / _effective_max_context(cumulative) if cumulative else 0.0
+    confirmed = _max_context_confirmed(cumulative) if cumulative else True
 
     msg = None
     # 90% auto-compact trigger — fires before 95% CRIT to produce a recovery
     # point and force Claude into /stage-compaction.
     if CRIT_RATIO > ratio >= AUTO_COMPACT_RATIO:
-        try:
-            from tools.fsm_runtime.fsm_runtime import FSMRuntime  # type: ignore
-            rt = FSMRuntime.bootstrap()
-            result = rt.trigger_auto_compact(cumulative, ratio)
-            snapshot_path = result.get("snapshot")
-            resume_state = result.get("resume_state", "<unknown>")
-            if result.get("escalated"):
-                # ACT-026: auto_compact 被拒（per-stage 上限超過 / 已在 ESCALATION）
-                reason = result.get("reason", "auto-compact suppressed")
+        if not confirmed:
+            # DEF-200-275 第二輪：分母尚未確認（未顯式設定 SDD_MAX_CONTEXT 且尚未
+            # 觀測到用量超過保守預設）——只示警，不呼叫 trigger_auto_compact（那會
+            # 真的把 FSM 切進 AUTO_COMPACT_PENDING，在真實 1M 視窗下對應僅一到兩成
+            # 用量的誤觸發）。
+            msg = _unconfirmed_notice(cumulative, ratio, "AUTO_COMPACT")
+        else:
+            try:
+                from tools.fsm_runtime.fsm_runtime import FSMRuntime  # type: ignore
+                rt = FSMRuntime.bootstrap()
+                result = rt.trigger_auto_compact(cumulative, ratio)
+                snapshot_path = result.get("snapshot")
+                resume_state = result.get("resume_state", "<unknown>")
+                if result.get("escalated"):
+                    # ACT-026: auto_compact 被拒（per-stage 上限超過 / 已在 ESCALATION）
+                    reason = result.get("reason", "auto-compact suppressed")
+                    msg = (
+                        f"[SDD-CTX][AUTO-COMPACT][ESCALATION] ratio {ratio:.0%} — {reason}。"
+                        " FSM 已進入 ESCALATION，後續工具呼叫將被 PreToolUse 阻擋，"
+                        "必須人工介入（檢查是否引用文件過大 / stage 需拆分）。"
+                    )
+                elif result.get("already_pending"):
+                    msg = (
+                        f"[SDD-CTX][AUTO-COMPACT] ratio {ratio:.0%} — 已處於 AUTO_COMPACT_PENDING，"
+                        "請立即呼叫 Skill: stage-compaction 完成壓縮。"
+                    )
+                else:
+                    msg = (
+                        f"[SDD-CTX][AUTO-COMPACT] ratio {ratio:.0%} (cumulative={cumulative}). "
+                        f"FSM → AUTO_COMPACT_PENDING（resume_state={resume_state}）。"
+                        f" Snapshot: {snapshot_path}. "
+                        "🔴 下一步必須立即呼叫 Skill: stage-compaction —"
+                        " 其餘工具呼叫將被 PreToolUse 阻擋，直到 compact 完成。"
+                    )
+            except Exception as exc:  # noqa: BLE001
                 msg = (
-                    f"[SDD-CTX][AUTO-COMPACT][ESCALATION] ratio {ratio:.0%} — {reason}。"
-                    " FSM 已進入 ESCALATION，後續工具呼叫將被 PreToolUse 阻擋，"
-                    "必須人工介入（檢查是否引用文件過大 / stage 需拆分）。"
+                    f"[SDD-CTX][AUTO-COMPACT][WARN] ratio {ratio:.0%}，但 FSMRuntime 不可用：{exc!r}。"
+                    " 請立即手動呼叫 /stage-compaction。"
                 )
-            elif result.get("already_pending"):
-                msg = (
-                    f"[SDD-CTX][AUTO-COMPACT] ratio {ratio:.0%} — 已處於 AUTO_COMPACT_PENDING，"
-                    "請立即呼叫 Skill: stage-compaction 完成壓縮。"
-                )
-            else:
-                msg = (
-                    f"[SDD-CTX][AUTO-COMPACT] ratio {ratio:.0%} (cumulative={cumulative}). "
-                    f"FSM → AUTO_COMPACT_PENDING（resume_state={resume_state}）。"
-                    f" Snapshot: {snapshot_path}. "
-                    "🔴 下一步必須立即呼叫 Skill: stage-compaction —"
-                    " 其餘工具呼叫將被 PreToolUse 阻擋，直到 compact 完成。"
-                )
-        except Exception as exc:  # noqa: BLE001
-            msg = (
-                f"[SDD-CTX][AUTO-COMPACT][WARN] ratio {ratio:.0%}，但 FSMRuntime 不可用：{exc!r}。"
-                " 請立即手動呼叫 /stage-compaction。"
-            )
     elif ratio >= CRIT_RATIO:
-        msg = (
-            f"[SDD-CTX][CRIT] context ratio {ratio:.0%} (cumulative={cumulative}). "
-            "下次 PreToolUse 將拒絕工具呼叫 — 立即執行 /stage-compaction 並考慮 Context Snapshot。"
-        )
+        if not confirmed:
+            msg = _unconfirmed_notice(cumulative, ratio, "CRIT")
+        else:
+            msg = (
+                f"[SDD-CTX][CRIT] context ratio {ratio:.0%} (cumulative={cumulative}). "
+                "下次 PreToolUse 將拒絕工具呼叫 — 立即執行 /stage-compaction 並考慮 Context Snapshot。"
+            )
     elif ratio >= WARN_RATIO:
         msg = (
             f"[SDD-CTX][WARN] context ratio {ratio:.0%}. 應執行 /stage-compaction。"

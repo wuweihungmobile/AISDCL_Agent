@@ -42,6 +42,7 @@ import os
 import re
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import textwrap
 import tokenize
@@ -2336,6 +2337,13 @@ class TestR67R3ThisFileMakesNoUnstatedPlatformAssumption(unittest.TestCase):
             probe.countTestCases(), 50,
             "子套件幾乎是空的 ⇒ 本鎖空轉（loadTestsFromModule 漂移），不具鑑別力",
         )
+        # DEF-200-277：搶在改 sys.platform 前暖機 sysconfig 行程級快取——CPython
+        # 首次呼叫 `sysconfig.get_config_vars()` 會用當下 sys.platform 動態組出
+        # sysconfigdata 模組名並 import、快取；若第一次恰好落在下面假平台期間，
+        # 會組出「假平台+真 multiarch」這種不存在的名字而炸 ModuleNotFoundError
+        # （CI 實測：ubuntu 模擬 darwin 炸 `_sysconfigdata__darwin_x86_64-linux-gnu`；
+        # 本機 Mac 因 venv 啟動已暖機，測不出來）。
+        sysconfig.get_config_vars()
         original = sys.platform
         failures: dict[str, list[str]] = {}
         try:
@@ -2362,6 +2370,28 @@ class TestR67R3ThisFileMakesNoUnstatedPlatformAssumption(unittest.TestCase):
             "本檔有鎖的結果隨 sys.platform 改變 ⇒ 它對『本機是哪個平台』做了未言明的"
             "前提假設。修法不是加 skip（那等於讓該平台永遠沒有覆蓋），而是把該鎖改成"
             "**吃平台當參數**——它驗的判準本來就是逐欄的純函式。",
+        )
+
+
+class TestDEF200277SysconfigWarmedBeforePlatformSimulation(unittest.TestCase):
+    """DEF-200-277 回歸鎖：暖機呼叫必須排在改 sys.platform 之前（WHY 見
+    test_every_lock_in_this_file_holds_under_every_simulated_platform 內註解；
+    本機 Mac 因 venv 早已暖機測不出原始症狀，改用源碼順序斷言頂替行為重現）。
+    """
+
+    def test_warm_up_call_precedes_the_platform_mutation_loop(self) -> None:
+        src = inspect.getsource(
+            TestR67R3ThisFileMakesNoUnstatedPlatformAssumption
+            .test_every_lock_in_this_file_holds_under_every_simulated_platform
+        )
+        warm_idx = src.find("sysconfig.get_config_vars()")
+        loop_idx = src.find("for fake in _NEUTRALITY_PLATFORMS:")
+        self.assertGreater(warm_idx, -1, "sysconfig 暖機呼叫消失 ⇒ DEF-200-277 會復發")
+        self.assertGreater(loop_idx, -1, "平台模擬迴圈消失，本鎖的判準基準跑掉")
+        self.assertLess(
+            warm_idx, loop_idx,
+            "暖機呼叫必須在改 sys.platform 之前，否則行程內第一次用到 sysconfig "
+            "可能落在假平台期間，組出不存在的模組名而炸 ModuleNotFoundError",
         )
 
 

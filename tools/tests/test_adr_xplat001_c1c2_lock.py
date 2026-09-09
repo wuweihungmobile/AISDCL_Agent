@@ -682,7 +682,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 7698,
+    "test_adr_xplat001_c1c2_lock.py": 7723,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 3839,
@@ -705,7 +705,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_dev_start.py": 6529,
     "test_dev_start_ps1_lastexitcode.py": 548,
     "test_doc_env_prefix_platform_parity_r60.py": 340,
-    "test_doc_loc_baseline_freshness_r60.py": 7125,
+    "test_doc_loc_baseline_freshness_r60.py": 7155,
     "test_extras_quoting_zsh_safety.py": 365,
     "test_failure_log_rotation.py": 80,
     "test_find_git_bash_parity.py": 1266,
@@ -1675,6 +1675,18 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "逐檔漂移 +36，全額歸回歸鎖軌（記帳誠實度分類）。逐項見 "
      "docs/06_quality/CrossPlatform_R141_Scan_Findings.md；詳細證據見 "
      "CrossPlatform_DEF200274_Parallel_Tests_Evidence.md〈第八輪〉。"),
+    ("R142", 96451, 96506, 55,
+     "[非淨減法輪][回歸鎖軌全額申報，見 _REGRESSION_LANE_LOG 同輪列] DEF-200-277："
+     "跨平台假設 meta-test（test_every_lock_in_this_file_holds_under_every_"
+     "simulated_platform）模擬 sys.platform='darwin' 時撞見 CPython sysconfig "
+     "行程級快取首次暖機時機，組出不存在的 sysconfigdata 模組名炸 "
+     "ModuleNotFoundError（CI ubuntu 實測；本機 Mac 因 venv 已暖機測不出原始症狀）。"
+     "修法：迴圈前先呼叫 sysconfig.get_config_vars() 暖機真實平台快取；新增 "
+     "TestDEF200277SysconfigWarmedBeforePlatformSimulation 源碼順序回歸鎖（production+"
+     "test +30）；本檔自身逐檔漂移 +25（新增主表本列＋本軌新列的行數），全額歸本軌"
+     "（記帳誠實度分類）。逐項見 docs/06_quality/CrossPlatform_R142_Scan_Findings.md；"
+     "詳細證據見 docs/06_quality/CrossPlatform_DEF200277_Sysconfig_"
+     "Platform_Sim_Evidence.md。"),
 )
 
 
@@ -1901,6 +1913,12 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "`_FROZEN_PREFIX_REWRITE_LEDGER` 接鏈列的行數），全額歸本軌（記帳誠實度分類）。"
      "逐項見 docs/06_quality/CrossPlatform_DEF200274_Parallel_Tests_Evidence.md"
      "〈第八輪〉。"),
+    ("R142", 55, "DEF-200-277：sysconfig 暖機呼叫＋"
+     "TestDEF200277SysconfigWarmedBeforePlatformSimulation 源碼順序回歸鎖（+30）"
+     "＋本檔自身逐檔漂移（新增主表本列＋本軌新列的行數，+25），全額歸本軌"
+     "（記帳誠實度分類）。逐項見 docs/06_quality/CrossPlatform_R142_Scan_Findings.md；"
+     "詳細證據見 "
+     "docs/06_quality/CrossPlatform_DEF200277_Sysconfig_Platform_Sim_Evidence.md。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -1975,7 +1993,11 @@ def _regression_lane_cap_basis() -> tuple[str, int]:
 # 🔴 R137 具名展延（鐵律七，不得靜默沿用）round-label-ok：DEF-200-274 第五輪四方獨立複審
 # 收尾窗口（全庫 TOCTOU 病灶排查修復），非 root-tools 重構持有面；
 # 真拆待獨立窗口，137 → 142（在 lookahead=5 內）。
-_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND = 142
+# 🔴 R142 具名展延（鐵律七，不得靜默沿用）round-label-ok：DEF-200-275（SDD-FSM
+# context 計量誤報三輪修復）／DEF-200-277（跨平台假設 meta-test sysconfig 暖機
+# 時機）兩個獨立缺陷收尾窗口，非 root-tools 重構持有面；
+# 真拆待獨立窗口，142 → 147（在 lookahead=5 內，已達上界）。
+_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND = 147
 #: 清償旗標——真拆完成後改 True。刻意用布林而非重建舊尺計數器（ADR §9.3「舊尺已廢」）。
 _ROOT_TOOLS_OLD_SCALE_DEBT_RESOLVED = False
 #: A-2 後設鎖：到期輪只准落在「現查輪＋lookahead」內，推遠（如 9999）當場紅；shrink-only
@@ -2141,10 +2163,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 149
+_REPIN_LOG_FROZEN_PREFIX_LEN = 150
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "6f595278360c4ec376181cb57d74dc862e5ad031c87bd21e1e074c7693f1311e")
+    "b97e86a790f06cc0a4948121c9f4a4ddfaebf3e5470065d24375d90a3e6c2ab3")
 
 
 def repin_log_history_digest(
@@ -2359,6 +2381,9 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # R141：DEF-200-274 第八輪——四方獨立複審修復收尾（worker_count 公式測試／CI round-label-ok
     # wiring 回歸鎖／GitHub Actions annotation 測試），凍結前綴延伸涵蓋新增列本身。
     ("R141", "d27ba8c13f10", "6f595278360c", "DEF-200-274"),
+    # R142：DEF-200-275／DEF-200-277 收尾——兩個獨立缺陷收斂附帶的 guard-line round-label-ok
+    # 記帳延伸，凍結前綴延伸涵蓋新增列本身。
+    ("R142", "6f595278360c", "b97e86a790f0", "DEF-200-277"),
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

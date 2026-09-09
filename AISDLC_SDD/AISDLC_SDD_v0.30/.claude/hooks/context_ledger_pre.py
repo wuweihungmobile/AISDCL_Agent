@@ -36,9 +36,91 @@ if str(_SDD_ROOT) not in sys.path:
 # never fire). Both classes degrade gracefully to the 200000 default.
 try:
     _RAW_MAX_CONTEXT = int(os.environ.get("SDD_MAX_CONTEXT", "200000"))
+    _RAW_MAX_CONTEXT_PARSE_OK = True
 except (TypeError, ValueError):
     _RAW_MAX_CONTEXT = 200000
+    _RAW_MAX_CONTEXT_PARSE_OK = False
 MAX_CONTEXT = _RAW_MAX_CONTEXT if _RAW_MAX_CONTEXT > 0 else 200000
+
+# DEF-200-275（2026-09-10）：MAX_CONTEXT 沒被操作者顯式釘住時，200000 只是舊
+# 模型（Claude 3 世代）200K context window 年代留下的保守預設值——現行模型
+# 視窗常是 1,000,000。硬把 ratio = cumulative / MAX_CONTEXT 套這個過時預設，
+# 會讓 cumulative 一過 200000 就被誤判成「100% 滿」而擋下整個 session（實測
+# cumulative=200994, ratio=1.00；使用者 /context 當場量到真實只有 38%）。
+# 比照姊妹守衛 .claude/hooks/context_budget_guard.py 的 resolve_window()
+# 同一手法（可證下界推論，見該檔模組 docstring〈context window 判定〉）：
+# 本 session 若已實際觀測到 cumulative 超過這個保守預設，代表真實視窗必然
+# 大於它，改採已知的下一檔變體；操作者若真的顯式設定 SDD_MAX_CONTEXT，一律
+# 尊重其設定值、不做這層推論覆寫（也因此只在 MAX_CONTEXT 剛好等於下面這個
+# 具名常數時才觸發——測試裡刻意調小 MAX_CONTEXT 讓門檻好測，不受影響）。
+#
+# DEF-200-275 第三輪（四方複審 QA/SA 各自獨立發現、SA 判定 REJECT 後訂正，
+# 2026-09-10）：原判準只問「環境變數有沒有被設」，操作者打錯字
+# （SDD_MAX_CONTEXT=abc/1.5/12k/空字串/0/-5）也會讓這裡讀到 True——即使上面
+# 那段 try/except 已經正確把 _RAW_MAX_CONTEXT fallback 回 200000，這裡卻誤判
+# 成「操作者刻意選了這個值」，於是 190000（真實 1,000,000 視窗下僅 19% 用量）
+# 會被當成已確認分母去硬鎖 ESCALATION——與 DEF-200-275 原始 bug 同一種「未經
+# 確認的分母被拿去硬擋」路徑重演。比照姊妹守衛
+# .claude/hooks/context_budget_guard.py 的 `_positive_int(raw) > 0`：一個值
+# 要算「已指定」，必須解析成功**且**是正整數，不能只憑「有沒有設」猜。這裡不
+# 重新猜一次，直接掛鉤上面 try/except 已經算出的解析結果
+# （_RAW_MAX_CONTEXT_PARSE_OK 且 _RAW_MAX_CONTEXT > 0）。
+_SDD_MAX_CONTEXT_PINNED = (
+    os.environ.get("SDD_MAX_CONTEXT") is not None
+    and _RAW_MAX_CONTEXT_PARSE_OK
+    and _RAW_MAX_CONTEXT > 0
+)
+_CONSERVATIVE_DEFAULT_MAX_CONTEXT = 200_000
+WIDE_MAX_CONTEXT = 1_000_000
+
+
+def _effective_max_context(cumulative: int) -> int:
+    """DEF-200-275：見上方常數區塊註解——可證下界推論，避免拿舊模型 200K
+    常數誤判現行大視窗模型已 100% 滿。"""
+    if (
+        not _SDD_MAX_CONTEXT_PINNED
+        and MAX_CONTEXT == _CONSERVATIVE_DEFAULT_MAX_CONTEXT
+        and cumulative > _CONSERVATIVE_DEFAULT_MAX_CONTEXT
+    ):
+        return WIDE_MAX_CONTEXT
+    return MAX_CONTEXT
+
+
+# DEF-200-275 第二輪（四方複審 REJECT 後訂正，2026-09-10）：第一版只切了分母，沒有
+# 切「這個分母能不能拿去硬擋」。CRIT_RATIO=0.95、0.95×200000=190000——比切換點
+# 200001 早了一萬。cumulative 是單調爬升的，任何 session 必然先經過
+# 190000~200000 這個窗口才可能到 200001，於是在切換生效之前就已經被 190000 那個
+# ratio=0.95 鎖進 ESCALATION（真實 1,000,000 視窗下僅 19% 用量）——分母切換邏輯
+# 從未有機會執行到，同一個缺陷只是把觸發點從 ~100% 移到 ~95%，本質重演。
+#
+# 比照姊妹守衛 .claude/hooks/context_budget_guard.py 的 may_block(source) 語意：
+# 硬擋／記 ESCALATION 只在「分母來源已確認」時才准——確認＝①操作者顯式設定
+# SDD_MAX_CONTEXT（信任其選擇，即使值恰好等於保守預設）；②已觀測到 cumulative
+# 超過保守預設（_effective_max_context 因此已切到 WIDE，這是可證的下界推論，
+# 不再是純猜測，對應姊妹守衛的 SOURCE_INFERRED_WIDE）。唯一「不確認」的情形是
+# 姊妹守衛的 SOURCE_INFERRED_FLOOR 等價物：未顯式設定、且 cumulative 仍未超過
+# 200000——此刻 200000 純粹是「還沒證據」的保守猜測，不得拿來鎖 ESCALATION。
+def _max_context_confirmed(cumulative: int) -> bool:
+    """分母來源是否已確認到可以拿來硬擋／記 ESCALATION（見上方 WHY）。"""
+    if _SDD_MAX_CONTEXT_PINNED:
+        return True
+    return _effective_max_context(cumulative) != _CONSERVATIVE_DEFAULT_MAX_CONTEXT
+
+
+def _unconfirmed_notice(cumulative: int, ratio: float, tier: str) -> str:
+    """CRIT／AUTO_COMPACT 門檻在分母尚未確認時的降級提示（見 `_max_context_confirmed`
+    docstring）。只出聲，不呼叫 record_escalation、不 deny、不 trigger_auto_compact。"""
+    return (
+        f"[SDD-CTX][WARN][UNCONFIRMED-DENOM] {tier} 門檻在保守預設分母"
+        f"（{_CONSERVATIVE_DEFAULT_MAX_CONTEXT:,}）下已達 ratio={ratio:.2f}"
+        f"（cumulative={cumulative}），但此分母尚未確認——未顯式設定 SDD_MAX_CONTEXT，"
+        f"且本 session 尚未觀測到用量超過 {_CONSERVATIVE_DEFAULT_MAX_CONTEXT:,}。"
+        f"現行模型視窗常是 {WIDE_MAX_CONTEXT:,}，若貿然硬擋／記 ESCALATION 可能在"
+        "真實用量僅一到兩成時就誤鎖整個 session（DEF-200-275）。本次僅示警，FSM 狀態"
+        "不變。若這是操作者刻意選擇的小視窗，請顯式設定 SDD_MAX_CONTEXT 以啟用正常防護。"
+    )
+
+
 WARN_RATIO = 0.85
 AUTO_COMPACT_RATIO = 0.90
 CRIT_RATIO = 0.95
@@ -322,8 +404,15 @@ def main() -> int:
         # already past 95%. Read existing cumulative and short-circuit
         # before the normal entry-appending path.
         existing_cum = _read_cumulative()
-        existing_ratio = existing_cum / MAX_CONTEXT if existing_cum else 0.0
+        existing_ratio = existing_cum / _effective_max_context(existing_cum) if existing_cum else 0.0
+        existing_confirmed = _max_context_confirmed(existing_cum)
         if existing_ratio >= CRIT_RATIO:
+            if not existing_confirmed:
+                ac = _unconfirmed_notice(existing_cum, existing_ratio, "CRIT")
+                if subagent_notice:
+                    ac = f"{subagent_notice}\n{ac}"
+                _emit({"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": ac}})
+                return 0
             try:
                 rt.state.record_escalation(
                     f"TOKEN_BUDGET_CRITICAL: cumulative={existing_cum} "
@@ -342,6 +431,12 @@ def main() -> int:
             AUTO_COMPACT_RATIO <= existing_ratio < CRIT_RATIO
             and rt.state.current != "AUTO_COMPACT_PENDING"
         ):
+            if not existing_confirmed:
+                ac = _unconfirmed_notice(existing_cum, existing_ratio, "AUTO_COMPACT")
+                if subagent_notice:
+                    ac = f"{subagent_notice}\n{ac}"
+                _emit({"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": ac}})
+                return 0
             trigger_result: dict = {}
             try:
                 trigger_result = rt.trigger_auto_compact(existing_cum, existing_ratio) or {}
@@ -377,9 +472,16 @@ def main() -> int:
         "tokens": tokens,
         "fsm_state": rt.state.current,
     })
-    ratio = cumulative / MAX_CONTEXT
+    ratio = cumulative / _effective_max_context(cumulative)
+    confirmed = _max_context_confirmed(cumulative)
 
     if ratio >= CRIT_RATIO:
+        if not confirmed:
+            ac = _unconfirmed_notice(cumulative, ratio, "CRIT")
+            if subagent_notice:
+                ac = f"{subagent_notice}\n{ac}"
+            _emit({"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": ac}})
+            return 0
         try:
             rt.state.record_escalation(
                 f"TOKEN_BUDGET_CRITICAL: cumulative={cumulative} ratio={ratio:.2f}"
@@ -396,6 +498,12 @@ def main() -> int:
     # 90% auto-compact: trigger here too (defensive; post hook triggers primarily).
     # Once in AUTO_COMPACT_PENDING, assert_tool_allowed() above已經把非 compact 工具擋下來。
     if AUTO_COMPACT_RATIO <= ratio < CRIT_RATIO and rt.state.current != "AUTO_COMPACT_PENDING":
+        if not confirmed:
+            ac = _unconfirmed_notice(cumulative, ratio, "AUTO_COMPACT")
+            if subagent_notice:
+                ac = f"{subagent_notice}\n{ac}"
+            _emit({"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": ac}})
+            return 0
         trigger_result: dict = {}
         try:
             trigger_result = rt.trigger_auto_compact(cumulative, ratio) or {}

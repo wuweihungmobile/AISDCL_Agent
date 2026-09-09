@@ -390,10 +390,31 @@ if [ "$run_rootinfra" -eq 1 ] || [ "$run_rootinfra_guards" -eq 1 ]; then
       #    「只看 rc」等於自願對工具說出口的話裝作沒聽見。
       #    `--no-cache` 不可省（同機實測）：該 warning **只在冷 cache 時印**，第二次跑起
       #    就靜默 ⇒ 不帶它的話本道的鑑別力取決於「這台機器剛好有沒有 cache」。冷跑 0.02s。
-      if ! command -v ruff >/dev/null 2>&1; then
-        echo "[pre-push dispatcher] ❌ root-infra：找不到 ruff — 根層護欄層 lint 無法執行；請先啟用 .venv 並安裝開發相依（cd AutoClaude && uv pip install -e '.[dev,notifications]'）" >&2
+      # DEF-200-275（2026-09-10）：`ruff` 由 git 呼叫的子行程只繼承呼叫端 shell 的
+      # PATH——venv 沒 source 過就找不到，逼人每次手動啟用才能 push（同一坑撞了
+      # 多輪，見 memory project_bash_shell_state_not_persisted_zshrc_leak）。
+      # 比照上面 $PY 候選鏈的精神（DEF-101-740）：先認 PATH 上現成的 `ruff`，
+      # 找不到才退而在 repo 內已知的 .venv 位置找，兩處都沒有才真正 fail-loud
+      # ——是擴大候選來源，不是軟跳過（原設計意圖見上方大段註解仍然成立）。
+      # 🔴 找到候選後把它的目錄塞進 PATH、後面沿用裸 `ruff check tools/` 字面呼叫
+      # （不要改成 `"$RUFF_BIN" check ...`）：`test_root_infra_parity.py` 的
+      # `_RUFF_COMMAND_RE` 鎖要求「命令位置」出現字面 `ruff check tools/`，換成
+      # 變數呼叫會讓這道防「執行行被偷偷刪掉只留 echo」的鎖失去鑑別力（R69 終審 P2）。
+      RUFF_BIN=""
+      if command -v ruff >/dev/null 2>&1; then
+        RUFF_BIN="ruff"
+      else
+        for _ruff_cand in "$TOPLEVEL/.venv/bin/ruff" "$TOPLEVEL/AutoClaude/.venv/bin/ruff"; do
+          if [ -x "$_ruff_cand" ]; then RUFF_BIN="$_ruff_cand"; break; fi
+        done
+      fi
+      if [ -z "$RUFF_BIN" ]; then
+        echo "[pre-push dispatcher] ❌ root-infra：找不到 ruff（PATH 與 repo 內 .venv 候選皆無）— 根層護欄層 lint 無法執行；請先啟用 .venv 並安裝開發相依（cd AutoClaude && uv pip install -e '.[dev,notifications]'）" >&2
         leg_rc=1
       else
+        if [ "$RUFF_BIN" != "ruff" ]; then
+          PATH="$(dirname "$RUFF_BIN"):$PATH"
+        fi
         # 🔴 模板不可省（R82 MAC-01）：BSD/macOS 裸 mktemp＝usage error ⇒ `$_ruff_err`
         #   為空、`2>""` 重導向失敗、ruff 被判成非零 ⇒ 印出「ruff check tools/ 失敗」
         #   並擋下 push。那句診斷確定為假（ruff 根本沒跑），且 mac 開發者無從自 log
