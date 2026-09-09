@@ -41,8 +41,8 @@ streak 於本輪歸零）。另起 R136 而非續記 R135，係因 R135 的 lane
 ## §3 到期義務兌現與展延
 
 本輪未觸發任何到期義務（`_REPIN_NET_CAP_SCHEDULE` 現行 cap＝548，本輪淨額扣除
-lane 後為 0，遠低於 cap；`_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND=137`／
-`_PHASE2_REVIEW_LOG` 最新列 R135 皆未到期）。
+lane 後為 0，遠低於 cap；`_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND=137` 與
+`_PHASE2_REVIEW_LOG` 上一筆既有列皆未到期）。
 
 ## §4 四方複審逐條處理
 

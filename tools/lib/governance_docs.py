@@ -246,6 +246,9 @@ _GOVERNANCE_DOCS = (
     # 🔴 DEF-200-131 同型：新建證據檔沒有即刻登記，導致 `unregistered_governance_docs()`
     # 對它結構上不可見。即刻登記，不等下一輪。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_Guard_Line_History.md",
+    # DEF-101-587 拆分慣例：入口檔逼近 Read 工具讀取上限時的姊妹檔（承載
+    # MIN_TESTS 逐輪重釘沿革，第五輪四方獨立複審自源碼搬遷至此）。即刻登記。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_Guard_Line_History_MinTests.md",
     # R98 收尾（macOS 側）七支跨平台紅的取證：DEF-200-178~184 七列已依 ROW_MAX_BYTES
     # 瘦身成索引 ⇒ 本檔是那七筆判讀（四種修法的實測比較、A3 放寬守衛的實證、驗證清單
     # 涵蓋缺口的逐字證據）**唯一還能重驗的地方**（⇒ 體積守門），且七列各指名本檔某節
@@ -461,6 +464,9 @@ _GOVERNANCE_DOCS = (
     # R136 收尾：DEF-200-274 第四輪第二次對抗式複審收斂（BaseException 型別缺口＋計時 round-label-ok
     # 脆弱性＋MIN_TESTS／docstring／缺陷帳本文件同步）＋護欄層對帳。即刻登記。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R136_Scan_Findings.md",
+    # R137 收尾：DEF-200-274 第五輪四方獨立複審（全庫 TOCTOU 排查＋Ctrl-C／計時收斂） round-label-ok
+    # ＋護欄層對帳與到期義務兌現。即刻登記。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R137_Scan_Findings.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/{CrossPlatform,Quota}_*.md`。這**不是**把具名

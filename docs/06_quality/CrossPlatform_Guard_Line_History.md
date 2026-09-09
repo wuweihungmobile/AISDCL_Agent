@@ -3008,3 +3008,7 @@ R60 round 3（DEF-101-587）：具名治理文件的體積守門。
     一度達 260,963 bytes、距 262,144（Read 工具單次讀取上限）僅 1,181 bytes。
     ⇒ **把資料搬到另一支檔就繞過守門**，等於守門只綁在檔名上、沒綁在義務上。
     與 `DEF-99-001`／`DEF-101-123` 同型：政策有上限、卻無機械守門。
+
+## MIN_TESTS 逐輪重釘沿革（R15~R136，姊妹檔）
+
+本檔逼近 Read 工具單次讀取上限（DEF-101-587 拆分慣例）：`tools/run_root_unittests.py` 的 `MIN_TESTS` 逐輪重釘沿革（R15 至 R136 完整原文，第五輪四方獨立複審時自源碼搬遷至此）改放姊妹檔 [CrossPlatform_Guard_Line_History_MinTests.md](CrossPlatform_Guard_Line_History_MinTests.md)，本檔不重複內容。
