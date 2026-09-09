@@ -925,6 +925,14 @@ jobs:
           AUTOSDD_PARALLEL_TESTS: "1"
         run: python3 tools/run_root_unittests.py
 
+      - name: 失敗明細落檔上傳（DEF-200-274 CI 事故：落檔在 runner 臨時工作目錄，job 結束即銷毀）
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: macos-compat-ci-last-failure-log
+          path: tools/.last_failure_*.log
+          if-no-files-found: ignore
+
       - name: install_mac_nightly.sh --render-only（plist 產出＋plutil -lint；鏡射本機 smoke [6]，QA-R13-3 補齊四向互鎖缺角）
         run: |
           bash tools/install_mac_nightly.sh --render-only "$RUNNER_TEMP/com.autoclaude.nightly.plist"

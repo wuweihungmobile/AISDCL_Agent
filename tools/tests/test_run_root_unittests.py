@@ -236,6 +236,81 @@ class RunRootUnittestsTest(unittest.TestCase):
                          "呼叫的不是 sentinel_lifecycle.leak_fence")
 
 
+class ParallelFallbackToSequentialTest(unittest.TestCase):
+    """DEF-200-274 第七輪四方獨立複審（Architect／SD 各自命中）：`worker_count()`
+    算出 1（例如 `AUTOSDD_PARALLEL_TESTS_WORKERS=1`，或單核心環境的預設公式）時，
+    走 subprocess 架構零平行效益、純損耗——本測試鎖住『此時退回序列路徑、不呼叫
+    `parallel_shard.run_parallel()`』這條判斷式，不管 `enabled()` 是否為 True。"""
+
+    def test_worker_count_one_never_calls_run_parallel(self) -> None:
+        mod_name = "test_fixture_parallel_fallback"
+        self.addCleanup(lambda: sys.modules.pop(mod_name, None))
+        with tempfile.TemporaryDirectory(prefix="rru_fallback_") as td:
+            d = Path(td)
+            (d / f"{mod_name}.py").write_text(
+                "import unittest\n\n\n"
+                "class Dummy(unittest.TestCase):\n"
+                "    def test_ok(self):\n"
+                "        self.assertTrue(True)\n",
+                encoding="utf-8",
+            )
+            ps = run_root_unittests.parallel_shard
+            with mock.patch.object(ps, "enabled", return_value=True), \
+                 mock.patch.object(ps, "worker_count", return_value=1), \
+                 mock.patch.object(
+                     ps, "run_parallel",
+                     side_effect=AssertionError(
+                         "run_parallel 不該在 worker_count()==1 時被呼叫——零平行效益、純損耗")
+                 ) as mocked_run_parallel, \
+                 mock.patch.dict(run_root_unittests._WINDOWS_SKIP_TAG_EXEMPT, {}, clear=True):
+                rc = run_root_unittests.run_with_floor(d, min_tests=1)
+        mocked_run_parallel.assert_not_called()
+        self.assertEqual(rc, 0, "序列路徑（TextTestRunner）應正常執行單一通過測試並回傳 0")
+
+
+class WorkerCountFormulaTest(unittest.TestCase):
+    """DEF-200-274 第八輪四方獨立複審（SD／QA 各自點名）：`ParallelFallbackToSequentialTest`
+    等既有測試全數用 `mock.patch.object(parallel_shard, "worker_count", ...)` 整個換掉
+    函式本體，從未直接呼叫 `worker_count(cpu_count=N)` 斷言公式輸出本身——公式
+    （`max(1, min(8, cpu-1))`）、環境變數覆寫、非法值退回三條路徑因此零覆蓋。本類別
+    直接呼叫真正的函式，不 mock 它。"""
+
+    def test_formula_across_cpu_counts(self) -> None:
+        ps = run_root_unittests.parallel_shard
+        cases = {0: 1, 1: 1, 2: 1, 9: 8, 10: 8, 100: 8}
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop(ps._ENV_WORKERS, None)  # 清掉本機 shell profile 可能殘留的覆寫
+            for cpu, expected in cases.items():
+                self.assertEqual(
+                    ps.worker_count(cpu_count=cpu), expected,
+                    f"cpu_count={cpu} 應得 {expected}（公式 max(1, min(8, cpu-1))）")
+
+    def test_workers_env_override_wins_over_formula(self) -> None:
+        ps = run_root_unittests.parallel_shard
+        with mock.patch.dict(os.environ, {ps._ENV_WORKERS: "3"}, clear=False):
+            self.assertEqual(
+                ps.worker_count(cpu_count=100), 3,
+                "合法正整數覆寫應勝過公式，即使公式本會算出更大的值")
+
+    def test_invalid_override_values_fall_back_to_formula(self) -> None:
+        ps = run_root_unittests.parallel_shard
+        for bad in ("0", "-5", "abc"):
+            with mock.patch.dict(os.environ, {ps._ENV_WORKERS: bad}, clear=False):
+                self.assertEqual(
+                    ps.worker_count(cpu_count=9), 8,
+                    f"非法覆寫值 {bad!r} 應退回預設公式，不應讓平行模式整支炸掉")
+
+    def test_none_cpu_count_uses_real_os_cpu_count_within_bounds(self) -> None:
+        """`cpu_count=None` 時走真的 `os.cpu_count()`——不斷言精確值（該值隨執行機器
+        核心數而變），只斷言落在公式的值域 `[1, 8]` 內。"""
+        ps = run_root_unittests.parallel_shard
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop(ps._ENV_WORKERS, None)
+            result = ps.worker_count(cpu_count=None)
+        self.assertGreaterEqual(result, 1)
+        self.assertLessEqual(result, 8)
+
+
 class ReportWindowsNativeSkipsTest(unittest.TestCase):
     """R43 Architect P1（DEF-101-348 方向①）：`[WINDOWS-NATIVE-ONLY]` 標籤的 skip
     必須從一般 `skipped=N` 摘要中被獨立點名，不能混在裡面看不出來。"""
@@ -1288,6 +1363,33 @@ class DumpFailureDetailTest(unittest.TestCase):
             text = target.read_text(encoding="utf-8")
         for expected in ("m.C.test_a", "AssertionError: boom", "m.C.test_b", "RuntimeError: kaboom"):
             self.assertIn(expected, text, f"失敗明細未含 {expected!r}——落檔對診斷無用")
+
+    def test_failure_detail_is_also_printed_to_stderr(self) -> None:
+        """DEF-200-274 CI 事故（commit 9478bda，root-infra-ci run 34358252409）：
+        平行模式此前只把明細落檔、從未印到 console——CI runner 的落檔目錄是 job
+        臨時工作目錄，job 結束即銷毀，三支 CI workflow 也都沒有 upload-artifact
+        步驟，主控台因而完全看不到任何 FAIL:/ERROR:/Traceback。本測試鎖住修法：
+        落檔內容必須同時印到 stderr，與序列模式 `TextTestRunner` 內建
+        `printErrors()` 的行為對等。"""
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td) / "f.log"
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                run_root_unittests.dump_failure_detail(
+                    self._result_with(
+                        failures=[("m.C.test_a", "AssertionError: boom")],
+                        errors=[("m.C.test_b", "RuntimeError: kaboom")],
+                    ),
+                    target,
+                )
+        printed = stderr.getvalue()
+        expected_all = (
+            "m.C.test_a", "AssertionError: boom",
+            "m.C.test_b", "RuntimeError: kaboom",
+        )
+        for expected in expected_all:
+            self.assertIn(expected, printed,
+                          f"失敗明細未印到 stderr（{expected!r} 缺席）——CI 主控台仍會看不到內容")
 
     def test_write_failure_does_not_raise(self) -> None:
         """診斷輔助不得反過來變成新的失敗來源（寫檔失敗只印警告、不拋）。"""
@@ -3581,6 +3683,33 @@ class ReportDispatchImbalanceTest(unittest.TestCase):
             "dispatch_granularity.py", output,
             "建議文字必須指向現成的白名單機制，不能只丟數字給讀者",
         )
+
+    def test_github_actions_env_adds_warning_annotation(self) -> None:
+        """DEF-200-274 第八輪：CI 上（`GITHUB_ACTIONS=true`）額外印一行 GitHub
+        Actions 原生 `::warning::` annotation，讓不均訊號直接上 run 摘要頁面，
+        不需要人工捲動冗長 log 中段。"""
+        buf = io.StringIO()
+        result = self._FakeResult({"hot": 100.0, "a": 1.0, "b": 1.0, "c": 1.0})
+        with mock.patch.dict(os.environ, {"GITHUB_ACTIONS": "true"}, clear=False), \
+             contextlib.redirect_stdout(buf):
+            run_root_unittests.dispatch_imbalance.report_dispatch_imbalance(result, worker_count=4)
+        lines = buf.getvalue().splitlines()
+        warning_lines = [ln for ln in lines if ln.startswith("::warning::")]
+        self.assertEqual(
+            len(warning_lines), 1,
+            f"預期恰 1 行 ::warning:: annotation（一個熱點），實際：{warning_lines}")
+        self.assertIn("hot", warning_lines[0])
+
+    def test_non_ci_env_has_no_warning_annotation(self) -> None:
+        """未設 `GITHUB_ACTIONS` 時維持原本純 print 行為，不多印 `::warning::`。"""
+        buf = io.StringIO()
+        result = self._FakeResult({"hot": 100.0, "a": 1.0, "b": 1.0, "c": 1.0})
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("GITHUB_ACTIONS", None)
+            with contextlib.redirect_stdout(buf):
+                run_root_unittests.dispatch_imbalance.report_dispatch_imbalance(
+                    result, worker_count=4)
+        self.assertNotIn("::warning::", buf.getvalue())
 
 
 if __name__ == "__main__":

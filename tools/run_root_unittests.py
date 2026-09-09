@@ -533,7 +533,8 @@ def run_with_floor(start_dir: Path, min_tests: int) -> int:
     warn_ratchet_drift(count, min_tests, suite_modules(suite))
     dispatch_units = dispatch_granularity.suite_dispatch_units(_flatten(suite))
     result = (parallel_shard.run_parallel(suite, start_dir, dispatch_units)
-        if parallel_shard.enabled() else unittest.TextTestRunner(verbosity=1).run(suite))
+        if parallel_shard.enabled() and parallel_shard.worker_count() > 1  # DEF-200-274 第八輪，WHY 見證據檔
+        else unittest.TextTestRunner(verbosity=1).run(suite))
     report_module_timings(result)
     dispatch_imbalance.report_dispatch_imbalance(result, parallel_shard.worker_count())
     report_windows_native_skips(result)
@@ -618,6 +619,7 @@ def dump_failure_detail(result: unittest.TestResult, path: Path | None = None) -
         tid = test.id() if hasattr(test, "id") else str(test)
         lines.append(f"\n===== UNEXPECTED SUCCESS: {tid} =====\n"
                      "（標記 expectedFailure 但實際通過——該缺陷可能已修好，請移除標記）")
+    print("\n".join(lines), file=sys.stderr)  # DEF-200-274 第八輪：CI 無 artifact 時仍可見，WHY 見證據檔
     if path is None:  # 只有預設落點才輪替；測試傳自訂 target 時不動 _FAILURE_LOG_DIR
         failure_log_rotation.prune_old_failure_logs(_FAILURE_LOG_DIR)
     return _write_failure_log(target, "\n".join(lines))

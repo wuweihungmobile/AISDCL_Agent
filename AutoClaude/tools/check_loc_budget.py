@@ -184,7 +184,14 @@ SPECIAL_FILES: dict[str, int] = {
     # 靠人眼」）。核心邏輯與印出接線皆已抽到 tools/lib/dispatch_imbalance.py（同一
     # 先例），本檔只餘 1 行 import ＋ 1 行轉呼叫（`report_dispatch_imbalance()`），
     # 確認不可再壓縮，淨增 +2 行（773→775）。
-    "../tools/run_root_unittests.py": 775,
+    # DEF-200-274 第八輪四方獨立複審修復：① `worker_count()==1` 時退回序列（避免
+    # subprocess 架構零平行效益、純損耗）；② 平行模式失敗明細補印 stderr（CI 無
+    # upload-artifact 時此前完全看不到 FAIL:/ERROR:）。兩處皆已壓成單行行內指標
+    # 註解（WHY 全文見 docs/06_quality/CrossPlatform_DEF200274_Parallel_Tests_
+    # Evidence.md〈第八輪〉），①②各為 1 行不可再壓縮的真實邏輯（條件判斷／print
+    # 呼叫本身），確認無法在不刪除已驗證功能或改動無關程式碼的前提下再省，
+    # 淨增 +2 行（775→777）。
+    "../tools/run_root_unittests.py": 777,
     "../.claude/hooks/context_budget_guard.py": 1089,
     # commit fab2d0e：runtime_carrier_verdict() 誤判修復。已抽出可抽的部分
     # （_SPAWN_FAILURE_RE／is_spawn_failure → tools/lib/spawn_failure.py，先例：

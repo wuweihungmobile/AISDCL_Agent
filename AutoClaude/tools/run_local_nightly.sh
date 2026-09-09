@@ -250,7 +250,7 @@ write_heartbeat() {
 }
 
 run_stage 1 macos_smoke     /bin/bash "$ROOT/tools/macos_smoke_local.sh"
-run_stage 2 root_unittests  "$PY" "$ROOT/tools/run_root_unittests.py"
+run_stage 2 root_unittests  env AUTOSDD_PARALLEL_TESTS=1 "$PY" "$ROOT/tools/run_root_unittests.py"
 run_stage 3 autoclaude_gate bash "$ROOT/AutoClaude/tools/local_ci_gate.sh"
 run_stage 4 sdd_ci_gate     sdd_gate
 

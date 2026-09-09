@@ -476,6 +476,9 @@ _GOVERNANCE_DOCS = (
     # R140 收尾：DEF-200-274 第七輪（負載不均自動偵測＋四方獨立複審修復 fair_share round-label-ok
     # 分母真缺陷）＋護欄層對帳。即刻登記。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R140_Scan_Findings.md",
+    # R141 收尾：DEF-200-274 第八輪（special-tier LOC 棘輪超額修復＋worker_count() round-label-ok
+    # 公式測試＋CI 接線回歸鎖）＋護欄層對帳。即刻登記。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R141_Scan_Findings.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/{CrossPlatform,Quota}_*.md`。這**不是**把具名

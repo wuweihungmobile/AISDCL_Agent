@@ -1128,6 +1128,14 @@ jobs:
           AUTOSDD_PARALLEL_TESTS: "1"
         run: python tools/run_root_unittests.py
 
+      - name: 失敗明細落檔上傳（DEF-200-274 CI 事故：落檔在 runner 臨時工作目錄，job 結束即銷毀）
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: windows-compat-ci-last-failure-log
+          path: tools/.last_failure_*.log
+          if-no-files-found: ignore
+
       - name: install_windows_nightly.ps1 -WhatIf 預覽（R26 Scan-C 發現：從未在真實 CI 執行過；鏡射 macos-compat-ci.yml install_mac_nightly.sh --render-only 步驟，DEF-101-269）
         # -WhatIf 不需 elevation、不真的呼叫 Register-ScheduledTask，windows-latest runner
         # 可安全直跑。斷言寫法鏡射 tools/windows_smoke_local.ps1 [9/9]（獨立子行程呼叫，

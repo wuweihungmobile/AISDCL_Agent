@@ -1109,8 +1109,15 @@ $rcGate = Invoke-Stage 'local-ci-gate full (對齊 windows-nightly-full) + root 
     $rootRc = 1
   } else {
     # 零旗標契約（run_root_unittests.py 檔頭：任何引數一律 rc=2）——刻意不傳任何參數。
-    Invoke-Native { & $script:PyExe $rootUnittestsPy }
-    $rootRc = [int]$LASTEXITCODE
+    # DEF-200-274 第八輪：比照三支 CI workflow 接上平行模式；跑完即還原，不外溢到後續 stage。
+    $prevParallelEnv = $env:AUTOSDD_PARALLEL_TESTS
+    $env:AUTOSDD_PARALLEL_TESTS = '1'
+    try {
+      Invoke-Native { & $script:PyExe $rootUnittestsPy }
+      $rootRc = [int]$LASTEXITCODE
+    } finally {
+      $env:AUTOSDD_PARALLEL_TESTS = $prevParallelEnv
+    }
   }
   Log ("[STAGE-L] 兩道檢查各自的 rc：local_ci_gate={0} root_unittests={1}（合併規則：真失敗優先於 WARN(2)）" -f $gateRc, $rootRc)
   if ($rootRc -ne 0) {

@@ -480,6 +480,14 @@ jobs:
           AUTOSDD_PARALLEL_TESTS: "1"
         run: python3 tools/run_root_unittests.py
 
+      - name: 失敗明細落檔上傳（DEF-200-274 CI 事故：落檔在 runner 臨時工作目錄，job 結束即銷毀）
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: root-infra-ci-last-failure-log
+          path: tools/.last_failure_*.log
+          if-no-files-found: ignore
+
       - name: 缺陷帳本跨文件狀態一致（ONBOARDING.md 對 DEF-* 狀態宣稱 vs 帳本實況）
         run: python3 tools/check_defect_log_crossref.py
 

@@ -682,7 +682,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 7662,
+    "test_adr_xplat001_c1c2_lock.py": 7698,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 3839,
@@ -732,13 +732,13 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_python_c_percent_shim.py": 119,
     "test_quota_policy.py": 3396,
     "test_root_infra_parity.py": 441,
-    "test_run_root_unittests.py": 3587,
+    "test_run_root_unittests.py": 3716,
     "test_sanitize_component_frozen_sdd_versions_lock.py": 340,
     "test_schedule_capability_parity.py": 626,
     "test_script_scan_surface_ssot.py": 391,
     "test_skip_ceiling_ratchet_direction.py": 706,
     "test_skip_discoverability_r83.py": 744,
-    "test_smoke_ci_sync.py": 1353,
+    "test_smoke_ci_sync.py": 1399,
     "test_stdio_utf8.py": 76,
     "test_subprocess_encoding_hygiene.py": 1609,
     "test_windows_forbidden_filename_parity.py": 1025,
@@ -1667,6 +1667,14 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "本列自身的行數）。逐項見 docs/06_quality/CrossPlatform_R140_Scan_Findings.md"
      "；詳細證據見 docs/06_quality/CrossPlatform_DEF200274_Parallel_Tests_"
      "Evidence.md〈第七輪〉。"),
+    ("R141", 96240, 96451, 211,
+     "[非淨減法輪][回歸鎖軌全額申報，見 _REGRESSION_LANE_LOG 同輪列] DEF-200-274 "
+     "第八輪四方獨立複審修復收尾：test_run_root_unittests.py 新增 "
+     "WorkerCountFormulaTest／ReportDispatchImbalanceTest（+129）；"
+     "test_smoke_ci_sync.py 新增 TestParallelTestsCiWiring（+46）；本檔自身"
+     "逐檔漂移 +36，全額歸回歸鎖軌（記帳誠實度分類）。逐項見 "
+     "docs/06_quality/CrossPlatform_R141_Scan_Findings.md；詳細證據見 "
+     "CrossPlatform_DEF200274_Parallel_Tests_Evidence.md〈第八輪〉。"),
 )
 
 
@@ -1750,6 +1758,9 @@ _REPIN_NET_CAP_SCHEDULE: tuple[tuple[int, int], ...] = (
                   # 同輪重新武裝下一段：步伐維持 1（已是最小正整數步伐）。
     (139, 546),   # 到期輪兌現（DEF-200-274 第六輪四方獨立複審收斂）：cap 降到到期 round-label-ok
                   # 目標本身（同既有判例）。本輪剛好到期（`_REPIN_NET_CAP_DUE_ROUND=139`）。
+                  # 同輪重新武裝下一段：步伐維持 1（已是最小正整數步伐）。
+    (141, 545),   # 到期輪兌現（DEF-200-274 第八輪複審收尾）：cap 降到到期 round-label-ok
+                  # 目標本身（同既有判例）。本輪剛好到期（`_REPIN_NET_CAP_DUE_ROUND=141`）。
                   # 同輪重新武裝下一段：步伐維持 1（已是最小正整數步伐）。
 )
 #: 生效點＝首列輪號、現行上限＝末列上限，**皆由表導出不另立常數**（R73 判例：一份知識一個家）。
@@ -1877,6 +1888,19 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "修法的 `fair_share` 分母真缺陷之回歸鎖 +17＋本檔自身逐檔漂移收斂列"
      "（本列本身＋主表新列＋接鏈列的行數）+22，全額歸本軌（記帳誠實度分類）。"
      "逐項見 CrossPlatform_R140_Scan_Findings.md。"),
+    ("R141", 211, "DEF-200-274 第八輪四方獨立複審修復收尾："
+     "`test_run_root_unittests.py` 新增 `WorkerCountFormulaTest`（`worker_count()` "
+     "公式／環境變數覆寫／非法值退回四條路徑的直接單元測試，SD／QA 共同點名此前全數"
+     "靠 mock 換掉函式本體，零覆蓋）與 `ReportDispatchImbalanceTest` 兩支新測試"
+     "（`GITHUB_ACTIONS=true` 時 `dispatch_imbalance.report_dispatch_imbalance()` "
+     "印出 GitHub Actions 原生 `::warning::` annotation，+129）；"
+     "`test_smoke_ci_sync.py` 新增 `TestParallelTestsCiWiring`（三支 compat-CI 呼叫 "
+     "run_root_unittests.py 的 step 是否設 `AUTOSDD_PARALLEL_TESTS=1` 的機械回歸鎖，"
+     "SA 點名此前零覆蓋，+46）＋本檔自身逐檔漂移 +36（新增主表本列＋本軌新列＋"
+     "`_REPIN_NET_CAP_SCHEDULE` 到期義務兌現列＋`_PHASE2_REVIEW_LOG` 新列＋"
+     "`_FROZEN_PREFIX_REWRITE_LEDGER` 接鏈列的行數），全額歸本軌（記帳誠實度分類）。"
+     "逐項見 docs/06_quality/CrossPlatform_DEF200274_Parallel_Tests_Evidence.md"
+     "〈第八輪〉。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -2049,8 +2073,8 @@ def net_cap_schedule_problems(
 #: R135 DEF-200-274 第四輪四方複審收尾兌現 round-label-ok：cap 降到目標本身（548，見
 #: `(135, 548)` 列），同輪重新武裝下一段：目標 547 嚴格低於現行 cap 548（步伐已降至
 #: 整數下限 1，無法再變小，維持同步伐、僅前進到期輪，續守「目標嚴格低於現行 cap」）。
-_REPIN_NET_CAP_DUE_ROUND = 141  # round-label-ok：到期輪＝兌現輪+2（lookahead 判準的活體對照）
-_REPIN_NET_CAP_DUE_TARGET = 545  # 步伐 1，嚴格低於 cap 546（R139 重新武裝） round-label-ok
+_REPIN_NET_CAP_DUE_ROUND = 143  # round-label-ok：到期輪＝兌現輪+2（lookahead 判準的活體對照）
+_REPIN_NET_CAP_DUE_TARGET = 544  # 步伐 1，嚴格低於 cap 545（R141 重新武裝） round-label-ok
 
 #: DEF-200-121：到期輪自身的後設鎖——`_REPIN_NET_CAP_DUE_ROUND` 只准落在「最近稽核輪
 #: ＋ lookahead」以內（歷史母體 85..113 的到期輪一律＝上一次兌現輪 +2）。可延期的到期日
@@ -2117,10 +2141,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 148
+_REPIN_LOG_FROZEN_PREFIX_LEN = 149
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "d27ba8c13f10de4d4f305e28c976f6a8cb8dcd3f47f15ddb50f4aeeaf45449d3")
+    "6f595278360c4ec376181cb57d74dc862e5ad031c87bd21e1e074c7693f1311e")
 
 
 def repin_log_history_digest(
@@ -2332,6 +2356,9 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # R140：DEF-200-274 第七輪——新增負載不均自動偵測（dispatch_imbalance.py）＋ round-label-ok
     # 四方獨立複審共同點名的 fair_share 分母真缺陷回歸鎖，凍結前綴延伸涵蓋新增列本身。
     ("R140", "7f78df45354f", "d27ba8c13f10", "DEF-200-274"),
+    # R141：DEF-200-274 第八輪——四方獨立複審修復收尾（worker_count 公式測試／CI round-label-ok
+    # wiring 回歸鎖／GitHub Actions annotation 測試），凍結前綴延伸涵蓋新增列本身。
+    ("R141", "d27ba8c13f10", "6f595278360c", "DEF-200-274"),
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。
@@ -6685,6 +6712,15 @@ _PHASE2_REVIEW_LOG: tuple[tuple[int, str, str], ...] = (
      "一事，複審本身由主控承接、非本收尾窗口執行），亦未提出新 Phase 2 提案。上一列是 "
      "[提案] ⇒ 連續『維持觀察』計數自本列起算為一，未觸上限（`_PHASE2_MAX_CONSECUTIVE_"
      "DEFERRALS=1`）。依 §6 重新武裝下一個視窗。"),
+    (141, "[提案]",
+     "本輪是 DEF-200-274 第八輪四方獨立複審修復收尾窗口，同樣未觸碰 ADR-XPLAT-013 "
+     "方向 (c) 觀測→阻斷轉換提案本身——上一列（R135）是『維持觀察』，其名額"
+     "（`_PHASE2_MAX_CONSECUTIVE_DEFERRALS=1`）已用罄，§6 只剩 [提案]／[落地] 兩條"
+     "合法出路。🔴 誠實記載：本列**不是**對 (c) 方向做出任何新判斷，R129 提出的既存"
+     "提案（送四方複審一事）迄今仍待主控排定、尚未有結果；本列僅是把該既存未決狀態"
+     "依款(5) 的封閉表格式重新登記一次，純因本輪把稽核痕跡機械推進到 R141 而觸發"
+     "§6 的 5 輪視窗時效，與 DEF-200-274 guard-line 記帳本身無關。依 §6 重新武裝"
+     "下一個視窗（連續『維持觀察』計數歸零）。"),
 )
 #: 到期輪由末列導出、不另立常數（一份知識一個家；同 `_REPIN_NET_CAP_SCHEDULE` 的
 #: 「生效點＝首列、現值＝末列，皆由表導出」）。

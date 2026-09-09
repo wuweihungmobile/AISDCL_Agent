@@ -34,6 +34,8 @@ run_parallel()` 自己在 `n = min(worker_count(), len(modules_sorted)) or 1`
 """
 from __future__ import annotations
 
+import os
+
 
 def detect_imbalance(
     module_timings: dict[str, float],
@@ -68,6 +70,12 @@ def report_dispatch_imbalance(result: object, worker_count: int) -> None:
     序列模式（無 `module_timings`）或無不均時不印。抽成本檔（而非留在
     `run_root_unittests.py`）的理由同 `dispatch_granularity.py` 檔頭 WHY——
     呼叫端受 LOC 分級政策 special-tier 行數棘輪管制，落地當輪已無餘裕。
+
+    第八輪：在 CI 上（`GITHUB_ACTIONS=true`）額外逐筆印一行 GitHub Actions 原生
+    `::warning::` annotation——這種格式的行會被 GitHub 直接抓進該次 run 的摘要
+    頁面，不需要人工捲動冗長的 log 中段才看得到（本函式此前的輸出只是普通
+    print，混在成百上千行 unittest 輸出裡）。非 CI 環境（環境變數未設）維持
+    原本純 print 行為不變，不多印任何東西。
     """
     timings = getattr(result, "module_timings", None)
     if not timings:
@@ -75,12 +83,18 @@ def report_dispatch_imbalance(result: object, worker_count: int) -> None:
     flagged = detect_imbalance(timings, worker_count)
     if not flagged:
         return
+    on_ci = os.environ.get("GITHUB_ACTIONS") == "true"
     print(
         f"🚨 平行負載不均偵測：以下派工單位耗時遠超過公平均分基準"
         f"（worker={worker_count}）："
     )
     for key, elapsed, ratio in flagged:
         print(f"   - {key}: {elapsed:.1f}s（{ratio:.1f}x 公平均分基準）")
+        if on_ci:
+            print(
+                f"::warning::平行負載不均：{key} 耗時 {elapsed:.1f}s"
+                f"（{ratio:.1f}x 公平均分基準）"
+            )
     print(
         "👉 建議：若為單一測試方法拖累整個模組，比照 "
         "tools/lib/dispatch_granularity.py 的 CLASS_LEVEL_DISPATCH_MODULES "

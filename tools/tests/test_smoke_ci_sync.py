@@ -22,6 +22,8 @@ import unittest
 from pathlib import Path
 from types import ModuleType
 
+import yaml
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _platform_helpers import usable_bash_for_fixture  # noqa: E402
 
@@ -597,6 +599,10 @@ _CI_STEP_LOCAL_CARRIER: dict[str, dict[str, str]] = {
             "test_every_ci_job_running_the_runner_installs_all_external_tools 機械看守"
         ),
         "tools/tests/（SIGPIPE 回歸鎖 + dev_start.py 平台邏輯；R3 QA 發現：paths 雖已涵蓋 tools/tests/**，但先前從未有任何 step 真的執行過，只在 root-infra-ci.yml 的 ubuntu-latest 上以 mock 跑過）": "nightly:run_root_unittests.py@AutoClaude/tools/run_local_nightly.sh（stage 2 root_unittests）＋ pre-push root-infra leg",
+        "失敗明細落檔上傳（DEF-200-274 CI 事故：落檔在 runner 臨時工作目錄，job 結束即銷毀）": (
+            f"{_NO_CARRIER}: actions/upload-artifact 是 GitHub Actions 專屬機制，"
+            "本機執行時失敗明細本來就留在磁碟、不會隨 job 結束銷毀，無對應動作可跑"
+        ),
         "install_mac_nightly.sh --render-only（plist 產出＋plutil -lint；鏡射本機 smoke [6]，QA-R13-3 補齊四向互鎖缺角）": "macos_smoke_local.sh [6/7]",
         "執行 tools/bootstrap.sh（全新 .venv 建立情境）": (
             f"{_NO_CARRIER}: 需在乾淨 checkout 上建立**全新** .venv；在開發者機器上跑會覆蓋"
@@ -681,6 +687,10 @@ _CI_STEP_LOCAL_CARRIER: dict[str, dict[str, str]] = {
             "test_every_ci_job_running_the_runner_installs_all_external_tools 機械看守"
         ),
         "tools/tests/（SIGPIPE 回歸鎖 + dev_start.py 平台邏輯；R3 QA 發現：先前只在 root-infra-ci.yml 的 ubuntu-latest 上以 mock 跑過，從未在真實 Windows 執行過）": "nightly:run_root_unittests.py@AutoClaude/tools/run_local_nightly.ps1（掛在 local-ci-gate stage 內的第二道檢查）＋ pre-push root-infra leg",
+        "失敗明細落檔上傳（DEF-200-274 CI 事故：落檔在 runner 臨時工作目錄，job 結束即銷毀）": (
+            f"{_NO_CARRIER}: 同 macOS 側——actions/upload-artifact 是 GitHub Actions "
+            "專屬機制，本機執行時失敗明細本來就留在磁碟、不會隨 job 結束銷毀"
+        ),
         "install_windows_nightly.ps1 -WhatIf 預覽（R26 Scan-C 發現：從未在真實 CI 執行過；鏡射 macos-compat-ci.yml install_mac_nightly.sh --render-only 步驟，DEF-101-269）": "windows_smoke_local.ps1 [9/9]",
         "執行 tools/bootstrap.ps1（R1 SA 發現：Windows 新人上手入口從未被實測）": f"{_NO_CARRIER}: 同 macOS 側——需乾淨 checkout 建全新 .venv，破壞性且分鐘級",
         "重跑 tools/bootstrap.ps1（既有 .venv 沿用情境；R9 Fix-D）": f"{_NO_CARRIER}: 同上，驗證對象是「既有 .venv 沿用」路徑",
@@ -1351,3 +1361,39 @@ class TestSkipModuleListsMirrorToolsLib(unittest.TestCase):
         self.assertEqual(blocks, [["tools/lib/skip_a.py", "tools/lib/other.py"],
                                   ["tools/lib/skip_b.py"]])
         self.assertEqual(_skip_modules_in(blocks[0]), {"skip_a.py"})
+
+
+class TestParallelTestsCiWiring(unittest.TestCase):
+    """DEF-200-274 第八輪四方獨立複審（SA 點名）：三支 compat-CI 接上
+    `AUTOSDD_PARALLEL_TESTS=1` 的 step 目前零測試覆蓋——刪掉那一行 env 不會讓任何
+    既有測試變紅，平行模式因而可能在未來某次「順手清理」中被無聲移除而無人發現。
+    用 `yaml.safe_load` 而非正則抽取：判準只問「值」，見 test_gha_action_versions.py
+    「C 節為何可以用 pyyaml」的既有理由（同一批 CI job 早已宣告 pyyaml 為相依）。"""
+
+    #: 只認「真的執行它」的 run 本體（例如 `python3 tools/run_root_unittests.py`）——
+    #: 光含子字串 `run_root_unittests.py` 會誤中另一個 step（`ruff check --show-settings
+    #: tools/run_root_unittests.py`，只是拿它當 ruff 設定解析的參照對象，並未執行它）。
+    _INVOKE_RE = re.compile(r"^\s*python3?\s+tools/run_root_unittests\.py\s*$", re.MULTILINE)
+
+    def test_each_workflow_runs_the_runner_with_parallel_tests_enabled(self) -> None:
+        for path in (_ROOT_INFRA_CI, _MAC_CI, _WIN_CI):
+            data = yaml.safe_load(_read(path)) or {}
+            hits = [
+                step
+                for job in (data.get("jobs") or {}).values()
+                if isinstance(job, dict)
+                for step in (job.get("steps") or [])
+                if isinstance(step, dict) and self._INVOKE_RE.search(step.get("run") or "")
+            ]
+            self.assertEqual(
+                len(hits), 1,
+                f"{path.name} 找到 {len(hits)} 個呼叫 run_root_unittests.py 的 step"
+                "（預期恰 1）——結構已變動，需重新核對本鎖",
+            )
+            env = hits[0].get("env") or {}
+            self.assertEqual(
+                str(env.get("AUTOSDD_PARALLEL_TESTS")), "1",
+                f"{path.name} 呼叫 run_root_unittests.py 的 step 未設 "
+                "AUTOSDD_PARALLEL_TESTS=1——平行模式接線被移除，DEF-200-274 的 CI "
+                "覆蓋會靜默退回序列模式",
+            )

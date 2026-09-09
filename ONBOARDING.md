@@ -212,7 +212,10 @@ PYTHONUTF8=1 lint-imports             # 架構約束（契約條數 SSOT＝AutoC
 python tools/run_root_unittests.py                          # tools/tests 全套（序列，預設）
 AUTOSDD_PARALLEL_TESTS=1 python tools/run_root_unittests.py  # opt-in 本機多核心平行執行（DEF-200-274）；
                                                               # worker 數見 AUTOSDD_PARALLEL_TESTS_WORKERS，
-                                                              # 未設時＝max(1,min(8,cpu-1))；Windows 真機未驗證
+                                                              # 未設時＝max(1,min(8,cpu-1))；三支 CI 已接線，
+                                                              # windows-compat-ci 已在 windows-latest runner
+                                                              # 真的跑過（成功）；掌舵者本人 Windows 11 機器
+                                                              # 上手動驗證仍待進行
 
 # AISDLC_SDD（在 AISDLC_SDD/ 下）
 bash scripts/ci-gate.sh               # 本機 CI 閘門（pytest + arch_fitness）
@@ -227,7 +230,7 @@ $env:PYTHONUTF8=1; lint-imports       # 架構約束（契約條數 SSOT＝AutoC
 
 # 根層（在 repo 根目錄下）
 python tools\run_root_unittests.py
-$env:AUTOSDD_PARALLEL_TESTS=1; python tools\run_root_unittests.py   # opt-in 平行；本開關在 Windows 尚未經真機驗證（DEF-200-274）
+$env:AUTOSDD_PARALLEL_TESTS=1; python tools\run_root_unittests.py   # opt-in 平行；三支 CI 已接線，windows-compat-ci 已在 windows-latest runner 真的跑過（成功）；掌舵者本人 Windows 11 機器上手動驗證仍待進行（DEF-200-274）
 
 # AISDLC_SDD（在 AISDLC_SDD\ 下）
 powershell -ExecutionPolicy Bypass -File scripts\ci-gate.ps1   # 偵測到 Git Bash 即薄委派 ci-gate.sh＝完整對等，見 §6

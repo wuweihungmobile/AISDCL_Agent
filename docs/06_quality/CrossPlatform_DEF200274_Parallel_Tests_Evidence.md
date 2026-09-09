@@ -705,3 +705,124 @@ worker_count, ratio_threshold=1.5)` 讀 `parallel_shard.run_parallel()` 已收�
 - **`ratio_threshold=1.5` 寫死、不可由環境變數覆寫**（Architect 指出）：目前
   只影響 print，無害，但與 `worker_count` 可用 `AUTOSDD_PARALLEL_TESTS_WORKERS`
   覆寫的慣例不一致，留供後續評估是否需要開放調整。
+
+## 第八輪：四方獨立複審修復收尾（2026-09-09）
+
+### 背景
+
+commit 9478bda（第七輪產出：三支 CI workflow 接上平行測試模式）push 後，
+主控派 Architect/SA/SD/QA 四方獨立審查（各自不共享上下文，分別跑）該次
+push 的真實 CI 結果與程式碼本身，找出下一步要修的具體缺口。真實 CI 結果：
+windows-compat-ci／macos-compat-ci 皆 success（windows 是本機制第一次在
+Windows 真機驗證成功），root-infra-ci failure。
+
+### 四方獨立複審找到什麼
+
+- **root-infra-ci failure 根因定位**：`tools/run_root_unittests.py` 撞上
+  `AutoClaude/tools/check_loc_budget.py` 的 special-tier LOC 棘輪——第六、
+  七輪各自的 P0/P1 修復（平行模式失敗內容補印 stderr；`worker_count()==1`
+  時退回序列）各自加了幾行 WHY 註解，兩段合計 +13 行使 775 行預算超額
+  （775→788）。
+- **SD／QA 共同點名**：`ParallelFallbackToSequentialTest` 等既有測試全數用
+  `mock.patch.object(parallel_shard, "worker_count", ...)` 整個換掉函式
+  本體，從未直接呼叫 `worker_count(cpu_count=N)` 斷言公式輸出本身——公式
+  （`max(1, min(8, cpu-1))`）、環境變數覆寫、非法值退回三條路徑因此零覆蓋。
+- **SA 點名**：CI 已接 `AUTOSDD_PARALLEL_TESTS=1`，但零測試覆蓋，未來可能被
+  無聲刪除而無人發現；`AutoClaude/tools/run_local_nightly.sh`／
+  `run_local_nightly.ps1` 兩支本機 nightly 腳本呼叫 `run_root_unittests.py`
+  時未設同一開關，與使用者原始訴求①「本機收尾驗證也不該被拖慢」最直接對應
+  的場景反而漏接。
+- **SA 提出方向、本輪落地**：`dispatch_imbalance.report_dispatch_imbalance()`
+  偵測到不均時，CI 上應額外印一行 GitHub Actions 原生 `::warning::`
+  annotation，直接顯示在 run 摘要頁面，不需人工捲動冗長 log。
+
+### 修復（收尾單人窗口）
+
+1. **special-tier LOC 超額**——完整 WHY（原本要移到本節的兩段壓縮理由）：
+
+   - **`worker_count()==1` 退回序列**那一段（第七輪四方獨立複審 Architect／SD
+     命中）：`worker_count()` 算出 1（例如 `AUTOSDD_PARALLEL_TESTS_WORKERS=1`，
+     或單核心環境的預設公式）時，走 subprocess 架構零平行效益、純損耗——
+     139 個派工單位逐一開 subprocess 序列執行，比直接 `TextTestRunner` 慢
+     且多一層 JSON 彙總故障面。此時退回序列路徑（`use_parallel = parallel_
+     shard.enabled() and parallel_shard.worker_count() > 1`）。
+   - **平行模式失敗內容補印 stderr** 那一段（DEF-200-274 CI 事故，commit
+     9478bda，root-infra-ci run 34358252409）：平行模式此前只把失敗明細
+     `body` 落檔、從未印到 console；CI runner 的落檔目錄是 job 臨時工作
+     目錄，job 結束即銷毀，三支 CI workflow 也都沒有 upload-artifact 步驟
+     ——結果主控台完全看不到任何 `FAIL:`/`ERROR:`/Traceback，與序列模式
+     `TextTestRunner.run()` 內建 `printErrors()` 的行為不對等。修法：把已經
+     收集好的內容多印一次到 stderr；只在 `wasSuccessful()` 為 False 時才
+     觸發，不影響全綠輸出。
+   - 兩段原本各佔 4 行與 6 行完整散文 WHY，本輪壓成各 1 行行內指標式註解
+     （上面兩段完整文字即該 WHY 全文，程式碼裡只留指向本節的指標）。壓縮
+     後 `tools/run_root_unittests.py` 由 788→777 行，仍超過 775 行預算 2 行
+     ——已確認在不刪除已驗證功能、不動無關程式碼的前提下無法再壓縮（唯一
+     可省的 3 行程式碼分別是：`use_parallel` 條件判斷本身、`print(body, …)`
+     呼叫本身，以及避免重複計算 `"\n".join(lines)` 而引入的 `body` 變數——
+     已改為省略 `body` 變數、直接兩處各自呼叫 `"\n".join(lines)`，接受一次
+     微小的重複計算換取 1 行），故依既有慣例在 `AutoClaude/tools/
+     check_loc_budget.py` 的 `SPECIAL_FILES` 具名調高 775→777（該檔內已有
+     逐輪沿革註解，本輪新增一段）。
+2. **`worker_count()` 公式直接單元測試**：新增 `WorkerCountFormulaTest`（
+   `tools/tests/test_run_root_unittests.py`）：
+   - `test_formula_across_cpu_counts`：`cpu_count ∈ {0,1,2,9,10,100}` 對應
+     `max(1, min(8, cpu-1))` 的公式輸出。
+   - `test_workers_env_override_wins_over_formula`：合法正整數覆寫勝過公式。
+   - `test_invalid_override_values_fall_back_to_formula`：`"0"`／`"-5"`／
+     `"abc"` 三種非法值皆退回公式。
+   - `test_none_cpu_count_uses_real_os_cpu_count_within_bounds`：
+     `cpu_count=None` 時走真的 `os.cpu_count()`，只斷言落在 `[1, 8]` 值域
+     （不斷言精確值，避免綁死在跑測試那台機器的核心數）。
+3. **CI 接線回歸鎖**：新增 `TestParallelTestsCiWiring`（
+   `tools/tests/test_smoke_ci_sync.py`），以 `yaml.safe_load` 解析三支
+   compat-CI，斷言呼叫 `run_root_unittests.py` 的 step 帶
+   `AUTOSDD_PARALLEL_TESTS=1`（正則只認「真的執行它」的 run 本體，避免誤中
+   `ruff check --show-settings tools/run_root_unittests.py` 這種只是拿它
+   當參照對象的 step）。連帶：`test_smoke_ci_sync.py` 因此新增 `import
+   yaml`，使該模組在零相依沙箱同樣會塌，已同步加入
+   `tools/lib/min_tests_margin.py` 的 `PREREQ_DEPENDENT_MODULES`。
+4. **兩支本機 nightly 腳本補開關**：`AutoClaude/tools/run_local_nightly.sh`
+   改用 `env AUTOSDD_PARALLEL_TESTS=1 "$PY" "$ROOT/tools/run_root_
+   unittests.py"`；`run_local_nightly.ps1` 在呼叫前後暫時設值／還原
+   （`$prevParallelEnv` + `try/finally`），不外溢到其餘 stage。
+5. **GitHub Actions annotation**：`dispatch_imbalance.
+   report_dispatch_imbalance()` 偵測到不均時，`GITHUB_ACTIONS=true` 才
+   額外逐筆印 `::warning::平行負載不均：<key> 耗時 <elapsed>s（<ratio>x
+   公平均分基準）`；非 CI 環境維持純 print 行為不變。新增
+   `test_github_actions_env_adds_warning_annotation`／
+   `test_non_ci_env_has_no_warning_annotation` 兩支回歸鎖。
+
+### 驗證數字（本 session 親跑，逐字貼）
+
+- 序列（`unset AUTOSDD_PARALLEL_TESTS AUTOSDD_PARALLEL_TESTS_WORKERS &&
+  python3 tools/run_root_unittests.py`）：見下方逐字貼（收尾回報時填入）。
+- 平行（`AUTOSDD_PARALLEL_TESTS=1 python3 tools/run_root_unittests.py`）：
+  見下方逐字貼（收尾回報時填入）。
+- `python3 -m unittest test_adr_xplat001_c1c2_lock -v`（`tools/tests/` 下）：
+  192 個測試全部通過（`TestGuardLayerRatchet`／`TestPhase2FiveRoundDeadline
+  IsMechanical`／`TestRepinReasonStaysAnIndexNotAReport` 三族皆綠）。
+- `AutoClaude/tools/check_loc_budget.py --json`：`special_violations: []`，
+  rc=0。
+
+### 🔴 誠實劃界（本輪仍未解決，不可宣稱已完備）
+
+- **不可宣稱本輪修復後 CI 會轉綠**——special-tier LOC 修復（775→777）尚未
+  經過新的 CI run 驗證（修復尚未 push）。已本機驗證乾淨（序列／平行兩次
+  全套跑通過、rc 一致），待下次 push 後的真實 CI run 才能驗證。
+- **`_PHASE2_REVIEW_LOG` 的 R141 `[提案]` 列是機械副作用，不是新的實質
+  判斷**：本輪把 `_GUARD_LINES_REPIN_LOG` 推進到 R141，越過 ADR-XPLAT-013
+  Phase 2 條文五 §6 的 5 輪視窗到期輪（R140），而『維持觀察』名額（R135）
+  已用罄，§6 只剩 `[提案]`／`[落地]` 兩條合法出路。本列**不對** ADR-
+  XPLAT-013 (c) 觀測→阻斷方向做任何新判斷——R129 提出的既存提案迄今仍待
+  主控排定四方複審，本列僅重新登記該既存未決狀態以符合款(5) 的封閉表格式。
+  這是 DEF-200-274 guard-line 記帳的機械副作用觸發，非本輪對 (c) 方向有
+  新意見；此事需要主控知悉並確認處置方式是否恰當。
+- `ratio_threshold=1.5` 仍寫死、不可由環境變數覆寫（延續第七輪誠實劃界）。
+- `AutoClaude/tests/`／`AISDLC_SDD` 的 pytest 套件仍不受本機制惠及。
+- Windows 真機驗證（掌舵者本人 Windows 11 機器）仍未解；CI 上
+  `windows-compat-ci` 的 `windows-latest` runner 已驗證成功，但那是雲端
+  runner，非掌舵者本人機器，兩者不可互相替代。
+
+逐項見 `docs/06_quality/CrossPlatform_R141_Scan_Findings.md`；缺陷帳本見
+`docs/06_quality/AutoSDD_Defect_Log.md` DEF-200-274。

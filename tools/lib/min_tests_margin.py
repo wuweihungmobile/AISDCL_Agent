@@ -49,6 +49,10 @@ PREREQ_DEPENDENT_MODULES: frozenset[str] = frozenset(
     {
         "test_gha_action_versions",
         "test_ntfs_trailing_space_device_name",
+        # DEF-200-274 第八輪：新增 TestParallelTestsCiWiring 改用 `yaml.safe_load`
+        # 解析三支 compat-CI（同 test_gha_action_versions.py「C 節為何可以用
+        # pyyaml」的既有理由），本檔因此加入 yaml 相依 ⇒ 零相依沙箱同樣會塌。
+        "test_smoke_ci_sync",
         "test_windows_forbidden_filename_parity",
         "test_windowsapps_guard_cross_consistency",
     }
