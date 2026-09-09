@@ -10,6 +10,7 @@ from __future__ import annotations
 import ast
 import contextlib
 import functools
+import importlib
 import inspect
 import io
 import json
@@ -3328,6 +3329,156 @@ class ParallelShardRealSubprocessProtocolIntegrationTest(unittest.TestCase):
             elapsed_c, self._SLEEP_SECONDS / 2,
             f"LOUD(stdout+stderr) shard 的寫入耗時 {elapsed_c:.3f}s 過於接近 SLOW shard 的"
             f" sleep（{self._SLEEP_SECONDS}s）——stderr backpressure 回歸復發",
+        )
+
+
+class _TopLevelDispatchFixtureA(unittest.TestCase):
+    """DEF-200-274 第六輪：供 `DispatchGranularity*Test` 使用的頂層 fixture 類別。
+
+    刻意定義在模組層（非某個測試方法內部），使 `__qualname__` 不含 `<locals>`，
+    才能拿來驗證「白名單模組的頂層類別會被 `dispatch_key()` 細分」這條正向路徑
+    ——巢狀類別測（fail-closed 分支）則沿用既有慣例、直接在測試方法內部定義
+    區域類別即可自然取得含 `<locals>` 的 `__qualname__`，不需要本 fixture。
+    """
+
+    def test_ok(self) -> None:
+        pass
+
+
+class DispatchGranularityDispatchKeyTest(unittest.TestCase):
+    """DEF-200-274 第六輪四方獨立複審（Architect/SA/SD/QA）共同點名的缺口：
+    `tools/lib/dispatch_granularity.py` 落地時零測試覆蓋，且該檔 docstring 曾
+    宣稱『兩份 `_PLACEHOLDER_MODULE`／`_module_of()` 複本是否同步由本測試檔
+    看守』——查無實據。本測試類別（與下面兩個姊妹類別）補齊覆蓋，讓這句話
+    從『說了才知道是假的』變成『真的有回歸鎖看守』。
+
+    白名單一律用 `mock.patch.object` 暫時覆寫成只含本模組（`__name__`），
+    不改動真正的 `CLASS_LEVEL_DISPATCH_MODULES`（那兩個真實白名單檔案另有
+    `DispatchGranularityWhitelistHasNoModuleLevelFixturesTest` 專門驗證）。
+    """
+
+    def test_non_whitelisted_module_stays_at_module_granularity(self) -> None:
+        dispatch_granularity = run_root_unittests.dispatch_granularity
+
+        class _Case(unittest.TestCase):
+            def test_ok(self):
+                pass
+
+        case = _Case("test_ok")
+        key = dispatch_granularity.dispatch_key(case)
+        self.assertEqual(key, type(case).__module__, "非白名單模組不該被細分")
+
+    def test_whitelisted_module_top_level_class_is_split_by_class(self) -> None:
+        dispatch_granularity = run_root_unittests.dispatch_granularity
+        case = _TopLevelDispatchFixtureA("test_ok")
+        with mock.patch.object(
+            dispatch_granularity, "CLASS_LEVEL_DISPATCH_MODULES", frozenset({__name__}),
+        ):
+            key = dispatch_granularity.dispatch_key(case)
+        self.assertEqual(
+            key, f"{__name__}.{_TopLevelDispatchFixtureA.__qualname__}",
+            "白名單模組的頂層類別應被細分成 module.ClassName",
+        )
+
+    def test_nested_class_in_whitelisted_module_falls_back_to_module(self) -> None:
+        dispatch_granularity = run_root_unittests.dispatch_granularity
+
+        class _NestedCase(unittest.TestCase):
+            def test_ok(self):
+                pass
+
+        case = _NestedCase("test_ok")
+        self.assertIn(
+            "<locals>", type(case).__qualname__, "本測試前提：受測類別須為巢狀類別")
+        with mock.patch.object(
+            dispatch_granularity, "CLASS_LEVEL_DISPATCH_MODULES", frozenset({__name__}),
+        ):
+            key = dispatch_granularity.dispatch_key(case)
+        self.assertEqual(
+            key, __name__, "巢狀類別必須 fail-closed 退回模組粒度，不得誤判為可細分")
+
+    def test_unresolvable_qualname_falls_back_to_module(self) -> None:
+        dispatch_granularity = run_root_unittests.dispatch_granularity
+        # 用 type() 現造一個一次性類別、`__qualname__` 從一開始就設成模組上不存在
+        # 的名字——刻意不對既有共用 fixture 類別做 mock.patch.object(cls,
+        # "__qualname__", ...)：`__qualname__` 是 dunder slot，mock 的清理階段對它
+        # 呼叫 delattr 會拋 TypeError（immutable type），且若真的清理失敗會讓
+        # 汙染跨測試殘留（本測試曾實際踩過這個坑，見本行的存在理由）。
+        fixture_cls = type(
+            "_UnresolvableQualnameFixture", (unittest.TestCase,), {
+                "test_ok": lambda self: None,
+                "__qualname__": "NameThatIsNotOnTheModule",
+                "__module__": __name__,
+            },
+        )
+        case = fixture_cls("test_ok")
+        with mock.patch.object(
+            dispatch_granularity, "CLASS_LEVEL_DISPATCH_MODULES", frozenset({__name__}),
+        ):
+            key = dispatch_granularity.dispatch_key(case)
+        self.assertEqual(
+            key, __name__, "getattr(module, qualname) 解不回同一個類別物件時必須 fail-closed")
+
+    def test_placeholder_test_is_never_split_even_if_its_module_name_is_whitelisted(
+        self,
+    ) -> None:
+        dispatch_granularity = run_root_unittests.dispatch_granularity
+        placeholder = unittest.loader._FailedTest(
+            "some_module_that_failed_to_import", ImportError("boom"))
+        with mock.patch.object(
+            dispatch_granularity, "CLASS_LEVEL_DISPATCH_MODULES",
+            frozenset({"some_module_that_failed_to_import"}),
+        ):
+            key = dispatch_granularity.dispatch_key(placeholder)
+        self.assertEqual(key, "some_module_that_failed_to_import")
+
+
+class DispatchGranularityPlaceholderConstantStaysInSyncTest(unittest.TestCase):
+    """`dispatch_granularity.py` 為避免與 `run_root_unittests.py` 循環 import 而
+    獨立持有一份 `_PLACEHOLDER_MODULE`／`_module_of()` 複本（見該檔頭 WHY）。
+    本測試是那份 WHY 的機械兌現：任一邊獨立改掉這個值都會讓本測試變紅，而不是
+    悄悄漂移到下一次有人手動比對才發現。
+    """
+
+    def test_placeholder_module_constant_matches(self) -> None:
+        dispatch_granularity = run_root_unittests.dispatch_granularity
+        self.assertEqual(
+            dispatch_granularity._PLACEHOLDER_MODULE,
+            run_root_unittests._PLACEHOLDER_MODULE,
+            "兩份 _PLACEHOLDER_MODULE 複本已經漂移——dispatch_key() 對 placeholder "
+            "測試的判斷會悄悄跑偏",
+        )
+
+    def test_module_of_behaviour_matches_on_a_real_placeholder(self) -> None:
+        dispatch_granularity = run_root_unittests.dispatch_granularity
+        placeholder = unittest.loader._FailedTest("some_module", ImportError("boom"))
+        self.assertEqual(
+            dispatch_granularity._module_of(placeholder),
+            run_root_unittests._module_of(placeholder),
+            "兩份 _module_of() 複本對同一筆 placeholder 測試算出不同結果",
+        )
+
+
+class DispatchGranularityWhitelistHasNoModuleLevelFixturesTest(unittest.TestCase):
+    """DEF-200-274 第六輪四方獨立複審 Architect finding：白名單機制目前完全依賴
+    人工核實『類別間無隱性共享狀態依賴』，最容易被忽略、後果最隱蔽的違反方式是
+    未來有人替白名單模組新增 `setUpModule`／`tearDownModule`（原本整檔在同一個
+    subprocess 跑一次，細分成 (module, class) 後每個 class 各自的 subprocess 都
+    會重跑一次）。本測試把這條最低限度的前提轉成機械不變量。
+    """
+
+    def test_no_whitelisted_module_defines_module_level_fixtures(self) -> None:
+        dispatch_granularity = run_root_unittests.dispatch_granularity
+        problems = []
+        for module_name in sorted(dispatch_granularity.CLASS_LEVEL_DISPATCH_MODULES):
+            module = importlib.import_module(module_name)
+            for fixture_name in ("setUpModule", "tearDownModule"):
+                if hasattr(module, fixture_name):
+                    problems.append(f"{module_name} 定義了 {fixture_name}")
+        self.assertEqual(
+            problems, [],
+            "白名單模組出現模組層 fixture，細分成 (module, class) 派工後會被重複"
+            "執行、破壞其『整檔只跑一次』的假設：\n  " + "\n  ".join(problems),
         )
 
 

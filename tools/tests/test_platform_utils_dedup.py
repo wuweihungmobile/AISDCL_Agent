@@ -205,9 +205,17 @@ def _repo_py_files(root: Path | None = None) -> list[str]:
     `.venv/`／`__pycache__/`（實測 `AISDLC_SDD/` 下有 4,800+ 支這類 `.py`）的效果
     一個都沒少——實測本 repo untracked-not-ignored 的 `.py` 現為 0 支，
     即本次擴面對**耗時**同樣近乎零代價。
+
+    `_zzz_` 前綴排除（DEF-200-274 第六輪）：擴面納入 untracked 後，本函式會與
+    `tools/tests/` 內其他測試（`LoadBalancingRegressionTest`／
+    `ParallelShardStderrBackpressureRegressionTest` 等）動態建立又
+    `addCleanup` 刪除的合成暫存模組（`_zzz_*.py`）產生 TOCTOU 競態——本函式列出
+    時檔案還在，讀取時已被另一條 worker thread 的 cleanup 刪除，觸發
+    `FileNotFoundError`。這些合成檔從不是本鎖要驗的「真實原始碼」，先例見
+    `test_pre_push_dispatcher.py`／`test_ps_engine_ssot.py`（同一批第五輪修法）。
     """
-    return sorted(_git_py_paths(root=root)
-                  | _git_py_paths("-o", "--exclude-standard", root=root))
+    paths = _git_py_paths(root=root) | _git_py_paths("-o", "--exclude-standard", root=root)
+    return sorted(p for p in paths if not Path(p).name.startswith("_zzz_"))
 
 
 def _scan_repo_py_for(pattern: re.Pattern[str], root: Path | None = None) -> list[str]:

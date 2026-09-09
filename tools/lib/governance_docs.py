@@ -467,6 +467,12 @@ _GOVERNANCE_DOCS = (
     # R137 收尾：DEF-200-274 第五輪四方獨立複審（全庫 TOCTOU 排查＋Ctrl-C／計時收斂） round-label-ok
     # ＋護欄層對帳與到期義務兌現。即刻登記。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R137_Scan_Findings.md",
+    # R138 收尾：DEF-200-274 第六輪（頭重腳輕修法＋補漏 TOCTOU 排除）＋護欄層對帳。 round-label-ok
+    # 即刻登記。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R138_Scan_Findings.md",
+    # R139 收尾：DEF-200-274 第六輪四方獨立複審收斂（補齊回歸測試＋訂正 docstring round-label-ok
+    # 假宣稱＋證據帳本斷鏈）＋護欄層對帳。即刻登記。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R139_Scan_Findings.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/{CrossPlatform,Quota}_*.md`。這**不是**把具名

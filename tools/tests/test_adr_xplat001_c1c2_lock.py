@@ -682,7 +682,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 7607,
+    "test_adr_xplat001_c1c2_lock.py": 7640,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 3839,
@@ -723,7 +723,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_ntfs_trailing_space_device_name.py": 760,
     "test_onboarding_parity_interlock.py": 233,
     "test_platform_neutral_paths.py": 5759,
-    "test_platform_utils_dedup.py": 1104,
+    "test_platform_utils_dedup.py": 1112,
     "test_pre_commit_dispatcher_sigpipe.py": 964,
     "test_pre_push_dispatcher.py": 686,
     "test_ps1_bom.py": 248,
@@ -732,7 +732,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_python_c_percent_shim.py": 119,
     "test_quota_policy.py": 3396,
     "test_root_infra_parity.py": 441,
-    "test_run_root_unittests.py": 3335,
+    "test_run_root_unittests.py": 3486,
     "test_sanitize_component_frozen_sdd_versions_lock.py": 340,
     "test_schedule_capability_parity.py": 626,
     "test_script_scan_surface_ssot.py": 391,
@@ -1637,6 +1637,23 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "[非淨減法輪][全額功能軌] 本檔自身逐檔漂移收斂（新增前一筆稽核列＋回歸鎖淨額"
      "上限到期義務兌現列＋前綴重寫接鏈列＋本列本身的行數）。逐項見 "
      "CrossPlatform_R137_Scan_Findings.md。"),
+    ("R138", 95925, 95942, 17,
+     "[非淨減法輪][全額功能軌] DEF-200-274 第六輪：test_platform_utils_dedup.py 補"
+     "_zzz_ 合成暫存模組排除（與 test_pre_push_dispatcher.py／test_ps_engine_ssot.py"
+     "同型 TOCTOU 病灶，前五輪排查未涵蓋此檔，+8）；本檔自身逐檔漂移收斂（本列本身"
+     "＋_FROZEN_PREFIX_REWRITE_LEDGER 接鏈列，+8）。逐項見 "
+     "CrossPlatform_R138_Scan_Findings.md。"),
+    ("R139", 95942, 96117, 175,
+     "[非淨減法輪][回歸鎖軌全額申報，見 _REGRESSION_LANE_LOG 同輪列] DEF-200-274 "
+     "第六輪四方獨立複審（Architect/SA/"
+     "SD/QA）共同點名：tools/lib/dispatch_granularity.py 落地時零測試覆蓋，且其"
+     "docstring 宣稱『由 test_run_root_unittests.py 回歸鎖看守』查無實據——補上"
+     "DispatchGranularityDispatchKeyTest／PlaceholderConstantStaysInSyncTest／"
+     "WhitelistHasNoModuleLevelFixturesTest 三個測試類別（`test_run_root_unittests."
+     "py` 3335→3486，+151，全額歸回歸鎖軌），docstring 訂正為據實描述；本檔自身"
+     "逐檔漂移收斂（本列本身＋`_FROZEN_PREFIX_REWRITE_LEDGER` 接鏈列＋"
+     "`_REGRESSION_LANE_LOG` 新列本身＋`_REPIN_NET_CAP_SCHEDULE` 到期義務兌現列，"
+     "+23）。逐項見 CrossPlatform_R139_Scan_Findings.md。"),
 )
 
 
@@ -1717,6 +1734,9 @@ _REPIN_NET_CAP_SCHEDULE: tuple[tuple[int, int], ...] = (
                   # 到期（`_REPIN_NET_CAP_DUE_ROUND=135`）。
     (137, 547),   # 到期輪兌現（DEF-200-274 第五輪四方獨立複審收尾）：cap 降到到期 round-label-ok
                   # 目標本身（同既有判例）。本輪剛好到期（`_REPIN_NET_CAP_DUE_ROUND=137`）。
+                  # 同輪重新武裝下一段：步伐維持 1（已是最小正整數步伐）。
+    (139, 546),   # 到期輪兌現（DEF-200-274 第六輪四方獨立複審收斂）：cap 降到到期 round-label-ok
+                  # 目標本身（同既有判例）。本輪剛好到期（`_REPIN_NET_CAP_DUE_ROUND=139`）。
                   # 同輪重新武裝下一段：步伐維持 1（已是最小正整數步伐）。
 )
 #: 生效點＝首列輪號、現行上限＝末列上限，**皆由表導出不另立常數**（R73 判例：一份知識一個家）。
@@ -1831,6 +1851,13 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "`ParallelShardWorkerThreadBaseExceptionDoesNotEscapeTest`（Architect finding "
      "1(a)）＋本檔自身逐檔漂移收斂列（含回歸鎖軌與前綴重寫接鏈列本身），全額歸本軌"
      "（記帳誠實度分類）。逐項見 CrossPlatform_R136_Scan_Findings.md。"),
+    ("R139", 175, "DEF-200-274 第六輪四方獨立複審（Architect/SA/SD/QA）共同點名："
+     "tools/lib/dispatch_granularity.py 零測試覆蓋——補上 "
+     "`DispatchGranularityDispatchKeyTest`／`DispatchGranularityPlaceholderConstant"
+     "StaysInSyncTest`／`DispatchGranularityWhitelistHasNoModuleLevelFixturesTest`"
+     "（`test_run_root_unittests.py` +151）＋本檔自身逐檔漂移收斂列（含回歸鎖軌與"
+     "前綴重寫接鏈列本身，+20），全額歸本軌（記帳誠實度分類）。逐項見 "
+     "CrossPlatform_R139_Scan_Findings.md。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -2003,8 +2030,8 @@ def net_cap_schedule_problems(
 #: R135 DEF-200-274 第四輪四方複審收尾兌現 round-label-ok：cap 降到目標本身（548，見
 #: `(135, 548)` 列），同輪重新武裝下一段：目標 547 嚴格低於現行 cap 548（步伐已降至
 #: 整數下限 1，無法再變小，維持同步伐、僅前進到期輪，續守「目標嚴格低於現行 cap」）。
-_REPIN_NET_CAP_DUE_ROUND = 139  # round-label-ok：到期輪＝兌現輪+2（lookahead 判準的活體對照）
-_REPIN_NET_CAP_DUE_TARGET = 546  # 步伐 1，嚴格低於 cap 547（R137 重新武裝） round-label-ok
+_REPIN_NET_CAP_DUE_ROUND = 141  # round-label-ok：到期輪＝兌現輪+2（lookahead 判準的活體對照）
+_REPIN_NET_CAP_DUE_TARGET = 545  # 步伐 1，嚴格低於 cap 546（R139 重新武裝） round-label-ok
 
 #: DEF-200-121：到期輪自身的後設鎖——`_REPIN_NET_CAP_DUE_ROUND` 只准落在「最近稽核輪
 #: ＋ lookahead」以內（歷史母體 85..113 的到期輪一律＝上一次兌現輪 +2）。可延期的到期日
@@ -2071,10 +2098,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 145
+_REPIN_LOG_FROZEN_PREFIX_LEN = 147
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "6843feaf786c0bf246b22a4992d1e72ee76f448b12336625d66aaa9317e36345")
+    "7f78df45354f1c22764999d79236785e2f100011a02dfc6ed0b76403bd69bcc5")
 
 
 def repin_log_history_digest(
@@ -2277,6 +2304,12 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # R137：DEF-200-274 第五輪四方獨立複審收尾——全庫 TOCTOU 病灶排查修復＋回歸 round-label-ok
     # 淨額上限到期義務兌現列＋本檔自身逐檔漂移，凍結前綴延伸涵蓋新增列本身。
     ("R137", "08ffdc430461", "6843feaf786c", "DEF-200-274"),
+    # R138：DEF-200-274 第六輪——test_platform_utils_dedup.py 補 _zzz_ 排除（前五輪 round-label-ok
+    # 排查未涵蓋此檔）＋本檔自身逐檔漂移，凍結前綴延伸涵蓋新增列本身。
+    ("R138", "6843feaf786c", "7b88d4c61478", "DEF-200-274"),
+    # R139：DEF-200-274 第六輪四方獨立複審收斂——補齊 dispatch_granularity.py round-label-ok
+    # 零測試覆蓋缺口，凍結前綴延伸涵蓋新增列本身。
+    ("R139", "7b88d4c61478", "7f78df45354f", "DEF-200-274"),
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

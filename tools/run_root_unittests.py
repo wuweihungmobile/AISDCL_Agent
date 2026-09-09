@@ -55,7 +55,7 @@ _TESTS_DIR = Path(__file__).resolve().parent / "tests"
 # 下限釘選：低於此數＝測試大規模靜默消失（目錄/pattern/路徑壞掉），紅燈。
 # 刻意刪減測試時同步下修；新增測試累積到吃掉**零相依鑑別力餘裕**的一半即被提醒重釘、
 # 吃掉四分之三即讓閘門變紅（判準＝`tools/lib/min_tests_margin.py`，見下方 DEF-200-170 段）。
-MIN_TESTS = 4045  # 🔴 重釘 4042 → 4045（方向＝收緊；2026-09-09，DEF-200-274 第四輪第二次對抗式複審收斂批）：discovery 探針實測直接填入、零加減推算；成長來源＝`ParallelShardWorkerThreadBaseExceptionDoesNotEscapeTest`。歷來完整逐輪沿革（含每次重釘理由）已搬至 docs/06_quality/CrossPlatform_Guard_Line_History_MinTests.md，本行不再原地累加。
+MIN_TESTS = 4054  # 🔴 重釘 4045 → 4054（方向＝收緊；2026-09-09，DEF-200-274 第六輪四方獨立複審收斂批）：discovery 探針實測直接填入、零加減推算；成長來源＝`DispatchGranularityDispatchKeyTest`／`DispatchGranularityPlaceholderConstantStaysInSyncTest`／`DispatchGranularityWhitelistHasNoModuleLevelFixturesTest` 三個測試類別。歷來完整逐輪沿革（含每次重釘理由）已搬至 docs/06_quality/CrossPlatform_Guard_Line_History_MinTests.md，本行不再原地累加。
 
 # R57「人工 ratchet 自己會腐化」（R15 釘完連續 11 輪沒人重釘）的兩層解：① WARN 只印不擋、
 # ② 保鮮期斷言會紅，且兩層門檻刻意不同，否則 WARN 一響閘門已紅、①毫無意義。立意成立，
@@ -127,6 +127,7 @@ from lib.windows_skip_tags import (  # noqa: E402, I001
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import dispatch_granularity  # noqa: E402  ← DEF-200-274 第六輪：平行派工鍵細分
 import failure_log_rotation  # noqa: E402  ← DEF-200-162：失敗明細檔名／輪替 SSOT
 import min_tests_margin  # noqa: E402  ← DEF-200-170：MIN_TESTS 重釘提醒的判準（零相依餘裕軸）
 import parallel_shard  # noqa: E402  ← DEF-200-274：本機平行執行（opt-in，見 AUTOSDD_PARALLEL_TESTS）
@@ -529,7 +530,8 @@ def run_with_floor(start_dir: Path, min_tests: int) -> int:
         return 1  # 量測本身已不可信，fail-closed：不放行、也不假裝跑完
     placeholders, known_ids = report_discovery_placeholders(suite), {t.id() for t in _flatten(suite)}  # DEF-200-233：兩者都必須在 run() **之前**讀——`TestSuite.run()` 會把跑完的每一支就地換成 `None`（`_removeTestAtIndex`），WHY 全文見 `windows_skip_tags.report_windows_skip_tag_exemption_problems`
     warn_ratchet_drift(count, min_tests, suite_modules(suite))
-    result = (parallel_shard.run_parallel(suite, start_dir, suite_modules(suite))
+    dispatch_units = dispatch_granularity.suite_dispatch_units(_flatten(suite))
+    result = (parallel_shard.run_parallel(suite, start_dir, dispatch_units)
         if parallel_shard.enabled() else unittest.TextTestRunner(verbosity=1).run(suite))
     report_module_timings(result)
     report_windows_native_skips(result)

@@ -176,7 +176,11 @@ SPECIAL_FILES: dict[str, int] = {
     # DEF-200-274 第五輪四方獨立複審：新增 report_module_timings()（負載不均
     # 觀測性，供 QA/Architect finding 收斂）。docstring 已壓成單行，函式本體
     # 8 行皆為不可壓縮的真實邏輯（讀 module_timings／排序／逐行印出）。
-    "../tools/run_root_unittests.py": 771,
+    # DEF-200-274 第六輪：修「頭重腳輕」根因（單一測試占平行總耗時 65%，見
+    # CrossPlatform_DEF200274_Parallel_Tests_Evidence.md 第六輪）——核心判準邏輯
+    # 已抽到 tools/lib/dispatch_granularity.py（先例：ci_liveness.py），本檔只餘
+    # 1 行 import ＋ 1 行轉呼叫（`suite_dispatch_units()`），確認不可再壓縮。
+    "../tools/run_root_unittests.py": 773,
     "../.claude/hooks/context_budget_guard.py": 1089,
     # commit fab2d0e：runtime_carrier_verdict() 誤判修復。已抽出可抽的部分
     # （_SPAWN_FAILURE_RE／is_spawn_failure → tools/lib/spawn_failure.py，先例：

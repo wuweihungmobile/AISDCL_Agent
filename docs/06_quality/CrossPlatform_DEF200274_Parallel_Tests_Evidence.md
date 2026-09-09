@@ -540,3 +540,64 @@ passed!`。
 - **本輪 TOCTOU 排查僅涵蓋 `tools/tests/`**：未對 `AutoClaude/tests/`／`AISDLC_SDD/`
   等其他樹做同型排查，若那些樹底下也有平行測試合成暫存檔案的類似風險，仍可能
   有漏網，逐項見 `CrossPlatform_R137_Scan_Findings.md` §5。
+
+## 第六輪：頭重腳輕根因修法＋四方獨立複審收斂（2026-09-09）
+
+### 背景
+
+第五輪 QA 量到 `test_doc_loc_baseline_freshness_r60.py` 單模組占平行總耗時
+65%，是「頭重腳輕」的直接根因，但當輪未落地修法（列入誠實劃界）。掌舵者直接
+提問，要求真正解決此問題並派 Architect/SA/SD/QA 四方獨立審查（各自不共享
+上下文，分別跑）核對三題：①帳本問題是否解決、②多CPU測試功能是否完備、
+③是否有頭重腳輕分配不均。
+
+### 實作（收尾單人窗口）
+
+實測定位真正離群值是單一測試方法而非整個檔案：
+`TestR67R3ThisFileMakesNoUnstatedPlatformAssumption.
+test_every_lock_in_this_file_holds_under_every_simulated_platform` 佔全模組
+157.52s 的 118.49s（≈75%）。新增 `tools/lib/dispatch_granularity.py`：平行
+派工鍵改採白名單模組 (module, class) 細分（`unittest.TestLoader.
+loadTestsFromName()` 原生支援點號路徑，`parallel_shard.py` worker 協定零
+改動），其餘模組維持整模組派工。白名單納入兩檔：
+`test_doc_loc_baseline_freshness_r60`（36 類別）與修完第一熱點後浮現的新
+單一最重模組 `test_archive_defect_log`（224.5s，36 類別）。端到端重驗時
+親自複現並修復第五輪排查漏掉的第 11 個同型 TOCTOU 站點
+（`test_platform_utils_dedup.py`）。逐項見 `CrossPlatform_R138_Scan_
+Findings.md`。
+
+### 四方獨立複審結果（Architect/SA/SD/QA，各自獨立跑）
+
+四方三題裁決一致：**VERDICT_LEDGER_RESOLVED=partial**／
+**VERDICT_FEATURE_COMPLETE=partial**／**VERDICT_LOAD_BALANCED=partial**。
+共同確認核心技術修法真實且可獨立重現（QA 實測序列 794.00s vs 平行 4-worker
+300~308s，加速比 ≈2.6x，強力推翻第三輪「幾乎零加速比」的舊描述；SD 另寫
+腳本對真實 4045 支測試逐鍵回灌 `loadTestsFromName()` 核對計數，139 個派工鍵
+0 筆不符）。共同點名的缺口（本輪已逐項修復）：
+
+1. **`dispatch_granularity.py` 落地時零測試覆蓋**，且其 docstring 宣稱
+   「由 `test_run_root_unittests.py` 回歸鎖看守」查無實據——已修復：補上
+   `DispatchGranularityDispatchKeyTest`／
+   `DispatchGranularityPlaceholderConstantStaysInSyncTest`／
+   `DispatchGranularityWhitelistHasNoModuleLevelFixturesTest` 三個測試類別
+   （涵蓋白名單細分／fail-closed 安全網／placeholder 特例／兩份
+   `_PLACEHOLDER_MODULE` 複本同步／白名單模組無模組層 fixture 五個面向），
+   docstring 訂正為據實描述。
+2. **本檔（證據檔）缺〈第六輪〉章節、主缺陷帳本 DEF-200-274 列未同步**——
+   已修復：本節即為該章節；`AutoSDD_Defect_Log.md` 該列已回填。
+
+逐項複審記錄與修復見 `CrossPlatform_R139_Scan_Findings.md`。
+
+### 誠實劃界（本輪仍未解決）
+
+- **Windows 真機驗證**：仍未解，沿用第五輪既有記載，本輪未觸及。
+- **單一測試 118~134s 的結構性下限**：`test_every_lock_in_this_file_holds_
+  under_every_simulated_platform` 本身仍需 118~134s（依機器負載變動），本輪
+  只解決「不拖累其他測試」，未嘗試縮短該測試自身邏輯（其職責是逐一模擬多
+  平台重跑本檔全部鎖，縮短需求須先確認不犧牲覆蓋率，非本輪範圍）。四方
+  獨立確認：4-worker wall-clock 理論最佳值（總 CPU 時間 / 4）與實測仍有
+  約 29~46% 落差，機制仍是手動白名單、非自動負載感知派工——下一個新熱點
+  出現時仍需人工重新發現與加白名單（SA 建議：補一份正式 runbook 取代目前
+  純靠 docstring 範例的操作指引，本輪未落地，留供後續）。
+- **本輪 TOCTOU 補漏排查僅涵蓋端到端重驗實際命中的一個站點**：未對整棵
+  `tools/tests/` 樹重做第五輪等級的逐檔普查，不保證這是最後一個漏網站點。
