@@ -180,7 +180,11 @@ SPECIAL_FILES: dict[str, int] = {
     # CrossPlatform_DEF200274_Parallel_Tests_Evidence.md 第六輪）——核心判準邏輯
     # 已抽到 tools/lib/dispatch_granularity.py（先例：ci_liveness.py），本檔只餘
     # 1 行 import ＋ 1 行轉呼叫（`suite_dispatch_units()`），確認不可再壓縮。
-    "../tools/run_root_unittests.py": 773,
+    # DEF-200-274 第七輪：新增負載不均自動偵測（掌舵者要求「未來新熱點不再只能
+    # 靠人眼」）。核心邏輯與印出接線皆已抽到 tools/lib/dispatch_imbalance.py（同一
+    # 先例），本檔只餘 1 行 import ＋ 1 行轉呼叫（`report_dispatch_imbalance()`），
+    # 確認不可再壓縮，淨增 +2 行（773→775）。
+    "../tools/run_root_unittests.py": 775,
     "../.claude/hooks/context_budget_guard.py": 1089,
     # commit fab2d0e：runtime_carrier_verdict() 誤判修復。已抽出可抽的部分
     # （_SPAWN_FAILURE_RE／is_spawn_failure → tools/lib/spawn_failure.py，先例：

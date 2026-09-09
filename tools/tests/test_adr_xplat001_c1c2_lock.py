@@ -682,7 +682,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 7640,
+    "test_adr_xplat001_c1c2_lock.py": 7662,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 3839,
@@ -732,7 +732,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_python_c_percent_shim.py": 119,
     "test_quota_policy.py": 3396,
     "test_root_infra_parity.py": 441,
-    "test_run_root_unittests.py": 3486,
+    "test_run_root_unittests.py": 3587,
     "test_sanitize_component_frozen_sdd_versions_lock.py": 340,
     "test_schedule_capability_parity.py": 626,
     "test_script_scan_surface_ssot.py": 391,
@@ -1654,6 +1654,19 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "逐檔漂移收斂（本列本身＋`_FROZEN_PREFIX_REWRITE_LEDGER` 接鏈列＋"
      "`_REGRESSION_LANE_LOG` 新列本身＋`_REPIN_NET_CAP_SCHEDULE` 到期義務兌現列，"
      "+23）。逐項見 CrossPlatform_R139_Scan_Findings.md。"),
+    ("R140", 96117, 96240, 123,
+     "[非淨減法輪][回歸鎖軌全額申報，見 _REGRESSION_LANE_LOG 同輪列] DEF-200-274 "
+     "第七輪：新增負載不均自動偵測（掌舵者要求「未來新熱點不再只能靠人眼」）——"
+     "DispatchImbalanceDetectionTest／ReportDispatchImbalanceTest 兩個測試類別"
+     "（`test_run_root_unittests.py` 3486→3570，+84）；四方獨立複審（Architect/"
+     "SA/SD/QA）共同點名並由 SD 給出修法的 `fair_share` 分母真缺陷，補回歸測試 "
+     "`test_fewer_units_than_workers_and_balanced_flags_nothing`"
+     "（`test_run_root_unittests.py` 3570→3587，+17），全額歸回歸鎖軌；本檔"
+     "（`test_adr_xplat001_c1c2_lock.py`）自身逐檔漂移 +22（新增稽核列＋"
+     "`_REGRESSION_LANE_LOG` 新列＋`_FROZEN_PREFIX_REWRITE_LEDGER` 接鏈列＋"
+     "本列自身的行數）。逐項見 docs/06_quality/CrossPlatform_R140_Scan_Findings.md"
+     "；詳細證據見 docs/06_quality/CrossPlatform_DEF200274_Parallel_Tests_"
+     "Evidence.md〈第七輪〉。"),
 )
 
 
@@ -1858,6 +1871,12 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "（`test_run_root_unittests.py` +151）＋本檔自身逐檔漂移收斂列（含回歸鎖軌與"
      "前綴重寫接鏈列本身，+20），全額歸本軌（記帳誠實度分類）。逐項見 "
      "CrossPlatform_R139_Scan_Findings.md。"),
+    ("R140", 123, "DEF-200-274 第七輪：新增負載不均自動偵測回歸測試"
+     "`DispatchImbalanceDetectionTest`／`ReportDispatchImbalanceTest`（"
+     "`test_run_root_unittests.py` +84）＋四方獨立複審共同點名並由 SD 給出"
+     "修法的 `fair_share` 分母真缺陷之回歸鎖 +17＋本檔自身逐檔漂移收斂列"
+     "（本列本身＋主表新列＋接鏈列的行數）+22，全額歸本軌（記帳誠實度分類）。"
+     "逐項見 CrossPlatform_R140_Scan_Findings.md。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -2098,10 +2117,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 147
+_REPIN_LOG_FROZEN_PREFIX_LEN = 148
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "7f78df45354f1c22764999d79236785e2f100011a02dfc6ed0b76403bd69bcc5")
+    "d27ba8c13f10de4d4f305e28c976f6a8cb8dcd3f47f15ddb50f4aeeaf45449d3")
 
 
 def repin_log_history_digest(
@@ -2310,6 +2329,9 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # R139：DEF-200-274 第六輪四方獨立複審收斂——補齊 dispatch_granularity.py round-label-ok
     # 零測試覆蓋缺口，凍結前綴延伸涵蓋新增列本身。
     ("R139", "7b88d4c61478", "7f78df45354f", "DEF-200-274"),
+    # R140：DEF-200-274 第七輪——新增負載不均自動偵測（dispatch_imbalance.py）＋ round-label-ok
+    # 四方獨立複審共同點名的 fair_share 分母真缺陷回歸鎖，凍結前綴延伸涵蓋新增列本身。
+    ("R140", "7f78df45354f", "d27ba8c13f10", "DEF-200-274"),
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

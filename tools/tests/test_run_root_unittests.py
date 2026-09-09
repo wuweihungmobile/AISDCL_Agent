@@ -3482,5 +3482,106 @@ class DispatchGranularityWhitelistHasNoModuleLevelFixturesTest(unittest.TestCase
         )
 
 
+class DispatchImbalanceDetectionTest(unittest.TestCase):
+    """DEF-200-274 第七輪：`tools/lib/dispatch_imbalance.py` 純函式的紅綠自證
+    （掌舵者要求「自動偵測未來新熱點，不再只能靠人眼」）。純函式邏輯測完後，
+    再驗 `report_dispatch_imbalance()` 的印出接線本身（見下方
+    `ReportDispatchImbalanceTest`）。
+    """
+
+    def test_balanced_timings_flag_nothing(self) -> None:
+        dispatch_imbalance = run_root_unittests.dispatch_imbalance
+        # 4 個單位、worker=4，每個單位恰好等於公平均分基準 → 倍率=1.0，不觸發。
+        timings = {"a": 10.0, "b": 10.0, "c": 10.0, "d": 10.0}
+        self.assertEqual(dispatch_imbalance.detect_imbalance(timings, worker_count=4), [])
+
+    def test_single_dominant_unit_is_flagged_with_correct_ratio(self) -> None:
+        dispatch_imbalance = run_root_unittests.dispatch_imbalance
+        # 總耗時 130s／worker=4 → 公平均分基準 32.5s；"hot" 耗時 100s → 倍率
+        # ≈3.08，遠超預設門檻 1.5，其餘三個各 10s（倍率 <1）不該出現。
+        timings = {"hot": 100.0, "a": 10.0, "b": 10.0, "c": 10.0}
+        flagged = dispatch_imbalance.detect_imbalance(timings, worker_count=4)
+        self.assertEqual(len(flagged), 1, f"只有 hot 該被標記，實際：{flagged}")
+        key, elapsed, ratio = flagged[0]
+        self.assertEqual(key, "hot")
+        self.assertEqual(elapsed, 100.0)
+        self.assertAlmostEqual(ratio, 100.0 / 32.5, places=6)
+
+    def test_multiple_flagged_units_sorted_by_ratio_descending(self) -> None:
+        dispatch_imbalance = run_root_unittests.dispatch_imbalance
+        timings = {"mid_hot": 60.0, "hottest": 100.0, "cold": 5.0}
+        # 公平均分基準 = 165/4 = 41.25；60/41.25≈1.45（未過門檻）、100/41.25≈2.42（過）。
+        # 刻意讓其中一個落在門檻附近但不過，驗證「只標超過門檻的」而非「全部排序」。
+        flagged = dispatch_imbalance.detect_imbalance(timings, worker_count=4)
+        keys = [item[0] for item in flagged]
+        self.assertEqual(keys, ["hottest"], f"mid_hot 倍率未過門檻不該被標記，實際：{flagged}")
+
+    def test_empty_timings_returns_empty(self) -> None:
+        dispatch_imbalance = run_root_unittests.dispatch_imbalance
+        self.assertEqual(dispatch_imbalance.detect_imbalance({}, worker_count=4), [])
+
+    def test_non_positive_worker_count_returns_empty(self) -> None:
+        dispatch_imbalance = run_root_unittests.dispatch_imbalance
+        timings = {"hot": 100.0, "a": 1.0}
+        self.assertEqual(dispatch_imbalance.detect_imbalance(timings, worker_count=0), [])
+        self.assertEqual(dispatch_imbalance.detect_imbalance(timings, worker_count=-1), [])
+
+    def test_fewer_units_than_workers_and_balanced_flags_nothing(self) -> None:
+        """第七輪四方獨立複審（Architect/SA/SD/QA）共同點名並經 QA 合成場景證實
+        的真缺陷：派工單位數 < worker_count 時，若分母誤用未經 cap 的名目
+        `worker_count`，即使所有單位耗時完全相同也會被全數誤判為不均（QA 實測：
+        3 個耗時皆 20.0 的單位、worker_count=8 時倍率恆 2.67、全部 3 個都被標記）。
+        本測試釘住修復後的正確行為：`min(worker_count, len(module_timings))`
+        當分母，完全均衡的資料在任何 worker_count 下都不該被標記。
+        """
+        dispatch_imbalance = run_root_unittests.dispatch_imbalance
+        timings = {"a": 20.0, "b": 20.0, "c": 20.0}
+        for worker_count in (2, 3, 4, 8, 50):
+            with self.subTest(worker_count=worker_count):
+                self.assertEqual(
+                    dispatch_imbalance.detect_imbalance(timings, worker_count), [],
+                    f"3 個完全均衡的單位在 worker_count={worker_count} 下不該被標記",
+                )
+
+
+class ReportDispatchImbalanceTest(unittest.TestCase):
+    """`dispatch_imbalance.report_dispatch_imbalance()` 的印出接線：序列模式
+    （無 `module_timings`）與「有均衡資料但無不均」皆不印；有不均時印出可執行的
+    建議（不是只印數字，讓讀者不必再自己推導該做什麼）。
+    """
+
+    class _FakeResult:
+        def __init__(self, module_timings=None):
+            if module_timings is not None:
+                self.module_timings = module_timings
+
+    def test_sequential_result_without_module_timings_prints_nothing(self) -> None:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            run_root_unittests.dispatch_imbalance.report_dispatch_imbalance(
+                self._FakeResult(), worker_count=4,
+            )
+        self.assertEqual(buf.getvalue(), "")
+
+    def test_balanced_module_timings_prints_nothing(self) -> None:
+        buf = io.StringIO()
+        result = self._FakeResult({"a": 10.0, "b": 10.0})
+        with contextlib.redirect_stdout(buf):
+            run_root_unittests.dispatch_imbalance.report_dispatch_imbalance(result, worker_count=2)
+        self.assertEqual(buf.getvalue(), "")
+
+    def test_imbalanced_module_timings_prints_flagged_key_and_suggestion(self) -> None:
+        buf = io.StringIO()
+        result = self._FakeResult({"hot": 100.0, "a": 1.0, "b": 1.0, "c": 1.0})
+        with contextlib.redirect_stdout(buf):
+            run_root_unittests.dispatch_imbalance.report_dispatch_imbalance(result, worker_count=4)
+        output = buf.getvalue()
+        self.assertIn("hot", output)
+        self.assertIn(
+            "dispatch_granularity.py", output,
+            "建議文字必須指向現成的白名單機制，不能只丟數字給讀者",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

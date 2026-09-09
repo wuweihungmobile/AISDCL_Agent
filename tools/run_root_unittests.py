@@ -128,6 +128,7 @@ from lib.windows_skip_tags import (  # noqa: E402, I001
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import dispatch_granularity  # noqa: E402  ← DEF-200-274 第六輪：平行派工鍵細分
+import dispatch_imbalance  # noqa: E402  ← DEF-200-274 第七輪：負載不均自動偵測
 import failure_log_rotation  # noqa: E402  ← DEF-200-162：失敗明細檔名／輪替 SSOT
 import min_tests_margin  # noqa: E402  ← DEF-200-170：MIN_TESTS 重釘提醒的判準（零相依餘裕軸）
 import parallel_shard  # noqa: E402  ← DEF-200-274：本機平行執行（opt-in，見 AUTOSDD_PARALLEL_TESTS）
@@ -534,6 +535,7 @@ def run_with_floor(start_dir: Path, min_tests: int) -> int:
     result = (parallel_shard.run_parallel(suite, start_dir, dispatch_units)
         if parallel_shard.enabled() else unittest.TextTestRunner(verbosity=1).run(suite))
     report_module_timings(result)
+    dispatch_imbalance.report_dispatch_imbalance(result, parallel_shard.worker_count())
     report_windows_native_skips(result)
     report_all_skips(result)
     # R67-F11：標籤漏標＝上面那行標題低報 ⇒ fail-closed。與收集面缺口（見

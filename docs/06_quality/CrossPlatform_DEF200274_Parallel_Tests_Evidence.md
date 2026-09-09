@@ -601,3 +601,102 @@ Findings.md`。
   純靠 docstring 範例的操作指引，本輪未落地，留供後續）。
 - **本輪 TOCTOU 補漏排查僅涵蓋端到端重驗實際命中的一個站點**：未對整棵
   `tools/tests/` 樹重做第五輪等級的逐檔普查，不保證這是最後一個漏網站點。
+
+## 第七輪：負載不均自動偵測 + 四方獨立複審收斂（2026-09-09）
+
+### 背景
+
+第六輪〈誠實劃界〉記載：白名單機制（`CLASS_LEVEL_DISPATCH_MODULES`）仍是
+手動——下一個新熱點出現時，需要有人親自讀 `report_module_timings()` 印出的
+「⏱ 模組耗時排行」、自己心算比例，才會發現該加進白名單。掌舵者直接提問，
+要求「設計自動偵測機制」取代「靠人眼發現新熱點」，並再次派 Architect/SA/SD/QA
+四方獨立審查（各自不共享上下文，分別跑）核對三題：①帳本問題是否解決、
+②多CPU測試功能是否完備、③是否有頭重腳輕分配不均。
+
+### 實作（收尾單人窗口）
+
+新增 `tools/lib/dispatch_imbalance.py`：純函式 `detect_imbalance(module_timings,
+worker_count, ratio_threshold=1.5)` 讀 `parallel_shard.run_parallel()` 已收集的
+`module_timings`，算出每個派工單位耗時相對「公平均分基準」（總耗時 /
+`min(worker_count, len(module_timings))`）的倍率，超過門檻即回傳（依倍率遞減
+排序）；`report_dispatch_imbalance()` 在平行模式跑完後印出警告與可執行建議
+（指向既有的白名單機制）。`tools/run_root_unittests.py::run_with_floor()` 在
+`report_module_timings(result)` 之後多加一行呼叫轉接。核心邏輯與印出接線皆
+抽到獨立檔案（同 `dispatch_granularity.py` 先例）：`run_root_unittests.py`
+特殊層行數棘輪原訂 773，落地當下無餘裕，抽檔後只餘 1 行 import + 1 行轉呼叫，
+淨增 +2 行（773→775，已同步 `AutoClaude/tools/check_loc_budget.py`）。
+
+### 四方獨立複審結果（Architect/SA/SD/QA，各自獨立跑）
+
+四方裁決三題時方向一致但理由略有差異（詳見下方逐項）：
+
+- **Architect**：`VERDICT_LEDGER_RESOLVED=partial`（無倒退）／
+  `VERDICT_FEATURE_COMPLETE=partial`／`VERDICT_LOAD_BALANCED=partial`。實測
+  `wc -l tools/run_root_unittests.py`＝775，與棘輪表逐字吻合；`ruff check`
+  全乾淨；`test_run_root_unittests.py` 143 個測試全綠。點名 F1（major）：
+  `.github/workflows/*.yml` 三支與 `tools/git-hooks/pre-push` 皆未設定
+  `AUTOSDD_PARALLEL_TESTS`，偵測結果只印 stdout、不落檔、不影響 rc——「自動」
+  目前僅對手動 opt-in 平行模式的個別開發者生效，CI/pre-push 完全看不到。
+  F2（major，潛伏未觸發）：`fair_share` 分母用未經 cap 的名目 `worker_count`，
+  實測「1 個單位、worker=8」與「3 個完全平衡的單位、worker=8」皆被誤判為不均。
+- **SA**：`VERDICT_LEDGER_RESOLVED=open`（F1／F2 兩個 blocking：本輪新增的
+  `_GUARD_LINES_REPIN_LOG` 列引用了當時尚不存在的〈第七輪〉章節，且
+  `AutoSDD_Defect_Log.md` DEF-200-274 列未同步本輪——與第六輪複審點名過的同型
+  缺口重演）／`VERDICT_FEATURE_COMPLETE=partial`／`VERDICT_LOAD_BALANCED=open`
+  （本輪對派工演算法本身零改動，純觀測工具不是負載平衡改善）。獨立核實
+  `AutoClaude/pyproject.toml` 與 30 份 `AISDLC_SDD/AISDLC_SDD_v0.*/pytest.ini`
+  逐一比對內容完全相同、皆無平行化設定，佐證「多 CPU 測試」僅涵蓋根層
+  `tools/tests/`；`AutoClaude/tools/run_local_nightly.sh` 呼叫本 runner 時亦
+  未設定該環境變數。
+- **SD**：獨立寫合成場景實測證實 F2「不是邊緣情況偶爾誤報，而是這個公式在
+  `dispatch units < worker_count` 整個區間裡都不是在測『不均』，而是在測
+  `worker_count` 設定值本身」（單一單位倍率恆等於 worker_count，與 elapsed
+  數值無關）；確認唯一生產路徑（69 支測試檔＋白名單細分後遠大於 worker 上限 8）
+  結構上不會踩到，但公式正確性不該依賴這個僥倖。給出一行修法：分母改用
+  `min(worker_count, len(module_timings))`。
+- **QA**：`VERDICT_LOAD_BALANCED=fixed`（唯一與其他三方不同的裁決——親測全套
+  4062 支測試、139 個派工單位、4 worker，`grep "🚨"` 零命中，無誤報也無舊熱點
+  假性復發，5 個模組耗時排行數字與第六輪機制吻合）。用合成場景逐一戳邊界（10
+  種情境，含極小浮點數／恰好門檻值／10x 主導）驗證核心邏輯本身正確，唯一真缺陷
+  即 F2（用 3 個完全相同耗時的單位、worker=8 實測全數 3 個皆被誤標，5 個相同
+  單位、worker=8 同樣全數誤標，7 個則不誤標——精確定位問題邊界）。親跑全套時
+  rc=1，15 個失敗經逐一核對測試名稱皆為 `test_adr_xplat001_c1c2_lock.py` 的
+  護欄層棘輪測試（因收尾窗口尚未補完 R140 帳本三件套），與 `dispatch_imbalance`
+  本身無關。
+
+### 修復（收尾單人窗口，依四方共同點名逐條落地）
+
+1. **F2／SD 一行修法**：`detect_imbalance()` 分母改為
+   `effective_workers = min(worker_count, len(module_timings))`；新增回歸測試
+   `test_fewer_units_than_workers_and_balanced_flags_nothing`（3 個耗時皆 20.0
+   的單位，worker_count 分別代入 2/3/4/8/50，斷言皆不觸發），釘住四方共同
+   驗證過的邊界。
+2. **F1／SA／Architect「未達自動」缺口**：本節〈誠實劃界〉如實記載，不宣稱
+   已解決（見下）。
+3. **F1（SA blocking）文件斷鏈**：本節本身即為該修復——`_GUARD_LINES_REPIN_LOG`
+   R140 列的引用落地時生效；`AutoSDD_Defect_Log.md` DEF-200-274 列同輪回填；
+   `docs/06_quality/CrossPlatform_R140_Scan_Findings.md` 新建（含四方複審逐項
+   記錄與 guard-total:R140 標記）。
+
+### 🔴 誠實劃界（本輪仍未解決，不可宣稱已完備）
+
+- **這不是真正的「自動」偵測，而是「自動化了計算，沒有自動化觸發」**（SA／
+  Architect 各自獨立指出、QA 佐證）：`tools/git-hooks/pre-push` 與四支
+  `.github/workflows/*.yml`（`windows-compat-ci.yml`／`macos-compat-ci.yml`／
+  `root-infra-ci.yml`／`autoclaude-ci.yml`）逐一查證，沒有任何一處在平行模式
+  下執行 `tools/run_root_unittests.py`。`report_dispatch_imbalance()` 只印
+  stdout、不落檔、不影響 rc、不升級——目前的真實觸發路徑只有「開發者自己手動
+  設 `AUTOSDD_PARALLEL_TESTS=1` 並親眼看 terminal 輸出」這一種，比 CI 更稀疏、
+  更依賴個人記性。要真正達成「不必再靠人眼發現新熱點」，下一輪至少需要：讓
+  某個排程（nightly 或 CI）在平行模式下真的跑一次，並讓偵測結果有機械可稽核
+  的落點（落檔／回寫帳本／或至少讓已知的偵測結果不會隨終端機關閉而消失），
+  而非僅止於本輪「把心算自動化成函式」這一步。
+- **Windows 真機驗證**：仍未解，沿用第五、六輪既有記載，本輪未觸及（掌舵者
+  已表示會自行在 Windows 11 驗證）。
+- **`AutoClaude/tests/`／`AISDLC_SDD` 的 pytest 套件不受本機制惠及**：SA 獨立
+  核實 `AutoClaude/pyproject.toml` 與全部 `AISDLC_SDD_v0.*/pytest.ini` 皆無
+  平行化設定；DEF-200-274 立案文字本身即限定「根層測試 runner」，範圍本身不算
+  違反承諾，但此前六輪皆未在〈誠實劃界〉明講這個邊界，本輪一併記載。
+- **`ratio_threshold=1.5` 寫死、不可由環境變數覆寫**（Architect 指出）：目前
+  只影響 print，無害，但與 `worker_count` 可用 `AUTOSDD_PARALLEL_TESTS_WORKERS`
+  覆寫的慣例不一致，留供後續評估是否需要開放調整。
