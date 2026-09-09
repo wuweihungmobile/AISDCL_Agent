@@ -452,6 +452,15 @@ _GOVERNANCE_DOCS = (
     # 唯一居所在本檔（⇒ 體積守門），且它寫出「該 DEF-ID 詳情現居本檔」的座標宣稱（⇒ 指針
     # 稽核）。命名刻意不帶 R<N> 輪號（非帳本輪次迭代序列產物，見該檔頭 WHY）。即刻登記。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_DEF200274_Parallel_Tests_Evidence.md",
+    # DEF-200-275（SDD-FSM context/budget 計量誤差）證據檔：帳本該列已瘦身成索引 ⇒
+    # 現象、建議處置與狀態全文唯一居所在本檔（⇒ 體積守門＋指針稽核）。即刻登記。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_DEF200275_Context_Metering_Evidence.md",
+    # R135 收尾：DEF-200-274 第四輪四方複審收尾＋護欄層對帳＋到期義務兌現與展延 round-label-ok
+    # （_REPIN_NET_CAP_SCHEDULE／_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND／_PHASE2_REVIEW_LOG）。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R135_Scan_Findings.md",
+    # R136 收尾：DEF-200-274 第四輪第二次對抗式複審收斂（BaseException 型別缺口＋計時 round-label-ok
+    # 脆弱性＋MIN_TESTS／docstring／缺陷帳本文件同步）＋護欄層對帳。即刻登記。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R136_Scan_Findings.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/{CrossPlatform,Quota}_*.md`。這**不是**把具名

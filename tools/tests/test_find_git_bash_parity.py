@@ -259,6 +259,8 @@ class TestPsCommentStripperSsotCallsiteLock(unittest.TestCase):
         for path in sorted(_TESTS_DIR.glob("*.py")):
             if path.name == f"{_PS_STRIPPER_SSOT_MODULE}.py":
                 continue
+            if path.name.startswith("_zzz_"):  # 平行測試合成暫存模組（第五輪）
+                continue
             with warnings.catch_warnings():
                 # 掃描面內既有檔案（如 test_ps51_compat.py 的模組 docstring）帶有
                 # 非 raw 字串的 `\s`，`ast.parse` 會噴 DeprecationWarning。那是別的

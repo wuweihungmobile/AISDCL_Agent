@@ -621,7 +621,7 @@ class TestNamedCarrierFilesActuallyExist(unittest.TestCase):
         surface = sorted(
             p for p in list((REPO_ROOT / "tools" / "git-hooks").glob("*"))
             + list((REPO_ROOT / "tools" / "tests").glob("*.py"))
-            if p.is_file()
+            if p.is_file() and not p.name.startswith("_zzz_")  # 平行測試合成暫存模組（第五輪）
         )
         dangling: dict[str, list[str]] = {}
         for path in surface:

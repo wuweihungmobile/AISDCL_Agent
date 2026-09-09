@@ -173,8 +173,19 @@ SPECIAL_FILES: dict[str, int] = {
     "../tools/archive_defect_log.py": 1507,
     "../tools/check_defect_log_crossref.py": 1479,
     "../tools/sync_onboarding_baselines.py": 1430,
-    "../tools/run_root_unittests.py": 759,
+    # DEF-200-274 第五輪四方獨立複審：新增 report_module_timings()（負載不均
+    # 觀測性，供 QA/Architect finding 收斂）。docstring 已壓成單行，函式本體
+    # 8 行皆為不可壓縮的真實邏輯（讀 module_timings／排序／逐行印出）。
+    "../tools/run_root_unittests.py": 771,
     "../.claude/hooks/context_budget_guard.py": 1089,
+    # commit fab2d0e：runtime_carrier_verdict() 誤判修復。已抽出可抽的部分
+    # （_SPAWN_FAILURE_RE／is_spawn_failure → tools/lib/spawn_failure.py，先例：
+    # tools/lib/ci_liveness.py），回收 4 個斷言行後仍餘 3 行不可壓縮的真實新邏輯
+    # （advisory_exit 分類分支＋其必要的 counts 鍵與 stderr 變數）。已重新確認
+    # 不宜再壓縮：改用 Counter() 有動到 counts 精確 dict 相等斷言的回歸風險；
+    # 縮短 on_windows 參數名會破壞多支測試既有的關鍵字引數呼叫。具名理由見
+    # AutoSDD_Defect_Log.md DEF-200-273。
+    "../tools/lib/hook_wiring.py": 782,
 }
 
 #: 上面那批根層 tools/ 棘輪的共同違規理由（`_SPECIAL_REASONS` 逐檔複寫一份就是複本型缺陷）。

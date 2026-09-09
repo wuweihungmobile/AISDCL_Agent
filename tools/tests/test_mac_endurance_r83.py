@@ -354,10 +354,20 @@ def _outside_consumers(name: str) -> list[Path]:
     無關的同名方法）。
     """
     mine = {_REPO_ROOT / "tools" / "lib" / "schedule_backend.py", Path(__file__)}
-    return [p for p in _REPO_ROOT.rglob("*.py")
-            if p not in mine and ".venv" not in p.parts
-            and "AISDLC_SDD" not in p.parts
-            and f".{name}(" in p.read_text(encoding="utf-8", errors="replace")]
+    out: list[Path] = []
+    # 第五輪：改用一般迴圈＋容忍 FileNotFoundError，取代原本塞讀取進 comprehension。
+    for p in _REPO_ROOT.rglob("*.py"):
+        if p in mine or ".venv" in p.parts or "AISDLC_SDD" in p.parts:
+            continue
+        if p.name.startswith("_zzz_"):
+            continue
+        try:
+            text = p.read_text(encoding="utf-8", errors="replace")
+        except FileNotFoundError:
+            continue
+        if f".{name}(" in text:
+            out.append(p)
+    return out
 
 
 def symmetry_problems(backends: tuple, launchd_only: tuple[str, ...]) -> list[str]:

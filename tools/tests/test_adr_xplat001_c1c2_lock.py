@@ -682,12 +682,12 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 7498,
+    "test_adr_xplat001_c1c2_lock.py": 7607,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 3839,
     "test_bash32_compat.py": 1020,
-    "test_bash_probe_spec_contract.py": 865,
+    "test_bash_probe_spec_contract.py": 867,
     "test_block_destructive_git_r83.py": 2288,
     "test_bootstrap_core.py": 439,
     "test_bootstrap_ps1.py": 160,
@@ -702,37 +702,37 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_component_sanitizer_shared_layer_lock.py": 293,
     "test_context_budget_guard.py": 11861,
     "test_defect_id_reference_integrity.py": 281,
-    "test_dev_start.py": 6527,
+    "test_dev_start.py": 6529,
     "test_dev_start_ps1_lastexitcode.py": 548,
     "test_doc_env_prefix_platform_parity_r60.py": 340,
     "test_doc_loc_baseline_freshness_r60.py": 7125,
     "test_extras_quoting_zsh_safety.py": 365,
     "test_failure_log_rotation.py": 80,
-    "test_find_git_bash_parity.py": 1264,
+    "test_find_git_bash_parity.py": 1266,
     "test_gha_action_versions.py": 703,
     "test_git_hooks_install_common.py": 393,
     "test_guard_line_taxonomy_r99.py": 148,
     "test_install_windows_nightly.py": 1385,
-    "test_mac_endurance_r83.py": 1949,
+    "test_mac_endurance_r83.py": 1959,
     "test_mac_readiness_r82.py": 621,
     "test_macos_smoke_skip_honesty.py": 225,
     "test_maturity_criteria_r79.py": 431,
     "test_negative_existence_claims_r82.py": 380,
     "test_nightly_interpreter_determinism.py": 278,
-    "test_no_invalid_escape_sequences.py": 329,
+    "test_no_invalid_escape_sequences.py": 339,
     "test_ntfs_trailing_space_device_name.py": 760,
     "test_onboarding_parity_interlock.py": 233,
-    "test_platform_neutral_paths.py": 5720,
+    "test_platform_neutral_paths.py": 5759,
     "test_platform_utils_dedup.py": 1104,
     "test_pre_commit_dispatcher_sigpipe.py": 964,
     "test_pre_push_dispatcher.py": 686,
     "test_ps1_bom.py": 248,
     "test_ps51_compat.py": 610,
-    "test_ps_engine_ssot.py": 954,
+    "test_ps_engine_ssot.py": 960,
     "test_python_c_percent_shim.py": 119,
     "test_quota_policy.py": 3396,
     "test_root_infra_parity.py": 441,
-    "test_run_root_unittests.py": 3116,
+    "test_run_root_unittests.py": 3335,
     "test_sanitize_component_frozen_sdd_versions_lock.py": 340,
     "test_schedule_capability_parity.py": 626,
     "test_script_scan_surface_ssot.py": 391,
@@ -740,7 +740,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_skip_discoverability_r83.py": 744,
     "test_smoke_ci_sync.py": 1353,
     "test_stdio_utf8.py": 76,
-    "test_subprocess_encoding_hygiene.py": 1603,
+    "test_subprocess_encoding_hygiene.py": 1609,
     "test_windows_forbidden_filename_parity.py": 1025,
     "test_windows_nightly_anchor_parity.py": 135,
     "test_windows_smoke_heartbeat_doc_sync.py": 197,
@@ -1578,6 +1578,65 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "[非淨減法輪] 本檔自身逐檔漂移第二次收斂（本列＋前一筆收斂列自身的行數，同 R131 "
      "多列收斂體例）。逐項見 docs/06_quality/CrossPlatform_R131_Scan_Findings.md §8。"),
     ("R134", 95507, 95520, 13, "[非淨減法輪] 詳 CrossPlatform_R131_Scan_Findings.md。"),
+    ("R135", 95520, 95639, 119,
+     "[非淨減法輪][回歸鎖軌全額申報，見 _REGRESSION_LANE_LOG 同輪列] DEF-200-274 第四輪"
+     "四方複審收尾：`test_run_root_unittests.py` +92（work-stealing 動態派工重構＋"
+     "LoadBalancingRegressionTest 等回歸測試）、`test_platform_neutral_paths.py` +27"
+     "（QA 阻斷條件要求的 TOCTOU 緩解，`_read_text_or_none()` 輔助函式＋三個呼叫點）。"
+     "逐項見 CrossPlatform_R135_Scan_Findings.md。"),
+    ("R135", 95639, 95644, 5,
+     "[非淨減法輪][回歸鎖軌全額申報，見 _REGRESSION_LANE_LOG 同輪列] 本檔自身逐檔漂移"
+     "（新增前一筆稽核列本身的行數，同 R131/R134 既有體例）。逐項見 "
+     "CrossPlatform_R135_Scan_Findings.md。"),
+    ("R135", 95644, 95646, 2,
+     "[非淨減法輪][回歸鎖軌全額申報，見 _REGRESSION_LANE_LOG 同輪列] 本檔自身逐檔漂移"
+     "第二次收斂（本列＋前一筆收斂列自身的行數，同 R131/R134 多列收斂體例）。逐項見 "
+     "CrossPlatform_R135_Scan_Findings.md。"),
+    ("R135", 95646, 95649, 3,
+     "[非淨減法輪][回歸鎖軌全額申報，見 _REGRESSION_LANE_LOG 同輪列] 本檔自身逐檔漂移"
+     "第三次收斂（同上）。逐項見 CrossPlatform_R135_Scan_Findings.md。"),
+    ("R135", 95649, 95651, 2,
+     "[非淨減法輪][回歸鎖軌全額申報，見 _REGRESSION_LANE_LOG 同輪列] 本檔自身逐檔漂移"
+     "第四次收斂（同上）。逐項見 CrossPlatform_R135_Scan_Findings.md。"),
+    ("R135", 95651, 95690, 39,
+     "[非淨減法輪][回歸鎖軌全額申報，見 _REGRESSION_LANE_LOG 同輪列] 本檔自身逐檔漂移"
+     "第五次收斂（含本次新增的 _REGRESSION_LANE_LOG／_REPIN_NET_CAP_SCHEDULE／"
+     "_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND／_FROZEN_PREFIX_REWRITE_LEDGER／"
+     "_PHASE2_REVIEW_LOG 五處到期義務兌現、展延與接鏈本身的行數）。逐項見 "
+     "CrossPlatform_R135_Scan_Findings.md。"),
+    ("R135", 95690, 95745, 55,
+     "[非淨減法輪][回歸鎖軌全額申報，見 _REGRESSION_LANE_LOG 同輪列] Architect 複審"
+     "阻斷條件建議的新回歸測試：`ParallelShardMultipleThreadFailuresAreAllReportedTest`"
+     "（多條 worker thread 同時失敗，斷言合併後的例外訊息裡每一筆失敗全部可見，直接"
+     "驗證 thread_errors 排空修復）＋修正既存 `_FakeProc` fixture 漏 `returncode` 屬性"
+     "的潛在缺口（該修復連帶讓的第二支測試附帶說明段落變長）。逐項見 "
+     "CrossPlatform_R135_Scan_Findings.md。"),
+    ("R135", 95745, 95762, 17,
+     "[非淨減法輪][回歸鎖軌全額申報，見 _REGRESSION_LANE_LOG 同輪列] 本檔自身逐檔"
+     "漂移第六次收斂（新增前兩筆稽核列＋回歸鎖軌新列本身的行數）。逐項見 "
+     "CrossPlatform_R135_Scan_Findings.md。"),
+    ("R136", 95762, 95823, 61,
+     "[非淨減法輪][回歸鎖軌全額申報，見 _REGRESSION_LANE_LOG 同輪列] DEF-200-274 "
+     "第四輪第二次對抗式複審收斂：`test_run_root_unittests.py` +61——新增回歸測試"
+     "類別 `ParallelShardWorkerThreadBaseExceptionDoesNotEscapeTest`（Architect "
+     "finding 1(a)：worker thread 內部拋出非 `Exception` 子類的 `BaseException` "
+     "時 `run_parallel()` 不得讓它穿透）、`LoadBalancingRegressionTest`／"
+     "`ParallelShardStderrBackpressureRegressionTest` 兩支既有測試的 docstring "
+     "重寫（SA finding：計時斷言複合延遲風險收斂、shard 0/1 字面訂正）。逐項見 "
+     "CrossPlatform_R136_Scan_Findings.md。"),
+    ("R136", 95823, 95843, 20,
+     "[非淨減法輪][回歸鎖軌全額申報，見 _REGRESSION_LANE_LOG 同輪列] 本檔自身逐檔"
+     "漂移收斂（新增前一筆稽核列＋回歸鎖軌新列＋前綴重寫接鏈列本身的行數，同 "
+     "R131/R134/R135 既有體例）。逐項見 CrossPlatform_R136_Scan_Findings.md。"),
+    ("R137", 95843, 95907, 64,
+     "[非淨減法輪][全額功能軌] DEF-200-274 第五輪四方獨立複審（Architect/SA/SD/QA）："
+     "全庫排查同一 TOCTOU 病灶（平行測試合成暫存模組與治理掃描器競態），逐檔補一道"
+     "排除；`parallel_shard.py` 補齊 Ctrl-C 孤兒行程清理與 per-module 計時觀測。"
+     "逐項見 CrossPlatform_R137_Scan_Findings.md。"),
+    ("R137", 95907, 95925, 18,
+     "[非淨減法輪][全額功能軌] 本檔自身逐檔漂移收斂（新增前一筆稽核列＋回歸鎖淨額"
+     "上限到期義務兌現列＋前綴重寫接鏈列＋本列本身的行數）。逐項見 "
+     "CrossPlatform_R137_Scan_Findings.md。"),
 )
 
 
@@ -1653,6 +1712,12 @@ _REPIN_NET_CAP_SCHEDULE: tuple[tuple[int, int], ...] = (
     (133, 549),   # 到期輪兌現（DEF-200-274 guard-line 記帳，2026-09-08）：cap 降到到期
                   # 目標本身（同既有判例：兌現值貼齊到期目標，`cap > due_target` 轉 round-label-ok
                   # False ⇒ 款(12) 不再說話）。本輪剛好到期。
+    (135, 548),   # 到期輪兌現（DEF-200-274 第四輪四方複審收尾，2026-09-08）：cap round-label-ok
+                  # 降到到期目標本身（同既有判例：兌現值貼齊到期目標）。本輪剛好
+                  # 到期（`_REPIN_NET_CAP_DUE_ROUND=135`）。
+    (137, 547),   # 到期輪兌現（DEF-200-274 第五輪四方獨立複審收尾）：cap 降到到期 round-label-ok
+                  # 目標本身（同既有判例）。本輪剛好到期（`_REPIN_NET_CAP_DUE_ROUND=137`）。
+                  # 同輪重新武裝下一段：步伐維持 1（已是最小正整數步伐）。
 )
 #: 生效點＝首列輪號、現行上限＝末列上限，**皆由表導出不另立常數**（R73 判例：一份知識一個家）。
 _REPIN_ROUND_CAP_SINCE = _REPIN_NET_CAP_SCHEDULE[0][0]
@@ -1749,6 +1814,23 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "（不 mock subprocess.Popen 的真實整合測試，一次涵蓋協定通道與 stderr backpressure "
      "兩情境）全額歸本軌（記帳誠實度分類）。逐項見 "
      "docs/06_quality/CrossPlatform_R131_Scan_Findings.md §8。"),
+    ("R135", 119, "DEF-200-274 第四輪四方複審收尾：work-stealing 動態派工重構回歸測試"
+     "（LoadBalancingRegressionTest 等，test_run_root_unittests.py +92）與 QA 阻斷條件"
+     "要求的 TOCTOU 緩解（_read_text_or_none() 輔助函式，test_platform_neutral_paths.py "
+     "+27）全額歸本軌（記帳誠實度分類）。逐項見 CrossPlatform_R135_Scan_Findings.md。"),
+    ("R135", 51, "本檔自身逐檔漂移（五次收斂列＋本列自身＋回歸鎖軌／到期義務五處"
+     "新增行數）全額歸本軌（記帳誠實度分類，非必要湊額）。逐項見 "
+     "CrossPlatform_R135_Scan_Findings.md。"),
+    ("R135", 55, "Architect 複審阻斷條件建議的新回歸測試"
+     "（ParallelShardMultipleThreadFailuresAreAllReportedTest）＋既存 _FakeProc "
+     "fixture 缺口修正全額歸本軌（記帳誠實度分類）。逐項見 "
+     "CrossPlatform_R135_Scan_Findings.md。"),
+    ("R135", 17, "本檔自身逐檔漂移第六次收斂全額歸本軌（記帳誠實度分類，非必要湊額）。"
+     "逐項見 CrossPlatform_R135_Scan_Findings.md。"),
+    ("R136", 81, "DEF-200-274 第四輪第二次對抗式複審收斂：新增回歸測試"
+     "`ParallelShardWorkerThreadBaseExceptionDoesNotEscapeTest`（Architect finding "
+     "1(a)）＋本檔自身逐檔漂移收斂列（含回歸鎖軌與前綴重寫接鏈列本身），全額歸本軌"
+     "（記帳誠實度分類）。逐項見 CrossPlatform_R136_Scan_Findings.md。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -1817,7 +1899,13 @@ def _regression_lane_cap_basis() -> tuple[str, int]:
 # 非 root-tools 重構持有面；真拆待獨立窗口，132 → 133。
 # 🔴 R133 具名展延（鐵律七，不得靜默沿用）round-label-ok：DEF-200-274 本機平行執行落地
 # 窗口，非 root-tools 重構持有面；真拆待獨立窗口，133 → 135（在 lookahead=5 內）。
-_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND = 135
+# 🔴 R135 具名展延（鐵律七，不得靜默沿用）round-label-ok：DEF-200-274 第四輪四方複審收尾
+# 窗口（work-stealing 動態派工重構＋TOCTOU 緩解），非 root-tools 重構持有面；
+# 真拆待獨立窗口，135 → 137（在 lookahead=5 內）。
+# 🔴 R137 具名展延（鐵律七，不得靜默沿用）round-label-ok：DEF-200-274 第五輪四方獨立複審
+# 收尾窗口（全庫 TOCTOU 病灶排查修復），非 root-tools 重構持有面；
+# 真拆待獨立窗口，137 → 142（在 lookahead=5 內）。
+_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND = 142
 #: 清償旗標——真拆完成後改 True。刻意用布林而非重建舊尺計數器（ADR §9.3「舊尺已廢」）。
 _ROOT_TOOLS_OLD_SCALE_DEBT_RESOLVED = False
 #: A-2 後設鎖：到期輪只准落在「現查輪＋lookahead」內，推遠（如 9999）當場紅；shrink-only
@@ -1912,8 +2000,11 @@ def net_cap_schedule_problems(
 #: 武裝下一段：步伐 2 < 前一段的 3，續守「步伐刻意變小」且目標嚴格低於現行 cap。
 #: R131 喚醒鏈四方審計對抗查證收尾兌現 round-label-ok：cap 降到目標本身（550，見 `(131, 550)`
 #: 列），同輪重新武裝下一段：步伐 1 < 前一段的 2，續守「步伐刻意變小」且目標嚴格低於現行 cap。
-_REPIN_NET_CAP_DUE_ROUND = 135  # round-label-ok：到期輪＝兌現輪+2（lookahead 判準的活體對照）
-_REPIN_NET_CAP_DUE_TARGET = 548  # 步伐 1，嚴格低於 cap 549（R133 重新武裝） round-label-ok
+#: R135 DEF-200-274 第四輪四方複審收尾兌現 round-label-ok：cap 降到目標本身（548，見
+#: `(135, 548)` 列），同輪重新武裝下一段：目標 547 嚴格低於現行 cap 548（步伐已降至
+#: 整數下限 1，無法再變小，維持同步伐、僅前進到期輪，續守「目標嚴格低於現行 cap」）。
+_REPIN_NET_CAP_DUE_ROUND = 139  # round-label-ok：到期輪＝兌現輪+2（lookahead 判準的活體對照）
+_REPIN_NET_CAP_DUE_TARGET = 546  # 步伐 1，嚴格低於 cap 547（R137 重新武裝） round-label-ok
 
 #: DEF-200-121：到期輪自身的後設鎖——`_REPIN_NET_CAP_DUE_ROUND` 只准落在「最近稽核輪
 #: ＋ lookahead」以內（歷史母體 85..113 的到期輪一律＝上一次兌現輪 +2）。可延期的到期日
@@ -1980,10 +2071,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 133
+_REPIN_LOG_FROZEN_PREFIX_LEN = 145
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "5f040dde89da173b1f88589bc9ff8834980802c3e823d6611efa6f6ccbb526ad")
+    "6843feaf786c0bf246b22a4992d1e72ee76f448b12336625d66aaa9317e36345")
 
 
 def repin_log_history_digest(
@@ -2177,6 +2268,15 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # R134 續：DEF-200-274 第三輪對抗式複審收斂批——新增真實 subprocess round-label-ok
     # 回歸測試使護欄層行數重釘，凍結前綴延伸涵蓋新增列本身。
     ("R134", "e069a86b7750", "5f040dde89da", "DEF-200-274"),
+    # R135：DEF-200-274 第四輪四方複審收尾——work-stealing 動態派工重構回歸測試＋ round-label-ok
+    # TOCTOU 緩解＋回歸鎖軌／到期義務三處新增，凍結前綴延伸涵蓋新增列本身。
+    ("R135", "5f040dde89da", "1e3073cee390", "DEF-200-274"),
+    # R136：DEF-200-274 第四輪第二次對抗式複審收斂——BaseException 型別缺口回歸 round-label-ok
+    # 測試＋回歸鎖軌新列＋本檔自身逐檔漂移，凍結前綴延伸涵蓋新增列本身。
+    ("R136", "1e3073cee390", "08ffdc430461", "DEF-200-274"),
+    # R137：DEF-200-274 第五輪四方獨立複審收尾——全庫 TOCTOU 病灶排查修復＋回歸 round-label-ok
+    # 淨額上限到期義務兌現列＋本檔自身逐檔漂移，凍結前綴延伸涵蓋新增列本身。
+    ("R137", "08ffdc430461", "6843feaf786c", "DEF-200-274"),
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。
@@ -4896,7 +4996,10 @@ def read_wide() -> list[tuple[str, str]]:
     # 落地前實測：把 Archive/ 併入後 SC-9 problems 仍為 0，故納入不引入存量紅。
     paths += sorted((_REPO / "docs" / "04_planning").rglob("AutoSDD_improving_*.md"))
     for rel in _SC9_DIRS:
-        paths += sorted((_REPO / rel).rglob("*.py"))
+        # `_zzz_*` 排除：`"tools"` 遞迴覆蓋 tools/tests，下面 read_text() 有 TOCTOU（第五輪）。
+        paths += sorted(
+            p for p in (_REPO / rel).rglob("*.py") if not p.name.startswith("_zzz_")
+        )
     out: dict[str, str] = {}
     root = _REPO.resolve()
     for p in paths:
@@ -6521,6 +6624,12 @@ _PHASE2_REVIEW_LOG: tuple[tuple[int, str, str], ...] = (
      "本列即依該既有約定提出 Phase 2 提案：ADR-XPLAT-013 (c) 觀測→阻斷的轉換決定送四方複審。"
      "🔴 複審本身由主控承接、非本收尾窗口執行（本輪只記入機械載體，同 R113 [提案] 由 "
      "DEF-200-211 承接的體例）；[提案] 使連續『維持觀察』計數歸零並重新武裝下一個視窗。"),
+    (135, "[維持觀察]",
+     "本輪是 DEF-200-274 第四輪四方複審收尾窗口（work-stealing 動態派工重構＋TOCTOU "
+     "緩解），未觸碰 ADR-XPLAT-013 方向 (c) 觀測→阻斷轉換提案（R129 [提案] 送四方複審"
+     "一事，複審本身由主控承接、非本收尾窗口執行），亦未提出新 Phase 2 提案。上一列是 "
+     "[提案] ⇒ 連續『維持觀察』計數自本列起算為一，未觸上限（`_PHASE2_MAX_CONSECUTIVE_"
+     "DEFERRALS=1`）。依 §6 重新武裝下一個視窗。"),
 )
 #: 到期輪由末列導出、不另立常數（一份知識一個家；同 `_REPIN_NET_CAP_SCHEDULE` 的
 #: 「生效點＝首列、現值＝末列，皆由表導出」）。

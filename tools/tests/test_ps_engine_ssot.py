@@ -304,6 +304,8 @@ def inline_engine_hits(root: Path) -> dict[str, list[int]]:
             continue
         if path.name == _SSOT_MODULE:
             continue
+        if path.name.startswith("_zzz_"):  # 平行測試合成暫存模組，讀取無防護（第五輪）
+            continue
         rel = path.relative_to(root).as_posix()
         linenos = _engine_selection_linenos(
             path.read_text(encoding="utf-8", errors="replace"), rel
@@ -727,7 +729,11 @@ class TestNoStaleLocalEngineClaims(unittest.TestCase):
     def _scan_files(cls) -> list[Path]:
         files: list[Path] = []
         for root in cls._SCAN_ROOTS:
-            files.extend(p for p in root.rglob("*.py") if "__pycache__" not in p.parts)
+            # `_zzz_*` 排除：理由同 `inline_engine_hits()`（第五輪）。
+            files.extend(
+                p for p in root.rglob("*.py")
+                if "__pycache__" not in p.parts and not p.name.startswith("_zzz_")
+            )
         return sorted(files)
 
     @classmethod

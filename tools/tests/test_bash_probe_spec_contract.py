@@ -829,6 +829,8 @@ class TestNoBareBashInvocationInToolsTests(unittest.TestCase):
             for path in sorted(root.rglob("*.py")):
                 if "__pycache__" in path.parts:
                     continue
+                if path.name.startswith("_zzz_"):  # 平行測試合成暫存模組（第五輪）
+                    continue
                 scanned += 1
                 hits = bare_bash_argv0_offenders(path)
                 if hits:

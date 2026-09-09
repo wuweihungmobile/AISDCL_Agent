@@ -99,7 +99,12 @@ def scan(repo_root: Path = _REPO_ROOT) -> dict[str, list[str]]:
             )
         for path in sorted(base.rglob("*.py")):
             rel = path.relative_to(repo_root).as_posix()
-            if "/.venv/" in f"/{rel}" or "/__pycache__/" in f"/{rel}":
+            # `_zzz_*`：平行測試合成暫存模組，同一 TOCTOU 病灶（第五輪）。
+            if (
+                "/.venv/" in f"/{rel}"
+                or "/__pycache__/" in f"/{rel}"
+                or path.name.startswith("_zzz_")
+            ):
                 continue
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always")
@@ -138,7 +143,7 @@ def scanned_file_count(repo_root: Path = _REPO_ROOT) -> int:
     for root in _SCAN_ROOTS:
         for path in (repo_root / root).rglob("*.py"):
             rel = f"/{path.relative_to(repo_root).as_posix()}"
-            if "/.venv/" in rel or "/__pycache__/" in rel:
+            if "/.venv/" in rel or "/__pycache__/" in rel or path.name.startswith("_zzz_"):
                 continue
             total += 1
     return total
@@ -267,7 +272,12 @@ def scan_malformed_noqa(repo_root: Path = _REPO_ROOT) -> list[str]:
         base = repo_root / root
         for path in sorted(base.rglob("*.py")):
             rel = path.relative_to(repo_root).as_posix()
-            if "/.venv/" in f"/{rel}" or "/__pycache__/" in f"/{rel}":
+            # `_zzz_*` 排除：理由同上方 `scan()`（第五輪）。
+            if (
+                "/.venv/" in f"/{rel}"
+                or "/__pycache__/" in f"/{rel}"
+                or path.name.startswith("_zzz_")
+            ):
                 continue
             text = path.read_text(encoding="utf-8", errors="replace")
             for lineno, line in enumerate(text.splitlines(), 1):

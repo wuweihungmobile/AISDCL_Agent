@@ -214,3 +214,329 @@ worker 數的穩定性保證**；`weighted_shards()` 的權重演算法（依測
 僅剩第 3 項（Windows 真機驗證）與第 6 項（效率優化，非阻塞）未解。DEF-200-274 於本輪
 維持 `partial`，不宣稱 `fixed`/`closed`——Windows 真機驗證這一項的性質決定它無法由
 macOS-only session 完成，需交棒。
+
+## 第四輪：work-stealing 動態派工重構 + 四方對抗式複審全修（2026-09-08／09）
+
+### 背景
+
+主控直接動手把 `parallel_shard.py` 由「依測試方法數貪婪裝箱成 N 個固定 shard」
+（`weighted_shards()`）改成**動態工作竊取**：共用 `queue.Queue` 塞全部模組，最多
+`worker_count()` 條 thread 各自認領下一個模組、自己 Popen＋自己 communicate，取代
+舊版靜態裝箱；`weighted_shards()`／`_communicate_all()` 已刪除。同批新增
+`LoadBalancingRegressionTest`（合成 1 個高方法數 TRIVIAL 模組＋2 個低方法數但真的
+耗時的 SLOW_A/SLOW_B 模組，證明兩個 SLOW 模組會被兩條不同 thread 同時執行而非
+序列化）；`ParallelShardPopenFailureKillsAlreadyStartedProcsTest` 因原本依 Popen
+呼叫次序判斷成敗在多執行緒下不再可靠，改成依 argv 模組名判斷。此輪落地時因
+DEF-200-275（SDD-FSM context 計量誤差誤觸 ESCALATION）中途擋下工具呼叫，Developer
+角色的收尾與四方複審因此延到本節記載的這次收斂。
+
+### 四方複審結果（逐條處理）
+
+四方對本輪未經審查的變更（`parallel_shard.py`／`test_run_root_unittests.py`／
+`quota_escalation.py`／`check_loc_budget.py`／`hook_wiring.py`／`spawn_failure.py`／
+pre-commit／pre-push）跑了一輪對抗式複審，裁決 Architect＝APPROVE_WITH_CONDITIONS、
+SD＝APPROVE_WITH_CONDITIONS、QA＝REJECT。逐條處理如下：
+
+1. **Architect 阻斷①：`run_parallel()` 多執行緒例外收集有靜默漏失通道**
+   （`thread_errors.get_nowait()` 只取第一筆就 `raise`，兩條以上 thread 同時失敗時
+   其餘例外永遠留在佇列裡、從未被印出）——**已修復**：改為 join 完後把
+   `thread_errors` 整個排空，逐筆印到 stderr，單筆時原樣 `raise` 保留原始例外型別
+   （不破壞既有測試對特定例外型別的斷言），多筆時合成一個 `RuntimeError` 把全部
+   `repr()` 串在訊息裡一併 `raise`。同時把「Popen 失敗偵測時效在動態佇列下變慢」
+   這個非功能性變化明寫進 docstring（Architect minor finding）。見
+   `tools/lib/parallel_shard.py::run_parallel()`。
+2. **Architect 阻斷②：`quota_escalation.py::_write()` 的 `write_bytes` 改法理由
+   虛構**（註解宣稱替代的是 `Path.write_text(newline=)`，但實際被取代的是
+   `Path.open(newline=)`，後者在 macOS 系統 Python 3.9 上完全正常，commit 89c4e91
+   當時修的正是這件事，本輪的註解把已修好的舊 bug 誤植到新變更上）——**已修復**：
+   保留 `path.write_bytes(text.encode("utf-8"))` 這個寫法（已獨立驗證與
+   `.open("w", encoding="utf-8", newline="\n").write(text)` 對純 `\n` 字串逐位元組
+   等價、且是 guardrail_lib tier 400 行預算下省 1 行的必要寫法），只訂正虛構理由的
+   註解本身，**不是**改回 `.open()`（第四輪第二次對抗式複審 SA/SD 交叉核對抓到本節
+   先前這句「已修復：改回 .open() 寫法」與實際程式碼不符，此處已訂正為據實描述）。
+3. **SD 阻斷：`check_loc_budget.py` 新增的 `hook_wiring.py` 782 行 SPECIAL_FILES
+   棘輪調高，缺陷帳本裡沒有對應的具名理由列，且註解自陳「本行落地當回合尚未
+   補」**——**已修復**：把 DEF-200-273（`block_destructive_git.py` 非阻斷提醒被
+   `runtime_carrier_verdict()` 誤判為載具故障）的狀態欄由 `open（未指派）` 改為
+   `fixed（commit fab2d0e）`，敘明 `_SPAWN_FAILURE_RE` 修法與連帶的 782 行棘輪
+   理由；同步把 `check_loc_budget.py` 該處註解的「尚未補」文字更新為指向
+   DEF-200-273。
+4. **QA 阻斷①：`tools/lib/spawn_failure.py` 是 git 未追蹤檔，`hook_wiring.py`
+   `import spawn_failure` 會在 fresh clone 上 ImportError**——**已核實、未修復**：
+   本 session 的任務書明確指示「不要執行 git add/commit/push」，而修復此問題唯一
+   的手段是 `git add tools/lib/spawn_failure.py`。這是本輪唯一因外部約束而**無法**
+   在本 session 內完成的項目，留給下一個有 git 寫入權限的窗口在 commit 前執行
+   `git add tools/lib/spawn_failure.py`（檔案內容本身已核實正確，SD／QA 兩方各自
+   獨立驗證過）。
+5. **QA 阻斷②：端到端執行 rc≠0（11 failures + 2 errors）**，三類根因：
+   (a) 護欄層行數棘輪未同步（`test_run_root_unittests.py` +92 行）；
+   (b) 缺陷帳本逐列 700-byte 上限／存量超標總量棘輪／淨額棘輪三項違規；
+   (c) `check_loc_budget.py:178`／`spawn_failure.py:2` 的「R135」輪號註記超前帳本
+   當前輪（`current_round()` 現查為 100）——**均已修復**：
+   - (a) 見下方「guard-line 行數棘輪重釘」小節。
+   - (b) DEF-200-274／DEF-200-275 兩列瘦身至 ≤700 bytes（本檔即為瘦身後的接收
+     端），DEF-200-275 另建 `CrossPlatform_DEF200275_Context_Metering_Evidence.md`
+     承接全文；淨額棘輪由 DEF-200-273 改標 `fixed` 抵銷（見上第 3 點）。
+   - (c) 兩處註解的「R135」改為指名 commit `fab2d0e`，不再宣稱任何輪號（避免對
+     一個未經證實對應哪個計輪序列的數字做出無法查證的宣稱）。
+6. **QA 阻斷③：平行模式下的 TOCTOU 競態產生偽 `FileNotFoundError`**——本 session
+   親自重現（`test_platform_neutral_paths.TestTextIoDeclaresEncoding.
+   test_debt_ratchet_is_exact_and_shrink_only` 對 `_zzz_protocol_repro_a_mixed_*.py`
+   ERROR）：`tools/tests/` 內多支治理測試（`run_unit_scan()`／
+   `TestTextIoDeclaresEncoding._scan_repo()`／`_scan_file()`）會先 glob
+   `tools/tests/*.py` 拿到檔案清單，再逐一 `read_text()`；`LoadBalancingRegressionTest`
+   ／`ParallelShardRealSubprocessProtocolIntegrationTest` 在**不同 worker
+   subprocess** 裡對同一目錄寫入並以 `addCleanup` 刪除合成暫存模組
+   （`_zzz_*.py`），兩步之間的窗口造成競態——**已修復**：新增共用輔助函式
+   `_read_text_or_none()`（`tools/tests/test_platform_neutral_paths.py`），檔案
+   在讀取當下消失即回 `None`、呼叫端一律 `continue`／回空清單（消失的檔案本來
+   就不是治理掃描要看的內容，容忍它消失不會掩蓋任何真實違規），套用到
+   `run_unit_scan()`、`TestTextIoDeclaresEncoding._scan_repo()`、`_scan_file()`
+   三個實際會被此競態命中的呼叫點。
+7. **QA minor：`quota_escalation.py` 註解失實**——與 Architect 阻斷②同一處，已在
+   第 2 點一併修復。
+
+### guard-line 行數棘輪重釘
+
+本輪 `tools/tests/` 護欄層行數 95520 → 95762（+242，全額歸回歸鎖軌）。除
+`test_run_root_unittests.py`（work-stealing 重構回歸測試＋對抗式複審收斂追加的
+`ParallelShardMultipleThreadFailuresAreAllReportedTest`）／`test_platform_neutral_paths.py`
+（`_read_text_or_none()` TOCTOU 緩解）兩項功能性成長外，本輪落地時一併觸發並兌現／
+展延了四項各自獨立的到期義務：`_REPIN_NET_CAP_SCHEDULE`（cap 549→548）、
+`_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND`（135→137，具名展延）、
+`_FROZEN_PREFIX_REWRITE_LEDGER`（指紋接鏈）、`_PHASE2_REVIEW_LOG`（追加
+`[維持觀察]` 列）——這四項與本輪主軸（parallel_shard.py 修復）無直接關聯，純粹是
+`_GUARD_LINES_REPIN_LOG` 推進到 R135 這個輪號時，四個各自獨立的到期輪計數器恰好
+同時到期而觸發（`_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND`／`_REPIN_NET_CAP_DUE_ROUND`
+两者皆早由前幾輪具名展延至 135）。逐項數字、每一步的計算過程與到期義務處置理由
+完整記載於 `CrossPlatform_R135_Scan_Findings.md`（本節不重複），該檔命名依既有
+`CrossPlatform_R<N>_Scan_Findings.md` 慣例（款(9) `_PER_FILE_LIST_RE` 要求）。
+
+### 本 session 端到端重驗（逐字見任務完成回覆）
+
+修復後重跑 `cd tools/tests && .venv/bin/python3 -m unittest test_run_root_unittests
+-v -k Parallel -k LoadBalancing`、`test_adr_xplat001_c1c2_lock.TestGuardLayerRatchet`、
+`test_check_defect_log_crossref`（全套）、`AUTOSDD_PARALLEL_TESTS=1
+AUTOSDD_PARALLEL_TESTS_WORKERS=4 python tools/run_root_unittests.py` 端到端兩次，
+逐字輸出見本輪任務回覆（未落成第二份副本，避免與回覆內容產生第二個會漂移的
+真相來源）。
+
+## 第四輪第二次對抗式複審：型別缺口＋計時脆弱性＋文件同步收斂（2026-09-09）
+
+### 背景
+
+第四輪初版修復（上一節）落地並經 Architect／SD／QA 三方 APPROVE_WITH_CONDITIONS／
+APPROVE_WITH_CONDITIONS／REJECT 收斂後，同一批檔案又跑了第二次四方對抗式複審
+（Architect／SA／SD／QA），裁決 Architect＝REJECT、SA＝APPROVE_WITH_CONDITIONS、
+SD＝APPROVE、QA＝未回報（null）。逐條處理如下：
+
+1. **Architect 阻斷①：`LoadBalancingRegressionTest` 的計時斷言有複合延遲風險**
+   （`worker_count=2` 下 TRIVIAL 若被某條 thread 搶先認領，該 thread 完成後會
+   回頭再認領剩下的那個 SLOW，形成「兩次 Popen 啟動延遲疊加」，使 1.6x 安全邊際
+   在 Windows／高負載 CI 上的實際餘裕不明）——**已修復**：改用 Architect 建議的
+   選項 (c)，`worker_count` 由 2 改為 3（＝模組數），讓 3 個模組在啟動瞬間各自
+   被 1 條 thread 一次認領到位、全程零佇列競爭，徹底移除複合延遲來源（而非只是
+   加大安全邊際掩蓋它）。docstring 同步記錄改法理由。見
+   `tools/tests/test_run_root_unittests.py::LoadBalancingRegressionTest`。
+2. **Architect 阻斷②：`run_parallel()` 的例外安全網對非 `Exception` 子類的
+   `BaseException`（`SystemExit`／`KeyboardInterrupt`／`GeneratorExit`）有型別
+   缺口**（worker thread 用 `except BaseException` 蒐集後，若合成例外重新
+   `raise`、交外層 `except Exception` 接住，非 `Exception` 子類會直接穿透）——
+   **已修復**：抽出 `_crash_fallback(started, exc)` 共用函式，thread_errors 路徑
+   改成呼叫端拿到例外物件後**直接**呼叫該函式收尾，不再經過 `raise` 依賴外層
+   `except` 篩選型別；外層 `except Exception` 對 main thread 自己的
+   `KeyboardInterrupt`（如 `t.join()` 期間被 Ctrl-C 中斷）刻意維持不攔截，
+   docstring 明寫這個取捨。新增回歸鎖
+   `ParallelShardWorkerThreadBaseExceptionDoesNotEscapeTest`（用 `SystemExit`
+   驗證，`OSError` 換不出這個型別缺口）。見
+   `tools/lib/parallel_shard.py::_crash_fallback()`／`run_parallel()`。
+3. **SA 阻斷①：`MIN_TESTS` 未同步重釘**（本輪新增測試方法後 discovery 實測
+   4045，`MIN_TESTS` 仍是 4042）——**已修復**：以唯讀 discovery 探針實測直接
+   填入 4045，落款記錄成長來源（`ParallelShardWorkerThreadBaseExceptionDoesNotEscapeTest`），
+   `python tools/sync_onboarding_baselines.py --write` 同步回填 `ONBOARDING.md`
+   §7 的 `rootunit-baseline-live:` 格（`--check` 覆核 rc=0）。
+4. **SA 阻斷②：`parallel_shard.py` 模組層 docstring（第 1~31 行）仍描述舊版
+   靜態分片設計，與 `run_parallel()` 內已正確描述的動態工作竊取設計矛盾**——
+   已修復：改寫成「依模組拆成獨立派工單位、塞進共用佇列，最多 `worker_count()`
+   條 thread 各自認領」的敘述，與 `run_parallel()` docstring 一致。
+5. **SA 阻斷③：pre-commit／pre-push 的 venv 偵測修法缺具名缺陷帳本理由**（註解
+   只模糊指向「DEF-200-274 系列同類病灶的另一個發作點」，查無對應 DEF-ID）——
+   已修復：新開 `DEF-200-276`，狀態 `fixed（本輪）`，指向本節。
+6. **SA minor：`ParallelShardStderrBackpressureRegressionTest` docstring 前後
+   用語不一致**（開頭已改寫成 work-stealing 語言，但「修復前」段落仍沿用
+   「shard 0/1」字面）——順手修復：改寫成「LOUD／SLOW 那個模組」的敘述，並
+   明確標註「修復前（第三輪）」／「修復後（第四輪動態工作竊取）」兩個階段。
+7. **QA：本輪未回報裁決（`null`）**——無對應阻斷條件需要處理。
+
+### 本輪重驗（逐字，2026-09-09）
+
+```
+$ cd tools/tests && .venv/bin/python3 -m unittest test_run_root_unittests -v -k Parallel -k LoadBalancing
+...
+Ran 12 tests in 7.233s
+
+OK
+```
+
+（較上一輪的 11 支多 1 支：新增的 `ParallelShardWorkerThreadBaseExceptionDoesNotEscapeTest`。）
+
+discovery 探針（唯讀，`countTestCases()`，不執行任何測試）：`4045`，與重釘後的
+`MIN_TESTS` 一致；`python tools/sync_onboarding_baselines.py --check` rc=0。
+
+`LoadBalancingRegressionTest` 連續 3 次獨立執行皆 `ok`（`worker_count=3` 版本，
+逐次耗時見任務完成回覆）；額外手動驗證 `worker_count=1`（強迫兩個 SLOW 模組
+排隊）重跑同一情境，耗時 5.175s（逼近 `2 × 2.5s`），佐證新設計與舊版行為在
+計時斷言上仍能明確區分。
+
+### 第四輪第三次收斂（收尾單人窗口，2026-09-09）——誠實揭露 QA 鏡頭全程未曾真正執行
+
+**背景**：第四輪的兩次對抗式複審（本節上方）與其後再跑一次的第三輪複審，QA 這個
+鏡頭**三次全數**因（本次任務環境的）安全分類器攔截而回報 `null`，從未真的完成過
+一次 QA 驗收。前一批收斂記錄把「QA 回報 null」直接讀成「無阻斷條件需要處理」——
+這個假設本身沒有被質疑過，是本輪誠實補上的缺口，不是新發現的程式碼問題。
+
+**第三輪 Architect（APPROVE）／SA／SD（皆 APPROVE_WITH_CONDITIONS）找到的阻斷條件
+與處置**（收尾單人窗口逐條核實並修復，非自證）：
+
+1. `tools/lib/spawn_failure.py` 仍是 git 未追蹤檔——**這是唯一會讓「功能完備」
+   在字面上失敗的項目**：`tools/lib/hook_wiring.py` 已無條件 `import spawn_failure`，
+   commit 前必須把這支新檔與其餘 6 個已修改檔案一起 `git add`，否則任何 fresh
+   clone／CI checkout 會在 import 階段崩潰。**已記錄為 commit 前必做步驟**（見本檔
+   結尾〈結案前待辦〉）。
+2. 本檔上一節「Architect 阻斷②…已修復：改回 `.open()` 寫法」一句與
+   `tools/lib/quota_escalation.py` 現況（仍是 `write_bytes`）矛盾——**已訂正**：
+   改為據實描述「保留 `write_bytes`、只訂正虛構理由的註解」（該寫法已獨立驗證與
+   `.open(newline="\n")` 逐位元組等價，且是 LOC 預算下必要的省 1 行寫法）。
+3. `tools/lib/parallel_shard.py`（3 處）與 `tools/tests/test_run_root_unittests.py`
+   （2 處）把同一批修復稱為「第五輪複審」，與本檔／`R135`／`R136` findings 檔的
+   「第四輪第二次對抗式複審」用語不一致，形成懸空輪號參照——**已全部訂正**為
+   「第四輪第二次對抗式複審」。
+4. `ONBOARDING.md` §7 表①「（量測時點 2026-08-19）」與本輪實際重釘日期
+   （2026-09-09）矛盾，是 R96 已判過的同型舊病復發——**已訂正**日期。
+5. `LoadBalancingRegressionTest` docstring 用 `worker_count=2` 的手算例子論證
+   測試設計動機，但測試本體實際 mock 的是 `worker_count=3`；SD 獨立重算舊版
+   `weighted_shards()` 在 n=3 下並不會把 `SLOW_A`／`SLOW_B` 分進同一 bin，故本測試
+   對「已刪除的舊演算法」在其實際配置下沒有雙態鑑別力——**已訂正** docstring，
+   明確承認 n=2 例子僅為動機說明，本測試真正鎖住的是「n=3 下三模組真的併發執行」
+   本身。
+6. SA／SD 皆點名 `AutoClaude/tools/git-hooks/pre-commit`／`pre-push` 的 `.venv`
+   偵測邏輯在「檔案存在但不可執行」這個邊角案例下會靜默退回系統 python、毫無
+   診斷輸出（與 Rule 12 Fail loud 精神不符，標記 minor、非阻斷）——**已順手修復**：
+   兩檔皆補一行 stderr 警告，偵測到此情境時先出聲再退回。
+
+**收尾單人窗口自行執行的 QA 等效驗證**（補足三輪皆缺席的 QA 鏡頭，逐字）：
+
+```
+$ cd tools/tests && .venv/bin/python3 -m unittest test_run_root_unittests -v -k Parallel -k LoadBalancing
+Ran 12 tests in 7.222s
+OK
+```
+（含上述 5 項文件/docstring 訂正後重跑，行為不變、全數維持通過。）
+
+`LoadBalancingRegressionTest` 額外獨立重跑 2 次，皆 `OK`（無 flaky 跡象）。
+
+邊角案例驗證（QA 原定任務項目）：`run_parallel(unittest.TestSuite(), tools/tests, {})`
+（空 suite ＋空 module_counts）→ `testsRun=0, wasSuccessful()=True`，未崩潰、未卡死、
+無除以零——`n = min(worker_count(), 0) or 1` 建立 1 條 thread，該 thread 立即命中
+`queue.Empty` 收工，`merge_results([], {})` 正常回傳空結果，行為符合預期。
+
+`ruff check` 與 `check_loc_budget.py`（`violations=0`）於本輪所有訂正後重跑皆綠；
+兩支 git hook 的 shell 語法以 `bash -n` 確認無誤。
+
+**仍誠實保留、刻意不在本輪處理的一項**（Architect 第三輪 minor finding，非阻斷）：
+`_crash_fallback()` 讀取 `started` list 時未持有 `started_lock`，唯一理論競態路徑是
+`threading.Thread.start()` 本身失敗（需 OS 層級資源耗盡）且發生在 for 迴圈啟動到一半
+時——機率極低，且 Architect 本人明確判定「非本輪阻斷條件」。收尾單人窗口判斷：在
+沒有專屬回歸測試佐證修法正確性的情況下，於收尾窗口倉促加鎖修改例外安全網這種
+本輪已三度被複審驗證過的核心路徑，風險高於保留現況、留待下一輪帶測試一併處理的
+風險。**留供下一輪處理，非本輪遺漏**。
+
+## 第五輪：四方獨立複審（Architect/SA/SD/QA）全庫 TOCTOU 排查與 Ctrl-C／計時收斂（2026-09-09）
+
+### 背景
+
+掌舵者直接提問：派出 Architect／SA／SD／QA 四方獨立審查（各自不共享上下文，分別跑），
+針對現況重新核對三題——①帳本問題是否解決、②多CPU測試功能是否完備、③是否有頭重
+腳輕分配不均。四方皆親自讀程式碼／文件，QA 並親自實跑（本輪 QA 未再被安全分類器
+攔截，三輪全數完成，補齊第四輪三次皆缺席的鏡頭）。
+
+### 四方複審結果摘要
+
+- **Architect**：`VERDICT_LEDGER_RESOLVED=partial`／`VERDICT_FEATURE_COMPLETE=partial`
+  ／`VERDICT_LOAD_BALANCED=partial`。找到 4 項發現：(1) 無 per-module 計時觀測——
+  work-stealing 的核心效率宣稱無從驗證；(2) 確認 `TestPathextReadsAreePlatformGuarded`
+  TOCTOU 缺口為真；(3) `TestScanSurfaceParityWithSisterLock` 是架構層級問題（list-vs-list
+  race，讀取端防護治不了），非局部 bug；(4，新發現) Ctrl-C 中斷時其餘 worker thread
+  未被清理、非 daemon thread 卡住直譯器退出、已啟動子行程未被 kill。
+- **SA**：三題判斷與 Architect 一致（皆 partial），額外指出 `ONBOARDING.md` 完全未提及
+  `AUTOSDD_PARALLEL_TESTS` 開關——功能存在但無人能發現，直接構成 feature-complete
+  只能判 partial 的理由；並訂正「本輪任務的真正源頭是缺陷帳本一次性提問，不是
+  `AutoSDD_improving_112.md` 迭代序」。
+- **SD**：逐條核實 Architect 四項發現皆屬實，並獨立在 `tools/tests/` 另外九支檔案
+  （`test_subprocess_encoding_hygiene.py`／`test_no_invalid_escape_sequences.py`／
+  `test_pre_push_dispatcher.py`／`test_adr_xplat001_c1c2_lock.py`／`test_ps_engine_ssot.py`
+  ／`test_dev_start.py`／`test_bash_probe_spec_contract.py`／`test_mac_endurance_r83.py`／
+  `test_find_git_bash_parity.py`）找到同一 TOCTOU 病灶的呼叫點，判定 Architect 建議的
+  「搬離 `tools/tests/`」修法因 `_worker_main()` 硬性斷言 `start_dir == tests_dir` 而不可行，
+  改採「`_zzz_` 前綴排除」集中修法。
+- **QA**：實測序列 805.61s（`Ran 4045 tests in 788.378s`，real 13:25.61）vs 平行(8 worker)
+  252.72s——3.19x 加速比（約 40% 理論效率），總 CPU 秒數兩次量測幾乎守恆（857.3 vs
+  861.0，+0.4%），確認是乾淨比較。直接計時單一模組找到根因：
+  `test_doc_loc_baseline_freshness_r60.py` 單模組耗時 163.19s，獨占平行總耗時約
+  65%——這就是「頭重腳輕」問題的量化根因（277 支測試但單執行緒全樹掃描）；對照
+  `test_context_budget_guard.py`（621 支測試僅 28.32s）證實「方法數」與「實際耗時」
+  無關，佐證了 work-stealing 取代舊版方法數加權裝箱的設計決策。邊界案例
+  （`WORKERS=1`／`WORKERS=50`）皆正確；現場複現 TOCTOU 崩潰 1/3 次（間歇性競態，
+  非每次必現）。誠實揭露：8-worker 與 4-worker 兩次量測的失敗數不一致（10F/0E vs
+  6F/1E），懷疑與本機背景 nightly 自動化搶資源有關，未能在本輪內完全排除。
+
+### 修復（收尾單人窗口逐條落地）
+
+1. **TOCTOU 病灶全庫排查修復**：十支 `tools/tests/` 檔案（Architect 原僅點名 1 支，
+   SD 複核時另找到 2 支，收尾單人窗口實作時逐一核對整棵 `tools/tests/` 樹又找到
+   剩餘 7 支）各補一道 `_zzz_` 合成暫存模組排除；`test_platform_neutral_paths.py`
+   的 `TestPathextReadsAreePlatformGuarded` 額外疊加既有 `_read_text_or_none()`
+   讀取防護（雙重保險）。
+2. **Ctrl-C 孤兒行程清理**（`tools/lib/parallel_shard.py::run_parallel()`）：新增
+   `stop_event`（worker thread 認領新模組前檢查）；`t.join()` 迴圈外包
+   `except KeyboardInterrupt`：立旗標→排空 `pending`→kill 已啟動子行程（`started_lock`
+   保護下拍照）→等所有 thread 真的結束→`raise`（不吞例外，只是先清乾淨）。誠實
+   劃界：極窄殘留窗口（一條 thread 剛拿到模組、還沒檢查旗標就被排程出去）仍可能
+   多起一個子行程，但 `t.join()` 保證它會被等到、不會變真正孤兒。
+3. **per-module 計時觀測**：`_worker_thread_loop()` 用 `time.monotonic()` 量測每個
+   模組的 wall-clock 秒數，經 `_MergedResult.module_timings` 傳給新函式
+   `run_root_unittests.py::report_module_timings()`，平行模式下印出耗時排行前 5。
+4. **`_crash_fallback()` started_lock 缺口**（第四輪第三次收斂刻意留給下一輪的項目，
+   本輪即為該「下一輪」）：兩處呼叫端在傳入 `started` 前皆先於 `started_lock` 下
+   拍照，不再依賴「呼叫時機恰好安全」這個隱性前提。
+5. **`git add tools/lib/spawn_failure.py`**：已於本輪 commit 前完成（第四輪唯一因
+   任務書限制無法完成的項目）。
+6. **`ONBOARDING.md`**：§7 bash／PowerShell 兩區塊補上 `AUTOSDD_PARALLEL_TESTS` 開關
+   的呼叫範例與 Windows-未驗證註記。
+
+### 本輪重驗（逐字，2026-09-09）
+
+```
+$ AUTOSDD_PARALLEL_TESTS=1 AUTOSDD_PARALLEL_TESTS_WORKERS=4 python tools/run_root_unittests.py
+... Ran 839 tests in 215.104s ... OK (skipped=16)
+```
+
+（涵蓋全部本輪修改檔案：`test_platform_neutral_paths`／`test_subprocess_encoding_hygiene`
+／`test_no_invalid_escape_sequences`／`test_pre_push_dispatcher`／`test_ps_engine_ssot`
+／`test_dev_start`／`test_bash_probe_spec_contract`／`test_mac_endurance_r83`／
+`test_find_git_bash_parity`／`test_run_root_unittests`。）
+
+`test_adr_xplat001_c1c2_lock.py` 全套 192 支獨立重跑：`OK`（含護欄層行數棘輪、
+`guard_self` 分桶棘輪、`_REPIN_NET_CAP_SCHEDULE` 到期義務、`_FROZEN_PREFIX_REWRITE_LEDGER`
+接鏈、`_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND` 展延、文件側 guard-total 對帳，逐項見
+`CrossPlatform_R137_Scan_Findings.md`）。`ruff check` 全部本輪異動檔案：`All checks
+passed!`。
+
+### 誠實劃界（本輪仍未解決）
+
+- **Windows 真機驗證**：仍未解，本 session 全程 macOS-only。`VERDICT_LEDGER_RESOLVED`
+  ／`VERDICT_FEATURE_COMPLETE` 因此維持 `partial`，不宣稱 `fixed`/`closed`。
+- **run-to-run 失敗數變異**：QA 懷疑與本機背景自動化搶資源有關，未完全排除。
+- **本輪 TOCTOU 排查僅涵蓋 `tools/tests/`**：未對 `AutoClaude/tests/`／`AISDLC_SDD/`
+  等其他樹做同型排查，若那些樹底下也有平行測試合成暫存檔案的類似風險，仍可能
+  有漏網，逐項見 `CrossPlatform_R137_Scan_Findings.md` §5。

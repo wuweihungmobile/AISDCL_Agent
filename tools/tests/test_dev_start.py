@@ -5078,6 +5078,8 @@ class TestPsUtf8PreludeIsSingleSpelling(unittest.TestCase):
             for path in sorted(root.rglob("*.py")):
                 if "__pycache__" in path.parts:
                     continue
+                if path.name.startswith("_zzz_"):  # 平行測試合成暫存模組（第五輪）
+                    continue
                 scanned += 1
                 # `.as_posix()`：鍵會被印進失敗訊息，`str()` 在 Windows 上是
                 # 反斜線形態，與其他鎖的正斜線比對慣例不一致。

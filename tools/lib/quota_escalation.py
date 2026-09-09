@@ -168,14 +168,22 @@ def fanout_path(session_id: str) -> Path:
     return Path(tempfile.gettempdir()) / f"autosdd_fanout_{session_id}.json"
 
 
-# 🔴 `newline="\n"`：本 repo 判過「Python 寫檔不指定 newline，Windows 上會寫出 CRLF」。
-# 寫不進去**不得**升級為失敗——最壞情況是這一次沒留下紙，不能反過來變成故障源
-# （同 `append_log` 的既有紀律）。回傳值讓呼叫端把「寫了沒」記進稽核痕跡。
+# 🔴 用 `write_bytes` 而非 `.open(..., newline="\n")`：本 repo 判過「Python 寫檔不
+# 指定 newline，Windows 上會寫出 CRLF」，兩種寫法都能解——`.open(mode, newline=...)`
+# 與 `write_bytes` 對本檔唯一的呼叫端（純 `\n` 或已知混合換行字串）產出逐位元組相同
+# 的輸出（已獨立驗證）。選 `write_bytes`：guardrail_lib tier 餘裕在本檔落地當回合已是
+# 個位數行，`with` 區塊多付 1 行斷言即破線；`write_bytes` 一律 binary 模式、不需要
+# `with` 區塊，省下那 1 行。🔴 第四輪複審訂正（此前版本的註解誤稱本行取代的是
+# `Path.write_text(newline=)`——那個 3.10+ 專屬崩潰是 commit 89c4e91 修的**舊碼**，
+# 本行實際取代的是 `.open(mode, newline=...)`，在 macOS 系統 python3（3.9）上原本就
+# 完全正常，已用 `/usr/bin/python3` 實測；改用 `write_bytes` 純粹是 LOC 預算考量，
+# 不是 3.9 相容性考量）。寫不進去不得升級為失敗——最壞情況是這一次沒留下紙，不能
+# 反過來變成故障源（同 `append_log` 的既有紀律）。回傳值讓呼叫端把「寫了沒」記進
+# 稽核痕跡。
 def _write(path: Path, text: str) -> bool:
     """寫一支 UTF-8／LF 文字檔；回「寫成功了沒」。"""
     try:
-        with path.open("w", encoding="utf-8", newline="\n") as f:
-            f.write(text)
+        path.write_bytes(text.encode("utf-8"))
     except OSError:
         return False
     return True

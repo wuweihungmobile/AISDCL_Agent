@@ -21,6 +21,7 @@ import sys
 import tempfile
 import textwrap
 import threading
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -2685,18 +2686,21 @@ class ParallelShardStderrBackpressureRegressionTest(unittest.TestCase):
     的那個缺口。本測試用兩支**寫進磁碟**的合成模組（`_worker_main()` 硬性要求
     `start_dir` 必須是真正的 `tools/tests/`，無法用假路徑繞過）：
 
-      · SLOW（檔名字典序在前 ⇒ `weighted_shards()` 相同權重時分進 shard 0，
-        序列 `communicate()` 迴圈第一輪處理）：只 `time.sleep()`。
-      · LOUD（檔名字典序在後 ⇒ 分進 shard 1，第二輪處理）：立即對 `sys.stderr`
+      · SLOW（`worker_count=2` 下由某一條 worker thread 認領）：只 `time.sleep()`。
+      · LOUD（由另一條 worker thread 認領，與 SLOW 同時起跑）：立即對 `sys.stderr`
         寫超過 OS pipe buffer（常見 64KB）的內容，自行量測這次 `write()` 的耗時
         並落到一支結果檔——量測結果不能借道 stdout 協定通道回傳，那條通道被
         `_worker_main()` 拿去印一行 JSON，混進任何額外位元組會讓 `json.loads`
         當場炸掉。
 
-    修復前：shard 1 的 stderr `write()` 會被核心阻塞到 shard 0 的 `communicate()`
-    完成為止（parent 依序輪到它），量到的耗時應 ≈ SLOW 的 sleep 秒數。
-    修復後：兩個 shard 的 stdout/stderr 各有專屬 thread 從 Popen 一啟動就同時被
-    排空，LOUD 的耗時應與 SLOW 的 sleep 秒數無關（近乎瞬間完成）。
+    修復前（第三輪：主 thread 序列 for 迴圈依序 `Popen()`＋事後才平行 `communicate()`）：
+    LOUD 那個 shard 的 stderr `write()` 會被核心阻塞到 SLOW 那個 shard 的
+    `communicate()` 完成為止（parent 依序輪到它），量到的耗時應 ≈ SLOW 的 sleep
+    秒數。
+    修復後（第四輪動態工作竊取：每條 worker thread 各自 `Popen()`＋緊接著自己
+    `communicate()`，兩者之間沒有「先開好全部、再排隊處理」的視窗）：兩個模組的
+    stdout/stderr 各有專屬 thread 從 Popen 一啟動就同時被排空，LOUD 的耗時應與
+    SLOW 的 sleep 秒數無關（近乎瞬間完成）。
     """
 
     _SLOW_MODULE = f"_zzz_backpressure_repro_a_slow_{os.getpid()}"
@@ -2754,6 +2758,121 @@ class ParallelShardStderrBackpressureRegressionTest(unittest.TestCase):
             elapsed, self._SLEEP_SECONDS / 2,
             f"LOUD shard 的 stderr write() 耗時 {elapsed:.3f}s 過於接近 SLOW shard 的"
             f" sleep（{self._SLEEP_SECONDS}s）——stderr backpressure 回歸復發",
+        )
+
+
+class LoadBalancingRegressionTest(unittest.TestCase):
+    """DEF-200-274 第四輪：證明動態工作竊取真的達成負載平衡，不靠測試方法數這個
+    權重估計準不準。
+
+    刻意反過來設計成舊版 `weighted_shards()`（已刪除；依測試方法數貪婪裝箱）一定
+    誤判的形狀：1 個「方法數少但單次耗時極長」的慢模組＋1 個「方法數多但全部瞬間
+    通過」的快模組，兩者方法數皆遠低於另一個純粹用來墊高 worker 數的次要慢模組。
+    具體：TRIVIAL（10 支瞬間通過的方法，權重最高）＋ SLOW_A／SLOW_B（各 1 支
+    `time.sleep()`，權重最低，恰好是舊演算法會誤判成「輕量」而綁在同一個 shard
+    的那種模組）：
+
+      · 舊版 `weighted_shards()`（`worker_count=2` 下）：依權重（方法數）由重到輕
+        貪婪裝箱——TRIVIAL(10) 先進最輕的 bin（bin0，load=10）；SLOW_A(1) 進另一個
+        bin（bin1，load=1）；SLOW_B(1) 兩個 bin 的 load 為 [10, 1]，最輕的是 bin1，
+        SLOW_A 與 SLOW_B 因此被**同一個** shard（同一個 subprocess，序列跑完）
+        分到，總耗時 ≈ 2 × `_SLEEP_SECONDS`；bin0（TRIVIAL 獨占）幾乎瞬間完成、
+        閒置等待。
+      · 新版動態佇列：排程粒度已改成**每個模組各自一個獨立 subprocess**，SLOW_A
+        與 SLOW_B 無論 `worker_count` 是多少都不可能被綁進同一個 subprocess——
+        真正需要驗證的只剩「兩者是否真的**同時**執行」。
+
+    🔴 第四輪第二次對抗式複審 SD finding（上面 `worker_count=2` 例子的因果敘事訂正）：
+    上面這個手算例子純粹是**動機說明**（解釋舊演算法哪裡會誤判），本測試實際
+    mock 的是 `worker_count=3`（見下方 `test_two_slow_modules_run_concurrently_
+    not_sequentially`）——獨立重算過舊版 `weighted_shards()` 在 n=3 下的分箱結果
+    是 `[['TRIVIAL'], ['SLOW_A'], ['SLOW_B']]`（三模組各自獨立 bin），SLOW_A／
+    SLOW_B **不會**在 n=3 下被舊演算法綁進同一個 shard。因此本測試對「已刪除的
+    舊演算法」在其實際配置下**沒有**雙態鑑別力，不能宣稱「改回舊演算法會讓本
+    測試變紅」；本測試真正鎖住的是「新系統在 n=3、三模組真的併發執行」這件事
+    本身（見下方 docstring 尾段：把 `worker_count` 改成 1 才是能讓本測試失敗的
+    真實反例，而非復原舊演算法）。
+
+    🔴 第四輪第二次對抗式複審 Architect finding（timing 斷言的複合延遲風險，已修正）：本測試
+    原本用 `worker_count=2`，讓 TRIVIAL 與 SLOW_A/SLOW_B 三個模組競爭 2 條
+    thread——若 TRIVIAL 被某條 thread 搶先認領，該 thread 完成 TRIVIAL 後會
+    **回頭再次認領**佇列裡剩下的那個 SLOW，形成「兩次 Popen 啟動延遲疊加」的
+    複合效應（TRIVIAL 開銷 + 第二次 Popen 啟動開銷 + `_SLEEP_SECONDS`），使原本
+    1.6x 的安全邊際在 Windows／高負載 CI 上的實際餘裕不明（本機 mac 測得數字
+    尚可，但缺乏慢機器佐證）。改法：`worker_count` 改為 **3**（＝模組數），讓
+    3 個模組在啟動瞬間就被 3 條 thread 一次各自認領一次到位、全程零佇列競爭——
+    TRIVIAL 不再可能「搶完一個位置後回頭偷第二個」，每條 thread 全程只呼叫
+    一次 `Popen()`。這徹底移除複合延遲的來源（而非只是加大安全邊際掩蓋它），
+    計時斷言因此只需涵蓋「一次 subprocess 啟動開銷」，不再依賴「誰搶到
+    TRIVIAL、TRIVIAL 完成的時間點是否早於另一個 SLOW 啟動」這種 thread 排程
+    時序假設。
+
+    本測試斷言總耗時遠低於 `2 × _SLEEP_SECONDS`（給足容忍度後仍能與「兩個慢
+    模組被綁進同一個 subprocess 序列跑完」的舊行為明確區分）；把 `worker_count`
+    改回 1（強迫兩個 SLOW 模組排隊、其中一個必須等另一個的 subprocess 先讓出
+    thread）重跑本測試會因總耗時逼近 `2 × _SLEEP_SECONDS` 而失敗，落地時已手動
+    驗證過這一點。
+    """
+
+    _TRIVIAL_MODULE = f"_zzz_loadbalance_repro_trivial_{os.getpid()}"
+    _SLOW_MODULE_A = f"_zzz_loadbalance_repro_slow_a_{os.getpid()}"
+    _SLOW_MODULE_B = f"_zzz_loadbalance_repro_slow_b_{os.getpid()}"
+    _SLEEP_SECONDS = 2.5
+
+    def setUp(self) -> None:
+        self._tests_dir = Path(__file__).resolve().parent
+        self._paths: list[Path] = []
+
+        trivial_path = self._tests_dir / f"{self._TRIVIAL_MODULE}.py"
+        methods = "\n\n".join(f"    def test_{i}(self):\n        pass" for i in range(10))
+        trivial_path.write_text(
+            f"import unittest\n\n\nclass TrivialTest(unittest.TestCase):\n{methods}\n",
+            encoding="utf-8",
+        )
+        self._paths.append(trivial_path)
+
+        for name in (self._SLOW_MODULE_A, self._SLOW_MODULE_B):
+            slow_path = self._tests_dir / f"{name}.py"
+            slow_path.write_text(
+                "import time\n"
+                "import unittest\n\n\n"
+                "class SlowTest(unittest.TestCase):\n"
+                f"    def test_sleep(self):\n        time.sleep({self._SLEEP_SECONDS})\n",
+                encoding="utf-8",
+            )
+            self._paths.append(slow_path)
+
+        for p in self._paths:
+            self.addCleanup(p.unlink, missing_ok=True)
+
+    def test_two_slow_modules_run_concurrently_not_sequentially(self) -> None:
+        parallel_shard = run_root_unittests.parallel_shard
+        module_counts = {
+            self._TRIVIAL_MODULE: 10,
+            self._SLOW_MODULE_A: 1,
+            self._SLOW_MODULE_B: 1,
+        }
+        suite = unittest.TestSuite()
+
+        # worker_count=3（＝模組數）：3 個模組在啟動瞬間各自被 1 條 thread 一次
+        # 認領到位，全程零佇列競爭，避免「TRIVIAL 完成後回頭偷認領第二個 SLOW」
+        # 這種會疊加兩次 Popen 啟動延遲的複合效應（見上方 docstring 的 Architect
+        # finding 段落）。
+        with mock.patch.object(parallel_shard, "worker_count", return_value=3):
+            start = time.monotonic()
+            merged = parallel_shard.run_parallel(suite, self._tests_dir, module_counts)
+            elapsed = time.monotonic() - start
+
+        self.assertTrue(
+            merged.wasSuccessful(),
+            f"合成模組應該全部通過：errors={merged.errors} failures={merged.failures}",
+        )
+        self.assertEqual(merged.testsRun, 12)
+        self.assertLess(
+            elapsed, self._SLEEP_SECONDS * 1.6,
+            f"總耗時 {elapsed:.3f}s 過於接近兩個慢模組序列相加"
+            f"（{self._SLEEP_SECONDS * 2}s）——動態負載平衡疑似失效，"
+            "兩個慢模組被綁進同一條 thread 序列執行",
         )
 
 
@@ -2906,12 +3025,26 @@ class ParallelShardPopenFailureKillsAlreadyStartedProcsTest(unittest.TestCase):
     """
 
     def test_a_later_popen_failure_kills_already_started_procs(self) -> None:
+        """DEF-200-274 第四輪：動態佇列下 Popen 由多條 worker thread 併發呼叫，
+        「誰先誰後」不再確定——原本靠呼叫次數（第一次成功、第二次失敗）判斷的假
+        Popen，改成依 argv 裡的模組名決定成敗（`mod.b` 恆失敗、`mod.a` 恆成功），
+        讓斷言不依賴 thread 排程的先後順序。
+        """
         parallel_shard = run_root_unittests.parallel_shard
 
         class _FakeProc:
             def __init__(self) -> None:
                 self.killed = False
                 self.waited = False
+                # 🔴 第四輪複審發現的既存 fixture 缺口（非本輪引入）：本 mock 原本漏了
+                # `returncode`，`_worker_thread_loop()` 對成功 Popen 的分支一定會存取它
+                # （`results.put((module, proc.returncode, ...))`）——先前的舊版
+                # `run_parallel()` 只取 `thread_errors` 第一筆例外就 raise，恰好讓
+                # mod.b 那個「刻意」的 OSError 蓋過這個「意外」的 AttributeError，兩者
+                # 長得一樣（都是「有例外被攔下」），此測試因此從未真的獨立驗證過
+                # mod.a 分支能走到 `results.put()` 那一步。修復後的 `run_parallel()`
+                # 會把兩條 worker thread 的例外都排空印出，讓這個潛在缺口第一次現形。
+                self.returncode = 0
 
             def kill(self) -> None:
                 self.killed = True
@@ -2923,13 +3056,16 @@ class ParallelShardPopenFailureKillsAlreadyStartedProcsTest(unittest.TestCase):
                 return "", ""
 
         started: list = []
+        started_lock = threading.Lock()
 
         def fake_popen(argv, **_kwargs):
-            if not started:
-                proc = _FakeProc()
+            module = argv[3]
+            if module == "mod.b":
+                raise OSError("boom: mod.b Popen failed")
+            proc = _FakeProc()
+            with started_lock:
                 started.append(proc)
-                return proc
-            raise OSError("boom: second Popen failed")
+            return proc
 
         class _Case(unittest.TestCase):
             def test_ok(self):
@@ -2946,12 +3082,95 @@ class ParallelShardPopenFailureKillsAlreadyStartedProcsTest(unittest.TestCase):
             except OSError as exc:
                 self.fail(f"run_parallel() 讓 Popen() 失敗的例外穿透，未被攔截：{exc}")
 
-        self.assertEqual(len(started), 1, "應該只成功啟動第一個 shard")
+        self.assertEqual(len(started), 1, "應該只成功啟動 mod.a 這個子行程")
         self.assertTrue(
             started[0].killed,
-            "第二個 Popen 失敗時，已啟動的第一個子行程沒有被 kill()——孤兒子行程",
+            "mod.b 的 Popen 失敗時，已啟動的 mod.a 子行程沒有被 kill()——孤兒子行程",
         )
         self.assertFalse(result.wasSuccessful())
+
+
+class ParallelShardMultipleThreadFailuresAreAllReportedTest(unittest.TestCase):
+    """DEF-200-274 第四輪 Architect 複審阻斷條件：`run_parallel()` 此前只用
+    `thread_errors.get_nowait()` 取**第一筆**例外就 `raise`，兩條以上 worker thread
+    幾乎同時失敗時，其餘例外物件永遠留在佇列裡、從未被印出——診斷資訊真的遺失。
+
+    本測試讓 3 個 worker thread 全部因不同的 Popen 失敗而拋出例外（3 個模組、
+    `worker_count=3` 保證每個模組各自一條 thread、無人能倖存去消化佇列），斷言
+    最終結果的 `errors` 訊息裡看得到**全部三筆**失敗的線索，而不是只有一筆
+    ——這正是 Architect 建議的回歸測試形狀。
+    """
+
+    def test_three_simultaneous_popen_failures_all_surface_in_the_error_text(self) -> None:
+        parallel_shard = run_root_unittests.parallel_shard
+
+        def fake_popen(argv, **_kwargs):
+            module = argv[3]
+            raise OSError(f"boom: {module} Popen failed")
+
+        class _Case(unittest.TestCase):
+            def test_ok(self):
+                pass
+
+        suite = unittest.TestSuite([_Case("test_ok")])
+        modules = {"mod.x": 1, "mod.y": 1, "mod.z": 1}
+
+        with mock.patch.object(parallel_shard, "worker_count", return_value=3), \
+                mock.patch.object(parallel_shard.subprocess, "Popen", side_effect=fake_popen):
+            try:
+                result = parallel_shard.run_parallel(
+                    suite, Path(__file__).resolve().parent, modules,
+                )
+            except OSError as exc:
+                self.fail(f"run_parallel() 讓 Popen() 失敗的例外穿透，未被攔截：{exc}")
+
+        self.assertFalse(result.wasSuccessful())
+        self.assertEqual(len(result.errors), 1, "run_parallel() 本身的例外合成一筆 errors 條目")
+        _, reason = result.errors[0]
+        for module in modules:
+            self.assertIn(
+                f"{module} Popen failed",
+                reason,
+                f"合併後的例外訊息裡看不到 {module} 那一筆失敗——多筆例外只留了其中幾筆，"
+                "回到修復前『只取第一筆就 raise』的靜默漏失",
+            )
+
+
+class ParallelShardWorkerThreadBaseExceptionDoesNotEscapeTest(unittest.TestCase):
+    """DEF-200-274 第四輪第二次對抗式複審 Architect finding 1(a)：worker thread 內部若拋出非
+    `Exception` 子類的 `BaseException`（如 `SystemExit`），`run_parallel()` 不得
+    讓它穿透——`_crash_fallback()` 直接收尾，不依賴外層 `except Exception` 篩選
+    型別。刻意用 `SystemExit` 而非既有測試已覆蓋的 `OSError`：`OSError` 是
+    `Exception` 子類，舊版「合成後 `raise`、交外層 `except Exception` 接」的寫法
+    對它本來就成立，換不出這個型別缺口；`SystemExit` 才是舊版寫法會真的漏接的
+    具體反例。
+    """
+
+    def test_worker_thread_system_exit_is_captured_not_propagated(self) -> None:
+        parallel_shard = run_root_unittests.parallel_shard
+
+        def fake_popen(argv, **_kwargs):
+            raise SystemExit("boom: simulated non-Exception BaseException")
+
+        class _Case(unittest.TestCase):
+            def test_ok(self):
+                pass
+
+        suite = unittest.TestSuite([_Case("test_ok")])
+
+        with mock.patch.object(parallel_shard, "worker_count", return_value=1), \
+                mock.patch.object(parallel_shard.subprocess, "Popen", side_effect=fake_popen):
+            try:
+                result = parallel_shard.run_parallel(
+                    suite, Path(__file__).resolve().parent, {"mod.exit": 1},
+                )
+            except SystemExit as exc:
+                self.fail(f"run_parallel() 讓 worker thread 的 SystemExit 穿透，未被攔截：{exc}")
+
+        self.assertFalse(result.wasSuccessful())
+        self.assertEqual(len(result.errors), 1)
+        _, reason = result.errors[0]
+        self.assertIn("simulated non-Exception BaseException", reason)
 
 
 class ParallelShardRealSubprocessProtocolIntegrationTest(unittest.TestCase):

@@ -176,6 +176,8 @@ def _scan_units() -> list[tuple[str, list[Path], int]]:
         if not root.is_dir():
             raise AssertionError(f"掃描根缺席：{root}（邊界不得靜默縮小）")
         found = root.rglob("*.py") if recursive else root.glob("*.py")
+        # `_zzz_*` 排除：兩支姊妹鎖的 list-vs-list race，讀取端防護治不了（第五輪）。
+        found = (p for p in found if not p.name.startswith("_zzz_"))
         specs.append((root, floor, sorted(p for p in found
                                           if "__pycache__" not in p.parts)))
     roots = [root for root, _floor, _files in specs]
@@ -186,6 +188,25 @@ def _scan_units() -> list[tuple[str, list[Path], int]]:
     singles = sorted(p for p in _scan_single_files() if p.is_file())
     units.append((_SINGLE_UNIT_LABEL, singles, _SINGLE_FILE_FLOOR))
     return units
+
+
+def _read_text_or_none(path: Path, **kwargs: object) -> str | None:
+    """讀檔內容；回 `None`＝檔案在被 `_scan_units()` 列舉之後、真的讀取之前消失。
+
+    DEF-200-274 第四輪 QA 複審發現的 TOCTOU：`AUTOSDD_PARALLEL_TESTS=1` 下，
+    `tools/tests/` 底下另一支測試（`ParallelShardRealSubprocessProtocolIntegrationTest`／
+    `LoadBalancingRegressionTest` 等）在**不同的 worker subprocess**裡對同一目錄寫入
+    合成暫存模組（`_zzz_*.py`）並以 `addCleanup` 刪除——本檔多支判準會先 glob
+    `tools/tests/*.py` 拿到檔案清單、再逐一讀取，兩步之間若那支暫存檔恰好被刪，
+    `read_text()` 會拋 `FileNotFoundError` 讓整支治理測試當場報 ERROR，而這與治理
+    掃描本身要驗的內容毫無關係——消失的檔案本來就不該算進這次掃描結論，容忍它
+    消失不會讓任何真實違規被掩蓋。只吞 `FileNotFoundError`：其餘 I/O 錯誤（權限、
+    編碼判準本身的 `UnicodeDecodeError` 等）仍應照各呼叫端既有邏輯處理，不在此收斂。
+    """
+    try:
+        return path.read_text(**kwargs)
+    except FileNotFoundError:
+        return None
 
 
 def _owning_root(py: Path, roots: list[Path]) -> Path:
@@ -228,8 +249,11 @@ def run_unit_scan(
         scanned = 0
         for py in files:
             rel = py.relative_to(_REPO_ROOT).as_posix()
+            text = _read_text_or_none(py, encoding="utf-8")
+            if text is None:
+                continue  # TOCTOU 消失（見 `_read_text_or_none` docstring）
             try:
-                off, st = scanner(py.read_text(encoding="utf-8"), rel)
+                off, st = scanner(text, rel)
             except (SyntaxError, UnicodeDecodeError, ValueError) as exc:
                 parse_failures.append(f"{rel}: {type(exc).__name__}: {exc}")
                 continue
@@ -260,8 +284,11 @@ def scan_drive_literal(source: str, rel: str) -> tuple[list[str], list[str]]:
 
 
 def _scan_file(py: Path) -> list[str]:
+    text = _read_text_or_none(py, encoding="utf-8")
+    if text is None:
+        return []  # TOCTOU 消失（見 `_read_text_or_none` docstring）
     rel = py.relative_to(_REPO_ROOT).as_posix()
-    return scan_drive_literal(py.read_text(encoding="utf-8"), rel)[0]
+    return scan_drive_literal(text, rel)[0]
 
 
 class TestPlatformNeutralPaths(unittest.TestCase):
@@ -1486,6 +1513,8 @@ def _pathext_scan_files() -> list[Path]:
         for p in _REPO_ROOT.rglob(suffix):
             if skip_parts & set(p.parts):
                 continue
+            if p.name.startswith("_zzz_"):  # 平行測試合成暫存模組（第五輪）
+                continue
             out.append(p)
     return sorted(out)
 
@@ -1499,8 +1528,12 @@ class TestPathextReadsAreePlatformGuarded(unittest.TestCase):
         scanned = 0
         for path in _pathext_scan_files():
             rel = path.relative_to(_REPO_ROOT).as_posix()
-            off, st = scan_unguarded_pathext(
-                path.read_text(encoding="utf-8-sig", errors="replace"), rel)
+            # 第五輪：此前直接 read_text()，是唯一漏掉 TOCTOU 防護的呼叫點（其餘
+            # 三處 run_unit_scan/_scan_file/_scan_repo 第四輪已補），現場複現過。
+            text = _read_text_or_none(path, encoding="utf-8-sig", errors="replace")
+            if text is None:
+                continue  # TOCTOU 消失（見 `_read_text_or_none` docstring）
+            off, st = scan_unguarded_pathext(text, rel)
             offenders.extend(off)
             stale.extend(st)
             scanned += 1
@@ -2106,8 +2139,10 @@ class TestTextIoDeclaresEncoding(unittest.TestCase):
         scanned = 0
         for path in _encoding_scan_files():
             rel = path.relative_to(_REPO_ROOT).as_posix()
-            off, st = scan_missing_encoding(
-                path.read_text(encoding="utf-8-sig", errors="replace"), rel)
+            text = _read_text_or_none(path, encoding="utf-8-sig", errors="replace")
+            if text is None:
+                continue  # TOCTOU 消失（見 `_read_text_or_none` docstring）
+            off, st = scan_missing_encoding(text, rel)
             if off:
                 per_file[rel] = len(off)
                 detail.extend(off)
@@ -2359,7 +2394,11 @@ class TestScanSurfaceParityWithSisterLock(unittest.TestCase):
         for root, _floor in _sister._scan_roots():
             if not root.is_dir():
                 continue
-            files.update(p for p in root.rglob("*.py") if "__pycache__" not in p.parts)
+            # `_zzz_*` 兩邊都要排除，否則「兩鎖掃描面相等」的前提不成立（第五輪）。
+            files.update(
+                p for p in root.rglob("*.py")
+                if "__pycache__" not in p.parts and not p.name.startswith("_zzz_")
+            )
         files.update(p for p in _sister._scan_single_files() if p.is_file())
         return files
 

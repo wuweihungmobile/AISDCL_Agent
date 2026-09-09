@@ -573,7 +573,8 @@ class TestSubprocessEncodingHygiene(unittest.TestCase):
         parse_failures: list[str] = []
         for root, floor in _scan_roots():
             self.assertTrue(root.is_dir(), f"掃描根缺席：{root}（邊界不得靜默縮小）")
-            files = sorted(root.rglob("*.py"))
+            # `_zzz_*` 排除：平行測試合成暫存模組，`scan_files()` 讀取無防護（第五輪）。
+            files = sorted(p for p in root.rglob("*.py") if not p.name.startswith("_zzz_"))
             # per-tree 下限帶：單樹縮面必紅；下限離實測太遠（＝腐化）也必紅
             verdict = tree_count_verdict(str(root), len(files), floor)
             self.assertIsNone(verdict, verdict or "")
@@ -694,8 +695,10 @@ class TestChildEncodingHygiene(unittest.TestCase):
         in_scope = 0
         for root, _floor in _scan_roots():
             self.assertTrue(root.is_dir(), f"掃描根缺席：{root}（邊界不得靜默縮小）")
+            # `_zzz_*` 排除：`scan_files_child_encoding()` 讀取同樣無防護（第五輪）。
             off, st, pf, cnt = scan_files_child_encoding(
-                sorted(root.rglob("*.py")), _REPO_ROOT
+                sorted(p for p in root.rglob("*.py") if not p.name.startswith("_zzz_")),
+                _REPO_ROOT,
             )
             offenders.extend(off)
             stale.extend(st)
@@ -1021,7 +1024,8 @@ class TestEntryPointStdioProtection(unittest.TestCase):
     def _all_files(self) -> list[Path]:
         files: list[Path] = []
         for root, _floor in _scan_roots():
-            files += sorted(root.rglob("*.py"))
+            # `_zzz_*` 排除：`scan_entry_points()` 讀取無防護，理由同上（第五輪）。
+            files += sorted(p for p in root.rglob("*.py") if not p.name.startswith("_zzz_"))
         return files + sorted(_scan_single_files())
 
     def test_entry_points_printing_non_ascii_are_protected(self) -> None:
@@ -1360,9 +1364,10 @@ class TestScanRootsConfigPinning(unittest.TestCase):
         for root, floor in _scan_roots():
             if not root.is_dir():
                 continue
+            # `_zzz_*` 排除，避免合成暫存檔讓下限帶自證跟著抖動（第五輪）。
             verdict = tree_count_verdict(
                 root.relative_to(_REPO_ROOT).as_posix(),
-                len(sorted(root.rglob("*.py"))), floor,
+                len([p for p in root.rglob("*.py") if not p.name.startswith("_zzz_")]), floor,
             )
             if verdict:
                 stale.append(verdict)
@@ -1406,7 +1411,8 @@ def _overlong_line_count(root: Path) -> int:
     """
     limit = _ruff_config()["line-length"]
     total = 0
-    for path in sorted(root.rglob("*.py")):
+    # `_zzz_*` 排除：唯一呼叫點就是 `tools/tests` 本身，read_text() 無防護（第五輪）。
+    for path in sorted(p for p in root.rglob("*.py") if not p.name.startswith("_zzz_")):
         for line in path.read_text(encoding="utf-8").splitlines():
             if sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in line) > limit:
                 total += 1

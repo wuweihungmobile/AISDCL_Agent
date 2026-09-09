@@ -32,13 +32,33 @@ fi
 # commit；比照 tools/git-hooks/pre-push 根層 dispatcher 同款用法）。
 # shellcheck disable=SC1091
 . "$ROOT/../tools/lib/windowsapps_guard.sh"
-if is_real_python_candidate python; then
-  PY=python
-elif is_real_python_candidate python3; then
-  PY=python3
+# 🔴 優先探測本專案自己的 venv 直譯器（絕對路徑，不經 PATH）：
+# 未 source venv 的 shell 上 `command -v python3` 常解析到系統內建 python
+# （macOS 是 3.9，未裝任何專案相依套件），is_real_python_candidate() 只排除
+# WindowsApps 空殼、不判斷是不是本專案 venv ⇒ 系統 python 會被誤判為可用，
+# 後續 pytest/ruff/lint-imports 炸出一長串 ModuleNotFoundError／3.9 語法不相容，
+# 看起來與這次改動完全無關（SD 診斷追加，DEF-200-274 系列同類病灶的
+# 另一個發作點）。venv 不存在時才退回既有 PATH 搜尋鏈——對已 source 過
+# venv 的現況零回歸。
+if [ -x "$ROOT/.venv/bin/python" ]; then
+  PY="$ROOT/.venv/bin/python"
+elif [ -x "$ROOT/.venv/Scripts/python.exe" ]; then
+  PY="$ROOT/.venv/Scripts/python.exe"
 else
-  echo "[pre-commit] ❌ 找不到可用的 python（PATH 上只有 WindowsApps 空殼或完全缺席）— 請先啟用 venv" >&2
-  exit 1
+  # 🔴 第四輪第二次對抗式複審 SA/SD minor finding：.venv 直譯器存在但不可執行
+  # （權限異常之類）時，原本會靜默退回 PATH 搜尋鏈、可能撿到系統 python 又不吭聲
+  # ——正是這支修法要根治的錯誤模式本身。先出聲再退回，符合 Rule 12 Fail loud。
+  if [ -e "$ROOT/.venv/bin/python" ] || [ -e "$ROOT/.venv/Scripts/python.exe" ]; then
+    echo "[pre-commit] ⚠️  偵測到 .venv 直譯器存在但不可執行（權限異常？）— 退回 PATH 搜尋，可能撿到系統 python" >&2
+  fi
+  if is_real_python_candidate python; then
+    PY=python
+  elif is_real_python_candidate python3; then
+    PY=python3
+  else
+    echo "[pre-commit] ❌ 找不到可用的 python（PATH 上只有 WindowsApps 空殼或完全缺席）— 請先啟用 venv" >&2
+    exit 1
+  fi
 fi
 
 export PYTHONUTF8=1

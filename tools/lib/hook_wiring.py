@@ -65,6 +65,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import spawn_failure
+
 #: 統一啟動器的 repo 相對路徑（exec form 的 `command` 塞不進 `-c` 程式碼，
 #: 所以那份 shim 必須有一個實體檔案的家）。
 LAUNCHER_REL = ".claude/hooks/_hook_launcher.py"
@@ -568,15 +570,6 @@ def hook_result_attachments(records) -> list[dict]:
 # 修法：真的 spawn 失敗必然帶 OS／runtime 的 spawn 層錯誤字樣（ENOENT／EACCES／EPERM／
 # ENOEXEC／EFTYPE 這類 errno 名，緊跟著 `spawn`）；hook 自己的訊息不會湊巧長這樣
 # （本 repo 具名的 hook 提醒訊息一律以 `[<hook 名>]` 開頭，見 `_GOVWRITE_NOTE_MSG` 等）。
-#: `\bspawn\b`（帶尾端字界）會漏掉 `posix_spawn`——底線兩側都是 `\w`，字界判不出來
-#: （實測：對兩筆真實 ENOENT／EACCES 樣本原判準零命中）。故尾端刻意不帶字界。
-_SPAWN_FAILURE_RE = re.compile(
-    r"\b(?:ENOENT|EACCES|EPERM|ENOEXEC|EFTYPE|ENOTDIR)\b[^\n]{0,80}spawn", re.IGNORECASE)
-
-
-def _is_spawn_failure(stderr: str) -> bool:
-    """`stderr` 讀起來像不像行程根本沒 spawn 起來（而不是跑了但故意回非零）。"""
-    return bool(_SPAWN_FAILURE_RE.search(stderr))
 
 
 def runtime_carrier_verdict(attachments, *, on_windows: bool = os.name == "nt"
@@ -595,7 +588,7 @@ def runtime_carrier_verdict(attachments, *, on_windows: bool = os.name == "nt"
         where = f"[{att.get('hookEvent') or att.get('hookName') or '?'}]"
         stderr = str(att.get("stderr") or "")
         if win if on_windows else posix:
-            if not _is_spawn_failure(stderr):
+            if not spawn_failure.is_spawn_failure(stderr):
                 # 載具真的跑起來了，是 hook 自己選擇非阻斷地回非零（例如治理檔保護
                 # 有人值守時只提醒），不是「這次沒跑」——不計入問題清單。
                 counts["advisory_exit"] += 1
