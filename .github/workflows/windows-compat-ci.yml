@@ -369,6 +369,9 @@ on:
       # DEF-200-274：本機平行執行 opt-in 模組，由 tools/run_root_unittests.py 消費，
       # test_ci_paths_cover_root_consumers.py 當場攔下（DEF-101-042 同構）。
       - "tools/lib/parallel_shard.py"
+      # DEF-200-274 第五輪：hook_wiring.py 無條件 import 本檔（spawn 失敗分類抽出），
+      # 同一批鎖跟著依賴它，test_ci_paths_cover_root_consumers.py 當場攔下（同構）。
+      - "tools/lib/spawn_failure.py"
       # R81 收尾：本輪六支新建 tools/lib/ 共用層，同樣由
       # test_ci_paths_cover_root_consumers.py 當場攔下（與 R80 同一形態、同一支判準）：
       # git_paths.py＝git quotepath SSOT；quota_meter.py＝額度水位取數；
@@ -758,6 +761,9 @@ on:
       # DEF-200-274：本機平行執行 opt-in 模組，由 tools/run_root_unittests.py 消費，
       # test_ci_paths_cover_root_consumers.py 當場攔下（DEF-101-042 同構）。
       - "tools/lib/parallel_shard.py"
+      # DEF-200-274 第五輪：hook_wiring.py 無條件 import 本檔（spawn 失敗分類抽出），
+      # 同一批鎖跟著依賴它，test_ci_paths_cover_root_consumers.py 當場攔下（同構）。
+      - "tools/lib/spawn_failure.py"
       # R81 收尾：本輪六支新建 tools/lib/ 共用層，同樣由
       # test_ci_paths_cover_root_consumers.py 當場攔下（與 R80 同一形態、同一支判準）：
       # git_paths.py＝git quotepath SSOT；quota_meter.py＝額度水位取數；

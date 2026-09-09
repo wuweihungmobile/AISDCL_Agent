@@ -69,6 +69,10 @@ on:
       # 做行為斷言 ⇒ 只改本檔時該兩支鎖必須跟著跑，否則 DEF-101-042 同構假綠。
       # 由 test_ci_paths_cover_root_consumers.py 當場攔下並要求補列。
       - "tools/lib/hook_wiring.py"
+      # DEF-200-274 第五輪：hook_wiring.py 無條件 import 本檔（runtime_carrier_verdict()
+      # 的 spawn 失敗分類抽出），故上面兩支跨樹鎖同樣依賴它 ⇒ 只改本檔時該兩支鎖必須
+      # 跟著跑，否則 DEF-101-042 同構假綠。由 test_ci_paths_cover_root_consumers.py 攔下。
+      - "tools/lib/spawn_failure.py"
       # R84 W3：hook_wiring 的 LATEST 版本解析改走既有 SSOT tools/lib/sdd_latest.py
       # （不另開第二個 LATEST 解析家）⇒ 本樹的 hook wiring 鎖同樣跨樹依賴本檔，
       # 只改它時該批鎖必須跟著跑。同上，由 test_ci_paths_cover_root_consumers.py 攔下。
@@ -99,6 +103,10 @@ on:
       # 做行為斷言 ⇒ 只改本檔時該兩支鎖必須跟著跑，否則 DEF-101-042 同構假綠。
       # 由 test_ci_paths_cover_root_consumers.py 當場攔下並要求補列。
       - "tools/lib/hook_wiring.py"
+      # DEF-200-274 第五輪：hook_wiring.py 無條件 import 本檔（runtime_carrier_verdict()
+      # 的 spawn 失敗分類抽出），故上面兩支跨樹鎖同樣依賴它 ⇒ 只改本檔時該兩支鎖必須
+      # 跟著跑，否則 DEF-101-042 同構假綠。由 test_ci_paths_cover_root_consumers.py 攔下。
+      - "tools/lib/spawn_failure.py"
       # R84 W3：hook_wiring 的 LATEST 版本解析改走既有 SSOT tools/lib/sdd_latest.py
       # （不另開第二個 LATEST 解析家）⇒ 本樹的 hook wiring 鎖同樣跨樹依賴本檔，
       # 只改它時該批鎖必須跟著跑。同上，由 test_ci_paths_cover_root_consumers.py 攔下。
