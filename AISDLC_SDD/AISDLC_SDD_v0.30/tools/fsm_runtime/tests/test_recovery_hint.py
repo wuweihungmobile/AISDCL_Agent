@@ -315,8 +315,10 @@ class RecoveryHintTests(_Base):
         posix = rh.recovery_command(sdd_root=Path("/x"), python="/p", target="PR_REVIEW", reason="r")
         ps = rh.recovery_command(sdd_root=Path("/x"), python="/p", target="PR_REVIEW", reason="r",
                                  shell="powershell")
-        self.assertTrue(posix.startswith('cd "/x" ; "/p" -m tools.fsm_runtime.fsm_runtime'), posix)
-        self.assertTrue(ps.startswith('Set-Location "/x"; & "/p" -m tools.fsm_runtime.fsm_runtime'), ps)
+        # 鐵律三：Path("/x") 在 Windows 渲染成 "\\x"（windows-compat-ci 實測轉紅），期望值與生產碼同一渲染
+        root = str(Path("/x"))
+        self.assertTrue(posix.startswith(f'cd "{root}" ; "/p" -m tools.fsm_runtime.fsm_runtime'), posix)
+        self.assertTrue(ps.startswith(f'Set-Location "{root}"; & "/p" -m tools.fsm_runtime.fsm_runtime'), ps)
         self.assertEqual(posix.split(" -m ", 1)[1], ps.split(" -m ", 1)[1])
 
 
