@@ -12,6 +12,7 @@ from .event_reconciler import reconcile
 from .snapshot import save_abort_report, save_auto_snapshot
 from .state_loader import FSMState, load_state, project_from_env, save_state
 from .transition_rules import (
+    _HAPPY_PATH,
     IMPL_MAX_TEST_FAIL_WITHOUT_SPEC_CHANGE,
     MAX_AUTO_COMPACT_PER_STAGE,
     OBSERVATION_STATES,
@@ -19,10 +20,15 @@ from .transition_rules import (
     SPEC_AUDIT_MAX_PER_STAGE,
     TransitionError,
     assert_transition,
+    is_transition_allowed,
     next_state_on_gate_fail,
     next_state_on_gate_pass,
     should_escalate_for_implementation,
 )
+
+#: DEF-200-275 第四輪 D6／ARCH-04：人工恢復 `--to` 的合法目標＝RESUME_VERIFICATION 的 happy-path
+#: 出口去掉 ESCALATION（那是退回，不是恢復）。住核心層；`recovery_hint`（表現層）反過來 import。
+RESUME_TARGETS = frozenset(_HAPPY_PATH["RESUME_VERIFICATION"] - {"ESCALATION"})
 
 _SPEC_TARGET_PREFIXES = (
     "docs/01_requirements/",
@@ -140,42 +146,64 @@ def _rule_catch_telemetry_enabled() -> bool:
     return val in {"1", "true", "yes", "on"}
 
 
-def _reset_today_ledger() -> dict:
+def _reset_today_ledger(*, lock_timeout: float = 1.0) -> dict:
     """Zero today's CONTEXT-LEDGER cumulative_tokens; keep entries history.
 
     Used by complete_auto_compact() so the next PreToolUse won't re-trigger
     the 90% AUTO_COMPACT loop after a successful compaction.
-    Returns: {"reset": bool, "path": str|None, "previous_cumulative": int}
+    Returns: {"reset": bool, "path": str|None, "previous_cumulative": int
+              [, "rotated": True][, "lock_timeout": True][, "error": str]}
+
+    G1（第 2 輪審查 QA-R2-01／ARCH-R2-01／SD-R2-02 三方實測 ≈10s）：F2 讓本函式改取 `ledger_lock` 後，
+    AUTO_COMPACT_PENDING 出口路徑在他人持鎖時兩支 hook 都要**連續等兩次** 5s（post：audit+merge 逾時→
+    sidecar，再 reset；pre：先 reset 再 audit）⇒ 10s > `sdd_hook_router.py` child timeout 8s ⇒ router
+    砍子行程、hook fail-open、稽核 entry 一起丟。帳本零決策權、歸零只是稽核便利 ⇒ 這裡只等 `lock_timeout`
+    （預設 1s），逾時誠實回 `lock_timeout=True`；單支 hook 最壞 5+1=6s < 8s。
+    G4（SD-R2-03）：`_load_ledger_doc` 讀不到（OSError）現在會拋出 ⇒ 回 `reset=False`＋`error`，不以空 doc 覆寫。
+
+    DEF-200-275 第四輪 F2（SD-02／ARCH-08）：改走 `conversation_ledger` 的同一把 advisory lock＋
+    `_load_ledger_doc`（損毀 ⇒ rotate 成 `.corrupt-<ts>.yaml`）＋`_atomic_write_yaml`（pid tmp），
+    不再自己 open／yaml.safe_load——此前損毀帳本會在 `complete_auto_compact` **已轉態之後**拋例外，
+    hook 的 `[DONE]` 變成 `[DONE][WARN]` 誤導。損毀被 rotate ⇒ 沒有東西可歸零 ⇒ `reset=False`＋
+    `rotated=True`（誠實：這不是「已歸零」）。
     """
     import datetime as _dt
     from .state_loader import REPO_ROOT  # local to avoid cycles
     try:
-        import yaml  # type: ignore
+        import yaml  # type: ignore  # noqa: F401
     except Exception:
         return {"reset": False, "path": None, "previous_cumulative": 0}
+    from .conversation_ledger import _atomic_write_yaml, _load_ledger_doc, ledger_lock
+
     ledger_dir = REPO_ROOT / "build" / "reports" / "fsm"
     path = ledger_dir / f"CONTEXT-LEDGER-{_dt.date.today().isoformat()}.yaml"
     if not path.exists():
         return {"reset": False, "path": str(path), "previous_cumulative": 0}
-    with path.open("r", encoding="utf-8") as f:
-        doc = yaml.safe_load(f) or {}
-    prev = int(doc.get("cumulative_tokens", 0))
-    entries = doc.get("entries") or []
-    entries.append({
-        "ts": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
-        "phase": "compact-reset",
-        "tool": "FSMRuntime",
-        "target": "complete_auto_compact",
-        "tokens": 0,
-        "previous_cumulative": prev,
-    })
-    doc["cumulative_tokens"] = 0
-    doc["entries"] = entries
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    with tmp.open("w", encoding="utf-8") as f:
-        yaml.safe_dump(doc, f, allow_unicode=True, sort_keys=False)
-    import os as _os
-    _os.replace(tmp, path)
+    try:
+        with ledger_lock(ledger_dir, timeout=lock_timeout):
+            doc = _load_ledger_doc(path)
+            if not path.exists():
+                # 損毀已被 rotate（或競態下被他人移走）⇒ 沒有東西可歸零。
+                return {"reset": False, "path": str(path), "previous_cumulative": 0, "rotated": True}
+            prev = int(doc.get("cumulative_tokens") or 0)
+            entries = doc.get("entries") or []
+            if not isinstance(entries, list):
+                entries = []
+            entries.append({
+                "ts": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
+                "phase": "compact-reset",
+                "tool": "FSMRuntime",
+                "target": "complete_auto_compact",
+                "tokens": 0,
+                "previous_cumulative": prev,
+            })
+            doc["cumulative_tokens"] = 0
+            doc["entries"] = entries
+            _atomic_write_yaml(path, doc)
+    except TimeoutError:  # 必須排在 OSError 前：TimeoutError 是 OSError 的子類
+        return {"reset": False, "path": str(path), "previous_cumulative": 0, "lock_timeout": True}
+    except OSError as exc:
+        return {"reset": False, "path": str(path), "previous_cumulative": 0, "error": repr(exc)}
     return {"reset": True, "path": str(path), "previous_cumulative": prev}
 
 
@@ -605,8 +633,14 @@ class FSMRuntime:
     # Deprecated alias — remove after downstream tooling migrates.
     _current_stage_key = current_stage_key
 
-    def trigger_auto_compact(self, cumulative_tokens: int, ratio: float) -> dict:
+    def trigger_auto_compact(
+        self, cumulative_tokens: int, ratio: float, *, details: Optional[dict] = None,
+    ) -> dict:
         """Enter AUTO_COMPACT_PENDING, persist Snapshot. Idempotent.
+
+        DEF-200-275 第四輪（D6b）：`details`（session_id／used／window／window_source／
+        compact_boundaries）存進 `auto_compact_state.trigger_details`，per-stage cap 升級路徑
+        透傳給 `record_escalation`，讓恢復提示能說出「哪個 session、為什麼」。
 
         ACT-026: enforce MAX_AUTO_COMPACT_PER_STAGE — if the current stage has
         already triggered auto-compact 3 times, stop compacting and escalate.
@@ -632,6 +666,7 @@ class FSMRuntime:
         # P2 fix: materialize max_per_stage so FSM-STATE overrides take effect
         # and appear explicitly in persisted state.
         auto.setdefault("max_per_stage", MAX_AUTO_COMPACT_PER_STAGE)
+        auto["trigger_details"] = dict(details) if details else None
 
         # ACT-026: reset per-stage counter if stage has changed.
         stage_key = self.current_stage_key()
@@ -645,7 +680,7 @@ class FSMRuntime:
                 f"auto_compact exceeded {max_per_stage} per stage '{stage_key}' "
                 "— 可能引用文件過大或 stage 需拆分；拒絕再次 compact"
             )
-            self.state.record_escalation(reason)
+            self.state.record_escalation(reason, details=details)
             # W-20-1（catch 覆蓋補強 DEF-19-001）：per-stage auto_compact 超限 → ESCALATION 即
             # R-9.2（Context Budget）守望的失敗模式真實發生，結構化歸因到 R-9.2（無歧義映射，
             # 非時序猜測）。flag OFF＝不記（零退化）；fail-closed；只增 catch_count（R-9.20 #11）。
@@ -703,8 +738,10 @@ class FSMRuntime:
             self.state.append_decision_trace(
                 from_state=resume_state,
                 to_state="AUTO_COMPACT_PENDING",
+                # ARCH-05：第四輪起分子＝逐字稿 API usage，reason 印 used=／source= 而非 cumulative=。
                 reason=(
-                    f"auto-compact triggered at ratio={ratio:.2%} cumulative={cumulative_tokens} "
+                    f"auto-compact triggered at ratio={ratio:.2%} used={cumulative_tokens} "
+                    f"source={(details or {}).get('window_source', 'n/a')} "
                     f"stage={stage_key} count_per_stage={projected}"
                 ),
                 trigger="auto_compact_trigger",
@@ -720,33 +757,107 @@ class FSMRuntime:
             "stage_key": stage_key,
         }
 
-    def complete_auto_compact(self, *, reset_ledger: bool = True) -> dict:
-        """Called by stage-compaction Skill after successful compact.
+    def complete_auto_compact(
+        self, *, reset_ledger: bool = True, observed_effective: bool = False,
+        released_by: Optional[str] = None,
+    ) -> dict:
+        """Called by stage-compaction Skill after successful compact — or, since DEF-200-275
+        第四輪（D4／C5），by the pre/post hooks when the real transcript usage has dropped below
+        WARN_RATIO × window（Claude Code 自動 compaction 亦算完成）.
 
         Side-effects when reset_ledger=True (default):
         - FSM transitions back to recorded resume_state
         - Today's CONTEXT-LEDGER cumulative_tokens is zeroed (entries kept)
         - auto_compact_state.completed_at / completed_count updated
+
+        D4：`resume_state` 不在 AUTO_COMPACT_PENDING 的合法出口（活狀態實測 `INIT`——AUTO_COMPACT_SOURCES
+        含 INIT 但出口集不含）⇒ remap 到 SPEC_DRAFTING 並在 reason 註明，不讓 TransitionError 把
+        FSM 卡死在 PENDING。`observed_effective=True`（真實 usage 回落）⇒ `count_per_stage` 歸 0：
+        一次有效壓縮證明該 stage 沒卡住；ACT-026 的 per-stage cap 只對「從未觀測到有效壓縮」的
+        連續觸發生效（cap 語意收斂，見證據檔〈第四輪〉）。
+
+        ARCH-03（第 1 輪審查）：D4 出口刻意**不**檢查 session——PENDING 是專案級狀態、觸發它的
+        session 與觀測到 usage 回落的 session 可以不同（他 session 視窗本來就小 ⇒ 開場即釋放並歸零
+        count_per_stage）。取捨與乒乓後果登記在證據檔〈把握程度〉；本方法只把兩個 session id 一起
+        印進 reason／回傳值（`released_by_session`／`triggered_by_session`），讓 decision_trace 可稽核。
+        是否加 session 守衛另案。
         """
         if self.state.current != "AUTO_COMPACT_PENDING":
             return {"noop": True, "reason": f"state={self.state.current}"}
         auto = self.state.root.setdefault("auto_compact_state", {})
         resume_state = auto.get("resume_state") or "SPEC_DRAFTING"
+        trigger_details = auto.get("trigger_details") or {}
+        triggered_by = trigger_details.get("session_id") if isinstance(trigger_details, dict) else None
+        reason = (
+            "stage-compaction completed — resume from AUTO_COMPACT_PENDING"
+            f"；released_by_session={released_by or 'unknown'} triggered_by_session={triggered_by or 'unknown'}"
+        )
+        remapped_from: Optional[str] = None
+        if not is_transition_allowed("AUTO_COMPACT_PENDING", resume_state):
+            remapped_from = resume_state
+            resume_state = "SPEC_DRAFTING"
+            reason += (
+                f"（resume_state={remapped_from} 非 AUTO_COMPACT_PENDING 合法出口，"
+                "remap→SPEC_DRAFTING；DEF-200-275 第四輪 D4）"
+            )
+        if observed_effective:
+            auto["count_per_stage"] = 0
+            reason += "；觀測到有效壓縮（真實 usage 回落 <85%），per-stage 計數歸零"
         import datetime as _dt
         auto["completed_at"] = _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")
         auto["completed_count"] = int(auto.get("completed_count", 0)) + 1
+        auto["observed_effective"] = bool(observed_effective)
         self.transition(
             resume_state,
-            reason="stage-compaction completed — resume from AUTO_COMPACT_PENDING",
+            reason=reason,
             trigger="auto_compact_complete",
         )
         ledger_reset_info: dict = {"reset": False}
         if reset_ledger:
-            ledger_reset_info = _reset_today_ledger()
-        return {"resumed_to": resume_state, "ledger": ledger_reset_info}
+            try:
+                ledger_reset_info = _reset_today_ledger()
+            except Exception as exc:  # noqa: BLE001
+                # F2（SD-02／ARCH-08）：狀態已轉、帳本只是稽核值——歸零失敗不得讓呼叫端把整件事
+                # 讀成「complete 失敗」（hook 的 [DONE] 會變 [DONE][WARN] 誤導）。誠實回報在 ledger 欄。
+                ledger_reset_info = {"reset": False, "error": repr(exc)}
+        out = {
+            "resumed_to": resume_state, "ledger": ledger_reset_info,
+            "released_by_session": released_by or "unknown",
+            "triggered_by_session": triggered_by or "unknown",
+        }
+        if remapped_from is not None:
+            out["remapped_from"] = remapped_from
+        return out
 
     def is_auto_compact_pending(self) -> bool:
         return self.state.current == "AUTO_COMPACT_PENDING"
+
+    # ----- DEF-200-275 第四輪（D6／C10）：ESCALATION 的人工恢復單一入口 -----
+    def resume_from_escalation(self, to: str, *, reason: str) -> dict:
+        """人工恢復：ESCALATION／ESCALATION_FINAL → RESUME_VERIFICATION → `to`（既有合法邊，零新增）。
+
+        R-9.5 規範「進入 ESCALATION 後禁止自動恢復」——本方法只由人在終端呼叫（CLI 子命令
+        `resume-from-escalation`），hook 路徑不呼叫它；兩跳皆寫 decision_trace（trigger=human_resume）
+        並回填 `escalation_history[-1].resolved_at／resolution`（此前全庫從未有人填過）。
+        非 ESCALATION 類狀態 ⇒ `{"noop": True}`；非法 `to`／空 reason ⇒ ValueError（fail-loud）。
+        """
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError("reason 必填：人工恢復必須留下可稽核的理由（R-9.5）")
+        if to not in RESUME_TARGETS:
+            raise ValueError(f"--to 只能是 {sorted(RESUME_TARGETS)}，得到 {to!r}")
+        if self.state.current not in {"ESCALATION", "ESCALATION_FINAL"}:
+            return {"noop": True, "reason": f"state={self.state.current} 不是 ESCALATION 類，無需恢復"}
+        src = self.state.current
+        self.transition("RESUME_VERIFICATION", reason=reason, trigger="human_resume")
+        self.transition(to, reason=reason, trigger="human_resume")
+        import datetime as _dt
+        now = _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")
+        history = self.state.root.get("escalation_history") or []
+        if history and isinstance(history[-1], dict) and history[-1].get("resolved_at") is None:
+            history[-1]["resolved_at"] = now
+            history[-1]["resolution"] = f"human_resume → {to}: {reason}"
+        save_state(self.state)
+        return {"from": src, "via": "RESUME_VERIFICATION", "to": to, "resolved_at": now}
 
     # ----- Phase G M1 / ACT-033/034: Self-Healing entry/exit -----
     @staticmethod
@@ -2896,7 +3007,7 @@ def _cli() -> int:
     parser = argparse.ArgumentParser(description="SDD FSM Runtime CLI")
     parser.add_argument("command", choices=[
         "show", "transition", "gate", "reconcile", "spec-audit", "spec-frozen", "check-impl",
-        "complete-auto-compact", "reset-ledger",
+        "complete-auto-compact", "reset-ledger", "resume-from-escalation",
     ])
     parser.add_argument("--project", default=None)
     parser.add_argument("--to", dest="target", default=None)
@@ -2943,6 +3054,20 @@ def _cli() -> int:
     elif args.command == "reset-ledger":
         result = _reset_today_ledger()
         print(json.dumps(result, ensure_ascii=False))
+    elif args.command == "resume-from-escalation":
+        # DEF-200-275 第四輪（D6）：一行可複製的人工恢復指令（由 recovery_hint 印出）。
+        if not args.target or args.target not in RESUME_TARGETS:
+            parser.error(f"--to 必須是 {sorted(RESUME_TARGETS)} 之一")
+        if not args.reason.strip():
+            parser.error("--reason 必填（人工恢復理由，寫進 decision_trace）")
+        result = runtime.resume_from_escalation(args.target, reason=args.reason)
+        print(json.dumps(result, ensure_ascii=False))
+        if not result.get("noop"):
+            # SA-R4-08：恢復成功後暫時繞過已無必要；stderr 不污染 stdout 的 JSON 契約。
+            # 全 ASCII：本入口點無 UTF-8 stdio 保護（test_subprocess_encoding_hygiene 鎖），
+            # 非 UTF-8 locale 下非 ASCII 會 UnicodeEncodeError。
+            print("Reminder: remove SDD_HOOKS_DRY_RUN=1 from ~/.zshrc (PowerShell: $PROFILE); "
+                  "the temporary bypass is no longer needed.", file=sys.stderr)
     return 0
 
 

@@ -109,6 +109,7 @@ from quota_limits import LIMIT_NONE, parse_reset_at, unhandled_limit_event  # no
 # 這裡 re-export 是為了讓四個既有消費端與測試沿用 `quota_gate.<name>` 零改動；
 # 方向是單向的（本檔 → quota_messages），反向 import 會造成循環。
 from quota_messages import (  # noqa: E402,F401
+    HALT_RESET_SKEW_SECONDS,  # noqa: F401
     QUOTA_BRANCH_ARM,
     QUOTA_BRANCH_ESCALATE,
     QUOTA_BRANCH_NOTIFY,
@@ -120,6 +121,7 @@ from quota_messages import (  # noqa: E402,F401
     evidence_hint,
     fanout_window_line,
     halt_resets_at,
+    halt_verdict,  # noqa: F401  # DEF-200-278／INV-H2：re-export，見 quota_messages 檔頭慣例
     model_hint_line,
     pace_line,
     quota_halt_message,
@@ -128,6 +130,16 @@ from quota_messages import (  # noqa: E402,F401
     reset_horizon_phrase,
     throttle_horizon_line,
 )
+
+# DEF-200-278：halt 交棒需要在 payload 缺 `transcript_path` 時還原逐字稿路徑。
+# `project_transcript_dir`（slug 推導）唯一實作住 `tools/probe/audit_session.py`
+# （見 `tools/session_resume_planner.py` 同一段 WHY），本檔取用而不抄一份；
+# fail-open——`tools/` 不可達時本符號為 `None`，還原整條退化成「量不到」。
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+try:
+    from probe.audit_session import project_transcript_dir
+except Exception:  # noqa: BLE001 — 能力提供者可降級（fail-open 是 P0）
+    project_transcript_dir = None  # type: ignore[assignment]
 
 # ── 兩道的分工（掌舵者訴求 b 逐字；門檻值本身住 `quota_policy.ENV_SPEC`）─────────
 #   水位偏高 ⇒ 少派 agent：扇出型工具受**滾動視窗派發預算**節制，超出即 `exit 2`（那次
@@ -744,6 +756,53 @@ def quota_floor_reading(payload: dict, now: datetime) -> quota_policy.QuotaState
         now.isoformat(timespec="seconds"), "transcript-floor", "transcript-floor")
 
 
+# DEF-200-278／INV-H1a：RC-1 的直接修法——`quota_halt_actions()` 舊版只認
+# `payload["transcript_path"]`，缺席（或雖有路徑但那一刻讀不到檔）就整段放棄，
+# 且不管真正原因是什麼，訊息一律印同一句「拿不到逐字稿路徑」（本場實測重現：
+# `payload={}` 與「transcript 存在但 plan_writer 失敗」兩種完全不同的成因，
+# 修前輸出逐字相同）。本函式把「找逐字稿」拆成可測的純函式，並提供
+# `CLAUDE_CODE_SESSION_ID`＋`project_transcript_dir()` 這條 fallback。
+def resolve_halt_transcript(payload: dict) -> tuple[Path | None, str]:
+    """halt 交棒的逐字稿還原。回 `(路徑或 None, 來源)`；來源＝`payload`／`env-derived`／`unavailable`。"""  # noqa: E501
+    raw = payload.get("transcript_path") if isinstance(payload, dict) else None
+    cand = Path(raw) if isinstance(raw, str) and raw.strip() else None
+    if cand is not None and cand.is_file():
+        return cand, "payload"
+    sid = str(os.environ.get("CLAUDE_CODE_SESSION_ID") or "").strip()
+    if sid and project_transcript_dir is not None:
+        root = Path(os.environ.get("CLAUDE_PROJECT_DIR") or Path.cwd())
+        cand = project_transcript_dir(root) / f"{sid}.jsonl"
+        if cand.is_file():
+            return cand, "env-derived"
+    return None, "unavailable"
+
+
+def halt_marker_path(sid: str) -> Path:
+    """DEF-200-278／INV-H1c 落盤處，SSOT＝`endurance_env.trace_dir()`（同哨兵痕跡的家）。"""
+    return endurance_env.trace_dir() / f"halt_{sid}.json"
+
+
+def write_halt_marker(sid: str, data: dict) -> Path:
+    """落一份持久 halt 標記，供哨兵下一輪巡邏讀（`halt_verdict()`）。寫檔失敗吞掉——
+    標記是輔助憑證而非安全煞車（fail-open 是 P0）。"""
+    path = halt_marker_path(sid)
+    try:
+        path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8", newline="\n")
+    except OSError:
+        pass
+    return path
+
+
+def read_halt_marker(sid: str) -> dict | None:
+    """讀不出來（沒有 sid／檔不存在／壞 JSON）一律回 `None`，呼叫端據此落回既有判定。"""
+    if not sid:
+        return None
+    try:
+        return json.loads(halt_marker_path(sid).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
 def quota_halt_actions(payload: dict, decision: quota_policy.Decision, now: datetime, *,
                        plan_writer, waker) -> dict:
     """halt 閂鎖那一刻真的做的事。回稽核欄位（給訊息與測試讀）。
@@ -757,11 +816,31 @@ def quota_halt_actions(payload: dict, decision: quota_policy.Decision, now: date
     branch = reset_branch(halt_resets_at(decision), now)
     raw = payload.get("transcript_path")
     transcript = Path(raw) if isinstance(raw, str) and raw.strip() else None
+    source = "payload"
+    if transcript is None or not transcript.is_file():
+        transcript, source = resolve_halt_transcript(payload)
     plan = plan_writer(transcript) if transcript and transcript.is_file() else ""
+    # DEF-200-278／INV-H1e：「未武裝」不得再對所有成因印同一句話——這是 RC-1 的直接症狀。
+    reason = (None if plan else
+             f"逐字稿路徑不可得（來源={source}）⇒ 沒有可以掛的任務書" if transcript is None else
+             f"任務書產生器失敗（write_resume_plan 回空字串，逐字稿={transcript}）")
     arm = waker(transcript, plan) if branch == QUOTA_BRANCH_ARM else {}
+    if (branch == QUOTA_BRANCH_ARM and not arm.get("armed")
+            and not arm.get("sentinel_off") and reason is None):
+        reason = f"喚醒 spawn 失敗（transcript={transcript}／plan={plan!r}）"
+    # DEF-200-278／INV-H1c：halt 是機器必須留下可讀「我停了，reset 在 T」標記的事件，
+    # 不得只靠 best-effort 的訊息——落一份持久標記給哨兵下一輪巡邏讀（見 `halt_verdict`）。
+    sid = transcript.stem if transcript else "unknown"
+    write_halt_marker(sid, {
+        "sid": sid, "band": decision.band,
+        "binding": decision.binding.kind if decision.binding is not None else "",
+        "reset_at": str(halt_resets_at(decision) or ""), "at": now.isoformat(),
+        "transcript": str(transcript) if transcript else "", "resolved_source": source,
+    })
     # DEF-200-200 ③：`now` 帶進稽核欄，讓 `quota_halt_message()` 判得出「這個 reset 其實
     # 已經過去」——訊息層自己沒有時鐘（那是刻意的，它必須是純渲染）。
     return {"branch": branch, "plan": plan, "armed": bool(arm.get("armed")), "now": now,
+            "not_armed_reason": reason,
             "sentinel_off": bool(arm.get("sentinel_off")), "posix": bool(arm.get("posix")),
             "kind": decision.binding.kind if decision.binding is not None else ""}
 

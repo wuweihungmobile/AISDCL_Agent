@@ -1,4 +1,4 @@
-"""PreToolUse Hook — FSM guardrail + context budget gate (ACT-012).
+"""PreToolUse Hook — FSM guardrail + context budget gate (ACT-012; DEF-200-275 第四輪重寫).
 
 Wiring (.claude/settings.json):
     "hooks": {
@@ -9,12 +9,22 @@ Wiring (.claude/settings.json):
       }]
     }
 
-Behaviour:
-- Reads tool_name + tool_input from stdin (Claude Code hook protocol).
-- Calls FSMRuntime.assert_tool_allowed() — blocks if state forbids.
-- Estimates incremental tokens for Read/Write/Edit and appends to ledger.
-- If cumulative ≥ 95% of MAX_CONTEXT → emit permissionDecision=deny
-  with reason "TOKEN_BUDGET_CRITICAL"; ≥ 85% → warn via additionalContext.
+Behaviour（實測語意，2026-09-10 起）:
+- Reads tool_name + tool_input + transcript_path + session_id from stdin (Claude Code hook protocol).
+- **分子＝真實值**：`context_window.measure(transcript_path)` 讀本 session 逐字稿最後一筆 API
+  `usage`（＝`/context` 的數字）。量不到（無路徑／檔不存在／全 synthetic／compact 後尚無新 usage）
+  ⇒ 零 gating、不出聲（C3）。估算帳本（conversation_ledger）只記稽核 entry，不驅動任何判定。
+- **分母鏈**＝`context_window.resolve_window()`（SDD_MAX_CONTEXT → AUTOSDD_CONTEXT_WINDOW →
+  harness 旋鈕 → model 標記 → Models API 查表 → 可證下界 → 保守值）；保守值只出聲、永不硬擋。
+- FSM guardrail：`assert_tool_allowed()`（ESCALATION 類全擋並附一行人工恢復指令；AUTO_COMPACT_PENDING
+  只放 compact 相關）。
+- AUTO_COMPACT_PENDING 且真實 used 已回落 <85% window ⇒ `complete_auto_compact(observed_effective=True)`
+  自動回 resume_state（Claude Code 自動 compaction 亦算完成；D4／C5）。
+- ratio ≥ 95%（分母已確認）⇒ **session 級**拒絕非 compact 工具＋Snapshot（trigger_auto_compact），
+  **不再**寫專案級 ESCALATION／TOKEN_BUDGET_CRITICAL（根因 C：context window 是 session 的屬性，
+  FSM-STATE 是專案的屬性；舊語意會讓下一個全新視窗一開場就被擋）。per-stage cap 超限仍走既有
+  結構性升級（R-9.2 failure_mode 不變）。90~95% ⇒ AUTO_COMPACT_PENDING；≥85% ⇒ WARN。
+- `SDD_HOOKS_DISABLE=1` 全關（保留 ACT-020 subagent 注入）；`SDD_HOOKS_DRY_RUN=1` deny 降為警告。
 """
 from __future__ import annotations
 
@@ -28,105 +38,25 @@ _SDD_ROOT = Path(__file__).resolve().parents[2]
 if str(_SDD_ROOT) not in sys.path:
     sys.path.insert(0, str(_SDD_ROOT))
 
-# QA Round-5 P0 + DEF-CLDREV-012: guard against operator misconfiguration.
-# A zero/negative budget would crash every ratio calculation with
-# ZeroDivisionError; a non-numeric value (e.g. "abc", "1.5") would raise
-# ValueError at import time and silently disable the whole context-budget gate
-# (cumulative tokens stop being recorded, 85% warn / 95% deny / auto-compact
-# never fire). Both classes degrade gracefully to the 200000 default.
-try:
-    _RAW_MAX_CONTEXT = int(os.environ.get("SDD_MAX_CONTEXT", "200000"))
-    _RAW_MAX_CONTEXT_PARSE_OK = True
-except (TypeError, ValueError):
-    _RAW_MAX_CONTEXT = 200000
-    _RAW_MAX_CONTEXT_PARSE_OK = False
-MAX_CONTEXT = _RAW_MAX_CONTEXT if _RAW_MAX_CONTEXT > 0 else 200000
-
-# DEF-200-275（2026-09-10）：MAX_CONTEXT 沒被操作者顯式釘住時，200000 只是舊
-# 模型（Claude 3 世代）200K context window 年代留下的保守預設值——現行模型
-# 視窗常是 1,000,000。硬把 ratio = cumulative / MAX_CONTEXT 套這個過時預設，
-# 會讓 cumulative 一過 200000 就被誤判成「100% 滿」而擋下整個 session（實測
-# cumulative=200994, ratio=1.00；使用者 /context 當場量到真實只有 38%）。
-# 比照姊妹守衛 .claude/hooks/context_budget_guard.py 的 resolve_window()
-# 同一手法（可證下界推論，見該檔模組 docstring〈context window 判定〉）：
-# 本 session 若已實際觀測到 cumulative 超過這個保守預設，代表真實視窗必然
-# 大於它，改採已知的下一檔變體；操作者若真的顯式設定 SDD_MAX_CONTEXT，一律
-# 尊重其設定值、不做這層推論覆寫（也因此只在 MAX_CONTEXT 剛好等於下面這個
-# 具名常數時才觸發——測試裡刻意調小 MAX_CONTEXT 讓門檻好測，不受影響）。
-#
-# DEF-200-275 第三輪（四方複審 QA/SA 各自獨立發現、SA 判定 REJECT 後訂正，
-# 2026-09-10）：原判準只問「環境變數有沒有被設」，操作者打錯字
-# （SDD_MAX_CONTEXT=abc/1.5/12k/空字串/0/-5）也會讓這裡讀到 True——即使上面
-# 那段 try/except 已經正確把 _RAW_MAX_CONTEXT fallback 回 200000，這裡卻誤判
-# 成「操作者刻意選了這個值」，於是 190000（真實 1,000,000 視窗下僅 19% 用量）
-# 會被當成已確認分母去硬鎖 ESCALATION——與 DEF-200-275 原始 bug 同一種「未經
-# 確認的分母被拿去硬擋」路徑重演。比照姊妹守衛
-# .claude/hooks/context_budget_guard.py 的 `_positive_int(raw) > 0`：一個值
-# 要算「已指定」，必須解析成功**且**是正整數，不能只憑「有沒有設」猜。這裡不
-# 重新猜一次，直接掛鉤上面 try/except 已經算出的解析結果
-# （_RAW_MAX_CONTEXT_PARSE_OK 且 _RAW_MAX_CONTEXT > 0）。
-_SDD_MAX_CONTEXT_PINNED = (
-    os.environ.get("SDD_MAX_CONTEXT") is not None
-    and _RAW_MAX_CONTEXT_PARSE_OK
-    and _RAW_MAX_CONTEXT > 0
+# DEF-200-275 第四輪：門檻常數、分子量測、分母鏈全部只住 tools/fsm_runtime/context_window.py
+# （pre/post 兩支 hook 此前各持一份逐字相同的分母邏輯與 200000 字面值）。
+from tools.fsm_runtime.context_window import (  # noqa: E402
+    AUTO_COMPACT_RATIO,
+    CRIT_RATIO,
+    WARN_RATIO,
+    Measurement,
+    auto_compact_exit_due,
+    may_block,
+    measure,
+    resolve_window,
+    unconfirmed_notice,
+    window_evidence,
 )
-_CONSERVATIVE_DEFAULT_MAX_CONTEXT = 200_000
-WIDE_MAX_CONTEXT = 1_000_000
 
-
-def _effective_max_context(cumulative: int) -> int:
-    """DEF-200-275：見上方常數區塊註解——可證下界推論，避免拿舊模型 200K
-    常數誤判現行大視窗模型已 100% 滿。"""
-    if (
-        not _SDD_MAX_CONTEXT_PINNED
-        and MAX_CONTEXT == _CONSERVATIVE_DEFAULT_MAX_CONTEXT
-        and cumulative > _CONSERVATIVE_DEFAULT_MAX_CONTEXT
-    ):
-        return WIDE_MAX_CONTEXT
-    return MAX_CONTEXT
-
-
-# DEF-200-275 第二輪（四方複審 REJECT 後訂正，2026-09-10）：第一版只切了分母，沒有
-# 切「這個分母能不能拿去硬擋」。CRIT_RATIO=0.95、0.95×200000=190000——比切換點
-# 200001 早了一萬。cumulative 是單調爬升的，任何 session 必然先經過
-# 190000~200000 這個窗口才可能到 200001，於是在切換生效之前就已經被 190000 那個
-# ratio=0.95 鎖進 ESCALATION（真實 1,000,000 視窗下僅 19% 用量）——分母切換邏輯
-# 從未有機會執行到，同一個缺陷只是把觸發點從 ~100% 移到 ~95%，本質重演。
-#
-# 比照姊妹守衛 .claude/hooks/context_budget_guard.py 的 may_block(source) 語意：
-# 硬擋／記 ESCALATION 只在「分母來源已確認」時才准——確認＝①操作者顯式設定
-# SDD_MAX_CONTEXT（信任其選擇，即使值恰好等於保守預設）；②已觀測到 cumulative
-# 超過保守預設（_effective_max_context 因此已切到 WIDE，這是可證的下界推論，
-# 不再是純猜測，對應姊妹守衛的 SOURCE_INFERRED_WIDE）。唯一「不確認」的情形是
-# 姊妹守衛的 SOURCE_INFERRED_FLOOR 等價物：未顯式設定、且 cumulative 仍未超過
-# 200000——此刻 200000 純粹是「還沒證據」的保守猜測，不得拿來鎖 ESCALATION。
-def _max_context_confirmed(cumulative: int) -> bool:
-    """分母來源是否已確認到可以拿來硬擋／記 ESCALATION（見上方 WHY）。"""
-    if _SDD_MAX_CONTEXT_PINNED:
-        return True
-    return _effective_max_context(cumulative) != _CONSERVATIVE_DEFAULT_MAX_CONTEXT
-
-
-def _unconfirmed_notice(cumulative: int, ratio: float, tier: str) -> str:
-    """CRIT／AUTO_COMPACT 門檻在分母尚未確認時的降級提示（見 `_max_context_confirmed`
-    docstring）。只出聲，不呼叫 record_escalation、不 deny、不 trigger_auto_compact。"""
-    return (
-        f"[SDD-CTX][WARN][UNCONFIRMED-DENOM] {tier} 門檻在保守預設分母"
-        f"（{_CONSERVATIVE_DEFAULT_MAX_CONTEXT:,}）下已達 ratio={ratio:.2f}"
-        f"（cumulative={cumulative}），但此分母尚未確認——未顯式設定 SDD_MAX_CONTEXT，"
-        f"且本 session 尚未觀測到用量超過 {_CONSERVATIVE_DEFAULT_MAX_CONTEXT:,}。"
-        f"現行模型視窗常是 {WIDE_MAX_CONTEXT:,}，若貿然硬擋／記 ESCALATION 可能在"
-        "真實用量僅一到兩成時就誤鎖整個 session（DEF-200-275）。本次僅示警，FSM 狀態"
-        "不變。若這是操作者刻意選擇的小視窗，請顯式設定 SDD_MAX_CONTEXT 以啟用正常防護。"
-    )
-
-
-WARN_RATIO = 0.85
-AUTO_COMPACT_RATIO = 0.90
-CRIT_RATIO = 0.95
 LEDGER_DIR = _SDD_ROOT / "build" / "reports" / "fsm"
 
 _BYPASS_HINT = "緊急繞過：set SDD_HOOKS_DISABLE=1（全關）或 SDD_HOOKS_DRY_RUN=1（改發警告不阻擋）。"
+_ESCALATION_STATES = frozenset({"ESCALATION", "ESCALATION_FINAL"})
 
 
 def _is_disabled() -> bool:
@@ -156,91 +86,11 @@ def _deny_or_warn(reason: str) -> dict:
     }
 
 
-def _today_ledger() -> Path:
-    date = _dt.date.today().isoformat()
-    LEDGER_DIR.mkdir(parents=True, exist_ok=True)
-    return LEDGER_DIR / f"CONTEXT-LEDGER-{date}.yaml"
-
-
-def _append_ledger(entry: dict) -> int:
-    path = _today_ledger()
-    try:
-        import yaml  # type: ignore
-    except Exception:  # noqa: BLE001
-        return 0
-    # M2 QA Round-2 P1-1: guard read-modify-write with advisory lock so Pre+Post
-    # hook interleaving cannot lose token entries. Fall back to append-only on
-    # timeout to at least preserve the delta (later merge will reconcile).
-    try:
-        from tools.fsm_runtime.file_lock import file_lock  # type: ignore
-    except Exception:  # noqa: BLE001
-        file_lock = None  # type: ignore
-    lock_path = path.with_suffix(path.suffix + ".lock")
-
-    def _read_modify_write() -> int:
-        existing = {}
-        if path.exists():
-            with path.open("r", encoding="utf-8") as f:
-                existing = yaml.safe_load(f) or {}
-        entries = existing.get("entries") or []
-        entries.append(entry)
-        cumulative = int(existing.get("cumulative_tokens", 0)) + int(entry.get("tokens", 0))
-        doc = {
-            "date": _dt.date.today().isoformat(),
-            "cumulative_tokens": cumulative,
-            "entries": entries,
-        }
-        tmp = path.with_suffix(path.suffix + ".tmp")
-        with tmp.open("w", encoding="utf-8") as f:
-            yaml.safe_dump(doc, f, allow_unicode=True, sort_keys=False)
-        os.replace(tmp, path)
-        return cumulative
-
-    if file_lock is None:
-        return _read_modify_write()
-    try:
-        with file_lock(lock_path, timeout=5.0):
-            return _read_modify_write()
-    except TimeoutError:
-        # Degraded fallback — write an append-only sidecar so the entry is not
-        # lost. Merge tooling can reconcile at next idle moment.
-        fallback = path.with_suffix(path.suffix + ".append")
-        try:
-            with fallback.open("a", encoding="utf-8") as f:
-                yaml.safe_dump([entry], f, allow_unicode=True, sort_keys=False)
-        except Exception:  # noqa: BLE001
-            pass
-        # Return best-effort cumulative snapshot (no lock → tolerated stale read).
-        try:
-            if path.exists():
-                with path.open("r", encoding="utf-8") as f:
-                    doc = yaml.safe_load(f) or {}
-                return int(doc.get("cumulative_tokens", 0)) + int(entry.get("tokens", 0))
-        except Exception:  # noqa: BLE001
-            pass
-        return int(entry.get("tokens", 0))
-
-
-def _read_cumulative() -> int:
-    """Read today's cumulative_tokens without writing — used by the tokens==0
-    branch so escalation checks still run for zero-delta tool calls (P2-08)."""
-    path = _today_ledger()
-    if not path.exists():
-        return 0
-    try:
-        import yaml  # type: ignore
-        with path.open("r", encoding="utf-8") as f:
-            doc = yaml.safe_load(f) or {}
-        return int(doc.get("cumulative_tokens", 0))
-    except Exception:  # noqa: BLE001
-        return 0
-
-
 def _estimate_tokens(tool: str, tool_input: dict) -> int:
     """Delegate to conversation_ledger.estimate_tool_tokens (ACT-024).
 
     Falls back to the legacy size/4 estimate if the helper import fails (e.g.
-    conversation_ledger.py temporarily missing during rollout).
+    conversation_ledger.py temporarily missing during rollout). 估算值自第四輪起只寫稽核 entry。
     """
     try:
         from tools.fsm_runtime.conversation_ledger import estimate_tool_tokens  # type: ignore
@@ -284,6 +134,14 @@ def _emit(payload: dict) -> None:
     sys.stdout.flush()
 
 
+def _emit_pass(notices: list[str]) -> int:
+    out = {"hookSpecificOutput": {"hookEventName": "PreToolUse"}}
+    if notices:
+        out["hookSpecificOutput"]["additionalContext"] = "\n".join(notices)
+    _emit(out)
+    return 0
+
+
 def _build_subagent_notice(tool: str, tool_input: dict, runtime=None) -> str | None:
     """ACT-020 injection — runs even when SDD_HOOKS_DISABLE=1 so that
     Subagent Contract hints are not accidentally silenced by the ledger kill
@@ -320,6 +178,67 @@ def _build_subagent_notice(tool: str, tool_input: dict, runtime=None) -> str | N
             "未進行 FSM 守門，建議加入 REGISTERED 清單。"
         )
     return None
+
+
+def _session_id(inp: dict, transcript: object) -> str:
+    sid = inp.get("session_id")
+    if isinstance(sid, str) and sid.strip():
+        return sid.strip()
+    if isinstance(transcript, str) and transcript.strip():
+        return Path(transcript).stem
+    return "unknown"
+
+
+def _measure(transcript: object) -> Measurement | None:
+    """量不到一律 None（C3）；任何例外也當量不到——量測本身絕不能成為 deny 的原因。"""
+    try:
+        return measure(transcript)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _window_for(m: Measurement | None) -> tuple[int | None, str | None]:
+    if m is None or m.used is None:
+        return None, None
+    try:
+        return resolve_window(m.peak, **window_evidence(m.model))
+    except Exception:  # noqa: BLE001
+        return None, None
+
+
+def _label(m: Measurement, window: int, source: str) -> str:
+    return (
+        f"used={m.used:,} window={window:,} 來源={source} "
+        f"compact_boundaries={m.compact_boundaries}"
+    )
+
+
+def _details(sid: str, m: Measurement, window: int, source: str) -> dict:
+    return {
+        "session_id": sid,
+        "category": "context-budget",
+        "used": m.used,
+        "window": window,
+        "window_source": source,
+        "compact_boundaries": m.compact_boundaries,
+    }
+
+
+def _recovery_hint(rt) -> str:
+    try:
+        from tools.fsm_runtime.recovery_hint import recovery_hint  # type: ignore
+        return recovery_hint(rt.state, sdd_root=_SDD_ROOT)
+    except Exception as exc:  # noqa: BLE001
+        return f"[SDD-FSM][RECOVERY][WARN] recovery hint unavailable: {exc!r}"
+
+
+def _record_audit(entry: dict) -> None:
+    """稽核 entry（估算值＋真實 used＋分母來源）；帳本 I/O 任何例外永不到 main()（D5）。"""
+    try:
+        from tools.fsm_runtime.conversation_ledger import append_ledger_entry  # type: ignore
+        append_ledger_entry(LEDGER_DIR, entry)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def main() -> int:
@@ -365,11 +284,11 @@ def main() -> int:
         # Subagent Contract injection — otherwise a disabled ledger weakens
         # ACT-020 (Rule 9.8.4). Attach the hint if applicable and exit.
         notice = _build_subagent_notice(tool, tool_input)
-        out = {"hookSpecificOutput": {"hookEventName": "PreToolUse"}}
-        if notice:
-            out["hookSpecificOutput"]["additionalContext"] = notice
-        _emit(out)
-        return 0
+        return _emit_pass([notice] if notice else [])
+
+    transcript = inp.get("transcript_path")
+    m = _measure(transcript)
+    sid = _session_id(inp, transcript)
 
     # FSM guardrail
     try:
@@ -377,169 +296,147 @@ def main() -> int:
         from tools.fsm_runtime.transition_rules import TransitionError  # type: ignore
 
         rt = FSMRuntime.bootstrap()
-        try:
-            rt.assert_tool_allowed(tool, target)
-        except TransitionError as err:
-            _emit(_deny_or_warn(f"[SDD-FSM] {err}"))
-            return 0
     except Exception as exc:  # noqa: BLE001 — never hard-block on infra fault
-        _emit({
-            "hookSpecificOutput": {
-                "hookEventName": "PreToolUse",
-                "additionalContext": f"[SDD-FSM][WARN] guardrail unavailable: {exc!r}",
-            }
-        })
+        return _emit_pass([f"[SDD-FSM][WARN] guardrail unavailable: {exc!r}"])
+
+    window, source = _window_for(m)
+    notices: list[str] = []
+
+    # D4／C5：AUTO_COMPACT_PENDING 而真實 used 已回落 ⇒ 視為 compaction 完成（含 Claude Code 自動 compact）。
+    if rt.state.current == "AUTO_COMPACT_PENDING" and m is not None and window \
+            and auto_compact_exit_due(m.used, window):
+        try:
+            done = rt.complete_auto_compact(observed_effective=True, released_by=sid)
+            notices.append(
+                f"[SDD-CTX][AUTO-COMPACT][DONE] {_label(m, window, source)} "
+                f"resume→{done.get('resumed_to')} "
+                f"released_by_session={done.get('released_by_session')} "
+                f"triggered_by_session={done.get('triggered_by_session')}"
+                + (f"（原 resume_state={done['remapped_from']} 非合法出口，已 remap）"
+                   if done.get("remapped_from") else "")
+            )
+        except Exception as exc:  # noqa: BLE001
+            notices.append(f"[SDD-CTX][AUTO-COMPACT][DONE][WARN] complete_auto_compact failed: {exc!r}")
+
+    try:
+        rt.assert_tool_allowed(tool, target)
+    except TransitionError as err:
+        reason = f"[SDD-FSM] {err}"
+        if rt.state.current in _ESCALATION_STATES:
+            reason += "\n" + _recovery_hint(rt)
+        _emit(_deny_or_warn(reason))
         return 0
+    except Exception as exc:  # noqa: BLE001 — never hard-block on infra fault
+        return _emit_pass([f"[SDD-FSM][WARN] guardrail unavailable: {exc!r}"])
 
     # ACT-020 Subagent Dispatch Contract — for Task tool with registered agent,
     # attach a reminder so the subagent re-reads FSM state before acting.
     subagent_notice = _build_subagent_notice(tool, tool_input, runtime=rt)
+    if subagent_notice:
+        notices.insert(0, subagent_notice)
 
-    # Context budget ledger
-    tokens = _estimate_tokens(tool, tool_input)
-    if tokens == 0:
-        # P2-08 fix: even zero-delta tool calls must honour escalation /
-        # AUTO_COMPACT thresholds — otherwise a caller can starve out the
-        # budget gate by spamming zero-cost tools while cumulative is
-        # already past 95%. Read existing cumulative and short-circuit
-        # before the normal entry-appending path.
-        existing_cum = _read_cumulative()
-        existing_ratio = existing_cum / _effective_max_context(existing_cum) if existing_cum else 0.0
-        existing_confirmed = _max_context_confirmed(existing_cum)
-        if existing_ratio >= CRIT_RATIO:
-            if not existing_confirmed:
-                ac = _unconfirmed_notice(existing_cum, existing_ratio, "CRIT")
-                if subagent_notice:
-                    ac = f"{subagent_notice}\n{ac}"
-                _emit({"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": ac}})
-                return 0
-            try:
-                rt.state.record_escalation(
-                    f"TOKEN_BUDGET_CRITICAL: cumulative={existing_cum} "
-                    f"ratio={existing_ratio:.2f} (zero-delta tool)"
-                )
-                from tools.fsm_runtime.state_loader import save_state  # type: ignore
-                save_state(rt.state)
-            except Exception:  # noqa: BLE001
-                pass
-            _emit(_deny_or_warn(
-                f"[SDD-CTX] TOKEN_BUDGET_CRITICAL (cumulative={existing_cum}, "
-                f"ratio={existing_ratio:.2f}). 必須立即執行 /stage-compaction 並產出 Context Snapshot。"
-            ))
-            return 0
-        if (
-            AUTO_COMPACT_RATIO <= existing_ratio < CRIT_RATIO
-            and rt.state.current != "AUTO_COMPACT_PENDING"
-        ):
-            if not existing_confirmed:
-                ac = _unconfirmed_notice(existing_cum, existing_ratio, "AUTO_COMPACT")
-                if subagent_notice:
-                    ac = f"{subagent_notice}\n{ac}"
-                _emit({"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": ac}})
-                return 0
-            trigger_result: dict = {}
-            try:
-                trigger_result = rt.trigger_auto_compact(existing_cum, existing_ratio) or {}
-            except Exception:  # noqa: BLE001
-                pass
-            if trigger_result.get("escalated"):
-                reason = trigger_result.get("reason", "auto-compact suppressed")
-                _emit(_deny_or_warn(
-                    f"[SDD-CTX][AUTO-COMPACT][ESCALATION] ratio {existing_ratio:.0%} — {reason}。"
-                    " 後續工具呼叫已被 FSM guardrail 阻擋，必須人工介入。"
-                ))
-                return 0
-            ac = (
-                f"[SDD-CTX][AUTO-COMPACT] ratio {existing_ratio:.0%} "
-                f"(cumulative={existing_cum}). FSM → AUTO_COMPACT_PENDING。"
-                " 🔴 下一步必須立即呼叫 Skill: stage-compaction。"
-            )
-            if subagent_notice:
-                ac = f"{subagent_notice}\n{ac}"
-            _emit({"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": ac}})
-            return 0
-        out_no_tokens = {"hookSpecificOutput": {"hookEventName": "PreToolUse"}}
-        if subagent_notice:
-            out_no_tokens["hookSpecificOutput"]["additionalContext"] = subagent_notice
-        _emit(out_no_tokens)
-        return 0
-
-    cumulative = _append_ledger({
+    # 稽核帳本（估算值＋真實值並列，供校準；tokens=0 也寫，零決策權）。
+    _record_audit({
         "ts": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
         "phase": "pre",
         "tool": tool,
         "target": target,
-        "tokens": tokens,
+        "tokens": _estimate_tokens(tool, tool_input),
         "fsm_state": rt.state.current,
+        "session_id": sid,
+        "observed_used": None if m is None else m.used,
+        "window": window,
+        "window_source": source,
     })
-    ratio = cumulative / _effective_max_context(cumulative)
-    confirmed = _max_context_confirmed(cumulative)
+
+    # C3：量不到 ⇒ 零 gating、不出聲。
+    if m is None or m.used is None or not window or not source:
+        return _emit_pass(notices)
+
+    ratio = m.used / window
+    confirmed = may_block(source)
+    label = _label(m, window, source)
 
     if ratio >= CRIT_RATIO:
         if not confirmed:
-            ac = _unconfirmed_notice(cumulative, ratio, "CRIT")
-            if subagent_notice:
-                ac = f"{subagent_notice}\n{ac}"
-            _emit({"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": ac}})
-            return 0
+            notices.append(unconfirmed_notice(m.used, ratio, "CRIT", source))
+            return _emit_pass(notices)
+        if rt.state.current != "AUTO_COMPACT_PENDING":
+            trigger_result: dict = {}
+            try:
+                trigger_result = rt.trigger_auto_compact(
+                    m.used, ratio, details=_details(sid, m, window, source)) or {}
+            except Exception:  # noqa: BLE001
+                pass
+            if trigger_result.get("escalated"):
+                # per-stage cap 超限＝結構性升級（既有 R-9.2 failure_mode），照舊 deny 並附恢復指令。
+                reason = trigger_result.get("reason", "auto-compact suppressed")
+                _emit(_deny_or_warn(
+                    f"[SDD-CTX][CRIT][ESCALATION] ratio {ratio:.0%}（{label}）— {reason}。"
+                    " 後續工具呼叫已被 FSM guardrail 阻擋，必須人工介入。\n" + _recovery_hint(rt)
+                ))
+                return 0
+        # session 級判定：當次工具是否為 compact 相關（不寫 ESCALATION、不寫 TOKEN_BUDGET_CRITICAL）。
         try:
-            rt.state.record_escalation(
-                f"TOKEN_BUDGET_CRITICAL: cumulative={cumulative} ratio={ratio:.2f}"
-            )
-            from tools.fsm_runtime.state_loader import save_state  # type: ignore
-            save_state(rt.state)
-        except Exception:  # noqa: BLE001
-            pass
-        _emit(_deny_or_warn(
-            f"[SDD-CTX] TOKEN_BUDGET_CRITICAL (cumulative={cumulative}, "
-            f"ratio={ratio:.2f}). 必須立即執行 /stage-compaction 並產出 Context Snapshot。"
-        ))
-        return 0
-    # 90% auto-compact: trigger here too (defensive; post hook triggers primarily).
-    # Once in AUTO_COMPACT_PENDING, assert_tool_allowed() above已經把非 compact 工具擋下來。
+            rt._assert_allowed_under_auto_compact(tool, target)
+        except TransitionError:
+            # ARCH-06／SD-06：依狀態分句——PENDING 才有「回落即恢復 resume_state」可講；
+            # RELEASE 等 no-op 狀態只有 session 級 deny 本身會隨 usage 回落解除。
+            if rt.state.current == "AUTO_COMPACT_PENDING":
+                tail = "真實 usage 回落 <85% 後下一次工具呼叫即自動恢復 resume_state。"
+            else:
+                tail = f"FSM={rt.state.current} 不進 PENDING；usage 回落 <95% 後本 deny 即解除。"
+            _emit(_deny_or_warn(
+                f"[SDD-CTX][CRIT] context ratio {ratio:.0%}（{label}）— 本 session 已達 95%，"
+                "拒絕非 compact 工具。請 /compact 或呼叫 Skill: stage-compaction；" + tail
+            ))
+            return 0
+        notices.append(
+            f"[SDD-CTX][CRIT] context ratio {ratio:.0%}（{label}）— 只允許 compact 相關操作；"
+            "請立即 /compact 或 Skill: stage-compaction。"
+        )
+        return _emit_pass(notices)
+
+    # 90% auto-compact（≥90% 且 <95%，尚未 PENDING）。
     if AUTO_COMPACT_RATIO <= ratio < CRIT_RATIO and rt.state.current != "AUTO_COMPACT_PENDING":
         if not confirmed:
-            ac = _unconfirmed_notice(cumulative, ratio, "AUTO_COMPACT")
-            if subagent_notice:
-                ac = f"{subagent_notice}\n{ac}"
-            _emit({"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": ac}})
-            return 0
-        trigger_result: dict = {}
+            notices.append(unconfirmed_notice(m.used, ratio, "AUTO_COMPACT", source))
+            return _emit_pass(notices)
+        trigger_result = {}
         try:
-            trigger_result = rt.trigger_auto_compact(cumulative, ratio) or {}
+            trigger_result = rt.trigger_auto_compact(
+                m.used, ratio, details=_details(sid, m, window, source)) or {}
         except Exception:  # noqa: BLE001
             pass
+        if trigger_result.get("noop"):
+            # ARCH-06／SD-06：RELEASE 等狀態下 trigger 是 no-op，不得宣稱已進 PENDING。
+            notices.append(
+                f"[SDD-CTX][AUTO-COMPACT][NOOP] ratio {ratio:.0%}（{label}）— "
+                f"{trigger_result.get('reason', 'auto_compact suppressed')}；FSM 未進 PENDING，請手動 /compact。"
+            )
+            return _emit_pass(notices)
         if trigger_result.get("escalated"):
             reason = trigger_result.get("reason", "auto-compact suppressed")
             _emit(_deny_or_warn(
-                f"[SDD-CTX][AUTO-COMPACT][ESCALATION] ratio {ratio:.0%} — {reason}。"
-                " 後續工具呼叫已被 FSM guardrail 阻擋，必須人工介入。"
+                f"[SDD-CTX][AUTO-COMPACT][ESCALATION] ratio {ratio:.0%}（{label}）— {reason}。"
+                " 後續工具呼叫已被 FSM guardrail 阻擋，必須人工介入。\n" + _recovery_hint(rt)
             ))
             return 0
-        ac = (
-            f"[SDD-CTX][AUTO-COMPACT] ratio {ratio:.0%} (cumulative={cumulative}). "
+        notices.append(
+            f"[SDD-CTX][AUTO-COMPACT] ratio {ratio:.0%}（{label}）. "
             "FSM → AUTO_COMPACT_PENDING。Context Snapshot 已持久化。"
-            " 🔴 下一步必須立即呼叫 Skill: stage-compaction。"
+            " 🔴 下一步必須立即呼叫 Skill: stage-compaction（或 /compact；真實 usage 回落 <85% 即自動回 resume_state）。"
         )
-        if subagent_notice:
-            ac = f"{subagent_notice}\n{ac}"
-        _emit({"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": ac}})
-        return 0
+        return _emit_pass(notices)
+
     if ratio >= WARN_RATIO:
-        ac = (
-            f"[SDD-CTX][WARN] context usage {ratio:.0%} (~{cumulative} tokens). "
+        notices.append(
+            f"[SDD-CTX][WARN] context usage {ratio:.0%}（{label}）. "
             "建議立即執行 /stage-compaction 清理已凍結 Stage 詳細內容。"
         )
-        if subagent_notice:
-            ac = f"{subagent_notice}\n{ac}"
-        _emit({"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": ac}})
-        return 0
+        return _emit_pass(notices)
 
-    out_final = {"hookSpecificOutput": {"hookEventName": "PreToolUse"}}
-    if subagent_notice:
-        out_final["hookSpecificOutput"]["additionalContext"] = subagent_notice
-    _emit(out_final)
-    return 0
+    return _emit_pass(notices)
 
 
 if __name__ == "__main__":

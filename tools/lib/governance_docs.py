@@ -486,6 +486,12 @@ _GOVERNANCE_DOCS = (
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R141_Scan_Findings.md",
     # R142 收尾：DEF-200-275／DEF-200-277 兩個獨立缺陷收尾附帶的護欄層對帳。即刻登記。round-label-ok
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R142_Scan_Findings.md",
+    # R143 收尾：DEF-200-275 第四輪護欄層對帳。即刻登記。round-label-ok
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R143_Scan_Findings.md",
+    # DEF-200-278：喚醒鏈缺口（halt 交棒＋哨兵認得自願停機）證據面。逐筆寫出根因座標
+    # 與先紅後綠實測值 ⇒ 指針稽核與體積守門兩項義務皆成立，即刻登記（上輪 R143 漏登記 round-label-ok
+    # 讓 15 支測試靜默轉紅的教訓，本輪不重演）。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_DEF200278_Halt_Handoff_Evidence.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/{CrossPlatform,Quota}_*.md`。這**不是**把具名

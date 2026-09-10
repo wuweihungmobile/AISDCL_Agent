@@ -6,18 +6,21 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 import yaml  # noqa: E402
 
 from tools.fsm_runtime.conversation_ledger import (  # noqa: E402
+    append_ledger_entry,
     estimate_bash_command_tokens,
     estimate_conversation_overhead,
     estimate_read_tokens,
     estimate_tool_tokens,
     merge_conversation_overhead_into_ledger,
     record_calibration_sample,
+    write_sidecar,
 )
 
 
@@ -174,6 +177,27 @@ class LedgerPrecisionTests(unittest.TestCase):
         res2 = merge_conversation_overhead_into_ledger(self.root, merge_every=10)
         self.assertFalse(res2["merged"])
 
+    def test_sidecar_folded_below_threshold_is_persisted(self) -> None:
+        """DEF-200-275 第四輪 G3（SD-R2-01，HEAD 既有；先紅再綠）：`_merge_locked` 先把 sidecar 併進記憶體
+        doc 並 unlink，隨後 `delta_calls < merge_every` 早退**不寫檔** ⇒ 折回的 entries 磁碟上永久消失
+        （預設 merge_every=10 ⇒ 20 個 tick 只有 1 個真的持久化，其餘 19 個折回＝刪除）。F2 讓 post hook
+        逾時唯一出口是 sidecar，這條路徑因此承重；docstring 宣稱「下次 merge 折回主檔」必須為真。"""
+        date = _dt.date.today().isoformat()
+        path = self.root / f"CONTEXT-LEDGER-{date}.yaml"
+        self._write_ledger([{"tokens": 100, "phase": "pre"}])
+        for tokens in (11, 22, 33):  # 3 筆共 66 tokens，遠低於 merge 門檻（10 calls × 2 entries）
+            write_sidecar(self.root, {"tokens": tokens, "phase": "post"})
+        sidecar = path.with_suffix(path.suffix + ".append")
+        self.assertTrue(sidecar.exists())
+        res = merge_conversation_overhead_into_ledger(self.root, merge_every=10)
+        self.assertFalse(res["merged"])
+        self.assertEqual(res.get("sidecar_merged"), 3, msg=res)
+        self.assertFalse(sidecar.exists(), "sidecar 折回後應被消耗")
+        doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+        self.assertEqual(len(doc["entries"]), 4, msg=f"折回的 3 筆必須在磁碟上：{doc}")
+        self.assertEqual(doc["cumulative_tokens"], 166)
+        self.assertEqual(append_ledger_entry(self.root, {"tokens": 9, "phase": "pre"}), 175)
+
     def test_sidecar_absent_does_not_report_merge(self) -> None:
         """Regression: sidecar_merged must be 0 when sidecar file is absent."""
         self._write_ledger([{"tokens": 100} for _ in range(20)])
@@ -191,6 +215,190 @@ class LedgerPrecisionTests(unittest.TestCase):
         doc = yaml.safe_load(out.read_text(encoding="utf-8"))
         self.assertEqual(len(doc["samples"]), 2)
         self.assertIn("rolling_avg_drift_pct_last10", doc)
+
+
+class LedgerBookmarkAndTearingTests(unittest.TestCase):
+    """DEF-200-275 第四輪根因 A／A-2 回歸鎖。
+
+    根因 A（本場直接重現於舊 pre hook）：`_read_modify_write` 重寫整份 doc 時只保留
+    `{date, cumulative_tokens, entries}`，丟掉 `conversation_overhead.last_merge_entry_index`
+    ⇒ `merge_conversation_overhead_into_ledger` 每次都從 0 起算、把全部 entries 再合併一次
+    ⇒ 每次工具呼叫 +(len/2)*300、單調遞增（O(n²)）；活帳本實測 conv-overhead 佔 92%、
+    單筆 30000→30300→30600。任一測試轉紅＝這條灌水路徑又被打開。
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.date = _dt.date.today().isoformat()
+        self.path = self.root / f"CONTEXT-LEDGER-{self.date}.yaml"
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _seed(self, n: int, *, with_bookmark: object = None, with_conv_entry: bool = False) -> None:
+        entries = [{"tokens": 100, "phase": "pre" if i % 2 == 0 else "post"} for i in range(n)]
+        if with_conv_entry:
+            # 已合併過一次的痕跡（conv-overhead 列），但書籤不見了＝根因 A 的形狀
+            entries.append({"tokens": 300, "phase": "conv-overhead", "tool": "ConversationLedger"})
+        doc = {
+            "date": self.date,
+            "cumulative_tokens": sum(int(e["tokens"]) for e in entries),
+            "entries": entries,
+        }
+        if with_bookmark is not None:
+            doc["conversation_overhead"] = {"last_merge_entry_index": with_bookmark}
+        self.path.write_text(yaml.safe_dump(doc, allow_unicode=True, sort_keys=False), encoding="utf-8")
+
+    def _doc(self) -> dict:
+        return yaml.safe_load(self.path.read_text(encoding="utf-8"))
+
+    def test_append_ledger_entry_preserves_conversation_overhead_bookmark(self) -> None:
+        """【根因 A，先紅再綠】merge 後書籤=22；append 一筆後書籤必須仍是 22（不得被整份改寫吃掉）。"""
+        self._seed(22)
+        res = merge_conversation_overhead_into_ledger(self.root, merge_every=10)
+        self.assertTrue(res["merged"])
+        self.assertEqual(self._doc()["conversation_overhead"]["last_merge_entry_index"], 22)
+        append_ledger_entry(self.root, {"tokens": 1, "phase": "pre", "tool": "Bash"})
+        doc = self._doc()
+        self.assertIn("conversation_overhead", doc,
+                      msg="append 後 conversation_overhead 鍵消失＝根因 A 重現")
+        self.assertEqual(doc["conversation_overhead"]["last_merge_entry_index"], 22)
+
+    def test_second_merge_after_append_does_not_remerge(self) -> None:
+        """【根因 A】同序列後第二次 merge 不得再合併（舊碼 +3600）。
+
+        QA-05 註明：本案是**端到端／縱深防禦鎖**，不是單點鑑別鎖——只注入「舊 _read_modify_write」
+        會被 rebaseline 接住、只注入「關 rebaseline」會被保留書籤接住，兩層**同時**失守才轉紅
+        （QA 第 1 輪實測：單注入 A→綠、單注入 B→綠、複合 A2→紅）。單點鑑別由前一案與
+        `test_missing_bookmark_rebaselines_without_merging` 各自負責。"""
+        self._seed(22)
+        merge_conversation_overhead_into_ledger(self.root, merge_every=10)
+        append_ledger_entry(self.root, {"tokens": 1, "phase": "pre", "tool": "Bash"})
+        res2 = merge_conversation_overhead_into_ledger(self.root, merge_every=10)
+        self.assertFalse(res2["merged"], msg=f"書籤遺失後立即再合併：{res2}")
+        self.assertEqual(res2["added_tokens"], 0)
+
+    def test_negative_bookmark_is_treated_as_missing(self) -> None:
+        """SD-05：負整數書籤 ⇒ 視同缺失 rebaseline（`len - (-k)` 會多算 k 筆再灌水），本 tick 不合併。"""
+        self._seed(22, with_bookmark=-4)
+        res = merge_conversation_overhead_into_ledger(self.root, merge_every=10)
+        self.assertFalse(res["merged"], msg=res)
+        self.assertTrue(res.get("rebaselined"), msg=res)
+        self.assertEqual(self._doc()["conversation_overhead"]["last_merge_entry_index"], 22)
+
+    def test_missing_bookmark_rebaselines_without_merging(self) -> None:
+        """【C7 防呆】帳本已有 conv-overhead 列卻無書籤（＝書籤遺失）⇒ 以 len(entries) 為新起點、
+        本 tick 不合併（不得從 0 起算灌水）。全新帳本（無 conv-overhead 列）不在此列，見對照組。"""
+        self._seed(22, with_conv_entry=True)  # 23 entries、無 conversation_overhead 鍵
+        res = merge_conversation_overhead_into_ledger(self.root, merge_every=10)
+        self.assertFalse(res["merged"], msg=f"書籤遺失後從 0 起算再合併：{res}")
+        self.assertEqual(res["added_tokens"], 0)
+        doc = self._doc()
+        self.assertEqual(doc["conversation_overhead"]["last_merge_entry_index"], 23)
+        self.assertEqual(doc["cumulative_tokens"], 2500)
+        # 非整數書籤同樣 rebaseline（不論有無 conv-overhead 列）
+        self._seed(22, with_bookmark="garbage")
+        res = merge_conversation_overhead_into_ledger(self.root, merge_every=10)
+        self.assertFalse(res["merged"])
+        self.assertEqual(self._doc()["conversation_overhead"]["last_merge_entry_index"], 22)
+
+    def test_fresh_ledger_without_bookmark_still_merges_from_zero(self) -> None:
+        """對照組（既有 12 支的前提）：全新帳本沒有書籤也沒有 conv-overhead 列 ⇒ 從 0 起算正常合併。"""
+        self._seed(20)
+        res = merge_conversation_overhead_into_ledger(self.root, merge_every=10)
+        self.assertTrue(res["merged"])
+        self.assertEqual(res["added_tokens"], 3000)
+        self.assertEqual(self._doc()["conversation_overhead"]["last_merge_entry_index"], 20)
+
+    def test_bookmark_zero_on_fresh_ledger_still_merges_normally(self) -> None:
+        """對照組：書籤存在且為 0（新帳本）時，既有「每 10 次工具呼叫合併」語意不變。"""
+        self._seed(20, with_bookmark=0)
+        res = merge_conversation_overhead_into_ledger(self.root, merge_every=10)
+        self.assertTrue(res["merged"])
+        self.assertEqual(res["added_tokens"], 3000)
+
+    def test_corrupt_ledger_is_rotated_not_raised(self) -> None:
+        """【A-2】本場活帳本損毀形態（半截 `t: null` 行）⇒ append 不 raise、rotate 成 .corrupt-*.yaml、新檔可解析。"""
+        self.path.write_text(
+            "date: '2026-09-10'\ncumulative_tokens: 5\nentries:\n- ts: 1\n  tokens: 5\n  t: null\n"
+            "  - phase: [unclosed\n",
+            encoding="utf-8",
+        )
+        with self.assertRaises(yaml.YAMLError):
+            yaml.safe_load(self.path.read_text(encoding="utf-8"))
+        cumulative = append_ledger_entry(self.root, {"tokens": 7, "phase": "post", "tool": "Read"})
+        self.assertEqual(cumulative, 7)
+        rotated = list(self.root.glob(f"CONTEXT-LEDGER-{self.date}.corrupt-*.yaml"))
+        self.assertEqual(len(rotated), 1, msg=f"損毀帳本應被改名保留：{list(self.root.iterdir())}")
+        doc = self._doc()
+        self.assertEqual(doc["cumulative_tokens"], 7)
+        self.assertEqual(len(doc["entries"]), 1)
+
+    @staticmethod
+    def _deny_read(target: Path):
+        """讓 `target` 的文字讀取拋 PermissionError、其餘 Path.open 直通。
+        WHY 不用 chmod 000：root（CI 容器）讀得到 000 檔、Windows 的 chmod 對讀取權零作用（鐵律三）——
+        兩個平台都會把這案變成假綠；patch 是唯一平台中性的注入點。"""
+        orig = Path.open
+
+        def _open(self, mode="r", *args, **kwargs):
+            if self == target and "r" in mode and "+" not in mode:
+                raise PermissionError(13, "Permission denied (simulated)", str(self))
+            return orig(self, mode, *args, **kwargs)
+        return patch.object(Path, "open", _open)
+
+    def test_unreadable_ledger_is_not_overwritten_by_writers(self) -> None:
+        """【G4／SD-R2-03，本輪 delta 引入】`_load_ledger_doc` 讀檔 OSError 若回 `{}`，寫入者會拿空 doc
+        `_atomic_write_yaml` 整本覆寫（歷史／書籤全滅、還回報成功）。讀不到 ≠ 空帳本：該次只是不寫、不 raise 到 hook。"""
+        self._seed(6, with_bookmark=6)
+        before = self.path.read_bytes()
+        with self._deny_read(self.path):
+            self.assertEqual(append_ledger_entry(self.root, {"tokens": 7, "phase": "post"}), 0)
+            res = merge_conversation_overhead_into_ledger(self.root, merge_every=1)
+        self.assertFalse(res["merged"])
+        self.assertIn("io_error", res, msg=res)
+        self.assertEqual(self.path.read_bytes(), before, "讀不到時磁碟帳本位元組不得改變")
+        self.assertFalse(list(self.root.glob("*.corrupt-*")), "讀不到不是損毀，不得 rotate")
+
+    def test_entry_carries_session_and_observed_fields(self) -> None:
+        append_ledger_entry(self.root, {
+            "tokens": 3, "phase": "pre", "tool": "Bash", "session_id": "sess-1",
+            "observed_used": 97184, "window": 1000000, "window_source": "查表值（…）",
+        })
+        entry = self._doc()["entries"][-1]
+        self.assertEqual(entry["session_id"], "sess-1")
+        self.assertEqual(entry["observed_used"], 97184)
+        self.assertEqual(entry["window"], 1000000)
+        self.assertIn("查表值", entry["window_source"])
+
+    def test_concurrent_writers_do_not_tear(self) -> None:
+        """【A-2】兩個子行程各 100 次交錯 append／merge ⇒ 最終檔可解析、entries 數＝寫入總數（含 conv-overhead 列）。"""
+        import subprocess
+        import sys as _sys
+
+        script = (
+            "import sys; sys.path.insert(0, sys.argv[1]);"
+            "from pathlib import Path;"
+            "from tools.fsm_runtime.conversation_ledger import append_ledger_entry, merge_conversation_overhead_into_ledger as m;"
+            "d = Path(sys.argv[2]);"
+            "[ (append_ledger_entry(d, {'tokens': 1, 'phase': sys.argv[3], 'tool': 'T'}), m(d)) for _ in range(100) ]"
+        )
+        sdd_root = str(Path(__file__).resolve().parents[3])
+        procs = [
+            subprocess.Popen([_sys.executable, "-c", script, sdd_root, str(self.root), phase])
+            for phase in ("pre", "post")
+        ]
+        for proc in procs:
+            self.assertEqual(proc.wait(timeout=120), 0)
+        doc = self._doc()
+        entries = doc["entries"]
+        real = [e for e in entries if e.get("phase") in ("pre", "post")]
+        conv = [e for e in entries if e.get("phase") == "conv-overhead"]
+        self.assertEqual(len(real), 200, msg="交錯寫入撕裂／遺失 entries")
+        self.assertEqual(doc["cumulative_tokens"], 200 + sum(e["tokens"] for e in conv))
+        self.assertFalse(list(self.root.glob("*.part.*")), msg="pid 專屬暫存檔不得殘留")
+        self.assertFalse(list(self.root.glob("*.corrupt-*")), msg="有鎖保護下不應出現損毀 rotate")
 
 
 if __name__ == "__main__":

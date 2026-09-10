@@ -251,16 +251,21 @@ class FSMState:
         for gate_name in ("SCG_VALIDATION", "PR_REVIEW", "RTM_VERIFY"):
             self.reset_retry(gate_name)
 
-    def record_escalation(self, reason: str) -> None:
+    def record_escalation(self, reason: str, *, details: Optional[Dict[str, Any]] = None) -> None:
+        # DEF-200-275 第四輪（D6b）：`details` 讓 escalation 紀錄帶上來源 session_id／used／window／
+        # window_source／compact_boundaries，供 recovery_hint 印出「這個 ESCALATION 來自哪個 session、
+        # 是 context budget 還是結構性」。None 時鍵集合與此前逐字相同（96 個既有呼叫端零改動）；
+        # 既有四鍵在前且不被 details 覆寫。
         history = self.root.setdefault("escalation_history", []) or []
-        history.append(
-            {
-                "triggered_at": _now(),
-                "trigger_reason": reason,
-                "resolved_at": None,
-                "resolution": None,
-            }
-        )
+        entry: Dict[str, Any] = {
+            "triggered_at": _now(),
+            "trigger_reason": reason,
+            "resolved_at": None,
+            "resolution": None,
+        }
+        if details is not None:
+            entry.update({k: v for k, v in dict(details).items() if k not in entry})
+        history.append(entry)
         self.root["escalation_history"] = history
         cum = self.cumulative()
         cum["escalation_count"] = int(cum.get("escalation_count", 0)) + 1

@@ -18,10 +18,18 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 . "$SCRIPT_DIR/lib/windowsapps_guard.sh"
 
-# 直譯器選擇維持收斂前語意：PATH 上的 python（所有段落都靠已啟用的 venv），
-# 未啟用 venv 就直接失敗提示（勝過各段落逐一噴錯）
-is_real_python_candidate python || { echo '❌ 找不到 python — 請先 source .venv/bin/activate（見 ONBOARDING.md §3）'; exit 1; }
+# 直譯器候選鏈（DEF-200-275 第四輪 D8／C14）：python → python3 → 根層 .venv/bin/python，
+# 與 tools/git-hooks/pre-push 的 $PY 候選鏈同形。WHY：未 source venv 的 macOS 只有 python3；
+# pre-push 整合閘門 leg 先以候選鏈找到直譯器、再 `bash tools/integration_gate.sh`，本殼若只認
+# `python` 就會在同一台機器上自相矛盾地失敗。仍屬薄殼三職責之一（選直譯器）；殼內零迴圈
+# （check_wrapper_thinness 黑名單：for／while／python -c 皆不得出現）。找不到就 fail-loud。
+PY=""
+if is_real_python_candidate python; then PY=python
+elif is_real_python_candidate python3; then PY=python3
+elif is_real_python_candidate "$SCRIPT_DIR/../.venv/bin/python"; then PY="$SCRIPT_DIR/../.venv/bin/python"
+fi
+[ -n "$PY" ] || { echo '❌ 找不到 python／python3／.venv/bin/python — 請先 source .venv/bin/activate（見 ONBOARDING.md §3）' >&2; exit 1; }
 
 export PYTHONUTF8=1
-python "$SCRIPT_DIR/integration_gate_core.py" "$@"
+"$PY" "$SCRIPT_DIR/integration_gate_core.py" "$@"
 exit $?

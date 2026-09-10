@@ -186,8 +186,14 @@ _PINNED_SHA256: dict[str, str] = {
         "993b366802dce5763e748247df43ea7fd6c8fd8db593f273892c35f4957bae45"
     ),
     # R43：補上 WindowsApps guard dot-source（同上 DEF-101-353）
+    # DEF-200-275 第四輪（D8／C14）重釘：直譯器選擇由「只認 PATH 上的 python」改為與
+    # tools/git-hooks/pre-push 同形的 if/elif 三候選鏈（python → python3 → 根層
+    # .venv/bin/python）。WHY：未 source venv 的 macOS 只有 python3，pre-push 整合閘門 leg 用
+    # 候選鏈找到直譯器後再呼叫本殼，本殼卻在同一台機器上失敗。仍屬「選直譯器」薄殼職責，
+    # 殼內零迴圈／零 `python -c`（_SH_THIN_KEYWORDS 並聯訊號照樣守著）。`.ps1` 側不動
+    # （不對稱記入 CrossPlatform_DEF200275_Context_Metering_Evidence.md〈第四輪〉）。
     "tools/integration_gate.sh": (
-        "3a155b915f7bc42c32c752885a97a38eb9a60a3b411d85c532a8421e4cacfc75"
+        "d5a8c9ca5b4b11319bf2141bae83813729e4bb8de9a00ee2df5df9451f44f69b"
     ),
     # R44：python 前置檢查改走 tools/lib/WindowsAppsGuard.ps1::Test-IsRealPython SSOT
     "tools/integration_gate.ps1": (

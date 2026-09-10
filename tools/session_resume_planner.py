@@ -609,13 +609,16 @@ def tick_plan(state: dict, verdict: dict, now: datetime) -> dict:
 # 痕跡上仍分得開，而分得開本來就是當初把它做成 fail-loud 的唯一正當理由。
 # 「叫人」的門檻同輪收緊成「有未處理撞線 **且** 有扇出待救」，落在 `escalation.alert`。
 def sentinel_decide(event: dict | None, handled_through: object,
-                    idle_seconds: float | None, now: datetime) -> dict:
+                    idle_seconds: float | None, now: datetime, halt: dict | None = None) -> dict:
     """哨兵醒來後的**五**分支判定。純函式——預防鏈的大腦，每一支都要能單獨注入。
 
     🔴 R100 訂正：此前逐字寫「四分支」而函式體實有 **5** 個相異 `action`
     （`arm_reset`／`disarm`／`escalate`／`patrol`／`probe`）。少算的那一個是 `probe`
     ——五個裡唯一**會花錢**的分支 ⇒ 照 docstring 去數的人會把新事件命名成 `probe`
     而撞名，正好摧毀「掛回巡邏 vs 終止在痕跡上一眼可辨」這件事。
+    DEF-200-278／INV-H2：`halt`＝自願停機標記（見 `quota_gate.read_halt_marker`）。
+    真的撞線事件（上面那支）優先於它；它自己又優先於下面的 idle-based patrol/disarm
+    ——自願停機不會讓逐字稿繼續更新，沿用 patrol 分支等於永遠等到 6 小時後靜默解除。
     """
     if event and str(event.get("timestamp") or "") > str(handled_through or ""):
         if event["kind"] == guard.LIMIT_SPEND:
@@ -634,6 +637,8 @@ def sentinel_decide(event: dict | None, handled_through: object,
             # 在 mac 上會明說「有 / 沒有 StartCalendarInterval」與「重載是否仍待完成」。
             return {"action": "arm_reset", "at": at, "reset_at": reset_at, "reset_source": "transcript-verbatim", "reason": f"偵測到未處理的撞線；觀測 reset={reset_at} 尚未到 ⇒ " "要求排程器改在那個時刻醒（本次零 token；載具實際做到什麼" "看同一筆痕跡的 credential 欄）"}  # noqa: E501
         return {"action": "probe", "at": None, "reason": f"偵測到未處理的撞線；觀測 reset={reset_at} 已過 ⇒ " "花一次探測確認額度回來了沒"}  # noqa: E501
+    if (v := quota_gate.halt_verdict(halt, idle_seconds, now)) is not None:
+        return v
     if idle_seconds is not None and idle_seconds < SENTINEL_IDLE_SECONDS:
         return {"action": "patrol", "at": now + timedelta(seconds=SENTINEL_INTERVAL_SECONDS), "reason": f"無未處理撞線；逐字稿 {idle_seconds:.0f}s 前仍有更新 ⇒ " "session 還活著，續巡（本次零 token）"}  # noqa: E501
     why = ("從來沒有被建立出來（開了沒做事就結束的 session 是常態，不是哨兵失明）" if idle_seconds is None else f"已靜止 {idle_seconds:.0f}s（≥{SENTINEL_IDLE_SECONDS}s）⇒ 工作已結束")  # noqa: E501
@@ -1467,7 +1472,8 @@ def _sentinel_tick(args) -> int:
     event = guard.unhandled_limit_event(transcript) if transcript.is_file() else None
     fan = escalation.patrol_housekeeping(transcript, event, now, state, SENTINEL_INTERVAL_SECONDS, SENTINEL_TICK, log)  # noqa: E501
     idle = (now.timestamp() - guard.newest_activity_at(guard.session_transcripts(transcript)) if transcript.is_file() else None)  # noqa: E501
-    decision = sentinel_decide(event, "", idle, now)
+    decision = sentinel_decide(event, "", idle, now,
+                               halt=quota_gate.read_halt_marker(state.get("session_id") or ""))
     append_log(log, "sentinel_decided", action=decision["action"], reason=decision["reason"], **fan)  # noqa: E501
     print(f"哨兵判定 {decision['action']}：{decision['reason']}")
     if decision["action"] == "probe":

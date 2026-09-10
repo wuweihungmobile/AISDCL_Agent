@@ -175,23 +175,31 @@ class GreenfieldSmokeTest(unittest.TestCase):
     # ---------- S10: 90% Auto-Compact full loop ----------
     def test_s10_auto_compact_full_loop_resets_ledger_and_resumes(self) -> None:
         """Token 90% → AUTO_COMPACT_PENDING → complete_auto_compact() →
-        FSM 回 resume_state + 今日 ledger cumulative_tokens 歸零。"""
+        FSM 回 resume_state + 今日 ledger cumulative_tokens 歸零。
+
+        G2（DEF-200-275 第四輪第 2 輪審查 ARCH-R2-02）：此前直接讀寫 `REPO_ROOT/build/reports/fsm` 的**活帳本**
+        並以 backup 覆蓋回去——同機任何活 session 的 SDD hook 在 reset 與 read-back 之間 append 一筆就隨機紅
+        （本輪實測 5 跑 2 紅），且覆蓋回寫會抹掉 hook 的 entries。改 patch `REPO_ROOT`／`SNAPSHOT_DIR` 到 tmp
+        （同 test_recovery_hint 體例），意圖與斷言不動。"""
+        import datetime as _dt
+        from unittest.mock import patch
+
         import yaml
 
-        from tools.fsm_runtime.fsm_runtime import _reset_today_ledger
-        from tools.fsm_runtime.state_loader import REPO_ROOT
+        import tools.fsm_runtime.snapshot as snap_mod
+        import tools.fsm_runtime.state_loader as sl_mod
 
         state = load_state("greenfield-autocompact", path=self.state_path)
         rt = FSMRuntime(state)
         rt.state.current = "SPEC_DRAFTING"
 
-        # Seed today's ledger with > 90% cumulative
-        ledger_dir = REPO_ROOT / "build" / "reports" / "fsm"
+        # Seed today's ledger with > 90% cumulative（落 tmp，不碰活帳本）
+        tmp_root = Path(self._tmp.name)
+        ledger_dir = tmp_root / "build" / "reports" / "fsm"
         ledger_dir.mkdir(parents=True, exist_ok=True)
-        import datetime as _dt
         ledger_path = ledger_dir / f"CONTEXT-LEDGER-{_dt.date.today().isoformat()}.yaml"
-        backup = ledger_path.read_text(encoding="utf-8") if ledger_path.exists() else None
-        try:
+        with patch.object(sl_mod, "REPO_ROOT", tmp_root), \
+                patch.object(snap_mod, "SNAPSHOT_DIR", tmp_root / "build" / "reports" / "abort"):
             with ledger_path.open("w", encoding="utf-8") as f:
                 yaml.safe_dump({
                     "date": _dt.date.today().isoformat(),
@@ -234,11 +242,6 @@ class GreenfieldSmokeTest(unittest.TestCase):
             # Idempotent: second call from non-pending state must noop
             again = rt.complete_auto_compact()
             self.assertTrue(again.get("noop"))
-        finally:
-            if backup is not None:
-                ledger_path.write_text(backup, encoding="utf-8")
-            elif ledger_path.exists():
-                ledger_path.unlink()
 
 
 class HookBypassSubprocessTest(unittest.TestCase):

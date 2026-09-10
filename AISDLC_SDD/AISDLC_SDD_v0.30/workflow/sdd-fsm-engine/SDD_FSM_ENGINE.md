@@ -226,14 +226,14 @@ states:
       - "Hook 自動寫入 CONTEXT-SNAPSHOT-{date}-auto.md（無需 Claude 參與）"
       - "記錄 resume_state（轉入前的狀態）至 FSM-STATE.yaml"
       - "下一次 PreToolUse 僅允許 Skill(stage-compaction)、Read(docs/, build/)、Write(snapshot)"
-    exit_on: "stage-compaction Skill 完成"
+    exit_on: "stage-compaction Skill 完成，或 hook 於下一次工具呼叫觀測到本 session 逐字稿 API usage 已回落 < 85% window（Claude Code 自動 compaction 亦視為完成；DEF-200-275 第四輪）"
     on_exit:
-      - "歸零 CONTEXT-LEDGER 當日 cumulative_tokens（保留 entries 歷史）"
+      - "歸零 CONTEXT-LEDGER 當日 cumulative_tokens（保留 entries 歷史）（估算稽核值；判定不靠此歸零）"
       - "FSM 轉回 resume_state"
 
   TOKEN_BUDGET_CRITICAL:
     type: emergency
-    description: "Token 預算嚴重不足（> 95%）— AUTO_COMPACT 失敗後的最後防線"
+    description: "Token 預算嚴重不足（> 95%）— hook 自第四輪起不再自動進入本狀態（改為 session 級拒絕非 compact 工具＋Snapshot）；保留供人工／結構性升級"
     on_enter:
       - "立即暫停所有工作"
       - "產出 Context Snapshot（當前狀態、下一步、未完成項目）"
@@ -431,11 +431,11 @@ states:
 | SPEC_AUDIT | 無矛盾 | PR_REVIEW（retry_count 重置） |
 | RTM_VERIFY | FAIL，retry_count < 2 | IMPLEMENTATION（retry_count++，補實作） |
 | RTM_VERIFY | FAIL，retry_count ≥ 2 | ESCALATION |
-| 任意狀態（非 AUTO_COMPACT_PENDING） | Token Budget ≥ 90% 且 < 95% | AUTO_COMPACT_PENDING（記錄 resume_state） |
-| AUTO_COMPACT_PENDING | stage-compaction 完成 | resume_state（歸零 ledger cumulative） |
+| 任意狀態（非 AUTO_COMPACT_PENDING） | Token Budget ≥ 90% 且 < 95%（分子＝逐字稿實測 usage、分母已確認；見表後註腳） | AUTO_COMPACT_PENDING（記錄 resume_state） |
+| AUTO_COMPACT_PENDING | stage-compaction 完成，或 hook 觀測到 usage 回落 < 85% | resume_state（估算 ledger cumulative 歸零，判定不靠此） |
 | AUTO_COMPACT_PENDING | 單一 stage count_per_stage > 3（ACT-026） | ESCALATION |
-| AUTO_COMPACT_PENDING | Token Budget ≥ 95% | TOKEN_BUDGET_CRITICAL → ESCALATION |
-| 任意狀態 | Token Budget ≥ 95% | TOKEN_BUDGET_CRITICAL → ESCALATION |
+| AUTO_COMPACT_PENDING | Token Budget ≥ 95% | AUTO_COMPACT_PENDING（拒絕非 compact 工具＋Context Snapshot；session 級，不寫 ESCALATION；分子＝逐字稿實測 usage 且分母已確認） |
+| 任意狀態 | Token Budget ≥ 95% | AUTO_COMPACT_PENDING（拒絕非 compact 工具＋Context Snapshot；session 級，不寫 ESCALATION；分子＝逐字稿實測 usage 且分母已確認） |
 | 任意非 terminal 狀態 | runtime monitor 偵測 .tla safety invariant 破壞（ACT-064） | MONITOR_VIOLATION → ESCALATION |
 | ESCALATION | 人工決定中止 | TERMINATED |
 | ESCALATION | 人工修復後恢復（有可恢復狀態） | RESUME_VERIFICATION |
@@ -465,6 +465,8 @@ states:
 | DRIFT_OBSERVATION | continue → resume SPEC_FROZEN | SPEC_FROZEN |
 | DRIFT_OBSERVATION | switch_to_audit（連續 3 commits ≥ 0.3，Rule 9.17.3） | SPEC_AUDIT |
 
+> Token Budget 比率＝本 session 逐字稿 API usage（input+cache_creation+cache_read）／`context_window.resolve_window()` 分母；分母未確認（保守下界）時只示警；估算帳本（conversation_ledger）不驅動任何列（DEF-200-275 第四輪）。
+
 ---
 
 ## 🗺️ 狀態圖
@@ -472,10 +474,10 @@ states:
 ```
                    ┌──────────────────────────────────────────────────────┐
                    │              TOKEN BUDGET GOVERNOR                   │
-                   │ 70% warn → 85% compress → 90% AUTO → 95% HARD-STOP   │
+                   │ 70% warn → 85% compress → 90% AUTO → 95% SESS-DENY   │
                    └────────────────────┬─────────────────────────────────┘
                                         │ 90% → AUTO_COMPACT_PENDING → (compact ok) resume_state
-                                        │ 95% → TOKEN_BUDGET_CRITICAL → ESCALATION
+                                        │ 95% → deny 非 compact 工具 + Snapshot（session 級，不寫 ESCALATION）
                                         │
 INIT → SCENARIO_DETECT → AGENT_LOAD → SPEC_DRAFTING ◄────────────────┐
                                           │                            │
@@ -529,7 +531,7 @@ INIT → SCENARIO_DETECT → AGENT_LOAD → SPEC_DRAFTING ◄──────�
 - Schema 詳見 [FSM-STATE-TEMPLATE.yaml](../../tools/fsm_runtime/templates/FSM-STATE-TEMPLATE.yaml)
 
 ### 2. Ledger 精準度（ACT-024）
-`tools/fsm_runtime/conversation_ledger.py` 為唯一 token 估算入口：
+`tools/fsm_runtime/conversation_ledger.py` 為唯一 token 估算入口（估算值僅稽核／校準；gating 分子＝`context_window.scan_transcript()` 讀本 session 逐字稿 API usage，DEF-200-275 第四輪）：
 
 | 工具 | 估算公式 |
 |------|---------|

@@ -1,15 +1,16 @@
-"""PostToolUse Hook — record tool result size, detect post-call spikes (ACT-012).
+"""PostToolUse Hook — record tool result size, detect post-call spikes (ACT-012; DEF-200-275 第四輪重寫).
 
-Reads Claude Code hook JSON from stdin. Appends a 'post' entry to the daily
-context ledger with result-size token estimate. Emits an additionalContext
-warning when cumulative ratio crosses 70% (soft), 85% (hard), 95% (critical).
+Reads Claude Code hook JSON from stdin. Appends a 'post' audit entry to the daily
+context ledger（估算值，零決策權）並在**同一把鎖**內做 conv-overhead 合併；判級以本 session 逐字稿
+API usage 的真實 ratio（`context_window.measure`）：70%（soft）／85%（warn）／90%（AUTO_COMPACT
+→ trigger_auto_compact）／95%（CRIT，只出聲——deny 是 PreToolUse 的事）。量不到 ⇒ 不出聲（C3）。
+AUTO_COMPACT_PENDING 且真實 used 回落 <85% ⇒ 自動 complete_auto_compact（D4／C5）。
 
 Matcher note (A6-02, by-design — do NOT add `Task` here): the PostToolUse matcher
 is `Write|Edit|Read|Bash|NotebookEdit` WITHOUT `Task`, deliberately asymmetric
 with PreToolUse (which adds `Task` purely for the ACT-020 subagent-contract
 injection hint, not for accounting). A subagent runs in its own context window,
-so its result tokens must NOT be charged to the main session's MAX_CONTEXT —
-adding `Task` here would inflate cumulative and trip the 95% deny prematurely.
+so its result tokens must NOT be charged to the main session's ledger.
 """
 from __future__ import annotations
 
@@ -23,154 +24,19 @@ _SDD_ROOT = Path(__file__).resolve().parents[2]
 if str(_SDD_ROOT) not in sys.path:
     sys.path.insert(0, str(_SDD_ROOT))
 
-# DEF-CLDREV-002 + DEF-CLDREV-012: symmetric with context_ledger_pre.py —
-# guard against operator misconfiguration (env=0 / negative / non-numeric).
-# A zero budget would crash the :140 ratio calculation (cumulative / MAX_CONTEXT)
-# with ZeroDivisionError; a non-numeric value would raise ValueError at import
-# time and disable the gate. Both degrade gracefully to the 200000 default.
-try:
-    _RAW_MAX_CONTEXT = int(os.environ.get("SDD_MAX_CONTEXT", "200000"))
-    _RAW_MAX_CONTEXT_PARSE_OK = True
-except (TypeError, ValueError):
-    _RAW_MAX_CONTEXT = 200000
-    _RAW_MAX_CONTEXT_PARSE_OK = False
-MAX_CONTEXT = _RAW_MAX_CONTEXT if _RAW_MAX_CONTEXT > 0 else 200000
-
-# DEF-200-275（2026-09-10）：symmetric with context_ledger_pre.py — MAX_CONTEXT
-# 沒被操作者顯式釘住時，200000 只是舊模型（Claude 3 世代）200K context
-# window 年代留下的保守預設值，現行模型視窗常是 1,000,000。硬套過時預設會
-# 讓 cumulative 一過 200000 就被誤判成「100% 滿」（實測 cumulative=200994,
-# ratio=1.00，/context 當場量到真實只有 38%）。比照姊妹守衛
-# .claude/hooks/context_budget_guard.py 的 resolve_window()（可證下界推論）：
-# 觀測到 cumulative 超過保守預設 ⇒ 真實視窗必然大於它，改採下一檔已知變體；
-# 操作者顯式設定 SDD_MAX_CONTEXT 時一律尊重、不做推論覆寫。
-#
-# DEF-200-275 第三輪（四方複審 QA/SA 各自獨立發現、SA 判定 REJECT 後訂正，
-# 2026-09-10；symmetric with context_ledger_pre.py）：原判準只問「環境變數有
-# 沒有被設」，操作者打錯字（SDD_MAX_CONTEXT=abc/1.5/12k/空字串/0/-5）也會讓
-# 這裡讀到 True，導致 190000（真實 1,000,000 視窗下僅 19% 用量）被當成已確認
-# 分母去觸發 AUTO_COMPACT/CRIT——與 DEF-200-275 原始 bug 同一種「未經確認的
-# 分母被拿去硬擋」路徑重演。比照姊妹守衛 .claude/hooks/context_budget_guard.py
-# 的 `_positive_int(raw) > 0`：一個值要算「已指定」，必須解析成功**且**是正
-# 整數。這裡不重新猜一次，直接掛鉤上面 try/except 已經算出的解析結果
-# （_RAW_MAX_CONTEXT_PARSE_OK 且 _RAW_MAX_CONTEXT > 0）。
-_SDD_MAX_CONTEXT_PINNED = (
-    os.environ.get("SDD_MAX_CONTEXT") is not None
-    and _RAW_MAX_CONTEXT_PARSE_OK
-    and _RAW_MAX_CONTEXT > 0
+# DEF-200-275 第四輪：symmetric with context_ledger_pre.py — 門檻／量測／分母鏈只住 context_window.py。
+from tools.fsm_runtime.context_window import (  # noqa: E402
+    Measurement,
+    auto_compact_exit_due,
+    may_block,
+    measure,
+    ratio_tier,
+    resolve_window,
+    unconfirmed_notice,
+    window_evidence,
 )
-_CONSERVATIVE_DEFAULT_MAX_CONTEXT = 200_000
-WIDE_MAX_CONTEXT = 1_000_000
 
-
-def _effective_max_context(cumulative: int) -> int:
-    """DEF-200-275：見上方常數區塊註解——可證下界推論，避免拿舊模型 200K
-    常數誤判現行大視窗模型已 100% 滿。"""
-    if (
-        not _SDD_MAX_CONTEXT_PINNED
-        and MAX_CONTEXT == _CONSERVATIVE_DEFAULT_MAX_CONTEXT
-        and cumulative > _CONSERVATIVE_DEFAULT_MAX_CONTEXT
-    ):
-        return WIDE_MAX_CONTEXT
-    return MAX_CONTEXT
-
-
-# DEF-200-275 第二輪（四方複審 REJECT 後訂正，2026-09-10）：symmetric with
-# context_ledger_pre.py — 第一版只切了分母，沒有切「這個分母能不能拿去硬擋」。
-# CRIT_RATIO=0.95、0.95×200000=190000，比切換點 200001 早一萬；cumulative 單調
-# 爬升，任何 session 必然先經過 190000~200000 才可能到 200001，於是在切換生效
-# 之前就已經在 190000 被鎖進 AUTO_COMPACT/ESCALATION（真實 1,000,000 視窗下僅
-# 19% 用量）。比照姊妹守衛 .claude/hooks/context_budget_guard.py 的
-# may_block(source) 語意：只有分母來源已確認（顯式設定 SDD_MAX_CONTEXT，或已
-# 觀測到 cumulative 超過保守預設而推得下界為 WIDE）才准觸發 AUTO_COMPACT/CRIT；
-# 未確認（＝SOURCE_INFERRED_FLOOR 等價物）時只降級為 stderr/additionalContext
-# 警告，FSM 狀態不變。
-def _max_context_confirmed(cumulative: int) -> bool:
-    """分母來源是否已確認到可以拿來觸發 AUTO_COMPACT／CRIT（見上方 WHY）。"""
-    if _SDD_MAX_CONTEXT_PINNED:
-        return True
-    return _effective_max_context(cumulative) != _CONSERVATIVE_DEFAULT_MAX_CONTEXT
-
-
-def _unconfirmed_notice(cumulative: int, ratio: float, tier: str) -> str:
-    """AUTO_COMPACT／CRIT 門檻在分母尚未確認時的降級提示（symmetric with
-    context_ledger_pre.py 同名函式）。只出聲，不觸發 FSM 狀態變更。"""
-    return (
-        f"[SDD-CTX][WARN][UNCONFIRMED-DENOM] {tier} 門檻在保守預設分母"
-        f"（{_CONSERVATIVE_DEFAULT_MAX_CONTEXT:,}）下已達 ratio={ratio:.2f}"
-        f"（cumulative={cumulative}），但此分母尚未確認——未顯式設定 SDD_MAX_CONTEXT，"
-        f"且本 session 尚未觀測到用量超過 {_CONSERVATIVE_DEFAULT_MAX_CONTEXT:,}。"
-        f"現行模型視窗常是 {WIDE_MAX_CONTEXT:,}，若貿然觸發 AUTO_COMPACT／CRIT 可能在"
-        "真實用量僅一到兩成時就誤鎖整個 session（DEF-200-275）。本次僅示警，FSM 狀態"
-        "不變。若這是操作者刻意選擇的小視窗，請顯式設定 SDD_MAX_CONTEXT 以啟用正常防護。"
-    )
-
-
-SOFT_RATIO = 0.70
-WARN_RATIO = 0.85
-AUTO_COMPACT_RATIO = 0.90
-CRIT_RATIO = 0.95
 LEDGER_DIR = _SDD_ROOT / "build" / "reports" / "fsm"
-
-
-def _ledger_path() -> Path:
-    LEDGER_DIR.mkdir(parents=True, exist_ok=True)
-    return LEDGER_DIR / f"CONTEXT-LEDGER-{_dt.date.today().isoformat()}.yaml"
-
-
-def _append(entry: dict) -> int:
-    try:
-        import yaml  # type: ignore
-    except Exception:  # noqa: BLE001
-        return 0
-    path = _ledger_path()
-    # M2 QA Round-2 P1-1: same advisory lock as pre-hook so concurrent writers
-    # don't clobber each other's cumulative_tokens update.
-    try:
-        from tools.fsm_runtime.file_lock import file_lock  # type: ignore
-    except Exception:  # noqa: BLE001
-        file_lock = None  # type: ignore
-    lock_path = path.with_suffix(path.suffix + ".lock")
-
-    def _read_modify_write() -> int:
-        existing = {}
-        if path.exists():
-            with path.open("r", encoding="utf-8") as f:
-                existing = yaml.safe_load(f) or {}
-        entries = existing.get("entries") or []
-        entries.append(entry)
-        cumulative = int(existing.get("cumulative_tokens", 0)) + int(entry.get("tokens", 0))
-        doc = {
-            "date": _dt.date.today().isoformat(),
-            "cumulative_tokens": cumulative,
-            "entries": entries,
-        }
-        tmp = path.with_suffix(path.suffix + ".tmp")
-        with tmp.open("w", encoding="utf-8") as f:
-            yaml.safe_dump(doc, f, allow_unicode=True, sort_keys=False)
-        os.replace(tmp, path)
-        return cumulative
-
-    if file_lock is None:
-        return _read_modify_write()
-    try:
-        with file_lock(lock_path, timeout=5.0):
-            return _read_modify_write()
-    except TimeoutError:
-        fallback = path.with_suffix(path.suffix + ".append")
-        try:
-            with fallback.open("a", encoding="utf-8") as f:
-                yaml.safe_dump([entry], f, allow_unicode=True, sort_keys=False)
-        except Exception:  # noqa: BLE001
-            pass
-        try:
-            if path.exists():
-                with path.open("r", encoding="utf-8") as f:
-                    doc = yaml.safe_load(f) or {}
-                return int(doc.get("cumulative_tokens", 0)) + int(entry.get("tokens", 0))
-        except Exception:  # noqa: BLE001
-            pass
-        return int(entry.get("tokens", 0))
 
 
 def _estimate_result_tokens(tool_response) -> int:
@@ -190,10 +56,70 @@ def _emit(payload: dict) -> None:
     sys.stdout.flush()
 
 
+def _emit_msgs(msgs: list[str]) -> int:
+    out = {"hookSpecificOutput": {"hookEventName": "PostToolUse"}}
+    if msgs:
+        out["hookSpecificOutput"]["additionalContext"] = "\n".join(msgs)
+    _emit(out)
+    return 0
+
+
+def _session_id(inp: dict, transcript: object) -> str:
+    sid = inp.get("session_id")
+    if isinstance(sid, str) and sid.strip():
+        return sid.strip()
+    if isinstance(transcript, str) and transcript.strip():
+        return Path(transcript).stem
+    return "unknown"
+
+
+def _measure(transcript: object) -> Measurement | None:
+    try:
+        return measure(transcript)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _window_for(m: Measurement | None) -> tuple[int | None, str | None]:
+    if m is None or m.used is None:
+        return None, None
+    try:
+        return resolve_window(m.peak, **window_evidence(m.model))
+    except Exception:  # noqa: BLE001
+        return None, None
+
+
+def _label(m: Measurement, window: int, source: str) -> str:
+    return (
+        f"used={m.used:,} window={window:,} 來源={source} "
+        f"compact_boundaries={m.compact_boundaries}"
+    )
+
+
+def _record_audit_and_merge(entry: dict) -> None:
+    """append＋merge 在同一把 advisory lock 內（A-2）；逾時**直接**落 sidecar（F2：絕不再進
+    `append_ledger_entry`／`ledger_lock` 取第二次鎖——5s+5s=10s 會撞 router 8s child timeout）；
+    任何例外永不到 main()（D5）。"""
+    try:
+        from tools.fsm_runtime.conversation_ledger import (  # type: ignore
+            append_ledger_entry,
+            ledger_lock,
+            merge_conversation_overhead_into_ledger,
+            write_sidecar,
+        )
+        try:
+            with ledger_lock(LEDGER_DIR):
+                append_ledger_entry(LEDGER_DIR, entry, lock_held=True)
+                merge_conversation_overhead_into_ledger(LEDGER_DIR, lock_held=True)
+        except TimeoutError:
+            write_sidecar(LEDGER_DIR, entry)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def main() -> int:
     if os.environ.get("SDD_HOOKS_DISABLE") == "1":
-        _emit({"hookSpecificOutput": {"hookEventName": "PostToolUse"}})
-        return 0
+        return _emit_msgs([])
 
     # zh-TW Windows pipe 預設 cp950：裸 sys.stdin.read() 遇含中文的 UTF-8 payload 會拋
     # UnicodeDecodeError → hook fail-open。改讀 bytes 端以 UTF-8+replace 解碼；
@@ -214,101 +140,129 @@ def main() -> int:
     if not isinstance(inp, dict):
         inp = {}
     tool = inp.get("tool_name", "")
+    if not isinstance(tool, str):
+        tool = ""
     tool_input = inp.get("tool_input", {})
     if not isinstance(tool_input, dict):
         tool_input = {}
     tool_response = inp.get("tool_response")
     target = tool_input.get("file_path") or tool_input.get("path")
 
-    tokens = _estimate_result_tokens(tool_response)
-    cumulative = _append({
+    transcript = inp.get("transcript_path")
+    m = _measure(transcript)
+    sid = _session_id(inp, transcript)
+    window, source = _window_for(m)
+
+    _record_audit_and_merge({
         "ts": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
         "phase": "post",
         "tool": tool,
         "target": target,
-        "tokens": tokens,
+        "tokens": _estimate_result_tokens(tool_response),
+        "session_id": sid,
+        "observed_used": None if m is None else m.used,
+        "window": window,
+        "window_source": source,
     })
 
-    # ACT-024: merge conversation overhead every N tool calls so the ledger
-    # reflects message-level cost, not just file I/O. Silent on failure.
+    # C3：量不到 ⇒ 不出聲、不判級。
+    if m is None or m.used is None or not window or not source:
+        return _emit_msgs([])
+
+    msgs: list[str] = []
+    rt = None
+    rt_error: Exception | None = None
     try:
-        from tools.fsm_runtime.conversation_ledger import (  # type: ignore
-            merge_conversation_overhead_into_ledger,
-        )
-        merge_result = merge_conversation_overhead_into_ledger(LEDGER_DIR)
-        if merge_result.get("merged"):
-            cumulative = int(merge_result.get("cumulative", cumulative))
-    except Exception:  # noqa: BLE001
-        pass
+        from tools.fsm_runtime.fsm_runtime import FSMRuntime  # type: ignore
+        rt = FSMRuntime.bootstrap()
+    except Exception as exc:  # noqa: BLE001
+        rt_error = exc
 
-    ratio = cumulative / _effective_max_context(cumulative) if cumulative else 0.0
-    confirmed = _max_context_confirmed(cumulative) if cumulative else True
+    label = _label(m, window, source)
+    # D4／C5：PENDING 而真實 used 已回落 ⇒ compaction 完成。
+    if rt is not None and rt.state.current == "AUTO_COMPACT_PENDING" \
+            and auto_compact_exit_due(m.used, window):
+        try:
+            done = rt.complete_auto_compact(observed_effective=True, released_by=sid)
+            msgs.append(
+                f"[SDD-CTX][AUTO-COMPACT][DONE] {label} resume→{done.get('resumed_to')} "
+                f"released_by_session={done.get('released_by_session')} "
+                f"triggered_by_session={done.get('triggered_by_session')}"
+            )
+        except Exception as exc:  # noqa: BLE001
+            msgs.append(f"[SDD-CTX][AUTO-COMPACT][DONE][WARN] complete_auto_compact failed: {exc!r}")
 
-    msg = None
-    # 90% auto-compact trigger — fires before 95% CRIT to produce a recovery
-    # point and force Claude into /stage-compaction.
-    if CRIT_RATIO > ratio >= AUTO_COMPACT_RATIO:
+    ratio = m.used / window
+    confirmed = may_block(source)
+    tier = ratio_tier(m.used, window)
+
+    if tier == "crit":
         if not confirmed:
-            # DEF-200-275 第二輪：分母尚未確認（未顯式設定 SDD_MAX_CONTEXT 且尚未
-            # 觀測到用量超過保守預設）——只示警，不呼叫 trigger_auto_compact（那會
-            # 真的把 FSM 切進 AUTO_COMPACT_PENDING，在真實 1M 視窗下對應僅一到兩成
-            # 用量的誤觸發）。
-            msg = _unconfirmed_notice(cumulative, ratio, "AUTO_COMPACT")
+            msgs.append(unconfirmed_notice(m.used, ratio, "CRIT", source))
+        else:
+            msgs.append(
+                f"[SDD-CTX][CRIT] context ratio {ratio:.0%}（{label}）. "
+                "下次 PreToolUse 將拒絕非 compact 工具 — 立即 /compact 或 Skill: stage-compaction。"
+            )
+    elif tier == "auto_compact":
+        if not confirmed:
+            msgs.append(unconfirmed_notice(m.used, ratio, "AUTO_COMPACT", source))
+        elif rt is None:
+            msgs.append(
+                f"[SDD-CTX][AUTO-COMPACT][WARN] ratio {ratio:.0%}（{label}），但 FSMRuntime 不可用："
+                f"{rt_error!r}。請立即手動呼叫 /stage-compaction。"
+            )
+        elif rt.state.current == "AUTO_COMPACT_PENDING":
+            msgs.append(
+                f"[SDD-CTX][AUTO-COMPACT] ratio {ratio:.0%}（{label}）— 已處於 AUTO_COMPACT_PENDING，"
+                "請立即呼叫 Skill: stage-compaction 完成壓縮。"
+            )
         else:
             try:
-                from tools.fsm_runtime.fsm_runtime import FSMRuntime  # type: ignore
-                rt = FSMRuntime.bootstrap()
-                result = rt.trigger_auto_compact(cumulative, ratio)
-                snapshot_path = result.get("snapshot")
-                resume_state = result.get("resume_state", "<unknown>")
-                if result.get("escalated"):
-                    # ACT-026: auto_compact 被拒（per-stage 上限超過 / 已在 ESCALATION）
+                result = rt.trigger_auto_compact(m.used, ratio, details={
+                    "session_id": sid, "category": "context-budget", "used": m.used,
+                    "window": window, "window_source": source,
+                    "compact_boundaries": m.compact_boundaries,
+                })
+                if result.get("noop"):
+                    # ARCH-06／SD-06：FSM 在 RELEASE 等不可 compact 狀態 ⇒ trigger 是 no-op，
+                    # 不得再說「已進 PENDING／回落即恢復」。
+                    msgs.append(
+                        f"[SDD-CTX][AUTO-COMPACT][NOOP] ratio {ratio:.0%}（{label}）— "
+                        f"{result.get('reason', 'auto_compact suppressed')}；FSM 未進 PENDING，請手動 /compact。"
+                    )
+                elif result.get("escalated"):
+                    # ACT-026: auto_compact 被拒（per-stage 上限超過）
                     reason = result.get("reason", "auto-compact suppressed")
-                    msg = (
-                        f"[SDD-CTX][AUTO-COMPACT][ESCALATION] ratio {ratio:.0%} — {reason}。"
+                    msgs.append(
+                        f"[SDD-CTX][AUTO-COMPACT][ESCALATION] ratio {ratio:.0%}（{label}）— {reason}。"
                         " FSM 已進入 ESCALATION，後續工具呼叫將被 PreToolUse 阻擋，"
                         "必須人工介入（檢查是否引用文件過大 / stage 需拆分）。"
                     )
                 elif result.get("already_pending"):
-                    msg = (
+                    msgs.append(
                         f"[SDD-CTX][AUTO-COMPACT] ratio {ratio:.0%} — 已處於 AUTO_COMPACT_PENDING，"
                         "請立即呼叫 Skill: stage-compaction 完成壓縮。"
                     )
                 else:
-                    msg = (
-                        f"[SDD-CTX][AUTO-COMPACT] ratio {ratio:.0%} (cumulative={cumulative}). "
-                        f"FSM → AUTO_COMPACT_PENDING（resume_state={resume_state}）。"
-                        f" Snapshot: {snapshot_path}. "
+                    msgs.append(
+                        f"[SDD-CTX][AUTO-COMPACT] ratio {ratio:.0%}（{label}）. "
+                        f"FSM → AUTO_COMPACT_PENDING（resume_state={result.get('resume_state', '<unknown>')}）。"
+                        f" Snapshot: {result.get('snapshot')}. "
                         "🔴 下一步必須立即呼叫 Skill: stage-compaction —"
-                        " 其餘工具呼叫將被 PreToolUse 阻擋，直到 compact 完成。"
+                        " 其餘工具呼叫將被 PreToolUse 阻擋，直到真實 usage 回落 <85%。"
                     )
             except Exception as exc:  # noqa: BLE001
-                msg = (
-                    f"[SDD-CTX][AUTO-COMPACT][WARN] ratio {ratio:.0%}，但 FSMRuntime 不可用：{exc!r}。"
+                msgs.append(
+                    f"[SDD-CTX][AUTO-COMPACT][WARN] ratio {ratio:.0%}，但 trigger_auto_compact 失敗：{exc!r}。"
                     " 請立即手動呼叫 /stage-compaction。"
                 )
-    elif ratio >= CRIT_RATIO:
-        if not confirmed:
-            msg = _unconfirmed_notice(cumulative, ratio, "CRIT")
-        else:
-            msg = (
-                f"[SDD-CTX][CRIT] context ratio {ratio:.0%} (cumulative={cumulative}). "
-                "下次 PreToolUse 將拒絕工具呼叫 — 立即執行 /stage-compaction 並考慮 Context Snapshot。"
-            )
-    elif ratio >= WARN_RATIO:
-        msg = (
-            f"[SDD-CTX][WARN] context ratio {ratio:.0%}. 應執行 /stage-compaction。"
-        )
-    elif ratio >= SOFT_RATIO:
-        msg = (
-            f"[SDD-CTX] context ratio {ratio:.0%}. 開始壓縮輔助文件（改用 ID 清單）。"
-        )
+    elif tier == "warn":
+        msgs.append(f"[SDD-CTX][WARN] context ratio {ratio:.0%}（{label}）. 應執行 /stage-compaction。")
+    elif tier == "soft":
+        msgs.append(f"[SDD-CTX] context ratio {ratio:.0%}（{label}）. 開始壓縮輔助文件（改用 ID 清單）。")
 
-    out = {"hookSpecificOutput": {"hookEventName": "PostToolUse"}}
-    if msg:
-        out["hookSpecificOutput"]["additionalContext"] = msg
-    _emit(out)
-    return 0
+    return _emit_msgs(msgs)
 
 
 if __name__ == "__main__":

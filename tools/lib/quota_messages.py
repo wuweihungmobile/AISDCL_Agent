@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -106,6 +106,40 @@ def halt_resets_at(decision: quota_policy.Decision) -> object:
     stamps = [r.axis.resets_at for r in decision.per_axis
               if r.band == quota_policy.BAND_HALT and _aware(r.axis.resets_at) is not None]
     return min(stamps, key=_aware) if stamps else binding_resets_at(decision)
+
+
+#: DEF-200-278／INV-H2：必須與 `tools/session_resume_planner.py::RESET_SKEW_SECONDS`
+#: 同值——兩檔不能互相 import（單向規則，見本檔與 `quota_gate.py` 檔頭），故各自具名
+#: ＋parity 測試守同值（先例：`test_find_git_bash_parity.py` 對 `_extract_py_candidates`）。
+HALT_RESET_SKEW_SECONDS = 120
+
+
+def halt_verdict(halt_marker: dict | None, idle_seconds: float | None,
+                 now: datetime) -> dict | None:
+    """halt 標記 → 既有 `arm_reset`／`probe`／`escalate` 判決（純函式，同本檔通篇紀律）。
+
+    `None`＝標記不適用，呼叫端（`sentinel_decide`）落回既有的 idle-based 判定。
+    「最新活動晚於標記」代表 session 已自行續跑過，此時標記過期——不判定，否則
+    哨兵會永遠卡在 `probe`（那是本輪要修的無做工空轉的鏡像新形態）。
+    """
+    if not halt_marker:
+        return None
+    marker_at = _aware(halt_marker.get("at"))
+    if (marker_at is not None and idle_seconds is not None
+            and (now.timestamp() - idle_seconds) > marker_at.timestamp()):
+        return None
+    reset_at = _aware(halt_marker.get("reset_at"))
+    if reset_at is None:
+        return {"action": "escalate", "at": None,
+                "reason": f"halt 標記存在但解不出 reset 時刻 ⇒ 拒絕用猜的重排：{halt_marker!r}"}
+    fire_at = reset_at + timedelta(seconds=HALT_RESET_SKEW_SECONDS)
+    if fire_at > now:
+        return {"action": "arm_reset", "at": fire_at, "reset_at": reset_at,
+                "reset_source": "halt-marker",
+                "reason": f"偵測到自願 halt 標記；觀測 reset={reset_at} 尚未到 ⇒ "
+                          "要求排程器改在那個時刻醒（本次零 token）"}
+    return {"action": "probe", "at": None,
+            "reason": f"偵測到自願 halt 標記；觀測 reset={reset_at} 已過 ⇒ 花一次探測確認額度回來了沒"}  # noqa: E501
 
 
 # 憑證是真的、**指路是假的**——那個 cmdlet 在 mac 不存在，而 `NextRunTime` 這個概念 launchd

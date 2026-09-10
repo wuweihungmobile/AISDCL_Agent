@@ -1,13 +1,25 @@
 # enforces (governance rules): R-9.2, R-9.6
-"""Unit tests for QA patches on `.claude/hooks/context_ledger_pre.py`.
+"""Unit tests for `.claude/hooks/context_ledger_pre.py`（DEF-200-275 第四輪重塑）.
 
-Covers:
-- P1-04: SDD_HOOKS_DISABLE=1 must NOT silence Subagent Contract injection.
-- P1-05: Legacy Read fallback must include cat -n line overhead.
-- P2-08: tokens==0 early-return must still run ESCALATION / AUTO_COMPACT checks.
+被守的性質（Rule 9）：
+- C1／C4：gating 分子＝本 session 逐字稿 API usage；跨 session 的日帳本估算值零決策權。
+- C2：分母未確認（保守下界）只出聲永不硬擋；查表阻止對 200K 模型猜大。
+- C3：量不到（無 transcript／檔不存在／全 synthetic）⇒ 零 gating。
+- C5／D4：AUTO_COMPACT_PENDING 於真實 used 回落 <85% 自動出口（含 resume_state=INIT remap）。
+- C6／D3：真實 950,000/1,000,000 仍擋非 compact 工具，但**不寫專案級 ESCALATION**。
+- C10：ESCALATION 的 deny reason 帶一行可執行恢復指令。
+- C12：每案顯式覆寫 SDD_HOOKS_DISABLE／SDD_HOOKS_DRY_RUN／SDD_MAX_CONTEXT／AUTOSDD_CONTEXT_WINDOW／
+  CLAUDE_CODE_AUTO_COMPACT_WINDOW，HOME／USERPROFILE／CLAUDE_PROJECT_DIR 指到 tmp——本機
+  `~/.claude/settings.json` 有 `model=claude-fable-5-1[1m]` 與 `AUTOSDD_CONTEXT_WINDOW=967000`，
+  正是第三輪留下 2 紅測試的根因。
+既有 P1-04（HOOKS_DISABLE 保留 subagent 注入）、P1-05（legacy Read fallback）、DEF-CLDREV-020/025/029
+輸入域防護測試原樣保留；第二～三輪的 MaxContextGuard／WideContextWindowInference／
+MaxContextConfirmed／NaturalClimb／ZeroTokenEscalation 各案的意圖 1:1 改寫為逐字稿夾具
+（對照表見證據檔〈第四輪〉）。
 """
 from __future__ import annotations
 
+import datetime as _dt
 import json
 import os
 import sys
@@ -19,12 +31,12 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
-# Re-import the hook module with the repo root on sys.path. The module does
-# its own path manipulation; we wrap it in a helper so each test gets a
-# fresh module-level state (LEDGER_DIR, MAX_CONTEXT).
+import yaml  # noqa: E402
+
 HOOK_MODULE_PATH = (
     Path(__file__).resolve().parents[3] / ".claude" / "hooks" / "context_ledger_pre.py"
 )
+_POLLUTING_ENVS = ("SDD_MAX_CONTEXT", "AUTOSDD_CONTEXT_WINDOW", "CLAUDE_CODE_AUTO_COMPACT_WINDOW")
 
 
 def _load_hook_module(tmp_root: Path):
@@ -40,13 +52,58 @@ def _load_hook_module(tmp_root: Path):
     return mod
 
 
+def _isolated_env(tmp: Path, extra: dict | None = None):
+    """C12：把會污染判定的環境變數與 settings 鏈全部隔離到 tmp。"""
+    env = dict(os.environ)
+    for key in _POLLUTING_ENVS:
+        env.pop(key, None)
+    home = tmp / "home"
+    proj = tmp / "proj"
+    home.mkdir(exist_ok=True)
+    proj.mkdir(exist_ok=True)
+    env.update({
+        "SDD_HOOKS_DISABLE": "",
+        "SDD_HOOKS_DRY_RUN": "",
+        "SDD_SUBAGENT_CONTRACT": "0",
+        "HOME": str(home),
+        "USERPROFILE": str(home),
+        "CLAUDE_PROJECT_DIR": str(proj),
+    })
+    if extra:
+        env.update(extra)
+    return patch.dict(os.environ, env, clear=True)
+
+
+def _write_transcript(
+    tmp: Path, used: int | None, *, model: str = "claude-fable-5-1", peak: int | None = None,
+    boundary_after: bool = False, synthetic_only: bool = False, name: str = "session-abc.jsonl",
+) -> str:
+    def rec(m: str, n: int) -> str:
+        return json.dumps({"type": "assistant", "message": {
+            "model": m, "usage": {"input_tokens": n, "cache_creation_input_tokens": 0,
+                                  "cache_read_input_tokens": 0, "output_tokens": 77}}})
+    lines = [json.dumps({"type": "user", "message": {"content": "hi"}})]
+    if synthetic_only:
+        lines += [rec("<synthetic>", 0), rec("<synthetic>", 0)]
+    else:
+        if peak is not None:
+            lines.append(rec(model, peak))
+        if used is not None:
+            lines.append(rec(model, used))
+    if boundary_after:
+        lines.append(json.dumps({"type": "system", "subtype": "compact_boundary"}))
+    p = tmp / name
+    p.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return str(p)
+
+
 class _MainRunner:
     """Capture stdout from mod.main() given a JSON stdin payload."""
 
     def __init__(self, mod):
         self.mod = mod
 
-    def run(self, payload: dict) -> dict:
+    def run(self, payload) -> dict:
         buf_out = StringIO()
 
         class _FakeStdin(StringIO):
@@ -61,6 +118,34 @@ class _MainRunner:
         if not raw:
             return {}
         return json.loads(raw)
+
+
+class _IsolatedFsmMixin:
+    """隔離 FSM state（tmp）、Snapshot 目錄（tmp）、ledger reset 的 REPO_ROOT（tmp）。"""
+
+    def _isolate_fsm(self, tmp: Path, current: str = "SPEC_DRAFTING"):
+        from tools.fsm_runtime.fsm_runtime import FSMRuntime
+        from tools.fsm_runtime.state_loader import load_state
+        import tools.fsm_runtime.fsm_runtime as fsm_rt_mod
+        import tools.fsm_runtime.snapshot as snap_mod
+        import tools.fsm_runtime.state_loader as sl_mod
+
+        state = load_state("pre-hook-proj", path=tmp / "FSM-STATE-pre.yaml")
+        state.current = current
+        self._rt = FSMRuntime(state)
+        self._patches = [
+            patch.object(fsm_rt_mod.FSMRuntime, "bootstrap",
+                         classmethod(lambda cls, project=None: self._rt)),
+            patch.object(snap_mod, "SNAPSHOT_DIR", tmp / "abort"),
+            patch.object(sl_mod, "REPO_ROOT", tmp / "repo"),
+        ]
+        for p in self._patches:
+            p.start()
+        return self._rt
+
+    def _release_fsm(self) -> None:
+        for p in getattr(self, "_patches", []):
+            p.stop()
 
 
 class HooksDisableSubagentContractTests(unittest.TestCase):
@@ -93,8 +178,6 @@ class HooksDisableSubagentContractTests(unittest.TestCase):
                       msg=f"expected subagent hint even with HOOKS_DISABLE=1, got: {ctx!r}")
 
     def test_hooks_disable_non_task_returns_plain_output(self) -> None:
-        """Sanity check: HOOKS_DISABLE for non-Task tool still returns empty
-        additionalContext (no false-positive injection)."""
         env = {"SDD_HOOKS_DISABLE": "1", "SDD_SUBAGENT_CONTRACT": "1"}
         payload = {"tool_name": "Read", "tool_input": {"file_path": "/tmp/x"}}
         with patch.dict(os.environ, env, clear=False):
@@ -103,8 +186,6 @@ class HooksDisableSubagentContractTests(unittest.TestCase):
         self.assertNotIn("additionalContext", hook_out)
 
     def test_hooks_disable_with_contract_off_skips_injection(self) -> None:
-        """If subagent contract is explicitly off, HOOKS_DISABLE path stays
-        quiet — the fix only preserves injection when the contract is ON."""
         env = {"SDD_HOOKS_DISABLE": "1", "SDD_SUBAGENT_CONTRACT": "0"}
         payload = {
             "tool_name": "Task",
@@ -130,11 +211,9 @@ class LegacyReadFallbackTests(unittest.TestCase):
 
     def test_fallback_read_includes_line_overhead(self) -> None:
         src = self.root / "sample.txt"
-        # Write 10 short lines so line-count overhead is material relative to size.
         src.write_text("\n".join(f"l{i}" for i in range(10)) + "\n", encoding="utf-8")
         size = src.stat().st_size
 
-        # Force the legacy fallback path by making estimate_tool_tokens raise.
         from tools.fsm_runtime import conversation_ledger as cl
 
         def _boom(*_a, **_k):
@@ -148,7 +227,6 @@ class LegacyReadFallbackTests(unittest.TestCase):
             legacy, size_only,
             msg=f"legacy fallback ignored line overhead: legacy={legacy} size_only={size_only}",
         )
-        # Upper bound — should not exceed (size + 10*8)/4 + 1
         self.assertLessEqual(legacy, (size + 10 * 8) // 4 + 1)
 
     def test_fallback_read_missing_file_returns_zero(self) -> None:
@@ -159,427 +237,436 @@ class LegacyReadFallbackTests(unittest.TestCase):
             self.assertEqual(self.mod._estimate_tokens("Read", {"file_path": None}), 0)
 
 
-class ZeroTokenEscalationTests(unittest.TestCase):
-    """P2-08: zero-delta tool calls must still trigger TOKEN_BUDGET_CRITICAL
-    / AUTO_COMPACT when cumulative ratio is already past threshold."""
+class RealUsageGatingTests(_IsolatedFsmMixin, unittest.TestCase):
+    """C1／C6／D3：分子＝逐字稿 API usage；≥95% 擋非 compact 工具但不寫專案級 ESCALATION。"""
 
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.root = Path(self._tmp.name)
+        self._isolate_fsm(self.root)
+        self._env = _isolated_env(self.root)
+        self._env.start()
         self.mod = _load_hook_module(self.root)
-        # Small MAX_CONTEXT so we can cross thresholds easily
-        self.mod.MAX_CONTEXT = 1000
         self.runner = _MainRunner(self.mod)
 
-        # Isolate FSM state from the repo's real FSM-STATE-*.yaml so the hook
-        # doesn't see a live ESCALATION / HUMAN_PENDING from another session.
-        from tools.fsm_runtime.fsm_runtime import FSMRuntime
-        from tools.fsm_runtime.state_loader import load_state
-        self._fsm_state_path = self.root / "FSM-STATE-zerotoken.yaml"
-        state = load_state("zerotoken-proj", path=self._fsm_state_path)
-        state.current = "SPEC_DRAFTING"  # benign state; Bash is allowed
-        self._isolated_rt = FSMRuntime(state)
-
-        # Patch FSMRuntime.bootstrap used by the hook to return our isolated rt.
-        import tools.fsm_runtime.fsm_runtime as fsm_rt_mod
-        self._boot_patch = patch.object(
-            fsm_rt_mod.FSMRuntime, "bootstrap",
-            classmethod(lambda cls, project=None: self._isolated_rt),
-        )
-        self._boot_patch.start()
-
     def tearDown(self) -> None:
-        self._boot_patch.stop()
+        self._env.stop()
+        self._release_fsm()
         self._tmp.cleanup()
 
-    def _seed_ledger(self, cumulative: int) -> None:
-        """Write a minimal daily ledger with `cumulative` already spent."""
-        import datetime as _dt
-        import yaml  # noqa: WPS433
+    def _run(self, used, tool="Write", target="src/app.py", **kw) -> dict:
+        transcript = _write_transcript(self.root, used, **kw)
+        payload = {"tool_name": tool, "tool_input": {"file_path": target, "content": "x"},
+                   "transcript_path": transcript, "session_id": "sess-42"}
+        if tool == "Bash":
+            payload["tool_input"] = {"command": ""}
+        return self.runner.run(payload).get("hookSpecificOutput", {})
 
-        path = self.root / f"CONTEXT-LEDGER-{_dt.date.today().isoformat()}.yaml"
-        doc = {
-            "date": _dt.date.today().isoformat(),
-            "cumulative_tokens": cumulative,
-            "entries": [{"tokens": cumulative, "phase": "pre", "tool": "Seed"}],
-        }
-        path.write_text(yaml.safe_dump(doc, allow_unicode=True), encoding="utf-8")
+    def test_isolation_fixture_hides_real_user_settings(self) -> None:
+        """C12 自證：隔離後 settings 鏈與環境變數都看不到本機真值。"""
+        from tools.fsm_runtime.context_window import window_evidence
+        ev = window_evidence("claude-fable-5-1")
+        self.assertIsNone(ev["autosdd_raw"])
+        self.assertIsNone(ev["sdd_raw"])
+        self.assertIsNone(ev["settings_window"])
+        self.assertIsNone(ev["model_hint"])
 
-    def test_zero_token_tool_still_denies_at_crit_ratio(self) -> None:
-        # Cumulative already 96% of 1000 = 960. A Bash with empty command
-        # estimates to 0 tokens → should hit TOKEN_BUDGET_CRITICAL branch.
-        self._seed_ledger(960)
-        payload = {"tool_name": "Bash", "tool_input": {"command": ""}}
-        with patch.dict(os.environ, {
-            "SDD_HOOKS_DISABLE": "",
-            "SDD_HOOKS_DRY_RUN": "",
-            "SDD_SUBAGENT_CONTRACT": "0",
-        }, clear=False):
-            out = self.runner.run(payload)
-        hook_out = out.get("hookSpecificOutput", {})
-        self.assertEqual(
-            hook_out.get("permissionDecision"), "deny",
-            msg=f"expected deny for tokens==0 at 96%, got: {hook_out}",
-        )
-        self.assertIn("TOKEN_BUDGET_CRITICAL", hook_out.get("permissionDecisionReason", ""))
+    def test_real_950000_of_1000000_denies_without_project_escalation(self) -> None:
+        out = self._run(950_000)
+        self.assertEqual(out.get("permissionDecision"), "deny", msg=out)
+        reason = out.get("permissionDecisionReason", "")
+        self.assertIn("[SDD-CTX][CRIT]", reason)
+        self.assertIn("來源=", reason)
+        self.assertIn("used=950,000", reason)
+        self.assertEqual(self._rt.state.current, "AUTO_COMPACT_PENDING")
+        self.assertEqual(len(self._rt.state.root.get("escalation_history") or []), 0,
+                         msg="95% 不得寫專案級 ESCALATION（根因 C）")
+        snap = self._rt.state.root["auto_compact_state"]["snapshot_path"]
+        self.assertTrue(Path(snap).exists(), msg=f"Snapshot 應落盤：{snap}")
+        self.assertEqual(self._rt.state.root["auto_compact_state"]["trigger_details"]["session_id"], "sess-42")
 
-    def test_zero_token_tool_triggers_auto_compact_at_90pct(self) -> None:
-        """90-94% range with tokens==0 must trigger AUTO_COMPACT_PENDING
-        via the new early-return branch (not silent pass-through)."""
-        self._seed_ledger(920)  # 92%
-        payload = {"tool_name": "Bash", "tool_input": {"command": ""}}
-        with patch.dict(os.environ, {
-            "SDD_HOOKS_DISABLE": "",
-            "SDD_HOOKS_DRY_RUN": "",
-            "SDD_SUBAGENT_CONTRACT": "0",
-        }, clear=False):
-            out = self.runner.run(payload)
-        hook_out = out.get("hookSpecificOutput", {})
-        ctx = hook_out.get("additionalContext", "")
-        self.assertIn("AUTO-COMPACT", ctx,
-                      msg=f"expected AUTO-COMPACT notice at 92% with tokens==0, got: {hook_out}")
+    def test_real_950000_allows_compact_whitelist_tool(self) -> None:
+        out = self._run(950_000, tool="Read", target="docs/x.md")
+        self.assertNotIn("permissionDecision", out)
+        self.assertIn("[SDD-CTX][CRIT]", out.get("additionalContext", ""))
+        self.assertEqual(self._rt.state.current, "AUTO_COMPACT_PENDING")
 
-    def test_zero_token_tool_under_warn_passes_through(self) -> None:
-        """Sanity: tokens==0 below WARN_RATIO must NOT raise a warning."""
-        self._seed_ledger(300)  # 30%
-        payload = {"tool_name": "Bash", "tool_input": {"command": ""}}
-        with patch.dict(os.environ, {
-            "SDD_HOOKS_DISABLE": "",
-            "SDD_HOOKS_DRY_RUN": "",
-            "SDD_SUBAGENT_CONTRACT": "0",
-        }, clear=False):
-            out = self.runner.run(payload)
-        hook_out = out.get("hookSpecificOutput", {})
-        self.assertNotIn("permissionDecision", hook_out)
-        self.assertNotIn("AUTO-COMPACT", hook_out.get("additionalContext", ""))
+    def test_real_900000_triggers_auto_compact_pending(self) -> None:
+        out = self._run(900_000)
+        self.assertNotIn("permissionDecision", out)
+        self.assertIn("[SDD-CTX][AUTO-COMPACT]", out.get("additionalContext", ""))
+        self.assertEqual(self._rt.state.current, "AUTO_COMPACT_PENDING")
+        details = self._rt.state.root["auto_compact_state"]["trigger_details"]
+        self.assertEqual(details["session_id"], "sess-42")
+        self.assertEqual(details["window"], 1_000_000)
+
+    def _cap_out(self) -> None:
+        # QA-02：直接把 per-stage 計數設到上限（用 complete_auto_compact(observed_effective) 逼會被歸零）。
+        self._rt.state.root["auto_compact_state"] = {"stage_key": "initial", "count_per_stage": 3,
+                                                     "max_per_stage": 3}
+
+    def test_per_stage_cap_exceeded_at_950000_denies_with_project_escalation(self) -> None:
+        """QA-02：hook 層唯一仍會寫專案級 ESCALATION 的路徑（pre L373 `[CRIT][ESCALATION]`）。
+        結構性升級（R-9.2 failure_mode）既有語意不變：deny＋恢復指令＋escalation_history 帶 session_id。"""
+        self._cap_out()
+        out = self._run(950_000)
+        self.assertEqual(out.get("permissionDecision"), "deny", msg=out)
+        reason = out.get("permissionDecisionReason", "")
+        self.assertIn("[SDD-CTX][CRIT][ESCALATION]", reason)
+        self.assertIn("resume-from-escalation --to", reason)
+        self.assertEqual(self._rt.state.current, "ESCALATION")
+        history = self._rt.state.root["escalation_history"]
+        self.assertEqual(len(history), 1)
+        self.assertEqual(history[-1]["session_id"], "sess-42")
+
+    def test_per_stage_cap_exceeded_at_900000_denies_with_project_escalation(self) -> None:
+        """QA-02：pre L407 `[AUTO-COMPACT][ESCALATION]` 分支。"""
+        self._cap_out()
+        out = self._run(900_000)
+        self.assertEqual(out.get("permissionDecision"), "deny", msg=out)
+        reason = out.get("permissionDecisionReason", "")
+        self.assertIn("[SDD-CTX][AUTO-COMPACT][ESCALATION]", reason)
+        self.assertIn("resume-from-escalation --to", reason)
+        self.assertEqual(len(self._rt.state.root["escalation_history"]), 1)
+
+    def test_release_state_noop_does_not_claim_pending(self) -> None:
+        """ARCH-06／SD-06：RELEASE 下 90% 的 trigger 是 no-op ⇒ [NOOP]，不得說 FSM → AUTO_COMPACT_PENDING；
+        95% 的 deny 句依狀態分句（不講「回落即恢復 resume_state」）。"""
+        self._rt.state.current = "RELEASE"
+        out = self._run(900_000)
+        self.assertNotIn("permissionDecision", out)
+        self.assertIn("[SDD-CTX][AUTO-COMPACT][NOOP]", out.get("additionalContext", ""), msg=out)
+        self.assertNotIn("FSM → AUTO_COMPACT_PENDING", out.get("additionalContext", ""))
+        out = self._run(950_000)
+        self.assertEqual(out.get("permissionDecision"), "deny", msg=out)
+        self.assertIn("FSM=RELEASE 不進 PENDING", out.get("permissionDecisionReason", ""))
+        self.assertEqual(self._rt.state.current, "RELEASE")
+
+    def test_real_860000_only_warns(self) -> None:
+        out = self._run(860_000)
+        self.assertNotIn("permissionDecision", out)
+        self.assertIn("[SDD-CTX][WARN]", out.get("additionalContext", ""))
+        self.assertEqual(self._rt.state.current, "SPEC_DRAFTING")
+
+    def test_real_430000_passes_silently(self) -> None:
+        """本 session 實測值（430,428 / 1,000,000 ≈ 43%）：放行、不出聲。"""
+        out = self._run(430_428)
+        self.assertNotIn("permissionDecision", out)
+        self.assertNotIn("additionalContext", out)
+
+    def test_known_haiku_window_blocks_at_192000(self) -> None:
+        """方向鎖：查表使 200K 模型在 peak 未過 200K 時就拿到正確分母（不得猜大成 1M）。"""
+        out = self._run(192_000, model="claude-haiku-4-5")
+        self.assertEqual(out.get("permissionDecision"), "deny", msg=out)
+        self.assertIn("model=claude-haiku-4-5", out.get("permissionDecisionReason", ""))
+
+    def test_new_session_ignores_inherited_day_ledger(self) -> None:
+        """C4／根因 B 重現：日帳本繼承 2,500,000 估算值，真實 used 只有 50,000 ⇒ 放行。"""
+        date = _dt.date.today().isoformat()
+        (self.root / f"CONTEXT-LEDGER-{date}.yaml").write_text(yaml.safe_dump({
+            "date": date, "cumulative_tokens": 2_500_000,
+            "entries": [{"tokens": 2_500_000, "phase": "post", "tool": "OtherSession"}],
+        }), encoding="utf-8")
+        out = self._run(50_000)
+        self.assertNotIn("permissionDecision", out, msg=out)
+        self.assertNotIn("additionalContext", out)
+        self.assertEqual(self._rt.state.current, "SPEC_DRAFTING")
+        doc = yaml.safe_load((self.root / f"CONTEXT-LEDGER-{date}.yaml").read_text(encoding="utf-8"))
+        last = doc["entries"][-1]
+        self.assertEqual(last["session_id"], "sess-42")
+        self.assertEqual(last["observed_used"], 50_000)
+        self.assertEqual(last["window"], 1_000_000)
 
 
-class MaxContextGuardTests(unittest.TestCase):
-    """DEF-CLDREV-002 (symmetric) + DEF-CLDREV-012: a misconfigured
-    SDD_MAX_CONTEXT (zero / negative / non-numeric) must NOT crash the pre hook
-    at import time. A crash here silently disables the entire context-budget gate
-    (cumulative tokens stop recording, 85% warn / 95% deny / auto-compact never
-    fire) — the opposite of the hook's purpose."""
-
-    def test_zero_floors_to_default(self) -> None:
-        with patch.dict(os.environ, {"SDD_MAX_CONTEXT": "0"}, clear=False):
-            mod = _load_hook_module(Path(tempfile.gettempdir()))
-            self.assertEqual(mod.MAX_CONTEXT, 200000)
-
-    def test_negative_floors_to_default(self) -> None:
-        with patch.dict(os.environ, {"SDD_MAX_CONTEXT": "-5"}, clear=False):
-            mod = _load_hook_module(Path(tempfile.gettempdir()))
-            self.assertEqual(mod.MAX_CONTEXT, 200000)
-
-    def test_non_numeric_falls_back_to_default(self) -> None:
-        """Pre-fix: `int("abc")` raises ValueError at import → hook crashes.
-        Post-fix: falls back to 200000, matching the 0/negative floor."""
-        for bad in ("abc", "1.5", "12k"):
-            with patch.dict(os.environ, {"SDD_MAX_CONTEXT": bad}, clear=False):
-                mod = _load_hook_module(Path(tempfile.gettempdir()))
-                self.assertEqual(mod.MAX_CONTEXT, 200000, msg=f"value={bad!r}")
-
-    def test_valid_value_preserved(self) -> None:
-        with patch.dict(os.environ, {"SDD_MAX_CONTEXT": "50000"}, clear=False):
-            mod = _load_hook_module(Path(tempfile.gettempdir()))
-            self.assertEqual(mod.MAX_CONTEXT, 50000)
-
-
-class WideContextWindowInferenceTests(unittest.TestCase):
-    """DEF-200-275: SDD_MAX_CONTEXT unset (real-world default) must NOT treat
-    the stale 200000 (old Claude-3-era context window) as the true ceiling
-    once cumulative has actually exceeded it — that misread the real 2026-09
-    incident (cumulative=200994, ratio=1.00 reported) as 100% full while the
-    session's real /context reading was 378.8k/1,000,000 (38%)."""
+class UnmeteredAndUnconfirmedTests(_IsolatedFsmMixin, unittest.TestCase):
+    """C3：量不到零 gating；C2：保守下界只出聲。"""
 
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.root = Path(self._tmp.name)
-
-        # Isolate FSM state from the repo's real FSM-STATE-*.yaml so the hook
-        # doesn't see a live ESCALATION / HUMAN_PENDING from another session.
-        from tools.fsm_runtime.fsm_runtime import FSMRuntime
-        from tools.fsm_runtime.state_loader import load_state
-        self._fsm_state_path = self.root / "FSM-STATE-widectx.yaml"
-        state = load_state("widectx-proj", path=self._fsm_state_path)
-        state.current = "SPEC_DRAFTING"  # benign state; Bash is allowed
-        self._isolated_rt = FSMRuntime(state)
-
-        import tools.fsm_runtime.fsm_runtime as fsm_rt_mod
-        self._boot_patch = patch.object(
-            fsm_rt_mod.FSMRuntime, "bootstrap",
-            classmethod(lambda cls, project=None: self._isolated_rt),
-        )
-        self._boot_patch.start()
+        self._isolate_fsm(self.root)
+        self._env = _isolated_env(self.root)
+        self._env.start()
+        self.mod = _load_hook_module(self.root)
+        self.runner = _MainRunner(self.mod)
+        date = _dt.date.today().isoformat()
+        (self.root / f"CONTEXT-LEDGER-{date}.yaml").write_text(yaml.safe_dump({
+            "date": date, "cumulative_tokens": 5_000_000,
+            "entries": [{"tokens": 5_000_000, "phase": "post", "tool": "Seed"}],
+        }), encoding="utf-8")
 
     def tearDown(self) -> None:
-        self._boot_patch.stop()
+        self._env.stop()
+        self._release_fsm()
         self._tmp.cleanup()
 
-    def _seed_ledger(self, cumulative: int) -> None:
-        import datetime as _dt
-        import yaml  # noqa: WPS433
-
-        path = self.root / f"CONTEXT-LEDGER-{_dt.date.today().isoformat()}.yaml"
-        doc = {
-            "date": _dt.date.today().isoformat(),
-            "cumulative_tokens": cumulative,
-            "entries": [{"tokens": cumulative, "phase": "pre", "tool": "Seed"}],
+    def test_unmetered_session_never_gates(self) -> None:
+        cases = {
+            "no_transcript": None,
+            "missing_file": str(self.root / "nope.jsonl"),
+            "all_synthetic": _write_transcript(self.root, None, synthetic_only=True),
+            "stale_after_compact": _write_transcript(self.root, 990_000, boundary_after=True, name="s2.jsonl"),
         }
-        path.write_text(yaml.safe_dump(doc, allow_unicode=True), encoding="utf-8")
+        for name, transcript in cases.items():
+            payload = {"tool_name": "Write", "tool_input": {"file_path": "src/app.py", "content": "x"}}
+            if transcript is not None:
+                payload["transcript_path"] = transcript
+            out = self.runner.run(payload).get("hookSpecificOutput", {})
+            self.assertNotIn("permissionDecision", out, msg=f"{name}: {out}")
+            self.assertNotIn("additionalContext", out, msg=f"{name}: {out}")
+            self.assertEqual(self._rt.state.current, "SPEC_DRAFTING", msg=name)
 
-    def test_real_incident_cumulative_does_not_falsely_escalate(self) -> None:
-        """Reproduces the 2026-09-10 incident exactly: cumulative=200994 with
-        SDD_MAX_CONTEXT unset (guaranteed absent at import time via clear=True,
-        not just ambient-environment luck). Pre-fix this computed ratio=1.00
-        (>= CRIT_RATIO) and denied every tool call. Post-fix, 200994 is
-        inferred to be under a 1,000,000-token window (ratio ≈ 0.20) — well
-        under WARN_RATIO — so no deny and no AUTO-COMPACT notice should fire."""
-        self._seed_ledger(200994)
-        env_no_pin = dict(os.environ)
-        env_no_pin.pop("SDD_MAX_CONTEXT", None)
-        env_no_pin.update({
-            "SDD_HOOKS_DISABLE": "",
-            "SDD_HOOKS_DRY_RUN": "",
-            "SDD_SUBAGENT_CONTRACT": "0",
-        })
-        with patch.dict(os.environ, env_no_pin, clear=True):
-            mod = _load_hook_module(self.root)
-            self.assertEqual(mod.MAX_CONTEXT, 200000)  # sanity: floor unchanged
-            runner = _MainRunner(mod)
-            payload = {"tool_name": "Bash", "tool_input": {"command": ""}}
-            out = runner.run(payload)
-        hook_out = out.get("hookSpecificOutput", {})
-        self.assertNotIn(
-            "permissionDecision", hook_out,
-            msg=f"expected no deny for real-incident cumulative, got: {hook_out}",
-        )
-        self.assertNotIn("AUTO-COMPACT", hook_out.get("additionalContext", ""))
+    def test_floor_window_only_warns(self) -> None:
+        """未知 model、peak<200K、used=195,000 ⇒ 保守下界 97.5%：只出 UNCONFIRMED-DENOM，不擋、不 trigger。"""
+        transcript = _write_transcript(self.root, 195_000, model="claude-unknown-9")
+        out = self.runner.run({"tool_name": "Write", "tool_input": {"file_path": "src/app.py", "content": "x"},
+                               "transcript_path": transcript}).get("hookSpecificOutput", {})
+        self.assertNotIn("permissionDecision", out, msg=out)
+        self.assertIn("UNCONFIRMED-DENOM", out.get("additionalContext", ""))
+        self.assertEqual(self._rt.state.current, "SPEC_DRAFTING")
+        self.assertEqual(len(self._rt.state.root.get("escalation_history") or []), 0)
 
-    def test_explicit_sdd_max_context_pin_still_denies_at_200k(self) -> None:
-        """An operator who explicitly sets SDD_MAX_CONTEXT=200000 (e.g. testing
-        against a genuinely small-window model) must still get the strict
-        200000 ceiling enforced — the DEF-200-275 inference must not silently
-        override an explicit operator choice."""
-        self._seed_ledger(200994)
-        with patch.dict(os.environ, {
-            "SDD_HOOKS_DISABLE": "",
-            "SDD_HOOKS_DRY_RUN": "",
-            "SDD_SUBAGENT_CONTRACT": "0",
-            "SDD_MAX_CONTEXT": "200000",
-        }, clear=False):
-            mod = _load_hook_module(self.root)
-            runner = _MainRunner(mod)
-            payload = {"tool_name": "Bash", "tool_input": {"command": ""}}
-            out = runner.run(payload)
-        hook_out = out.get("hookSpecificOutput", {})
-        self.assertEqual(
-            hook_out.get("permissionDecision"), "deny",
-            msg=f"expected deny when SDD_MAX_CONTEXT is explicitly pinned to 200000, got: {hook_out}",
-        )
-        self.assertIn("TOKEN_BUDGET_CRITICAL", hook_out.get("permissionDecisionReason", ""))
+    def test_inferred_wide_window_after_peak_passes(self) -> None:
+        """peak=250,000 變體：下界推論 1M、may_block=True，195,000 只有 19.5% ⇒ 放行且不出聲。"""
+        transcript = _write_transcript(self.root, 195_000, model="claude-unknown-9", peak=250_000)
+        out = self.runner.run({"tool_name": "Write", "tool_input": {"file_path": "src/app.py", "content": "x"},
+                               "transcript_path": transcript}).get("hookSpecificOutput", {})
+        self.assertNotIn("permissionDecision", out, msg=out)
+        self.assertNotIn("additionalContext", out, msg=out)
 
 
-class MaxContextConfirmedUnitTests(unittest.TestCase):
-    """Direct unit coverage for `_max_context_confirmed` (DEF-200-275 第二輪) —
-    the gate that decides whether the current denominator is trustworthy
-    enough to drive CRIT/AUTO_COMPACT, mirroring the sister guard's
-    `may_block(source) != SOURCE_INFERRED_FLOOR` semantics."""
+class PinnedWindowTests(_IsolatedFsmMixin, unittest.TestCase):
+    """承接 ZeroTokenEscalationTests／explicit-pin 各案意圖：SDD_MAX_CONTEXT=1000 顯式釘住，
+    Bash 空 command（估算 0 tokens）仍受真實 used 的 gating。"""
 
-    def test_unpinned_at_or_below_conservative_default_is_unconfirmed(self) -> None:
-        env_no_pin = dict(os.environ)
-        env_no_pin.pop("SDD_MAX_CONTEXT", None)
-        with patch.dict(os.environ, env_no_pin, clear=True):
-            mod = _load_hook_module(Path(tempfile.gettempdir()))
-            for cum in (0, 170000, 180000, 190000, 199999, 200000):
-                self.assertFalse(mod._max_context_confirmed(cum), msg=f"cumulative={cum}")
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self._isolate_fsm(self.root)
+        self._env = _isolated_env(self.root, {"SDD_MAX_CONTEXT": "1000"})
+        self._env.start()
+        self.mod = _load_hook_module(self.root)
+        self.runner = _MainRunner(self.mod)
 
-    def test_unpinned_above_conservative_default_is_confirmed(self) -> None:
-        env_no_pin = dict(os.environ)
-        env_no_pin.pop("SDD_MAX_CONTEXT", None)
-        with patch.dict(os.environ, env_no_pin, clear=True):
-            mod = _load_hook_module(Path(tempfile.gettempdir()))
-            for cum in (200001, 250000, 500000, 999999):
-                self.assertTrue(mod._max_context_confirmed(cum), msg=f"cumulative={cum}")
+    def tearDown(self) -> None:
+        self._env.stop()
+        self._release_fsm()
+        self._tmp.cleanup()
 
-    def test_pinned_is_always_confirmed_even_at_the_default_value(self) -> None:
-        with patch.dict(os.environ, {"SDD_MAX_CONTEXT": "200000"}, clear=False):
-            mod = _load_hook_module(Path(tempfile.gettempdir()))
-            for cum in (0, 100000, 190000, 200000, 500000):
-                self.assertTrue(mod._max_context_confirmed(cum), msg=f"cumulative={cum}")
+    def _run(self, used: int) -> dict:
+        transcript = _write_transcript(self.root, used, model="claude-unknown-9")
+        return self.runner.run({"tool_name": "Bash", "tool_input": {"command": ""},
+                                "transcript_path": transcript}).get("hookSpecificOutput", {})
 
-    def test_malformed_pin_at_190000_is_unconfirmed(self) -> None:
-        """DEF-200-275 第三輪（四方複審 QA/SA 各自獨立發現、SA 判 REJECT 後
-        訂正）：SDD_MAX_CONTEXT 設成解析失敗或非正整數的壞值（操作者打錯字）
-        不得被誤判為「已釘住」。壞值集合沿用 MaxContextGuardTests 既有測資
-        （"abc"/"1.5"/"12k"/空字串/"0"/"-5"）——這些值都會讓 _RAW_MAX_CONTEXT
-        正確 fallback 回 200000（MaxContextGuardTests 已驗證這一半），但修復前
-        _SDD_MAX_CONTEXT_PINNED 只問「環境變數是否存在」，錯誤地讀作 True，
-        導致 190000（真實 1,000,000 視窗下僅 19% 用量）被誤判為已確認分母而
-        硬鎖 ESCALATION——本測試釘住 `_max_context_confirmed(190000)` 在這組
-        壞值下必須是 False（未確認，不應硬鎖）。"""
+    def test_pinned_window_1000_with_used_960_denies(self) -> None:
+        # Bash 在 AUTO_COMPACT 白名單內（跑 compaction 需要它）⇒ 這裡以 Write 驗 deny、以 Bash 驗 CRIT 訊息。
+        out = self._run(960)
+        self.assertNotIn("permissionDecision", out)
+        self.assertIn("[SDD-CTX][CRIT]", out.get("additionalContext", ""))
+        self.assertIn("SDD_MAX_CONTEXT", out.get("additionalContext", ""))
+        self.assertEqual(self._rt.state.current, "AUTO_COMPACT_PENDING")
+        transcript = _write_transcript(self.root, 960, model="claude-unknown-9")
+        out = self.runner.run({"tool_name": "Write", "tool_input": {"file_path": "src/a.py", "content": "x"},
+                               "transcript_path": transcript}).get("hookSpecificOutput", {})
+        self.assertEqual(out.get("permissionDecision"), "deny", msg=out)
+        self.assertEqual(len(self._rt.state.root.get("escalation_history") or []), 0)
+
+    def test_pinned_920_of_1000_auto_compact(self) -> None:
+        out = self._run(920)
+        self.assertIn("[SDD-CTX][AUTO-COMPACT]", out.get("additionalContext", ""))
+        self.assertEqual(self._rt.state.current, "AUTO_COMPACT_PENDING")
+
+    def test_pinned_300_of_1000_passes(self) -> None:
+        out = self._run(300)
+        self.assertNotIn("permissionDecision", out)
+        self.assertNotIn("additionalContext", out)
+
+    def test_malformed_pin_is_not_pinned(self) -> None:
+        """第三輪意圖搬入：壞值（abc/1.5/12k/空/0/-5）不算釘住 ⇒ 未知 model、190,000 只示警。"""
         for bad in ("abc", "1.5", "12k", "", "0", "-5"):
             with patch.dict(os.environ, {"SDD_MAX_CONTEXT": bad}, clear=False):
-                mod = _load_hook_module(Path(tempfile.gettempdir()))
-                self.assertFalse(mod._SDD_MAX_CONTEXT_PINNED, msg=f"value={bad!r}")
-                self.assertFalse(
-                    mod._max_context_confirmed(190000), msg=f"value={bad!r}"
-                )
-
-    def test_valid_pin_at_190000_is_confirmed(self) -> None:
-        """對照組：SDD_MAX_CONTEXT 設成有效正整數（"200000"）時，190000 仍應
-        正確回傳 True（已確認）——修復不能連帶修壞這個正常情境。"""
-        with patch.dict(os.environ, {"SDD_MAX_CONTEXT": "200000"}, clear=False):
-            mod = _load_hook_module(Path(tempfile.gettempdir()))
-            self.assertTrue(mod._SDD_MAX_CONTEXT_PINNED)
-            self.assertTrue(mod._max_context_confirmed(190000))
+                transcript = _write_transcript(self.root, 190_000, model="claude-unknown-9")
+                out = self.runner.run({"tool_name": "Write", "tool_input": {"file_path": "src/a.py", "content": "x"},
+                                       "transcript_path": transcript}).get("hookSpecificOutput", {})
+                self.assertNotIn("permissionDecision", out, msg=f"value={bad!r}: {out}")
+                self.assertIn("UNCONFIRMED-DENOM", out.get("additionalContext", ""), msg=repr(bad))
+                self.assertEqual(self._rt.state.current, "SPEC_DRAFTING", msg=repr(bad))
 
 
-class DEF200275NaturalClimbTests(unittest.TestCase):
-    """DEF-200-275 第二輪（四方獨立複審 REJECT 後訂正）：SA／QA 兩位審查員實測
-    證實第一版修復（只在 cumulative > 200000 才切分母）留了一個區間性回歸——
-    CRIT_RATIO(0.95) × 200000 = 190000，比切換點 200001 早一萬。cumulative
-    單調爬升，任何 session 必然先經過 190000~200000 才可能到 200001，因此在
-    切換生效之前就已經在 190000 被 ratio=0.95 鎖進 ESCALATION（對真實
-    1,000,000 視窗而言僅 19% 用量）——同一個缺陷只是把觸發點從 ~100% 移到
-    ~95%，本質重演。
-
-    本測試模擬 cumulative 依序爬過 170000 → 180000 → 190000 → 199999 →
-    200000 → 200001 → 250000（SDD_MAX_CONTEXT 未顯式設定的真實情境，非單點
-    seed），驗證整條路徑上 FSM state 都不會被鎖進 ESCALATION；並保留對照組：
-    操作者顯式設定 SDD_MAX_CONTEXT=200000 時，190000（ratio=0.95）仍應正常
-    觸發 CRIT／ESCALATION——那是操作者自己選的小視窗，不是誤判。
-    """
-
-    _PATH = (170000, 180000, 190000, 199999, 200000, 200001, 250000)
+class AutoCompactPendingExitTests(_IsolatedFsmMixin, unittest.TestCase):
+    """C5／D4：PENDING 於真實 used 回落 <85% 自動完成（含 Claude Code 自動 compact）。"""
 
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.root = Path(self._tmp.name)
-
-        # Isolate FSM state so the natural-climb assertions observe only this
-        # test's transitions, not a live ESCALATION from another session.
-        from tools.fsm_runtime.fsm_runtime import FSMRuntime
-        from tools.fsm_runtime.state_loader import load_state
-        self._fsm_state_path = self.root / "FSM-STATE-climb.yaml"
-        state = load_state("climb-proj", path=self._fsm_state_path)
-        state.current = "SPEC_DRAFTING"  # benign state; Bash is allowed
-        self._isolated_rt = FSMRuntime(state)
-
-        import tools.fsm_runtime.fsm_runtime as fsm_rt_mod
-        self._boot_patch = patch.object(
-            fsm_rt_mod.FSMRuntime, "bootstrap",
-            classmethod(lambda cls, project=None: self._isolated_rt),
-        )
-        self._boot_patch.start()
-
-    def tearDown(self) -> None:
-        self._boot_patch.stop()
-        self._tmp.cleanup()
-
-    def _seed_ledger(self, cumulative: int) -> None:
-        import datetime as _dt
-        import yaml  # noqa: WPS433
-
-        path = self.root / f"CONTEXT-LEDGER-{_dt.date.today().isoformat()}.yaml"
-        doc = {
-            "date": _dt.date.today().isoformat(),
-            "cumulative_tokens": cumulative,
-            "entries": [{"tokens": cumulative, "phase": "pre", "tool": "Seed"}],
-        }
-        path.write_text(yaml.safe_dump(doc, allow_unicode=True), encoding="utf-8")
-
-    def test_natural_climb_never_escalates_when_denominator_unconfirmed(self) -> None:
-        env_no_pin = dict(os.environ)
-        env_no_pin.pop("SDD_MAX_CONTEXT", None)
-        env_no_pin.update({
-            "SDD_HOOKS_DISABLE": "",
-            "SDD_HOOKS_DRY_RUN": "",
-            "SDD_SUBAGENT_CONTRACT": "0",
-        })
-        with patch.dict(os.environ, env_no_pin, clear=True):
-            mod = _load_hook_module(self.root)
-            self.assertFalse(mod._SDD_MAX_CONTEXT_PINNED)  # sanity: truly unset
-            runner = _MainRunner(mod)
-            prev = 0
-            for target in self._PATH:
-                delta = target - prev
-                prev = target
-                # Fix the per-step token delta deterministically so cumulative
-                # lands exactly on each checkpoint — real /context growth is
-                # continuous, this pins it to the exact reported incident values.
-                with patch.object(mod, "_estimate_tokens", lambda *_a, tokens=delta, **_k: tokens):
-                    out = runner.run({"tool_name": "Bash", "tool_input": {"command": "x"}})
-                hook_out = out.get("hookSpecificOutput", {})
-                self.assertNotEqual(
-                    hook_out.get("permissionDecision"), "deny",
-                    msg=f"cumulative={target}: unexpectedly denied — {hook_out}",
-                )
-                self.assertEqual(
-                    self._isolated_rt.state.current, "SPEC_DRAFTING",
-                    msg=(
-                        f"cumulative={target}: FSM state unexpectedly transitioned to "
-                        f"{self._isolated_rt.state.current!r} while the denominator was "
-                        "still an unconfirmed guess (DEF-200-275 regression reproduced)"
-                    ),
-                )
-
-    def test_explicit_pin_still_escalates_at_190000(self) -> None:
-        """Control group: an operator who explicitly sets SDD_MAX_CONTEXT=200000
-        (a genuinely small-window session) must still get real CRIT/ESCALATION
-        protection at 190000/200000 = 95% — the unconfirmed-denominator downgrade
-        must never silently swallow a deliberate small-window configuration."""
-        self._seed_ledger(189000)  # next +1000 lands exactly on 190000
-        env = {
-            "SDD_HOOKS_DISABLE": "",
-            "SDD_HOOKS_DRY_RUN": "",
-            "SDD_SUBAGENT_CONTRACT": "0",
-            "SDD_MAX_CONTEXT": "200000",
-        }
-        with patch.dict(os.environ, env, clear=False):
-            mod = _load_hook_module(self.root)
-            self.assertTrue(mod._SDD_MAX_CONTEXT_PINNED)
-            runner = _MainRunner(mod)
-            with patch.object(mod, "_estimate_tokens", lambda *_a, **_k: 1000):
-                out = runner.run({"tool_name": "Bash", "tool_input": {"command": "x"}})
-        hook_out = out.get("hookSpecificOutput", {})
-        self.assertEqual(
-            hook_out.get("permissionDecision"), "deny",
-            msg=f"expected deny at 190000/200000=95% with SDD_MAX_CONTEXT pinned, got: {hook_out}",
-        )
-        self.assertIn("TOKEN_BUDGET_CRITICAL", hook_out.get("permissionDecisionReason", ""))
-        self.assertEqual(self._isolated_rt.state.current, "ESCALATION")
-
-
-class NonStringSubagentTypeTests(unittest.TestCase):
-    """DEF-CLDREV-020: a non-string subagent_type/agent (list / dict / int) on a
-    Task payload must NOT crash the pre hook. Pre-fix `_build_subagent_notice`
-    called `.strip()` on the raw value → AttributeError → hook exits non-zero,
-    silently dropping the PreToolUse JSON. This path became reachable only after
-    DEF-CLDREV-017 added `Task` to the PreToolUse matcher, so it is the input-domain
-    sibling of DEF-CLDREV-012 (non-numeric SDD_MAX_CONTEXT)."""
-
-    def setUp(self) -> None:
-        self._tmp = tempfile.TemporaryDirectory()
-        self.root = Path(self._tmp.name)
+        self._isolate_fsm(self.root)
+        self._env = _isolated_env(self.root)
+        self._env.start()
         self.mod = _load_hook_module(self.root)
         self.runner = _MainRunner(self.mod)
 
     def tearDown(self) -> None:
+        self._env.stop()
+        self._release_fsm()
+        self._tmp.cleanup()
+
+    def _enter_pending(self, resume_state: str) -> None:
+        self._rt.state.current = resume_state
+        res = self._rt.trigger_auto_compact(900_000, 0.9)
+        self.assertFalse(res.get("escalated"))
+        self.assertEqual(self._rt.state.current, "AUTO_COMPACT_PENDING")
+
+    def _run(self, used: int, tool: str = "Write", target: str = "src/app.py") -> dict:
+        transcript = _write_transcript(self.root, used, peak=900_000)
+        return self.runner.run({"tool_name": tool, "tool_input": {"file_path": target, "content": "x"},
+                                "transcript_path": transcript}).get("hookSpecificOutput", {})
+
+    def test_pending_exits_when_used_drops_below_85pct(self) -> None:
+        self._enter_pending("SPEC_DRAFTING")
+        out = self._run(120_000)
+        self.assertNotIn("permissionDecision", out, msg=out)
+        self.assertIn("[DONE]", out.get("additionalContext", ""))
+        self.assertEqual(self._rt.state.current, "SPEC_DRAFTING")
+        self.assertEqual(self._rt.state.root["auto_compact_state"]["count_per_stage"], 0)
+        self.assertEqual(self._rt.state.root["decision_trace"][-1]["trigger"], "auto_compact_complete")
+
+    def test_pending_hysteresis(self) -> None:
+        self._enter_pending("SPEC_DRAFTING")
+        out = self._run(890_000, tool="Read", target="docs/x.md")
+        self.assertNotIn("[DONE]", out.get("additionalContext", ""))
+        self.assertEqual(self._rt.state.current, "AUTO_COMPACT_PENDING")
+        out = self._run(840_000, tool="Read", target="docs/x.md")
+        self.assertIn("[DONE]", out.get("additionalContext", ""))
+        self.assertEqual(self._rt.state.current, "SPEC_DRAFTING")
+
+    def test_pending_with_illegal_resume_state_remaps_to_spec_drafting(self) -> None:
+        self._enter_pending("INIT")
+        out = self._run(100_000)
+        self.assertNotIn("permissionDecision", out, msg=out)
+        self.assertEqual(self._rt.state.current, "SPEC_DRAFTING")
+        self.assertIn("remap", self._rt.state.root["decision_trace"][-1]["reason"])
+        self.assertIn("remap", out.get("additionalContext", ""))
+
+    def test_pending_non_compact_tool_still_denied_while_high(self) -> None:
+        self._enter_pending("SPEC_DRAFTING")
+        out = self._run(920_000)
+        self.assertEqual(out.get("permissionDecision"), "deny", msg=out)
+        self.assertIn("AUTO_COMPACT_PENDING", out.get("permissionDecisionReason", ""))
+
+
+class PendingExitLockContentionTests(_IsolatedFsmMixin, unittest.TestCase):
+    """DEF-200-275 第四輪 G1（QA-R2-01／ARCH-R2-01／SD-R2-02 三方獨立實測 ≈10s）：AUTO_COMPACT_PENDING
+    出口路徑在他人持鎖時，pre hook 先 `complete_auto_compact`→`_reset_today_ledger`（取鎖）再 `_record_audit`
+    →`append_ledger_entry`（再取同一把鎖）——兩段各等 5s ⇒ 10s > `sdd_hook_router.py` child timeout 8s
+    ⇒ router 砍子行程、hook fail-open、稽核 entry 一起丟（F2 同一失效類別在另一條路徑重開）。
+
+    WHY 同目錄：生產環境 hook 的 LEDGER_DIR 與 `_reset_today_ledger` 的 `REPO_ROOT/build/reports/fsm`
+    是同一個目錄、同一把鎖；測試必須讓兩者指同處才量得到這條路徑。修法＝reset 只等 1s（帳本零決策權，
+    歸零失敗誠實回 `lock_timeout=True`），單支 hook 最壞 5+1=6s < 8s。
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self._isolate_fsm(self.root)
+        self._env = _isolated_env(self.root)
+        self._env.start()
+        self.mod = _load_hook_module(self.root)
+        self.runner = _MainRunner(self.mod)
+        # 與 `_reset_today_ledger` 讀的 REPO_ROOT/build/reports/fsm 同一目錄（生產環境如此）
+        self.ledger_dir = self.root / "repo" / "build" / "reports" / "fsm"
+        self.mod.LEDGER_DIR = self.ledger_dir
+        self.ledger_dir.mkdir(parents=True, exist_ok=True)
+        date = _dt.date.today().isoformat()
+        (self.ledger_dir / f"CONTEXT-LEDGER-{date}.yaml").write_text(yaml.safe_dump(
+            {"date": date, "cumulative_tokens": 10, "entries": [{"tokens": 10, "phase": "post"}]}),
+            encoding="utf-8")
+        self.lock = self.ledger_dir / f"CONTEXT-LEDGER-{date}.yaml.lock"
+        self.lock.write_text("pid=0 host=test ts=fresh\n", encoding="utf-8")  # fresh sentinel＝他人正持鎖
+
+    def tearDown(self) -> None:
+        self._env.stop()
+        self._release_fsm()
+        self._tmp.cleanup()
+
+    def test_pending_exit_under_foreign_lock_stays_within_router_budget(self) -> None:
+        import time
+        self._rt.trigger_auto_compact(900_000, 0.9, details={"session_id": "sess-A"})
+        self.assertEqual(self._rt.state.current, "AUTO_COMPACT_PENDING")
+        transcript = _write_transcript(self.root, 120_000, peak=900_000)
+        t0 = time.monotonic()
+        out = self.runner.run({"tool_name": "Write", "tool_input": {"file_path": "src/app.py", "content": "x"},
+                               "transcript_path": transcript, "session_id": "sess-42"}
+                              ).get("hookSpecificOutput", {})
+        elapsed = time.monotonic() - t0
+        self.assertLess(elapsed, 8.0, msg=f"PENDING 出口路徑耗時 {elapsed:.2f}s ≥ router child timeout 8s")
+        self.assertEqual(self._rt.state.current, "SPEC_DRAFTING")
+        self.assertIn("[DONE]", out.get("additionalContext", ""), msg=out)
+        self.assertNotIn("permissionDecision", out, msg=out)
+        self.assertTrue(self.lock.exists(), msg="不得偷拆別人的 fresh sentinel")
+
+
+class EscalationRecoveryHintTests(_IsolatedFsmMixin, unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self._isolate_fsm(self.root)
+        self._env = _isolated_env(self.root)
+        self._env.start()
+        self.mod = _load_hook_module(self.root)
+        self.runner = _MainRunner(self.mod)
+
+    def tearDown(self) -> None:
+        self._env.stop()
+        self._release_fsm()
+        self._tmp.cleanup()
+
+    def test_escalation_deny_reason_contains_recovery_hint(self) -> None:
+        self._rt.state.record_escalation("TOKEN_BUDGET_CRITICAL: legacy", details={"session_id": "old-1"})
+        transcript = _write_transcript(self.root, 50_000)
+        out = self.runner.run({"tool_name": "Read", "tool_input": {"file_path": "docs/x.md"},
+                               "transcript_path": transcript}).get("hookSpecificOutput", {})
+        self.assertEqual(out.get("permissionDecision"), "deny", msg=out)
+        reason = out.get("permissionDecisionReason", "")
+        self.assertIn("resume-from-escalation --to", reason)
+        self.assertIn("session=old-1", reason)
+        self.assertIn("SDD_HOOKS_DRY_RUN=1", reason)
+
+    def test_dry_run_softens_escalation_deny(self) -> None:
+        self._rt.state.record_escalation("x")
+        with patch.dict(os.environ, {"SDD_HOOKS_DRY_RUN": "1"}, clear=False):
+            out = self.runner.run({"tool_name": "Read", "tool_input": {"file_path": "docs/x.md"}}
+                                  ).get("hookSpecificOutput", {})
+        self.assertNotIn("permissionDecision", out)
+        self.assertIn("[SDD-DRY-RUN] would deny", out.get("additionalContext", ""))
+
+
+class NonStringSubagentTypeTests(_IsolatedFsmMixin, unittest.TestCase):
+    """DEF-CLDREV-020: a non-string subagent_type/agent (list / dict / int) on a
+    Task payload must NOT crash the pre hook."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self._isolate_fsm(self.root)
+        self._env = _isolated_env(self.root)
+        self._env.start()
+        self.mod = _load_hook_module(self.root)
+        self.runner = _MainRunner(self.mod)
+
+    def tearDown(self) -> None:
+        self._env.stop()
+        self._release_fsm()
         self._tmp.cleanup()
 
     def test_non_string_subagent_type_does_not_crash(self) -> None:
-        # contract ON (soft) so the code path reaches the agent_name extraction.
         env = {"SDD_SUBAGENT_CONTRACT": "1"}
         for bad in ([{"a": 1}], {"x": 1}, 123, ["a", "b"]):
             payload = {"tool_name": "Task", "tool_input": {"subagent_type": bad}}
             with patch.dict(os.environ, env, clear=False):
-                # _MainRunner.run asserts rc == 0; pre-fix this raised AttributeError.
                 out = self.runner.run(payload)
             hook_out = out.get("hookSpecificOutput", {})
-            self.assertEqual(hook_out.get("hookEventName"), "PreToolUse",
-                             msg=f"value={bad!r}")
-            # non-string ⇒ treated as no agent ⇒ no contract injection (graceful).
+            self.assertEqual(hook_out.get("hookEventName"), "PreToolUse", msg=f"value={bad!r}")
             self.assertNotIn("additionalContext", hook_out, msg=f"value={bad!r}")
 
     def test_non_string_agent_key_does_not_crash(self) -> None:
@@ -587,98 +674,76 @@ class NonStringSubagentTypeTests(unittest.TestCase):
         payload = {"tool_name": "Task", "tool_input": {"agent": {"nested": True}}}
         with patch.dict(os.environ, env, clear=False):
             out = self.runner.run(payload)
-        self.assertEqual(
-            out.get("hookSpecificOutput", {}).get("hookEventName"), "PreToolUse")
+        self.assertEqual(out.get("hookSpecificOutput", {}).get("hookEventName"), "PreToolUse")
 
 
-class MalformedPayloadTests(unittest.TestCase):
-    """DEF-CLDREV-025: a JSON-valid but non-dict top-level payload (`[1,2,3]`)
-    does NOT raise json.JSONDecodeError, so the except branch never fires and the
-    subsequent `inp.get(...)` / `tool_input.get(...)` raised AttributeError →
-    hook exits non-zero and the PreToolUse JSON is dropped. Same input-domain
-    class as DEF-CLDREV-012 (non-numeric SDD_MAX_CONTEXT) / DEF-CLDREV-020
-    (non-string subagent_type). Both `inp` and `tool_input` must normalize to {}."""
+class MalformedPayloadTests(_IsolatedFsmMixin, unittest.TestCase):
+    """DEF-CLDREV-025: non-dict top-level payload / tool_input must normalize to {}."""
 
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.root = Path(self._tmp.name)
+        self._isolate_fsm(self.root)
+        self._env = _isolated_env(self.root)
+        self._env.start()
         self.mod = _load_hook_module(self.root)
         self.runner = _MainRunner(self.mod)
 
     def tearDown(self) -> None:
+        self._env.stop()
+        self._release_fsm()
         self._tmp.cleanup()
 
     def test_top_level_list_does_not_crash(self) -> None:
-        # _MainRunner.run asserts rc == 0; pre-fix this raised AttributeError at
-        # `inp.get("tool_name")`. _FakeStdin serializes via json.dumps so a list
-        # payload reaches main() exactly as Claude Code would deliver malformed JSON.
-        out = self.runner.run([1, 2, 3])  # type: ignore[arg-type]
+        out = self.runner.run([1, 2, 3])
         self.assertEqual(out.get("hookSpecificOutput", {}).get("hookEventName"), "PreToolUse")
 
     def test_list_tool_input_does_not_crash(self) -> None:
-        out = self.runner.run({"tool_name": "Read", "tool_input": [1, 2, 3]})  # type: ignore[dict-item]
+        out = self.runner.run({"tool_name": "Read", "tool_input": [1, 2, 3]})
         self.assertEqual(out.get("hookSpecificOutput", {}).get("hookEventName"), "PreToolUse")
 
     def test_str_tool_input_does_not_crash(self) -> None:
-        out = self.runner.run({"tool_name": "Read", "tool_input": "abc"})  # type: ignore[dict-item]
+        out = self.runner.run({"tool_name": "Read", "tool_input": "abc"})
+        self.assertEqual(out.get("hookSpecificOutput", {}).get("hookEventName"), "PreToolUse")
+
+    def test_non_string_transcript_path_does_not_crash(self) -> None:
+        out = self.runner.run({"tool_name": "Read", "tool_input": {}, "transcript_path": [1, 2]})
         self.assertEqual(out.get("hookSpecificOutput", {}).get("hookEventName"), "PreToolUse")
 
 
-class NonStringToolNameTests(unittest.TestCase):
-    """DEF-CLDREV-029 (SA 鏡 F-03): a non-string tool_name (list / dict / int)
-    must be normalized to "" BEFORE reaching the FSM guardrail. Pre-fix it reached
-    `assert_tool_allowed([...], target)` → TypeError → caught by the broad except →
-    degraded to a "guardrail unavailable" warn-pass, silently bypassing FSM
-    enforcement for that call. Same input-domain class as DEF-CLDREV-020/025."""
+class NonStringToolNameTests(_IsolatedFsmMixin, unittest.TestCase):
+    """DEF-CLDREV-029 (SA 鏡 F-03): a non-string tool_name must be normalized to ""
+    BEFORE reaching the FSM guardrail."""
 
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.root = Path(self._tmp.name)
+        self._isolate_fsm(self.root)
+        self._env = _isolated_env(self.root)
+        self._env.start()
         self.mod = _load_hook_module(self.root)
         self.runner = _MainRunner(self.mod)
-
-        from tools.fsm_runtime.fsm_runtime import FSMRuntime
-        from tools.fsm_runtime.state_loader import load_state
-        state = load_state("toolname-proj", path=self.root / "FSM-STATE-toolname.yaml")
-        state.current = "SPEC_DRAFTING"  # benign state
-        self._isolated_rt = FSMRuntime(state)
-
-        # Spy on assert_tool_allowed to capture the exact `tool` argument it receives.
         self._seen_tools: list = []
-        _orig = self._isolated_rt.assert_tool_allowed
+        _orig = self._rt.assert_tool_allowed
 
         def _spy(tool, target=None):  # noqa: ANN001
             self._seen_tools.append(tool)
             return _orig(tool, target)
 
-        self._isolated_rt.assert_tool_allowed = _spy  # type: ignore[method-assign]
-
-        import tools.fsm_runtime.fsm_runtime as fsm_rt_mod
-        self._boot_patch = patch.object(
-            fsm_rt_mod.FSMRuntime, "bootstrap",
-            classmethod(lambda cls, project=None: self._isolated_rt),
-        )
-        self._boot_patch.start()
+        self._rt.assert_tool_allowed = _spy  # type: ignore[method-assign]
 
     def tearDown(self) -> None:
-        self._boot_patch.stop()
+        self._env.stop()
+        self._release_fsm()
         self._tmp.cleanup()
 
     def _run(self, bad_tool_name) -> dict:  # noqa: ANN001
-        payload = {"tool_name": bad_tool_name, "tool_input": {}}
-        with patch.dict(os.environ, {
-            "SDD_HOOKS_DISABLE": "",
-            "SDD_HOOKS_DRY_RUN": "",
-            "SDD_SUBAGENT_CONTRACT": "0",
-        }, clear=False):
-            return self.runner.run(payload)  # type: ignore[arg-type]
+        return self.runner.run({"tool_name": bad_tool_name, "tool_input": {}})
 
     def test_list_tool_name_normalized_before_guardrail(self) -> None:
         out = self._run(["Bash"])
         hook_out = out.get("hookSpecificOutput", {})
         self.assertEqual(hook_out.get("hookEventName"), "PreToolUse")
-        # Non-hollow: the guardrail must have been reached with a *string* tool
-        # (normalized ""), not the raw list — proving no TypeError bypass.
         self.assertEqual(self._seen_tools, [""],
                          msg=f"guardrail saw {self._seen_tools!r}, expected normalized ['']")
         self.assertNotIn("guardrail unavailable", hook_out.get("additionalContext", ""))

@@ -49,7 +49,31 @@ def _rule_lines(state: str) -> list:
     return out
 
 
-def _build_context() -> dict:
+def _measurement_line(payload: dict | None) -> str:
+    """DEF-200-275 第四輪：一開場就說清楚「量的是什麼、量到多少、分母哪來」。任何例外只回一行 WARN。"""
+    try:
+        from tools.fsm_runtime.context_window import (  # type: ignore
+            measure, resolve_window, window_evidence,
+        )
+        transcript = (payload or {}).get("transcript_path") if isinstance(payload, dict) else None
+        m = measure(transcript)
+        if m is None or m.used is None:
+            return (
+                "[SDD-CTX] 量測＝逐字稿 API usage；transcript_path="
+                + ("有" if isinstance(transcript, str) and transcript else "無")
+                + "；尚無可用 usage（不 gating）"
+            )
+        window, source = resolve_window(m.peak, **window_evidence(m.model))
+        return (
+            f"[SDD-CTX] 量測＝逐字稿 API usage；transcript_path=有；used={m.used:,}；"
+            f"window={window:,}（{source}）；ratio={m.used / window:.0%}；"
+            f"compact_boundaries={m.compact_boundaries}"
+        )
+    except Exception as exc:  # noqa: BLE001 — never block session start
+        return f"[SDD-CTX][WARN] 量測不可用：{exc!r}"
+
+
+def _build_context(payload: dict | None = None) -> dict:
     if os.environ.get("SDD_HOOKS_DISABLE") == "1":
         return {
             "hookSpecificOutput": {
@@ -228,10 +252,18 @@ def _build_context() -> dict:
             "建議進入 SPEC_AUDIT 檢查規格是否有系統性矛盾。"
         )
     if rt.state.current in {"ESCALATION", "ESCALATION_FINAL", "TERMINATED", "TOKEN_BUDGET_CRITICAL"}:
-        warnings.append(
+        block = (
             f"[SDD-FSM][BLOCK] 當前狀態 {rt.state.current} — 所有工具呼叫將被 PreToolUse 阻擋，"
             "必須人工介入並執行 Session 恢復流程。"
         )
+        if rt.state.current in {"ESCALATION", "ESCALATION_FINAL"}:
+            # DEF-200-275 第四輪（C10）：印來源 session／類別／原因＋一行可複製執行的恢復指令。
+            try:
+                from tools.fsm_runtime.recovery_hint import recovery_hint  # type: ignore
+                block += "\n" + recovery_hint(rt.state, sdd_root=_SDD_ROOT)
+            except Exception as exc:  # noqa: BLE001
+                block += f"\n[SDD-FSM][RECOVERY][WARN] recovery hint unavailable: {exc!r}"
+        warnings.append(block)
     if rt.state.current == "AUTO_COMPACT_PENDING":
         auto = rt.state.root.get("auto_compact_state", {}) or {}
         resume_state = auto.get("resume_state", "<unknown>")
@@ -266,6 +298,7 @@ def _build_context() -> dict:
         f"- applied_ci_events: {len(applied)}"
         + (f" ({', '.join(applied)})" if applied else ""),
         f"- total_scg_retries_all_time: {total_retries}",
+        f"- {_measurement_line(payload)}",
     ]
 
     # ACT-025: inject last 5 decision trace entries so resuming sessions
@@ -300,9 +333,25 @@ def _build_context() -> dict:
     }
 
 
+def _read_payload() -> dict:
+    """SessionStart payload（含 transcript_path）；非 tty 才讀 stdin，壞 JSON／非 dict 一律 {}。"""
+    try:
+        _stdin_buffer = getattr(sys.stdin, "buffer", None)
+        if sys.stdin.isatty():
+            raw = "{}"
+        elif _stdin_buffer is not None:
+            raw = _stdin_buffer.read().decode("utf-8", "replace")
+        else:
+            raw = sys.stdin.read()
+        data = json.loads(raw or "{}")
+    except Exception:  # noqa: BLE001
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 def main() -> int:
     try:
-        payload = _build_context()
+        payload = _build_context(_read_payload())
     except Exception as exc:  # noqa: BLE001
         payload = {
             "hookSpecificOutput": {

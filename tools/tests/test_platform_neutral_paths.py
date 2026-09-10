@@ -3698,7 +3698,10 @@ _NON_PATH_REPLACE_OWNERS: frozenset[str] = frozenset({"dataclasses", "attr", "at
 #: DEF-200-202 四方複審修復窗口：`QuotaGateIsWiredToTheBurnPathTest` 新增回歸測試
 #: 多用了一次既有 fixture 慣用句式 `<Path>.replace(qg.quota_cache_path())`
 #: （同檔既有測試已大量使用同一句式，未另立新形態）。
-_DIRENT_UNGUARDED_DEBT: dict[str, int] = {"live": 42}
+# DEF-200-275 第四輪 42 → 40（方向＝下修）：SDD LATEST `conversation_ledger.py` 原有三個各自
+# `tmp=…; os.replace(tmp, path)` 的站點（append／merge／calibration）收斂為 `_atomic_write_yaml`
+# 一處（pid 專屬 tmp），判準逐字指示「有人修掉了，請把數字改小：實測 40」⇒ 照填。
+_DIRENT_UNGUARDED_DEBT: dict[str, int] = {"live": 40}
 
 
 def dirent_primitive_sites(source: str, rel: str) -> list[tuple[str, int, str, bool]]:

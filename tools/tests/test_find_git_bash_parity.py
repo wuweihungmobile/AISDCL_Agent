@@ -1261,6 +1261,66 @@ class TestIntegrationGateShellDelegation(unittest.TestCase):
         self.assertEqual(rc, 0, f"stdout={out}\nstderr={err}")
         self.assertEqual(self._marker()["argv"], [])
 
+    # ── DEF-200-275 第四輪 D8／C14 候選鏈鑑別（SA-R4-03）─────────────────────────────
+    # WHY 不從 PATH 拔掉系統目錄來「藏」python：macOS 的 dirname／tr 就住 /usr/bin，跟 python3
+    # 同一個目錄；拔掉它薄殼自己先掛。改用 guard 的既有語意——`is_real_python_candidate` 對
+    # 路徑段含 `windowsapps` 的候選一律回 1（Store 空殼排除）⇒ 把假 python 放進一個名為
+    # `WindowsApps/` 的目錄並排在 PATH 最前，`command -v` 先命中它、guard 再把它否決，真直譯器
+    # 就被遮住了；三平台同一招（Windows 上 shim 以 `.exe` 命名，`command -v` 同樣先命中）。
+    _EXE = ".exe" if os.name == "nt" else ""
+
+    def _shadow_dir(self, *names: str) -> str:
+        d = self.tmp / "WindowsApps"
+        d.mkdir(exist_ok=True)
+        for n in names:
+            f = d / f"{n}{self._EXE}"
+            f.write_text("#!/bin/sh\nexit 99\n", encoding="utf-8", newline="\n")
+            f.chmod(0o755)
+        return str(d)
+
+    def _real_shim(self, directory: Path, name: str) -> None:
+        directory.mkdir(parents=True, exist_ok=True)
+        link = directory / f"{name}{self._EXE}"
+        try:
+            link.symlink_to(Path(sys.executable))
+        except OSError:
+            shutil.copy2(sys.executable, link)
+
+    def _run_with_path(self, path_entries: list[str]) -> tuple[int, str, str]:
+        env = dict(os.environ)
+        env["PATH"] = os.pathsep.join(path_entries + [env.get("PATH", "")])
+        env["IG_STUB_MARKER"] = str(self.marker)
+        env["IG_STUB_RC"] = "0"
+        env.pop("PYTHONUTF8", None)
+        proc = subprocess.run(
+            [_BASH, "tools/integration_gate.sh", "--skip-full"],
+            cwd=str(self.tmp), capture_output=True, env=env, timeout=120,
+        )
+        return (proc.returncode, proc.stdout.decode("utf-8", errors="replace"),
+                proc.stderr.decode("utf-8", errors="replace"))
+
+    def test_chain_falls_back_to_python3_when_python_is_absent(self) -> None:
+        """未 source venv 的 macOS 只有 python3（pre-push 整合閘門 leg 的真實輸入面）。"""
+        py3 = self.tmp / "only_py3"
+        self._real_shim(py3, "python3")
+        rc, out, err = self._run_with_path([self._shadow_dir("python"), str(py3)])
+        self.assertEqual(rc, 0, f"stdout={out}\nstderr={err}")
+        self.assertEqual(self._marker()["argv"], ["--skip-full"])
+
+    def test_chain_falls_back_to_repo_venv_when_path_has_no_python(self) -> None:
+        """PATH 上 python／python3 皆不可用、repo 有 .venv/bin/python ⇒ 第三候選接手。"""
+        self._real_shim(self.tmp / ".venv" / "bin", "python")
+        rc, out, err = self._run_with_path([self._shadow_dir("python", "python3")])
+        self.assertEqual(rc, 0, f"stdout={out}\nstderr={err}")
+        self.assertEqual(self._marker()["argv"], ["--skip-full"])
+
+    def test_chain_exhausted_fails_loud_with_remediation(self) -> None:
+        """三候選全無 ⇒ rc=1、stderr 逐字點名三個候選（不得 rc=0 假綠、不得靜默）。"""
+        rc, out, err = self._run_with_path([self._shadow_dir("python", "python3")])
+        self.assertEqual(rc, 1, f"stdout={out}\nstderr={err}")
+        self.assertIn("找不到 python／python3／.venv/bin/python", err)
+        self.assertFalse(self.marker.exists(), "候選鏈耗盡卻仍執行了核心")
+
 
 if __name__ == "__main__":
     unittest.main()

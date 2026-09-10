@@ -372,7 +372,11 @@ _TREE_FILE_FLOORS: dict[str, int] = {
     # 方向是**上修＝判準更嚴**（下限愈高，對「掃描面靜默縮小」的鑑別力愈強），不是放寬。
     # 🔴 55 只在實測恰為 69 時成立（`int(69×0.8)=55`、`int(70×0.8)=56`）——本行是在三個
     # 並行包**全部停工後**的收尾單人窗口量的，69 即本輪定案值。
-    "tools/tests": 55,
+    # 🔴 DEF-200-275 第四輪重釘 55 → 56（機制同上：`tools/tests` 由 69 支長到 **70**——
+    # 本包新增 `test_context_window_parity.py`〔根層守衛 ↔ SDD context_window 的 parity 鎖〕，
+    # 55 只剩實測的 79%、低於 `TREE_FLOOR_RATIO` 80%，第三向逐字指示「重釘為 56」
+    # ⇒ 照填、零加減推算；方向＝上修）。
+    "tools/tests": 56,
     # 🔴 R82 包 A2（DEBT-01）：204 → 205。新增 `AutoClaude/tests/contract/test_w6_deletion.py`
     # （AC2-2 的真斷言落點）後掃描面變 257，下限只剩實測的 79% ⇒ 依 `TREE_FLOOR_RATIO` 的
     # 防腐那一向轉紅。這正是它的設計意圖：下限不跟著長就會愈來愈鬆而沒有任何東西說話。
@@ -439,7 +443,10 @@ _TREE_FILE_FLOORS: dict[str, int] = {
     # 本閘門的顏色。合計再新增 ≥2 支就會再次過期 ⇒
     # 🔴 收輪者請在所有包停工後的單人窗口重量一次再定案。
     "AISDLC_SDD/scripts/tests": 24,
-    LATEST_FSM_TESTS_TREE: 60,   # 本輪納入；實測 76 × 0.8
+    # 🔴 DEF-200-275 第四輪重釘 60 → 62：該樹由 76 支長到 **78**（本包新增
+    # `test_context_window.py`／`test_recovery_hint.py`），60 只剩實測的 77%，第三向逐字
+    # 指示「重釘為 62」⇒ 照填、零加減推算。
+    LATEST_FSM_TESTS_TREE: 62,
 }
 
 #: 下限相對實測值的目標比例（`floor ≈ actual × 本值`）。兩個方向都由它定義：
