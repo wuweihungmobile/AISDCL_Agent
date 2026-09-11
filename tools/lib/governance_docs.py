@@ -495,6 +495,9 @@ _GOVERNANCE_DOCS = (
     # R144 收尾：DEF-200-275 第五輪＋DEF-200-281／282 護欄層對帳。即刻登記。 round-label-ok
     # （crossref 早退實測：未登記即「涵蓋面與磁碟脫節」一筆＋12 道檢查未執行。）
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R144_Scan_Findings.md",
+    # R145 收尾：DEF-200-275 第六輪（四方複審 REJECT→D17～D25→修後複審 APPROVE）＋ round-label-ok
+    # DEF-200-279／280 結案、DEF-200-283 新立 護欄層對帳。即刻登記。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R145_Scan_Findings.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/{CrossPlatform,Quota}_*.md`。這**不是**把具名

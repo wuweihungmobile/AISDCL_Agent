@@ -336,7 +336,13 @@ _FROZEN_SHRINK_ONLY_BUCKET_LINES: dict[str, int] = {
     # （naive `now` 拒寫而非拋 TypeError）。誠實劃界：同上一列體例，本列由同一單一喚醒鏈
     # 修復代理在掌舵者明確授權下重釘（任務書逐字：棘輪表紅了照訊息重釘，輪號沿用
     # R144），**不是**正式四方複審，留待收尾窗口／掌舵者事後補審或推翻。 round-label-ok
-    "prose": 4182,
+    # 🔴 DEF-200-275 第六輪收尾單人窗口：prose 4182→4512（+330）——四方複審 REJECT→D17～D25
+    # 修復→修後複審 APPROVE 的收斂輪；新增 test_root_guard_known_model_r145.py（215）／
+    # test_sentinel_tick_e2e_r145.py（141）兩支鎖檔的 docstring 依 Dev-Trim 紀律留「一句 WHY＋
+    # 指針 docs/06_quality/…」，指針字面使整檔依 BUCKET_PRIORITY 落 prose 桶（非散文成長，是
+    # 歸桶副作用；另一出口＝拔掉指針改落 guard_self，同為 shrink-only 桶，成長不會消失只會換桶）。
+    # 帶四方記帳複審裁決重釘（紀錄見 docs/06_quality/CrossPlatform_R145_Scan_Findings.md §3.1）。
+    "prose": 4512,
     "guard_self": 3431,
 }
 

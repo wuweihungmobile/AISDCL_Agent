@@ -932,5 +932,84 @@ class TestTheUnbackedBlockClaimHookWiring(unittest.TestCase):
                           f"{foreign} 消失了 ⇒ 那個判準被順手併進別人的開關")
 
 
+class TestTheBlockClaimEvidenceWindowIsRecentTurnsOnly(unittest.TestCase):
+    """D24（SD-06）：第五判準的佐證窗口從全場收斂為「倒數第二則 role=user 訊息之後」，
+    避免早已無關的舊通知替本回合赤裸宣稱背書。詳見 docs/06_quality/
+    CrossPlatform_DEF200275_Context_Metering_Evidence.md〈第六輪〉。"""
+
+    def setUp(self) -> None:
+        self._dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._dir.cleanup)
+
+    def _write_transcript(self, lines: list[str]) -> Path:
+        p = Path(self._dir.name) / "t.jsonl"
+        p.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+        return p
+
+    def _run(self, claim: str, transcript: Path):
+        payload = json.dumps({"hook_event_name": "Stop", "last_assistant_message": claim,
+                              "transcript_path": str(transcript)})
+        return subprocess.run([sys.executable, str(_HOOK)], input=payload, env=os.environ,
+                              capture_output=True, text=True, timeout=60,
+                              encoding="utf-8", errors="replace")
+
+    @staticmethod
+    def _user_line(when: str, text: str) -> str:
+        """真人 role=user 訊息（非 tool_result 中繼）——D24 拿它當回合邊界。"""
+        return json.dumps({"type": "user", "timestamp": when,
+                           "message": {"role": "user", "content": text}})
+
+    @staticmethod
+    def _notice_line(when: str, content: str) -> str:
+        """額度守衛 `hook_additional_context` 通知形狀（見 `BLOCK_EVIDENCE_RE`）。"""
+        return json.dumps({
+            "type": "attachment", "timestamp": when,
+            "attachment": {"type": "hook_additional_context", "hookEvent": "PostToolUse",
+                           "content": [content]},
+        })
+
+    def test_a_notice_from_two_rounds_ago_no_longer_silences_this_rounds_claim(self) -> None:
+        lines = [
+            self._user_line("2026-09-01T00:00:00Z", "第一輪：開始工作"),
+            self._notice_line("2026-09-01T00:01:00Z",
+                             "kind=session 28% band=notice cap=4 reason=ok"),
+            self._user_line("2026-09-01T00:02:00Z", "第二輪：（倒數第二則，邊界）"),
+            self._user_line("2026-09-01T00:03:00Z", "第三輪：這一輪被擋了嗎？"),
+        ]
+        transcript = self._write_transcript(lines)
+        done = self._run("我剛剛被擋了，不能寫檔案。", transcript)
+        self.assertEqual(done.returncode, 0, "本守衛永不阻斷")
+        self.assertIn("被擋／水位", done.stderr,
+                      "兩回合前的 kind=/band= 通知不應再讓這一回合的赤裸宣稱免罰")
+
+    def test_a_notice_inside_the_previous_round_still_silences_it(self) -> None:
+        """對照組：通知落在邊界之後（前一回合）時仍應放行，不能矯枉過正。"""
+        lines = [
+            self._user_line("2026-09-01T00:00:00Z", "第一輪：開始工作"),
+            self._user_line("2026-09-01T00:02:00Z", "第二輪：（倒數第二則，邊界）"),
+            self._notice_line("2026-09-01T00:02:30Z",
+                             "kind=session 91% band=crit cap=4 reason=ok"),
+            self._user_line("2026-09-01T00:03:00Z", "第三輪：這一輪被擋了嗎？"),
+        ]
+        transcript = self._write_transcript(lines)
+        done = self._run("我剛剛被擋了，不能寫檔案。", transcript)
+        self.assertEqual(done.returncode, 0)
+        self.assertNotIn("被擋／水位", done.stderr,
+                         "邊界之後（前一回合）的通知仍應維持既有『合法情境』放行")
+
+    def test_fewer_than_two_user_turns_falls_back_to_whole_transcript(self) -> None:
+        """少於兩則真人訊息時無邊界可切，退回全場（覆蓋既有假紅普查案例形狀）。"""
+        lines = [
+            self._user_line("2026-09-01T00:00:00Z", "只有一輪，沒有邊界可切"),
+            self._notice_line("2026-09-01T00:01:00Z",
+                             "kind=session 28% band=notice cap=4 reason=ok"),
+        ]
+        transcript = self._write_transcript(lines)
+        done = self._run("我剛剛被擋了，不能寫檔案。", transcript)
+        self.assertEqual(done.returncode, 0)
+        self.assertNotIn("被擋／水位", done.stderr,
+                         "只有一則真人訊息時沒有邊界，應退回全場既有行為")
+
+
 if __name__ == "__main__":
     unittest.main()

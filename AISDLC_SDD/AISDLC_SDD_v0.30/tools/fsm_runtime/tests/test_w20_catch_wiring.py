@@ -77,11 +77,19 @@ def _rt(tmp_path, current, name="w20"):
 
 
 def _drive_auto_compact_overflow(rt) -> dict:
-    """把 auto_compact_state 預置到上限，再觸發一次 → projected > max → escalate 分支。"""
+    """把 auto_compact_state 預置到上限，再觸發一次 → projected > max → escalate 分支。
+
+    D18（DEF-200-275 第六輪；SD-01）：cap 判定改依 `count_per_stage_by_session`（逐 session
+    分桶）而非專案級彙總 `count_per_stage`——本呼叫端不傳 `details`，session_key 固定落在
+    "unknown" 桶，必須同步預置 `count_per_stage_by_session={"unknown": MAX}`，否則新判準會讀到
+    空桶、誤判成「這個（未知）session 才第一次觸發」而不會撞 cap，這支 catch 覆蓋測試會失去
+    要測的前提（R-9.2 escalate 分支）。
+    """
     rt.state.current = "IMPLEMENTATION"
     rt.state.root["auto_compact_state"] = {
         "stage_key": rt.current_stage_key(),
         "count_per_stage": MAX_AUTO_COMPACT_PER_STAGE,
+        "count_per_stage_by_session": {"unknown": MAX_AUTO_COMPACT_PER_STAGE},
         "max_per_stage": MAX_AUTO_COMPACT_PER_STAGE,
     }
     return rt.trigger_auto_compact(cumulative_tokens=180_000, ratio=0.91)

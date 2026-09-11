@@ -123,6 +123,7 @@ from quota_messages import (  # noqa: E402,F401
     halt_marker_or_rejection,  # DEF-200-281／F-1：re-export，同 quota_messages 檔頭慣例
     halt_resets_at,
     halt_verdict,  # noqa: F401  # DEF-200-278／INV-H2：re-export，見 quota_messages 檔頭慣例
+    halted_band_line,  # D23（SD-07）：re-export，同上一行慣例
     model_hint_line,
     pace_line,
     quota_halt_message,
@@ -849,14 +850,21 @@ def quota_halt_actions(payload: dict, decision: quota_policy.Decision, now: date
 
 def quota_prepare_actions(payload: dict, decision: quota_policy.Decision, now: datetime, *,
                           latch_read, latch_write, plan_writer) -> str:
-    """真的做那三件事（出聲／寫任務書／一個視窗一次）。回「這次寫出來的任務書路徑」。"""
+    """真的做那三件事（出聲／寫任務書／一個視窗一次）。回「這次寫出來的任務書路徑」。
+
+    D22（DEF-200-278 第二輪 §8 item 1）：閂鎖鍵補 sid（比照 halt 分支，見 `quota_gate()`
+    的 halt 分支）——`quota_latch_path()` 是 machine-wide 單一檔案，鍵若不含 sid，同一
+    reset 視窗內第二個進 prepare 帶的 session 會被第一個 session 的閂鎖誤擋，拿不到
+    自己的 `write_resume_plan()` 任務書骨架（不是訊息去重問題，是實質少一份任務書）。
+    sid 取法與 halt 分支同一個來源（`resolve_halt_transcript`），刻意一致。
+    """
     latch = quota_latch_path()
-    key = f"prepare@{decision.binding.kind}@{str(binding_resets_at(decision))[:16]}"
+    transcript, _ = resolve_halt_transcript(payload)
+    sid = transcript.stem if transcript else "unknown"
+    key = f"prepare@{sid}@{decision.binding.kind}@{str(binding_resets_at(decision))[:16]}"
     if key in latch_read(latch):
         return ""
     latch_write(latch, key)
-    raw = payload.get("transcript_path")
-    transcript = Path(raw) if isinstance(raw, str) and raw.strip() else None
     plan = plan_writer(transcript) if transcript and transcript.is_file() else ""
     sys.stderr.write(quota_prepare_message(decision, plan, now))
     return plan
@@ -891,9 +899,17 @@ def pace_state(now: datetime) -> quota_policy.QuotaState:
 # 🔴 R98：新增 `model` 參數——這次要問的目標模型；`None`＝不知道，模型分軌軸（見
 # `quota_policy.MODEL_SCOPED_KINDS`）一律不進 cap 聚合，但仍全帶在 describe() 那一行裡
 # （`quota_policy._in_cap_gate()`）。既有呼叫端全部沿用這個預設，行為逐字不變。
-def pace_report(now: datetime | None = None, model: str | None = None) -> str:
-    """`--pace` 的全文：第一行是那個數字，第二行起是逐軸明細（每個 % 都帶 kind 與分鐘）。"""
+def pace_report(now: datetime | None = None, model: str | None = None,
+                sid: str | None = None) -> str:
+    """`--pace` 的全文：第一行是那個數字，第二行起是逐軸明細（每個 % 都帶 kind 與分鐘）。
+
+    D23（SD-07）：本 sid 的 halt 標記未過期時直接短路回「halted」那一行，**不**進
+    `pace_state()`（它在快取不可用時可能補打一次 `/api/oauth/usage`）——halt 期間
+    量不到本來就是事實，不需要再花一次 API 才知道。
+    """
     now = now or datetime.now().astimezone()
+    if (halted := halted_band_line(read_halt_marker(sid or ""), now)):
+        return halted + "\n"
     policy, problems = quota_policy.load_policy(policy_env())
     state = pace_state(now)
     # 🔴 `live` 落款進去是為了**下一輪**：per-agent 燃燒率＝Δpct ÷（Δ分鐘 × 併發數），

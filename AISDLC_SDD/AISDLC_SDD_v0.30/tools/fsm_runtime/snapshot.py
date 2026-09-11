@@ -90,6 +90,8 @@ def save_auto_snapshot(
 
 **建立時間**: {_now_iso()}
 **觸發原因**: {reason}（Token ratio = {ratio:.2%}, cumulative = {cumulative_tokens}）
+**分子來源 (numerator)**: transcript_api_usage（`cumulative` 是呼叫端傳入的逐字稿真實 API usage，
+不是估算值；欄位名沿用既有 `cumulative_tokens`，本行只加註來源，不改欄位名——SA-04／ARCH-05 後半）
 **產生者**: context_ledger_post.py hook（非 Claude 主動產出）
 
 ---

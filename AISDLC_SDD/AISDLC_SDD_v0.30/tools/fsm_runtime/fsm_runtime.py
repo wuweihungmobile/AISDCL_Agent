@@ -350,7 +350,8 @@ class FSMRuntime:
         session_start hook 委派呼叫——hook 偵測逾時，但 catch 記帳須跟著攔截事件的真實
         escalation 落點才不漏記。W-37-1（DEF-19-001 catch 覆蓋 4/39→5/39）。
         """
-        self.state.record_escalation(reason)
+        # D17（DEF-200-275 第六輪）：rule_id/source 供 escalation_provenance（recovery_hint 用）。
+        self.state.record_escalation(reason, rule_id="R-9.7", source="human_pending_timeout")
         # W-37-1：HUMAN_PENDING 逾時 ≥168h → ESCALATION 即 R-9.7（9.7.2）守望的失敗模式真實發生，
         # 結構化歸因到 R-9.7（無歧義映射）。**不含 9.7.3**（AUTO_COMPACT per-stage 歸 R-9.2，見
         # trigger_auto_compact 的 R-9.2 catch），杜絕雙重歸因（DEF-18-001）。flag OFF＝不記（零退化）。
@@ -456,7 +457,8 @@ class FSMRuntime:
             esc_reason = (
                 f"{gate} retry_count {new_count} ≥ {RETRY_LIMITS.get(gate, 'N/A')}"
             )
-            self.state.record_escalation(esc_reason)
+            # D17：rule_id/source 供 escalation_provenance。
+            self.state.record_escalation(esc_reason, rule_id="R-9.1", source=f"gate_retry_budget:{gate}")
             # W-19-2：gate retry budget 耗盡 → ESCALATION 即 R-9.1 守望的失敗模式真實發生，
             # 結構化歸因到 R-9.1（無歧義映射，非時序猜測）。v0.24 預設 ON 活體記 catch；
             # 顯式 opt-out（flag=0）＝不記（零退化）。
@@ -518,8 +520,10 @@ class FSMRuntime:
         pr_entry = self.state.retry("PR_REVIEW")
         pr_entry["spec_audit_count"] = int(pr_entry.get("spec_audit_count", 0)) + 1
         if pr_entry["spec_audit_count"] >= SPEC_AUDIT_MAX_PER_STAGE:
+            # D17：rule_id/source 供 escalation_provenance。
             self.state.record_escalation(
-                f"SPEC_AUDIT executed {pr_entry['spec_audit_count']} times without resolution"
+                f"SPEC_AUDIT executed {pr_entry['spec_audit_count']} times without resolution",
+                rule_id="R-9.3", source="spec_audit_exhausted",
             )
             # W-38-2（DEF-19-001 catch 覆蓋 6/39→7/39）：SPEC_AUDIT 於上限內無法解消 AC vs Test
             # Contract 矛盾 → ESCALATION 即 R-9.3（邏輯一致性防護）守望的失敗模式真實發生，結構化歸因。
@@ -559,7 +563,8 @@ class FSMRuntime:
         {"ESCALATION", "ESCALATION_FINAL", "TERMINATED", "TOKEN_BUDGET_CRITICAL"}
     )
 
-    def assert_tool_allowed(self, tool: str, target: Optional[str]) -> None:
+    def assert_tool_allowed(self, tool: str, target: Optional[str], *,
+                           session_id: Optional[str] = None) -> None:
         # deny 清單；OBSERVATION_STATES 刻意不在此 — 參見 transition_rules.OBSERVATION_STATES
         if self.state.current in self._BLOCKING_STATES:
             raise TransitionError(
@@ -570,6 +575,22 @@ class FSMRuntime:
             "invariant violated: OBSERVATION_STATES leaked into _BLOCKING_STATES"
         )
         if self.state.current == "AUTO_COMPACT_PENDING":
+            # D19（DEF-200-275 第六輪；SD-02；DEF-200-279 殘餘路徑之二）：PENDING 是專案級狀態，
+            # 但「只准 compact 工具」這個限制只該套用在觸發它的 owner session——否則任何全新視窗
+            # 第一次工具呼叫，只要專案曾有*任何*session 進過 PENDING，就會被卡死。`session_id`
+            # 未提供（既有零改動呼叫簽名）或找不到 owner 記錄時，保守 fail-closed：維持舊語意（視同
+            # owner，套用限制），不因新機制反而弱化既有安全網。
+            owner = (self.state.root.get("auto_compact_state") or {}).get("pending_owner")
+            owner_sid = owner.get("session_id") if isinstance(owner, dict) else None
+            if session_id is not None and owner_sid is not None and session_id != owner_sid:
+                # 非 owner：不受「只准 compact 工具」白名單限制，但 Rule 9.6（規格檔絕對禁令）
+                # 仍然擋——沿用同一份 `_is_blocked_spec_write`，不因 D19 開新後門。
+                if _is_blocked_spec_write(self.state.current, tool, target):
+                    raise TransitionError(
+                        f"state {self.state.current} does not allow modifying spec files "
+                        f"under {_SPEC_TARGET_PREFIXES}"
+                    )
+                return
             self._assert_allowed_under_auto_compact(tool, target)
             return
         if _is_blocked_spec_write(self.state.current, tool, target):
@@ -620,7 +641,10 @@ class FSMRuntime:
         budget = self.state.implementation_budget()
         escalate, reason = should_escalate_for_implementation(budget)
         if escalate:
-            self.state.record_escalation(reason or "implementation budget exceeded")
+            # D17：無對應 R-9.x 規則（正交，見 _ESCALATION_ATTRIBUTABLE_RULE_IDS 註解），rule_id
+            # 留 unknown；source 標明落點供 escalation_provenance／recovery_hint 顯示。
+            self.state.record_escalation(reason or "implementation budget exceeded",
+                                         source="implementation_budget")
             save_state(self.state)
             return {"escalated": True, "reason": reason}
         payload: dict = {"escalated": False, "reason": reason}
@@ -692,23 +716,49 @@ class FSMRuntime:
         if auto.get("stage_key") != stage_key:
             auto["stage_key"] = stage_key
             auto["count_per_stage"] = 0
-        projected = int(auto.get("count_per_stage", 0)) + 1
+            # D18（DEF-200-275 第六輪；SD-01）：逐 session 分桶隨 stage 換過一起歸零——換了 stage，
+            # 任何 session 之前在舊 stage 的計數都不該延續到新 stage。
+            auto["count_per_stage_by_session"] = {}
+        by_session = auto.setdefault("count_per_stage_by_session", {})
+        session_id = (details or {}).get("session_id") if isinstance(details, dict) else None
+        # D17／D18 共用同一個「缺席時」sentinel："unknown"（不新開一套語意）。
+        session_key = session_id or "unknown"
+        projected = int(auto.get("count_per_stage", 0)) + 1  # 專案級彙總（沿用；R-9.2 catch 記帳／
+        # 既有測試讀這個欄位當「stage 總共 compact 過幾次」，不受本輪影響）。
+        # D18（SD-01；DEF-200-279 P1 殘餘路徑之一）：cap 超限的判定改依「本 session 自己在這個
+        # stage 觸發過幾次」，不是專案級彙總——否則從未觸發過的全新 session 會被別的 session 的
+        # 計數牽連而誤判 cap_exceeded（p1_cap_crosssession2.py 實測：session-B 第一次呼叫就被
+        # session-A 的計數卡住）。
+        projected_session = int(by_session.get(session_key, 0)) + 1
         max_per_stage = int(auto.get("max_per_stage", MAX_AUTO_COMPACT_PER_STAGE))
-        if projected > max_per_stage:
+        if projected_session > max_per_stage:
             reason = (
                 f"auto_compact exceeded {max_per_stage} per stage '{stage_key}' "
                 "— 可能引用文件過大或 stage 需拆分；拒絕再次 compact"
             )
-            session_id = (details or {}).get("session_id") if isinstance(details, dict) else None
-            existing_marker = auto.get("cap_exceeded")
+            by_session_markers = auto.setdefault("cap_exceeded_by_session", {})
+            existing_marker = by_session_markers.get(session_key)
             # 複審 R-D13（DEF-200-275 第五輪）：first_mark 判準原本是「有無 marker」的全域一次性
             # 旗標、不分 stage——stage-A 撞 cap 後，stage-B（全新 stage／全新 session）再撞 cap 時
             # 會被 stage-A 的舊 marker 卡死（不重寫、不補 abort_report），marker 與現實不符。改為
             # 「無 marker，或 marker 記的 stage_key 已不是目前 stage」才算首次——同一 stage 內反覆
-            # 命中仍維持不重寫（保留該 stage 第一次觸發的 at/session_id/count 證據）。
+            # 命中仍維持不重寫（保留該 stage 第一次觸發的 at/session_id/count 證據）。D18：判準改
+            # 讀逐 session 的 marker（`by_session_markers`），不是專案級單一 marker——兩個不同
+            # session 各自「第一次撞到自己的 cap」都要各自留一份證據，不能互相蓋掉。
             first_mark = (
                 not isinstance(existing_marker, dict)
                 or existing_marker.get("stage_key") != stage_key
+            )
+            # D18：這個 stage 在「這次覆寫前」是否已有『另一個』session 撞過 cap——供 hook 端
+            # deny 訊息分辨「本 session 已 N 次」vs「另一 session 也撞過，本 session 現在自己也
+            # 達到門檻」（決策 D18；讀的是尚未被本次覆寫的專案彙總 marker）。
+            prior_agg_marker = auto.get("cap_exceeded")
+            other_session_id = (
+                prior_agg_marker.get("session_id")
+                if isinstance(prior_agg_marker, dict)
+                and prior_agg_marker.get("stage_key") == stage_key
+                and prior_agg_marker.get("session_id") != session_id
+                else None
             )
             # D13（DEF-200-275 第五輪／ARCH-02／SD-02／QA P0）：per-stage cap 超限**不再**寫
             # 專案級 ESCALATION（不呼叫 record_escalation、不 transition，state.current 維持原狀）
@@ -718,12 +768,17 @@ class FSMRuntime:
             # 觸發時洗掉最早的證據）；stage 換過後視為新事件，重寫並補寫 abort report。
             if first_mark:
                 import datetime as _dt_cap
-                auto["cap_exceeded"] = {
+                marker = {
                     "at": _dt_cap.datetime.now(_dt_cap.timezone.utc).isoformat(timespec="seconds"),
                     "session_id": session_id,
                     "stage_key": stage_key,
-                    "count": projected,
+                    "count": projected_session,
                 }
+                by_session_markers[session_key] = marker
+                # 專案級彙總欄：保留「最近一次撞 cap（任一 session）」的快照，回溯相容既有讀者
+                # （test_recovery_hint.py／test_context_ledger_pre_hook.py 等既有測試讀
+                # auto_compact_state["cap_exceeded"]）。
+                auto["cap_exceeded"] = marker
                 # W-20-1（catch 覆蓋補強 DEF-19-001）沿用：R-9.2 自描述的 failure_mode（per-stage
                 # auto_compact 超限）仍真實發生，catch 語意收斂為「規則守望的失敗模式真的被打到」
                 # 而非「必進 project-level ESCALATION 狀態」——`record_state_catches` 本身只憑
@@ -743,10 +798,14 @@ class FSMRuntime:
                         reason=reason,
                         category="auto-compact-rate-limit",
                         extra_context={
-                            "count_per_stage": projected,
+                            "count_per_stage": projected_session,
                             "max_per_stage": max_per_stage,
                             "stage_key": stage_key,
                             "cumulative_tokens": cumulative_tokens,
+                            # SA-04（ARCH-05 後半；DEF-200-275 第六輪）：只加法——標明
+                            # `cumulative_tokens` 這個既有欄位的真實來源是逐字稿 API usage，不是
+                            # 估算值，不改欄位名本身（既有讀者／測試零改動）。
+                            "numerator": "transcript_api_usage",
                             "ratio": ratio,
                             "session_id": session_id,
                             "suggestions": "文件過大需拆分 / 引用策略錯 / 考慮手動深度 compaction",
@@ -761,6 +820,11 @@ class FSMRuntime:
                 "noop": True,
                 "reason": reason,
                 "count_per_stage": auto.get("count_per_stage", 0),
+                # D18：本 session 自己在這個 stage 撞了幾次（deny 訊息用這個數字，不是
+                # max_per_stage——此前 hook 端誤把門檻值當成「已觸發次數」印出）。
+                "session_count": projected_session,
+                "cap_session_id": session_id,
+                "other_session_id": other_session_id,
                 "max_per_stage": max_per_stage,
                 "stage_key": stage_key,
                 "abort_report": str(abort_report_path) if abort_report_path else None,
@@ -774,6 +838,8 @@ class FSMRuntime:
         auto["trigger_cumulative_tokens"] = cumulative_tokens
         auto["trigger_count"] = int(auto.get("trigger_count", 0)) + 1
         auto["count_per_stage"] = projected
+        # D18：逐 session 分桶與專案級彙總一起提交——這是 cap 判定真正倚賴的資料。
+        by_session[session_key] = projected_session
         auto["completed_at"] = None
         snapshot_path = save_auto_snapshot(
             self.state,
@@ -783,6 +849,15 @@ class FSMRuntime:
             compact_index=projected,  # P1-C：避免同 stage 多次 compact 互相 overwrite
         )
         auto["snapshot_path"] = str(snapshot_path)
+        # D19（DEF-200-275 第六輪；SD-02）：記下這次進 PENDING 的 owner——session_id／時間／
+        # transcript_path（陳舊判準要用，見 hook 端 `_owner_is_stale`）。`transcript_path` 由
+        # `details` 透傳（context_ledger_pre.py 的 `_details()` 已同步加這一鍵）；details 缺席
+        # 或無此鍵時老實存 None，不臆測路徑。
+        auto["pending_owner"] = {
+            "session_id": session_id,
+            "at": now,
+            "transcript_path": (details or {}).get("transcript_path"),
+        }
         self.state.current = "AUTO_COMPACT_PENDING"
         # ACT-025: record decision trace for auto-compact trigger (direct assignment
         # above, not via transition(); log explicitly here).
@@ -858,6 +933,11 @@ class FSMRuntime:
             # stage 歸零），殘留的 cap_exceeded 標記（若有）也必須一併清掉——否則下一次同 stage
             # 命中 cap 時 first_mark 判準會誤讀成「已存在同 stage marker」而不重寫/不補 abort_report。
             auto.pop("cap_exceeded", None)
+            # D18（DEF-200-275 第六輪）：逐 session 分桶與其 marker 一起歸零/清除——同一份「該
+            # stage 沒卡住」的證明對所有 session 都成立，不能只清專案級彙總欄卻留著逐 session 的
+            # 舊分桶（否則下一次某個 session 撞 cap 時，first_mark 會誤讀成早就存在同 stage marker）。
+            auto["count_per_stage_by_session"] = {}
+            auto.pop("cap_exceeded_by_session", None)
             reason += "；觀測到有效壓縮（真實 usage 回落 <85%），per-stage 計數歸零"
         import datetime as _dt
         auto["completed_at"] = _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")
@@ -1341,6 +1421,23 @@ class FSMRuntime:
                     f"category=structural，導 MFSM_ESCALATION 待人工裁決）"
                 )
 
+        if target == "ESCALATION":
+            # ARCH-R6-01（DEF-200-275 第六輪複審）：兩個分支（人工 rejected／meta_halt 攔截）
+            # 此前都直接呼叫 self.transition(target, ...) 繞過 record_escalation，
+            # escalation_provenance 從不更新。改為先落 provenance 再轉態。
+            if meta_halt_info.get("blocked"):
+                violation = meta_halt_info.get("violation")
+                esc_rule_id = {
+                    "ChurnBounded": "R-9.24.1",
+                    "GraduationRatchet": "R-9.24.2",
+                }.get(violation, "R-9.24")
+                self.state.record_escalation(
+                    exit_reason, rule_id=esc_rule_id, source="learning_commit_meta_halt",
+                )
+            else:
+                # 人工 reject 無對應 R-9.x 規則（正交，同 implementation_budget／
+                # spec_patch_no_draft），rule_id 留 unknown；source 標明落點。
+                self.state.record_escalation(exit_reason, source="learning_review_rejected")
         self.transition(
             target,
             reason=exit_reason,
@@ -1585,6 +1682,14 @@ class FSMRuntime:
                     state_name="TRAJECTORY_PREDICTED",
                 )
 
+        if target == "ESCALATION":
+            # ARCH-R6-01（DEF-200-275 第六輪複審）：abort_early 此前直接呼叫
+            # self.transition(target, ...) 繞過 record_escalation，escalation_provenance
+            # 從不更新。改為先落 provenance（Rule 9.15.2）再轉態。
+            self.state.record_escalation(
+                reason or f"trajectory_predicted exit decision={decision}",
+                rule_id="R-9.15.2", source="trajectory_predicted_abort_early",
+            )
         self.transition(
             target,
             reason=reason or f"trajectory_predicted exit decision={decision}",
@@ -1615,9 +1720,15 @@ class FSMRuntime:
         save_state(self.state)
         if n >= self.DISPATCH_REJECT_LIMIT:
             bucket["consecutive_rejections"] = 0  # reset after escalation
+            esc_reason = f"Rule 9.19.3: {n} consecutive dispatch rejections ({reason})"
+            # ARCH-R6-01（DEF-200-275 第六輪複審）：此前直接呼叫 self.transition("ESCALATION", ...)
+            # 繞過 record_escalation，導致 escalation_provenance／escalation_history 完全不更新
+            # ——新視窗會被前一次（可能已解決）escalation 的舊溯源誤導。改為先落 provenance
+            # （rule_id=R-9.19.3／source=cost_gate_escalation）再轉態。
+            self.state.record_escalation(esc_reason, rule_id="R-9.19.3", source="cost_gate_escalation")
             self.transition(
                 "ESCALATION",
-                reason=f"Rule 9.19.3: {n} consecutive dispatch rejections ({reason})",
+                reason=esc_reason,
                 trigger="cost_gate_escalation",
             )
             return {"escalated": True, "count": n, "reason": reason}
@@ -2181,8 +2292,10 @@ class FSMRuntime:
             )
             return {"exited": True, "verdict": "pass", "to": "EXECUTION_EVALUATION"}
         if verdict == "policy_violation":
+            # D17：rule_id/source 供 escalation_provenance。
             self.state.record_escalation(
-                reason or "sandbox_policy_violation (ACT-061): image/簽章/lockfile/self-STRIDE 違反"
+                reason or "sandbox_policy_violation (ACT-061): image/簽章/lockfile/self-STRIDE 違反",
+                rule_id="R-SELF-STRIDE", source="sandbox_hardening_policy_violation",
             )
             # W-38-1（DEF-19-001 catch 覆蓋 5/39→6/39）：SANDBOX_HARDENING_GATE policy_violation
             # → ESCALATION 即 R-SELF-STRIDE（Loop Self-STRIDE）守望的失敗模式真實發生，結構化歸因。
@@ -2304,8 +2417,10 @@ class FSMRuntime:
                 f"exit_monitor_violation called in state={self.state.current}, expected MONITOR_VIOLATION"
             )
         tracking = self.state.root.get("monitor_violation_tracking", {})
+        # D17：rule_id/source 供 escalation_provenance。
         self.state.record_escalation(
-            reason or f"runtime monitor invariant breach: {tracking.get('invariant', '?')}"
+            reason or f"runtime monitor invariant breach: {tracking.get('invariant', '?')}",
+            rule_id="R-9.21", source="monitor_violation",
         )
         # W-19-2：monitor invariant 破壞 → MONITOR_VIOLATION → ESCALATION 即 R-9.21 守望的
         # 失敗模式真實發生，結構化歸因到 R-9.21（無歧義映射）。flag OFF＝不記（零退化）。
@@ -2652,10 +2767,12 @@ class FSMRuntime:
         counts = tracking.setdefault("count_per_ac", {})
         prior = int(counts.get(ac_id, 0))
         if prior >= self.MAX_SPEC_PATCH_PER_AC:
-            # 超限 → 直升 ESCALATION（不進 SPEC_PATCH_PROPOSAL）
+            # 超限 → 直升 ESCALATION（不進 SPEC_PATCH_PROPOSAL）；D17：rule_id/source 供
+            # escalation_provenance。
             self.state.record_escalation(
                 f"spec_patch limit exceeded for {ac_id} "
-                f"({prior} ≥ {self.MAX_SPEC_PATCH_PER_AC}); structural — needs human"
+                f"({prior} ≥ {self.MAX_SPEC_PATCH_PER_AC}); structural — needs human",
+                rule_id="R-9.22", source=f"spec_patch_limit:{ac_id}",
             )
             # W-20-1（catch 覆蓋補強 DEF-19-001）：spec_patch per-AC 上限耗盡 → ESCALATION 即
             # R-9.22（Phase J 規格自癒）守望的失敗模式真實發生，結構化歸因到 R-9.22（無歧義映射，
@@ -2701,7 +2818,9 @@ class FSMRuntime:
             raise ValueError(f"invalid outcome={outcome!r}; expected 'drafted' / 'nodraft'")
         target = mapping[outcome]
         if outcome == "nodraft":
-            self.state.record_escalation(reason or "spec_patch: unable to draft, escalate")
+            # D17：無對應 R-9.x 規則（正交，同 implementation_budget），source 標明落點。
+            self.state.record_escalation(reason or "spec_patch: unable to draft, escalate",
+                                         source="spec_patch_no_draft")
         self.transition(
             target,
             reason=reason or f"spec_patch_proposal outcome={outcome}",
@@ -3051,6 +3170,15 @@ class FSMRuntime:
         if decision not in mapping:
             raise ValueError(f"invalid decision={decision!r}; expected 'done' / 'failed'")
         target = mapping[decision]
+        if target == "ESCALATION":
+            # ARCH-R6-01（DEF-200-275 第六輪複審）：failed 此前直接呼叫
+            # self.transition(target, ...) 繞過 record_escalation，escalation_provenance
+            # 從不更新。無對應 R-9.x 規則（正交，同 implementation_budget／spec_patch_no_draft），
+            # rule_id 留 unknown；source 標明落點。
+            self.state.record_escalation(
+                reason or f"autoclaude_delegated exit decision={decision}",
+                source="autoclaude_delegated_failed",
+            )
         self.transition(
             target,
             reason=reason or f"autoclaude_delegated exit decision={decision}",

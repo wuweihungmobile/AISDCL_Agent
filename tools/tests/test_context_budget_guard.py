@@ -1075,6 +1075,51 @@ class CompactBoundaryLatchTest(unittest.TestCase):
         self.assertEqual(guard.compact_boundary_count(path), 1)
 
 
+class AtomicLatchStorageTest(unittest.TestCase):
+    """D22（SD-05）：`remember_latch` 從整讀→union→整寫改為每 key 一個 `O_CREAT|O_EXCL`
+    標記檔，新 key 結構上不可能覆蓋既有 key。詳見 docs/06_quality/
+    CrossPlatform_DEF200275_Context_Metering_Evidence.md〈第六輪〉。"""
+
+    def setUp(self) -> None:
+        self.tmp = _tmpdir(self, "ctxguard-atomiclatch-")
+        self.state = self.tmp / "state.json"
+
+    def test_two_different_keys_land_in_two_separate_marker_files(self) -> None:
+        guard.remember_latch(self.state, "keyA")
+        guard.remember_latch(self.state, "keyB")
+        marker_dir = self.state.parent / f"{self.state.stem}.latches.d"
+        self.assertTrue(marker_dir.is_dir(), "新版必須把標記檔放進獨立目錄，不是單一 JSON 檔")
+        self.assertEqual(len(list(marker_dir.iterdir())), 2,
+                         "兩個不同 key 必須各自佔一個檔——單一共用檔案無法個別原子化")
+        self.assertEqual(guard.announced_latches(self.state), {"keyA", "keyB"})
+
+    def test_writing_a_second_key_never_touches_the_first_keys_file(self) -> None:
+        """紅端：舊版整寫必改動第一個 key 的檔案；新版各自獨立檔案，位元組不變。"""
+        guard.remember_latch(self.state, "keyA")
+        marker_dir = self.state.parent / f"{self.state.stem}.latches.d"
+        (first_file,) = list(marker_dir.iterdir())
+        before_bytes = first_file.read_bytes()
+        before_mtime = first_file.stat().st_mtime_ns
+
+        guard.remember_latch(self.state, "keyB")
+
+        self.assertEqual(first_file.read_bytes(), before_bytes,
+                         "第二個 key 的寫入動到了第一個 key 的檔案 ⇒ 不是真正原子化")
+        self.assertEqual(first_file.stat().st_mtime_ns, before_mtime,
+                         "mtime 改變＝檔案被重寫過，違反「新增 key 不觸碰既有 key」的性質")
+
+    def test_remembering_the_same_key_twice_is_idempotent(self) -> None:
+        """O_EXCL 建檔在 key 已存在時失敗——必須安靜吞掉，不得升級成守衛失敗。"""
+        guard.remember_latch(self.state, "keyA")
+        guard.remember_latch(self.state, "keyA")  # 不應拋例外
+        self.assertEqual(guard.announced_latches(self.state), {"keyA"})
+
+    def test_unreadable_state_returns_empty_set_not_a_crash(self) -> None:
+        """目錄不存在（從未 remember 過任何 key）：寧可多喊一次，不要崩潰或誤報已喊過。"""
+        never_written = self.tmp / "never-written.json"
+        self.assertEqual(guard.announced_latches(never_written), set())
+
+
 class PreToolUseBlockTest(unittest.TestCase):
     """R79 交付物 A：≥90% 時**真的擋下來**，而不是印一段話請模型自己記得。
 
@@ -10762,6 +10807,9 @@ class QuotaPrepareBandActuallyPreparesTest(unittest.TestCase):
             with self.subTest(event=event, tool=tool):
                 self.err, self.plans = io.StringIO(), []
                 (self.tmp / "latch.json").unlink(missing_ok=True)
+                # D22（SD-05）：閂鎖落點已改成 `guard._latch_marker_dir()` 目錄，需一併清。
+                shutil.rmtree(guard._latch_marker_dir(self.tmp / "latch.json"),
+                             ignore_errors=True)
                 rc = self._gate_with_spy(event, tool)
                 said = self.err.getvalue()
                 self.assertEqual(rc, 0, "prepare 帶擋下了收斂型工具 ⇒ 人連收斂都做不完")

@@ -251,11 +251,39 @@ class FSMState:
         for gate_name in ("SCG_VALIDATION", "PR_REVIEW", "RTM_VERIFY"):
             self.reset_retry(gate_name)
 
-    def record_escalation(self, reason: str, *, details: Optional[Dict[str, Any]] = None) -> None:
+    def record_escalation(self, reason: str, *, details: Optional[Dict[str, Any]] = None,
+                          rule_id: Optional[str] = None, source: Optional[str] = None) -> None:
         # DEF-200-275 第四輪（D6b）：`details` 讓 escalation 紀錄帶上來源 session_id／used／window／
         # window_source／compact_boundaries，供 recovery_hint 印出「這個 ESCALATION 來自哪個 session、
         # 是 context budget 還是結構性」。None 時鍵集合與此前逐字相同（96 個既有呼叫端零改動）；
         # 既有四鍵在前且不被 details 覆寫。
+        #
+        # D17（DEF-200-275 第六輪／DEF-200-283）：F-ARCH-01／QA-C1 指出——任一原因（不只 context
+        # budget）寫入的 project-level ESCALATION，都會讓全新視窗第一次工具呼叫被無條件擋下，且
+        # 訊息答不出「這是不是我這個 session 觸發的」。
+        #
+        # 🔴 ARCH-R6-01 訂正（同輪複審抓到；訂正協議：不靜默覆寫，原文與此區隔）：本函式此前
+        # 自稱是 fsm_runtime.py 全部生產落點「唯一」寫入 current="ESCALATION" 的地方，但當時
+        # exit_learning_commit（兩分支）／exit_trajectory_predicted 的 abort_early／
+        # record_dispatch_rejection／exit_autoclaude_delegated 的 failed 這 4 個函式仍直接呼叫
+        # self.transition("ESCALATION", ...) 繞過本函式，完全不落 escalation_provenance／
+        # escalation_history，使 recovery_hint() 誤印前一次（可能已解決）事件的舊溯源。本輪已把
+        # 這 4 處全部改為先呼叫本函式。現在 fsm_runtime.py 全部生產落點——R-9.1／R-9.2(*)／R-9.3／
+        # R-9.7／R-9.15.2／R-9.19.3／R-9.21／R-9.22／R-9.24.1／R-9.24.2／R-SELF-STRIDE／
+        # implementation-budget／spec_patch-no-draft／learning-review-rejected／
+        # autoclaude-delegated-failed——都在轉態前呼叫本函式（(*) R-9.2 的 cap_exceeded 是唯一
+        # 例外：那條路徑刻意不呼叫本函式、也不轉態，見 trigger_auto_compact 附近註解，D13）。
+        # 呼叫端多半會在本函式之後**再呼叫一次** self.transition("ESCALATION", ...) 完成
+        # decision_trace／save_state／規則遙測——那次重覆寫 current 是 no-op（本函式已寫過），
+        # 但會讓 decision_trace 該筆的 from_state 顯示 "ESCALATION"（本函式已改寫 current）而非
+        # 轉態前的真實來源狀態；這是 sandbox_hardening／spec_patch_proposal 等既有落點就有的既有
+        # 行為（非本輪引入的新缺陷），recovery_hint() 不依賴 decision_trace.from 判斷觸發者，故
+        # 不受影響。ESCALATION_FINAL 一律從已在 ESCALATION 的狀態經 transition() 轉出，天然繼承
+        # 這裡寫的 provenance，不需要另一個落點。
+        # 落一份「最新快照」到 self.root["escalation_provenance"]，供 recovery_hint() 回答上述問題。
+        # session_id／rule_id／source 三者任一缺席一律老實寫 "unknown"（不臆測），rule_id 沿用呼叫端
+        # 已算好的 R-9.x 編號（與 `_record_escalation_catches` 同一份字面值，不重新推導）；
+        # 兩個新關鍵字參數皆 optional，96 個既有呼叫端（含 chaos_runner／tests）零改動。
         history = self.root.setdefault("escalation_history", []) or []
         entry: Dict[str, Any] = {
             "triggered_at": _now(),
@@ -270,6 +298,14 @@ class FSMState:
         cum = self.cumulative()
         cum["escalation_count"] = int(cum.get("escalation_count", 0)) + 1
         self.current = "ESCALATION"
+        prov_session_id = details.get("session_id") if details is not None else None
+        self.root["escalation_provenance"] = {
+            "session_id": prov_session_id or "unknown",
+            "at": entry["triggered_at"],
+            "reason": reason,
+            "rule_id": rule_id or "unknown",
+            "source": source or "unknown",
+        }
 
     # QA Round-3 P2-02: `add_pending_ci_event` / `remove_pending_ci_event` were
     # unused (event_reconciler relies on `ci_event_seen_hashes`, not the pending

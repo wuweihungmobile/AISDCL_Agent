@@ -376,7 +376,12 @@ _TREE_FILE_FLOORS: dict[str, int] = {
     # 本包新增 `test_context_window_parity.py`〔根層守衛 ↔ SDD context_window 的 parity 鎖〕，
     # 55 只剩實測的 79%、低於 `TREE_FLOOR_RATIO` 80%，第三向逐字指示「重釘為 56」
     # ⇒ 照填、零加減推算；方向＝上修）。
-    "tools/tests": 56,
+    # 🔴 DEF-200-275 第六輪收尾重釘 56 → 58：`tools/tests` 由 70 支長到 **73**
+    # （Dev-B／Dev-C 並行包新增 `test_root_guard_known_model_r145.py`／
+    # `test_sentinel_tick_e2e_r145.py`，另一支為既有樹成長），56 只剩實測的 77%、低於
+    # `TREE_FLOOR_RATIO` 80%，`run_root_unittests.py` 前置掃描第三向逐字指示「重釘為 58」
+    # ⇒ 照填、零加減推算；方向＝上修。四包全部停工後的單人窗口所量。
+    "tools/tests": 58,
     # 🔴 R82 包 A2（DEBT-01）：204 → 205。新增 `AutoClaude/tests/contract/test_w6_deletion.py`
     # （AC2-2 的真斷言落點）後掃描面變 257，下限只剩實測的 79% ⇒ 依 `TREE_FLOOR_RATIO` 的
     # 防腐那一向轉紅。這正是它的設計意圖：下限不跟著長就會愈來愈鬆而沒有任何東西說話。
@@ -446,7 +451,11 @@ _TREE_FILE_FLOORS: dict[str, int] = {
     # 🔴 DEF-200-275 第四輪重釘 60 → 62：該樹由 76 支長到 **78**（本包新增
     # `test_context_window.py`／`test_recovery_hint.py`），60 只剩實測的 77%，第三向逐字
     # 指示「重釘為 62」⇒ 照填、零加減推算。
-    LATEST_FSM_TESTS_TREE: 62,
+    # 🔴 DEF-200-275 第六輪收尾重釘 62 → 64：該樹由 78 支長到 **80**（Dev-B 新增
+    # `test_settings_matcher_r145.py`、複審修復波 Dev-A2 新增 `test_escalation_provenance_r6.py`），
+    # 62 只剩實測的 77%，第三向逐字指示「重釘為 64」⇒ 照填、零加減推算；複審全 APPROVE、
+    # 全包停工後的單人窗口所量。
+    LATEST_FSM_TESTS_TREE: 64,
 }
 
 #: 下限相對實測值的目標比例（`floor ≈ actual × 本值`）。兩個方向都由它定義：

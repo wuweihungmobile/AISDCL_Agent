@@ -222,10 +222,14 @@ stderr 全空**。
 
 判準形狀
 --------
-句子含「被擋」類詞（`BLOCK_CLAIM_RE`；引號夾住的不算，沿用 `_is_quoted`），而**全場**證據
+句子含「被擋」類詞（`BLOCK_CLAIM_RE`；引號夾住的不算，沿用 `_is_quoted`），而證據
 （`tool_result` ＋ 兩型 attachment 的合併文字）不含 `deny`／`[SDD-FSM]`／`[SDD-CTX]`／
 `used=`／`--check`／`kind=`／`band=`／`cap=`／權限牆字樣（`BLOCK_EVIDENCE_RE`）⇒ 出聲。
 不逐句比對——被擋事件與宣稱它的那句話本來就常常不在同一句裡（先被擋、事後收工才提一句）。
+🔴 **D24（DEF-200-275 第六輪；SD-06）訂正**：`unbacked_block_claim_hits()` 這個純函式
+本身不分時間——它只認呼叫端遞給它的 `evidence_text` 是什麼。分時間的責任在**呼叫端**
+（`main()` 經由 `_block_claim_evidence()`）：那裡把「全場」窄化成「倒數第二則真人
+role=user 訊息之後」（本回合＋前一回合），見下方「證據面窄化」段。
 
 真實面假紅普查（母體＝`~/.claude/projects/-Users-wuweihong-Antigravity-AISDCL-Agent/*.jsonl`
 近 7 天、非 rglob、只掃頂層，2026-09-11 現查，**40 支**）：逐支循序掃描，證據只累積「這一句
@@ -244,11 +248,26 @@ stderr 全空**。
 `TestTheUnbackedBlockClaimHookWiring`；重跑方式見 `census_d15.py` 方法段，母體與範圍
 逐字複製於本段）。
 🔴 **`kind=`／`band=`／`cap=` 的覆蓋率不是免費的**（本機 40 支中分別 16／14／16 支含這些
-字樣，約 40%）：它們是額度守衛幾乎任何時候都可能印出的字，本場任何地方出現過一次，就會
-讓本判準對之後所有「被擋」宣稱整場靜音，即使那次通知與這一次的「被擋」宣稱無關、甚至早
-已過期。這是**刻意的**（可滿足性 > 精確盯住同一次事件——本判準問的是「這件事在本場有沒
-有發生過的任何痕跡」，不是「這一次的痕跡是不是同一次」），但誠實登記：它比第一／第四個
-判準更容易被無關的舊證據免罰，這是本判準的精確度代價。
+字樣，約 40%；此數字是**窄化前**的量測值，見下段 D24 訂正）：它們是額度守衛幾乎任何時候
+都可能印出的字，若不分時間全場都算數，本判準會對之後所有「被擋」宣稱整場靜音，即使那次
+通知與這一次的「被擋」宣稱無關、甚至早已過期。這是**刻意的可滿足性選擇**（可滿足性 >
+精確盯住同一次事件），但誠實登記：它比第一／第四個判準更容易被無關的舊證據免罰，這是本
+判準的精確度代價。
+
+證據面窄化（D24；DEF-200-275 第六輪；SD-06 收斂版）
+--------------------------------------------------
+上面 40% 的覆蓋率量的是「全場」窗口的代價——SD-06 指出這個窗口大到會讓**任何時間點**
+出現過的通知，替**之後所有**「被擋」宣稱背書，即使早已過期或無關。`main()` 呼叫
+`_block_claim_evidence()` 把窗口收斂為「倒數第二則**真人**（非 tool_result 中繼）
+role=user 訊息之後」（本回合＋前一回合）：`_read_transcript()` 額外回傳 `user_turns`
+（真人訊息的落款時刻，依檔案序），少於兩則時沒有邊界可切、退回全場（覆蓋本段假紅普查
+的 4 筆案例——那些語料本來就不含任何真人 role=user 訊息，行為不變）；邊界找得到時，
+只有落款 `>= 邊界` 的 `tool_result`／attachment 才算數。`>=` 而非 `>`、落款解析不出的
+一律當「之後」收進來——兩者都是同一個 fail-open 方向：窗口切錯的代價是把合法宣稱誤判
+成無佐證（新的假紅），寧可多算一筆舊證據也不要犯這個方向的錯。這不是把 40% 歸零：
+「上一回合」與「這一回合」之間的真實佐證仍然算數（原判準設計動機——先被擋、下一回合才
+提一句），窄化只收斂掉「兩回合前及更早」那一段，回歸鎖見
+`tools/tests/test_claim_provenance_r86.py::TestTheBlockClaimEvidenceWindowIsRecentTurnsOnly`。
 處置同其餘判準：**只出聲，永不阻斷**。
 
 誠實劃界（本檔抓不到什麼）
@@ -277,16 +296,21 @@ stderr 全空**。
   attachment（`hook_success` 只有在 hook 真的印字時才落盤，全母體實測）。
 · 逐字稿讀不到／payload 退化／任何非預期例外 ⇒ **一律 fail-open 靜默放行**
   （`.claude/settings.json` description 記載過的 P0：hook 誤觸 deny 會把所有工具硬鎖死）。
-· 第五個判準的證據面是**全場、不分時間先後、也不分是不是同一次事件**：本場任何時候出現
-  過一次 deny／額度通知／權限牆訊息，之後所有「被擋」宣稱都會被放行，即使那次通知早已
-  過期或與這次無關（見假紅普查段落）。這是刻意的可滿足性選擇，代價是精確度。
+· 第五個判準的證據面自 D24 起收斂為**倒數第二則真人 role=user 訊息之後**（本回合＋前一
+  回合），不再是全場——但仍**不逐句比對**：這個窗口內任何時候出現過一次 deny／額度
+  通知／權限牆訊息，之後所有「被擋」宣稱都會被放行，即使那次通知與這次宣稱本身無關
+  （見「證據面窄化」段）。少於兩則真人訊息（例如 session 剛開始的第一輪）時沒有邊界可
+  切，仍退回全場——這個殘餘缺口在實務上代價很低（那個時間點逐字稿本來就短），但誠實
+  登記：它不是「窮盡消除全場代價」，只是把代價收斂到「兩回合前及更早」那一段。
 
 判準本體 `unsourced_verdict_hits()` 是純函式，由 `tools/tests/test_claim_provenance_r86.py`
 機械釘住（含合成注入紅綠雙向自證）。依賴方向與 `lint_powershell_command.py` 同：
 **`tools/probe` 向本檔借，本檔不 import 任何 repo 模組**（本檔由 `runpy.run_path` 起、
 `sys.path` 上沒有 `tools/`，import 期爆掉會破壞 fail-open 契約）。第五個判準
 `unbacked_block_claim_hits()` 同一套機械釘住方式，測試住同一檔的
-`TestTheUnbackedBlockClaimJudgement`／`TestTheUnbackedBlockClaimHookWiring`。
+`TestTheUnbackedBlockClaimJudgement`／`TestTheUnbackedBlockClaimHookWiring`；D24 的窗口
+收斂（`_is_genuine_user_turn()`／`_block_claim_evidence()`）另有
+`TestTheBlockClaimEvidenceWindowIsRecentTurnsOnly` 釘住。
 """
 from __future__ import annotations
 
@@ -741,12 +765,38 @@ def error_literal_mechanism_hits(claim_text: str, tool_output: str) -> list[dict
 #: 兩型 attachment 從未被 JSON 解析過，第五個判準因此永遠拿不到本場真實的 deny／通知
 #: 證據（見 `_block_evidence_text`）。
 _INTERESTING = ('"tool_result"', '"hook_success"', '"hook_non_blocking_error"',
-                '"hook_blocking_error"', '"hook_additional_context"')
+                '"hook_blocking_error"', '"hook_additional_context"',
+                # D24（DEF-200-275 第六輪）新增：真人打字的 role=user 訊息此前不含上面
+                # 任何字面 ⇒ 前篩把它們整批擋在 json.loads 之外，`unbacked_block_claim_
+                # hits()` 因此量不到『回合邊界』。兩種寫法都收：真實落盤是 `"role":"user"`
+                # （無空白）；`json.dumps` 預設吐 `"role": "user"`（一個空白）——本檔測試
+                # 用後者合成逐字稿，兩邊都要匹配。
+                '"role":"user"', '"role": "user"')
+
+
+def _is_genuine_user_turn(content) -> bool:
+    """`content` 是**真人打字**的一輪發言，不是 tool_result 中繼（D24 回合邊界判準）。
+
+    Claude Code 逐字稿把工具結果包成 `role=user` 訊息回灌給模型——這在檔案裡跟真人
+    打的字長得一樣（`message.role == "user"`），差別只在 `content`：中繼訊息的
+    `content` 是清一色 `type=tool_result` 的 block 清單；真人訊息要嘛是純字串，要嘛
+    清單裡至少有一個非 `tool_result` 的 block（例如 `text`，含 slash-command 展開）。
+    本機全母體現查（47 筆 role=user 記錄）：8 筆純字串／1 筆非 tool_result 清單皆為
+    真人發言，38 筆清一色 tool_result 清單皆為中繼——用這個分野挑出來的『回合邊界』
+    與人類直覺的『這是新的一輪』一致。
+    """
+    if isinstance(content, str):
+        return bool(content.strip())
+    if isinstance(content, list):
+        blocks = [b for b in content if isinstance(b, dict)]
+        return bool(blocks) and any(b.get("type") != "tool_result" for b in blocks)
+    return False
 
 
 def _read_transcript(transcript_path: str, byte_cap: int = 32 * 1024 * 1024
-                     ) -> tuple[list, list]:
-    """一次掃完 → `([(落款時刻|None, 工具輸出文字)], [帶 hook attachment 的記錄])`。
+                     ) -> tuple[list, list, list]:
+    """一次掃完 → `([(落款時刻|None, 工具輸出文字)], [帶 hook attachment 的記錄],
+    [真人 role=user 訊息的落款時刻，依檔案序])`。
 
     `byte_cap` 是防呆而非效能手段：本機最大逐字稿 6.0 MB／全場 51 支掃完 10.3 s
     ⇒ 單場遠在預算內。超過上限時**回空字串會讓每個數字都變成命中**（截斷偏向假紅），
@@ -757,12 +807,16 @@ def _read_transcript(transcript_path: str, byte_cap: int = 32 * 1024 * 1024
     本檔第一版就是回空字串，被 `tools/tests/test_claim_provenance_r86.py::
     TestTruncationBiasesTowardsSilenceNotFalseRed` 當場抓出來（逐字稿路徑不存在時
     噴出一整段違規訊息）——「證據面拿不到」與「證據面裡沒有這個數字」必須分開。
+
+    第三個回傳值（`user_turns`）只給 D24 的窗口收斂用；落款解析不出（`when is None`）
+    的真人訊息不計入——沒有時刻就沒辦法拿它當邊界，寧可少算一個邊界也不要用一個猜的。
     """
     size = os.path.getsize(transcript_path)  # OSError ⇒ 交給 main() fail-open
     if size > byte_cap:
         raise ValueError("transcript exceeds byte cap")
     stamped: list = []
     records: list = []
+    user_turns: list = []
     with open(transcript_path, encoding="utf-8", errors="replace") as handle:
         for line in handle:
             if not any(token in line for token in _INTERESTING):
@@ -780,6 +834,9 @@ def _read_transcript(transcript_path: str, byte_cap: int = 32 * 1024 * 1024
             if not isinstance(message, dict):
                 continue
             content = message.get("content")
+            if (when is not None and message.get("role") == "user"
+                    and _is_genuine_user_turn(content)):
+                user_turns.append(when)
             if not isinstance(content, list):
                 continue
             for block in content:
@@ -791,7 +848,7 @@ def _read_transcript(transcript_path: str, byte_cap: int = 32 * 1024 * 1024
                 elif isinstance(inner, list):
                     stamped.extend((when, str(b.get("text") or "")) for b in inner
                                    if isinstance(b, dict))
-    return stamped, records
+    return stamped, records, user_turns
 
 
 def _tool_output_digits(transcript_path: str, byte_cap: int = 32 * 1024 * 1024) -> str:
@@ -826,6 +883,35 @@ def _block_evidence_text(records: list) -> str:
             elif isinstance(content, str):
                 parts.append(content)
     return "\n".join(parts)
+
+
+def _block_claim_evidence(stamped: list, records: list, user_turns: list) -> str:
+    """D15 判準專用的證據面（D24；DEF-200-275 第六輪；SD-06 收斂版）。
+
+    把窗口從『全場不分時間』收斂為『倒數第二則真人 role=user 訊息之後』（本回合＋
+    前一回合），取代 `unbacked_block_claim_hits()` 原本『全場』的證據來源——本函式
+    只影響第五個判準，`unsourced_verdict_hits`／`naked_verdict_hits`／
+    `error_literal_mechanism_hits`／`stale_pace_hits` 四個判準仍讀全場 `output`，
+    不受影響（它們沒有 SD-06 那個『整場靜音』的代價，不需要這個窗口）。
+
+    `user_turns`（`_read_transcript` 回傳）少於兩則（含 0／1 則）時沒有『倒數第二則』
+    可切 ⇒ 退回全場——這正是既有 4 筆假紅普查案例＋既有 hook-wiring 測試的形狀
+    （合成語料本來就不含任何真人 role=user 訊息），故此路徑不需要、也不應該改變既有
+    行為。邊界＝倒數第二則真人訊息的落款時刻，`>=` 邊界者算『之後』（含邊界本身那一刻）；
+    落款解析不出的 stamped／records 項一律當作『之後』收進來——fail-open 方向：窗口切
+    錯的代價是誤判合法宣稱為無佐證（新的假紅），寧可多算一筆舊證據也不要犯這個方向的錯。
+    """
+    if len(user_turns) < 2:
+        output = "\n".join(text for _when, text in stamped)
+        return output + "\n" + _block_evidence_text(records)
+    boundary = sorted(user_turns)[-2]
+    output = "\n".join(text for when, text in stamped if when is None or when >= boundary)
+    windowed_records = []
+    for rec in records:
+        stamp = _parse_aware(rec.get("timestamp")) if isinstance(rec, dict) else None
+        if stamp is None or stamp >= boundary:
+            windowed_records.append(rec)
+    return output + "\n" + _block_evidence_text(windowed_records)
 
 
 def _say(messages: list[str], event: str, quiet: bool) -> None:
@@ -888,7 +974,7 @@ def main() -> int:
         # 🔴 M1 的夾具值。缺欄位時**當成 False**（＝會發射）：CC 只在「這一回合是 Stop hook
         # 造成的續跑」時才給 True，缺席等同第一次 ⇒ 把缺席當 True 會讓通道永遠不開。
         quiet = bool(payload.get("stop_hook_active"))
-        stamped, records = _read_transcript(transcript)
+        stamped, records, user_turns = _read_transcript(transcript)
         output = "\n".join(text for _when, text in stamped)
         messages: list[str] = []
         # 抑制詞表的選擇對第一與第四個判準是同一個問題（見檔頭：無人看管時縮到只認方括號
@@ -931,7 +1017,7 @@ def main() -> int:
                     f"（判準：.claude/hooks/check_claim_provenance.py"
                     f"；關閉：AUTOSDD_CAUSAL_GUARD_OFF=1）")
         if not os.environ.get("AUTOSDD_BLOCK_CLAIM_GUARD_OFF"):
-            block_evidence = output + "\n" + _block_evidence_text(records)
+            block_evidence = _block_claim_evidence(stamped, records, user_turns)
             blocked = unbacked_block_claim_hits(claim, block_evidence)
             if blocked:
                 listed = "／".join(f"「{h['phrase']}」" for h in blocked[:4])

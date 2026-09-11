@@ -274,17 +274,24 @@ def _build_context(payload: dict | None = None) -> dict:
             f"[SDD-FSM][BLOCK] 當前狀態 {rt.state.current} — 所有工具呼叫將被 PreToolUse 阻擋，"
             "必須人工介入並執行 Session 恢復流程。"
         )
-        if rt.state.current in {"ESCALATION", "ESCALATION_FINAL"}:
-            # DEF-200-275 第四輪（C10）：印來源 session／類別／原因＋一行可複製執行的恢復指令。
-            # D16（第五輪 SA-02）：一併印目前本 session 真實水位（量不到就老實說量不到）。
-            try:
-                from tools.fsm_runtime.recovery_hint import recovery_hint  # type: ignore
-                _m, _window, _source = _recovery_measurement(payload)
-                block += "\n" + recovery_hint(
-                    rt.state, sdd_root=_SDD_ROOT, measurement=_m, window=_window, source=_source,
-                )
-            except Exception as exc:  # noqa: BLE001
-                block += f"\n[SDD-FSM][RECOVERY][WARN] recovery hint unavailable: {exc!r}"
+        # DEF-200-275 第四輪（C10）：印來源 session／類別／原因＋一行可複製執行的恢復指令。
+        # D16（第五輪 SA-02）：一併印目前本 session 真實水位（量不到就老實說量不到）。
+        # D17（第六輪；F-ARCH-04）：不再只挑 ESCALATION／ESCALATION_FINAL 兩態——外層 if 已經是
+        # 這 4 態才會進來，內層原本再篩一次只留 2 態，會讓 TOKEN_BUDGET_CRITICAL／TERMINATED 卡住時
+        # 拿不到溯源與恢復指令，與 context_ledger_pre.py 的 `_ESCALATION_STATES`（同一輪同步擴到 4
+        # 態）語意不一致（deny 訊息 vs BLOCK 訊息本該同一份「有沒有恢復提示」的判準）。
+        try:
+            from tools.fsm_runtime.recovery_hint import recovery_hint  # type: ignore
+            _m, _window, _source = _recovery_measurement(payload)
+            _caller_sid = payload.get("session_id") if isinstance(payload, dict) else None
+            if not isinstance(_caller_sid, str) or not _caller_sid.strip():
+                _caller_sid = None
+            block += "\n" + recovery_hint(
+                rt.state, sdd_root=_SDD_ROOT, measurement=_m, window=_window, source=_source,
+                caller_session_id=_caller_sid,
+            )
+        except Exception as exc:  # noqa: BLE001
+            block += f"\n[SDD-FSM][RECOVERY][WARN] recovery hint unavailable: {exc!r}"
         warnings.append(block)
     if rt.state.current == "AUTO_COMPACT_PENDING":
         auto = rt.state.root.get("auto_compact_state", {}) or {}

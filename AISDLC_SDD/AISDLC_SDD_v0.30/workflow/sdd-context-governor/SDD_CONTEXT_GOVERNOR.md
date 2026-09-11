@@ -20,7 +20,9 @@
 
 ```yaml
 context_budget:
-  model_reference: "claude-sonnet-4-6（200K token window）"
+  # SA-02（第六輪 D25）訂正：原寫死「claude-sonnet-4-6（200K token window）」與現行查表值
+  # 1,000,000 自我矛盾（5 倍落差）——分母不是固定常數，一律現查，不再假設任何模型的視窗值。
+  model_reference: "分母依 context_window.resolve_window() 分母鏈現查（tools/fsm_runtime/data/known_model_windows.json），不假設固定值"
   
   thresholds:
     green:
@@ -65,7 +67,7 @@ context_budget:
       action:
         - "拒絕本 session 非 compact 工具呼叫（DEF-200-275 第四／五輪：session 級，不寫入專案級 ESCALATION）"
         - "產出 Context Snapshot（見下方格式）"
-        - "真實逐字稿 usage 回落 < 90%（或 /compact 完成）即自動解除；ESCALATION 僅保留供人工／結構性升級（見 SDD_ESCALATION_PROTOCOL.md）"
+        - "SA-F3（第六輪複審後訂正）：回落門檻依狀態分兩種，皆已隔離 FSM 探針實測（單一 session 直接跳到 96% 進 PENDING 後，降到 88% 仍 deny／PENDING 不變，降到 82% 才真正釋放）——已進入 AUTO_COMPACT_PENDING ⇒ 真實 usage 回落 <85%（context_window.WARN_RATIO，或 /compact 完成）即自動解除；trigger 被壓抑未進 PENDING ⇒ usage 回落 <95%（CRIT_RATIO）本 deny 即解除；ESCALATION 僅保留供人工／結構性升級（見 SDD_ESCALATION_PROTOCOL.md）"
 ```
 
 ### 閾值遷移對照
@@ -75,7 +77,7 @@ context_budget:
 | 70% | warn（不變） | ✅ |
 | 85% | warn + 建議執行 /stage-compaction（不變） | ✅ |
 | **90%**（新增） | **自動 Snapshot + 強制 Auto-Compact + 成功後繼續** | ✅ 同 session 或下次 session |
-| 95% | 改為 session 級拒絕非 compact 工具（不再自動進 TOKEN_BUDGET_CRITICAL／ESCALATION；DEF-200-275 第四／五輪） | ✅ 真實 usage 回落 < 90% 或 /compact 完成即自動解除 |
+| 95% | 改為 session 級拒絕非 compact 工具（不再自動進 TOKEN_BUDGET_CRITICAL／ESCALATION；DEF-200-275 第四／五輪） | ✅ 已進 AUTO_COMPACT_PENDING：真實 usage 回落 <85%（`context_window.WARN_RATIO`）即自動解除；trigger 被壓抑未進 PENDING：回落 <95%（`CRIT_RATIO`）本 deny 即解除；/compact 完成亦解除（SA-F3 訂正，探針實測 88% 仍 deny、82% 才釋放） |
 
 ---
 
@@ -155,7 +157,10 @@ stage_compaction_protocol:
 auto_compact_flow:
   trigger:
     source: ".claude/hooks/context_ledger_post.py"
-    condition: "cumulative_ratio ≥ 0.90 且 < 0.95"
+    # SA-03（第六輪 D25）訂正：`cumulative_ratio` 是第四輪之前的舊詞（拿 CONTEXT-LEDGER 的
+    # cumulative_tokens 當分子的時代）；現在的觸發條件是本 session 逐字稿真實 API usage，
+    # cumulative_tokens 只剩稽核用途、零決策權。
+    condition: "真實 usage ratio（context_window.measure().used / resolve_window()）≥ 0.90 且 < 0.95"
     idempotent: true  # 已進入 AUTO_COMPACT_PENDING 不重複觸發
 
   step_1_snapshot:
@@ -171,25 +176,46 @@ auto_compact_flow:
   step_3_force_claude:
     actor: "post hook 的 additionalContext"
     message: |
-      [SDD-CTX][AUTO-COMPACT] context ratio ≥ 90%。
+      [SDD-CTX][AUTO-COMPACT] 本 session 逐字稿真實 usage ratio ≥ 90%（非 cumulative_ratio；SA-03/D25）。
       已自動產出 Context Snapshot。FSM: AUTO_COMPACT_PENDING。
       下一步必須立即呼叫 Skill: stage-compaction。
-      其餘工具呼叫將被 PreToolUse 阻擋。
+      其餘工具呼叫將被 PreToolUse 阻擋（僅本次觸發的 owner session；見 step_4_gated_execution）。
 
   step_4_gated_execution:
     actor: "pre hook（下次工具呼叫時）"
+    # D19（第六輪；DEF-200-275）訂正：AUTO_COMPACT_PENDING 本身仍是專案級狀態轉移（FSM
+    # 狀態集/邊未動），但 gating（「只准 compact 相關工具」的限制）改成只鎖「持有者
+    # （owner）」——trigger_auto_compact 進 PENDING 時記
+    # auto_compact_state.pending_owner = {session_id, at, transcript_path}，取代舊版
+    # 「任何 session 都受限、任何 session 都能釋放」的乒乓（ARCH-03 已否決）。
     rule: |
       if fsm.state == AUTO_COMPACT_PENDING:
-        allow: Skill(stage-compaction), Read(docs/, build/reports/), Write(CONTEXT-SNAPSHOT*)
-        deny: all others
+        if 本次呼叫的 session_id == pending_owner.session_id:
+          allow: Skill(stage-compaction), Read(docs/, build/reports/), Write(CONTEXT-SNAPSHOT*)
+          deny: all others
+        elif 本 session 自己的逐字稿真實 usage ratio 量得到且 < 0.90:
+          allow: 放行（不釋放專案級 PENDING，owner 仍需自行完成 compact）
+        elif owner 已陳舊（pending_owner.transcript_path 不存在，或其 mtime 距今
+             > SDD_PENDING_OWNER_STALE_SECONDS，預設 1800 秒，可 env 覆寫）:
+          allow: 放行並可釋放 PENDING
+        else:
+          # SA-F2（第六輪複審後訂正）：本場曾誤寫「≥0.90 時比照 owner 限制」，經隔離 FSM
+          # 探針實測（owner 90% 觸發 PENDING 後，非 owner 自身 ratio=92% 呼叫 Write 完全
+          # 放行、僅 WARN；ratio=96% 才真的被 deny）證實真實門檻是 CRIT_RATIO=0.95，不是
+          # 0.90——assert_tool_allowed／_assert_allowed_under_auto_compact 兩處程式碼一致。
+          allow: 量不到 usage ⇒ 放行一次（D11，不視為釋放）；量得到且 <0.95（CRIT_RATIO）⇒ 僅出聲警示
+                 （WARN／AUTO_COMPACT 通知），不受 owner 限制
+          deny: 量得到且 ≥0.95（CRIT_RATIO）⇒ 比照 owner 的『只准 compact 工具』限制
 
   step_5_resume:
     actor: "stage-compaction Skill（Step 5 必執行 Bash）"
     cli_command: |
-      cd AISDLC_SDD_v0.01 && python -m tools.fsm_runtime.fsm_runtime complete-auto-compact
+      # SA-01（第六輪 D25）訂正：v0.01 是 ci-gate 凍結基線（不可原地改，也不承載本檔任何
+      # D-系列修復），現場一律換成 LATEST（現查：python scripts/sdd_version.py）。
+      cd AISDLC_SDD_v<LATEST> && python -m tools.fsm_runtime.fsm_runtime complete-auto-compact
     action:
       - "FSMRuntime.complete_auto_compact() → 轉回 auto_compact_state.resume_state"
-      - "_reset_today_ledger() → 當日 CONTEXT-LEDGER-*.yaml.cumulative_tokens 歸零（entries 保留 + 寫入 phase=compact-reset 稽核紀錄）"
+      - "_reset_today_ledger() → 當日 CONTEXT-LEDGER-*.yaml.cumulative_tokens 歸零（entries 保留 + 寫入 phase=compact-reset 稽核紀錄；此值僅供稽核，零決策權，見 trigger.condition）"
       - "繼續原工作（resumed_to 即下一個應進入的狀態）"
     expected_output: |
       {"resumed_to": "<resume_state>", "ledger": {"reset": true, "path": "...", "previous_cumulative": <n>}}

@@ -222,6 +222,143 @@ class HaltVerdictTest(unittest.TestCase):
         self.assertIsNone(qg.halt_verdict(marker, idle_seconds, now))
 
 
+class HaltMarkerProbePathDoesNotCreateDirectoriesTest(unittest.TestCase):
+    """D23：`_halt_marker_probe_path()` 是 `--check` 唯讀探測入口，不得觸發
+    `trace_dir()` 的 mkdir 副作用。詳見 docs/06_quality/
+    CrossPlatform_DEF200275_Context_Metering_Evidence.md〈第六輪〉。"""
+
+    def setUp(self) -> None:
+        import tempfile
+        self.tmp = Path(tempfile.mkdtemp(prefix="d23_probe_nomkdir_"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
+        old = os.environ.get("AUTOSDD_TRACE_DIR")
+        self.trace_root = self.tmp / "never-created" / "traces"
+        os.environ["AUTOSDD_TRACE_DIR"] = str(self.trace_root)
+        self.addCleanup(lambda: (os.environ.__setitem__("AUTOSDD_TRACE_DIR", old)
+                                 if old is not None
+                                 else os.environ.pop("AUTOSDD_TRACE_DIR", None)))
+
+    def test_probing_a_never_written_marker_creates_no_directory(self) -> None:
+        path = planner._halt_marker_probe_path("sid-never-written-d23")
+        self.assertFalse(path.is_file())
+        self.assertFalse(self.trace_root.exists(),
+                         "唯讀探測不得建目錄——`--check` 的『不寫檔』契約靠這個成立")
+
+    def test_probing_an_existing_marker_finds_it(self) -> None:
+        sid = "sid-does-exist-d23"
+        qg.write_halt_marker(sid, {"sid": sid, "reset_at": "2099-01-01T00:00:00+00:00"})
+        path = planner._halt_marker_probe_path(sid)
+        self.assertTrue(path.is_file())
+        self.assertEqual(qg.read_halt_marker(sid), {"sid": sid,
+                         "reset_at": "2099-01-01T00:00:00+00:00"})
+
+
+class HaltedBandLineTest(unittest.TestCase):
+    """D23（SD-07）：`halted_band_line()` 純函式——未過期印 halted 行，過期或無標記回
+    `None`。詳見 docs/06_quality/CrossPlatform_DEF200275_Context_Metering_Evidence.md
+    〈第六輪〉。"""
+
+    def _now(self) -> datetime:
+        return datetime.now(UTC).astimezone()
+
+    def test_no_marker_returns_none(self) -> None:
+        self.assertIsNone(quota_messages.halted_band_line(None, self._now()))
+
+    def test_unexpired_marker_yields_the_halted_line(self) -> None:
+        now = self._now()
+        reset_at = now + timedelta(seconds=600)
+        line = quota_messages.halted_band_line({"reset_at": reset_at.isoformat()}, now)
+        self.assertIsNotNone(line)
+        self.assertIn("halted", line)
+        self.assertIn(reset_at.isoformat(), line)
+
+    def test_expired_marker_returns_none(self) -> None:
+        now = self._now()
+        reset_at = now - timedelta(seconds=1)
+        self.assertIsNone(
+            quota_messages.halted_band_line({"reset_at": reset_at.isoformat()}, now))
+
+    def test_unparseable_reset_at_still_yields_a_line_not_a_crash(self) -> None:
+        """解不出 reset_at 時 `_aware()` 回 `None` ⇒ 視同「尚未到」（fail-safe：寧可多印
+        一次 halted，也不要在解析失敗時假裝一切正常）。"""
+        line = quota_messages.halted_band_line({"reset_at": "not-a-timestamp"}, self._now())
+        self.assertIsNotNone(line)
+
+
+class PaceReportShortCircuitsDuringHaltTest(unittest.TestCase):
+    """D23（SD-07；INV-H3）：`pace_report()` 於 halt 未過期時須短路回 halted 行，不得
+    進 `pace_state()` 補打 API。詳見 docs/06_quality/
+    CrossPlatform_DEF200275_Context_Metering_Evidence.md〈第六輪〉。"""
+
+    def setUp(self) -> None:
+        import tempfile
+        self.tmp = Path(tempfile.mkdtemp(prefix="d23_pace_halt_"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
+        old_trace = os.environ.get("AUTOSDD_TRACE_DIR")
+        os.environ["AUTOSDD_TRACE_DIR"] = str(self.tmp / "traces")
+        self.addCleanup(lambda: (os.environ.__setitem__("AUTOSDD_TRACE_DIR", old_trace)
+                                 if old_trace is not None
+                                 else os.environ.pop("AUTOSDD_TRACE_DIR", None)))
+
+    def test_pace_state_is_never_called_while_halted(self) -> None:
+        now = datetime.now(UTC).astimezone()
+        sid = "sid-d23-pace-halt"
+        qg.write_halt_marker(sid, {
+            "sid": sid, "reset_at": (now + timedelta(seconds=600)).isoformat(),
+            "at": now.isoformat(), "band": "halt", "binding": "session"})
+
+        def _boom(*_a, **_k):
+            raise AssertionError("halt 期間不該呼叫 pace_state()——那條路可能補打一次 API")
+
+        old_pace_state = qg.pace_state
+        qg.pace_state = _boom
+        self.addCleanup(setattr, qg, "pace_state", old_pace_state)
+        report = qg.pace_report(now=now, sid=sid)
+        self.assertIn("halted", report)
+
+    def test_no_halt_marker_falls_through_to_normal_pace_report(self) -> None:
+        """對照組：沒有 halt 標記時仍走既有路徑（不是永遠短路）。"""
+        now = datetime.now(UTC).astimezone()
+        cache = self.tmp / "autosdd_quota.json"
+        cache.write_text(json.dumps({
+            "schema": qg.quota_schema(),
+            "axes": [{"kind": "session", "pct": 10.0,
+                      "resets_at": (now + timedelta(seconds=600)).isoformat()}],
+            "source": "endpoint", "measured_at": now.isoformat(timespec="seconds"),
+        }), encoding="utf-8")
+        old = qg.quota_cache_path
+        qg.quota_cache_path = lambda: cache
+        self.addCleanup(setattr, qg, "quota_cache_path", old)
+        report = qg.pace_report(now=now, sid="sid-never-halted-d23")
+        self.assertNotIn("halted", report)
+
+
+class RelayProblemsCatchesEmptySessionIdTest(unittest.TestCase):
+    """D23（SD-08）：`relay_problems()` 此前只查 session_id 存在、不查非空，空字串會
+    讓 `read_halt_marker` 靜默降級。詳見 docs/06_quality/
+    CrossPlatform_DEF200275_Context_Metering_Evidence.md〈第六輪〉。"""
+
+    def _valid_state(self, session_id: str = "sid-relayproblems-ok") -> dict:
+        return {"schema": planner.RELAY_SCHEMA, "session_id": session_id,
+                "plan_path": "x", "state": "patrolling", "kind": "sentinel",
+                "reset_at": "", "reset_source": "operator", "attempts": 0,
+                "max_attempts": 5, "allow_resume": True, "task_name": "t"}
+
+    def test_a_fully_valid_state_has_no_problems(self) -> None:
+        """對照組：本測試組的 fixture 本身必須是健康的，否則下一條測不出「單一原因」。"""
+        self.assertEqual(planner.relay_problems(self._valid_state()), [])
+
+    def test_empty_session_id_is_flagged(self) -> None:
+        state = self._valid_state(session_id="")
+        problems = planner.relay_problems(state)
+        self.assertTrue(problems, "空字串 session_id 必須被判為需要自癒")
+        self.assertTrue(any("session_id" in p for p in problems))
+
+    def test_empty_session_id_degrades_read_halt_marker_to_none(self) -> None:
+        """證明體檢面攔的正是這個真實降級路徑（不是憑空立案）。"""
+        self.assertIsNone(qg.read_halt_marker(""))
+
+
 class SentinelDecideRecognizesHaltMarkerTest(unittest.TestCase):
     """INV-H2 接線：`sentinel_decide()` 的 halt_marker 分支。"""
 
@@ -462,6 +599,68 @@ class HaltLatchIsSessionScopedTest(unittest.TestCase):
         self.assertEqual(len(self.waker_calls), 1,
                          "同一 session 在同一視窗重複 halt 不該重新 spawn"
                          "（one-shot 語意被打破）")
+
+
+class PrepareLatchIsSessionScopedTest(unittest.TestCase):
+    """D22（SD-04）：`quota_prepare_actions()` 閂鎖鍵此前不含 sid，同視窗第二個 session
+    會被第一個誤擋、拿不到任務書骨架（比照 HaltLatchIsSessionScopedTest 同型）。詳見
+    docs/06_quality/CrossPlatform_DEF200275_Context_Metering_Evidence.md〈第六輪〉。"""
+
+    def setUp(self) -> None:
+        import tempfile
+        self.tmp = Path(tempfile.mkdtemp(prefix="d22_prepare_"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
+        old_trace = os.environ.get("AUTOSDD_TRACE_DIR")
+        os.environ["AUTOSDD_TRACE_DIR"] = str(self.tmp / "traces")
+        self.addCleanup(lambda: (os.environ.__setitem__("AUTOSDD_TRACE_DIR", old_trace)
+                                 if old_trace is not None
+                                 else os.environ.pop("AUTOSDD_TRACE_DIR", None)))
+        now = datetime.now(UTC).astimezone()
+        cache = self.tmp / "autosdd_quota.json"
+        body = {"schema": qg.quota_schema(),
+                "axes": [{"kind": "session", "pct": 90.0,
+                          "resets_at": (now + timedelta(seconds=600)).isoformat()}],
+                "source": "endpoint", "measured_at": now.isoformat(timespec="seconds")}
+        cache.write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
+        for name, value in (("quota_cache_path", lambda: cache),
+                            ("fanout_ledger_path", lambda: self.tmp / "ledger.d"),
+                            ("quota_latch_path", lambda: self.tmp / "latch.json")):
+            old = getattr(qg, name)
+            setattr(qg, name, value)
+            self.addCleanup(setattr, qg, name, old)
+        self.plan_calls: list[str] = []
+
+    def _transcript(self, sid: str) -> Path:
+        ts = self.tmp / f"{sid}.jsonl"
+        ts.write_text('{"type":"assistant"}\n', encoding="utf-8")
+        return ts
+
+    def _gate(self, sid: str) -> int:
+        ts = self._transcript(sid)
+        return qg.quota_gate(
+            {"hook_event_name": "PostToolUse", "tool_name": "Read",
+             "transcript_path": str(ts)},
+            blocking=guard.BLOCKING_TOOLS, latch_read=guard.announced_latches,
+            latch_write=guard.remember_latch,
+            plan_writer=lambda t: (self.plan_calls.append(str(t)) or f"plan-for-{t}"),
+            waker=lambda t, p: {"armed": True}, event="PostToolUse")
+
+    def test_two_sessions_in_the_same_prepare_window_both_get_their_own_plan(self) -> None:
+        """紅端：修前第二個 sid 撞「已閂鎖」分支，plan_writer 只被叫一次（DEF-200-278
+        第二輪 §8 item 1）。"""
+        self._gate("sidA-d22prepare")
+        self._gate("sidB-d22prepare")
+        self.assertEqual(len(self.plan_calls), 2,
+                         "第二個 session 被第一個的機器級閂鎖誤擋 ⇒ D22 復發")
+        self.assertIn("sidA-d22prepare", self.plan_calls[0])
+        self.assertIn("sidB-d22prepare", self.plan_calls[1])
+
+    def test_same_session_repeated_prepare_does_not_rewrite(self) -> None:
+        """同一 sid 在同一視窗重複進 prepare 帶：既有 one-shot 語意必須保留。"""
+        self._gate("sidC-d22prepare")
+        self._gate("sidC-d22prepare")
+        self.assertEqual(len(self.plan_calls), 1,
+                         "同一 session 在同一視窗重複 prepare 不該重新寫任務書")
 
 
 class ClaimGuardCatchesAutoContinueWithoutCredentialTest(unittest.TestCase):

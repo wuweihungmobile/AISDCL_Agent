@@ -114,6 +114,27 @@ def halt_resets_at(decision: quota_policy.Decision) -> object:
 HALT_RESET_SKEW_SECONDS = 120
 
 
+def halted_band_line(halt_marker: dict | None, now: datetime) -> str | None:
+    """D23（SD-07；DEF-200-275 第六輪）：`--pace`／`--check` 在本 sid 的 halt 標記
+    未過期時該印的那一行；`None`＝沒有適用的 halt 標記，呼叫端落回既有判定。
+
+    純函式（同本檔通篇紀律）：不讀任何檔，`halt_marker` 由呼叫端已經呼叫過
+    `quota_gate.read_halt_marker(sid)` 取得——本檔不得反向 import `quota_gate`
+    （見檔頭〈相依方向是單向的〉）。刻意不打任何 API：halt 標記已經把答案寫在磁碟上，
+    「量不到」在 halt 期間本來就是事實，不需要再花一次探測才知道（那正是 SD-07 要堵的
+    洞——INV-H3 之前，`--pace`/`--check` 在 halt 期間會落到 `unmeasured` 判定，可能
+    連帶觸發 `quota_meter` 補量探測，而 halt 期間不該再花任何一次 API）。
+    """
+    if not halt_marker:
+        return None
+    reset_at = _aware(halt_marker.get("reset_at"))
+    if reset_at is not None and reset_at <= now:
+        return None  # 已過期：不算「halted」，落回既有判定（會走 probe 分支自然恢復）
+    reset_text = halt_marker.get("reset_at") or "（無法解析）"
+    return (f"🔴 halted，reset 於 {reset_text}"
+            "（本 sid 的 halt 標記尚未過期；依 D23 不打 API，量不到本來就是事實）")
+
+
 def halt_verdict(halt_marker: dict | None, idle_seconds: float | None,
                  now: datetime) -> dict | None:
     """halt 標記 → 既有 `arm_reset`／`probe`／`escalate` 判決（純函式，同本檔通篇紀律）。

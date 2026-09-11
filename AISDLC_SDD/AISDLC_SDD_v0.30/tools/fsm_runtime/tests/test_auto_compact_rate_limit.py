@@ -28,8 +28,9 @@ class AutoCompactRateLimitTests(unittest.TestCase):
         rt.state.current = "IMPLEMENTATION"
         return rt
 
-    def _compact_cycle(self, rt: FSMRuntime, tokens: int = 180_000, ratio: float = 0.9) -> dict:
-        result = rt.trigger_auto_compact(cumulative_tokens=tokens, ratio=ratio)
+    def _compact_cycle(self, rt: FSMRuntime, tokens: int = 180_000, ratio: float = 0.9,
+                       details: dict | None = None) -> dict:
+        result = rt.trigger_auto_compact(cumulative_tokens=tokens, ratio=ratio, details=details)
         if not result.get("escalated"):
             rt.complete_auto_compact(reset_ledger=False)
         return result
@@ -74,8 +75,11 @@ class AutoCompactRateLimitTests(unittest.TestCase):
         try:
             rt = self._bootstrap()
             rt.state.root["frozen_stages"] = [{"stage": "stage-A"}]
+            # D18（DEF-200-275 第六輪；SD-01）：cap 判定改依逐 session 分桶——同一位觸發者
+            # 必須全程帶同一個 session_id，否則前 N 次落在 "unknown" 桶、第 N+1 次落在
+            # "sess-A" 桶，兩桶互不相干，永遠撞不到 cap（讀碼確認的真實回歸，非臆測）。
             for _ in range(MAX_AUTO_COMPACT_PER_STAGE):
-                self._compact_cycle(rt)
+                self._compact_cycle(rt, details={"session_id": "sess-A"})
             res1 = rt.trigger_auto_compact(
                 cumulative_tokens=180_000, ratio=0.91, details={"session_id": "sess-A"})
             self.assertTrue(res1.get("cap_exceeded"))
@@ -127,8 +131,9 @@ class AutoCompactRateLimitTests(unittest.TestCase):
         snap_mod.SNAPSHOT_DIR = tmp_out
         try:
             rt = self._bootstrap()
+            # D18：同一 session 全程一致（見上一測試同型註解），否則永遠撞不到 cap。
             for _ in range(MAX_AUTO_COMPACT_PER_STAGE):
-                self._compact_cycle(rt)
+                self._compact_cycle(rt, details={"session_id": "sess-A"})
             res = rt.trigger_auto_compact(cumulative_tokens=180_000, ratio=0.91,
                                           details={"session_id": "sess-A"})
             self.assertTrue(res.get("cap_exceeded"))
@@ -232,6 +237,12 @@ class AutoCompactRateLimitTests(unittest.TestCase):
             self.assertIn("auto-compact-rate-limit", content)
             self.assertIn("count_per_stage", content)
             self.assertIn("stage_key", content)
+            # SA-04（ARCH-05 後半；DEF-200-275 第六輪）：`cumulative_tokens` 這個既有欄位名沒被
+            # 改掉（下游讀者零改動），但報告裡必須額外標明它的真實來源是逐字稿 API usage，不是
+            # 估算值——否則讀報告的人（或工具）會誤以為這是 conversation_ledger 的估算累計值。
+            self.assertIn("cumulative_tokens", content)
+            self.assertIn("numerator", content)
+            self.assertIn("transcript_api_usage", content)
         finally:
             snap_mod.SNAPSHOT_DIR = original_dir
 
@@ -278,6 +289,128 @@ class AutoCompactRateLimitTests(unittest.TestCase):
             # 檔名後綴須為 -01 / -02 / -03
             suffixes = sorted(p.stem.rsplit("-", 1)[-1] for p in paths)
             self.assertEqual(suffixes, ["01", "02", "03"])
+        finally:
+            snap_mod.SNAPSHOT_DIR = original_dir
+
+
+class AutoSnapshotNumeratorAnnotationTests(unittest.TestCase):
+    """SA-04（ARCH-05 後半；DEF-200-275 第六輪）：`save_auto_snapshot()` 的 `cumulative_tokens`
+    參數名沒改（下游讀者零改動），但落盤內容必須額外標明來源是逐字稿 API usage，不是估算值。"""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.path = Path(self._tmp.name) / "FSM-STATE-numerator.yaml"
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def test_auto_snapshot_content_names_the_numerator(self) -> None:
+        from tools.fsm_runtime import snapshot as snap_mod
+
+        tmp_out = Path(self._tmp.name) / "abort"
+        original_dir = snap_mod.SNAPSHOT_DIR
+        snap_mod.SNAPSHOT_DIR = tmp_out
+        try:
+            state = load_state("numerator-proj", path=self.path)
+            state.current = "IMPLEMENTATION"
+            rt = FSMRuntime(state)
+            result = rt.trigger_auto_compact(cumulative_tokens=900_000, ratio=0.9)
+            snapshot_path = Path(result["snapshot"])
+            content = snapshot_path.read_text(encoding="utf-8")
+            self.assertIn("cumulative", content)
+            self.assertIn("numerator", content)
+            self.assertIn("transcript_api_usage", content)
+        finally:
+            snap_mod.SNAPSHOT_DIR = original_dir
+
+
+class CrossSessionCapIsolationTests(unittest.TestCase):
+    """D18（DEF-200-275 第六輪；SD-01；DEF-200-279 殘餘路徑之一）：per-stage cap 的計數改依逐
+    session 分桶——一個從未觸發過 auto-compact 的全新 session，不得被『另一個 session 在同一
+    stage 累積的計數』牽連判成 cap_exceeded。形狀複製自 SD 唯讀複審探針
+    scratchpad/sd/p1_cap_crosssession2.py（本輪四方複審 SD-01 finding 的重現腳本）。"""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.path = Path(self._tmp.name) / "FSM-STATE-cross-session.yaml"
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _drive_session_to_its_own_cap(self, rt: FSMRuntime, session_id: str) -> dict:
+        """讓一個 session 連續觸發直到撞到*自己*的 cap（每次成功都接
+        complete_auto_compact(observed_effective=False) 模擬『/compact 過但沒見效』）。"""
+        last: dict = {}
+        for _ in range(MAX_AUTO_COMPACT_PER_STAGE + 1):
+            last = rt.trigger_auto_compact(950_000, 0.97, details={"session_id": session_id})
+            if last.get("cap_exceeded"):
+                return last
+            rt.complete_auto_compact(observed_effective=False)
+        return last
+
+    def test_brand_new_session_is_not_capped_by_another_sessions_history(self) -> None:
+        from tools.fsm_runtime import snapshot as snap_mod
+
+        tmp_out = Path(self._tmp.name) / "abort"
+        original_dir = snap_mod.SNAPSHOT_DIR
+        snap_mod.SNAPSHOT_DIR = tmp_out
+        try:
+            state = load_state("cross-session-proj", path=self.path)
+            state.current = "SPEC_DRAFTING"
+            rt = FSMRuntime(state)
+
+            last_a = self._drive_session_to_its_own_cap(rt, "session-A")
+            self.assertTrue(last_a.get("cap_exceeded"),
+                            "session-A 自己連續撞滿次數後也該撞到自己的 cap")
+            self.assertEqual(rt.state.current, "SPEC_DRAFTING", "cap 超限不得轉態（D13）")
+
+            # session-B：全新、自己從未觸發過。第一次呼叫必須放行，不得被 session-A 的計數牽連。
+            result_b = rt.trigger_auto_compact(
+                600_000, 0.96, details={"session_id": "session-B-brand-new"})
+            self.assertFalse(
+                result_b.get("cap_exceeded"),
+                msg=f"全新 session B 自己從未觸發過，不該被 session-A 的計數牽連：{result_b}",
+            )
+            self.assertEqual(result_b.get("stage_key"), "initial")
+            by_session_markers = rt.state.root["auto_compact_state"].get(
+                "cap_exceeded_by_session", {})
+            self.assertNotIn("session-B-brand-new", by_session_markers)
+        finally:
+            snap_mod.SNAPSHOT_DIR = original_dir
+
+    def test_deny_reason_names_the_other_session_when_a_different_session_hit_cap_first(self) -> None:
+        """兩個不同 session 各自撞到自己的 cap 時，第二個撞到的 deny 訊息要點名第一個
+        （D18；`_cap_exceeded_deny_reason` 的兩分支措辭）。"""
+        from tools.fsm_runtime import snapshot as snap_mod
+        import importlib.util as _ilu
+
+        sdd_root = Path(__file__).resolve().parents[3]
+        hook_path = sdd_root / ".claude" / "hooks" / "context_ledger_pre.py"
+        spec = _ilu.spec_from_file_location("cap_deny_reason_probe_r145", hook_path)
+        mod = _ilu.module_from_spec(spec)
+        spec.loader.exec_module(mod)  # type: ignore[union-attr]
+
+        tmp_out = Path(self._tmp.name) / "abort"
+        original_dir = snap_mod.SNAPSHOT_DIR
+        snap_mod.SNAPSHOT_DIR = tmp_out
+        try:
+            state = load_state("cross-session-proj2", path=self.path)
+            state.current = "SPEC_DRAFTING"
+            rt = FSMRuntime(state)
+
+            last_a = self._drive_session_to_its_own_cap(rt, "session-A")
+            self.assertTrue(last_a.get("cap_exceeded"))
+            reason_a = mod._cap_exceeded_deny_reason(last_a)
+            self.assertNotIn("另一 session", reason_a,
+                             msg="session-A 是本 stage 第一個撞 cap 的，不該點名別人")
+            over_limit_count = MAX_AUTO_COMPACT_PER_STAGE + 1
+            self.assertIn(f"本 session 於 stage 'initial' 已 {over_limit_count} 次觸發", reason_a)
+
+            last_b = self._drive_session_to_its_own_cap(rt, "session-B")
+            self.assertTrue(last_b.get("cap_exceeded"))
+            reason_b = mod._cap_exceeded_deny_reason(last_b)
+            self.assertIn("另一 session=session-A 已於此 stage 觸發過 cap", reason_b)
+            self.assertIn(f"本 session 現在自己也達到門檻（已 {over_limit_count} 次）", reason_b)
         finally:
             snap_mod.SNAPSHOT_DIR = original_dir
 

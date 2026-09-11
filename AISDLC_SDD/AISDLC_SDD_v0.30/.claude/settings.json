@@ -33,7 +33,8 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Write|Edit|Read|Bash|NotebookEdit|Task",
+        "_comment": "R145／D20（DEF-200-280／SD-03／F-ARCH-02）：matcher 補上 Agent|Workflow。四方複審實測本條原本圈的 Write|Edit|Read|Bash|NotebookEdit|Task 完全不含 Agent/Workflow，子代理（Agent）／批次編排（Workflow）呼叫因此整條繞過本檔承載的 SDD FSM guardrail（context_ledger_pre）——ESCALATION／AUTO_COMPACT_PENDING 等狀態守門對這兩種工具形同虛設，是 DEF-200-279（不該擋卻擋）的鏡像問題（該擋沒擋）。與根層 `.claude/settings.json` 同型缺口同批修復（F-ARCH-02：根層開 claude + SDD_ACTIVE_VERSION 是更常見的工作流，該檔已同步）。context_ledger_pre.py 的 gating 邏輯（FSMRuntime.assert_tool_allowed）對 _BLOCKING_STATES 的判斷完全由 FSM 狀態決定、與 tool 名稱無關，加寬 matcher 不需要同步改該檔任何邏輯（回歸鎖見 tools/fsm_runtime/tests/test_settings_matcher_r145.py 的 AgentWorkflowGatingTests，兩案在修 matcher 前後皆為綠）。",
+        "matcher": "Write|Edit|Read|Bash|NotebookEdit|Task|Agent|Workflow",
         "hooks": [
           {
             "type": "command",

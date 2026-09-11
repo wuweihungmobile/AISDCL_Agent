@@ -161,9 +161,13 @@ class RealRatioTierTests(_IsolatedBase):
         """D13（DEF-200-275 第五輪）：per-stage cap 超限改為 session 級 `[CAP]` 通知（PostToolUse
         只出聲，deny 是 PreToolUse 的事），**不再**寫專案級 ESCALATION——改名自
         test_per_stage_cap_exceeded_at_900000_reports_project_escalation。
-        直接把 count 設到上限（complete_auto_compact(observed_effective) 會歸零，不能用它逼）。"""
-        self._rt.state.root["auto_compact_state"] = {"stage_key": "initial", "count_per_stage": 3,
-                                                     "max_per_stage": 3}
+        直接把 count 設到上限（complete_auto_compact(observed_effective) 會歸零，不能用它逼）。
+        D18（DEF-200-275 第六輪；SD-01）：cap 判定改依逐 session 分桶——`_run()` 固定用
+        session_id="sess-post"，須同步預置 `count_per_stage_by_session`，否則新判準讀到空桶。"""
+        self._rt.state.root["auto_compact_state"] = {
+            "stage_key": "initial", "count_per_stage": 3, "max_per_stage": 3,
+            "count_per_stage_by_session": {"sess-post": 3},
+        }
         out = self._run(900_000)
         ctx = out.get("additionalContext", "")
         self.assertIn("[SDD-CTX][AUTO-COMPACT][CAP]", ctx, msg=out)

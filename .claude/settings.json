@@ -57,7 +57,8 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Write|Edit|Read|Bash|NotebookEdit|Task",
+        "_comment": "R145／D20（DEF-200-280／F-ARCH-02）：matcher 補上 Agent|Workflow。立案是四方複審實測——在 monorepo 根開 claude（本任務常見工作流）時只有本檔生效，而本條轉發 SDD FSM guardrail（context_ledger_pre）原本圈的 Write|Edit|Read|Bash|NotebookEdit|Task 完全不含 Agent/Workflow，子代理（Agent）／批次編排（Workflow）呼叫因此整條繞過 ESCALATION／AUTO_COMPACT_PENDING 等狀態守門——這是 DEF-200-279（不該擋卻擋）的鏡像問題（該擋沒擋）。鄰近的 context_budget_guard.py 那條（本檔下方 Task|WebFetch|WebSearch|Agent|Workflow）R80 已加過 Agent|Workflow 並以 8,106 次真實 tool_use 逐字稿佐證本 harness 子代理確實叫 Agent、批次編排確實叫 Workflow——本條當時未同步，屬明確遺漏而非未知風險。context_ledger_pre.py 的 gating 邏輯（FSMRuntime.assert_tool_allowed）對 _BLOCKING_STATES 的判斷完全由 FSM 狀態決定、與 tool 名稱無關，故加寬 matcher 不需要同步改該檔任何邏輯。回歸鎖：tools/tests/test_check_hooks_liveness.py 的正面斷言＋AISDLC_SDD/AISDLC_SDD_v0.30/tools/fsm_runtime/tests/test_settings_matcher_r145.py。",
+        "matcher": "Write|Edit|Read|Bash|NotebookEdit|Task|Agent|Workflow",
         "hooks": [
           {
             "type": "command",

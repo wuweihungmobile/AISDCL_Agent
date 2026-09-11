@@ -302,8 +302,13 @@ class RealUsageGatingTests(_IsolatedFsmMixin, unittest.TestCase):
 
     def _cap_out(self) -> None:
         # QA-02：直接把 per-stage 計數設到上限（用 complete_auto_compact(observed_effective) 逼會被歸零）。
-        self._rt.state.root["auto_compact_state"] = {"stage_key": "initial", "count_per_stage": 3,
-                                                     "max_per_stage": 3}
+        # D18（DEF-200-275 第六輪；SD-01）：cap 判定改依逐 session 分桶——`_run()` 固定用
+        # session_id="sess-42"，必須同步預置 `count_per_stage_by_session={"sess-42": 3}`，
+        # 否則新判準會讀到空桶、誤判成這個 session 才第一次觸發（不會撞 cap）。
+        self._rt.state.root["auto_compact_state"] = {
+            "stage_key": "initial", "count_per_stage": 3, "max_per_stage": 3,
+            "count_per_stage_by_session": {"sess-42": 3},
+        }
 
     def test_per_stage_cap_exceeded_at_950000_denies_session_level(self) -> None:
         """D13（DEF-200-275 第五輪／ARCH-02／SD-02／QA P0）：per-stage cap 超限只拒絕本 session
@@ -537,10 +542,14 @@ class AutoCompactPendingExitTests(_IsolatedFsmMixin, unittest.TestCase):
         self.assertFalse(res.get("escalated"))
         self.assertEqual(self._rt.state.current, "AUTO_COMPACT_PENDING")
 
-    def _run(self, used: int, tool: str = "Write", target: str = "src/app.py") -> dict:
+    def _run(self, used: int, tool: str = "Write", target: str = "src/app.py",
+            session_id: str | None = None) -> dict:
         transcript = _write_transcript(self.root, used, peak=900_000)
-        return self.runner.run({"tool_name": tool, "tool_input": {"file_path": target, "content": "x"},
-                                "transcript_path": transcript}).get("hookSpecificOutput", {})
+        payload = {"tool_name": tool, "tool_input": {"file_path": target, "content": "x"},
+                  "transcript_path": transcript}
+        if session_id is not None:
+            payload["session_id"] = session_id
+        return self.runner.run(payload).get("hookSpecificOutput", {})
 
     def test_pending_exits_when_used_drops_below_85pct(self) -> None:
         self._enter_pending("SPEC_DRAFTING")
@@ -576,9 +585,13 @@ class AutoCompactPendingExitTests(_IsolatedFsmMixin, unittest.TestCase):
 
     def test_pending_deny_reason_has_real_numbers_and_trigger_session(self) -> None:
         """D12（DEF-200-275 第五輪 SA-01）：PENDING 且量得到仍 deny 時，reason 必含
-        used=/window=/來源=/session=/觸發時間，以及解除規則一句。"""
+        used=/window=/來源=/session=/觸發時間，以及解除規則一句。
+
+        D19（DEF-200-275 第六輪；SD-02）：這裡驗證的是「PENDING 的 owner 自己再次呼叫、usage
+        仍高」這個情境——所以呼叫端必須是同一個 session_id，否則 D19 的 owner-scope 判準會把它當
+        非 owner 而放行（那正是 D19 要修的行為，不是這支測試要驗證的行為，兩者不衝突）。"""
         self._enter_pending("SPEC_DRAFTING", session_id="sess-trigger")
-        out = self._run(920_000)
+        out = self._run(920_000, session_id="sess-trigger")
         self.assertEqual(out.get("permissionDecision"), "deny", msg=out)
         reason = out.get("permissionDecisionReason", "")
         self.assertIn("used=920,000", reason)
@@ -772,6 +785,179 @@ class EscalationRecoveryHintTests(_IsolatedFsmMixin, unittest.TestCase):
         self.assertNotIn("permissionDecision", out)
         self.assertIn("[SDD-DRY-RUN] would deny", out.get("additionalContext", ""))
 
+    def test_first_strike_no_usage_escalation_deny_has_full_provenance(self) -> None:
+        """D17（DEF-200-275 第六輪／DEF-200-283；F-ARCH-01／QA-C1）：全新視窗第一次工具呼叫
+        （無 transcript_path ⇒ m=None）撞上『別的 session 因非 auto-compact 原因寫入的
+        project-level ESCALATION』（此案比照 R-9.7 human-pending timeout 語意）時，deny 訊息
+        仍必須含溯源四欄（來源 session／時間／原因／rule_id）＋一行可複製恢復指令——此前
+        `EscalationRecoveryHintTests` 只覆蓋『量得到 usage』的情境（見 D16 docstring 自陳）。"""
+        self._rt.state.record_escalation(
+            "HUMAN_PENDING 逾時 200h (≥168h)，自動進入 ESCALATION (ACT-023)",
+            details={"session_id": "old-session"}, rule_id="R-9.7", source="human_pending_timeout",
+        )
+        out = self.runner.run({"tool_name": "Read", "tool_input": {"file_path": "docs/x.md"},
+                               "session_id": "brand-new-session"}).get("hookSpecificOutput", {})
+        self.assertEqual(out.get("permissionDecision"), "deny", msg=out)
+        reason = out.get("permissionDecisionReason", "")
+        self.assertIn("溯源：此 ESCALATION 由 session=old-session", reason)
+        self.assertIn("rule_id=R-9.7", reason)
+        self.assertIn("本 session=brand-new-session", reason)
+        self.assertIn("不是觸發者", reason)
+        self.assertIn("resume-from-escalation --to", reason)
+
+    def test_same_session_triggering_own_escalation_is_named_trigger(self) -> None:
+        """對稱驗證：provenance 的 session_id 與本次呼叫的 session_id 相同時，訊息明說
+        『是觸發者』，而非籠統地說『不知道』——D17 的核心承諾是誠實回答『是不是我』，不是
+        永遠印一句安全但無資訊量的話。"""
+        self._rt.state.record_escalation(
+            "gate retry exhausted", details={"session_id": "same-sess"},
+            rule_id="R-9.1", source="gate_retry_budget:SCG_VALIDATION",
+        )
+        out = self.runner.run({"tool_name": "Read", "tool_input": {"file_path": "docs/x.md"},
+                               "session_id": "same-sess"}).get("hookSpecificOutput", {})
+        reason = out.get("permissionDecisionReason", "")
+        self.assertIn("本 session=same-sess（是觸發者）", reason)
+
+    def test_terminated_state_also_gets_recovery_hint_now(self) -> None:
+        """D17 point 3（F-ARCH-04）：`_ESCALATION_STATES` 擴到 TOKEN_BUDGET_CRITICAL／TERMINATED
+        ——deny 訊息『一律帶真實數字＋恢復指令』（D12/D16）的精神不該因為卡在哪個 blocking 狀態
+        而不同；此前只有 ESCALATION／ESCALATION_FINAL 兩態會附恢復指令，TERMINATED 只有光禿禿一句
+        `state TERMINATED blocks all tool calls...`。"""
+        self._rt.state.current = "TERMINATED"
+        out = self.runner.run({"tool_name": "Read", "tool_input": {"file_path": "docs/x.md"}}
+                              ).get("hookSpecificOutput", {})
+        self.assertEqual(out.get("permissionDecision"), "deny", msg=out)
+        reason = out.get("permissionDecisionReason", "")
+        self.assertIn("resume-from-escalation --to", reason)
+
+
+class PendingOwnerScopeTests(_IsolatedFsmMixin, unittest.TestCase):
+    """D19（DEF-200-275 第六輪；SD-02；DEF-200-279 殘餘路徑之二）：AUTO_COMPACT_PENDING 是專案級
+    狀態，但『只准 compact 工具』這個限制、以及『誰能釋放它』這兩件事都改成只看 owner——否則任何
+    全新視窗第一次工具呼叫，只要專案裡*任何* session 曾進過 PENDING，就會被卡死（F-ARCH-01／
+    QA-C1 指出的殘餘路徑）。"""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self._isolate_fsm(self.root)
+        self._env = _isolated_env(self.root)
+        self._env.start()
+        self.mod = _load_hook_module(self.root)
+        self.runner = _MainRunner(self.mod)
+
+    def tearDown(self) -> None:
+        self._env.stop()
+        self._release_fsm()
+        self._tmp.cleanup()
+
+    def _run(self, transcript: str, session_id: str, tool: str = "Write",
+            target: str = "src/app.py") -> dict:
+        payload = {"tool_name": tool, "tool_input": {"file_path": target, "content": "x"},
+                  "transcript_path": transcript, "session_id": session_id}
+        return self.runner.run(payload).get("hookSpecificOutput", {})
+
+    def _enter_pending_as(self, owner_transcript: str, owner_sid: str) -> None:
+        """讓 owner session 走真正的 hook 路徑觸發 PENDING，讓 `pending_owner` 被正確記錄
+        （直接呼叫 `rt.trigger_auto_compact()` 也能進 PENDING，但那樣繞過了 hook 的
+        `_details()`／`transcript_path` 透傳，測不到 D19 真正要驗證的路徑）。"""
+        out = self._run(owner_transcript, owner_sid)
+        self.assertNotIn("permissionDecision", out, msg=out)  # 90% 觸發只出聲，不 deny
+        self.assertEqual(self._rt.state.current, "AUTO_COMPACT_PENDING")
+        owner = self._rt.state.root["auto_compact_state"].get("pending_owner")
+        self.assertIsInstance(owner, dict, msg="trigger_auto_compact 必須落一份 pending_owner")
+        self.assertEqual(owner["session_id"], owner_sid)
+        self.assertEqual(owner["transcript_path"], owner_transcript)
+
+    def test_non_owner_low_usage_passes_without_releasing_project_pending(self) -> None:
+        """非 owner、自己量得到 ratio 遠低於門檻 ⇒ 放行，但不釋放專案 PENDING（決策 D19 item 2；
+        owner 仍新鮮，不符陳舊條件，item 3 的例外不適用）。"""
+        owner_transcript = _write_transcript(self.root, 900_000, name="owner.jsonl")
+        self._enter_pending_as(owner_transcript, "owner-sess")
+
+        other_transcript = _write_transcript(self.root, 5_000, name="brand-new.jsonl")
+        out = self._run(other_transcript, "brand-new-session", target="src/other.py")
+        self.assertNotIn("permissionDecision", out, msg=out)
+        self.assertEqual(
+            self._rt.state.current, "AUTO_COMPACT_PENDING",
+            msg="非 owner 的低用量不得順便釋放別人觸發的 PENDING（D19 item 2）",
+        )
+
+    def test_owner_itself_is_still_restricted_to_compact_tools(self) -> None:
+        """owner 自己再次呼叫、usage 仍高 ⇒ 只准 compact 工具（D19 沒有弱化既有 D12 行為，
+        只是把它的適用範圍從『整個專案』收斂到『owner 自己』）。"""
+        owner_transcript = _write_transcript(self.root, 900_000, name="owner2.jsonl")
+        self._enter_pending_as(owner_transcript, "owner-sess-2")
+        out = self._run(owner_transcript, "owner-sess-2", target="src/other.py")
+        self.assertEqual(out.get("permissionDecision"), "deny", msg=out)
+
+    def test_non_owner_spec_write_is_still_blocked_by_rule_9_6(self) -> None:
+        """D19 只鬆綁『只准 compact 工具』這條，不鬆綁 Rule 9.6 絕對禁令——非 owner 也不得趁機
+        寫規格文件（決策 D19 item 2 明文：『Rule 9.6 規格檔仍擋』）。
+
+        訊息文字沿用既有的 `_pending_deny_reason()` 通用 PENDING 訊息（不是
+        `_is_blocked_spec_write` 在 core 層拋出的那句話）——`context_ledger_pre.py` 的
+        `except TransitionError` 只要 `rt.state.current == "AUTO_COMPACT_PENDING"` 就一律改印
+        通用訊息，這是既有行為（owner 自己寫規格檔命中的也是同一句，非本輪改動），本測試只斷言
+        deny 這個結果本身，不糾結訊息文字出處。"""
+        owner_transcript = _write_transcript(self.root, 900_000, name="owner3.jsonl")
+        self._enter_pending_as(owner_transcript, "owner-sess-3")
+        other_transcript = _write_transcript(self.root, 5_000, name="brand-new2.jsonl")
+        out = self._run(other_transcript, "brand-new-session-2",
+                        target="docs/01_requirements/PRD.md")
+        self.assertEqual(out.get("permissionDecision"), "deny", msg=out)
+        self.assertIn("AUTO_COMPACT_PENDING", out.get("permissionDecisionReason", ""))
+
+    def test_fresh_owner_blocks_non_owner_release_even_when_non_owner_usage_has_dropped(self) -> None:
+        """owner 仍新鮮（transcript 剛寫入、遠在陳舊窗口內）時，非 owner 即使自己量到真實回落，
+        也不得釋放專案 PENDING（決策 D19 item 3；被否決的替代案是維持 ARCH-03『任何 session 都可
+        釋放』不分陳舊與否）。"""
+        owner_transcript = _write_transcript(self.root, 900_000, name="owner-fresh.jsonl")
+        self._enter_pending_as(owner_transcript, "owner-fresh-sess")
+        other_transcript = _write_transcript(self.root, 50_000, name="other-low.jsonl")
+        out = self._run(other_transcript, "other-session", tool="Read", target="docs/x.md")
+        self.assertNotIn("[DONE]", out.get("additionalContext", ""), msg=out)
+        self.assertEqual(self._rt.state.current, "AUTO_COMPACT_PENDING")
+
+    def test_stale_owner_missing_transcript_lets_a_different_session_release(self) -> None:
+        """owner 的逐字稿已從磁碟消失（模擬那個視窗早就關掉、暫存被清）⇒ 陳舊；非 owner 這次量到
+        真實回落時可以釋放，取代 ARCH-03 的無條件釋放，但不讓 PENDING 因 owner 消失而永遠卡死
+        （決策 D19 item 3）。"""
+        owner_transcript = _write_transcript(self.root, 900_000, name="owner-to-vanish.jsonl")
+        self._enter_pending_as(owner_transcript, "owner-vanish-sess")
+        Path(owner_transcript).unlink()
+
+        other_transcript = _write_transcript(self.root, 50_000, name="rescuer.jsonl")
+        out = self._run(other_transcript, "rescuer-session", tool="Read", target="docs/x.md")
+        self.assertIn("[DONE]", out.get("additionalContext", ""), msg=out)
+        self.assertEqual(self._rt.state.current, "SPEC_DRAFTING")
+
+    def test_stale_owner_by_old_mtime_lets_a_different_session_release(self) -> None:
+        """owner 的逐字稿檔案還在，但 mtime 已超過 `SDD_PENDING_OWNER_STALE_SECONDS`（預設 1800s）
+        ⇒ 同樣判定陳舊（決策 D19 item 3 的兩個陳舊判準之一：mtime，另一是檔案不存在，見上一案）。"""
+        owner_transcript = _write_transcript(self.root, 900_000, name="owner-old-mtime.jsonl")
+        self._enter_pending_as(owner_transcript, "owner-old-sess")
+        old_ts = (_dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(hours=2)).timestamp()
+        os.utime(owner_transcript, (old_ts, old_ts))
+
+        other_transcript = _write_transcript(self.root, 50_000, name="rescuer2.jsonl")
+        out = self._run(other_transcript, "rescuer-session-2", tool="Read", target="docs/x.md")
+        self.assertIn("[DONE]", out.get("additionalContext", ""), msg=out)
+        self.assertEqual(self._rt.state.current, "SPEC_DRAFTING")
+
+    def test_env_override_shrinks_the_stale_window(self) -> None:
+        """`SDD_PENDING_OWNER_STALE_SECONDS` 可用環境變數覆寫成更短的陳舊窗口（決策 D19 明文
+        『可 env 覆寫』；不得寫死 1800 常數本身無法調整）。"""
+        owner_transcript = _write_transcript(self.root, 900_000, name="owner-shrink.jsonl")
+        self._enter_pending_as(owner_transcript, "owner-shrink-sess")
+        old_ts = (_dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(seconds=10)).timestamp()
+        os.utime(owner_transcript, (old_ts, old_ts))
+
+        other_transcript = _write_transcript(self.root, 50_000, name="rescuer3.jsonl")
+        with patch.dict(os.environ, {"SDD_PENDING_OWNER_STALE_SECONDS": "5"}, clear=False):
+            out = self._run(other_transcript, "rescuer-session-3", tool="Read", target="docs/x.md")
+        self.assertIn("[DONE]", out.get("additionalContext", ""), msg=out)
+
 
 class NonStringSubagentTypeTests(_IsolatedFsmMixin, unittest.TestCase):
     """DEF-CLDREV-020: a non-string subagent_type/agent (list / dict / int) on a
@@ -858,9 +1044,13 @@ class NonStringToolNameTests(_IsolatedFsmMixin, unittest.TestCase):
         self._seen_tools: list = []
         _orig = self._rt.assert_tool_allowed
 
-        def _spy(tool, target=None):  # noqa: ANN001
+        # D19（DEF-200-275 第六輪；SD-02）：生產碼呼叫端現在多帶一個 `session_id=` 關鍵字引數
+        # （owner-scope 判準要用）；spy 簽名須同步接住，否則呼叫會在綁定引數這一步就拋
+        # TypeError（比 `_orig` 的函式體還早），`self._seen_tools.append` 永遠不會執行到——
+        # 這不是本測試要驗證的行為，是 monkeypatch 落後生產簽名的純技術性斷線。
+        def _spy(tool, target=None, *, session_id=None):  # noqa: ANN001
             self._seen_tools.append(tool)
-            return _orig(tool, target)
+            return _orig(tool, target, session_id=session_id)
 
         self._rt.assert_tool_allowed = _spy  # type: ignore[method-assign]
 

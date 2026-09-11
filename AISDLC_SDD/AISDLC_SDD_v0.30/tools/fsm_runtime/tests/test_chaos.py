@@ -193,20 +193,48 @@ class ChaosScenarioTests(unittest.TestCase):
         self.assertEqual(rt.state.current, "SPEC_AUDIT")
         self.assertIsNotNone(final_payload)
 
-    # --- (5) AUTO_COMPACT rate limit must trigger ESCALATION --------------
-    def test_auto_compact_rate_limit_triggers_escalation(self) -> None:
+    # --- (5) AUTO_COMPACT rate limit must halt, not loop forever ----------
+    def test_auto_compact_rate_limit_halts_at_cap_exceeded(self) -> None:
         """Per §ACT-026: more than MAX_AUTO_COMPACT_PER_STAGE calls in one
-        stage must escalate, not keep compacting."""
+        stage must halt — not keep compacting forever.
+
+        DEF-200-275 第五輪 D13：per-stage cap 超限**不再**寫專案級 ESCALATION
+        （根因：context window 是 session 的屬性，FSM-STATE 是專案的屬性；舊語意
+        會讓下一個全新視窗一開場就被卡在 ESCALATION）。改為一次性 session 級
+        `cap_exceeded` 標記，`state.current` 維持原狀不轉態。
+        DEF-200-275 第六輪 D18：cap 判定的鍵再從單純 stage_key 改成
+        (stage_key, session_id) ——同一位觸發者必須全程帶同一個 session_id 才
+        會撞到「自己的」cap，否則會被誤判成從未觸發過的全新 session。
+
+        Chaos 精神保留：連續觸發超過 MAX_AUTO_COMPACT_PER_STAGE 次後，FSM 必須
+        有界停機（第 N+1 次回 cap_exceeded=True，不得無限 compact 下去）；停下
+        的形態改為現行語意驗證，不是舊斷言的 escalated=True／ESCALATION 轉態。
+        """
         rt = self._fresh_runtime("compact")
         rt.state.current = "IMPLEMENTATION"
-        # First N are allowed, N+1 escalates.
+        session_id = "chaos-compact-session"
+        # First N are allowed, N+1 must halt via cap_exceeded — bounded, not
+        # an infinite compact loop.
         for _ in range(MAX_AUTO_COMPACT_PER_STAGE):
-            result = rt.trigger_auto_compact(cumulative_tokens=180_000, ratio=0.9)
+            result = rt.trigger_auto_compact(
+                cumulative_tokens=180_000, ratio=0.9,
+                details={"session_id": session_id},
+            )
             self.assertFalse(result.get("escalated", False))
+            self.assertFalse(result.get("cap_exceeded", False))
             rt.complete_auto_compact(reset_ledger=False)
-        result = rt.trigger_auto_compact(cumulative_tokens=181_000, ratio=0.91)
-        self.assertTrue(result.get("escalated"))
-        self.assertEqual(rt.state.current, "ESCALATION")
+        result = rt.trigger_auto_compact(
+            cumulative_tokens=181_000, ratio=0.91,
+            details={"session_id": session_id},
+        )
+        self.assertTrue(result.get("cap_exceeded"))
+        self.assertFalse(result.get("escalated", False))
+        # D13: bounded halt is a session-scoped marker, not project ESCALATION.
+        self.assertNotEqual(rt.state.current, "ESCALATION")
+        self.assertEqual(rt.state.current, "IMPLEMENTATION")
+        # D18: the marker must carry the session_id of whoever tripped it.
+        marker = rt.state.root["auto_compact_state"]["cap_exceeded"]
+        self.assertEqual(marker["session_id"], session_id)
 
     # --- Additional fault-type coverage from FAULT_TYPES ------------------
     def test_retry_tamper_cannot_bypass_escalation(self) -> None:

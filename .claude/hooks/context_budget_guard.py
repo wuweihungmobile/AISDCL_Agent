@@ -1,50 +1,20 @@
 #!/usr/bin/env python
 """PostToolUse 守衛：Claude Code session 的 context 水位觀測者（本 repo 首見）。
 
-WHY
----
-掌舵者連續多輪指名要兩件事：「注意上下文是否超出 90%，進行 /compact，不要爆」與
-「注意 Token 限制，適當進行排程再喚醒繼續處理」。四處實查（哪四處、當時各量到什麼，
-逐字保全於 `docs/06_quality/CrossPlatform_R91_Scan_Findings.md` §A-1；R91 搬出，理由是
-其中的 `claude --version` 讀數已隨版本過期，而過期的量測值住在契約文件裡會被當成常數）
-的結論只剩兩句仍在約束今天的行為：**沒有任何既有 hook 在看 context 水位**，以及
-**harness 自己的 autocompact 預設開啟**（姿態現查 `--check-autocompact`，見下一節）。
+WHY（全文史料搬 scratchpad/dev-c/moved_lore.md，R91 起同型搬法）
+---------------------------------------------------------------
+掌舵者要兩件事：「注意上下文是否超出 90%、/compact、不要爆」與「注意 Token 限制、
+排程再喚醒」。harness 自己的 autocompact 預設開啟（姿態現查 `--check-autocompact`）；
+本檔做不到執行 `/compact`（模型也不能自己打 slash 指令），是那條線的**第二道**：
+① 把「現在幾 %」變成看得見的數字；② ≥94% 時真的擋下展開型工具（見〈PreToolUse
+阻斷模式〉）；③ 產出「可重啟點任務書」骨架供 `claude -r` 續跑。
 
-🔴 因此本檔的角色被明確收斂（別讓一個東西假裝能做兩件事）
---------------------------------------------------------
-「不要爆」這件事**主要由 harness 的 autocompact 做**，本檔做不到——hook 不能執行
-`/compact`，模型也不能自己打 slash 指令。本檔是那條線的**第二道**：
-  ① 把「現在幾 %」變成看得見的數字（harness 的 autocompact 不告訴你水位）；
-  ② 在 ≥94% 時**真的擋下展開型工具**（見下方〈PreToolUse 阻斷模式〉）——因為
-     autocompact 觸發時會丟掉舊訊息，而「丟掉什麼」不由使用者決定；在那之前把
-     戰場收斂掉，才是掌舵者要的「不要爆」。
-  ③ 產出「可重啟點任務書」骨架，供 token 用完後 `claude -r` 續跑。
-harness 那一半的姿態是**可現查的**：`python tools/session_resume_planner.py
---check-autocompact`（autocompact 被關掉時 rc=1）。
-
-🔴 與 SDD `context_ledger` 的分工邊界（**先查過再寫，本檔不是重複造輪子**）
-------------------------------------------------------------------------
-repo 內確實已有一套帶 90% 門檻的 context 機制（SDD 各版目錄的 `context_ledger_pre/post`，
-經 `sdd_hook_router.py` 橋接在根註冊面上）。**它不該被廢、也不該被改**（數十個版目錄、
-Copy-on-Evolve 凍結、FSM 有依賴）。本檔與它**量的不是同一個東西**，三點逐項實查過——
-估算 vs 實測（ledger 的分子只看 `tool_input`，看不到工具輸出／subagent 回傳／對話本身）／
-生效條件不相交（ledger 以 `SDD_ACTIVE_VERSION` 為守衛，純根 session 一行都不跑）／
-分母不同（Stage 預算 vs context window）。逐條實查數字與 ledger 的常數表逐字保全於
-`docs/06_quality/CrossPlatform_R91_Scan_Findings.md` §A-4（R91 搬出：那是另一支檔的實作
-細節，抄在這裡就是同一份知識的第二個家，而只有這一份會過期）。
-
-🔴 這個分工論證的**洞**，照實寫（不粉飾）
-------------------------------------------
-`SDD_ACTIVE_VERSION` 有設時兩者同時活著，而**兩邊都有一條 90% 線**、分子分母都不同 ⇒
-同一時刻兩個百分比會不一樣。處置是**標示而非收編**：每一則訊息都印 `MEASURE_LABEL`；
-不讀也不寫 ledger 的檔案（耦合會讓凍結版被拖下水）；不因它存在而讓路。
-**未解的那一半**：兩者同時觸發時使用者會連拿兩則語氣相近的告警。本檔不試圖去重
-（去重需要跨全部凍結版的協議），僅以標籤讓它們可分辨——已知且已接受的限制，不是漏看。
-
-而「純文件約束對當下的模型零攔阻力」在本 repo 已被實證兩次（`block_bash_on_windows.py`
-與 `lint_powershell_command.py` 的立案量測，逐字見 `CrossPlatform_R91_Scan_Findings.md`
-§A-2）。水位這件事同型且更嚴重——CLAUDE.md 由 session **開場**載入，而「現在幾 % 了」
-是每回合都在變的量，靠模型主動想起來去算它，正是決策負荷第一個擠掉的東西。
+與 SDD `context_ledger`（各版目錄 `context_ledger_pre/post`，經 `sdd_hook_router.py`
+橋接）**不是重複造輪子**：估算 vs 實測／生效條件不相交（`SDD_ACTIVE_VERSION` 為守衛）／
+分母不同（Stage 預算 vs context window），三點皆已實查（詳見 moved_lore）。已知且接受
+的殘餘限制：兩者同時觸發時使用者會拿到兩則語氣相近的告警，僅以 `MEASURE_LABEL` 標示
+可分辨，不試圖去重（需要跨全部凍結版協議）。純文件約束對模型零攔阻力已實證兩次
+（`block_bash_on_windows.py`／`lint_powershell_command.py`），水位這件事同型更嚴重。
 
 量測面（實測確認，不是推測）
 ----------------------------
@@ -79,95 +49,54 @@ context 裡，重複計會高估）。
 🔴 **⑤ 這一階不得用來硬擋**（見〈PreToolUse 阻斷模式〉）：它是「我不知道」的委婉說法，
 拿一個猜出來的分母去硬鎖工具，就是把本輪要修的那個缺陷換個方向再犯一次。
 
-行為契約（PostToolUse＝觀測模式）
---------------------------------
-· payload 讀不出來（壞 JSON／空 stdin）→ stderr 一行 ＋ **exit 1**（出聲但不阻斷）。
-  🔴 為何不是靜默 exit 0：`tools/tests/test_check_hooks_liveness.py` 的
-  `degraded_payload_verdict` 判過——讀不懂輸入時放行，等於讓「送壞 payload」成為
-  讓守衛整支消失的免費手段，而且失效時沒有人看得見。同一支判準也說「rc==1＝出聲
-  但不阻斷，爆炸半徑為零，合法」，所以這裡取 1 而不是 2。
-· 沒有 `transcript_path`／檔案不存在／掃不到任何 usage → exit 0 靜默。這與上一條
-  是**不同**的事：那是「輸入壞掉」，這是「量測暫時不可得」（session 剛開場一定會
-  走到這裡）。把兩者混同就會變成每次呼叫都出聲的守衛，然後整支被關掉。
-· `< 84%` → exit 0 且**完全靜默**（每次工具呼叫都出聲的守衛會被關掉）。
-  🔴 R92 掌舵者裁決：閾值 75／90 → **84／94**，理由見 `WARN_RATIO` 旁的 WHY
-  （與額度尺 85／95 刻意錯開；84 在機械 autocompact 點之前、94 是它的失效警報）。
-· `>= 84%` → stderr 一行 ＋ **同一段文字送進模型 context**（stdout 的
-  `hookSpecificOutput`，發射口＝`platform_utils.emit_to_model`），exit 0。
-  🔴 R91 立案：exit 0 下 stderr **不進模型 context**（官方契約：PostToolUse 只有 exit 2
-  才回饋 stderr）⇒ 這一整帶（75~90%）模型結構上收不到任何訊號，本輪實測 1h49m／45 turns
-  零訊號。stderr 保留不動（人與 log 的可見面），新增的是模型那一半——形態與
-  `quota_gate.note_degraded()` 逐字同構（那是本通道在 production 的第一個消費者）。
-  逃生口 `AUTOSDD_CONTEXT_SIGNAL_OFF` 只關這半條（退回舊的純 stderr），刻意不與
-  `AUTOSDD_CONTEXT_GUARD_OFF`／`AUTOSDD_SENTINEL_OFF` 共用。
-  🔴 **這一格說什麼，取決於額度那把尺**（`quota_gate.draining()`，零網路、只讀快取）：
-  PRD `docs/01_requirements/AutoClaude_Token_監控與喚醒機制_PRD_v2.1.md` §4.3 的壓縮觸發
-  是**三個 AND**，本 hook 原本只實作了第一條（`K_ctx ≥ 75`）。PRD §0 第 1 條把「額度高時
-  觸發 `/compact`」列為**阻斷級**（§2：壓縮要模型讀完整段對話再產摘要 ⇒ 顯著推升 U5h）。
-  這個缺陷在 R91 之前是**良性的，正因為它壞著**——沒有人聽那則訊息；換上模型通道會讓它
-  真的被執行 ⇒ 分流與換通道必須是**同一個** commit，見 `warn_message` 的 WHY。
-· `>= 94%` → stderr 強制指引（含 %、used/window 實數、下一步）＋ 呼叫
-  `tools/session_resume_planner.py` 寫出「可重啟點任務書」骨架 ＋ **exit 2**。
-  PostToolUse 的 exit 2 會把 stderr 回饋給模型，這正是要的效果；它**不**阻斷已經
-  完成的那次工具呼叫（與 PreToolUse 的 exit 2 語意不同，別混淆）。
-· **同一門檻＋同一 window 只喊一次**（state 檔在系統暫存，檔名帶 session id）。
-  🔴 閂鎖鍵含 window 是 R79 修的那半個缺陷：R78 版只以 tier 為鍵，於是「用 200K
-  當分母誤喊一次 90%」之後，等分母修正成 1M、真的到 90% 時**閂鎖還鎖著** ⇒ 該喊
-  的那一次被前面那次誤報吃掉。分母一變就重新武裝，對 200K session 零行為改變。
-  代價仍明說：模型若無視同一組（門檻, window）的那一喊，本檔不會再喊第二次。
+行為契約（PostToolUse＝觀測模式；全文史料同上，搬 moved_lore.md）
+------------------------------------------------------------------
+· payload 讀不出來（壞 JSON／空 stdin）→ stderr 一行 ＋ **exit 1**（出聲但不阻斷，
+  rc=1＝爆炸半徑為零；見 `degraded_payload_verdict` 判準）。
+· 沒有 `transcript_path`／檔案不存在／掃不到任何 usage → exit 0 靜默（「量測暫時不可得」
+  與上一條「輸入壞掉」是不同的事，混同會讓守衛變成每次都出聲而被整支關掉）。
+· `< 84%` → exit 0 完全靜默；`>= 84%` → stderr 一行 ＋ 同一段文字送進模型 context
+  （`platform_utils.emit_to_model`，逃生口 `AUTOSDD_CONTEXT_SIGNAL_OFF`），內容依額度尺
+  `quota_gate.draining()` 三分（PRD §4.3 的三個 AND，見 `warn_message`／`_NEXT_STEP`）。
+  `>= 94%` → stderr 強制指引 ＋ 寫任務書 ＋ **exit 2**（PostToolUse 的 exit 2 不阻斷已完成
+  的那次呼叫，語意與 PreToolUse 不同）。
+· **同一門檻＋同一 window 只喊一次**（`latch_key` 含 window／epoch，見該函式 WHY）。
 
-🔴 PreToolUse 阻斷模式（R79 新增——把「不要爆」從散文變成真的擋得下來的東西）
-----------------------------------------------------------------------------
-R78 版的鏈條是「印一段話 → 模型自己記得去 compact」，而「純文件約束對當下的模型零
-攔阻力」在本 repo 已被實證兩次（`block_bash_on_windows.py` 的立案就是這樣來的）。
-故同一支腳本另有一個由 payload 的 `hook_event_name` 分派的模式：
+🔴 PreToolUse 阻斷模式（R79：把「不要爆」從散文變成真的擋得下來的東西）
+------------------------------------------------------------------------
+另一個由 `hook_event_name` 分派的模式：只在 `>= 94%` 且 window 不是保守下界猜測時擋
+（`may_block()`——分母是猜的只出聲不擋，否則猜錯會把真實 18% 誤鎖）；只擋展開型工具
+（`BLOCKING_TOOLS`），Read／Edit／PowerShell 放行（收斂本身需要它們）；不進閂鎖（會一直
+擋到水位真的掉下來，`/compact` 後自動解除）；人為逃生口 `AUTOSDD_CONTEXT_GUARD_OFF=1`。
+任何非預期例外 → exit 0（fail-open 是 P0：守衛自身絕不可成為故障源）。
 
-  · 只在 `>= 94%` 且 **window 不是保守下界猜測**時擋（`may_block()`）。分母是猜的
-    就只出聲不擋——否則今天這個缺陷（1M session 被當成 200K）會直接變成「真實 18%
-    就把工具鎖死」，比原缺陷更糟。
-  · 只擋**展開型**工具（`BLOCKING_TOOLS`；R80 起含本 harness 真正在用的 `Agent`／
-    `Workflow`，見該常數旁的 WHY），註冊面的 matcher 與它逐名對齊。
-    Read／Edit／PowerShell 一律放行——根 CLAUDE.md 那句是
-    「此後只做收斂，不做展開」，而收斂本身需要讀檔、寫任務書、跑 git。**擋到讓人
-    無法收斂的守衛會被整個關掉**，那是本 repo 反覆判過的形態。
-  · **不進閂鎖**：擋一次就放行的東西不是阻斷。它會一直擋到水位掉下來為止，而
-    `/compact` 之後 used 會真的掉 ⇒ 自動解除，不需要任何人來關掉它。
-  · 人為逃生口：環境變數 `AUTOSDD_CONTEXT_GUARD_OFF=1` 一律放行（供人在守衛誤判時
-    自救；模型改不到 hook 行程的環境）。這是對 P0 的第二道保險，不是給模型的後門。
-· **任何非預期例外 → exit 0（fail-open）**。`.claude/settings.json` 的 description
-  記載過 P0：hook 誤觸會把所有工具硬鎖死。守衛自身絕不可成為故障源。
+相依規則：①能力提供者（quota_gate／platform_utils／sdd_latest）一律 try/except，
+不可達時該軸退化成「量不到」；②判讀原語（quota_limits）hard import；③`tools/lib/*`
+只准裸名 import（反向依賴仍允許：planner import 本檔）。
 
-相依規則（R82／Q2-01 訂正：此前寫「本檔只用 stdlib」，而下面幾行就 import 了四支 tools/lib）
-------------------------------------------------------------------------------------
-①能力提供者（quota_gate／platform_utils）一律 try/except，不可達時該軸退化成「量不到」；
-②判讀原語（quota_limits）hard import，給 stub 等於讓同一份字面有第二個家；
-③`tools/lib/*` **只准裸名 import**——`from lib import X` 會讓同一份原始碼在同一行程裡
-有兩個模組物件（`ModuleIdentityIsSingleTest` 在守）。反向依賴仍允許：planner import 本檔。
-
-🔴 R82／Q2-02：本檔的**職責邊界**（額度軸已經不在這裡了）
---------------------------------------------------------
-本檔只剩一把尺——**context 水位**：量它、判 window、越線時出聲／擋展開型工具／寫任務書，
-外加哨兵武裝的**觸發面**（R82／HELM-02 起：SessionStart 只清閂鎖，真正註冊延後到
-PostToolUse 且要通過 `tools/lib/sentinel_lifecycle` 的雙門檻——立案是掌舵者當場截圖的
-「排程器裡三支哨兵，兩支屬於活 5 秒／12 秒的 session」）。額度尺整條住 `quota_gate.py`，本檔對
-它只有兩件事：①`main()` 在五道 context 早退**之前**呼叫它一次（撞額度那刻 context 水位
-可能只有 ~18%，掛在早退之後的分支一次都不會被執行——那是 SA-B1 判過的死碼）；
-②把它需要的四個 hook 端能力注入進去（阻斷名單／閂鎖讀寫／任務書／喚醒武裝）。
-兩把尺不共用早退條件、也不共用模組，就是那個設計。既有架構鎖
-`test_quota_is_not_wired_into_the_context_blocking_path` 的射程零改變且更容易成立。
+🔴 R82／Q2-02：本檔的**職責邊界**——只剩一把尺（context 水位），額度尺整條住
+`quota_gate.py`；本檔對它只有兩件事：①`main()` 在 context 早退之前呼叫它一次
+（撞額度那刻 context 水位可能只有 ~18%，掛在早退之後的分支一次都到不了）；
+②注入四個 hook 端能力（阻斷名單／閂鎖讀寫／任務書／喚醒武裝）。兩把尺不共用早退
+條件、也不共用模組（`test_quota_is_not_wired_into_the_context_blocking_path` 釘住）。
 
 回歸鎖：`tools/tests/test_context_budget_guard.py`（合成 jsonl 注入，逐條驗紅）。
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
 from datetime import datetime
 from pathlib import Path
+
+#: `O_BINARY` 只有 Windows 的 `os` 有（鐵律三）；同 `tools/lib/quota_ledger.py` 既有慣例。
+_BINARY = getattr(os, "O_BINARY", 0)
 
 # 自己的 stdout/stderr 強制 UTF-8。缺這段時：locale 表達不了 CJK（en-US Windows
 # ＝cp1252）→ 整段指引變 `\uXXXX` 逃脫字面；locale 表達得了但非 UTF-8（zh-TW
@@ -231,20 +160,25 @@ try:
 except Exception:  # noqa: BLE001 — 見上
     schedule_backend = None  # type: ignore[assignment]
 
+# D21（SD-09／DEF-200-275 第六輪）：LATEST 版本路徑解析唯一真相源＝`tools/lib/sdd_latest.py`
+# （query 查表資料的家＝`$V/tools/fsm_runtime/data/known_model_windows.json`，
+# 見 `known_model_windows_path()`）。同一套 fail-open：不可達時本符號為 `None`，
+# 查表收斂整條退化成「查不到，不收斂」——與這個階段本身的方向一致（不收斂只是不精確，
+# 不是不安全；被否決的作法是在根層另存一份查表，見該函式 docstring）。
+try:
+    import sdd_latest  # type: ignore[import-not-found]
+except Exception:  # noqa: BLE001 — 見上
+    sdd_latest = None  # type: ignore[assignment]
+
 
 def _has_carrier() -> bool:
     """這台機器上有沒有排程載具（Windows schtasks／macOS launchd）。"""
     return schedule_backend is not None and schedule_backend.has_carrier()
 
-# 額度**撞線判讀**唯一的家＝`tools/lib/quota_limits.py`（R81 收斂沿革與 R82／Q2-01
-# 刪 15 行 tuple 常數的史料搬至 CrossPlatform_Guard_Line_History.md
-# 〈context_budget_guard 立案史彙整〉節）。**為什麼這一格沒有 try/except**（與上面兩格
-# 刻意不同）見該檔 docstring 最後一段：能力提供者可以降級，判讀原語不行——
-# 給它 fallback stub 等於讓同一份字面有第二個家，而且會用錯的答案靜默通過。
-# `tools/session_resume_planner.py` 以 `guard.<name>` 取用這些符號 ⇒ 這裡把它們 import
-# 回本檔的命名空間，呼叫端與既有回歸鎖一個字都不必改。
-# 🔴 下面 11 個在本檔內一次都不會被呼叫：它們是給 planner 的純再匯出（`guard.
-# classify_limit` 這種取法），刪掉任一個 planner 會在無人看管的排程路徑上 AttributeError。
+# 額度**撞線判讀**唯一的家＝`tools/lib/quota_limits.py`。刻意 hard import（與上面能力
+# 提供者不同）：判讀原語給 fallback stub 等於讓同一份字面有第二個家、用錯答案靜默通過。
+# 下面 11 個在本檔內一次都不會被呼叫，是給 `tools/session_resume_planner.py`（`guard.
+# <name>` 取用）的純再匯出——刪任一個都會在無人看管的排程路徑上 AttributeError。
 from quota_limits import (  # noqa: E402,F401
     LIMIT_NONE,
     LIMIT_SESSION,
@@ -522,6 +456,94 @@ def window_from_model(hint: object, observed: object = None) -> int | None:
     return WIDE_WINDOW
 
 
+_DATE_SUFFIX_RE = re.compile(r"-\d{8}$")
+#: D21：查表資料相對 LATEST 版根目錄的路徑（資料只有一個家——SDD 子專案自己那份，
+#: 見 `known_model_windows_path()` 的 WHY；D21 否決「根層另存一份」）。
+_KNOWN_MODEL_WINDOWS_REL = ("tools", "fsm_runtime", "data", "known_model_windows.json")
+
+
+def normalize_model_id(model: object) -> str:
+    """查表鍵：去 `[1m]`／尾碼 `-1m`、小寫、去 `-YYYYMMDD` 日期尾碼（同 SDD `context_window.py`
+    同名函式逐字同構——查表資料共用同一份，鍵的正規化規則不能各算各的）。"""
+    text = str(model or "").strip().lower().replace("[1m]", "").strip()
+    if text.endswith("-1m"):
+        text = text[:-3]
+    return _DATE_SUFFIX_RE.sub("", text)
+
+
+def known_model_windows_path(root: Path | None = None) -> Path | None:
+    """LATEST 版 `known_model_windows.json` 的路徑；解析不到／檔不存在一律 `None`（D21 fail-open；
+    四種失效各印一行 stderr，SA-F1 訂正——唯一真相源與失效分類全文見 moved_lore.md）。"""
+    if sdd_latest is None:
+        sys.stderr.write("⚠️  known_model_windows fail-open：sdd_latest 模組不可達，不收斂\n")
+        return None
+    sdd_root = (root or repo_root()) / "AISDLC_SDD"
+    try:
+        if not sdd_root.is_dir():
+            sys.stderr.write(
+                f"⚠️  known_model_windows fail-open：無 AISDLC_SDD 子專案（{sdd_root}），不收斂\n"
+            )
+            return None
+        latest_root = sdd_latest.resolve_latest_root(sdd_root)
+    except Exception as exc:  # noqa: BLE001 — 解析失敗一律 fail-open、不收斂（D21）
+        kind = "有子專案無版本目錄" if "找不到任何版本目錄" in str(exc) else "LATEST 解析失敗"
+        sys.stderr.write(f"⚠️  known_model_windows fail-open：{kind}（{sdd_root}）：{exc}，不收斂\n")
+        return None
+    path = latest_root.joinpath(*_KNOWN_MODEL_WINDOWS_REL)
+    if not path.is_file():
+        sys.stderr.write(f"⚠️  known_model_windows fail-open：表檔不存在（{path}），不收斂\n")
+        return None
+    return path
+
+
+def load_known_model_windows(path: Path | None) -> dict[str, int]:
+    """回查表 `{正規化 model id: window}`；`path=None`／讀不到／格式不對一律 `{}`（fail-open）。"""
+    if path is None:
+        return {}
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError) as exc:
+        sys.stderr.write(f"⚠️  known_model_windows fail-open：JSON 損毀（{path}）：{exc}，不收斂\n")
+        return {}
+    if not isinstance(doc, dict) or not isinstance(doc.get("models"), dict):
+        sys.stderr.write(f"⚠️  known_model_windows fail-open：JSON 形狀不對（{path}），不收斂\n")
+        return {}
+    table: dict[str, int] = {}
+    for model_id, window in doc["models"].items():
+        if (isinstance(model_id, str) and isinstance(window, int)
+                and not isinstance(window, bool) and window > 0):
+            table[normalize_model_id(model_id)] = window
+    return table
+
+
+def _not_converged_note(source: str, key: str, table_value: int) -> str:
+    """查過表、沒收斂時附註的證據（D21／SD-09 殘餘：根層此前連查過表這件事本身都看不見，
+    只在真的收斂時才留痕跡不夠）。插進原本來源說明的括號內，讓 `--check` 印得出「這一格
+    到底有沒有真的查過表、比較的結果是什麼」，不論收不收斂。"""
+    note = f"；查表 {key}={table_value:,} ≥ 指定值，不收斂"
+    return source[:-1] + note + "）" if source.endswith("）") else source + note
+
+
+def _converge_pinned_window(
+    pinned: int, observed_model: object, known_models: dict[str, int] | None,
+) -> tuple[int, str] | None:
+    """釘值 vs 逐字稿實跑 model 查表值的收斂（D21，鏡射 SDD `context_window.py` 同名函式：
+    只在查表值嚴格小於指定值時收斂，方向論證同模組 docstring——猜小只是早喊，猜大會讓
+    阻斷遲到）。`None`＝查不到表／認不出 observed_model，呼叫端沿用原本的來源說明。"""
+    if not known_models:
+        return None
+    key = normalize_model_id(observed_model)
+    if not key or key not in known_models:
+        return None
+    table_value = known_models[key]
+    if table_value < pinned:
+        return table_value, (
+            f"查表值（Models API max_input_tokens，model={key}；"
+            f"指定值 {pinned:,} 大於該模型上限，已收斂）"
+        )
+    return None  # 沒收斂——附註由呼叫端用 `_not_converged_note()` 補上（它還要原本的 source）
+
+
 def resolve_window(
     peak_used: int,
     env_raw: str | None = None,
@@ -530,13 +552,15 @@ def resolve_window(
     settings_window: object = None,
     model_hint: object = None,
     observed_model: object = None,
+    known_models: dict[str, int] | None = None,
 ) -> tuple[int, str]:
     """`(window, 來源說明)`。純函式——紅綠由注入自證，不讀環境／不讀檔（呼叫端傳入）。
 
     順序即優先序（詳細理由見模組 docstring 的〈context window 判定〉）：
-    本檔旗標 → harness 自己的旋鈕（環境變數／settings）→ model 標記（帶交叉否決）
-    → 可證的下界推論 → 保守值。來源說明會原樣印進使用者看到的訊息，所以它**必須**
-    分得出「指定」與「推斷」；把推斷寫成已知是本 repo 的既有缺陷形態，不是文風問題。
+    本檔旗標 → harness 自己的旋鈕（環境變數／settings，D21 起皆會與 `known_models` 收斂）
+    → model 標記（帶交叉否決）→ 可證的下界推論 → 保守值。來源說明會原樣印進使用者看到
+    的訊息，所以它**必須**分得出「指定」與「推斷」；把推斷寫成已知是本 repo 的既有缺陷
+    形態，不是文風問題。
 
     前兩個參數維持位置引數：既有呼叫端（`tools/session_resume_planner.py` 與回歸鎖）
     不必改就仍是對的，新增的證據來源一律 keyword-only。
@@ -550,6 +574,12 @@ def resolve_window(
             continue
         pinned = _positive_int(raw)
         if pinned > 0:
+            converged = _converge_pinned_window(pinned, observed_model, known_models)
+            if converged is not None:
+                return converged
+            key = normalize_model_id(observed_model)
+            if known_models and key and key in known_models:
+                return pinned, _not_converged_note(source, key, known_models[key])
             return pinned, source
     from_model = window_from_model(model_hint, observed_model)
     if from_model is not None:
@@ -606,24 +636,44 @@ def latch_key(tier: str, window: int, epoch: int = 0) -> str:
     return f"{tier}@{window}@{epoch}"
 
 
+def _latch_marker_dir(state: Path) -> Path:
+    """D22（SD-05）：`state` 對應的原子標記檔目錄——每個 key 一個檔，取代單一 JSON 檔。"""
+    return state.parent / f"{state.stem}.latches.d"
+
+
+def _latch_marker_name(key: str) -> str:
+    return hashlib.sha1(key.encode("utf-8")).hexdigest()[:24] + ".key"
+
+
 def announced_latches(state: Path) -> set[str]:
     """已喊過的 (門檻, 分母) 集合。讀不出來一律回空集合（寧可多喊一次，也不要靜默失聲）。"""
+    out: set[str] = set()
     try:
-        data = json.loads(state.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return set()
-    tiers = data.get("tiers") if isinstance(data, dict) else None
-    return {str(t) for t in tiers} if isinstance(tiers, list) else set()
+        entries = list(_latch_marker_dir(state).iterdir())
+    except OSError:
+        return out
+    for entry in entries:
+        try:
+            out.add(entry.read_text(encoding="utf-8"))
+        except OSError:
+            continue
+    return out
 
 
 def remember_latch(state: Path, key: str) -> None:
-    """把 (門檻, 分母) 記進 state 檔。寫失敗不得升級為守衛失敗——最壞情況是下次再喊一次。"""
-    tiers = sorted(announced_latches(state) | {key})
+    """把 key 記進去（D22／SD-05：`O_CREAT|O_EXCL` 原子建檔，取代舊版整讀→union→整寫——
+    後者兩個行程幾乎同時各自 union 後寫回會遺失先寫入的那個 key，方向安全但不精確；
+    每個 key 一個檔天生不衝突，同 key 競爭時輸的那邊 `O_EXCL` 失敗即安靜跳過）。
+    寫失敗（含已存在）一律吞掉，不得升級為守衛失敗——最壞情況是下次再喊一次。"""
+    marker_dir = _latch_marker_dir(state)
     try:
-        # `Path.write_text(newline=)` 要 3.10+ 才有；改用 `.open()`（委派給內建 `open()`，
-        # `newline=` 3.9 就支援）以維持 mac 系統預設直譯器（常年 3.9）相容。
-        with state.open("w", encoding="utf-8", newline="\n") as f:
-            f.write(json.dumps({"tiers": tiers}, ensure_ascii=False))
+        marker_dir.mkdir(parents=True, exist_ok=True)
+        fd = os.open(str(marker_dir / _latch_marker_name(key)),
+                     os.O_CREAT | os.O_EXCL | os.O_WRONLY | _BINARY, 0o600)
+        try:
+            os.write(fd, key.encode("utf-8"))
+        finally:
+            os.close(fd)
     except OSError:
         pass
 
@@ -671,13 +721,24 @@ def settings_value(key: str, paths: list[Path] | None = None) -> object:
 
 
 def window_evidence(observed_model: str | None) -> dict:
-    """把 `resolve_window` 需要的四個證據來源一次收齊（I/O 都在這裡，判定仍是純函式）。"""
+    """把 `resolve_window` 需要的證據來源一次收齊（I/O 都在這裡，判定仍是純函式）。"""
+    env_raw = os.environ.get(WINDOW_ENV)
+    cc_window_raw = os.environ.get(CC_WINDOW_ENV)
+    settings_window = settings_value(CC_WINDOW_KEY)
+    # D21：只在至少一階有指定值時才查表——沒有任何 pin 時 `_converge_pinned_window` 用
+    # 不到它（收斂只發生在②③④階），提早跳過能省一次 `sdd_latest` 的 LATEST 解析
+    # （內部再呼叫一次 `git`，逐次工具呼叫都付這個代價並不便宜）。
+    known_models: dict[str, int] = {}
+    if (_positive_int(env_raw) or _positive_int(cc_window_raw)
+            or _positive_int(settings_window)):
+        known_models = load_known_model_windows(known_model_windows_path())
     return {
-        "env_raw": os.environ.get(WINDOW_ENV),
-        "cc_window_raw": os.environ.get(CC_WINDOW_ENV),
-        "settings_window": settings_value(CC_WINDOW_KEY),
+        "env_raw": env_raw,
+        "cc_window_raw": cc_window_raw,
+        "settings_window": settings_window,
         "model_hint": settings_value(CC_MODEL_KEY),
         "observed_model": observed_model,
+        "known_models": known_models,
     }
 
 
@@ -716,20 +777,12 @@ def write_resume_plan(transcript: Path) -> str:
     return str(out) if out.is_file() else ""
 
 
-# ───────────────────────── 預防性哨兵的**觸發層**（R79 補洞包；R82／HELM-02 改觸發時機）
-# 🔴 SessionStart 只**清閂鎖**（見 `arm_sentinel`），真正註冊延後到 PostToolUse 且要通過
-# `tools/lib/sentinel_lifecycle.should_arm()`（回合數＋存活跨度雙門檻）——判準不能寫在
-# SessionStart 那一刻，逐字稿那時往往還不存在。為何非預防性不可、三個刻意取捨（detached
-# 子行程／逐字稿不存在也照樣武裝／一切例外吞掉）逐字保全於
-# `CrossPlatform_R91_Scan_Findings.md` §I-12；立案量測見同檔 §A-6。
+# ───────────────────────── 預防性哨兵的**觸發層**（R79 補洞包；R82／HELM-02 改觸發時機；
+# SessionStart 只清閂鎖，真正註冊延後到 PostToolUse 且要通過 `sentinel_lifecycle.should_arm()`
+# 雙門檻——三個刻意取捨與立案量測全文搬 moved_lore.md／`CrossPlatform_R91_Scan_Findings.md` §I-12）。
 def spawn_sentinel(transcript_raw: str, out: str, log: object = None) -> bool:
-    """Detached 起 planner 的 `--arm-sentinel`；回「有沒有真的 spawn 出去」。
-
-    🔴 R82／Q2-02 的減法：SessionStart 武裝與額度 95% 喚醒武裝此前是**兩份逐字相同的
-    `Popen`**（同一支 planner、同一組旗標、同一個 `creationflags`），差別只有「要不要寫
-    boot log」。兩份各自演化的代價已經看得到：R80 修「`DETACHED_PROCESS` 讓視窗回來」
-    那一次只改了其中一份。收成一份之後那個漂移在結構上不存在。
-    """
+    """Detached 起 planner 的 `--arm-sentinel`；回「有沒有真的 spawn 出去」（R82／Q2-02 的
+    減法：SessionStart 武裝與額度 95% 喚醒武裝共用同一份實作，避免各自演化漂移）。"""
     planner = repo_root() / "tools" / "session_resume_planner.py"
     if not _has_carrier() or not planner.is_file() or not transcript_raw or not out:
         return False
@@ -739,13 +792,8 @@ def spawn_sentinel(transcript_raw: str, out: str, log: object = None) -> bool:
              "--out", out, "--arm-sentinel"],
             stdout=log if log is not None else subprocess.DEVNULL,
             stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-            # 🔴 R80：舊寫法帶了 `DETACHED_PROCESS`，而它在**本 venv 的 trampoline 載具**
-            # 上會讓視窗回來（矩陣見 NO_WINDOW 第二列：`DET` 與 `DET|CNW` 兩格皆「可見」）
-            # ——上面取捨①宣稱的「不彈視窗」在寫下的當回合就不成立，且失效是靜默的
-            # （旗標有設、視窗照彈）。**不要把這句讀成「DETACHED 會抵銷 CNW」**：那是本檔
-            # 第一版的過度一般化，真直譯器那一列 `DET|CNW` 是 0，翻面的是載具不是旗標語意。
-            # 取捨①要的「不同步等它跑完」由「不呼叫 wait()」提供，與旗標無關；子行程活過
-            # 父行程退場這件事也已實測不需要 DETACHED_PROCESS（父死 8 秒後子仍寫出痕跡）。
+            # 🔴 R80：不帶 `DETACHED_PROCESS`（它在本 venv 的 trampoline 載具上會讓視窗回來，
+            # 全文搬 moved_lore.md）；「不同步等它跑完」由不呼叫 `wait()` 提供，與旗標無關。
             creationflags=NO_WINDOW)
     except Exception:  # noqa: BLE001 — 見上方取捨③：武裝失敗不得反過來變成故障源
         return False
@@ -753,14 +801,8 @@ def spawn_sentinel(transcript_raw: str, out: str, log: object = None) -> bool:
 
 
 def arm_sentinel(payload: dict) -> None:
-    """SessionStart：**不再直接武裝**，只把上一輪的武裝閂鎖清掉並留一行痕跡。
-
-    🔴 為什麼還要清閂鎖（不是「什麼都不做就好」）：`claude -r` 續接一個已經下班（6 小時
-    閒置自我解除）的 session 時，閂鎖若留著就再也不會重新武裝＝續航被靜默弄丟。清掉之後
-    下一次工具呼叫會重新評估，而那時逐字稿早就過門檻 ⇒ 立刻補上。
-    boot log 保留：它是「SessionStart 有沒有被叫到」唯一的痕跡，而本輪正是靠它才發現
-    有四支短命 session 根本沒觸發過這支 hook（沒有 boot log）。
-    """
+    """SessionStart：**不再直接武裝**，只把上一輪的武裝閂鎖清掉並留一行痕跡（`claude -r`
+    續接已下班 session 時閂鎖若留著會讓續航靜默弄丟；boot log 是「有沒有被叫到」的痕跡）。"""
     if not _has_carrier() or os.environ.get(SENTINEL_OFF_ENV):
         return  # 沒有排程載具就沒有續航可言（見 `_has_carrier`）；人要關就關得掉
     if not isinstance(raw := payload.get("transcript_path"), str) or not raw.strip():
@@ -775,15 +817,9 @@ def arm_sentinel(payload: dict) -> None:
                      f" （閂鎖已清；武裝延後到累積夠工作量的那一刻）｜孤兒回收 spawn={swept} ===\n")
 
 
-# 🔴 R84／C3-P4b：`sentinel_lifecycle.gc()` 此前**零自動呼叫端**，殘骸哨兵每 15 分鐘
-# 照樣醒來（立案實測全文搬至 docs/06_quality/CrossPlatform_Guard_Line_History.md
-# 〈context_budget_guard 立案史彙整〉節）；呼叫點選在 SessionStart＝「後來的人開工」
-# 那一刻，也是本函式已經在清閂鎖的地方（同一族的清理，不另開第二個時機）。
-#
-# 三個刻意的取捨，與 `spawn_sentinel` 逐條同構（同一族的風險，同一組處置）：
-#  ① **detached 子行程**（`gc()` 要外呼排程器列舉，同步做＝每次開 session 先卡幾秒）；
-#  ② **`keep=(當前 sid,)`**（自己的哨兵不能被自己收掉；`gc()` 內另有一層保護，兩層獨立）；
-#  ③ **一切例外吞掉**（P0：hook 誤觸鎖死所有工具；回收失敗最多殘骸多留一輪，不可變故障源）。
+# 🔴 R84／C3-P4b：`sentinel_lifecycle.gc()` 此前零自動呼叫端，殘骸哨兵每 15 分鐘照樣醒來
+# （全文搬 moved_lore.md／`CrossPlatform_Guard_Line_History.md`）。三個取捨與 `spawn_sentinel`
+# 逐條同構：detached 子行程／`keep=(當前 sid,)` 自己的哨兵不能被自己收掉／一切例外吞掉。
 def spawn_sentinel_gc(keep_sid: str) -> bool:
     """Detached 起 `sentinel_lifecycle --gc --apply`；回「有沒有真的 spawn 出去」。"""
     lifecycle = repo_root() / "tools" / "lib" / "sentinel_lifecycle.py"
@@ -849,21 +885,8 @@ def _headline(used: int, window: int, source: str) -> str:
             f"（{MEASURE_LABEL}：used {used:,} / window {window:,}〔{source}〕）")
 
 
-#: 84% 那一格的**下一步**，依額度相對 PRD `DRAIN_PERCENT` 的位置三分（`quota_gate.draining()`）。
-#:
-#: 🔴 立案（R91，PRD 前置條件）：PRD §4.3 的壓縮觸發是**三個 AND**——
-#: `K_ctx ≥ CONTEXT_COMPACT_PERCENT`（R92＝84） ∧ `U5h + COMPACT_COST_BUDGET_PP ≤ DRAIN_PERCENT` ∧
-#: `距上次壓縮 ≥ COMPACT_MIN_INTERVAL_SECONDS`——而本 hook 原本只實作了第一條，於是它在額度高位照樣
-#: 喊 `/compact`。PRD §0 第 1 條把那件事列為 **🔴 阻斷級**，理由在 §2「關鍵釐清」：壓縮
-#: 本身要模型讀完整段對話並產生摘要 ⇒ **會顯著推升 U5h**，高位壓縮是反向操作。
-#: 本輪之前這個缺陷是**良性的，正因為它壞著**（訊息走沒有讀者的 stderr）；一旦換上模型
-#: 通道，它就會**真的被執行** ⇒ 補這一條與換通道必須同一個 commit，否則等於啟動一個
-#: 休眠的阻斷級違反。第三條 AND（距上次壓縮的間隔）本 hook 量不到，由「同一門檻本
-#: session 只喊一次」的閂鎖近似——**誠實劃界：那是 per (tier, window)，不是 per 時間間隔**。
-#: 🔴 第二條 AND 的 3pp 邊際（PRD §6 `COMPACT_COST_BUDGET_PP`）已由 `quota_gate.draining()`
-#: 實作（DEF-200-137）：五小時軸 `pct + 邊際 > DRAIN` 亦回 `"yes"`，`(82, 85]` 帶不再勸壓縮。
-#: `"unknown"` 不折進 `"no"`：PRD §0 第 6 條明定遙測失效方向為 fail-safe，而「證不出
-#: 第二個 AND 成立」與「已證明它成立」是兩件事（同本檔通篇「量不到 ≠ 量到零」的紀律）。
+#: 84% 那一格的**下一步**，依額度相對 PRD `DRAIN_PERCENT` 的位置三分（`quota_gate.draining()`）；
+#: PRD §4.3 三個 AND 條件與立案史全文搬 moved_lore.md（R91）。
 _NEXT_STEP = {
     "no": ("   機械 autocompact 將於觸發點自動壓縮（模型自身打不了 `/compact`，人在旁可手動——"
            "ADR-XPLAT-008；額度現查：五小時軸連同 PRD `COMPACT_COST_BUDGET_PP` 邊際仍在 "
@@ -949,14 +972,9 @@ def block_message(used: int, window: int, source: str, tool: str) -> str:
 
 def main() -> int:
     try:
-        # 🔴 R82／C2：`.env` 裡的逃生口必須真的算數。本檔的三個開關（`GUARD_OFF_ENV`／
-        # `SENTINEL_OFF_ENV` 兩處）與 `quota_gate` 的那一個此前全讀 `os.environ` ⇒ 使用者
-        # 照 `.env.example` 抄一份 `.env` 把守衛關掉，守衛照擋，而「關掉了」與「沒關掉」
-        # 外觀完全相同。這一行把 `.env` 裡**我們自己宣告過的鍵**（`ENV_SPEC` 白名單，
-        # 不是整份檔——`.env` 也放機密，整份灌進 env 會隨 Popen 繼承到子行程）填成行程級
-        # 預設，缺席才填 ⇒ 真環境變數仍然贏。放在 `main()` 而不是模組層：模組層副作用會
-        # 讓「import 本檔的測試」被開發機上的 `.env` 影響。
-        # 回歸鎖：`tools/tests/test_context_budget_guard.py::EnvFileReachesEveryEscapeHatchTest`。
+        # 🔴 R82／C2：`.env` 裡我們自己宣告過的鍵（`ENV_SPEC` 白名單）填成行程級預設，
+        # 缺席才填、真環境變數仍贏；放 `main()` 而非模組層（避免測試 import 被開發機 `.env`
+        # 影響）。回歸鎖：`EnvFileReachesEveryEscapeHatchTest`。
         if quota_gate is not None:
             quota_gate.apply_env_defaults(os.environ)
         payload = read_payload()
@@ -977,23 +995,10 @@ def main() -> int:
                 sentinel_lifecycle.announce_handbacks(lambda m: emit_to_model(event, m))
             return 0
         blocking = event == "PreToolUse"
-        # 🔴 R83：額度軸只在**我們真的推理過的那兩個事件**上動作。少了這一格，接電會順手
-        # 把「事件名讀不出來」（壞 payload、未來新增的事件）也當成觀測點——本輪注入實測：
-        # 一份沒有 `hook_event_name` 的 payload 會走完整條額度判讀並出聲，而那類 payload
-        # 依本檔既有契約應該是「量測暫時不可得 ⇒ 靜默 rc=0」。射程要靠白名單而不是靠
-        # 「不是 PreToolUse 就當 PostToolUse」，後者是預設開啟、方向錯的。
+        # 🔴 R83：額度軸只在真的推理過的這兩個事件上動作（白名單，不是「不是 PreToolUse
+        # 就當 PostToolUse」）；且必須在下面五道 context 早退**之前**求值（SA-B1 判過的
+        # 死碼：撞額度那刻水位常只有 ~18%，掛在早退之後一次都到不了）。全文搬 moved_lore.md。
         measuring = event in ("PreToolUse", "PostToolUse")
-        # 🔴 額度那把尺**必須在這裡**求值，不能往下擺（SA-B1 判過的死碼）。下面五道早退
-        # 全是 context 語意，而 `tier_of()` 在低於 WARN_RATIO 時一律回 `None` ⇒ 撞額度那一刻
-        # （實測水位只有 ~18~20%）任何掛在 `block_verdict()` 裡的 quota 分支都到不了。
-        # 兩把尺不共用早退條件，這一行的位置就是那個設計。
-        # 🔴 R83／接電：`blocking and` 這個前綴拿掉了，`event` 改為傳進去。立案是量出來的
-        # ——舊條件讓額度那把尺**只在「我要扇出」那一刻**被問一次，而 R83 實測配額 5%→90%
-        # 的整段，主 session 派完最後一波之後再也沒呼叫任何扇出型工具（後續全是全樹跑、
-        # agent 回傳、大量讀檔）⇒ 本閘從頭到尾一次都沒被叫到。燒額度的是「我自己在做事」
-        # 那條路，而 PostToolUse 的 matcher（`Read|Task|Grep|Glob|…|Bash|PowerShell`）
-        # **本來就覆蓋**那條路 ⇒ `settings.json` 一個字都不用改，缺的只有這裡的條件與參數。
-        # 射程的第二半在 `quota_gate()` 內（PostToolUse 不記派發帳、不擋節流帶），兩邊要一起讀。
         raw_path = payload.get("transcript_path")
         transcript = Path(raw_path) if isinstance(raw_path, str) and raw_path.strip() else None
         # 🔴 DEF-200-202：模型分軌軸需要 `active_model` 才進 cap 聚合；提前掃逐字稿讓兩把
@@ -1006,13 +1011,9 @@ def main() -> int:
                 payload, blocking=BLOCKING_TOOLS, latch_read=announced_latches,
                 latch_write=remember_latch, plan_writer=write_resume_plan,
                 waker=arm_quota_wakeup, event=event, active_model=active_model or None)):
-            # 🔴 R83／Δ13：**接電引入的新缺陷，必須在同一個 commit 處理。** halt 帶在
-            # PostToolUse 會**每一次**回 2 ⇒ 本 hook 在這裡提早 return ⇒ 下面那個
-            # `arm_when_earned()` 在整個 halt 期間（一直到 reset）一次都不會執行，
-            # context 續航哨兵靜默失去所有武裝機會。而額度那層的喚醒武裝只在 halt 閂鎖
-            # **第一次**觸發時試一次、失敗不重試（見 `quota_gate` 的 D2 重排）⇒ 兩層都沒了。
-            # 兩層續航是不同的東西（一次性 reset 喚醒 vs 900s 巡邏），不得因為額度那層
-            # 說了話就把 context 那層吃掉。`arm_when_earned` 自身有閂鎖與 fail-open。
+            # 🔴 R83／Δ13：halt 帶在 PostToolUse 每次都回 2，本 hook 在這裡提早 return——
+            # 下面的 `arm_when_earned()` 仍須在此補呼叫一次，否則整個 halt 期間 context
+            # 續航哨兵會靜默失去所有武裝機會（兩層續航職責不同，全文搬 moved_lore.md）。
             if not blocking and transcript is not None and transcript.is_file():
                 arm_when_earned(transcript)
             return quota_stop

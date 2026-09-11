@@ -66,7 +66,15 @@ from tools.fsm_runtime.context_window import (  # noqa: E402
 LEDGER_DIR = _SDD_ROOT / "build" / "reports" / "fsm"
 
 _BYPASS_HINT = "緊急繞過：set SDD_HOOKS_DISABLE=1（全關）或 SDD_HOOKS_DRY_RUN=1（改發警告不阻擋）。"
-_ESCALATION_STATES = frozenset({"ESCALATION", "ESCALATION_FINAL"})
+# D17（DEF-200-275 第六輪；F-ARCH-04）：擴到 TOKEN_BUDGET_CRITICAL／TERMINATED——deny 訊息「一律帶
+# 真實數字＋恢復指令」的精神（D12/D16）不該因為卡在哪個 blocking 狀態而不同。TOKEN_BUDGET_CRITICAL
+# 目前無任何轉入邊（讀碼確認為理論死碼，Architect F-ARCH-04），TERMINATED 是合法終態，但兩者一旦
+# 真的被卡住（含未來新增轉入邊、或狀態被人工/測試直接灌入），deny 訊息同樣該有溯源可讀，不留兩套
+# 語意。與 fsm_runtime.py 的 `_BLOCKING_STATES`（同 4 態）刻意各自成一份常數：後者是 FSM 核心層
+# 「哪些狀態擋工具呼叫」的判準，這裡是 hook 表現層「哪些狀態要多印恢復提示」的判準，語意不同不合併。
+_ESCALATION_STATES = frozenset(
+    {"ESCALATION", "ESCALATION_FINAL", "TOKEN_BUDGET_CRITICAL", "TERMINATED"}
+)
 
 
 def _is_disabled() -> bool:
@@ -75,6 +83,46 @@ def _is_disabled() -> bool:
 
 def _is_dry_run() -> bool:
     return os.environ.get("SDD_HOOKS_DRY_RUN") == "1"
+
+
+# D19（DEF-200-275 第六輪；SD-02）：非 owner session 只在 owner 已「陳舊」時才可釋放 PENDING
+# ——陳舊窗口預設 30 分鐘，可用 env 覆寫（現查唯一真相源就是這個常數，不複寫成文件敘述）。
+_DEFAULT_PENDING_OWNER_STALE_SECONDS = 1800
+
+
+def _pending_owner_stale_seconds() -> float:
+    raw = os.environ.get("SDD_PENDING_OWNER_STALE_SECONDS")
+    if raw:
+        try:
+            return float(raw)
+        except ValueError:
+            pass
+    return float(_DEFAULT_PENDING_OWNER_STALE_SECONDS)
+
+
+def _owner_is_stale(rt) -> bool:
+    """D19：owner 是否已「陳舊」——owner 的 `transcript_path` 不存在，或其 mtime 距今超過
+    `SDD_PENDING_OWNER_STALE_SECONDS`。缺 `pending_owner` 記錄本身（沿用舊資料／繞過本輪機制
+    直接灌狀態的測試夾具）也視為陳舊——安全的一側：寧可讓非 owner 釋放一個查無記錄的 PENDING，
+    也不要因為新機制反而讓它比 D19 之前更難釋放（ARCH-03 的既有行為是「任何 session 都可釋
+    放」，本輪只在 owner 記錄清楚且新鮮時才收緊，其餘一律維持舊行為）。"""
+    auto = rt.state.root.get("auto_compact_state") or {}
+    owner = auto.get("pending_owner")
+    if not isinstance(owner, dict):
+        return True
+    path = owner.get("transcript_path")
+    if not path:
+        return True
+    try:
+        p = Path(path)
+        if not p.exists():
+            return True
+        age_seconds = (
+            _dt.datetime.now(_dt.timezone.utc).timestamp() - p.stat().st_mtime
+        )
+        return age_seconds > _pending_owner_stale_seconds()
+    except OSError:
+        return True
 
 
 def _deny_or_warn(reason: str) -> dict:
@@ -223,22 +271,28 @@ def _label(m: Measurement, window: int, source: str) -> str:
     )
 
 
-def _details(sid: str, m: Measurement, window: int, source: str) -> dict:
+def _details(sid: str, m: Measurement, window: int, source: str,
+            transcript: object = None) -> dict:
     return {
         "session_id": sid,
         "category": "context-budget",
         "used": m.used,
         "window": window,
         "window_source": source,
+        # D19（DEF-200-275 第六輪；SD-02）：owner 陳舊判準要讀 transcript 的 mtime——這裡是
+        # `trigger_auto_compact()` 唯一知道呼叫端 transcript_path 的入口。非字串（None／畸形
+        # payload）一律存 None，不臆測路徑。
+        "transcript_path": transcript if isinstance(transcript, str) else None,
         "compact_boundaries": m.compact_boundaries,
     }
 
 
 def _recovery_hint(rt, m: Measurement | None = None, window: int | None = None,
-                   source: str | None = None) -> str:
+                   source: str | None = None, sid: str | None = None) -> str:
     try:
         from tools.fsm_runtime.recovery_hint import recovery_hint  # type: ignore
-        return recovery_hint(rt.state, sdd_root=_SDD_ROOT, measurement=m, window=window, source=source)
+        return recovery_hint(rt.state, sdd_root=_SDD_ROOT, measurement=m, window=window, source=source,
+                             caller_session_id=sid)
     except Exception as exc:  # noqa: BLE001
         return f"[SDD-FSM][RECOVERY][WARN] recovery hint unavailable: {exc!r}"
 
@@ -302,13 +356,27 @@ def _pending_deny_reason(rt, m: Measurement | None, window: int | None, source: 
 
 def _cap_exceeded_deny_reason(trigger_result: dict) -> str:
     """D13（DEF-200-275 第五輪／ARCH-02／SD-02／QA P0）：per-stage cap 超限的 session 級 deny——
-    只擋本 session 的非 compact 工具，不寫專案級 ESCALATION、不影響其他視窗（另一個全新 session
-    自己的 ratio 沒衝到門檻，根本不會走到這支函式）。"""
+    只擋本 session 的非 compact 工具，不寫專案級 ESCALATION、不影響其他視窗。
+
+    D18（DEF-200-275 第六輪；SD-01）：`trigger_auto_compact()` 的 cap_exceeded 判定已改依「本
+    session 自己」的計數（不會再被別的 session 的計數錯誤牽連——見同函式 docstring），所以走到
+    這裡時一定是本 session 自己也撞了門檻；`other_session_id` 純粹是措辭資訊：這個 stage 先前是否
+    已有『另一個』session 撞過同一個 cap，讓使用者知道這不是這個 stage 第一次出狀況。`session_count`
+    是本 session 自己真實的觸發次數（此前誤用 `max_per_stage`——那是門檻常數，不是次數，既有小
+    bug，順手一併修正）。"""
     stage_key = trigger_result.get("stage_key", "?")
-    n = trigger_result.get("max_per_stage", "?")
+    n = trigger_result.get("session_count", trigger_result.get("max_per_stage", "?"))
+    other_sid = trigger_result.get("other_session_id")
+    if other_sid:
+        attribution = (
+            f"另一 session={other_sid} 已於此 stage 觸發過 cap；本 session 現在自己也達到"
+            f"門檻（已 {n} 次）"
+        )
+    else:
+        attribution = f"本 session 於 stage '{stage_key}' 已 {n} 次觸發"
     return (
-        f"[SDD-CTX][CRIT][CAP] 本 session 於 stage '{stage_key}' 已 {n} 次觸發 auto-compact "
-        "未見有效壓縮 ⇒ 本 session 拒絕非 compact 工具（不寫 ESCALATION、不影響其他視窗）。"
+        f"[SDD-CTX][CRIT][CAP] {attribution} auto-compact 未見有效壓縮 ⇒ 本 session 拒絕非 "
+        "compact 工具（不寫 ESCALATION、不影響其他視窗）。"
         "請 /compact 或 claude -r 重啟本 session；真實 usage 回落 <90% 即解除。"
     )
 
@@ -393,20 +461,28 @@ def main() -> int:
     notices: list[str] = []
 
     # D4／C5：AUTO_COMPACT_PENDING 而真實 used 已回落 ⇒ 視為 compaction 完成（含 Claude Code 自動 compact）。
+    # D19（DEF-200-275 第六輪；SD-02）：釋放者是否為 owner 決定要不要多查一次陳舊——owner 自己
+    # 量到回落，直接釋放（現行 D4，零改動）；非 owner 只在 owner 已陳舊（transcript 不存在／
+    # 太久沒動）時才可釋放，取代 ARCH-03「任何 session 都可釋放」的乒乓（被否決的另一案）。
     if rt.state.current == "AUTO_COMPACT_PENDING" and m is not None and window \
             and auto_compact_exit_due(m.used, window):
-        try:
-            done = rt.complete_auto_compact(observed_effective=True, released_by=sid)
-            notices.append(
-                f"[SDD-CTX][AUTO-COMPACT][DONE] {_label(m, window, source)} "
-                f"resume→{done.get('resumed_to')} "
-                f"released_by_session={done.get('released_by_session')} "
-                f"triggered_by_session={done.get('triggered_by_session')}"
-                + (f"（原 resume_state={done['remapped_from']} 非合法出口，已 remap）"
-                   if done.get("remapped_from") else "")
-            )
-        except Exception as exc:  # noqa: BLE001
-            notices.append(f"[SDD-CTX][AUTO-COMPACT][DONE][WARN] complete_auto_compact failed: {exc!r}")
+        _pending_owner = (rt.state.root.get("auto_compact_state") or {}).get("pending_owner")
+        _owner_sid = _pending_owner.get("session_id") if isinstance(_pending_owner, dict) else None
+        if _owner_sid is None or sid == _owner_sid or _owner_is_stale(rt):
+            try:
+                done = rt.complete_auto_compact(observed_effective=True, released_by=sid)
+                notices.append(
+                    f"[SDD-CTX][AUTO-COMPACT][DONE] {_label(m, window, source)} "
+                    f"resume→{done.get('resumed_to')} "
+                    f"released_by_session={done.get('released_by_session')} "
+                    f"triggered_by_session={done.get('triggered_by_session')}"
+                    + (f"（原 resume_state={done['remapped_from']} 非合法出口，已 remap）"
+                       if done.get("remapped_from") else "")
+                )
+            except Exception as exc:  # noqa: BLE001
+                notices.append(f"[SDD-CTX][AUTO-COMPACT][DONE][WARN] complete_auto_compact failed: {exc!r}")
+        # 非 owner 且 owner 未陳舊 ⇒ 不釋放（D19）；不 return——照樣往下走既有 gating，非 owner
+        # 已因 assert_tool_allowed 的 D19 owner-scope 判準不受「只准 compact 工具」限制。
 
     # D11（C3 補齊；DEF-200-275 第五輪 F2）：PENDING 且本次量不到 usage（新 session 首擊／compact
     # 後尚無新 usage）⇒ 不能讓 `_assert_allowed_under_auto_compact` 白名單擋下這次呼叫——那正是
@@ -439,7 +515,7 @@ def main() -> int:
         return _emit_pass(notices)
 
     try:
-        rt.assert_tool_allowed(tool, target)
+        rt.assert_tool_allowed(tool, target, session_id=sid)
     except TransitionError as err:
         if rt.state.current == "AUTO_COMPACT_PENDING":
             # D12：量得到仍 deny 時，reason 必含真實數字＋來源 session＋解除規則（m 保證非 None，
@@ -448,7 +524,7 @@ def main() -> int:
         else:
             reason = f"[SDD-FSM] {err}"
             if rt.state.current in _ESCALATION_STATES:
-                reason += "\n" + _recovery_hint(rt, m, window, source)
+                reason += "\n" + _recovery_hint(rt, m, window, source, sid)
         _emit(_deny_or_warn(reason))
         return 0
     except Exception as exc:  # noqa: BLE001 — never hard-block on infra fault
@@ -490,7 +566,7 @@ def main() -> int:
             trigger_result: dict = {}
             try:
                 trigger_result = rt.trigger_auto_compact(
-                    m.used, ratio, details=_details(sid, m, window, source)) or {}
+                    m.used, ratio, details=_details(sid, m, window, source, transcript=transcript)) or {}
             except Exception:  # noqa: BLE001
                 pass
             if trigger_result.get("cap_exceeded"):
@@ -511,7 +587,7 @@ def main() -> int:
                 reason = trigger_result.get("reason", "auto-compact suppressed")
                 _emit(_deny_or_warn(
                     f"[SDD-CTX][CRIT][ESCALATION] ratio {ratio:.0%}（{label}）— {reason}。"
-                    " 後續工具呼叫已被 FSM guardrail 阻擋，必須人工介入。\n" + _recovery_hint(rt, m, window, source)
+                    " 後續工具呼叫已被 FSM guardrail 阻擋，必須人工介入。\n" + _recovery_hint(rt, m, window, source, sid)
                 ))
                 return 0
         # session 級判定：當次工具是否為 compact 相關（不寫 ESCALATION、不寫 TOKEN_BUDGET_CRITICAL）。
@@ -543,7 +619,7 @@ def main() -> int:
         trigger_result = {}
         try:
             trigger_result = rt.trigger_auto_compact(
-                m.used, ratio, details=_details(sid, m, window, source)) or {}
+                m.used, ratio, details=_details(sid, m, window, source, transcript=transcript)) or {}
         except Exception:  # noqa: BLE001
             pass
         if trigger_result.get("cap_exceeded"):
@@ -569,7 +645,7 @@ def main() -> int:
             reason = trigger_result.get("reason", "auto-compact suppressed")
             _emit(_deny_or_warn(
                 f"[SDD-CTX][AUTO-COMPACT][ESCALATION] ratio {ratio:.0%}（{label}）— {reason}。"
-                " 後續工具呼叫已被 FSM guardrail 阻擋，必須人工介入。\n" + _recovery_hint(rt, m, window, source)
+                " 後續工具呼叫已被 FSM guardrail 阻擋，必須人工介入。\n" + _recovery_hint(rt, m, window, source, sid)
             ))
             return 0
         notices.append(

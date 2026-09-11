@@ -1868,6 +1868,24 @@ class TestHookRegistrationScopeIsShrinkOnly(unittest.TestCase):
                 registered_tool_scope(mutated), _REGISTRATION_BASELINE),
             [])
 
+    def test_root_sdd_hook_router_pretooluse_matcher_includes_agent_and_workflow(
+        self,
+    ) -> None:
+        """D20（DEF-200-280／F-ARCH-02）正面斷言：根層 sdd_hook_router 的 PreToolUse
+        matcher 須含 Agent／Workflow，否則子代理呼叫繞過 SDD FSM guardrail；floor-only
+        棘輪測不出「真的加了」，故直讀現實 settings.json。詳見 docs/06_quality/
+        CrossPlatform_DEF200275_Context_Metering_Evidence.md〈第六輪〉。"""
+        scope = registered_tool_scope(self._real())
+        tools = scope.get(("PreToolUse", ".claude/hooks/sdd_hook_router.py"))
+        self.assertIsNotNone(tools, "sdd_hook_router 的 PreToolUse 註冊條目不見了")
+        for tool in ("Agent", "Workflow"):
+            self.assertIn(
+                tool, tools,
+                f"根層 sdd_hook_router PreToolUse matcher 缺 {tool}"
+                "（DEF-200-280／F-ARCH-02：Agent/Workflow 呼叫會繞過 SDD FSM guardrail，"
+                "在 monorepo 根開 claude 是本任務實際工作流，此路徑失守即整條 D11~D19 修復"
+                "對 Agent/Workflow 呼叫零效果）")
+
     def test_wildcard_matcher_is_green(self) -> None:
         mutated = self._mutate_matcher(self._real(), "*")
         self.assertEqual(

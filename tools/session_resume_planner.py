@@ -395,7 +395,12 @@ def relay_problems(state: object) -> list[str]:
     """狀態塊的體檢清單（空＝健康）。純函式，紅綠由注入自證。"""
     if not isinstance(state, dict):
         return ["狀態塊不是物件"]
-    problems = [f"缺必填鍵 `{key}`" for key in RELAY_REQUIRED if key not in state]
+    # D23（SD-08）：`session_id` 存在但是空字串——`_sentinel_tick` 拿它餵
+    # `quota_gate.read_halt_marker(sid)`，而該函式對假值 sid 直接靜默回 `None`（退化成
+    # idle-based patrol，DEF-200-281 修復前的行為在這條窄路上悄悄重演）。體檢面補上，
+    # 讓這種狀態塊被判為需要自癒，而不是悄悄放過（併進同一個 list 組出式省一行，本檔
+    # `guardrail_cli` tier 餘裕為 0）。
+    problems = [f"缺必填鍵 `{key}`" for key in RELAY_REQUIRED if key not in state] + (["session_id 是空字串 ⇒ read_halt_marker 會降級成 None（需要自癒）"] if not str(state.get("session_id") or "").strip() else [])  # noqa: E501
     if state.get("schema") != RELAY_SCHEMA:
         problems.append(f"schema 不是 {RELAY_SCHEMA}（讀到 {state.get('schema')!r}）")
     # 🔴 取證守衛：拿不到憑證就**不准**宣稱排程成立。這是「反事後諸葛」那條規則在狀態
@@ -1510,6 +1515,18 @@ def _sentinel_tick(args) -> int:
     return rc
 
 
+def _halt_marker_probe_path(sid: str) -> Path:
+    """halt 標記路徑，但**不**觸發 `endurance_env.trace_dir()` 的 `mkdir` 副作用（D23：
+    `--check` 是「不寫檔」的既有契約——`PlannerCliTest.test_check_prints_usage_and_
+    writes_nothing` 釘住；若直接呼叫 `quota_gate.read_halt_marker()` 探測，會在從沒人
+    寫過標記的機器上把 HOME 底下憑空長出 `.autosdd/traces` 目錄）。解析規則與
+    `endurance_env._durable_dir_status()` 同源但只讀不建：目錄真的存在才可能有標記，
+    不存在就是「沒有」，不需要為了確認這件事而先造出它來。"""
+    override = os.environ.get(endurance_env.TRACE_DIR_ENV, "").strip()
+    root = Path(override) if override else Path.home().joinpath(*endurance_env.TRACE_HOME_PARTS)
+    return root / f"halt_{sid}.json"
+
+
 def main(argv: list[str]) -> int:
     # 🔴 R97（round-label-ok：非帳本追蹤的正式輪，僅沿用便於追蹤的標籤）：`.env` 裡的 `AUTOSDD_RESUME_OFF`（與其他 `ENV_SPEC` 逃生口）必須在  # noqa: E501
     # `build_parser()` 之前套用——`--allow-resume` 的預設值是
@@ -1539,12 +1556,9 @@ def main(argv: list[str]) -> int:
     # 不外溢（付費探針仍為互動 session 保留）。
     if args.sentinel_tick or args.resume_tick:
         os.environ[UNATTENDED_ENV] = "1"
-    if args.sentinel_tick:
-        return _sentinel_tick(args)
-    if args.resume_tick:
-        return _resume_tick(args)
-    if args.reconcile:
-        return quota_reconcile.cli(args.reconcile, args.reconcile_at)
+    if args.sentinel_tick: return _sentinel_tick(args)  # noqa: E701 — D23：LOC 餘裕為 0 起，本檔沿用既有單行 if 慣例
+    if args.resume_tick: return _resume_tick(args)  # noqa: E701
+    if args.reconcile: return quota_reconcile.cli(args.reconcile, args.reconcile_at)  # noqa: E701,E501
     if args.probe_quota:
         verdict = probe_quota(args.probe_command)
         print(f"quota_open={verdict['open']}  kind={verdict['kind']}  rc={verdict['rc']}")
@@ -1555,10 +1569,11 @@ def main(argv: list[str]) -> int:
     # 的路徑上會讓「這台機器上找不到 session」變成查不到額度（同 --check-autocompact 的理由）。
     if args.pace:
         print(endurance_env.unattended_outcome_banner(), end="")  # noqa: E501 — FIX3(b)：無人續跑停下未讀結局，開頭主動印
-        print(quota_gate.pace_report(model=args.model), end="")
-        # 修3（R95；ADR §2.9）：哨兵活性欄。定位不到 session 時靜默跳過（本旗標的
-        # 「不依賴逐字稿」契約不變）；定位得到而 stamp 與排程器現查不一致才出聲。
+        # 修3（R95；ADR §2.9）：哨兵活性欄，同時 D23 用 sid 判本 session 是否 halt 未過期
+        # （見 pace_report 的 sid 分支）。定位不到 session 時靜默跳過（不依賴逐字稿的契約
+        # 不變）；定位得到而 stamp 與排程器現查不一致才出聲。
         aim = resolve_transcript(args.session_id, args.transcript)
+        print(quota_gate.pace_report(model=args.model, sid=guard.session_id_of(aim) if aim else None), end="")  # noqa: E501
         liveness = sentinel_lifecycle.liveness_line(guard.session_id_of(aim)) if aim else ""
         if liveness:
             print(liveness, file=sys.stderr)
@@ -1568,8 +1583,7 @@ def main(argv: list[str]) -> int:
     if args.check_autocompact:
         posture = endurance_env.autocompact_posture(guard); print(endurance_env.autocompact_report(posture, guard), end="")  # noqa: E501,E702 — ⓿：搬 endurance_env，guard 注入
         return 0 if posture["effective"] else 1
-    if args.verify_schtasks and not args.register_schtasks:
-        return _schtasks_verify(args.task_name)
+    if args.verify_schtasks and not args.register_schtasks: return _schtasks_verify(args.task_name)  # noqa: E701,E501
     if args.remove_schtasks:
         return _schtasks_remove(args.task_name)
 
@@ -1589,8 +1603,12 @@ def main(argv: list[str]) -> int:
     if args.check:
         print(endurance_env.unattended_outcome_banner(), end="")  # noqa: E501 — FIX3(b)：無人續跑停下未讀結局，開頭主動印
         print(endurance_env.check_report(data, guard), end="")
-        liveness = sentinel_lifecycle.liveness_line(data["session_id"])  # 修3：同 --pace
-        if liveness:
+        # D23（SD-07）：本 sid 的 halt 標記未過期時多印一行，同 --pace 分支的短路邏輯
+        # （純讀標記，不打 API）；先過 `_halt_marker_probe_path()` 的唯讀存在性檢查，
+        # 標記真的在才呼叫會建目錄的 `read_halt_marker()`（見該函式 WHY）。單行 if
+        # 沿用本檔 guardrail_cli tier 餘裕為 0 的既有慣例。
+        if _halt_marker_probe_path(data["session_id"]).is_file() and (halted := quota_gate.halted_band_line(quota_gate.read_halt_marker(data["session_id"]), datetime.now().astimezone())): print(halted)  # noqa: E501,E701
+        if (liveness := sentinel_lifecycle.liveness_line(data["session_id"])):  # 修3：同 --pace
             print(liveness, file=sys.stderr)
         if args.print_schtasks:
             print(

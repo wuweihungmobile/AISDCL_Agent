@@ -96,6 +96,82 @@ class RecordEscalationDetailsTests(_Base):
             snap_mod.SNAPSHOT_DIR = original
 
 
+class EscalationProvenanceTests(_Base):
+    """D17（DEF-200-275 第六輪／DEF-200-283；F-ARCH-01／QA-C1）：`record_escalation()` 落一份
+    `escalation_provenance` 快照——「誰、何時、為何、依哪條規則」寫入了這個 project-level
+    ESCALATION，讓 recovery_hint() 能回答「這是不是我這個 session 觸發的」。缺席一律老實寫
+    "unknown"（機讀 sentinel），不是 None、不臆測。"""
+
+    def test_record_escalation_writes_provenance_with_rule_id_and_source(self) -> None:
+        self.state.record_escalation(
+            "gate retry exhausted", details={"session_id": "s-1"},
+            rule_id="R-9.1", source="gate_retry_budget:SCG_VALIDATION",
+        )
+        prov = self.state.root["escalation_provenance"]
+        self.assertEqual(prov["session_id"], "s-1")
+        self.assertEqual(prov["rule_id"], "R-9.1")
+        self.assertEqual(prov["source"], "gate_retry_budget:SCG_VALIDATION")
+        self.assertEqual(prov["reason"], "gate retry exhausted")
+        self.assertIn("T", prov["at"])  # aware ISO timestamp（同 escalation_history 的 triggered_at）
+        self.assertEqual(prov["at"], self.state.root["escalation_history"][-1]["triggered_at"])
+
+    def test_missing_session_id_rule_id_source_write_unknown_not_none(self) -> None:
+        self.state.record_escalation("implementation budget exceeded")
+        prov = self.state.root["escalation_provenance"]
+        self.assertEqual(prov["session_id"], "unknown")
+        self.assertEqual(prov["rule_id"], "unknown")
+        self.assertEqual(prov["source"], "unknown")
+
+
+class RecoveryHintProvenanceTests(_Base):
+    """D17：recovery_hint() 的溯源行——是不是我這個 session 觸發的；m=None 首擊一樣要印。"""
+
+    def test_first_strike_m_none_still_prints_full_provenance_and_resume_command(self) -> None:
+        self.state.record_escalation(
+            "HUMAN_PENDING 逾時 200h (≥168h)，自動進入 ESCALATION (ACT-023)",
+            details={"session_id": "old-1"}, rule_id="R-9.7", source="human_pending_timeout",
+        )
+        # measurement/window/source 全不傳 ⇒ 首擊量不到 usage 的真實情境（新視窗第一次呼叫）。
+        text = rh.recovery_hint(self.state, sdd_root=_SDD_ROOT, python="/venv/bin/python",
+                                caller_session_id="new-2")
+        self.assertIn("溯源：此 ESCALATION 由 session=old-1", text)
+        self.assertIn("因 HUMAN_PENDING 逾時 200h (≥168h)，自動進入 ESCALATION (ACT-023) 寫入", text)
+        self.assertIn("rule_id=R-9.7", text)
+        self.assertIn("本 session=new-2", text)
+        self.assertIn("不是觸發者", text)
+        self.assertIn("resume-from-escalation --to", text)
+        self.assertIn("目前本 session 尚無可用 usage（新 session 首擊或 compact 後）", text)
+
+    def test_same_session_is_named_as_trigger(self) -> None:
+        self.state.record_escalation(
+            "spec_patch limit exceeded for AC-1", details={"session_id": "s-same"},
+            rule_id="R-9.22", source="spec_patch_limit:AC-1",
+        )
+        text = rh.recovery_hint(self.state, sdd_root=_SDD_ROOT, caller_session_id="s-same")
+        self.assertIn("本 session=s-same（是觸發者）", text)
+
+    def test_unknown_provenance_session_says_cannot_confirm(self) -> None:
+        self.state.record_escalation("implementation budget exceeded")  # 無 details ⇒ session unknown
+        text = rh.recovery_hint(self.state, sdd_root=_SDD_ROOT, caller_session_id="new-3")
+        self.assertIn("無法確認是否為觸發者", text)
+
+    def test_no_caller_session_id_also_cannot_confirm(self) -> None:
+        """呼叫端沒傳 caller_session_id（例如既有舊呼叫簽名）時，同樣誠實印「無法確認」，
+        不得因為 caller 端缺席就誤判成任何一種確定答案。"""
+        self.state.record_escalation("x", details={"session_id": "s-1"})
+        text = rh.recovery_hint(self.state, sdd_root=_SDD_ROOT)
+        self.assertIn("無法確認是否為觸發者", text)
+
+    def test_hours_ago_is_computed_from_provenance_timestamp(self) -> None:
+        import datetime as _dt
+        self.state.record_escalation("x", details={"session_id": "s-1"})
+        fixed_now = _dt.datetime.fromisoformat(
+            self.state.root["escalation_provenance"]["at"]
+        ) + _dt.timedelta(hours=3)
+        text = rh.recovery_hint(self.state, sdd_root=_SDD_ROOT, caller_session_id="s-1", _now=fixed_now)
+        self.assertIn("3.0 小時前", text)
+
+
 class CompleteAutoCompactD4Tests(_Base):
     def _enter_pending(self, resume_state: str) -> None:
         import tools.fsm_runtime.snapshot as snap_mod
@@ -232,7 +308,17 @@ class CompleteAutoCompactD4Tests(_Base):
         self.assertEqual(path.read_bytes(), before, "讀不到時不得以空 doc 覆寫帳本")
 
     def test_release_and_trigger_sessions_are_recorded(self) -> None:
-        """ARCH-03：D4 出口不看 session（現行行為，刻意釘住）；reason／回傳值必須把兩個 session 都印出來。"""
+        """D19（DEF-200-275 第六輪；SD-02）訂正 ARCH-03 的原始判讀：本測試釘住的是
+        `FSMRuntime.complete_auto_compact()` 這支**底層 API 本身**——它刻意維持「不看 session」的
+        無條件釋放行為，因為它是給 `/stage-compaction` 這類「人已經確認完成」的呼叫端當建構材料，
+        呼叫端本來就該對自己的呼叫負責，這支方法不該替呼叫端決定政策。
+
+        D19 新增的「非 owner 只在 owner 已陳舊時才可釋放」政策**不收斂在這支方法**，而是收斂在
+        呼叫端 `.claude/hooks/context_ledger_pre.py` 的 D4/C5 完成判定分支（見
+        `tests/test_context_ledger_pre_hook.py::PendingOwnerScopeTests`，那裡才是 D19 實際生效
+        的地方）。本測試的斷言因此維持不變（方法本身確實沒變）；只有這段 docstring 改寫，把
+        ARCH-03「任何 session 都可釋放」這句話的適用範圍講清楚：它現在只對這支底層方法本身成立，
+        不再是使用者實際感受到的 hook 層行為（後者已被 D19 收斂為 owner-scope＋陳舊判準）。"""
         import tools.fsm_runtime.snapshot as snap_mod
         with patch.object(snap_mod, "SNAPSHOT_DIR", self.tmp / "abort"):
             self.state.current = "IMPLEMENTATION"

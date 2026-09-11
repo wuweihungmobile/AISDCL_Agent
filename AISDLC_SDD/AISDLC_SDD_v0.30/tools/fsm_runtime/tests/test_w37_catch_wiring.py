@@ -85,11 +85,17 @@ def _rt(tmp_path, current, name="w37"):
 
 
 def _drive_auto_compact_overflow(rt) -> dict:
-    """把 auto_compact_state 預置到上限，再觸發一次 → projected > max → escalate 分支（9.7.3 路徑）。"""
+    """把 auto_compact_state 預置到上限，再觸發一次 → projected > max → escalate 分支（9.7.3 路徑）。
+
+    D18（DEF-200-275 第六輪；SD-01）：cap 判定改依 `count_per_stage_by_session`（逐 session
+    分桶）——本呼叫端不傳 `details`，session_key 固定落在 "unknown" 桶，需同步預置
+    `count_per_stage_by_session={"unknown": MAX}`，否則新判準會誤判成尚未觸發過。
+    """
     rt.state.current = "IMPLEMENTATION"
     rt.state.root["auto_compact_state"] = {
         "stage_key": rt.current_stage_key(),
         "count_per_stage": MAX_AUTO_COMPACT_PER_STAGE,
+        "count_per_stage_by_session": {"unknown": MAX_AUTO_COMPACT_PER_STAGE},
         "max_per_stage": MAX_AUTO_COMPACT_PER_STAGE,
     }
     return rt.trigger_auto_compact(cumulative_tokens=180_000, ratio=0.91)

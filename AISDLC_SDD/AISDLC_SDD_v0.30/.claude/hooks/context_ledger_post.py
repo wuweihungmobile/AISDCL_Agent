@@ -231,11 +231,16 @@ def main() -> int:
                     # 也帶 noop=True，必須先於下面的泛用 [NOOP] 分支檢查，否則會被那支分支悄悄
                     # 蓋掉（同 pre hook 的排序理由）。
                     stage_key = result.get("stage_key", "?")
-                    n = result.get("max_per_stage", "?")
+                    # D18（DEF-200-275 第六輪；同 pre hook _cap_exceeded_deny_reason 語意）：
+                    # session_count 是本 session 自己真實的觸發次數；此前誤用 max_per_stage
+                    # （那是門檻常數，不是次數）順手一併修正，兩支 hook 的措辭同步。
+                    n = result.get("session_count", result.get("max_per_stage", "?"))
+                    other_sid = result.get("other_session_id")
+                    other_note = f"（另一 session={other_sid} 先前也於此 stage 觸發過 cap）" if other_sid else ""
                     msgs.append(
                         f"[SDD-CTX][AUTO-COMPACT][CAP] ratio {ratio:.0%}（{label}）— 本 session 於"
-                        f" stage '{stage_key}' 已 {n} 次觸發 auto-compact 未見有效壓縮；PreToolUse"
-                        "將對本 session 拒絕非 compact 工具（不寫 ESCALATION、不影響其他視窗）。"
+                        f" stage '{stage_key}' 已 {n} 次觸發 auto-compact 未見有效壓縮{other_note}；"
+                        "PreToolUse 將對本 session 拒絕非 compact 工具（不寫 ESCALATION、不影響其他視窗）。"
                     )
                 elif result.get("noop"):
                     # ARCH-06／SD-06：FSM 在 RELEASE 等不可 compact 狀態 ⇒ trigger 是 no-op，

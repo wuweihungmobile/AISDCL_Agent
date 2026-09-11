@@ -57,7 +57,7 @@ monorepo 根目錄（`AISDCL_Agent/`，各機器 checkout 路徑不同）＝**�
 
 | Hook | 事件／matcher | 作用 | 逃生口 |
 |------|--------------|------|--------|
-| `sdd_hook_router.py` | SessionStart；PreToolUse（Write／Edit／Read／Bash／NotebookEdit／Task）；PostToolUse（Write／Edit／Read／Bash／NotebookEdit） | SDD 治理橋接：`SDD_ACTIVE_VERSION` 未設＝休眠 no-op | `SDD_ROUTER_QUIET=1` 靜音 |
+| `sdd_hook_router.py` | SessionStart；PreToolUse（Write／Edit／Read／Bash／NotebookEdit／Task／Agent／Workflow）；PostToolUse（Write／Edit／Read／Bash／NotebookEdit） | SDD 治理橋接：`SDD_ACTIVE_VERSION` 未設＝休眠 no-op | `SDD_ROUTER_QUIET=1` 靜音 |
 | `block_bash_on_windows.py` | PreToolUse／Bash | Windows 上禁用 Bash 工具（鐵律一）；非 Windows 一律 exit 0 | 無（掌舵者直接指令） |
 | `lint_powershell_command.py` | PreToolUse／PowerShell | 擋「管線後讀 `$LASTEXITCODE`」、行首裸 `cd`／`Set-Location` 帶相對路徑、裸 `bash` + `.sh`（鐵律一、二） | 行尾 `# ps-lint-ok: <WHY>`（獨立註解行無效） |
 | `block_destructive_git.py` | PreToolUse／Bash、PowerShell、Write、Edit、NotebookEdit | 毀滅性 git 形態阻斷（鐵律五）＋等待壞形態 `waitform_hits()`（鐵律六）＋治理檔禁寫（PRD §15.5 紅線 10：`AUTOSDD_UNATTENDED` 下保護面唯讀） | `AUTOSDD_GIT_GUARD_OFF`（模型碰不到，須在啟動 claude 前設）；`AUTOSDD_GOVWRITE_GUARD_OFF`（治理面唯讀專屬，與 git 族開關互不相通）；行內 `# git-guard-ok: <理由>`／`# waitform-ok: <WHY>`（`AUTOSDD_UNATTENDED` 有設時行內豁免無效） |
