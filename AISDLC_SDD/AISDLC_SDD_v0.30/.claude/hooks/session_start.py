@@ -49,6 +49,24 @@ def _rule_lines(state: str) -> list:
     return out
 
 
+def _recovery_measurement(payload: dict | None):
+    """D16（DEF-200-275 第五輪 SA-02）：給 recovery_hint 用的『目前真實水位』量測——獨立於
+    `_measurement_line` 的字串輸出與其例外處理路徑，避免動到既有量測字串的行為。任何例外一律
+    回 `(None, None, None)`（recovery_hint 對此印「尚無可用 usage」，不阻斷 session 啟動）。"""
+    try:
+        from tools.fsm_runtime.context_window import (  # type: ignore
+            measure, resolve_window, window_evidence,
+        )
+        transcript = (payload or {}).get("transcript_path") if isinstance(payload, dict) else None
+        m = measure(transcript)
+        if m is None or m.used is None:
+            return m, None, None
+        window, source = resolve_window(m.peak, **window_evidence(m.model))
+        return m, window, source
+    except Exception:  # noqa: BLE001 — 量測失敗不得擋 recovery_hint 本身
+        return None, None, None
+
+
 def _measurement_line(payload: dict | None) -> str:
     """DEF-200-275 第四輪：一開場就說清楚「量的是什麼、量到多少、分母哪來」。任何例外只回一行 WARN。"""
     try:
@@ -258,9 +276,13 @@ def _build_context(payload: dict | None = None) -> dict:
         )
         if rt.state.current in {"ESCALATION", "ESCALATION_FINAL"}:
             # DEF-200-275 第四輪（C10）：印來源 session／類別／原因＋一行可複製執行的恢復指令。
+            # D16（第五輪 SA-02）：一併印目前本 session 真實水位（量不到就老實說量不到）。
             try:
                 from tools.fsm_runtime.recovery_hint import recovery_hint  # type: ignore
-                block += "\n" + recovery_hint(rt.state, sdd_root=_SDD_ROOT)
+                _m, _window, _source = _recovery_measurement(payload)
+                block += "\n" + recovery_hint(
+                    rt.state, sdd_root=_SDD_ROOT, measurement=_m, window=_window, source=_source,
+                )
             except Exception as exc:  # noqa: BLE001
                 block += f"\n[SDD-FSM][RECOVERY][WARN] recovery hint unavailable: {exc!r}"
         warnings.append(block)

@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import datetime as _dt
+import os
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -14,6 +16,7 @@ import yaml  # noqa: E402
 
 from tools.fsm_runtime.conversation_ledger import (  # noqa: E402
     append_ledger_entry,
+    cleanup_orphan_part_files,
     estimate_bash_command_tokens,
     estimate_conversation_overhead,
     estimate_read_tokens,
@@ -399,6 +402,137 @@ class LedgerBookmarkAndTearingTests(unittest.TestCase):
         self.assertEqual(doc["cumulative_tokens"], 200 + sum(e["tokens"] for e in conv))
         self.assertFalse(list(self.root.glob("*.part.*")), msg="pid 專屬暫存檔不得殘留")
         self.assertFalse(list(self.root.glob("*.corrupt-*")), msg="有鎖保護下不應出現損毀 rotate")
+
+
+class LedgerPerformanceTests(unittest.TestCase):
+    """DEF-200-275 第五輪 Dev-C：稽核帳本效能修復（現場實測 400KB 帳本單次 append 5s+ 撞 router 8s
+    child timeout）。根因＝PyYAML 純 Python `safe_load`/`safe_dump` 對整份 entries 列表的解析/序列化
+    成本隨帳本大小線性增長；`append_ledger_entry`／`merge_conversation_overhead_into_ledger` 各自對
+    今日帳本做一次完整 read-modify-write，帳本沒有上限 ⇒ 隨一天推進單次呼叫越來越慢。
+    修法＝改用 libyaml 綁定的 `CSafeLoader`/`CSafeDumper`（不可用時 fallback 回純 Python，格式與語意
+    完全不變，只是換一個更快的實作）。"""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.date = _dt.date.today().isoformat()
+        self.path = self.root / f"CONTEXT-LEDGER-{self.date}.yaml"
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _seed_realistic(self, n: int) -> None:
+        """夾具貼近真實帳本 entry 形狀（見 `.claude/hooks/context_ledger_post.py` 的 entry dict）。"""
+        entries = []
+        for i in range(n):
+            entries.append({
+                "ts": f"2026-09-11T{(i // 3600) % 24:02d}:{(i // 60) % 60:02d}:{i % 60:02d}+00:00",
+                "phase": "post" if i % 2 else "pre",
+                "tool": "Bash",
+                "target": None,
+                "tokens": 25 + (i % 100),
+                "session_id": "8d8773f9-efc9-4513-be65-d48ca316d114",
+                "observed_used": 709120,
+                "window": 967000,
+                "window_source": "指定值（環境變數 AUTOSDD_CONTEXT_WINDOW）",
+            })
+        doc = {
+            "date": self.date,
+            "cumulative_tokens": sum(e["tokens"] for e in entries),
+            "entries": entries,
+            "conversation_overhead": {
+                "last_merge_entry_index": n,
+                "last_merged_at": "2026-09-11T03:12:19+00:00",
+                "total_conv_overhead_tokens": 397800,
+            },
+        }
+        self.path.write_text(yaml.safe_dump(doc, allow_unicode=True, sort_keys=False), encoding="utf-8")
+
+    def test_append_ledger_entry_is_fast_at_1500_entry_scale(self) -> None:
+        """硬性驗收（DEF-200-275 第五輪 Dev-C 任務書）：1500 筆／約 400KB 同等規模下 append <0.3s。"""
+        self._seed_realistic(1500)
+        size = self.path.stat().st_size
+        self.assertGreater(size, 300_000, msg=f"夾具過小，非同等規模：{size} bytes")
+        t0 = time.perf_counter()
+        append_ledger_entry(self.root, {
+            "ts": "2026-09-11T23:59:59+00:00", "phase": "post", "tool": "Bash",
+            "target": None, "tokens": 42, "session_id": "test-sess",
+            "observed_used": 700000, "window": 967000, "window_source": "test",
+        })
+        elapsed = time.perf_counter() - t0
+        self.assertLess(elapsed, 0.3, msg=f"append_ledger_entry 耗時 {elapsed:.4f}s ≥ 0.3s 上界")
+
+    def test_merge_conversation_overhead_is_fast_at_1500_entry_scale(self) -> None:
+        """post hook 在同一把鎖內緊接 append 之後呼叫 merge——兩者合計才是端到端耗時，merge 本身也不得是瓶頸。"""
+        self._seed_realistic(1500)
+        t0 = time.perf_counter()
+        merge_conversation_overhead_into_ledger(self.root, merge_every=10)
+        elapsed = time.perf_counter() - t0
+        self.assertLess(elapsed, 0.3, msg=f"merge_conversation_overhead_into_ledger 耗時 {elapsed:.4f}s ≥ 0.3s 上界")
+
+
+class LedgerOrphanPartCleanupTests(unittest.TestCase):
+    """孤兒 `.part.<pid>` 清理（現場證據：router 砍 8s child 留下的半寫暫存檔，7 個 0～530KB 不等，
+    今日帳本目錄裡永久殘留）。判準：mtime > 10 分鐘**且** pid 已不存在才清；活著的 pid／太新的檔一律留著
+    （避免誤刪正在寫入中的兄弟行程暫存檔）。"""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.date = _dt.date.today().isoformat()
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _make_part(self, pid: int, *, age_sec: float) -> Path:
+        p = self.root / f"CONTEXT-LEDGER-{self.date}.yaml.part.{pid}"
+        p.write_text("date: '2026-09-11'\n", encoding="utf-8")
+        old = time.time() - age_sec
+        os.utime(p, (old, old))
+        return p
+
+    @staticmethod
+    def _dead_pid() -> int:
+        """找一個保證不存在的 pid：從 PID_MAX 往下找第一個 os.kill(pid, 0) 拋 ProcessLookupError 的值。"""
+        import errno
+
+        for candidate in (2**31 - 1, 999999, 888888, 777777):
+            try:
+                os.kill(candidate, 0)
+            except ProcessLookupError:
+                return candidate
+            except PermissionError:
+                continue
+            except OSError as exc:
+                if exc.errno == errno.ESRCH:
+                    return candidate
+        raise unittest.SkipTest("找不到保證不存在的 pid，本機環境無法安全驗證")
+
+    def test_stale_dead_pid_part_is_removed(self) -> None:
+        dead = self._dead_pid()
+        stale = self._make_part(dead, age_sec=700)  # >10 分鐘
+        removed = cleanup_orphan_part_files(self.root)
+        self.assertGreaterEqual(removed, 1)
+        self.assertFalse(stale.exists(), "逾 10 分鐘且 pid 已死的 .part 檔應被清掉")
+
+    def test_fresh_dead_pid_part_is_kept(self) -> None:
+        dead = self._dead_pid()
+        fresh = self._make_part(dead, age_sec=5)  # <10 分鐘：可能還在寫，不清
+        cleanup_orphan_part_files(self.root)
+        self.assertTrue(fresh.exists(), "未滿 10 分鐘的 .part 檔即使 pid 已死也不應被清（可能剛好撞名）")
+
+    def test_stale_alive_pid_part_is_kept(self) -> None:
+        alive = os.getpid()
+        stale_but_alive = self._make_part(alive, age_sec=700)
+        cleanup_orphan_part_files(self.root)
+        self.assertTrue(stale_but_alive.exists(), "pid 仍活著的 .part 檔不得被清（可能仍在寫入）")
+
+    def test_append_ledger_entry_triggers_orphan_cleanup(self) -> None:
+        """整合面：呼叫公開入口 `append_ledger_entry` 時應順手清掉孤兒檔，不需另外手動呼叫。"""
+        dead = self._dead_pid()
+        stale = self._make_part(dead, age_sec=700)
+        append_ledger_entry(self.root, {"tokens": 1, "phase": "pre", "tool": "Bash"})
+        self.assertFalse(stale.exists(), "append_ledger_entry 應在寫入端啟動時清掉孤兒 .part 檔")
 
 
 if __name__ == "__main__":

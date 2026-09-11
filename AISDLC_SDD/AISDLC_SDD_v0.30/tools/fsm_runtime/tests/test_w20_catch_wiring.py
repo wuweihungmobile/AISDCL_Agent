@@ -99,22 +99,26 @@ def _drive_spec_patch_overflow(rt) -> dict:
 # ---------- R-9.2：auto_compact per-stage 超限 → catch ----------
 
 def test_r92_catch_on_auto_compact_overflow_flag_on(tmp_path, monkeypatch, _w20_rules):
-    """flag ON：auto_compact per-stage 超限 escalate → R-9.2 守望的失敗模式真實發生 → catch+1。"""
+    """flag ON：auto_compact per-stage 超限（D13：session 級 cap_exceeded，不再 project-level
+    ESCALATION）→ R-9.2 這條規則自描述的 failure_mode 仍真實發生 → catch+1（catch 語意收斂為
+    「規則守望的失敗模式真的被打到」，不要求進 ESCALATION 狀態——見 fsm_runtime.py 該呼叫點註解）。"""
     monkeypatch.setenv("SDD_ENABLE_RULE_CATCH_TELEMETRY", "1")
     rt = _rt(tmp_path, "INIT")
     res = _drive_auto_compact_overflow(rt)
-    assert res.get("escalated") is True, "per-stage 超限必 escalate（既有不變式）"
-    assert rt.state.current == "ESCALATION"
+    assert res.get("escalated") is False, "D13：cap 超限不再 escalated=True"
+    assert res.get("cap_exceeded") is True
+    assert rt.state.current == "IMPLEMENTATION", "D13：cap 超限不得轉態（_drive_auto_compact_overflow 已把 state 設成 IMPLEMENTATION）"
     assert _catch_count(_w20_rules, "R-9.2") == 1, "R-9.2 顯式歸因 + failure_mode 齊備 → catch+1"
 
 
 def test_r92_catch_flag_off_zero_regression(tmp_path, monkeypatch, _w20_rules):
-    """flag OFF：同一 escalate 分支行為逐字同 v0.10——仍 escalate 但 catch 全程 0（零退化）。"""
+    """flag OFF：同一 cap-exceeded 分支行為逐字同 flag ON（catch 是純疊加記帳，D13 不改變此契約）
+    ——仍 cap_exceeded 但 catch 全程 0（零退化）。"""
     monkeypatch.setenv("SDD_ENABLE_RULE_CATCH_TELEMETRY", "0")  # v0.24 翻環後以顯式 '0' opt-out 表達 OFF
     rt = _rt(tmp_path, "INIT")
     res = _drive_auto_compact_overflow(rt)
-    assert res.get("escalated") is True, "escalate 行為不受 flag 影響（catch 是純疊加記帳）"
-    assert rt.state.current == "ESCALATION"
+    assert res.get("cap_exceeded") is True, "cap-exceeded 行為不受 flag 影響（catch 才是純疊加記帳）"
+    assert rt.state.current == "IMPLEMENTATION"
     assert _catch_count(_w20_rules, "R-9.2") == 0, "flag OFF 不得記 catch（零退化）"
 
 

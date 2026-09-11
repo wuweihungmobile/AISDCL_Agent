@@ -239,6 +239,53 @@ class ResolveWindowTests(unittest.TestCase):
             self.assertEqual(cw.load_known_model_windows(Path(td) / "nope.json"), ({}, "無表"))
 
 
+class ConvergePinnedToKnownModelTests(unittest.TestCase):
+    """D14：②③④ 階（AUTOSDD_CONTEXT_WINDOW／CC env／settings autoCompactWindow）的釘值，
+    若大於 observed_model 查表得到的上限，收斂到表值；① SDD_MAX_CONTEXT 永不收斂。"""
+    _KNOWN = {"claude-fable-5-1": 1_000_000, "claude-haiku-4-5": 200_000}
+
+    def test_autosdd_converges_to_smaller_table_value_for_haiku(self) -> None:
+        window, source = cw.resolve_window(
+            0, autosdd_raw="967000", observed_model="claude-haiku-4-5",
+            known_models=self._KNOWN)
+        self.assertEqual(window, 200_000)
+        self.assertIn("已收斂", source)
+        self.assertTrue(cw.may_block(source))
+
+    def test_autosdd_keeps_pinned_when_table_value_is_larger_for_fable(self) -> None:
+        window, source = cw.resolve_window(
+            0, autosdd_raw="967000", observed_model="claude-fable-5-1",
+            known_models=self._KNOWN)
+        self.assertEqual((window, source), (967000, cw.SOURCE_PINNED_AUTOSDD))
+        self.assertNotIn("已收斂", source)
+
+    def test_sdd_raw_pinned_value_never_converges(self) -> None:
+        window, source = cw.resolve_window(
+            0, sdd_raw="967000", observed_model="claude-haiku-4-5",
+            known_models=self._KNOWN)
+        self.assertEqual((window, source), (967000, cw.SOURCE_PINNED_SDD))
+        self.assertNotIn("已收斂", source)
+
+    def test_observed_none_keeps_pinned(self) -> None:
+        window, source = cw.resolve_window(
+            0, autosdd_raw="967000", observed_model=None, known_models=self._KNOWN)
+        self.assertEqual((window, source), (967000, cw.SOURCE_PINNED_AUTOSDD))
+
+    def test_cc_env_raw_converges_same_as_autosdd(self) -> None:
+        window, source = cw.resolve_window(
+            0, cc_env_raw="967000", observed_model="claude-haiku-4-5",
+            known_models=self._KNOWN)
+        self.assertEqual(window, 200_000)
+        self.assertIn("已收斂", source)
+
+    def test_settings_window_converges_same_as_autosdd(self) -> None:
+        window, source = cw.resolve_window(
+            0, settings_window=967000, observed_model="claude-haiku-4-5",
+            known_models=self._KNOWN)
+        self.assertEqual(window, 200_000)
+        self.assertIn("已收斂", source)
+
+
 class TierAndExitTests(unittest.TestCase):
     def test_ratio_tier_table(self) -> None:
         self.assertIsNone(cw.ratio_tier(None, 1000))

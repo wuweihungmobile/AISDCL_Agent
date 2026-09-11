@@ -85,9 +85,18 @@ def recovery_command(*, sdd_root: Path, python: str, target: str, reason: str,
 
 
 def recovery_hint(state, *, sdd_root: Path, python: str = sys.executable,
-                  exists: Optional[Callable[[Path], bool]] = None) -> str:
+                  exists: Optional[Callable[[Path], bool]] = None,
+                  measurement: object = None, window: Optional[int] = None,
+                  source: Optional[str] = None) -> str:
     """給 session_start.py 與 pre hook 的 BLOCK／deny 訊息用：來源 session、類別、原因、時間、
-    兩殼各一行指令（bash/zsh 與 PowerShell）。"""
+    目前真實水位、兩殼各一行指令（bash/zsh 與 PowerShell）。
+
+    D16（DEF-200-275 第五輪 SA-02）：`measurement`（`context_window.Measurement` 或 None，用
+    duck-typing 讀 `.used` 避免此模組反過來 import context_window）／`window`／`source` 三個
+    optional 關鍵字參數，由呼叫端（pre hook／session_start）把它們已經量測過的真實水位傳進來——
+    本函式只負責印出，不重新量測。三者皆有預設值 None，既有呼叫簽名（不傳這三個新參數）零改動
+    即可繼續運作；量不到（measurement 為 None、或 `.used` 為 None、或缺 window）時印「尚無可用
+    usage」而非硬湊假數字。"""
     history = state.root.get("escalation_history") or []
     last = history[-1] if history and isinstance(history[-1], dict) else {}
     category = classify_escalation(last)
@@ -104,11 +113,17 @@ def recovery_hint(state, *, sdd_root: Path, python: str = sys.executable,
                                  shell="posix", exists=exists)
     ps_cmd = recovery_command(sdd_root=root, python=python, target=target, reason=auto_reason,
                               shell="powershell", exists=exists)
+    used = getattr(measurement, "used", None) if measurement is not None else None
+    if used is not None and window:
+        water_line = f"  目前本 session 真實 used={used:,} window={window:,} 來源={source or '未知'}"
+    else:
+        water_line = "  目前本 session 尚無可用 usage（新 session 首擊或 compact 後）"
     lines = [
         f"[SDD-FSM][RECOVERY] 此 ESCALATION 來源 session={session_id or _UNRECORDED}；"
         f"類別={category}（{'context budget 誤觸／耗盡' if category == CATEGORY_CONTEXT_BUDGET else '結構性升級'}）；"
         f"原因={trigger_reason}；時間={triggered_at}",
         f"  目標={target}" + ("（resume_state 不在合法出口，fallback 為 SPEC_DRAFTING）" if fallback else ""),
+        water_line,
         "  人工恢復（R-9.5：需人類在終端執行；依你的殼複製對應那一整行）：",
         f"  bash/zsh   : {posix_cmd}",
         f"  PowerShell : {ps_cmd}",

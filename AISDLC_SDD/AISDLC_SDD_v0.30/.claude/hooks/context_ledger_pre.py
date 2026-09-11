@@ -1,4 +1,4 @@
-"""PreToolUse Hook — FSM guardrail + context budget gate (ACT-012; DEF-200-275 第四輪重寫).
+"""PreToolUse Hook — FSM guardrail + context budget gate (ACT-012; DEF-200-275 第四／五輪重寫).
 
 Wiring (.claude/settings.json):
     "hooks": {
@@ -20,10 +20,20 @@ Behaviour（實測語意，2026-09-10 起）:
   只放 compact 相關）。
 - AUTO_COMPACT_PENDING 且真實 used 已回落 <85% window ⇒ `complete_auto_compact(observed_effective=True)`
   自動回 resume_state（Claude Code 自動 compaction 亦算完成；D4／C5）。
+- **D11（第五輪 F2；複審 R-D11 補防禦）**：AUTO_COMPACT_PENDING 但本次量不到 usage（新 session
+  首擊／compact 後尚無新 usage）⇒ 依 C3 放行一次＋`[UNMETERED]` notice，不讓
+  `_assert_allowed_under_auto_compact` 白名單擋下這次呼叫（否則新視窗第一擊就被卡死）。
+  此放行**只及於非規格檔**：Write/Edit 命中 `fsm_runtime._SPEC_TARGET_PREFIXES`
+  （`docs/01_requirements|02_architecture|03_testing`）時，即使量不到 usage 仍 deny（Rule 9.6
+  絕對禁令 #3；`rt.is_blocked_spec_write()` 沿用既有常數，不複製第二份清單）。**D12**：量得到仍
+  PENDING deny 時，reason 必含真實數字（used=/window=/來源=）＋觸發來源 session／時間＋解除規則
+  一句。
 - ratio ≥ 95%（分母已確認）⇒ **session 級**拒絕非 compact 工具＋Snapshot（trigger_auto_compact），
   **不再**寫專案級 ESCALATION／TOKEN_BUDGET_CRITICAL（根因 C：context window 是 session 的屬性，
-  FSM-STATE 是專案的屬性；舊語意會讓下一個全新視窗一開場就被擋）。per-stage cap 超限仍走既有
-  結構性升級（R-9.2 failure_mode 不變）。90~95% ⇒ AUTO_COMPACT_PENDING；≥85% ⇒ WARN。
+  FSM-STATE 是專案的屬性；舊語意會讓下一個全新視窗一開場就被擋）。**D13（第五輪）**：per-stage
+  cap 超限**改為 session 級** `[CAP]` deny（不寫 ESCALATION、不影響其他視窗），只落一次性
+  `auto_compact_state.cap_exceeded` 標記；R-9.2 catch 語意仍照記（規則守望的失敗模式真的發生，
+  不要求進 project-level ESCALATION）。90~95% ⇒ AUTO_COMPACT_PENDING；≥85% ⇒ WARN。
 - `SDD_HOOKS_DISABLE=1` 全關（保留 ACT-020 subagent 注入）；`SDD_HOOKS_DRY_RUN=1` deny 降為警告。
 """
 from __future__ import annotations
@@ -224,12 +234,92 @@ def _details(sid: str, m: Measurement, window: int, source: str) -> dict:
     }
 
 
-def _recovery_hint(rt) -> str:
+def _recovery_hint(rt, m: Measurement | None = None, window: int | None = None,
+                   source: str | None = None) -> str:
     try:
         from tools.fsm_runtime.recovery_hint import recovery_hint  # type: ignore
-        return recovery_hint(rt.state, sdd_root=_SDD_ROOT)
+        return recovery_hint(rt.state, sdd_root=_SDD_ROOT, measurement=m, window=window, source=source)
     except Exception as exc:  # noqa: BLE001
         return f"[SDD-FSM][RECOVERY][WARN] recovery hint unavailable: {exc!r}"
+
+
+def _pending_unmetered_notice(rt) -> str:
+    """D11（C3 補齊；DEF-200-275 第五輪 F2）：AUTO_COMPACT_PENDING 且本次量不到 usage 時的放行
+    notice——說清楚是誰、何時觸發了這個 PENDING，讓新視窗第一擊不必猜。"""
+    auto = rt.state.root.get("auto_compact_state") or {}
+    trigger_details = auto.get("trigger_details") or {}
+    trigger_sid = trigger_details.get("session_id") if isinstance(trigger_details, dict) else None
+    triggered_at = auto.get("triggered_at")
+    return (
+        "[SDD-CTX][AUTO-COMPACT][UNMETERED] 本次呼叫量不到 usage"
+        "（新 session 首擊／compact 後尚無新 usage）⇒ 依 C3 放行一次；"
+        "下一次呼叫依真實 usage 判定（<85% 自動解除 PENDING）。"
+        f"PENDING 由 session={trigger_sid or '未知'} 於 {triggered_at or '未知'} 觸發"
+    )
+
+
+def _pending_unmetered_spec_deny_reason(rt) -> str:
+    """複審 R-D11（DEF-200-275 第五輪）：D11「PENDING＋量不到 usage ⇒ 放行一次」的 C3 放行只
+    及於非規格檔——Write/Edit 命中 `_SPEC_TARGET_PREFIXES`（Rule 9.6 絕對禁令 #3）時，即使量不到
+    usage 仍必須 deny，避免「量不到 usage 放行一次」被誤用成繞過規格檔保護的後門（原缺陷：D11
+    分支在 `rt.assert_tool_allowed()` 之前就提前 return，連帶跳過了 spec 前綴保護）。"""
+    auto = rt.state.root.get("auto_compact_state") or {}
+    trigger_details = auto.get("trigger_details") or {}
+    trigger_sid = trigger_details.get("session_id") if isinstance(trigger_details, dict) else None
+    triggered_at = auto.get("triggered_at")
+    return (
+        "[SDD-FSM][SPEC-GUARD] state AUTO_COMPACT_PENDING — 本次呼叫量不到 usage，"
+        "但量不到 usage 放行只及於非規格檔；規格檔（docs/01_requirements|02_architecture|"
+        "03_testing）的 Write/Edit 不因『量不到 usage』而放行（Rule 9.6 絕對禁令 #3）。"
+        f"PENDING 由 session={trigger_sid or '未知'} 於 {triggered_at or '未知'} 觸發。"
+        "請呼叫 Skill: stage-compaction；真實 usage 回落 <85% 後下一次工具呼叫自動恢復 resume_state。"
+    )
+
+
+def _pending_deny_reason(rt, m: Measurement | None, window: int | None, source: str | None) -> str:
+    """D12：PENDING 且量得到仍 deny 時，reason 必含真實數字＋來源 session＋解除規則——不再是
+    空泛的「只允許 stage-compaction 相關操作」。
+
+    複審 R-D11（DEF-200-275 第五輪）防禦性補強：呼叫端原本保證 `m` 非 None（量不到的情形已被
+    D11 分支攔截並提前 return），但這個保證不該讓本函式對 `m is None` 沒有防呆——量測面任何
+    未來變動都不該讓這裡拋 AttributeError。`m is None` 時老實印「量不到」，不猜數字。"""
+    auto = rt.state.root.get("auto_compact_state") or {}
+    trigger_details = auto.get("trigger_details") or {}
+    trigger_sid = trigger_details.get("session_id") if isinstance(trigger_details, dict) else None
+    triggered_at = auto.get("triggered_at")
+    if m is None:
+        label = "量不到 usage（新 session 首擊／compact 後尚無新 usage）"
+    elif window and source:
+        label = _label(m, window, source)
+    else:
+        label = f"used={m.used:,} window=未知（分母無法解析）"
+    return (
+        f"[SDD-FSM] state AUTO_COMPACT_PENDING — 只允許 /stage-compaction 相關操作"
+        f"（{label}）。PENDING 由 session={trigger_sid or '未知'} 於 {triggered_at or '未知'} 觸發。"
+        "請呼叫 Skill: stage-compaction；真實 usage 回落 <85% 後下一次工具呼叫自動恢復 resume_state。"
+    )
+
+
+def _cap_exceeded_deny_reason(trigger_result: dict) -> str:
+    """D13（DEF-200-275 第五輪／ARCH-02／SD-02／QA P0）：per-stage cap 超限的 session 級 deny——
+    只擋本 session 的非 compact 工具，不寫專案級 ESCALATION、不影響其他視窗（另一個全新 session
+    自己的 ratio 沒衝到門檻，根本不會走到這支函式）。"""
+    stage_key = trigger_result.get("stage_key", "?")
+    n = trigger_result.get("max_per_stage", "?")
+    return (
+        f"[SDD-CTX][CRIT][CAP] 本 session 於 stage '{stage_key}' 已 {n} 次觸發 auto-compact "
+        "未見有效壓縮 ⇒ 本 session 拒絕非 compact 工具（不寫 ESCALATION、不影響其他視窗）。"
+        "請 /compact 或 claude -r 重啟本 session；真實 usage 回落 <90% 即解除。"
+    )
+
+
+def _cap_exceeded_pass_notice(trigger_result: dict, label: str) -> str:
+    stage_key = trigger_result.get("stage_key", "?")
+    n = trigger_result.get("max_per_stage", "?")
+    return (
+        f"[SDD-CTX][CAP] ratio（{label}）— stage '{stage_key}' 已 {n} 次觸發 auto-compact 未見"
+        "有效壓縮；本次為 compact 白名單工具，放行。其餘非 compact 工具本 session 仍會被拒絕。"
+    )
 
 
 def _record_audit(entry: dict) -> None:
@@ -318,12 +408,47 @@ def main() -> int:
         except Exception as exc:  # noqa: BLE001
             notices.append(f"[SDD-CTX][AUTO-COMPACT][DONE][WARN] complete_auto_compact failed: {exc!r}")
 
+    # D11（C3 補齊；DEF-200-275 第五輪 F2）：PENDING 且本次量不到 usage（新 session 首擊／compact
+    # 後尚無新 usage）⇒ 不能讓 `_assert_allowed_under_auto_compact` 白名單擋下這次呼叫——那正是
+    # 「新視窗一開就被擋」的根因。放行一次＋notice，下一次呼叫依真實 usage 判定。ESCALATION 類
+    # 狀態不受本條影響（僅檢查 AUTO_COMPACT_PENDING）。
+    if rt.state.current == "AUTO_COMPACT_PENDING" and (m is None or m.used is None):
+        # 複審 R-D11（DEF-200-275 第五輪）：C3 放行一次只及於非規格檔——不能讓「量不到 usage」
+        # 連帶跳過 Rule 9.6 絕對禁令 #3（IMPLEMENTATION 等非草擬狀態禁止 Write/Edit 規格文件）。
+        # 沿用 fsm_runtime 既有的 `_SPEC_TARGET_PREFIXES`／`_STATES_ALLOWING_SPEC_WRITE`，不複製
+        # 第二份清單。
+        if rt.is_blocked_spec_write(tool, target):
+            _emit(_deny_or_warn(_pending_unmetered_spec_deny_reason(rt)))
+            return 0
+        subagent_notice = _build_subagent_notice(tool, tool_input, runtime=rt)
+        notices.append(_pending_unmetered_notice(rt))
+        if subagent_notice:
+            notices.insert(0, subagent_notice)
+        _record_audit({
+            "ts": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
+            "phase": "pre",
+            "tool": tool,
+            "target": target,
+            "tokens": _estimate_tokens(tool, tool_input),
+            "fsm_state": rt.state.current,
+            "session_id": sid,
+            "observed_used": None if m is None else m.used,
+            "window": window,
+            "window_source": source,
+        })
+        return _emit_pass(notices)
+
     try:
         rt.assert_tool_allowed(tool, target)
     except TransitionError as err:
-        reason = f"[SDD-FSM] {err}"
-        if rt.state.current in _ESCALATION_STATES:
-            reason += "\n" + _recovery_hint(rt)
+        if rt.state.current == "AUTO_COMPACT_PENDING":
+            # D12：量得到仍 deny 時，reason 必含真實數字＋來源 session＋解除規則（m 保證非 None，
+            # 因為量不到的情形已被上面的 D11 分支攔截並提前 return）。
+            reason = _pending_deny_reason(rt, m, window, source)
+        else:
+            reason = f"[SDD-FSM] {err}"
+            if rt.state.current in _ESCALATION_STATES:
+                reason += "\n" + _recovery_hint(rt, m, window, source)
         _emit(_deny_or_warn(reason))
         return 0
     except Exception as exc:  # noqa: BLE001 — never hard-block on infra fault
@@ -368,12 +493,25 @@ def main() -> int:
                     m.used, ratio, details=_details(sid, m, window, source)) or {}
             except Exception:  # noqa: BLE001
                 pass
+            if trigger_result.get("cap_exceeded"):
+                # D13（DEF-200-275 第五輪）：per-stage cap 超限只拒絕本 session 的非 compact
+                # 工具，不再寫專案級 ESCALATION（不影響其他視窗；根因 C）。
+                try:
+                    rt._assert_allowed_under_auto_compact(tool, target)
+                except TransitionError:
+                    _emit(_deny_or_warn(_cap_exceeded_deny_reason(trigger_result)))
+                    return 0
+                notices.append(_cap_exceeded_pass_notice(trigger_result, label))
+                return _emit_pass(notices)
             if trigger_result.get("escalated"):
-                # per-stage cap 超限＝結構性升級（既有 R-9.2 failure_mode），照舊 deny 並附恢復指令。
+                # 防禦性保留：目前 trigger_auto_compact 在 assert_tool_allowed 已放行的前提下
+                # （即 state 不在 _BLOCKING_STATES）不會再回 escalated=True（per-stage cap 已改走
+                # 上面的 cap_exceeded 分支）。保留這支分支是為了不讓未來新增的 escalated 路徑
+                # 靜默吞掉——真的發生時仍照舊 deny 並附恢復指令。
                 reason = trigger_result.get("reason", "auto-compact suppressed")
                 _emit(_deny_or_warn(
                     f"[SDD-CTX][CRIT][ESCALATION] ratio {ratio:.0%}（{label}）— {reason}。"
-                    " 後續工具呼叫已被 FSM guardrail 阻擋，必須人工介入。\n" + _recovery_hint(rt)
+                    " 後續工具呼叫已被 FSM guardrail 阻擋，必須人工介入。\n" + _recovery_hint(rt, m, window, source)
                 ))
                 return 0
         # session 級判定：當次工具是否為 compact 相關（不寫 ESCALATION、不寫 TOKEN_BUDGET_CRITICAL）。
@@ -408,6 +546,17 @@ def main() -> int:
                 m.used, ratio, details=_details(sid, m, window, source)) or {}
         except Exception:  # noqa: BLE001
             pass
+        if trigger_result.get("cap_exceeded"):
+            # D13：cap_exceeded 也帶 noop=True，必須先於下面的泛用 [NOOP] 分支檢查，否則
+            # cap 超限會被 [NOOP] 分支悄悄放行、遺失 session 級 CAP 拒絕（同一支函式服務
+            # CRIT／AUTO_COMPACT 兩分支）。
+            try:
+                rt._assert_allowed_under_auto_compact(tool, target)
+            except TransitionError:
+                _emit(_deny_or_warn(_cap_exceeded_deny_reason(trigger_result)))
+                return 0
+            notices.append(_cap_exceeded_pass_notice(trigger_result, label))
+            return _emit_pass(notices)
         if trigger_result.get("noop"):
             # ARCH-06／SD-06：RELEASE 等狀態下 trigger 是 no-op，不得宣稱已進 PENDING。
             notices.append(
@@ -416,10 +565,11 @@ def main() -> int:
             )
             return _emit_pass(notices)
         if trigger_result.get("escalated"):
+            # 防禦性保留：見上方 CRIT 分支同名註解，per-stage cap 已改走 cap_exceeded。
             reason = trigger_result.get("reason", "auto-compact suppressed")
             _emit(_deny_or_warn(
                 f"[SDD-CTX][AUTO-COMPACT][ESCALATION] ratio {ratio:.0%}（{label}）— {reason}。"
-                " 後續工具呼叫已被 FSM guardrail 阻擋，必須人工介入。\n" + _recovery_hint(rt)
+                " 後續工具呼叫已被 FSM guardrail 阻擋，必須人工介入。\n" + _recovery_hint(rt, m, window, source)
             ))
             return 0
         notices.append(

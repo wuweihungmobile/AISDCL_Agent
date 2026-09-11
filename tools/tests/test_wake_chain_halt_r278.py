@@ -34,7 +34,9 @@ import importlib.util as _ilu  # noqa: E402
 
 import context_budget_guard as guard  # noqa: E402
 import quota_gate as qg  # noqa: E402
+import quota_messages  # noqa: E402
 import quota_policy  # noqa: E402
+import schedule_backend as sb  # noqa: E402
 
 import session_resume_planner as planner  # noqa: E402
 
@@ -269,6 +271,197 @@ class SentinelDecideRecognizesHaltMarkerTest(unittest.TestCase):
         self.assertEqual(planner.sentinel_decide(None, "", 60.0, now)["action"], "patrol")
         self.assertEqual(planner.sentinel_decide(
             None, "", planner.SENTINEL_IDLE_SECONDS + 1, now)["action"], "disarm")
+
+    def test_halt_marker_reset_source_passes_the_relay_credential_check(self) -> None:
+        """DEF-200-281／F-4 端到端演練（真 launchd）揪出的整合缺口：`halt_verdict()` 的
+        `arm_reset` 分支寫回 `reset_source="halt-marker"`，但 `relay_problems()` 修前
+        只認 `transcript-verbatim`／`probe-verbatim`／`operator` 三種——下一輪 tick 會把
+        這個合法狀態塊判成「猜出來的 reset」而觸發不必要的 `_heal_relay()` 自癒，自癒又
+        會把 `allow_resume` 靜默重置回預設值（見 `_heal_relay`／`_base_state`）。"""
+        state = {"schema": planner.RELAY_SCHEMA, "session_id": "sid-halt-marker",
+                 "plan_path": "p.md", "state": "waiting", "kind": "sentinel",
+                 "reset_at": "2099-01-01T00:00:00+00:00", "reset_source": "halt-marker",
+                 "attempts": 0, "max_attempts": 5, "allow_resume": False,
+                 "task_name": "AutoSDD_Sentinel_sid-halt-marker",
+                 sb.CRED_KEY_LAUNCHD: "launchd gui/501/…憑證…"}
+        self.assertEqual(planner.relay_problems(state), [],
+                         "halt-marker 是真實觀測值（寫入前已過 F-1 自檢），"
+                         "不該被判成『猜出來的 reset』")
+
+
+class HaltMarkerSelfCheckTest(unittest.TestCase):
+    """DEF-200-281／F-1：`quota_halt_actions()` 落盤前的寫入自檢。
+
+    立案：本輪鑑識實測 `~/.autosdd/traces/halt_{96d7f386-…,8d8773f9-…,unknown}.json`
+    三份現場標記逐位元組相同（`at`="2026-08-09T05:15:03+00:00"／
+    `reset_at`="2026-08-09T08:23:03+00:00"／`resolved_source`="env-derived"），
+    追根究柢是 `tools/tests/test_quota_policy.py::TestR95HaltArmsOffTheEarliestResettableAxis
+    ::test_the_halt_actions_and_message_follow_the_choice` 用模組常數
+    `NOW = datetime(2026, 8, 9, 5, 15, 3, tzinfo=UTC)` 呼叫 `quota_halt_actions()`，
+    且未隔離 `CLAUDE_CODE_SESSION_ID`／`CLAUDE_PROJECT_DIR`／`AUTOSDD_TRACE_DIR`——
+    在任何真實 session 裡跑 pytest 都會把這個凍結值寫進真實 sid 的 halt 標記。
+    """
+
+    def setUp(self) -> None:
+        import tempfile
+        self.tmp = Path(tempfile.mkdtemp(prefix="def281_selfcheck_"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
+        old = os.environ.get("AUTOSDD_TRACE_DIR")
+        os.environ["AUTOSDD_TRACE_DIR"] = str(self.tmp)
+        self.addCleanup(lambda: (os.environ.__setitem__("AUTOSDD_TRACE_DIR", old)
+                                 if old is not None else os.environ.pop("AUTOSDD_TRACE_DIR", None)))
+        ts = self.tmp / "real.jsonl"
+        ts.write_text('{"type":"assistant"}\n', encoding="utf-8")
+        self.transcript = ts
+
+    def test_fresh_now_and_future_reset_is_accepted_and_written(self) -> None:
+        """對照組：`now`＝真牆鐘、`reset_at` 在未來 ⇒ 照舊落盤（不得誤傷正常路徑）。"""
+        decision = _decision(96.0, 600.0)
+        now = datetime.now(UTC).astimezone()
+        act = qg.quota_halt_actions(
+            {"hook_event_name": "PostToolUse", "tool_name": "Read",
+             "transcript_path": str(self.transcript)},
+            decision, now, plan_writer=lambda t: "plan-path", waker=lambda t, p: {"armed": True})
+        self.assertIsNone(act["marker_rejected"])
+        markers = list(self.tmp.glob("halt_*.json"))
+        self.assertTrue(markers, "正常路徑不該被自檢誤擋")
+
+    def test_frozen_now_a_month_stale_is_rejected_and_not_written(self) -> None:
+        """紅端＝本場事故的逐位元組重現：拿 `test_quota_policy.py` 那個凍結常數當 `now`，
+        修前會落盤（且與現場三份標記逐位元組相同），修後必須拒寫、且訊息點名量級。
+        """
+        frozen_now = datetime(2026, 8, 9, 5, 15, 3, tzinfo=UTC)
+        decision = _decision(96.0, 188 * 60.0)
+        act = qg.quota_halt_actions(
+            {"hook_event_name": "PostToolUse", "tool_name": "Read",
+             "transcript_path": str(self.transcript)},
+            decision, frozen_now, plan_writer=lambda t: "plan-path",
+            waker=lambda t, p: {"armed": True})
+        self.assertIsNotNone(act["marker_rejected"])
+        self.assertIn("疑似測試夾具洩漏", act["marker_rejected"])
+        markers = list(self.tmp.glob("halt_*.json"))
+        self.assertFalse(markers, "凍結的 now 不該落盤——落盤就是本次事故復發")
+
+    def test_reset_at_in_the_past_is_rejected_even_when_now_is_fresh(self) -> None:
+        """`now` 本身與牆鐘偏移很小（不會撞到 skew 門檻），但算出來的 `reset_at`
+        相對 `real_now` 已經是過去 ⇒ 同樣拒寫，不准落一份保證讓 `halt_verdict()`
+        判過期的標記。偏移刻意選在「skew 門檻之內、但足夠讓 reset 翻頁」的區間。"""
+        now = datetime.now(UTC).astimezone()
+        decision = _decision(96.0, 60.0)  # reset ≈ now 之後 60 秒
+        real_now_past_reset = now + timedelta(seconds=120)  # skew=120s<600s；reset 已過
+        marker, rejected = qg.halt_marker_or_rejection(
+            "sid-past-reset", decision, now, self.transcript, "payload",
+            real_now=real_now_past_reset)
+        self.assertIsNone(marker)
+        self.assertIn("已在過去", rejected)
+
+    def test_skew_boundary_is_exactly_the_documented_threshold(self) -> None:
+        """門檻值本身要能現查、不是憑印象——10 分鐘剛好卡在
+        `HALT_MARKER_MAX_CLOCK_SKEW_SECONDS`。"""
+        self.assertEqual(quota_messages.HALT_MARKER_MAX_CLOCK_SKEW_SECONDS, 600)
+        now = datetime.now(UTC).astimezone()
+        decision = _decision(96.0, 600.0)
+        just_inside, _ = qg.halt_marker_or_rejection(
+            "sid-inside", decision, now - timedelta(seconds=599), self.transcript, "payload",
+            real_now=now)
+        self.assertIsNotNone(just_inside)
+        just_outside, reason = qg.halt_marker_or_rejection(
+            "sid-outside", decision, now - timedelta(seconds=601), self.transcript, "payload",
+            real_now=now)
+        self.assertIsNone(just_outside)
+        self.assertIsNotNone(reason)
+
+    def test_naive_now_is_rejected_not_crashed(self) -> None:
+        """複審 naive-now 防呆（必修）：`now` 缺 tzinfo 時 `real_now - now` 會拋
+        `TypeError` 崩掉整條 halt 武裝路徑——這比拒寫更糟，連拒寫理由都印不出來，
+        呼叫端（`quota_halt_actions`）會整段連 `not_armed_reason` 都算不出來。
+        方向＝naive 視為不可信任的輸入，拒寫而非猜時區（猜錯時區會落一份看似合法、
+        實則 `at`/`reset_at` 全錯的標記，與 RC-1 同型：寧可漏一次武裝機會）。
+        """
+        decision = _decision(96.0, 600.0)
+        naive_now = datetime(2026, 9, 11, 9, 0, 0)  # 蓄意缺 tzinfo
+        marker, rejected = qg.halt_marker_or_rejection(
+            "sid-naive-now", decision, naive_now, self.transcript, "payload")
+        self.assertIsNone(marker)
+        self.assertIsNotNone(rejected)
+        self.assertIn("tzinfo", rejected)
+
+
+class HaltLatchIsSessionScopedTest(unittest.TestCase):
+    """DEF-200-281 第二輪／RC-3：`quota_gate()` halt 分支的閂鎖鍵此前不含 sid
+    （`f"halt@{kind}@{reset[:16]}"`），而 `quota_latch_path()` 是 machine-wide 單一檔案。
+    同一個 reset 視窗內，第二個撞 halt 的 session 會被第一個 session 的閂鎖擋下
+    （`key in latch_read(latch)`），於是永遠不呼叫 `quota_halt_actions()`——不寫自己的
+    halt 標記，也不重新嘗試 spawn。本機此刻真的同時掛兩支哨兵
+    （`8d8773f9-…`／`96d7f386-…`），正是本測試防的場景。
+    """
+
+    def setUp(self) -> None:
+        import tempfile
+        self.tmp = Path(tempfile.mkdtemp(prefix="def281_rc3_"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
+        old_trace = os.environ.get("AUTOSDD_TRACE_DIR")
+        os.environ["AUTOSDD_TRACE_DIR"] = str(self.tmp / "traces")
+        self.addCleanup(lambda: (os.environ.__setitem__("AUTOSDD_TRACE_DIR", old_trace)
+                                 if old_trace is not None
+                                 else os.environ.pop("AUTOSDD_TRACE_DIR", None)))
+        now = datetime.now(UTC).astimezone()
+        cache = self.tmp / "autosdd_quota.json"
+        body = {"schema": qg.quota_schema(),
+                "axes": [{"kind": "session", "pct": 96.0,
+                          "resets_at": (now + timedelta(seconds=600)).isoformat()}],
+                "source": "endpoint", "measured_at": now.isoformat(timespec="seconds")}
+        cache.write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
+        # 同 `QuotaPrepareBandActuallyPreparesTest` 既有慣例：三個檔案契約全關進沙箱，
+        # `quota_latch_path` 刻意只給**一份共用**路徑——生產上機器級單一檔案正是本場景
+        # 要重現的前提（latch 的機器級範圍本身不是本輪要動的線，見任務書 D-b）。
+        for name, value in (("quota_cache_path", lambda: cache),
+                            ("fanout_ledger_path", lambda: self.tmp / "ledger.d"),
+                            ("quota_latch_path", lambda: self.tmp / "latch.json")):
+            old = getattr(qg, name)
+            setattr(qg, name, value)
+            self.addCleanup(setattr, qg, name, old)
+        self.waker_calls: list[str] = []
+
+    def _transcript(self, sid: str) -> Path:
+        ts = self.tmp / f"{sid}.jsonl"
+        ts.write_text('{"type":"assistant"}\n', encoding="utf-8")
+        return ts
+
+    def _gate(self, sid: str) -> int:
+        ts = self._transcript(sid)
+        return qg.quota_gate(
+            {"hook_event_name": "PostToolUse", "tool_name": "Read",
+             "transcript_path": str(ts)},
+            blocking=guard.BLOCKING_TOOLS, latch_read=guard.announced_latches,
+            latch_write=guard.remember_latch, plan_writer=lambda t: "plan-path",
+            waker=lambda t, p: (self.waker_calls.append(str(t)) or {"armed": True}),
+            event="PostToolUse")
+
+    def test_two_sessions_in_the_same_window_both_get_their_own_marker(self) -> None:
+        """紅端＝修前第二個 sid 的 `_gate()` 會撞進「已閂鎖」分支：`waker` 只被叫一次、
+        `read_halt_marker("sidB-...")` 回 `None`——第二個 session 的喚醒鏈斷在這裡。
+        """
+        rc_a = self._gate("sidA-def281rc3")
+        rc_b = self._gate("sidB-def281rc3")
+        self.assertEqual((rc_a, rc_b), (2, 2), "halt 帶必須擋下兩次呼叫，不影響本測試主張")
+        self.assertEqual(len(self.waker_calls), 2,
+                         "第二個 session 被第一個的機器級閂鎖誤擋 ⇒ RC-3 復發")
+        self.assertIsNotNone(qg.read_halt_marker("sidA-def281rc3"),
+                             "第一個 session 應有自己的 halt 標記")
+        self.assertIsNotNone(qg.read_halt_marker("sidB-def281rc3"),
+                             "第二個 session 沒有自己的 halt 標記 ⇒ 它的哨兵永遠 idle-patrol")
+
+    def test_same_session_repeated_halt_does_not_rewrite_or_respawn(self) -> None:
+        """同一 sid 在同一視窗連續撞 halt：既有 one-shot 語意必須保留——第二次不重新
+        spawn（`waker` 只叫一次），這是本輪唯一要**保留**而非改動的既有行為。
+        """
+        rc1 = self._gate("sidC-def281rc3")
+        rc2 = self._gate("sidC-def281rc3")
+        self.assertEqual((rc1, rc2), (2, 2))
+        self.assertEqual(len(self.waker_calls), 1,
+                         "同一 session 在同一視窗重複 halt 不該重新 spawn"
+                         "（one-shot 語意被打破）")
 
 
 class ClaimGuardCatchesAutoContinueWithoutCredentialTest(unittest.TestCase):

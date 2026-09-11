@@ -305,29 +305,49 @@ class RealUsageGatingTests(_IsolatedFsmMixin, unittest.TestCase):
         self._rt.state.root["auto_compact_state"] = {"stage_key": "initial", "count_per_stage": 3,
                                                      "max_per_stage": 3}
 
-    def test_per_stage_cap_exceeded_at_950000_denies_with_project_escalation(self) -> None:
-        """QA-02：hook 層唯一仍會寫專案級 ESCALATION 的路徑（pre L373 `[CRIT][ESCALATION]`）。
-        結構性升級（R-9.2 failure_mode）既有語意不變：deny＋恢復指令＋escalation_history 帶 session_id。"""
+    def test_per_stage_cap_exceeded_at_950000_denies_session_level(self) -> None:
+        """D13（DEF-200-275 第五輪／ARCH-02／SD-02／QA P0）：per-stage cap 超限只拒絕本 session
+        的非 compact 工具（pre L373 附近的 `[CRIT][CAP]` 分支），**不再**寫專案級 ESCALATION——
+        改名自 test_per_stage_cap_exceeded_at_950000_denies_with_project_escalation。"""
         self._cap_out()
         out = self._run(950_000)
         self.assertEqual(out.get("permissionDecision"), "deny", msg=out)
         reason = out.get("permissionDecisionReason", "")
-        self.assertIn("[SDD-CTX][CRIT][ESCALATION]", reason)
-        self.assertIn("resume-from-escalation --to", reason)
-        self.assertEqual(self._rt.state.current, "ESCALATION")
-        history = self._rt.state.root["escalation_history"]
-        self.assertEqual(len(history), 1)
-        self.assertEqual(history[-1]["session_id"], "sess-42")
+        self.assertIn("[SDD-CTX][CRIT][CAP]", reason)
+        self.assertNotIn("[ESCALATION]", reason, msg="不得再有舊式 [CRIT][ESCALATION]/[AUTO-COMPACT][ESCALATION] 標籤")
+        self.assertNotIn("resume-from-escalation --to", reason)
+        self.assertNotEqual(self._rt.state.current, "ESCALATION",
+                            msg="cap 超限不得把 FSM 轉進專案級 ESCALATION（D13）")
+        self.assertEqual(len(self._rt.state.root.get("escalation_history") or []), 0,
+                         msg="cap 超限不得寫 escalation_history（D13）")
+        marker = self._rt.state.root["auto_compact_state"]["cap_exceeded"]
+        self.assertEqual(marker["session_id"], "sess-42")
 
-    def test_per_stage_cap_exceeded_at_900000_denies_with_project_escalation(self) -> None:
-        """QA-02：pre L407 `[AUTO-COMPACT][ESCALATION]` 分支。"""
+    def test_per_stage_cap_exceeded_at_900000_denies_session_level(self) -> None:
+        """D13：pre L407 附近 `[AUTO-COMPACT][CAP]` 分支——同一語意，改名自
+        test_per_stage_cap_exceeded_at_900000_denies_with_project_escalation。"""
         self._cap_out()
         out = self._run(900_000)
         self.assertEqual(out.get("permissionDecision"), "deny", msg=out)
         reason = out.get("permissionDecisionReason", "")
-        self.assertIn("[SDD-CTX][AUTO-COMPACT][ESCALATION]", reason)
-        self.assertIn("resume-from-escalation --to", reason)
-        self.assertEqual(len(self._rt.state.root["escalation_history"]), 1)
+        self.assertIn("[CAP]", reason)
+        self.assertNotIn("[ESCALATION]", reason, msg="不得再有舊式 [CRIT][ESCALATION]/[AUTO-COMPACT][ESCALATION] 標籤")
+        self.assertNotIn("resume-from-escalation --to", reason)
+        self.assertEqual(len(self._rt.state.root.get("escalation_history") or []), 0)
+
+    def test_cap_exceeded_does_not_block_a_brand_new_low_usage_session(self) -> None:
+        """D13 新增：另一個全新 session（低/零 usage）在 cap 標記落下後照常放行——cap_exceeded 是
+        「本 session 自己的 ratio 又衝到門檻」才會查驗的旗標，不是專案級全鎖（不影響其他視窗）。"""
+        self._cap_out()
+        out = self._run(950_000)  # 先把 cap_exceeded 標記打上（sess-42）
+        self.assertEqual(out.get("permissionDecision"), "deny", msg=out)
+        self.assertTrue(self._rt.state.root["auto_compact_state"].get("cap_exceeded"))
+        # 全新 session、低 usage（5%）：走同一支 hook，但自己的 ratio 遠低於門檻。
+        transcript = _write_transcript(self.root, 50_000, name="session-new.jsonl")
+        payload = {"tool_name": "Write", "tool_input": {"file_path": "src/other.py", "content": "y"},
+                   "transcript_path": transcript, "session_id": "sess-brand-new"}
+        out2 = self.runner.run(payload).get("hookSpecificOutput", {})
+        self.assertNotIn("permissionDecision", out2, msg=out2)
 
     def test_release_state_noop_does_not_claim_pending(self) -> None:
         """ARCH-06／SD-06：RELEASE 下 90% 的 trigger 是 no-op ⇒ [NOOP]，不得說 FSM → AUTO_COMPACT_PENDING；
@@ -510,9 +530,10 @@ class AutoCompactPendingExitTests(_IsolatedFsmMixin, unittest.TestCase):
         self._release_fsm()
         self._tmp.cleanup()
 
-    def _enter_pending(self, resume_state: str) -> None:
+    def _enter_pending(self, resume_state: str, session_id: str | None = None) -> None:
         self._rt.state.current = resume_state
-        res = self._rt.trigger_auto_compact(900_000, 0.9)
+        details = {"session_id": session_id} if session_id else None
+        res = self._rt.trigger_auto_compact(900_000, 0.9, details=details)
         self.assertFalse(res.get("escalated"))
         self.assertEqual(self._rt.state.current, "AUTO_COMPACT_PENDING")
 
@@ -552,6 +573,117 @@ class AutoCompactPendingExitTests(_IsolatedFsmMixin, unittest.TestCase):
         out = self._run(920_000)
         self.assertEqual(out.get("permissionDecision"), "deny", msg=out)
         self.assertIn("AUTO_COMPACT_PENDING", out.get("permissionDecisionReason", ""))
+
+    def test_pending_deny_reason_has_real_numbers_and_trigger_session(self) -> None:
+        """D12（DEF-200-275 第五輪 SA-01）：PENDING 且量得到仍 deny 時，reason 必含
+        used=/window=/來源=/session=/觸發時間，以及解除規則一句。"""
+        self._enter_pending("SPEC_DRAFTING", session_id="sess-trigger")
+        out = self._run(920_000)
+        self.assertEqual(out.get("permissionDecision"), "deny", msg=out)
+        reason = out.get("permissionDecisionReason", "")
+        self.assertIn("used=920,000", reason)
+        self.assertIn("window=", reason)
+        self.assertIn("來源=", reason)
+        self.assertIn("session=sess-trigger", reason)
+        self.assertIn("真實 usage 回落 <85% 後下一次工具呼叫自動恢復 resume_state", reason)
+
+
+class PendingUnmeteredTests(_IsolatedFsmMixin, unittest.TestCase):
+    """D11（C3 補齊；DEF-200-275 第五輪 F2）：AUTO_COMPACT_PENDING 且本次量不到 usage（新 session
+    首擊／compact 後尚無新 usage）⇒ 放行一次＋[UNMETERED] notice；不得讓
+    `_assert_allowed_under_auto_compact` 白名單擋下這次呼叫——否則就是「新視窗一開就被擋」（F2）。"""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self._isolate_fsm(self.root)
+        self._env = _isolated_env(self.root)
+        self._env.start()
+        self.mod = _load_hook_module(self.root)
+        self.runner = _MainRunner(self.mod)
+
+    def tearDown(self) -> None:
+        self._env.stop()
+        self._release_fsm()
+        self._tmp.cleanup()
+
+    def _enter_pending(self) -> None:
+        self._rt.state.current = "SPEC_DRAFTING"
+        res = self._rt.trigger_auto_compact(900_000, 0.9, details={"session_id": "sess-trigger"})
+        self.assertFalse(res.get("escalated"))
+        self.assertEqual(self._rt.state.current, "AUTO_COMPACT_PENDING")
+
+    def _run_unmetered(self, tool: str, tool_input: dict, session_id: str = "sess-new") -> dict:
+        # 無 transcript_path ⇒ measure() 回 None（新 session 首擊，逐字稿裡尚無這次 tool_use 的 usage）。
+        payload = {"tool_name": tool, "tool_input": tool_input, "session_id": session_id}
+        return self.runner.run(payload).get("hookSpecificOutput", {})
+
+    def test_write_passes_once_when_pending_and_unmetered(self) -> None:
+        self._enter_pending()
+        out = self._run_unmetered("Write", {"file_path": "src/app.py", "content": "x"})
+        self.assertNotIn("permissionDecision", out, msg=out)
+        ctx = out.get("additionalContext", "")
+        self.assertIn("[SDD-CTX][AUTO-COMPACT][UNMETERED]", ctx)
+        self.assertIn("session=sess-trigger", ctx)
+        self.assertEqual(self._rt.state.current, "AUTO_COMPACT_PENDING",
+                         msg="D11 不改變 PENDING 狀態，只放行這一次呼叫")
+
+    def test_task_passes_once_when_pending_and_unmetered(self) -> None:
+        self._enter_pending()
+        out = self._run_unmetered("Task", {"subagent_type": "dev-senior", "prompt": "demo"})
+        self.assertNotIn("permissionDecision", out, msg=out)
+        self.assertIn("[SDD-CTX][AUTO-COMPACT][UNMETERED]", out.get("additionalContext", ""))
+
+    def test_second_call_same_session_with_low_usage_completes(self) -> None:
+        """同 session 第二次帶 usage<85% ⇒ [DONE]（既有 D4/C5 語意；D11 只補齊第一次量不到那一擊）。"""
+        self._enter_pending()
+        out1 = self._run_unmetered("Write", {"file_path": "src/app.py", "content": "x"})
+        self.assertNotIn("permissionDecision", out1, msg=out1)
+        self.assertIn("[UNMETERED]", out1.get("additionalContext", ""))
+        transcript = _write_transcript(self.root, 120_000, peak=900_000)
+        out2 = self.runner.run({"tool_name": "Write", "tool_input": {"file_path": "src/app.py", "content": "x"},
+                                "transcript_path": transcript, "session_id": "sess-new"}
+                               ).get("hookSpecificOutput", {})
+        self.assertNotIn("permissionDecision", out2, msg=out2)
+        self.assertIn("[DONE]", out2.get("additionalContext", ""))
+        self.assertEqual(self._rt.state.current, "SPEC_DRAFTING")
+
+    def test_spec_target_write_denied_when_pending_and_unmetered(self) -> None:
+        """複審 R-D11（DEF-200-275 第五輪）：D11 的『量不到 usage 放行一次』只及於非規格檔——
+        Write 命中 `docs/01_requirements/`（Rule 9.6 絕對禁令 #3）時，即使量不到 usage 仍須 deny，
+        不得被 D11 的 C3 放行短路成後門。原缺陷：D11 分支在 `assert_tool_allowed()` 之前提前
+        return，連 spec 前綴保護一起跳過（實測：PENDING＋零 usage＋此 Write ⇒ 放行）。"""
+        self._enter_pending()
+        out = self._run_unmetered(
+            "Write", {"file_path": "docs/01_requirements/PRD-review.md", "content": "x"})
+        self.assertEqual(out.get("permissionDecision"), "deny", msg=out)
+        reason = out.get("permissionDecisionReason", "")
+        self.assertIn("量不到 usage 放行只及於非規格檔", reason)
+        self.assertIn("session=sess-trigger", reason)
+        self.assertEqual(self._rt.state.current, "AUTO_COMPACT_PENDING")
+
+    def test_spec_target_edit_also_denied_when_pending_and_unmetered(self) -> None:
+        """同上，Edit 工具、`02_architecture/` 前綴同樣受保護（不只 Write／不只 01_requirements）。"""
+        self._enter_pending()
+        out = self._run_unmetered(
+            "Edit", {"file_path": "docs/02_architecture/SRD.md", "old_string": "a", "new_string": "b"})
+        self.assertEqual(out.get("permissionDecision"), "deny", msg=out)
+
+    def test_non_spec_write_still_passes_once_when_pending_and_unmetered(self) -> None:
+        """對照組（防止過度收斂）：非規格前綴目標仍照 D11 放行一次，不因新增的 spec 例外連坐。"""
+        self._enter_pending()
+        out = self._run_unmetered("Write", {"file_path": "src/app.py", "content": "x"})
+        self.assertNotIn("permissionDecision", out, msg=out)
+        self.assertIn("[SDD-CTX][AUTO-COMPACT][UNMETERED]", out.get("additionalContext", ""))
+
+    def test_pending_deny_reason_with_m_none_does_not_raise(self) -> None:
+        """複審 R-D11 補防禦：`_pending_deny_reason` 對 `m is None` 不得拋 AttributeError（原本
+        `else` 分支直接讀 `m.used`，假設呼叫端保證非 None；補上防呆讓量測面未來變動也不會炸
+        hook）。應老實印「量不到」，不得猜數字。"""
+        self._enter_pending()
+        reason = self.mod._pending_deny_reason(self._rt, None, None, None)
+        self.assertIn("量不到", reason)
+        self.assertIn("session=sess-trigger", reason)
 
 
 class PendingExitLockContentionTests(_IsolatedFsmMixin, unittest.TestCase):

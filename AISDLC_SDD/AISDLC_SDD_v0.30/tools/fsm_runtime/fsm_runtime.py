@@ -219,6 +219,22 @@ _STATES_ALLOWING_SPEC_WRITE = {
 }
 
 
+def _is_blocked_spec_write(current_state: str, tool: str, target: Optional[str]) -> bool:
+    """True 當且僅當 `tool` 為 Write/Edit、`target` 命中 `_SPEC_TARGET_PREFIXES`，且
+    `current_state` 不在 `_STATES_ALLOWING_SPEC_WRITE`（Rule 9.6 絕對禁令 #3）。
+
+    複審 R-D11（DEF-200-275 第五輪）：抽出為模組級函式，讓 `assert_tool_allowed` 與繞過其正常
+    流程短路的呼叫端（例如 hook 的「PENDING＋量不到 usage 放行一次」分支）共用同一份判定，不
+    複製第二份 `_SPEC_TARGET_PREFIXES`／`_STATES_ALLOWING_SPEC_WRITE` 清單。
+    """
+    if tool not in {"Write", "Edit"} or not target:
+        return False
+    normalized = target.replace("\\", "/")
+    if any(prefix in normalized for prefix in _SPEC_TARGET_PREFIXES):
+        return current_state not in _STATES_ALLOWING_SPEC_WRITE
+    return False
+
+
 class FSMRuntime:
     """High-level API used by hook scripts and tests."""
 
@@ -556,13 +572,16 @@ class FSMRuntime:
         if self.state.current == "AUTO_COMPACT_PENDING":
             self._assert_allowed_under_auto_compact(tool, target)
             return
-        if tool in {"Write", "Edit"} and target:
-            normalized = target.replace("\\", "/")
-            if any(prefix in normalized for prefix in _SPEC_TARGET_PREFIXES):
-                if self.state.current not in _STATES_ALLOWING_SPEC_WRITE:
-                    raise TransitionError(
-                        f"state {self.state.current} does not allow modifying spec files under {_SPEC_TARGET_PREFIXES}"
-                    )
+        if _is_blocked_spec_write(self.state.current, tool, target):
+            raise TransitionError(
+                f"state {self.state.current} does not allow modifying spec files under {_SPEC_TARGET_PREFIXES}"
+            )
+
+    def is_blocked_spec_write(self, tool: str, target: Optional[str]) -> bool:
+        """公開入口（複審 R-D11）：讓不經過 `assert_tool_allowed` 正常流程的呼叫端（如 hook 的
+        「AUTO_COMPACT_PENDING＋量不到 usage 放行一次」短路分支）仍能查驗 Rule 9.6 絕對禁令 #3，
+        沿用同一份 `_SPEC_TARGET_PREFIXES`／`_STATES_ALLOWING_SPEC_WRITE`，不複製第二份清單。"""
+        return _is_blocked_spec_write(self.state.current, tool, target)
 
     @staticmethod
     def _assert_allowed_under_auto_compact(tool: str, target: Optional[str]) -> None:
@@ -680,33 +699,66 @@ class FSMRuntime:
                 f"auto_compact exceeded {max_per_stage} per stage '{stage_key}' "
                 "— 可能引用文件過大或 stage 需拆分；拒絕再次 compact"
             )
-            self.state.record_escalation(reason, details=details)
-            # W-20-1（catch 覆蓋補強 DEF-19-001）：per-stage auto_compact 超限 → ESCALATION 即
-            # R-9.2（Context Budget）守望的失敗模式真實發生，結構化歸因到 R-9.2（無歧義映射，
-            # 非時序猜測）。flag OFF＝不記（零退化）；fail-closed；只增 catch_count（R-9.20 #11）。
-            self._record_escalation_catches(["R-9.2"])
+            session_id = (details or {}).get("session_id") if isinstance(details, dict) else None
+            existing_marker = auto.get("cap_exceeded")
+            # 複審 R-D13（DEF-200-275 第五輪）：first_mark 判準原本是「有無 marker」的全域一次性
+            # 旗標、不分 stage——stage-A 撞 cap 後，stage-B（全新 stage／全新 session）再撞 cap 時
+            # 會被 stage-A 的舊 marker 卡死（不重寫、不補 abort_report），marker 與現實不符。改為
+            # 「無 marker，或 marker 記的 stage_key 已不是目前 stage」才算首次——同一 stage 內反覆
+            # 命中仍維持不重寫（保留該 stage 第一次觸發的 at/session_id/count 證據）。
+            first_mark = (
+                not isinstance(existing_marker, dict)
+                or existing_marker.get("stage_key") != stage_key
+            )
+            # D13（DEF-200-275 第五輪／ARCH-02／SD-02／QA P0）：per-stage cap 超限**不再**寫
+            # 專案級 ESCALATION（不呼叫 record_escalation、不 transition，state.current 維持原狀）
+            # ——根因 C：context window 是 session 的屬性，FSM-STATE 是專案的屬性；舊語意會讓下一個
+            # 全新視窗一開場就被卡在 ESCALATION（DEF-200-275 第五輪 F2）。改成一次性 session 級標記，
+            # 同一 stage 內已存在則不重寫（保留第一次觸發的 at/session_id/count，避免同一 stage 反覆
+            # 觸發時洗掉最早的證據）；stage 換過後視為新事件，重寫並補寫 abort report。
+            if first_mark:
+                import datetime as _dt_cap
+                auto["cap_exceeded"] = {
+                    "at": _dt_cap.datetime.now(_dt_cap.timezone.utc).isoformat(timespec="seconds"),
+                    "session_id": session_id,
+                    "stage_key": stage_key,
+                    "count": projected,
+                }
+                # W-20-1（catch 覆蓋補強 DEF-19-001）沿用：R-9.2 自描述的 failure_mode（per-stage
+                # auto_compact 超限）仍真實發生，catch 語意收斂為「規則守望的失敗模式真的被打到」
+                # 而非「必進 project-level ESCALATION 狀態」——`record_state_catches` 本身只憑
+                # rule_id + failure_mode 記帳，不檢查 FSM 狀態，D13 拿掉 record_escalation 呼叫不影響
+                # 這個呼叫點的正確性；只在首次落標記時記一次，避免同一 stage 反覆觸發把 catch_count
+                # 灌到失真（fail-closed；只增 catch_count；R-9.20 #11）。
+                self._record_escalation_catches(["R-9.2"])
             save_state(self.state)
-            # CLAUDE.md Rule 9.5 — ESCALATION 必須產出 Abort Report
+            # CLAUDE.md Rule 9.5「ESCALATION 必須產出 Abort Report」的精神保留：cap 超限仍是需要
+            # 人關注的事件，只是不再鎖死全專案——只在首次落標記時寫一次（同一 stage 重複觸發不重寫
+            # 覆蓋同一份報告）。
             abort_report_path = None
-            try:
-                abort_report_path = save_abort_report(
-                    self.state,
-                    reason=reason,
-                    category="auto-compact-rate-limit",
-                    extra_context={
-                        "count_per_stage": projected,
-                        "max_per_stage": max_per_stage,
-                        "stage_key": stage_key,
-                        "cumulative_tokens": cumulative_tokens,
-                        "ratio": ratio,
-                        "suggestions": "文件過大需拆分 / 引用策略錯 / 考慮手動深度 compaction",
-                    },
-                )
-            except Exception:  # noqa: BLE001 — abort report is best-effort
-                abort_report_path = None
+            if first_mark:
+                try:
+                    abort_report_path = save_abort_report(
+                        self.state,
+                        reason=reason,
+                        category="auto-compact-rate-limit",
+                        extra_context={
+                            "count_per_stage": projected,
+                            "max_per_stage": max_per_stage,
+                            "stage_key": stage_key,
+                            "cumulative_tokens": cumulative_tokens,
+                            "ratio": ratio,
+                            "session_id": session_id,
+                            "suggestions": "文件過大需拆分 / 引用策略錯 / 考慮手動深度 compaction",
+                        },
+                    )
+                except Exception:  # noqa: BLE001 — abort report is best-effort
+                    abort_report_path = None
             return {
                 "already_pending": False,
-                "escalated": True,
+                "escalated": False,
+                "cap_exceeded": True,
+                "noop": True,
                 "reason": reason,
                 "count_per_stage": auto.get("count_per_stage", 0),
                 "max_per_stage": max_per_stage,
@@ -802,6 +854,10 @@ class FSMRuntime:
             )
         if observed_effective:
             auto["count_per_stage"] = 0
+            # 複審 R-D13（DEF-200-275 第五輪）：一次有效壓縮既然證明「該 stage 沒卡住」（count_per_
+            # stage 歸零），殘留的 cap_exceeded 標記（若有）也必須一併清掉——否則下一次同 stage
+            # 命中 cap 時 first_mark 判準會誤讀成「已存在同 stage marker」而不重寫/不補 abort_report。
+            auto.pop("cap_exceeded", None)
             reason += "；觀測到有效壓縮（真實 usage 回落 <85%），per-stage 計數歸零"
         import datetime as _dt
         auto["completed_at"] = _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")

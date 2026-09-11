@@ -224,7 +224,20 @@ def main() -> int:
                     "window": window, "window_source": source,
                     "compact_boundaries": m.compact_boundaries,
                 })
-                if result.get("noop"):
+                if result.get("cap_exceeded"):
+                    # D13（DEF-200-275 第五輪；同 pre hook 語意）：per-stage cap 超限不再進
+                    # project-level ESCALATION，改為 session 級一次性標記——PreToolUse 側才會真的
+                    # deny 非 compact 工具；這裡（PostToolUse）只出聲，不重複判定邏輯。cap_exceeded
+                    # 也帶 noop=True，必須先於下面的泛用 [NOOP] 分支檢查，否則會被那支分支悄悄
+                    # 蓋掉（同 pre hook 的排序理由）。
+                    stage_key = result.get("stage_key", "?")
+                    n = result.get("max_per_stage", "?")
+                    msgs.append(
+                        f"[SDD-CTX][AUTO-COMPACT][CAP] ratio {ratio:.0%}（{label}）— 本 session 於"
+                        f" stage '{stage_key}' 已 {n} 次觸發 auto-compact 未見有效壓縮；PreToolUse"
+                        "將對本 session 拒絕非 compact 工具（不寫 ESCALATION、不影響其他視窗）。"
+                    )
+                elif result.get("noop"):
                     # ARCH-06／SD-06：FSM 在 RELEASE 等不可 compact 狀態 ⇒ trigger 是 no-op，
                     # 不得再說「已進 PENDING／回落即恢復」。
                     msgs.append(
@@ -232,7 +245,8 @@ def main() -> int:
                         f"{result.get('reason', 'auto_compact suppressed')}；FSM 未進 PENDING，請手動 /compact。"
                     )
                 elif result.get("escalated"):
-                    # ACT-026: auto_compact 被拒（per-stage 上限超過）
+                    # 防禦性保留：見 context_ledger_pre.py 同名註解，per-stage cap 已改走
+                    # cap_exceeded 分支；理論上不再可達，保留給未來新增的 escalated 路徑。
                     reason = result.get("reason", "auto-compact suppressed")
                     msgs.append(
                         f"[SDD-CTX][AUTO-COMPACT][ESCALATION] ratio {ratio:.0%}（{label}）— {reason}。"

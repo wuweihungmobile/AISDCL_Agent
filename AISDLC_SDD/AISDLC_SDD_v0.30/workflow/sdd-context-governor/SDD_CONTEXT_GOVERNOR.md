@@ -61,11 +61,11 @@ context_budget:
 
     hard_stop:
       at: 95%
-      status: "🔴 緊急停止"
+      status: "🔴 session 級拒絕（不進 ESCALATION）"
       action:
-        - "立即暫停所有工作"
+        - "拒絕本 session 非 compact 工具呼叫（DEF-200-275 第四／五輪：session 級，不寫入專案級 ESCALATION）"
         - "產出 Context Snapshot（見下方格式）"
-        - "進入 ESCALATION（見 SDD_ESCALATION_PROTOCOL.md）"
+        - "真實逐字稿 usage 回落 < 90%（或 /compact 完成）即自動解除；ESCALATION 僅保留供人工／結構性升級（見 SDD_ESCALATION_PROTOCOL.md）"
 ```
 
 ### 閾值遷移對照
@@ -75,7 +75,7 @@ context_budget:
 | 70% | warn（不變） | ✅ |
 | 85% | warn + 建議執行 /stage-compaction（不變） | ✅ |
 | **90%**（新增） | **自動 Snapshot + 強制 Auto-Compact + 成功後繼續** | ✅ 同 session 或下次 session |
-| 95% | TOKEN_BUDGET_CRITICAL → ESCALATION（不變，作為最後防線） | 🟡 需人工介入 |
+| 95% | 改為 session 級拒絕非 compact 工具（不再自動進 TOKEN_BUDGET_CRITICAL／ESCALATION；DEF-200-275 第四／五輪） | ✅ 真實 usage 回落 < 90% 或 /compact 完成即自動解除 |
 
 ---
 
@@ -292,5 +292,5 @@ incremental_review:
 ## 🔗 相關文件
 
 - [SDD_FSM_ENGINE.md](../sdd-fsm-engine/SDD_FSM_ENGINE.md) — SPEC_FROZEN 觸發 Compaction
-- [SDD_ESCALATION_PROTOCOL.md](../sdd-escalation/SDD_ESCALATION_PROTOCOL.md) — 95% 時進入 ESCALATION
+- [SDD_ESCALATION_PROTOCOL.md](../sdd-escalation/SDD_ESCALATION_PROTOCOL.md) — ESCALATION 僅保留供人工／結構性升級（95% 現改為 session 級拒絕，見上方〈預算閾值定義〉；DEF-200-275 第四／五輪）
 - [stage-compaction SKILL](../../.claude/skills/stage-compaction/SKILL.md) — Compaction 執行 Skill

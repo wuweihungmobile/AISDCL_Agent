@@ -35,6 +35,26 @@ hook 的 gating 分子改讀逐字稿 API usage（`context_window.scan_transcrip
   會互相搬走對方半寫的檔 ⇒ 活帳本出現半截 `t: null` 行、後續 hook 全數 crash → fail-open。
   修法＝tmp 一律 pid 專屬（`.part.<pid>`）、merge 也進 advisory lock、`yaml` 解析失敗時把
   損毀檔 rotate 成 `.corrupt-<ts>.yaml` 重開新檔（保留現場、不吞例外）。
+
+DEF-200-275 第五輪（2026-09-11，Dev-C 效能修復）— 根因 C（見 profiling）：帳本沒有上限，
+`append_ledger_entry`／`merge_conversation_overhead_into_ledger` 各自對今日整份帳本做一次完整
+read-modify-write；成本幾乎全部落在 PyYAML **純 Python** `safe_load`/`safe_dump` 解析/序列化
+`entries` 列表（實測 400KB／1500 筆：safe_load 0.41s＋safe_dump 0.24s；cProfile 顯示 >95% 時間在
+`yaml/scanner.py`／`yaml/composer.py`／`yaml/serializer.py` 的純 Python 逐 token 掃描），隨帳本增長
+線性變慢、單次呼叫終究撞上 `sdd_hook_router.py` 的 8s child timeout（現場已多次收到
+`[SDD-ROUTER][WARN] context_ledger_post.py 逾 8.0s 未回應`）。鎖等待與 merge 邏輯本身耗時可忽略
+（同規模量測 <1ms）。修法＝改用 libyaml 綁定的 `yaml.CSafeLoader`/`yaml.CSafeDumper`（`_yaml_loader`/
+`_yaml_dumper`；同規模量測 CSafeLoader 0.06s／CSafeDumper 0.05s，約 6~7 倍加速，1500 筆規模下單次
+`append_ledger_entry` 從 0.66s 降到 <0.15s）——純粹換一個更快的實作，帳本檔案格式、鍵結構、
+`entries`／`conversation_overhead` 語意完全不變（C dumper 輸出與純 Python dumper 逐位元組相同，
+純 Python `yaml.safe_load` 仍可讀回 C dumper 寫出的檔案），對 `fsm_runtime.py:_reset_today_ledger`
+這類直接呼叫 `_load_ledger_doc`/`_atomic_write_yaml` 的既有讀寫者零侵入。libyaml 不可用時
+`getattr(yaml, "CSafeLoader", yaml.SafeLoader)` 退化回純 Python，正確性優先於速度。
+
+同輪也清掉 router 砍 child 留下的孤兒 `.part.<pid>` 暫存檔（現場實測同目錄殘留 7 個、0～530KB
+不等）：`cleanup_orphan_part_files()` 在 `append_ledger_entry` 啟動時清掉 mtime > 10 分鐘**且**來源
+pid 已不存在（`os.kill(pid, 0)` 判活；Windows 語意不同，改用 `psutil.pid_exists()` 若可用、否則只依
+mtime 保守跳過）的殘檔；仍在寫入中或剛砍不久的檔案一律留著，避免誤刪。
 """
 from __future__ import annotations
 
@@ -43,6 +63,7 @@ import datetime as _dt
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Any, Dict, Iterator, Optional
 
@@ -52,6 +73,21 @@ _CAT_N_PREFIX_CHARS = 8  # "NNNN\t" padded + margin
 # Empirical midpoint of the 100~500-token band documented in §E-05.
 _CONVERSATION_OVERHEAD_PER_MESSAGE = 300
 _DEFAULT_MERGE_EVERY = 10
+_ORPHAN_PART_AGE_SEC = 600.0  # 10 分鐘（見〈孤兒 .part 清理〉docstring）
+
+
+def _yaml_loader():
+    """libyaml 綁定的 C loader（約 6~7 倍於純 Python）；不可用時退化回 `SafeLoader`（正確性優先）。"""
+    import yaml  # type: ignore
+
+    return getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+
+
+def _yaml_dumper():
+    """同上，dumper 版本。"""
+    import yaml  # type: ignore
+
+    return getattr(yaml, "CSafeDumper", yaml.SafeDumper)
 
 
 def estimate_read_tokens(file_path: Optional[str]) -> int:
@@ -126,13 +162,14 @@ def ledger_lock(ledger_dir: Path, *, timeout: float = _LOCK_TIMEOUT_SEC) -> Iter
 
 def _atomic_write_yaml(path: Path, doc: Dict[str, Any]) -> None:
     """pid 專屬暫存檔 + os.replace（A-2：並行 hook 共用同名 .tmp 會互相搬走對方半寫的檔）。
-    刻意不用 `.tmp` 後綴：arch_fitness FF-3 把 `build/reports/fsm/*.tmp` 判為孤兒。"""
+    刻意不用 `.tmp` 後綴：arch_fitness FF-3 把 `build/reports/fsm/*.tmp` 判為孤兒。
+    第五輪：dumper 改用 `_yaml_dumper()`（libyaml C 綁定，格式與純 Python `safe_dump` 逐位元組相同）。"""
     import yaml  # type: ignore
 
     tmp = path.with_name(path.name + f".part.{os.getpid()}")
     try:
         with tmp.open("w", encoding="utf-8") as f:
-            yaml.safe_dump(doc, f, allow_unicode=True, sort_keys=False)
+            yaml.dump(doc, f, Dumper=_yaml_dumper(), allow_unicode=True, sort_keys=False)
         os.replace(tmp, path)
     finally:
         try:
@@ -152,7 +189,7 @@ def _load_ledger_doc(path: Path) -> Dict[str, Any]:
         return {}
     try:
         with path.open("r", encoding="utf-8") as f:
-            doc = yaml.safe_load(f) or {}
+            doc = yaml.load(f, Loader=_yaml_loader()) or {}
         if isinstance(doc, dict):
             return doc
         reason = f"top-level is {type(doc).__name__}, not mapping"
@@ -195,7 +232,7 @@ def _write_sidecar(path: Path, entry: Dict[str, Any]) -> None:
         import yaml  # type: ignore
 
         with _sidecar_path(path).open("a", encoding="utf-8") as f:
-            yaml.safe_dump([entry], f, allow_unicode=True, sort_keys=False)
+            yaml.dump([entry], f, Dumper=_yaml_dumper(), allow_unicode=True, sort_keys=False)
     except Exception:  # noqa: BLE001
         pass
 
@@ -203,6 +240,72 @@ def _write_sidecar(path: Path, entry: Dict[str, Any]) -> None:
 def write_sidecar(ledger_dir: Path, entry: Dict[str, Any]) -> None:
     """hook 用的公開入口：`ledger_lock` 逾時後直接落 sidecar（不取鎖）。"""
     _write_sidecar(_ledger_path(ledger_dir), entry)
+
+
+def _is_pid_alive(pid: int) -> bool:
+    """判斷 `.part.<pid>` 的來源行程是否還活著。
+
+    POSIX：`os.kill(pid, 0)` 不送訊號只查存在性——`ProcessLookupError`＝不存在（可清），
+    `PermissionError`＝存在但無權限送訊號（仍算活著，不清，例如不同使用者的行程）。
+    Windows：`os.kill` 語意不同（鐵律三），改用 `psutil.pid_exists()` 若可用；
+    `psutil` 不可用時保守回傳 True（只靠呼叫端的 mtime 門檻兜底，寧可少清也不誤刪還在寫的檔）。
+    """
+    if sys.platform == "win32":
+        try:
+            import psutil  # type: ignore
+        except Exception:  # noqa: BLE001
+            return True
+        try:
+            return bool(psutil.pid_exists(pid))
+        except Exception:  # noqa: BLE001
+            return True
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return True
+    return True
+
+
+def cleanup_orphan_part_files(ledger_dir: Path) -> int:
+    """清掉本目錄下 mtime > 10 分鐘**且**來源 pid 已不存在的孤兒 `CONTEXT-LEDGER-*.yaml.part.<pid>`
+    暫存檔（`sdd_hook_router.py` 砍 child 於 `_atomic_write_yaml` 寫到一半時留下）。回傳清掉的數量。
+
+    判準刻意保守（兩個條件都要成立才清）：mtime 太新可能仍在寫入中；pid 還活著也可能仍在寫入中——
+    只有「夠舊」+「來源行程已死」同時成立才能確定是孤兒。best-effort：任何錯誤吞掉、永不 raise
+    （帳本零決策權，清理失敗不得影響正常寫入路徑）。
+    """
+    removed = 0
+    try:
+        if not ledger_dir.exists():
+            return 0
+        now = time.time()
+        for p in ledger_dir.glob("CONTEXT-LEDGER-*.yaml.part.*"):
+            try:
+                pid = int(p.name.rsplit(".part.", 1)[-1])
+            except ValueError:
+                continue
+            try:
+                age = now - p.stat().st_mtime
+            except OSError:
+                continue
+            if age <= _ORPHAN_PART_AGE_SEC:
+                continue
+            if _is_pid_alive(pid):
+                continue
+            try:
+                p.unlink()
+                removed += 1
+            except FileNotFoundError:
+                pass
+            except OSError:
+                pass
+    except Exception:  # noqa: BLE001
+        pass
+    return removed
 
 
 def _read_modify_write(path: Path, entry: Dict[str, Any]) -> int:
@@ -231,11 +334,18 @@ def append_ledger_entry(ledger_dir: Path, entry: Dict[str, Any], *, lock_held: b
     逾時 ⇒ 降級寫 `.append` sidecar（下次 merge 折回主檔並持久化，見 `_merge_locked` G3）。
     `lock_held=True`＝呼叫端已持有 `ledger_lock()`，不重複取鎖。
     G4：帳本讀不到（OSError）⇒ 回 0、不寫、不 raise——讀不到 ≠ 空帳本，不得以空 doc 覆寫。
+
+    寫入端啟動時順手清掉孤兒 `.part.<pid>`（見 `cleanup_orphan_part_files`）；best-effort，
+    清理失敗不影響本次 append。
     """
     try:
         import yaml  # type: ignore  # noqa: F401
     except Exception:  # noqa: BLE001
         return 0
+    try:
+        cleanup_orphan_part_files(ledger_dir)
+    except Exception:  # noqa: BLE001
+        pass
     path = _ledger_path(ledger_dir)
     try:
         if lock_held:
@@ -275,7 +385,7 @@ def _merge_sidecar_if_present(path: Path, doc: Dict[str, Any]) -> int:
     merged = 0
     try:
         with sidecar.open("r", encoding="utf-8") as f:
-            raw = yaml.safe_load_all(f)
+            raw = yaml.load_all(f, Loader=_yaml_loader())
             for chunk in raw:
                 if not chunk:
                     continue
@@ -455,7 +565,7 @@ def record_calibration_sample(
     doc: Dict[str, Any] = {}
     if path.exists():
         with path.open("r", encoding="utf-8") as f:
-            doc = yaml.safe_load(f) or {}
+            doc = yaml.load(f, Loader=_yaml_loader()) or {}
     samples = doc.get("samples") or []
     delta = observed - estimated
     drift_pct = (abs(delta) / observed * 100) if observed > 0 else 0.0

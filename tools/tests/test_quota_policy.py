@@ -2307,15 +2307,35 @@ class TestR95HaltArmsOffTheEarliestResettableAxis(unittest.TestCase):
 
     def test_the_halt_actions_and_message_follow_the_choice(self) -> None:
         """接線＋訊息面：事故形狀下 waker 真的被按下去（修前 branch=escalate ⇒ waker
-        一次都不會被叫），且已武裝那一句印**被選中的** reset 而非 binding 的 None。"""
-        d = Q.decide(state(("session", 96, None), ("five_hour", 96, 188)), NOW, P)
-        woken: list[str] = []
-        act = QG.quota_halt_actions({"transcript_path": ""}, d, NOW, plan_writer=lambda t: "",
-                                    waker=lambda t, p: woken.append(p) or {"armed": True})
+        一次都不會被叫），且已武裝那一句印**被選中的** reset 而非 binding 的 None。
+
+        DEF-200-281／RC-1：`quota_halt_actions()` 有落盤副作用（`write_halt_marker()`
+        寫 `endurance_env.trace_dir()`），且 `payload` 沒帶 `transcript_path` 時會走
+        `resolve_halt_transcript()` 的 env-derived 分支，吃 `CLAUDE_CODE_SESSION_ID`／
+        `CLAUDE_PROJECT_DIR`。本測試此前未隔離這三者：在任何真實 Claude Code session
+        裡跑 pytest 都會用本檔頂端「刻意固定、不隨掛鐘漂移」的 `NOW`（一個月前的時刻）
+        把 halt 標記寫進**真實**session 的 `~/.autosdd/traces/halt_<真實 sid>.json`
+        ——本場鑑識實測三份真實現場標記逐位元組相同，根因正是本測試（見
+        `tools/tests/test_wake_chain_halt_r278.py::HaltMarkerSelfCheckTest` 的
+        `test_frozen_now_a_month_stale_is_rejected_and_not_written` 逐位元組重現）。
+        隔離手法同既有先例 `tools/tests/test_context_budget_guard.py::_isolate_trace_dir`
+        （DEF-200-239 同型止血）。"""
+        tmp = Path(tempfile.mkdtemp(prefix="def281_r95_halt_"))
+        self.addCleanup(lambda: shutil.rmtree(tmp, ignore_errors=True))
+        with mock.patch.dict(os.environ, {EE.TRACE_DIR_ENV: str(tmp)}, clear=False):
+            os.environ.pop("CLAUDE_CODE_SESSION_ID", None)  # patch.dict 出區塊會整份還原
+            d = Q.decide(state(("session", 96, None), ("five_hour", 96, 188)), NOW, P)
+            woken: list[str] = []
+            act = QG.quota_halt_actions(
+                {"transcript_path": ""}, d, NOW, plan_writer=lambda t: "",
+                waker=lambda t, p: woken.append(p) or {"armed": True})
         self.assertEqual((act["branch"], act["armed"], len(woken)),
                          (QM.QUOTA_BRANCH_ARM, True, 1))
         self.assertIn(str(at(188)), QM.quota_halt_message(d, act),
                       "halt 訊息還在印 binding 軸的期程（None）")
+        self.assertFalse(list(tmp.glob("halt_*.json")),
+                         "本測試的 NOW 凍結在一個月前 ⇒ F-1 自檢必須拒寫，"
+                         "任何落盤都是 DEF-200-281 復發")
 
 
 # ═══════════════════════════════════════════════════════════════════════════

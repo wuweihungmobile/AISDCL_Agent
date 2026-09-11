@@ -492,6 +492,9 @@ _GOVERNANCE_DOCS = (
     # 與先紅後綠實測值 ⇒ 指針稽核與體積守門兩項義務皆成立，即刻登記（上輪 R143 漏登記 round-label-ok
     # 讓 15 支測試靜默轉紅的教訓，本輪不重演）。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_DEF200278_Halt_Handoff_Evidence.md",
+    # R144 收尾：DEF-200-275 第五輪＋DEF-200-281／282 護欄層對帳。即刻登記。 round-label-ok
+    # （crossref 早退實測：未登記即「涵蓋面與磁碟脫節」一筆＋12 道檢查未執行。）
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R144_Scan_Findings.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/{CrossPlatform,Quota}_*.md`。這**不是**把具名

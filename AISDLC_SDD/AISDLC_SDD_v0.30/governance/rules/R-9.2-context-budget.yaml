@@ -16,9 +16,12 @@ test_ref: tools/fsm_runtime/tests/test_context_ledger_pre_hook.py
 enforcement_mechanism: escalation
 failure_mode: >
   per-stage auto_compact 超限（同一 stage 內 auto_compact 次數 > max_per_stage）→ 拒絕再次
-  compact、record_escalation 進 ESCALATION。此即 R-9.2 守望的失敗模式——context/token 預算
-  治理已無法再壓縮上下文時真實發生；catch 側結構化歸因到 R-9.2（W-19 catch 契約三要件之一；
-  對應 FSMRuntime.trigger_auto_compact 的 per-stage cap escalate 分支，無歧義映射非時序猜測）。
+  compact；改為落 auto_compact_state.cap_exceeded 一次性標記、對本 session 拒絕非 compact 工具
+  （DEF-200-275 第五輪 D13：session 級，不再 record_escalation／不進 project-level ESCALATION——
+  context window 是 session 的屬性，不應鎖死其他視窗）。此即 R-9.2 守望的失敗模式——context/token
+  預算治理已無法再壓縮上下文時真實發生；catch 側結構化歸因到 R-9.2（W-19 catch 契約三要件之一；
+  對應 FSMRuntime.trigger_auto_compact 的 per-stage cap 分支，無歧義映射非時序猜測——catch 只認
+  規則自描述的失敗模式是否真實發生，不要求進 ESCALATION 狀態）。
 scaffold_roi:
   fire_count: 0
   catch_count: 0

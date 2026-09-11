@@ -34,7 +34,7 @@ Claude Code Hook 層的**強制攔截**；Phase E 在此之上依序加入**精�
 | IMPLEMENTATION sub-FSM | [workflow/sdd-fsm-engine/FSM_IMPLEMENTATION_SUB.md](workflow/sdd-fsm-engine/FSM_IMPLEMENTATION_SUB.md) | 展開 IMPLEMENTATION 為子狀態機 | D |
 | **M1 — FSM 雙源一致性測試** | [tools/fsm_runtime/tests/test_md_python_sync.py](tools/fsm_runtime/tests/test_md_python_sync.py) | 每次 CI 比對 SDD_FSM_ENGINE.md vs transition_rules._HAPPY_PATH | E M1 |
 | **M1 — HUMAN_PENDING Timeout Checker** | [tools/fsm_runtime/timeout_checker.py](tools/fsm_runtime/timeout_checker.py) | 72h REMINDER / 168h 自動 ESCALATION | E M1 |
-| **M1 — AUTO_COMPACT 單 Stage 限流** | [tools/fsm_runtime/fsm_runtime.py](tools/fsm_runtime/fsm_runtime.py) | 同一 stage 超 3 次 compact 即 ESCALATION | E M1 |
+| **M1 — AUTO_COMPACT 單 Stage 限流** | [tools/fsm_runtime/fsm_runtime.py](tools/fsm_runtime/fsm_runtime.py) | 同一 stage 超 3 次 compact 即 session 級拒絕非 compact 工具（`cap_exceeded`，不再寫入專案級 ESCALATION；DEF-200-275 第五輪 D13） | E M1 |
 | **M2 — Decision Trace** | [tools/fsm_runtime/state_loader.py](tools/fsm_runtime/state_loader.py) | FSMRuntime.transition 必帶 reason/spec_refs/trigger；active 50 + flushed FIFO | E M2 |
 | **M2 — Conversation Ledger** | [tools/fsm_runtime/conversation_ledger.py](tools/fsm_runtime/conversation_ledger.py) | 唯一 token 估算入口；Read 行號 overhead、Task subagent overhead、rolling drift | E M2 |
 | **M2 — File Lock** | [tools/fsm_runtime/file_lock.py](tools/fsm_runtime/file_lock.py) | CONTEXT-LEDGER YAML 互斥（sentinel + 30s stale + 5s timeout） | E M2 |

@@ -118,14 +118,16 @@ def test_r97_catch_flag_off_zero_regression(tmp_path, monkeypatch, _w37_rules):
 # ---------- 非重疊守門（DEF-18-001 核心意圖）：9.7.3 路徑不歸因 R-9.7 ----------
 
 def test_r97_not_attributed_on_auto_compact_overflow(tmp_path, monkeypatch, _w37_rules):
-    """flag ON：走 9.7.3（AUTO_COMPACT per-stage 超限）escalate 路徑 → 只 R-9.2 catch+1，
-    R-9.7 catch 恆 0。鎖死「R-9.7 failure_mode 僅涵蓋 9.7.2、不搭便車 trigger_auto_compact」
-    的無歧義映射意圖（DEF-18-001 寧缺勿濫，防雙重歸因污染 ROI）。"""
+    """flag ON：走 9.7.3（AUTO_COMPACT per-stage 超限，D13 起為 session 級 cap_exceeded、不再
+    project-level ESCALATION）路徑 → 只 R-9.2 catch+1，R-9.7 catch 恆 0。鎖死「R-9.7 failure_mode
+    僅涵蓋 9.7.2、不搭便車 trigger_auto_compact」的無歧義映射意圖（DEF-18-001 寧缺勿濫，防雙重歸因
+    污染 ROI）——D13 只改變是否轉態/寫 ESCALATION，不改變這條非重疊守門的歸因鎖。"""
     monkeypatch.setenv("SDD_ENABLE_RULE_CATCH_TELEMETRY", "1")
     rt = _rt(tmp_path, "INIT")
     res = _drive_auto_compact_overflow(rt)
-    assert res.get("escalated") is True, "per-stage 超限必 escalate（既有不變式）"
-    assert rt.state.current == "ESCALATION"
+    assert res.get("escalated") is False, "D13：cap 超限不再 escalated=True"
+    assert res.get("cap_exceeded") is True
+    assert rt.state.current == "IMPLEMENTATION", "D13：cap 超限不得轉態（_drive_auto_compact_overflow 已把 state 設成 IMPLEMENTATION）"
     assert _catch_count(_w37_rules, "R-9.2") == 1, "9.7.3 路徑歸 R-9.2（trigger_auto_compact）"
     assert _catch_count(_w37_rules, "R-9.7") == 0, "R-9.7 不得在 auto_compact 路徑被歸因（非重疊）"
 

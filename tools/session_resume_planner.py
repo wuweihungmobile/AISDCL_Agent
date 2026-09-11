@@ -420,8 +420,14 @@ def relay_problems(state: object) -> list[str]:
     # 綠——但它醒在錯的時間。「憑證存在、但憑證不回答那個問題」是最難看見的一種假綠。
     # `operator` 是哨兵那一路：它的觸發時刻是巡邏間隔（人選的常數），**不是**在宣稱
     # 任何 reset 時刻，所以它不在「猜 reset」這個禁令的射程內。
+    # DEF-200-281／F-2 端到端演練揪出：`halt-marker` 缺席時，`halt_verdict()` 的
+    # `arm_reset` 分支寫回 `reset_source="halt-marker"`（DEF-200-278 INV-H2）的狀態塊在
+    # 下一輪 tick 會被本判準判成「不是觀測值」⇒ 觸發不必要的 `_heal_relay()` 自癒——而
+    # 自癒是**用當下 argv 重建 `_base_state()`**，會把操作者原本設定的 `allow_resume`
+    # 靜默重置回預設值（見 `_heal_relay()`/`_base_state()`）。halt 標記的 `reset_at` 本身
+    # 就是觀測值（`quota_gate.halt_marker_or_rejection()` 寫入前已驗證），故補上白名單。
     if live and state.get("reset_source") not in (
-            "transcript-verbatim", "probe-verbatim", "operator"):
+            "transcript-verbatim", "probe-verbatim", "operator", "halt-marker"):
         problems.append(f"reset_source={state.get('reset_source')!r} 不是觀測值 ⇒ "
                         "不准用來武裝（猜出來的時刻會讓它醒在錯的時間）")
     return problems

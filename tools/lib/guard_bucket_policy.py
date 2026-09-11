@@ -318,8 +318,26 @@ _FROZEN_SHRINK_ONLY_BUCKET_LINES: dict[str, int] = {
     # 缺口的 `_zzz_*` 排除修法遍及 `tools/tests/` 十支檔，注入的判準本體行遠多於
     # +2（見 `CrossPlatform_R137_Scan_Findings.md`），絕大多數已在落地過程中同步
     # 收緊為單行 filter／inline 註解以壓低散文佔比，殘留 +2 為無法再壓縮的最小值。
+    # R144／DEF-200-281（喚醒鏈 halt 標記寫入自檢＋test_quota_policy.py 污染止血）： round-label-ok
+    # guard_self 3261→3415（+154）——新增 tools/tests/test_wake_chain_halt_r278.py 的
+    # `HaltMarkerSelfCheckTest`（F-1 自檢：凍結 `now`／過去 `reset_at` 拒寫）＋一支整合鎖
+    # （halt-marker reset_source 白名單）共 +100，`test_quota_policy.py` 的
+    # `TestR95HaltArmsOffTheEarliestResettableAxis::test_the_halt_actions_and_message_
+    # follow_the_choice` 補隔離（DEF-200-239 同型止血：`AUTOSDD_TRACE_DIR`／
+    # `CLAUDE_CODE_SESSION_ID` 隔離註解）+20。誠實劃界：本列由單一喚醒鏈鑑識代理在掌舵者
+    # 明確授權下重釘（任務書逐字：棘輪表紅了照訊息重釘，輪號沿用 R144），**不是**先例 round-label-ok
+    # 各列所述的正式四方複審——若本 repo 的分桶棘輪政策要求 shrink-only 桶成長必經四方複審
+    # 才能重釘，本列尚未滿足該前提，留待收尾窗口／掌舵者事後補審或推翻。
+    # 🔴 R144 同輪追加：guard_self 3415→3416（+1）——上一列重釘後，本輪對 round-label-ok
+    # `test_wake_chain_halt_r278.py` 的 E501 折行修復多寫一行造成的漂移。
+    # R144 第二輪／DEF-200-281（複審點名的 RC-3／naive-now 修復包）：guard_self round-label-ok
+    # 3416→3431（+15）——新增 `HaltLatchIsSessionScopedTest`（halt 閂鎖鍵補 sid 的兩支
+    # 回歸鎖）＋ `HaltMarkerSelfCheckTest::test_naive_now_is_rejected_not_crashed`
+    # （naive `now` 拒寫而非拋 TypeError）。誠實劃界：同上一列體例，本列由同一單一喚醒鏈
+    # 修復代理在掌舵者明確授權下重釘（任務書逐字：棘輪表紅了照訊息重釘，輪號沿用
+    # R144），**不是**正式四方複審，留待收尾窗口／掌舵者事後補審或推翻。 round-label-ok
     "prose": 4182,
-    "guard_self": 3261,
+    "guard_self": 3431,
 }
 
 #: 棘輪吃的粒度與估計量。寫成常數而不是散文，是為了讓 probe 與棘輪不可能各讀一種

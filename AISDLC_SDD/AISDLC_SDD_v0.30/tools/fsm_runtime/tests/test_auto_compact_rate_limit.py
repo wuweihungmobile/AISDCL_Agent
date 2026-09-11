@@ -42,15 +42,111 @@ class AutoCompactRateLimitTests(unittest.TestCase):
         auto = rt.state.root["auto_compact_state"]
         self.assertEqual(auto["count_per_stage"], MAX_AUTO_COMPACT_PER_STAGE)
 
-    def test_over_limit_escalates(self) -> None:
+    def test_over_limit_marks_cap_exceeded_not_escalated(self) -> None:
+        """D13（DEF-200-275 第五輪）：超限不再 escalated=True／轉 project-level ESCALATION，
+        改為 session 級 `cap_exceeded` 一次性標記，state 維持原狀——改名自
+        test_over_limit_escalates。"""
         rt = self._bootstrap()
         for _ in range(MAX_AUTO_COMPACT_PER_STAGE):
             self._compact_cycle(rt)
-        # The N+1 attempt must be rejected
+        # The N+1 attempt must be rejected（不再進 ESCALATION，只落 session 級標記）
         result = rt.trigger_auto_compact(cumulative_tokens=180_000, ratio=0.91)
-        self.assertTrue(result.get("escalated"))
-        self.assertEqual(rt.state.current, "ESCALATION")
+        self.assertFalse(result.get("escalated"))
+        self.assertTrue(result.get("cap_exceeded"))
+        self.assertEqual(rt.state.current, "IMPLEMENTATION")
         self.assertIn("auto_compact exceeded", result["reason"])
+        self.assertEqual(rt.state.root.get("escalation_history") or [], [])
+        marker = rt.state.root["auto_compact_state"]["cap_exceeded"]
+        self.assertEqual(marker["stage_key"], "initial")
+
+    def test_cap_exceeded_marker_and_abort_report_are_per_stage_not_global(self) -> None:
+        """複審 R-D13（DEF-200-275 第五輪）：`first_mark` 原是「有無 marker」的全域一次性旗標、
+        不分 stage——stage-A 撞 cap 後，stage-B（全新 stage／全新 session）再撞 cap 時會被 stage-A
+        的舊 marker 卡死：`abort_report` 回 None、`cap_exceeded` marker 仍是 stage-A/舊 session 的
+        值，與現實不符。改為「無 marker，或 marker 的 stage_key 已不是目前 stage」才算首次——第二
+        個 stage 自己的 cap 事件必須有獨立的 abort_report 與更新後的 marker。"""
+        import datetime as _dt
+        from tools.fsm_runtime import snapshot as snap_mod
+
+        tmp_out = Path(self._tmp.name) / "abort"
+        original_dir = snap_mod.SNAPSHOT_DIR
+        snap_mod.SNAPSHOT_DIR = tmp_out
+        try:
+            rt = self._bootstrap()
+            rt.state.root["frozen_stages"] = [{"stage": "stage-A"}]
+            for _ in range(MAX_AUTO_COMPACT_PER_STAGE):
+                self._compact_cycle(rt)
+            res1 = rt.trigger_auto_compact(
+                cumulative_tokens=180_000, ratio=0.91, details={"session_id": "sess-A"})
+            self.assertTrue(res1.get("cap_exceeded"))
+            self.assertIsNotNone(res1.get("abort_report"))
+            marker1 = dict(rt.state.root["auto_compact_state"]["cap_exceeded"])
+            self.assertEqual(marker1["stage_key"], "stage-A")
+            self.assertEqual(marker1["session_id"], "sess-A")
+
+            # 換 stage：current_stage_key() 讀 frozen_stages 最後一筆。stage 換過會讓
+            # count_per_stage 歸零，所以要重新打滿 MAX_AUTO_COMPACT_PER_STAGE 次才會在
+            # stage-B 命中 cap（模擬「新 stage 也連續 N 次 compact 都沒見效」）。
+            rt.state.root["frozen_stages"] = [{"stage": "stage-A"}, {"stage": "stage-B"}]
+            for _ in range(MAX_AUTO_COMPACT_PER_STAGE):
+                rt.trigger_auto_compact(cumulative_tokens=180_000, ratio=0.91,
+                                        details={"session_id": "sess-B"})
+                rt.complete_auto_compact(reset_ledger=False, observed_effective=False)
+            res2 = rt.trigger_auto_compact(
+                cumulative_tokens=180_000, ratio=0.91, details={"session_id": "sess-B"})
+            self.assertTrue(res2.get("cap_exceeded"))
+            self.assertIsNotNone(
+                res2.get("abort_report"),
+                msg="stage-B 自己的 cap 事件必須有獨立的 abort_report，不得被 stage-A 的舊"
+                    "marker 卡死（R-D13）",
+            )
+            marker2 = dict(rt.state.root["auto_compact_state"]["cap_exceeded"])
+            self.assertEqual(marker2["stage_key"], "stage-B")
+            self.assertEqual(
+                marker2["session_id"], "sess-B",
+                msg="marker 必須更新為第二個 stage 事件，不得殘留 stage-A/sess-A 的舊值（R-D13）",
+            )
+            # 兩次事件的 abort_report 應各自落盤且不同檔（同一 category 但不同 timestamp/內容
+            # 也可能同名——本測試只斷言路徑存在且可讀，不強求不同檔名）。
+            self.assertTrue(Path(res2["abort_report"]).exists())
+            today = _dt.date.today().isoformat()
+            self.assertEqual(Path(res2["abort_report"]).name,
+                             f"ABORT-{today}-auto-compact-rate-limit.md")
+        finally:
+            snap_mod.SNAPSHOT_DIR = original_dir
+
+    def test_observed_effective_clears_cap_exceeded_marker(self) -> None:
+        """複審 R-D13：`complete_auto_compact(observed_effective=True)` 既然把 `count_per_stage`
+        歸零（證明該 stage 沒卡住），殘留的 `cap_exceeded` marker 也必須一併清掉——否則下一次同
+        stage 命中 cap 時，`first_mark` 判準會誤讀成「已存在同 stage marker」而不重寫、不補
+        abort_report（與 observed_effective 想表達的『重新開始』語意矛盾）。"""
+        from tools.fsm_runtime import snapshot as snap_mod
+
+        tmp_out = Path(self._tmp.name) / "abort"
+        original_dir = snap_mod.SNAPSHOT_DIR
+        snap_mod.SNAPSHOT_DIR = tmp_out
+        try:
+            rt = self._bootstrap()
+            for _ in range(MAX_AUTO_COMPACT_PER_STAGE):
+                self._compact_cycle(rt)
+            res = rt.trigger_auto_compact(cumulative_tokens=180_000, ratio=0.91,
+                                          details={"session_id": "sess-A"})
+            self.assertTrue(res.get("cap_exceeded"))
+            self.assertIn("cap_exceeded", rt.state.root["auto_compact_state"])
+
+            # cap 超限後 state.current 仍是 IMPLEMENTATION（D13：不進 PENDING），要能呼叫
+            # complete_auto_compact 必須先讓它進 PENDING——這裡直接呼叫底層方法驗證 D4 出口
+            # 對 cap_exceeded 標記的清除語意（trigger_auto_compact 對 cap 超限本身是 no-op，
+            # 不會轉態；真正會清除 marker 的路徑是「下一次全新 compact 週期」被觀測為有效）。
+            rt.state.current = "AUTO_COMPACT_PENDING"
+            rt.state.root["auto_compact_state"]["resume_state"] = "IMPLEMENTATION"
+            rt.complete_auto_compact(reset_ledger=False, observed_effective=True)
+            self.assertNotIn(
+                "cap_exceeded", rt.state.root["auto_compact_state"],
+                msg="observed_effective=True 出口必須清掉 cap_exceeded（R-D13）",
+            )
+        finally:
+            snap_mod.SNAPSHOT_DIR = original_dir
 
     def test_stage_change_resets_counter(self) -> None:
         rt = self._bootstrap()
@@ -84,12 +180,13 @@ class AutoCompactRateLimitTests(unittest.TestCase):
     def test_trigger_in_escalation_is_noop(self) -> None:
         """P1-1 regression: once FSM is in ESCALATION, trigger_auto_compact must
         NOT re-record an escalation nor attempt a transition — it becomes a no-op.
+
+        D13（DEF-200-275 第五輪）：per-stage cap 超限不再是通往 ESCALATION 的路徑（改成 session
+        級 cap_exceeded 標記），所以這裡改用 `record_escalation` 直接把 state 推進 ESCALATION，
+        單獨測這個既有、與 cap-exceeded 分支正交的「已在 ESCALATION 就 no-op」頂端守衛。
         """
         rt = self._bootstrap()
-        # Exceed the per-stage limit to push state into ESCALATION
-        for _ in range(MAX_AUTO_COMPACT_PER_STAGE):
-            self._compact_cycle(rt)
-        rt.trigger_auto_compact(cumulative_tokens=180_000, ratio=0.91)
+        rt.state.record_escalation("manual_trigger_for_test")
         self.assertEqual(rt.state.current, "ESCALATION")
         escalations_before = len(rt.state.root.get("escalations", []))
 
@@ -104,8 +201,9 @@ class AutoCompactRateLimitTests(unittest.TestCase):
         self.assertEqual(len(rt.state.root.get("escalations", [])), escalations_before)
 
     def test_over_limit_writes_abort_report(self) -> None:
-        """QA-04: AUTO_COMPACT 超限 ESCALATION 必須產出 Abort Report
-        (CLAUDE.md Rule 9.5)。使用 monkeypatch 將 SNAPSHOT_DIR 導向 tmp 目錄。
+        """QA-04: AUTO_COMPACT 超限必須產出 Abort Report (CLAUDE.md Rule 9.5)——D13 起不再進
+        project-level ESCALATION，但「人須被通知」的精神保留：cap 超限仍寫 Abort Report。
+        使用 monkeypatch 將 SNAPSHOT_DIR 導向 tmp 目錄。
         """
         import datetime as _dt
         from tools.fsm_runtime import snapshot as snap_mod
@@ -118,10 +216,11 @@ class AutoCompactRateLimitTests(unittest.TestCase):
             rt = self._bootstrap()
             for _ in range(MAX_AUTO_COMPACT_PER_STAGE):
                 self._compact_cycle(rt)
-            # 超限觸發 ESCALATION
+            # 超限觸發 session 級 cap_exceeded 標記（D13：不再是 ESCALATION）
             result = rt.trigger_auto_compact(cumulative_tokens=180_000, ratio=0.91)
-            self.assertTrue(result.get("escalated"))
-            self.assertEqual(rt.state.current, "ESCALATION")
+            self.assertFalse(result.get("escalated"))
+            self.assertTrue(result.get("cap_exceeded"))
+            self.assertEqual(rt.state.current, "IMPLEMENTATION")
             # Abort Report 必須被建立
             self.assertIsNotNone(result.get("abort_report"))
             abort_path = Path(result["abort_report"])

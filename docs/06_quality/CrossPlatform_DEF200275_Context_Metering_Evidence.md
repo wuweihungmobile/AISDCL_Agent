@@ -646,3 +646,339 @@ $ python tools/run_root_unittests.py > /tmp/x.log 2>&1; echo rc=$? → rc=1；Ra
 
 未改 `_HAPPY_PATH`、未增刪狀態與邊（`resume_from_escalation` 走既有 `ESCALATION→RESUME_VERIFICATION→{SPEC_DRAFTING,IMPLEMENTATION,PR_REVIEW}`；
 D4 remap 走既有 `AUTO_COMPACT_PENDING→SPEC_DRAFTING`），不重跑 TLC（R-9.18 僅在改動 `_HAPPY_PATH` 時強制）。`test_tla_python_sync`／`test_md_python_sync` 全綠。
+
+## 第五輪（2026-09-11；四方複審後仍 partial ⇒ D11～D16）
+
+### 觸發（掌舵者原話逐字）
+
+第四輪 commit ea6113d push 後，掌舵者要求對「已修好」的宣稱做獨立複審：
+
+1. 「我用終端 claude 都會出現以下問題，才開新視窗，就說他被擋不能寫檔案用工具了，然後也不去查真實的數據」
+2. 「模型都不用真實的 /context 或 API 去查真實數據」
+
+並要求：「派出 Architect / SA / SD / QA 四方專家獨立審查，與目前系統現況進行比對，請確認是否有以下問題，若有請徹底解決」；「請確認以上都已經修好！」
+
+### 四方判決與收斂發現
+
+Architect／SA／SD／QA 四方（皆 Sonnet 5、唯讀、各自在隔離副本獨立重現，不互相溝通）判決一致：
+問題 1「新視窗一開就被擋」＝**partial**；問題 2「不用真實 /context 或 API 查數據」＝**partial**。
+收斂發現如下（座標見前次任務書 §3 F1～F12；下方 (a)～(h) 為四方交叉重現後的收斂結論）：
+
+- **(a) PENDING × 首擊 m=None ⇒ 首擊 Write/Task deny**（四方皆重現）。新 session 第一次 `PreToolUse` 量不到 usage
+  （逐字稿尚未寫入帶 `usage` 的 assistant 訊息），`main()` 的 D4 出口要求 `m is not None` 才會嘗試釋放 PENDING；
+  若專案 FSM-STATE 恰好停在 `AUTO_COMPACT_PENDING`，新視窗第一個非白名單工具呼叫（Write／Edit 非
+  `build/reports/`、Task／Agent）會被 `_assert_allowed_under_auto_compact` deny——這正是掌舵者原話①的機制根源。
+- **(b) per-stage cap ⇒ 專案級 ESCALATION，之後每個新視窗全擋、不自癒**（Architect／SD／QA 重現）。
+  第四輪 D3 明文保留「per-stage cap 超限仍走既有結構性升級」，但 `record_escalation()` 把 `ESCALATION`
+  寫進**跨 session 黏著**的專案級 FSM-STATE，R-9.5「不可自動退出」⇒ 任何全新視窗（含 `claude -r`、
+  subagent／Workflow 子 session）開場即被 PreToolUse 全擋，SessionStart 只印「需人工介入」、無可執行指令。
+- **(c) 指定值分母（967000）對 observed_model 零交叉，haiku 真實 125% 讀成 25.9%**
+  （四方皆以 `resolve_window` 直呼重現）。分母鏈②③④階取到操作者釘值（如 `AUTOSDD_CONTEXT_WINDOW=967000`）後
+  從未與 `observed_model` 查表值比較收斂；當實際跑的是 haiku-4-5（Models API 上限 200,000）而釘值仍是
+  967000 時，真實 125% 的用量會被算成 25.9%——量測「不用真實 API 查數據」（原話②）在跨模型／子 agent
+  情境下並未收斂。
+- **(d) Stop hook 無「被擋／水位」宣稱佐證判準**（四方）。`check_claim_provenance.py` 既有四個判準未涵蓋
+  「模型自稱『被擋了』／『水位過高』但本場零機器事件佐證」這一類無值宣稱，沒有機械物逼模型先查真實值
+  才能做這類宣稱。
+- **(e) SD-06（另案）**：並行 subagent 共用同一份專案級 FSM-STATE；`load_track_state`／`track_id` 已存在但
+  hook 未使用，屬於 (a)(b) 的同根結構性問題的另一個面向。
+- **(f) ARCH-06（另案）**：v0.30 `.claude/settings.json` 的 `PreToolUse` matcher 缺 `Agent|Workflow`，
+  代表 Agent／Workflow 工具呼叫目前**繞過** SDD FSM 護欄（與 (a)(b) 相反方向的缺口：不是「多擋」而是「該擋沒擋」）。
+- **(g) QA 親跑複驗上一場（第四輪）數字成立**：SDD 全套 `1845 passed, 8 skipped` rc=0；根層
+  `Ran 4097 tests … OK` rc=0；DEF-200-278 的 18 支測試「`ea6113d^` 紅、現版綠」。[他包回報]
+  （第四輪「已修復」宣稱在**已驗證的既有回歸範圍內**成立，partial 判決指向的是四方新發現的 (a)～(f)，
+  不是推翻第四輪既有測試。）
+- **(h) F8 定性更正**：主控前一份任務書把「近四天逐字稿中 2026-09-10T08:31:21Z 的一筆 attachment」
+  誤判為 hook deny 事件；QA 複驗後更正：該筆 attachment type 為 `edited_text_file`（磁碟異動提醒），
+  **不是** hook deny——本場近四天逐字稿內找不到真實 hook deny 事件樣本，(d) 的假紅普查因此以合成注入自證
+  （見〈實測〉D15 假紅普查一節）。
+
+### 裁決 D11～D16（總架構師定案；被否決意見括註）
+
+> 逐字抄自本輪設計定案 `design_r5.md`；括號內為被否決的替代方案與否決理由。
+
+- **D11 PENDING × 量不到 usage ⇒ 放行一次（C3 原則補齊）**。`context_ledger_pre.py`：FSM 為
+  `AUTO_COMPACT_PENDING` 且 `m is None or m.used is None` 時，`assert_tool_allowed` 拋出的 PENDING deny
+  改為放行＋notice：`[SDD-CTX][AUTO-COMPACT][UNMETERED] 本次呼叫量不到 usage（新 session 首擊／compact 後
+  尚無新 usage）⇒ 依 C3 放行一次；下一次呼叫依真實 usage 判定（<85% 自動解除 PENDING）。PENDING 由
+  session=<trigger sid> 於 <triggered_at> 觸發`。ESCALATION 類狀態不受本條影響。
+  （否決「加 session 守衛只讓觸發 session 被擋」：那回到 ARCH-03 的乒乓與根因 C 形狀；否決「把 D4 出口
+  放寬成 m=None 也出口」：量不到不能當「已回落」。）
+- **D12 PENDING deny 訊息必帶真實數字＋來源 session**。量得到而仍 deny 時，reason 必含
+  `used=… window=… 來源=…`、`PENDING 由 session=<sid> 於 <ts> 觸發`、解除規則一句（`真實 usage 回落 <85%
+  後下一次工具呼叫自動恢復 resume_state`）。抽 helper `_pending_deny_reason(rt, m, window, source)`。
+- **D13 per-stage cap 超限 ⇒ session 級，不再寫專案級 ESCALATION**（ARCH-02／SD-02／QA P0）。
+  `FSMRuntime.trigger_auto_compact` cap 分支：不呼叫 `record_escalation`、不 transition；改在
+  `auto_compact_state["cap_exceeded"]={"at","session_id","stage_key","count"}` 落一次性標記（已存在則不重寫）、
+  `save_abort_report(category="auto-compact-rate-limit")` 只在首次落標記時寫一次、`save_state`；回
+  `{"escalated": False, "cap_exceeded": True, "noop": True, "reason": "..."}`。hook（CRIT 與 AUTO_COMPACT
+  兩分支）收到 `cap_exceeded` ⇒ 以 `_assert_allowed_under_auto_compact` 白名單做**session 級** deny：
+  `[SDD-CTX][CRIT][CAP] 本 session 於 stage '<k>' 已 <n> 次觸發 auto-compact 未見有效壓縮 ⇒ 本 session
+  拒絕非 compact 工具（不寫 ESCALATION、不影響其他視窗）。請 /compact 或 claude -r 重啟本 session；真實
+  usage 回落 <90% 即解除。` D4 出口 `observed_effective=True` 時同步清掉 `cap_exceeded`。R-9.2 yaml
+  `failure_mode` 文字改為 session 級語意（只改字、不改結構鍵）。既有
+  `test_per_stage_cap_exceeded_*_denies_with_project_escalation` 改名重寫為 session 級斷言＋新增「另一個
+  全新 session（零 usage）在 cap 後照常放行」。TLA：無狀態／邊增刪 ⇒ 不重跑 TLC，但要跑
+  `test_tla_python_sync`／`test_md_python_sync`。
+  （否決「ESCALATION 只放 Read」：仍是專案級鎖，違反 D3 的層級論證。）
+- **D14 指定值分母（②③④階）以 observed_model 查表值收斂**（SA-04／ARCH-04／SD-03／QA-04 P1）。
+  `context_window.resolve_window`：取到 ②`AUTOSDD_CONTEXT_WINDOW`／③CC env／④settings `autoCompactWindow`
+  的釘值後，若 `observed_model`（只認逐字稿實跑 model，不認 hint）在 `known_models` 查得且**表值 < 釘值**
+  ⇒ 回 `(表值, "已收斂" 來源字串)`。① `SDD_MAX_CONTEXT` 是 session 手動釘值，不收斂。`may_block` 對此來源
+  ＝True。根層守衛的同型收斂**另案**登記（它沒有查表階）。
+- **D15 Stop hook 新判準：「被擋／水位」無值宣稱須有本場佐證**（SA-03／ARCH-03／QA-05／SD-05）。
+  `.claude/hooks/check_claim_provenance.py` 新增純函式 `unbacked_block_claim_hits(claim_text, evidence_text)`：
+  句子含被擋類詞（引號夾住的不算）而本場佐證文字不含 `permissionDecision|deny|[SDD-FSM]|[SDD-CTX]|used=|--check`
+  任一 ⇒ 出聲，**永不阻斷**。`AUTOSDD_UNATTENDED` 有設時沿用既有縮窄規則。必做假紅普查。
+- **D16 recovery_hint 印目前真實水位**（SA-02 P2）。`recovery_hint(state, *, sdd_root, python=…,
+  measurement=None, window=None, source=None)` 可選參數；pre hook 與 session_start 傳入量測；有值印
+  「目前本 session 真實 used=… window=… 來源=…」，量不到印「目前本 session 尚無可用 usage」。既有簽名呼叫
+  零改動。
+
+### 修法逐檔
+
+分兩包並行（鎖持有面已切開）：Dev-A 負責 D11／D12／D13／D16（SDD 治理面）；Dev-B 負責 D14／D15
+（量測面＋根層 Stop hook）。下表合併兩包報告；標「範圍外」的檔案不在原始任務分派清單內，是因為它們是
+被要求修改的函式（`trigger_auto_compact`）的直接消費者，不修會讓 `pytest tools/fsm_runtime/tests/ -m
+"not chaos"` 見紅，判斷屬「開發-編譯-測試循環」義務範圍、非擅自擴權（已核實與 Dev-B 的檔無重疊）。
+
+| 檔案 | 改動 | 包 |
+|---|---|---|
+| `AISDLC_SDD_v0.30/.claude/hooks/context_ledger_pre.py` | D11：新增 `_pending_unmetered_notice()`，`AUTO_COMPACT_PENDING` 且 `m is None or m.used is None` ⇒ 放行一次＋`[UNMETERED]` notice；D12：新增 `_pending_deny_reason(rt, m, window, source)` 組真實數字 reason；`_recovery_hint` 簽名擴充轉呼叫新版 `recovery_hint()`；D13：新增 `_cap_exceeded_deny_reason()`／`_cap_exceeded_pass_notice()`，CRIT／AUTO_COMPACT 兩分支在 `escalated` 檢查前插入 `cap_exceeded` 檢查（AUTO_COMPACT 分支需排在 `noop` 檢查之前），走白名單做 session 級 `[CAP]` deny／放行；`escalated` 分支保留為防禦性 fallback | Dev-A |
+| `AISDLC_SDD_v0.30/.claude/hooks/context_ledger_post.py` | **範圍外**（`trigger_auto_compact` 直接消費者，不修會使全套測試見紅）：D13 的 `cap_exceeded` 分支需排在 `noop` 分支之前（否則 PostToolUse 通知被 `[NOOP]` 蓋掉，實測踩到）；新增對稱 `[CAP]` 通知文字；`escalated` 分支保留為防禦性 fallback | Dev-A |
+| `AISDLC_SDD_v0.30/.claude/hooks/session_start.py` | D16：新增 `_recovery_measurement(payload)`，獨立重新量測一次（duck-typing、例外回 `(None,None,None)`）；ESCALATION／ESCALATION_FINAL 區塊呼叫 `recovery_hint()` 時傳入量測 | Dev-A |
+| `AISDLC_SDD_v0.30/tools/fsm_runtime/fsm_runtime.py` | D13：`trigger_auto_compact()` per-stage cap 分支移除 `record_escalation` 與轉態，改落 `auto_compact_state.cap_exceeded` 一次性標記；`save_abort_report()`／`_record_escalation_catches(["R-9.2"])` 只在首次落標記時呼叫一次；回傳 `cap_exceeded=True`／`escalated=False` | Dev-A |
+| `AISDLC_SDD_v0.30/tools/fsm_runtime/recovery_hint.py` | D16：`recovery_hint()` 新增 `measurement=None, window=None, source=None` 可選關鍵字參數（duck-typing 讀 `.used`）；輸出多一行真實水位或「尚無可用 usage」；既有呼叫簽名零改動 | Dev-A |
+| `AISDLC_SDD_v0.30/governance/rules/R-9.2-context-budget.yaml` | 只改 `failure_mode:` 文字（Edit 逐段替換，非 yaml dump）為 session 級語意；`enforcement_mechanism`／`spec:` 皆未動 | Dev-A |
+| `tools/fsm_runtime/tests/test_context_ledger_pre_hook.py` | 新增 `PendingUnmeteredTests`（D11，3 支）；`test_pending_deny_reason_has_real_numbers_and_trigger_session`（D12）；`RealUsageGatingTests` 兩個 cap 測試改名重寫為 session 級語意＋新增「全新低用量 session 照常放行」 | Dev-A |
+| `tools/fsm_runtime/tests/test_context_ledger_post_hook.py` | **範圍外**：`..._reports_project_escalation` 改名重寫為 `..._reports_session_level_cap` | Dev-A |
+| `tools/fsm_runtime/tests/test_recovery_hint.py` | 新增 `RecoveryHintMeasurementTests`（D16，4 支）；`test_trigger_auto_compact_stores_details_and_passes_them_on_cap` 改寫為 D13 語意 | Dev-A |
+| `tools/fsm_runtime/tests/test_w20_catch_wiring.py`／`test_w37_catch_wiring.py` | R-9.2／R-9.7 catch 測試改寫斷言（D13 語意；catch_count 判定不變） | Dev-A |
+| `tools/fsm_runtime/tests/test_auto_compact_rate_limit.py` | **範圍外**：`test_over_limit_escalates`→`test_over_limit_marks_cap_exceeded_not_escalated`；`test_over_limit_writes_abort_report` 斷言改 cap_exceeded；`test_trigger_in_escalation_is_noop` 改用 `record_escalation()` 直接造前提 | Dev-A |
+| `AISDLC_SDD_v0.30/tools/fsm_runtime/context_window.py` | D14：新增 `_converge_pinned_window(pinned, observed_model, known_models)` 純函式；`resolve_window` 改寫，① `SDD_MAX_CONTEXT` 獨立不收斂，②③④ 迴圈內插入收斂呼叫 | Dev-B |
+| `tools/fsm_runtime/tests/test_context_window.py` | 新增 `ConvergePinnedToKnownModelTests`（6 測試：autosdd 收斂／fable 保留釘值／sdd_raw 永不收斂／observed None 保留釘值／cc_env_raw 收斂／settings_window 收斂） | Dev-B |
+| `.claude/hooks/check_claim_provenance.py`（根層） | D15：`_INTERESTING` 前篩加寬 `hook_blocking_error`／`hook_additional_context`；新增 `_block_evidence_text(records)`；新增 `BLOCK_CLAIM_RE`／`BLOCK_EVIDENCE_RE`（含假紅普查逼出的 `kind=|band=|cap=|requested permissions|haven't granted`）；新增 `unbacked_block_claim_hits(claim_text, evidence_text)`；`main()` 新增第五判準分支，逃生口 `AUTOSDD_BLOCK_CLAIM_GUARD_OFF`（獨立、不與既有四個共用） | Dev-B |
+| `tools/tests/test_claim_provenance_r86.py`（根層） | 新增 `TestTheUnbackedBlockClaimJudgement`（6 測試）／`TestTheUnbackedBlockClaimHookWiring`（5 測試） | Dev-B |
+| `tools/tests/test_adr_xplat001_c1c2_lock.py`（根層） | guard-line 棘輪重釘：`test_claim_provenance_r86.py` 806→936；本檔自身漂移 +17＋7；`_GUARD_LINES_REPIN_LOG` 新增 R144 三列，淨額 97056→97210（+154）；`_REPIN_LOG_HISTORY_SHA256` 重算；`_FROZEN_PREFIX_REWRITE_LEDGER` 新增 R144 接鏈列 | Dev-B |
+| `tools/tests/test_context_window_parity.py`（根層） | **只讀未改**（設計範圍限制）；D14 收斂邏輯只影響②③④階，`known_models={}` 時行為逐字不變，parity 未受影響 | Dev-B（唯讀） |
+
+### 舊測試 → 新測試對照（Dev-A）
+
+| 舊測試 | 新測試/新斷言 | 檔案 |
+|--------|--------------|------|
+| `test_per_stage_cap_exceeded_at_950000_denies_with_project_escalation` | `test_per_stage_cap_exceeded_at_950000_denies_session_level` | test_context_ledger_pre_hook.py |
+| `test_per_stage_cap_exceeded_at_900000_denies_with_project_escalation` | `test_per_stage_cap_exceeded_at_900000_denies_session_level` | test_context_ledger_pre_hook.py |
+| （無，新增）| `test_cap_exceeded_does_not_block_a_brand_new_low_usage_session` | test_context_ledger_pre_hook.py |
+| （無，新增）| `PendingUnmeteredTests`（D11，3 支）／`test_pending_deny_reason_has_real_numbers_and_trigger_session`（D12） | test_context_ledger_pre_hook.py |
+| `test_per_stage_cap_exceeded_at_900000_reports_project_escalation` | `test_per_stage_cap_exceeded_at_900000_reports_session_level_cap` | test_context_ledger_post_hook.py |
+| `test_trigger_auto_compact_stores_details_and_passes_them_on_cap`（斷言 escalated=True） | 同名，斷言改 `cap_exceeded=True`／`escalation_history==[]` | test_recovery_hint.py |
+| （無，新增）| `RecoveryHintMeasurementTests`（D16，4 支） | test_recovery_hint.py |
+| `test_r92_catch_on_auto_compact_overflow_flag_on` / `test_r92_catch_flag_off_zero_regression` | 同名，斷言改 D13 語意 | test_w20_catch_wiring.py |
+| `test_r97_not_attributed_on_auto_compact_overflow` | 同名，斷言改 D13 語意 | test_w37_catch_wiring.py |
+| `test_over_limit_escalates` | `test_over_limit_marks_cap_exceeded_not_escalated` | test_auto_compact_rate_limit.py |
+| `test_over_limit_writes_abort_report` | 同名，斷言改 cap_exceeded | test_auto_compact_rate_limit.py |
+| `test_trigger_in_escalation_is_noop` | 同名，改用 `record_escalation()` 直接造前提（不再靠 cap 超限進 ESCALATION） | test_auto_compact_rate_limit.py |
+
+### 實測
+
+> Dev-A／Dev-B 為兩個獨立子 agent，於各自 session 內自行實測；本文件整合 agent 未重跑，以下 Dev-A／Dev-B
+> 段落數字全數標記 [他包回報]。文件整合 agent 本場親跑驗證見文末〈驗證〉一節（不加標記）。
+
+**Dev-A（D11/D12/D13/D16）**：[他包回報]
+```
+# 紅（實作前）
+python -m pytest tools/fsm_runtime/tests/test_context_ledger_pre_hook.py -q -p no:cacheprovider
+→ 7 failed, 36 passed in 6.68s
+python -m pytest tools/fsm_runtime/tests/test_recovery_hint.py tools/fsm_runtime/tests/test_w20_catch_wiring.py tools/fsm_runtime/tests/test_w37_catch_wiring.py -q -p no:cacheprovider
+→ 7 failed, 32 passed in 1.93s
+# 綠（逐步修復後）
+python -m pytest tools/fsm_runtime/tests/test_recovery_hint.py -q -p no:cacheprovider → 29 passed in 1.58s
+python -m pytest tools/fsm_runtime/tests/test_context_ledger_pre_hook.py -q -p no:cacheprovider → 43 passed in 6.58s
+# 組合驗證（8 檔）
+python -m pytest tools/fsm_runtime/tests/test_context_ledger_pre_hook.py tools/fsm_runtime/tests/test_context_ledger_post_hook.py tools/fsm_runtime/tests/test_recovery_hint.py tools/fsm_runtime/tests/test_w20_catch_wiring.py tools/fsm_runtime/tests/test_w37_catch_wiring.py tools/fsm_runtime/tests/test_w39_coverage_denominator.py tools/fsm_runtime/tests/test_governance_coverage.py tools/fsm_runtime/tests/test_context_window.py -q -p no:cacheprovider
+→ 153 passed in 20.23s（首跑 1 failed，`context_ledger_post.py` 也依賴舊 escalated 語意，修好後綠）
+# rule loader／md-python sync／tla sync
+python -m pytest tools/fsm_runtime/tests/test_md_python_sync.py tools/fsm_runtime/tests/test_rule_loader_eol.py tools/fsm_runtime/tests/test_tla_python_sync.py tools/fsm_runtime/tests/test_rule_938_translation_fidelity.py tools/fsm_runtime/tests/test_rule_catch_telemetry_wiring.py tools/fsm_runtime/tests/test_rule_fire_telemetry_wiring.py tools/fsm_runtime/tests/test_rules_index_sync.py -q -p no:cacheprovider
+→ 41 passed, 1 skipped in 0.60s
+# 全套（含 Dev-B 同時在改的檔）
+python -m pytest tools/fsm_runtime/tests/ -m "not chaos" -q -p no:cacheprovider
+→ 1860 passed, 8 skipped, 34 deselected, 14 subtests passed in 45.98s（首跑 3 failed，`test_auto_compact_rate_limit.py` 因 grep 大小寫漏抓 `MAX_AUTO_COMPACT_PER_STAGE` 常數用法，改寫後綠）
+# ci-gate.sh（含 v0.01 凍結基線＋v0.30 LATEST 雙軌＋根層 scripts/tests 共享 infra）
+✅ 本機 CI 閘門全數通過（版本：AISDLC_SDD_v0.01 AISDLC_SDD_v0.30）；逐軌計數：AISDLC_SDD_v0.01:1475 AISDLC_SDD_v0.30:1860 scripts/tests:351；CI_GATE_RC=0
+```
+
+**Dev-B（D14/D15）**：[他包回報]
+```
+# D14 紅：3 個新測試（autosdd/cc_env/settings 三階收斂案例）修法前 AssertionError: 967000 != 200000
+# D14 綠
+cd AISDLC_SDD/AISDLC_SDD_v0.30 && python -m pytest tools/fsm_runtime/tests/test_context_window.py -q → 39 passed in 0.10s（33 舊 + 6 新）
+python -m pytest tools/fsm_runtime/tests/test_context_window.py tools/fsm_runtime/tests/test_context_ledger_pre_hook.py tools/fsm_runtime/tests/test_context_ledger_post_hook.py -q → 95 passed in 18.14s
+cd tools/tests && python -m unittest test_context_window_parity -v → Ran 3 tests in 0.010s / OK（未受影響）
+# D15 紅：暫時把 unbacked_block_claim_hits 改成 return []，python -m unittest tools.tests.test_claim_provenance_r86 -q → 2 個測試失敗
+# D15 綠
+python -m unittest tools.tests.test_claim_provenance_r86 -q → Ran 62 tests in 0.822s / OK（還原後）；加入 kind=/band=/cap=/權限牆兩個新測試後 → Ran 64 tests in 0.794s / OK
+```
+
+**D15 假紅普查（Dev-B，[他包回報]）**：母體 `~/.claude/projects/-Users-wuweihong-Antigravity-AISDCL-Agent/*.jsonl`
+近 7 天（mtime，非 rglob 只掃頂層）40 支，逐支循序掃描每一則 assistant text 區塊（證據只累積「這一則之前」
+的內容，模擬真實 Stop hook 因果順序）：
+- 初版詞表（`deny|[SDD-FSM]|[SDD-CTX]|used=|--check`）：命中 4 筆，逐筆判讀 4 筆全部假紅（配速守衛 `kind=…band=`
+  通知、Claude Code 內建權限牆訊息 3 筆）。
+- 加入 `kind=|band=|cap=|requested permissions|haven't granted` 後重跑同一份母體：**命中 0 筆**。
+- 本機母體上真陽性同樣是 0 筆（無「本場真的沒有任何機器事件佐證」的被擋宣稱）——召回率在本機母體上無從
+  量測，紅綠自證靠合成注入（`TestTheUnbackedBlockClaimJudgement`／`TestTheUnbackedBlockClaimHookWiring`）。
+
+### 把握程度
+
+- **高把握（Dev-A）**：D11／D12／D13 的核心行為變更、D16 的 `recovery_hint` 擴充，皆先紅後綠、且全套
+  fsm_runtime 測試（1860 passed）驗證過。
+- **Dev-A 對 `_record_escalation_catches(["R-9.2"])` 保留的判斷**：讀了 `rule_loader.record_state_catches()`
+  實作後發現它**不檢查 FSM 狀態**，只憑 rule_id + failure_mode 記 `catch_count`；而
+  `test_w39_coverage_denominator.py`／`test_governance_coverage.py`（皆不在 Dev-A/Dev-B 範圍內、且靜態掃描
+  `_record_escalation_catches([...])` 呼叫字面）鎖死「R-9.2 屬於 7 條 escalation-attributable 規則」這個
+  不變式。若移除該呼叫，`_ESCALATION_ATTRIBUTABLE_RULE_IDS` 與 R-9.2 yaml 的
+  `enforcement_mechanism: escalation` 會與這兩支範圍外測試打架，而 Dev-A 不能改它們（也不能改
+  `enforcement_mechanism`，只准改 `failure_mode` 文字）。故 Dev-A 判斷：catch 語意收斂為「規則自描述的
+  失敗模式真的被打到」，不再要求「必進 project-level ESCALATION」——已在呼叫點與 R-9.2 yaml 的
+  `failure_mode` 裡寫清楚這個收斂。**若總架構師認為應該移除**，需要同時鬆動
+  `_ESCALATION_ATTRIBUTABLE_RULE_IDS`／`test_w39_coverage_denominator.py`／`test_governance_coverage.py`／
+  R-9.2 的 `enforcement_mechanism`，那是四方之外的另一個決策面，建議另案處理（本輪暫按 Dev-A 判斷收尾，
+  未進一步裁決推翻）。
+- **中高把握（Dev-B）**：D14 收斂邏輯只影響②③④階、且只在 `known_models` 非空且命中時觸發；parity 測試
+  傳 `known_models={}`，結構上不可能受影響（已實測確認）。D15 判準本體與假紅收斂經過兩輪真實語料驗證
+  （4→0），且有合成注入雙向自證。
+- **Dev-B 的 `kind=`/`band=`/`cap=` 可滿足性代價（誠實劃界）**：這三個詞加入 `BLOCK_EVIDENCE_RE` 是假紅
+  普查逼出的收斂，但覆蓋率不是免費的——本機 40 支語料中 16／14／16 支含這些字樣（40%），一旦本場任何地方
+  出現過就會讓 D15 判準對「被擋」整場靜音，即使與該次宣稱無關。這是刻意的可滿足性選擇（精確度換召回率），
+  代價已寫入 `check_claim_provenance.py` 檔頭「第五個判準」段落，未被總架構師推翻。
+- D14／D15 皆未觸及 Windows 側真機驗證；D14 查表值仍是 `known_model_windows.json` 的 2026-06-24 種子值
+  （本機無 `anthropic` SDK／key，`refresh_known_model_windows.py` 本輪仍未真跑）。
+
+### 未做事項（另案）
+
+- **SD-06**：並行 subagent 共用同一份專案級 FSM-STATE，`load_track_state`／`track_id` 存在但 hook 未用。
+  已立 **DEF-200-279**（P1，open）。
+- **ARCH-06**：v0.30 `.claude/settings.json` `PreToolUse` matcher 缺 `Agent|Workflow`（Agent/Workflow
+  工具呼叫繞過 SDD FSM 護欄）。已立 **DEF-200-280**（P2，open）。
+- 根層 `context_budget_guard.py` 無查表階 ⇒ D14 同型收斂仍是另案，本輪未做。
+- `known_model_windows.json` 仍未真打 Models API（本機無 SDK／key）；`refreshed_at` 仍為 `null`。
+- `session_start.py` 的 D16 改動沒有新增獨立測試（design 只把它列為「只為 D16 傳參」；既有
+  `test_session_start_rules.py`／`test_timeout_checker.py` 跑過確認無回歸，但沒有一支直接斷言
+  session_start 的 `recovery_hint` 輸出帶水位——建議由後續收尾窗口補一支整合測試）。
+- Dev-B 完成根層 guard-line 棘輪重釘（`test_adr_xplat001_c1c2_lock.py` 97056→97210）後，該檔另有 5 個測試
+  要求本輪（R144）在**兩個不同檔案**（`docs/04_planning/AutoSDD_improving_*.md`、
+  `docs/06_quality/CrossPlatform_R*_Scan_Findings.md` 或 `docs/04_planning/R*_HANDOFF.md`，三選二）寫入
+  `<!-- guard-total:R144 -->` 形態標記——本輪 `AutoSDD_improving_112.md` R144 段刻意只留佔位行（見該檔），
+  數字待喚醒鏈（DEF-200-281）棘輪重釘完成才能一次定案，故這 5 支測試（
+  `test_a_broken_arithmetic_in_the_real_docs_is_red`／`test_a_stale_total_in_the_real_docs_is_red`／
+  `test_removing_the_marker_is_red_and_history_rounds_do_not_count`／
+  `test_the_docs_cite_the_live_guard_total`／`test_the_extended_doc_surface_covers_the_handoff_without_false_reds`）
+  本輪仍紅，留待收尾窗口補上真正的 `guard-total:R144` 數字後一次關掉。
+
+### 喚醒鏈（DEF-200-281）
+
+自願停機喚醒鏈斷裂為獨立缺陷，鑑識、修法、紅→綠逐字與真實 launchd 端到端演練全文見
+`docs/06_quality/CrossPlatform_DEF200278_Halt_Handoff_Evidence.md`〈第二輪（2026-09-11；
+DEF-200-281 自願停機喚醒鏈斷裂）〉節；缺陷帳本狀態見 `AutoSDD_Defect_Log.md` DEF-200-281。
+
+### D11／D13 複審 REJECT→修復→APPROVE
+
+第五輪 Dev-A 交棒後，複審者（唯讀）用合成重現腳本 `scratchpad/Review/d11_spec_check.py`／
+`scratchpad/Review/d13_stage_change_gap.py` 抓到兩個真缺陷並判 REJECT：
+
+- **R-D11**：D11「PENDING × 量不到 usage ⇒ 放行一次」的放行範圍未排除 Rule 9.6 絕對禁令 #3
+  （規格檔寫入）——PENDING＋零 usage 時對 `docs/01_requirements/*.md` 之類規格前綴目標的
+  Write/Edit 本應仍 deny，卻被 D11 的「量不到就放行一次」短路成放行。
+- **R-D13**：D13「per-stage cap 超限 ⇒ session 級標記」的 `first_mark` 判準是全域一次性旗標
+  （只認「有無 marker」，不認 stage 是否已換），導致 stage 換過後的新 cap 事件被舊 stage 的
+  marker 擋住、拿不到自己的 `abort_report`。
+
+由 Dev-A2（接 Dev-A 的棒）修復：`fsm_runtime.py` 新增 `_is_blocked_spec_write()`／
+`FSMRuntime.is_blocked_spec_write()`（R-D11，沿用既有 `_SPEC_TARGET_PREFIXES`／
+`_STATES_ALLOWING_SPEC_WRITE`、不複製第二份清單）；`context_ledger_pre.py` 的 D11 分支在放行前
+先查 `is_blocked_spec_write()`，命中則 deny（新函式 `_pending_unmetered_spec_deny_reason()`）；
+`trigger_auto_compact()` 的 `first_mark` 判準改為「無 marker，或 marker 的 `stage_key` 已不是
+目前 stage」（R-D13），`complete_auto_compact()` 的 `observed_effective=True` 出口同步清掉
+`cap_exceeded` 殘留標記。兩者皆先紅後綠（新增 4＋2 支測試），複審者重現腳本核實：
+`d11_spec_check.py` 情境 A（PENDING＋零 usage＋Write 規格檔）從 `denied=False` 變
+`denied=True`；`d13_stage_change_gap.py` 第二次（stage-B／sess-B）cap 事件從
+`abort_report=None` 變成非 None 且 marker 正確更新為 stage-B。修復後複審轉 APPROVE。
+
+全套驗證：`SDD_ENABLE_RULE_FIRE_TELEMETRY=0 SDD_ENABLE_RULE_CATCH_TELEMETRY=0 python -m pytest tools/fsm_runtime/tests/ -m "not chaos" -q -p no:cacheprovider` →
+`1866 passed, 8 skipped, 34 deselected, 14 subtests passed in 48.42s`，rc=0（[他包回報]，Dev-A2）。
+
+### 治理 yaml 污染事件與還原
+
+本輪期間發生一次治理 yaml 污染：某探針（Dev-C 效能量測腳本）漏加
+`SDD_ENABLE_RULE_FIRE_TELEMETRY=0 SDD_ENABLE_RULE_CATCH_TELEMETRY=0` 前綴，觸發
+`transition()` 的 `rule_loader.record_state_fires` 以 `yaml.safe_dump` 回寫，導致
+11 支 tracked `governance/rules/R-9.*.yaml` 被重新排版（形態改變＋`fire_count` 灌值，非本輪
+刻意變更）。主控（收尾單人窗口）發現後以 `git show HEAD:<path> > <path>` 逐支還原：10 支完全
+還原為 HEAD 版本；`R-9.2-context-budget.yaml` 因本輪 D13 確實需要修改其 `failure_mode:` 文字
+（session 級語意），改為手動重寫為只含 D13 語意改動的版本（不含污染帶來的形態重排與
+`fire_count` 灌值）。還原後 `git status --short -- AISDLC_SDD/AISDLC_SDD_v0.30/governance/`
+只列 R-9.2（其 `failure_mode:` 文字改動屬本輪合法變更，非污染殘留）。還原後主控親跑 SDD 全套：
+
+```
+$ SDD_ENABLE_RULE_FIRE_TELEMETRY=0 SDD_ENABLE_RULE_CATCH_TELEMETRY=0 python -m pytest tools/fsm_runtime/tests/ -m "not chaos" -q -p no:cacheprovider
+1872 passed, 8 skipped, 34 deselected, 14 subtests passed in 42.16s   rc=0
+```
+
+（1872 為 D11/D13 複審修復＋Dev-C 稽核帳本效能修復＋喚醒鏈第二修復包全數併入後的最終基線；
+較 Dev-A 段落〈實測〉的 1866 多 6，來自 Dev-C 新增的 `LedgerPerformanceTests`／
+`LedgerOrphanPartCleanupTests` 四案與另外兩案收斂。）
+
+### 稽核帳本效能（DEF-200-282）
+
+**觸發**：本場多次收到 `[SDD-ROUTER][WARN] context_ledger_post.py 逾 8.0s 未回應，已中止
+child 並本次放行`——守門被靜默放行的實證。主控親跑 post hook 端到端修前 5.09s／5.83s。
+
+**量測拆解**（Dev-C，1500 筆／364.6KB 夾具，貼近 `context_ledger_post.py` 真實 entry 形狀；
+cProfile，`append_ledger_entry` 單次呼叫）：safe_load 佔 ~63%（0.4082s）、safe_dump 佔
+~37%（0.2509s）；鎖等待與 merge 邏輯本身 <1ms（可忽略）。>95% 時間落在純 Python
+`yaml/scanner.py`／`yaml/composer.py`（load）與 `yaml/serializer.py`（dump），隨帳本大小線性
+增長，終究撞上 router 8s child timeout。附帶發現孤兒 `.part.<pid>`：router 砍 child 時
+`_atomic_write_yaml` 寫到一半的 pid 專屬暫存檔沒有任何人清理，同目錄永久累積（現場實測 7 個、
+0～530KB 不等）。
+
+**修法**：`AISDLC_SDD/AISDLC_SDD_v0.30/tools/fsm_runtime/conversation_ledger.py` 改用
+libyaml C 綁定（`yaml.CSafeLoader`/`yaml.CSafeDumper`，`getattr` 保底回純 Python）——量測顯示
+>95% 耗時落在純 Python YAML 編解碼本身，換一個 C 加速的相容實作即可線性換算成本（6-7 倍），
+格式、鍵結構、`entries`/`conversation_overhead`/書籤/sidecar/corrupt-rotate 語意完全不變。
+未採「entries 移出 YAML 到 JSONL sidecar」（`fsm_runtime.py::_reset_today_ledger()` 直接呼叫
+`_load_ledger_doc`/`_atomic_write_yaml` 並自行操作 `entries` 列表，繞過公開介面，格式一變這個
+既有呼叫端會在不知情下寫壞主檔）與「entries 上限滾動」（同樣的相容性風險，複雜度不亞於前者但
+收益不明顯更好）兩個候選。另新增 `cleanup_orphan_part_files(ledger_dir)`：清掉 mtime > 600s 且
+pid 已死（POSIX `os.kill(pid,0)`；Windows `psutil.pid_exists()` 若可用，否則保守回 True）的
+`.part.*`；`append_ledger_entry` 開頭 best-effort 呼叫。
+
+**前後耗時**（同一夾具）：
+```
+修法前：append_ledger_entry wall time: 0.6567s
+修法後：append_ledger_entry wall time: 0.1192s   （_load_ledger_doc 0.0579s + _atomic_write_yaml 0.0520s）
+```
+真實活帳本端到端（802KB／2026-09-11 當日帳本）：
+```
+$ echo '{}' | /usr/bin/time python3 .claude/hooks/context_ledger_post.py
+{"hookSpecificOutput": {"hookEventName": "PostToolUse"}}        0.42 real         0.40 user         0.02 sys
+rc=0
+```
+較主控實測基線 5.09s/5.83s 快 ~12x；孤兒 `.part.*` 清理前 9 個、跑完本輪測試與一次真實 post
+hook 呼叫後僅剩 2 個（皆 <10 分鐘齡，設計上刻意保留待下次呼叫再清）。
+
+**複審結論**：APPROVE。**備註**：AISDLC_SDD 未宣告 `psutil` 依賴 ⇒ Windows 側孤兒 `.part.*`
+清理的 `psutil.pid_exists()` 分支實質 no-op（`psutil` 不可 import 時保守回 `True`，即「當作活
+著、本次不清」）——方向安全（fail-safe，不會誤刪還在寫入的檔案），但 Windows 上孤兒清理功能
+本身目前不生效，僅本 macOS/Linux 分支（`os.kill(pid,0)`）已在本機驗證兩種分支。
+
+新增回歸測試：`LedgerPerformanceTests`（1500 筆規模 append/merge 各 <0.3s 硬性驗收）／
+`LedgerOrphanPartCleanupTests`（死 pid＋逾時清除／死 pid＋未逾時保留／活 pid＋逾時保留／
+`append_ledger_entry` 整合面自動觸發清理，四案）。全套：
+```
+$ python -m pytest tools/fsm_runtime/tests/test_conversation_ledger.py -q
+31 passed in 1.87s
+```
+未改動 `merge_conversation_overhead_into_ledger` 既有書籤/rebaseline/corrupt-rotate/sidecar
+語意——27 支既有測試（本輪新增 4 支，共 31 支）全綠，未動任何既有斷言。詳見缺陷帳本
+`AutoSDD_Defect_Log.md` DEF-200-282。
+

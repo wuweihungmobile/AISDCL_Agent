@@ -142,6 +142,50 @@ def halt_verdict(halt_marker: dict | None, idle_seconds: float | None,
             "reason": f"偵測到自願 halt 標記；觀測 reset={reset_at} 已過 ⇒ 花一次探測確認額度回來了沒"}  # noqa: E501
 
 
+#: DEF-200-281／F-1：`quota_halt_actions()` 寫入 halt 標記前的自檢門檻——本輪事故的直接
+#: 證據：`tools/tests/test_quota_policy.py` 一支未隔離的測試（module 常數
+#: `NOW = datetime(2026, 8, 9, 5, 15, 3, tzinfo=UTC)`）在**任何真實 Claude Code session**
+#: 裡跑 pytest 時，因為沒清 `CLAUDE_CODE_SESSION_ID`／`CLAUDE_PROJECT_DIR`、也沒隔離
+#: `AUTOSDD_TRACE_DIR`，把這個凍結在一個月前的 `now` 寫進**真實**
+#: `~/.autosdd/traces/halt_<真實 sid>.json`——本場三份現場標記（`96d7f386-…`／
+#: `8d8773f9-…`／`unknown`）逐位元組相同，且與本函式本機重現輸出逐位元組相同（見
+#: `tools/tests/test_wake_chain_halt_r278.py::HaltMarkerSelfCheckTest`）。門檻只挑「大到
+#: 不可能是正常時脈漂移／IO 延遲」的量級。
+HALT_MARKER_MAX_CLOCK_SKEW_SECONDS = 600
+
+
+def halt_marker_or_rejection(sid: str, decision: quota_policy.Decision, now: datetime,
+                             transcript: object, source: str,
+                             real_now: datetime | None = None) -> tuple[dict | None, str | None]:
+    """回 `(標記, None)`＝可以落盤，或 `(None, 拒寫理由)`。
+
+    `real_now` 給測試注入；production 呼叫端不傳，落回真牆鐘——自檢不能拿被檢查的
+    同一個 `now` 當基準，否則凍結的 `now` 會通過「自己與自己一致」的假陽性檢查。
+
+    🔴 DEF-200-281 第二輪：`now` 缺 tzinfo（naive）時不得讓下面的相減拋
+    `TypeError` 崩掉整條 halt 武裝路徑——方向＝當作不可信輸入直接拒寫，不猜時區
+    （猜錯時區會讓 `at`/`reset_at` 全錯，與 RC-1 同型：寧可漏一次武裝機會）。
+    """
+    if now.tzinfo is None:
+        return None, f"now={now!r} 缺 tzinfo（naive）⇒ 無法安全比對牆鐘，拒絕落盤"
+    real_now = real_now or datetime.now().astimezone()
+    resets_at = halt_resets_at(decision)
+    skew = abs((real_now - now).total_seconds())
+    if skew > HALT_MARKER_MAX_CLOCK_SKEW_SECONDS:
+        return None, (f"now={now.isoformat()} 與牆鐘 {real_now.isoformat()} 差距 {skew:.0f}s"
+                      f"（>{HALT_MARKER_MAX_CLOCK_SKEW_SECONDS}s）⇒ 疑似測試夾具洩漏或過期"
+                      "快取，拒絕落盤")
+    reset_dt = _aware(resets_at) if resets_at else None
+    if reset_dt is not None and reset_dt < real_now:
+        return None, (f"reset_at={resets_at} 已在過去（牆鐘 {real_now.isoformat()}）⇒ 拒絕"
+                      "落一份保證讓 halt_verdict() 判定過期的標記")
+    return {"sid": sid, "band": decision.band,
+            "binding": decision.binding.kind if decision.binding is not None else "",
+            "reset_at": str(resets_at or ""), "at": now.isoformat(),
+            "transcript": str(transcript) if transcript else "",
+            "resolved_source": source}, None
+
+
 # 憑證是真的、**指路是假的**——那個 cmdlet 在 mac 不存在，而 `NextRunTime` 這個概念 launchd
 # 從不提供（`launchctl print` 輸出裡 next／fire／due 皆不存在，R83 實測）。同型判例：
 # 「憑證裡混一句假話，比沒有那一欄更難看見」（`schedule_backend._readback` 的 depth-1 訂正）。

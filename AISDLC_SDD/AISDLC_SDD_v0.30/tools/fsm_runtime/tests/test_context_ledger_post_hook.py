@@ -157,19 +157,22 @@ class RealRatioTierTests(_IsolatedBase):
         out = self._run(430_428)
         self.assertNotIn("additionalContext", out)
 
-    def test_per_stage_cap_exceeded_at_900000_reports_project_escalation(self) -> None:
-        """QA-02：hook 層唯一仍會寫專案級 ESCALATION 的路徑＝per-stage cap 超限（結構性升級，既有語意）。
+    def test_per_stage_cap_exceeded_at_900000_reports_session_level_cap(self) -> None:
+        """D13（DEF-200-275 第五輪）：per-stage cap 超限改為 session 級 `[CAP]` 通知（PostToolUse
+        只出聲，deny 是 PreToolUse 的事），**不再**寫專案級 ESCALATION——改名自
+        test_per_stage_cap_exceeded_at_900000_reports_project_escalation。
         直接把 count 設到上限（complete_auto_compact(observed_effective) 會歸零，不能用它逼）。"""
         self._rt.state.root["auto_compact_state"] = {"stage_key": "initial", "count_per_stage": 3,
                                                      "max_per_stage": 3}
         out = self._run(900_000)
         ctx = out.get("additionalContext", "")
-        self.assertIn("[SDD-CTX][AUTO-COMPACT][ESCALATION]", ctx, msg=out)
+        self.assertIn("[SDD-CTX][AUTO-COMPACT][CAP]", ctx, msg=out)
+        self.assertNotIn("[ESCALATION]", ctx, msg=out)
         self.assertNotIn("permissionDecision", out)  # post 只出聲
-        self.assertEqual(self._rt.state.current, "ESCALATION")
-        history = self._rt.state.root["escalation_history"]
-        self.assertEqual(len(history), 1)
-        self.assertEqual(history[-1]["session_id"], "sess-post")
+        self.assertNotEqual(self._rt.state.current, "ESCALATION")
+        self.assertEqual(len(self._rt.state.root.get("escalation_history") or []), 0)
+        marker = self._rt.state.root["auto_compact_state"]["cap_exceeded"]
+        self.assertEqual(marker["session_id"], "sess-post")
 
     def test_release_state_noop_is_said_out_loud(self) -> None:
         """ARCH-06／SD-06：FSM=RELEASE 時 trigger 是 no-op，訊息不得宣稱已進 PENDING。"""

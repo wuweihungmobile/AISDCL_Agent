@@ -120,6 +120,7 @@ from quota_messages import (  # noqa: E402,F401
     core_signature_change_note,
     evidence_hint,
     fanout_window_line,
+    halt_marker_or_rejection,  # DEF-200-281／F-1：re-export，同 quota_messages 檔頭慣例
     halt_resets_at,
     halt_verdict,  # noqa: F401  # DEF-200-278／INV-H2：re-export，見 quota_messages 檔頭慣例
     model_hint_line,
@@ -830,17 +831,18 @@ def quota_halt_actions(payload: dict, decision: quota_policy.Decision, now: date
         reason = f"喚醒 spawn 失敗（transcript={transcript}／plan={plan!r}）"
     # DEF-200-278／INV-H1c：halt 是機器必須留下可讀「我停了，reset 在 T」標記的事件，
     # 不得只靠 best-effort 的訊息——落一份持久標記給哨兵下一輪巡邏讀（見 `halt_verdict`）。
+    # DEF-200-281／F-1：落盤前先過 `halt_marker_or_rejection()` 自檢——拒寫勝過落一份
+    # 看起來合法、實則讓 `halt_verdict()` 永遠判過期的標記（本次事故的直接成因）。
     sid = transcript.stem if transcript else "unknown"
-    write_halt_marker(sid, {
-        "sid": sid, "band": decision.band,
-        "binding": decision.binding.kind if decision.binding is not None else "",
-        "reset_at": str(halt_resets_at(decision) or ""), "at": now.isoformat(),
-        "transcript": str(transcript) if transcript else "", "resolved_source": source,
-    })
+    marker, rejected = halt_marker_or_rejection(sid, decision, now, transcript, source)
+    if marker is not None:
+        write_halt_marker(sid, marker)
+    else:
+        sys.stderr.write(f"🔴 halt 標記拒寫（DEF-200-281）：{rejected}\n")
     # DEF-200-200 ③：`now` 帶進稽核欄，讓 `quota_halt_message()` 判得出「這個 reset 其實
     # 已經過去」——訊息層自己沒有時鐘（那是刻意的，它必須是純渲染）。
     return {"branch": branch, "plan": plan, "armed": bool(arm.get("armed")), "now": now,
-            "not_armed_reason": reason,
+            "not_armed_reason": reason, "marker_rejected": rejected,
             "sentinel_off": bool(arm.get("sentinel_off")), "posix": bool(arm.get("posix")),
             "kind": decision.binding.kind if decision.binding is not None else ""}
 
@@ -1102,7 +1104,13 @@ def quota_gate(payload: dict, *, blocking, latch_read, latch_write,
         # `BAND_UNMEASURED`（見該檔 `decide()`）。
         # 修4：閂鎖鍵的期程半改記**被武裝的**那個 reset（halt_resets_at）——鍵若釘在
         # binding 的 None 上，跨 reset 視窗永遠不換鍵＝reset 後不re-arm（事故 00:42 原形）。
-        key = f"halt@{decision.binding.kind}@{str(halt_resets_at(decision))[:16]}"
+        # DEF-200-281 第二輪／RC-3：鍵須含 sid，否則同一視窗內第二個撞 halt 的 session
+        # 會被第一個 session 的閂鎖誤擋（`quota_latch_path()` 是 machine-wide 單一檔案）
+        # ⇒ 永遠拿不到自己的 halt 標記。sid 取法與 `quota_halt_actions()` 寫入標記檔名
+        # 用的**同一個**來源（已解析的逐字稿 stem），兩處故意一致。
+        transcript, _ = resolve_halt_transcript(payload)
+        sid = transcript.stem if transcript else "unknown"
+        key = f"halt@{sid}@{decision.binding.kind}@{str(halt_resets_at(decision))[:16]}"
         if key not in latch_read(latch):
             latch_write(latch, key)
             act = quota_halt_actions(payload, decision, now,

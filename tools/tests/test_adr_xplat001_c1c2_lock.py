@@ -682,7 +682,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 7766,
+    "test_adr_xplat001_c1c2_lock.py": 7855,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 3839,
@@ -698,7 +698,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_check_pytest_baseline_sites.py": 301,
     "test_check_script_parity.py": 2098,
     "test_check_wrapper_thinness.py": 1234,
-    "test_claim_provenance_r86.py": 806,
+    "test_claim_provenance_r86.py": 936,
     "test_component_sanitizer_shared_layer_lock.py": 293,
     "test_context_budget_guard.py": 11861,
     "test_context_window_parity.py": 145,
@@ -731,7 +731,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_ps51_compat.py": 610,
     "test_ps_engine_ssot.py": 960,
     "test_python_c_percent_shim.py": 119,
-    "test_quota_policy.py": 3396,
+    "test_quota_policy.py": 3416,
     "test_root_infra_parity.py": 441,
     "test_run_root_unittests.py": 3716,
     "test_sanitize_component_frozen_sdd_versions_lock.py": 340,
@@ -742,7 +742,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_smoke_ci_sync.py": 1399,
     "test_stdio_utf8.py": 76,
     "test_subprocess_encoding_hygiene.py": 1609,
-    "test_wake_chain_halt_r278.py": 299,
+    "test_wake_chain_halt_r278.py": 492,
     "test_windows_forbidden_filename_parity.py": 1025,
     "test_windows_nightly_anchor_parity.py": 135,
     "test_windows_smoke_heartbeat_doc_sync.py": 197,
@@ -1712,6 +1712,86 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "（記帳誠實度分類，非必要湊額）。逐檔清單＝"
      "CrossPlatform_R143_Scan_Findings.md §3；證據見"
      "docs/06_quality/CrossPlatform_DEF200278_Halt_Handoff_Evidence.md。"),  # round-label-ok
+    ("R144", 97056, 97186, 130,
+     "[非淨減法輪][全額功能軌] DEF-200-275 第五輪 D15：`.claude/hooks/check_claim_"
+     "provenance.py` 新增第五個判準 `unbacked_block_claim_hits()`（「被擋／水位」無值"
+     "宣稱須有本場 deny／[SDD-FSM]／[SDD-CTX]／used=／--check／kind=／band=／cap=／"
+     "權限牆佐證；後三組是對近期真實逐字稿假紅普查加寬出來的，量測方法與命中數見"
+     "本檔內判準自身 docstring）。回歸鎖與普查方法全落 test_claim_provenance_r86.py "
+     "（新增 `TestTheUnbackedBlockClaimJudgement`／`TestTheUnbackedBlockClaimHookWiring` "
+     "兩組合成注入紅綠自證＋檔頭新增判準與普查段落）。逐檔清單沿用 "
+     "CrossPlatform_R143_Scan_Findings.md（本包不寫 docs/06_quality/，細節待收尾窗口"
+     "補上；異動僅一檔，無需另立報告）。合法出口逐條實查：刪死碼不適用（新判準此前"
+     "不存在）、抽共用層不適用（延續既有判準體例，同構不算重複知識）。"),
+    ("R144", 97186, 97203, 17,
+     "[非淨減法輪][同輪追加] 本檔自身逐檔漂移收斂——來源是上一列新增的稽核列本身"
+     "（新列文字＋重釘的 `_FROZEN_GUARD_LINES` 數字＋`_REPIN_LOG_FROZEN_PREFIX_LEN`／"
+     "`_REPIN_LOG_HISTORY_SHA256` 更新），`--print-guard-lines` 反覆覆核收斂到本行本身"
+     "也計入為止，同 R95~R143 既有體例。逐項見 CrossPlatform_R143_Scan_Findings.md。"
+     "合法出口逐條實查：無死碼可刪、抽共用層不適用（純數字與註解，無可抽結構）。"),
+    ("R144", 97203, 97210, 7,
+     "[非淨減法輪][同輪追加] 收斂列：新增 `_FROZEN_PREFIX_REWRITE_LEDGER` 接鏈列（把"
+     "帳本終點指紋接上現值）造成的本檔自身逐檔漂移。逐項見 "
+     "CrossPlatform_R143_Scan_Findings.md。"),
+    ("R144", 97210, 97330, 120,
+     "[非淨減法輪] DEF-200-281（喚醒鏈 halt 標記寫入自檢＋test_quota_policy.py 測試污染"
+     "止血；掌舵者任務書明文授權「棘輪表紅了照訊息重釘」，非正式四方複審）：新增 "
+     "test_wake_chain_halt_r278.py::HaltMarkerSelfCheckTest（F-1 自檢：now 偏移牆鐘＞"
+     "10 分鐘或 reset_at 已過即拒寫，逐位元組重現本輪事故三份污染標記）＋整合鎖"
+     "（halt-marker reset_source 過 relay_problems 白名單，真 launchd 端到端演練揪出："
+     "修前每次觸發都會自癒並靜默重置 allow_resume），該檔 299→399（+100）；"
+     "test_quota_policy.py 該測試補 AUTOSDD_TRACE_DIR／CLAUDE_CODE_SESSION_ID 隔離"
+     "（DEF-200-239 同型止血），3396→3416（+20）。guard_self 分桶同輪重釘"
+     "（tools/lib/guard_bucket_policy.py）。逐檔清單沿用 "
+     "CrossPlatform_R143_Scan_Findings.md（本包禁寫 docs/06_quality/，待收尾窗口補）。"),
+    ("R144", 97330, 97345, 15,
+     "[非淨減法輪][同輪追加] 本檔自身逐檔漂移收斂——來源是上一列新增的稽核列本身。"
+     "`--print-guard-lines` 反覆覆核收斂到本行本身也計入為止，同 R95~R143 既有體例。"
+     "逐檔清單沿用 CrossPlatform_R143_Scan_Findings.md。"),
+    ("R144", 97345, 97348, 3,
+     "[非淨減法輪][同輪追加] 收斂列：上一列自身造成的三行漂移。逐檔清單沿用 "
+     "CrossPlatform_R143_Scan_Findings.md。"),
+    ("R144", 97348, 97350, 2,
+     "[非淨減法輪][同輪追加] 收斂列：上一列自身造成的兩行漂移。逐檔清單沿用 "
+     "CrossPlatform_R143_Scan_Findings.md。"),
+    ("R144", 97350, 97352, 2, "[非淨減法輪][同輪追加] 收斂列：單行壓縮，仍 +2。逐檔清單"
+     "沿用 CrossPlatform_R143_Scan_Findings.md。"),
+    ("R144", 97352, 97353, 1, "[非淨減法輪][同輪追加] 收斂列：單行 +1 定點。逐檔清單沿用 "
+     "CrossPlatform_R143_Scan_Findings.md。"),
+    ("R144", 97353, 97358, 5, "[非淨減法輪][同輪追加] 收斂列：上一列本身造成的漂移，反覆"
+     "覆核收斂至此。逐檔清單沿用 CrossPlatform_R143_Scan_Findings.md。"),  # noqa: E501
+    ("R144", 97358, 97364, 6, "[非淨減法輪][同輪追加] DEF-200-281 現已登記於帳本，補"
+     "`_FROZEN_PREFIX_REWRITE_LEDGER` 接鏈列＋本檔自身漂移（含本列覆核收斂）。逐檔"
+     "清單沿用 CrossPlatform_R143_Scan_Findings.md。"),
+    ("R144", 97364, 97456, 92,
+     "[非淨減法輪] DEF-200-281 第二輪（複審點名的 RC-3／naive-now 修復包）：新增 "
+     "test_wake_chain_halt_r278.py::HaltLatchIsSessionScopedTest（halt 閂鎖鍵須含 sid，"
+     "否則同一 reset 視窗內第二個撞 halt 的 session 被第一個的機器級閂鎖誤擋，永遠拿不到"
+     "自己的 halt 標記——兩支紅端：`test_two_sessions_in_the_same_window_both_get_their_"
+     "own_marker`／`test_same_session_repeated_halt_does_not_rewrite_or_respawn`）＋"
+     "`HaltMarkerSelfCheckTest::test_naive_now_is_rejected_not_crashed`（`now` 缺 tzinfo "
+     "時 `halt_marker_or_rejection()` 拒寫而非拋 TypeError 崩掉整條武裝路徑），"
+     "該檔 400→492（+92）。掌舵者任務書明文授權「棘輪表紅了照訊息重釘」，非正式四方複審"
+     "（同 R144 前一列 DEF-200-281 首輪體例）。逐檔清單沿用 "
+     "CrossPlatform_R143_Scan_Findings.md。"),
+    ("R144", 97456, 97466, 10,
+     "[非淨減法輪][同輪追加] 本檔自身逐檔漂移收斂——來源是上一列新增的稽核列本身。"
+     "`--print-guard-lines` 反覆覆核收斂到本行本身也計入為止，同 R95~R143 既有體例。"
+     "逐檔清單沿用 CrossPlatform_R143_Scan_Findings.md。"),
+    ("R144", 97466, 97469, 3,
+     "[非淨減法輪][同輪追加] 收斂列：上一列自身造成的三行漂移。逐檔清單沿用 "
+     "CrossPlatform_R143_Scan_Findings.md。"),
+    ("R144", 97469, 97474, 5,
+     "[非淨減法輪][同輪追加] 收斂列：上一列自身造成的五行漂移。逐檔清單沿用 "
+     "CrossPlatform_R143_Scan_Findings.md。"),
+    ("R144", 97474, 97477, 3,
+     "[非淨減法輪][同輪追加] 收斂列：三行漂移。逐檔清單沿用 "
+     "CrossPlatform_R143_Scan_Findings.md。"),
+    ("R144", 97477, 97480, 3,
+     "[非淨減法輪] 逐檔清單＝CrossPlatform_R143_Scan_Findings.md"),
+    ("R144", 97480, 97488, 8,
+     "[非淨減法輪] 收斂列：`_FROZEN_PREFIX_REWRITE_LEDGER` 接鏈列造成的漂移。逐檔清單＝"
+     "CrossPlatform_R143_Scan_Findings.md"),
 )
 
 
@@ -2198,10 +2278,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 153
+_REPIN_LOG_FROZEN_PREFIX_LEN = 171
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "39ac03acd0f791a370307f0d0083362eda59092575b111a81a2b3c04c57487b2")
+    "846054db5d7e438343bed3b6a3f44987d30a89b299e46ab134355ae13ddffb7a")
 
 
 def repin_log_history_digest(
@@ -2427,6 +2507,15 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # R144：DEF-200-278 喚醒鏈缺口收尾——新增 test_wake_chain_halt_r278.py，凍結 round-label-ok
     # 前綴延伸涵蓋新增主表列與本軌新列本身（prefix_len 152→153）。
     ("R143", "3d5c464c7535", "39ac03acd0f7", "DEF-200-278"),  # 同輪三度追加
+    # R144：DEF-200-275 第五輪 D15——check_claim_provenance.py 新增第五個判準 round-label-ok
+    # unbacked_block_claim_hits()，凍結前綴延伸涵蓋新增主表列與本軌新列本身。
+    ("R144", "39ac03acd0f7", "19e2a68ac40e", "DEF-200-275"),
+    # R144：DEF-200-281 喚醒鏈鑑識收尾——halt 標記寫入自檢＋test_quota_policy.py round-label-ok
+    # 測試污染止血，凍結前綴延伸涵蓋新增主表列與本軌新列本身。
+    ("R144", "19e2a68ac40e", "55ce75c14334", "DEF-200-281"),
+    # R144 第二輪：DEF-200-281 RC-3（halt 閂鎖鍵補 sid）＋naive-now 防呆兩項修復， round-label-ok
+    # 凍結前綴延伸涵蓋新增主表列與本軌新列本身。
+    ("R144", "55ce75c14334", "846054db5d7e", "DEF-200-281"),
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

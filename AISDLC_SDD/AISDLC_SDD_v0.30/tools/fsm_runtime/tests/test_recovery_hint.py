@@ -64,6 +64,8 @@ class RecordEscalationDetailsTests(_Base):
         self.assertEqual(entry["trigger_reason"], "TOKEN_BUDGET_CRITICAL: used=950000")
 
     def test_trigger_auto_compact_stores_details_and_passes_them_on_cap(self) -> None:
+        """D13（DEF-200-275 第五輪）：per-stage cap 超限不再寫專案級 ESCALATION，改成
+        auto_compact_state.cap_exceeded 一次性標記（session 級），details 透傳到標記裡。"""
         import tools.fsm_runtime.snapshot as snap_mod
         original = snap_mod.SNAPSHOT_DIR
         snap_mod.SNAPSHOT_DIR = self.tmp / "abort"
@@ -75,15 +77,21 @@ class RecordEscalationDetailsTests(_Base):
             self.assertFalse(res.get("escalated"))
             self.assertEqual(self.state.root["auto_compact_state"]["trigger_details"]["session_id"], "s-9")
             self.rt.complete_auto_compact(reset_ledger=False)
-            # 逼到 per-stage cap：既有 escalate 分支仍走 record_escalation，且 details 透傳
+            # 逼到 per-stage cap
             for _ in range(2):
                 self.rt.trigger_auto_compact(900_000, 0.9, details=details)
                 self.rt.complete_auto_compact(reset_ledger=False)
             res = self.rt.trigger_auto_compact(900_000, 0.9, details=details)
-            self.assertTrue(res.get("escalated"))
-            last = self.state.root["escalation_history"][-1]
-            self.assertEqual(last["session_id"], "s-9")
-            self.assertTrue(last["trigger_reason"].startswith("auto_compact exceeded"))
+            self.assertFalse(res.get("escalated"), "D13：cap 超限不再是 escalated=True")
+            self.assertTrue(res.get("cap_exceeded"))
+            self.assertTrue(res.get("noop"))
+            self.assertEqual(self.state.root.get("escalation_history") or [], [],
+                             "D13：cap 超限不得寫 escalation_history")
+            self.assertEqual(self.state.current, "IMPLEMENTATION",
+                             "D13：cap 超限不得把 FSM 轉態")
+            marker = self.state.root["auto_compact_state"]["cap_exceeded"]
+            self.assertEqual(marker["session_id"], "s-9")
+            self.assertEqual(marker["stage_key"], "initial")
         finally:
             snap_mod.SNAPSHOT_DIR = original
 
@@ -320,6 +328,42 @@ class RecoveryHintTests(_Base):
         self.assertTrue(posix.startswith(f'cd "{root}" ; "/p" -m tools.fsm_runtime.fsm_runtime'), posix)
         self.assertTrue(ps.startswith(f'Set-Location "{root}"; & "/p" -m tools.fsm_runtime.fsm_runtime'), ps)
         self.assertEqual(posix.split(" -m ", 1)[1], ps.split(" -m ", 1)[1])
+
+
+class RecoveryHintMeasurementTests(_Base):
+    """D16（DEF-200-275 第五輪 SA-02）：recovery_hint 印目前真實水位——pre hook／session_start
+    傳入量測時印真實 used/window/來源；量不到時印「尚無可用 usage」；既有簽名呼叫零改動即可繼續用。"""
+
+    def test_prints_real_usage_when_measurement_present(self) -> None:
+        self.state.record_escalation("TOKEN_BUDGET_CRITICAL: x", details={"session_id": "s-1"})
+
+        class _M:
+            used = 123456
+
+        text = rh.recovery_hint(self.state, sdd_root=_SDD_ROOT, measurement=_M(),
+                                window=1_000_000, source="指定值")
+        self.assertIn("目前本 session 真實 used=123,456 window=1,000,000 來源=指定值", text)
+
+    def test_prints_unmetered_when_no_measurement(self) -> None:
+        self.state.record_escalation("TOKEN_BUDGET_CRITICAL: x", details={"session_id": "s-1"})
+        text = rh.recovery_hint(self.state, sdd_root=_SDD_ROOT)
+        self.assertIn("目前本 session 尚無可用 usage（新 session 首擊或 compact 後）", text)
+
+    def test_measurement_with_none_used_is_treated_as_unmetered(self) -> None:
+        self.state.record_escalation("TOKEN_BUDGET_CRITICAL: x")
+
+        class _MNone:
+            used = None
+
+        text = rh.recovery_hint(self.state, sdd_root=_SDD_ROOT, measurement=_MNone(),
+                                window=1_000_000, source="指定值")
+        self.assertIn("目前本 session 尚無可用 usage（新 session 首擊或 compact 後）", text)
+
+    def test_legacy_call_signature_still_works(self) -> None:
+        """既有簽名呼叫零改動：不傳新參數仍可正常呼叫、不 crash，既有恢復指令內容照舊都在。"""
+        self.state.record_escalation("x")
+        text = rh.recovery_hint(self.state, sdd_root=_SDD_ROOT, python="/venv/bin/python")
+        self.assertIn("resume-from-escalation --to", text)
 
 
 class ResumeFromEscalationTests(_Base):

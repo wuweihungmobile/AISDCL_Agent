@@ -203,6 +203,54 @@ stderr 全空**。
 注入（`tools/tests/test_claim_provenance_r86.py` 的 `TestTheNakedVerdictWithNoEvidence*`）。
 處置同第一個判準：**只出聲，永不阻斷**。
 
+第五個判準：「被擋／水位」的無值宣稱，本場沒有留下任何機器事件的痕跡（D15；DEF-200-275 第五輪）
+--------------------------------------------------------------------------------------------
+立案（掌舵者原話）：「才開新視窗，就說他被擋不能寫檔案用工具了，然後也不去查真實的數據」。
+被擋是一個**機器事件**：deny 訊息與額度守衛的通知都會落盤——本檔在此之前只讀 `tool_result`
+（第一／第四個判準），從未讀過 hook attachment 本身，「被擋」這個宣稱唯一可能的機械佐證
+管道此前從未被打開過。
+
+證據收集面的訂正（設計時假設 vs 實測）
+--------------------------------------
+設計時假設 deny 訊息以 `permissionDecision` 欄位出現；本機全母體（1,013 支逐字稿）現查
+**零命中** `permissionDecision` 字面——那是設計文件裡猜的欄位名，這份逐字稿格式從來沒有
+過這個欄位。實際的落盤形態是兩種 `attachment.type`：`hook_blocking_error`（deny 訊息本體，
+`blockingError.blockingError`）與 `hook_additional_context`（`[SDD-CTX]`／`[SDD-ROUTER]`
+這類非阻斷通知，`content`），全母體現查分別有 591／3,831 筆。`_read_transcript` 的前篩
+（`_INTERESTING`）此前不含這兩個字面，兩型 attachment 從未被 JSON 解析過——本輪把前篩
+加寬，並新增 `_block_evidence_text()` 把兩型 attachment 的文字接進證據面。
+
+判準形狀
+--------
+句子含「被擋」類詞（`BLOCK_CLAIM_RE`；引號夾住的不算，沿用 `_is_quoted`），而**全場**證據
+（`tool_result` ＋ 兩型 attachment 的合併文字）不含 `deny`／`[SDD-FSM]`／`[SDD-CTX]`／
+`used=`／`--check`／`kind=`／`band=`／`cap=`／權限牆字樣（`BLOCK_EVIDENCE_RE`）⇒ 出聲。
+不逐句比對——被擋事件與宣稱它的那句話本來就常常不在同一句裡（先被擋、事後收工才提一句）。
+
+真實面假紅普查（母體＝`~/.claude/projects/-Users-wuweihong-Antigravity-AISDCL-Agent/*.jsonl`
+近 7 天、非 rglob、只掃頂層，2026-09-11 現查，**40 支**）：逐支循序掃描，證據只累積「這一句
+之前」看到的內容（因果正確：真實 Stop hook 觸發當下，逐字稿裡只有這一輪為止的內容）。
+🔴 **初版詞表（僅 `deny`／`[SDD-FSM]`／`[SDD-CTX]`／`used=`／`--check`）命中 4 筆，逐筆
+判讀 4 筆全部假紅**：
+  · 3 筆的真實佐證是 Claude Code 自己的權限牆訊息（`Claude requested permissions to
+    write to …, but you haven't granted it yet.`）——這不是任何 repo hook 印的字，是
+    harness 內建的，本機全母體逐字重複 6 筆，原詞表對它結構性失明。
+  · 1 筆的真實佐證是 `context_budget_guard.py` 額度守衛的通知格式
+    （`kind=session…band=notice…cap=4…`），同樣不含 `deny`／`used=`。
+加入 `kind=|band=|cap=|requested permissions|haven't granted` 後**重跑同一份母體，
+命中 0 筆**。🔴 **本機母體上真陽性同樣是 0 筆**（沒有一個「本場真的沒有任何機器事件佐證」
+的被擋宣稱）⇒ 召回率在本機母體上無從量測，紅綠自證靠合成注入
+（`tools/tests/test_claim_provenance_r86.py` 的 `TestTheUnbackedBlockClaimJudgement`／
+`TestTheUnbackedBlockClaimHookWiring`；重跑方式見 `census_d15.py` 方法段，母體與範圍
+逐字複製於本段）。
+🔴 **`kind=`／`band=`／`cap=` 的覆蓋率不是免費的**（本機 40 支中分別 16／14／16 支含這些
+字樣，約 40%）：它們是額度守衛幾乎任何時候都可能印出的字，本場任何地方出現過一次，就會
+讓本判準對之後所有「被擋」宣稱整場靜音，即使那次通知與這一次的「被擋」宣稱無關、甚至早
+已過期。這是**刻意的**（可滿足性 > 精確盯住同一次事件——本判準問的是「這件事在本場有沒
+有發生過的任何痕跡」，不是「這一次的痕跡是不是同一次」），但誠實登記：它比第一／第四個
+判準更容易被無關的舊證據免罰，這是本判準的精確度代價。
+處置同其餘判準：**只出聲，永不阻斷**。
+
 誠實劃界（本檔抓不到什麼）
 ------------------------
 · **不帶值的判決只治「赤裸」那一型**（第四個判準）：本場零工具輸出 ＋ 同句堆疊 ≥2 個
@@ -229,11 +277,16 @@ stderr 全空**。
   attachment（`hook_success` 只有在 hook 真的印字時才落盤，全母體實測）。
 · 逐字稿讀不到／payload 退化／任何非預期例外 ⇒ **一律 fail-open 靜默放行**
   （`.claude/settings.json` description 記載過的 P0：hook 誤觸 deny 會把所有工具硬鎖死）。
+· 第五個判準的證據面是**全場、不分時間先後、也不分是不是同一次事件**：本場任何時候出現
+  過一次 deny／額度通知／權限牆訊息，之後所有「被擋」宣稱都會被放行，即使那次通知早已
+  過期或與這次無關（見假紅普查段落）。這是刻意的可滿足性選擇，代價是精確度。
 
 判準本體 `unsourced_verdict_hits()` 是純函式，由 `tools/tests/test_claim_provenance_r86.py`
 機械釘住（含合成注入紅綠雙向自證）。依賴方向與 `lint_powershell_command.py` 同：
 **`tools/probe` 向本檔借，本檔不 import 任何 repo 模組**（本檔由 `runpy.run_path` 起、
-`sys.path` 上沒有 `tools/`，import 期爆掉會破壞 fail-open 契約）。
+`sys.path` 上沒有 `tools/`，import 期爆掉會破壞 fail-open 契約）。第五個判準
+`unbacked_block_claim_hits()` 同一套機械釘住方式，測試住同一檔的
+`TestTheUnbackedBlockClaimJudgement`／`TestTheUnbackedBlockClaimHookWiring`。
 """
 from __future__ import annotations
 
@@ -600,6 +653,57 @@ def naked_verdict_hits(claim_text: str, tool_output: str,
     return hits
 
 
+#: 第五個判準：「被擋／水位」的無值宣稱形狀（D15；DEF-200-275 第五輪）。引號夾住的不算
+#: （沿用 `_is_quoted`）。
+BLOCK_CLAIM_RE = re.compile(
+    r"(被擋|被阻擋|擋下|無法寫檔|不能寫檔|不能用工具|工具被鎖|hook\s*擋|"
+    r"deny|denied|blocked|context\s*已滿|context\s*爆|水位過高|水位太高)",
+    re.IGNORECASE)
+
+#: 本場「這件事真的發生過」的佐證形狀。`deny`／`[SDD-FSM]`／`[SDD-CTX]` 是機械物自己印的
+#: 字首，`used=` 是 D12 之後每則 deny 訊息必帶的真實數字，`--check` 是查證指令本身的名字
+#: ——引用了查證指令也算「已經去查過」，不強迫一定要逐字貼出 deny 內容。
+#: 🔴 後兩組是**假紅普查逼出來的**，不是設計時就想到的（見本檔假紅普查段落）：
+#:   · `kind=`／`band=`／`cap=`：`context_budget_guard.py` 額度守衛的通知格式（`kind=session
+#:     …band=notice…cap=…`），普查實測它是「被擋」最常見的真實佐證形態之一，且**不含**
+#:     `deny`／`used=` 字樣——原始詞表對這一整類佐證結構性失明。
+#:   · `requested permissions|haven't granted`：Claude Code 自己的權限牆訊息（`Claude
+#:     requested permissions to write to …, but you haven't granted it yet.`），這不是
+#:     本 repo 任何 hook 印的字，是 harness 內建的，逐字固定、本機全母體實測 6 筆逐字相同。
+BLOCK_EVIDENCE_RE = re.compile(
+    r"(permissionDecision|deny|\[SDD-FSM\]|\[SDD-CTX\]|used=|--check|"
+    r"kind=|band=|cap=|requested permissions|haven't granted)", re.IGNORECASE)
+
+
+def unbacked_block_claim_hits(claim_text: str, evidence_text: str) -> list[dict]:
+    """`claim_text` 裡「被擋／水位」的宣稱，而 `evidence_text`（本場佐證）找不到任何
+    deny／[SDD-FSM]／[SDD-CTX]／used=／--check／kind=／band=／cap=／權限牆字樣（`[]`＝沒有）。
+
+    純函式，供攔截端（本檔 Stop 分支）與普查端共用同一份判準。與前四個判準的分工：
+    那四個問「這個數字／判決有沒有出處」，本判準問的是「『被擋』這件事本身有沒有在
+    本場留下痕跡」——被擋是一個機器事件，deny 訊息與 [SDD-CTX]／[SDD-FSM] 通知都會
+    落盤成 hook attachment（見 `_block_evidence_text`），一個字樣都沒有就代表本場沒有
+    這件事的任何痕跡，那句「被擋了」只能是記憶／臆測，不是這一場真的發生過的事。
+
+    `evidence_text` 是**全場**的證據（tool_result ＋ 兩型 hook attachment 的合併文字），
+    不逐句比對——被擋事件與宣稱它的那句話本來就常常不在同一句裡（先被擋、事後收工時
+    才提一句），逐句比對會對這個判準結構性失明。
+    """
+    if BLOCK_EVIDENCE_RE.search(evidence_text):
+        return []
+    hits: list[dict] = []
+    for sentence in _SENTENCE_RE.split(claim_text):
+        sentence = sentence.strip()
+        if not sentence:
+            continue
+        for match in BLOCK_CLAIM_RE.finditer(sentence):
+            if _is_quoted(sentence, match.start(), match.end()):
+                continue
+            hits.append({"phrase": match.group(0), "sentence": sentence[:200]})
+            break  # 一句只報一次
+    return hits
+
+
 def error_literal_mechanism_hits(claim_text: str, tool_output: str) -> list[dict]:
     """`claim_text` 裡「把機器吐出來的錯誤字面當成機制結論」的句子（`[]`＝沒有）。
 
@@ -628,7 +732,16 @@ def error_literal_mechanism_hits(claim_text: str, tool_output: str) -> list[dict
 #: 逐字稿裡「這一列值得 json 解析」的字面前篩。第三項起是 hook 執行結果 attachment 的
 #: `type` 值（M9 的執行期證據面）——刻意用字面前篩而不是全列解析：本機最大逐字稿 6.0 MB，
 #: 每一列都解析會把單次成本從 61ms 推到秒級，而 Stop 是**每一則回覆都會經過**的路徑。
-_INTERESTING = ('"tool_result"', '"hook_success"', '"hook_non_blocking_error"')
+#: 🔴 D15 新增後兩項：`hook_blocking_error`（deny 訊息本體，`attachment.blockingError.
+#: blockingError`）與 `hook_additional_context`（`[SDD-CTX]`／`[SDD-ROUTER]` 這類非阻斷
+#: 通知，`attachment.content`）——本機全母體現查（1,013 支逐字稿的 `attachment.type`
+#: 計數）它們是「被擋」與「水位通知」在逐字稿裡唯一的落盤形態；且**沒有任何記錄帶字面
+#: `permissionDecision`**（那是設計文件裡假設的欄位名，本機母體零命中）——本檔按實際
+#: 落盤形態收證據，不按字面猜的欄位名。此前 `_read_transcript` 的前篩不含這兩個字面，
+#: 兩型 attachment 從未被 JSON 解析過，第五個判準因此永遠拿不到本場真實的 deny／通知
+#: 證據（見 `_block_evidence_text`）。
+_INTERESTING = ('"tool_result"', '"hook_success"', '"hook_non_blocking_error"',
+                '"hook_blocking_error"', '"hook_additional_context"')
 
 
 def _read_transcript(transcript_path: str, byte_cap: int = 32 * 1024 * 1024
@@ -685,6 +798,34 @@ def _tool_output_digits(transcript_path: str, byte_cap: int = 32 * 1024 * 1024) 
     """本場**自己跑出來的**工具輸出（只認 `tool_result`；見檔頭誠實劃界）。"""
     return "\n".join(text for _when, text in
                      _read_transcript(transcript_path, byte_cap)[0])
+
+
+def _block_evidence_text(records: list) -> str:
+    """第五個判準（D15）要用的佐證文字：`hook_blocking_error` 的 deny 訊息本體
+    （`blockingError.blockingError`）＋ `hook_additional_context` 的通知內容（`content`）。
+
+    這兩型 attachment 是「被擋」與「[SDD-CTX]／[SDD-FSM] 通知」在逐字稿裡唯一的落盤
+    形態（見 `_INTERESTING` 旁註的母體現查）。任何形狀不符一律跳過，不得讓一筆壞資料
+    拖垮整支 hook（與本檔其餘 I/O 收口同一慣例）。
+    """
+    parts: list[str] = []
+    for rec in records:
+        att = rec.get("attachment") if isinstance(rec, dict) else None
+        if not isinstance(att, dict):
+            continue
+        kind = att.get("type")
+        if kind == "hook_blocking_error":
+            blocking = att.get("blockingError")
+            text = blocking.get("blockingError") if isinstance(blocking, dict) else blocking
+            if isinstance(text, str):
+                parts.append(text)
+        elif kind == "hook_additional_context":
+            content = att.get("content")
+            if isinstance(content, list):
+                parts.extend(str(c) for c in content if isinstance(c, str))
+            elif isinstance(content, str):
+                parts.append(content)
+    return "\n".join(parts)
 
 
 def _say(messages: list[str], event: str, quiet: bool) -> None:
@@ -789,6 +930,18 @@ def main() -> int:
                     f"（常數／變因／對照組／反例／成功組／失敗組…）即抑制。"
                     f"（判準：.claude/hooks/check_claim_provenance.py"
                     f"；關閉：AUTOSDD_CAUSAL_GUARD_OFF=1）")
+        if not os.environ.get("AUTOSDD_BLOCK_CLAIM_GUARD_OFF"):
+            block_evidence = output + "\n" + _block_evidence_text(records)
+            blocked = unbacked_block_claim_hits(claim, block_evidence)
+            if blocked:
+                listed = "／".join(f"「{h['phrase']}」" for h in blocked[:4])
+                messages.append(
+                    f"🔴 這一則有 {len(blocked)} 句「被擋／水位」宣稱（{listed}），但本場"
+                    "沒有任何 deny／[SDD-FSM]／[SDD-CTX]／used= 佐證。請先跑 "
+                    "`python tools/session_resume_planner.py --check`，或逐字引用 hook "
+                    "訊息裡的 used=/window=。"
+                    "（判準：.claude/hooks/check_claim_provenance.py"
+                    "；關閉：AUTOSDD_BLOCK_CLAIM_GUARD_OFF=1）")
         if not os.environ.get("AUTOSDD_PACE_GUARD_OFF"):
             messages += _pace_messages(
                 stale_pace_hits(claim, stamped, datetime.now(timezone.utc)))

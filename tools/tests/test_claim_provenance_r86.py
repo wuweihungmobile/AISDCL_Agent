@@ -802,5 +802,135 @@ class TestTheNakedGuardIsItsOwnProcessLevelContract(unittest.TestCase):
                           f"{foreign} 消失了 ⇒ 那個判準被順手併進別人的開關")
 
 
+#: D15：一句赤裸的「被擋」宣稱，本場零證據。
+_BLOCKED_CLAIM = "剛開新視窗，工具就被擋了，什麼都不能寫。"
+
+
+class TestTheUnbackedBlockClaimJudgement(unittest.TestCase):
+    """第五個判準（D15；DEF-200-275 第五輪）：「被擋／水位」宣稱在本場沒有
+    deny／[SDD-FSM]／[SDD-CTX]／used= 佐證時出聲。"""
+
+    def test_a_bare_block_claim_with_no_evidence_is_flagged(self) -> None:
+        hits = G.unbacked_block_claim_hits(_BLOCKED_CLAIM, "")
+        self.assertTrue(hits, "赤裸的「被擋」宣稱沒有被抓到")
+        self.assertEqual(hits[0]["phrase"], "被擋")
+
+    def test_a_quoted_block_phrase_is_being_discussed_not_asserted(self) -> None:
+        self.assertEqual(
+            G.unbacked_block_claim_hits("守衛的判準名字就叫「被擋」偵測。", ""), [],
+            "引號內的詞是被談論的對象，不是斷言")
+
+    def test_a_real_deny_marker_in_this_sessions_evidence_silences_it(self) -> None:
+        evidence = "[SDD-CTX][CRIT] deny：本次呼叫被拒絕。"
+        self.assertEqual(G.unbacked_block_claim_hits(_BLOCKED_CLAIM, evidence), [],
+                         "本場已有 deny／[SDD-CTX] 佐證，不該再被判成無佐證")
+
+    def test_a_used_equals_reading_in_this_sessions_evidence_silences_it(self) -> None:
+        evidence = "used=850000 window=1000000 來源=指定值"
+        self.assertEqual(G.unbacked_block_claim_hits(_BLOCKED_CLAIM, evidence), [],
+                         "本場已有 used= 佐證，不該再被判成無佐證")
+
+    def test_a_check_invocation_in_this_sessions_evidence_silences_it(self) -> None:
+        evidence = "已跑 python tools/session_resume_planner.py --check 核對過水位"
+        self.assertEqual(G.unbacked_block_claim_hits(_BLOCKED_CLAIM, evidence), [],
+                         "引用了查證指令本身也算已經去查過")
+
+    def test_a_quota_guard_notice_in_this_sessions_evidence_silences_it(self) -> None:
+        """假紅普查逼出來的（見本檔假紅普查方法段）：`context_budget_guard.py` 的
+        `kind=`／`band=`／`cap=` 通知格式不含 `deny`／`used=`，原始詞表對它結構性失明。"""
+        evidence = "kind=session 28% band=notice cap=4 reason=ok"
+        self.assertEqual(G.unbacked_block_claim_hits(_BLOCKED_CLAIM, evidence), [])
+
+    def test_a_permission_wall_message_in_this_sessions_evidence_silences_it(self) -> None:
+        """假紅普查逼出來的：harness 自己的權限牆訊息（不是任何 repo hook 印的字，逐字
+        固定，本機全母體實測 6 筆一致）。"""
+        evidence = ("Claude requested permissions to write to /tmp/x.md, "
+                   "but you haven't granted it yet.")
+        self.assertEqual(G.unbacked_block_claim_hits(_BLOCKED_CLAIM, evidence), [])
+
+    def test_a_clean_claim_with_no_block_phrase_is_silent(self) -> None:
+        self.assertEqual(G.unbacked_block_claim_hits("已完成三個檔案的修改。", ""), [])
+
+
+class TestTheUnbackedBlockClaimHookWiring(unittest.TestCase):
+    """程序層：D15 判準真的接進 Stop 分支，證據面真的讀得到 attachment 型佐證，
+    且逃生口不與其他判準共用。"""
+
+    def setUp(self) -> None:
+        self._dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._dir.cleanup)
+
+    def _write_transcript(self, lines: list[str]) -> Path:
+        p = Path(self._dir.name) / "t.jsonl"
+        p.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+        return p
+
+    def _run(self, claim: str, transcript: Path, env_extra: dict | None = None):
+        payload = json.dumps({"hook_event_name": "Stop", "last_assistant_message": claim,
+                              "transcript_path": str(transcript)})
+        env = {**os.environ, **(env_extra or {})}
+        return subprocess.run([sys.executable, str(_HOOK)], input=payload, env=env,
+                              capture_output=True, text=True, timeout=60,
+                              encoding="utf-8", errors="replace")
+
+    def test_a_bare_claim_with_an_empty_transcript_is_flagged_on_stderr(self) -> None:
+        transcript = self._write_transcript([])
+        done = self._run(_BLOCKED_CLAIM, transcript)
+        self.assertEqual(done.returncode, 0, "本守衛永不阻斷")
+        self.assertIn("被擋／水位", done.stderr)
+
+    def test_a_real_deny_attachment_in_the_transcript_silences_it(self) -> None:
+        """驗證 `_INTERESTING` 前篩真的把 `hook_blocking_error` 攔進來，不是只在
+        單元測試層面繞過真實逐字稿。"""
+        line = json.dumps({
+            "type": "attachment",
+            "attachment": {"type": "hook_blocking_error", "hookEvent": "PreToolUse",
+                           "blockingError": {
+                               "blockingError": "[SDD-CTX] deny：used=900000 window=1000000"}},
+        })
+        transcript = self._write_transcript([line])
+        done = self._run(_BLOCKED_CLAIM, transcript)
+        self.assertEqual(done.returncode, 0)
+        self.assertNotIn("被擋／水位", done.stderr, "真實 deny attachment 沒有被讀到")
+
+    def test_a_real_additional_context_attachment_silences_it(self) -> None:
+        line = json.dumps({
+            "type": "attachment",
+            "attachment": {"type": "hook_additional_context", "hookEvent": "PostToolUse",
+                           "content": ["[SDD-CTX][WARN] used=800000 window=1000000"]},
+        })
+        transcript = self._write_transcript([line])
+        done = self._run(_BLOCKED_CLAIM, transcript)
+        self.assertEqual(done.returncode, 0)
+        self.assertNotIn("被擋／水位", done.stderr,
+                         "真實 hook_additional_context attachment 沒有被讀到")
+
+    def test_the_escape_hatch_silences_only_this_one(self) -> None:
+        transcript = self._write_transcript([])
+        claim = _BLOCKED_CLAIM + " 收工：99991 passed。"  # baseline-ok: 合成語料
+        done = self._run(claim, transcript, {"AUTOSDD_BLOCK_CLAIM_GUARD_OFF": "1"})
+        self.assertEqual(done.returncode, 0)
+        self.assertNotIn("被擋／水位", done.stderr, "逃生口沒有真的關掉本判準")
+        self.assertIn("99991", done.stderr, "另一個判準被順手關掉了")
+
+    def test_the_new_hatch_is_read_and_is_not_shared(self) -> None:
+        read_names = {
+            node.args[0].value
+            for node in ast.walk(ast.parse(_HOOK.read_text(encoding="utf-8")))
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute) and node.func.attr == "get"
+            and isinstance(node.func.value, ast.Attribute)
+            and node.func.value.attr == "environ"
+            and node.args and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[0].value, str)
+        }
+        self.assertIn("AUTOSDD_BLOCK_CLAIM_GUARD_OFF", read_names,
+                      "第五個判準必須有自己的逃生口")
+        for foreign in ("AUTOSDD_CLAIM_GUARD_OFF", "AUTOSDD_NAKED_GUARD_OFF",
+                        "AUTOSDD_CAUSAL_GUARD_OFF", "AUTOSDD_PACE_GUARD_OFF"):
+            self.assertIn(foreign, read_names,
+                          f"{foreign} 消失了 ⇒ 那個判準被順手併進別人的開關")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -317,6 +317,30 @@ def known_model_window(
     return None
 
 
+def _converge_pinned_window(
+    pinned: int, observed_model: object, known_models: dict[str, int] | None,
+) -> tuple[int, str] | None:
+    """②③④ 階釘值 vs 逐字稿實跑 model 查表值的收斂（D14）。`None`＝不收斂（沿用釘值）。
+
+    只認 `observed_model`——`model_hint` 是 settings 自己宣告的欄位，用它來否決同一份
+    settings 宣告的釘值沒有意義。表值 `>=` 釘值時不收斂（保留使用者刻意設的較小指定值，
+    即使模型上限更大也不放大分母）；只有表值嚴格小於釘值才收斂——避免一個大於模型真實
+    上限的釘值繼續拿去餵 CRIT／AUTO_COMPACT 分母（方向論證同模組 docstring：猜小只是
+    早喊，猜大會讓阻斷遲到）。
+    """
+    if not known_models:
+        return None
+    key = normalize_model_id(observed_model)
+    if not key or key not in known_models:
+        return None
+    table_value = known_models[key]
+    if table_value >= pinned:
+        return None
+    return table_value, (
+        f"{SOURCE_KNOWN_MODEL_PREFIX}，model={key}；指定值 {pinned:,} 大於該模型上限，已收斂）"
+    )
+
+
 def resolve_window(
     peak_used: int,
     *,
@@ -333,9 +357,16 @@ def resolve_window(
 
     順序見模組 docstring。`sdd_raw=None, known_models={}` 時與姊妹守衛 `resolve_window` 結果
     逐項相等（parity 鎖）。
+
+    D14：②③④ 階（`AUTOSDD_CONTEXT_WINDOW`／CC env／settings `autoCompactWindow`）的釘值
+    若大於 `observed_model` 查表得到的上限，收斂到表值（見 `_converge_pinned_window`）；
+    ① `SDD_MAX_CONTEXT` 是 session 手動釘值，永不收斂。
     """
+    if sdd_raw is not None:
+        pinned = positive_int(sdd_raw)
+        if pinned > 0:
+            return pinned, SOURCE_PINNED_SDD
     for raw, source in (
-        (sdd_raw, SOURCE_PINNED_SDD),
         (autosdd_raw, SOURCE_PINNED_AUTOSDD),
         (cc_env_raw, SOURCE_PINNED_CC_ENV),
         (settings_window, SOURCE_PINNED_CC_SETTING),
@@ -344,6 +375,9 @@ def resolve_window(
             continue
         pinned = positive_int(raw)
         if pinned > 0:
+            converged = _converge_pinned_window(pinned, observed_model, known_models)
+            if converged is not None:
+                return converged
             return pinned, source
     from_model = window_from_model(model_hint, observed_model)
     if from_model is not None:
