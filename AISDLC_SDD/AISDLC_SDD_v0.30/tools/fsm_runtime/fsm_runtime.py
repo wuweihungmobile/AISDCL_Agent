@@ -120,11 +120,12 @@ _RULE_FIRE_TELEMETRY_ENV = "SDD_ENABLE_RULE_FIRE_TELEMETRY"
 
 
 def _rule_fire_telemetry_enabled() -> bool:
-    """True 為預設（unset → ON，v0.24 活體化）；僅顯式 falsy（0/false/no/off）→ OFF opt-out。"""
-    val = os.environ.get(_RULE_FIRE_TELEMETRY_ENV, "").strip().lower()
-    if val == "":
-        return True  # v0.24 預設 ON（B-axis L5 規則命中遙測活體化）
-    return val in {"1", "true", "yes", "on"}
+    """True 為預設（unset → ON，v0.24 活體化）；僅顯式 falsy（0/false/no/off）→ OFF opt-out。
+
+    D28（見下方 `_telemetry_writeback_allowed`）：unset 時另受 session 級
+    SDD_TELEMETRY_WRITEBACK_REQUIRES_HOOK 加法式約束，v0.24 顯式 0/1 契約不變。
+    """
+    return _telemetry_writeback_allowed(_RULE_FIRE_TELEMETRY_ENV)
 
 
 # W-19-2 / B-axis L5（規則命中遙測「catch 側記帳」開關，鏡像 fire 側翻環）。
@@ -140,10 +141,69 @@ _RULE_CATCH_TELEMETRY_ENV = "SDD_ENABLE_RULE_CATCH_TELEMETRY"
 
 def _rule_catch_telemetry_enabled() -> bool:
     """True 為預設（unset → ON，v0.24 活體化）；僅顯式 falsy（0/false/no/off）→ OFF opt-out。"""
-    val = os.environ.get(_RULE_CATCH_TELEMETRY_ENV, "").strip().lower()
+    return _telemetry_writeback_allowed(_RULE_CATCH_TELEMETRY_ENV)
+
+
+# D28（DEF-200-275 第七輪 SA-R7-01）：session 級「要求 hook 身分」加法式守衛 ─────────────
+# 起因：pytest 外任何 FSM 驅動（探針／審查 agent／手動重現）只要漏加
+# SDD_ENABLE_RULE_FIRE_TELEMETRY=0 SDD_ENABLE_RULE_CATCH_TELEMETRY=0 前綴，就會在
+# unset→ON 的 v0.24 預設下對 tracked 的 governance/rules/*.yaml 寫回 fire_count／
+# catch_count（第五輪、第七輪各真實發生一次污染）——靠人記前綴不是機械守衛。
+# **為何不翻 v0.24 預設**：unset→ON 已被 43 處測試與文件釘住；框架獨立於 Claude Code
+# session 外使用時（裸終端 CLI 驅動 FSM）仍需 ON，翻預設會讓該路徑靜默退化成不記帳。
+# **為何要兩個 env、不是一個**：
+#   - `SDD_TELEMETRY_WRITEBACK_REQUIRES_HOOK` 是 *session 級開關*，只由
+#     `.claude/settings.json` 的 env 區塊釘 "1"（Claude Code 會把它注入整個 session：
+#     Bash 工具子行程與 hook 行程皆繼承）。
+#   - `SDD_FSM_HOOK_ENTRY` 是 *hook 身分標記*，只由三支真正的 hook
+#     （context_ledger_pre／context_ledger_post／session_start）在自己 main() 入口用
+#     os.environ 設 "1"，從不寫進任何 settings。
+#   兩者缺一都無法分辨「這是不是 hook 行程」：harness 既有 env（CLAUDECODE、
+#   SDD_ACTIVE_VERSION）在 Bash 工具子行程與 hook 行程皆為真，本 session 實測
+#   CLAUDE_PROJECT_DIR 亦不可靠（Bash 工具子行程量到是空字串）——沒有現成信號可用，
+#   只能自建一個「只有 hook 自己會設」的旗標，且只在 session 明確要求時才強制檢查它，
+#   使 session 外的裸 CLI（REQUIRES_HOOK 未設）完全不受影響、逐字沿用 v0.24 行為。
+_TELEMETRY_WRITEBACK_REQUIRES_HOOK_ENV = "SDD_TELEMETRY_WRITEBACK_REQUIRES_HOOK"
+_FSM_HOOK_ENTRY_ENV = "SDD_FSM_HOOK_ENTRY"
+
+# 同行程只出聲一次（避免同一 session 內多次 transition 洗版 stderr）。
+_telemetry_writeback_skip_warned = False
+
+
+def _explicit_telemetry_bool_env(name: str) -> Optional[bool]:
+    """讀一個 telemetry flag 的顯式值；unset/空字串回 None（交由呼叫端決定預設）。"""
+    val = os.environ.get(name, "").strip().lower()
     if val == "":
-        return True  # v0.24 預設 ON（B-axis L5 catch 側遙測活體化）
+        return None
     return val in {"1", "true", "yes", "on"}
+
+
+def _telemetry_writeback_allowed(explicit_env: str) -> bool:
+    """D28 共用判定：顯式 0/1（含 true/false/yes/no/on/off）永遠優先，v0.24 契約零變更。
+
+    未設顯式值時：session 要求 hook 身分（REQUIRES_HOOK 為真）且本行程不是 hook
+    （HOOK_ENTRY 不為真）→ False（跳過寫回，stderr 出聲一次）；否則 → True
+    （v0.24 預設 ON，含 session 外裸 CLI 與已標記的 hook 行程）。
+    """
+    explicit = _explicit_telemetry_bool_env(explicit_env)
+    if explicit is not None:
+        return explicit
+    requires_hook = _explicit_telemetry_bool_env(_TELEMETRY_WRITEBACK_REQUIRES_HOOK_ENV) or False
+    if requires_hook and os.environ.get(_FSM_HOOK_ENTRY_ENV, "").strip() != "1":
+        global _telemetry_writeback_skip_warned
+        if not _telemetry_writeback_skip_warned:
+            _telemetry_writeback_skip_warned = True
+            # 全 ASCII：本檔是入口點且無 UTF-8 stdio 保護（同 _cli() 既有慣例；
+            # test_subprocess_encoding_hygiene 鎖），行內 reconfigure 又受 stdio-SSOT
+            # 複本棘輪禁止（test_platform_utils_dedup）——鐵律三 console 編碼。
+            print(
+                "[SDD-FSM] rule telemetry write-back skipped: not a hook process "
+                f"({_TELEMETRY_WRITEBACK_REQUIRES_HOOK_ENV}=1; "
+                f"hook entry sets {_FSM_HOOK_ENTRY_ENV}=1)",
+                file=sys.stderr,
+            )
+        return False
+    return True
 
 
 def _reset_today_ledger(*, lock_timeout: float = 1.0) -> dict:

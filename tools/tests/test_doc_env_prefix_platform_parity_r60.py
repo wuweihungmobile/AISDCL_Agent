@@ -2,20 +2,11 @@
 """活文件「`VAR=value <指令>` bash 前綴語法必附 PowerShell 對照」機械鎖
 （R60 Scan-D D-02 根治，DEF-101-513 家族）。
 
-WHY（為何非得有這道鎖）：
-  PowerShell **沒有** `VAR=value <指令>` 這種行內環境變數前綴語法。照抄 bash 形態的
-  Windows 使用者拿到的是 `The term 'PYTHONUTF8=1' is not recognized as the name of a
-  cmdlet...`（本機 Windows PowerShell 5.1 實測），而且錯誤訊息完全不指向真正的原因，
-  看起來像「lint-imports 沒裝」。設環境變數須寫 `$env:VAR=值; <指令>`。
-  這個家族已**三度復發、四個站點**，每次都靠人工逐份補：
-    - R57：`ONBOARDING.md` §7 補齊；
-    - R59（DEF-101-513）：根 `CLAUDE.md` §測試/Lint、`docs/AISDLC_Agent_UserGuide.md`
-      §1.4 補齊——但同一份修復**漏掉** `AutoClaude/README.md`；
-    - R60 Scan-D D-02：`AutoClaude/README.md` 的 `PYTHONUTF8=1 lint-imports` 仍是
-      bash 單邊，且整份 README 的 `$env:` 出現 **0 次**（不是「對照隔太遠」而是
-      「完全沒有」）。
-  該家族在 R60 之前**零機械鎖**（實查：全 repo 沒有任何檢查器碰過這個形狀），所以
-  「下一份新文件又只寫 bash 形態」是必然而非偶然。本測試把它升為機械守門。
+WHY：PowerShell **沒有** `VAR=value <指令>` 這種行內環境變數前綴語法，須改寫
+  `$env:VAR=值; <指令>`；照抄 bash 形態的 Windows 使用者拿到的錯誤訊息完全不指向
+  真正的原因。此家族已三度復發、四個站點皆靠人工逐份補（R57／R59／R60），R60 之前
+  零機械鎖，故本測試升為機械守門（史料見 CrossPlatform_DEF200275_Context_Metering_
+  Evidence.md〈第七輪 史料搬遷〉）。
 
 判準邊界（誠實劃界，比照 check_pytest_baseline_sites.py docstring 風格）：
   掃描面＝下方 `_LIVE_DOCS` 名冊（**活文件**，非全 repo）。名冊沿用

@@ -647,12 +647,11 @@ def _round_no(path: str) -> int | None:
 
 
 class TestArchivedIterationDocRefsResolve(unittest.TestCase):
-    """R72 資料層：歸檔後，根層 `docs/` 對四件套的引用必須仍解析得到。
-
-    掃描面與 `TestRootDocsPathRefsAreCaseExact` 同（根層 `docs/` 的 .md），
-    但問的是**另一個問題**：那道鎖三分法裡「上層與 lowercase 索引皆不中」的那一支
-    是**刻意放行**的（避免死連結偵測變噪音來源），於是搬檔造成的斷鏈對它完全隱形。
-    本類把「四件套」這個**檔名形態明確、轉址規則明確**的子集從那個縫裡撿回來守。
+    """R72 資料層：歸檔後，根層 `docs/` 對四件套的引用必須仍解析得到——
+    `TestRootDocsPathRefsAreCaseExact` 的三分法對「上層與 lowercase 索引皆不中」
+    刻意放行（避免死連結偵測變噪音），本類把「四件套」這個檔名形態明確的子集從
+    那個縫裡撿回來守（史料見 CrossPlatform_DEF200275_Context_Metering_Evidence.md
+    〈第七輪 史料搬遷〉）。
     """
 
     @classmethod

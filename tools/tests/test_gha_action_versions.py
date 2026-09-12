@@ -19,37 +19,15 @@
      本體必須全 ASCII（R76-02）。詳見 `TestPowershellRunBodyIsAscii` 的
      docstring——含它**守不到**哪一面的誠實劃界。
 
-【B 節為何不用 pyyaml】根層 `tools/`＋`tools/tests/` 全數 stdlib-only，
-`root-infra-ci.yml` 的 root-infra job 沒有 `setup-python`、也沒有任何
-`pip install` 步驟（實查該檔可證），引入 pyyaml 會替根層閘門新增一個此前不存在
-的外部相依。故 B 節自帶一個**縮限用途**的縮排掃描器 `parse_shell_distribution()`，
-並以下列實測建立等價性證據：
-
-  已實測涵蓋：本 repo 根層 11 支 workflow 中，7 支（aisdlc-sdd-arch-fitness /
-  aisdlc-sdd-artifact-cleanup / aisdlc-sdd-drift-daily / aisdlc-sdd-fsm-chaos-nightly
-  / macos-compat-ci / root-infra-ci / windows-compat-ci）以本掃描器與
-  `yaml.safe_load` 逐 job 比對 `runs-on` 與 run-step shell 分佈，結果**全部相等**。
-  已知不涵蓋（掃描器主動 raise、不做靜默猜測）：帶 `defaults:` 區塊的檔案
-  （aisdlc-sdd-ci / autoclaude-ci / autoclaude-mutation-on-change /
-  autoclaude-pg-e2e-on-label 共 4 支）——本鎖只服務 windows-compat-ci.yml，
-  而該檔檔頭自述「全檔無 workflow 層／job 層 defaults:」，因此把 `defaults:`
-  的出現直接當成「快照前提已被推翻」而 fail-loud。
-  未窮舉：非本 repo 的任意 YAML 寫法（流式對映 `{...}`、錨點/別名、`- run: |`
-  以外的區塊純量寫法、tab 縮排等）一律不保證——掃描器對認不得的形狀是
-  raise 而非猜測，故失效方向是紅燈不是綠燈。
-
-【C 節為何**可以**用 pyyaml（與 B 節不同調，這是有據的差別不是矛盾）】上段
-「根層全數 stdlib-only」寫於 R57；R68 之後該前提已由 repo 自己推翻並改成受管
-相依——`tools/run_root_unittests.py` 的 `_THIRD_PARTY_PREREQS` 明列
-`("yaml", "pyyaml")`，且由三道機械物看守：runner 開場 fail-fast、下限失敗訊息
-歸因、以及 `test_run_root_unittests.py::CiPrereqInstallLockTest`（凡在 CI 跑本
-runner 的 job 都必須先裝清單裡每一個 pip 名）。實查三個消費者皆已安裝：
-`root-infra-ci.yml:396`、`windows-compat-ci.yml`／`macos-compat-ci.yml` 的
-「tools/tests 第三方相依」步驟；本機 pre-push 走 `.venv`（AutoClaude runtime
-本就相依 pyyaml）。C 節要判的是「run 本體」這個**值**，縮排掃描器對區塊純量的
-續行、`|`／`>`／`|-` 變體、行內註解各有一套規則，自寫近似只會多一個新的失明
-面——B 節當時付不起的相依成本，今天已經是既成事實，故不重複造輪。
-B 節維持原樣（不改動既有綠鎖）。
+【B 節為何不用 pyyaml、C 節為何可以】B 節立於「根層 stdlib-only」前提（R57），
+自帶縮限用途的縮排掃描器 `parse_shell_distribution()`（已實測涵蓋根層 11 支
+workflow 中 7 支、與 `yaml.safe_load` 逐 job 比對全部相等；帶 `defaults:` 區塊的
+4 支主動 raise 不猜測；非本 repo 的任意 YAML 寫法一律不保證，失效方向是紅燈）。
+R68 起該前提已由 repo 自己推翻——`tools/run_root_unittests.py` 的
+`_THIRD_PARTY_PREREQS` 已把 pyyaml 列為受管相依（三道機械物看守安裝），C 節
+因此直接用 pyyaml 判「run 本體」這個值，不重複造第二套掃描器；B 節維持原樣
+（不改動既有綠鎖）。史料見 CrossPlatform_DEF200275_Context_Metering_Evidence.md
+〈第七輪 史料搬遷〉。
 
 執行：python3 -m unittest tools.tests.test_gha_action_versions -v
 （亦由 tools/run_root_unittests.py discover 納入）

@@ -1,45 +1,18 @@
 #!/usr/bin/env python3
 """tools/dev_start 兩支殼（.ps1 / .sh）的「被 source 時 rc 語意」回歸鎖。
 
-# 第一部分（原始職責）：tools/dev_start.ps1 dot-source 失敗分支 $LASTEXITCODE（DEF-101-304）
+第一部分（DEF-101-304）：`tools/dev_start.ps1` dot-source 失敗分支曾未對
+`$LASTEXITCODE` 賦值（呼叫前殘值可能是 0 而誤判成功），對等的 `.sh` 用 `return 1`
+正確傳遞失敗，兩邊曾不對稱（R35 發現）；本測試只驗證「找不到 Python 直譯器」這條
+分支（PATH 清空即可穩定觸發）。
 
-`tools/dev_start.ps1` 的 `.NOTES` 明載「dot-source 呼叫端判斷成功/失敗請讀
-$LASTEXITCODE，不要用 $?」，但早期失敗分支（找不到 repo 根／找不到 Python
-直譯器）在 dot-source 情境下只執行裸 `return`，未對 `$LASTEXITCODE` 賦值——
-呼叫前的殘值（可能是 0）會被誤判為成功。對等的 `tools/dev_start.sh` 用
-`return 1` 正確傳遞失敗，兩邊在 exit code 語意上不對稱（R35 Scan-A 發現）。
-
-本測試只驗證「找不到 Python 直譯器」這條分支（PATH 清空即可穩定觸發，
-不依賴 Windows PATHEXT／`.cmd` 解析語意，pwsh 在 macOS/Linux/Windows 上
-dot-source 與 `$LASTEXITCODE` 的語言層行為一致，故不比照
-`test_bootstrap_ps1.py` 的 `_windows_pwsh_available()` 額外限定真 Windows）。
-
-# 第二部分（R67-C17 併入）：tools/dev_start.sh 的 zsh／bash 實跑載具
-
-**為何併進本檔而不新開一支**：`DEF-101-561③`（由
-`test_adr_xplat001_c1c2_lock.py::TestGuardLayerRatchet` 機械強制）要求
-「把新判準擴充進既有鎖檔」（🔴 R78 ARCH-03 訂正：R67 當時它量的是**檔數**、語意是
-「禁止新增」；R77 起改量逐檔行數的**淨額**，新增檔案本身不違規）。而本檔正是 dev_start
-兩支殼「被 source／dot-source 時如何傳 rc」的既有鎖檔——上面第一部分的緣起，逐字就是
-「對等的 `tools/dev_start.sh` 用 `return 1` 正確傳遞失敗」這句**從未被機械驗證過**的
-對照宣稱。第二部分把那句話變成真跑出來的事實，是同一條軸上的補完，不是雜物。
-
-**缺口本體（R67-C17）**：`source tools/dev_start.sh` 是 ONBOARDING §2.1 教使用者每天
-開工敲的第一道指令，而 macOS 自 Catalina 起預設 shell 就是 **zsh**。該檔有真正的 zsh
-專屬程式碼路徑：`ZSH_EVAL_CONTEXT` 判定是否被 source、`${(%):-%x}` 取當前檔案路徑
-（`zsh -c` 下 `$0` 是 "zsh"，不可靠）。R67 全庫普查實測：這條分支在整個自動化層的唯一
-執行者是 `.github/workflows/macos-compat-ci.yml` 的一個 step，而該 workflow 因 CI 帳務
-停擺（DEF-101-081）多輪未真正執行 ⇒ **使用者最常走的開工入口，全 repo 零活體驗證**。
-`bash -n` / `zsh -n` 只做語法解析，執行不到這條分支（本機實測兩者皆 rc=0）。
-
-🔴 **第二部分的斷言「結構」是重點，不只是斷言內容**（R67-C17 附帶發現的直接修復）：
-macOS compat-CI 那個 step 的形狀是「`zsh -c 'source dev_start.sh; <斷言>'`」——把斷言
-寫在同一個 shell 的 source 之後。R67 注入實測證明該形狀對它**本來要抓的主要故障模式
-結構性失明**：一旦 sourced 偵測壞掉（`_ds_sourced=0`），dev_start.sh 會落到檔尾
-`exit "$_ds_rc"`，**直接殺掉整個 `zsh -c`**，後面所有斷言一行都不執行、rc 仍為 0 全綠
-（實測：注入後 CI 形狀 rc=0、`ASSERTION_LINE_REACHED` 從未印出）。故本檔改用**行程外側
-通道**：把證物寫進 source 之後的一個重導向檔，再於 Python 端檢查。「斷言被跳過」因此
-變成「證物檔不存在」＝當場紅，而不是靜默通過。
+第二部分（R67-C17 併入既有鎖檔，非新開一支）：`source tools/dev_start.sh` 是使用者
+每天開工的第一道指令，該檔的 zsh 專屬路徑（`ZSH_EVAL_CONTEXT`／`${(%):-%x}`）此前
+全 repo 零活體驗證（CI 帳務停擺、`bash -n`/`zsh -n` 只做語法解析）。斷言刻意走
+**行程外側通道**（證物寫進重導向檔、Python 端檢查）——同一 shell 內斷言在 sourced
+偵測壞掉時會被 dev_start.sh 檔尾 `exit` 直接殺掉、後面斷言一行都不執行卻仍 rc=0；
+「斷言被跳過」因此變成「證物檔不存在」＝當場紅，而不是靜默通過（史料見
+CrossPlatform_DEF200275_Context_Metering_Evidence.md〈第七輪 史料搬遷〉）。
 
 第二部分覆蓋（每項在 zsh 與 bash 各跑一次，鎖住兩殼行為對等）：
   1. 被 source 時**不得**殺掉呼叫端 shell（證物檔必須存在）

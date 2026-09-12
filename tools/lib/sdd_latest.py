@@ -15,9 +15,18 @@ import（同 `tools/lib/platform_utils.py`／`tools/lib/bash_probe_spec.py` 既�
 `tools/check_script_parity.py::_find_latest_sdd_version()` 另有一份「解析失敗回
 `None`」的軟失敗契約，該檔本身不在本輪收斂範圍（不強行統一兩種契約，亦不在本模組
 新增一個目前沒有任何呼叫端的 Optional 版入口——沒有呼叫端的分支寫了也測不到）。
+
+D27（DEF-200-275 第七輪）另加 `resolve_latest_name_fast`/`resolve_latest_root_fast`：
+`resolve_latest_name` 每次呼叫都起一個新 python 子行程執行 `sdd_version.py`，
+`context_budget_guard.py` 從「只在有 pin 時才查表」改成每次工具呼叫都查表後，
+這個直譯器冷啟動成本不再攤提得起。fast 版以 `importlib` 就地載入同一支
+`sdd_version.py` 呼叫其 `latest_version_name()`，省的只是「多開一個 python 行程」
+這一層；SSOT 與 raise 契約不變，`git ls-files`（`latest_version_name()` 內部）
+子行程仍保留——那是語意本身要的 I/O，不是本函式要省的對象。
 """
 from __future__ import annotations
 
+import importlib.util
 import re
 import subprocess
 import sys
@@ -71,6 +80,31 @@ def resolve_latest_root(sdd_root: Path) -> Path:
     """LATEST 版根目錄（`sdd_root / resolve_latest_name(sdd_root)`）；解析
     失敗即 `AssertionError`（同 `resolve_latest_name`）。"""
     return sdd_root / resolve_latest_name(sdd_root)
+
+
+def resolve_latest_name_fast(sdd_root: Path) -> str:
+    """`resolve_latest_name()` 的熱路徑版本（D27）：契約逐字相同（解析失敗即
+    `AssertionError`），差別只在不起第二個 python 行程——`importlib` 就地載入
+    `sdd_root/scripts/sdd_version.py` 呼叫其 `latest_version_name()`。"""
+    resolver = sdd_root / "scripts" / "sdd_version.py"
+    spec = (importlib.util.spec_from_file_location("sdd_version_fast", resolver)
+            if resolver.is_file() else None)
+    if spec is None or spec.loader is None:
+        raise AssertionError(f"LATEST 解析失敗：找不到或無法載入 {resolver}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    warnings: list[str] = []
+    name = module.latest_version_name(sdd_root, warn=warnings.append)
+    if not name:
+        raise AssertionError(
+            f"LATEST 解析失敗（於 {sdd_root} 找不到任何版本目錄）；warn={warnings!r}"
+        )
+    return name
+
+
+def resolve_latest_root_fast(sdd_root: Path) -> Path:
+    """`resolve_latest_root()` 的熱路徑版本，見 `resolve_latest_name_fast()`。"""
+    return sdd_root / resolve_latest_name_fast(sdd_root)
 
 
 def exclude_frozen_sdd_versions(paths: list[str], latest_name: str) -> list[str]:

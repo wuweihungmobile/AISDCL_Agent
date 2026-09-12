@@ -613,13 +613,10 @@ class TestTheRelaxationOpensNoNewHoles(_ForeignTreeCase):
         self.assertTrue(self.hits(f"git -C {_REPO_ROOT.parent} clean -fdx"))
 
     def test_the_filesystem_root_contains_the_project_too(self) -> None:
-        """🔴 反向包含的**邊界格**，獨立驗證輪實測出來的漏擋（不是想像的形態）。
-
-        它躲得過上一支測試的機制、以及當時 `cd / && git clean -fdx` 被放行的實測，
-        逐字＝`docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`。
-
-        判準本身刻意不寫死 `/`：用 `os.path.abspath(os.sep)` 取當前平台的根
-        （Windows 上是磁碟機根），否則這支鎖在另一個平台上量的是別的東西。
+        """🔴 反向包含的**邊界格**，獨立驗證輪實測出來的漏擋；判準刻意不寫死 `/`，
+        改用 `os.path.abspath(os.sep)` 取當前平台的根（Windows 上是磁碟機根），
+        否則這支鎖在另一個平台上量的是別的東西（史料見 CrossPlatform_DEF200275_
+        Context_Metering_Evidence.md〈第七輪 史料搬遷〉）。
         """
         fs_root = os.path.abspath(os.sep)
         self.assertTrue(self.hits(f"cd {fs_root} && git clean -fdx"),

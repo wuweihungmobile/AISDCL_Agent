@@ -400,6 +400,10 @@ def _record_audit(entry: dict) -> None:
 
 
 def main() -> int:
+    # D28（DEF-200-275 第七輪 SA-R7-01）：在任何 FSM 呼叫之前先標記「這是真正的 hook 行程」，
+    # 供 fsm_runtime._telemetry_writeback_allowed 分辨 session 內 ad-hoc 探針 vs hook 本身。
+    # 只用 setdefault：已被上游（例如測試）設過就不覆寫。
+    os.environ.setdefault("SDD_FSM_HOOK_ENTRY", "1")
     # zh-TW Windows pipe 預設 cp950：裸 sys.stdin.read() 遇含中文的 UTF-8 payload 會拋
     # UnicodeDecodeError → hook fail-open。改讀 bytes 端以 UTF-8+replace 解碼；
     # 無 buffer（如測試以 StringIO 替身）時回退文字端。

@@ -5,7 +5,8 @@
     "PYTHONUTF8": "1",
     "SDD_SUBAGENT_CONTRACT": "soft",
     "SDD_PATTERN_MATCH_THRESHOLD": "0.75",
-    "SDD_MULTIMODAL_BACKEND": "session"
+    "SDD_MULTIMODAL_BACKEND": "session",
+    "SDD_TELEMETRY_WRITEBACK_REQUIRES_HOOK": "1"
   },
   "hooks": {
     "SessionStart": [

@@ -5097,17 +5097,9 @@ def cloud_nightly_red_problems(
 
 
 def parse_cloud_fields(anchor_tail: str) -> tuple[dict[str, str], list[str]]:
-    """錨尾解析成 `({欄位: 值}, 問題清單)`；同一欄位出現 ≥2 次一律 **fail-loud**。
-
-    🔴 WHY fail-loud 而不是沿用「取最後一個」：錨是**單獨一行**、機器欄位與人讀散文
-    同住那一行，於是散文裡一個 `pending=<sha>…` 字樣就會**靜默覆蓋**真正的欄位值，
-    判準拿帶省略號的字串去比 sha ⇒ 假紅，而錯誤訊息印著一個看起來正確的值
-    （被自己咬到的那次逐字＝R89 收尾證據檔）。
-
-    這與根 CLAUDE.md 那條「已橋接的 hook 名稱不得與射程字樣同行」是**同一個病**：逐行
-    substring 判準遇上同一行的散文。那邊的解是把文件寫成可精確判定，這邊的解是讓歧義
-    **當場 fail-loud**——兩者都不是「把判準放寬」。少了這一條，下一個在錨上寫說明文字的
-    人會再踩一次，而症狀是一個指著正確值卻說它不對的假紅（最難查的那種）。
+    """錨尾解析成 `({欄位: 值}, 問題清單)`；同一欄位出現 ≥2 次一律 **fail-loud**——
+    散文裡一個 `pending=<sha>…` 字樣會靜默覆蓋真正欄位值，讓假紅印出看似正確的值
+    （史料見 CrossPlatform_DEF200275_Context_Metering_Evidence.md〈第七輪 史料搬遷〉）。
     """
     fields: dict[str, str] = {}
     problems: list[str] = []
@@ -5364,12 +5356,10 @@ class TestR74CloudCiStatusIsRecorded(unittest.TestCase):
             "在 CI 的條件（被測 commit == 最新 push）下判紅 ⇒ 又是一個不可滿足的判準")
 
     def test_the_deadlock_scenario_no_longer_forces_a_fabricated_check(self) -> None:
-        """🔴 死結回歸鎖（端到端）：舵手 2026-08-05 實測的那個狀態必須可以合法通過。
-
-        場景逐字重現：本輪改了測試樹 → `--write --with-slow` 把 `measured-at` 推到
-        比 `checked-at` 更新的一天 → 舊判準在此判紅，而唯一的解紅操作是編造一次查核。
-        本測試斷言：**同一份文件**在誠實宣告 pending 之後 rc 面全綠，且**沒有任何欄位
-        被改成當天／HEAD**（`checked-at` 與 `head-sha` 逐字保持原值）。
+        """🔴 死結回歸鎖（2026-08-05 事故；端到端）：改測試樹推高 `measured-at` 早於
+        `checked-at` 時，舊判準判紅、唯一解法是編造查核——本測試斷言誠實宣告 pending
+        後 rc 全綠，且 `checked-at`／`head-sha` 不被竄改（史料見 CrossPlatform_
+        DEF200275_Context_Metering_Evidence.md〈第七輪 史料搬遷〉）。
         """
         old_checked, old_sha = "2026-08-04", self._SHA_A
         text = (

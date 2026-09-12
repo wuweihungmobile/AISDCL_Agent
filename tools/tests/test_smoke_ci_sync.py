@@ -454,15 +454,13 @@ class TestSmokeCiSync(unittest.TestCase):
             )
 
     def test_bash_n_scan_surface_matches_root_infra_ci(self) -> None:
-        """`root-infra-ci.yml` 第 1 道（bash -n）與 `macos_smoke_local.sh` [1/7] 是兩份
-        手寫實作、兩者自述「同一份 git ls-files 清單、同一套判準」，但此前零機械互鎖
-        （立案的三種實測漂移＝`docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`）。
-        凡「兩份硬編實作互稱鏡射」本 repo 一律建鎖（同
-        test_root_infra_parity 的 CI↔pre-push 守門清單鎖），故機械斷言三件事：
+        """`root-infra-ci.yml` 第 1 道（bash -n）與 `macos_smoke_local.sh` [1/7] 兩份
+        手寫實作自述「同一份 git ls-files 清單、同一套判準」卻此前零機械互鎖；
+        機械斷言三件事：
           1. 兩處 `git ls-files` 的 pathspec 樣式集合逐字相同；
           2. 兩處的兩段下限釘選值（active .sh／無副檔名 git-hooks）逐字相同；
-          3. 兩處都以 `sdd_version.py` SSOT 解析 LATEST 做凍結版排除（DEF-101-133：
-             禁止任一方內嵌第二份版本 regex，否則 Copy-on-Evolve 建新版時兩邊分歧）。
+          3. 兩處都以 `sdd_version.py` SSOT 解析 LATEST 做凍結版排除（DEF-101-133）
+        （史料見 CrossPlatform_DEF200275_Context_Metering_Evidence.md〈第七輪 史料搬遷〉）。
         """
         # 三項斷言一律只看「bash -n 那一段」，不看整檔——整檔比對會被檔案別處
         # 剛好也提到同一字串的巧合滿足（bug-injection 實證：只改 [1/7] 段內的

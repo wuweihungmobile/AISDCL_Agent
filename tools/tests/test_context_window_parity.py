@@ -141,5 +141,89 @@ class ContextWindowParityTest(unittest.TestCase):
                                 msg=f"injected {name} but parity stayed green")
 
 
+def _real_known_models() -> tuple[dict[str, int], str, dict[str, int], str]:
+    """兩側查表資料，各自經自己的 `known_model_windows_path()`／`KNOWN_MODEL_WINDOWS_PATH`
+    解析同一份 `known_model_windows.json`（D27／ARCH-A4-01：資料唯一的家）。"""
+    known_root, note_root = guard.load_known_model_windows(guard.known_model_windows_path())
+    known_sdd, note_sdd = cw.load_known_model_windows()
+    return known_root, note_root, known_sdd, note_sdd
+
+
+#: (peak, observed_model, 期望來源字串裡要出現的分類字)。`claude-mystery-9` 不在表裡，
+#: 落下界推論——與 `_WINDOW_CASES` 的既有 `known_models={}` 中和案例互補，不取代：
+#: 那組證明「沒有 ⑥ 這一階時兩側同構」，這組證明「有 ⑥ 這一階時兩側也同構」。
+_LOOKUP_STAGE_CASES = [
+    (0, "claude-fable-5-1", "查表"),
+    (0, "claude-haiku-4-5", "查表"),
+    (0, "claude-mystery-9", "推斷"),
+]
+
+
+def known_model_lookup_problems(
+    known_root: dict[str, int], note_root: str, known_sdd: dict[str, int], note_sdd: str,
+) -> list[str]:
+    """D27：⑥ 查表階 parity 判準（純函式，紅綠由 bug-injection 自證）。"""
+    problems: list[str] = []
+    if known_root != known_sdd:
+        problems.append(f"known_models tables differ：root={len(known_root)} keys，"
+                         f"sdd={len(known_sdd)} keys")
+    for peak, observed, category in _LOOKUP_STAGE_CASES:
+        g_window, g_source = guard.resolve_window(
+            peak, observed_model=observed, known_models=known_root,
+            known_models_note=note_root)
+        s_window, s_source = cw.resolve_window(
+            peak, observed_model=observed, known_models=known_sdd,
+            known_models_note=note_sdd)
+        if g_window != s_window:
+            problems.append(f"lookup[{observed}] window: {g_window} vs {s_window}")
+        if category not in g_source:
+            problems.append(f"lookup[{observed}] root source 缺 {category!r}：{g_source}")
+        if category not in s_source:
+            problems.append(f"lookup[{observed}] sdd source 缺 {category!r}：{s_source}")
+        if guard.may_block(g_source) != cw.may_block(s_source):
+            problems.append(f"lookup[{observed}] may_block mismatch")
+    # 查表階本身兩側會用同一份資料＋同一個 note 組字串，來源說明應逐字相等
+    # （不同於下面「有釘值不收斂」那格——根層 D21／SD-09 在那格多附一段稽核註記，
+    # SDD 側沒有，這是既有已知差異，非本輪 ARCH-A4-01 射程）。
+    for observed in ("claude-fable-5-1", "claude-haiku-4-5"):
+        _, g_source = guard.resolve_window(0, observed_model=observed, known_models=known_root,
+                                            known_models_note=note_root)
+        _, s_source = cw.resolve_window(0, observed_model=observed, known_models=known_sdd,
+                                         known_models_note=note_sdd)
+        if g_source != s_source:
+            problems.append(f"lookup[{observed}] 來源字串未逐字相等：{g_source!r} vs {s_source!r}")
+    # 有釘值 967000＋fable：兩側皆 967000、不收斂（window／may_block 相等）。
+    g_window, g_source = guard.resolve_window(
+        0, "967000", observed_model="claude-fable-5-1", known_models=known_root,
+        known_models_note=note_root)
+    s_window, s_source = cw.resolve_window(
+        0, autosdd_raw="967000", observed_model="claude-fable-5-1", known_models=known_sdd,
+        known_models_note=note_sdd)
+    if (g_window, guard.may_block(g_source)) != (s_window, cw.may_block(s_source)):
+        problems.append(f"pinned+fable: {(g_window, guard.may_block(g_source))} vs "
+                         f"{(s_window, cw.may_block(s_source))}")
+    if g_window != 967_000 or "不收斂" not in g_source:
+        problems.append(f"pinned+fable root 不收斂形狀不對：{g_source!r}")
+    return problems
+
+
+class KnownModelLookupStageParityTest(unittest.TestCase):
+    """D27（DEF-200-275 第七輪，ARCH-A4-01）：⑥ 查表階的 parity，用真實
+    `known_model_windows.json` 內容同時餵兩側——四方複審判定 D21「只在有 pin 時才查表」
+    的捷徑本身就是缺陷根因（沒有釘值的機器上兩側對同一份逐字稿算出不同答案，差可達
+    5 倍）。全文與端到端量測見 `docs/06_quality/CrossPlatform_DEF200275_Context_
+    Metering_Evidence.md`〈第七輪〉。"""
+
+    def test_no_pin_lookup_and_pinned_unconverged_shapes_match(self) -> None:
+        self.assertEqual(known_model_lookup_problems(*_real_known_models()), [])
+
+    def test_bug_injection_on_the_lookup_stage_turns_red(self) -> None:
+        """自證：弄壞 SDD `known_model_window()`，判準必須抓到——否則這支鎖沒有鑑別力。"""
+        real_known = _real_known_models()
+        with mock.patch.object(cw, "known_model_window", lambda *a, **k: None):
+            self.assertTrue(known_model_lookup_problems(*real_known),
+                            msg="injected known_model_window but parity stayed green")
+
+
 if __name__ == "__main__":
     unittest.main()

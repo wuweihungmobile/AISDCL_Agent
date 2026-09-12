@@ -5,7 +5,8 @@
   "outputStyle": "ELI5",
   "env": {
     "PYTHONUTF8": "1",
-    "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "90"
+    "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "90",
+    "SDD_TELEMETRY_WRITEBACK_REQUIRES_HOOK": "1"
   },
   "hooks": {
     "SessionStart": [

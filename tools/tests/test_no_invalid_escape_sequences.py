@@ -2,56 +2,32 @@
 """非法轉義序列（`W605` / `SyntaxWarning: invalid escape sequence`）機械鎖
 （R60 QA-R60-05 的結構性那一半）。
 
-WHY（為何非得有這道鎖）：
-  R60 在 `AutoClaude/tools/local_ci_gate.py`（本機 CI 閘門**唯一核心**）的 docstring
-  引述 Windows 路徑時引入 `\\l`，Python 3.11 只印 DeprecationWarning、**3.12 起升為
-  SyntaxWarning、CPython 已宣告未來版本改為 SyntaxError**（屆時該檔無法 import）。
-  當時三道閘門全綠：AutoClaude 的 ruff `select` 不含 `W`（已於同輪補上），而**根層
-  `tools/` 與 AISDLC_SDD 樹完全沒有任何 ruff 閘門**，所以這一整類在本 repo 過去只能
-  靠人眼。QA-R60-05 判為 blocking 的正是這個結構面：不是那一個 `\\l`，而是
-  「這一類在閘門上看不見」。
-  同輪 Pkg-4 自己就對 `tools/tests/test_extras_quoting_zsh_safety.py` 的同款缺陷寫過
-  「建議由該檔擁有者改成 raw string」——建議在同一輪內沒有承接者，正是「沒有機械物
-  就等於沒發生」的教科書例子。
+WHY：根層 `tools/`／AISDLC_SDD 樹過去無任何 ruff 閘門，此類問題只能靠人眼
+（CPython 已宣告未來版本將非法轉義升為 SyntaxError）；「沒有機械物就等於沒發生」
+——同輪曾有人手動建議改 raw string 卻無人承接，本檔補上機械物。
 
 判準：對 `_SCAN_ROOTS` 下每一支 `.py` 做 `compile()`，收集 `invalid escape sequence`
   警告。命中且不在 `_KNOWN_DEBT` 名冊內 → 紅。
   （本 docstring 刻意不寫出三引號字面——寫了會提前結束自己，本檔第一版即因此
   `SyntaxError: invalid character`，屬「示範壞形態的文件會反咬自己」的同族陷阱。）
 
-🔴 修法（**首選＝把該處反斜線改寫成 `\\\\`**，次選才是整串改 raw）：
-  R60 Pkg-P3 回收存量債時實測發現「一律改 raw 前綴」這個處置**不是**零語意變更，
-  原名冊三筆的 WHY 都寫錯了方向：raw 化會讓同一 docstring 內**既有的合法轉義**
-  一併改變 rendered 內容——`test_ps51_compat.py` 有 8 處 `\\\\`（本意是顯示單一反斜線
-  的正則，raw 後會變成顯示兩個，**文件反而變錯**）、`test_nightly_interpreter_determinism.py`
-  有 2 處、`test_extras_quoting_zsh_safety.py` 甚至有一個合法的 `\\t`（rendered 是真
-  TAB）。三檔實測 `ast.get_docstring()` 皆 `differs_if_made_raw=True`。
-  反之「把該處反斜線加倍」對**非法**轉義是恆等變換（Python 對非法轉義原樣保留
-  反斜線），R60 實測三檔 rendered docstring 的 len 與 sha256 前後完全相同——這也正是
-  `ruff --select W605` 自己給的 `help: Add backslash to escape sequence` 與 `--fix` 行為。
-  只有在該字串內**沒有**任何合法轉義時，raw 化才等價。
+🔴 修法首選＝把該處反斜線改寫成 `\\\\`，次選才是整串改 raw——raw 化會讓同一
+  docstring 內**既有的合法轉義**一併改變 rendered 內容（`\\\\`／`\\t` 等），
+  「加倍反斜線」對**非法**轉義才是恆等變換（`ruff --select W605 --fix` 同一行為）。
 
 🔴 判準邊界（誠實劃界）：
-  - **掃描面刻意不含 `AISDLC_SDD/AISDLC_SDD_v0.01`~`v0.29`**（29 個凍結版）：依
-    Copy-on-Evolve 政策那些樹不改，掃出來只能長出 29 份永久豁免。實測（R60）：全 repo
-    5,451 支 `.py` 掃完為 6.8 秒、命中仍是同樣這 3 支；縮到現行掃描面是 832 支／0.7 秒
-    且**命中集合完全相同**——即縮面沒有損失鑑別力，只省時間。若哪天凍結版真的長出這
-    類問題，它也不在本鎖負責的範圍（該由凍結版豁免家族處理）。
+  - 掃描面不含 `AISDLC_SDD/AISDLC_SDD_v0.01`~`v0.29`（29 個凍結版，Copy-on-Evolve
+    政策下那些樹不改，掃出來只會長出永久豁免）。
   - 只驗「非法轉義」這一類，不是完整的 ruff `W`。AutoClaude 樹另有 ruff `W`
     （`AutoClaude/pyproject.toml`，R60 補入）作為更全面的第二層；本鎖是**跨樹**那一層。
   - `compile()` 只做語法層編譯、**不執行**任何模組，無 import 副作用。
 
-名冊紀律（防「豁免變永久」）：`_KNOWN_DEBT` 為既有存量債（皆非本輪引入），每筆須帶
-  WHY；並有 stale 自檢——某筆已修好卻留在名冊 ⇒ 紅，強制回收。這是刻意避開 R60
-  `_PENDING_MIGRATION_SITES` 的坑（無 stale 自檢的 pending 名單永遠不會退場）。
-
-  🔴 **名冊現為空**（R60 Pkg-P3 全數回收，見上）。原本登記的 3 筆是「**無承接輪次的
-  backlog**」——只是把待辦從缺陷帳本搬進程式碼裡的名冊，正是本輪硬規則② 要治的形態，
-  而三筆的修法都只是加倍反斜線（零 rendered 變更），沒有任何延後的理由。
-  名冊機制**保留**（未來仍可能有真的需要凍結的存量債），但空名冊會讓 stale／WHY 兩支
-  自檢變成恆真斷言，故另立 `test_stale_detector_reports_a_synthetic_stale_entry` 與
-  `test_why_detector_reports_a_synthetic_empty_why` 兩支**合成自證**，讓名冊機制在
-  零條目時仍有鑑別力（同本檔既有的 `test_detector_catches_a_synthetic_offender` 慣例）。
+名冊紀律（防「豁免變永久」）：`_KNOWN_DEBT` 為既有存量債，每筆須帶 WHY；並有 stale
+  自檢——某筆已修好卻留在名冊 ⇒ 紅，強制回收。🔴 名冊現為空（R60 Pkg-P3 全數回收），
+  機制保留供未來真正需要凍結的存量債使用；`test_stale_detector_reports_a_synthetic_stale_entry`
+  與 `test_why_detector_reports_a_synthetic_empty_why` 兩支合成自證讓名冊機制在
+  零條目時仍有鑑別力。史料見 CrossPlatform_DEF200275_Context_Metering_Evidence.md
+  〈第七輪 史料搬遷〉。
 
 執行：python tools/run_root_unittests.py
       python -m unittest tools.tests.test_no_invalid_escape_sequences -v

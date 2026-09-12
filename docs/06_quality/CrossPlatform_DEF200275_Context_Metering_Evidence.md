@@ -1770,3 +1770,866 @@ $ python tools/tests/test_adr_xplat001_c1c2_lock.py --print-guard-lines | head -
 $ git status --short -- AISDLC_SDD/AISDLC_SDD_v0.30/governance/   → （空）
 ```
 護欄層淨額定案 97488→98236（+748＝回歸鎖軌 392＋功能軌 356），四方記帳複審 SA／SD／QA APPROVE、Architect REJECT→修正 392／356 分法→APPROVE（R145 Scan_Findings §3.1／§3.2）。ONBOARDING §7 表② 指紋以樹外乾淨 venv（`onboarding_clean_venv`，Python 3.11.15，`psycopg2` absent）回填。
+
+## 第七輪（2026-09-12；四方獨立複審 3 APPROVE／1 REJECT ⇒ D27～D30）
+
+### 觸發
+
+commit e90ee11（第六輪「修後複審 APPROVE」）push 後，主控再派 Architect／SA／SD／QA 四方（皆 Sonnet 5、唯讀、各自隔離重現、互不溝通）對掌舵者原始三問重新獨立複審：①新視窗一開就被擋；②不用真實 /context 或 API 查數據；③印出的數字與 /context 明顯不符。四方之後另加一層**三鏡對抗驗證**（repro／code／intent 三個獨立 Sonnet 5 agent，對每一筆待裁決 finding 各自判定「是否已被駁回」），原始報告全文在
+`~/.claude/projects/-Users-wuweihong-Antigravity-AISDCL-Agent/17e2da67-e140-43a8-9817-d1b6f61f3f7a/subagents/workflows/wf_9afa3db6-c24/journal.jsonl`（`type=started` 行有 `label`，`type=result` 行有 `result`），以下逐字引用皆取自該檔。
+
+### 四方判決與收斂發現（Architect／SA／SD／QA 皆 Sonnet 5、唯讀、各自隔離重現，不互相溝通）
+
+| | Architect | SA | SD | QA |
+|---|---|---|---|---|
+| P1 新視窗被擋 | partial | **fixed** | **fixed** | **fixed** |
+| P2 不用真實數據 | partial | **fixed** | partial | **fixed** |
+| P3 數字與 /context 不符 | partial | **fixed** | partial | **fixed** |
+| overall | **REJECT** | APPROVE | APPROVE | APPROVE |
+
+**ARCH-A4-01（Architect，P1，對應問題 3；`.claude/hooks/context_budget_guard.py:547`）**——四方本輪最重的發現，逐字：
+
+```
+根層與 SDD 層 context window 分母鏈不是同一套邏輯：根層缺『無釘值時查表』階，兩層數字在新視窗低用量時可相差 5 倍
+
+resolve_window()／window_evidence() 只在至少一階已有釘值（AUTOSDD_CONTEXT_WINDOW／CC env／settings）時才會查
+known_model_windows.json（僅用於『收斂』既有釘值，D21 註解明文『只在至少一階有指定值時才查表』）；SDD 層
+context_window.py::resolve_window() 有獨立、無條件的『⑥ 以 model id 查表』階，沒有任何釘值也會命中。兩層因此
+不是同一套演算法，只是共用同一份 JSON 資料檔——資料 SSOT 有了，演算法 SSOT 沒有。
+
+repro：peak_used=50000（模擬新視窗低用量）、不設 AUTOSDD_CONTEXT_WINDOW／CC settings、model_hint=None、
+observed_model='claude-fable-5-1'（表值 1,000,000），分別呼叫根層與 SDD 層 resolve_window()。
+actual：根層回報 window=200,000（ratio=25.00%，來源『推斷值・保守下界』）；SDD 層回報 window=1,000,000
+（ratio=5.00%，來源『查表值』）。現有 test_context_window_parity.py 對 SDD 側硬寫死 known_models={}，
+結構上永遠測不到這條分歧（該測試目前 3/3 綠燈）。
+```
+
+三鏡對此 finding 的裁決：**repro 未駁回**（`refuted=false, confidence=high`，親手重跑得到與 finding 逐字相同的數字：200,000/25.00% vs 1,000,000/5.00%，並額外驗證「即使手動把查表結果硬塞進根層 `resolve_window()`，無釘值時仍完全不用它」，證明是判定邏輯本身缺這一階，不只是資料收集面被擋）；**code 未駁回**（`refuted=false, confidence=high`，逐行核對 HEAD e90ee11 兩層程式碼與 finding 描述精確無誤）；**intent 判「已裁決」**（`refuted=true, confidence=high`）：
+
+```
+ARCH-A4-01 描述的行為…皆為第六輪四方複審已裁決、附理由的刻意設計，非未書面化的缺陷。
+裁決 D21（證據檔 L1034）：「根層 context_budget_guard.py 補查表收斂階，資料只有一個家…否決根層另存一份查表」。
+效能取捨的明文理由（證據檔 L1631）：「D21 效能取捨：沒有任何 pin 時 window_evidence() 不該去解析 LATEST
+（_converge_pinned_window 用不到它）——省一次 sdd_latest 的 subprocess 解析」。
+因此 ARCH-A4-01 描述的「行為不一致」屬實（未推翻其技術觀察），但其定性為「未經裁決的架構缺陷」不成立——
+這條路徑的存在、理由與測試邊界，第六輪 D21 裁決與程式模組 docstring 皆已書面化並附理由。
+```
+
+三鏡結論：**confirmed 且為書面裁決**（技術現象真實存在、且是 D21 白紙黑字的刻意取捨，不是遺漏）。**總架構師本輪推翻 D21**：理由——①本機 `AUTOSDD_CONTEXT_WINDOW=967000` 這個釘值只住 `~/.claude/settings.json`，不隨 clone 走，換一台乾淨機器就會退化成「無釘值」狀態；②無釘值機器在低用量（peak<200,000）時會用猜的分母（200,000）擋展開型工具，正是掌舵者問題 1（新視窗被擋）與問題 3（數字對不上）共同的形狀根源，不是各自獨立的兩個問題；③正確性不得用效能捷徑換——D21 當時的取捨是「省一次 subprocess」，但省下的代價是「無釘值時分母系統性失真 5 倍」，兩者不對等。
+
+**SD-F1（SD，P2，對應問題 3；`.claude/hooks/context_budget_guard.py:338`）**：
+
+```
+known_model_windows 收斂只修正『分母高估』方向，未涵蓋『分母低估』方向
+
+_converge_pinned_window() 只在 table_value < pinned 時才把 window 往下修正；當已指定的 window
+（來自 AUTOSDD_CONTEXT_WINDOW 環境變數或 CC settings）小於查表真實值時，函式回 None，resolve_window()
+沿用原本（偏小）的指定值，不做任何修正。這個方向性選擇 docstring 有交代理由（『猜小只是早喊，猜大會讓阻斷
+遲到』），是從『會不會太晚擋下工具』這個安全角度做的合理取捨，但沒有解決『算出來的百分比是否貼近 /context
+真實顯示值』這個不同判準——如果分母被低估，算出來的用量百分比會系統性地高於 /context 真實值。
+
+actual：回傳 (200000, '指定值（環境變數 AUTOSDD_CONTEXT_WINDOW；查表 claude-fable-5-1=1,000,000 ≥
+指定值，不收斂）')——雖然有老實在 source 字串裡標註查到的表值供人工核對，但百分比本身仍用偏小的分母算出，
+不會自動修正。
+```
+
+三鏡：repro 駁回（判為刻意設計、非可歸咎的未書面化缺陷）、code 未駁回（技術現象屬實）、intent 判「D21 已裁決」（單向收斂是設計取捨，非遺漏）。裁決：**不改碼**，寫入誠實劃界（見下）。
+
+**SA-R7-01（SA，P2，對應問題 0；`AISDLC_SDD/AISDLC_SDD_v0.30/tools/fsm_runtime/rule_loader.py:158`）**：
+
+```
+複審視窗內治理規則 YAML 被非隔離 FSM 驅動寫回（fire_count 遙測），唯讀複審協定無機械守衛
+
+本輪複審期間（git status 顯示，非 e90ee11 commit 內容本身）發現 9 支 governance/rules/*.yaml
+（R-9.13／16／18／2／3／6／7／8／9，皆 trigger_states=["*"]）被同一秒（mtime 2026-09-12 11:27:23）
+改動，diff 為真實遙測寫回（fire_count: 0→1），非純格式重排。根因鎖定：rule_loader.py::_write_rule()
+（由 fsm_runtime.py:287 在 _rule_fire_telemetry_enabled() 為真時、經 record_state_fires() 呼叫）在未帶
+SDD_ENABLE_RULE_FIRE_TELEMETRY=0 前綴、對真實 governance/rules/ 目錄跑一次真實 FSM transition 時會寫回本體。
+已核實不是本 SA 造成：本 SA 三次 SDD pytest 呼叫皆已加上正確前綴，相關測試皆用隔離 tmp_path；11:27:23 在
+本 SA 所有指令視窗之外，高度疑似同機另一位複審方跑了『pytest 外』手動 FSM 重現腳本卻漏帶前綴（與既有記憶
+缺陷『SDD 探針會回寫治理 yaml』同型）。
+```
+
+三鏡（repro／code／intent）皆未駁回（`refuted=false, confidence=high` ×3）。根因補充（主控自查，非三鏡發現）：主控派審任務書把 opt-out 旗標名寫成縮寫展開錯名（`SDD_ENABLE_RULE_FIRE=0`／`SDD_ENABLE_CATCH_TELEMETRY=0`），正確全名為 `SDD_ENABLE_RULE_FIRE_TELEMETRY`／`SDD_ENABLE_RULE_CATCH_TELEMETRY`；主控已於審查結束後以 `git show HEAD:<path> > <path>` 逐支還原 9 支（`git status` 核為 0 列）。
+
+**SA-R7-02（SA，P2，對應問題 0；`docs/06_quality/CrossPlatform_DEF200275_Context_Metering_Evidence.md:1334`）**：
+
+```
+commit e90ee11「修後複審 APPROVE」壓縮了真實過程——第一次修後複審其實 3 REJECT／1 APPROVE，之後只有
+『護欄層記帳』被重新四方複審，D17/SA-F2/SA-F1/QA-R6-01 的實質修復僅由主控親跑自證，未經第二次四方獨立重現
+
+證據檔記載：修後複審（第一次）結果為 Architect REJECT／SA REJECT／SD APPROVE／QA REJECT，抓到
+ARCH-R6-01／SA-F2／QA-R6-01 三筆阻斷發現；Dev-A2／Dev-D2 修復後，證據檔只再記錄了『護欄層記帳複審』
+（針對 LOC 棘輪分軌申報），並未見對 D17（含 ARCH-R6-01 訂正）／SA-F1／SA-F2 本身的第二輪四方獨立重現
+紀錄，這部分只有『主控親跑』自證。commit message 用『修後複審 APPROVE』一詞，容易讓人誤讀成四方對全部
+修復內容都重新獨立確認過。本 SA 本輪已針對 ARCH-R6-01／D18／D19／D20 的程式碼與測試做了獨立重現，結果與
+Dev-A2/Dev-D2 的自陳一致，未發現實質錯誤，因此本項定性為文件精確度問題而非阻斷級發現。
+```
+
+三鏡皆未駁回。裁決：文件精確度訂正（見 D29(b)），不影響本輪 fixed 判定。
+
+**ARCH-A2-01（Architect，P3，對應問題 1；`AISDLC_SDD/AISDLC_SDD_v0.30/tools/fsm_runtime/fsm_runtime.py:562`）**（未走三鏡，直接登記）：`_BLOCKING_STATES`（ESCALATION／ESCALATION_FINAL／TERMINATED／TOKEN_BUDGET_CRITICAL）對所有工具無例外阻擋（含 Read／Bash），D17 恢復指令依賴 Bash——但 Bash 正是被擋工具之一，須人類開真終端執行。Architect 讀碼確認為 R-9.5「禁止自動恢復」刻意設計、D17 已提供人工可讀溯源與恢復指令，判「非缺陷，記錄供掌舵者確認是否仍可接受」。留掌舵者裁決是否對非觸發者 session 放行 Read（若要開放，Architect 建議仿照 `AUTO_COMPACT_PENDING` 白名單模式另開窄例外，但明言「此舉超出本輪審查範圍」）。
+
+**SD-F2（SD，P3，對應問題 0；`.claude/hooks/context_budget_guard.py:426`）**（未走三鏡，直接登記）：`remember_latch()` 用 `os.open(..., O_CREAT|O_EXCL)` 先建立檔案、再 `os.write()` 寫入內容，兩步非原子；行程若在兩步之間中斷會留下空內容的 marker 檔，之後同一 key 永遠無法被成功記錄，導致該門檻反覆出聲。SD 未能在測試環境重現（中斷視窗極短），僅讀碼推導；失效方向本身安全（「多喊一次」符合本檔「寧可多喊，不要靜默失聲」既定紀律），SD 建議「不需要在本輪處理，僅供記錄」。
+
+四方 `git status --short` 除 SA-R7-01 指出的 9 支治理 yaml（非四方自己造成、已還原）外，皆與開工時逐字相同。
+
+四方各自跑的測試（[他包回報]，除主控開場實測外）：SA 親跑 `python tools/run_root_unittests.py` → `Ran 4157 tests in 801.467s; OK (skipped=46)` rc=0；SA／QA 皆 `1907 passed, 8 skipped, 34 deselected, 14 subtests passed`、chaos `34 passed`；SD 針對性跑與 D17～D25 直接相關測試檔合計 933 支 rc=0（自陳未跑全套 4157，誠實劃界見下）；QA 與 SA 同時刻三條算法（手算逐字稿／根層 `scan_transcript`／SDD `measure()`）對主控逐字稿皆 `used=119,598／peak=119,598／window=967,000／ratio≈12.4%`，逐位元組一致。
+
+### 裁決 D27～D30（總架構師定案；被否決意見括註）
+
+- **D27（ARCH-A4-01）**：根層 `context_budget_guard.py` 補⑥查表收斂階（`known_model_window()` 與 SDD `context_window.py` 逐字同構）、`window_evidence()` 改為無條件查表（不再有「只在有釘值時才查表」的提前跳過）。效能疑慮（每次工具呼叫都多開一個 `sdd_latest` subprocess）以 `tools/lib/sdd_latest.py` 新增 `resolve_latest_name_fast()`／`resolve_latest_root_fast()`（`importlib` 就地載入 `sdd_version.py`，不起第二個 python 行程）＋ per-session 快取檔（`_known_table_cache_path()`，住 `_latch_marker_dir()`）解決。（否決 SD-F1 提議的「雙向收斂」——維持 D21 原有的單向安全取捨，只改「有沒有查表」，不改「查到了怎麼收斂」。）
+- **D28（SA-R7-01）**：**不翻 v0.24 既有預設**，走加法式守衛：settings env `SDD_TELEMETRY_WRITEBACK_REQUIRES_HOOK=1`（根層與 v0.30 兩份 `.claude/settings.json` 皆加）＋ hook 入口標記 `SDD_FSM_HOOK_ENTRY=1`（`context_ledger_pre.py`／`context_ledger_post.py`／`session_start.py` 的 `main()` 第一行設定）＋ `fsm_runtime.py` 新增 `_telemetry_writeback_allowed()` 共用判定（顯式 0/1 優先 → `REQUIRES` 且非 hook 入口 → `False` 並 stderr 出聲一次 → 否則 `True`）；`conftest.py` 隔離兩個新 env（避免既有測試套件被牽連轉紅）。
+- **D29（誠實劃界訂正，三點）**：(a) SD-F1 的單向收斂（只修分母高估方向）寫進〈把握程度〉誠實劃界；(b) 第六輪「修後複審 APPROVE」的範圍訂正（SA-R7-02）：commit 訊息應區分「護欄層記帳複審 APPROVE」與「阻斷發現本身是否經第二次四方複審」；(c) 問題 2 的機制邊界重申：hook 已保證分子數字是真的（逐字稿 API usage）、Stop hook 對無佐證的「被擋」宣稱出聲，但**結構上無法機械強制模型去對照 /context 或打 API**（Architect／SA 兩方各自獨立劃界，逐字一致）；D26 Models API 種子值仍未做（需 `ANTHROPIC_API_KEY`，另案）。
+- **D30（登記不修）**：ARCH-A2-01（ESCALATION 全擋含 Read/Bash）留掌舵者裁決；SD-F2（latch marker 非原子）P3 登記；新立哨兵缺陷 DEF-200-286（見〈喚醒鏈哨兵新缺陷〉節）。
+
+派工：Dev-A7（D27：根層 context_budget_guard.py／sdd_latest.py／相關測試）／Dev-B7（D28：SDD telemetry writeback 守衛，三支 hook＋fsm_runtime.py＋conftest＋新測試）／Dev-Trim7（護欄層行數棘輪抵銷：Dev-A7／B7 的合法新增使棘輪轉紅，搬運既有測試檔 docstring 敘事）三包 Sonnet 5 並行，鎖持有面互斥；棘輪逐檔重釘、缺陷帳本、證據檔收尾由本節〈收尾窗口〉（Dev-C7，收尾單人窗口）統一處理。
+
+### 修法逐檔（三包並行，皆 Sonnet 5；細節與紅→綠逐字見各包回報，標 [他包回報]）
+
+**Dev-A7（D27；根層查表收斂＋效能）** [他包回報]
+- 改 `.claude/hooks/context_budget_guard.py`（最終 1089 行＝`SPECIAL_FILES` 上限，餘裕 0）、`tools/lib/sdd_latest.py`（新增 `resolve_latest_name_fast`／`resolve_latest_root_fast`）、`tools/tests/test_root_guard_known_model_r145.py`（`test_no_pin_at_all_yields_empty_known_models` 翻案為 `WindowEvidenceAlwaysQueriesTheRealTableTests::test_no_pin_at_all_still_queries_the_real_table`，語意由「無 pin 不查表」反轉為「無 pin 也一定查表」）、`tools/tests/test_context_window_parity.py`（新增 `KnownModelLookupStageParityTest`）、`tools/tests/test_context_budget_guard.py`（fixture 預設 model 改合成值 `claude-test-double-3`，修復 7 支因查表攔截而假紅的既有測試）、SDD `context_window.py` 只改 docstring（不動判定邏輯，parity 語意不變）、證據檔檔尾〈第七輪 史料搬遷（Dev-A7）〉保全原文。
+- 紅→綠：`AssertionError: None != 1000000`（r145 翻案紅）；parity 注入紅 `'lookup[claude-fable-5-1] window: 200000 vs 1000000'`。
+- 效能中位數（10 次跑）：OLD（D21，僅取無 pin 分支）76.40ms → 僅套 `resolve_latest_root_fast()`（無快取）111.58ms（+35.18ms，超過 30ms 門檻，`git ls-files` 本身即耗 ~24-32ms）→ 加 per-session 快取 77.92ms（+1.28ms，10 次裡只有第 1 次冷啟動吃到 ~35ms，第 2～10 次快取命中）。
+- 端到端：無釘值兩側皆 `window=1,000,000／ratio=0.050000`、source 逐字相等（ARCH-A4-01 描述的分歧已消除）；有釘值 967000 兩側 window／ratio 相等，source 差一段根層稽核註記（D21／SD-09 既有行為，非本輪改動）。
+
+**Dev-B7（D28；SDD telemetry writeback 守衛）** [他包回報]
+- 改 `fsm_runtime.py`（新增 `_telemetry_writeback_allowed()`）、三支 hook（`context_ledger_pre.py`／`context_ledger_post.py`／`session_start.py` 的 `main()` 首行設 `SDD_FSM_HOOK_ENTRY=1`）、`conftest.py`（隔離兩個新 env）、新檔 `tools/fsm_runtime/tests/test_rule_telemetry_requires_hook_r7.py`（13 案）、兩份 `.claude/settings.json`（`SDD_TELEMETRY_WRITEBACK_REQUIRES_HOOK=1`）、`tools/tests/test_context_budget_guard.py` 新增 `SettingsChainTest` 一案。
+- 紅→綠：`4 failed, 9 passed`（helper 回舊行為）→ `13 passed`。
+- 端到端：`REQUIRES=1` 且無 `ENTRY` 標記 → 治理 yaml 摘要 digest `8b2692a9…`→`8b2692a9…`（`unchanged=True`）＋ stderr 出聲一次；`ENTRY=1`（真 hook 路徑）→ digest 變為 `7b3bbeb0…`（`unchanged=False`，遙測正常寫回）。
+- `ci-gate.sh`：v0.30 `1920 passed`／`arch_fitness` `fail=0 warn=3`（既有）／`scripts` `351 passed` rc=0。
+
+**Dev-Trim7（護欄層行數棘輪抵銷）** [他包回報]
+- Dev-A7／B7 對 `test_context_window_parity.py`／`test_context_budget_guard.py`／`test_root_guard_known_model_r145.py` 的合法新增使護欄層行數棘輪（`_FROZEN_GUARD_LINES` 總量 98236）與分桶棘輪（`prose` 桶 4512）雙雙轉紅（98373／4528）。12 支既有 `tools/tests/` 測試檔模組頂端 docstring／歷史敘事搬到本證據檔〈第七輪 史料搬遷（Dev-Trim7）〉，判準與斷言本身一行未砍，淨減 177 行（289 刪／112 增）。
+- `GLC_LINES` 98373→98196（`_FROZEN_GUARD_LINES` 舊基準 98236，Dev-Trim7 收工時餘裕 40 行）；`prose` 分桶 4528→4493（`_FROZEN` 基準 4512）；`guard_self` 3431 持平。
+- 12 支模組各自 `unittest` OK、`ruff` `All checks passed`。**未做**逐檔重釘（`_FROZEN_GUARD_LINES` 逐檔基準與磁碟不符，`[逐檔漂移]` 共 15 支檔轉紅），依任務書明文「不准重釘任何棘輪常數／不准動 `_GUARD_LINES_REPIN_LOG`」留待收尾單人窗口——即本節〈收尾窗口〉。
+
+### 實測（主控親跑）
+
+```
+$ cd tools/tests && python -m unittest test_context_window_parity test_root_guard_known_model_r145 \
+  test_context_budget_guard test_check_hooks_liveness -q
+Ran 818 tests in 39.537s
+OK (skipped=15)
+$ cd AISDLC_SDD/AISDLC_SDD_v0.30 && python -m pytest tools/fsm_runtime/tests/ -m "not chaos" -q
+1920 passed, 8 skipped, 34 deselected, 14 subtests passed in 50.98s   rc=0
+$ ... -m chaos ...
+34 passed, 1928 deselected in 15.96s   rc=0
+$ git status --short -- AISDLC_SDD/AISDLC_SDD_v0.30/governance/
+（空）
+$ python tools/session_resume_planner.py --check   # 於 12:5x
+used 264,124／window 967,000／27.3%
+```
+
+棘輪現況（Dev-Trim7 收工後、Dev-C7 收尾前）：`GLC_LINES=98196`。主控在派下一輪工作前，`python tools/session_resume_planner.py --pace` 首行回報哨兵活性異常（見下〈喚醒鏈哨兵新缺陷〉），已當場 `--arm-sentinel` 重武裝止血。全套 `run_root_unittests.py` 未跑（主控收工後親跑）。
+
+### 喚醒鏈哨兵新缺陷（DEF-200-286；本欄刻意零輪號）
+
+主控派工前 `python tools/session_resume_planner.py --pace` 首行逐字：
+
+```
+🔴 哨兵活性：armed stamp 說 AutoSDD_Sentinel_17e2da67-e140-43a8-9817-d1b6f61f3f7a 已武裝，
+排程器現查卻沒有這支工作 ⇒ 哨兵已死、喚醒鏈斷線（2026-08-16 事故形狀）
+```
+
+主控立即 `--arm-sentinel`：成功（`launchctl print` rc=0、interval 900s、plist 持久化；`launchctl list | grep AutoSDD_Sentinel_` 列出本 session 與前一 session `c65e030b` 各一）。取證缺口：重武裝覆寫了原 armed stamp（`/var/folders/…/autosdd_sentinel_armed_<sid>.json` 現為 11:57:49 的新值），SessionStart 那次武裝到底是 launchctl 失敗 fail-open 還是事後被卸載已無法分辨；`~/.autosdd/traces` 內查無本 session 事件。定 P1 open（喚醒鏈；根因未定；已登記 `docs/06_quality/AutoSDD_Defect_Log.md` DEF-200-286；建議 armed stamp 改 append-only 或武裝時同步落 `launchctl print` 回讀證據）。
+
+### 把握程度（誠實劃界）
+
+- **高把握**：D27（ARCH-A4-01 分母鏈已補齊、效能以快取解決，端到端無釘值兩層數字與 source 逐字相等）、D28（SA-R7-01 加法式守衛，不翻既有預設，端到端 digest 測試證實 unchanged 語意）皆先紅後綠，且分別由 SD／SA／QA／Architect 四方或其三鏡至少一路徑獨立確認技術現象屬實。
+- **中把握**：D29(a) SD-F1 的單向收斂殘留——分母被低估時百分比仍會系統性高於 `/context` 真實值，本輪判斷「這是既有安全取捨、不是本輪新缺陷」但**沒有解決**，日後若掌舵者實測到「數字比 /context 更高」的方向性落差，第一個該查的就是這個殘留。
+- **P1 的殘餘邊界不變**：ARCH-A2-01（結構性 ESCALATION 全擋含 Read／Bash）本輪**未修**，是 R-9.5 刻意設計，D17 已提供溯源與恢復指令；是否要開窄例外放行 Read 留掌舵者裁決。
+- **P2 的機制邊界（D29(c)）**：hook 對分子（真實 usage）與對「被擋」宣稱的雙重出聲機制已到位；**模型是否真的據以行動、是否真的去對照 /context** 結構上無法被 hook 保證，這是本輪與前六輪一致的誠實劃界，不會因為再修一輪而消失。
+- **未驗證**：本 session 的三路徑數字一致性（119,598／967,000／12.4%）由 QA／SA 各自獨立算過，但**掌舵者本人尚未親自對照一次互動式 `/context` 面板**——同前幾輪劃界，subagent 結構上做不到。
+- **Windows 未真機驗證**（同前幾輪）；D26 Models API 種子值仍未做（需憑證）；DEF-200-286（哨兵喚醒鏈）open，根因未定。
+
+### 收尾窗口（Dev-C7，本節）
+
+四方複審與修復波完工、工作樹無人再動之後，本窗口單人完成：
+
+1. **證據檔**：本節（〈第七輪〉）撰寫；引用四方複審與三鏡驗證的逐字內容取自 `journal.jsonl`（見〈觸發〉節路徑）。
+2. **缺陷帳本**：新增 `DEF-200-284`（ARCH-A4-01，P1，fixed 第七輪 D27）／`DEF-200-285`（SA-R7-01，P2，fixed 第七輪 D28）／`DEF-200-286`（哨兵 armed stamp 與 launchd 實況不一致，P1，open）三列；`DEF-200-275` 列補「第七輪 2026-09-12 D27 補根層⑥階查表收斂」一句，仍 <700 bytes。
+3. **護欄層逐檔重釘**：`_FROZEN_GUARD_LINES` 依 `--print-guard-lines` 實測值重釘 15 支檔（`test_block_destructive_git_r83.py` 2288→2285／`test_context_budget_guard.py` 11909→11950／`test_context_window_parity.py` 145→229／`test_dev_start_ps1_lastexitcode.py` 548→521／`test_doc_env_prefix_platform_parity_r60.py` 340→331／`test_doc_loc_baseline_freshness_r60.py` 7155→7145／`test_gha_action_versions.py` 703→681／`test_no_invalid_escape_sequences.py` 339→315／`test_ntfs_trailing_space_device_name.py` 760→759／`test_platform_utils_dedup.py` 1112→1078／`test_root_guard_known_model_r145.py` 215→227／`test_sanitize_component_frozen_sdd_versions_lock.py` 340→317／`test_skip_discoverability_r83.py` 744→742／`test_smoke_ci_sync.py` 1399→1397／`test_windowsapps_guard_bash_parity.py` 973→953）；`_GUARD_LINES_REPIN_LOG` 新增兩列（R146 主表 −40／R146 本檔自身自含式漂移 +15，總淨額 −25，98236→98211，**淨減法輪**）；`_REPIN_LOG_FROZEN_PREFIX_LEN` 172→174、`_REPIN_LOG_HISTORY_SHA256` 重釘；`_FROZEN_PREFIX_REWRITE_LEDGER` 接鏈一列（`67af3c96e763`→`a4aa9940f730`，`DEF-200-275`）。doc-total 對帳（≥2 站點）：`docs/04_planning/AutoSDD_improving_112.md` 與 `docs/06_quality/CrossPlatform_R145_Scan_Findings.md`〈第七輪附記〉皆補 `<!-- guard-total:R146 -->` 標記行（同 R129～R145 寄居體例，不另建新檔）。逐檔清單全文見 `CrossPlatform_R145_Scan_Findings.md`〈第七輪附記〉節。
+4. **零新檔**：本窗口未新增任何檔案（`tools/lib/governance_docs.py` 無需登記）。
+5. **收工驗證**：`test_adr_xplat001_c1c2_lock`／`test_check_defect_log_crossref`／`test_doc_loc_baseline_freshness_r60`／`test_check_hooks_liveness` 四支根層 unittest 皆 `OK`；`test_check_defect_log_crossref` 單獨執行時因與 git HEAD 相比多出 1 筆淨新增未結列（`DEF-200-286`）觸發淨額棘輪 `❌`——此為既有記憶備忘所述「commit 前全套恰幾紅是預期，commit 後 pre-push 全綠」的已知模式（比較基準是尚未 commit 的 git HEAD），非新缺陷；帳本承接指派、輪號標籤、逐列位元組上限三項判準皆已修復為綠。
+
+### 修後複審（Architect／SA／SD／QA 四方唯讀、皆 Sonnet 5；2026-09-12，全數 APPROVE ⇒ 進入收尾）
+
+| 角色 | 判決 | 問題 1／2／3 | 發現 |
+|------|------|-------------|------|
+| Architect | APPROVE | partial／partial／fixed（1＝ARCH-A2-01 留裁決；2＝D29(c) 結構性邊界） | ARCH-F1 P3 |
+| SA | APPROVE | fixed／fixed／fixed | 無 |
+| SD | APPROVE | fixed／partial／fixed | SD-P3-01 P3（與 ARCH-F1 同一件事） |
+| QA | APPROVE | fixed／fixed／fixed | 無 |
+
+- 各自親跑（[他包回報]）：SDD `1920 passed, 8 skipped` rc=0、chaos `34 passed` rc=0（Architect／SA／QA 三方皆與主控親跑逐字相同）；根層針對性 `Ran 818 tests` `OK (skipped=15)`（QA／SD）；`test_adr_xplat001_c1c2_lock` `Ran 192 tests` `OK`、`GLC_LINES=98211`（四方皆核）；SD 以 `wc -l` 逐支核對 15 支重釘檔行數與 `_FROZEN_GUARD_LINES` 新值精確相符，並逐 hunk 讀完 12 支 Dev-Trim7 檔確認零 assert／零判準改動；SA 核 `test_check_defect_log_crossref` 恰 2 支已知 pre-commit 紅、帳本三列 591／632／677 bytes、DEF-200-275 補句後 661 bytes；SA 同時刻三條算法對主控逐字稿 `used=315,258／window=967,000／32.6%` 三路徑相等。
+- QA 黑箱（[他包回報]）：對 `used=188,000、無釘值、model=claude-fable-5-1` 的假逐字稿，HEAD 舊 hook `rc=2` 硬擋並印 `94.0%`（分母仍是猜的 200,000）；改後 hook 同一輸入 `rc=0` 靜默（18.8%）——問題 1＋3 形狀的直接消失證據。有釘值／無釘值 × Read／Write／Bash 六組首擊皆 `rc=0` 無誤報；快取檔改成不存在路徑或亂碼 bytes 時 hook 仍 `rc=0` 且自我修復（fail-open）；D28 三象限（REQUIRES=1 無 ENTRY→digest 不變＋stderr 恰一次／ENTRY=1→fire_count+1／顯式 FIRE=0 覆蓋 ENTRY=1→不寫）全符合，全程 governance/rules 零列；Stop hook 對無佐證「被擋」宣稱出聲。
+- **D30 追加登記（P3，不修）**：ARCH-F1／SD-P3-01——`known_model_windows_path(session_id=…)` 的 per-session 表路徑快取只以 `is_file()` 判有效，同一 session 內若發生 Copy-on-Evolve 換 LATEST 且舊版目錄仍在，快取不失效、會續用舊版表；且快取讀寫／三條 fail-open 分支無回歸測試。影響窄（單 session 內切版）、方向不定；候選修法＝快取內容加記 LATEST 目錄名或 `AISDLC_SDD/` 目錄 mtime、讀取時比對。Architect 另記一項前瞻性殘餘：D28 對「未來新增的 FSM 生產呼叫端忘記設 `SDD_FSM_HOOK_ENTRY`」無機械鎖（現況靜態搜尋零違反，生產呼叫端僅三支具名 hook）。
+- 總架構師裁決：四方全 APPROVE、無 P0～P2 ⇒ 進入收尾單人窗口（全套根層閘門 → ONBOARDING §7 表② 回填 → commit → push）。
+
+### 收尾窗口補修（主控親跑；修後複審 APPROVE 之後、push 之前發現的兩處）
+
+- 根層全套 `python tools/run_root_unittests.py` → `Ran 4160 tests` `FAILED (failures=3, skipped=46)`：2 支＝commit 前已知淨額棘輪紅（`test_check_defect_log_crossref` 兩案），第 3 支 `test_subprocess_encoding_hygiene.TestEntryPointStdioProtection.test_entry_points_printing_non_ascii_are_protected` 指 `fsm_runtime.py` D28 的中文 stderr 警告「入口點印非 ASCII 但無 UTF-8 stdio 保護」。第一次修法（就地 `sys.stderr.reconfigure(encoding="utf-8", errors="replace")`）通過 hygiene 卻在 pre-push 被 `test_platform_utils_dedup` 的 stdio-SSOT 複本棘輪擋下（`行內 stdio-UTF-8 複本 1 處 > 凍結值 0 處`；SSOT＝`tools/_stdio_utf8.py`，但 AISDLC_SDD 不得跨專案 import）。最終修法＝沿用同檔 `_cli()` 既有慣例把警告改全 ASCII（`[SDD-FSM] rule telemetry write-back skipped: not a hook process (...)`），測試斷言同步。複驗：`test_subprocess_encoding_hygiene test_platform_utils_dedup` → `Ran 72 tests` `OK`；D28 `13 passed`；SDD `1920 passed, 8 skipped` rc=0。
+- pre-push 快層 `ruff check tools/ .claude/hooks/` 抓到 Dev-A7 的 `known_model_windows_path()` 簽名 E501（101 > 100）：拆成兩行並把同函式 docstring 壓縮一行，檔案維持 1089 行（SPECIAL_FILES 上限）；`ruff` → `All checks passed!`；`test_adr_xplat001_c1c2_lock` 等 `Ran 839 tests` `OK (skipped=10)`。
+- 教訓（主控）：`ruff … | tail -1` 接管線吃掉 rc，讓第一次 commit 在 lint 紅的情況下通過——鐵律六「讀 rc 不接管線」在 zsh 側零攔截器（DEF-200-086）再一次現形；第二次改為 `&&` 串接無管線。
+
+## 第七輪 史料搬遷（Dev-A7；context_budget_guard.py 原文逐字保全）
+
+D27（修復包 Dev-A7）：四方複審 Architect finding ARCH-A4-01 判定 D21「`window_evidence()`
+只在至少一階有指定值時才查表」這個效能捷徑本身就是缺陷根因——沒有釘值的機器上分母因此
+少了 SDD `context_window.py` 8 階分母鏈的第⑥階（以 model id 查表），與 SDD 側對同一份
+逐字稿算出不同答案（差可達 5 倍）。裁決：推翻 D21，`.claude/hooks/context_budget_guard.py`
+無條件補齊 ⑥ 查表階；效能代價改由 `tools/lib/sdd_latest.py` 的
+`resolve_latest_root_fast()`（importlib 熱路徑，不起第二個 python 行程）＋
+`context_budget_guard.py` 的 per-session 快取檔（`_known_table_cache_path()`，住
+`_latch_marker_dir()` 同一目錄）兩層吸收。
+
+`context_budget_guard.py` 受 `AutoClaude/tools/check_loc_budget.py` 的 `SPECIAL_FILES`
+raw-line 棘輪管（本輪上限 1089，零餘裕）。本輪新增的查表階／per-session 快取／文件同步
+需要淨新增的行數，依既有慣例（R91 起同型搬法）用「搬史料」抵銷：把該檔內以下幾段純敘事
+的歷史註解／docstring 原文逐字保全於此，檔內只留一行指標。以下逐段列出**修改前的原文**
+（來源：本輪 Dev-A7 修改前的 HEAD＝commit e90ee11）：
+
+**① 模組 docstring〈context window 判定〉節，D21 之前只有 5 階（現改為對齊 SDD
+8 階分母鏈編號，見檔內〈context window 判定〉）：**
+
+```
+🔴 context window 判定（R79 重寫；當時的缺陷實況＝`CrossPlatform_R91_Scan_Findings.md`
+§A-3——一句話：分母猜小只是早喊，猜大會讓守衛在真 90% 結構性靜默）
+--------------------------------------------------------------------------------
+方向是不對稱的：
+  · 猜小（實際 1M、當成 200K）⇒ 提早喊。成本＝一次多餘的 `/compact`。
+  · 猜大（實際 200K、當成 1M）⇒ 到 90% 才喊時真實水位已是 450%，**根本喊不到**。
+判定順序（先可證、後推斷；**每一階的來源字串都會原樣印進使用者看到的訊息**，
+讓讀者知道分母是被指定的還是被推斷的——把推斷寫成已知是本 repo 的既有缺陷形態）：
+  ① `AUTOSDD_CONTEXT_WINDOW`：本檔自己的旗標，最高優先＝**指定值**。
+  ② `CLAUDE_CODE_AUTO_COMPACT_WINDOW`（環境變數）／`autoCompactWindow`（settings
+     鏈：`.claude/settings.local.json` → `.claude/settings.json` → `~/.claude/
+     settings.json`）＝**harness 自己的 window 旋鈕**。有設就用它——那正是 CC 用來
+     決定何時 autocompact 的那個數，本檔的分母與它一致才不會出現「同一份 repo 對
+     同一個數字兩種說法」。二進位內的 schema 逐字：`autoCompactWindow: number().
+     int().min(1e5).max(1e6)`，且大於模型上限時由 CC 自己 capped，方向安全。
+  ③ settings 鏈的 `model` 欄帶 `1m` 標記（本機實測 `opus[1m]`）⇒ 1,000,000。
+     🔴 這一階刻意帶**交叉否決**：逐字稿裡實際跑過的 `message.model` 若與該 hint
+     不同族（例：設定寫 opus、實際 `--model sonnet`），這一階**放棄發言**往下一階
+     走。少了這道否決，一次 `--model` 覆寫就會讓分母偏大＝往危險方向錯。
+  ④ 本 session 歷來 `used` 曾超過 200,000 ⇒ window **必然**大於 200K（可證的下界）；
+     但「所以它是 1,000,000」不是證出來的，是在已知變體裡取下一檔，故標為推斷。
+  ⑤ 其餘一律 200,000（保守下界）。這個方向只會早喊，安全。
+🔴 **⑤ 這一階不得用來硬擋**（見〈PreToolUse 阻斷模式〉）：它是「我不知道」的委婉說法，
+拿一個猜出來的分母去硬鎖工具，就是把本輪要修的那個缺陷換個方向再犯一次。
+```
+
+**② 模組 docstring〈R82／Q2-02 職責邊界〉節：**
+
+```
+🔴 R82／Q2-02：本檔的**職責邊界**——只剩一把尺（context 水位），額度尺整條住
+`quota_gate.py`；本檔對它只有兩件事：①`main()` 在 context 早退之前呼叫它一次
+（撞額度那刻 context 水位可能只有 ~18%，掛在早退之後的分支一次都到不了）；
+②注入四個 hook 端能力（阻斷名單／閂鎖讀寫／任務書／喚醒武裝）。兩把尺不共用早退
+條件、也不共用模組（`test_quota_is_not_wired_into_the_context_blocking_path` 釘住）。
+```
+
+**③ `sdd_latest` import 旁的 D21 註記：**
+
+```
+# D21（SD-09／DEF-200-275 第六輪）：LATEST 版本路徑解析唯一真相源＝`tools/lib/sdd_latest.py`
+# （query 查表資料的家＝`$V/tools/fsm_runtime/data/known_model_windows.json`，
+# 見 `known_model_windows_path()`）。同一套 fail-open：不可達時本符號為 `None`，
+# 查表收斂整條退化成「查不到，不收斂」——與這個階段本身的方向一致（不收斂只是不精確，
+# 不是不安全；被否決的作法是在根層另存一份查表，見該函式 docstring）。
+```
+
+**④ `_KNOWN_MODEL_WINDOWS_REL` 旁的 D21 註記：**
+
+```
+#: D21：查表資料相對 LATEST 版根目錄的路徑（資料只有一個家——SDD 子專案自己那份，
+#: 見 `known_model_windows_path()` 的 WHY；D21 否決「根層另存一份」）。
+```
+
+**⑤ `window_evidence()` 內的 D21「只在有 pin 才查表」捷徑（本輪推翻的那段本體）：**
+
+```python
+    # D21：只在至少一階有指定值時才查表——沒有任何 pin 時 `_converge_pinned_window` 用
+    # 不到它（收斂只發生在②③④階），提早跳過能省一次 `sdd_latest` 的 LATEST 解析
+    # （內部再呼叫一次 `git`，逐次工具呼叫都付這個代價並不便宜）。
+    known_models: dict[str, int] = {}
+    if (_positive_int(env_raw) or _positive_int(cc_window_raw)
+            or _positive_int(settings_window)):
+        known_models = load_known_model_windows(known_model_windows_path())
+```
+
+**⑥ `scan_transcript()` docstring 的效能三段省法全文：**
+
+```
+    刻意**逐行覆寫 last** 而不是整檔 `json.loads` 後排序：逐字稿是會長到數十 MB
+    的 append-only 檔，而本檔每次工具呼叫都會跑一次。三段省法：
+      ① 以 `"usage"` 子字串預篩，絕大多數行連 `json.loads` 都不進；
+      ② 記憶體 O(1)（只留 last 與 max）；
+      ③ 壞行直接跳過——逐字稿常有半截尾行（正在寫入時被讀到），一行壞掉不得
+         讓整支守衛崩潰（同 `tools/probe/audit_session.py::iter_records` 的既有判斷）。
+    歷來最大值是 window 下界推論的唯一輸入，所以必須整檔看過，不能只看尾巴。
+```
+
+**⑦ `latch_key()` docstring 全文：**
+
+```
+    """閂鎖鍵＝(門檻, 分母, compact 週期)。
+
+    分母必須進鍵，這是 R79 修的半個缺陷（誤報吃掉真正的那一次）。`epoch` 是
+    R92／D3 補的第二個盲區：同一 (tier, window) 內「compact 成功 → 真的再次越線」
+    此前不會重新武裝。`epoch`＝`compact_boundary_count()`，同一次 compact 週期內
+    不變 ⇒ one-shot 語意零改變；跨過一次真 compact 才前進，鍵才因此不同。
+    完整立案敘事見證據檔 §I-3／§I-10。
+    """
+```
+
+**⑧ `remember_latch()` docstring 全文：**
+
+```
+    """把 key 記進去（D22／SD-05：`O_CREAT|O_EXCL` 原子建檔，取代舊版整讀→union→整寫——
+    後者兩個行程幾乎同時各自 union 後寫回會遺失先寫入的那個 key，方向安全但不精確；
+    每個 key 一個檔天生不衝突，同 key 競爭時輸的那邊 `O_EXCL` 失敗即安靜跳過）。
+    寫失敗（含已存在）一律吞掉，不得升級為守衛失敗——最壞情況是下次再喊一次。"""
+```
+
+**⑨ `write_resume_plan()` docstring 全文：**
+
+```
+    """呼叫 `tools/session_resume_planner.py` 產出任務書骨架；回傳路徑（失敗回空字串）。
+
+    走 subprocess 而不是 import：本檔的零相依契約（見模組 docstring）不允許 import
+    repo 內任何模組，而 `tools/` 根本不在 hook 行程的 `sys.path` 上。子行程的
+    stdout/stderr 明確宣告 UTF-8（`encoding=`／`errors=`），避免 zh-TW cp950 下
+    讀子行程輸出時炸 UnicodeDecodeError。任何失敗一律吞掉——任務書寫不出來時，
+    使用者仍該拿到那段強制指引。
+    """
+```
+
+**⑩ `spawn_sentinel()` 上方的觸發層總覽註記：**
+
+```
+# ───────────────────────── 預防性哨兵的**觸發層**（R79 補洞包；R82／HELM-02 改觸發時機；
+# SessionStart 只清閂鎖，真正註冊延後到 PostToolUse 且要通過 `sentinel_lifecycle.should_arm()`
+# 雙門檻——三個刻意取捨與立案量測全文搬 moved_lore.md／`CrossPlatform_R91_Scan_Findings.md` §I-12）。
+```
+
+**⑪ `spawn_sentinel_gc()` 上方的 R84／C3-P4b 註記：**
+
+```
+# 🔴 R84／C3-P4b：`sentinel_lifecycle.gc()` 此前零自動呼叫端，殘骸哨兵每 15 分鐘照樣醒來
+# （全文搬 moved_lore.md／`CrossPlatform_Guard_Line_History.md`）。三個取捨與 `spawn_sentinel`
+# 逐條同構：detached 子行程／`keep=(當前 sid,)` 自己的哨兵不能被自己收掉／一切例外吞掉。
+```
+
+**⑫ `arm_when_earned()` docstring 全文：**
+
+```
+    """PostToolUse：夠格才武裝。回理由字串（呼叫端不讀，留給測試與未來的痕跡）。
+
+    一切例外吞掉：`.claude/settings.json` 的 description 記載過 P0（hook 誤觸會把所有
+    工具硬鎖死），而武裝失敗最多是少一層保護，絕不可反過來變成故障源。
+    """
+```
+
+**⑬ `arm_quota_wakeup()` docstring 全文（含 R83／W2-A 沿革指標）：**
+
+```
+    """額度 95%／`arm` 分支的喚醒武裝；回 `{armed, sentinel_off, posix}` 給訊息用。
+
+    🔴 平台判斷與逃生口刻意留在 hook 這一側：`tools/lib/quota_gate.py` 只讀這份回報，
+    自己不去問 `os.name`、也不去讀哨兵的環境變數——那會讓同一份平台知識有第二個家。
+    🔴 `armed` 是**真的 spawn 出去了**，不是「我走到了那個分支」：舊實作把兩者混同
+    （Popen 拋例外時照樣回報 armed），而那正是本 repo 反覆判過的「真紅讀成綠」。
+    憑證仍是 planner 自己的取證閘（`relay_problems()` 禁止在兩個憑證鍵皆空時把狀態寫成
+    armed），本函式一行都沒有動它，只當消費者。
+
+    🔴 射程：`posix` 這個鍵的語意是「這台機器沒有排程載具」，由 `_has_carrier()` 決定
+    ⇒ mac 上為 False（launchd 真的武裝得起來）。取證指令的唯一的家＝各後端的
+    `evidence_hint()`（`tools/lib/schedule_backend.py`）；本函式只回報三個布林，一行取證
+    字串都不產。R83／W2-A 那段「訊息會指錯路」的沿革（含它在同一輪內就轉假的經過與
+    darwin 實測輸出）逐字保全於 `CrossPlatform_R91_Scan_Findings.md` §A-5。
+    """
+```
+
+上述十三段搬出後，檔內原文改寫為對齊 D27 新行為＋精簡版 WHY（各自留一行指標指回本節或
+`moved_lore.md`／`CrossPlatform_R91_Scan_Findings.md` 原引用），語意不變、只是把「歷史
+沿革的完整敘事」搬出主檔。逐字比對見本輪 commit 的 diff（`.claude/hooks/
+context_budget_guard.py`）。
+
+### 效能量測（Dev-A7 實測，2026-09-12）
+
+payload：`PreToolUse` ／`tool_name=Read`／假逐字稿 1 筆 assistant usage（50,000 tokens，
+model=`claude-fable-5-1`）／`AUTOSDD_SENTINEL_OFF=1`／`env -u AUTOSDD_CONTEXT_WINDOW`，
+`python3 <hook> < payload.json` 跑 10 次量中位數：
+
+| 版本 | 中位數 | 說明 |
+|------|--------|------|
+| OLD（D21，`git show HEAD:...` 唯讀取出） | 76.40 ms | 無 pin 時不查表 |
+| D27 僅套 `resolve_latest_root_fast()`（無 per-session 快取） | 111.58 ms | Δ+35.18ms，超過 30ms 門檻——`git ls-files` 本身即耗 ~24-32ms，`resolve_latest_root_fast()` 每次都重跑 |
+| D27 完整版（`resolve_latest_root_fast()` ＋ per-session 快取） | 77.92 ms | Δ+1.28ms（10 次裡只有第 1 次冷啟動吃到 ~35ms，第 2～10 次快取命中，落回與 OLD 統計不可分辨） |
+
+結論：per-session 快取是必要的第二層——單靠 importlib 熱路徑（省掉多開一個 python 行程）
+仍不足以把 `git ls-files` 本身的 I/O 成本壓到 30ms 門檻以下；快取把這個成本攤提成
+「每個 session 只付一次」，與 hook 實際的呼叫模式（同一 session 內每次工具呼叫都觸發）
+相符。
+
+## 第七輪 史料搬遷（Dev-Trim7；護欄層原文逐字保全）
+
+> DEF-200-275 第七輪：package A／B 對 `test_context_window_parity.py`／
+> `test_context_budget_guard.py`／`test_root_guard_known_model_r145.py` 的合法新增
+> 使護欄層行數棘輪（`_FROZEN_GUARD_LINES` 總量 98236）與分桶棘輪（`prose` 桶 4512）雙雙
+> 轉紅（98373／4528）。本節不做任何改寫、不重釘任何棘輪常數：測試碼與判準本身一行未砍，
+> 只搬「背景故事／事故經過／歷史沿革／方法論選擇的完整敘事」，原處各留一句 WHY＋本節指標。
+> 每則標明來源檔案與符號名，原文如下（不做任何改寫，逐字保全）。
+
+---
+
+## tools/tests/test_platform_utils_dedup.py
+
+### `<module>` 模組頂端 docstring（原文）
+
+```
+tools/lib/platform_utils.py 收斂止血鎖（R16 架構最佳化 — Architect 建議 A/E）。
+
+背景：`_init_utf8_streams()` 曾被複製貼上到至少 8 個檔案，其中 6 份漏了
+`sys.platform != "win32"` 守衛、2 份有。8 個呼叫點已收斂為統一 import
+`tools/lib/platform_utils.init_utf8_streams`——但收斂當下誤判「有守衛的 2 份
+才是正確版本」，實際上 `test_hooks_stdin_utf8.py` 證明「無條件包裝（原本
+6 份的行為）」才是正確版本：呼叫端可在任何平台以 `PYTHONIOENCODING` 覆寫
+編碼，POSIX 上不強制重新包裝會讓阻斷級 hook 的中文錯誤訊息讀成亂碼。
+本測試機械鎖住兩件事：
+  1. `platform_utils` 模組本身提供的 API 存在且行為正確（兩平台皆包裝 / 三態標籤）。
+  2. 8 個已知呼叫點不再各自定義 `_init_utf8_streams()`（防未來復發第 9 份複製貼上）。
+
+R66 追加（ADR-XPLAT-002 §5 Phase 2-C 驗收判準③ 補齊，DEF-101-629）：Phase 2-C／
+2-D 把 10 份消費者各自的 LATEST 版本解析／凍結版本 regex 樣板收斂進
+`tools/lib/sdd_latest.py`（`DEF-101-624`）之後，ADR 原始驗收判準③「任一消費者
+改回自帶 `_latest_root` ⇒ dedup 鎖須紅」指定的手法正是「擴充本檔既有的
+`_scan_repo_py_for(pattern)` 機制」，但落地當下未真正補上（僅補了 `DEF-101-627`
+的模組自身行為回歸鎖，未補「消費者不得復發自帶定義」這道鎖）。本輪比照既有
+`_EXTRA_DEF_RES` 做法，補上 `resolve_latest_name`／`resolve_latest_root`／
+`exclude_frozen_sdd_versions` 三個函式的 repo-wide 唯一定義鎖。
+
+R70 訂正兩件事（`DEF-101-751` 實質／`DEF-101-752` 元層級，兩者由同一個事故顯形）：
+
+**① 不變量本身錯了（`DEF-101-751`）**：R17 的鎖寫的是「全 repo 只有一個定義點」，
+但 R69 的 `ADR-XPLAT-003` 讓 `AutoClaude/autoclaude/utils/platform_caps.py` 也必須
+定義 `is_windows()`／`is_macos()`——`autoclaude` 是**可獨立 pip 安裝**的套件
+（`AutoClaude/pyproject.toml`，hatchling 預設只打包 `AutoClaude/autoclaude/`），
+根層 `tools/lib/` 不在 wheel 內，脫離 monorepo checkout 後 import 必然失敗。
+這與 `DEF-101-295`（R33 Architect 裁決，見 `autoclaude/utils/logger.py` 檔內註解）
+是**同一條結構事實**、同一個既有解法：**跨孤島各留一份 ＋ 以鎖釘住其一致性**。
+故本檔的不變量改寫為「**每一個相依孤島內，各 helper 只准有一個定義點**」——
+不是把 `platform_caps.py` 加進白名單（那是把鎖改鬆），而是把「孤島」這個真正的
+邊界寫進斷言：任一島內出現第二個定義點、或某島出現它不該有的 helper，皆須紅。
+孤島邊界不是說法而是**結構事實**，由 `test_autoclaude_package_island_cannot_reach_root_tools_lib`
+機械證明（該島若哪天真的搆得到根層 SSOT，兩島就該合併、本檔的雙 SSOT 宣告同時失效）。
+
+**② 掃描面 fail-open（`DEF-101-752`，本輪更有價值的一筆）**：本檔原本用
+`git ls-files "*.py"` 當掃描面 ⇒ **未追蹤（untracked）的 .py 天然不可見**。
+`platform_caps.py` 在 R69 全程都是 untracked，於是上述①的衝突躲過了**四輪四方
+複審**與收尾者多次 `run_root_unittests.py` 全套實跑（皆 `Ran 1581 … OK`），
+直到 `git add -A` 讓它變成 tracked 的**那一刻**才在 pre-push 顯形。
+掃描面現改為 **tracked ∪ untracked-not-ignored**（`git ls-files` ＋
+`git ls-files -o --exclude-standard`）——排除 venv/快取的效果原本就靠 `.gitignore`，
+`--exclude-standard` 一樣排除得掉。盲區已封由
+`TestScanSurfaceCoversUntrackedFiles` 以真實 untracked 探針證明
+（修前的 tracked-only 掃描面看不到它／修後看得到且判紅）。
+
+執行：python3 -m unittest discover -s tools/tests -p "test_*.py" -v
+```
+
+---
+
+## tools/tests/test_no_invalid_escape_sequences.py
+
+### `<module>` 模組頂端 docstring（原文）
+
+```
+非法轉義序列（`W605` / `SyntaxWarning: invalid escape sequence`）機械鎖
+（R60 QA-R60-05 的結構性那一半）。
+
+WHY（為何非得有這道鎖）：
+  R60 在 `AutoClaude/tools/local_ci_gate.py`（本機 CI 閘門**唯一核心**）的 docstring
+  引述 Windows 路徑時引入 `\l`，Python 3.11 只印 DeprecationWarning、**3.12 起升為
+  SyntaxWarning、CPython 已宣告未來版本改為 SyntaxError**（屆時該檔無法 import）。
+  當時三道閘門全綠：AutoClaude 的 ruff `select` 不含 `W`（已於同輪補上），而**根層
+  `tools/` 與 AISDLC_SDD 樹完全沒有任何 ruff 閘門**，所以這一整類在本 repo 過去只能
+  靠人眼。QA-R60-05 判為 blocking 的正是這個結構面：不是那一個 `\l`，而是
+  「這一類在閘門上看不見」。
+  同輪 Pkg-4 自己就對 `tools/tests/test_extras_quoting_zsh_safety.py` 的同款缺陷寫過
+  「建議由該檔擁有者改成 raw string」——建議在同一輪內沒有承接者，正是「沒有機械物
+  就等於沒發生」的教科書例子。
+
+判準：對 `_SCAN_ROOTS` 下每一支 `.py` 做 `compile()`，收集 `invalid escape sequence`
+  警告。命中且不在 `_KNOWN_DEBT` 名冊內 → 紅。
+  （本 docstring 刻意不寫出三引號字面——寫了會提前結束自己，本檔第一版即因此
+  `SyntaxError: invalid character`，屬「示範壞形態的文件會反咬自己」的同族陷阱。）
+
+🔴 修法（**首選＝把該處反斜線改寫成 `\\`**，次選才是整串改 raw）：
+  R60 Pkg-P3 回收存量債時實測發現「一律改 raw 前綴」這個處置**不是**零語意變更，
+  原名冊三筆的 WHY 都寫錯了方向：raw 化會讓同一 docstring 內**既有的合法轉義**
+  一併改變 rendered 內容——`test_ps51_compat.py` 有 8 處 `\\`（本意是顯示單一反斜線
+  的正則，raw 後會變成顯示兩個，**文件反而變錯**）、`test_nightly_interpreter_determinism.py`
+  有 2 處、`test_extras_quoting_zsh_safety.py` 甚至有一個合法的 `\t`（rendered 是真
+  TAB）。三檔實測 `ast.get_docstring()` 皆 `differs_if_made_raw=True`。
+  反之「把該處反斜線加倍」對**非法**轉義是恆等變換（Python 對非法轉義原樣保留
+  反斜線），R60 實測三檔 rendered docstring 的 len 與 sha256 前後完全相同——這也正是
+  `ruff --select W605` 自己給的 `help: Add backslash to escape sequence` 與 `--fix` 行為。
+  只有在該字串內**沒有**任何合法轉義時，raw 化才等價。
+
+🔴 判準邊界（誠實劃界）：
+  - **掃描面刻意不含 `AISDLC_SDD/AISDLC_SDD_v0.01`~`v0.29`**（29 個凍結版）：依
+    Copy-on-Evolve 政策那些樹不改，掃出來只能長出 29 份永久豁免。實測（R60）：全 repo
+    5,451 支 `.py` 掃完為 6.8 秒、命中仍是同樣這 3 支；縮到現行掃描面是 832 支／0.7 秒
+    且**命中集合完全相同**——即縮面沒有損失鑑別力，只省時間。若哪天凍結版真的長出這
+    類問題，它也不在本鎖負責的範圍（該由凍結版豁免家族處理）。
+  - 只驗「非法轉義」這一類，不是完整的 ruff `W`。AutoClaude 樹另有 ruff `W`
+    （`AutoClaude/pyproject.toml`，R60 補入）作為更全面的第二層；本鎖是**跨樹**那一層。
+  - `compile()` 只做語法層編譯、**不執行**任何模組，無 import 副作用。
+
+名冊紀律（防「豁免變永久」）：`_KNOWN_DEBT` 為既有存量債（皆非本輪引入），每筆須帶
+  WHY；並有 stale 自檢——某筆已修好卻留在名冊 ⇒ 紅，強制回收。這是刻意避開 R60
+  `_PENDING_MIGRATION_SITES` 的坑（無 stale 自檢的 pending 名單永遠不會退場）。
+
+  🔴 **名冊現為空**（R60 Pkg-P3 全數回收，見上）。原本登記的 3 筆是「**無承接輪次的
+  backlog**」——只是把待辦從缺陷帳本搬進程式碼裡的名冊，正是本輪硬規則② 要治的形態，
+  而三筆的修法都只是加倍反斜線（零 rendered 變更），沒有任何延後的理由。
+  名冊機制**保留**（未來仍可能有真的需要凍結的存量債），但空名冊會讓 stale／WHY 兩支
+  自檢變成恆真斷言，故另立 `test_stale_detector_reports_a_synthetic_stale_entry` 與
+  `test_why_detector_reports_a_synthetic_empty_why` 兩支**合成自證**，讓名冊機制在
+  零條目時仍有鑑別力（同本檔既有的 `test_detector_catches_a_synthetic_offender` 慣例）。
+
+執行：python tools/run_root_unittests.py
+      python -m unittest tools.tests.test_no_invalid_escape_sequences -v
+```
+
+---
+
+## tools/tests/test_doc_env_prefix_platform_parity_r60.py
+
+### `<module>` 模組頂端 docstring WHY 段（原文）
+
+```
+WHY（為何非得有這道鎖）：
+  PowerShell **沒有** `VAR=value <指令>` 這種行內環境變數前綴語法。照抄 bash 形態的
+  Windows 使用者拿到的是 `The term 'PYTHONUTF8=1' is not recognized as the name of a
+  cmdlet...`（本機 Windows PowerShell 5.1 實測），而且錯誤訊息完全不指向真正的原因，
+  看起來像「lint-imports 沒裝」。設環境變數須寫 `$env:VAR=值; <指令>`。
+  這個家族已**三度復發、四個站點**，每次都靠人工逐份補：
+    - R57：`ONBOARDING.md` §7 補齊；
+    - R59（DEF-101-513）：根 `CLAUDE.md` §測試/Lint、`docs/AISDLC_Agent_UserGuide.md`
+      §1.4 補齊——但同一份修復**漏掉** `AutoClaude/README.md`；
+    - R60 Scan-D D-02：`AutoClaude/README.md` 的 `PYTHONUTF8=1 lint-imports` 仍是
+      bash 單邊，且整份 README 的 `$env:` 出現 **0 次**（不是「對照隔太遠」而是
+      「完全沒有」）。
+  該家族在 R60 之前**零機械鎖**（實查：全 repo 沒有任何檢查器碰過這個形狀），所以
+  「下一份新文件又只寫 bash 形態」是必然而非偶然。本測試把它升為機械守門。
+```
+
+---
+
+## tools/tests/test_gha_action_versions.py
+
+### `<module>` 模組頂端 docstring【B/C 兩節取捨】段（原文）
+
+```
+【B 節為何不用 pyyaml】根層 `tools/`＋`tools/tests/` 全數 stdlib-only，
+`root-infra-ci.yml` 的 root-infra job 沒有 `setup-python`、也沒有任何
+`pip install` 步驟（實查該檔可證），引入 pyyaml 會替根層閘門新增一個此前不存在
+的外部相依。故 B 節自帶一個**縮限用途**的縮排掃描器 `parse_shell_distribution()`，
+並以下列實測建立等價性證據：
+
+  已實測涵蓋：本 repo 根層 11 支 workflow 中，7 支（aisdlc-sdd-arch-fitness /
+  aisdlc-sdd-artifact-cleanup / aisdlc-sdd-drift-daily / aisdlc-sdd-fsm-chaos-nightly
+  / macos-compat-ci / root-infra-ci / windows-compat-ci）以本掃描器與
+  `yaml.safe_load` 逐 job 比對 `runs-on` 與 run-step shell 分佈，結果**全部相等**。
+  已知不涵蓋（掃描器主動 raise、不做靜默猜測）：帶 `defaults:` 區塊的檔案
+  （aisdlc-sdd-ci / autoclaude-ci / autoclaude-mutation-on-change /
+  autoclaude-pg-e2e-on-label 共 4 支）——本鎖只服務 windows-compat-ci.yml，
+  而該檔檔頭自述「全檔無 workflow 層／job 層 defaults:」，因此把 `defaults:`
+  的出現直接當成「快照前提已被推翻」而 fail-loud。
+  未窮舉：非本 repo 的任意 YAML 寫法（流式對映 `{...}`、錨點/別名、`- run: |`
+  以外的區塊純量寫法、tab 縮排等）一律不保證——掃描器對認不得的形狀是
+  raise 而非猜測，故失效方向是紅燈不是綠燈。
+
+【C 節為何**可以**用 pyyaml（與 B 節不同調，這是有據的差別不是矛盾）】上段
+「根層全數 stdlib-only」寫於 R57；R68 之後該前提已由 repo 自己推翻並改成受管
+相依——`tools/run_root_unittests.py` 的 `_THIRD_PARTY_PREREQS` 明列
+`("yaml", "pyyaml")`，且由三道機械物看守：runner 開場 fail-fast、下限失敗訊息
+歸因、以及 `test_run_root_unittests.py::CiPrereqInstallLockTest`（凡在 CI 跑本
+runner 的 job 都必須先裝清單裡每一個 pip 名）。實查三個消費者皆已安裝：
+`root-infra-ci.yml:396`、`windows-compat-ci.yml`／`macos-compat-ci.yml` 的
+「tools/tests 第三方相依」步驟；本機 pre-push 走 `.venv`（AutoClaude runtime
+本就相依 pyyaml）。C 節要判的是「run 本體」這個**值**，縮排掃描器對區塊純量的
+續行、`|`／`>`／`|-` 變體、行內註解各有一套規則，自寫近似只會多一個新的失明
+面——B 節當時付不起的相依成本，今天已經是既成事實，故不重複造輪。
+B 節維持原樣（不改動既有綠鎖）。
+```
+
+---
+
+## tools/tests/test_sanitize_component_frozen_sdd_versions_lock.py
+
+### `<module>` 模組頂端 docstring（原文，僅保留執行段未動）
+
+```
+背景：R44 對 `AISDLC_SDD_v0.01`～`v0.29` 共 29 個凍結基線版本的 7 支
+`tools/fsm_runtime/` 檔案（`hub_sync.py`／`production_monitor.py`／`hub_merge.py`／
+`spec_patch_proposer.py`／`production_to_fpl.py`／`sandbox_runner.py`／
+`counterfactual_replay.py`）逐版套用「呼叫該版本既有 `_sanitize_component()`」的
+P0 路徑穿越修復（`rule_id`/`nfr_id`/`ac_id`/`fpl_id`/`divergence_kind`/`app_id`
+等使用者可控字串未經淨化即組進檔案路徑 f-string，可逃出預期目錄讀到任意檔案）。
+本輪由使用者明確核准、破例打破 Copy-on-Evolve 鐵律對 29 份凍結快照原地補丁
+（見 `docs/06_quality/AutoSDD_Defect_Log.md::DEF-101-357`）。
+
+Architect 二審發現：這 203 處改動（29 版 × 7 檔）完全沒有任何常駐測試鎖住——
+每版 `tools/fsm_runtime/tests/` 目錄本身沒有對應測試（那些測試只存在於 v0.30/
+LATEST），且既有 repo-wide 掃描（`tools/tests/test_windowsapps_guard_*.py`）
+只涵蓋 WindowsApps python 可用性判斷、不涵蓋這個路徑穿越修復類別。若未來任一
+版任一檔被意外還原（順手重構／merge 衝突誤解／另一支自動化腳本覆寫），目前
+沒有任何測試會抓到。本檔補上對稱的 repo-wide 靜態鎖。
+
+方法論選擇（**刻意不**直接搬 v0.30 端既有的
+`test_sanitize_component_call_site_lock.py` 泛用 AST 掃描邏輯，而是改用逐檔
+「已知淨化呼叫式必須存在」的正向斷言）：
+
+  逐項理由（不搬 v0.30 泛用 AST 掃描的兩個實測盲點、bug-injection 的固定基線 SHA
+  錨定、正向斷言對 7 支檔案的鑑別力驗證）原文逐字＝
+  `docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`。
+
+方法論邊界（誠實記載）：
+  - 本檢查只驗證『已知淨化呼叫式的字面文字仍存在於檔案中（非注釋內）』，非
+    真正的資料流/AST 語意驗證——若該呼叫式被複製到一個完全無關、不影響組
+    檔名路徑的死碼分支，本鎖仍會判定通過（誤判為安全）。這類『刻意規避』手法
+    需要真正的控制流分析才能封閉，比照 WindowsApps 鎖與
+    `test_sanitize_component_call_site_lock.py` 既有記載的同級方法論邊界，
+    此為已知限制而非本檔涵蓋範圍。
+  - 只掃描凍結版本（`AISDLC_SDD_v0.01`～目前 LATEST 之前所有版本，動態排除
+    LATEST——LATEST 由 `test_sanitize_component_call_site_lock.py` 用不同機制
+    〔泛用 AST 掃描 + `_ADDITIONAL_RISKY_NAMES` 委派 wrapper 名單〕獨立守護，
+    兩者分工互補，不重複亦不遺漏）。
+
+R66 追加（Review round 1 QA 發現，DEF-101-627）：`tools/lib/sdd_latest.py`
+（R66 新增，DEF-101-624）當時只做手動 bug-injection 驗證、未落成任何測試檔的
+永久斷言。本應為它新增專屬 `tools/tests/test_sdd_latest.py`，但 `DEF-101-561③`
+棘輪（`test_adr_xplat001_c1c2_lock.py::TestGuardLayerRatchet`）
+自 R61 起要求 `tools/tests/` 擴充既有檔、或先合併／刪除等量舊物再加
+（🔴 R78 ARCH-03 訂正：R66 當時量的是**檔數**、語意是「禁止新增」；R77 起改量逐檔
+行數的**淨額**，新增檔案本身不違規，淨額上升才違規）
+——故把本檔自己呼叫端（`_frozen_version_dirs`）的 `.fullmatch()` call-site 鎖
+＋ `exclude_frozen_sdd_versions` 的過濾語意併入本檔（本檔是原始兩個肇事呼叫端
+之一，且已 import `sdd_latest`）；`FROZEN_VERSION_DIR_RE` 本身的 `.fullmatch()`
+行為回歸鎖與 `resolve_latest_name`/`resolve_latest_root` 覆蓋併入姊妹檔
+`test_component_sanitizer_shared_layer_lock.py`（見該檔同款追加段）。
+```
+
+---
+
+## tools/tests/test_doc_loc_baseline_freshness_r60.py
+
+### `parse_cloud_fields`（原 docstring）
+
+```
+錨尾解析成 `({欄位: 值}, 問題清單)`；同一欄位出現 ≥2 次一律 **fail-loud**。
+
+🔴 WHY fail-loud 而不是沿用「取最後一個」：錨是**單獨一行**、機器欄位與人讀散文
+同住那一行，於是散文裡一個 `pending=<sha>…` 字樣就會**靜默覆蓋**真正的欄位值，
+判準拿帶省略號的字串去比 sha ⇒ 假紅，而錯誤訊息印著一個看起來正確的值
+（被自己咬到的那次逐字＝R89 收尾證據檔）。
+
+這與根 CLAUDE.md 那條「已橋接的 hook 名稱不得與射程字樣同行」是**同一個病**：逐行
+substring 判準遇上同一行的散文。那邊的解是把文件寫成可精確判定，這邊的解是讓歧義
+**當場 fail-loud**——兩者都不是「把判準放寬」。少了這一條，下一個在錨上寫說明文字的
+人會再踩一次，而症狀是一個指著正確值卻說它不對的假紅（最難查的那種）。
+```
+
+### `TestR74CloudCiStatusIsRecorded.test_the_deadlock_scenario_no_longer_forces_a_fabricated_check`（原 docstring）
+
+```
+🔴 死結回歸鎖（端到端）：舵手 2026-08-05 實測的那個狀態必須可以合法通過。
+
+場景逐字重現：本輪改了測試樹 → `--write --with-slow` 把 `measured-at` 推到
+比 `checked-at` 更新的一天 → 舊判準在此判紅，而唯一的解紅操作是編造一次查核。
+本測試斷言：**同一份文件**在誠實宣告 pending 之後 rc 面全綠，且**沒有任何欄位
+被改成當天／HEAD**（`checked-at` 與 `head-sha` 逐字保持原值）。
+```
+
+---
+
+## tools/tests/test_block_destructive_git_r83.py
+
+### `TestTheRelaxationOpensNoNewHoles.test_the_filesystem_root_contains_the_project_too`（原 docstring）
+
+```
+🔴 反向包含的**邊界格**，獨立驗證輪實測出來的漏擋（不是想像的形態）。
+
+它躲得過上一支測試的機制、以及當時 `cd / && git clean -fdx` 被放行的實測，
+逐字＝`docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`。
+
+判準本身刻意不寫死 `/`：用 `os.path.abspath(os.sep)` 取當前平台的根
+（Windows 上是磁碟機根），否則這支鎖在另一個平台上量的是別的東西。
+```
+
+---
+
+## tools/tests/test_smoke_ci_sync.py
+
+### `TestSmokeCiSync.test_bash_n_scan_surface_matches_root_infra_ci`（原 docstring）
+
+```
+`root-infra-ci.yml` 第 1 道（bash -n）與 `macos_smoke_local.sh` [1/7] 是兩份
+手寫實作、兩者自述「同一份 git ls-files 清單、同一套判準」，但此前零機械互鎖
+（立案的三種實測漂移＝`docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`）。
+凡「兩份硬編實作互稱鏡射」本 repo 一律建鎖（同
+test_root_infra_parity 的 CI↔pre-push 守門清單鎖），故機械斷言三件事：
+  1. 兩處 `git ls-files` 的 pathspec 樣式集合逐字相同；
+  2. 兩處的兩段下限釘選值（active .sh／無副檔名 git-hooks）逐字相同；
+  3. 兩處都以 `sdd_version.py` SSOT 解析 LATEST 做凍結版排除（DEF-101-133：
+     禁止任一方內嵌第二份版本 regex，否則 Copy-on-Evolve 建新版時兩邊分歧）。
+```
+
+---
+
+## tools/tests/test_skip_discoverability_r83.py
+
+### `TestPgSkipRemedyStaysDiscoverable`（class，原 docstring）
+
+```
+「大量 skipped 的最大宗解法＝一行 docker 指令」必須留在使用者找得到的地方。
+
+Rule 9：本類守的是**可發現性**這個意圖，不是某段文字的排版。大量 skip 的最大宗成因
+就是「容器沒起來」，而這件事在 R83 之前於兩份 onboarding 文件裡一個字都找不到
+（立案的兩組實測 skip 數＝`docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`）。
+這兩份文件是掌舵者實際會讀的入口，拿掉這段＝缺陷復發。
+```
+
+---
+
+## tools/tests/test_ntfs_trailing_space_device_name.py
+
+### `TestArchivedIterationDocRefsResolve`（class，原 docstring）
+
+```
+R72 資料層：歸檔後，根層 `docs/` 對四件套的引用必須仍解析得到。
+
+掃描面與 `TestRootDocsPathRefsAreCaseExact` 同（根層 `docs/` 的 .md），
+但問的是**另一個問題**：那道鎖三分法裡「上層與 lowercase 索引皆不中」的那一支
+是**刻意放行**的（避免死連結偵測變噪音來源），於是搬檔造成的斷鏈對它完全隱形。
+本類把「四件套」這個**檔名形態明確、轉址規則明確**的子集從那個縫裡撿回來守。
+```
+
+---
+
+## tools/tests/test_dev_start_ps1_lastexitcode.py
+
+### `<module>` 模組頂端 docstring（原文，僅覆蓋清單與執行段未動）
+
+```
+tools/dev_start 兩支殼（.ps1 / .sh）的「被 source 時 rc 語意」回歸鎖。
+
+# 第一部分（原始職責）：tools/dev_start.ps1 dot-source 失敗分支 $LASTEXITCODE（DEF-101-304）
+
+`tools/dev_start.ps1` 的 `.NOTES` 明載「dot-source 呼叫端判斷成功/失敗請讀
+$LASTEXITCODE，不要用 $?」，但早期失敗分支（找不到 repo 根／找不到 Python
+直譯器）在 dot-source 情境下只執行裸 `return`，未對 `$LASTEXITCODE` 賦值——
+呼叫前的殘值（可能是 0）會被誤判為成功。對等的 `tools/dev_start.sh` 用
+`return 1` 正確傳遞失敗，兩邊在 exit code 語意上不對稱（R35 Scan-A 發現）。
+
+本測試只驗證「找不到 Python 直譯器」這條分支（PATH 清空即可穩定觸發，
+不依賴 Windows PATHEXT／`.cmd` 解析語意，pwsh 在 macOS/Linux/Windows 上
+dot-source 與 `$LASTEXITCODE` 的語言層行為一致，故不比照
+`test_bootstrap_ps1.py` 的 `_windows_pwsh_available()` 額外限定真 Windows）。
+
+# 第二部分（R67-C17 併入）：tools/dev_start.sh 的 zsh／bash 實跑載具
+
+**為何併進本檔而不新開一支**：`DEF-101-561③`（由
+`test_adr_xplat001_c1c2_lock.py::TestGuardLayerRatchet` 機械強制）要求
+「把新判準擴充進既有鎖檔」（🔴 R78 ARCH-03 訂正：R67 當時它量的是**檔數**、語意是
+「禁止新增」；R77 起改量逐檔行數的**淨額**，新增檔案本身不違規）。而本檔正是 dev_start
+兩支殼「被 source／dot-source 時如何傳 rc」的既有鎖檔——上面第一部分的緣起，逐字就是
+「對等的 `tools/dev_start.sh` 用 `return 1` 正確傳遞失敗」這句**從未被機械驗證過**的
+對照宣稱。第二部分把那句話變成真跑出來的事實，是同一條軸上的補完，不是雜物。
+
+**缺口本體（R67-C17）**：`source tools/dev_start.sh` 是 ONBOARDING §2.1 教使用者每天
+開工敲的第一道指令，而 macOS 自 Catalina 起預設 shell 就是 **zsh**。該檔有真正的 zsh
+專屬程式碼路徑：`ZSH_EVAL_CONTEXT` 判定是否被 source、`${(%):-%x}` 取當前檔案路徑
+（`zsh -c` 下 `$0` 是 "zsh"，不可靠）。R67 全庫普查實測：這條分支在整個自動化層的唯一
+執行者是 `.github/workflows/macos-compat-ci.yml` 的一個 step，而該 workflow 因 CI 帳務
+停擺（DEF-101-081）多輪未真正執行 ⇒ **使用者最常走的開工入口，全 repo 零活體驗證**。
+`bash -n` / `zsh -n` 只做語法解析，執行不到這條分支（本機實測兩者皆 rc=0）。
+
+🔴 **第二部分的斷言「結構」是重點，不只是斷言內容**（R67-C17 附帶發現的直接修復）：
+macOS compat-CI 那個 step 的形狀是「`zsh -c 'source dev_start.sh; <斷言>'`」——把斷言
+寫在同一個 shell 的 source 之後。R67 注入實測證明該形狀對它**本來要抓的主要故障模式
+結構性失明**：一旦 sourced 偵測壞掉（`_ds_sourced=0`），dev_start.sh 會落到檔尾
+`exit "$_ds_rc"`，**直接殺掉整個 `zsh -c`**，後面所有斷言一行都不執行、rc 仍為 0 全綠
+（實測：注入後 CI 形狀 rc=0、`ASSERTION_LINE_REACHED` 從未印出）。故本檔改用**行程外側
+通道**：把證物寫進 source 之後的一個重導向檔，再於 Python 端檢查。「斷言被跳過」因此
+變成「證物檔不存在」＝當場紅，而不是靜默通過。
+```
+
+---
+
+## tools/tests/test_windowsapps_guard_bash_parity.py
+
+### `<module>` 模組頂端 docstring（原文，僅結構清單①②未動）
+
+```
+背景：`tools/lib/WindowsAppsGuard.ps1::Test-IsRealPython`（R37 抽出）與
+`bootstrap_core.py::_is_windows_apps_stub`（Python 側）皆只涵蓋各自語言的
+呼叫端，repo 內另有多支 tracked bash 腳本（含 `tools/git-hooks/pre-push` 這個
+每次 push 都會實際執行的 dispatcher 本體）各自用裸 `command -v python`／
+`command -v python3` 判斷可用性，從未排除 Windows Store App Execution Alias
+空殼——Git Bash on Windows 會繼承 Windows PATH，同樣會命中
+`%LOCALAPPDATA%\Microsoft\WindowsApps` 底下系統自動註冊的空殼
+`python.exe`/`python3.exe`（`command -v` 判定為「存在」，實際執行只會跳出
+Microsoft Store 安裝提示，對 `pre-push` 這類阻斷式 hook 而言即為掛起）。
+
+`_has_ssot_guard`（判斷一段 `.sh` 內文是否已正確接上共用 guard）沿革：R46 一審
+只判斷「兩關鍵字是否曾出現在文字中」，QA 二審 bug-injection 揪出可被「no-op
+前綴＋尾隨註解」／「一般尾隨註解」／「純文字提及」三種手法繞過，改為
+`_strip_bash_comment`（剝離不在引號內的 `#` 註解）+ `_SOURCE`/`_CALL` 陳述式位置
+錨定正則（`_has_real_source_statement`／`_has_real_call_statement`）；Architect
+三審再揪出兩者排除純訊息輸出指令行（`_PRINT_COMMAND_RE`）的保護不對稱並補齊；
+`TestHasSsotGuardBypassResistance` 對這三種繞過手法各自構造專屬回歸測試。
+
+方法論邊界（誠實記載，非本檔涵蓋範圍——R46 QA 三審 bug-injection 揪出，比照
+`AISDLC_SDD/scripts/component_sanitizer_callsite_scan.py` 同款 Rule 2 比例原則
+不強修的先例）：`_has_ssot_guard` 是逐行文字掃描 + 位置錨定正則，不是真正的
+bash 語法解析，因此對下列兩種刻意構造的偽裝手法無鑑別力：
+  - heredoc（`cat <<'EOF' ... EOF`）內把兩個關鍵字包成「使用範例」說明文字，
+    真正選 `PY` 的邏輯改用裸 `command -v python`——逐行掃描看不出 heredoc
+    邊界，會把說明文字誤判為真陳述式。
+  - 把 `is_real_python_candidate` 包進一個語法正確、但整檔從未被呼叫的死
+    函式裡（source 行是真的）——本檔不做可達性分析，無法分辨「定義了」與
+    「真的被呼叫到」。
+  這兩種繞過會讓 `_has_ssot_guard` 誤判為已收斂，但風險有界：對已知白名單
+  呼叫端（`_CALLER_FILES`），`test_no_raw_unguarded_python_check_remains`
+  是另一支**不依賴** `_has_ssot_guard` 的獨立安全網（直接對這些檔案做裸
+  `command -v python >/dev/null` 字面值 regex 比對），不受此限制影響；只有
+  repo-wide 防增生掃描（`test_repo_wide_scan_finds_no_unmigrated_sh_scripts`／
+  `test_repo_wide_scan_finds_no_zero_guard_python_calls`，鎖定「未知的新檔案」）
+  對這兩種刻意構造的偽裝手法會失明。徹底解決需要真正的 bash 語法解析（含
+  heredoc 邊界追蹤與基本可達性分析），複雜度遠超本檔工具定位，留待出現真實
+  呼叫點再評估。
+```
+
+---
+
+上述十三段搬出後，各檔原地依 Dev-Trim 紀律留「一句 WHY＋指針本節」（各自措辭見對應
+檔案現況），語意不變，只是把「歷史沿革／背景敘事／方法論選擇的完整說明」搬出主檔；
+任何判準、斷言、常數值、字串字面、豁免 token 皆未動。逐字比對見本輪 commit 的 diff。
+
+🔴 誠實劃界（收尾窗口待辦）：本包（Dev-Trim7）依任務書明文「不准重釘任何棘輪常數／
+不准動 `_GUARD_LINES_REPIN_LOG`」，故上列搬遷完成後，`tools/tests/test_adr_xplat001_
+c1c2_lock.py` 的逐檔漂移判準（`guard_line_problems()` 款(6)）會把本包編修過的 12 支
+檔（連同 package A／B 已造成、本包到工前就已存在的 3 支：`test_context_budget_guard.py`／
+`test_context_window_parity.py`／`test_root_guard_known_model_r145.py`）一併列為
+「基準值與磁碟不符」——這是 `drift_tolerance=0` 設計下，任何未經正式 `--print-guard-lines`
+重釘的行數變動皆會觸發的必然結果，不是本包新引入的判準缺陷。收尾單人窗口需在本輪
+所有並行包停工後，執行 `python tools/tests/test_adr_xplat001_c1c2_lock.py
+--print-guard-lines` 並在 `_GUARD_LINES_REPIN_LOG` 補上本輪（R146？現查現存最大輪號＋1）
+一列，方能讓 `test_the_line_ratchet_took_over_and_has_teeth`／
+`test_ratchet_is_independent_of_git_state` 轉綠。

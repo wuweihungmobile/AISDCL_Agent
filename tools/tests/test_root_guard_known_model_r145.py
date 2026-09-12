@@ -111,9 +111,10 @@ class KnownModelWindowsPathFailOpenTests(unittest.TestCase):
         path = guard.known_model_windows_path()
         self.assertIsNotNone(path)
         self.assertTrue(path.is_file())
-        table = guard.load_known_model_windows(path)
+        table, note = guard.load_known_model_windows(path)
         self.assertEqual(table.get("claude-fable-5-1"), 1_000_000)
         self.assertEqual(table.get("claude-haiku-4-5"), 200_000)
+        self.assertTrue(note, "D27：查表來源說明（refreshed_at／seeded_from）不得是空字串")
 
     def test_corrupt_json_is_fail_open_not_a_crash(self) -> None:
         buf = io.StringIO()
@@ -122,7 +123,7 @@ class KnownModelWindowsPathFailOpenTests(unittest.TestCase):
             bad.write_text("{not json", encoding="utf-8")
             with contextlib.redirect_stderr(buf):
                 result = guard.load_known_model_windows(bad)
-        self.assertEqual(result, {})
+        self.assertEqual(result, ({}, guard._NO_TABLE_NOTE))
         # SA-F1：JSON 損毀是 load_known_model_windows() 自己的 fail-open 之一。
         self.assertTrue(buf.getvalue(), "fail-open 不該再靜默——必須印一行 stderr")
         self.assertIn("JSON 損毀", buf.getvalue())
@@ -134,7 +135,7 @@ class KnownModelWindowsPathFailOpenTests(unittest.TestCase):
             bad.write_text(json.dumps({"models": "not-a-dict"}), encoding="utf-8")
             with contextlib.redirect_stderr(buf):
                 result = guard.load_known_model_windows(bad)
-        self.assertEqual(result, {})
+        self.assertEqual(result, ({}, guard._NO_TABLE_NOTE))
         self.assertTrue(buf.getvalue(), "fail-open 不該再靜默——必須印一行 stderr")
         self.assertIn("JSON 形狀不對", buf.getvalue())
 
@@ -156,16 +157,27 @@ class NormalizeModelIdTests(unittest.TestCase):
         self.assertEqual(guard.normalize_model_id(""), "")
 
 
-class WindowEvidenceOnlyQueriesTableWhenPinnedTests(unittest.TestCase):
-    """D21 效能取捨：沒有 pin 時 `window_evidence()` 不解析 LATEST，省一次 subprocess。"""
+class WindowEvidenceAlwaysQueriesTheRealTableTests(unittest.TestCase):
+    """D27（DEF-200-275 第七輪，推翻 D21）：四方複審 ARCH-A4-01 判定「沒有 pin 時
+    `window_evidence()` 不解析 LATEST」這個效能捷徑本身就是缺陷根因——沒有釘值的
+    機器上（`AUTOSDD_CONTEXT_WINDOW` 只住個人 `~/.claude/settings.json`，不隨 clone
+    走）分母因此少了 ⑥ 查表這一階，與 SDD `context_window.py` 對同一份逐字稿算出
+    不同答案（差可達 5 倍）。本類別因此把「省一次查表」的舊行為測試**翻成**
+    「無釘值仍會查到真實表」——效能代價改在 `sdd_latest.resolve_latest_root_fast()`
+    的熱路徑解（見 `docs/06_quality/CrossPlatform_DEF200275_Context_Metering_
+    Evidence.md`〈第七輪〉）。"""
 
-    def test_no_pin_at_all_yields_empty_known_models(self) -> None:
+    def test_no_pin_at_all_still_queries_the_real_table(self) -> None:
         # 隔離環境變數（DEF-200-281 同型教訓：夾具沒隔離會測到別的東西）。
         with unittest.mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop(guard.WINDOW_ENV, None)
             os.environ.pop(guard.CC_WINDOW_ENV, None)
             evidence = guard.window_evidence(observed_model="claude-fable-5-1")
-        self.assertEqual(evidence["known_models"], {})
+        # D27：本機真有 AISDLC_SDD/LATEST ⇒ 就算完全沒有任何 pin，也查得到、且真的
+        # 是那份表的內容——這正是 ARCH-A4-01 判定 D21 缺失的那一階。
+        self.assertEqual(evidence["known_models"].get("claude-fable-5-1"), 1_000_000)
+        self.assertEqual(evidence["known_models"].get("claude-haiku-4-5"), 200_000)
+        self.assertTrue(evidence["known_models_note"], "查表來源說明不得是空字串")
 
     def test_a_pin_present_triggers_a_real_table_lookup(self) -> None:
         import os

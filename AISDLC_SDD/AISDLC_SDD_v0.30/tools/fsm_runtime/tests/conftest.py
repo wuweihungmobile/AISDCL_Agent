@@ -44,13 +44,32 @@ def _isolate_meta_loop_ledger():
 #   function 級 monkeypatch.delenv(...) 覆寫本預設來驗「unset → 預設 ON 活體」，且各自以隔離
 #   RULES_DIR（tmp）承接寫入；setenv("1") 的明確 ON 案同樣覆寫。production 出貨仍 ON——本隔離
 #   純為「保護凍結本體不被測試 side-effect 污染」，與 meta-ledger 隔離同屬測試基建紀律。
+#
+# D28（DEF-200-275 第七輪 SA-R7-01）補強：SDD_TELEMETRY_WRITEBACK_REQUIRES_HOOK／
+# SDD_FSM_HOOK_ENTRY 兩個新 env 同樣要隔離，理由與上方兩個 telemetry flag 不同——不是怕
+# 「預設 ON 污染凍結本體」，而是怕**在 Claude Code session 內跑 pytest**時，settings.json
+# 的 env 區塊已把 SDD_TELEMETRY_WRITEBACK_REQUIRES_HOOK="1" 注入本行程；wiring 測試以
+# monkeypatch.delenv 讓 SDD_ENABLE_RULE_FIRE/CATCH_TELEMETRY 回到 unset 以驗「預設 ON」時，
+# 若 REQUIRES_HOOK 從 session 漏進來、而 pytest 行程從未設過 SDD_FSM_HOOK_ENTRY，
+# `_telemetry_writeback_allowed` 會誤判成「非 hook 行程」而回 False——同一批測試因而
+# **CI 綠（無 session env）、本機在 Claude Code 內跑紅**。用 pop（非設 "0"）：session 外
+# 裸 pytest 也不該讓這兩個新 env 的任何殘留值影響既有測試；新測試檔
+# test_rule_telemetry_requires_hook_r7.py 針對這兩個 env 的四象限自行用
+# monkeypatch.setenv 逐案覆寫。
+_HOOK_IDENTITY_ENVS = ("SDD_TELEMETRY_WRITEBACK_REQUIRES_HOOK", "SDD_FSM_HOOK_ENTRY")
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _isolate_rule_telemetry_default():
-    """測試套預設關閉兩 telemetry flag（opt-out），保護凍結 governance；wiring 測試自行覆寫。"""
+    """測試套預設關閉兩 telemetry flag（opt-out）＋清空兩個 hook 身分 env，保護凍結
+    governance 並杜絕 session env 洩漏；wiring／新測試自行覆寫。"""
     _ENVS = ("SDD_ENABLE_RULE_FIRE_TELEMETRY", "SDD_ENABLE_RULE_CATCH_TELEMETRY")
     prior = {k: os.environ.get(k) for k in _ENVS}
     for k in _ENVS:
         os.environ[k] = "0"
+    hook_identity_prior = {k: os.environ.get(k) for k in _HOOK_IDENTITY_ENVS}
+    for k in _HOOK_IDENTITY_ENVS:
+        os.environ.pop(k, None)
     try:
         yield
     finally:
@@ -59,6 +78,11 @@ def _isolate_rule_telemetry_default():
                 os.environ.pop(k, None)
             else:
                 os.environ[k] = prior[k]
+        for k in _HOOK_IDENTITY_ENVS:
+            if hook_identity_prior[k] is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = hook_identity_prior[k]
 
 
 # improving_63（v0.25，B L5 鷹架代謝活體化）autouse 隔離 — 與 _isolate_rule_telemetry_default 同精神。

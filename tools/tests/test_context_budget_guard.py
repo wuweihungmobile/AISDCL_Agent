@@ -62,6 +62,7 @@ import quota_messages as qm  # noqa: E402  # R88／LOC-01：人話面與載具�
 import quota_meter  # noqa: E402  # R82／HELM-02：`NO_WINDOW` 相等鎖的另一端
 import quota_policy  # noqa: E402  # R82：門檻／階梯的唯一的家，本檔不再持有任何數字
 import schedule_backend as sb  # noqa: E402  # R83：取證指引的家（見 halt 訊息接線鎖）
+import sdd_latest  # noqa: E402  # DEF-200-275 第七輪 D28：現查 AISDLC_SDD LATEST，不寫死版號
 import sentinel_lifecycle  # noqa: E402  # R82／HELM-02：哨兵生命週期判準
 from _ps_engine import production_engine  # noqa: E402  # R60 E-A-03：5.1 優先（DEF-101-509 判準）
 
@@ -140,8 +141,16 @@ def _usage(inp: int, creation: int, read: int, out: int = 999_999) -> dict:
 
 
 def _write_jsonl(path: Path, useds: list[int], *, junk: bool = False,
-                 model: str = "claude-opus-5") -> Path:
-    """把每一筆 `used` 寫成一列 assistant 記錄（拆成 2 + 3 + 其餘三個欄位）。"""
+                 model: str = "claude-test-double-3") -> Path:
+    """把每一筆 `used` 寫成一列 assistant 記錄（拆成 2 + 3 + 其餘三個欄位）。
+
+    D27（DEF-200-275 第七輪）：預設 model 原為 `claude-opus-5`——它恰好是
+    `known_model_windows.json` 裡的真實表項（window=1,000,000）。D27 補齊 ⑥ 查表階
+    後，`window_evidence()` 無條件查表，這個「巧合的真名字」會讓大量以此預設值間接
+    測試 FLOOR／WIDE 推斷分支（⑦⑧）的既有案例被查表階攔截、改用真實表值，測到的
+    東西跟斷言的意圖對不上。改用不在表裡的合成模型名，讓那些案例繼續測它們原本要
+    測的下界推論；真的要測查表階的案例改用表內真名（見 `test_context_window_
+    parity.py::KnownModelLookupStageParityTest`）。"""
     lines: list[str] = ['{"type":"user","message":{"role":"user"}}']
     for used in useds:
         rec = {"type": "assistant",
@@ -981,6 +990,38 @@ class SettingsChainTest(unittest.TestCase):
                 f"{repo_settings} 出現了 `{key}` ⇒ 本檔的 e2e 隔離前提破了。"
                 "要嘛把它拿掉，要嘛同時改掉 _isolated_env 並在該處寫明新的前提",
             )
+
+    def test_root_and_sdd_latest_settings_require_hook_identity_for_telemetry_writeback(
+        self,
+    ) -> None:
+        """DEF-200-275 第七輪 D28（SA-R7-01）：根層與 AISDLC_SDD LATEST 兩份 settings.json
+        的 `env` 都必須釘 `SDD_TELEMETRY_WRITEBACK_REQUIRES_HOOK="1"`。
+
+        為何重要：這是 fsm_runtime._telemetry_writeback_allowed 判定「session 是否要求
+        hook 身分」的唯一開關來源——只由 settings.json 的 env 區塊釘，模型碰不到（同族
+        `AUTOSDD_GIT_GUARD_OFF` 逃生口的反面）。少釘任一份，該份 settings 對應的 session
+        （根層 monorepo session／以 AISDLC_SDD LATEST 版本目錄為 cwd 的 session）就完全
+        沒有這道守衛，pytest 外的 ad-hoc FSM 驅動仍會漏加 opt-out 前綴污染 governance/rules
+        （第五輪、第七輪已各真實發生一次）。LATEST 版本號一律現查
+        `tools.lib.sdd_latest`，不寫死版號（會漂移）。
+        """
+        root_settings = _REPO_ROOT / ".claude" / "settings.json"
+        root_data = json.loads(root_settings.read_text(encoding="utf-8-sig"))
+        self.assertEqual(
+            root_data.get("env", {}).get("SDD_TELEMETRY_WRITEBACK_REQUIRES_HOOK"),
+            "1",
+            f"{root_settings} 的 env.SDD_TELEMETRY_WRITEBACK_REQUIRES_HOOK 必須是字串 \"1\"",
+        )
+
+        sdd_root = _REPO_ROOT / "AISDLC_SDD"
+        latest_root = sdd_latest.resolve_latest_root(sdd_root)
+        latest_settings = latest_root / ".claude" / "settings.json"
+        latest_data = json.loads(latest_settings.read_text(encoding="utf-8-sig"))
+        self.assertEqual(
+            latest_data.get("env", {}).get("SDD_TELEMETRY_WRITEBACK_REQUIRES_HOOK"),
+            "1",
+            f"{latest_settings} 的 env.SDD_TELEMETRY_WRITEBACK_REQUIRES_HOOK 必須是字串 \"1\"",
+        )
 
 
 class LatchRearmTest(unittest.TestCase):

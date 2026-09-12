@@ -1,54 +1,31 @@
 #!/usr/bin/env python3
 """DEF-101-357 路徑穿越修復 — 29 版凍結基線 × 7 檔案回歸鎖（R44 Architect 二審建議）。
 
-背景：R44 對 `AISDLC_SDD_v0.01`～`v0.29` 共 29 個凍結基線版本的 7 支
-`tools/fsm_runtime/` 檔案（`hub_sync.py`／`production_monitor.py`／`hub_merge.py`／
-`spec_patch_proposer.py`／`production_to_fpl.py`／`sandbox_runner.py`／
-`counterfactual_replay.py`）逐版套用「呼叫該版本既有 `_sanitize_component()`」的
-P0 路徑穿越修復（`rule_id`/`nfr_id`/`ac_id`/`fpl_id`/`divergence_kind`/`app_id`
-等使用者可控字串未經淨化即組進檔案路徑 f-string，可逃出預期目錄讀到任意檔案）。
-本輪由使用者明確核准、破例打破 Copy-on-Evolve 鐵律對 29 份凍結快照原地補丁
-（見 `docs/06_quality/AutoSDD_Defect_Log.md::DEF-101-357`）。
+背景：29 個凍結基線版本（`AISDLC_SDD_v0.01`～`v0.29`）的 7 支 `tools/fsm_runtime/`
+檔案逐版套用「呼叫該版本既有 `_sanitize_component()`」的 P0 路徑穿越修復（使用者
+可控字串未經淨化即組進檔案路徑 f-string，可逃出預期目錄讀到任意檔案），由使用者
+明確核准破例原地補丁 29 份凍結快照（`DEF-101-357`）。這 203 處改動完全沒有任何
+常駐測試鎖住（凍結版本目錄本身無對應測試），本檔補上對稱的 repo-wide 靜態鎖。
 
-Architect 二審發現：這 203 處改動（29 版 × 7 檔）完全沒有任何常駐測試鎖住——
-每版 `tools/fsm_runtime/tests/` 目錄本身沒有對應測試（那些測試只存在於 v0.30/
-LATEST），且既有 repo-wide 掃描（`tools/tests/test_windowsapps_guard_*.py`）
-只涵蓋 WindowsApps python 可用性判斷、不涵蓋這個路徑穿越修復類別。若未來任一
-版任一檔被意外還原（順手重構／merge 衝突誤解／另一支自動化腳本覆寫），目前
-沒有任何測試會抓到。本檔補上對稱的 repo-wide 靜態鎖。
-
-方法論選擇（**刻意不**直接搬 v0.30 端既有的
-`test_sanitize_component_call_site_lock.py` 泛用 AST 掃描邏輯，而是改用逐檔
-「已知淨化呼叫式必須存在」的正向斷言）：
-
-  逐項理由（不搬 v0.30 泛用 AST 掃描的兩個實測盲點、bug-injection 的固定基線 SHA
-  錨定、正向斷言對 7 支檔案的鑑別力驗證）原文逐字＝
-  `docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`。
+方法論刻意不搬 v0.30 端既有的 `test_sanitize_component_call_site_lock.py` 泛用
+AST 掃描邏輯，改用逐檔「已知淨化呼叫式必須存在」的正向斷言（見
+`docs/06_quality/AutoSDD_Defect_Log.md::DEF-101-357`；史料見
+docs/06_quality/CrossPlatform_DEF200275_Context_Metering_Evidence.md
+〈第七輪 史料搬遷〉）。
 
 方法論邊界（誠實記載）：
   - 本檢查只驗證『已知淨化呼叫式的字面文字仍存在於檔案中（非注釋內）』，非
     真正的資料流/AST 語意驗證——若該呼叫式被複製到一個完全無關、不影響組
-    檔名路徑的死碼分支，本鎖仍會判定通過（誤判為安全）。這類『刻意規避』手法
-    需要真正的控制流分析才能封閉，比照 WindowsApps 鎖與
-    `test_sanitize_component_call_site_lock.py` 既有記載的同級方法論邊界，
-    此為已知限制而非本檔涵蓋範圍。
-  - 只掃描凍結版本（`AISDLC_SDD_v0.01`～目前 LATEST 之前所有版本，動態排除
-    LATEST——LATEST 由 `test_sanitize_component_call_site_lock.py` 用不同機制
-    〔泛用 AST 掃描 + `_ADDITIONAL_RISKY_NAMES` 委派 wrapper 名單〕獨立守護，
-    兩者分工互補，不重複亦不遺漏）。
+    檔名路徑的死碼分支，本鎖仍會判定通過（誤判為安全），此為已知限制。
+  - 只掃描凍結版本（動態排除 LATEST——LATEST 由
+    `test_sanitize_component_call_site_lock.py` 用不同機制獨立守護，兩者分工
+    互補，不重複亦不遺漏）。
 
-R66 追加（Review round 1 QA 發現，DEF-101-627）：`tools/lib/sdd_latest.py`
-（R66 新增，DEF-101-624）當時只做手動 bug-injection 驗證、未落成任何測試檔的
-永久斷言。本應為它新增專屬 `tools/tests/test_sdd_latest.py`，但 `DEF-101-561③`
-棘輪（`test_adr_xplat001_c1c2_lock.py::TestGuardLayerRatchet`）
-自 R61 起要求 `tools/tests/` 擴充既有檔、或先合併／刪除等量舊物再加
-（🔴 R78 ARCH-03 訂正：R66 當時量的是**檔數**、語意是「禁止新增」；R77 起改量逐檔
-行數的**淨額**，新增檔案本身不違規，淨額上升才違規）
-——故把本檔自己呼叫端（`_frozen_version_dirs`）的 `.fullmatch()` call-site 鎖
-＋ `exclude_frozen_sdd_versions` 的過濾語意併入本檔（本檔是原始兩個肇事呼叫端
-之一，且已 import `sdd_latest`）；`FROZEN_VERSION_DIR_RE` 本身的 `.fullmatch()`
-行為回歸鎖與 `resolve_latest_name`/`resolve_latest_root` 覆蓋併入姊妹檔
-`test_component_sanitizer_shared_layer_lock.py`（見該檔同款追加段）。
+R66 追加（DEF-101-627）：把本檔呼叫端（`_frozen_version_dirs`）的 `.fullmatch()`
+call-site 鎖＋ `exclude_frozen_sdd_versions` 的過濾語意併入本檔（本檔是原始兩個
+肇事呼叫端之一）；`FROZEN_VERSION_DIR_RE` 行為回歸鎖與
+`resolve_latest_name`/`resolve_latest_root` 覆蓋併入姊妹檔
+`test_component_sanitizer_shared_layer_lock.py`。
 
 執行：python -m pytest tools/tests/test_sanitize_component_frozen_sdd_versions_lock.py -v
 """

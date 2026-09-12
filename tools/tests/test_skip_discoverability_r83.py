@@ -680,12 +680,10 @@ class TestDetectorRedGreenSelfProof(unittest.TestCase):
 # ④ PG skip 解法的可發現性錨（本包的另一半：#1 不是技術缺陷，是找不到）
 # ═══════════════════════════════════════════════════════════════════════════
 class TestPgSkipRemedyStaysDiscoverable(unittest.TestCase):
-    """「大量 skipped 的最大宗解法＝一行 docker 指令」必須留在使用者找得到的地方。
-
-    Rule 9：本類守的是**可發現性**這個意圖，不是某段文字的排版。大量 skip 的最大宗成因
-    就是「容器沒起來」，而這件事在 R83 之前於兩份 onboarding 文件裡一個字都找不到
-    （立案的兩組實測 skip 數＝`docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`）。
-    這兩份文件是掌舵者實際會讀的入口，拿掉這段＝缺陷復發。
+    """「大量 skipped 的最大宗解法＝一行 docker 指令」必須留在使用者找得到的地方
+    （Rule 9：守的是可發現性，不是排版；這兩份文件是掌舵者實際會讀的入口，拿掉即
+    缺陷復發。史料見 CrossPlatform_DEF200275_Context_Metering_Evidence.md
+    〈第七輪 史料搬遷〉）。
     """
 
     _COMPOSE_CMD = "docker compose -f docker-compose.ci.yml up -d"

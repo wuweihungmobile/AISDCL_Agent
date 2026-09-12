@@ -42,10 +42,13 @@ session 的估算式 I/O 總和」，跨 session 共用、單調遞增、compact
 與根層姊妹守衛 `.claude/hooks/context_budget_guard.py` 的關係
 ---------------------------------------------------------------
 `used_of`／`scan_transcript`／`compact_boundary_count`／`positive_int`／`carries_wide_marker`／
-`model_family`／`window_from_model`／`may_block` 與該檔同名函式逐字同構，且 `resolve_window`
-在 SDD 專屬階（①⑥）中和時與該檔結果逐項相等——由根層 `tools/tests/test_context_window_parity.py`
-釘住。兩子專案刻意不跨 import（根 CLAUDE.md〈雙專案 monorepo〉），所以是「複製＋parity 鎖」
-而不是「共用一份」。
+`model_family`／`window_from_model`／`known_model_window`／`may_block` 與該檔同名函式逐字同構，
+且 `resolve_window` 在 SDD 專屬階（①`SDD_MAX_CONTEXT`）中和時與該檔結果逐項相等——由根層
+`tools/tests/test_context_window_parity.py` 釘住。🔴 D27（DEF-200-275 第七輪）起 ⑥ 查表階
+已**非**SDD 專屬：根層 `context_budget_guard.py` 同步補齊了「無釘值也無條件查表」這一階
+（此前僅在有 pin 時才查，四方複審 ARCH-A4-01 判定該捷徑本身即為缺陷根因），兩檔對 ⑥ 的
+判定同樣由上述 parity 測試逐項釘住。兩子專案刻意不跨 import（根 CLAUDE.md〈雙專案
+monorepo〉），所以是「複製＋parity 鎖」而不是「共用一份」。
 """
 from __future__ import annotations
 

@@ -83,3 +83,43 @@ SDD 子專案側（`AISDLC_SDD/AISDLC_SDD_v0.30/`）的 hook／runtime／測試�
 - `state_loader.save_state()` 併發 `.bak` 輪替 FileNotFoundError 被既有 try/except 吞（SD-RR-01，P2 非阻斷）。
 - `endurance_env.trace_dir()` 唯讀路徑仍會 mkdir 的同型風險（Dev-C 只在 planner 內繞開）。
 - LOC 餘裕：`quota_gate.py` 499/500、`session_resume_planner.py` 750/750、`context_budget_guard.py` 1089/1089。
+
+## 第七輪附記（R146；DEF-200-275 第七輪收尾單人窗口 Dev-C7）
+
+- **體例**：本節非開新一輪 CrossPlatform 掃描輪四件套，僅為 DEF-200-275 第七輪（package A／B 修復＋Dev-Trim7 散文搬遷）
+  造成的護欄層逐檔漂移收斂記帳，寄居本檔（同 R141～R145「單一缺陷收尾附帶記帳」寄居體例，不另開新檔）。
+
+<!-- guard-total:R146 --> R146 護欄層累積淨額＝ 98236 → 98211（-25＝-40 主表 15 檔逐檔漂移＋15 本檔自身（test_adr_xplat001_c1c2_lock.py）自含式漂移；[淨減法輪]，不受款(9)`[未附刪除清單]` 約束）——
+成因：package A（D27 根層 context_budget_guard.py 補查表收斂⑥階＋`tools/lib/sdd_latest.py` per-session 快取）／
+package B（D28 SDD telemetry writeback 守衛，v0.30 三支 hook＋fsm_runtime.py＋新檔
+`test_rule_telemetry_requires_hook_r7.py`〔屬 AISDLC_SDD 子專案自身 LOC 政策，不落本檔棘輪射程〕）對
+`test_context_window_parity.py`／`test_context_budget_guard.py`／`test_root_guard_known_model_r145.py` 的合法新增，
+加上 Dev-Trim7 十二支既有測試檔 docstring／模組頂端敘事搬遷抵銷（原文逐字保全於
+`CrossPlatform_DEF200275_Context_Metering_Evidence.md`〈第七輪 史料搬遷（Dev-Trim7）〉節）。
+逐項見下表；證據見 `docs/06_quality/CrossPlatform_DEF200275_Context_Metering_Evidence.md`〈第七輪〉節；
+缺陷帳本見 `docs/06_quality/AutoSDD_Defect_Log.md` DEF-200-275／DEF-200-284／DEF-200-285／DEF-200-286。
+此附記為 doc-total 對帳（≥2 站點）另一站點寄居 `AutoSDD_improving_112.md`，同 R129～R145 寄居體例。round-label-ok
+
+| 檔 | 前 | 後 | 淨額 |
+|---|---|---|---|
+| `test_block_destructive_git_r83.py` | 2288 | 2285 | -3 |
+| `test_context_budget_guard.py` | 11909 | 11950 | +41 |
+| `test_context_window_parity.py` | 145 | 229 | +84 |
+| `test_dev_start_ps1_lastexitcode.py` | 548 | 521 | -27 |
+| `test_doc_env_prefix_platform_parity_r60.py` | 340 | 331 | -9 |
+| `test_doc_loc_baseline_freshness_r60.py` | 7155 | 7145 | -10 |
+| `test_gha_action_versions.py` | 703 | 681 | -22 |
+| `test_no_invalid_escape_sequences.py` | 339 | 315 | -24 |
+| `test_ntfs_trailing_space_device_name.py` | 760 | 759 | -1 |
+| `test_platform_utils_dedup.py` | 1112 | 1078 | -34 |
+| `test_root_guard_known_model_r145.py` | 215 | 227 | +12 |
+| `test_sanitize_component_frozen_sdd_versions_lock.py` | 340 | 317 | -23 |
+| `test_skip_discoverability_r83.py` | 744 | 742 | -2 |
+| `test_smoke_ci_sync.py` | 1399 | 1397 | -2 |
+| `test_windowsapps_guard_bash_parity.py` | 973 | 953 | -20 |
+| `test_adr_xplat001_c1c2_lock.py`（本檔自身，自含式） | 7903 | 7918 | +15 |
+
+主表 15 檔合計 -40；加上本檔自身自含式漂移 +15（`_GUARD_LINES_REPIN_LOG` 新增本輪兩列＋`_REPIN_LOG_FROZEN_PREFIX_LEN`
+172→174＋`_FROZEN_PREFIX_REWRITE_LEDGER` 接鏈列，反覆覆核收斂至此），本輪總淨額 -25。淨額為負，`repin_log_problems()`
+款(9) `[未附刪除清單]` 僅在淨額為正時判定，本輪不觸發；`repin_growth_problems()` 款(11) `[只升不降]` 的連續正成長計數
+因本輪淨額 ≤0 而歸零（R143～R145 三輪連續正成長已結束）。

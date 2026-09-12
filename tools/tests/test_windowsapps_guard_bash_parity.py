@@ -1,15 +1,10 @@
 #!/usr/bin/env python3
 """WindowsApps 空殼排除 guard — bash 側對稱實作收斂鎖（R43 Scan-B，DEF-101-353）。
 
-背景：`tools/lib/WindowsAppsGuard.ps1::Test-IsRealPython`（R37 抽出）與
-`bootstrap_core.py::_is_windows_apps_stub`（Python 側）皆只涵蓋各自語言的
-呼叫端，repo 內另有多支 tracked bash 腳本（含 `tools/git-hooks/pre-push` 這個
-每次 push 都會實際執行的 dispatcher 本體）各自用裸 `command -v python`／
-`command -v python3` 判斷可用性，從未排除 Windows Store App Execution Alias
-空殼——Git Bash on Windows 會繼承 Windows PATH，同樣會命中
-`%LOCALAPPDATA%\\Microsoft\\WindowsApps` 底下系統自動註冊的空殼
-`python.exe`/`python3.exe`（`command -v` 判定為「存在」，實際執行只會跳出
-Microsoft Store 安裝提示，對 `pre-push` 這類阻斷式 hook 而言即為掛起）。
+背景：repo 內多支 tracked bash 腳本（含 `tools/git-hooks/pre-push` dispatcher 本體）
+各自用裸 `command -v python` 判斷可用性，未排除 Windows Store App Execution Alias
+空殼（Git Bash on Windows 繼承 Windows PATH，`command -v` 判定為存在，實際執行只
+跳出 Microsoft Store 安裝提示，對 `pre-push` 這類阻斷式 hook 即為掛起）。
 
 本檔比照既有 `test_windowsapps_guard_cross_consistency.py`（.ps1 側）的兩段式
 結構鎖住 bash 側對稱實作：
@@ -19,33 +14,18 @@ Microsoft Store 安裝提示，對 `pre-push` 這類阻斷式 hook 而言即為�
      `is_real_python_candidate`，不得殘留繞過共用函式的裸 `command -v python`／
      `command -v python3` 判斷。
 
-`_has_ssot_guard`（判斷一段 `.sh` 內文是否已正確接上共用 guard）沿革：R46 一審
-只判斷「兩關鍵字是否曾出現在文字中」，QA 二審 bug-injection 揪出可被「no-op
-前綴＋尾隨註解」／「一般尾隨註解」／「純文字提及」三種手法繞過，改為
-`_strip_bash_comment`（剝離不在引號內的 `#` 註解）+ `_SOURCE`/`_CALL` 陳述式位置
-錨定正則（`_has_real_source_statement`／`_has_real_call_statement`）；Architect
-三審再揪出兩者排除純訊息輸出指令行（`_PRINT_COMMAND_RE`）的保護不對稱並補齊；
-`TestHasSsotGuardBypassResistance` 對這三種繞過手法各自構造專屬回歸測試。
+`_has_ssot_guard`（判斷一段 `.sh` 內文是否已正確接上共用 guard）為逐行文字掃描 +
+`_SOURCE`/`_CALL` 陳述式位置錨定正則，非真正的 bash 語法解析（沿革：R46/QA/
+Architect 三審逐步補上剝離註解、位置錨定、保護不對稱修正三道防線，
+`TestHasSsotGuardBypassResistance` 各自構造專屬回歸測試；史料見 CrossPlatform_
+DEF200275_Context_Metering_Evidence.md〈第七輪 史料搬遷〉）。
 
-方法論邊界（誠實記載，非本檔涵蓋範圍——R46 QA 三審 bug-injection 揪出，比照
-`AISDLC_SDD/scripts/component_sanitizer_callsite_scan.py` 同款 Rule 2 比例原則
-不強修的先例）：`_has_ssot_guard` 是逐行文字掃描 + 位置錨定正則，不是真正的
-bash 語法解析，因此對下列兩種刻意構造的偽裝手法無鑑別力：
-  - heredoc（`cat <<'EOF' ... EOF`）內把兩個關鍵字包成「使用範例」說明文字，
-    真正選 `PY` 的邏輯改用裸 `command -v python`——逐行掃描看不出 heredoc
-    邊界，會把說明文字誤判為真陳述式。
-  - 把 `is_real_python_candidate` 包進一個語法正確、但整檔從未被呼叫的死
-    函式裡（source 行是真的）——本檔不做可達性分析，無法分辨「定義了」與
-    「真的被呼叫到」。
-  這兩種繞過會讓 `_has_ssot_guard` 誤判為已收斂，但風險有界：對已知白名單
-  呼叫端（`_CALLER_FILES`），`test_no_raw_unguarded_python_check_remains`
-  是另一支**不依賴** `_has_ssot_guard` 的獨立安全網（直接對這些檔案做裸
-  `command -v python >/dev/null` 字面值 regex 比對），不受此限制影響；只有
-  repo-wide 防增生掃描（`test_repo_wide_scan_finds_no_unmigrated_sh_scripts`／
-  `test_repo_wide_scan_finds_no_zero_guard_python_calls`，鎖定「未知的新檔案」）
-  對這兩種刻意構造的偽裝手法會失明。徹底解決需要真正的 bash 語法解析（含
-  heredoc 邊界追蹤與基本可達性分析），複雜度遠超本檔工具定位，留待出現真實
-  呼叫點再評估。
+方法論邊界（誠實記載，非本檔涵蓋範圍）：對下列兩種刻意構造的偽裝手法無鑑別力——
+heredoc 內把關鍵字包成說明文字（真邏輯改用裸 `command -v python`）、或把
+`is_real_python_candidate` 包進從未被呼叫的死函式裡（本檔不做可達性分析）。
+風險有界：已知白名單呼叫端另有 `test_no_raw_unguarded_python_check_remains`
+獨立安全網；只有 repo-wide 防增生掃描對這兩種手法會失明，徹底解決需要真正的
+bash 語法解析，留待出現真實呼叫點再評估。
 
 執行：python -m pytest tools/tests/test_windowsapps_guard_bash_parity.py -v
 """

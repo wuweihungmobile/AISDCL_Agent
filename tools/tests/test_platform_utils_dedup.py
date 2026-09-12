@@ -1,50 +1,16 @@
 #!/usr/bin/env python3
 """tools/lib/platform_utils.py 收斂止血鎖（R16 架構最佳化 — Architect 建議 A/E）。
 
-背景：`_init_utf8_streams()` 曾被複製貼上到至少 8 個檔案，其中 6 份漏了
-`sys.platform != "win32"` 守衛、2 份有。8 個呼叫點已收斂為統一 import
-`tools/lib/platform_utils.init_utf8_streams`——但收斂當下誤判「有守衛的 2 份
-才是正確版本」，實際上 `test_hooks_stdin_utf8.py` 證明「無條件包裝（原本
-6 份的行為）」才是正確版本：呼叫端可在任何平台以 `PYTHONIOENCODING` 覆寫
-編碼，POSIX 上不強制重新包裝會讓阻斷級 hook 的中文錯誤訊息讀成亂碼。
-本測試機械鎖住兩件事：
-  1. `platform_utils` 模組本身提供的 API 存在且行為正確（兩平台皆包裝 / 三態標籤）。
-  2. 8 個已知呼叫點不再各自定義 `_init_utf8_streams()`（防未來復發第 9 份複製貼上）。
-
-R66 追加（ADR-XPLAT-002 §5 Phase 2-C 驗收判準③ 補齊，DEF-101-629）：Phase 2-C／
-2-D 把 10 份消費者各自的 LATEST 版本解析／凍結版本 regex 樣板收斂進
-`tools/lib/sdd_latest.py`（`DEF-101-624`）之後，ADR 原始驗收判準③「任一消費者
-改回自帶 `_latest_root` ⇒ dedup 鎖須紅」指定的手法正是「擴充本檔既有的
-`_scan_repo_py_for(pattern)` 機制」，但落地當下未真正補上（僅補了 `DEF-101-627`
-的模組自身行為回歸鎖，未補「消費者不得復發自帶定義」這道鎖）。本輪比照既有
-`_EXTRA_DEF_RES` 做法，補上 `resolve_latest_name`／`resolve_latest_root`／
-`exclude_frozen_sdd_versions` 三個函式的 repo-wide 唯一定義鎖。
-
-R70 訂正兩件事（`DEF-101-751` 實質／`DEF-101-752` 元層級，兩者由同一個事故顯形）：
-
-**① 不變量本身錯了（`DEF-101-751`）**：R17 的鎖寫的是「全 repo 只有一個定義點」，
-但 R69 的 `ADR-XPLAT-003` 讓 `AutoClaude/autoclaude/utils/platform_caps.py` 也必須
-定義 `is_windows()`／`is_macos()`——`autoclaude` 是**可獨立 pip 安裝**的套件
-（`AutoClaude/pyproject.toml`，hatchling 預設只打包 `AutoClaude/autoclaude/`），
-根層 `tools/lib/` 不在 wheel 內，脫離 monorepo checkout 後 import 必然失敗。
-這與 `DEF-101-295`（R33 Architect 裁決，見 `autoclaude/utils/logger.py` 檔內註解）
-是**同一條結構事實**、同一個既有解法：**跨孤島各留一份 ＋ 以鎖釘住其一致性**。
-故本檔的不變量改寫為「**每一個相依孤島內，各 helper 只准有一個定義點**」——
-不是把 `platform_caps.py` 加進白名單（那是把鎖改鬆），而是把「孤島」這個真正的
-邊界寫進斷言：任一島內出現第二個定義點、或某島出現它不該有的 helper，皆須紅。
-孤島邊界不是說法而是**結構事實**，由 `test_autoclaude_package_island_cannot_reach_root_tools_lib`
-機械證明（該島若哪天真的搆得到根層 SSOT，兩島就該合併、本檔的雙 SSOT 宣告同時失效）。
-
-**② 掃描面 fail-open（`DEF-101-752`，本輪更有價值的一筆）**：本檔原本用
-`git ls-files "*.py"` 當掃描面 ⇒ **未追蹤（untracked）的 .py 天然不可見**。
-`platform_caps.py` 在 R69 全程都是 untracked，於是上述①的衝突躲過了**四輪四方
-複審**與收尾者多次 `run_root_unittests.py` 全套實跑（皆 `Ran 1581 … OK`），
-直到 `git add -A` 讓它變成 tracked 的**那一刻**才在 pre-push 顯形。
-掃描面現改為 **tracked ∪ untracked-not-ignored**（`git ls-files` ＋
-`git ls-files -o --exclude-standard`）——排除 venv/快取的效果原本就靠 `.gitignore`，
-`--exclude-standard` 一樣排除得掉。盲區已封由
-`TestScanSurfaceCoversUntrackedFiles` 以真實 untracked 探針證明
-（修前的 tracked-only 掃描面看不到它／修後看得到且判紅）。
+本測試機械鎖住三件事：(1) `platform_utils` 模組本身 API 存在且行為正確（兩平台皆
+`_init_utf8_streams()` 無條件包裝，見 `test_hooks_stdin_utf8.py`：POSIX 上不強制重新
+包裝會讓阻斷級 hook 的中文錯誤訊息讀成亂碼）；(2) 8 個已知呼叫點不再各自定義
+`_init_utf8_streams()`；(3) `resolve_latest_name`／`resolve_latest_root`／
+`exclude_frozen_sdd_versions` 三函式 repo-wide 唯一定義鎖（R66 追加，DEF-101-629）。
+不變量以「**每一個相依孤島內，各 helper 只准有一個定義點**」為界（R70／DEF-101-751：
+`autoclaude` 為可獨立 pip 安裝套件，跨孤島各留一份＋以鎖釘住一致性），掃描面涵蓋
+tracked ∪ untracked-not-ignored（R70／DEF-101-752：untracked 天然不可見曾讓衝突躲過
+四輪複審）。史料見 CrossPlatform_DEF200275_Context_Metering_Evidence.md
+〈第七輪 史料搬遷〉。
 
 執行：python3 -m unittest discover -s tools/tests -p "test_*.py" -v
 """
