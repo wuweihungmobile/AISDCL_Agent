@@ -85,6 +85,7 @@ sys.path.insert(0, str(_REPO_ROOT / ".claude" / "hooks"))
 #   第三方；`tools/` 內的則是 first-party。分段是它要的形狀，不是隨手排的。）
 import context_budget_guard as guard  # noqa: E402  # 水位判定唯一實作（見上方 WHY）
 import endurance_env  # noqa: E402  # ⓿（ADR-XPLAT-014 §7.0）：autocompact 姿態的家（tools/lib）
+import harness_feed  # noqa: E402  # D32b-2：狀態列 feed 合併／`--check` 旁註（tools/lib）
 import quota_boot_check  # noqa: E402  # R102／R16：啟動自檢（H6／H7），見該檔檔頭 WHY  round-label-ok
 import quota_escalation as escalation  # noqa: E402  # R81：叫人＋扇出清單（R84／ARCH-10：改裸名）
 import quota_gate  # noqa: E402  # R84／SA-02：`--pace` 的內容產生者（額度判讀唯一入口）
@@ -142,26 +143,15 @@ def resolve_transcript(
     return max(found, key=lambda p: p.stat().st_mtime) if found else None
 
 
-# 🔴 R79：window 的證據來源改由 `guard.window_evidence()` 一次收齊（環境變數兩支＋
-# settings 鏈的 `autoCompactWindow`／`model`＋逐字稿實跑 model 的交叉否決）。此前
-# 本檔只餵得進 `AUTOSDD_CONTEXT_WINDOW` 一個來源 ⇒ 在 1M 機器上印出來的百分比是
-# 真值的五倍，而它正是掌舵者拿來判「要不要 compact」的那個數字。
+# 🔴 R79：window 的證據來源改由 `guard.window_evidence()` 一次收齊。本檔自己不重寫
+# 一份判準——`measure()` 已抽到 `tools/lib/harness_feed.py`（D32b-2）：刻意不把
+# `session_id` 轉給 `window_evidence()` 本身，那會連帶餵給 `known_model_windows_
+# path()` 的 per-session 快取路徑（D27 為熱路徑 hook 設計的優化），在 `--check`
+# 這種一次性呼叫上會寫一個從沒人要的快取檔，破壞既有的『`--check` 不寫檔』契約
+# （`PlannerCliTest.test_check_prints_usage_and_writes_nothing`）。
 def measure(transcript: Path) -> dict:
-    """水位量測（純資料）。判定一律走 hook 的實作，本檔不重寫一份判準。"""
-    used, peak, model = guard.scan_transcript(transcript)
-    window, source = guard.resolve_window(peak, **guard.window_evidence(model))
-    return {
-        "session_id": guard.session_id_of(transcript),
-        "transcript": str(transcript),
-        "used": used,
-        "peak_used": peak,
-        "model": model,
-        "window": window,
-        "window_source": source,
-        "may_block": guard.may_block(source),
-        "ratio": (used / window) if (used is not None and window > 0) else None,
-        "tier": guard.tier_of(used, window) if used is not None else None,
-    }
+    """水位量測（純資料）。轉呼叫 `harness_feed.measure()`，`guard` 由此處注入。"""
+    return harness_feed.measure(transcript, guard)
 
 
 # 🔴 ⓿（ADR-XPLAT-014 §7.0-a/§7.0-b）：autocompact 姿態的三常數與三支函式
@@ -1603,6 +1593,10 @@ def main(argv: list[str]) -> int:
     if args.check:
         print(endurance_env.unattended_outcome_banner(), end="")  # noqa: E501 — FIX3(b)：無人續跑停下未讀結局，開頭主動印
         print(endurance_env.check_report(data, guard), end="")
+        # D32-4／D32b-3：harness 旁註（分子交叉比對，或未採用時的 reason）一份判準
+        # 給 CLI 與 hook 共用，見 `harness_feed.check_lines()`。
+        for line in harness_feed.check_lines(data):
+            print(line)
         # D23（SD-07）：本 sid 的 halt 標記未過期時多印一行，同 --pace 分支的短路邏輯
         # （純讀標記，不打 API）；先過 `_halt_marker_probe_path()` 的唯讀存在性檢查，
         # 標記真的在才呼叫會建目錄的 `read_halt_marker()`（見該函式 WHY）。單行 if

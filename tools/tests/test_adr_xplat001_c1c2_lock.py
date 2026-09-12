@@ -682,26 +682,26 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 7918,
+    "test_adr_xplat001_c1c2_lock.py": 7956,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
-    "test_archive_defect_log.py": 3839,
-    "test_bash32_compat.py": 1020,
-    "test_bash_probe_spec_contract.py": 867,
+    "test_archive_defect_log.py": 3767,
+    "test_bash32_compat.py": 985,
+    "test_bash_probe_spec_contract.py": 859,
     "test_block_destructive_git_r83.py": 2285,
     "test_bootstrap_core.py": 439,
     "test_bootstrap_ps1.py": 160,
     "test_check_archive_required.py": 160,
     "test_check_defect_log_crossref.py": 3891,
     "test_check_gha_action_versions.py": 295,
-    "test_check_hooks_liveness.py": 3314,
+    "test_check_hooks_liveness.py": 3397,
     "test_check_pytest_baseline_sites.py": 301,
-    "test_check_script_parity.py": 2098,
-    "test_check_wrapper_thinness.py": 1234,
+    "test_check_script_parity.py": 2051,
+    "test_check_wrapper_thinness.py": 1185,
     "test_claim_provenance_r86.py": 1015,
     "test_component_sanitizer_shared_layer_lock.py": 293,
-    "test_context_budget_guard.py": 11950,
-    "test_context_window_parity.py": 229,
+    "test_context_budget_guard.py": 12160,
+    "test_context_window_parity.py": 281,
     "test_defect_id_reference_integrity.py": 281,
     "test_dev_start.py": 6529,
     "test_dev_start_ps1_lastexitcode.py": 521,
@@ -709,32 +709,32 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_doc_loc_baseline_freshness_r60.py": 7145,
     "test_extras_quoting_zsh_safety.py": 365,
     "test_failure_log_rotation.py": 80,
-    "test_find_git_bash_parity.py": 1326,
+    "test_find_git_bash_parity.py": 1306,
     "test_gha_action_versions.py": 681,
     "test_git_hooks_install_common.py": 393,
     "test_guard_line_taxonomy_r99.py": 148,
-    "test_install_windows_nightly.py": 1385,
+    "test_install_windows_nightly.py": 1347,
     "test_mac_endurance_r83.py": 1959,
     "test_mac_readiness_r82.py": 621,
     "test_macos_smoke_skip_honesty.py": 225,
     "test_maturity_criteria_r79.py": 431,
-    "test_negative_existence_claims_r82.py": 380,
+    "test_negative_existence_claims_r82.py": 370,
     "test_nightly_interpreter_determinism.py": 278,
     "test_no_invalid_escape_sequences.py": 315,
     "test_ntfs_trailing_space_device_name.py": 759,
     "test_onboarding_parity_interlock.py": 233,
-    "test_platform_neutral_paths.py": 5762,
+    "test_platform_neutral_paths.py": 5781,
     "test_platform_utils_dedup.py": 1078,
-    "test_pre_commit_dispatcher_sigpipe.py": 964,
+    "test_pre_commit_dispatcher_sigpipe.py": 936,
     "test_pre_push_dispatcher.py": 686,
     "test_ps1_bom.py": 248,
     "test_ps51_compat.py": 610,
-    "test_ps_engine_ssot.py": 960,
+    "test_ps_engine_ssot.py": 905,
     "test_python_c_percent_shim.py": 119,
     "test_quota_policy.py": 3416,
     "test_root_guard_known_model_r145.py": 227,
     "test_root_infra_parity.py": 441,
-    "test_run_root_unittests.py": 3716,
+    "test_run_root_unittests.py": 3648,
     "test_sanitize_component_frozen_sdd_versions_lock.py": 317,
     "test_schedule_capability_parity.py": 626,
     "test_script_scan_surface_ssot.py": 391,
@@ -742,15 +742,16 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_skip_ceiling_ratchet_direction.py": 706,
     "test_skip_discoverability_r83.py": 742,
     "test_smoke_ci_sync.py": 1397,
+    "test_statusline_context_feed.py": 204,
     "test_stdio_utf8.py": 76,
-    "test_subprocess_encoding_hygiene.py": 1609,
+    "test_subprocess_encoding_hygiene.py": 1582,
     "test_wake_chain_halt_r278.py": 691,
-    "test_windows_forbidden_filename_parity.py": 1025,
+    "test_windows_forbidden_filename_parity.py": 1003,
     "test_windows_nightly_anchor_parity.py": 135,
     "test_windows_smoke_heartbeat_doc_sync.py": 197,
     "test_windowsapps_guard_bash_parity.py": 953,
-    "test_windowsapps_guard_cross_consistency.py": 2183,
-    "test_workflow_permission_concurrency_lock.py": 1417,
+    "test_windowsapps_guard_cross_consistency.py": 2051,
+    "test_workflow_permission_concurrency_lock.py": 1406,
     "test_workflow_schedule_sync.py": 309,
     "test_workflow_timeout_coverage.py": 158,
     "test_worktree_paths.py": 104,
@@ -1813,6 +1814,37 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "[非淨減法輪][同輪追加] 本檔自身逐檔漂移：上一列稽核列＋本列本身＋"
      "`_REPIN_LOG_FROZEN_PREFIX_LEN` 172→174 涵蓋新列所需的反覆覆核收斂，同 R95~R145 "
      "既有體例。逐檔清單沿用 CrossPlatform_R145_Scan_Findings.md〈第七輪附記〉節。"),
+    ("R146", 98211, 98165, -46,
+     "[淨減法輪][同輪續] DEF-200-287／DEF-200-288 收尾：功能軌＝新增 "
+     "test_statusline_context_feed.py＋test_context_budget_guard.py 的 "
+     "HarnessFeedStageTest＋test_context_window_parity.py 的 HarnessStageParityTest；"
+     "回歸鎖軌＝test_check_hooks_liveness.py 的 TestConversationLedgerChildTimeoutParity"
+     "（DEF-200-287 W-3）；抵銷＝Dev-Trim8 十五支 tools/tests/*.py 搬約 80 段歷史敘事。"
+     "不使用任何例外配額。逐檔清單＝CrossPlatform_R145_Scan_Findings.md〈第七輪附記"
+     "（R146）〉節與證據檔〈第七輪追加 A／B〉。"),
+    ("R146", 98165, 98166, 1,
+     "[非淨減法輪][同輪追加] 本檔自身逐檔漂移：上一列稽核列本身造成的一行漂移，同 "
+     "R95~R145 既有體例。逐檔清單沿用 CrossPlatform_R145_Scan_Findings.md〈第七輪附記"
+     "（R146）〉節。"),
+    ("R146", 98166, 98170, 4,
+     "[非淨減法輪][同輪追加] 本檔自身逐檔漂移：上一列稽核列本身再造成的四行漂移，同 "
+     "R95~R145 既有體例。逐檔清單沿用 CrossPlatform_R145_Scan_Findings.md〈第七輪附記"
+     "（R146）〉節。"),
+    ("R146", 98170, 98174, 4,
+     "[非淨減法輪][同輪追加] 收斂列：`_FROZEN_GUARD_LINES` 表更新（自身行數計入）造成的"
+     "四行漂移，同 R95~R145 既有體例。逐檔清單沿用 CrossPlatform_R145_Scan_Findings.md"
+     "〈第七輪附記（R146）〉節。"),
+    ("R146", 98174, 98178, 4,
+     "[非淨減法輪][同輪追加] 收斂列：上一列本身造成的四行漂移，同 R95~R145 既有體例。"
+     "逐檔清單沿用 CrossPlatform_R145_Scan_Findings.md〈第七輪附記（R146）〉節。"),
+    ("R146", 98178, 98181, 3,
+     "[非淨減法輪][同輪追加] 收斂列：上一列本身造成的三行漂移。逐檔清單沿用 "
+     "CrossPlatform_R145_Scan_Findings.md〈第七輪附記（R146）〉節。"),
+    ("R146", 98181, 98195, 14,
+     "[非淨減法輪][同輪追加] 收斂列：本檔自身歷次覆核收斂（`_FROZEN_GUARD_LINES` 二次"
+     "更新、`_FROZEN_PREFIX_REWRITE_LEDGER` 接鏈列、`_REPIN_LOG_FROZEN_PREFIX_LEN`／"
+     "`_REPIN_LOG_HISTORY_SHA256` 重釘）累計造成的十三行漂移，同 R95~R145 既有體例。"
+     "逐檔清單沿用 CrossPlatform_R145_Scan_Findings.md〈第七輪附記（R146）〉節。"),
 )
 
 
@@ -2334,10 +2366,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 174
+_REPIN_LOG_FROZEN_PREFIX_LEN = 181
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "a4aa9940f730e9320e489083bdafeabcf1c597f2badefca17d02e1d0a37acb35")
+    "054135e143d67f05c886944860cfa7275404b46dd427d42fdfb51ddd9aa87a90")
 
 
 def repin_log_history_digest(
@@ -2579,6 +2611,12 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # 抵銷造成的逐檔漂移收斂（自含式：本檔自身編修亦計入），凍結前綴延伸涵蓋新增
     # 主表列與本軌新列本身，起點接 R145 終點 67af3c96e763。 round-label-ok
     ("R146", "67af3c96e763", "a4aa9940f730", "DEF-200-275"),
+    # R146 續：DEF-200-275 第七輪收尾單人窗口（Dev-D8）—DEF-200-287（Windows 稽核帳本 round-label-ok
+    # 檔案鎖競態三棒修復）／DEF-200-288（status line harness 進料兩棒）收尾：功能軌新增
+    # test_statusline_context_feed.py 等鎖檔、回歸鎖軌 TestConversationLedgerChildTimeoutParity、
+    # Dev-Trim8 十五支散文搬遷抵銷造成的逐檔漂移收斂（自含式：本檔自身編修亦計入），
+    # 起點接上一列終點 a4aa9940f730。
+    ("R146", "a4aa9940f730", "054135e143d6", "DEF-200-287"),
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

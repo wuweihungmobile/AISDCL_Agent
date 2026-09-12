@@ -371,13 +371,10 @@ class TestNightlyJobNameSelectorInterlock(unittest.TestCase):
 class TestRootInfraNightlyStalenessSentinel(unittest.TestCase):
     """R68（P1）：root-infra-ci.yml 第 15 道「nightly-full 排程陳舊度哨兵」。
 
-    Rule 9：兩支 `*-nightly-full` 是唯一會在真 Windows／真 macOS 上跑完整
-    AutoClaude 測試樹的通道，卻是 `continue-on-error: true` 的非阻斷 job；
-    2026-07-15～07-27 連續 5 次排程全紅、18 天零成功，而三道既有哨兵在結構上
-    都偵測不到（alert 同計費平面、`_check_ci_liveness` 只取 --limit 1 且不分
-    事件、`_check_nightly_heartbeat` 只讀本機 log mtime）。本哨兵是唯一會在
-    每次 push 都問一次「那條真機通道還活著嗎」的機械物，且**必須阻斷**——
-    非阻斷正是病因本身。
+    Rule 9：兩支 `*-nightly-full` 是唯一在真 Windows／真 macOS 上跑完整測試樹的
+    通道，卻是非阻斷 job；曾連續 5 次排程全紅、18 天零成功，三道既有哨兵在結構
+    上都偵測不到。本哨兵是唯一每次 push 都問「那條真機通道還活著嗎」的機械物，
+    且必須阻斷——非阻斷正是病因本身。史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
 
     def _sentinel_step(self) -> str:
@@ -764,15 +761,11 @@ class TestRootInfraNightlyStalenessSentinel(unittest.TestCase):
     def test_waiver_reason_states_a_checkable_release_criterion_not_a_dated_claim(self):
         """WAIVER_REASON 必須是可現查的解除判準，且不得夾帶日曆日期。
 
-        Rule 9：豁免的正當性建立在「根因在本 repo 之外」這個**事實**上，而事實會變。
-        修復前的理由把續期綁在一句對未來的預測上（斷言帳務已在某日恢復、再等兩個
-        排程窗口即可自證）；後續量測推翻了那個預測，而**沒有任何機械物會說話**——
-        豁免照樣自動生效到期滿。日期一旦寫進理由，它從被推翻的那一刻起就開始說謊。
-        改法：理由只准描述「怎樣才算可以解除」，而那個判準必須是本 step 自己就會
-        印出來的量測值（見 test_sentinel_reads_the_job_layer_not_only_the_run_layer）。
-
-        射程劃界：`WAIVER_UNTIL` 本身**仍然是日期**且不受本條管——它是豁免視窗的
-        界線（反 fail-open 三道保險之一），不是對世界的事實宣稱。
+        Rule 9：豁免的正當性建立在「根因在本 repo 之外」這個事實上，而事實會變。
+        修復前的理由綁在一句對未來的預測上，後續量測推翻了它卻沒有任何機械物會
+        說話——日期一旦寫進理由，從被推翻那刻起就開始說謊。改法：理由只准描述
+        怎樣才算可以解除，判準必須是本 step 自己會印出來的量測值。射程劃界：
+        `WAIVER_UNTIL` 本身仍是日期且不受本條管，它是豁免視窗的界線。
         """
         step = self._sentinel_step()
         if not self._WAIVER_RE.search(step).group(1):
@@ -1068,15 +1061,11 @@ def _tracked_scripts() -> list[str]:
 class TestCompatCiScriptTriggerSymmetry(unittest.TestCase):
     """R68 SCAN-E（DOWNGRADED→P3）：兩支 compat-CI 對 `.sh`／`.ps1` 的觸發面對稱。
 
-    Rule 9（測意圖）：windows 側對 `.ps1` 用 `**/*.ps1` 兜底、對 `.sh` 逐一列舉；
-    macos 側恰好相反。逐一列舉的那一面**零機械完整性鎖**——新增一支腳本只要
-    落在既有列舉之外，該平台的 CI 就靜默不觸發，而「靜默不觸發」在 GitHub UI
-    上與「跑過且通過」長得一模一樣。實測（R68）全 repo 305 支腳本中確有 1 支
-    （`AutoClaude/tools/run_mutmut_in_docker.sh`）只觸發 macOS 側；已補列，
-    使本鎖得以維持**零豁免清單**形態——豁免清單本身即 fail-open 面。
-
-    刻意不改成兩側都通配（原提案 A）：那會讓 30 個凍結版樹下的腳本也觸發兩支
-    compat-CI，代價與效益不成比例，且與凍結版「不回改」政策相斥。
+    Rule 9：windows 側對 `.ps1` 用萬用字元兜底、對 `.sh` 逐一列舉；macos 側恰好
+    相反。逐一列舉的那一面零機械完整性鎖——新增腳本落在列舉之外時該平台 CI
+    靜默不觸發，與「跑過且通過」在 UI 上長得一模一樣。實測全 repo 確有 1 支只
+    觸發一側，已補列維持零豁免清單形態。刻意不改成兩側都通配：會讓凍結版樹下的
+    腳本也觸發，與凍結版政策相斥。史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
 
     def test_paths_blocks_extractable_and_symmetric_within_each_workflow(self):

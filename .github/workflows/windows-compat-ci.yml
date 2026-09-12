@@ -240,6 +240,8 @@ on:
       # 把剩下這兩筆逐字點名出來的。
       - ".actrc"
       - "tools/session_resume_planner.py"
+      - "tools/statusline_context_feed.py"
+      - "tools/tests/test_statusline_context_feed.py"
       # R79（同一個形態的第三次：新增判準消費了根層檔卻沒補 paths，由
       # AISDLC_SDD/scripts/tests/test_ci_paths_cover_root_consumers.py 逐字點名）。
       # tools/tests/test_platform_neutral_paths.py 讀 .editorconfig 的 .ps1 區塊
@@ -550,6 +552,7 @@ on:
       # R86：本輪新增的四支根層 SSOT（配速攤提／判準本體／pace 契約寫入者／護欄層分桶判準）
       #      漏列的代價逐字同 DEF-101-042：只改該檔時其回歸鎖不會跑。
       - "tools/lib/quota_pace.py"
+      - "tools/lib/harness_feed.py"
       - "tools/lib/quota_criteria.py"
       - "tools/lib/pace_contract.py"
       - "tools/lib/guard_bucket_policy.py"
@@ -646,6 +649,8 @@ on:
       # 把剩下這兩筆逐字點名出來的。
       - ".actrc"
       - "tools/session_resume_planner.py"
+      - "tools/statusline_context_feed.py"
+      - "tools/tests/test_statusline_context_feed.py"
       # R79（同一個形態的第三次：新增判準消費了根層檔卻沒補 paths，由
       # AISDLC_SDD/scripts/tests/test_ci_paths_cover_root_consumers.py 逐字點名）。
       # tools/tests/test_platform_neutral_paths.py 讀 .editorconfig 的 .ps1 區塊
@@ -899,6 +904,7 @@ on:
       # R86：本輪新增的四支根層 SSOT（配速攤提／判準本體／pace 契約寫入者／護欄層分桶判準）
       #      漏列的代價逐字同 DEF-101-042：只改該檔時其回歸鎖不會跑。
       - "tools/lib/quota_pace.py"
+      - "tools/lib/harness_feed.py"
       - "tools/lib/quota_criteria.py"
       - "tools/lib/pace_contract.py"
       - "tools/lib/guard_bucket_policy.py"

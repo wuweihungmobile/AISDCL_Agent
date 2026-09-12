@@ -119,17 +119,11 @@ def tree_count_verdict(label: str, actual: int, floor: int) -> str | None:
 def _scan_roots() -> list[tuple[Path, int]]:
     """（掃描根, 該樹檔數下限）清單；根缺席或**離開下限帶**由測試 fail-loud。
 
-    per-tree 下限（對齊 test_platform_neutral_paths SD-3 慣例）：逐樹釘選使任一樹
-    縮面必紅、不被他樹總量掩蓋。R13 一審 ARCH-R13-REV-5 補納四個小樹
-    （.claude/hooks／AutoClaude/scripts／AutoClaude/alembic／LATEST .claude/hooks
-    ——其中 AutoClaude/scripts 正是 DEF-101-178 實證的 R12 清查漏網目錄）。
-    樹清單本體由 TestScanRootsConfigPinning 釘選，防「刪清單一列」整樹靜默出界
-    （QA-R13-2 同構）。
-
-    🔴 下限值＝**R75 當回合實測 × 0.95**（見 `suggested_floor()`），不再是
-    2026-07-19 首掃數打八折的化石。實測值（2026-08-04，本機）：
-    81／43／204／282／1／19／2／43／166／2／5。上界機制見 `tree_count_verdict()`
-    ——下限與實測拉開太遠時它自己會紅，所以這一串數字不會再默默腐化。"""
+    per-tree 下限：逐樹釘選使任一樹縮面必紅、不被他樹總量掩蓋。樹清單本體由
+    `TestScanRootsConfigPinning` 釘選，防「刪清單一列」整樹靜默出界。下限值＝
+    R75 當回合實測 × 0.95（`suggested_floor()`），不是打八折的化石；上界機制見
+    `tree_count_verdict()`——下限與實測拉開太遠時它自己會紅。史料見證據檔
+    〈第七輪 史料搬遷（Dev-Trim8）〉。"""
     latest = _latest_root()
     return [
         # 🔴 R80 收尾單人窗口重釘 77 → 92（**方向是收緊**：下限拉高＝要求更大的掃描面）。
@@ -438,15 +432,9 @@ _NON_CODE_TOKENS = frozenset(
 def code_only(source: str) -> str:
     """把註解與字串字面**塗白成等寬空白**後的原始碼（行號與欄位皆不位移）。
 
-    🔴 為何非要塗白（R75／DEF-101-801）：本判準原本是**整檔子字串比對**，於是
-    一行註解 `# init_utf8_streams` 就能讓一支毫無保護的檔案被判為「有保護」。
-    QA 以同樣手法複算過本輪納管的 child，14/14 命中皆落在真實程式碼 ⇒ 現況沒有
-    實例在濫用，屬**潛在缺口**。但這個缺口的形狀是「假綠」，而假綠一旦發生就
-    沒有任何訊號——本檔另一道判準（`_marker_lines`）早就只認 COMMENT token、
-    刻意不用裸子字串，同一份謹慎沒有套到這裡來。
-
-    tokenize 失敗（壞檔／怪編碼）時回空字串＝**視為無保護**：方向刻意選紅不選綠，
-    判準的存在理由就是防假綠。掃描面內的檔另有 `ast.parse` 的 fail-loud 會先叫。
+    WHY（R75／DEF-101-801）：舊判準是整檔子字串比對，一行註解就能讓毫無保護的
+    檔案被判為「有保護」——假綠一旦發生就沒有任何訊號。tokenize 失敗時回空字串
+    視為無保護，方向刻意選紅不選綠。史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
     try:
         toks = list(tokenize.generate_tokens(io.StringIO(source).readline))
@@ -1104,17 +1092,11 @@ _SETTINGS_JSON = _REPO_ROOT / ".claude" / "settings.json"
 def hook_command_scripts(settings: dict) -> list[tuple[str, str]]:
     """`settings` 內每個 hook 條目**實際會跑到**的腳本 → [(事件名, repo 相對 posix 路徑)]。
 
-    🔴 **R80：本函式此前只讀 `command` 字串，而那個假設已經被推翻。** Claude Code 的
-    hook 條目有兩種形態，腳本路徑住在不同欄位：shell form 在 `command` 裡，exec form
-    （帶 `args`，Windows 上不經 `bash.exe`＝不閃 console 視窗）則**結構性地搬到
-    `args`**。R80 把根 `.claude/settings.json` 轉成 exec form 之後實測：本函式掃出來的
-    腳本集合由 6 支變成 1 支（只剩啟動器自己）。
-
-    後果**不是**「這道鎖會紅」，是它會**恆綠**——分母掃出 0 支 ⇒ 沒有東西可違反，
-    rc 與「正確地全部通過」一模一樣。本檔判準四、
-    `test_doc_loc_baseline_freshness_r60.registered_hook_basenames`（經本函式）
-    都建立在這個分母上。⇒ 解析邏輯已收進唯一真相源 `tools/lib/hook_wiring.py`，
-    兩種形態都認得；本函式只保留呼叫端介面（回傳形狀逐字不變）。
+    R80：本函式此前只讀 `command` 字串，而 exec form（腳本路徑結構性地搬到
+    `args`）轉換後實測掃出的腳本集合由 6 支變成 1 支——後果不是「這道鎖會紅」，
+    是分母掃出 0 支使它恆綠、與「正確地全部通過」在 rc 上無法區分。解析邏輯已
+    收進唯一真相源 `tools/lib/hook_wiring.py`，兩種形態都認得。史料見證據檔
+    〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
     sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
     import hook_wiring  # noqa: PLC0415
@@ -1206,14 +1188,11 @@ class TestRegisteredHookScriptsAreInChildEncodingScope(unittest.TestCase):
     def test_the_scan_survives_the_exec_form_conversion(self) -> None:
         """🔴 R80 注入自證：**在轉換後的 settings 上**，這道鎖必須仍然抓得到違規。
 
-        WHY 這條非有不可：exec form 把腳本路徑從 `command` 搬進 `args`，而失明的
-        表徵是**恆綠**（分母掃出 0 支 ⇒ 沒有東西可違反），與「正確地全部通過」在 rc
-        上無法區分。所以「轉換後 rc=0」證明不了任何事——必須證明「轉換後把註冊拿掉
-        會轉紅」。
-
-        注入用**真實檔案的內容**在記憶體裡動手（不寫磁碟）：合成 settings 證明不了
-        判準對 repo 現況有牙，而真的改磁碟上的 settings.json 會影響同一棵樹上其他
-        agent 的每一次工具呼叫（該檔記載過 hook 誤觸 deny 的 P0）。
+        WHY：exec form 轉換後失明的表徵是恆綠（分母掃出 0 支），與「正確地全部
+        通過」在 rc 上無法區分，故轉換後 rc=0 證明不了任何事，必須證明「拿掉註冊
+        會轉紅」。注入在記憶體裡動真實檔案內容（不寫磁碟）：真改磁碟上的
+        settings.json 會影響同棵樹上其他 agent 的每次工具呼叫。史料見證據檔
+        〈第七輪 史料搬遷（Dev-Trim8）〉。
         """
         real = self._real_settings()
         self.assertIn(
@@ -1245,14 +1224,11 @@ class TestRegisteredHookScriptsAreInChildEncodingScope(unittest.TestCase):
 
     def _settings_with(self, script_rel: str) -> dict:
         """把真實 settings.json 裡起 R74 P0 那支 hook 的**整個條目**取來，只把腳本
-        路徑換掉——這樣 fixture 驗的就是 production 當下的佈線形態本身，而不是一個
-        我自己寫得比較好認的簡化字串。
+        路徑換掉，讓 fixture 驗的是 production 當下的佈線形態本身。
 
-        🔴 R80 訂正：此處原本硬斷言 production 是 `-c` ＋ runpy 形態（shell form）。
-        那兩行斷言把 fixture 綁死在**一種**形態上，於是 exec form 轉換會讓這支自證
-        直接 fail——而它要證的東西（判準能不能認出無保護的腳本）與形態無關。改成
-        逐字搬真實條目、只換路徑，並以 `hook_entry_targets()` 回頭驗「真的換成功了」，
-        形態變更不再需要動這裡。
+        R80 訂正：原本硬斷言 production 是 shell form，把 fixture 綁死在一種形態上，
+        exec form 轉換會讓自證直接 fail——而它要證的東西與形態無關。改為逐字搬真實
+        條目、只換路徑，並以 `hook_entry_targets()` 回頭驗證。
         """
         sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
         import hook_wiring  # noqa: PLC0415
@@ -1554,14 +1530,11 @@ class TestRootToolsLintPolicy(unittest.TestCase):
     def test_the_config_actually_covers_the_root_tools_tree(self) -> None:
         """反空轉：設定檔必須真的**罩得住**根層 tools/ 樹（不是放在某個沒人走到的角落）。
 
-        以 ruff 自己的解析結果為準——`ruff check --show-settings <本樹任一支檔>` 印出的
-        `Settings path` 必須就是 `tools/ruff.toml`、`linter.rules.enabled` 必須含 E501、
-        `linter.line_length` 必須等於本檔宣告值。**不能**靠讀 toml 自我確認：這一整類缺陷
-        的形狀就是「檔案內容正確、但 ruff 的向上尋找根本走不到它」，讀 toml 對此恆真。
-
-        R69 訂正（SA 實測）：本測試原本的斷言是 `_overlong_line_count(...) >= 0` ——
-        一個**恆真**式子，而 docstring 卻宣稱「以 `ruff check --show-settings` 驗證」。
-        宣稱與實作不符的鎖比沒有鎖更糟：它讓人以為這條路已經被守住了。
+        以 ruff 自己的解析結果為準（`--show-settings` 的 Settings path／E501／
+        line_length），不能靠讀 toml 自我確認：這類缺陷的形狀是「檔案內容正確，但
+        ruff 向上尋找走不到它」，讀 toml 對此恆真。R69 訂正（SA 實測）：本測試原本
+        的斷言是恆真式子，而 docstring 宣稱已驗證——宣稱與實作不符的鎖比沒有鎖更糟。
+        史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
         """
         ruff = shutil.which("ruff")
         if ruff is None:

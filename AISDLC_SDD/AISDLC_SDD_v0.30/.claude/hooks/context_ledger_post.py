@@ -73,18 +73,21 @@ def _session_id(inp: dict, transcript: object) -> str:
     return "unknown"
 
 
-def _measure(transcript: object) -> Measurement | None:
+def _measure(transcript: object, session_id: str | None = None) -> Measurement | None:
+    """D32-4：`session_id` 轉給 `measure()` 讀 status line feed，填 `Measurement.harness_used`。"""
     try:
-        return measure(transcript)
+        return measure(transcript, session_id=session_id)
     except Exception:  # noqa: BLE001
         return None
 
 
-def _window_for(m: Measurement | None) -> tuple[int | None, str | None]:
+def _window_for(m: Measurement | None, sid: str | None = None) -> tuple[int | None, str | None]:
+    """D32-3：`sid` 轉給 `window_evidence()` 讀 status line feed（harness 回報階）；
+    缺席（既有呼叫端未改）時該階單純說不出話，行為與 D32 之前相同。"""
     if m is None or m.used is None:
         return None, None
     try:
-        return resolve_window(m.peak, **window_evidence(m.model))
+        return resolve_window(m.peak, **window_evidence(m.model, session_id=sid))
     except Exception:  # noqa: BLE001
         return None, None
 
@@ -153,9 +156,9 @@ def main() -> int:
     target = tool_input.get("file_path") or tool_input.get("path")
 
     transcript = inp.get("transcript_path")
-    m = _measure(transcript)
     sid = _session_id(inp, transcript)
-    window, source = _window_for(m)
+    m = _measure(transcript, sid)
+    window, source = _window_for(m, sid)
 
     _record_audit_and_merge({
         "ts": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),

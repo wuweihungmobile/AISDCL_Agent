@@ -413,7 +413,10 @@ def _isolated_env(tmp: Path, *, real_scheduler: bool = False) -> dict[str, str]:
                  "CLAUDE_CODE_AUTO_COMPACT_WINDOW", "AUTOSDD_CONTEXT_GUARD_OFF",
                  "AUTOSDD_CONTEXT_SIGNAL_OFF", "AUTOSDD_TRACE_DIR",
                  "AUTOSDD_SENTINEL_OFF", "AUTOSDD_QUOTA_GUARD_OFF",
-                 "AUTOSDD_QUOTA_FANOUT_CAP", "AUTOSDD_HANDBACK_DIR"):
+                 "AUTOSDD_QUOTA_FANOUT_CAP", "AUTOSDD_HANDBACK_DIR",
+                 # D32：status line feed 目錄——不清掉的話，開發機上若真的裝了 status
+                 # line，子行程會讀到真實 feed 檔而讓 window 判定的測試變得不確定。
+                 "AUTOSDD_CONTEXT_FEED_DIR"):
         env.pop(flag, None)
     # 🔴 R84／C3-P4c：**預設不准碰真的排程器**，要碰得自己具名（`real_scheduler=True`）。
     # 立案實測（launchctl 孤兒哨兵）原文＝Resume 證據檔 §L-3.3；TMPDIR 隔離為何擋不住
@@ -11932,6 +11935,213 @@ class InvariantLocksArePresentTest(unittest.TestCase):
                     count, min_count,
                     f"{class_name} 只剩 {count} 支測試方法（下限 {min_count}）"
                     "——INV/FIX 鎖被削弱且沒有任何守門變紅")
+
+
+#: D32-5：官方 status line schema 的一份最小合法範例，供本節共用。
+_FEED_SAMPLE = {
+    "session_id": "sess-harness",
+    "model": {"id": "claude-fable-5-1", "display_name": "Fable"},
+    "context_window": {
+        "context_window_size": 1_000_000,
+        "used_percentage": 39.4,
+        "current_usage": {"input_tokens": 300_000, "output_tokens": 1_200,
+                          "cache_creation_input_tokens": 50_000,
+                          "cache_read_input_tokens": 43_900},
+    },
+}
+
+
+def _write_feed(tmp: Path, doc: dict) -> Path:
+    p = tmp / f"{doc['session_id']}.json"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    return p
+
+
+class HarnessFeedStageTest(unittest.TestCase):
+    """D32-3／D32-4：status line 進料的分母階＋分子交叉比對（純函式，紅綠由注入自證）。"""
+
+    def setUp(self) -> None:
+        self.tmp = _tmpdir(self, "harness-feed-")
+        self._env_patch = unittest.mock.patch.dict(
+            os.environ, {guard.CONTEXT_FEED_DIR_ENV: str(self.tmp)}, clear=False)
+        self._env_patch.start()
+        self.addCleanup(self._env_patch.stop)
+
+    def test_context_feed_path_honours_env_override(self) -> None:
+        self.assertEqual(guard.context_feed_path("sid"), self.tmp / "sid.json")
+
+    def test_no_feed_file_is_not_an_error(self) -> None:
+        """D32b-3：沒有 feed 檔本身也是一種 reason（statusLine 未設定或本 session
+        太新），不是壞事——但這句話必須被印出來，不能只是「非 None」就算過。"""
+        got = guard.read_context_feed("nope", "claude-fable-5-1")
+        self.assertIsNone(got["window"])
+        self.assertIsNone(got["used"])
+        self.assertEqual(got["reason"],
+                         "無 feed（statusLine 未設定或本 session 尚無 assistant 訊息）")
+
+    def test_valid_feed_yields_window_and_used(self) -> None:
+        _write_feed(self.tmp, _FEED_SAMPLE)
+        got = guard.read_context_feed("sess-harness", "claude-fable-5-1")
+        self.assertEqual(got["window"], 1_000_000)
+        self.assertEqual(got["used"], 393_900)
+        self.assertIsNone(got["reason"])
+
+    def test_session_id_mismatch_is_rejected(self) -> None:
+        """注入：feed 檔名對得上但內容 `session_id` 對不上 ⇒ 必須拒絕，否則子行程間
+        會互相讀到彼此的 feed（同一台機器上 session id 就是 feed 檔名，理應相等）。"""
+        bad = {**_FEED_SAMPLE, "session_id": "someone-else"}
+        (self.tmp / "sess-harness.json").write_text(json.dumps(bad), encoding="utf-8")
+        got = guard.read_context_feed("sess-harness", "claude-fable-5-1")
+        self.assertIsNone(got["window"])
+
+    def test_model_family_mismatch_is_rejected(self) -> None:
+        _write_feed(self.tmp, _FEED_SAMPLE)
+        got = guard.read_context_feed("sess-harness", "claude-sonnet-5")
+        self.assertIsNone(got["window"], "fable feed 不得餵給 sonnet session")
+        self.assertIn("家族", got["reason"])
+
+    def test_unrecognisable_observed_model_does_not_veto(self) -> None:
+        """認不出家族就不敢否決——同 `window_from_model` 既有的寬容度。"""
+        _write_feed(self.tmp, _FEED_SAMPLE)
+        got = guard.read_context_feed("sess-harness", None)
+        self.assertEqual(got["window"], 1_000_000)
+
+    def test_non_positive_window_size_is_rejected(self) -> None:
+        bad = {**_FEED_SAMPLE, "context_window": {**_FEED_SAMPLE["context_window"],
+                                                   "context_window_size": 0}}
+        _write_feed(self.tmp, bad)
+        got = guard.read_context_feed("sess-harness", "claude-fable-5-1")
+        self.assertIsNone(got["window"])
+
+    def test_corrupt_json_is_not_an_error(self) -> None:
+        (self.tmp / "sess-harness.json").write_text("{not json", encoding="utf-8")
+        got = guard.read_context_feed("sess-harness", "claude-fable-5-1")
+        self.assertIsNone(got["window"])
+        self.assertIsNone(got["used"])
+
+    def test_no_session_id_is_not_an_error(self) -> None:
+        got = guard.read_context_feed(None, "claude-fable-5-1")
+        self.assertIsNone(got["window"])
+
+    def test_resolve_window_prefers_harness_over_every_pinned_source(self) -> None:
+        """D32-3：harness 回報排在 `resolve_window` 五階之上——之前的優先序測試
+        （`WindowSourceOrderTest`）鎖住的是**沒有** harness 時的順序，這裡補上「有的
+        話它贏」。"""
+        every = {"cc_window_raw": "300000", "settings_window": 400_000,
+                 "model_hint": "opus[1m]", "observed_model": "claude-opus-5"}
+        window, source = guard.resolve_window(
+            999_999, "123456", **every, harness_window=777_000)
+        self.assertEqual(window, 777_000)
+        self.assertIn("harness", source)
+
+    def test_conflicting_pin_is_noted_but_not_used(self) -> None:
+        window, source = guard.resolve_window(0, "967000", harness_window=1_000_000)
+        self.assertEqual(window, 1_000_000)
+        self.assertIn("967,000", source)
+        self.assertIn("未採用", source)
+
+    def test_agreeing_pin_is_not_flagged_as_unconverged(self) -> None:
+        window, source = guard.resolve_window(0, "1000000", harness_window=1_000_000)
+        self.assertEqual(window, 1_000_000)
+        self.assertNotIn("未採用", source)
+
+    def test_absent_harness_window_skips_the_stage_entirely(self) -> None:
+        """向後相容：既有呼叫端不傳 `harness_window` ⇒ 這一階必須完全不介入
+        （parity 鎖 `test_context_window_parity.py` 的既有案例仰賴這個事實）。"""
+        window, source = guard.resolve_window(0, "500000")
+        self.assertEqual(window, 500_000)
+        self.assertNotIn("harness", source)
+
+    def test_bad_harness_window_falls_through(self) -> None:
+        for dud in ("abc", "0", "-1", "", None, 0, -5):
+            window, source = guard.resolve_window(0, "500000", harness_window=dud)
+            self.assertEqual(window, 500_000, repr(dud))
+
+    def test_may_block_accepts_the_harness_source(self) -> None:
+        _, source = guard.resolve_window(0, harness_window=500_000)
+        self.assertTrue(guard.may_block(source))
+
+    def test_window_evidence_threads_session_id_into_the_feed_lookup(self) -> None:
+        _write_feed(self.tmp, _FEED_SAMPLE)
+        ev = guard.window_evidence("claude-fable-5-1", session_id="sess-harness")
+        self.assertEqual(ev["harness_window"], 1_000_000)
+        window, source = guard.resolve_window(0, **ev)
+        self.assertEqual(window, 1_000_000)
+        self.assertIn("harness", source)
+
+    def test_cross_check_note_is_silent_within_five_percent(self) -> None:
+        """D32b-1a：`feed` 由呼叫端傳入（不再是 session_id／observed_model），
+        `cross_check_note()` 本身不重複讀檔。"""
+        _write_feed(self.tmp, _FEED_SAMPLE)
+        feed = guard.read_context_feed("sess-harness", "claude-fable-5-1")
+        self.assertEqual(guard.cross_check_note(393_900, feed), "")
+        self.assertEqual(guard.cross_check_note(400_000, feed), "")
+
+    def test_cross_check_note_fires_past_five_percent(self) -> None:
+        """注入：分子相差一倍以上——必須真的印出兩個數字與差值，不是只出聲不帶內容。"""
+        _write_feed(self.tmp, _FEED_SAMPLE)
+        feed = guard.read_context_feed("sess-harness", "claude-fable-5-1")
+        note = guard.cross_check_note(700_000, feed)
+        self.assertIn("393,900", note)
+        self.assertIn("700,000", note)
+        self.assertIn("306,100", note)
+
+    def test_cross_check_note_surfaces_reason_without_a_feed(self) -> None:
+        """D32b-3：沒有 feed 也是一種 reason，必須被印出來，不能悄悄吞掉——這是
+        本輪對舊行為（舊案「cross_check_note 無 feed 時靜默」，已改名）的訂正。"""
+        feed = guard.read_context_feed("no-such-session", "claude-fable-5-1")
+        note = guard.cross_check_note(700_000, feed)
+        self.assertIn("harness feed 未採用", note)
+        self.assertIn(feed["reason"], note)
+
+    def test_end_to_end_hook_reports_harness_source_and_appends_cross_check(self) -> None:
+        """子行程等級：feed 檔存在時，hook 的 hard 訊息裡 window 來源標 harness、且交叉
+        比對那一行真的出現（用故意灌水的逐字稿 used 觸發 >5% 差）。
+
+        `_isolated_env()` 把子行程的 `HOME` 蓋成 `home_dir`、且明確 pop 掉
+        `AUTOSDD_CONTEXT_FEED_DIR`（見該函式 R+D32 補的隔離）⇒ feed 必須寫在
+        `context_feed_path()` 沒有旗標時的預設位置：`$HOME/.autosdd/context_feed/`。
+        """
+        home_dir = _tmpdir(self, "harness-e2e-")
+        transcript_used = 950_000  # 遠高於 feed 的 393,900 ⇒ 差 > 5%
+        transcript = home_dir / "e2e-sess.jsonl"
+        transcript.write_text(
+            json.dumps({"type": "assistant", "message": {
+                "model": "claude-fable-5-1",
+                "usage": {"input_tokens": transcript_used, "cache_creation_input_tokens": 0,
+                         "cache_read_input_tokens": 0, "output_tokens": 0}}}) + "\n",
+            encoding="utf-8")
+        feed_dir = home_dir / ".autosdd" / "context_feed"
+        feed_doc = {**_FEED_SAMPLE, "session_id": "e2e-sess"}
+        _write_feed(feed_dir, feed_doc)
+        rc, stderr = _run_hook(
+            {"hook_event_name": "PostToolUse", "transcript_path": str(transcript),
+             "tool_name": "Read"}, home_dir)
+        self.assertEqual(rc, 2, stderr)
+        self.assertIn("harness 回報", stderr)
+        self.assertIn("分子交叉比對", stderr)
+
+    def test_end_to_end_hook_surfaces_unadopted_feed_reason(self) -> None:
+        """D32b-3 端到端：完全沒有 status line 進料時，hard 訊息仍要把 reason 印
+        出來——不能因為「沒有 feed」這件事本身就在這句話上沉默（同 `HarnessFeedStageTest.
+        test_cross_check_note_surfaces_reason_without_a_feed` 的行為，這裡驗子行程
+        真的接上）。分母走 ⑥ 查表階（`claude-fable-5-1` → 1,000,000），不需要釘值。
+        """
+        home_dir = _tmpdir(self, "harness-e2e-noreason-")
+        transcript = home_dir / "e2e-noreason.jsonl"
+        transcript.write_text(
+            json.dumps({"type": "assistant", "message": {
+                "model": "claude-fable-5-1",
+                "usage": {"input_tokens": 950_000, "cache_creation_input_tokens": 0,
+                         "cache_read_input_tokens": 0, "output_tokens": 0}}}) + "\n",
+            encoding="utf-8")
+        rc, stderr = _run_hook(
+            {"hook_event_name": "PostToolUse", "transcript_path": str(transcript),
+             "tool_name": "Read"}, home_dir)
+        self.assertEqual(rc, 2, stderr)
+        self.assertIn("harness feed 未採用", stderr)
+        self.assertIn("無 feed", stderr)
 
 
 def tearDownModule() -> None:

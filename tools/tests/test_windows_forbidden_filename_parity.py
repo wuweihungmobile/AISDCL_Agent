@@ -723,13 +723,11 @@ def _ntfs_scan_candidates(latest_name: str) -> list[str]:
     """候選檔＝git（tracked ∪ untracked-not-ignored）∩（三種副檔名 ∪ 三處 hook 目錄），
     扣除凍結版與測試檔。
 
-    用 `git ls-files` 而非 `rglob`（天然排除 `.git`／`.venv`／`__pycache__`）；rc≠0 一律
-    fail-loud，**不可**靜默回空——掃描邊界不得靜默縮小（姊妹檔 `_tracked_files()` 判準）。
-
-    🔴 R82（`DEF-101-752`）：本檔頭〈已實測不涵蓋〉③曾明文記載「尚未 `git add` 的新檔
-    （ls-files 固有性質）」為已知邊界，但姊妹鎖已證明那是真 fail-open（R69 的
-    `platform_caps.py` 全程 untracked，躲過四輪複審）。加 `-o --exclude-standard`
-    納入 untracked-not-ignored，`.gitignore` 排除的 `.venv`／快取不受影響。
+    用 `git ls-files` 而非 `rglob`；rc≠0 一律 fail-loud，不可靜默回空。R82
+    （`DEF-101-752`）：本檔曾記載「尚未 `git add` 的新檔」為已知邊界，但姊妹鎖已
+    證明那是真 fail-open（R69 的 `platform_caps.py` 全程 untracked，躲過四輪
+    複審）。加 `-o --exclude-standard` 納入 untracked-not-ignored。史料見證據檔
+    〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
     candidates: set[str] = set()
     for extra_args in ((), ("-o", "--exclude-standard")):
@@ -778,22 +776,12 @@ class TestNtfsSanitizerSiteEnumerationIsForwardLooking(unittest.TestCase):
     def test_each_authoritative_impl_keeps_base_device_names_adjacent(self) -> None:
         """R60 新增：4 份權威實作的保留名**交替構造**必須讓四個基本裝置名保持相鄰。
 
-        WHY（本輪真實踩到、且第一版鎖也真的沒鑑別力）：`test_registered_sites_match_repo_
-        scan_exactly` 取兩錨**聯集**，所以只要錨②（禁用字元集合 `<>:"|?*`）還命中，某份實作
-        掉出錨①也照樣全綠。R60 為納入新裝置名時把它們插進第一與第二個基本名之間，錨①要求
-        四者依序且間隙 ≤5 字元，插入後間隙變 17 → 實測 `check_ntfs_paths.py`／`pre-commit`／
-        `logger.py` **三處同時**掉出錨①（第四處只因既有 docstring 另有一份斜線分隔的同序
-        字樣而倖存），註冊表等值斷言毫無反應。後果不是立刻壞掉，而是**未來**某天錨②被改寫、
-        或新的第 5 份實作照抄這種插中間的寫法時，前瞻掃描對它靜默失明。
-
-        WHY 本鎖不直接重用 `_RESERVED_LIST_ANCHOR`：第一版就是那樣寫，實測**注入不紅**——
-        因為修法留下的那行說明註解本身含有一份管線分隔的同序字樣，剛好自我滿足了錨①
-        （粗粒度錨不剝註解的既知代價，見本檔上方「WHY 不照抄姊妹檔」段）。故本鎖改認
-        **構造形**：管線分隔、四名之間不得有任何其他字元。本 repo 的散文一律用斜線或頓號
-        分隔，故不會誤滿足。
-        **殘留 fail-open（如實揭露）**：若有人在註解裡寫出管線分隔的同序字樣，本鎖會被
-        同一手法滿足。要徹底根治需剝註解／AST 解析四種語言，而 R46 已證明那是無底洞；
-        本鎖的價值是攔下「無意識地插中間」這個真實發生過的動作，不主張攔下刻意偽裝。
+        WHY：姊妹鎖取兩錨聯集，只要禁用字元集合的錨②還命中，某份實作掉出錨①也
+        照樣全綠——R60 插入新裝置名到中間造成間隙從 ≤5 變 17 時，三處實作同時
+        掉出錨①，註冊表等值斷言毫無反應。改認構造形：管線分隔、四名之間不得有
+        任何其他字元。殘留 fail-open（如實揭露）：註解裡的偽裝字樣仍可滿足本鎖，
+        徹底根治需 AST 解析四種語言（R46 已證明無底洞），本鎖只攔「無意識插中間」
+        這個真實發生過的動作。史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
         """
         impls = [rel for rel, role in _KNOWN_NTFS_ANCHOR_SITES.items() if role.startswith("實作")]
         self.assertEqual(
@@ -906,18 +894,12 @@ _SDD_FORBIDDEN_CHARS = '<>:"|?*\\'
 class TestSddSanitizeComponentVsLoggerSecurityParity(unittest.TestCase):
     """`component_sanitizer.sanitize_component` ↔ `_sanitize_log_filename` 等強度鎖。
 
-    自 `AISDLC_SDD_v0.30/tools/fsm_runtime/tests/
-    test_state_component_sanitizer_parity.py` 原地搬遷（R69）。原檔比對的是
-    `state_loader._sanitize_component`，而該符號自 R45 抽共享層後就是
-    `component_sanitizer.sanitize_component` 本身（`state_loader.py:70`
-    `_sanitize_component = _shared_component_sanitizer.sanitize_component`），故本檔
-    直接比對共享層＝**行為完全等價**，且不再需要進到版本目錄。
-
-    兩側刻意**不共用同一顆函式物件**——AISDLC_SDD 與 AutoClaude 是兩個獨立可發布子專案
-    （各自 releases/ 打包），依既有先例不可跨子專案 import 生產程式碼。本鎖只驗證「安全
-    性質對齊」：同一組危險輸入兩邊都必須擋下，**不要求輸出逐字元相同**。長度截斷是
-    AISDLC_SDD 側獨有的額外防線（見上方 TestLengthPolicySiteTwoLoggerNoTruncation），
-    故不在 parity 比較範圍內。
+    自姊妹子專案的同型測試原地搬遷（R69）：原檔比對的符號自 R45 抽共享層後就是
+    `component_sanitizer.sanitize_component` 本身，故本檔直接比對共享層即行為
+    完全等價。兩側刻意不共用同一顆函式物件（兩個獨立可發布子專案不可跨專案
+    import 生產程式碼），本鎖只驗證安全性質對齊，不要求輸出逐字元相同。長度截斷
+    是其中一側獨有的額外防線，不在 parity 比較範圍內。史料見證據檔
+    〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
 
     @classmethod
@@ -984,14 +966,10 @@ class TestSddSanitizeComponentVsLoggerSecurityParity(unittest.TestCase):
 
 class TestNtfsScanCandidatesScanSurfaceCoversUntracked(unittest.TestCase):
     """DEF-101-752 站點覆蓋（問題 3，永久回歸鎖）：`_ntfs_scan_candidates()` 的
-    union 迴圈必須真的把 `-o --exclude-standard`（untracked-not-ignored）那一次
-    `git ls-files -z` 呼叫的結果併進最終回傳值，不是只呼叫了卻沒接住。此前只靠
-    人工注入探針檔案驗證、事後刪除，沒有留下永久回歸測試——本 class 機械化、常駐化。
-
-    手法：`unittest.mock.patch("subprocess.run")` 依 argv 是否帶 `-o` 分流兩次
-    `git ls-files -z` 呼叫的假輸出（NUL 分隔），不需要真的建立磁碟上的 disposable
-    git repo；假路徑刻意避開 `_is_ntfs_test_file()`（不含 `/tests/`、檔名不以
-    `test_` 開頭）與凍結版路徑，才不會被後續過濾層擋掉。
+    union 迴圈必須真的把 untracked-not-ignored 那一次 `git ls-files -z` 呼叫的
+    結果併進最終回傳值，不是只呼叫了卻沒接住。此前只靠人工注入探針驗證、事後
+    刪除，沒有留下永久回歸測試。手法：`mock.patch` 依 argv 分流兩次呼叫的假輸出，
+    不需要真的建立磁碟上的 git repo。
     """
 
     @staticmethod

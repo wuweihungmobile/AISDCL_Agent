@@ -239,17 +239,11 @@ class StripPsCommentsBoundaryTest(unittest.TestCase):
 class TestPsCommentStripperSsotCallsiteLock(unittest.TestCase):
     """SSOT 呼叫端鎖（R57 SA-R57R2-03）。
 
-    本輪已學到的教訓：**SSOT 沒有呼叫端鎖等於沒有強制力**——R56 把 CI 掃描樹抽取式
-    抄三份、R57 又把註解剝除器抄兩份，兩次都是「同一個盲點抄 N 遍」，而兩次都沒有
-    任何機械訊號。故：(a) `tools/tests/` 內除 SSOT 模組外，任何檔案
-    重新自帶同名函式定義即紅；(b) 已知消費端必須真的 import 且真的呼叫（只 import
-    不呼叫＝死 import，鎖零訊號）。
-
-    **已實測涵蓋**（四次注入實驗，每次都精準指名單一測試後以檔案複製還原）：
-    `def _strip_ps_comments` 複本、`def strip_ps_comments` 複本、只 import 不呼叫、
-    完全不 import。**已知不涵蓋**（未窮舉，不做全備宣稱）：換一個名字重寫一份等價
-    邏輯、以 `lambda`／賦值而非 `def` 提供同名物件、把複本放在 `tools/tests/` 以外
-    的目錄、以 `exec`／動態 import 迂迴。
+    教訓：SSOT 沒有呼叫端鎖等於沒有強制力——「同一個盲點抄 N 遍」曾發生兩次卻
+    都沒有機械訊號。故：(a) 除 SSOT 模組外任何檔案重新自帶同名函式定義即紅；
+    (b) 已知消費端必須真的 import 且真的呼叫。已知不涵蓋（未窮舉）：換名重寫、
+    `lambda`／賦值提供同名物件、複本放到其他目錄、`exec`／動態 import 迂迴。
+    史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
 
     _CONSUMERS = ("test_find_git_bash_parity.py", "test_windows_nightly_anchor_parity.py")
@@ -627,21 +621,12 @@ class TestFindGitBashBehavior(unittest.TestCase):
 class TestSystem32VerdictParity(unittest.TestCase):
     """🔴 R60 P10-2 行為表 parity 鎖：兩側對同一組輸入必須逐筆同判。
 
-    WHY 靜態鎖不夠（本檔既有 `test_system32_exclusion_targets_same_segment_name` 的
-    盲區）：它只比對「兩邊拿哪個**字面詞**去比」，對「用什麼**手法**比」完全盲目。
-    P10-2 實測：兩側字面詞都是 `System32`（該靜態鎖全綠），但 PS 側行內 regex
-    `-notmatch '\\\\System32\\\\'` 要求前後皆為反斜線，於是
-
-        輸入 `C:/Windows/System32/bash.exe`
-          PS 側 accepts=True（放行）  ／  Python 側 excluded=True（排除）
-
-    ——同一組輸入、相反裁決。而且**可觸達**：`(Get-Command bash).Source` 是「PATH 條目
-    + 檔名」拼出來的，PATH 條目以正斜線書寫時 Source 就帶正斜線。實測（PS 5.1，
-    `$env:PATH` 設為 `C:/Windows/System32`）得 Source=`C:/Windows/System32\\bash.exe`，
-    修前 `Find-GitBash` **回傳了 WSL 的 bash**。
-
-    本類別真的起 PowerShell 執行 `Test-HasSystem32Segment`，不是比對原始碼字面——
-    任一側被改壞（如 PS 側退回 `-notmatch`、Python 側退回子字串命中）都必紅。
+    WHY 靜態鎖不夠：它只比對兩邊拿哪個字面詞去比，對用什麼手法比完全盲目。
+    P10-2 實測：字面詞都是 `System32`，但 PS 側 regex 要求前後皆為反斜線，輸入
+    `C:/Windows/System32/bash.exe` 時 PS 側放行、Python 側排除——同一組輸入相反
+    裁決，且可觸達（`Source` 帶正斜線時修前 `Find-GitBash` 回傳了 WSL 的 bash）。
+    本類別真的起 PowerShell 執行，不是比對原始碼字面。史料見證據檔
+    〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
 
     _CASE_TABLE_PATH = _PS1_PATH
@@ -754,16 +739,11 @@ class TestSystem32VerdictParity(unittest.TestCase):
 class TestFindGitBashCallSites(unittest.TestCase):
     """R57 新增（A3）：呼叫端**真的有用**這個共用 helper。
 
-    WHY：本檔 R17~R21 累積的 11 支測試，全部只驗 `Find-GitBash.ps1` 自身的行為與
-    它跟 `integration_gate_core.py` 的結構等價——**沒有任何一支驗證三支 `.ps1`
-    呼叫端真的 dot-source 並呼叫它**。呼叫端只要退回自己內聯寫一段 `Get-Command
-    bash` 偵測（也就是 DEF-101-099 當年在 `integration_gate.ps1` 踩過的原坑），
-    這 11 支測試依然全綠：helper 完好無損，只是沒人用了。S11 抽共用的整個價值
-    在於「單一真相源被實際消費」，而那正是原本零覆蓋的一段。
-
-    另（R56 backlog 項目 4）：「三支呼叫點」這個計數在 `AutoSDD_Defect_Log.md`
-    與多處註解反覆出現卻無機械鎖。下方 `test_call_site_registry_matches_repo_scan`
-    以 git 追蹤檔全掃比對登記表，增刪任一呼叫端皆必紅（不是下限、是等值）。
+    WHY：既有 11 支測試全部只驗 `Find-GitBash.ps1` 自身行為，沒有任何一支驗證
+    呼叫端真的 dot-source 並呼叫它——呼叫端退回內聯偵測（`DEF-101-099` 原坑）
+    這 11 支依然全綠，helper 完好無損只是沒人用了。另：呼叫點計數反覆出現於
+    帳本卻無機械鎖，下方測試以 git 追蹤檔全掃比對登記表，增刪皆必紅。史料見
+    證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
 
     # 三支已知呼叫端（S11 抽共用時的收斂範圍）。

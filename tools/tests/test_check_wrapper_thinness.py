@@ -226,14 +226,10 @@ class TestCheckWrapperThinness(unittest.TestCase):
 class TestKeywordDetectionParallel(unittest.TestCase):
     """R60 Scan-E E-A-02 回歸鎖：關鍵字偵測必須與 hash 釘選**並聯**，非串聯。
 
-    WHY（測意圖非僅行為，Rule 9）：原實作把整組 `for keyword in _FORBIDDEN…` 縮排在
-    `if actual != pinned:` 內，於是「以 `--print-hash` 取新值同步更新 pin」——本工具
-    docstring 自己指示的正常維護動作——會把 hash 這道防線合法地消音，**同時**讓關鍵字
-    偵測整組失效；MAX_LINES 也還沒到（各殼行數現查 `--print-lines`，餘裕仍大），三道
-    訊號一起靜音。R60 round-2（SD-R60-08）：本段原寫死「最長殼 NN 行 / 上限 NN」，屬
-    同一個「文件寫死機器算得出的數字」家族，已改為不引具體數字。
-    既有 10 支 `test_forbidden_*` 全部用 `_make_fake_root()` 造內容＝必然 hash 紅燈，
-    因此對這條路徑天生零鑑別力（它們在串聯實作下也全綠），必須另立本類別。
+    WHY（Rule 9）：原實作把關鍵字迴圈縮排在 `if actual != pinned:` 內，於是「更新
+    pin」這個本工具自己指示的正常維護動作會把 hash 與關鍵字兩道防線一起消音。既有
+    `test_forbidden_*` 全部用 `_make_fake_root()` 造內容＝必然 hash 紅燈，對這條路徑
+    天生零鑑別力，必須另立本類別。史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
 
     def _fake_dev_start(self, td: str, sh_text: str, ps1_text: str) -> Path:
@@ -317,20 +313,12 @@ class TestKeywordDetectionParallel(unittest.TestCase):
 class TestBomIsNotContent(unittest.TestCase):
     """R60 P10-1 回歸鎖：`.ps1` 的 UTF-8 BOM 不得被當成腳本內容。
 
-    WHY（測意圖非僅行為，Rule 9）：`_read_source()` 前身是 `read_text(encoding="utf-8")`，
-    於是 BOM（U+FEFF）留在文字裡；`_normalize()` 剝掉檔頭 `<# … #>` 後那一行只剩 BOM，
-    而 `"\\ufeff".strip()` 在 Python 是**非空**（U+FEFF 屬 Cf、不算 whitespace）⇒ 正規化
-    結果多出一行純 BOM 的假行，被釘進權威判定的 sha256 裡。修前實測：最小合成殼
-    `NORM_LINES=3 / 首行 repr='\\ufeff'`，修後 `NORM_LINES=2 / 首行 'param()'`；真實
-    `tools/integration_gate.ps1` 亦由 14→13（首行 `'\\ufeff'` → `'param('`）。
-
-    這不是美觀問題而是**同一個量兩個答案**：`tools/check_script_parity.py` 對同一批
-    `.ps1` 早就用 `utf-8-sig`，兩支工具因此對同一份檔案算出不同的正規化文字。
-
-    🔴 修法邊界：`.ps1` 帶 BOM 是**刻意**的（PS 5.1 對無 BOM 的 UTF-8 檔改用 ANSI
-    codepage 解讀、中文全毀；root-infra-ci 另有 BOM 守門），故修的是讀取端，
-    **不准**拿掉 BOM——`test_real_ps1_wrappers_really_carry_bom` 同時守住這件事，
-    並讓本類別不至於變成恆真斷言（BOM 若消失，本類別的前提就沒了）。
+    WHY（Rule 9）：`_read_source()` 前身用 `read_text(encoding="utf-8")` 使 BOM 留在
+    文字裡，`_normalize()` 剝掉檔頭後那一行只剩 BOM 而 `.strip()` 判它非空 ⇒ 多出一行
+    假行被釘進權威判定的 sha256。這不是美觀問題：`check_script_parity.py` 早就對同批
+    `.ps1` 用 `utf-8-sig`，兩支工具因此對同一檔案算出不同正規化文字。修法邊界：BOM
+    是刻意保留的（PS 5.1 無 BOM 會誤讀 ANSI codepage），修的是讀取端不准拿掉 BOM。
+    數字對照史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
 
     _BODY = "<#\n.SYNOPSIS\nminimal\n#>\nparam()\nWrite-Host 'x'\n"
@@ -446,13 +434,10 @@ class TestBomIsNotContent(unittest.TestCase):
 class TestNoHardcodedLineCounts(unittest.TestCase):
     """R60 round-2（SD-R60-08）：guard 本體不得再寫死各薄殼的行數快照。
 
-    WHY（測意圖非僅行為，Rule 9）：`check_wrapper_thinness.py` 原本在 `MAX_LINES`
-    上方列了 8 支殼的行數（`dev_start.sh=78 行、…local_ci_gate.ps1=39 行…`），複審
-    逐檔實測**8 支全部過期**——其中 `local_ci_gate.ps1` 是同一輪自己改長了卻沒回頭
-    同步，清單還把 `run_act.*` 誤記在 `tools/` 下。行數是機器隨時算得出的量，寫進
-    原始碼註解就等於製造一份必然腐化的第二真相源（同 DEF-101-289／515 家族，本輪
-    另有 ONBOARDING LOC 格的新鮮度鎖）。**只把 8 個數字改對治不了病**：下一輪照樣
-    stale。根治＝(a) 刪掉快照、(b) 由 `--print-lines` 現查、(c) 本鎖守著不准寫回。
+    WHY（Rule 9）：`MAX_LINES` 上方原列 8 支殼的行數快照，複審逐檔實測 8 支全部過期
+    ——行數是機器隨時算得出的量，寫進原始碼註解就是製造必然腐化的第二真相源。只改對
+    數字治不了病，根治＝刪快照、由 `--print-lines` 現查、本鎖守著不准寫回。史料見
+    證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
 
     # 兩種「行數快照」形狀。第一條對應原註解的 `<檔名>=<數字>`／`.ps1=<數字>` 寫法；
@@ -551,17 +536,11 @@ class TestNoHardcodedLineCounts(unittest.TestCase):
 class TestR67ShebangIsNotAComment(unittest.TestCase):
     """R67（Scan-H R67-H35）回歸鎖：首行 shebang 必須進入 hash 輸入。
 
-    WHY（測意圖非僅行為，Rule 9）：薄殼的三項職責第一項就是「選直譯器」，而
-    `_normalize()` 原本以 `not line.lstrip().startswith("#")` 一律剝除註解行，
-    連 `#!/usr/bin/env bash` 一起吃掉——8 支釘選 `.sh` 的 shebang 可被改成
-    `#!/bin/sh` 而 hash 紋風不動（實測 `check_wrapper_thinness.py` rc=0、
-    `check_script_parity.py` rc=0、`tools/tests` 全綠）。`tools/dev_start.sh`
-    實際用了 `${BASH_SOURCE[0]}` 與 `local`，在 dash（Ubuntu runner 的 /bin/sh）
-    下會直接語法/展開失敗。守門對象的頭號職責整條不在覆蓋面內＝這道 hash 鎖對
-    「殼被改成用錯直譯器」天生零訊號。
-
-    邊界：本鎖只保證「shebang 變動一律紅」，不保證 shebang 內容本身正確
-    （`#!/usr/bin/env python3` 掛在 .sh 上照樣通過釘選——那是另一個判準）。
+    WHY（Rule 9）：`_normalize()` 原本一律剝除註解行，連 shebang 一起吃掉——釘選
+    `.sh` 的 shebang 可被改成 `#!/bin/sh` 而 hash 紋風不動，對「殼被改成用錯直譯器」
+    天生零訊號（`tools/dev_start.sh` 用了 dash 不支援的語法會直接失敗）。邊界：本鎖
+    只保證 shebang 變動一律紅，不保證其內容本身正確。史料見證據檔
+    〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
 
     def _fake_root(self, tmp_dir: Path, sh_text: str) -> Path:
@@ -656,14 +635,10 @@ class TestR67ShebangIsNotAComment(unittest.TestCase):
 class TestConvergenceTargetsArePerShell(unittest.TestCase):
     """本輪 E-05b：違規訊息的「該收斂到哪」必須逐殼查表，且那個目的地要真的在。
 
-    病灶（修前逐字）：行數上限與 hash 不符兩條訊息一律寫「業務邏輯應收斂進
-    `tools/dev_start.py`」，**不看 `rel` 屬於哪一棵樹**。兩個問題疊在一起——
-      (1) 語意錯：`AISDLC_SDD/scripts/install-hooks.*` 的契約住
-          `tools/git_hooks_install_common.py`，`AutoClaude/tools/run_act.*` 的核心是
-          `run_act_core.py`，都不是 dev_start；
-      (2) 可滿足性：被無條件指路的那支檔是 shrink-only 特例棘輪、餘裕個位數，照訊息
-          辦事極可能當場撞 LOC violation（Scan-H 必跑項⑥「A 鎖要你加、B 鎖不准你加」）。
-    這條分支從未被觸發過（受管殼全部遠低於上限），所以修前沒有任何人會發現。
+    病灶：修前行數上限與 hash 不符兩條訊息一律指路 `tools/dev_start.py`，不看
+    `rel` 屬於哪一棵樹——語意錯（其他殼各有各的契約檔）且可能撞 LOC violation
+    （被指路的檔本身是餘裕個位數的棘輪）。從未被觸發過，修前沒有人會發現。史料見
+    證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
 
     def test_every_pinned_key_has_a_registered_core(self) -> None:
@@ -704,17 +679,10 @@ class TestConvergenceTargetsArePerShell(unittest.TestCase):
 class TestForbiddenKeywordsCoverEveryPin(unittest.TestCase):
     """R79 ARCH：並聯的第三訊號必須覆蓋**每一個**釘選鍵，缺席不得靜默。
 
-    病灶（修前實測）：`_PINNED_SHA256` 16 鍵、`_FORBIDDEN` 只有 14 鍵，缺的兩鍵是
-    兩支 LATEST run_tlc 薄殼；`check_wrapper_thinness()` 用 `_FORBIDDEN.get(rel, ())`
-    取關鍵字，缺鍵靜默回空 tuple ⇒ 迴圈零次、零訊號。後果是那兩支只剩 hash 一道
-    訊號，而**更新 pin 正是它的合法維護動作**——那正是 R60 Scan-E E-A-02 把串聯改
-    並聯所要消滅的形態，只是對這兩鍵而言並聯的那一路從落地起就是空的。同一支檔的
-    `_CORE_TARGET` 早有對等的完整性鎖（見上一個 class），`_FORBIDDEN` 沒有——同檔內
-    的不對稱，而且沒有任何東西會提醒人去補。
-
-    本鎖刻意用「集合相等」而非「子集」：多登記一個已不存在的釘選鍵（stale）與少
-    登記一個（缺口）都是問題，兩個方向都要紅。刻意不設關鍵字的殼請寫成顯式的
-    `(): # WHY …` 而非缺鍵——讓「這支殼沒有第三訊號」成為 diff 上看得見的決定。
+    病灶：`_PINNED_SHA256` 16 鍵、`_FORBIDDEN` 只有 14 鍵，`.get(rel, ())` 缺鍵靜默
+    回空 tuple ⇒ 那兩支殼只剩 hash 一道訊號，而更新 pin 正是它的合法維護動作——正是
+    R60 Scan-E E-A-02 把串聯改並聯所要消滅的形態。本鎖用集合相等（非子集）：多登記
+    或少登記一鍵都要紅。史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
 
     def test_pinned_keys_and_forbidden_keys_are_the_same_set(self) -> None:
@@ -911,13 +879,9 @@ class TestRootGateToolsRejectUnknownFlags(unittest.TestCase):
     def _offenders(tools: list[Path], waived: dict[str, str]) -> list[str]:
         """真的拿假引數跑一遍，回傳仍然 rc=0 的工具（＝靜默吞掉）。
 
-        抽成純函式是為了讓**鑑別力可被合成注入證明**：判準若只跑真實目錄，
-        「現在是綠的」無法區分「守衛有牙」與「守衛根本沒被叫到」。
-
-        🔴 逾時**也算 offender**（R74 補）：不拒收的工具會改跑預設路徑，而那條路徑可能
-        很長——`run_root_unittests.py` 修前就是跑完整棵樹（逾 120 秒）。放任
-        `TimeoutExpired` 拋出去，讀者看到的是一坨堆疊「error」而不是「這支不拒收」的
-        **fail**，很容易被當成環境抖動放過（本 repo 剛為同一形態付過學費：`DEF-101-803`）。
+        抽成純函式讓鑑別力可被合成注入證明。逾時也算 offender（R74 補，同
+        `DEF-101-803`）：不拒收的工具會改跑可能很長的預設路徑，放任
+        `TimeoutExpired` 拋出去容易被當成環境抖動放過。
         """
         import subprocess  # noqa: PLC0415  # 僅本鎖需要，不進本檔 import 期
 
@@ -991,13 +955,9 @@ class TestRootGateToolsRejectUnknownFlags(unittest.TestCase):
     def test_a_synthetic_tools_dir_discriminates_entrypoints_from_helpers(self) -> None:
         """判準的注入式鑑別力：合成一棵 `tools/` 目錄，三支檔各代表一種身分。
 
-        🔴 為何合成在 tmpdir 而**不是**真的往 `tools/` 丟一支探針：本輪多個 agent 同樹
-        並行，往 `tools/` 新增一支 `*.py` 會同時污染 ruff／LOC 棘輪／`_script_scan_surface`
-        等多個掃描面 ⇒ 別人的全套會假紅（本 repo 已重演三次「並行突變互踩假紅」）。
-        判準已參數化，注入不需要動真實目錄。
-
-        本合成樹刻意**不含任何** `check_*` 命名 ⇒ 舊判準在這棵樹上枚舉不到任何東西，
-        故本測試同時是「射程已不再是檔名 glob」的**行為級**證明，而非只讀原始碼。
+        合成在 tmpdir 而非真的往 `tools/` 丟探針：往 `tools/` 新增檔案會污染多個
+        掃描面造成假紅（已重演三次）。本合成樹刻意不含任何 `check_*` 命名，證明
+        射程已不再是檔名 glob，而是行為級。
         """
         import tempfile  # noqa: PLC0415
 
@@ -1039,14 +999,11 @@ class TestRootGateToolsRejectUnknownFlags(unittest.TestCase):
     def _layering_offenders(tools: list[Path]) -> list[str]:
         """回傳違反 `cli`/`main` 分層的工具（純函式 ⇒ 鑑別力可被合成注入證明）。
 
-        以 **AST 讀原始碼**而刻意**不 import** 目標模組：這一層的工具在 import 期會做
-        stdio 手術（`tools/_stdio_utf8.py`）、注入 `sys.path`、甚至解析整棵 repo。為了
-        讀一段原始碼去觸發那些副作用，本身就是「驗證載具汙染被驗證對象」的另一種形態。
-
-        🔴 判準看的是 **AST 節點**、不是原始碼字串（R75 落地當回合實測到的假陽性）：
-        本鎖第一版用 `"sys.argv" in ast.get_source_segment(...)`，於是 `main()` 裡一句
-        「本層絕不讀 `sys.argv`」的**註解**就被判成違規。字串比對在這裡不只是不精確，
-        它的方向是錯的——**它懲罰把紀律寫下來的人**，而那正是本 repo 要鼓勵的行為。
+        以 AST 讀原始碼而刻意不 import 目標模組：這層工具在 import 期會做 stdio
+        手術等副作用，讀原始碼觸發它們是「載具汙染被驗證對象」的另一種形態。判準看
+        AST 節點而非原始碼字串（R75 假陽性：字串比對曾把「本層絕不讀 sys.argv」這句
+        註解判成違規——懲罰了把紀律寫下來的人）。史料見證據檔
+        〈第七輪 史料搬遷（Dev-Trim8）〉。
         """
         import ast  # noqa: PLC0415
 
@@ -1087,18 +1044,12 @@ class TestRootGateToolsRejectUnknownFlags(unittest.TestCase):
     def test_rejection_never_reads_sys_argv_inside_main(self) -> None:
         """`sys.argv` 只能在 `__main__` 那一行讀；`main()` 一律只吃顯式引數。
 
-        測意圖（Rule 9）：`main()` 有**程式化呼叫端**，而它們的 `sys.argv` 裝的是別人的
-        參數。兩筆實測都是「一道真鎖被弄成假紅」，不是風格偏好：
-          · `python -m unittest tools.tests.test_gha_action_versions` —— unittest 把模組名
-            放進 `sys.argv`，被 `main()` 當成未知旗標拒收 rc=2，而該測試斷言 rc=1
-            ⇒ **HEAD 既存 3 支假紅**（R75 實測 `Ran 14 / FAILED (failures=3)`）；
-          · `test_run_root_unittests.py` 的零相依探針在子行程內叩 `R.main()`，該子行程的
-            `sys.argv` 帶的是探針自己的三個參數（blocked JSON／mode／tools_dir）。
-        🔴 為何非機械釘住不可：這個洞在**閘門路徑**（`sys.argv[1:] == []`）恆綠，所以
-        「四支工具跑起來都是綠的」對本性質零鑑別力——它就是這樣活過七輪的。
-        🔴 R75 射程擴張：原版只具名釘 `run_root_unittests.py` 一支，而同一個洞當時正躺在
-        另外四支上（`DEF-101-757`「已知的鎖射程缺口不得只以劃界結案」同型，這次的界是
-        「上一包剛好修到的那一支」）。射程改為現查枚舉 `_cli_flags` 消費者。
+        測意圖（Rule 9）：`main()` 有程式化呼叫端，它們的 `sys.argv` 裝的是別人的
+        參數——unittest 把模組名放進 `sys.argv`、子行程探針帶自己的參數，都會被
+        誤判為未知旗標而假紅（R75 實測 HEAD 既存 3 支）。這個洞在閘門路徑
+        （`sys.argv[1:] == []`）恆綠，對本性質零鑑別力。射程改為現查枚舉
+        `_cli_flags` 消費者（原版只具名釘一支，同型缺口見 `DEF-101-757`）。史料見
+        證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
         """
         consumers = self._cli_flags_consumers(self._TOOLS_DIR)
         names = sorted(p.name for p in consumers)

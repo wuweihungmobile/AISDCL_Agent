@@ -64,14 +64,11 @@ class TestInstallWindowsNightlyStructure(unittest.TestCase):
         """DEF-101-517 R60 收斂（backlog 解鎖條件的路徑①）：本安裝器須同時註冊
         `windows_smoke_local.ps1` 的獨立排程任務。
 
-        WHY：`windows_smoke_local.ps1` 是 DEF-101-139 為「雲端 CI 帳務停擺
-        （DEF-101-081）」而建的 Windows 側**執行級補償控制**，而 R59 逐項實測確認
-        `run_local_nightly.ps1` 對它零呼叫 ⇒ 補償控制自己沒有心跳，只能手動觸發
-        （也解釋了它為何腐化到讓 R59 踩到 DEF-101-511）。mac 側對照：
-        `run_local_nightly.sh` 的 [1/4] 每日自動跑 `macos_smoke_local.sh`。
-        刻意走「獨立 schtasks 任務」而非「run_local_nightly.ps1 第 8 個 stage」：後者
-        需同動 summary 行／summary JSON／exit-decision／Format-Rc 四處，而 summary 行
-        被 `tools/dev_start.py` 心跳哨兵以跨檔字面正則解析（DEF-101-263②）。
+        WHY：`windows_smoke_local.ps1` 是 Windows 側執行級補償控制，R59 實測確認
+        `run_local_nightly.ps1` 對它零呼叫 ⇒ 補償控制自己沒有心跳。刻意走獨立
+        schtasks 任務而非塞進 nightly 的某個 stage：後者需同動四處，且 summary
+        行被 `tools/dev_start.py` 心跳哨兵以跨檔正則解析。史料見證據檔
+        〈第七輪 史料搬遷（Dev-Trim8）〉。
         """
         self.assertIn("$SmokeTaskName = 'AutoClaude_WindowsSmoke'", self.text)
         self.assertIn(
@@ -358,15 +355,10 @@ class TestInstallWindowsNightlyStructure(unittest.TestCase):
         self.assertIn("Write-Warning", status_block, "-Status+-Uninstall 同給時未輸出警告——違反 fail-loud 慣例")
 
     def test_uninstall_branch_does_not_depend_on_carrier_script_existence(self) -> None:
-        """DEF-101-619（R66 真機重現）：修復前 `$NightlyPs1` 的 `Test-Path` 存在性檢查
-        放在 `if ($Uninstall)` 判斷「之前」，對 install／-Uninstall 兩路共用——nightly
-        載體被刪掉（或腳本尚未 checkout 完整）時，連 `-Uninstall`（單純操作 Task
-        Scheduler、理論上不需要讀取任何載體檔案）都會被擋下（scratchpad 隔離重現：
-        REAL_EXITCODE=1），與 mac 側 `install_mac_nightly.sh` 的 `cmd_uninstall()`
-        （完全不檢查底層腳本是否存在）行為不對稱。
-
-        沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
-        〈test_uninstall_branch_does_not_depend_on_carrier_script_existence 結構不變量與錨點修訂〉。
+        """DEF-101-619（R66 真機重現）：修復前 `Test-Path` 存在性檢查放在
+        `if ($Uninstall)` 判斷之前，對 install／-Uninstall 兩路共用——nightly 載體
+        被刪掉時，連理論上不需要讀取任何載體檔案的 `-Uninstall` 都會被擋下，與
+        mac 側行為不對稱。沿革史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
         """
         uninstall_block_match = re.search(
             r"^if \(\$Uninstall\) \{"
@@ -409,13 +401,9 @@ class TestInstallWindowsNightlyStructure(unittest.TestCase):
 def _ps_engine() -> str | None:
     """回傳本機可用的 PowerShell 解析引擎路徑，Windows 上優先 5.1（見上方 WHY）。
 
-    抽成模組層函式而非寫在測試裡，是為了讓下方 `TestSyntaxGateEngineSelection`
-    能對「選誰」這件事本身做斷言——選擇邏輯若退回 pwsh-only，鎖才抓得到。
-
-    R60 Scan-E E-A-03：判定本體收斂進 `_ps_engine.production_engine()`（同一份
-    優先序 SSOT，供全 `tools/tests` 共用）——本輪掃描實查同樹另有 5 個檔案在寫
-    同一件事、其中一處還是 **pwsh 優先**（與本檔上方 DEF-101-509 判準方向相反）。
-    本函式保留為就地別名：下方兩支鎖與其他呼叫端逐字不動（Rule 3）。
+    抽成模組層函式而非寫在測試裡，讓 `TestSyntaxGateEngineSelection` 能對「選誰」
+    本身做斷言。R60 Scan-E E-A-03：判定本體收斂進 `_ps_engine.production_engine()`
+    （同一份優先序 SSOT），本函式保留為就地別名，下方呼叫端逐字不動（Rule 3）。
     """
     return production_engine()
 
@@ -480,23 +468,15 @@ class TestSyntaxGateEngineSelection(unittest.TestCase):
 
     def test_engine_selection_prefers_windows_powershell(self) -> None:
         """兩者都在時必須選 5.1：生產是以 `powershell -File` 執行本腳本，且 `tools/`
-        受 test_ps51_compat.py 的 PS 5.1 相容政策約束——用 PS 7 文法解析會漏掉
-        「5.1 解析不過、7 解析得過」的寫法（CI 的 pwsh parser 是 7，本來就驗不到）。
+        受 PS 5.1 相容政策約束——用 PS 7 文法解析會漏掉「5.1 解析不過、7 解析得過」
+        的寫法。
 
-        R60 E-A-03：本鎖刻意**保留行內 `shutil.which`**、不改走 `_ps_engine` SSOT
-        ——它是這條判準的獨立 ground truth；若兩邊都用同一顆述詞算 expected，
-        優先序寫反時兩邊會一起寫反、斷言恆綠＝鎖失去鑑別力。`test_ps_engine_ssot.py`
-        的反增生掃描已就此列具名永久豁免（附本 WHY）。
-        🔴 **R73 訂正（DEF-101-777）**：這裡原本斷言「這台機器缺 pwsh 7，於是 `expected`
-        恆等於 5.1 路徑、走不到『兩者皆有』那條分支」——把撰寫當時的機器屬性寫成了常數。
-        2026-08-04 實測該機器已同時具備兩個引擎（`available_engines()` 回
-        `{'powershell': …\\WindowsPowerShell\\v1.0\\powershell.EXE,
-        'pwsh': …\\WindowsApps\\Microsoft.PowerShell_7.6.4.0_x64__…\\pwsh.EXE}`，
-        兩者皆為真實執行檔、非 0 byte 佔位版），**該分支現在每次都走得到，且本斷言通過**
-        ⇒ 這條判準在此機器上首次獲得真實鑑別力。引擎可用性是**機器屬性**：這裡不再寫
-        任何「這台機器有／沒有什麼」的斷言，要知道就現查 `available_engines()`。
-        不依賴機器的方向驗證仍由 `test_ps_engine_ssot.py` 以合成 `shutil.which` 的
-        雙引擎情境保證（那才是在**任何**機器上都測得到方向的做法）。"""
+        R60 E-A-03：本鎖刻意保留行內 `shutil.which`、不改走 `_ps_engine` SSOT——
+        它是這條判準的獨立 ground truth，若兩邊共用同一顆述詞，優先序寫反時斷言
+        恆綠會失去鑑別力。R73 訂正（DEF-101-777）：不再寫死「這台機器缺 pwsh 7」
+        這類機器屬性斷言，引擎可用性一律現查 `available_engines()`。不依賴機器的
+        方向驗證由 `test_ps_engine_ssot.py` 以合成雙引擎情境保證。史料見證據檔
+        〈第七輪 史料搬遷（Dev-Trim8）〉。"""
         ps51, ps7 = shutil.which("powershell"), shutil.which("pwsh")
         if ps51 is None and ps7 is None:
             self.skipTest("本機無任何 PowerShell 引擎")
@@ -513,22 +493,13 @@ class TestSyntaxGateEngineSelection(unittest.TestCase):
     "Windows 上真的可呼叫（R43 DEF-101-348 標籤，供 run_root_unittests.py 彙整可見度）",
 )
 class TestInstallWindowsNightlySettingsConstruction(unittest.TestCase):
-    """DEF-101-249（R20 真 Windows 機器驗證）：New-ScheduledTaskSettingsSet 是「建構」
-    cmdlet，參數名與 Settings 物件本身的屬性名不同、甚至極性相反——物件屬性叫
-    DisallowStartIfOnBatteries／StopIfGoingOnBatteries（fix_nightly_catchup.ps1 讀寫
-    既有任務用的正是這兩個屬性名，那裡沒錯），但這個「建構」cmdlet 的參數名是
-    -AllowStartIfOnBatteries／-DontStopIfGoingOnBatteries。原參數名
-    -DisallowStartIfOnBatteries/-StopIfGoingOnBatteries 在此 cmdlet 上根本不存在，
-    只有真的呼叫這個 cmdlet（非純語法解析、非 -WhatIf 抽象層——ShouldProcess 之前
-    PowerShell 就會先做參數綁定）才會拋 ParameterBindingException，R19 一路只做
-    語法解析從未真的呼叫過，未曾發現。
-
-    本測試不假設腳本目前寫的是哪個參數名——直接從原始碼抽出
-    `$settings = New-ScheduledTaskSettingsSet ...` 這段實際文字，原封不動丟給真正
-    的 PowerShell 執行（此 cmdlet 本身不需要系統管理員權限，只有後續
-    Register-ScheduledTask 才需要，故 windows-latest CI runner 可安全真跑），斷言
-    建構成功且回傳物件的屬性值符合預期極性——未來若又被改回錯誤參數名，本測試會
-    直接重現當初的真實 ParameterBindingException。"""
+    """DEF-101-249（R20 真 Windows 機器驗證）：`New-ScheduledTaskSettingsSet` 是
+    「建構」cmdlet，參數名與 Settings 物件屬性名極性相反（`-AllowStartIfOnBatteries`
+    /`-DontStopIfGoingOnBatteries` vs 屬性 `DisallowStartIfOnBatteries`/
+    `StopIfGoingOnBatteries`），只有真的呼叫此 cmdlet 才會拋
+    `ParameterBindingException`，純語法解析從未發現。本測試直接從原始碼抽出實際
+    文字丟給真正的 PowerShell 執行（不需要系統管理員權限），斷言回傳物件屬性值
+    符合預期極性。史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。"""
 
     def test_settings_construction_snippet_executes_with_expected_property_values(self) -> None:
         text = _read(_SCRIPT)
@@ -658,14 +629,10 @@ class TestStatusExitCodeRuntime(unittest.TestCase):
     def test_uninstall_whatif_succeeds_when_carrier_scripts_are_unreachable(self) -> None:
         """DEF-101-619 回歸鎖：`-Uninstall` 不得依賴 nightly／smoke 載體腳本存在。
 
-        刻意沿用 `_script_with_absent_task_names` 產生的**改名複本**（複本落在
-        temp，其 `$RepoRoot` 算出來的 `$NightlyPs1`／`$SmokePs1` 絕對路徑在該複本
-        所在目錄下必然不存在——`test_whatif_previews_every_task_without_touching_scheduler`
-        docstring 已記載這個既有事實：install 模式的 `-WhatIf` 在這種複本下會在
-        載體存在性檢查就 `exit 1`，R60 實測）。修復前若同一道 `Test-Path` 守門
-        也擋 `-Uninstall`，本測試會在修復前以 rc=1 重現 DEF-101-619；修復後
-        `-Uninstall -WhatIf` 完全不觸碰 `Test-Path`，應正常預覽並以 rc=0 結束——
-        不需要、也不應該要求兩支載體真的存在（解除安裝理應比安裝更寬容）。
+        沿用改名複本（其載體絕對路徑必然不存在，R60 實測 install 模式 `-WhatIf`
+        在此會於存在性檢查就 `exit 1`）：修復前若同一道守門也擋 `-Uninstall`，
+        本測試會以 rc=1 重現 DEF-101-619；修復後應正常預覽並以 rc=0 結束——
+        解除安裝理應比安裝更寬容。史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
         """
         with tempfile.TemporaryDirectory() as tmpdir:
             script = self._script_with_absent_task_names(tmpdir)
@@ -721,13 +688,11 @@ class TestStatusExitCodeRuntime(unittest.TestCase):
 class TestUnattendedExecutionHardening(unittest.TestCase):
     """R69（S-5）：讓「重跑 installer」不再是回歸源。
 
-    2026-08-01/02 真機事故的三個直接成因，全都能被「有人跑一次 installer」重新種回去
-    （install 路徑是「存在就 Unregister 再 Register」，每跑一次就重置一次）：
-      (1) 不帶 -Principal → 套預設 Interactive → 使用者未登入就整輪不跑
-          （實測 AutoClaude_WindowsSmoke：事件 332、NumberOfMissedRuns=1）
-      (2) 不帶 -ExecutionTimeLimit → 預設 PT72H → 被睡眠凍住 35.6 小時的實例仍在
-          額度內存活，隔日 02:00 觸發被擋掉（事件 322）
-      (3) MultipleInstances 預設 IgnoreNew → 同上，新觸發直接被丟棄
+    真機事故的三個直接成因，全都能被「有人跑一次 installer」重新種回去（install
+    路徑是「存在就 Unregister 再 Register」）：不帶 `-Principal` 套預設 Interactive
+    使未登入就整輪不跑、不帶 `-ExecutionTimeLimit` 預設 PT72H 使睡眠凍住的實例
+    仍在額度內存活、`MultipleInstances` 預設 IgnoreNew 使新觸發被丟棄。史料見
+    證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
 
     def setUp(self) -> None:
@@ -1332,14 +1297,11 @@ class TestWindowsSmokeTaskHasWrittenExitCriteria(unittest.TestCase):
     def test_e3_measures_only_what_survives_its_own_action(self) -> None:
         """🔴 R76：E3 的量測對象不得隨「被它所判的動作」而改變（R75 頭號教訓第三次復發）。
 
-        缺陷本體：E3 原文要求「移除後 `check_scheduled_task_drift.py` 回 rc=0」，而該工具的
-        期望值 SSOT（`tools/scheduled_task_expectations.json`）**同時列兩支任務** ⇒ 執行
-        E3 自己授權的動作（移除 AutoClaude_WindowsSmoke）必然讓它回 `task_missing`／rc=1。
-        判準在結構上不可滿足 ⇒ 這支排程永遠退不了場，而失敗看起來只像「條件還沒到」。
-
-        意圖（Rule 9）：本鎖守的不是「E3 現在寫得對」，而是**不可滿足的判準不得再被寫回去**。
-        三個方向：①E3 必須點名它真正關心的那一支；②不得把它授權移除的那一支算進量測對象；
-        ③必須是**逐任務**讀法（整支工具的 rc／status 會把 smoke 算進去）。
+        缺陷本體：E3 原文要求移除後某工具回 rc=0，而該工具的期望值 SSOT 同時列
+        兩支任務 ⇒ 執行 E3 自己授權的移除動作必然讓它回 rc=1，判準結構上不可滿足。
+        意圖（Rule 9）：不可滿足的判準不得再被寫回去。三方向：①E3 必須點名真正
+        關心的那一支；②不得把授權移除的那一支算進量測對象；③必須逐任務讀法。
+        史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
         """
         e3 = self._e3_paragraph()
         self.assertIn(

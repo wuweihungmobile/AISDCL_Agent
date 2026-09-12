@@ -2783,27 +2783,12 @@ class ParallelShardCrashLeakFenceIntegrationTest(unittest.TestCase):
 class ParallelShardStderrBackpressureRegressionTest(unittest.TestCase):
     """DEF-200-274 第三輪複審 Problem 1：stderr backpressure 真實子行程回歸測試。
 
-    刻意**不** mock `subprocess.Popen`——三支既有 `ParallelShard*` 測試全部 mock 掉
-    Popen，因此從未真的碰到 `_worker_main()` 的 fd 重導向與真實 OS pipe 行為，正是
-    QA 複審點名「這正是 Problem 1 能存活至今未被任何既有自動化測試抓到的直接原因」
-    的那個缺口。本測試用兩支**寫進磁碟**的合成模組（`_worker_main()` 硬性要求
-    `start_dir` 必須是真正的 `tools/tests/`，無法用假路徑繞過）：
-
-      · SLOW（`worker_count=2` 下由某一條 worker thread 認領）：只 `time.sleep()`。
-      · LOUD（由另一條 worker thread 認領，與 SLOW 同時起跑）：立即對 `sys.stderr`
-        寫超過 OS pipe buffer（常見 64KB）的內容，自行量測這次 `write()` 的耗時
-        並落到一支結果檔——量測結果不能借道 stdout 協定通道回傳，那條通道被
-        `_worker_main()` 拿去印一行 JSON，混進任何額外位元組會讓 `json.loads`
-        當場炸掉。
-
-    修復前（第三輪：主 thread 序列 for 迴圈依序 `Popen()`＋事後才平行 `communicate()`）：
-    LOUD 那個 shard 的 stderr `write()` 會被核心阻塞到 SLOW 那個 shard 的
-    `communicate()` 完成為止（parent 依序輪到它），量到的耗時應 ≈ SLOW 的 sleep
-    秒數。
-    修復後（第四輪動態工作竊取：每條 worker thread 各自 `Popen()`＋緊接著自己
-    `communicate()`，兩者之間沒有「先開好全部、再排隊處理」的視窗）：兩個模組的
-    stdout/stderr 各有專屬 thread 從 Popen 一啟動就同時被排空，LOUD 的耗時應與
-    SLOW 的 sleep 秒數無關（近乎瞬間完成）。
+    刻意**不** mock `subprocess.Popen`（既有 `ParallelShard*` 測試全 mock，從未真的
+    碰到 `_worker_main()` 的 fd 重導向與真實 OS pipe 行為）：SLOW 模組只 sleep，
+    LOUD 模組同時對 stderr 寫超過 OS pipe buffer 的內容並自量耗時；修復前序列
+    `Popen()` 會讓 LOUD 被 SLOW 的 `communicate()` 卡住，修復後動態工作竊取應使
+    兩者耗時互不相干。事故經過與逐輪修復細節史料見證據檔〈第七輪 史料搬遷
+    （Dev-Trim8）〉。
     """
 
     _SLOW_MODULE = f"_zzz_backpressure_repro_a_slow_{os.getpid()}"
@@ -2868,53 +2853,13 @@ class LoadBalancingRegressionTest(unittest.TestCase):
     """DEF-200-274 第四輪：證明動態工作竊取真的達成負載平衡，不靠測試方法數這個
     權重估計準不準。
 
-    刻意反過來設計成舊版 `weighted_shards()`（已刪除；依測試方法數貪婪裝箱）一定
-    誤判的形狀：1 個「方法數少但單次耗時極長」的慢模組＋1 個「方法數多但全部瞬間
-    通過」的快模組，兩者方法數皆遠低於另一個純粹用來墊高 worker 數的次要慢模組。
-    具體：TRIVIAL（10 支瞬間通過的方法，權重最高）＋ SLOW_A／SLOW_B（各 1 支
-    `time.sleep()`，權重最低，恰好是舊演算法會誤判成「輕量」而綁在同一個 shard
-    的那種模組）：
-
-      · 舊版 `weighted_shards()`（`worker_count=2` 下）：依權重（方法數）由重到輕
-        貪婪裝箱——TRIVIAL(10) 先進最輕的 bin（bin0，load=10）；SLOW_A(1) 進另一個
-        bin（bin1，load=1）；SLOW_B(1) 兩個 bin 的 load 為 [10, 1]，最輕的是 bin1，
-        SLOW_A 與 SLOW_B 因此被**同一個** shard（同一個 subprocess，序列跑完）
-        分到，總耗時 ≈ 2 × `_SLEEP_SECONDS`；bin0（TRIVIAL 獨占）幾乎瞬間完成、
-        閒置等待。
-      · 新版動態佇列：排程粒度已改成**每個模組各自一個獨立 subprocess**，SLOW_A
-        與 SLOW_B 無論 `worker_count` 是多少都不可能被綁進同一個 subprocess——
-        真正需要驗證的只剩「兩者是否真的**同時**執行」。
-
-    🔴 第四輪第二次對抗式複審 SD finding（上面 `worker_count=2` 例子的因果敘事訂正）：
-    上面這個手算例子純粹是**動機說明**（解釋舊演算法哪裡會誤判），本測試實際
-    mock 的是 `worker_count=3`（見下方 `test_two_slow_modules_run_concurrently_
-    not_sequentially`）——獨立重算過舊版 `weighted_shards()` 在 n=3 下的分箱結果
-    是 `[['TRIVIAL'], ['SLOW_A'], ['SLOW_B']]`（三模組各自獨立 bin），SLOW_A／
-    SLOW_B **不會**在 n=3 下被舊演算法綁進同一個 shard。因此本測試對「已刪除的
-    舊演算法」在其實際配置下**沒有**雙態鑑別力，不能宣稱「改回舊演算法會讓本
-    測試變紅」；本測試真正鎖住的是「新系統在 n=3、三模組真的併發執行」這件事
-    本身（見下方 docstring 尾段：把 `worker_count` 改成 1 才是能讓本測試失敗的
-    真實反例，而非復原舊演算法）。
-
-    🔴 第四輪第二次對抗式複審 Architect finding（timing 斷言的複合延遲風險，已修正）：本測試
-    原本用 `worker_count=2`，讓 TRIVIAL 與 SLOW_A/SLOW_B 三個模組競爭 2 條
-    thread——若 TRIVIAL 被某條 thread 搶先認領，該 thread 完成 TRIVIAL 後會
-    **回頭再次認領**佇列裡剩下的那個 SLOW，形成「兩次 Popen 啟動延遲疊加」的
-    複合效應（TRIVIAL 開銷 + 第二次 Popen 啟動開銷 + `_SLEEP_SECONDS`），使原本
-    1.6x 的安全邊際在 Windows／高負載 CI 上的實際餘裕不明（本機 mac 測得數字
-    尚可，但缺乏慢機器佐證）。改法：`worker_count` 改為 **3**（＝模組數），讓
-    3 個模組在啟動瞬間就被 3 條 thread 一次各自認領一次到位、全程零佇列競爭——
-    TRIVIAL 不再可能「搶完一個位置後回頭偷第二個」，每條 thread 全程只呼叫
-    一次 `Popen()`。這徹底移除複合延遲的來源（而非只是加大安全邊際掩蓋它），
-    計時斷言因此只需涵蓋「一次 subprocess 啟動開銷」，不再依賴「誰搶到
-    TRIVIAL、TRIVIAL 完成的時間點是否早於另一個 SLOW 啟動」這種 thread 排程
-    時序假設。
-
-    本測試斷言總耗時遠低於 `2 × _SLEEP_SECONDS`（給足容忍度後仍能與「兩個慢
-    模組被綁進同一個 subprocess 序列跑完」的舊行為明確區分）；把 `worker_count`
-    改回 1（強迫兩個 SLOW 模組排隊、其中一個必須等另一個的 subprocess 先讓出
-    thread）重跑本測試會因總耗時逼近 `2 × _SLEEP_SECONDS` 而失敗，落地時已手動
-    驗證過這一點。
+    形狀刻意對舊版 `weighted_shards()`（已刪除；依方法數貪婪裝箱）不利：TRIVIAL
+    （10 支瞬間通過的方法）＋ SLOW_A／SLOW_B（各 1 支 `sleep()`）。實際以
+    `worker_count=3`（＝模組數）跑，讓三模組啟動瞬間各自被一條 thread 認領、
+    全程零佇列競爭；斷言總耗時遠低於 `2 × _SLEEP_SECONDS`，`worker_count` 改回 1
+    重跑則因排隊而逼近該值、已手動驗證過。取捨動機、`worker_count=2` 手算對照組
+    與兩輪對抗式複審 finding 的因果敘事訂正史料見證據檔〈第七輪 史料搬遷
+    （Dev-Trim8）〉。
     """
 
     _TRIVIAL_MODULE = f"_zzz_loadbalance_repro_trivial_{os.getpid()}"
@@ -3280,25 +3225,12 @@ class ParallelShardRealSubprocessProtocolIntegrationTest(unittest.TestCase):
     """DEF-200-274 第三輪複審 Problem 3：涵蓋 `run_parallel()`/`_worker_main()` JSON
     協定通道本身的真實子行程整合測試，刻意**不** mock `subprocess.Popen`。
 
-    與既有 `ParallelShardStderrBackpressureRegressionTest` 的差異：那支測試只用
-    2 個 shard（1 個 sleep、1 個寫 stderr）驗證「後面的沒被前面的卡住」這一個訊號。
-    本測試改成 3 個 shard 同時涵蓋兩件事：
-
-      (a) **協定通道本身**：`shard0`（`_zzz_protocol_repro_a_mixed`）在**同一個**
-          shard payload 裡塞進 pass／fail／error／skip／unexpectedFailure-但實際
-          通過（unexpectedSuccess）五種結果型態，證明 parent 從真實 subprocess
-          的 stdout 收到的單行 JSON 能被正確 `json.loads` 並經 `merge_results()`
-          彙總成數量與型別正確的 `testsRun`/`skipped`/`errors`/`failures`/
-          `unexpectedSuccesses`——三支既有 mock 版測試都用假 payload，從未真的
-          走過 `_worker_main()` 序列化＋parent 反序列化這條真實路徑。
-      (b) **stderr 管線行為不會卡死**：`shard1`／`shard2` 各自在模組匯入當下（即
-          worker subprocess 一啟動就執行，早於任何 `communicate()`）對 stderr
-          （`shard2` 額外加碼 stdout）寫入遠超過 OS pipe buffer（常見 64KB）的
-          內容，各自量測這次寫入耗時；`shard0` 同時跑一個會 `sleep()` 的測試。
-          若 stderr backpressure 回歸，`shard1`／`shard2` 的寫入會被卡到
-          `shard0` 的 `communicate()` 完成為止（耗時 ≈ sleep 秒數）。另外包一層
-          硬性逾時（背景 thread + `join(timeout=...)`），逾時本身就是測試失敗，
-          避免真的卡死時把整個測試行程一起拖住。
+    3 個 shard 同時涵蓋兩件既有 mock 版測試從未真的走過的路徑：(a) `shard0` 單一
+    payload 塞五種結果型態，證明真實 stdout JSON 能被 `json.loads`／`merge_results()`
+    正確彙總；(b) `shard1`／`shard2` 匯入當下即對 stderr／stdout 寫超過 OS pipe
+    buffer 的內容並自量耗時，驗證 backpressure 不會卡死（另包硬性逾時避免真卡死
+    拖住整個測試行程）。與既有 `ParallelShardStderrBackpressureRegressionTest`
+    的差異史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
 
     _MIXED_MODULE = f"_zzz_protocol_repro_a_mixed_{os.getpid()}"

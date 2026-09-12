@@ -1,42 +1,21 @@
 #!/usr/bin/env python3
 """`tools/archive_defect_log.py` 的判準與保全行為回歸鎖。
 
-🔴 本檔刻意寫成 `unittest.TestCase` 類別風格：根層四道閘門（`tools/run_root_unittests.py`
-＋ pre-push ＋ 兩支 CI）走的是 **unittest discover**，pytest 函式風格的測試檔會被**整檔零收集**
-（R60 Scan-C 的 C-01 就是這個病：一道「兩平台排程能力對等契約鎖」寫成 pytest 函式，
-四道閘門全部收不到，等於從來沒跑過）。
+🔴 本檔刻意寫成 `unittest.TestCase` 類別風格：根層四道閘門走的是 **unittest discover**，
+pytest 函式風格的測試檔會被整檔零收集（R60 Scan-C 的 C-01 病例）。
 
-鑑別力設計說明（R60 round 1 四方複審把本檔初版拆穿的三件事，逐條對應本檔的結構）：
+R60 round 1 四方複審拆穿本檔初版五個鑑別力缺口，逐一對應現行結構：
+`TestCheckModeBugInjection`（注入七種真實缺陷比對 problem 集合差異，而非只看 rc）／
+呼叫 `ADL.POINTER_RE` 本體對真實帳本雙分支斷言（原自寫窄正則零測試消費者）／
+`TestConservationGuardsAreExplicitNotAssert`（AST 斷零 `assert` 陳述＋`python -O`
+子行程重驗，原裸 `assert` 在 `-O` 下整組消失）／`TestCheckIsWiredIntoGates`（斷言
+pre-push／CI 真的執行 `--check`，原無人看 rc）／`_generated_header_of()` 結構邊界
+（原 `[:4000]` 切片溢入表格區撞到合法引用字樣）。五項缺口細節與 Pkg-P12 假紅史料
+見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
 
-  1. **SD-R60-01**：把 `ADL.check()` 整支換成 `return 0` 仍 10/10 綠——因為當時唯一
-     碰到 `check()` 的斷言是 `assertIn(rc, (0, 1))`（rc 只可能是 0/1，恆真）。
-     → 現在 `check()` 的鑑別力由 `TestCheckModeBugInjection` 承擔：把帳本家族
-     **複製到 tmp**、`monkeypatch` `ADL._LEDGER`／`ADL._QUALITY_DIR`，逐項注入七種
-     真實缺陷形態，每一項都斷言「注入後才出現的那一筆 problem 訊息」——比對的是
-     **problem 集合差異**而非只看 rc，所以「恰好本來就紅」無法冒充鑑別力。
-  2. **QA-R60-02**：`ADL.POINTER_RE` 零測試消費者，測試自寫了一份比生產窄的正則
-     （只認 `立帳見本表 DEF-x`），6 個真實指針只驗到 1 個。
-     → 現在一律呼叫 `ADL.POINTER_RE` 本體，並對**真實帳本家族**斷言「現居 archive_NN」
-     與「立帳見主檔」兩種分支各至少命中一次（任一分支被改壞即紅）。
-  3. **ARCH-R60-07／SD-R60-07／QA-R60-08**：`apply()` 的四項保全是裸 `assert`，
-     `python -O` 下整組消失，而 `apply()` 會就地覆寫帳本主檔；當時的「SSOT 耦合鎖」
-     是一行 `assertIs(x, x)` 恆真空斷言。
-     → 現在 `TestConservationGuardsAreExplicitNotAssert` 以 AST 斷言本工具**全檔零
-     `assert` 陳述**、以構造輸入逐條驗四項不變量、並在 `python -O` 子行程下重驗；
-     SSOT 耦合改為 `TestGateSsotCouplingContract` 的顯式契約鎖。
-  4. **ARCH-R60-02／QA-R60-01**：`--check` 的 rc 沒有任何閘門在看。
-     → `TestCheckIsWiredIntoGates` 斷言 pre-push 守門迴圈與 root-infra-ci.yml 兩邊
-     都真的執行 `python tools/archive_defect_log.py --check`。
-  5. **Pkg-P12（載具假紅）**：本檔自己犯了「拿整份文件斷言某字串不出現」——標頭鎖以
-     `read_text()[:4000]` 取樣，切片溢進逐字搬入的表格區，撞到某列**合法引用**作廢字樣的
-     缺陷描述。被測行為是對的，紅的是取樣範圍；代價是帳本改寫了自己的缺陷描述來繞道。
-     → 取樣改走 `_generated_header_of()`（結構邊界），紀律與機械自檢見
-     `TestNoAssertionSamplesALiveDocumentWholesale`。
-
-判準④（散文交棒偵測）的正樣本**用 R60 動工前真的被誤搬的那兩列原文**
-（`DEF-101-517`／`DEF-101-526`，現居 `archive_30`）。這不是自己編一個一定會過的字串——
-那兩列是舊判準（只看狀態欄）實際放行、而新判準必須攔下的真實案例，所以這條測試
-如果哪天判準退化回「只看狀態欄」，它會轉紅。
+判準④（散文交棒偵測）的正樣本用 R60 動工前真的被誤搬的兩列原文
+（`DEF-101-517`／`DEF-101-526`，現居 `archive_30`）：舊判準（只看狀態欄）曾放行、
+新判準必須攔下的真實案例，判準退化回舊行為會使其轉紅。
 """
 from __future__ import annotations
 
@@ -105,20 +84,10 @@ _GATE_SSOT_CONTRACT: dict[str, str] = {
 def _local_cell_split_sites(tree: ast.AST) -> list[str]:
     """AST 掃描「本地又長出一份切欄邏輯」的痕跡；回傳命中位置清單（空＝乾淨）。
 
-    🔴 為何不能只靠 `_GATE_SSOT_CONTRACT` 的名稱比對：那張表只擋「用同一個名字再定義
-    一次」。把複本改個名字（`_MY_PIPE_RE`／`_split_cells()`）就完全繞過，而 Pkg-P7 要防的
-    正是「同一語意在第二個地方又寫一次」——名字不是重點，**形狀**才是。故本函式改認三種
-    形狀，任一命中即視為複本：
-      (i)  `re.compile(...)` 的樣式字面含反斜線＋豎線（`\\|`）＝表格欄分隔符的轉義寫法。
-           本工具其餘正則（`ACTIVE_STATUS_RE`／`HANDOFF_PROSE_RE` 等）用的是**未轉義**的
-           `|` 當 alternation，故此判準對它們零命中（實測）。
-      (ii) 對「名稱以 `_RE` 結尾的已編譯正則」或 `re` 模組本身呼叫 `.split()`。
-      (iii) `.split()` 的字面引數含 `|`（＝不用正則、手工切豎線那條路）。
-           本工具既有的 `.split("\\n")`／`.split(",")` 不含豎線，零誤報（實測）。
-
-    誠實劃界：它認的是**已知的三種形狀**，不是「任何手寫解析器」的通用偵測。一支從字元
-    迴圈手刻的 parser 不會被抓到——那種東西在 code review 與本檔的行為測試前不隱形，
-    而本鎖要擋的是「順手複製貼上一份」這個真實的復發路徑。
+    名稱比對只擋「同名再定義」，改個名字就繞過；Pkg-P7 要防的是**形狀**：
+    (i) 正則樣式含轉義豎線 `\\|`、(ii) `_RE` 結尾正則或 `re` 本身呼叫 `.split()`、
+    (iii) `.split()` 引數字面含 `|`。誠實劃界：只認這三種已知形狀，手刻字元迴圈
+    parser 不在偵測範圍內，取捨史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
     hits: list[str] = []
     for node in ast.walk(tree):
@@ -260,23 +229,11 @@ def _row_from(path: Path, def_id: str) -> str:
 def _generated_header_of(archive: Path) -> str:
     """該 archive 檔內「由 `apply()` **生成**的標頭」區段原文（不含逐字搬入的表格列）。
 
-    🔴 **本函式存在的理由就是 Pkg-P12 那個假紅**（同族紀律見
-    `TestNoAssertionSamplesALiveDocumentWholesale` 檔內類別 docstring）：原本這裡寫的是
-    `dest.read_text(...)[:4000]`，兩個獨立缺陷疊在一起——
-
-      (i) **寫死切片**：`4000` 假設「標頭一定短於 4000 bytes」，而標頭是由 `CHECK_CRITERIA`／
-          `MOVE_CRITERIA` **生成**的，長度隨判準增減而變（判準每多一項，`criteria_sentence()`
-          就長一段）。這個假設沒有任何機制保證，且愈接近就愈難察覺。
-      (ii) **取樣範圍吃到別人的地盤**：`apply()` 會把已結列**逐字**搬進 archive 檔，所以
-          4000 bytes 的切片會越過表頭、切進表格區。於是斷言「標頭不得出現『共七項』」
-          撞到的是**某一列缺陷描述**——那一列（`DEF-101-584`）之所以寫著「共七項」，正是
-          因為它在敘述「標頭殘留共七項」這個缺陷。帳本的職責就是記錄缺陷、必然逐字引用
-          缺陷字樣，所以這是**帳本合法內容造成的假紅**，被測行為其實是對的。
-
-    改法＝邊界由**結構**認定，而且用生產側同一份 SSOT：`apply()` 組出的
-    `archive_body = header + 逐字搬入的列`，故「生成標頭」的結束點就是**第一列可解析的
-    缺陷表格列**。判定一律走 `gate._table_layout()` ＋ `ADL._row_id()`（本檔全域零切欄
-    實作的既有紀律），找不到邊界就 fail-loud——**不退回整檔**，否則假紅會靜默復活。
+    本函式存在的理由是 Pkg-P12 那個假紅：寫死 `[:4000]` 切片既假設標頭長度不變、又會
+    切進已結列逐字搬入的表格區，讓帳本合法引用的缺陷字樣（如「共七項」）誤觸斷言。
+    改法＝邊界由結構認定：走生產側同一份 SSOT `gate._table_layout()`／`ADL._row_id()`
+    找出第一列可解析的表格列，找不到即 fail-loud，不退回整檔。史料見證據檔
+    〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
     text = archive.read_text(encoding="utf-8-sig")
     layout = ADL.gate._table_layout(text)
@@ -493,18 +450,11 @@ class TestPlanNeverProposesActiveRows(unittest.TestCase):
         """判準③ 的 R68 改寫（DEF-101-676）：「被宣稱過」不再是 blocker，取而代之的義務是
         「搬走後那句宣稱仍解析得到」。
 
-        🔴 本條取代舊的 `assertNotIn(v["id"], claimed)`。**為何舊斷言必須退場而不是放寬**：
-        它把「有人在 ONBOARDING／CI workflow 裡提過這一列」當成永久不可搬，而那從來不是
-        危害本身——危害是「搬走之後 `_scan_target()` 找不到它、報『帳本查無此 ID』」。
-        R68 之前這兩件事被綁在一起，只因為 `gate._load_ledger_status()` **只讀主檔**；
-        補上 `gate._load_archive_status()` 之後，帳本 SSOT 才真的是它一直宣稱的
-        「主檔 ∪ archive 家族」，於是「被宣稱過」與「不可搬」解耦。
-        實測代價：R68 動工前 11 筆已結列（16217 bytes）**只**因舊斷言而永久卡在主檔。
-
-        本條的鑑別力＝正向驗證那個新義務真的成立，而不是刪掉檢查了事：對每一筆
-        「被宣稱過 ＆ 被列為可搬」的列，斷言它在帳本家族內解析得到且狀態與宣稱一致。
-        真正的端到端證明另由 `--check` 判準(8) 每次執行實跑（見
-        `TestCriterion8VerifiesClaimsResolveAcrossFamily`）。
+        取代舊的 `assertNotIn(v["id"], claimed)`：舊斷言把「被提過」永久等同「不可搬」，
+        危害其實是搬走後 `_scan_target()` 找不到；補上 `gate._load_archive_status()`
+        使帳本 SSOT 真正涵蓋主檔∪archive 家族後，兩者解耦。改寫動機與代價量化史料見
+        證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。本條正向驗證新義務：對每一筆「被宣稱過
+        ＆ 可搬」的列，斷言它在帳本家族內解析得到且狀態與宣稱一致。
         """
         p = ADL.plan()
         claimed = ADL._status_claimed_ids()
@@ -2651,20 +2601,10 @@ def _tmpdir():
 class TestHardLineIsToolFact(unittest.TestCase):
     """方向③（調高硬線）駁回鎖：262144 綁的是 Read 工具事實，不是政策自由度。
 
-    🔴 **為何這不是「把溫度計砸掉」的相反面 —— 為何連「調高一點點」都不行**：
-    2026-08-01 於 macOS 26.5.2 arm64 真機對 Read 工具實跑探針（R67 的認知不被採信、
-    當場重驗），兩發皆在**還沒讀到任何內容**時就被工具本身拒絕：
-
-        Read(probe_2m.txt   / 2097152 bytes)
-          → File content (2MB) exceeds maximum allowed size (256KB).
-        Read(probe_300k.txt /  307200 bytes)
-          → File content (300KB) exceeds maximum allowed size (256KB).
-
-    錯誤訊息逐字載明上限 256KB ⇒ R67 帳本內「現值 262144 綁的是 Read 工具單次讀取上限」
-    於 R68 仍成立、未過期。把 `_LEDGER_FAIL_BYTES` 調高的後果不是「閘門變寬鬆」而是
-    **主檔變成任何 agent 都讀不完整的檔**：Read 會直接拒絕，被迫改用 offset/limit 分段
-    讀，而分段讀的讀者不會知道自己漏了哪些列——「讀不完整的 SSOT」比「撞閘門」壞得多，
-    因為前者是靜默失效。容量問題的正解是提高輪替**吞吐**，不是提高上限。
+    2026-08-01 macOS 真機對 Read 工具實跑探針重驗：256KB 以上的檔會被工具本身直接
+    拒絕（連 offset/limit 分段讀都不知道漏了哪些列）。調高上限的後果不是閘門變寬鬆，
+    而是主檔變成讀不完整的 SSOT——容量問題的正解是提高輪替吞吐，不是提高上限。
+    探針逐字輸出史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
 
     def test_fail_line_equals_measured_read_tool_limit(self):
@@ -3166,24 +3106,12 @@ class TestTemporalNarrativeSamplesStayUncaught(unittest.TestCase):
 class TestOpenBacklogArchiveIsRejected(unittest.TestCase):
     """方向②（讓長期未結的 known-gap 列搬進 open-backlog archive、主檔只留指針）駁回鎖。
 
-    🔴 **駁回理由不是「工作量大」，是它會讓兩條既有硬規則同時瞎掉**：
-
-      (甲) `check_defect_log_crossref.orphan_backlog_problems()`（硬規則②，R67 才落地）
-           的輸入是 `ledger_text` ＝ **主檔全文**。它逐列檢查「未結案列指名的承接輪次不得
-           早於當前輪」。未結列一旦搬出主檔，這道閘門對它們就是零檢查——而未結列正是
-           唯一需要孤兒偵測的那一群。等於為了容量，把 R67 剛補上的孤兒偵測整個關掉。
-      (乙) `current_round()` 由主檔「發現情境」欄推得當前輪次。主檔只剩指針之後，
-           輪次推導的樣本面同步縮小。
-      (丙) 「帳本是 SSOT」在讀者面失效：未結項才是每輪開工必讀的那一半，把它搬走
-           只留指針，等於要求每個讀者多讀一支檔才知道現在有哪些活；而容量問題的成因
-           恰恰是「一次讀不完」——把必讀內容搬到第二支檔並沒有解決它，只是換個地方。
-
-    量化對照（R68 動工前實測）：方向② 的標的是 78 筆 open/routed 列共 155615 bytes，
-    看似最大宗；但實際採納的 ①＋判準② 收窄合計釋放 19486 bytes 已使餘裕達標，且**不
-    破壞任何不變量**。以「破壞兩條硬規則」換取暫時更大的數字不划算。
-
-    本測試鎖的是：孤兒偵測的輸入面**必須**仍是主檔全文，且主檔**必須**仍實際承載未結列。
-    哪天有人把未結列搬走，這裡會轉紅。
+    駁回理由不是工作量大，是它會讓孤兒偵測（`orphan_backlog_problems()` 吃主檔全文）
+    對未結列——唯一需要孤兒偵測的那一群——變成零檢查，且讓「帳本是 SSOT」在讀者面
+    失效（未結項才是每輪必讀的那一半）。R68 量化對照顯示改採①＋判準②收窄已足夠釋放
+    容量餘裕，不必以破壞硬規則換取更大數字，史料見證據檔〈第七輪 史料搬遷
+    （Dev-Trim8）〉。本測試鎖的是：孤兒偵測的輸入面必須仍是主檔全文，且主檔必須仍
+    實際承載未結列。
     """
 
     def test_orphan_detection_input_is_the_main_ledger_text(self):

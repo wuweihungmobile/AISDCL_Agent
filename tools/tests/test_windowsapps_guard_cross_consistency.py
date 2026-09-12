@@ -180,20 +180,12 @@ class TestWindowsAppsGuardEnrollment(unittest.TestCase):
         )
 
     def test_dev_start_ps1_delegates_candidate_selection_to_ssot(self) -> None:
-        """🔴 R69 P2 改寫（鎖**遷移**，非放寬）：舊鎖要求 dev_start.ps1 內恰有一處
-        `Test-IsRealPython -CandidateName 'python'`——那正是本輪修掉的缺陷形狀：
-        「命中裸 python 即用、不看版本」。macOS 真機重現的姊妹缺陷（`python3` 恆
-        為系統 3.9，`brew install python@3.11` 不改寫它 ⇒ dev_start 核心版本閘
-        rc=2、ONBOARDING §2.1「全新機器可直接跑 dev_start」為假）迫使候選鏈上移
-        到 SSOT `Get-PythonGeMin`（>= 3.11 才算數，內部逐個裸名候選仍呼叫
-        `Test-IsRealPython`）。舊鎖若原地保留，等於要求 wrapper 永遠留著那個
-        不看版本的分支。
-
-        新鎖強度不減，且改守本輪真正要守的東西：
-          ① wrapper 必須把候選挑選**委派**給 SSOT（恰一處 `Get-PythonGeMin`）；
-          ② wrapper 內不得再出現任何自行判斷候選的 `Test-IsRealPython
-             -CandidateName '<裸名>'`（回填該分支＝缺陷復發）。
-        「SSOT 內部真的有做空殼排除」另由本檔 ②④ 節的行為表 parity 鎖看著。
+        """🔴 R69 P2 改寫（鎖**遷移**，非放寬）：舊鎖要求恰一處
+        `Test-IsRealPython -CandidateName 'python'`（命中裸 python 即用、不看
+        版本），macOS 真機重現的姊妹缺陷迫使候選鏈上移到 SSOT `Get-PythonGeMin`
+        （>= 3.11 才算數）。新鎖強度不減：①委派給 SSOT ②不得再出現自行判斷候選的
+        `Test-IsRealPython -CandidateName '<裸名>'`。史料見證據檔
+        〈第七輪 史料搬遷（Dev-Trim8）〉。
         """
         selector_calls = re.findall(r"\bGet-PythonGeMin\b", _ps_code_only(self.dev_start_text))
         self.assertEqual(
@@ -376,20 +368,14 @@ class TestDevStartPs1WindowsAppsGuard(unittest.TestCase):
     def test_windowsapps_only_python_stub_is_skipped_and_reports_not_found(self) -> None:
         """PATH 上只有一個位於 WindowsApps 路徑下的 python.exe 空殼、無 py 時，
         dev_start.ps1 必須跳過該空殼並回報「找不到 Python 直譯器」，而不是把
-        空殼當真直譯器去呼叫 tools/dev_start.py（那樣只會跳出 Store 提示，
-        永遠不會真正整備環境）——與 bootstrap.ps1 既有回歸鎖同款情境。
+        空殼當真直譯器去呼叫 tools/dev_start.py——與 bootstrap.ps1 既有回歸鎖
+        同款情境。
 
-        已知侷限（bug-injection 驗證時發現，如實揭露）：在 macOS/Linux 上的
-        `pwsh`，`Get-Command python` 不會透過 Windows PATHEXT 語意把裸名
-        `python` 解析到 `python.exe`——即使把本測試用的 guard 暫時拔掉（改為
-        `if ($PyCand) { ... }`），`$PyCand` 在 macOS pwsh 上仍恆為 null，本測試
-        會因「本來就找不到任何 python」而通過，並非真的驗證了 guard 邏輯本身
-        （`test_bootstrap_ps1.py` 同款寫法的等價測試亦有此侷限；共用函式本身
-        的排除邏輯已由上方 `TestWindowsAppsGuardSharedFunctionBehavior` 用
-        shadow `Get-Command` 手法在任何平台上都具鑑別力地驗證過）。本測試在真
-        Windows PowerShell（PATHEXT 生效）上才具備鑑別力——CI 端
-        `windows-compat-ci.yml` 於 `windows-latest` runner 執行，該環境才是本測
-        試實際發揮回歸鎖作用之處。
+        已知侷限（如實揭露）：macOS/Linux `pwsh` 的 `Get-Command python` 不走
+        Windows PATHEXT 語意，`$PyCand` 恆為 null ⇒ 本測試在真 Windows
+        PowerShell（`windows-compat-ci.yml` 的 `windows-latest` runner）上才
+        具備鑑別力；共用函式排除邏輯已由 `TestWindowsAppsGuardSharedFunctionBehavior`
+        跨平台驗證過。史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
         """
         with tempfile.TemporaryDirectory() as td:
             stub_dir = Path(td) / "WindowsApps"
@@ -409,46 +395,17 @@ class TestDevStartPs1WindowsAppsGuard(unittest.TestCase):
     def test_windowsapps_stub_present_first_is_rejected_not_silently_bypassed(
         self,
     ) -> None:
-        """R42 四方複審修正（前身
-        `test_real_python_outside_windowsapps_is_used_even_when_windowsapps_stub_present_first`
-        的期待本身是錯的，見下方說明）：
+        """R42 四方複審修正：前身測試的期待本身是錯的。
 
-        dev_start.ps1 只有 **單一** `python` 候選名稱（無 `python3`／`py`
-        等第二候選可退而求其次）。`Test-IsRealPython` 目前實作是
-        `Get-Command $CandidateName`（單一結果，依 PATH 目錄順序取第一個），
-        呼叫端拿到 `$true` 後一律用**候選名稱字面值**（`'python'`）而非解析出
-        的完整路徑去實際呼叫（`& $Py` 其中 `$Py = 'python'`）。
-
-        前身測試建構「WindowsApps 空殼排前面、真直譯器排後面」的 PATH，卻
-        期待 dev_start.ps1 最終會呼叫到後面那個真直譯器——這在目前架構下
-        物理上不可能發生且**不應該**發生：本機實測（見 R42 修復報告）證實
-        PowerShell `&` 對裸名稱的命令解析，与 `Test-IsRealPython` 內部
-        `Get-Command` 各自獨立依 PATH 順序解析，兩者解析結果一致（都會拿到
-        最前面的 WindowsApps 空殼）；`Test-IsRealPython` 目前回傳布林值前已
-        用 `Get-Command $CandidateName`（單一結果）判斷該第一個候選是否為
-        空殼，若是則正確回傳 `$false`，`$Py` 保持 `$null`，程式走「❌ 找不到
-        Python 直譯器」分支並停下——這是**正確且更安全**的行為。
-
-        若要讓 guard 真的「跳過空殼、找到後面的真直譯器」（例如改用
-        `Get-Command -All` 逐一排除 WindowsApps 後取第一個真實候選），
-        `Test-IsRealPython` 必須同時回傳該真直譯器的**完整解析路徑**，且三個
-        呼叫端都要跟著改成用該完整路徑呼叫——否則就算函式回傳 `$true`，呼叫
-        端 `& 'python'` 實際執行時，PowerShell 一樣會照 PATH 目錄順序解析到
-        最前面那個 WindowsApps 空殼（本測試命名的原始期待），造成「guard 說
-        安全，但實際執行的還是空殼」的靜默失敗，比現在「誠實回報找不到並
-        停下」更危險。這是一個牽動三個入口腳本呼叫慣例的高風險大改動，超出
-        本輪比例原則，故修正本測試期待而非動 production 邏輯。
-
-        已知既有迴避手法（如實記載）：`test_bootstrap_ps1.py` 的同名測試
-        `test_real_python_outside_windowsapps_is_used_even_when_windowsapps_stub_present_first`
-        之所以能正向斷言「真直譯器被呼叫」且維持綠燈，是因為 bootstrap.ps1
-        有 `python`／`python3` **兩個**候選名稱：該測試把 WindowsApps 空殼放在
-        `python.exe`（第一候選會被排除），把真直譯器放在 `python3.cmd`
-        （**不同**候選名稱、PATH 上沒有 python3 的空殼與它競爭），guard 對
-        `python3` 這個全新候選重新走一次 `Get-Command python3`，天然只找到
-        `real_dir` 底下那一個，不涉及「同一候選名稱有兩個 PATH 條目、跳過前
-        面選後面」的場景，因此迴避掉了本測試揭露的問題。dev_start.ps1 只有
-        `'python'` 一個候選名，沒有第二個候選名可用這招迴避。
+        dev_start.ps1 只有**單一** `python` 候選名稱（無 `python3`／`py` 第二
+        候選可退而求其次）。`Test-IsRealPython` 是 `Get-Command $CandidateName`
+        （依 PATH 順序取第一個），呼叫端拿到 `$true` 後一律用候選名稱字面值
+        （非解析出的完整路徑）呼叫——故 WindowsApps 空殼排前面時，guard 正確
+        回傳 `$false` 並停下，物理上不可能跳過空殼找到後面的真直譯器（除非
+        `Test-IsRealPython` 同時回傳完整路徑且三個呼叫端都跟著改，屬超出本輪
+        比例原則的高風險大改動）。bootstrap.ps1 因有 `python`／`python3` 兩個
+        候選名可迴避此問題，dev_start.ps1 沒有第二候選名可用。修正動機與逐步
+        推導史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
         """
         with tempfile.TemporaryDirectory() as td:
             stub_dir = Path(td) / "WindowsApps"
@@ -488,18 +445,10 @@ def _tracked_files(pattern: str) -> list[str]:
     路徑清單（fail-loud）。
 
     用 `git ls-files` 而非 `Path.rglob`：天然排除 `.git`／`.venv`／
-    `__pycache__`／`node_modules`（只要未被 commit 或被 `.gitignore` 排除）。
-
-    🔴 R85／訴求 2：取數本體改委派 `tools/lib/git_paths.py`（根 CLAUDE.md 鐵律三表
-    逐字指定的唯一取數層）——「每個站點各自記得帶 quotepath 旗標」正是該 SSOT 立案時
-    要消滅的形態。fail-loud 留在本層（該 SSOT 刻意不代呼叫端決定 rc≠0 怎麼處置）。
-
-    🔴 R82（`DEF-101-752`）：掃描面原本只有 tracked（`git ls-files -- pattern`），
-    尚未 `git add` 的新檔天然不可見——R69 的 `platform_caps.py` 全程 untracked，
-    使一個真實違規躲過四輪四方複審與多次全套實跑，直到 `git add -A` 才顯形（見
-    `tools/tests/test_platform_utils_dedup.py` 檔頭②）。現改為 union 上
-    `-o --exclude-standard`（tracked ∪ untracked-not-ignored），手法與該檔同政策；
-    `--exclude-standard` 仍尊重 `.gitignore`，故 `.venv/`／`__pycache__/` 等排除不受影響。
+    `__pycache__`／`node_modules`。取數本體委派 `tools/lib/git_paths.py`
+    （quotepath 旗標的唯一取數層）；scope 為 union（`-o --exclude-standard`）
+    而非只掃 tracked，因為 untracked 新檔曾使一個真實違規躲過四輪複審直到
+    `git add -A` 才顯形，史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
     rels = sorted(
         set(git_paths.ls_files(_REPO_ROOT, "--", pattern))
@@ -571,21 +520,10 @@ _STUB_PREDICATE_RE = re.compile(r"""["']windowsapps["']""", re.I)
 def _matches_stub_anchor(text: str) -> bool:
     """兩錨的**聯集**——只要任一錨命中即視為「疑似第二份 stub 判斷式實作」。
 
-    R56 round 6 修正（QA 複核以 bug-injection 證實）：本判定原本直接內聯寫在掃描
-    迴圈裡（`_STUB_NAME_RE.search(text) or _STUB_PREDICATE_RE.search(text)`），
-    使得「∪」這個 round 5 的**核心交付物本身完全無鎖**——把該處 `or` 改成 `and`
-    （3 個字元），全檔 40 支測試維持 OK、變體 L（改名 ＋ 裸大寫字面值）完整逃逸。
-    `TestStubAnchorDiscriminatingPower` 當時鎖住的是兩個錨**各自**的 `re.I`／
-    `MULTILINE`／引號界定三項屬性，唯獨沒鎖住把它們接起來的運算子。
-
-    觸發情境具體、非理論：下方「精度取捨」段明載放寬字面值會多出 5~6 支偽陽性，
-    未來任何一次偽陽性壓力下，「改成必須兩個錨同時命中才算」都是最自然的收緊
-    動作——它看起來像精度改善，且不會讓任何一支測試翻紅。
-
-    抽成純函式後由 `TestStubAnchorDiscriminatingPower` 的兩支單錨樣本斷言鎖住
-    （兩者在 `∩` 語意下必死），並與同檔 `_invokes_python_in_ps1`／
-    `_all_python_invocations_are_ssot_protected` 的「測組合後純函式」慣例對齊
-    ——原本只有 stub 這一側測裸 regex 常數，是對本檔自身慣例的偏離。
+    R56 round 6 修正：原本內聯寫在掃描迴圈裡的 `or` 曾被實測改成 `and`（3 字元）
+    仍全綠、變體 L 完整逃逸——`TestStubAnchorDiscriminatingPower` 當時只鎖住兩錨
+    各自的屬性，沒鎖住接起來的運算子。抽成純函式後由該測試的兩支單錨樣本鎖住
+    （`∩` 語意下必死）。史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
     return bool(_STUB_NAME_RE.search(text) or _STUB_PREDICATE_RE.search(text))
 
@@ -1070,33 +1008,17 @@ class TestNoOrphanWindowsAppsImplementation(unittest.TestCase):
         同時具備「真正的」dot-source SSOT 陳述式與「真正呼叫」
         `Test-IsRealPython` 的陳述式——否則列為 offender（獨立副本嫌疑）。
 
-        R40 SD 對抗式驗證實測揪出前版漏洞：舊判定僅檢查全檔文字是否「同時
-        含有 `WindowsAppsGuard.ps1` 與 `Test-IsRealPython` 兩個子字串」，
-        SD 構造出一個完全獨立重寫判斷邏輯、從未 dot-source SSOT 的 .ps1，
-        只在註解裡提及這兩個子字串做偽裝，就騙過了測試（PASSED，本該
-        FAILED）。改為 `_has_real_dot_source_of_ssot` /
-        `_has_real_test_is_real_python_call`：要求匹配的是陳述式開頭的
-        dot-source 語法、以及非註解非字串常值的實際函式呼叫，而非任意位置
-        的文字提及；並在此基礎上濾掉行尾裝飾性註解（`_strip_trailing_line_comment`），
-        關閉 QA 二審用「真實程式碼行 + 行尾裝飾性註解偽裝呼叫」構造出的第二
-        種繞過。
+        R40 SD 對抗式驗證揪出前版漏洞（只查全檔文字同時含兩個子字串即可被
+        註解偽裝騙過）後改為 `_has_real_dot_source_of_ssot` /
+        `_has_real_test_is_real_python_call`：要求陳述式開頭的 dot-source
+        語法與非註解非字串常值的實際函式呼叫，並濾掉行尾裝飾性註解。
 
-        **已知殘留限制（如實記載，非本測試涵蓋範圍，列 R41 backlog）**：本
-        測試是逐行靜態文字/正則掃描，非真正的 PowerShell AST 解析或執行期
-        驗證，因此仍可被以下手法繞過（R40 四方複審中 Architect 與 QA 各自
-        獨立構造並驗證成立，判定為此類前瞻鎖依 Rule 2 比例原則暫不需要更
-        重的 AST 層修復，但必須誠實記載，不可讓人誤以為已完全封閉）：
-        (a) 檔案中存在「真實但死碼」的 dot-source SSOT 陳述式（語法正確、
-            執行期真的會讀入該檔案），但實際生效的判斷邏輯是另一個完全獨立
-            重寫的函式，`Test-IsRealPython` 只在從未被呼叫的死碼分支或無關
-            變數指派中「提及」（Architect 複審實測構造）；
-        (b) 把兩段魔法字串包進 PowerShell here-string（`@"..."@`/`@'...'@`）
-            當誘餌，本測試的逐行引號奇偶追蹤不追蹤跨行 here-string 開闔狀
-            態，門外的真正獨立重寫邏輯因此不會被辨識為 offender（QA 複審
-            實測構造）。
-        若未來要徹底封閉，需要真正的 PowerShell AST 解析（追蹤變數賦值是否
-        被實際呼叫使用、正確處理 here-string 狀態機），而非本測試目前採用
-        的逐行正則掃描；在該投入被判定值得之前，此為已知的方法論邊界。
+        已知殘留限制（如實記載，R41 backlog，Rule 2 比例原則暫不修）：本測試是
+        逐行靜態正則掃描，非真正 AST 解析，仍可被 (a) 真實但從未被呼叫的死碼
+        dot-source／`Test-IsRealPython` 提及、(b) 跨行 here-string 包裝魔法
+        字串兩種手法繞過（R40 四方複審各自構造驗證成立）。徹底封閉需要真正
+        AST 解析與 here-string 狀態機，構造細節與投入評估史料見證據檔
+        〈第七輪 史料搬遷（Dev-Trim8）〉。
         """
         latest_name = _latest_sdd_root().name
         scoped_ps1 = _exclude_frozen_sdd_versions(_tracked_files("*.ps1"), latest_name)
@@ -1123,35 +1045,18 @@ class TestNoOrphanWindowsAppsImplementation(unittest.TestCase):
         )
 
     def test_python_calls_in_ps1_all_go_through_ssot(self) -> None:
-        """R44 Architect 深度架構評估找到的系統性缺口：上一測試
-        （`test_ps1_mentions_of_windowsapps_all_go_through_ssot`）只掃『檔案內
-        文字提及 WindowsApps 字面值』者，抓不到『整支檔案從頭到尾根本沒有
-        任何 WindowsApps 相關字樣、直接裸呼叫 python』這個更原始形狀——例如
-        `AutoClaude/tools/local_ci_gate.ps1`／`run_act.ps1`／
-        `tools/integration_gate.ps1`／`tools/lib/GitHooksInstallCommon.ps1`／
-        `tools/windows_smoke_local.ps1` 確實有 `Get-Command python` 判斷，但
-        從未提及 WindowsApps，故被舊判準完全忽略；
-        `AutoClaude/tools/run_local_nightly.ps1` 與
-        `AISDLC_SDD/AISDLC_SDD_v0.30/tools/arch_fitness/run_self_evolution.ps1`
-        更是連 `Get-Command python` 判斷都沒有，直接裸呼叫。
+        """R44 Architect 深度架構評估找到的系統性缺口：上一測試只掃『提及
+        WindowsApps 字面值』者，抓不到『整支檔案從未提及卻直接裸呼叫 python』
+        這個更原始形狀。本測試 repo-wide 掃描全部 tracked `*.ps1`，找出「呼叫
+        python 但未 dot-source SSOT 且未呼叫 Test-IsRealPython」者，不再要求
+        先提及 WindowsApps 字面值。
 
-        本測試 repo-wide 掃描全部 tracked `*.ps1`（同上排除凍結版本），找出
-        「呼叫 python 但未 dot-source WindowsAppsGuard.ps1 且未呼叫
-        Test-IsRealPython」者，不再要求先提及 WindowsApps 字面值才檢查。
-
-        R44 SA 一審對抗式複審追加揪出：初版判準仍是「檔案層級」——只要檔案內
-        某處存在 dot-source SSOT 陳述式、某處存在 Test-IsRealPython 呼叫，全
-        檔即視為安全，不檢查每個裸 python 呼叫點是否真的受該次判斷保護。實測
-        把 `AutoClaude/tools/run_local_nightly.ps1` 改回「僅 1 處 guard、其餘
-        15+ 處裸呼叫且與 guard 判斷結果無關」的狀態，該測試仍全綠，證實此掃描
-        鎖抓不到「guard 已檢查、但呼叫點根本沒接上其判斷結果」的部分覆蓋缺口
-        （已修復＋自動化鎖護航的雙重假象）。改用
-        `_all_python_invocations_are_ssot_protected`：改為呼叫點層級，要求每
-        一個真正的裸呼叫都能歸類到現存兩種已知安全形狀之一——(A) guard 判斷
-        失敗時緊接 fail-fast（`exit`/`return`/`throw`），之後的裸呼叫因此保
-        證只在判斷通過時才會執行到；或 (B) guard 判斷結果存進變數、之後全部
-        呼叫點改用該變數（檔案裡已無真正的裸字面值呼叫）。任一裸呼叫點找不
-        到歸類即判定未受保護（見該函式與其呼叫的 helper docstring）。
+        R44 SA 一審追加揪出：初版判準是檔案層級（只要檔案內某處存在 guard
+        陳述即視為全檔安全），實測構造「1 處 guard、其餘 15+ 處裸呼叫與判斷
+        結果無關」仍全綠。改用 `_all_python_invocations_are_ssot_protected`：
+        呼叫點層級，要求每個裸呼叫歸類到 (A) guard 失敗即 fail-fast 或
+        (B) guard 結果存變數、全呼叫點改用該變數，任一歸類不到即未受保護。
+        真實案例清單與逐輪追加史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
         """
         latest_name = _latest_sdd_root().name
         scoped_ps1 = _exclude_frozen_sdd_versions(_tracked_files("*.ps1"), latest_name)
@@ -1203,45 +1108,16 @@ class TestNoOrphanWindowsAppsImplementation(unittest.TestCase):
     def test_windows_apps_predicate_impls_are_all_registered(self) -> None:
         """Python 側 WindowsApps 空殼判斷式的實作站點必須全部登記在案。
 
-        R56 訂正（原名 `test_is_windows_apps_stub_defined_exactly_once`）：舊判準
-        以**函式名**為錨（`^\\s*def _is_windows_apps_stub\\b`），而
-        `AutoClaude/autoclaude/execution/pre_run_validator.py:33` 的第二份實作
-        判斷式**逐字相同**、只差函式名多兩個字（`_is_windows_apps_alias_stub`），
-        在掃描範圍內（`AutoClaude/` 前綴）卻完整逃過，斷言訊息宣稱的「只出現
-        一次」因此為假、鎖零訊號。改以**判斷式內容**為錨，並比照本檔
-        `_EXEMPT_PS1_FILES`／bash 側 `_EXEMPT_SH_FILES` 的「附理由白名單」慣例
-        登記已核准的第二實作。
-
-        R56 二次訂正（本輪 Architect／SD 各自實測揪出）：上述「取代」是平移而非
-        升級——函式名錨與運算式錨互補，取代後「同名但換寫法」的變體反而新失守。
-        本鎖現以 `_STUB_NAME_RE`（函式名）∪ `_STUB_PREDICATE_RE`（引號界定的
-        `windowsapps` 字面值）雙錨判定，涵蓋範圍與兩錨各自盲區的完整對照表見兩個
-        常數上方註解。
-
-        R56 round 5 三次訂正（三位審查員互不知會、各自 bug-injection 命中同一根因）：
-        兩錨原本都**大小寫敏感**，把字面值／函式名寫成 repo 慣用的大寫 `WindowsApps`
-        即整組逃逸；兩錨各補 `re.I` 後收攏（378 支候選生產 `.py` 實測命中集合不變、
-        新增偽陽性 0）。**本鎖仍不宣稱涵蓋「重新發明」全類別**：改名且把字面值嵌進
-        更大字串（K）或以字串串接組出（O）者仍逃得掉，屬正則/靜態掃描類防護的既知
-        邊界。
-
-        白名單腐化保護：登記項若被刪除／改寫成不再命中任一錨，`hits` 就不會
-        包含它而使本鎖翻紅（等值斷言天然含 stale 檢查），不會靜默留著死條目。
-
-        測試檔本身排除在外：`tools/tests/*` 內出現同一字面值是「對 SSOT 內容
-        做斷言」（如上方 `test_bootstrap_core_py_has_symmetric_stub_detector`），
-        不是生產路徑上的第二實作。
-
-        R56 round 5 修正（QA 複核以 bug-injection 證實）：本鎖原本另以
-        `scoped_prefixes = ("AutoClaude/", "tools/", f"AISDLC_SDD/{LATEST}/")`
-        縮面，導致 16 支生產 `.py` 完全不被掃——`.claude/hooks/sdd_hook_router.py`、
-        `AISDLC_SDD/conftest.py` 與 `AISDLC_SDD/scripts/` 下 14 支。把逐字相同的
-        canonical 第二實作放進其中任一支，本鎖 100% 綠燈。而同檔兩支 `.ps1` 掃描與
-        姊妹鎖 `test_windowsapps_guard_bash_parity.py` 的 `.sh` 掃描**都是無前綴、
-        repo-wide**（只排凍結版）——即三語言中唯獨 Python 側被縮面，正是本輪主題
-        所指的「平台/語言待遇不對稱」。改為與姊妹掃描同政策：只排凍結版與測試檔。
-        實測：候選由 378 → 394 支，命中集合完全不變（仍為 `pre_run_validator.py`
-        ＋ `bootstrap_core.py`），新增偽陽性 0，故取消縮面零代價。
+        三輪訂正逐步收斂鑑別力：①以函式名為錨曾被逐字相同、只改函式名的第二
+        實作完整逃過，改以判斷式內容為錨並比照 `_EXEMPT_PS1_FILES` 慣例登記
+        白名單；②函式名錨與運算式錨互補，改為 `_STUB_NAME_RE` ∪
+        `_STUB_PREDICATE_RE` 雙錨判定；③兩錨原大小寫敏感，補 `re.I` 收攏
+        （既知邊界：改名且嵌進更大字串或字串串接組出者仍逃得掉）。掃描面亦曾
+        因 `scoped_prefixes` 縮面漏掉 16 支生產 `.py`，改為與姊妹 `.ps1`／`.sh`
+        掃描同政策（只排凍結版與測試檔）。白名單有 stale 檢查（登記項不再命中
+        任一錨即翻紅），測試檔本身排除在外（同檔內出現字面值是斷言 SSOT 內容，
+        非第二實作）。逐輪實測數字與 bug-injection 案例史料見證據檔
+        〈第七輪 史料搬遷（Dev-Trim8）〉。
         """
         latest_name = _latest_sdd_root().name
         all_py = _exclude_frozen_sdd_versions(_tracked_files("*.py"), latest_name)
@@ -1746,19 +1622,11 @@ def _case_inputs() -> tuple[str, ...]:
 def _write_verdict_samples(td: str) -> Path:
     """把樣本表寫成一個 ASCII 檔案，PS 與 bash 兩側**讀同一個檔**。
 
-    刻意不用命令列參數傳樣本：反斜線／`$`／UNC 前導 `\\\\` 在兩種 shell 的引號語意
-    下各有轉義陷阱，一旦轉義歪掉，測試會因為「餵進去的字串已經不是表上那個」而
-    假綠。走檔案則兩側都是逐行原文讀取，沒有轉義層。
-
-    🔴 一律走 bytes 層寫入、行尾**硬編碼 LF**（R68 windows-compat-ci 首度在真 Windows
-    執行 `tools/tests/` 時炸出的病灶，3 筆紅）：原本的 `write_text(..., encoding="ascii")`
-    其 `newline` 預設為 `None` ＝「翻成平台行尾」，在 Windows 上寫出的是 **CRLF**。
-    bash 側驅動器 `while IFS= read -r line` 只以 LF 斷行，`$line` 於是尾帶一個 `\\r`，
-    那個 CR 跟著被 `printf` 印進判定行——**送進生產函式的字串已經不是表上那個**，正是
-    本 docstring 上一段要防的假綠，只是改由行尾而非轉義層造成。PS 側走 `Get-Content`
-    會吃掉行終止符故免疫，這也是 CI 上只有 bash 那三筆紅、PS 三筆全綠的原因。
-    同型先例：`test_doc_loc_baseline_freshness_r60.py::_fingerprint_of` 的
-    「🔴 bytes 層：write_text 會在 Windows 自行加 CR」。
+    刻意不用命令列參數傳樣本：轉義陷阱一旦歪掉會讓測試假綠。一律走 bytes 層寫入、
+    行尾硬編碼 LF——`write_text(encoding="ascii")` 的預設 `newline=None` 在 Windows
+    會翻成 CRLF，讓 bash 側 `read -r` 斷行後字串尾帶 `\\r`（R68 windows-compat-ci
+    首度在真 Windows 炸出的病灶），PS 側 `Get-Content` 因吃掉行終止符而免疫。
+    史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
     path = Path(td) / "verdict_cases.txt"
     path.write_bytes(("\n".join(_case_inputs()) + "\n").encode("ascii"))

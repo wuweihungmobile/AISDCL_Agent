@@ -28,6 +28,17 @@ from typing import Iterator
 
 _POLL_INTERVAL_SEC = 0.05
 _STALE_AFTER_SEC = 30.0
+# D31-4：Windows 上第三方短暫持有 handle（AV／索引器）多為瞬時（同型見
+# conversation_ledger.py `_REPLACE_RETRY_*`／windows-compat-ci #220／#221、鐵律三「Windows 檔案鎖」
+# 列）；不重試會讓 `_try_unlink` 立即回 False，逼下一位取鎖者等滿 `_STALE_AFTER_SEC=30s` 才能回收，
+# 逼近 `sdd_hook_router.py` 的 8s child timeout。
+# D31b-3（總架構師裁決；解複審 W-2）：原訂 10 次 × 20ms ≈ 0.2s 是單獨對照本模組自己的取鎖逾時訂
+# 的，未與 conversation_ledger.py 的兩次 `_replace_with_retry`（append + merge 各一次）合起來對照
+# router 的 8s child timeout——四個常數分居三檔，最壞情況疊加逼近 6s+。下修為 5 次 × 20ms ≈ 0.1s；
+# `conversation_ledger.worst_case_ledger_budget_sec()` 讀取本模組這兩個常數算出組合上界，由該模組
+# 的測試斷言把關（兩子專案不跨 import，一致性靠斷言而非匯入依賴）。
+_UNLINK_RETRY_ATTEMPTS = 5
+_UNLINK_RETRY_INTERVAL_SEC = 0.02
 
 
 def _write_sentinel(path: Path) -> None:
@@ -57,14 +68,29 @@ def _try_unlink(path: Path) -> bool:
     charge, mirroring ``tools/dev_start.py::_release_bootstrap_lock``'s
     ``except OSError: pass`` precedent for the same "releasing a lock must not
     fail the caller" situation.
+
+    D31-4: retries a transient ``PermissionError``/``OSError`` up to
+    ``_UNLINK_RETRY_ATTEMPTS`` times (``_UNLINK_RETRY_INTERVAL_SEC`` apart) before
+    giving up and returning ``False``. Windows AV/indexer holds are usually
+    momentary (see module-level constant docstring); without this the very
+    first transient hold forces the next lock waiter to sit out the full 30s
+    ``_is_stale`` window instead of the ~0.2s retry budget. Return type and
+    callers' contract are unchanged — this only delays the "can't remove it"
+    verdict by a short, bounded window.
     """
-    try:
-        path.unlink()
-    except FileNotFoundError:
-        return True   # already gone (another writer reclaimed it) — same as success
-    except OSError:
-        return False  # still held open by a third party; caller must not spin
-    return True
+    for attempt in range(_UNLINK_RETRY_ATTEMPTS):
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            return True   # already gone (another writer reclaimed it) — same as success
+        except OSError:
+            if attempt + 1 < _UNLINK_RETRY_ATTEMPTS:
+                time.sleep(_UNLINK_RETRY_INTERVAL_SEC)
+                continue
+            return False  # still held open by a third party; caller must not spin
+        else:
+            return True
+    return False  # pragma: no cover — loop always returns via one of the branches above
 
 
 def _is_stale(path: Path) -> bool:

@@ -381,7 +381,9 @@ _TREE_FILE_FLOORS: dict[str, int] = {
     # `test_sentinel_tick_e2e_r145.py`，另一支為既有樹成長），56 只剩實測的 77%、低於
     # `TREE_FLOOR_RATIO` 80%，`run_root_unittests.py` 前置掃描第三向逐字指示「重釘為 58」
     # ⇒ 照填、零加減推算；方向＝上修。四包全部停工後的單人窗口所量。
-    "tools/tests": 58,
+    # 🔴 第七輪收尾重釘 58 → 59（同上機制：所有包停工後實測 tools/tests 已 74 支，58 只剩
+    # 實測 78% 低於 80%，判準逐字指示重釘為 59；來源＝新增 test_statusline_context_feed.py）。
+    "tools/tests": 59,
     # 🔴 R82 包 A2（DEBT-01）：204 → 205。新增 `AutoClaude/tests/contract/test_w6_deletion.py`
     # （AC2-2 的真斷言落點）後掃描面變 257，下限只剩實測的 79% ⇒ 依 `TREE_FLOOR_RATIO` 的
     # 防腐那一向轉紅。這正是它的設計意圖：下限不跟著長就會愈來愈鬆而沒有任何東西說話。
@@ -626,7 +628,12 @@ _SITE_CLASS_CENSUS: dict[str, dict[str, int]] = {
         # 第二個 `self.skipTest(f"...rc={rc}...")` 是 f-string 非字面 reason 且無方括號
         # 標籤前綴，不落 `_NONLITERAL_TAG_DEBT`（該帳只認帶標籤者），不計入本表（同上一批
         # windows schtasks 對照站點的既有判例）。
-        "runtime-skipTest": 30,
+        # 🔴 第七輪收尾重釘 `runtime-skipTest` 30→32（**非放寬**，同上：本表判準是「相等」）。
+        # 新增 `TestConversationLedgerChildTimeoutParity` 兩案（DEF-200-287 W-3：以 ast 讀
+        # router 與 SDD LATEST conversation_ledger.py 字面常數比對）各一個字面 reason 站點
+        # `self.skipTest("[TOOL-ABSENCE] 解不出 SDD LATEST 或 conversation_ledger.py 不存在")`，
+        # 沿用同檔既有 `[TOOL-ABSENCE] 解不出 SDD LATEST` 慣例。
+        "runtime-skipTest": 32,
         "unclassified": 0,
     },
     # 🔴 R81 包 F 重釘 `windows-only` 9→10：並行包在

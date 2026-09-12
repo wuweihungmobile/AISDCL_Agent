@@ -141,7 +141,7 @@ def _scan_roots() -> list[tuple[Path, bool, int]]:
         # Gap C 接線輪 41→49（`onboarding_snapshot_note.py` 落地，本樹 52 支越過腐化
         # 上界 51，重釘值＝下限帶訊息逐字要求，詳見 `CrossPlatform_R106_Scan_Findings.md`
         # 的 R109 標記行）。  # round-label-ok: 指涉護欄層重釘落款輪，非超前宣稱
-        (_REPO_ROOT / "tools" / "lib", True, 49),
+        (_REPO_ROOT / "tools" / "lib", True, 59),  # 第七輪收尾重釘 49→59（新增 harness_feed.py）
         (latest / "tools" / "arch_fitness", True, 2),
         (latest / ".claude" / "hooks", True, 5),
     ]
@@ -3701,7 +3701,26 @@ _NON_PATH_REPLACE_OWNERS: frozenset[str] = frozenset({"dataclasses", "attr", "at
 # DEF-200-275 第四輪 42 → 40（方向＝下修）：SDD LATEST `conversation_ledger.py` 原有三個各自
 # `tmp=…; os.replace(tmp, path)` 的站點（append／merge／calibration）收斂為 `_atomic_write_yaml`
 # 一處（pid 專屬 tmp），判準逐字指示「有人修掉了，請把數字改小：實測 40」⇒ 照填。
-_DIRENT_UNGUARDED_DEBT: dict[str, int] = {"live": 40}
+# DEF-200-275 第七輪 D31（windows-compat-ci #220／#221）40 → 39（方向＝下修）：
+# `conversation_ledger._atomic_write_yaml` 的 `os.replace(tmp, path)` 移進新函式
+# `_replace_with_retry`，改用 `try: os.replace(...) except PermissionError:` 短退避重試
+# （見該函式），本判準因此把它由「未處置」改判為「已處置」——一個站點消失。同輪新增的
+# `_merge_sidecar_if_present` 站點 `os.replace(sidecar, claimed)` 一開始就寫在
+# `try: … except (PermissionError, FileNotFoundError):` 內，本判準判定為已處置，不計入
+# census（新增站點但不增債）。判準逐字指示「有人修掉了，請把數字改小：實測 39」⇒ 照填。
+# 🔴 D31b／D31c 訂正（W-5，四方複審發現本段描述已過期，訂正協議：保留原文，追記訂正）：
+# 上一段描述的「認領改名」（`_merge_sidecar_if_present` 內 `os.replace(sidecar, claimed)`）
+# 已在 D31b 整段移除——四方複審發現該手法仍有兩個資料遺失缺陷（C3／W-1，見
+# `conversation_ledger.py` 模組 docstring D31b 段），總架構師裁決改成 sidecar「每筆一檔、
+# 寫成即不可變」，不再需要任何認領改名；`_merge_sidecar_if_present` 起只剩「掃描目錄→
+# 逐檔讀→折進記憶體 doc」，沒有 `os.replace` 呼叫（純讀取，不在 `_DIRENT_PRIMITIVES` 掃描
+# 範圍內）。D31c（解複審 W-4）在 `_write_sidecar` 既有的 `_replace_with_retry` 呼叫端加了
+# 一個新分支（`LedgerReplaceDenied` 時保留 tmp，不再無條件 `finally: tmp.unlink()`），但
+# 呼叫的仍是同一個 `_replace_with_retry`——該函式內部唯一的 `try: os.replace(...)
+# except PermissionError:` 站點本身沒變。D31b／D31c 兩輪都沒有新增或移除任何
+# `os.replace`／`os.rename`／`shutil.move` 站點，數字仍是 39
+# （`test_unguarded_site_census_matches_the_ledger` 當回合實測，見 D31c 任務書）。
+_DIRENT_UNGUARDED_DEBT: dict[str, int] = {"live": 39}
 
 
 def dirent_primitive_sites(source: str, rel: str) -> list[tuple[str, int, str, bool]]:

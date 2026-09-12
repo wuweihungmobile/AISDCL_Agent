@@ -371,14 +371,11 @@ class TestUsableBashEndToEndWithRestrictedPath(unittest.TestCase):
 class TestNoneSourceIsDistinguishable(unittest.TestCase):
     """釘住「`usable_bash()` 回 None 的兩種來源必須可分辨」（R60 A-01／DEF-101-531）。
 
-    WHY：生產端的 `except Exception: continue` 讓「候選被 PROBE_CMD 正確拒絕」與
-    「子行程根本沒起來」回同一個 `None`。R60 實測本機 Windows 上官方閘門
-    （`tools/run_root_unittests.py`，pre-push ＋ root-infra-ci ＋ macos/windows-compat-ci
-    共四處呼叫）對 `test_usable_bash_rejects_candidate_when_path_lacks_dirname`
-    **長年誤綠**：`None` 來自 `[WinError 87] 參數錯誤`（`CreateProcess` 沒起來），
-    而非候選被拒絕。誤綠的代價是 DEF-101-275 的 wiring 層防線在 Windows 上等於不存在。
-    本類鎖住兩件事：① helper 真的把兩種來源分流；② wiring 測試在「子行程起不來」時
-    會**紅**而不是誤綠。
+    WHY：生產端的 `except Exception: continue` 讓「候選被正確拒絕」與「子行程
+    根本沒起來」回同一個 `None`——R60 實測本機 Windows 上一支測試長年誤綠：
+    `None` 來自子行程起不來，而非候選被拒絕，使 wiring 層防線在 Windows 上等於
+    不存在。本類鎖住：①helper 真的分流兩種來源；②子行程起不來時該紅而非誤綠。
+    史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
 
     def setUp(self) -> None:
@@ -713,15 +710,10 @@ def _is_bare_which_bash(node: ast.AST) -> bool:
 def _bash_taints(tree: ast.AST) -> tuple[dict[str, str], dict[str, str]]:
     """回傳 `(執行檔變數, 整條 argv 變數)`，值為「為何算裸 bash」的說明。
 
-    WHY 需要這一層間接追蹤：實測到的三種形態沒有一種是教科書式的
-    `subprocess.run(["bash", …])`——
-      ① `def _run(self, argv, shell: str = "bash")` ＋ `run([shell, …])`
-         （DEF-101-753 本體：字面值與呼叫點隔著一個**參數預設值**）；
-      ② `_BASH = shutil.which("bash")` ＋ `run([_BASH, …])`
-         （隔著一個**模組變數**，且 `shutil.which` 本身就沒有 System32 排除）；
-      ③ `cmd = ["bash", str(_SCRIPT)]` ＋ `run(cmd, …)`
-         （隔著一個**整條 argv 變數**）。
-    只認呼叫點 list 首元素是常數的掃描器，對這三種全盲＝鎖形同虛設。
+    WHY 需要這一層間接追蹤：實測到的三種形態沒有一種是教科書式的字面值呼叫，
+    而是各隔著一個參數預設值、模組變數、或整條 argv 變數。只認呼叫點 list 首
+    元素是常數的掃描器對這三種全盲，鎖形同虛設。史料見證據檔
+    〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
     exe_names: dict[str, str] = {}
     argv_names: dict[str, str] = {}

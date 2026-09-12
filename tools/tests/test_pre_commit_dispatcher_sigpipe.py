@@ -84,13 +84,10 @@ class TestPreCommitDispatcherSigpipe(unittest.TestCase):
     def test_large_diff_with_early_match_still_routes_to_autoclaude(self):
         """>64KB 暫存變更清單、命中字串在最前段，dispatcher 仍須正確分流不漏跑。
 
-        兩階段 commit：第一階段（AUTOCLAUDE_SKIP_HOOKS=1 略過 hook）先建立 4000 個
-        filler 檔並 commit，避免本測試的重點（case 分流判定的 SIGPIPE 抗性）被
-        dispatcher 另一段邏輯（NTFS 檔名閘對「新增」檔逐一 grep 比對大小寫碰撞）
-        的 O(n) 效能拖慢。第二階段修改全部 filler 檔＋新增一個 AutoClaude/ 檔——
-        `git diff --cached --name-only`（case 分流判定讀的清單）仍 >64KB 且命中
-        字串在最前段，但 `--diff-filter=AC`（NTFS 閘讀的清單）只有新增的那一個檔，
-        NTFS 逐一比對迴圈僅跑一次，測試才能在合理時間內完成。
+        兩階段 commit：先跳過 hook 建立 4000 個 filler 檔並 commit，避免本測試重點
+        （SIGPIPE 抗性）被 NTFS 檔名閘的 O(n) 效能拖慢；第二階段修改全部 filler
+        檔＋新增一個檔，使兩份清單（case 分流讀的 vs NTFS 閘讀的）大小不同，讓
+        NTFS 迴圈僅跑一次。
         """
         filler_dir = self.repo / "filler"
         filler_dir.mkdir()
@@ -147,26 +144,15 @@ class TestPreCommitDispatcherSigpipe(unittest.TestCase):
 class TestPreCommitBlocksCrOnShellScripts(unittest.TestCase):
     """R74 行尾閘：帶 CR 的 `.sh`／無副檔名 hook 檔不得進 commit。
 
-    WHY 這件事在 Windows 上完全沒有訊號（本輪同機實測，這是本閘存在的全部理由）：
-      · Git Bash 對 CRLF **完全容忍**——`bash -n` 對 CRLF 腳本 rc=0，直接執行也 rc=0
-        並正常印出結果；於是 dispatcher 既有的根層基建 `bash -n` 那道閘看不到它。
-      · 同一份位元組在 POSIX bash（mac/Linux/Docker/act）上是 `$'\\r': command not
-        found` ＋ syntax error。⇒「在 Windows 開發、在 mac 才爆」的最直接來源。
-
-    WHY 閘門看**暫存區 blob** 而不是工作樹檔案：決定 mac 那邊拿到什麼位元組的是入庫
-    內容，不是本機 checkout。本 repo 現況正是這個區分的活教材——Windows checkout 上有
-    相當數量的 tracked `.sh` 工作樹是 CRLF，而 index 全部是 LF（`.gitattributes` 的
-    `*.sh text eol=lf` 正在生效）⇒ clone 到 mac 拿到 LF、無危害，工作樹那批只是本機
-    checkout 的殘跡。若閘門改看工作樹，那批檔會讓它天天假紅；看 blob 才對得上危害。
-    （筆數刻意不寫死成本檔的常數——那是會漂移的量測值。現查：
-     `git ls-files --eol -- '*.sh'`，`i/` 欄才是入庫行尾，`w/` 欄只是本機 checkout。）
-
-    WHY 有 `.gitattributes` 還要這道閘：那是一份**設定**。設定被削弱時（新增子樹自帶
-    `.gitattributes` 少了這條、或有人寫成 `*.sh -text`）CRLF 會無聲進 index，而 Windows
-    側從頭到尾零訊號——沒有任何人會發現，直到 mac/CI 那邊爆。內容級斷言不依賴設定是否
-    正確，這是它與 `.gitattributes` 的分工，不是重複。
-    本測試的沙盒**刻意**用 `*.sh -text` ＋ `core.autocrlf=false` 製造那個被削弱的世界，
-    否則 `git add` 會先把 CRLF 正規化掉，閘門根本沒機會被考。
+    WHY 在 Windows 上完全沒有訊號：Git Bash 對 CRLF 完全容忍（`bash -n` 與直接
+    執行皆 rc=0），同一份位元組在 POSIX bash（mac/Linux/Docker/act）上卻是語法
+    錯誤——「在 Windows 開發、在 mac 才爆」的最直接來源。閘門看暫存區 blob 而非
+    工作樹：決定 mac 拿到什麼位元組的是入庫內容，工作樹的 CRLF 殘跡只是本機
+    checkout 的假紅來源。`.gitattributes` 是一份設定，被削弱時（新子樹漏帶、
+    或寫成 `*.sh -text`）CRLF 會無聲進 index 而 Windows 側零訊號，內容級斷言
+    因此不能只靠它。沙盒刻意用 `*.sh -text` ＋ `core.autocrlf=false` 製造被削弱
+    的世界，否則 `git add` 會先正規化掉 CRLF。史料見證據檔
+    〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
 
     def setUp(self) -> None:
@@ -280,17 +266,11 @@ def _load_hook_path_scope():
 class TestHookPathScopeFlavourParity(unittest.TestCase):
     """R77-50：兩支 exit-2 阻斷級 hook 的路徑正規化，兩種 flavour 必須同判決。
 
-    WHY 這件事重要（Rule 9 — 測的是「為什麼」，不是「是什麼」）：
-    `enforce_docs_path.py` 與 `check_sh_eol.py` 都是 exit 2 硬阻斷。它們此前各自靠
-    `Path.resolve().relative_to(PROJECT_ROOT)` 取相對路徑，而**那條路的大小寫語意由
-    flavour 決定**（見下方 `test_stdlib_relative_to_is_the_divergence_being_absorbed`
-    的實測）。同一份判準因此在兩個平台壞向相反的兩邊：
-      · POSIX 上 `enforce_docs_path` 對大小寫變體**假陽性硬擋**——使用者當場撞到，
-        卻只會以為是自己路徑打錯（本輪 Windows 真機 rc 矩陣：改前 rc=2、改後 rc=0）；
-      · POSIX 上 `check_sh_eol` 的 `relative_to` 拋 ValueError → 回 None → main 直接
-        return 0 ⇒ **CRLF 守衛整支靜默略過**，fail-open，沒有人會發現。
-    「壞的方向依平台而反轉」正是單一平台實測抓不到的那一類——Windows 真機把兩個錯都
-    蓋住了。所以判準必須是**純字面**、可對兩種 flavour 直接對拍，而不是問檔案系統。
+    WHY（Rule 9）：兩支 hook 此前各自靠 `Path.resolve().relative_to()` 取相對路徑，
+    而其大小寫語意由 flavour 決定，同一份判準在兩個平台壞向相反：一支對大小寫
+    變體假陽性硬擋，另一支拋 ValueError 後靜默 fail-open——單一平台實測抓不到這
+    種「壞的方向依平台而反轉」。判準因此必須是純字面對拍，不問檔案系統。史料見
+    證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
 
     def setUp(self) -> None:
@@ -414,16 +394,11 @@ def _path_scope_consumers() -> list[str]:
 class TestBlockingHooksShareOnePathNormalizer(unittest.TestCase):
     """R77-50 的**單一實作**約束：hook 不得再各自長出一份路徑正規化。
 
-    WHY：本缺陷的成因不是「某一行寫錯」，而是同一份知識住兩個家而只有一個家被想過
-    （R73 `DEF-101-778` 同型）。只修那兩行、不釘「別再分家」，下一個人照樣會在其中
-    一支就地補一段 `resolve().relative_to(...)`，而分歧會再度只在對面平台顯形。
-
-    🔴 R78／ARCH-06：本鎖此前是**寫死兩項的白名單** `("enforce_docs_path.py",
-    "check_sh_eol.py")`，於是同目錄第三支 `loc_budget_check.py`（保留了逐字相同的舊
-    寫法）與**任何未來新增者**都在射程外——R77 的 commit message 逐字寫「收斂到單一
-    實作並補 parity 測試」，收斂是真的，但鎖只擋在當初被想到的那兩個站點上。這正是
-    本 repo 反覆出現的「白名單型的鎖對未來新增者失明」。改成「列舉整個目錄 − 具名
-    排除表」後，掃描面隨磁碟走，漏掉一支就是紅。
+    WHY：本缺陷的成因是同一份知識住兩個家而只有一個家被想過（`DEF-101-778` 同型），
+    只修兩行不釘「別再分家」，分歧會再度只在對面平台顯形。R78／ARCH-06：本鎖此前
+    是寫死兩項的白名單，第三支同寫法的檔與任何未來新增者都在射程外——白名單型的
+    鎖對未來新增者失明。改成「列舉整個目錄 − 具名排除表」後，掃描面隨磁碟走，漏掉
+    一支就是紅。史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
 
     @property
@@ -433,13 +408,10 @@ class TestBlockingHooksShareOnePathNormalizer(unittest.TestCase):
     def test_enrolment_is_exactly_listing_minus_named_exclusions(self) -> None:
         """掃描面的**推導式**本身：納管面 ≡ 目錄列舉 − 具名排除，中間不得有過濾器。
 
-        🔴 本條取代初稿裡一條**恆真**的斷言（`on_disk − 納管 − 排除 == []`——在
-        「納管 ≡ 列舉 − 排除」的定義下結構上永遠是空集）。那正是本包在修的
-        「鎖存在但沒有鑑別力」，寫在自己身上格外難看，故改成真的會被改壞的性質：
-        日後有人為了消一個紅而在 `_path_scope_consumers()` 裡加一道隱形過濾
-        （例如「只收檔名含 `check_` 的」），掃描面就會悄悄縮回白名單，而排除表上
-        一個字都不用改、複審也看不到。新增者「必須委派或必須具名排除」這件事本身
-        由下面兩條負責（實測：目錄裡放一支未表態的 hook → 立刻紅）。
+        取代初稿裡一條在此定義下結構上恆真的斷言（鎖存在但沒有鑑別力）。改成真的
+        會被改壞的性質：日後有人加一道隱形過濾，掃描面就會悄悄縮回白名單而排除表
+        一字不用改、複審也看不到。新增者「必須委派或具名排除」由下面兩條負責。
+        史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
         """
         on_disk = {p.name for p in _BLOCKING_HOOKS_DIR.glob("*.py")}
         self.assertTrue(on_disk, f"掃不到任何 hook：{_BLOCKING_HOOKS_DIR} ⇒ 本鎖恆綠")

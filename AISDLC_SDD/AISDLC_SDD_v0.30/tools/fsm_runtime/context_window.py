@@ -81,6 +81,10 @@ CC_WINDOW_KEY = "autoCompactWindow"
 CC_MODEL_KEY = "model"
 
 #: 八個來源字串。每則訊息都印 `used=… window=… 來源=…`，讀者要分得出「指定」與「推斷」。
+#: D32／DEF-200-275 第七輪：status line 進料的分母階（見模組 docstring 補述＋
+#: `tools/statusline_context_feed.py` 檔頭）。與根層姊妹守衛同名常數逐字同構。
+SOURCE_HARNESS = "harness 回報（status line context_window.context_window_size）"
+
 SOURCE_PINNED_SDD = f"指定值（環境變數 {SDD_WINDOW_ENV}）"
 SOURCE_PINNED_AUTOSDD = f"指定值（環境變數 {AUTOSDD_WINDOW_ENV}）"
 SOURCE_PINNED_CC_ENV = f"指定值（harness 環境變數 {CC_WINDOW_ENV}）"
@@ -204,13 +208,23 @@ class Measurement:
     model: str | None
     compact_boundaries: int
     stale_after_compact: bool
+    #: D32-4：feed 的 `current_usage` 三欄和（可 None＝無 feed／session_id 不符／
+    #: model 家族不符）。呼叫端拿它跟 `used` 比對，兩者理應指同一次 API 回應。
+    harness_used: int | None = None
+    #: D32b-3：`harness_used` 為 `None` 時，這裡帶著 `read_context_feed()` 的
+    #: `reason`（沒有 feed 也是一種 reason，不得被悄悄吞掉）；`harness_used` 有值時
+    #: 恆為 `None`（兩者互斥，同根層姊妹守衛 `read_context_feed()` 的回傳形狀）。
+    harness_reason: str | None = None
 
 
-def measure(transcript_path: object) -> Measurement | None:
+def measure(transcript_path: object, session_id: str | None = None) -> Measurement | None:
     """量本 session 的真實 context 佔用。None＝無路徑／不存在／不可讀（C3：一律不 gating）。
 
     `stale_after_compact`：最後一個 compact_boundary 落在最後一筆 usage 之後 ⇒ 量到的是壓縮前的
     舊值，`used` 一律 None（拿舊值擋人比放行一次更糟）。
+
+    `session_id` 缺席時退回逐字稿檔名（去副檔名）——與各 hook 既有的 `_session_id()`
+    後備規則同構（D32-4：讀 status line feed 需要 session_id 當 key）。
     """
     if not isinstance(transcript_path, (str, Path)):
         return None
@@ -231,12 +245,16 @@ def measure(transcript_path: object) -> Measurement | None:
         and scan.last_boundary_line is not None
         and scan.last_boundary_line > scan.last_usage_line
     )
+    sid = session_id if session_id else path.stem
+    feed = read_context_feed(sid, scan.model)
     return Measurement(
         used=None if stale else scan.last,
         peak=scan.peak,
         model=scan.model,
         compact_boundaries=scan.boundaries,
         stale_after_compact=stale,
+        harness_used=feed["used"],
+        harness_reason=feed["reason"],
     )
 
 
@@ -344,6 +362,20 @@ def _converge_pinned_window(
     )
 
 
+def _harness_source(harness_note: str, pinned_raw: object, hw: int) -> str:
+    """`SOURCE_HARNESS` 附註組字——與根層姊妹守衛同名函式逐字同構（D32-3）。"""
+    extra = [harness_note] if harness_note else []
+    pinned = positive_int(pinned_raw) if pinned_raw is not None else 0
+    if pinned > 0 and pinned != hw:
+        extra.append(f"釘值 {pinned:,} 未採用")
+    if not extra:
+        return SOURCE_HARNESS
+    note = "；" + "；".join(extra)
+    if SOURCE_HARNESS.endswith("）"):
+        return SOURCE_HARNESS[:-1] + note + "）"
+    return SOURCE_HARNESS + note
+
+
 def resolve_window(
     peak_used: int,
     *,
@@ -355,11 +387,18 @@ def resolve_window(
     observed_model: object = None,
     known_models: dict[str, int] | None = None,
     known_models_note: str = "",
+    harness_window: object = None,
+    harness_note: str = "",
 ) -> tuple[int, str]:
     """`(window, 來源說明)`。純函式——不讀環境／不讀檔（`window_evidence()` 負責收證據）。
 
-    順序見模組 docstring。`sdd_raw=None, known_models={}` 時與姊妹守衛 `resolve_window` 結果
-    逐項相等（parity 鎖）。
+    順序見模組 docstring。`sdd_raw=None, known_models={}, harness_window=None` 時與姊妹
+    守衛 `resolve_window` 結果逐項相等（parity 鎖）。
+
+    D32／DEF-200-275 第七輪：⓪′ harness 回報（status line）排在 ① `SDD_MAX_CONTEXT`
+    之後、② `AUTOSDD_CONTEXT_WINDOW` 之前——① 是使用者對本 session 的手動釘值，理應
+    維持最高優先；② 只是「沒有 harness 這條管道時的權宜」，harness 回報存在時不再需要
+    它，但仍在來源說明附註「未採用」讓讀者看得出兩者是否收斂到同一個數字。
 
     D14：②③④ 階（`AUTOSDD_CONTEXT_WINDOW`／CC env／settings `autoCompactWindow`）的釘值
     若大於 `observed_model` 查表得到的上限，收斂到表值（見 `_converge_pinned_window`）；
@@ -369,6 +408,9 @@ def resolve_window(
         pinned = positive_int(sdd_raw)
         if pinned > 0:
             return pinned, SOURCE_PINNED_SDD
+    hw = positive_int(harness_window) if harness_window is not None else 0
+    if hw > 0:
+        return hw, _harness_source(harness_note, autosdd_raw, hw)
     for raw, source in (
         (autosdd_raw, SOURCE_PINNED_AUTOSDD),
         (cc_env_raw, SOURCE_PINNED_CC_ENV),
@@ -477,6 +519,56 @@ def settings_value(key: str, paths: list[Path]) -> object:
     return None
 
 
+#: D32-2 SSOT：feed 檔目錄。與根層姊妹守衛、`tools/statusline_context_feed.py`
+#: 的同名函式逐字同構（parity 見根層 `test_context_window_parity.py`）。刻意讀裸
+#: `os.environ`（不走本檔其餘函式慣用的 `env=` 注入）——這一階的測試用真環境變數
+#: 覆寫 `AUTOSDD_CONTEXT_FEED_DIR` 即可隔離，三份拷貝维持逐字同構比可注入性更重要。
+CONTEXT_FEED_DIR_ENV = "AUTOSDD_CONTEXT_FEED_DIR"
+
+
+def context_feed_path(session_id: str) -> Path:
+    """Feed 檔路徑（D32-2）。"""
+    base = os.environ.get(CONTEXT_FEED_DIR_ENV)
+    root = Path(base) if base else Path(os.path.expanduser("~")) / ".autosdd" / "context_feed"
+    return root / f"{session_id}.json"
+
+
+def read_context_feed(session_id: str | None, observed_model: object) -> dict:
+    """讀 status line feed（D32-3／D32-4／D32b-3，與根層姊妹守衛同名函式同構）。回
+    `{window, note, used, reason}`；fail-open——任何解析失敗一律視為「沒有 feed」，
+    `reason` 給讀者一句能懂的話（沒有 feed 檔本身也是一種 reason）。
+    """
+    empty = {"window": None, "note": "", "used": None, "reason": None}
+    if not session_id:
+        return {**empty, "reason": "無 session_id"}
+    try:
+        raw = context_feed_path(session_id).read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return {**empty, "reason": "無 feed（statusLine 未設定或本 session 尚無 assistant 訊息）"}
+    except OSError:
+        return {**empty, "reason": "feed 讀不到（非不存在）"}
+    try:
+        doc = json.loads(raw)
+    except ValueError:
+        return {**empty, "reason": "feed 壞 JSON"}
+    if not isinstance(doc, dict) or doc.get("session_id") != session_id:
+        return {**empty, "reason": "feed 缺失或 session_id 不符"}
+    cw = doc.get("context_window")
+    size = positive_int(cw.get("context_window_size")) if isinstance(cw, dict) else 0
+    if size <= 0:
+        return {**empty, "reason": "feed 缺 context_window_size（或非正整數）"}
+    feed_model = doc.get("model") if isinstance(doc.get("model"), dict) else {}
+    feed_model_id = feed_model.get("id")
+    want, got = model_family(observed_model), model_family(feed_model_id)
+    if want and got and want != got:
+        return {**empty, "reason": f"feed model 家族（{got}）與逐字稿（{want}）不符"}
+    used = None
+    current_usage = cw.get("current_usage") if isinstance(cw, dict) else None
+    if isinstance(current_usage, dict):
+        used = used_of(current_usage)
+    return {"window": size, "note": f"model={feed_model_id or '?'}", "used": used, "reason": None}
+
+
 def window_evidence(
     observed_model: str | None,
     *,
@@ -484,11 +576,13 @@ def window_evidence(
     root: Path | None = None,
     home: Path | str | None = None,
     known_models_path: Path = KNOWN_MODEL_WINDOWS_PATH,
+    session_id: str | None = None,
 ) -> dict:
     """把 `resolve_window` 需要的全部證據一次收齊（I/O 都在這裡，判定仍是純函式）。"""
     source = os.environ if env is None else env
     paths = settings_chain(root or repo_root(source), home)
     known, note = load_known_model_windows(known_models_path)
+    feed = read_context_feed(session_id, observed_model)
     return {
         "sdd_raw": source.get(SDD_WINDOW_ENV),
         "autosdd_raw": source.get(AUTOSDD_WINDOW_ENV),
@@ -498,4 +592,6 @@ def window_evidence(
         "observed_model": observed_model,
         "known_models": known,
         "known_models_note": note,
+        "harness_window": feed["window"],
+        "harness_note": feed["note"],
     }

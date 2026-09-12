@@ -253,17 +253,12 @@ class TheRuleHasTeethTest(unittest.TestCase):
     def test_a_marked_claim_that_the_disk_contradicts_is_caught(self) -> None:
         """🔴 這一顆牙就是當場擋下 R81 §3.2 的那一顆。
 
-        🔴 **自證的語料不得取自 production 符號**（R82 收尾實測到的第二個真實案例）：
-        本測原本拿 `def note_degraded` 當「磁碟上一定找得到」的錨，而同一輪另一包把該符號
-        整段搬進 `tools/lib/quota_gate.py`（新檔、當時 untracked）⇒ `git grep` 對它回空。
-        它當時之所以還綠，靠的是 R81 交棒書自己那兩行 `Select-String` **指令文字**碰巧含有
-        同一個字面——自證量到的是文件的迴音，不是實作。錨一搬家，這一顆牙就會因為與它所判
-        的主題**毫無關係**的理由翻紅，而下一個人最省力的修法是把語料改回去（＝把判準調成
-        配合現況，本 repo 判過那等於關掉它）。
-
-        ⇒ 改成在**臨時 git repo 內就地構造**證據：零 production 符號、零 tracked 狀態依賴，
-        repo 內任何搬家都動不到它。體例沿用根 CLAUDE.md 記載的
-        `TestGitPathEnumerationIsQuotepathSafe`（同樣在臨時 repo 內明文構造對照組）。
+        自證的語料不得取自 production 符號（R82 收尾實測到的真實案例）：原本拿一個
+        production 符號當「磁碟上一定找得到」的錨，該符號被搬到 `tools/lib/
+        quota_gate.py`（新檔、當時 untracked）後 `git grep` 回空，卻仍靠交棒書
+        自己的指令文字碰巧含同一字面而誤綠——自證量到的是文件的迴音，不是實作。
+        改成在臨時 git repo 內就地構造證據：零 production 符號、零 tracked 狀態
+        依賴。史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
         """
         text = self._CLAIM + f"\n<!-- absent-if: {self._SYNTHETIC} -->\n"
         claims = negative_claims("X_HANDOFF.md", text)
@@ -302,16 +297,11 @@ class TheRuleHasTeethTest(unittest.TestCase):
     def test_a_true_claim_stays_green(self) -> None:
         """對照組：真的不存在時必須放行，否則本判準只是「一律判紅」（同樣沒有鑑別力）。
 
-        🔴 **對照組不能拿本 repo 當「不存在」的舞台**（R82 收尾實測，本測第一版就踩到）：
-        原版把 `def note_degraded_NOT_REAL` 當成連續字面寫進斷言，而本檔自己是 tracked
-        檔 ⇒ `git grep` 在**本檔原始碼內**命中 3 筆（全部來自這一條測試自己的三行），
-        於是「這個字面真的不存在」這個前提在本 repo 內**結構上永遠成立不了**，對照組恆紅。
-        自我指涉的失效方向特別難看見：紅的理由與它所判的主題毫無關係，而最省力的修法
-        （把斷言刪掉）會順手拿掉這一組唯一的**綠側**自證——只剩紅側的判準無法區分
-        「有鑑別力」與「一律判紅」。
-        ⇒ 改成在臨時 repo 內就地構造「不存在」，形狀照抄同檔
-        `test_a_marked_claim_that_the_disk_contradicts_is_caught`：標的存不存在由本測
-        自己決定，repo 裡有沒有人寫過那個字面一律影響不到它。
+        對照組不能拿本 repo 當「不存在」的舞台（R82 收尾實測，本測第一版就踩到）：
+        原版把斷言字面寫進本檔原始碼，`git grep` 在本檔內命中自己那幾行，使「不存在」
+        前提結構上永遠成立不了、對照組恆紅——最省力的修法會順手拿掉唯一的綠側自證。
+        改成在臨時 repo 內就地構造「不存在」，標的存不存在由本測自己決定。史料見
+        證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
         """
         text = self._CLAIM + f"\n<!-- absent-if: {self._ABSENT} -->\n"
         claims = negative_claims("X_HANDOFF.md", text)

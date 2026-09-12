@@ -1,49 +1,20 @@
 #!/usr/bin/env python3
 """PowerShell 引擎述詞 SSOT 的守門（R60 Scan-E E-A-03；R60 round-2 改 AST 判定）。
 
-WHY（測意圖非僅行為，Rule 9）：`tools/tests/` 曾有 **6 檔／10 處行內寫法／5 種語意**
-各自挑 PowerShell 引擎，其中一處（`test_windowsapps_guard_cross_consistency.py`
-的 `_pwsh_exe()`）是 **pwsh 7 優先**，與 R59 **DEF-101-509** 拍板的「生產引擎（5.1）
-優先」方向相反。這類「第 N+1 份選錯」在本 repo 已有兩次實證（DEF-101-285 的
-`.cmd`/PATHEXT、DEF-101-509 的 pwsh-only skip），而過去**沒有任何鎖**在看著。
+WHY（Rule 9）：`tools/tests/` 曾有多檔／多處各自挑 PowerShell 引擎，其中一處與
+R59 `DEF-101-509` 拍板的「生產引擎（5.1）優先」方向相反，過去沒有任何鎖在看著。
 
-本鎖守四件事：
-  1. **優先序方向**：`production_engine()` 在「兩引擎都在」時必須回 5.1。
-     🔴 **在只裝了一個引擎的機器上**，任何「pwsh 優先」的實作都會靜默 fallback 到另一個、
-     **測不出差別**——所以這支測試必須用合成的 `shutil.which` 偽造「兩者皆在」，否則它
-     對整個 E-A-03 缺陷類別零鑑別力（同 R56 教訓：「驗證合法三元」與「驗證鎖是否真的
-     漏抓」是兩件事）。合成的另一個好處是**與這台機器裝了什麼無關**：R73 訂正前這裡
-     寫死了撰寫當輪那台機器只有 5.1，而 2026-08-04 它已同時具備兩者（DEF-101-777）。
-  2. **語意④不得 fallback**：`native_ps51()` 在「只有 pwsh」的機器上必須回 None。
-  3. **反增生**：`tools/tests/*.py` 不得再出現行內引擎挑選，除具名豁免。
-  4. **正向委派**：已遷移的消費檔必須真的 import SSOT，且其引擎述詞函式的**程式碼本體**
-     必須呼叫 `production_engine()`、不得回退成 `shutil.which(...)`。
+本鎖守四件事：①優先序方向——`production_engine()` 在兩引擎都在時必須回 5.1
+（用合成 `shutil.which` 偽造「兩者皆在」，否則單引擎機器上測不出差別）；②語意
+不得 fallback；③反增生——`tools/tests/*.py` 不得再出現行內引擎挑選，除具名
+豁免；④正向委派——已遷移消費檔的函式本體必須真的呼叫 `production_engine()`。
 
-🔴 **R60 round-2 訂正（ARCH-R60-06／SA-R60-03／SD-R60-03／QA-R60-07 四方獨立命中）**：
-本鎖第 3 項原本是**逐行文字 regex**，只跳過整行 `#` 註解、**不剝 docstring**。後果是
-`test_windowsapps_guard_cross_consistency.py` 靠自己 docstring 內兩句「原實作是
-`shutil.which("pwsh") or shutil.which("powershell")`」的**史料引述**恆久「命中」，於是
-①該檔以檔案級豁免（`_PENDING_MIGRATION_SITES`）掛在名單上，遷移完成後仍不會被判 stale
-（豁免自陳「遷移完成後刪除本條目」卻永遠退不了場）；②該檔又不在正向 import 鎖名單內
-⇒ **E-A-03 的原始動機案例檔零覆蓋**：把 `_pwsh_exe()` 改回 pwsh 優先，本鎖全綠。
-四方各自以注入實證此假綠（`INJECTED_RUN ran=2 fail=0 err=0`）。
-
-修法＝**判定改走 `ast`**（`_engine_selection_linenos()`）：只認**真正的 `Call` 節點**
-`shutil.which("powershell"|"pwsh")` / `which("powershell"|"pwsh")`，docstring／註解／
-字串常數內的史料引述在 AST 上根本不是 Call ⇒ 結構性不可能誤命中。連帶效果：
-  · `_PENDING_MIGRATION_SITES` 整張表刪除（該檔已無真程式碼命中，遷移已完成）。
-  · `test_windowsapps_guard_cross_consistency.py` 進入正向 import 鎖名單。
-  · 本檔自己也不再需要永久豁免——`test_scanner_has_teeth` 的樣本是**字串常數**，
-    AST 判定下本來就不是命中；反過來說，若有人把判定改回逐行文字掃描，本檔那些樣本
-    會立刻變成 offender 讓 `test_no_unwaived_inline_engine_selection` 翻紅
-    ⇒ **「掃描器退回文字掃描」本身成為自偵測項**（本次假綠的根因不會靜默復發）。
-  · 另補 `_SSOT_DELEGATION_SITES` 正向鎖：直接對函式本體斷言，封住「留著 import
-    卻把函式改回行內 which」這條 import 級鎖看不到的路（SD-R60-03 ③）。
-方法論邊界（誠實揭露，勿留「已涵蓋全類別」錯覺）：AST 判定認的是字面引擎名的 `which`
-呼叫；`shutil.which(name_from_variable)`／`getattr(shutil, "which")(...)`／`exec()` 組
-出來的呼叫仍逃得掉（同 DEF-101-333 對逐行 regex 天花板的四方一致裁定，只是天花板換了
-一層）。第 4 項正向委派鎖是這個邊界的補位：它不問「有沒有寫 which」，而問「函式本體
-有沒有呼叫 SSOT」。
+R60 round-2 訂正（四方獨立命中）：第③項原本是逐行文字 regex、不剝 docstring，
+使一支檔靠自己 docstring 內的史料引述恆久假命中而逃過覆蓋，四方各自以注入實證
+此假綠。修法改走 AST（`_engine_selection_linenos()`）只認真正的 `Call` 節點，
+docstring／註解在 AST 上根本不是 Call。方法論邊界（誠實揭露）：`shutil.which
+(name_from_variable)` 等組出來的呼叫仍逃得掉，第④項正向委派鎖是這個邊界的
+補位。逐輪判例史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
 
 執行：python3 -m unittest discover -s tools/tests
 """
@@ -499,14 +470,10 @@ SAMPLE = 'shutil.which("powershell")'   # 字串常數內的樣本
     def test_delegation_sites_call_the_ssot_predicate(self) -> None:
         """🔴 SD-R60-03 ③／QA-R60-07 的核心回歸鎖：函式本體必須委派 SSOT。
 
-        WHY（測意圖非僅行為）：import 級鎖看不到「留著 import 卻把函式本體改回
-        `shutil.which("pwsh") or shutil.which("powershell")`」——而那正是
-        DEF-101-548 的原始缺陷形狀（pwsh 7 去驗一支受 `tools/` 5.1 政策約束的
-        `.ps1`）。在只裝了一個引擎的機器上，行為面測不出差別（fallback 會靜默補上），
-        所以只能從**原始碼結構**釘死——這條理由與這台機器現在裝了什麼無關，
-        故 R73 把原本寫死機器屬性的措辭一併改掉（DEF-101-777）。
-        斷言對象是 `ast.unparse` 後的函式本體（不含 docstring／註解），故該檔
-        docstring 逐字保留舊實作當史料不會讓本鎖誤綠也不會誤紅。
+        WHY：import 級鎖看不到「留著 import 卻把函式本體改回裸 fallback」（原始
+        `DEF-101-548` 缺陷形狀）；在只裝一個引擎的機器上行為面測不出差別，只能從
+        原始碼結構釘死。斷言對象是 `ast.unparse` 後的函式本體（不含 docstring／
+        註解）。史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
         """
         for name, func_names in _SSOT_DELEGATION_SITES.items():
             source = (_TESTS_DIR / name).read_text(encoding="utf-8")
@@ -614,16 +581,10 @@ _STALE_CLAIM_RE = re.compile(
 def _logical_segments(text: str) -> list[tuple[str, list[int]]]:
     """把連續的非空行併成**邏輯段**；回傳 `[(段文字, 每個字元的來源行號)]`。
 
-    🔴 WHY（R74 修 `DEF-101-777` 的漏抓面——「有鎖在守假話」的實例）：R73 把射程
-    擴到整個 `tools/` 樹，但判定仍是**逐行**掃描，而中文散文的斷行位置是排版偶然。
-    落地當時樹裡就有一筆真違規逃過：主語落在某一行的行尾、否定詞與引擎名落在下一行
-    的行首——兩個片段各自都不成句，鎖因此全綠。**這比沒有鎖更糟**：讀者會把綠燈
-    當成「這類假事實已經清乾淨了」。
-
-    合併規則刻意最笨：整行 `#` 註解剝掉 `#` 與前後空白後接續，其餘行原樣接續，
-    空行為段界。散文的**句號**由 `_STALE_CLAIM_RE` 的 `[^。]` 自己擋住，所以合併
-    到段不等於把射程放大到整檔——邊界從「排版換行」換成「作者寫的句號」，而後者
-    才是語意邊界。
+    WHY（R74 修 `DEF-101-777` 漏抓面）：判定原本逐行掃描，而中文散文斷行是排版
+    偶然——落地當時真有一筆違規因主語與否定詞分落兩行而逃過。合併規則刻意最笨：
+    `#` 註解剝殼後接續，空行為段界；散文句號由 `_STALE_CLAIM_RE` 自己擋住，邊界
+    是作者寫的句號而非排版換行。史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
     segments: list[tuple[str, list[int]]] = []
     chars: list[str] = []
@@ -682,29 +643,13 @@ def stale_local_engine_claims(text: str) -> list[tuple[tuple[int, ...], str]]:
 class TestNoStaleLocalEngineClaims(unittest.TestCase):
     """不得把「這台機器有沒有某個引擎」寫成常數。**射程＝整個 `tools/` 樹**（R73 擴）。
 
-    WHY（R69 原案）：`_ps_engine.py` 的 docstring 有兩處把「這台機器缺 pwsh 7」這件事寫成
-    常數，那是撰寫當輪那台 Windows 機器的屬性；R69 在 macOS 真機上 `shutil.which("pwsh")` 命中
-    ⇒ 該前提為假，而它正是「⑤ 這條為什麼測不出差別」的**唯一理由**——理由失效後，
-    讀者會以為那個風險在本機不存在，實際上正在發生。同 ADR-XPLAT-002 §6 邊界 1 已裁定
-    的原則：平台／環境可用性是**輪次屬性**，治理文件與護欄程式一律指向現查來源。
-
-    🔴 **R73 擴射程的理由（DEF-101-777）——這是「劃界結案」的代價被實際收取**：
-    R69 訂正了 `_ps_engine.py` 並上了這條鎖，但鎖只圈**那一個檔**。2026-08-04 這台機器裝上
-    PowerShell 7.6.4（`shutil.which("pwsh")` 實測命中 `Program Files/WindowsApps/
-    Microsoft.PowerShell_7.6.4.0_x64__8wekyb3d8bbwe/pwsh.EXE`，size=301368、非 0 byte
-    佔位版）後，**射程外的同型句子同時變成假事實**，實查 5 處：
-      · `tools/lib/windows_skip_tags.py`（🔴 **護欄層**——拿現在為假的前提在描述豁免依據）
-      · `tools/tests/test_install_windows_nightly.py`（宣稱「走不到兩引擎皆有的分支」，
-        而該分支現在**每次都走得到**，且實測 `production_engine()` 正確回 5.1）
-      · 本檔自己 3 處（鎖的檔案犯了鎖在抓的病，而鎖看不到自己）
-    這正是 `DEF-101-757`「已知的鎖射程缺口不得只以劃界結案」的同型復發：**知道有缺口、
-    只在文件裡註明缺口，四輪後缺口自己發火**。修法必須是擴射程，不是再註明一次。
-
-    判準刻意窄（沿用 R69）：只抓「本機 + 無/沒有/不存在 + 引擎名」這種**斷言句**，不碰
-    「本機根本沒有 5.1（macOS/Linux）」這類通則敘述。另有兩類結構性豁免，各有獨立鎖：
-      · **skip 理由**（`_skip_reason_linenos`，走 AST）——見該函式 docstring。
-      · **偵測器自己的樣本**（行尾 `# stale-sample:` 標記）——由
-        `test_stale_sample_marker_stays_bounded` 防它被拿去豁免真的違規。
+    WHY（R69 原案）：`_ps_engine.py` 曾把「這台機器缺 pwsh 7」寫成常數，那是撰寫
+    當輪那台 Windows 機器的屬性；平台／環境可用性是輪次屬性，治理文件與護欄程式
+    一律指向現查來源。R73 擴射程（`DEF-101-777`）：R69 的鎖只圈一個檔，這台機器
+    後來裝上 PowerShell 7 後射程外的同型句子同時變成假事實，實查命中 5 處（含
+    本檔自己 3 處）——`DEF-101-757`「已知的鎖射程缺口不得只以劃界結案」的同型
+    復發。判準刻意窄：只抓「本機 + 無/沒有/不存在 + 引擎名」斷言句，另有兩類
+    結構性豁免各有獨立鎖。史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
 
     # 🔴 R73 二審擴（SD）：初版主語只認「本機」、否定只認「無/沒有/不存在」，實測

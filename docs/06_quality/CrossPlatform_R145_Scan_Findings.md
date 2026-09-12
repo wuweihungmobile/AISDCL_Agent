@@ -89,7 +89,7 @@ SDD 子專案側（`AISDLC_SDD/AISDLC_SDD_v0.30/`）的 hook／runtime／測試�
 - **體例**：本節非開新一輪 CrossPlatform 掃描輪四件套，僅為 DEF-200-275 第七輪（package A／B 修復＋Dev-Trim7 散文搬遷）
   造成的護欄層逐檔漂移收斂記帳，寄居本檔（同 R141～R145「單一缺陷收尾附帶記帳」寄居體例，不另開新檔）。
 
-<!-- guard-total:R146 --> R146 護欄層累積淨額＝ 98236 → 98211（-25＝-40 主表 15 檔逐檔漂移＋15 本檔自身（test_adr_xplat001_c1c2_lock.py）自含式漂移；[淨減法輪]，不受款(9)`[未附刪除清單]` 約束）——
+<!-- guard-total:R146 --> R146 護欄層累積淨額＝ 98236 → 98195（-41＝-25 前段＋（本輪續）-16 DEF-200-287／288 收尾；-25 分解＝-40 主表 15 檔逐檔漂移＋15 本檔自身（test_adr_xplat001_c1c2_lock.py）自含式漂移；[淨減法輪]，不受款(9)`[未附刪除清單]` 約束）——
 成因：package A（D27 根層 context_budget_guard.py 補查表收斂⑥階＋`tools/lib/sdd_latest.py` per-session 快取）／
 package B（D28 SDD telemetry writeback 守衛，v0.30 三支 hook＋fsm_runtime.py＋新檔
 `test_rule_telemetry_requires_hook_r7.py`〔屬 AISDLC_SDD 子專案自身 LOC 政策，不落本檔棘輪射程〕）對
@@ -123,3 +123,45 @@ package B（D28 SDD telemetry writeback 守衛，v0.30 三支 hook＋fsm_runtime
 172→174＋`_FROZEN_PREFIX_REWRITE_LEDGER` 接鏈列，反覆覆核收斂至此），本輪總淨額 -25。淨額為負，`repin_log_problems()`
 款(9) `[未附刪除清單]` 僅在淨額為正時判定，本輪不觸發；`repin_growth_problems()` 款(11) `[只升不降]` 的連續正成長計數
 因本輪淨額 ≤0 而歸零（R143～R145 三輪連續正成長已結束）。
+
+### 第七輪附記續（R146 續；Dev-D8 收尾單人窗口，2026-09-12）
+
+**體例**：延續上段同一輪（R146）記帳，非開新一輪。承接上表終點 98211，收尾 DEF-200-287（windows-compat-ci
+#220／#221 Windows 稽核帳本檔案鎖競態，三棒修復 D31／D31b／D31c；三輪複審 W／C REJECT→C APPROVE／W REJECT
+（W-4 P0）→W／C 皆 APPROVE，C-1 P3 登記不修）與 DEF-200-288（status line harness 進料，D32／D32b 兩棒；
+兩鏡首輪 REJECT→S8b 全修→final:architect／qa 兩鏡最終複審皆 APPROVE，各登記 P2 不修）造成的逐檔漂移收斂，
+詳見證據檔〈第七輪追加 A／B〉節。
+
+| 檔 | 前 | 後 | 淨額 |
+|---|---|---|---|
+| `test_archive_defect_log.py` | 3839 | 3767 | -72 |
+| `test_bash32_compat.py` | 1020 | 985 | -35 |
+| `test_bash_probe_spec_contract.py` | 867 | 859 | -8 |
+| `test_check_hooks_liveness.py` | 3314 | 3397 | +83 |
+| `test_check_script_parity.py` | 2098 | 2051 | -47 |
+| `test_check_wrapper_thinness.py` | 1234 | 1185 | -49 |
+| `test_context_budget_guard.py` | 11950 | 12160 | +210 |
+| `test_context_window_parity.py` | 229 | 281 | +52 |
+| `test_find_git_bash_parity.py` | 1326 | 1306 | -20 |
+| `test_install_windows_nightly.py` | 1385 | 1347 | -38 |
+| `test_negative_existence_claims_r82.py` | 380 | 370 | -10 |
+| `test_platform_neutral_paths.py` | 5762 | 5781 | +19 |
+| `test_pre_commit_dispatcher_sigpipe.py` | 964 | 936 | -28 |
+| `test_ps_engine_ssot.py` | 960 | 905 | -55 |
+| `test_run_root_unittests.py` | 3716 | 3648 | -68 |
+| `test_subprocess_encoding_hygiene.py` | 1609 | 1582 | -27 |
+| `test_windows_forbidden_filename_parity.py` | 1025 | 1003 | -22 |
+| `test_windowsapps_guard_cross_consistency.py` | 2183 | 2051 | -132 |
+| `test_workflow_permission_concurrency_lock.py` | 1417 | 1406 | -11 |
+| `test_statusline_context_feed.py`（新檔，D32／D32b 功能軌鎖檔） | 0 | 204 | +204 |
+| `test_adr_xplat001_c1c2_lock.py`（本檔自身，自含式） | 7918 | 7956 | +38 |
+
+上列 19 支既有檔（Dev-Trim8 十五支散文搬遷抵銷＋D31／D32 系列回歸鎖擴充）合計 -258；加上新檔
+`test_statusline_context_feed.py` +204（功能軌，D32 status line harness 進料鎖檔）；加上本檔自身自含式
+漂移 +38（本節新增 `_GUARD_LINES_REPIN_LOG` 本輪續多列＋`_FROZEN_GUARD_LINES` 兩次更新＋
+`_REPIN_LOG_FROZEN_PREFIX_LEN` 174→181＋`_REPIN_LOG_HISTORY_SHA256` 重釘＋`_FROZEN_PREFIX_REWRITE_LEDGER`
+接鏈列，反覆覆核收斂至此）。三者合計 -258+204+38 = -16，本輪續總淨額 -16（98211 → 98195）。分軌：
+功能軌＝`test_statusline_context_feed.py`＋`test_context_budget_guard.py` 的 `HarnessFeedStageTest`＋
+`test_context_window_parity.py` 的 `HarnessStageParityTest`；回歸鎖軌＝`test_check_hooks_liveness.py` 的
+`TestConversationLedgerChildTimeoutParity`（DEF-200-287 W-3）；不使用任何例外配額（`_REGRESSION_LANE_APPROVED_OVERAGE`／
+`_REPIN_APPROVED_ROUND_OVERAGE` 皆未動）。累計本輪（R146 前段＋續）總淨額 98236 → 98195（-41）。

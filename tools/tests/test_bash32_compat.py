@@ -169,13 +169,10 @@ def _git_tracked(rel_prefix: str) -> list[str]:
     """git tracked ∪ untracked-not-ignored 檔案相對路徑清單（fail-loud：git 失敗
     即 AssertionError）。
 
-    🔴 R82（`DEF-101-752`）：原本只認 tracked（檔頭 docstring 逐字寫過「排除
-    未追蹤垃圾」），但尚未 `git add` 的新腳本正是最可能複製舊 bash4+ 語法的地方
-    ——同一個政策已在 `test_platform_utils_dedup.py`／
-    `test_windowsapps_guard_cross_consistency.py` 等站點被證明是真 fail-open
-    （R69 的 `platform_caps.py` 全程 untracked，躲過四輪複審）。加
-    `-o --exclude-standard` 一併掃 untracked-not-ignored，`.gitignore` 排除的
-    `.venv`／快取不受影響。
+    🔴 R82（`DEF-101-752`）：原本只認 tracked，但尚未 `git add` 的新腳本正是最可能
+    複製舊 bash4+ 語法的地方——同政策已在姊妹掃描站點證明是真 fail-open（R69 的
+    `platform_caps.py` 全程 untracked，躲過四輪複審）。加 `-o --exclude-standard`
+    一併掃 untracked-not-ignored，`.gitignore` 排除不受影響。
     """
     rels: set[str] = set()
     for extra_args in (("--",), ("-o", "--exclude-standard", "--")):
@@ -463,17 +460,11 @@ class TestScanConfigPinning(unittest.TestCase):
     def test_scan_trees_pinned(self) -> None:
         """R56 round 5 修正（SA）：與 ps1 側 QA B-3 同步，維持兩平台守門密度對稱。
 
-        原實作 `keys = {key for key, _files, _floor in _scan_trees()}` 之後只斷言
-        keys、`_floor` 從未進入斷言——與 `test_ps51_compat.TestPs51ScanConfigPinning`
-        修正前逐字同構。注入實證：把 `AutoClaude/tools` 的 floor 由 6 改成 1，本模組
-        全部 8 支測試仍 failures=0 errors=0＝「下限值本身被無聲下修」零機械訊號。
-        改為 keys 與 floors 逐值同釘（DEF-101-451：修一邊卻讓兩平台失衡，正是本輪
-        主題所要防的問題）。
-
-        既知邊界（與 ps1 側刻意不同，非疏漏）：本檔 floors ＝實掃數打八折（見
-        `_scan_trees` docstring），故掃描面本來就可先無聲縮水約 20% 才紅；ps1 側
-        floors 與實數零餘裕。本斷言只鎖住「下限值本身被改動／整樹被刪列」這兩條
-        路徑，不收斂那 20% 鬆弛。
+        原實作只斷言 keys、floor 從未進入斷言——注入實證：floor 由 6 改成 1，全部
+        8 支測試仍零訊號。改為 keys 與 floors 逐值同釘。既知邊界（與 ps1 側刻意
+        不同）：本檔 floors 是實掃數打八折，故掃描面可先無聲縮水約 20% 才紅；本斷言
+        只鎖「下限值被改動／整樹被刪列」，不收斂那 20% 鬆弛。史料見證據檔
+        〈第七輪 史料搬遷（Dev-Trim8）〉。
         """
         keys_floors = [(key, floor) for key, _files, floor in _scan_trees()]
         self.assertEqual(
@@ -493,15 +484,10 @@ class TestScanConfigPinning(unittest.TestCase):
 class TestProseBanListIsFullyMechanised(unittest.TestCase):
     """R69（DEF-101-702／R68-03）：**宣告的禁令不得多於守得住的判準**。
 
-    WHY：本 repo 在三個地方各寫了一份「bash 3.2 / BSD 禁用清單」，長度分別是 8、4、3 項，
-    而 `_PATTERNS` 修前只機械化其中 3 項 BSD 禁令 —— 沙箱把 5 項散文列了但沒守的形態注入
-    腳本後，全套根層測試仍 rc=0。「文件宣告」與「機械判準」的差集就是**假合規面**：讀者
-    照檔頭寫程式時以為有人在守，實際沒有。本鎖把差集本身變成紅燈。
-
-    兩個方向都要（單向會留下另一種漂移）：
-      ① 散文列的每一項都必須有能真的打中它的 pattern（否則是空頭宣告）；
-      ② `_BAN_TOKEN_SAMPLES` 登記的每一項都必須真的被某條 pattern 命中（否則是空殼登記，
-         看起來有守、其實 pattern 寫壞了也沒人知道）。
+    WHY：本 repo 三個地方各寫了一份禁用清單（8、4、3 項），`_PATTERNS` 修前只機械化
+    其中 3 項——注入「散文列了但沒守」的形態後全套仍 rc=0。文件宣告與機械判準的差集
+    就是假合規面，本鎖把差集變成紅燈：①散文列的每一項都要有真的打中它的 pattern；
+    ②登記的每一項都要真的被某條 pattern 命中。
     """
 
     _PROSE_SH = _REPO_ROOT / "tools" / "macos_smoke_local.sh"
@@ -559,18 +545,12 @@ _EMPTY_ARRAY_DECL_RE = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)=\(\s*\)", re.M)
 def unset_safe_array_problems(code: str, rel: str) -> list[str]:
     """回傳「`set -u` 檔內、以 `"${NAME[@]}"` 裸展開可能為空之陣列」的違規清單。
 
-    WHY（本判準為何存在）：`AISDLC_SDD_v0.30/tools/fsm_runtime/formal/run_tlc.sh` 同時有
-    `set -euo pipefail` 與 `TLA_VERSION_ARGS=()`，於是在 macOS 系統 bash 3.2 下**每一條**
-    執行路徑都死在 `"${TLA_VERSION_ARGS[@]}"`（3.2 對空陣列的 `[@]` 展開視為 unbound），
-    而該檔自訂 rc=1＝「TLC 偵測到 invariant violation」⇒ **環境錯誤被偽裝成形式化驗證失敗**。
-    `bash -n` 攔不到（語法合法），CI 的 bash 5.x 也攔不到（5.x 不視為 unbound）。
-
-    安全形態＝`${NAME[@]+"${NAME[@]}"}`（3.2/5.x 皆正確）。
-
-    啟發式邊界（刻意寫明，勿當成完備分析）：若檔內任何地方以 `${#NAME[@]}` 做過非空守衛
-    （如 `if [ "${#a[@]}" -gt 0 ]`），視該陣列為已守；`${#…}` 對空陣列本來就安全，這是本
-    repo 既有的正確寫法（`AutoClaude/tools/git-hooks/pre-commit`）。代價是「守衛在別的分支、
-    展開不在其內」這種形態會漏抓——行級掃描器換不到控制流分析，如實揭露。
+    WHY：一支真實腳本同時有 `set -euo pipefail` 與空陣列初值，macOS 系統 bash 3.2
+    視空陣列的 `[@]` 展開為 unbound，使環境錯誤被偽裝成該腳本自訂的業務失敗碼；
+    `bash -n` 與 CI 的 bash 5.x 都攔不到。安全形態＝`${NAME[@]+"${NAME[@]}"}`。
+    啟發式邊界（如實記載）：`${#NAME[@]}` 非空守衛視為已守，但守衛在別的分支、展開
+    不在其內的形態會漏抓——行級掃描器換不到控制流分析。史料見證據檔
+    〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
     if not _SET_U_RE.search(code):
         return []
@@ -600,16 +580,11 @@ _FULLWIDTH_GLUED_VAR_RE = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*)([^\x00-\x7f])"
 def fullwidth_glued_var_problems(code: str, rel: str) -> list[str]:
     """回傳「`$VAR` 緊接非 ASCII 字元」的違規清單（純函式，可構造輸入測鑑別力）。
 
-    WHY（R69 終審 P3，`DEF-101-742`）：`tools/git-hooks/pre-push` 的
-    `echo "…找不到 $SDD_CI_YML（根層消費檔清單來源…"` 在 macOS 系統 bash 3.2.57
-    （`/bin/bash`）＋ `set -u` 下，全形左括號的位元組被併進變數名 ⇒
-    `SDD_CI_YML<亂碼>: unbound variable`，**整支 hook 當場中止**（實測：該行之後的所有
-    leg 都不再執行、rc=1）。CI 的 bash 5.x 與 `bash -n` 皆攔不到（語法合法、5.x 名稱
-    解析不同），`macos-compat-ci` 雖有「以 /bin/bash 3.2 直接執行 dispatcher」步驟，
-    但走不到這個分支（要 `aisdlc-sdd-ci.yml` 缺席才觸發）⇒ 這條路徑上零機械訊號。
-
-    安全形態＝`${VAR}（`。判準刻意**不限於 `set -u` 檔**：即使沒有 `set -u`，該寫法也會
-    靜默展開成空字串、訊息內容當場失真——只是不會炸而已，一樣是缺陷。
+    WHY（R69 終審 P3，`DEF-101-742`）：一支真實 hook 的 echo 訊息在 macOS 系統
+    bash 3.2.57 ＋ `set -u` 下，全形左括號的位元組被併進變數名，導致 unbound
+    variable、整支 hook 當場中止；CI 的 bash 5.x 與 `bash -n` 皆攔不到。安全形態＝
+    `${VAR}（`。判準不限於 `set -u` 檔：即使沒有它，該寫法也會靜默展開成空字串、
+    訊息失真。史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
     problems: list[str] = []
     for match in _FULLWIDTH_GLUED_VAR_RE.finditer(code):
@@ -706,22 +681,12 @@ _DATE_NANOS_DEBT: dict[str, int] = {
 def gnu_date_nanos_problems(code: str, rel: str) -> list[str]:
     """回傳「`date` 格式字串帶 `%N`」的違規清單（純函式，可構造輸入測鑑別力）。
 
-    WHY（R82 MAC-05）：`%N`（奈秒）是 **GNU coreutils 的擴充**，不在 BSD `strftime(3)`
-    的格式字元表內；macOS 的 `date` 就是 BSD date。BSD 對不認得的轉換是**原樣輸出**，
-    於是 `date +%s%N` 回的是 `1754…N` 這種尾巴帶字母 N 的字串，接著的
-    `$(( END - START ))` 直接算術崩——而 `bash -n` 攔不到（語法完全合法）、ubuntu CI
-    也攔不到（GNU date 支援）、Windows 的 Git Bash 同樣是 GNU userland ⇒ **三個平時
-    在跑的環境全部給假綠，只有 mac 會炸**。
-
-    跨平台寫法（兩者皆不需要 GNU）：
-      · 只要秒級 → `date +%s`（POSIX，兩邊都對）；
-      · 真的要次秒解析度 → `python3 -c 'import time; print(time.time_ns())'`
-        （本 repo 的腳本本來就都要求 python3 在場）。
-
-    🔴 本 repo 內那 16 個站點所在的檔案，其**檔頭自陳與自己下一句矛盾**（逐字同時斷言
-    「現代 macOS BSD date 皆支援」與「嚴格 BSD 會輸出字面 N」），且那句「R11 真 Mac 實測」
-    在 repo 內找不到可重跑的取證位置。本判準不去裁決那句話，只把「有幾個站點押在它上面」
-    變成一個會說話的數字。
+    WHY（R82 MAC-05）：`%N`（奈秒）是 GNU coreutils 擴充，不在 BSD `strftime(3)`
+    格式表內；macOS 的 `date` 是 BSD date，對不認得的轉換原樣輸出，使
+    `date +%s%N` 回帶字母 N 的字串、後續算術崩潰。`bash -n`／ubuntu CI／Windows
+    Git Bash（GNU userland）三個平時在跑的環境全部假綠，只有 mac 會炸。跨平台寫法：
+    秒級用 `date +%s`，次秒用 `python3 -c 'import time; print(time.time_ns())'`。
+    史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
     problems: list[str] = []
     for lineno, line in enumerate(code.splitlines(), start=1):

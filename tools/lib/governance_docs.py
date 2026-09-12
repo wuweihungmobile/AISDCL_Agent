@@ -498,6 +498,10 @@ _GOVERNANCE_DOCS = (
     # R145 收尾：DEF-200-275 第六輪（四方複審 REJECT→D17～D25→修後複審 APPROVE）＋ round-label-ok
     # DEF-200-279／280 結案、DEF-200-283 新立 護欄層對帳。即刻登記。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R145_Scan_Findings.md",
+    # DEF-200-275 第七輪 Dev-D8 收尾窗口拆出的史料接收端：主證據檔逼近 262,144 bytes
+    # 硬線，已凍結的純史料節（原文逐字節、前幾輪「史料搬遷」批次）搬來此檔，主檔原位置
+    # 只留同名標題＋指標；命名慣例與體積硬線兩項義務對本檔同樣成立，即刻登記。round-label-ok
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_DEF200275_Context_Metering_Lore.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/{CrossPlatform,Quota}_*.md`。這**不是**把具名

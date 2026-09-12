@@ -58,10 +58,11 @@ def _recovery_measurement(payload: dict | None):
             measure, resolve_window, window_evidence,
         )
         transcript = (payload or {}).get("transcript_path") if isinstance(payload, dict) else None
-        m = measure(transcript)
+        sid = (payload or {}).get("session_id") if isinstance(payload, dict) else None
+        m = measure(transcript, session_id=sid)
         if m is None or m.used is None:
             return m, None, None
-        window, source = resolve_window(m.peak, **window_evidence(m.model))
+        window, source = resolve_window(m.peak, **window_evidence(m.model, session_id=sid))
         return m, window, source
     except Exception:  # noqa: BLE001 — 量測失敗不得擋 recovery_hint 本身
         return None, None, None
@@ -74,18 +75,22 @@ def _measurement_line(payload: dict | None) -> str:
             measure, resolve_window, window_evidence,
         )
         transcript = (payload or {}).get("transcript_path") if isinstance(payload, dict) else None
-        m = measure(transcript)
+        sid = (payload or {}).get("session_id") if isinstance(payload, dict) else None
+        m = measure(transcript, session_id=sid)
         if m is None or m.used is None:
             return (
                 "[SDD-CTX] 量測＝逐字稿 API usage；transcript_path="
                 + ("有" if isinstance(transcript, str) and transcript else "無")
                 + "；尚無可用 usage（不 gating）"
             )
-        window, source = resolve_window(m.peak, **window_evidence(m.model))
+        window, source = resolve_window(m.peak, **window_evidence(m.model, session_id=sid))
+        # D32b-3：harness feed 沒被拿來當分母時，把原因印出來（沒有 feed 也是一種
+        # reason，不得被悄悄吞掉）——一份判準同根層姊妹守衛的 `cross_check_note()`。
+        reason = f"；harness feed 未採用：{m.harness_reason}" if m.harness_reason else ""
         return (
             f"[SDD-CTX] 量測＝逐字稿 API usage；transcript_path=有；used={m.used:,}；"
             f"window={window:,}（{source}）；ratio={m.used / window:.0%}；"
-            f"compact_boundaries={m.compact_boundaries}"
+            f"compact_boundaries={m.compact_boundaries}{reason}"
         )
     except Exception as exc:  # noqa: BLE001 — never block session start
         return f"[SDD-CTX][WARN] 量測不可用：{exc!r}"

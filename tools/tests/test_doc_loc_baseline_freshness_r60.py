@@ -3618,7 +3618,7 @@ _GHOST_SYMBOL_BASELINE: frozenset[str] = frozenset({
     "_LATEST_PINNED_SHA256",
     "_LATEST_THINNESS_ENROLLED",
     "_LIVE_LOC_ANCHOR",
-    "_MY_PIPE_RE",
+    # 第七輪收尾：過期豁免已刪（幽靈已清乾淨），本行保留以維持逐檔行數釘值
     "_PENDING_MIGRATION_SITES",
     "_PROVENANCE_FIELDS",
     "_REASSIGN_RE",
@@ -3630,10 +3630,10 @@ _GHOST_SYMBOL_BASELINE: frozenset[str] = frozenset({
     "_TLC_TRACK_RE",                        # R79-docs：R65 Phase 2-A 退場的客製鎖
     "_TRACKED_ACTIONS",
 
-    "test_ac_matches_sum_of_seven_registries",
+    # 第七輪收尾：過期豁免已刪（幽靈已清乾淨），本行保留以維持逐檔行數釘值
     "test_constants_never_increase_versus_head",
     "test_frozen_guard_count_matches_the_worktree",  # R79-docs：同檔數棘輪一併退場
-    "test_is_windows_apps_stub_defined_exactly_once",
+    # 第七輪收尾：過期豁免已刪（幽靈已清乾淨），本行保留以維持逐檔行數釘值
     "test_latest_install_post_commit_pins_utf8_before_reading_git_common_dir",
     "test_only_the_matching_check_reds",
     "test_the_header_boundary_excludes_a_row_that_legitimately_quotes_it",
@@ -3647,7 +3647,7 @@ _GHOST_SYMBOL_BASELINE: frozenset[str] = frozenset({
 #: 的重釘紀律）；**不得**為了讓一筆新寫下的懸空引用過關而調高它。
 #: 33→32→31→30→29 的逐格收緊沿革（R85／R89／R95／R115）已搬至 round-label-ok
 #: CrossPlatform_R127_Guard_Prose_Migration.md。
-_GHOST_SYMBOL_BASELINE_CEILING = 29
+_GHOST_SYMBOL_BASELINE_CEILING = 26
 
 _SYMBOL_INDEX_CACHE: dict[str, frozenset[str]] = {}
 

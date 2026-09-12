@@ -13,7 +13,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
-from tools.fsm_runtime.file_lock import file_lock  # noqa: E402
+from tools.fsm_runtime.file_lock import _try_unlink, file_lock  # noqa: E402
 
 
 def _worker_increment(lock_path: str, counter_path: str, hold_ms: int) -> None:
@@ -143,6 +143,26 @@ class UnremovableSentinelTests(unittest.TestCase):
                 held.close()
         self.assertTrue(lock_path.exists(), "載具失效：Windows 竟刪得掉被開啟的檔案")
         lock_path.unlink()
+
+    def test_try_unlink_retries_transient_permission_denied(self) -> None:
+        """D31-4：windows-compat-ci #220／#221 同型回歸鎖——瞬時 PermissionError 2 次後第 3 次成功，
+        `_try_unlink` 必須回 True（不得在第一次失敗就放棄回 False，逼下一位等滿 30s 陳舊門檻）。"""
+        target = self.root / "retry.lock"
+        target.write_text("pid=1 fresh", encoding="utf-8")
+        orig_unlink = Path.unlink
+        calls = {"n": 0}
+
+        def flaky_unlink(self, *a, **kw):
+            if self == target and calls["n"] < 2:
+                calls["n"] += 1
+                raise PermissionError(32, "程序無法存取檔案（模擬瞬時佔用）")
+            return orig_unlink(self, *a, **kw)
+
+        with mock.patch.object(Path, "unlink", flaky_unlink), \
+             mock.patch("tools.fsm_runtime.file_lock.time.sleep", return_value=None):
+            self.assertTrue(_try_unlink(target))
+        self.assertEqual(calls["n"], 2, "應在重試預算內於第 3 次成功，不多不少")
+        self.assertFalse(target.exists())
 
     def test_unremovable_stale_sentinel_times_out_instead_of_spinning(self) -> None:
         lock_path = self.root / "stale_held.lock"

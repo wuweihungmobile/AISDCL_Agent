@@ -1,75 +1,38 @@
 #!/usr/bin/env python
 """PostToolUse 守衛：Claude Code session 的 context 水位觀測者（本 repo 首見）。
 
-WHY（全文史料搬 scratchpad/dev-c/moved_lore.md，R91 起同型搬法）
----------------------------------------------------------------
-掌舵者要兩件事：「注意上下文是否超出 90%、/compact、不要爆」與「注意 Token 限制、
-排程再喚醒」。harness 自己的 autocompact 預設開啟（姿態現查 `--check-autocompact`）；
-本檔做不到執行 `/compact`（模型也不能自己打 slash 指令），是那條線的**第二道**：
-① 把「現在幾 %」變成看得見的數字；② ≥94% 時真的擋下展開型工具（見〈PreToolUse
-阻斷模式〉）；③ 產出「可重啟點任務書」骨架供 `claude -r` 續跑。
+WHY（沿革全文搬 scratchpad/dev-c/moved_lore.md；與 SDD `context_ledger` 的分工、
+兩者同時觸發的殘餘限制、純文件約束對模型的攔阻力先例，皆見該檔）——一句話：把
+harness 自己的 autocompact（姿態現查 `--check-autocompact`）之外，模型自己看得見
+「現在幾 %」，並在 ≥94% 真的擋下展開型工具、產出可重啟點任務書供 `claude -r` 續跑。
 
-與 SDD `context_ledger`（各版目錄 `context_ledger_pre/post`，經 `sdd_hook_router.py`
-橋接）**不是重複造輪子**：估算 vs 實測／生效條件不相交（`SDD_ACTIVE_VERSION` 為守衛）／
-分母不同（Stage 預算 vs context window），三點皆已實查（詳見 moved_lore）。已知且接受
-的殘餘限制：兩者同時觸發時使用者會拿到兩則語氣相近的告警，僅以 `MEASURE_LABEL` 標示
-可分辨，不試圖去重（需要跨全部凍結版協議）。純文件約束對模型零攔阻力已實證兩次
-（`block_bash_on_windows.py`／`lint_powershell_command.py`），水位這件事同型更嚴重。
+量測面：hook payload 帶 `transcript_path`（本 session 逐字稿）。每筆 `type ==
+"assistant"` 的 `message.usage` 下，**當前 context 佔用 ＝ input_tokens ＋
+cache_creation_input_tokens ＋ cache_read_input_tokens**（`output_tokens` 不算：
+下一回合才以 input 形式回到 context，重複計會高估）。
 
-量測面（實測確認，不是推測）
-----------------------------
-Claude Code 的 hook payload 帶 `transcript_path`，指向本 session 的 jsonl。該檔每筆
-`type == "assistant"` 的記錄在 `message.usage` 下有四個計數欄。**當前 context 佔用
-＝ `input_tokens` ＋ `cache_creation_input_tokens` ＋ `cache_read_input_tokens`**
-（`output_tokens` 不算：它是這一則回覆吐出來的量，下一回合才會以 input 的形式回到
-context 裡，重複計會高估）。
+🔴 context window 判定：先可證、後推斷，來源字串原樣印給使用者。九階完整清單
+（⓪ status line 進料 → ①~⑦ 各種釘值／查表 → ⑧ 保守下界，方向不對稱：猜小只是
+早喊，猜大會讓守衛在真 90% 結構性靜默）與各階 WHY 全文搬 `CrossPlatform_
+DEF200275_Context_Metering_Evidence.md`〈第七輪 史料搬遷（Dev-S8b）〉節，程式碼
+本體＝`resolve_window()`。🔴 **⑧ 不得用來硬擋**（見〈PreToolUse 阻斷模式〉）。
 
-🔴 context window 判定（R79 重寫〔缺陷實況＝`CrossPlatform_R91_Scan_Findings.md`
-§A-3〕，D27 補⑥查表階——推翻 D21，全文史料＝`CrossPlatform_DEF200275_Context_
-Metering_Evidence.md`〈第七輪〉：分母猜小只是早喊，猜大會讓守衛在真 90% 結構性靜默）
---------------------------------------------------------------------------------
-方向不對稱：猜小（1M 當 200K）⇒ 早喊，成本一次多餘 `/compact`；猜大（200K 當 1M）
-⇒ 到 90% 才喊時真實水位已 450%，根本喊不到。
-判定順序（先可證、後推斷，來源字串原樣印給使用者；編號沿用 SDD `context_window.py`
-8 階分母鏈——該檔獨有 ①`SDD_MAX_CONTEXT`，本檔沒有）：
-  ② `AUTOSDD_CONTEXT_WINDOW`：本檔旗標，最高優先＝**指定值**（會與 ⑥ 查表值收斂）。
-  ③④ `CLAUDE_CODE_AUTO_COMPACT_WINDOW`／settings `autoCompactWindow`＝**harness
-     自己的 window 旋鈕**。同 ⑥ 收斂。
-  ⑤ settings `model` 欄帶 `1m` 標記 ⇒ 1,000,000，帶交叉否決（見 `window_from_model()`）。
-  ⑥ **以 model id 查表**（D27／ARCH-A4-01；`known_model_window()`）：表值＝Models
-     API `max_input_tokens`，唯一的家＝`known_model_windows_path()`。②③④以外**無
-     條件**查表——D21 曾限縮成「只在有 pin 時才查」，四方複審判定那正是缺陷根因，全文見證據檔。
-  ⑦ 本 session 歷來 `used` 曾超過 200,000 ⇒ window 必然大於 200K，取 1,000,000。
-  ⑧ 其餘一律 200,000（保守下界）。
-🔴 **⑧ 不得用來硬擋**（見〈PreToolUse 阻斷模式〉）；⑥ 夠格——查得到表就不是「不知道」。
-
-行為契約（PostToolUse＝觀測模式；全文史料同上，搬 moved_lore.md）
+行為契約（PostToolUse＝觀測模式；沿革搬 moved_lore.md）
 ------------------------------------------------------------------
-· payload 讀不出來（壞 JSON／空 stdin）→ stderr 一行 ＋ **exit 1**（出聲但不阻斷，
-  rc=1＝爆炸半徑為零；見 `degraded_payload_verdict` 判準）。
-· 沒有 `transcript_path`／檔案不存在／掃不到任何 usage → exit 0 靜默（「量測暫時不可得」
-  與上一條「輸入壞掉」是不同的事，混同會讓守衛變成每次都出聲而被整支關掉）。
-· `< 84%` → exit 0 完全靜默；`>= 84%` → stderr 一行 ＋ 同一段文字送進模型 context
-  （`platform_utils.emit_to_model`，逃生口 `AUTOSDD_CONTEXT_SIGNAL_OFF`），內容依額度尺
-  `quota_gate.draining()` 三分（PRD §4.3 的三個 AND，見 `warn_message`／`_NEXT_STEP`）。
-  `>= 94%` → stderr 強制指引 ＋ 寫任務書 ＋ **exit 2**（PostToolUse 的 exit 2 不阻斷已完成
-  的那次呼叫，語意與 PreToolUse 不同）。
-· **同一門檻＋同一 window 只喊一次**（`latch_key` 含 window／epoch，見該函式 WHY）。
+· payload 讀不出來 → stderr 一行 ＋ **exit 1**（出聲不阻斷，見 `degraded_payload_verdict`）。
+· 量不到 usage → exit 0 靜默（「量不到」≠「輸入壞掉」，混同會讓守衛被整支關掉）。
+· `< 84%` 靜默；`>= 84%` stderr ＋ 送進模型 context（`emit_to_model`，逃生口
+  `AUTOSDD_CONTEXT_SIGNAL_OFF`），內容依額度尺 `quota_gate.draining()` 三分。
+· `>= 94%` stderr 強制指引 ＋ 寫任務書 ＋ **exit 2**。
+· **同一門檻＋同一 window 只喊一次**（`latch_key` 含 window／epoch）。
 
-🔴 PreToolUse 阻斷模式（R79：把「不要爆」從散文變成真的擋得下來的東西）
-------------------------------------------------------------------------
-另一個由 `hook_event_name` 分派的模式：只在 `>= 94%` 且 window 不是保守下界猜測時擋
-（`may_block()`——分母是猜的只出聲不擋，否則猜錯會把真實 18% 誤鎖）；只擋展開型工具
-（`BLOCKING_TOOLS`），Read／Edit／PowerShell 放行（收斂本身需要它們）；不進閂鎖（會一直
-擋到水位真的掉下來，`/compact` 後自動解除）；人為逃生口 `AUTOSDD_CONTEXT_GUARD_OFF=1`。
-任何非預期例外 → exit 0（fail-open 是 P0：守衛自身絕不可成為故障源）。
+🔴 PreToolUse 阻斷模式：`>= 94%` 且 window 非保守下界猜測時才擋（`may_block()`）；
+只擋展開型工具（`BLOCKING_TOOLS`），Read／Edit／PowerShell 放行；不進閂鎖（水位掉下
+去自動解除）；逃生口 `AUTOSDD_CONTEXT_GUARD_OFF=1`；任何非預期例外一律 exit 0。
 
-相依規則：①能力提供者（quota_gate／platform_utils／sdd_latest）一律 try/except，
-不可達時該軸退化成「量不到」；②判讀原語（quota_limits）hard import；③`tools/lib/*`
-只准裸名 import（反向依賴仍允許：planner import 本檔）。
-
-🔴 R82／Q2-02：本檔職責邊界——只剩一把尺（context 水位），額度尺整條住 `quota_gate.py`
-（分工詳見該處 import 旁 WHY）。
+相依規則：①能力提供者一律 try/except、不可達即退化「量不到」；②`quota_limits` hard
+import；③`tools/lib/*` 只准裸名 import（反向依賴仍允許：planner import 本檔）。
+本檔職責邊界（R82／Q2-02）：只剩一把尺（context 水位），額度尺整條住 `quota_gate.py`。
 
 回歸鎖：`tools/tests/test_context_budget_guard.py`（合成 jsonl 注入，逐條驗紅）。
 """
@@ -89,24 +52,17 @@ from pathlib import Path
 #: `O_BINARY` 只有 Windows 的 `os` 有（鐵律三）；同 `tools/lib/quota_ledger.py` 既有慣例。
 _BINARY = getattr(os, "O_BINARY", 0)
 
-# 自己的 stdout/stderr 強制 UTF-8。缺這段時：locale 表達不了 CJK（en-US Windows
-# ＝cp1252）→ 整段指引變 `\uXXXX` 逃脫字面；locale 表達得了但非 UTF-8（zh-TW
-# ＝cp950）→ 讀者端亂碼。兩種都讓「提醒有了、指引沒了」，而本檔存在的唯一理由
-# 就是純文件約束無攔阻力，指引不可讀等於把它砍掉一半。
-# 例外一律吞掉且刻意比 stdlib 慣例更寬：**模組層**崩潰發生在 main() 的 try 之外、
-# 繞得過那道保險，而 fail-open 在這裡是 P0。
+# 自己的 stdout/stderr 強制 UTF-8（缺這段：CJK locale 表達不了會逃脫成 \uXXXX、
+# 非 UTF-8 locale 會亂碼；沿革全文搬證據檔〈第七輪 史料搬遷（Dev-S8b）〉節）。
 for _stream in (sys.stdout, sys.stderr):
     try:
         _stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
-    except Exception:  # noqa: BLE001 — 見上
+    except Exception:  # noqa: BLE001 — 模組層崩潰繞得過 main() 的保險，fail-open 是 P0
         pass
 
-# payload 讀取接上共用層 `tools/lib/platform_utils.py`（R81／SUB-S1-04 的交棒項；
-# 手抄本漂移立案史搬至 CrossPlatform_Guard_Line_History.md〈context_budget_guard 立案史彙整〉節）。
-# 🔴 與上方「零外部相依」**不衝突**：那條要的是 fail-open 而不是「不准 import」。
-# 共用層不可達時（`run_path` 起、`tools/lib` 不在 sys.path）下面的 except 讓它退化成
-# `read_payload() -> None`，正好走本檔既有的「讀不出來 → 出聲不阻斷、rc=1」分支；
-# 模組層不會爆掉，也不留第二份 JSON 解析實作（形態同 `lint_powershell_command.py`）。
+# 下面五個 import 共用同一種形態（同一條 sys.path、同一種 fail-open）：不可達時退化成
+# `None`／存根函式，各自的職責整條退化成「量不到／不節流／不武裝／查不到」，絕不讓
+# context 阻斷這條主線被一起帶走。逐支的家與退化方向全文搬證據檔同節。
 sys.path.insert(0, os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
     "tools", "lib"))
@@ -117,45 +73,27 @@ except Exception:  # noqa: BLE001 — 共用層不可達＝退化，不是崩潰
         return None
 
     def emit_to_model(event: str, msg: str) -> bool:  # type: ignore[misc]
-        return False  # 送不進模型 ⇒ 只剩 stderr 那一半，與 R91 之前的行為相同
+        return False  # 送不進模型 ⇒ 只剩 stderr 那一半
 
-# 額度水位節流閘（80/95 兩道）整條的家＝`tools/lib/quota_gate.py`（R82／Q2-02）。搬走的
-# 是一個完整主題：輸入是額度快取／逐字稿撞線，輸出是「這次扇出准不准」，與 context 水位
-# 零交集。形態與上一格逐字相同（同一條 sys.path、同一種 fail-open）：不可達時本符號為
-# `None`，額度軸整條退化成「量不到」＝不節流，而**不會**把 context 阻斷也一起帶走
-# ——那是拆分的硬安全條件（見該檔檔頭），不是風格偏好。
 try:
-    import quota_gate  # type: ignore[import-not-found]
+    import quota_gate  # type: ignore[import-not-found]  # 額度水位節流閘，與 context 水位零交集
 except Exception:  # noqa: BLE001 — 見上
     quota_gate = None  # type: ignore[assignment]
 
-# 哨兵的**生命週期判準**（值不值得一支 schtasks、什麼時候收）整條的家＝
-# `tools/lib/sentinel_lifecycle.py`。形態同上一格：不可達時本符號為 `None`，
-# 武裝整條退化成「不武裝」——那個方向安全（少一層續航保護），反過來（不可達就無條件
-# 武裝）才是 R82 之前那個會在排程器裡增生的形狀。
 try:
-    import sentinel_lifecycle  # type: ignore[import-not-found]
+    import sentinel_lifecycle  # type: ignore[import-not-found]  # 哨兵生命週期判準（值不值得一支 schtasks）
 except Exception:  # noqa: BLE001 — 見上
     sentinel_lifecycle = None  # type: ignore[assignment]
 
-# 排程**載具**（schtasks／launchd／沒有）唯一的家＝`tools/lib/schedule_backend.py`。
-# 形態同上一格（同一條 sys.path、同一種 fail-open）：不可達時本符號為 `None`，
-# `_has_carrier()` 回 False ⇒ 武裝整條退化成「不武裝」，方向與上一格一致（少一層續航
-# 保護，而不是無條件武裝）。
-# 🔴 R83／W2-A：本檔此前用 `os.name != "nt"` 在**四個**武裝站點各判一次平台，於是
-# 「mac 上有沒有排程載具」這個問題有四個答案的家；補 mac 支援時只要漏改一個，那一臂
-# 就會靜默失明（而失明的表徵與「這台機器本來就沒有載具」完全相同）。現在四個站點一律
-# 問 `_has_carrier()`，而它只是把問題轉給那個唯一的提問點。
+# 🔴 R83／W2-A：四個武裝站點一律問 `_has_carrier()`（不再各自判一次平台），理由與
+# 沿革全文搬證據檔同節。
 try:
-    import schedule_backend  # type: ignore[import-not-found]
+    import schedule_backend  # type: ignore[import-not-found]  # 排程載具（schtasks／launchd／沒有）
 except Exception:  # noqa: BLE001 — 見上
     schedule_backend = None  # type: ignore[assignment]
 
-# LATEST 版本路徑解析唯一真相源＝`tools/lib/sdd_latest.py`（查表資料的家＝
-# `$V/tools/fsm_runtime/data/known_model_windows.json`，見 `known_model_windows_
-# path()`）。同一套 fail-open：不可達時本符號為 `None`，查表整條退化成「查不到」。
 try:
-    import sdd_latest  # type: ignore[import-not-found]
+    import sdd_latest  # type: ignore[import-not-found]  # LATEST 版本路徑解析（查表資料的家）
 except Exception:  # noqa: BLE001 — 見上
     sdd_latest = None  # type: ignore[assignment]
 
@@ -164,10 +102,10 @@ def _has_carrier() -> bool:
     """這台機器上有沒有排程載具（Windows schtasks／macOS launchd）。"""
     return schedule_backend is not None and schedule_backend.has_carrier()
 
-# 額度**撞線判讀**唯一的家＝`tools/lib/quota_limits.py`。刻意 hard import（與上面能力
-# 提供者不同）：判讀原語給 fallback stub 等於讓同一份字面有第二個家、用錯答案靜默通過。
-# 下面 11 個在本檔內一次都不會被呼叫，是給 `tools/session_resume_planner.py`（`guard.
-# <name>` 取用）的純再匯出——刪任一個都會在無人看管的排程路徑上 AttributeError。
+# 額度**撞線判讀**唯一的家＝`tools/lib/quota_limits.py`。刻意 hard import（判讀原語
+# 給 fallback stub 等於讓同一份字面有第二個家）。下面 11 個在本檔內不會被呼叫，是給
+# `tools/session_resume_planner.py`（`guard.<name>` 取用）的純再匯出，刪任一個都會
+# 在無人看管的排程路徑上 AttributeError。
 from quota_limits import (  # noqa: E402,F401
     LIMIT_NONE,
     LIMIT_SESSION,
@@ -214,20 +152,14 @@ SENTINEL_OFF_ENV = "AUTOSDD_SENTINEL_OFF"
 SIGNAL_OFF_ENV = "AUTOSDD_CONTEXT_SIGNAL_OFF"
 
 #: 無 console 父行程下 spawn 子行程的**防彈窗**兩層防線（`NO_WINDOW` 旗標 ＋
-#: `quiet_python()` 載具）唯一的家＝`tools/lib/win_spawn.py`（R84／C8 的減法）。
-#: 搬走的理由與 `quota_limits` 那一格逐字同構：那是一個完整主題，且本檔此前是它的家
-#: 而 lib 反過來 import hook（方向倒了，`quota_meter.py` 因此留過第二份字面）。
-#: **刻意沒有 try/except**（同 `quota_limits` 判例）：原語不能有 fallback stub，
-#: 給 `NO_WINDOW` 一個 `0` 的備援等於在 Windows 上用錯的答案靜默通過（旗標沒帶、
-#: 視窗照彈）。`session_resume_planner` 以 `guard.NO_WINDOW`／`guard.quiet_python()`
-#: 取用 ⇒ 這裡 import 回本檔命名空間，呼叫端與既有回歸鎖一個字都不必改。
+#: `quiet_python()` 載具）唯一的家＝`tools/lib/win_spawn.py`（刻意沒有 try/except：
+#: 原語不能有 fallback stub，給 `NO_WINDOW` 一個 `0` 備援等於在 Windows 上用錯答案
+#: 靜默通過）。`session_resume_planner` 以 `guard.NO_WINDOW` 取用，理由全文搬證據檔。
 from win_spawn import NO_WINDOW, quiet_python  # noqa: E402,F401
 
 #: 🔴 送進 `powershell.exe`（5.1）的每一段腳本都要以這一行開頭——PS 5.1 以主控台
-#: codepage（zh-TW＝cp950）寫 stdout、Python 這一側以 UTF-8 讀 ⇒ 取證憑證
-#: （`next_run_time`）逐位元組降解卻仍非空＝取證規則照樣判綠。立案實測（哨兵稽核
-#: jsonl 逐字）與「三個消費者為何同住本檔」的選址理由逐字保全於
-#: `CrossPlatform_R91_Scan_Findings.md` §A-7（R92 搬出）。
+#: codepage 寫 stdout、Python 以 UTF-8 讀，取證憑證會逐位元組降解卻仍非空。立案實測
+#: 全文搬 `CrossPlatform_R91_Scan_Findings.md` §A-7。
 PS_UTF8_PRELUDE = ("$OutputEncoding = [Console]::OutputEncoding = "
                    "[Text.UTF8Encoding]::new($false)\n")
 
@@ -264,6 +196,10 @@ HARD_RATIO = 0.94
 
 TIER_WARN = "warn"
 TIER_HARD = "hard"
+
+#: D32／DEF-200-275 第七輪：status line 進料的分母階，優先於本檔一切釘值（見
+#: `resolve_window` 的〈harness 回報〉節與 `tools/statusline_context_feed.py` 檔頭）。
+SOURCE_HARNESS = "harness 回報（status line context_window.context_window_size）"
 
 SOURCE_PINNED = f"指定值（環境變數 {WINDOW_ENV}）"
 SOURCE_PINNED_CC_ENV = f"指定值（Claude Code 自己的 {CC_WINDOW_ENV}）"
@@ -305,11 +241,8 @@ PLAN_PREFIX = "autosdd_resume_plan_"
 
 def used_of(usage: object) -> int | None:
     """單筆 `message.usage` 的當前 context 佔用；`None`＝這筆不是可用的 usage。
-
-    刻意只認 `int`（`bool` 也排除——它是 `int` 子類，混進來會讓 `True` 算成 1）：
-    欄位缺一律當 0，但整筆一個欄位都沒有時回 `None`，讓「量到零」與「量不到」
-    分得開。這兩者混同正是本 repo 反覆踩到的 fail-open 形狀。
-    """
+    只認 `int`（`bool` 排除，避免 `True` 算成 1）；欄位缺一律當 0，但整筆零欄位
+    時回 `None`——「量到零」與「量不到」分得開是本檔通篇的紀律。"""
     if not isinstance(usage, dict):
         return None
     total = 0
@@ -324,15 +257,10 @@ def used_of(usage: object) -> int | None:
 
 def scan_transcript(path: Path) -> tuple[int | None, int, str | None]:
     """逐行掃 jsonl，回 `(最後一筆 used, 歷來最大 used, 最後一個實際跑過的 model)`。
-
-    model 一起掃出來是為了 window 判定的**交叉否決**（見 `window_from_model`），
-    而且它必須與 usage 同一趟掃完——逐字稿會長到數十 MB，本檔每次工具呼叫都會跑。
-    `<synthetic>` 這類佔位值不採計：它認不出家族，留著只會稀釋否決的鑑別力。
-
-    刻意**逐行覆寫 last** 而不是整檔 `json.loads` 後排序（append-only 檔會長到數十
-    MB，每次工具呼叫都跑一次）：①`"usage"` 子字串預篩省掉多數 `json.loads`；
-    ②記憶體 O(1)；③壞行直接跳過（半截尾行不得讓整支守衛崩潰）。歷來最大值是
-    window 下界推論的唯一輸入，必須整檔看過，不能只看尾巴。"""
+    model 一起掃出是為了 window 判定的交叉否決（`window_from_model`），且必須與
+    usage 同一趟掃完；`<synthetic>` 佔位值不採計。逐行覆寫 last 而非整檔排序的
+    三段省法（子字串預篩／記憶體 O(1)／壞行跳過）全文搬證據檔〈第七輪 史料搬遷
+    （Dev-S8b）〉節。"""
     last: int | None = None
     peak = 0
     model: str | None = None
@@ -371,13 +299,9 @@ def scan_transcript(path: Path) -> tuple[int | None, int, str | None]:
 
 
 def compact_boundary_count(path: Path) -> int:
-    """本 session 逐字稿裡 `type=="system" and subtype=="compact_boundary"` 的累計次數。
-
-    🔴 R92／D3（SD 複審 P1）：harness 免費寫進逐字稿、`scan_transcript()` 此前沒讀過的
-    「已 compact 幾次」訊號，`latch_key` 靠它重新武裝。獨立成一支函式而非併入
-    `scan_transcript`（後者三元組回傳值已有多個三元解包呼叫端）。完整立案敘事與
-    `compactMetadata` 欄位形狀見證據檔 §I-10（R92 搬出）。
-    """
+    """本 session 逐字稿裡 `type=="system" and subtype=="compact_boundary"` 的累計次數
+    （`latch_key` 靠它重新武裝）。獨立成一支函式而非併入 `scan_transcript`——後者三元組
+    回傳值已有多個三元解包呼叫端。完整立案敘事見證據檔 §I-10。"""
     count = 0
     try:
         with path.open(encoding="utf-8", errors="replace") as handle:
@@ -417,11 +341,9 @@ def carries_wide_marker(model: object) -> bool:
 
 
 def model_family(model: object) -> str:
-    """取 model 字串裡的家族字（`opus[1m]` → `opus`；`claude-opus-5` → `opus`）。
-
-    只用來做**交叉否決**（設定寫的與逐字稿實際跑的是不是同一族），不用來判 window。
-    回空字串＝認不出來 ⇒ 呼叫端一律當「無法否決」處理（不敢否決就不否決）。
-    """
+    """取 model 字串裡的家族字（`opus[1m]` → `opus`；`claude-opus-5` → `opus`）。只
+    用來做交叉否決（設定寫的與逐字稿實際跑的是不是同一族），不用來判 window；回空
+    字串＝認不出來 ⇒ 呼叫端一律當「無法否決」處理（不敢否決就不否決）。"""
     text = str(model or "").strip().lower()
     for family in ("opus", "sonnet", "haiku", "fable"):
         if family in text:
@@ -430,12 +352,9 @@ def model_family(model: object) -> str:
 
 
 def window_from_model(hint: object, observed: object = None) -> int | None:
-    """設定層 model 欄推出的 window；`None`＝這一階說不出話（往下一階走）。
-
-    交叉否決：`observed`（逐字稿裡實際跑過的 model）認得出家族、且與 `hint` 的家族
-    不同 ⇒ 放棄。少了它，一次 `claude --model sonnet` 覆寫就會讓分母偏大五倍。
-    `<synthetic>` 這類佔位值認不出家族，會落在「無法否決」那一側，不誤殺。
-    """
+    """設定層 model 欄推出的 window；`None`＝這一階說不出話（往下一階走）。交叉否決：
+    `observed` 認得出家族、且與 `hint` 的家族不同 ⇒ 放棄——少了它，一次 `claude
+    --model sonnet` 覆寫就會讓分母偏大五倍。`<synthetic>` 認不出家族，不誤殺。"""
     if not carries_wide_marker(hint):
         return None
     want, got = model_family(hint), model_family(observed)
@@ -567,6 +486,70 @@ def known_model_window(
     return None
 
 
+#: D32-2 SSOT：feed 檔目錄。與 `tools/statusline_context_feed.py`、SDD
+#: `context_window.py` 的同名函式逐字同構（parity 見 `test_context_window_parity.py`）。
+CONTEXT_FEED_DIR_ENV = "AUTOSDD_CONTEXT_FEED_DIR"
+
+
+def context_feed_path(session_id: str) -> Path:
+    """Feed 檔路徑（D32-2）。三份同名函式（本檔／SDD／status line 寫入端）逐字同構。"""
+    base = os.environ.get(CONTEXT_FEED_DIR_ENV)
+    root = Path(base) if base else Path(os.path.expanduser("~")) / ".autosdd" / "context_feed"
+    return root / f"{session_id}.json"
+
+
+def read_context_feed(session_id: str | None, observed_model: object) -> dict:
+    """讀 status line feed（D32-3／D32-4／D32b-3）。回 `{window, note, used, reason}`；
+    fail-open：解析失敗一律當「沒有 feed」，`reason` 給讀者一句能懂的話——**沒有
+    feed 檔本身也是一種 reason**（statusLine 未設定或本 session 太新），不是壞事，
+    但不採用的原因不該被悄悄吞掉（D32b-3：這句話要被 `cross_check_note()`／
+    `tools/lib/harness_feed.py` 印出來）。
+    """
+    empty = {"window": None, "note": "", "used": None, "reason": None}
+    if not session_id:
+        return {**empty, "reason": "無 session_id"}
+    try:
+        raw = context_feed_path(session_id).read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return {**empty, "reason": "無 feed（statusLine 未設定或本 session 尚無 assistant 訊息）"}
+    except OSError:
+        return {**empty, "reason": "feed 讀不到（非不存在）"}
+    try:
+        doc = json.loads(raw)
+    except ValueError:
+        return {**empty, "reason": "feed 壞 JSON"}
+    if not isinstance(doc, dict) or doc.get("session_id") != session_id:
+        return {**empty, "reason": "feed 缺失或 session_id 不符"}
+    cw = doc.get("context_window")
+    size = _positive_int(cw.get("context_window_size")) if isinstance(cw, dict) else 0
+    if size <= 0:
+        return {**empty, "reason": "feed 缺 context_window_size（或非正整數）"}
+    feed_model = doc.get("model") if isinstance(doc.get("model"), dict) else {}
+    feed_model_id = feed_model.get("id")
+    want, got = model_family(observed_model), model_family(feed_model_id)
+    if want and got and want != got:
+        return {**empty, "reason": f"feed model 家族（{got}）與逐字稿（{want}）不符"}
+    used = None
+    current_usage = cw.get("current_usage") if isinstance(cw, dict) else None
+    if isinstance(current_usage, dict):
+        used = used_of(current_usage)
+    return {"window": size, "note": f"model={feed_model_id or '?'}", "used": used, "reason": None}
+
+
+def _harness_source(harness_note: str, pinned_raw: object, hw: int) -> str:
+    """`SOURCE_HARNESS` 附註：feed model 說明＋（釘值存在且與 harness 不同時）標出未採用。"""
+    extra = [harness_note] if harness_note else []
+    pinned = _positive_int(pinned_raw) if pinned_raw is not None else 0
+    if pinned > 0 and pinned != hw:
+        extra.append(f"釘值 {pinned:,} 未採用")
+    if not extra:
+        return SOURCE_HARNESS
+    note = "；" + "；".join(extra)
+    if SOURCE_HARNESS.endswith("）"):
+        return SOURCE_HARNESS[:-1] + note + "）"
+    return SOURCE_HARNESS + note
+
+
 def resolve_window(
     peak_used: int,
     env_raw: str | None = None,
@@ -577,16 +560,19 @@ def resolve_window(
     observed_model: object = None,
     known_models: dict[str, int] | None = None,
     known_models_note: str = "",
+    harness_window: object = None,
+    harness_note: str = "",
 ) -> tuple[int, str]:
     """`(window, 來源說明)`。純函式——紅綠由注入自證，不讀環境／不讀檔（呼叫端傳入）。
 
-    順序即優先序（詳細理由見模組 docstring 的〈context window 判定〉）：本檔旗標
-    → harness 旋鈕（皆與 `known_models` 收斂）→ model 標記（帶交叉否決）→ **⑥ 查表**
-    （`known_model_window()`，D27 起無釘值也會走到）→ 可證下界推論 → 保守值。
-
-    前兩個參數維持位置引數：既有呼叫端（`tools/session_resume_planner.py` 與回歸鎖）
-    不必改就仍是對的，新增的證據來源一律 keyword-only。
+    順序即優先序（詳見模組 docstring〈context window 判定〉）：⓪ harness 回報 →
+    本檔旗標 → harness 旋鈕（皆與 `known_models` 收斂）→ model 標記（帶交叉否決）→
+    ⑥ 查表 → 可證下界推論 → 保守值。新增的 `harness_*` 皆 keyword-only、預設 `None`
+    即整階跳過，舊呼叫端行為逐位元組不變（parity 鎖不受影響）。
     """
+    hw = _positive_int(harness_window) if harness_window is not None else 0
+    if hw > 0:
+        return hw, _harness_source(harness_note, env_raw, hw)
     for raw, source in (
         (env_raw, SOURCE_PINNED),
         (cc_window_raw, SOURCE_PINNED_CC_ENV),
@@ -639,11 +625,8 @@ def tier_of(used: int, window: int) -> str | None:
 
 
 def session_id_of(transcript: Path) -> str:
-    """逐字稿檔名（去副檔名）即 session id；非英數字元一律換成 `-`。
-
-    清洗不是裝飾：這個字串會變成暫存檔名的一部分，未清洗的路徑分隔符會讓
-    state 檔寫到別的目錄去（或在 Windows 上直接寫檔失敗）。
-    """
+    """逐字稿檔名（去副檔名）即 session id；非英數字元一律換成 `-`——這個字串會變成
+    暫存檔名的一部分，未清洗的路徑分隔符會讓 state 檔寫錯目錄（或 Windows 上寫檔失敗）。"""
     return "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in transcript.stem)
 
 
@@ -699,11 +682,9 @@ def remember_latch(state: Path, key: str) -> None:
 
 
 def repo_root() -> Path:
-    """monorepo 根。`CLAUDE_PROJECT_DIR` 由 Claude Code 注入，缺席時以本檔位置推。
-
-    以檔案位置為主要依據（`.claude/hooks/<本檔>` ⇒ 上溯兩層）而不是 cwd：cwd 由
-    註冊面的 shim 決定，那是別人的實作細節，被改掉時本檔不該跟著壞。
-    """
+    """monorepo 根。`CLAUDE_PROJECT_DIR` 由 Claude Code 注入，缺席時以本檔位置
+    （`.claude/hooks/<本檔>` 上溯兩層）而不是 cwd 推——cwd 由註冊面的 shim 決定，
+    那是別人的實作細節，被改掉時本檔不該跟著壞。"""
     env = os.environ.get("CLAUDE_PROJECT_DIR")
     if env:
         candidate = Path(env)
@@ -713,13 +694,10 @@ def repo_root() -> Path:
 
 
 def settings_chain(root: Path | None = None) -> list[Path]:
-    """Claude Code settings 檔，**由高優先到低優先**。
-
-    刻意不含 enterprise policy 層：那一層的路徑隨 OS 而異、且本檔讀它也沒有意義
-    （它只會讓分母更小＝更早喊，而更早喊本來就是安全方向）。誠實劃界：`--settings`
-    旗標與 `/model` 的 session 內覆寫本檔看不到，這也正是 `window_from_model` 要用
-    逐字稿實跑 model 做交叉否決的原因。
-    """
+    """Claude Code settings 檔，**由高優先到低優先**。刻意不含 enterprise policy
+    層（讀它也沒意義：只會讓分母更小＝更早喊，方向安全）。誠實劃界：`--settings`
+    旗標與 `/model` 的 session 內覆寫本檔看不到，這正是 `window_from_model` 要用
+    逐字稿實跑 model 做交叉否決的原因。"""
     base = root or repo_root()
     return [
         base / ".claude" / "settings.local.json",
@@ -740,23 +718,26 @@ def settings_value(key: str, paths: list[Path] | None = None) -> object:
     return None
 
 
-def window_evidence(observed_model: str | None, session_id: str | None = None) -> dict:
-    """把 `resolve_window` 需要的證據來源一次收齊（I/O 都在這裡，判定仍是純函式）。
-    D27（推翻 D21）：無條件查表——效能代價改在熱路徑＋per-session 快取解，全文見
-    證據檔〈第七輪〉。"""
-    env_raw = os.environ.get(WINDOW_ENV)
-    cc_window_raw = os.environ.get(CC_WINDOW_ENV)
-    settings_window = settings_value(CC_WINDOW_KEY)
+def window_evidence(observed_model: str | None, session_id: str | None = None,
+                    *, feed: dict | None = None) -> dict:
+    """把 `resolve_window` 需要的證據一次收齊（I/O 都在這裡，判定仍是純函式）。
+    D27：無條件查表，沿革見證據檔〈第七輪〉。`feed` 讓呼叫端重用已讀過一次的
+    status line 進料（D32b-1a：消除 `main()` 內的重複讀檔），缺席才自己讀一次。
+    """
     known_models, known_models_note = load_known_model_windows(
         known_model_windows_path(session_id=session_id))
+    if feed is None:
+        feed = read_context_feed(session_id, observed_model)
     return {
-        "env_raw": env_raw,
-        "cc_window_raw": cc_window_raw,
-        "settings_window": settings_window,
+        "env_raw": os.environ.get(WINDOW_ENV),
+        "cc_window_raw": os.environ.get(CC_WINDOW_ENV),
+        "settings_window": settings_value(CC_WINDOW_KEY),
         "model_hint": settings_value(CC_MODEL_KEY),
         "observed_model": observed_model,
         "known_models": known_models,
         "known_models_note": known_models_note,
+        "harness_window": feed["window"],
+        "harness_note": feed["note"],
     }
 
 
@@ -903,6 +884,22 @@ _NEXT_STEP = {
 }
 
 
+def cross_check_note(used: int, feed: dict) -> str:
+    """D32-4／D32b-3：status line feed 的旁註，純函式（`feed` 由呼叫端傳入，
+    不在此重複讀檔——D32b-1a）。未採用時把 `reason` 印出來（沒有 feed 也是一種
+    reason，不得被悄悄吞掉）；已採用時做分子交叉比對，差 >5% 才出聲。"""
+    if feed.get("reason") is not None:
+        return f"   ℹ️  harness feed 未採用：{feed['reason']}\n"
+    harness_used = feed.get("used")
+    if harness_used is None or harness_used <= 0 or used <= 0:
+        return ""
+    diff = abs(used - harness_used)
+    if diff / max(used, harness_used) <= 0.05:
+        return ""
+    return (f"   ℹ️  分子交叉比對：harness used={harness_used:,} 逐字稿 used={used:,}"
+            f" 差={diff:,}（>5%，僅供參考，不影響本次判定）\n")
+
+
 def warn_message(used: int, window: int, source: str, drain: str = "unknown") -> str:
     """84% 提示。`drain`＝`quota_gate.draining()` 的三態，未知一律走 fail-safe 那一格。"""
     return (
@@ -1030,8 +1027,9 @@ def main() -> int:
         used, peak, model = scanned if scanned is not None else scan_transcript(transcript)
         if used is None:
             return 0  # 掃不到任何 usage：量不到 ≠ 量到零，不做任何宣稱
-        window, source = resolve_window(
-            peak, **window_evidence(model, session_id=session_id_of(transcript)))
+        sid = session_id_of(transcript)
+        feed = read_context_feed(sid, model)  # D32b-1a：整回合只讀一次，餵給下面兩處消費端
+        window, source = resolve_window(peak, **window_evidence(model, session_id=sid, feed=feed))
         tier = tier_of(used, window)
         if tier is None:
             return 0
@@ -1039,7 +1037,7 @@ def main() -> int:
         if blocking:
             return block_verdict(payload, used, window, source, tier)
 
-        state = state_path(session_id_of(transcript))
+        state = state_path(sid)
         key = latch_key(tier, window, compact_boundary_count(transcript))
         if key in announced_latches(state):
             return 0
@@ -1050,7 +1048,7 @@ def main() -> int:
             # 訊息內容本身取決於答案（見 `_NEXT_STEP` 的立案）。`quota_gate` 不可達時
             # 三態退化成 `"unknown"`＝fail-safe 那一格，與本檔既有的降級方向一致。
             drain = quota_gate.draining() if quota_gate is not None else "unknown"
-            message = warn_message(used, window, source, drain)
+            message = warn_message(used, window, source, drain) + cross_check_note(used, feed)
             sys.stderr.write(message)
             # stderr 在 exit 0 下**不進模型 context**（官方契約）⇒ 這一行才是本輪要修的
             # 那一半。事件名由 payload 傳，不得寫死（R83／D3：不符即整段被 CC 丟掉）。
@@ -1060,7 +1058,7 @@ def main() -> int:
         sys.stderr.write(hard_message(
             used, window, source, write_resume_plan(transcript),
             sdd_active=bool(os.environ.get("SDD_ACTIVE_VERSION")),
-        ))
+        ) + cross_check_note(used, feed))
         return 2
     except Exception:  # noqa: BLE001 — fail-open 是刻意的，見模組 docstring 的 P0
         return 0

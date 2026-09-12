@@ -12,10 +12,12 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import time
 import unittest
+import unittest.mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
@@ -122,6 +124,19 @@ class ScanTests(unittest.TestCase):
         self.assertIsNone(cw.measure(str(self.tmp / "nope.jsonl")))
         self.assertEqual(cw.scan_transcript(self.tmp / "nope.jsonl"), (None, 0, None))
         self.assertEqual(cw.compact_boundary_count(self.tmp / "nope.jsonl"), 0)
+
+    def test_no_feed_populates_harness_reason_not_harness_used(self) -> None:
+        """D32b-3：沒有 status line 進料時，`harness_used` 為 `None`，但
+        `harness_reason` 要帶著能讓人看懂的話——沒有 feed 也是一種 reason，不得被
+        悄悄吞掉（`session_start.py` 的 `[SDD-CTX]` 量測行靠這個欄位印出來）。"""
+        feed_dir = self.tmp / "feed"
+        with unittest.mock.patch.dict(
+                os.environ, {cw.CONTEXT_FEED_DIR_ENV: str(feed_dir)}, clear=False):
+            p = _write(self.tmp, [_assistant("claude-fable-5-1", 100)])
+            m = cw.measure(p)
+        self.assertIsNone(m.harness_used)
+        self.assertIsNotNone(m.harness_reason)
+        self.assertIn("無 feed", m.harness_reason)
 
     def test_all_synthetic_yields_used_none(self) -> None:
         p = _write(self.tmp, [_assistant("<synthetic>", 0), _assistant("<synthetic>", 0)])

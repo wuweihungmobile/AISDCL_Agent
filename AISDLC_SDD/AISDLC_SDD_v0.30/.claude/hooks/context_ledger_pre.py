@@ -247,19 +247,22 @@ def _session_id(inp: dict, transcript: object) -> str:
     return "unknown"
 
 
-def _measure(transcript: object) -> Measurement | None:
-    """量不到一律 None（C3）；任何例外也當量不到——量測本身絕不能成為 deny 的原因。"""
+def _measure(transcript: object, session_id: str | None = None) -> Measurement | None:
+    """量不到一律 None（C3）；任何例外也當量不到——量測本身絕不能成為 deny 的原因。
+    D32-4：`session_id` 轉給 `measure()` 讀 status line feed，填 `Measurement.harness_used`。"""
     try:
-        return measure(transcript)
+        return measure(transcript, session_id=session_id)
     except Exception:  # noqa: BLE001
         return None
 
 
-def _window_for(m: Measurement | None) -> tuple[int | None, str | None]:
+def _window_for(m: Measurement | None, sid: str | None = None) -> tuple[int | None, str | None]:
+    """D32-3：`sid` 轉給 `window_evidence()` 讀 status line feed（harness 回報階）；
+    缺席（既有呼叫端未改）時該階單純說不出話，行為與 D32 之前相同。"""
     if m is None or m.used is None:
         return None, None
     try:
-        return resolve_window(m.peak, **window_evidence(m.model))
+        return resolve_window(m.peak, **window_evidence(m.model, session_id=sid))
     except Exception:  # noqa: BLE001
         return None, None
 
@@ -449,8 +452,8 @@ def main() -> int:
         return _emit_pass([notice] if notice else [])
 
     transcript = inp.get("transcript_path")
-    m = _measure(transcript)
     sid = _session_id(inp, transcript)
+    m = _measure(transcript, sid)
 
     # FSM guardrail
     try:
@@ -461,7 +464,7 @@ def main() -> int:
     except Exception as exc:  # noqa: BLE001 — never hard-block on infra fault
         return _emit_pass([f"[SDD-FSM][WARN] guardrail unavailable: {exc!r}"])
 
-    window, source = _window_for(m)
+    window, source = _window_for(m, sid)
     notices: list[str] = []
 
     # D4／C5：AUTO_COMPACT_PENDING 而真實 used 已回落 ⇒ 視為 compaction 完成（含 Claude Code 自動 compact）。

@@ -2827,6 +2827,89 @@ class TestAutoClaudeHookSpawnsAreConsoleFree(unittest.TestCase):
              and not any(kw.arg == "creationflags" for kw in n.keywords)], [])
 
 
+def _extract_router_post_tool_use_timeout(source: str) -> float:
+    """從 `sdd_hook_router.py` 原始碼字面（ast，不 import）取 `_CHILD_TIMEOUT["PostToolUse"]`。"""
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id == "_CHILD_TIMEOUT" for t in node.targets
+        ):
+            value = ast.literal_eval(node.value)
+            return float(value["PostToolUse"])
+    raise AssertionError("_CHILD_TIMEOUT assignment not found in sdd_hook_router.py")
+
+
+def _extract_ledger_hook_child_timeout(source: str) -> float:
+    """從 `conversation_ledger.py` 原始碼字面（ast，不 import）取 `HOOK_CHILD_TIMEOUT_SEC`。"""
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id == "HOOK_CHILD_TIMEOUT_SEC" for t in node.targets
+        ):
+            return float(ast.literal_eval(node.value))
+    raise AssertionError("HOOK_CHILD_TIMEOUT_SEC assignment not found in conversation_ledger.py")
+
+
+class TestConversationLedgerChildTimeoutParity(unittest.TestCase):
+    """D31c-2（解複審 W-3，總架構師裁決 D31c）：`conversation_ledger.HOOK_CHILD_TIMEOUT_SEC`
+    是**手寫鏡射** `.claude/hooks/sdd_hook_router.py` 的 `_CHILD_TIMEOUT["PostToolUse"]`
+    （見該模組 docstring D31b-3 段的 WHY——`worst_case_ledger_budget_sec()` 的組合上界必須
+    留給 router 的 child timeout 足夠餘裕）。全庫此前**沒有任何跨層 parity 測試**斷言兩者
+    真的相等：`test_conversation_ledger.py::LedgerLockBudgetTests` 只是拿
+    `worst_case_ledger_budget_sec()` 跟 `conversation_ledger` 自己的
+    `HOOK_CHILD_TIMEOUT_SEC` 比——兩個常數同出一檔，自己跟自己比恆真，router 那邊的值
+    漂移了（例如有人改了 `_CHILD_TIMEOUT["PostToolUse"]` 卻忘記同步鏡射常數）不會被任何
+    測試發現。
+
+    讀原始碼字面（`ast.literal_eval`），刻意不 import 任一模組——AISDLC_SDD 與根層護欄層
+    是獨立部署面，兩子專案不跨 import（同模組既有慣例），一致性靠測試斷言而非匯入依賴。
+    SDD LATEST 走 SSOT 現查 `tools/lib/sdd_latest.resolve_latest_root`，不寫死版號：寫死
+    會在下一次 Copy-on-Evolve 後靜默指向凍結面，掃描面塌陷但判準照樣綠。
+    """
+
+    @staticmethod
+    def _ledger_source() -> str | None:
+        try:
+            sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
+            from sdd_latest import resolve_latest_root  # type: ignore[import-not-found]
+
+            root = resolve_latest_root(_REPO_ROOT / "AISDLC_SDD")
+            path = root / "tools" / "fsm_runtime" / "conversation_ledger.py"
+            return path.read_text(encoding="utf-8") if path.is_file() else None
+        except Exception:  # noqa: BLE001 — 解不出來一律降級成 skip，不得假綠
+            return None
+
+    def test_hook_child_timeout_matches_router_post_tool_use_timeout(self) -> None:
+        router_source = (_REPO_ROOT / ".claude" / "hooks" / "sdd_hook_router.py").read_text(
+            encoding="utf-8")
+        ledger_source = self._ledger_source()
+        if ledger_source is None:
+            self.skipTest("[TOOL-ABSENCE] 解不出 SDD LATEST 或 conversation_ledger.py 不存在")
+        router_timeout = _extract_router_post_tool_use_timeout(router_source)
+        ledger_timeout = _extract_ledger_hook_child_timeout(ledger_source)
+        self.assertEqual(
+            ledger_timeout, router_timeout,
+            f"conversation_ledger.HOOK_CHILD_TIMEOUT_SEC={ledger_timeout} 與 "
+            f"sdd_hook_router._CHILD_TIMEOUT['PostToolUse']={router_timeout} 不一致——"
+            "worst_case_ledger_budget_sec() 的組合上界失去意義（W-3）")
+
+    def test_injected_mismatch_is_caught(self) -> None:
+        """注入紅：把鏡射常數的原始碼字面改掉再餵給判準函式，必須真的抓到不一致（不得恆綠）。"""
+        router_source = (_REPO_ROOT / ".claude" / "hooks" / "sdd_hook_router.py").read_text(
+            encoding="utf-8")
+        ledger_source = self._ledger_source()
+        if ledger_source is None:
+            self.skipTest("[TOOL-ABSENCE] 解不出 SDD LATEST 或 conversation_ledger.py 不存在")
+        router_timeout = _extract_router_post_tool_use_timeout(router_source)
+        tampered = ledger_source.replace(
+            "HOOK_CHILD_TIMEOUT_SEC = 8.0", "HOOK_CHILD_TIMEOUT_SEC = 999.0")
+        self.assertNotEqual(tampered, ledger_source,
+                            "注入替換沒有命中任何文字 ⇒ 判準空轉（掃描面塌陷）")
+        tampered_timeout = _extract_ledger_hook_child_timeout(tampered)
+        self.assertNotEqual(tampered_timeout, router_timeout,
+                            "注入後兩者理應不相等，判準函式才有東西可抓")
+
+
 _NIGHTLY_INSTALLER = _REPO_ROOT / "tools" / "install_windows_nightly.ps1"
 #: schtasks Action 的載具行：`New-ScheduledTaskAction -Execute 'powershell.exe' … -Argument "…"`。
 #: 反引號續行 ⇒ 判準以「整支檔」為單位切出每一個 Action 的 `-Argument` 字串。

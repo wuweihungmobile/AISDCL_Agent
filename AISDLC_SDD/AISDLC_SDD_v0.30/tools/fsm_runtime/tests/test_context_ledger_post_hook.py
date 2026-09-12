@@ -296,15 +296,17 @@ class LockTimeoutDegradationTests(_IsolatedBase):
         out = self._run(50_000)
         elapsed = time.monotonic() - t0
         self.assertLess(elapsed, 8.0, msg=f"降級路徑耗時 {elapsed:.2f}s ≥ router child timeout 8s")
-        sidecar = self.root / f"CONTEXT-LEDGER-{date}.yaml.append"
-        self.assertTrue(sidecar.exists(), msg=f"逾時後 entry 必須落 sidecar：{sorted(p.name for p in self.root.iterdir())}")
+        # D31b-1：sidecar 改「每筆一檔」，精確檔名換成家族 glob（`<ledger>.yaml.append.<唯一後綴>`）。
+        sidecar_glob = f"CONTEXT-LEDGER-{date}.yaml.append.*"
+        self.assertTrue(list(self.root.glob(sidecar_glob)),
+                         msg=f"逾時後 entry 必須落 sidecar：{sorted(p.name for p in self.root.iterdir())}")
         self.assertNotIn("permissionDecision", out)
         self.assertTrue(lock.exists(), msg="降級路徑不得偷拆別人的 fresh sentinel")
         # G3（SD-R2-01）：sidecar 不是終點——鎖釋放後的下一次 merge 必須把降級 entry **持久化到主檔**
         # （修前：折回只發生在記憶體、`delta_calls < merge_every` 早退不寫檔 ⇒ sidecar 被 unlink、entry 永久消失）。
         lock.unlink()
         self._run(50_000)
-        self.assertFalse(sidecar.exists(), "sidecar 折回後應被消耗")
+        self.assertFalse(list(self.root.glob(sidecar_glob)), "sidecar 折回後應被消耗")
         doc = self._ledger()
         self.assertEqual(len(doc["entries"]), 2, msg=f"降級 entry 必須在下一次 merge 後真的在磁碟上：{doc}")
 
@@ -330,7 +332,9 @@ class LockTimeoutDegradationTests(_IsolatedBase):
         self.assertLess(elapsed, 8.0, msg=f"PENDING 出口路徑耗時 {elapsed:.2f}s ≥ router child timeout 8s")
         self.assertEqual(self._rt.state.current, "SPEC_DRAFTING")
         self.assertIn("[DONE]", out.get("additionalContext", ""), msg=out)
-        self.assertTrue((ledger_dir / f"CONTEXT-LEDGER-{date}.yaml.append").exists(), "逾時後 entry 必須落 sidecar")
+        # D31b-1：sidecar 改「每筆一檔」，精確檔名換成家族 glob。
+        self.assertTrue(list(ledger_dir.glob(f"CONTEXT-LEDGER-{date}.yaml.append.*")),
+                         "逾時後 entry 必須落 sidecar")
         self.assertTrue(lock.exists(), msg="不得偷拆別人的 fresh sentinel")
 
 

@@ -14,7 +14,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 import yaml  # noqa: E402
 
+from tools.fsm_runtime import conversation_ledger  # noqa: E402
 from tools.fsm_runtime.conversation_ledger import (  # noqa: E402
+    LedgerReplaceDenied,
     append_ledger_entry,
     cleanup_orphan_part_files,
     estimate_bash_command_tokens,
@@ -182,20 +184,21 @@ class LedgerPrecisionTests(unittest.TestCase):
 
     def test_sidecar_folded_below_threshold_is_persisted(self) -> None:
         """DEF-200-275 第四輪 G3（SD-R2-01，HEAD 既有；先紅再綠）：`_merge_locked` 先把 sidecar 併進記憶體
-        doc 並 unlink，隨後 `delta_calls < merge_every` 早退**不寫檔** ⇒ 折回的 entries 磁碟上永久消失
+        doc，隨後 `delta_calls < merge_every` 早退**不寫檔** ⇒ 折回的 entries 磁碟上永久消失
         （預設 merge_every=10 ⇒ 20 個 tick 只有 1 個真的持久化，其餘 19 個折回＝刪除）。F2 讓 post hook
-        逾時唯一出口是 sidecar，這條路徑因此承重；docstring 宣稱「下次 merge 折回主檔」必須為真。"""
+        逾時唯一出口是 sidecar，這條路徑因此承重；docstring 宣稱「下次 merge 折回主檔」必須為真。
+        D31b-1 起 `write_sidecar` 每筆一檔，故用 glob 找家族檔名而非精確比對單一路徑。"""
         date = _dt.date.today().isoformat()
         path = self.root / f"CONTEXT-LEDGER-{date}.yaml"
         self._write_ledger([{"tokens": 100, "phase": "pre"}])
         for tokens in (11, 22, 33):  # 3 筆共 66 tokens，遠低於 merge 門檻（10 calls × 2 entries）
             write_sidecar(self.root, {"tokens": tokens, "phase": "post"})
-        sidecar = path.with_suffix(path.suffix + ".append")
-        self.assertTrue(sidecar.exists())
+        sidecar_files = sorted(self.root.glob(f"{path.name}.append.*"))
+        self.assertEqual(len(sidecar_files), 3, msg="D31b：每筆一檔，應有 3 份 sidecar")
         res = merge_conversation_overhead_into_ledger(self.root, merge_every=10)
         self.assertFalse(res["merged"])
         self.assertEqual(res.get("sidecar_merged"), 3, msg=res)
-        self.assertFalse(sidecar.exists(), "sidecar 折回後應被消耗")
+        self.assertFalse(list(self.root.glob(f"{path.name}.append.*")), "sidecar 折回後應被消耗")
         doc = yaml.safe_load(path.read_text(encoding="utf-8"))
         self.assertEqual(len(doc["entries"]), 4, msg=f"折回的 3 筆必須在磁碟上：{doc}")
         self.assertEqual(doc["cumulative_tokens"], 166)
@@ -376,7 +379,11 @@ class LedgerBookmarkAndTearingTests(unittest.TestCase):
         self.assertIn("查表值", entry["window_source"])
 
     def test_concurrent_writers_do_not_tear(self) -> None:
-        """【A-2】兩個子行程各 100 次交錯 append／merge ⇒ 最終檔可解析、entries 數＝寫入總數（含 conv-overhead 列）。"""
+        """【A-2／D31 windows-compat-ci #220／#221 回歸鎖】兩個子行程各 100 次交錯 append／merge。
+        不變量＝**主檔＋sidecar 合計零遺失**（真實 entries 總數必為 200），而不是「主檔 entries 恰好
+        200」——D31-1／D31-2 的降級路徑會讓瞬時 `LedgerReplaceDenied` 折進 `.append` sidecar，這是
+        設計內的正確行為，不是遺失。子行程結束後先呼叫一次 `merge_conversation_overhead_into_ledger`
+        把殘留的 sidecar 折回主檔，再斷言 real==200、無殘留 `.append*`／`.part.*`／`.corrupt-*`。"""
         import subprocess
         import sys as _sys
 
@@ -394,6 +401,9 @@ class LedgerBookmarkAndTearingTests(unittest.TestCase):
         ]
         for proc in procs:
             self.assertEqual(proc.wait(timeout=120), 0)
+        # 折回任何殘留 sidecar（正常路徑下應該沒有；D31 降級路徑下可能有），讓「合計零遺失」
+        # 這個不變量可以只看主檔就驗證完。
+        merge_conversation_overhead_into_ledger(self.root)
         doc = self._doc()
         entries = doc["entries"]
         real = [e for e in entries if e.get("phase") in ("pre", "post")]
@@ -401,7 +411,362 @@ class LedgerBookmarkAndTearingTests(unittest.TestCase):
         self.assertEqual(len(real), 200, msg="交錯寫入撕裂／遺失 entries")
         self.assertEqual(doc["cumulative_tokens"], 200 + sum(e["tokens"] for e in conv))
         self.assertFalse(list(self.root.glob("*.part.*")), msg="pid 專屬暫存檔不得殘留")
+        self.assertFalse(list(self.root.glob("*.append*")), msg="sidecar 應已被折回主檔")
         self.assertFalse(list(self.root.glob("*.corrupt-*")), msg="有鎖保護下不應出現損毀 rotate")
+
+
+class LedgerReplaceRetryTests(unittest.TestCase):
+    """D31-5(ii)：windows-compat-ci #220／#221 回歸鎖——`os.replace` 短暫被拒絕存取時的重試／降級
+    路徑。`_merge_sidecar_if_present` 本身（folding／去重／delayed-delete）的測試見
+    `LedgerSidecarFoldingTests`（D31b-2 起認領改名已被複審 REJECT 並移除，見該類別 docstring）。"""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.date = _dt.date.today().isoformat()
+        self.path = self.root / f"CONTEXT-LEDGER-{self.date}.yaml"
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    @staticmethod
+    def _always_deny_replace(_src, _dst):
+        raise PermissionError(5, "Access is denied (simulated)")
+
+    def _flaky_replace(self, deny_count: int):
+        real_replace = os.replace
+        calls = {"n": 0}
+
+        def _replace(src, dst):
+            if calls["n"] < deny_count:
+                calls["n"] += 1
+                raise PermissionError(5, "Access is denied (simulated)")
+            return real_replace(src, dst)
+
+        return _replace, calls
+
+    def test_atomic_write_retries_transient_permission_denied(self) -> None:
+        """先紅（無重試時第一次 PermissionError 就會逸出）後綠：瞬時拒絕 2 次後第 3 次成功。"""
+        flaky, calls = self._flaky_replace(deny_count=2)
+        with patch.object(conversation_ledger.os, "replace", side_effect=flaky):
+            conversation_ledger._atomic_write_yaml(
+                self.path, {"date": self.date, "cumulative_tokens": 0, "entries": []},
+            )
+        self.assertEqual(calls["n"], 2, "應在重試預算內於第 3 次成功，不多不少")
+        self.assertTrue(self.path.exists())
+        doc = yaml.safe_load(self.path.read_text(encoding="utf-8"))
+        self.assertEqual(doc["cumulative_tokens"], 0)
+
+    def test_atomic_write_raises_ledger_replace_denied_when_exhausted(self) -> None:
+        """永遠拋 PermissionError ⇒ 重試耗盡後拋具名 LedgerReplaceDenied（不是裸 PermissionError）。"""
+        with patch.object(conversation_ledger.os, "replace", side_effect=self._always_deny_replace), \
+             patch.object(conversation_ledger.time, "sleep", return_value=None):
+            with self.assertRaises(LedgerReplaceDenied):
+                conversation_ledger._atomic_write_yaml(
+                    self.path, {"date": self.date, "cumulative_tokens": 0, "entries": []},
+                )
+        self.assertFalse(self.path.exists(), "永遠失敗時主檔不得被建立")
+        self.assertFalse(list(self.root.glob("*.part.*")), "pid 專屬暫存檔須在 finally 被清掉")
+
+    def test_append_ledger_entry_degrades_to_sidecar_on_replace_denied(self) -> None:
+        """【D31-2】`LedgerReplaceDenied` ⇒ 主檔位元組不變＋entry 折進 sidecar（不是靜默丟成 0）。
+
+        D31b-1 起 `_write_sidecar` 本身也走 `_replace_with_retry`（每筆一檔、寫成即不可變），故本測試
+        只鎖定**主檔**檔名拒絕存取——sidecar 用全新的 pid+時間戳專屬檔名，現實中不會撞上同一個
+        「另一行程持著 path 讀」的 WinError 5/32（見鐵律三「Windows 檔案鎖」列）；全域拒絕會製造一個
+        不存在的複合失效情境（主檔和全新 sidecar 檔同時被拒），偏離本測試要驗的降級路徑。"""
+        date = self.date
+        doc = {"date": date, "cumulative_tokens": 5, "entries": [{"tokens": 5, "phase": "pre"}]}
+        self.path.write_text(yaml.safe_dump(doc, allow_unicode=True, sort_keys=False), encoding="utf-8")
+        before = self.path.read_bytes()
+        real_replace = os.replace
+
+        def _deny_main_only(src, dst):
+            if Path(dst) == self.path:
+                raise PermissionError(5, "Access is denied (simulated)")
+            return real_replace(src, dst)
+
+        with patch.object(conversation_ledger.os, "replace", side_effect=_deny_main_only), \
+             patch.object(conversation_ledger.time, "sleep", return_value=None):
+            cumulative = append_ledger_entry(self.root, {"tokens": 9, "phase": "post", "tool": "Bash"})
+        self.assertEqual(self.path.read_bytes(), before, "主檔位元組不得改變")
+        self.assertEqual(cumulative, 14, "回傳值＝主檔既有 cumulative(5) + 本筆 tokens(9)")
+        sidecar_files = list(self.root.glob(f"{self.path.name}.append.*"))
+        self.assertEqual(len(sidecar_files), 1, "entry 必須折進 sidecar，不得靜默丟棄")
+        loaded = list(yaml.load_all(sidecar_files[0].read_text(encoding="utf-8"), Loader=yaml.SafeLoader))
+        flat = [item for chunk in loaded for item in (chunk if isinstance(chunk, list) else [chunk])]
+        self.assertEqual(len(flat), 1)
+        self.assertEqual(flat[0]["tokens"], 9)
+
+    def test_unreadable_ledger_still_returns_zero_without_sidecar(self) -> None:
+        """G4 語意不得被 D31-2 改動：讀不到（非 replace 被拒）⇒ 回 0，且不建 sidecar。"""
+        doc = {"date": self.date, "cumulative_tokens": 6,
+               "entries": [{"tokens": 6, "phase": "pre"}],
+               "conversation_overhead": {"last_merge_entry_index": 6}}
+        self.path.write_text(yaml.safe_dump(doc, allow_unicode=True, sort_keys=False), encoding="utf-8")
+
+        # `_load_ledger_doc` 對讀不到（OSError）的既有契約是原樣拋出（G4，見該函式 docstring）；
+        # 直接 patch 它，把「讀不到」與本測試組的「replace 被拒」情境隔開，避免用兩種注入手法
+        # 互相污染判準。
+        with patch.object(conversation_ledger, "_load_ledger_doc", side_effect=PermissionError(13, "denied")):
+            result = append_ledger_entry(self.root, {"tokens": 7, "phase": "post"})
+        self.assertEqual(result, 0)
+        sidecar = self.path.with_suffix(self.path.suffix + ".append")
+        self.assertFalse(sidecar.exists(), "G4：讀不到不得建立 sidecar")
+
+    def test_merge_reports_io_error_on_replace_denied_without_raising(self) -> None:
+        """merge 公開入口對 LedgerReplaceDenied 的處理與既有 OSError 路徑一致：回報 io_error，不 raise。"""
+        self.path.write_text(
+            yaml.safe_dump(
+                {"date": self.date, "cumulative_tokens": 2000,
+                 "entries": [{"tokens": 100, "phase": "pre" if i % 2 == 0 else "post"} for i in range(20)]},
+                allow_unicode=True, sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
+        with patch.object(conversation_ledger.os, "replace", side_effect=self._always_deny_replace), \
+             patch.object(conversation_ledger.time, "sleep", return_value=None):
+            res = merge_conversation_overhead_into_ledger(self.root, merge_every=10)
+        self.assertFalse(res["merged"])
+        self.assertIn("io_error", res, msg=res)
+        self.assertIn("LedgerReplaceDenied", res["io_error"])
+
+class LedgerSidecarFoldingTests(unittest.TestCase):
+    """D31b-2／D31b-5(i)(ii)(iii)：sidecar 改「每筆一檔、寫成即不可變」後的折回語意——取代
+    第一棒 D31-3 的認領改名（claim-rename）測試，該手法已被四方複審 REJECT（C3／W-1，見
+    `conversation_ledger.py` 模組 docstring D31b 段）。"""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.date = _dt.date.today().isoformat()
+        self.path = self.root / f"CONTEXT-LEDGER-{self.date}.yaml"
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _seed_primary(self, tokens: int = 5) -> None:
+        doc = {"date": self.date, "cumulative_tokens": tokens,
+               "entries": [{"tokens": tokens, "phase": "pre"}]}
+        self.path.write_text(yaml.safe_dump(doc, allow_unicode=True, sort_keys=False), encoding="utf-8")
+
+    def test_merge_sidecar_if_present_returns_files_without_deleting_them(self) -> None:
+        """回傳值是「可安全刪除的清單」，不是「已刪除」——刪除時機由呼叫端（`_merge_locked`）決定，
+        必須晚於主檔持久化（D31b-2 的核心正確性保證，見該函式 docstring）。"""
+        self._seed_primary()
+        write_sidecar(self.root, {"tokens": 7, "phase": "post"})
+        doc = yaml.safe_load(self.path.read_text(encoding="utf-8"))
+        merged, to_delete = conversation_ledger._merge_sidecar_if_present(self.path, doc)
+        self.assertEqual(merged, 1)
+        self.assertEqual(len(doc["entries"]), 2)
+        self.assertEqual(doc["cumulative_tokens"], 12)
+        self.assertEqual(len(to_delete), 1)
+        self.assertTrue(to_delete[0].exists(),
+                         "回傳的刪除清單此刻必須仍在磁碟上——尚未持久化前不得先刪來源")
+
+    def test_c3_style_race_two_sidecars_both_survive_fold(self) -> None:
+        """【C3 情境正式回歸鎖】複審 c3_race_repro.py 的思路：認領改名版本會讓後寫入者的 fd 寫進
+        無目錄項的 inode 而遺失；D31b 每筆一檔沒有共用可變檔，第二個 appender 的寫入落在自己專屬
+        的檔名，兩筆都必須能被合併進主檔——即使兩次 `write_sidecar` 呼叫穿插在兩輪
+        `_merge_sidecar_if_present` 之間。"""
+        self._seed_primary()
+        write_sidecar(self.root, {"tokens": 3, "phase": "post", "who": "A"})
+        doc = yaml.safe_load(self.path.read_text(encoding="utf-8"))
+        merged1, to_delete1 = conversation_ledger._merge_sidecar_if_present(self.path, doc)
+        self.assertEqual(merged1, 1)
+        # 模擬「B 在 A 合併期間才寫入」——B 的 sidecar 檔名與 A 的完全不相干，落在 A 已讀完之後
+        # 才出現，不受 A 的讀取／持久化影響（結構性不再有共用檔可撞，這正是 C3 的修法）。
+        write_sidecar(self.root, {"tokens": 4, "phase": "post", "who": "B"})
+        conversation_ledger._atomic_write_yaml(self.path, doc)
+        conversation_ledger._delete_sidecar_sources(to_delete1)
+        doc2 = yaml.safe_load(self.path.read_text(encoding="utf-8"))
+        merged2, to_delete2 = conversation_ledger._merge_sidecar_if_present(self.path, doc2)
+        self.assertEqual(merged2, 1, msg="B 的 sidecar 必須在下一輪被折回，不得遺失")
+        conversation_ledger._atomic_write_yaml(self.path, doc2)
+        conversation_ledger._delete_sidecar_sources(to_delete2)
+        final = yaml.safe_load(self.path.read_text(encoding="utf-8"))
+        whos = sorted(e.get("who") for e in final["entries"] if e.get("who"))
+        self.assertEqual(whos, ["A", "B"], msg=f"兩筆都必須在主檔：{final}")
+
+    def test_w1_style_crash_after_persist_before_delete_does_not_duplicate(self) -> None:
+        """【W-1 情境正式回歸鎖】模擬「主檔已持久化、但刪除來源前行程被砍」：
+        `folded_sidecar_ids` 書籤必須擋下下一次 merge 把同一個 sidecar 檔內容重複折算一次。"""
+        self._seed_primary()
+        write_sidecar(self.root, {"tokens": 7, "phase": "post"})
+        doc = yaml.safe_load(self.path.read_text(encoding="utf-8"))
+        merged, to_delete = conversation_ledger._merge_sidecar_if_present(self.path, doc)
+        self.assertEqual(merged, 1)
+        conversation_ledger._atomic_write_yaml(self.path, doc)
+        # 刻意「不」呼叫 `_delete_sidecar_sources`——模擬持久化成功後、刪除前被砍。
+        self.assertTrue(to_delete[0].exists(), "來源檔應仍在磁碟上（尚未執行刪除）")
+        doc2 = yaml.safe_load(self.path.read_text(encoding="utf-8"))
+        self.assertEqual(len(doc2["entries"]), 2, "主檔已持久化，這一筆已經在裡面")
+        merged2, to_delete2 = conversation_ledger._merge_sidecar_if_present(self.path, doc2)
+        self.assertEqual(merged2, 0, msg="同一筆不得因來源檔還在就被重複折算")
+        self.assertEqual(len(doc2["entries"]), 2, "doc 不得被重複 append")
+        self.assertEqual(to_delete2, to_delete, "殘留的來源檔仍應被回報供下次清理")
+
+    def test_orphaned_merging_claim_file_from_first_pass_is_folded(self) -> None:
+        """相容性：第一棒 D31 認領改名留下的孤兒 `.append.merging.<pid>` 檔（行程認領後被砍、零
+        清理邏輯）視同 sidecar 來源折回——相容一輪後可移除（見 `_iter_sidecar_sources`）。"""
+        self._seed_primary()
+        orphan = self.path.with_name(f"{self.path.name}.append.merging.54321")
+        with orphan.open("w", encoding="utf-8") as f:
+            yaml.safe_dump([{"tokens": 2, "phase": "post"}], f, allow_unicode=True, sort_keys=False)
+        doc = yaml.safe_load(self.path.read_text(encoding="utf-8"))
+        merged, to_delete = conversation_ledger._merge_sidecar_if_present(self.path, doc)
+        self.assertEqual(merged, 1)
+        self.assertEqual(to_delete, [orphan])
+
+    def test_legacy_shared_append_file_is_folded(self) -> None:
+        """相容性：D31b 之前的共用單檔 `<ledger>.append` 仍能被折回（部署當天可能還有殘留）。"""
+        self._seed_primary()
+        legacy = conversation_ledger._sidecar_path(self.path)
+        with legacy.open("w", encoding="utf-8") as f:
+            yaml.safe_dump([{"tokens": 1}, {"tokens": 2}], f, allow_unicode=True, sort_keys=False)
+        doc = yaml.safe_load(self.path.read_text(encoding="utf-8"))
+        merged, to_delete = conversation_ledger._merge_sidecar_if_present(self.path, doc)
+        self.assertEqual(merged, 2)
+        self.assertEqual(to_delete, [legacy])
+
+    def test_corrupt_sidecar_is_skipped_not_deleted(self) -> None:
+        """損毀的 sidecar 檔（無法解析）⇒ 跳過、不列入刪除清單，保留現場供事後查驗。"""
+        self._seed_primary()
+        broken = self.path.with_name(f"{self.path.name}.append.99999.1.0")
+        broken.write_text("not: [valid, yaml\n", encoding="utf-8")
+        doc = yaml.safe_load(self.path.read_text(encoding="utf-8"))
+        merged, to_delete = conversation_ledger._merge_sidecar_if_present(self.path, doc)
+        self.assertEqual(merged, 0)
+        self.assertEqual(to_delete, [])
+        self.assertTrue(broken.exists(), "損毀檔不得被刪除")
+
+
+class LedgerSidecarPartRetentionTests(unittest.TestCase):
+    """D31c-1（解複審 W-4，總架構師裁決 D31c）：`_write_sidecar` 在 `LedgerReplaceDenied` 時保留
+    tmp（此刻是這筆 entry 的唯一合法副本），`_iter_sidecar_sources` 依「來源 pid 已死、或 mtime
+    超過 `_SIDECAR_PART_FOLD_AGE_SEC` 秒」判準把它當一般 sidecar 折回；`cleanup_orphan_part_files`
+    起不再主動清這一類殘留檔（見 `conversation_ledger.py` 模組 docstring D31c 段）。"""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.date = _dt.date.today().isoformat()
+        self.path = self.root / f"CONTEXT-LEDGER-{self.date}.yaml"
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _seed_primary(self, tokens: int = 5) -> None:
+        doc = {"date": self.date, "cumulative_tokens": tokens,
+               "entries": [{"tokens": tokens, "phase": "pre"}]}
+        self.path.write_text(yaml.safe_dump(doc, allow_unicode=True, sort_keys=False), encoding="utf-8")
+
+    def test_replace_denied_keeps_a_valid_yaml_tmp_not_an_empty_husk(self) -> None:
+        """(D31c-4(i))【先紅後綠】永遠拋 `LedgerReplaceDenied` ⇒ `_write_sidecar` 後 tmp 仍在磁碟上，
+        內容是合法可解析的 YAML list（W-4 修復前：`finally: tmp.unlink()` 會在這裡把它刪掉，
+        整筆 entry 無聲消失、不留殘檔）。"""
+        with patch.object(conversation_ledger, "_replace_with_retry",
+                           side_effect=LedgerReplaceDenied("simulated")):
+            conversation_ledger._write_sidecar(self.path, {"tokens": 11, "phase": "post"})
+        part_files = list(self.root.glob(f"{self.path.name}.append.part.*"))
+        self.assertEqual(len(part_files), 1, "replace 被拒後 tmp 必須被保留，不得被 finally 清掉")
+        loaded = yaml.safe_load(part_files[0].read_text(encoding="utf-8"))
+        self.assertEqual(loaded, [{"tokens": 11, "phase": "post"}],
+                         "保留的 tmp 必須是這筆 entry 的合法完整副本")
+
+    def test_stale_part_is_folded_and_deleted_after_persist(self) -> None:
+        """(D31c-4(ii) 前半) mtime 超過折回門檻 ⇒ 下次 merge 把它當 sidecar 來源折進主檔，
+        持久化成功後刪除來源。"""
+        self._seed_primary()
+        with patch.object(conversation_ledger, "_replace_with_retry",
+                           side_effect=LedgerReplaceDenied("simulated")):
+            conversation_ledger._write_sidecar(self.path, {"tokens": 22, "phase": "post"})
+        part_files = list(self.root.glob(f"{self.path.name}.append.part.*"))
+        self.assertEqual(len(part_files), 1)
+        old = time.time() - (conversation_ledger._SIDECAR_PART_FOLD_AGE_SEC + 5)
+        os.utime(part_files[0], (old, old))
+        doc = yaml.safe_load(self.path.read_text(encoding="utf-8"))
+        merged, to_delete = conversation_ledger._merge_sidecar_if_present(self.path, doc)
+        self.assertEqual(merged, 1, "夠舊的 .append.part.* 必須被當來源折回")
+        self.assertEqual(to_delete, part_files)
+        conversation_ledger._atomic_write_yaml(self.path, doc)
+        conversation_ledger._delete_sidecar_sources(to_delete)
+        self.assertFalse(part_files[0].exists(), "折回並持久化成功後，來源必須被刪除")
+        final_doc = yaml.safe_load(self.path.read_text(encoding="utf-8"))
+        self.assertIn(22, [e.get("tokens") for e in final_doc["entries"]])
+
+    def test_fresh_and_alive_part_is_not_folded_or_deleted(self) -> None:
+        """(D31c-4(ii) 後半) mtime 新鮮且來源 pid（本行程自己）仍活著 ⇒ 本輪不折、不刪——
+        避免讀到另一行程正在寫入中的半成品。"""
+        self._seed_primary()
+        with patch.object(conversation_ledger, "_replace_with_retry",
+                           side_effect=LedgerReplaceDenied("simulated")):
+            conversation_ledger._write_sidecar(self.path, {"tokens": 33, "phase": "post"})
+        part_files = list(self.root.glob(f"{self.path.name}.append.part.*"))
+        self.assertEqual(len(part_files), 1)
+        doc = yaml.safe_load(self.path.read_text(encoding="utf-8"))
+        merged, to_delete = conversation_ledger._merge_sidecar_if_present(self.path, doc)
+        self.assertEqual(merged, 0, "新鮮且來源行程仍活著時不得折回")
+        self.assertEqual(to_delete, [])
+        self.assertTrue(part_files[0].exists(), "未折回的來源不得被刪除")
+
+    def test_cleanup_orphan_part_files_leaves_append_part_alone(self) -> None:
+        """(D31c-4(iii) 前半) `cleanup_orphan_part_files` 對 `.append.part.*`（即使夠舊 + pid 已死）
+        一律不刪——這一類是 sidecar 的唯一副本，直接刪等於資料遺失，交由折回路徑處理。"""
+        dead = LedgerOrphanPartCleanupTests._dead_pid()
+        part = self.root / f"{self.path.name}.append.part.{dead}.123456789.0"
+        part.write_text(yaml.safe_dump([{"tokens": 1}], allow_unicode=True), encoding="utf-8")
+        old = time.time() - 700
+        os.utime(part, (old, old))
+        removed = cleanup_orphan_part_files(self.root)
+        self.assertEqual(removed, 0)
+        self.assertTrue(part.exists(), "sidecar 的 .append.part.* 不得被 cleanup_orphan_part_files 刪除")
+
+    def test_cleanup_orphan_part_files_still_removes_dead_yaml_snapshot_part(self) -> None:
+        """(D31c-4(iii) 後半) 對照組：主檔整本快照的孤兒 `.yaml.part.<dead pid>` 行為不變——
+        它是可再生快照，仍會被清掉（回歸鎖：不得因本輪改動連帶弄壞既有行為）。"""
+        dead = LedgerOrphanPartCleanupTests._dead_pid()
+        snap = self.root / f"{self.path.name}.part.{dead}"
+        snap.write_text("date: '2026-09-12'\n", encoding="utf-8")
+        old = time.time() - 700
+        os.utime(snap, (old, old))
+        removed = cleanup_orphan_part_files(self.root)
+        self.assertGreaterEqual(removed, 1)
+        self.assertFalse(snap.exists())
+
+    def test_corrupt_append_part_prints_ascii_warning_and_is_not_deleted(self) -> None:
+        """YAML 半成品（解析失敗）的 `.append.part.*`：折回時跳過不刪、印一次 ASCII 警告
+        （與既有「損毀 sidecar 跳過不刪」案一致，見 `_merge_sidecar_if_present`）。"""
+        self._seed_primary()
+        broken = self.root / f"{self.path.name}.append.part.999999.1.0"
+        broken.write_text("not: [valid, yaml\n", encoding="utf-8")
+        old = time.time() - (conversation_ledger._SIDECAR_PART_FOLD_AGE_SEC + 5)
+        os.utime(broken, (old, old))
+        doc = yaml.safe_load(self.path.read_text(encoding="utf-8"))
+        import io
+        captured = io.StringIO()
+        with patch.object(conversation_ledger.sys, "stderr", captured):
+            merged, to_delete = conversation_ledger._merge_sidecar_if_present(self.path, doc)
+        self.assertEqual(merged, 0)
+        self.assertEqual(to_delete, [])
+        self.assertTrue(broken.exists(), "損毀的 .append.part.* 不得被刪除")
+        warning = captured.getvalue()
+        self.assertIn("sidecar file failed to parse", warning)
+        warning.encode("ascii")  # 必須是純 ASCII——不得在非 UTF-8 locale 下讓 print 本身 crash
+
+
+class LedgerLockBudgetTests(unittest.TestCase):
+    """D31b-3（解複審 W-2）：post hook 在同一個 `ledger_lock` 臨界區內 append + merge 各一次
+    `_replace_with_retry`＋解鎖 `_try_unlink` 重試，合計不得逼近 `sdd_hook_router.py` 的 8s child
+    timeout——必須留至少 2s 給 stdin／measure。"""
+
+    def test_worst_case_ledger_budget_leaves_headroom_for_router_timeout(self) -> None:
+        budget = conversation_ledger.worst_case_ledger_budget_sec()
+        self.assertLessEqual(
+            budget, conversation_ledger.HOOK_CHILD_TIMEOUT_SEC - 2.0,
+            msg=f"worst_case_ledger_budget_sec()={budget}s 逼近 router {conversation_ledger.HOOK_CHILD_TIMEOUT_SEC}s "
+                "child timeout，留給 stdin/measure 的餘裕 <2s",
+        )
 
 
 class LedgerPerformanceTests(unittest.TestCase):
@@ -410,7 +775,21 @@ class LedgerPerformanceTests(unittest.TestCase):
     成本隨帳本大小線性增長；`append_ledger_entry`／`merge_conversation_overhead_into_ledger` 各自對
     今日帳本做一次完整 read-modify-write，帳本沒有上限 ⇒ 隨一天推進單次呼叫越來越慢。
     修法＝改用 libyaml 綁定的 `CSafeLoader`/`CSafeDumper`（不可用時 fallback 回純 Python，格式與語意
-    完全不變，只是換一個更快的實作）。"""
+    完全不變，只是換一個更快的實作）。
+
+    D31b-4（總架構師裁決；解複審 C5／W-3）：牆鐘門檻無法可靠鑑別「libyaml 退化」——共用 CI 跑者的
+    變異量級與退化的減速量級同一數量級，兩者在 CI 上分不開（複審 c5_perf_check.py 實測：1500 筆
+    純 Python 0.6718s vs C 加速 0.1343s，退化後仍可能落在放寬後的門檻內而被牆鐘誤判為通過）；且
+    原本靠 `os.environ.get("CI")` 放寬門檻的條件對 macOS CI 不成立——`.github/workflows/
+    macos-compat-ci.yml` 對 `runs-on: macos-latest` 也設 `CI=true`（GitHub Actions 平台預設），
+    而 docstring 曾宣稱「mac 仍 0.3s」，兩者互斥。修法：
+    (a) 改用身分斷言（`_yaml_loader() is yaml.CSafeLoader`）直接檢查退化與否，不看牆鐘；
+    (b) `LIMIT_SEC` 不再依賴 `CI` 環境變數，只依平台——Windows 放寬到 1.0s（windows-compat-ci
+        #220／#221 實測 0.3027s／0.3084s，僅超出 mac 量出的 0.3s 硬門檻約 1~3%，屬共用跑者變異
+        而非效能退化），其餘平台（含 macOS CI）維持原始 0.3s 緊門檻，牆鐘只負責守住「回到第五輪
+        修復前的 5s+ 撞 router 8s child timeout」這條粗防線，真正的退化鑑別交給 (a)。"""
+
+    LIMIT_SEC = 1.0 if sys.platform.startswith("win") else 0.3
 
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
@@ -448,6 +827,25 @@ class LedgerPerformanceTests(unittest.TestCase):
         }
         self.path.write_text(yaml.safe_dump(doc, allow_unicode=True, sort_keys=False), encoding="utf-8")
 
+    def test_libyaml_c_bindings_are_active_when_available(self) -> None:
+        """D31b-4(a)：libyaml 可用時必須真的在用（不是退化回純 Python 卻靠放寬後的牆鐘僥倖通過）。
+        `hasattr` 為假時不斷言——本環境本來就沒裝 libyaml，不是本模組的缺陷；改印一行提示，讓 (b)
+        的牆鐘門檻承擔這種環境下的粗防線（不 skip：測試仍正常通過並留下可見痕跡）。"""
+        import yaml as _yaml
+
+        if not hasattr(_yaml, "CSafeLoader"):
+            # ASCII-only：本檔含 `if __name__ == "__main__"` 入口點，
+            # tools/tests/test_subprocess_encoding_hygiene.py 的 stdio 保護判準會擋非 ASCII print。
+            print(
+                "[SKIP-ASSERT] no libyaml binding (yaml.CSafeLoader) in this env; "
+                "degraded-loader coverage falls back to the wall-clock threshold below, "
+                "not a conversation_ledger.py defect.", file=sys.stderr,
+            )
+            return
+        self.assertIs(conversation_ledger._yaml_loader(), _yaml.CSafeLoader,
+                      "libyaml 可用卻沒被用上＝C5 指出的純 Python 退化")
+        self.assertIs(conversation_ledger._yaml_dumper(), _yaml.CSafeDumper)
+
     def test_append_ledger_entry_is_fast_at_1500_entry_scale(self) -> None:
         """硬性驗收（DEF-200-275 第五輪 Dev-C 任務書）：1500 筆／約 400KB 同等規模下 append <0.3s。"""
         self._seed_realistic(1500)
@@ -460,7 +858,7 @@ class LedgerPerformanceTests(unittest.TestCase):
             "observed_used": 700000, "window": 967000, "window_source": "test",
         })
         elapsed = time.perf_counter() - t0
-        self.assertLess(elapsed, 0.3, msg=f"append_ledger_entry 耗時 {elapsed:.4f}s ≥ 0.3s 上界")
+        self.assertLess(elapsed, self.LIMIT_SEC, msg=f"append_ledger_entry 耗時 {elapsed:.4f}s ≥ {self.LIMIT_SEC}s 上界")
 
     def test_merge_conversation_overhead_is_fast_at_1500_entry_scale(self) -> None:
         """post hook 在同一把鎖內緊接 append 之後呼叫 merge——兩者合計才是端到端耗時，merge 本身也不得是瓶頸。"""
@@ -468,7 +866,7 @@ class LedgerPerformanceTests(unittest.TestCase):
         t0 = time.perf_counter()
         merge_conversation_overhead_into_ledger(self.root, merge_every=10)
         elapsed = time.perf_counter() - t0
-        self.assertLess(elapsed, 0.3, msg=f"merge_conversation_overhead_into_ledger 耗時 {elapsed:.4f}s ≥ 0.3s 上界")
+        self.assertLess(elapsed, self.LIMIT_SEC, msg=f"merge_conversation_overhead_into_ledger 耗時 {elapsed:.4f}s ≥ {self.LIMIT_SEC}s 上界")
 
 
 class LedgerOrphanPartCleanupTests(unittest.TestCase):

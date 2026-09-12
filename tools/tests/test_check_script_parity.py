@@ -219,13 +219,10 @@ class TestR13LibAndInstallerEnrollment(unittest.TestCase):
     def test_tools_lib_covered_by_scan_surface(self) -> None:
         """掃描邊界必**涵蓋** tools/lib（回退即紅——邊界縮面零訊號的防護本體）。
 
-        R60 Scan-E E-A-01 訂正：掃描根自此收斂為 SSOT `SCRIPT_SCAN_ROOTS` 三棵樹且
-        **遞迴**，`tools/lib` 由 `tools` 樹自動涵蓋、不再單獨列名，故原斷言
-        `assertIn("tools/lib", _PAIR_SCAN_DIRS)` 對新形狀已無意義（它會在「掃描面
-        其實變大了」的情況下翻紅，激勵方向相反）。改鎖語意本體兩層：① `tools/lib`
-        必須落在某個掃描根底下；② 真磁碟上該目錄的腳本必須**真的被列舉到**——
-        後者才是「非遞迴回退」會踩到的斷言（遞迴性本體另由
-        `tools/tests/test_script_scan_surface_ssot.py` 以合成假樹守，不依賴 repo 現況）。
+        R60 Scan-E E-A-01 訂正：掃描根收斂為 SSOT `SCRIPT_SCAN_ROOTS` 三棵樹且遞迴，
+        `tools/lib` 由 `tools` 樹自動涵蓋，故改鎖語意本體兩層：① 必須落在某個掃描根
+        底下；② 真磁碟上該目錄的腳本必須真的被列舉到（遞迴性本體另由姊妹鎖以合成假樹
+        守，不依賴 repo 現況）。
         """
         covered = [
             root for root in m._PAIR_SCAN_DIRS
@@ -422,13 +419,10 @@ class TestRunTlcInvocationParityLock(unittest.TestCase):
 class TestR69ExitCodeContract(unittest.TestCase):
     """R69：`run_self_evolution.{sh,ps1}` 退出碼契約三方鎖（SSOT ↔ .sh ↔ .ps1）。
 
-    WHY（測意圖非僅行為，Rule 9）：R68 統一了兩側碼值、並在兩側檔頭寫「規格側見
-    SDD_SELF_EVOLUTION.md『退出碼契約』節」——**該節當時不存在**（grep 零命中），
-    而該腳本對在 `_EXEMPT_PAIRS` 屬 `unpinned`、零機械 parity ⇒ 契約落地即孤兒：
-    任一側改碼零訊號、兩側一起漂離規格也零訊號（同型漂移 DEF-101-264 已復發過）。
-    本鎖用 fixture 注入變異自證鑑別力：**單側改壞必紅**（兩個方向各一），
-    **實作新增未登記碼必紅**（第一道只讀註解，看不到實作），**抽不到即紅**
-    （空集合逐筆相等會恆真＝靜默失守）。
+    WHY（Rule 9）：兩側檔頭曾聲稱規格側有節可查，但該節當時不存在且零機械 parity
+    ⇒ 契約落地即孤兒。fixture 注入自證鑑別力：單側改壞必紅、實作新增未登記碼必紅、
+    抽不到即紅（空集合逐筆相等恆真會靜默失守）。史料見證據檔
+    〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
 
     _SPEC = (
@@ -584,17 +578,13 @@ class TestR69ExitCodeContract(unittest.TestCase):
 
 
 class TestLatestThinnessPin(unittest.TestCase):
-    """LATEST 版薄殼 hash 釘選的紅/綠自證（R65 立，**本輪改為委派**）。
+    """LATEST 版薄殼 hash 釘選的紅/綠自證（R65 立，本輪改為委派）。
 
-    R65 起本鎖接手退場的 `_TLC_TRACK_ENROLLED` 的「run_tlc.{sh,ps1} 兩側檔案存在、
-    內容未偏離已核准樣子」這條斷言，且比舊鎖更嚴格（舊鎖只比對抽取到的軌 token
-    集合，本鎖鎖住整份正規化內容）。
-
-    🔴 本輪（E-06／R77-54①）：受測對象由本檔的第二套實作改為
-    `check_wrapper_thinness`（唯一實作）＋ 本檔的薄呼叫點。**斷言逐條保留**——
-    這一整個類別就是併表的 dominance test 本體：若併表弄丟了任何一條，下面任一支
-    會由紅轉綠（＝抓不到它該抓的東西），而不是靜悄悄地消失。
-    注入面因此改 patch `check_wrapper_thinness` 的表與 LATEST 解析器。
+    R65 起本鎖接手 `run_tlc.{sh,ps1}` 兩側內容未偏離的斷言，比舊鎖更嚴格
+    （鎖住整份正規化內容而非只比對軌 token 集合）。E-06／R77-54①：受測對象改為
+    `check_wrapper_thinness`（唯一實作）＋本檔薄呼叫點，斷言逐條保留作為併表的
+    dominance test 本體，注入面改 patch 該表與 LATEST 解析器。史料見證據檔
+    〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
 
     def _make_shell_tree(self, name: str, sh_body: str, ps1_body: str) -> Path:
@@ -1072,17 +1062,11 @@ class TestR64TierShrinkOnlyRatchet(unittest.TestCase):
     """R64（ADR-XPLAT-002 §8 item 12）：`_EXEMPT_PAIRS`／`_SINGLE_SIDED_EXEMPT` 的
     tier 值只准往「更嚴格或不變」的方向改，對 HEAD 版本機械比對，形狀比照
     `tools/tests/test_adr_xplat001_c1c2_lock.py::TestShrinkOnlyRatchet`（ADR 指定的
-    照抄對象）：(a) 正控（自比自為零違規）、(b) 合成注入兩個降級方向、(c) 對照組
-    （升級/不變/整筆移出登記表皆合法）、(d) 字典改名不得靜默放行、(e) 真棘輪
-    （對 HEAD 現查）。
+    照抄對象）：正控／合成注入兩個降級方向／對照組／字典改名不得靜默放行／真棘輪。
 
-    本類刻意加進本檔而非新開檔案：`TestGuardLayerRatchet`
-    （`test_adr_xplat001_c1c2_lock.py`）已把 `tools/tests/*.py` 這一層棘輪化
-    （DEF-101-561③）——當時量的是**檔數**，新開一支 `test_*.py` 就會讓那道鎖翻紅，
-    故比照該裁決的既有慣例（該類自己也是主題不同卻擴進既有檔的先例），把本鎖擴進本檔
-    （`check_script_parity` 既有測試檔）。
-    🔴 R78 ARCH-03 訂正：R77 起量測面換成逐檔行數的**淨額**，新增檔案本身不再違規；
-    但「同族判準住同一個家」這個理由與量測面無關，仍然成立。
+    本類刻意加進本檔而非新開檔案：新開 `test_*.py` 當時會讓護欄層檔數棘輪翻紅
+    （DEF-101-561③，R78 起量測面已換成淨行數，但「同族判準住同一個家」的理由
+    仍然成立）。史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
 
     @staticmethod
@@ -1243,16 +1227,10 @@ class TestR64TierShrinkOnlyRatchet(unittest.TestCase):
 class TestR67BaselineRatchet(unittest.TestCase):
     """R67-H14 回歸鎖：棘輪的比對基準必須是**凍結常數**，不得是 git 導出的量。
 
-    WHY（Rule 9：測意圖不只測行為）——R64 的棘輪拿 `git show HEAD:<本檔>` 當基準，
-    形式上完全正確，實質上在**每一個真正消費它 rc 的閘門**裡都是恆真的：pre-push 與
-    三支 CI workflow 都跑在 commit 之後（CI 更是乾淨 checkout），HEAD 逐字等於工作樹
-    ⇒ 基準與被檢查值在被比較前就已相等，比較退化。實測（R67 掃描，沙箱）：把
-    `run_local_nightly` 由 tier4 降為 unpinned 並 commit ⇒ `check_script_parity.py`
-    rc=0、真 pre-push hook 端到端 rc=0、`tools/tests` 與控制組逐字相同。
-
-    根因不是「判準寫得不夠嚴」，而是「基準會自己對齊」。故本類鎖的是**那個結構性質**
-    本身（下面第一支測試：禁用 subprocess 仍須完整運作），而不只是鎖某幾筆 tier 值——
-    只鎖值的話，任何人把基準改回 git 導出量都不會有訊號。
+    WHY（Rule 9）：舊棘輪拿 `git show HEAD:<本檔>` 當基準，在每個真正消費 rc 的
+    閘門裡都跑在 commit 之後，HEAD 逐字等於工作樹 ⇒ 比較退化恆真（R67 沙箱實測：
+    降級並 commit 後 rc 仍全 0）。根因是「基準會自己對齊」，故本類鎖的是那個結構性質
+    本身，不只是鎖某幾筆 tier 值。史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
 
     def test_ratchet_is_independent_of_git_state(self) -> None:
@@ -1476,13 +1454,9 @@ class TestR67BaselineRatchet(unittest.TestCase):
 class TestR67UnpinnedExitObligation(unittest.TestCase):
     """R67-E24 回歸鎖：`unpinned` 的 reason 必須帶退場錨點。
 
-    WHY：`unpinned`＝「不符 Tier-1~4 任一定義」，佔比 8/23＝34.8%。R67 前它唯一的門檻
-    是「reason 非空」——實測 `reason="x"` 照樣綠——於是它成為 Tier 模型之外一個不需要
-    任何理由品質、也沒有退場義務的永久豁免桶。本鎖要求每筆明說誰來接
-    （`退場：未指派` 或 `退場：R<輪號>…`），把「沒人接」由散文語感升級為可 grep 的欄位。
-
-    邊界（誠實）：不驗證輪號是否仍在未來——那要耦合帳本當前輪號，`CrossPlatform_Scan_
-    Dimensions.md` §191 已明文警告會造成永紅。數量面的退步由 `_UNPINNED_CEILING` 擋。
+    WHY：R67 前唯一門檻是「reason 非空」（`reason="x"` 照樣綠），成為永久豁免桶。
+    本鎖要求每筆明說誰來接（`退場：未指派` 或 `退場：R<輪號>…`）。邊界：不驗證輪號
+    是否仍在未來（會耦合帳本當前輪號造成永紅）。數量面退步由 `_UNPINNED_CEILING` 擋。
     """
 
     def test_real_tables_all_unpinned_carry_exit_anchor(self) -> None:
@@ -1650,14 +1624,10 @@ class TestR67UnpinnedExitObligation(unittest.TestCase):
 class TestR67AcCoverage(unittest.TestCase):
     """R67-H34 回歸鎖：AC 的涵蓋面不得再被「新增一張登記表」整張逃逸。
 
-    WHY：AC（§4.2 反位移判準）是「描述性常數登記項的誠實全集」，用途是擋「換個地方
-    複雜」。R67 前這個全集只存在於 `_print_collapse()` 一條寫死的七項加總算式裡，而
-    號稱「獨立重算」的 `test_ac_matches_sum_of_seven_registries` 逐字複製同一條算式
-    ⇒ 對「多了一張沒被算進去的表」天生零訊號（實測：注入第 8 張表 3 筆，AC 不動、
-    全套 tools/tests 零紅）。
-
-    本鎖改用**真正不同的實作路徑**：以 `ast` 掃描兩支工具原始碼的模組層登記表，
-    比對「掃到的全集 == AC 納入 ∪ 具名排除」。新增任何一張表若兩邊都沒登記即紅。
+    WHY：R67 前 AC 全集只存在於一條寫死的七項加總算式裡，號稱「獨立重算」的舊測試
+    逐字複製同一條算式，對「多了一張沒被算進去的表」天生零訊號（實測注入第 8 張表
+    3 筆，全套 tools/tests 零紅）。本鎖改用 `ast` 掃描兩支工具原始碼的模組層登記表
+    真正獨立重算，新增任何一張表若兩邊都沒登記即紅。
     """
 
     _MIN_DISCOVERED = 9  # 2026-08-01 實測 13 張；下限防「掃描器被改壞 ⇒ 掃到 0 ⇒ 恆綠」
@@ -1738,15 +1708,12 @@ class TestR67AcCoverage(unittest.TestCase):
         self.assertIn("_GHOST_REGISTRY", str(ctx.exception))
 
     def test_ac_value_is_pinned(self) -> None:
-        """AC 活體值釘選（比照 UEP 的 `test_uep_is_five_after_r65_migration`）。
+        """AC 活體值釘選（比照 UEP 的等值釘選）。
 
         §4.2 判定規則 2：AC 每一筆上升必須在同一 commit 內具名對應一筆 UEP 下降。
-        R67 前 AC 完全無值鎖（實測 AC 48→49 全綠）；現在上升即紅、下降亦紅（提醒
-        同步下修以維持張力）。R67 現值 48 = 14+7+5+18+2+1+1。
-        R76 現值 47 = 14+7+5+**17**+2+1+1：`_SINGLE_SIDED_EXEMPT` 由 18 降為 17——
-        reschedule_g0_gatecheck.ps1 整支刪除（真孤兒：它唯一能做的事是重排
-        AutoClaude_SD09_G0_GateCheck，而該工作於 R71 已從本機移除）。方向是**下降**，
-        非規則 2 所管的上升，故不需具名對應 UEP 下降（UEP 維持 5）。
+        R67 前 AC 完全無值鎖（實測 48→49 全綠）；現在上升即紅、下降亦紅。R76 現值
+        47（真孤兒 `reschedule_g0_gatecheck.ps1` 整支刪除造成的下降，非規則 2 所管
+        方向，不需具名對應 UEP 下降）。史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
         """
         ac = sum(len(reg) for reg in m.ac_registries().values())
         self.assertEqual(
@@ -1770,15 +1737,10 @@ class TestR67AcCoverage(unittest.TestCase):
 class TestRedOutputGoesThroughTheSingleExit(unittest.TestCase):
     """本輪 F-09／R77-54③：紅燈不得被綠燈淹沒——所有 stderr 輸出走 `_fail()` 唯一出口。
 
-    病灶（注入實測）：綠燈走 stdout、紅燈走 stderr，而輸出被導向檔案／管線時 stdout 是
-    塊緩衝、stderr 不是 ⇒ 合流檢視（`2>&1`）時整批紅燈先出現、後面跟著一長串綠燈。
-    實測形態：紅在第 1 行、其後 12 行全綠。而 `R76_HANDOFF.md` §1 那張十道閘門表正是
-    用「跑指令 → 看尾巴」記錄的 ⇒ 這支工具在**真紅**時尾巴是綠的。
-    與 Scan-H⑦（早退遮蔽訊號）同族、方向相反：不是少印，是把紅埋在前面。
-
-    🔴 為何鎖「唯一出口」而不是鎖「最後一行是紅的」：後者只驗一個表象，下一個新增的
-    紅燈站點照樣可以繞過去（同 `test_guard_has_a_single_encoding_decision` 治「讀檔決策
-    散落三處」的理由——只改三處字面值治不了病）。
+    病灶（注入實測）：綠燈走 stdout（塊緩衝）、紅燈走 stderr（不是），合流檢視
+    （`2>&1`）時整批紅燈先出現、後面跟著一長串綠燈——「跑指令看尾巴」的記錄法在
+    真紅時尾巴是綠的。鎖「唯一出口」而非「最後一行是紅的」：後者只驗表象，下一個
+    新增的紅燈站點照樣繞過去。史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
 
     @staticmethod
@@ -1879,16 +1841,11 @@ class TestLatestThinnessRationaleIsFactual(unittest.TestCase):
     """R79 ARCH：`_check_latest_thinness()` 上方那段「為何不刪這個呼叫點」的事實宣稱
     必須與磁碟相符。
 
-    病灶（R79 實測）：原文寫「`check_wrapper_thinness.py` 只在 pre-push 與 root-infra-ci
-    有具名執行步驟，**macos/windows-compat-ci 與兩支 smoke 只跑本檔**」——compat-CI 那
-    一半是假的（兩支 workflow 各有一個 `run_root_unittests.py` step，而
-    `test_check_wrapper_thinness.test_real_wrappers_pass_today` 對真樹跑全部 16 鍵）。
-    那句話是「這段不可刪」的唯一論據，下一輪有人依它做架構決定就是拿失實前提在推理。
-
-    測意圖非僅行為：本鎖釘的不是那段散文的字面，而是**它所依賴的四個世界事實**。
-    任一事實翻轉（compat-CI 拿掉 unittest step、或 smoke 改跑 thinness）都會讓那段
-    訂正文變成新的假話，此時本鎖紅並指名要去改哪一段——這正是 R79 為「宣稱先於查證」
-    這個形態補的機械物。
+    病灶（R79 實測）：原文聲稱 compat-CI 只跑本檔，實則兩支 workflow 各有一個
+    `run_root_unittests.py` step 對真樹跑全部 16 鍵——那句話是「這段不可刪」的
+    唯一論據，失實前提會讓下一輪架構決定建立在假話上。本鎖釘的不是散文字面而是
+    它依賴的四個世界事實，任一事實翻轉即紅並指名要改哪一段。史料見證據檔
+    〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
 
     _COMPAT_CI = ("macos-compat-ci.yml", "windows-compat-ci.yml")
@@ -1963,14 +1920,10 @@ class TestLatestThinnessRationaleIsFactual(unittest.TestCase):
 class TestR81ScriptInterfaceParity(unittest.TestCase):
     """`.sh` ↔ `.ps1` 可觀察介面對等鎖（R81／S8-05）的鑑別力與邊界。
 
-    🔴 這一組守的是 R80 掃描 S8-05 留下的缺口：`check_script_parity` 此前驗的是
-    「存在性 ＋ 位元組釘選 ＋ 幾道具名內容鎖」，**沒有任何一般性行為判準** ⇒ 一對
-    腳本可以做不同的事而零訊號。判準本體＝`tools/lib/script_interface_parity.py`
-    （住 lib 的理由見該檔檔頭：消費端受零餘裕 raw-line 棘輪管）。
-
-    本組刻意同時釘住兩個方向：**會紅**（新分歧、既有分歧消失、掃描面崩塌）與
-    **不會誤紅**（散文裡的 git 字樣、薄殼／tier4／委派對出局）。只驗前者的鎖
-    活不過一輪——本 repo 已判過那個形態。
+    守的是 R80 掃描留下的缺口：此前只驗存在性＋位元組釘選，沒有任何一般性行為
+    判準 ⇒ 一對腳本可以做不同的事而零訊號。判準本體＝`tools/lib/script_interface_
+    parity.py`。刻意同時釘住兩個方向：會紅（新分歧、既有分歧消失、掃描面崩塌）與
+    不會誤紅（散文裡的 git 字樣、薄殼／tier4／委派對出局）。
     """
 
     def test_a_divergent_exit_code_is_detected(self) -> None:

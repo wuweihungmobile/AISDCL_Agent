@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -223,6 +224,57 @@ class KnownModelLookupStageParityTest(unittest.TestCase):
         with mock.patch.object(cw, "known_model_window", lambda *a, **k: None):
             self.assertTrue(known_model_lookup_problems(*real_known),
                             msg="injected known_model_window but parity stayed green")
+
+
+#: D32-5：harness 回報階（⓪／⓪′）的 parity 案例——`known_models={}` 中和，聚焦
+#: `harness_window`／`harness_note` 這一階本身。
+_HARNESS_CASES = [
+    # (peak, autosdd_raw, harness_window, harness_note)
+    (0, None, 1_000_000, ""),
+    (0, "967000", 1_000_000, "model=claude-fable-5-1"),
+    (0, "1000000", 1_000_000, "model=claude-fable-5-1"),
+    (999_999, "200000", None, ""),  # 沒有 harness ⇒ 兩側都落回既有五階
+]
+
+
+def harness_stage_problems() -> list[str]:
+    """D32-5：純函式，紅綠由 bug-injection 自證（見下方測試）。"""
+    problems: list[str] = []
+    for peak, autosdd_raw, harness_window, harness_note in _HARNESS_CASES:
+        g_window, g_source = guard.resolve_window(
+            peak, autosdd_raw, harness_window=harness_window, harness_note=harness_note)
+        s_window, s_source = cw.resolve_window(
+            peak, autosdd_raw=autosdd_raw, harness_window=harness_window,
+            harness_note=harness_note)
+        got = (g_window, guard.may_block(g_source)), (s_window, cw.may_block(s_source))
+        if got[0] != got[1]:
+            case = (peak, autosdd_raw, harness_window, harness_note)
+            problems.append(f"resolve_window[harness]{case}: {got[0]} vs {got[1]}")
+        if harness_window and ("harness" not in g_source or "harness" not in s_source):
+            problems.append(f"harness stage source 未標 harness：{g_source!r} vs {s_source!r}")
+    return problems
+
+
+class HarnessStageParityTest(unittest.TestCase):
+    """D32-3：兩側 resolve_window 的 harness 回報階（root ⓪／SDD ⓪′）逐項相等。"""
+
+    def test_cases_agree(self) -> None:
+        self.assertEqual(harness_stage_problems(), [])
+
+    def test_bug_injection_turns_it_red(self) -> None:
+        with mock.patch.object(cw, "SOURCE_HARNESS", "壞掉的來源字串"):
+            self.assertTrue(harness_stage_problems(),
+                            msg="injected SOURCE_HARNESS but parity stayed green")
+
+    def test_context_feed_path_matches_across_root_sdd_and_the_status_line_writer(self) -> None:
+        """D32-2：三份逐字同構的 `context_feed_path()`（本檔另兩份見根層／SDD 各自的
+        `context_budget_guard.py`／`context_window.py`；status line 寫入端另有一份，
+        由 `tools/statusline_context_feed.py` 自己的單元測試守）。一字之差都要在此現形。
+        """
+        with tempfile.TemporaryDirectory() as td, mock.patch.dict(
+                os.environ, {"AUTOSDD_CONTEXT_FEED_DIR": td}, clear=False):
+            for sid in ("abc-123", "sess.with.dots", "17e2da67-e140-43a8-9817-d1b6f61f3f7a"):
+                self.assertEqual(guard.context_feed_path(sid), cw.context_feed_path(sid))
 
 
 if __name__ == "__main__":
