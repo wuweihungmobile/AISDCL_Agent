@@ -1973,6 +1973,12 @@ used 264,124／window 967,000／27.3%
 - pre-push 快層 `ruff check tools/ .claude/hooks/` 抓到 Dev-A7 的 `known_model_windows_path()` 簽名 E501（101 > 100）：拆成兩行並把同函式 docstring 壓縮一行，檔案維持 1089 行（SPECIAL_FILES 上限）；`ruff` → `All checks passed!`；`test_adr_xplat001_c1c2_lock` 等 `Ran 839 tests` `OK (skipped=10)`。
 - 教訓（主控）：`ruff … | tail -1` 接管線吃掉 rc，讓第一次 commit 在 lint 紅的情況下通過——鐵律六「讀 rc 不接管線」在 zsh 側零攔截器（DEF-200-086）再一次現形；第二次改為 `&&` 串接無管線。
 
+### 掌舵者裁決（2026-09-12，push a264e72 之後）＋ /context 親對
+
+- **ARCH-A2-01 裁決＝A（維持現狀）**：結構性（規則寫入的）ESCALATION 對所有 session 全擋、含 Read／Bash，D17 溯源＋一行恢復指令由人在 Claude Code 外的真終端執行；**不**對非觸發者 session 放行 Read。理由（主控建議、掌舵者採納）：context 來源的 ESCALATION 自第四輪起已不再由 hook 寫入，剩下的都是真的要人介入的情況，訊息已交代怎麼解。本項自此為已裁決事項，不再另案。
+- **/context 親對（掌舵者於本 session 執行，逐字）**：`393.9k/1m tokens (39%)`；`Autocompact buffer: 33k tokens (3.3%)`；`Auto-compact window: 1m tokens`。主控 `python tools/session_resume_planner.py --check` 前後兩次逐字：/context 前兩則訊息 `used 391,289 … window 967,000 … 水位 40.5%`；/context 後一則 `used 400,305 … 水位 41.4%`。結論：**分子同源且一致**（393.9k 落在兩次量測之間，差值＝中間訊息本身）；**分母差＝定義差**：1,000,000 − 33,000（autocompact buffer）＝ 967,000，即 `~/.claude/settings.json` 的 `AUTOSDD_CONTEXT_WINDOW=967000` 釘值，故百分比 39% vs 40.5% 不是缺陷。問題 3 至此由掌舵者親對關閉。
+- **「現在是否已真實查詢 /context 容量」誠實答**：分子＝逐字稿裡 API 回報的真實 usage（與 /context 同源）；分母＝釘值或快取表（`known_model_windows.json`：seeded_from＝claude-api skill cached table 2026-06-24、refreshed_at＝null），**未**打 Models API（D26 仍需 `ANTHROPIC_API_KEY`）；本次 /context 證實 claude-fable-5-1 為 1m，與表值一致。要讓工具百分比與 /context 完全相同，只需把釘值改為 1000000（或移除釘值改走查表），但 967,000 是「autocompact 前可用視窗」的保守定義，主控建議維持。
+
 ## 第七輪 史料搬遷（Dev-A7；context_budget_guard.py 原文逐字保全）
 
 D27（修復包 Dev-A7）：四方複審 Architect finding ARCH-A4-01 判定 D21「`window_evidence()`
