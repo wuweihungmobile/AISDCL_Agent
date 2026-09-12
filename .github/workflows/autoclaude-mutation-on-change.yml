@@ -91,7 +91,7 @@ jobs:
           mutmut run --paths-to-mutate=autoclaude/plugins/token_guard \
                      --tests-dir=tests/plugins/token_guard \
                      --no-progress \
-                     -p no:xdist || true  # mutmut: survived 退出碼 != 0，容忍
+                     -p no:xdist -o addopts= || true  # mutmut: survived 退出碼 != 0，容忍
           mutmut results | tee mutation_token_guard.log
       # ADR-SD09-011：累積一筆帶 source_sha256 的證據（同 sha 去重留最新；同日多 sha 皆計入）
       - name: Accrue unique-sha evidence

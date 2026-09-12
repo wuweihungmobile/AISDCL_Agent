@@ -40,6 +40,10 @@ dev = [
     # 往上找設定，兩處適用的規則集與掃描面都不同），混用兩個數字就是製造下一筆 stale。
     # pytest 釘選與 requirements-ci.txt 的一致性由根層 tools/check_script_parity.py 機械比對（root-infra-ci）。
     "pytest==9.1.1",
+    # DEF-200-274 D5：pytest-xdist 導入（多核心平行測試）。鎖版理由同上（DEF-101-006）：
+    # 與根 .venv、AISDLC_SDD 兩份 requirements-ci.txt 三處同版一致。啟用方式見下方
+    # [tool.pytest.ini_options] addopts。
+    "pytest-xdist==3.8.0",
     "pytest-mock>=3.14",
     "ruff==0.15.21",
     "cachetools>=5.3",
@@ -182,6 +186,12 @@ select = ["E", "F", "I", "UP", "W", "S102"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# DEF-200-274 D5：全域 addopts 讓任何呼叫端（local_ci_gate.py／CI／開發者直呼）
+# 一視同仁吃到 -n auto --dist worksteal，零呼叫端改動（設計理由與 fail-loud
+# 取捨見 design_xdist.md §2.1）。除錯／--pdb／單檔小範圍請額外加 -n 0；
+# local_ci_gate.py::gate_pytest() 的非預設參數分支已自動附加
+# `-p no:xdist -o addopts=` 停用平行（見該函式）。
+addopts = ["-n", "auto", "--dist", "worksteal"]
 # legacy / xunit1 允許 record_property 寫入 <property> 元素（xunit2 不支援）
 # ac4_nightly_collector.py 依賴 <property name="recall_at_10"> / <property name="p95_ms">
 junit_family = "legacy"
@@ -200,4 +210,5 @@ markers = [
     "pg_real: 需要真實 PG + pgvector 的 e2e 測試（SD_07 T2-3 / PM #2）",
     "perf: 性能 baseline 測試（SD_08 W5 / ADR-SD08-003）；perf-baseline-nightly job 啟用",
     "benchmark: pytest-benchmark 入口（SD_08 W5 / ADR-SD08-003 §3）",
+    "xdist_group: pytest-xdist 內建 mark；本檔在 ini 註冊以避免 -p no:xdist 下的 PytestUnknownMarkWarning（DEF-200-274 D5）",
 ]

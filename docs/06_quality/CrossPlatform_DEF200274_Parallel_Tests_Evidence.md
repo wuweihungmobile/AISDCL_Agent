@@ -826,3 +826,187 @@ Windows 真機驗證成功），root-infra-ci failure。
 
 逐項見 `docs/06_quality/CrossPlatform_R141_Scan_Findings.md`；缺陷帳本見
 `docs/06_quality/AutoSDD_Defect_Log.md` DEF-200-274。
+
+## 第九輪：預設自動多核心＋LPT＋自動細分＋不均偵測 v2＋SIGTERM 清理＋P1 zshrc 假紅根治＋pytest-xdist（2026-09-13）
+
+### 背景
+
+主控派 Architect/SA/SD/QA 四方獨立審查（各自不共享上下文分別跑，每個發現另配
+2 位懷疑者投票）本機制第八輪落地後的現況，逐項核實此前「靠人眼發現熱點」與
+「zshrc 殘留 `AUTOSDD_PARALLEL_TESTS=1` 會不會讓合成樹測試誤觸平行」等疑慮。
+
+### 四方獨立複審找到什麼（存活發現）
+
+- **P1（零信任判死）：zshrc 假紅真因**——三方獨立實測證實：既有合成樹測試在
+  自己的行程內直接呼叫 `run_with_floor()`，而該函式在 D1 之前對「未設環境變數」
+  一律視為序列；一旦操作者的 shell rc 檔殘留 `AUTOSDD_PARALLEL_TESTS=1`，
+  合成樹測試會被平行 worker 接手，而 worker 對合成樹的 `assert start_dir` 前提
+  斷言炸掉——「靜態掃描能提早攔截」一說經三方各自重現後不成立，唯一收斂的修法
+  是讓 `should_run_parallel()` 對非真實 `tools/tests` 目錄一律強制序列，不論
+  環境變數為何。
+- **P2**：`fair_share` 倍率判準在低 worker 數（如 worker=1～2）下被稀釋，
+  且此前從未在 CI 的預設序列模式下觸發過，判準等於長期休眠。
+- **P2**：偵測到不均只印警告，沒有接到任何「自動採取行動」的閉環（例如自動
+  細分過熱模組）。
+- **P2**：pre-push 的 leg②（root-infra）此前未接上平行模式，本機收尾驗證的
+  最大宗場景反而繼續吃序列的全部時間代價。
+- **P2**：`AutoClaude/tests/`／`AISDLC_SDD` 兩個子專案的 pytest 套件仍是純
+  序列，零 xdist，與根層 `tools/tests` 的處境不一致。
+- **P2**：`MIN_TESTS` 收集數保鮮提醒（`WARN`）此前已存在但未被本輪前處理。
+- **P3**：SIGTERM 情境下，已啟動的子行程沒有清理機制，會變成孤兒行程。
+- **P3**：`run_root_unittests.py` 執行時不印實際使用的 worker 數，除錯時難以
+  判斷平行是否真的生效。
+- **P3**：`run_root_unittests.py` 本檔自身行數 777/777，已頂到 special-tier
+  上限，任何新增都得先在同一次變更內找到等量刪減。
+- **駁回的疑慮**：`os.dup` 在 Windows 上是否安全（三方各自查證 CI 已在
+  windows-latest runner 真的跑過，不成立）；P/E core（效能／能效核心）異質
+  排程是否需要感知（駁回，非本輪範圍）。
+
+### 設計裁決
+
+- `parallel_shard.should_run_parallel()` 改寫三條件真值表：目標目錄必須是
+  真實 `tools/tests`（非合成樹）、worker 數 > 1、且未被顯式關閉；三者皆真
+  才平行。合成樹（單元測試注入的 fixture 目錄）無論環境變數為何一律序列，
+  根治 P1。
+- 零相依探針子行程（`_zero_dep_probe_cached()`）新增 `_zero_dep_child_env()`
+  輔助函式，無條件把子行程環境的 `AUTOSDD_PARALLEL_TESTS` 強制寫成 `"0"`，
+  阻斷探針對自身遞迴 fan-out（同 DEF-101-803 遞迴熱點史料的精神延伸，P0）。
+- 新增 `tools/lib/parallel_timing_cache.py`：`read_json()`／`load_hints()`
+  對缺檔／壞 JSON／非 dict／bool 誤判為計時數值等情境一律容錯回空值；
+  `order_dispatch_units()` 依歷史耗時做 LPT（Longest-Processing-Time）派工
+  排序，無 hints 時與舊排序位元級相同（零回歸承諾）；`save_live_cache()`
+  只在大型執行（≥20 派工單位）才落盤，避免小型合成測試污染活體快取；
+  `staleness_report()` 偵測快取與現況重疊率過低時提醒重新種子化。
+- `tools/lib/dispatch_granularity.py` 新增 `auto_class_level_candidates()`／
+  `auto_suite_dispatch_units()`：對通過安全網（頂層、非 placeholder、未定義
+  `setUpModule`/`tearDownModule`）的候選類別自動細分派工單位，倍率判準沿用
+  既有 `dispatch_imbalance.detect_imbalance()`。
+- `tools/lib/dispatch_imbalance.py` 不均偵測 v2：新增 1.0～1.5 倍率帶（排程
+  救不了、需細分的族群，去重後只印一次）與整體 `wall/ideal` 排程效率回報；
+  `report_module_timings()` 標題行印出實際 worker 數（SA-09）。
+- `parallel_shard.py` 修 SIGTERM 清理競態：主執行緒收到 SIGTERM 時，所有
+  已啟動的子行程（含清理快照之後才登記的）皆被 `kill()`，且舊 handler 事後
+  被還原；非主執行緒呼叫 `run_parallel()` 不因掛 SIGTERM handler 而拋
+  `ValueError`。
+- worker cap 8→9（掌舵者/設計者以離線模擬數據反對再往上調到 12，見下方
+  〈主控實測〉）。
+- `pre-push` leg①（root-infra）由 `find -exec py_compile` 改
+  `compileall -j0`（平行語法檢查），新增回歸鎖驗證語法錯誤偵測能力不因遷移
+  而倒退。
+- AutoClaude／AISDLC_SDD 兩個子專案的 pytest 套件接上 `pytest-xdist`：
+  `addopts` 全域帶 `-n auto --dist worksteal`（fail-loud，非 conftest 靜默
+  降級）；PostgreSQL 真實資料庫在場時強制 `--dist loadgroup`（conftest
+  fail-loud＋`local_ci_gate.py`／`pre-push` 自動加旗標）；`LedgerPerformance
+  Tests` 在 xdist worker 內的時間閾值放寬到 1.0s（worker 間資源競爭）。
+  v0.01（ci-gate 凍結基線）不動，`requirements-ci.txt` 可加 pin（先例
+  commit d411dc6）；兩份 `pytest.ini` 不動，旗標放呼叫端。
+
+### 實作（本收尾單人窗口落地物）
+
+- `tools/run_root_unittests.py`：`MIN_TESTS` 4054→4246（discovery 探針實測
+  直接填入，見該檔第 58 行的重釘註記）。
+- `tools/tests/test_run_root_unittests.py`：3648→4258（+610），新增
+  `ShouldRunParallelDecisionTest`／`RunWithFloorNeverParallelizesSyntheticTreeTest`／
+  `ZeroDepProbeForcesSequentialChildEnvTest`（P0/P1 根治回歸鎖）、
+  `ParallelTimingCacheLoadHintsTest`／`ParallelTimingCacheOrderDispatchUnitsTest`／
+  `ParallelTimingCacheSaveLiveCacheTest`／`ParallelTimingCacheStalenessReportTest`／
+  `RunParallelPersistsLiveCacheOnlyForLargeRunsTest`（LPT 快取）、
+  `ParallelShardSigtermCleanupTest`／`ParallelShardSigtermIgnoredOffMainThreadTest`
+  （SIGTERM 清理）、`DispatchGranularityAutoSplitCandidatesTest`／
+  `DispatchGranularityAutoSuiteDispatchUnitsTest`（自動細分）、
+  `ReportDispatchImbalanceOverFairShareBandTest`／
+  `ReportDispatchImbalanceWallClockLossTest`／
+  `ReportModuleTimingsPrintsWorkerCountTest`（不均偵測 v2）。
+- `tools/tests/test_pre_push_dispatcher.py`：686→704（+18），新增
+  `test_syntax_error_under_tools_fails_the_rootinfra_leg`（compileall 遷移
+  語法偵測回歸鎖）。
+- `tools/tests/test_adr_xplat001_c1c2_lock.py`（本檔）：guard-line R147 重釘
+  自身逐檔漂移收斂 +104（`_GUARD_LINES_REPIN_LOG` 本輪多列＋`_FROZEN_GUARD_
+  LINES` 反覆更新＋新增 `_REGRESSION_LANE_LOG` 列＋`_REPIN_NET_CAP_SCHEDULE`
+  到期兌現 cap 543→542 與重新武裝下一段（`_REPIN_NET_CAP_DUE_ROUND=149`／
+  `_REPIN_NET_CAP_DUE_TARGET=541`）＋`_PHASE2_REVIEW_LOG` 新增 R147
+  `[維持觀察]` 列＋`_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND` 具名展延
+  147→152（非 root-tools 重構持有面，真拆仍待獨立窗口）＋
+  `_REPIN_LOG_FROZEN_PREFIX_LEN` 181→203 與 `_REPIN_LOG_HISTORY_SHA256`／
+  `_FROZEN_PREFIX_REWRITE_LEDGER` 重釘＋E501 存量債棘輪折行（8 行單行列改
+  雙行避免過長行）。
+- 分軌：回歸鎖軌 270（P1/P0 zshrc 假紅根治 119 行＋既有缺陷修復回歸鎖
+  ParallelTimingCacheLoadHintsTest／ParallelShardSigtermCleanupTest／
+  ParallelShardSigtermIgnoredOffMainThreadTest 151 行，未使用任何一次性例外
+  名冊）；功能軌餘額 462（＝內容成長 358〔LPT 排序／保存／過期回報／大批
+  持久化＋自動細分＋不均偵測 v2＋worker 數印出＋既有 cap 8→9 調整 340 行＋
+  compileall 遷移回歸鎖 18 行〕＋本檔〔`test_adr_xplat001_c1c2_lock.py`〕
+  自身記帳漂移 104 行，本輪刻意不把自身記帳漂移歸入回歸鎖軌以保留其 cap 309
+  的餘裕）。回歸鎖軌 270 ≤ cap 309、功能軌餘額 462 ≤ 到期後 cap 542，
+  皆未超額，未動用任何一次性例外名冊。
+
+### 驗證數字（逐字）
+
+- 主控實測：6 worker 現行排序 wall 262～264s（4205 支）；離線模擬（模型
+  對上實測 264.5s）：LPT 排序 w=6→206.1s、w=8→154.6s、w=9→137.4s 皆＝理論
+  下界；拆最重測試對 makespan 幫助＝0。
+- 主控實測：安靜機器 auto 平行 worker=9 LPT 排序：**4246 支、wall 159s**；
+  ⏱ 前五：`TestR67R3ThisFileMakesNoUnstatedPlatformAssumption` 141.6s／
+  `test_platform_neutral_paths` 81.7s／`test_run_root_unittests` 76.4s／
+  `TestMoveSubsetSelectionIsNamedAndTraceable` 74.7s／
+  `TestPlanRejectsRowsWithExternalResidencePointers` 46.0s；新偵測印出
+  「⚠️ 以下派工單位耗時超過公平份額：…TestR67R3… 141.6s（1.3x）」。
+- `[他包回報]` Pkg-R（根層引擎）：全套兩次 3:55（冷快取）→ 2:40（LPT）；
+  先紅再綠：P1 修前 failures=4、SIGTERM 舊邏輯 15/15 紅→15/15 綠、LPT
+  2/3 紅→3/3 綠、cache 容錯 4/5 紅→5/5 綠。
+- `[他包回報]` Pkg-X（pytest-xdist）：AutoClaude 4579 passed／222 skipped／
+  30.42s（序列基線主控親測 160s／4570 passed）；AISDLC_SDD `scripts/`
+  tests 351 passed／16.15s（主控親測序列 90.6s）；v0.30 fsm 1941 passed／
+  15.69s；發現並修復 v0.30 `snapshot.py` 固定 `.tmp` 中繼檔名競態（v0.01
+  凍結基線不可改 ⇒ `ci-gate.sh` 對凍結基線維持序列）；conftest 分群機制
+  兩個必要條件（`tryfirst`＋標記迴圈在早退前）各有先紅再綠。
+- 本收尾單人窗口親跑（2026-09-13，安靜機器）：
+  `(cd tools/tests && python -m unittest test_adr_xplat001_c1c2_lock -q)` →
+  `Ran 192 tests in 10.853s` `OK`；
+  `python tools/archive_defect_log.py --check` → `✅ 帳本保全稽核通過` rc=0；
+  `python tools/check_defect_log_crossref.py` → `✅ 缺陷帳本跨文件狀態一致`
+  rc=0；`python tools/check_handoff_carriers.py` → `✅ 每一筆前瞻延後宣稱都
+  有帳本承接載體` rc=0；`python tools/check_pytest_baseline_sites.py` →
+  `✅ pytest 基線站點守門通過` rc=0。
+
+### 誠實劃界（本輪仍未解決，不可宣稱已完備）
+
+- 掌舵者本人 Windows 11 物理機親驗待補；CI `windows-compat-ci` 的
+  `windows-latest` runner 已在第八輪驗證成功，但那是雲端 runner，非掌舵者
+  本人機器，兩者不可互相替代，本輪 push 後會再驗一次雲端 CI。
+- `compileall -j0` 與 SIGTERM 清理在 Windows 上的實機行為尚未驗證。
+- AutoClaude 真實 Docker PostgreSQL 環境下的 `--dist loadgroup` 端到端流程
+  尚未驗證。
+- 自動細分機制在 worker cap=9 下目前休眠（需 worker ≥ 10 才觸發），本輪
+  未能實測其真正生效路徑；其候選判準與安全網（`setUpModule`／import 失敗
+  排除、無快取時與既有行為逐位元相同）只有單元測試
+  （`test_run_root_unittests.py` 的 `auto_class_level_candidates`／
+  `auto_suite_dispatch_units` 測試類別）覆蓋，沒有真實觸發的端到端證據
+  （四方複審 QA F6，P3）。
+- D7 其餘多CPU候選**評估後不做**（四方複審 SA F3 要求明列）：① pre-push 十支
+  守門工具並行——每支皆 <5s、總和約 20s，並行要處理輸出交錯與 rc 彙整，
+  收益 < 複雜度；② `ci-gate.sh` v0.01／v0.30 雙軌並行——各軌已由 xdist 吃滿
+  全部核心，再並行只會互相搶 CPU；③ 根層 root-infra-ci 的逐檔 `py_compile`
+  step——它逐檔印 `::error::` annotation 需要檔名，`compileall -j0` 的並行輸出
+  順序不保證，另案處理；④ 單一最重測試方法內部平行化——離線模擬證明對
+  makespan 幫助為 0（瓶頸是 sum/w），不做。
+- `snapshot.py::_append_raw_abort_event()` 的中繼檔名碰撞（四方複審 Architect
+  PF-02／SA F2）已於複審後一併改走 `_atomic_write_text`；其讀-改-寫三步的
+  lost-update 窗口仍未修（best-effort raw audit，呼叫端吞例外，不影響任何判定）。
+- 四方複審 PF-01／F1（P1）：`-p no:xdist` 在 `gate_pg()` 與 pg-e2e-nightly 兩個
+  CI step 漏配 `-o addopts=`（會直接 `unrecognized arguments`），複審後已補齊並在
+  `test_local_ci_gate.py` 加成對斷言。
+- `_PHASE2_REVIEW_LOG` 的 R147 `[維持觀察]` 列同第八輪 R141 `[提案]` 列
+  一樣是機械副作用：本輪把 `_GUARD_LINES_REPIN_LOG` 推進到 R147，越過
+  ADR-XPLAT-013 Phase 2 條文五 §6 的到期輪，`[提案]`（R141）已用罄
+  「維持觀察」的連續資格重置，本列不對 (c) 觀測→阻斷方向做任何新判斷，
+  R129 提出的既存提案迄今仍待主控排定四方複審。
+- `_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND`（U9 舊尺技術債，四支 `[ROOT-TOOLS]`
+  檔）本輪恰好到期（147），與本輪主軸（guard-line 記帳＋pytest-xdist 落地）
+  無關，依鐵律七具名展延 147→152（真拆仍待獨立重構持有面窗口，非本輪
+  範圍）。
+- AutoClaude／AISDLC_SDD 之後的 pytest-xdist 真 Docker PG／Windows 物理機
+  組合尚無任何一次同時驗證過。
+
+逐項見 `docs/06_quality/CrossPlatform_R145_Scan_Findings.md`〈第九輪附記〉節；
+缺陷帳本見 `docs/06_quality/AutoSDD_Defect_Log.md` DEF-200-274。

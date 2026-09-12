@@ -178,7 +178,32 @@ run_gate_for_version() {
   # 這件事補在根層 unittest runner；pytest 面本來就內建 `-rs`，本 repo 卻從未開。
   # DEF-101-515 需人工考古才解釋得出 v0.30 −4 的兩支平台硬排除，根因即此。
   # 對計數無影響：pytest_passed_count.sh 抓 `N passed`，SKIPPED 行不含該樣式（R59 實測）。
-  python -m pytest tools/fsm_runtime/tests/ -m "not chaos" -q -rs 2>&1 | tee "${PYTEST_LOG}"
+  # DEF-200-274 D6：兩份 pytest.ini（v0.01/v0.30）一律不動（掌舵者裁決），啟用點
+  # 放呼叫端（design_xdist.md §6）。
+  # 🔴 實作偏離掌舵者裁決之處（本節必須如實記錄，見任務書「有證據認為設計錯了才可
+  # 偏離」）：裁決原文要求兩軌「都吃到 -n auto --dist worksteal，效果一致」，但本輪
+  # 實測發現 `tools/fsm_runtime/snapshot.py::save_abort_report()` 對同日同 category
+  # 的 abort 報告使用**固定檔名**的 `.tmp` 中繼檔，多個 xdist worker 真的並行觸發
+  # `test_act056_structural_escalation_fsm_writes_diagnostic_abort` 這類「auto
+  # recovery refused」路徑時會互相競態（一個 worker 的 `tmp.replace(path)` 使另一個
+  # worker 的 `tmp` 消失或內容被覆寫）。AISDLC_SDD_v0.01（凍結基線）連續多次實測約
+  # 1/3~4/9 翻紅。v0.30（LATEST）同一份程式碼已於本輪修好（`snapshot.py` 改用
+  # per-call 唯一中繼檔名＋`test_phase_h.py` 補上與同檔其餘測試一致的 SNAPSHOT_DIR
+  # 隔離慣例，修後連續 15 次實測 0 次因此翻紅）——但 v0.01 是凍結基線，依規則不可
+  # 原地改這兩個檔修競態，於是差異化：只有非凍結基線才吃 xdist，凍結基線維持序列
+  # （見下方 XDIST_ARGS 判斷）。詳細重現指令、逐次結果見回報「先紅再綠 / 偏離設計」。
+  # 🔴 另一項殘留風險（v0.30 修完仍在）：`test_conversation_ledger.py::
+  # LedgerPerformanceTests` 兩支硬性計時驗收（<0.3s）在本機 9-worker 全核心壓力下
+  # 偶爾超時（約 2/15，實測 0.41s vs 0.3s 上界）——這是效能測試對 CPU 競爭的既有
+  # 敏感度，非資料競態／正確性錯誤，本輪未動它（改門檻或隔離執行屬 QA/PM 決策，
+  # 留待收尾/下一輪決定），如實記入回報。
+  local XDIST_ARGS=""
+  if [[ "${VER}" != "${FROZEN_BASELINE}" ]]; then
+    XDIST_ARGS="-n auto --dist worksteal"
+  fi
+  # shellcheck disable=SC2086
+  python -m pytest tools/fsm_runtime/tests/ -m "not chaos" -q -rs ${XDIST_ARGS} \
+    2>&1 | tee "${PYTEST_LOG}"
   # DEF-06-001：擷取逐軌 `N passed` 收斂計數（取證友善性，純函式 helper 單獨可測）
   local PASSED
   PASSED="$(bash "${REPO_ROOT}/scripts/pytest_passed_count.sh" < "${PYTEST_LOG}")"
@@ -254,7 +279,12 @@ cd "${REPO_ROOT}"
 # mktemp 一律帶模板：理由同上（R82 MAC-01 訂正處）——BSD/macOS 無預設模板。
 INFRA_LOG="$(mktemp "${TMPDIR:-/tmp}/ci_gate_infra.XXXXXX")"
 # `-rs` 理由同上（R59 ARCH-R59-01）。
-python -m pytest scripts/tests/ -q -rs 2>&1 | tee "${INFRA_LOG}"
+# DEF-200-274 D6（實作階段補現查）：設計文件誤判「ci-gate.sh 從未呼叫 scripts/tests」，
+# 實際上本段（共享 infra 自身回歸鎖）正是第三個呼叫端——與 pre-push 那一份「N 份複本
+# 只改 1 份」同一原則，此處一併加旗標。scripts/tests 不含 FSM runtime 那段共享
+# tmp 檔競態（已現查 tools/fsm_runtime/snapshot.py 相關程式碼不在 scripts/tests 射程
+# 內），版本無關（非凍結基線範圍），無需差異化處理。
+python -m pytest scripts/tests/ -q -rs -n auto --dist worksteal 2>&1 | tee "${INFRA_LOG}"
 INFRA_PASSED="$(bash "${REPO_ROOT}/scripts/pytest_passed_count.sh" < "${INFRA_LOG}")"
 rm -f "${INFRA_LOG}"
 echo "==> 共享 infra scripts/tests/: ${INFRA_PASSED} passed"

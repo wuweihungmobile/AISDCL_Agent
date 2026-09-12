@@ -787,9 +787,17 @@ class LedgerPerformanceTests(unittest.TestCase):
     (b) `LIMIT_SEC` 不再依賴 `CI` 環境變數，只依平台——Windows 放寬到 1.0s（windows-compat-ci
         #220／#221 實測 0.3027s／0.3084s，僅超出 mac 量出的 0.3s 硬門檻約 1~3%，屬共用跑者變異
         而非效能退化），其餘平台（含 macOS CI）維持原始 0.3s 緊門檻，牆鐘只負責守住「回到第五輪
-        修復前的 5s+ 撞 router 8s child timeout」這條粗防線，真正的退化鑑別交給 (a)。"""
+        修復前的 5s+ 撞 router 8s child timeout」這條粗防線，真正的退化鑑別交給 (a)。
+    (c) DEF-200-274 第九輪（pytest-xdist 導入）：本套件在 `-n auto --dist worksteal` 下由 9 條
+        worker 同時吃滿全部核心，牆鐘量到的是 CPU 競爭不是程式碼——實測 15 次約 2 次量到
+        0.41s（上界 0.3s）。xdist worker 行程恆帶 `PYTEST_XDIST_WORKER` 環境變數（controller
+        與序列跑法皆無），故在 worker 內比照 Windows 放寬到 1.0s；序列跑法（含凍結基線
+        v0.01 那一軌，ci-gate.sh 對它維持序列）仍守 0.3s 緊門檻，退化鑑別仍由 (a) 承擔。"""
 
-    LIMIT_SEC = 1.0 if sys.platform.startswith("win") else 0.3
+    LIMIT_SEC = (
+        1.0 if (sys.platform.startswith("win") or os.environ.get("PYTEST_XDIST_WORKER"))
+        else 0.3
+    )
 
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()

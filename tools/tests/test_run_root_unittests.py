@@ -17,12 +17,14 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
 import textwrap
 import threading
 import time
+import types
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -240,7 +242,9 @@ class ParallelFallbackToSequentialTest(unittest.TestCase):
     """DEF-200-274 第七輪四方獨立複審（Architect／SD 各自命中）：`worker_count()`
     算出 1（例如 `AUTOSDD_PARALLEL_TESTS_WORKERS=1`，或單核心環境的預設公式）時，
     走 subprocess 架構零平行效益、純損耗——本測試鎖住『此時退回序列路徑、不呼叫
-    `parallel_shard.run_parallel()`』這條判斷式，不管 `enabled()` 是否為 True。"""
+    `parallel_shard.run_parallel()`』這條判斷式，不管 `parallel_mode()` 是什麼
+    （第九輪：`enabled()` 已刪除，改由 `should_run_parallel()` 判斷，見
+    `ShouldRunParallelDecisionTest`）。"""
 
     def test_worker_count_one_never_calls_run_parallel(self) -> None:
         mod_name = "test_fixture_parallel_fallback"
@@ -255,8 +259,7 @@ class ParallelFallbackToSequentialTest(unittest.TestCase):
                 encoding="utf-8",
             )
             ps = run_root_unittests.parallel_shard
-            with mock.patch.object(ps, "enabled", return_value=True), \
-                 mock.patch.object(ps, "worker_count", return_value=1), \
+            with mock.patch.object(ps, "worker_count", return_value=1), \
                  mock.patch.object(
                      ps, "run_parallel",
                      side_effect=AssertionError(
@@ -277,13 +280,14 @@ class WorkerCountFormulaTest(unittest.TestCase):
 
     def test_formula_across_cpu_counts(self) -> None:
         ps = run_root_unittests.parallel_shard
-        cases = {0: 1, 1: 1, 2: 1, 9: 8, 10: 8, 100: 8}
+        # 第九輪：cap 8→9（worker_count 上限，見 parallel_shard.worker_count docstring）。
+        cases = {0: 1, 1: 1, 2: 1, 9: 8, 10: 9, 100: 9}
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop(ps._ENV_WORKERS, None)  # 清掉本機 shell profile 可能殘留的覆寫
             for cpu, expected in cases.items():
                 self.assertEqual(
                     ps.worker_count(cpu_count=cpu), expected,
-                    f"cpu_count={cpu} 應得 {expected}（公式 max(1, min(8, cpu-1))）")
+                    f"cpu_count={cpu} 應得 {expected}（公式 max(1, min(9, cpu-1))）")
 
     def test_workers_env_override_wins_over_formula(self) -> None:
         ps = run_root_unittests.parallel_shard
@@ -302,13 +306,97 @@ class WorkerCountFormulaTest(unittest.TestCase):
 
     def test_none_cpu_count_uses_real_os_cpu_count_within_bounds(self) -> None:
         """`cpu_count=None` 時走真的 `os.cpu_count()`——不斷言精確值（該值隨執行機器
-        核心數而變），只斷言落在公式的值域 `[1, 8]` 內。"""
+        核心數而變），只斷言落在公式的值域 `[1, 9]` 內（第九輪：cap 8→9）。"""
         ps = run_root_unittests.parallel_shard
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop(ps._ENV_WORKERS, None)
             result = ps.worker_count(cpu_count=None)
         self.assertGreaterEqual(result, 1)
-        self.assertLessEqual(result, 8)
+        self.assertLessEqual(result, 9)
+
+
+class ShouldRunParallelDecisionTest(unittest.TestCase):
+    """DEF-200-274 第九輪 D1：`parallel_shard.should_run_parallel()` 三條件的真值表
+    ——P1 根治的機械化：`test_synthetic_tree_always_sequential_regardless_of_mode`
+    是核心斷言（合成樹無論 mode 為何一律序列，即使殼層殘留 `AUTOSDD_PARALLEL_
+    TESTS=1`）。"""
+
+    def _real_and_synthetic(self):
+        ps = run_root_unittests.parallel_shard
+        real = run_root_unittests._TESTS_DIR
+        synthetic = real.parent  # tools/ 本身必不等於 tools/tests
+        return ps, real, synthetic
+
+    def test_off_forces_sequential_even_on_real_tree_with_many_workers(self) -> None:
+        ps, real, _synthetic = self._real_and_synthetic()
+        with mock.patch.dict(os.environ, {ps._ENV_ON: "0"}, clear=False):
+            self.assertFalse(ps.should_run_parallel(real, real, workers=8))
+
+    def test_on_and_auto_agree_on_real_tree_with_many_workers(self) -> None:
+        ps, real, _synthetic = self._real_and_synthetic()
+        for raw in (None, "1", "garbage"):
+            with self.subTest(raw=raw):
+                with mock.patch.dict(os.environ, {}, clear=False):
+                    if raw is None:
+                        os.environ.pop(ps._ENV_ON, None)
+                    else:
+                        os.environ[ps._ENV_ON] = raw
+                    self.assertTrue(
+                        ps.should_run_parallel(real, real, workers=8),
+                        f"raw={raw!r} 應與顯式 '1' 收斂成 True（auto 與 on 一致）")
+
+    def test_synthetic_tree_always_sequential_regardless_of_mode(self) -> None:
+        """P1 核心斷言：合成樹無論 `AUTOSDD_PARALLEL_TESTS` 為何值都必須序列。"""
+        ps, _real, synthetic = self._real_and_synthetic()
+        for raw in ("1", None):
+            with self.subTest(raw=raw):
+                with mock.patch.dict(os.environ, {}, clear=False):
+                    if raw is None:
+                        os.environ.pop(ps._ENV_ON, None)
+                    else:
+                        os.environ[ps._ENV_ON] = raw
+                    self.assertFalse(
+                        ps.should_run_parallel(synthetic, run_root_unittests._TESTS_DIR, workers=8),
+                        f"raw={raw!r} 時合成樹仍必須被判為序列——這正是 P1 的核心修復")
+
+    def test_workers_le_1_forces_sequential_regardless_of_mode(self) -> None:
+        ps, real, _synthetic = self._real_and_synthetic()
+        for raw in ("1", None):
+            with self.subTest(raw=raw):
+                with mock.patch.dict(os.environ, {}, clear=False):
+                    if raw is None:
+                        os.environ.pop(ps._ENV_ON, None)
+                    else:
+                        os.environ[ps._ENV_ON] = raw
+                    self.assertFalse(ps.should_run_parallel(real, real, workers=1))
+
+
+class RunWithFloorNeverParallelizesSyntheticTreeTest(unittest.TestCase):
+    """端到端：`run_with_floor()` 對合成目錄、即使殼層設了
+    `AUTOSDD_PARALLEL_TESTS=1`，也不觸發 `run_parallel()`（P1 根治的整合驗證，
+    補上 `ShouldRunParallelDecisionTest` 的純函式覆蓋）。"""
+
+    def test_synthetic_tree_with_env_forced_on_never_calls_run_parallel(self) -> None:
+        mod_name = "test_fixture_p1_synthetic_guard"
+        self.addCleanup(lambda: sys.modules.pop(mod_name, None))
+        with tempfile.TemporaryDirectory(prefix="rru_p1_") as td:
+            d = Path(td)
+            (d / f"{mod_name}.py").write_text(
+                "import unittest\n\n\nclass Dummy(unittest.TestCase):\n"
+                "    def test_ok(self):\n        self.assertTrue(True)\n",
+                encoding="utf-8",
+            )
+            ps = run_root_unittests.parallel_shard
+            with mock.patch.dict(os.environ, {ps._ENV_ON: "1"}, clear=False), \
+                 mock.patch.object(ps, "worker_count", return_value=8), \
+                 mock.patch.object(
+                     ps, "run_parallel",
+                     side_effect=AssertionError("run_parallel 不該被合成樹觸發"),
+                 ) as mocked, \
+                 mock.patch.dict(run_root_unittests._WINDOWS_SKIP_TAG_EXEMPT, {}, clear=True):
+                rc = run_root_unittests.run_with_floor(d, min_tests=1)
+        mocked.assert_not_called()
+        self.assertEqual(rc, 0)
 
 
 class ReportWindowsNativeSkipsTest(unittest.TestCase):
@@ -1779,12 +1867,27 @@ _ZERO_DEP_PROBE_ENV = "RRU_IN_ZERO_DEP_PROBE"
 _ZERO_DEP_PROBE_TIMEOUT = 600
 
 
+def _zero_dep_child_env() -> dict[str, str]:
+    """斷『平行』遞迴（與既有 `_ZERO_DEP_PROBE_ENV` 斷『skip 掃描』遞迴的精神一致，
+    但是兩件獨立的事，不合併成同一個旗標）。DEF-200-274 第九輪 P0：D1 把
+    `AUTOSDD_PARALLEL_TESTS` 未設的語意從「序列」改成「auto（真實樹＋workers>1
+    即平行）」後，本探針子行程對 `R._TESTS_DIR`（貨真價實的真樹）整套重跑一次時
+    （`floor`／`main` 模式）會被新語意捲入、疊加在外層已在跑的 fan-out 之上
+    （DEF-101-803 遞迴熱點史料：823s→3813s 且仍逾時）。不管外層 `AUTOSDD_
+    PARALLEL_TESTS` 是什麼值（未設／"1"／zshrc 殘留），探針子行程一律強制序列
+    ——退回 D1 之前的「未設＝序列」基準，不被新語意捲入。
+    """
+    child_env = {**os.environ, _ZERO_DEP_PROBE_ENV: "1"}
+    child_env[run_root_unittests.parallel_shard._ENV_ON] = "0"
+    return child_env
+
+
 @functools.cache
 def _zero_dep_probe_cached(
     mode: str, blocked_key: tuple[str, ...]
 ) -> subprocess.CompletedProcess[str]:
     tools_dir = str(Path(run_root_unittests.__file__).resolve().parent)
-    child_env = {**os.environ, _ZERO_DEP_PROBE_ENV: "1"}
+    child_env = _zero_dep_child_env()
     with tempfile.TemporaryDirectory() as tmp:
         probe = Path(tmp) / "zero_dep_probe.py"
         probe.write_text(_ZERO_DEP_PROBE, encoding="utf-8")
@@ -1793,6 +1896,26 @@ def _zero_dep_probe_cached(
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             cwd=tools_dir, timeout=_ZERO_DEP_PROBE_TIMEOUT, env=child_env,
         )
+
+
+class ZeroDepProbeForcesSequentialChildEnvTest(unittest.TestCase):
+    """DEF-200-274 第九輪 P0：即使外層環境要求平行，探針子行程必須強制序列，
+    否則 D1 的 auto 預設會讓 DEF-101-803 的遞迴熱點在每次全套執行時重演。"""
+
+    def test_child_env_forces_off_even_when_parent_env_requests_parallel(self) -> None:
+        R = run_root_unittests
+        with mock.patch.dict(os.environ, {R.parallel_shard._ENV_ON: "1"}, clear=False):
+            child_env = _zero_dep_child_env()
+        self.assertEqual(child_env[R.parallel_shard._ENV_ON], "0",
+                          "探針子行程必須無條件強制序列，不得繼承外層的平行請求")
+
+    def test_child_env_forces_off_when_parent_env_unset(self) -> None:
+        R = run_root_unittests
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop(R.parallel_shard._ENV_ON, None)
+            child_env = _zero_dep_child_env()
+        self.assertEqual(child_env[R.parallel_shard._ENV_ON], "0",
+                          "D1 之後「未設」會被判成 auto——這支測試釘住探針層不能被 auto 捲入")
 
 
 def _run_zero_dep_probe(mode: str, blocked: list[str]) -> subprocess.CompletedProcess[str]:
@@ -3366,6 +3489,286 @@ class ParallelShardRealSubprocessProtocolIntegrationTest(unittest.TestCase):
         )
 
 
+class ParallelTimingCacheLoadHintsTest(unittest.TestCase):
+    """DEF-200-274 第九輪 D2：`tools/lib/parallel_timing_cache.py` 的
+    `read_json()`／`load_hints()` 純函式紅綠自證。"""
+
+    def _ptc(self):
+        return run_root_unittests.parallel_shard.parallel_timing_cache
+
+    def test_read_json_missing_file_returns_empty(self) -> None:
+        # R69：不得用 POSIX 絕對路徑字面值斷言（Windows 上會渲染成反斜線、字面值
+        # 必然落空）——改用「存在的暫存目錄 + 保證不存在的檔名」表達同一件事。
+        ptc = self._ptc()
+        with tempfile.TemporaryDirectory(prefix="ptc_missing_") as td:
+            missing = Path(td) / "no-such-file-xyz.json"
+            self.assertEqual(ptc.read_json(missing), {})
+
+    def test_read_json_invalid_json_returns_empty(self) -> None:
+        ptc = self._ptc()
+        with tempfile.TemporaryDirectory(prefix="ptc_") as td:
+            bad = Path(td) / "bad.json"
+            bad.write_text("{not valid json", encoding="utf-8")
+            self.assertEqual(ptc.read_json(bad), {})
+
+    def test_read_json_non_dict_returns_empty(self) -> None:
+        ptc = self._ptc()
+        with tempfile.TemporaryDirectory(prefix="ptc_") as td:
+            arr = Path(td) / "arr.json"
+            arr.write_text("[1, 2, 3]", encoding="utf-8")
+            self.assertEqual(ptc.read_json(arr), {})
+
+    def test_read_json_filters_non_numeric_and_bool_values(self) -> None:
+        """第九輪批評 D2-BOOL-COERCED-AS-TIMING 回歸鎖：bool 是 int 子類別，
+        `{"mod": true}` 不得被 `float()` 轉成 1.0 秒。"""
+        ptc = self._ptc()
+        with tempfile.TemporaryDirectory(prefix="ptc_") as td:
+            mixed = Path(td) / "mixed.json"
+            mixed.write_text(
+                json.dumps({"a": 1.5, "b": "nope", "c": True, "d": False, "e": 2}),
+                encoding="utf-8",
+            )
+            self.assertEqual(ptc.read_json(mixed), {"a": 1.5, "e": 2.0})
+
+    def test_load_hints_prefers_live_over_seed_and_filters_by_keys(self) -> None:
+        ptc = self._ptc()
+        with tempfile.TemporaryDirectory(prefix="ptc_") as td:
+            seed = Path(td) / "seed.json"
+            live = Path(td) / "live.json"
+            seed.write_text(json.dumps({"mod.a": 10.0, "mod.b": 20.0}), encoding="utf-8")
+            live.write_text(json.dumps({"mod.a": 99.0}), encoding="utf-8")
+            with mock.patch.object(ptc, "SEED_PATH", seed), \
+                 mock.patch.object(ptc, "LIVE_CACHE_PATH", live):
+                hints = ptc.load_hints({"mod.a", "mod.b", "mod.c"})
+        self.assertEqual(hints, {"mod.a": 99.0, "mod.b": 20.0},
+                          "活體快取應覆蓋種子；不在 keys 內或缺席的鍵不應出現")
+
+
+class ParallelTimingCacheOrderDispatchUnitsTest(unittest.TestCase):
+    """`order_dispatch_units()`：`hints={}` 時與舊排序位元級相同（零回歸承諾）；
+    已知鍵優先於未知鍵；已知鍵之間依秒數遞減。"""
+
+    def _ptc(self):
+        return run_root_unittests.parallel_shard.parallel_timing_cache
+
+    def test_empty_hints_matches_legacy_test_count_ordering(self) -> None:
+        ptc = self._ptc()
+        units = {"a": 3, "b": 1, "c": 2}
+        legacy = sorted(units, key=lambda m: (-units[m], m))
+        self.assertEqual(ptc.order_dispatch_units(units, {}), legacy)
+
+    def test_known_keys_come_before_unknown_keys(self) -> None:
+        ptc = self._ptc()
+        units = {"known": 1, "unknown": 100}
+        hints = {"known": 5.0}
+        self.assertEqual(ptc.order_dispatch_units(units, hints), ["known", "unknown"])
+
+    def test_known_keys_sorted_by_seconds_descending(self) -> None:
+        ptc = self._ptc()
+        units = {"a": 1, "b": 1, "c": 1}
+        hints = {"a": 10.0, "b": 30.0, "c": 20.0}
+        self.assertEqual(ptc.order_dispatch_units(units, hints), ["b", "c", "a"])
+
+
+class ParallelTimingCacheSaveLiveCacheTest(unittest.TestCase):
+    """`save_live_cache()`：成功寫入可被 `read_json()` 讀回；寫入失敗只印 warning。"""
+
+    def _ptc(self):
+        return run_root_unittests.parallel_shard.parallel_timing_cache
+
+    def test_save_then_read_round_trips(self) -> None:
+        ptc = self._ptc()
+        with tempfile.TemporaryDirectory(prefix="ptc_save_") as td:
+            live = Path(td) / "live.json"
+            with mock.patch.object(ptc, "LIVE_CACHE_PATH", live):
+                ptc.save_live_cache({"mod.a": 1.25, "mod.b": 2.5})
+                readback = ptc.read_json(live)
+        self.assertEqual(readback, {"mod.a": 1.25, "mod.b": 2.5})
+
+    def test_write_failure_prints_warning_and_does_not_raise(self) -> None:
+        ptc = self._ptc()
+        with tempfile.TemporaryDirectory(prefix="ptc_save_fail_") as td:
+            live = Path(td) / "live.json"
+            buf = io.StringIO()
+            with mock.patch.object(ptc, "LIVE_CACHE_PATH", live), \
+                 mock.patch.object(Path, "write_text", side_effect=OSError("boom")), \
+                 contextlib.redirect_stderr(buf):
+                ptc.save_live_cache({"mod.a": 1.0})
+        self.assertIn("寫入失敗", buf.getvalue())
+
+
+class ParallelTimingCacheStalenessReportTest(unittest.TestCase):
+    """`staleness_report()`：重疊率高於門檻回 `None`；低於門檻回訊息且含
+    `refresh_parallel_timing_seed.py`；任一邊為空回 `None`。"""
+
+    def _ptc(self):
+        return run_root_unittests.parallel_shard.parallel_timing_cache
+
+    def test_high_overlap_returns_none(self) -> None:
+        ptc = self._ptc()
+        data = {f"mod.{i}": float(100 - i) for i in range(20)}
+        self.assertIsNone(ptc.staleness_report(data, dict(data)))
+
+    def test_low_overlap_returns_message_naming_the_refresh_tool(self) -> None:
+        ptc = self._ptc()
+        seed = {f"seed.{i}": float(100 - i) for i in range(20)}
+        live = {f"live.{i}": float(100 - i) for i in range(20)}
+        msg = ptc.staleness_report(seed, live)
+        self.assertIsNotNone(msg)
+        assert msg is not None
+        self.assertIn("refresh_parallel_timing_seed.py", msg)
+
+    def test_either_side_empty_returns_none(self) -> None:
+        ptc = self._ptc()
+        self.assertIsNone(ptc.staleness_report({}, {"a": 1.0}))
+        self.assertIsNone(ptc.staleness_report({"a": 1.0}, {}))
+
+
+class RunParallelPersistsLiveCacheOnlyForLargeRunsTest(unittest.TestCase):
+    """第九輪批評 D2-TEST-MOCK-TARGET-WRONG 接受並修正：mock 目標必須是
+    `parallel_shard.parallel_timing_cache.save_live_cache`（`parallel_shard` 模組
+    本身透過 `import parallel_timing_cache` 把該模組物件掛在自己的命名空間下）。
+    <20 個派工單位的既有合成測試不觸發寫入；>=20 個才觸發。
+    """
+
+    @staticmethod
+    def _fake_popen_factory():
+        class _FakeProc:
+            returncode = 0
+
+            def communicate(self):
+                return (
+                    json.dumps({
+                        "testsRun": 1, "skipped": [], "errors": [], "failures": [],
+                        "unexpectedSuccesses": [],
+                    }) + "\n",
+                    "",
+                )
+
+        def fake_popen(argv, **_kwargs):
+            return _FakeProc()
+
+        return fake_popen
+
+    def test_small_run_does_not_persist_live_cache(self) -> None:
+        parallel_shard = run_root_unittests.parallel_shard
+        suite = unittest.TestSuite()
+        modules = {f"mod.{i}": 1 for i in range(3)}
+        with mock.patch.object(parallel_shard, "worker_count", return_value=2), \
+                mock.patch.object(parallel_shard.subprocess, "Popen",
+                                   side_effect=self._fake_popen_factory()), \
+                mock.patch.object(parallel_shard.parallel_timing_cache, "save_live_cache") as saved:
+            parallel_shard.run_parallel(suite, Path(__file__).resolve().parent, modules)
+        saved.assert_not_called()
+
+    def test_large_run_persists_live_cache(self) -> None:
+        parallel_shard = run_root_unittests.parallel_shard
+        suite = unittest.TestSuite()
+        modules = {f"mod.{i}": 1 for i in range(25)}
+        with mock.patch.object(parallel_shard, "worker_count", return_value=4), \
+                mock.patch.object(parallel_shard.subprocess, "Popen",
+                                   side_effect=self._fake_popen_factory()), \
+                mock.patch.object(parallel_shard.parallel_timing_cache, "save_live_cache") as saved:
+            parallel_shard.run_parallel(suite, Path(__file__).resolve().parent, modules)
+        saved.assert_called_once()
+
+
+class ParallelShardSigtermCleanupTest(unittest.TestCase):
+    """DEF-200-274 第九輪 D4：主執行緒收到真的 SIGTERM 時，(a) `KeyboardInterrupt`
+    從 `run_parallel()` 冒出、(b) 所有已啟動的（即使是在清理快照之後才登記的）
+    子行程都被 `kill()`、(c) 舊的 SIGTERM handler 事後被還原。"""
+
+    def test_sigterm_during_join_kills_all_started_procs_and_restores_handler(self) -> None:
+        parallel_shard = run_root_unittests.parallel_shard
+        started: list = []
+        started_lock = threading.Lock()
+
+        class _FakeProc:
+            def __init__(self):
+                self.killed = False
+
+            def kill(self):
+                self.killed = True
+
+        def fake_popen(argv, **_kwargs):
+            proc = _FakeProc()
+            with started_lock:
+                idx = len(started)
+                started.append(proc)
+
+            def _communicate():
+                if idx == 0:
+                    os.kill(os.getpid(), signal.SIGTERM)
+                time.sleep(0.3)  # 模擬「還在跑」，時間夠讓其餘 worker 也真的登記進 started
+                return "", ""
+
+            proc.communicate = _communicate
+            return proc
+
+        old_handler = signal.getsignal(signal.SIGTERM)
+
+        class _Case(unittest.TestCase):
+            def test_ok(self):
+                pass
+
+        suite = unittest.TestSuite([_Case("test_ok")])
+        modules = {f"mod.{i}": 1 for i in range(4)}
+
+        with mock.patch.object(parallel_shard, "worker_count", return_value=4), \
+                mock.patch.object(parallel_shard.subprocess, "Popen", side_effect=fake_popen):
+            with self.assertRaises(KeyboardInterrupt):
+                parallel_shard.run_parallel(suite, Path(__file__).resolve().parent, modules)
+
+        self.assertEqual(signal.getsignal(signal.SIGTERM), old_handler,
+                          "run_parallel() 結束後必須還原原本的 SIGTERM handler")
+        with started_lock:
+            snapshot = list(started)
+        self.assertTrue(snapshot)
+        for proc in snapshot:
+            self.assertTrue(proc.killed, "已啟動的子行程必須被 kill()，不得放生成孤兒")
+
+
+class ParallelShardSigtermIgnoredOffMainThreadTest(unittest.TestCase):
+    """非主執行緒呼叫 `run_parallel()` 不因為掛 SIGTERM handler 而 `ValueError`。"""
+
+    def test_run_parallel_called_off_main_thread_does_not_raise_valueerror(self) -> None:
+        parallel_shard = run_root_unittests.parallel_shard
+
+        class _FakeProc:
+            def kill(self):
+                pass
+
+        def fake_popen(argv, **_kwargs):
+            proc = _FakeProc()
+            proc.communicate = lambda: (
+                json.dumps({
+                    "testsRun": 1, "skipped": [], "errors": [], "failures": [],
+                    "unexpectedSuccesses": [],
+                }) + "\n",
+                "",
+            )
+            proc.returncode = 0
+            return proc
+
+        class _Case(unittest.TestCase):
+            def test_ok(self):
+                pass
+
+        suite = unittest.TestSuite([_Case("test_ok")])
+        result_holder: dict = {}
+
+        def _call() -> None:
+            with mock.patch.object(parallel_shard, "worker_count", return_value=2), \
+                    mock.patch.object(parallel_shard.subprocess, "Popen", side_effect=fake_popen):
+                result_holder["result"] = parallel_shard.run_parallel(
+                    suite, Path(__file__).resolve().parent, {"mod.a": 1, "mod.b": 1})
+
+        t = threading.Thread(target=_call)
+        t.start()
+        t.join(timeout=10)
+        self.assertIn("result", result_holder, "非主執行緒呼叫不該因 ValueError 而整段沒完成")
+
+
 class _TopLevelDispatchFixtureA(unittest.TestCase):
     """DEF-200-274 第六輪：供 `DispatchGranularity*Test` 使用的頂層 fixture 類別。
 
@@ -3516,6 +3919,88 @@ class DispatchGranularityWhitelistHasNoModuleLevelFixturesTest(unittest.TestCase
         )
 
 
+class DispatchGranularityAutoSplitCandidatesTest(unittest.TestCase):
+    """DEF-200-274 第九輪 D2：`auto_class_level_candidates()` 自動細分候選——
+    倍率判準沿用 `dispatch_imbalance.detect_imbalance()`，只保留通過安全網
+    （頂層、非 placeholder、模組未定義 setUpModule/tearDownModule）的候選。
+    用本測試檔自己（`__name__`，已知無 setUpModule/tearDownModule）當天然樣本。
+    """
+
+    def _dg(self):
+        return run_root_unittests.dispatch_granularity
+
+    def test_module_over_fair_share_and_safe_is_selected(self) -> None:
+        dg = self._dg()
+        hints = {__name__: 100.0, "other.mod": 1.0}
+        candidates = dg.auto_class_level_candidates(hints, worker_count=2)
+        self.assertIn(__name__, candidates)
+
+    def test_already_class_level_key_is_not_a_candidate(self) -> None:
+        dg = self._dg()
+        key = f"{__name__}.SomeClass"
+        hints = {key: 100.0, "other.mod": 1.0}
+        candidates = dg.auto_class_level_candidates(hints, worker_count=2)
+        self.assertEqual(candidates, frozenset())
+
+    def test_known_module_is_excluded(self) -> None:
+        dg = self._dg()
+        hints = {__name__: 100.0, "other.mod": 1.0}
+        candidates = dg.auto_class_level_candidates(
+            hints, worker_count=2, known_modules=frozenset({__name__}))
+        self.assertNotIn(__name__, candidates)
+
+    def test_module_with_module_level_fixture_is_excluded(self) -> None:
+        dg = self._dg()
+        fake_name = "test_fixture_autosplit_fixture_module"
+        fake_module = types.ModuleType(fake_name)
+        fake_module.setUpModule = lambda: None
+        sys.modules[fake_name] = fake_module
+        self.addCleanup(sys.modules.pop, fake_name, None)
+        hints = {fake_name: 100.0, "other.mod": 1.0}
+        candidates = dg.auto_class_level_candidates(hints, worker_count=2)
+        self.assertNotIn(fake_name, candidates)
+
+    def test_unimportable_module_is_excluded_without_raising(self) -> None:
+        dg = self._dg()
+        hints = {"no_such_module_xyz_9999": 100.0, "other.mod": 1.0}
+        candidates = dg.auto_class_level_candidates(hints, worker_count=2)
+        self.assertEqual(candidates, frozenset())
+
+
+class DispatchGranularityAutoSuiteDispatchUnitsTest(unittest.TestCase):
+    """`auto_suite_dispatch_units()`：無快取時與 `suite_dispatch_units(tests)` 逐位元
+    相同（零回歸）；有 hints 命中安全、非白名單模組時回傳的 dict 含 `module.Class` 鍵。
+    """
+
+    def _dg(self):
+        return run_root_unittests.dispatch_granularity
+
+    @staticmethod
+    def _ptc():
+        # 第九輪：`dispatch_granularity.auto_suite_dispatch_units()` 對
+        # `parallel_timing_cache` 是**函式內延遲 import**（見該函式 docstring），
+        # 該名字不是 `dispatch_granularity` 模組本身的屬性——`mock.patch.object`
+        # 必須對準真正掛著這個函式的模組物件（`sys.modules` 裡只有一份，
+        # `parallel_shard` 頂層 `import parallel_timing_cache` 恰好持有同一份引用）。
+        return run_root_unittests.parallel_shard.parallel_timing_cache
+
+    def test_no_hints_matches_plain_suite_dispatch_units(self) -> None:
+        dg = self._dg()
+        tests = [_TopLevelDispatchFixtureA("test_ok")]
+        with mock.patch.object(self._ptc(), "load_hints", return_value={}):
+            auto = dg.auto_suite_dispatch_units(tests, worker_count=4)
+        self.assertEqual(auto, dg.suite_dispatch_units(tests))
+
+    def test_hints_hitting_a_safe_non_whitelisted_module_splits_by_class(self) -> None:
+        dg = self._dg()
+        tests = [_TopLevelDispatchFixtureA("test_ok")]
+        fake_hints = {__name__: 100.0, "other.mod": 1.0}
+        with mock.patch.object(self._ptc(), "load_hints", return_value=fake_hints):
+            auto = dg.auto_suite_dispatch_units(tests, worker_count=2)
+        expected_key = f"{__name__}.{_TopLevelDispatchFixtureA.__qualname__}"
+        self.assertIn(expected_key, auto)
+
+
 class DispatchImbalanceDetectionTest(unittest.TestCase):
     """DEF-200-274 第七輪：`tools/lib/dispatch_imbalance.py` 純函式的紅綠自證
     （掌舵者要求「自動偵測未來新熱點，不再只能靠人眼」）。純函式邏輯測完後，
@@ -3642,6 +4127,131 @@ class ReportDispatchImbalanceTest(unittest.TestCase):
                 run_root_unittests.dispatch_imbalance.report_dispatch_imbalance(
                     result, worker_count=4)
         self.assertNotIn("::warning::", buf.getvalue())
+
+
+class _FakeParallelResult:
+    """DEF-200-274 第九輪 D3：`ReportDispatchImbalanceOverFairShareBandTest`／
+    `ReportDispatchImbalanceWallClockLossTest` 共用的假結果——比既有
+    `ReportDispatchImbalanceTest._FakeResult` 多支援 `wall_clock`／
+    `module_finish_times` 兩個可選欄位（不設時該屬性根本不存在，
+    `getattr(result, "...", None)` 回 `None`，與序列模式／舊呼叫端同構）。
+    """
+
+    def __init__(self, module_timings=None, wall_clock=None, module_finish_times=None):
+        if module_timings is not None:
+            self.module_timings = module_timings
+        if wall_clock is not None:
+            self.wall_clock = wall_clock
+        if module_finish_times is not None:
+            self.module_finish_times = module_finish_times
+
+
+class ReportDispatchImbalanceOverFairShareBandTest(unittest.TestCase):
+    """DEF-200-274 第九輪 D3：1.0~1.5 倍率帶——排程救不了，需細分，去重後只印一次
+    （不重複既有 1.5 熱點門檻那組）。"""
+
+    def test_unit_between_1_0_and_1_5_is_printed_with_warn_prefix(self) -> None:
+        # 公平份額 = 130/4 = 32.5；"mid" 40.0 倍率 ≈1.23（1.0~1.5 之間）。
+        buf = io.StringIO()
+        result = _FakeParallelResult({"mid": 40.0, "a": 30.0, "b": 30.0, "c": 30.0})
+        with contextlib.redirect_stdout(buf):
+            run_root_unittests.dispatch_imbalance.report_dispatch_imbalance(result, worker_count=4)
+        output = buf.getvalue()
+        self.assertIn("⚠️", output)
+        self.assertIn("mid", output)
+        self.assertNotIn("🚨", output, "倍率未過 1.5 熱點門檻不該出現在 🚨 那組")
+
+    def test_unit_over_1_5_is_not_duplicated_in_the_over_share_band(self) -> None:
+        buf = io.StringIO()
+        result = _FakeParallelResult({"hot": 100.0, "a": 1.0, "b": 1.0, "c": 1.0})
+        with contextlib.redirect_stdout(buf):
+            run_root_unittests.dispatch_imbalance.report_dispatch_imbalance(result, worker_count=4)
+        output = buf.getvalue()
+        self.assertEqual(output.count("hot"), 1, "hot 已在 🚨 組出現，不該在 1.0~1.5 帶重複列出")
+        self.assertNotIn("⚠️ 以下派工單位耗時超過公平份額", output,
+                          "唯一超標的 hot 已被 🚨 組吸收，1.0~1.5 帶去重後應無殘留可印")
+
+    def test_all_units_at_or_below_fair_share_prints_neither_band(self) -> None:
+        buf = io.StringIO()
+        result = _FakeParallelResult({"a": 10.0, "b": 10.0, "c": 10.0, "d": 10.0})
+        with contextlib.redirect_stdout(buf):
+            run_root_unittests.dispatch_imbalance.report_dispatch_imbalance(result, worker_count=4)
+        self.assertEqual(buf.getvalue(), "")
+
+
+class ReportDispatchImbalanceWallClockLossTest(unittest.TestCase):
+    """DEF-200-274 第九輪 D3：整體排程效率 `wall/ideal`——`wall_clock` 屬性不存在
+    （既有 5 支 `ReportDispatchImbalanceTest` 皆用此形狀）時該區塊不印，回歸鎖。
+    """
+
+    def test_loss_at_or_below_threshold_prints_nothing_extra(self) -> None:
+        # ideal = max(sum/eff_workers, max_unit) = max(40/4, 10) = 10；wall=11 → loss=1.1<=1.15。
+        buf = io.StringIO()
+        result = _FakeParallelResult(
+            {"a": 10.0, "b": 10.0, "c": 10.0, "d": 10.0}, wall_clock=11.0)
+        with contextlib.redirect_stdout(buf):
+            run_root_unittests.dispatch_imbalance.report_dispatch_imbalance(result, worker_count=4)
+        self.assertNotIn("🐢", buf.getvalue())
+
+    def test_loss_above_threshold_prints_efficiency_and_last_finishers(self) -> None:
+        # ideal=10；wall=15 → loss=1.5>1.15。
+        buf = io.StringIO()
+        result = _FakeParallelResult(
+            {"a": 10.0, "b": 10.0, "c": 10.0, "d": 10.0}, wall_clock=15.0,
+            module_finish_times={"a": 15.0, "b": 5.0, "c": 8.0, "d": 3.0},
+        )
+        with contextlib.redirect_stdout(buf):
+            run_root_unittests.dispatch_imbalance.report_dispatch_imbalance(result, worker_count=4)
+        output = buf.getvalue()
+        self.assertIn("🐢", output)
+        self.assertIn("loss=", output)
+        self.assertIn("最後完工", output)
+        # 依 finish_at 遞減排序：a(15) 應排在 c(8) 之前，c 應排在 b(5) 之前。
+        self.assertLess(output.index(" - a:"), output.index(" - c:"))
+        self.assertLess(output.index(" - c:"), output.index(" - b:"))
+
+    def test_no_wall_clock_attribute_prints_nothing_extra(self) -> None:
+        """回歸鎖：既有 `ReportDispatchImbalanceTest._FakeResult` 皆無 `wall_clock`
+        屬性，本區塊必須整段不印、不拋例外——即既有 5 支測試不受影響。"""
+        buf = io.StringIO()
+        result = ReportDispatchImbalanceTest._FakeResult({"hot": 100.0, "a": 1.0})
+        with contextlib.redirect_stdout(buf):
+            run_root_unittests.dispatch_imbalance.report_dispatch_imbalance(result, worker_count=2)
+        self.assertNotIn("🐢", buf.getvalue())
+
+    def test_missing_finish_times_prints_efficiency_line_without_finisher_list(self) -> None:
+        buf = io.StringIO()
+        result = _FakeParallelResult(
+            {"a": 10.0, "b": 10.0, "c": 10.0, "d": 10.0}, wall_clock=15.0)
+        with contextlib.redirect_stdout(buf):
+            run_root_unittests.dispatch_imbalance.report_dispatch_imbalance(result, worker_count=4)
+        output = buf.getvalue()
+        self.assertIn("🐢", output)
+        self.assertNotIn("最後完工", output, "缺一個可選欄位不該讓整段不印，但也不該憑空造清單")
+
+
+class ReportModuleTimingsPrintsWorkerCountTest(unittest.TestCase):
+    """DEF-200-274 第九輪 D3 SA-09：標題行印實際 worker 數。"""
+
+    class _FakeResult:
+        def __init__(self, module_timings, workers_used=None):
+            self.module_timings = module_timings
+            if workers_used is not None:
+                self.workers_used = workers_used
+
+    def test_workers_used_present_shows_worker_count(self) -> None:
+        buf = io.StringIO()
+        result = self._FakeResult({"a": 1.0}, workers_used=6)
+        with contextlib.redirect_stdout(buf):
+            run_root_unittests.report_module_timings(result)
+        self.assertIn("worker=6", buf.getvalue())
+
+    def test_workers_used_absent_shows_worker_none_without_raising(self) -> None:
+        buf = io.StringIO()
+        result = self._FakeResult({"a": 1.0})
+        with contextlib.redirect_stdout(buf):
+            run_root_unittests.report_module_timings(result)
+        self.assertIn("worker=None", buf.getvalue())
 
 
 if __name__ == "__main__":

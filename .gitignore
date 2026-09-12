@@ -80,6 +80,11 @@ tools/.last_failure_*.log
 # `*` 不匹配空字串，故上一行涵蓋不到它。今日已無程式碼寫這個名字，此行純為殘檔除噪。
 tools/.last_failure.log
 
+# DEF-200-274 第九輪 D2：平行派工歷史耗時活體快取（本機量測值，每次真跑覆寫；
+# git 追蹤的對應種子檔是 tools/lib/parallel_timing_seed.json，兩者不同檔不可混淆）。
+tools/.parallel_timings.json
+tools/.parallel_timings.json.tmp
+
 # act 實跑帳本（run_act_core.py `--verify-all` 寫入，`--list` 讀取）。
 # 刻意**不入庫**：它記的是「**這台機器**上那一次 act 執行真的走完了」——是本機量測值，
 # 不是 repo 的性質。入庫等於把 A 機器的實跑結果變成 B 機器的 ✅，而那正是本 repo 反覆在

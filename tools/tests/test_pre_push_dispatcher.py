@@ -416,6 +416,24 @@ class TestPrePushDispatcher(unittest.TestCase):
         self.assertEqual(rc, 1, f"快層守門失敗必須阻擋 push：\nstdout={out}\nstderr={err}")
         self.assertIn("check_ntfs_paths.py 失敗", out + err)
 
+    def test_syntax_error_under_tools_fails_the_rootinfra_leg(self) -> None:
+        """DEF-200-274 第九輪 D7（`PrePushCompileallCatchesSyntaxErrorTest`）：
+        leg① 由 `find -exec py_compile` 改 `compileall -j0` 後，語法錯誤情境的
+        偵測能力不得倒退——既有 fake-repo 測試只覆蓋合法檔案（`tools/ok.py`），
+        沒有一支驗證語法錯誤真的會被抓到。刻意寫進**既有** `TestPrePushDispatcher`
+        （而非另開子類別繼承）：子類別會連同繼承 13 支既有 `test_*` 方法一起
+        重跑，徒增執行時間與 MIN_TESTS 計數，對本測試意圖毫無貢獻。
+        """
+        self._write("tools/bad_syntax.py", "def f(:\n")
+        sha = self._commit_all("introduce a syntax error under tools/")
+        rc, out, err = self._run_dispatcher(self._push_line(sha, self.base_sha))
+        self.assertEqual(
+            rc, 1,
+            f"tools/ 下的語法錯誤必須擋下 push（compileall -j0 取代 py_compile 後"
+            f"偵測能力不得倒退）：\nstdout={out}\nstderr={err}",
+        )
+        self.assertIn("root-infra：根層 Python py_compile 失敗", out + err)
+
     def test_empty_stdin_failsafe_runs_all_legs(self) -> None:
         """情境 3：空 stdin → fail-safe 全部 leg 都跑（寧可多跑不可漏跑）。
 

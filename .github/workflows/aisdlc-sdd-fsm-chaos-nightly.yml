@@ -90,6 +90,18 @@ jobs:
       - name: Run chaos-marked pytest suite
         working-directory: AISDLC_SDD/AISDLC_SDD_v0.01
         run: |
+          # 🔴 DEF-200-274 D6：實作階段偏離原設計，如實記錄——design_xdist.md §6.5
+          # 結構分析認為 chaos 測試對平行化無害，本輪原照掌舵者裁決加了
+          # `-n auto --dist worksteal`，但實作階段對同一份 `tools/fsm_runtime/tests/`
+          # （working-directory 固定 v0.01＝凍結基線）實測發現
+          # `tools/fsm_runtime/snapshot.py::save_abort_report()` 對「同日同 category」
+          # 的 abort 報告使用共用檔案路徑，多個 xdist worker 並行寫入同一路徑時會
+          # 競態（`-m "not chaos"` 全套連續 9 次實測 3 次翻紅；根因與逐次結果見
+          # ci-gate.sh 內對應註記與回報「先紅再綠 / 偏離設計」一節）。v0.01 是凍結
+          # 基線、依規則不可原地改此檔修競態；chaos 套件雖本輪 4 次試跑未重現，但
+          # 同一個不可修的根因存在、且本 job 只跑這一顆凍結基線，維持序列較保守。
+          # 加速空間本就有限（34 支測試、序列 <10s），不值得為它保留一個無法在原地
+          # 修復的競態風險。若日後想重新啟用，見上方分析與 §6.5 的可逆收斂建議。
           python -m pytest tools/fsm_runtime/tests/ -m chaos -v
 
       - name: Run 100-round chaos sweep

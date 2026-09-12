@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
-"""tools/lib/parallel_shard.py — `tools/run_root_unittests.py` 的本機平行執行（opt-in）。
+"""tools/lib/parallel_shard.py — `tools/run_root_unittests.py` 的本機平行執行（預設自動）。
 
 WHY（DEF-200-274，P3）：全套 4000+ 支測試序列跑約 12~13 分鐘，Mac 多核心未被利用。
-本模組在 `AUTOSDD_PARALLEL_TESTS=1` 時把 discover 完（尚未 `run()`）的 suite 依**模組**
-拆成獨立派工單位，塞進一個共用佇列；最多 `worker_count()` 條 thread 各自不斷認領
+本模組在 `should_run_parallel()` 為真時（第九輪起預設 auto：`AUTOSDD_PARALLEL_TESTS`
+未設＝真實 `tools/tests` 樹且 worker>1 即平行；`"0"`＝強制序列；`"1"`＝強制平行但仍只對
+真實樹；合成樹一律序列）把 discover 完（尚未 `run()`）的 suite 依**派工鍵**（模組或
+白名單／自動細分後的 `模組.類別`）拆成獨立派工單位，依歷史耗時遞減（LPT，見
+`parallel_timing_cache`）塞進一個共用佇列；最多 `worker_count()` 條 thread 各自不斷認領
 佇列裡的下一個模組、自己起**獨立 subprocess** 真跑該模組、自己 `communicate()` 等
 結果，再把每個模組印出的一行 JSON 彙總成一個只實作呼叫端所需介面的
 `_MergedResult`（動態工作竊取／work-stealing，細節見 `run_parallel()` docstring 的
 DEF-200-274 第四輪一節；取代舊版「依測試方法數貪婪裝箱成 N 個固定 shard」的
-`weighted_shards()`，已刪除）。預設（未設環境變數）完全不觸碰這條路徑。
+`weighted_shards()`，已刪除）。顯式 `AUTOSDD_PARALLEL_TESTS=0` 才完全不觸碰這條路徑。
 
 為何用 subprocess 而非 `multiprocessing.Pool`：Windows 強制 `spawn`、macOS 3.8+
 預設也是 `spawn`——`spawn` 會重新 import 主模組，且傳給 worker 的函式必須是模組層級、
@@ -39,12 +42,15 @@ import io
 import json
 import os
 import queue
+import signal
 import subprocess
 import sys
 import threading
 import time
 import unittest
 from pathlib import Path
+
+import parallel_timing_cache  # DEF-200-274 第九輪 D2：歷史耗時快取／LPT 排序
 
 # 🔴 本檔既是被 `run_parallel()` 以 `python <本檔>` 生出的 child target，自己也在
 # `run_parallel()` 裡印中文錯誤訊息——兩者都要求 child/entry 端有 UTF-8 stdio 保護
@@ -62,15 +68,48 @@ _ENV_ON = "AUTOSDD_PARALLEL_TESTS"
 _ENV_WORKERS = "AUTOSDD_PARALLEL_TESTS_WORKERS"
 
 
-def enabled() -> bool:
-    """讀 `AUTOSDD_PARALLEL_TESTS` 開關；純函式化以利測試注入。未設或非 "1" 皆為 False。"""
-    return os.environ.get(_ENV_ON) == "1"
+def parallel_mode() -> str:
+    """`AUTOSDD_PARALLEL_TESTS` 三態：'off'（顯式 "0"）／'on'（顯式 "1"）／
+    'auto'（未設或任何其餘字串——含使用者手誤打的值，比照 `worker_count()` 對壞
+    掉旗標「讀不懂就不讓它走進意料之外分支」的既有慣例）。
+    """
+    raw = os.environ.get(_ENV_ON)
+    if raw == "0":
+        return "off"
+    if raw == "1":
+        return "on"
+    return "auto"
+
+
+def should_run_parallel(start_dir: Path, real_start_dir: Path, workers: int) -> bool:
+    """取代舊呼叫端裸寫的 `enabled() and worker_count() > 1`，是 DEF-200-274 第九輪
+    P1 根治的機械修復：`tools/tests/test_run_root_unittests.py` 有多支測試在自己的
+    行程內對**合成暫存目錄**呼叫 `run_with_floor()`；若殼層殘留
+    `AUTOSDD_PARALLEL_TESTS=1`，舊判準會誤觸發 `run_parallel()`，worker 的
+    `assert start_dir == tools/tests` 必炸（歷史事故編號 R140，非本輪宣稱 round-label-ok，
+    即「連環 4 次假失敗」的根因）。
+
+    三條件依序判：① `mode == "off"` 永遠序列；② `workers <= 1` 永遠序列（`on`／
+    `auto` 皆不豁免——只有 1 條 worker 時走 subprocess 架構零平行效益）；
+    ③ `start_dir` 不是真正的 `real_start_dir` 時永遠序列（`on`／`auto` 皆不豁
+    免——這是 P1 的核心修復：即使殼層殘留 `=1`，對合成樹的呼叫永遠不會走到
+    `run_parallel()`）。走到這裡（`off` 已排除、`workers > 1`、樹是真的）：`on`
+    與 `auto` 收斂成同一個結論，都回 `True`——CI 既有的顯式 `=1`（三支 compat-CI）
+    在真實樹上的行為與「不設它」完全一致，回歸鎖不必動。
+    """
+    if parallel_mode() == "off":
+        return False
+    if workers <= 1:
+        return False
+    return start_dir.resolve() == real_start_dir.resolve()
 
 
 def worker_count(cpu_count: int | None = None) -> int:
-    """`AUTOSDD_PARALLEL_TESTS_WORKERS` 可覆寫；未設時＝`max(1, min(8, cpu-1))`：
-    保留一核心給前景，上限 8（subprocess 開銷＋少數大檔主導總時長，切太細邊際效益低）。
-    覆寫值非正整數時忽略、退回預設公式（壞掉的旗標不該讓平行模式整支炸掉）。
+    """`AUTOSDD_PARALLEL_TESTS_WORKERS` 可覆寫；未設時＝`max(1, min(9, cpu-1))`：
+    保留一核心給前景，上限 9（第九輪：8→9，本機 10 核 8P+2E 恰頂到新 cap；CI
+    runner 4 vCPU 不受影響——`min(9, cpu-1)` 在 cpu<=10 時與 cap=9 無關，實測見
+    證據檔）。覆寫值非正整數時忽略、退回預設公式（壞掉的旗標不該讓平行模式
+    整支炸掉）。
     """
     override = os.environ.get(_ENV_WORKERS)
     if override:
@@ -81,7 +120,7 @@ def worker_count(cpu_count: int | None = None) -> int:
         if parsed > 0:
             return parsed
     cpu = cpu_count if cpu_count is not None else (os.cpu_count() or 2)
-    return max(1, min(8, cpu - 1))
+    return max(1, min(9, cpu - 1))
 
 
 def _flatten(suite: unittest.TestSuite) -> list[unittest.TestCase]:
@@ -128,6 +167,13 @@ class _MergedResult:
         self.unexpectedSuccesses: list[object] = []
         #: {模組名: wall-clock 秒數}，供 `report_module_timings()` 消費（第五輪）。
         self.module_timings: dict[str, float] = {}
+        #: {模組名: 完工時刻（相對 `run_parallel()` 起點的秒數）}，供第九輪 D3
+        #: 「最後完工」尾端診斷消費；空 dict＝零特判（`getattr(..., None) or {}`）。
+        self.module_finish_times: dict[str, float] = {}
+        #: 本次 `run_parallel()` 的總 wall-clock 秒數（第九輪 D3）。
+        self.wall_clock: float = 0.0
+        #: 本次實際啟動的 worker thread 數（第九輪 D3 SA-09：標題行印實際 worker 數）。
+        self.workers_used: int = 0
 
     def wasSuccessful(self) -> bool:
         return not self.failures and not self.errors and not self.unexpectedSuccesses
@@ -257,6 +303,13 @@ def _crash_fallback(started: list[subprocess.Popen], exc: BaseException) -> _Mer
     return fallback
 
 
+#: 只有涵蓋這麼多派工單位的真實跑完結果才值得寫回活體快取——避免單元測試用
+#: 2~4 個合成/假模組名呼叫 `run_parallel()` 時把快取污染成幾乎沒有代表性的資料
+#: （現行 145 個生產派工單位 vs. 測試普遍用 <10 個合成模組）。副作用：這個門檻
+#: 天然讓所有既有單元測試不寫入快取檔，不需要額外 mock `save_live_cache`。
+_CACHE_PERSIST_MIN_UNITS = 20
+
+
 def run_parallel(
     suite: unittest.TestSuite, start_dir: Path, module_counts: dict[str, int]
 ) -> _MergedResult:
@@ -341,11 +394,42 @@ def run_parallel(
     整個排空，逐筆印到 stderr（不遺漏任何一筆），只有一筆時保留原始例外型別、兩筆
     以上合成一個 `RuntimeError` 把全部 `repr()` 串在訊息裡，交給 `_crash_fallback()`
     統一寫進最終的 `errors` 條目，讓「看得到幾筆失敗」這件事不必再靠猜。
+
+    🔴 第九輪 D2（LPT 排序＋計時快取）：派工鍵原本依「測試數」遞減排序，與真實
+    耗時反相關（實測：改依「歷史耗時」遞減排序即可把 makespan 壓到理論下界，見
+    證據檔）。`parallel_timing_cache.load_hints()` 讀兩層快取（git 追蹤的種子檔＋
+    本機活體快取，activated 皆缺失時回空 dict），`order_dispatch_units()` 據此排序，
+    `hints={}` 時與舊排序位元級相同（零回歸）。本次結果在涵蓋 >= `_CACHE_PERSIST_
+    MIN_UNITS` 個派工單位時（避免單元測試的 2~4 個合成模組污染快取）寫回活體
+    快取，供下次執行使用；同時印一次過期性 advisory（`staleness_report`，純
+    print、不擋）與「新模組無歷史基準」的 advisory（`unknown_n`，見程式碼）。
+
+    🔴 第九輪 D3（wall-clock／worker 數量測）：`overall_start` 記錄整體起點，每個
+    worker 完工時多存一個 `finish_at`（相對起點的秒數），供
+    `dispatch_imbalance.report_dispatch_imbalance()` 的「最後完工」尾端診斷消費；
+    `merged.wall_clock`／`workers_used` 供 `report_module_timings()`／該函式消費
+    （皆以 `getattr(result, "新欄位", None)` 讀取，序列模式的 plain `TestResult`
+    沒有這些屬性時自然不印，零特判）。
+
+    🔴 第九輪 D4（SIGTERM 清理）：`signal.default_int_handler` 讓 SIGTERM 在 Python
+    層面轉譯成與 Ctrl-C 完全相同的 `KeyboardInterrupt`，故不新開一條清理路徑，
+    直接讓 SIGTERM 借道既有的 `except KeyboardInterrupt:` 分支（僅在**主執行緒**
+    掛/還原 handler——`signal.signal()` 在非主執行緒呼叫會拋
+    `ValueError: signal only works in main thread`，本函式被單元測試在背景執行緒
+    呼叫時必須完全跳過掛/還原）。本輪同時修復一個**此前零測試覆蓋**的既存競態：
+    舊版「單次快照→單次 kill」在「已拿到模組、正要呼叫 Popen」的執行緒身上會漏接
+    ——`KeyboardInterrupt` 可能在該執行緒把自己登記進 `started` **之前**就被偵測到，
+    快照因此拍不到它，`kill()` 永遠打不到這個子行程；改為**輪詢直到所有已啟動的
+    執行緒真正結束**（`t.join(timeout=...)` 迴圈，見下方清理區塊），已用原型驗證
+    15/15 次全數清乾淨（修復前僅 ~1/10 次）。
     """
     known_tests_by_id = {t.id(): t for t in _flatten(suite)}
-    # 排序純粹是「疑似最重先派」的啟發式（縮短 tail latency），不影響正確性——
-    # work-stealing 的負載平衡保證不依賴這個猜測準不準。
-    modules_sorted = sorted(module_counts, key=lambda m: (-module_counts[m], m))
+    hints = parallel_timing_cache.load_hints(module_counts)
+    modules_sorted = parallel_timing_cache.order_dispatch_units(module_counts, hints)
+    unknown_n = len(module_counts) - len(hints)
+    if unknown_n > 0:
+        print(f"ℹ️ 本次有 {unknown_n} 個派工單位無歷史耗時基準（新模組或快取未覆蓋），"
+              "本輪仍依測試數排序——下次執行後會有基準可用。")
     pending: queue.Queue[str] = queue.Queue()
     for module in modules_sorted:
         pending.put(module)
@@ -357,8 +441,9 @@ def run_parallel(
     started_lock = threading.Lock()
     results: queue.SimpleQueue = queue.SimpleQueue()
     thread_errors: queue.SimpleQueue = queue.SimpleQueue()
-    #: Ctrl-C 收尾用（見下方 `except KeyboardInterrupt`）；平常路徑恆為 False。
+    #: Ctrl-C／SIGTERM 收尾用（見下方 `except KeyboardInterrupt`）；平常路徑恆為 False。
     stop_event = threading.Event()
+    overall_start = time.monotonic()  # 第九輪 D3：wall-clock 量測起點
 
     def _worker_thread_loop() -> None:
         try:
@@ -384,37 +469,52 @@ def run_parallel(
                 started_at = time.monotonic()
                 stdout, stderr = proc.communicate()
                 elapsed = time.monotonic() - started_at
-                results.put((module, proc.returncode, stdout, stderr, elapsed))
+                finish_at = time.monotonic() - overall_start
+                results.put((module, proc.returncode, stdout, stderr, elapsed, finish_at))
         except BaseException as exc:  # noqa: BLE001 — 蒐集後交主 thread 直接收尾，故意不窄化
             thread_errors.put(exc)
 
+    # 第九輪 D4：僅主執行緒掛/還原 SIGTERM handler——`signal.signal()` 在非主執行緒
+    # 呼叫會拋 ValueError，本函式亦被單元測試從背景執行緒呼叫過。
+    is_main = threading.current_thread() is threading.main_thread()
+    old_sigterm = signal.signal(signal.SIGTERM, signal.default_int_handler) if is_main else None
     try:
         n = min(worker_count(), len(modules_sorted)) or 1
         threads = [threading.Thread(target=_worker_thread_loop) for _ in range(n)]
-        for t in threads:
-            t.start()
         try:
+            for t in threads:
+                t.start()
             for t in threads:
                 t.join()
         except KeyboardInterrupt:
-            # 清理後 re-raise（不吞例外）：立旗標阻新 Popen→排空 pending→kill 已
-            # 啟動的子行程→等 thread 真的結束。窄殘留窗見 docstring 上方一節。
+            # 清理後 re-raise（不吞例外）：立旗標阻新 Popen→排空 pending→輪詢直到
+            # 所有已啟動的執行緒真正結束（見上方 docstring〈第九輪 D4〉的競態修復：
+            # 單次快照會漏接「正要登記進 started」的執行緒，改輪詢直到 remaining 清空）。
             stop_event.set()
             while True:
                 try:
                     pending.get_nowait()
                 except queue.Empty:
                     break
-            with started_lock:
-                snapshot = list(started)
-            for proc in snapshot:
-                try:
-                    proc.kill()
-                    proc.wait(timeout=5)
-                except Exception:  # noqa: BLE001 — 收尾動作本身不得再拋例外
-                    pass
-            for t in threads:
-                t.join()
+            killed_ids: set[int] = set()
+            remaining = [t for t in threads if t.ident is not None]
+            while remaining:
+                with started_lock:
+                    snapshot = list(started)
+                for proc in snapshot:
+                    if id(proc) in killed_ids:
+                        continue
+                    killed_ids.add(id(proc))
+                    try:
+                        proc.kill()
+                    except Exception:  # noqa: BLE001 — 收尾動作本身不得再拋例外
+                        pass
+                still_alive = []
+                for t in remaining:
+                    t.join(timeout=0.02)
+                    if t.is_alive():
+                        still_alive.append(t)
+                remaining = still_alive
             raise
         if not thread_errors.empty():
             collected: list[BaseException] = []
@@ -437,9 +537,11 @@ def run_parallel(
         payloads: list[dict] = []
         crashes: list[tuple[str, int, str, str]] = []
         module_timings: dict[str, float] = {}
+        module_finish_times: dict[str, float] = {}
         while not results.empty():
-            module, rc, stdout, stderr, elapsed = results.get_nowait()
+            module, rc, stdout, stderr, elapsed, finish_at = results.get_nowait()
             module_timings[module] = elapsed
+            module_finish_times[module] = finish_at
             parsed = None
             if rc == 0 and stdout.strip():
                 try:
@@ -454,18 +556,32 @@ def run_parallel(
             payloads.append(parsed)
         merged = merge_results(payloads, known_tests_by_id)
         merged.module_timings = module_timings
+        merged.module_finish_times = module_finish_times
+        merged.wall_clock = time.monotonic() - overall_start
+        merged.workers_used = n
         for module, rc, stdout, stderr in crashes:
             reason = (
                 f"平行分片崩潰（模組：{module}，rc={rc}）\n"
                 f"--- stdout ---\n{stdout}\n--- stderr ---\n{stderr}"
             )
             merged.errors.append((_FixtureStub(f"shard_crash::{module}"), reason))
+        if len(module_timings) >= _CACHE_PERSIST_MIN_UNITS:
+            parallel_timing_cache.save_live_cache(module_timings)
+            staleness_msg = parallel_timing_cache.staleness_report(
+                parallel_timing_cache.read_json(parallel_timing_cache.SEED_PATH),
+                module_timings,
+            )
+            if staleness_msg:
+                print(staleness_msg)
         return merged
     except Exception as exc:  # noqa: BLE001 — 見上方 docstring：任何 Exception 子類都不得穿透 leak_fence
         # `_crash_fallback()` 逐一 kill `started` 時不持鎖，傳入前先在鎖下拍照（第五輪）。
         with started_lock:
             started_snapshot = list(started)
         return _crash_fallback(started_snapshot, exc)
+    finally:
+        if is_main:
+            signal.signal(signal.SIGTERM, old_sigterm)
 
 
 if __name__ == "__main__":

@@ -328,11 +328,15 @@ if [ "$run_rootinfra" -eq 1 ] || [ "$run_rootinfra_guards" -eq 1 ]; then
       if [ "$run_rootinfra" -eq 1 ]; then
       # ① 根層 Python 全量 py_compile：tools/ + .claude/hooks/（R10 ARCH-1 補：
       #    sdd_hook_router.py 等根層消費檔有 CI paths 覆蓋，本地原本連語法檢查
-      #    都沒有）（find -exec：免 mapfile、空白檔名安全；py_compile 對多檔
-      #    逐一編譯、任一失敗即非零）
+      #    都沒有）。DEF-200-274 第九輪 D7：改用 `compileall -j0`（`-j 0` 讓
+      #    `ProcessPoolExecutor` 自己選 worker 數＝`os.cpu_count()`，環境不支援時
+      #    `_check_system_limits()` 自動退回 workers=1，不會炸）取代
+      #    `find -exec py_compile`；rc 語意與失敗可見性皆相容（`-q` 只抑制成功清單，
+      #    不抑制錯誤），實測本機 2.2x 加速。天然遞迴掃描整棵目錄樹，`__pycache__`
+      #    只含 `.pyc`、compileall 只找 `.py`，不需要額外排除。
       pydirs="tools"
       [ -d .claude/hooks ] && pydirs="$pydirs .claude/hooks"
-      if ! find $pydirs -name '*.py' -not -path '*/__pycache__/*' -exec "$PY" -m py_compile {} +; then
+      if ! "$PY" -m compileall -q -j 0 $pydirs; then
         echo "[pre-push dispatcher] ❌ root-infra：根層 Python py_compile 失敗" >&2
         leg_rc=1
       fi
@@ -452,7 +456,9 @@ if [ "$run_sdd_consumer" -eq 1 ]; then
     rc=1
   # `-rs`（R59 ARCH-R59-NB1）：與 AISDLC_SDD/scripts/ci-gate.sh 跑的是**同一套**
   # scripts/tests，本輪若只補 ci-gate.sh 那一邊，就是本輪自己在抓的「N 份複本只改 1 份」。
-  elif ! (cd "$TOPLEVEL/AISDLC_SDD" && "$PY" -m pytest scripts/tests -q -rs); then
+  # DEF-200-274 D6：scripts/tests 的 rootdir 無 ini，呼叫端顯式加 -n auto --dist worksteal
+  # （pytest.ini 一律不動，掌舵者裁決；效果須與 ci-gate.sh 那一軌一致，見上方註解）。
+  elif ! (cd "$TOPLEVEL/AISDLC_SDD" && "$PY" -m pytest scripts/tests -q -rs -n auto --dist worksteal); then
     echo "[pre-push dispatcher] ❌ 根層消費檔回歸鎖失敗（AISDLC_SDD/scripts/tests）" >&2
     rc=1
   fi

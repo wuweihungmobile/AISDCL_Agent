@@ -563,9 +563,22 @@ def test_save_abort_report_backward_compatible(tmp_path):
     assert Path(p).exists()
 
 
-def test_act056_structural_escalation_fsm_writes_diagnostic_abort(tmp_path):
+def test_act056_structural_escalation_fsm_writes_diagnostic_abort(tmp_path, monkeypatch):
     """ACT-056 / §G8 wiring：structural ESCALATION_FINAL 須由 FSM 直接產出
-    含 diagnostic 的舵手級 abort 報告，而非僅回傳 diagnostic 讓 caller 自理。"""
+    含 diagnostic 的舵手級 abort 報告，而非僅回傳 diagnostic 讓 caller 自理。
+
+    DEF-200-274 D6（pytest-xdist 導入時發現的既有測試隔離缺口）：`enter_auto_
+    recovery()` 經 `save_abort_report()` 寫入**共用**的
+    `build/reports/abort/ABORT-{date}-auto-recovery-refused.md`（同日同 category
+    覆寫為既有設計，見 snapshot.py docstring）。多個 xdist worker 並行時，任何
+    另一支測試同時觸發同一 category 都會在讀回前把內容覆寫掉，造成間歇性失敗
+    （實測：`-n auto --dist worksteal` 連續多次必現）。本檔同層 `test_save_abort_
+    report_backward_compatible` 與 `test_recovery_hint.py`／`test_auto_compact_
+    rate_limit.py`／`test_e2e_smoke.py` 皆已把 `SNAPSHOT_DIR` 導向隔離目錄，本支
+    唯獨漏了，跟進同一既有慣例即可（不是新發明的隔離手法）。
+    """
+    import tools.fsm_runtime.snapshot as snap_mod
+    monkeypatch.setattr(snap_mod, "SNAPSHOT_DIR", tmp_path / "abort")
     rt = _rt(tmp_path, "g8-wire", "ESCALATION")
     outcome = rt.enter_auto_recovery(
         escalation_reason="SLV-004 FAIL: AC-003-1 P95<0ms 與 INV-002 矛盾",

@@ -55,7 +55,7 @@ _TESTS_DIR = Path(__file__).resolve().parent / "tests"
 # 下限釘選：低於此數＝測試大規模靜默消失（目錄/pattern/路徑壞掉），紅燈。
 # 刻意刪減測試時同步下修；新增測試累積到吃掉**零相依鑑別力餘裕**的一半即被提醒重釘、
 # 吃掉四分之三即讓閘門變紅（判準＝`tools/lib/min_tests_margin.py`，見下方 DEF-200-170 段）。
-MIN_TESTS = 4054  # 🔴 重釘 4045 → 4054（方向＝收緊；2026-09-09，DEF-200-274 第六輪四方獨立複審收斂批）：discovery 探針實測直接填入、零加減推算；成長來源＝`DispatchGranularityDispatchKeyTest`／`DispatchGranularityPlaceholderConstantStaysInSyncTest`／`DispatchGranularityWhitelistHasNoModuleLevelFixturesTest` 三個測試類別。歷來完整逐輪沿革（含每次重釘理由）已搬至 docs/06_quality/CrossPlatform_Guard_Line_History_MinTests.md，本行不再原地累加。
+MIN_TESTS = 4246  # 🔴 重釘 4054 → 4246（方向＝收緊；2026-09-13，DEF-200-274 第九輪收尾單人窗口）：discovery 探針實測直接填入、零加減推算；成長來源＝新增 `ParallelTimingCache*`／`ParallelShardSigterm*`／`DispatchGranularityAutoSplit*`／`ReportDispatchImbalance*`／`ShouldRunParallelDecisionTest`／`ZeroDepProbeForcesSequentialChildEnvTest` 等測試類別（LPT 快取、SIGTERM 清理、自動細分、不均偵測 v2、P0/P1 zshrc 假紅根治）。歷來完整逐輪沿革（含每次重釘理由）已搬至 docs/06_quality/CrossPlatform_Guard_Line_History_MinTests.md，本行不再原地累加。
 
 # R57「人工 ratchet 自己會腐化」（R15 釘完連續 11 輪沒人重釘）的兩層解：① WARN 只印不擋、
 # ② 保鮮期斷言會紅，且兩層門檻刻意不同，否則 WARN 一響閘門已紅、①毫無意義。立意成立，
@@ -131,7 +131,7 @@ import dispatch_granularity  # noqa: E402  ← DEF-200-274 第六輪：平行派
 import dispatch_imbalance  # noqa: E402  ← DEF-200-274 第七輪：負載不均自動偵測
 import failure_log_rotation  # noqa: E402  ← DEF-200-162：失敗明細檔名／輪替 SSOT
 import min_tests_margin  # noqa: E402  ← DEF-200-170：MIN_TESTS 重釘提醒的判準（零相依餘裕軸）
-import parallel_shard  # noqa: E402  ← DEF-200-274：本機平行執行（opt-in，見 AUTOSDD_PARALLEL_TESTS）
+import parallel_shard  # noqa: E402  ← DEF-200-274：本機平行執行（第九輪起預設 auto；AUTOSDD_PARALLEL_TESTS 三態 0/1/未設，見 parallel_shard.should_run_parallel）
 import sentinel_lifecycle  # noqa: E402  ← M-03：leak_fence 底線防護（真排程觸碰可稽核）
 import skip_group_policy  # noqa: E402  ← R80 包 A（S3-04）：skip 分群天花板的政策 SSOT
 import skip_profile_key  # noqa: E402  ← DEF-200-183：剖面鍵的文法（軸宣告）SSOT
@@ -498,12 +498,12 @@ def report_floor_failure(
 
 
 def report_module_timings(result: object, top_n: int = 5) -> None:
-    """平行模式印耗時最長前 N 個模組；序列模式無 module_timings，不印（第五輪）。"""
+    """平行模式印耗時最長前 N 個模組與實際 worker 數；序列模式無 module_timings，不印。"""
     timings = getattr(result, "module_timings", None)
     if not timings:
         return
     ranked = sorted(timings.items(), key=lambda kv: kv[1], reverse=True)[:top_n]
-    print(f"⏱ 模組耗時排行（前 {len(ranked)}，共 {len(timings)} 模組，平行模式）：")
+    print(f"⏱ 模組耗時排行（前 {len(ranked)}，共 {len(timings)} 模組，平行模式，worker={getattr(result, 'workers_used', None)}）：")
     for module, elapsed in ranked:
         print(f"   - {module}: {elapsed:.1f}s")
 
@@ -531,9 +531,9 @@ def run_with_floor(start_dir: Path, min_tests: int) -> int:
         return 1  # 量測本身已不可信，fail-closed：不放行、也不假裝跑完
     placeholders, known_ids = report_discovery_placeholders(suite), {t.id() for t in _flatten(suite)}  # DEF-200-233：兩者都必須在 run() **之前**讀——`TestSuite.run()` 會把跑完的每一支就地換成 `None`（`_removeTestAtIndex`），WHY 全文見 `windows_skip_tags.report_windows_skip_tag_exemption_problems`
     warn_ratchet_drift(count, min_tests, suite_modules(suite))
-    dispatch_units = dispatch_granularity.suite_dispatch_units(_flatten(suite))
+    dispatch_units = dispatch_granularity.auto_suite_dispatch_units(_flatten(suite), parallel_shard.worker_count())
     result = (parallel_shard.run_parallel(suite, start_dir, dispatch_units)
-        if parallel_shard.enabled() and parallel_shard.worker_count() > 1  # DEF-200-274 第八輪，WHY 見證據檔
+        if parallel_shard.should_run_parallel(start_dir, _TESTS_DIR, parallel_shard.worker_count())
         else unittest.TextTestRunner(verbosity=1).run(suite))
     report_module_timings(result)
     dispatch_imbalance.report_dispatch_imbalance(result, parallel_shard.worker_count())

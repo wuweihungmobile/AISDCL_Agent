@@ -612,10 +612,29 @@ def gate_pytest(pytest_args: list[str]) -> int:
     🔴 只在「使用者沒有覆寫 pytest 參數」時判——`-k foo` 只跑一小撮測試，那個 census
     是另一個母體，拿去比全樹的天花板必然是假綠（甚至假紅）。判準的比較對象不得隨
     「被它所判的動作」而改變，這是 R75 升為機械物的頭號教訓。
+
+    DEF-200-274 D5（B-4）：非預設參數分支天然是「使用者自己指定的窄範圍／除錯呼叫」
+    （例如 `-k foo -v --pdb`），不需要平行——`pyproject.toml` 的 `addopts` 是 ini
+    層級全域生效、與顯式 CLI 參數「合併」而非「取代」，若不停用，殘留的
+    `-n auto --dist worksteal` 會與 `-k`/`--pdb` 疊加造成除錯體驗劣化，或無謂啟動
+    多個閒置 worker。同時加 `-p no:xdist` 與 `-o addopts=` 兩者缺一不可：只加
+    `-p no:xdist` 會讓 ini 殘留的 `-n`/`--dist` 字面在 argparse 認不得該選項時硬報
+    `unrecognized arguments`（design_xdist.md §4 實測）。
+
+    DEF-200-274 X1（主控追加需求）：預設參數分支若 PG DSN 真的生效
+    （`pg_dsn_in_effect()`），代表 ONBOARDING §7.1 教的「拉起 docker PG 再跑全套」
+    情境——conftest 的 `pytest_configure` 對此已有 fail-loud 的 UsageError 擋著
+    （見 `AutoClaude/tests/conftest.py`），但 `local_ci_gate.py` 自己這條路徑也該
+    順手把 `--dist loadgroup` 接上，讓「本機 PG 在場時跑 local_ci_gate」直接可用，
+    不必每次手動加旗標。
     """
     if pytest_args != DEFAULT_PYTEST_ARGS:
-        return _stream([sys.executable, "-m", "pytest", *pytest_args])
-    rc, output = _stream_capture([sys.executable, "-m", "pytest", *pytest_args])
+        return _stream([sys.executable, "-m", "pytest", "-p", "no:xdist", "-o", "addopts=",
+                         *pytest_args])
+    args = list(pytest_args)
+    if pg_dsn_in_effect():
+        args += ["--dist", "loadgroup"]
+    rc, output = _stream_capture([sys.executable, "-m", "pytest", *args])
     census_rc = check_skip_census(output, pg=pg_dsn_in_effect())
     return rc or census_rc
 
@@ -640,9 +659,12 @@ def gate_pg() -> int:
         print("alembic upgrade head 失敗")
         _run_quiet([*_PG_COMPOSE, "down", "-v"])
         return 1
+    # DEF-200-274 D5：單檔案呼叫無論是否分群，實際排程結果都等價於序列跑，
+    # `-p no:xdist` 省掉啟動多個閒置 worker 的心智負擔與成本（design_xdist.md §2.3）。
     rc = _stream([
         sys.executable, "-m", "pytest",
         "tests/contract/test_pg_state_repository_contract.py", "-q", "--tb=short",
+        "-p", "no:xdist", "-o", "addopts=",  # 兩者缺一不可，理由見 gate_pytest() 註解
     ])
     _run_quiet([*_PG_COMPOSE, "down", "-v"])
     return rc

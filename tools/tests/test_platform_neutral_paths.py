@@ -3720,7 +3720,7 @@ _NON_PATH_REPLACE_OWNERS: frozenset[str] = frozenset({"dataclasses", "attr", "at
 # except PermissionError:` 站點本身沒變。D31b／D31c 兩輪都沒有新增或移除任何
 # `os.replace`／`os.rename`／`shutil.move` 站點，數字仍是 39
 # （`test_unguarded_site_census_matches_the_ledger` 當回合實測，見 D31c 任務書）。
-_DIRENT_UNGUARDED_DEBT: dict[str, int] = {"live": 39}
+_DIRENT_UNGUARDED_DEBT: dict[str, int] = {"live": 37}
 
 
 def dirent_primitive_sites(source: str, rel: str) -> list[tuple[str, int, str, bool]]:
@@ -4007,7 +4007,7 @@ class TestDirEntryPrimitivesAreAccountedFor(unittest.TestCase):
         census = {"live": 0}
         scanned = 0
         for py in _REPO_ROOT.rglob("*.py"):
-            if skip_parts & set(py.parts):
+            if skip_parts & set(py.parts) or py.name.startswith("_zzz_"):  # _zzz_=合成暫存模組
                 continue
             if any(root in py.parents for root in skip_roots):
                 continue

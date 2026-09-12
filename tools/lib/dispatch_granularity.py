@@ -39,6 +39,7 @@ subprocess 內部循序重算 vs 現在最多 35 個 subprocess 平行各自重�
 """
 from __future__ import annotations
 
+import importlib
 import sys
 import unittest
 
@@ -69,18 +70,28 @@ def _module_of(test: unittest.TestCase) -> str:
     return str(cls.__module__)
 
 
-def dispatch_key(test: unittest.TestCase) -> str:
+def dispatch_key(
+    test: unittest.TestCase, class_level_modules: frozenset[str] | None = None,
+) -> str:
     """細分後的平行派工鍵。預設＝模組名（含 placeholder 特例）；僅
-    `CLASS_LEVEL_DISPATCH_MODULES` 白名單內、且非 placeholder 的模組才改用
-    「模組.類別」，讓已知的單一離群值類別能被其他 worker 分開派工。
+    `class_level_modules`（未傳時＝`CLASS_LEVEL_DISPATCH_MODULES`）白名單內、且非
+    placeholder 的模組才改用「模組.類別」，讓已知的單一離群值類別能被其他 worker
+    分開派工。
+
+    🔴 `class_level_modules=None` 才在**呼叫當下**查 `CLASS_LEVEL_DISPATCH_MODULES`
+    （而非把它直接綁進參數預設值）：後者會在函式定義當下就把預設值鎖死，往後
+    `mock.patch.object(dispatch_granularity, "CLASS_LEVEL_DISPATCH_MODULES", ...)`
+    替換模組屬性時，函式看到的仍是舊物件，讓既有測試的 patch 全部失效。
 
     安全網：只有「類別是模組的頂層屬性、且 `getattr(module, qualname)` 真的解回
     同一個類別物件」才細分——巢狀／動態產生的類別（`__qualname__` 含 `<locals>`
     或非頂層屬性）一律退回模組粒度，因為 `unittest.TestLoader.loadTestsFromName`
     無法用字串路徑解析出這類名字（fail-closed：解不回去寧可不細分，不猜）。
     """
+    if class_level_modules is None:
+        class_level_modules = CLASS_LEVEL_DISPATCH_MODULES
     module_name = _module_of(test)
-    if module_name not in CLASS_LEVEL_DISPATCH_MODULES:
+    if module_name not in class_level_modules:
         return module_name
     cls = type(test)
     if cls.__module__ == _PLACEHOLDER_MODULE:
@@ -94,14 +105,68 @@ def dispatch_key(test: unittest.TestCase) -> str:
     return f"{module_name}.{qualname}"
 
 
-def suite_dispatch_units(tests) -> dict[str, int]:
+def suite_dispatch_units(
+    tests, extra_class_level_modules: frozenset[str] = frozenset(),
+) -> dict[str, int]:
     """純函式：回傳「平行派工鍵 -> 測試數」，供 `parallel_shard.run_parallel()`
     消費（見 `dispatch_key()`）。`tests` 為呼叫端已攤平的測試清單
     （`run_root_unittests._flatten(suite)`）。與 `suite_modules()` 差異：本函式
     只決定派工單位，訊息用途一律仍用 `suite_modules()`（不受影響）。
+
+    `extra_class_level_modules` 非空時併入人工白名單（見 `auto_suite_dispatch_units`
+    的自動細分候選）；預設空集合＝與呼叫端只傳 `tests` 的既有行為位元級相同。
     """
+    effective = (
+        CLASS_LEVEL_DISPATCH_MODULES | extra_class_level_modules
+        if extra_class_level_modules else None
+    )
     counts: dict[str, int] = {}
     for test in tests:
-        key = dispatch_key(test)
+        key = dispatch_key(test, effective)
         counts[key] = counts.get(key, 0) + 1
     return counts
+
+
+def auto_class_level_candidates(
+    hints: dict[str, float], worker_count: int,
+    known_modules: frozenset[str] = frozenset(),
+) -> frozenset[str]:
+    """由歷史耗時快取自動算出「這次該額外細分的模組」。沿用
+    `dispatch_imbalance.detect_imbalance()` 同一套倍率判準（同一份閾值邏輯只
+    有一個家），只保留通過安全網的**模組級**（非 `module.Class`）候選：頂層、
+    非 placeholder、且模組本身未定義 `setUpModule`/`tearDownModule`（否則細分
+    後每個 class 各自 subprocess 都會重跑一次模組層 fixture，破壞「整檔只跑
+    一次」假設）。`known_modules`（現行人工白名單）排除在外——沒有新增的意義。
+    模組匯入失敗一律跳過，不強行細分、不崩潰。
+    """
+    import dispatch_imbalance  # noqa: PLC0415 — 延遲 import：與既有 import 順序解耦
+    flagged = dispatch_imbalance.detect_imbalance(hints, worker_count, ratio_threshold=1.0)
+    out: set[str] = set()
+    for key, _elapsed, _ratio in flagged:
+        if "." in key or key == _PLACEHOLDER_MODULE or key in known_modules:
+            continue
+        try:
+            module = importlib.import_module(key)
+        except ImportError:
+            continue
+        if hasattr(module, "setUpModule") or hasattr(module, "tearDownModule"):
+            continue
+        out.add(key)
+    return frozenset(out)
+
+
+def auto_suite_dispatch_units(tests, worker_count: int) -> dict[str, int]:
+    """`suite_dispatch_units()` 的自動版：先讀計時快取，算出這次除了人工白名單
+    外還應該細分的模組，再委派既有函式。快取讀取失敗／無快取由
+    `parallel_timing_cache.load_hints()` 自己 fail-safe 回空 dict，此時候選集合
+    必為空，`suite_dispatch_units(tests)` 原樣呼叫——與現行（僅人工白名單）行為
+    位元級相同，零風險。
+    """
+    import parallel_timing_cache  # noqa: PLC0415 — 延遲 import，理由同上
+    tests = list(tests)
+    keys_now = suite_dispatch_units(tests)
+    hints = parallel_timing_cache.load_hints(keys_now)
+    candidates = auto_class_level_candidates(hints, worker_count, CLASS_LEVEL_DISPATCH_MODULES)
+    if not candidates:
+        return keys_now
+    return suite_dispatch_units(tests, extra_class_level_modules=candidates)

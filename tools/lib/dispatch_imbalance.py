@@ -76,27 +76,59 @@ def report_dispatch_imbalance(result: object, worker_count: int) -> None:
     頁面，不需要人工捲動冗長的 log 中段才看得到（本函式此前的輸出只是普通
     print，混在成百上千行 unittest 輸出裡）。非 CI 環境（環境變數未設）維持
     原本純 print 行為不變，不多印任何東西。
+
+    第九輪 D3 新增兩段，皆刻意**新增區塊**而非調低既有 1.5 門檻（既有 11 支
+    `DispatchImbalanceDetectionTest`／`ReportDispatchImbalanceTest` 逐字沿用）：
+    ① 1.0~1.5 倍率帶——單一單位已超過公平份額但未到既有熱點門檻，排程救不了、
+       只能靠細分，去重後只印一次；② 整體排程效率 `wall/ideal`——`result` 沒有
+       `wall_clock` 屬性（序列模式／舊呼叫端）時 `getattr` 回 `None`、整段不印，
+       零特判。
     """
     timings = getattr(result, "module_timings", None)
     if not timings:
         return
-    flagged = detect_imbalance(timings, worker_count)
-    if not flagged:
-        return
     on_ci = os.environ.get("GITHUB_ACTIONS") == "true"
-    print(
-        f"🚨 平行負載不均偵測：以下派工單位耗時遠超過公平均分基準"
-        f"（worker={worker_count}）："
-    )
-    for key, elapsed, ratio in flagged:
-        print(f"   - {key}: {elapsed:.1f}s（{ratio:.1f}x 公平均分基準）")
-        if on_ci:
-            print(
-                f"::warning::平行負載不均：{key} 耗時 {elapsed:.1f}s"
-                f"（{ratio:.1f}x 公平均分基準）"
-            )
-    print(
-        "👉 建議：若為單一測試方法拖累整個模組，比照 "
-        "tools/lib/dispatch_granularity.py 的 CLASS_LEVEL_DISPATCH_MODULES "
-        "白名單機制細分派工鍵；若為多支測試普遍偏重，評估能否再細分或縮短該測試本身。"
-    )
+
+    flagged = detect_imbalance(timings, worker_count)
+    flagged_keys = {item[0] for item in flagged}
+    if flagged:
+        print(
+            f"🚨 平行負載不均偵測：以下派工單位耗時遠超過公平均分基準"
+            f"（worker={worker_count}）："
+        )
+        for key, elapsed, ratio in flagged:
+            print(f"   - {key}: {elapsed:.1f}s（{ratio:.1f}x 公平均分基準）")
+            if on_ci:
+                print(
+                    f"::warning::平行負載不均：{key} 耗時 {elapsed:.1f}s"
+                    f"（{ratio:.1f}x 公平均分基準）"
+                )
+        print(
+            "👉 建議：若為單一測試方法拖累整個模組，比照 "
+            "tools/lib/dispatch_granularity.py 的 CLASS_LEVEL_DISPATCH_MODULES "
+            "白名單機制細分派工鍵；若為多支測試普遍偏重，評估能否再細分或縮短該測試本身。"
+        )
+
+    over_share = [
+        item for item in detect_imbalance(timings, worker_count, ratio_threshold=1.0)
+        if item[0] not in flagged_keys
+    ]
+    if over_share:
+        print("⚠️ 以下派工單位耗時超過公平份額（排程救不了，需細分才能再壓 makespan）：")
+        for key, elapsed, ratio in over_share:
+            print(f"   - {key}: {elapsed:.1f}s（{ratio:.1f}x 公平均分基準）")
+
+    wall = getattr(result, "wall_clock", None)
+    if wall:
+        eff_workers = min(worker_count, len(timings)) if worker_count > 0 else 1
+        ideal = max(sum(timings.values()) / max(eff_workers, 1), max(timings.values()))
+        loss = wall / ideal if ideal > 0 else 1.0
+        if loss > 1.15:
+            finishes = getattr(result, "module_finish_times", None) or {}
+            last = sorted(finishes.items(), key=lambda kv: -kv[1])[:5]
+            print(f"🐢 整體排程效率：wall={wall:.1f}s ideal={ideal:.1f}s "
+                  f"loss={loss:.2f}x（>1.15 門檻）")
+            if last:
+                print("   最後完工（可能是拖累 makespan 的尾端）：")
+                for key, finish_at in last:
+                    print(f"   - {key}: 第 {finish_at:.1f}s 完工")

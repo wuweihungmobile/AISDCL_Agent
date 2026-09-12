@@ -10,6 +10,8 @@ tools/check_wrapper_thinness.py hash 釘選守門）。
     (c) 位置參數整批取代預設 pytest 參數（--act/--pg 旗標可混雜任意位置）
     (d) --act 平台分派（POSIX bash 載具 vs Windows PowerShell 載具 -File）
     (e) --pg：alembic 失敗 → 清理容器（down -v）+ gate FAIL；compose up 失敗不跑 alembic
+    (e2) DEF-200-274 D5/X1：gate_pytest() 非預設參數分支自動停用 xdist；
+        PG DSN 生效時預設分支自動加 --dist loadgroup
     (f) hooks liveness advisory 失敗（rc!=0 / 例外）不影響閘門結果
     (g) gate 執行拋例外（FileNotFoundError 等）→ 判 FAIL 不炸（對齊 .ps1 try/catch）
     (h) `-h/--help` 不得靜默跑完整套閘門
@@ -323,10 +325,77 @@ def test_gate_pg_success_returns_pytest_rc_and_tears_down(
     stream_calls, quiet_calls = _pg_call_recorder(monkeypatch, alembic_rc=0)
     assert m.gate_pg() == 0
     assert any("test_pg_state_repository_contract.py" in c for cmd in stream_calls for c in cmd)
+    # DEF-200-274 D5：單檔案 PG 呼叫停用 xdist（design_xdist.md §2.3——單檔案無論是否
+    # 分群，實際排程結果都等價於序列跑，用 -p no:xdist 省掉閒置 worker 的心智負擔）。
+    pytest_cmd = next(
+        cmd for cmd in stream_calls
+        if any("test_pg_state_repository_contract.py" in c for c in cmd)
+    )
+    assert "-p" in pytest_cmd and pytest_cmd[pytest_cmd.index("-p") + 1] == "no:xdist"
+    # 第九輪四方複審 PF-01：只帶 -p no:xdist 而漏 -o addopts= 會讓 ini 殘留的 -n/--dist
+    # 字面硬報 unrecognized arguments（已實測重現），兩者必須成對出現。
+    assert "-o" in pytest_cmd and pytest_cmd[pytest_cmd.index("-o") + 1] == "addopts="
     assert quiet_calls == [["docker", "compose", "-f", "docker-compose.ci.yml", "down", "-v"]]
     # DSN env 對齊 CI（asyncpg；alembic/env.py 自動 strip）
     assert m.os.environ["AUTOCLAUDE_DB_DSN"].startswith("postgresql+asyncpg://")
     assert m.os.environ["AUTOCLAUDE_ALLOW_INSECURE_DB"] == "1"
+
+
+# --- (e2) DEF-200-274 D5/X1：gate_pytest() 的 xdist 相關分支 ---
+
+def test_gate_pytest_disables_xdist_for_custom_args(monkeypatch: pytest.MonkeyPatch) -> None:
+    """非預設參數（除錯／窄範圍呼叫）必須自動停用 xdist（B-4）：只加 -p no:xdist
+    不夠——ini 殘留的 addopts 會讓 argparse 認不得 -n/--dist 而硬報
+    `unrecognized arguments`（design_xdist.md §4 實測），故兩者必須同時附加。
+    """
+    calls: list[list[str]] = []
+    monkeypatch.setattr(m, "_stream", lambda cmd: calls.append(list(cmd)) or 0)
+    rc = m.gate_pytest(["-k", "test_foo", "-v"])
+    assert rc == 0
+    assert calls == [[
+        sys.executable, "-m", "pytest", "-p", "no:xdist", "-o", "addopts=",
+        "-k", "test_foo", "-v",
+    ]]
+
+
+def test_gate_pytest_default_args_add_loadgroup_when_pg_in_effect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """DEF-200-274 X1：預設參數分支若 PG DSN 真的生效，實際呼叫要加 --dist loadgroup
+    ——對齊 ONBOARDING §7.1 教的「拉起 docker PG 再跑全套」情境。
+    """
+    calls: list[list[str]] = []
+
+    def fake_capture(cmd: list[str]) -> tuple[int, str]:
+        calls.append(list(cmd))
+        return 0, ""
+
+    monkeypatch.setattr(m, "_stream_capture", fake_capture)
+    monkeypatch.setattr(m, "pg_dsn_in_effect", lambda: True)
+    monkeypatch.setattr(m, "check_skip_census", lambda output, pg: 0)
+    rc = m.gate_pytest(list(m.DEFAULT_PYTEST_ARGS))
+    assert rc == 0
+    assert calls == [
+        [sys.executable, "-m", "pytest", *m.DEFAULT_PYTEST_ARGS, "--dist", "loadgroup"]
+    ]
+
+
+def test_gate_pytest_default_args_no_loadgroup_when_pg_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """反向對照：PG 不在場時預設分支不得多加 --dist loadgroup（鑑別力來源）。"""
+    calls: list[list[str]] = []
+
+    def fake_capture(cmd: list[str]) -> tuple[int, str]:
+        calls.append(list(cmd))
+        return 0, ""
+
+    monkeypatch.setattr(m, "_stream_capture", fake_capture)
+    monkeypatch.setattr(m, "pg_dsn_in_effect", lambda: False)
+    monkeypatch.setattr(m, "check_skip_census", lambda output, pg: 0)
+    rc = m.gate_pytest(list(m.DEFAULT_PYTEST_ARGS))
+    assert rc == 0
+    assert calls == [[sys.executable, "-m", "pytest", *m.DEFAULT_PYTEST_ARGS]]
 
 
 # --- (f) liveness advisory 失敗不影響閘門結果 ---

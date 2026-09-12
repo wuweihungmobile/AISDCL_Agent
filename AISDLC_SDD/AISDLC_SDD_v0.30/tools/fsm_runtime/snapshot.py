@@ -7,6 +7,8 @@ subsequent /stage-compaction fails or the session dies.
 from __future__ import annotations
 
 import datetime as _dt
+import os as _os
+import uuid as _uuid
 from pathlib import Path
 from typing import Optional
 
@@ -17,6 +19,35 @@ SNAPSHOT_DIR = REPO_ROOT / "build" / "reports" / "abort"
 
 def _now_iso() -> str:
     return _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")
+
+
+def _atomic_write_text(path: Path, content: str, *, encoding: str = "utf-8") -> None:
+    """Atomically write ``content`` to ``path`` via a per-call-unique temp file.
+
+    DEF-200-274 D6（pytest-xdist 導入實作階段發現的既有缺陷，非本次新增的行為）：
+    舊實作三處皆用 ``path.with_suffix(path.suffix + ".tmp")`` 當中繼檔名——這是
+    **固定**檔名，當多個行程（例如多個 xdist worker 各自跑到會寫同一份 abort
+    report／snapshot 的測試）幾乎同時呼叫本函式時，會出現「A 的 tmp 內容被 B
+    覆寫」或「A 的 ``replace()`` 已把 tmp 搬走，B 的 ``replace()`` 對著不存在的
+    檔案拋 FileNotFoundError」兩種競態。實測：AISDLC_SDD_v0.01（凍結基線）連續 9
+    次跑 `pytest -n auto --dist worksteal` 有 3 次因此讓
+    ``test_act056_structural_escalation_fsm_writes_diagnostic_abort`` 翻紅（拋出
+    的例外被呼叫端 best-effort 吞掉，`abort_report_path` 變 None）；本檔（LATEST）
+    同一份程式碼於連續復跑中亦重現一次（這次是內容互相覆蓋，非 None）。
+
+    修法：中繼檔名加上 pid + uuid4，使每次呼叫的中繼檔在檔案系統上互不相干；
+    最終路徑（``path``）本身維持既有「同日同 category 覆寫」語意不變（最後一次
+    寫入者為準——這是既有設計，本次不改）。
+    """
+    tmp = path.with_name(f"{path.name}.{_os.getpid()}.{_uuid.uuid4().hex}.tmp")
+    try:
+        tmp.write_text(content, encoding=encoding)
+        tmp.replace(path)
+    finally:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def _fmt_list(items) -> str:
@@ -158,9 +189,7 @@ def save_auto_snapshot(
 - `workflow/sdd-fsm-engine/SDD_FSM_ENGINE.md` — AUTO_COMPACT_PENDING state
 - `AISDLC_SDD_INIT.md` — session_resume 流程
 """
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(content, encoding="utf-8")
-    tmp.replace(path)
+    _atomic_write_text(path, content)
     return path
 
 
@@ -248,9 +277,7 @@ def save_abort_report(
 - `workflow/sdd-escalation/SDD_ESCALATION_PROTOCOL.md` — ESCALATION / TERMINATED
 - `workflow/sdd-fsm-engine/SDD_FSM_ENGINE.md` — FSM 狀態轉換表
 """
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(content, encoding="utf-8")
-    tmp.replace(path)
+    _atomic_write_text(path, content)
 
     # Phase I M3 / ACT-068：修正「同日同 category 覆寫的審計遺失點」。
     # 上面的 ABORT-{date}-{category}.md 是人類入口（attention_router digest 來源），
@@ -298,7 +325,12 @@ def _append_raw_abort_event(
     })
     doc["events"] = events
     doc["date"] = date
-    tmp = raw_path.with_suffix(raw_path.suffix + ".tmp")
-    tmp.write_text(yaml.safe_dump(doc, allow_unicode=True, sort_keys=False), encoding="utf-8")
-    tmp.replace(raw_path)
+    # 🔴 誠實劃界：`_atomic_write_text` 只消除「中繼檔名碰撞」這一種競態（見該函式
+    # docstring），不消除本函式讀-改-寫三步之間的 lost-update 窗口——兩個行程幾乎
+    # 同時讀到同一份舊 doc、各自 append 一筆再寫回，後寫的會覆蓋先寫的那一筆事件。
+    # 本函式全程包在呼叫端 `except Exception: pass`（best-effort raw audit，見上方
+    # docstring），不影響任何測試結果或閘門判定，故本輪不修（需要跨行程鎖或改成
+    # append-only 檔案格式才能根治，屬另一個問題，不在 DEF-200-274 D5/D6 範圍）。
+    # 第九輪四方複審 F2：本處中繼檔名碰撞與上面兩處同型，一併改走 `_atomic_write_text`。
+    _atomic_write_text(raw_path, yaml.safe_dump(doc, allow_unicode=True, sort_keys=False))
     return raw_path

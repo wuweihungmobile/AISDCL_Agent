@@ -111,6 +111,13 @@ echo "[pre-push] 5/5 pytest（CI test+equivalence 鏡像）"
 # `-rs`（R59 ARCH-R59-NB1）：與 tools/local_ci_gate.py 的 DEFAULT_PYTEST_ARGS 對齊，
 # 否則每次 push 跑的這一套仍把 skip 理由丟掉（DEF-101-510 只補了 unittest 面）。
 PYTEST_ARGS="${AUTOCLAUDE_PUSH_PYTEST_ARGS:-tests/ -q -rs --tb=short}"
+# DEF-200-274 X1：PG DSN 在場時（開發者已拉起 docker PG 並 export 給本 hook 子行程）
+# 追加 --dist loadgroup，否則 pyproject.toml 的 addopts（-n auto --dist worksteal）
+# 會讓多個 xdist worker 同時觸碰同一顆 PG 資料庫造成競態；conftest.py 已有 fail-loud
+# 的 UsageError 兜底，這裡順手接上讓本機 push 前全套在 PG 在場時直接可用。
+if [ -n "${AUTOCLAUDE_TEST_PG_DSN:-}" ] || [ -n "${AUTOCLAUDE_DB_DSN:-}" ]; then
+  PYTEST_ARGS="${PYTEST_ARGS} --dist loadgroup"
+fi
 # shellcheck disable=SC2086
 env -u GIT_DIR -u GIT_WORK_TREE "$PY" -m pytest $PYTEST_ARGS || fail=1
 

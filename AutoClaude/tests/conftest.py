@@ -235,12 +235,40 @@ def pytest_configure(config):  # noqa: ARG001
         gate = _local_ci_gate()
         if gate is None:
             _PG_AUTODETECT_NOTE = f"跳過：載入不到 {_LOCAL_CI_GATE_PATH}"
-            return
-        _, why = gate.pg_autodetect()
-        _PG_AUTODETECT_NOTE = why
-        _autoenable_real_pg_e2e()
+        else:
+            _, why = gate.pg_autodetect()
+            _PG_AUTODETECT_NOTE = why
+            _autoenable_real_pg_e2e()
     except Exception as exc:  # noqa: BLE001 — 見上方第 ⑤ 條
         _PG_AUTODETECT_NOTE = f"跳過：自動偵測本身出錯（{type(exc).__name__}: {exc}）"
+    _reject_pg_present_with_mismatched_xdist_dist(config)
+
+
+# DEF-200-274 X1（主控追加需求）：ONBOARDING §7.1 教開發者把 docker PG 拉起來再跑
+# `python -m pytest tests/ -q`——此時本檔上方的 PG autodetect 注入 DSN，而
+# `pyproject.toml` 的 addopts 預設帶 `-n auto --dist worksteal`，兩者疊加會讓多個
+# xdist worker 同時觸碰同一顆 PG 資料庫造成競態。fail-loud（pytest.UsageError），
+# 不靜默降級——理由同本檔一貫紀律：真問題不能長得像已經被管好了。
+def _reject_pg_present_with_mismatched_xdist_dist(config) -> None:
+    """PG 在場、xdist 平行、卻沒有用 loadgroup 分群 ⇒ 直接拒絕啟動。"""
+    if hasattr(config, "workerinput"):
+        return  # worker 端：config.option.dist 已被 xdist remote.py 的 setup_config()
+        # 強制改成 "no"，本判準只在 controller 端有意義；hasattr 是雙重保險。
+    if _resolve_real_pg_dsn() is None:
+        return  # 沒有 PG 在場，不需要管平行排程怎麼配
+    if not config.pluginmanager.hasplugin("xdist"):
+        return  # xdist 外掛未載入（例如 -p no:xdist）：不存在多 worker 競態的可能
+    numprocesses = config.getoption("numprocesses", None)
+    if not numprocesses:
+        return  # -n 0／未啟用平行：單行程本來就不會撞
+    dist = config.getoption("dist", "no")
+    if dist in ("loadgroup", "no"):
+        return
+    raise pytest.UsageError(
+        f"PG 在場但未用 --dist loadgroup（現為 -n {numprocesses} --dist {dist}）："
+        "多個 xdist worker 可能同時觸碰同一顆 PG 資料庫造成競態（DEF-200-274 D5/X1）。"
+        "請改用 python -m pytest tests/ -q --dist loadgroup（或 -n 0 停用平行）。"
+    )
 
 
 def _autoenable_real_pg_e2e() -> None:
@@ -376,8 +404,40 @@ def real_pg_dsn() -> str:
     return dsn
 
 
+_PG_GROUP_PATH_PREFIXES = ("tests/contract/", "tests/integration/", "tests/infra/")
+
+
+@pytest.hookimpl(tryfirst=True)  # 🔴 必須有：見下方 docstring，沒有此裝飾器時即使命令列
+# 顯式傳 --dist loadgroup，分群仍 100% 靜默失敗（xdist 3.8.0 worker 端自己的
+# WorkerInteractor.pytest_collection_modifyitems 會先於本函式執行、看不到任何 marker）。
 def pytest_collection_modifyitems(config, items):  # noqa: ARG001
-    """自動為 pg_real 標記但未啟用真實 PG 的測試加 skip reason（CI 友善 log）。"""
+    """自動為 pg_real 標記但未啟用真實 PG 的測試加 skip reason（CI 友善 log）；
+    並一律（不看 PG 是否在場）替可能觸碰真實 PG 的測試打上 xdist_group("pg_serial")。
+
+    🔴 為何「一律標記」且**必須排在下面的早退分支之前**（DEF-200-274 D5）：實測證實
+    xdist 3.8.0 的 worker 端 `config.option.loadgroup` 在任何 conftest.py 的
+    pytest_configure／pytest_cmdline_main 執行**之前**就已由原始 args/ini 鎖定
+    （見 xdist/remote.py `setup_config()`），conftest 執行期改寫 `config.option.dist`
+    對 worker 完全不生效。標記本身在 `--dist worksteal`／`load` 下是完全的 no-op
+    （xdist 忽略它），零成本；只有呼叫端顯式傳 `--dist loadgroup` 時才會真正把同群
+    項目送去同一個 worker——決定要不要用 loadgroup 是呼叫端（gate_pg() / CI PG job）
+    的靜態旗標，不是這裡的執行期判斷。
+
+    🔴 標記迴圈必須排在下面「PG 已啟用即早退」的 `return` **之前**：若排在之後，
+    PG 真的在場時（風險最高的那個分支）這段標記邏輯整段不會執行（已用 pytester
+    對照驗證：PG 啟用時 marker 完全消失，見 tests/test_conftest_pg_group.py）。
+    """
+    marker = pytest.mark.xdist_group("pg_serial")
+    for item in items:
+        # 用 nodeid，不用 str(item.fspath)：_pytest/nodes.py 的 SEP="/" 把
+        # Windows 反斜線正規化過，nodeid 保證跨平台皆為 "/" 分隔；fspath 在
+        # Windows 上是反斜線，字串前綴比對會全部落空（見根 CLAUDE.md 鐵律三）。
+        nodeid = item.nodeid
+        is_pg_real = item.get_closest_marker("pg_real") is not None
+        if nodeid.startswith(_PG_GROUP_PATH_PREFIXES) or is_pg_real:
+            item.add_marker(marker)
+
+    # ---- 既有邏輯（原封不動，只是現在排在標記迴圈之後）----
     if _resolve_real_pg_dsn() is not None:
         return  # 啟用條件滿足 — 不需 skip
     skip_marker = pytest.mark.skip(

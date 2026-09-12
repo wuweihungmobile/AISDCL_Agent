@@ -393,6 +393,7 @@ jobs:
           set -o pipefail
           pytest_rc=0
           python -m pytest tests/contract/ tests/integration/ tests/infra/ -q -rs --tb=short \
+            --dist loadgroup \
             | tee pg-contract-pytest.log || pytest_rc=$?
           echo "PG-CONTRACT-PYTEST-RC=$pytest_rc"
           PG_CONTRACT_PYTEST_RC="$pytest_rc" python - <<'PY'
@@ -535,7 +536,7 @@ jobs:
         # SD_09 W0 Z1 解除（2026-05-20，B-09）：X1/Y1/B-01/B-07/B-08 全綠後移除 continue-on-error: true
         run: |
           python -m pytest tests/integration/test_pgvector_real_recall.py \
-            -v --tb=short -m pg_real \
+            -v --tb=short -m pg_real -p no:xdist -o addopts= \
             --junitxml=.ac4_junit.xml
 
       # 🔴 R79（D-skipped #4）：ADR-SD08-003 §2.2 場景 #4 的 p95 SLA 首次接上通道。
@@ -562,7 +563,7 @@ jobs:
           set -o pipefail
           perf_rc=0
           python -m pytest tests/perf/test_pgvector_recall_perf.py \
-            -q -rs --tb=short -m pg_real \
+            -q -rs --tb=short -m pg_real -p no:xdist -o addopts= \
             | tee pgvector-perf.log || perf_rc=$?
           echo "PGVECTOR-PERF-PYTEST-RC=$perf_rc"
           PGVECTOR_PERF_RC="$perf_rc" python - <<'PY'
@@ -687,7 +688,7 @@ jobs:
           mutmut run --paths-to-mutate=autoclaude/plugins/token_guard \
                      --tests-dir=tests/plugins/token_guard \
                      --no-progress \
-                     -p no:xdist || true  # mutmut 工具特性：survived mutation 退出碼 != 0；保留 || true 容忍
+                     -p no:xdist -o addopts= || true  # mutmut 工具特性：survived mutation 退出碼 != 0；保留 || true 容忍
           mutmut results | tee mutation_token_guard.log
 
       # 連續 7 次達 ≥ 70%（目標 75% -5% 容忍）才鎖定 baseline
@@ -764,7 +765,7 @@ jobs:
           mutmut run --paths-to-mutate=autoclaude/plugins/goal_synthesis_plugin.py \
                      --tests-dir=tests/plugins/test_goal_synthesis_plugin.py \
                      --no-progress \
-                     -p no:xdist || true  # mutmut 工具特性：survived mutation 退出碼 != 0；保留 || true 容忍
+                     -p no:xdist -o addopts= || true  # mutmut 工具特性：survived mutation 退出碼 != 0；保留 || true 容忍
           mutmut results | tee mutation_goal_synthesis.log
 
       - name: Upload mutation reports (dormant)
@@ -813,7 +814,7 @@ jobs:
           mutmut run --paths-to-mutate=autoclaude/core/orchestration \
                      --tests-dir=tests/core/orchestration \
                      --no-progress \
-                     -p no:xdist || true  # mutmut 工具特性：survived mutation 退出碼 != 0；保留 || true 容忍
+                     -p no:xdist -o addopts= || true  # mutmut 工具特性：survived mutation 退出碼 != 0；保留 || true 容忍
           mutmut results | tee mutation_coordinator.log
 
       - name: Upload mutation reports (dormant)
