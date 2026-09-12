@@ -77,7 +77,7 @@ class SentinelTickConsumesHaltMarkerE2ETest(unittest.TestCase):
     def test_unexpired_halt_marker_drives_arm_reset_and_reaches_register(self) -> None:
         """reset_at 尚未到 ⇒ decision=arm_reset ⇒ 必須真的走到 `_register_and_record()`。"""
         sid = "sid-d23-e2e-armreset"
-        transcript = self._transcript(sid)
+        transcript = self._transcript(sid, mtime=datetime.now(UTC).timestamp() - 5)  # 活動早於 at
         plan = self._write_plan(sid, transcript, "T-r145-armreset")
         now = datetime.now(UTC).astimezone()
         reset_at = now + timedelta(seconds=600)
