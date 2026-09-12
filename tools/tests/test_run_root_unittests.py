@@ -3690,6 +3690,10 @@ class ParallelShardSigtermCleanupTest(unittest.TestCase):
             def kill(self):
                 self.killed = True
 
+        # Windows：`os.kill(pid, SIGTERM)`＝TerminateProcess，沒有 handler 可攔（windows-compat-ci
+        # 實測 rc=15、整個 worker 被殺）⇒ 此平台只驗 (c) handler 掛上／還原，(a)(b) 由 POSIX 承擔。
+        on_windows = sys.platform.startswith("win")
+
         def fake_popen(argv, **_kwargs):
             proc = _FakeProc()
             with started_lock:
@@ -3697,7 +3701,7 @@ class ParallelShardSigtermCleanupTest(unittest.TestCase):
                 started.append(proc)
 
             def _communicate():
-                if idx == 0:
+                if idx == 0 and not on_windows:
                     os.kill(os.getpid(), signal.SIGTERM)
                 time.sleep(0.3)  # 模擬「還在跑」，時間夠讓其餘 worker 也真的登記進 started
                 return "", ""
@@ -3716,11 +3720,16 @@ class ParallelShardSigtermCleanupTest(unittest.TestCase):
 
         with mock.patch.object(parallel_shard, "worker_count", return_value=4), \
                 mock.patch.object(parallel_shard.subprocess, "Popen", side_effect=fake_popen):
-            with self.assertRaises(KeyboardInterrupt):
+            if on_windows:
                 parallel_shard.run_parallel(suite, Path(__file__).resolve().parent, modules)
+            else:
+                with self.assertRaises(KeyboardInterrupt):
+                    parallel_shard.run_parallel(suite, Path(__file__).resolve().parent, modules)
 
         self.assertEqual(signal.getsignal(signal.SIGTERM), old_handler,
                           "run_parallel() 結束後必須還原原本的 SIGTERM handler")
+        if on_windows:
+            return
         with started_lock:
             snapshot = list(started)
         self.assertTrue(snapshot)
@@ -4167,7 +4176,8 @@ class ReportDispatchImbalanceOverFairShareBandTest(unittest.TestCase):
         with contextlib.redirect_stdout(buf):
             run_root_unittests.dispatch_imbalance.report_dispatch_imbalance(result, worker_count=4)
         output = buf.getvalue()
-        self.assertEqual(output.count("hot"), 1, "hot 已在 🚨 組出現，不該在 1.0~1.5 帶重複列出")
+        # 只數 bullet 行：CI（GITHUB_ACTIONS=true）多印的 ::warning:: annotation 不算重複
+        self.assertEqual(output.count("- hot:"), 1, "hot 已在 🚨 組出現，不該在 1.0~1.5 帶重複列出")
         self.assertNotIn("⚠️ 以下派工單位耗時超過公平份額", output,
                           "唯一超標的 hot 已被 🚨 組吸收，1.0~1.5 帶去重後應無殘留可印")
 

@@ -682,7 +682,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 8060,
+    "test_adr_xplat001_c1c2_lock.py": 8066,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 3767,
@@ -734,7 +734,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_quota_policy.py": 3416,
     "test_root_guard_known_model_r145.py": 227,
     "test_root_infra_parity.py": 441,
-    "test_run_root_unittests.py": 4258,
+    "test_run_root_unittests.py": 4268,
     "test_sanitize_component_frozen_sdd_versions_lock.py": 317,
     "test_schedule_capability_parity.py": 626,
     "test_script_scan_surface_ssot.py": 391,
@@ -1924,6 +1924,12 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
     ("R147", 98921, 98927, 6,
      "[非淨減法輪][同輪追加] 收斂列（含本列自身收斂），"
      "CrossPlatform_R145_Scan_Findings.md〈續11〉。"),
+    ("R147", 98927, 98943, 16,
+     "[非淨減法輪][同輪追加] 主控 CI 複驗修正：`test_run_root_unittests.py` "
+     "4258→4268（Windows 上 SIGTERM 測試改為不自殺的平台分支＋CI 多印 "
+     "`::warning::` 的計數修正）+10，全額歸功能軌（同一批新能力測試的 CI "
+     "相容修正，非回歸鎖）＋本列自身收斂 +6。逐檔清單沿用 "
+     "CrossPlatform_R145_Scan_Findings.md〈R147 沿用〉。"),
 )
 
 
@@ -2460,10 +2466,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 203
+_REPIN_LOG_FROZEN_PREFIX_LEN = 204
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "b2e7f31824ff6498bfeffb11097be18f2e6355f6b0543b475bf2a3beb3494ff3")
+    "f436d6837308b9e89ce1ee6f29dafde32f82bad6aedf3d517cb0a670bfb713b8")
 
 
 def repin_log_history_digest(
@@ -2714,7 +2720,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # R147：DEF-200-274 第九輪收尾單人窗口——P1/P0 zshrc 假紅根治＋LPT 快取／自動 round-label-ok
     # 細分／不均偵測 v2 新判準能力鎖檔＋既有缺陷修復回歸鎖，凍結前綴延伸涵蓋新增
     # 主表列與本軌新列本身，起點接 R146 終點 054135e143d6。 round-label-ok
-    ("R147", "054135e143d6", "b2e7f31824ff", "DEF-200-274"),
+    ("R147", "054135e143d6", "f436d6837308", "DEF-200-274"),
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

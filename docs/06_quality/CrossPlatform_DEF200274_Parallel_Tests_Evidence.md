@@ -916,28 +916,31 @@ Windows 真機驗證成功），root-infra-ci failure。
   `DispatchGranularityAutoSuiteDispatchUnitsTest`（自動細分）、
   `ReportDispatchImbalanceOverFairShareBandTest`／
   `ReportDispatchImbalanceWallClockLossTest`／
-  `ReportModuleTimingsPrintsWorkerCountTest`（不均偵測 v2）。
+  `ReportModuleTimingsPrintsWorkerCountTest`（不均偵測 v2）；同輪追加：主控
+  CI 複驗修正 4258→4268（+10，Windows 上 SIGTERM 測試改為不自殺的平台分支
+  ＋CI 多印 `::warning::` 的計數修正）。
 - `tools/tests/test_pre_push_dispatcher.py`：686→704（+18），新增
   `test_syntax_error_under_tools_fails_the_rootinfra_leg`（compileall 遷移
   語法偵測回歸鎖）。
 - `tools/tests/test_adr_xplat001_c1c2_lock.py`（本檔）：guard-line R147 重釘
-  自身逐檔漂移收斂 +104（`_GUARD_LINES_REPIN_LOG` 本輪多列＋`_FROZEN_GUARD_
+  自身逐檔漂移收斂 +110（`_GUARD_LINES_REPIN_LOG` 本輪多列＋`_FROZEN_GUARD_
   LINES` 反覆更新＋新增 `_REGRESSION_LANE_LOG` 列＋`_REPIN_NET_CAP_SCHEDULE`
   到期兌現 cap 543→542 與重新武裝下一段（`_REPIN_NET_CAP_DUE_ROUND=149`／
   `_REPIN_NET_CAP_DUE_TARGET=541`）＋`_PHASE2_REVIEW_LOG` 新增 R147
   `[維持觀察]` 列＋`_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND` 具名展延
   147→152（非 root-tools 重構持有面，真拆仍待獨立窗口）＋
-  `_REPIN_LOG_FROZEN_PREFIX_LEN` 181→203 與 `_REPIN_LOG_HISTORY_SHA256`／
-  `_FROZEN_PREFIX_REWRITE_LEDGER` 重釘＋E501 存量債棘輪折行（8 行單行列改
+  `_REPIN_LOG_FROZEN_PREFIX_LEN` 181→204 與 `_REPIN_LOG_HISTORY_SHA256`／
+  `_FROZEN_PREFIX_REWRITE_LEDGER` 重釘＋E501 存量債棘輪折行（多支單行列改
   雙行避免過長行）。
 - 分軌：回歸鎖軌 270（P1/P0 zshrc 假紅根治 119 行＋既有缺陷修復回歸鎖
   ParallelTimingCacheLoadHintsTest／ParallelShardSigtermCleanupTest／
   ParallelShardSigtermIgnoredOffMainThreadTest 151 行，未使用任何一次性例外
-  名冊）；功能軌餘額 462（＝內容成長 358〔LPT 排序／保存／過期回報／大批
+  名冊）；功能軌餘額 478（＝內容成長 368〔LPT 排序／保存／過期回報／大批
   持久化＋自動細分＋不均偵測 v2＋worker 數印出＋既有 cap 8→9 調整 340 行＋
-  compileall 遷移回歸鎖 18 行〕＋本檔〔`test_adr_xplat001_c1c2_lock.py`〕
-  自身記帳漂移 104 行，本輪刻意不把自身記帳漂移歸入回歸鎖軌以保留其 cap 309
-  的餘裕）。回歸鎖軌 270 ≤ cap 309、功能軌餘額 462 ≤ 到期後 cap 542，
+  compileall 遷移回歸鎖 18 行＋主控 CI 複驗修正 10 行〕＋本檔
+  〔`test_adr_xplat001_c1c2_lock.py`〕自身記帳漂移 110 行，本輪刻意不把自身
+  記帳漂移歸入回歸鎖軌以保留其 cap 309 的餘裕）。回歸鎖軌 270 ≤ cap 309、
+  功能軌餘額 478 ≤ 到期後 cap 542，
   皆未超額，未動用任何一次性例外名冊。
 
 ### 驗證數字（逐字）

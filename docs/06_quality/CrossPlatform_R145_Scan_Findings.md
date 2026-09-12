@@ -172,19 +172,21 @@ package B（D28 SDD telemetry writeback 守衛，v0.30 三支 hook＋fsm_runtime
   自動細分＋不均偵測 v2＋SIGTERM 清理＋P1 zshrc 假紅根治＋AutoClaude／AISDLC_SDD 接 pytest-xdist）造成的
   護欄層逐檔漂移收斂記帳，寄居本檔（同 R141～R146「單一缺陷收尾附帶記帳」寄居體例，不另開新檔）。
 
-<!-- guard-total:R147 --> R147 護欄層累積淨額＝ 98195 → 98927（+732）——內容成長 +628（`test_run_root_unittests.py`
+<!-- guard-total:R147 --> R147 護欄層累積淨額＝ 98195 → 98943（+748）——內容成長 +638（`test_run_root_unittests.py`
 3648→4258 ＋610：`ShouldRunParallelDecisionTest`／`RunWithFloorNeverParallelizesSyntheticTreeTest`／
 `_zero_dep_child_env()`＋`ZeroDepProbeForcesSequentialChildEnvTest`＝P1/P0 zshrc 假紅根治回歸鎖 119 行；
 `ParallelTimingCacheLoadHintsTest`（快取壞檔容錯＋bool 誤判計時回歸）／`ParallelShardSigtermCleanupTest`／
 `ParallelShardSigtermIgnoredOffMainThreadTest`＝既有缺陷修復回歸鎖 151 行；LPT 排序／保存／過期回報／
-大批持久化＋自動細分＋不均偵測 v2＋worker 數印出＋既有 cap 8→9 調整＝功能軌 340 行；`test_pre_push_dispatcher.py`
-686→704 ＋18：compileall 遷移語法偵測回歸鎖，功能軌）＋本檔（`test_adr_xplat001_c1c2_lock.py`）自身逐檔漂移
-收斂 +104（`_GUARD_LINES_REPIN_LOG` 本輪多列＋`_FROZEN_GUARD_LINES` 反覆更新＋`_REGRESSION_LANE_LOG` 新列＋
-`_REPIN_NET_CAP_SCHEDULE` 到期兌現（cap 543→542）與重新武裝＋`_PHASE2_REVIEW_LOG` 新列＋U9 具名展延
-147→152＋`_REPIN_LOG_FROZEN_PREFIX_LEN` 181→203＋`_REPIN_LOG_HISTORY_SHA256`／`_FROZEN_PREFIX_REWRITE_LEDGER`
+大批持久化＋自動細分＋不均偵測 v2＋worker 數印出＋既有 cap 8→9 調整＝功能軌 340 行；同輪追加：主控 CI
+複驗修正 4258→4268 ＋10（Windows 上 SIGTERM 測試改為不自殺的平台分支＋CI 多印 `::warning::` 的計數
+修正，功能軌）；`test_pre_push_dispatcher.py` 686→704 ＋18：compileall 遷移語法偵測回歸鎖，功能軌）＋
+本檔（`test_adr_xplat001_c1c2_lock.py`）自身逐檔漂移收斂 +110（`_GUARD_LINES_REPIN_LOG` 本輪多列＋
+`_FROZEN_GUARD_LINES` 反覆更新＋`_REGRESSION_LANE_LOG` 新列＋`_REPIN_NET_CAP_SCHEDULE` 到期兌現
+（cap 543→542）與重新武裝＋`_PHASE2_REVIEW_LOG` 新列＋U9 具名展延 147→152＋
+`_REPIN_LOG_FROZEN_PREFIX_LEN` 181→204＋`_REPIN_LOG_HISTORY_SHA256`／`_FROZEN_PREFIX_REWRITE_LEDGER`
 重釘＋E501 存量債棘輪折行，反覆覆核收斂至此）。分軌：回歸鎖軌 270（119+151，全額歸本軌，未使用任何一次
-性例外名冊）＋功能軌餘額 462（＝內容成長 358〔340+18〕＋本檔自身記帳漂移 104，本輪刻意不把自身記帳漂移
-歸入回歸鎖軌以保留回歸鎖軌 cap 309 的餘裕），皆未超各自上限（回歸鎖軌 cap 309／功能軌 cap 542）。詳細背景
-複審發現、設計裁決與逐項驗證數字見
+性例外名冊）＋功能軌餘額 478（＝內容成長 368〔340+18+10〕＋本檔自身記帳漂移 110，本輪刻意不把自身記帳
+漂移歸入回歸鎖軌以保留回歸鎖軌 cap 309 的餘裕），皆未超各自上限（回歸鎖軌 cap 309／功能軌 cap 542）。
+詳細背景複審發現、設計裁決與逐項驗證數字見
 `docs/06_quality/CrossPlatform_DEF200274_Parallel_Tests_Evidence.md`〈第九輪〉節；缺陷帳本見
 `docs/06_quality/AutoSDD_Defect_Log.md` DEF-200-274。
