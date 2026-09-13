@@ -1380,10 +1380,16 @@ if ($script:DockerOK) {
     # R10 QA-4（DEF-101-129）：recall pytest rc 以 [ref] 捕捉（D-10 模式）——原本其
     # rc 被 collector（main() 恆 return 0）/ progress_check（連續 ≥3 次未達綠線才
     # 非零）覆蓋，單日真紅 → stage rc=0 假綠；CI 對等 job 該 step 是當場硬紅。
+    # DEF-200-274 D5/X1：本 stage 以下四個單檔／窄範圍 pytest 呼叫一律停用 xdist——
+    # `pyproject.toml` 全域 addopts 帶 `-n auto --dist worksteal`，PG 在場時 conftest
+    # 的 X1 守門會因非 loadgroup 分群直接 UsageError；且 Windows nightly 依
+    # DEF-101-506 走 PATH 上的 pyenv 全域 python，該直譯器不保證裝了 xdist。
+    # `-p no:xdist` 與 `-o addopts=` 兩者缺一不可（ini 殘留 addopts 會讓 argparse
+    # 認不得 -n/--dist 而報 unrecognized arguments；同 local_ci_gate.gate_pg() 理由）。
     $recallRcRef = [ref] 0
     Invoke-Native {
       & $script:PyExe -m pytest tests/integration/test_pgvector_real_recall.py `
-        -v --tb=short -m pg_real --junitxml=.ac4_junit.xml
+        -v --tb=short -m pg_real --junitxml=.ac4_junit.xml -p no:xdist -o addopts=
     }
     $recallRcRef.Value = $LASTEXITCODE
     # R88／掌舵者拍板「保留＋同輪建自動通道」：`test_pgvector_hnsw_recall.py` 此前在
@@ -1398,7 +1404,8 @@ if ($script:DockerOK) {
     # 兩件事，本行只負責讓「有沒有被跑到」這件事變成可觀測的。
     $hnswRcRef = [ref] 0
     Invoke-Native {
-      & $script:PyExe -m pytest tests/integration/test_pgvector_hnsw_recall.py -v --tb=short -rs
+      & $script:PyExe -m pytest tests/integration/test_pgvector_hnsw_recall.py -v --tb=short -rs `
+        -p no:xdist -o addopts=
     }
     $hnswRcRef.Value = $LASTEXITCODE
     # R9 複審 (a)：pg-e2e stage 補 PG contract 測試（AUTOCLAUDE_TEST_PG_DSN 於本
@@ -1434,7 +1441,7 @@ if ($script:DockerOK) {
       $contractFiles += $alembicContractFiles
       Log ("[PG-CONTRACT] 本輪選擇面 {0} 支：{1}" -f $contractFiles.Count, ($contractFiles -join ' '))
       Invoke-Native {
-        & $script:PyExe -m pytest @contractFiles -v --tb=short -rs
+        & $script:PyExe -m pytest @contractFiles -v --tb=short -rs -p no:xdist -o addopts=
       }
       $contractRcRef.Value = $LASTEXITCODE
     }
@@ -1533,7 +1540,7 @@ if (Test-Path 'perf_results.json') {
   Log 'perf_results.json 移除（強制 fresh）'
 }
 $rc3 = Invoke-Stage 'perf-baseline' {
-  Invoke-Native { & $script:PyExe -m pytest tests/perf/ -v --tb=short -m perf }
+  Invoke-Native { & $script:PyExe -m pytest tests/perf/ -v --tb=short -m perf -p no:xdist -o addopts= }
   # TD-N01 修復（2026-06-12，AutoClaude_Improving_012 Phase 0）：
   # 對齊 ci.yml「Verify perf_results.json present」step — pytest 跑完後強制驗證
   # perf_results.json 確實由 tests/perf/conftest.py pytest_sessionfinish hook 產出。

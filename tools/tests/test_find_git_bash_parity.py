@@ -1263,8 +1263,8 @@ class TestIntegrationGateShellDelegation(unittest.TestCase):
         link = directory / f"{name}{self._EXE}"
         try:
             link.symlink_to(Path(sys.executable))
-        except OSError:
-            shutil.copy2(sys.executable, link)
+        except OSError:  # Win: symlink 無特權(1314)、venv stub 複製→rc=106 ⇒ shebang 包裝 exec
+            link.write_bytes(f'#!/bin/sh\nexec "{Path(sys.executable).as_posix()}" "$@"\n'.encode())
 
     def _run_with_path(self, path_entries: list[str]) -> tuple[int, str, str]:
         env = dict(os.environ)

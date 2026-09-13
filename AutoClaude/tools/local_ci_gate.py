@@ -564,10 +564,16 @@ def gate_claudemd() -> int:
 
 
 def gate_claudemd_line() -> int:
-    """2b. CLAUDE.md 單行 <= 800 codepoint（contract test）。"""
+    """2b. CLAUDE.md 單行 <= 800 codepoint（contract test）。
+
+    DEF-200-274 D5/X1：單檔案呼叫同 gate_pg() 一律停用 xdist——docker PG 在場時
+    conftest 的 X1 守門會因 ini 殘留 addopts 帶 `-n auto --dist worksteal` 而
+    UsageError，`-p no:xdist` 與 `-o addopts=` 兩者缺一不可（理由同 gate_pg() 註解）。
+    """
     return _stream([
         sys.executable, "-m", "pytest",
         "tests/contract/test_claude_md_no_long_lines.py", "-q", "--tb=short",
+        "-p", "no:xdist", "-o", "addopts=",
     ])
 
 

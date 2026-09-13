@@ -251,7 +251,10 @@ def pytest_configure(config):  # noqa: ARG001
 # 不靜默降級——理由同本檔一貫紀律：真問題不能長得像已經被管好了。
 def _reject_pg_present_with_mismatched_xdist_dist(config) -> None:
     """PG 在場、xdist 平行、卻沒有用 loadgroup 分群 ⇒ 直接拒絕啟動。"""
-    if hasattr(config, "workerinput"):
+    # config is None：呼叫端無任何命令列選項可判（例如
+    # test_local_ci_gate.py::test_conftest_is_where_the_autodetect_is_wired 直呼
+    # pytest_configure(None)），不可能存在多 worker，與 workerinput 早退合併一句。
+    if config is None or hasattr(config, "workerinput"):
         return  # worker 端：config.option.dist 已被 xdist remote.py 的 setup_config()
         # 強制改成 "no"，本判準只在 controller 端有意義；hasattr 是雙重保險。
     if _resolve_real_pg_dsn() is None:

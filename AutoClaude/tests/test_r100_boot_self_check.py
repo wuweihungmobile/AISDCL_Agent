@@ -278,11 +278,15 @@ def test_g7_the_rescue_side_asserts_the_order_itself():
 # ══════════════════════════════════════════════════════════════════════════════
 # G8：門檻是 bytes 對 bytes
 # ══════════════════════════════════════════════════════════════════════════════
-def test_g8_the_same_free_percentage_yields_different_verdicts_by_bytes(tmp_path):
-    from autoclaude.utils.disk_space import check_space, free_bytes
-    free = free_bytes(tmp_path)
-    small = check_space(tmp_path, 1, margin_bytes=0)
-    large = check_space(tmp_path, free + 1, margin_bytes=0)
+def test_g8_the_same_free_percentage_yields_different_verdicts_by_bytes(tmp_path, monkeypatch):
+    # 判準測的是「bytes 對 bytes」的門檻邏輯，不是真磁碟——真磁碟可用量在平行 xdist
+    # worker 同時寫檔時兩次呼叫會不同（Windows 2026-09-13 實測兩次相差 8192 bytes），
+    # 故把 free_bytes 釘成常數，讓 check_space() 內部兩次呼叫讀到同一個值。
+    from autoclaude.utils import disk_space
+    free = 10 * 1024 ** 3
+    monkeypatch.setattr(disk_space, "free_bytes", lambda _target: free)
+    small = disk_space.check_space(tmp_path, 1, margin_bytes=0)
+    large = disk_space.check_space(tmp_path, free + 1, margin_bytes=0)
     assert small.ok is True and large.ok is False
     assert small.free_bytes == large.free_bytes          # 同一個「可用百分比」
     assert small.required_bytes != large.required_bytes  # 判定卻不同 ⇒ bytes 對 bytes
