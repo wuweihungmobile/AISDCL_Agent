@@ -3673,6 +3673,181 @@ class RunParallelPersistsLiveCacheOnlyForLargeRunsTest(unittest.TestCase):
         saved.assert_called_once()
 
 
+class RunParallelStalenessAdvisoryCiSymmetryTest(unittest.TestCase):
+    """DEF-200-274 第十輪 D2（SD-06 P2）：`dispatch_imbalance.
+    report_dispatch_imbalance()` 第八輪起在 CI 上（`GITHUB_ACTIONS=true`）額外印
+    `::warning::` annotation，但 `run_parallel()` 對
+    `parallel_timing_cache.staleness_report()` 的非 None 回傳值此前只有純
+    print——兩則 advisory 待遇不對稱，CI 摘要頁只曝光前者。本測試釘住兩者對稱
+    後的行為：CI 上種子過期 advisory 也要多印一行 `::warning::`，非 CI 維持純
+    文字不變。
+    """
+
+    _STALE_MSG = (
+        "⚠️ 平行派工計時種子檔可能已過期：種子與活體快取的 Top-8 熱點重疊率僅 "
+        "0%（門檻 50%）——考慮執行 `python tools/refresh_parallel_timing_seed.py` "
+        "重新產生種子檔"
+    )
+
+    @staticmethod
+    def _fake_popen_factory():
+        class _FakeProc:
+            returncode = 0
+
+            def communicate(self):
+                return (
+                    json.dumps({
+                        "testsRun": 1, "skipped": [], "errors": [], "failures": [],
+                        "unexpectedSuccesses": [],
+                    }) + "\n",
+                    "",
+                )
+
+        def fake_popen(argv, **_kwargs):
+            return _FakeProc()
+
+        return fake_popen
+
+    def _run_with_stale_seed(self) -> str:
+        """真跑一次涵蓋 >= `_CACHE_PERSIST_MIN_UNITS` 個模組的 `run_parallel()`，
+        mock `staleness_report()` 直接回傳過期訊息——`staleness_report()` 判準
+        本身已由既有 `ParallelTimingCache*Test` 獨立鎖住，這裡只驗
+        `run_parallel()` 收到非 None 訊息之後的列印分支。
+        """
+        parallel_shard = run_root_unittests.parallel_shard
+        suite = unittest.TestSuite()
+        modules = {f"mod.{i}": 1 for i in range(25)}
+        buf = io.StringIO()
+        with mock.patch.object(parallel_shard, "worker_count", return_value=4), \
+                mock.patch.object(parallel_shard.subprocess, "Popen",
+                                   side_effect=self._fake_popen_factory()), \
+                mock.patch.object(parallel_shard.parallel_timing_cache, "save_live_cache"), \
+                mock.patch.object(parallel_shard.parallel_timing_cache, "staleness_report",
+                                   return_value=self._STALE_MSG), \
+                contextlib.redirect_stdout(buf):
+            parallel_shard.run_parallel(suite, Path(__file__).resolve().parent, modules)
+        return buf.getvalue()
+
+    def test_stale_seed_on_ci_prints_warning_annotation(self) -> None:
+        with mock.patch.dict(os.environ, {"GITHUB_ACTIONS": "true"}, clear=False):
+            output = self._run_with_stale_seed()
+        warning_lines = [ln for ln in output.splitlines() if ln.startswith("::warning::")]
+        self.assertEqual(
+            len(warning_lines), 1,
+            f"CI 上種子過期 advisory 應恰印 1 行 ::warning:: annotation，實際：{warning_lines}")
+        self.assertIn("過期", warning_lines[0])
+
+    def test_stale_seed_off_ci_has_no_warning_annotation(self) -> None:
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("GITHUB_ACTIONS", None)
+            output = self._run_with_stale_seed()
+        self.assertNotIn("::warning::", output)
+        self.assertIn("過期", output)
+
+
+class ParallelMergeResultSkipCensusParityTest(unittest.TestCase):
+    """DEF-200-274 第十輪 SA-01：`merge_results()` 產生的 `_MergedResult` 餵給
+    `report_skip_census()`（連帶 `report_windows_skip_tag_exemption_problems()`
+    共用的同一份 skip 明細）的語意，必須與序列 `unittest.TextTestRunner` 的原生
+    結果一致——此前全檔 `_MergedResult(` 零命中，只有真 `run_parallel()` 對
+    tools/tests 全樹的整合層級間接證據，`merge_results()` 自身若重建有缺陷不會
+    被單獨鎖住。
+
+    現場事實（先確認才動工）：`_worker_main()`（parallel_shard.py 第236~240行）
+    對 `start_dir` 有 `assert start_dir == tests_dir`——本 worker 目前只為真
+    tools/tests 設計，無法用真 subprocess 對合成暫存樹跑 `run_parallel()`（會在
+    assert 處讓 worker 以 rc=1 崩潰，變成 `shard_crashed` 而非真實 skip 語意）。
+    退回手造 per-worker payload：對同一批合成測試各自真跑一次
+    `unittest.TextTestRunner`（模擬 worker 在子行程內的真跑），用與
+    `_worker_main` 完全同款的 `parallel_shard._entries()` 序列化，再交
+    `merge_results()` 彙總——資料形狀因此與真實平行路徑保真，只是把「子行程」
+    換成「同一行程內的第二次真跑」。
+    """
+
+    def setUp(self) -> None:
+        self._tmpdir = tempfile.mkdtemp(prefix="parallel_skip_census_parity_")
+        self.addCleanup(shutil.rmtree, self._tmpdir, ignore_errors=True)
+        module_src = textwrap.dedent("""
+            import unittest
+
+
+            class SampleCases(unittest.TestCase):
+                def test_normal(self):
+                    self.assertTrue(True)
+
+                @unittest.skip("plain skip")
+                def test_decorator_skip(self):
+                    pass
+
+                def test_runtime_skip(self):
+                    self.skipTest("runtime skip")
+        """)
+        (Path(self._tmpdir) / "test_sample_module.py").write_text(module_src, encoding="utf-8")
+        self.addCleanup(sys.modules.pop, "test_sample_module", None)
+
+    def _load_suite(self) -> unittest.TestSuite:
+        # 用 discover(start_dir=top_level_dir=合成暫存目錄) 取代
+        # `sys.path.insert(self._tmpdir)` + `loadTestsFromName`：後者的執行期路徑對
+        # `AISDLC_SDD/scripts/tests/test_ci_paths_cover_root_consumers.py` 的
+        # `_eval_path_expr()` 靜態掃描器不可解析（`tempfile.mkdtemp()` 回傳值非字面
+        # 路徑常數）⇒ `test_no_unresolvable_sys_path_inserts` 真紅。discover() 本身也會
+        # 把 top_level_dir 插進 sys.path，但那是 stdlib 內部行為、不是本檔寫出的
+        # `sys.path.insert(...)` 陳述式，不落入該掃描器的射程。
+        return unittest.TestLoader().discover(
+            start_dir=self._tmpdir, top_level_dir=self._tmpdir)
+
+    def test_merged_result_skip_ids_and_census_output_match_sequential(self) -> None:
+        parallel_shard = run_root_unittests.parallel_shard
+
+        sequential_result = unittest.TextTestRunner(
+            stream=io.StringIO(), verbosity=0).run(self._load_suite())
+
+        # 平行語意重建：parent 端在**跑之前**建 known_tests_by_id（真 run_parallel()
+        # 的既有做法：`known_tests_by_id = {t.id(): t for t in _flatten(suite)}`）。
+        parent_suite = self._load_suite()
+        known_tests_by_id = {
+            t.id(): t for t in parallel_shard._flatten(parent_suite)
+        }
+        # worker 端獨立跑一次（模擬子行程內的真跑），用 worker 同款序列化打包成 payload。
+        worker_result = unittest.TextTestRunner(
+            stream=io.StringIO(), verbosity=0).run(self._load_suite())
+        payload = {
+            "testsRun": worker_result.testsRun,
+            "skipped": parallel_shard._entries(worker_result.skipped),
+            "errors": parallel_shard._entries(worker_result.errors),
+            "failures": parallel_shard._entries(worker_result.failures),
+            "unexpectedSuccesses": [
+                t.id() if hasattr(t, "id") else str(t)
+                for t in worker_result.unexpectedSuccesses
+            ],
+        }
+        merged = parallel_shard.merge_results([payload], known_tests_by_id)
+
+        self.assertEqual(merged.testsRun, sequential_result.testsRun)
+        seq_ids = {test.id() for test, _ in sequential_result.skipped}
+        merged_ids = {test.id() for test, _ in merged.skipped}
+        self.assertEqual(
+            merged_ids, seq_ids,
+            "merge_results() 重建出的 skip id 集合必須與序列真跑逐一對上",
+        )
+
+        synth_dir = Path(self._tmpdir)
+        buf_seq = io.StringIO()
+        with contextlib.redirect_stdout(buf_seq):
+            rc_seq = run_root_unittests.report_skip_census(sequential_result, synth_dir)
+        buf_merged = io.StringIO()
+        with contextlib.redirect_stdout(buf_merged):
+            rc_merged = run_root_unittests.report_skip_census(merged, synth_dir)
+
+        self.assertEqual(rc_seq, rc_merged)
+        self.assertEqual(
+            buf_seq.getvalue(), buf_merged.getvalue(),
+            "同一批 skip 語意餵 report_skip_census()：序列與平行合併結果的輸出"
+            "必須逐字相同（start_dir 傳合成目錄本身，讓 M6 集合面對非真"
+            " tools/tests 樹早退、不誤判——理由見 report_skip_census docstring）",
+        )
+
+
 class ParallelShardSigtermCleanupTest(unittest.TestCase):
     """DEF-200-274 第九輪 D4：主執行緒收到真的 SIGTERM 時，(a) `KeyboardInterrupt`
     從 `run_parallel()` 冒出、(b) 所有已啟動的（即使是在清理快照之後才登記的）

@@ -190,3 +190,54 @@ package B（D28 SDD telemetry writeback 守衛，v0.30 三支 hook＋fsm_runtime
 詳細背景複審發現、設計裁決與逐項驗證數字見
 `docs/06_quality/CrossPlatform_DEF200274_Parallel_Tests_Evidence.md`〈第九輪〉節；缺陷帳本見
 `docs/06_quality/AutoSDD_Defect_Log.md` DEF-200-274。
+
+## 第十輪附記（R148；DEF-200-274 第十輪收尾單人窗口）
+
+- **體例**：本節非開新一輪 CrossPlatform 掃描輪四件套，僅為 DEF-200-274 第十輪（四方獨立審查第九輪
+  產出＋5 包並行修復＋收尾單人窗口收斂）造成的護欄層逐檔漂移收斂記帳，寄居本檔（同 R129～R147
+  「單一缺陷收尾附帶記帳」寄居體例，不另開新檔）。
+
+<!-- guard-total:R148 --> R148 護欄層累積淨額＝ 98943 → 99419（+476）——內容成長 +407，逐檔：
+`test_run_root_unittests.py` 4268→4443（+175：D2 兩支平行回歸鎖 `RunParallelStalenessAdvisoryCiSymmetryTest`／
+`ParallelMergeResultSkipCensusParityTest`，驗 staleness advisory 與既有 dispatch_imbalance 的 CI
+`::warning::` 對稱、以及 `merge_results()` 重建的 skip 語意與序列真跑一致）；
+`test_doc_loc_baseline_freshness_r60.py` 7145→7206（+61：D1 把 139.9s 單一測試方法拆成 Darwin／Linux／
+Win32 三個具名平台子類別＋一支類別集合一致性回歸鎖，讓 `dispatch_granularity` 的類別級白名單能各自
+分開派工）；`test_wake_chain_halt_r278.py` 691→727（+36：包 C 三支近界回歸鎖，驗
+`HALT_MARKER_ACTIVITY_SKEW_SECONDS=10` 容忍窗的邊界內／邊界外／恰等三案）；新檔
+`test_ci_gate_xdist_allowlist.py`（0→121：修 2 鎖住 `ci-gate.sh` 的 `XDIST_ARGS` 判準必須是允許清單
+`VER == LATEST`、姊妹段落 `scripts/tests/` 呼叫恆帶 xdist，原生於 `AISDLC_SDD/scripts/tests/`、因該樹是
+ONBOARDING 指紋樹而遷入本樹，同 D32 status line 先例）。四者皆回歸鎖軌，全額計入，非淨減法輪，
+已補 `_REGRESSION_LANE_LOG` R148 列 393（分軌申報，見 `lane_split_problems()`）；淨額 393 超過
+軌上限 309，四方獨立審查核准一次性例外（`_REGRESSION_LANE_APPROVED_OVERAGE` 新增 R148 列，
+`_REGRESSION_LANE_APPROVED_OVERAGE_MAX_ENTRIES` 1→2，同 R145 判例：一次性收斂優於放寬上限
+本體或虛報分類）。另 +11 全套第三次驗證跑時四方複審再發現：`test_doc_loc_baseline_freshness_r60.py`
+的 `python_symbol_index()`／`collect_symbol_claims()` 對 `glob()` 快照後才 `read_text()`，D1 拆分後
+平台模擬類別數增加、與 `LoadBalancingRegressionTest` 平行寫刪合成檔的既有競態暴露機率上升，補
+`try/except FileNotFoundError` 兩處硬化（全額歸功能軌，非回歸鎖，`test_doc_loc_baseline_freshness_r60.py`
+7206→7217）。另 +3 全套第四次驗證跑時四方複審再發現：`TestR81GhostPathClaims._FLIP_PROBE` 是固定
+檔名，D1 拆分後多個平行 worker 行程各自跑一次 sibling suite 時互撞對方的建檔／刪檔；改帶
+`os.getpid()` 隔離（同 `LoadBalancingRegressionTest` 既有慣例，全額歸功能軌，
+`test_doc_loc_baseline_freshness_r60.py` 7217→7220）。
+另 +69 本檔（`test_adr_xplat001_c1c2_lock.py`）自身逐檔漂移收斂（主表新增列＋本軌新增列＋
+`_FROZEN_PREFIX_REWRITE_LEDGER` 追加列＋`_REGRESSION_LANE_LOG` 追加列＋
+`_REGRESSION_LANE_APPROVED_OVERAGE` 追加列＋逐列補 CrossPlatform 逐檔清單指標所造成的行數漂移，
+`--print-guard-lines` 反覆覆核收斂到本行本身也計入為止，同既有體例；凍結前綴
+`_REPIN_LOG_FROZEN_PREFIX_LEN` 204→213、`_REPIN_LOG_HISTORY_SHA256`／`_FROZEN_PREFIX_REWRITE_LEDGER`
+同步重釘）——DEF-200-274 第十輪：
+掌舵者要求四方獨立審查（Architect／SA／SD／QA，各自不共享上下文分別跑）覆核第九輪 24 條發現，19 條
+成立、5 條駁回、1 條未驗；其中 SA-04（`halt_verdict()` 判「標記過期」用零容忍嚴格比較，hook 落盤 `at`
+與逐字稿真實 mtime 之間天生的毫秒級時序雜訊會被誤判成「已續跑」，commit c4a7e00 當輪只把測試治具的
+mtime 撥早規避現象、生產碼本身未動）、SD-06（種子過期 advisory 與既有 `dispatch_imbalance` 的
+`::warning::` 待遇不對稱）、SD-02／SA-01（139.9s 單一測試方法過長、無法被 `dispatch_granularity` 類別級
+白名單再細分）三項判定為需修復的真缺陷；5 包並行修復：包 A（CI workflow perf-baseline／pg-e2e／
+nightly-full 的 xdist 開關调整）、包 B（`ci-gate.sh` xdist 判準排除清單改允許清單，因 `_atomic_write_text`
+競態修法僅存在於 LATEST、中間歷史版依規則不可原地補）、包 C（`HALT_MARKER_ACTIVITY_SKEW_SECONDS=10`
+生產面根治＋三支近界回歸鎖）、D1（139.9s 測試拆三平台具名子類別）、D2（staleness advisory CI
+`::warning::` 對稱化＋`merge_results()` skip 語意平行回歸鎖）→ 四方複審 3 APPROVE／1 REJECT（一次性例外
+未逐字附刪除清單，退回補正）→ 收尾單人窗口修復收斂、SD／QA 二審 APPROVE。誠實劃界：Windows／macOS
+物理機親驗待補；本輪修復的自動細分候選層在真實全套從未被觸發過（本機 9／CI 3／2 worker 皆不達公平
+份額門檻）；跨 leg CPU 預算協調層缺口（DEF-200-289）與 root-infra-ci nightly-full 新鮮度守衛只判天數、
+不判待驗變更是否已被涵蓋（DEF-200-290）留為未結項。詳細背景複審發現、設計裁決與逐項驗證數字見
+`docs/06_quality/CrossPlatform_DEF200274_Parallel_Tests_Evidence.md`〈第十輪〉節；缺陷帳本見
+`docs/06_quality/AutoSDD_Defect_Log.md` DEF-200-274／DEF-200-289／DEF-200-290。

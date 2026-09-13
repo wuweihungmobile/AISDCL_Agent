@@ -682,7 +682,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 8066,
+    "test_adr_xplat001_c1c2_lock.py": 8135,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 3767,
@@ -698,6 +698,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_check_pytest_baseline_sites.py": 301,
     "test_check_script_parity.py": 2051,
     "test_check_wrapper_thinness.py": 1185,
+    "test_ci_gate_xdist_allowlist.py": 121,
     "test_claim_provenance_r86.py": 1015,
     "test_component_sanitizer_shared_layer_lock.py": 293,
     "test_context_budget_guard.py": 12160,
@@ -706,7 +707,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_dev_start.py": 6529,
     "test_dev_start_ps1_lastexitcode.py": 521,
     "test_doc_env_prefix_platform_parity_r60.py": 331,
-    "test_doc_loc_baseline_freshness_r60.py": 7145,
+    "test_doc_loc_baseline_freshness_r60.py": 7220,
     "test_extras_quoting_zsh_safety.py": 365,
     "test_failure_log_rotation.py": 80,
     "test_find_git_bash_parity.py": 1306,
@@ -734,7 +735,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_quota_policy.py": 3416,
     "test_root_guard_known_model_r145.py": 227,
     "test_root_infra_parity.py": 441,
-    "test_run_root_unittests.py": 4268,
+    "test_run_root_unittests.py": 4443,
     "test_sanitize_component_frozen_sdd_versions_lock.py": 317,
     "test_schedule_capability_parity.py": 626,
     "test_script_scan_surface_ssot.py": 391,
@@ -745,7 +746,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_statusline_context_feed.py": 204,
     "test_stdio_utf8.py": 76,
     "test_subprocess_encoding_hygiene.py": 1582,
-    "test_wake_chain_halt_r278.py": 691,
+    "test_wake_chain_halt_r278.py": 727,
     "test_windows_forbidden_filename_parity.py": 1003,
     "test_windows_nightly_anchor_parity.py": 135,
     "test_windows_smoke_heartbeat_doc_sync.py": 197,
@@ -1930,6 +1931,52 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "`::warning::` 的計數修正）+10，全額歸功能軌（同一批新能力測試的 CI "
      "相容修正，非回歸鎖）＋本列自身收斂 +6。逐檔清單沿用 "
      "CrossPlatform_R145_Scan_Findings.md〈R147 沿用〉。"),
+    ("R148", 98943, 99336, 393,
+     "[非淨減法輪] DEF-200-274 第十輪收尾單人窗口：`test_run_root_unittests.py` +175"
+     "（D2 兩支平行回歸鎖：`RunParallelStalenessAdvisoryCiSymmetryTest`／"
+     "`ParallelMergeResultSkipCensusParityTest`）；`test_doc_loc_baseline_freshness_r60.py` "
+     "+61（D1：139.9s 臨界測試拆三個具名平台子類別＋一致性回歸鎖）；"
+     "`test_wake_chain_halt_r278.py` +36（包 C：`HALT_MARKER_ACTIVITY_SKEW_SECONDS` "
+     "三支近界回歸鎖）；新檔 `test_ci_gate_xdist_allowlist.py` +121（修 2：ci-gate.sh "
+     "xdist 允許清單回歸鎖，遷自 AISDLC_SDD 樹、同 D32 status line 先例，非全新判準面）。"
+     "四者皆回歸鎖軌，全額計入，非淨減法輪。逐檔清單見 "
+     "CrossPlatform_R145_Scan_Findings.md〈第十輪附記〉。"),
+    ("R148", 99336, 99375, 39,
+     "[非淨減法輪][同輪追加] 收斂列：本表（`test_adr_xplat001_c1c2_lock.py` 自身）新增"
+     "上一列＋`_FROZEN_PREFIX_REWRITE_LEDGER` 追加列＋`_REGRESSION_LANE_LOG` 追加列＋"
+     "`_REGRESSION_LANE_APPROVED_OVERAGE` 追加列所造成的行數漂移，數字由 "
+     "--print-guard-lines 覆核收斂到本行本身也計入為止，同既有體例。逐檔清單沿用 "
+     "CrossPlatform_R145_Scan_Findings.md〈第十輪附記〉。"),
+    ("R148", 99375, 99386, 11,
+     "[非淨減法輪][全額功能軌][同輪追加] 四方複審發現：`python_symbol_index()`／"
+     "`collect_symbol_claims()` 對 `glob()` 快照後才 `read_text()`，平行派工下"
+     "`LoadBalancingRegressionTest` 於 `tools/tests/` 內短暫寫入又刪除的合成 `.py` 檔"
+     "會在兩者之間消失、炸 `FileNotFoundError`（D1 拆分後同批平台模擬類別數增加、"
+     "暴露機率上升）；修法：兩處各包一層 `try/except FileNotFoundError: continue`，"
+     "與函式檔頭既有「漏報比誤報安全」方向一致，非新判準面、屬硬化非回歸鎖。逐項見 "
+     "CrossPlatform_R145_Scan_Findings.md〈第十輪附記〉。"),
+    ("R148", 99386, 99393, 7,
+     "[非淨減法輪][全額功能軌][同輪追加] 收斂列：本表自身新增上一列所造成的行數漂移，"
+     "數字由 --print-guard-lines 覆核收斂到本行本身也計入為止，同既有體例。逐檔清單沿用 "
+     "CrossPlatform_R145_Scan_Findings.md〈第十輪附記〉。"),
+    ("R148", 99393, 99396, 3,
+     "[非淨減法輪][全額功能軌][同輪追加] 收斂列（含本列自身收斂），同既有體例。逐檔清單沿用 "
+     "CrossPlatform_R145_Scan_Findings.md〈續〉。"),
+    ("R148", 99396, 99400, 4,
+     "[非淨減法輪][全額功能軌][同輪追加] 收斂列（含本列自身收斂），同既有體例。逐檔清單沿用 "
+     "CrossPlatform_R145_Scan_Findings.md〈續2〉。"),
+    ("R148", 99400, 99407, 7,
+     "[非淨減法輪][全額功能軌][同輪追加] 收斂列：上四列各自補 CrossPlatform 逐檔清單指標"
+     "所造成的行數漂移。逐檔清單沿用 CrossPlatform_R145_Scan_Findings.md〈續3〉。"),
+    ("R148", 99407, 99410, 3,
+     "[非淨減法輪][全額功能軌][同輪追加] 全套第四次驗證跑時四方複審再發現："
+     "`TestR81GhostPathClaims._FLIP_PROBE` 是固定檔名，D1 拆分後多個平行 worker 行程"
+     "各自跑一次 sibling suite 時互相撞見對方的建檔／刪檔；改帶 `os.getpid()` 隔離"
+     "（同 `LoadBalancingRegressionTest` 既有慣例），全額歸功能軌，非回歸鎖。逐檔清單"
+     "沿用 CrossPlatform_R145_Scan_Findings.md〈第十輪附記〉。"),
+    ("R148", 99410, 99419, 9,
+     "[非淨減法輪][全額功能軌][同輪追加] 收斂列：上一列自身新增所造成的行數漂移，同既有"
+     "體例。逐檔清單沿用 CrossPlatform_R145_Scan_Findings.md〈續4〉。"),
 )
 
 
@@ -2208,6 +2255,14 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "ParallelShardSigtermIgnoredOffMainThreadTest（41 行），全額歸本軌（記帳誠實度"
      "分類）。逐項見 docs/06_quality/CrossPlatform_DEF200274_Parallel_Tests_Evidence.md"
      "〈第九輪〉。"),
+    ("R148", 393,
+     "DEF-200-274 第十輪四方獨立審查收斂：`RunParallelStalenessAdvisoryCiSymmetryTest`／"
+     "`ParallelMergeResultSkipCensusParityTest`（既有 staleness advisory／skip 語意平行"
+     "回歸鎖，175 行）＋139.9s 臨界測試拆三平台具名子類別＋一致性回歸鎖（61 行）＋"
+     "`HALT_MARKER_ACTIVITY_SKEW_SECONDS` 三支近界回歸鎖（36 行）＋`ci-gate.sh` xdist "
+     "允許清單回歸鎖（121 行，遷自 AISDLC_SDD 樹），全額歸本軌（記帳誠實度分類，本檔"
+     "自身逐檔漂移收斂 21 行不計入）。逐項見 "
+     "docs/06_quality/CrossPlatform_R145_Scan_Findings.md〈第十輪附記〉。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -2235,8 +2290,17 @@ _REGRESSION_LANE_APPROVED_OVERAGE: dict[str, tuple[int, str]] = {
         "E_ROUND_CAP 數字本輪一個字未動，本表只涵蓋本輪這一個精確淨額，往後任何一輪照原判準阻擋"
         "。紀錄見 docs/06_quality/CrossPlatform_R145_Scan_Findings.md §3.1。"
     )),
+    "R148": (393, (  # round-label-ok：四方複審核准的一次性例外，非帳本追蹤輪號
+        "四方獨立審查（Architect/SA/SD/QA）核准 DEF-200-274 第十輪一次性例外：本輪四支回歸鎖檔"
+        "（D2 兩支平行回歸鎖＋D1 拆分回歸鎖＋包 C 近界回歸鎖＋修 2 ci-gate 允許清單回歸鎖）皆為"
+        "四方本輪覆核第九輪產出後點名要修的真缺陷所需的驗收測試，全數屬回歸鎖性質、無可裁切為"
+        "功能軌，淨額 393 超過軌上限 309。一次性收斂優於放寬上限本體或虛報分類，"
+        "lane_split_problems() 判準邏輯與 _REGRESSION_LANE_ROUND_CAP 數字本輪一個字未動，本表"
+        "只涵蓋本輪這一個精確淨額，往後任何一輪照原判準阻擋。紀錄見 "
+        "docs/06_quality/CrossPlatform_R145_Scan_Findings.md〈第十輪附記〉。"
+    )),
 }
-_REGRESSION_LANE_APPROVED_OVERAGE_MAX_ENTRIES = 1
+_REGRESSION_LANE_APPROVED_OVERAGE_MAX_ENTRIES = 2
 _REGRESSION_LANE_APPROVED_OVERAGE_MIN_REASON_LEN = 20
 
 #: 款「軌別未申報」的明文出口：主表某輪淨額 > 0 而回歸鎖軌表無對應列時，允許在**主表**
@@ -2466,10 +2530,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 204
+_REPIN_LOG_FROZEN_PREFIX_LEN = 213
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "f436d6837308b9e89ce1ee6f29dafde32f82bad6aedf3d517cb0a670bfb713b8")
+    "ca5dd474ef1643be16102fdac1400f748c25564c1833b4cd851fc92f62cafcf1")
 
 
 def repin_log_history_digest(
@@ -2721,6 +2785,11 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # 細分／不均偵測 v2 新判準能力鎖檔＋既有缺陷修復回歸鎖，凍結前綴延伸涵蓋新增
     # 主表列與本軌新列本身，起點接 R146 終點 054135e143d6。 round-label-ok
     ("R147", "054135e143d6", "f436d6837308", "DEF-200-274"),
+    # R148：DEF-200-274 第十輪收尾單人窗口——四方獨立審查第九輪產出後 5 包並行修復 round-label-ok
+    # （xdist 開關調整／ci-gate 允許清單／halt_verdict 活動容忍窗／139.9s 測試拆三平台
+    # 具名子類別／staleness advisory 對稱化）造成的新增主表列與本軌新列自身漂移，
+    # 凍結前綴延伸涵蓋新增列本身，起點接 R147 終點 f436d6837308。 round-label-ok
+    ("R148", "f436d6837308", "ca5dd474ef16", "DEF-200-274"),
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

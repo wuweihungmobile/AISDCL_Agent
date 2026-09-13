@@ -135,19 +135,37 @@ def halted_band_line(halt_marker: dict | None, now: datetime) -> str | None:
             "（本 sid 的 halt 標記尚未過期；依 D23 不打 API，量不到本來就是事實）")
 
 
+# 🔴 DEF-200-274 第十輪／SA-04（反駁者在現行程式碼上重現）：`halt_verdict()` 判「標記
+# 已過期（session 自行續跑過）」此前是零容忍嚴格比較——標記的 `at` 是 hook 處理當下的
+# 牆鐘（見 `halt_marker_or_rejection()` 落盤那句 `"at": now.isoformat()`），而逐字稿的
+# 真實 mtime 是 Claude Code 在 hook 結束後才把 tool_result／assistant 訊息 append 進去
+# 的時刻 ⇒ mtime 天生可能晚於 `at` 幾十毫秒到幾秒。反駁者實測：mtime 晚 20ms ⇒ 誤判
+# 過期、回 `None`（哨兵因此喪失 arm_reset 快路徑、落回 900s 巡邏）；commit c4a7e00 當時
+# 只把測試治具的 mtime 撥早 5 秒規避現象，生產碼本身未動——本常數才是那一輪缺的另一半。
+# 本容忍窗判的是「session 是否真的自行續跑」：真續跑會持續產生活動、遠超這個量級，
+# 10 秒只吃時序雜訊，不吃真實續跑。
+# 🔴 與另外兩個名字相近的容忍窗語意不同、不得混用：`HALT_RESET_SKEW_SECONDS`
+# （120s，reset 排程延遲的容忍）、`HALT_MARKER_MAX_CLOCK_SKEW_SECONDS`
+# （600s，自檢牆鐘漂移的容忍）——三者各守不同的時脈落差，彼此不可互相取代。
+HALT_MARKER_ACTIVITY_SKEW_SECONDS = 10
+
+
 def halt_verdict(halt_marker: dict | None, idle_seconds: float | None,
                  now: datetime) -> dict | None:
     """halt 標記 → 既有 `arm_reset`／`probe`／`escalate` 判決（純函式，同本檔通篇紀律）。
 
     `None`＝標記不適用，呼叫端（`sentinel_decide`）落回既有的 idle-based 判定。
-    「最新活動晚於標記」代表 session 已自行續跑過，此時標記過期——不判定，否則
-    哨兵會永遠卡在 `probe`（那是本輪要修的無做工空轉的鏡像新形態）。
+    「最新活動晚於標記**超過** `HALT_MARKER_ACTIVITY_SKEW_SECONDS` 容忍窗」代表 session
+    已自行續跑過，此時標記過期——不判定，否則哨兵會永遠卡在 `probe`（那是本輪要修的
+    無做工空轉的鏡像新形態）；容忍窗只吃 hook 落盤與逐字稿 append 之間的先天時序雜訊，
+    不放大成「已續跑」的誤判空間（見上方常數定義的 SA-04 立案）。
     """
     if not halt_marker:
         return None
     marker_at = _aware(halt_marker.get("at"))
     if (marker_at is not None and idle_seconds is not None
-            and (now.timestamp() - idle_seconds) > marker_at.timestamp()):
+            and (now.timestamp() - idle_seconds)
+                > marker_at.timestamp() + HALT_MARKER_ACTIVITY_SKEW_SECONDS):
         return None
     reset_at = _aware(halt_marker.get("reset_at"))
     if reset_at is None:

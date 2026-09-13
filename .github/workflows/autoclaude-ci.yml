@@ -863,7 +863,11 @@ jobs:
       # pytest_sessionfinish hook 自動呼叫 write_perf_results，SD_09 B-08 修復）
       - name: Run perf baseline (4 scenarios x 7 runs)
         run: |
-          python -m pytest tests/perf/ -v --tb=short -m perf
+          # DEF-200-274 第十輪 SA-03：全域 addopts 已加 -n auto --dist worksteal（見
+          # AutoClaude/pyproject.toml），perf 基準計時會被 worker 互搶 CPU 污染，且
+          # tests/perf/conftest.py 的 pytest_sessionfinish 整檔覆寫結果檔在多 worker
+          # 下會互蓋；比照同檔 pg_real／mutmut 既有 5 處寫法停用 xdist
+          python -m pytest tests/perf/ -v --tb=short -m perf -p no:xdist -o addopts=
 
       # SD_09 W0 B-08：確認 perf_results.json 已由 conftest pytest_sessionfinish 寫出
       - name: Verify perf_results.json present

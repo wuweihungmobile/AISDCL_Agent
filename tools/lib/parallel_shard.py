@@ -106,10 +106,16 @@ def should_run_parallel(start_dir: Path, real_start_dir: Path, workers: int) -> 
 
 def worker_count(cpu_count: int | None = None) -> int:
     """`AUTOSDD_PARALLEL_TESTS_WORKERS` 可覆寫；未設時＝`max(1, min(9, cpu-1))`：
-    保留一核心給前景，上限 9（第九輪：8→9，本機 10 核 8P+2E 恰頂到新 cap；CI
-    runner 4 vCPU 不受影響——`min(9, cpu-1)` 在 cpu<=10 時與 cap=9 無關，實測見
-    證據檔）。覆寫值非正整數時忽略、退回預設公式（壞掉的旗標不該讓平行模式
-    整支炸掉）。
+    保留一核心給前景，上限 9（第九輪：8→9，本機 10 核 8P+2E 恰頂到新 cap）。
+
+    🔴 第十輪訂正（SD-02）：CI runner vCPU 數普遍 <= 10，`min(9, cpu-1)` 這一步
+    的 cap 對它們不生效、公式收斂成單純的 `cpu-1`——但這不等於「worker 數不受
+    影響」，只是「cap 這個上限值不生效」。c4a7e00 三支 CI run 實測：
+    worker=3（ubuntu-latest 4 vCPU，run 34726770284）／3（windows-latest
+    4 vCPU，run 34726770282）／2（macos-latest 3 vCPU，run 34726770259），
+    皆與公式吻合；三者 CI 牆鐘 575~663s 是本機 156.6s 的 3.67~4.23x，成因是
+    runner 核心數本就遠少於本機的 worker=9，不是平行機制在 CI 上失效。
+    覆寫值非正整數時忽略、退回預設公式（壞掉的旗標不該讓平行模式整支炸掉）。
     """
     override = os.environ.get(_ENV_WORKERS)
     if override:
@@ -403,6 +409,10 @@ def run_parallel(
     MIN_UNITS` 個派工單位時（避免單元測試的 2~4 個合成模組污染快取）寫回活體
     快取，供下次執行使用；同時印一次過期性 advisory（`staleness_report`，純
     print、不擋）與「新模組無歷史基準」的 advisory（`unknown_n`，見程式碼）。
+    第十輪（SD-06）：過期性 advisory 在 CI 上（`GITHUB_ACTIONS=true`）額外印一行
+    `::warning::`，待遇對齊 `dispatch_imbalance.report_dispatch_imbalance()`
+    第八輪起的既有分支——此前兩者不對稱，只有後者的訊號會被 GitHub 直接抓進
+    run 摘要頁面，前者仍混在冗長 log 中段裡。
 
     🔴 第九輪 D3（wall-clock／worker 數量測）：`overall_start` 記錄整體起點，每個
     worker 完工時多存一個 `finish_at`（相對起點的秒數），供
@@ -573,6 +583,8 @@ def run_parallel(
             )
             if staleness_msg:
                 print(staleness_msg)
+                if os.environ.get("GITHUB_ACTIONS") == "true":
+                    print(f"::warning::{staleness_msg}")
         return merged
     except Exception as exc:  # noqa: BLE001 — 見上方 docstring：任何 Exception 子類都不得穿透 leak_fence
         # `_crash_fallback()` 逐一 kill `started` 時不持鎖，傳入前先在鎖下拍照（第五輪）。

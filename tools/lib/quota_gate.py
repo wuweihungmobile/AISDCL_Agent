@@ -109,6 +109,7 @@ from quota_limits import LIMIT_NONE, parse_reset_at, unhandled_limit_event  # no
 # 這裡 re-export 是為了讓四個既有消費端與測試沿用 `quota_gate.<name>` 零改動；
 # 方向是單向的（本檔 → quota_messages），反向 import 會造成循環。
 from quota_messages import (  # noqa: E402,F401
+    HALT_MARKER_ACTIVITY_SKEW_SECONDS,  # noqa: F401  # DEF-200-274 第十輪／SA-04：re-export
     HALT_RESET_SKEW_SECONDS,  # noqa: F401
     QUOTA_BRANCH_ARM,
     QUOTA_BRANCH_ESCALATE,

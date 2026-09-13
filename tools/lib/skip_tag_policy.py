@@ -383,7 +383,10 @@ _TREE_FILE_FLOORS: dict[str, int] = {
     # ⇒ 照填、零加減推算；方向＝上修。四包全部停工後的單人窗口所量。
     # 🔴 第七輪收尾重釘 58 → 59（同上機制：所有包停工後實測 tools/tests 已 74 支，58 只剩
     # 實測 78% 低於 80%，判準逐字指示重釘為 59；來源＝新增 test_statusline_context_feed.py）。
-    "tools/tests": 59,
+    # 🔴 第十輪收尾重釘 59 → 60（同上機制：新增 test_ci_gate_xdist_allowlist.py 遷入本樹後
+    # 實測 75 支，59 只剩實測 79%、低於 80%，前置掃描第三向逐字指示「重釘為 60」⇒ 照填、
+    # 零加減推算；方向＝上修）。
+    "tools/tests": 60,
     # 🔴 R82 包 A2（DEBT-01）：204 → 205。新增 `AutoClaude/tests/contract/test_w6_deletion.py`
     # （AC2-2 的真斷言落點）後掃描面變 257，下限只剩實測的 79% ⇒ 依 `TREE_FLOOR_RATIO` 的
     # 防腐那一向轉紅。這正是它的設計意圖：下限不跟著長就會愈來愈鬆而沒有任何東西說話。

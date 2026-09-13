@@ -1841,7 +1841,11 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "python -m pip 升級失敗（rc=$LASTEXITCODE）" }
             pip install -r requirements-ci.txt
             if ($LASTEXITCODE -ne 0) { throw "requirements-ci.txt 安裝失敗（rc=$LASTEXITCODE）" }
-            python -m pytest tools/fsm_runtime/tests/ -m "not chaos" -q -rs --tb=short  # -rs：R59 ARCH-R59-NB1
+            # DEF-200-274 第十輪 SA-02：比照 AISDLC_SDD/scripts/ci-gate.sh 對 LATEST
+            # （非凍結基線）的 XDIST_ARGS 寫法加速；requirements-ci.txt 已釘
+            # pytest-xdist==3.8.0。只跑動態解析出的 LATEST，不觸及 v0.01 凍結基線
+            # 那段中繼檔競態
+            python -m pytest tools/fsm_runtime/tests/ -m "not chaos" -q -rs --tb=short -n auto --dist worksteal  # -rs：R59 ARCH-R59-NB1
           } finally {
             Pop-Location
           }

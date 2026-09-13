@@ -2318,20 +2318,28 @@ def _flatten_suite(suite: unittest.TestSuite) -> list[unittest.TestCase]:
     return out
 
 
-class TestR67R3ThisFileMakesNoUnstatedPlatformAssumption(unittest.TestCase):
-    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
-    doc_loc TestR67R3ThisFileMakesNoUnstatedPlatformAssumption WHY〉節。"""
+class _R67R3PlatformNeutralityProbe(unittest.TestCase):
+    """三個具名平台子類別（見下）共用的探針邏輯。
+
+    刻意**不含** `test_` 開頭方法 ⇒ 不會被 `unittest.TestLoader` 收集成獨立案例
+    （WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
+    doc_loc TestR67R3ThisFileMakesNoUnstatedPlatformAssumption WHY〉節）。
+
+    DEF-200-274 第十輪拆分：原單一方法逐平台迴圈跑一次姊妹套件（3 個平台＝3 倍
+    耗時、且是單一派工單位無法再分），拆成每平台各一個頂層 `TestCase`，讓
+    `tools/lib/dispatch_granularity.py` 的類別級派工白名單能各自分開排程。
+    """
 
     def _sibling_suite(self) -> unittest.TestSuite:
-        """本模組除本類別以外的全部測試（排除自己＝防無限遞迴）。"""
+        """本模組除本探針家族以外的全部測試（排除自己與所有平台子類別＝防無限遞迴）。"""
         loaded = unittest.TestLoader().loadTestsFromModule(sys.modules[__name__])
         suite = unittest.TestSuite()
         for test in _flatten_suite(loaded):
-            if not isinstance(test, TestR67R3ThisFileMakesNoUnstatedPlatformAssumption):
+            if not isinstance(test, _R67R3PlatformNeutralityProbe):
                 suite.addTest(test)
         return suite
 
-    def test_every_lock_in_this_file_holds_under_every_simulated_platform(self) -> None:
+    def _assert_platform_neutral(self, fake: str) -> None:
         probe = self._sibling_suite()
         self.assertGreater(
             probe.countTestCases(), 50,
@@ -2345,51 +2353,104 @@ class TestR67R3ThisFileMakesNoUnstatedPlatformAssumption(unittest.TestCase):
         # 本機 Mac 因 venv 啟動已暖機，測不出來）。
         sysconfig.get_config_vars()
         original = sys.platform
-        failures: dict[str, list[str]] = {}
         try:
-            for fake in _NEUTRALITY_PLATFORMS:
-                sys.platform = fake
-                sink = io.StringIO()
-                with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
-                    result = unittest.TextTestRunner(stream=sink, verbosity=0).run(
-                        self._sibling_suite()
-                    )
-                bad = [
-                    f"{kind} {test.id()} :: {trace.strip().splitlines()[-1]}"
-                    for kind, bucket in (
-                        ("FAIL", result.failures), ("ERROR", result.errors)
-                    )
-                    for test, trace in bucket
-                ]
-                if bad:
-                    failures[fake] = bad
+            sys.platform = fake
+            sink = io.StringIO()
+            with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
+                result = unittest.TextTestRunner(stream=sink, verbosity=0).run(
+                    self._sibling_suite()
+                )
+            bad = [
+                f"{kind} {test.id()} :: {trace.strip().splitlines()[-1]}"
+                for kind, bucket in (
+                    ("FAIL", result.failures), ("ERROR", result.errors)
+                )
+                for test, trace in bucket
+            ]
         finally:
             sys.platform = original
         self.assertEqual(
-            failures, {},
-            "本檔有鎖的結果隨 sys.platform 改變 ⇒ 它對『本機是哪個平台』做了未言明的"
-            "前提假設。修法不是加 skip（那等於讓該平台永遠沒有覆蓋），而是把該鎖改成"
-            "**吃平台當參數**——它驗的判準本來就是逐欄的純函式。",
+            bad, [],
+            f"本檔有鎖在 sys.platform={fake!r} 下的結果與其他平台不同 ⇒ 它對『本機是"
+            "哪個平台』做了未言明的前提假設。修法不是加 skip（那等於讓該平台永遠沒有"
+            "覆蓋），而是把該鎖改成**吃平台當參數**——它驗的判準本來就是逐欄的純函式。",
+        )
+
+
+#: DEF-200-274 第十輪拆分前的舊類名。`R119_HANDOFF.md`（歷史交棒書檔名，非本批輪次  # round-label-ok
+#: 宣稱）仍以反引號指名它（`TestR78GhostSymbolClaims.test_no_new_ghost_symbols` 的引用面掃得到），
+#: 本輪職權不改 docs／不重釘任何棘輪常數（含 `_GHOST_SYMBOL_BASELINE_CEILING`），
+#: 故不走該表的豁免登記，改保留一個**真別名**指回共用基底——它就是本類別拆分前
+#: 持有全部邏輯的那個物件，不是憑空捏造的佔位符；且基底無 `test_` 方法，不會被
+#: `unittest.TestLoader` 收集成任何測試案例，對測試計數與平行派工皆無副作用。
+TestR67R3ThisFileMakesNoUnstatedPlatformAssumption = _R67R3PlatformNeutralityProbe
+
+
+# 派工鍵必須是靜態類名（見 `dispatch_granularity.dispatch_key()` 的「頂層屬性且
+# `getattr(module, qualname) is cls`」安全網），故 3 個平台各自寫死類別、不用迴圈
+# 動態產生；`_PLATFORM` 類別屬性仍指回 `_NEUTRALITY_PLATFORMS`，避免兩處平台字面
+# 各自漂移（`TestR67R3PlatformClassesMatchNeutralityPlatforms` 機械鎖住兩者同步）。
+class TestR67R3NoUnstatedPlatformAssumptionDarwin(_R67R3PlatformNeutralityProbe):
+    """WHY 全文見 `_R67R3PlatformNeutralityProbe`；本類別固定模擬 darwin。"""
+
+    _PLATFORM = _NEUTRALITY_PLATFORMS[0]
+
+    def test_holds_under_simulated_platform(self) -> None:
+        self._assert_platform_neutral(self._PLATFORM)
+
+
+class TestR67R3NoUnstatedPlatformAssumptionLinux(_R67R3PlatformNeutralityProbe):
+    """WHY 全文見 `_R67R3PlatformNeutralityProbe`；本類別固定模擬 linux。"""
+
+    _PLATFORM = _NEUTRALITY_PLATFORMS[1]
+
+    def test_holds_under_simulated_platform(self) -> None:
+        self._assert_platform_neutral(self._PLATFORM)
+
+
+class TestR67R3NoUnstatedPlatformAssumptionWin32(_R67R3PlatformNeutralityProbe):
+    """WHY 全文見 `_R67R3PlatformNeutralityProbe`；本類別固定模擬 win32。"""
+
+    _PLATFORM = _NEUTRALITY_PLATFORMS[2]
+
+    def test_holds_under_simulated_platform(self) -> None:
+        self._assert_platform_neutral(self._PLATFORM)
+
+
+class TestR67R3PlatformClassesMatchNeutralityPlatforms(unittest.TestCase):
+    """回歸鎖：3 個具名平台類別的 `_PLATFORM` 集合必須恰等於 `_NEUTRALITY_PLATFORMS`
+    ——防止有人日後改了 `_NEUTRALITY_PLATFORMS`（例如新增平台）卻忘記同步新增
+    對應類別，讓覆蓋面靜默縮水而沒有任何測試變紅。
+    """
+
+    def test_platform_classes_cover_exactly_the_neutrality_platforms(self) -> None:
+        classes = (
+            TestR67R3NoUnstatedPlatformAssumptionDarwin,
+            TestR67R3NoUnstatedPlatformAssumptionLinux,
+            TestR67R3NoUnstatedPlatformAssumptionWin32,
+        )
+        self.assertEqual(len(classes), len(_NEUTRALITY_PLATFORMS), "類別數須與平台數相等")
+        self.assertEqual(
+            {cls._PLATFORM for cls in classes},
+            set(_NEUTRALITY_PLATFORMS),
+            "3 個具名類別覆蓋的平台集合須與 _NEUTRALITY_PLATFORMS 完全相同",
         )
 
 
 class TestDEF200277SysconfigWarmedBeforePlatformSimulation(unittest.TestCase):
     """DEF-200-277 回歸鎖：暖機呼叫必須排在改 sys.platform 之前（WHY 見
-    test_every_lock_in_this_file_holds_under_every_simulated_platform 內註解；
+    `_R67R3PlatformNeutralityProbe._assert_platform_neutral` 內註解；
     本機 Mac 因 venv 早已暖機測不出原始症狀，改用源碼順序斷言頂替行為重現）。
     """
 
-    def test_warm_up_call_precedes_the_platform_mutation_loop(self) -> None:
-        src = inspect.getsource(
-            TestR67R3ThisFileMakesNoUnstatedPlatformAssumption
-            .test_every_lock_in_this_file_holds_under_every_simulated_platform
-        )
+    def test_warm_up_call_precedes_the_platform_mutation(self) -> None:
+        src = inspect.getsource(_R67R3PlatformNeutralityProbe._assert_platform_neutral)
         warm_idx = src.find("sysconfig.get_config_vars()")
-        loop_idx = src.find("for fake in _NEUTRALITY_PLATFORMS:")
+        mutate_idx = src.find("sys.platform = fake")
         self.assertGreater(warm_idx, -1, "sysconfig 暖機呼叫消失 ⇒ DEF-200-277 會復發")
-        self.assertGreater(loop_idx, -1, "平台模擬迴圈消失，本鎖的判準基準跑掉")
+        self.assertGreater(mutate_idx, -1, "平台模擬賦值消失，本鎖的判準基準跑掉")
         self.assertLess(
-            warm_idx, loop_idx,
+            warm_idx, mutate_idx,
             "暖機呼叫必須在改 sys.platform 之前，否則行程內第一次用到 sysconfig "
             "可能落在假平台期間，組出不存在的模組名而炸 ModuleNotFoundError",
         )
@@ -3668,7 +3729,14 @@ def python_symbol_index(repo_root: Path) -> frozenset[str]:
             if "__pycache__" in path.parts:
                 continue
             names.add(path.stem)
-            body = path.read_text(encoding="utf-8", errors="replace")
+            # 平行派工下 tools/tests/ 內會有其他測試（如 LoadBalancingRegressionTest）
+            # 短暫寫入又刪除的合成 .py 檔；glob() 拍到快照後、read_text() 之前檔案
+            # 消失即 FileNotFoundError——這正是本函式檔頭「漏報比誤報安全」的同一方向，
+            # 跳過讀不到的檔即可，不必讓整個索引崩潰。
+            try:
+                body = path.read_text(encoding="utf-8", errors="replace")
+            except FileNotFoundError:
+                continue
             names.update(_SYMBOL_DEF_RE.findall(body))
             names.update(_SYMBOL_ASSIGN_RE.findall(body))
     index = frozenset(names | _SYMBOL_STDLIB_OK)
@@ -3693,9 +3761,13 @@ def collect_symbol_claims(repo_root: Path) -> list[tuple[str, str, str]]:
         for path in sorted(repo_root.glob(glob)):
             if "__pycache__" in path.parts:
                 continue
-            claims += symbol_claims(
-                path.read_text(encoding="utf-8", errors="replace"),
-                path.relative_to(repo_root).as_posix())
+            # 同 python_symbol_index() 的競態理由：平行派工下合成測試檔可能在
+            # glob() 之後、read_text() 之前被另一支測試刪除，跳過即可。
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except FileNotFoundError:
+                continue
+            claims += symbol_claims(text, path.relative_to(repo_root).as_posix())
     return claims
 
 
@@ -4448,7 +4520,10 @@ class TestR81GhostPathClaims(unittest.TestCase):
     # ── 第三態（機器本地生成物）的紅綠自證 ────────────────────────────────────
     #: 探針落在 `AutoClaude/logs/`（`AutoClaude/.gitignore:26: logs/`）：該目錄整個
     #: 被 ignore，所以這支暫存檔對 `git status` 結構上不可見，不會干擾同樹並行的作業。
-    _FLIP_PROBE = "AutoClaude/logs/_p4_third_state_probe.md"
+    #: 四方複審發現：D1 拆分後本模組的 sibling suite 會在多個平行 worker 行程各自跑一次，
+    #: 固定檔名會被另一個行程的 create／unlink 撞見（同 `LoadBalancingRegressionTest` 既有
+    #: 的 PID 隔離慣例）；檔名帶 `os.getpid()` 即各行程互不干擾。
+    _FLIP_PROBE = f"AutoClaude/logs/_p4_third_state_probe_{os.getpid()}.md"
 
     def _verdict_uncached(self, rel: str) -> str | None:
         """清掉兩層快取後重新判一次（快取會遮住我們正要量的那個變化）。"""

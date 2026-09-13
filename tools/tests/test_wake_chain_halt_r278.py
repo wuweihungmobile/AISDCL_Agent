@@ -221,6 +221,42 @@ class HaltVerdictTest(unittest.TestCase):
         idle_seconds = 5.0  # 最新活動＝now-5s，遠晚於 marker_at
         self.assertIsNone(qg.halt_verdict(marker, idle_seconds, now))
 
+    def test_activity_within_the_skew_tolerance_still_arms(self) -> None:
+        """DEF-200-274 第十輪／SA-04 回歸鎖：改前必紅（零容忍嚴格比較會把這個
+        20ms 的時序雜訊誤判成「已續跑」而回 `None`），改後必綠。活動只比標記晚
+        0.02 秒——遠小於 `HALT_MARKER_ACTIVITY_SKEW_SECONDS`——是 hook 落盤與
+        逐字稿 append 之間天生會有的落差，不是真的續跑過。"""
+        now = self._now()
+        marker_at = now - timedelta(seconds=600)
+        reset_at = now + timedelta(seconds=600)
+        marker = {"at": marker_at.isoformat(), "reset_at": reset_at.isoformat()}
+        idle_seconds = 600 - 0.02  # 最新活動＝marker_at 之後 0.02s
+        verdict = qg.halt_verdict(marker, idle_seconds, now)
+        self.assertIsNotNone(verdict, "20ms 時序雜訊不得被判成已續跑")
+        self.assertEqual(verdict["action"], "arm_reset")
+
+    def test_activity_beyond_the_skew_tolerance_is_still_stale(self) -> None:
+        """容忍窗不是無限放大：活動晚於標記超過
+        `HALT_MARKER_ACTIVITY_SKEW_SECONDS` 一秒，仍要判過期。"""
+        now = self._now()
+        marker_at = now - timedelta(seconds=600)
+        marker = {"at": marker_at.isoformat(),
+                  "reset_at": (marker_at + timedelta(seconds=700)).isoformat()}
+        idle_seconds = 600 - (qg.HALT_MARKER_ACTIVITY_SKEW_SECONDS + 1)
+        self.assertIsNone(qg.halt_verdict(marker, idle_seconds, now))
+
+    def test_activity_exactly_at_the_skew_boundary_still_arms(self) -> None:
+        """邊界值：活動恰好晚於標記 `HALT_MARKER_ACTIVITY_SKEW_SECONDS` 秒——比較符號
+        用嚴格 `>`，故恰好等於容忍窗仍不算過期（與 `HALT_RESET_SKEW_SECONDS` 的既有
+        `fire_at > now` 用法同一方向）。"""
+        now = self._now()
+        marker_at = now - timedelta(seconds=600)
+        marker = {"at": marker_at.isoformat(),
+                  "reset_at": (marker_at + timedelta(seconds=700)).isoformat()}
+        idle_seconds = 600 - qg.HALT_MARKER_ACTIVITY_SKEW_SECONDS
+        verdict = qg.halt_verdict(marker, idle_seconds, now)
+        self.assertIsNotNone(verdict, "恰好等於容忍窗不應被判成已續跑")
+
 
 class HaltMarkerProbePathDoesNotCreateDirectoriesTest(unittest.TestCase):
     """D23：`_halt_marker_probe_path()` 是 `--check` 唯讀探測入口，不得觸發

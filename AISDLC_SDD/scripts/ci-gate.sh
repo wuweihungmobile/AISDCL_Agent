@@ -192,13 +192,22 @@ run_gate_for_version() {
   # 隔離慣例，修後連續 15 次實測 0 次因此翻紅）——但 v0.01 是凍結基線，依規則不可
   # 原地改這兩個檔修競態，於是差異化：只有非凍結基線才吃 xdist，凍結基線維持序列
   # （見下方 XDIST_ARGS 判斷）。詳細重現指令、逐次結果見回報「先紅再綠 / 偏離設計」。
+  # 🔴 DEF-200-274 第十輪訂正：上一輪判準寫成「VER != FROZEN_BASELINE 就開
+  # xdist」，但 `_atomic_write_text` 這個修復僅存在於 v0.30——實測 v0.02~v0.29
+  # 每一個中間歷史版的 `snapshot.py` 仍是舊版固定檔名 `.tmp`，與 v0.01 同型
+  # 競態尚未修好。`SDD_FW_VERSION` 逃生口（見上方 R47 二審修復註解）若指到
+  # 這些中間版之一，舊判準會誤開 xdist，把未修競態誤判成該歷史版自身的回歸；
+  # 而中間版依規則不可原地改（見 AISDLC_SDD/CLAUDE.md〈版本狀態〉表），無法
+  # 就地補 `_atomic_write_text`。判準故收斂為「只有 VER == LATEST 才開
+  # xdist」：只有 LATEST 這一版保證帶著已修好的 `snapshot.py`；凍結基線與
+  # 全部中間歷史版一律序列執行。
   # 🔴 另一項殘留風險（v0.30 修完仍在）：`test_conversation_ledger.py::
   # LedgerPerformanceTests` 兩支硬性計時驗收（<0.3s）在本機 9-worker 全核心壓力下
   # 偶爾超時（約 2/15，實測 0.41s vs 0.3s 上界）——這是效能測試對 CPU 競爭的既有
   # 敏感度，非資料競態／正確性錯誤，本輪未動它（改門檻或隔離執行屬 QA/PM 決策，
   # 留待收尾/下一輪決定），如實記入回報。
   local XDIST_ARGS=""
-  if [[ "${VER}" != "${FROZEN_BASELINE}" ]]; then
+  if [[ "${VER}" == "${LATEST}" ]]; then
     XDIST_ARGS="-n auto --dist worksteal"
   fi
   # shellcheck disable=SC2086

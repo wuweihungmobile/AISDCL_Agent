@@ -85,9 +85,13 @@ jobs:
 
       - name: Run labeled PR 真實 PG e2e（pg_real marker）+ junit XML
         continue-on-error: true
+        # DEF-200-274 第十輪：workflow 頂層 defaults.run.working-directory: AutoClaude
+        # 隱式吃到全域 -n auto --dist worksteal；真 PG 單一資料庫不可多 worker 併發
+        # 存取，與 autoclaude-ci.yml 兩處同支測試呼叫端（行 539／566）一致補回
+        # `-p no:xdist -o addopts=`。
         run: |
           python -m pytest tests/integration/test_pgvector_real_recall.py \
-            -v --tb=short -m pg_real \
+            -v --tb=short -m pg_real -p no:xdist -o addopts= \
             --junitxml=.ac4_junit.xml
 
       - name: Collect AC4 metrics (labeled PR 模式)
