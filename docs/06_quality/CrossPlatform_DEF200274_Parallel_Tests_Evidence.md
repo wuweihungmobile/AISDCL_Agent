@@ -1013,3 +1013,65 @@ Windows 真機驗證成功），root-infra-ci failure。
 
 逐項見 `docs/06_quality/CrossPlatform_R145_Scan_Findings.md`〈第九輪附記〉節；
 缺陷帳本見 `docs/06_quality/AutoSDD_Defect_Log.md` DEF-200-274。
+
+## 第十輪：四方獨立審查覆核第九輪發現＋5 包並行修復收斂（2026-09-13）
+
+### 背景
+
+DEF-200-274 第十輪（掌舵者要求四方獨立審查 Architect／SA／SD／QA 覆核第九輪 24 條發現）
+的複審找到什麼、設計裁決、5 包並行修復逐條與逐項驗證數字，完整記述寄居
+`CrossPlatform_R145_Scan_Findings.md`〈第十輪附記（R148）〉（同 R129～R147 既有「單一缺陷
+收尾附帶記帳」寄居體例，未另開新檔）；該附記第 241～242 行指標「詳細…見本節」，本節僅
+承接此指標，補上 commit `6a12da1` 摘要與本輪收尾之後、文件回填單人窗口本場現查的 push
+後 CI／nightly-full dispatch 補驗結果——四方複審發現與設計裁決本體不在此重複，一律以
+R145 附記為準，避免雙份記帳漂移。
+
+commit `6a12da1` 摘要：拆 139.9s 臨界測試為三平台類（本機牆鐘 156.6→135.6s）、
+`halt_verdict()` 加 10s 活動容忍窗（c4a7e00 治具規避的生產面根治）、perf-baseline／pg-e2e
+排除 xdist、nightly-full 接 xdist、ci-gate xdist 判準改 LATEST 允許清單＋回歸鎖、staleness
+advisory 補 CI `::warning::`、skip 語意平行回歸鎖；驗證跑時四方複審再揪出兩處既有測試
+競態（ghost-symbol 掃描與第三態探針的固定檔名撞見平行 worker）並硬化；新立
+DEF-200-289／290。
+
+### 第十輪補驗：push CI 與 nightly-full dispatch 結果（2026-09-13）
+
+- **A. push 觸發 CI（含 run ID）**：`6a12da1` push 後四支同步 CI 皆 success——
+  root-infra-ci run `34740753858`、AutoClaude CI run `34740753876`、aisdlc-sdd-ci run
+  `34740753843`、shellcheck-ci run `34740753839`；windows-compat-ci run `34740753883`／
+  macos-compat-ci run `34740753845` 因與稍後的 workflow_dispatch 共用 concurrency group
+  被 `cancelled`（非失敗），同 commit 的 smoke job 由下方 B 項 dispatch run 補足驗證。
+- **B. DEF-200-290 補驗（workflow_dispatch）**：windows-compat-ci run `34740773049`
+  （smoke success；**nightly-full job failure**；alert success）、macos-compat-ci run
+  `34740774601`（smoke success；**nightly-full job failure**；alert success）。兩支 run
+  的整體 `conclusion=success` 只因 nightly-full step 帶 `continue-on-error: true`，不代表
+  job 本身通過。
+- **C. nightly-full 失敗鑑識**（鑑識 agent 本場現查）：兩邊皆敗在 AutoClaude
+  `local_ci_gate.{ps1,sh}` 的 pytest 閘；pytest 子行程本身 **0 failed**——Windows
+  `4626 passed, 175 skipped in 154.21s`、macOS `4579 passed, 222 skipped in 107.18s`，
+  皆帶 `-n auto --dist worksteal`，**AutoClaude xdist 首次在真 Windows／macOS 全套驗證
+  通過**。rc=1 來自 `AutoClaude/tools/local_ci_gate.py:387-398 check_skip_census()` 把
+  `CENSUS_PROFILE_UNREGISTERED` 與 `CENSUS_FAIL` 同判 rc=1（`gate_pytest()` L639
+  `return rc or census_rc`）；剖面 `AutoClaude/tests@win32+nopg+solo`／`darwin+nopg+solo`
+  未登記（`tools/lib/skip_group_policy.py:821-863`，掌舵者裁決「先修 pgextras 軸、修好前
+  維持 advisory 不登記」）。此紅**非本輪／非 xdist 引入**：2026-09-07 schedule run
+  `34121302118`／`34127718484` job 同樣 failure、同字樣；GitHub Issue #10
+  （2026-07-14 開單、仍 OPEN、7 則留言）。SDD LATEST `fsm_runtime` pytest 步（本輪新接
+  xdist）在兩邊皆綠（Windows `1935 passed, 14 skipped in 68.24s`）。
+- **D. 附帶缺陷（鑑識 agent 現查）**：macOS nightly-alert job 的
+  `gh issue create --label "p1,macos,nightly"` 因 repo 無 `p1` label 報
+  `could not add label: 'p1' not found` → exit 1，被 `continue-on-error` 蓋掉 ⇒ mac 側
+  從未真正開過 issue（Windows 側有 Issue #10）。座標
+  `.github/workflows/macos-compat-ci.yml:1382-1467`。
+
+**主控原假設被鑑識推翻**：主控原判「xdist 讓 nightly-full 紅」，鑑識指出哪個量在
+變——`check_skip_census()` 對未登記剖面判紅的邏輯自 R79（Issue #10 於 2026-07-14 即已存在）
+起即存在，xdist 落地前後皆紅，此量從未因本輪改變；本輪新增的兩個 xdist 站點（AutoClaude
+全套、SDD `fsm_runtime` nightly-full）皆綠，才是本輪真正變動的量。
+
+🔴 **誠實劃界**：nightly-full 的深度回歸訊號目前不可信（未登記剖面恆判紅，真回歸與既有
+已知缺口同判 rc=1、無法分辨），待 DEF-200-291 修復前，nightly-full job 的 `failure` 不構成
+本輪／後續變更的回歸證據。
+
+逐項見 `docs/06_quality/CrossPlatform_R145_Scan_Findings.md`〈第十輪附記（R148）〉節；
+缺陷帳本見 `docs/06_quality/AutoSDD_Defect_Log.md` DEF-200-274／DEF-200-289／DEF-200-290／
+DEF-200-291／DEF-200-292。
