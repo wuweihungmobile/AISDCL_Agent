@@ -334,6 +334,10 @@ on:
       # DEF-101-703：兩支 *-nightly-full 18 天零成功而三道既有哨兵結構上都偵測不到。
       # 由 test_ci_paths_cover_root_consumers.py 當場攔下並要求雙邊補列（該鎖有效）。
       - "tools/lib/ci_liveness.py"
+      # DEF-200-297：單一 .venv 收斂新增的雜散 venv 掃描 SSOT（pyvenv.cfg 標記、純讀），
+      # 由 tools/dev_start.py 第④步與 tools/tests/test_dev_start.py 消費；
+      # test_ci_paths_cover_root_consumers.py 當場攔下並要求雙邊補列（該鎖有效）。
+      - "tools/lib/stray_venv.py"
       # R74：本輪新增/新被消費的根層檔——test_ci_paths_cover_root_consumers.py 實測
       # 攔下（DEF-101-042 同構）。CLAUDE.md 由 tools/tests/
       # test_doc_loc_baseline_freshness_r60.py 的鐵律機械物盤點鎖逐行消費；
@@ -737,6 +741,10 @@ on:
       # DEF-101-703：兩支 *-nightly-full 18 天零成功而三道既有哨兵結構上都偵測不到。
       # 由 test_ci_paths_cover_root_consumers.py 當場攔下並要求雙邊補列（該鎖有效）。
       - "tools/lib/ci_liveness.py"
+      # DEF-200-297：單一 .venv 收斂新增的雜散 venv 掃描 SSOT（pyvenv.cfg 標記、純讀），
+      # 由 tools/dev_start.py 第④步與 tools/tests/test_dev_start.py 消費；
+      # test_ci_paths_cover_root_consumers.py 當場攔下並要求雙邊補列（該鎖有效）。
+      - "tools/lib/stray_venv.py"
       # R74：本輪新增/新被消費的根層檔——test_ci_paths_cover_root_consumers.py 實測
       # 攔下（DEF-101-042 同構）。CLAUDE.md 由 tools/tests/
       # test_doc_loc_baseline_freshness_r60.py 的鐵律機械物盤點鎖逐行消費；
