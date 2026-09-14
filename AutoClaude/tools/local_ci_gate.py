@@ -55,6 +55,8 @@ nightly Stage L）**無參數呼叫**就被薄殼整批取代掉核心預設、`
       給「已經在別處跑過 pytest」的通道消費——push 通道（根層 tools/git-hooks/pre-push
       的 AutoClaude leg）與 CI 的 test job 都是這一種：它們刻意直跑 pytest 不經本檔
       （R12 QA-2 紀律：兩個訊號不得合流），於是天花板此前一條阻斷通道都沒接上。
+      `<pytest 輸出檔>` 傳**檔案路徑**＝push 通道與 CI 的形態（DEF-200-293 起）；
+      傳 `-` ＝從 stdin 讀（既有呼叫端與測試仍可用，但 push 通道自 DEF-200-293 起不再選它）。
       離開碼三態（**刻意不是兩態**）：
         0 ＝健康；1 ＝真問題（量測塌掉／天花板被突破／找不到剖面標記）；
         3 ＝剖面未登記（量測正常，但這個平台沒有人量過健康值 ⇒ 沒有天花板可比）。
@@ -401,10 +403,18 @@ def check_skip_census(pytest_output: str, *, pg: bool) -> int:
 def census_only(log_path: str) -> int:
     """`--census-only <pytest 輸出檔>`：只判普查，回三態離開碼（見檔頭）。
 
-    `-` ＝從 stdin 讀。push 通道走的就是這一條：`mktemp` 回的是 POSIX 路徑，而 Windows
-    側的 python 是原生 exe（路徑會過 MSYS 參數轉換）——改用 shell 的重導向就完全繞開
-    那一層。stdin 顯式以 UTF-8 解碼：skip 理由含中文，呼叫端的 codepage 不該決定它
-    讀不讀得懂。
+    `-` ＝從 stdin 讀（既有呼叫端與既有測試仍支援）。stdin 顯式以 UTF-8 解碼：skip
+    理由含中文，呼叫端的 codepage 不該決定它讀不讀得懂。
+
+    🔴 DEF-200-293：**push 通道自本輪起改傳檔案路徑，不再走這條 stdin 形態**。R79
+    收輪當時的理由——「`mktemp` 回的是 POSIX 路徑，Windows 側的 python 是原生 exe 會
+    過 MSYS 參數轉換，改用 shell 重導向可以繞開那一層」——留作史料，但已被本輪實測
+    反證：未啟用 venv 時 `command -v python` 解析到的是 pyenv-win shim
+    （`#!/bin/sh` 轉呼叫 `pyenv.bat` → cmd.exe 鏈），這條鏈連 `< file` 重導向本身都
+    整個吞掉——488 bytes 的檔案讀出來是 **0 bytes**（同一份檔案改傳參數能讀到完整
+    488）。也就是說 R79 想繞開的那個「MSYS 參數轉換」問題確實存在，但選的解法
+    （stdin 重導向）在最常見的未啟用 venv 環境下反而更壞：不是轉換錯路徑，是整條
+    讀取都消失。詳見 `tools/git-hooks/pre-push` 該處的 WHY 註解與量測數字。
 
     🔴 R79 收輪：這裡刻意**讀 `stdin.buffer` 的位元組再自己 decode**，而不是就地把
     stdin 重新設定成 UTF-8 串流。後者是「強制 stdio 為 UTF-8」的**第二份實作**
@@ -434,6 +444,16 @@ def census_only(log_path: str) -> int:
 
 def _census_from_text(text: str) -> int:
     """已取得輸出之後的共同尾段（剖面標記 → 判準 → 印出）。"""
+    if not text.strip():
+        print(
+            "❌ [skip census] 輸入是空的（0 bytes，或全為空白）——這不是「找不到剖面"
+            "標記」，是**載具**沒把內容送到。常見真因兩種：`tee` 沒落地（暫存目錄權限／已滿），"
+            "或 stdin 被中間層吞掉（DEF-200-293：pyenv-win shim 這類直譯器轉呼叫鏈會把 "
+            "`< file` 重導向整條吞掉，488 bytes 的檔案讀出來是 0 bytes）。正解＝呼叫端"
+            "改傳**檔案路徑**當參數（見 `tools/git-hooks/pre-push` 的修法），不要再靠 "
+            "stdin 重導向。"
+        )
+        return CENSUS_FAIL
     pg = pg_in_effect_from_log(text)
     nested = nested_from_log(text)
     if pg is not None and nested is None:

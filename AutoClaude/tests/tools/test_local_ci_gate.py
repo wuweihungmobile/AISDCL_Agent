@@ -799,12 +799,47 @@ def test_census_only_returns_three_states_and_runs_no_gate(
 def test_census_only_reads_stdin_when_path_is_dash(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """`-` ＝讀 stdin。push 通道走這一條的理由：`mktemp` 給的是 POSIX 路徑，而
-    Windows 側 python 是原生 exe，路徑會過 MSYS 參數轉換——shell 重導向繞開那一層。"""
+    """`-` ＝讀 stdin，既有呼叫端與既有測試仍支援；但 push 通道自 DEF-200-293 起
+    不再選它（該通道最常見的直譯器解析路徑下，stdin 重導向會被整條吞掉）。"""
     _pin_registered_profile(monkeypatch)
     monkeypatch.setattr(m.sys, "stdin", io.StringIO(_HEALTHY_LOG))
     assert m.census_only("-") == m.CENSUS_OK
     assert "共 3 支" in capsys.readouterr().out
+
+
+def test_census_only_names_the_carrier_when_input_is_empty(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """DEF-200-293：空輸入（0 bytes）必須被指名是**載具**問題，不是「找不到剖面標記」。
+
+    WHY：修復前，空輸入落進與「這不是 AutoClaude 測試輸出」同一條分支，訊息把讀者
+    指向 `AutoClaude/tests/conftest.py`——而 DEF-200-293 的真因其實是 push 通道的
+    直譯器解析鏈把 stdin 重導向整條吞掉，讀者順著訊息去查 conftest 只會撲空。這支
+    測試耗掉主控一整個 session 才查到真因，此後空輸入必須自報「0 bytes」＋「載具」，
+    把讀者直接指向正解（push 通道改傳檔案路徑）。
+    """
+    _pin_registered_profile(monkeypatch)
+    empty_path = tmp_path / "empty.log"
+    empty_path.write_text("", encoding="utf-8", newline="\n")
+    assert m.census_only(str(empty_path)) == m.CENSUS_FAIL
+    out = capsys.readouterr().out
+    assert "0 bytes" in out
+    assert "載具" in out
+
+    monkeypatch.setattr(m.sys, "stdin", io.StringIO(""))
+    assert m.census_only("-") == m.CENSUS_FAIL
+    out2 = capsys.readouterr().out
+    assert "0 bytes" in out2
+    assert "載具" in out2
+
+    # 第三案例（R129 round2 C5，SD minor）：判準是 `not text.strip()`，涵蓋純空白
+    # 輸入（非真正 0 bytes）——訊息若寫死「0 bytes」會對這種輸入說謊，故訊息改為
+    # 「0 bytes，或全為空白」；本案例證明純空白輸入一樣走同一條 fail-loud 分支。
+    whitespace_path = tmp_path / "whitespace.log"
+    whitespace_path.write_text("\n  \n", encoding="utf-8", newline="\n")
+    assert m.census_only(str(whitespace_path)) == m.CENSUS_FAIL
+    out3 = capsys.readouterr().out
+    assert "載具" in out3
 
 
 # --- (k) 接線鎖：判準有沒有真的掛在會擋的通道上 ---
@@ -845,6 +880,21 @@ def test_pre_push_dispatcher_actually_invokes_the_census() -> None:
     assert "-eq 3" in leg, "advisory（剖面未登記）那一支被拿掉了＝沒量過的平台會被誤擋"
     assert "rc=1" in leg, "census 判紅時沒有把 rc 接出來＝印了紅字卻照樣放行（fail-open）"
     assert (_REPO_ROOT / "AutoClaude" / "tools" / "local_ci_gate.py").is_file()
+    # DEF-200-293：執行行不得回退成 stdin 形態（`--census-only -` 或 `--census-only - <`）
+    # ——那正是本輪修的病灶：pyenv-win shim 這類直譯器轉呼叫鏈會把 `< file` 重導向整條
+    # 吞掉，488 bytes 的檔案讀出來是 0 bytes。
+    stdin_form = re.compile(r"--census-only\s+-(\s|$)|--census-only\s+-\s*<")
+    assert not any(stdin_form.search(ln) for ln in invocations), (
+        "pre-push 的 AutoClaude leg 又退回 stdin 形態餵 census——DEF-200-293 的病灶"
+        f"可能復發：{invocations}"
+    )
+    # 執行行的參數必須源自 `$_ac_log`（經 `_ac_log_arg` 轉出，不是憑空的字面路徑或
+    # 完全脫鉤的別的變數）——否則「傳檔案路徑」這件事本身就是空話。
+    from_ac_log = re.compile(r'--census-only\s+"\$_ac_log')
+    assert any(from_ac_log.search(ln) for ln in invocations), (
+        "pre-push 的 AutoClaude leg 執行行的 --census-only 參數看不出源自 $_ac_log"
+        f"（tee 落下的那份 log）：{invocations}"
+    )
 
 
 def test_push_ci_test_job_consumes_the_census_and_perf_step_counts_skips() -> None:

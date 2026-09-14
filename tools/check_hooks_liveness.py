@@ -183,8 +183,9 @@ def check_claude_hook_carriers(repo_root: Path) -> bool:
     🔴 R84：掃描面由「只有根層那一份」擴到 `discover_active_settings()` 現查出來的
     **每一份活躍 settings**（根層／AutoClaude／SDD LATEST）。立案理由是這半原本只問
     根層，而另外兩份各自宣告**不同的** venv 載具——`AutoClaude/.claude/settings.json` 的
-    Windows 載具是 `AutoClaude/.venv/Scripts/pythonw.exe`（那是另一個 venv，由
-    `AutoClaude/tools/bootstrap.*` 建），它不存在時該子專案 session 的六支守衛全部靜默
+    Windows 載具是 `AutoClaude/.venv/Scripts/pythonw.exe`（那是另一個 venv；
+    現行 bootstrap（`tools/bootstrap_core.py`）只建根層 .venv，該檔案僅在該目錄自行建了
+    .venv 時才存在——DEF-200-294），它不存在時該子專案 session 的六支守衛全部靜默
     失效，而本工具當時一個字都不會說。每一份用**它自己的專案根**展開佔位符（子專案
     session 的 `CLAUDE_PROJECT_DIR` 就是那個子目錄；拿 monorepo 根去展開帶 `../` 的載具
     會 normpath 到 repo 之外而假紅）。同一條載具被多份宣告時訊息去重。

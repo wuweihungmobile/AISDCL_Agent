@@ -247,9 +247,19 @@ fi
 # 🔴 路徑刻意經由 `$_ac_gate_dir` 拼出、不寫成字面路徑形態：
 # tools/tests/test_root_infra_parity.py 對本檔非註解行出現的 `tools/*.py` 字面值有
 # 「必須在 root-infra-ci.yml 有對等守門」的雙向集合斷言（同本檔既有 `_core.py` 的註記）。
-# 🔴 log 以 **stdin 重導向**餵進去、不當成參數傳：`mktemp` 回的是 POSIX 路徑，而
-# Windows 側的 python 是原生 exe，路徑會經過 MSYS 參數轉換——重導向由 shell 自己做，
-# 完全繞開那一層。
+# 🔴 DEF-200-293：log 改以**檔案路徑**當參數傳、不再走 stdin 重導向。舊理由
+# （「重導向由 shell 自己做，繞開 MSYS 參數轉換」）經主控 2026-09-14 實測**推翻**：
+# 未啟用 venv 時 `command -v python` 解析到的是 pyenv-win shim（`#!/bin/sh` 轉呼叫
+# `pyenv.bat` → cmd.exe 鏈），這條鏈會把 `< "$_ac_log"` 整個吞掉——488 bytes 的檔案
+# 讀出來是 **0 bytes**；同鏈下改傳參數（`"$_ac_log_arg"`）讀出來是完整的 488。用真
+# pytest 子集 log（428 bytes）複現：`--census-only - < log` 判「找不到剖面標記」
+# rc=1（這就是擋下每一次 push 的那一行），`--census-only "$(cygpath -w log)"` 才是
+# rc=0。根 `.venv` 直譯器兩種餵法皆讀得到 488——問題只在 shim 這一鏈，而
+# `command -v python` 在未啟用 venv 時解析到的正是它。
+# cygpath 轉換的理由不變：`mktemp` 回的是 POSIX 路徑，Windows 側的 python 是原生
+# exe，路徑會過 MSYS 參數轉換；`cygpath -w` 已被證實可用（Git for Windows 的 bash
+# 啟動器無條件把 `/mingw64/bin:/usr/bin` insert 進內部 PATH 最前面），轉換失敗或
+# 該平台沒有 cygpath（mac／Linux）時原樣傳路徑即可，兩者本就是合法輸入。
 if [ "$run_autoclaude" -eq 1 ]; then
   if [ -f "$TOPLEVEL/AutoClaude/tools/git-hooks/pre-push" ]; then
     echo "[pre-push dispatcher] push 範圍含 AutoClaude/ → 執行 AutoClaude pre-push"
@@ -276,7 +286,12 @@ if [ "$run_autoclaude" -eq 1 ]; then
         echo "[pre-push dispatcher] ⚠ 找不到 python／python3 → 跳過 skip 分群普查（AutoClaude leg 本身已因此判紅）" >&2
       else
         census_rc=0
-        PYTHONUTF8=1 "$PY" "$_ac_gate_dir/local_ci_gate.py" --census-only - < "$_ac_log" || census_rc=$?
+        _ac_log_arg="$_ac_log"
+        if command -v cygpath >/dev/null 2>&1; then
+          _ac_log_arg="$(cygpath -w "$_ac_log" 2>/dev/null || true)"
+          [ -n "$_ac_log_arg" ] || _ac_log_arg="$_ac_log"
+        fi
+        PYTHONUTF8=1 "$PY" "$_ac_gate_dir/local_ci_gate.py" --census-only "$_ac_log_arg" || census_rc=$?
         if [ "$census_rc" -eq 3 ]; then
           echo "[pre-push dispatcher] ⚠ skip 分群普查：本平台剖面未登記（advisory，不擋 push）"
         elif [ "$census_rc" -ne 0 ]; then
@@ -404,11 +419,18 @@ if [ "$run_rootinfra" -eq 1 ] || [ "$run_rootinfra_guards" -eq 1 ]; then
       # （不要改成 `"$RUFF_BIN" check ...`）：`test_root_infra_parity.py` 的
       # `_RUFF_COMMAND_RE` 鎖要求「命令位置」出現字面 `ruff check tools/`，換成
       # 變數呼叫會讓這道防「執行行被偷偷刪掉只留 echo」的鎖失去鑑別力（R69 終審 P2）。
+      # DEF-200-294：加入 Windows 佈局（`Scripts/ruff.exe`）——舊清單只列 POSIX
+      # 佈局（`bin/ruff`），單一 .venv 設計下 Windows 開發者的根層 venv 一律是
+      # `Scripts/` 而非 `bin/`，原候選鏈在 Windows 上等同只剩 PATH 一條路。
+      # 順序仍根層優先，`AutoClaude/.venv` 兩筆維持在候選鏈末尾（歷史遺留位置，
+      # 與子 hook DEF-200-294 的根層優先精神一致（不同機制：本檔上方 `$PY` 是
+      # PATH 語意，見 DEF-101-740／DEF-101-506 註解，刻意不做 .venv 優先判斷）。
       RUFF_BIN=""
       if command -v ruff >/dev/null 2>&1; then
         RUFF_BIN="ruff"
       else
-        for _ruff_cand in "$TOPLEVEL/.venv/bin/ruff" "$TOPLEVEL/AutoClaude/.venv/bin/ruff"; do
+        for _ruff_cand in "$TOPLEVEL/.venv/bin/ruff" "$TOPLEVEL/.venv/Scripts/ruff.exe" \
+                          "$TOPLEVEL/AutoClaude/.venv/bin/ruff" "$TOPLEVEL/AutoClaude/.venv/Scripts/ruff.exe"; do
           if [ -x "$_ruff_cand" ]; then RUFF_BIN="$_ruff_cand"; break; fi
         done
       fi

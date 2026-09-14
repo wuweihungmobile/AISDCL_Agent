@@ -86,6 +86,46 @@ def _bash_marker_stub(marker: Path) -> str:
     return f'#!/usr/bin/env bash\n: > "{marker.as_posix()}"\nexit 0\n'
 
 
+def _autoclaude_leg_stub(marker: Path) -> str:
+    """AutoClaude 子 hook**專屬** stub（不得與 `_bash_marker_stub()` 共用，SD 審查條件）。
+
+    DEF-200-293：census 通道吃的是這支子 hook 的**真實 stdout**（經
+    `PYTHONUNBUFFERED=1 bash <此 stub> | tee "$_ac_log"` 落到暫存 log，再餵給
+    `local_ci_gate.py --census-only <path>`）。`_bash_marker_stub()` 刻意什麼都不印
+    （只留 marker 檔）——套進 census 之後會產生 0 bytes 的 log，讓「輸入是空的」
+    診斷變成每一支既有測試的雜訊，而非只在真正要驗 census 的測試裡出現。這裡額外
+    echo 一個唯一識別字，讓 census 收到的 log 恆有內容（已比對本檔全部
+    assertIn／assertNotIn 不碰撞）。
+    """
+    return (
+        f'#!/usr/bin/env bash\n: > "{marker.as_posix()}"\n'
+        'echo "AC_LEG_STUB_OUTPUT_7f3c"\nexit 0\n'
+    )
+
+
+def _census_stub(marker: Path) -> str:
+    """`AutoClaude/tools/local_ci_gate.py --census-only <path>` 的 fake-repo 替身。
+
+    只驗證 dispatcher 真的把「檔案路徑」餵給這支入口（DEF-200-293 修復標的），不
+    重驗 census 判準本身（那由 `AutoClaude/tests/tools/test_local_ci_gate.py` 的
+    單元測試守）。argv 形狀錯（不是恰好 `["--census-only", <一個路徑>]`）→ rc 7；
+    仍是 stdin 形態（`-`，即修復前的病灶）→ rc 8；讀到的 bytes 數寫進 marker，
+    供呼叫端斷言「> 0」；有 bytes → rc 0，0 bytes → rc 6。
+    """
+    return (
+        "import sys\n"
+        "from pathlib import Path\n"
+        "argv = sys.argv[1:]\n"
+        'if len(argv) != 2 or argv[0] != "--census-only":\n'
+        "    raise SystemExit(7)\n"
+        'if argv[1] == "-":\n'
+        "    raise SystemExit(8)\n"
+        "data = Path(argv[1]).read_bytes()\n"
+        f'Path("{marker.as_posix()}").write_text(str(len(data)), encoding="utf-8")\n'
+        "raise SystemExit(0 if data else 6)\n"
+    )
+
+
 def _py_marker_stub(marker: Path) -> str:
     """python stub：寫 marker 後 exit 0（供 run_root_unittests 替身用）。"""
     return (
@@ -150,14 +190,24 @@ class TestPrePushDispatcher(unittest.TestCase):
         self.marker_rootinfra_guards = self.tmp / "MARKER_ROOTINFRA_GUARDS"
         self.marker_consumer = self.tmp / "MARKER_SDD_SCRIPTS_TESTS_PYTEST"
         self.marker_integration_gate = self.tmp / "MARKER_INTEGRATION_GATE"
+        # DEF-200-293：census 通道（`local_ci_gate.py --census-only <path>`）真的收到
+        # 「有內容的檔案路徑」的鐵證——寫進的是讀到的 bytes 數，供呼叫端斷言 > 0。
+        self.marker_census_bytes = self.tmp / "MARKER_CENSUS_BYTES"
 
-        # 兩個子 hook stub。
+        # 兩個子 hook stub。AutoClaude 子 hook 用專屬 stub（見 _autoclaude_leg_stub
+        # 的 WHY）：它的 stdout 會被 tee 進 census 要讀的 log，不能是空的。
         self._write(
-            "AutoClaude/tools/git-hooks/pre-push", _bash_marker_stub(self.marker_autoclaude)
+            "AutoClaude/tools/git-hooks/pre-push", _autoclaude_leg_stub(self.marker_autoclaude)
         )
         os.chmod(self.repo / "AutoClaude" / "tools" / "git-hooks" / "pre-push", 0o755)
         self._write("AISDLC_SDD/.githooks/pre-push", _bash_marker_stub(self.marker_sdd))
         os.chmod(self.repo / "AISDLC_SDD" / ".githooks" / "pre-push", 0o755)
+        # census 消費端替身：真檔缺席時 dispatcher 會直接跳過 census（見 dispatcher
+        # `[ ! -f "$_ac_gate_dir/local_ci_gate.py" ]` 分支），故 fake repo 必須備有它，
+        # 這條 leg 的行為才進得了任何一支測試的視野。
+        self._write(
+            "AutoClaude/tools/local_ci_gate.py", _census_stub(self.marker_census_bytes)
+        )
 
         # 最小 root-infra 面：py_compile 目標（tools/ + .claude/hooks/，驗 R10
         # 範圍擴充不炸）、run_root_unittests 替身（寫 marker）、七支守門 stub
@@ -286,6 +336,9 @@ class TestPrePushDispatcher(unittest.TestCase):
         env = dict(os.environ)
         # 外層若帶跳過旗標（如開發者 shell 殘留），dispatcher 會直接 exit 0，全部斷言失真。
         env.pop("AUTOCLAUDE_SKIP_HOOKS", None)
+        # 外層若帶著這個縮限旗標，dispatcher 的 AutoClaude leg 會直接跳過 census
+        # （母體被縮限，見該處 echo）——census 相關斷言會全數失真。
+        env.pop("AUTOCLAUDE_PUSH_PYTEST_ARGS", None)
         # production 下 git 會幫 hook 把自家 usr/bin（GNU find/sed/sort/grep）prepend
         # 進 PATH；直接 spawn bash.exe 時 Windows 會把 find/sort 解析到 System32 版、
         # sed/grep 直接缺席（本機實測）→ 比照 git 行為 prepend bash 所在目錄。
@@ -577,6 +630,239 @@ class TestPrePushDispatcher(unittest.TestCase):
         rc, out, err = self._run_dispatcher(self._push_line(sha, self.base_sha))
         self.assertEqual(rc, 1, f"閘門缺失必須 rc=1：\nstdout={out}\nstderr={err}")
         self.assertIn("整合閘門缺失", out + err)
+
+    def test_autoclaude_leg_feeds_census_a_file_path_with_real_bytes(self) -> None:
+        """DEF-200-293：census 通道必須拿到「有內容的檔案路徑」，不是 stdin 或 0 bytes。
+
+        WHY：修復前 dispatcher 以 `< "$_ac_log"` 把 log 重導向進 stdin——在最常見的
+        未啟用 venv 環境下（`command -v python` 解析到 pyenv-win shim），這個重導向
+        被整條轉呼叫鏈吞掉，488 bytes 的檔案讀出來是 0 bytes，census 因此永遠判
+        「找不到剖面標記」rc=1，擋下每一次 push（主控 2026-09-14 實測）。這裡的假
+        `local_ci_gate.py`（`_census_stub`）直接讀 argv[1] 指向的檔案、把 bytes 數
+        寫進 marker：只要 > 0，就證明 dispatcher 真的把「有內容的檔案路徑」傳給了
+        下游，而不是 stdin 或空字串。
+        """
+        self._write("AutoClaude/x.txt", "x\n")
+        sha = self._commit_all("autoclaude change feeds census a real file path")
+        rc, out, err = self._run_dispatcher(self._push_line(sha, self.base_sha))
+        self.assertEqual(rc, 0, f"stdout={out}\nstderr={err}")
+        self.assertTrue(
+            self.marker_census_bytes.exists(),
+            f"census stub（local_ci_gate.py 替身）未被呼叫到：\nstdout={out}\nstderr={err}",
+        )
+        n = int(self.marker_census_bytes.read_text(encoding="utf-8"))
+        self.assertGreater(
+            n, 0,
+            "census 收到的檔案 bytes 數為 0——DEF-200-293 的病灶（stdin 重導向被"
+            "轉呼叫鏈吞掉）可能已經復發",
+        )
+
+    def test_census_stub_rejects_stdin_form_directly(self) -> None:
+        """反向測試（可證偽）：census stub 對 `-`（stdin 形態，即修復前的病灶）必須
+        自報 rc=8——如果 stub 邏輯被改壞成「不管 argv[1] 是什麼都回 0」，本測試會
+        獨立於整套 dispatcher 立刻現形，不必依賴一次完整的 fake-repo push 才查得到。
+        """
+        proc = subprocess.run(
+            [
+                sys.executable,
+                str(self.repo / "AutoClaude" / "tools" / "local_ci_gate.py"),
+                "--census-only", "-",
+            ],
+            capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(
+            proc.returncode, 8,
+            f"census stub 對 `-` 沒有回報 rc=8：stdout={proc.stdout}\nstderr={proc.stderr}",
+        )
+
+
+_AUTOCLAUDE_SUBHOOK = REPO_ROOT / "AutoClaude" / "tools" / "git-hooks" / "pre-push"
+_AUTOCLAUDE_PRECOMMIT_SUBHOOK = REPO_ROOT / "AutoClaude" / "tools" / "git-hooks" / "pre-commit"
+
+# 根層變數（$_MONO／$TOPLEVEL）或子專案變數（$ROOT）開頭的 venv python 候選字面。
+_VENV_PY_LITERAL_RE = re.compile(
+    r"\$(_MONO|TOPLEVEL|ROOT)(?:/\.\.)?[^\"'\s]*\.venv/(?:bin/python|Scripts/python\.exe)"
+)
+
+
+def _non_comment_lines(text: str) -> list[str]:
+    """去除整行註解（strip 後以 `#` 開頭的行）。純文字判準用，不做行內 `#` 剝離
+    ——本檔受測的字面標記皆不落在「程式碼＋尾隨註解同一行」的邊界情境內。"""
+    return [ln for ln in text.splitlines() if not ln.strip().startswith("#")]
+
+
+# R129 round2 C7：兩支 hook 是逐字同源的候選鏈（pre-commit 抄自 pre-push），但
+# 健康探針字面刻意不同——pre-push 跑 pytest，硬前提是 xdist；pre-commit 不跑
+# pytest，硬前提只是「Python >= 3.11 且真的能啟動」，故各自的探針字面不能共用
+# 同一個判準，否則其中一支永遠測不到自己的探針字面。
+_HOOK_HEALTH_PROBE_LITERAL: dict[Path, str] = {
+    _AUTOCLAUDE_SUBHOOK: "import pytest, xdist",
+    _AUTOCLAUDE_PRECOMMIT_SUBHOOK: "PYTHON_GE_MIN_PROBE",
+}
+
+# 修復前（2026-09-14 之前）pre-commit 的候選鏈片段——只有 `$ROOT/.venv` 一層、
+# 零健康探針。用來反向自證：把同一套判準套在這段舊文字上必須判紅，否則本鎖
+# 只是「順序對就永遠綠」的裝飾（SD 突變實驗，R129 round2 C7 第二點）。
+_PRECOMMIT_PRE_FIX_SNIPPET = (
+    'if [ -x "$ROOT/.venv/bin/python" ]; then\n'
+    '  PY="$ROOT/.venv/bin/python"\n'
+    'elif [ -x "$ROOT/.venv/Scripts/python.exe" ]; then\n'
+    '  PY="$ROOT/.venv/Scripts/python.exe"\n'
+    "else\n"
+    "  if is_real_python_candidate python; then\n"
+    "    PY=python\n"
+    "  elif is_real_python_candidate python3; then\n"
+    "    PY=python3\n"
+    "  else\n"
+    "    exit 1\n"
+    "  fi\n"
+    "fi\n"
+)
+
+
+class TestAutoClaudeSubHookInterpreterChain(unittest.TestCase):
+    """DEF-200-294：AutoClaude 子 pre-push／pre-commit hook 的直譯器候選鏈——
+    根層優先＋健康探針（純文字判準，直接讀源碼，非 fake-repo 執行）。
+
+    WHY（Rule 9 — 測意圖不只測行為）：2026-09-13 事故——舊版候選鏈「子專案
+    `.venv` 優先、找到即用零健檢」，一個陳舊 `AutoClaude/.venv`
+    （Python 3.12.11、無 pytest-xdist）被第一順位撿到，`pyproject.toml` 全域
+    addopts `-n auto` 讓 pytest rc=4 `unrecognized arguments`，表徵與「程式碼
+    壞了」無法區分。本鎖住的正是「不再退回這個順序、不再跳過健康探針」。
+
+    🔴 R129 round2 C7（SA 審查）：本鎖原本只讀 pre-push 一支，pre-commit 是
+    逐字同源的姊妹 hook 卻沒被鎖住——結果 DEF-200-294 落地時 pre-commit 那份
+    候選鏈原封不動漏改，直到本輪 SA 審查才抓到。單鎖一支＝另一支可以靜默漂回
+    舊順序，本輪起 (a)(c) 兩條對兩支 hook 各跑一次（`subTest(hook=...)`），
+    (b) 改為每支 hook 各自的探針字面（見 `_HOOK_HEALTH_PROBE_LITERAL`）。
+
+    誠實劃界：純文字判準看不到「順序對但被 if 包成永不執行」的形態——那需要
+    真跑 shell 才驗得到（見任務書 §2 第 2 項的行為驗證，非本檔涵蓋範圍）。
+    """
+
+    _HOOKS = (_AUTOCLAUDE_SUBHOOK, _AUTOCLAUDE_PRECOMMIT_SUBHOOK)
+
+    @staticmethod
+    def _lines(path: Path) -> list[str]:
+        return _non_comment_lines(path.read_text(encoding="utf-8"))
+
+    def test_root_level_venv_candidate_precedes_subproject_venv_candidate(self) -> None:
+        """(a) 順序鎖：第一個出現 `.venv/bin/python`／`.venv/Scripts/python.exe`
+        字面的非註解行，其路徑須由根層變數（`$_MONO` 或 `$TOPLEVEL`）開頭，且
+        早於任何 `$ROOT/.venv` 候選行。對 pre-push 與 pre-commit 各跑一次。
+
+        違反後果：陳舊子專案 venv 又會被第一順位撿到——2026-09-13 事故重演。
+        """
+        for hook in self._HOOKS:
+            with self.subTest(hook=hook.name):
+                first_var = None
+                for ln in self._lines(hook):
+                    m = _VENV_PY_LITERAL_RE.search(ln)
+                    if m:
+                        first_var = m.group(1)
+                        break
+                self.assertIsNotNone(
+                    first_var,
+                    f"{hook.name} 內找不到任何 `.venv/bin/python`／"
+                    "`.venv/Scripts/python.exe` 候選字面——候選鏈本體可能被"
+                    "整段刪除或改寫成別的形態",
+                )
+                self.assertIn(
+                    first_var, ("_MONO", "TOPLEVEL"),
+                    f"{hook.name} 第一個出現的 venv python 候選由 ${first_var} "
+                    "開頭而非 $_MONO／$TOPLEVEL——根層優先序被破壞，陳舊子專案 "
+                    "venv 會再度被第一順位撿到（2026-09-13 事故重演：無 xdist "
+                    "的直譯器讓 pytest rc=4，表徵與程式碼壞掉無法區分）",
+                )
+
+    def test_health_probe_literal_present(self) -> None:
+        """(b) 健檢鎖：非註解行含各自的健康探針字面
+        （`_HOOK_HEALTH_PROBE_LITERAL`）。對 pre-push 與 pre-commit 各跑一次，
+        兩者字面刻意不同——共用一支判準會讓其中一支永遠測不到自己的探針。
+
+        少了它，缺門檻版本／相依套件的直譯器會被選中，表徵與程式碼壞掉無法
+        區分（pre-push：`AutoClaude/pyproject.toml` 全域 addopts `-n auto` 使
+        xdist 是第 5 步 pytest 的硬前提；pre-commit：只跑 ruff／LOC／行尾檢查，
+        硬前提只是 Python >= 3.11 且真的能啟動）。
+        """
+        for hook in self._HOOKS:
+            with self.subTest(hook=hook.name):
+                probe = _HOOK_HEALTH_PROBE_LITERAL[hook]
+                self.assertTrue(
+                    any(probe in ln for ln in self._lines(hook)),
+                    f"{hook.name} 未見健康探針字面 `{probe}`——候選鏈可能已"
+                    "退化回『存在即用，不驗健康』的舊行為",
+                )
+
+    def test_subproject_venv_presence_warns_to_stderr(self) -> None:
+        """(c) 出聲鎖：非註解行同時含 `>&2` 與「歷史遺留」或「子專案 venv」字樣。
+        對 pre-push 與 pre-commit 各跑一次。
+
+        子專案 `.venv` 一律是歷史遺留（`tools/bootstrap_core.py` 只建根層
+        `.venv`）；此警告消失會讓開發者永遠不知道該刪除它，陳舊 venv 長期
+        存在即下一次事故的伏筆。
+        """
+        for hook in self._HOOKS:
+            with self.subTest(hook=hook.name):
+                self.assertTrue(
+                    any(
+                        ">&2" in ln and ("歷史遺留" in ln or "子專案 venv" in ln)
+                        for ln in self._lines(hook)
+                    ),
+                    f"{hook.name} 未見『偵測到子專案 venv 存在即出聲警告』的 "
+                    "stderr 訊息——DEF-200-294 的『只出聲不擋』設計可能已被刪除",
+                )
+
+    def test_root_dispatcher_ruff_candidates_include_windows_layout(self) -> None:
+        """(d) 根層 dispatcher（`tools/git-hooks/pre-push`）的 ruff 候選須含
+        Windows 佈局 `.venv/Scripts/ruff.exe`。
+
+        舊清單只列 POSIX 佈局（`bin/ruff`），單一 .venv 設計下 Windows 開發者
+        的根層 venv 一律是 `Scripts/` 而非 `bin/`，缺這一筆等於候選鏈在
+        Windows 上只剩 PATH 一條路。
+        """
+        dispatcher_lines = _non_comment_lines(DISPATCHER.read_text(encoding="utf-8"))
+        self.assertTrue(
+            any(".venv/Scripts/ruff.exe" in ln for ln in dispatcher_lines),
+            "根層 dispatcher 的 ruff 候選鏈未見 Windows 佈局 "
+            "`.venv/Scripts/ruff.exe`——未裝 PATH ruff 的 Windows 開發者候選鏈"
+            "會全數落空",
+        )
+
+    def test_precommit_pre_fix_snippet_would_fail_order_lock(self) -> None:
+        """反向自證（SD 突變實驗，R129 round2 C7 第二點）：把修復前（僅
+        `$ROOT/.venv`、零健康探針）的 pre-commit 候選鏈片段套進 (a)(b) 同一套
+        判準，必須判紅——否則本鎖只是「順序恰好對就永遠綠」的裝飾，不具備
+        真正的鑑別力。
+
+        用的是舊文字的字串常數（`_PRECOMMIT_PRE_FIX_SNIPPET`），不是真的還原
+        磁碟檔案：對活體工作樹做突變測試曾在本 repo 造成真事故（見
+        memory: git-checkout-mutation-revert-hazard），本測試刻意迴避該手法。
+        """
+        old_lines = _non_comment_lines(_PRECOMMIT_PRE_FIX_SNIPPET)
+        first_var = None
+        for ln in old_lines:
+            m = _VENV_PY_LITERAL_RE.search(ln)
+            if m:
+                first_var = m.group(1)
+                break
+        self.assertEqual(
+            first_var, "ROOT",
+            "舊 snippet 的第一個 venv python 候選預期由 $ROOT 開頭（修復前的"
+            "『子專案優先』設計）——若這裡不是 ROOT，snippet 本身已經失真，"
+            "反向自證不成立",
+        )
+        self.assertNotIn(
+            first_var, ("_MONO", "TOPLEVEL"),
+            "舊 snippet 不應通過 (a) 的根層優先判準——若通過，代表 (a) 判準"
+            "對修復前的形態沒有鑑別力",
+        )
+        probe = _HOOK_HEALTH_PROBE_LITERAL[_AUTOCLAUDE_PRECOMMIT_SUBHOOK]
+        self.assertFalse(
+            any(probe in ln for ln in old_lines),
+            f"舊 snippet 不應含健康探針字面 `{probe}`——若含有，代表 (b) 判準"
+            "對修復前的形態沒有鑑別力",
+        )
 
 
 # ── 指名鎖檔必須存在（R67 round 2，QA-R67-03）──────────────────────────────────
