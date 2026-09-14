@@ -220,8 +220,11 @@ def claim_once(stamp: Path, ttl: float, now: float | None = None) -> bool:
         age: float | None = now - stamp.stat().st_mtime
     except OSError:
         age = None
+    # DEF-200-296：`ttl <= 0` ＝呼叫端明說「不節流」（`maybe_arm(relatch_interval=0.0)`
+    # 直擊判準），不得再比 age——Windows 上 `st_mtime` 與 `time.time()` 的時鐘粒度差可讓
+    # age 為負，`age < 0.0` 成立就把「不節流」誤判成「還在視窗內」（整類連跑才現形）。
     if age is not None:
-        if age < ttl:
+        if ttl > 0 and age < ttl:
             return False
         try:
             stamp.unlink()
