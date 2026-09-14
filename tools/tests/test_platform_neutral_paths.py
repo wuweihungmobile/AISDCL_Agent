@@ -467,10 +467,10 @@ def scan_intree_tmpdir(source: str, rel: str) -> tuple[list[str], list[str]]:
 def _tmpdir_scan_roots() -> list[tuple[Path, bool, int]]:
     """（掃描根, 是否遞迴, 該樹檔數下限）；下限＝落地當回合實測 × 0.95。
 
-    🔴 本輪重釘（與 `_scan_roots()` 同一筆缺陷的第二個病灶）：原下限是「首掃數打
-    八折」的化石且**只有下界**。落地當回合實測三棵已越過腐化上界（56 對 44、
-    282 對 223、54 對 43），也就是本判準的掃描面此前可以掉掉兩成而全綠。改用姊妹
-    鎖的雙邊帶（`tree_count_verdict`）後，下限自己過期時會當場紅並印出該填的數字。
+    🔴 下限只有下界必然腐化（原「首掃數打八折」化石、三棵越過上界而全綠），故走姊妹
+    鎖的雙邊帶（`tree_count_verdict`）：過期當場紅並印該填的數字。計數**排除** `_zzz_*`
+    （兄弟測試以 addCleanup 刪除的合成暫存模組）：雲端 ubuntu 實測把根層測試樹由 79
+    灌成 82、越過上界 80，本機因先後序不同只見 79——不排除等於把競態釘進下限。
 
     🔴 掃描面比本檔第一道判準多一棵「**凍結基線 v0.01**」，這是刻意的，WHY：
       `AISDLC_SDD/scripts/ci-gate.sh` 的 `FROZEN_BASELINE="AISDLC_SDD_v0.01"` 是
@@ -483,7 +483,7 @@ def _tmpdir_scan_roots() -> list[tuple[Path, bool, int]]:
       把它們納進來會讓本鎖一上線就紅，而那紅燈反映的是待決策，不是新退化。
     """
     return [
-        (_TESTS_DIR, False, 64),                                       # 實測 67
+        (_TESTS_DIR, False, 75),                     # 實測 79（排除 _zzz_ 後本機＝雲端）
         (_REPO_ROOT / "AISDLC_SDD" / "scripts" / "tests", False, 28),  # 實測 29
         (_REPO_ROOT / "AutoClaude" / "tests", True, 268),              # 實測 282
         (_latest_fsm_tests_dir(), True, 74),                           # 實測 78
@@ -504,7 +504,7 @@ class TestNoInTreeWritableTmpDir(unittest.TestCase):
             self.assertTrue(root.is_dir(), f"掃描根缺席：{root}（邊界不得靜默縮小）")
             files = sorted(root.rglob("*.py") if recursive else root.glob("*.py"))
             scanned = 0
-            for py in files:
+            for py in (p for p in files if not p.name.startswith("_zzz_")):  # 兄弟測試暫存模組
                 rel = py.relative_to(_REPO_ROOT).as_posix()
                 try:
                     off, st = scan_intree_tmpdir(py.read_text(encoding="utf-8"), rel)
