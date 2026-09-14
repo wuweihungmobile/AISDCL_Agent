@@ -7,7 +7,7 @@
 | 對應 PM 拍板 | SD_08 PM #6（雙軌：CI nightly + perf machine 季度校準）|
 | 提案人 | SD（實作可行性主導）|
 | 核准日期 | 2026-05-18（SD_08 W0 T0-ADR3）|
-| 修訂歷史 | v1.0（2026-05-18，初版）；v1.1（2026-05-21，SD_09 W0 二次/三次 audit S-2 結構性問題 → samples=7 統計噪音必然，升 baseline samples ≥ 20）|
+| 修訂歷史 | v1.0（2026-05-18，初版）；v1.1（2026-05-21，SD_09 W0 二次/三次 audit S-2 結構性問題 → samples=7 統計噪音必然，升 baseline samples ≥ 20）；v1.2（2026-09-14，DEF-200-298：baseline 全數由 Windows 本機 nightly 鎖定卻與 ubuntu CI runner 比對，15% 相對門檻在 ~ms 場景對 runner 抖動零鑑別力 → 新增 §2.7 環境 provenance + advisory 分流；同日四方審查 T1 blocking 修復：advisory 分流訂正為「等級照算＋通知強度依等級分流」（原誤把 level 蓋成 advisory 字面、annotation 一律 `::warning::`）；`perf_environment()` CI 判準收窄為只認 `GITHUB_ACTIONS`；DEF-200-300 衛生修補（`.perf_baseline.toml` 寫出強制 LF）同批完成）|
 
 ---
 
@@ -26,6 +26,11 @@
 | **(c) perf machine** | 專用機（SD_09 採購評估）| 季度（每 3 個月）| **IO/IO-bound**：pgvector recall@10 + p95 / multi-run resume | 絕對基準 + production SLA |
 
 **禁止**：(a) 本地 dev（無法重現 + 無歷史趨勢）
+
+> **R14 降頻後鎖定權責實況（v1.2 補註）**：CI nightly 降為週頻後，`.perf_baseline.toml` 三場景
+> 75 筆歷史事實上全數由 **Windows 本機 nightly**（`run_local_nightly.ps1`）呼叫
+> `tools/perf_baseline_lock.py` 鎖定，(b) 表列的 CI nightly 目前只跑量測與比對、未曾實際
+> 鎖過 baseline——見 §2.7 environment provenance 分流的背景。
 
 ### 2.2 量測場景（4 個核心）
 
@@ -127,6 +132,26 @@ locked_by = "SD_08 W5 G5"
 # 2. PR merge 後 main branch nightly 連續 7 次達標即更新
 # 3. 重大重構（如 SD_09）後由 W6 收尾任務手動 unlock + recapture
 ```
+
+### 2.7 環境 provenance 與跨環境比對（advisory，v1.2 / DEF-200-298；分流語意經四方審查 T1 訂正）
+
+- 每筆量測（`measure()`）與每個 baseline section 皆帶 `environment`
+  （`f"{sys.platform}-{'ci' if CI env else 'local'}"`，如 `win32-local`／`linux-ci`）。
+  `perf_environment()` 的 CI 判準**只認 `GITHUB_ACTIONS`**（本 repo 唯一 CI 是 GitHub
+  Actions；通用 `CI` 環境變數在本機 shell 偶然被設上時會把 Windows 本機 nightly 誤標為
+  `-ci`，將 lock 歷史一分為二、靜默延誤 re-lock）。
+- `perf_regression_check.py`：baseline 與 current **兩者皆有且不同** → 該場景進 advisory
+  模式——等級（green/warn/block）**照算不覆蓋**，只是**不計入 block/warn count**（rc 語意
+  不變：全 advisory 時 rc=0）；通知強度依「照算等級」分流，而非一律降級：
+    - 照算 green → `::notice::scenario=... cross-environment advisory (...) level=PASS`
+    - 照算 warn／block → `::warning::title=Perf Advisory::scenario=... delta=... cross-environment advisory (...) level=WARN|BLOCK`
+  （兩者皆非 `::error::`）。人類可讀輸出標 `[ADVISORY:PASS|WARN|BLOCK]`；PR comment 該列
+  狀態欄寫 `🔵 建議（跨環境，照算=PASS|WARN|BLOCK）`。任一方缺欄位（舊資料）→ 維持既有
+  嚴格路徑並印 `::notice::` 說明缺席，不改變既有 rc 語意。
+- `perf_baseline_lock.py`：連續達標判定與容忍計算只採計與當次同 environment 的 history
+  紀錄（缺欄位舊紀錄視同同環境，不打斷既有觀察期進度）。
+- 目的：避免「baseline 由 Windows 本機鎖定、CI 在 ubuntu runner 上比對」這種跨硬體/跨 OS
+  比較被誤判為真實 regression（見上方 §2.1 補註）。
 
 ## 3. CI Job 草稿（W5 落地）
 

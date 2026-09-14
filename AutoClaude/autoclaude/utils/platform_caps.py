@@ -35,6 +35,13 @@ def is_macos() -> bool:
     return sys.platform == "darwin"
 
 
+def platform_key() -> str:
+    # 量測 provenance 用的平台識別字串（`sys.platform` 原值：win32／darwin／linux）。
+    # 讀取點收在本模組：`tests/test_evaluator_kill_tree.py` 的架構鎖要求 autoclaude/
+    # 內任何 `sys.platform` 存取只能住這裡，消費者（utils/perf_baseline）一律經本函式。
+    return sys.platform
+
+
 #: 無視窗旗標。POSIX 的 `subprocess` 上這個常數**不存在**，`getattr` 取 0 ＝不加任何旗標，
 #: 正是 POSIX 上正確的值（根 CLAUDE.md 鐵律三「這在另一個平台是什麼值」）。
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)

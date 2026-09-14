@@ -89,6 +89,24 @@ def load_results(path: Path) -> dict[str, float]:
     return {}
 
 
+def load_results_environment(path: Path) -> dict[str, str]:
+    """讀 perf_results.json 各 scenario 的 environment（ADR-SD08-003 §2.7 / DEF-200-298）。
+
+    僅格式 B（write_perf_results() 輸出的巢狀 dict）帶 `environment` 欄位；
+    格式 A（純數字）與 pytest-benchmark 格式無此 provenance，回空。
+    """
+    if not path.exists():
+        return {}
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, str] = {}
+    for k, v in raw.items():
+        if isinstance(v, dict) and v.get("environment"):
+            out[k] = str(v["environment"])
+    return out
+
+
 def classify(delta_pct: float) -> str:
     """0~1 增量百分比（0.15 = +15%）→ 等級 green / warn / block。"""
     if delta_pct < WARN_THRESHOLD:
@@ -123,7 +141,15 @@ def build_pr_comment(rows: list[dict]) -> str:
     lines.append("| 場景 | Baseline p95 | Current p95 | 增量 | 狀態 |")
     lines.append("|------|--------------|-------------|------|------|")
     for r in rows:
-        emoji = {"green": "🟢 通過", "warn": "🟡 警告", "block": "🔴 阻塞"}[r["level"]]
+        if r.get("advisory"):
+            computed_label = {"green": "PASS", "warn": "WARN", "block": "BLOCK"}[r["level"]]
+            emoji = f"🔵 建議（跨環境，照算={computed_label}）"
+        else:
+            emoji = {
+                "green": "🟢 通過",
+                "warn": "🟡 警告",
+                "block": "🔴 阻塞",
+            }[r["level"]]
         lines.append(
             f"| {r['scenario']} | {r['baseline_ms']:.1f} ms | "
             f"{r['current_ms']:.1f} ms | +{r['delta_pct'] * 100:.1f}% | {emoji} |"
@@ -146,6 +172,7 @@ def check(
 ) -> int:
     baseline_data = load_baseline(baseline_path)
     results = load_results(results_path)
+    results_env = load_results_environment(results_path)
 
     if not baseline_data:
         print(f"::error::baseline 不存在或為空：{baseline_path}", flush=True)
@@ -162,6 +189,7 @@ def check(
     rows: list[dict] = []
     block_count = 0
     warn_count = 0
+    advisory_count = 0
     for scenario, current_p95 in sorted(results.items()):
         section = baseline_data.get(scenario)
         if not section:
@@ -204,6 +232,46 @@ def check(
                     f"(samples={baseline_samples} <{MIN_BASELINE_SAMPLES})"
                 )
                 level = "warn"
+
+        # ADR-SD08-003 §2.7 / DEF-200-298：baseline 與 current 環境 provenance 比對。
+        baseline_env = section.get("environment") if isinstance(section, dict) else None
+        current_env = results_env.get(scenario)
+        cross_environment = bool(baseline_env and current_env and baseline_env != current_env)
+        if not baseline_env or not current_env:
+            print(
+                f"::notice::scenario={scenario} environment provenance missing "
+                f"(baseline={baseline_env or 'unknown'} current={current_env or 'unknown'}); "
+                "using strict comparison"
+            )
+
+        advisory = False
+        if cross_environment:
+            # 跨環境比對缺鑑別力（DEF-200-298 / 四方審查 T1 blocking 修復）：等級照算
+            # （green/warn/block）保留供人類參考，不計入 block_count／warn_count（rc 語意
+            # 不變：全 advisory 時 rc=0）；annotation 強度依「照算等級」分流，而非一律降級：
+            # 照算 green → ::notice::（人類參考）；照算 warn/block → ::warning::（提醒但不阻塞）。
+            advisory = True
+            advisory_count += 1
+            computed_label = {"green": "PASS", "warn": "WARN", "block": "BLOCK"}[level]
+            if level == "green":
+                print(
+                    f"::notice::scenario={scenario} cross-environment advisory "
+                    f"(baseline={baseline_env} current={current_env}) level={computed_label}"
+                )
+            else:
+                print(
+                    f"::warning::title=Perf Advisory::scenario={scenario} "
+                    f"baseline_p95={baseline_p95:.1f}ms current_p95={current_p95:.1f}ms "
+                    f"delta=+{delta_pct * 100:.1f}% cross-environment advisory "
+                    f"(baseline={baseline_env} current={current_env}) level={computed_label}"
+                )
+        elif level == "warn":
+            warn_count += 1
+            emit_annotation("warn", scenario, baseline_p95, current_p95, delta_pct)
+        elif level == "block":
+            block_count += 1
+            emit_annotation("block", scenario, baseline_p95, current_p95, delta_pct)
+
         rows.append(
             {
                 "scenario": scenario,
@@ -211,31 +279,29 @@ def check(
                 "current_ms": current_p95,
                 "delta_pct": delta_pct,
                 "level": level,
+                "advisory": advisory,
             }
         )
-        if level == "warn":
-            warn_count += 1
-            emit_annotation("warn", scenario, baseline_p95, current_p95, delta_pct)
-        elif level == "block":
-            block_count += 1
-            emit_annotation("block", scenario, baseline_p95, current_p95, delta_pct)
 
-    # 人類可讀輸出
+    # 人類可讀輸出（advisory 場景標 [ADVISORY:PASS|WARN|BLOCK]，照算等級照實顯示）
     print("\n[perf_regression_check] 比對結果：")
     for r in rows:
-        emoji = {"green": "PASS", "warn": "WARN", "block": "BLOCK"}[r["level"]]
+        computed_label = {"green": "PASS", "warn": "WARN", "block": "BLOCK"}[r["level"]]
+        label = f"ADVISORY:{computed_label}" if r["advisory"] else computed_label
         print(
-            f"  [{emoji}] {r['scenario']}: "
+            f"  [{label}] {r['scenario']}: "
             f"{r['baseline_ms']:.1f}ms → {r['current_ms']:.1f}ms (+{r['delta_pct'] * 100:.1f}%)"
         )
 
-    # 寫 PR comment（若有阻塞或警告）
-    if comment_out and (block_count + warn_count) > 0:
+    # 寫 PR comment（若有阻塞／警告／跨環境 advisory）
+    if comment_out and (block_count + warn_count + advisory_count) > 0:
         comment_out.write_text(build_pr_comment(rows), encoding="utf-8")
         print(f"\nPR comment markdown 已寫入：{comment_out}")
 
-    green = len(rows) - warn_count - block_count
-    print(f"\nTotal: green={green} warn={warn_count} block={block_count}")
+    green = len(rows) - warn_count - block_count - advisory_count
+    print(
+        f"\nTotal: green={green} warn={warn_count} block={block_count} advisory={advisory_count}"
+    )
     # SD_09 W3 Round 2 audit P0-6 修復（三態）：
     #   0=全綠 / 2=有 WARN（含 undersampled BLOCK→WARN 退化）/ 1=有 BLOCK
     # 讓 ps1 summary 區分「綠」與「觀察期等待」— 不再用單 rc 0 蓋過真實 WARN 信號

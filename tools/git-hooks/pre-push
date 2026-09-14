@@ -422,15 +422,15 @@ if [ "$run_rootinfra" -eq 1 ] || [ "$run_rootinfra_guards" -eq 1 ]; then
       # DEF-200-294：加入 Windows 佈局（`Scripts/ruff.exe`）——舊清單只列 POSIX
       # 佈局（`bin/ruff`），單一 .venv 設計下 Windows 開發者的根層 venv 一律是
       # `Scripts/` 而非 `bin/`，原候選鏈在 Windows 上等同只剩 PATH 一條路。
-      # 順序仍根層優先，`AutoClaude/.venv` 兩筆維持在候選鏈末尾（歷史遺留位置，
-      # 與子 hook DEF-200-294 的根層優先精神一致（不同機制：本檔上方 `$PY` 是
-      # PATH 語意，見 DEF-101-740／DEF-101-506 註解，刻意不做 .venv 優先判斷）。
+      # DEF-200-297：`AutoClaude/.venv` 兩筆候選已移除——子專案 venv 依單一
+      # .venv 設計永不進候選鏈（與子 hook DEF-200-294 的根層優先精神一致，
+      # 不同機制：本檔上方 `$PY` 是 PATH 語意，見 DEF-101-740／DEF-101-506
+      # 註解，刻意不做 .venv 優先判斷）。
       RUFF_BIN=""
       if command -v ruff >/dev/null 2>&1; then
         RUFF_BIN="ruff"
       else
-        for _ruff_cand in "$TOPLEVEL/.venv/bin/ruff" "$TOPLEVEL/.venv/Scripts/ruff.exe" \
-                          "$TOPLEVEL/AutoClaude/.venv/bin/ruff" "$TOPLEVEL/AutoClaude/.venv/Scripts/ruff.exe"; do
+        for _ruff_cand in "$TOPLEVEL/.venv/bin/ruff" "$TOPLEVEL/.venv/Scripts/ruff.exe"; do
           if [ -x "$_ruff_cand" ]; then RUFF_BIN="$_ruff_cand"; break; fi
         done
       fi

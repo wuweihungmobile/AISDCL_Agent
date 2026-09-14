@@ -96,19 +96,17 @@ from datetime import UTC, datetime  # noqa: E402  # UTC 是 3.11 才有的別名
 # step_hooks() 與 tools/check_hooks_liveness.py 共用同一份判定邏輯（S22，見該函式註解）。
 import check_hooks_liveness  # noqa: E402
 
-# platform_utils 位於 tools/lib/ 子目錄（非本檔同層），需顯式插入 sys.path 才能
-# import——手法對齊本輪其他核心檔案（AutoClaude/tools/scaffold_sprint_section.py 等）
-# 既有慣例（R17 DEF-101-231 觀察點 1+2：收斂 is_windows/os_label/venv_python_path
-# 平台判斷邏輯的第二次重複）。
+# platform_utils／stray_venv 位於 tools/lib/ 子目錄（非本檔同層），需顯式插入 sys.path 才能
+# import（既有慣例，R17 DEF-101-231：收斂平台判斷與雜散 venv 掃描邏輯的重複，見下方 import）。
 sys.path.insert(0, str(ROOT / "tools" / "lib"))
-# noqa: F401 — DEF-101-758 後本檔已不直接呼叫，但 `tools/tests/test_dev_start.py`
-# 以 `ci_liveness = dev_start.ci_liveness` 取得與生產路徑同一個模組物件（避免
-# patch 到不同副本，見該檔行內 WHY），拿掉這個名字會讓該別名連鎖打壞其下
-# 數十個測試案例；真正的呼叫端已搬到 `ci_run_status.py`（見下一行 import）。
+# noqa: F401 — DEF-101-758 後本檔已不直接呼叫，但 test_dev_start.py 以
+# `ci_liveness = dev_start.ci_liveness` 取得同一模組物件（避免 patch 到不同副本），
+# 拿掉此名會打壞其下數十個測試；真正呼叫端已搬到 ci_run_status.py（見下一行）。
 import ci_liveness  # noqa: E402,F401
 import ci_run_status  # noqa: E402  # DEF-101-758：最新 run 判讀本體（LOC 死結搬遷）
 import onboarding_snapshot_note  # noqa: E402  # §7 表② 指紋哨兵本體（同上搬遷形態）
 import platform_utils  # noqa: E402
+import stray_venv  # noqa: E402  # DEF-200-297：開工期雜散 venv 掃描本體
 
 
 def _hr(n: int, title: str) -> None:
@@ -1485,6 +1483,8 @@ def step_venv(now: str, state: dict, force: bool, cross_same_flavor: bool = Fals
             _write_origin_marker(ROOT / ".venv", now)
         else:
             SUMMARY["venv"] = "❌ 失敗（見上方錯誤）"
+        for line in stray_venv.advisory_lines(ROOT, platform_utils.is_windows()):
+            _warn(line)
         return ok
     finally:
         if release_lock:

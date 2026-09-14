@@ -17,7 +17,6 @@ import pytest
 from tools.perf_regression_check import (
     BLOCK_THRESHOLD,
     MIN_BASELINE_SAMPLES,
-    SUBMS_JITTER_FLOOR_MS,
     WARN_THRESHOLD,
     build_pr_comment,
     check,
@@ -25,7 +24,6 @@ from tools.perf_regression_check import (
     load_baseline,
     load_results,
 )
-
 
 # === classify 三級判定 ===
 
@@ -107,7 +105,9 @@ def test_load_results_returns_empty_when_missing(tmp_path: Path) -> None:
 
 # === check 主流程 ===
 
-def test_check_fails_when_baseline_missing(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_check_fails_when_baseline_missing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     """baseline 不存在 → exit 1（紀律 #7 cache fresh + 紀律 #1 fail-loud）。"""
     results = tmp_path / "results.json"
     results.write_text(json.dumps({"s": 100.0}), encoding="utf-8")
@@ -146,7 +146,9 @@ def test_check_green_when_under_warn_threshold(tmp_path: Path) -> None:
     assert rc == 0
 
 
-def test_check_warn_returns_rc_2_three_state(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_check_warn_returns_rc_2_three_state(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     """SD_09 W3 Round 2 audit P0-6：三態 rc — warn → rc=2（不阻塞但區分真綠）。
 
     紀律 #1「stage rc 必須反映真實狀態」— warn 與 green 必須以不同 rc 區分，
@@ -351,6 +353,107 @@ def test_check_no_pr_comment_when_all_green(tmp_path: Path) -> None:
     assert not comment_path.exists(), "全綠時不應產出 PR comment"
 
 
+# === environment provenance（ADR-SD08-003 §2.7 / DEF-200-298）===
+
+def test_check_cross_environment_advisory_rc_zero(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """跨環境（baseline≠current）比對缺鑑別力 → advisory，不計入 block/warn，rc=0。
+
+    即使增量 +20%（strict 路徑下會 BLOCK），跨環境比對本身零鑑別力
+    （CI runner vs 本機硬體差異遠大於真實 regression），不應阻塞 merge。
+
+    四方審查 T1 blocking 修復：等級照算（此例照算=block）不得被 advisory 蓋掉，
+    annotation 依照算等級分流為 ::warning::（非一律降級掩蓋照算結果）。
+    """
+    baseline = tmp_path / "baseline.toml"
+    baseline.write_text(
+        '[scenario_a]\np95_ms = 100.0\nsamples = 25\nenvironment = "win32-local"\n',
+        encoding="utf-8",
+    )
+    results = tmp_path / "results.json"
+    results.write_text(
+        json.dumps({"scenario_a": {"p95_ms": 120.0, "environment": "linux-ci"}}),
+        encoding="utf-8",
+    )
+
+    rc = check(results, baseline)
+    assert rc == 0, "跨環境 advisory 不應阻塞（rc=0）"
+    captured = capsys.readouterr()
+    assert "::warning::" in captured.out
+    assert "cross-environment advisory" in captured.out
+    assert "level=BLOCK" in captured.out, "照算等級必須照算不覆蓋"
+    assert "[ADVISORY:BLOCK]" in captured.out
+    assert "::error::" not in captured.out
+
+
+def test_check_cross_environment_advisory_computed_green_uses_notice(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """四方審查 T1：跨環境 + 照算 green → ::notice::（非 ::warning::）+ [ADVISORY:PASS]，rc=0。"""
+    baseline = tmp_path / "baseline.toml"
+    baseline.write_text(
+        f'[scenario_a]\np95_ms = 100.0\nsamples = {MIN_BASELINE_SAMPLES}\n'
+        'environment = "win32-local"\n',
+        encoding="utf-8",
+    )
+    results = tmp_path / "results.json"
+    results.write_text(
+        json.dumps({"scenario_a": {"p95_ms": 102.0, "environment": "linux-ci"}}),  # +2% green
+        encoding="utf-8",
+    )
+
+    rc = check(results, baseline)
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert "::notice::" in captured.out
+    assert "cross-environment advisory" in captured.out
+    assert "level=PASS" in captured.out
+    assert "[ADVISORY:PASS]" in captured.out
+    assert "::warning::" not in captured.out
+    assert "::error::" not in captured.out
+
+
+def test_check_same_environment_block_rc_unchanged(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """同環境（baseline=current）+ 增量 ≥15% → 既有 BLOCK rc=1 行為不變。"""
+    baseline = tmp_path / "baseline.toml"
+    baseline.write_text(
+        '[scenario_a]\np95_ms = 100.0\nsamples = 25\nenvironment = "win32-local"\n',
+        encoding="utf-8",
+    )
+    results = tmp_path / "results.json"
+    results.write_text(
+        json.dumps({"scenario_a": {"p95_ms": 120.0, "environment": "win32-local"}}),
+        encoding="utf-8",
+    )
+
+    rc = check(results, baseline)
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert "::error::" in captured.out
+    assert "cross-environment" not in captured.out
+
+
+def test_check_missing_environment_field_uses_strict_path_with_notice(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """任一方缺 environment 欄位 → 維持嚴格路徑（既有 rc 行為）＋印 notice 說明缺席。"""
+    baseline = tmp_path / "baseline.toml"
+    baseline.write_text(
+        "[scenario_a]\np95_ms = 100.0\nsamples = 25\n", encoding="utf-8"
+    )  # 無 environment（舊資料）
+    results = tmp_path / "results.json"
+    results.write_text(json.dumps({"scenario_a": 120.0}), encoding="utf-8")  # +20%
+
+    rc = check(results, baseline)
+    assert rc == 1, "缺 provenance 應維持嚴格 BLOCK，不降級"
+    captured = capsys.readouterr()
+    assert "::error::" in captured.out
+    assert "environment provenance missing" in captured.out
+
+
 def test_build_pr_comment_has_all_levels() -> None:
     """PR comment markdown 範本包含 ADR 引用 + 三級告警 emoji。"""
     rows = [
@@ -382,3 +485,20 @@ def test_build_pr_comment_has_all_levels() -> None:
     assert "🟡" in md
     assert "🔴" in md
     assert "+20.0%" in md
+
+
+def test_build_pr_comment_advisory_row_shows_computed_level() -> None:
+    """四方審查 T1：advisory 列狀態欄須帶照算等級（非固定「跨環境」字面）。"""
+    rows = [
+        {
+            "scenario": "s1",
+            "baseline_ms": 100.0,
+            "current_ms": 120.0,
+            "delta_pct": 0.20,
+            "level": "block",
+            "advisory": True,
+        },
+    ]
+    md = build_pr_comment(rows)
+    assert "🔵 建議（跨環境，照算=BLOCK）" in md
+    assert "🔴" not in md, "advisory 列不應照 block 顯示紅色阻塞 emoji"

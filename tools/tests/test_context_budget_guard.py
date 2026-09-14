@@ -9796,6 +9796,23 @@ class SentinelArmingCriterionTest(unittest.TestCase):
                                      spawn=self._spawn, tmp_dir=str(self.tmp))
         self.assertEqual(len(self.spawned), 2)
 
+    def test_claim_once_ttl_le_zero_ignores_negative_age_from_clock_skew(self) -> None:
+        """DEF-200-296 鑑別力補強（DEF-200-299）：修復前 `age < 0.0` 會被誤判為
+        「還在視窗內」而擋下——既有兩支測試從未逼出此分支。用 `os.utime` 把 stamp
+        mtime 撥到未來直接構造 age<0。"""
+        ledger = _ledger()
+        now, future = 1_000_000.0, 1_000_060.0  # age = now - future = -60 < 0
+        stamp = self.tmp / "skew.stamp"
+        stamp.write_text("", encoding="utf-8")
+        os.utime(stamp, (future, future))
+        self.assertTrue(ledger.claim_once(stamp, ttl=0.0, now=now),
+                         "ttl<=0 明說不節流，age<0 不得誤判為仍在視窗內")
+        stamp2 = self.tmp / "skew2.stamp"
+        stamp2.write_text("", encoding="utf-8")
+        os.utime(stamp2, (future, future))
+        self.assertFalse(ledger.claim_once(stamp2, ttl=120.0, now=now),
+                          "ttl>0 時仍依既有 age 判準，不得被本次修法連帶改變")
+
     # ── R84／C3-C：每一條「醒來之後」的路徑都必須處置掉自己的排程 ──────────────
     #: 允許的處置＝拆掉自己／重排下一次／交棒給另一支受本判準約束的 tick；第四個名字
     #: （`_abort_and_unregister`）是委派而非新語意，強度由

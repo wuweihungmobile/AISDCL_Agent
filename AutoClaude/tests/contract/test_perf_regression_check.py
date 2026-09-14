@@ -147,6 +147,37 @@ def test_perf_regression_check_undersampled_baseline_downgrades_block_to_warn(tm
     assert "::error::" not in result.stdout
 
 
+def test_perf_regression_check_cross_environment_advisory(tmp_path):
+    """場景 7（DEF-200-298）：baseline=win32-local vs current=linux-ci，增量 +20%
+
+    → advisory（rc=0，不阻塞），annotation 降為 ::warning::，非 ::error::。
+    """
+    baseline = tmp_path / "baseline.toml"
+    baseline.write_text(
+        "[dry_run_e2e]\n"
+        "p50_ms = 700.0\n"
+        "p95_ms = 1000.0\n"
+        "p99_ms = 1100.0\n"
+        "samples = 20\n"
+        'git_sha = "test"\n'
+        'captured_at = "2026-05-21T00:00:00+00:00"\n'
+        'environment = "win32-local"\n',
+        encoding="utf-8",
+    )
+    results = tmp_path / "results.json"
+    results.write_text(
+        json.dumps({"dry_run_e2e": {"p95_ms": 1200.0, "environment": "linux-ci"}}),
+        encoding="utf-8",
+    )
+
+    result = _run_tool(results, baseline, tmp_path)
+
+    assert result.returncode == 0, f"stdout={result.stdout!r}"
+    assert "::warning::" in result.stdout
+    assert "cross-environment advisory" in result.stdout
+    assert "::error::" not in result.stdout
+
+
 def test_perf_regression_check_locked_baseline_still_blocks_block_level(tmp_path):
     """場景 6（SD_09 W0 P0-AUDIT-perf-followup 反向 mirror）：
 

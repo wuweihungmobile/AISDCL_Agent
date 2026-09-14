@@ -115,6 +115,26 @@ def load_history(history_path: Path) -> list[dict[str, Any]]:
     return records
 
 
+def _filter_by_environment(
+    history: list[dict[str, Any]], scenario: str, current_environment: str | None
+) -> list[dict[str, Any]]:
+    """排除與當次量測環境不同的舊紀錄（DEF-200-298：baseline 跨環境比對假紅）。
+
+    雙方皆有 `environment` 欄位且不同者才排除；缺欄位的舊紀錄視同同環境，
+    不破壞既有觀察期累積進度（ADR-SD08-003 §2.7）。
+    """
+    if not current_environment:
+        return history
+    kept: list[dict[str, Any]] = []
+    for rec in history:
+        scen_data = rec.get("scenarios", {}).get(scenario)
+        rec_env = scen_data.get("environment") if isinstance(scen_data, dict) else None
+        if rec_env and rec_env != current_environment:
+            continue
+        kept.append(rec)
+    return kept
+
+
 def _within_regression_tolerance(
     history_tail: list[dict[str, Any]], scenario: str, baseline_p95: float
 ) -> bool:
@@ -135,13 +155,21 @@ def _within_regression_tolerance(
 
 
 def should_lock(
-    history: list[dict[str, Any]], scenario: str, baseline_p95: float | None
+    history: list[dict[str, Any]],
+    scenario: str,
+    baseline_p95: float | None,
+    *,
+    current_environment: str | None = None,
 ) -> tuple[bool, float | None]:
     """連續 N 次 samples ≥ MIN_SAMPLES 且（無舊 baseline 或增量 < 15%）→ 鎖定。
+
+    `current_environment` 非空時，先排除與其不同 environment 的舊紀錄
+    （DEF-200-298；缺欄位舊紀錄視同同環境）。
 
     回傳：(locked, new_p95)
         new_p95: 取 N 筆 max p95（最保守值）
     """
+    history = _filter_by_environment(history, scenario, current_environment)
     if len(history) < CONSECUTIVE_RUNS:
         return False, None
     tail = history[-CONSECUTIVE_RUNS:]
@@ -191,8 +219,12 @@ def write_baseline(
         lines.append(f"samples = {sec.get('samples', 0)}")
         lines.append(f'git_sha = "{sec.get("git_sha", git_sha)}"')
         lines.append(f'captured_at = "{sec.get("captured_at", "")}"')
+        env = sec.get("environment", "")
+        if env:
+            lines.append(f'environment = "{env}"')
         lines.append("")
-    baseline_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    # DEF-200-300：newline="\n" 防止 Windows text-mode 預設把 \n 轉譯成 \r\n。
+    baseline_path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
 
 
 def reset_baseline(baseline_path: Path) -> Path:
@@ -256,13 +288,18 @@ def run(
                 old_baseline_p95 = float(baseline[scen].get("p95_ms", 0)) or None
             except (TypeError, ValueError):
                 old_baseline_p95 = None
-        locked, new_p95 = should_lock(history, scen, old_baseline_p95)
+        current_env = valid_scenarios[scen].get("environment") or None
+        locked, new_p95 = should_lock(
+            history, scen, old_baseline_p95, current_environment=current_env
+        )
         if locked and new_p95 is not None:
             # DEF-200-164：p50/p99/samples 改取「p95 最大那一筆」的同一次量測，不再各自
             # 取不同母體（原本 p50/p99 取 tail 最後一筆、samples 硬寫 MIN_SAMPLES，三者
             # 可能互不自洽，例如 p99 < p95）。同一筆天然滿足 p50 <= p95 <= p99。
+            # DEF-200-298：tail 須與 should_lock 同一份環境過濾後的歷史，否則兩處對不上。
+            env_tail = _filter_by_environment(history, scen, current_env)[-CONSECUTIVE_RUNS:]
             worst = max(
-                (t["scenarios"][scen] for t in history[-CONSECUTIVE_RUNS:]),
+                (t["scenarios"][scen] for t in env_tail),
                 key=lambda s: s.get("p95_ms", float("-inf")),
             )
             locked_updates[scen] = {
@@ -272,11 +309,12 @@ def run(
                 "samples": worst.get("samples", MIN_SAMPLES),
                 "git_sha": git_sha,
                 "captured_at": record["timestamp"],
+                "environment": worst.get("environment", current_env or ""),
             }
         else:
-            # 統計連續達標次數
+            # 統計連續達標次數（DEF-200-298：先排除跨環境舊紀錄，不因其存在而中斷連續計數）
             count = 0
-            for rec in reversed(history):
+            for rec in reversed(_filter_by_environment(history, scen, current_env)):
                 scen_data = rec.get("scenarios", {}).get(scen)
                 if not scen_data or scen_data.get("samples", 0) < MIN_SAMPLES:
                     break

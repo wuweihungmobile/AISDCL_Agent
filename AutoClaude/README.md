@@ -66,10 +66,13 @@
 ### 1. 安裝
 
 > ℹ️ **本專案現為 monorepo 子目錄**：AutoClaude 已併入單一 monorepo `AISDCL_Agent`（2026-06-13 移除巢狀 `.git`），不再是獨立倉庫。請從 monorepo 根 clone，再依 [根層 ONBOARDING.md](../ONBOARDING.md) 執行一鍵設定（`tools/bootstrap.sh` / `tools/bootstrap.ps1`），bootstrap 會自動處理本子目錄的依賴安裝。以下步驟示範單獨在 `AutoClaude/` 內手動安裝依賴（例如已用根層 bootstrap 建好 `.venv` 後，只想針對本子專案加裝 extras）：
+>
+> 🔴 **單一 .venv 原則**：全樹只有 monorepo 根層 `.venv` 是開發 venv，`AutoClaude/` 下不建第二顆——下方區塊 `cd` 進 `AutoClaude/` 之後、`uv pip install` 之前，先啟用根層 venv（啟用行已寫在區塊內對應位置）。
 
 ```bash
 git clone https://github.com/wuweihungmobile/AISDCL_Agent.git
 cd AISDCL_Agent/AutoClaude
+source ../.venv/bin/activate        # macOS/Linux；Windows PowerShell 改：. ..\.venv\Scripts\Activate.ps1
 uv pip install -e '.[dev,notifications]'
 
 # 架構約束檢查（import-linter）

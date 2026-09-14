@@ -63,9 +63,9 @@ gh run list --limit 10 --json workflowName,conclusion,event,createdAt,headSha   
 3. 🔴 **回填本平台 ONBOARDING §7 表②**——整份 SOP 唯一只能在目標平台做的事（跨平台代填＝假 provenance，工具 rc=2 拒絕）：`<乾淨 venv>/bin/python tools/sync_onboarding_baselines.py --write --with-slow`。
    - **乾淨 venv ≠ 本機 .venv**（本機幾乎必裝過 pg extras，工具 rc=2 拒跑）：建在 **repo 樹外**（樹內會污染全樹掃描型測試），照 `tools/bootstrap_core.py` 的出廠定義裝（Windows 換 `py -3.11 -m venv <樹外目錄>` 與 `<樹外目錄>\Scripts\python.exe`）：
      ```bash
-     python3.11 -m venv /tmp/cleanvenv
-     /tmp/cleanvenv/bin/python -m pip install -e 'AutoClaude/.[dev,notifications,lint]' -r AISDLC_SDD/AISDLC_SDD_v0.01/requirements-ci.txt
-     /tmp/cleanvenv/bin/python -c "import importlib.util as u; [print(m, 'PRESENT' if u.find_spec(m) else 'ABSENT') for m in ('psycopg2','sqlalchemy')]"
+     python3.11 -m venv "${TMPDIR:-/tmp}/cleanvenv"     # 放 $TMPDIR（mac 預設非 /tmp）：dev_start 的雜散 venv 提醒掃的是 tempfile.gettempdir()，同一基準才掃得到
+     "${TMPDIR:-/tmp}/cleanvenv/bin/python" -m pip install -e 'AutoClaude/.[dev,notifications,lint]' -r AISDLC_SDD/AISDLC_SDD_v0.01/requirements-ci.txt
+     "${TMPDIR:-/tmp}/cleanvenv/bin/python" -c "import importlib.util as u; [print(m, 'PRESENT' if u.find_spec(m) else 'ABSENT') for m in ('psycopg2','sqlalchemy')]"
      ```
      ```powershell
      py -3.11 -m venv $env:TEMP\cleanvenv

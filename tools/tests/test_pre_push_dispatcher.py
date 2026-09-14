@@ -667,6 +667,18 @@ _HOOK_HEALTH_PROBE_LITERAL: dict[Path, str] = {
     _AUTOCLAUDE_PRECOMMIT_SUBHOOK: "PYTHON_GE_MIN_PROBE",
 }
 
+# 修復前兩支子 hook 共通的 `$ROOT/.venv` fallback 迴圈舊形狀，供反向自證用。
+_PRE_FIX_A1_ROOT_FALLBACK_LOOP_SNIPPET = (
+    'if [ -z "$PY" ]; then\n'
+    '  for _py_cand in "$ROOT/.venv/bin/python" "$ROOT/.venv/Scripts/python.exe"; do\n'
+    '    if [ -x "$_py_cand" ]; then\n'
+    '      PY="$_py_cand"\n'
+    "      break\n"
+    "    fi\n"
+    "  done\n"
+    "fi\n"
+)
+
 # 修復前 pre-commit 候選鏈舊文字（僅 `$ROOT/.venv`、零健康探針），供反向自證用。
 _PRECOMMIT_PRE_FIX_SNIPPET = (
     'if [ -x "$ROOT/.venv/bin/python" ]; then\n'
@@ -697,11 +709,18 @@ class TestAutoClaudeSubHookInterpreterChain(unittest.TestCase):
     def _lines(path: Path) -> list[str]:
         return _non_comment_lines(path.read_text(encoding="utf-8"))
 
-    def test_root_level_venv_candidate_precedes_subproject_venv_candidate(self) -> None:
-        """(a) 順序鎖：第一個出現的 venv python 候選須由 `$_MONO`／`$TOPLEVEL`
-        開頭而非 `$ROOT`（否則陳舊子專案 venv 又被撿到）。"""
+    def test_no_root_venv_fallback_loop_remains(self) -> None:
+        """(a) 徹底移除鎖（DEF-200-297）：不得再有以 `$ROOT/.venv` 為候選的
+        `for _py_cand` 迴圈——子專案 venv 永不成候選（只出聲，見 (c)）。"""
         for hook in self._HOOKS:
             with self.subTest(hook=hook.name):
+                text = hook.read_text(encoding="utf-8")
+                self.assertNotRegex(
+                    text,
+                    r"for _py_cand in \"\$ROOT/\.venv",
+                    f"{hook.name} 仍殘留以 $ROOT/.venv 為候選的 for _py_cand "
+                    "迴圈——子專案 venv 不應再進候選鏈（DEF-200-297）",
+                )
                 first_var = None
                 for ln in self._lines(hook):
                     m = _VENV_PY_LITERAL_RE.search(ln)
@@ -758,6 +777,22 @@ class TestAutoClaudeSubHookInterpreterChain(unittest.TestCase):
             "`.venv/Scripts/ruff.exe`——未裝 PATH ruff 的 Windows 開發者候選鏈"
             "會全數落空",
         )
+
+    def test_delete_commands_present_and_ruff_chain_excludes_subproject_venv(self) -> None:
+        """(e)(f) DEF-200-297：警告含可複製刪除指令（PowerShell／bash 各一）；
+        根 dispatcher 的 ruff 候選鏈不再含 `AutoClaude/.venv`。"""
+        for hook in self._HOOKS:
+            with self.subTest(hook=hook.name):
+                lines = self._lines(hook)
+                self.assertTrue(any("Remove-Item -Recurse -Force" in ln for ln in lines))
+                self.assertTrue(any("rm -rf" in ln for ln in lines))
+        dispatcher_lines = _non_comment_lines(DISPATCHER.read_text(encoding="utf-8"))
+        self.assertFalse(any("AutoClaude/.venv" in ln for ln in dispatcher_lines))
+
+    def test_pre_fix_fallback_snippet_would_fail_the_no_fallback_lock(self) -> None:
+        """反向自證：修復前 `$ROOT/.venv` fallback 迴圈舊形狀須被 (a) 的 regex
+        抓到，否則該鎖對修復前的形態無鑑別力。"""
+        self.assertRegex(_PRE_FIX_A1_ROOT_FALLBACK_LOOP_SNIPPET, r"for _py_cand in \"\$ROOT/\.venv")
 
     def test_precommit_pre_fix_snippet_would_fail_order_lock(self) -> None:
         """反向自證（四方審查第二棒 C7 第二點）：把修復前舊 snippet 套進 (a)(b)

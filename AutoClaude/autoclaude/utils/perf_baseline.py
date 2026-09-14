@@ -13,6 +13,7 @@
 """
 from __future__ import annotations
 
+import os
 import statistics
 import subprocess
 import sys
@@ -22,8 +23,23 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from autoclaude.utils import platform_caps
+
 # ADR-SD08-003 v1.1（SD_09 W1）：samples 最小門檻 — < MIN_RUNS 印 warning，不阻塞
 MIN_RUNS = 20
+
+
+def perf_environment() -> str:
+    """量測環境 provenance key（ADR-SD08-003 §2.7 / DEF-200-298；CI 判準收窄見四方審查 T1）。
+
+    格式：`<platform_caps.platform_key()>-<ci|local>`（例：win32-local、linux-ci）；
+    平台字串經 platform_caps 取得，遵守「平台判斷只住一處」的架構鎖。
+    CI 判準：只認 `GITHUB_ACTIONS`（本 repo 唯一 CI 是 GitHub Actions；通用 `CI`
+    環境變數在本機 shell 偶然被設上時會把 Windows 本機 nightly 誤標為 `-ci`，
+    把 lock 歷史一分為二、靜默延誤 re-lock）。
+    """
+    is_ci = bool(os.environ.get("GITHUB_ACTIONS"))
+    return f"{platform_caps.platform_key()}-{'ci' if is_ci else 'local'}"
 
 
 def _percentile(samples: list[float], pct: float) -> float:
@@ -64,6 +80,7 @@ class PerfBaseline:
       samples      : 連跑次數
       git_sha      : 採集時 git SHA（短）
       captured_at  : ISO8601 UTC timestamp
+      environment  : 量測環境 key（ADR-SD08-003 §2.7；空字串＝舊資料無 provenance）
     """
 
     scenario: str
@@ -73,10 +90,11 @@ class PerfBaseline:
     samples: int
     git_sha: str
     captured_at: str
+    environment: str = ""
 
     def to_toml_section(self) -> str:
         """序列化為 TOML section 字串（給 .perf_baseline.toml 寫入用）。"""
-        return (
+        section = (
             f"[{self.scenario}]\n"
             f'p50_ms = {self.p50_ms}\n'
             f'p95_ms = {self.p95_ms}\n'
@@ -85,6 +103,9 @@ class PerfBaseline:
             f'git_sha = "{self.git_sha}"\n'
             f'captured_at = "{self.captured_at}"\n'
         )
+        if self.environment:
+            section += f'environment = "{self.environment}"\n'
+        return section
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -134,6 +155,7 @@ def measure(
         samples=runs,
         git_sha=git_sha if git_sha is not None else _current_sha(),
         captured_at=datetime.now(UTC).isoformat(timespec="seconds"),
+        environment=perf_environment(),
     )
 
 
@@ -156,7 +178,8 @@ def write_baseline(path: Path, baselines: list[PerfBaseline]) -> None:
     accepted = [b for b in baselines if b.samples >= MIN_RUNS]
     for b in accepted:
         body += b.to_toml_section() + "\n"
-    path.write_text(body, encoding="utf-8")
+    # DEF-200-300：newline="\n" 防止 Windows text-mode 預設把 \n 轉譯成 \r\n。
+    path.write_text(body, encoding="utf-8", newline="\n")
 
 
 def write_perf_results(path: Path, baselines: list[PerfBaseline]) -> None:
@@ -170,4 +193,4 @@ def write_perf_results(path: Path, baselines: list[PerfBaseline]) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-__all__ = ["PerfBaseline", "measure", "write_baseline", "write_perf_results"]
+__all__ = ["PerfBaseline", "measure", "perf_environment", "write_baseline", "write_perf_results"]

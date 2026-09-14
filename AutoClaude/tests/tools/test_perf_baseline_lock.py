@@ -237,6 +237,136 @@ def test_subms_floor_does_not_affect_large_baseline_scenarios(tmp_path):
     assert locked is False
 
 
+# === environment provenance（ADR-SD08-003 §2.7 / DEF-200-298）===
+
+def test_write_baseline_includes_environment_when_present(tmp_path):
+    """lock 寫出的 baseline section 需帶 environment（來源＝當次 results）。"""
+    b = tmp_path / "base.toml"
+    write_baseline(
+        b,
+        {
+            "s": {
+                "p50_ms": 1, "p95_ms": 2, "p99_ms": 3, "samples": MIN_SAMPLES,
+                "environment": "win32-local",
+            }
+        },
+    )
+    assert 'environment = "win32-local"' in b.read_text(encoding="utf-8")
+    assert load_baseline(b)["s"]["environment"] == "win32-local"
+
+
+def test_write_baseline_omits_environment_when_absent(tmp_path):
+    """舊資料無 environment 欄位時不強制寫出空字串（向後相容）。"""
+    b = tmp_path / "base.toml"
+    write_baseline(b, {"s": {"p50_ms": 1, "p95_ms": 2, "p99_ms": 3, "samples": MIN_SAMPLES}})
+    assert "environment" not in b.read_text(encoding="utf-8")
+
+
+def test_should_lock_excludes_different_environment_history(tmp_path):
+    """history 依環境過濾 — 混入其他環境紀錄不得計入連續達標判定。"""
+    matching = [
+        {"scenarios": {"s": {**_make_scen(100 + i), "environment": "win32-local"}}}
+        for i in range(CONSECUTIVE_RUNS)
+    ]
+    foreign = [
+        {"scenarios": {"s": {**_make_scen(999), "environment": "linux-ci"}}}
+        for _ in range(3)
+    ]
+    history = matching[:3] + foreign + matching[3:]  # 交錯放入外來環境紀錄
+    locked, new_p95 = should_lock(history, "s", None, current_environment="win32-local")
+    assert locked is True
+    assert new_p95 == 100 + (CONSECUTIVE_RUNS - 1)
+
+
+def test_should_lock_missing_environment_field_still_counts(tmp_path):
+    """缺 environment 欄位的舊紀錄視同同環境，不破壞既有觀察期進度。"""
+    history = [{"scenarios": {"s": _make_scen(100 + i)}} for i in range(CONSECUTIVE_RUNS)]
+    locked, new_p95 = should_lock(history, "s", None, current_environment="win32-local")
+    assert locked is True
+    assert new_p95 == 100 + (CONSECUTIVE_RUNS - 1)
+
+
+def test_run_records_environment_from_results(tmp_path):
+    """run() 寫入 locked baseline 的 environment 來源＝當次 results。"""
+    r = tmp_path / "res.json"
+    h = tmp_path / "h.jsonl"
+    b = tmp_path / "b.toml"
+    for i in range(CONSECUTIVE_RUNS - 1):
+        append_history(
+            h,
+            {
+                "timestamp": f"2026-05-{10 + i:02d}T01:00:00+00:00",
+                "scenarios": {"s": {**_make_scen(100), "environment": "win32-local"}},
+            },
+        )
+    _write_results(r, {"s": {**_make_scen(100), "environment": "win32-local"}})
+    result = run(r, h, b)
+    assert result["status"] == "locked"
+    assert load_baseline(b)["s"]["environment"] == "win32-local"
+
+
+def test_perf_baseline_dataclass_serializes_environment():
+    """PerfBaseline.to_dict()／to_toml_section() 需含 environment 欄位。"""
+    from autoclaude.utils.perf_baseline import PerfBaseline
+
+    pb = PerfBaseline(
+        scenario="s", p50_ms=1.0, p95_ms=2.0, p99_ms=3.0, samples=MIN_SAMPLES,
+        git_sha="abc123", captured_at="2026-09-14T00:00:00+00:00",
+        environment="win32-local",
+    )
+    assert pb.to_dict()["environment"] == "win32-local"
+    assert 'environment = "win32-local"' in pb.to_toml_section()
+
+    # 舊呼叫方式（未帶 environment）仍相容：預設空字串且不寫出該行。
+    legacy = PerfBaseline(
+        scenario="s", p50_ms=1.0, p95_ms=2.0, p99_ms=3.0, samples=MIN_SAMPLES,
+        git_sha="abc123", captured_at="2026-09-14T00:00:00+00:00",
+    )
+    assert legacy.environment == ""
+    assert "environment" not in legacy.to_toml_section()
+
+
+def test_write_baseline_produces_no_cr_def_200_300(tmp_path):
+    """DEF-200-300：write_baseline 產物一律 LF，不含 \\r（Windows text-mode 預設會轉譯）。"""
+    b = tmp_path / "base.toml"
+    write_baseline(
+        b,
+        {"s": {"p50_ms": 1, "p95_ms": 2, "p99_ms": 3, "samples": MIN_SAMPLES}},
+    )
+    raw = b.read_bytes()
+    assert b"\r" not in raw
+
+
+def test_perf_environment_ci_env_alone_is_not_ci(monkeypatch):
+    """四方審查 T1：通用 `CI` 環境變數不再視為 CI；只有 `GITHUB_ACTIONS` 才算。"""
+    from autoclaude.utils.perf_baseline import perf_environment
+
+    monkeypatch.setenv("CI", "true")
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    assert perf_environment().endswith("-local")
+
+
+def test_perf_environment_github_actions_is_ci(monkeypatch):
+    from autoclaude.utils.perf_baseline import perf_environment
+
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    assert perf_environment().endswith("-ci")
+
+
+def test_perf_baseline_write_baseline_produces_no_cr_def_200_300(tmp_path):
+    """DEF-200-300：autoclaude.utils.perf_baseline.write_baseline 產物一律 LF。"""
+    from autoclaude.utils.perf_baseline import PerfBaseline
+    from autoclaude.utils.perf_baseline import write_baseline as pb_write_baseline
+
+    pb = PerfBaseline(
+        scenario="s", p50_ms=1.0, p95_ms=2.0, p99_ms=3.0, samples=MIN_SAMPLES,
+        git_sha="abc123", captured_at="2026-09-14T00:00:00+00:00",
+    )
+    out = tmp_path / "base.toml"
+    pb_write_baseline(out, [pb])
+    assert b"\r" not in out.read_bytes()
+
+
 def test_run_observing_when_baseline_regression_too_large(tmp_path):
     """既有 baseline 100ms，新一筆 130ms (+30%) → observing（拒 lock）。"""
     r = tmp_path / "res.json"

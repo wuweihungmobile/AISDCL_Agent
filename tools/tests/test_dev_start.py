@@ -6525,5 +6525,52 @@ class TestResolveNativeExecutableShortCircuitOrder(unittest.TestCase):
         )
 
 
+class TestStrayVenvScan(DevStartTestCase):
+    """雜散 venv 掃描（DEF-200-297；回應 DEF-200-294 事故：子專案悄悄長出第二顆
+    .venv 時，子 hook 候選鏈會把它撿去當直譯器用而跑錯環境。單一 .venv 設計下
+    這是開工當下就該被看見的偏移，本類釘住偵測面不漏收也不誤收。"""
+
+    stray_venv = dev_start.stray_venv
+
+    def test_finds_pyvenv_cfg_marked_dirs_under_subprojects(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            rels = ("AutoClaude/.venv", "AutoClaude/.venv-onboarding-clean")
+            for rel in rels:
+                d = root / rel
+                d.mkdir(parents=True)
+                (d / "pyvenv.cfg").write_text("home = /x\n", encoding="utf-8")
+            found = self.stray_venv.find_stray_venvs(root)
+            self.assertEqual(found, sorted(root / rel for rel in rels))
+
+    def test_root_venv_and_cache_dirs_excluded(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            for rel in (".venv", ".venv-cache-darwin"):
+                d = root / rel
+                d.mkdir(parents=True)
+                (d / "pyvenv.cfg").write_text("home = /x\n", encoding="utf-8")
+            self.assertEqual(self.stray_venv.find_stray_venvs(root), [])
+
+    def test_advisory_lines_carry_platform_specific_delete_command(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            d = root / "AutoClaude" / ".venv"
+            d.mkdir(parents=True)
+            (d / "pyvenv.cfg").write_text("home = /x\n", encoding="utf-8")
+            win_lines = self.stray_venv.advisory_lines(root, is_windows=True)
+            posix_lines = self.stray_venv.advisory_lines(root, is_windows=False)
+            self.assertTrue(any("Remove-Item -Recurse -Force" in ln for ln in win_lines))
+            self.assertTrue(any("rm -rf" in ln for ln in posix_lines))
+
+    def test_temp_cleanvenv_leftovers_are_listed(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            leftover = Path(td) / "autoclaude_cleanvenv_x"
+            leftover.mkdir()
+            with mock.patch("tempfile.gettempdir", return_value=td):
+                found = self.stray_venv.find_temp_cleanvenvs()
+            self.assertIn(leftover, found)
+
+
 if __name__ == "__main__":
     unittest.main()

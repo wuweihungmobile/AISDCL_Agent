@@ -265,3 +265,24 @@ loadgroup` 判準改問 SSOT 三筆缺陷的回歸鎖與 fake-repo stub：`_auto
 `tools/tests/test_pre_push_dispatcher.py`；缺陷帳本見 `docs/06_quality/AutoSDD_Defect_Log.md`
 DEF-200-293／DEF-200-294／DEF-200-295。此附記為 doc-total 對帳（≥2 站點）另一站點寄居
 `AutoSDD_improving_112.md`，同 R129～R148 寄居體例。round-label-ok
+
+## 第十二輪附記（R150；DEF-200-297／298／299／300 單一 .venv 收斂＋perf 跨環境 provenance 收尾）
+
+- **體例**：本節非開新一輪 CrossPlatform 掃描輪四件套，僅為四筆缺陷收尾造成的護欄層逐檔漂移
+  記帳，寄居本檔（同 R129～R149「單一缺陷收尾附帶記帳」寄居體例，不另開新檔）。
+
+<!-- guard-total:R150 --> R150 護欄層累積淨額＝ 99726 → 99845（+119）——內容成長 +99：
+`test_pre_push_dispatcher.py` 981→1016（+35，DEF-200-297：兩支子 hook 候選鏈**零**子專案 venv
+候選的文字鎖＋根 dispatcher ruff 候選不含 `AutoClaude/.venv` 鎖＋修復前 fallback 片段反向自證）／
+`test_dev_start.py` 6529→6576（+47，DEF-200-297：`TestStrayVenvScan` 4 測試——`pyvenv.cfg` 標記偵測、
+根 `.venv`／`.venv-cache-*` 排除、平台對應刪除指令、`%TEMP%` cleanvenv 殘留）／
+`test_context_budget_guard.py` 12160→12177（+17，DEF-200-299：`claim_once` 以 `os.utime` 構造 age<0
+的確定性測試）；另 +20 本檔（`test_adr_xplat001_c1c2_lock.py`）自身逐檔漂移收斂（主表新增列＋
+`_REGRESSION_LANE_LOG`／`_FROZEN_PREFIX_REWRITE_LEDGER` 追加列，凍結前綴
+`_REPIN_LOG_FROZEN_PREFIX_LEN` 217→219、`_REPIN_LOG_HISTORY_SHA256` 同步重釘）。全額歸回歸鎖軌
+（`_REGRESSION_LANE_LOG` R150 列 119，未超軌上限 309，未使用任何一次性例外名冊）。DEF-200-298
+（perf 基線跨環境比對降 advisory）／DEF-200-300（toml 寫出 CRLF）的修復全在 AutoClaude 側
+（`tools/perf_regression_check.py`／`tools/perf_baseline_lock.py`／`autoclaude/utils/perf_baseline.py`／
+`.perf_baseline.toml`／ADR-SD08-003 v1.2），不計護欄層。缺陷帳本見 `docs/06_quality/AutoSDD_Defect_Log.md`
+DEF-200-297／DEF-200-298／DEF-200-299／DEF-200-300。此附記為 doc-total 對帳（≥2 站點）另一站點寄居
+`AutoSDD_improving_112.md`，同 R129～R149 寄居體例。round-label-ok

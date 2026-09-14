@@ -682,7 +682,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 8165,
+    "test_adr_xplat001_c1c2_lock.py": 8185,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 3767,
@@ -701,10 +701,10 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_ci_gate_xdist_allowlist.py": 121,
     "test_claim_provenance_r86.py": 1015,
     "test_component_sanitizer_shared_layer_lock.py": 293,
-    "test_context_budget_guard.py": 12160,
+    "test_context_budget_guard.py": 12177,
     "test_context_window_parity.py": 281,
     "test_defect_id_reference_integrity.py": 281,
-    "test_dev_start.py": 6529,
+    "test_dev_start.py": 6576,
     "test_dev_start_ps1_lastexitcode.py": 521,
     "test_doc_env_prefix_platform_parity_r60.py": 331,
     "test_doc_loc_baseline_freshness_r60.py": 7220,
@@ -727,7 +727,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_platform_neutral_paths.py": 5781,
     "test_platform_utils_dedup.py": 1078,
     "test_pre_commit_dispatcher_sigpipe.py": 936,
-    "test_pre_push_dispatcher.py": 981,
+    "test_pre_push_dispatcher.py": 1016,
     "test_ps1_bom.py": 248,
     "test_ps51_compat.py": 610,
     "test_ps_engine_ssot.py": 905,
@@ -1994,6 +1994,17 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "[非淨減法輪][同輪追加] 收斂列（含本列自身與 _FROZEN_PREFIX_REWRITE_LEDGER 接鏈列"
      "自身收斂），全額歸回歸鎖軌（同既有體例）。逐檔清單沿用 "
      "CrossPlatform_R145_Scan_Findings.md〈R149 沿用〉。"),
+    ("R150", 99726, 99825, 99,  # round-label-ok：DEF-200-297/299 回歸鎖，全額歸回歸鎖軌
+     "[非淨減法輪] DEF-200-297（單一 .venv 收斂：子 hook 候選鏈移除子專案 venv fallback"
+     "＋dev_start 雜散 venv advisory）／DEF-200-299（DEF-200-296 回歸鎖鑑別力補強）"
+     "的回歸鎖：test_pre_push_dispatcher.py 981→1016（+35）／test_dev_start.py "
+     "6529→6576（+47）／test_context_budget_guard.py 12160→12177（+17），全額歸"
+     "回歸鎖軌（結案證據，見 _REGRESSION_LANE_LOG 同輪列）。逐檔清單沿用 "
+     "CrossPlatform_R145_Scan_Findings.md〈R150 沿用〉。"),
+    ("R150", 99825, 99845, 20,
+     "[非淨減法輪][同輪追加] 收斂列（含本列自身、回歸鎖軌列與 _FROZEN_PREFIX_REWRITE_LEDGER"
+     " 接鏈列自身收斂），全額歸回歸鎖軌（同既有體例）。逐檔清單沿用 "
+     "CrossPlatform_R145_Scan_Findings.md〈R150 沿用〉。"),
 )
 
 
@@ -2288,6 +2299,12 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "SSOT 判準鎖）的回歸鎖與 fake-repo stub 全額歸本軌（記帳誠實度分類）："
      "test_pre_push_dispatcher.py +277（含 E501 存量債棘輪折行）＋本檔自身逐檔漂移收斂 "
      "+30。逐項見 docs/06_quality/CrossPlatform_R145_Scan_Findings.md〈R149 沿用〉。"),
+    ("R150", 119,
+     "DEF-200-297（單一 .venv 收斂：候選鏈零子專案 venv＋dev_start 雜散 venv advisory）／"
+     "DEF-200-299（DEF-200-296 回歸鎖鑑別力補強）回歸鎖全額歸本軌（記帳誠實度分類）："
+     "test_pre_push_dispatcher.py +35＋test_dev_start.py +47＋test_context_budget_guard.py "
+     "+17＋本檔自身逐檔漂移收斂 +20。逐項見 docs/06_quality/"
+     "CrossPlatform_R145_Scan_Findings.md〈R150 沿用〉。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -2557,10 +2574,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 217
+_REPIN_LOG_FROZEN_PREFIX_LEN = 219
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "d7d2f8f98dc804d887b76858da525c7b775121f45f8d0b23e76929ed8ae0efbf")
+    "7c1770cb38cabb7a7e13fd70de1769175904958239dc70e85987bf1d4047bed9")
 
 
 def repin_log_history_digest(
@@ -2820,6 +2837,9 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # R149：DEF-200-293/294/295 root-infra 三筆缺陷收尾——新增主表列與本軌新列自身 round-label-ok
     # 漂移，凍結前綴延伸涵蓋新增列本身，起點接 R148 終點 ca5dd474ef16。 round-label-ok
     ("R149", "ca5dd474ef16", "d7d2f8f98dc8", "DEF-200-293"),
+    # R150：DEF-200-297／299 單一 .venv 收斂＋DEF-200-296 鑑別力補強——新增主表列與 round-label-ok
+    # 本軌新列自身漂移，凍結前綴延伸涵蓋新增列本身，起點接 R149 終點 d7d2f8f98dc8。 round-label-ok
+    ("R150", "d7d2f8f98dc8", "7c1770cb38ca", "DEF-200-297"),
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

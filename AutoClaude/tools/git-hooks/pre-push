@@ -46,6 +46,9 @@ fi
 # `unrecognized arguments`，表徵與「程式碼壞了」無法區分；刪掉該 venv 才轉綠。
 # 修法：根層 `.venv` 優先＋每個候選皆過健康探針（能否 import pytest/xdist）
 # 才算數，陳舊子專案 venv 只出聲提醒、不再被優先選中。
+# DEF-200-297：子專案 venv fallback 已徹底移除（不只是降權）——2026-09-13
+# 事故的本質是「撿到了但撿錯」而非「沒撿到」，fail-loud（直接報錯給修法指令）
+# 優於繼續留一條可能撿到錯直譯器的退路。
 
 # 健康探針：`AutoClaude/pyproject.toml` 全域 addopts `-n auto` 使 xdist 是本
 # hook 第 5 步 pytest 的硬前提；沒有它 pytest rc=4 的訊息與程式碼壞掉無法區分
@@ -77,28 +80,15 @@ for _py_cand in "$_MONO/.venv/bin/python" "$_MONO/.venv/Scripts/python.exe"; do
   fi
 done
 
-# ② 子專案 .venv（歷史遺留）：只要存在（不論是否被①選中）就出聲一次——
-# bootstrap 只建根層 .venv，本目錄（$ROOT）下的 .venv 只可能是舊 bootstrap／
-# 手動建立／IDE 自建的殘留物。
+# ② 子專案 .venv（歷史遺留）：只要存在就出聲一次，**不進候選鏈**（DEF-200-297：
+# 子專案 venv 永不被選中，只提醒＋給可直接複製的刪除指令）——bootstrap 只建
+# 根層 .venv，本目錄（$ROOT）下的 .venv 只可能是舊 bootstrap／手動建立／IDE
+# 自建的殘留物，依單一 .venv 設計（根 ONBOARDING §2.1／DEF-200-294）應刪除。
 if [ -x "$ROOT/.venv/bin/python" ] || [ -x "$ROOT/.venv/Scripts/python.exe" ] \
    || [ -e "$ROOT/.venv/bin/python" ] || [ -e "$ROOT/.venv/Scripts/python.exe" ]; then
-  echo "[pre-push] ⚠️  偵測到子專案 venv（$ROOT/.venv）— 單一 .venv 設計下屬歷史遺留（bootstrap 只建根層 .venv），建議刪除" >&2
-fi
-
-if [ -z "$PY" ]; then
-  for _py_cand in "$ROOT/.venv/bin/python" "$ROOT/.venv/Scripts/python.exe"; do
-    if [ -x "$_py_cand" ]; then
-      if _py_health "$_py_cand"; then
-        PY="$_py_cand"
-        break
-      fi
-      echo "[pre-push] ⚠️  ${_py_cand} 缺 pytest／pytest-xdist（陳舊 venv 或未裝相依）→ 跳過此候選" >&2
-    elif [ -e "$_py_cand" ]; then
-      # 🔴 保留既有語意（第四輪對抗式複審 SA/SD minor finding）：候選存在但
-      # 不可執行（權限異常之類）時先出聲再退回下一候選，符合 Rule 12 Fail loud。
-      echo "[pre-push] ⚠️  ${_py_cand} 存在但不可執行（權限異常？）— 退回下一候選" >&2
-    fi
-  done
+  echo "[pre-push] ⚠️  偵測到子專案 venv（$ROOT/.venv）— 單一 .venv 設計下屬歷史遺留，建議刪除：" >&2
+  echo "[pre-push]      Remove-Item -Recurse -Force \"$ROOT/.venv\"   （PowerShell）" >&2
+  echo "[pre-push]      rm -rf \"$ROOT/.venv\"                        （bash）" >&2
 fi
 
 # ③ PATH：python → python3（維持 is_real_python_candidate 守門，DEF-101-740 候選鏈）。
@@ -118,7 +108,7 @@ if [ -z "$PY" ] && is_real_python_candidate python3; then
 fi
 
 if [ -z "$PY" ]; then
-  echo "[pre-push] ❌ 找不到可用的直譯器（已試：根層 .venv／子專案 .venv／PATH python・python3，皆缺席或缺 pytest/xdist）" >&2
+  echo "[pre-push] ❌ 找不到可用的直譯器（已試：根層 .venv／PATH python・python3，皆缺席或缺 pytest/xdist）" >&2
   echo "[pre-push]    修法（擇一，逐字可執行）：" >&2
   echo "[pre-push]      source .venv/bin/activate   （Windows: .venv\\Scripts\\Activate.ps1）" >&2
   echo "[pre-push]      uv pip install -e 'AutoClaude/.[dev,notifications,lint]'" >&2
