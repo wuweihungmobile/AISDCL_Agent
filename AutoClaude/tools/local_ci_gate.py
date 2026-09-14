@@ -73,7 +73,7 @@ import shutil
 import socket
 import subprocess
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent  # AutoClaude repo 根
@@ -416,13 +416,14 @@ def check_skip_census(pytest_output: str, *, pg: bool, unattended: bool = False)
     實測值入表，未登記 ⇒ 判紅並印補救指引。`unattended=True`＝沒有人能當場入表
     （nightly／schtasks／CI）：未登記 ⇒ 真正的 advisory（rc=0），與 `--census-only`
     對未登記剖面的既有語意一致（那裡擋下一個從來沒人量過的平台是誤擋，不是嚴格）。
-    `GITHUB_ACTIONS` 有值時自動視為無人值守（同 `perf_baseline.perf_environment()`
-    判 CI 的 SSOT，本 repo 唯一 CI 訊號）；本機 nightly（無 `GITHUB_ACTIONS`）須顯式
-    傳 `--unattended`。
+    🔴 本函式是**純函式**、刻意不讀任何環境變數：`GITHUB_ACTIONS` 的自動偵測住 CLI
+    邊界 `resolve_unattended()`（`main()` 呼叫）。初版把 `os.environ` 讀進這裡，GitHub
+    runner 上 `GITHUB_ACTIONS=true` 洩入 pytest 行程，直呼本函式並斷言「有人值守 ⇒
+    未登記剖面判紅」的既有測試在雲端翻紅、本機（無該變數）全綠——env 洩入測試行程的
+    同型坑。本機 nightly（無 `GITHUB_ACTIONS`）須顯式傳 `--unattended`。
     🔴 不得重用 `AUTOSDD_UNATTENDED`：那是 headless claude 續跑的 git 防護訊號
     （`tools/lib/unattended_authz.py`），事件源與本檔的 pytest／nightly 無關（SA-3）。
     """
-    unattended = unattended or bool(os.environ.get("GITHUB_ACTIONS"))
     rc, lines = census_verdict(pytest_output, pg=pg)
     print("\n" + "\n".join(lines))
     if rc == CENSUS_OK:
@@ -508,6 +509,17 @@ def _census_from_text(text: str) -> int:
     rc, lines = census_verdict(text, pg=pg, nested=nested)
     print("\n".join(lines))
     return rc
+
+
+def resolve_unattended(flag: bool, environ: Mapping[str, str]) -> bool:
+    """CLI 邊界決定「無人值守」：顯式 `--unattended`，或 `GITHUB_ACTIONS` 有值（DEF-200-291）。
+
+    `GITHUB_ACTIONS` 是本 repo 唯一 CI 訊號（同 `perf_baseline.perf_environment()` 判 CI
+    的 SSOT）。`environ` 由呼叫端傳入（`main()` 傳 `os.environ`）而不在此讀全域：環境
+    變數的讀取點只准在 CLI 邊界出現一次，下游 `check_skip_census` 才守得住純函式
+    （見該函式 WHY）。
+    """
+    return flag or bool(environ.get("GITHUB_ACTIONS"))
 
 
 def parse_args(argv: list[str]) -> tuple[bool, bool, list[str], bool]:
@@ -851,6 +863,7 @@ def main(argv: list[str] | None = None) -> int:
     os.chdir(REPO_ROOT)
 
     do_act, do_pg, pytest_args, do_unattended = parse_args(raw_argv)
+    do_unattended = resolve_unattended(do_unattended, os.environ)
     _hooks_liveness_advisory()
 
     # R79（S3）：讓「甲類 skip」預設就會跑。刻意**不**做成一道 gate——gate 名稱與順序是

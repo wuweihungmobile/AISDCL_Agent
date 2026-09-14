@@ -609,20 +609,27 @@ def test_unregistered_profile_is_advisory_for_the_cli_but_red_for_the_gate(
 
 def test_check_skip_census_unattended_semantics(monkeypatch: pytest.MonkeyPatch) -> None:
     """DEF-200-291：未登記剖面依 `unattended` 分岔；已登記剖面不受旗標影響；
-    `GITHUB_ACTIONS` 有值時自動視為無人值守（同 `perf_baseline.perf_environment()`
-    判 CI 的 SSOT，本 repo 唯一 CI 訊號）。此前 12 連紅的死結正是「nightly 無人值守
-    卻套用『人在現場』那條規則」。"""
+    `GITHUB_ACTIONS` 的自動偵測住 CLI 邊界 `resolve_unattended`，`check_skip_census`
+    本身是純函式。此前 12 連紅的死結正是「nightly 無人值守卻套用『人在現場』那條規則」。
+
+    🔴 為什麼純函式那一半要**在設了 `GITHUB_ACTIONS` 的情況下**斷言判紅：初版把
+    `os.environ` 讀進 `check_skip_census`，GitHub runner 上該變數恆為 true，本檔上方
+    `test_unregistered_profile_is_advisory_for_the_cli_but_red_for_the_gate` 在雲端翻紅、
+    Windows 本機全綠——env 洩入測試行程的同型坑。本斷言讓那種迴歸在任何環境都當場紅。
+    """
     monkeypatch.setattr(m.sys, "platform", "linux")  # 確保剖面未登記
-    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")  # 模擬 runner 環境洩入
     assert m.check_skip_census(_HEALTHY_LOG, pg=False) == 1, (
-        "有人值守（預設）：未登記剖面仍判紅，人在現場可當場入表"
+        "有人值守（預設）：未登記剖面仍判紅，且純函式不得偷讀 GITHUB_ACTIONS"
     )
     assert m.check_skip_census(_HEALTHY_LOG, pg=False, unattended=True) == 0, (
         "無人值守：未登記剖面必須是真正的 advisory"
     )
-    monkeypatch.setenv("GITHUB_ACTIONS", "true")
-    assert m.check_skip_census(_HEALTHY_LOG, pg=False) == 0, (
-        "GITHUB_ACTIONS 有值時必須自動視為無人值守，不需手動加 --unattended"
+    # CLI 邊界那一半：environ 由呼叫端傳入，不碰真環境
+    assert m.resolve_unattended(False, {}) is False
+    assert m.resolve_unattended(True, {}) is True
+    assert m.resolve_unattended(False, {"GITHUB_ACTIONS": "true"}) is True, (
+        "GITHUB_ACTIONS 有值時 CLI 必須自動視為無人值守，不需手動加 --unattended"
     )
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     _pin_registered_profile(monkeypatch)
