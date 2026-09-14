@@ -1009,7 +1009,7 @@ _COMPLEMENTARY_PROFILE: dict[str, tuple[str, ...]] = {
     # `_RUNTIME_SKIP_CEILING` 上方 WHY——值若不同步更新，`profile_registered()` 會對
     # 已經量測過的舊字面回 False（找不到鍵），把「已覆蓋」誤報成「還沒人量過」。
     "AutoClaude/tests@win32+nopg+nested+pgext": ("AutoClaude/tests@linux+nopg+solo+nopgext",),
-    "AutoClaude/tests@win32+pg+nested+pgext": ("AutoClaude/tests@linux+pg+solo",),
+    "AutoClaude/tests@win32+pg+nested+pgext": ("AutoClaude/tests@linux+pg+solo+pgext",),
     # 🔴 R84 包 W5：反方向（同 `tools/tests@darwin` 那一列的判準）。mac 上被 skip 的
     # `platform` 群實測 53 支**全部**是 `[WINDOWS-NATIVE-ONLY]`（本輪逐支讀 reason 分群，
     # 零 `[POSIX-NATIVE-ONLY]`／零 `[MAC-NATIVE-ONLY]`）⇒ 唯一承接得住的是真 Windows 剖面，
