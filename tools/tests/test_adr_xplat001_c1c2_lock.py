@@ -682,7 +682,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 8135,
+    "test_adr_xplat001_c1c2_lock.py": 8165,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 3767,
@@ -727,7 +727,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_platform_neutral_paths.py": 5781,
     "test_platform_utils_dedup.py": 1078,
     "test_pre_commit_dispatcher_sigpipe.py": 936,
-    "test_pre_push_dispatcher.py": 704,
+    "test_pre_push_dispatcher.py": 981,
     "test_ps1_bom.py": 248,
     "test_ps51_compat.py": 610,
     "test_ps_engine_ssot.py": 905,
@@ -1977,6 +1977,23 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
     ("R148", 99410, 99419, 9,
      "[非淨減法輪][全額功能軌][同輪追加] 收斂列：上一列自身新增所造成的行數漂移，同既有"
      "體例。逐檔清單沿用 CrossPlatform_R145_Scan_Findings.md〈續4〉。"),
+    ("R149", 99419, 99696, 277,  # round-label-ok：DEF-200-293/294/295 回歸鎖，全額歸回歸鎖軌
+     "[非淨減法輪] DEF-200-293（census 改餵檔案路徑非 stdin）／DEF-200-294（子 hook 直譯器候選"
+     "鏈根層優先＋健康探針）／DEF-200-295（--dist loadgroup 判準改問 SSOT）三筆缺陷的回歸鎖與 "
+     "fake-repo stub：test_pre_push_dispatcher.py 704→981（+277，含 E501 存量債棘輪折行），"
+     "全額歸回歸鎖軌（結案證據，見 _REGRESSION_LANE_LOG 同輪列）。逐檔清單沿用 "
+     "CrossPlatform_R145_Scan_Findings.md〈R149 沿用〉。"),
+    ("R149", 99696, 99712, 16,
+     "[非淨減法輪][同輪追加] 收斂列：本表（test_adr_xplat001_c1c2_lock.py 自身）新增上一列"
+     "所造成的行數漂移，全額歸回歸鎖軌（同上一列理由）。逐檔清單沿用 "
+     "CrossPlatform_R145_Scan_Findings.md〈R149 沿用〉。"),
+    ("R149", 99712, 99719, 7,
+     "[非淨減法輪][同輪追加] 收斂列（含本列自身收斂），全額歸回歸鎖軌（同既有體例）。"
+     "逐檔清單沿用 CrossPlatform_R145_Scan_Findings.md〈R149 沿用〉。"),
+    ("R149", 99719, 99726, 7,
+     "[非淨減法輪][同輪追加] 收斂列（含本列自身與 _FROZEN_PREFIX_REWRITE_LEDGER 接鏈列"
+     "自身收斂），全額歸回歸鎖軌（同既有體例）。逐檔清單沿用 "
+     "CrossPlatform_R145_Scan_Findings.md〈R149 沿用〉。"),
 )
 
 
@@ -2070,6 +2087,9 @@ _REPIN_NET_CAP_SCHEDULE: tuple[tuple[int, int], ...] = (
                   # （`_REPIN_NET_CAP_DUE_ROUND=143` 段到期）。同輪重新武裝下一段：步伐維持 1。
     (147, 542),   # 到期輪兌現（DEF-200-274 第九輪收尾單人窗口）：cap 降到到期 round-label-ok
                   # 目標本身（同既有判例）。本輪剛好到期（`_REPIN_NET_CAP_DUE_ROUND=147`）。
+                  # 同輪重新武裝下一段：步伐維持 1。
+    (149, 541),   # 到期輪兌現（DEF-200-293/294/295 root-infra 收尾）：cap 降到到期 round-label-ok
+                  # 目標本身（同既有判例）。本輪剛好到期（`_REPIN_NET_CAP_DUE_ROUND=149`）。
                   # 同輪重新武裝下一段：步伐維持 1。
 )
 #: 生效點＝首列輪號、現行上限＝末列上限，**皆由表導出不另立常數**（R73 判例：一份知識一個家）。
@@ -2263,6 +2283,11 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "允許清單回歸鎖（121 行，遷自 AISDLC_SDD 樹），全額歸本軌（記帳誠實度分類，本檔"
      "自身逐檔漂移收斂 21 行不計入）。逐項見 "
      "docs/06_quality/CrossPlatform_R145_Scan_Findings.md〈第十輪附記〉。"),
+    ("R149", 307,
+     "DEF-200-293／294／295 三筆缺陷（census 檔案路徑鎖／子 hook 直譯器候選鏈鎖／loadgroup "
+     "SSOT 判準鎖）的回歸鎖與 fake-repo stub 全額歸本軌（記帳誠實度分類）："
+     "test_pre_push_dispatcher.py +277（含 E501 存量債棘輪折行）＋本檔自身逐檔漂移收斂 "
+     "+30。逐項見 docs/06_quality/CrossPlatform_R145_Scan_Findings.md〈R149 沿用〉。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -2462,8 +2487,10 @@ def net_cap_schedule_problems(
 #: 整數下限 1，無法再變小，維持同步伐、僅前進到期輪，續守「目標嚴格低於現行 cap」）。
 #: DEF-200-275 第六輪收尾兌現：cap 降到目標本身（543，見 `(145, 543)` 列），同輪重新 round-label-ok
 #: 武裝下一段：目標 542 嚴格低於現行 cap 543（步伐已是整數下限 1，維持同步伐、只前進到期輪）。
-_REPIN_NET_CAP_DUE_ROUND = 149  # round-label-ok：到期輪＝兌現輪+2（lookahead 判準的活體對照）
-_REPIN_NET_CAP_DUE_TARGET = 541  # 步伐 1，嚴格低於 cap 542（第九輪重新武裝） round-label-ok
+#: R149 兌現（DEF-200-293/294/295 root-infra 收尾）：cap 降到目標本身（541，見 round-label-ok
+#: `(149, 541)` 列），同輪重新武裝下一段：目標 540 嚴格低於現行 cap 541（步伐維持 1）。
+_REPIN_NET_CAP_DUE_ROUND = 151  # round-label-ok：到期輪＝兌現輪+2（lookahead 判準的活體對照）
+_REPIN_NET_CAP_DUE_TARGET = 540  # 步伐 1，嚴格低於 cap 541（本輪重新武裝） round-label-ok
 
 #: DEF-200-121：到期輪自身的後設鎖——`_REPIN_NET_CAP_DUE_ROUND` 只准落在「最近稽核輪
 #: ＋ lookahead」以內（歷史母體 85..113 的到期輪一律＝上一次兌現輪 +2）。可延期的到期日
@@ -2530,10 +2557,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 213
+_REPIN_LOG_FROZEN_PREFIX_LEN = 217
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "ca5dd474ef1643be16102fdac1400f748c25564c1833b4cd851fc92f62cafcf1")
+    "d7d2f8f98dc804d887b76858da525c7b775121f45f8d0b23e76929ed8ae0efbf")
 
 
 def repin_log_history_digest(
@@ -2790,6 +2817,9 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # 具名子類別／staleness advisory 對稱化）造成的新增主表列與本軌新列自身漂移，
     # 凍結前綴延伸涵蓋新增列本身，起點接 R147 終點 f436d6837308。 round-label-ok
     ("R148", "f436d6837308", "ca5dd474ef16", "DEF-200-274"),
+    # R149：DEF-200-293/294/295 root-infra 三筆缺陷收尾——新增主表列與本軌新列自身 round-label-ok
+    # 漂移，凍結前綴延伸涵蓋新增列本身，起點接 R148 終點 ca5dd474ef16。 round-label-ok
+    ("R149", "ca5dd474ef16", "d7d2f8f98dc8", "DEF-200-293"),
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

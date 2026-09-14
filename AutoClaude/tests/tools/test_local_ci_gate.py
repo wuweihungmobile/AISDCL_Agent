@@ -832,7 +832,7 @@ def test_census_only_names_the_carrier_when_input_is_empty(
     assert "0 bytes" in out2
     assert "載具" in out2
 
-    # 第三案例（R129 round2 C5，SD minor）：判準是 `not text.strip()`，涵蓋純空白
+    # 第三案例（四方審查第二棒 C5，SD minor）：判準是 `not text.strip()`，涵蓋純空白
     # 輸入（非真正 0 bytes）——訊息若寫死「0 bytes」會對這種輸入說謊，故訊息改為
     # 「0 bytes，或全為空白」；本案例證明純空白輸入一樣走同一條 fail-loud 分支。
     whitespace_path = tmp_path / "whitespace.log"

@@ -241,3 +241,27 @@ nightly-full 的 xdist 開關调整）、包 B（`ci-gate.sh` xdist 判準排除
 不判待驗變更是否已被涵蓋（DEF-200-290）留為未結項。詳細背景複審發現、設計裁決與逐項驗證數字見
 `docs/06_quality/CrossPlatform_DEF200274_Parallel_Tests_Evidence.md`〈第十輪〉節；缺陷帳本見
 `docs/06_quality/AutoSDD_Defect_Log.md` DEF-200-274／DEF-200-289／DEF-200-290。
+
+## 第十一輪附記（R149；DEF-200-293/294/295 root-infra 收尾）
+
+- **體例**：本節非開新一輪 CrossPlatform 掃描輪四件套，僅為 DEF-200-293／294／295 三筆
+  root-infra leg 缺陷收尾造成的護欄層逐檔漂移記帳，寄居本檔（同 R129～R148「單一缺陷收尾
+  附帶記帳」寄居體例，不另開新檔）。
+
+<!-- guard-total:R149 --> R149 護欄層累積淨額＝ 99419 → 99726（+307）——內容成長 +277：
+`test_pre_push_dispatcher.py` 704→981（DEF-200-293 census 通道改餵檔案路徑非 stdin／
+DEF-200-294 AutoClaude 子 hook 直譯器候選鏈根層優先＋健康探針／DEF-200-295 `--dist
+loadgroup` 判準改問 SSOT 三筆缺陷的回歸鎖與 fake-repo stub：`_autoclaude_leg_stub`／
+`_census_stub` 兩支專屬 stub＋`TestAutoClaudeSubHookInterpreterChain`（4 測試）／
+`TestAutoClaudeSubHookPytestDistDecision`（4 測試）兩個純文字判準測試類別＋兩支 fake-repo
+整合測試，含 E501 存量債棘輪折行 +29）；另 +30 本檔（`test_adr_xplat001_c1c2_lock.py`）
+自身逐檔漂移收斂（主表新增列＋`_FROZEN_PREFIX_REWRITE_LEDGER` 追加列所造成的行數漂移，
+`--print-guard-lines` 反覆覆核收斂到本行本身也計入為止，同既有體例；凍結前綴
+`_REPIN_LOG_FROZEN_PREFIX_LEN` 維持 217（本輪新增列全部涵蓋在內）、
+`_REPIN_LOG_HISTORY_SHA256`／`_FROZEN_PREFIX_REWRITE_LEDGER` 同步重釘）。全額歸回歸鎖軌
+（`_REGRESSION_LANE_LOG` R149 列 307，未超軌上限 309，未使用任何一次性例外名冊）；
+款(12) 到期義務同輪兌現（`_REPIN_NET_CAP_SCHEDULE` 追加 `(149, 541)`，
+重新武裝 `_REPIN_NET_CAP_DUE_ROUND=151`／`_REPIN_NET_CAP_DUE_TARGET=540`）。逐項見
+`tools/tests/test_pre_push_dispatcher.py`；缺陷帳本見 `docs/06_quality/AutoSDD_Defect_Log.md`
+DEF-200-293／DEF-200-294／DEF-200-295。此附記為 doc-total 對帳（≥2 站點）另一站點寄居
+`AutoSDD_improving_112.md`，同 R129～R148 寄居體例。round-label-ok

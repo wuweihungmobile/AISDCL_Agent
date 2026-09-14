@@ -70,7 +70,7 @@ for _py_cand in "$_MONO/.venv/bin/python" "$_MONO/.venv/Scripts/python.exe"; do
     fi
     echo "[pre-push] ⚠️  ${_py_cand} 缺 pytest／pytest-xdist（陳舊 venv 或未裝相依）→ 跳過此候選" >&2
   elif [ -e "$_py_cand" ]; then
-    # 🔴 保留既有語意（第四輪對抗式複審 SA/SD minor finding；本輪 R129 round2
+    # 🔴 保留既有語意（第四輪對抗式複審 SA/SD minor finding；四方審查第二棒
     # Architect minor：仿②迴圈補上此分支使兩處對稱）：候選存在但不可執行
     # （權限異常之類）時先出聲再退回下一候選，符合 Rule 12 Fail loud。
     echo "[pre-push] ⚠️  ${_py_cand} 存在但不可執行（權限異常？）— 退回下一候選" >&2
@@ -171,13 +171,30 @@ echo "[pre-push] 5/5 pytest（CI test+equivalence 鏡像）"
 # `-rs`（R59 ARCH-R59-NB1）：與 tools/local_ci_gate.py 的 DEFAULT_PYTEST_ARGS 對齊，
 # 否則每次 push 跑的這一套仍把 skip 理由丟掉（DEF-101-510 只補了 unittest 面）。
 PYTEST_ARGS="${AUTOCLAUDE_PUSH_PYTEST_ARGS:-tests/ -q -rs --tb=short}"
-# DEF-200-274 X1：PG DSN 在場時（開發者已拉起 docker PG 並 export 給本 hook 子行程）
-# 追加 --dist loadgroup，否則 pyproject.toml 的 addopts（-n auto --dist worksteal）
-# 會讓多個 xdist worker 同時觸碰同一顆 PG 資料庫造成競態；conftest.py 已有 fail-loud
-# 的 UsageError 兜底，這裡順手接上讓本機 push 前全套在 PG 在場時直接可用。
-if [ -n "${AUTOCLAUDE_TEST_PG_DSN:-}" ] || [ -n "${AUTOCLAUDE_DB_DSN:-}" ]; then
-  PYTEST_ARGS="${PYTEST_ARGS} --dist loadgroup"
-fi
+# DEF-200-274 X1：PG DSN 在場時追加 --dist loadgroup，否則 pyproject.toml 的
+# addopts（-n auto --dist worksteal）會讓多個 xdist worker 同時觸碰同一顆 PG
+# 資料庫造成競態；conftest.py 已有 fail-loud 的 UsageError 兜底，這裡順手接上
+# 讓本機 push 前全套在 PG 在場時直接可用。
+# DEF-200-295：「要不要加 --dist loadgroup」的判準只有一個家——local_ci_gate 的
+# pg_autodetect()（四條剎車）＋ pg_dsn_in_effect()，conftest 的 X1 守門問的就是
+# 它們。舊版在此自己看 AUTOCLAUDE_TEST_PG_DSN／AUTOCLAUDE_DB_DSN 環境變數，等於
+# 把判準複製了一半：使用者沒 export 但 autodetect 會自動注入時，hook 這裡說
+# 「沒 PG」、conftest 那裡說「有 PG」⇒ 2026-09-14 分離行程 push 實測 UsageError。
+# 剎車①（使用者已自行 export）之後 pg_dsn_in_effect() 讀 env 仍為真，故舊條件
+# 是新條件的子集，零回歸。
+_pg_probe="$(env -u GIT_DIR -u GIT_WORK_TREE "$PY" -c 'import sys; sys.path.insert(0, "tools"); import local_ci_gate as g; g.pg_autodetect(); print("PG_IN_EFFECT=" + ("1" if g.pg_dsn_in_effect() else "0"))' 2>/dev/null || true)"
+case "$_pg_probe" in
+  *PG_IN_EFFECT=1*) _pg_in_effect=1 ;;
+  *PG_IN_EFFECT=0*) _pg_in_effect=0 ;;
+  # 探針失敗（例如 local_ci_gate 相依缺席）：保守加 loadgroup——對無 PG 的跑法
+  # 無害（只是分配策略不同），寧可多加不可漏加（漏加＝X1 必紅）。
+  *) _pg_in_effect=1
+     echo "[pre-push] ⚠️  PG 剖面探針沒有回答（local_ci_gate 載入失敗？）→ 保守加 --dist loadgroup" >&2 ;;
+esac
+case "$PYTEST_ARGS" in
+  *--dist*|*no:xdist*|*" -n 0"*) ;;   # 使用者已自行決定分配策略，不重複加
+  *) [ "$_pg_in_effect" -eq 1 ] && PYTEST_ARGS="${PYTEST_ARGS} --dist loadgroup" ;;
+esac
 # shellcheck disable=SC2086
 env -u GIT_DIR -u GIT_WORK_TREE "$PY" -m pytest $PYTEST_ARGS || fail=1
 
