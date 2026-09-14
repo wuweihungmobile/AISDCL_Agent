@@ -182,19 +182,29 @@ def check_claude_hook_carriers(repo_root: Path) -> bool:
 
     🔴 R84：掃描面由「只有根層那一份」擴到 `discover_active_settings()` 現查出來的
     **每一份活躍 settings**（根層／AutoClaude／SDD LATEST）。立案理由是這半原本只問
-    根層，而另外兩份各自宣告**不同的** venv 載具——`AutoClaude/.claude/settings.json` 的
-    Windows 載具是 `AutoClaude/.venv/Scripts/pythonw.exe`（那是另一個 venv；
-    現行 bootstrap（`tools/bootstrap_core.py`）只建根層 .venv，該檔案僅在該目錄自行建了
-    .venv 時才存在——DEF-200-294），它不存在時該子專案 session 的六支守衛全部靜默
-    失效，而本工具當時一個字都不會說。每一份用**它自己的專案根**展開佔位符（子專案
-    session 的 `CLAUDE_PROJECT_DIR` 就是那個子目錄；拿 monorepo 根去展開帶 `../` 的載具
-    會 normpath 到 repo 之外而假紅）。同一條載具被多份宣告時訊息去重。
+    根層，而另外兩份當時各自宣告**不同的** venv 載具——`AutoClaude/.claude/settings.json`
+    的 Windows 載具曾是 `AutoClaude/.venv/Scripts/pythonw.exe`（DEF-200-301 現況訂正：
+    那是 DEF-200-294 事故當時的錯誤前提「該檔案僅在該目錄自行建了 .venv 時才存在」；
+    DEF-200-297 單一 .venv 收斂後 `AutoClaude/.venv` 已定義為不應存在的雜散殘留——
+    見 `tools/lib/stray_venv.py`。現況兩份宣告的載具都已改指回同一顆根層 `.venv`，
+    此段只保留史實，不再是現行接受的設計），它不存在時該子專案 session 的六支守衛
+    全部靜默失效，而本工具當時一個字都不會說。每一份用**它自己的專案根**展開佔位符
+    （子專案 session 的 `CLAUDE_PROJECT_DIR` 就是那個子目錄；拿 monorepo 根去展開帶
+    `../` 的載具會 normpath 到 repo 之外而假紅）。同一條載具被多份宣告時訊息去重。
+
+    🔴 DEF-200-301（existence vs identity 分工）：上面這段只判「宣告的路徑存不存
+    在」，判不出「存在但是錯的第二顆 venv」——若哪天真有人在子專案底下手動建了一顆
+    `.venv`，existence 判準會轉綠，因為那個路徑真的存在。本函式另呼叫
+    `single_venv_identity_problems()`（`tools/lib/single_venv_identity.py`）補這一格：
+    宣告的 venv 載具展開後 normpath 必須等於 repo 唯一根層 `.venv`，不是「隨便一顆
+    存在的 venv」。兩者合併進同一個 `problems` 清單、同前綴去重規則。
 
     與本檔既有那半一樣是 **advisory**：印警告、回 False，不阻擋呼叫端閘門。
     """
     try:
         sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
         import hook_wiring  # noqa: PLC0415
+        import single_venv_identity  # noqa: PLC0415
 
         problems: list[str] = []
         for rel in hook_wiring.discover_active_settings(repo_root):
@@ -203,7 +213,13 @@ def check_claude_hook_carriers(repo_root: Path) -> bool:
                 continue  # 沒有 settings＝沒有宣告，無從判定
             settings = json.loads(settings_path.read_text(encoding="utf-8"))
             project_dir = str(settings_path.parent.parent)
-            for problem in hook_wiring.carrier_liveness_problems(settings, project_dir):
+            checks = [
+                hook_wiring.carrier_liveness_problems(settings, project_dir),
+                single_venv_identity.single_venv_identity_problems(
+                    settings, project_dir, str(repo_root)
+                ),
+            ]
+            for problem in (p for check in checks for p in check):
                 entry = f"[{rel}] {problem}"
                 if entry not in problems:
                     problems.append(entry)

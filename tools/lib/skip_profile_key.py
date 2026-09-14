@@ -13,15 +13,21 @@ PRESENT）`untagged=96`；乾淨 venv（ABSENT）`untagged=162`，差 66 支。�
 會破 `guardrail_lib<=400`（落地當回合實測 362 ＋ 約 47）。同一情形的既定處置逐字
 寫在職責⑤自己的檔頭——它當年就是這樣從職責①（`skip_tag_policy`）分出來的。
 
-🔴 誠實劃界（本模組**不**宣稱 DEF-200-183 已修完）：鍵有兩個生產者——
+🔴 落地紀錄（DEF-200-303，F3 死結解除）：鍵有兩個生產者，今日**皆已**消費本模組——
 · 根層 `tools/run_root_unittests.skip_census_profile()`：已改為消費本模組的 builder；
-· `AutoClaude/tools/local_ci_gate._skip_profile()`：**尚未**帶上 pgextras 軸，
-  而該檔不在本輪的持有面（鐵律七：常數／史料／消費端不同持有面時不得並行動）。
-掌舵者裁決逐字是「先修剖面軸，修好前維持 advisory 不登記」⇒ `profile_axis_problems()`
-只餵 advisory 通道（`skip_group_policy.skip_target_report` 與「剖面未登記」那一支），
-**不接任何閘門的 rc**；`_RUNTIME_SKIP_CEILING` 兩張表本輪刻意零 re-key（見下方
-`legacy_profile` 的 WHY：re-key 若先於生產者落地，AutoClaude 那一棵的天花板會整批
-退回 advisory＝比今天更沒有牙）。
+· `AutoClaude/tools/local_ci_gate._skip_profile()`：**已**帶上 pgextras 軸
+  （`baseline_origin.pg_extras_state()` 探測），改用 `census_profile()` 產生鍵，
+  不再自己字串拼接。`skip_group_policy._RUNTIME_SKIP_CEILING` 等表的 `AutoClaude/
+  tests@` 鍵已同輪 re-key（`legacy_profile()` 仍保留給方向鎖映回舊鍵，見該函式 WHY——
+  它今後的用途是「新鍵裂變時每個後代都受同一凍結值約束」，不再是「生產者還沒落地時
+  的緩衝」）。`profile_axis_problems()` 對已 re-key 的鍵今日恆回空 list；若未來又有
+  新鍵漏帶軸，仍只出現在 advisory 通道（`skip_group_policy.skip_target_report` 與
+  「剖面未登記」那一支），不接任何閘門的 rc。
+
+沿革（原句，DEF-200-183 立案時的誠實劃界，保留供對照，不刪除——樹裡不留假句子的
+對偶是「別把曾經為真的句子直接抹掉」，改用沿革標題讓讀者一眼看出時效）：「本模組
+不宣稱 DEF-200-183 已修完……掌舵者裁決逐字是『先修剖面軸，修好前維持 advisory
+不登記』」。
 """
 from __future__ import annotations
 
@@ -147,14 +153,16 @@ def profile_axis_problems(profile: str) -> list[str]:
     ]
 
 
-#: 🔴 DEF-200-183 的 **re-key 完成度棘輪**（只准降）：今天判準各表裡還有幾個鍵沒帶滿
-#: 本樹宣告的軸。生產者（`AutoClaude/tools/local_ci_gate._skip_profile`，不在立這道鎖
-#: 這一輪的持有面）補上 pgextras 那一刻，這些鍵**必須同一次變更全部 re-key**；而「同一次
-#: 變更」在本 repo 的歷史裡反覆靠人記得而漏掉（R115 red-4 漏補第四層是同型 round-label-ok
-#: ——該輪號是**已發生的史料引述**，不是本批的自稱，故具名豁免）。寫成
-#: shrink-only 計數之後：re-key 一個就降一個，而**新增一個缺軸的鍵當場紅**——後者才是
-#: 這道鎖平時真正在守的方向（缺陷未修完期間，帳面不得再長出新的歧義鍵）。
-PRE_AXIS_KEY_DEBT_MAX = 5
+#: 🔴 DEF-200-183 的 **re-key 完成度棘輪**（只准降；DEF-200-303 已降到 0）：判準各表裡
+#: 還有幾個鍵沒帶滿本樹宣告的軸。生產者（`AutoClaude/tools/local_ci_gate._skip_profile`）
+#: 補上 pgextras 那一刻，`skip_group_policy` 的四張表（`_RUNTIME_SKIP_CEILING`／
+#: `_RUNTIME_SKIP_CEILING_MAX`／`_FULL_SUITE_RUNNERS`／`_COMPLEMENTARY_PROFILE`）已
+#: 同一次變更全部 re-key，5→0；而「同一次變更」在本 repo 的歷史裡反覆靠人記得而漏掉
+#: （R115 red-4 漏補第四層是同型 round-label-ok——該輪號是**已發生的史料引述**，不是
+#: 本批的自稱，故具名豁免）。寫成 shrink-only 計數之後：re-key 一個就降一個，而
+#: **新增一個缺軸的鍵當場紅**——後者才是這道鎖平時真正在守的方向（歸零之後不得再
+#: 靜默長出新的歧義鍵）。
+PRE_AXIS_KEY_DEBT_MAX = 0
 
 
 def keys_missing_axes(*tables: object) -> list[str]:

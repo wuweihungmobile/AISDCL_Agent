@@ -2919,10 +2919,10 @@ class TestLaunchdNightlyLoaded(DevStartTestCase):
         fake_run.assert_not_called()
 
     def test_win32_returns_none_without_spawning(self):
-        """DEF-101-243③／R19／DEF-101-247③ 立案：win32 專屬案例與三重 mock 視野缺口
-        （原文＝Guard_Repin 證據檔 §D-3）。三重 mock 涵蓋 `subprocess.run`／`Popen`／
-        `os.system`／`os.posix_spawn`，確保「提早 return、不 spawn 任何子行程」的
-        意圖被完整鎖住。"""
+        """win32 專屬案例；立案沿革全文搬至
+        CrossPlatform_R151_Guard_Prose_Migration.md〈test_win32_returns_none_without_spawning〉節。
+        三重 mock 涵蓋 `subprocess.run`／`Popen`／`os.system`／`os.posix_spawn`，確保
+        「提早 return、不 spawn 任何子行程」的意圖被完整鎖住。"""
         with mock.patch.object(sys, "platform", "win32"), \
              mock.patch.object(dev_start.subprocess, "run") as fake_run, \
              mock.patch.object(dev_start.subprocess, "Popen") as fake_popen, \
@@ -3756,19 +3756,9 @@ class MacNightlyStatusTestCase(unittest.TestCase):
         ' [0]  wake at 08/11/2026 01:52:44 by \'com.apple.alarm.user-invisible\'\\n"\n'
         "exit 0\n"
     )
-    #: 一次性的 **wakeorpoweron**——這才是「全文子字串比對」那個舊形態真正會吃下去的
-    #: 假綠，而 `PMSET_ONESHOT_ONLY`（eventtype＝`wake`）**吃不到**：`wake` 不是詞彙表
-    #: `wakepoweron|wakeorpoweron|poweron` 的子字串，所以那一支即使拿全文比對去跑也照樣綠
-    #: （本輪實測：忠實還原全文比對 → 24 tests OK，rc=0）。⇒ 沒有這一支，
-    #: 「一次性事件不得算數」這件事在**歷史上真的出過錯的那個形態**上是零覆蓋的。
-    #:
-    #: 🔴 這不是虛構的 OS 行為，是反組譯實證：一次性段的顯示路徑（` [%ld]  %s at %s`）
-    #: 在印出前先把 eventtype 原值與 `wakepoweron` 逐位元組比對
-    #: （`x9=0x65776f70656b6177`＝"wakepowe" ＋ `w10=0x006e6f72`＝"ron"），**相等就把顯示
-    #: 字串換成字面值 `wakeorpoweron`**（`csel x24, x9, x8, ne`，x8 指向 0x15d53）。
-    #: 重複段則不做這個代換、直印原值 ⇒ 同一個 eventtype 在兩段的渲染**不同**。
-    #: 使用者把 `pmset repeat` 打成 `pmset schedule` 就會落在這一格：事件跑一次就沒了，
-    #: 撐不起「每天 02:00 前叫醒」，但全文比對會回報「已排定」。
+    #: 一次性的 **wakeorpoweron**——全文子字串比對舊形態的假綠專屬樣本；反組譯實證與
+    #: 詳細沿革全文搬至 CrossPlatform_R151_Guard_Prose_Migration.md
+    #: 〈PMSET_ONESHOT_WAKEORPOWERON〉節。
     PMSET_ONESHOT_WAKEORPOWERON = (
         'printf "Scheduled power events:\\n'
         " [0]  wakeorpoweron at 08/11/2026 01:55:00 by 'me'\\n\"\n"
@@ -3867,13 +3857,9 @@ class TestMacNightlyPlistCapabilityTable(MacNightlyStatusTestCase):
         """控制組：健康 plist ＋ 健康機器狀態 ⇒ 每列皆 ✅、且無「與期望不符」彙總行。
 
         沒有這一組，「退化 plist 會噴 ⚠️」只證明載具會叫，不證明它會分辨。
-
-        🔴「健康」在本測試裡是**兩個自變數**：能力表大多數列讀 plist 檔案內容
-        （`install_healthy_plist()` 全權控制），WakeToRun／NextRunTime 兩列讀
-        `pmset -g sched` ＝**這台機器的電源排程狀態**。夾具的 pmset stub 把第二個
-        自變數也收進測試手裡，兩列因此**留在**斷言內（沒被拿掉、沒被放寬成允許 ⚠️）。
-        只設前者時本測試在真 mac 上為何結構性必紅、又為何在 Windows 上沒人看見，
-        史料＝`docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`。
+        🔴「健康」的兩個自變數（plist 內容＋pmset 排程狀態）與其沿革全文搬至
+        CrossPlatform_R151_Guard_Prose_Migration.md
+        〈test_healthy_plist_passes_every_capability_row〉節。
         """
         self.install_healthy_plist()
         self.write_heartbeat()
@@ -4529,12 +4515,8 @@ class TestStaleScheduleTracks(unittest.TestCase):
     def test_weekly_track_tolerates_one_skip(self) -> None:
         """週頻軌 13 天前成功仍在容忍內（7 × 2 = 14）——STALE_PERIOD_FACTOR 的存在理由。
 
-        🔴 R71 保留本鎖的理由（D-5 的處置說明）：診斷把 `STALE_PERIOD_FACTOR=2.0`
-        列為缺陷（週頻門檻 14 天 ⇒ 結構上不可能「當場發現」）。本輪**刻意不動這個
-        常數**——它擋的是「單次 runner 排隊／額度抖動」造成的假紅，拿掉就回到天天
-        狼來了、然後被忽略（那正是 DEF-101-703 的死法）。改以**新增判準**取得當場
-        訊號：`_schedule_axis_note` 讓「cron 觸發後 run 轉紅」立刻出聲，不進容忍窗
-        （見 `test_failed_scheduled_attempt_inside_tolerance_window_still_speaks`）。
+        🔴 R71 保留本鎖的理由（D-5 的處置說明）沿革全文搬至
+        CrossPlatform_R151_Guard_Prose_Migration.md〈test_weekly_track_tolerates_one_skip〉節。
         """
         root = self._root_with_cron('    - cron: "12 6 * * 1"\n')
         now = datetime.datetime(2026, 8, 2, tzinfo=datetime.UTC)
@@ -4568,14 +4550,10 @@ class TestStaleScheduleTracks(unittest.TestCase):
     def test_deadline_stops_the_scan(self) -> None:
         """預算耗盡即中止：advisory 哨兵寧可少報，不可拖住開工流程。
 
-        🔴 R71 訂正（本鎖唯一被改動的既有斷言，理由寫在這裡）：原本第二條是
-        `assertEqual(stale_schedule_tracks(...), [])`——也就是**把「沒查」與「查過、
-        很健康」編碼成同一個回傳值**。那正是 E-2 的病：`_scan_order` 前身是固定
-        字典序 ⇒ 預算截斷永遠砍掉排最後的 `windows-compat-ci.yml`（實測本 repo 7 軌
-        排序後它就是最後一名），而呼叫端收到 `[]`、印「排程軌正常」。
+        🔴 R71 訂正（本鎖唯一被改動的既有斷言）沿革全文搬至
+        CrossPlatform_R151_Guard_Prose_Migration.md〈test_deadline_stops_the_scan〉節。
         本鎖的**意圖**（不得對 probe 發動查詢、不得拖住開工）以 `assert_not_called()`
-        逐字保留並仍是主判準；改掉的只是「截斷必須靜默」這個附帶結果——靜默本身是
-        缺陷，不是要保護的行為。
+        逐字保留並仍是主判準。
         """
         root = self._root_with_cron('    - cron: "12 6 * * *"\n')
         with mock.patch.object(ci_liveness, "_latest_success_run",
@@ -4633,13 +4611,9 @@ class TestStaleScheduleTracks(unittest.TestCase):
         """正向注入（今天正在真實發生的形態）：dispatch 成功「治好」了警告，
         但 schedule 軌本身最近一次觸發是紅的、且晚於那次成功 ⇒ 必須出聲。
 
-        實證來源（2026-08-03 唯讀 gh 實查）：`aisdlc-sdd-arch-fitness.yml` 的
-        schedule 軌最後成功 2026-07-14、最近一次 schedule run 2026-07-27 failure，
-        而 08-02 14:24 有一次 workflow_dispatch 成功 ⇒ 主判準看起來新鮮。
-
-        🔴 為何不是把 `workflow_dispatch` 移出 `_LIVENESS_EVENTS`：那樣做會讓
-        DEF-101-703 的死鎖復發（哨兵印的處置指令產生的正是 dispatch run，不算數
-        就永遠解不開）。dispatch 繼續計入主判準，遮蔽事實另立一句話。
+        實證來源與「為何不把 workflow_dispatch 移出 `_LIVENESS_EVENTS`」（DEF-101-703
+        死鎖）的沿革全文搬至 CrossPlatform_R151_Guard_Prose_Migration.md
+        〈test_dispatch_only_freshness_is_reported_even_though_verdict_is_fresh〉節。
         """
         root = self._root_with_cron('    - cron: "37 2 * * 1"\n')
         now = datetime.datetime(2026, 8, 3, tzinfo=datetime.UTC)
@@ -4727,11 +4701,9 @@ class TestStaleScheduleTracks(unittest.TestCase):
         """還原（負控）：兩條 cron 驅動**同一組** job ⇒ run 層結論仍代表得了它們，
         不得誤報。缺這支，上一支可以靠「凡多 cron 必報」通過＝零鑑別力。
 
-        🔴 本 fixture 的形狀是被鑑別力驗證逼出來的：第一版把 `7 3` 那個 job 的 `if:`
-        改成 `7 2`，結果 `cron_job_map` 只剩**一個**鍵 ⇒ 走的是 `len(mapping) < 2`
-        的早退，**根本沒碰到**要守的「同一組 job」判準。實測：把 `all(s == sets[0])`
-        整條刪掉，那一版仍然全綠＝死鎖。現在兩個 job 的 `if:` 都同時列出兩條 cron，
-        因此 map 有兩個鍵、兩鍵的 job 集合相同——這才真的走到那條判準上。
+        🔴 本 fixture 的形狀是被鑑別力驗證逼出來的沿革全文搬至
+        CrossPlatform_R151_Guard_Prose_Migration.md
+        〈test_same_job_set_across_crons_is_not_a_blind_spot〉節。
         """
         both = ("    if: (github.event_name == 'schedule' && "
                 "(github.event.schedule == '7 2 * * 1' || "
@@ -4966,12 +4938,8 @@ def _narrative_node_ids(tree: ast.AST) -> set[int]:
 
     三者的共同性質是**不會被當成 PowerShell 送出去執行**——它們在講解與指路。
 
-    🔴 R71 為何要把 docstring 這一層擴出去（不是為了消紅，是兩道鎖真的互斥）：
-    `DEF-101-762` 的鎖必須**逐字引述**生產碼的拼法才斷言得了它，而本鎖規定測試樹內
-    唯一合法拼法是 SSOT 那一串。該組鎖併進本檔時，它「解釋 CP950 下會發生什麼事」的
-    斷言訊息與 skip reason 全被判成分歧拼法（實測 8 筆命中、其他檔 0 筆）。把講解算成
-    複本，作者唯一的消紅路徑是刪掉講解——鎖因此反過來消滅自己存在的理由，與本檔
-    `TestPsUtf8PreludeIsSingleSpelling` docstring 記載的自噬是同一形狀，只是換了位置。
+    🔴 R71 為何要把 docstring 這一層擴出去（兩道鎖真的互斥）沿革全文搬至
+    CrossPlatform_R151_Guard_Prose_Migration.md〈_narrative_node_ids〉節。
     真正需要「引述可執行拼法」的那一處另走具名豁免（`_PS_UTF8_OK_MARKER`），不走本層。
     """
     ids: set[int] = set()
@@ -5333,11 +5301,9 @@ class TestPickPythonGeMin(unittest.TestCase):
         "`tools/tests@win32` 的互補剖面只指向 linux ⇒ 這一支目前仍無覆蓋證據）",
     )
     def test_candidate_chain_word_splits_under_zsh(self) -> None:
-        """🔴 zsh 迴歸鎖（R69 P2 自身修復過程中真的踩到）：候選鏈初版寫成空白
-        分隔字串 + `for c in $LIST`，在 bash 下正確、在 **zsh** 下整條清單被當成
-        單一候選 ⇒ 一支都命中不了。zsh 對未加引號的參數展開預設不做字詞切分
-        （SH_WORD_SPLIT off），而 `source tools/dev_start.sh` 的主場正是 macOS
-        預設 shell zsh——bash 全綠、真實入門路徑仍斷，與本輪要修的缺陷同型。
+        """🔴 zsh 迴歸鎖（R69 P2 自身修復過程中真的踩到）沿革全文搬至
+        CrossPlatform_R151_Guard_Prose_Migration.md
+        〈test_candidate_chain_word_splits_under_zsh〉節。
         """
         self._write_fake_39("python3")
         self._write_real_311("python3.11")
@@ -5561,11 +5527,9 @@ class TestGetPythonGeMinPowerShell(unittest.TestCase):
         沒有這一支，下一支的 `only39=[]` 會在「shim 根本啟動失敗」時同樣成立
         ⇒ 主判準（版本比較）一次都沒被執行卻顯示綠燈。DEF-101-755 之所以出現，
         根子就是「Windows 上 shim 起不來」這件事沒有任何機械物在看。
-
-        🔴 本測試的探測片段刻意**不含任何雙引號**（第一版寫 `print("MM=%d.%d" % …)`
-        當場被 PS 5.1 吃掉一個引號、實測拿到 `SyntaxError: invalid syntax`）——
-        載具本身踩進 DEF-101-760 就會量到假紅，看起來像 shim 壞了。
-        改印 `sys.version_info[:2]` 這個 tuple 的預設 repr，零引號需求。
+        🔴 探測片段刻意不含雙引號的沿革（DEF-101-760 假紅）全文搬至
+        CrossPlatform_R151_Guard_Prose_Migration.md
+        〈test_fake_39_shim_is_live_so_the_version_check_is_what_rejects_it〉節。
         """
         self._write_fake_39("python3")
         r = self._run_ps(

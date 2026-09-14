@@ -774,10 +774,8 @@ def _ci_smoke_steps(path: Path, job: str) -> dict[str, str]:
 class TestCiStepLocalCarrierCoverage(unittest.TestCase):
     """R67-C19：compat-CI 的每一個 smoke step 都必須在登記表裡有明確的本地承載歸屬。
 
-    這道鎖要擋的**具體失敗**：有人在 compat-CI 加一個新驗證步（例如新平台守門），本地
-    smoke／nightly 完全沒跟上，而 compat-CI 因帳務停擺不會執行 ⇒ 那一步實際上**從未在
-    任何地方跑過**，卻讓 §6.1 的「本地補償」措辭看起來仍成立。Scan-C 已實測注入證明此
-    情境下 56 支護欄測試（含本檔）全綠、零訊號。
+    具體失敗案例沿革全文搬至 CrossPlatform_R151_Guard_Prose_Migration.md
+    〈TestCiStepLocalCarrierCoverage〉節。
 
     刻意**不**斷言「零本地承載的步數必須是 N」：寫死支數＝下一輪必過期（R57 已立政策）。
     本鎖只要求「每一步都被明確歸屬，且無承載者必須寫明為何」——把「沒人想過這一步」與
@@ -967,11 +965,8 @@ if __name__ == "__main__":
 class TestMacSmokeCliContract(unittest.TestCase):
     """R69（DEF-101-702／R68-19＋R68-21）：`macos_smoke_local.sh` 的兩道入口守門。
 
-    WHY 這兩件事住同一支測試：它們是同一個病灶的兩面——**這支腳本先前對「怎麼被呼叫」
-    完全沒有意見**。① 任何打錯的旗標（例如把 `--help` 敲成 `--hlep`）都被靜默丟棄、整套
-    smoke 照跑完再印綠；② 以 macOS 預設的 zsh 執行時 `${BASH_SOURCE[0]}` 未定義，腳本
-    目錄解到呼叫端 cwd，guard source 失敗後 `is_real_python_candidate` 變成 command not
-    found，於是印出**與事實相反**的「找不到 python」——使用者被指去裝一個早就裝好的東西。
+    WHY 這兩件事住同一支測試的沿革全文搬至
+    CrossPlatform_R151_Guard_Prose_Migration.md〈TestMacSmokeCliContract〉節。
 
     兩者都以「真的把腳本跑起來」驗證，不做字面比對：字面比對驗不到 rc，也驗不到
     「整套 smoke 有沒有真的被跳過」。
@@ -1062,12 +1057,8 @@ def _script_code_only(path: Path) -> str:
 class TestNightlyCarrierReferencesResolve(unittest.TestCase):
     """登記成 `nightly:<token>@<腳本>` 者，token 必須在該腳本的可執行內容裡抓得到。
 
-    這道鎖要擋的**具體失敗**（本輪實測，不是假想）：登記表把兩個 CI step 指給
-    `AutoClaude/tools/run_local_nightly.ps1`，而該檔當時**根本沒有**那兩件事——
-    舊守門 `test_named_local_carriers_actually_exist` 只驗「被指名的檔案存在」，
-    nightly 腳本當然存在，於是這張表可以說謊而零訊號。ONBOARDING §6.1 又刻意
-    不再重抄、直接指向本表當唯一真相源 ⇒ 任何人拿它回答「什麼只能等雲端」都會
-    得到錯的答案，而雲端此刻因帳務停擺根本不會跑。
+    具體失敗案例沿革全文搬至 CrossPlatform_R151_Guard_Prose_Migration.md
+    〈TestNightlyCarrierReferencesResolve〉節。
 
     **仍未買到的**（誠實劃界，同上方邊界 (c)）：token 命中只證明「那支腳本真的
     呼叫／定義了它」，不證明「跑的範圍與 CI 那一步相同」。

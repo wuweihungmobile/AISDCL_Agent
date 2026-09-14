@@ -44,6 +44,8 @@ nightly Stage L）**無參數呼叫**就被薄殼整批取代掉核心預設、`
   --act  額外用 act 在 Linux 容器跑 ci.yml（POSIX 走 run_act.sh；Windows 以 PowerShell
          載具 -File 呼叫 run_act.ps1，powershell 優先、pwsh 後備——對齊 tools/dev_start.py
          先例與 Local_CI_Parity_NextAction「pwsh→powershell（本機僅 PS5.1）」修正史料）
+  --unattended  無人值守（DEF-200-291）：skip 剖面未登記時不判紅（真正的 advisory），
+         供本機 nightly／schtasks 使用；`GITHUB_ACTIONS` 有值時自動套用，不需手動加
 
 用法（一般經薄殼呼叫；直接呼叫亦可）：
   python tools/local_ci_gate.py
@@ -81,8 +83,10 @@ MONO_ROOT = REPO_ROOT.parent                        # monorepo 根 — 定位共
 # sys.path 才能 import——手法對齊本輪其他核心檔案既有慣例（R17 DEF-101-231 觀察點
 # 1+2：收斂 is_windows/os_label/venv_python_path 平台判斷邏輯的第二次重複）。
 sys.path.insert(0, str(MONO_ROOT / "tools" / "lib"))
+import baseline_origin  # noqa: E402  ← DEF-200-303：pgextras 軸探針 SSOT（根層 tools/lib/）
 import platform_utils  # noqa: E402
 import skip_group_policy  # noqa: E402  ← R79：skip 分群天花板的政策 SSOT（根層 tools/lib/）
+import skip_profile_key  # noqa: E402  ← DEF-200-183/303：剖面鍵文法 SSOT（根層 tools/lib/）
 
 # `-rs`（R59 ARCH-R59-01）：印出每一支 skip 的理由。
 # WHY：DEF-101-510 立的原則是「因為跑在某平台而失去的覆蓋不得只併成一個數字」，但那輪
@@ -339,11 +343,24 @@ def _skip_profile(pg: bool, *, nested: bool | None = None) -> str:
     """剖面鍵：同一棵樹在「有 PG」與「沒 PG」下的健康值差 92 支，用同一個數字管必然
     一邊沒鑑別力、另一邊恆假紅；平台同理（Windows 上 POSIX-only 全 skip，mac 反過來）；
     巢狀 session 同理（見 `nested_session`）。
+
+    🔴 DEF-200-303：第三軸（pgextras）落地——`baseline_origin.pg_extras_state()` 探測
+    本行程直譯器有沒有裝 psycopg2／sqlalchemy（DEF-200-183 記載：同一個鍵在 PRESENT／
+    ABSENT 下量到兩個值，差 66～96 支，任填一值必然一邊零鑑別力、另一邊恆假紅）。鍵改由
+    `skip_profile_key.census_profile()` 這個唯一產生器拼出，不再自己字串拼接——那正是
+    pgextras 軸此前能漏掉而沒有任何東西出聲的機制：文法住在生產者裡，判準在另一個檔，
+    兩邊沒有共同的家可以對帳。
+
     剖面由**實測**決定，不是由人宣告。未登記的剖面會被判準點名並要求以實測值入表。"""
     if nested is None:
         nested = nested_session()
-    return (f"AutoClaude/tests@{sys.platform}"
-            f"+{'pg' if pg else 'nopg'}+{'nested' if nested else 'solo'}")
+    pgextras = "pgext" if baseline_origin.pg_extras_state() == "present" else "nopgext"
+    return skip_profile_key.census_profile(
+        "AutoClaude/tests", sys.platform,
+        pg="pg" if pg else "nopg",
+        nested="nested" if nested else "solo",
+        pgextras=pgextras,
+    )
 
 
 def skipped_reasons(pytest_output: str) -> list[str]:
@@ -377,8 +394,12 @@ def census_verdict(pytest_output: str, *, pg: bool,
         return CENSUS_OK, lines
     if not skip_group_policy.profile_registered(profile):
         lines.append(
+            # 🔴 DEF-200-291：這裡不再預設「advisory」或「阻斷」——是否判紅由呼叫端
+            # 決定（見 `check_skip_census` 的 `unattended` 語意），訊息與 rc 才不會
+            # 自相矛盾（訂正前舊句逐字「advisory；把實測值入表即升級為阻斷」，但
+            # `check_skip_census` 對同一個 rc 一律併成 1，兩者互斥）。
             "⚠️ 剖面未登記——量測本身正常，但這個平台從來沒有人量過健康值，"
-            "沒有天花板可比（advisory；把實測值入表即升級為阻斷）：")
+            "沒有天花板可比（把實測值入表即可登記；是否因此判紅由呼叫端決定）：")
         lines += [f"   - {msg}" for msg in problems]
         return CENSUS_PROFILE_UNREGISTERED, lines
     lines.append("❌ skip 分群天花板不合格（S3：skipped 數必須有人管）：")
@@ -386,18 +407,34 @@ def census_verdict(pytest_output: str, *, pg: bool,
     return CENSUS_FAIL, lines
 
 
-def check_skip_census(pytest_output: str, *, pg: bool) -> int:
+def check_skip_census(pytest_output: str, *, pg: bool, unattended: bool = False) -> int:
     """印分群普查並判天花板；回 0／1（呼叫端把它併進 pytest gate 的 rc）。
 
-    🔴 本入口對「剖面未登記」仍判**紅**（`CENSUS_PROFILE_UNREGISTERED` 併成 1），與
-    `--census-only` 的 advisory 刻意不同，而這個差異是有理由的、不是漏改：本入口是
-    「我要 push 了，把全部東西跑一遍」的手動閘門，人就在現場，可以當場把實測值入表；
-    `--census-only` 掛在 push 通道與 CI 上，那裡擋下一個從來沒人量過的平台是**誤擋**
-    （沒有鑑別力的紅），不是嚴格。
+    🔴 DEF-200-291：本入口對「剖面未登記」的判法依 `unattended` 分岔——這是舊版死結
+    （nightly 無人值守卻套用「人在現場」那條規則，12 連紅）的解法。`unattended=False`
+    （預設）＝有人在現場的手動閘門：「我要 push 了，把全部東西跑一遍」，人可以當場把
+    實測值入表，未登記 ⇒ 判紅並印補救指引。`unattended=True`＝沒有人能當場入表
+    （nightly／schtasks／CI）：未登記 ⇒ 真正的 advisory（rc=0），與 `--census-only`
+    對未登記剖面的既有語意一致（那裡擋下一個從來沒人量過的平台是誤擋，不是嚴格）。
+    `GITHUB_ACTIONS` 有值時自動視為無人值守（同 `perf_baseline.perf_environment()`
+    判 CI 的 SSOT，本 repo 唯一 CI 訊號）；本機 nightly（無 `GITHUB_ACTIONS`）須顯式
+    傳 `--unattended`。
+    🔴 不得重用 `AUTOSDD_UNATTENDED`：那是 headless claude 續跑的 git 防護訊號
+    （`tools/lib/unattended_authz.py`），事件源與本檔的 pytest／nightly 無關（SA-3）。
     """
+    unattended = unattended or bool(os.environ.get("GITHUB_ACTIONS"))
     rc, lines = census_verdict(pytest_output, pg=pg)
     print("\n" + "\n".join(lines))
-    return 0 if rc == CENSUS_OK else 1
+    if rc == CENSUS_OK:
+        return 0
+    if rc == CENSUS_PROFILE_UNREGISTERED and unattended:
+        return 0
+    if rc == CENSUS_PROFILE_UNREGISTERED:
+        print(
+            "本入口為人工全套閘門，未登記剖面判紅：請當場以實測值入表；"
+            "無人值守請加 --unattended", flush=True,
+        )
+    return 1
 
 
 def census_only(log_path: str) -> int:
@@ -473,14 +510,24 @@ def _census_from_text(text: str) -> int:
     return rc
 
 
-def parse_args(argv: list[str]) -> tuple[bool, bool, list[str]]:
+def parse_args(argv: list[str]) -> tuple[bool, bool, list[str], bool]:
     """解析參數（語意照收斂前 .sh 逐參數迴圈）。
 
-    --act / --pg 為旗標，可出現在任意位置；首個非旗標參數起「整批取代」預設
-    pytest 參數（而非附加），其後的非旗標參數依序累積。
+    --act / --pg / --unattended 為旗標，可出現在任意位置；首個非旗標參數起「整批
+    取代」預設 pytest 參數（而非附加），其後的非旗標參數依序累積。
+
+    🔴 DEF-200-291：`--unattended` 傳給 `check_skip_census`（見 `gate_pytest`）——
+    本機 nightly／schtasks 沒有 `GITHUB_ACTIONS` 這個自動訊號，須顯式加這個旗標，
+    「剖面未登記」才會是真正的 advisory 而不是判紅。
+
+    🔴 `do_unattended` 刻意放在回傳 tuple**最後一位**、不插在 `pytest_args` 前面：
+    `tests/tools/test_local_ci_gate_shell_arg_parity.py` 既有呼叫端用位置索引
+    `parse_args(...)[2]` 取 `pytest_args`（該檔不在本輪持有面，不得因新增旗標而破壞
+    既有索引）。新增回傳值一律追加在尾端，是本檔對外契約穩定的既有慣例。
     """
     do_act = False
     do_pg = False
+    do_unattended = False
     pytest_args = list(DEFAULT_PYTEST_ARGS)
     overridden = False
     for arg in argv:
@@ -488,12 +535,14 @@ def parse_args(argv: list[str]) -> tuple[bool, bool, list[str]]:
             do_act = True
         elif arg == "--pg":
             do_pg = True
+        elif arg == "--unattended":
+            do_unattended = True
         else:
             if not overridden:
                 pytest_args = []
                 overridden = True
             pytest_args.append(arg)
-    return do_act, do_pg, pytest_args
+    return do_act, do_pg, pytest_args, do_unattended
 
 
 def _stream(cmd: list[str]) -> int:
@@ -631,8 +680,10 @@ def _stream_capture(cmd: list[str]) -> tuple[int, str]:
     return proc.wait(), "".join(chunks)
 
 
-def gate_pytest(pytest_args: list[str]) -> int:
+def gate_pytest(pytest_args: list[str], *, unattended: bool = False) -> int:
     """5. pytest（參數可被位置參數整批取代，見 parse_args）。
+
+    `unattended`：原樣轉給 `check_skip_census`（DEF-200-291），見該函式 WHY。
 
     R79：跑完順手判一次 **skip 分群天花板**（見 `check_skip_census`）。
     🔴 只在「使用者沒有覆寫 pytest 參數」時判——`-k foo` 只跑一小撮測試，那個 census
@@ -661,7 +712,7 @@ def gate_pytest(pytest_args: list[str]) -> int:
     if pg_dsn_in_effect():
         args += ["--dist", "loadgroup"]
     rc, output = _stream_capture([sys.executable, "-m", "pytest", *args])
-    census_rc = check_skip_census(output, pg=pg_dsn_in_effect())
+    census_rc = check_skip_census(output, pg=pg_dsn_in_effect(), unattended=unattended)
     return rc or census_rc
 
 
@@ -721,9 +772,12 @@ def gate_act() -> int:
 # ---------------------------------------------------------------------------
 
 def build_gates(
-    do_act: bool, do_pg: bool, pytest_args: list[str]
+    do_act: bool, do_pg: bool, pytest_args: list[str], *, unattended: bool = False
 ) -> list[tuple[str, Callable[[], int]]]:
-    """組出 gate 清單（名稱與順序為凍結介面；--pg 先於 --act，照收斂前 .sh/.ps1）。"""
+    """組出 gate 清單（名稱與順序為凍結介面；--pg 先於 --act，照收斂前 .sh/.ps1）。
+
+    `unattended`：轉給 `gate_pytest`（DEF-200-291），預設 False 不改變既有呼叫端行為。
+    """
     gates: list[tuple[str, Callable[[], int]]] = [
         ("editable sentinel", gate_editable),
         ("LOC budget", gate_loc),
@@ -732,7 +786,7 @@ def build_gates(
         ("snapshot --check", gate_snapshot),
         ("import-linter", gate_importlinter),
         # 延遲查全域名（勿綁死 default）：測試 monkeypatch gate_pytest 後仍需生效
-        ("pytest", lambda: gate_pytest(pytest_args)),
+        ("pytest", lambda: gate_pytest(pytest_args, unattended=unattended)),
     ]
     if do_pg:
         gates.append(("PG contract (pg17)", gate_pg))
@@ -796,7 +850,7 @@ def main(argv: list[str] | None = None) -> int:
 
     os.chdir(REPO_ROOT)
 
-    do_act, do_pg, pytest_args = parse_args(raw_argv)
+    do_act, do_pg, pytest_args, do_unattended = parse_args(raw_argv)
     _hooks_liveness_advisory()
 
     # R79（S3）：讓「甲類 skip」預設就會跑。刻意**不**做成一道 gate——gate 名稱與順序是
@@ -809,7 +863,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"[PG autodetect] {why}", flush=True)
 
     results: list[tuple[str, str]] = []
-    for name, fn in build_gates(do_act, do_pg, pytest_args):
+    for name, fn in build_gates(do_act, do_pg, pytest_args, unattended=do_unattended):
         run_gate(name, fn, results)
 
     # ----- 總結（字樣為凍結介面）-----

@@ -3148,14 +3148,10 @@ class UnattendedPermissionPostureTest(unittest.TestCase):
         `--add-dir` 之前——排在其後會被那個變長參數吃掉（同姊妹鎖的立案缺陷）。
 
         🔴 2026-09-07 掌舵者裁決（INV2＋INV3 拆除）：姿態檔**只有一份**——
-        `UNATTENDED_SETTINGS`。此前 M-06 另立 `.claude/settings.unattended_first_window.json`
-        給「第一窗」用（deny 帶 Task／Agent／Workflow），現已刪除：訂閱制風險模型下，
-        一旦主 agent 確認喚醒即與互動 session 同等信任，不分窗次。額度風險由
-        `RELAY_MAX_SPAWNS`（每視窗 spawn 上限）＋1 小時牆鐘 timeout＋INV4（無人看管一次
-        沒進度就停）界住，不需要分階段 fan-out 解鎖。故本條一併釘住「兩路指向同一份檔」
-        與「那一份檔的 deny 不含 fan-out 三工具」——本類原有的兩支 fan-out 姿態測試
-        （第一窗 deny 三工具 ＋ followup 窗 allow 三工具的控制組）證明的是「兩份檔有
-        分流」，該前提已不成立，故連同姿態檔一起刪除；它們的核心斷言併進本條。
+        `UNATTENDED_SETTINGS`。此前 M-06 分窗立檔、後併回本條的沿革全文搬至
+        CrossPlatform_R151_Guard_Prose_Migration.md
+        〈test_va1_both_routes_carry_permission_mode_and_settings〉節。
+        故本條一併釘住「兩路指向同一份檔」與「那一份檔的 deny 不含 fan-out 三工具」。
         """
         resume = planner.choose_resume_route(
             "claude", "sid-9", self.transcript, str(self.plan))
@@ -6610,10 +6606,10 @@ class FanoutCasualtyRecordTest(unittest.TestCase):
     def test_the_record_states_when_resume_from_run_id_is_invalid(self) -> None:
         """🔴 誠實劃界寫進**產物本身**，不是只寫在註解裡——且措辭要是**現行**的。
 
-        DEF-200-270：「同 session only／沒有任何排程器按得到」在 `claude -p -r <sid>` 無頭
-        續跑成立後（R111／R113 四段全通；round-label-ok）已 stale：
-        `-p -r` 就是同一個 session，run 目錄住
-        `<sid>/` 底下。現行劃界＝**session 已死且無法 `-p -r` 續跑時**才無效；無頭窗口
+        DEF-200-270 舊措辭（「同 session only／沒有任何排程器按得到」）為何 stale 的沿革
+        全文搬至 CrossPlatform_R151_Guard_Prose_Migration.md
+        〈test_the_record_states_when_resume_from_run_id_is_invalid〉節。
+        現行劃界＝**session 已死且無法 `-p -r` 續跑時**才無效；無頭窗口
         可自行呼叫 `Workflow(resumeFromRunId)`（掌舵者 2026-09-05 裁決）。「`-p -r` 內
         resumeFromRunId 是否有效」為前提待實測，產物要說出這件事。
         """
@@ -6685,12 +6681,10 @@ class FanoutCasualtyRecordTest(unittest.TestCase):
 
     def test_the_resume_prompt_never_names_a_workflow_resume_call(self) -> None:
         """🔴 2026-09-07 掌舵者裁決：**續跑 prompt 完全不注入 Workflow 續跑提示**（連
-        gated 注入也移除）。史料兩層：DEF-200-270 ③ 原本**無條件**注入 ⇒ headless 窗口
-        一起手就重跑 34-agent Workflow、撞權限牆前先燒掉一輪 token；2026-09-05 改成
-        gated（INV2＋INV3）；2026-09-07 連 gate 一起拆——醒來的主 agent 與互動 session
-        同等信任，要不要 fan-out 由它自己讀任務書／handback 判斷，系統不再用提示句驅使
-        特定工具呼叫。fanout 清單（`resume_call` 欄）仍然照寫，那是給人／給模型自己讀的
-        磁碟事實，不是 prompt 注入。
+        gated 注入也移除）。三段沿革（DEF-200-270③ 無條件注入 → 2026-09-05 gated →
+        2026-09-07 連 gate 一起拆）全文搬至 CrossPlatform_R151_Guard_Prose_Migration.md
+        〈test_the_resume_prompt_never_names_a_workflow_resume_call〉節。fanout 清單
+        （`resume_call` 欄）仍然照寫，那是給人／給模型自己讀的磁碟事實，不是 prompt 注入。
         鑑別力：本條與 `test_the_resume_prompt_is_unchanged_without_a_fanout_record` 不同
         ——那支是「沒有清單」的控制組，本支是「清單**有** resume_ready 的 run」仍不注入，
         把注入邏輯加回來（無條件或 gated 皆然）當場紅。"""
@@ -7665,12 +7659,11 @@ class QuotaUnmeasurableTest(unittest.TestCase):
             meter.fetch_usage = original
 
     def test_unmeasurable_is_its_own_band_and_is_capped_not_unlimited(self) -> None:
-        """🔴 R82 具名改寫（裁決 D-8，駁回本條 R81 版的「量不到 ⇒ 不設限」；R81 版斷言
-        原文與複審探針數字＝Resume 證據檔 §L-3.11）。
-
-        裁決把它拆成兩層——守衛**行程**仍然 fail-open（不得崩、不得誤 deny），但**節流
-        決策**不得靜默全放行 ⇒ 量不到時 `cap = degraded_cap`（>0，所以不會鎖死；
-        且**永不** halt，因為絕不對一個沒量到的值開火）。狀態字仍必須與任何水位帶分得開。
+        """🔴 R82 具名改寫（裁決 D-8，駁回本條 R81 版的「量不到 ⇒ 不設限」）三層拆解
+        沿革已搬至 CrossPlatform_R127_Guard_Prose_Migration.md
+        〈test_a_dead_endpoint_with_no_evidence_falls_back_to_the_degraded_cap〉節
+        （同批裁決；R81 版斷言原文與複審探針數字＝Resume 證據檔 §L-3.11）。狀態字仍必須
+        與任何水位帶分得開。
         """
         now = datetime.now(UTC).astimezone()
         policy = quota_policy.DEFAULT_POLICY
@@ -11086,9 +11079,8 @@ class WindowUsageIsToldTheSameWayByBothOutletsTest(unittest.TestCase):
     def test_both_fanout_branches_print_the_window_count_they_were_given(self) -> None:
         """① **渲染面**：`Agent`／`Workflow` 兩支都要把拿到的 `live` 說出來。
 
-        `live=3` 是挑過的：它既不是 `0`（舊 Workflow 分支硬寫的那個字面），也不是 cap
-        （否則「印的是 live」與「印的是 cap」在畫面上分不出來）——底下那一行斷言就是在
-        釘住這個前提，免得哪天階梯一改讓 cap 恰好等於 3 而本條靜默失去鑑別力。
+        `live=3` 挑選理由的沿革全文搬至 CrossPlatform_R151_Guard_Prose_Migration.md
+        〈WindowUsageIsToldTheSameWayByBothOutletsTest〉節。
         """
         decision = _decision((("session", 88.0, 3600.0),))
         self.assertNotIn(decision.cap, (0, 3),
@@ -11103,10 +11095,9 @@ class WindowUsageIsToldTheSameWayByBothOutletsTest(unittest.TestCase):
     def test_the_blocked_workflow_message_counts_the_real_ledger(self) -> None:
         """② **呼叫點**：走真的閘，訊息裡那個 N 必須等於當下 `live_dispatches()`。
 
-        紅端逐字（R96 落地前）：Workflow 那一支傳的是**字面 `0`**，而真正的 `live` 要更
-        後面才算得出來、該分支早就 `return 2` 了 ⇒ 被擋的人恆看到「本視窗已用 0 次」，
-        於是會推論「配額還有、擋我的是別的原因」。①（純渲染）結構上抓不到它——①問的是
-        「給了 live 有沒有印」，而這個缺陷是「呼叫端根本沒把 live 給進去」。
+        紅端逐字（R96 落地前，Workflow 分支傳字面 `0` 的缺陷）沿革全文搬至
+        CrossPlatform_R151_Guard_Prose_Migration.md
+        〈WindowUsageIsToldTheSameWayByBothOutletsTest〉節。
         """
         _quota_cache(self.tmp, 75.0, kind="session", resets_in=2 * 3600)
         live = self._seed_dispatches(3)
@@ -11122,11 +11113,9 @@ class WindowUsageIsToldTheSameWayByBothOutletsTest(unittest.TestCase):
     def test_a_full_window_reads_as_zero_on_both_sides(self) -> None:
         """③ **跨層對帳**：同一份帳、同一份快取，兩個出口不得說出不同的話。
 
-        紅端（主控本輪實測）：`--pace` 印「現在可派 2 個 agent（硬上限 cap=2）」的同一
-        刻，`Agent` 被守衛擋下、理由逐字是「每 300s 最多 2 次扇出，本視窗已用 2 次 ⇒
-        不執行」。根 CLAUDE.md〈現查指令速查表〉明文要求「**派工前**問『現在能派幾個
-        agent』→ `--pace`」⇒ 官方指定的派工前置出口會給出一個當場被守衛推翻的數字。
-        ①②都抓不到它：那兩條完全不碰 `--pace` 這個出口。
+        紅端（主控本輪實測，`--pace` 與守衛同一刻說出不同數字）沿革全文搬至
+        CrossPlatform_R151_Guard_Prose_Migration.md
+        〈WindowUsageIsToldTheSameWayByBothOutletsTest〉節。
         """
         _quota_cache(self.tmp, 75.0, kind="session", resets_in=2 * 3600)
         cap, _now = self._cap_now()
@@ -11913,27 +11902,18 @@ class InvariantLocksArePresentTest(unittest.TestCase):
     （斷言用 `>=` 不是 `==`）。
     """
 
-    #: 現查快照（2026-09-07，`grep -n 'class Inv[0-9]\|class Fix[0-9]'
-    #: tools/tests/test_context_budget_guard.py`）：本檔目前存在的 6 個 INV/FIX 類別，
-    #: 逐一登記其**當下**測試方法數下限。數字是量測值不是常數——之後合法新增測試會讓
-    #: 現值大於此表（不紅）；本表只在有人整批刪除／砍到低於下限時才出聲。
-    #:
-    #: 🔴 2026-09-07 掌舵者裁決（INV2＋INV3 拆除，SA＋SD 兩位獨立審查通過）：
-    #: `Inv2Inv3WorkflowFanoutGateTest`（6 支）與 `Fix4FirstWindowCannotFanOutEndToEndTest`
-    #: （2 支）兩列**整列移除**——被守的行為（第一無人視窗禁 fan-out／需前一窗證明有進度
-    #: 才解鎖）已不存在，留著列就會讓判準對「不存在的類別」拋例外而恆紅（`loadTestsFromName`
-    #: 對缺類別是拋例外，不是回 0，所以不能只把數字改成 0）。Fix4 唯一與該禁令無關的
-    #: 那一支（`test_arm_sentinel_arms_fail_open_when_job_list_is_unmeasured`）已遷入
-    #: `Inv5SingleOwnerTest`，其下限因而 6→7（遷入的那一支在新家一樣被守著，不是淨損）。
+    #: 現查快照（2026-09-07）：本檔目前存在的 6 個 INV/FIX 類別，逐一登記其**當下**測試
+    #: 方法數下限。數字是量測值不是常數——之後合法新增測試會讓現值大於此表（不紅）；
+    #: 本表只在有人整批刪除／砍到低於下限時才出聲。2026-09-07 掌舵者裁決（INV2＋INV3
+    #: 拆除）的沿革全文搬至
+    #: CrossPlatform_R151_Guard_Prose_Migration.md〈InvariantLocksArePresentTest〉節。
     _EXPECTED_MIN_TEST_COUNTS = {
         "Inv1UnattendedZeroPaidProbeTest": 3,
         "Inv1ScheduledTickMarksUnattendedTest": 3,
         "Fix2ResumeCallScriptPathIsJsSafeTest": 2,
         "Inv4UnattendedStopsOnFirstNoProgressTest": 5,
-        # 🔴 收尾單人窗口重釘 7→11（實測 2026-09-07：12 支，見上方 loader 現查指令）——
-        # 規則 5 的 macOS 真機測試（`test_real_launchd_listing_feeds_other_owner_for_
-        # session`）＋既有 M-19 Windows 對照＋失敗開放族測試併入本類別後累積 12 支，
-        # 留 1 支裕度（同其餘各列既有慣例：下限＝現測值−1，非湊整）。
+        # 🔴 收尾單人窗口重釘 7→11 沿革全文搬至
+        # CrossPlatform_R151_Guard_Prose_Migration.md〈InvariantLocksArePresentTest〉節。
         "Inv5SingleOwnerTest": 11,
         "Fix3UnattendedOutcomeBannerTest": 4,
     }

@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""nightly 載具的直譯器必須「決定性 + 可取證」（DEF-101-506，紀律 #14 延伸）。
+"""nightly 載具的直譯器必須「決定性 + 可取證」（DEF-101-506，紀律 #14 延伸；
+DEF-200-302 起改為「釘死」而非「使其等價」，見下方訂正）。
 
-WHY（2026-07-27 真機事故）：`run_local_nightly.ps1` 把直譯器存成字面 token
-`$script:PyExe = 'python'`，每個呼叫點都由 PATH **現場解析**。於是同一支 nightly：
+WHY（2026-07-27 真機事故，DEF-101-506 立案時的原始問題）：
+`run_local_nightly.ps1` 把直譯器存成字面 token `$script:PyExe = 'python'`，每個
+呼叫點都由 PATH **現場解析**。於是同一支 nightly：
 
   - schtasks 排程下 → pyenv-win 的 python（`python.bat` shim，且裝了 psycopg2）
   - 已啟用 monorepo .venv 的終端機／agent 下 → `.venv\\Scripts\\python.exe`
@@ -13,45 +15,105 @@ WHY（2026-07-27 真機事故）：`run_local_nightly.ps1` 把直譯器存成字
 （`%` 被 batch shim 吃掉）的修復「綠得沒有鑑別力」——真 .exe 本來就不觸發該 bug，
 沒修也會綠。而 log 當時只印字面 token「python」，事後完全無法指認是哪一顆。
 
-🔴 **R59 補述（DEF-101-522 教訓）**：本檔原本 A/B/C 三項**全是行級靜態檢查**，
-於是當 PATH 正規化區塊的比對「形狀齊備但語意永遠不成立」時（`Activate.ps1` 插入的是
-`.venv/Scripts` 正斜線、`Join-Path` 產生 `.venv\\Scripts` 反斜線 → 比對必不等），本檔
-當時的斷言全綠（**R59 二審 QA 訂正**：本處原寫「20 支」、下方 A 項註解原寫「7 支斷言」，QA 副本注入實測為 **4 支測試／8 條斷言**全綠；數字改為不寫死以免再過期）。**形狀鎖對「比對永遠不成立」這類缺陷結構上零鑑別力**，故 R59 新增第
-D 項＝**行為級鎖**（真的把該區塊的比對式抽出來在 PowerShell 子行程裡跑一次）。
+🔴 **DEF-200-302 訂正（掌舵者 2026-09-15 裁決 B 案）**：DEF-101-506 當時的修法＝讓
+schtasks 與已啟用 venv 兩種啟動方式「殊途同歸」（互動 shell 偵測到已啟用 venv
+就把它的 Scripts 從本行程 PATH 剝除，使解析退回 pyenv 全域）；本檔原本因此在
+下方（已刪除的）A/D 兩類鎖住這段「正規化」邏輯與其斜線比對細節。前提已由主控
+本場實測推翻：根層 .venv 的 `pyvenv.cfg` home 本身就是同一顆 pyenv-win 3.11.9
+二進位，且 xdist／psycopg2／sqlalchemy／pgvector／asyncpg／alembic／pytest 七
+項在 pyenv 全域與根 .venv 兩邊皆 PRESENT——「兩套互不受控、可能分岔的依賴集
+合」這個風險已不成立（2026-09-13 nightly 曾因 PATH 上的 pyenv 全域缺 xdist 而
+pytest rc=4，正是那個風險的真實代價）。故 Windows 側改為與 mac 側同款「絕對路
+徑釘死」：不論 schtasks 或已啟用 venv 的終端機／agent 觸發，`run_local_nightly.
+ps1`／`windows_smoke_local.ps1` 一律直接使用 `<repo 根>/.venv/Scripts/python.exe`
+絕對路徑，不再靠 PATH 現場解析「使其等價」；找不到就 fail-loud（exit 1）。
 
-本檔鎖四件事（A/B/C 為行級靜態檢查、D 為行為級實跑）：
-  A. `.ps1` 必須有「已啟用 venv → 自本行程 PATH 移除其 Scripts」的正規化區塊，
-     且必須有「移除後找不到 python 就還原」的降級分支（載具正規化不得讓整晚
-     驗證開天窗）。
+本檔鎖三件事（B/C 為既有行級靜態檢查；新增 E 為 Windows 絕對路徑釘死鎖，鎖的三支
+檔＝`AutoClaude/tools/run_local_nightly.ps1`／`tools/windows_smoke_local.ps1`／
+`AutoClaude/tools/local_ci_gate.ps1`）：
   B. 兩支載具都必須把**解析後的直譯器路徑**寫進 log（禁止只印字面 token）。
   C. mac 側必須維持「絕對路徑釘死」而非 PATH 現場解析。
-  D.（R59 新增，行為級）自 `.ps1` 抽出 PATH 正規化的**比對式本體**，在 PowerShell
-     子行程裡對一個含**正斜線**寫法的合成 PATH 執行，斷言該項真的被判為相符並移除。
-     這是唯一能抓到 DEF-101-522 的形狀——A 項只看「有沒有 `-split ';'`／`Join-Path`／
-     `$pathBefore`」，那些在缺陷存在時全部齊備。
+  E.（DEF-200-302 新增）Windows 側兩支 .ps1（`run_local_nightly.ps1`／
+     `windows_smoke_local.ps1`）都必須絕對路徑釘死根層 `.venv\\Scripts\\
+     python.exe`、都必須有 fail-loud 分支（`Test-Path` 不成立即 `exit 1`）；
+     `run_local_nightly.ps1` 不得再把 PATH 現場解析的 `Test-IsRealPython
+     -CandidateName 'python'` 當直譯器決定者，也不得再含「偵測 `$env:VIRTUAL_ENV`
+     即剝除其 Scripts」的正規化區塊；nightly 對 `local_ci_gate.ps1` 的呼叫必須
+     帶 `--unattended`（DEF-200-291 無人值守 advisory 降級的前置條件）。
 
-刻意不鎖「兩平台必須用同一顆直譯器」：mac 釘 `.venv/bin/python`、Windows 走
-pyenv，是各自既有且各自綠的政策；本缺陷要根治的是「**同一平台上因啟動方式不同
-而漂移**」，不是強推跨平台統一（那會讓 Windows 排程失去 psycopg2）。
+原 A 項（Windows PATH 正規化區塊行級檢查）與 D 項（該正規化比對式的行為級鎖，
+DEF-101-522）鎖的正是本輪拔除的那段邏輯，隨程式碼一併移除——史料見 git 歷史與
+docs/06_quality/AutoSDD_Defect_Log.md 的 DEF-200-302 條目，不再保留無程式碼可
+對照的死鎖。
+
+刻意仍不鎖「兩平台必須用同一顆直譯器」這個問題本身的框架：mac 釘
+`.venv/bin/python`、Windows 釘 `.venv\\Scripts\\python.exe`，兩邊本就分屬各自
+平台的 `.venv`、路徑分隔符也天然不同——這不是「兩顆不同的直譯器」，只是同一
+種「絕對路徑釘死」政策在兩個平台上的自然表達。
 """
 from __future__ import annotations
 
 import re
 import subprocess
 import sys
-import tempfile
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _ps_engine import (  # noqa: E402  # R60 E-A-03：引擎述詞 SSOT（語意④）
     native_ps51,
-    windows_with_native_ps51,
 )
 
 _ROOT = Path(__file__).resolve().parents[2]
 _PS1 = _ROOT / "AutoClaude" / "tools" / "run_local_nightly.ps1"
 _SH = _ROOT / "AutoClaude" / "tools" / "run_local_nightly.sh"
+_SMOKE_PS1 = _ROOT / "tools" / "windows_smoke_local.ps1"
+
+# DEF-200-302：兩支 .ps1 皆需釘死的絕對路徑字面（相對於各自的 repo 根變數，
+# 故只鎖尾段——`.venv\Scripts\python.exe`——不鎖前導變數名，因兩檔前導變數
+# 名稱不同（$MonorepoRoot／$RepoRoot）且本鎖只關心「釘死了沒」，不關心變數名）。
+_PINNED_VENV_PY_RE = re.compile(r"\.venv\\Scripts\\python\.exe")
+# fail-loud 判定：`-not (Test-Path $VenvPy)` 或 `-not (Test-Path $script:PyExe)`
+# 出現後，其所在 if 的大括號區塊內必須有 `exit 1`（見 `_has_fail_loud_venv_check`
+# 的大括號配對，QA-3 訂正）——本正則只需命中條件本身，不需顧及兩檔外層 if 括號
+# 巢狀深度不同（windows_smoke_local.ps1 是 `-or` 複合條件，多包一層括號），因為
+# 找區塊起點是用 `text.find("{", ...)` 而非正則，括號巢狀深度不影響命中。
+_FAIL_LOUD_CONDITION_RE = re.compile(
+    r"-not\s*\(\s*Test-Path\s+\$(?:script:PyExe|VenvPy)\s*\)"
+)
+
+
+def _has_fail_loud_venv_check(text: str) -> bool:
+    """QA-3（四方複審）：大括號感知判準——原本「命中條件行後 N 行內找 exit 1」的
+    視窗式寫法對兩種 mutant 皆誤判 True：① 條件配對寫反（`exit 1` 錯放在 `else`
+    分支，實際只在 venv **存在**時才 exit）；② `exit 1` 落在 if 區塊外（緊接在
+    `}` 之後、無條件執行，不論 venv 存不存在都會跑）。兩者都不是「venv 缺席才
+    fail-loud」，卻因為文字上仍落在原窗口內而被舊判準放行。
+
+    改法：命中條件後，從**該條件之後第一個 `{`**（if 區塊起點）做大括號配對，
+    只在配對出的區塊**內文**找 `exit 1`——區塊外或另一分支的 `exit 1` 一律不算數。
+    """
+    for match in _FAIL_LOUD_CONDITION_RE.finditer(text):
+        brace_start = text.find("{", match.end())
+        if brace_start == -1:
+            continue
+        depth = 0
+        block_end = None
+        for i in range(brace_start, len(text)):
+            ch = text[i]
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    block_end = i
+                    break
+        if block_end is None:
+            continue
+        block = text[brace_start + 1 : block_end]
+        if re.search(r"exit\s+1", block):
+            return True
+    return False
 
 
 def _read(p: Path) -> str:
@@ -63,69 +125,7 @@ class TestCarrierFilesExist(unittest.TestCase):
         """檔案改名/搬家時本檔其餘斷言會全部靜默失效，先釘存在性。"""
         self.assertTrue(_PS1.is_file(), f"找不到 {_PS1}")
         self.assertTrue(_SH.is_file(), f"找不到 {_SH}")
-
-
-class TestWindowsInterpreterNormalization(unittest.TestCase):
-    """A：Windows 側必須主動把「已啟用 venv」正規化掉，使解析與 schtasks 等價。"""
-
-    def test_has_virtual_env_detection(self):
-        self.assertRegex(
-            _read(_PS1), r"if\s*\(\s*\$env:VIRTUAL_ENV\s*\)",
-            "run_local_nightly.ps1 必須偵測 $env:VIRTUAL_ENV——否則已啟用 venv 的終端機/"
-            "agent 跑出來的紅綠與 schtasks 排程不可比較（DEF-101-506）")
-
-    def test_removes_active_venv_scripts_from_path(self):
-        text = _read(_PS1)
-        # R59 DEF-101-522：原斷言寫死 `$env:PATH -split ';'`。修復後兩次比對（算命中數、
-        # 算保留集）一律對 `$pathBefore` 這份**同一快照**做，避免中途被改動造成兩次比對
-        # 依據不同；故本斷言放寬為「對某個 PATH 字串做 `-split ';'`」，語意不變（仍要求
-        # 真的重組 PATH、不能只印警告了事），但不再把實作細節寫死。
-        self.assertRegex(
-            text, r"\$(?:env:PATH|pathBefore)\s+-split\s+';'",
-            "必須實際重組 PATH 以移除 venv Scripts，不能只印警告了事")
-        self.assertRegex(text, r"Join-Path\s+\$env:VIRTUAL_ENV\s+'Scripts'",
-                         "必須以 VIRTUAL_ENV 推導出要移除的 Scripts 目錄")
-        # DEF-101-522 形狀面補鎖（行為面見 TestPathNormalisationBehaviour）：
-        # 比對前必須把斜線正規化，否則 Activate.ps1 的正斜線寫法永遠不相符。
-        self.assertIn(
-            ".Replace('/', '\\')", text,
-            "PATH 比對前必須把 `/` 正規化為 `\\`——Activate.ps1 插入的是 "
-            "`$env:VIRTUAL_ENV/Scripts`（正斜線），不正規化則比對永遠不成立（DEF-101-522）")
-
-    def test_normalisation_block_precedes_pyexe_resolution(self):
-        """QA-R59-03：位置鎖。A 項其餘斷言都是**全檔** assertIn/assertRegex，只要區塊
-        存在就綠——把整塊搬到 `$script:PyExe` 解析之後（例如某次「把 PATH 設定集中管理」
-        的重構），同類其餘斷言仍全綠（二審 QA 副本注入實測：4 支測試／8 條斷言），但從已啟用 venv 啟動時解析到的仍是 `.venv` 的 python，
-        DEF-101-506 完全復發、log 還會誠實印出錯的那一顆。**存在但無效**是另一個成因類別。
-        技法同本類別既有的 guard dot-source 順序斷言。"""
-        text = _read(_PS1)
-        norm_at = text.index("if ($env:VIRTUAL_ENV)")
-        pyexe_at = text.index("$script:PyExe = $null")
-        self.assertLess(
-            norm_at, pyexe_at,
-            "PATH 正規化區塊必須在 $script:PyExe 解析**之前**——否則正規化對本輪實際"
-            "使用的直譯器毫無影響（DEF-101-506／QA-R59-03）",
-        )
-
-    def test_post_strip_check_uses_real_python_guard(self):
-        """移除 venv 後的『還有沒有 python』判斷必須用 Test-IsRealPython：若用裸
-        Get-Command，PATH 上只剩 WindowsApps 空殼時會誤判為可用而不還原。"""
-        text = _read(_PS1)
-        strip_block = text.split("if ($env:VIRTUAL_ENV)", 1)[-1].split("try {", 1)[0]
-        self.assertIn("Test-IsRealPython -CandidateName 'python'", strip_block,
-                      "正規化區塊必須以 Test-IsRealPython 判斷，不可用裸 Get-Command")
-        # guard SSOT 必須在正規化區塊之前 dot-source，否則上面那行是未定義函式
-        self.assertLess(
-            text.index("tools/lib/WindowsAppsGuard.ps1"), text.index("if ($env:VIRTUAL_ENV)"),
-            "WindowsAppsGuard.ps1 必須在 venv 正規化區塊之前載入")
-
-    def test_has_restore_fallback_when_no_other_python(self):
-        """降級分支：移除後若沒有其他 python，必須還原，不可讓整晚驗證開天窗。"""
-        text = _read(_PS1)
-        self.assertIn("$pathBefore", text, "必須保留還原用的 PATH 快照")
-        self.assertRegex(
-            text, r"\$env:PATH\s*=\s*\$pathBefore",
-            "必須有『找不到其他 python 就還原 PATH』的降級路徑（DEF-101-506）")
+        self.assertTrue(_SMOKE_PS1.is_file(), f"找不到 {_SMOKE_PS1}")
 
 
 class TestInterpreterIsForensicallyLogged(unittest.TestCase):
@@ -180,99 +180,133 @@ class TestDetectorItself(unittest.TestCase):
             "反向鎖的 regex 必須能命中修復前的舊寫法，否則該斷言是空殼")
 
 
-# ── D 項：行為級鎖（R59 DEF-101-522）──────────────────────────────────────────
-_NORM_HIT_RE = re.compile(
-    r"\$removed\s*=\s*@\(\s*\$pathBefore\s+-split\s+';'\s*\|\s*Where-Object\s*\{(?P<hit>.+?)\}\s*\)\.Count",
-    re.DOTALL,
-)
-_NORM_KEEP_RE = re.compile(
-    r"\$kept\s*=\s*@\(\s*\$pathBefore\s+-split\s+';'\s*\|\s*Where-Object\s*\{(?P<keep>.+?)\}\s*\)",
-    re.DOTALL,
-)
+class TestHasFailLoudVenvCheckIsBraceAware(unittest.TestCase):
+    """QA-3（四方複審）反事實測試：舊的「視窗式」判準對下列兩段 mutant 文字皆會
+    誤判 `True`（`exit 1` 字面剛好落在命中行後 5 行內）；大括號感知版必須正確
+    判定這兩段皆是 `False`——`exit 1` 沒有真的落在該 if 的區塊內。"""
+
+    def test_condition_and_exit_swapped_across_if_else_is_false(self) -> None:
+        """mutant①「條件寫反」：`exit 1` 錯放在 `else` 分支，實際只在 venv
+        **存在**（`Test-Path` 為真）時才會 exit，缺席時反而只印一行 log——
+        與「缺席才 fail-loud」的原意完全相反。"""
+        mutant = (
+            "if (-not (Test-Path $VenvPy)) {\n"
+            '  Write-Host "venv 存在，正常"\n'
+            "} else {\n"
+            "  exit 1\n"
+            "}\n"
+        )
+        self.assertFalse(
+            _has_fail_loud_venv_check(mutant),
+            "exit 1 落在 else 分支（條件配對寫反）時，判準不應判定為有效的 "
+            "fail-loud 檢查，卻回傳 True")
+
+    def test_exit_after_if_block_closes_is_false(self) -> None:
+        """mutant②「exit 1 在 if 區塊外」：`exit 1` 緊接在 `}` 之後、不受條件保護，
+        不論 venv 存不存在都會無條件執行——同樣不是「缺席才 fail-loud」。"""
+        mutant = (
+            "if (-not (Test-Path $VenvPy)) {\n"
+            '  Write-Host "缺 venv" \'WARN\'\n'
+            "}\n"
+            'Write-Host "無論如何都會印這行" \'INFO\'\n'
+            "exit 1\n"
+        )
+        self.assertFalse(
+            _has_fail_loud_venv_check(mutant),
+            "exit 1 落在 if 區塊外（無條件執行）時，判準不應判定為有效的 "
+            "fail-loud 檢查，卻回傳 True")
 
 
-class TestPathNormalisationBehaviour(unittest.TestCase):
-    """D 項：PATH 正規化的比對式必須真的能命中 `Activate.ps1` 實際寫入的形態。
+class TestWindowsInterpreterStaysPinned(unittest.TestCase):
+    """E（DEF-200-302 新增）：Windows 兩支 .ps1 都必須絕對路徑釘死根層 .venv，
+    不得再靠 PATH 現場解析「使其與 schtasks 排程等價」。"""
 
-    WHY 必須是行為級（DEF-101-522）：`.venv\\Scripts\\Activate.ps1` 插入 PATH 的字串是
-    `"$env:VIRTUAL_ENV/Scripts"`（**正斜線**），而 `Join-Path` 產生反斜線。初版直接以
-    `-ne` 比字串，在原生 PowerShell 下**永遠不相符** → venv 的 python 留在 PATH 上、
-    腳本卻走進成功分支印出「已移除…已與 schtasks 排程等價」。從 Git Bash 啟動時 msys
-    會把該項轉成反斜線、比對剛好成立，這就是本輪與上一輪都沒測出來的原因（載具剛好會過）。
-    """
+    def test_both_windows_carriers_pin_venv_python_absolute_path(self):
+        for path in (_PS1, _SMOKE_PS1):
+            text = _read(path)
+            self.assertRegex(
+                text, _PINNED_VENV_PY_RE,
+                f"{path.name} 必須含 `.venv\\Scripts\\python.exe` 絕對路徑字面"
+                "（DEF-200-302：釘死根層 .venv，不靠 PATH 現場解析）")
+
+    def test_both_windows_carriers_fail_loud_when_venv_missing(self):
+        for path in (_PS1, _SMOKE_PS1):
+            text = _read(path)
+            self.assertTrue(
+                _has_fail_loud_venv_check(text),
+                f"{path.name} 必須有「根層 .venv 直譯器不存在即 exit 1」的 "
+                "fail-loud 分支，不得再退化為 PATH 現場解析（DEF-200-302）")
+
+    def test_run_local_nightly_no_longer_resolves_bare_python_from_path(self):
+        """DEF-101-506 舊決定者：`Test-IsRealPython -CandidateName 'python'`
+        （裸字面值 'python'）不得再作為直譯器判定式——現在應改判定 $VenvPy／
+        $script:PyExe 這個已釘死的絕對路徑。"""
+        text = _read(_PS1)
+        self.assertNotIn(
+            "Test-IsRealPython -CandidateName 'python'", text,
+            "run_local_nightly.ps1 不得再以裸字面值 'python' 現場解析 PATH 當"
+            "直譯器決定者（DEF-200-302：改用已釘死的根層 .venv 絕對路徑）")
+
+    def test_run_local_nightly_no_longer_strips_active_venv_from_path(self):
+        """DEF-101-506 舊「殊途同歸」正規化區塊（偵測已啟用 venv 就從 PATH 剝除
+        其 Scripts）已隨 DEF-200-302 拔除——保留會與「直接釘死」的新設計互相矛盾。"""
+        text = _read(_PS1)
+        self.assertNotIn(
+            "if ($env:VIRTUAL_ENV)", text,
+            "run_local_nightly.ps1 不應再有偵測 $env:VIRTUAL_ENV 並剝除其 Scripts "
+            "的正規化區塊（DEF-200-302：已改為直接釘死根層 .venv，不需要「使其"
+            "與 schtasks 等價」這個中間步驟）")
+
+    def test_run_local_nightly_calls_local_ci_gate_with_unattended_flag(self):
+        """DEF-200-302 step(e)：無人值守 nightly 呼叫 local_ci_gate.ps1 必須帶
+        無人值守旗標，讓 check_skip_census 對未登記剖面降級為真正的 advisory
+        （DEF-200-291 的前置條件）。
+
+        🔴 DEF-200-303 訂正：斷言目標由 `--unattended`（位置參數）改為 `-Unattended`
+        （PowerShell switch 形態）——`local_ci_gate.ps1` 是 `[CmdletBinding()]` 薄殼，
+        `param()` 只認具名參數，位置參數 `--unattended` 會讓參數綁定失敗（rc=1）。
+        核心 `local_ci_gate.py` 的 `--unattended` 由薄殼在內部轉發（見該檔
+        `if ($Unattended) { $CliArgs += '--unattended' }`），呼叫端只能打 `-Unattended`。
+        """
+        text = _read(_PS1)
+        self.assertRegex(
+            text, r"-File\s+tools/local_ci_gate\.ps1\s+-Unattended",
+            "nightly 對 local_ci_gate.ps1 的呼叫必須附加 -Unattended 引數（PowerShell "
+            "switch 形態；-File 薄殼不吃位置參數 --unattended）")
+
+
+# ── 行為級鎖（既有）：兩支 .ps1 必須能被原生 PowerShell 5.1 解析 ────────────────
+class TestWindowsPs1ParseCleanly(unittest.TestCase):
+    """行為級補強：DEF-200-302 改動了兩支 .ps1 的開頭區塊，用真的
+    [System.Management.Automation.Language.Parser]::ParseFile 確認零語法錯誤——
+    純字串鎖抓不到「改壞語法但字面值仍命中 regex」這類缺陷。"""
 
     @unittest.skipUnless(
-        windows_with_native_ps51(),  # R60 E-A-03：語意④ SSOT 述詞（只認原生 5.1）
-        "[WINDOWS-NATIVE-ONLY] 本鎖要在真 PowerShell 上執行抽出的比對式；"
-        "PATH 分隔符與斜線語意僅 Windows 成立（R43 DEF-101-348 標籤，"
-        "供 run_root_unittests.py 彙整可見度）",
+        # DEF-200-303（主控追加）：標籤改為 `[WINDOWS-NATIVE-ONLY]`——
+        # `tools/lib/skip_tag_policy.ALL_SKIP_TAGS` 只認這個字面（不認 `[WINDOWS-ONLY]`），
+        # 舊字面會被 `unregistered_tag_problems()` 的反向檢查判成未登記標籤。
+        sys.platform == "win32", "[WINDOWS-NATIVE-ONLY] 需要原生 PowerShell 引擎解析 .ps1"
     )
-    def test_forward_slash_path_entry_is_matched_and_removed(self) -> None:
-        src = _read(_PS1)
-        hit = _NORM_HIT_RE.search(src)
-        keep = _NORM_KEEP_RE.search(src)
-        self.assertIsNotNone(hit, "找不到 $removed 的比對式——PATH 正規化區塊結構已變動，請同步本鎖")
-        self.assertIsNotNone(keep, "找不到 $kept 的比對式——PATH 正規化區塊結構已變動，請同步本鎖")
-
-        # 合成情境：VIRTUAL_ENV 為反斜線絕對路徑，PATH 內該項寫成**正斜線**
-        # （＝Activate.ps1 的真實寫法），另含一個無關項確認不被誤刪。
-        # 路徑以 tempfile 動態取得而非寫死磁碟機字母——`test_platform_neutral_paths.py`
-        # 有一道禁止 .py 內出現寫死 Windows 假路徑的鎖（R59 落地本測試時當場被它攔下），
-        # 且用真實臨時目錄比假路徑更忠實。
-        with tempfile.TemporaryDirectory() as td:
-            venv_dir = str(Path(td) / "venv")
-            other_dir = str(Path(td) / "other")
-            fwd = venv_dir.replace("\\", "/") + "/Scripts"
-            script = "\n".join([
-                f"$env:VIRTUAL_ENV = '{venv_dir}'",
-                f"$pathBefore = '{other_dir};{fwd};'",
-                "$venvScripts = Join-Path $env:VIRTUAL_ENV 'Scripts'",
-                "$venvNorm = $venvScripts.Replace('/', '\\').TrimEnd('\\')",
-                f"$removed = @($pathBefore -split ';' | Where-Object {{{hit.group('hit')}}}).Count",
-                f"$kept = @($pathBefore -split ';' | Where-Object {{{keep.group('keep')}}})",
-                "Write-Output \"REMOVED=$removed\"",
-                "Write-Output \"KEPT=$($kept -join ',')\"",
-            ])
-            expected_kept = other_dir
+    def test_both_windows_carriers_parse_with_zero_errors(self) -> None:
+        for path in (_PS1, _SMOKE_PS1):
+            script = (
+                "$errors = $null; "
+                f"[void][System.Management.Automation.Language.Parser]::ParseFile("
+                f"'{path}', [ref]$null, [ref]$errors); "
+                "Write-Output ($errors.Count)"
+            )
             proc = subprocess.run(
                 [native_ps51(), "-NoProfile", "-Command", script],
                 capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
             )
-        out = proc.stdout
-        self.assertEqual(proc.returncode, 0, f"抽出的比對式執行失敗：\n{proc.stdout}\n{proc.stderr}")
-        self.assertIn(
-            "REMOVED=1", out,
-            "正斜線寫法的 venv Scripts 未被判為相符（REMOVED != 1）——DEF-101-522 迴歸："
-            f"比對式對 `Activate.ps1` 的真實寫法無效，正規化區塊是死碼。實得：\n{out}",
-        )
-        self.assertIn(
-            f"KEPT={expected_kept}", out,
-            f"無關的 PATH 項被誤刪或保留集算錯。實得：\n{out}",
-        )
-
-    def test_zero_hit_must_not_claim_equivalence(self) -> None:
-        """後置條件鎖：命中 0 項時不得宣告「已等價」。
-
-        刻意不用「總項數變化」做自檢——實測 `$_ -and` 會濾掉 PATH 尾端的空字串項，
-        造成 31→30 的假象，用總數自檢會被騙（DEF-101-522 實測記錄）。
-        """
-        src = _read(_PS1)
-        self.assertRegex(
-            src, r"if\s*\(\s*\$removed\s+-eq\s+0\s*\)",
-            "缺少「命中 0 項」的後置條件分支——零命中時仍會印出等價宣稱（DEF-101-522）",
-        )
-        zero_branch = re.search(r"if\s*\(\s*\$removed\s+-eq\s+0\s*\)\s*\{(.+?)\}\s*else", src, re.DOTALL)
-        self.assertIsNotNone(zero_branch, "零命中分支結構已變動，請同步本鎖")
-        body = zero_branch.group(1)
-        self.assertIn("WARN", body, "零命中分支必須是 WARN 而非成功訊息")
-        self.assertNotIn("使直譯器解析與 schtasks 排程等價", body,
-                         "零命中分支不得出現等價宣稱")
+            self.assertEqual(
+                proc.returncode, 0,
+                f"{path.name} parser 呼叫失敗：\n{proc.stdout}\n{proc.stderr}",
+            )
+            self.assertEqual(
+                proc.stdout.strip(), "0",
+                f"{path.name} 有 {proc.stdout.strip()} 個 parse error：\n{proc.stderr}")
 
 
-# 🔴 本區塊必須留在檔尾。R59 二審 QA-R59-P3-1：初稿把它誤放在 D 項類別**之前**
-# （原第 178 行），直接 `python test_nightly_interpreter_determinism.py` 時
-# unittest.main() 在 D 項類別尚未定義時就開跑 → 只收 10 支、靜默漏掉
-# TestPathNormalisationBehaviour（本檔唯一的行為級鎖，守 P1 DEF-101-522）。
-# 「載具自己少跑兩支卻回報 OK」正是本輪 Scan-F 要抓的形狀，故留註警示。
 if __name__ == "__main__":
     unittest.main()

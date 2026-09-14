@@ -2047,20 +2047,8 @@ class TestAdrClosureClaimsAreMechanicallyChecked(unittest.TestCase):
 
 # ── R71（`DEF-101-765` 解鎖條件 (c)）：程式碼註解輪號 ↔ 帳本當前輪的機械守 ──────────
 #
-# 根因逐字（帳本 `DEF-101-765`）：「`current_round()` **只讀帳本**，程式碼註解裡的輪號對它
-# 完全不可見，兩邊可以無限漂移」。`DEF-101-757` 入規「已知的鎖射程缺口不得只以劃界結案」，
-# 故本組鎖把那個盲區封起來——但**刻意射程窄而準**，判準是「超前」不是「不等於」：
-#
-#   ✅ 採用：輪號 **> 帳本當前輪** 即紅。
-#      · 對正當歷史引用**天然免疫**：「R70 那輪做了 X」講的是已發生的輪次，恆 ≤ 當前輪。
-#        這一點不是宣稱，由 `test_a_legitimate_historical_reference_is_not_flagged` 坐實。
-#      · 抓得到 `DEF-101-765` 的**實際形態**：本批程式碼自稱 R72、帳本當前輪 R71。round-label-ok
-#   ❌ 否決 ①「輪號 ≠ 當前輪即紅」：本 repo 的註解**大量**逐字引用往輪（`R42`／`R60`／
-#      `R69`…），實測全樹逾千處 ⇒ 幾乎每支檔都紅，屬「寬而吵」，鎖會被 opt-out 掉。
-#   ❌ 否決 ②「只掃未提交／本批新增的行」：可攔本次事故，但一 commit 就失明——鎖的價值
-#      在下一輪，而下一輪它什麼都看不到；且 `git diff` 面對 rebase／squash 不穩定。
-#   ❌ 否決 ③「凡輪號一律要求同行帶輪次來源註記」：等於強制全樹改寫上千處註解，成本遠高
-#      於收益，且新格式一樣會漂移（本 repo 已有多筆「格式訂了沒人跟」的前例）。
+# 根因（帳本 `DEF-101-765`）、採用的判準與兩個被否決的替代方案，沿革全文搬至
+# CrossPlatform_R151_Guard_Prose_Migration.md〈R71（DEF-101-765 解鎖條件 (c)）〉節。
 #
 # 掃描面（**實測收斂**，非拍腦袋——手法同 `DEF-101-757` 那輪「寬判準 52 命中多為誤配 →
 # 收斂到零誤報」）：
@@ -2466,11 +2454,8 @@ class TestUnresolvedInventoryHasASingleMeasurementEntry(unittest.TestCase):
 
 
 # ── 早退遮蔽 ＋ 「訊息教人加內容的檔必須加得下」（P0-A；本批落地） ─────────────────
-# 兩道鎖同源於一次實測事故：帳本目錄新增一份未登記的治理文件時，本工具**只印 2 行**
-# （`❌ 具名治理文件涵蓋面與磁碟脫節` ＋ 那一筆），原本會印的 8 筆孤兒 warning、18 筆
-# 已結列殘留待辦全部消失——而讀者看到的是「輸出變乾淨了」。同一則訊息教人「請在該常數
-# 補上一筆」，但那支檔當時卡在 raw-line 棘輪 1474/1474、**餘裕 0 行**，照做即破另一道
-# 硬閘 ⇒ 訊息在磁碟現況下不可執行，兩道鎖互為對方的違規。
+# 兩道鎖同源於一次實測事故：帳本目錄新增未登記治理文件時本工具只印 2 行，兩道鎖互為
+# 對方違規的立案沿革全文搬至 CrossPlatform_R151_Guard_Prose_Migration.md〈早退遮蔽〉節。
 #
 # 誠實劃界（R76 複審後訂正——原文對第二半的宣稱在寫下當回合就是假的，見下方表的訂正段）：
 #   · **早退遮蔽**那一半只管 `check_defect_log_crossref.py` 這一支工具的檢查序（`main()`
@@ -2585,12 +2570,8 @@ class TestEarlyExitAnnouncesUnrunChecks(unittest.TestCase):
 #: 訊息一律**當場真的產生一次**（不是讀 docstring）——讀 docstring 的鎖抓不到「訊息被改寫
 #: 成指向別的檔」。
 #:
-#: 🔴 R76 複審 ARCH-02／SD-02 訂正：本表落地首版**只有兩欄**（第三欄「被要求編輯的檔」
-#: 在註解裡宣告、在實作裡不存在），而餘裕斷言硬編 `Path(m.__file__)`、根本不讀本表 ⇒
-#: 上方 `:2333` 那句「要納入就在本表加一筆」是假的：照三欄格式加一筆會 `ValueError:
-#: too many values to unpack`，退成兩欄則 `_message()` 靜默跑到別支函式、產生一則講
-#: 別的常數的誤導訊息。現已補成真三欄、餘裕斷言逐筆迭代、`_message()` 具名 dispatch
-#: 且未知名字 fail-loud。同時把第二支工具真的納管進來（那正是它「做成表格」的意義）。
+#: 🔴 R76 複審 ARCH-02／SD-02 訂正（本表落地首版只有兩欄、餘裕斷言不讀本表）沿革全文
+#: 搬至 CrossPlatform_R151_Guard_Prose_Migration.md〈_ADD_CONTENT_DIRECTIVES〉節。
 _ADD_CONTENT_DIRECTIVES: tuple[tuple[str, str, str], ...] = (
     ("unregistered_governance_docs", "_GOVERNANCE_DOCS",
      "tools/check_defect_log_crossref.py"),
@@ -3214,17 +3195,9 @@ class TestR82ComplexReviewSealTableIntegrity(unittest.TestCase):
 
 
 # ------------------------------------------------- R84：`改派`／`回執` 出口的**過期**判準
-# 🔴 立案（帳本 `DEF-200-041`，R84 落地為 `DEF-200-047`）：`m._reassign_hit()` 是硬規則②
-# 的**無條件**出口——它只問狀態欄有沒有「改派」／「回執」字樣，**不問改派到第幾輪**。於是
-# 一列寫過一次改派附記之後，它的承接輪號此後永遠不再被比較：實測 `DEF-101-886`／`887`
-# 的出口寫的是 R81，而 HEAD 已是 R83 收輪，三輪零交付卻一次都沒轉紅。
-#
-# 🔴 **為何判準住在測試檔而不是 `check_defect_log_crossref.py`**（誠實劃界，不是偏好）：
-# 該工具受 `check_loc_budget.SPECIAL_FILES` 的 raw-line 棘輪管（門檻 1474），當回合實測
-# raw 餘裕 22 行，而 `TestActionableMessagesHaveLocHeadroom` 另要求它保留
-# `_MIN_DIRECTIVE_HEADROOM`(=5) 行 ⇒ 可用只有 17 行，塞不下「判準＋WHY＋逐列訊息」。
-# 代價已誠實記在帳本 `DEF-200-047`：閘門 `check_defect_log_crossref.py` 的 rc 不含本判準，
-# 咬人的是根層 unittest 閘門（CI 亦跑）。
+# 🔴 立案（帳本 `DEF-200-041`／`DEF-200-047`）與「為何判準住在測試檔而不是
+# check_defect_log_crossref.py」的 LOC 餘裕裁決，沿革全文搬至
+# CrossPlatform_R151_Guard_Prose_Migration.md〈R84：改派／回執出口過期判準〉節。
 #
 #: **生效輪**：只判「發現情境」欄輪號 ≥ 本值的列（照 R59 判例「釘現況 ＋ 只硬擋新增列」）。
 #: 🔴 為何非得分軌：對全表硬上，當回合實測 26 列當場轉真紅（走該出口的未結列 49 筆，扣掉

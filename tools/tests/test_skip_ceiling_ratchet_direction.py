@@ -224,7 +224,11 @@ class TestCeilingMaxDirectionLock(unittest.TestCase):
         live = copy.deepcopy(S._RUNTIME_SKIP_CEILING_MAX)
         legacy = "AutoClaude/tests@win32+nopg+nested"
         frozen_untagged = _FROZEN_CEILING_MAX[legacy][S.SKIP_GROUP_UNTAGGED]
-        cells = live.pop(legacy)
+        # 🔴 DEF-200-303：真表已完成 re-key，`legacy` 這個舊字面本身不再是任何一張
+        # 表的鍵（真鍵多帶 `+pgext`）——用它當索引會 KeyError。改用 `legacy_profile()`
+        # 找出真正對應這個舊字面的 live 鍵，取值後再模擬「一鍵裂成兩鍵」。
+        live_key = next(k for k in live if K.legacy_profile(k) == legacy)
+        cells = live.pop(live_key)
         live[f"{legacy}+pgext"] = {**cells, S.SKIP_GROUP_UNTAGGED: 96}
         live[f"{legacy}+nopgext"] = {**cells, S.SKIP_GROUP_UNTAGGED: 162}
         problems = ceiling_max_direction_problems(live)
@@ -236,12 +240,17 @@ class TestCeilingMaxDirectionLock(unittest.TestCase):
 
     def test_a_frozen_key_that_falls_through_is_said_out_loud(self) -> None:
         """凍結鍵在 live 表裡連一個後代都沒有時必須出聲——原版靜默 `continue`，
-        於是「把鍵刪掉／改成映不回來的名字」是零阻力的繞道。"""
+        於是「把鍵刪掉／改成映不回來的名字」是零阻力的繞道。
+
+        🔴 DEF-200-303：真表已 re-key，訊息報的是**凍結鍵**（舊字面），不是被砍掉的
+        live 鍵本身（新字面多帶 pgextras token）——用 `legacy_profile()` 換算後比對。
+        """
         live = copy.deepcopy(S._RUNTIME_SKIP_CEILING_MAX)
         dropped = next(iter(live))
         del live[dropped]
         problems = ceiling_max_direction_problems(live)
-        self.assertTrue(any(dropped in p and "落空" in p for p in problems), problems)
+        legacy = K.legacy_profile(dropped)
+        self.assertTrue(any(legacy in p and "落空" in p for p in problems), problems)
 
     def test_both_raised_together_is_still_caught(self) -> None:
         """立案情境本身：`_RUNTIME_SKIP_CEILING` 與 `_RUNTIME_SKIP_CEILING_MAX` 兩張表一起
@@ -638,19 +647,27 @@ class TestSkipProfileKeyAxes(unittest.TestCase):
     def test_the_axis_verdict_stays_advisory_and_never_reaches_a_gate(self) -> None:
         """掌舵者裁決「修好前維持 advisory 不登記、不擋 push」的機械形態：
         軸判準只出現在 advisory 通道（`skip_target_report`／未登記那一支），
-        **不得**出現在會讓 rc 變 1 的 `skip_group_census_problems` 有牙向。"""
-        at_ceiling = dict(S._RUNTIME_SKIP_CEILING[self._AMBIGUOUS])
+        **不得**出現在會讓 rc 變 1 的 `skip_group_census_problems` 有牙向。
+
+        🔴 DEF-200-303 訂正本支前提：`self._AMBIGUOUS`（無 pgextras 軸的舊字面）
+        今日已不再是任何一張表的已登記鍵——re-key 之後它與其他任何缺軸字面同樣落入
+        「未登記」分支。本支改測**已登記**的新鍵（`_RUNTIME_SKIP_CEILING` 真實存在
+        的 `+pgext` 鍵）在上限值上零問題，證明「軸已帶滿」才是真正解除 advisory 的
+        條件，而不是「掌舵者裁決還沒到期」。
+        """
+        registered = "AutoClaude/tests@win32+nopg+nested+pgext"
+        at_ceiling = dict(S._RUNTIME_SKIP_CEILING[registered])
         self.assertEqual(
-            S.skip_group_census_problems(self._AMBIGUOUS, at_ceiling), [],
-            "已登記剖面在上限值上必須零問題——軸 advisory 若滲進這一向就是當場擋 push")
+            S.skip_group_census_problems(registered, at_ceiling), [],
+            "已登記且帶滿軸的剖面在上限值上必須零問題——軸 advisory 若滲進這一向"
+            "就是當場擋 push")
+        unregistered = S.skip_group_census_problems(self._AMBIGUOUS, at_ceiling)
+        self.assertTrue(any("未登記" in p for p in unregistered))
+        self.assertTrue(any(K.AXIS_PGEXTRAS in p for p in unregistered))
         self.assertTrue(
             any(K.AXIS_PGEXTRAS in line
                 for line in S.skip_target_report(self._AMBIGUOUS, at_ceiling)),
-            "advisory 通道必須說話，否則這道判準沒有任何production 出口")
-        unregistered = S.skip_group_census_problems(
-            "AutoClaude/tests@linux+nopg+nested", at_ceiling)
-        self.assertTrue(any("未登記" in p for p in unregistered))
-        self.assertTrue(any(K.AXIS_PGEXTRAS in p for p in unregistered))
+            "advisory 通道必須說話，否則這道判準沒有任何 production 出口")
 
     def test_the_builder_refuses_a_key_its_grammar_does_not_cover(self) -> None:
         """鍵不得靠字串拼接：未宣告的樹／軸給少了／token 不合法都必須 fail-loud。"""
@@ -672,16 +689,17 @@ class TestSkipProfileKeyAxes(unittest.TestCase):
         self.assertTrue(K.axis_tokens(K.AXIS_PGEXTRAS))
 
     def test_no_new_ambiguous_key_may_join_the_tables(self) -> None:
-        """re-key 完成度棘輪：缺軸的鍵只准變少，新增一個當場紅（見
-        `skip_profile_key.PRE_AXIS_KEY_DEBT_MAX` 的 WHY）。"""
+        """re-key 完成度棘輪：DEF-200-303 已把四張表的 `AutoClaude/tests@` 鍵全部
+        re-key 到位，棘輪歸零（`PRE_AXIS_KEY_DEBT_MAX` 5→0）。缺軸的鍵只准維持 0，
+        新增一個當場紅（見 `skip_profile_key.PRE_AXIS_KEY_DEBT_MAX` 的 WHY）。"""
         tables = (S._RUNTIME_SKIP_CEILING, S._RUNTIME_SKIP_CEILING_MAX,
                   S._FULL_SUITE_RUNNERS, S._COMPLEMENTARY_PROFILE)
         debt = K.keys_missing_axes(*tables)
-        self.assertLessEqual(
-            len(debt), K.PRE_AXIS_KEY_DEBT_MAX,
-            f"缺軸的鍵變多了（{debt}）——DEF-200-183 未修完期間不得再長出新的歧義鍵；"
-            "re-key 之後請把 PRE_AXIS_KEY_DEBT_MAX 一起下修")
-        self.assertTrue(debt, "棘輪若已歸零，請把常數降到 0 並移除本前提斷言")
+        self.assertEqual(K.PRE_AXIS_KEY_DEBT_MAX, 0)
+        self.assertEqual(
+            debt, [],
+            f"缺軸的鍵變多了（{debt}）——re-key 已完成，棘輪已歸零，任何缺軸的鍵"
+            "都不該再出現")
         self.assertEqual(
             K.keys_missing_axes({"tools/tests@win32": 1, "brand/new@x": 1}), [],
             "零軸樹與未宣告軸的樹不得被算成欠債（否則棘輪會被雜訊填滿）")

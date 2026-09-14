@@ -168,8 +168,14 @@ _PINNED_SHA256: dict[str, str] = {
     # ——本檔 hash 釘選只認「殼內容有沒有變」，對「殼內嵌常數與核心常數語意分歧」
     # 天生盲目（R59 核心加 -rs 時本檔全綠、Windows 側靜默少 -rs），語意面另由
     # AutoClaude/tests/tools/test_local_ci_gate_shell_arg_parity.py 跨檔鎖守。
+    # DEF-200-303 重釘（B5 修復棒）：新增 `-Unattended` 開關（[switch]$Unattended），
+    # 轉發 `--unattended` 給核心（B3 棒已於 local_ci_gate.py 的 parse_args 支援），
+    # 補上 B2 棒把 nightly Stage L 呼叫改成帶 `--unattended` 後最後一段轉發鏈
+    # ——`local_ci_gate.ps1` 原本只有 -Act/-Pg/-PytestArgs，位置參數 `--unattended`
+    # 會讓 [CmdletBinding()] 參數綁定失敗（rc=1）。仍屬「參數映射 → 轉呼叫核心」
+    # 薄殼職責（零業務邏輯），故重釘非降級。
     "AutoClaude/tools/local_ci_gate.ps1": (
-        "50c7246079fab0ee522b0d3a787e51bdf949161333b17b2b43300cd7b5e40373"
+        "08184ba979c118fb7502004fe11b636f991ca35bc62f48ccd2125973b18255cc"
     ),
     # R16（Architect 建議 B）：bootstrap/integration_gate/run_act 收斂為薄殼＋
     # 各自 Python 核心（bootstrap_core.py／integration_gate_core.py／

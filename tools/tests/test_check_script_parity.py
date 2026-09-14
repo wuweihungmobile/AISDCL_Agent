@@ -201,12 +201,8 @@ class TestSingleSidedEnrollment(unittest.TestCase):
 class TestR13LibAndInstallerEnrollment(unittest.TestCase):
     """R13 ARCH-R13-4／CI-3：tools/lib 納入掃描邊界＋mac nightly 安裝器單邊納管。
 
-    WHY：tools/lib/ 三支（install 共用層「異名對等品」×2＋PowerShell 專屬 helper）
-    過去完全在 _PAIR_SCAN_DIRS 邊界外——增刪/改名零機械訊號；install_mac_nightly.sh
-    （R13 ARCH-R13-3 launchd 安裝器）為新增單邊 .sh，皆須附決策依據納管。
-    計數註記（R13 擴充依據）：「13 對＋11 支單邊」是 R12 時期工具的動態實跑輸出、
-    並無任何測試釘選值鎖定該計數（enrollment 守護靠 unknown/stale 名單而非總數），
-    R13 擴面後實跑輸出為 13 對＋15 支單邊，無需同步任何釘選。
+    WHY 沿革全文搬至 CrossPlatform_R151_Guard_Prose_Migration.md
+    〈TestR13LibAndInstallerEnrollment〉節。
     """
 
     _R13_SINGLES = (
@@ -322,13 +318,10 @@ class TestLatestToolsEnrollment(unittest.TestCase):
 
 class TestRunTlcInvocationParityLock(unittest.TestCase):
     """R65（ADR-XPLAT-002 §5 Phase 2-A）：取代退場的 run_tlc FSM 軌錨點集合鎖
-    （原 `_check_run_tlc_tracks`）。run_tlc.{sh,ps1} 薄殼化後兩側已不再內嵌
-    `.tla`/`.cfg` 檔名字面（舊鎖的抽取對象消失），但「兩側委派引數仍可能分歧」
-    （DEF-101-100 攔的正是這型漂移：.ps1 曾缺整條 FLEET_FSM 軌而 .sh 有）這個
-    風險本身沒有消失——依 ADR §4.2 rule 3 dominance test，此斷言沒有現成接手者，
-    改抽兩側委派 `tools.fsm_runtime.tlc_runner` 時傳的 `--module`/`--cfg` 引數
-    token 做同型 multiset 比對，延續同一個保護意圖，只是換一個新形態下仍存在
-    的錨點（fixture 注入變異，同 R12 原測試手法）。
+    （原 `_check_run_tlc_tracks`）。
+
+    沿革與現行判準設計全文搬至 CrossPlatform_R151_Guard_Prose_Migration.md
+    〈TestRunTlcInvocationParityLock〉節。
     """
 
     _SH_FULL = (
@@ -580,11 +573,7 @@ class TestR69ExitCodeContract(unittest.TestCase):
 class TestLatestThinnessPin(unittest.TestCase):
     """LATEST 版薄殼 hash 釘選的紅/綠自證（R65 立，本輪改為委派）。
 
-    R65 起本鎖接手 `run_tlc.{sh,ps1}` 兩側內容未偏離的斷言，比舊鎖更嚴格
-    （鎖住整份正規化內容而非只比對軌 token 集合）。E-06／R77-54①：受測對象改為
-    `check_wrapper_thinness`（唯一實作）＋本檔薄呼叫點，斷言逐條保留作為併表的
-    dominance test 本體，注入面改 patch 該表與 LATEST 解析器。史料見證據檔
-    〈第七輪 史料搬遷（Dev-Trim8）〉。
+    沿革全文搬至 CrossPlatform_R151_Guard_Prose_Migration.md〈TestLatestThinnessPin〉節。
     """
 
     def _make_shell_tree(self, name: str, sh_body: str, ps1_body: str) -> Path:
@@ -727,11 +716,8 @@ class TestThinnessCrossLock(unittest.TestCase):
 class TestLatestKeysAreCoveredByTheSingleCrossLock(unittest.TestCase):
     """R66 DEF-101-622 的斷言，**改由合併後的那一份 cross-lock 承接**（本輪 E-06）。
 
-    原本這裡是 `_check_latest_thinness_cross_lock()` 的專屬類別——它與
-    `TestThinnessCrossLock` 逐字同形，只差兩張表的名字，而這兩支存在的**唯一理由**
-    正是「兩份獨立字面清單會各自腐化」。判準自己複製兩份，等於把它負責攔的病帶進
-    守門層本身。兩表合一後只剩一份 cross-lock，本類別因此改成：證明 LATEST 鍵**確實
-    落在那一份的射程內**（不是「少了一支測試」，是「同一批斷言換人承接」）。
+    沿革全文搬至 CrossPlatform_R151_Guard_Prose_Migration.md
+    〈TestLatestKeysAreCoveredByTheSingleCrossLock〉節。
     """
 
     def test_missing_latest_pin_key_is_red(self) -> None:
@@ -841,13 +827,10 @@ class TestR61Phase1BMigration(unittest.TestCase):
     def test_uep_is_five_after_r65_migration(self) -> None:
         """UEP＝`_EXEMPT_PAIRS`（ADR-XPLAT-002 §4.1，R65 更新）。
 
-        歷史：R60 基線 8 → R61 Phase 1-B 遷移兩對至 `_THINNESS_ENROLLED` 後為 6
-        （公式當時是 `_EXEMPT_PAIRS` + `_TLC_TRACK_ENROLLED`）→ R65 Phase 2-A 把
-        run_tlc 那唯一一筆 `_TLC_TRACK_ENROLLED` 條目也升級為 hash 釘選
-        （不計入 UEP）後，`_TLC_TRACK_ENROLLED` 本身
-        退場、公式不再有該項，UEP 應為 5。本測試名稱雖冠 R61，但斷言的是「當前
-        UEP 公式與數值」的活體回歸鎖（非凍結歷史快照），故隨本輪同步更新，防止
-        被靜默改回。"""
+        逐輪遷移沿革（R60 基線 8 → R61 → R65 現為 5）全文搬至
+        CrossPlatform_R151_Guard_Prose_Migration.md〈test_uep_is_five_after_r65_migration〉節。
+        本測試名稱雖冠 R61，但斷言的是「當前 UEP 公式與數值」的活體回歸鎖（非凍結歷史
+        快照），故隨本輪同步更新，防止被靜默改回。"""
         uep = len(m._EXEMPT_PAIRS)
         self.assertEqual(uep, 5)
 
@@ -1064,9 +1047,8 @@ class TestR64TierShrinkOnlyRatchet(unittest.TestCase):
     `tools/tests/test_adr_xplat001_c1c2_lock.py::TestShrinkOnlyRatchet`（ADR 指定的
     照抄對象）：正控／合成注入兩個降級方向／對照組／字典改名不得靜默放行／真棘輪。
 
-    本類刻意加進本檔而非新開檔案：新開 `test_*.py` 當時會讓護欄層檔數棘輪翻紅
-    （DEF-101-561③，R78 起量測面已換成淨行數，但「同族判準住同一個家」的理由
-    仍然成立）。史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
+    本類刻意加進本檔而非新開檔案的沿革全文搬至
+    CrossPlatform_R151_Guard_Prose_Migration.md〈TestR64TierShrinkOnlyRatchet〉節。
     """
 
     @staticmethod
@@ -1807,12 +1789,8 @@ class TestRedOutputGoesThroughTheSingleExit(unittest.TestCase):
 class TestR67LatestPinnedShebangCoverage(unittest.TestCase):
     """R67-H35 回歸鎖（LATEST 側）：LATEST 釘選鍵的 `.sh` 也須把 shebang 納入 hash。
 
-    WHY 當初要另立一支：R67 時 LATEST 釘選住在本檔的第二張表，而
-    `test_check_wrapper_thinness.py` 那支全面性測試只走 `_PINNED_SHA256` 的迴圈——
-    LATEST 那兩支不在它的射程裡，不補這條就會「主表修好、LATEST 仍在覆蓋面外」。
-    🔴 本輪（E-06／R77-54①）兩表合一後，那支全面性測試的迴圈**自動涵蓋** LATEST 鍵；
-    本類別因此改為守住「合併確實把 LATEST 帶進了那個迴圈」——刻意不刪，因為刪掉
-    就沒有任何東西會在「有人把 LATEST 鍵再拆出去」時說話。
+    WHY 當初要另立一支、以及本輪合表後改守什麼的沿革全文搬至
+    CrossPlatform_R151_Guard_Prose_Migration.md〈TestR67LatestPinnedShebangCoverage〉節。
     """
 
     def test_latest_pinned_sh_shebang_enters_hash(self) -> None:
@@ -1841,11 +1819,8 @@ class TestLatestThinnessRationaleIsFactual(unittest.TestCase):
     """R79 ARCH：`_check_latest_thinness()` 上方那段「為何不刪這個呼叫點」的事實宣稱
     必須與磁碟相符。
 
-    病灶（R79 實測）：原文聲稱 compat-CI 只跑本檔，實則兩支 workflow 各有一個
-    `run_root_unittests.py` step 對真樹跑全部 16 鍵——那句話是「這段不可刪」的
-    唯一論據，失實前提會讓下一輪架構決定建立在假話上。本鎖釘的不是散文字面而是
-    它依賴的四個世界事實，任一事實翻轉即紅並指名要改哪一段。史料見證據檔
-    〈第七輪 史料搬遷（Dev-Trim8）〉。
+    病灶（R79 實測）沿革全文搬至 CrossPlatform_R151_Guard_Prose_Migration.md
+    〈TestLatestThinnessRationaleIsFactual〉節。
     """
 
     _COMPAT_CI = ("macos-compat-ci.yml", "windows-compat-ci.yml")
@@ -1898,6 +1873,9 @@ class TestLatestThinnessRationaleIsFactual(unittest.TestCase):
         # `python …/check_script_parity.py` 換成別的檔）時，裸檔名比對會被同區塊的
         # `echo "--- [N/M] … check_script_parity.py …"` 標題字串滿足而放行——本 repo
         # 已在 sdd_version.py 那條鎖上踩過同款陷阱，這裡先把它堵掉。
+        # DEF-200-302：Windows smoke 改以釘死根層 .venv 的 `$script:PyExe` 執行（不再靠
+        # PATH 上的裸 `python`），「被直譯器執行」的判準因此同時認這個變數字面。
+        interp = r"(?:python|\$script:PyExe)"
         for name in self._SMOKES:
             with self.subTest(smoke=name):
                 code = "\n".join(
@@ -1905,12 +1883,12 @@ class TestLatestThinnessRationaleIsFactual(unittest.TestCase):
                     if not ln.lstrip().startswith("#")
                 ).replace("\\", "/")
                 self.assertRegex(
-                    code, r"python[^\n]*check_script_parity\.py",
+                    code, interp + r"[^\n]*check_script_parity\.py",
                     f"{name} 已不再實際執行 check_script_parity ⇒ LATEST 釘選在 smoke "
                     "路徑上已無守門，check_script_parity.py 內那段理由整段失效",
                 )
                 self.assertNotRegex(
-                    code, r"python[^\n]*check_wrapper_thinness\.py",
+                    code, interp + r"[^\n]*check_wrapper_thinness\.py",
                     f"{name} 已改跑 check_wrapper_thinness ⇒ smoke 覆蓋由 2 鍵升到 16 鍵，"
                     "check_script_parity.py 內那段「其餘 14 支殼在 smoke 上無 hash 守門」"
                     "的缺口描述已成假話，請刪除該段並重新評估本呼叫點是否仍需保留",

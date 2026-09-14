@@ -342,8 +342,14 @@ _FROZEN_SHRINK_ONLY_BUCKET_LINES: dict[str, int] = {
     # 指針 docs/06_quality/…」，指針字面使整檔依 BUCKET_PRIORITY 落 prose 桶（非散文成長，是
     # 歸桶副作用；另一出口＝拔掉指針改落 guard_self，同為 shrink-only 桶，成長不會消失只會換桶）。
     # 帶四方記帳複審裁決重釘（紀錄見 docs/06_quality/CrossPlatform_R145_Scan_Findings.md §3.1）。
-    "prose": 4512,
-    "guard_self": 3431,
+    # 🔴 DEF-200-301～306 單一 .venv 收斂收尾單人窗口：prose 4512→4469（−43）、guard_self
+    # 3431→3162（−269）——兩桶皆**下修**：Dev-Trim 兩棒對 tools/tests 鎖檔的史料散文搬遷
+    # （逐字保全於 docs/06_quality/CrossPlatform_R151_Guard_Prose_Migration.md）使 guard_self 實測
+    # 低於基準的 95%，`bucket_ratchet_problems()` 第三向「分桶基準過時」逐字指示重釘為實測值
+    # 3162；prose 雖未跌破 slack，依本表「合法縮小後必須同步下修」紀律一併釘到實測值。
+    # 值取自當回合 `guard_layer_bucket_census.py --grain chunk`（exclusive）實跑、零加減推算。
+    "prose": 4469,
+    "guard_self": 3162,
 }
 
 #: 棘輪吃的粒度與估計量。寫成常數而不是散文，是為了讓 probe 與棘輪不可能各讀一種

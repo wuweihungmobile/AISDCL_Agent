@@ -61,6 +61,13 @@ gh run list --limit 10 --json workflowName,conclusion,event,createdAt,headSha   
 
 1. **跑一次啟動提示詞**（全新 Windows 機器先 `Set-ExecutionPolicy RemoteSigned -Scope CurrentUser`，預設 Restricted 擋掉所有 .ps1）；2. **跑全套閘門確立新平台基線，紅燈在這步清完**（指令見 ONBOARDING §7 與根 CLAUDE.md；本檔不重抄數字）——剛過來的第一輪最容易冒出跨平台缺口，是本步目的、不是意外。
 3. 🔴 **回填本平台 ONBOARDING §7 表②**——整份 SOP 唯一只能在目標平台做的事（跨平台代填＝假 provenance，工具 rc=2 拒絕）：`<乾淨 venv>/bin/python tools/sync_onboarding_baselines.py --write --with-slow`。
+   - **首選：`tools/lib/clean_venv_carrier.py`**（建／裝／探針／回填／必刪一條龍；DEF-200-306）——下方手動 SOP 是它出現前的做法，保留作**手動備援**（工具本身壞掉、或要偵錯某一步時逐步照抄）：
+     ```bash
+     "$(git rev-parse --show-toplevel)/.venv/bin/python" tools/lib/clean_venv_carrier.py
+     ```
+     ```powershell
+     & "$(git rev-parse --show-toplevel)\.venv\Scripts\python.exe" tools/lib/clean_venv_carrier.py
+     ```
    - **乾淨 venv ≠ 本機 .venv**（本機幾乎必裝過 pg extras，工具 rc=2 拒跑）：建在 **repo 樹外**（樹內會污染全樹掃描型測試），照 `tools/bootstrap_core.py` 的出廠定義裝（Windows 換 `py -3.11 -m venv <樹外目錄>` 與 `<樹外目錄>\Scripts\python.exe`）：
      ```bash
      python3.11 -m venv "${TMPDIR:-/tmp}/cleanvenv"     # 放 $TMPDIR（mac 預設非 /tmp）：dev_start 的雜散 venv 提醒掃的是 tempfile.gettempdir()，同一基準才掃得到

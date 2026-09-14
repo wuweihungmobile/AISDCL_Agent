@@ -4,14 +4,8 @@
 🔴 本檔刻意寫成 `unittest.TestCase` 類別風格：根層四道閘門走的是 **unittest discover**，
 pytest 函式風格的測試檔會被整檔零收集（R60 Scan-C 的 C-01 病例）。
 
-R60 round 1 四方複審拆穿本檔初版五個鑑別力缺口，逐一對應現行結構：
-`TestCheckModeBugInjection`（注入七種真實缺陷比對 problem 集合差異，而非只看 rc）／
-呼叫 `ADL.POINTER_RE` 本體對真實帳本雙分支斷言（原自寫窄正則零測試消費者）／
-`TestConservationGuardsAreExplicitNotAssert`（AST 斷零 `assert` 陳述＋`python -O`
-子行程重驗，原裸 `assert` 在 `-O` 下整組消失）／`TestCheckIsWiredIntoGates`（斷言
-pre-push／CI 真的執行 `--check`，原無人看 rc）／`_generated_header_of()` 結構邊界
-（原 `[:4000]` 切片溢入表格區撞到合法引用字樣）。五項缺口細節與 Pkg-P12 假紅史料
-見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
+R60 round 1 四方複審拆穿本檔初版五個鑑別力缺口的沿革全文搬至
+CrossPlatform_R151_Guard_Prose_Migration.md〈test_archive_defect_log.py 模組 docstring〉節。
 
 判準④（散文交棒偵測）的正樣本用 R60 動工前真的被誤搬的兩列原文
 （`DEF-101-517`／`DEF-101-526`，現居 `archive_30`）：舊判準（只看狀態欄）曾放行、
@@ -510,9 +504,11 @@ class TestPlanRejectsRowsWithExternalResidencePointers(unittest.TestCase):
     """判準⑥（指針反向依賴，DEF-101-612）：`plan()` 不得把「有外部居所指針宣稱本列現居
     主檔」的列判為可搬。
 
-    DEF-101-612 立案史料（R60 收尾包搬遷後家族與治理文件共 11 處居所指針同時失實）
-    搬遷，原文＝Guard_Repin 證據檔 §E-12。本類別逐項注入真實會撞到的三種形態
-    （立帳見主檔／見主檔／已在某 archive），並反向坐實「正確的排除範圍」不會誤傷。
+    立案史料（R60 收尾包搬遷後家族與治理文件共 11 處居所指針同時失實）全文搬至
+    CrossPlatform_R151_Guard_Prose_Migration.md
+    〈TestPlanRejectsRowsWithExternalResidencePointers〉節。
+    本類別逐項注入真實會撞到的三種形態（立帳見主檔／見主檔／已在某 archive），
+    並反向坐實「正確的排除範圍」不會誤傷。
 
     正樣本一律用構造的合成 ID（`DEF-999-99x`），不用真實帳本現存列——現行帳本上暫無
     外部居所指針指向任何可搬候選（R66 Triage 評估的既有現況：`DEF-101-617`／`618` 查無
@@ -1233,14 +1229,11 @@ class TestCheckModeBugInjection(unittest.TestCase):
     def test_the_two_quotation_exceptions_are_exempt_but_always_printed(self):
         """硬要求的兩種例外必須①真的豁免②每次都被列印。
 
-        🔴 這兩條是本輪自己補的洞（帳本 round 2 實際寫入時當場踩到）：
-          (甲) code span 引述 —— 帳本的缺陷條目本來就要逐字引述判準語法（敘述
-               ARCH-R60-01 時寫 `` `立帳見主檔 DEF-101-493` ``）；
-          (乙) 術語提及 —— 本 repo 慣用「立帳見」字樣 這種中文引號寫法（本工具自己的
-               錯誤訊息就是），一律誤報會逼人改寫**正確的**散文。
-        硬要求若把這兩種也當宣稱，帳本永遠無法談論自己的判準；但豁免必須看得見——
-        否則「用反引號夾帶一個真指針」就是新的靜默規避路徑。故同時斷言兩件事：
-        豁免生效（不進 problems）＋豁免現形（進逐處列印的引述清單，且標明憑哪一條）。
+        兩種例外（code span 引述／術語提及「立帳見」）的立案沿革全文搬至
+        CrossPlatform_R151_Guard_Prose_Migration.md
+        〈test_the_two_quotation_exceptions_are_exempt_but_always_printed〉節。
+        故同時斷言兩件事：豁免生效（不進 problems）＋豁免現形（進逐處列印的引述清單，
+        且標明憑哪一條）。
         """
         payload = ("> 引述語法：`立帳見主檔 DEF-999-996`、`立帳見本表 R99 條目`；"
                    "另「立帳見」字樣本身在本行只是術語提及。")
@@ -1516,9 +1509,7 @@ class TestArchiveIndexCoverage(unittest.TestCase):
     """判準⑤ — 歸檔索引涵蓋性（R60 round 3；四方 round 2 **全部四位獨立命中**：
     ARCH-R60R2-01／SA-R60R2-01／SD-R60-R2-01／QA2-R60-03）。
 
-    原始缺陷：R60 收輪前人工建了 `archive_31` 卻沒登記進主檔索引段，而當時的四項判準
-    完全不看索引 ⇒ `--check` 照印 rc=0，主檔標題還寫死「三十檔」。**同一支閘門在同一個
-    session 印的是「32 檔」**（家族檔數）——兩個數字在同一份輸出裡自相矛盾而沒人被擋。
+    原始缺陷沿革全文搬至 CrossPlatform_R151_Guard_Prose_Migration.md〈TestArchiveIndexCoverage〉節。
 
     根因級修法不只是「加一道檢查」，而是讓 `apply()` **自己註冊**（建 archive 的程式負責
     寫索引），於是「歸檔完忘記更新索引」不再是一條靜默路徑；判準⑤ 則守人工歸檔與事後腐化。
@@ -1632,11 +1623,8 @@ class TestArchiveIndexCoverage(unittest.TestCase):
 class TestGovernanceDocsAreInThePointerAuditSurface(unittest.TestCase):
     """判準④ 稽核面擴為「帳本家族 ∪ 具名治理文件」（ARCH-R60R2-05，方案甲）。
 
-    裁決過程刻意記在測試裡：主控初裁方案(乙)「立帳見＝家族專用語法、家族外禁用」，
-    隨後**自己推翻**——(乙) 會讓治理文件裡的指針完全失去居所稽核，而 ARCH 的證據正指出
-    其中一處指向的列是待 R61 承接的**活列**，一旦被搬走該句就靜默失實（與 archive_26/27
-    → `DEF-101-493` 同一劇本，而 493 正是 ARCH-R60-01 的原始案例）。**把語法禁掉＝把
-    偵測面一起丟掉**，故改採擴面。
+    裁決過程（主控初裁方案(乙)又自行推翻的沿革）全文搬至
+    CrossPlatform_R151_Guard_Prose_Migration.md〈TestGovernanceDocsAreInThePointerAuditSurface〉節。
     """
 
     def test_third_scope_dialect_is_parseable(self):
@@ -1709,11 +1697,8 @@ class TestGovernanceDocsAreInThePointerAuditSurface(unittest.TestCase):
 class TestCriteriaListIsASingleSsot(unittest.TestCase):
     """判準清單只准有一份（Pkg-P7 P7-4）。
 
-    原始缺陷：round 2 主控推翻方案(乙)、刪掉 `check()` 的第(7)項「具名治理文件無家族專用
-    語法的指針宣稱」反向鎖，卻**漏改 `apply()` 標頭裡手寫的「共七項」清單**。而 archive 是
-    **零刪除的史料檔** ⇒ 每跑一次 `--apply` 就把那份失實宣稱複製成一份新的永久紀錄。
-    這與本工具立帳要消滅的病（「宣稱一道機械檢查存在而它不存在」）完全同型，且是在同一輪、
-    同一支工具身上復發。另一處殘留：`_fenced_line_numbers()` docstring 還寫著「判準⑦ 用」。
+    原始缺陷沿革全文搬至 CrossPlatform_R151_Guard_Prose_Migration.md
+    〈TestCriteriaListIsASingleSsot〉節。
 
     根治＝**生成而非手寫**：成功訊息與 archive 標頭都由 `CHECK_CRITERIA`／`MOVE_CRITERIA`
     生成，「兩份說法」在結構上不可能出現。本類別再補三道鎖確認生成沒被繞開。
@@ -1825,11 +1810,9 @@ class TestCriteriaListIsASingleSsot(unittest.TestCase):
           (a) `MOVE_CRITERIA`／`CHECK_CRITERIA` 的每一項都必須出現（＝標頭是生成的）；
           (b) 被推翻的方案(乙) 反向鎖字樣、以及寫死的「共七項」「四項判準」都不得出現。
 
-        🔴 取樣範圍走 `_generated_header_of()`（結構邊界）而**不是**寫死切片：Pkg-P12
-        前這裡是 `[:4000]`，會切進逐字搬入的表格區、撞到某列缺陷描述而假紅。該假紅由
-        下方 `test_the_header_boundary_excludes_a_row_that_legitimately_quotes_it` 永久
-        釘住，鎖的牙由 `test_the_retracted_claim_lock_has_teeth_on_a_header_borne_claim`
-        釘住（兩面都在，才不是「為了消紅燈把鎖弄鈍」）。
+        取樣範圍走 `_generated_header_of()`（結構邊界）的沿革全文搬至
+        CrossPlatform_R151_Guard_Prose_Migration.md
+        〈test_a_new_archive_header_is_generated_and_carries_no_retracted_claim〉節。
         """
         with _ledger_sandbox():
             header, _dest = self._apply_into_sandbox(87, "合成")
@@ -2083,13 +2066,8 @@ def _an_archived_id() -> tuple[str, str]:
 class TestGovernanceDocsAreOneSharedSsotObject(unittest.TestCase):
     """B1 / SA-R60R3-01（BLOCKING）：具名治理文件清單全 repo 只准有一份。
 
-    🔴 原始缺陷（主控親自複驗 CONFIRMED）：兩支工具**同名而成員不同**——
-      · `check_defect_log_crossref._GOVERNANCE_DOCS` = (Evidence.md, Evidence_r3.md)  ← 體積守門
-      · `archive_defect_log._GOVERNANCE_DOCS`       = (Evidence.md, Scan_Dimensions.md) ← 指針稽核
-    各缺對方一支。實測 `r3 in _pointer_audit_files()` 為 **False** ⇒ 本輪新生的姊妹證據檔
-    進了體積閘門卻**完全不在指針稽核面**，其中十餘處指針方言零檢查。
-    這是 `DEF-101-587`「搬到另一支檔就繞過守門」的同型復發，只是繞過的是指針鎖；
-    而「同名常數各寫一份」本身，就是本輪反覆立帳要消滅的複本型缺陷長在守門程式自己身上。
+    原始缺陷沿革（兩支工具同名而成員不同、指針稽核面缺口）全文搬至
+    CrossPlatform_R151_Guard_Prose_Migration.md〈TestGovernanceDocsAreOneSharedSsotObject〉節。
 
     修法＝單一 SSOT：閘門那側定義，本工具**再匯出同一個物件**（`= gate._GOVERNANCE_DOCS`），
     形狀沿用既有的 `_CELL_SPLIT_RE` 先例。本類別鎖住「它真的是同一個物件」＋「稽核面真的
@@ -2189,11 +2167,8 @@ class TestGovernanceDocsAreOneSharedSsotObject(unittest.TestCase):
 class TestBareResidenceTokenHasAHardRequirement(unittest.TestCase):
     """B3 / SA-R60R3-05：裸「現居 archive_NN」的第三種方言必須有對等硬要求。
 
-    🔴 結構論證（SA 完整方言普查）：`立帳見` 有 `POINTER_VERB` 硬要求（動詞在、後面沒跟
-    可解析 ID 即紅），但**真正承載居所語意的 token 是「現居」，而它先前沒有對等硬要求**。
-    不帶 `見` 動詞的裸 `現居 archive_NN` 於是兩道正則皆不命中 ⇒ 注入失實宣稱時 rc=0、零訊號。
-    磁碟現況此形態零命中（latent，非已發生），但結構上一直開著——這正是「還沒出事」與
-    「不會出事」的差別，本 repo 對前者的處置一律是補鎖而不是記一筆觀察。
+    🔴 結構論證（SA 完整方言普查）全文搬至
+    CrossPlatform_R151_Guard_Prose_Migration.md〈TestBareResidenceTokenHasAHardRequirement〉節。
     """
 
     def test_the_gap_was_real_neither_existing_regex_matched(self):
@@ -2290,13 +2265,8 @@ class TestBareResidenceTokenHasAHardRequirement(unittest.TestCase):
 class TestDingExceptionRequiresCornerQuotes(unittest.TestCase):
     """B4 / SA-R60R3-06：例外 (丁) 收窄為「必須落在同一行的「」或『』內」。
 
-    🔴 **三方判斷不一致，主控裁決採納收窄**（勿改寫成「四方一致認為」）：
-      · Architect：撤回「(丁) 重開了 ARCH-R60-01③」的疑慮。
-      · SD：以四發注入判定 **(丁) 沒有重開** ARCH-R60-01③——它只豁免「無 ID 因而無物可
-        稽核」的提及（家族內同句仍 RED、治理文件內帶真實 ID 的失實指針仍 RED）。
-      · SA：判定**重開**，理由是例外開得比需要寬、形態級模糊仍在。
-    **事實三方一致**（治理文件內未加引號的無 ID 散句 → rc=0），分歧純在價值判斷。
-    主控裁決理由：代價僅一行判準，而現存唯一 (丁) 用例本就落在「」內 ⇒ 零誤紅。
+    三方複審分歧與主控裁決理由全文搬至
+    CrossPlatform_R151_Guard_Prose_Migration.md〈TestDingExceptionRequiresCornerQuotes〉節。
     """
 
     def _run_with_governance(self, body: str) -> tuple[int, str]:
@@ -2396,11 +2366,8 @@ class TestDingExceptionRequiresCornerQuotes(unittest.TestCase):
 class TestCheckIsWiredIntoGates(unittest.TestCase):
     """`--check` 的 rc 必須真的被閘門看（ARCH-R60-02 ②／QA-R60-01 (a)）。
 
-    🔴 立此鎖的理由：`tools/` 下 7 支 `check_*.py` 全部有執行點（pre-push 守門迴圈 ＋
-    root-infra-ci.yml 具名 step），唯一破例就是本輪新增的這支——它兩處出現都只在
-    compat-ci 的 `paths:` 過濾器（觸發條件，不是執行 step）。`tools/tests/
-    test_root_infra_parity.py` 已守「CI 與 pre-push 兩份清單互為鏡射」，但它守不到
-    「兩邊同時被拿掉」，故本鎖補上「兩邊都必須有」這一面。
+    🔴 立此鎖的理由全文搬至 CrossPlatform_R151_Guard_Prose_Migration.md
+    〈TestCheckIsWiredIntoGates〉節。
     """
 
     _INVOCATION = "tools/archive_defect_log.py --check"
@@ -3106,12 +3073,9 @@ class TestTemporalNarrativeSamplesStayUncaught(unittest.TestCase):
 class TestOpenBacklogArchiveIsRejected(unittest.TestCase):
     """方向②（讓長期未結的 known-gap 列搬進 open-backlog archive、主檔只留指針）駁回鎖。
 
-    駁回理由不是工作量大，是它會讓孤兒偵測（`orphan_backlog_problems()` 吃主檔全文）
-    對未結列——唯一需要孤兒偵測的那一群——變成零檢查，且讓「帳本是 SSOT」在讀者面
-    失效（未結項才是每輪必讀的那一半）。R68 量化對照顯示改採①＋判準②收窄已足夠釋放
-    容量餘裕，不必以破壞硬規則換取更大數字，史料見證據檔〈第七輪 史料搬遷
-    （Dev-Trim8）〉。本測試鎖的是：孤兒偵測的輸入面必須仍是主檔全文，且主檔必須仍
-    實際承載未結列。
+    駁回理由全文搬至 CrossPlatform_R151_Guard_Prose_Migration.md
+    〈TestOpenBacklogArchiveIsRejected〉節。
+    本測試鎖的是：孤兒偵測的輸入面必須仍是主檔全文，且主檔必須仍實際承載未結列。
     """
 
     def test_orphan_detection_input_is_the_main_ledger_text(self):
@@ -3224,11 +3188,8 @@ class TestArchiveIndexDocIsExternalized(unittest.TestCase):
 class TestR82RotationSideEffectsAreAnnounced(unittest.TestCase):
     """輪替的兩個副作用必須由**造成它的人**印出來（`DEF-101-977` ＋ `DEF-101-676`）。
 
-    意圖（Rule 9）：這兩筆是同一種病的兩面——歸檔器改變了下游判準的輸入，卻讓下游的人
-    去發現後果。977 的實際發生形態：`--archive-num 64` 搬走 3 列，`OVERSIZE_ROW_GRANDFATHERED`
-    的那 3 筆當場過期、`check_defect_log_crossref.py` 判準②轉紅，而歸檔器對此**零輸出**
-    ⇒ 每輪歸檔都復發、每輪都手動修。676 的形態：每次 `--apply` 都把一條索引 bullet 寫回
-    主檔家族，於是釋出與新增同時發生，而**只有釋出那一半被印出來**，讀者因此以為餘裕買到了。
+    兩筆事故形態的沿革全文搬至 CrossPlatform_R151_Guard_Prose_Migration.md
+    〈TestR82RotationSideEffectsAreAnnounced〉節。
 
     兩者都刻意是**純讀計算**：不改判準、不寫檔，因此不可能製造新的紅。
     """
@@ -3299,9 +3260,8 @@ class TestR82RotationSideEffectsAreAnnounced(unittest.TestCase):
 class TestCriterion2VerbatimQuoteTailMask(unittest.TestCase):
     """判準② 第三種遮罩（R76）：「訂正首詞（原文…接於後）：」之後是**舊狀態引文**。
 
-    病＝那一族慣用語之後的引文，用途正是**宣告該狀態已不成立**，判準② 卻把它讀成
-    「還成立」，語意剛好相反（`DEF-101-676` 的同型復發，第三種逸出面）。立案實測數字＝
-    `docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`。
+    立案沿革（`DEF-101-676` 同型復發、實測數字）全文搬至
+    CrossPlatform_R151_Guard_Prose_Migration.md〈TestCriterion2VerbatimQuoteTailMask〉節。
 
     🔴 本類刻意雙向鎖，只做 (a) 不算有鑑別力：
       (a) 帶慣用語且**現況已結** ⇒ 修後可搬（下方三種真實形態 ＋ row 級控制組）；
@@ -3399,9 +3359,8 @@ class TestCriterion2VerbatimQuoteTailMask(unittest.TestCase):
 class TestMoveSubsetSelectionIsNamedAndTraceable(unittest.TestCase):
     """`--only`／`--keep`（`DEF-101-811`）：排除入口不得成為無聲的少搬後門。
 
-    原始缺陷：`--apply` 全有全無，唯一的「不要搬這一筆」入口是判準④ 的 `--ack-handoff`
-    ——而那是**加入**用的，方向相反。於是每輪都得先讓工具把本輪列一起搬走、再手工把它們
-    還原回主檔；手工還原一份剛被就地覆寫的帳本，正是本工具立帳要消滅的動作。
+    原始缺陷沿革全文搬至 CrossPlatform_R151_Guard_Prose_Migration.md
+    〈TestMoveSubsetSelectionIsNamedAndTraceable〉節。
 
     🔴 本類鎖的是「這個入口為什麼不是後門」那三條設計約束（見
     `defect_ledger_index.select_move_subset()` docstring）：只會讓集合變小、打錯即

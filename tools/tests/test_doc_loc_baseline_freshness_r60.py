@@ -2726,13 +2726,8 @@ _IRON_LAW3_NO_MECHANISM = "無機械物"
 #: `TestR74IronLawMechanismAccounting` 的
 #: `test_iron_law3_coverage_only_goes_up_and_the_denominator_may_grow`）。
 #: 分子＝**有機械物**的觸發項數，只准上升（拆掉掃描器即紅）。
-#: R79：4 → 7（`.ps1` 行尾補上 hook＋事後兜底；另新增 exec bit 與目錄項原語兩列，
-#: 兩列都是「新增時就已經有掃描器」，分子分母同時 +1）。
-#: R80（包 B）：7 → 12。分子 +5＝`$env:*` 讀取、`Get-Command` 解析、大小寫敏感度
-#: （前兩項本輪新建站點級判準；第三項是訂正低報）、`.py` 行尾（本輪新建活躍面止血）、
-#: 以及兩個新登記且**當輪就有掃描器**的危害類中的 shebang×行尾；naive 本地時間戳那一列
-#: 同樣是新增即有掃描器 ⇒ 實際分子為 13，此處只釘到 12 是**刻意留一格**：並行工作包
-#: 若在本輪同時動到這張表，釘到剛好等於現值會讓兩邊互相判紅。地板是下界不是等號。
+#: R79 4→7／R80 7→12（含「刻意留一格給並行包」慣例）的逐格沿革全文搬至
+#: CrossPlatform_R151_Guard_Prose_Migration.md〈_IRON_LAW3_COVERED_FLOOR R79／R80〉節。
 #: R81 12→17／R84 17→18→19／R85 19→21 的逐格沿革已搬至 CrossPlatform_R127_Guard_Prose_Migration.md。
 _IRON_LAW3_COVERED_FLOOR = 21
 #: 分母＝**已登記**的危害類數，只准上升（刪列來讓數字好看即紅）。未覆蓋數＝分母−分子，
@@ -2795,25 +2790,8 @@ def hook_claim_problems(text: str, settings_text: str, repo_root: Path) -> list[
     ① 未註冊者：凡提到它的行都必須標明子專案射程，否則讀者會以為根 session 也會攔。
     ② **已註冊者：任何一行都不得標成「僅 AutoClaude 子專案 session」**（R75 訂正）。
 
-    🔴 為何非補 ② 不可（本函式自己放行過一次假事實）：原判準是 OR——「已註冊 **或**
-    該行標明子專案射程」，於是 `if name in settings_text: continue` 讓「已註冊」單獨
-    成為免檢通行證，**完全不看那些行實際寫了什麼**。實況：`a371068` 這個 commit 的
-    一個包把 `check_sh_eol.py` 橋進根 `.claude/settings.json`，同一個 commit 的訂正文
-    卻仍把它算在「不會跑」那一組並連帶少報了橋接支數 ⇒ 假事實在寫下的當回合就成立，
-    而這道鎖結構上恆綠（實跑當時 4 tests 全 ok、rc=0）。
-
-    ②「一行都不得」而非「主要那行不得」是刻意的：這個字樣的語意是絕對的（「這支在根
-    session 不會跑」），一支會跑的 hook 沒有任何語境能讓那句話變成真的。副作用是文件
-    必須把「已橋接清單」與「未橋接清單」**分行寫**——那不是本判準的成本，而是它要的
-    結構：兩組事實混在同一行時，逐行 substring 判準對任何一組都判不準。
-
-    🔴 **R76 訂正（同一個通行證換皮復活）**：「已註冊」的判定原本是
-    `if name in settings_text:`——拿**整份 settings.json 的文字**做 substring。於是
-    該檔任何角落提到過的名字（`_comment`／`_why` 敘述、被註解掉的舊 wiring、`matcher`
-    說明裡順口舉的例）都算「已註冊」而讓那支 hook **整支免檢**；把真 wiring 拔掉、
-    只留一句註解，根 CLAUDE.md 那句「已橋接 N 支」就成了假話而零訊號。R75 才剛拆掉
-    OR 型通行證（見上方 ②），這裡是同一個病的第二個住所：**判定「有沒有」時，掃描面
-    必須是解析出來的結構，不是整檔文字。** 現行判定改走
+    🔴 為何非補 ② 不可、與 R76 對同一個通行證換皮復活的訂正，沿革全文搬至
+    CrossPlatform_R151_Guard_Prose_Migration.md〈hook_claim_problems〉節。現行判定改走
     `registered_hook_basenames()`（既有 SSOT 的 `hooks[*][*].hooks[*].command`）。
     """
     problems: list[str] = []
@@ -3599,15 +3577,8 @@ class TestR75IronLawMechanismSubstance(unittest.TestCase):
 # ══════════════════════════════════════════════════════════════════════════════
 # R78 ARCH-03／SD-07：具名機械物鎖的第四面 —— **反引號 Python 識別字**
 # ══════════════════════════════════════════════════════════════════════════════
-# 🔴 缺陷本體（複審逐字指出的逃逸縫）：上面三面判準的擷取器 `_MECHANISM_PATH_RE` 只認
-# **帶副檔名的路徑**。於是「以一個**裸識別字**指認機械物」這種寫法完全不在任何鎖的視野內：
-#   · R77 的護欄層**檔數**棘輪常數被它自己那一輪刪掉，全庫剩零個賦值定義、十餘個引用
-#     （分布十支檔）——**專門偵測懸空引用的那道鎖照樣綠**。
-#     （🔴 本段刻意不逐字寫出那個已死的名字：本節新加的判準會把它判成幽靈，而那正是它
-#      該有的行為；訂正註記引述假話等於製造新假話——同 R73 已立的紀律。）
-#   · 最嚴重的一處：`AutoClaude/tools/check_loc_budget.py` 拿它當「根層 `tools/tests/`
-#     不納入 LOC 分級管轄」的正當性依據 ⇒ 一整層數萬行護欄碼的豁免，掛在一個不存在的符號上。
-#   · 同源還有一個已移除的測試方法名與一個從未存在的函式名，散在十餘處註解／docstring。
+# 🔴 缺陷本體（複審逐字指出的逃逸縫）實測三筆沿革全文搬至
+# CrossPlatform_R151_Guard_Prose_Migration.md〈R78 ARCH-03／SD-07〉節。
 #
 # 判準：文字裡以反引號**單獨**框起來的 Python 識別字（三種形狀：前導底線的 ALLCAPS 常數、
 # Test 開頭的類名、test_ 開頭的方法名），必須在 repo 的符號索引裡找得到定義，否則就是幽靈。
@@ -3697,7 +3668,6 @@ _GHOST_SYMBOL_BASELINE: frozenset[str] = frozenset({
     # 第七輪收尾：過期豁免已刪（幽靈已清乾淨），本行保留以維持逐檔行數釘值
     "test_latest_install_post_commit_pins_utf8_before_reading_git_common_dir",
     "test_only_the_matching_check_reds",
-    "test_the_header_boundary_excludes_a_row_that_legitimately_quotes_it",
     "test_untracked_action_is_ignored",
 })
 #: **shrink-only 天花板**：本表的筆數只准變少。
@@ -3707,8 +3677,8 @@ _GHOST_SYMBOL_BASELINE: frozenset[str] = frozenset({
 #: 擴掃描面而多看見存量時，重釘本值並在交件回報寫出前後值與理由（同 `_FROZEN_GUARD_LINES`
 #: 的重釘紀律）；**不得**為了讓一筆新寫下的懸空引用過關而調高它。
 #: 33→32→31→30→29 的逐格收緊沿革（R85／R89／R95／R115）已搬至 round-label-ok
-#: CrossPlatform_R127_Guard_Prose_Migration.md。
-_GHOST_SYMBOL_BASELINE_CEILING = 26
+#: CrossPlatform_R127_Guard_Prose_Migration.md。26→25：幽靈已清（DEF-200-306 收尾）。
+_GHOST_SYMBOL_BASELINE_CEILING = 25
 
 _SYMBOL_INDEX_CACHE: dict[str, frozenset[str]] = {}
 
@@ -3944,15 +3914,8 @@ class TestR78GhostSymbolClaims(unittest.TestCase):
 # ══════════════════════════════════════════════════════════════════════════════
 # R81：幽靈**路徑**宣稱——證據錨的第三面（CLAIM-FIRST 桶的第一個通用機械物）
 # ══════════════════════════════════════════════════════════════════════════════
-# 立案理由（量測值，不是印象）：`tools/probe/misstep_attribution.py` 現跑的桶分佈裡
-# 「宣稱先於查證」是**最大的具名桶**，而它今天一個機械物都沒有；相對地最小的那個桶
-# （選錯載具）正是唯一上了機械阻斷的。⇒ 這一桶缺的是門，不是更多自律。
-#
-# 本面補的是**證據錨可解析性**這條線上缺席的那一半：符號那半已有
-# `TestR78GhostSymbolClaims`、具名機械物那半已有 `mechanism_claim_problems`，缺的是
-# 「治理文件裡**任何**以反引號寫出的 repo 路徑」。這個縫有判例——R75 訂正逐字記載
-# 「此格原先寫的 `AutoClaude/` 前綴在磁碟上不存在，而當時的具名機械物鎖只認 `.py`
-# 副檔名故照樣放行」：讀者照著走必定撲空，而全 repo 沒有任何東西會轉紅。
+# 立案理由（量測值）、本面補的縫（證據錨可解析性）與 R75 判例，沿革全文搬至
+# CrossPlatform_R151_Guard_Prose_Migration.md〈R81 幽靈路徑宣稱 立案〉節。
 #
 # 兩顆牙，第二顆是跨平台那顆：① 路徑必須在解析基準之一底下找得到（檔或目錄皆可）；
 # ② **大小寫必須逐段相符**——Windows 與 macOS 的預設檔案系統大小寫**不敏感**，
@@ -3961,12 +3924,9 @@ class TestR78GhostSymbolClaims(unittest.TestCase):
 # 「Windows 看不見的紅」。逐段比對目錄項名稱後三個平台得出**同一個**結論（本檔的
 # sys.platform 中立性鎖也才過得了）。
 #
-# 🔴 掃描面刻意只有**治理活文件**（.md），程式碼面整片排除——這是實測不是偷懶：
-# `tools/**/*.py` ＋ `.claude/hooks/*.py` ＋ `AutoClaude/tools/*.py` 面上 757 筆宣稱有
-# 49 筆解析不到，而它們幾乎全是合成範例與注入 fixture（`a/b/c.md`、`A/x.sh`、以及既有
-# 機械物鎖自己用來驗紅的假路徑）；判準分不開它們與真宣稱 ⇒ 納入等於製造 49 筆要逐一
-# 辯護的假紅，那種鎖活不過一輪。同理排除輪次凍結史料（`CrossPlatform_R*_*.md`、缺陷
-# 帳本）：它們寫下當時為真，納入等於逼人竄改歷史記錄（同 `_SYMBOL_REF_GLOBS` 的理由）。
+# 🔴 掃描面刻意只有**治理活文件**（.md）、程式碼面整片排除的實測理由（757 筆宣稱、49
+# 筆解析不到）沿革全文搬至 CrossPlatform_R151_Guard_Prose_Migration.md〈R81 幽靈路徑宣稱
+# 立案〉節。同理排除輪次凍結史料：它們寫下當時為真，納入等於逼人竄改歷史記錄。
 _PATH_CLAIM_EXTS = "py|ps1|sh|json|yml|yaml|md|toml|cfg|ini|tla|bat|sql"
 #: 形狀：整段反引號內容就是「**至少兩段**的相對路徑 ＋ 已知副檔名」。
 #: 刻意要求兩段以上——裸檔名（`` `check_lang.py` ``）在本 repo 是**提及**不是路徑宣稱，
@@ -4028,12 +3988,8 @@ def path_claim_bases(repo_root: Path) -> tuple[str, ...]:
 #: 不是清存量（同 CLAUDE.md 鐵律三 `Get-Command` 那一列的裁決措辭）。順帶的收穫是這些
 #: 「刻意不存在」從此是**登記過的**事實，而不是每個讀者各自撲空一次才知道。
 #: 筆數不寫進本段散文——`_GHOST_PATH_BASELINE_CEILING` 就是那個數字的唯一住所。
-#: 🔴 R82／P4 訂正上面第二類的措辭與內容：「已 gitignore 出庫」這一族**已經不該住在本表**
-#: ——它有專屬的第三態（`is_machine_local_artifact()`，理由見該函式）。逐筆豁免對它是錯的
-#: 修法：豁免表是「這台機器上解析不到」的登記，而 gitignored 生成物在**不同機器上解析
-#: 結果本來就不同**，於是同一筆登記在 A 機器是必要的、在 B 機器是 stale——兩邊都會紅，
-#: 只是紅的那一支不同。本輪據此移出 `AISDLC_SDD/.claude/settings.local.json`（唯一一筆
-#: 命中第三態的登記，實測；其餘 17 筆一筆都不是 gitignored）。
+#: 🔴 R82／P4 對「已 gitignore 出庫」一類的訂正沿革全文搬至
+#: CrossPlatform_R151_Guard_Prose_Migration.md〈_GHOST_PATH_BASELINE 上方〉節。
 _GHOST_PATH_BASELINE: frozenset[str] = frozenset({
     ".claude/loop.md",
     "AISDLC_SDD/.github/workflows/arch-fitness.yml",
@@ -4066,15 +4022,8 @@ _GHOST_PATH_BASELINE: frozenset[str] = frozenset({
 })
 #: shrink-only 天花板（同 `_GHOST_SYMBOL_BASELINE_CEILING` 的立案理由）：上面那句
 #: 「只准變少」若只是散文，這道鎖最省力的關法就是把新寫下的壞路徑登記進表。
-#: 🔴 R81 QA B-3 重釘：18 → 19（擴掃描面才看見的既有存量，本常數紅燈訊息明文指定的
-#: 那條合法路徑）。🔴 R81 SA-B3 再下修：19 → **18**——那一筆豁免的標的（四方複審轉錄檔）
-#: 已於本輪建立、解析得到，自清機制當場要求刪除該筆登記。**下修方向本來就是這道鎖要的**：
-#: 天花板是欠債上限，不是額度。
-#: 🔴 R82／P4 再下修：18 → **17**——`AISDLC_SDD/.claude/settings.local.json` 改由第三態
-#: 承接（見上方表頭與 `is_machine_local_artifact()`）。這一筆不是「清掉了」而是「搬家了」，
-#: 但天花板要的就是**本表**只准變小，搬走同樣算變小。
-#: R99 round-label-ok：17→18 新增一筆，WHY 同上方 CrossPlatform_R99_Scan_Findings.md
-#: R126 round-label-ok：18→19 新增一筆（已刪除的孤兒載具，第二類），WHY 見表內該筆旁註。
+#: 18→19→18→17→18→19（R81 QA B-3／R81 SA-B3／R82／P4／R99／R126）逐格沿革全文搬至 round-label-ok
+#: CrossPlatform_R151_Guard_Prose_Migration.md〈_GHOST_PATH_BASELINE_CEILING〉節。
 _GHOST_PATH_BASELINE_CEILING = 19
 
 #: 目錄項快取：本檔的平台中立性鎖會把全檔重跑 3 次，逐段列目錄不快取會慢一個量級。
@@ -4132,17 +4081,9 @@ def _run_check_ignore(
 ) -> frozenset[str]:
     """批次問 git：這批路徑裡，哪幾條被**追蹤中的 `.gitignore`** 宣告為忽略。
 
-    🔴 **「追蹤中的」不是修辭，是本函式最重要的一道過濾**（R82／P4 複驗補洞）。
-    `git check-ignore` 讀的 ignore 來源有三種，其中**兩種不隨 repo 走**：
-      · repo 內的 `.gitignore`（tracked ⇒ 每台機器逐字相同）✅
-      · `$GIT_DIR/info/exclude`（由 `git clone` 就地新建、**untracked**）❌
-      · `core.excludesFile`（使用者家目錄的全域 ignore，例 `~/.config/git/ignore`）❌
-    只問「被不被 ignore」而不問「**是誰宣告的**」，等於把第三態的答案接回機器本地狀態
-    ——也就是本節正在治的那個缺陷，只是從「檔案系統上有沒有這個檔」換成了「這台機器的
-    git 設定裡有沒有這條規則」。複驗當回合在本機實測到它**已經活著**：
-    `.git/info/exclude` 有 10 條 repo 完全沒宣告的 `**/.claude/*` 規則，於是
-    `resolve_doc_path('AutoClaude/.claude/agent-registry.json')` 在本機回 `'ignored'`、
-    在沒有那個區塊的 checkout 上會回 `'missing'` ⇒ 紅照樣會在兩台機器間漂移。
+    🔴 **「追蹤中的」不是修辭，是本函式最重要的一道過濾**（R82／P4 複驗補洞）——三種
+    ignore 來源裡有兩種不隨 repo 走的立案敘事與本機複驗實測，沿革全文搬至
+    CrossPlatform_R151_Guard_Prose_Migration.md〈_run_check_ignore〉節。
     修法＝改用 `-v` 拿到**規則出處**，只採信出處是 tracked 檔的那些命中。形狀與
     `tools/lib/git_paths.py` 檔頭記載的 `core.quotepath` 同型：真正的守門員不可以是
     「這台機器的偶然事實」。
@@ -4576,14 +4517,11 @@ class TestR81GhostPathClaims(unittest.TestCase):
     def test_a_tracked_path_is_never_the_third_state(self) -> None:
         """🔴 **tracked 否決款**的紅綠自證：tracked 的檔永遠不是機器本地生成物。
 
-        🔴 R82／P4 複驗訂正本測試自陳的守備對象（原文寫「`--no-index` 陷阱的紅綠自證」，
-        而它對那件事**沒有鑑別力**——把 `--no-index` 加回正式判準，本測試照樣全綠）。實測
-        兩組對照：把該旗標加進判準後，341 條陷阱路徑的**最終判決一筆都沒變**（0/341），
-        因為 `--no-index` 多出來的命中一律落在 tracked 檔上，而那正好被合取的第二款
-        （`prime_machine_local_cache` 的 tracked 否決）整片吃掉 ⇒ **否決款嚴格支配該旗標
-        的差異**。真正有鑑別力的是否決款本身：把它拿掉，200 條取樣**全部 200 條**被誤判
-        成第三態。「測試名／訊息描述了一件它沒在守的事」正是本檔通篇在治的病，故就地改正
-        而不是留著當註腳。
+        🔴 R82／P4 複驗訂正本測試自陳守備對象（原文自稱驗 `--no-index` 陷阱、實測對它
+        沒有鑑別力）的沿革全文搬至
+        CrossPlatform_R151_Guard_Prose_Migration.md
+        〈test_a_tracked_path_is_never_the_third_state〉節。
+        真正有鑑別力的是否決款本身：把它拿掉，200 條取樣**全部 200 條**被誤判成第三態。
 
         `--no-index` 的選擇因此降級為**縱深防禦**（兩道各自獨立、失效模式不同）。它不是
         沒有代價，只是代價被另一款擋住了；為免那句散文再度無錨，下面第二段斷言直接在
@@ -4756,17 +4694,8 @@ class TestR81GhostPathClaims(unittest.TestCase):
 # ══════════════════════════════════════════════════════════════════════════════
 # R75 訂正：ONBOARDING §7 表① 的 `skipped=N` 格——數字與逐項清單必須同進同退
 # ══════════════════════════════════════════════════════════════════════════════
-# 🔴 缺陷本體：該格的受鎖 token 只有「N tests OK」（見 `SYNC._SPECS`），`skipped=N` 與
-# **其後的逐項清單**明文不在鎖內。後果實測：受鎖 token 每輪被產生器更新，而 `skipped=N`
-# 與那份手寫清單自寫下之後從未被核對過；本輪淨增約 33 筆 skip，零機械記帳。
-#
-# 🔴 為何**不**把那個數字本身做成 live 鎖（誠實的設計裁決，不是偷懶）：
-#   ① 結構性不可能在同一次執行內取值——跑在套件**裡面**的測試不可能知道自己這一次跑完
-#      的最終 skip 數（`MIN_TESTS` 能鎖是因為它是靜態常數，不是 runtime 結果）。
-#   ② 就算改由 runner 事後比對，skip 數**依機器而變**（docker 在不在、pwsh 7 裝沒裝、
-#      zsh 有沒有）⇒ 硬相等會在任何一台環境略異的機器上假紅，而假紅的鎖最後一定被關掉。
-#   ③ 靜態站點數不是它的替代量：本輪實測 tools/tests 有 11 個「Windows 上會 skip」的
-#      站點，卻對應到 32 支已標籤 skip（class 級 decorator 一對多），差 3 倍。
+# 🔴 缺陷本體與為何不做成 live 鎖的三理由沿革全文搬至
+# CrossPlatform_R151_Guard_Prose_Migration.md〈_SKIPPED_CELL_RE 上方〉節。
 # 故本鎖改守**可稽核性**這三件事（成本近零、零假紅面）：數字只准有一個、必須帶量測日期、
 # 且清單必須指向那個每輪都會現場印出的權威來源，而不是自己養一份沒人維護的散文清單。
 # 正解的下一步（本輪未做，須動別包持有的檔）：由 `tools/run_root_unittests.py` 在跑完後
@@ -4850,19 +4779,8 @@ class TestR75SkippedCellIsAuditable(unittest.TestCase):
 # ══════════════════════════════════════════════════════════════════════════════
 # R74：ONBOARDING §7 表③「雲端 CI 狀態」的機械鎖（本輪 P0 的結構解）
 # ══════════════════════════════════════════════════════════════════════════════
-# 🔴 缺陷本體：§7 表①②量的全是**本機**（六道根層閘門／四棵測試樹／LOC），整節
-# **零欄位**承載雲端結論；而 `tools/lib/ci_liveness.py` 的哨兵只查排程軌（`--event
-# schedule` / `workflow_dispatch`），push 軌完全不在視野內。於是 R73 收輪時本機全綠、
-# `82eee92` 推上去，而**同一個 commit 的 `windows-compat-ci` 在雲端是 failure**
-# ——這件事結構上不可能被任何本機機械物報出來。缺的不是新鮮度，是**平面**。
-#
-# 🔴 **QA-R74-01（BLOCKING）：本鎖的第一版把 `head-sha` 當成「有寫就算」**。實測取證：
-# 把該欄換成全零的 40 位 sha，`cloud_status_problems` 仍回 `[]`；全庫搜尋
-# `head-sha` 除本檔外**沒有任何生產碼消費它** ⇒ 這個欄位是裝飾品。而新鮮度判準是
-# `checked-at < max(measured-at)` 的**日期字串**比較，本 repo 一輪常在同一天內完成
-# （R74 的兩個 commit 相隔 8 小時、同一天）⇒「動了本機基線就得重查雲端」這條因果判準
-# 在一輪之內結構上不可能觸發。兩層加起來的後果正是 R74 頭號發現的成因本體：
-# 錨上記載的雲端結論屬於**上一個** commit，而鎖全綠。
+# 🔴 缺陷本體與 QA-R74-01（BLOCKING）發現沿革全文搬至
+# CrossPlatform_R151_Guard_Prose_Migration.md〈_CLOUD_ANCHOR 上方〉節。
 _CLOUD_ANCHOR = "cloud-ci-status:"
 _CLOUD_FIELD_RE = re.compile(r"(\w[\w-]*)=([^\s]+)")
 _WORKFLOWS_DIR = _REPO_ROOT / ".github" / "workflows"
@@ -5012,12 +4930,9 @@ _NIGHTLY_RED_SEP = ","
 #: 沒有人去查（一筆真實 P1 橫跨四輪「雲端全綠」宣稱），開一個 `unchecked` 出口等於
 #: 把那個缺陷寫成合法狀態。要嘛去 `gh run view <id> --json jobs` 查一次，要嘛就紅。
 _NIGHTLY_RED_CLEAN = "none"
-#: 🔴 **R76 複審 ARCH-03 補的兩欄 provenance**。落地首版的判準⑧ 只有三種判定：欄位缺席、
-#: 值是 `none`、值裡有現查不到的 job 名——**沒有任何一條在看「那個宣告現在還成不成立」**。
-#: 實測四個互相矛盾的值（宣告 windows 紅／宣告 macos 紅／宣告兩支都紅／宣告全綠）全部判綠。
-#: 於是兩個方向都失明：①本輪 PKG-B 修好 `windows-nightly-full` 之後，錨仍會逐字宣告它是
-#: 紅的而判準照樣綠＝**一句被鎖守著的假話**；②下週換 `macos-nightly-full` 轉紅，一行都不會響。
-#: 它買到的是「有人查過一次」，而它替代的正是那個「橫跨四輪沒人讀」的 issue 通道。
+#: 🔴 **R76 複審 ARCH-03 補的兩欄 provenance**：落地首版判準⑧ 三種判定實測全部放行四個
+#: 互相矛盾宣稱的沿革全文搬至
+#: CrossPlatform_R151_Guard_Prose_Migration.md〈_NIGHTLY_RUN_FIELD 上方〉節。
 #:
 #: 修法＝讓這一欄自帶時點，並給它一個**本機算得出來**的過期界線：
 #:   · `nightly-run=<run-id>`：查的是哪一次 run。必須逐字出現在表③-b（錨 ↔ 表格綁定，
@@ -5238,12 +5153,8 @@ def cloud_pending_problems(
     宣稱一次沒發生過的查核）。
 
     🔴 **本判準刻意只驗「非假性」，不驗「是否等於最後一次 push」——後者結構上不可滿足。**
-    R75 落地時我第一版就是拿 `git rev-parse origin/main` 當比較對象，實測後果：main 上
-    三支 workflow 全紅（root-infra／windows-compat／macos-compat），而且**每一次 push 都
-    必紅**。推導很短：CI 是在 push **之後**跑的，那時 `origin/main` 已經等於被測的那個
-    commit；要讓 commit X 通過，X 的檔案內容就必須寫進 X 自己的 sha——而 sha 是 X 內容的
-    雜湊，**自我指涉、不可能滿足**。當回合實測重現（HEAD == `origin/main` == `21354c9`
-    時跑同一支測試即紅），錯誤訊息還指著兩個其實相等的值。
+    R75 落地首版拿 `origin/main` 當比較對象、三支 workflow 全紅的教訓沿革全文搬至
+    CrossPlatform_R151_Guard_Prose_Migration.md〈cloud_pending_problems〉節。
 
     ⇒ **教訓（已升為機械物，見 `TestR75CloudCriteriaAreSatisfiableAtAnyCommit`）：判準的
     比較對象若會隨「被該判準所判的那個動作」本身而改變，這個判準結構上不可滿足。**
@@ -5898,13 +5809,8 @@ class TestR76UncoveredFormListTracksActualBehaviour(unittest.TestCase):
 
 # ── R76：把 R75 頭號教訓擴到**退場／解除條件**類判準（不限 Python、不限 cloud_ 前綴）──
 #
-# 🔴 為何非擴不可（同形態第三次復發，而上面那道旗艦鎖結構上抓不到它）：R75 的鎖讀的是
-# **本模組內 `cloud_*` 家族的 Python 執行碼**。第三次復發卻住在
-# `tools/windows_smoke_local.ps1` 的**註解散文**裡——E3 原文要求「移除該排程任務後，
-# `check_scheduled_task_drift.py` 回 rc=0」，而該 checker 的期望值 SSOT
-# （`tools/scheduled_task_expectations.json`）**同時列著要被移除的那支任務** ⇒ 執行 E3
-# 自己授權的動作必然讓 E3 轉紅。語言不同（PowerShell 註解）、載體不同（散文而非執行碼）、
-# 命名不同（沒有 `cloud_` 前綴），三個縫任一個都足以讓上面那道鎖看不見它。
+# 🔴 為何非擴不可（同形態第三次復發，`tools/windows_smoke_local.ps1` E3 案）沿革全文搬至
+# CrossPlatform_R151_Guard_Prose_Migration.md〈R76 退場判準擴面〉節。
 #
 # 本段守的是**結構**而不是那一個站點：退場判準若拿「整支工具的 rc／status」當取證，而
 # 那支工具的比較對象是一份列了多個實體的期望值 SSOT，則移除其中任一實體必然讓取證轉紅。
@@ -6496,12 +6402,9 @@ def _handoff_claim_blocks(text: str) -> list[list[str]]:
     `_handoff_problems`）。章節名（例：R74 的 `## 2. 還沒做什麼`）是這一節的名字，
     不是對某件事的狀態宣稱；要它附現查指令是噪音，而噪音會讓鎖被整個關掉。
 
-    🔴 R79 複審（HANDOFF 包注入時當場量到）：**巢狀小標題繼承父節的射程**。
-    上一版對「任何 `##` 以上的標題」一律重設 `in_section`，包括 `###`——於是一個
-    住在「待辦」大節底下、但小標題本身不含觸發字的 `###` 區塊，整區條目會**靜默退出
-    射程**（實測：加了四個小標題之後，拿掉某一項的現查指令，這道鎖照樣印綠）。
-    當時的處置是「把觸發字寫進每一個小標題」＝繞過，不是修好；下一個人在 §4 底下
-    新增一個不含該字的小標題就會再踩一次，而且沒有任何東西會轉紅。
+    🔴 R79 複審（HANDOFF 包注入時當場量到）：**巢狀小標題繼承父節的射程**。上一版錯誤
+    實作與當時繞過式處置的沿革全文搬至 CrossPlatform_R151_Guard_Prose_Migration.md
+    〈_handoff_claim_blocks 巢狀小標題〉節。
     現行語意：只有**同級或更高級**（`#` 數不多於開啟該節的那一個）的標題才重設；
     更深的標題沿用父節的 `in_section`。⇒ 觸發字只需寫在大節標題上一次。
     """

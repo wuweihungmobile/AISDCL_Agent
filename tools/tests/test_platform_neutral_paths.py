@@ -1,32 +1,12 @@
 #!/usr/bin/env python3
-"""測試樹原始碼「Windows 磁碟機假路徑」自我檢測（R11 A1c；R11 複審 SD-2/ARCH-2 補強；
-R12 ARCH-R12-4 掃描面擴大至四個測試樹）.
+"""測試樹原始碼「Windows 磁碟機假路徑」自我檢測（R11 A1c；R12 ARCH-R12-4 掃描面擴大至四個測試樹）。
 
-WHY：R11 真 Mac 首跑實證——測試裡把 D:/repo 這種磁碟機假路徑字串塞給 Path()，
-它只在 Windows 是絕對路徑；POSIX 上 `repo_root / 絕對路徑` 的 pathlib join 會退化
-成串接（D:/repo/D:/repo/…）、resolve 後恆不相等 → Windows 全綠、Mac/Linux 假紅
-（test_check_hooks_liveness.py TestIsHooksEffective 兩案例實際紅過）。修法是改用
-_platform_helpers.ABS_FAKE_REPO 平台中立常數；本測試機械掃描測試樹原始碼，
-防未來有人複製舊 pattern 再踩一次。
-
-R11 四方複審補強（SD-2/ARCH-2）：原 regex 只抓「Path( 後緊接引號＋大寫磁碟機
-＋正斜線」單一形態——漏抓 r/f 等字串前綴變體、反斜線形態 X:\\、小寫磁碟機，
-以及**裸字串**磁碟機路徑常數（原病灶正是不經 Path( 直呼的裸字串）。改為抓
-「任意字串字面值以磁碟機路徑開頭」（引號後緊接單一字母＋冒號＋斜線或反斜線；
-匹配起點是引號本身，故 r/f/b 前綴一律涵蓋）。並：
-  (a) 每行先剝 `#` 註解尾再掃（註解舉例不誤報；heuristic 不解析字串內的 #，
-      字串內含 # 且其後才出現磁碟機路徑的極端形態會漏掃，屬可接受取捨）；
-  (b) 豁免顯式平台語意 PureWindowsPath(/PurePosixPath(（該行本來就是在寫
-      特定平台路徑）與逐檔豁免清單 _ALLOWED（附 WHY）；
-  (c) 支援行尾 `# platform-ok: <理由>` 豁免標記（合法命中須逐行附理由明示處置）。
-
-R12 掃描面（ARCH-R12-4；DEF-101-149 病灶類別在其他測試樹此前零守門）：
-  1. tools/tests/（本目錄，非遞迴——維持 R11 現狀）
-  2. AISDLC_SDD/scripts/tests/（非遞迴）
-  3. AutoClaude/tests/（**遞迴**，含 plugins/core/contract/… 子樹）
-  4. LATEST 版 tools/fsm_runtime/tests/（遞迴；LATEST 以 scripts/sdd_version.py
-     SSOT subprocess 解析——手法對齊 check_script_parity；解析失敗 fail-loud，
-     不得靜默縮小掃描邊界。凍結版 v0.01~v0.2X 依鐵律不掃、也不可修）
+WHY：把 D:/repo 這種磁碟機假路徑字串塞給 Path() 在 Windows 是絕對路徑，POSIX 上 join 卻退化
+成串接、resolve 後恆不相等 → Windows 全綠、Mac/Linux 假紅；本測試機械掃描 tools/tests/、
+AISDLC_SDD/scripts/tests/、AutoClaude/tests/（遞迴）、LATEST fsm_runtime/tests/（遞迴）
+四棵測試樹的原始碼，防未來有人複製舊 pattern 再踩一次。regex 判準（r/f/b 前綴與反斜線變體）、
+`# platform-ok: <理由>` 豁免標記與四棵掃描樹的沿革全文搬至
+CrossPlatform_R151_Guard_Prose_Migration.md〈test_platform_neutral_paths.py 模組 docstring〉節。
 """
 from __future__ import annotations
 
@@ -112,9 +92,7 @@ def _scan_roots() -> list[tuple[Path, bool, int]]:
     """
     latest = _latest_root()
     return [
-        # 🔴 護欄層重釘 R97 追加當輪由 85085→85394 新增 3 支鎖檔，`tools/tests`  round-label-ok
-        # 實測 67 支越過腐化上界 66（`TestScanRootFloorBand` 開的藥：只還守得住
-        # 79% 掃描面），依失敗訊息重釘 53 → 64。
+        # 沿革已搬至 CrossPlatform_R151_Guard_Prose_Migration.md〈_scan_roots tools/tests 重釘〉節。
         (_TESTS_DIR, True, 64),
         (_REPO_ROOT / "AISDLC_SDD" / "scripts" / "tests", True, 28),
         (_REPO_ROOT / "AutoClaude" / "tests", True, 268),
@@ -134,14 +112,8 @@ def _scan_roots() -> list[tuple[Path, bool, int]]:
         (_REPO_ROOT / "tools", True, 27),
         (_REPO_ROOT / ".claude" / "hooks", True, 2),
         (_REPO_ROOT / "AISDLC_SDD" / "scripts", True, 13),
-        # R81 10→21（`quota_ledger.py`／`quota_limits.py` 落地）；R85／P12 21→30
-        # （`unattended_authz.py` 落地）；R98 30→41（`quota_policy_env.py`／
-        # `schedule_backend_calendar.py`／`sentinel_lifecycle_arm.py` 三支新子模組落地，
-        # 本樹 43 支越過腐化上界 40，重釘理由與淨額詳見 `CrossPlatform_R98_Scan_Findings.md`）；
-        # Gap C 接線輪 41→49（`onboarding_snapshot_note.py` 落地，本樹 52 支越過腐化
-        # 上界 51，重釘值＝下限帶訊息逐字要求，詳見 `CrossPlatform_R106_Scan_Findings.md`
-        # 的 R109 標記行）。  # round-label-ok: 指涉護欄層重釘落款輪，非超前宣稱
-        (_REPO_ROOT / "tools" / "lib", True, 59),  # 第七輪收尾重釘 49→59（新增 harness_feed.py）
+        # 沿革已搬至 CrossPlatform_R151_Guard_Prose_Migration.md〈_scan_roots tools/lib 重釘〉節。
+        (_REPO_ROOT / "tools" / "lib", True, 59),
         (latest / "tools" / "arch_fitness", True, 2),
         (latest / ".claude" / "hooks", True, 5),
     ]
@@ -2299,12 +2271,9 @@ class TestEncodingMarkersDoNotCollide(unittest.TestCase):
     def test_no_two_files_share_the_same_marker_string(self) -> None:
         """判準是**跨檔**共用，不是「任何共用」——這條界線是實測收斂出來的。
 
-        `test_adr_xplat001_c1c2_lock.py` 的 SC-4／SC-9 **刻意**共用同一個
-        `stale-premise-ok:`（該檔 `sc9_…` 的 docstring 逐字寫「豁免沿用 SC-4 的…」，
-        且死信偵測的 `consumed` 集合把它算成同一個），那是**同一位擁有者**在同一份檔裡
-        自己看得到的設計；把它判紅只會是自製誤報。真正會出事的是**跨檔**：兩支互不知情
-        的掃描器各有一套 stale 偵測，其中一方的合法豁免就是另一方的紅——ARCH-01 那筆
-        逃出去的縫正是這一格。
+        具體判例（SC-4／SC-9 共用同一個 marker 的設計 vs 跨檔誤報）全文搬至
+        CrossPlatform_R151_Guard_Prose_Migration.md
+        〈test_no_two_files_share_the_same_marker_string〉節。
 
         誠實劃界：同檔內共用仍可能出錯（若該檔沒把 stale 偵測接起來），本條抓不到。
         """
@@ -3698,28 +3667,7 @@ _NON_PATH_REPLACE_OWNERS: frozenset[str] = frozenset({"dataclasses", "attr", "at
 #: DEF-200-202 四方複審修復窗口：`QuotaGateIsWiredToTheBurnPathTest` 新增回歸測試
 #: 多用了一次既有 fixture 慣用句式 `<Path>.replace(qg.quota_cache_path())`
 #: （同檔既有測試已大量使用同一句式，未另立新形態）。
-# DEF-200-275 第四輪 42 → 40（方向＝下修）：SDD LATEST `conversation_ledger.py` 原有三個各自
-# `tmp=…; os.replace(tmp, path)` 的站點（append／merge／calibration）收斂為 `_atomic_write_yaml`
-# 一處（pid 專屬 tmp），判準逐字指示「有人修掉了，請把數字改小：實測 40」⇒ 照填。
-# DEF-200-275 第七輪 D31（windows-compat-ci #220／#221）40 → 39（方向＝下修）：
-# `conversation_ledger._atomic_write_yaml` 的 `os.replace(tmp, path)` 移進新函式
-# `_replace_with_retry`，改用 `try: os.replace(...) except PermissionError:` 短退避重試
-# （見該函式），本判準因此把它由「未處置」改判為「已處置」——一個站點消失。同輪新增的
-# `_merge_sidecar_if_present` 站點 `os.replace(sidecar, claimed)` 一開始就寫在
-# `try: … except (PermissionError, FileNotFoundError):` 內，本判準判定為已處置，不計入
-# census（新增站點但不增債）。判準逐字指示「有人修掉了，請把數字改小：實測 39」⇒ 照填。
-# 🔴 D31b／D31c 訂正（W-5，四方複審發現本段描述已過期，訂正協議：保留原文，追記訂正）：
-# 上一段描述的「認領改名」（`_merge_sidecar_if_present` 內 `os.replace(sidecar, claimed)`）
-# 已在 D31b 整段移除——四方複審發現該手法仍有兩個資料遺失缺陷（C3／W-1，見
-# `conversation_ledger.py` 模組 docstring D31b 段），總架構師裁決改成 sidecar「每筆一檔、
-# 寫成即不可變」，不再需要任何認領改名；`_merge_sidecar_if_present` 起只剩「掃描目錄→
-# 逐檔讀→折進記憶體 doc」，沒有 `os.replace` 呼叫（純讀取，不在 `_DIRENT_PRIMITIVES` 掃描
-# 範圍內）。D31c（解複審 W-4）在 `_write_sidecar` 既有的 `_replace_with_retry` 呼叫端加了
-# 一個新分支（`LedgerReplaceDenied` 時保留 tmp，不再無條件 `finally: tmp.unlink()`），但
-# 呼叫的仍是同一個 `_replace_with_retry`——該函式內部唯一的 `try: os.replace(...)
-# except PermissionError:` 站點本身沒變。D31b／D31c 兩輪都沒有新增或移除任何
-# `os.replace`／`os.rename`／`shutil.move` 站點，數字仍是 39
-# （`test_unguarded_site_census_matches_the_ledger` 當回合實測，見 D31c 任務書）。
+# 沿革已搬至 CrossPlatform_R151_Guard_Prose_Migration.md〈_DIRENT_UNGUARDED_DEBT 逐輪重釘〉節。
 _DIRENT_UNGUARDED_DEBT: dict[str, int] = {"live": 37}
 
 
@@ -4087,11 +4035,9 @@ class TestExecBitIsGovernedViaTheGitIndex(unittest.TestCase):
     def test_the_index_exec_set_matches_the_onboarding_policy_sentence(self) -> None:
         """🔴 DEF-101-205 自訂的解鎖條件本體（R80 落地）。
 
-        該列自 R14 起 open 逾五十輪，逐字寫著解鎖條件＝「以 `git ls-files -s` 取出 mode
-        `100755` 的檔案集合，與 `ONBOARDING.md` §6 執行權限政策句具名的 755 清單逐項互比
-        （散文即 SSOT），不符即 rc=1」。**取數管道早就有了**（本類別 R79 落地時就在讀
-        `git ls-files -s`），缺的一直是這一項比對——所以政策句與索引之間的漂移到今天為止
-        一個訊號都沒有。
+        該列沿革（自 R14 起 open 逾五十輪）全文搬至
+        CrossPlatform_R151_Guard_Prose_Migration.md
+        〈test_the_index_exec_set_matches_the_onboarding_policy_sentence〉節。
 
         Rule 9（為何這件事重要，而不只是「模式好看」）：exec bit 這一維在 Windows 上
         **結構性不可見**（本機 `core.filemode=false`，模式從不出現在 `git status`／
@@ -4828,10 +4774,9 @@ class TestShebangImpliesLfLineEndings(unittest.TestCase):
         （tracked／宣告 eol=lf／**blob** 首行 `#!`），所以這一條在 mac 與 Windows 上
         同樣有牙。
 
-        🔴 第三個條件刻意向 **blob** 問而不是向工作樹問（R82 複驗補正）：本條的失敗訊息
-        叫人「把該筆自欠債表刪掉」，而工作樹版對「index 有、工作樹沒有」（稀疏 checkout）
-        回 `False` ⇒ 那會是一個**假紅，且它建議的動作會就地縮小掃描面**——被刪掉的那一筆
-        正是 Windows 那台仍然成立的欠債。縮面的表徵是「看起來更乾淨」，沒有人會發現。
+        🔴 第三個條件刻意向 **blob** 問而不是向工作樹問（R82 複驗補正）沿革全文搬至
+        CrossPlatform_R151_Guard_Prose_Migration.md
+        〈test_every_registered_debt_entry_still_has_a_platform_neutral_reason〉節。
         """
         tracked = {r.path: r for r in tracked_eol_records()}
         declared = declared_eol(_GITATTRIBUTES_PATH.read_text(encoding="utf-8"))
@@ -5072,13 +5017,9 @@ class TestNaiveLocalTimestampsAreNotPersisted(unittest.TestCase):
 
         本機時區 Asia/Taipei 不實施 DST ⇒ 這個缺陷在本機結構上重現不了。
 
-        🔴 **不用 `zoneinfo.ZoneInfo("America/New_York")`**（第一版就是那樣寫的，當回合
-        實測 `ZoneInfoNotFoundError`）：Windows 沒有系統 tz 資料庫，`zoneinfo` 要靠
-        `tzdata` 這個**選配**套件，而本 repo 沒有裝它 ⇒ 那種寫法會讓這條在 Windows 上
-        變成 ERROR、在 mac/Linux 上通過。本判準在守的就是「單平台判準不可無條件外推」，
-        它自己第一版卻正是那個形態。改用固定 offset 直接構造 fall-back 的兩個瞬間：
-        EDT(-04:00) 的 01:30 與 EST(-05:00) 的 01:30 相差正好一小時，而**丟掉 offset
-        之後兩者完全相同**——這就是 DST 落回那一小時的全部語意，且零外部相依。
+        🔴 **不用 `zoneinfo.ZoneInfo("America/New_York")`**——第一版曾這樣寫的沿革全文搬至
+        CrossPlatform_R151_Guard_Prose_Migration.md
+        〈test_the_dst_gap_is_reproducible_without_touching_the_system_clock〉節。
         """
         from datetime import datetime as _dt  # noqa: PLC0415
         from datetime import timedelta as _td  # noqa: PLC0415

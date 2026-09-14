@@ -1,14 +1,10 @@
 #!/usr/bin/env python3
 """tools/git-hooks/pre-push dispatcher 的功能性回歸鎖（R10 QA-1 / DEF-101-126）。
 
-WHY（Rule 9 — 測試鎖的是意圖，不只是行為）：
-本 dispatcher 是 R9 P1 修復（root-infra leg：純根層變更 push 原本一個閘門都不跑，
-CI 帳單停擺期間零防護）＋ R10 ARCH-1 擴充（根層消費檔 leg：aisdlc-sdd-ci.yml paths
-承認的非 AISDLC_SDD/ 條目，其回歸鎖住在 AISDLC_SDD/scripts/tests，純根層 push 原本
-永遠不執行它們）的核心防線，先前卻零自動化測試（tools/tests 只有 pre-commit 的
-SIGPIPE 回歸鎖）。分流邏輯一旦被重構改壞——case 前綴比對寫錯、fail-safe 被
-「優化」成靜默放行、消費檔 yml 解析退化成空集合、子 hook 缺失改成軟跳過——
-症狀全都是「push 照樣全綠放行」，沒有任何紅燈，正是最危險的無聲復發。
+WHY（Rule 9 — 測試鎖的是意圖，不只是行為）：分流邏輯一旦被重構改壞，症狀全都是
+「push 照樣全綠放行」、沒有任何紅燈，正是最危險的無聲復發；立案沿革（R9 P1／R10 ARCH-1
+兩道防線先前零自動化測試）全文搬至
+CrossPlatform_R151_Guard_Prose_Migration.md〈test_pre_push_dispatcher.py 模組 docstring〉節。
 本檔以 tmp fake repo「真跑」dispatcher（非 mock），逐情境鎖住：
   1. 純根層變更 → 只跑 root-infra leg（R9 P1 的存在理由）
   2. 僅 AutoClaude/ 變更 → 只分流 AutoClaude 子 hook（不多跑）
@@ -406,17 +402,8 @@ class TestPrePushDispatcher(unittest.TestCase):
     def test_subproject_only_change_still_runs_root_guard_fast_tier(self) -> None:
         """情境 2b（R69；R68-63/65 未修）：純子專案 push 也必須跑 root-infra **快層**。
 
-        WHY：那八支守門工具（check_script_parity／check_ntfs_paths／
-        check_wrapper_thinness／check_defect_log_crossref …）守的全是**跨子專案**
-        不變式——它們的掃描面本來就涵蓋 AutoClaude/tools 與 AISDLC_SDD/scripts。
-        R69 前的觸發條件是「存在不在兩子專案底下的變更路徑」，於是「只改
-        AutoClaude/tools/xxx.ps1」這種最常見的 push，一支根層守門都不跑，CI 帳務
-        停擺期間等同零防護（本 repo 已有 windows-compat-ci 連 15+ 次紅的前例）。
-        快慢分層即取捨：快層 8 支同機實測合計約 1.0s（逐支 0.03~0.27s），一律跑；
-        慢層（py_compile + run_root_unittests，同機實測 111.89s）維持路徑觸發。
-
-        本鎖若被改回「只有根層變更才跑守門」，症狀是子專案 push 全綠放行、
-        跨專案守門靜默不執行——與 R9 P1 當年修的是同一個病，只是換一邊。
+        WHY 沿革全文搬至 CrossPlatform_R151_Guard_Prose_Migration.md
+        〈test_subproject_only_change_still_runs_root_guard_fast_tier〉節。
         """
         self._write("AutoClaude/x.txt", "x\n")
         sha = self._commit_all("autoclaude only change")
@@ -470,12 +457,8 @@ class TestPrePushDispatcher(unittest.TestCase):
     def test_empty_stdin_failsafe_runs_all_legs(self) -> None:
         """情境 3：空 stdin → fail-safe 全部 leg 都跑（寧可多跑不可漏跑）。
 
-        R67-C18 起「全部」＝四 leg（兩子專案 + root-infra + 整合閘門）；測試名刻意不寫
-        死數字，避免下一次增減 leg 時名稱與內容漂移（本 repo 已多次踩到計數敘述漂移）。
-
-        WHY：pre-commit 框架等外層工具可能吃掉 hook 的 stdin；無法判定 push
-        範圍時唯一安全語意是全跑。fail-safe 若被「優化」成靜默放行（rc=0、
-        零 leg），就是整個 dispatcher 最危險的回歸模式。
+        WHY 沿革全文搬至 CrossPlatform_R151_Guard_Prose_Migration.md
+        〈test_empty_stdin_failsafe_runs_all_legs〉節。
         """
         rc, out, err = self._run_dispatcher("")
         self.assertEqual(rc, 0, f"stdout={out}\nstderr={err}")
@@ -563,12 +546,8 @@ class TestPrePushDispatcher(unittest.TestCase):
     def test_integration_gate_change_runs_the_gate(self) -> None:
         """情境 7：變更整合閘門本體（tools/integration_gate_core.py）→ 實跑該閘門。
 
-        WHY（R67-C18）：tools/integration_gate.{sh,ps1,_core.py} 是 monorepo 整合層
-        閘門，但它在整個自動化層零呼叫端——唯二執行者是兩支已隨 CI 帳務停擺
-        （DEF-101-081）而多輪未跑的 compat-CI。「雲端是唯一執行者的東西＝實質已死」：
-        改壞閘門本體後，本機沒有任何流程會發現。本 leg 是它在本機的第一個活體執行者。
-        刻意用 `_core.py`（而非 `.sh`）當觸發檔，鎖住 dispatcher 的 glob 前綴比對
-        `tools/integration_gate*` 真的涵蓋三支，而不只認到薄殼那一支。
+        WHY（R67-C18）沿革全文搬至 CrossPlatform_R151_Guard_Prose_Migration.md
+        〈test_integration_gate_change_runs_the_gate〉節。
         """
         self._write("tools/integration_gate_core.py", "OK = True  # changed by test\n")
         sha = self._commit_all("integration gate core change")

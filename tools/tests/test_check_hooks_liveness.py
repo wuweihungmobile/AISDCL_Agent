@@ -187,11 +187,7 @@ class TestIsHooksEffective(unittest.TestCase):
 class TestRunEncodingRegression(unittest.TestCase):
     """R10 QA-8（DEF-101-137）：_run() 的顯式 encoding 回歸鎖。
 
-    WHY：R9 修復「text=True 無 encoding 在 zh-TW Windows 走 cp950 → 非 ASCII repo
-    路徑 UnicodeDecodeError → liveness 靜默失效（無法判定＝不警告）」，但 13 個既有
-    case 全 mock _run，重構移除 encoding 參數時測試依然全綠。本 case 直接鎖住
-    subprocess.run 的呼叫參數（同輪同款修復在 test_git_hooks_install_common 有鎖，
-    此處補齊對稱）。
+    WHY 沿革全文搬至 CrossPlatform_R151_Guard_Prose_Migration.md〈TestRunEncodingRegression〉節。
     """
 
     def test_run_passes_explicit_utf8_encoding(self) -> None:
@@ -533,11 +529,8 @@ def named_test_files(text: str) -> list[str]:
 class TestHooksDoNotSignpostMissingLocks(unittest.TestCase):
     """機械強制物指名的鎖檔必須真的存在（DEF-101-790）。
 
-    WHY：`block_bash_on_windows.py` 的指引訊息指名一支從未存在的鎖檔，真正的鎖
-    卻在本檔裡。**執行規則的機械物給錯的指路比沒有指路更糟**——讀者會認為它比
-    文件權威，於是「我查過了」是假的（`tools/ruff.toml` 檔頭有過同型訂正：原本
-    指向一支沒有該類別的測試檔）。射程刻意只到 `.claude/hooks/`：那是本 repo 唯一
-    「會主動阻斷使用者操作」的一層，指路錯誤的代價最高。
+    WHY 沿革全文搬至 CrossPlatform_R151_Guard_Prose_Migration.md
+    〈TestHooksDoNotSignpostMissingLocks〉節。
     """
 
     def test_every_named_lock_file_exists(self) -> None:
@@ -652,11 +645,8 @@ class TestSettingsProvideUtf8ForHookChildren(unittest.TestCase):
         """交叉指路：本檔 `_run_hook` 的直接執行形態**不再**是那支 hook 進入 child
         編碼判準的唯一途徑。
 
-        WHY（R75／DEF-101-802）：改寫 `_run_hook` 的 argv（例如換成 `-c` 形態）
-        曾經會讓 `.claude/hooks/block_bash_on_windows.py` 靜默離開 child 編碼判準的
-        射程——一支**測試**的寫法決定另一道鎖的射程。判準四改以 production 的註冊表
-        （`.claude/settings.json` 的 `-c` ＋ runpy 形態）為掃描面，本案只確認那道鎖
-        真的存在且真的罩住這支 hook，避免本檔日後被重構時無人知情。
+        WHY（R75／DEF-101-802）沿革全文搬至 CrossPlatform_R151_Guard_Prose_Migration.md
+        〈test_the_p0_hook_is_covered_by_the_production_form_lock〉節。
         """
         sys.path.insert(0, str(_REPO_ROOT))
         from tools.tests import test_subprocess_encoding_hygiene as hygiene
@@ -720,13 +710,8 @@ def _run_lint_hook(
 class TestLintPowerShellHookBehaviour(unittest.TestCase):
     """三條檢查 × 擋／放行 × 射程 × 退化的行為契約。
 
-    🔴 **刻意不掛 `skipUnless(os.name == "nt")`**，兩個理由：
-      ① 這些判準的成因是「payload 帶的是一段 PowerShell 指令」，不是「這台機器是
-         Windows」——把它綁在當下平台上，mac/Linux 一側就永遠沒人跑過（本檔的
-         `TestBlockBashHookGuidanceSurvivesNonUtf8Locale` 早有同樣的取捨與理由）。
-      ② 新增一個平台 skip 站點會動到 `skip_tag_policy._SITE_CLASS_CENSUS` 的相等
-         判準，而那張表由另一個工作面在維護。用注入 `os.name` 取得**更大**的覆蓋、
-         同時零跨檔耦合，比「多開一個站點再去別人的表上加一」好。
+    🔴 刻意不掛 `skipUnless(os.name == "nt")` 的兩個理由全文搬至
+    CrossPlatform_R151_Guard_Prose_Migration.md〈TestLintPowerShellHookBehaviour〉節。
     平台分支本身另有 `TestLintPowerShellHookDoesNotHurtOtherPlatforms` 專屬 case。
     """
 
@@ -1066,11 +1051,8 @@ class TestUnattendedCommitPushBlock(unittest.TestCase):
     def test_non_windows_keeps_the_platform_contract(self) -> None:
         """非 Windows 一律 exit 0——**但那不再代表 mac 上沒有這道鎖**（R85／P12 訂正）。
 
-        本 docstring 的前一版寫「mac/Linux 開 Auto Pilot 時這道鎖必須另外補」，那句話
-        自 R85 起已為假：mac 側補在 `.claude/hooks/block_destructive_git.py`
-        （matcher `Bash|PowerShell`、平台中立），判準與訊息兩支共用
-        `tools/lib/unattended_authz.py` 這一個家，回歸鎖是該檔的姊妹鎖
-        `test_block_destructive_git_r83.TestUnattendedAuthzHasTeethOnEveryPlatform`。
+        訂正沿革（R85／P12）全文搬至 CrossPlatform_R151_Guard_Prose_Migration.md
+        〈test_non_windows_keeps_the_platform_contract〉節。
         本條仍然成立、也仍然該守：它守的是**本支 hook 的射程不外溢**。
         """
         rc, err = _run_lint_hook(_ps_payload("git push"), force_os_name="posix",
@@ -1208,11 +1190,9 @@ class TestSessionAuditProbeContract(unittest.TestCase):
     def test_collapse_is_judged_per_session_not_by_the_historical_total(self) -> None:
         """🔴 R78／SD-03 的機械面：**一支崩塌就要紅，不准被歷史總量蓋掉**。
 
-        上一版的崩塌判準建在跨 session 合計的 `shell_calls == 0` 上，而預設用法會
-        把整個逐字稿目錄加總（本機 51 支）——那是只會單調增長的歷史量，於是「今天
-        格式改了」這個唯一要防的失效結構上打不出來。本測試餵的正是那個情境：一支
-        舊的、量得到東西的逐字稿 ＋ 一支新的、有記錄卻抽不到任何 shell 呼叫的。
-        合計 `shell_calls` 是 2（>0）⇒ 舊判準會回 rc=0＝「本輪零違規」。
+        舊判準（跨 session 合計 `shell_calls`）的失效沿革全文搬至
+        CrossPlatform_R151_Guard_Prose_Migration.md
+        〈test_collapse_is_judged_per_session_not_by_the_historical_total〉節。
         """
         with tempfile.TemporaryDirectory() as tmp:
             _write_transcript(tmp, [_tool_use("git status"), _tool_use("git log")],
@@ -1675,10 +1655,8 @@ def registered_tool_scope(settings: dict) -> dict[tuple[str, str], set[str]]:
     事件即此形）。同一支腳本在同一事件下註冊於多個條目時取**聯集**——它實際的觸發面
     就是那些 matcher 的聯集。
 
-    🔴 R80：解析面由「`command` 字串」改問唯一真相源 `tools/lib/hook_wiring.py`。
-    exec form（治 Windows 閃窗的形態）把腳本路徑搬進 `args`，只讀 `command` 的舊寫法
-    轉換後會回**空 dict** ⇒ `registration_shrink_problems()` 會把**每一支** hook 都
-    報成「註冊條目整個不見了」。射程判準必須跟著形態走，否則它守的是字串不是事實。
+    🔴 解析面問唯一真相源 `tools/lib/hook_wiring.py`（R80 沿革全文搬至
+    CrossPlatform_R151_Guard_Prose_Migration.md〈registered_tool_scope〉節）。
     """
     wiring = _hook_wiring()
     scope: dict[tuple[str, str], set[str]] = {}
@@ -1980,12 +1958,8 @@ class TestHookEntriesAreExecForm(unittest.TestCase):
     def test_the_shim_has_exactly_one_home(self) -> None:
         """十份 `python -c` shim 複本收成一支檔之後，不得有第二個家。
 
-        🔴 取樣面刻意是**解析後的 argv**，不是整份檔案的文字。第一版寫成
-        `assertNotIn("runpy.run_path", _SETTINGS.read_text(...))`，當場被
-        `test_archive_defect_log.TestNoAssertionSamplesALiveDocumentWholesale` 抓到：
-        該檔有 6 個 `_comment` 在**合法地**敘述舊 shim 的設計理由，只要有人在註解裡
-        寫出那個字樣就假紅——而假紅的下場是有人回頭去改註解裡的歷史敘述（那正是
-        Pkg-P12 實際發生過的事）。判準要看的是「**會被執行的東西**裡有沒有 shim」。
+        🔴 取樣面刻意是**解析後的 argv**、不是整份檔案文字的沿革全文搬至
+        CrossPlatform_R151_Guard_Prose_Migration.md〈test_the_shim_has_exactly_one_home〉節。
         """
         self.assertTrue(_LAUNCHER.is_file(), f"找不到啟動器 {_LAUNCHER}")
         wiring = _hook_wiring()
@@ -2175,13 +2149,8 @@ class TestSamePathIsNotVacuous(unittest.TestCase):
     """`_same_path()` 是把「字面相等」放寬成「同一個實體」的那一層——**放寬最常見的
     失敗模式是寬過頭變成恆真**，所以它自己要有一組雙向判準。
 
-    這幾格**兩個平台都跑得到、也都在量同一件事**（沒有任何 `skipUnless`）：連結是
-    POSIX 與 Windows 都有的機制，只是**原語不同**——POSIX 是 symlink、Windows 是
-    目錄 junction（原語選擇與 WHY 見 `_make_directory_link`）。此前這裡兩邊都寫
-    `os.symlink`，於是 Windows 側恆為 skip；改成各走各的原語之後，Windows 不再需要
-    開發者模式就有真覆蓋。殘留的那一個 skip 只剩「這台機器的檔案系統根本建不起
-    連結」（FAT／某些網路磁碟）這一種機器能力問題，不是平台語意
-    （`DEF-101-766`：單平台判準不可無條件外推，反之亦然）。
+    兩平台覆蓋沿革（symlink／junction 原語選擇、殘留 skip 範圍）全文搬至
+    CrossPlatform_R151_Guard_Prose_Migration.md〈TestSamePathIsNotVacuous〉節。
     """
 
     def setUp(self) -> None:
@@ -2217,11 +2186,8 @@ class TestSamePathIsNotVacuous(unittest.TestCase):
     def test_the_windows_branch_uses_a_junction_not_a_symlink(self) -> None:
         """🔴 這一格是「Windows 側真的有覆蓋」在 darwin 開發機上**唯一**的證據。
 
-        沒有它，把 `_make_directory_link()` 的 junction 分支刪掉會完全無聲：mac 上
-        每一格照樣綠（那條分支在 mac 上本來就不會執行），而 Windows 側悄悄退回
-        「恆 skip」——測試檔在、判準在、rc 是 0，與修好完全相同。
-        以注入 `os.name` 驗證而不是掛 `skipUnless`，是本檔既有慣例（見 `:481`／`:825`
-        兩處的同一理由：注入取得的覆蓋比「只在對的機器上才跑」更大）。
+        沿革全文搬至 CrossPlatform_R151_Guard_Prose_Migration.md
+        〈test_the_windows_branch_uses_a_junction_not_a_symlink〉節。
         """
         real, link = self.box / "real", self.box / "link"
         real.mkdir()
@@ -2337,11 +2303,8 @@ class TestHookLauncherContract(unittest.TestCase):
     def test_the_cwd_criterion_still_catches_a_launcher_that_never_chdirs(self) -> None:
         """反空轉自證：把 production 的 `os.chdir(root)` 拿掉，上一格的 cwd 判準必須轉紅。
 
-        🔴 **為什麼這一格非有不可**：上一格剛從「字面相等」換成「同一個實體」，而
-        放寬判準最常見的失敗模式就是**寬過頭變成恆真**。合成注入一支「忘記 chdir」
-        的啟動器（那正是它要防的 P0：hook 在錯的 cwd 下跑，所有相對路徑判準全歪），
-        證明新判準仍然說得出話。
-
+        🔴 為什麼這一格非有不可的沿革全文搬至 CrossPlatform_R151_Guard_Prose_Migration.md
+        〈test_the_cwd_criterion_still_catches_a_launcher_that_never_chdirs〉節。
         注入的是 production 檔的**副本**（`_LAUNCHER` 一個字都沒動），跑完即丟。
         """
         broken = self.root / "broken_launcher.py"
@@ -2595,11 +2558,9 @@ class TestExecFormConversionScope(unittest.TestCase):
     def test_every_active_settings_file_passes_the_form_criteria(self) -> None:
         """🔴 R84：形態判準 A~F 的掃描面由「只有根檔」擴到**每一份活躍 settings**。
 
-        為何這一格此前不存在（而不是「不需要」）：`hook_form_problems()` 對
-        `AutoClaude/.claude/settings.json` 實測回 **12 筆假紅**（B／E 兩條做字面比對，
-        而那份檔的載具帶 `../`）⇒ 想擴面的人會先撞到一堵假牆，於是擴面一直沒發生，
-        而 SDD LATEST 那份 shell form 就一直沒有任何形態判準看著。假紅先修（見
-        `win_carrier_kind()`），再擴面——順序反了就會有人把判準關掉。
+        為何這一格此前不存在（而不是「不需要」）的沿革全文搬至
+        CrossPlatform_R151_Guard_Prose_Migration.md
+        〈test_every_active_settings_file_passes_the_form_criteria〉節。
         """
         wiring = _hook_wiring()
         for rel in wiring.discover_active_settings(_REPO_ROOT):
@@ -2644,11 +2605,8 @@ class TestExecFormConversionScope(unittest.TestCase):
 class TestFrozenShellFormIsAShrinkOnlyExemption(unittest.TestCase):
     """凍結歷史面（`AISDLC_SDD/AISDLC_SDD_v*` 裡**非 LATEST** 的那些）的 shell form 份數。
 
-    🔴 立案（R84 訴求 7）：這一族此前是**結構性豁免**——`FROZEN_SETTINGS_PREFIX` 一句話
-    就把 30 份全部踢出掃描面，於是「凍結面有沒有被人動過」與「LATEST 轉了沒有」兩件事
-    同時失明。凍結面依 Copy-on-Evolve 政策不改寫，所以正解不是把它們也轉掉（那才是打破
-    政策），而是把「還有幾份是 shell form」登記成**可查的量測值**、判準取相等、方向只准
-    變小。新開一版**不會**讓它上升：新版由已是 exec form 的 LATEST 複製而來。
+    🔴 立案（R84 訴求 7）沿革全文搬至 CrossPlatform_R151_Guard_Prose_Migration.md
+    〈TestFrozenShellFormIsAShrinkOnlyExemption〉節。
     """
 
     def test_the_frozen_ratchet_matches_the_disk(self) -> None:
@@ -2730,11 +2688,8 @@ def _console_spawn_offenders(hook_dir: Path | None = None) -> list[str]:
 class TestAutoClaudeHookSpawnsAreConsoleFree(unittest.TestCase):
     """🔴 R84 訴求 7／C1：exec form 治掉載具的彈窗之後，**載具生的孫子還在彈**。
 
-    立案事實：`AutoClaude/tools/hooks/check_sh_eol.py::_run_git` 對 `git.exe` 的
-    `subprocess.run` 沒有 `CREATE_NO_WINDOW`。父行程是 `pythonw.exe`（GUI 子系統、
-    **沒有 console**），Windows 在這種情況下會替 console 子系統的 child **配一個新
-    console 視窗** ⇒ 每次 Write／Edit 到 `.sh` 就閃一次。`.claude/hooks/` 那一棵樹早有
-    判準看著（`ConsoleFreeSpawnTest`），`AutoClaude/tools/hooks/` 這一棵**一個都沒有**。
+    立案事實沿革全文搬至 CrossPlatform_R151_Guard_Prose_Migration.md
+    〈TestAutoClaudeHookSpawnsAreConsoleFree〉節。
     """
 
     def test_no_console_spawning_site_remains(self) -> None:
@@ -2762,12 +2717,8 @@ class TestAutoClaudeHookSpawnsAreConsoleFree(unittest.TestCase):
     def test_the_sdd_latest_hook_tree_is_covered_too(self) -> None:
         """🔴 R88／DEF-200-104：**第三個掃描面**＝SDD LATEST 的 `.claude/hooks/`。
 
-        立案（R85／P4 提出、R88 修）：前兩個掃描面是 `.claude/hooks/` 與
-        `AutoClaude/tools/hooks/`，而 SDD LATEST 那一棵樹**一個判準都看不到**——當回合
-        AST 實查有 3 個裸 `subprocess.check_output(["git", ...])`（`closure_evidence_
-        verify.py` 1 個、`post_commit_drift.py` 2 個）。它們是真的會跑的：SDD 框架的
-        hook 掛在版本目錄下，以 LATEST 為 cwd 開 session 是常態（同 R84 對
-        `FROZEN_SETTINGS_PREFIX` 下過的判決——把活躍面排除在普查外＝假的安心）。
+        立案沿革全文搬至 CrossPlatform_R151_Guard_Prose_Migration.md
+        〈test_the_sdd_latest_hook_tree_is_covered_too〉節。
 
         🔴 LATEST 走 SSOT 現查（`tools/lib/sdd_latest.resolve_latest_root`），**不寫版號**：
         寫死版號會在下一次 Copy-on-Evolve 時靜默指向凍結面，而那正是本列要防的失明。
@@ -2852,19 +2803,13 @@ def _extract_ledger_hook_child_timeout(source: str) -> float:
 
 class TestConversationLedgerChildTimeoutParity(unittest.TestCase):
     """D31c-2（解複審 W-3，總架構師裁決 D31c）：`conversation_ledger.HOOK_CHILD_TIMEOUT_SEC`
-    是**手寫鏡射** `.claude/hooks/sdd_hook_router.py` 的 `_CHILD_TIMEOUT["PostToolUse"]`
-    （見該模組 docstring D31b-3 段的 WHY——`worst_case_ledger_budget_sec()` 的組合上界必須
-    留給 router 的 child timeout 足夠餘裕）。全庫此前**沒有任何跨層 parity 測試**斷言兩者
-    真的相等：`test_conversation_ledger.py::LedgerLockBudgetTests` 只是拿
-    `worst_case_ledger_budget_sec()` 跟 `conversation_ledger` 自己的
-    `HOOK_CHILD_TIMEOUT_SEC` 比——兩個常數同出一檔，自己跟自己比恆真，router 那邊的值
-    漂移了（例如有人改了 `_CHILD_TIMEOUT["PostToolUse"]` 卻忘記同步鏡射常數）不會被任何
-    測試發現。
+    是**手寫鏡射** `.claude/hooks/sdd_hook_router.py` 的 `_CHILD_TIMEOUT["PostToolUse"]`。
 
-    讀原始碼字面（`ast.literal_eval`），刻意不 import 任一模組——AISDLC_SDD 與根層護欄層
-    是獨立部署面，兩子專案不跨 import（同模組既有慣例），一致性靠測試斷言而非匯入依賴。
-    SDD LATEST 走 SSOT 現查 `tools/lib/sdd_latest.resolve_latest_root`，不寫死版號：寫死
-    會在下一次 Copy-on-Evolve 後靜默指向凍結面，掃描面塌陷但判準照樣綠。
+    立案沿革（全庫此前零跨層 parity 測試）全文搬至
+    CrossPlatform_R151_Guard_Prose_Migration.md〈TestConversationLedgerChildTimeoutParity〉節。
+
+    讀原始碼字面（`ast.literal_eval`），刻意不 import 任一模組——兩子專案不跨 import；
+    SDD LATEST 走 SSOT 現查 `tools/lib/sdd_latest.resolve_latest_root`，不寫死版號。
     """
 
     @staticmethod
@@ -3108,10 +3053,8 @@ def _action_scan_sources() -> dict[str, str]:
 class TestNightlyTaskActionsAreWindowless(unittest.TestCase):
     """🔴 R84 訴求 7／B1-B2：schtasks 的兩支 Action 是 console 的 `powershell.exe`。
 
-    第一層防護是 `LogonType=S4U`（無互動桌面 ⇒ 本來就看不到），但那一層**已經被實測
-    證明會漂**：`tools/scheduled_task_expectations.json` 的 `_why` 逐字記載 smoke 任務的
-    LogonType 曾漂成 `InteractiveToken` **連三輪**，而漂掉的那三輪正是使用者會看到彈窗
-    的那三輪。`-WindowStyle Hidden` 是與它獨立的第二層。
+    LogonType=S4U 漂移沿革全文搬至
+    CrossPlatform_R151_Guard_Prose_Migration.md〈TestNightlyTaskActionsAreWindowless〉節。
 
     🔴 誠實劃界：本輪**無 Windows 真機** ⇒ 本類守的是「這兩行寫進去了、而且不准有人拿
     掉」，**不是**「彈窗真的消失了」。後者要真機才驗得到。
@@ -3179,9 +3122,8 @@ class TestNightlyTaskActionsAreWindowless(unittest.TestCase):
     def test_the_gui_whitelist_is_per_site_not_a_whole_file_pass(self) -> None:
         """🔴 R84／SD-05：白名單是**站點級**的——提到 `quiet_python` 不等於認證了它。
 
-        修前的判準是 `_GUI_CARRIER_SYMBOL in text`（整檔），實測注入：只在**註解**裡提到
-        它、另外寫一個內插出 `powershell.exe` 的 Action ⇒ **0 筆命中**。而 console 載具
-        混在內插裡正是這一族最難看見的形態（第一分支的字面比對看不到它）。
+        修前判準的實測缺口沿革全文搬至 CrossPlatform_R151_Guard_Prose_Migration.md
+        〈test_the_gui_whitelist_is_per_site_not_a_whole_file_pass〉節。
         `.ps1` 一併驗：兩種副檔名走的是不同的認證路徑（AST／剝註解後的行首賦值），
         只驗一種等於另一種沒有人守。
         """

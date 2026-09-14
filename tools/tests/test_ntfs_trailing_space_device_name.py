@@ -1,62 +1,10 @@
-"""R57 回歸鎖：Windows 保留裝置名「保留名 + 尾隨空白 + 副檔名」形態不得逃逸。
+"""R57 回歸鎖：Windows 保留裝置名「保留名 + 尾隨空白 + 副檔名」形態不得逃逸；R67 併入
+目錄段大小寫碰撞（A2）／文件引用大小寫（A15）／Unicode NFC 正規化（B16）三軸。
 
-缺陷（R57 掃描 B1）：`tools/check_ntfs_paths.py` 與 `tools/git-hooks/pre-commit`
-的 `_ntfs_seg_bad()` 都以「切到第一個點」取 base 後直接比對保留名清單——
-`CON .txt` 的 base 是 `"CON "`（帶尾隨空白），`^(CON|...)$` / case pattern `CON`
-皆不匹配；而「整段以空白或句點結尾」那一條只看整段（`CON .txt` 結尾是 `t`）也
-不成立 → 兩道判準之間漏出一個縫，`CON .txt`／`NUL .log`／`LPT1 .yaml` 全數放行。
-Windows 實情：Win32 解析裝置名時會忽略基底名後的尾隨空白，此形態在 Windows
-checkout 仍會撞到裝置名。
-
-本檔只鎖 monorepo 根層兩處實作（Python CI 版 + bash hook 版）的**行為對等**。
-同一缺陷形態另存在於兩處，**R57 主控收尾時已一併修復並各自設鎖**：
-`AutoClaude/autoclaude/utils/logger.py._sanitize_log_filename`（第三方，鎖在
-`test_windows_forbidden_filename_parity.py::TestTrailingSpaceReservedNameCrossConsistency`）
-與 `AISDLC_SDD/scripts/component_sanitizer.py.sanitize_component`（第四處，屬子專案
-邊界不可跨界 import，鎖在 `AISDLC_SDD/scripts/tests/
-test_component_sanitizer_reserved_trailing_space.py`）。四處成因相同：都是
-`rstrip(" .")` 作用於整串、之後才 `split(".", 1)[0]`，故 `CON .txt` 的 stem 皆為 `"CON "`。
-
-────────────────────────────────────────────────────────────────────────────
-## R67 併入：目錄段大小寫碰撞（A2）／文件引用大小寫（A15）／Unicode NFC 正規化（B16）
-
-**為何併進本檔而不另開一支**：`tools/tests/` 有一道護欄層棘輪
-（`test_adr_xplat001_c1c2_lock.py::TestGuardLayerRatchet`，機械承載
-DEF-101-561③／DEF-101-565 的架構級裁決）——R67 當時它量的是**檔數**，語意是
-「R61 開輪即禁止新增鎖檔、只准合併／刪除」（🔴 R78 ARCH-03 訂正：R77 起改量逐檔行數的
-**淨額**，新增檔案只要同一次變更刪掉等量以上的行就合法；下段是 R67 當時的實錄），
-理由是護欄層已比它所護的生產碼還大。R67 初版確實另開了一支獨立鎖檔
-（`test_path_segment_case_and_nfc_collision.py`），**當場被該棘輪擋下**；依其明示的合法作法
-（「把新判準擴充進既有鎖檔」）改為併入本檔。本檔是最貼近的宿主：它既有的職責就是
-「monorepo 根層兩處 NTFS 實作（Python CI 版 + bash hook 版）的行為對等」，
-R67 三軸全部落在同兩處實作上。**檔名比內容窄是刻意承受的代價**（改名屬另一種變更、
-且會打斷既有引用），讀者請以本段為準。
-
-### R67-A2 — 目錄段層級碰撞
-`check_ntfs_paths.py` 的碰撞檢查用**整條路徑**做分群鍵、`pre-commit` 的 A3 閘用
-`grep -iFx` 做**整行**比對，兩者對「目錄段拼法不同、basename 完全不重複」結構上失明。
-本 repo 就是這樣長出 `docs/04_planning/{Archive,archive}/` 與
-`docs/06_quality/{Archive,archive}/` 兩對 index 目錄並靜默共存 6 週
-（`f81ad94` 用大寫收 improving_01–31、`22782fe` 改小寫收 32–50）。
-mac(APFS)／Win(NTFS) 上兩拼法**塌縮成同一個磁碟目錄**、`git status` 全綠＝本機零訊號；
-同一 commit 在 Linux CI／github.com 上卻是**兩個獨立目錄**（R67 以 `hdiutil` 建
-case-sensitive APFS 卷實測坐實）。危害不是立即覆蓋（basename 不重疊時不會），而是
-**同一份程式碼在兩平台掃到不同的檔案集合**，以及交叉引用在 Linux 變死連結。
-
-### R67-A15 — 文件交叉引用大小寫
-上述漂移的第一個已實體化症狀：3 處文件把 improving_39 的出處寫成
-`docs/04_planning/Archive/AutoSDD_improving_39.md`，而該檔當時實住小寫 `archive/`。
-R67 的修法是**收斂目錄拼法為大寫 `Archive/`**（全 repo 外部引用清一色用大寫、兩支
-`README.md` 也住大寫側），使這 3 處原地變正確——**一個字都不用改**，因而不必改寫
-逐字保全的歷史歸檔帳本 `docs/06_quality/AutoSDD_Defect_Log_archive_02.md`。
-
-### R67-B16 — Unicode NFC 正規化
-整組檔名衛生鎖的設計標的清一色是「Windows/NTFS 簽出會不會炸」，沒有一項守
-「macOS 簽出會不會炸」。macOS(APFS/HFS+) 對檔名做 NFD、Windows(NTFS) 用 NFC，
-git 以 `core.precomposeunicode` 在 macOS readdir 端轉回 NFC；一旦 index 內存的是 NFD
-位元組，macOS clone 後該檔即永久呈現「index 一份 NFD、工作樹一份 NFC 未追蹤」的雙重
-身影：`git status` 恆不乾淨，且 `git clean -fd` 清掉 phantom 會直接變成 tracked 檔遺失
-（兩種不乾淨狀態互斥，無常規手段回到乾淨——R67 實測）。
+本檔只鎖 monorepo 根層兩處實作（Python CI 版 + bash hook 版）的**行為對等**；四缺陷
+沿革、R67 為何併入本檔而非另開一支、與 A2／A15／B16 各軸的立案敘事全文搬至
+CrossPlatform_R151_Guard_Prose_Migration.md〈test_ntfs_trailing_space_device_name.py
+模組 docstring〉節。
 """
 
 import os
@@ -305,18 +253,9 @@ class TestNfcNormalizationAxis(unittest.TestCase):
 class TestNfcAxisScopeIsCiOnlyByDesign(unittest.TestCase):
     """R67-B16 範圍決策鎖：NFC 軸**刻意只在 CI 版實作、不鏡射進 hook 版**。
 
-    這條的鑑別力方向是**反向**的（斷言「hook 不該有」而非「必須有」），理由與
-    `test_ntfs_trailing_space_device_name.py` 的前導空白鎖同型：本 repo 的守門慣例是
-    「hook 與 CI 版行為對等」，故下一輪掃描者看到「CI 有六項、hook 只有五項」時，
-    幾乎必然會把它當成缺口而「補齊對稱性」。實測結論是補了等於加死碼——
-
-      · macOS 端 `git add` 走 argv 有 `precompose_argv`、走目錄走訪有 readdir
-        precompose（R67 實測：磁碟 NFD 檔名 `63616665cc812e6d64` 經 `git add .`
-        後 index 記為 NFC `636166c3a92e6d64`）；
-      · Windows/NTFS 本身即 NFC。
-
-    ⇒ NFD index 項只能由 Linux 貢獻者／GitHub web／plumbing 進來，**那三條路都不經過
-    pre-commit**；而它們全都會被 CI 版的全量 tracked 掃描網住。
+    這條的鑑別力方向是**反向**的（斷言「hook 不該有」而非「必須有」）——實測結論是
+    補齊對稱性等於加死碼；範圍決策沿革與兩份實測依據全文搬至
+    CrossPlatform_R151_Guard_Prose_Migration.md〈TestNfcAxisScopeIsCiOnlyByDesign〉節。
     """
 
     def test_ci_version_implements_the_nfc_axis(self) -> None:

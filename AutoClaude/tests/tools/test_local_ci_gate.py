@@ -20,6 +20,11 @@ tools/check_wrapper_thinness.py hash 釘選守門）。
     (j) `--census-only` CLI（push 通道與 CI 的共同入口；含 stdin 形態）
     (k) 接線鎖：census 有沒有真的掛在會擋的通道上（pre-push／push CI），
         以及自動偵測有沒有掛在 pytest 一定會載的那一層（conftest）
+    (m) DEF-200-303：`_skip_profile` 帶上 pgextras 第三軸（`baseline_origin.
+        pg_extras_state()` 探測，不寫死本機值）；`AutoClaude/tests@win32+pg+solo+pgext`
+        由今晚 nightly 真實輸出登記入表，死結解除
+    (n) DEF-200-291：`check_skip_census` 的 `unattended` 語意——未登記剖面依它分岔，
+        `GITHUB_ACTIONS` 自動視為無人值守，已登記剖面不受旗標影響
 """
 from __future__ import annotations
 
@@ -82,7 +87,9 @@ def _mock_all_gates(monkeypatch: pytest.MonkeyPatch, rc: int = 0, **overrides) -
     for name in _ALL_GATE_FUNCS:
         target_rc = overrides.get(name, rc)
         if name == "gate_pytest":
-            monkeypatch.setattr(m, name, lambda _args, _rc=target_rc: _rc)
+            # `**_kw` 吞掉 `unattended`（DEF-200-291）——本假實作只在乎 rc，不在乎
+            # 呼叫端傳了哪些關鍵字參數。
+            monkeypatch.setattr(m, name, lambda _args, _rc=target_rc, **_kw: _rc)
         else:
             monkeypatch.setattr(m, name, lambda _rc=target_rc: _rc)
 
@@ -94,8 +101,8 @@ def _silence_liveness(monkeypatch: pytest.MonkeyPatch) -> None:
 def _pin_registered_profile(monkeypatch: pytest.MonkeyPatch) -> None:
     """把剖面釘在**已登記**的那一格（`_skip_profile` 讀 `sys.platform`）。
 
-    WHY：`_RUNTIME_SKIP_CEILING` 目前只登記 `win32` 兩個剖面（刻意的誠實劃界——
-    mac／Linux 的健康值沒人量過）。不釘的話，「健康量測 ⇒ CENSUS_OK」這組斷言在
+    WHY：`_RUNTIME_SKIP_CEILING` 目前只登記 `win32`／`darwin` 幾個剖面（刻意的誠實
+    劃界——mac／Linux 的健康值沒人量過）。不釘的話，「健康量測 ⇒ CENSUS_OK」這組斷言在
     Windows 上綠、在 Linux runner 上得到 `CENSUS_PROFILE_UNREGISTERED`（3）而紅
     ——本輪由 act（ubuntu 容器）實跑抓到。釘住剖面才問得到本組真正要問的那件事。
     """
@@ -103,6 +110,11 @@ def _pin_registered_profile(monkeypatch: pytest.MonkeyPatch) -> None:
     # R80 包 A（S3-09）：剖面多了「巢狀 session」這一維，同樣要釘——否則本組斷言的
     # 綠紅會跟著「跑測試的人剛好在不在 Claude Code session 裡」翻面，那是最難查的假紅。
     monkeypatch.setattr(m, "nested_session", lambda: True)
+    # 🔴 DEF-200-303：剖面第三維（pgextras）同樣要釘——本組要問的是「剖面登記表對得
+    # 上」，不是「這台跑測試的機器今天裝了什麼」。已登記的 `AutoClaude/tests@win32+…`
+    # 三格皆用 `pgext`（見 `skip_group_policy._RUNTIME_SKIP_CEILING` 同鍵 WHY），
+    # 不釘的話本組斷言會隨著測試機是否裝有 psycopg2／sqlalchemy 而漂移。
+    monkeypatch.setattr(m.baseline_origin, "pg_extras_state", lambda: "present")
 
 
 # --- (a) gate 清單與順序 ---
@@ -156,36 +168,51 @@ def test_all_green_yields_rc0_and_push_ok(
 # --- (c) 位置參數取代語意 ---
 
 def test_default_pytest_args() -> None:
-    do_act, do_pg, args = m.parse_args([])
-    assert (do_act, do_pg) == (False, False)
+    do_act, do_pg, args, do_unattended = m.parse_args([])
+    assert (do_act, do_pg, do_unattended) == (False, False, False)
     # R59 ARCH-R59-01：新增 `-rs`（印 skip 理由）。本斷言是 DEFAULT_PYTEST_ARGS 的釘選鎖，
     # 改預設值必須同步改這裡——它在本輪確實當場翻紅並逼我同步，鎖有效。
     assert args == ["tests/", "-q", "-rs", "--tb=short"]
 
 
 def test_positional_args_replace_defaults_entirely() -> None:
-    _, _, args = m.parse_args(["-k", "test_foo", "-v"])
+    _, _, args, _ = m.parse_args(["-k", "test_foo", "-v"])
     assert args == ["-k", "test_foo", "-v"]  # 整批取代，不是附加
 
 
 def test_flags_mixed_anywhere_with_positionals() -> None:
-    do_act, do_pg, args = m.parse_args(["-k", "foo", "--act", "-v", "--pg"])
-    assert (do_act, do_pg) == (True, True)
+    do_act, do_pg, args, do_unattended = m.parse_args(
+        ["-k", "foo", "--act", "-v", "--pg", "--unattended"])
+    assert (do_act, do_pg, do_unattended) == (True, True, True)
     assert args == ["-k", "foo", "-v"]  # 旗標任意位置皆可，且不進 pytest 參數
 
 
 def test_flags_only_keep_default_pytest_args() -> None:
-    do_act, do_pg, args = m.parse_args(["--act", "--pg"])
-    assert (do_act, do_pg) == (True, True)
+    do_act, do_pg, args, do_unattended = m.parse_args(["--act", "--pg"])
+    assert (do_act, do_pg, do_unattended) == (True, True, False)
     # R59 ARCH-R59-01：新增 `-rs`（印 skip 理由）。本斷言是 DEFAULT_PYTEST_ARGS 的釘選鎖，
     # 改預設值必須同步改這裡——它在本輪確實當場翻紅並逼我同步，鎖有效。
     assert args == ["tests/", "-q", "-rs", "--tb=short"]
 
 
+def test_unattended_flag_is_a_flag_not_a_positional() -> None:
+    """DEF-200-291：`--unattended` 與 `--act`／`--pg` 同款——出現在任意位置皆可，
+    且不得被誤判為「首個非旗標參數」而整批取代 pytest 預設參數。
+
+    🔴 `do_unattended` 位於 `parse_args` 回傳 tuple 最後一位（不是插在 `pytest_args`
+    前面）——見該函式 WHY：既有呼叫端 `test_local_ci_gate_shell_arg_parity.py` 用
+    位置索引 `[2]` 取 `pytest_args`，新增旗標不得打斷那個索引。
+    """
+    do_act, do_pg, args, do_unattended = m.parse_args(["--unattended"])
+    assert (do_act, do_pg, do_unattended) == (False, False, True)
+    assert args == list(m.DEFAULT_PYTEST_ARGS)
+
+
 def test_pytest_gate_receives_overridden_args(monkeypatch: pytest.MonkeyPatch) -> None:
     received: list[list[str]] = []
     _mock_all_gates(monkeypatch, rc=0)
-    monkeypatch.setattr(m, "gate_pytest", lambda args: received.append(list(args)) or 0)
+    monkeypatch.setattr(
+        m, "gate_pytest", lambda args, **_kw: received.append(list(args)) or 0)
     _silence_liveness(monkeypatch)
     assert m.main(["-k", "test_bar"]) == 0
     assert received == [["-k", "test_bar"]]
@@ -372,7 +399,7 @@ def test_gate_pytest_default_args_add_loadgroup_when_pg_in_effect(
 
     monkeypatch.setattr(m, "_stream_capture", fake_capture)
     monkeypatch.setattr(m, "pg_dsn_in_effect", lambda: True)
-    monkeypatch.setattr(m, "check_skip_census", lambda output, pg: 0)
+    monkeypatch.setattr(m, "check_skip_census", lambda output, pg, **_kw: 0)
     rc = m.gate_pytest(list(m.DEFAULT_PYTEST_ARGS))
     assert rc == 0
     assert calls == [
@@ -392,7 +419,7 @@ def test_gate_pytest_default_args_no_loadgroup_when_pg_absent(
 
     monkeypatch.setattr(m, "_stream_capture", fake_capture)
     monkeypatch.setattr(m, "pg_dsn_in_effect", lambda: False)
-    monkeypatch.setattr(m, "check_skip_census", lambda output, pg: 0)
+    monkeypatch.setattr(m, "check_skip_census", lambda output, pg, **_kw: 0)
     rc = m.gate_pytest(list(m.DEFAULT_PYTEST_ARGS))
     assert rc == 0
     assert calls == [[sys.executable, "-m", "pytest", *m.DEFAULT_PYTEST_ARGS]]
@@ -580,6 +607,89 @@ def test_unregistered_profile_is_advisory_for_the_cli_but_red_for_the_gate(
     assert m.check_skip_census(_HEALTHY_LOG, pg=False) == 1  # 同一份輸入，閘門入口判紅
 
 
+def test_check_skip_census_unattended_semantics(monkeypatch: pytest.MonkeyPatch) -> None:
+    """DEF-200-291：未登記剖面依 `unattended` 分岔；已登記剖面不受旗標影響；
+    `GITHUB_ACTIONS` 有值時自動視為無人值守（同 `perf_baseline.perf_environment()`
+    判 CI 的 SSOT，本 repo 唯一 CI 訊號）。此前 12 連紅的死結正是「nightly 無人值守
+    卻套用『人在現場』那條規則」。"""
+    monkeypatch.setattr(m.sys, "platform", "linux")  # 確保剖面未登記
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    assert m.check_skip_census(_HEALTHY_LOG, pg=False) == 1, (
+        "有人值守（預設）：未登記剖面仍判紅，人在現場可當場入表"
+    )
+    assert m.check_skip_census(_HEALTHY_LOG, pg=False, unattended=True) == 0, (
+        "無人值守：未登記剖面必須是真正的 advisory"
+    )
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    assert m.check_skip_census(_HEALTHY_LOG, pg=False) == 0, (
+        "GITHUB_ACTIONS 有值時必須自動視為無人值守，不需手動加 --unattended"
+    )
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    _pin_registered_profile(monkeypatch)
+    assert m.check_skip_census(_HEALTHY_LOG, pg=False) == 0
+    assert m.check_skip_census(_HEALTHY_LOG, pg=False, unattended=True) == 0, (
+        "已登記剖面（CENSUS_OK）不受 unattended 旗標影響"
+    )
+
+
+#: 今晚 nightly 的真實 `-rs` 尾段摘錄（`AutoClaude/logs/nightly_2026-09-14_223002.log`
+#: 第 152~163 行）。DEBT 三支的原文散文長達數千字元，這裡只保留分類判準需要的標籤
+#: 字首＋可辨識片語＋「R90」承接輪次引用（`skip_tag_policy._EXEMPT_HANDOVER_RE` 判準
+#: 需要，三支原文皆逐字含「平台綁定登記於 R90」）——被斷言的是分群與 `N skipped`，
+#: 不是逐字散文，保留整段會撞 ruff 行長與本檔 LOC 紀律，且與斷言內容無關（同
+#: `_HEALTHY_LOG` 上方既有慣例）。
+_NIGHTLY_20260914_TAIL = (
+    "SKIPPED [1] tests\\test_evaluator_kill_tree.py:56: "
+    "[POSIX-NATIVE-ONLY] POSIX killpg 專屬行為\n"
+    "SKIPPED [1] tests\\test_evaluator_kill_tree.py:94: "
+    "[POSIX-NATIVE-ONLY] POSIX process group 專屬\n"
+    "SKIPPED [1] tests\\test_evaluator_kill_tree.py:118: "
+    "[POSIX-NATIVE-ONLY] POSIX process group 專屬\n"
+    "SKIPPED [1] tests\\test_perception.py:435: "
+    "[POSIX-NATIVE-ONLY] POSIX process-group 孤兒防護\n"
+    "SKIPPED [1] tests\\test_perception_platform_honesty.py:166: "
+    "[MAC-NATIVE-ONLY] macOS 真機專屬\n"
+    "SKIPPED [1] tests\\tools\\test_validate_mutmut_log.py:205: "
+    "[ENV-DISABLED] 未啟用，非缺件\n"
+    "SKIPPED [1] tests\\contract\\test_pg_existing_schema_lock.py:321: "
+    "[STRUCTURAL-PAIR] present/absent 互斥對\n"
+    "SKIPPED [1] tests\\integration\\test_pgvector_hnsw_recall.py:213: "
+    "[DEBT] 需 W3 G3 staging 資料集，平台綁定登記於 R90\n"
+    "SKIPPED [1] tests\\integration\\test_pgvector_hnsw_recall.py:281: "
+    "[DEBT] 需 W3 G3 staging 資料集（同 T1），平台綁定登記於 R90\n"
+    "SKIPPED [1] tests\\integration\\test_pgvector_real_recall.py:264: "
+    "[DEBT] 雙 adapter failover fixture 缺失，平台綁定登記於 R90\n"
+    "SKIPPED [1] tests\\perf\\test_pgvector_recall_perf.py:71: "
+    "[ENV-DISABLED] pgvector recall 延遲 SLA 未啟用\n"
+    # 摘要行刻意拆成兩段字面：本檔不在 tools/check_pytest_baseline_sites._SCAN_FILES 內，
+    # 其前瞻發現面對「同一行同時含 ≥4 位數字與 passed／skipped」一律判為基線宣稱新家
+    # （不吃行內豁免）；這裡是 nightly log 尾段的測試輸入，不是基線宣稱（SSOT＝ONBOARDING §7）。
+    "4841"
+    " passed, 11 skipped in 76.73s (0:01:16)\n"
+)
+
+
+def test_the_win32_pg_solo_profile_is_registered_from_tonights_nightly_excerpt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """DEF-200-303：F3 死結解除的落地驗證——真實 nightly 尾段餵進 `census_verdict`，
+    此前 12 連紅（剖面未登記 ⇒ rc=1），本輪後必須是 CENSUS_OK。
+
+    逐支分群人工核對（對照 `skip_group_policy._RUNTIME_SKIP_CEILING` 新登記那格）：
+    platform=5（頭 5 支）／env-disabled=2（第 6、11 支）／structural-pair=1（第 7 支）／
+    debt=3（第 8~10 支）／tool-absence=0／untagged=0，加總 11＝摘要行 `11 skipped`。
+    """
+    monkeypatch.setattr(m.sys, "platform", "win32")
+    monkeypatch.setattr(m, "nested_session", lambda: False)
+    monkeypatch.setattr(m.baseline_origin, "pg_extras_state", lambda: "present")
+    profile = m._skip_profile(True, nested=False)
+    assert profile == "AutoClaude/tests@win32+pg+solo+pgext"
+    assert m.skip_group_policy.profile_registered(profile)
+    rc, lines = m.census_verdict(_NIGHTLY_20260914_TAIL, pg=True, nested=False)
+    assert rc == m.CENSUS_OK, "\n".join(lines)
+    assert m.check_skip_census(_NIGHTLY_20260914_TAIL, pg=True) == 0
+
+
 def test_profile_key_follows_real_effectiveness_not_who_set_the_variable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -607,11 +717,20 @@ def test_profile_key_follows_real_effectiveness_not_who_set_the_variable(
         "DSN 設了卻用不動時剖面必須是 nopg——census 形狀就是 nopg，拿 pg 的緊上限去比是假紅，"
         "而反過來（標成 pg）會讓下游拿錯天花板"
     )
-    assert m._skip_profile(m.pg_dsn_in_effect(), nested=True).endswith("+nopg+nested")
+    # 🔴 DEF-200-303：第三軸（pgextras）不寫死本機值——兩個值各測一次，證明 pg／nopg
+    # 那一軸的鑑別力與 pgextras 軸互不相依（endswith 只認到「本次真的探測到什麼」，
+    # 不是「這台機器剛好裝了什麼」）。
+    monkeypatch.setattr(m.baseline_origin, "pg_extras_state", lambda: "present")
+    assert m._skip_profile(m.pg_dsn_in_effect(), nested=True).endswith("+nopg+nested+pgext")
+    monkeypatch.setattr(m.baseline_origin, "pg_extras_state", lambda: "absent")
+    assert m._skip_profile(m.pg_dsn_in_effect(), nested=True).endswith("+nopg+nested+nopgext")
     # ③ DSN 在、DB 用得動 ⇒ +pg，且**不問是誰設的**（這裡沒有經過 pg_autodetect）
     monkeypatch.setattr(m, "_pg_migrated", lambda dsn: None)
     assert m.pg_dsn_in_effect() is True
-    assert m._skip_profile(m.pg_dsn_in_effect(), nested=True).endswith("+pg+nested")
+    monkeypatch.setattr(m.baseline_origin, "pg_extras_state", lambda: "present")
+    assert m._skip_profile(m.pg_dsn_in_effect(), nested=True).endswith("+pg+nested+pgext")
+    monkeypatch.setattr(m.baseline_origin, "pg_extras_state", lambda: "absent")
+    assert m._skip_profile(m.pg_dsn_in_effect(), nested=True).endswith("+pg+nested+nopgext")
 
 
 def test_pg_profile_marker_round_trips_and_absence_is_not_false() -> None:
@@ -982,7 +1101,9 @@ if str(_POLICY_ROOT) not in sys.path:
     sys.path.insert(0, str(_POLICY_ROOT))
 import skip_group_policy as P  # noqa: E402
 
-_PROF = "AutoClaude/tests@win32+nopg+nested"
+#: DEF-200-303：鍵已 re-key 帶上 pgextras 軸；本機 repo `.venv` 裝有 psycopg2／
+#: sqlalchemy（同 `skip_group_policy._RUNTIME_SKIP_CEILING` 同鍵 WHY），故用 `pgext`。
+_PROF = "AutoClaude/tests@win32+nopg+nested+pgext"
 
 
 def _base_census() -> dict[str, int]:
@@ -1372,14 +1493,32 @@ def test_the_nightly_runner_profile_is_the_one_that_can_actually_be_measured() -
     nightly 必然落在 `+pg+solo`。帳上寫著「已登記一個執行者」，指的卻是一個不存在的
     執行者；每天真的在跑的那一個一格判準都沒有（實測 nightly log 逐字印
     `⚠️ 剖面未登記`）。這種失效不會有紅燈，只會有一行 advisory。
+
+    🔴 DEF-200-303（F3 死結解除）：`+pg+solo` 這一格自己也曾長期停在「已登記執行者，
+    卻沒有天花板」——12 連紅的根因。今晚是它第一次真的被量到並移出豁免表，畢業。
     """
-    assert "AutoClaude/tests@win32+pg+solo" in P._FULL_SUITE_RUNNERS
+    key = "AutoClaude/tests@win32+pg+solo+pgext"
+    assert key in P._FULL_SUITE_RUNNERS
     assert "AutoClaude/tests@win32+nopg+solo" not in P._FULL_SUITE_RUNNERS, (
         "量不到的舊鍵又回來了——它會讓 nightly 那一路的天花板永遠停在 advisory"
     )
-    # 豁免理由必須指名承接帳本列（既有判準），且必須寫得出「怎麼量」——否則交棒等於沒交
-    exempt = P._UNMEASURED_RUNNER_PROFILES["AutoClaude/tests@win32+pg+solo"]
-    assert "nightly_latest.log" in exempt, f"豁免理由沒寫出取得管道：{exempt!r}"
+    # 畢業完整性（同 `test_the_darwin_runner_graduated_and_every_remaining_gap_still_has_a_recipe`
+    # 的既有判準形狀）：兩張天花板表都要有它，且不得再掛在未量測豁免表裡。
+    assert key in P._RUNTIME_SKIP_CEILING, f"{key} 沒有基線天花板"
+    assert key in P._RUNTIME_SKIP_CEILING_MAX, f"{key} 只進了基線表、沒進 MAX 表"
+    assert P.profile_registered(key)
+    assert key not in P._UNMEASURED_RUNNER_PROFILES, (
+        "已經量到天花板了，卻還掛在未量測豁免表裡——把有人守的寫成沒人守"
+    )
+    # 值逐字照抄 `AutoClaude/logs/nightly_2026-09-14_223002.log` 第 164 行，零加減推算
+    assert P._RUNTIME_SKIP_CEILING[key] == {
+        P.SKIP_GROUP_PLATFORM: 5,
+        P.SKIP_GROUP_TOOL_ABSENCE: 0,
+        P.SKIP_GROUP_ENV_DISABLED: 2,
+        P.SKIP_GROUP_STRUCTURAL: 1,
+        P.SKIP_GROUP_DEBT: 3,
+        P.SKIP_GROUP_UNTAGGED: 0,
+    }
 
 
 #: 「可跑的配方」的機械形態：至少指名一支真的跑得起來的載具／可抄的產物。
@@ -1498,11 +1637,19 @@ def test_the_third_tree_is_inside_the_skip_governance_frame() -> None:
     assert "--census-only" in exempt, f"豁免理由沒寫出接法：{exempt!r}"
 
 
-def test_profile_key_encodes_the_nested_session_dimension() -> None:
+def test_profile_key_encodes_the_nested_session_dimension(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """S3-09：同一棵樹在巢狀 session 內外是兩個母體（本次實測差一整族），
-    剖面鍵不編碼它，天花板就永遠在比不同的東西。"""
+    剖面鍵不編碼它，天花板就永遠在比不同的東西。
+
+    🔴 DEF-200-303：斷言改用 `"+solo+" in profile` 而非 `endswith("+solo")`——鍵尾巴
+    現在多帶一段 pgextras token，不寫死本機值（見 `_pin_registered_profile` 的
+    pgextras 釘法）；本支只釘 pgextras 讓輸出可預期，不代表 nested 軸的鑑別力來自它。
+    """
+    monkeypatch.setattr(m.baseline_origin, "pg_extras_state", lambda: "present")
     assert m._skip_profile(True, nested=True) != m._skip_profile(True, nested=False)
-    assert m._skip_profile(True, nested=False).endswith("+solo")
+    assert "+solo+" in m._skip_profile(True, nested=False)
     assert m.nested_from_log(m.pg_marker_line(True, nested=False)) is False
     assert m.nested_from_log("完全沒有標記的一份輸出") is None
 

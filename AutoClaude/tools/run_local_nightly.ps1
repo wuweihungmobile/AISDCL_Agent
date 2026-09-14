@@ -151,97 +151,50 @@ if ($args.Count -gt 0) {
   exit 2
 }
 
-# SD_09 W3 Round 19 audit P0-AUDIT-R18-1 修復（紀律 #14 schtasks PATH 補強）：
+# SD_09 W3 Round 19 audit P0-AUDIT-R18-1 修復史料（紀律 #14 schtasks PATH 補強）：
 # 02:00 schtasks 第 14 跑（首次自動跑）pg-e2e stage 36ms 內 EXCEPTION crash：
 #   「在此物件上找不到屬性 'Source'」(StrictMode 3.0 + $null.Source)
 # 根因：schtasks 啟動的 powershell.exe 未經 pyenv 互動 hook → PATH 只含
 #   `pyenv-win\shims` 但 shims 內無 alembic.bat → Get-Command alembic.exe 回 $null
-#   → 後續 .Source 取屬性失敗。
-# 修復：偵測 pyenv-win 存在但 Scripts/ 不在 PATH 時自動補入；確保 alembic.exe /
-#   asyncpg / 等 Python entry-point exe 在 schtasks / 互動模式下行為一致。
-# DEF-101-506（紀律 #14 延伸，2026-07-27 真機事故）：上面那段只讓「entry-point
-# exe」在兩種啟動方式下等價，**直譯器本身仍是誰啟動就用誰的**。互動 shell 若已啟用
-# monorepo .venv，PATH 前段就是 .venv\Scripts → 同一支 nightly 在 schtasks 下跑
-# pyenv python.exe、在已啟用 venv 的終端機/agent 下跑 .venv python.exe，兩者
-# **依賴集不同**（.venv 未裝 [postgres,pgvector] 選配 → pg-e2e 假紅）、
-# **shim 語意也不同**（pyenv 是 python.bat，會做 batch 百分號展開；.venv 是真
-# .exe，不會）→ 同一份 nightly_latest.log 的紅綠無法互相比較，且會污染觀察期帳本。
-# 真實後果：本輪先以 .venv 跑出 pg-e2e/perf 兩個假紅，且讓 DEF-101-503（% 被
-# batch shim 吃掉）的修復「綠得沒有鑑別力」——真 .exe 本來就不會觸發該 bug。
-# 對策＝把「排程等價」提升為腳本自身不變量：偵測到已啟用 venv 就把它的 Scripts
-# 目錄自本行程 PATH 移除（僅本行程，不動使用者 shell），使解析結果與 schtasks 一致；
-# 但**移除後必須仍找得到真 python**，否則還原並改為警告——載具正規化不該讓整晚
-# 驗證開天窗（同 Mutex 鎖的降級哲學）。mac 側無此問題：run_local_nightly.sh 一開始
-# 就把直譯器釘成絕對路徑 $ROOT/.venv/bin/python，不靠 PATH 現場解析。
-# WindowsAppsGuard SSOT 必須在此提前載入（原本在下方 PyExe 解析處才 dot-source）：
-# 下方正規化區塊要判斷「移除 venv Scripts 後是否仍有可用 python」，該判斷必須用
-# Test-IsRealPython 而非裸 Get-Command——否則當 PATH 上只剩 WindowsApps 空殼時會
-# 誤判為「還有 python」而不還原。同時滿足 test_windowsapps_guard_cross_consistency
-# 的呼叫點層級判準（檔內不得有裸字面值 python 呼叫）。
+#   → 後續 .Source 取屬性失敗。原修復＝偵測 pyenv-win 存在但 Scripts/ 不在 PATH
+#   時自動補入；DEF-101-506（2026-07-27 真機事故）進一步發現「entry-point exe
+#   等價」不夠，直譯器本身仍是誰啟動就用誰的，故再加一段「偵測已啟用 venv 就把
+#   它的 Scripts 從本行程 PATH 剝除，使 PATH 解析退回 pyenv 全域」的正規化邏輯，
+#   讓兩種啟動方式「殊途同歸」；隨後 DEF-101-522 又修過該正規化邏輯本身的斜線
+#   比對死碼缺陷（史料見 git 歷史，本檔不再保留無程式碼可對照的死註解）。
+#
+# 🔴 DEF-200-302（掌舵者 2026-09-15 裁決 B 案，解除上述整套「殊途同歸」設計）：
+# 「schtasks 與已啟用 venv 兩種啟動方式依賴集不同、需要正規化互相靠攏」這個前提
+# 本身已失效——主控本場實測根層 .venv 的 pyvenv.cfg home 就是同一顆 pyenv-win
+# 3.11.9 二進位，且 xdist／psycopg2／sqlalchemy／pgvector／asyncpg／alembic／
+# pytest 七項在 pyenv 全域與根 .venv 兩邊皆 PRESENT（不再是「兩套互不受控、可能
+# 分岔的依賴集合」）；2026-09-13 nightly 曾因 PATH 上的 pyenv 全域缺 xdist 而
+# pytest rc=4，正是「第二套環境沒人專職維護」的真實代價。故不再「使兩者等
+# 價」，反過來直接釘死根層 .venv 絕對路徑——不論 schtasks 或已啟用 venv 的終端
+# 機／agent 觸發，nightly 一律使用同一顆直譯器，且與其餘工具鏈（pre-push、hook
+# 載具）用的是同一顆；找不到就 fail-loud（exit 1），不再退化為 PATH 現場解析
+# （那正是本輪要拔除的「沒人維護的第二套環境」）。mac 側本就是同款絕對路徑釘死
+# 設計（run_local_nightly.sh 的 $ROOT/.venv/bin/python），本輪是 Windows 側補齊。
+# WindowsAppsGuard SSOT 提前載入：下方健檢與行尾 $script:PyExe 解析都要用它，且
+# 本檔全域禁止裸字面值 `python` 呼叫（test_windowsapps_guard_cross_consistency.py
+# 的呼叫點層級判準——本區塊改用變數 $VenvPy／$script:PyExe，屬其認可的「變數替
+# 換」安全形狀）。
 . "$PSScriptRoot/../../tools/lib/WindowsAppsGuard.ps1"
 
-# DEF-101-522（R59 四方一審 SD-R59-01 揪出並經主控原生 PowerShell 探針證實）：
-# 本區塊初版的路徑比對**在文件主推的 Windows 開發流程上永遠不成立**，即整段是死碼，
-# 而且還會走進成功分支印出「已移除…已與 schtasks 排程等價」這句與事實相反的取證。
-# 根因＝斜線形態不一致：`.venv\Scripts\Activate.ps1` 插入 PATH 的字串是
-# `"$env:VIRTUAL_ENV/Scripts"`（**正斜線**），而 `Join-Path` 產生的是**反斜線**。
-# 主控實測（原生 PowerShell 5.1，真的 dot-source 本 repo 的 Activate.ps1）：
-#   PATH[0]   = D:\...\.venv/Scripts      ← 正斜線
-#   Join-Path = D:\...\.venv\Scripts      ← 反斜線
-#   before=31 kept=30 → 少的那一項是**空字串**，venv Scripts 仍在 PATH 上
-#   resolved python = D:\...\.venv/Scripts\python.exe   ← 仍是 venv 的
-# 為何 R58／R59 回收時都沒測出來：從 Git Bash 啟動 powershell 時，msys 會把該項轉成
-# 反斜線，比對剛好成立——**又一次「載具剛好會過」**（本輪第四次現形，見 DEF-101-520 ②）。
-# 兩處修法：
-#  ① 兩邊都正規化再比（`/`→`\` 後去尾隨 `\`；`-ne` 本身大小寫不敏感，磁碟機字母不需另處理）。
-#  ② 加後置條件：數**真的比對成功幾項**（`$removed`），為 0 就不得宣告成功。
-#     刻意不用「總項數變化」自檢——實測空字串項會被 `$_ -and` 濾掉而造成 31→30 的假象。
-if ($env:VIRTUAL_ENV) {
-  $venvScripts = Join-Path $env:VIRTUAL_ENV 'Scripts'
-  $venvNorm = $venvScripts.Replace('/', '\').TrimEnd('\')
-  $pathBefore = $env:PATH
-  $removed = @($pathBefore -split ';' | Where-Object {
-    $_ -and ($_.Replace('/', '\').TrimEnd('\') -eq $venvNorm)
-  }).Count
-  $kept = @($pathBefore -split ';' | Where-Object {
-    $_ -and ($_.Replace('/', '\').TrimEnd('\') -ne $venvNorm)
-  })
-  if ($removed -eq 0) {
-    Write-Host "[bootstrap] WARN 已啟用 venv（$env:VIRTUAL_ENV），但在 PATH 上找不到與其 Scripts 相符的項目（正規化後比對 0 命中）— 未做任何變更，本輪結果與 schtasks 排程不保證等價（DEF-101-522：不得在零命中時宣告已等價）"
-  } else {
-    $env:PATH = ($kept -join ';')
-    if (Test-IsRealPython -CandidateName 'python') {
-      Write-Host "[bootstrap] 偵測到已啟用 venv（$env:VIRTUAL_ENV）— 已自本行程 PATH 移除 $removed 個相符項（$venvScripts），使直譯器解析與 schtasks 排程等價（DEF-101-506）"
-    } else {
-      $env:PATH = $pathBefore
-      Write-Host "[bootstrap] WARN 已啟用 venv（$env:VIRTUAL_ENV），但移除其 Scripts 後 PATH 上已無其他 python — 已還原並沿用 venv 直譯器；本輪結果與 schtasks 排程不完全等價（DEF-101-506）"
-    }
-  }
+$MonorepoRoot = Split-Path -Parent $RepoRoot
+$VenvScripts = Join-Path $MonorepoRoot '.venv\Scripts'
+# 字面值刻意與 tools/windows_smoke_local.ps1 同款單一相對字串（'.venv\Scripts\
+# python.exe'）而非疊用 $VenvScripts 組出——兩檔同一段字面值是
+# test_nightly_interpreter_determinism.py::TestWindowsInterpreterStaysPinned
+# 的釘選對象，維持逐字一致比各自組合更利於機械比對與人工核對。
+$VenvPy = Join-Path $MonorepoRoot '.venv\Scripts\python.exe'
+if (-not (Test-Path $VenvPy)) {
+  Write-Host "[bootstrap] ERROR 根層 .venv 直譯器不存在：$VenvPy（DEF-200-302：nightly 釘死根層 .venv，不再退回 PATH 現場解析）— 修法：在 repo 根執行 tools/bootstrap.ps1 或 python tools/dev_start.py 建立 .venv" -ForegroundColor Red
+  exit 1
 }
-
-try {
-  $pyenvRoot = $env:PYENV
-  if (-not $pyenvRoot -and $env:USERPROFILE) {
-    $candidate = Join-Path $env:USERPROFILE '.pyenv\pyenv-win'
-    if (Test-Path $candidate) { $pyenvRoot = $candidate }
-  }
-  if ($pyenvRoot -and (Test-Path $pyenvRoot)) {
-    $versionsDir = Join-Path $pyenvRoot 'versions'
-    if (Test-Path $versionsDir) {
-      $pyVersion = Get-ChildItem $versionsDir -Directory -ErrorAction SilentlyContinue |
-                   Sort-Object Name -Descending | Select-Object -First 1
-      if ($pyVersion) {
-        $scriptsPath = Join-Path $pyVersion.FullName 'Scripts'
-        if ((Test-Path $scriptsPath) -and ($env:PATH -notlike "*$scriptsPath*")) {
-          $env:PATH = "$scriptsPath;$env:PATH"
-          Write-Host "[bootstrap] Added pyenv Scripts to PATH: $scriptsPath"
-        }
-      }
-    }
-  }
-} catch {
-  Write-Host "[bootstrap] WARN PATH augmentation failed: $_"
-}
+$env:PATH = "$VenvScripts;$env:PATH"
+$env:VIRTUAL_ENV = Join-Path $MonorepoRoot '.venv'
+Write-Host "[bootstrap] 已釘死根層 .venv（DEF-200-302）：VIRTUAL_ENV=$env:VIRTUAL_ENV；已將 $VenvScripts 前置至本行程 PATH（供 alembic.exe 等 entry-point 解析，取代原 pyenv-win Scripts 補強）"
 
 # DEF-101-228（R20 真 Windows 機器驗證）：mac 側 run_local_nightly.sh 已有 mkdir
 # atomic lock，防「排程觸發與手動重跑時間重疊時重複跑一整套 gate」；Windows 側先前
@@ -464,10 +417,17 @@ function Format-Rc {
 # 失敗（沿用既有機制，無需額外程式碼）；唯一不在 Invoke-Stage 保護範圍內的呼叫點
 # （Stage 4 drift Docker-不可用分支，見下方該處）另補顯式判斷，避免未捕捉例外
 # 中止整支腳本、波及 Stage 5/6/Cleanup/summary。
+# DEF-200-302：直譯器不再現場解析 PATH 上的裸字面值 'python'——上方已釘死
+# 根層 .venv 絕對路徑（$VenvPy），找不到時已 fail-loud exit 1，執行到此處代表
+# 該檔必然存在。仍保留 Test-IsRealPython 健檢（不裸接受）：$VenvPy 可能是磁碟上
+# 損毀的殘骸，用既有 SSOT guard 做最後一道「非 WindowsApps 空殼、Get-Command
+# 認得」的確認；健檢失敗則 $script:PyExe 維持 $null，交由既有 Invoke-Stage
+# try/catch 判為 stage 失敗（沿用既有「stage 失敗不中斷後續 stage」降級哲學，
+# 不在此處直接 exit）。
 $script:PyExe = $null
-if (Test-IsRealPython -CandidateName 'python') { $script:PyExe = 'python' }
+if (Test-IsRealPython -CandidateName $VenvPy) { $script:PyExe = $VenvPy }
 if (-not $script:PyExe) {
-  Log 'python 命令在 PATH 上找不到，或為 WindowsApps 空殼別名（schtasks 排程情境下執行帳號的 PATH 可能未含已啟用 venv 的 Scripts/）— 本檔幾乎所有相依 host-side python 的 stage 將被標記為失敗' 'ERROR'
+  Log "根層 .venv 直譯器健檢失敗：$VenvPy 存在但未通過 Test-IsRealPython（DEF-200-302）— 本檔幾乎所有相依 host-side python 的 stage 將被標記為失敗" 'ERROR'
 } else {
   # DEF-101-506：舊版只印 `$script:PyExe`＝字面 token「python」，等於沒印——
   # 事後從 log 完全無法得知是哪一顆直譯器跑的，兩種啟動方式的 log 長得一模一樣。
@@ -479,7 +439,7 @@ if (-not $script:PyExe) {
   $pyCmd = Get-Command $script:PyExe -ErrorAction SilentlyContinue
   $pyResolved = if ($pyCmd) { $pyCmd.Source } else { '(路徑未解析)' }
   $pyVer = (& $script:PyExe -c "import sys; print(sys.version.split()[0])" 2>$null)
-  $venvNote = if ($env:VIRTUAL_ENV) { "（VIRTUAL_ENV=$env:VIRTUAL_ENV）" } else { '（無啟用中 venv，與 schtasks 排程等價）' }
+  $venvNote = "（DEF-200-302：釘死根層 .venv，VIRTUAL_ENV=$env:VIRTUAL_ENV）"
   Log "python 可用性驗證通過（非 WindowsApps 空殼）：$pyResolved [v$pyVer] $venvNote"
 }
 
@@ -1095,7 +1055,11 @@ Log ("BEGIN observation pre-snapshot: mutation={0} ac4={1} obs={2} drift={3} (js
 #   · 真失敗（rc ∉ {0, 2}）優先於 WARN(2)：若 gate 回 2 而 unittest 回 1，stage 必須是 1，
 #     否則一個真紅會被降級成觀察期 WARN 而不計入 exit decision。
 $rcGate = Invoke-Stage 'local-ci-gate full (對齊 windows-nightly-full) + root unittests' {
-  Invoke-Native { powershell -NoProfile -ExecutionPolicy Bypass -File tools/local_ci_gate.ps1 }
+  # DEF-200-302 step (e)：無人值守 nightly 呼叫加 -Unattended（PowerShell switch；
+  # 薄殼 local_ci_gate.ps1 內部已轉發 --unattended 給核心 local_ci_gate.py，
+  # DEF-200-303 訂正），讓 check_skip_census 對未登記剖面降級為真正的 advisory
+  # （不進 rc）。
+  Invoke-Native { powershell -NoProfile -ExecutionPolicy Bypass -File tools/local_ci_gate.ps1 -Unattended }
   $gateRc = [int]$LASTEXITCODE
 
   # $RepoRoot 是 AutoClaude/；根層 runner 住 monorepo 根的 tools/（同 :1521 的取法）。
@@ -1348,7 +1312,12 @@ if ($script:DockerOK) {
         try {
           $realPy = & $script:PyExe -c "import sys; print(sys.executable)" 2>$null
           if ($realPy) {
-            $alembicExe = Join-Path (Split-Path $realPy -Parent) 'Scripts\alembic.exe'
+            # ARCH-2 修復（複審）：DEF-200-302 後 $realPy 本身就已在 .venv\Scripts\
+            # 底下（釘死根層 venv），alembic.exe 與 python.exe 是同層 sibling，不是
+            # 巢狀 Scripts\Scripts\——原寫法 Join-Path ... 'Scripts\alembic.exe' 會
+            # 多組一層 Scripts，組出不存在的 .venv\Scripts\Scripts\alembic.exe
+            # （主控複審實測 Test-Path False）。改為同層取檔名。
+            $alembicExe = Join-Path (Split-Path $realPy -Parent) 'alembic.exe'
           }
         } catch {
           Log "python 解析 sys.executable 失敗：$_" 'WARN'
@@ -1382,8 +1351,13 @@ if ($script:DockerOK) {
     # 非零）覆蓋，單日真紅 → stage rc=0 假綠；CI 對等 job 該 step 是當場硬紅。
     # DEF-200-274 D5/X1：本 stage 以下四個單檔／窄範圍 pytest 呼叫一律停用 xdist——
     # `pyproject.toml` 全域 addopts 帶 `-n auto --dist worksteal`，PG 在場時 conftest
-    # 的 X1 守門會因非 loadgroup 分群直接 UsageError；且 Windows nightly 依
-    # DEF-101-506 走 PATH 上的 pyenv 全域 python，該直譯器不保證裝了 xdist。
+    # 的 X1 守門會因非 loadgroup 分群直接 UsageError（與直譯器裝了什麼套件無關，
+    # 純粹是「窄範圍單檔呼叫」與「全域 loadgroup 分群設定」的形狀衝突）。
+    # 🔴 DEF-200-302 訂正：本段原句「且 Windows nightly 依 DEF-101-506 走 PATH 上的
+    # pyenv 全域 python，該直譯器不保證裝了 xdist」已因 nightly 改為釘死根層 .venv
+    # 而不再成立——根 .venv 與 pyenv 全域對 xdist 皆 PRESENT（同批修法實測）；但上面
+    # 那條 X1 分群衝突才是本規則存在的主因，故 `-p no:xdist -o addopts=` 這兩個旗標
+    # 仍然必要，不因直譯器換了就能拿掉。
     # `-p no:xdist` 與 `-o addopts=` 兩者缺一不可（ini 殘留 addopts 會讓 argparse
     # 認不得 -n/--dist 而報 unrecognized arguments；同 local_ci_gate.gate_pg() 理由）。
     $recallRcRef = [ref] 0

@@ -279,8 +279,19 @@ def skip_measurement_problems(pytest_output: str, parsed_skips: int) -> list[str
 #:
 #: 🔴 `untagged` 這一格是本鎖唯一真正有牙的地方，也是它最脆弱的地方：R79 有六個包並行改樹
 #: （量測期間樹已由 135 長到 136 支 skip），**收輪者必須以停工後的單人窗口重跑一次並重釘**。
+# 🔴 DEF-200-303（F3 死結解除）：`AutoClaude/tests@` 前綴三個現存鍵 re-key，補上
+# pgextras 軸（`skip_profile_key._TREE_REQUIRED_AXES` 已宣告該樹需要它）。token 逐鍵
+# 有據，非推算：
+#   · `win32+nopg+nested`／`win32+pg+nested`：R79／R81／R82 皆在本機 repo `.venv` 量測
+#     （`pyvenv.cfg` home＝pyenv 3.11.9，DEF-200-297／DEF-200-299 已收斂為單一 .venv），該 venv
+#     裝有 psycopg2／sqlalchemy ⇒ `pgext`。
+#   · `darwin+pg+nested`：R84 於 mac 真機用其 `.venv` 成功跑過
+#     `python -m alembic upgrade head`（見本鍵下方沿革②）——alembic 遷移需要
+#     psycopg2／sqlalchemy 才能連線，跑得動即 PRESENT ⇒ `pgext`。
+# re-key 不改變任何一格的數字，只改鍵的字面；`legacy_profile()` 仍可把新鍵映回舊鍵，
+# 方向鎖（`tools/tests/test_skip_ceiling_ratchet_direction.py`）藉此不會失明。
 _RUNTIME_SKIP_CEILING: dict[str, dict[str, int]] = {
-    "AutoClaude/tests@win32+nopg+nested": {
+    "AutoClaude/tests@win32+nopg+nested+pgext": {
         SKIP_GROUP_PLATFORM: 17,
         SKIP_GROUP_TOOL_ABSENCE: 0,
         SKIP_GROUP_ENV_DISABLED: 1,
@@ -301,7 +312,7 @@ _RUNTIME_SKIP_CEILING: dict[str, dict[str, int]] = {
     # 值取自當回合 `pytest tests/ -q -rs` 實跑後對其 `skipped_reasons()` 逐支分群所得、
     # 非推算。🔴 該次的全套計數刻意不在此重述——基線數字唯一出處＝ONBOARDING.md §7
     # （本列六格之和即該次量到的 skip 總數，不需要第二個家）。
-    "AutoClaude/tests@win32+pg+nested": {
+    "AutoClaude/tests@win32+pg+nested+pgext": {
         SKIP_GROUP_PLATFORM: 5,
         SKIP_GROUP_TOOL_ABSENCE: 0,
         SKIP_GROUP_ENV_DISABLED: 12,
@@ -346,10 +357,31 @@ _RUNTIME_SKIP_CEILING: dict[str, dict[str, int]] = {
     # `AUTOCLAUDE-PG-DSN-IN-EFFECT=1 AUTOCLAUDE-NESTED-SESSION=1`）。全套計數的唯一出處＝
     # ONBOARDING.md §7，本表不複寫。**只動 darwin 剖面**：win32 各剖面在 mac 上量不到，
     # 憑空改它就是憑空捏造（同本表「憑空填數字」那條紀律的反向）。
-    "AutoClaude/tests@darwin+pg+nested": {
+    "AutoClaude/tests@darwin+pg+nested+pgext": {
         SKIP_GROUP_PLATFORM: 53, SKIP_GROUP_TOOL_ABSENCE: 3,
         SKIP_GROUP_ENV_DISABLED: 2, SKIP_GROUP_STRUCTURAL: 1,
         SKIP_GROUP_DEBT: 3, SKIP_GROUP_UNTAGGED: 0,
+    },
+    # 🔴 DEF-200-303（F3 死結解除）新登記：`AutoClaude/tests@win32+pg+solo+pgext`——
+    # nightly（非巢狀）此前只掛在 `_FULL_SUITE_RUNNERS` 分母裡，天花板永遠停在
+    # 「剖面未登記」（12 連紅，見 `AutoClaude/tools/local_ci_gate.check_skip_census`
+    # 的 DEF-200-291 沿革），今晚是它第一次真的被量到。值逐字照抄
+    # `AutoClaude/logs/nightly_2026-09-14_223002.log` 第 164 行、零加減推算：
+    #   `[skip census] AutoClaude/tests@win32+pg+solo 共 11 支：platform=5／
+    #    tool-absence=0／env-disabled=2／structural-pair=1／debt=3／untagged=0／
+    #    欠債型 5 支（目標 0）`
+    # pgextras token＝`pgext`：同一份 log 第 15 行已印出 `AUTOCLAUDE_DB_DSN` 被注入
+    # （剎車④ 只在那顆 DB 真的 migrate 過才會這樣做，見 `local_ci_gate.pg_autodetect`），
+    # 主控本場探針兩顆直譯器（pyenv 全域 3.11.9／根 `.venv`）對 psycopg2／sqlalchemy
+    # 皆 PRESENT——nightly 實跑用的正是前者。新登記剖面天花板**不留餘裕**
+    # （本表既有紀律①）。
+    "AutoClaude/tests@win32+pg+solo+pgext": {
+        SKIP_GROUP_PLATFORM: 5,
+        SKIP_GROUP_TOOL_ABSENCE: 0,
+        SKIP_GROUP_ENV_DISABLED: 2,
+        SKIP_GROUP_STRUCTURAL: 1,
+        SKIP_GROUP_DEBT: 3,
+        SKIP_GROUP_UNTAGGED: 0,
     },
     # 🔴 R80 包 A（S3-04）：根層 `tools/tests` 那一棵此前**完全不在任何天花板管轄內**
     # （43 支 skip，`run_root_unittests.py` 只印不判、rc 與它無關）。本列即那道管轄的入表。
@@ -556,7 +588,7 @@ _RUNTIME_SKIP_CEILING: dict[str, dict[str, int]] = {
 #: 否則下一個人會照失敗訊息把 MAX 調大——新增任何一支 `[WINDOWS-NATIVE-ONLY]` 根層測試會讓
 #: 根層閘門當場紅（R84／QA-04 就地確認零餘裕是刻意的，實測兩張表同鍵 headroom 皆 0）。
 _RUNTIME_SKIP_CEILING_MAX: dict[str, dict[str, int]] = {
-    "AutoClaude/tests@win32+nopg+nested": {
+    "AutoClaude/tests@win32+nopg+nested+pgext": {
         SKIP_GROUP_PLATFORM: 17,
         SKIP_GROUP_TOOL_ABSENCE: 0,
         SKIP_GROUP_ENV_DISABLED: 1,
@@ -565,7 +597,7 @@ _RUNTIME_SKIP_CEILING_MAX: dict[str, dict[str, int]] = {
         SKIP_GROUP_UNTAGGED: 118,
     },
     # 🔴 R82：連同基線一起下修（platform 17→5、debt 7→6；理由見 _RUNTIME_SKIP_CEILING）。
-    "AutoClaude/tests@win32+pg+nested": {
+    "AutoClaude/tests@win32+pg+nested+pgext": {
         SKIP_GROUP_PLATFORM: 5,
         SKIP_GROUP_TOOL_ABSENCE: 0,
         SKIP_GROUP_ENV_DISABLED: 12,
@@ -575,10 +607,20 @@ _RUNTIME_SKIP_CEILING_MAX: dict[str, dict[str, int]] = {
     },
     # 🔴 R90 補洞包 F：連同基線一起下修（`env-disabled` 12 → 2、`untagged` 1 → 0；理由與
     # census 原始整行見 `_RUNTIME_SKIP_CEILING` 同鍵那一段。同輪改兩表、無餘裕＝本表紀律②③）。
-    "AutoClaude/tests@darwin+pg+nested": {
+    "AutoClaude/tests@darwin+pg+nested+pgext": {
         SKIP_GROUP_PLATFORM: 53, SKIP_GROUP_TOOL_ABSENCE: 3,
         SKIP_GROUP_ENV_DISABLED: 2, SKIP_GROUP_STRUCTURAL: 1,
         SKIP_GROUP_DEBT: 3, SKIP_GROUP_UNTAGGED: 0,
+    },
+    # 🔴 DEF-200-303：新登記剖面天花板無餘裕，理由與逐字 provenance 見
+    # `_RUNTIME_SKIP_CEILING` 同鍵那一段，此處不複寫第二份。
+    "AutoClaude/tests@win32+pg+solo+pgext": {
+        SKIP_GROUP_PLATFORM: 5,
+        SKIP_GROUP_TOOL_ABSENCE: 0,
+        SKIP_GROUP_ENV_DISABLED: 2,
+        SKIP_GROUP_STRUCTURAL: 1,
+        SKIP_GROUP_DEBT: 3,
+        SKIP_GROUP_UNTAGGED: 0,
     },
     # 🔴 R82（CARRIER-02）：連同基線一起下修 40 → 37（天花板不跟著降＝把剛還掉的
     # 欠債額度留著，日後可無聲用回去——這句話是本表自己的既有紀律）。
@@ -645,8 +687,12 @@ _RUNTIME_SKIP_CEILING_MAX: dict[str, dict[str, int]] = {
 #     線，而最省力的滿足方式會變成不要登記（R74 已為同一個病寫過整段判詞）。
 #   · 代價由另一邊補回來：每一筆未量測**必須具名寫出承接輪次**（大寫 R 加輪號），否則紅。
 _FULL_SUITE_RUNNERS: dict[str, str] = {
-    "AutoClaude/tests@linux+nopg+solo": "autoclaude-ci.yml 的 test job（ubuntu-latest）",
-    "AutoClaude/tests@win32+nopg+nested": "pre-push 的 AutoClaude leg（在 CC session 內）",
+    # 🔴 DEF-200-303：本表 `AutoClaude/tests@` 鍵同輪 re-key（見 `_RUNTIME_SKIP_CEILING`
+    # 上方 WHY）。`linux+nopg+solo` 的 pgextras token＝`nopgext`：
+    # `.github/workflows/autoclaude-ci.yml` 的 `test` job 只 `pip install -e ".[dev,sdk]"`
+    # （不含 `postgres`／`pgvector` extra）⇒ psycopg2／sqlalchemy 在該 job 上是 ABSENT。
+    "AutoClaude/tests@linux+nopg+solo+nopgext": "autoclaude-ci.yml 的 test job（ubuntu-latest）",
+    "AutoClaude/tests@win32+nopg+nested+pgext": "pre-push 的 AutoClaude leg（在 CC session 內）",
     # 🔴 R82 包 A2（RUNNER-01）改鍵：`+nopg+solo` → `+pg+solo`。舊鍵**結構上永遠量不到**
     # ——PG 容器長駐（`docker ps` → `autoclaude_pg | Up | pgvector/pgvector:pg18`），而
     # `tests/conftest.py::pytest_configure` 在收集之前就 autodetect 並注入 DSN ⇒ nightly
@@ -654,12 +700,16 @@ _FULL_SUITE_RUNNERS: dict[str, str] = {
     # `[skip census] AutoClaude/tests@win32+pg+solo …` ＋「⚠️ 剖面未登記」。也就是說帳上
     # 那個「已登記的執行者」指的是一個不存在的執行者，而每天真的在跑的那一個一格判準都沒有
     # ——這正是 R79 立這道棘輪時寫的「skip 可以無聲從 43 長到 143 而閘門全綠」。
-    "AutoClaude/tests@win32+pg+solo": "run_local_nightly.ps1／schtasks nightly（非巢狀）",
+    # 🔴 DEF-200-303：鍵補上 pgextras 軸（`+pgext`，理由見 `_RUNTIME_SKIP_CEILING` 同鍵
+    # 那一段）；此鍵今晚已第一次被量到並移入兩張天花板表（不再是 `_UNMEASURED_RUNNER_
+    # PROFILES` 的成員），死結解除。
+    "AutoClaude/tests@win32+pg+solo+pgext": "run_local_nightly.ps1／schtasks nightly（非巢狀）",
     # 🔴 R84 包 W5（QA-03）新登記：mac 真機上的 pre-push AutoClaude leg。此前**平台層與剖面層
     # 都沒有它**——`_platform_of` 的派生視圖裡 darwin 已被 `tools/tests@darwin` 佔位，於是平台
     # 那一向也看不到缺口 ⇒ 這一路是「回 [] 而不是回一筆缺口」，比未量測更難發現。
     # 本列與天花板同輪入表（分母升、分子亦升，兩者都是只准增的方向）。
-    "AutoClaude/tests@darwin+pg+nested": "pre-push 的 AutoClaude leg（mac 真機，在 CC session 內）",
+    "AutoClaude/tests@darwin+pg+nested+pgext":
+        "pre-push 的 AutoClaude leg（mac 真機，在 CC session 內）",
     # 🔴 R82 包 A2（MAC-01）新登記：`macos-compat-ci.yml` 的 macOS smoke job 逐字
     # `run: python3 tools/run_root_unittests.py`＝一個貨真價實的 full-suite darwin 執行者，
     # 卻從來不在這張分母表裡 ⇒ 26 支 `[MAC-NATIVE-ONLY]` 的互補剖面連「有沒有人量過」
@@ -679,14 +729,16 @@ _FULL_SUITE_RUNNERS: dict[str, str] = {
 # 🔴 每一列的值＝「怎麼把它量出來」的可貼指令 ＋ 帳本列。散文寫在**註解**裡（註解不計
 # `count_loc`，而本檔已貼著 guardrail_lib 的 400 行分級——把 WHY 塞進字串會直接撞線）。
 #
-# · `AutoClaude/tests@linux+nopg+solo`：R80 原理由逐字是「本機沒有 Linux runner」，R82 訂正
-#   ——本機**有**，`docker images` 內的 `aisdcl-act/ubuntu:act-latest` 就是 root-infra-ci／
-#   autoclaude-ci 用的同一顆映像（R82 已用它實跑 `73 passed, 1 skipped`）。雲端那條路今天走
-#   不通（macOS/ubuntu job 自 2026-08-05 起 8 連跑 `steps=0`＝帳務未付、一個 step 都沒開始）。
-# · `AutoClaude/tests@win32+pg+solo`：nightly（非巢狀）與 pre-push 是兩個母體——一族 skip 的
-#   述詞含 `CLAUDECODE == '1'`，巢狀多 skip ⇒ 拿 nested 的上限管 solo 是拿寬鬆的管嚴格的。
-#   本輪只改了鍵（`+nopg` → 實際量得到的 `+pg`），值刻意**不填**：nightly log 現有那組數字取
-#   自 R82 補標籤之前的樹，照抄會把已經還掉的欠債重新寫成合法額度。
+# · `AutoClaude/tests@linux+nopg+solo+nopgext`：R80 原理由逐字是「本機沒有 Linux runner」，
+#   R82 訂正——本機**有**，`docker images` 內的 `aisdcl-act/ubuntu:act-latest` 就是
+#   root-infra-ci／autoclaude-ci 用的同一顆映像（R82 已用它實跑 `73 passed, 1 skipped`）。
+#   雲端那條路今天走不通（macOS/ubuntu job 自 2026-08-05 起 8 連跑 `steps=0`＝帳務未付、
+#   一個 step 都沒開始）。
+# · `AutoClaude/tests@win32+pg+solo+pgext`：🔴 DEF-200-303 已畢業，此段落**只留作史料**——
+#   nightly（非巢狀）此前只改了鍵（`+nopg` → 實際量得到的 `+pg`），值刻意不填是因為
+#   「nightly log 現有那組數字取自 R82 補標籤之前的樹，照抄會把已經還掉的欠債重新寫成
+#   合法額度」；今晚（DEF-200-303）已用當回合實測值正式入表（見 `_RUNTIME_SKIP_CEILING`
+#   同鍵那一段），不再是「值刻意不填」的狀態。
 # · `tools/tests@darwin`：🔴 **R83 已畢業、不再是本表成員**（R82 的「沒有 mac 真機 ⇒ 健康值
 #   取不到，只登記缺口」在當時為真；R83 有真機後值已逐格照填並移入兩張天花板表）。這一族散文
 #   **沒有任何機械物在守**，所以它在同一個變更內被自己的改動證偽時是靜默的。
@@ -694,10 +746,11 @@ _FULL_SUITE_RUNNERS: dict[str, str] = {
 #   它的閘門 ⇒ 數字量得到、卻沒有任何東西在讀。🔴 先接閘門再入表，順序不可顛倒——先填數字
 #   只會得到一個沒有消費者的常數。
 _UNMEASURED_RUNNER_PROFILES: dict[str, str] = {
-    "AutoClaude/tests@linux+nopg+solo":
+    # 🔴 DEF-200-303：`AutoClaude/tests@win32+pg+solo` 已畢業移出本表（今晚第一次量到，
+    # 見 `_RUNTIME_SKIP_CEILING` 同鍵那一段）——留著就是把有人守的寫成沒人守
+    # （`ci_platform_coverage_problems()` 第④向管的正是這個反向假事實）。
+    "AutoClaude/tests@linux+nopg+solo+nopgext":
         "取得＝act 映像跑 pytest，輸出餵 `local_ci_gate.py --census-only`。DEF-101-960",
-    "AutoClaude/tests@win32+pg+solo":
-        "取得＝跑 run_local_nightly.ps1 後抄 nightly_latest.log 的 `[skip census]`。DEF-101-960",
     "AISDLC_SDD/fsm_runtime@win32": "取得＝ci-gate.sh 接 `--census-only` census。DEF-101-960",
 }
 #: 雙單邊的兩個**下限**（取代舊的 shrink-only 上限，理由見上方）：分母與分子都只准增。
@@ -706,10 +759,12 @@ _UNMEASURED_RUNNER_PROFILES: dict[str, str] = {
 #: 與 `_RUNTIME_SKIP_CEILING_MAX`（無餘裕）。只登記缺口而沒量到時，分子必須不動**，否則就是
 #: 鼓勵「憑空填數字」；方向相反的兩件事共用一個數字，那個數字就不再有語意。沿革（分母／分子）：
 #: R82 5→7／3 不動（兩筆都只是登記缺口）；R83 7 不動／3→4（`tools/tests@darwin`，首個 mac 真機
-#: 輪）；R84 7→8／4→5（`AutoClaude/tests@darwin+pg+nested` 同輪量到）。前兩次的「分子不動 vs
-#: 下一行已是 4」自相矛盾由獨立驗證者點名，不是自己發現的——這一族散文零機械物在守。
+#: 輪）；R84 7→8／4→5（`AutoClaude/tests@darwin+pg+nested` 同輪量到）；DEF-200-303 8 不動／
+#: 5→6（`AutoClaude/tests@win32+pg+solo+pgext` 同輪量到，見 `_RUNTIME_SKIP_CEILING` 同鍵）。
+#: 前兩次的「分子不動 vs 下一行已是 4」自相矛盾由獨立驗證者點名，不是自己發現的——
+#: 這一族散文零機械物在守。
 _FULL_SUITE_RUNNERS_MIN = 8
-_MEASURED_RUNNERS_MIN = 5
+_MEASURED_RUNNERS_MIN = 6
 #: 未量測列必須指名一個**帳本列**當承接處。刻意要 DEF-ID 而不是「R<下一輪>」字面：後者
 #: 是在程式碼裡宣稱一個還沒發生的輪號（本 repo 另有一道全樹掃描在擋這件事），而承接輪次
 #: 本來就該只有帳本一個家——註解裡寫「還沒量」則是判過的第 10 號形態（劃界不等於防護）。
@@ -950,14 +1005,17 @@ def required_home_platforms(platform: str) -> set[str]:
 
 
 _COMPLEMENTARY_PROFILE: dict[str, tuple[str, ...]] = {
-    "AutoClaude/tests@win32+nopg+nested": ("AutoClaude/tests@linux+nopg+solo",),
-    "AutoClaude/tests@win32+pg+nested": ("AutoClaude/tests@linux+pg+solo",),
+    # 🔴 DEF-200-303：本表 `AutoClaude/tests@` 鍵（左右兩側）同輪 re-key，token 依據見
+    # `_RUNTIME_SKIP_CEILING` 上方 WHY——值若不同步更新，`profile_registered()` 會對
+    # 已經量測過的舊字面回 False（找不到鍵），把「已覆蓋」誤報成「還沒人量過」。
+    "AutoClaude/tests@win32+nopg+nested+pgext": ("AutoClaude/tests@linux+nopg+solo+nopgext",),
+    "AutoClaude/tests@win32+pg+nested+pgext": ("AutoClaude/tests@linux+pg+solo",),
     # 🔴 R84 包 W5：反方向（同 `tools/tests@darwin` 那一列的判準）。mac 上被 skip 的
     # `platform` 群實測 53 支**全部**是 `[WINDOWS-NATIVE-ONLY]`（本輪逐支讀 reason 分群，
     # 零 `[POSIX-NATIVE-ONLY]`／零 `[MAC-NATIVE-ONLY]`）⇒ 唯一承接得住的是真 Windows 剖面，
     # 而 `AutoClaude/tests@win32+pg+nested` 已量測入表。不填這一列時判準走 `not counterparts`
     # 那一支、印「（平台 win32 未宣告承接剖面）」＝把「有著落」誤報成「全世界都沒跑過」。
-    "AutoClaude/tests@darwin+pg+nested": ("AutoClaude/tests@win32+pg+nested",),
+    "AutoClaude/tests@darwin+pg+nested+pgext": ("AutoClaude/tests@win32+pg+nested+pgext",),
     # POSIX-generic 那一半的家是 linux，mac-only 那一半的家只有 darwin——兩個都要。
     "tools/tests@win32": ("tools/tests@linux", "tools/tests@darwin"),
     # 🔴 反方向（R83 收斂訂正）：darwin 上 skip 掉的那 44 支**全部**是

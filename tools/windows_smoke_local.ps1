@@ -303,8 +303,15 @@ if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
 }
 # WindowsApps 空殼排除比照 tools/bootstrap.ps1／tools/dev_start.ps1 既有 SSOT（R44 收斂）
 . "$PSScriptRoot/lib/WindowsAppsGuard.ps1"
-if (-not (Test-IsRealPython -CandidateName 'python')) {
-  Write-Host '❌ 找不到 python — 請先啟用 venv：.venv\Scripts\Activate.ps1（見 ONBOARDING.md §3）' -ForegroundColor Red
+# DEF-200-302（掌舵者 2026-09-15 裁決 B 案，同批修法同一段 WHY 見
+# AutoClaude/tools/run_local_nightly.ps1）：不再現場解析 PATH 上的裸字面值
+# 'python'，直接釘死根層 .venv 絕對路徑——本腳本 $RepoRoot 已是 monorepo 根
+# （見上方 `$RepoRoot = [System.IO.Path]::GetFullPath((Join-Path $ScriptDir '..'))`），
+# 只需一層 Join-Path。後續全部呼叫點改用 $script:PyExe（變數替換安全形狀，見
+# tools/tests/test_windowsapps_guard_cross_consistency.py 呼叫點層級判準）。
+$script:PyExe = Join-Path $RepoRoot '.venv\Scripts\python.exe'
+if ((-not (Test-Path $script:PyExe)) -or (-not (Test-IsRealPython -CandidateName $script:PyExe))) {
+  Write-Host "❌ 根層 .venv 直譯器不存在或無效：$script:PyExe — 請先在 repo 根執行 tools/bootstrap.ps1 或 python tools/dev_start.py 建立 .venv（DEF-200-302）" -ForegroundColor Red
   exit 1
 }
 
@@ -533,7 +540,7 @@ Write-Host '===== windows_smoke_local（DEF-101-081 補償控制 / QA-10 DEF-101
 Write-Host "repo 根：${RepoRoot}"
 Write-Host "PowerShell：$($PSVersionTable.PSVersion)（$($PSVersionTable.PSEdition)）"
 Write-Host "git：$(git --version)"
-Write-Host "python：$(python --version)"
+Write-Host "python：$(& $script:PyExe --version)"
 Write-Host "OS temp 工作目錄：${Work}"
 $dirty = git -C $RepoRoot status --porcelain
 if ($dirty) {
@@ -558,7 +565,7 @@ try {
   Write-Host ''
   Write-Host '--- [1/9] Parser 解析檢查（active .ps1 四棵樹，皆遞迴；掃描面取自 tools/_script_scan_surface.py SSOT）---'
   $surfaceTool = Join-Path $RepoRoot 'tools\_script_scan_surface.py'
-  $ps1Files = @(& python $surfaceTool --list --suffix .ps1 --with-latest --check-floors --absolute --repo-root $RepoRoot)
+  $ps1Files = @(& $script:PyExe $surfaceTool --list --suffix .ps1 --with-latest --check-floors --absolute --repo-root $RepoRoot)
   $surfaceRc = $LASTEXITCODE
   $treeBad = 0
   if ($surfaceRc -ne 0) {
@@ -630,7 +637,7 @@ try {
     # LATEST 解析一律走 SSOT resolver（DEF-101-133）；resolver 檔取自真 repo、
     # --sdd-root 指向 fake repo（resolver 屬驗證工具、不必來自被測樹）。
     $resolver = Join-Path $RepoRoot 'AISDLC_SDD\scripts\sdd_version.py'
-    $latestName = & python $resolver --sdd-root (Join-Path $Fake 'AISDLC_SDD') | Select-Object -Last 1
+    $latestName = & $script:PyExe $resolver --sdd-root (Join-Path $Fake 'AISDLC_SDD') | Select-Object -Last 1
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrEmpty($latestName)) {
       Fail-Item "[5] LATEST 解析失敗（sdd_version.py rc=${LASTEXITCODE}）——install_post_commit.ps1 驗證未能執行"
     } else {
@@ -734,13 +741,13 @@ try {
   # 自行定位 repo 根，不依賴呼叫端 cwd，故不需 fake repo / Push-Location。
   Write-Host ''
   Write-Host '--- [8/9] check_ntfs_paths.py + check_script_parity.py（本 repo，唯讀）---'
-  & python (Join-Path $RepoRoot 'tools\check_ntfs_paths.py')
+  & $script:PyExe (Join-Path $RepoRoot 'tools\check_ntfs_paths.py')
   if ($LASTEXITCODE -eq 0) {
     Pass-Item 'tools\check_ntfs_paths.py'
   } else {
     Fail-Item "tools\check_ntfs_paths.py（rc=$LASTEXITCODE）"
   }
-  & python (Join-Path $RepoRoot 'tools\check_script_parity.py')
+  & $script:PyExe (Join-Path $RepoRoot 'tools\check_script_parity.py')
   if ($LASTEXITCODE -eq 0) {
     Pass-Item 'tools\check_script_parity.py'
   } else {

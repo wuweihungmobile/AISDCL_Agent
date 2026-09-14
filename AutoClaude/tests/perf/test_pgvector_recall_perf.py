@@ -58,7 +58,9 @@ _PG_REAL_ENABLED = os.environ.get("PG_REAL_ENABLED", "0") == "1"
 _MIN_CORPUS_ROWS = 100
 _SEED_HINT = (
     "先跑 `python tools/seed_kb.py --mock-pg-seed --pg-dsn <同一個 DSN>`"
-    "（它會同時寫 PG 與 tests/fixtures/ 兩份檔，兩者必須同一次產出）"
+    "（DEF-200-305 起預設只寫 PG，不覆寫 tracked 的 queries.json——本測試只驗"
+    "p95 latency、不驗 recall，且用固定亂數種子重建 embedding，tracked"
+    "queries.json 不需要與當次 PG seed 資料同批產出即可沿用）"
 )
 
 

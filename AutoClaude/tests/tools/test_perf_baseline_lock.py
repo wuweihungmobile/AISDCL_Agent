@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -324,6 +325,37 @@ def test_perf_baseline_dataclass_serializes_environment():
     )
     assert legacy.environment == ""
     assert "environment" not in legacy.to_toml_section()
+
+
+def test_write_baseline_header_includes_environment_provenance_line(tmp_path):
+    """DEF-200-304：有 environment 資料時檔頭需含 §2.7 provenance 行，且不得寫死
+    任何形如「N 筆」的具體數字（那句話會隨資料演進而過期）。"""
+    b = tmp_path / "base.toml"
+    write_baseline(
+        b,
+        {
+            "s": {
+                "p50_ms": 1, "p95_ms": 2, "p99_ms": 3, "samples": MIN_SAMPLES,
+                "environment": "win32-local",
+            }
+        },
+    )
+    header = b.read_text(encoding="utf-8")
+    assert "ADR-SD08-003 §2.7" in header
+    assert "win32-local" in header
+    assert not re.search(r"\d+\s*筆", header)
+
+
+def test_write_baseline_header_omits_provenance_line_when_no_environment(tmp_path):
+    """全部 section 皆無 environment 欄位時，檔頭維持原本兩行，不硬湊 provenance。"""
+    b = tmp_path / "base.toml"
+    write_baseline(b, {"s": {"p50_ms": 1, "p95_ms": 2, "p99_ms": 3, "samples": MIN_SAMPLES}})
+    header_lines = b.read_text(encoding="utf-8").splitlines()
+    # 前兩行仍是 Auto-generated / Lock policy，第三行直接是空行（無 provenance 行插入）。
+    assert header_lines[0].startswith("# Auto-generated")
+    assert header_lines[1].startswith("# Lock policy")
+    assert header_lines[2] == ""
+    assert "§2.7" not in b.read_text(encoding="utf-8")
 
 
 def test_write_baseline_produces_no_cr_def_200_300(tmp_path):

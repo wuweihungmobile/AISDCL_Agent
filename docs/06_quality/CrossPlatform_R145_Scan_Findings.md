@@ -286,3 +286,26 @@ DEF-200-293／DEF-200-294／DEF-200-295。此附記為 doc-total 對帳（≥2 �
 `.perf_baseline.toml`／ADR-SD08-003 v1.2），不計護欄層。缺陷帳本見 `docs/06_quality/AutoSDD_Defect_Log.md`
 DEF-200-297／DEF-200-298／DEF-200-299／DEF-200-300。此附記為 doc-total 對帳（≥2 站點）另一站點寄居
 `AutoSDD_improving_112.md`，同 R129～R149 寄居體例。round-label-ok
+
+## 第十三輪附記（R151；DEF-200-301～306 單一 .venv 徹底收斂＋nightly 12 連紅死結解除收尾）
+
+- **體例**：本節非開新一輪 CrossPlatform 掃描輪四件套，僅為六筆缺陷收尾造成的護欄層逐檔漂移
+  記帳，寄居本檔（同 R129～R150 寄居體例，不另開新檔）。本輪為**淨減法輪**（款(11) 連兩輪上升後
+  的第三輪必須 ≤0，本輪兌現），並同輪兌現 cap 到期義務 541→540、重新武裝下一段 153／539。
+
+<!-- guard-total:R151 --> R151 護欄層累積淨額＝ 99845 → 99812（-33）——內容成長：兩支新鎖檔
+`test_single_venv_identity.py`（DEF-200-301 hook 載具單一 .venv 身分鎖）／`test_clean_venv_carrier.py`
+（DEF-200-306 乾淨 venv 載具）、`test_nightly_interpreter_determinism.py` 278→309（DEF-200-302：刪 PATH 剝除
+A／D 兩類、增釘死根層 .venv 的 E 類與大括號感知 fail-loud 判準）、`test_skip_ceiling_ratchet_direction.py`
+706→724（DEF-200-303 re-key 後方向鎖改走 `legacy_profile()`）；抵銷＝Dev-Trim 兩棒對 tools/tests 鎖檔的
+史料散文搬遷（`test_doc_loc_baseline_freshness_r60.py` −97／`test_ntfs_trailing_space_device_name.py` −61／
+`test_platform_neutral_paths.py` −60／`test_check_hooks_liveness.py` −59／`test_archive_defect_log.py` −43／
+`test_dev_start.py` −38／`test_check_defect_log_crossref.py` −27／`test_check_script_parity.py` −26／
+`test_pre_push_dispatcher.py` −21／`test_context_budget_guard.py` −20／`test_wake_chain_halt_r278.py` −11／
+`test_smoke_ci_sync.py` −9），逐字保全於 `CrossPlatform_R151_Guard_Prose_Migration.md`；本檔
+（`test_adr_xplat001_c1c2_lock.py`）自身重釘漂移（主表兩新檔登記＋R151 列＋cap 排程列與接鏈列、
+凍結前綴 `_REPIN_LOG_FROZEN_PREFIX_LEN` 219→220）含於同一列，未使用任何一次性例外名冊。分桶棘輪同輪
+重釘：`prose` 桶與 `guard_self` 桶皆只降（值以 `guard_layer_bucket_census.py --grain chunk` 現查為準）。
+DEF-200-304／305 的修復全在 AutoClaude 側，不計護欄層。缺陷帳本見 `docs/06_quality/AutoSDD_Defect_Log.md`
+DEF-200-301～DEF-200-306。此附記為 doc-total 對帳（≥2 站點）另一站點寄居 `AutoSDD_improving_112.md`，
+同 R129～R150 寄居體例。round-label-ok

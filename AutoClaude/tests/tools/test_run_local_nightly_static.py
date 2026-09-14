@@ -16,7 +16,8 @@ SD_09 W3 Round 19 audit P0-AUDIT-R18-2 修復（紀律 #4「驗證鏡子自身�
     1) StrictMode 3.0 啟用：確保未來不會被誤刪
     2) 禁止模式：`(...-ErrorAction SilentlyContinue).<Prop>` 鏈式存取絕跡
     3) 禁止模式：`(...-EA SilentlyContinue).<Prop>` 簡寫絕跡
-    4) PATH 補強區塊存在（pyenv-win Scripts 自動加入）
+    4) PATH 補強區塊存在（根層 .venv\\Scripts 前置至 PATH，DEF-200-302 訂正：原為
+       pyenv-win Scripts 自動加入，掌舵者 2026-09-15 裁決 B 案起改為釘死根層 .venv）
     5) Pre-snapshot jsonl count 區塊存在（觀察期 delta 取證可見）
 
 互補關係：本檔做靜態檢查（grep）；行為驗證需 Pester（PowerShell）— 留待 SD_10 W0 補建。
@@ -98,17 +99,21 @@ def test_no_null_property_chain_silentlycontinue_short(ps1_content: str) -> None
     )
 
 
-def test_pyenv_path_augmentation_present(ps1_content: str) -> None:
-    """case 4：PATH 補強區塊存在（pyenv-win Scripts 自動加入）。
+def test_venv_scripts_path_augmentation_present(ps1_content: str) -> None:
+    """case 4（DEF-200-302 訂正）：PATH 補強區塊存在——不再是「pyenv-win Scripts
+    自動加入」，改為「根層 .venv\\Scripts 前置至 PATH」。
 
-    schtasks 自動跑場景下 PATH 不含 user pyenv-win/Scripts → alembic.exe / 其他 Python
-    entry-point exe 找不到 → 各 stage exception。修復後必須在 ps1 開頭偵測 pyenv-win
-    並自動補入 Scripts 路徑。
+    原始問題不變：schtasks 自動跑場景下 PATH 若不含 alembic.exe / 其他 Python
+    entry-point exe 所在目錄 → 各 stage exception。原修復＝偵測 pyenv-win 並補入
+    其 Scripts；掌舵者 2026-09-15 裁決 B 案起，nightly 改為直接釘死根層 .venv 絕對路徑
+    （不再現場解析 PATH 上的 pyenv 全域），故 entry-point exe 的來源也從 pyenv-win
+    Scripts 換成根層 .venv\\Scripts——同一段程式碼今天做的是「把 $VenvScripts 前置
+    到 $env:PATH」而非「把 pyenv-win Scripts 加進 PATH」，斷言隨之改判該字面。
     """
-    assert "pyenv-win" in ps1_content, "ps1 必須處理 pyenv-win 環境"
+    assert ".venv" in ps1_content, "ps1 必須處理根層 .venv 環境"
     assert re.search(
-        r"\$env:PATH\s*=\s*[\"'].*\$scriptsPath", ps1_content
-    ), "ps1 開頭必須有 PATH 補強區塊（將 pyenv-win/Scripts 加入 $env:PATH）"
+        r"\$env:PATH\s*=\s*[\"'].*\$VenvScripts", ps1_content
+    ), "ps1 開頭必須有 PATH 補強區塊（將根層 .venv\\Scripts 前置至 $env:PATH，DEF-200-302）"
 
 
 def test_pre_snapshot_jsonl_count_present(ps1_content: str) -> None:

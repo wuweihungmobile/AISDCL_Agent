@@ -386,7 +386,11 @@ _TREE_FILE_FLOORS: dict[str, int] = {
     # 🔴 第十輪收尾重釘 59 → 60（同上機制：新增 test_ci_gate_xdist_allowlist.py 遷入本樹後
     # 實測 75 支，59 只剩實測 79%、低於 80%，前置掃描第三向逐字指示「重釘為 60」⇒ 照填、
     # 零加減推算；方向＝上修）。
-    "tools/tests": 60,
+    # 🔴 DEF-200-301／DEF-200-306 收尾單人窗口重釘 60 → 61（同上機制：本輪新增
+    # `test_single_venv_identity.py`／`test_clean_venv_carrier.py` 兩支鎖檔後，所有棒停工後
+    # 實測 `tools/tests` 77 支，60 只剩實測的 78%、低於 `TREE_FLOOR_RATIO` 80%，前置掃描第三向
+    # 逐字指示「重釘為 61」⇒ 照填、零加減推算；方向＝上修＝判準更嚴）。
+    "tools/tests": 61,
     # 🔴 R82 包 A2（DEBT-01）：204 → 205。新增 `AutoClaude/tests/contract/test_w6_deletion.py`
     # （AC2-2 的真斷言落點）後掃描面變 257，下限只剩實測的 79% ⇒ 依 `TREE_FLOOR_RATIO` 的
     # 防腐那一向轉紅。這正是它的設計意圖：下限不跟著長就會愈來愈鬆而沒有任何東西說話。
@@ -442,7 +446,10 @@ _TREE_FILE_FLOORS: dict[str, int] = {
     # `tests/integration/test_def_200_205_production_wiring.py`，該樹由 271 支長到 **272**，
     # 216 只剩實測的 79%（低於 `TREE_FLOOR_RATIO` 的 80%），第三向逐字指示重釘為 217
     # ⇒ 本行照填、零加減推算。方向是**上修＝判準更嚴**，不是放寬。
-    "AutoClaude/tests": 217,
+    # 🔴 DEF-200-305 收尾單人窗口重釘 217 → 218：新增 `tests/tools/test_seed_kb.py` 後該樹
+    # 實測 **273** 支，217 只剩實測的 79%（低於 `TREE_FLOOR_RATIO` 的 80%），第三向逐字指示
+    # 重釘為 218 ⇒ 本行照填、零加減推算。方向是**上修＝判準更嚴**，不是放寬。
+    "AutoClaude/tests": 218,
     # 🔴 R84 包 W5：23 → 24。**非本包造成**——`AISDLC_SDD/scripts/tests` 由 29 支長到 30
     # （並行包新增鎖檔），下限只剩實測的 77%、低於 `TREE_FLOOR_RATIO` 的 80% ⇒
     # `tree_floor_problems()` 的第三向（下限已過期）當場判紅並**逐字**指示重釘為 24，本行

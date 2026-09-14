@@ -7,7 +7,14 @@
 
 模式：
     --mock              僅寫 fixture 檔（不寫 PG，384-dim）
-    --mock-pg-seed      X1 路徑：寫 fixture 且寫 PG（1024-dim；需 --pg-dsn）
+    --mock-pg-seed      X1 路徑：只寫 PG（1024-dim；需 --pg-dsn）；fixture 檔預設**不寫**
+                        （DEF-200-305 訂正：ground_truth.json 全 repo 零消費者，PG
+                        entry_id（UUID）每次 truncate/reinsert 全換只會製造每晚無意義
+                        diff；queries.json 則由 tests/perf/test_pgvector_recall_perf.py
+                        唯讀消費，但該測試只驗 p95 latency、不驗 recall，且用固定亂數
+                        種子重建 embedding，不需要與當次 PG 資料配對——故 tracked 版本
+                        可長期沿用。需明確帶 --output-queries/--output-ground-truth
+                        兩者才人工重生）
     --pg-dsn DSN        真實模式（需 BGE-M3；本工具尚未啟用，graceful exit 0）
 
 對應（SD_09 W2 / W3 更新）：
@@ -28,6 +35,8 @@ from collections.abc import Iterable
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
+_DEFAULT_QUERIES_PATH = _REPO_ROOT / "tests" / "fixtures" / "pgvector_real_queries.json"
+_DEFAULT_GROUND_TRUTH_PATH = _REPO_ROOT / "tests" / "fixtures" / "pgvector_real_ground_truth.json"
 DEFAULT_EMBEDDING_DIM = 384  # BGE-M3 dense head 為 1024，但純 mock 採 384 以節省 fixture 體積
 DEFAULT_MOCK_PG_DIM = 1024  # X1 路徑：與 halfvec(1024) 對齊
 DEFAULT_COUNT = 100
@@ -129,8 +138,10 @@ def _validate_ground_truth(gt: dict[str, list[str]], queries: list[dict], top_k:
 
 
 def _write_json(path: Path, data) -> None:
+    # DEF-200-305：newline="\n" 防止 Windows text-mode 預設把 \n 轉譯成 \r\n
+    # （與 .gitattributes *.json eol=lf 對齊；同 DEF-200-300 對 .toml 的既有修法）。
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as f:
+    with path.open("w", encoding="utf-8", newline="\n") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
@@ -254,7 +265,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--mock", action="store_true", help="僅寫 fixture 檔（不寫 PG，384-dim）")
     parser.add_argument(
         "--mock-pg-seed", action="store_true",
-        help="X1 路徑：寫 fixture 且寫 PG mock 資料（1024-dim；需 --pg-dsn）",
+        help="X1 路徑：寫 PG mock 資料（1024-dim；需 --pg-dsn）；fixture 檔預設不寫"
+        "（見 --output-queries/--output-ground-truth，DEF-200-305）",
     )
     parser.add_argument(
         "--pg-dsn", type=str, default=None,
@@ -282,17 +294,20 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--output-queries", type=Path,
-        default=_REPO_ROOT / "tests" / "fixtures" / "pgvector_real_queries.json",
-        help="輸出 query embedding fixture 路徑",
+        default=None,
+        help="輸出 query embedding fixture 路徑（--mock 模式下本旗標省略時預設寫 "
+        f"{_DEFAULT_QUERIES_PATH.name}；--mock-pg-seed 模式下省略時**不寫檔**，見 DEF-200-305）",
     )
     parser.add_argument(
         "--output-ground-truth", type=Path,
-        default=_REPO_ROOT / "tests" / "fixtures" / "pgvector_real_ground_truth.json",
-        help="輸出 ground truth fixture 路徑",
+        default=None,
+        help="輸出 ground truth fixture 路徑（--mock 模式下本旗標省略時預設寫 "
+        f"{_DEFAULT_GROUND_TRUTH_PATH.name}；--mock-pg-seed 模式下省略時**不寫檔**，"
+        "見 DEF-200-305）",
     )
     args = parser.parse_args(argv)
 
-    # X1 路徑：mock-pg-seed — 同時寫 PG + fixture（1024-dim）
+    # X1 路徑：mock-pg-seed — 寫 PG，fixture 檔預設不再寫（DEF-200-305）。
     if args.mock_pg_seed:
         if not args.pg_dsn:
             print("[ERROR] --mock-pg-seed 需要 --pg-dsn 參數。", file=sys.stderr)
@@ -304,28 +319,50 @@ def main(argv: list[str] | None = None) -> int:
         )
         _validate_queries(queries, dim)
         _validate_ground_truth(gt, queries, args.top_k)
-        _write_json(args.output_queries, queries)
-        _write_json(args.output_ground_truth, gt)
-        print(
-            f"[OK] mock-pg-seed: queries={args.output_queries} "
-            f"({len(queries)} entries, dim={dim}); "
-            f"ground_truth={args.output_ground_truth} ({len(gt)} entries)"
-        )
+        # DEF-200-305 訂正（複審 SA-1）：entry_id 是 PG 生成的 UUID，每次
+        # truncate/reinsert 全換——這對 ground_truth.json 成立（該檔全 repo 零
+        # 消費者，連 test_pgvector_real_recall.py 都自行就地 seed／讀值，不讀這份
+        # 檔），但 queries.json 不含任何 entry_id／UUID（只有 id/embedding），實際
+        # 由 tests/perf/test_pgvector_recall_perf.py 唯讀消費；該測試只驗 p95
+        # latency、不驗 recall，且用固定亂數種子重建 embedding，不需要與當次 PG
+        # 資料配對，故 tracked queries.json 可長期沿用。預設繼續寫檔仍只會製造
+        # 每晚必然的雜訊 diff commit（entry_id 對 ground_truth 而言每次全換），
+        # 只有使用者**明確**帶 --output-queries／--output-ground-truth 兩者
+        # （人工重生的顯式意圖）才寫。
+        if args.output_queries and args.output_ground_truth:
+            _write_json(args.output_queries, queries)
+            _write_json(args.output_ground_truth, gt)
+            print(
+                f"[OK] mock-pg-seed: queries={args.output_queries} "
+                f"({len(queries)} entries, dim={dim}); "
+                f"ground_truth={args.output_ground_truth} ({len(gt)} entries)"
+            )
+        else:
+            print(
+                f"[SKIP] mock-pg-seed：PG 已寫入（{len(queries)} entries, dim={dim}），"
+                "但未帶明確 --output-queries/--output-ground-truth ⇒ 不寫 fixture 檔"
+                "（DEF-200-305 訂正：ground_truth.json 零消費者、queries.json 由 "
+                "test_pgvector_recall_perf.py 唯讀消費但不需與當次 PG 配對，兩者"
+                "預設寫入都只製造每晚雜訊 diff；需要人工重生時明確帶上述兩旗標）。",
+                file=sys.stderr,
+            )
         return 0
 
     if args.mock:
         dim = args.dim or DEFAULT_EMBEDDING_DIM
+        output_queries = args.output_queries or _DEFAULT_QUERIES_PATH
+        output_ground_truth = args.output_ground_truth or _DEFAULT_GROUND_TRUTH_PATH
         queries, gt = generate_mock_fixtures(
             count=args.count, dim=dim, top_k=args.top_k, seed=args.seed,
         )
         _validate_queries(queries, dim)
         _validate_ground_truth(gt, queries, args.top_k)
-        _write_json(args.output_queries, queries)
-        _write_json(args.output_ground_truth, gt)
+        _write_json(output_queries, queries)
+        _write_json(output_ground_truth, gt)
         print(
             f"[OK] mock fixtures generated: "
-            f"queries={args.output_queries} ({len(queries)} entries, dim={dim}); "
-            f"ground_truth={args.output_ground_truth} ({len(gt)} entries, top_k={args.top_k})"
+            f"queries={output_queries} ({len(queries)} entries, dim={dim}); "
+            f"ground_truth={output_ground_truth} ({len(gt)} entries, top_k={args.top_k})"
         )
         return 0
 

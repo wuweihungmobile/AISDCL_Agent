@@ -525,8 +525,12 @@ jobs:
 
       # DEF-101-050：X1 seed 接線——recall 測試前置明載「seed_kb.py 已 seed 100 列」，
       # 但本 job 自 monorepo 匯入起即缺 seed 步驟 → knowledge_entries 空表、recall 恆 0.000
-      # （fixture 檔在庫故測試不 skip）。seed 同時重生 queries/ground-truth fixture 於
-      # runner 工作區，與當次 seed 資料嚴格配對。
+      # （fixture 檔在庫故測試不 skip）。
+      # DEF-200-305 訂正（複審 SA-1）：本步未帶 --output-queries/--output-ground-truth，
+      # 只寫 PG、不再重生 tests/fixtures/ 下的 queries/ground-truth fixture——
+      # ground_truth.json 全 repo 零消費者，queries.json 由
+      # tests/perf/test_pgvector_recall_perf.py 唯讀消費且用固定種子，兩者皆不需要
+      # 與當次 PG seed 資料嚴格配對，tracked 版本可長期沿用。
       - name: Seed KB corpus + fixtures (X1, tools/seed_kb.py)
         run: |
           python tools/seed_kb.py --mock-pg-seed --pg-dsn "$AUTOCLAUDE_TEST_PG_DSN"

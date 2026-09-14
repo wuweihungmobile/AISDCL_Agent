@@ -214,6 +214,12 @@ on:
       # 由 tools/dev_start.py 第④步與 tools/tests/test_dev_start.py 消費；
       # test_ci_paths_cover_root_consumers.py 當場攔下並要求雙邊補列（該鎖有效）。
       - "tools/lib/stray_venv.py"
+      # DEF-200-301：hook 載具「身分」判準 SSOT（見 tools/lib/single_venv_identity.py
+      # 檔頭）；DEF-200-306：§7 回填用乾淨 venv 一條龍載具。兩者皆由
+      # tools/tests/test_single_venv_identity.py／test_clean_venv_carrier.py 消費，
+      # test_ci_paths_cover_root_consumers.py 當場攔下並要求雙邊補列（該鎖有效）。
+      - "tools/lib/single_venv_identity.py"
+      - "tools/lib/clean_venv_carrier.py"
       # R74：本輪新增/新被消費的根層檔——test_ci_paths_cover_root_consumers.py 實測
       # 攔下（DEF-101-042 同構）。CLAUDE.md 由 tools/tests/
       # test_doc_loc_baseline_freshness_r60.py 的鐵律機械物盤點鎖逐行消費；
@@ -620,6 +626,12 @@ on:
       # 由 tools/dev_start.py 第④步與 tools/tests/test_dev_start.py 消費；
       # test_ci_paths_cover_root_consumers.py 當場攔下並要求雙邊補列（該鎖有效）。
       - "tools/lib/stray_venv.py"
+      # DEF-200-301：hook 載具「身分」判準 SSOT（見 tools/lib/single_venv_identity.py
+      # 檔頭）；DEF-200-306：§7 回填用乾淨 venv 一條龍載具。兩者皆由
+      # tools/tests/test_single_venv_identity.py／test_clean_venv_carrier.py 消費，
+      # test_ci_paths_cover_root_consumers.py 當場攔下並要求雙邊補列（該鎖有效）。
+      - "tools/lib/single_venv_identity.py"
+      - "tools/lib/clean_venv_carrier.py"
       # R74：本輪新增/新被消費的根層檔——test_ci_paths_cover_root_consumers.py 實測
       # 攔下（DEF-101-042 同構）。CLAUDE.md 由 tools/tests/
       # test_doc_loc_baseline_freshness_r60.py 的鐵律機械物盤點鎖逐行消費；

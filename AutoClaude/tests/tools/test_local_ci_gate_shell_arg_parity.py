@@ -73,7 +73,10 @@ _PS1_PARAM_RE = re.compile(
 # $CliArgs 的每一次附加（用來排除「薄殼偷偷多塞一個 pytest 參數」）
 _PS1_CLIARGS_APPEND_RE = re.compile(r"\$CliArgs\s*\+=\s*(?P<rhs>.+?)\s*(?:}|$)")
 # 允許的 $CliArgs 附加形態：gate 旗標字面值，或 $PytestArgs 的空白切割
-_PS1_ALLOWED_APPENDS = {"'--act'", "'--pg'", "($PytestArgs -split '\\s+')"}
+# DEF-200-303：新增 -Unattended → --unattended 轉發（B5 修復棒，補齊薄殼轉發鏈）。
+_PS1_ALLOWED_APPENDS = {
+    "'--act'", "'--pg'", "'--unattended'", "($PytestArgs -split '\\s+')",
+}
 # .sh 轉呼叫核心那一行：只准 "$@" 透傳，不得夾帶任何字面參數
 _SH_CORE_CALL_RE = re.compile(
     r'^\s*python\s+"\$SCRIPT_DIR/local_ci_gate\.py"\s+"\$@"\s*$', re.MULTILINE

@@ -428,6 +428,10 @@ _GOVERNANCE_DOCS = (
     # **逐字保全**的唯一居所（⇒ 體積守門——原處只留一行指標），且逐節寫出「某段原文原處
     # 是哪支檔哪個符號」的座標宣稱（⇒ 指針稽核）。資格與 R122 同名檔逐字同一份。 round-label-ok
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R127_Guard_Prose_Migration.md",
+    # 單一 .venv 收斂輪（DEF-200-301～306）守衛線搬遷抵銷包的逐字保全落點：tools/tests 九支鎖檔
+    # 內歷史沿革敘事的唯一居所（⇒ 體積守門——原處只留一行 bare 檔名指標），逐節寫出「原文原處是
+    # 哪支檔哪個符號」的座標宣稱（⇒ 指針稽核）。資格與 R122／R127 同名檔逐字同一份。round-label-ok
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R151_Guard_Prose_Migration.md",
     # R127 落地輪結案存證（round-label-ok）：三筆 fixed 的落地取證、三方設計複審條件承接與
     # 逐筆針對測試實跑輸出唯一居所在本檔（⇒ 體積守門），帳本各列以 `§DEF-ID` 座標宣稱指向
     # 本檔（⇒ 指針稽核）。即刻登記，同 R121～R126 姊妹檔判例。 round-label-ok

@@ -1,12 +1,8 @@
 #!/usr/bin/env python3
 """DEF-200-278（喚醒鏈缺口第四輪）：halt 交棒 ＋ 哨兵認得自願停機的回歸鎖。
 
-事故：額度守衛判 `band=halt` 後，`quota_halt_actions()` 只認 `payload["transcript_path"]`
-——缺席（或雖有路徑但暫時讀不到檔）就整段放棄，任務書寫不出來、喚醒訊息卻只印一句
-籠統的「拿不到逐字稿路徑」，不管真正的成因是什麼（見 §RC1）。而哨兵（`sentinel_decide`）
-只認逐字稿裡的未復原撞線（429），自願停機沒有那一筆 ⇒ 永遠 `patrol` 到 6 小時後靜默
-解除。兩層合起來＝reset 到了也不會有人喚醒續跑（本輪 2026-09-10 19:1x～23:11 損失
-≈3h50m 的直接成因）。
+事故沿革（2026-09-10 損失 ≈3h50m 的直接成因）全文搬至
+CrossPlatform_R151_Guard_Prose_Migration.md〈test_wake_chain_halt_r278.py 模組 docstring〉節。
 
 本檔釘住的兩件事（各自紅→綠）：
   INV-H1：`quota_gate.resolve_halt_transcript()` 在 payload 缺席時以
@@ -465,14 +461,7 @@ class SentinelDecideRecognizesHaltMarkerTest(unittest.TestCase):
 class HaltMarkerSelfCheckTest(unittest.TestCase):
     """DEF-200-281／F-1：`quota_halt_actions()` 落盤前的寫入自檢。
 
-    立案：本輪鑑識實測 `~/.autosdd/traces/halt_{96d7f386-…,8d8773f9-…,unknown}.json`
-    三份現場標記逐位元組相同（`at`="2026-08-09T05:15:03+00:00"／
-    `reset_at`="2026-08-09T08:23:03+00:00"／`resolved_source`="env-derived"），
-    追根究柢是 `tools/tests/test_quota_policy.py::TestR95HaltArmsOffTheEarliestResettableAxis
-    ::test_the_halt_actions_and_message_follow_the_choice` 用模組常數
-    `NOW = datetime(2026, 8, 9, 5, 15, 3, tzinfo=UTC)` 呼叫 `quota_halt_actions()`，
-    且未隔離 `CLAUDE_CODE_SESSION_ID`／`CLAUDE_PROJECT_DIR`／`AUTOSDD_TRACE_DIR`——
-    在任何真實 session 裡跑 pytest 都會把這個凍結值寫進真實 sid 的 halt 標記。
+    立案鑑識沿革全文搬至 CrossPlatform_R151_Guard_Prose_Migration.md〈HaltMarkerSelfCheckTest〉節。
     """
 
     def setUp(self) -> None:
