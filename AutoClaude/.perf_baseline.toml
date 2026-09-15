@@ -22,10 +22,10 @@ environment = "win32-local"
 
 [token_halt_roundtrip]
 p50_ms = 0.504
-p95_ms = 0.54
-p99_ms = 0.54
+p95_ms = 0.562
+p99_ms = 0.562
 samples = 20
-git_sha = "2dd93f3"
-captured_at = "2026-09-15T06:33:52.523193+00:00"
+git_sha = "54e2a47"
+captured_at = "2026-09-15T07:03:07.593848+00:00"
 environment = "win32-local"
 
