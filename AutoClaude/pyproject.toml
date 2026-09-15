@@ -163,7 +163,8 @@ target-version = "py311"
 # Windows 路徑 `.\local_ci_gate.ps1` 引入非法轉義 `\l`，Python 3.11 只印
 # DeprecationWarning、3.12 起升 SyntaxWarning、CPython 已宣告未來改 SyntaxError，
 # 而 `ruff check`（select 無 W）與 pre-commit ruff leg 全綠 ⇒ 只能靠人眼。
-# 加入成本實測（AutoClaude/.venv ruff，修完該檔後）：`ruff check --extend-select W
+# 加入成本實測（根層 .venv 的 ruff，修完該檔後；當年量測時 AutoClaude/ 尚有一顆自建
+# .venv，單一 .venv 收斂後已不存在）：`ruff check --extend-select W
 # --statistics .` 的 W 類命中數＝0（含 W291/W293/W391 皆零），即**零存量債**，
 # 無需任何 per-file-ignores。
 #

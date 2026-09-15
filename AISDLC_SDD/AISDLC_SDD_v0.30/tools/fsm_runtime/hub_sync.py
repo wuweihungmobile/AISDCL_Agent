@@ -182,8 +182,10 @@ def _rmtree_windows_safe(path: Path) -> None:
     R60 SD-R60-10: dispatches on ``onexc=`` (added 3.12) when available, because
     ``onerror=`` is deprecated since 3.12 and REMOVED in 3.14 — passing it there
     would make this helper a hard TypeError. The 3.11 branch is kept because CI
-    pins 3.11 (``.github/workflows/*.yml``) while ``AutoClaude/.venv`` is
-    already 3.12.11, so both interpreters really do run this code today.
+    pins 3.11 (``.github/workflows/*.yml``) while the then-existing
+    ``AutoClaude/.venv`` was already 3.12.11, so both interpreters really did
+    run this code back then (that per-subproject venv no longer exists: the
+    monorepo now has a single root ``.venv``, see root ONBOARDING.md §2.1).
     """
     def _handle(func, p, original):
         try:

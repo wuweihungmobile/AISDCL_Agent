@@ -1483,8 +1483,8 @@ def step_venv(now: str, state: dict, force: bool, cross_same_flavor: bool = Fals
             _write_origin_marker(ROOT / ".venv", now)
         else:
             SUMMARY["venv"] = "❌ 失敗（見上方錯誤）"
-        for line in stray_venv.advisory_lines(ROOT, platform_utils.is_windows()):
-            _warn(line)
+        if not stray_venv.enforce(ROOT, platform_utils.is_windows(), _warn):
+            ok, SUMMARY["venv"] = False, f'❌ 雜散 venv（見上方）；{SUMMARY.get("venv", "")}'
         return ok
     finally:
         if release_lock:

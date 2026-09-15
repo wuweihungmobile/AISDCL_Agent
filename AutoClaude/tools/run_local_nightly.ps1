@@ -173,8 +173,12 @@ if ($args.Count -gt 0) {
 # 價」，反過來直接釘死根層 .venv 絕對路徑——不論 schtasks 或已啟用 venv 的終端
 # 機／agent 觸發，nightly 一律使用同一顆直譯器，且與其餘工具鏈（pre-push、hook
 # 載具）用的是同一顆；找不到就 fail-loud（exit 1），不再退化為 PATH 現場解析
-# （那正是本輪要拔除的「沒人維護的第二套環境」）。mac 側本就是同款絕對路徑釘死
-# 設計（run_local_nightly.sh 的 $ROOT/.venv/bin/python），本輪是 Windows 側補齊。
+# （那正是本輪要拔除的「沒人維護的第二套環境」）。mac 側 run_local_nightly.sh
+# 原本只釘死主路徑，缺席時仍退回 `command -v python || command -v python3` 這條
+# PATH 現場解析退路（`tools/macos_smoke_local.sh` 則只驗證 PATH 上的 python 是否
+# 為 WindowsApps 空殼，未保證它就是根層 .venv 那一顆）；已於 2026-09-15 同輪
+# （DEF-200-302 mac 側補齊）補上與本檔同款的絕對路徑釘死＋fail-loud，兩支 .sh
+# 皆不再有 PATH 退路，本檔（.ps1）是同一輪的 Windows 側。
 # WindowsAppsGuard SSOT 提前載入：下方健檢與行尾 $script:PyExe 解析都要用它，且
 # 本檔全域禁止裸字面值 `python` 呼叫（test_windowsapps_guard_cross_consistency.py
 # 的呼叫點層級判準——本區塊改用變數 $VenvPy／$script:PyExe，屬其認可的「變數替

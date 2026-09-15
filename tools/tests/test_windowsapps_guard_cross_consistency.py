@@ -1300,7 +1300,8 @@ _ZERO_GUARD_BARE_PY_SITES = {
         "真兜底：`_QUOTED_PY = '\"%s\"' % (sys.executable or \"python3\")`——僅在 "
         "sys.executable 為空（嵌入式/凍結直譯器）時才落到裸名。AutoClaude 的入口是 "
         "`python -m autoclaude`／console script，該情境下 sys.executable 恆為 venv 內"
-        "絕對路徑（本輪實測本機 .venv 與 AutoClaude/.venv 皆非空）；且該行是**模組載入期**"
+        "絕對路徑（2026-07 登記當時實測本機 .venv 與今已作廢的 AutoClaude/.venv 皆非空；"
+        "單一 .venv 收斂後全樹只剩根層 .venv，結論不變）；且該行是**模組載入期**"
         "求值，若真為空則整個套件早已無法運作。不改生產碼，改在此登記並保留訊號。"
     ),
     "AutoClaude/autoclaude/execution/mutation_applier/_simple_mutations.py": (

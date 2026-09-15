@@ -105,8 +105,18 @@ SYS_BASH="/bin/bash"
 
 # 前置守門：install 共用層（tools/lib/git_hooks_install_common.sh）與守門工具
 # 都需要 python —— 缺席時 fail-fast（與該共用層同款訊息），勝過中段連環爆。
-if ! is_real_python_candidate python; then
-  echo "❌ 找不到 python — 請先 source .venv/bin/activate（見 ONBOARDING.md §3）" >&2
+# DEF-200-302（掌舵者 2026-09-15 裁決 B 案，mac 側補齊）：原本只判斷 PATH 上的
+# python 是否為 WindowsApps 空殼，卻不保證它就是本 repo 根層 .venv 那一顆——與
+# run_local_nightly.sh／windows_smoke_local.ps1 已釘死根層 .venv 的設計不對稱。
+# 改為直接釘死絕對路徑，缺席即 fail-loud；is_real_python_candidate 仍保留作
+# 第二道（WindowsApps 空殼排除），不因釘死絕對路徑而失去這層防護。
+python_bin="$REPO_ROOT/.venv/bin/python"
+if [ ! -x "$python_bin" ]; then
+  echo "❌ 根層 .venv 直譯器不存在：${python_bin}（DEF-200-302：smoke 釘死根層 .venv，不再退回 PATH 現場解析）— 修法：在 repo 根執行 tools/bootstrap.sh 或 source tools/dev_start.sh 建立 .venv" >&2
+  exit 1
+fi
+if ! is_real_python_candidate "$python_bin"; then
+  echo "❌ 根層 .venv 直譯器判定為 WindowsApps 空殼：$python_bin" >&2
   exit 1
 fi
 
@@ -180,7 +190,7 @@ echo "--- [1/7] bash -n 語法檢查（active tracked .sh + 三處 git-hooks 目
 # 逐行讀時路徑帶引號會使 `[ -f ]` 與 bash -n 皆指向不存在的路徑——本 repo 已在
 # root-infra-ci.yml 第 3 道明文記載過此病灶 SD-R13-6。本檔逐行讀而非 -z：bash 3.2
 # 無法安全處理 NUL 分隔的 heredoc，quotePath=false 已足以消除該已知病灶）。
-sdd_latest="$(python "$REPO_ROOT/AISDLC_SDD/scripts/sdd_version.py" \
+sdd_latest="$("$python_bin" "$REPO_ROOT/AISDLC_SDD/scripts/sdd_version.py" \
   --sdd-root "$REPO_ROOT/AISDLC_SDD" 2>/dev/null || true)"
 sh_files="$(git -C "$REPO_ROOT" -c core.quotePath=false ls-files -- '*.sh' 'tools/git-hooks/*' \
   'AutoClaude/tools/git-hooks/*' 'AISDLC_SDD/.githooks/*')"
@@ -404,7 +414,7 @@ echo "--- [4/7] install_post_commit.sh worktree 實跑 + 移除後路徑斷言�
 # 鏡射 ci-gate.sh 同款；fake repo 為完整 clone，tracked 過濾語意成立；python 已於
 # 檔頭前置守門）。原 `ls -d ... | sort -V | tail -1` 尾端未錨定＋掃磁碟，複製品目錄
 # 會汙染選版（R10 ARCH-3）。
-latest_name="$(cd "$FAKE" && python AISDLC_SDD/scripts/sdd_version.py --sdd-root AISDLC_SDD || true)"
+latest_name="$(cd "$FAKE" && "$python_bin" AISDLC_SDD/scripts/sdd_version.py --sdd-root AISDLC_SDD || true)"
 latest="AISDLC_SDD/${latest_name}"
 if [ -z "$latest_name" ]; then
   fail "找不到任何 AISDLC_SDD_v* 版本目錄（fake repo）"
@@ -449,12 +459,12 @@ fi
 # ── [5/7] 守門工具（唯讀，直接對本 repo）──────────────────────────────────────
 echo ""
 echo "--- [5/7] check_ntfs_paths.py + check_script_parity.py（本 repo，唯讀）---"
-if (cd "$REPO_ROOT" && python tools/check_ntfs_paths.py); then
+if (cd "$REPO_ROOT" && "$python_bin" tools/check_ntfs_paths.py); then
   pass "tools/check_ntfs_paths.py"
 else
   fail "tools/check_ntfs_paths.py"
 fi
-if (cd "$REPO_ROOT" && python tools/check_script_parity.py); then
+if (cd "$REPO_ROOT" && "$python_bin" tools/check_script_parity.py); then
   pass "tools/check_script_parity.py"
 else
   fail "tools/check_script_parity.py"

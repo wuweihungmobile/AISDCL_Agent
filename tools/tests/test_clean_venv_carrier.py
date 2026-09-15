@@ -44,14 +44,29 @@ def _ok_run(*_a, **_k):
     return result
 
 
+class PlanCleanVenvDirTest(unittest.TestCase):
+    """(iii) plan_clean_venv_dir 是純函式：不碰磁碟、不呼叫 subprocess，
+    只決定路徑——名稱含 cleanvenv 且落在 base_temp_dir 下。"""
+
+    def test_name_and_parent_no_subprocess(self):
+        cvc = _carrier()
+        with patch.object(cvc.subprocess, "run") as mock_run:
+            target = cvc.plan_clean_venv_dir(base_temp_dir=_FAKE_ROOT)
+        mock_run.assert_not_called()
+        assert "cleanvenv" in target.name
+        assert target.parent == _FAKE_ROOT
+
+
 class CreateCleanVenvTest(unittest.TestCase):
     """(a) 建 venv 的 argv 形態；(g) 目錄名含 cleanvenv。"""
 
     def test_venv_creation_argv_and_naming(self):
         cvc = _carrier()
+        target = cvc.plan_clean_venv_dir(base_temp_dir=_FAKE_ROOT)
         with patch.object(cvc.subprocess, "run", side_effect=_ok_run) as mock_run:
-            target = cvc.create_clean_venv(base_temp_dir=_FAKE_ROOT)
+            returned = cvc.create_clean_venv(target)
 
+        assert returned == target
         assert "cleanvenv" in target.name
         venv_calls = [
             c for c in mock_run.call_args_list if "venv" in c.args[0] and "-m" in c.args[0]
@@ -64,6 +79,7 @@ class CreateCleanVenvTest(unittest.TestCase):
     def test_low_version_base_interpreter_fails_loud(self):
         """基底直譯器版本探針回非零 rc（< 3.11）→ 立即 raise，不建 venv。"""
         cvc = _carrier()
+        target = cvc.plan_clean_venv_dir(base_temp_dir=_FAKE_ROOT)
 
         def _low_version_run(argv, **kwargs):
             result = MagicMock()
@@ -73,7 +89,7 @@ class CreateCleanVenvTest(unittest.TestCase):
 
         with patch.object(cvc.subprocess, "run", side_effect=_low_version_run) as mock_run:
             with self.assertRaises(RuntimeError):
-                cvc.create_clean_venv(base_temp_dir=_FAKE_ROOT)
+                cvc.create_clean_venv(target)
         # 版本探針之後不應再有第二次呼叫（venv 建立），因為已經 raise。
         assert mock_run.call_count == 1
 
@@ -129,6 +145,7 @@ class MainCleanupInvariantTest(unittest.TestCase):
         cvc = _carrier()
         fake_venv_dir = _FAKE_VENV_DIR
         with (
+            patch.object(cvc, "plan_clean_venv_dir", return_value=fake_venv_dir),
             patch.object(cvc, "create_clean_venv", return_value=fake_venv_dir),
             patch.object(cvc.platform_utils, "venv_python_path", return_value=_FAKE_PY_SHORT),
             patch.object(
@@ -139,6 +156,42 @@ class MainCleanupInvariantTest(unittest.TestCase):
             patch.object(
                 cvc, "assert_pg_extras_absent", side_effect=cvc.CleanVenvContaminatedError("x")
             ),
+            patch.object(cvc, "cleanup", return_value=True) as mock_cleanup,
+        ):
+            rc = cvc.main([])
+        assert rc == 1
+        mock_cleanup.assert_called_once_with(
+            fake_venv_dir, is_windows=cvc.platform_utils.is_windows()
+        )
+
+    def test_cleanup_called_when_create_clean_venv_raises_called_process_error(self):
+        """(i) create_clean_venv 本身失敗（`-m venv` 非零 rc）也要 fail-loud
+        且仍呼叫 cleanup——DEF-200-306 補洞：修復前這條路徑會讓例外直接向外
+        拋出、cleanup 被跳過，磁碟留下半殘目錄。"""
+        cvc = _carrier()
+        fake_venv_dir = _FAKE_VENV_DIR
+        with (
+            patch.object(cvc, "plan_clean_venv_dir", return_value=fake_venv_dir),
+            patch.object(
+                cvc,
+                "create_clean_venv",
+                side_effect=cvc.subprocess.CalledProcessError(1, "venv"),
+            ),
+            patch.object(cvc, "cleanup", return_value=True) as mock_cleanup,
+        ):
+            rc = cvc.main([])
+        assert rc == 1
+        mock_cleanup.assert_called_once_with(
+            fake_venv_dir, is_windows=cvc.platform_utils.is_windows()
+        )
+
+    def test_cleanup_called_when_create_clean_venv_raises_oserror(self):
+        """(ii) 同上，換成 OSError（例如磁碟/權限問題）。"""
+        cvc = _carrier()
+        fake_venv_dir = _FAKE_VENV_DIR
+        with (
+            patch.object(cvc, "plan_clean_venv_dir", return_value=fake_venv_dir),
+            patch.object(cvc, "create_clean_venv", side_effect=OSError("boom")),
             patch.object(cvc, "cleanup", return_value=True) as mock_cleanup,
         ):
             rc = cvc.main([])
@@ -165,6 +218,16 @@ class MainCleanupInvariantTest(unittest.TestCase):
 
 class CleanupFailureTest(unittest.TestCase):
     """(f) 刪除失敗時印出含目錄路徑的刪除指令且 rc 非零。"""
+
+    def test_cleanup_returns_true_for_nonexistent_dir(self):
+        """(iv) 目錄根本不存在（例如 create_clean_venv 連目錄都沒建出來就
+        失敗）時 cleanup 視為成功、不報錯——這是 main() 能安全對「計畫出但
+        沒建成」的路徑呼叫 cleanup() 的前提。"""
+        cvc = _carrier()
+        nonexistent = _FAKE_ROOT / "autoclaude_cleanvenv_never_created"
+        with patch.object(cvc.Path, "exists", return_value=False):
+            ok = cvc.cleanup(nonexistent, is_windows=True)
+        assert ok is True
 
     def test_rmtree_failure_prints_copyable_command_and_returns_false(self):
         cvc = _carrier()

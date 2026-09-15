@@ -28,11 +28,13 @@ pytest rc=4，正是那個風險的真實代價）。故 Windows 側改為與 ma
 ps1`／`windows_smoke_local.ps1` 一律直接使用 `<repo 根>/.venv/Scripts/python.exe`
 絕對路徑，不再靠 PATH 現場解析「使其等價」；找不到就 fail-loud（exit 1）。
 
-本檔鎖三件事（B/C 為既有行級靜態檢查；新增 E 為 Windows 絕對路徑釘死鎖，鎖的三支
-檔＝`AutoClaude/tools/run_local_nightly.ps1`／`tools/windows_smoke_local.ps1`／
-`AutoClaude/tools/local_ci_gate.ps1`）：
+本檔鎖四件事（B/C 為既有行級靜態檢查；E 為 Windows 絕對路徑釘死鎖，鎖的三支檔＝
+`AutoClaude/tools/run_local_nightly.ps1`／`tools/windows_smoke_local.ps1`／
+`AutoClaude/tools/local_ci_gate.ps1`；新增 F 為 DEF-200-302 mac 側補齊，鎖的兩支
+檔＝`AutoClaude/tools/run_local_nightly.sh`／`tools/macos_smoke_local.sh`）：
   B. 兩支載具都必須把**解析後的直譯器路徑**寫進 log（禁止只印字面 token）。
-  C. mac 側必須維持「絕對路徑釘死」而非 PATH 現場解析。
+  C. mac 側維持「絕對路徑釘死」而非 PATH 現場解析（見 F：本輪起兩支 .sh 皆已
+     拔除缺席時的 PATH 退路，不再只是「主路徑釘死、缺席仍退回現場解析」）。
   E.（DEF-200-302 新增）Windows 側兩支 .ps1（`run_local_nightly.ps1`／
      `windows_smoke_local.ps1`）都必須絕對路徑釘死根層 `.venv\\Scripts\\
      python.exe`、都必須有 fail-loud 分支（`Test-Path` 不成立即 `exit 1`）；
@@ -40,6 +42,15 @@ ps1`／`windows_smoke_local.ps1` 一律直接使用 `<repo 根>/.venv/Scripts/py
      -CandidateName 'python'` 當直譯器決定者，也不得再含「偵測 `$env:VIRTUAL_ENV`
      即剝除其 Scripts」的正規化區塊；nightly 對 `local_ci_gate.ps1` 的呼叫必須
      帶 `--unattended`（DEF-200-291 無人值守 advisory 降級的前置條件）。
+  F.（DEF-200-302 mac 側補齊，2026-09-15）`run_local_nightly.sh` 與
+     `macos_smoke_local.sh` 都必須絕對路徑釘死根層 `.venv/bin/python`、都必須
+     有 fail-loud 分支（`[ ! -x "$PY" ]`／`[ ! -x "$python_bin" ]` 不成立即
+     `exit 1`）；兩檔皆不得再含 `command -v python || command -v python3` 這類
+     缺席時退回 PATH 現場解析的分支——`run_local_nightly.sh` 原本就有這段退路
+     （C 項此前只驗證「主路徑有沒有釘死」，沒驗證「缺席時是否真的 fail-loud」，
+     故放過了它），`macos_smoke_local.sh` 則原本只用 `is_real_python_candidate
+     python` 判斷 PATH 上的 python 是否為真直譯器，未保證它就是本 repo 根層
+     .venv 那一顆。
 
 原 A 項（Windows PATH 正規化區塊行級檢查）與 D 項（該正規化比對式的行為級鎖，
 DEF-101-522）鎖的正是本輪拔除的那段邏輯，隨程式碼一併移除——史料見 git 歷史與
@@ -68,6 +79,9 @@ _ROOT = Path(__file__).resolve().parents[2]
 _PS1 = _ROOT / "AutoClaude" / "tools" / "run_local_nightly.ps1"
 _SH = _ROOT / "AutoClaude" / "tools" / "run_local_nightly.sh"
 _SMOKE_PS1 = _ROOT / "tools" / "windows_smoke_local.ps1"
+# DEF-200-302 mac 側補齊（F 項）：與 _SH 同款需要「無 PATH 退路 + fail-loud」
+# 兩支斷言的第二支 .sh 載具。
+_MAC_SMOKE = _ROOT / "tools" / "macos_smoke_local.sh"
 
 # DEF-200-302：兩支 .ps1 皆需釘死的絕對路徑字面（相對於各自的 repo 根變數，
 # 故只鎖尾段——`.venv\Scripts\python.exe`——不鎖前導變數名，因兩檔前導變數
@@ -120,12 +134,43 @@ def _read(p: Path) -> str:
     return p.read_text(encoding="utf-8", errors="replace")
 
 
+def _code_only(text: str) -> str:
+    """剝除整行 `#` 註解（.sh 慣例；同 test_smoke_ci_sync.py 既有 `_code_only`）。
+    F 項訂正文本身逐字引述了被拔除的 `command -v python || command -v python3`
+    舊寫法（史料/訂正說明），若不剝除註解，反向鎖會被自己的訂正註記誤判成仍
+    殘留該退路。"""
+    return "\n".join(ln for ln in text.splitlines() if not ln.lstrip().startswith("#"))
+
+
+_SH_BARE_PATH_FALLBACK_RE = re.compile(r"command\s+-v\s+python3?\b")
+
+# F 項 fail-loud 判準：`[ ! -x "$PY" ]` 或 `[ ! -x "$python_bin" ]`（兩檔變數名
+# 不同，機械物只需認出「缺席就 fail-loud」這個形狀）。
+_SH_FAIL_LOUD_CONDITION_RE = re.compile(r'\[\s*!\s*-x\s+"\$(?:PY|python_bin)"\s*\]')
+
+
+def _has_fail_loud_venv_check_sh(text: str) -> bool:
+    """F 項 sh 版判準：本 repo 兩支 .sh 載具的 fail-loud 分支皆是單層
+    `if [ ! -x "$VAR" ]; then ... exit 1; fi`（無巢狀大括號可比對，不需要
+    `_has_fail_loud_venv_check` 的大括號配對），改抓「條件命中後到下一個
+    行首 `fi` 之間」是否含 `exit 1`。"""
+    code = _code_only(text)
+    for match in _SH_FAIL_LOUD_CONDITION_RE.finditer(code):
+        fi_at = code.find("\nfi", match.end())
+        if fi_at == -1:
+            continue
+        if re.search(r"exit\s+1", code[match.end():fi_at]):
+            return True
+    return False
+
+
 class TestCarrierFilesExist(unittest.TestCase):
     def test_both_carriers_present(self):
         """檔案改名/搬家時本檔其餘斷言會全部靜默失效，先釘存在性。"""
         self.assertTrue(_PS1.is_file(), f"找不到 {_PS1}")
         self.assertTrue(_SH.is_file(), f"找不到 {_SH}")
         self.assertTrue(_SMOKE_PS1.is_file(), f"找不到 {_SMOKE_PS1}")
+        self.assertTrue(_MAC_SMOKE.is_file(), f"找不到 {_MAC_SMOKE}")
 
 
 class TestInterpreterIsForensicallyLogged(unittest.TestCase):
@@ -161,13 +206,40 @@ class TestInterpreterIsForensicallyLogged(unittest.TestCase):
 
 
 class TestMacInterpreterStaysPinned(unittest.TestCase):
-    """C：mac 側的「絕對路徑釘死」是它不受本缺陷影響的原因，不可被改回現場解析。"""
+    """C：mac 側的「絕對路徑釘死」是它不受本缺陷影響的原因，不可被改回現場解析。
+
+    F（DEF-200-302 mac 側補齊）：`run_local_nightly.sh` 與 `macos_smoke_local.sh`
+    兩支 .sh 載具都須無 PATH 退路、缺席即 fail-loud——與 Windows 側 E 項對稱。
+    """
 
     def test_pins_venv_absolute_path(self):
         self.assertRegex(
             _read(_SH), r'PY="\$ROOT/\.venv/bin/python"',
             "run_local_nightly.sh 必須維持絕對路徑釘死；改回裸 `python` 會把 Windows "
             "側的啟動方式漂移問題複製到 mac（DEF-101-506）")
+
+    def test_no_longer_resolves_bare_python_from_path(self) -> None:
+        """F：兩支 .sh 載具不得再有 `command -v python`／`python3` 退路——
+        `run_local_nightly.sh` 原本只有主路徑釘死，缺席時仍退回此退路（C 項
+        此前只驗證「主路徑有沒有釘死」，未驗證「缺席時是否真的 fail-loud」）；
+        `macos_smoke_local.sh` 原本用 `is_real_python_candidate python` 判斷
+        PATH 上的 python，未保證那就是本 repo 根層 .venv 那一顆。"""
+        for path in (_SH, _MAC_SMOKE):
+            code = _code_only(_read(path))
+            self.assertNotRegex(
+                code, _SH_BARE_PATH_FALLBACK_RE,
+                f"{path.name} 不得再以 `command -v python`／`python3` 退回 PATH "
+                "現場解析當直譯器決定者（DEF-200-302）")
+
+    def test_fail_loud_when_venv_missing(self) -> None:
+        """F：兩支 .sh 載具都必須有「根層 .venv 直譯器不存在即 exit 1」的
+        fail-loud 分支，不得只印警告或靜默退回其他解析方式。"""
+        for path in (_SH, _MAC_SMOKE):
+            text = _read(path)
+            self.assertTrue(
+                _has_fail_loud_venv_check_sh(text),
+                f"{path.name} 必須有「根層 .venv 直譯器不存在即 exit 1」的 "
+                "fail-loud 分支（DEF-200-302）")
 
 
 class TestDetectorItself(unittest.TestCase):

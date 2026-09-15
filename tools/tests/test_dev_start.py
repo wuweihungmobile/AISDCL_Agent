@@ -6535,6 +6535,115 @@ class TestStrayVenvScan(DevStartTestCase):
                 found = self.stray_venv.find_temp_cleanvenvs()
             self.assertIn(leftover, found)
 
+    def test_full_tree_recursion_finds_previously_missed_nested_locations(self) -> None:
+        """DEF-200-297 四方審查 M-03：舊版只掃 `AutoClaude/*`／`AISDLC_SDD/*`／
+        `AISDLC_SDD/*/*` 兩層固定 glob，下列四類巢狀更深的雜散 venv 全部漏收；
+        全樹遞迴後應全數命中。"""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            rels = (
+                ".claude/worktrees/x/.venv",
+                "tools/.venv",
+                "AISDLC_SDD/AISDLC_SDD_v0.01/tools/.venv",
+                "AutoClaude/tests/fixtures/.venv",
+            )
+            for rel in rels:
+                d = root / rel
+                d.mkdir(parents=True)
+                (d / "pyvenv.cfg").write_text("home = /x\n", encoding="utf-8")
+            found = self.stray_venv.find_stray_venvs(root)
+            self.assertEqual(found, sorted(root / rel for rel in rels))
+
+    def test_git_and_node_modules_are_pruned_not_descended(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            for rel in (".git/x", "node_modules/x"):
+                d = root / rel
+                d.mkdir(parents=True)
+                (d / "pyvenv.cfg").write_text("home = /x\n", encoding="utf-8")
+            self.assertEqual(
+                self.stray_venv.find_stray_venvs(root), [],
+                "剪枝目錄底下的 pyvenv.cfg 不應被收錄（不下探證明）")
+
+    def test_hit_venv_dir_is_not_descended_into(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            outer = root / "AutoClaude" / ".venv"
+            outer.mkdir(parents=True)
+            (outer / "pyvenv.cfg").write_text("home = /x\n", encoding="utf-8")
+            nested = outer / "lib" / "site-packages" / ".venv"
+            nested.mkdir(parents=True)
+            (nested / "pyvenv.cfg").write_text("home = /y\n", encoding="utf-8")
+            found = self.stray_venv.find_stray_venvs(root)
+            self.assertEqual(found, [outer], "命中的 venv 目錄底下不應再下探找第二筆")
+
+    def test_enforce_blocks_and_emits_when_stray_present(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            d = root / "AutoClaude" / ".venv"
+            d.mkdir(parents=True)
+            (d / "pyvenv.cfg").write_text("home = /x\n", encoding="utf-8")
+            emitted: list[str] = []
+            ok = self.stray_venv.enforce(root, is_windows=True, emit=emitted.append)
+            self.assertFalse(ok, "偵測到雜散 venv 時 enforce 必須回 False")
+            self.assertEqual(len(emitted), 1)
+            self.assertIn("必須刪除", emitted[0])
+            self.assertIn("Remove-Item -Recurse -Force", emitted[0])
+
+    def test_enforce_passes_silently_when_clean(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            emitted: list[str] = []
+            ok = self.stray_venv.enforce(root, is_windows=False, emit=emitted.append)
+            self.assertTrue(ok, "無雜散 venv 時 enforce 應回 True")
+            self.assertEqual(emitted, [], "無雜散 venv 時不應呼叫 emit")
+
+    def test_find_stray_venvs_perf_guard_on_real_repo(self) -> None:
+        """效能護欄：全樹遞迴改動後，對真實 repo 樹跑一次不得暴衝——不斷言結果
+        內容（他機可能真的有雜散 venv），只釘時間上界（2026-09-15 實測基準見
+        模組檔頭 docstring：約 6370 目錄、0.18 秒）。"""
+        start = time.perf_counter()
+        self.stray_venv.find_stray_venvs(dev_start.ROOT)
+        elapsed = time.perf_counter() - start
+        self.assertLess(elapsed, 5.0, f"find_stray_venvs 對真實 repo 耗時 {elapsed:.2f}s，超過上界")
+
+
+class TestStepVenvBlocksOnStrayVenv(DevStartTestCase):
+    """DEF-200-297 四方審查 M-03 SD (b)＋掌舵者 2026-09-15 裁決：偵測到雜散 venv
+    時 step_venv() 必須擋下（回傳 False、SUMMARY 開頭 ❌），不得只 _warn 後放行。
+    以 patch dev_start.stray_venv.enforce 直接測呼叫鏈（enforce 本體的行為已由
+    TestStrayVenvScan 覆蓋）。"""
+
+    def _run(self, enforce_return: bool) -> bool:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            fake_py = root / ".venv" / "bin" / "python"
+            fake_py.parent.mkdir(parents=True)
+            fake_py.write_text("", encoding="utf-8")
+            state = {"deps_hash": {"posix": "h"}}
+            with mock.patch.object(dev_start, "ROOT", root), \
+                 mock.patch.object(dev_start, "LOCK_FILE", root / ".dev_start.lock"), \
+                 mock.patch.object(dev_start, "_ensure_venv_shape", return_value="ok"), \
+                 mock.patch.object(dev_start, "_deps_hash", return_value="h"), \
+                 mock.patch.object(dev_start, "_venv_python", return_value=fake_py), \
+                 mock.patch.object(dev_start, "_write_origin_marker"), \
+                 mock.patch.object(dev_start, "_python_version_target", return_value=None), \
+                 mock.patch.object(dev_start.stray_venv, "enforce",
+                                    return_value=enforce_return), \
+                 mock.patch("builtins.print"):
+                return dev_start.step_venv("mac", state, force=False)
+
+    def test_step_venv_fails_when_stray_venv_enforce_reports_stray(self) -> None:
+        ok = self._run(enforce_return=False)
+        self.assertFalse(ok, "偵測到雜散 venv 時 step_venv 必須回傳 False（擋下，非放行）")
+        self.assertTrue(
+            dev_start.SUMMARY["venv"].startswith("❌"),
+            f"SUMMARY['venv'] 應以 ❌ 開頭，實際={dev_start.SUMMARY.get('venv')!r}")
+
+    def test_step_venv_succeeds_when_stray_venv_enforce_reports_clean(self) -> None:
+        ok = self._run(enforce_return=True)
+        self.assertTrue(ok, "無雜散 venv 時 step_venv 不應被本檢查擋下")
+
 
 if __name__ == "__main__":
     unittest.main()

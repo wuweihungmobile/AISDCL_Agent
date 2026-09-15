@@ -98,7 +98,7 @@ dev_start 七步驟（邏輯集中於 `tools/dev_start.py` 跨平台單一核心
 
 補充：狀態檔 `.dev_env_state.json` 損毀時自動視為首次執行（可隨時安全刪除重生，只多付一次依賴基準記錄）；VSCode 使用者在**整合終端機**執行同指令即可（或把指令掛進 shell profile，開終端機即自動整備）。
 
-> 🔴 **單一 .venv 原則**（DEF-200-297）：全樹只有 monorepo 根層 `.venv` 是開發 venv；子專案（`AutoClaude/`、`AISDLC_SDD/**`）底下**不應該**再長出第二顆——那正是 DEF-200-294 事故的起因（子 hook 候選鏈撿到子專案 venv、跑錯環境）。`.venv-cache-<flavor>/` 不算第二顆，它是**同一顆** venv 換平台時的暫存身分（見上方④）。dev_start 第④步結尾會掃一次子專案雜散 venv 與 `%TEMP%`／`$TMPDIR` 下的乾淨 venv 殘留（`tools/lib/stray_venv.py`，純讀不代勞刪除），發現即印出可直接複製的刪除指令；§7 回填流程用完的乾淨 venv 也請隨手刪除，不要留著跨會話。
+> 🔴 **單一 .venv 原則**（DEF-200-297；DEF-200-308 起由警告升級為擋下）：全樹只有 monorepo 根層 `.venv` 是開發 venv；根層以外**任何位置**（子專案 `AutoClaude/`、`AISDLC_SDD/**`、`.claude/worktrees/*`、`tools/`……任何巢狀深度）都不應再長出第二顆——那正是 DEF-200-294 事故的起因（子 hook 候選鏈撿到子專案 venv、跑錯環境）。`.venv-cache-<flavor>/` 不算第二顆，它是**同一顆** venv 換平台時的暫存身分（見上方④；掌舵者 2026-09-15 裁決保留此機制）。dev_start 第④步結尾會對全樹遞迴掃一次 `pyvenv.cfg`（剪枝 `.git`／`node_modules`／快取目錄，本機實測 0.3 秒內）並掃 `%TEMP%`／`$TMPDIR` 下的乾淨 venv 殘留（`tools/lib/stray_venv.py`，純讀不代勞刪除）；**偵測到即判該步驟失敗（rc≠0）**並印出可直接複製的刪除指令，刪完重跑才過（掌舵者 2026-09-15 裁決：擋下、不自動刪——黃字警告會被捲過去，正是 DEF-200-294 當時沒人看見的原因）。§7 回填流程用的乾淨 venv 由 `tools/lib/clean_venv_carrier.py` 在 finally 自動刪（含第一步建立本身失敗的情境，DEF-200-309）。
 
 ---
 
@@ -351,7 +351,7 @@ powershell -ExecutionPolicy Bypass -File scripts\ci-gate.ps1   # 偵測到 Git B
 >   `parametrize` 來源」也能改變計數，該面**不在指紋內**；docker daemon 可用性、平台差異亦然
 >   （見下方容差訂正段）。故它是 stale 的**充分觸發器、非必要條件**——會漏、不會冤。
 > <!-- snapshot-fingerprints-darwin: v001=8ffe3c3dabbd v030=a72dea28c763 scripts=645c9debe7f3 autoclaude=e2ef12bb640a measured-at=2026-09-13 host=Darwin-25.6.0-arm64 docker=down pgextras=absent interpreter=clean_venv/bin@3.11.15 sdk-extra=present baseline-origin=self-recorded ／ 由 `python tools/sync_onboarding_baselines.py --write --with-slow` 在 macOS 上維護，勿手改；刪除本標記會讓 --check-snapshot fail-loud -->
-> <!-- snapshot-fingerprints-win32: v001=8ffe3c3dabbd v030=a72dea28c763 scripts=645c9debe7f3 autoclaude=d60205aa3d86 measured-at=2026-09-15 host=Windows-10-AMD64 docker=up pgextras=absent interpreter=autoclaude_cleanvenv_20260914T202140Z/Scripts@3.11.9 sdk-extra=present baseline-origin=self-recorded ／ 同上，由 Windows 側維護。🔴 該 origin 值的語意以 `tools/lib/baseline_origin.py::ORIGIN_SELF` 為準（本行不另寫一份定義）＝**本欄四格是在同一台 Windows 真機上一次量完、env 欄位在當時的定義下齊全**。🔴 兩條錨的後兩欄現值是 `tools/lib/baseline_origin.py::PRE_FIELD`＝**本錨早於那一欄**（不是「不可考」，也**不得**手填一個猜的值——那會把今天的環境寫在昨天的數字旁邊）；下一次在該平台跑 `--write --with-slow` 就會自動被真值取代 -->
+> <!-- snapshot-fingerprints-win32: v001=8ffe3c3dabbd v030=a72dea28c763 scripts=d3f6d1bc6643 autoclaude=d60205aa3d86 measured-at=2026-09-15 host=Windows-10-AMD64 docker=up pgextras=absent interpreter=autoclaude_cleanvenv_20260915T051613Z/Scripts@3.11.9 sdk-extra=present baseline-origin=self-recorded ／ 同上，由 Windows 側維護。🔴 該 origin 值的語意以 `tools/lib/baseline_origin.py::ORIGIN_SELF` 為準（本行不另寫一份定義）＝**本欄四格是在同一台 Windows 真機上一次量完、env 欄位在當時的定義下齊全**。🔴 兩條錨的後兩欄現值是 `tools/lib/baseline_origin.py::PRE_FIELD`＝**本錨早於那一欄**（不是「不可考」，也**不得**手填一個猜的值——那會把今天的環境寫在昨天的數字旁邊）；下一次在該平台跑 `--write --with-slow` 就會自動被真值取代 -->
 >
 > 🔴 **Windows 欄 provenance 沿革（史料段，非現況；R74 訂正）**：本段標題與內文自 R67 起逐字寫著
 > 「Windows 欄整欄記 `unrecorded`」並解釋為何如此，而 R73 已在一台 Windows 真機上一次量完四格、

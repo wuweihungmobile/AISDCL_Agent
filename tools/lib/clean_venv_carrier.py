@@ -6,7 +6,8 @@
 autoclaude_cleanvenv_*` 殘留正是「人手最後一步忘了刪」的直接後果——本模組把
 同一條 SOP 程式化：建（樹外 TEMP）→ 裝依賴 → 探針 psycopg2／sqlalchemy 必
 ABSENT → 跑 `tools/sync_onboarding_baselines.py --write --with-slow` →
-**必刪**（`finally`，即使中途失敗也刪；除非 `--keep`）。
+**必刪**（`finally`，即使中途失敗也刪——含第一步「建立」本身失敗：路徑先由
+`plan_clean_venv_dir()` 決定再動手建，finally 才一定摸得到它；除非 `--keep`）。
 
 與既有工具的分工：
     - `tools/bootstrap_core.py` 建的是**本機開發用** `.venv`（挑最新可用版、
@@ -74,18 +75,30 @@ def _assert_base_interpreter_version_ok(base: str) -> None:
         raise RuntimeError(f"基底直譯器版本 < 3.11（{base}），無法建立乾淨 venv。")
 
 
-def create_clean_venv(base_temp_dir: Path | None = None) -> Path:
-    """在樹外 TEMP 建立乾淨 venv，回傳其目錄（不含 python 路徑）。
+def plan_clean_venv_dir(base_temp_dir: Path | None = None) -> Path:
+    """純函式：只決定乾淨 venv 的目標路徑（樹外 TEMP），不建立、不碰磁碟。
+
+    與 `create_clean_venv()` 刻意分離（DEF-200-306 補洞）：`main()` 先呼叫本
+    函式取得目標路徑，再呼叫 `create_clean_venv()` 動手建立；即使建立本身
+    失敗（`subprocess.CalledProcessError`／`OSError`），`main()` 手上已握有
+    這個路徑，`finally` 的 `cleanup()` 仍能對它動作（`cleanup()` 對不存在的
+    目錄回 `True`，見其實作），不會再有半殘目錄逃過必刪保證。
 
     目錄名含 `cleanvenv` 子字串，與 `tools/lib/stray_venv.find_temp_cleanvenvs()`
-    的既有命名約定相容。用 stdlib `venv`（本身含 pip）建，刻意不用 `uv venv`——
-    uv 建出的 venv 內沒有 pip 模組，後續 `install_deps()` 的 `-m pip install`
-    會直接失敗。
+    的既有命名約定相容。
+    """
+    root = base_temp_dir if base_temp_dir is not None else Path(tempfile.gettempdir())
+    return root / f"autoclaude_cleanvenv_{_utc_timestamp()}"
+
+
+def create_clean_venv(target: Path) -> Path:
+    """在 `target` 路徑建立乾淨 venv，回傳 `target`（不含 python 路徑）。
+
+    用 stdlib `venv`（本身含 pip）建，刻意不用 `uv venv`——uv 建出的 venv 內
+    沒有 pip 模組，後續 `install_deps()` 的 `-m pip install` 會直接失敗。
     """
     base = _base_interpreter()
     _assert_base_interpreter_version_ok(base)
-    root = base_temp_dir if base_temp_dir is not None else Path(tempfile.gettempdir())
-    target = root / f"autoclaude_cleanvenv_{_utc_timestamp()}"
     print(f"      指令：{base} -m venv {target}")
     subprocess.run(
         [base, "-m", "venv", str(target)], encoding="utf-8", errors="replace", check=True
@@ -222,7 +235,12 @@ def main(argv: list[str] | None = None) -> int:
     cleanup_ok = True
     try:
         print(steps[0])
-        venv_dir = create_clean_venv()
+        # 先「決定路徑」再「動手建立」（DEF-200-306 補洞）：一旦 venv_dir 被
+        # 賦值，即使緊接著的 create_clean_venv() 本身拋出（建立失敗），下面
+        # 的 finally 仍握有這個路徑可交給 cleanup()（對不存在的目錄回
+        # True，見其實作），不會再有半殘目錄逃過必刪保證。
+        venv_dir = plan_clean_venv_dir()
+        create_clean_venv(venv_dir)
         venv_python = platform_utils.venv_python_path(venv_dir, is_windows=is_win)
         print(f"      -> {venv_dir}")
 
@@ -238,17 +256,27 @@ def main(argv: list[str] | None = None) -> int:
         print(steps[3])
         rc = run_onboarding_sync(venv_python, repo_root)
         print(f"      -> rc={rc}")
-    except (RuntimeError, CleanVenvContaminatedError) as exc:
-        print(f"[ERROR] {exc}", file=sys.stderr)
+    except (
+        RuntimeError,
+        CleanVenvContaminatedError,
+        subprocess.CalledProcessError,
+        OSError,
+    ) as exc:
+        # 裸 except Exception 會連 KeyboardInterrupt 都吞掉（repo fail-loud
+        # 風格禁止）；建立乾淨 venv 本身失敗時最常見的兩型即
+        # CalledProcessError（`-m venv` 非零 rc）與 OSError（磁碟/權限問題）。
+        print(f"[ERROR] {type(exc).__name__}: {exc}", file=sys.stderr)
         rc = 1
     finally:
-        if venv_dir is not None:
-            if args.keep:
-                cmd = _delete_command(venv_dir, is_windows=is_win)
-                print(f"[KEEP] 未刪除，保留於 {venv_dir}；事後請自行刪除：{cmd}")
-            else:
-                print(steps[4])
-                cleanup_ok = cleanup(venv_dir, is_windows=is_win)
+        if venv_dir is not None and args.keep and venv_dir.exists():
+            cmd = _delete_command(venv_dir, is_windows=is_win)
+            print(f"[KEEP] 未刪除，保留於 {venv_dir}；事後請自行刪除：{cmd}")
+        elif venv_dir is not None and args.keep:
+            # 建立步驟本身失敗、目錄未落地：沒有東西可保留，別叫人去刪不存在的路徑
+            print(f"[KEEP] 建立未完成，磁碟上無 {venv_dir} 可保留")
+        elif venv_dir is not None:
+            print(steps[4])
+            cleanup_ok = cleanup(venv_dir, is_windows=is_win)
 
     if not cleanup_ok:
         rc = 1

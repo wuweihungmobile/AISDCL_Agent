@@ -166,9 +166,11 @@ def _as_running_interpreter(hook: dict) -> dict | None:
           `tools/check_hooks_liveness.py::check_claude_hook_carriers`（對三份活躍
           settings 逐份查存在性，CI 刻意跳過那一層）。
 
-    原本的 `assert runnable` 把 (b) 也判成紅，於是 windows-compat-ci 在
-    `AutoClaude/.venv` 從未被建立的 runner 上連續 6 次紅，紅的內容與當輪改動無關；
-    而同一份「載具存在嗎」的知識同時住在兩個家，正是本 repo 的頭號病。
+    原本的 `assert runnable` 把 (b) 也判成紅，於是 windows-compat-ci 在（當時載具宣告的）
+    `AutoClaude/.venv` 從未被建立的 runner 上連續 6 次紅，紅的內容與當輪改動無關——單一
+    .venv 收斂後子專案載具已改指根層 `../.venv`，此情境類別仍成立：載具形態正確但
+    gitignored 產物未材料化；而同一份「載具存在嗎」的知識同時住在兩個家，正是本 repo 的
+    頭號病。
 
     代換的射程刻意收到最窄，這樣它遮得住的只有 (b)：**只有 Windows、且 argv[0] 正是
     那個唯一合法的 venv 載具**（`win_carrier_kind()=="venv"`，字面被改壞就對不上）
@@ -378,8 +380,10 @@ def test_claude_project_dir_anchors_autoclaude_deny_semantics():
 def test_autoclaude_deny_semantics_survives_a_machine_without_the_local_venv():
     """紅綠自證（綠面）：載具指到的 venv 未材料化時，阻斷語意仍必須被**真的驗到**。
 
-    這就是 CI runner 的條件（`AutoClaude/.venv` 從未被建立）。刻意不是 skip：
-    把「本機沒有那個 gitignored 產物」變成靜默跳過，等於用看不見換綠燈。
+    這就是 CI runner 的條件（當時載具宣告的 `AutoClaude/.venv` 從未被建立——單一 .venv
+    收斂後子專案載具已改指根層 `../.venv`，此情境類別仍成立：載具形態正確但 gitignored
+    產物未材料化）。刻意不是 skip：把「本機沒有那個 gitignored 產物」變成靜默跳過，
+    等於用看不見換綠燈。
     """
     ac_root, hooks = _autoclaude_enforce_docs_path_hooks()
 

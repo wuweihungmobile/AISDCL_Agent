@@ -309,3 +309,27 @@ A／D 兩類、增釘死根層 .venv 的 E 類與大括號感知 fail-loud 判�
 DEF-200-304／305 的修復全在 AutoClaude 側，不計護欄層。缺陷帳本見 `docs/06_quality/AutoSDD_Defect_Log.md`
 DEF-200-301～DEF-200-306。此附記為 doc-total 對帳（≥2 站點）另一站點寄居 `AutoSDD_improving_112.md`，
 同 R129～R150 寄居體例。round-label-ok
+
+## 第十四輪附記（R152；DEF-200-307～310 單一 .venv 四方審查殘餘收尾）
+
+- **體例**：本節非開新一輪 CrossPlatform 掃描輪四件套，僅為四筆缺陷收尾造成的護欄層逐檔漂移
+  記帳，寄居本檔（同 R129～R151 寄居體例，不另開新檔）。本輪**非淨減法輪**（R151 淨減法輪已把
+  款(11) 連續上升 streak 歸零，本輪可為正）；cap 到期輪 R153 尚未到，本輪維持 540 不動。
+
+<!-- guard-total:R152 --> R152 護欄層累積淨額＝ 99812 → 100088（+276）——內容成長 +245：
+`test_nightly_interpreter_determinism.py` 312→384（+72，DEF-200-307：mac nightly／smoke 釘死
+根層 .venv 的 F 項斷言）／`test_dev_start.py` 6540→6649（+109，DEF-200-308：雜散 venv 全樹
+遞迴掃描＋`step_venv` 擋下）／`test_clean_venv_carrier.py` 199→262（+63，DEF-200-309：clean_venv_
+carrier 建立失敗必清理）三筆缺陷的回歸鎖，全額歸回歸鎖軌；`test_windowsapps_guard_cross_
+consistency.py` 2051→2052（+1，DEF-200-310：過期字面訂正折行）性質非回歸鎖，全額歸功能軌、
+不計入回歸鎖軌淨額。另 +31 本檔（`test_adr_xplat001_c1c2_lock.py`）自身逐檔漂移收斂（主表新增
+列＋`_FROZEN_PREFIX_REWRITE_LEDGER` 接鏈列＋`_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND` 到期義務
+具名展延 152→157〔鐵律七：真拆屬獨立重構持有面，非本輪並行包能做完，展延理由逐字寫在檔內〕
+所造成的行數漂移，`--print-guard-lines` 反覆覆核收斂到本行本身也計入為止，收成單一收斂列，同
+既有體例；凍結前綴 `_REPIN_LOG_FROZEN_PREFIX_LEN` 220→223、`_REPIN_LOG_HISTORY_SHA256`／
+`_FROZEN_PREFIX_REWRITE_LEDGER` 同步重釘），全額歸回歸鎖軌。回歸鎖軌淨額合計 275
+（`_REGRESSION_LANE_LOG` R152 列，244＋31 自身漂移，未超軌上限 309，未使用任何一次性例外
+名冊；DEF-200-310 的 +1 明文排除於本軌淨額之外）。分桶棘輪同輪重釘：`prose` 桶與 `guard_self`
+桶皆與上輪相同、未變動（值以 `guard_layer_bucket_census.py --grain chunk` 現查為準）。缺陷
+帳本見 `docs/06_quality/AutoSDD_Defect_Log.md` DEF-200-307～DEF-200-310。此附記為 doc-total
+對帳（≥2 站點）另一站點寄居 `AutoSDD_improving_112.md`，同 R129～R151 寄居體例。round-label-ok

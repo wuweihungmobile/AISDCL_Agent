@@ -682,7 +682,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 8202,
+    "test_adr_xplat001_c1c2_lock.py": 8233,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 3726,
@@ -700,12 +700,12 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_check_wrapper_thinness.py": 1185,
     "test_ci_gate_xdist_allowlist.py": 121,
     "test_claim_provenance_r86.py": 1015,
-    "test_clean_venv_carrier.py": 199,
+    "test_clean_venv_carrier.py": 262,
     "test_component_sanitizer_shared_layer_lock.py": 293,
     "test_context_budget_guard.py": 12157,
     "test_context_window_parity.py": 281,
     "test_defect_id_reference_integrity.py": 281,
-    "test_dev_start.py": 6540,
+    "test_dev_start.py": 6649,
     "test_dev_start_ps1_lastexitcode.py": 521,
     "test_doc_env_prefix_platform_parity_r60.py": 331,
     "test_doc_loc_baseline_freshness_r60.py": 7123,
@@ -721,7 +721,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_macos_smoke_skip_honesty.py": 225,
     "test_maturity_criteria_r79.py": 431,
     "test_negative_existence_claims_r82.py": 370,
-    "test_nightly_interpreter_determinism.py": 312,
+    "test_nightly_interpreter_determinism.py": 384,
     "test_no_invalid_escape_sequences.py": 315,
     "test_ntfs_trailing_space_device_name.py": 698,
     "test_onboarding_parity_interlock.py": 233,
@@ -753,7 +753,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_windows_nightly_anchor_parity.py": 135,
     "test_windows_smoke_heartbeat_doc_sync.py": 197,
     "test_windowsapps_guard_bash_parity.py": 953,
-    "test_windowsapps_guard_cross_consistency.py": 2051,
+    "test_windowsapps_guard_cross_consistency.py": 2052,
     "test_workflow_permission_concurrency_lock.py": 1406,
     "test_workflow_schedule_sync.py": 309,
     "test_workflow_timeout_coverage.py": 158,
@@ -2014,6 +2014,22 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "DEF-200-306（clean_venv_carrier，新檔 test_clean_venv_carrier.py）的新增，以 Dev-Trim 兩棒"
      "對 tools/tests 多支鎖檔的史料散文搬遷抵銷（淨額為負，不受款(9)[未附刪除清單]約束；"
      "本表自身重釘漂移含於本列）。逐檔清單＝CrossPlatform_R145_Scan_Findings.md〈R151 沿用〉節。"),
+    ("R152", 99812, 100056, 244,  # round-label-ok：DEF-200-307～309 單一 .venv 四方審查殘餘回歸鎖
+     "[非淨減法輪] DEF-200-307（mac nightly／smoke 釘死根層 .venv 的 F 項斷言）／DEF-200-308"
+     "（雜散 venv 全樹遞迴掃描＋step_venv 擋下）／DEF-200-309（clean_venv_carrier 建立失敗必"
+     "清理）三筆缺陷的回歸鎖：test_nightly_interpreter_determinism.py +72／test_dev_start.py "
+     "+109／test_clean_venv_carrier.py +63，全額歸回歸鎖軌（見 _REGRESSION_LANE_LOG 同輪列）。"
+     "逐檔清單見 CrossPlatform_R145_Scan_Findings.md〈R152 沿用〉節。"),
+    ("R152", 100056, 100057, 1,  # round-label-ok：DEF-200-310 過期字面訂正，非回歸鎖
+     "[非淨減法輪] DEF-200-310：test_windowsapps_guard_cross_consistency.py 過期字面訂正"
+     "折行（+1），性質是散文訂正非回歸鎖，全額歸功能軌、不計入回歸鎖軌淨額（見 "
+     "_REGRESSION_LANE_LOG 同輪列的排除說明）。逐檔清單見 "
+     "CrossPlatform_R145_Scan_Findings.md〈R152 沿用〉節。"),
+    ("R152", 100057, 100088, 31,  # round-label-ok：本表自身重釘漂移（單一收斂列，含本列自身）
+     "[非淨減法輪][同輪追加] 收斂列：本表（test_adr_xplat001_c1c2_lock.py 自身）新增上兩列、"
+     "`_FROZEN_PREFIX_REWRITE_LEDGER` 接鏈列與 `_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND` 具名"
+     "展延 152→157 所造成的行數漂移（含本列自身收斂），全額歸回歸鎖軌（同既有體例）。"
+     "逐檔清單見 CrossPlatform_R145_Scan_Findings.md〈R152 沿用〉。"),
 )
 
 
@@ -2317,6 +2333,15 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "test_pre_push_dispatcher.py +35＋test_dev_start.py +47＋test_context_budget_guard.py "
      "+17＋本檔自身逐檔漂移收斂 +20。逐項見 docs/06_quality/"
      "CrossPlatform_R145_Scan_Findings.md〈R150 沿用〉。"),
+    ("R152", 275,
+     "DEF-200-307（mac nightly／smoke 釘死根層 .venv 的 F 項斷言）／DEF-200-308（雜散 venv "
+     "全樹遞迴掃描＋step_venv 擋下）／DEF-200-309（clean_venv_carrier 建立失敗必清理）回歸鎖"
+     "全額歸本軌（記帳誠實度分類）：test_nightly_interpreter_determinism.py +72＋"
+     "test_dev_start.py +109＋test_clean_venv_carrier.py +63＋本檔自身逐檔漂移收斂（含"
+     "`_FROZEN_PREFIX_REWRITE_LEDGER` 接鏈列與 `_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND` "
+     "具名展延造成的漂移）合計 31。DEF-200-310（test_windowsapps_guard_cross_consistency.py "
+     "過期字面訂正折行 +1）性質非回歸鎖、不計入本軌淨額——已在主表另立一列全額歸功能軌，"
+     "排除於本列淨額之外。見 docs/06_quality/CrossPlatform_R145_Scan_Findings.md〈R152 沿用〉。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -2416,7 +2441,10 @@ def _regression_lane_cap_basis() -> tuple[str, int]:
 # 🔴 R147 具名展延（鐵律七，不得靜默沿用）round-label-ok：DEF-200-274 第九輪收尾
 # 單人窗口（護欄層 guard-line 記帳＋pytest-xdist／自動多核心落地），非 root-tools
 # 重構持有面；真拆待獨立窗口，147 → 152（在 lookahead=5 內，已達上界）。
-_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND = 152
+# 🔴 R152 具名展延（鐵律七，不得靜默沿用）round-label-ok：單一 .venv 四方審查殘餘
+# 收尾單人窗口（DEF-200-307～310 護欄層記帳），非 root-tools 重構持有面；
+# 真拆待獨立窗口，152 → 157（在 lookahead=5 內，已達上界）。
+_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND = 157
 #: 清償旗標——真拆完成後改 True。刻意用布林而非重建舊尺計數器（ADR §9.3「舊尺已廢」）。
 _ROOT_TOOLS_OLD_SCALE_DEBT_RESOLVED = False
 #: A-2 後設鎖：到期輪只准落在「現查輪＋lookahead」內，推遠（如 9999）當場紅；shrink-only
@@ -2588,10 +2616,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 220
+_REPIN_LOG_FROZEN_PREFIX_LEN = 223
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "0618d2c4affcc23d51e8f0ab799168cfaa30d6409050347867c0200df5058612")
+    "7febcf5e23e0577a150aa321e019d9bd0eba8e9b0f93361f65bddbe87b3ba23d")
 
 
 def repin_log_history_digest(
@@ -2857,6 +2885,9 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # R151：DEF-200-301～306 單一 .venv 收斂收尾——新增主表列與本軌新列自身漂移， round-label-ok
     # 凍結前綴延伸涵蓋新增列本身，起點接 R150 終點 7c1770cb38ca。 round-label-ok
     ("R151", "7c1770cb38ca", "0618d2c4affc", "DEF-200-301"),
+    # R152：DEF-200-307～310 單一 .venv 四方審查殘餘收尾——新增主表列與本軌新列自身 round-label-ok
+    # 漂移，凍結前綴延伸涵蓋新增列本身，起點接 R151 終點 0618d2c4affc。 round-label-ok
+    ("R152", "0618d2c4affc", "7febcf5e23e0", "DEF-200-307"),
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

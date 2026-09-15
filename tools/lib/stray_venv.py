@@ -7,35 +7,63 @@
 只負責「開工當下有沒有雜散 venv／殘留」的**唯讀**偵測與可複製刪除指令產生，
 真正的刪除一律由使用者自行執行（fail loud 優於本模組代勞誤刪）。
 
+2026-09-15 四方審查 M-03：舊版只掃固定兩層（`AutoClaude/*`／`AISDLC_SDD/*`／
+`AISDLC_SDD/*/*`），漏收 `.claude/worktrees/x/.venv`、根層 `tools/.venv`、
+`AISDLC_SDD/<ver>/tools/.venv`、`AutoClaude/tests/fixtures/.venv` 四類巢狀更深
+的雜散 venv。改為對**全樹**（含 `.claude/worktrees`、`tools/`，任何巢狀深度）
+遞迴走訪＋就地剪枝：命中 `root/.venv` 本尊、`.venv-cache-*`（同一顆 venv 換
+平台身分，不算第二顆）與常見 VCS／套件快取目錄（`.git`／`node_modules`／
+`__pycache__`／`.pytest_cache`／`.ruff_cache`／`.hypothesis`／`.mypy_cache`）
+一律不下探；命中含 `pyvenv.cfg` 的目錄後同樣不再下探（venv 內部結構無需再
+掃）。效能量測依據：對本 repo 整棵樹（剪枝後約 6370 個目錄）實測 `os.walk`
+走訪耗時 0.18 秒（2026-09-15），全樹遞迴在此規模下可行——見
+`tools/tests/test_dev_start.py::TestStrayVenvScan` 的效能護欄測試。
+
 刻意不用任何單平台 API：`is_windows` 由呼叫端傳入，本模組零 `sys.platform`
-分支（鐵律三）。所有函式皆為純讀取（`Path.glob`／`Path.is_dir`／`Path.is_file`／
-`Path.iterdir`），不含 `os.replace`／`rename`／`shutil.move`／`unlink`／`rmtree`。
+分支（鐵律三）。所有函式皆為純讀取（`os.walk`／`Path.is_file`／`Path.iterdir`），
+不含 `os.replace`／`rename`／`shutil.move`／`unlink`／`rmtree`。
 """
 from __future__ import annotations
 
+import os
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 
-# 子專案雜散 venv 的掃描面：兩個子專案根目錄的直接子目錄，外加 AISDLC_SDD 底下
-# 逐版目錄（如 AISDLC_SDD_v0.01/）各自的直接子目錄——版本目錄本身可能各帶一顆。
-_SCAN_GLOBS: tuple[str, ...] = ("AutoClaude/*", "AISDLC_SDD/*", "AISDLC_SDD/*/*")
+# 遞迴走訪時就地剪枝、不下探的目錄名（VCS／套件管理器／測試快取產物，非子專案
+# 候選——與 `.venv-cache-*` 前綴判斷分開處理，因為那個判準是前綴而非全名）。
+_PRUNE_DIR_NAMES: frozenset[str] = frozenset({
+    ".git", "node_modules", "__pycache__", ".pytest_cache",
+    ".ruff_cache", ".hypothesis", ".mypy_cache",
+})
 
 
 def find_stray_venvs(root: Path) -> list[Path]:
-    """掃 `root` 下子專案目錄，回傳含 `pyvenv.cfg` 的目錄（以標記檔判定，不看
-    目錄名）。排除 `root/.venv` 本尊與 `root/.venv-cache-*`（同一顆 venv 換平台
-    時的暫存身分，不算第二顆）——兩者理論上不落在掃描面內，此處僅作明確自證。
+    """全樹（任何巢狀深度）遞迴掃描 `root`，回傳含 `pyvenv.cfg` 的目錄（以標記
+    檔判定，不看目錄名）。就地剪枝、不下探：`root/.venv` 本尊、任何名稱以
+    `.venv-cache-` 開頭的目錄（同一顆 venv 換平台時的暫存身分，不算第二顆）、
+    `_PRUNE_DIR_NAMES` 列舉的 VCS／快取目錄；命中 `pyvenv.cfg` 的目錄本身也
+    不再下探（其內部結構不是另一個獨立雜散案例）。
     """
-    root_venv = root / ".venv"
+    root = Path(root)
     found: set[Path] = set()
-    for pattern in _SCAN_GLOBS:
-        for cand in root.glob(pattern):
-            if cand == root_venv or cand.name.startswith(".venv-cache-"):
+    for dirpath, dirnames, _filenames in os.walk(root):
+        current = Path(dirpath)
+        keep: list[str] = []
+        for name in dirnames:
+            if current == root and name == ".venv":
+                continue  # root/.venv 本尊
+            if name.startswith(".venv-cache-"):
+                continue  # 同一顆 venv 換平台身分，不算第二顆
+            if name in _PRUNE_DIR_NAMES:
                 continue
-            if not cand.is_dir():
-                continue
-            if (cand / "pyvenv.cfg").is_file():
-                found.add(cand)
+            keep.append(name)
+        dirnames[:] = keep
+        if current == root:
+            continue  # root 本身不是候選目錄（只掃它底下的子目錄）
+        if (current / "pyvenv.cfg").is_file():
+            found.add(current)
+            dirnames[:] = []  # 命中即不下探
     return sorted(found)
 
 
@@ -52,12 +80,23 @@ def find_temp_cleanvenvs() -> list[Path]:
 
 
 def advisory_lines(root: Path, is_windows: bool) -> list[str]:
-    """每筆雜散 venv／殘留一行警告＋可直接複製的刪除指令。空清單回空。"""
+    """每筆雜散 venv／殘留一行訊息＋可直接複製的刪除指令；空清單回空。這是唯一的
+    格式化點（`enforce` 也走這裡），同一份措辭只住一個家。"""
     lines: list[str] = []
     for p in [*find_stray_venvs(root), *find_temp_cleanvenvs()]:
         cmd = f'Remove-Item -Recurse -Force "{p}"' if is_windows else f'rm -rf "{p}"'
         lines.append(
-            f"偵測到雜散 venv／殘留：{p}"
-            f"（單一 .venv 設計，見 ONBOARDING §2.1）— 建議刪除：{cmd}"
+            f"🔴 偵測到雜散 venv／殘留：{p} — 單一 .venv 設計"
+            f"（ONBOARDING §2.1）下必須刪除後重跑 dev_start：{cmd}"
         )
     return lines
+
+
+def enforce(root: Path, is_windows: bool, emit: Callable[[str], None]) -> bool:
+    """開工當下擋下雜散 venv／殘留（掌舵者 2026-09-15 裁決：擋下並給刪除指令，
+    不自動刪——fail loud 優於本模組代勞誤刪）。對每筆命中呼叫 `emit` 一行，並
+    回傳 `False`；乾淨時不呼叫 `emit`、回傳 `True`。"""
+    lines = advisory_lines(root, is_windows)
+    for line in lines:
+        emit(line)
+    return not lines

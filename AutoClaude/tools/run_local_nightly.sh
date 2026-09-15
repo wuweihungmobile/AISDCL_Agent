@@ -190,18 +190,19 @@ else
   echo "⚠️ logs 目錄建立失敗——RunId log 停用，輸出照舊直出 stdout（launchd log 兜底）：${ROOT}/AutoClaude/logs" >&2
 fi
 
-# python 解析：優先 monorepo .venv（存在即用），否則退回 PATH 上的 python/python3。
-if [ -x "$ROOT/.venv/bin/python" ]; then
-  PY="$ROOT/.venv/bin/python"
-else
-  PY="$(command -v python || command -v python3 || true)"
-fi
-if [ -z "$PY" ]; then
-  echo "❌ 找不到 python/python3 — 請先跑 tools/dev_start 建置 .venv（ONBOARDING.md §3）" >&2
+# python 解析：釘死根層 .venv（DEF-200-302，mac 側補齊）——不再退回 PATH 現場
+# 解析，缺席即 fail-loud。原 else 分支的 `command -v python || command -v
+# python3` 退路正是本輪要拔除的「沒人維護的第二套環境」（DEF-101-506 事故的
+# 病根：schtasks 排程與已啟用 venv 的終端機/agent 觸發各自解析到不同直譯器）。
+PY="$ROOT/.venv/bin/python"
+if [ ! -x "$PY" ]; then
+  echo "❌ 根層 .venv 直譯器不存在：${PY}（DEF-200-302：nightly 釘死根層 .venv，不再退回 PATH 現場解析）— 修法：在 repo 根執行 tools/bootstrap.sh 或 source tools/dev_start.sh 建立 .venv" >&2
   exit 1
 fi
 # DEF-101-506：本檔的直譯器**已**釘成絕對路徑（不靠 PATH 現場解析，故無 Windows
-# 側「誰啟動就用誰的 python」問題），但先前同樣沒把它印進 log——事後無從指認。
+# 側「誰啟動就用誰的 python」問題）。DEF-200-302 訂正：原本只有主路徑釘死，缺席
+# 時仍退回上述 PATH 現場解析，與「已釘死」的自我宣稱矛盾；本輪拔除該退路，改為
+# 缺席即 fail-loud（對稱 run_local_nightly.ps1／windows_smoke_local.ps1 既有設計）。
 # 補印解析結果，與 .ps1 側取證對稱（紀律 #14 延伸）。
 printf 'python 直譯器：%s [v%s]\n' "$PY" "$("$PY" -c 'import sys; print(sys.version.split()[0])' 2>/dev/null)"
 
