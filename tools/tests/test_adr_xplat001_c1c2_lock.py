@@ -682,7 +682,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 8233,
+    "test_adr_xplat001_c1c2_lock.py": 8239,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 3726,
@@ -711,7 +711,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_doc_loc_baseline_freshness_r60.py": 7123,
     "test_extras_quoting_zsh_safety.py": 365,
     "test_failure_log_rotation.py": 80,
-    "test_find_git_bash_parity.py": 1306,
+    "test_find_git_bash_parity.py": 1310,
     "test_gha_action_versions.py": 681,
     "test_git_hooks_install_common.py": 393,
     "test_guard_line_taxonomy_r99.py": 148,
@@ -2030,6 +2030,11 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "`_FROZEN_PREFIX_REWRITE_LEDGER` 接鏈列與 `_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND` 具名"
      "展延 152→157 所造成的行數漂移（含本列自身收斂），全額歸回歸鎖軌（同既有體例）。"
      "逐檔清單見 CrossPlatform_R145_Scan_Findings.md〈R152 沿用〉。"),
+    ("R152", 100088, 100098, 10,  # round-label-ok：DEF-200-312 首晚 nightly 真跑抓到的測試修正
+     "[非淨減法輪][同輪追加] DEF-200-312（DEF-200-302 釘死根層 .venv 後首晚 nightly 真跑：schtasks"
+     " 最高權限下 test_find_git_bash_parity.py 的 _real_shim symlink venv launcher ⇒ rc=106，"
+     "改 Windows 一律 shebang 包裝）的回歸鎖修正，含本列自身收斂，全額歸回歸鎖軌。"
+     "逐檔清單見 CrossPlatform_R145_Scan_Findings.md〈R152 沿用〉。"),
 )
 
 
@@ -2333,13 +2338,14 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "test_pre_push_dispatcher.py +35＋test_dev_start.py +47＋test_context_budget_guard.py "
      "+17＋本檔自身逐檔漂移收斂 +20。逐項見 docs/06_quality/"
      "CrossPlatform_R145_Scan_Findings.md〈R150 沿用〉。"),
-    ("R152", 275,
+    ("R152", 285,
      "DEF-200-307（mac nightly／smoke 釘死根層 .venv 的 F 項斷言）／DEF-200-308（雜散 venv "
      "全樹遞迴掃描＋step_venv 擋下）／DEF-200-309（clean_venv_carrier 建立失敗必清理）回歸鎖"
      "全額歸本軌（記帳誠實度分類）：test_nightly_interpreter_determinism.py +72＋"
-     "test_dev_start.py +109＋test_clean_venv_carrier.py +63＋本檔自身逐檔漂移收斂（含"
-     "`_FROZEN_PREFIX_REWRITE_LEDGER` 接鏈列與 `_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND` "
-     "具名展延造成的漂移）合計 31。DEF-200-310（test_windowsapps_guard_cross_consistency.py "
+     "test_dev_start.py +109＋test_clean_venv_carrier.py +63＋DEF-200-312（首晚 nightly 真跑："
+     "_real_shim 在 Windows 一律 shebang 包裝）test_find_git_bash_parity.py +4＋本檔自身逐檔"
+     "漂移收斂（含 `_FROZEN_PREFIX_REWRITE_LEDGER` 接鏈列、`_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND` "
+     "具名展延與同輪追加列造成的漂移）合計 37。DEF-200-310（test_windowsapps_guard_cross_consistency.py "
      "過期字面訂正折行 +1）性質非回歸鎖、不計入本軌淨額——已在主表另立一列全額歸功能軌，"
      "排除於本列淨額之外。見 docs/06_quality/CrossPlatform_R145_Scan_Findings.md〈R152 沿用〉。"),
 )
@@ -2616,10 +2622,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 223
+_REPIN_LOG_FROZEN_PREFIX_LEN = 224
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "7febcf5e23e0577a150aa321e019d9bd0eba8e9b0f93361f65bddbe87b3ba23d")
+    "8b034cee4c63e922cd465f56cbbeab7a9cca6c65c16a6f62738e6340f445ca82")
 
 
 def repin_log_history_digest(
@@ -2887,7 +2893,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R151", "7c1770cb38ca", "0618d2c4affc", "DEF-200-301"),
     # R152：DEF-200-307～310 單一 .venv 四方審查殘餘收尾——新增主表列與本軌新列自身 round-label-ok
     # 漂移，凍結前綴延伸涵蓋新增列本身，起點接 R151 終點 0618d2c4affc。 round-label-ok
-    ("R152", "0618d2c4affc", "7febcf5e23e0", "DEF-200-307"),
+    ("R152", "0618d2c4affc", "8b034cee4c63", "DEF-200-307"),
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

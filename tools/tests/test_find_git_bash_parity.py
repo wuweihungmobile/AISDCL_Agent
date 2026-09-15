@@ -1261,10 +1261,14 @@ class TestIntegrationGateShellDelegation(unittest.TestCase):
     def _real_shim(self, directory: Path, name: str) -> None:
         directory.mkdir(parents=True, exist_ok=True)
         link = directory / f"{name}{self._EXE}"
+        wrapper = f'#!/bin/sh\nexec "{Path(sys.executable).as_posix()}" "$@"\n'.encode()
+        if os.name == "nt":  # DEF-200-312：venv launcher 經 symlink 執行以連結所在目錄找 pyvenv.cfg
+            link.write_bytes(wrapper)  # ⇒ rc=106；schtasks 最高權限有 symlink 特權才踩到，故一律包裝
+            return
         try:
             link.symlink_to(Path(sys.executable))
-        except OSError:  # Win: symlink 無特權(1314)、venv stub 複製→rc=106 ⇒ shebang 包裝 exec
-            link.write_bytes(f'#!/bin/sh\nexec "{Path(sys.executable).as_posix()}" "$@"\n'.encode())
+        except OSError:  # POSIX 罕見無法 symlink ⇒ 同款 shebang 包裝 exec
+            link.write_bytes(wrapper)
 
     def _run_with_path(self, path_entries: list[str]) -> tuple[int, str, str]:
         env = dict(os.environ)
