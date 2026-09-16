@@ -41,6 +41,7 @@
 | DEF-200-186 | GitHub Actions 帳務 | 2026-08-21 | 拆自 `DEF-101-866` 條件 (b)：`gh workflow run windows-compat-ci.yml --ref main` 確認 nightly-full job 真的有 `steps`，端到端全綠 | 2026-08-27 |
 | DEF-200-174 | GitHub Actions 帳務 | 2026-08-21 | 帳號所有者查 GitHub Billing 頁面確認 spend limit 已調高或 runner 計費已恢復，`gh api repos/.../actions/runs` 觀測對應 job 的 `runner_id≠0` | 2026-08-27 |
 | DEF-200-075 | 其他-macOS實機（darwin執行面量測值，Windows結構上量不到也修不了） | 2026-08-27 | 回 mac 真機後第一動作＝重量 AutoClaude 樹 skip census（量測入口見主帳本該列配方）；macos-compat-ci 長期紅不可依賴 | 2026-08-27 |
+| DEF-200-313 | Windows 實機 | 2026-09-15 | 回 Windows 真機、人在互動終端機：`python tools/run_root_unittests.py` 跑到一半按 Ctrl-C，再以 `Get-CimInstance Win32_Process` 過濾 CommandLine 含 `run_root_unittests` 或 `unittest` 者須為空；結果寫進 `CrossPlatform_DEF200274_Parallel_Tests_Evidence.md`〈第十一輪〉③ 後移出本表 | 2026-09-15 |
 
 ## 複查記錄
 

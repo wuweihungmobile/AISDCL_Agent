@@ -240,6 +240,14 @@ def _materialise_carrier(hook: dict, project_root: str) -> None:
     **合成**而非複製，理由見 `_pyvenv_cfg_text()`）。只材料化 `kind=="venv"` 的
     條目：`kind=="path"`（裸執行檔名，靠 PATH 解析）`carrier_available()` 本就無條件
     視為 viable，不需要、也不該材料化任何檔案。
+
+    🔴 2026-09-15：POSIX 側 `argv[0]`（`command`）不再是啟動器本身，改與 Windows 側
+    同構——`command` 是根層 `.venv/bin/python`、啟動器搬到 `args[0]`（`argv[1]`）。
+    材料化因此也要造兩個檔：直譯器本體（`os.symlink` 指回目前正在跑的直譯器；
+    權限不足時退回 `shutil.copy` ＋ `chmod 0o755`）＋緊鄰的啟動器（同 Windows 側的
+    `argv[1]` 材料化手法，直接複製 `_LAUNCHER`）。`os.name=="nt"` 時整條不造：留給
+    `carrier_available()` 自己判死（該路徑在真實 Windows 上本就不存在，材料化它會
+    製造一個生產環境不會有的假 viable）。
     """
     wiring = lint._hook_wiring()
     argv = wiring.hook_entry_argv(hook)
@@ -249,11 +257,21 @@ def _materialise_carrier(hook: dict, project_root: str) -> None:
         if os.name == "nt":
             return  # 另一半：留給 carrier_available() 自己判死，不材料化
         exe = wiring.expand_tokens([argv[0]], project_root)[0]
-        os.makedirs(os.path.dirname(exe), exist_ok=True)
-        # copyfile 不帶權限位 ⇒ 複本沒有 exec bit，spawn 會拿到 EACCES 而不是我們要測的
-        # 「目標缺檔」路徑。用 copy（帶模式）並顯式補上 exec bit，兩層都不依賴來源的模式。
-        shutil.copy(_LAUNCHER, exe)
-        os.chmod(exe, 0o755)
+        if not os.path.exists(exe):
+            os.makedirs(os.path.dirname(exe), exist_ok=True)
+            real_interp = os.path.realpath(sys.executable)
+            try:
+                os.symlink(real_interp, exe)
+            except OSError:
+                # copy 不帶權限位 ⇒ 複本沒有 exec bit，spawn 會拿到 EACCES 而不是我們
+                # 要測的「目標缺檔」路徑，顯式補上 exec bit。
+                shutil.copy(real_interp, exe)
+                os.chmod(exe, 0o755)
+        if len(argv) > 1:
+            launcher = wiring.expand_tokens([argv[1]], project_root)[0]
+            if not os.path.exists(launcher):
+                os.makedirs(os.path.dirname(launcher), exist_ok=True)
+                shutil.copy(_LAUNCHER, launcher)
         return
     if os.name == "nt" and wiring.win_carrier_kind(argv[0]) == "venv":
         # 多個條目常共用同一個相對路徑（同一個 fake project_root）⇒ 冪等：已經材料化過

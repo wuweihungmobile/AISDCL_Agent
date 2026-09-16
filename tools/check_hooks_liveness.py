@@ -166,7 +166,8 @@ def check_claude_hook_carriers(repo_root: Path) -> bool:
 
     WHY 這半非有不可：R80 把根 `.claude/settings.json` 的 hook 條目轉成 **exec form**
     （不經 `bash.exe` ⇒ 不再每觸發一次就閃一個 console 視窗），而 exec form 的
-    `command` 是一個**執行檔路徑**：`${CLAUDE_PROJECT_DIR}/.venv/Scripts/pythonw.exe`。
+    `command` 是一個**執行檔路徑**：`${CLAUDE_PROJECT_DIR}/.venv/Scripts/pythonw.exe`
+    （POSIX 側＝`.venv/bin/python`，2026-09-15 起與 Windows 側同構釘死根層 venv）。
     那個檔不在時（沒跑過 bootstrap／venv 被砍掉／被重建到別處），CC 只記一行 ERROR
     就放行——**六支守衛全部靜默失效，而螢幕上的表徵就是「終於不閃窗了」**。
 

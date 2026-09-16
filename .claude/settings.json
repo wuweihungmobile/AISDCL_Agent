@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
-  "description": "monorepo 整合層 — 守衛式 SDD hook 橋接（AutoSDD_improving）。以 SDD_ACTIVE_VERSION 為守衛路由到 AISDLC_SDD/AISDLC_SDD_v0.0X 的實體 hooks；未設則 no-op，純 AutoClaude session 零污染。詳見 .claude/hooks/sdd_hook_router.py。🔴 R80：hook 條目已全面由 shell form 轉成 **exec form**（帶 `args`），10 條 → 20 條。病：Windows 上 shell form 是用 Git Bash 的 `bash.exe -c` 起的，而 `bash.exe` 是 console 子系統程式 ⇒ 每觸發一次 hook 就閃一個 console 視窗（實測一個量測視窗內 39 支 bash.exe、22 支自帶 conhost）。exec form 不經 shell、直接 spawn，`command` 指向 GUI 子系統的 pythonw.exe 即零視窗（實測 conhost 0）。每個邏輯 hook 兩條＝「Windows 載具 + POSIX 載具」，**各平台恰好一條成立、另一條 spawn 失敗**（Windows 上 .py 直接 spawn 回 EFTYPE、POSIX 上 .venv/Scripts/pythonw.exe 回 ENOENT），而 CC 對 spawn 失敗是 **fail-open**（只記一行 ERROR、工具照跑）⇒ 兩條**不會**雙跑（production 實測：PreToolUse 對 Bash 命中兩個 block、EFTYPE 2 次，而 `Hook denied tool use for Bash` 只有 1 次）。這也是本形態最大的風險：載具解析不到時六支守衛會**全部靜默失效，而表徵與『修好了』完全相同**，故驗收必須正負兩面一起看（見根 CLAUDE.md〈鐵律一之二〉）。舊 shim 的十份複本已收進 `.claude/hooks/_hook_launcher.py` 一個家（exec form 的 command 塞不進 -c 程式碼）；錨定與 fail-open 語意逐項不變：啟動器自行讀 CLAUDE_PROJECT_DIR（CC 注入、不經 shell 展開；實測 command 與 args 元素裡的 ${CLAUDE_PROJECT_DIR} 都會被展開），未設時回退 cwd；目標腳本缺檔＝fail-open exit 0——修復「cwd≠專案根時 python 缺檔 exit 2 誤觸 PreToolUse deny、全工具硬鎖死」P0（四方複審第四輪）。解析這份檔的唯一真相源＝`tools/lib/hook_wiring.py`（**只讀 command 找腳本名的解析器在 exec form 下會全部掃出空集合而恆綠**，repo 內原有 8 支已全部改為問它）。env.PYTHONUTF8=1 為 zh-TW Windows（cp950）防禦縱深：強制 hook 子行程 stdin/stdout/stderr 一律 UTF-8，跨平台無副作用。🔴 R92（掌舵者裁決：compaction 要機械執行，不靠模型自律）：頂層 autoCompactEnabled: true（官方預設雖 true，顯式釘住讓 project 層蓋過 user 層誤關）＋ env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=90（官方 env-vars 文件逐字：percentage (1-100) of the auto-compact window at which auto-compaction triggers…can't raise the threshold ⇒ 只能提早、絕不撞頂；百分比制在 200K 與 1M 變體上都對）。刻意**不**落 autoCompactWindow token 數：①本檔隨 checkout 跨機器跨模型，任何寫死 token 數對其中一種 window 變體必錯（同本檔 R78 拒釘 AUTOSDD_CONTEXT_WINDOW 的理由）；②context_budget_guard.py 把該鍵讀成釘死分母（SOURCE_PINNED_CC_SETTING），釘大值會讓守衛在 200K session 的真硬線結構性靜默；③tools/tests/test_context_budget_guard.py::SettingsChainTest::test_the_repo_settings_carries_neither_window_key 機械禁止。取捨全文＝docs/04_planning/ADR/ADR-XPLAT-008-mechanical-autocompact.md。",
+  "description": "monorepo 整合層 — 守衛式 SDD hook 橋接（AutoSDD_improving）。以 SDD_ACTIVE_VERSION 為守衛路由到 AISDLC_SDD/AISDLC_SDD_v0.0X 的實體 hooks；未設則 no-op，純 AutoClaude session 零污染。詳見 .claude/hooks/sdd_hook_router.py。🔴 R80：hook 條目已全面由 shell form 轉成 **exec form**（帶 `args`），10 條 → 20 條。病：Windows 上 shell form 是用 Git Bash 的 `bash.exe -c` 起的，而 `bash.exe` 是 console 子系統程式 ⇒ 每觸發一次 hook 就閃一個 console 視窗（實測一個量測視窗內 39 支 bash.exe、22 支自帶 conhost）。exec form 不經 shell、直接 spawn，`command` 指向 GUI 子系統的 pythonw.exe 即零視窗（實測 conhost 0）。每個邏輯 hook 兩條＝「Windows 載具 + POSIX 載具」，**各平台恰好一條成立、另一條 spawn 失敗**（Windows 上 .venv/bin/python 不存在回 ENOENT、POSIX 上 .venv/Scripts/pythonw.exe 回 ENOENT；2026-09-15 起 POSIX 載具由『直接 exec 帶 shebang 的啟動器＝PATH python3』改釘根層 .venv/bin/python，掌舵者裁決，單一 .venv），而 CC 對 spawn 失敗是 **fail-open**（只記一行 ERROR、工具照跑）⇒ 兩條**不會**雙跑（production 實測：PreToolUse 對 Bash 命中兩個 block、EFTYPE 2 次，而 `Hook denied tool use for Bash` 只有 1 次）。這也是本形態最大的風險：載具解析不到時六支守衛會**全部靜默失效，而表徵與『修好了』完全相同**，故驗收必須正負兩面一起看（見根 CLAUDE.md〈鐵律一之二〉）。舊 shim 的十份複本已收進 `.claude/hooks/_hook_launcher.py` 一個家（exec form 的 command 塞不進 -c 程式碼）；錨定與 fail-open 語意逐項不變：啟動器自行讀 CLAUDE_PROJECT_DIR（CC 注入、不經 shell 展開；實測 command 與 args 元素裡的 ${CLAUDE_PROJECT_DIR} 都會被展開），未設時回退 cwd；目標腳本缺檔＝fail-open exit 0——修復「cwd≠專案根時 python 缺檔 exit 2 誤觸 PreToolUse deny、全工具硬鎖死」P0（四方複審第四輪）。解析這份檔的唯一真相源＝`tools/lib/hook_wiring.py`（**只讀 command 找腳本名的解析器在 exec form 下會全部掃出空集合而恆綠**，repo 內原有 8 支已全部改為問它）。env.PYTHONUTF8=1 為 zh-TW Windows（cp950）防禦縱深：強制 hook 子行程 stdin/stdout/stderr 一律 UTF-8，跨平台無副作用。🔴 R92（掌舵者裁決：compaction 要機械執行，不靠模型自律）：頂層 autoCompactEnabled: true（官方預設雖 true，顯式釘住讓 project 層蓋過 user 層誤關）＋ env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=90（官方 env-vars 文件逐字：percentage (1-100) of the auto-compact window at which auto-compaction triggers…can't raise the threshold ⇒ 只能提早、絕不撞頂；百分比制在 200K 與 1M 變體上都對）。刻意**不**落 autoCompactWindow token 數：①本檔隨 checkout 跨機器跨模型，任何寫死 token 數對其中一種 window 變體必錯（同本檔 R78 拒釘 AUTOSDD_CONTEXT_WINDOW 的理由）；②context_budget_guard.py 把該鍵讀成釘死分母（SOURCE_PINNED_CC_SETTING），釘大值會讓守衛在 200K session 的真硬線結構性靜默；③tools/tests/test_context_budget_guard.py::SettingsChainTest::test_the_repo_settings_carries_neither_window_key 機械禁止。取捨全文＝docs/04_planning/ADR/ADR-XPLAT-008-mechanical-autocompact.md。",
   "autoCompactEnabled": true,
   "outputStyle": "ELI5",
   "env": {
@@ -24,8 +24,9 @@
           },
           {
             "type": "command",
-            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py",
+            "command": "${CLAUDE_PROJECT_DIR}/.venv/bin/python",
             "args": [
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py",
               ".claude/hooks/sdd_hook_router.py",
               "session_start"
             ],
@@ -34,7 +35,7 @@
         ]
       },
       {
-        "_comment": "R79 續航補洞包：把『預防性哨兵』接上電（掌舵者第 3 點『適當利用 AutoClaude 機制進行排程再喚醒繼續處理，這個請實際徹底做到』的機械化）。立案理由是本輪第二次撞同一個坑：續航協定（tools/session_resume_planner.py --arm-endurance）做完了，但它是**手動武裝**的，而額度耗盡那一刻是 16 秒內全部 subagent 瞬間掛掉——沒有人會去跑那行指令。更根本的是**額度耗盡在 hook 體系裡沒有任何觸發點**：它是 API 層失敗、不是工具呼叫失敗，PreToolUse／PostToolUse 都不會被叫到 ⇒ 只能預防性武裝，而 SessionStart 是『還能跑指令的最早時刻』。這與 R77『PKG-GUARD 機制蓋好沒接電』是同一個病的第三次復發，故這一次把電接上、不靠人記得。行為契約：只在 Windows 動作（schtasks 只在 Windows 成立，鐵律三）；環境變數 AUTOSDD_SENTINEL_OFF 有設一律 no-op（給人的逃生口，與 context 阻斷的 AUTOSDD_CONTEXT_GUARD_OFF 刻意分開——兩者關掉的是不同的東西）；**恆 exit 0、不出聲、不量水位**；註冊動作走 detached 子行程故不阻塞 session 開場（同步外呼 powershell.exe 註冊 schtasks 實測數秒，每次開 session 都卡是不可接受的代價）。取證沒有因為非同步而消失：--arm-sentinel 自己有 NextRunTime 憑證閘（拿不到即 rc=1、絕不宣稱已排程），成敗都寫進 %TEMP%\\autosdd_resume_log_*.jsonl 與 %TEMP%\\autosdd_sentinel_boot_*.log。無 matcher＝SessionStart 本來就沒有工具面。timeout 取 10：本模式只做一次 Popen 就返回。任何非預期例外 fail-open（見本檔 description 記載的 P0：hook 誤觸 deny 會把所有工具硬鎖死）。回歸鎖 tools/tests/test_context_budget_guard.py::SentinelWiringTest；設計理由見 docs/04_planning/ADR/ADR-XPLAT-004-token-endurance-protocol.md §2.6。",
+        "_comment": "R79 續航補洞包：把『預防性哨兵』接上電（掌舵者第 3 點『適當利用 AutoClaude 機制進行排程再喚醒繼續處理，這個請實際徹底做到』的機械化）。立案理由是本輪第二次撞同一個坑：續航協定（tools/session_resume_planner.py --arm-endurance）做完了，但它是**手動武裝**的，而額度耗盡那一刻是 16 秒內全部 subagent 瞬間掛掉——沒有人會去跑那行指令。更根本的是**額度耗盡在 hook 體系裡沒有任何觸發點**：它是 API 層失敗、不是工具呼叫失敗，PreToolUse／PostToolUse 都不會被叫到 ⇒ 只能預防性武裝，而 SessionStart 是『還能跑指令的最早時刻』（R82／HELM-02 起本條目在 SessionStart 只清上一輪的武裝閂鎖＋回收孤兒哨兵；真正武裝延後到 PostToolUse 的 arm_when_earned()，累積夠工作量才 detached 起 planner --arm-sentinel）。這與 R77『PKG-GUARD 機制蓋好沒接電』是同一個病的第三次復發，故這一次把電接上、不靠人記得。行為契約：只在有排程載具的平台動作（Windows schtasks／macOS launchd，由 tools/lib/schedule_backend.py 選擇；Linux 等無載具即 no-op——R79 原文寫『只在 Windows』，R83 mac 續航落地後已不成立，2026-09-15 訂正）；環境變數 AUTOSDD_SENTINEL_OFF 有設一律 no-op（給人的逃生口，與 context 阻斷的 AUTOSDD_CONTEXT_GUARD_OFF 刻意分開——兩者關掉的是不同的東西）；**恆 exit 0、不出聲、不量水位**；註冊動作走 detached 子行程故不阻塞 session 開場（同步外呼 powershell.exe 註冊 schtasks 實測數秒，每次開 session 都卡是不可接受的代價）。取證沒有因為非同步而消失：--arm-sentinel 自己有 NextRunTime 憑證閘（拿不到即 rc=1、絕不宣稱已排程），成敗都寫進 %TEMP%\\autosdd_resume_log_*.jsonl 與 %TEMP%\\autosdd_sentinel_boot_*.log。無 matcher＝SessionStart 本來就沒有工具面。timeout 取 10：本模式只做一次 Popen 就返回。任何非預期例外 fail-open（見本檔 description 記載的 P0：hook 誤觸 deny 會把所有工具硬鎖死）。回歸鎖 tools/tests/test_context_budget_guard.py::SentinelWiringTest；設計理由見 docs/04_planning/ADR/ADR-XPLAT-004-token-endurance-protocol.md §2.6。",
         "hooks": [
           {
             "type": "command",
@@ -47,8 +48,9 @@
           },
           {
             "type": "command",
-            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py",
+            "command": "${CLAUDE_PROJECT_DIR}/.venv/bin/python",
             "args": [
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py",
               ".claude/hooks/context_budget_guard.py"
             ],
             "timeout": 10
@@ -73,8 +75,9 @@
           },
           {
             "type": "command",
-            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py",
+            "command": "${CLAUDE_PROJECT_DIR}/.venv/bin/python",
             "args": [
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py",
               ".claude/hooks/sdd_hook_router.py",
               "context_ledger_pre"
             ],
@@ -97,8 +100,9 @@
           },
           {
             "type": "command",
-            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py",
+            "command": "${CLAUDE_PROJECT_DIR}/.venv/bin/python",
             "args": [
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py",
               ".claude/hooks/lint_powershell_command.py"
             ],
             "timeout": 10
@@ -120,8 +124,9 @@
           },
           {
             "type": "command",
-            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py",
+            "command": "${CLAUDE_PROJECT_DIR}/.venv/bin/python",
             "args": [
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py",
               ".claude/hooks/block_bash_on_windows.py"
             ],
             "timeout": 10
@@ -143,8 +148,9 @@
           },
           {
             "type": "command",
-            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py",
+            "command": "${CLAUDE_PROJECT_DIR}/.venv/bin/python",
             "args": [
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py",
               ".claude/hooks/block_destructive_git.py"
             ],
             "timeout": 10
@@ -166,8 +172,9 @@
           },
           {
             "type": "command",
-            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py",
+            "command": "${CLAUDE_PROJECT_DIR}/.venv/bin/python",
             "args": [
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py",
               ".claude/hooks/context_budget_guard.py"
             ],
             "timeout": 10
@@ -191,8 +198,9 @@
           },
           {
             "type": "command",
-            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py",
+            "command": "${CLAUDE_PROJECT_DIR}/.venv/bin/python",
             "args": [
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py",
               ".claude/hooks/sdd_hook_router.py",
               "context_ledger_post"
             ],
@@ -215,8 +223,9 @@
           },
           {
             "type": "command",
-            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py",
+            "command": "${CLAUDE_PROJECT_DIR}/.venv/bin/python",
             "args": [
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py",
               "AutoClaude/tools/hooks/check_ps1_encoding.py"
             ],
             "timeout": 10
@@ -232,8 +241,9 @@
           },
           {
             "type": "command",
-            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py",
+            "command": "${CLAUDE_PROJECT_DIR}/.venv/bin/python",
             "args": [
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py",
               "AutoClaude/tools/hooks/check_sh_eol.py"
             ],
             "timeout": 10
@@ -255,8 +265,9 @@
           },
           {
             "type": "command",
-            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py",
+            "command": "${CLAUDE_PROJECT_DIR}/.venv/bin/python",
             "args": [
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py",
               ".claude/hooks/context_budget_guard.py"
             ],
             "timeout": 30
@@ -279,8 +290,9 @@
           },
           {
             "type": "command",
-            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py",
+            "command": "${CLAUDE_PROJECT_DIR}/.venv/bin/python",
             "args": [
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py",
               ".claude/hooks/check_claim_provenance.py"
             ],
             "timeout": 15

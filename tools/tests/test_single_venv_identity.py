@@ -54,21 +54,21 @@ class TestSingleVenvIdentitySynthetic(unittest.TestCase):
 
     def test_zero_level_parent_prefix_is_red(self) -> None:
         """(a) 0 層 `../`（DEF-200-294 事故當時的字面）在 AutoClaude 深度下判紅——
-        展開後落在 `AutoClaude/.venv/...`，不是 repo 唯一那一顆根層 `.venv`。
+        展開後不是 repo 唯一那一顆根層 `.venv`（併測 POSIX 對照，同構同一顆 venv）。
         """
-        settings = _synthetic_settings("${CLAUDE_PROJECT_DIR}/.venv/Scripts/pythonw.exe")
-        problems = _identity().single_venv_identity_problems(
-            settings, project_dir="/repo/AutoClaude", repo_root="/repo")
-        self.assertTrue(problems, "0 層 ../ 在子專案深度下應判紅，卻回空")
+        for carrier in ("${CLAUDE_PROJECT_DIR}/.venv/Scripts/pythonw.exe",
+                        "${CLAUDE_PROJECT_DIR}/.venv/bin/python"):
+            problems = _identity().single_venv_identity_problems(
+                _synthetic_settings(carrier), "/repo/AutoClaude", "/repo")
+            self.assertTrue(problems, f"0 層 ../ 在子專案深度下應判紅，卻回空：{carrier}")
 
     def test_one_level_parent_prefix_is_green(self) -> None:
-        """(b) 1 層 `../`（AutoClaude 只比 monorepo 根深一級，DEF-200-301 修法）
-        展開後落在根層 `.venv` ⇒ 判準應放行。
-        """
-        settings = _synthetic_settings("${CLAUDE_PROJECT_DIR}/../.venv/Scripts/pythonw.exe")
-        problems = _identity().single_venv_identity_problems(
-            settings, project_dir="/repo/AutoClaude", repo_root="/repo")
-        self.assertEqual(problems, [], problems)
+        """(b) 1 層 `../` 展開後落在根層 `.venv` ⇒ 應放行（併測 POSIX 對照）。"""
+        for carrier in ("${CLAUDE_PROJECT_DIR}/../.venv/Scripts/pythonw.exe",
+                        "${CLAUDE_PROJECT_DIR}/../.venv/bin/python"):
+            problems = _identity().single_venv_identity_problems(
+                _synthetic_settings(carrier), "/repo/AutoClaude", "/repo")
+            self.assertEqual(problems, [], (carrier, problems))
 
     def test_path_carrier_is_out_of_scope(self) -> None:
         """(c) PATH 版載具（`pythonw.exe` 字面）的實況取決於 session 的 PATH，

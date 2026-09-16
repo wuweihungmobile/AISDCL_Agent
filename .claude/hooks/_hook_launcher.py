@@ -32,11 +32,14 @@ exit 2 不被吞掉）。**改這支檔之前先讀那組測試**：它是全部
 
 🔴 兩個平台各有一條會失敗，而失敗是 **fail-open**（只記一行 ERROR、工具照跑）：
 Windows 條目在 POSIX 是 ENOENT（`.venv/Scripts/pythonw.exe` 不存在）、
-POSIX 條目在 Windows 是 EFTYPE（`.py` 不能直接 spawn）。**這代表「hook 全部靜默
-消失」與「修好了」的螢幕表徵一模一樣**，所以本檔的存在同時要求兩道現查：
+POSIX 條目在 Windows 是 ENOENT（`.venv/bin/python` 不存在；2026-09-15 起 POSIX
+載具釘死根層 venv 的直譯器，與 Windows 側同構，不再是「直接 exec 帶 shebang 的
+啟動器」）。**這代表「hook 全部靜默消失」與「修好了」的螢幕表徵一模一樣**，
+所以本檔的存在同時要求兩道現查：
   · 宣告與實況綁定：`tools/tests/test_check_hooks_liveness.py` 的載具存在性判準
   · 一行現查（見根 CLAUDE.md〈Windows 側單一載具原則〉）：
-    `Test-Path (Join-Path $env:CLAUDE_PROJECT_DIR '.venv\\Scripts\\pythonw.exe')`
+    Windows：`Test-Path (Join-Path $env:CLAUDE_PROJECT_DIR '.venv\\Scripts\\pythonw.exe')`
+    POSIX：`test -x "$CLAUDE_PROJECT_DIR/.venv/bin/python"`
 """
 from __future__ import annotations
 

@@ -70,13 +70,17 @@ monorepo 根目錄（`AISDCL_Agent/`，各機器 checkout 路徑不同）＝**�
 
 ### hook 載具（鐵律一之二：exec form）
 
-- 根層 hook 條目一律 **exec form**（帶 `args`，Windows 載具指向 GUI 子系統 `pythonw.exe`）——shell form 在 Windows 每觸發一次就閃一個 console 視窗。
-- 🔴 **不對稱風險**：exec form 載具解析不到時 Claude Code **fail-open**（只記 ERROR、工具照跑）⇒ 全部守衛靜默失效，表徵與「修好了」完全相同。**「不閃窗了」永遠不算驗收通過**，正負兩面一起看：
+- 根層 hook 條目一律 **exec form**（帶 `args`；每支 hook 成對：Windows 載具＝根層 `.venv\Scripts\pythonw.exe`（GUI 子系統，零視窗），POSIX 載具＝根層 `.venv/bin/python`；`args[0]` 皆為同一支啟動器 `_hook_launcher`，住 `.claude/hooks/`）——shell form 在 Windows 每觸發一次就閃一個 console 視窗。2026-09-15 掌舵者裁決前 POSIX 條目是直接 exec 帶 shebang 的啟動器（直譯器＝PATH 上的 `python3`），已改釘根層 .venv：兩平台 hook 直譯器自此只有一個來源，代價是首次 clone 到 bootstrap 建好 `.venv` 前兩平台 hook 皆 fail-open（此前只有 Windows 如此）。
+- 🔴 **不對稱風險**：exec form 載具解析不到時 Claude Code **fail-open**（只記 ERROR、工具照跑）⇒ 全部守衛靜默失效，表徵與「修好了」完全相同。**「不閃窗了」永遠不算驗收通過**，正負兩面一起看（平台各一條，不要照抄另一邊）：
 
 ```powershell
 Test-Path (Join-Path $env:CLAUDE_PROJECT_DIR '.venv\Scripts\pythonw.exe')   # 載具在不在，必須 True
 claude -p --model haiku --debug hooks --debug-file h.log "ok"
 Select-String -Path h.log -Pattern 'Hook SessionStart.*success'             # 正面現查：有 success 才算活著
+```
+```bash
+test -x "$CLAUDE_PROJECT_DIR/.venv/bin/python" && echo carrier-ok            # mac：載具在不在
+claude -p --model haiku --debug hooks --debug-file h.log "ok"; grep 'Hook SessionStart.*success' h.log
 ```
 
 - 佈線解析唯一真相源＝`tools/lib/hook_wiring.py`（`SHELL_FORM_CENSUS` 登記「哪一份 settings 還剩幾條沒轉」，相等判準：退回 shell form 紅、轉好沒回來改表也紅；凍結歷史面走 `FROZEN_SHELL_FORM_MAX` shrink-only 豁免）。格數與值一律現查該檔。
@@ -99,7 +103,7 @@ Select-String -Path h.log -Pattern 'Hook SessionStart.*success'             # �
 
 ### 額度哨兵（額度尺；設計全文 ADR-XPLAT-004 §2.6／§2.7）
 
-- **額度 ≠ context 水位**：撞額度那一刻水位可能很低，context 守衛全數放行。「額度耗盡」是 API 層失敗，**hook 體系沒有任何觸發點** ⇒ 只能**預防性**武裝：SessionStart 自動 `--arm-sentinel`（Windows schtasks，巡邏**只讀逐字稿、零 token**；讀到未處理撞線才轉續航排程）。「撞了沒」寫在逐字稿裡讀檔即知；「額度回來了沒」只能問伺服器——這個不對稱是哨兵成立的原因。
+- **額度 ≠ context 水位**：撞額度那一刻水位可能很低，context 守衛全數放行。「額度耗盡」是 API 層失敗，**hook 體系沒有任何觸發點** ⇒ 只能**預防性**武裝：SessionStart 清閂鎖、PostToolUse 累積夠工作量即自動 `--arm-sentinel`（Windows schtasks／macOS launchd，巡邏**只讀逐字稿、零 token**；讀到未處理撞線才轉續航排程）。「撞了沒」寫在逐字稿裡讀檔即知；「額度回來了沒」只能問伺服器——這個不對稱是哨兵成立的原因。
 - **reset 時刻是滾動視窗，只能觀測不能算**：解不出時刻一律**拒絕武裝**，不准退回「假設 5 小時」；分佈現查 `python tools/probe/reset_window_distribution.py`。
 - 兩條閾值的方向鎖具名測試：`test_the_patrol_interval_bounds_the_post_reset_dead_time`（巡邏間隔＝reset 後最壞死等時間的上界，只准調小）／`test_the_idle_threshold_outlives_a_whole_quota_window`（自我解除門檻須大於一個完整額度視窗）。註冊面與四分支判定＝`tools/tests/test_context_budget_guard.py::SentinelWiringTest`／`tools/tests/test_context_budget_guard.py::SentinelDecisionTest`。
 - 現查哨兵（**平台各一條，不要照抄另一邊**）：Windows 用 `Get-ScheduledTask`（見下方取證規則，憑證＝NextRunTime 值）；macOS 用 `launchctl list` 過濾 AutoSDD_Sentinel_（**憑證是 rc，不是時間值**——launchd 從不報下次幾點跑）。

@@ -60,7 +60,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -74,8 +73,13 @@ LAUNCHER_REL = ".claude/hooks/_hook_launcher.py"
 #: Claude Code 注入的專案根佔位符。實測在 `command` **與** `args` 元素裡都會被展開。
 PROJECT_DIR_PLACEHOLDER = "${CLAUDE_PROJECT_DIR}"
 
-#: POSIX 側載具＝直接 exec 帶 shebang 的啟動器（git index 100755）。
-POSIX_CARRIER = f"{PROJECT_DIR_PLACEHOLDER}/{LAUNCHER_REL}"
+#: 啟動器的展開前佔位路徑——兩平台的 `args[0]` 皆同一份（2026-09-15 起同構）。
+LAUNCHER = f"{PROJECT_DIR_PLACEHOLDER}/{LAUNCHER_REL}"
+
+#: POSIX 側載具（掌舵者 2026-09-15 裁決）＝根層 .venv 的直譯器本身，與 Windows 側同構
+#: （舊形態是「直接 exec 帶 shebang 的啟動器」，見 `runtime_carrier_verdict()` 相容判準）。
+POSIX_CARRIER_REL = ".venv/bin/python"
+POSIX_CARRIER = f"{PROJECT_DIR_PLACEHOLDER}/{POSIX_CARRIER_REL}"
 
 #: Windows 側載具，**只准二選一、且全檔不得混用**。
 #: venv 版不看 PATH（與 session 怎麼被啟動無關）；PATH 版在 schtasks 起的 session 上
@@ -165,6 +169,7 @@ def carrier_available(hook: dict, project_dir: str, *, exists=os.path.exists) ->
     if not exists(exe):
         return False
     if exe.lower().endswith(".py"):
+        # legacy 形態（舊 POSIX command 本身是 `.py` 啟動器）；現行 carrier 不落這條。
         return os.name != "nt"  # Windows 上 .py 不能直接 spawn（實測 EFTYPE）
     return True
 
@@ -185,8 +190,13 @@ def _normalise(token: str) -> str:
 # `../` 回到 monorepo 根層取用**同一支檔**。字面比對會把它們判成「沒有宣告 POSIX 載具」，
 # 於是 `posix_carrier_problems()` 對整個子專案靜默失明——而那一側的失效同樣是 fail-open。
 def is_posix_carrier(command: str) -> bool:
-    """`command` 是不是 POSIX 載具（＝啟動器本身），`../` 前綴視為同一個載具。"""
-    return _normalise(str(command)) == LAUNCHER_REL
+    """`command` 是不是 POSIX 載具（根層 .venv 直譯器），`../` 前綴視為同一個載具。"""
+    return _normalise(str(command)) == POSIX_CARRIER_REL
+
+
+def is_launcher(token: str) -> bool:
+    """`token` 是不是啟動器本身（兩平台的 `args[0]` 皆同一份檔），`../` 前綴視為同一個。"""
+    return _normalise(str(token)) == LAUNCHER_REL
 
 
 # 🔴 R84（訴求 7／A2b）：Windows 載具也必須走**正規化**比對，理由與上面那段逐字同構，
@@ -258,7 +268,8 @@ def entries_launching(settings: dict, needle: str, event: str = "PreToolUse") ->
 #   C `command` 不得含空白（V4 陷阱：`args` 存在時整串會被當成一個執行檔路徑，
 #     實測 `uv_spawn ENOENT`，而它「看起來像對的」）
 #   D `command` 與所有 `args` 元素不得出現機器專屬絕對路徑（DEF-101-778）
-#   E 每個目標在同一 block 內必須恰好一個 Windows 條目 ＋ 恰好一個 POSIX 條目
+#   E 每個目標在同一 block 內必須恰好一個 Windows 條目 ＋ 恰好一個 POSIX 條目，
+#     **兩側 `args[0]` 都必須是啟動器**（2026-09-15 起兩側同構；`tail=args[1:]`）
 #     ⚠️ **這條是本鎖的核心**：exec form 的 spawn 失敗是 **fail-open**，少一邊
 #     不會有任何東西轉紅，只會在那個平台靜默失去這個 hook
 #   F 全檔不得混用兩**種** Windows 載具（venv／PATH，見 `WIN_CARRIERS` 旁註記）
@@ -295,24 +306,24 @@ def hook_form_problems(settings: dict) -> list[str]:
                         f"{where}: 出現機器專屬絕對路徑"
                         f"（只准 {PROJECT_DIR_PLACEHOLDER} 佔位）：{hits}")
                 kind = win_carrier_kind(command)
-                if kind:
-                    carriers_used.add(kind)
-                    if not is_posix_carrier(args[0]):
-                        problems.append(
-                            f"{where}: Windows 載具的 args[0] 必須是啟動器 "
-                            f"{POSIX_CARRIER!r}，實得 {args[0]!r}")
-                        continue
-                    tail = tuple(args[1:])
-                    pairs.setdefault(tail, {})
-                    pairs[tail]["win"] = pairs[tail].get("win", 0) + 1
-                elif is_posix_carrier(command):
-                    tail = tuple(args)
-                    pairs.setdefault(tail, {})
-                    pairs[tail]["posix"] = pairs[tail].get("posix", 0) + 1
-                else:
+                posix = is_posix_carrier(command)
+                if not kind and not posix:
                     problems.append(
                         f"{where}: command 只准是 {WIN_CARRIERS}（Windows 載具）或 "
                         f"{POSIX_CARRIER!r}（POSIX 載具），實得 {command!r}")
+                    continue
+                if kind:
+                    carriers_used.add(kind)
+                # 2026-09-15 起兩側同構：args[0] 一律必須是啟動器。
+                if not is_launcher(args[0]):
+                    problems.append(
+                        f"{where}: {'Windows' if kind else 'POSIX'} 載具的 args[0] 必須是"
+                        f"啟動器 {LAUNCHER!r}，實得 {args[0]!r}")
+                    continue
+                tail = tuple(args[1:])
+                pairs.setdefault(tail, {})
+                label = "win" if kind else "posix"
+                pairs[tail][label] = pairs[tail].get(label, 0) + 1
             for tail, seen in pairs.items():
                 if seen.get("win", 0) != 1 or seen.get("posix", 0) != 1:
                     problems.append(
@@ -415,42 +426,28 @@ def carrier_liveness_problems(
 POSIX_MIN_PY = (3, 11)
 
 
-def _probe_shebang(path: str) -> tuple[str | None, tuple[int, int] | None]:
-    """讀 `path` 的 shebang → `(解析到的直譯器, 版本)`；任一步做不到該格回 `None`。"""
-    try:
-        with open(path, encoding="utf-8", errors="replace") as handle:
-            first = handle.readline()
-    except OSError:
-        return (None, None)
-    parts = first[2:].split() if first.startswith("#!") else []
-    if not parts:
-        return (None, None)
-    name = parts[1] if os.path.basename(parts[0]) == "env" and len(parts) > 1 else parts[0]
-    interp = shutil.which(name)
-    if not interp:
-        return (None, None)
+def _probe_interpreter(path: str) -> tuple[str | None, tuple[int, int] | None]:
+    """直接執行 `path` 問它自己的版本 → `(path, 版本)`；跑不起來回 `(None, None)`。
+
+    POSIX 載具本身就是直譯器（2026-09-15 起不再是帶 shebang 的啟動器），不需要先解析
+    shebang 再繞一手找 `PATH` 上的直譯器——直接 exec 它自己最準確也最貼近真實 spawn。
+    """
     try:
         done = subprocess.run(
-            [interp, "-c", "import sys; print('%d %d' % sys.version_info[:2])"],
+            [path, "-c", "import sys; print('%d %d' % sys.version_info[:2])"],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=20, check=False)
         major, minor = (int(tok) for tok in done.stdout.split())
     except Exception:
-        return (interp, None)
-    return (interp, (major, minor))
+        return (None, None)
+    return (path, (major, minor))
 
 
-# 🔴 為何 POSIX 這半非有不可（缺口的形狀與 Windows 側**不對稱**，不是順手補對稱）：
-# Windows 條目把載具釘死在 `.venv/Scripts/pythonw.exe`——一個確定的檔案，在不在看得出來。
-# POSIX 條目的 `command` 是那支帶 shebang 的啟動器本身，於是真正被執行的直譯器是
-# **`PATH` 上任意一個 `python3`**：macOS 內建那支常年是 3.9，而本 repo 的 bootstrap 門檻
-# 是 3.11。三種失效——檔不在／沒有執行位元／shebang 解析到的直譯器太舊——**表徵完全相同**：
-# CC 只記一行 ERROR 就放行（fail-open），六支守衛一起消失，而螢幕上看起來就是
-# 「終於不閃窗了」。
-#
-# 誠實劃界：`PATH` 是 session 屬性，本判準量的是**跑這個檢查的那個 shell 的 PATH**，
-# 不是 Claude Code 自己那個行程的（拿不到）。所以它抓得到「這台機器根本沒有夠新的
-# python3」，抓不到「CC 的 PATH 與我的不同」。必要條件，不是充分條件。
+# 🔴 為何 POSIX 這半非有不可（2026-09-15 起與 Windows 側**同構**，不再不對稱）：
+# `command` 直接釘死 `.venv/bin/python`，不再靠 `PATH` 解析。三種失效——檔不在／
+# 沒有執行位元／版本太舊或壞掉——表徵完全相同：CC 只記一行 ERROR 就放行（fail-open），
+# 螢幕上看起來就是「終於不閃窗了」。代價：clone 到 bootstrap 建好 `.venv` 之前，
+# POSIX 上 hook 全部 fail-open——與 Windows 現況一致，是刻意的對稱。
 def posix_carrier_problems(
     settings: dict,
     project_dir: str,
@@ -463,44 +460,42 @@ def posix_carrier_problems(
     if is_exec is None:
         def is_exec(path: str) -> bool:
             return os.access(path, os.X_OK)
-    probe = probe or _probe_shebang
+    probe = probe or _probe_interpreter
     problems: list[str] = []
     for carrier in sorted(declared_posix_carriers(settings)):
         path = expand_tokens([carrier], project_dir)[0]
         if not exists(path):
             problems.append(
                 f"`.claude/settings.json` 宣告 POSIX hook 載具 {carrier}，但實況不存在："
-                f"{path} ⇒ 這台機器上**全部 hook 都不會跑**（spawn 失敗是 fail-open）")
+                f"{path} ⇒ 這台機器上**全部 hook 都不會跑**（spawn 失敗是 fail-open）。"
+                '修法：repo 根跑 bootstrap（tools/bootstrap.sh），現查 '
+                '`test -x "$CLAUDE_PROJECT_DIR/.venv/bin/python"`')
             continue
         if not is_exec(path):
             problems.append(
                 f"POSIX hook 載具 {path} 沒有執行位元 ⇒ spawn 回 EACCES、CC 只記一行 "
-                "ERROR 就放行，六支守衛一起靜默消失。修法：git index 應為 100755"
-                "（`git update-index --chmod=+x`），並確認 checkout 沒有把它洗掉")
+                "ERROR 就放行，六支守衛一起靜默消失。修法：重建根層 .venv"
+                "（`tools/bootstrap.sh`；此檔是 bootstrap 產物、非 git tracked，"
+                "不是 `git update-index --chmod=+x` 能修的）")
             continue
         interp, version = probe(path)
         if interp is None:
             problems.append(
-                f"POSIX hook 載具 {path} 的 shebang 解析不到任何直譯器 ⇒ 直接 exec 它會"
+                f"POSIX hook 載具 {path} 執行不起來（探測不到版本）⇒ 直接 exec 它會"
                 "失敗，而失敗是 fail-open（六支守衛靜默消失）")
             continue
         if version is not None and version < POSIX_MIN_PY:
             want = ".".join(str(n) for n in POSIX_MIN_PY)
             got = ".".join(str(n) for n in version)
             problems.append(
-                f"POSIX hook 載具的 shebang 解析到 {interp}（Python {got}），低於本 repo "
-                f"的下限 {want}（SSOT：tools/bootstrap_core.py）。這在 macOS 上是**預設**"
-                "狀態（系統 python3 常年 3.9），所以這行話在 mac 上 day 1 就會響——"
-                "正因如此它必須說真話，否則只是在訓練你忽略它。\n"
-                "    實測後果（R82 MAC-03；`tools/tests/test_mac_readiness_r82.py` 現查）："
-                "現行 hook 集**載入得起來**（`tools/lib/quota_meter.py` 2026-09-08 起已改用 "
-                "3.9 相容寫法，不再是退化實例）。\n"
-                "    真正的風險面：hook 鏈上**沒有 try/except 保護**的那幾格（例如同檔的 "
-                "`from quota_limits import …`，該處刻意不給 fallback）一旦被加進任何 3.11 "
-                "專屬 import，六支守衛會一起靜默消失——而 spawn／import 失敗是 fail-open"
-                "（CC 只記一行 ERROR、工具照跑）。\n"
-                f"    修法：讓 PATH 上的 python3 指向 >= {want}，或把 POSIX 條目的 "
-                "command 釘到 venv 內的直譯器（後者要一併處理「全新 clone 還沒有 venv」）")
+                f"POSIX hook 載具 {interp} 回報版本 Python {got}，低於本 repo 的下限 "
+                f"{want}（SSOT：tools/bootstrap_core.py）。macOS 系統 python3 常年 3.9，"
+                "若 bootstrap 當初就是用它建的 venv，這行話在 mac 上 day 1 就可能響。\n"
+                "    實測後果（R82 MAC-03；test_mac_readiness_r82.py 現查）：現行 hook 集"
+                "**載入得起來**（`tools/lib/quota_meter.py` 已改用 3.9 相容寫法）。\n"
+                "    真正的風險面：沒有 try/except 保護的那幾格一旦加進 3.11 專屬 import，"
+                "六支守衛會一起靜默消失（spawn／import 失敗是 fail-open）。\n"
+                f"    修法：重建根層 .venv（bootstrap 門檻 {want}）")
     return problems
 
 
@@ -584,7 +579,10 @@ def runtime_carrier_verdict(attachments, *, on_windows: bool = os.name == "nt"
         if att.get("type") == "hook_success":
             counts["success"] += 1
             continue
-        win, posix = bool(win_carrier_kind(head)), is_posix_carrier(head)
+        # `is_launcher(head)` 相容 2026-09-15 前的舊 POSIX 形態（command 本身就是啟動器）：
+        # 逐字稿裡的歷史 attachment 仍長那樣，不把它判成 alien（見 POSIX_CARRIER 旁註記）。
+        win = bool(win_carrier_kind(head))
+        posix = is_posix_carrier(head) or is_launcher(head)
         where = f"[{att.get('hookEvent') or att.get('hookName') or '?'}]"
         stderr = str(att.get("stderr") or "")
         if win if on_windows else posix:

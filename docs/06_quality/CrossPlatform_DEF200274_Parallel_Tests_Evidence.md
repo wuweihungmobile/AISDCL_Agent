@@ -1075,3 +1075,27 @@ DEF-200-289／290。
 逐項見 `docs/06_quality/CrossPlatform_R145_Scan_Findings.md`〈第十輪附記（R148）〉節；
 缺陷帳本見 `docs/06_quality/AutoSDD_Defect_Log.md` DEF-200-274／DEF-200-289／DEF-200-290／
 DEF-200-291／DEF-200-292。
+
+## 第十一輪：掌舵者 Windows 11 物理機親驗補記（2026-09-15）
+
+### 背景
+
+第九輪〈誠實劃界〉留下「掌舵者本人 Windows 11 物理機親驗待補」四項，此前只住在
+`useMacWin.md`〈B 段〉尾端的一次性待辦（帳本 DEF-200-274 已標 fixed，兩份文件互相矛盾）。
+下輪切換 macOS 前把可從物理機**既有取證**回填的三項在此收攏，剩一項如實留缺並另立
+DEF-200-313；`useMacWin.md` 不再攜帶該待辦——一次性的單平台待辦不該住在兩平台共用的
+啟動 SOP 裡。
+
+### 四項對照（本場現查，物理機＝Windows 11 Pro 10.0.26200）
+
+| 項 | 第九輪待驗內容 | 物理機證據 | 判定 |
+|---|---|---|---|
+| ① 多核 runner | `run_root_unittests.py` rc=0、log 含 `worker=` | schtasks 觸發之 nightly（2026-09-15 14:55，`AutoClaude/logs/nightly_latest.log`）L210 `模組耗時排行（前 5，共 151 模組，平行模式，worker=9）`；L303 `local_ci_gate=0 root_unittests=0` | 已驗（排程環境） |
+| ② `compileall -j 0` | pre-push 慢層該段無 ❌，或手動 `python -m compileall -q -j 0 tools .claude/hooks` rc=0 | 本場以根層 `.venv\Scripts\python.exe` 手動實跑：輸出 0 行、rc=0（pre-push 呼叫點＝`tools/git-hooks/pre-push:354`） | 已驗（互動 session） |
+| ③ Ctrl-C／SIGTERM 孤兒行程 | 全套中 Ctrl-C 後 `Get-CimInstance Win32_Process` 無殘留 | 無——需人在終端機前按 Ctrl-C，`Stop-Process` 送的是 TerminateProcess 不是 SIGINT，不可替代 | **未驗**（DEF-200-313，下次 Windows 窗口補） |
+| ④ AutoClaude xdist 全套 | rc=0 且 log 開頭 `bringing up nodes` | 同一支 nightly log L89～90 `bringing up nodes...`；STAGE-L rc=0（L303） | 已驗（排程環境） |
+
+🔴 誠實劃界：①④ 的證據來自 schtasks 排程環境（最高權限、非互動），與掌舵者在互動終端機
+手打的執行環境不完全等價（DEF-200-312 正是兩者分歧的實證）；本輪不另在互動 session 重跑
+全套，因為互動 session 的 xdist 全套在 R152 收尾窗口已跑過（該窗口宣稱見 `AutoSDD_improving_112.md`，
+本節不重複其數字）。

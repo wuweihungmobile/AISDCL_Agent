@@ -1677,7 +1677,7 @@ _REGISTRATION_BASELINE: dict[tuple[str, str], frozenset[str]] = {
     # 不是工具呼叫失敗 ⇒ 它在 hook 體系裡**沒有任何觸發點**，「撞到才反應」結構上
     # 不可能成立，只能在還跑得動指令的最早時刻預防性武裝。本輪之前的續航協定是
     # 手動武裝的，而那一刻沒有人會去武裝它——同輪連撞兩次額度、協定零作用即為實證。
-    # 契約（逐項見 .claude/settings.json 該條目的 _comment）：只在 Windows 動作／
+    # 契約（見 .claude/settings.json 該條目 _comment）：有排程載具的平台才動作（schtasks／launchd）／
     # `AUTOSDD_SENTINEL_OFF` 可單獨關掉（刻意不與 `AUTOSDD_CONTEXT_GUARD_OFF` 共用）／
     # 恆 exit 0 不出聲／detached 子行程故不阻塞開場／缺 planner 即 fail-open。
     ("SessionStart", ".claude/hooks/context_budget_guard.py"): frozenset({"*"}),
@@ -2056,7 +2056,7 @@ class TestHookEntriesAreExecForm(unittest.TestCase):
         """三個站點（argv 解析／形態鎖／載具宣告枚舉）必須用**同一個** type 判準。"""
         wiring = _hook_wiring()
         good = {"command": wiring.WIN_CARRIER_VENV,
-                "args": [wiring.POSIX_CARRIER, ".claude/hooks/x.py"]}
+                "args": [wiring.LAUNCHER, ".claude/hooks/x.py"]}
         odd = dict(good, type="prompt")
         self.assertTrue(wiring.is_command_hook(good), "沒寫 type ＝ CC 的預設 command")
         self.assertFalse(wiring.is_command_hook(odd))
@@ -2432,13 +2432,13 @@ class TestPosixCarrierLiveness(unittest.TestCase):
         self.assertIn("全部 hook 都不會跑", problems[0])
 
     def test_a_launcher_without_the_exec_bit_is_red(self) -> None:
-        """`git index 100755` 被洗掉時 spawn 回 EACCES，而 EACCES 是 fail-open。"""
+        """POSIX 載具沒有執行位元時 spawn 回 EACCES，而 EACCES 是 fail-open。"""
         problems = self._posix(is_exec=lambda _p: False)
         self.assertTrue(any("執行位元" in p for p in problems), problems)
 
-    def test_an_unresolvable_shebang_is_red(self) -> None:
+    def test_an_unprobeable_interpreter_is_red(self) -> None:
         problems = self._posix(probe=lambda _p: (None, None))
-        self.assertTrue(any("shebang" in p for p in problems), problems)
+        self.assertTrue(any("探測不到版本" in p for p in problems), problems)
 
     def test_an_interpreter_below_the_floor_is_red(self) -> None:
         """macOS 系統 python3 的**預設**狀態（3.9）——這不是假想情境。"""
@@ -2577,7 +2577,8 @@ class TestExecFormConversionScope(unittest.TestCase):
                 {"type": "command",
                  "command": f"${{CLAUDE_PROJECT_DIR}}/{depth}.venv/Scripts/pythonw.exe",
                  "args": [launcher, ".claude/hooks/x.py"]},
-                {"type": "command", "command": launcher, "args": [".claude/hooks/x.py"]},
+                {"type": "command", "command": f"${{CLAUDE_PROJECT_DIR}}/{depth}.venv/bin/python",
+                 "args": [launcher, ".claude/hooks/x.py"]},
             ]}]}}
             self.assertEqual(wiring.hook_form_problems(settings), [], depth)
             self.assertEqual(wiring.win_carrier_kind(
@@ -3185,9 +3186,9 @@ _ALIEN_CARRIER_ENOENT = {
 #: 完全相同（都是一行 ERROR、工具照跑），差別只在 `command` 指的是哪一種載具。
 _NATIVE_CARRIER_EACCES = {
     "type": "hook_non_blocking_error", "hookEvent": "PreToolUse", "exitCode": 1,
-    "stderr": "EACCES: permission denied, posix_spawn "
-              "'/fake/repo/.claude/hooks/_hook_launcher.py'",
-    "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py "
+    "stderr": "EACCES: permission denied, posix_spawn '/fake/repo/.venv/bin/python'",
+    "command": "${CLAUDE_PROJECT_DIR}/.venv/bin/python "
+               "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py "
                ".claude/hooks/block_destructive_git.py",
 }
 
@@ -3217,13 +3218,12 @@ class TestRuntimeCarrierEvidenceIsRead(unittest.TestCase):
         self.assertEqual(counts["native_fail"], 0)
 
     def test_the_native_carrier_failure_is_reported(self) -> None:
-        """紅：同一種螢幕表徵，但失敗的是本平台自己那條 ⇒ 那個 hook 真的沒跑。"""
-        wiring = _hook_wiring()
-        problems, counts = wiring.runtime_carrier_verdict(
-            [_ALIEN_CARRIER_ENOENT, _NATIVE_CARRIER_EACCES], on_windows=False)
-        self.assertEqual(counts["native_fail"], 1)
-        self.assertEqual(counts["by_design_fail"], 1)
-        self.assertEqual(len(problems), 1)
+        legacy = {"command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py x.py",
+                  "stderr": "EACCES posix_spawn"}
+        problems, counts = _hook_wiring().runtime_carrier_verdict(
+            [_ALIEN_CARRIER_ENOENT, _NATIVE_CARRIER_EACCES, legacy], on_windows=False)
+        n, b, a = counts["native_fail"], counts["by_design_fail"], counts["alien_fail"]
+        self.assertEqual((n, b, a), (2, 1, 0))
         self.assertIn("block_destructive_git.py", problems[0],
                       "必須指名是**哪一支守衛**沒跑，否則讀者無從行動")
 
