@@ -172,16 +172,22 @@ def _as_running_interpreter(hook: dict) -> dict | None:
     gitignored 產物未材料化；而同一份「載具存在嗎」的知識同時住在兩個家，正是本 repo 的
     頭號病。
 
-    代換的射程刻意收到最窄，這樣它遮得住的只有 (b)：**只有 Windows、且 argv[0] 正是
-    那個唯一合法的 venv 載具**（`win_carrier_kind()=="venv"`，字面被改壞就對不上）
-    才代換。POSIX 那一半的載具是 **git tracked 的檔**，它缺席就是真缺陷 ⇒ 由
-    `os.name` 守住、一律不代換。
+    代換的射程刻意收到最窄，這樣它遮得住的只有 (b)：**只代換本平台那一半、且 argv[0]
+    正是那個唯一合法的 venv 載具**（Windows `win_carrier_kind()=="venv"`、POSIX
+    `is_posix_carrier()`，字面被改壞就對不上）。另一平台那一半由 `os.name` 守住、一律
+    不代換（紅面自證見 `test_deny_carrier_resolution_stays_red_when_the_local_platform_half_is_missing`）。
+    🔴 2026-09-15 起 POSIX 載具也是 gitignored 的根層 `.venv/bin/python`（此前是 git
+    tracked 的啟動器，缺席＝真缺陷故不代換）⇒ ubuntu／macOS runner 上情境 (b) 同樣成立，
+    代換必須兩平台對稱，否則 aisdlc-sdd-ci／macos-compat-ci 在 fresh clone 上必紅。
     """
     wiring = lint._hook_wiring()
     argv = wiring.hook_entry_argv(hook)
-    if os.name != "nt" or len(argv) < 2 or not wiring.is_exec_form(hook):
+    if len(argv) < 2 or not wiring.is_exec_form(hook):
         return None
-    if wiring.win_carrier_kind(argv[0]) != "venv":
+    if os.name == "nt":
+        if wiring.win_carrier_kind(argv[0]) != "venv":
+            return None
+    elif not wiring.is_posix_carrier(argv[0]):
         return None
     return {"type": "command", "command": sys.executable, "args": list(argv[1:])}
 
@@ -191,7 +197,7 @@ def _resolve_carriers(hooks: list[dict], project_dir: str,
     """把條目清單收斂成「本平台真的 spawn 得動」的那些（必要時代換成目前直譯器）。
 
     條目數刻意**不因代換而增減**：可跑的原樣留下，只有「宣告正確但沒材料化」的
-    Windows venv 載具被代換，另一個平台那一半仍照樣被丟掉（fail-open 的那一半）。
+    本平台 venv 載具被代換，另一個平台那一半仍照樣被丟掉（fail-open 的那一半）。
     回空清單＝本平台在這份佈線裡已無任何跑得動的條目 ⇒ 呼叫端必須出聲。
     """
     out: list[dict] = []
