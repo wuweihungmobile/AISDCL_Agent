@@ -290,6 +290,13 @@ R79 已判過一次同型失誤——R77 宣稱「每輪重跑分群」卻沒留
 每次開 session 都卡是不可接受的代價）。取證沒有因為非同步而消失——`--arm-sentinel` 自己
 有 `NextRunTime` 憑證閘，成敗都進稽核 jsonl。
 
+> 🔴 **superseded（2026-09-15 標記，原文不動）**：上段「只在 Windows 動作」與「SessionStart 註冊」兩句已過期——
+> R83 落地 launchd 後端（`tools/lib/schedule_backend.py`）後，本條目在 Windows（schtasks）與 macOS（launchd）
+> 皆動作、Linux 等無載具 no-op；R82／HELM-02 起 SessionStart 只清上一輪武裝閂鎖＋回收孤兒哨兵，真正武裝
+> 延後到 PostToolUse `arm_when_earned()`。現行契約以 `.claude/hooks/context_budget_guard.py` 與
+> `.claude/settings.json` 該條目 `_comment` 為準；§2.9 既有 superseded 註記只點名 §2.6 第 4 條與 §7-4，
+> 未涵蓋本段，故在此補標。
+
 > 🔴 **`.claude/settings.json` 從此不再是「本協定不動」**（§4 最後一列原本這樣寫，那是對的——
 > 在寫下它的時候）。本節是一個**新決策**：額度確實不是 context，但**接電點**只能長在 hook
 > 註冊面上，因為那是全 repo 唯一「session 一開就會自動跑」的地方。共用腳本、不共用門檻。
