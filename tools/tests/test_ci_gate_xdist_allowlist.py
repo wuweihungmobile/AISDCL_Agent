@@ -1,5 +1,12 @@
 """DEF-200-274 第十輪批評缺口 2 — `ci-gate.sh` xdist 判準必須是「允許清單」而非
-「排除清單」，回歸鎖。
+「排除清單」，回歸鎖。DEF-200-289（A 包）另擴充兩件事：① `ci-gate.ps1` 的
+Windows-native fallback（GAP-D）——它只跑凍結基線 `AISDLC_SDD_v0.01`（硬寫死，
+從無 LATEST 軌），依 `ci-gate.sh` 本檔同一條允許清單語意（只有 LATEST 保證帶
+`_atomic_write_text` 修法），本鎖釘住的是「該 fallback **刻意不**帶
+`-n auto --dist worksteal`」——這不是覆蓋缺口，是把 GAP-D 誤解為「無條件補上
+該旗標」時會引入的回歸（對凍結基線開多 worker，複製回本檔已修掉的競態）事先
+攔住；② `ci-gate.sh`／`ci-gate.ps1`／`tools/git-hooks/pre-push` 三處都必須有
+`tools/lib/cpu_budget.py --legs` 的跨 leg CPU 預算匯出段（DEF-200-289 SSOT 接線）。
 
 WHY（測意圖非僅行為，Rule 9）：`tools/fsm_runtime/snapshot.py::save_abort_report()`
 的 `_atomic_write_text` 競態修法**僅存在於 LATEST**（`AISDLC_SDD_v0.30`）；凍結基線
@@ -32,6 +39,14 @@ from pathlib import Path
 # tools/tests → tools → 根目錄（REPO_ROOT）；ci-gate.sh 位於 AISDLC_SDD/scripts/ 下。
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CI_GATE = REPO_ROOT / "AISDLC_SDD" / "scripts" / "ci-gate.sh"
+CI_GATE_PS1 = REPO_ROOT / "AISDLC_SDD" / "scripts" / "ci-gate.ps1"
+PRE_PUSH = REPO_ROOT / "tools" / "git-hooks" / "pre-push"
+
+#: DEF-200-289：三處 orchestrator 匯出段的共同錨點字面值（存在即視為已接線；
+#: 三份檔案各自的變數命名慣例不同——bash 用 `"$PY"`／`$TOPLEVEL`，PowerShell 用
+#: `python`／`$repo`——故只鎖「呼叫 cpu_budget.py --legs」這個共同錨點，不逐字
+#: 比對整段程式碼，避免對三種殼語法各寫一份脆弱的逐字鎖）。
+_CPU_BUDGET_EXPORT_ANCHOR = "cpu_budget.py"
 
 # 只認允許清單這一種寫法；排除清單（無論寫成 `!=` 或反過來的 `not ==`）都不合格。
 _ALLOWLIST_CONDITION = '"${VER}" == "${LATEST}"'
@@ -115,6 +130,83 @@ class CiGateXdistAllowlistTest(unittest.TestCase):
             f"scripts/tests/ 的 pytest 呼叫應無條件帶 `-n auto --dist worksteal`，"
             f"實得：{calls[0].strip()!r}",
         )
+
+
+def _ci_gate_ps1_text() -> str:
+    assert CI_GATE_PS1.is_file(), f"ci-gate.ps1 不存在：{CI_GATE_PS1}"
+    return CI_GATE_PS1.read_text(encoding="utf-8")
+
+
+class CiGatePs1FallbackXdistTest(unittest.TestCase):
+    """GAP-D（DEF-200-289 四方審查 P1）：`ci-gate.ps1` 的 Windows-native fallback。
+
+    本鎖釘住**不加** `-n auto`／`--dist worksteal`——該 fallback 硬寫死只跑
+    `AISDLC_SDD_v0.01`（凍結基線，從無 LATEST 軌，見 `$fw = Join-Path $repo
+    "AISDLC_SDD_v0.01"`），依 `ci-gate.sh` 的允許清單語意（只有 LATEST 保證帶
+    `_atomic_write_text` 修法才可開 xdist），對它無條件加上該旗標等於把凍結
+    基線唯一沒有的修法需求強加給它，複製回 `ci-gate.sh` 已經修掉的那個共享
+    tmp 檔競態（該檔記載凍結基線連續實測約 1/3~4/9 翻紅）。GAP-D 的正確解讀
+    是「補上覆蓋（此前 `test_ci_gate_xdist_allowlist.py` 對 `.ps1` 零覆蓋）」，
+    不是「無條件複製旗標」——本測試把這個判讀本身鎖住，防止日後有人依 GAP-D
+    的字面敘述誤修。
+    """
+
+    def _fsm_runtime_pytest_call(self) -> str:
+        text = _ci_gate_ps1_text()
+        calls = [
+            ln for ln in text.splitlines()
+            if ln.lstrip().startswith("python -m pytest tools/fsm_runtime/tests/")
+        ]
+        self.assertTrue(calls, "ci-gate.ps1 找不到 FSM runtime pytest 呼叫——結構已變動，請同步本鎖")
+        self.assertEqual(len(calls), 1, f"預期恰有 1 處，實得 {len(calls)} 處：{calls}")
+        return calls[0]
+
+    def test_fallback_pytest_call_has_no_xdist_flags(self) -> None:
+        call = self._fsm_runtime_pytest_call()
+        self.assertNotIn(
+            "-n auto", call,
+            f"ci-gate.ps1 的 fallback 只跑凍結基線 v0.01，不得帶 `-n auto`"
+            f"（會複製回已修掉的 snapshot.py 共享 tmp 檔競態）：{call.strip()!r}",
+        )
+        self.assertNotIn(
+            "--dist worksteal", call, f"同上，不得帶 --dist worksteal：{call.strip()!r}")
+
+    def test_fallback_only_ever_targets_frozen_baseline(self) -> None:
+        """本鎖的前提斷言：fallback 硬寫死目錄仍是 v0.01——若未來改成也偵測
+        LATEST，上一支測試的「不得帶 xdist」判準就必須同步重新評估。"""
+        text = _ci_gate_ps1_text()
+        self.assertIn(
+            'Join-Path $repo "AISDLC_SDD_v0.01"', text,
+            "ci-gate.ps1 fallback 的目標版本已不再硬寫死 v0.01——"
+            "本檔 CiGatePs1FallbackXdistTest 的前提已改變，請重新評估是否仍應排除 xdist",
+        )
+
+
+class CpuBudgetExportWiringTest(unittest.TestCase):
+    """DEF-200-289：`ci-gate.sh`／`ci-gate.ps1`／`tools/git-hooks/pre-push` 三處
+    都必須有跨 leg CPU 預算匯出段（呼叫 `tools/lib/cpu_budget.py --legs`）。"""
+
+    def test_ci_gate_sh_exports_cpu_budget(self) -> None:
+        text = _ci_gate_text()
+        self.assertIn(_CPU_BUDGET_EXPORT_ANCHOR, text, "ci-gate.sh 找不到 cpu_budget.py 匯出段")
+        self.assertIn("--legs", text, "ci-gate.sh 的 cpu_budget.py 呼叫缺 --legs 參數")
+        self.assertIn("AUTOSDD_PARALLEL_TESTS_WORKERS", text)
+        self.assertIn("PYTEST_XDIST_AUTO_NUM_WORKERS", text)
+
+    def test_ci_gate_ps1_exports_cpu_budget(self) -> None:
+        text = _ci_gate_ps1_text()
+        self.assertIn(_CPU_BUDGET_EXPORT_ANCHOR, text, "ci-gate.ps1 找不到 cpu_budget.py 匯出段")
+        self.assertIn("--legs", text, "ci-gate.ps1 的 cpu_budget.py 呼叫缺 --legs 參數")
+        self.assertIn("AUTOSDD_PARALLEL_TESTS_WORKERS", text)
+        self.assertIn("PYTEST_XDIST_AUTO_NUM_WORKERS", text)
+
+    def test_pre_push_exports_cpu_budget(self) -> None:
+        assert PRE_PUSH.is_file(), f"pre-push 不存在：{PRE_PUSH}"
+        text = PRE_PUSH.read_text(encoding="utf-8")
+        self.assertIn(_CPU_BUDGET_EXPORT_ANCHOR, text, "pre-push 找不到 cpu_budget.py 匯出段")
+        self.assertIn("--legs", text, "pre-push 的 cpu_budget.py 呼叫缺 --legs 參數")
+        self.assertIn("AUTOSDD_PARALLEL_TESTS_WORKERS", text)
+        self.assertIn("PYTEST_XDIST_AUTO_NUM_WORKERS", text)
 
 
 if __name__ == "__main__":

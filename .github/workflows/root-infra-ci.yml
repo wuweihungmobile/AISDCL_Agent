@@ -562,6 +562,22 @@ jobs:
           # advisory 巡檢的粗門檻（見 run: 內該段的取捨說明）。刻意單一數字而非
           # 逐檔依 cron 週期計算：advisory 不擋路，精算留給本機那支逐軌偵測器。
           ADVISORY_MAX_AGE_DAYS: "8"
+          # DEF-200-290：SHA 涵蓋判準（advisory）監測的路徑清單——多 CPU／xdist
+          # 相關的執行面與其驗證載體。一行一路徑；`git log -- <path>` 對不存在的
+          # 路徑回空輸出、rc=0，不需要先確認每條路徑在當下 checkout 都存在。
+          WATCHED_PATHS: |
+            AutoClaude/pyproject.toml
+            AutoClaude/tests/conftest.py
+            AutoClaude/tools/local_ci_gate.py
+            AutoClaude/tools/local_ci_gate.sh
+            AutoClaude/tools/local_ci_gate.ps1
+            AISDLC_SDD/scripts/ci-gate.sh
+            AISDLC_SDD/scripts/ci-gate.ps1
+            tools/lib/parallel_shard.py
+            tools/lib/cpu_budget.py
+            tools/run_root_unittests.py
+            .github/workflows/macos-compat-ci.yml
+            .github/workflows/windows-compat-ci.yml
         run: |
           set -euo pipefail
           now=$(date -u +%s)
@@ -617,13 +633,16 @@ jobs:
                 ;;
             esac
             last=""
+            last_sha=""
             for ev in schedule workflow_dispatch; do
-              t=$(gh run list --repo "${GITHUB_REPOSITORY}" --workflow "$wf" \
-                    --event "$ev" --status success --limit 1 \
-                    --json createdAt --jq '.[0].createdAt // empty' \
-                  || echo "")
+              row=$(gh run list --repo "${GITHUB_REPOSITORY}" --workflow "$wf" \
+                      --event "$ev" --status success --limit 1 \
+                      --json createdAt,headSha \
+                      --jq '.[0] // {} | "\(.createdAt // "")|\(.headSha // "")"' \
+                    || echo "|")
+              t=${row%%|*}; sha=${row#*|}
               echo "   最近一次 ${ev} 成功：${t:-（無）}"
-              if [ -n "$t" ] && { [ -z "$last" ] || [[ "$t" > "$last" ]]; }; then last="$t"; fi
+              if [ -n "$t" ] && { [ -z "$last" ] || [[ "$t" > "$last" ]]; }; then last="$t"; last_sha="$sha"; fi
             done
             if [ -z "$last" ]; then
               echo "::${lvl}::${wf} 查無任何**成功**的 schedule／workflow_dispatch run（或 gh API 查詢失敗）——該 workflow 的 *-nightly-full 是唯一會在真 Windows／真 macOS 上跑完整測試樹的通道，查不到成功紀錄等同該通道從未被證實可用"
@@ -635,6 +654,31 @@ jobs:
             if [ "$age" -gt "$MAX_AGE_DAYS" ]; then
               echo "::${lvl}::${wf} 的 *-nightly-full 已 ${age} 天沒有成功執行（門檻 ${MAX_AGE_DAYS} 天）——真機深度回歸通道處於死亡狀態，此期間任何「CI 全綠」宣稱都只涵蓋 push 事件"
               stale=1
+            fi
+            # --- DEF-200-290：headSha 涵蓋判準（advisory，只 ::warning:: 不阻斷）---
+            # WHY 是 advisory 而非阻斷：nightly-full 每週才排程一次，硬阻斷會讓
+            # 每次動到 WATCHED_PATHS 的 push 都紅到下個週日；上面的天數判準已有
+            # 顯式豁免機制可用，本判準與 R71 的 advisory 巡檢同層級（提醒、不擋路）。
+            # 失效面：gh／git 任一失敗只 ::warning:: 說明「本次無法評估」＋原因，
+            # 不改變本 step 的 rc（照抄本 step 既有的 fail-open 慣例）。
+            if [ -z "$last_sha" ]; then
+              echo "::warning::${wf} 的 SHA 涵蓋判準本次無法評估（查無成功 run 之 headSha，gh API 查詢可能失敗）"
+            elif last_change=$(git log -1 --format=%H -- ${WATCHED_PATHS} 2>&1); then
+              if [ -z "$last_change" ]; then
+                echo "   SHA 涵蓋：WATCHED_PATHS 至今無任何改動紀錄，略過本判準"
+              else
+                merge_base_out=$(git merge-base --is-ancestor "$last_change" "$last_sha" 2>&1) && mb_rc=0 || mb_rc=$?
+                if [ "$mb_rc" -eq 0 ]; then
+                  echo "   SHA 涵蓋：OK（最近成功 nightly-full headSha ${last_sha:0:7} 已涵蓋 WATCHED_PATHS 最後改動 ${last_change:0:7}）"
+                elif [ "$mb_rc" -eq 1 ]; then
+                  change_date=$(git log -1 --format=%cs "$last_change" 2>/dev/null || echo "?")
+                  echo "::warning::${wf} 最近成功 nightly-full（run headSha ${last_sha:0:7}）尚未涵蓋 WATCHED_PATHS 最後改動 ${last_change:0:7}（${change_date}）——多 CPU／xdist 相關變更尚無真機深度回歸證據；處置：gh workflow run ${wf}"
+                else
+                  echo "::warning::${wf} 的 SHA 涵蓋判準本次無法評估（git merge-base rc=${mb_rc}：${merge_base_out}）——headSha ${last_sha:0:7} 可能不在本次 checkout 的歷史內"
+                fi
+              fi
+            else
+              echo "::warning::${wf} 的 SHA 涵蓋判準本次無法評估（git log 查詢 WATCHED_PATHS 失敗：${last_change}）"
             fi
           done
           # --- 其餘含 cron 的 workflow：advisory 巡檢（永不影響本 step 的 rc）-----

@@ -1099,3 +1099,102 @@ DEF-200-313；`useMacWin.md` 不再攜帶該待辦——一次性的單平台待
 手打的執行環境不完全等價（DEF-200-312 正是兩者分歧的實證）；本輪不另在互動 session 重跑
 全套，因為互動 session 的 xdist 全套在 R152 收尾窗口已跑過（該窗口宣稱見 `AutoSDD_improving_112.md`，
 本節不重複其數字）。
+
+## 第十二輪：掌舵者四問（多 CPU 是否完備／CI 是否接入／負載是否均衡／還有哪裡可用）四方獨立審查＋收尾（2026-09-17～18）
+
+### 背景
+
+掌舵者提出四個問題：Q1 帳本「Python 測試可用多 CPU」是否已解決；Q2 功能是否完備、CI 是否也用多 CPU；
+Q3 有無頭重腳輕、「自動偵測多 CPU 平衡負載」設計是否最佳；Q4 還有哪些沒列入可用多 CPU。並要求
+Architect／SA／SD／QA 四方獨立審查（皆 Sonnet 5、唯讀、不共享上下文），確認前輪宣稱（6a12da1／54ae6e9
+已 push、CI 全綠）屬實。主控（Fable）只裁決、派工、收尾。
+
+### 四方審查結果摘要（各自獨立跑；細節見 scratchpad 證據檔，本節只留存活發現）
+
+- **一致確認**：核心機制與 CI 接線完備——root-infra-ci worker=3、macos worker=2、windows worker=3
+  （runner vCPU 4／3／4 套 cpu-1）、AutoClaude CI xdist `4605 passed, 224 skipped in 86.48s`、SDD LATEST
+  fsm 五段 `bringing up nodes`（皆 QA 自 CI log grep，[他包回報]）；前輪兩 commit 皆在 origin/main、
+  最近 push CI 全綠（主控本場親查 `gh run list`：7b102176 的 macos／root-infra／windows 三支 success，
+  bbb8a0b8 的五支 success）。
+- **Q3 無結構性頭重腳輕**（SD 以快取實算，[他包回報]）：本機 worker=9 最重派工單位 93s ＜ 公平份額
+  123.3s；CI worker=2／3 公平份額 370～555s 遠大於任何單位；worker 認領是共用佇列（動態）非靜態分片；
+  `detect_imbalance` 在 worker=2／3／9 三種假設下皆回空。QA 自 CI log grep「公平份額／排程效率」四字面
+  零命中。SD 駁回 Architect「自動細分需 worker≥10」——程式碼無此門檻，休眠是因兩個熱點已被人工白名單
+  拆掉（第九輪〈誠實劃界〉該句已 stale，本節訂正）。
+- **存活缺口**（四方交叉皆 VERIFIED）：
+  1. DEF-200-289：五套 CPU 公式互不知情（`worker_count()`／xdist `-n auto`／ci-gate.sh 與 pre-push 各寫死
+     `-n auto --dist worksteal`／compileall -j0／tlc `-workers auto`），且 CI headless 仍套 cpu-1 白白少用一核
+     （Architect F2／F5、SD SD-01）。
+  2. GAP-D（QA P1）：`ci-gate.ps1` 無 Git Bash 時的 native fallback 缺 xdist 且 `.ps1` 零鎖。
+  3. GAP-E（QA P1）：AutoClaude `pyproject.toml` addopts 的 `-n auto --dist worksteal` 全庫無鎖。
+  4. DEF-200-290／292 帳本 open 且程式碼確實未修（SA 逐條 grep）；SA 另查 Windows Issue #10 labels=[]
+     為同根因（repo 無 `p1` label）。
+- **評估後不做**（四方一致）：ci-gate 雙軌並行、pre-push 十支守門工具並行、TLC 五軌並行（各軌已吃滿
+  核心，並行只互搶；ci-gate 雙軌真因是凍結基線 `snapshot.py` 競態非 CPU 預算）、單一重測試內部平行。
+  Architect 建議 root-infra-ci 182 檔逐檔 `py_compile` 改兩階段（先 `compileall -q -j0`，失敗才逐檔印
+  annotation）：主控評估收益約一次 CI 十秒級、需動受多鎖 workflow，**本輪不做**，留作候選。
+
+### 主控裁決與實作（兩包 Sonnet，檔案面互不相交；A 在主工作樹、B 在隔離 worktree 交 patch）
+
+**A 包（DEF-200-289＋GAP-D＋GAP-E）**：新增 `tools/lib/cpu_budget.py`（60 行）為唯一 CPU 預算算法：
+`total_budget(cpu_count, headless)`＝headless（`GITHUB_ACTIONS=true` 或 `AUTOSDD_CPU_HEADLESS=1`）用滿全部核心、
+互動保留一核，cap 9 沿用（SD-03 列為待量化 HYPOTHESIS，本輪不動）；`per_leg_budget(n_legs)` 平分；CLI
+`--legs N` 只印整數。`parallel_shard.worker_count()` 改委派（覆寫優先序不變）。pre-push／ci-gate.sh／
+ci-gate.ps1 在 legs 定案後一次算好、經 `AUTOSDD_PARALLEL_TESTS_WORKERS`＋`PYTEST_XDIST_AUTO_NUM_WORKERS`
+（xdist 3.8.0 `plugin.py::pytest_xdist_auto_num_workers()` 原生優先讀此變數，A 包已於 .venv 原始碼核實）
+廣播給全部 leg；使用者已顯式設定則不覆寫；算不出來靜默跳過——**刻意 fail-open**（純效能層，擋 push
+只會逼人 `--no-verify`）。今日 n_legs=1 ⇒ 行為與現況位元級相同，只有 CI headless 多 1 worker（預期
+ubuntu／windows 3→4、macos 2→3，待 push CI 實測）。GAP-D 判讀偏離 QA 字面：fallback 硬寫死只跑凍結基線
+v0.01，凍結基線不可加 xdist（`snapshot.py` 固定檔名競態，實測 1/3～4/9 翻紅，v0.01 依鐵律不可原地改），
+故鎖住「不加」（`CiGatePs1FallbackXdistTest`）而非加旗標；真正缺口＝fallback 無 LATEST 軌，另立
+DEF-200-318（open）。GAP-E 立 DEF-200-317 並以 tomllib 讀 pyproject 斷言（同輪 fixed）。棘輪重釘：
+`skip_tag_policy._TREE_FILE_FLOORS["tools/tests"]` 61→62（新增 test_cpu_budget.py 使樹 77→78 支）。
+
+**B 包（DEF-200-290＋292）**：root-infra-ci 哨兵 step 補抓最近成功 nightly-full run 的 `headSha`，對
+`WATCHED_PATHS`（12 條：AutoClaude pyproject／conftest／local_ci_gate 三檔、ci-gate.sh／.ps1、
+parallel_shard／cpu_budget／run_root_unittests、兩支 compat-ci yml）最後改動做 `git merge-base
+--is-ancestor`，未涵蓋只 `::warning::`（advisory：nightly-full 每週一班，硬阻斷會紅到下個週日）；gh／git
+失敗只 warning 說明無法評估。mac／win 告警 job：開單前 `gh label create p1／<平台>／nightly --force`
+自癒（idempotent），開單 step 移除 `continue-on-error: true`、`gh issue create` 失敗 `::error::`＋exit 1；
+自動關閉 step 未動。B 包本機以真 git 驗 SHA 判準：對 HEAD rc=0、對 HEAD~30 rc=1、對假 SHA rc=128 各走
+對應分支（[他包回報]）。
+
+**收尾單人窗口（主控）**：套 B patch（`git apply --check` OK）、解鎖並移除 B worktree、`git add` 兩新檔；
+護欄行數棘輪重釘 100211→100689（+478＝內容 +439＋本檔自身漂移 +39；分軌：回歸鎖軌 251／功能軌 227；
+`_REPIN_NET_CAP_SCHEDULE` 兌現 (153, 539) 並重新武裝 155／538；`_PHASE2_REVIEW_LOG` 依 R141 體例登記
+`[提案]`）；帳本三筆結案、兩筆新立、五列縮到 700 bytes 內；`check_defect_log_crossref.py` 本場實跑
+「✅ 缺陷帳本跨文件狀態一致：帳本 248 筆有效狀態紀錄、19 份掃描目標皆無矛盾」。
+
+### 驗證數字（[他包回報] 者為 A／B／QA 子 agent 本場實跑，主控未重跑；其餘為主控本場親跑）
+
+- [他包回報，QA] AutoClaude 本機全套 `4707 passed, 156 skipped in 32.92s`（real 33.297s、cpu 695%）；根層本機
+  全套 real 143.25s、cpu 724%（QA 的 `tail -80` 被 skip 清單擠滿，`Ran／OK` 逐字未擷取——誠實列缺）。
+- [他包回報，A] `PYTEST_XDIST_AUTO_NUM_WORKERS=3 … -n auto` 恰得 `[gw0] [gw1] [gw2]`；CLI `--legs 1`→9、
+  `GITHUB_ACTIONS=true --legs 1`→9（本機 10 核 cap 9 使兩者相同）、`--legs 2`→4、`--bogus` rc=2。
+- [他包回報，B] 針對性 `test_workflow_permission_concurrency_lock test_smoke_ci_sync` → `Ran 85 tests` OK；
+  14 支紅→綠鑑別力全成立。
+- 主控親跑：`python -m unittest test_adr_xplat001_c1c2_lock` → `Ran 192 tests in 11.604s` OK，
+  `GLC_LINES=100689`；根層全套最終結果見下一行（本場回填）。
+- 主控親跑根層全套（所有並行包停工、B worktree 移除後）：`rc=0`、`✅ unittest 數量下限釘選通過：發現 4340 個測試
+  （下限 4246）`、`模組耗時排行（前 5，共 152 模組，平行模式，worker=9）` 首位 `test_archive_defect_log.
+  TestMoveSubsetSelectionIsNamedAndTraceable: 94.0s`、`[skip census] tools/tests@darwin 共 46 支：platform=46
+  ／tool-absence=0／env-disabled=0／structural-pair=0／debt=0／untagged=0`、time `932.08s user 118.66s system
+  745% cpu 2:20.92 total`（最重派工單位 94.0s ＜ 牆鐘 140.9s，與 SD 快取實算「無結構性頭重腳輕」一致）。
+  另 `ruff check` 八支改動 py 檔 rc=0（B 包一處 F841 未用變數由主控同行數替換為段落錨點斷言）、`bash -n`
+  兩支 shell OK、三支 workflow yml `yaml.safe_load` OK、`ci-gate.ps1` 101 行全 CRLF。
+
+### 🔴 誠實劃界（本輪仍未解決，不可宣稱已完備）
+
+- CI headless 多 1 worker（4／4／3）只是公式推論，**push 後 CI log 的 `worker=` 才是證據**；本節數字待
+  下一輪或掌舵者現查 `gh run view <id> --log | grep worker=` 回填。
+- DEF-200-290 的 SHA warning 自本 push 起會持續出現到下次 nightly-full 成功為止——這是設計內訊號，不是回歸。
+- DEF-200-292 的自癒與 fail-loud 要等下一次 nightly-full **真失敗**才能觀測 issue 是否真的開出來。
+- DEF-200-318：`ci-gate.ps1` fallback 無 LATEST 軌；`run_local_nightly.ps1:46-50` 自陳本機 Windows nightly
+  缺 SDD 雙軌 xdist 覆蓋——解鎖條件：fallback 補 LATEST 軌（帶 xdist，LATEST 現查 `sdd_version.py`）並擴
+  `CiGatePs1FallbackXdistTest`，或掌舵者明文裁決 fallback 僅為降級路徑並在 .ps1 檔頭寫明。
+- cap=9 仍是校準到單一 10 核筆電的硬編數字（SD-03 HYPOTHESIS）；`os.cpu_count()` 用邏輯核心、未考慮
+  SMT／cpuset（SD-04）；自動細分候選層自落地至今在真實全套零觸發（SD-05，純安全網）；timing seed 只靠
+  人工 `refresh_parallel_timing_seed.py`，CI 無 `--check` 提醒（SD-06）——四項皆未立帳，屬觀察。
+- 護欄層 R152／R153 連續兩輪上升，`_REPIN_MAX_CONSECUTIVE_RISING_ROUNDS=2` 名額用罄 ⇒ **R154 必須淨減**。
+- 掌舵者 Windows 11 物理機互動 session 親跑 `python tools/run_root_unittests.py` 仍待掌舵者本人執行；
+  DEF-200-316 hook 單一載具方案 B 未動工（單人窗口、不可並行）。

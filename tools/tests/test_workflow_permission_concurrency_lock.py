@@ -287,6 +287,15 @@ def _job_display_name(job_text: str) -> str:
     return m.group(1)
 
 
+def _strip_comment_lines(text: str) -> str:
+    """去除所有純註解行（同 `TestRootInfraNightlyStalenessSentinel._exec_lines`
+    的慣例）——本檔的 step 內大量夾帶「解釋為何要拿掉 X」這類註解，逐字引用了
+    X 本身（例如解釋『拿掉 continue-on-error: true』的註解，字面就含
+    `continue-on-error: true`），對整段原文做 assertIn/assertNotIn 會被註解
+    滿足，抓不到功能行真正的漂移。"""
+    return "\n".join(ln for ln in text.splitlines() if not ln.lstrip().startswith("#"))
+
+
 class TestNightlyAlertConclusionWhitelist(unittest.TestCase):
     """R68（P2，兩平台同款）：`*-nightly-alert` 的結論判讀必須 fail-closed。
 
@@ -334,6 +343,102 @@ class TestNightlyAlertConclusionWhitelist(unittest.TestCase):
                     len(_CLOSE_GUARD_RE.findall(block)), 1,
                     f"{label} 的 {alert_id} 預期恰一個 `failed == 'false'` 關單守衛——"
                     f"守衛消失＝關單無條件執行；守衛變多＝出現第二條未經白名單判讀的關單路徑",
+                )
+
+
+# 「失敗時開單或於既有單留言」step 的抽取器（DEF-200-292 專用）。與 `_job_block`
+# 同慣例：抽不到即 fail-loud，不得靜默降級成整個 job 區塊比對——那會讓本 step
+# 的漂移被「自動關閉」那個仍合法保留 continue-on-error 的 step 滿足。
+_ISSUE_CREATE_STEP_RE = re.compile(
+    r"^      - name: 失敗時開單或於既有單留言.*?(?=^      - name: |\Z)",
+    re.MULTILINE | re.DOTALL,
+)
+
+
+def _issue_create_step(job_block: str) -> str:
+    m = _ISSUE_CREATE_STEP_RE.search(job_block)
+    if m is None:
+        raise AssertionError("抽不到「失敗時開單或於既有單留言」step——結構已變動")
+    return m.group(0)
+
+
+class TestNightlyAlertIssueCreationSelfHealsLabelsAndFailsLoud(unittest.TestCase):
+    """DEF-200-292：nightly 告警的開單 step 不得因缺 label 靜默失敗。
+
+    根因（四方審查已 VERIFIED）：repo 沒有 `p1` label（`gh label list` 現查為
+    證）⇒ `gh issue create --label "p1,macos,nightly"`（或 windows 版）必以
+    `could not add label: 'p1' not found` 失敗；該 step 原帶
+    `continue-on-error: true`，失敗被整層吃掉——mac 側從未真正開過單，windows
+    側雖有既存 Issue #10 但通道本身同樣是壞的（labels=[]）。修法：
+    （1）開單前先 `gh label create --force` 自癒缺漏的 label（idempotent）；
+    （2）拿掉該 step 的 continue-on-error，開單失敗必須讓 job 顯式失敗。
+    """
+
+    def test_issue_create_step_self_heals_required_labels_before_creating(self):
+        platform_label = {"windows-compat-ci.yml": "windows", "macos-compat-ci.yml": "macos"}
+        for label, path, _full_id, alert_id, _prefix in _NIGHTLY_PLATFORMS:
+            with self.subTest(workflow=label):
+                block = _job_block(path.read_text(encoding="utf-8"), alert_id)
+                step = _issue_create_step(block)
+                self.assertIn(
+                    "gh label create p1", step,
+                    f"{label} 的開單 step 未先自癒 `p1` label——repo 本無此 "
+                    f"label，`gh issue create --label \"p1,...\"` 會直接失敗",
+                )
+                self.assertIn(
+                    f"gh label create {platform_label[label]}", step,
+                    f"{label} 的自癒段缺對應平台 label `{platform_label[label]}`——"
+                    f"兩平台各自要補的 label 不同，不可共用同一份字面",
+                )
+                self.assertIn(
+                    "gh label create nightly", step,
+                    f"{label} 的自癒段缺 `nightly` label",
+                )
+                self.assertIn(
+                    "--force", step,
+                    f"{label} 的 `gh label create` 未帶 --force——已存在的 "
+                    f"label 會讓建立指令回非零，自癒段必須是 idempotent 操作",
+                )
+
+    def test_issue_create_step_no_longer_swallows_failure(self):
+        for label, path, _full_id, alert_id, _prefix in _NIGHTLY_PLATFORMS:
+            with self.subTest(workflow=label):
+                block = _job_block(path.read_text(encoding="utf-8"), alert_id)
+                step = _strip_comment_lines(_issue_create_step(block))
+                self.assertNotIn(
+                    "continue-on-error: true", step,
+                    f"{label} 的開單 step 仍帶 continue-on-error: true——"
+                    f"告警通道本身壞掉（如缺 label）會被靜默吃掉，job 恆綠",
+                )
+                self.assertIn(
+                    "::error::", step,
+                    f"{label} 的開單 step 缺 ::error:: 告警——開單失敗時必須顯式"
+                    f"出聲，不能只靠 gh CLI 自己印到 stderr",
+                )
+                self.assertRegex(
+                    step, r"exit 1",
+                    f"{label} 的開單 step 缺顯式 `exit 1`——開單失敗必須讓本 "
+                    f"step（進而本 job）失敗，不可靜默",
+                )
+
+    def test_close_branch_is_untouched_and_stays_best_effort(self):
+        """確認拿掉 continue-on-error 的是「開單 step」，不是「自動關閉」那一個。
+
+        後者是綠燈時的 best-effort 關單，失敗不需要讓 job 紅；本輪修法射程
+        刻意不動它，此鎖釘住這條界線。
+        """
+        close_step_re = re.compile(
+            r"^      - name: 綠燈時若有既有失敗 issue 則自動關閉.*?(?=^      - name: |\Z)",
+            re.MULTILINE | re.DOTALL,
+        )
+        for label, path, _full_id, alert_id, _prefix in _NIGHTLY_PLATFORMS:
+            with self.subTest(workflow=label):
+                block = _job_block(path.read_text(encoding="utf-8"), alert_id)
+                m = close_step_re.search(block)
+                self.assertIsNotNone(m, f"{label} 找不到「自動關閉」step——結構已變動")
+                self.assertIn(
+                    "continue-on-error: true", _strip_comment_lines(m.group(0)),
+                    f"{label} 的「自動關閉」step 不應被 DEF-200-292 修法動到",
                 )
 
 
@@ -801,6 +906,75 @@ class TestRootInfraNightlyStalenessSentinel(unittest.TestCase):
             f"root-infra-ci.yml 出現寫入權限（現況應全唯讀）：{perms!r}——"
             f"本 workflow 純驗證不回寫，最小權限原則",
         )
+
+    # --- DEF-200-290：headSha 涵蓋判準（advisory，不阻斷）--------------------
+
+    def test_sha_coverage_check_exists_and_reads_head_sha(self):
+        """哨兵必須額外查「最近成功 nightly-full 的 headSha 是否涵蓋監測路徑的
+        最後改動」，且只能是 advisory（::warning::），不得升成阻斷。
+
+        Rule 9（測意圖）：天數判準只回答「多久沒跑過」，答不了「跑過的那次到底
+        測到了多新的程式碼」——一支 nightly-full 十天內天天綠燈，但每次跑的都是
+        同一個舊 headSha，天數判準會滿足，而多 CPU／xdist 相關的最新變更其實從
+        未被真機驗證過。
+        """
+        exec_only = self._exec_lines(self._sentinel_step())
+        self.assertIn(
+            "headSha", exec_only,
+            "陳舊度哨兵沒有查 headSha——無法判斷最近成功的 nightly-full 涵蓋到"
+            "哪個 commit",
+        )
+        self.assertIn(
+            'git merge-base --is-ancestor "$last_change" "$last_sha"', exec_only,
+            "陳舊度哨兵未以 `git merge-base --is-ancestor` 判斷 headSha 是否涵蓋"
+            "監測路徑的最後改動——這是唯一正確的「A 是否已包含在 B 的歷史裡」判準",
+        )
+        self.assertIn(
+            "WATCHED_PATHS", exec_only,
+            "陳舊度哨兵沒有 WATCHED_PATHS——SHA 涵蓋判準需要一份監測路徑清單",
+        )
+
+    def test_sha_coverage_check_is_advisory_not_blocking(self):
+        """SHA 涵蓋判準只能 `::warning::`，且不得指派 `stale`／`exit`。
+
+        WHY：nightly-full 每週才排程一次，硬阻斷會讓每次動到 WATCHED_PATHS 的
+        push 都紅到下個週日；此判準與既有天數判準的豁免機制、R71 的 advisory
+        巡檢同層級——提醒，不擋路。
+        """
+        step = self._sentinel_step()
+        self.assertIn("--- DEF-200-290", step, "找不到 DEF-200-290 段落錨點註解")
+        # 判準本體（含 warning 訊息）獨立成一段，鎖只掃這一段：從
+        # `--- DEF-200-290` 註解到本 `for wf` 迴圈的 `done` 為止；用註解定位段落
+        # 起點時必須讀「含註解」的原文，不能用剝除註解後的 exec 行。
+        m = re.search(
+            r"# --- DEF-200-290：headSha 涵蓋判準.*?\n(?:.*\n)*?          done\n",
+            step,
+        )
+        self.assertIsNotNone(m, "找不到 DEF-200-290 SHA 涵蓋判準區塊——結構已變動")
+        block_exec = self._exec_lines(m.group(0))
+        self.assertIn("::warning::", block_exec, "SHA 涵蓋判準未出聲")
+        self.assertNotIn(
+            "::error::", block_exec,
+            "SHA 涵蓋判準出現 ::error::——本判準設計上是 advisory，不得升級為阻斷",
+        )
+        self.assertNotRegex(
+            block_exec, r"(?m)^\s*stale=1\s*$",
+            "SHA 涵蓋判準指派了 stale=1——這會讓本判準變成阻斷式，"
+            "與既有天數判準混為一談",
+        )
+        self.assertNotRegex(
+            block_exec, r"(?m)^\s*exit\s+1\s*$",
+            "SHA 涵蓋判準內出現獨立的 `exit 1`——本判準不得自行讓 step 失敗",
+        )
+
+    def test_watched_paths_includes_multi_cpu_xdist_surface(self):
+        step = self._sentinel_step()
+        for path in ("tools/lib/parallel_shard.py", "AutoClaude/pyproject.toml"):
+            self.assertIn(
+                path, step,
+                f"WATCHED_PATHS 缺 `{path}`——多 CPU／xdist 相關的執行面或其"
+                f"驗證載體未被監測到",
+            )
 
 
 # ══════════════════════════════════════════════════════════════════════════════

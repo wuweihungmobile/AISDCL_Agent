@@ -42,11 +42,32 @@ if (-not (Test-IsRealPython -CandidateName 'python')) {
   exit 1
 }
 
+# 跨 leg CPU 預算廣播（DEF-200-289）— fallback 版首個 pytest 呼叫之前。
+# WHY：與 ci-gate.sh／pre-push 同名區塊同一顆 SSOT（tools/lib/cpu_budget.py），
+# 廣播給下游任何會讀這兩個變數的呼叫端；使用者已顯式設定其一則不覆寫。
+if (-not $env:AUTOSDD_PARALLEL_TESTS_WORKERS -and -not $env:PYTEST_XDIST_AUTO_NUM_WORKERS) {
+  $_cpuBudget = & python "$repo/tools/lib/cpu_budget.py" --legs 1 2>$null
+  if ($_cpuBudget -match '^\d+$') {
+    $env:AUTOSDD_PARALLEL_TESTS_WORKERS = $_cpuBudget
+    $env:PYTEST_XDIST_AUTO_NUM_WORKERS = $_cpuBudget
+  }
+}
+
 $fw   = Join-Path $repo "AISDLC_SDD_v0.01"
 Set-Location $fw
 
 Write-Host "==> [1/3] pytest -m 'not chaos'（全套，含 offline reachability BFS）"
 # `-rs`（R59 ARCH-R59-01）：與 ci-gate.sh 對稱，skip 理由必須可見。
+# 🔴 GAP-D 判讀（DEF-200-289 四方審查列為 P1 缺口）：本行**刻意不加**
+# `-n auto --dist worksteal`——本 fallback 只跑 `AISDLC_SDD_v0.01`（凍結基線，
+# 見上方 `$fw`），而 ci-gate.sh 的差異化理由（該檔 XDIST_ARGS 判斷區塊，
+# `"${VER}" == "${LATEST}"` 才開 xdist）明文記載：凍結基線的 `snapshot.py`
+# 仍是舊版固定檔名 `.tmp`，多 worker 平行觸發 `save_abort_report()` 會互相
+# 競態，實測約 1/3~4/9 翻紅；只有 LATEST 帶著已修好的 `_atomic_write_text`。
+# 本 fallback 沒有 LATEST 軌（硬寫死 v0.01），若無條件加上 `-n auto`，等於
+# 把凍結基線唯一沒有的那個修法需求強加給它，複製回 ci-gate.sh 已經修掉的
+# 那個競態——這不是「與 .sh LATEST 軌一致」，而是「與 .sh 凍結基線軌一致」
+# （序列執行），對稱點是允許清單語意本身，不是逐字複製旗標。
 python -m pytest tools/fsm_runtime/tests/ -m "not chaos" -q -rs
 if ($LASTEXITCODE -ne 0) { throw "pytest 失敗" }
 

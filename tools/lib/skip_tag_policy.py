@@ -390,7 +390,11 @@ _TREE_FILE_FLOORS: dict[str, int] = {
     # `test_single_venv_identity.py`／`test_clean_venv_carrier.py` 兩支鎖檔後，所有棒停工後
     # 實測 `tools/tests` 77 支，60 只剩實測的 78%、低於 `TREE_FLOOR_RATIO` 80%，前置掃描第三向
     # 逐字指示「重釘為 61」⇒ 照填、零加減推算；方向＝上修＝判準更嚴）。
-    "tools/tests": 61,
+    # 🔴 DEF-200-289（第 A 包）重釘 61 → 62（同上機制：本輪新增 `test_cpu_budget.py`
+    # 後，`tools/tests` 由 77 支長到 **78**，61 只剩實測的 78%、低於 `TREE_FLOOR_RATIO`
+    # 80%，`run_root_unittests.py` 前置掃描第三向逐字指示「重釘為 62」⇒ 照填、零加減
+    # 推算；方向＝上修＝判準更嚴）。
+    "tools/tests": 62,
     # 🔴 R82 包 A2（DEBT-01）：204 → 205。新增 `AutoClaude/tests/contract/test_w6_deletion.py`
     # （AC2-2 的真斷言落點）後掃描面變 257，下限只剩實測的 79% ⇒ 依 `TREE_FLOOR_RATIO` 的
     # 防腐那一向轉紅。這正是它的設計意圖：下限不跟著長就會愈來愈鬆而沒有任何東西說話。

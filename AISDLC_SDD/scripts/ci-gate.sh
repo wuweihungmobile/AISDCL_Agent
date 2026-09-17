@@ -264,6 +264,30 @@ run_gate_for_version() {
   fi
 }
 
+# 跨 leg CPU 預算廣播（DEF-200-289）— 版本迴圈之前、legs 已判定完畢（雙軌
+# FW_VERSIONS 陣列已定案）。WHY：本檔 `[1/3]` 的 `-n auto --dist worksteal`
+# 與 `tools/lib/parallel_shard.py::worker_count()`（AutoClaude／AISDLC_SDD 兩邊
+# root-infra unittest）過去各自算 CPU 預算、互不知情（帳本 DEF-200-289）。本段
+# 一次算好、經由這兩個變數廣播給下面版本迴圈與共享 infra scripts/tests/ 的每個
+# pytest 子行程：`AUTOSDD_PARALLEL_TESTS_WORKERS` 是 `worker_count()` 的覆寫、
+# `PYTEST_XDIST_AUTO_NUM_WORKERS` 是 pytest-xdist 自己 `-n auto` 的覆寫（xdist
+# `plugin.py::pytest_xdist_auto_num_workers()` 原生讀這個變數），兩者天生共用
+# 一份值。使用者已顯式設定其一則不覆寫（尊重手動覆寫優先序）。
+# 🔴 算不出來（`tools/lib/cpu_budget.py` 缺席或執行失敗）一律靜默跳過、不擋
+# 閘門——本段純屬效能層（worker 數只影響快慢，不影響正確性），與上方 python
+# 缺席時的 fail-loud 紀律刻意不同調（該紀律守的是「閘門有沒有真的跑」，本段
+# 只決定跑多快）。
+if [[ -z "${AUTOSDD_PARALLEL_TESTS_WORKERS:-}" && -z "${PYTEST_XDIST_AUTO_NUM_WORKERS:-}" ]]; then
+  _cpu_budget="$(python "${REPO_ROOT}/tools/lib/cpu_budget.py" --legs 1 2>/dev/null || true)"
+  case "${_cpu_budget}" in
+    ''|*[!0-9]*) ;;
+    *)
+      export AUTOSDD_PARALLEL_TESTS_WORKERS="${_cpu_budget}"
+      export PYTEST_XDIST_AUTO_NUM_WORKERS="${_cpu_budget}"
+      ;;
+  esac
+fi
+
 for VER in "${FW_VERSIONS[@]}"; do
   run_gate_for_version "${VER}"
 done

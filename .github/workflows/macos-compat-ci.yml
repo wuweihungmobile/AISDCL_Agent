@@ -1463,7 +1463,12 @@ jobs:
 
       - name: 失敗時開單或於既有單留言（title 比對避免每日重覆開單）
         if: steps.check.outputs.failed == 'true'
-        continue-on-error: true
+        # 🔴 DEF-200-292：本 step 原帶 continue-on-error: true，而 repo 沒有 `p1`
+        # label（`gh label list` 已現查為證）⇒ `gh issue create --label
+        # "p1,macos,nightly"` 必以 `could not add label: 'p1' not found` 失敗，
+        # 被這層 continue-on-error 吃掉——mac 側從未真正開過單，告警通道本身壞了
+        # 卻長期綠燈。移除本層 continue-on-error：開單失敗必須讓本 step（進而本
+        # job）顯式失敗，不可靜默；label 缺失改由下方「自癒」段先行補建根除。
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -1471,12 +1476,26 @@ jobs:
           CONCLUSION: ${{ steps.check.outputs.conclusion }}
         run: |
           set -euo pipefail
+          # 告警 label 自癒（DEF-200-292）：p1／macos／nightly 三個 label 存在即用、
+          # 不存在即建（--force 對既存 label 是 idempotent 更新，同時補上缺欄）。
+          # 本段自身失敗只 ::warning:: 降級（改為不帶該 label 開單），不因此拖垮
+          # 下面真正的開單動作——label 自癒與開單是兩件事，前者失敗不該悶掉後者。
+          gh label create p1 --repo "${REPO}" --color B60205 \
+            --description "P1：需人工排查的 nightly 深度回歸失敗" --force \
+            || echo "::warning::p1 label 建立/更新失敗（rc=$?），將不帶該 label 開單"
+          gh label create macos --repo "${REPO}" --color 1D76DB \
+            --description "macOS 相關" --force \
+            || echo "::warning::macos label 建立/更新失敗（rc=$?），將不帶該 label 開單"
+          gh label create nightly --repo "${REPO}" --color 5319E7 \
+            --description "nightly 排程相關" --force \
+            || echo "::warning::nightly label 建立/更新失敗（rc=$?），將不帶該 label 開單"
           TITLE="[P1] macos-nightly-full 深度回歸失敗"
           existing=$(gh issue list --repo "${REPO}" --state open --search "\"${TITLE}\" in:title" --json number --jq '.[0].number // empty')
           if [ -n "$existing" ]; then
             gh issue comment "$existing" --repo "${REPO}" --body "再次失敗（實際結論：\`${CONCLUSION}\`）：${RUN_URL}"
           else
-            gh issue create --repo "${REPO}" --title "${TITLE}" --label "p1,macos,nightly" --body "macos-nightly-full（continue-on-error 非阻斷 job，不會擋 push/PR）非綠燈，需人工排查，請勿長期忽略。本次實際結論：\`${CONCLUSION}\`（\`success\` 以外一律開單；\`unknown\`／\`api-error\` 代表**根本沒跑起來或查不到**，例如帳務停擺讓 job 完全未配置 runner，見 DEF-101-081）。首次偵測到的執行：${RUN_URL}。恢復 \`success\` 後本 job 會自動關閉本 issue。"
+            gh issue create --repo "${REPO}" --title "${TITLE}" --label "p1,macos,nightly" --body "macos-nightly-full（continue-on-error 非阻斷 job，不會擋 push/PR）非綠燈，需人工排查，請勿長期忽略。本次實際結論：\`${CONCLUSION}\`（\`success\` 以外一律開單；\`unknown\`／\`api-error\` 代表**根本沒跑起來或查不到**，例如帳務停擺讓 job 完全未配置 runner，見 DEF-101-081）。首次偵測到的執行：${RUN_URL}。恢復 \`success\` 後本 job 會自動關閉本 issue。" \
+              || { echo "::error::nightly 告警開單失敗（rc=$?）——告警通道本身壞了，不可靜默"; exit 1; }
           fi
 
       - name: 綠燈時若有既有失敗 issue 則自動關閉（白名單：僅 conclusion == success）

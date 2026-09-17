@@ -50,6 +50,7 @@ import time
 import unittest
 from pathlib import Path
 
+import cpu_budget  # DEF-200-289：跨 leg CPU 預算 SSOT，worker_count() 委派其公式
 import parallel_timing_cache  # DEF-200-274 第九輪 D2：歷史耗時快取／LPT 排序
 
 # 🔴 本檔既是被 `run_parallel()` 以 `python <本檔>` 生出的 child target，自己也在
@@ -105,8 +106,10 @@ def should_run_parallel(start_dir: Path, real_start_dir: Path, workers: int) -> 
 
 
 def worker_count(cpu_count: int | None = None) -> int:
-    """`AUTOSDD_PARALLEL_TESTS_WORKERS` 可覆寫；未設時＝`max(1, min(9, cpu-1))`：
-    保留一核心給前景，上限 9（第九輪：8→9，本機 10 核 8P+2E 恰頂到新 cap）。
+    """`AUTOSDD_PARALLEL_TESTS_WORKERS` 可覆寫；未設時委派 `cpu_budget.total_budget()`：
+    互動環境＝`max(1, min(9, cpu-1))`（保留一核心給前景，上限 9：第九輪 8→9，
+    本機 10 核 8P+2E 恰頂到新 cap）；headless（`GITHUB_ACTIONS=true` 或
+    `AUTOSDD_CPU_HEADLESS=1`）＝`max(1, min(9, cpu))`（無前景可保留，見下）。
 
     🔴 第十輪訂正（SD-02）：CI runner vCPU 數普遍 <= 10，`min(9, cpu-1)` 這一步
     的 cap 對它們不生效、公式收斂成單純的 `cpu-1`——但這不等於「worker 數不受
@@ -116,6 +119,12 @@ def worker_count(cpu_count: int | None = None) -> int:
     皆與公式吻合；三者 CI 牆鐘 575~663s 是本機 156.6s 的 3.67~4.23x，成因是
     runner 核心數本就遠少於本機的 worker=9，不是平行機制在 CI 上失效。
     覆寫值非正整數時忽略、退回預設公式（壞掉的旗標不該讓平行模式整支炸掉）。
+
+    🔴 DEF-200-289（第 A 包）：CI runner 是無人值守 headless，「保留一核給前景」
+    在那裡毫無意義、白白少用一核（沿用上段第十輪實測：ubuntu/windows 4 vCPU
+    worker=3、macos 3 vCPU worker=2）。本輪起 headless 環境不再保留前景 ⇒ 同
+    三支 runner 應變為 4/4/3——公式與判準本身委派 `tools/lib/cpu_budget.py`
+    （跨 leg CPU 預算 SSOT，見該檔 WHY），本函式簽章與覆寫優先序不變。
     """
     override = os.environ.get(_ENV_WORKERS)
     if override:
@@ -125,8 +134,7 @@ def worker_count(cpu_count: int | None = None) -> int:
             parsed = 0
         if parsed > 0:
             return parsed
-    cpu = cpu_count if cpu_count is not None else (os.cpu_count() or 2)
-    return max(1, min(9, cpu - 1))
+    return cpu_budget.total_budget(cpu_count)
 
 
 def _flatten(suite: unittest.TestSuite) -> list[unittest.TestCase]:

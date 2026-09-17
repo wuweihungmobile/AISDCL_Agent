@@ -276,7 +276,19 @@ class WorkerCountFormulaTest(unittest.TestCase):
     等既有測試全數用 `mock.patch.object(parallel_shard, "worker_count", ...)` 整個換掉
     函式本體，從未直接呼叫 `worker_count(cpu_count=N)` 斷言公式輸出本身——公式
     （`max(1, min(8, cpu-1))`）、環境變數覆寫、非法值退回三條路徑因此零覆蓋。本類別
-    直接呼叫真正的函式，不 mock 它。"""
+    直接呼叫真正的函式，不 mock 它。
+
+    🔴 DEF-200-289（第 A 包）：`worker_count()` 委派 `cpu_budget.total_budget()` 後，
+    公式在 headless（`GITHUB_ACTIONS=true`／`AUTOSDD_CPU_HEADLESS=1`）下改為
+    `cpu`（不再 `cpu-1`）。以下三支既有測試斷言的是**互動環境**公式，故一律顯式
+    拔掉這兩個環境變數（`clear=False` 的 `mock.patch.dict` 不會拔掉外部殘留值，
+    必須另外 `pop`）——否則本機（無 `GITHUB_ACTIONS`）綠、CI（`GITHUB_ACTIONS=true`）
+    紅，同一支測試在兩處給出不同答案。"""
+
+    def _force_interactive_env(self) -> None:
+        """把 `GITHUB_ACTIONS`／`AUTOSDD_CPU_HEADLESS` 拔掉，確保走互動公式分支。"""
+        os.environ.pop("GITHUB_ACTIONS", None)
+        os.environ.pop("AUTOSDD_CPU_HEADLESS", None)
 
     def test_formula_across_cpu_counts(self) -> None:
         ps = run_root_unittests.parallel_shard
@@ -284,10 +296,11 @@ class WorkerCountFormulaTest(unittest.TestCase):
         cases = {0: 1, 1: 1, 2: 1, 9: 8, 10: 9, 100: 9}
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop(ps._ENV_WORKERS, None)  # 清掉本機 shell profile 可能殘留的覆寫
+            self._force_interactive_env()
             for cpu, expected in cases.items():
                 self.assertEqual(
                     ps.worker_count(cpu_count=cpu), expected,
-                    f"cpu_count={cpu} 應得 {expected}（公式 max(1, min(9, cpu-1))）")
+                    f"cpu_count={cpu} 應得 {expected}（互動公式 max(1, min(9, cpu-1))）")
 
     def test_workers_env_override_wins_over_formula(self) -> None:
         ps = run_root_unittests.parallel_shard
@@ -300,13 +313,15 @@ class WorkerCountFormulaTest(unittest.TestCase):
         ps = run_root_unittests.parallel_shard
         for bad in ("0", "-5", "abc"):
             with mock.patch.dict(os.environ, {ps._ENV_WORKERS: bad}, clear=False):
+                self._force_interactive_env()
                 self.assertEqual(
                     ps.worker_count(cpu_count=9), 8,
-                    f"非法覆寫值 {bad!r} 應退回預設公式，不應讓平行模式整支炸掉")
+                    f"非法覆寫值 {bad!r} 應退回互動預設公式，不應讓平行模式整支炸掉")
 
     def test_none_cpu_count_uses_real_os_cpu_count_within_bounds(self) -> None:
         """`cpu_count=None` 時走真的 `os.cpu_count()`——不斷言精確值（該值隨執行機器
-        核心數而變），只斷言落在公式的值域 `[1, 9]` 內（第九輪：cap 8→9）。"""
+        核心數而變），只斷言落在公式的值域 `[1, 9]` 內（第九輪：cap 8→9；headless／
+        互動兩分支的 cap 相同，此處無需固定分支）。"""
         ps = run_root_unittests.parallel_shard
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop(ps._ENV_WORKERS, None)

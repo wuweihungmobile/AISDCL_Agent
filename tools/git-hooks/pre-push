@@ -231,6 +231,27 @@ $ALL_FILES
 IGFILES_EOF
 fi
 
+# 跨 leg CPU 預算廣播（DEF-200-289）— legs 已判定完畢、尚未跑第一個 leg。
+# WHY：`parallel_shard.worker_count()`（AutoClaude/AISDLC_SDD 兩邊各自的 root-infra
+# unittest）與 `pytest -n auto`（AutoClaude leg／AISDLC_SDD leg 各自的 pytest 子行程）
+# 過去各自算 CPU 預算、互不知情（帳本 DEF-200-289）。本段一次算好、經由這兩個變數
+# 廣播給下面全部 leg：`AUTOSDD_PARALLEL_TESTS_WORKERS` 是 `worker_count()` 的覆寫、
+# `PYTEST_XDIST_AUTO_NUM_WORKERS` 是 pytest-xdist 自己 `-n auto` 的覆寫（xdist
+# `plugin.py::pytest_xdist_auto_num_workers()` 原生讀這個變數），兩者天生共用一份值。
+# 使用者已顯式設定其一則不覆寫（尊重手動覆寫優先序，同 `worker_count()` 既有慣例）。
+# 🔴 算不出來（`$PY` 缺席、`cpu_budget.py` 不存在或執行失敗）一律靜默跳過、不擋
+# push——這是本檔對「python 缺席 fail-loud」既有紀律的刻意偏離：本段純屬效能層
+# （worker 數只影響快慢，不影響正確性），擋下 push 換來的唯一效果是逼人
+# `--no-verify`，得不償失。`test_pre_push_dispatcher.py` 在合成樹真跑本 dispatcher
+# 時，該樹底下沒有 `tools/lib/cpu_budget.py`，本段必須在那種情境下安靜跳過。
+if [ -z "${AUTOSDD_PARALLEL_TESTS_WORKERS:-}" ] && [ -z "${PYTEST_XDIST_AUTO_NUM_WORKERS:-}" ] && [ -n "$PY" ]; then
+  _cpu_budget="$("$PY" "$TOPLEVEL/tools/lib/cpu_budget.py" --legs 1 2>/dev/null || true)"
+  case "$_cpu_budget" in
+    ''|*[!0-9]*) ;;
+    *) export AUTOSDD_PARALLEL_TESTS_WORKERS="$_cpu_budget" PYTEST_XDIST_AUTO_NUM_WORKERS="$_cpu_budget" ;;
+  esac
+fi
+
 # skip 分群天花板（S3）接線 — R79 收輪（QA-R79／SA-R79）
 # ---------------------------------------------------------------------------
 # 缺陷本體：R79 落地的「skip 分群天花板」唯一的消費者是 AutoClaude/tools/ 底下的本機
