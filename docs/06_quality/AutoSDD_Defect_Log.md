@@ -318,6 +318,7 @@
 | DEF-200-316 | 2026-09-17 | 四方審查 Architect A3（本欄刻意零輪號） | **mac／Windows 各自的成對 hook 條目必然 ENOENT／EFTYPE**（by-design 噪音，`runtime_carrier_verdict()` 已歸類正確）；方案 B symlink 裁決的立帳本步驟遲至本輪才補。詳情見 CrossPlatform_R152_DEF200314_MacNightly_Evidence.md | P3 | 掌舵者 2026-09-17 裁決：**做方案 B**（單一 Windows 形態載具＋mac symlink；單人窗口；設計書 PlanB_design.md）；承接輪次：**未指派**；解鎖條件：mac `claude -p --debug hooks` 零 posix_spawn ENOENT＋SessionStart success | open（2026-09-17）；裁決已回填 |
 | DEF-200-317 | 2026-09-18 | 多 CPU 四方獨立審查 QA GAP-E（本欄刻意零輪號） | **AutoClaude `pyproject.toml` addopts 的 xdist 旗標全庫無鎖**：拿掉即整套退回序列而零紅。詳見 CrossPlatform_DEF200274_Parallel_Tests_Evidence.md〈第十二輪〉 | P2 | 跨專案回歸鎖放 tools/tests | fixed（2026-09-18）：`test_cpu_budget.py` 讀 toml 斷言，紅→綠已實證 |
 | DEF-200-318 | 2026-09-18 | 多 CPU 四方獨立審查 QA GAP-D＋A 包判讀（本欄刻意零輪號） | **`ci-gate.ps1` 無 Git Bash 時的 fallback 只跑凍結基線、無 LATEST 軌**（QA 原判「缺 xdist」，A 包判讀凍結基線不可加 xdist 並鎖住「不加」）。詳見 CrossPlatform_DEF200274_Parallel_Tests_Evidence.md〈第十二輪〉 | P3 | 承接輪次：**未指派**；解鎖條件見證據檔 | open（2026-09-18） |
+| DEF-200-319 | 2026-09-18 | 多 CPU 四方審查收尾 pre-push 第二次實跑 root leg（本欄刻意零輪號） | **`test_dev_start` SIGINT 兩支同型測試 pidfile TOCTOU**：只等 `is_file()` 不等內容，孫行程 create→write 之間讀到空字串 `ValueError`，時序性翻紅。詳見 CrossPlatform_DEF200274_Parallel_Tests_Evidence.md〈第十二輪〉 | P3 | 修測試（等 pid 文字 `isdigit()`） | fixed（2026-09-18）：改輪詢 pid 文字而非檔案存在，+6 行歸回歸鎖軌 |
 
 > **R41「四方複審裁決總結」敘事段落已搬遷至 [`AutoSDD_Defect_Log_archive_17.md`](AutoSDD_Defect_Log_archive_17.md)（R43 帳本 housekeeping，逐字保全）。**
 

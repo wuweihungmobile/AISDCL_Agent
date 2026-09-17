@@ -1160,9 +1160,13 @@ parallel_shard／cpu_budget／run_root_unittests、兩支 compat-ci yml）最後
 對應分支（[他包回報]）。
 
 **收尾單人窗口（主控）**：套 B patch（`git apply --check` OK）、解鎖並移除 B worktree、`git add` 兩新檔；
-護欄行數棘輪重釘 100211→100689（+478＝內容 +439＋本檔自身漂移 +39；分軌：回歸鎖軌 251／功能軌 227；
+護欄行數棘輪重釘 100211→100695（+484＝內容 +445＋本檔自身漂移 +39；分軌：回歸鎖軌 257／功能軌 227；
 `_REPIN_NET_CAP_SCHEDULE` 兌現 (153, 539) 並重新武裝 155／538；`_PHASE2_REVIEW_LOG` 依 R141 體例登記
-`[提案]`）；帳本三筆結案、兩筆新立、五列縮到 700 bytes 內；`check_defect_log_crossref.py` 本場實跑
+`[提案]`）；帳本三筆結案、三筆新立（317 同輪修、318 open、319 同輪修）、五列縮到 700 bytes 內；
+第一次 push 被 SDD leg `test_ci_paths_cover_root_consumers` 正確擋下（新檔未列入兩支 compat-ci 觸發 paths）→ 三支
+workflow 補路徑；第二次 push 被 root leg 一支 error 擋下：`test_dev_start.TestSigintForwardsToBootstrapProcessGroup`
+讀 pidfile 得空字串 `ValueError`（只等 `is_file()` 不等內容，孫行程 create→write 之間的 TOCTOU；同碼在第一次
+push 與主控親跑皆綠＝時序性），立 DEF-200-319 並把該類別兩支同型測試改等 pid 文字 `isdigit()`（+6 行，歸回歸鎖軌）；`check_defect_log_crossref.py` 本場實跑
 「✅ 缺陷帳本跨文件狀態一致：帳本 248 筆有效狀態紀錄、19 份掃描目標皆無矛盾」。
 
 ### 驗證數字（[他包回報] 者為 A／B／QA 子 agent 本場實跑，主控未重跑；其餘為主控本場親跑）

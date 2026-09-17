@@ -357,7 +357,7 @@ docstring「四件事」訂正為「五件事」（`test_nightly_interpreter_det
   ≤0），否則款(11) 當場紅。cap 到期義務同輪兌現：`_REPIN_NET_CAP_SCHEDULE` 追加 `(153, 539)`、
   重新武裝 `_REPIN_NET_CAP_DUE_ROUND=155`／`_REPIN_NET_CAP_DUE_TARGET=538`。
 
-<!-- guard-total:R153 --> R153 護欄層累積淨額＝ 100211 → 100689（+478）——內容成長 +439：
+<!-- guard-total:R153 --> R153 護欄層累積淨額＝ 100211 → 100695（+484）——內容成長 +445：
 `test_cpu_budget.py` 新檔 158（DEF-200-289 跨 leg CPU 預算 SSOT 的公式／cap／floor／per_leg／CLI
 契約鎖；DEF-200-317 AutoClaude `pyproject.toml` addopts `-n auto --dist worksteal` 讀 toml 斷言寄居
 其中）——新判準能力鎖檔，**全額歸功能軌**（GAP-E 鎖保守不計入回歸鎖軌）；`test_ci_gate_xdist_
@@ -366,13 +366,14 @@ allowlist.py` 121→213（+92：`CiGatePs1FallbackXdistTest` 鎖住 DEF-200-318�
 歸回歸鎖軌；`test_run_root_unittests.py` 4443→4458（+15：`WorkerCountFormulaTest` 三支顯式拔掉
 `GITHUB_ACTIONS`／`AUTOSDD_CPU_HEADLESS`，避免本機綠 CI 紅）歸回歸鎖軌；`test_workflow_permission_
 concurrency_lock.py` 1406→1580（+174＝DEF-200-292 告警 label 自癒＋開單不吞錯的三支鎖與兩支 helper
-共 105 歸回歸鎖軌＋DEF-200-290 headSha 涵蓋 advisory 三支新判準鎖 69 歸功能軌）。另 +39 本檔
+共 105 歸回歸鎖軌＋DEF-200-290 headSha 涵蓋 advisory 三支新判準鎖 69 歸功能軌）；`test_dev_start.py`
+6649→6655（+6：DEF-200-319 pre-push 第二次實跑抓到 SIGINT 兩支同型測試 pidfile TOCTOU，改等 pid 文字）歸回歸鎖軌。另 +39 本檔
 （`test_adr_xplat001_c1c2_lock.py`）自身逐檔漂移收斂（主表新增兩列＋`_REGRESSION_LANE_LOG` 同輪列＋
 `_REPIN_NET_CAP_SCHEDULE` 兌現列＋`_PHASE2_REVIEW_LOG` 同輪 `[提案]` 列〔體例同 R141 那筆：非對 (c)
 方向新判斷，僅因稽核痕跡推進到 R153 觸發 §6 五輪時效且 R147 的「維持觀察」名額已用罄〕＋
 `_FROZEN_PREFIX_REWRITE_LEDGER` 接鏈列；凍結前綴 `_REPIN_LOG_FROZEN_PREFIX_LEN` 228→230、
-`_REPIN_LOG_HISTORY_SHA256` 同步重釘），全額歸回歸鎖軌。回歸鎖軌淨額合計 251（`_REGRESSION_LANE_LOG`
-R153 那筆＝92＋15＋105＋39 自身漂移，未超軌上限 309、未使用任何一次性例外名冊；功能軌 227＝158＋69）。
-缺陷帳本見 `docs/06_quality/AutoSDD_Defect_Log.md` DEF-200-289／290／292／317／318；四方審查與實作
+`_REPIN_LOG_HISTORY_SHA256` 同步重釘），全額歸回歸鎖軌。回歸鎖軌淨額合計 257（`_REGRESSION_LANE_LOG`
+R153 那筆＝92＋15＋105＋6＋39 自身漂移，未超軌上限 309、未使用任何一次性例外名冊；功能軌 227＝158＋69）。
+缺陷帳本見 `docs/06_quality/AutoSDD_Defect_Log.md` DEF-200-289／290／292／317／318／319；四方審查與實作
 證據見 `CrossPlatform_DEF200274_Parallel_Tests_Evidence.md`〈第十二輪〉。此附記為 doc-total 對帳
 （≥2 站點）另一站點寄居 `AutoSDD_improving_112.md`，同 R129～R152 寄居體例。round-label-ok

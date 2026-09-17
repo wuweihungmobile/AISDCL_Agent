@@ -1508,10 +1508,13 @@ class TestStreamNewProcessGroupSurvivesDirectChildDeath(DevStartTestCase):
                                   "（setsid 語意）")
 
                 deadline = time.monotonic() + 5
-                while not pidfile.is_file() and time.monotonic() < deadline:
+                pid_text = ""  # DEF-200-319：只等 is_file 會在孫行程 create→write 之間讀到空字串
+                while not pid_text.isdigit() and time.monotonic() < deadline:
                     time.sleep(0.05)
-                self.assertTrue(pidfile.is_file(), "孫行程應已 fork 出來（測試前提）")
-                grandchild_pid = int(pidfile.read_text(encoding="utf-8").strip())
+                    if pidfile.is_file():
+                        pid_text = pidfile.read_text(encoding="utf-8").strip()
+                self.assertTrue(pid_text.isdigit(), "孫行程應已寫入 pid（空檔＝尚未寫完）")
+                grandchild_pid = int(pid_text)
 
                 # 模擬使用者/監控工具只精準 kill 掉直接子行程（不碰整個 group）
                 os.kill(pgid, signal.SIGKILL)
@@ -1699,10 +1702,13 @@ class TestSigintForwardsToBootstrapProcessGroup(DevStartTestCase):
                 self.assertIn("pgid", result, "應已取得直接子行程 pgid（測試前提）")
 
                 deadline = time.monotonic() + 5
-                while not pidfile.is_file() and time.monotonic() < deadline:
+                pid_text = ""  # DEF-200-319：只等 is_file 會在孫行程 create→write 之間讀到空字串
+                while not pid_text.isdigit() and time.monotonic() < deadline:
                     time.sleep(0.05)
-                self.assertTrue(pidfile.is_file(), "孫行程應已 fork 出來（測試前提）")
-                grandchild_pid = int(pidfile.read_text(encoding="utf-8").strip())
+                    if pidfile.is_file():
+                        pid_text = pidfile.read_text(encoding="utf-8").strip()
+                self.assertTrue(pid_text.isdigit(), "孫行程應已寫入 pid（空檔＝尚未寫完）")
+                grandchild_pid = int(pid_text)
 
                 # 模擬使用者在 bootstrap 執行期間按下 Ctrl-C：對自己送出真實 SIGINT
                 time.sleep(0.1)
