@@ -37,7 +37,6 @@
 |---|---|---|---|---|
 | DEF-101-693 | Windows 實機 | 2026-08-21 | 下一個 Windows 真機輪逐列覆核 windows-smoke 22 步（`tools/tests/test_smoke_ci_sync.py::test_registered_smoke_groups_exist_in_that_script` 先行，另需真機執行紀錄） | 2026-08-31 |
 | DEF-101-703 | 其他-DEF-200-291舊碼（census未登記剖面一律判紅）修復ddaf6301／0ee23312晚於最近一次排程run才進main，09-17手動dispatch兩平台nightly-full已success，條件字面要排程run故待09-21排程窗口 | 2026-08-21 | `*-nightly-full`（windows-compat-ci.yml／macos-compat-ci.yml）至少一次排程視窗成功（`gh run list --workflow=windows-compat-ci.yml --event schedule` 見 `conclusion=success` 且 `steps>0`），之後移除 `WAIVER_UNTIL` | 2026-09-17 |
-| DEF-200-174 | GitHub Actions 帳務 | 2026-08-21 | 帳號所有者查 GitHub Billing 頁面確認 spend limit 已調高或 runner 計費已恢復，`gh api repos/.../actions/runs` 觀測對應 job 的 `runner_id≠0` | 2026-09-17 |
 | DEF-200-075 | 其他-macOS實機（darwin執行面量測值，Windows結構上量不到也修不了） | 2026-08-27 | 回 mac 真機後第一動作＝重量 AutoClaude 樹 skip census（量測入口見主帳本該列配方）；macos-compat-ci 長期紅不可依賴 | 2026-09-17 |
 | DEF-200-313 | Windows 實機 | 2026-09-15 | 回 Windows 真機、人在互動終端機：`python tools/run_root_unittests.py` 跑到一半按 Ctrl-C，再以 `Get-CimInstance Win32_Process` 過濾 CommandLine 含 `run_root_unittests` 或 `unittest` 者須為空；結果寫進 `CrossPlatform_DEF200274_Parallel_Tests_Evidence.md`〈第十一輪〉③ 後移出本表 | 2026-09-15 |
 
@@ -104,6 +103,14 @@ headSha `33b9470f`（11:24 UTC），`git merge-base --is-ancestor` 證實非其�
 與第 8 步 AISDLC_SDD LATEST fsm_runtime pytest 皆 success）、「Windows smoke」
 `success`／31 steps、「Windows nightly 失敗提醒」`success`。三 job 全綠、無帳務空轉。
 08-27 複查時的 `failure` 真因見上段 DEF-101-703（DEF-200-291 舊碼）。
+
+### DEF-200-174（複查 2026-09-17＝解鎖條件達成，列已移出本表）
+
+兩半條件同日達成：機械半 `runner_id≠0` 已於 09-14 排程 run（`runner_id=1000004590`）與 09-17
+dispatch run `35175312397`／`35175314395`（三 job 全 success）確認；人工半＝帳號所有者於
+2026-09-17 在 Claude Code 互動問題中親口確認「GitHub Actions 計費已不是問題、可以結掉」
+（repo 自 2026-08-25 轉 Public，Actions 分鐘不計費）。主帳本無本列（已於 archive_67 以
+closed-by-decision 索引），本段即結案紀錄。
 
 ### DEF-200-174（複查 2026-09-17）
 
