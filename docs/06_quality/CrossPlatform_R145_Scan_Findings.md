@@ -316,7 +316,7 @@ DEF-200-301～DEF-200-306。此附記為 doc-total 對帳（≥2 站點）另一
   記帳，寄居本檔（同 R129～R151 寄居體例，不另開新檔）。本輪**非淨減法輪**（R151 淨減法輪已把
   款(11) 連續上升 streak 歸零，本輪可為正）；cap 到期輪 R153 尚未到，本輪維持 540 不動。
 
-<!-- guard-total:R152 --> R152 護欄層累積淨額＝ 99812 → 100098（+286）——內容成長 +249：
+<!-- guard-total:R152 --> R152 護欄層累積淨額＝ 99812 → 100211（+399）——內容成長 +249：
 `test_nightly_interpreter_determinism.py` 312→384（+72，DEF-200-307：mac nightly／smoke 釘死
 根層 .venv 的 F 項斷言）／`test_dev_start.py` 6540→6649（+109，DEF-200-308：雜散 venv 全樹
 遞迴掃描＋`step_venv` 擋下）／`test_clean_venv_carrier.py` 199→262（+63，DEF-200-309：clean_venv_
@@ -334,4 +334,17 @@ shebang 包裝）同輪追加、歸回歸鎖軌。另 +37 本檔（`test_adr_xpl
 名冊；DEF-200-310 的 +1 明文排除於本軌淨額之外）。分桶棘輪同輪重釘：`prose` 桶與 `guard_self`
 桶皆與上輪相同、未變動（值以 `guard_layer_bucket_census.py --grain chunk` 現查為準）。缺陷
 帳本見 `docs/06_quality/AutoSDD_Defect_Log.md` DEF-200-307～DEF-200-310。此附記為 doc-total
-對帳（≥2 站點）另一站點寄居 `AutoSDD_improving_112.md`，同 R129～R151 寄居體例。round-label-ok
+對帳（≥2 站點）另一站點寄居 `AutoSDD_improving_112.md`，同 R129～R151 寄居體例。
+
+**R152 沿用追加**（+113，累計兩批）：第一批 +71——DEF-200-314（mac launchd nightly
+三症狀修復）新增 `test_nightly_interpreter_determinism.py` G 項兩支斷言（+58，先紅
+後綠實證：mac 對稱 `--unattended` 呼叫、Homebrew bin 存在性探測）＋本檔（`test_adr_
+xplat001_c1c2_lock.py`）自身逐檔漂移收斂（+13）。第二批 +42——四方複審四項非阻斷
+修正：Homebrew append-only 位置鎖三支斷言＋run_stage 3 整行 unattended 鎖＋
+docstring「四件事」訂正為「五件事」（`test_nightly_interpreter_determinism.py`
++29，先紅後綠實證：對 HEAD 舊版與修前的往前插版各驗一次紅）＋本檔自身逐檔漂移收斂
+（+13，凍結前綴 `_REPIN_LOG_FROZEN_PREFIX_LEN` 226→228、`_REPIN_LOG_HISTORY_SHA256`／
+`_FROZEN_PREFIX_REWRITE_LEDGER` 同步重釘）。兩批皆全額歸功能軌（`[全額功能軌]` 標記，
+非回歸鎖）。
+逐項見 `CrossPlatform_R152_DEF200314_MacNightly_Evidence.md`；缺陷帳本見
+`docs/06_quality/AutoSDD_Defect_Log.md` DEF-200-314～DEF-200-316。round-label-ok

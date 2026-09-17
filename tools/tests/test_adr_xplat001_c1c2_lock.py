@@ -682,7 +682,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 8239,
+    "test_adr_xplat001_c1c2_lock.py": 8265,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 3726,
@@ -721,7 +721,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_macos_smoke_skip_honesty.py": 225,
     "test_maturity_criteria_r79.py": 431,
     "test_negative_existence_claims_r82.py": 370,
-    "test_nightly_interpreter_determinism.py": 384,
+    "test_nightly_interpreter_determinism.py": 471,
     "test_no_invalid_escape_sequences.py": 315,
     "test_ntfs_trailing_space_device_name.py": 698,
     "test_onboarding_parity_interlock.py": 233,
@@ -2035,6 +2035,26 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      " 最高權限下 test_find_git_bash_parity.py 的 _real_shim symlink venv launcher ⇒ rc=106，"
      "改 Windows 一律 shebang 包裝）的回歸鎖修正，含本列自身收斂，全額歸回歸鎖軌。"
      "逐檔清單見 CrossPlatform_R145_Scan_Findings.md〈R152 沿用〉。"),
+    ("R152", 100098, 100156, 58,  # round-label-ok：DEF-200-314 mac launchd nightly 三症狀修復
+     "[非淨減法輪][全額功能軌][同輪追加] DEF-200-314（mac launchd nightly 三症狀：S1 PATH 缺 "
+     "Homebrew／S2 兩個 darwin+nopg 剖面未登記／S3 `.sh` 缺 --unattended）的新增測試涵蓋："
+     "test_nightly_interpreter_determinism.py +58（新增 G 項兩支斷言，先紅後綠實證：mac "
+     "對稱 --unattended 呼叫、Homebrew bin 存在性探測）。逐檔清單見 "
+     "CrossPlatform_R152_DEF200314_MacNightly_Evidence.md〈R152 沿用〉。"),
+    ("R152", 100156, 100169, 13,  # round-label-ok：本表自身新增上一列＋鏈接列所造成的行數漂移
+     "[非淨減法輪][全額功能軌][同輪追加] 收斂列：本表（test_adr_xplat001_c1c2_lock.py 自身）"
+     "新增上一列與 `_FROZEN_PREFIX_REWRITE_LEDGER` 鏈接列所造成的行數漂移（含本列自身"
+     "收斂）。逐檔清單見 CrossPlatform_R152_DEF200314_MacNightly_Evidence.md〈R152 沿用〉。"),
+    ("R152", 100169, 100198, 29,  # round-label-ok：DEF-200-314 四方複審四項非阻斷修正
+     "[非淨減法輪][全額功能軌][同輪追加] DEF-200-314 四方複審修正：test_nightly_"
+     "interpreter_determinism.py +29（Homebrew append-only 位置鎖三支斷言＋"
+     "run_stage 3 整行 unattended 鎖＋docstring「四件事」訂正為「五件事」）。逐檔"
+     "清單見 CrossPlatform_R152_DEF200314_MacNightly_Evidence.md〈R152 沿用〉。"),
+    ("R152", 100198, 100211, 13,  # round-label-ok：本表自身新增上一列＋鏈接列所造成的行數漂移
+     "[非淨減法輪][全額功能軌][同輪追加] 收斂列：本表（test_adr_xplat001_c1c2_lock.py 自身）"
+     "新增上一列與 `_FROZEN_PREFIX_REWRITE_LEDGER` 鏈接列所造成的行數漂移（含本列"
+     "自身收斂）。逐檔清單見 CrossPlatform_R152_DEF200314_MacNightly_Evidence.md"
+     "〈R152 沿用〉。"),
 )
 
 
@@ -2622,10 +2642,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 224
+_REPIN_LOG_FROZEN_PREFIX_LEN = 228
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "8b034cee4c63e922cd465f56cbbeab7a9cca6c65c16a6f62738e6340f445ca82")
+    "70959d5b82956da99f03be1562dc463bff98cb1f3f14b9fe09761eb4b80f703d")
 
 
 def repin_log_history_digest(
@@ -2894,6 +2914,12 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # R152：DEF-200-307～310 單一 .venv 四方審查殘餘收尾——新增主表列與本軌新列自身 round-label-ok
     # 漂移，凍結前綴延伸涵蓋新增列本身，起點接 R151 終點 0618d2c4affc。 round-label-ok
     ("R152", "0618d2c4affc", "8b034cee4c63", "DEF-200-307"),
+    # R152 沿用：DEF-200-314 mac launchd nightly 三症狀修復——新增主表列與本軌新列 round-label-ok
+    # 自身漂移，凍結前綴延伸涵蓋新增列本身，起點接 R152 終點 8b034cee4c63。 round-label-ok
+    ("R152", "8b034cee4c63", "038461e50767", "DEF-200-314"),
+    # R152 沿用：DEF-200-314 四方複審四項非阻斷修正——新增主表列與本軌新列 round-label-ok
+    # 自身漂移，凍結前綴延伸涵蓋新增列本身，起點接 R152 終點 038461e50767。 round-label-ok
+    ("R152", "038461e50767", "70959d5b8295", "DEF-200-314"),
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

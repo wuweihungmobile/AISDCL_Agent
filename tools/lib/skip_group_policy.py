@@ -362,6 +362,21 @@ _RUNTIME_SKIP_CEILING: dict[str, dict[str, int]] = {
         SKIP_GROUP_ENV_DISABLED: 2, SKIP_GROUP_STRUCTURAL: 1,
         SKIP_GROUP_DEBT: 3, SKIP_GROUP_UNTAGGED: 0,
     },
+    # 🔴 DEF-200-314 新登記（darwin+nopg+solo）：值逐字照抄
+    #    nightly_mac_20260917_020002.log:739，零加減；provenance 全文見
+    #    CrossPlatform_R152_DEF200314_MacNightly_Evidence.md §S2。
+    "AutoClaude/tests@darwin+nopg+solo+pgext": {
+        SKIP_GROUP_PLATFORM: 53, SKIP_GROUP_TOOL_ABSENCE: 0,
+        SKIP_GROUP_ENV_DISABLED: 6, SKIP_GROUP_STRUCTURAL: 1,
+        SKIP_GROUP_DEBT: 0, SKIP_GROUP_UNTAGGED: 97,
+    },
+    # 🔴 DEF-200-314 新登記（darwin+nopg+nested）：值逐字照抄本輪
+    #    `local_ci_gate.py` 實跑 census（四方 QA 同數字），零加減；provenance
+    #    全文見 CrossPlatform_R152_DEF200314_MacNightly_Evidence.md §S2。
+    "AutoClaude/tests@darwin+nopg+nested+pgext": {
+        SKIP_GROUP_PLATFORM: 53, SKIP_GROUP_TOOL_ABSENCE: 0,
+        SKIP_GROUP_ENV_DISABLED: 6, SKIP_GROUP_STRUCTURAL: 1,
+        SKIP_GROUP_DEBT: 0, SKIP_GROUP_UNTAGGED: 96},
     # 🔴 DEF-200-303（F3 死結解除）新登記：`AutoClaude/tests@win32+pg+solo+pgext`——
     # nightly（非巢狀）此前只掛在 `_FULL_SUITE_RUNNERS` 分母裡，天花板永遠停在
     # 「剖面未登記」（12 連紅，見 `AutoClaude/tools/local_ci_gate.check_skip_census`
@@ -612,6 +627,20 @@ _RUNTIME_SKIP_CEILING_MAX: dict[str, dict[str, int]] = {
         SKIP_GROUP_ENV_DISABLED: 2, SKIP_GROUP_STRUCTURAL: 1,
         SKIP_GROUP_DEBT: 3, SKIP_GROUP_UNTAGGED: 0,
     },
+    # 🔴 DEF-200-314：新登記剖面天花板無餘裕，理由與逐字 provenance 見
+    # `_RUNTIME_SKIP_CEILING` 同鍵那一段，此處不複寫第二份。
+    "AutoClaude/tests@darwin+nopg+solo+pgext": {
+        SKIP_GROUP_PLATFORM: 53, SKIP_GROUP_TOOL_ABSENCE: 0,
+        SKIP_GROUP_ENV_DISABLED: 6, SKIP_GROUP_STRUCTURAL: 1,
+        SKIP_GROUP_DEBT: 0, SKIP_GROUP_UNTAGGED: 97,
+    },
+    # 🔴 DEF-200-314：新登記剖面天花板無餘裕，理由與逐字 provenance 見
+    # `_RUNTIME_SKIP_CEILING` 同鍵那一段，此處不複寫第二份。
+    "AutoClaude/tests@darwin+nopg+nested+pgext": {
+        SKIP_GROUP_PLATFORM: 53, SKIP_GROUP_TOOL_ABSENCE: 0,
+        SKIP_GROUP_ENV_DISABLED: 6, SKIP_GROUP_STRUCTURAL: 1,
+        SKIP_GROUP_DEBT: 0, SKIP_GROUP_UNTAGGED: 96,
+    },
     # 🔴 DEF-200-303：新登記剖面天花板無餘裕，理由與逐字 provenance 見
     # `_RUNTIME_SKIP_CEILING` 同鍵那一段，此處不複寫第二份。
     "AutoClaude/tests@win32+pg+solo+pgext": {
@@ -710,6 +739,13 @@ _FULL_SUITE_RUNNERS: dict[str, str] = {
     # 本列與天花板同輪入表（分母升、分子亦升，兩者都是只准增的方向）。
     "AutoClaude/tests@darwin+pg+nested+pgext":
         "pre-push 的 AutoClaude leg（mac 真機，在 CC session 內）",
+    # 🔴 DEF-200-314 新登記：與上一列同一個執行者，差在 docker 未啟動；本列與
+    # 天花板同輪入表。provenance 全文見 CrossPlatform_R152_DEF200314_MacNightly_
+    # Evidence.md §S2。
+    "AutoClaude/tests@darwin+nopg+nested+pgext": "pre-push leg（mac，CC session，docker 未啟動）",
+    # 🔴 DEF-200-314 新登記：mac launchd nightly stage 3；本列與天花板同輪入表
+    # （分母升、分子亦升）。provenance 全文見同上 §S2。
+    "AutoClaude/tests@darwin+nopg+solo+pgext": "nightly（mac launchd，非巢狀，docker 未啟動）",
     # 🔴 R82 包 A2（MAC-01）新登記：`macos-compat-ci.yml` 的 macOS smoke job 逐字
     # `run: python3 tools/run_root_unittests.py`＝一個貨真價實的 full-suite darwin 執行者，
     # 卻從來不在這張分母表裡 ⇒ 26 支 `[MAC-NATIVE-ONLY]` 的互補剖面連「有沒有人量過」

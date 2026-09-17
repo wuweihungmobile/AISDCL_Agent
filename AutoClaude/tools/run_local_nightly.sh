@@ -18,7 +18,10 @@
 # stage（任一失敗記名後續跑，結尾彙總；任一 FAIL → exit 1，對齊 .ps1 R9 ③ exit 語意）：
 #   [1/4] macos_smoke     — /bin/bash 強制系統 bash 3.2（平台相容性聚合驗證）
 #   [2/4] root_unittests  — 根層 tools/tests unittest 全套（含測試數量下限釘選）
-#   [3/4] autoclaude_gate — AutoClaude tools/local_ci_gate.sh（鏡像 CI push gating）
+#   [3/4] autoclaude_gate — AutoClaude tools/local_ci_gate.sh（鏡像 CI push gating；
+#                           顯式帶 --unattended——GitHub Actions 靠 GITHUB_ACTIONS
+#                           環境變數自動判定 unattended，本檔排程執行無此變數，
+#                           須顯式帶旗標才是真鏡像，DEF-200-314）
 #   [4/4] sdd_ci_gate     — AISDLC_SDD scripts/ci-gate.sh（凍結基線 + LATEST 雙軌）
 #
 # log（R15 DEF-101-201②）：RunId log——開頭將輸出 exec 改道
@@ -46,6 +49,23 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 if [ -d "$ROOT/.venv/bin" ]; then
   PATH="$ROOT/.venv/bin:$PATH"; export PATH
 fi
+
+# WHY：launchd 極簡 PATH 也缺 Homebrew bin ⇒ 需要 pwsh 的 tools/tests 測試從 platform 語意的
+# skip 落成 untagged／debt 語意，撞 skip 天花板（DEF-200-314）。兩種 Homebrew 前綴都做存在性
+# 探測、不寫死單一架構（鐵律三：Apple Silicon=/opt/homebrew、Intel=/usr/local）；不可用
+# `brew --prefix`——極簡 PATH 下 brew 本身可能解析不到。🔴 刻意 append 到尾端：只為讓
+# pwsh 可解析，`.venv/bin` 必須維持最前（單一 .venv 原則）——往前插會把 Homebrew 排到
+# `.venv/bin` 前面，若 Homebrew 目錄裡剛好有裸 `python`／`python3` 就會蓋掉單一 .venv
+# 這條鐵律（本機未炸純屬僥倖：Homebrew 目錄當下無裸 python）。
+for _hb_bin in /opt/homebrew/bin /opt/homebrew/sbin /usr/local/bin; do
+  if [ -d "${_hb_bin}" ]; then
+    case ":${PATH}:" in
+      *":${_hb_bin}:"*) ;;
+      *) PATH="${PATH}:${_hb_bin}" ;;
+    esac
+  fi
+done
+export PATH
 
 # launchd job Label（R67-F26）：必須與 tools/install_mac_nightly.sh 的 LABEL 同值
 # ——它是下面觸發來源判定的比對基準，兩邊漂移會讓真排程觸發被誤標成「手動」。
@@ -252,7 +272,7 @@ write_heartbeat() {
 
 run_stage 1 macos_smoke     /bin/bash "$ROOT/tools/macos_smoke_local.sh"
 run_stage 2 root_unittests  env AUTOSDD_PARALLEL_TESTS=1 "$PY" "$ROOT/tools/run_root_unittests.py"
-run_stage 3 autoclaude_gate bash "$ROOT/AutoClaude/tools/local_ci_gate.sh"
+run_stage 3 autoclaude_gate bash "$ROOT/AutoClaude/tools/local_ci_gate.sh" --unattended
 run_stage 4 sdd_ci_gate     sdd_gate
 
 printf '\n===== nightly 彙總：PASS=%s FAIL=%s =====\n' "$PASS" "$FAIL"

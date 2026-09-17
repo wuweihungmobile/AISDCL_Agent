@@ -28,7 +28,7 @@ pytest rc=4，正是那個風險的真實代價）。故 Windows 側改為與 ma
 ps1`／`windows_smoke_local.ps1` 一律直接使用 `<repo 根>/.venv/Scripts/python.exe`
 絕對路徑，不再靠 PATH 現場解析「使其等價」；找不到就 fail-loud（exit 1）。
 
-本檔鎖四件事（B/C 為既有行級靜態檢查；E 為 Windows 絕對路徑釘死鎖，鎖的三支檔＝
+本檔鎖五件事（B/C 為既有行級靜態檢查；E 為 Windows 絕對路徑釘死鎖，鎖的三支檔＝
 `AutoClaude/tools/run_local_nightly.ps1`／`tools/windows_smoke_local.ps1`／
 `AutoClaude/tools/local_ci_gate.ps1`；新增 F 為 DEF-200-302 mac 側補齊，鎖的兩支
 檔＝`AutoClaude/tools/run_local_nightly.sh`／`tools/macos_smoke_local.sh`）：
@@ -51,6 +51,13 @@ ps1`／`windows_smoke_local.ps1` 一律直接使用 `<repo 根>/.venv/Scripts/py
      故放過了它），`macos_smoke_local.sh` 則原本只用 `is_real_python_candidate
      python` 判斷 PATH 上的 python 是否為真直譯器，未保證它就是本 repo 根層
      .venv 那一顆。
+  G.（DEF-200-314 新增，2026-09-17）mac launchd nightly 三症狀之二：
+     `run_local_nightly.sh` 對 `local_ci_gate.sh` 的呼叫必須帶 `--unattended`
+     （E 項已鎖 Windows 側 `-Unattended`，本項補 mac 對稱半——鐵律三漏補）；
+     且必須以存在性探測 prepend 兩種 Homebrew bin 前綴（`/opt/homebrew/bin`
+     與 `/usr/local/bin`，不可用 `brew --prefix`），修 launchd 極簡 PATH 缺
+     pwsh 導致需要 powershell/pwsh 的測試從 platform skip 落成 untagged、
+     撞 skip 天花板的問題。
 
 原 A 項（Windows PATH 正規化區塊行級檢查）與 D 項（該正規化比對式的行為級鎖，
 DEF-101-522）鎖的正是本輪拔除的那段邏輯，隨程式碼一併移除——史料見 git 歷史與
@@ -345,6 +352,86 @@ class TestWindowsInterpreterStaysPinned(unittest.TestCase):
             text, r"-File\s+tools/local_ci_gate\.ps1\s+-Unattended",
             "nightly 對 local_ci_gate.ps1 的呼叫必須附加 -Unattended 引數（PowerShell "
             "switch 形態；-File 薄殼不吃位置參數 --unattended）")
+
+    def test_run_local_nightly_sh_calls_local_ci_gate_with_unattended_flag(self):
+        """DEF-200-314 G 項：mac 對稱鎖——run_local_nightly.sh 呼叫
+        local_ci_gate.sh 必須帶 --unattended。mac 側 local_ci_gate.sh 是
+        `python local_ci_gate.py "$@"` 薄殼，位置旗標直接轉發給核心（與
+        Windows 側 CmdletBinding 具名參數語意不同，故正則不同）。
+
+        🔴 四方複審訂正：鎖緊到 `run_stage 3 autoclaude_gate` 那一整行本身
+        （而非任意子字串 `local_ci_gate.sh" --unattended`），避免未來有人把
+        旗標搬到不相干的呼叫上也能矇混過關——本判準就是要那一行、原封不動。
+
+        WHY：run_local_nightly.sh 檔頭 stage 3 說明句自陳「鏡像 CI push
+        gating」，但 GitHub Actions 靠 GITHUB_ACTIONS 環境變數自動判定
+        unattended，launchd 排程執行沒有這個變數；不顯式帶旗標，
+        check_skip_census 對未登記剖面就不會降級為 advisory，會撞 skip
+        天花板（DEF-200-314 S3：.ps1 側早於 DEF-200-302/303 補齊，.sh 側
+        當時漏補，鐵律三未落實的具體案例）。
+        """
+        text = _read(_SH)
+        self.assertRegex(
+            text,
+            re.compile(
+                r'^run_stage 3 autoclaude_gate bash '
+                r'"\$ROOT/AutoClaude/tools/local_ci_gate\.sh" --unattended\s*$',
+                re.MULTILINE,
+            ),
+            "run_local_nightly.sh 的 run_stage 3 那一整行必須逐字附加 --unattended"
+            "（mac 對稱：Windows 側已由 DEF-200-302 step(e) 補齊，本測補 mac 半）")
+
+    def test_run_local_nightly_sh_prepends_homebrew_bin_by_existence_probe(self):
+        """DEF-200-314 S1：launchd 極簡 PATH 缺 Homebrew bin ⇒ pwsh 不可解析 ⇒
+        24 支「需要 powershell/pwsh」測試從 platform 語意的 skip 落成
+        untagged／debt 語意，撞 skip 天花板。修法是兩種 Homebrew 前綴都做
+        存在性探測後 **append 到 PATH 尾端**（鐵律三：Apple Silicon=/opt/
+        homebrew、Intel=/usr/local，不可寫死單一架構），且不可用
+        `brew --prefix`——極簡 PATH 下 brew 本身可能解析不到。
+
+        🔴 四方複審訂正（QA＋Architect 同時抓到）：探測迴圈原本往前插
+        （`PATH="${_hb_bin}:${PATH}"`）會把 Homebrew 排到 `.venv/bin` 前面，
+        違反單一 .venv 原則（本機未炸純屬僥倖：Homebrew 目錄當下無裸
+        `python`）。改為 append 到尾端後補三支斷言：①迴圈必須在第一個
+        `run_stage ` 呼叫之前出現（PATH 設定本就該搶在任何 stage 執行前）；
+        ②必須是尾端追加形態；③不得含往前插形態。三者皆先剝掉整行 `#`
+        註解再比對（與既有 `brew --prefix` 判準對稱處理，理由同）。
+        """
+        text = _read(_SH)
+        code_lines = [
+            ln for ln in text.splitlines() if not ln.lstrip().startswith("#")
+        ]
+        code_text = "\n".join(code_lines)
+        self.assertRegex(
+            code_text, r'for _hb_bin in .*/opt/homebrew/bin',
+            "run_local_nightly.sh 必須以存在性探測 prepend /opt/homebrew/bin"
+            "（Apple Silicon Homebrew 前綴）")
+        self.assertRegex(
+            code_text, r'/usr/local/bin',  # posix-abs-ok: 比對對象是 .sh（bash-only）原始檔文字，非 Path/os.fspath 產物，不受 Windows 反斜線渲染影響
+            "run_local_nightly.sh 必須同時探測 /usr/local/bin"
+            "（Intel Homebrew 前綴），不可只認單一架構）")
+        self.assertNotRegex(
+            code_text, r'brew\s+--prefix',
+            "不可用 `brew --prefix` 探測 Homebrew 路徑——極簡 PATH 下 brew "
+            "本身可能解析不到（DEF-200-314 S1；本判準只查非註解行，允許 "
+            "WHY 註解討論此決策）")
+
+        loop_match = re.search(r'for _hb_bin in ', code_text)
+        run_stage_match = re.search(r'^run_stage ', code_text, re.MULTILINE)
+        self.assertIsNotNone(loop_match, "找不到 Homebrew 探測迴圈")
+        self.assertIsNotNone(run_stage_match, "找不到任何 run_stage 呼叫")
+        self.assertLess(
+            loop_match.start(), run_stage_match.start(),
+            "Homebrew 探測迴圈必須在第一個 run_stage 呼叫之前完成——PATH 設定"
+            "本就該搶在任何 stage 執行前生效，四方複審訂正的位置鎖")
+        self.assertRegex(
+            code_text, r'PATH="\$\{PATH\}:\$\{_hb_bin\}"',
+            "Homebrew 探測必須是**尾端追加**形態（`PATH=\"${PATH}:${_hb_bin}\"`）"
+            "——往前插會把 Homebrew 排到 .venv/bin 前面，違反單一 .venv 原則")
+        self.assertNotRegex(
+            code_text, r'PATH="\$\{_hb_bin\}:\$\{PATH\}"',
+            "不得再含往前插形態（`PATH=\"${_hb_bin}:${PATH}\"`）——四方複審"
+            "訂正：往前插會讓 Homebrew 排到 .venv/bin 前面")
 
 
 # ── 行為級鎖（既有）：兩支 .ps1 必須能被原生 PowerShell 5.1 解析 ────────────────

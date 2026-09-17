@@ -506,6 +506,10 @@ _GOVERNANCE_DOCS = (
     # 硬線，已凍結的純史料節（原文逐字節、前幾輪「史料搬遷」批次）搬來此檔，主檔原位置
     # 只留同名標題＋指標；命名慣例與體積硬線兩項義務對本檔同樣成立，即刻登記。round-label-ok
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_DEF200275_Context_Metering_Lore.md",
+    # DEF-200-314／315／316（mac launchd nightly 三症狀＋四方審查兩筆發現）的詳情面。
+    # 同一資格：帳本列被逐列體積守門壓成索引後，逐條重驗所需的完整脈絡只住這裡。
+    # 即刻登記，不等下一輪。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R152_DEF200314_MacNightly_Evidence.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/{CrossPlatform,Quota}_*.md`。這**不是**把具名

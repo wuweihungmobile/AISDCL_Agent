@@ -1,9 +1,9 @@
 {
   "_why": "M6（每一支測試都至少在某條軌上真的跑過一次）的落款：**每個剖面各自記下它 skip 掉的 test-id 集合**，判準＝skip(A) ⊆ run(B) ∪ 合法平台專屬集合（等價於 skip(A) ∩ skip(B) − 豁免 = ∅）。判準的家＝tools/lib/skip_runtime_report.py::m6_id_set_problems；本檔只是史料。缺任一剖面時判準回『不可求值』而不是回綠。落款取得＝在該剖面上跑 python tools/run_root_unittests.py，它會印出可直接貼進本檔的區塊；重釘＝把該剖面那一格換成新的可貼落款（逐 id 差異會出現在 diff 裡，這就是稽核痕跡）。刻意不記『跑過的 id 全集』：那是數千筆、每輪都在變，而 run(B) 由『B 的落款裡沒有它』推得即足以回答 M6（誠實劃界見判準檔）。",
   "tools/tests@darwin": {
-    "measured-at": "2026-09-07T05:30:05+00:00（真 GitHub run：macos-compat-ci 對本次 push 的 skip census 落款；訂正本輪先前的誤植——`test_skip_ledger_co_change_ignores_a_touch_with_no_value_change` 的 [ENV-DISABLED] skip 只在本機分支領先 origin/main 時暫態成立，push 落地後 HEAD＝origin/main、diff 清空即恆常態執行，CI 上不 skip——逐格照填、零加減推算；DEF-200-302 靜態訂正 2026-09-15：`test_nightly_interpreter_determinism.TestPathNormalisationBehaviour.test_forward_slash_path_entry_is_matched_and_removed` 已隨 PATH 剝除區塊刪除，1:1 換為同一 skipUnless 述詞（非 win32 即 skip）的 `TestWindowsPs1ParseCleanly.test_both_windows_carriers_parse_with_zero_errors`——這是換名不是量測，待下一次真 macos-compat-ci run 的可貼落款覆核）",
-    "host": "macOS-26.5.2-arm64-arm-64bit",
-    "ran": 3284,
+    "measured-at": "2026-09-17T04:22:20+00:00（mac 真機本機 `python tools/run_root_unittests.py` 落款，DEF-200-314 同輪：登記 darwin+nopg 兩剖面觸發本檔共變鎖；skip 46 支 id 集合與 09-07 CI 落款逐 id 相等、零加減；ran＝runner 印出的「發現 4310 個測試」，與 unittest discovery countTestCases 4310 相符）",
+    "host": "macOS-26.6.2-arm64-arm-64bit",
+    "ran": 4310,
     "skipped": [
       "test_bash_probe_spec_contract.TestBinBashLauncherSelfInjectsPathContract.test_export_path_empty_makes_probe_fail",
       "test_bash_probe_spec_contract.TestBinBashLauncherSelfInjectsPathContract.test_restricted_external_path_alone_is_ineffective",

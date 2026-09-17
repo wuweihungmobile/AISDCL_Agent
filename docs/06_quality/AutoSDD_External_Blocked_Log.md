@@ -35,12 +35,10 @@
 
 | DEF-ID | 具名阻塞源 | 阻塞起始日 | 解鎖條件（可機械查） | 最近複查日 |
 |---|---|---|---|---|
-| DEF-101-518 | GitHub Actions 帳務 | 2026-08-21 | 帳務恢復後一次真實 `windows-latest` run 觀測到 bootstrap 之後步驟確實用到 `.venv` 的 python（`gh run list --workflow=windows-compat-ci.yml` 見 `conclusion=success` 且 `steps>0`） | 2026-08-27 |
 | DEF-101-693 | Windows 實機 | 2026-08-21 | 下一個 Windows 真機輪逐列覆核 windows-smoke 22 步（`tools/tests/test_smoke_ci_sync.py::test_registered_smoke_groups_exist_in_that_script` 先行，另需真機執行紀錄） | 2026-08-31 |
-| DEF-101-703 | GitHub Actions 帳務 | 2026-08-21 | `*-nightly-full`（windows-compat-ci.yml／macos-compat-ci.yml）至少一次排程視窗成功（`gh run list --workflow=windows-compat-ci.yml --event schedule` 見 `conclusion=success` 且 `steps>0`），之後移除 `WAIVER_UNTIL` | 2026-08-27 |
-| DEF-200-186 | GitHub Actions 帳務 | 2026-08-21 | 拆自 `DEF-101-866` 條件 (b)：`gh workflow run windows-compat-ci.yml --ref main` 確認 nightly-full job 真的有 `steps`，端到端全綠 | 2026-08-27 |
-| DEF-200-174 | GitHub Actions 帳務 | 2026-08-21 | 帳號所有者查 GitHub Billing 頁面確認 spend limit 已調高或 runner 計費已恢復，`gh api repos/.../actions/runs` 觀測對應 job 的 `runner_id≠0` | 2026-08-27 |
-| DEF-200-075 | 其他-macOS實機（darwin執行面量測值，Windows結構上量不到也修不了） | 2026-08-27 | 回 mac 真機後第一動作＝重量 AutoClaude 樹 skip census（量測入口見主帳本該列配方）；macos-compat-ci 長期紅不可依賴 | 2026-08-27 |
+| DEF-101-703 | 其他-DEF-200-291舊碼（census未登記剖面一律判紅）修復ddaf6301／0ee23312晚於最近一次排程run才進main，09-17手動dispatch兩平台nightly-full已success，條件字面要排程run故待09-21排程窗口 | 2026-08-21 | `*-nightly-full`（windows-compat-ci.yml／macos-compat-ci.yml）至少一次排程視窗成功（`gh run list --workflow=windows-compat-ci.yml --event schedule` 見 `conclusion=success` 且 `steps>0`），之後移除 `WAIVER_UNTIL` | 2026-09-17 |
+| DEF-200-174 | GitHub Actions 帳務 | 2026-08-21 | 帳號所有者查 GitHub Billing 頁面確認 spend limit 已調高或 runner 計費已恢復，`gh api repos/.../actions/runs` 觀測對應 job 的 `runner_id≠0` | 2026-09-17 |
+| DEF-200-075 | 其他-macOS實機（darwin執行面量測值，Windows結構上量不到也修不了） | 2026-08-27 | 回 mac 真機後第一動作＝重量 AutoClaude 樹 skip census（量測入口見主帳本該列配方）；macos-compat-ci 長期紅不可依賴 | 2026-09-17 |
 | DEF-200-313 | Windows 實機 | 2026-09-15 | 回 Windows 真機、人在互動終端機：`python tools/run_root_unittests.py` 跑到一半按 Ctrl-C，再以 `Get-CimInstance Win32_Process` 過濾 CommandLine 含 `run_root_unittests` 或 `unittest` 者須為空；結果寫進 `CrossPlatform_DEF200274_Parallel_Tests_Evidence.md`〈第十一輪〉③ 後移出本表 | 2026-09-15 |
 
 ## 複查記錄
@@ -74,6 +72,55 @@ R114 Windows 真機取證三項全達成：①12 列 rc 矩陣
 實跑 PASS=12 FAIL=0 rc=0（本地可化步驟全綠）；但 CI windows-smoke 22 步中 bootstrap 往返、
 dev_start、AutoClaude 子集／integration_gate、SDD ci-gate 雙軌數列本輪無獨立實跑紀錄 ⇒
 「逐列覆核」未完成，阻塞仍成立、列保留。證據＝`CrossPlatform_R114_WakeChain_Review.md` §3.3。
+
+### DEF-101-518（複查 2026-09-17＝解鎖條件達成，列已移出本表）
+
+複查：`gh workflow run windows-compat-ci.yml --ref main`（2026-09-17，headSha `e5bf3c0f`）
+→ run `35175312397`，job「Windows smoke」`conclusion=success`、`steps=31`；其中第 12 步
+「dot-source tools/dev_start.ps1」log 逐字印出
+`✅ 已自動啟用 .venv（python → D:\a\AISDCL_Agent\AISDCL_Agent\.venv\Scripts\python.exe）`
+＝bootstrap 之後步驟確實用到 `.venv` 的 python，兩半條件（`conclusion=success` 且
+`steps>0`、觀測到 .venv python）同一 run 內達成。主帳本該列狀態同輪改為指向本段。
+
+### DEF-101-703（複查 2026-09-17）
+
+複查：08-31／09-07／09-14 三次 `--event schedule` run 的 nightly-full **job** 皆
+`conclusion=failure`（Windows 11 steps／macOS 9 steps），workflow 整體 `success` 只是
+job 層 `continue-on-error: true` 遮蔽；失敗 step 皆為 `local_ci_gate.{ps1,sh}`，log 逐字
+`[skip census] AutoClaude/tests@win32+nopg+solo …剖面未登記` ＋ `[pytest] FAIL (rc=1)`
+而 pytest 本體 0 failed ⇒ 真因＝DEF-200-291（census 對未登記剖面在 CI 上仍判紅），修復
+commit `ddaf6301`／`0ee23312`（09-14 20:05~20:18 UTC）**晚於** 09-14 排程 run 的
+headSha `33b9470f`（11:24 UTC），`git merge-base --is-ancestor` 證實非其祖先。
+09-17 手動 dispatch 對 `e5bf3c0f`：Windows run `35175312397` nightly-full `success`
+（11 steps）、macOS run `35175314395` nightly-full `success`（9 steps）＝修復已在雲端
+兩平台生效；但條件字面要求 `event schedule`，下一排程窗口 09-21，故列保留、阻塞源改為
+真因。`WAIVER_UNTIL` 現值已為 `""`（root-infra-ci.yml），後置動作無需再做。
+
+### DEF-200-186（複查 2026-09-17＝解鎖條件達成，列已移出本表）
+
+複查：條件字面＝`gh workflow run windows-compat-ci.yml --ref main` 確認 nightly-full job
+有 `steps` 且端到端全綠。2026-09-17 實跑 → run `35175312397`（headSha `e5bf3c0f`）：
+「Windows nightly full suite」`conclusion=success`、`steps=11`（第 7 步 local_ci_gate.ps1
+與第 8 步 AISDLC_SDD LATEST fsm_runtime pytest 皆 success）、「Windows smoke」
+`success`／31 steps、「Windows nightly 失敗提醒」`success`。三 job 全綠、無帳務空轉。
+08-27 複查時的 `failure` 真因見上段 DEF-101-703（DEF-200-291 舊碼）。
+
+### DEF-200-174（複查 2026-09-17）
+
+複查：機械半 `runner_id≠0` 再次確認（09-14 排程 run job `runner_id=1000004590`）；
+09-17 dispatch 兩平台三 job 全 success 亦佐證 runner 計費未再空轉。人工半「帳號所有者查
+Billing 頁面」仍未執行（代理無 `user` billing scope）；repo 自 2026-08-25 轉 Public 後
+Actions 分鐘不計費，該人工確認實質只剩一句話，待帳號所有者親口確認後移除本列。
+
+### DEF-200-075（複查 2026-09-17）
+
+複查：解鎖條件「回 mac 真機後第一動作＝重量 AutoClaude 樹 skip census」已做——mac
+launchd nightly `AutoClaude/logs/nightly_mac_20260917_020002.log:739` 逐字
+`[skip census] AutoClaude/tests@darwin+nopg+solo+pgext 共 157 支：platform=53／
+tool-absence=0／env-disabled=6／structural-pair=1／debt=0／untagged=97／欠債型 103 支
+（目標 0）`；CC session 內同日量得 `darwin+nopg+nested+pgext` 共 156 支（untagged=96）。
+兩剖面同輪登記進 `tools/lib/skip_group_policy.py`（見主帳本 DEF-200-314）。欠債 103 支
+非 0，列保留。
 
 ### DEF-101-518（複查 2026-08-27）
 
