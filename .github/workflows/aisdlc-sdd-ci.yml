@@ -77,6 +77,7 @@ on:
       # （不另開第二個 LATEST 解析家）⇒ 本樹的 hook wiring 鎖同樣跨樹依賴本檔，
       # 只改它時該批鎖必須跟著跑。同上，由 test_ci_paths_cover_root_consumers.py 攔下。
       - "tools/lib/sdd_latest.py"
+      - "tools/lib/cpu_budget.py"  # DEF-200-289：ci-gate.sh／pre-push 消費的跨 leg CPU 預算 SSOT
       # R84／C3：test_hook_wiring_cwd_safety.py 現在會**複製**這支啟動器來構造
       # 「載具在、目標腳本缺」那個情境（exec form 之後那才是本鎖真正要測的形態）⇒
       # 只改啟動器時該鎖必須跟著跑。同上，由 test_ci_paths_cover_root_consumers.py 攔下。
@@ -111,6 +112,7 @@ on:
       # （不另開第二個 LATEST 解析家）⇒ 本樹的 hook wiring 鎖同樣跨樹依賴本檔，
       # 只改它時該批鎖必須跟著跑。同上，由 test_ci_paths_cover_root_consumers.py 攔下。
       - "tools/lib/sdd_latest.py"
+      - "tools/lib/cpu_budget.py"  # DEF-200-289：ci-gate.sh／pre-push 消費的跨 leg CPU 預算 SSOT
       # R84／C3：test_hook_wiring_cwd_safety.py 現在會**複製**這支啟動器來構造
       # 「載具在、目標腳本缺」那個情境（exec form 之後那才是本鎖真正要測的形態）⇒
       # 只改啟動器時該鎖必須跟著跑。同上，由 test_ci_paths_cover_root_consumers.py 攔下。
