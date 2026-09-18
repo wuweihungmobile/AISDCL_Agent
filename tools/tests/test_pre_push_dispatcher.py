@@ -32,6 +32,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DISPATCHER = REPO_ROOT / "tools" / "git-hooks" / "pre-push"
@@ -48,6 +49,13 @@ ZERO_SHA = "0000000000000000000000000000000000000000"
 # 該 SSOT 的候選蒐集是三份複本的**嚴格超集**（多含 POSIX 佈局子路徑）。
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _platform_helpers import usable_bash_for_fixture  # noqa: E402
+
+# DEF-200-324：`_pg_dist_args()` 判準鎖（TestIntegrationGateCorePgDistArgs）需要真的
+# import 本檔（非文字判準）——手法同 test_find_git_bash_parity.py:57/65。
+sys.path.insert(0, str(REPO_ROOT / "tools"))
+import integration_gate_core  # noqa: E402
+
+_IGC_PATH = REPO_ROOT / "tools" / "integration_gate_core.py"
 
 # fake 消費檔清單來源：格式鏡真實 aisdlc-sdd-ci.yml（`- "..."` 雙引號條目）。
 # dispatcher 機械解析此檔（單一真相源），本測試據此鎖住「解析→比對→補跑」全鏈。
@@ -996,6 +1004,51 @@ class TestNamedCarrierFilesActuallyExist(unittest.TestCase):
         ghost = "tools/tests/" + ghost_name
         self.assertEqual(_CARRIER_REF_RE.findall(ghost), [ghost_name])
         self.assertFalse((REPO_ROOT / "tools" / "tests" / ghost_name).exists())
+
+
+def _function_body(source: str, name: str) -> str:
+    """`name` 函式定義到下一個頂層 `def ` 或 EOF 之間的原始碼片段（naive 但夠用：
+    `tools/integration_gate_core.py` 函式間無巢狀 def）。"""
+    m = re.search(rf"^def {re.escape(name)}\(.*?\n(?=^def |\Z)", source, re.M | re.S)
+    if not m:
+        raise AssertionError(f"找不到函式 {name}()")
+    return m.group(0)
+
+
+class TestIntegrationGateCorePgDistArgs(unittest.TestCase):
+    """DEF-200-324：`tools/integration_gate_core.py` 的 `_pg_dist_args()` 是否問對
+    `AutoClaude/tools/local_ci_gate.py` 的 SSOT（`pg_autodetect`／`pg_dsn_in_effect`，
+    同 DEF-200-295 判例）——PG 在場而零判準時，本檔兩處 pytest 呼叫零 `--dist
+    loadgroup`，撞 DEF-200-274 X1 守門 rc=4（一次真實 push 因此被擋下的根因）。"""
+
+    def test_pg_in_effect_adds_loadgroup(self) -> None:
+        """探針印 `PG_IN_EFFECT=1` ⇒ 必須加 `--dist loadgroup`。"""
+        fake = mock.Mock(stdout="PG_IN_EFFECT=1\n")
+        with mock.patch("integration_gate_core.subprocess.run", return_value=fake):
+            self.assertEqual(
+                integration_gate_core._pg_dist_args(Path(".")), ["--dist", "loadgroup"])
+
+    def test_no_pg_adds_nothing(self) -> None:
+        """探針印 `PG_IN_EFFECT=0` ⇒ 不加任何旗標。"""
+        fake = mock.Mock(stdout="PG_IN_EFFECT=0\n")
+        with mock.patch("integration_gate_core.subprocess.run", return_value=fake):
+            self.assertEqual(integration_gate_core._pg_dist_args(Path(".")), [])
+
+    def test_probe_failure_is_conservative(self) -> None:
+        """探針行程本身炸掉（`OSError`）⇒ 保守加 `--dist loadgroup`（對無 PG 跑法無害）。"""
+        with mock.patch("integration_gate_core.subprocess.run", side_effect=OSError("boom")):
+            self.assertEqual(
+                integration_gate_core._pg_dist_args(Path(".")), ["--dist", "loadgroup"])
+
+    def test_both_pytest_sites_consume_the_helper(self) -> None:
+        """兩個呼叫點都要接 `_pg_dist_args(cwd)`；拿掉任一處即翻紅（突變自證）。"""
+        source = _IGC_PATH.read_text(encoding="utf-8")
+        for name in ("sec_bridge", "sec_rollback"):
+            with self.subTest(fn=name):
+                self.assertIn("_pg_dist_args(cwd)", _function_body(source, name))
+        mutated, n = re.subn(r"\s+\+ _pg_dist_args\(cwd\),", ",", source, count=1)
+        self.assertEqual(n, 1, "突變 regex 未命中——判準與實際格式脫節")
+        self.assertNotIn("_pg_dist_args(cwd)", _function_body(mutated, "sec_bridge"))
 
 
 if __name__ == "__main__":

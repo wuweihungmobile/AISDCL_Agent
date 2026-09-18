@@ -682,7 +682,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 8331,
+    "test_adr_xplat001_c1c2_lock.py": 8353,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 3726,
@@ -729,7 +729,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_platform_neutral_paths.py": 5722,
     "test_platform_utils_dedup.py": 1078,
     "test_pre_commit_dispatcher_sigpipe.py": 969,
-    "test_pre_push_dispatcher.py": 1002,
+    "test_pre_push_dispatcher.py": 1055,
     "test_ps1_bom.py": 248,
     "test_ps51_compat.py": 610,
     "test_ps_engine_ssot.py": 905,
@@ -2096,6 +2096,19 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "凍結前綴 231→233 所造成的行數漂移（含本列自身收斂），全額歸回歸鎖軌"
      "（同既有體例）。逐檔清單見 CrossPlatform_R145_Scan_Findings.md〈第十七輪附記"
      "（R155）〉。"),
+    ("R156", 101532, 101585, 53,  # round-label-ok：DEF-200-324 pre-push 整合閘門修復，另起本輪
+     "[非淨減法輪] DEF-200-324（tools/integration_gate_core.py 兩處 AutoClaude pytest "
+     "呼叫補 `--dist loadgroup` 判準，PG 在場撞 X1 守門 rc=4）另起本輪（判例 "
+     "R132／R136：上一輪主軌額度用盡）：test_pre_push_dispatcher.py 新增 "
+     "TestIntegrationGateCorePgDistArgs 四支行為測試，全額為缺陷回歸鎖。分軌見 "
+     "_REGRESSION_LANE_LOG 同輪列；逐檔清單見 "
+     "CrossPlatform_R145_Scan_Findings.md〈第十八輪附記（R156）〉。"),
+    ("R156", 101585, 101607, 22,  # round-label-ok：本表自身重釘漂移（單一收斂列，含本列自身）
+     "[非淨減法輪][同輪追加] 收斂列：本表（test_adr_xplat001_c1c2_lock.py 自身）新增"
+     "上一列、`_REGRESSION_LANE_LOG` 同輪新列、`_FROZEN_PREFIX_REWRITE_LEDGER` 接鏈列"
+     "與凍結前綴 233→235 所造成的行數漂移（含本列自身收斂），保守全額歸主軌"
+     "（本輪連升 2／2 到頂：R157 必須淨額 ≤0）。逐檔清單見 "
+     "CrossPlatform_R145_Scan_Findings.md〈第十八輪附記（R156）〉。"),
 )
 
 
@@ -2431,6 +2444,12 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "累加至軌上限 309（貼齊）。test_nightly_interpreter_determinism.py 的 H 項新判準"
      "能力鎖與上列各檔逾額片段保守歸主軌（主軌淨額 812−309＝503 ≤ cap 538）。逐檔"
      "清單見 CrossPlatform_R145_Scan_Findings.md〈第十七輪附記（R155）〉。"),
+    ("R156", 53,
+     "DEF-200-324 缺陷回歸鎖全額歸本軌（記帳誠實度分類）：test_pre_push_dispatcher.py "
+     "新增 TestIntegrationGateCorePgDistArgs 四支（探針 PG 在場／缺席／失敗三情境＋兩"
+     "呼叫點接線突變自證），全額為 DEF-200-324 的驗收測試，非湊額。本表自身收斂列"
+     "（含本列自身）保守不計入本軌、全額歸主軌。逐檔清單見 "
+     "CrossPlatform_R145_Scan_Findings.md〈第十八輪附記（R156）〉。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -2706,10 +2725,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 233
+_REPIN_LOG_FROZEN_PREFIX_LEN = 235
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "96325f09b5d582d5ec0d988df11739e973c7f162c0adf472a7a8d7faae428b66")
+    "d1780bab594636081a47563f33989b39d0b7c0827b437c1b443a6778dd58e8cd")
 
 
 def repin_log_history_digest(
@@ -2988,6 +3007,9 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R154", "ea0a3bfec58f", "f62eab34f224", "DEF-200-320"),
     # R155：新增主表兩列（內容＋收斂）與本軌新列自身漂移，凍結前綴延伸涵蓋新增列本身。round-label-ok
     ("R155", "f62eab34f224", "96325f09b5d5", "DEF-200-315"),
+    # R156：DEF-200-324 pre-push 整合閘門修復——新增主表兩列與本軌新列自身 round-label-ok
+    # 漂移，凍結前綴延伸涵蓋新增列本身，起點接上一列終點 96325f09b5d5。round-label-ok
+    ("R156", "96325f09b5d5", "d1780bab5946", "DEF-200-324"),
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

@@ -174,6 +174,21 @@ TestPickRepoPythonBehavior` → rc=0，`Ran 3 tests in 0.461s`，OK
 `{"conclusion":"success","headSha":"e9f5817f8bf77aa13190664f66dd308da3d973b2",
 "status":"completed"}`（sha 前 7 碼 e9f5817，即本輪起點 HEAD）。
 
+#### R156 追記（DEF-200-324）
+
+R155 commit（`19f3e75`）push 被 pre-push 整合閘門 leg 擋下，逐字訊息：
+`[pre-push dispatcher] push 涉整合層閘門本體 → 實跑整合閘門（--skip-full）` →
+`❌ [3/5] SDD bridge 整合煙霧 FAILED (exit=4)`／`❌ [4/5] 回退驗證 FAILED (exit=4)`，
+`ERROR: PG 在場但未用 --dist loadgroup（現為 -n 9 --dist worksteal）…（DEF-200-274
+D5/X1）`。根因：`tools/integration_gate_core.py` 的 `sec_bridge()`／`sec_rollback()`
+兩處 AutoClaude pytest 呼叫自 R69（`edd5388`）從未帶 PG 判準，只因本輪改了
+`tools/integration_gate.sh` 本體才讓 pre-push 首次實跑到這條 leg，潛伏缺陷曝光。
+修法：新增 `_pg_dist_args()` 純函式，問 `AutoClaude/tools/local_ci_gate.py` 的
+`pg_autodetect()`／`pg_dsn_in_effect()` SSOT（同 DEF-200-295 子 hook 判例，探針
+失敗保守加），接進兩處呼叫點 argv 末尾。真跑：`bash tools/integration_gate.sh
+--skip-full`（PG 在場）rc=0，`[3/5] SDD bridge 整合煙霧 PASS`（22 passed）、
+`[4/5] 回退驗證 PASS`（2 passed），`✅ 整合閘門通過（2 PASS / 1 SKIP）`。
+
 ## DEF-200-316（P3，open）—— mac hook 成對條目 ENOENT 噪音
 
 四方審查 Architect A3 發現：mac 上每個 hook 事件的 Windows 成對條目

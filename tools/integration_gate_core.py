@@ -156,11 +156,30 @@ def sec_sdd() -> int:
     return subprocess.run(cmd, cwd=cwd).returncode
 
 
+def _pg_dist_args(cwd: Path) -> list[str]:
+    """PG 在場時 AutoClaude pytest 必帶 `--dist loadgroup`（DEF-200-274 X1 守門；DEF-200-324）。
+    判準只有一個家＝AutoClaude/tools/local_ci_gate.py 的 pg_autodetect()＋pg_dsn_in_effect()
+    （DEF-200-295 同型，子 hook pre-push 已這樣問）；探針失敗保守加（對無 PG 的跑法無害）。"""
+    probe = ("import sys; sys.path.insert(0, 'tools'); import local_ci_gate as g; "
+             "g.pg_autodetect(); print('PG_IN_EFFECT=' + ('1' if g.pg_dsn_in_effect() else '0'))")
+    env = {k: v for k, v in os.environ.items() if k not in ("GIT_DIR", "GIT_WORK_TREE")}
+    try:
+        out = subprocess.run(
+            [sys.executable, "-c", probe], cwd=cwd, env=env, capture_output=True,
+            text=True, encoding="utf-8", errors="replace", timeout=120,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ["--dist", "loadgroup"]
+    return [] if out and "PG_IN_EFFECT=0" in out else ["--dist", "loadgroup"]
+
+
 def sec_bridge() -> int:
     """[3/5] SDD bridge 整合煙霧。"""
     cwd = ROOT / "AutoClaude"
     return subprocess.run(
-        [sys.executable, "-m", "pytest", "tests/integration/test_sdd_bridge/", "-q"], cwd=cwd
+        [sys.executable, "-m", "pytest", "tests/integration/test_sdd_bridge/", "-q"]
+        + _pg_dist_args(cwd),
+        cwd=cwd,
     ).returncode
 
 
@@ -171,7 +190,8 @@ def sec_rollback() -> int:
         [
             sys.executable, "-m", "pytest",
             "tests/integration/test_sdd_bridge/test_rollback_compat.py", "-q",
-        ],
+        ]
+        + _pg_dist_args(cwd),
         cwd=cwd,
     ).returncode
 

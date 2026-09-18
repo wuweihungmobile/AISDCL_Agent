@@ -430,3 +430,30 @@ DEF-200-321 的 `test_workflow_permission_concurrency_lock.py` 段、DEF-200-315
 DEF-200-315／321／322／323；四方審查與實作證據見 `CrossPlatform_R152_DEF200314_MacNightly_Evidence.md`
 〈收尾（R155）〉。此附記為 doc-total 對帳（≥2 站點）另一站點寄居 `AutoSDD_improving_112.md`，
 同 R129～R154 寄居體例。round-label-ok
+
+## 第十八輪附記（R156；DEF-200-324 pre-push 整合閘門 `--dist loadgroup` 修復）
+
+- **體例**：本節非開新一輪 CrossPlatform 掃描輪四件套，僅為單一缺陷修復造成的護欄層逐檔漂移記帳，
+  寄居本檔（同 R129～R155 寄居體例）。**另起本輪**（判例＝R132／R136：R155 主軌額度僅剩
+  538−532＝6 行，不足容納本次新增，故不續記 R155 而另起）。本輪為非淨減法輪，且是連續第 2 輪
+  淨額為正（R155 主軌 +532、本輪主軌 +22）——`_REPIN_MAX_CONSECUTIVE_RISING_ROUNDS=2` 已到頂，
+  **R157 必須淨額 ≤0**。cap 到期義務未到（`_REPIN_NET_CAP_DUE_ROUND=157` 尚未觸及，武裝不動）；
+  `_PHASE2_REVIEW_LOG` 五輪時效未到，本輪無新登記。
+
+<!-- guard-total:R156 --> R156 護欄層累積淨額＝ 101532 → 101607（+75）——DEF-200-324
+（`tools/integration_gate_core.py` 的 `sec_bridge()`／`sec_rollback()` 兩處 AutoClaude pytest 呼叫
+零 `--dist loadgroup` 判準，PG 在場即撞 DEF-200-274 X1 守門 rc=4；只在動到閘門本體時 pre-push
+才實跑此 leg，故潛伏已久直到近期改動 `integration_gate.sh` 才曝光，擋下一次真實 push）修復：
+新增 `_pg_dist_args()` 純函式（問 `AutoClaude/tools/local_ci_gate.py` 的 `pg_autodetect()`／
+`pg_dsn_in_effect()` SSOT，同 DEF-200-295 判例，探針失敗保守加）並接進兩處呼叫點；
+`test_pre_push_dispatcher.py` 新增 `TestIntegrationGateCorePgDistArgs` 四支行為測試 +53
+（PG 在場／缺席／探針失敗三情境＋兩呼叫點接線突變自證）；本檔（`test_adr_xplat001_c1c2_lock.py`）
+自身逐檔漂移 +22（新增主表兩列〔內容＋收斂〕、`_REGRESSION_LANE_LOG` 同輪新列、
+`_FROZEN_PREFIX_REWRITE_LEDGER` 接鏈列；凍結前綴 233→235、`_REPIN_LOG_HISTORY_SHA256` 同步重釘）。
+分軌：`_REGRESSION_LANE_LOG` R156 列申報 53（`test_pre_push_dispatcher.py` 新增測試全額為
+DEF-200-324 缺陷回歸鎖），本檔自身漂移保守全額歸主軌，主軌淨額 75−53＝22 ≤ cap 538。真機驗證：
+`bash tools/integration_gate.sh --skip-full`（PG 在場）rc=0，`[3/5]`／`[4/5]` 皆 PASS（22 passed／
+2 passed）。缺陷帳本見 `docs/06_quality/AutoSDD_Defect_Log.md` DEF-200-324；證據見
+`CrossPlatform_R152_DEF200314_MacNightly_Evidence.md`〈收尾（R155）〉#### R156 追記。此附記為
+doc-total 對帳（≥2 站點）另一站點寄居 `AutoSDD_improving_112.md`，同 R129～R155 寄居體例。
+round-label-ok
