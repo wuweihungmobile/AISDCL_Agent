@@ -81,9 +81,14 @@ def test_ps1_installer_sets_exec_bit_on_posix() -> None:
                        check=True, capture_output=True, timeout=30)
         subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "init"],
                        check=True, capture_output=True, timeout=30, env=git_env)
+        # DEF-200-315 系列：fake repo 的 tools/lib/WindowsAppsGuard.ps1（安裝器
+        # 自身的 guard 存在性前置檢查所需）已備妥，故安裝器會走 Get-RepoPython
+        # 分支；fake repo 無 .venv，需此逃生口才會退回 PATH 上的 python（本測試
+        # 原意只驗證 chmod +x 行為，非 .venv 優先順位）。
+        env = {**os.environ, "AUTOSDD_ALLOW_PATH_PYTHON": "1"}
         proc = subprocess.run(
             [_PWSH, "-NoProfile", "-File", str(installer)],
-            cwd=str(repo),
+            cwd=str(repo), env=env,
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=120,
         )

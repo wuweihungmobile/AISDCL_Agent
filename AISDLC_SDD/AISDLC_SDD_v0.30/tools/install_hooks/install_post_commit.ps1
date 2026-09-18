@@ -81,11 +81,16 @@ if (-not (Test-Path $WindowsAppsGuardPath)) {
   exit 1
 }
 . $WindowsAppsGuardPath
-if (-not (Test-IsRealPython -CandidateName 'python')) {
-  Write-Error "找不到 python — 請啟用 venv 或安裝 Python 後重試"
+# DEF-200-315 系列：guard 已在場（上方已擋掉缺席情境），改委派 Get-RepoPython
+# 釘死 repo 根層 .venv 直譯器（互動式入口統一政策，見
+# tools/lib/WindowsAppsGuard.ps1::Get-RepoPython 檔頭 WHY），不再只做
+# Test-IsRealPython 的 PATH 存在性判斷。
+$Py = Get-RepoPython -RepoRoot $MainCheckoutRoot
+if (-not $Py) {
+  Write-Error "找不到 python — 請啟用 venv 或安裝 Python 後重試（或未 bootstrap 根層 .venv：. tools\dev_start.ps1）"
   exit 1
 }
-$Latest = (& python (Join-Path $SddRoot "scripts\sdd_version.py") --sdd-root $SddRoot | Out-String).Trim()
+$Latest = (& $Py (Join-Path $SddRoot "scripts\sdd_version.py") --sdd-root $SddRoot | Out-String).Trim()
 if ($LASTEXITCODE -ne 0 -or -not $Latest) {
   Write-Error "LATEST 解析失敗（sdd_version.py SSOT）：找不到任何 AISDLC_SDD_v* 版本目錄於 $SddRoot"
   exit 1
@@ -120,11 +125,24 @@ $GuardSrcBash = Join-Path $MainCheckoutRoot "tools\lib\windowsapps_guard.sh"
 # 本行內容由 bash 自己 [ -f ]／source（非傳給 python.exe 當 argv），原生 Windows
 # PowerShell 5.1 的 Join-Path 不會正規化反斜線，需正規化為正斜線供 bash 解析。
 $GuardSrcBash = $GuardSrcBash -replace "\\", "/"
+# DEF-200-315 系列：advisory hook 永不擋 commit，不可像互動式入口那樣 fail-loud
+# ——故不透過 Get-RepoPython（找不到就 fail-loud），改讓 hook 內容自己先
+# `[ -x ]` 探測兩種 .venv 慣例（與 Get-RepoPython 候選同序：bin 優先），找不到
+# 才降級回退既有 guard／PATH 鏈（never block commit 原則不變；與 .sh 產生器
+# 同步，兩產生器輸出須逐字對稱——見下方 EndsWith 補檔尾換行的既有註解）。
+$VenvBinPy = Join-Path $MainCheckoutRoot ".venv\bin\python"
+$VenvBinPy = $VenvBinPy -replace "\\", "/"
+$VenvScriptsPy = Join-Path $MainCheckoutRoot ".venv\Scripts\python.exe"
+$VenvScriptsPy = $VenvScriptsPy -replace "\\", "/"
 $HookContent = @"
 #!/usr/bin/env bash
 # PostCommit advisory hooks - never block commit
 PY=""
-if [ -f "$GuardSrcBash" ]; then
+if [ -x "$VenvBinPy" ]; then
+  PY="$VenvBinPy"
+elif [ -x "$VenvScriptsPy" ]; then
+  PY="$VenvScriptsPy"
+elif [ -f "$GuardSrcBash" ]; then
   . "$GuardSrcBash"
   if is_real_python_candidate python; then PY=python
   elif is_real_python_candidate python3; then PY=python3

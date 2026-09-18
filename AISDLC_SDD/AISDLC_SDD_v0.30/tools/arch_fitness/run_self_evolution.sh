@@ -60,17 +60,22 @@ mkdir -p "$REPORT_DIR"
 # 「存在才 source、缺席則降級回退」——同 LATEST tools/install_hooks/
 # install_post_commit.sh 既有慣例，monorepo 內仍受 guard 保護、單獨交付時可跑。
 GUARD_SRC="$SCRIPT_DIR/../../../../tools/lib/windowsapps_guard.sh"
+# DEF-200-315 系列：guard 在場時不再只做「排除 WindowsApps 空殼」的存在性判斷，
+# 改委派 pick_repo_python 釘死 repo 根層 .venv 直譯器（互動式入口統一政策，見
+# tools/lib/windowsapps_guard.sh 該函式檔頭 WHY）；guard 缺席（框架被單獨部署，
+# 見上方 R68 註解）才降級回退舊行為（PATH 上任一 python）。
 if [ -f "$GUARD_SRC" ]; then
   # shellcheck disable=SC1091
   . "$GUARD_SRC"
-  is_real_python_candidate python || { echo "❌ 找不到可用的 python 直譯器（PATH 上找不到，或僅命中 WindowsApps 空殼）" >&2; exit 5; }
+  PY="$(pick_repo_python "$SCRIPT_DIR/../../../..")" || exit 5
 else
-  [ -n "$(command -v python || true)" ] || { echo "❌ 找不到可用的 python 直譯器（PATH 上找不到）" >&2; exit 5; }
+  PY="$(command -v python || true)"
+  [ -n "$PY" ] || { echo "❌ 找不到可用的 python 直譯器（PATH 上找不到）" >&2; exit 5; }
 fi
 
-py_field() { python -c "import json,sys;print(json.load(open(sys.argv[1])).get(sys.argv[2],''))" "$1" "$2"; }
+py_field() { "$PY" -c "import json,sys;print(json.load(open(sys.argv[1])).get(sys.argv[2],''))" "$1" "$2"; }
 top_fp() {  # 印 "severity|ff|title|fingerprint" 給最高 ROI finding（fail 優先）
-  python - "$1" <<'PY'
+  "$PY" - "$1" <<'PY'
 import json,sys
 d=json.load(open(sys.argv[1]))
 c=[f for f in d["findings"] if f["severity"]!="info"]
@@ -80,7 +85,7 @@ if c:
 PY
 }
 
-sense() { python -m tools.arch_fitness.arch_fitness --strict --quiet --json "$1" || true; }
+sense() { "$PY" -m tools.arch_fitness.arch_fitness --strict --quiet --json "$1" || true; }
 
 echo "=== FSE_SENSE：架構適應度量測 ==="
 BASE="$REPORT_DIR/findings.json"
@@ -136,10 +141,10 @@ for ((iter=1; iter<=MAX_ITER; iter++)); do
            --max-turns 12 --allowedTools "Edit" "Write" "Bash(python -m pytest:*)" --permission-mode acceptEdits || true
 
     echo "FSE_VERIFY：pytest + fitness..."
-    if python -m pytest -m "not chaos" -q; then pytest_ok=1; else pytest_ok=0; fi
+    if "$PY" -m pytest -m "not chaos" -q; then pytest_ok=1; else pytest_ok=0; fi
     AFTER="$REPORT_DIR/findings-after.json"; sense "$AFTER"
     SCORE_AFTER="$(py_field "$AFTER" score)"
-    still="$(python -c "import json,sys;d=json.load(open('$AFTER'));print(1 if any(f['fingerprint']=='$fp' for f in d['findings']) else 0)")"
+    still="$("$PY" -c "import json,sys;d=json.load(open('$AFTER'));print(1 if any(f['fingerprint']=='$fp' for f in d['findings']) else 0)")"
 
     if [[ "$pytest_ok" -eq 1 && "$SCORE_AFTER" -lt "$SCORE_BEFORE" && "$still" -eq 0 ]]; then
       # git add/commit 包在 if 條件內：set -e 對 if 測試中的失敗有豁免，失敗不中止腳本，

@@ -5904,7 +5904,10 @@ _SUBCOMMANDS = (
     "assert-hooks-present",
     "check-installed",
 )
-_RAW_PY_CALL = "& python $script:GitHooksInstallCommonPy"
+# DEF-200-315（2026-09-19）：裸 `& python` 改為 dot-source 期經 `Get-RepoPython` 選定的
+# `$script:GitHooksInstallCommonPython`（根層 .venv 優先）；本鎖守的仍是「呼叫核心的那一處
+# 只准在 Invoke-CommonPy 內」，字面隨之更新，語意不變。
+_RAW_PY_CALL = "& $script:GitHooksInstallCommonPython $script:GitHooksInstallCommonPy"
 
 # DEF-101-762 在 LATEST 版 SDD 樹上的**兩個**同形態站點：都以 `git rev-parse` 的輸出反推
 # 路徑，cp950 下損毀即整條路不可用。R71 落地時只鎖了 install_post_commit.ps1，run_tlc.ps1
@@ -6493,6 +6496,32 @@ class TestResolveNativeExecutableShortCircuitOrder(unittest.TestCase):
         )
 
 
+class TestDevStartShellsPinUvProjectEnvironment(unittest.TestCase):
+    """DEF-200-323：uv 專案指令（`uv sync`／`uv run`）預設用 cwd 專案自己的 `.venv`、
+    無視已啟用 venv（uv 0.8.22 兩指令皆有 `--active` 旗標反證預設值），在 AutoClaude/
+    下執行會另建第二顆 venv。兩支薄殼 tools/dev_start.sh／tools/dev_start.ps1 在
+    source／dot-source 啟用 venv 的分支必須同步 export `UV_PROJECT_ENVIRONMENT`
+    指向根層 .venv 兜底（uv 承認該變數：TEMP 沙盒 `uv sync --dry-run` 印出
+    `Would create project environment at: <該值>`）；單邊有、另一邊沒有即鐵律三漏補。"""
+
+    def test_both_shells_export_uv_project_environment_after_activate(self) -> None:
+        sh = _DEV_START_SH_PATH.read_text(encoding="utf-8")
+        ps1 = _DEV_START_PS1_PATH.read_text(encoding="utf-8-sig")
+        sh_export = 'export UV_PROJECT_ENVIRONMENT="$root/.venv"'
+        ps1_export = "$env:UV_PROJECT_ENVIRONMENT = Join-Path $Root '.venv'"
+        self.assertIn(sh_export, sh, "dev_start.sh 缺 UV_PROJECT_ENVIRONMENT 兜底")
+        self.assertIn(ps1_export, ps1, "dev_start.ps1 缺 UV_PROJECT_ENVIRONMENT 兜底")
+        # 必須落在 activate 之後的同一分支：venv 沒啟用就不該把 uv 導向它
+        self.assertLess(
+            sh.index('. "$root/.venv/bin/activate"'), sh.index(sh_export),
+            "dev_start.sh 的 export 不在 activate 之後",
+        )
+        self.assertLess(
+            ps1.index(". $Act"), ps1.index(ps1_export),
+            "dev_start.ps1 的 $env 賦值不在 activate 之後",
+        )
+
+
 class TestStrayVenvScan(DevStartTestCase):
     """雜散 venv 掃描（DEF-200-297；回應 DEF-200-294 事故：子專案悄悄長出第二顆
     .venv 時，子 hook 候選鏈會把它撿去當直譯器用而跑錯環境。單一 .venv 設計下
@@ -6519,6 +6548,17 @@ class TestStrayVenvScan(DevStartTestCase):
                 d.mkdir(parents=True)
                 (d / "pyvenv.cfg").write_text("home = /x\n", encoding="utf-8")
             self.assertEqual(self.stray_venv.find_stray_venvs(root), [])
+
+    def test_venv_cache_prefix_is_only_exempt_at_root(self) -> None:
+        """B1（SD 1a）：`.venv-cache-*` 前綴豁免只准套用在根層——子專案底下同名
+        前綴是巧合撞名，不是「同一顆 venv 換平台身分」那個語意，仍算雜散 venv。"""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            d = root / "AutoClaude" / ".venv-cache-fake"
+            d.mkdir(parents=True)
+            (d / "pyvenv.cfg").write_text("home = /x\n", encoding="utf-8")
+            found = self.stray_venv.find_stray_venvs(root)
+            self.assertEqual(found, [d], "根層以外的 .venv-cache-* 前綴未被正確收錄")
 
     def test_advisory_lines_carry_platform_specific_delete_command(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -6602,6 +6642,45 @@ class TestStrayVenvScan(DevStartTestCase):
             self.assertTrue(ok, "無雜散 venv 時 enforce 應回 True")
             self.assertEqual(emitted, [], "無雜散 venv 時不應呼叫 emit")
 
+    def test_symlinked_venv_pointing_outside_repo_is_detected(self) -> None:
+        """SA 1（SD 1b，2026-09-19 四方複審追加）：`os.walk(followlinks=False)`
+        不會走進 symlink 目錄——junction 在 Windows 上 `Path.is_symlink()` 為
+        `False`，已被一般路徑掃到而不受影響，真 symlink 才是盲區。建一個指向
+        TEMP 外部 venv 目錄的 symlink（`AutoClaude/.venv -> <TEMP 外部目錄>`），
+        斷言仍被列為雜散案例（見 `find_stray_venvs` 內新增的 symlink 直接判定，
+        不下探、不留在 `keep`）。
+
+        Windows 無 symlink 特權（未開發者模式／非管理者，`os.symlink` 拋
+        `OSError`／`WinError 1314`）時**不跳過**：改以真目錄＋`Path.is_symlink`
+        對該候選回 True 的替身走同一條分支——分支邏輯照樣被執行到（記為雜散、
+        不下探），只有「OS 真的把它當 symlink」這一格由特權環境（mac／CI）覆蓋。
+        skip 會撞 skip 分群天花板且讓本鎖在本機零覆蓋，替身比跳過誠實。
+        """
+        with tempfile.TemporaryDirectory() as td_repo, \
+                tempfile.TemporaryDirectory() as td_external:
+            root = Path(td_repo)
+            external = Path(td_external) / "elsewhere_venv"
+            external.mkdir()
+            (external / "pyvenv.cfg").write_text("home = /x\n", encoding="utf-8")
+
+            link = root / "AutoClaude" / ".venv"
+            link.parent.mkdir(parents=True)
+            try:
+                os.symlink(external, link, target_is_directory=True)  # xplat-ok: 缺特權炸 OSError
+                found = self.stray_venv.find_stray_venvs(root)
+            except OSError:
+                # 無特權：真目錄承載 pyvenv.cfg，替身只把這一個候選宣告成 symlink
+                link.mkdir()
+                (link / "pyvenv.cfg").write_text("home = /x\n", encoding="utf-8")
+                real_is_symlink = Path.is_symlink
+                with mock.patch.object(
+                    Path, "is_symlink",
+                    lambda self: self == link or real_is_symlink(self),
+                ):
+                    found = self.stray_venv.find_stray_venvs(root)
+            self.assertEqual(
+                found, [link], "指向外部 venv 的 symlink 未被列為雜散案例")
+
     def test_find_stray_venvs_perf_guard_on_real_repo(self) -> None:
         """效能護欄：全樹遞迴改動後，對真實 repo 樹跑一次不得暴衝——不斷言結果
         內容（他機可能真的有雜散 venv），只釘時間上界（2026-09-15 實測基準見
@@ -6610,6 +6689,32 @@ class TestStrayVenvScan(DevStartTestCase):
         self.stray_venv.find_stray_venvs(dev_start.ROOT)
         elapsed = time.perf_counter() - start
         self.assertLess(elapsed, 5.0, f"find_stray_venvs 對真實 repo 耗時 {elapsed:.2f}s，超過上界")
+
+    def test_cli_main_returns_zero_on_clean_repo(self) -> None:
+        """B2（SD 1d）CLI 入口：乾淨 repo 根 rc=0（`main()` 不接 sys.argv，見其
+        docstring；本測試直呼函式，不繞經 subprocess）。"""
+        with tempfile.TemporaryDirectory() as td:
+            with mock.patch("sys.stderr", new_callable=io.StringIO):
+                rc = self.stray_venv.main([td])
+            self.assertEqual(rc, 0, "乾淨 repo 根應回 rc=0")
+
+    def test_cli_main_returns_one_and_prints_delete_command_on_stray_hit(self) -> None:
+        """B2（SD 1d）CLI 入口：命中雜散 venv 時 rc=1，且 stderr 含可複製的刪除
+        指令（`Remove-Item`／`rm -rf`，依 `os.name` 決定）。"""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            d = root / "AutoClaude" / ".venv"
+            d.mkdir(parents=True)
+            (d / "pyvenv.cfg").write_text("home = /x\n", encoding="utf-8")
+            captured = io.StringIO()
+            with mock.patch("sys.stderr", captured):
+                rc = self.stray_venv.main([td])
+            self.assertEqual(rc, 1, "命中雜散 venv 時應回 rc=1")
+            out = captured.getvalue()
+            self.assertTrue(
+                "Remove-Item" in out or "rm -rf" in out,
+                f"stderr 未含可複製的刪除指令：{out!r}",
+            )
 
 
 class TestStepVenvBlocksOnStrayVenv(DevStartTestCase):

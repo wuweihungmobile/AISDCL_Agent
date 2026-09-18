@@ -34,12 +34,11 @@ param(
 
 $ErrorActionPreference = 'Continue'
 
-# 直譯器選擇維持收斂前語意：PATH 上的 python（所有 gate 都靠已啟用的 venv），
-# 未啟用 venv 就直接失敗提示（勝過各 gate 逐一噴錯）；WindowsApps 空殼排除
-# 比照 tools/bootstrap.ps1／tools/dev_start.ps1 既有 SSOT（R44 收斂）
+# DEF-200-315：互動式入口優先釘死 repo 根層 .venv 直譯器（單一 .venv 設計，
+# ONBOARDING §2.1），本機缺席時 fail-loud；CI／逃生口見 Get-RepoPython 內註解。
 . "$PSScriptRoot/../../tools/lib/WindowsAppsGuard.ps1"
-if (-not (Test-IsRealPython -CandidateName 'python')) {
-  Write-Host '❌ 找不到 python — 請先啟用 venv：.venv\Scripts\Activate.ps1（見 ONBOARDING.md §3）' -ForegroundColor Red
+$py = Get-RepoPython -RepoRoot (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))
+if (-not $py) {
   exit 1
 }
 
@@ -51,5 +50,5 @@ if ($Act) { $CliArgs += '--act' }
 if ($Pg) { $CliArgs += '--pg' }
 if ($Unattended) { $CliArgs += '--unattended' }
 if ($PytestArgs) { $CliArgs += ($PytestArgs -split '\s+') }
-& python (Join-Path $PSScriptRoot 'local_ci_gate.py') @CliArgs
+& $py (Join-Path $PSScriptRoot 'local_ci_gate.py') @CliArgs
 exit $LASTEXITCODE

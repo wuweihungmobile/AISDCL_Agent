@@ -148,20 +148,27 @@ _PINNED_SHA256: dict[str, str] = {
     # 取代原本「`python3`/`python` 命中即用」——後者在 macOS 上恆撿到系統 3.9，
     # 照 ONBOARDING §1 裝完 python@3.11 仍 rc=2（真機重現）。仍屬「選直譯器」
     # 薄殼職責（候選鏈邏輯落在 tools/lib/windowsapps_guard.sh，殼內零迴圈）。
+    # DEF-200-323（2026-09-19）：source 分支 activate 後補 export UV_PROJECT_ENVIRONMENT
+    # （uv 專案指令兜底），仍屬「啟用 venv」薄殼職責 ⇒ 重釘。
     "tools/dev_start.sh": (
-        "b7530b3bed8f5bbb44782e88527085bad9ef9c88ed8f178f872ac8d3ad2ba9d1"
+        "b0d439983f9753bac3dede2ae65fb4327080012cdb72b76a9154181f1bcf3d87"
     ),
     # R37：WindowsApps 空殼排除 guard 收斂為 dot-source tools/lib/WindowsAppsGuard.ps1
     # 共用函式（DEF-101-273/279/300/303 反覆復發後的架構收斂）
     # R69 P2 重釘：同 .sh 側，改委派 SSOT 候選鏈 `Get-PythonGeMin`（雙向對等，
     # 兩側同一套候選鏈語意與同一段版本探測碼）。
+    # DEF-200-323（2026-09-19）：dot-source 分支 activate 後補 $env:UV_PROJECT_ENVIRONMENT，
+    # 與 .sh 側同輪對稱 ⇒ 重釘。
     "tools/dev_start.ps1": (
-        "3217d73ac2cb2a1b136786e300ff7370855d58bb8594c961b7a136a80480fa60"
+        "e2b4594b89357b0227c9753d9ea8482383526dc6ebfdcde30c89bf106b97524e"
     ),
     # R12（DEF-101-070 ②）：local_ci_gate 收斂為薄殼＋Python 核心後納入釘選；
     # R43：補上 WindowsApps guard dot-source（同上 DEF-101-353）
+    # DEF-200-315（2026-09-19，Dev-A2 棒）重釘：直譯器選擇改呼叫 `pick_repo_python`
+    # （單一 .venv 設計，同 integration_gate.sh 上方理由），取代原 `is_real_python_candidate`
+    # + 裸 `python`。仍屬「選直譯器 → 轉呼叫核心」薄殼職責，非降級。
     "AutoClaude/tools/local_ci_gate.sh": (
-        "8d381f7c83714755b1a320a1af3d98abda64be15620a250db508f6e88f64eff0"
+        "91f3c4f3aa622bbfbc1aa80f289d2ace82bb91d869e94d1d536446d489ab2385"
     ),
     # R44：python 前置檢查改走 tools/lib/WindowsAppsGuard.ps1::Test-IsRealPython SSOT
     # R60（F-refuter-1）：$PytestArgs 預設值由寫死的 'tests/ -q --tb=short' 改為 ''
@@ -174,8 +181,11 @@ _PINNED_SHA256: dict[str, str] = {
     # ——`local_ci_gate.ps1` 原本只有 -Act/-Pg/-PytestArgs，位置參數 `--unattended`
     # 會讓 [CmdletBinding()] 參數綁定失敗（rc=1）。仍屬「參數映射 → 轉呼叫核心」
     # 薄殼職責（零業務邏輯），故重釘非降級。
+    # DEF-200-315（2026-09-19，Dev-A2 棒）重釘：直譯器選擇改呼叫 `Get-RepoPython`
+    # （單一 .venv 設計，同 integration_gate.ps1 上方理由），取代原 `Test-IsRealPython`
+    # + 裸 `& python`。仍屬「選直譯器 → 轉呼叫核心」薄殼職責，非降級。
     "AutoClaude/tools/local_ci_gate.ps1": (
-        "08184ba979c118fb7502004fe11b636f991ca35bc62f48ccd2125973b18255cc"
+        "c22b801d1ab75426e0192ddae696ae706e5ae9c04e99a35d88a17327fa49072f"
     ),
     # R16（Architect 建議 B）：bootstrap/integration_gate/run_act 收斂為薄殼＋
     # 各自 Python 核心（bootstrap_core.py／integration_gate_core.py／
@@ -192,22 +202,29 @@ _PINNED_SHA256: dict[str, str] = {
         "993b366802dce5763e748247df43ea7fd6c8fd8db593f273892c35f4957bae45"
     ),
     # R43：補上 WindowsApps guard dot-source（同上 DEF-101-353）
-    # DEF-200-275 第四輪（D8／C14）重釘：直譯器選擇由「只認 PATH 上的 python」改為與
+    # DEF-200-275 第四輪（D8／C14）：直譯器選擇由「只認 PATH 上的 python」改為與
     # tools/git-hooks/pre-push 同形的 if/elif 三候選鏈（python → python3 → 根層
     # .venv/bin/python）。WHY：未 source venv 的 macOS 只有 python3，pre-push 整合閘門 leg 用
     # 候選鏈找到直譯器後再呼叫本殼，本殼卻在同一台機器上失敗。仍屬「選直譯器」薄殼職責，
     # 殼內零迴圈／零 `python -c`（_SH_THIN_KEYWORDS 並聯訊號照樣守著）。`.ps1` 側不動
     # （不對稱記入 CrossPlatform_DEF200275_Context_Metering_Evidence.md〈第四輪〉）。
+    # DEF-200-315（2026-09-19 掌舵者裁決）重釘：訂正上述三候選鏈協議——單一 .venv 設計
+    # 下互動式入口一律優先釘死 repo 根層 .venv，改呼叫 `pick_repo_python`（同檔 SSOT，
+    # 只在 CI／逃生口才落回 PATH 候選）。`.ps1` 側本輪同步改用 `Get-RepoPython`（見下）。
     "tools/integration_gate.sh": (
-        "d5a8c9ca5b4b11319bf2141bae83813729e4bb8de9a00ee2df5df9451f44f69b"
+        "b6c3b000964660ccbb3d8e31a5d838a43a912d0093973de207d71cbc1c423554"
     ),
     # R44：python 前置檢查改走 tools/lib/WindowsAppsGuard.ps1::Test-IsRealPython SSOT
+    # DEF-200-315（2026-09-19 掌舵者裁決）重釘：改用 `Get-RepoPython`（同上 .sh 側理由）。
     "tools/integration_gate.ps1": (
-        "ca1c18c920e28398d804e634ab7a7f0f96d213dd346bc93c1ee2981b15bc6c23"
+        "2d667eb6ee0c484ad9e78d79ecc2b9fa16685379e6265f1a9e467375e6e61514"
     ),
     # R43：補上 WindowsApps guard dot-source（同上 DEF-101-353）
+    # DEF-200-315（2026-09-19，Dev-A2 棒）重釘：直譯器選擇改呼叫 `pick_repo_python`
+    # （單一 .venv 設計，同 local_ci_gate.sh 上方理由），取代原 `is_real_python_candidate`
+    # + 裸 `python`。仍屬「選直譯器 → 轉呼叫核心」薄殼職責，非降級。
     "AutoClaude/tools/run_act.sh": (
-        "422af63e6e74ef0b88ba4dbc3ca63e893a08470b451118d8f6d388d366fd848b"
+        "6543992b0227039654b4a2fd6aacc7d89054efbd926e9852e0b4a383fe1fff97"
     ),
     # R44：python 前置檢查改走 tools/lib/WindowsAppsGuard.ps1::Test-IsRealPython SSOT
     # 🔴 本輪重釘（SD-06，LOCKBLIND）：補上 `-Workflow`／`-Event`（Alias，變數名為
@@ -222,8 +239,11 @@ _PINNED_SHA256: dict[str, str] = {
     # `tools/tests/test_act_local_runner_image.py::TestRunActShellFlagParity`
     # （核心 `parse_args([])` 現查出的每個長旗標，兩側殼都必須到得了；刻意不在那裡抄
     # 一份旗標清單——抄的那份會是第三個會腐化的家）。
+    # DEF-200-315（2026-09-19，Dev-A2 棒）重釘：直譯器選擇改呼叫 `Get-RepoPython`
+    # （單一 .venv 設計，同 local_ci_gate.ps1 上方理由），取代原 `Test-IsRealPython`
+    # + 裸 `& python`。仍屬「參數映射 → 轉呼叫核心」薄殼職責，非降級。
     "AutoClaude/tools/run_act.ps1": (
-        "cdb4c2ff17e4ca57c7b6988ddb9f49825f19fb94d26545469e9a209e7357cabe"
+        "89e88c7f6c512ffc7ad2c123e38a828e7293f2766db4bfe90bbad8f88a5b7bbb"
     ),
     # R61（ADR-XPLAT-002 Phase 1-B，DEF-101-088 由零守門的 _EXEMPT_PAIRS 決策豁免升級
     # 為 hash 釘選）：業務邏輯本已下沉 tools/git_hooks_install_common.py 單一真相源，

@@ -858,6 +858,38 @@ class TestRootInfraNightlyStalenessSentinel(unittest.TestCase):
             "never-started", exec_only,
             "哨兵沒有把 never-started 統計印出來——算了不印等於沒算")
 
+    def test_never_started_excludes_conditional_skip_jobs(self):
+        """DEF-200-321：`never-started` 判準必須排除 `conclusion=="skipped"` 的
+        job，且該排除條件須與 `(.steps|length)==0` 同一個 `select(...)` 內（同一
+        物理行）。
+
+        Rule 9（測意圖）：帶 `if:` 條件性 skip 的 job（如 windows-smoke／
+        macos-smoke 的 `if: github.event_name != 'schedule'`）`conclusion=
+        skipped`、`steps=0`，與帳務阻擋（`conclusion=failure`、`steps=0`）在
+        `steps` 長度這個單一欄位上**無法分辨**——SA 2026-09-19 實查 run
+        34844265895／34852978108 證實兩者皆屬條件性 skip、非帳務阻擋，舊判準
+        （只認 `steps|length==0`）對這兩筆恆印 `::notice::` 為誤判。若排除條件
+        被寫到 `select(...)` 之外（例如整段 `jq` 後面再用 bash 層過濾），jq
+        本身在 skip 案例上仍會算進 never-started 分子，訊號照樣汙染——故本鎖
+        要求兩個判準字面在同一行、同一個 `select(...)` 運算式內。
+        """
+        exec_only = self._exec_lines(self._sentinel_step())
+        target_line = next(
+            (ln for ln in exec_only.splitlines() if "(.steps|length)==0" in ln),
+            None,
+        )
+        self.assertIsNotNone(
+            target_line,
+            "哨兵找不到含 `(.steps|length)==0` 的那一行——DEF-200-321 判準的"
+            "錨點消失",
+        )
+        self.assertIn(
+            '.conclusion != "skipped"', target_line,
+            "哨兵的 never-started 判準未排除 conclusion==skipped（DEF-200-321）"
+            "——條件性 skip 的 job 會被誤判為帳務阻擋；且必須與 "
+            "`(.steps|length)==0` 落在同一個 select(...) 運算式（同一行），"
+            "寫到別處攔不住 jq 分子誤計")
+
     #: 續期理由內**不得**出現日曆日期（見下方測試的 WHY）。
     _CALENDAR_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
     #: 解除判準的必要標記——理由必須說「怎樣才算可以解除」，而不是「我猜它會好」。

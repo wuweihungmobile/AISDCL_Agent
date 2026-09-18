@@ -18,6 +18,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -54,6 +55,22 @@ def _env_without_fw_version() -> dict[str, str]:
     """
     env = dict(os.environ)
     env.pop("SDD_FW_VERSION", None)
+    return env
+
+
+def _env_for_venvless_sandbox() -> dict[str, str]:
+    """DEF-200-315（2026-09-19）：`ci-gate.sh` 改優先釘死 monorepo 根層 .venv
+    （`pick_repo_python`）。以 `tempfile.TemporaryDirectory()` 建的沙盒天生沒有
+    真 `.venv`（`shutil.copy2` 只複製 `ci-gate.sh` 本體，不複製整個 monorepo）
+    ——沙盒測的是 resolver 行為本身（stub `sdd_version.py` 的各種退出碼），不是
+    DEF-200-315 的直譯器挑選邏輯本身（後者由
+    `tools/tests/test_windowsapps_guard_bash_parity.py::TestPickRepoPythonBehavior`
+    覆蓋），故合法使用 `AUTOSDD_ALLOW_PATH_PYTHON=1` 逃生口；同時明確把本測試
+    自身正在執行的直譯器目錄 prepend 進 PATH（不依賴本機當下 PATH 是否剛好有
+    其他 python，避免依賴不確定的環境狀態）。"""
+    env = _env_without_fw_version()
+    env["AUTOSDD_ALLOW_PATH_PYTHON"] = "1"
+    env["PATH"] = os.pathsep.join([str(Path(sys.executable).parent), env.get("PATH", "")])
     return env
 
 
@@ -128,31 +145,56 @@ def test_single_version_override_collapses_to_one():
     assert versions == ["AISDLC_SDD_v0.04"], f"覆寫應僅測單版，實得 {versions}"
 
 
-def test_missing_python_fails_loud_not_silent_downgrade():
-    """R14 DEF-101-188 守門鎖：python 缺席須 rc=1 指路 venv，不得假綠。
+def test_missing_venv_fails_loud_not_silent_downgrade():
+    """R14 DEF-101-188 守門鎖，DEF-200-315（2026-09-19）訂正：repo 根層 .venv
+    缺席（且未開逃生口）須 rc=1 指路，不得假綠。
 
-    WHY：現代 macOS 乾淨 PATH 只有 python3 無 python，修復前 LATEST 解析的
-    `|| true` 把 127 靜默吞成「無演化版」——dry-run 假綠 exit 0、非 dry-run
-    雙軌閘門靜默降為單軌 v0.01（驗證鏡子靜默縮面家族）。本測試鎖住守門分支，
-    防日後誤刪守門塊零訊號（R14 一審 ARCH-R14-REV-1 / QA-R14-REV-1）。
+    🔴 訂正協議：原判準（`PATH=/usr/bin:/bin` 限縮 PATH 模擬「PATH 上沒有
+    python」）在 DEF-200-315 新設計下已失去鑑別力——`pick_repo_python` 找 repo
+    .venv 走絕對路徑（`${REPO_ROOT}/../.venv/...`），與呼叫端當下 PATH 狀態
+    無關；對著真的有 .venv 的 monorepo 根跑，限縮 PATH 攔不住它照樣找到真
+    .venv，rc 仍為 0——舊判準的假設前提已被推翻。唯一能真正觸發
+    `pick_repo_python` fail-loud 分支的情境是 repo 根層真的沒有 .venv，故改用
+    與 `test_resolver_failure_downgrades_with_stderr_warning` 同款沙盒（無
+    `.venv`、且明確清掉 CI／GITHUB_ACTIONS／AUTOSDD_ALLOW_PATH_PYTHON 三個
+    逃生口，不落回 PATH）。
+
+    WHY（原始立案，改法未變）：現代 macOS 乾淨 PATH 只有 python3 無 python，
+    修復前 LATEST 解析的 `|| true` 把 127 靜默吞成「無演化版」——dry-run 假綠
+    exit 0、非 dry-run 雙軌閘門靜默降為單軌 v0.01（驗證鏡子靜默縮面家族）。
+    本測試鎖住守門分支，防日後誤刪守門塊零訊號（R14 一審 ARCH-R14-REV-1 /
+    QA-R14-REV-1）。
     """
-    probe = subprocess.run(
-        [_BASH, "-c", "PATH=/usr/bin:/bin command -v python"],
-        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
-    )
-    if probe.returncode == 0:
-        pytest.skip("此環境 /usr/bin:/bin 內有 python，無法模擬缺席情境")
-    proc = subprocess.run(
-        [_BASH, "-c", "PATH=/usr/bin:/bin SDD_GATE_DRY_RUN=1 bash scripts/ci-gate.sh"],
-        cwd=str(REPO_ROOT),
-        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
-        env=_env_without_fw_version(),
-    )
+    import shutil
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as td:
+        # sandbox 扮演 AISDLC_SDD/ 這一層（比照 REPO_ROOT），故須巢狀一層，
+        # 讓 tools/lib/windowsapps_guard.sh 能放在 td 底下、與 sandbox 手足並列
+        # ——對齊 ci-gate.sh 內 `../../tools/lib/windowsapps_guard.sh` 的兩層
+        # 相對路徑；`td` 本身即 `${REPO_ROOT}/..`，刻意不建 `.venv`。
+        sandbox = Path(td) / "AISDLC_SDD"
+        sandbox.mkdir()
+        (sandbox / "scripts").mkdir()
+        shutil.copy2(CI_GATE, sandbox / "scripts" / "ci-gate.sh")
+        guard_dir = Path(td) / "tools" / "lib"
+        guard_dir.mkdir(parents=True)
+        shutil.copy2(_GUARD_SH, guard_dir / "windowsapps_guard.sh")
+        env = _env_without_fw_version()
+        for var in ("CI", "GITHUB_ACTIONS", "AUTOSDD_ALLOW_PATH_PYTHON"):
+            env.pop(var, None)
+        proc = subprocess.run(
+            [_BASH, "-c", "SDD_GATE_DRY_RUN=1 bash scripts/ci-gate.sh"],
+            cwd=str(sandbox),
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
+            env=env,
+        )
     assert proc.returncode == 1, (
-        f"python 缺席應 rc=1 fail-loud，實得 rc={proc.returncode}（假綠復發？）\n"
+        f"repo 根層 .venv 缺席應 rc=1 fail-loud，實得 rc={proc.returncode}（假綠復發？）\n"
         f"stdout={proc.stdout!r}\nstderr={proc.stderr!r}"
     )
-    assert "找不到 python" in proc.stderr, f"stderr 應含指路文案，實得：{proc.stderr!r}"
+    assert "找不到 repo 根層 .venv 直譯器" in proc.stderr, (
+        f"stderr 應含指路文案，實得：{proc.stderr!r}")
     assert "SDD_GATE_VERSIONS" not in proc.stdout, "守門應在版本解析前攔下，不得輸出版本清單"
 
 
@@ -184,7 +226,7 @@ def test_resolver_failure_downgrades_with_stderr_warning():
             [_BASH, "-c", "SDD_GATE_DRY_RUN=1 bash scripts/ci-gate.sh"],
             cwd=str(sandbox),
             capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
-            env=_env_without_fw_version(),
+            env=_env_for_venvless_sandbox(),
         )
     assert proc.returncode == 0, f"降軌屬容忍情境應 rc=0：{proc.stderr}"
     m = re.search(r"^SDD_GATE_VERSIONS=(.*)$", proc.stdout, re.MULTILINE)
@@ -211,8 +253,8 @@ def test_resolver_abnormal_exit_code_fails_loud_not_silent_downgrade(stub_body, 
     「resolver 根本沒跑起來」與「這個 repo 沒有演化版」在閘門眼中完全同義——結果是
     只測 v0.01 凍結基線、LATEST 軌與其後全部硬閘一次都沒跑，**而且 rc=0 印出成功**。
     閘門靜默降級是最危險的一類缺陷，因為它回報綠：稽核者拿到的是「通過」。
-    上方 `test_missing_python_fails_loud_not_silent_downgrade` 只覆蓋「PATH 上沒有
-    python」（由檔頭守門攔下），攔不到本組這三種「有 python、但呼叫本身壞了」。
+    上方 `test_missing_venv_fails_loud_not_silent_downgrade` 只覆蓋「repo 根層
+    .venv 缺席」（由檔頭守門攔下），攔不到本組這三種「有 .venv、但呼叫本身壞了」。
 
     三個退出碼各跑一次而非只挑一個：分級判準寫成 `-ne 0 && -ne 1` 是一句話，但退化
     成「只擋某個特定碼」時單一樣本看不出來。
@@ -234,7 +276,7 @@ def test_resolver_abnormal_exit_code_fails_loud_not_silent_downgrade(stub_body, 
             [_BASH, "-c", "SDD_GATE_DRY_RUN=1 bash scripts/ci-gate.sh"],
             cwd=str(sandbox),
             capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
-            env=_env_without_fw_version(),
+            env=_env_for_venvless_sandbox(),
         )
     assert proc.returncode != 0, (
         f"resolver {label} 應 fail-loud，實得 rc=0——閘門又把「沒跑起來」讀成「無演化版」，"
@@ -276,7 +318,7 @@ def test_override_with_failed_resolver_suppresses_downgrade_warning():
              "SDD_GATE_DRY_RUN=1 SDD_FW_VERSION=AISDLC_SDD_v0.04 bash scripts/ci-gate.sh"],
             cwd=str(sandbox),
             capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
-            env=_env_without_fw_version(),
+            env=_env_for_venvless_sandbox(),
         )
     assert proc.returncode == 0
     m = re.search(r"^SDD_GATE_VERSIONS=(.*)$", proc.stdout, re.MULTILINE)
@@ -383,9 +425,14 @@ def test_ci_gate_pytest_calls_carry_dash_rs():
         assert " -rs" in ln, (
             f"ci-gate.ps1 的 fallback pytest 呼叫缺 `-rs`（ARCH-R59-NB2）：{ln.strip()}")
 
+    # DEF-200-315（2026-09-19）：ci-gate.sh 的執行呼叫改優先釘死 repo 根層
+    # .venv（`"$PY"`），不再是裸 `python`——比照
+    # `tools/tests/test_ci_gate_xdist_allowlist.py` 同款訂正，判準須同時接受
+    # 舊裸字面值與新直譯器變數兩種形態。
     sh = CI_GATE.read_text(encoding="utf-8", errors="replace")
     calls = [ln for ln in sh.splitlines()
-             if "python -m pytest" in ln and not ln.lstrip().startswith("#")]
+             if "-m pytest" in ln and not ln.lstrip().startswith("#")
+             and re.match(r'^(?:python\b|"\$PY")', ln.lstrip())]
     assert len(calls) >= 2, f"ci-gate.sh 的 pytest 呼叫少於 2 處——結構已變動：{calls}"
     for ln in calls:
         assert " -rs" in ln, (

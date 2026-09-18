@@ -16,7 +16,7 @@
 
 ## 🚀 啟動提示詞（兩平台共用）
 
-平台差異只有下表，提示詞內以「mac／win」標示，`<python>` 依表代換。全 repo 只有**根層一顆 `.venv`**（兩子專案的內容都裝在它裡面），任何工具、hook、排程都指向它：
+平台差異只有下表，提示詞內以「mac／win」標示，`<python>` 依表代換。全 repo 只有**根層一顆 `.venv`**（兩子專案的內容都裝在它裡面）；hook 載具、排程與互動式入口（git hooks／ci-gate／integration_gate…）皆指向它，互動式入口在根層 .venv 缺席時只有 CI 情境容許 PATH（DEF-200-315）：
 
 | | macOS | Windows |
 |---|---|---|

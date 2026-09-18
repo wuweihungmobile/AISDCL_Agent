@@ -77,9 +77,12 @@ _PS1_CLIARGS_APPEND_RE = re.compile(r"\$CliArgs\s*\+=\s*(?P<rhs>.+?)\s*(?:}|$)")
 _PS1_ALLOWED_APPENDS = {
     "'--act'", "'--pg'", "'--unattended'", "($PytestArgs -split '\\s+')",
 }
-# .sh 轉呼叫核心那一行：只准 "$@" 透傳，不得夾帶任何字面參數
+# .sh 轉呼叫核心那一行：只准 "$@" 透傳，不得夾帶任何字面參數。
+# DEF-200-315：直譯器改由 pick_repo_python 選定並存進 "$PY"（不再是裸 `python`），
+# 呼叫行接受 `python` 或 `"$PY"` 兩種直譯器字面。
 _SH_CORE_CALL_RE = re.compile(
-    r'^\s*python\s+"\$SCRIPT_DIR/local_ci_gate\.py"\s+"\$@"\s*$', re.MULTILINE
+    r'^\s*(?:python|"\$PY")\s+"\$SCRIPT_DIR/local_ci_gate\.py"\s+"\$@"\s*$',
+    re.MULTILINE,
 )
 # `$PytestArgs` 轉送的守門判準：條件必須**恰好**是 `$PytestArgs` 真值判斷。
 # 🔴 R60 round 3（SD-R60-R2-09）收緊：原判準 `if\s*\(\s*[^)]*\$PytestArgs` 的 `[^)]*`

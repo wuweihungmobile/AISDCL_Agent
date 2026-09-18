@@ -58,10 +58,13 @@ if ($DotSourced) {
   $Act = Join-Path $Root '.venv\Scripts\Activate.ps1'
   if ($rc -eq 0 -and (Test-Path $Act)) {
     . $Act
+    # DEF-200-323：uv 專案指令（uv sync／uv run）預設用 cwd 專案自己的 .venv、無視已啟用
+    # venv ⇒ 在 AutoClaude\ 下會另建第二顆；釘 UV_PROJECT_ENVIRONMENT 到根層 .venv 兜底。
+    $env:UV_PROJECT_ENVIRONMENT = Join-Path $Root '.venv'
     # 兩步式取 .Source（紀律 #14：StrictMode 下禁 (Get-Command …).<Prop> 鏈式）
     $PyCmd = Get-Command python -ErrorAction SilentlyContinue
     $PyNow = if ($PyCmd) { $PyCmd.Source } else { '(unknown)' }
-    Write-Host "✅ 已自動啟用 .venv（python → $PyNow）" -ForegroundColor Green
+    Write-Host "✅ 已自動啟用 .venv（python → $PyNow；UV_PROJECT_ENVIRONMENT → $env:UV_PROJECT_ENVIRONMENT）" -ForegroundColor Green
   } elseif ($rc -eq 0) {
     Write-Host "⚠️  .venv\Scripts\Activate.ps1 不存在，未啟用 venv" -ForegroundColor Yellow
   }

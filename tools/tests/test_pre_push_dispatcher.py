@@ -315,6 +315,13 @@ class TestPrePushDispatcher(unittest.TestCase):
         env.pop("AUTOCLAUDE_SKIP_HOOKS", None)
         # 外層若帶此縮限旗標，AutoClaude leg 會跳過 census，census 斷言全數失真。
         env.pop("AUTOCLAUDE_PUSH_PYTEST_ARGS", None)
+        # DEF-200-315（2026-09-19）：dispatcher 改優先釘死 fake repo 根層 .venv，
+        # 但本 fixture 是沙盒（`self.repo` 天生沒有真 .venv，python 只經下方
+        # `_python_dir()` PATH shim 供應）——與 `AISDLC_SDD/scripts/tests/
+        # test_ci_gate_version_resolution.py` 的處置同理，補人為逃生口而非造假
+        # `.venv`（本測試鎖的是分流路由邏輯，不是直譯器挑選邏輯本身，後者已由
+        # `test_windowsapps_guard_bash_parity.py` 的行為測試覆蓋）。
+        env["AUTOSDD_ALLOW_PATH_PYTHON"] = "1"
         # production 下 git 會幫 hook 把自家 usr/bin（GNU find/sed/sort/grep）prepend
         # 進 PATH；直接 spawn bash.exe 時 Windows 會把 find/sort 解析到 System32 版、
         # sed/grep 直接缺席（本機實測）→ 比照 git 行為 prepend bash 所在目錄。

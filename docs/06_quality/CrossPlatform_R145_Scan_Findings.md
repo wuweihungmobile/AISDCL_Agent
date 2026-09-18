@@ -398,3 +398,35 @@ R153 那筆＝92＋15＋105＋6＋39 自身漂移，未超軌上限 309、未使
 `docs/06_quality/AutoSDD_Defect_Log.md` DEF-200-319／320；四方複審與實作證據見
 `CrossPlatform_DEF200274_Parallel_Tests_Evidence.md`〈第十三輪〉。此附記為 doc-total 對帳（≥2 站點）另一站點寄居
 `AutoSDD_improving_112.md`，同 R129～R153 寄居體例。round-label-ok
+
+## 第十七輪附記（R155；DEF-200-315 互動式入口釘死根層 .venv＋DEF-200-321～323 四方審查收尾）
+
+- **體例**：本節非開新一輪 CrossPlatform 掃描輪四件套，僅為四筆缺陷收尾造成的護欄層逐檔漂移記帳，
+  寄居本檔（同 R129～R154 寄居體例）。本輪為**非淨減法輪**（R154 淨額 -4 已使連續上升計數歸零，
+  本輪為連升第 1 輪，≤ 上限 2）。cap 到期義務本輪兌現：`(155, 538)` 落地，重新武裝
+  `_REPIN_NET_CAP_DUE_ROUND` 155→157、`_REPIN_NET_CAP_DUE_TARGET` 538→537；`_PHASE2_REVIEW_LOG`
+  五輪時效未到（R153 [提案] 起算），本輪無新登記。
+
+<!-- guard-total:R155 --> R155 護欄層累積淨額＝ 100691 → 101532（+841）——DEF-200-315（互動式入口
+改經 `pick_repo_python`／`Get-RepoPython` SSOT 化：本機缺席 fail-loud、CI／`AUTOSDD_ALLOW_PATH_PYTHON=1`
+容許 PATH）／DEF-200-321（root-infra-ci never-started jq 判準排除 `conclusion=="skipped"`）／
+DEF-200-322（雜散 venv 守衛四處補洞：`.venv-cache-*` 根層限定剪枝／pre-commit CLI 閘／symlink
+`pyvenv.cfg` 查探）／DEF-200-323（`uv sync`／`uv run` 第二顆 venv：dev_start 兩殼 export
+`UV_PROJECT_ENVIRONMENT`）四筆收尾的新增測試涵蓋：`test_nightly_interpreter_determinism.py` +349
+（H 項新判準能力鎖：本機缺席 fail-loud／CI 容許 PATH／逃生口三情境）、
+`test_windowsapps_guard_cross_consistency.py` +126、`test_dev_start.py` +105、
+`test_windowsapps_guard_bash_parity.py` +89、`test_pre_commit_dispatcher_sigpipe.py` +33、
+`test_workflow_permission_concurrency_lock.py` +32、`test_find_git_bash_parity.py` +26、
+`test_clean_venv_carrier.py` +19、`test_git_hooks_install_common.py` +18、
+`test_ci_gate_xdist_allowlist.py` +8、`test_pre_push_dispatcher.py` +7（合計 +812）；本檔
+（`test_adr_xplat001_c1c2_lock.py`）自身逐檔漂移 +29（新增主表兩列〔內容＋收斂〕、
+`_REGRESSION_LANE_LOG` 同輪新列、`_REPIN_NET_CAP_SCHEDULE` 到期義務兌現列與重新武裝、
+`_FROZEN_PREFIX_REWRITE_LEDGER` 接鏈列；凍結前綴 231→233、`_REPIN_LOG_HISTORY_SHA256` 同步重釘）。
+分軌：`_REGRESSION_LANE_LOG` R155 列申報 309（貼齊上限，同 R131 體例，優先納入 DEF-200-322／323 的
+`test_dev_start.py`／`test_pre_commit_dispatcher_sigpipe.py`／`test_clean_venv_carrier.py` 段、
+DEF-200-321 的 `test_workflow_permission_concurrency_lock.py` 段、DEF-200-315 的 windowsapps_guard
+兩支三情境行為測試段；`test_nightly_interpreter_determinism.py` 的 H 項與逾額片段保守歸主軌），
+主軌淨額 841−309＝532 ≤ cap 538。缺陷帳本見 `docs/06_quality/AutoSDD_Defect_Log.md`
+DEF-200-315／321／322／323；四方審查與實作證據見 `CrossPlatform_R152_DEF200314_MacNightly_Evidence.md`
+〈收尾（R155）〉。此附記為 doc-total 對帳（≥2 站點）另一站點寄居 `AutoSDD_improving_112.md`，
+同 R129～R154 寄居體例。round-label-ok

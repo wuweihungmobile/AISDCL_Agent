@@ -90,10 +90,10 @@ if [ -f "$_ss_scanner" ] && [ -f "$_ss_guard" ]; then
   # （該表明訂只准變小，往上加一筆就是把還沒修的債寫成合法額度）。
   # shellcheck disable=SC1090,SC1091
   . "$_ss_guard"
-  _ss_py=""
-  for _ss_cand in python python3; do
-    if is_real_python_candidate "$_ss_cand"; then _ss_py="$_ss_cand"; break; fi
-  done
+  # DEF-200-315（2026-09-19 掌舵者裁決）：互動式入口優先釘死 repo 根層 .venv，
+  # 不再從 PATH 直接挑 python/python3；`pick_repo_python` 同檔 SSOT，內部沿用
+  # is_real_python_candidate 判空殼，只在 CI／逃生口才落回 PATH 候選。
+  _ss_py="$(pick_repo_python "$TOPLEVEL")" || _ss_py=""
   if [ -z "$_ss_py" ]; then
     echo "[pre-commit dispatcher] ⚠ 找不到可用的 python → 機密**內容**掃描這一層未執行（檔名層已跑）" >&2
   else
@@ -487,10 +487,10 @@ _ar_checker="$TOPLEVEL/tools/check_archive_required.py"
 if [ -f "$_ar_guard" ] && [ -f "$_ar_checker" ]; then
   # shellcheck disable=SC1090,SC1091  # 動態 source，理由同上方機密掃描層的同款豁免
   . "$_ar_guard"
-  _ar_py=""
-  for _ar_cand in python python3; do
-    if is_real_python_candidate "$_ar_cand"; then _ar_py="$_ar_cand"; break; fi
-  done
+  # DEF-200-315（2026-09-19 掌舵者裁決）：互動式入口優先釘死 repo 根層 .venv，
+  # 不再從 PATH 直接挑 python/python3；`pick_repo_python` 同檔 SSOT，內部沿用
+  # is_real_python_candidate 判空殼，只在 CI／逃生口才落回 PATH 候選。
+  _ar_py="$(pick_repo_python "$TOPLEVEL")" || _ar_py=""
   if [ -z "$_ar_py" ]; then
     echo "[pre-commit dispatcher] ⚠ 找不到可用的 python → 帳本歸檔強制觸發閘未執行" >&2
   elif ! PYTHONUTF8=1 "$_ar_py" "$_ar_checker"; then
@@ -503,6 +503,20 @@ if [ -f "$_ar_guard" ] && [ -f "$_ar_checker" ]; then
   fi
 else
   echo "[pre-commit dispatcher] ⚠ 找不到 tools/check_archive_required.py 或共用 guard → 帳本歸檔強制觸發閘未執行" >&2
+fi
+
+# ── 雜散 venv 順手掃描（B2／SD 1d，DEF-200-294 事故回應）───────────────────────
+# 掌舵者 2026-09-15 裁決：擋下、不代勞刪。原本要等到「下次 dev_start」才會被看見
+# 的雜散 venv，本閘把攔截點提前到「下次 commit」；成本約 0.2s（見
+# tools/lib/stray_venv.py 檔頭效能量測）。`_sv_py` 沿用上方帳本歸檔閘已選出的
+# `_ar_py`（同一支 `pick_repo_python` 候選鏈，未選出時該變數不存在，`${_ar_py:-}`
+# 安全預設空字串，`set -u` 下不炸）。
+_sv_py="${_ar_py:-}"
+if [ -z "$_sv_py" ]; then
+  echo "[pre-commit dispatcher] ⚠ 找不到可用的 python → 雜散 venv 掃描未執行" >&2
+elif ! PYTHONUTF8=1 "$_sv_py" "$TOPLEVEL/tools/lib/stray_venv.py" "$TOPLEVEL"; then
+  echo "[pre-commit dispatcher] ❌ 偵測到根層以外的 venv／殘留（單一 .venv 設計，ONBOARDING §2.1）——刪除指令見上方訊息，刪完重試 commit" >&2
+  rc=1
 fi
 
 # ── 根層基建 leg（A4）────────────────────────────────────────────────────

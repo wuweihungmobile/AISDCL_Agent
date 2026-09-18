@@ -98,7 +98,7 @@
 - `ruff check tools/lib/skip_group_policy.py
   tools/tests/test_nightly_interpreter_determinism.py`：All checks passed。
 
-## DEF-200-315（P3，open）—— 互動式入口未釘死 .venv
+## DEF-200-315（P3，fixed 2026-09-19）—— 互動式入口未釘死 .venv
 
 四方審查 Architect A1 發現：`tools/git-hooks/pre-commit`、
 `tools/git-hooks/pre-push`、`AISDLC_SDD/scripts/ci-gate.sh` 三支互動式入口的
@@ -107,6 +107,72 @@ Windows `WindowsApps` 空殼 shim，未如 DEF-200-302／307（nightly／smoke �
 入口）改為釘死根層 `.venv` 絕對路徑，缺席時亦無 fail-loud 分支。與已完成的
 無人值守面形成不對稱：排程路徑已收斂到單一 `.venv`，互動路徑仍可能因 PATH
 上第一個 `python` 是別的直譯器而解析錯誤。本輪僅記錄不修復（範圍外）。
+
+### 收尾（R155）
+
+**掌舵者代決 D1～D5 摘要**：D1／互動式入口直譯器選擇原則＝根層 `.venv` 存在即
+釘死用它；缺席時只在 CI 情境（`GITHUB_ACTIONS=true` 或 `CI=true`）容許 PATH，
+本機一律 fail-loud 印 bootstrap／dev_start 指令，逃生口 `AUTOSDD_ALLOW_PATH_
+PYTHON=1`。D2／共用函式併入既有 SSOT——`tools/lib/windowsapps_guard.sh` 的
+`repo_python_path_fallback_allowed`／`pick_repo_python`，與
+`tools/lib/WindowsAppsGuard.ps1` 的 `Test-RepoPythonPathFallbackAllowed`／
+`Get-RepoPython`，不新增 lib／鎖檔。D3／AutoClaude 子 hook ③ PATH fallback
+不刪，改為只在 `repo_python_path_fallback_allowed` 成立時才進入（全新 clone
+未 bootstrap 時 hooks 尚未安裝，strict 零實際代價）。D4／`ci-gate.ps1`
+fallback 只做「補根 venv 判斷」最小修，整段刪除留給 Phase 2-B signoff。
+D5／`.python-version` 與 `.venv-cache-*` 不算第二來源，不動。
+
+**改動檔清單**（`git status --short` 實測合計 52 檔 M：Dev-A／Dev-B／Dev-D
+消費端與共用 SSOT 47 檔＋本節所在檔／帳本／棘輪／doc-total 兩站點等 Dev-C
+記帳異動 5 檔）：互動式入口消費端 21 支
+（`tools/git-hooks/pre-commit`／`pre-push`、`AISDLC_SDD/scripts/ci-gate.sh`／
+`.ps1`、`tools/integration_gate.sh`／`.ps1`、`AutoClaude/tools/local_ci_gate.
+sh`／`.ps1`、`run_act.sh`／`.ps1`、`g0_gate_check.ps1`、
+`sd06_w3_staging_dryrun.sh`、`AISDLC_SDD/scripts/copy_on_evolve.sh`、
+`tools/lib/git_hooks_install_common.sh`／`GitHooksInstallCommon.ps1`、
+`AutoClaude/tools/git-hooks/pre-push`／`pre-commit`、四支 LATEST SDD 工具
+`AISDLC_SDD/AISDLC_SDD_v0.30/tools/arch_fitness/run_self_evolution.sh`／
+`.ps1`、`tools/install_hooks/install_post_commit.sh`／`.ps1`）；共用 SSOT
+`tools/lib/windowsapps_guard.sh`／`WindowsAppsGuard.ps1`／`stray_venv.py`／
+`skip_tag_policy.py`；`tools/dev_start.sh`／`.ps1`（`UV_PROJECT_ENVIRONMENT`
+export，DEF-200-323）；`.github/workflows/root-infra-ci.yml`（DEF-200-321）；
+`tools/check_wrapper_thinness.py`（六支殼 `_PINNED_SHA256` 重釘）；回歸鎖測試
+11 支（`tools/tests/test_nightly_interpreter_determinism.py`／
+`test_windowsapps_guard_bash_parity.py`／`test_windowsapps_guard_cross_
+consistency.py`／`test_dev_start.py`／`test_pre_commit_dispatcher_sigpipe.py`
+／`test_clean_venv_carrier.py`／`test_workflow_permission_concurrency_lock.py`
+／`test_find_git_bash_parity.py`／`test_git_hooks_install_common.py`／
+`test_ci_gate_xdist_allowlist.py`／`test_pre_push_dispatcher.py`）＋
+`AISDLC_SDD/scripts/tests/` 四支＋`AutoClaude/tests/tools/test_local_ci_gate_
+shell_arg_parity.py`；文件 `ONBOARDING.md`／`useMacWin.md`／
+`docs/06_quality/AutoSDD_Defect_Log.md`（本節所在檔另計）。
+
+**鎖 H 判準**：`test_nightly_interpreter_determinism.py` 的 H 項（DEF-200-315）
+以 `_INTERACTIVE_ENTRY_FILES` 字典枚舉全部互動式入口，H1～H5 判準機械檢查
+每一入口是否已改呼叫 `pick_repo_python`／`Get-RepoPython`（AutoClaude 兩支子
+hook 走客製判準 H5：③ PATH fallback 段必須被
+`[ -z "$PY" ] && repo_python_path_fallback_allowed` 條件包住）。
+
+**三情境行為測試結果**（本包自跑，非轉述）：
+`python -m unittest discover -s tools/tests -p test_nightly_interpreter_
+determinism.py` → rc=0，`Ran 25 tests in 0.388s`，OK；
+`python -m unittest tools.tests.test_windowsapps_guard_bash_parity.
+TestPickRepoPythonBehavior` → rc=0，`Ran 3 tests in 0.461s`，OK
+（情境 1：repo 根層 `.venv` 存在即選中；情境 2：`CI=true` 時退回 PATH；
+情境 3：無 `.venv` 且無逃生口 ⇒ rc=1 fail-loud，訊息含「找不到 repo 根層
+.venv 直譯器」）。
+
+**QA 危害重現**：未啟用 venv 時本機 `python` 解析到 pyenv-win shim
+`C:\Users\wuwei\.pyenv\pyenv-win\versions\3.11.9\python.exe`
+（同 DEF-200-293 危害家族：shim 行為與真直譯器不對等，是本機一律 fail-loud
+而非靜默信任 PATH 首個 `python` 的立案動機）。
+
+**雲端憑證**（本包自跑 `gh run view` 驗證，非轉述）：
+`windows-compat-ci` workflow_dispatch run `35369313672` →
+`{"conclusion":"success","headSha":"e9f5817f8bf77aa13190664f66dd308da3d973b2",
+"status":"completed"}`；`macos-compat-ci` run `35369317362` →
+`{"conclusion":"success","headSha":"e9f5817f8bf77aa13190664f66dd308da3d973b2",
+"status":"completed"}`（sha 前 7 碼 e9f5817，即本輪起點 HEAD）。
 
 ## DEF-200-316（P3，open）—— mac hook 成對條目 ENOENT 噪音
 

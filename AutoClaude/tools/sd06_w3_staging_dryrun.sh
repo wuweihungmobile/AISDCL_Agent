@@ -103,9 +103,13 @@ command -v alembic >/dev/null 2>&1 || fail "alembic 不存在於 PATH" 1
 command -v pg_dump >/dev/null 2>&1 || fail "pg_dump 不存在於 PATH" 1
 command -v pg_restore >/dev/null 2>&1 || fail "pg_restore 不存在於 PATH" 1
 # R43 Scan-B（DEF-101-353）：WindowsApps 空殼排除 guard（純函式定義，無副作用）。
+SD06_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../tools/lib/windowsapps_guard.sh"
-is_real_python_candidate python || fail "python 不存在於 PATH（請先啟用 .venv，見 ONBOARDING.md §3）" 1
+. "$SD06_SCRIPT_DIR/../../tools/lib/windowsapps_guard.sh"
+# DEF-200-315：互動式入口優先釘死 repo 根層 .venv 直譯器（單一 .venv 設計，
+# ONBOARDING §2.1），本機缺席時 fail-loud（pick_repo_python 已印補救指令）；
+# CI／逃生口見 pick_repo_python 內註解。
+PY="$(pick_repo_python "$SD06_SCRIPT_DIR/../..")" || exit 1
 
 # psql 連線測試
 PSQL_DSN="${DSN/+asyncpg/}"
@@ -309,8 +313,8 @@ RATE="$(psql "$PSQL_DSN" -tA -c "
 SELECT count(*) FILTER (WHERE goal_task_id IS NOT NULL)::float / count(*)
 FROM playbook_runs;")"
 log "backfill_rate = $RATE"
-# 用 python 算（避免 bc 不存在；venv 政策統一用裸 python，見 ONBOARDING.md §3）
-[ "$(python -c "print('yes' if $RATE >= 0.95 else 'no')")" = "yes" ] || fail "backfill_rate $RATE < 0.95" 5
+# 用 python 算（避免 bc 不存在；直譯器統一用 pick_repo_python 選定的 repo 根層 .venv）
+[ "$("$PY" -c "print('yes' if $RATE >= 0.95 else 'no')")" = "yes" ] || fail "backfill_rate $RATE < 0.95" 5
 ok "backfill_rate $RATE ≥ 0.95"
 
 # Backfill checkpoints

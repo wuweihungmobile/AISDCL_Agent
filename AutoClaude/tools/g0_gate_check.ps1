@@ -35,21 +35,24 @@ W "repo=$Repo"
 #   successfully on this machine before schtasks fires this script -- that
 #   assumption is not enforced anywhere, so guard directly instead (same SSOT
 #   as tools/bootstrap.ps1/tools/dev_start.ps1/AutoClaude/tools/local_ci_gate.ps1).
+# DEF-200-315 (2026-09-19): interactive entries pin the repo-root .venv interpreter
+#   first (single-.venv design, ONBOARDING SS2.1); fail-loud when it is absent locally.
+#   See Get-RepoPython in WindowsAppsGuard.ps1 for the CI / escape-hatch conditions.
 . "$PSScriptRoot/../../tools/lib/WindowsAppsGuard.ps1"
-if (-not (Test-IsRealPython -CandidateName 'python')) {
-  W "[ERROR] python not found (or is a WindowsApps stub alias) -- cannot run G0 gate check. Install Python >= 3.11 first."
+$py = Get-RepoPython -RepoRoot (Split-Path -Parent $Repo)
+if (-not $py) {
   exit 1
 }
 
 # --- #2 AC4 (need ready_for_labeled_pr=true / 14 days) ---
 W "--- #2 AC4 progress (ac4_progress_check --json) ---"
-$ac4 = python tools/ac4_progress_check.py --history .ac4_history.jsonl --json 2>&1 | Out-String
+$ac4 = & $py tools/ac4_progress_check.py --history .ac4_history.jsonl --json 2>&1 | Out-String
 W $ac4
 $ac4_ready = $ac4 -match '"ready_for_labeled_pr"\s*:\s*true'
 
 # --- #3 observability/drift (need green_streak>=30) ---
 W "--- #3 observability GA (observability_ga_check) ---"
-$obs = python tools/observability_ga_check.py --history .observability_history.jsonl 2>&1 | Out-String
+$obs = & $py tools/observability_ga_check.py --history .observability_history.jsonl 2>&1 | Out-String
 W $obs
 $obs_pass = $obs -match '\[PASS\]'
 

@@ -26,8 +26,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 . "$SCRIPT_DIR/../../tools/lib/windowsapps_guard.sh"
 
-is_real_python_candidate python || { echo '❌ 找不到 python — 請先 source .venv/bin/activate（見 ONBOARDING.md §3）'; exit 1; }
+# DEF-200-315：互動式入口優先釘死 repo 根層 .venv 直譯器（單一 .venv 設計，
+# ONBOARDING §2.1），本機缺席時 fail-loud；CI／逃生口見 pick_repo_python 內註解。
+PY="$(pick_repo_python "$SCRIPT_DIR/../..")" || exit 1
 
 export PYTHONUTF8=1
-python "$SCRIPT_DIR/run_act_core.py" "$@"
+"$PY" "$SCRIPT_DIR/run_act_core.py" "$@"
 exit $?

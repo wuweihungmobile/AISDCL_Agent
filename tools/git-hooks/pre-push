@@ -63,15 +63,13 @@ rc=0
 # 🔴 DEF-101-740（R80）：直譯器候選由 `python` 一支擴為 `python → python3`，與姊妹
 # hook AutoClaude/tools/git-hooks/pre-push 的既有候選鏈**逐字同形**，並維持 fail-loud
 # （軟跳過會讓整條 leg 退回「宣告有、執行者無」）。
-# 為何非補不可：R69 把 root-infra 快層改成「任何 push 皆跑」之後，只認 `python` 使得
-# **未啟用 venv 的 macOS**（系統只有 `python3`）下的每一次 push——含純文件、純子專案
-# ——都被硬擋，而該次 push 真正要跑的子專案 hook 自己跑得動。
+# 🔴 DEF-200-315（2026-09-19 掌舵者裁決）：訂正上述協議——單一 .venv 設計下互動式
+# 入口一律優先釘死 repo 根層 .venv，不再從 PATH 直接挑 python/python3；改呼叫
+# `pick_repo_python`（同檔 SSOT，內部沿用 is_real_python_candidate 判空殼，只在
+# CI／逃生口才落回 PATH 候選，見 tools/lib/windowsapps_guard.sh 同名函式 WHY）。
 # `PY` 為空＝一個候選都沒有；四處 leg 各自以 `[ -z "$PY" ]` fail-loud，語意與原本的
-# `! is_real_python_candidate python` 完全相同，只是候選集合大了一個。
-PY=""
-for _py_cand in python python3; do
-  if is_real_python_candidate "$_py_cand"; then PY="$_py_cand"; break; fi
-done
+# `! is_real_python_candidate python` 完全相同。
+PY="$(pick_repo_python "$TOPLEVEL")" || PY=""
 
 ZERO_SHA='0000000000000000000000000000000000000000'
 STDIN="$(cat)"

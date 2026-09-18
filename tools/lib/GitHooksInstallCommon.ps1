@@ -43,14 +43,13 @@ $script:GitHooksInstallCommonPy = [System.IO.Path]::GetFullPath(
 # 純互動 `-Command ". thisFile"` 時 [1] 為空白 ScriptBlock → return；被任何真實
 # .ps1 dot-source 進去時，無論該 .ps1 再往上被如何呼叫，[1] 恆非空 → exit。
 $script:GitHooksInstallCommonScriptDriven = [bool]((Get-PSCallStack)[1].ScriptName)
-# venv 提示：下列各函式都靠裸 python 呼叫 GitHooksInstallCommonPy，未啟用 venv 就
-# 直接失敗提示（勝過各函式逐一噴原生「'python' 不是內部或外部命令」）——與
-# tools/integration_gate.ps1 / AutoClaude/tools/local_ci_gate.ps1 的
-# `Get-Command python` 前置守門對稱，dot-source 本檔時即檢查一次。WindowsApps
-# 空殼排除比照 tools/bootstrap.ps1／tools/dev_start.ps1 既有 SSOT（R44 收斂）。
+# DEF-200-315：互動式入口優先釘死 repo 根層 .venv 直譯器（單一 .venv 設計，
+# ONBOARDING §2.1），dot-source 本檔時即選定一次，供下列各函式呼叫
+# GitHooksInstallCommonPy 共用——與 tools/integration_gate.ps1 /
+# AutoClaude/tools/local_ci_gate.ps1 的前置守門對稱。
 . "$PSScriptRoot/WindowsAppsGuard.ps1"
-if (-not (Test-IsRealPython -CandidateName 'python')) {
-  Write-Host '❌ 找不到 python — 請先啟用 venv：.venv\Scripts\Activate.ps1（見 ONBOARDING.md §3）' -ForegroundColor Red
+$script:GitHooksInstallCommonPython = Get-RepoPython -RepoRoot (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))
+if (-not $script:GitHooksInstallCommonPython) {
   # 頂層本體（不在函式內）呼叫 exit 只終止本檔自身載入、不終止外層呼叫行程
   # （與下方函式內 exit 語意不同）；裸 `exit 1` 會讓 script-driven 呼叫端不受
   # 阻擋繼續跑，違反 fail-loud（DEF-101-261 追加修復，R23 SA/QA 命中）。
@@ -91,7 +90,7 @@ function Invoke-CommonPy {
     $prevEnc = $null
   }
   try {
-    & python $script:GitHooksInstallCommonPy @PyArgs
+    & $script:GitHooksInstallCommonPython $script:GitHooksInstallCommonPy @PyArgs
   } finally {
     if ($null -ne $prevEnc) { [Console]::OutputEncoding = $prevEnc }
   }

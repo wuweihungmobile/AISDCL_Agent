@@ -36,9 +36,14 @@ Write-Host "⚠️ 覆蓋範圍小於 ci-gate.sh（無 LATEST 演化版軌與其
 # WindowsAppsGuard.ps1）。全新 Windows 11 機器未裝真 Python、又剛好沒裝 Git Bash
 # 時，`Get-Command python` 仍會找到 WindowsApps 底下的空殼，若不排除，下方
 # `python -m pytest ...` 只會跳出 Microsoft Store 安裝提示。
+# 🔴 DEF-200-315（2026-09-19 掌舵者裁決）：訂正上述協議——單一 .venv 設計下互動式
+# 入口一律優先釘死 monorepo 根層 .venv（`$repo` 指向 AISDLC_SDD/，故傳
+# `Join-Path $repo '..'`），不再只檢查 PATH 上有沒有 python；`$py` 取代下方全部
+# 執行用裸 `python`（`Get-RepoPython` 同檔 SSOT，內部沿用 Test-IsRealPython 判
+# 空殼，只在 CI／逃生口才落回 PATH 候選，找不到時已印補救訊息，本處不必再印）。
 . "$PSScriptRoot/../../tools/lib/WindowsAppsGuard.ps1"
-if (-not (Test-IsRealPython -CandidateName 'python')) {
-  Write-Host "❌ 找不到 python（或偵測到的是 WindowsApps 空殼別名）— 無法執行 fallback 3-stage。請先安裝 Python >= 3.11。" -ForegroundColor Red
+$py = Get-RepoPython -RepoRoot (Join-Path $repo '..')
+if (-not $py) {
   exit 1
 }
 
@@ -46,7 +51,7 @@ if (-not (Test-IsRealPython -CandidateName 'python')) {
 # WHY：與 ci-gate.sh／pre-push 同名區塊同一顆 SSOT（tools/lib/cpu_budget.py），
 # 廣播給下游任何會讀這兩個變數的呼叫端；使用者已顯式設定其一則不覆寫。
 if (-not $env:AUTOSDD_PARALLEL_TESTS_WORKERS -and -not $env:PYTEST_XDIST_AUTO_NUM_WORKERS) {
-  $_cpuBudget = & python "$repo/tools/lib/cpu_budget.py" --legs 1 2>$null
+  $_cpuBudget = & $py "$repo/tools/lib/cpu_budget.py" --legs 1 2>$null
   if ($_cpuBudget -match '^\d+$') {
     $env:AUTOSDD_PARALLEL_TESTS_WORKERS = $_cpuBudget
     $env:PYTEST_XDIST_AUTO_NUM_WORKERS = $_cpuBudget
@@ -68,19 +73,19 @@ Write-Host "==> [1/3] pytest -m 'not chaos'（全套，含 offline reachability 
 # 把凍結基線唯一沒有的那個修法需求強加給它，複製回 ci-gate.sh 已經修掉的
 # 那個競態——這不是「與 .sh LATEST 軌一致」，而是「與 .sh 凍結基線軌一致」
 # （序列執行），對稱點是允許清單語意本身，不是逐字複製旗標。
-python -m pytest tools/fsm_runtime/tests/ -m "not chaos" -q -rs
+& $py -m pytest tools/fsm_runtime/tests/ -m "not chaos" -q -rs
 if ($LASTEXITCODE -ne 0) { throw "pytest 失敗" }
 
 Write-Host "==> [2/3] arch_fitness（structural fail 阻擋；advisory warn 放行）"
 # 必帶 --strict：唯有 --strict 時 structural fail 才回傳 exit 2，與雲端 nightly-strict 一致。
-python -m tools.arch_fitness.arch_fitness --strict --json arch-fitness.json
+& $py -m tools.arch_fitness.arch_fitness --strict --json arch-fitness.json
 if ($LASTEXITCODE -ge 2) { throw "arch_fitness structural fail (exit=$LASTEXITCODE)" }
 if ($LASTEXITCODE -eq 1) { Write-Host "(arch_fitness advisory warn — 不阻擋)" }
 
 if ($env:SDD_RUN_TLC -eq "1") {
   foreach ($m in "SDD_FSM","META_FSM","FLEET_FSM","COMPOSITION_FSM","OPTIMIZATION_FSM") {
     Write-Host "==> [3/3] TLC $m"
-    python -m tools.fsm_runtime.tlc_runner --module $m
+    & $py -m tools.fsm_runtime.tlc_runner --module $m
     if ($LASTEXITCODE -ne 0) { throw "TLC $m 失敗" }
   }
 } else {

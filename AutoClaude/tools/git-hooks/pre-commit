@@ -87,23 +87,29 @@ if [ -x "$ROOT/.venv/bin/python" ] || [ -x "$ROOT/.venv/Scripts/python.exe" ] \
 fi
 
 # ③ PATH：python → python3（維持 is_real_python_candidate 守門，DEF-101-740 候選鏈）。
-if [ -z "$PY" ] && is_real_python_candidate python; then
-  if _py_health python; then
-    PY=python
-  else
-    echo "[pre-commit] ⚠️  PATH 上的 python 缺 Python ${PYTHON_GE_MIN_MM}+ → 跳過此候選" >&2
+# 🔴 DEF-200-315（2026-09-19）：本機根層 .venv 缺席不再退回 PATH——單一 .venv 設計
+# （ONBOARDING §2.1）下互動式入口只認根層 .venv；PATH fallback 只在 CI／容器
+# （repo_python_path_fallback_allowed：GITHUB_ACTIONS／CI／逃生口 AUTOSDD_ALLOW_PATH_PYTHON=1）
+# 容許，本機缺席時落到下方既有 ❌ fail-loud 訊息（該訊息已含修法）。
+if [ -z "$PY" ] && repo_python_path_fallback_allowed; then
+  if [ -z "$PY" ] && is_real_python_candidate python; then
+    if _py_health python; then
+      PY=python
+    else
+      echo "[pre-commit] ⚠️  PATH 上的 python 缺 Python ${PYTHON_GE_MIN_MM}+ → 跳過此候選" >&2
+    fi
   fi
-fi
-if [ -z "$PY" ] && is_real_python_candidate python3; then
-  if _py_health python3; then
-    PY=python3
-  else
-    echo "[pre-commit] ⚠️  PATH 上的 python3 缺 Python ${PYTHON_GE_MIN_MM}+ → 跳過此候選" >&2
+  if [ -z "$PY" ] && is_real_python_candidate python3; then
+    if _py_health python3; then
+      PY=python3
+    else
+      echo "[pre-commit] ⚠️  PATH 上的 python3 缺 Python ${PYTHON_GE_MIN_MM}+ → 跳過此候選" >&2
+    fi
   fi
 fi
 
 if [ -z "$PY" ]; then
-  echo "[pre-commit] ❌ 找不到可用的直譯器（已試：根層 .venv／PATH python・python3，皆缺席或版本不足）" >&2
+  echo "[pre-commit] ❌ 找不到可用的直譯器（已試：根層 .venv（PATH 僅 CI／AUTOSDD_ALLOW_PATH_PYTHON=1 容許），皆缺席或版本不足）" >&2
   echo "[pre-commit]    修法（擇一，逐字可執行）：" >&2
   echo "[pre-commit]      source .venv/bin/activate   （Windows: .venv\\Scripts\\Activate.ps1）" >&2
   echo "[pre-commit]      uv pip install -e 'AutoClaude/.[dev,notifications,lint]'" >&2

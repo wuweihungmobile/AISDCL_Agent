@@ -67,10 +67,11 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # 一旦被當成「無演化版」處理，就是 dry-run 假綠、非 dry-run 雙軌閘門靜默降為單軌
 # v0.01（下方 R74 的退出碼分級是第二道；本守門讓最常見的那條路連分級都不用走）。
 # 與姊妹腳本（tools/integration_gate.sh / AutoClaude/tools/local_ci_gate.sh）同款守門。
-if ! is_real_python_candidate python; then
-  echo "❌ 找不到 python — 請先啟用 venv（macOS/Linux: source .venv/bin/activate；Windows: .venv/Scripts/activate；見 ONBOARDING.md §3）" >&2
-  exit 1
-fi
+# 🔴 DEF-200-315（2026-09-19 掌舵者裁決）：訂正上述協議——單一 .venv 設計下互動式
+# 入口一律優先釘死 monorepo 根層 .venv（`${REPO_ROOT}/..`），不再只檢查 PATH 上有
+# 沒有 python；改呼叫 `pick_repo_python`（tools/lib/windowsapps_guard.sh 同檔
+# SSOT，只在 CI／逃生口才落回 PATH 候選）。`PY` 取代下方全部執行用裸 `python`。
+PY="$(pick_repo_python "${REPO_ROOT}/..")" || exit 1
 
 # ── 版本解析（DEF-03-001 雙軌；R10 DEF-101-133 改走 SSOT）───────────────────
 FROZEN_BASELINE="AISDLC_SDD_v0.01"   # 凍結基線：恆測，回歸防護
@@ -93,7 +94,7 @@ FROZEN_BASELINE="AISDLC_SDD_v0.01"   # 凍結基線：恆測，回歸防護
 # `set +e`／`set -e` 成對包夾：檔頭 `set -e` 下 `VAR="$(cmd)"` 失敗即整檔中止，取不到
 #    rc 做分級；手法沿用本檔下方 arch_fitness 取 `AF_CODE` 的既有寫法（Rule 11）。
 set +e
-LATEST="$(python "${REPO_ROOT}/scripts/sdd_version.py")"
+LATEST="$("$PY" "${REPO_ROOT}/scripts/sdd_version.py")"
 _LATEST_RC=$?
 set -e
 if [[ "${_LATEST_RC}" -ne 0 && "${_LATEST_RC}" -ne 1 ]]; then
@@ -211,7 +212,7 @@ run_gate_for_version() {
     XDIST_ARGS="-n auto --dist worksteal"
   fi
   # shellcheck disable=SC2086
-  python -m pytest tools/fsm_runtime/tests/ -m "not chaos" -q -rs ${XDIST_ARGS} \
+  "$PY" -m pytest tools/fsm_runtime/tests/ -m "not chaos" -q -rs ${XDIST_ARGS} \
     2>&1 | tee "${PYTEST_LOG}"
   # DEF-06-001：擷取逐軌 `N passed` 收斂計數（取證友善性，純函式 helper 單獨可測）
   local PASSED
@@ -244,7 +245,7 @@ run_gate_for_version() {
   # `if args.strict and report.fails: return 2`）；否則即使有 structural fail 也只回 1
   # 被當 advisory 放行 → 與雲端 nightly-strict 同語意，避免地端漏接。
   set +e
-  python -m tools.arch_fitness.arch_fitness --strict --json arch-fitness.json
+  "$PY" -m tools.arch_fitness.arch_fitness --strict --json arch-fitness.json
   local AF_CODE=$?
   set -e
   if [[ "${AF_CODE}" -ge 2 ]]; then
@@ -257,7 +258,7 @@ run_gate_for_version() {
     echo "==> [3/3] 五軌 TLA+/TLC 形式化驗證"
     for m in SDD_FSM META_FSM FLEET_FSM COMPOSITION_FSM OPTIMIZATION_FSM; do
       echo "  -- TLC ${m}"
-      python -m tools.fsm_runtime.tlc_runner --module "${m}"
+      "$PY" -m tools.fsm_runtime.tlc_runner --module "${m}"
     done
   else
     echo "==> [3/3] 跳過完整 TLC（offline reachability 已隨 pytest 驗證）；--full-tlc 可啟用"
@@ -278,7 +279,7 @@ run_gate_for_version() {
 # 缺席時的 fail-loud 紀律刻意不同調（該紀律守的是「閘門有沒有真的跑」，本段
 # 只決定跑多快）。
 if [[ -z "${AUTOSDD_PARALLEL_TESTS_WORKERS:-}" && -z "${PYTEST_XDIST_AUTO_NUM_WORKERS:-}" ]]; then
-  _cpu_budget="$(python "${REPO_ROOT}/tools/lib/cpu_budget.py" --legs 1 2>/dev/null || true)"
+  _cpu_budget="$("$PY" "${REPO_ROOT}/tools/lib/cpu_budget.py" --legs 1 2>/dev/null || true)"
   case "${_cpu_budget}" in
     ''|*[!0-9]*) ;;
     *)
@@ -317,7 +318,7 @@ INFRA_LOG="$(mktemp "${TMPDIR:-/tmp}/ci_gate_infra.XXXXXX")"
 # 只改 1 份」同一原則，此處一併加旗標。scripts/tests 不含 FSM runtime 那段共享
 # tmp 檔競態（已現查 tools/fsm_runtime/snapshot.py 相關程式碼不在 scripts/tests 射程
 # 內），版本無關（非凍結基線範圍），無需差異化處理。
-python -m pytest scripts/tests/ -q -rs -n auto --dist worksteal 2>&1 | tee "${INFRA_LOG}"
+"$PY" -m pytest scripts/tests/ -q -rs -n auto --dist worksteal 2>&1 | tee "${INFRA_LOG}"
 INFRA_PASSED="$(bash "${REPO_ROOT}/scripts/pytest_passed_count.sh" < "${INFRA_LOG}")"
 rm -f "${INFRA_LOG}"
 echo "==> 共享 infra scripts/tests/: ${INFRA_PASSED} passed"
@@ -334,7 +335,7 @@ fi
 # active/（v0.12/v0.13 至今凍結著 _26/_27）。此 lint（版本無關 shared infra，read-only 純
 # 觀察者）掃最新演化版 build/planning/active/，偵測已決 RFC 滯留即非零 → 硬閘擋下。
 echo "############## CI 閘門：RFC 生命週期 lint（DEF-23-005）##############"
-python scripts/rfc_lifecycle_lint.py "${REPO_ROOT}"
+"$PY" scripts/rfc_lifecycle_lint.py "${REPO_ROOT}"
 
 # ── Copy-on-Evolve .gitignore 覆蓋 lint（DEF-37-001 advisory）────────────────
 # 每輪 Copy-on-Evolve 建新版後，新版 build/reports/ + arch-fitness.json + chaos-report.json
@@ -342,14 +343,14 @@ python scripts/rfc_lifecycle_lint.py "${REPO_ROOT}"
 # （版本無關 shared infra，read-only 純觀察者）偵測磁碟最新演化版是否缺對應排除行，缺即
 # advisory warn。**advisory：永遠 exit 0、不阻擋硬閘**（P3，對齊 DEF-37-001 routed「缺即 warn」）。
 echo "############## CI 閘門：.gitignore 覆蓋 lint（DEF-37-001 advisory）##############"
-python scripts/gitignore_coverage_lint.py "${REPO_ROOT}"
+"$PY" scripts/gitignore_coverage_lint.py "${REPO_ROOT}"
 
 # ── Agent template 路徑存在性 lint（DEF-AGTREV-002 機械強制）──────────────────
 # v0.18 全面重新接線 broken template_path（方案一）後，加此硬閘掃最新演化版 agent/
 # 所有 template 引用是否解析至磁碟且為「框架根相對」（無 ../），杜絕舊接線再生。
 # 版本無關 shared infra、read-only 純觀察者；broken / 非根相對即非零硬閘擋下。
 echo "############## CI 閘門：Agent template 路徑 lint（DEF-AGTREV-002）##############"
-python scripts/agent_template_lint.py "${REPO_ROOT}"
+"$PY" scripts/agent_template_lint.py "${REPO_ROOT}"
 
 # ── 核心 agent collaboration 對稱性 lint（DEF-AGTREV-004 機械防復發）──────────────
 # collaboration_rules 的 upstream/downstream/peer 本應構成對稱有向圖，但全靠人工同步 →
@@ -357,7 +358,7 @@ python scripts/agent_template_lint.py "${REPO_ROOT}"
 # 此 lint（版本無關 shared infra、read-only 純觀察者）掃最新演化版 7 核心 agent，斷言每條
 # 內部 downstream/peer 邊皆有對側宣告，不對稱即非零硬閘擋下 → 杜絕同類斷鏈再生。
 echo "############## CI 閘門：核心 agent collaboration 對稱性 lint（DEF-AGTREV-004）##############"
-python scripts/collaboration_symmetry_lint.py "${REPO_ROOT}"
+"$PY" scripts/collaboration_symmetry_lint.py "${REPO_ROOT}"
 
 # ── Agent scenario_usage frequency SSOT 一致性 lint（DEF-AGTREV-015 機械防復發）──────
 # 各 agent 的 scenario_usage.frequency（N/10）有兩個義務全靠人工同步 → 長期漂移（第四輪
@@ -366,7 +367,7 @@ python scripts/collaboration_symmetry_lint.py "${REPO_ROOT}"
 # (2) 分子須等於 primary+supporting 場景項數（內部一致）。此 lint（版本無關 shared infra、
 # read-only 純觀察者）掃最新演化版 agent 比對之，任一不一致即非零硬閘擋下 → 杜絕漂移再生。
 echo "############## CI 閘門：Agent scenario frequency SSOT lint（DEF-AGTREV-015）##############"
-python scripts/scenario_frequency_lint.py "${REPO_ROOT}"
+"$PY" scripts/scenario_frequency_lint.py "${REPO_ROOT}"
 
 # ── 框架版本/計數 SSOT 新鮮度 lint（DEF-AGTREV 全面收尾，機械強制）────────────────
 # 版本（Copy-on-Evolve）不斷累積，過去「最新版本號 + 各類資產計數」硬寫散落多份文件
@@ -383,10 +384,10 @@ python scripts/scenario_frequency_lint.py "${REPO_ROOT}"
 # read-only 純觀察者）另守：單一真相源引用可解析、agent.version 不得寫死版號（AGT-05）。
 # 標記表每次執行都對著 SSOT 自證（SSOT 變動而表沒跟上即 fail-loud），故不構成第三個家。
 echo "############## CI 閘門：Agent 閘門錨點 ↔ SCG SSOT lint（AGT-03/04/05）##############"
-python scripts/agent_scg_anchor_lint.py "${REPO_ROOT}"
+"$PY" scripts/agent_scg_anchor_lint.py "${REPO_ROOT}"
 
 echo "############## CI 閘門：框架版本/計數 SSOT 新鮮度 lint（DEF-AGTREV 收尾）##############"
-python scripts/framework_status_snapshot.py --check --repo-root "${REPO_ROOT}"
+"$PY" scripts/framework_status_snapshot.py --check --repo-root "${REPO_ROOT}"
 
 # ── Skill 版本戳記 SSOT 新鮮度 lint（DEF-CLDREV-007 系統性根除）────────────────────
 # 每版 skill 的框架版本戳（SKILL.md footer `**基於**: AISDLC-SDD vX.YY`、README/PLAN 套件版
@@ -396,14 +397,14 @@ python scripts/framework_status_snapshot.py --check --repo-root "${REPO_ROOT}"
 # 非零硬閘擋下。前綴鎖死故不誤觸 provenance / 歷史 / 模板佔位版。先於 skills 鏡像守門（戳記＝
 # 源頭，鏡像在後）。修復：python scripts/skill_header_sync.py --write
 echo "############## CI 閘門：Skill 版本戳記 SSOT 新鮮度 lint（DEF-CLDREV-007）##############"
-python scripts/skill_header_sync.py --check --repo-root "${REPO_ROOT}"
+"$PY" scripts/skill_header_sync.py --check --repo-root "${REPO_ROOT}"
 
 # ── 對外曝光 skills SSOT 新鮮度 lint（AutoSDD_improving 方案 C ②）──────────────────
 # 父層 .claude/skills（版本無關曝光集）曾為早期凍結快照、與 LATEST 漂移且不受治理。
 # 改以「LATEST 版 = SSOT、父層為機械鏡像」+ 此 check 硬閘，stale 即非零擋下。
 # 修復：python scripts/sync_exposed_skills.py --write
 echo "############## CI 閘門：對外曝光 skills SSOT 新鮮度 lint（方案 C ②）##############"
-python scripts/sync_exposed_skills.py --check --repo-root "${REPO_ROOT}"
+"$PY" scripts/sync_exposed_skills.py --check --repo-root "${REPO_ROOT}"
 
 # ── Router hook 覆蓋 lint（DEF-43-008 / DEF-B 機械防破口）──────────────────────
 # Claude Code 不遞迴載入子目錄 hooks → 各版 .claude/hooks 須經根層守衛式 router 橋接，且根
@@ -412,7 +413,7 @@ python scripts/sync_exposed_skills.py --check --repo-root "${REPO_ROOT}"
 # hook 在 monorepo 根 session 下靜默失效。此 lint（版本無關 shared infra、read-only 純觀察者）斷言
 # 最新演化版宣告之 CC event ⊆ (router 涵蓋 ∩ 根 settings wire)；不可達即非零硬閘擋下（fail-loud）。
 echo "############## CI 閘門：Router hook 覆蓋 lint（DEF-43-008）##############"
-python scripts/router_hook_coverage_lint.py "${REPO_ROOT}"
+"$PY" scripts/router_hook_coverage_lint.py "${REPO_ROOT}"
 
 echo "✅ 本機 CI 閘門全數通過（版本：${FW_VERSIONS[*]}）"
 # DEF-06-001：單行自證逐軌 passed 計數，免零信任取證捲動截斷輸出

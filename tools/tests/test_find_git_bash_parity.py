@@ -1189,6 +1189,14 @@ class TestIntegrationGateShellDelegation(unittest.TestCase):
 
     def _run(self, args: list[str], stub_rc: int = 0) -> tuple[int, str, str]:
         env = dict(os.environ)
+        # DEF-200-315（2026-09-19）：薄殼改優先釘死 fake repo 根層 .venv
+        # （`pick_repo_python`），但本 fixture 是沙盒（`self.tmp` 天生沒有真
+        # `.venv`，python 只經下方 PATH shim 供應）——同
+        # `test_pre_push_dispatcher.py::_run_dispatcher` 的處置，補人為逃生口
+        # （本類鎖的是「薄殼→核心委派」三職責本身，不是直譯器挑選邏輯，後者由
+        # 下方 DEF-200-315 candidate-chain 一節與 test_windowsapps_guard_bash_
+        # parity.py 的行為測試覆蓋）。
+        env["AUTOSDD_ALLOW_PATH_PYTHON"] = "1"
         env["PATH"] = os.pathsep.join(
             [_ig_python_shim_dir(self.tmp), str(Path(_BASH).parent), env.get("PATH", "")]
         )
@@ -1270,8 +1278,19 @@ class TestIntegrationGateShellDelegation(unittest.TestCase):
         except OSError:  # POSIX 罕見無法 symlink ⇒ 同款 shebang 包裝 exec
             link.write_bytes(wrapper)
 
-    def _run_with_path(self, path_entries: list[str]) -> tuple[int, str, str]:
+    # 🔴 DEF-200-315（2026-09-19 掌舵者裁決）訂正 DEF-200-275 第四輪候選鏈：
+    # 「PATH 優先、repo .venv 墊底」已改為「repo .venv 優先、PATH 只在 CI／
+    # 逃生口才容許」，故下面三支測試的期待行為隨之改寫（`_run_with_path` 增
+    # `extra_env` 參數以注入逃生口變數；預設清掉三個容許變數以保證判定式決定性，
+    # 不受開發機當下環境影響）。
+    def _run_with_path(
+        self, path_entries: list[str], extra_env: dict[str, str] | None = None
+    ) -> tuple[int, str, str]:
         env = dict(os.environ)
+        for var in ("CI", "GITHUB_ACTIONS", "AUTOSDD_ALLOW_PATH_PYTHON"):
+            env.pop(var, None)
+        if extra_env:
+            env.update(extra_env)
         env["PATH"] = os.pathsep.join(path_entries + [env.get("PATH", "")])
         env["IG_STUB_MARKER"] = str(self.marker)
         env["IG_STUB_RC"] = "0"
@@ -1283,27 +1302,34 @@ class TestIntegrationGateShellDelegation(unittest.TestCase):
         return (proc.returncode, proc.stdout.decode("utf-8", errors="replace"),
                 proc.stderr.decode("utf-8", errors="replace"))
 
-    def test_chain_falls_back_to_python3_when_python_is_absent(self) -> None:
-        """未 source venv 的 macOS 只有 python3（pre-push 整合閘門 leg 的真實輸入面）。"""
-        py3 = self.tmp / "only_py3"
-        self._real_shim(py3, "python3")
-        rc, out, err = self._run_with_path([self._shadow_dir("python"), str(py3)])
-        self.assertEqual(rc, 0, f"stdout={out}\nstderr={err}")
-        self.assertEqual(self._marker()["argv"], ["--skip-full"])
-
-    def test_chain_falls_back_to_repo_venv_when_path_has_no_python(self) -> None:
-        """PATH 上 python／python3 皆不可用、repo 有 .venv/bin/python ⇒ 第三候選接手。"""
+    def test_repo_venv_is_preferred_even_when_path_has_python(self) -> None:
+        """DEF-200-315：repo 根層 .venv 優先於 PATH，即使 PATH 上也有候選可用
+        （訂正 DEF-200-275 的「PATH 優先」語意）。"""
         self._real_shim(self.tmp / ".venv" / "bin", "python")
         rc, out, err = self._run_with_path([self._shadow_dir("python", "python3")])
         self.assertEqual(rc, 0, f"stdout={out}\nstderr={err}")
         self.assertEqual(self._marker()["argv"], ["--skip-full"])
 
-    def test_chain_exhausted_fails_loud_with_remediation(self) -> None:
-        """三候選全無 ⇒ rc=1、stderr 逐字點名三個候選（不得 rc=0 假綠、不得靜默）。"""
+    def test_falls_back_to_path_python3_when_escape_hatch_set(self) -> None:
+        """無 repo .venv 時預設 fail-loud；只有 `AUTOSDD_ALLOW_PATH_PYTHON=1`
+        逃生口顯式開啟才落回 PATH（未 source venv 的 macOS 只有 python3，
+        pre-push 整合閘門 leg 的真實輸入面之一，但現在需要顯式逃生口）。"""
+        py3 = self.tmp / "only_py3"
+        self._real_shim(py3, "python3")
+        rc, out, err = self._run_with_path(
+            [self._shadow_dir("python"), str(py3)],
+            extra_env={"AUTOSDD_ALLOW_PATH_PYTHON": "1"},
+        )
+        self.assertEqual(rc, 0, f"stdout={out}\nstderr={err}")
+        self.assertEqual(self._marker()["argv"], ["--skip-full"])
+
+    def test_no_repo_venv_and_no_escape_hatch_fails_loud(self) -> None:
+        """DEF-200-315：無 repo .venv 且未開逃生口 ⇒ rc=1、stderr 指路（不得
+        rc=0 假綠、不得靜默落回 PATH）。"""
         rc, out, err = self._run_with_path([self._shadow_dir("python", "python3")])
         self.assertEqual(rc, 1, f"stdout={out}\nstderr={err}")
-        self.assertIn("找不到 python／python3／.venv/bin/python", err)
-        self.assertFalse(self.marker.exists(), "候選鏈耗盡卻仍執行了核心")
+        self.assertIn("找不到 repo 根層 .venv 直譯器", err)
+        self.assertFalse(self.marker.exists(), "無 .venv 且未開逃生口卻仍執行了核心")
 
 
 if __name__ == "__main__":

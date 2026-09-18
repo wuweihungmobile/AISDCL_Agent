@@ -72,10 +72,11 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# WindowsApps 空殼排除比照 tools/bootstrap.ps1／tools/dev_start.ps1 既有 SSOT（R44 收斂）
+# DEF-200-315：互動式入口優先釘死 repo 根層 .venv 直譯器（單一 .venv 設計，
+# ONBOARDING §2.1），本機缺席時 fail-loud；CI／逃生口見 Get-RepoPython 內註解。
 . "$PSScriptRoot/../../tools/lib/WindowsAppsGuard.ps1"
-if (-not (Test-IsRealPython -CandidateName 'python')) {
-  Write-Host '❌ 找不到 python — 請先啟用 venv：.venv\Scripts\Activate.ps1（見 ONBOARDING.md §3）' -ForegroundColor Red
+$py = Get-RepoPython -RepoRoot (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))
+if (-not $py) {
   exit 1
 }
 
@@ -89,5 +90,5 @@ if ($DryRun) { $CliArgs += '--dry-run' }
 if ($BuildImage) { $CliArgs += '--build-image' }
 if ($NoCache) { $CliArgs += '--no-cache' }
 if ($VerifyAll) { $CliArgs += '--verify-all' }
-& python (Join-Path $PSScriptRoot 'run_act_core.py') @CliArgs
+& $py (Join-Path $PSScriptRoot 'run_act_core.py') @CliArgs
 exit $LASTEXITCODE

@@ -102,15 +102,20 @@ if (-not (Test-Path $WindowsAppsGuardPath)) {
     exit 8  # R68 退出碼契約：8=SSOT guard 缺席（monorepo 佈局前提不成立；.ps1 側限定）
 }
 . $WindowsAppsGuardPath
-if (-not (Test-IsRealPython -CandidateName 'python')) {
-    Write-Host "ERROR: 找不到可用的 python 直譯器（PATH 上找不到，或僅命中 WindowsApps 空殼）" -ForegroundColor Red
+# DEF-200-315 系列：guard 已在場（上方 rc=8 分支已擋掉缺席情境），改委派
+# Get-RepoPython 釘死 repo 根層 .venv 直譯器（互動式入口統一政策，見
+# tools/lib/WindowsAppsGuard.ps1::Get-RepoPython 檔頭 WHY），不再只做
+# Test-IsRealPython 的 PATH 存在性判斷。
+$py = Get-RepoPython -RepoRoot $RepoRoot
+if (-not $py) {
+    Write-Host "ERROR: 找不到可用的 python 直譯器（PATH 上找不到，或僅命中 WindowsApps 空殼；亦可能未 bootstrap 根層 .venv）" -ForegroundColor Red
     exit 5  # R68 退出碼契約：5=無可用 python（原為 7，與 bash 側 5 不對等）
 }
 
 function Invoke-Fitness {
     param([string]$JsonOut)
     # --quiet 只寫 JSON，避免主控台編碼問題；退出碼 0/1/2 由呼叫端解讀
-    python -m tools.arch_fitness.arch_fitness --strict --quiet --json $JsonOut | Out-Null
+    & $py -m tools.arch_fitness.arch_fitness --strict --quiet --json $JsonOut | Out-Null
     return (Get-Content -Raw -Encoding utf8 $JsonOut | ConvertFrom-Json)
 }
 
@@ -198,7 +203,7 @@ for ($iter = 1; $iter -le $MaxIterations; $iter++) {
 
         # FSE_VERIFY：測試 + 收斂閘
         Write-Host "FSE_VERIFY：pytest + fitness..."
-        python -m pytest -m "not chaos" -q
+        & $py -m pytest -m "not chaos" -q
         $pytestOk = ($LASTEXITCODE -eq 0)
         $after = Invoke-Fitness -JsonOut (Join-Path $ReportDir "findings-after.json")
         $scoreAfter = [int]$after.score

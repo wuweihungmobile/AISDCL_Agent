@@ -32,6 +32,7 @@ bash 語法解析，留待出現真實呼叫點再評估。
 from __future__ import annotations
 
 import functools
+import os
 import re
 import subprocess
 import sys
@@ -363,7 +364,12 @@ _PRINT_COMMAND_RE = re.compile(r"^\s*(?:echo|printf|print)\b")
 # SSOT 一份實作裡，自行內嵌判斷式的檔案照樣抓得到）。同時補上 `$(` 前綴——候選
 # 鏈函式的回傳值走 stdout，呼叫端寫法必然是 `py="$(pick_python_ge_min)"`，
 # 舊的四種陳述式起始錨點涵蓋不到。
-_SSOT_ENTRYPOINTS = r"(?:is_real_python_candidate|pick_python_ge_min)"
+#
+# DEF-200-315（2026-09-19）：第三個入口函式 `pick_repo_python`——互動式入口
+# （pre-push／pre-commit／integration_gate／ci-gate）改優先釘死 repo 根層
+# .venv，內部沿用同一份 `is_real_python_candidate` 判空殼（只在 CI／逃生口才
+# 落回 PATH 候選），故與前兩者同理等價，加入同一組入口白名單。
+_SSOT_ENTRYPOINTS = r"(?:is_real_python_candidate|pick_python_ge_min|pick_repo_python)"
 _CALL_STATEMENT_RE = re.compile(
     r"(?:^\s*|;\s*|&&\s*|\|\|\s*|\$\(\s*)(?:if\s+|elif\s+)?!?\s*" + _SSOT_ENTRYPOINTS + r"\b"
 )
@@ -515,6 +521,89 @@ class TestSharedGuardShellFunctionBehavior(unittest.TestCase):
         一次都沒有被 `_VERDICT_CASES` 走到（那張表餵的是既有路徑字串，不做 PATH 查找）。
         """
         self.assertFalse(self._run("real", candidate="totally_nonexistent_xyz"))
+
+
+@unittest.skipUnless(_bash_exe(), "本機找不到 bash，略過 shell 行為驗證")
+class TestPickRepoPythonBehavior(unittest.TestCase):
+    """DEF-200-315（2026-09-19 掌舵者裁決）行為測試：`pick_repo_python` 三情境
+    ——repo 根層 .venv 存在即釘死用它；缺席時只在 CI／逃生口才容許退回 PATH；
+    本機一律 fail-loud。手法比照本檔既有 `TestSharedGuardShellFunctionBehavior`
+    ：fixture 全由 bash 自身 `mktemp -d` 建立，不透過 Python tempfile 產生
+    Windows 樣式路徑字面塞進 shell 變數（同一類路徑格式陷阱，理由見該類
+    docstring）。候選檔只需對 `-c "$PYTHON_GE_MIN_PROBE"` 回非空字串即被接受
+    （`pick_repo_python` 本身不驗證內容是否為真直譯器路徑），故用回聲存根即可，
+    不需要真的複製一份 Python 直譯器。"""
+
+    def _run(self, body: str, env_overrides: dict[str, str] | None = None) -> tuple[int, str, str]:
+        script = (
+            'set -e\n'
+            'tmp="$(mktemp -d)"\n'
+            'trap \'rm -rf "$tmp"\' EXIT\n'
+            f'. "{_GUARD_SH.as_posix()}"\n'
+            f'{body}\n'
+        )
+        env = dict(os.environ)
+        for var in ("CI", "GITHUB_ACTIONS", "AUTOSDD_ALLOW_PATH_PYTHON"):
+            env.pop(var, None)
+        if env_overrides:
+            env.update(env_overrides)
+        r = subprocess.run(
+            [_bash_exe(), "-c", script],
+            capture_output=True, text=True, timeout=15,
+            encoding="utf-8", errors="replace", env=env,
+        )
+        return r.returncode, r.stdout, r.stderr
+
+    def test_repo_venv_present_is_preferred(self) -> None:
+        """情境 1：repo 根層 .venv 存在 ⇒ rc 0，印出該候選路徑。兩種副檔名慣例
+        （`.venv/bin/python`／`.venv/Scripts/python.exe`）都先備好且**內容不同**
+        （分別印 BIN／SCRIPTS），才對「候選順序」有鑑別力——先前兩份存根印同一
+        字串，就算實作順序反過來（先選 Scripts 版）測試也照樣綠。斷言選中的是
+        `bin/python`（順序＝bash 側 SSOT，見 `pick_repo_python` 候選序）。"""
+        body = (
+            'mkdir -p "$tmp/repo/.venv/bin" "$tmp/repo/.venv/Scripts"\n'
+            'cat > "$tmp/repo/.venv/bin/python" <<\'EOS\'\n'
+            '#!/usr/bin/env bash\n'
+            'echo BIN\n'
+            'EOS\n'
+            'chmod +x "$tmp/repo/.venv/bin/python"\n'
+            'cat > "$tmp/repo/.venv/Scripts/python.exe" <<\'EOS\'\n'
+            '#!/usr/bin/env bash\n'
+            'echo SCRIPTS\n'
+            'EOS\n'
+            'chmod +x "$tmp/repo/.venv/Scripts/python.exe"\n'
+            'pick_repo_python "$tmp/repo"\n'
+        )
+        rc, out, err = self._run(body)
+        self.assertEqual(rc, 0, f"stdout={out}\nstderr={err}")
+        self.assertTrue(
+            out.strip().endswith(".venv/bin/python"),
+            f"stdout={out!r} 未選中 .venv/bin/python（候選順序鑑別力測試）",
+        )
+
+    def test_ci_env_falls_back_to_path_python(self) -> None:
+        """情境 2：無 .venv、env CI=true ⇒ rc 0，退回 PATH 上的 python／python3。"""
+        body = (
+            'mkdir -p "$tmp/repo" "$tmp/pathbin"\n'
+            'cat > "$tmp/pathbin/python" <<\'EOS\'\n'
+            '#!/usr/bin/env bash\n'
+            'echo real\n'
+            'EOS\n'
+            'chmod +x "$tmp/pathbin/python"\n'
+            'PATH="$tmp/pathbin:$PATH"\n'
+            'pick_repo_python "$tmp/repo"\n'
+        )
+        rc, out, err = self._run(body, env_overrides={"CI": "true"})
+        self.assertEqual(rc, 0, f"stdout={out}\nstderr={err}")
+        self.assertIn(out.strip(), ("python", "python3"), f"stdout={out!r}")
+
+    def test_no_venv_no_escape_hatch_fails_loud(self) -> None:
+        """情境 3：無 .venv、清掉 CI／GITHUB_ACTIONS／AUTOSDD_ALLOW_PATH_PYTHON
+        ⇒ rc 1、stderr 含補救訊息。"""
+        body = 'mkdir -p "$tmp/repo"\npick_repo_python "$tmp/repo"\n'
+        rc, out, err = self._run(body)
+        self.assertEqual(rc, 1, f"stdout={out}\nstderr={err}")
+        self.assertIn("找不到 repo 根層 .venv 直譯器", err)
 
 
 class TestHasUnmigratedRawCheck(unittest.TestCase):

@@ -118,19 +118,16 @@ echo "✅ Copy-on-Evolve（git archive，純 tracked）: ${FROM} → ${TO}（匯
 #   既有 helper 測試；production scripts/ 恆具 siblings 故必跑。
 _SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _BASE="$(cd "$(dirname "$TO")" && pwd)"
-# PYTHON 可覆寫（預設 python）：production／ci-gate 用 `python`，跨平台測試可注入 sys.executable。
-# 頂層單一定義，供下方三個建版後同步 block（戳記/鏡像、.gitignore、FRAMEWORK_STATUS）共用
-# ——避免 set -u 下某 block guard 不過致 _PY 未定義（DEF-96-001 補第三 block 時上提）。
-# R44：只在使用預設值 'python'（PYTHON 環境變數未明確指定）時才需要 WindowsApps
-# 空殼排除判斷——PYTHON 已明確指定代表呼叫端（如跨平台測試注入 sys.executable）
-# 已知情選定直譯器，不需要 guard 二次把關。guard 函式若因隔離環境缺席（見上方
-# 頭部略過分支）則跳過判斷，行為與收斂前一致。
-if [ -z "${PYTHON:-}" ] && command -v is_real_python_candidate >/dev/null 2>&1; then
-  is_real_python_candidate python || {
-    echo "❌ 找不到可用的 python 直譯器（PATH 上找不到，或僅命中 WindowsApps 空殼；" >&2
-    echo "   可設定 PYTHON 環境變數明確指定直譯器路徑繞過本判斷）" >&2
-    exit 1
-  }
+# PYTHON 可覆寫（預設走 repo 根層 .venv）：production／ci-gate 未覆寫時優先釘死 $TOP/.venv，
+# 跨平台測試可注入 sys.executable 明確覆寫。頂層單一定義，供下方三個建版後同步 block
+# （戳記/鏡像、.gitignore、FRAMEWORK_STATUS）共用——避免 set -u 下某 block guard 不過致
+# _PY 未定義（DEF-96-001 補第三 block 時上提）。
+# DEF-200-315（2026-09-19）：R44 的 WindowsApps 空殼排除判斷升級為 pick_repo_python（單一
+# .venv 設計，ONBOARDING §2.1）；只在 PYTHON 未明確指定時才需要——PYTHON 已指定代表呼叫端
+# （如跨平台測試注入 sys.executable）已知情選定直譯器，不需要二次把關。guard 函式若因隔離
+# 環境缺席（見上方頭部略過分支）則跳過判斷，退回裸 python，行為與收斂前一致。
+if [ -z "${PYTHON:-}" ] && command -v pick_repo_python >/dev/null 2>&1; then
+  PYTHON="$(pick_repo_python "$TOP")" || exit 1
 fi
 _PY="${PYTHON:-python}"
 if [ -f "${_SCRIPT_DIR}/skill_header_sync.py" ] && [ -f "${_SCRIPT_DIR}/sync_exposed_skills.py" ]; then

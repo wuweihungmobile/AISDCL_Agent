@@ -165,6 +165,12 @@ def _run_with_shadowed_python(
         get_command_body = f'return [PSCustomObject]@{{ Source = "{escaped}" }}'
     script = (
         "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;\n"
+        # DEF-200-315 系列：安裝器改呼叫 Get-RepoPython，該函式優先釘死 repo 根層
+        # .venv 直譯器，只有在容許逃生口下才退回本測試組要驗證的 PATH／
+        # Get-Command 分支——`_make_fake_monorepo` 造的假 monorepo 無 .venv，
+        # 不設此逃生口 Get-RepoPython 會在到達 shadow 的 Get-Command 之前就先
+        # fail-loud，讓下方 shadow 邏輯完全測不到（本檔本來要測的是 PATH 分支）。
+        "$env:AUTOSDD_ALLOW_PATH_PYTHON='1';\n"
         "function Get-Command {\n"
         "  param(\n"
         "    [Parameter(Position=0)][string]$Name,\n"
@@ -268,6 +274,66 @@ def test_real_python_outside_windowsapps_is_accepted_and_hook_installs(tmp_path)
     assert hook.is_file(), f"guard 放行後應完成安裝、hook 未寫入：\n{output}"
 
 
+def test_repo_root_venv_is_preferred_over_path(tmp_path) -> None:
+    """DEF-200-315 系列：repo 根層 `.venv` 存在時必須優先於 PATH 被選中——即使
+    PATH 上第一個候選就是 WindowsApps 空殼、且**未設任何逃生口**（不同於本檔
+    其餘測試，本測試刻意不呼叫 `_run_with_shadowed_python`，因為該 helper 現
+    會強制注入 `AUTOSDD_ALLOW_PATH_PYTHON=1` 以維持其餘測試組原意，那正是本測試
+    要排除的變因）。這證明 `Get-RepoPython` 的候選釘死順位真的生效，不只是
+    「PATH 分支在有逃生口時還能用」而已——若實作退化成永遠先查 PATH，本測試
+    會因為空殼被誤判為候選、腳本判「找不到」而失敗。
+    """
+    installer = _latest_installer()
+    assert installer.is_file(), f"安裝器缺席：{installer}"
+    repo = _make_fake_monorepo(tmp_path)
+
+    venv_scripts = repo / ".venv" / "Scripts"
+    venv_scripts.mkdir(parents=True)
+    shutil.copy2(sys.executable, venv_scripts / "python.exe")
+    # venv 版 python.exe 搬離原本 `<venv>/Scripts/python.exe` 佈局後，啟動期找
+    # 不到同層 pyvenv.cfg 會以 exit code 106（"No pyvenv.cfg file"）拒絕啟動
+    # （本測試組實測撞出，見 tools/tests/test_windowsapps_guard_cross_consistency.py
+    # 同款修法）。
+    real_pyvenv_cfg = Path(sys.prefix) / "pyvenv.cfg"
+    if real_pyvenv_cfg.is_file():
+        shutil.copy2(real_pyvenv_cfg, repo / ".venv" / "pyvenv.cfg")
+
+    escaped = (
+        r"C:\Users\me\AppData\Local\Microsoft\WindowsApps\python.exe"  # platform-ok: 純字面值餵給 PowerShell 腳本文字，非 Python Path join
+    ).replace('"', '`"')
+    script = (
+        "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;\n"
+        "function Get-Command {\n"
+        "  param(\n"
+        "    [Parameter(Position=0)][string]$Name,\n"
+        "    [Parameter(ValueFromRemainingArguments=$true)] $Rest\n"
+        "  )\n"
+        "  if ($Name -ne 'python') {\n"
+        "    return Microsoft.PowerShell.Core\\Get-Command -Name $Name "
+        "-ErrorAction SilentlyContinue\n"
+        "  }\n"
+        f'  return [PSCustomObject]@{{ Source = "{escaped}" }}\n'
+        "}\n"
+        f'& "{installer}"\n'
+    )
+    env = dict(os.environ)
+    for var in ("AUTOSDD_ALLOW_PATH_PYTHON", "CI", "GITHUB_ACTIONS"):
+        env.pop(var, None)
+    proc = subprocess.run(
+        [_PWSH, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+        cwd=str(repo), env=env,
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=60,
+    )
+    output = proc.stdout + proc.stderr
+    assert proc.returncode == 0, (
+        f"repo 根層 .venv 存在時應優先於 PATH 被選中，不受 WindowsApps 空殼排 "
+        f"PATH 最前面影響（且未設任何逃生口）：\n{output}"
+    )
+    hook = repo / ".git" / "hooks" / "post-commit"
+    assert hook.is_file(), f".venv 優先分支下 hook 應正常安裝、卻未寫入：\n{output}"
+
+
 def test_installer_writes_hook_referencing_shared_bash_guard(tmp_path) -> None:
     """端到端內容驗證（R47/DEF-101-383）：`.ps1` 產生器寫入的
     `.git/hooks/post-commit` 內容必須 source 共用 `tools/lib/windowsapps_guard.sh`
@@ -285,9 +351,14 @@ def test_installer_writes_hook_referencing_shared_bash_guard(tmp_path) -> None:
     assert installer.is_file(), f"安裝器缺席：{installer}"
     repo = _make_fake_monorepo(tmp_path)
 
+    # DEF-200-315 系列：假 monorepo 無 .venv，Get-RepoPython 需此逃生口才會
+    # 退回 PATH 上的 python（本測試組原意），否則在到達 PATH 分支前就先
+    # fail-loud（見 `_run_with_shadowed_python` 同款理由）。
+    env = dict(os.environ)
+    env["AUTOSDD_ALLOW_PATH_PYTHON"] = "1"
     proc = subprocess.run(
         [_PWSH, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(installer)],
-        cwd=str(repo),
+        cwd=str(repo), env=env,
         capture_output=True, text=True, encoding="utf-8", errors="replace",
         timeout=60,
     )
@@ -319,9 +390,14 @@ def test_guard_src_bash_path_embedded_in_hook_has_no_backslash(tmp_path) -> None
     assert installer.is_file(), f"安裝器缺席：{installer}"
     repo = _make_fake_monorepo(tmp_path)
 
+    # DEF-200-315 系列：假 monorepo 無 .venv，Get-RepoPython 需此逃生口才會
+    # 退回 PATH 上的 python（本測試組原意），否則在到達 PATH 分支前就先
+    # fail-loud（見 `_run_with_shadowed_python` 同款理由）。
+    env = dict(os.environ)
+    env["AUTOSDD_ALLOW_PATH_PYTHON"] = "1"
     proc = subprocess.run(
         [_PWSH, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(installer)],
-        cwd=str(repo),
+        cwd=str(repo), env=env,
         capture_output=True, text=True, encoding="utf-8", errors="replace",
         timeout=60,
     )
@@ -417,9 +493,14 @@ def test_windowsapps_stub_first_falls_through_to_real_python3_via_ps1_installer(
     assert installer.is_file(), f"安裝器缺席：{installer}"
     repo = _make_fake_monorepo(tmp_path)
 
+    # DEF-200-315 系列：假 monorepo 無 .venv，Get-RepoPython 需此逃生口才會
+    # 退回 PATH 上的 python（本測試組原意），否則在到達 PATH 分支前就先
+    # fail-loud（見 `_run_with_shadowed_python` 同款理由）。
+    env = dict(os.environ)
+    env["AUTOSDD_ALLOW_PATH_PYTHON"] = "1"
     proc = subprocess.run(
         [_PWSH, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(installer)],
-        cwd=str(repo),
+        cwd=str(repo), env=env,
         capture_output=True, text=True, encoding="utf-8", errors="replace",
         timeout=60,
     )
@@ -485,6 +566,10 @@ def _run_with_path(installer: Path, cwd: Path, path_dirs: list[Path]) -> subproc
     if git_dir:
         all_dirs.append(git_dir)
     env["PATH"] = os.pathsep.join(all_dirs)
+    # DEF-200-315 系列：同 `_run_with_shadowed_python` 理由——假 monorepo 無
+    # .venv，Get-RepoPython 需此逃生口才會退回本測試組要驗證的 PATHEXT／
+    # Get-Command 分支，否則在到達該分支前就先 fail-loud。
+    env["AUTOSDD_ALLOW_PATH_PYTHON"] = "1"
     cmd = (
         "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; "
         f"& '{installer}'"

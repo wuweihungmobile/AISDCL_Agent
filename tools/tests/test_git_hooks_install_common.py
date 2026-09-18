@@ -36,6 +36,7 @@ from _ps_engine import any_engine_available, production_engine  # noqa: E402  # 
 _LIB_DIR = _REPO_ROOT / "tools" / "lib"
 _PS1_WRAPPER = _LIB_DIR / "GitHooksInstallCommon.ps1"
 _SH_WRAPPER = _LIB_DIR / "git_hooks_install_common.sh"
+_GUARD_PS1 = _LIB_DIR / "WindowsAppsGuard.ps1"
 
 
 def _make_hooks_dir(tmp: Path, *, complete: bool = True) -> Path:
@@ -323,15 +324,30 @@ class TestDotSourceTrapSafety(unittest.TestCase):
         呼叫端（install_git_hooks.ps1 等）會不受阻擋繼續往下跑，之後才因不相關
         錯誤失敗甚至以 exit 0 收尾，違反 fail-loud。
 
-        用清空 PATH（換成保證不含 python.exe 的空目錄）讓 `Get-Command python`
-        真的找不到 python，以 `-File` 呼叫端（模擬生產 dot-source 鏈路）斷言
-        整個呼叫行程 exit code 非 0，且 dot-source 之後的陳述式不會被執行到。
+        DEF-200-315：GitHooksInstallCommon.ps1 改用 `Get-RepoPython -RepoRoot`
+        （由 `$PSScriptRoot` 反推）優先釘死 repo 根層 .venv 直譯器，不再單純
+        依賴 PATH 上的 `python`——若直接對本機真實檔案下手，本機既有 .venv 會
+        讓判斷提前成功，guard 分支永遠不會被執行到（同
+        `test_windowsapps_guard_cross_consistency.py::TestDevStartPs1WindowsAppsGuard`
+        手法）。故複製 GitHooksInstallCommon.ps1 + WindowsAppsGuard.ps1 到零
+        .venv 的臨時 `<fake_root>/tools/lib/` 結構下執行，讓 RepoRoot 解析到
+        乾淨臨時目錄；同時清空 PATH 並移除 CI／GITHUB_ACTIONS／
+        AUTOSDD_ALLOW_PATH_PYTHON 逃生口，讓 `Get-RepoPython` 的 PATH fallback
+        分支也失效，斷言整個呼叫行程 exit code 非 0，且 dot-source 之後的
+        陳述式不會被執行到。
         """
         exe = production_engine()  # R60 E-A-03：5.1 優先（DEF-101-509 判準）
         with tempfile.TemporaryDirectory() as td:
+            fake_lib = Path(td) / "fake_repo" / "tools" / "lib"
+            fake_lib.mkdir(parents=True)
+            fake_ps1 = fake_lib / "GitHooksInstallCommon.ps1"
+            fake_ps1.write_text(_PS1_WRAPPER.read_text(encoding="utf-8"), encoding="utf-8")
+            (fake_lib / "WindowsAppsGuard.ps1").write_text(
+                _GUARD_PS1.read_text(encoding="utf-8"), encoding="utf-8"
+            )
             caller = Path(td) / "caller.ps1"
             caller.write_text(
-                f'. "{_PS1_WRAPPER}"\n'
+                f'. "{fake_ps1}"\n'
                 "Write-Host 'SHOULD_NOT_PRINT'\n",
                 encoding="utf-8",
             )
@@ -339,6 +355,8 @@ class TestDotSourceTrapSafety(unittest.TestCase):
             empty_path_dir.mkdir()
             env = dict(os.environ)
             env["PATH"] = str(empty_path_dir)
+            for var in ("CI", "GITHUB_ACTIONS", "AUTOSDD_ALLOW_PATH_PYTHON"):
+                env.pop(var, None)
             proc = subprocess.run(
                 [exe, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(caller)],
                 cwd=td, capture_output=True, text=True,

@@ -19,6 +19,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -89,6 +90,16 @@ def _build_fake_repo(repo: Path) -> None:
                    check=True, capture_output=True, timeout=30)
 
 
+def _allow_path_python_env() -> dict[str, str]:
+    """DEF-200-315 系列：`_build_fake_repo` 造的假 repo 無 `.venv`，安裝器自身
+    的 python 選擇（`pick_repo_python`）需此逃生口才會退回 PATH 上的
+    python/python3（本測試組原意：驗證 WindowsApps 空殼排除，不是 .venv 優先
+    順位），否則安裝器會在到達 guard 判斷前就先 fail-loud。"""
+    env = dict(os.environ)
+    env["AUTOSDD_ALLOW_PATH_PYTHON"] = "1"
+    return env
+
+
 def test_installer_and_generated_hook_use_shared_guard() -> None:
     with tempfile.TemporaryDirectory() as td:
         repo = Path(td) / "repo"
@@ -97,7 +108,7 @@ def test_installer_and_generated_hook_use_shared_guard() -> None:
         installer_path = next(installer_path.glob("*/tools/install_hooks/install_post_commit.sh"))
         proc = subprocess.run(
             [_BASH, str(installer_path)],
-            cwd=str(repo),
+            cwd=str(repo), env=_allow_path_python_env(),
             capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
         )
         assert proc.returncode == 0, f"安裝器非零退出：{proc.stdout!r} {proc.stderr!r}"
@@ -110,6 +121,52 @@ def test_installer_and_generated_hook_use_shared_guard() -> None:
         # 阻擋安裝），故不斷言其完全消失，改由下一測試做端到端行為驗證。
 
 
+def test_venv_scripts_python_is_preferred_when_present() -> None:
+    """DEF-200-315 系列：假 monorepo 根層放一份 `.venv/Scripts/python.exe`
+    （shebang 包裝的可執行 stub，bash 側不需真 PE）時，安裝器**不需任何逃生口**
+    即應成功——證明 `pick_repo_python` 確實優先釘死 repo 根層 .venv，而非只是
+    「PATH 分支在有逃生口時還能用」。stub 標記自己被呼叫後 `exec` 真正的測試
+    直譯器（`sys.executable`，避免依賴本機 PATH 上是否有 python3）完成真正的
+    `sdd_version.py` 解析工作——純 `echo` 假直譯器會讓安裝器後續 `LATEST=...`
+    解析吃到假輸出而整條安裝失敗，並非本測試要驗的東西。
+    """
+    with tempfile.TemporaryDirectory() as td:
+        repo = Path(td) / "repo"
+        _build_fake_repo(repo)
+        venv_scripts = repo / ".venv" / "Scripts"
+        venv_scripts.mkdir(parents=True)
+        stub = venv_scripts / "python.exe"
+        real_python = str(Path(sys.executable)).replace("\\", "/")
+        stub.write_text(
+            "#!/usr/bin/env bash\n"
+            "echo VENV_SCRIPTS_PYTHON_RAN >&2\n"
+            f'exec "{real_python}" "$@"\n',
+            encoding="utf-8",
+        )
+        stub.chmod(0o755)
+
+        installer_path = next(
+            (repo / "AISDLC_SDD").glob("*/tools/install_hooks/install_post_commit.sh")
+        )
+        env = dict(os.environ)
+        for var in ("AUTOSDD_ALLOW_PATH_PYTHON", "CI", "GITHUB_ACTIONS"):
+            env.pop(var, None)
+        proc = subprocess.run(
+            [_BASH, str(installer_path)],
+            cwd=str(repo), env=env,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
+        )
+        combined = proc.stdout + proc.stderr
+        assert proc.returncode == 0, (
+            f"repo 根層 .venv 存在時安裝器應成功、不需逃生口：{combined!r}"
+        )
+        assert "VENV_SCRIPTS_PYTHON_RAN" in combined, (
+            f".venv/Scripts/python.exe stub 未被實際呼叫：{combined!r}"
+        )
+        hook = repo / ".git" / "hooks" / "post-commit"
+        assert hook.is_file(), f".venv 優先分支下 hook 應正常安裝、卻未寫入：{combined!r}"
+
+
 def test_windowsapps_stub_first_falls_through_to_real_python3() -> None:
     """端到端功能驗證：WindowsApps 空殼排 PATH 最前面時，安裝出的 hook 正確跳過它、
     改執行後面真正的 python3（而非誤判可用執行空殼、也非誤判完全找不到）。"""
@@ -120,7 +177,7 @@ def test_windowsapps_stub_first_falls_through_to_real_python3() -> None:
         installer_path = next(repo.glob("AISDLC_SDD/*/tools/install_hooks/install_post_commit.sh"))
         proc = subprocess.run(
             [_BASH, str(installer_path)],
-            cwd=str(repo),
+            cwd=str(repo), env=_allow_path_python_env(),
             capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
         )
         assert proc.returncode == 0, f"安裝器非零退出：{proc.stdout!r} {proc.stderr!r}"

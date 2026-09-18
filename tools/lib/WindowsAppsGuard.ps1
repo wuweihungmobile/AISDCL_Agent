@@ -231,3 +231,66 @@ function Write-PythonGeMinRemediation {
   Write-Host "     winget install -e --id astral-sh.uv ; uv python install 3.11" -ForegroundColor Yellow
   Write-Host "   裝完請重開終端機（PATH 需重新載入）後再執行：. tools\dev_start.ps1" -ForegroundColor Yellow
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DEF-200-315（2026-09-19 掌舵者裁決）：互動式入口（git hooks／integration_gate／
+# ci-gate）一律優先釘死 repo 根層 .venv 直譯器，不再從 PATH 候選挑 python/python3。
+# 與 tools/lib/windowsapps_guard.sh 的 `repo_python_path_fallback_allowed`／
+# `pick_repo_python` 同構（WHY 見該檔同名區塊上方註解，本檔不重複）。
+function Test-RepoPythonPathFallbackAllowed {
+  # 回 $true ＝本情境容許退回 PATH python（雲端 CI／act 容器，或人為逃生口）。
+  [CmdletBinding()]
+  [OutputType([bool])]
+  param()
+
+  if ($env:GITHUB_ACTIONS -eq 'true') { return $true }
+  if ($env:CI -eq 'true') { return $true }
+  if ($env:AUTOSDD_ALLOW_PATH_PYTHON -eq '1') { return $true }
+  return $false
+}
+
+function Get-RepoPython {
+  # 回傳 repo 根層 .venv 直譯器路徑（優先）或（CI／逃生口下）PATH 上的
+  # 'python'；一個都不可用回 $null 並已印補救訊息到 stderr（呼叫端不必再印）。
+  [CmdletBinding()]
+  [OutputType([string])]
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$RepoRoot
+  )
+
+  # 順序＝bash 側 SSOT（windowsapps_guard.sh:155 pick_repo_python）逐字同序：
+  # 兩側殘檔同時存在時兩平台選同一顆，避免「同一 repo 兩個入口選到不同直譯器」。
+  $candidates = @(
+    (Join-Path $RepoRoot '.venv/bin/python'),
+    (Join-Path $RepoRoot '.venv\Scripts\python.exe')
+  )
+  foreach ($cand in $candidates) {
+    if (-not (Test-Path -LiteralPath $cand -PathType Leaf)) { continue }
+    $out = $null
+    try {
+      $out = & $cand -c $script:PythonGeMinProbe 2>$null
+    } catch {
+      continue
+    }
+    if ($LASTEXITCODE -ne 0) { continue }
+    $first = @($out)[0]
+    if ($first) { return $cand }
+  }
+
+  if (Test-RepoPythonPathFallbackAllowed) {
+    if (Test-IsRealPython -CandidateName 'python') {
+      if ($env:AUTOSDD_ALLOW_PATH_PYTHON -eq '1') {
+        Write-Host "⚠️  AUTOSDD_ALLOW_PATH_PYTHON=1：根層 .venv 缺席，改用 PATH 上的 python" -ForegroundColor Yellow
+      }
+      return 'python'
+    }
+  }
+
+  Write-Host "❌ 找不到 repo 根層 .venv 直譯器（$RepoRoot\.venv）——單一 .venv 設計（ONBOARDING §2.1）下互動式入口只認它。" -ForegroundColor Red
+  Write-Host "   修法（擇一，逐字可執行；於 repo 根執行）：" -ForegroundColor Yellow
+  Write-Host "     source tools/dev_start.sh          （macOS/Linux）" -ForegroundColor Yellow
+  Write-Host "     . tools\dev_start.ps1              （Windows PowerShell）" -ForegroundColor Yellow
+  Write-Host "   雲端 CI／容器：設 CI=true 或 GITHUB_ACTIONS=true 即容許 PATH python；人為逃生口 AUTOSDD_ALLOW_PATH_PYTHON=1" -ForegroundColor Yellow
+  return $null
+}

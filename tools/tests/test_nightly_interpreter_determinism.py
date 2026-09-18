@@ -58,6 +58,26 @@ ps1`／`windows_smoke_local.ps1` 一律直接使用 `<repo 根>/.venv/Scripts/py
      與 `/usr/local/bin`，不可用 `brew --prefix`），修 launchd 極簡 PATH 缺
      pwsh 導致需要 powershell/pwsh 的測試從 platform skip 落成 untagged、
      撞 skip 天花板的問題。
+  H.（DEF-200-315 新增，2026-09-19 掌舵者裁決）：互動式入口（git hooks／
+     integration_gate／ci-gate）改優先釘死 repo 根層 .venv，不再從 PATH 現場挑
+     python/python3——與本檔既有 B~G 項守的「nightly 載具」屬同一類危害的
+     不同呼叫面。本輪（Dev-A1）鎖住五組檔：`tools/git-hooks/pre-commit`／
+     `tools/git-hooks/pre-push`／`tools/integration_gate.sh`／
+     `tools/integration_gate.ps1`／`AISDLC_SDD/scripts/ci-gate.sh`／
+     `AISDLC_SDD/scripts/ci-gate.ps1`（Dev-A2 會再擴充
+     `_INTERACTIVE_ENTRY_FILES`）。
+     Dev-A2 棒擴充 AutoClaude/tools 消費端＋安裝共用核心＋copy_on_evolve：
+     `AutoClaude/tools/local_ci_gate.sh`／`.ps1`、`AutoClaude/tools/run_act.sh`／
+     `.ps1`、`AutoClaude/tools/g0_gate_check.ps1`、
+     `AutoClaude/tools/sd06_w3_staging_dryrun.sh`、
+     `AISDLC_SDD/scripts/copy_on_evolve.sh`、`tools/lib/git_hooks_install_common.sh`、
+     `tools/lib/GitHooksInstallCommon.ps1` 皆呼叫標準 SSOT，套用 H1~H3。
+     🔴 `AutoClaude/tools/git-hooks/pre-push`／`pre-commit`（子 hook，非根層
+     dispatcher）判準不同：它們維持自己既有的 ①②③ 候選鏈（根層 .venv 健康探針
+     → 子專案 venv 只警告 → PATH python/python3），不呼叫 `pick_repo_python`
+     本身，只把既有 ③ PATH 段落包進
+     `repo_python_path_fallback_allowed` 條件——標準 H1/H2 判準不適用，改由 H5
+     以專屬正則驗證該包住形態。
 
 原 A 項（Windows PATH 正規化區塊行級檢查）與 D 項（該正規化比對式的行為級鎖，
 DEF-101-522）鎖的正是本輪拔除的那段邏輯，隨程式碼一併移除——史料見 git 歷史與
@@ -83,12 +103,100 @@ from _ps_engine import (  # noqa: E402  # R60 E-A-03：引擎述詞 SSOT（語�
 )
 
 _ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(_ROOT / "tools" / "lib"))
+import sdd_latest  # noqa: E402  ← LATEST 版本解析唯一真相源
+
+_LATEST_SDD_ROOT = _ROOT / "AISDLC_SDD" / sdd_latest.resolve_latest_name(_ROOT / "AISDLC_SDD")
 _PS1 = _ROOT / "AutoClaude" / "tools" / "run_local_nightly.ps1"
 _SH = _ROOT / "AutoClaude" / "tools" / "run_local_nightly.sh"
 _SMOKE_PS1 = _ROOT / "tools" / "windows_smoke_local.ps1"
 # DEF-200-302 mac 側補齊（F 項）：與 _SH 同款需要「無 PATH 退路 + fail-loud」
 # 兩支斷言的第二支 .sh 載具。
 _MAC_SMOKE = _ROOT / "tools" / "macos_smoke_local.sh"
+
+# H 項（DEF-200-315）：互動式入口清單——Dev-A1 本棒六檔＋Dev-A2 本棒擴充
+# （新增標準消費端直接加鍵，H1~H3 判準自動套用到新增項；AutoClaude 兩支子 hook
+# 判準不同，見下方 _H_CUSTOM_CRITERION_FILES 與 H5）。
+_INTERACTIVE_ENTRY_FILES: dict[str, Path] = {
+    "tools/git-hooks/pre-commit": _ROOT / "tools" / "git-hooks" / "pre-commit",
+    "tools/git-hooks/pre-push": _ROOT / "tools" / "git-hooks" / "pre-push",
+    "tools/integration_gate.sh": _ROOT / "tools" / "integration_gate.sh",
+    "tools/integration_gate.ps1": _ROOT / "tools" / "integration_gate.ps1",
+    "AISDLC_SDD/scripts/ci-gate.sh": _ROOT / "AISDLC_SDD" / "scripts" / "ci-gate.sh",
+    "AISDLC_SDD/scripts/ci-gate.ps1": _ROOT / "AISDLC_SDD" / "scripts" / "ci-gate.ps1",
+    # ── Dev-A2 棒（2026-09-19）新增 ──────────────────────────────────────
+    "AutoClaude/tools/local_ci_gate.sh": _ROOT / "AutoClaude" / "tools" / "local_ci_gate.sh",
+    "AutoClaude/tools/local_ci_gate.ps1": _ROOT / "AutoClaude" / "tools" / "local_ci_gate.ps1",
+    "AutoClaude/tools/run_act.sh": _ROOT / "AutoClaude" / "tools" / "run_act.sh",
+    "AutoClaude/tools/run_act.ps1": _ROOT / "AutoClaude" / "tools" / "run_act.ps1",
+    "AutoClaude/tools/g0_gate_check.ps1": _ROOT / "AutoClaude" / "tools" / "g0_gate_check.ps1",
+    "AutoClaude/tools/sd06_w3_staging_dryrun.sh": (
+        _ROOT / "AutoClaude" / "tools" / "sd06_w3_staging_dryrun.sh"
+    ),
+    "AISDLC_SDD/scripts/copy_on_evolve.sh": _ROOT / "AISDLC_SDD" / "scripts" / "copy_on_evolve.sh",
+    "tools/lib/git_hooks_install_common.sh": (
+        _ROOT / "tools" / "lib" / "git_hooks_install_common.sh"
+    ),
+    "tools/lib/GitHooksInstallCommon.ps1": _ROOT / "tools" / "lib" / "GitHooksInstallCommon.ps1",
+    # 🔴 AutoClaude 子 hook（非根層 dispatcher）：不呼叫 pick_repo_python 本身，
+    # 標準 H1/H2 判準不適用，見 _H_CUSTOM_CRITERION_FILES 與 H5。
+    "AutoClaude/tools/git-hooks/pre-push": (
+        _ROOT / "AutoClaude" / "tools" / "git-hooks" / "pre-push"
+    ),
+    "AutoClaude/tools/git-hooks/pre-commit": (
+        _ROOT / "AutoClaude" / "tools" / "git-hooks" / "pre-commit"
+    ),
+    # ── Dev-D 棒（2026-09-19，D-F4）新增：LATEST SDD 四支可攜工具 ──────────
+    # 「guard 存在才 source、否則降級」的可攜設計（框架可能單獨部署到使用者
+    # 專案）：只有 guard 存在分支改呼叫 pick_repo_python／Get-RepoPython，
+    # else 分支（無 guard）原樣保留 PATH 降級——與標準 H1/H2 判準（也是「guard
+    # 分支優先，PATH 只作退路」）同構，故直接套用，不歸入 _H_CUSTOM_CRITERION_FILES。
+    "AISDLC_SDD/<LATEST>/tools/install_hooks/install_post_commit.sh": (
+        _LATEST_SDD_ROOT / "tools" / "install_hooks" / "install_post_commit.sh"
+    ),
+    "AISDLC_SDD/<LATEST>/tools/install_hooks/install_post_commit.ps1": (
+        _LATEST_SDD_ROOT / "tools" / "install_hooks" / "install_post_commit.ps1"
+    ),
+    "AISDLC_SDD/<LATEST>/tools/arch_fitness/run_self_evolution.sh": (
+        _LATEST_SDD_ROOT / "tools" / "arch_fitness" / "run_self_evolution.sh"
+    ),
+    "AISDLC_SDD/<LATEST>/tools/arch_fitness/run_self_evolution.ps1": (
+        _LATEST_SDD_ROOT / "tools" / "arch_fitness" / "run_self_evolution.ps1"
+    ),
+}
+
+# H2 誤判防線（install_post_commit.sh 專屬，D-F4 item 6）：本檔以 heredoc 產出
+# advisory hook 內容（見該檔內嵌 DEF-200-315 註解），heredoc 內文刻意保留 bash
+# 側 `is_real_python_candidate python` 降級分支（guard 存在但 repo 根層 .venv
+# 缺席時的可攜降級——advisory hook 永不阻擋 commit，不能像本檔安裝器自身那樣
+# fail-loud）。這段文字是 heredoc 的**內容**（將被寫入 .git/hooks/post-commit
+# 執行），不是安裝器自身的 python 選擇判斷（後者已改呼叫 pick_repo_python，
+# H1 已涵蓋）——H2 的裸文字逐行掃描不分辨 heredoc 邊界，會把這段刻意保留的可攜
+# 降級分支誤判為安裝器自身仍殘留裸判斷。窄化判準：H2 只掃 heredoc 起點
+# （`cat > "$HOOK_TARGET" <<HOOK`）之前的文字；該行之後的降級分支不受 H2 管轄
+# （其正確性由 AISDLC_SDD/scripts/tests/test_install_post_commit_sh_windowsapps_guard.py
+# 端到端鎖住）。
+_H2_SCAN_BEFORE_MARKER: dict[str, str] = {
+    "AISDLC_SDD/<LATEST>/tools/install_hooks/install_post_commit.sh": (
+        'cat > "$HOOK_TARGET" <<HOOK'
+    ),
+}
+
+# H1/H2 判準不適用的檔案：這兩支 AutoClaude 子 hook 維持自己既有的 ①②③ 候選鏈
+# （根層 .venv 健康探針 → 子專案 venv 只警告 → PATH python/python3），不呼叫
+# `pick_repo_python` 本身，只把既有 ③ PATH 段落包進
+# `repo_python_path_fallback_allowed` 條件（DEF-200-315，Dev-A2 棒）——改由 H5
+# 以專屬正則驗證該包住形態。
+_H_CUSTOM_CRITERION_FILES = frozenset({
+    "AutoClaude/tools/git-hooks/pre-push",
+    "AutoClaude/tools/git-hooks/pre-commit",
+})
+
+# H5：③ PATH fallback 段必須被 `[ -z "$PY" ] && repo_python_path_fallback_allowed`
+# 條件包住（spec 逐字給定的正則）。
+_H5_FALLBACK_GUARDED_RE = re.compile(
+    r'\[ -z "\$PY" \] && repo_python_path_fallback_allowed'
+)
 
 # DEF-200-302：兩支 .ps1 皆需釘死的絕對路徑字面（相對於各自的 repo 根變數，
 # 故只鎖尾段——`.venv\Scripts\python.exe`——不鎖前導變數名，因兩檔前導變數
@@ -465,6 +573,247 @@ class TestWindowsPs1ParseCleanly(unittest.TestCase):
             self.assertEqual(
                 proc.stdout.strip(), "0",
                 f"{path.name} 有 {proc.stdout.strip()} 個 parse error：\n{proc.stderr}")
+
+
+# ── H（DEF-200-315）：互動式入口優先釘死 repo 根層 .venv ─────────────────────
+# 判準只在非註解行生效——沿用本檔既有 `_code_only`／`_strip_bash_comment` 家族
+# 「剝整行 `#` 開頭」的慣例（不處理行內尾隨註解，也不處理 .ps1 的 `<# … #>`
+# 區塊註解：本輪新增的消費端呼叫都是單行陳述式，不落在區塊註解內）。
+_H_PICK_REPO_PYTHON_RE = re.compile(r"\bpick_repo_python\b")
+_H_GET_REPO_PYTHON_RE = re.compile(r"\bGet-RepoPython\b")
+
+# H2 裸 PATH 決定式——兩種歷史上真實出現過的形狀：
+#   (a) `for cand in python python3; do`（pre-push／pre-commit 舊候選鏈迴圈頭）
+#   (b) `is_real_python_candidate python`（ci-gate.sh／integration_gate.sh 舊
+#       直接判斷，含可選 `if`/`elif`/`!` 前綴）
+# SD 3（DEF-200-315 系列，四方複審追加）兩個繞過修補：
+#   (a) 候選名可能帶單／雙引號（`is_real_python_candidate "python"`）——原正則
+#       只認裸字面 `python3?` 緊接 `\b`，帶引號時 `\b` 落在引號字元上不成立，
+#       整條繞過偵測。改認可選引號，且結尾判準改用「後面接空白／分號／行尾」
+#       取代 `\b`（引號本身是非詞字元，緊鄰空白時 `\b` 不會成立）。
+#   (b) `_h_has_bare_path_decision` 逐行 `splitlines()` 後才套正則，bash 續行
+#       （行尾反斜線）會把 `for _c in python \` 與 `python3; do` 腰斬成兩行，
+#       兩行各自都不含完整 `for … in python python3` 字面，逐行判準因此漏抓。
+#       改在逐行掃描前先合併續行成單一邏輯行（見 `_h_join_backslash_continuations`）。
+_H_BARE_FOR_LOOP_RE = re.compile(r"for\s+\w+\s+in\s+python\s+python3")
+_H_BARE_IS_REAL_PYTHON_RE = re.compile(
+    r"^\s*(?:if\s+!?\s*)?is_real_python_candidate\s+[\"']?python3?[\"']?(?:\s|;|$)"
+)
+_H_BARE_TEST_IS_REAL_PYTHON_RE = re.compile(r"Test-IsRealPython\s+-CandidateName\s+'python'")
+
+
+def _h_join_backslash_continuations(code: str) -> str:
+    """SD 3（DEF-200-315 系列）：把行尾反斜線續行合併成單一邏輯行，再交給
+    既有逐行正則掃描——否則 `for _c in python \\` 換行接 `python3; do` 這種
+    真實存在的續行寫法（bash 慣例）會被逐行判準腰斬成兩行、各自都測不到完整
+    的 `for … in python python3` 字面而漏判。只處理裸反斜線行尾（不含尾隨
+    空白，符合本 repo 既有續行慣例），呼叫端須先剝除整行註解（本函式不重做
+    註解判斷）。"""
+    lines = code.split("\n")
+    merged: list[str] = []
+    pending = ""
+    for ln in lines:
+        current = pending + ln if pending else ln
+        pending = ""
+        if current.endswith("\\"):
+            pending = current[:-1] + " "
+            continue
+        merged.append(current)
+    if pending:
+        merged.append(pending)
+    return "\n".join(merged)
+
+# H3（ci-gate.sh 專屬）：執行呼叫必須經 `"$PY"`，非註解行不得以裸 `python` 開頭。
+_H3_BARE_PY_EXEC_RE = re.compile(r"^python(?:\s|$)")
+
+
+def _h_strip_comments(text: str) -> str:
+    """剝除整行 `#` 開頭的行（bash 與 PowerShell 單行註解共用同一字元）。"""
+    return "\n".join(
+        ln for ln in text.splitlines() if not ln.lstrip().startswith("#")
+    )
+
+
+def _h_has_ssot_call(text: str, is_ps1: bool) -> bool:
+    """H1：非註解行是否呼叫 `pick_repo_python`（bash）／`Get-RepoPython`（ps1）。"""
+    code = _h_strip_comments(text)
+    pattern = _H_GET_REPO_PYTHON_RE if is_ps1 else _H_PICK_REPO_PYTHON_RE
+    return bool(pattern.search(code))
+
+
+def _h_has_bare_path_decision(text: str, is_ps1: bool) -> bool:
+    """H2：非註解行是否殘留裸 PATH 決定式。"""
+    code = _h_strip_comments(text)
+    if is_ps1:
+        return bool(_H_BARE_TEST_IS_REAL_PYTHON_RE.search(code))
+    # SD 3（DEF-200-315 系列）：先合併反斜線續行成單一邏輯行，避免
+    # `for _c in python \` 換行接 `python3; do` 被逐行掃描腰斬而漏判。
+    code = _h_join_backslash_continuations(code)
+    for ln in code.splitlines():
+        if _H_BARE_FOR_LOOP_RE.search(ln) or _H_BARE_IS_REAL_PYTHON_RE.search(ln):
+            return True
+    return False
+
+
+def _h_has_bare_python_exec_line(text: str) -> bool:
+    """H3：非註解行是否以裸 `python` 開頭（ci-gate.sh 專屬判準）。"""
+    code = _h_strip_comments(text)
+    for ln in code.splitlines():
+        if _H3_BARE_PY_EXEC_RE.match(ln.lstrip()):
+            return True
+    return False
+
+
+class TestInteractiveEntryPointsPreferRootVenv(unittest.TestCase):
+    """H（DEF-200-315，2026-09-19 掌舵者裁決）：互動式入口一律優先釘死 repo
+    根層 .venv 直譯器，不再從 PATH 現場挑 python/python3。"""
+
+    def test_h1_every_entry_calls_the_ssot_picker(self) -> None:
+        for name, path in _INTERACTIVE_ENTRY_FILES.items():
+            with self.subTest(file=name):
+                self.assertTrue(path.is_file(), f"{path} 不存在")
+                if name in _H_CUSTOM_CRITERION_FILES:
+                    continue  # 判準不同（自己的 ①②③ 候選鏈），見 H5
+                is_ps1 = path.suffix.lower() == ".ps1"
+                self.assertTrue(
+                    _h_has_ssot_call(_read(path), is_ps1),
+                    f"{name} 未呼叫 pick_repo_python（bash）／Get-RepoPython（ps1）"
+                    "——互動式入口必須改優先釘死 repo 根層 .venv（DEF-200-315）",
+                )
+
+    def test_h2_no_bare_path_decision_remains(self) -> None:
+        for name, path in _INTERACTIVE_ENTRY_FILES.items():
+            if name in _H_CUSTOM_CRITERION_FILES:
+                continue  # 判準不同（自己的 ①②③ 候選鏈），見 H5
+            with self.subTest(file=name):
+                is_ps1 = path.suffix.lower() == ".ps1"
+                text = _read(path)
+                marker = _H2_SCAN_BEFORE_MARKER.get(name)
+                if marker is not None:
+                    idx = text.find(marker)
+                    self.assertNotEqual(
+                        idx, -1, f"{name} 找不到 H2 掃描邊界標記 {marker!r}——"
+                        "窄化判準需同步該檔結構變動",
+                    )
+                    text = text[:idx]
+                self.assertFalse(
+                    _h_has_bare_path_decision(text, is_ps1),
+                    f"{name} 殘留裸 PATH 決定式（`for … in python python3`／"
+                    "`is_real_python_candidate python`／`Test-IsRealPython "
+                    "-CandidateName 'python'`）——必須改經 pick_repo_python／"
+                    "Get-RepoPython（DEF-200-315）",
+                )
+
+    def test_h5_autoclaude_subhooks_guard_path_fallback_with_ci_predicate(self) -> None:
+        """H5（DEF-200-315，Dev-A2 棒）：AutoClaude 兩支子 hook 不呼叫
+        `pick_repo_python` 本身，判準改為「既有 ③ PATH 段落是否被
+        `repo_python_path_fallback_allowed` 條件包住」——本機根層 .venv 缺席時
+        不應再退回 PATH（只在 CI／容器／逃生口才容許）。"""
+        for name in sorted(_H_CUSTOM_CRITERION_FILES):
+            path = _INTERACTIVE_ENTRY_FILES[name]
+            with self.subTest(file=name):
+                self.assertTrue(path.is_file(), f"{path} 不存在")
+                code = _h_strip_comments(_read(path))
+                self.assertRegex(
+                    code, _H5_FALLBACK_GUARDED_RE,
+                    f"{name} 的 ③ PATH fallback 段未被 "
+                    '`[ -z "$PY" ] && repo_python_path_fallback_allowed` 條件包住'
+                    "——本機根層 .venv 缺席時可能仍會退回 PATH（DEF-200-315）",
+                )
+
+    def test_h3_ci_gate_sh_has_no_bare_python_exec_line(self) -> None:
+        path = _INTERACTIVE_ENTRY_FILES["AISDLC_SDD/scripts/ci-gate.sh"]
+        self.assertFalse(
+            _h_has_bare_python_exec_line(_read(path)),
+            "ci-gate.sh 出現非註解行以裸 `python` 開頭——執行呼叫必須經 "
+            '"$PY"（DEF-200-315）',
+        )
+
+    def test_h4_fallback_allowed_predicate_mentions_all_three_env_vars(self) -> None:
+        sh_text = _read(_ROOT / "tools" / "lib" / "windowsapps_guard.sh")
+        m = re.search(
+            r"repo_python_path_fallback_allowed\s*\(\)\s*\{(?P<body>.*?)\n\}",
+            sh_text, re.DOTALL,
+        )
+        self.assertIsNotNone(
+            m, "windowsapps_guard.sh 找不到 repo_python_path_fallback_allowed 函式")
+        body = m.group("body")
+        for env_name in ("GITHUB_ACTIONS", "CI", "AUTOSDD_ALLOW_PATH_PYTHON"):
+            self.assertIn(
+                env_name, body,
+                f"repo_python_path_fallback_allowed 函式體缺 {env_name}")
+
+        ps1_text = _read(_ROOT / "tools" / "lib" / "WindowsAppsGuard.ps1")
+        m2 = re.search(
+            r"function Test-RepoPythonPathFallbackAllowed\s*\{(?P<body>.*?)\n\}",
+            ps1_text, re.DOTALL,
+        )
+        self.assertIsNotNone(
+            m2, "WindowsAppsGuard.ps1 找不到 Test-RepoPythonPathFallbackAllowed 函式")
+        body2 = m2.group("body")
+        for env_name in ("GITHUB_ACTIONS", "CI", "AUTOSDD_ALLOW_PATH_PYTHON"):
+            self.assertIn(
+                env_name, body2,
+                f"Test-RepoPythonPathFallbackAllowed 函式體缺 {env_name}")
+
+    def test_red_green_self_check_rejects_the_old_pattern(self) -> None:
+        """紅→綠自證：合成 mutant 文字（只有 `for c in python python3`、無函式
+        呼叫）——H1 判準須回 False（沒呼叫 SSOT），H2 判準須回 True（殘留裸
+        PATH 決定式），比照本檔既有 `TestDetectorItself` 風格。"""
+        mutant = (
+            "#!/usr/bin/env bash\n"
+            "PY=\"\"\n"
+            "for c in python python3; do\n"
+            "  if is_real_python_candidate \"$c\"; then PY=\"$c\"; break; fi\n"
+            "done\n"
+        )
+        self.assertFalse(_h_has_ssot_call(mutant, is_ps1=False))
+        self.assertTrue(_h_has_bare_path_decision(mutant, is_ps1=False))
+
+    def test_h2_catches_quoted_candidate_name_bypass(self) -> None:
+        """SD 3（DEF-200-315 系列）突變自證①：`is_real_python_candidate` 的
+        候選名帶雙引號時，H2 原正則的 `\\b` 落在引號字元上不成立、整條繞過
+        偵測——確認加固後仍判 True。"""
+        mutant = (
+            "#!/usr/bin/env bash\n"
+            "PY=\"\"\n"
+            'if is_real_python_candidate "python"; then PY=python\n'
+            "fi\n"
+        )
+        self.assertTrue(
+            _h_has_bare_path_decision(mutant, is_ps1=False),
+            "帶雙引號的候選名（`is_real_python_candidate \"python\"`）繞過了 H2"
+            "——正則未涵蓋可選引號",
+        )
+        mutant_single = (
+            "#!/usr/bin/env bash\n"
+            "PY=\"\"\n"
+            "if is_real_python_candidate 'python3'; then PY=python3\n"
+            "fi\n"
+        )
+        self.assertTrue(
+            _h_has_bare_path_decision(mutant_single, is_ps1=False),
+            "帶單引號的候選名（`is_real_python_candidate 'python3'`）繞過了 H2"
+            "——正則未涵蓋可選引號",
+        )
+
+    def test_h2_catches_backslash_continuation_bypass(self) -> None:
+        """SD 3（DEF-200-315 系列）突變自證②：`for _c in python \\` 反斜線續行
+        接 `python3; do` 時，逐行 `splitlines()` 後判會把完整字面腰斬成兩行、
+        各自都不含 `for … in python python3`——確認合併續行後仍判 True。"""
+        mutant = (
+            "#!/usr/bin/env bash\n"
+            "PY=\"\"\n"
+            "for _c in python \\\n"
+            "  python3; do\n"
+            '  if is_real_python_candidate "$_c"; then PY="$_c"; break; fi\n'
+            "done\n"
+        )
+        self.assertTrue(
+            _h_has_bare_path_decision(mutant, is_ps1=False),
+            "反斜線續行的 for 迴圈（`for _c in python \\` 換行接 `python3; do`）"
+            "繞過了 H2——逐行掃描未先合併續行",
+        )
 
 
 if __name__ == "__main__":

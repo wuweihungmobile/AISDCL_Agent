@@ -54,14 +54,13 @@ _ghic_bail() {
   if [ "$_GHIC_SCRIPT_DRIVEN" = "1" ]; then exit 1; else return 1; fi
 }
 
-# venv 提示：下列各函式都靠裸 python 呼叫 _GIT_HOOKS_INSTALL_COMMON_PY，未啟用 venv
-# 就直接失敗提示（勝過各函式逐一噴原生「python: command not found」）——與
-# tools/integration_gate.sh / AutoClaude/tools/local_ci_gate.sh 的前置守門對稱，
-# source 本檔時即檢查一次。R43 Scan-B（DEF-101-353）：三處皆改用共用 guard
-# is_real_python_candidate 排除 WindowsApps 空殼候選，取代原本裸 `command -v`。
+# DEF-200-315：互動式入口優先釘死 repo 根層 .venv 直譯器（單一 .venv 設計，
+# ONBOARDING §2.1），source 本檔時即選定一次，供下列各函式呼叫 _GIT_HOOKS_INSTALL_COMMON_PY
+# 共用（勝過各函式逐一噴原生「python: command not found」）——與
+# tools/integration_gate.sh / AutoClaude/tools/local_ci_gate.sh 的前置守門對稱。
 # shellcheck disable=SC1091
 . "$_GIT_HOOKS_INSTALL_COMMON_SH_DIR/windowsapps_guard.sh"
-is_real_python_candidate python || { echo '❌ 找不到 python — 請先 source .venv/bin/activate（見 ONBOARDING.md §3）'; _ghic_bail; }
+_GHIC_PY="$(pick_repo_python "$_GIT_HOOKS_INSTALL_COMMON_SH_DIR/../..")" || _ghic_bail
 
 # 防護：core.hooksPath 寫入的是「共享 .git/config」；在 linked worktree 內執行會把
 # worktree 路徑寫進去，worktree 刪除後主 checkout 閘門靜默全滅 → 拒絕執行。
@@ -69,13 +68,13 @@ is_real_python_candidate python || { echo '❌ 找不到 python — 請先 sourc
 # 子指令；失敗時該子指令已把錯誤訊息印到 stderr，本函式只負責 exit 1。
 assert_not_linked_worktree() {
   local prefix="${1:-}"
-  python "$_GIT_HOOKS_INSTALL_COMMON_PY" assert-not-linked-worktree --prefix "$prefix" || _ghic_bail
+  "$_GHIC_PY" "$_GIT_HOOKS_INSTALL_COMMON_PY" assert-not-linked-worktree --prefix "$prefix" || _ghic_bail
 }
 
 # 回傳根層 dispatcher hooks 目錄（<repo根>/tools/git-hooks，絕對路徑）。
 # 演算法見 tools/git_hooks_install_common.py 的 `get-hooks-dir` 子指令。
 get_dispatcher_hooks_dir() {
-  python "$_GIT_HOOKS_INSTALL_COMMON_PY" get-hooks-dir || _ghic_bail
+  "$_GHIC_PY" "$_GIT_HOOKS_INSTALL_COMMON_PY" get-hooks-dir || _ghic_bail
 }
 
 # 安裝前驗證：dispatcher hooks（pre-commit/pre-push/post-commit）必須存在，
@@ -84,7 +83,7 @@ get_dispatcher_hooks_dir() {
 assert_dispatcher_hooks_present() {
   local hooks_dir="$1"
   local prefix="${2:-}"
-  python "$_GIT_HOOKS_INSTALL_COMMON_PY" assert-hooks-present "$hooks_dir" --prefix "$prefix" || _ghic_bail
+  "$_GHIC_PY" "$_GIT_HOOKS_INSTALL_COMMON_PY" assert-hooks-present "$hooks_dir" --prefix "$prefix" || _ghic_bail
 }
 
 # 安裝後驗證：core.hooksPath 解析出的目錄實際存在且含三支 hook 檔（杜絕假 ✅）。
@@ -94,7 +93,7 @@ assert_dispatcher_hooks_present() {
 check_git_hooks_path_installed() {
   local hooks_dir="$1"
   local out
-  out="$(python "$_GIT_HOOKS_INSTALL_COMMON_PY" check-installed "$hooks_dir")"
+  out="$("$_GHIC_PY" "$_GIT_HOOKS_INSTALL_COMMON_PY" check-installed "$hooks_dir")"
   CUR_HOOKS_PATH="$(echo "$out" | sed -n 's/^CUR=//p')"
   GIT_HOOKS_PATH_OK="$(echo "$out" | sed -n 's/^OK=//p')"
 }

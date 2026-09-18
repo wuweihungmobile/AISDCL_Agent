@@ -125,3 +125,49 @@ python_ge_min_remediation() {
   echo "     sudo dnf install -y python3.11" >&2
   echo "   裝完重開終端機（PATH 需重新載入）後再執行：source tools/dev_start.sh" >&2
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DEF-200-315（2026-09-19 掌舵者裁決）：互動式入口（git hooks／integration_gate／
+# ci-gate）一律優先釘死 repo 根層 .venv 直譯器，不再從 PATH 候選挑 python/python3。
+#
+# WHY 只在 CI 容許退回 PATH：本機開發者的 repo 根層 .venv 是單一 .venv 設計
+# （ONBOARDING §2.1）下互動式入口唯一該認的直譯器來源，PATH 上的 python/python3
+# 可能是另一個專案殘留或系統殼，退回它會讓「用錯直譯器」的缺陷無聲發生；雲端
+# CI／容器結構上沒有（也不需要）repo 根層 .venv（workflow 自行 setup-python 到
+# PATH），故以 GITHUB_ACTIONS／CI 兩個既有慣例環境變數放行；
+# AUTOSDD_ALLOW_PATH_PYTHON=1 是人為逃生口（比照本檔既有 AUTOSDD_*_OFF 慣例），
+# 供本機除錯或未涵蓋情境使用，使用時印警告避免靜默改變行為。
+#
+# WHY 複用 PYTHON_GE_MIN_PROBE／is_real_python_candidate：探針已驗證「可執行 +
+# 版本 >= 3.11」，repo 根層 .venv 直譯器同樣需要這兩項保證（Windows 形狀的
+# .venv/Scripts/python.exe 在 mac 上探針天然失敗，藉此自然跳過而非誤判為可
+# 用）；PATH 候選沿用 is_real_python_candidate 排除 WindowsApps 空殼，避免第五
+# 份判空殼邏輯（test_windowsapps_guard_cross_consistency.py 守四份對稱）。
+#
+# 回 0 ＝ 本情境容許退回 PATH python（雲端 CI／act 容器，或人為逃生口）
+repo_python_path_fallback_allowed() {
+  [ "${GITHUB_ACTIONS:-}" = "true" ] || [ "${CI:-}" = "true" ] || [ "${AUTOSDD_ALLOW_PATH_PYTHON:-}" = "1" ]
+}
+# 用法：PY="$(pick_repo_python "<repo 根絕對路徑>")" || { exit 1 或該檔既有 fail-loud 分支 }
+# stdout 印選定直譯器路徑；rc 0 成功／1 失敗（失敗時已在 stderr 印補救指令，呼叫端不必再印）
+pick_repo_python() {
+  local root="$1" cand resolved
+  for cand in "$root/.venv/bin/python" "$root/.venv/Scripts/python.exe"; do
+    [ -x "$cand" ] || continue
+    resolved="$("$cand" -c "$PYTHON_GE_MIN_PROBE" 2>/dev/null)" || continue   # 探針兼驗可執行＋≥3.11＋平台形狀（Windows 形狀的 .exe 在 mac 上探針失敗即跳過）
+    [ -n "$resolved" ] && { printf '%s\n' "$cand"; return 0; }
+  done
+  if repo_python_path_fallback_allowed; then
+    for cand in python python3; do
+      is_real_python_candidate "$cand" || continue
+      [ "${AUTOSDD_ALLOW_PATH_PYTHON:-}" = "1" ] && echo "⚠️  AUTOSDD_ALLOW_PATH_PYTHON=1：根層 .venv 缺席，改用 PATH 上的 ${cand}（$(command -v "$cand")）" >&2
+      printf '%s\n' "$cand"; return 0
+    done
+  fi
+  echo "❌ 找不到 repo 根層 .venv 直譯器（${root}/.venv）——單一 .venv 設計（ONBOARDING §2.1）下互動式入口只認它。" >&2
+  echo "   修法（擇一，逐字可執行；於 repo 根執行）：" >&2
+  echo "     source tools/dev_start.sh          （macOS/Linux）" >&2
+  echo "     . tools\\dev_start.ps1              （Windows PowerShell）" >&2
+  echo "   雲端 CI／容器：設 CI=true 或 GITHUB_ACTIONS=true 即容許 PATH python；人為逃生口 AUTOSDD_ALLOW_PATH_PYTHON=1" >&2
+  return 1
+}

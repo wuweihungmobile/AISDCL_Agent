@@ -614,6 +614,14 @@ jobs:
             # 「請你自己去查 job steps 長度」變成**已經查好的量測值**，而豁免理由的解除
             # 判準也因此有了可現查的載體（不必再靠一個會過期的日期宣稱）。
             # 刻意**不**讓它影響 rc：帳務平面本 repo 無可修處，升成阻斷就是 R68 死鎖形狀。
+            #
+            # 🔴 2026-09-19（B5／SA C 節）訂正：`steps` 長度為 0 還有第二個**良性**成因——
+            # 帶 `if:` 條件性 skip 的 job（如 `windows-smoke`／`macos-smoke` 的
+            # `if: github.event_name != 'schedule'`，見 windows-compat-ci.yml:1027／
+            # macos-compat-ci.yml:893）conclusion=`skipped`、steps=0，與帳務阻擋
+            # （conclusion=`failure`、steps=0）**可分**——多加 `.conclusion != "skipped"`
+            # 即可排除。SA 2026-09-19 實查 run 34844265895／34852978108：兩者皆屬此型
+            # （conditional skip，非帳務阻擋），舊判準對這兩筆恆印 `::notice::` 為誤判。
             run_id=$(gh run list --repo "${GITHUB_REPOSITORY}" --workflow "$wf" \
                        --event schedule --limit 1 --json databaseId \
                        --jq '.[0].databaseId // empty' \
@@ -621,10 +629,10 @@ jobs:
             never="(查不到 run id：該軌從未產生過 schedule run，或 gh API 查詢失敗)"
             if [ -n "$run_id" ]; then
               never=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/jobs" \
-                        --jq '"\([.jobs[] | select((.steps|length)==0)] | length)/\(.jobs | length)"' \
+                        --jq '"\([.jobs[] | select((.steps|length)==0 and .conclusion != "skipped")] | length)/\(.jobs | length)"' \
                       || echo "(gh API 查詢失敗)")
             fi
-            echo "   job 層 never-started（steps 長度為 0 的 job 數／job 總數）：${never}"
+            echo "   job 層 never-started（steps 長度為 0 且非 skipped 的 job 數／job 總數）：${never}"
             case "$never" in
               0/*)
                 ;;

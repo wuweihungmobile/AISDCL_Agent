@@ -59,7 +59,10 @@ _ds_main() {
     if [ -f "$root/.venv/bin/activate" ]; then
       # shellcheck disable=SC1091
       . "$root/.venv/bin/activate"
-      echo "✅ 已自動啟用 .venv（python → $(command -v python)）"
+      # DEF-200-323：uv 專案指令（uv sync／uv run）預設用 cwd 專案自己的 .venv、無視已啟用
+      # venv ⇒ 在 AutoClaude/ 下會另建第二顆；釘 UV_PROJECT_ENVIRONMENT 到根層 .venv 兜底。
+      export UV_PROJECT_ENVIRONMENT="$root/.venv"
+      echo "✅ 已自動啟用 .venv（python → $(command -v python)；UV_PROJECT_ENVIRONMENT → ${UV_PROJECT_ENVIRONMENT}）"
     else
       echo "⚠️  .venv/bin/activate 不存在，未啟用 venv" >&2
     fi

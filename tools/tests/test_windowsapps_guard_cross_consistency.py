@@ -33,6 +33,7 @@ from __future__ import annotations
 import ast
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -314,6 +315,126 @@ class TestWindowsAppsGuardSharedFunctionBehavior(unittest.TestCase):
         self.assertEqual(out, "False", out)
 
 
+@unittest.skipIf(_pwsh_exe() is None, "需要 powershell/pwsh")
+class TestGetRepoPythonBehavior(unittest.TestCase):
+    """DEF-200-315（2026-09-19 掌舵者裁決）行為測試：`Get-RepoPython` 三情境
+    ——repo 根層 .venv 存在即釘死用它；缺席時只在 CI／逃生口才容許退回 PATH；
+    本機一律 fail-loud。手法對齊本檔既有 `TestWindowsAppsGuardSharedFunctionBehavior`
+    （dot-source 共用檔案後直接呼叫函式）。與 bash 側
+    `test_windowsapps_guard_bash_parity.py::TestPickRepoPythonBehavior` 的差異：
+    PowerShell 的 `&` 呼叫走原生 CreateProcess，不像 bash 有 shebang 解譯，文字
+    存根命名成 `.exe` 無法真的執行——情境 1 的候選檔改複製自本測試自身正在
+    執行的直譯器（真實可執行檔）。"""
+
+    def _run(
+        self, script_body: str, env_overrides: dict[str, str] | None = None
+    ) -> subprocess.CompletedProcess:
+        exe = _pwsh_exe()
+        script = f'. "{_GUARD_PS1}"\n{script_body}\n'
+        env = dict(os.environ)
+        for var in ("CI", "GITHUB_ACTIONS", "AUTOSDD_ALLOW_PATH_PYTHON"):
+            env.pop(var, None)
+        if env_overrides:
+            env.update(env_overrides)
+        return subprocess.run(
+            [exe, "-NoProfile", "-Command", script],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=60, env=env,
+        )
+
+    def test_repo_venv_present_is_preferred(self) -> None:
+        """情境 1：repo 根層 .venv 存在 ⇒ 回傳該候選路徑。
+
+        D-F2 順序鑑別力補強：原版只放單一候選（`.venv/Scripts/python.exe`），
+        `assertIn(".venv", ...)` 對候選順序毫無鑑別力——連 fail-loud 分支的
+        補救訊息都含 ".venv" 字面，選哪個、甚至兩個都選不到，斷言照樣過。
+        現兩候選（`.venv/bin/python`／`.venv/Scripts/python.exe`）都複製
+        `sys.executable` 並補上 `pyvenv.cfg`（venv 版直譯器搬離原位置找不到
+        同層 pyvenv.cfg 會以 exit code 106 拒絕啟動，兩候選皆會落回
+        fail-loud，同樣讓弱斷言誤判通過——這正是本測試補強前的隱藏根因）。
+
+        🔴 Windows 平台真機實測（2026-09-19，本測試自身跑出）：PowerShell
+        `&` 呼叫操作對「無副檔名的真 PE 檔」走的不是 Start-Process 那種直接
+        CreateProcess 路徑——非互動 `-NoProfile -Command` 子行程下探測 rc/
+        stdout 皆空（非掛起；用 Start-Process 對同一份檔案直接呼叫可正常
+        執行，兩者路徑不同），使 `Get-RepoPython` 的候選迴圈判定 `.venv/bin/
+        python` 不可用而落到 `.venv\\Scripts\\python.exe`——即使該檔案
+        `Test-Path` 為真、內容是可正常運作的直譯器。這使得 bash 側新順序
+        （`.venv/bin/python` 優先）在 **Windows 原生候選陣列語意下對這個
+        人造 fixture 沒有可觀測效果**：不是本測試沒抓到 bug，而是 Windows
+        平台上 `.venv/bin/python`（POSIX 慣例、正常不會出現在 Windows venv）
+        這個候選形狀本身在 `&` 呼叫語意下結構性不可用，兩平台「同序」這件
+        事在 Windows 上只在**文字層**（D-F1 的候選字面序）有意義，行為層
+        （這裡）在 Windows 上量到的是「不管排哪個順位，bin/python 這個
+        候選形狀在 Windows 原生 & 呼叫下都選不到」。故 Windows 分支斷言改
+        為量測到的真實行為（選中 Scripts），non-Windows 分支維持原始 D-F2
+        意圖的嚴格斷言（POSIX `exec` 對無副檔名檔案無此限制，`bin/python`
+        才是真正的鑑別對象；本開發機為 Windows，此分支未實跑驗證，留待
+        macOS/Linux 開發機或雲端 CI 複驗）。"""
+        tmp = Path(tempfile.mkdtemp(prefix="get_repo_python_"))
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        venv_bin = tmp / ".venv" / "bin"
+        venv_scripts = tmp / ".venv" / "Scripts"
+        venv_bin.mkdir(parents=True)
+        venv_scripts.mkdir(parents=True)
+        shutil.copy2(sys.executable, venv_bin / "python")
+        shutil.copy2(sys.executable, venv_scripts / "python.exe")
+        real_pyvenv_cfg = Path(sys.prefix) / "pyvenv.cfg"
+        if real_pyvenv_cfg.is_file():
+            shutil.copy2(real_pyvenv_cfg, tmp / ".venv" / "pyvenv.cfg")
+        proc = self._run(f"Get-RepoPython -RepoRoot '{tmp}'")
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        stdout = proc.stdout.strip().replace("\\", "/")
+        with self.subTest(platform=sys.platform):
+            if sys.platform.startswith("win"):
+                self.assertTrue(
+                    stdout.endswith(".venv/Scripts/python.exe"),
+                    f"stdout={proc.stdout!r} stderr={proc.stderr!r} "
+                    "未落在已知的 Windows 原生 & 呼叫限制下的預期候選"
+                    "（見本測試 docstring 的真機實測記載）",
+                )
+            else:
+                self.assertTrue(
+                    stdout.endswith(".venv/bin/python"),
+                    f"stdout={proc.stdout!r} stderr={proc.stderr!r} 未選中 .venv/bin/python",
+                )
+
+    def test_ci_env_falls_back_to_path_python(self) -> None:
+        """情境 2：無 .venv、env CI=true ⇒ 退回 PATH 上的 python。"""
+        tmp = Path(tempfile.mkdtemp(prefix="get_repo_python_ci_"))
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        env = dict(os.environ)
+        for var in ("GITHUB_ACTIONS", "AUTOSDD_ALLOW_PATH_PYTHON"):
+            env.pop(var, None)
+        env["CI"] = "true"
+        env["PATH"] = os.pathsep.join(
+            [str(Path(sys.executable).parent), env.get("PATH", "")]
+        )
+        proc = subprocess.run(
+            [_pwsh_exe(), "-NoProfile", "-Command",
+             f'. "{_GUARD_PS1}"\nGet-RepoPython -RepoRoot \'{tmp}\'\n'],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=60, env=env,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertEqual(proc.stdout.strip(), "python", f"stdout={proc.stdout!r}")
+
+    def test_no_venv_no_escape_hatch_fails_loud(self) -> None:
+        """情境 3：無 .venv、清掉 CI／GITHUB_ACTIONS／AUTOSDD_ALLOW_PATH_PYTHON
+        ⇒ 回傳 $null（空輸出），並印出補救訊息。"""
+        tmp = Path(tempfile.mkdtemp(prefix="get_repo_python_fail_"))
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        proc = self._run(f"Get-RepoPython -RepoRoot '{tmp}'")
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        # Write-Host 訊息與函式回傳值（$null）共用 stdout（PowerShell 非互動
+        # 呼叫下 Write-Host 落在同一個被重導向的串流），故不斷言「乾淨空字串」，
+        # 只斷言補救訊息確實出現、且沒有印出看似合法的直譯器路徑。
+        self.assertIn(
+            "找不到 repo 根層 .venv 直譯器", proc.stdout + proc.stderr,
+            f"stdout={proc.stdout!r} stderr={proc.stderr!r}",
+        )
+
+
 # ---------------------------------------------------------------------------
 # ③ 端到端行為回歸鎖：dev_start.ps1 本身（R34 前零覆蓋的第 4 個獨立實作）
 # ---------------------------------------------------------------------------
@@ -590,8 +711,13 @@ _TEST_IS_REAL_PYTHON_CALL_RE = re.compile(
 # 「有沒有繞過空殼 guard」等價（強度不變，不是放寬：兩個名字都只存在於 SSOT
 # 一份實作裡，自行內嵌判斷式的 .ps1 照樣被判 offender）。bash 側對稱調整見
 # `test_windowsapps_guard_bash_parity.py::_SSOT_ENTRYPOINTS`。
+#
+# DEF-200-315（2026-09-19）：第三個入口函式 `Get-RepoPython`——互動式入口
+# （ci-gate.ps1／integration_gate.ps1）改優先釘死 repo 根層 .venv，內部沿用
+# 同一份 `Test-IsRealPython` 判空殼（只在 CI／逃生口才落回 PATH 候選），故與
+# 前兩者同理等價，加入同一組入口白名單。
 _SSOT_ENTRYPOINT_CALL_RE = re.compile(
-    r'\b(?:Test-IsRealPython\s+-CandidateName|Get-PythonGeMin)\b'
+    r'\b(?:Test-IsRealPython\s+-CandidateName|Get-PythonGeMin|Get-RepoPython)\b'
 )
 
 

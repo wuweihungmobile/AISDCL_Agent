@@ -831,11 +831,18 @@ class TestPreCommitBlocksEnvFiles(unittest.TestCase):
         self.assertEqual(add.returncode, 0, add.stderr)
 
     def _commit(self, message: str, env: dict | None = None) -> subprocess.CompletedProcess:
+        # DEF-200-315（2026-09-19）：pre-commit 的層②機密掃描改優先釘死 fake repo
+        # 根層 .venv（`pick_repo_python`），但本 fixture 是沙盒（`self.repo` 天生
+        # 沒有真 .venv）——同 `test_pre_push_dispatcher.py::_run_dispatcher` 的
+        # 處置，補人為逃生口讓層②真的執行到，而非造假 `.venv`（本類鎖的是機密
+        # 掃描的擋／放行為，不是直譯器挑選邏輯本身）。放在 base 而非 `env` 參數，
+        # 呼叫端傳入的覆寫（如顯式 env={}）仍可疊加。
+        base_env = dict(os.environ, AUTOSDD_ALLOW_PATH_PYTHON="1")
         return subprocess.run(
             ["git", "commit", "-q", "-m", message],
             cwd=str(self.repo), capture_output=True, text=True,
             encoding="utf-8", errors="replace",
-            env=dict(os.environ, **(env or {})), timeout=120,
+            env=dict(base_env, **(env or {})), timeout=120,
         )
 
     def test_force_added_env_file_is_blocked(self) -> None:
@@ -929,6 +936,32 @@ class TestPreCommitBlocksEnvFiles(unittest.TestCase):
         self.assertNotEqual(
             commit.returncode, 0,
             f"真 key 被貼進 .env.example 卻放行了：\n{commit.stdout}\n{commit.stderr}",
+        )
+
+
+class TestPreCommitStrayVenvScanWiring(unittest.TestCase):
+    """B2（SD 1d）文字鎖：dispatcher 必須呼叫 `tools/lib/stray_venv.py`，且命中
+    （呼叫回 rc≠0）時把 `rc` 設為 1（擋下 commit）。行為級端到端驗證已於本輪
+    真機跑過（注入假 `pyvenv.cfg` 觸發 rc=1、清除後恢復 rc=0）；本鎖只守「接線
+    有沒有被日後改動悄悄拆掉」，不重跑一次真 git 沙盒（那套 fixture 較重，本檔
+    其餘測試已大量使用，此處刻意用更輕量的文字判準）。
+    """
+
+    def test_dispatcher_calls_stray_venv_scan_and_blocks_on_nonzero_rc(self) -> None:
+        text = DISPATCHER.read_text(encoding="utf-8")
+        marker = "tools/lib/stray_venv.py"
+        self.assertIn(
+            marker, text,
+            "pre-commit dispatcher 未呼叫 tools/lib/stray_venv.py——雜散 venv "
+            "順手掃描（B2／SD 1d）未接線",
+        )
+        idx = text.index(marker)
+        next_section = text.find("# ──", idx)
+        window = text[idx: next_section if next_section != -1 else len(text)]
+        self.assertIn(
+            "rc=1", window,
+            "呼叫 stray_venv.py 之後的區塊未見 rc=1——命中雜散 venv 時必須擋下 "
+            "commit，不能只印訊息不動 rc",
         )
 
 

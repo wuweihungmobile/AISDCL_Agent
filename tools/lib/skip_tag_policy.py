@@ -596,7 +596,14 @@ _SITE_CLASS_CENSUS: dict[str, dict[str, int]] = {
         # **內部**再跑一次會遞迴生出孫探針（`DEF-101-803` 實測牆鐘 823s→3813s 且仍逾時）。
         # 該 skip 是**斷遞迴**、不是放棄覆蓋——外層那一次照跑，該組斷言全數在外層被驗證；
         # 述詞讀的是環境變數而非平台，故歸 `tool-absence` 而非任一平台格。
-        "tool-absence": 37,
+        # 🔴 DEF-200-315（2026-09-19）重釘 `tool-absence` 37 → 39（**非放寬**，同上：本表判準
+        # 是「相等」）。互動式入口釘死根層 .venv 的兩支**行為**測試類各帶一個類別層載具述詞：
+        # `test_windowsapps_guard_bash_parity.py::TestPickRepoPythonBehavior` 的
+        # `@unittest.skipUnless(_bash_exe(), …)` 與 `test_windowsapps_guard_cross_consistency.py::
+        # TestGetRepoPythonBehavior` 的 `@unittest.skipIf(_pwsh_exe() is None, …)`——兩者都是
+        # 「解不到載具就明說跳過、不假綠」的正確形態，述詞問的是工具在不在而非平台，故歸
+        # `tool-absence`。QA 複審實跑 `tools/run_root_unittests.py` 在靜態掃描階段早退抓到此漂移。
+        "tool-absence": 39,
         # 🔴 R88 重釘 `runtime-skipTest` 20→22（**非放寬**，同上：本表判準是「相等」）。
         # DEF-200-104 的第三個掃描面（SDD LATEST hook 樹的 console-spawn 判準）新增兩支測試，
         # 兩支皆以函式體內 `self.skipTest("[TOOL-ABSENCE] …")` 對「解不出 LATEST／該樹無
@@ -647,6 +654,12 @@ _SITE_CLASS_CENSUS: dict[str, dict[str, int]] = {
         # router 與 SDD LATEST conversation_ledger.py 字面常數比對）各一個字面 reason 站點
         # `self.skipTest("[TOOL-ABSENCE] 解不出 SDD LATEST 或 conversation_ledger.py 不存在")`，
         # 沿用同檔既有 `[TOOL-ABSENCE] 解不出 SDD LATEST` 慣例。
+        # 🔴 2026-09-19（SA 1／SD 1b symlink 盲區）本格**維持 32**：`test_dev_start.py::
+        # TestStrayVenvScan.test_symlinked_venv_pointing_outside_repo_is_detected` 初版在本機
+        # 無 `os.symlink` 特權時 `self.skipTest(...)`，會讓本格 32→33 並撞 skip 分群天花板
+        # （`tools/tests@win32／platform` 43>42）；收尾改為「真目錄＋`Path.is_symlink` 對該候選
+        # 回 True 的替身」走同一條分支——鎖在本機真的跑（零 skip），只把「OS 真把它當
+        # symlink」那一格留給有特權的環境（mac／CI）覆蓋。合法出口＝讓測試真的跑，不是調天花板。
         "runtime-skipTest": 32,
         "unclassified": 0,
     },

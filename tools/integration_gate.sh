@@ -18,17 +18,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 . "$SCRIPT_DIR/lib/windowsapps_guard.sh"
 
-# 直譯器候選鏈（DEF-200-275 第四輪 D8／C14）：python → python3 → 根層 .venv/bin/python，
-# 與 tools/git-hooks/pre-push 的 $PY 候選鏈同形。WHY：未 source venv 的 macOS 只有 python3；
-# pre-push 整合閘門 leg 先以候選鏈找到直譯器、再 `bash tools/integration_gate.sh`，本殼若只認
-# `python` 就會在同一台機器上自相矛盾地失敗。仍屬薄殼三職責之一（選直譯器）；殼內零迴圈
-# （check_wrapper_thinness 黑名單：for／while／python -c 皆不得出現）。找不到就 fail-loud。
-PY=""
-if is_real_python_candidate python; then PY=python
-elif is_real_python_candidate python3; then PY=python3
-elif is_real_python_candidate "$SCRIPT_DIR/../.venv/bin/python"; then PY="$SCRIPT_DIR/../.venv/bin/python"
-fi
-[ -n "$PY" ] || { echo '❌ 找不到 python／python3／.venv/bin/python — 請先 source .venv/bin/activate（見 ONBOARDING.md §3）' >&2; exit 1; }
+# 直譯器選定（DEF-200-275 第四輪 D8／C14 候選鏈，DEF-200-315（2026-09-19 掌舵者
+# 裁決）訂正：單一 .venv 設計下互動式入口一律優先釘死 repo 根層 .venv，不再從
+# PATH 挑 python/python3；`pick_repo_python` 同檔 SSOT，只在 CI／逃生口才落回
+# PATH 候選，找不到時已在 stderr 印補救指令，本殼不必再印）。仍屬薄殼三職責之一
+# （選直譯器）；殼內零迴圈（check_wrapper_thinness 黑名單：for／while／python -c
+# 皆不得出現）。
+PY="$(pick_repo_python "$SCRIPT_DIR/..")" || exit 1
 
 export PYTHONUTF8=1
 "$PY" "$SCRIPT_DIR/integration_gate_core.py" "$@"

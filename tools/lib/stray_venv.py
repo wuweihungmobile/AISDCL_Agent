@@ -11,13 +11,18 @@
 `AISDLC_SDD/*/*`），漏收 `.claude/worktrees/x/.venv`、根層 `tools/.venv`、
 `AISDLC_SDD/<ver>/tools/.venv`、`AutoClaude/tests/fixtures/.venv` 四類巢狀更深
 的雜散 venv。改為對**全樹**（含 `.claude/worktrees`、`tools/`，任何巢狀深度）
-遞迴走訪＋就地剪枝：命中 `root/.venv` 本尊、`.venv-cache-*`（同一顆 venv 換
-平台身分，不算第二顆）與常見 VCS／套件快取目錄（`.git`／`node_modules`／
+遞迴走訪＋就地剪枝：命中 `root/.venv` 本尊、根層的 `.venv-cache-*`（同一顆 venv
+換平台身分，不算第二顆）與常見 VCS／套件快取目錄（`.git`／`node_modules`／
 `__pycache__`／`.pytest_cache`／`.ruff_cache`／`.hypothesis`／`.mypy_cache`）
 一律不下探；命中含 `pyvenv.cfg` 的目錄後同樣不再下探（venv 內部結構無需再
 掃）。效能量測依據：對本 repo 整棵樹（剪枝後約 6370 個目錄）實測 `os.walk`
 走訪耗時 0.18 秒（2026-09-15），全樹遞迴在此規模下可行——見
 `tools/tests/test_dev_start.py::TestStrayVenvScan` 的效能護欄測試。
+
+2026-09-19（B1／SD 1a）：`.venv-cache-*` 前綴豁免收斂為**只准套用在根層**——子專案
+底下同名前綴（如 `AutoClaude/.venv-cache-fake/`）是巧合撞名，不是「同一顆 venv
+換平台身分」那個語意（那個語意只存在於根層 `.venv-cache-<flavor>/`，見 ONBOARDING
+§2.1 ④），故不應被豁免、仍屬雜散 venv。
 
 刻意不用任何單平台 API：`is_windows` 由呼叫端傳入，本模組零 `sys.platform`
 分支（鐵律三）。所有函式皆為純讀取（`os.walk`／`Path.is_file`／`Path.iterdir`），
@@ -26,6 +31,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
@@ -40,10 +46,19 @@ _PRUNE_DIR_NAMES: frozenset[str] = frozenset({
 
 def find_stray_venvs(root: Path) -> list[Path]:
     """全樹（任何巢狀深度）遞迴掃描 `root`，回傳含 `pyvenv.cfg` 的目錄（以標記
-    檔判定，不看目錄名）。就地剪枝、不下探：`root/.venv` 本尊、任何名稱以
-    `.venv-cache-` 開頭的目錄（同一顆 venv 換平台時的暫存身分，不算第二顆）、
+    檔判定，不看目錄名）。就地剪枝、不下探：`root/.venv` 本尊、**根層底下**任何
+    名稱以 `.venv-cache-` 開頭的目錄（同一顆 venv 換平台時的暫存身分，不算第二
+    顆——子專案底下同名前綴是巧合撞名，不豁免，見模組 docstring B1／SD 1a）、
     `_PRUNE_DIR_NAMES` 列舉的 VCS／快取目錄；命中 `pyvenv.cfg` 的目錄本身也
     不再下探（其內部結構不是另一個獨立雜散案例）。
+
+    SA 1（SD 1b，2026-09-19 四方複審追加）：`os.walk(followlinks=False)`
+    不會走進 symlink 目錄，故指向外部 venv 的**真 symlink**（如
+    `AutoClaude/.venv -> D:\\elsewhere\\venv`）是盲區——junction 在 Windows 上
+    `Path.is_symlink()` 為 `False`，已被一般路徑掃到而不受影響。剪枝迴圈內對
+    每個候選 `name` 額外判斷：若本身是 symlink 且目標含 `pyvenv.cfg`，直接記
+    為雜散案例（不下探、不留在 `keep`——`os.walk` 本就不會走進 symlink，留著
+    也無意義）。
     """
     root = Path(root)
     found: set[Path] = set()
@@ -53,9 +68,13 @@ def find_stray_venvs(root: Path) -> list[Path]:
         for name in dirnames:
             if current == root and name == ".venv":
                 continue  # root/.venv 本尊
-            if name.startswith(".venv-cache-"):
-                continue  # 同一顆 venv 換平台身分，不算第二顆
+            if current == root and name.startswith(".venv-cache-"):
+                continue  # 同一顆 venv 換平台身分，不算第二顆（僅根層豁免）
             if name in _PRUNE_DIR_NAMES:
+                continue
+            candidate = current / name
+            if candidate.is_symlink() and (candidate / "pyvenv.cfg").is_file():
+                found.add(candidate)  # symlink 指向外部 venv：os.walk 走不進去，直接記
                 continue
             keep.append(name)
         dirnames[:] = keep
@@ -100,3 +119,29 @@ def enforce(root: Path, is_windows: bool, emit: Callable[[str], None]) -> bool:
     for line in lines:
         emit(line)
     return not lines
+
+
+def main(argv: list[str]) -> int:
+    """CLI 入口：`python tools/lib/stray_venv.py <repo_root>`（B2／SD 1d）——供
+    `tools/git-hooks/pre-commit` 順手掃描用，讓 DEF-200-294 這型事故的攔截點從
+    「下次 dev_start」提前到「下次 commit」。乾淨 rc 0；命中即以 `enforce()` 把
+    每筆訊息（含可複製的刪除指令）印到 stderr 並回 rc 1。
+
+    UTF-8 stdio 一律委派 `platform_utils.init_utf8_streams()`（唯一實作，見該函式
+    docstring）——不得繞過它自行就地改寫 stderr 串流編碼，否則撞
+    `tools/tests/test_platform_utils_dedup.py::TestR75StdioUtf8HasOneImplementation`
+    棘輪。惰性 import：本模組其餘函式是純讀取，不需要它，只有 CLI 進入點才需要。
+    """
+    if len(argv) != 1:
+        print("用法：python tools/lib/stray_venv.py <repo_root>", file=sys.stderr)
+        return 2
+    import platform_utils  # noqa: PLC0415
+
+    platform_utils.init_utf8_streams()
+    root = Path(argv[0])
+    ok = enforce(root, os.name == "nt", lambda m: print(m, file=sys.stderr))
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

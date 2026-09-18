@@ -31,18 +31,19 @@ MAIN_CHECKOUT_ROOT="$(dirname "$GIT_COMMON_DIR")"
 # 現代 macOS 乾淨 PATH 只有 python3 沒有 python，故先解析直譯器、缺席 fail-loud。
 # R43 Scan-B（DEF-101-353，Architect 一審複查追加）：排除 WindowsApps 空殼候選
 # （guard 檔不存在時降級回退舊行為，不阻擋安裝）。
+# DEF-200-315 系列：guard 在場時不再只做「排除 WindowsApps 空殼」的存在性判斷，
+# 改委派 pick_repo_python 釘死 repo 根層 .venv 直譯器（互動式入口統一政策，見
+# tools/lib/windowsapps_guard.sh 該函式檔頭 WHY）；guard 缺席（框架被單獨部署）
+# 才降級回退舊行為（PATH 上任一 python/python3）。
 if [ -f "$MAIN_CHECKOUT_ROOT/tools/lib/windowsapps_guard.sh" ]; then
   # shellcheck disable=SC1091
   . "$MAIN_CHECKOUT_ROOT/tools/lib/windowsapps_guard.sh"
-  PY=""
-  if is_real_python_candidate python; then PY=python
-  elif is_real_python_candidate python3; then PY=python3
-  fi
+  PY="$(pick_repo_python "$MAIN_CHECKOUT_ROOT")" || PY=""
 else
   PY="$(command -v python || command -v python3 || true)"
 fi
 if [ -z "$PY" ]; then
-  echo "ERROR: 找不到 python/python3 — 請啟用 venv 或安裝 python3 後重試" >&2
+  echo "ERROR: 找不到 python/python3 — 請啟用 venv 或安裝 python3 後重試（或未 bootstrap 根層 .venv：source tools/dev_start.sh）" >&2
   exit 1
 fi
 LATEST="$("$PY" "$MAIN_CHECKOUT_ROOT/AISDLC_SDD/scripts/sdd_version.py" --sdd-root "$MAIN_CHECKOUT_ROOT/AISDLC_SDD")" || LATEST=""
@@ -71,11 +72,21 @@ fi
 # 展開為絕對路徑字面值，同 `$HOOK_SRC_DRIFT`/`$HOOK_SRC_CLOSURE` 慣例；guard 檔
 # 不存在時降級回退舊行為，不阻擋安裝）。
 GUARD_SRC="$MAIN_CHECKOUT_ROOT/tools/lib/windowsapps_guard.sh"
+# DEF-200-315 系列：advisory hook 永不擋 commit，不可像互動式入口那樣 fail-loud
+# ——故不透過 pick_repo_python（找不到就 fail-loud），改讓 hook 內容自己先
+# `[ -x ]` 探測兩種 .venv 慣例（與 pick_repo_python 候選同序：bin 優先），
+# 找不到才降級回退既有 guard／PATH 鏈（never block commit 原則不變）。
+VENV_BIN_PY="$MAIN_CHECKOUT_ROOT/.venv/bin/python"
+VENV_SCRIPTS_PY="$MAIN_CHECKOUT_ROOT/.venv/Scripts/python.exe"
 cat > "$HOOK_TARGET" <<HOOK
 #!/usr/bin/env bash
 # PostCommit advisory hooks - never block commit
 PY=""
-if [ -f "$GUARD_SRC" ]; then
+if [ -x "$VENV_BIN_PY" ]; then
+  PY="$VENV_BIN_PY"
+elif [ -x "$VENV_SCRIPTS_PY" ]; then
+  PY="$VENV_SCRIPTS_PY"
+elif [ -f "$GUARD_SRC" ]; then
   . "$GUARD_SRC"
   if is_real_python_candidate python; then PY=python
   elif is_real_python_candidate python3; then PY=python3

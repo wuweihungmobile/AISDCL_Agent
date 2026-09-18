@@ -52,6 +52,13 @@ _CPU_BUDGET_EXPORT_ANCHOR = "cpu_budget.py"
 _ALLOWLIST_CONDITION = '"${VER}" == "${LATEST}"'
 _EXCLUDELIST_CONDITION = '"${VER}" != "${FROZEN_BASELINE}"'
 
+# DEF-200-315（2026-09-19）：ci-gate.sh／ci-gate.ps1 的 python 呼叫改優先釘死
+# repo 根層 .venv（`"$PY"` / `& $py`），不再是裸 `python`——下面兩個判準各自的
+# 錨點正則須同時接受舊裸字面值與新直譯器變數兩種形態，語意不變（只是「認得出
+# 呼叫端」這一步要跟著消費端的改法走）。
+_PY_INVOKE_SH_RE = re.compile(r'^(?:python\b|"\$PY")')
+_PY_INVOKE_PS1_FSM_CALL_RE = re.compile(r'^(?:python|& \$py) -m pytest tools/fsm_runtime/tests/')
+
 
 def _ci_gate_text() -> str:
     assert CI_GATE.is_file(), f"ci-gate.sh 不存在：{CI_GATE}"
@@ -117,7 +124,8 @@ class CiGateXdistAllowlistTest(unittest.TestCase):
         text = _ci_gate_text()
         calls = [
             ln for ln in text.splitlines()
-            if "python -m pytest scripts/tests/" in ln and not ln.lstrip().startswith("#")
+            if "-m pytest scripts/tests/" in ln
+            and _PY_INVOKE_SH_RE.match(ln.lstrip())
         ]
         self.assertTrue(calls, "ci-gate.sh 找不到呼叫 scripts/tests/ 的 pytest 陳述式——結構已變動")
         self.assertEqual(
@@ -155,7 +163,7 @@ class CiGatePs1FallbackXdistTest(unittest.TestCase):
         text = _ci_gate_ps1_text()
         calls = [
             ln for ln in text.splitlines()
-            if ln.lstrip().startswith("python -m pytest tools/fsm_runtime/tests/")
+            if _PY_INVOKE_PS1_FSM_CALL_RE.match(ln.lstrip())
         ]
         self.assertTrue(calls, "ci-gate.ps1 找不到 FSM runtime pytest 呼叫——結構已變動，請同步本鎖")
         self.assertEqual(len(calls), 1, f"預期恰有 1 處，實得 {len(calls)} 處：{calls}")

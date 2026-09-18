@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -55,6 +56,24 @@ class PlanCleanVenvDirTest(unittest.TestCase):
         mock_run.assert_not_called()
         assert "cleanvenv" in target.name
         assert target.parent == _FAKE_ROOT
+
+    def test_real_output_path_is_recognized_by_stray_venv_scan(self):
+        """(B3／SD 1e) 名稱對應端對端鎖：`plan_clean_venv_dir()` 的真輸出路徑
+        `mkdir` 後，必須是 `stray_venv.find_temp_cleanvenvs()` 認得出來的名字——
+        兩者的命名約定過去只靠「都含 cleanvenv 子字串」這句話互相假設對方沒變，
+        從未被機械驗證過。本測試直接餵 `plan_clean_venv_dir()` 的真實輸出，不
+        另外寫死第三份 `"cleanvenv"` 字面。"""
+        cvc = _carrier()
+        sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
+        import stray_venv  # noqa: PLC0415
+
+        with tempfile.TemporaryDirectory() as td:
+            parent = Path(td)
+            target = cvc.plan_clean_venv_dir(base_temp_dir=parent)
+            target.mkdir(parents=True)
+            with patch.object(stray_venv.tempfile, "gettempdir", return_value=str(parent)):
+                found = stray_venv.find_temp_cleanvenvs()
+            assert target in found
 
 
 class CreateCleanVenvTest(unittest.TestCase):

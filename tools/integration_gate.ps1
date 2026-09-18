@@ -16,17 +16,19 @@ param(
     [switch]$SkipFull
 )
 
-# 直譯器選擇維持收斂前語意：PATH 上的 python（所有段落都靠已啟用的 venv），
-# 未啟用 venv 就直接失敗提示（勝過各段落逐一噴錯）；WindowsApps 空殼排除
-# 比照 tools/bootstrap.ps1／tools/dev_start.ps1 既有 SSOT（R44 收斂）
+# 直譯器選擇（DEF-200-315，2026-09-19 掌舵者裁決）：單一 .venv 設計下互動式
+# 入口一律優先釘死 repo 根層 .venv，不再只認 PATH 上的 python；`Get-RepoPython`
+# 同檔 SSOT（tools/lib/WindowsAppsGuard.ps1），只在 CI／逃生口才落回 PATH 候選，
+# 找不到時已印補救訊息，本殼不必再印。WindowsApps 空殼排除比照
+# tools/bootstrap.ps1／tools/dev_start.ps1 既有 SSOT（R44 收斂）
 . "$PSScriptRoot/lib/WindowsAppsGuard.ps1"
-if (-not (Test-IsRealPython -CandidateName 'python')) {
-  Write-Host '❌ 找不到 python — 請先啟用 venv：.venv\Scripts\Activate.ps1（見 ONBOARDING.md §3）' -ForegroundColor Red
+$py = Get-RepoPython -RepoRoot (Split-Path -Parent $PSScriptRoot)
+if (-not $py) {
   exit 1
 }
 
 $env:PYTHONUTF8 = '1'
 $CliArgs = @()
 if ($SkipFull) { $CliArgs += '--skip-full' }
-& python (Join-Path $PSScriptRoot 'integration_gate_core.py') @CliArgs
+& $py (Join-Path $PSScriptRoot 'integration_gate_core.py') @CliArgs
 exit $LASTEXITCODE
