@@ -1469,6 +1469,17 @@ class TestOrphanChildLockRegression(DevStartTestCase):
             self.assertEqual(bootstrap_calls, [], "不應執行 bootstrap")
 
 
+def _wait_pid_text(path: Path, timeout: float) -> str:
+    """輪詢等待 `path` 內容為完整 pid 文字（DEF-200-319：`is_file()` 會在孫行程
+    create→write 之間讀到空字串，需驗內容而非僅存在性）。"""
+    deadline = time.monotonic() + timeout
+    pid_text = ""
+    while not pid_text.isdigit() and time.monotonic() < deadline:
+        time.sleep(0.05)
+        pid_text = path.read_text(encoding="utf-8").strip() if path.is_file() else pid_text
+    return pid_text
+
+
 class TestStreamNewProcessGroupSurvivesDirectChildDeath(DevStartTestCase):
     """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
     dev_start TestStreamNewProcessGroupSurvivesDirectChildDeath WHY〉節。"""
@@ -1507,12 +1518,7 @@ class TestStreamNewProcessGroupSurvivesDirectChildDeath(DevStartTestCase):
                                   "new_process_group=True 應使直接子行程自身 PID 等於其 pgid"
                                   "（setsid 語意）")
 
-                deadline = time.monotonic() + 5
-                pid_text = ""  # DEF-200-319：只等 is_file 會在孫行程 create→write 之間讀到空字串
-                while not pid_text.isdigit() and time.monotonic() < deadline:
-                    time.sleep(0.05)
-                    if pidfile.is_file():
-                        pid_text = pidfile.read_text(encoding="utf-8").strip()
+                pid_text = _wait_pid_text(pidfile, timeout=5)
                 self.assertTrue(pid_text.isdigit(), "孫行程應已寫入 pid（空檔＝尚未寫完）")
                 grandchild_pid = int(pid_text)
 
@@ -1583,11 +1589,8 @@ class TestBootstrapProcessGroupSurvivesDirectChildKill(DevStartTestCase):
                 direct_child_holder["proc"] = direct_child
                 if on_start is not None:
                     on_start(direct_child.pid)
-                for _ in range(100):  # 最多等 5s 讓兩個孫行程真的 fork 出來
-                    if pidfile_a.is_file() and pidfile_b.is_file():
-                        break
-                    time.sleep(0.05)
-                time.sleep(0.3)
+                _wait_pid_text(pidfile_a, timeout=5)
+                _wait_pid_text(pidfile_b, timeout=5)
                 # 模擬使用者/監控工具只 kill 掉直接子行程本身（不碰整個 group）
                 os.kill(direct_child.pid, signal.SIGKILL)
                 return direct_child.wait()  # 被 SIGKILL：負值 rc
@@ -1701,12 +1704,7 @@ class TestSigintForwardsToBootstrapProcessGroup(DevStartTestCase):
                     time.sleep(0.02)
                 self.assertIn("pgid", result, "應已取得直接子行程 pgid（測試前提）")
 
-                deadline = time.monotonic() + 5
-                pid_text = ""  # DEF-200-319：只等 is_file 會在孫行程 create→write 之間讀到空字串
-                while not pid_text.isdigit() and time.monotonic() < deadline:
-                    time.sleep(0.05)
-                    if pidfile.is_file():
-                        pid_text = pidfile.read_text(encoding="utf-8").strip()
+                pid_text = _wait_pid_text(pidfile, timeout=5)
                 self.assertTrue(pid_text.isdigit(), "孫行程應已寫入 pid（空檔＝尚未寫完）")
                 grandchild_pid = int(pid_text)
 

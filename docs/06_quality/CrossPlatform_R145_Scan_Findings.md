@@ -377,3 +377,24 @@ R153 那筆＝92＋15＋105＋6＋39 自身漂移，未超軌上限 309、未使
 缺陷帳本見 `docs/06_quality/AutoSDD_Defect_Log.md` DEF-200-289／290／292／317／318／319；四方審查與實作
 證據見 `CrossPlatform_DEF200274_Parallel_Tests_Evidence.md`〈第十二輪〉。此附記為 doc-total 對帳
 （≥2 站點）另一站點寄居 `AutoSDD_improving_112.md`，同 R129～R152 寄居體例。round-label-ok
+
+## 第十六輪附記（R154；DEF-200-319 第三支補硬化／DEF-200-320 nightly-full 接 SSOT 四方複審收尾）
+
+- **體例**：本節非開新一輪 CrossPlatform 掃描輪四件套，僅為兩筆缺陷收尾造成的護欄層逐檔漂移記帳，
+  寄居本檔（同 R129～R153 寄居體例）。本輪為 **淨減法輪**（R152／R153 連續兩輪上升名額用罄，
+  `_REPIN_MAX_CONSECUTIVE_RISING_ROUNDS=2` ⇒ 本輪淨額必須 ≤0）。cap 到期義務未到（武裝 155／538 不動）；
+  `_PHASE2_REVIEW_LOG` 五輪時效未到，本輪無新登記。
+
+<!-- guard-total:R154 --> R154 護欄層累積淨額＝ 100695 → 100691（-4）——內容 -2：`test_dev_start.py`
+6655→6653（DEF-200-319：三處同型 pidfile 輪詢抽成模組層 `_wait_pid_text(path, timeout)`，兩支已修者改呼叫、
+第三支 `test_lock_stays_busy_via_killpg_while_any_grandchild_alive_then_clears` 同輪補硬化並移除 `time.sleep(0.3)`
+權宜緩衝）；`test_ci_gate_xdist_allowlist.py` 213→213（DEF-200-320：`CpuBudgetExportWiringTest` 三支重複方法合併為
+`test_orchestrators_export_cpu_budget`，`subTest` 五目標涵蓋兩支 nightly-full workflow）。本檔
+（`test_adr_xplat001_c1c2_lock.py`）-2：新增主表列與 `_FROZEN_PREFIX_REWRITE_LEDGER` 接鏈列（+8 級）以
+`repin_growth_problems()` docstring 兩段史料（ADR-XPLAT-013 Phase2 (b) 分軌 WHY、DEF-200-208 例外名冊 WHY）搬遷
+`CrossPlatform_Guard_Line_History.md`〈repin_growth_problems 分軌與例外名冊 WHY〉節抵銷（程式碼內各留一句摘要＋指針）；
+凍結前綴 `_REPIN_LOG_FROZEN_PREFIX_LEN` 230→231、`_REPIN_LOG_HISTORY_SHA256` 同步重釘。母項為負 ⇒ 不申報
+`_REGRESSION_LANE_LOG`（同 R146／R151 體例），款(9) 不適用、款(11) 連續計數歸零。缺陷帳本見
+`docs/06_quality/AutoSDD_Defect_Log.md` DEF-200-319／320；四方複審與實作證據見
+`CrossPlatform_DEF200274_Parallel_Tests_Evidence.md`〈第十三輪〉。此附記為 doc-total 對帳（≥2 站點）另一站點寄居
+`AutoSDD_improving_112.md`，同 R129～R153 寄居體例。round-label-ok

@@ -682,7 +682,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 8304,
+    "test_adr_xplat001_c1c2_lock.py": 8302,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 3726,
@@ -706,7 +706,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_context_window_parity.py": 281,
     "test_cpu_budget.py": 158,
     "test_defect_id_reference_integrity.py": 281,
-    "test_dev_start.py": 6655,
+    "test_dev_start.py": 6653,
     "test_dev_start_ps1_lastexitcode.py": 521,
     "test_doc_env_prefix_platform_parity_r60.py": 331,
     "test_doc_loc_baseline_freshness_r60.py": 7123,
@@ -2073,6 +2073,14 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "重新武裝 155／538、`_PHASE2_REVIEW_LOG` 同輪新列、`_FROZEN_PREFIX_REWRITE_LEDGER` "
      "接鏈列與凍結前綴 228→230 所造成的行數漂移（含本列自身收斂），全額歸回歸鎖軌"
      "（同既有體例）。逐檔清單見 CrossPlatform_R145_Scan_Findings.md〈第十五輪附記（R153）〉。"),
+    ("R154", 100695, 100691, -4,  # round-label-ok：DEF-200-319／320 複審收尾，淨減法輪
+     "[淨減法輪] 內容 -2：test_dev_start.py 6655→6653（DEF-200-319 三處同型 pidfile 輪詢抽成"
+     "模組層 _wait_pid_text，第三支同輪補硬化並移除 sleep(0.3) 權宜緩衝）；"
+     "test_ci_gate_xdist_allowlist.py 213→213（DEF-200-320 匯出接線鎖合併為 subTest 一支並擴到"
+     "兩支 nightly-full workflow）。本表自身新增本列／接鏈列的漂移以 repin_growth_problems() "
+     "docstring 兩段史料搬遷 CrossPlatform_Guard_Line_History.md〈repin_growth_problems 分軌與"
+     "例外名冊 WHY〉節抵銷（淨額為負，不受款(9)約束；本表自身重釘漂移含於本列）。"
+     "逐檔清單見 CrossPlatform_R145_Scan_Findings.md〈第十六輪附記（R154）〉。"),
 )
 
 
@@ -2671,10 +2679,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 230
+_REPIN_LOG_FROZEN_PREFIX_LEN = 231
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "ea0a3bfec58fd4af0c0d9456ecafda1c212d33ae9bb507dcd8954ed4b146d9fb")
+    "f62eab34f224a42ee0f82a9f917a7033006327486aeed5a40c7741dea691dbe2")
 
 
 def repin_log_history_digest(
@@ -2950,6 +2958,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # 自身漂移，凍結前綴延伸涵蓋新增列本身，起點接 R152 終點 038461e50767。 round-label-ok
     ("R152", "038461e50767", "70959d5b8295", "DEF-200-314"),
     ("R153", "70959d5b8295", "ea0a3bfec58f", "DEF-200-289"),
+    ("R154", "ea0a3bfec58f", "f62eab34f224", "DEF-200-320"),
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。
@@ -3033,13 +3042,9 @@ def repin_growth_problems(
 ) -> list[str]:
     """R84 ARCH-01：重釘的**代價**（空＝通過）。純函式，紅綠由合成注入自證。
 
-    🔴 ADR-XPLAT-013 Phase2 (b)（D-1＝S-2）：`regression_lane` 不傳或傳空 ⇒ 行為與分軌前
-    **逐字相同**（`test_the_split_does_not_widen_the_functional_lane` 的機械面）——這是
-    刻意的向後相容設計，不是巧合。傳入時，款(10)(11) 判的淨額改為「該輪主表淨額 −
-    該輪回歸鎖軌淨額」，但只對 `no >= regression_lane_since` 的輪次生效：
-    `regression_lane_since` 之前的輪次即使回歸鎖軌表宣告了淨額也**不會被扣**——這是
-    「(b) 不得用自己剛落地的減免軌豁免自己」（§1.6.3 第 3 題）的機械面：落地輪本身
-    永遠落在 SINCE 之前，把落地輪自己的淨額謊報成回歸鎖軌也救不了它。
+    🔴 ADR-XPLAT-013 Phase2 (b)：`regression_lane` 不傳＝與分軌前逐字相同；傳入時款(10)(11)
+    判「主表淨額 − 回歸鎖軌淨額」且只對 `no >= regression_lane_since` 生效。WHY 全文搬至
+    CrossPlatform_Guard_Line_History.md〈repin_growth_problems 分軌與例外名冊 WHY〉節。
 
     兩款，各帶方括號標籤（本檔的零串音紀律）：
       (10) `[超出每輪上限]` 某一輪的淨額合計 > **該輪當時在位的**上限
@@ -3058,16 +3063,9 @@ def repin_growth_problems(
     只判輪號 ≥ `since` 的輪次（不追溯，WHY 見常數區塊）；`since` 本身只准調小，看著它的是
     `repin_cost_ratchet_problems()`。四個參數刻意可傳，供注入測試用小值造出紅綠兩側。
 
-    🔴 DEF-200-208：`approved_overage`（預設 `_REPIN_APPROVED_ROUND_OVERAGE`）是**指名
-    輪號 ＋ 精確淨額**的一次性例外名冊——凡「輪號」與「該輪淨額」逐字對得上冊上那一列，
-    該輪的款(10)(11) 一律不計入回傳，其餘輪次（含未來任何一輪、含日後合成測試恰好用到
-    同一個輪號但淨額不同的樣本）原判準邏輯不受影響。「連淨額都要對上」不是畫蛇添足：
-    `test_a_round_that_exceeds_the_net_cap_is_red` 會拿 `_REPIN_NET_CAP_SCHEDULE[-1]`
-    的輪號造合成樣本，而那個輪號在到期義務兌現時**恰好**就是本例外核准的那個輪號
-    （R101）——若 key 只認輪號不認淨額，那支測試的紅燈會被本表意外熄滅。這與調高 round-label-ok
-    `net_cap`／`max_consecutive_rising` 有本質差異：後者放寬的是**所有輪次往後永遠
-    適用**的門檻，前者只赦免**指名的那一個精確事件**，且赦免與否寫在名冊裡、可被
-    單獨稽核（`TestApprovedRoundOverageIsScoped`）。
+    🔴 DEF-200-208：`approved_overage`（預設 `_REPIN_APPROVED_ROUND_OVERAGE`）是「輪號＋精確
+    淨額」逐字對上才赦免款(10)(11) 的一次性例外名冊（`TestApprovedRoundOverageIsScoped`）。
+    WHY 全文同上節。
 
     誠實劃界：本判準看的是**表上宣告的淨額**，不是磁碟——成長挪到 `tools/tests/` 以外的樹
     時本款不會說話，那是量測面邊界（`_GUARD_DIR_REL`／`_GUARD_LINE_PATTERN`），不是漏洞。

@@ -1387,6 +1387,12 @@ jobs:
           test -n "$latest_name" || { echo "::error::找不到任何 AISDLC_SDD_v* 版本目錄（sdd_version.py SSOT）"; exit 1; }
           latest="AISDLC_SDD/${latest_name}"
           echo "AISDLC_SDD LATEST 版：$latest"
+          # DEF-200-320：nightly-full 內嵌 xdist 呼叫接 cpu_budget SSOT 廣播
+          # （xdist 原生優先讀 PYTEST_XDIST_AUTO_NUM_WORKERS）。必須在 cd 之前
+          # 呼叫：進版本目錄後 tools/lib/cpu_budget.py 相對路徑解不到。
+          workers="$(python3 tools/lib/cpu_budget.py --legs 1)"
+          export PYTEST_XDIST_AUTO_NUM_WORKERS="$workers"
+          echo "PYTEST_XDIST_AUTO_NUM_WORKERS=$workers"
           cd "$latest"
           python -m pip install --upgrade pip
           pip install -r requirements-ci.txt

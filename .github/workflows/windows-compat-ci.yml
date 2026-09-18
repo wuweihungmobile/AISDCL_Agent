@@ -1853,6 +1853,13 @@ jobs:
           if (-not $latestName) { throw "找不到任何 AISDLC_SDD_v* 版本目錄（sdd_version.py SSOT 解析失敗）" }
           $latest = Get-Item (Join-Path "AISDLC_SDD" $latestName)
           Write-Host "AISDLC_SDD LATEST 版：$($latest.Name)"
+          # DEF-200-320：nightly-full 內嵌 xdist 呼叫接 cpu_budget SSOT 廣播
+          # （xdist 原生優先讀 PYTEST_XDIST_AUTO_NUM_WORKERS）。必須在 Push-Location
+          # 之前呼叫：進版本目錄後 tools/lib/cpu_budget.py 相對路徑解不到。
+          $workers = (python tools/lib/cpu_budget.py --legs 1)
+          if ($LASTEXITCODE -ne 0) { throw "cpu_budget.py 執行失敗（rc=$LASTEXITCODE）" }
+          $env:PYTEST_XDIST_AUTO_NUM_WORKERS = $workers
+          Write-Host "PYTEST_XDIST_AUTO_NUM_WORKERS=$workers"
           Push-Location $latest.FullName
           try {
             # R15 SCAN-C-10：pwsh 只回傳最後一條 native 指令 exit code——兩條 pip

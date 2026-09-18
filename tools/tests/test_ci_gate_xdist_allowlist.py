@@ -183,30 +183,30 @@ class CiGatePs1FallbackXdistTest(unittest.TestCase):
 
 
 class CpuBudgetExportWiringTest(unittest.TestCase):
-    """DEF-200-289：`ci-gate.sh`／`ci-gate.ps1`／`tools/git-hooks/pre-push` 三處
-    都必須有跨 leg CPU 預算匯出段（呼叫 `tools/lib/cpu_budget.py --legs`）。"""
+    """DEF-200-289／DEF-200-320：五處呼叫端都必須接上 `cpu_budget.py --legs`；
+    前三者另需匯出 `AUTOSDD_PARALLEL_TESTS_WORKERS`；兩支 nightly-full workflow
+    只需帶 `cpu_budget.py --legs 1` 與 `PYTEST_XDIST_AUTO_NUM_WORKERS`（xdist
+    原生讀取該環境變數，見兩檔 DEF-200-320 註解，不需額外匯出前者）。"""
 
-    def test_ci_gate_sh_exports_cpu_budget(self) -> None:
-        text = _ci_gate_text()
-        self.assertIn(_CPU_BUDGET_EXPORT_ANCHOR, text, "ci-gate.sh 找不到 cpu_budget.py 匯出段")
-        self.assertIn("--legs", text, "ci-gate.sh 的 cpu_budget.py 呼叫缺 --legs 參數")
-        self.assertIn("AUTOSDD_PARALLEL_TESTS_WORKERS", text)
-        self.assertIn("PYTEST_XDIST_AUTO_NUM_WORKERS", text)
+    _WF_DIR = REPO_ROOT / ".github" / "workflows"
+    _TARGETS = (  # (顯示名, 路徑, 是否須匯出 AUTOSDD_PARALLEL_TESTS_WORKERS)
+        ("ci-gate.sh", CI_GATE, True),
+        ("ci-gate.ps1", CI_GATE_PS1, True),
+        ("pre-push", PRE_PUSH, True),
+        ("windows-compat-ci.yml", _WF_DIR / "windows-compat-ci.yml", False),
+        ("macos-compat-ci.yml", _WF_DIR / "macos-compat-ci.yml", False),
+    )
 
-    def test_ci_gate_ps1_exports_cpu_budget(self) -> None:
-        text = _ci_gate_ps1_text()
-        self.assertIn(_CPU_BUDGET_EXPORT_ANCHOR, text, "ci-gate.ps1 找不到 cpu_budget.py 匯出段")
-        self.assertIn("--legs", text, "ci-gate.ps1 的 cpu_budget.py 呼叫缺 --legs 參數")
-        self.assertIn("AUTOSDD_PARALLEL_TESTS_WORKERS", text)
-        self.assertIn("PYTEST_XDIST_AUTO_NUM_WORKERS", text)
-
-    def test_pre_push_exports_cpu_budget(self) -> None:
-        assert PRE_PUSH.is_file(), f"pre-push 不存在：{PRE_PUSH}"
-        text = PRE_PUSH.read_text(encoding="utf-8")
-        self.assertIn(_CPU_BUDGET_EXPORT_ANCHOR, text, "pre-push 找不到 cpu_budget.py 匯出段")
-        self.assertIn("--legs", text, "pre-push 的 cpu_budget.py 呼叫缺 --legs 參數")
-        self.assertIn("AUTOSDD_PARALLEL_TESTS_WORKERS", text)
-        self.assertIn("PYTEST_XDIST_AUTO_NUM_WORKERS", text)
+    def test_orchestrators_export_cpu_budget(self) -> None:
+        for name, path, needs_workers in self._TARGETS:
+            with self.subTest(target=name):
+                assert path.is_file(), f"{name} 不存在：{path}"
+                text = path.read_text(encoding="utf-8")
+                self.assertIn(_CPU_BUDGET_EXPORT_ANCHOR, text, f"{name} 缺 cpu_budget.py 匯出段")
+                self.assertIn("--legs", text, f"{name} 的 cpu_budget.py 呼叫缺 --legs 參數")
+                self.assertIn("PYTEST_XDIST_AUTO_NUM_WORKERS", text)
+                if needs_workers:
+                    self.assertIn("AUTOSDD_PARALLEL_TESTS_WORKERS", text)
 
 
 if __name__ == "__main__":

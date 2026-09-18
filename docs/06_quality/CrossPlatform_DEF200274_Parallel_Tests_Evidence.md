@@ -1189,8 +1189,8 @@ push 與主控親跑皆綠＝時序性），立 DEF-200-319 並把該類別兩�
 
 ### 🔴 誠實劃界（本輪仍未解決，不可宣稱已完備）
 
-- CI headless 多 1 worker（4／4／3）只是公式推論，**push 後 CI log 的 `worker=` 才是證據**；本節數字待
-  下一輪或掌舵者現查 `gh run view <id> --log | grep worker=` 回填。
+- CI headless 多 1 worker（4／4／3）原為公式推論；〈第十三輪〉SA 與 QA 各自對 07909c4d 三支 CI log grep 到
+  root-infra `worker=4`／windows `worker=4`／macos `worker=3`，**已回填為實測**（本條保留以示曾為推論）。
 - DEF-200-290 的 SHA warning 自本 push 起會持續出現到下次 nightly-full 成功為止——這是設計內訊號，不是回歸。
 - DEF-200-292 的自癒與 fail-loud 要等下一次 nightly-full **真失敗**才能觀測 issue 是否真的開出來。
 - DEF-200-318：`ci-gate.ps1` fallback 無 LATEST 軌；`run_local_nightly.ps1:46-50` 自陳本機 Windows nightly
@@ -1202,3 +1202,72 @@ push 與主控親跑皆綠＝時序性），立 DEF-200-319 並把該類別兩�
 - 護欄層 R152／R153 連續兩輪上升，`_REPIN_MAX_CONSECUTIVE_RISING_ROUNDS=2` 名額用罄 ⇒ **R154 必須淨減**。
 - 掌舵者 Windows 11 物理機互動 session 親跑 `python tools/run_root_unittests.py` 仍待掌舵者本人執行；
   DEF-200-316 hook 單一載具方案 B 未動工（單人窗口、不可並行）。
+
+## 第十三輪：四方獨立複審「R153 是否全部修好」＋兩缺口同輪收尾（2026-09-18）
+
+### 背景
+
+掌舵者要求 Architect／SA／SD／QA 四方（皆 Sonnet 5、唯讀、不共享上下文）獨立複審〈第十二輪〉的全部宣稱：
+DEF-200-289／290／292／317／319 fixed、318 open、CI worker=4／4／3、無頭重腳輕、Q4 四項不做。主控（Fable）
+只裁決、派工、收尾。額度守衛（converge 帶）限每 300s 兩次扇出，四方分三批派出。
+
+### 四方判決（各自獨立；逐字輸出見各自 scratchpad 證據檔，本節只留存活發現）
+
+- **SA：PASS**。六筆帳本列逐筆對程式碼核實（`pre-push:238-251`／`ci-gate.sh:272-286`／`ci-gate.ps1:46-52`
+  匯出段、`root-infra-ci.yml:511-742` 哨兵 step 且 `WATCHED_PATHS` 逐條數＝12、兩支 compat-ci 告警 job 開單
+  step 無 `continue-on-error`、`test_cpu_budget.py:135-153` tomllib 斷言、`test_dev_start.py` 兩支 `isdigit()`）；
+  `check_defect_log_crossref.py` rc=0「帳本 249 筆有效狀態紀錄、19 份掃描目標皆無矛盾」；四處對帳
+  100211→100695（+484）、回歸鎖軌 257／功能軌 227 一致；帳本第 291～321 行 bytes 全 ≤700（最大 695）。
+  CI log 實測 root-infra `worker=4`／windows `worker=4`／macos `worker=3`（[他包回報]）。
+- **QA：PASS**。獨立複核同三值；AutoClaude CI `4605 passed, 224 skipped in 67.28s (0:01:07)`；aisdlc-sdd-ci 四行
+  `bringing up nodes...`；DEF-200-290 的 `##[warning]` 在 windows／macos 兩支 CI 皆為實際輸出；本機
+  `cpu_budget.py --legs 1`→9、`--legs 2`→4、`--bogus` rc=2；`test_cpu_budget test_ci_gate_xdist_allowlist`
+  `Ran 27 tests in 0.104s OK`；DEF-200-319 已硬化兩支連跑 3 次 OK、第三支同型未硬化者連跑 5 次 OK（本機重現不了
+  CI-only 時序）；AutoClaude 本機全套 `4707 passed, 156 skipped in 31.31s`、`real 31.65／user 142.02`（user/real≈4.5）；
+  `PYTEST_XDIST_AUTO_NUM_WORKERS=3` → `created: 3/3 workers`；`detect_imbalance` 對 git 追蹤種子（149 筆、總
+  1063.5s、worker=9 fair_share=118.16s）回空、最重單位 0.74x；`ruff check` 四檔 rc=0（皆 [他包回報]）。
+- **Architect：PARTIAL**。核心 SSOT 與廣播鏈成立，但「唯一」字面有兩處反例：`windows-compat-ci.yml`
+  windows-nightly-full 與 `macos-compat-ci.yml` macos-nightly-full 各有內嵌 `pytest … -n auto --dist worksteal`
+  繞過 ci-gate 廣播、xdist 自算核心數，今日數值巧合相同（CI 核心 ≤9）但結構性未覆蓋且零鎖 ⇒ **A-01**（立
+  DEF-200-320）。DEF-200-318 判讀正確維持 open（凍結基線 `snapshot.py:159/249/299` 固定 `.tmp` 檔名；LATEST
+  `snapshot.py:24-45` 已改 pid+uuid4）。Q4：root-infra-ci 逐檔 `py_compile` 184 檔本機序列 5.893s vs
+  `compileall -q -j0` 0.141s，維持「留作候選」；`tools/*.py` 其餘 260 處 for-loop 未逐一稽核（資料不足）。
+  root-infra-ci 無 `paths:` 過濾器（`test_root_infra_ci_has_no_paths_filter` 綠），此問對它不適用。
+- **SD：PARTIAL**（設計面）。`run_parallel()` 為共用 `queue.Queue` 動態工作竊取；`detect_imbalance()` 門檻熱點 1.5x
+  ／over_share 1.0x；152 單位 worker=9 fair_share=123.03s 最重 94.6s＝0.77x ⇒ 無頭重腳輕。🔴 **駁回兩處主控前提**：
+  (1) xdist `-n auto` 讀的是 `psutil.cpu_count(logical=False)`（`xdist/plugin.py:31`），且本 repo 未宣告 psutil ⇒
+  落回 `os.cpu_count()`，與 cpu_budget 殊途同歸但非設計保證（SD-02）；(2) A-01 兩個 step 的解析／安裝／pytest
+  全在同一 `run:` 區塊，寫 `$GITHUB_ENV` 下一 step 才生效 ⇒ 正解是腳本內直接設 process-level env var（SD-01）。
+  SA-01 第三支同型測試（`test_lock_stays_busy_via_killpg_while_any_grandchild_alive_then_clears`）仍只等
+  `is_file()`＋`time.sleep(0.3)` 權宜緩衝，設計抽 `_wait_pid_text()` helper 三處共用、淨 -2 行。
+
+### 主控裁決與實作（單一 Sonnet 實作包，四檔；記帳與文件由收尾單人窗口親做）
+
+- **DEF-200-320（A-01）**：兩支 nightly-full step 在 `cd`／`Push-Location` 之前（相對路徑仍在 repo 根）呼叫
+  `cpu_budget.py --legs 1` 設 `PYTEST_XDIST_AUTO_NUM_WORKERS`（bash `export`；pwsh `$env:` 並 `$LASTEXITCODE`
+  非零即 throw）；既有 `-n auto --dist worksteal` 不動（xdist `plugin.py:17` 原生優先讀該變數）。鎖：
+  `CpuBudgetExportWiringTest` 三支重複方法合併為 `test_orchestrators_export_cpu_budget`（`subTest` 五目標：
+  ci-gate.sh／ci-gate.ps1／pre-push 另需 `AUTOSDD_PARALLEL_TESTS_WORKERS`，兩支 workflow 只需
+  `PYTEST_XDIST_AUTO_NUM_WORKERS`），213→213 淨 0；紅綠自證：暫移 macos 新增段 →
+  `AssertionError: '--legs' not found … target='macos-compat-ci.yml' FAIL`，還原 → `Ran 6 tests OK`（[他包回報]）。
+- **DEF-200-319 第三支補硬化（SA-01）**：模組層 `_wait_pid_text(path, timeout)` 取代三處輪詢；第三支移除
+  `time.sleep(0.3)`。三個類別各連跑 3 次全 OK（5.15s／6.08s／0.41s 級，未變慢）；`ruff check` 兩檔
+  `All checks passed!`（[他包回報]）。`test_dev_start.py` 6655→6653。
+- **淨減法輪記帳**：護欄行數 100695→100691（-4）；`repin_growth_problems()` docstring 兩段史料（ADR-XPLAT-013
+  Phase2 (b) 分軌、DEF-200-208 例外名冊）搬至 `CrossPlatform_Guard_Line_History.md`〈repin_growth_problems
+  分軌與例外名冊 WHY〉節抵銷本表自身新增列漂移；母項為負 ⇒ 不申報 `_REGRESSION_LANE_LOG`（同 R146／R151 體例），
+  款(11) 連續上升計數歸零。主控親跑 `--print-guard-lines` 收斂：`# 淨額 100691→100691 (+0)`。
+- **SA-02**：〈第十二輪〉誠實劃界第一條「待回填」已改寫為實測（見上）。
+
+### 🔴 誠實劃界（本輪仍未解決）
+
+- DEF-200-318 維持 open 未指派（解鎖條件不變）。
+- SD-02：xdist `-n auto` 與 cpu_budget 的一致是 psutil 缺席下的巧合；nightly-full 兩 step 已改走 env var 廣播
+  故不受影響，其餘 `-n auto` 站點（AutoClaude addopts）仍靠 pre-push／ci-gate 廣播，CI 直跑 AutoClaude 的 job
+  靠 `GITHUB_ACTIONS=true` headless 判準——這條在 `AutoClaude CI` workflow 內**沒有**廣播段，數值今日相同但
+  同屬「殊途同歸」，未立帳（觀察）。
+- DEF-200-292 自癒尚無實測觸發證據（`gh label list` 無 p1／nightly 相關 label，nightly-full 未曾真失敗）。
+- cap=9／`os.cpu_count()` 邏輯核心（SD-03／04）無 16+ 核機器可量測；timing seed 5 天未更新、CI 無 `--check`
+  （advisory-only 設計）；py_compile→compileall 候選未動。
+- 掌舵者 Windows 11 物理機 `python tools/run_root_unittests.py` 仍待親跑；DEF-200-316 方案 B 未動工（單人窗口）。
+- A-01 兩支 workflow 的實際 `PYTEST_XDIST_AUTO_NUM_WORKERS=` 輸出要等下次 nightly-full（週日）才看得到。

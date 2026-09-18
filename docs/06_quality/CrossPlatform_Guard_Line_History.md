@@ -3012,3 +3012,32 @@ R60 round 3（DEF-101-587）：具名治理文件的體積守門。
 ## MIN_TESTS 逐輪重釘沿革（R15~R136，姊妹檔）
 
 本檔逼近 Read 工具單次讀取上限（DEF-101-587 拆分慣例）：`tools/run_root_unittests.py` 的 `MIN_TESTS` 逐輪重釘沿革（R15 至 R136 完整原文，第五輪四方獨立複審時自源碼搬遷至此）改放姊妹檔 [CrossPlatform_Guard_Line_History_MinTests.md](CrossPlatform_Guard_Line_History_MinTests.md)，本檔不重複內容。
+
+## repin_growth_problems() docstring 史料搬遷（淨減法輪抵銷）
+
+### repin_growth_problems 分軌與例外名冊 WHY
+
+自 `tools/tests/test_adr_xplat001_c1c2_lock.py::repin_growth_problems()` docstring 原文搬遷，程式碼內只留一句摘要＋本節指針。
+
+**分軌（ADR-XPLAT-013 Phase2 (b)，D-1＝S-2）**：
+
+🔴 ADR-XPLAT-013 Phase2 (b)（D-1＝S-2）：`regression_lane` 不傳或傳空 ⇒ 行為與分軌前
+**逐字相同**（`test_the_split_does_not_widen_the_functional_lane` 的機械面）——這是
+刻意的向後相容設計，不是巧合。傳入時，款(10)(11) 判的淨額改為「該輪主表淨額 −
+該輪回歸鎖軌淨額」，但只對 `no >= regression_lane_since` 的輪次生效：
+`regression_lane_since` 之前的輪次即使回歸鎖軌表宣告了淨額也**不會被扣**——這是
+「(b) 不得用自己剛落地的減免軌豁免自己」（§1.6.3 第 3 題）的機械面：落地輪本身
+永遠落在 SINCE 之前，把落地輪自己的淨額謊報成回歸鎖軌也救不了它。
+
+**一次性例外名冊（DEF-200-208）**：
+
+🔴 DEF-200-208：`approved_overage`（預設 `_REPIN_APPROVED_ROUND_OVERAGE`）是**指名
+輪號 ＋ 精確淨額**的一次性例外名冊——凡「輪號」與「該輪淨額」逐字對得上冊上那一列，
+該輪的款(10)(11) 一律不計入回傳，其餘輪次（含未來任何一輪、含日後合成測試恰好用到
+同一個輪號但淨額不同的樣本）原判準邏輯不受影響。「連淨額都要對上」不是畫蛇添足：
+`test_a_round_that_exceeds_the_net_cap_is_red` 會拿 `_REPIN_NET_CAP_SCHEDULE[-1]`
+的輪號造合成樣本，而那個輪號在到期義務兌現時**恰好**就是本例外核准的那個輪號
+（R101）——若 key 只認輪號不認淨額，那支測試的紅燈會被本表意外熄滅。這與調高
+`net_cap`／`max_consecutive_rising` 有本質差異：後者放寬的是**所有輪次往後永遠
+適用**的門檻，前者只赦免**指名的那一個精確事件**，且赦免與否寫在名冊裡、可被
+單獨稽核（`TestApprovedRoundOverageIsScoped`）。
