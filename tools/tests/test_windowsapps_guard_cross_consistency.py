@@ -425,8 +425,10 @@ class TestGetRepoPythonBehavior(unittest.TestCase):
         self.assertIsNotNone(m, "WindowsAppsGuard.ps1 找不到 Get-RepoPython 函式")
         body = _ps_code_only(m.group("body"))
         for needle in ("PATHEXT", "GetExtension", "-notcontains"):
-            self.assertIn(needle, body,
-                          f"Get-RepoPython 候選迴圈缺 {needle}（DEF-200-325：無副檔名候選會彈對話框）")
+            self.assertIn(
+                needle, body,
+                f"Get-RepoPython 候選迴圈缺 {needle}（DEF-200-325：無副檔名候選會彈對話框）",
+            )
 
 
 # ---------------------------------------------------------------------------

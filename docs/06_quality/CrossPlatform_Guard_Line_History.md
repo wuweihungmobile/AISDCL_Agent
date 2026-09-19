@@ -3042,7 +3042,7 @@ R60 round 3（DEF-101-587）：具名治理文件的體積守門。
 適用**的門檻，前者只赦免**指名的那一個精確事件**，且赦免與否寫在名冊裡、可被
 單獨稽核（`TestApprovedRoundOverageIsScoped`）。
 
-## R157 WorkerCountFormulaTest WHY
+## WorkerCountFormulaTest WHY（2026-09-19 搬遷）
 
 原址：`tools/tests/test_run_root_unittests.py::WorkerCountFormulaTest` 類別 docstring（R157 淨減法搬遷，判準與行為不變）。
 
@@ -3060,3 +3060,39 @@ DEF-200-289（第 A 包）：`worker_count()` 委派 `cpu_budget.total_budget()`
 DEF-200-327（R157）：互動分支改用實體核偵測（psutil optional import），setUp 釘死
 `_detect_physical_count()` 回 None 退回 `cpu_count` 當邏輯核，維持該類別既有斷言語意；上限現查
 `tools/lib/cpu_budget.py`（本檔不複寫數字）。
+
+## test_ci_gate_xdist_allowlist 模組 WHY（2026-09-19 搬遷）
+
+原址：`tools/tests/test_ci_gate_xdist_allowlist.py` 模組 docstring（R157 淨減法搬遷，判準與行為不變；原文逐字如下）。
+
+DEF-200-274 第十輪批評缺口 2 — `ci-gate.sh` xdist 判準必須是「允許清單」而非
+「排除清單」，回歸鎖。DEF-200-289（A 包）另擴充兩件事：① `ci-gate.ps1` 的
+Windows-native fallback（GAP-D）——它只跑凍結基線 `AISDLC_SDD_v0.01`（硬寫死，
+從無 LATEST 軌），依 `ci-gate.sh` 本檔同一條允許清單語意（只有 LATEST 保證帶
+`_atomic_write_text` 修法），本鎖釘住的是「該 fallback **刻意不**帶
+`-n auto --dist worksteal`」——這不是覆蓋缺口，是把 GAP-D 誤解為「無條件補上
+該旗標」時會引入的回歸（對凍結基線開多 worker，複製回本檔已修掉的競態）事先
+攔住；② `ci-gate.sh`／`ci-gate.ps1`／`tools/git-hooks/pre-push` 三處都必須有
+`tools/lib/cpu_budget.py --legs` 的跨 leg CPU 預算匯出段（DEF-200-289 SSOT 接線）。
+
+WHY（測意圖非僅行為，Rule 9）：`tools/fsm_runtime/snapshot.py::save_abort_report()`
+的 `_atomic_write_text` 競態修法**僅存在於 LATEST**（`AISDLC_SDD_v0.30`）；凍結基線
+`AISDLC_SDD_v0.01` 與其後到 LATEST 之間的每一個中間歷史版，其 `snapshot.py` 仍是舊版
+固定檔名 `.tmp`，與 v0.01 同型競態尚未修好——而依 `AISDLC_SDD/CLAUDE.md`〈版本狀態〉表，
+中間歷史版**不可原地改**，無法就地補上這個修法。
+
+若 `ci-gate.sh` 的 `XDIST_ARGS` 判準寫成排除清單（`"${VER}" != "${FROZEN_BASELINE}"`
+就開 xdist），`SDD_FW_VERSION` debug 逃生口一旦指到任一中間歷史版，就會誤幫一支
+未修競態的版本開多 worker，把「這支版本本來就會競態失敗」誤判成「這輪改動造成的
+回歸」——這正是第十輪批評缺口 2 指出、且第九輪一度發生過的判準退化形態。本鎖把
+判準釘死為允許清單（`"${VER}" == "${LATEST}"` 才開 xdist），並反向鎖死排除清單
+寫法不得復發：只有 LATEST 這一版保證帶著已修好的 `_atomic_write_text`，凍結基線與
+全部中間歷史版一律序列執行。
+
+另附一道姊妹鎖：`scripts/tests/`（共享 CI infra，版本無關、不含 FSM runtime 那段
+共享 tmp 檔競態）的 pytest 呼叫，必須**無條件**帶 `-n auto --dist worksteal`
+——它不受上述版本判準約束，是與 FSM runtime 段落刻意不同的另一段。
+
+安家位置：本鎖原生於 `AISDLC_SDD/scripts/tests/`，因該樹是 ONBOARDING 指紋樹（多一
+檔即需重做乾淨 venv 回填）而遷入根層 `tools/tests/`——比照 test_bash32_compat.py
+既有的「根層測試讀 AISDLC_SDD 腳本」先例，不影響 ci-gate.sh 的凍結／可改邊界判斷。

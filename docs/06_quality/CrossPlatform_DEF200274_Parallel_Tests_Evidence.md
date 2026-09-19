@@ -1271,3 +1271,112 @@ DEF-200-289／290／292／317／319 fixed、318 open、CI worker=4／4／3、無
   （advisory-only 設計）；py_compile→compileall 候選未動。
 - 掌舵者 Windows 11 物理機 `python tools/run_root_unittests.py` 仍待親跑；DEF-200-316 方案 B 未動工（單人窗口）。
 - A-01 兩支 workflow 的實際 `PYTEST_XDIST_AUTO_NUM_WORKERS=` 輸出要等下次 nightly-full（週日）才看得到。
+
+## 第十四輪：掌舵者再問四問＋Windows 對話框根治＋四方審查→兩包實作→四方複審（2026-09-19，R157）
+
+### 背景
+
+掌舵者重提四問（Q1 帳本是否已解／Q2 功能與 CI 是否完備／Q3 有無頭重腳輕、自動偵測是否最佳／Q4 還有哪裡可用多 CPU），
+要求 Architect／SA／SD／QA 四方（皆 Sonnet 5、唯讀、不共享上下文）先審查、再由 Developer 實作、再四方獨立複審；
+主控（Fable）只裁決、派工、收尾。本輪首次在 20 邏輯核／14 實體核（i5-14600K、128 GB）的 Windows 11 物理機量測，
+前輪「無 16+ 核機器可量測」的劃界自此可回填。審查中掌舵者另回報「一直出現『選取應用程式以開啟 Python』」，
+一併查明根治（DEF-200-325）。
+
+### 四方審查存活發現（各自獨立；逐字見 scratchpad 四份 *_R157_evidence.md，本節只留判決）
+
+- **Architect／SA 各自獨立命中（P1）**：`ci-gate.sh` L282／`ci-gate.ps1` L54 的 DEF-200-289 廣播段是死碼——`REPO_ROOT`／`$repo`
+  ＝`AISDLC_SDD/`，而 `tools/lib/cpu_budget.py` 住 monorepo 根；SA 親跑 `ls "$REPO_ROOT/tools/lib/cpu_budget.py"` rc=2
+  `No such file or directory`。fail-open 把「路徑錯」與「環境本來沒有」混成同一靜默分支；`CpuBudgetExportWiringTest`
+  只 `assertIn` 字面，第十二、十三輪四方審查因此皆判「匯出段存在」PASS（SA 對 13 筆帳本列逐列對帳：DEF-200-289 REFUTED、其餘 CONFIRMED）。
+- **SD（量測，機器安靜、序列）**：根層全套 `AUTOSDD_PARALLEL_TESTS_WORKERS`=9／14／19 ⇒ 196.5s／166.8s／173.7s（4364 支，
+  w=14 一次 rc=1＝`test_a_net_zero_swap_is_red` 撞到 `_zzz_loadbalance_repro_*` 暫態檔，w=9／19 皆 rc=0）；
+  AutoClaude 全套 `--dist loadgroup` 9／14／19 ⇒ 72.9s／70.9s／69.6s（4853 passed，與 worker 數無關）；
+  SDD v0.30 9／14 ⇒ 19.8s／18.8s。真因：conftest 把 tests/contract／integration／infra 三目錄整批標 `pg_serial`，
+  loadgroup 下全部序列（SD-01）；cap=9 是 10 核筆電硬編校準，實體核 14 最佳、邏輯核−1（19）反而慢（SD-02）；
+  `local_ci_gate.py::gate_pytest` 未設 `PYTEST_XDIST_AUTO_NUM_WORKERS`，xdist 自算走 psutil 實體核（SD-04）；
+  自動細分對 test_dev_start／test_platform_neutral_paths 未觸發待查（SD-06）。
+- **QA（CI log 實證）**：root-infra worker=4／windows 4／macos 3 與 headless 預期吻合；AutoClaude CI 主 job 無 `-v`，
+  worker 數結構上看不到（QA-01）；本機直呼子集 `created: 14/14 workers`＝psutil 實體核、繞過 cpu_budget（QA-02）；
+  `Ran 27 tests` 舊宣稱在 HEAD 為 25（4f74e4f 合併 subTest，非回歸）；A-01／DEF-200-292 仍待下次 nightly-full。
+- **SA-04**：`design_xdist.md` 被 8 處引用為設計出處，git log --all 零命中，從未入庫。
+- **Q4 重評**：第十二輪四項「不做」維持；root-infra-ci 逐檔 py_compile（本機 5.9s vs compileall -j0 0.14s）本輪落地。
+
+### DEF-200-325：對話框根治（主控親查）
+
+監看器（每 400ms 查 `Win32_Process Name='OpenWith.exe'`）＋單獨跑 `test_repo_venv_present_is_preferred`：09:49:12 起跑、
+09:49:13 出現 `OpenWith.exe -Embedding`（COM 啟動、父鏈＝svchost，只能靠時間對位）。真因＝19f3e75 該測試把 python.exe
+複製成無副檔名 `tmp/.venv/bin/python`，`Get-RepoPython` 以 `&` 探測 ⇒ CreateProcess 失敗回退 ShellExecute（DEF-101-759 同型）；
+headless 實作者把「探針 rc/stdout 皆空」誤記為「& 呼叫限制」。修法：`Get-RepoPython` 在 Windows 主機只探測 PATHEXT 內候選
+（`$isWindowsHost` 短路同 `Resolve-NativeExecutable`）；訂正 docstring＋文字鎖。修後同模組 111 tests OK、監看器 seen=0。
+
+### 主控裁決與實作（兩包 Sonnet，檔案面互不相交；A＝根層＋SDD，B＝AutoClaude；凍結為 3f77c20）
+
+- DEF-200-326 廣播路徑：`MONOREPO_ROOT="$(cd "${REPO_ROOT}/.." && pwd)"`／`Join-Path $repo '..'`，缺檔 stderr 出聲（仍 fail-open）；
+  鎖 `test_ci_gate_broadcasts_target_monorepo_root` 以各檔自身根算法重算路徑並斷言 `is_file()`（對 5134ee8 舊文字紅）。
+- DEF-200-327 cpu_budget：互動＝`max(1, min(16, physical-1))`（psutil optional，缺席退回邏輯核）、headless＝邏輯核不變
+  （CI 4/4/3 零回歸、SD-05 風險規避）、CAP 9→16（>16 實體核未量測＝HYPOTHESIS）；本機 `--legs 1` 13、headless 16；
+  `test_cpu_budget` 22 tests OK；`parallel_shard.worker_count` docstring／ONBOARDING §7 字面同步；SDD
+  `test_ci_paths_cover_root_consumers` 登記 psutil 為 optional 外部模組。
+- DEF-200-318 fallback LATEST 軌：`ci-gate.ps1` 於 v0.01 段後以 `sdd_version.py` 解析 LATEST、帶 `-n auto --dist worksteal`
+  跑一軌；`CiGatePs1FallbackXdistTest` 改為恰兩處呼叫（凍結基線不得帶、LATEST 必須帶）。誠實劃界：本機有 Git Bash，
+  ci-gate.ps1 薄委派 .sh，fallback 分支本體未在無 Git Bash 環境端到端真跑。
+- DEF-200-328 AutoClaude conftest：`pytest_xdist_auto_num_workers` hook（env 覆寫優先；subprocess 呼叫根層
+  `cpu_budget.py --legs 1`＝CLI 契約，不 import；缺檔／例外 fail-open）＋`pytest_sessionstart` 印
+  `[cpu_budget] xdist workers=N source=env|cpu_budget|xdist-default`；5 支純函式鎖。實測 workers=13 source=cpu_budget、env=3 ⇒ 3。
+- DEF-200-329 pg_serial：逐檔審計 81 支（Glob 現查；與任務書 83 差 2 支，已登記）：63 支不碰 PG、18 支保留；判準改
+  「路徑前綴 且 原始碼含 `_PG_SOURCE_INDICATORS`／`_PG_CLASS_NAME_RE`」或 `pg_real`，讀不到檔一律保守視為碰 PG，裸字面
+  `factory` 刻意不列（會誤配 `canonical_playbook_id`）。全套 3 次 29.27s／29.08s／29.51s，4858 passed 10 skipped，rc=0。
+- DEF-200-330：Dev-A 探針證實 `parallel_shard._worker_main()` 硬釘 start_dir＝tools/tests（AISDLC_SDD 側靜態路徑解析需求），
+  fixture 改走暫存目錄會 shard_crashed ⇒ 改由護欄掃描器三處檔案列舉排除 `_zzz_` 前綴（全庫第五輪同型慣例）。
+- DEF-200-331：8 處 `design_xdist.md` 引用改指本檔〈第九輪〉。
+- SD-06：主控本場親跑 `auto_class_level_candidates(live_hints, w)`：w=13／14 候選含 test_dev_start，w=19 另含
+  test_extras_quoting_zsh_safety／test_run_root_unittests——機制正常，Dev-A 查明 w=14 當時 fair_share 160s 高於 152s
+  屬正當不觸發；鎖 `test_auto_split_follows_fair_share_not_module_size`（w=14 不細分、w=19 細分）。
+- Q4：root-infra-ci py_compile 改兩階段（`compileall -q -j0` 全過即收工，失敗才逐檔印 `::error::`，保留 parity 判準字面）。
+
+### 四方複審判決（各自獨立；逐字見 *_R157_review.md；實作凍結 3f77c20）
+
+- **QA：PASS**。根層全套 rc=1（189.0s，worker=13，4371 支）——8 筆失敗中 7 筆逐字對應收尾窗口已知未完成
+  （護欄棘輪 +55／guard_self 桶／E501 存量／帳本缺列），1 筆 `TraceIsolationTest` 為並行 agent 的 hook 寫入生產痕跡檔
+  （環境自污染，非 diff 迴歸）；**根層全套＋SDD ci-gate 全程 OpenWith.exe 監看 seen=0**（對話框根治端到端證實）；
+  AutoClaude 全套兩次 29.643s／29.640s 皆 4858 passed、`[cpu_budget] xdist workers=13 source=cpu_budget`；SDD ci-gate.sh
+  67.5s rc=0（v0.01:1478／v0.30:1935／scripts/tests:354，log 兩次 `bringing up nodes` 證明廣播修復後 xdist 真的起來）；
+  lint-imports 9 kept；root-infra-ci 兩階段片段本機真跑 `compileall -j0 全過（184 個 .py 檔）`。
+- **SD：PARTIAL**。根層 default（w=13）166.94s，與四方審查最快值 w=14 166.80s 打平；AutoClaude w=13 29.59s、
+  `PYTEST_XDIST_AUTO_NUM_WORKERS=6` 40.06s（pg_serial 收斂後仍有邊際平行效益）；makespan 下界 144.1s／實測 166.9s
+  ⇒ 排程效率≈86%，下一個最值得拆的單位＝`test_archive_defect_log.TestMoveSubsetSelectionIsNamedAndTraceable`（144.1s）。
+  **SD-1**：本輪新增斷言訊息一行顯示寬度 103 使 E501 存量債 139→140（收尾折行修復，棘輪常數不動）。
+  **SD-2**：Dev-B 證據檔「18 碰／63 釋出」與程式化判準實測「25 碰／58 釋出」不符（方向安全：程式碼比人工表更保守）；
+  收尾以機器判準數字為準（帳本列已改寫）。
+- **Architect：PARTIAL**。十項宣稱九項 CONFIRMED；**ARCH-P1-01（P1）**：`pytest_xdist_auto_num_workers` 未標
+  `@pytest.hookimpl(optionalhook=True)`，`-p no:xdist -o addopts=`（`gate_pg()`／`gate_pytest()` 非預設分支的真實 argv）
+  在 collection 前撞 pluggy `PluginValidationError` ⇒ INTERNALERROR rc=3，父 commit 無此函式＝本輪新引入迴歸。
+  ARCH-OBS-01：`_pg_models.py` ORM 類別不以 Pg 開頭，判準有結構性盲區（目前零命中）。
+- **SA：PARTIAL**。追溯矩陣：四方審查全部存活發現皆對到 hunk 與鎖；四支鎖對 5134ee8 舊版逐一紅（鑑別力實證）；
+  同樣獨立命中 optionalhook 迴歸（SA-NEW-01，隔離最小案例加裝飾器後 1 passed）；`check_defect_log_crossref.py` rc=0。
+
+### 收尾單人窗口（主控親做）
+
+- ARCH-P1-01／SA-NEW-01：conftest hook 加 `@pytest.hookimpl(optionalhook=True)`；新增 `test_conftest_survives_p_no_xdist_invocation`
+  （真起子行程跑 `gate_claudemd_line()` 的 argv 形態）。實測：`tests/test_conftest_pg_group.py -q -p no:xdist -o addopts=`
+  由 rc=3 ⇒ rc=0（6 passed）；鎖 6 passed。ARCH-OBS-01：`_PG_SOURCE_INDICATORS` 補 `_pg_models`。
+- SD-1：line 429 折行；E501 存量債回到 139（鎖 `test_e501_debt_only_shrinks` 綠）。
+- 帳本：新立 DEF-200-325～331（皆 fixed）、DEF-200-318 改 fixed（含未端到端真跑的劃界）；`check_defect_log_crossref.py` rc=0
+  「帳本 261 筆有效狀態紀錄、19 份掃描目標皆無矛盾」，未結存量 34→33。
+- MIN_TESTS 4246→4371（runner 自檢「餘裕只剩 89／214」指示；沿革補進 `CrossPlatform_Guard_Line_History_MinTests.md`）。
+- 護欄行數棘輪：101607→101668（+61＝內容 +31＋本表自身 +30）；回歸鎖軌申報 61（raw +75，子集上限＝母項），主軌 0
+  ⇒ 款(11) 連續上升計數歸零；cap 到期兌現 `(157, 537)`、重新武裝 159／536；`_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND`
+  具名展延 157→162；guard_self 桶 3162→3163 重釘（四方複審確認非功能迴歸）；`--print-guard-lines` 收斂 `+0`、
+  指紋 53b023849913；鎖模組 200 tests OK。
+
+### 驗證數字（[他包回報] 者為子 agent 本場實跑；其餘主控親跑）
+
+- 主控收尾親跑：見本節末「最終親跑」一行（收尾提交前回填）。
+
+### 🔴 誠實劃界（本輪仍未解決）
+
+- CAP=16 與「實體核−1」是單機（i5-14600K）加一個歷史點（10 核筆電）的校準；>16 實體核、GH-hosted runner 是否 SMT（SD-05）未量測。
+- DEF-200-318 fallback 分支本體未在無 Git Bash 的 Windows 端到端真跑（本機恆薄委派）。
+- pg_serial 釋出的 58 支（機器判準）靠原始碼指標判定；子目錄（tests/infra/adapters、tests/integration/test_sdd_bridge…）未逐檔登記進審計表，
+  判準對其機械生效；fixture 間接觸碰 PG 的形態由本輪複審 SD 抽驗（見複審判決）。
+- A-01 nightly-full 廣播輸出、DEF-200-292 自癒、掌舵者本人親跑 run_root_unittests.py：仍待。

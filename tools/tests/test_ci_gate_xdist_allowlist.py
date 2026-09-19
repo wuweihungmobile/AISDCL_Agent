@@ -1,34 +1,8 @@
-"""DEF-200-274 第十輪批評缺口 2 — `ci-gate.sh` xdist 判準必須是「允許清單」而非
-「排除清單」，回歸鎖。DEF-200-289（A 包）另擴充兩件事：① `ci-gate.ps1` 的
-Windows-native fallback（GAP-D）——它只跑凍結基線 `AISDLC_SDD_v0.01`（硬寫死，
-從無 LATEST 軌），依 `ci-gate.sh` 本檔同一條允許清單語意（只有 LATEST 保證帶
-`_atomic_write_text` 修法），本鎖釘住的是「該 fallback **刻意不**帶
-`-n auto --dist worksteal`」——這不是覆蓋缺口，是把 GAP-D 誤解為「無條件補上
-該旗標」時會引入的回歸（對凍結基線開多 worker，複製回本檔已修掉的競態）事先
-攔住；② `ci-gate.sh`／`ci-gate.ps1`／`tools/git-hooks/pre-push` 三處都必須有
-`tools/lib/cpu_budget.py --legs` 的跨 leg CPU 預算匯出段（DEF-200-289 SSOT 接線）。
-
-WHY（測意圖非僅行為，Rule 9）：`tools/fsm_runtime/snapshot.py::save_abort_report()`
-的 `_atomic_write_text` 競態修法**僅存在於 LATEST**（`AISDLC_SDD_v0.30`）；凍結基線
-`AISDLC_SDD_v0.01` 與其後到 LATEST 之間的每一個中間歷史版，其 `snapshot.py` 仍是舊版
-固定檔名 `.tmp`，與 v0.01 同型競態尚未修好——而依 `AISDLC_SDD/CLAUDE.md`〈版本狀態〉表，
-中間歷史版**不可原地改**，無法就地補上這個修法。
-
-若 `ci-gate.sh` 的 `XDIST_ARGS` 判準寫成排除清單（`"${VER}" != "${FROZEN_BASELINE}"`
-就開 xdist），`SDD_FW_VERSION` debug 逃生口一旦指到任一中間歷史版，就會誤幫一支
-未修競態的版本開多 worker，把「這支版本本來就會競態失敗」誤判成「這輪改動造成的
-回歸」——這正是第十輪批評缺口 2 指出、且第九輪一度發生過的判準退化形態。本鎖把
-判準釘死為允許清單（`"${VER}" == "${LATEST}"` 才開 xdist），並反向鎖死排除清單
-寫法不得復發：只有 LATEST 這一版保證帶著已修好的 `_atomic_write_text`，凍結基線與
-全部中間歷史版一律序列執行。
-
-另附一道姊妹鎖：`scripts/tests/`（共享 CI infra，版本無關、不含 FSM runtime 那段
-共享 tmp 檔競態）的 pytest 呼叫，必須**無條件**帶 `-n auto --dist worksteal`
-——它不受上述版本判準約束，是與 FSM runtime 段落刻意不同的另一段。
-
-安家位置：本鎖原生於 `AISDLC_SDD/scripts/tests/`，因該樹是 ONBOARDING 指紋樹（多一
-檔即需重做乾淨 venv 回填）而遷入根層 `tools/tests/`——比照 test_bash32_compat.py
-既有的「根層測試讀 AISDLC_SDD 腳本」先例，不影響 ci-gate.sh 的凍結／可改邊界判斷。
+"""DEF-200-274 第十輪批評缺口 2：`ci-gate.sh` xdist 判準必須是「允許清單」（只有 LATEST 保證
+帶 `_atomic_write_text` 修法才開 xdist；凍結基線與中間歷史版一律序列）；DEF-200-289／318／
+326：`ci-gate.ps1` fallback 兩處呼叫（凍結基線不得帶 xdist、LATEST 軌必須帶）與三處
+orchestrator 的 cpu_budget 匯出段接線（含路徑真解得到）。完整 WHY 與安家理由見
+docs/06_quality/CrossPlatform_Guard_Line_History.md〈test_ci_gate_xdist_allowlist 模組 WHY（2026-09-19 搬遷）〉。
 """
 from __future__ import annotations
 
@@ -204,7 +178,7 @@ class CpuBudgetExportWiringTest(unittest.TestCase):
     def test_ci_gate_broadcasts_target_monorepo_root(self) -> None:
         """DEF-200-326：兩檔住 `AISDLC_SDD/scripts/`，到 monorepo 根還多一層
         ——舊文字直接拼 REPO_ROOT（＝AISDLC_SDD/）是死碼（該路徑不存在，紅綠自證
-        見 DevA_R157_evidence.md）。以各自根算法獨立重算，斷言路徑真實存在。"""
+        見 scratchpad 的 DevA 證據檔）。以各自根算法獨立重算，斷言路徑真實存在。"""
         sh_line = next(
             (ln for ln in _ci_gate_text().splitlines() if "cpu_budget.py" in ln and "=" in ln),
             None,

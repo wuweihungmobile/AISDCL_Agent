@@ -457,3 +457,26 @@ DEF-200-324 缺陷回歸鎖），本檔自身漂移保守全額歸主軌，主�
 `CrossPlatform_R152_DEF200314_MacNightly_Evidence.md`〈收尾（R155）〉#### R156 追記。此附記為
 doc-total 對帳（≥2 站點）另一站點寄居 `AutoSDD_improving_112.md`，同 R129～R155 寄居體例。
 round-label-ok
+
+## 第十九輪附記（R157；多 CPU 第十四輪＋DEF-200-325 對話框根治＋DEF-200-326～331 收尾）
+
+- **體例**：本節非開新一輪 CrossPlatform 掃描輪四件套，僅為單一收尾窗口造成的護欄層逐檔漂移記帳，
+  寄居本檔（同 R129～R156 寄居體例）。前兩輪（R155／R156）主軌淨額連續為正、
+  `_REPIN_MAX_CONSECUTIVE_RISING_ROUNDS=2` 已到頂 ⇒ 本輪主表扣除回歸鎖軌後必須 ≤0：本輪申報
+  回歸鎖軌 61（＝同輪主表淨額，子集不得大於母項；raw 回歸鎖行數 +75，餘 14 由史料搬遷抵銷），
+  主軌 61−61＝0。cap 到期義務兌現：`(157, 537)`，同輪重新武裝 `_REPIN_NET_CAP_DUE_ROUND=159`／
+  `_REPIN_NET_CAP_DUE_TARGET=536`；`_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND` 具名展延 157→162；
+  `_PHASE2_REVIEW_LOG` 五輪時效未到，本輪無新登記。
+
+<!-- guard-total:R157 --> R157 護欄層累積淨額＝ 101607 → 101668（+61）——內容 +31（
+`test_windowsapps_guard_cross_consistency.py` 2178→2174：DEF-200-325 文字鎖 +13、docstring 訂正搬遷 −17；
+`test_ci_gate_xdist_allowlist.py` 213→206：DEF-200-326 路徑鎖 +34、DEF-200-318 fallback 鎖改寫 −15、
+模組 docstring 搬遷 −26；`test_cpu_budget.py` 154→183：DEF-200-327 實體核公式鎖 +29；
+`test_run_root_unittests.py` 6653→6660：WorkerCountFormulaTest.setUp +5、自動細分門檻鎖 +9、
+類別 docstring 搬遷 −11；本檔 `_zzz_` 暫態排除 +6）＋本檔自身漂移 +30（主表兩列、回歸鎖軌新列、
+cap 到期兌現列與重新武裝、接鏈列、舊尺技術債展延；凍結前綴 235→237、`_REPIN_LOG_HISTORY_SHA256`
+同步重釘）。史料逐字保全於 `CrossPlatform_Guard_Line_History.md`〈R157 WorkerCountFormulaTest WHY〉
+與〈R157 test_ci_gate_xdist_allowlist 模組 WHY〉。缺陷帳本見 `docs/06_quality/AutoSDD_Defect_Log.md`
+DEF-200-325～331；證據見 `CrossPlatform_DEF200274_Parallel_Tests_Evidence.md`〈第十四輪〉。此附記為
+doc-total 對帳（≥2 站點）另一站點寄居 `AutoSDD_improving_112.md`，同 R129～R156 寄居體例。
+round-label-ok

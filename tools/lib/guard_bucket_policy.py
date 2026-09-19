@@ -348,8 +348,12 @@ _FROZEN_SHRINK_ONLY_BUCKET_LINES: dict[str, int] = {
     # 低於基準的 95%，`bucket_ratchet_problems()` 第三向「分桶基準過時」逐字指示重釘為實測值
     # 3162；prose 雖未跌破 slack，依本表「合法縮小後必須同步下修」紀律一併釘到實測值。
     # 值取自當回合 `guard_layer_bucket_census.py --grain chunk`（exclusive）實跑、零加減推算。
+    # 🔴 DEF-200-325～331 多 CPU 第十四輪收尾單人窗口：guard_self 3162→3163（+1）——本檔
+    # 掃描器對 `_zzz_` 暫態模組的排除（DEF-200-330，判準邏輯本身非說明文字）落入自守計數；
+    # 四方複審 Architect 判「與已揭露未完成項逐字吻合、非功能迴歸」後重釘為
+    # `guard_layer_bucket_census.py --grain chunk` 實測值；prose 4469 實測未動。
     "prose": 4469,
-    "guard_self": 3162,
+    "guard_self": 3163,
 }
 
 #: 棘輪吃的粒度與估計量。寫成常數而不是散文，是為了讓 probe 與棘輪不可能各讀一種

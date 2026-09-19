@@ -1179,6 +1179,23 @@ def test_cpu_budget_workers_runner_exception_returns_none(tmp_path: Path) -> Non
     assert result is None
 
 
+def test_conftest_survives_p_no_xdist_invocation() -> None:
+    """複審 ARCH-P1-01／SA-NEW-01：`pytest_xdist_auto_num_workers` 少了
+    `@pytest.hookimpl(optionalhook=True)` 時，`-p no:xdist -o addopts=`（gate_pg()／
+    gate_pytest() 非預設分支的真實 argv 形態）會在 collection 前撞 pluggy
+    PluginValidationError ⇒ INTERNALERROR rc=3。真起子行程跑同一形態，斷言不炸。"""
+    import subprocess
+
+    proc = subprocess.run(
+        [sys.executable, "-m", "pytest", "tests/contract/test_claude_md_no_long_lines.py",
+         "-q", "--tb=short", "-p", "no:xdist", "-o", "addopts="],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        cwd=str(Path(__file__).resolve().parents[2]), timeout=300,
+    )
+    assert "PluginValidationError" not in proc.stdout + proc.stderr
+    assert proc.returncode != 3, proc.stdout[-800:] + proc.stderr[-800:]
+
+
 # =====================================================================
 # (l) R80 包 A：skip 天花板的**判準形狀**（S3-03）、剖面第三維（S3-09）、
 #     CI 平台涵蓋帳（S3-02）、DSN 形態驗證（S3-06）

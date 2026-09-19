@@ -442,6 +442,7 @@ _PG_SOURCE_INDICATORS = (
     "pg_autodetect",
     "pg_dsn",
     "docker",
+    "_pg_models",  # 複審 ARCH-OBS-01：ORM 列類別不以 Pg 開頭，改認模組名
 )
 #: 大小寫敏感——要求真的是 `PgStateRepository` 這種具名類別，不誤配
 #: `upgrade`／`gpgsign` 這類巧合子字串（此前用大小寫不敏感掃過一輪、實測誤中）。
@@ -765,6 +766,9 @@ def _cpu_budget_workers(env, path: Path, runner) -> int | None:
         return None
 
 
+@pytest.hookimpl(optionalhook=True)  # 🔴 必須有：`-p no:xdist` 下 hookspec 不存在，pluggy
+# check_pending() 會對非 optional 的未知 hookimpl 拋 PluginValidationError ⇒ INTERNALERROR
+# rc=3（複審 ARCH-P1-01／SA-NEW-01 實測，gate_pg()／gate_pytest() 非預設分支整批中斷）。
 def pytest_xdist_auto_num_workers(config):  # noqa: ARG001
     """xdist newhook（`firstresult=True`，僅 `-n auto` 時被呼叫）：回傳
     `cpu_budget.py` 算出的 worker 數；回傳 `None` 即交還 xdist 內建預設。conftest
