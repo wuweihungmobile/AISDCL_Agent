@@ -141,19 +141,73 @@ def _disk_latest_version() -> str | None:
     return best_name
 
 
-def _drift_advisory(active: str) -> None:
-    """DEF-43-004：SessionStart 時若 SDD_ACTIVE_VERSION ≠ 磁碟最高版，於 stderr 印軟告警。
+def _target_writes_legacy_token_budget_critical(version: str) -> bool:
+    """R158 P4（主控裁決 D3(b) 舊語意偵測）：純字面比對目標版 `context_ledger_pre.py` round-label-ok
+    原始碼，不 import 該模組——router 受零相依契約約束，且該檔屬於另一個 SDD 版本，
+    import 會連帶拉進其全部相依（PyYAML 等，router 本身 stdlib-only）。v0.23~v0.29 的
+    `context_ledger_pre.py` 仍會寫專案級 `TOKEN_BUDGET_CRITICAL: cumulative=` 字面
+    （v0.30 起改寫 session 級 deny，不再含此字面；CrossPlatform R158 FACTS F2 已 grep round-label-ok
+    驗證）。讀檔失敗（檔案不存在／權限問題）一律回 False——advisory 只是提示，寧可漏報
+    也不能讓這個判斷本身弄崩 router（fail-safe）。
+    """
+    hook_path = (
+        REPO_ROOT / "AISDLC_SDD" / f"AISDLC_SDD_v{version}" / ".claude" / "hooks"
+        / "context_ledger_pre.py"
+    )
+    try:
+        text = hook_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    return "TOKEN_BUDGET_CRITICAL: cumulative=" in text
 
-    走 stderr 而非 stdout：絕不污染實體 hook 的 stdout JSON（剛於 DEF-43-001 修好的
-    編碼敏感轉發路徑），非阻擋；刻意指凍結版做 B 軌 dogfooding 為合法用法故僅提示不擋。
+
+def _drift_advisory_text(active: str) -> str | None:
+    """DEF-43-004（R158 P4 擴充）：漂移 advisory 的純文字組裝，**不做任何 I/O**。 round-label-ok
+
+    無漂移（磁碟掃不到版本目錄，或與 active 相同）回 None。刻意拆成純函式：呼叫端
+    （`main()` 的 SessionStart 分支）要等 child 執行完、看得到其 stdout 之後，才能決定
+    這段文字該併進 child 的 `hookSpecificOutput.additionalContext`（優先，stdout on
+    exit 0 才進得了模型 context）還是退回 stderr（原 DEF-43-004 行為，見
+    `_merge_advisory_into_stdout`）。
     """
     latest = _disk_latest_version()
-    if latest is not None and latest != active:
-        sys.stderr.write(
-            f"[SDD-ROUTER][advisory] SDD_ACTIVE_VERSION=v{active} 非磁碟最高版 v{latest}。"
-            f"若非刻意指定凍結版做 B 軌 dogfooding，請確認是否應改用 LATEST(v{latest})。\n"
+    if latest is None or latest == active:
+        return None
+    text = (
+        f"[SDD-ROUTER][advisory] SDD_ACTIVE_VERSION=v{active} 非磁碟最高版 v{latest}。"
+        f"若非刻意指定凍結版做 B 軌 dogfooding，請確認是否應改用 LATEST(v{latest})。"
+    )
+    if _target_writes_legacy_token_budget_critical(active):
+        text += (
+            f" 此版 hook（context_ledger_pre.py）仍寫專案級 TOKEN_BUDGET_CRITICAL，"
+            f"新視窗可能一開場就被擋；請改設 SDD_ACTIVE_VERSION={latest}（LATEST）。"
         )
-        sys.stderr.flush()
+    return text
+
+
+def _merge_advisory_into_stdout(stdout_text: str, advisory: str) -> tuple[str, bool]:
+    """R158 P4：把 advisory 併進 child 的 `hookSpecificOutput.additionalContext`。 round-label-ok
+
+    只在 child stdout 是合法 JSON 物件、`hookSpecificOutput` 是 dict、且其
+    `additionalContext` 已經是字串時才合併，回傳 `(合併後字串, True)`；任何一步不符
+    （非 JSON／非 dict／缺鍵／型別不對）一律 `(原樣 stdout_text, False)`——呼叫端據此
+    退回 stderr，行為與本函式新增前的 DEF-43-004 逐字相同（見 A1 路徑 6：stderr on
+    exit 0 可能從未被模型看到，是本輪要修的能見度缺口，但不能因為修不到就吞掉訊息）。
+    """
+    try:
+        data = json.loads(stdout_text)
+    except (json.JSONDecodeError, TypeError):
+        return stdout_text, False
+    if not isinstance(data, dict):
+        return stdout_text, False
+    hook_out = data.get("hookSpecificOutput")
+    if not isinstance(hook_out, dict):
+        return stdout_text, False
+    existing_ctx = hook_out.get("additionalContext")
+    if not isinstance(existing_ctx, str):
+        return stdout_text, False
+    hook_out["additionalContext"] = existing_ctx + "\n\n" + advisory
+    return json.dumps(data, ensure_ascii=False), True
 
 
 def main(argv: list[str]) -> int:
@@ -202,9 +256,11 @@ def main(argv: list[str]) -> int:
             f"{target}。請確認版本號（例：0.18）。本次放行、未套用 SDD 守門。",
         )
 
-    # DEF-43-004：僅 SessionStart 印一次 LATEST 漂移軟告警（stderr，非阻擋、不污染 stdout JSON）。
-    if event_name == "SessionStart":
-        _drift_advisory(version)
+    # DEF-43-004（R158 P4 擴充）：僅 SessionStart 算一次 LATEST 漂移 advisory 文字。 round-label-ok
+    # 先只算字串、不做 I/O——要等 child 執行完才知道能不能併進其 stdout JSON（見下方轉發段）；
+    # 若 child 逾時／噴例外，仍在對應 except 分支寫 stderr，保留「advisory 一定會被印在
+    # 某處」的原有保證。
+    advisory_text = _drift_advisory_text(version) if event_name == "SessionStart" else None
 
     # 轉交實體 hook：原樣轉發 stdin → child，child 的 stdout/stderr/exit code 原樣回傳。
     stdin_data = "" if sys.stdin.isatty() else sys.stdin.read()
@@ -237,6 +293,10 @@ def main(argv: list[str]) -> int:
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except subprocess.TimeoutExpired:
+        # R158 P4：child 沒能跑完，advisory 併不進任何 JSON——退回 stderr。 round-label-ok
+        if advisory_text is not None:
+            sys.stderr.write(advisory_text + "\n")
+            sys.stderr.flush()
         # 實體 hook 卡住：subprocess.run 已 kill 並 wait child（不留孤兒），router 放行不擋。
         return _warn(
             event_name,
@@ -244,10 +304,23 @@ def main(argv: list[str]) -> int:
             f"已中止 child 並本次放行（未套用 SDD 守門）。",
         )
     except Exception as exc:  # noqa: BLE001 — 永不讓 CC 崩潰
+        if advisory_text is not None:
+            sys.stderr.write(advisory_text + "\n")
+            sys.stderr.flush()
         return _warn(event_name, f"[SDD-ROUTER][WARN] 轉交 {script_name} 失敗：{exc!r}。本次放行。")
 
-    if proc.stdout:
-        sys.stdout.write(proc.stdout)
+    stdout_text = proc.stdout or ""
+    if advisory_text is not None:
+        merged_text, merged = _merge_advisory_into_stdout(stdout_text, advisory_text)
+        if merged:
+            stdout_text = merged_text
+        else:
+            # R158 P4：併不進去（child 沒印合法 JSON／缺 additionalContext 字串）—— round-label-ok
+            # 退回 stderr，維持 DEF-43-004 原行為（至少印在某處，不悄悄消失）。
+            sys.stderr.write(advisory_text + "\n")
+            sys.stderr.flush()
+    if stdout_text:
+        sys.stdout.write(stdout_text)
         sys.stdout.flush()
     if proc.stderr:
         sys.stderr.write(proc.stderr)

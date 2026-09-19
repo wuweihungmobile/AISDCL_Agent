@@ -128,6 +128,7 @@ from quota_messages import (  # noqa: E402,F401
     model_hint_line,
     pace_line,
     quota_halt_message,
+    quota_halt_repeat_message,  # R158：1140-1147 重複訊息的組字邏輯搬回這裡 round-label-ok
     quota_prepare_message,
     reset_branch,
     reset_horizon_phrase,
@@ -1141,9 +1142,9 @@ def quota_gate(payload: dict, *, blocking, latch_read, latch_write,
             # 期間人唯一持續看得到的那一則；而它此前不帶期程 ⇒ 「等一下就好」與「只能等
             # 人」在整個 halt 期間都分不出來。第一則（`quota_halt_message`）分得出來，但它
             # 一個 reset 視窗只印一次，早就捲出畫面了。同一個 `reset_branch()`，第三個出口。
-            sys.stderr.write(f"🔴 {quota_policy.describe(decision)}\n"
-                             "   額度仍在停止水位：扇出一律不執行，任務書已在磁碟上。\n"
-                             + throttle_horizon_line(decision, now))
+            # 🔴 R158：組字邏輯整段搬回 `quota_messages.quota_halt_repeat_message()`。round-label-ok
+            # 人話面只有一個家，不是把常數搬過去、組字留在這裡兩處各自維護。
+            sys.stderr.write(quota_halt_repeat_message(decision, now))
         return 2
     # 🔴 R84／6C（SA-03）：prepare 帶（85~95%）的準備動作。位置刻意在 halt **之後**、
     # 在下面那道早退**之前**——早退對 `PostToolUse` 與 free 帶無條件 `return 0`，把這一段

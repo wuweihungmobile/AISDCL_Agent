@@ -243,6 +243,11 @@ on:
       - "tools/session_resume_planner.py"
       - "tools/statusline_context_feed.py"
       - "tools/tests/test_statusline_context_feed.py"
+      # R158：status line 安裝器與 SessionStart 真實數字簡報新增的根層 SSOT，
+      #      漏列的代價逐字同 DEF-101-042：只改該檔時其回歸鎖不會跑
+      #      （tools/tests/test_install_statusline.py／test_session_brief.py 消費）。
+      - "tools/install_statusline.py"
+      - "tools/lib/session_brief.py"
       # R79（同一個形態的第三次：新增判準消費了根層檔卻沒補 paths，由
       # AISDLC_SDD/scripts/tests/test_ci_paths_cover_root_consumers.py 逐字點名）。
       # tools/tests/test_platform_neutral_paths.py 讀 .editorconfig 的 .ps1 區塊
@@ -665,6 +670,11 @@ on:
       - "tools/session_resume_planner.py"
       - "tools/statusline_context_feed.py"
       - "tools/tests/test_statusline_context_feed.py"
+      # R158：status line 安裝器與 SessionStart 真實數字簡報新增的根層 SSOT，
+      #      漏列的代價逐字同 DEF-101-042：只改該檔時其回歸鎖不會跑
+      #      （tools/tests/test_install_statusline.py／test_session_brief.py 消費）。
+      - "tools/install_statusline.py"
+      - "tools/lib/session_brief.py"
       # R79（同一個形態的第三次：新增判準消費了根層檔卻沒補 paths，由
       # AISDLC_SDD/scripts/tests/test_ci_paths_cover_root_consumers.py 逐字點名）。
       # tools/tests/test_platform_neutral_paths.py 讀 .editorconfig 的 .ps1 區塊

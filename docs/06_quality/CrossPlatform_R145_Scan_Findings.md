@@ -480,3 +480,17 @@ cap 到期兌現列與重新武裝、接鏈列、舊尺技術債展延；凍結�
 DEF-200-325～331；證據見 `CrossPlatform_DEF200274_Parallel_Tests_Evidence.md`〈第十四輪〉。此附記為
 doc-total 對帳（≥2 站點）另一站點寄居 `AutoSDD_improving_112.md`，同 R129～R156 寄居體例。
 round-label-ok
+
+<!-- guard-total:R158 --> R158 護欄層累積淨額＝ 101669 → 102515（+846）——收尾單人窗口：
+新增三支回歸鎖 `test_install_statusline.py`（297）／`test_sdd_hook_router_r158.py`
+（189）／`test_session_brief.py`（220）＋`test_context_budget_guard.py` +117／
+`test_platform_neutral_paths.py` +4（`tools/tests`／`tools` 兩桶腐化上界重釘
+64→79、27→36）／`test_mac_endurance_r83.py` +3（P6 行為變更同步訂正既有測試）／
+本表自身 +16。回歸鎖軌申報 309（router 189＋context_budget_guard 117＋
+mac_endurance_r83 3，子集不得大於母項，貼齊 `_REGRESSION_LANE_ROUND_CAP`），
+主軌 846−309＝537，貼齊該輪上限。前綴重寫鏈接
+DEF-200-333。缺陷帳本見
+`docs/06_quality/AutoSDD_Defect_Log.md`；證據見
+`CrossPlatform_R158_SessionGate_Statusline_Evidence.md`。此附記為 doc-total 對帳
+（≥2 站點）另一站點寄居 `AutoSDD_improving_112.md`，同 R129～R157 寄居體例。
+round-label-ok

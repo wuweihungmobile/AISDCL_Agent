@@ -50,12 +50,13 @@ def context_feed_path(session_id: str) -> Path:
     return root / f"{session_id}.json"
 
 
-def _atomic_write_json(path: Path, data: dict) -> None:
+def _atomic_write_json(path: Path, data: dict, *, indent: int | None = None) -> None:
     """tmp＋`os.replace` 原子寫（Windows 教訓：目標檔被開著讀時 `os.replace` 短暫
-    `PermissionError`，重試幾次即過；同根 CLAUDE.md〈鐵律三〉Windows 檔案鎖那格）。"""
+    `PermissionError`，重試幾次即過；同根 CLAUDE.md〈鐵律三〉Windows 檔案鎖那格）。
+    `indent=None`＝維持既有 compact 輸出（本檔 feed doc 呼叫慣例）。"""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f"{path.name}.tmp{os.getpid()}")
-    tmp.write_text(json.dumps(data, ensure_ascii=True), encoding="utf-8")
+    tmp.write_text(json.dumps(data, ensure_ascii=True, indent=indent), encoding="utf-8")
     last_exc: Exception | None = None
     for _ in range(5):
         try:
@@ -67,6 +68,12 @@ def _atomic_write_json(path: Path, data: dict) -> None:
     tmp.unlink(missing_ok=True)
     if last_exc is not None:
         raise last_exc
+
+
+def atomic_write_json(path: Path, data: dict, *, indent: int | None = None) -> None:
+    """`_atomic_write_json()` 的公開薄包裝，供其他模組（如
+    `tools/install_statusline.py`）重用同一份原子寫邏輯，避免第二份複本（R158 收尾）。"""
+    _atomic_write_json(path, data, indent=indent)
 
 
 def build_feed_doc(payload: dict) -> dict:
@@ -134,19 +141,63 @@ def ui_line(payload: dict) -> str:
     return f"{prefix}ctx {used_pct:.1f}% {_fmt_tokens(used)}/{_fmt_tokens(size)} | {label}"
 
 
+def _quote_token(token: str) -> str:
+    """token 含空白才加雙引號（如 Windows OneDrive 路徑）；無空白時原樣輸出。
+
+    刻意「有需要才加」而非一律加：`tools/tests/test_statusline_context_feed.py::
+    SettingsSnippetTest`（本檔以外的既有回歸鎖，R158 P5 不可改動）用 round-label-ok
+    `command.split(" ", 1)` 假設純空白分隔、無引號包住——本 checkout 的路徑不含
+    空白，維持該假設；含空白的路徑才需要保護，兩殼（Git Bash／PowerShell）皆吃得下
+    正斜線＋雙引號，同官方 statusline.md〈Windows configuration〉節的建議一致。
+    """
+    return f'"{token}"' if " " in token else token
+
+
+def resolve_windows_interpreter(python_path: Path) -> Path:
+    """Windows 上優先換成同目錄 `pythonw.exe`（GUI 子系統，工程手法上盼減少開新
+    終端時一瞬間的閃窗）；找不到就原樣回傳。純函式，呼叫端決定何時觸發
+    （`os.name == "nt"`）——官方文件對 statusLine 子行程的視窗行為未載明
+    （R158 analysis_docs.md G2），效果待 Windows 親驗，不可宣稱「已解決閃窗」。 round-label-ok
+    """
+    candidate = python_path.with_name("pythonw.exe")
+    try:
+        if candidate.is_file():
+            return candidate
+    except OSError:
+        pass
+    return python_path
+
+
+def build_command(python_path: Path, script_path: Path) -> str:
+    """組出可貼進 `settings.json` 的 `statusLine.command` 字串：POSIX 正斜線
+    （Git Bash／PowerShell 兩殼皆吃得下，官方 statusline.md 明文建議，反斜線在
+    Git Bash 下會被當跳脫字元吃掉且靜默失敗）＋含空白的 token 才加雙引號。
+    Windows 上（`os.name == "nt"`）先嘗試把直譯器換成同目錄 `pythonw.exe`。
+
+    `settings_snippet()`／`tools/install_statusline.py` 共用本函式，避免兩份各自
+    維護的字串組法（R158 D2；主控裁決 DECISION.md〈P5〉）。 round-label-ok
+    """
+    if os.name == "nt":
+        python_path = resolve_windows_interpreter(python_path)
+    return f"{_quote_token(python_path.as_posix())} {_quote_token(script_path.as_posix())}"
+
+
 def settings_snippet() -> dict:
     """可貼進 `~/.claude/settings.json` 的 `statusLine` 區塊（D32-1）。command 用**本
-    checkout** 的絕對 python 與腳本路徑、POSIX 正斜線；Windows 走 Git Bash 需自行調整
-    （command 走 shell，且無 exec form，跨平台差異本檔管不到，只能留言註明）。"""
+    checkout** 的絕對 python 與腳本路徑，經 `build_command()`（R158 D2）統一組字。round-label-ok"""
     script = Path(__file__).resolve()
     python = Path(sys.executable).resolve()
-    command = f"{python.as_posix()} {script.as_posix()}"
+    command = build_command(python, script)
     return {
         "statusLine": {"type": "command", "command": command, "padding": 0},
         "_comment_windows": (
-            "Windows 上 command 走 shell（無 exec form）：改走 Git Bash 呼叫本腳本，"
-            "command 改成 Git Bash 執行檔絕對路徑（現查安裝位置，勿寫死）"
-            " -lc '<python> <本腳本，正斜線>'"
+            "Windows 上 Claude Code 會自動選殼（裝了 Git Bash 走 Git Bash，沒裝才落到"
+            "PowerShell——見官方 statusline.md〈Windows configuration〉，不是一律"
+            "PowerShell）；command 恆為 shell form（無 exec form可用），但本字串一律用"
+            "正斜線、路徑含空白會自動加雙引號，兩種殼都安全，不需手動改寫成 Git Bash"
+            "呼叫式。同目錄若有 pythonw.exe 會優先使用（GUI 子系統，盼減少開新終端"
+            "一瞬間的閃窗，實際效果待 Windows 親驗——若仍會閃，改跑"
+            "`python tools/install_statusline.py --uninstall`）。"
         ),
     }
 

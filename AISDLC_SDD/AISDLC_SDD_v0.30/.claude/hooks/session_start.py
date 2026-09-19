@@ -96,6 +96,42 @@ def _measurement_line(payload: dict | None) -> str:
         return f"[SDD-CTX][WARN] 量測不可用：{exc!r}"
 
 
+def _decision_trace_staleness_note(
+    trace: list, current_state: str, blocking_states,
+) -> Optional[str]:
+    """R158 P3（CrossPlatform R158 Q1/Q2 分析路徑 5）：DECISION-TRACE 無條件印出最近 5 round-label-ok
+    筆歷史轉換，即使其中含 `blocking_states`（`FSMRuntime._BLOCKING_STATES`）字樣的轉換
+    早已由人工 `resume-from-escalation`（trigger=="human_resume"）解除，也沒有任何「已
+    解除」標註——模型若只做關鍵字比對、不核對 `current_state`，容易誤判自己被擋／額度
+    見底（Q1「不去查真實數據」／Q2 完全解釋，且與是否真的處於阻斷態無關）。純字串組裝
+    ：零 FSM 轉態、零檔案 I/O，例外一律由呼叫端既有 try/except 吞（本函式不自行 catch）。
+    `current_state` 若仍落在 `blocking_states` ＝真的被擋，[SDD-FSM][BLOCK] 橫幅本身就是
+    正確訊號，此時回 None（不疊加澄清句，避免同一件事講兩次卻互相矛盾）。
+    """
+    if current_state in blocking_states:
+        return None
+    stale_hit = False
+    last_resume_ts: Optional[str] = None
+    for entry in (trace or [])[-5:]:
+        frm = entry.get("from") or ""
+        to = entry.get("to") or ""
+        reason = entry.get("reason") or ""
+        if frm in blocking_states or to in blocking_states or any(
+            s in reason for s in blocking_states
+        ):
+            stale_hit = True
+        if entry.get("trigger") == "human_resume":
+            last_resume_ts = entry.get("ts") or last_resume_ts
+    if not stale_hit:
+        return None
+    when = last_resume_ts or "<未知時戳：最近 5 筆內未見 human_resume 紀錄>"
+    return (
+        f"ℹ️ 以下 DECISION-TRACE 為歷史紀錄：目前 current_state={current_state}"
+        f"（非阻斷態），阻斷已於 {when} 解除。"
+        "context 真實水位現查：`python tools/session_resume_planner.py --check`"
+    )
+
+
 def _build_context(payload: dict | None = None) -> dict:
     if os.environ.get("SDD_HOOKS_DISABLE") == "1":
         return {
@@ -341,6 +377,13 @@ def _build_context(payload: dict | None = None) -> dict:
         trace = rt.state.root.get("decision_trace") or []
         if trace:
             lines.append("")
+            # R158 P3：current_state 已離開阻斷集合但最近 5 筆仍含阻斷態字樣時，先講清楚 round-label-ok
+            # 「這是歷史、不是現況」——見 `_decision_trace_staleness_note` docstring。
+            staleness_note = _decision_trace_staleness_note(
+                trace, rt.state.current, FSMRuntime._BLOCKING_STATES,
+            )
+            if staleness_note:
+                lines.append(staleness_note)
             lines.append("[SDD-FSM][DECISION-TRACE] 最近 5 筆狀態轉換：")
             for e in trace[-5:]:
                 ts = e.get("ts", "?")

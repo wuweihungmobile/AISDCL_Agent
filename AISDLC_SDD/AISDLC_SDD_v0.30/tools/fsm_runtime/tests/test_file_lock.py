@@ -13,6 +13,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
+from tools.fsm_runtime import file_lock as fl_mod  # noqa: E402
 from tools.fsm_runtime.file_lock import _try_unlink, file_lock  # noqa: E402
 
 
@@ -198,6 +199,186 @@ class UnremovableSentinelTests(unittest.TestCase):
         )
         self.assertLess(elapsed, 5.0)
         lock_path.unlink()
+
+
+class AcquireTransientPermissionErrorTests(unittest.TestCase):
+    """R158 P1 回歸鎖（windows-compat-ci #250，run 35452796159）：``_write_sentinel`` 的 round-label-ok
+    ``os.open(O_CREAT|O_EXCL|O_WRONLY)`` 在 Windows delete-pending 態下丟 ``PermissionError``
+    （非 ``FileExistsError``），逸出 acquire 迴圈原本只接 ``FileExistsError`` 的 ``except``，
+    炸穿 ``file_lock()`` 的 context manager（同批次唯一一份 traceback 精確釘在此處，非
+    ``_try_unlink`` 也非 ``counter.txt`` 的寫入）。修法只加寬 acquire 迴圈的例外類型，且**只在
+    Windows**（模組常數 ``_ACQUIRE_TRANSIENT_ERRORS``）——POSIX 上 ``O_EXCL`` 的
+    ``PermissionError`` 幾乎必是真正的權限問題（沒有 delete-pending 語意），吞掉會掩蓋根因
+    （鐵律三）。三支測試皆顯式 patch ``_ACQUIRE_TRANSIENT_ERRORS``，不依賴實際跑測試的主機
+    平台（``os.name``）——同一份測試在 mac 開發機與 Windows CI 上斷言的是同一套邏輯分支。
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def test_transient_permission_error_on_acquire_is_retried_like_file_exists(self) -> None:
+        """常數含 PermissionError（模擬 Windows）＋ os.open 第一次丟 PermissionError、第二次
+        放行 ⇒ 視為暫時佔用，重試後正常取得鎖，不逸出。"""
+        lock_path = self.root / "counter.lock"
+        real_open = os.open
+        calls = {"n": 0}
+
+        def flaky_open(path, flags, *a, **kw):
+            if calls["n"] == 0 and path == str(lock_path):
+                calls["n"] += 1
+                raise PermissionError(
+                    13,
+                    "程序無法存取檔案（模擬 Windows delete-pending CreateFile ACCESS_DENIED）",
+                )
+            return real_open(path, flags, *a, **kw)
+
+        with mock.patch.object(
+            fl_mod, "_ACQUIRE_TRANSIENT_ERRORS", (FileExistsError, PermissionError)
+        ), mock.patch.object(fl_mod.os, "open", flaky_open):
+            with file_lock(lock_path, timeout=2.0):
+                self.assertTrue(lock_path.exists())
+        self.assertEqual(
+            calls["n"], 1, "應在第 1 次瞬時 PermissionError 後、第 2 次成功取得鎖"
+        )
+        self.assertFalse(lock_path.exists())
+
+    def test_posix_default_lets_permission_error_escape_on_acquire(self) -> None:
+        """守鐵律三：常數不含 PermissionError（POSIX 現況）時，真正的權限問題必須原樣逸出，
+        不得被誤判成鎖競爭而吞掉／轉型成別的例外型別。"""
+        lock_path = self.root / "denied.lock"
+        real_open = os.open
+
+        def always_denied(path, flags, *a, **kw):
+            if path == str(lock_path):
+                raise PermissionError(13, "程序無法存取檔案（模擬真正的權限問題，非鎖競爭）")
+            return real_open(path, flags, *a, **kw)
+
+        with mock.patch.object(fl_mod, "_ACQUIRE_TRANSIENT_ERRORS", (FileExistsError,)), \
+             mock.patch.object(fl_mod.os, "open", always_denied):
+            with self.assertRaises(PermissionError):
+                with file_lock(lock_path, timeout=2.0):
+                    self.fail("should not acquire")  # pragma: no cover
+        self.assertFalse(lock_path.exists())
+
+    def test_permanent_permission_error_is_bounded_by_timeout_when_treated_as_transient(
+        self,
+    ) -> None:
+        """邊界檢查（QA T2 風險提醒）：常數含 PermissionError 時，若 PermissionError 其實是
+        永久性的（非鎖競爭，例如目錄唯讀），行為從『立即拋出 PermissionError』變成『等滿
+        timeout 才拋 TimeoutError』——這是加寬 except 的已知代價（掩蓋根因型別），但必須仍在
+        `timeout` 內收場，不得無界等待。"""
+        lock_path = self.root / "stuck.lock"
+        real_open = os.open
+
+        def always_denied(path, flags, *a, **kw):
+            if path == str(lock_path):
+                raise PermissionError(13, "永久性權限錯誤（模擬目錄唯讀，非鎖競爭）")
+            return real_open(path, flags, *a, **kw)
+
+        with mock.patch.object(
+            fl_mod, "_ACQUIRE_TRANSIENT_ERRORS", (FileExistsError, PermissionError)
+        ), mock.patch.object(fl_mod.os, "open", always_denied):
+            start = time.time()
+            with self.assertRaises(TimeoutError):
+                with file_lock(lock_path, timeout=0.3):
+                    self.fail("should not acquire")  # pragma: no cover
+            elapsed = time.time() - start
+        self.assertGreaterEqual(elapsed, 0.25)
+        self.assertLess(elapsed, 5.0)
+        self.assertFalse(lock_path.exists())
+
+
+class StatTransientPermissionErrorTests(unittest.TestCase):
+    """R158 P1 追加（主控親驗）：接住 acquire 迴圈 ``os.open`` 的 ``PermissionError`` 後， round-label-ok
+    ``file_lock()`` 緊接著呼叫 ``_is_stale(lock_path)``，其內部 ``path.stat()`` 在同一個
+    Windows delete-pending 態下同樣會丟 ``PermissionError``（``_is_stale`` 本體只接
+    ``FileNotFoundError``，本輪不改）——逃逸點只是從 ``os.open`` 搬到 ``stat``。修法只在
+    ``file_lock()`` 呼叫 ``_is_stale`` 那一行窄窄地吞掉 ``_STAT_TRANSIENT_ERRORS``（Windows 才
+    非空），視為「本輪還不知道是否陳舊」而非「必是死鎖」，POSIX 上（空 tuple）逐字不變。兩支
+    測試皆顯式 patch ``_ACQUIRE_TRANSIENT_ERRORS``／``_STAT_TRANSIENT_ERRORS``，不依賴主機平台。
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def test_transient_stat_permission_error_after_acquire_retry_is_tolerated_on_windows(
+        self,
+    ) -> None:
+        """兩常數皆含 PermissionError（模擬 Windows）＋ os.open 與 Path.stat 第一次都丟
+        PermissionError、之後放行 ⇒ 視為『本輪還不知道是否陳舊』重試，最終正常取得鎖，不逸出。"""
+        lock_path = self.root / "counter.lock"
+        real_open = os.open
+        real_stat = Path.stat
+        open_calls = {"n": 0}
+        stat_calls = {"n": 0}
+
+        def flaky_open(path, flags, *a, **kw):
+            if open_calls["n"] == 0 and path == str(lock_path):
+                open_calls["n"] += 1
+                raise PermissionError(
+                    13,
+                    "程序無法存取檔案（模擬 Windows delete-pending CreateFile ACCESS_DENIED）",
+                )
+            return real_open(path, flags, *a, **kw)
+
+        def flaky_stat(self_path, *a, **kw):
+            if self_path == lock_path and stat_calls["n"] == 0:
+                stat_calls["n"] += 1
+                raise PermissionError(13, "程序無法存取檔案（模擬同一個 delete-pending 態）")
+            return real_stat(self_path, *a, **kw)
+
+        with mock.patch.object(
+            fl_mod, "_ACQUIRE_TRANSIENT_ERRORS", (FileExistsError, PermissionError)
+        ), mock.patch.object(
+            fl_mod, "_STAT_TRANSIENT_ERRORS", (PermissionError,)
+        ), mock.patch.object(
+            fl_mod.os, "open", flaky_open
+        ), mock.patch.object(Path, "stat", flaky_stat):
+            with file_lock(lock_path, timeout=2.0):
+                self.assertTrue(lock_path.exists())
+        self.assertEqual(open_calls["n"], 1, "os.open 應恰好瞬時失敗 1 次後成功")
+        self.assertEqual(stat_calls["n"], 1, "Path.stat 應恰好瞬時失敗 1 次（被本修法吞掉）")
+        self.assertFalse(lock_path.exists())
+
+    def test_posix_default_lets_stat_permission_error_escape(self) -> None:
+        """守鐵律三：``_STAT_TRANSIENT_ERRORS`` 為空 tuple（POSIX 現況）時，即使 acquire 層已
+        把 PermissionError 當暫時佔用重試，``_is_stale`` 的 ``stat()`` 撞到的 PermissionError
+        仍必須原樣逸出，不得被吞成『非陳舊』。"""
+        lock_path = self.root / "denied.lock"
+        real_open = os.open
+        real_stat = Path.stat
+
+        def flaky_open(path, flags, *a, **kw):
+            if path == str(lock_path):
+                raise PermissionError(
+                    13, "程序無法存取檔案（模擬 delete-pending CreateFile ACCESS_DENIED）"
+                )
+            return real_open(path, flags, *a, **kw)
+
+        def denied_stat(self_path, *a, **kw):
+            if self_path == lock_path:
+                raise PermissionError(13, "程序無法存取檔案（模擬真正的權限問題，非鎖競爭）")
+            return real_stat(self_path, *a, **kw)
+
+        with mock.patch.object(
+            fl_mod, "_ACQUIRE_TRANSIENT_ERRORS", (FileExistsError, PermissionError)
+        ), mock.patch.object(
+            fl_mod, "_STAT_TRANSIENT_ERRORS", ()
+        ), mock.patch.object(
+            fl_mod.os, "open", flaky_open
+        ), mock.patch.object(Path, "stat", denied_stat):
+            with self.assertRaises(PermissionError):
+                with file_lock(lock_path, timeout=2.0):
+                    self.fail("should not acquire")  # pragma: no cover
+        self.assertFalse(lock_path.exists())
 
 
 if __name__ == "__main__":

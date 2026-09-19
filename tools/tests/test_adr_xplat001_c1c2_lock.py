@@ -685,7 +685,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 8389,
+    "test_adr_xplat001_c1c2_lock.py": 8405,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 3726,
@@ -705,7 +705,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_claim_provenance_r86.py": 1015,
     "test_clean_venv_carrier.py": 281,
     "test_component_sanitizer_shared_layer_lock.py": 293,
-    "test_context_budget_guard.py": 12157,
+    "test_context_budget_guard.py": 12274,
     "test_context_window_parity.py": 281,
     "test_cpu_budget.py": 187,
     "test_defect_id_reference_integrity.py": 281,
@@ -719,8 +719,9 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_gha_action_versions.py": 681,
     "test_git_hooks_install_common.py": 411,
     "test_guard_line_taxonomy_r99.py": 148,
+    "test_install_statusline.py": 297,
     "test_install_windows_nightly.py": 1347,
-    "test_mac_endurance_r83.py": 1959,
+    "test_mac_endurance_r83.py": 1962,
     "test_mac_readiness_r82.py": 621,
     "test_macos_smoke_skip_honesty.py": 225,
     "test_maturity_criteria_r79.py": 431,
@@ -729,7 +730,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_no_invalid_escape_sequences.py": 315,
     "test_ntfs_trailing_space_device_name.py": 698,
     "test_onboarding_parity_interlock.py": 233,
-    "test_platform_neutral_paths.py": 5722,
+    "test_platform_neutral_paths.py": 5726,
     "test_platform_utils_dedup.py": 1078,
     "test_pre_commit_dispatcher_sigpipe.py": 969,
     "test_pre_push_dispatcher.py": 1055,
@@ -744,7 +745,9 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_sanitize_component_frozen_sdd_versions_lock.py": 317,
     "test_schedule_capability_parity.py": 626,
     "test_script_scan_surface_ssot.py": 391,
+    "test_sdd_hook_router_r158.py": 189,
     "test_sentinel_tick_e2e_r145.py": 141,
+    "test_session_brief.py": 220,
     "test_single_venv_identity.py": 161,
     "test_skip_ceiling_ratchet_direction.py": 724,
     "test_skip_discoverability_r83.py": 742,
@@ -2125,6 +2128,12 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "`_FROZEN_PREFIX_REWRITE_LEDGER` 接鏈列與凍結前綴 235→237 所造成的行數漂移"
      "（含本列自身收斂），保守全額歸主軌。逐檔清單見 "
      "CrossPlatform_R145_Scan_Findings.md〈第十九輪附記（R157）〉。"),
+    ("R158", 101669, 102515, 846,
+     "[非淨減法輪] 收尾單人窗口：三支新回歸鎖 install_statusline／sdd_hook_router_r158／"
+     "session_brief（+297／+189／+220）＋context_budget_guard +117／"
+     "platform_neutral_paths +4／mac_endurance_r83 +3（P6 行為變更同步訂正）／本表"
+     "+16（覆核收斂）。309 行轉入回歸鎖軌，本列原始總量（846−309＝537，貼齊上限）。"
+     "逐項見 CrossPlatform_R158_SessionGate_Statusline_Evidence.md。"),
 )
 
 
@@ -2476,6 +2485,12 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "test_run_root_unittests.py WorkerCountFormulaTest.setUp＋自動細分門檻鎖（+14）＝raw +75，"
      "依「子集不得大於母項」申報上限＝同輪主表淨額 62（餘 13 已被史料搬遷抵銷）。逐檔清單見 "
      "CrossPlatform_R145_Scan_Findings.md〈第十九輪附記（R157）〉。"),
+    ("R158", 309,
+     "P4 router 陳舊阻斷態可見性回歸鎖 test_sdd_hook_router_r158.py 全額（189）＋P2 額度 "
+     "halt 訊息澄清＋harness_feed 空窗出聲回歸鎖 test_context_budget_guard.py 全額"
+     "（117）＋DEF-200-337 既有測試訂正 test_mac_endurance_r83.py 全額（3）＝309"
+     "（子集不得大於母項：309 < 846，成立；貼齊 _REGRESSION_LANE_ROUND_CAP）。逐項見 "
+     "CrossPlatform_R158_SessionGate_Statusline_Evidence.md。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -2755,10 +2770,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 237
+_REPIN_LOG_FROZEN_PREFIX_LEN = 238
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "b55177a84c3b0ce355ef0d2c067fd5c3536545749edb5a1535c2f933019b450f")
+    "e402247cc75891c48d5665a7b3d6b3d708ee72fc783851da13d8f25f28fd0765")
 
 
 def repin_log_history_digest(
@@ -3043,6 +3058,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # R157：多 CPU 第十四輪＋DEF-200-325 對話框根治——新增主表兩列與本軌新列自身 round-label-ok
     # 漂移，凍結前綴延伸涵蓋新增列本身，起點接上一列終點 d1780bab5946。round-label-ok
     ("R157", "d1780bab5946", "b55177a84c3b", "DEF-200-325"),
+    ("R158", "b55177a84c3b", "e402247cc758", "DEF-200-333"),  # round-label-ok
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

@@ -125,6 +125,13 @@ source .venv/bin/activate
 
 驗證 hooks 正常（未報 `python not found`）：重開一個 session，SessionStart 若印出 `[SDD-ROUTER] SDD 治理 hooks 休眠中…` 即為正常（純 AutoClaude 工作時 hooks 本應休眠）。要對 SDD 框架做 dogfooding 時才設 `SDD_ACTIVE_VERSION`（🔴 R83 補齊平台：本句原本只給 bash/zsh 形態，Windows 讀者無路可走）——macOS / Linux 的 bash・zsh 寫 `export SDD_ACTIVE_VERSION=<版本號>`，Windows PowerShell 寫 `$env:SDD_ACTIVE_VERSION = '<版本號>'`（值＝當前最新版號，一律以 [AISDLC_SDD/FRAMEWORK_STATUS.md](AISDLC_SDD/FRAMEWORK_STATUS.md) 為唯一真相源；本文撰寫時為 `0.30`）。
 
+**status line（選配，R158 新增）**：想在對話視窗看到即時 context／額度水位，可跑
+`python tools/install_statusline.py --dry-run` 先預覽再安裝（不帶旗標＝安裝；`--status` 查現況；
+`--uninstall` 移除）。安裝器只動 `~/.claude/settings.json` 的 `statusLine` 鍵並先備份，兩平台皆用
+正斜線＋雙引號組出的 command 字串。🔴 **Windows 上是否會閃 console 視窗尚待實機親驗**（repo 層
+`settings.json` 刻意不隨 clone 帶這個鍵，正是這個原因）；裝上後若看到閃窗，立即
+`python tools/install_statusline.py --uninstall` 復原。
+
 ---
 
 ## 5. 常見雷區對照（Windows 開發者初到 macOS，或反向）

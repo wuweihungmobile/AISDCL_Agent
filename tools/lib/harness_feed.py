@@ -47,10 +47,19 @@ def check_lines(data: dict) -> list[str]:
     分子交叉比對；沒有時把 `harness_reason` 印出來（沒有 feed 也是一種 reason，不
     得被悄悄吞掉）。兩者互斥（`harness_used` 有值時 `harness_reason` 恆為 `None`，
     見 `context_budget_guard.read_context_feed()`）。
+
+    🔴 R158（refute_q3q4ci.md §1a／§1d 反駁者實測）：compact 後、下一次 API 回應前的 round-label-ok
+    空窗（官方契約 `current_usage: null`）會讓 `read_context_feed()` 同時回
+    `used=None, reason=None`——這是該函式**唯一**兩欄同時為 `None` 的分支（其餘每一個
+    「不採用」分支都會賦一個非空 `reason` 字串，見該函式最後一行與上面兩行對照）。
+    此前這個分支落到 `return []`，連「不採用」這件事本身都被悄悄吞掉，違反本函式與
+    `read_context_feed()` 自己 docstring 的設計意圖——現在補一行明講原因。
     """
     if data.get("harness_used") is not None and data.get("used") is not None:
         diff = abs(data["harness_used"] - data["used"])
         return [f"harness used={data['harness_used']:,} 逐字稿 used={data['used']:,} 差={diff:,}"]
     if data.get("harness_reason"):
         return [f"harness feed 未採用：{data['harness_reason']}"]
+    if data.get("harness_used") is None and data.get("harness_reason") is None:
+        return ["harness feed 存在但當下無 current_usage（compact 後空窗），本次無交叉比對"]
     return []

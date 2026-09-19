@@ -97,15 +97,18 @@ try:
 except Exception:  # noqa: BLE001 — 見上
     sdd_latest = None  # type: ignore[assignment]
 
+try:
+    import session_brief  # type: ignore[import-not-found]  # SessionStart 真實數字簡報（R158／P6） round-label-ok
+except Exception:  # noqa: BLE001 — 見上
+    session_brief = None  # type: ignore[assignment]
+
 
 def _has_carrier() -> bool:
     """這台機器上有沒有排程載具（Windows schtasks／macOS launchd）。"""
     return schedule_backend is not None and schedule_backend.has_carrier()
 
-# 額度**撞線判讀**唯一的家＝`tools/lib/quota_limits.py`。刻意 hard import（判讀原語
-# 給 fallback stub 等於讓同一份字面有第二個家）。下面 11 個在本檔內不會被呼叫，是給
-# `tools/session_resume_planner.py`（`guard.<name>` 取用）的純再匯出，刪任一個都會
-# 在無人看管的排程路徑上 AttributeError。
+# 額度撞線判讀唯一的家＝`tools/lib/quota_limits.py`（刻意 hard import）；下面 11 個是
+# 給 `session_resume_planner.py` 用的純再匯出，全文搬 scratchpad/r158/moved_lore_r158_p6.md。
 from quota_limits import (  # noqa: E402,F401
     LIMIT_NONE,
     LIMIT_SESSION,
@@ -170,11 +173,8 @@ BLOCKING_TOOLS = ("Task", "WebFetch", "WebSearch", "Agent", "Workflow")
 
 
 def blocking_reach_problems(blocking: tuple[str, ...], observed: set[str]) -> list[str]:
-    """阻斷臂的**有效性**判準（純函式）：圈到的名字必須真的會出現。回空 list ＝合格。
-
-    `observed`＝實測逐字稿裡出現過的 `tool_use` 名稱集合。空集合時**不判**——那代表
-    「這台機器上量不到」，不代表「命中面是 0」，而「量不到 ≠ 量到零」是本檔通篇的紀律。
-    """
+    """阻斷臂的有效性判準（純函式）：圈到的名字必須真的會出現，回空 list＝合格。
+    `observed` 空集合時不判（量不到≠量到零，全文搬 scratchpad/r158/moved_lore_r158_p6.md）。"""
     if not observed or set(blocking) & observed:
         return []
     return [f"BLOCKING_TOOLS={blocking} 與實測出現過的工具名毫無交集"
@@ -694,10 +694,8 @@ def repo_root() -> Path:
 
 
 def settings_chain(root: Path | None = None) -> list[Path]:
-    """Claude Code settings 檔，**由高優先到低優先**。刻意不含 enterprise policy
-    層（讀它也沒意義：只會讓分母更小＝更早喊，方向安全）。誠實劃界：`--settings`
-    旗標與 `/model` 的 session 內覆寫本檔看不到，這正是 `window_from_model` 要用
-    逐字稿實跑 model 做交叉否決的原因。"""
+    """Claude Code settings 檔，由高優先到低優先（不含 enterprise policy 層：讀它
+    只會讓分母更小，方向安全）。誠實劃界全文搬 scratchpad/r158/moved_lore_r158_p6.md。"""
     base = root or repo_root()
     return [
         base / ".claude" / "settings.local.json",
@@ -848,10 +846,9 @@ def arm_when_earned(transcript: Path) -> str:
 
 
 def arm_quota_wakeup(transcript: Path | None, plan: str) -> dict:
-    """額度 95%／`arm` 分支的喚醒武裝；回 `{armed, sentinel_off, posix}` 給訊息用。
-    `armed`＝**真的 spawn 出去了**；`posix`＝這台機器沒有排程載具（mac 上為 False）。
-    全文（含 R83／W2-A 沿革）逐字保全於 CrossPlatform_DEF200275_Context_Metering_
-    Evidence.md〈第七輪 史料搬遷〉節。"""
+    """額度 95%／`arm` 分支的喚醒武裝；回 `{armed, sentinel_off, posix}`（`armed`＝真的
+    spawn 出去了；`posix`＝無排程載具）。全文搬 CrossPlatform_DEF200275_Context_Metering_
+    Evidence.md〈第七輪〉節。"""
     if not _has_carrier():
         return {"armed": False, "sentinel_off": False, "posix": True}
     if os.environ.get(SENTINEL_OFF_ENV):
@@ -989,6 +986,10 @@ def main() -> int:
             arm_sentinel(payload)
             if sentinel_lifecycle is not None:
                 sentinel_lifecycle.announce_handbacks(lambda m: emit_to_model(event, m))
+            if session_brief is not None and quota_gate is not None:  # R158／P6 round-label-ok
+                emit_to_model(event, session_brief.sessionstart_brief(
+                    payload, quota_gate, scan_transcript, resolve_window,
+                    window_evidence, read_context_feed))
             return 0
         blocking = event == "PreToolUse"
         # 🔴 R83：額度軸只在真的推理過的這兩個事件上動作（白名單，不是「不是 PreToolUse

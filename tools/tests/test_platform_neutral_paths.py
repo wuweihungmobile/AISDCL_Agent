@@ -93,7 +93,9 @@ def _scan_roots() -> list[tuple[Path, bool, int]]:
     latest = _latest_root()
     return [
         # 沿革已搬至 CrossPlatform_R151_Guard_Prose_Migration.md〈_scan_roots tools/tests 重釘〉節。
-        (_TESTS_DIR, True, 64),
+        # 🔴 R158 重釘 64→79（新增三支回歸鎖，80→83 支，過腐化上界，詳 round-label-ok
+        # CrossPlatform_R158_SessionGate_Statusline_Evidence.md〈棘輪重釘〉）。
+        (_TESTS_DIR, True, 79),
         (_REPO_ROOT / "AISDLC_SDD" / "scripts" / "tests", True, 28),
         (_REPO_ROOT / "AutoClaude" / "tests", True, 268),
         # LATEST fsm_runtime **整棵遞迴**（原本 tests/ 與頂層分兩列、頂層還是 flat
@@ -109,7 +111,9 @@ def _scan_roots() -> list[tuple[Path, bool, int]]:
         # `tools` 與 `.claude/hooks` 兩棵的下限刻意只認並行包動工前就存在的那些檔：
         # 把一個當下還在變動的量寫成常數，下一輪必然對不上。
         # R85／F1 重釘 17→27（腐化上界逐字要求；`tools/probe/guard_layer_dedup_census.py` 觸發）。
-        (_REPO_ROOT / "tools", True, 27),
+        # 🔴 R158 重釘 27→36（新增 install_statusline.py，37→38 支，過腐化上界，詳 round-label-ok
+        # CrossPlatform_R158_SessionGate_Statusline_Evidence.md〈棘輪重釘〉）。
+        (_REPO_ROOT / "tools", True, 36),
         (_REPO_ROOT / ".claude" / "hooks", True, 2),
         (_REPO_ROOT / "AISDLC_SDD" / "scripts", True, 13),
         # 沿革已搬至 CrossPlatform_R151_Guard_Prose_Migration.md〈_scan_roots tools/lib 重釘〉節。

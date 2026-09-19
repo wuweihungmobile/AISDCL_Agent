@@ -1501,7 +1501,8 @@ class EscapeHatchAndNoProliferationTest(unittest.TestCase):
         self.assertEqual(len(spawned), 1)
 
     def test_session_start_stays_silent_and_exit_zero_on_this_machine(self) -> None:
-        """SessionStart 不得出聲、不得阻塞——它只清閂鎖（武裝延後到 PostToolUse）。"""
+        """SessionStart 不得阻塞、不得寫 stderr（武裝延後到 PostToolUse）。R158／P6 round-label-ok
+        訂正：SessionStart 現在無條件送出真實數字簡報，stdout 不再是空字串，改判合法 JSON。"""
         payload = json.dumps({"hook_event_name": "SessionStart",
                               "transcript_path": str(Path(tempfile.gettempdir())
                                                      / "r83-no-such-session.jsonl")})
@@ -1509,7 +1510,9 @@ class EscapeHatchAndNoProliferationTest(unittest.TestCase):
                               capture_output=True, encoding="utf-8", errors="replace",
                               timeout=60, check=False)
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertEqual((proc.stdout.strip(), proc.stderr.strip()), ("", ""))
+        self.assertEqual(proc.stderr.strip(), "", "SessionStart 不得寫 stderr")
+        out = json.loads(proc.stdout)["hookSpecificOutput"]
+        self.assertIn("[SDD-CTX-GUARD]", out["additionalContext"])
 
 
 class HookWiringReachesThisPlatformTest(unittest.TestCase):

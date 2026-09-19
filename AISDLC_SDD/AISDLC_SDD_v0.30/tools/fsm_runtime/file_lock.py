@@ -15,6 +15,23 @@ Design:
   crashed / was killed mid-write) it is forcibly removed before retrying.
 - Best-effort: lock file carries `{pid, host, ts}` for post-mortem, but the
   protocol doesn't rely on those being readable.
+
+R158 P1 (windows-compat-ci #250, run 35452796159): the acquire loop's round-label-ok
+``_write_sentinel`` calls ``os.open(..., O_CREAT|O_EXCL|O_WRONLY)`` and the
+loop only caught ``FileExistsError``. On Windows, when the sentinel path is
+in a delete-pending state (another process's ``unlink()`` has marked it for
+deletion but a handle is still open — the exact same race already handled on
+the *release* side by ``_try_unlink``'s retry loop), ``CreateFile`` returns
+``ERROR_ACCESS_DENIED`` instead of ``ERROR_FILE_EXISTS``; Python surfaces
+that as ``PermissionError``, not ``FileExistsError``, so it escaped the
+``try/except`` and crashed the caller (CI traceback pinned the raise to
+``file_lock.py``'s ``_write_sentinel``/``os.open``, called from the acquire
+loop's ``try:`` block). Fix is Windows-only: POSIX's ``O_EXCL`` raising
+``PermissionError`` almost always means a real permission problem (POSIX has
+no delete-pending semantics) — swallowing it there would mask a genuine
+misconfiguration as a transient lock race (cross-platform iron law #3:
+"what is this value on the other platform?"). See
+``_ACQUIRE_TRANSIENT_ERRORS`` below.
 """
 from __future__ import annotations
 
@@ -39,6 +56,22 @@ _STALE_AFTER_SEC = 30.0
 # 的測試斷言把關（兩子專案不跨 import，一致性靠斷言而非匯入依賴）。
 _UNLINK_RETRY_ATTEMPTS = 5
 _UNLINK_RETRY_INTERVAL_SEC = 0.02
+# R158 P1（windows-compat-ci #250）：只在 Windows 把 acquire 迴圈的 PermissionError 當成 round-label-ok
+# FileExistsError 同等的「暫時佔用」重試——POSIX 上 O_EXCL 丟出的 PermissionError 幾乎必然是
+# 真正的權限問題（POSIX 沒有 delete-pending 語意），吞掉會掩蓋根因，見上方模組 docstring。
+_ACQUIRE_TRANSIENT_ERRORS: tuple[type[BaseException], ...] = (
+    (FileExistsError, PermissionError) if os.name == "nt" else (FileExistsError,)
+)
+# R158 P1 追加（主控親驗）：接住 `os.open` 的 PermissionError 後，`file_lock()` 緊接著呼叫 round-label-ok
+# `_is_stale(lock_path)`，其內部 `path.stat()` 在同一個 Windows delete-pending 態下同樣會丟
+# `PermissionError`（`_is_stale` 只接 `FileNotFoundError`）——逃逸點只是從 `os.open` 搬到
+# `stat`。不改 `_is_stale` 本體（會結構性關閉陳舊回收，見反駁者對「改動B」的裁定）；只在
+# `file_lock()` 呼叫 `_is_stale` 那一行窄窄地把 `_STAT_TRANSIENT_ERRORS` 視為「本輪還不知道是
+# 否陳舊」（stale=False，落到下面的 deadline 檢查＋sleep 再試，下一輪重新 stat）。空 tuple 在
+# `except` 子句裡合法＝什麼都不接，POSIX 語意逐字不變。
+_STAT_TRANSIENT_ERRORS: tuple[type[BaseException], ...] = (
+    (PermissionError,) if os.name == "nt" else ()
+)
 
 
 def _write_sentinel(path: Path) -> None:
@@ -123,7 +156,7 @@ def file_lock(lock_path: Path, timeout: float = 5.0) -> Iterator[Path]:
         try:
             _write_sentinel(lock_path)
             break  # acquired
-        except FileExistsError:
+        except _ACQUIRE_TRANSIENT_ERRORS:
             # Forcefully remove a stale sentinel — safe because > 30s with
             # no updater implies the holder is dead. If the removal itself
             # fails (Windows: sentinel held open elsewhere) we must NOT retry
@@ -132,7 +165,11 @@ def file_lock(lock_path: Path, timeout: float = 5.0) -> Iterator[Path]:
             # forever. Falling through instead keeps `timeout` authoritative —
             # callers already handle TimeoutError (both CONTEXT-LEDGER hooks
             # have an append-only sidecar fallback for it).
-            if _is_stale(lock_path) and _try_unlink(lock_path):
+            try:
+                is_stale = _is_stale(lock_path)
+            except _STAT_TRANSIENT_ERRORS:
+                is_stale = False
+            if is_stale and _try_unlink(lock_path):
                 continue
             if time.time() >= deadline:
                 raise TimeoutError(

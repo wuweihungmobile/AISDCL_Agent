@@ -271,6 +271,18 @@ def reset_horizon_phrase(branch: str, resets_at: object, now: datetime | None = 
     return f"reset 在 {resets_at}（{hours} 小時內）"
 
 
+# 🔴 R158（反駁者 refute_q1q2.md §S4／§0 本場實測；Q1／Q2 誤讀「被擋」的合理成因 round-label-ok
+# 之一）：halt 帶第二次以後、**每一次** Read／Bash 都印的那則重複訊息（見 `quota_gate.py`
+# 1140 行附近的既有註解）此前沒有帶「收斂不受影響」的澄清——而它偏偏是撞牆期間人唯一
+# 持續看得到的版本。首則訊息（下面 `quota_halt_message()` 的 head）與重複訊息現在共用
+# 同一句，人話面 SSOT 收斂到這裡，避免兩處各自遣詞再度漂移。
+HALT_CONVERGENT_CLARIFICATION = (
+    "你剛才那次工具呼叫已正常執行完成；收斂型工具（Read／Write／Edit／Bash／git）"
+    "不受影響，只有扇出型（Task／Agent／Workflow／WebFetch／WebSearch）暫停；"
+    "真實數字現查：`python tools/session_resume_planner.py --pace`"
+)
+
+
 # 🔴 **開頭不再印裸百分比**（R82／M7）：舊版第一行是「額度水位 54%（≥95%…）」，而裸的
 # 「54%」正是掌舵者當場誤讀的**那個**形狀——那個數字沒有說自己是哪一桶、什麼時候 reset。
 # 改由 `quota_policy.describe()` 逐軸渲染，每一個 % 都自帶 `kind=` 與剩餘分鐘（或明文
@@ -278,7 +290,8 @@ def reset_horizon_phrase(branch: str, resets_at: object, now: datetime | None = 
 def quota_halt_message(decision: quota_policy.Decision, act: dict) -> str:
     """halt 的一次性訊息。三支分支**字串必須不同**，否則「不排程」與「排不了」外觀相同。"""
     head = (f"🔴 額度到達**停止**水位（最緊的一條＝{act['kind'] or '未知'}）⇒ **停止派發**："
-            "扇出型工具一律不執行；收斂（讀檔／寫檔／跑 git）不受影響。\n"
+            "扇出型工具一律不執行。\n"
+            f"   {HALT_CONVERGENT_CLARIFICATION}\n"
             f"   {quota_policy.describe(decision)}\n"
             f"   任務書：{act['plan'] or '（寫不出來——逐字稿路徑不可得）'}\n")
     # 修4：期程句印**被選中的** reset（≥halt 最早可 reset 軸），不再印 binding 的 None。
@@ -335,6 +348,22 @@ def throttle_horizon_line(decision: quota_policy.Decision, now: datetime,
         return (f"   ⏳ 這一條的 {horizon} ⇒ 這道節流會**連續套用好幾天**，不是等一下"
                 "就好。改做不吃額度的工作，或降扇出／切小模型。\n")
     return f"   ⏳ 這一條的 {horizon} ⇒ 這道節流很快就會自己解除。\n"
+
+
+# 🔴 R158（主控裁決）：`quota_gate.py` 1140-1147 那則重複訊息（halt 閂鎖命中後、每次 round-label-ok
+# Read／Bash 都印，撞牆期間人唯一持續看得到的版本）整段搬回人話面這個家——組字邏輯只
+# 一個家，不是把常數搬過去、組字留在呼叫端兩處各自維護。輸出與搬移前相同，另加一行
+# `HALT_CONVERGENT_CLARIFICATION`（DECISION P2；見
+# `tools/tests/test_context_budget_guard.py` 的既有回歸鎖）。
+def quota_halt_repeat_message(decision: quota_policy.Decision, now: datetime) -> str:
+    """halt 閂鎖命中後的重複訊息。同一個 `reset_branch()`，`quota_halt_message()` 的
+    第三個出口——`act` 那份 dict 只在**第一次**觸發時建立（見 `quota_gate.py` 的閂鎖
+    註解），這裡只吃 `decision`／`now` 兩個原語，不依賴 `act`。
+    """
+    return (f"🔴 {quota_policy.describe(decision)}\n"
+            "   額度仍在停止水位：扇出一律不執行，任務書已在磁碟上。\n"
+            f"   {HALT_CONVERGENT_CLARIFICATION}\n"
+            + throttle_horizon_line(decision, now))
 
 
 # ── 6C：85~95%「準備下一次 reset」那一帶真的要做的事（R84／SA-03）────────────────

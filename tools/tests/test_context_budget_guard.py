@@ -56,6 +56,7 @@ import context_budget_guard as guard  # noqa: E402
 # （`ModuleIdentityIsSingleTest` 在守這一條）。
 sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
 import endurance_env  # noqa: E402  # R96／B-4：持久痕跡居所的 SSOT（不複寫路徑字面）
+import harness_feed  # noqa: E402  # R158：`check_lines()` 的空窗出聲測試 round-label-ok
 import quota_criteria  # noqa: E402  # R86：判準本體的家（本檔只做斷言）
 import quota_gate as qg  # noqa: E402
 import quota_messages as qm  # noqa: E402  # R88／LOC-01：人話面與載具參照的家
@@ -3434,12 +3435,85 @@ class HandbackSessionStartAnnounceTest(unittest.TestCase):
         self.addCleanup(setattr, guard, "emit_to_model", guard.emit_to_model)
         guard.emit_to_model = lambda event, msg: seen.append((event, msg)) is None
         self.assertEqual(guard.main(), 0)
-        self.assertEqual(len(seen), 1,
+        # R158／P6：SessionStart 現在還會無條件多送一行真實數字簡報（見下方新測試）， round-label-ok
+        # 「恰好 1 次」不再成立——這裡改判「handback 訊息在呼叫清單中」，意圖不變：
+        # 佈線真的到達 lib，而不只是驗 lib 純函式。
+        handback_seen = [(e, m) for e, m in seen if "## 下一步指令" in m]
+        self.assertEqual(len(handback_seen), 1,
                          "SessionStart 分支沒把未讀 handback 送進 additionalContext")
-        self.assertEqual(seen[0][0], "SessionStart")
-        self.assertIn("## 下一步指令", seen[0][1])
+        self.assertEqual(handback_seen[0][0], "SessionStart")
+        self.assertIn("## 下一步指令", handback_seen[0][1])
         self.assertEqual(guard.main(), 0)
-        self.assertEqual(len(seen), 1, ".ack 落地後重跑仍出聲＝已讀憑證沒被讀")
+        handback_seen_again = [(e, m) for e, m in seen if "## 下一步指令" in m]
+        self.assertEqual(len(handback_seen_again), 1,
+                         ".ack 落地後重跑仍出聲＝已讀憑證沒被讀")
+
+    def test_r158_sessionstart_emits_real_number_brief(self) -> None:
+        """R158／P6（Q2 機制）：SessionStart 無條件多送一行真實數字簡報（額度＋ round-label-ok
+        context＋兩條查證指令＋rc=2 誤讀澄清句），且與未讀 handback 是否存在的出聲各自獨立
+        （§3(b)5 未設耦合，同上一條 vb3 的既有判詞）。"""
+        old_env = os.environ.get(endurance_env.HANDBACK_DIR_ENV)
+        os.environ[endurance_env.HANDBACK_DIR_ENV] = str(self.tmp)
+        self.addCleanup(lambda: os.environ.pop(endurance_env.HANDBACK_DIR_ENV, None)
+                        if old_env is None else os.environ.update(
+                            {endurance_env.HANDBACK_DIR_ENV: old_env}))
+        off_was = os.environ.get(guard.SENTINEL_OFF_ENV)
+        os.environ[guard.SENTINEL_OFF_ENV] = "1"
+        self.addCleanup(lambda: os.environ.update({guard.SENTINEL_OFF_ENV: off_was})
+                        if off_was is not None
+                        else os.environ.pop(guard.SENTINEL_OFF_ENV, None))
+        transcript = _write_jsonl(self.tmp / "brief.jsonl", [12345])
+        axis = quota_policy.Axis("session", 40.0, None, via="limits[].percent")
+        state = quota_policy.QuotaState((axis,), "2026-09-20T00:00:00+08:00", "cache", "ok")
+        self.addCleanup(setattr, guard.quota_gate, "read_quota", guard.quota_gate.read_quota)
+        guard.quota_gate.read_quota = lambda now, path=None: state
+        self.addCleanup(setattr, guard, "read_payload", guard.read_payload)
+        guard.read_payload = lambda: {"hook_event_name": "SessionStart",
+                                      "transcript_path": str(transcript)}
+        seen: list[tuple[str, str]] = []
+        self.addCleanup(setattr, guard, "emit_to_model", guard.emit_to_model)
+        guard.emit_to_model = lambda event, msg: seen.append((event, msg)) is None
+        self.assertEqual(guard.main(), 0)
+        briefs = [m for _, m in seen if "[SDD-CTX-GUARD]" in m]
+        self.assertEqual(len(briefs), 1, "SessionStart 沒有送出真實數字簡報")
+        brief = briefs[0]
+        self.assertIn("used=12,345", brief, "context 那一行沒帶到真實 used 數字")
+        self.assertIn("kind=session", brief, "額度那一行沒帶到假快取的判讀結果")
+        self.assertIn("python tools/session_resume_planner.py --check", brief)
+        self.assertIn("python tools/session_resume_planner.py --pace", brief)
+        self.assertIn("rc=2", brief, "沒有 rc=2 誤讀澄清句")
+
+    def test_r158_sessionstart_brief_falls_back_when_quota_cache_unavailable(self) -> None:
+        """四象限之一（guard 接線面）：額度快取讀不到／判不出來時，簡報退化成
+        「額度快取不可用」而不是整條崩潰或消失——照樣要含 `--pace`。"""
+        old_env = os.environ.get(endurance_env.HANDBACK_DIR_ENV)
+        os.environ[endurance_env.HANDBACK_DIR_ENV] = str(self.tmp)
+        self.addCleanup(lambda: os.environ.pop(endurance_env.HANDBACK_DIR_ENV, None)
+                        if old_env is None else os.environ.update(
+                            {endurance_env.HANDBACK_DIR_ENV: old_env}))
+        off_was = os.environ.get(guard.SENTINEL_OFF_ENV)
+        os.environ[guard.SENTINEL_OFF_ENV] = "1"
+        self.addCleanup(lambda: os.environ.update({guard.SENTINEL_OFF_ENV: off_was})
+                        if off_was is not None
+                        else os.environ.pop(guard.SENTINEL_OFF_ENV, None))
+
+        def _boom(now, path=None):
+            raise OSError("合成：快取讀不到")
+
+        self.addCleanup(setattr, guard.quota_gate, "read_quota", guard.quota_gate.read_quota)
+        guard.quota_gate.read_quota = _boom
+        self.addCleanup(setattr, guard, "read_payload", guard.read_payload)
+        guard.read_payload = lambda: {"hook_event_name": "SessionStart",
+                                      "transcript_path": str(self.tmp / "nope.jsonl")}
+        seen: list[tuple[str, str]] = []
+        self.addCleanup(setattr, guard, "emit_to_model", guard.emit_to_model)
+        guard.emit_to_model = lambda event, msg: seen.append((event, msg)) is None
+        self.assertEqual(guard.main(), 0)
+        briefs = [m for _, m in seen if "[SDD-CTX-GUARD]" in m]
+        self.assertEqual(len(briefs), 1, "額度讀不到時簡報整條消失了")
+        self.assertIn("額度快取不可用", briefs[0])
+        self.assertIn("python tools/session_resume_planner.py --pace", briefs[0])
+        self.assertIn("本 session 尚無量測", briefs[0], "新視窗（無逐字稿）沒有回退成尚無量測")
 
 
 class RunResumeConsumesTheRouteTest(unittest.TestCase):
@@ -10489,6 +10563,23 @@ class QuotaGateIsWiredToTheBurnPathTest(unittest.TestCase):
         self.assertTrue(list(self.tmp.glob(f"{guard.PLAN_PREFIX}*.md")),
                         "halt 帶沒把任務書寫到磁碟上（訴求 6c 的「記錄所有狀態」）")
 
+    def test_the_repeated_halt_message_still_says_convergent_tools_are_unaffected(
+            self) -> None:
+        """R158（refute_q1q2.md §S4／§0 本場實測）：閂鎖命中後、每一次 Read／Bash round-label-ok
+        都印的重複訊息（撞牆期間人唯一持續看得到的那一則）此前**沒有**首則訊息的「收斂不受
+        影響」澄清 ⇒ Q1／Q2 使用者誤讀「被擋」的合理成因之一。紅端＝舊碼的重複訊息只有
+        「額度仍在停止水位：扇出一律不執行，任務書已在磁碟上。」一行，不含這三件事。
+        """
+        _quota_cache(self.tmp, 96.0)
+        rc1, err1 = _run_hook(self._post("Read"), self.tmp)
+        self.assertEqual(rc1, 2, "第一次呼叫沒進 halt ⇒ 本測試前提不成立")
+        rc2, err2 = _run_hook(self._post("Read"), self.tmp)
+        self.assertEqual(rc2, 2, "第二次呼叫沒進 halt ⇒ 閂鎖沒命中，測不到重複訊息")
+        self.assertIn("你剛才那次工具呼叫已正常執行完成", err2)
+        self.assertIn("Read／Write／Edit／Bash／git", err2)
+        self.assertIn("Task／Agent／Workflow／WebFetch／WebSearch", err2)
+        self.assertIn("python tools/session_resume_planner.py --pace", err2)
+
     def test_the_halt_side_effects_run_exactly_once_per_reset_window(self) -> None:
         """副作用（寫任務書＋spawn 武裝）必須在閂鎖**之內**：否則 95% 之後每一次
         Read／Bash 都 spawn 一支 planner，而那會一直持續到 reset。"""
@@ -12054,6 +12145,32 @@ class HarnessFeedStageTest(unittest.TestCase):
         for dud in ("abc", "0", "-1", "", None, 0, -5):
             window, source = guard.resolve_window(0, "500000", harness_window=dud)
             self.assertEqual(window, 500_000, repr(dud))
+
+
+    # ── R158：`tools/lib/harness_feed.py::check_lines()`（純函式，紅綠由注入自證， round-label-ok
+    # 與上面 `HarnessFeedStageTest` 同一份 fixture 家族，不需要 `self.tmp`）───────
+    def test_a_cross_check_diff_is_printed_when_both_sides_measure(self) -> None:
+        lines = harness_feed.check_lines(
+            {"harness_used": 100, "used": 130, "harness_reason": None})
+        self.assertEqual(lines, ["harness used=100 逐字稿 used=130 差=30"])
+
+    def test_an_absent_feed_reason_is_not_swallowed(self) -> None:
+        reason = "無 feed（statusLine 未設定或本 session 尚無 assistant 訊息）"
+        lines = harness_feed.check_lines(
+            {"harness_used": None, "used": 130, "harness_reason": reason})
+        self.assertEqual(lines, [f"harness feed 未採用：{reason}"])
+
+    def test_a_compact_boundary_null_current_usage_is_no_longer_silent(self) -> None:
+        """R158（refute_q3q4ci.md §1a／§1d 反駁者實測）：compact 後、下一次 API round-label-ok
+        回應前的空窗（官方契約 `current_usage: null`）讓 `read_context_feed()` 同時回
+        `used=None, reason=None`——此前這裡落到 `return []`，連「不採用」本身都被吞掉。
+        紅端＝舊碼對這個輸入回 `[]`（見本檔 git 歷史修前版本）。
+        """
+        lines = harness_feed.check_lines(
+            {"harness_used": None, "used": 130, "harness_reason": None})
+        self.assertEqual(
+            lines,
+            ["harness feed 存在但當下無 current_usage（compact 後空窗），本次無交叉比對"])
 
     def test_may_block_accepts_the_harness_source(self) -> None:
         _, source = guard.resolve_window(0, harness_window=500_000)
