@@ -480,3 +480,74 @@ LATEST `install_post_commit.sh`）改為只認 repo 根層 `.venv` 直譯器，P
 `.ps1`；`cd tools/tests && python -m unittest test_ps51_compat
 test_platform_neutral_paths -q` 已於本機 mac 對 `.ps1` 檔掃描過 OK），主控在 mac
 上無法實跑 PowerShell 腳本本體，Windows 側 `PASS=13/13` 待 Windows 親驗補上。
+
+## 十一、補正 5：windows-compat-ci #251 兩個只在 Windows 現形的紅（DEF-200-344）
+
+**事實**：`windows-compat-ci` run 35466301834（headSha `b6e0bfeb`）的
+`run_root_unittests` 步驟回報 2 failures：
+A. `test_context_budget_guard.SentinelWiringTest.
+test_sessionstart_no_longer_spawns_the_arming_run`——斷言 SessionStart 這一支
+`(rc, stderr)` 必為 `(0, "")`，Windows runner 上卻多出一句
+`known_model_windows fail-open：無 AISDLC_SDD 子專案…，不收斂`：R158／P6 新增的
+`session_brief.sessionstart_brief()` 呼叫 `window_evidence()` 時無條件查
+`known_model_windows.json`（D27），假 repo 情境下該表解析失敗，`known_model_
+windows_path()` 把警語直接 `sys.stderr.write()` 到 hook 的**真實** stderr。
+B. `test_install_statusline.BuildCommandTest.
+test_keeps_python_on_posix_even_if_pythonw_exists`——`statusline_context_feed.
+build_command()` 用 `os.name == "nt"` 執行期現查平台，測試卻只斷言 POSIX 行為、
+未對 `os.name` 做任何注入；windows-compat-ci 的 runner 上 `os.name` 恆為
+`"nt"`，測試假設在真 Windows 機器上結構性不成立（鐵律三反向：測試本身沒把平台
+當成輸入注入）。
+
+**修法**：
+A. `tools/lib/session_brief.py::sessionstart_brief()` 把組簡報那段（`context_
+line()`＋`quota_line()`）整段包進 `contextlib.redirect_stderr(io.StringIO())`
+——注入函式（`resolve_window`／`window_evidence`／`read_context_feed`／
+`quota_gate.*`）任何 fail-open 出聲都被吞掉，簡報本身仍只回字串給呼叫端
+`emit_to_model`，不影響回傳內容。回歸鎖：`tools/tests/test_session_brief.py::
+SessionstartBriefTest::test_a_dependencys_stderr_noise_does_not_leak_to_the_
+caller`——注入一個會 `sys.stderr.write()` 的 `resolve_window` 替身，外層用
+`contextlib.redirect_stderr` 捕捉並斷言外層 stderr 為空、回傳字串仍含
+`--check`。
+B. `tools/statusline_context_feed.py::build_command()` 加關鍵字參數
+`windows: bool | None = None`；`None`（呼叫端不帶，即 `settings_snippet()`／
+`install_statusline.py` 既有呼叫）時退回 `os.name == "nt"` 現查，行為不變。
+`tools/tests/test_install_statusline.py` 的 POSIX 分支測試改傳
+`windows=False`、Windows 分支測試改傳 `windows=True`，拔掉原本的
+`mock.patch("statusline_context_feed.os.name", "nt")`（該 monkeypatch 在真
+Windows 機器上完全無效——`os.name` 本來就是 `"nt"`，patch 與否對 Windows 分支
+無差別，差別只在 POSIX 分支的假設是否成立）。
+
+**護欄行數棘輪**：`tools/tests/` 逐檔行數凍結表（`_FROZEN_GUARD_LINES`）之總量
+（`GLC_LINES`）在本輪動工前為 102515；`test_session_brief.py` 直接疊加新測試一度
+把總量推到 102539（+24），觸發 `test_adr_xplat001_c1c2_lock.py` 的
+`TestGuardLayerRatchet` 三支測試翻紅（成長側零容忍）。同檔內以三項瘦身抵銷：
+① 模組 docstring 6→3 行；② 三處重複的「無快取」`_boom` 內嵌替身收斂成共用
+`_cache_miss_gate()`；③ 新測試本身與既有一支 docstring 壓縮。收斂後
+`test_session_brief.py` 220→220（wc -l 淨零），`test_install_statusline.py`
+297→297（移除 `mock` 匯入與 `with` 包裹的行數，恰被展開後的 docstring 抵銷），
+`GLC_LINES` 回落 102515，三支測試轉綠。
+
+**驗證輸出**（本機 mac 親跑）：
+```
+cd tools/tests && python -m unittest test_session_brief test_install_statusline \
+  test_statusline_context_feed test_context_budget_guard.SentinelWiringTest \
+  test_context_budget_guard.HandbackSessionStartAnnounceTest -q
+Ran 78 tests in 0.711s
+OK (skipped=4)
+
+python -m unittest test_adr_xplat001_c1c2_lock -q
+Ran 192 tests in 11.434s
+OK
+[Scan-H triplet] UEP=5 AC=47 GLC_FILES=83 GLC_LINES=102515
+
+ruff check tools/ .claude/hooks/ --no-cache
+All checks passed!
+
+python AutoClaude/tools/check_loc_budget.py --json
+total_violation=False；absolute/tier/special/root_tools violations 皆為 []
+```
+
+**Windows 待親驗**：本輪只能在 mac 上跑上述本機套件，無法重跑真正的
+`windows-compat-ci` workflow；兩紅是否確實轉綠待下一次該 workflow 針對本次
+commit（或其後續 push）的執行結果為證。

@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-"""`tools/lib/session_brief.py` 的回歸鎖（R158／P6：SessionStart 真實數字簡報）。 round-label-ok
-
-四象限（IMPL_P6.md 指名）：額度〈有快取／無快取〉× context〈有 usage／無 usage〉，
-每象限至少一支＋整合測試（量不到就照實說，不得讓呼叫端出例外）。接線面另見
-`test_context_budget_guard.py::HandbackSessionStartAnnounceTest`。
-"""
+"""`tools/lib/session_brief.py` 的回歸鎖（R158／P6：四象限——額度〈有／無快取〉× round-label-ok
+context〈有／無 usage〉，量不到就照實說。接線面另見
+`test_context_budget_guard.py::HandbackSessionStartAnnounceTest`。"""
 from __future__ import annotations
 
+import contextlib
+import io
 import sys
 import types
 import unittest
@@ -36,6 +35,22 @@ def _cache_hit_state() -> quota_policy.QuotaState:
     return quota_policy.QuotaState((axis,), "2026-09-20T00:00:00+08:00", "cache", "ok")
 
 
+def _touch(case: unittest.TestCase) -> Path:
+    """建一份最小逐字稿檔（兩測試類別共用，DEF-200-344 收斂複本）。"""
+    import shutil
+    import tempfile
+    path = Path(tempfile.mkdtemp(prefix="session-brief-")) / "t.jsonl"
+    path.write_text("{}\n", encoding="utf-8")
+    case.addCleanup(shutil.rmtree, path.parent, True)
+    return path
+
+
+def _cache_miss_gate():
+    """`quota_gate` 替身：`read_quota` 恆丟 `OSError`（模擬無快取，3 個測試共用）。"""
+    return _fake_quota_gate(read_quota=lambda now, path=None: (_ for _ in ()).throw(
+        OSError("合成：無快取")))
+
+
 class QuotaLineTest(unittest.TestCase):
     """象限：額度〈有快取〉／〈無快取〉。零網路——`quota_gate` 全由呼叫端注入。"""
 
@@ -47,17 +62,12 @@ class QuotaLineTest(unittest.TestCase):
         self.assertNotIn("額度快取不可用", got)
 
     def test_without_cache_falls_back_to_a_human_sentence(self) -> None:
-        def _boom(now, path=None):
-            raise OSError("合成：無快取")
-
-        gate = _fake_quota_gate(read_quota=_boom)
-        got = sb.quota_line(gate, _NOW)
+        got = sb.quota_line(_cache_miss_gate(), _NOW)
         self.assertIn("額度快取不可用", got)
         self.assertIn("--pace", got, "回退訊息要帶得出查證指令")
 
     def test_load_policy_failure_also_falls_back(self) -> None:
-        """不只 `read_quota` 會壞；`load_policy`／`decide`／`describe` 任何一環出例外
-        都必須收斂成同一句人話，不得讓 SessionStart 整條崩潰。"""
+        """不只 `read_quota` 會壞；`load_policy` 出例外也要收斂成同一句人話。"""
         gate = types.SimpleNamespace(
             quota_policy=types.SimpleNamespace(
                 load_policy=lambda env: (_ for _ in ()).throw(ValueError("壞掉的 policy")),
@@ -92,7 +102,7 @@ class ContextLineTest(unittest.TestCase):
         self.assertEqual(got, sb._NO_MEASURE)
 
     def test_scan_returning_no_usage_reports_no_measurement(self) -> None:
-        tmp = self._touch()
+        tmp = _touch(self)
         got = sb.context_line(
             tmp, scan_transcript=lambda p: (None, 0, None),
             resolve_window=lambda *a, **k: (200_000, "x"),
@@ -100,7 +110,7 @@ class ContextLineTest(unittest.TestCase):
         self.assertEqual(got, sb._NO_MEASURE, "量不到 usage 不該假裝量到了")
 
     def test_scan_with_usage_reports_used_and_window(self) -> None:
-        tmp = self._touch()
+        tmp = _touch(self)
         got = sb.context_line(
             tmp,
             scan_transcript=lambda p: (12_345, 12_345, "claude-test-double-3"),
@@ -113,7 +123,7 @@ class ContextLineTest(unittest.TestCase):
 
     def test_a_broken_dependency_falls_back_to_no_measurement(self) -> None:
         """任何一環（掃描／解析 window／讀 feed）拋例外都要收斂，不得讓 SessionStart 死掉。"""
-        tmp = self._touch()
+        tmp = _touch(self)
 
         def _boom(_p):
             raise ValueError("合成：掃描壞掉")
@@ -125,20 +135,12 @@ class ContextLineTest(unittest.TestCase):
 
     def test_non_positive_window_reports_no_measurement(self) -> None:
         """`window<=0` 是 `tier_of()` 定義過的「不對零做除法」的同型地雷，本檔獨立防一次。"""
-        tmp = self._touch()
+        tmp = _touch(self)
         got = sb.context_line(
             tmp, scan_transcript=lambda p: (100, 100, "m"),
             resolve_window=lambda *a, **k: (0, "壞掉的分母"),
             window_evidence=lambda *a, **k: {}, read_context_feed=lambda *a: {})
         self.assertEqual(got, sb._NO_MEASURE)
-
-    def _touch(self) -> Path:
-        import shutil
-        import tempfile
-        path = Path(tempfile.mkdtemp(prefix="session-brief-")) / "t.jsonl"
-        path.write_text("{}\n", encoding="utf-8")
-        self.addCleanup(shutil.rmtree, path.parent, True)
-        return path
 
 
 class SessionstartBriefTest(unittest.TestCase):
@@ -148,7 +150,7 @@ class SessionstartBriefTest(unittest.TestCase):
         return {"transcript_path": str(transcript) if transcript else None}
 
     def test_cache_hit_and_usage_present(self) -> None:
-        tmp = self._touch()
+        tmp = _touch(self)
         gate = _fake_quota_gate(read_quota=lambda now, path=None: _cache_hit_state())
         got = sb.sessionstart_brief(
             self._payload(tmp), gate,
@@ -171,14 +173,8 @@ class SessionstartBriefTest(unittest.TestCase):
         self._assert_common(got)
 
     def test_cache_miss_and_usage_present(self) -> None:
-        tmp = self._touch()
-
-        def _boom(now, path=None):
-            raise OSError("合成：無快取")
-
-        gate = _fake_quota_gate(read_quota=_boom)
         got = sb.sessionstart_brief(
-            self._payload(tmp), gate,
+            self._payload(_touch(self)), _cache_miss_gate(),
             scan_transcript=lambda p: (1, 1, "claude-test-double-3"),
             resolve_window=lambda *a, **k: (200_000, "指定值（測試）"),
             window_evidence=lambda *a, **k: {}, read_context_feed=lambda *a: {}, now=_NOW)
@@ -188,32 +184,36 @@ class SessionstartBriefTest(unittest.TestCase):
 
     def test_cache_miss_and_usage_absent(self) -> None:
         """四象限最壞的一格：兩邊都量不到。簡報仍要送出，兩句 fail-open 訊息都在。"""
-
-        def _boom(now, path=None):
-            raise OSError("合成：無快取")
-
-        gate = _fake_quota_gate(read_quota=_boom)
         got = sb.sessionstart_brief(
-            self._payload(None), gate,
+            self._payload(None), _cache_miss_gate(),
             scan_transcript=None, resolve_window=None,
             window_evidence=None, read_context_feed=None, now=_NOW)
         self.assertIn(sb._NO_MEASURE, got)
         self.assertIn(sb._QUOTA_UNAVAILABLE, got)
         self._assert_common(got)
 
+    def test_a_dependencys_stderr_noise_does_not_leak_to_the_caller(self) -> None:
+        """DEF-200-344：注入函式的 fail-open 噪音（如 windows-compat-ci #251 撞到的
+        `known_model_windows` 查表警語）不得外洩到呼叫端 stderr。"""
+        def _noisy_resolve_window(*_a, **_k):
+            sys.stderr.write("known_model_windows fail-open：合成噪音\n")
+            return (200_000, "指定值（測試）")
+        outer = io.StringIO()
+        with contextlib.redirect_stderr(outer):
+            got = sb.sessionstart_brief(
+                self._payload(_touch(self)), _fake_quota_gate(
+                    read_quota=lambda now, path=None: _cache_hit_state()),
+                scan_transcript=lambda p: (1, 1, "claude-test-double-3"),
+                resolve_window=_noisy_resolve_window,
+                window_evidence=lambda *a, **k: {}, read_context_feed=lambda *a: {}, now=_NOW)
+        self.assertEqual(outer.getvalue(), "", "注入函式的 stderr 噪音外洩到呼叫端")
+        self.assertIn("--check", got)
+
     def _assert_common(self, brief: str) -> None:
         self.assertIn("python tools/session_resume_planner.py --check", brief)
         self.assertIn("python tools/session_resume_planner.py --pace", brief)
         self.assertIn("rc=2", brief, "缺少『rc=2 紅字只代表扇出暫停』的誤讀澄清句")
         self.assertIn("Read／Write／Edit／Bash／git", brief)
-
-    def _touch(self) -> Path:
-        import shutil
-        import tempfile
-        path = Path(tempfile.mkdtemp(prefix="session-brief-")) / "t.jsonl"
-        path.write_text("{}\n", encoding="utf-8")
-        self.addCleanup(shutil.rmtree, path.parent, True)
-        return path
 
 
 if __name__ == "__main__":

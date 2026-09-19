@@ -12,7 +12,6 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest import mock
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _TOOLS_DIR = _REPO_ROOT / "tools"
@@ -96,14 +95,15 @@ class BuildCommandTest(unittest.TestCase):
             pythonw_exe.write_text("", encoding="utf-8")
             script = d / "statusline_context_feed.py"
             script.write_text("", encoding="utf-8")
-            with mock.patch("statusline_context_feed.os.name", "nt"):
-                cmd = feed.build_command(python_exe, script)
+            cmd = feed.build_command(python_exe, script, windows=True)
         self.assertIn(pythonw_exe.as_posix(), cmd)
         self.assertNotIn(python_exe.as_posix(), cmd)
 
     def test_keeps_python_on_posix_even_if_pythonw_exists(self) -> None:
-        """`os.name` 不是 `"nt"` 時（本測試環境即是）不觸發替換——即使同目錄剛好
-        有一支叫 `pythonw.exe` 的檔案，也不該被誤用。"""
+        """`windows=False` 顯式注入時不觸發替換——即使同目錄剛好有一支叫
+        `pythonw.exe` 的檔案，也不該被誤用（DEF-200-344：改注入而非 monkeypatch
+        `os.name`，windows-compat-ci 真機上 `os.name` 恆為 `"nt"`，測試自身必須
+        能在任一平台斷言 POSIX 分支）。"""
         with tempfile.TemporaryDirectory() as td:
             d = Path(td)
             python_exe = d / "python3"
@@ -112,7 +112,7 @@ class BuildCommandTest(unittest.TestCase):
             pythonw_exe.write_text("", encoding="utf-8")
             script = d / "statusline_context_feed.py"
             script.write_text("", encoding="utf-8")
-            cmd = feed.build_command(python_exe, script)
+            cmd = feed.build_command(python_exe, script, windows=False)
         self.assertIn(python_exe.as_posix(), cmd)
         self.assertNotIn("pythonw.exe", cmd)
 

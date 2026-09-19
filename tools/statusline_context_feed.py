@@ -168,16 +168,20 @@ def resolve_windows_interpreter(python_path: Path) -> Path:
     return python_path
 
 
-def build_command(python_path: Path, script_path: Path) -> str:
+def build_command(python_path: Path, script_path: Path, *, windows: bool | None = None) -> str:
     """組出可貼進 `settings.json` 的 `statusLine.command` 字串：POSIX 正斜線
     （Git Bash／PowerShell 兩殼皆吃得下，官方 statusline.md 明文建議，反斜線在
     Git Bash 下會被當跳脫字元吃掉且靜默失敗）＋含空白的 token 才加雙引號。
-    Windows 上（`os.name == "nt"`）先嘗試把直譯器換成同目錄 `pythonw.exe`。
+    `windows=None`（呼叫端不帶）時以 `os.name == "nt"` 現查；測試才需要顯式注入
+    （DEF-200-344：windows-compat-ci 實跑時 `os.name` 恆為 `"nt"`，靠 monkeypatch
+    模擬 POSIX 分支在真 Windows runner 上不成立）。是 Windows 才嘗試把直譯器換成
+    同目錄 `pythonw.exe`。
 
     `settings_snippet()`／`tools/install_statusline.py` 共用本函式，避免兩份各自
     維護的字串組法（R158 D2；主控裁決 DECISION.md〈P5〉）。 round-label-ok
     """
-    if os.name == "nt":
+    is_windows = (os.name == "nt") if windows is None else windows
+    if is_windows:
         python_path = resolve_windows_interpreter(python_path)
     return f"{_quote_token(python_path.as_posix())} {_quote_token(script_path.as_posix())}"
 

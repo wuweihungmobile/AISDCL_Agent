@@ -18,6 +18,8 @@ window」的邏輯。純 stdlib；任何一路量不到／組不出來都 fail-o
 """
 from __future__ import annotations
 
+import contextlib
+import io
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -89,11 +91,18 @@ def sessionstart_brief(
     *,
     now: datetime | None = None,
 ) -> str:
-    """組出 SessionStart 要 `emit_to_model` 的那一整行簡報（額度＋context＋查證指令）。"""
+    """組出 SessionStart 要 `emit_to_model` 的那一整行簡報（額度＋context＋查證指令）。
+
+    DEF-200-344：注入函式（`resolve_window` 等）本身也可能 fail-open 出聲到
+    stderr（如 `known_model_windows` 查表失手），本函式整段包
+    `contextlib.redirect_stderr` 吞掉，不得漏到 SessionStart hook 的真實 stderr。
+    """
     raw = payload.get("transcript_path")
     transcript = Path(raw) if isinstance(raw, str) and raw.strip() else None
-    ctx = context_line(transcript, scan_transcript=scan_transcript, resolve_window=resolve_window,
-                       window_evidence=window_evidence, read_context_feed=read_context_feed)
-    quota = quota_line(quota_gate, now)
+    with contextlib.redirect_stderr(io.StringIO()):
+        ctx = context_line(
+            transcript, scan_transcript=scan_transcript, resolve_window=resolve_window,
+            window_evidence=window_evidence, read_context_feed=read_context_feed)
+        quota = quota_line(quota_gate, now)
     return (f"[SDD-CTX-GUARD] 本 session 啟動時真實水位——context：{ctx}；額度：{quota}。"
            f"{_VERIFY_HINT}{_RC2_CLARIFY}")
