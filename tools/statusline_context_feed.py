@@ -72,7 +72,7 @@ def _atomic_write_json(path: Path, data: dict, *, indent: int | None = None) -> 
 
 def atomic_write_json(path: Path, data: dict, *, indent: int | None = None) -> None:
     """`_atomic_write_json()` 的公開薄包裝，供其他模組（如
-    `tools/install_statusline.py`）重用同一份原子寫邏輯，避免第二份複本（R158 收尾）。"""
+    `tools/install_statusline.py`）重用同一份原子寫邏輯，避免第二份複本（2026-09-20 修）。"""
     _atomic_write_json(path, data, indent=indent)
 
 
