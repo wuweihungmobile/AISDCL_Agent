@@ -1372,10 +1372,10 @@ headless 實作者把「探針 rc/stdout 皆空」誤記為「& 呼叫限制」�
 ### 驗證數字（[他包回報] 者為子 agent 本場實跑；其餘主控親跑）
 
 - 主控收尾親跑（最終親跑）：根層全套 w=13 184.5s rc=1，3 筆失敗＝E501 折行前（已修，鎖回綠）、程式碼內 R157 字面撞輪號鎖
-  （已改用日期指針）、DEF-200-332（`TraceIsolationTest`）；修後目標模組合跑 230 tests OK；護欄鎖模組 218 tests OK；
+  （已改用日期指針）、`TraceIsolationTest` 競態（待立帳）；修後目標模組合跑 230 tests OK；護欄鎖模組 218 tests OK；
   `check_defect_log_crossref.py` rc=0；ONBOARDING §7 表②以乾淨 venv 載具回填兩次（137s／rc=0，`--check-snapshot` rc=0）。
   pre-push 實跑：第一次被 E501（139→141）＋指紋 stale 擋下；第二次五 leg 全過（推上 3f77c20＋5f71601，但收尾補正因
-  commit 訊息檔缺失未入該次）；第三次（0b26a00）只剩 DEF-200-332 一筆翻紅被擋；第四次以 `AUTOSDD_PARALLEL_TESTS_WORKERS=9`
+  commit 訊息檔缺失未入該次）；第三次（0b26a00）只剩 `TraceIsolationTest` 一筆翻紅被擋；第四次以 `AUTOSDD_PARALLEL_TESTS_WORKERS=9`
   重試——結果與雲端 CI 五支狀態見本輪 session 收尾回報，本檔於下一輪回填。
 
 ### 🔴 誠實劃界（本輪仍未解決）
@@ -1385,5 +1385,8 @@ headless 實作者把「探針 rc/stdout 皆空」誤記為「& 呼叫限制」�
 - pg_serial 釋出的 58 支（機器判準）靠原始碼指標判定；子目錄（tests/infra/adapters、tests/integration/test_sdd_bridge…）未逐檔登記進審計表，
   判準對其機械生效；fixture 間接觸碰 PG 的形態由本輪複審 SD 抽驗（見複審判決）。
 - A-01 nightly-full 廣播輸出、DEF-200-292 自癒、掌舵者本人親跑 run_root_unittests.py：仍待。
-- DEF-200-332：`TraceIsolationTest` 在 w=13 下約半數翻紅（生產痕跡檔被 `source=no-account-key` 寫入，pid 未歸因、
-  哨兵時刻不吻合），open 未指派；本輪 push 以 w=9 降低重疊，不是修復。
+- 待立帳（下一輪首件）：`TraceIsolationTest` 在 w=13 下約半數翻紅（生產痕跡 `autosdd_quota_degraded.jsonl` 被
+  `source=no-account-key` 行程寫入，12:29:58／12:45:52／12:50:26 三筆，pid 未歸因、哨兵時刻不吻合）；本輪 push 以 w=9 降低重疊，
+  不是修復。本輪未能立帳的原因＝工具衝突：帳本未結列淨額棘輪要求同一 commit 配對結案列，而逃生口 `AUTOSDD_NET_RATCHET_OFF=1`
+  在 pre-push 同一 env 下洩入根層測試行程，使 test_check_defect_log_crossref 三支 env 敏感測試翻紅（實測 b3dc070 push 被擋）；
+  下一輪先讓該三支測試自行隔離該環境變數，再立帳兩筆（TraceIsolationTest 競態、逃生口與 pre-push 互斥）。

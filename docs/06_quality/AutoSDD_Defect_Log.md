@@ -331,7 +331,6 @@
 | DEF-200-329 | 2026-09-19 | 多 CPU 第十四輪 SD-01 量測（本欄刻意零輪號） | **`pg_serial` 群組用三個目錄整批序列化**：83 支中約 25 支真碰 PG（機器判準），`--dist loadgroup` 下 9／14／19 worker 全套皆約 70s（與 worker 數無關的天花板）。詳見證據檔〈第十四輪〉 | P2 | 判準改「路徑前綴 且 原始碼含 PG 指標」或 `pg_real`；不確定一律保留 | fixed（2026-09-19）：全套 5 次 4858 passed，70s→29.6s；w=6 40s 證明仍有邊際效益 |
 | DEF-200-330 | 2026-09-19 | 多 CPU 第十四輪 SD 於 w=14 實跑撞出（本欄刻意零輪號） | **LoadBalancingRegressionTest 把 `_zzz_*` 暫態模組寫進真 tools/tests/**，與護欄行數掃描器時間窗重疊即假紅（`test_a_net_zero_swap_is_red`）；`_worker_main` 硬釘 start_dir 故不能改走暫存目錄。詳見證據檔〈第十四輪〉 | P2 | 護欄掃描器三處檔案列舉排除 `_zzz_` 前綴（全庫第五輪同型慣例） | fixed（2026-09-19） |
 | DEF-200-331 | 2026-09-19 | 多 CPU 第十四輪 SA-04（本欄刻意零輪號） | **`design_xdist.md` 被 8 處程式碼／測試／workflow 註解引用為設計出處，但從未入庫**（git log --all 零命中）。詳見證據檔〈第十四輪〉 | P3 | 引用改指 CrossPlatform_DEF200274_Parallel_Tests_Evidence.md〈第九輪〉 | fixed（2026-09-19）：全庫 Grep 零殘留 |
-| DEF-200-332 | 2026-09-19 | 多 CPU 第十四輪四方複審 QA-F2／SD-3（本欄刻意零輪號） | **`TraceIsolationTest` 在 worker=13 全套下約半數翻紅**：有行程以 `source=no-account-key` 寫入生產痕跡 `autosdd_quota_degraded.jsonl`，寫入者未歸因。詳見證據檔〈第十四輪〉 | P2 | 承接輪次：**未指派**；解鎖條件：寫入站點加 pid／argv 取證找出寫入者 | open（2026-09-19） |
 
 > **R41「四方複審裁決總結」敘事段落已搬遷至 [`AutoSDD_Defect_Log_archive_17.md`](AutoSDD_Defect_Log_archive_17.md)（R43 帳本 housekeeping，逐字保全）。**
 
