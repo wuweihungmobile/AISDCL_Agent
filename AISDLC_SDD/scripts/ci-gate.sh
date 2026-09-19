@@ -180,7 +180,7 @@ run_gate_for_version() {
   # DEF-101-515 需人工考古才解釋得出 v0.30 −4 的兩支平台硬排除，根因即此。
   # 對計數無影響：pytest_passed_count.sh 抓 `N passed`，SKIPPED 行不含該樣式（R59 實測）。
   # DEF-200-274 D6：兩份 pytest.ini（v0.01/v0.30）一律不動（掌舵者裁決），啟用點
-  # 放呼叫端（design_xdist.md §6）。
+  # 放呼叫端（docs/06_quality/CrossPlatform_DEF200274_Parallel_Tests_Evidence.md〈第九輪〉）。
   # 🔴 實作偏離掌舵者裁決之處（本節必須如實記錄，見任務書「有證據認為設計錯了才可
   # 偏離」）：裁決原文要求兩軌「都吃到 -n auto --dist worksteal，效果一致」，但本輪
   # 實測發現 `tools/fsm_runtime/snapshot.py::save_abort_report()` 對同日同 category
@@ -279,7 +279,15 @@ run_gate_for_version() {
 # 缺席時的 fail-loud 紀律刻意不同調（該紀律守的是「閘門有沒有真的跑」，本段
 # 只決定跑多快）。
 if [[ -z "${AUTOSDD_PARALLEL_TESTS_WORKERS:-}" && -z "${PYTEST_XDIST_AUTO_NUM_WORKERS:-}" ]]; then
-  _cpu_budget="$("$PY" "${REPO_ROOT}/tools/lib/cpu_budget.py" --legs 1 2>/dev/null || true)"
+  # DEF-200-326：cpu_budget.py 住 monorepo 根，不是 REPO_ROOT（＝AISDLC_SDD/）。
+  MONOREPO_ROOT="$(cd "${REPO_ROOT}/.." && pwd)"
+  _cpu_budget_script="${MONOREPO_ROOT}/tools/lib/cpu_budget.py"
+  if [[ -f "${_cpu_budget_script}" ]]; then
+    _cpu_budget="$("$PY" "${_cpu_budget_script}" --legs 1 2>/dev/null || true)"
+  else
+    echo "⚠️ cpu_budget 廣播跳過：${_cpu_budget_script} 不存在或執行失敗（fail-open）" >&2
+    _cpu_budget=""
+  fi
   case "${_cpu_budget}" in
     ''|*[!0-9]*) ;;
     *)

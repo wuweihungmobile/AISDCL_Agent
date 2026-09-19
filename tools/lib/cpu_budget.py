@@ -1,20 +1,14 @@
 #!/usr/bin/env python3
-"""tools/lib/cpu_budget.py — 跨 leg CPU 平行度預算 SSOT（DEF-200-289）。
+"""tools/lib/cpu_budget.py — 跨 leg CPU 平行度預算 SSOT（DEF-200-289；DEF-200-327 實體核優先）。
 
-WHY：`parallel_shard.worker_count()`（本機 unittest 平行）、AutoClaude
-`pyproject.toml` 的 `-n auto`（pytest-xdist 自算）、`AISDLC_SDD/scripts/ci-gate.sh`
-與 `tools/git-hooks/pre-push` 各自寫死 `-n auto --dist worksteal`／`cpu-1` 公式，
-五套互不知情、無 SSOT（帳本 DEF-200-289）。本檔是唯一算法來源。
+`parallel_shard.worker_count()`／AutoClaude pytest `-n auto`／`ci-gate.sh`／`pre-push`
+共用本檔算法，唯一算法來源（帳本 DEF-200-289）。
 
-CI runner（GitHub Actions）是無人值守 headless：`cpu-1`「保留一核給前景」在這裡
-毫無意義，白白少用一核。互動環境（本機開發者終端仍在前景）才保留一核。
-headless 判準＝`GITHUB_ACTIONS=true` 或 `AUTOSDD_CPU_HEADLESS=1`。cap 沿用既有
-`parallel_shard.worker_count()` 的上限 9（SD 審查列為待量化 HYPOTHESIS，本輪不動）。
-
-今日各 orchestrator（pre-push、ci-gate.sh／.ps1）皆序列跑（n_legs=1）：
-`per_leg_budget(1) == total_budget()`，行為與現況相同，只有 CI headless 情境下
-多分到 1 個 worker；未來若真的把某個 orchestrator 拆成多個並行 leg，才靠
-`per_leg_budget()` 依 leg 數平分預算，避免多個 leg 各自 `-n auto` 疊加超賣核心。
+headless（CI）＝`max(1, min(CAP, 邏輯核))`，不變（CI vCPU 皆 <=10，4/4/3 零回歸）。
+互動環境改用**實體核 -1**：i5-14600K 14P/20L 實測 w=9 196.5s／w=14 166.8s／
+w=19 173.7s，邏輯核 SMT/E-core 超額訂閱互動情境反而拖慢；10 核筆電 8P+2E → 9 是
+既有校準點。CAP 9→16（>16 實體核未量測＝HYPOTHESIS）。`physical_count` 未給時
+`_detect_physical_count()` optional import psutil；缺席或回 None 退回邏輯核（舊行為）。
 """
 from __future__ import annotations
 
@@ -22,20 +16,40 @@ import argparse
 import os
 import sys
 
+_CAP = 16
 
-def total_budget(cpu_count: int | None = None, headless: bool | None = None) -> int:
-    """headless 無前景可保留 ⇒ 用滿全部核心；互動環境保留一核給前景。
 
-    cap 沿用 `parallel_shard.worker_count()` 既有上限 `max(1, min(9, ·))`。
-    """
-    cpu = cpu_count if cpu_count is not None else (os.cpu_count() or 2)
+def _detect_physical_count() -> int | None:
+    """optional psutil 探測實體核心數；缺席或例外一律回 None（呼叫端退回邏輯核）。"""
+    try:
+        import psutil
+    except ImportError:
+        return None
+    try:
+        return psutil.cpu_count(logical=False)
+    except Exception:
+        return None
+
+
+def total_budget(
+    cpu_count: int | None = None,
+    headless: bool | None = None,
+    physical_count: int | None = None,
+) -> int:
+    """headless 用邏輯核心（不變）；互動用實體核心 -1（見檔頭 WHY）。"""
+    logical = cpu_count if cpu_count is not None else (os.cpu_count() or 2)
     if headless is None:
         headless = (
             os.environ.get("GITHUB_ACTIONS") == "true"
             or os.environ.get("AUTOSDD_CPU_HEADLESS") == "1"
         )
-    raw = cpu if headless else cpu - 1
-    return max(1, min(9, raw))
+    if headless:
+        return max(1, min(_CAP, logical))
+
+    physical = physical_count if physical_count is not None else _detect_physical_count()
+    if not physical:
+        physical = logical
+    return max(1, min(_CAP, physical - 1))
 
 
 def per_leg_budget(n_legs: int, total: int | None = None) -> int:

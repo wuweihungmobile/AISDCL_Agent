@@ -343,34 +343,16 @@ class TestGetRepoPythonBehavior(unittest.TestCase):
         )
 
     def test_repo_venv_present_is_preferred(self) -> None:
-        """情境 1：repo 根層 .venv 存在 ⇒ 回傳該候選路徑。
+        """情境 1：repo 根層 .venv 存在 ⇒ 回傳該候選路徑（兩候選皆備好且都是真直譯器
+        ＋pyvenv.cfg，否則兩者皆落回 fail-loud、弱斷言 `assertIn(".venv", …)` 照樣過——D-F2）。
 
-        D-F2 順序鑑別力補強：原版只放單一候選（`.venv/Scripts/python.exe`），
-        `assertIn(".venv", ...)` 對候選順序毫無鑑別力——連 fail-loud 分支的
-        補救訊息都含 ".venv" 字面，選哪個、甚至兩個都選不到，斷言照樣過。
-        現兩候選（`.venv/bin/python`／`.venv/Scripts/python.exe`）都複製
-        `sys.executable` 並補上 `pyvenv.cfg`（venv 版直譯器搬離原位置找不到
-        同層 pyvenv.cfg 會以 exit code 106 拒絕啟動，兩候選皆會落回
-        fail-loud，同樣讓弱斷言誤判通過——這正是本測試補強前的隱藏根因）。
-
-        🔴 Windows 平台真機實測（2026-09-19，本測試自身跑出）：PowerShell
-        `&` 呼叫操作對「無副檔名的真 PE 檔」走的不是 Start-Process 那種直接
-        CreateProcess 路徑——非互動 `-NoProfile -Command` 子行程下探測 rc/
-        stdout 皆空（非掛起；用 Start-Process 對同一份檔案直接呼叫可正常
-        執行，兩者路徑不同），使 `Get-RepoPython` 的候選迴圈判定 `.venv/bin/
-        python` 不可用而落到 `.venv\\Scripts\\python.exe`——即使該檔案
-        `Test-Path` 為真、內容是可正常運作的直譯器。這使得 bash 側新順序
-        （`.venv/bin/python` 優先）在 **Windows 原生候選陣列語意下對這個
-        人造 fixture 沒有可觀測效果**：不是本測試沒抓到 bug，而是 Windows
-        平台上 `.venv/bin/python`（POSIX 慣例、正常不會出現在 Windows venv）
-        這個候選形狀本身在 `&` 呼叫語意下結構性不可用，兩平台「同序」這件
-        事在 Windows 上只在**文字層**（D-F1 的候選字面序）有意義，行為層
-        （這裡）在 Windows 上量到的是「不管排哪個順位，bin/python 這個
-        候選形狀在 Windows 原生 & 呼叫下都選不到」。故 Windows 分支斷言改
-        為量測到的真實行為（選中 Scripts），non-Windows 分支維持原始 D-F2
-        意圖的嚴格斷言（POSIX `exec` 對無副檔名檔案無此限制，`bin/python`
-        才是真正的鑑別對象；本開發機為 Windows，此分支未實跑驗證，留待
-        macOS/Linux 開發機或雲端 CI 複驗）。"""
+        🔴 DEF-200-325（2026-09-19 掌舵者 Windows 11 物理機親眼所見）：Windows 上把
+        `.venv/bin/python` 這個無副檔名候選交給 `&`，PowerShell 會回退 ShellExecute、在桌面
+        彈出「選取應用程式以開啟 python」對話框（探針 rc/stdout 皆空；19f3e75 初版把這個現象
+        誤記為「& 呼叫限制」，每跑一次全套就彈一次）。修法＝`Get-RepoPython` 在 Windows 主機
+        只探測 PATHEXT 內的候選（鎖見 `test_get_repo_python_skips_extensionless_candidates_
+        on_windows`），故 Windows 分支的正解是選中 `Scripts/python.exe`；POSIX 分支維持
+        `bin/python` 優先（本開發機為 Windows，該分支留待 macOS/Linux 或雲端 CI 複驗）。"""
         tmp = Path(tempfile.mkdtemp(prefix="get_repo_python_"))
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
         venv_bin = tmp / ".venv" / "bin"
@@ -433,6 +415,18 @@ class TestGetRepoPythonBehavior(unittest.TestCase):
             "找不到 repo 根層 .venv 直譯器", proc.stdout + proc.stderr,
             f"stdout={proc.stdout!r} stderr={proc.stderr!r}",
         )
+
+    def test_get_repo_python_skips_extensionless_candidates_on_windows(self) -> None:
+        """DEF-200-325 回歸鎖（文字層、平台無關）：`Get-RepoPython` 候選迴圈必須帶 Windows
+        主機 PATHEXT 過濾——少了它，無副檔名候選經 `&` 回退 ShellExecute 彈對話框
+        （DEF-101-759 同型），而該對話框在無人值守環境下結構上不可觀測。"""
+        m = re.search(r"function Get-RepoPython\s*\{(?P<body>.*?)\n\}",
+                      _GUARD_PS1.read_text(encoding="utf-8-sig"), re.DOTALL)
+        self.assertIsNotNone(m, "WindowsAppsGuard.ps1 找不到 Get-RepoPython 函式")
+        body = _ps_code_only(m.group("body"))
+        for needle in ("PATHEXT", "GetExtension", "-notcontains"):
+            self.assertIn(needle, body,
+                          f"Get-RepoPython 候選迴圈缺 {needle}（DEF-200-325：無副檔名候選會彈對話框）")
 
 
 # ---------------------------------------------------------------------------

@@ -1,11 +1,14 @@
-"""`tools/lib/cpu_budget.py` 的機械物（DEF-200-289：跨 leg CPU 預算 SSOT）。
+"""`tools/lib/cpu_budget.py` 的機械物（DEF-200-289：跨 leg CPU 預算 SSOT；
+DEF-200-327 實體核優先）。
 
 WHY（測意圖非僅行為，Rule 9）：`parallel_shard.worker_count()`、AutoClaude
 `pyproject.toml` 的 `-n auto`、`AISDLC_SDD/scripts/ci-gate.sh`／`.ps1` 與
 `tools/git-hooks/pre-push` 各自寫死 CPU 平行度公式，五套互不知情、無 SSOT。
 本檔鎖住唯一算法來源本身（headless／互動兩分支、cap、floor、per_leg 切分、
-CLI 契約）；GAP-E 另鎖 AutoClaude `pyproject.toml` 的 `-n auto --dist worksteal`
-必須存在，防止「本檔算出的預算沒有任何已知消費端會用到」的退化。
+CLI 契約、實體核偵測退化路徑）；GAP-E 另鎖 AutoClaude `pyproject.toml` 的
+`-n auto --dist worksteal` 必須存在，防止「本檔算出的預算沒有任何已知消費端
+會用到」的退化。互動分支測試一律 mock `_detect_physical_count()`（本機真的裝了
+psutil，不 mock 就會被真實硬體核心數污染，測試在不同機器上得到不同答案）。
 
 執行：python -m unittest test_cpu_budget -v   （cwd＝tools/tests）
 """
@@ -26,29 +29,35 @@ import cpu_budget as cb  # noqa: E402
 
 
 class TotalBudgetFormulaTest(unittest.TestCase):
-    """`total_budget()` 的 headless／互動兩分支＋cap／floor。"""
+    """`total_budget()` 的 headless（邏輯核）／互動（實體核）兩分支＋cap／floor。"""
 
-    def test_interactive_reserves_one_core(self) -> None:
-        cases = {1: 1, 2: 1, 9: 8, 10: 9, 100: 9}
-        for cpu, expected in cases.items():
+    def setUp(self) -> None:
+        # 隔離本機真實 psutil：互動分支未顯式給 physical_count 時一律視為偵測失敗。
+        patcher = mock.patch.object(cb, "_detect_physical_count", return_value=None)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_interactive_reserves_one_physical_core(self) -> None:
+        cases = {1: 1, 10: 9, 14: 13, 20: 16}
+        for physical, expected in cases.items():
             self.assertEqual(
-                cb.total_budget(cpu_count=cpu, headless=False), expected,
-                f"互動 cpu={cpu} 應得 {expected}（max(1, min(9, cpu-1))）")
+                cb.total_budget(physical_count=physical, headless=False), expected,
+                f"互動 physical={physical} 應得 {expected}（max(1, min(16, physical-1))）")
 
-    def test_headless_uses_all_cores(self) -> None:
-        cases = {1: 1, 2: 2, 9: 9, 10: 9, 100: 9}
+    def test_headless_uses_all_logical_cores(self) -> None:
+        cases = {1: 1, 4: 4, 9: 9, 16: 16, 20: 16, 100: 16}
         for cpu, expected in cases.items():
             self.assertEqual(
                 cb.total_budget(cpu_count=cpu, headless=True), expected,
-                f"headless cpu={cpu} 應得 {expected}（max(1, min(9, cpu)))）")
+                f"headless cpu={cpu} 應得 {expected}（max(1, min(16, cpu)))）")
 
     def test_headless_gets_one_more_worker_than_interactive_below_cap(self) -> None:
-        """本輪核心行為變化：cap 以下，headless 應比互動多 1 個 worker——這正是
-        DEF-200-289 的收益本體（CI headless 不再白白保留前景那一核）。"""
-        for cpu in (2, 4, 8):
+        """本輪核心行為：cap 以下，headless（邏輯核 N）應比互動（實體核 N）多 1 個
+        worker——CI headless 不再白白保留前景那一核（DEF-200-289 收益本體）。"""
+        for cores in (2, 4, 8):
             self.assertEqual(
-                cb.total_budget(cpu_count=cpu, headless=True),
-                cb.total_budget(cpu_count=cpu, headless=False) + 1,
+                cb.total_budget(cpu_count=cores, headless=True),
+                cb.total_budget(physical_count=cores, headless=False) + 1,
             )
 
     def test_floor_is_one_even_with_single_core(self) -> None:
@@ -70,7 +79,7 @@ class TotalBudgetFormulaTest(unittest.TestCase):
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop("GITHUB_ACTIONS", None)
             os.environ.pop("AUTOSDD_CPU_HEADLESS", None)
-            self.assertEqual(cb.total_budget(cpu_count=4), 3, "兩變數皆缺席應判互動")
+            self.assertEqual(cb.total_budget(cpu_count=4), 3, "兩變數皆缺席應判互動，退回邏輯核")
 
     def test_explicit_headless_param_wins_over_env(self) -> None:
         with mock.patch.dict(os.environ, {"GITHUB_ACTIONS": "true"}, clear=False):
@@ -78,6 +87,26 @@ class TotalBudgetFormulaTest(unittest.TestCase):
                 cb.total_budget(cpu_count=4, headless=False), 3,
                 "顯式傳入的 headless 參數應勝過環境變數偵測",
             )
+
+    def test_interactive_uses_physical_headless_uses_logical(self) -> None:
+        """同一組 (logical, physical) 下，互動只看 physical、headless 只看 logical。"""
+        self.assertEqual(cb.total_budget(cpu_count=4, physical_count=14, headless=False), 13)
+        self.assertEqual(cb.total_budget(cpu_count=4, physical_count=14, headless=True), 4)
+
+
+class DetectPhysicalCountTest(unittest.TestCase):
+    """`_detect_physical_count()`：optional psutil import 的兩條退化路徑。"""
+
+    def test_psutil_import_error_returns_none(self) -> None:
+        with mock.patch.dict(sys.modules, {"psutil": None}):
+            self.assertIsNone(cb._detect_physical_count())
+
+    def test_returns_psutil_physical_count_when_available(self) -> None:
+        fake_psutil = mock.Mock()
+        fake_psutil.cpu_count.return_value = 8
+        with mock.patch.dict(sys.modules, {"psutil": fake_psutil}):
+            self.assertEqual(cb._detect_physical_count(), 8)
+            fake_psutil.cpu_count.assert_called_once_with(logical=False)
 
 
 class PerLegBudgetTest(unittest.TestCase):

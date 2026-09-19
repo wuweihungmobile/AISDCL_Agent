@@ -25,6 +25,8 @@ tools/check_wrapper_thinness.py hash 釘選守門）。
         由今晚 nightly 真實輸出登記入表，死結解除
     (n) DEF-200-291：`check_skip_census` 的 `unattended` 語意——未登記剖面依它分岔，
         `GITHUB_ACTIONS` 自動視為無人值守，已登記剖面不受旗標影響
+    (o) B1：`conftest._cpu_budget_workers` 純函式回歸鎖——env 覆寫優先、路徑缺席
+        fail-open、runner 注入值／垃圾值／例外三態
 """
 from __future__ import annotations
 
@@ -352,8 +354,10 @@ def test_gate_pg_success_returns_pytest_rc_and_tears_down(
     stream_calls, quiet_calls = _pg_call_recorder(monkeypatch, alembic_rc=0)
     assert m.gate_pg() == 0
     assert any("test_pg_state_repository_contract.py" in c for cmd in stream_calls for c in cmd)
-    # DEF-200-274 D5：單檔案 PG 呼叫停用 xdist（design_xdist.md §2.3——單檔案無論是否
-    # 分群，實際排程結果都等價於序列跑，用 -p no:xdist 省掉閒置 worker 的心智負擔）。
+    # DEF-200-274 D5：單檔案 PG 呼叫停用 xdist（根層
+    # docs/06_quality/CrossPlatform_DEF200274_Parallel_Tests_Evidence.md〈第九輪〉——
+    # 單檔案無論是否分群，實際排程結果都等價於序列跑，用 -p no:xdist 省掉閒置
+    # worker 的心智負擔）。
     pytest_cmd = next(
         cmd for cmd in stream_calls
         if any("test_pg_state_repository_contract.py" in c for c in cmd)
@@ -373,7 +377,9 @@ def test_gate_pg_success_returns_pytest_rc_and_tears_down(
 def test_gate_pytest_disables_xdist_for_custom_args(monkeypatch: pytest.MonkeyPatch) -> None:
     """非預設參數（除錯／窄範圍呼叫）必須自動停用 xdist（B-4）：只加 -p no:xdist
     不夠——ini 殘留的 addopts 會讓 argparse 認不得 -n/--dist 而硬報
-    `unrecognized arguments`（design_xdist.md §4 實測），故兩者必須同時附加。
+    `unrecognized arguments`（根層
+    docs/06_quality/CrossPlatform_DEF200274_Parallel_Tests_Evidence.md〈第九輪〉實測），
+    故兩者必須同時附加。
     """
     calls: list[list[str]] = []
     monkeypatch.setattr(m, "_stream", lambda cmd: calls.append(list(cmd)) or 0)
@@ -1096,6 +1102,81 @@ def test_conftest_terminal_summary_emits_the_profile_marker() -> None:
     assert m.pg_in_effect_from_log("\n".join(written)) is m.pg_dsn_in_effect()
     # R80 包 A（S3-09）：第二維也必須被印出來，否則 `--census-only` 同樣 fail-loud。
     assert m.nested_from_log("\n".join(written)) is m.nested_session()
+
+
+# =====================================================================
+# (o) B1：`conftest._cpu_budget_workers` 純函式回歸鎖
+# =====================================================================
+# WHY（Rule 9）：這支純函式決定 xdist `-n auto` 在**任何**呼叫端會啟動幾個
+# worker，四條分支任一被改壞都會靜默改變本機／CI 的平行度而不報錯（fail-open
+# 是刻意設計，見 conftest 該函式 docstring），故四條分支各鎖一支，`runner`
+# 一律用假物件注入，不真的 spawn `cpu_budget.py` 子行程。
+
+
+def test_cpu_budget_workers_env_override_wins_even_without_cpu_budget_path(
+    tmp_path: Path,
+) -> None:
+    """`PYTEST_XDIST_AUTO_NUM_WORKERS` 為正整數 ⇒ 直接採用，即使路徑根本不存在
+    （① 優先於 ②：env 覆寫不需要 `cpu_budget.py` 在場，也不該呼叫 runner）。"""
+    conftest = _loaded_conftest()
+    assert conftest is not None
+    missing = tmp_path / "does_not_exist" / "cpu_budget.py"
+
+    def _unreachable(argv, **kwargs):
+        raise AssertionError("env 覆寫時不該呼叫 runner")
+
+    result = conftest._cpu_budget_workers(
+        {"PYTEST_XDIST_AUTO_NUM_WORKERS": "7"}, missing, _unreachable
+    )
+    assert result == 7
+
+
+def test_cpu_budget_workers_missing_path_returns_none(tmp_path: Path) -> None:
+    """`cpu_budget.py` 不存在（套件獨立安裝，沒有 monorepo 根層 `tools/`）
+    ⇒ None（② fail-open，交還 xdist 預設）。"""
+    conftest = _loaded_conftest()
+    assert conftest is not None
+    missing = tmp_path / "does_not_exist" / "cpu_budget.py"
+    result = conftest._cpu_budget_workers({}, missing, lambda *a, **k: None)
+    assert result is None
+
+
+def test_cpu_budget_workers_uses_runner_stdout_when_positive_int(tmp_path: Path) -> None:
+    """假 runner 回傳 stdout=`"13"` ⇒ 採用 13（③；`runner` 可注入以利單元測試）。"""
+    conftest = _loaded_conftest()
+    assert conftest is not None
+    present = tmp_path / "cpu_budget.py"
+    present.write_text("# stub\n", encoding="utf-8")
+    result = conftest._cpu_budget_workers(
+        {}, present, lambda argv, **kwargs: SimpleNamespace(stdout="13\n")
+    )
+    assert result == 13
+
+
+def test_cpu_budget_workers_garbage_stdout_returns_none(tmp_path: Path) -> None:
+    """假 runner 回傳非整數 stdout ⇒ None（④ fail-open，不得讓 collection 崩潰）。"""
+    conftest = _loaded_conftest()
+    assert conftest is not None
+    present = tmp_path / "cpu_budget.py"
+    present.write_text("# stub\n", encoding="utf-8")
+    result = conftest._cpu_budget_workers(
+        {}, present, lambda argv, **kwargs: SimpleNamespace(stdout="not-a-number\n")
+    )
+    assert result is None
+
+
+def test_cpu_budget_workers_runner_exception_returns_none(tmp_path: Path) -> None:
+    """`runner` 拋例外（逾時／子行程失敗）⇒ None（④ fail-open 的另一半分支）。"""
+    conftest = _loaded_conftest()
+    assert conftest is not None
+    present = tmp_path / "cpu_budget.py"
+    present.write_text("# stub\n", encoding="utf-8")
+
+    def _raising_runner(argv, **kwargs):
+        raise TimeoutError("boom")
+
+    result = conftest._cpu_budget_workers({}, present, _raising_runner)
+    assert result is None
 
 
 # =====================================================================

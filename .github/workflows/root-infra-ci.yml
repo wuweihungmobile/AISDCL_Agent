@@ -317,6 +317,16 @@ jobs:
 
       - name: py_compile 語法檢查（根層 tools/ 下所有 *.py，遞迴涵蓋子目錄）
         run: |
+          # Q4（多 CPU 第十四輪，DEF-200-274 證據檔）：先用 compileall -j0 平行批次檢查，全過直接印統計
+          # 收工；非零才退回逐檔迴圈印 ::error:: annotation（保留原本逐檔訊息，
+          # test_root_infra_parity.py 的接線判準要它）——兩階段目的不同：前者快，
+          # 後者精準點名壞在哪一個檔案。
+          n=$(find tools -name '*.py' -type f | wc -l)
+          if python3 -m compileall -q -j0 tools; then
+            echo "compileall -j0 全過（${n} 個 .py 檔）"
+            exit 0
+          fi
+          echo "::warning::compileall 批次檢查非全綠，退回逐檔檢查以點出壞在哪一個檔案"
           fail=0
           while IFS= read -r -d '' f; do
             echo "py_compile ${f}"

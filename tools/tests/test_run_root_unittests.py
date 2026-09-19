@@ -272,18 +272,16 @@ class ParallelFallbackToSequentialTest(unittest.TestCase):
 
 
 class WorkerCountFormulaTest(unittest.TestCase):
-    """DEF-200-274 第八輪四方獨立複審（SD／QA 各自點名）：`ParallelFallbackToSequentialTest`
-    等既有測試全數用 `mock.patch.object(parallel_shard, "worker_count", ...)` 整個換掉
-    函式本體，從未直接呼叫 `worker_count(cpu_count=N)` 斷言公式輸出本身——公式
-    （`max(1, min(8, cpu-1))`）、環境變數覆寫、非法值退回三條路徑因此零覆蓋。本類別
-    直接呼叫真正的函式，不 mock 它。
+    """直接呼叫真正的 `worker_count(cpu_count=N)` 斷言公式（DEF-200-274 第八輪：此前全被
+    mock 掉、零覆蓋）；DEF-200-289 起 headless 不再 `-1`，故每支顯式拔掉兩個 env 走互動分支；
+    DEF-200-327 起 setUp 釘死 `_detect_physical_count()` 回 None，維持既有斷言語意。
+    史料全文：CrossPlatform_Guard_Line_History.md〈R157 WorkerCountFormulaTest WHY〉。"""
 
-    🔴 DEF-200-289（第 A 包）：`worker_count()` 委派 `cpu_budget.total_budget()` 後，
-    公式在 headless（`GITHUB_ACTIONS=true`／`AUTOSDD_CPU_HEADLESS=1`）下改為
-    `cpu`（不再 `cpu-1`）。以下三支既有測試斷言的是**互動環境**公式，故一律顯式
-    拔掉這兩個環境變數（`clear=False` 的 `mock.patch.dict` 不會拔掉外部殘留值，
-    必須另外 `pop`）——否則本機（無 `GITHUB_ACTIONS`）綠、CI（`GITHUB_ACTIONS=true`）
-    紅，同一支測試在兩處給出不同答案。"""
+    def setUp(self) -> None:
+        ps = run_root_unittests.parallel_shard
+        patcher = mock.patch.object(ps.cpu_budget, "_detect_physical_count", return_value=None)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def _force_interactive_env(self) -> None:
         """把 `GITHUB_ACTIONS`／`AUTOSDD_CPU_HEADLESS` 拔掉，確保走互動公式分支。"""
@@ -292,15 +290,15 @@ class WorkerCountFormulaTest(unittest.TestCase):
 
     def test_formula_across_cpu_counts(self) -> None:
         ps = run_root_unittests.parallel_shard
-        # 第九輪：cap 8→9（worker_count 上限，見 parallel_shard.worker_count docstring）。
-        cases = {0: 1, 1: 1, 2: 1, 9: 8, 10: 9, 100: 9}
+        # cap 現查 tools/lib/cpu_budget.py（本檔不複寫數字）。
+        cases = {0: 1, 1: 1, 2: 1, 9: 8, 10: 9, 100: 16}
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop(ps._ENV_WORKERS, None)  # 清掉本機 shell profile 可能殘留的覆寫
             self._force_interactive_env()
             for cpu, expected in cases.items():
                 self.assertEqual(
                     ps.worker_count(cpu_count=cpu), expected,
-                    f"cpu_count={cpu} 應得 {expected}（互動公式 max(1, min(9, cpu-1))）")
+                    f"cpu_count={cpu} 應得 {expected}（互動公式 max(1, min(CAP, cpu-1))）")
 
     def test_workers_env_override_wins_over_formula(self) -> None:
         ps = run_root_unittests.parallel_shard
@@ -320,14 +318,14 @@ class WorkerCountFormulaTest(unittest.TestCase):
 
     def test_none_cpu_count_uses_real_os_cpu_count_within_bounds(self) -> None:
         """`cpu_count=None` 時走真的 `os.cpu_count()`——不斷言精確值（該值隨執行機器
-        核心數而變），只斷言落在公式的值域 `[1, 9]` 內（第九輪：cap 8→9；headless／
-        互動兩分支的 cap 相同，此處無需固定分支）。"""
+        核心數而變），只斷言落在公式的值域 `[1, CAP]` 內（cap 現查 cpu_budget.py，
+        本檔不複寫數字；headless／互動兩分支的 cap 相同，此處無需固定分支）。"""
         ps = run_root_unittests.parallel_shard
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop(ps._ENV_WORKERS, None)
             result = ps.worker_count(cpu_count=None)
         self.assertGreaterEqual(result, 1)
-        self.assertLessEqual(result, 9)
+        self.assertLessEqual(result, ps.cpu_budget._CAP)
 
 
 class ShouldRunParallelDecisionTest(unittest.TestCase):
@@ -4164,6 +4162,15 @@ class DispatchGranularityAutoSplitCandidatesTest(unittest.TestCase):
         hints = {"no_such_module_xyz_9999": 100.0, "other.mod": 1.0}
         candidates = dg.auto_class_level_candidates(hints, worker_count=2)
         self.assertEqual(candidates, frozenset())
+
+    def test_auto_split_follows_fair_share_not_module_size(self) -> None:
+        """DEF-200-327（SD-06 觀察）：同一份耗時，w=14 時 fair_share 高於重模組 ⇒ 正當不
+        細分（第十四輪 w=14 實測 test_dev_start 152s／fair_share 160s 即此象限）；w=19 時
+        fair_share 降到其下 ⇒ 該模組（無模組層 fixture）成為候選。門檻隨 worker 數移動，非漏接。"""
+        hints = {"test_dev_start": 152.0, **{f"_a5_filler_{i}": 10.0 for i in range(207)}}
+        dg = self._dg()
+        self.assertNotIn("test_dev_start", dg.auto_class_level_candidates(hints, worker_count=14))
+        self.assertIn("test_dev_start", dg.auto_class_level_candidates(hints, worker_count=19))
 
 
 class DispatchGranularityAutoSuiteDispatchUnitsTest(unittest.TestCase):

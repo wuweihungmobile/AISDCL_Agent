@@ -708,7 +708,8 @@ def gate_pytest(pytest_args: list[str], *, unattended: bool = False) -> int:
     `-n auto --dist worksteal` 會與 `-k`/`--pdb` 疊加造成除錯體驗劣化，或無謂啟動
     多個閒置 worker。同時加 `-p no:xdist` 與 `-o addopts=` 兩者缺一不可：只加
     `-p no:xdist` 會讓 ini 殘留的 `-n`/`--dist` 字面在 argparse 認不得該選項時硬報
-    `unrecognized arguments`（design_xdist.md §4 實測）。
+    `unrecognized arguments`（根層
+    docs/06_quality/CrossPlatform_DEF200274_Parallel_Tests_Evidence.md〈第九輪〉實測）。
 
     DEF-200-274 X1（主控追加需求）：預設參數分支若 PG DSN 真的生效
     （`pg_dsn_in_effect()`），代表 ONBOARDING §7.1 教的「拉起 docker PG 再跑全套」
@@ -749,7 +750,8 @@ def gate_pg() -> int:
         _run_quiet([*_PG_COMPOSE, "down", "-v"])
         return 1
     # DEF-200-274 D5：單檔案呼叫無論是否分群，實際排程結果都等價於序列跑，
-    # `-p no:xdist` 省掉啟動多個閒置 worker 的心智負擔與成本（design_xdist.md §2.3）。
+    # `-p no:xdist` 省掉啟動多個閒置 worker 的心智負擔與成本（根層
+    # docs/06_quality/CrossPlatform_DEF200274_Parallel_Tests_Evidence.md〈第九輪〉）。
     rc = _stream([
         sys.executable, "-m", "pytest",
         "tests/contract/test_pg_state_repository_contract.py", "-q", "--tb=short",

@@ -630,6 +630,9 @@ _KNOWN_EXTERNAL_MODULES = frozenset({
     "pytest", "yaml", "pydantic", "sqlalchemy", "click", "httpx",
     "keyboard", "wexpect", "psycopg2", "plyer", "win10toast",
     "claude_agent_sdk", "anyio", "pgvector", "tenacity", "cachetools",
+    # DEF-200-327：tools/lib/cpu_budget.py 的實體核偵測 optional import（psutil
+    # 缺席時 ImportError 退回邏輯核，非硬相依）。
+    "psutil",
 })
 
 # sys.path 是**行程全域**的：A 模組 import B 時把某目錄插進 sys.path，之後 C 模組的

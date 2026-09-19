@@ -189,7 +189,8 @@ select = ["E", "F", "I", "UP", "W", "S102"]
 testpaths = ["tests"]
 # DEF-200-274 D5：全域 addopts 讓任何呼叫端（local_ci_gate.py／CI／開發者直呼）
 # 一視同仁吃到 -n auto --dist worksteal，零呼叫端改動（設計理由與 fail-loud
-# 取捨見 design_xdist.md §2.1）。除錯／--pdb／單檔小範圍請額外加 -n 0；
+# 取捨見根層 docs/06_quality/CrossPlatform_DEF200274_Parallel_Tests_Evidence.md
+# 〈第九輪〉）。除錯／--pdb／單檔小範圍請額外加 -n 0；
 # local_ci_gate.py::gate_pytest() 的非預設參數分支已自動附加
 # `-p no:xdist -o addopts=` 停用平行（見該函式）。
 addopts = ["-n", "auto", "--dist", "worksteal"]

@@ -90,7 +90,8 @@ jobs:
       - name: Run chaos-marked pytest suite
         working-directory: AISDLC_SDD/AISDLC_SDD_v0.01
         run: |
-          # 🔴 DEF-200-274 D6：實作階段偏離原設計，如實記錄——design_xdist.md §6.5
+          # 🔴 DEF-200-274 D6：實作階段偏離原設計，如實記錄——docs/06_quality/
+          # CrossPlatform_DEF200274_Parallel_Tests_Evidence.md〈第九輪〉
           # 結構分析認為 chaos 測試對平行化無害，本輪原照掌舵者裁決加了
           # `-n auto --dist worksteal`，但實作階段對同一份 `tools/fsm_runtime/tests/`
           # （working-directory 固定 v0.01＝凍結基線）實測發現

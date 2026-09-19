@@ -645,7 +645,7 @@ def guard_files_in_worktree() -> frozenset[str]:
     return frozenset(
         p.relative_to(_REPO).as_posix()
         for p in root.rglob(_GUARD_FILE_PATTERN)
-        if not _CACHE_DIR_NAMES & set(p.parts)
+        if not _CACHE_DIR_NAMES & set(p.parts) and not p.name.startswith(_TRANSIENT_PREFIX)
     )
 
 
@@ -662,6 +662,9 @@ def guard_files_in_worktree() -> frozenset[str]:
 #: （🔴 R78 ARCH-04：R77 寫下這句時那個函式並不存在——AST 實查零定義。本輪補上實作＋
 #:  `test_the_two_surfaces_have_no_coverage_gap`，讓這句宣稱有東西承接）。
 _GUARD_LINE_PATTERN = "*.py"
+#: DEF-200-330：平行測試合成暫存模組（`_zzz_*`，pid 後綴、存活數秒）落在同一棵樹，
+#: w>=14 時與本檔的活體行數／檔案集掃描時間窗重疊即假紅；比照全庫既有第五輪排除慣例。
+_TRANSIENT_PREFIX = "_zzz_"
 
 #: 基準與實況的**縮小**容忍帶。🔴 這不是成長緩衝——成長側零容忍（見 `glc_growth_problem`）。
 #: 形狀照抄 `test_subprocess_encoding_hygiene.tree_count_verdict()` 的雙邊帶：單邊棘輪
@@ -3613,6 +3616,7 @@ def guard_lines_in_worktree() -> dict[str, int]:
     return {
         p.name: len(p.read_text(encoding="utf-8", errors="replace").splitlines())
         for p in sorted(root.glob(_GUARD_LINE_PATTERN))
+        if not p.name.startswith(_TRANSIENT_PREFIX)
     }
 
 
@@ -7723,6 +7727,8 @@ def guard_line_composition() -> dict[str, tuple[int, int]]:
     root = _REPO / _GUARD_DIR_REL
     out: dict[str, tuple[int, int]] = {}
     for p in sorted(root.glob(_GUARD_LINE_PATTERN)):
+        if p.name.startswith(_TRANSIENT_PREFIX):
+            continue
         try:
             tree = ast.parse(p.read_text(encoding="utf-8", errors="replace"))
         except SyntaxError:

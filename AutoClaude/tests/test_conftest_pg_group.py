@@ -5,7 +5,8 @@ WHY（Rule 9，測意圖非僅行為）：`pytest_collection_modifyitems` 併入
 `@pytest.hookimpl(tryfirst=True)`；(2) 標記迴圈必須排在既有「PG 已啟用即早退」的
 `return` **之前**。兩者任一被拿掉，分群都會**靜默**失效（rc=0、零警告，只是
 「同群測試沒有真的分到同一個 worker」）——純函式層級的單元測試測不出這件事，
-必須用 `pytester` 以子行程真跑一次 xdist（見設計 design_xdist.md §2.3 對照實測）。
+必須用 `pytester` 以子行程真跑一次 xdist（見設計根層
+docs/06_quality/CrossPlatform_DEF200274_Parallel_Tests_Evidence.md〈第九輪〉對照實測）。
 
 本檔比照既有 `test_conftest_windows_native_skip_report.py` 的手法：把本套件真實
 `tests/conftest.py` 原始碼複製進 pytester 沙盒真跑（而非重新實作一份等價邏輯），
@@ -38,9 +39,18 @@ def pytest_runtest_logreport(report):
 
 
 def _write_toy_tree(pytester) -> None:
+    """toy tree：`tests/contract/` 下放兩支檔——一支含 PG 指標（`test_c1.py`，B2 收斂
+    後仍應分群）、一支不含（`test_c3_no_pg.py`，B2 收斂後不該分群），驗證新判準
+    「路徑前綴 AND 檔案內容」而非單靠路徑前綴（見 conftest.py `_PG_SOURCE_INDICATORS`
+    WHY）。`tests/other/` 維持原樣，作為路徑前綴本身就不命中的反方向對照。
+    """
     (pytester.path / "tests" / "contract").mkdir(parents=True)
     (pytester.path / "tests" / "contract" / "test_c1.py").write_text(
+        "# 觸碰 PG：AUTOCLAUDE_TEST_PG_DSN（B2 判準需要真的碰到 PG 指標才分群）\n"
         "def test_c1():\n    pass\n\n\ndef test_c2():\n    pass\n", encoding="utf-8"
+    )
+    (pytester.path / "tests" / "contract" / "test_c3_no_pg.py").write_text(
+        "def test_c3():\n    pass\n", encoding="utf-8"
     )
     (pytester.path / "tests" / "other").mkdir(parents=True)
     (pytester.path / "tests" / "other" / "test_o1.py").write_text(
@@ -71,6 +81,9 @@ def test_pg_serial_marker_present_when_pg_enabled(pytester, monkeypatch) -> None
     assert "MARKER-CHECK tests/contract/test_c1.py::test_c2 YES:('pg_serial',)" in out, out
     # 反方向對照：不在 pg_serial 路徑前綴下的測試不該被誤標
     assert "MARKER-CHECK tests/other/test_o1.py::test_o1 NO" in out, out
+    # B2：同在 tests/contract/ 路徑前綴下，但檔案內容不含任何 PG 指標 ⇒ 不分群
+    # （新判準「路徑前綴 AND 檔案內容」，而非單靠路徑前綴）。
+    assert "MARKER-CHECK tests/contract/test_c3_no_pg.py::test_c3 NO" in out, out
 
 
 def test_pg_serial_grouping_takes_effect_with_dist_loadgroup(
@@ -89,7 +102,7 @@ def test_pg_serial_grouping_takes_effect_with_dist_loadgroup(
         "-p", "no:cacheprovider", "-n", "2", "--dist", "loadgroup", "-q",
         "tests/contract", "tests/other",
     )
-    result.assert_outcomes(passed=4)
+    result.assert_outcomes(passed=5)  # test_c1/test_c2/test_c3(不分群)/test_o1/test_o2
     assigned: dict[str, str] = {}
     for log_file in tmp_path.glob("worker_assign.log.*"):
         worker = log_file.suffix.lstrip(".")
@@ -114,7 +127,8 @@ def _pg_env(monkeypatch) -> None:
 def test_pg_present_with_worksteal_dist_fails_loud(pytester, monkeypatch) -> None:
     """PG 在場、`-n`>0、`--dist worksteal`（非 loadgroup/no）⇒ pytest.UsageError，
     不得靜默降級——這是 conftest.py::_reject_pg_present_with_mismatched_xdist_dist
-    的存在理由（design_xdist.md 主控追加需求 X1）。
+    的存在理由（根層 docs/06_quality/CrossPlatform_DEF200274_Parallel_Tests_Evidence.md
+    〈第九輪〉主控追加需求 X1）。
     """
     _pg_env(monkeypatch)
     pytester.makeconftest(_CONFTEST_SOURCE)

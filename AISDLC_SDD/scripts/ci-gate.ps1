@@ -51,10 +51,17 @@ if (-not $py) {
 # WHY：與 ci-gate.sh／pre-push 同名區塊同一顆 SSOT（tools/lib/cpu_budget.py），
 # 廣播給下游任何會讀這兩個變數的呼叫端；使用者已顯式設定其一則不覆寫。
 if (-not $env:AUTOSDD_PARALLEL_TESTS_WORKERS -and -not $env:PYTEST_XDIST_AUTO_NUM_WORKERS) {
-  $_cpuBudget = & $py "$repo/tools/lib/cpu_budget.py" --legs 1 2>$null
-  if ($_cpuBudget -match '^\d+$') {
-    $env:AUTOSDD_PARALLEL_TESTS_WORKERS = $_cpuBudget
-    $env:PYTEST_XDIST_AUTO_NUM_WORKERS = $_cpuBudget
+  # DEF-200-326：cpu_budget.py 住 monorepo 根，不是 $repo（＝AISDLC_SDD/）；
+  # 同型算法見上方第 45 行 Get-RepoPython 呼叫。
+  $_cpuBudgetScript = Join-Path (Join-Path $repo '..') 'tools/lib/cpu_budget.py'
+  if (Test-Path $_cpuBudgetScript) {
+    $_cpuBudget = & $py $_cpuBudgetScript --legs 1 2>$null
+    if ($_cpuBudget -match '^\d+$') {
+      $env:AUTOSDD_PARALLEL_TESTS_WORKERS = $_cpuBudget
+      $env:PYTEST_XDIST_AUTO_NUM_WORKERS = $_cpuBudget
+    }
+  } else {
+    Write-Host "⚠️ cpu_budget 廣播跳過：$_cpuBudgetScript 不存在或執行失敗（fail-open）"
   }
 }
 
@@ -75,6 +82,31 @@ Write-Host "==> [1/3] pytest -m 'not chaos'（全套，含 offline reachability 
 # （序列執行），對稱點是允許清單語意本身，不是逐字複製旗標。
 & $py -m pytest tools/fsm_runtime/tests/ -m "not chaos" -q -rs
 if ($LASTEXITCODE -ne 0) { throw "pytest 失敗" }
+
+# DEF-200-318：fallback 原本硬寫死只跑凍結基線，從無 LATEST 軌——補上（帶 xdist，
+# 理由與 ci-gate.sh 允許清單一致：LATEST 保證帶 `_atomic_write_text` 修法）。
+# `sdd_version.py` rc!=0＝無演化版（凍結基線即最新），此時無 LATEST 軌可跑。
+$LATEST = (& $py "$repo/scripts/sdd_version.py" 2>$null)
+$latestRc = $LASTEXITCODE
+$LatestIncluded = $false
+if ($latestRc -eq 0 -and $LATEST) {
+  $LATEST = $LATEST.Trim()
+  if ($LATEST -ne "AISDLC_SDD_v0.01") {
+    $latestDir = Join-Path $repo $LATEST
+    if (Test-Path $latestDir) {
+      Write-Host "==> [1b/3] pytest -m 'not chaos'（LATEST 軌：$LATEST，帶 xdist）"
+      Set-Location $latestDir
+      & $py -m pytest tools/fsm_runtime/tests/ -m "not chaos" -q -rs -n auto --dist worksteal
+      if ($LASTEXITCODE -ne 0) { throw "pytest 失敗（LATEST 軌 $LATEST）" }
+      Set-Location $fw
+      $LatestIncluded = $true
+    } else {
+      Write-Host "⚠️ LATEST（$LATEST）目錄不存在，跳過 LATEST 軌"
+    }
+  }
+} else {
+  Write-Host "⚠️ sdd_version.py 判無演化版（rc=$latestRc），LATEST 軌缺席"
+}
 
 Write-Host "==> [2/3] arch_fitness（structural fail 阻擋；advisory warn 放行）"
 # 必帶 --strict：唯有 --strict 時 structural fail 才回傳 exit 2，與雲端 nightly-strict 一致。
@@ -103,4 +135,5 @@ if ($env:SDD_RUN_TLC -eq "1") {
 # 只有 Windows 走得到這條路（mac 一律有 bash），屬單邊平台的取證可信度缺口。
 # 修法刻意選「讓字串在結構上無法冒充」而非「加更多 warning」：起頭已有一行 ⚠️ 警告，
 # 但人讀 log 取的是**最後那行結論**；讓結論自己說出降級事實，才不依賴讀者記得往上看。
-Write-Host "✅ fallback 3-stage 通過（僅 AISDLC_SDD_v0.01 凍結基線單軌；**未含** LATEST 軌、未含 ci-gate.sh 的 lint 硬閘與 scripts/tests 共享 infra 測試——非完整閘門）"
+$LatestSummary = if ($LatestIncluded) { "含 LATEST 軌（$LATEST）" } else { "LATEST 軌缺席" }
+Write-Host "✅ fallback 3-stage 通過（AISDLC_SDD_v0.01 凍結基線單軌 ＋ $LatestSummary；未含 ci-gate.sh 的 lint 硬閘與 scripts/tests 共享 infra 測試——非完整閘門）"

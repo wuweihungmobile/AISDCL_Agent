@@ -265,8 +265,16 @@ function Get-RepoPython {
     (Join-Path $RepoRoot '.venv/bin/python'),
     (Join-Path $RepoRoot '.venv\Scripts\python.exe')
   )
+  # DEF-200-325：Windows 主機只探測副檔名落在 PATHEXT 內的候選——`&` 對無副檔名檔案
+  # （`.venv/bin/python` 這個 POSIX 形狀）會回退 ShellExecute、在桌面彈「選取應用程式以
+  # 開啟」對話框（DEF-101-759 同型：探針 rc/stdout 皆空、對話框留在桌面）。非 Windows 沿用原行為。
+  $isWindowsHost = ($PSVersionTable.PSVersion.Major -lt 6) -or $IsWindows  # ps7-ok: 左側先短路，5.1 上右側不求值（同 Resolve-NativeExecutable）
   foreach ($cand in $candidates) {
     if (-not (Test-Path -LiteralPath $cand -PathType Leaf)) { continue }
+    if ($isWindowsHost) {
+      $ext = [System.IO.Path]::GetExtension($cand)
+      if (-not $ext -or (($env:PATHEXT -split ';') -notcontains $ext)) { continue }
+    }
     $out = $null
     try {
       $out = & $cand -c $script:PythonGeMinProbe 2>$null

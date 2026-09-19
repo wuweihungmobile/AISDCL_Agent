@@ -216,7 +216,7 @@ PYTHONUTF8=1 lint-imports             # 架構約束（契約條數 SSOT＝AutoC
 # 根層（在 repo 根目錄下）
 python tools/run_root_unittests.py                          # tools/tests 全套。DEF-200-274 第九輪起**預設自動多核心**：
                                                               # 對真實 tools/tests 樹且 worker>1 即平行（合成樹一律序列）；
-                                                              # worker 數＝AUTOSDD_PARALLEL_TESTS_WORKERS 覆寫，未設＝max(1,min(9,cpu-1))；
+                                                              # worker 數＝AUTOSDD_PARALLEL_TESTS_WORKERS 覆寫，未設＝tools/lib/cpu_budget.py 現查（互動＝實體核-1、headless＝邏輯核，皆有上限）；
                                                               # 派工順序依歷史耗時（tools/.parallel_timings.json 活體快取 → tools/lib/parallel_timing_seed.json 種子）
 AUTOSDD_PARALLEL_TESTS=0 python tools/run_root_unittests.py  # 強制序列（逐一定位失敗、要看 print() 除錯輸出時用）
 AUTOSDD_PARALLEL_TESTS=1 python tools/run_root_unittests.py  # 強制平行（與未設同義；三支 CI 顯式帶它）；windows-compat-ci 已在

@@ -55,6 +55,7 @@ from __future__ import annotations
 
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -409,6 +410,70 @@ def real_pg_dsn() -> str:
 
 _PG_GROUP_PATH_PREFIXES = ("tests/contract/", "tests/integration/", "tests/infra/")
 
+# B2（DEF-200-274 系列後續，四方審查 SD-01）：路徑前綴不再單獨決定 pg_serial——
+# 逐檔審計 tests/{contract,integration,infra}/ 共 83 支後，實測僅 18 支真的碰得到
+# PG（其餘多支雖落在這三個目錄下，但只在 docstring／檔名字面提及 alembic／
+# pgvector，或改用 MagicMock／InMemoryStateRepository 頂替，皆明確自陳「不連真
+# PG」），其餘 62 支整批序列化純屬浪費（同機真因：四方審查 SD 實測 9/14/19
+# worker 全套皆約 70s，pg_serial 群組序列化才是瓶頸，見 B1 段落引用）。
+#
+# 判準方向刻意保守：（路徑前綴命中 且 檔案原始碼含任一 PG 指標）或帶 `pg_real`
+# marker 才標記；讀不到檔案／指標清單覆蓋不到的其他碰 PG 手法一律當作碰 PG——
+# 寧可多序列化幾支犧牲一點平行度，也不能把真的會撞同一顆 PG 的測試放給 xdist
+# 隨機分散到不同 worker（那是本組機制存在的唯一理由）。
+#
+# 指標清單特意**不含**裸字面 "factory"：`autoclaude.infra.repositories.factory`
+# 也匯出 `canonical_playbook_id` 這個後端無關工具函式（`tests/infra/
+# test_canonical_playbook_id.py`／`tests/integration/test_kernel_resume_multi_halt.py`
+# 皆只用它，從未觸碰任何 PG 分支），裸 "factory" 會把這類測試全部誤標。factory
+# 模組真正的 PG 分支一律以 `Pg` 開頭具名（`PgStateRepository`／`PgMemoryStore`／
+# `PgKbMetricStore`…），已被下方 `_PG_CLASS_NAME_RE` 涵蓋，不需要額外的裸字面。
+_PG_SOURCE_INDICATORS = (
+    "pg_real",
+    "AUTOCLAUDE_TEST_PG_DSN",
+    "AUTOCLAUDE_DB_DSN",
+    "AUTOCLAUDE_PG_DSN",
+    "psycopg",
+    "asyncpg",
+    "sqlalchemy",
+    "pgvector",
+    "alembic",
+    "create_async_engine",
+    "pg_autodetect",
+    "pg_dsn",
+    "docker",
+)
+#: 大小寫敏感——要求真的是 `PgStateRepository` 這種具名類別，不誤配
+#: `upgrade`／`gpgsign` 這類巧合子字串（此前用大小寫不敏感掃過一輪、實測誤中）。
+_PG_CLASS_NAME_RE = re.compile(r"Pg[A-Z]\w*")
+
+#: 每個檔案路徑只讀一次——同一檔案通常對應多個 item（多個 test function/method）。
+_PG_SOURCE_CACHE: dict[str, bool] = {}
+
+
+def _source_has_pg_indicator(text: str) -> bool:
+    """純函式：原始碼文字是否含任一 PG 指標。"""
+    if any(token in text for token in _PG_SOURCE_INDICATORS):
+        return True
+    return bool(_PG_CLASS_NAME_RE.search(text))
+
+
+def _path_touches_pg(path_str: str) -> bool:
+    """讀一次檔案內容並快取；讀不到（例如非磁碟支援的虛擬路徑）一律回 True——
+    保守：無法排除就當作碰 PG，不因為讀檔失敗而意外放寬既有序列化保護。
+    """
+    cached = _PG_SOURCE_CACHE.get(path_str)
+    if cached is not None:
+        return cached
+    try:
+        text = Path(path_str).read_text(encoding="utf-8")
+    except OSError:
+        result = True
+    else:
+        result = _source_has_pg_indicator(text)
+    _PG_SOURCE_CACHE[path_str] = result
+    return result
+
 
 @pytest.hookimpl(tryfirst=True)  # 🔴 必須有：見下方 docstring，沒有此裝飾器時即使命令列
 # 顯式傳 --dist loadgroup，分群仍 100% 靜默失敗（xdist 3.8.0 worker 端自己的
@@ -429,6 +494,10 @@ def pytest_collection_modifyitems(config, items):  # noqa: ARG001
     🔴 標記迴圈必須排在下面「PG 已啟用即早退」的 `return` **之前**：若排在之後，
     PG 真的在場時（風險最高的那個分支）這段標記邏輯整段不會執行（已用 pytester
     對照驗證：PG 啟用時 marker 完全消失，見 tests/test_conftest_pg_group.py）。
+
+    B2：路徑前綴命中之後**還要**檔案原始碼含 `_PG_SOURCE_INDICATORS`／
+    `_PG_CLASS_NAME_RE` 任一指標才真的標記（見上方常數區塊 WHY）；`pg_real`
+    marker 一律標記，不受路徑前綴或檔案內容影響（既有行為不變）。
     """
     marker = pytest.mark.xdist_group("pg_serial")
     for item in items:
@@ -437,7 +506,8 @@ def pytest_collection_modifyitems(config, items):  # noqa: ARG001
         # Windows 上是反斜線，字串前綴比對會全部落空（見根 CLAUDE.md 鐵律三）。
         nodeid = item.nodeid
         is_pg_real = item.get_closest_marker("pg_real") is not None
-        if nodeid.startswith(_PG_GROUP_PATH_PREFIXES) or is_pg_real:
+        in_pg_dir = nodeid.startswith(_PG_GROUP_PATH_PREFIXES)
+        if is_pg_real or (in_pg_dir and _path_touches_pg(str(item.path))):
             item.add_marker(marker)
 
     # ---- 既有邏輯（原封不動，只是現在排在標記迴圈之後）----
@@ -633,3 +703,103 @@ def _hermetic_quota_cache(monkeypatch, tmp_path_factory):
         original(self, path if path is not None else str(isolated), *args, **kwargs)
 
     monkeypatch.setattr(FileQuotaMeterAdapter, "__init__", _init)
+
+
+# ──────────────────────────────────────────────────────────────
+# B1（DEF-200-274 系列後續）：接 根層 tools/lib/cpu_budget.py 的實體核心預算
+# ──────────────────────────────────────────────────────────────
+# 立案：本檔 `pyproject.toml` 的 `addopts` 對任何呼叫端都帶 `-n auto`，而 xdist 內建的
+# `auto` 演算法用**邏輯核心數**——四方審查 SD 實測 i5-14600K（14 實體核／20 邏輯核）
+# 在 9／14／19 worker 下全套皆約 70s（同機真因是 `pg_serial` 群組序列化，另見 B2），
+# 但 `cpu_budget.py` 檔頭記載的校準點是「互動環境用實體核心 -1」，邏輯核心數只在
+# headless（CI）情境才是對的預算。本 hook 讓**任何**呼叫端（開發者直呼／
+# local_ci_gate.py／pre-push）一視同仁吃到同一把尺，而不必逐一在呼叫端加
+# `-n <N>` 字面（那樣每個呼叫端各自維護一份數字，正是本 repo 最常復發的缺陷形態）。
+#
+# 消費方式刻意只走 **CLI 契約**（subprocess 呼叫 `cpu_budget.py --legs 1`），不
+# import 根層 `tools/`：`.importlinter` 的 no-harness-import 契約射程雖不含
+# `tests/conftest.py`，但套件仍可能被獨立安裝（沒有 monorepo 根層 `tools/`）——那種
+# 情境下 `path.exists()` 為 False，必須靜默退回 xdist 預設，不得讓 collection 崩潰。
+_CPU_BUDGET_PATH = Path(__file__).resolve().parents[2] / "tools" / "lib" / "cpu_budget.py"
+
+#: `pytest_xdist_auto_num_workers` 的量測結果來源，供 `pytest_sessionstart` 印給人看。
+_CPU_BUDGET_SOURCE_NOTE: str | None = None
+
+
+def _positive_int(value: str | None) -> int | None:
+    """把字串解析成正整數；空值／非數字／非正數一律回 None（純函式）。"""
+    if not value:
+        return None
+    try:
+        n = int(value.strip())
+    except (TypeError, ValueError):
+        return None
+    return n if n > 0 else None
+
+
+def _cpu_budget_workers(env, path: Path, runner) -> int | None:
+    """純函式：決定 xdist `-n auto` 的 worker 數。`runner` 可注入假物件以利單元測試
+    （簽章比照 `subprocess.run`：以 `runner(argv, **kwargs)` 呼叫並讀回傳值的
+    `.stdout`），呼叫端在正式路徑一律傳入 `subprocess.run` 本身。
+
+    優先序：
+      ① `PYTEST_XDIST_AUTO_NUM_WORKERS` 為正整數 ⇒ 直接採用（尊重廣播／手動覆寫）；
+      ② `path`（`tools/lib/cpu_budget.py`）不存在 ⇒ None（套件獨立安裝情境，
+         fail-open 交還 xdist 預設）；
+      ③ 呼叫 `runner` 取得 `cpu_budget.py --legs 1` 的 stdout，為正整數才採用；
+      ④ 任何例外／逾時／非正整數輸出 ⇒ None（fail-open——本函式失敗不得有能力
+         弄垮整個 pytest session，同本檔一貫紀律，見 `pytest_configure` 第 ⑤ 條）。
+    """
+    override = _positive_int(env.get("PYTEST_XDIST_AUTO_NUM_WORKERS"))
+    if override is not None:
+        return override
+    if not path.exists():
+        return None
+    try:
+        result = runner(
+            [sys.executable, str(path), "--legs", "1"],
+            capture_output=True, text=True, encoding="utf-8", timeout=30,
+        )
+        return _positive_int(result.stdout)
+    except Exception:  # noqa: BLE001 — fail-open，見上方 ④
+        return None
+
+
+def pytest_xdist_auto_num_workers(config):  # noqa: ARG001
+    """xdist newhook（`firstresult=True`，僅 `-n auto` 時被呼叫）：回傳
+    `cpu_budget.py` 算出的 worker 數；回傳 `None` 即交還 xdist 內建預設。conftest
+    的 hook 實作先於 xdist 內建版本被呼叫，回傳非 `None` 值即被採用（xdist 官方
+    newhooks 文件記載的 firstresult 語意）。
+    """
+    global _CPU_BUDGET_SOURCE_NOTE
+    workers = _cpu_budget_workers(os.environ, _CPU_BUDGET_PATH, subprocess.run)
+    if _positive_int(os.environ.get("PYTEST_XDIST_AUTO_NUM_WORKERS")) is not None:
+        source = "env"
+    elif workers is not None:
+        source = "cpu_budget"
+    else:
+        source = "xdist-default"
+    shown = workers if workers is not None else "<xdist-default>"
+    _CPU_BUDGET_SOURCE_NOTE = f"[cpu_budget] xdist workers={shown} source={source}"
+    return workers
+
+
+def pytest_sessionstart(session):
+    """controller 端印一行 `[cpu_budget] xdist workers=<N> source=<...>`
+    （B1 可觀測性；`write_line` 不受 `-q` 抑制，比照本檔既有 `pytest_terminal_summary`
+    的印法）。
+
+    只在 controller 端（非 xdist worker）且 xdist 外掛確實已載入時印；`-p no:xdist`
+    或非 `-n auto` 呼叫（`pytest_xdist_auto_num_workers` 未被 xdist 觸發）時安靜跳過
+    ——沒有東西可印，硬印一行「xdist-default」只會誤導讀者以為本機制介入了。
+    """
+    config = session.config
+    if hasattr(config, "workerinput"):
+        return  # worker 端：這件事只在 controller 有意義
+    if not config.pluginmanager.hasplugin("xdist"):
+        return  # -p no:xdist：本 hook 不會被 xdist 呼叫，印了也是誤導
+    if _CPU_BUDGET_SOURCE_NOTE is None:
+        return  # 非 `-n auto`（例如顯式 `-n 3`）：xdist 未呼叫上面那支 hook
+    terminalreporter = config.pluginmanager.getplugin("terminalreporter")
+    if terminalreporter is not None:
+        terminalreporter.write_line(_CPU_BUDGET_SOURCE_NOTE)

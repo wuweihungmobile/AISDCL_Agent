@@ -146,48 +146,33 @@ def _ci_gate_ps1_text() -> str:
 
 
 class CiGatePs1FallbackXdistTest(unittest.TestCase):
-    """GAP-D（DEF-200-289 四方審查 P1）：`ci-gate.ps1` 的 Windows-native fallback。
+    """GAP-D（DEF-200-289）＋ DEF-200-318（A3）：`ci-gate.ps1` fallback 恰兩處 FSM
+    runtime pytest 呼叫——凍結基線（不得帶 xdist，複製會撞已修掉的共享 tmp 檔
+    競態）與新補的 LATEST 軌（`sdd_version.py` 解析，必須帶 xdist）。"""
 
-    本鎖釘住**不加** `-n auto`／`--dist worksteal`——該 fallback 硬寫死只跑
-    `AISDLC_SDD_v0.01`（凍結基線，從無 LATEST 軌，見 `$fw = Join-Path $repo
-    "AISDLC_SDD_v0.01"`），依 `ci-gate.sh` 的允許清單語意（只有 LATEST 保證帶
-    `_atomic_write_text` 修法才可開 xdist），對它無條件加上該旗標等於把凍結
-    基線唯一沒有的修法需求強加給它，複製回 `ci-gate.sh` 已經修掉的那個共享
-    tmp 檔競態（該檔記載凍結基線連續實測約 1/3~4/9 翻紅）。GAP-D 的正確解讀
-    是「補上覆蓋（此前 `test_ci_gate_xdist_allowlist.py` 對 `.ps1` 零覆蓋）」，
-    不是「無條件複製旗標」——本測試把這個判讀本身鎖住，防止日後有人依 GAP-D
-    的字面敘述誤修。
-    """
-
-    def _fsm_runtime_pytest_call(self) -> str:
+    def _calls_by_xdist(self) -> dict[str, str]:
         text = _ci_gate_ps1_text()
-        calls = [
-            ln for ln in text.splitlines()
-            if _PY_INVOKE_PS1_FSM_CALL_RE.match(ln.lstrip())
-        ]
-        self.assertTrue(calls, "ci-gate.ps1 找不到 FSM runtime pytest 呼叫——結構已變動，請同步本鎖")
-        self.assertEqual(len(calls), 1, f"預期恰有 1 處，實得 {len(calls)} 處：{calls}")
-        return calls[0]
+        calls = [ln for ln in text.splitlines() if _PY_INVOKE_PS1_FSM_CALL_RE.match(ln.lstrip())]
+        self.assertEqual(len(calls), 2, f"預期恰 2 處 FSM runtime pytest 呼叫，實得：{calls}")
+        with_xdist = [c for c in calls if "-n auto" in c]
+        no_xdist = [c for c in calls if "-n auto" not in c]
+        self.assertEqual(len(with_xdist), 1, f"預期恰 1 處帶 xdist，實得：{with_xdist}")
+        self.assertEqual(len(no_xdist), 1, f"預期恰 1 處不帶 xdist，實得：{no_xdist}")
+        return {"with_xdist": with_xdist[0], "no_xdist": no_xdist[0]}
 
-    def test_fallback_pytest_call_has_no_xdist_flags(self) -> None:
-        call = self._fsm_runtime_pytest_call()
-        self.assertNotIn(
-            "-n auto", call,
-            f"ci-gate.ps1 的 fallback 只跑凍結基線 v0.01，不得帶 `-n auto`"
-            f"（會複製回已修掉的 snapshot.py 共享 tmp 檔競態）：{call.strip()!r}",
-        )
-        self.assertNotIn(
-            "--dist worksteal", call, f"同上，不得帶 --dist worksteal：{call.strip()!r}")
+    def test_frozen_baseline_call_has_no_xdist_flags(self) -> None:
+        no_xdist = self._calls_by_xdist()["no_xdist"]
+        self.assertNotIn("-n auto", no_xdist)
+        self.assertNotIn("--dist worksteal", no_xdist)
 
-    def test_fallback_only_ever_targets_frozen_baseline(self) -> None:
-        """本鎖的前提斷言：fallback 硬寫死目錄仍是 v0.01——若未來改成也偵測
-        LATEST，上一支測試的「不得帶 xdist」判準就必須同步重新評估。"""
-        text = _ci_gate_ps1_text()
-        self.assertIn(
-            'Join-Path $repo "AISDLC_SDD_v0.01"', text,
-            "ci-gate.ps1 fallback 的目標版本已不再硬寫死 v0.01——"
-            "本檔 CiGatePs1FallbackXdistTest 的前提已改變，請重新評估是否仍應排除 xdist",
-        )
+    def test_latest_track_call_carries_xdist(self) -> None:
+        with_xdist = self._calls_by_xdist()["with_xdist"]
+        self.assertIn("-n auto", with_xdist)
+        self.assertIn("--dist worksteal", with_xdist)
+
+    def test_fallback_resolves_latest_via_sdd_version_script(self) -> None:
+        """不得硬寫死版本號，否則升版後 fallback 又跟丟 LATEST。"""
+        self.assertIn("sdd_version.py", _ci_gate_ps1_text())
 
 
 class CpuBudgetExportWiringTest(unittest.TestCase):
@@ -215,6 +200,40 @@ class CpuBudgetExportWiringTest(unittest.TestCase):
                 self.assertIn("PYTEST_XDIST_AUTO_NUM_WORKERS", text)
                 if needs_workers:
                     self.assertIn("AUTOSDD_PARALLEL_TESTS_WORKERS", text)
+
+    def test_ci_gate_broadcasts_target_monorepo_root(self) -> None:
+        """DEF-200-326：兩檔住 `AISDLC_SDD/scripts/`，到 monorepo 根還多一層
+        ——舊文字直接拼 REPO_ROOT（＝AISDLC_SDD/）是死碼（該路徑不存在，紅綠自證
+        見 DevA_R157_evidence.md）。以各自根算法獨立重算，斷言路徑真實存在。"""
+        sh_line = next(
+            (ln for ln in _ci_gate_text().splitlines() if "cpu_budget.py" in ln and "=" in ln),
+            None,
+        )
+        self.assertIsNotNone(sh_line, "ci-gate.sh 找不到組出 cpu_budget.py 路徑的賦值行")
+        self.assertIn(
+            "MONOREPO_ROOT", sh_line,
+            f"ci-gate.sh 組 cpu_budget.py 路徑應以 MONOREPO_ROOT 為底，實得：{sh_line.strip()!r}",
+        )
+        sh_root = (CI_GATE.parent / ".." / "..").resolve()
+        self.assertTrue(
+            (sh_root / "tools" / "lib" / "cpu_budget.py").is_file(),
+            f"ci-gate.sh 自身根算法（scripts/../..）重算出的路徑不存在：{sh_root}",
+        )
+
+        ps1_line = next(
+            (ln for ln in _ci_gate_ps1_text().splitlines() if "cpu_budget.py" in ln and "=" in ln),
+            None,
+        )
+        self.assertIsNotNone(ps1_line, "ci-gate.ps1 找不到組出 cpu_budget.py 路徑的賦值行")
+        self.assertIn(
+            "'..'", ps1_line,
+            f"ci-gate.ps1 路徑應含 monorepo 根層跳升 '..'，實得：{ps1_line.strip()!r}",
+        )
+        ps1_root = (CI_GATE_PS1.parent / ".." / "..").resolve()
+        self.assertTrue(
+            (ps1_root / "tools" / "lib" / "cpu_budget.py").is_file(),
+            f"ci-gate.ps1 自身根算法（Split-Path 兩層）重算出的路徑不存在：{ps1_root}",
+        )
 
 
 if __name__ == "__main__":

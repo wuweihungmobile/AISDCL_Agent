@@ -106,10 +106,9 @@ def should_run_parallel(start_dir: Path, real_start_dir: Path, workers: int) -> 
 
 
 def worker_count(cpu_count: int | None = None) -> int:
-    """`AUTOSDD_PARALLEL_TESTS_WORKERS` 可覆寫；未設時委派 `cpu_budget.total_budget()`：
-    互動環境＝`max(1, min(9, cpu-1))`（保留一核心給前景，上限 9：第九輪 8→9，
-    本機 10 核 8P+2E 恰頂到新 cap）；headless（`GITHUB_ACTIONS=true` 或
-    `AUTOSDD_CPU_HEADLESS=1`）＝`max(1, min(9, cpu))`（無前景可保留，見下）。
+    """`AUTOSDD_PARALLEL_TESTS_WORKERS` 可覆寫；未設時委派 `cpu_budget.total_budget()`
+    ——互動／headless 公式與上限一律現查該檔（DEF-200-327 起互動分支改用實體
+    核心，本檔不複寫舊公式數字，避免與 SSOT 漂移）。
 
     🔴 第十輪訂正（SD-02）：CI runner vCPU 數普遍 <= 10，`min(9, cpu-1)` 這一步
     的 cap 對它們不生效、公式收斂成單純的 `cpu-1`——但這不等於「worker 數不受
