@@ -2,7 +2,8 @@
 帶 `_atomic_write_text` 修法才開 xdist；凍結基線與中間歷史版一律序列）；DEF-200-289／318／
 326：`ci-gate.ps1` fallback 兩處呼叫（凍結基線不得帶 xdist、LATEST 軌必須帶）與三處
 orchestrator 的 cpu_budget 匯出段接線（含路徑真解得到）。完整 WHY 與安家理由見
-docs/06_quality/CrossPlatform_Guard_Line_History.md〈test_ci_gate_xdist_allowlist 模組 WHY（2026-09-19 搬遷）〉。
+docs/06_quality/CrossPlatform_Guard_Line_History.md
+〈test_ci_gate_xdist_allowlist 模組 WHY（2026-09-19 搬遷）〉。
 """
 from __future__ import annotations
 

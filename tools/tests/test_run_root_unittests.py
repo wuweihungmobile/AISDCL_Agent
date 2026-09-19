@@ -275,7 +275,7 @@ class WorkerCountFormulaTest(unittest.TestCase):
     """直接呼叫真正的 `worker_count(cpu_count=N)` 斷言公式（DEF-200-274 第八輪：此前全被
     mock 掉、零覆蓋）；DEF-200-289 起 headless 不再 `-1`，故每支顯式拔掉兩個 env 走互動分支；
     DEF-200-327 起 setUp 釘死 `_detect_physical_count()` 回 None，維持既有斷言語意。
-    史料全文：CrossPlatform_Guard_Line_History.md〈WorkerCountFormulaTest WHY（2026-09-19 搬遷）〉。"""
+    史料：CrossPlatform_Guard_Line_History.md〈WorkerCountFormulaTest WHY（2026-09-19 搬遷）〉。"""
 
     def setUp(self) -> None:
         ps = run_root_unittests.parallel_shard

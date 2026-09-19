@@ -701,7 +701,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_check_pytest_baseline_sites.py": 301,
     "test_check_script_parity.py": 2029,
     "test_check_wrapper_thinness.py": 1185,
-    "test_ci_gate_xdist_allowlist.py": 214,
+    "test_ci_gate_xdist_allowlist.py": 215,
     "test_claim_provenance_r86.py": 1015,
     "test_clean_venv_carrier.py": 281,
     "test_component_sanitizer_shared_layer_lock.py": 293,
@@ -2112,14 +2112,14 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "與凍結前綴 233→235 所造成的行數漂移（含本列自身收斂），保守全額歸主軌"
      "（本輪連升 2／2 到頂：R157 必須淨額 ≤0）。逐檔清單見 "
      "CrossPlatform_R145_Scan_Findings.md〈第十八輪附記（R156）〉。"),
-    ("R157", 101607, 101638, 31,  # round-label-ok：多 CPU 第十四輪＋DEF-200-325 對話框根治
+    ("R157", 101607, 101639, 32,  # round-label-ok：多 CPU 第十四輪＋DEF-200-325 對話框根治
      "[非淨減法輪][回歸鎖軌申報，見 _REGRESSION_LANE_LOG 同輪列] DEF-200-325／326／327／"
      "330 收尾：test_windowsapps_guard_cross_consistency（+13 鎖 −17 史料）、"
      "test_ci_gate_xdist_allowlist（+19）、test_cpu_budget（+29）、test_run_root_unittests"
      "（+14 鎖 −11 史料）、本檔 _zzz_ 暫態排除（+6）；史料搬遷至 "
      "CrossPlatform_Guard_Line_History.md〈R157 …WHY〉兩節抵銷。逐檔清單見 "
      "CrossPlatform_R145_Scan_Findings.md〈第十九輪附記（R157）〉。"),
-    ("R157", 101638, 101668, 30,  # round-label-ok：本表自身重釘漂移（單一收斂列，含本列自身）
+    ("R157", 101639, 101669, 30,  # round-label-ok：本表自身重釘漂移（單一收斂列，含本列自身）
      "[非淨減法輪][同輪追加] 收斂列：本表新增上一列、`_REGRESSION_LANE_LOG` 同輪新列、"
      "`_REPIN_NET_CAP_SCHEDULE` 到期義務兌現列 (157, 537)＋重新武裝 159／536、"
      "`_FROZEN_PREFIX_REWRITE_LEDGER` 接鏈列與凍結前綴 235→237 所造成的行數漂移"
@@ -2468,13 +2468,13 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "呼叫點接線突變自證），全額為 DEF-200-324 的驗收測試，非湊額。本表自身收斂列"
      "（含本列自身）保守不計入本軌、全額歸主軌。逐檔清單見 "
      "CrossPlatform_R145_Scan_Findings.md〈第十八輪附記（R156）〉。"),
-    ("R157", 61,
+    ("R157", 62,
      "DEF-200-325／326／327 結案回歸鎖（記帳誠實度分類，非湊額）：test_windowsapps_guard_"
      "cross_consistency.py test_get_repo_python_skips_extensionless_candidates_on_windows（+13）"
      "、test_ci_gate_xdist_allowlist.py test_ci_gate_broadcasts_target_monorepo_root 與 "
      "CiGatePs1FallbackXdistTest 改寫（+19）、test_cpu_budget.py 實體核公式鎖（+29）、"
      "test_run_root_unittests.py WorkerCountFormulaTest.setUp＋自動細分門檻鎖（+14）＝raw +75，"
-     "依「子集不得大於母項」申報上限＝同輪主表淨額 61（餘 14 已被史料搬遷抵銷）。逐檔清單見 "
+     "依「子集不得大於母項」申報上限＝同輪主表淨額 62（餘 13 已被史料搬遷抵銷）。逐檔清單見 "
      "CrossPlatform_R145_Scan_Findings.md〈第十九輪附記（R157）〉。"),
 )
 
@@ -2758,7 +2758,7 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 _REPIN_LOG_FROZEN_PREFIX_LEN = 237
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "53b02384991355da5bf6efdfad491edb99c1aa5ab00fc4d908c8f4f1940d819c")
+    "b55177a84c3b0ce355ef0d2c067fd5c3536545749edb5a1535c2f933019b450f")
 
 
 def repin_log_history_digest(
@@ -3042,7 +3042,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R156", "96325f09b5d5", "d1780bab5946", "DEF-200-324"),
     # R157：多 CPU 第十四輪＋DEF-200-325 對話框根治——新增主表兩列與本軌新列自身 round-label-ok
     # 漂移，凍結前綴延伸涵蓋新增列本身，起點接上一列終點 d1780bab5946。round-label-ok
-    ("R157", "d1780bab5946", "53b023849913", "DEF-200-325"),
+    ("R157", "d1780bab5946", "b55177a84c3b", "DEF-200-325"),
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

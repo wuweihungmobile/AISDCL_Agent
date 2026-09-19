@@ -463,15 +463,15 @@ round-label-ok
 - **體例**：本節非開新一輪 CrossPlatform 掃描輪四件套，僅為單一收尾窗口造成的護欄層逐檔漂移記帳，
   寄居本檔（同 R129～R156 寄居體例）。前兩輪（R155／R156）主軌淨額連續為正、
   `_REPIN_MAX_CONSECUTIVE_RISING_ROUNDS=2` 已到頂 ⇒ 本輪主表扣除回歸鎖軌後必須 ≤0：本輪申報
-  回歸鎖軌 61（＝同輪主表淨額，子集不得大於母項；raw 回歸鎖行數 +75，餘 14 由史料搬遷抵銷），
-  主軌 61−61＝0。cap 到期義務兌現：`(157, 537)`，同輪重新武裝 `_REPIN_NET_CAP_DUE_ROUND=159`／
+  回歸鎖軌 62（＝同輪主表淨額，子集不得大於母項；raw 回歸鎖行數 +75，餘 13 由史料搬遷抵銷），
+  主軌 62−62＝0。cap 到期義務兌現：`(157, 537)`，同輪重新武裝 `_REPIN_NET_CAP_DUE_ROUND=159`／
   `_REPIN_NET_CAP_DUE_TARGET=536`；`_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND` 具名展延 157→162；
   `_PHASE2_REVIEW_LOG` 五輪時效未到，本輪無新登記。
 
-<!-- guard-total:R157 --> R157 護欄層累積淨額＝ 101607 → 101668（+61）——內容 +31（
+<!-- guard-total:R157 --> R157 護欄層累積淨額＝ 101607 → 101669（+62）——內容 +32（
 `test_windowsapps_guard_cross_consistency.py` 2178→2174：DEF-200-325 文字鎖 +13、docstring 訂正搬遷 −17；
-`test_ci_gate_xdist_allowlist.py` 213→206：DEF-200-326 路徑鎖 +34、DEF-200-318 fallback 鎖改寫 −15、
-模組 docstring 搬遷 −26；`test_cpu_budget.py` 154→183：DEF-200-327 實體核公式鎖 +29；
+`test_ci_gate_xdist_allowlist.py` 213→207：DEF-200-326 路徑鎖 +34、DEF-200-318 fallback 鎖改寫 −15、
+模組 docstring 搬遷 −25；`test_cpu_budget.py` 154→183：DEF-200-327 實體核公式鎖 +29；
 `test_run_root_unittests.py` 6653→6660：WorkerCountFormulaTest.setUp +5、自動細分門檻鎖 +9、
 類別 docstring 搬遷 −11；本檔 `_zzz_` 暫態排除 +6）＋本檔自身漂移 +30（主表兩列、回歸鎖軌新列、
 cap 到期兌現列與重新武裝、接鏈列、舊尺技術債展延；凍結前綴 235→237、`_REPIN_LOG_HISTORY_SHA256`
