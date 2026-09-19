@@ -377,6 +377,13 @@ function Test-InstallRoundtrip {
     Fail-Item "${Label}：無法進入受測 repo ${TargetRepo}（非假 PASS）"
     return
   }
+  # DEF-200-343：假 repo 由 git clone 建立、天生沒有 .venv；19f3e75b（DEF-200-315）
+  # 單一 .venv 守衛會讓互動式安裝器在此拒跑。AUTOSDD_ALLOW_PATH_PYTHON='1' 是該
+  # 守衛文件明寫的人為逃生口（tools/lib/WindowsAppsGuard.ps1），只在本函式範圍
+  # 內生效、結束時還原——smoke 這裡驗的是安裝器 hooksPath 往返邏輯，不是 .venv
+  # 存在性。
+  $prevAllowPathPython = $env:AUTOSDD_ALLOW_PATH_PYTHON
+  $env:AUTOSDD_ALLOW_PATH_PYTHON = '1'
   try {
     & $installer
     $rcInstall = $LASTEXITCODE
@@ -440,6 +447,11 @@ function Test-InstallRoundtrip {
     }
     Pass-Item "${Label} 安裝／解除往返"
   } finally {
+    if ($null -eq $prevAllowPathPython) {
+      Remove-Item Env:AUTOSDD_ALLOW_PATH_PYTHON -ErrorAction SilentlyContinue
+    } else {
+      $env:AUTOSDD_ALLOW_PATH_PYTHON = $prevAllowPathPython
+    }
     Pop-Location
   }
 }
@@ -651,6 +663,10 @@ try {
         $rc = 9  # 哨兵：同 Test-WorktreeReject（腳本未被執行 ≠ 成功）
         try {
           Push-Location -LiteralPath $wt -ErrorAction Stop
+          # DEF-200-343：同 [2/9]/[4/9]（Test-InstallRoundtrip），官方逃生口，
+          # 僅在本段生效、結束時還原。
+          $prevAllowPathPython5 = $env:AUTOSDD_ALLOW_PATH_PYTHON
+          $env:AUTOSDD_ALLOW_PATH_PYTHON = '1'
           try {
             $installer = Join-Path $wt ('AISDLC_SDD\' + $latestName + '\tools\install_hooks\install_post_commit.ps1')
             if (Test-Path -LiteralPath $installer) {
@@ -658,6 +674,11 @@ try {
               $rc = $LASTEXITCODE
             }
           } finally {
+            if ($null -eq $prevAllowPathPython5) {
+              Remove-Item Env:AUTOSDD_ALLOW_PATH_PYTHON -ErrorAction SilentlyContinue
+            } else {
+              $env:AUTOSDD_ALLOW_PATH_PYTHON = $prevAllowPathPython5
+            }
             Pop-Location
           }
         } catch {

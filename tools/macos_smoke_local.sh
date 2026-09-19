@@ -339,8 +339,13 @@ echo ""
 echo "--- [3/7] install_git_hooks.sh / install-hooks.sh 往返 + worktree 拒絕（fake repo）---"
 
 # 3a. AutoClaude/tools/install_git_hooks.sh 安裝／解除往返
+# DEF-200-343：假 repo 由 git clone 建立、天生沒有 .venv；19f3e75b（DEF-200-315）
+# 單一 .venv 守衛讓互動式安裝器在此拒跑。AUTOSDD_ALLOW_PATH_PYTHON=1 是該守衛
+# 文件明寫的人為逃生口（tools/lib/windowsapps_guard.sh），只在本子 shell 內生
+# 效——smoke 這裡驗的是安裝器 hooksPath 往返邏輯，不是 .venv 存在性。
 (
   cd "$FAKE" || exit 9
+  export AUTOSDD_ALLOW_PATH_PYTHON=1
   bash AutoClaude/tools/install_git_hooks.sh || exit 1
   hp="$(git config --get core.hooksPath || true)"
   [ -n "$hp" ] || exit 1
@@ -376,8 +381,10 @@ else
 fi
 
 # 3c. AISDLC_SDD/scripts/install-hooks.sh 安裝往返
+# DEF-200-343：同 3a，官方逃生口（見上）。
 (
   cd "$FAKE" || exit 9
+  export AUTOSDD_ALLOW_PATH_PYTHON=1
   bash AISDLC_SDD/scripts/install-hooks.sh || exit 1
   hp="$(git config --get core.hooksPath || true)"
   [ -n "$hp" ] || exit 1
@@ -422,7 +429,8 @@ else
   echo "AISDLC_SDD LATEST 版：$latest"
   wt="$WORK/wt-install-post-commit"
   git -C "$FAKE" worktree add --quiet --detach "$wt" HEAD
-  ( cd "$wt" && bash "$latest/tools/install_hooks/install_post_commit.sh" )
+  # DEF-200-343：同 3a，官方逃生口（見上）。
+  ( cd "$wt" && export AUTOSDD_ALLOW_PATH_PYTHON=1 && bash "$latest/tools/install_hooks/install_post_commit.sh" )
   rc=$?
   target="$(git -C "$FAKE" rev-parse --path-format=absolute --git-common-dir)/hooks/post-commit"
   step4_ok=1

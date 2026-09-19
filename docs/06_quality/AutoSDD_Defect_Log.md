@@ -341,6 +341,7 @@
 | DEF-200-340 | 2026-09-20 | 收尾單人窗口（本欄刻意零輪號） | **根 CLAUDE.md 鐵律二字面與 `lint_powershell_command.py` 判準不符**：文件寫「帶相對路徑」的 `Set-Location` 才擋，但該 hook 對任何 `Set-Location`（含絕對路徑加引號）皆命中；框架自產的 ESCALATION 恢復指令可能被自家 lint 擋下 | P3 | 待指派 | open（未指派）：需釐清是文件措辭失準或判準過寬，兩案皆待下一輪處置 |
 | DEF-200-341 | 2026-09-20 | 收尾單人窗口（本欄刻意零輪號；承接 DEF-200-333） | **`file_lock._is_stale()` 的 `stat()` 呼叫在 Windows delete-pending 態的 `PermissionError` 本輪只在 acquire 迴圈內以窄護欄接住**，`_is_stale` 本體與其他呼叫端未處理，改動 B（讓 `_is_stale` 直接吞 PermissionError）已被反駁者裁定會結構性關閉陳舊回收、故意不做 | P3 | 待 Windows 證據 | open（承接輪次：**未指派**）：待真機重現 CI #250 後再評估是否修本體（解鎖條件：Windows 端跑〈七、Windows 親驗清單〉7.4 重現 PermissionError 後回報） |
 | DEF-200-342 | 2026-09-20 | 收尾單人窗口（本欄刻意零輪號） | **FSM `AUTO_COMPACT_PENDING` 且 `pending_owner` 缺席（舊版狀態檔）時 fail-closed 只擋一般檔 Write/Edit、Read/Bash 放行**——這是使用者原話「Read/Bash 能用、只有一般檔 Write/Edit 被擋」字面最精確的候選路徑（`fsm_runtime.py:637-687`）；本輪未改，需 Windows 端 FSM-STATE 實值佐證 | P2 | 待 Windows 親驗 | open（承接輪次：**未指派**）：解鎖條件＝Windows 端跑〈七、Windows 親驗清單〉7.1/7.2 現查 FSM-STATE 後回報 |
+| DEF-200-343 | 2026-09-20 | 收尾單人窗口（本欄刻意零輪號；承 DEF-200-342） | **19f3e75b 單一 .venv 守衛讓 macOS smoke 假 repo 三個安裝器拒跑**，mac nightly 09-20 02:00 起 `[1/4] macos_smoke` 紅（`PASS=10 FAIL=4`）；CI 因 `GITHUB_ACTIONS=true` 不受影響 | P2 | 見狀態欄 | fixed：三個安裝器呼叫子 shell 內加逃生口 `AUTOSDD_ALLOW_PATH_PYTHON=1`；mac 修復前 `PASS=10 FAIL=4` → 修復後 `PASS=13 FAIL=0` rc=0。詳見 CrossPlatform_R158_SessionGate_Statusline_Evidence.md〈十〉 |
 
 > **R41「四方複審裁決總結」敘事段落已搬遷至 [`AutoSDD_Defect_Log_archive_17.md`](AutoSDD_Defect_Log_archive_17.md)（R43 帳本 housekeeping，逐字保全）。**
 

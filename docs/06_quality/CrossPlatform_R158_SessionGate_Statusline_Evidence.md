@@ -441,3 +441,42 @@ DEF-200-340（open，未指派）。
   ｜同上模式，無漂移情境對 HEAD 版 `router.main()` 重跑也 PASS。
 - QA P3｜PKG_REPORTS「先紅再綠」敘事｜建議未來 PKG 報告區分「新行為斷言」與「規格完整性斷言」
   兩類測試計數。
+
+## 十、補正 4：本機 smoke 被 .venv 守衛擋下（DEF-200-343）
+
+**事實**：`19f3e75b`（2026-09-19，DEF-200-315「單一 .venv 最後一哩」）把互動式安裝器
+（`AutoClaude/tools/install_git_hooks.sh`／`AISDLC_SDD/scripts/install-hooks.sh`／
+LATEST `install_post_commit.sh`）改為只認 repo 根層 `.venv` 直譯器，PATH 上的
+`python`／`python3` 一律拒收，除非 `CI=true`／`GITHUB_ACTIONS=true` 或人為逃生口
+`AUTOSDD_ALLOW_PATH_PYTHON=1`。`tools/macos_smoke_local.sh`／
+`tools/windows_smoke_local.ps1` 各自在 OS temp 建的假 repo（`git clone` 而來）天生
+沒有 `.venv`，於是這三個安裝器呼叫點在假 repo 內全數被守衛擋下——mac nightly 自
+09-20 02:00 起 `[1/4] macos_smoke` 轉紅：`bash tools/macos_smoke_local.sh` 修復前
+親跑 `===== 彙總：PASS=10 FAIL=4 SKIP=0 =====` rc=1（紅：[3/7] `install_git_hooks.sh
+安裝後 core.hooksPath 未設定`、`install-hooks.sh 安裝後 core.hooksPath 未設定或安裝
+失敗（rc=1）`、[4/7] `install_post_commit.sh 於 worktree 執行失敗（rc=1）`、[7/7]
+`PASS 總數 10 低於下限 13`）。CI 因 workflow 內建 `GITHUB_ACTIONS=true` 走逃生口，
+未受影響；本輪（R158 六包）未動任何安裝器與 smoke 腳本，純屬 19f3e75b 的連帶。
+
+**修法**：假 repo 本來就沒有 `.venv`，`AUTOSDD_ALLOW_PATH_PYTHON=1` 是
+`tools/lib/windowsapps_guard.sh`／`tools/lib/WindowsAppsGuard.ps1` 文件明寫的人為
+逃生口，不是繞過守衛——smoke 驗的是安裝器 hooksPath 往返邏輯，不是 `.venv`
+存在性。`tools/macos_smoke_local.sh` 於 3a（`install_git_hooks.sh` 往返）、3c
+（`install-hooks.sh` 往返）、[4/7]（LATEST `install_post_commit.sh` worktree 實跑）
+三處子 shell 內加 `export AUTOSDD_ALLOW_PATH_PYTHON=1`（僅該子 shell 範圍內生效，
+不外洩到 [5/7] 等唯讀段）；`tools/windows_smoke_local.ps1` 同型，於共用函式
+`Test-InstallRoundtrip`（[2/9]/[4/9]a/[6/9] 三處呼叫共用同一函式體）與 [5/9]
+（`install_post_commit.ps1` worktree 實跑）內以 `$env:AUTOSDD_ALLOW_PATH_PYTHON =
+'1'` 包住安裝器呼叫、`finally` 區塊還原舊值（`Remove-Item Env:` 或設回）。3b/3d/
+[3/9]/[4/9]b（linked worktree 拒絕測試）未動——這些子 shell 本輪未觀察到失敗
+（守衛 rc=1 恰與「worktree 應拒絕」期望值巧合一致），裁決範圍僅涵蓋 FACTS 記錄
+為紅的三個「往返」呼叫點。
+
+**mac 實測前後彙總行**：
+- 修復前：`===== 彙總：PASS=10 FAIL=4 SKIP=0 =====` rc=1
+- 修復後：`===== 彙總：PASS=13 FAIL=0 SKIP=0 =====` rc=0（`bash tools/macos_smoke_local.sh` 全程親跑，[1/7]~[7/7] 全數 PASS）
+
+**Windows 待親驗**：`tools/windows_smoke_local.ps1` 本輪僅完成靜態合規（`ruff` 不管
+`.ps1`；`cd tools/tests && python -m unittest test_ps51_compat
+test_platform_neutral_paths -q` 已於本機 mac 對 `.ps1` 檔掃描過 OK），主控在 mac
+上無法實跑 PowerShell 腳本本體，Windows 側 `PASS=13/13` 待 Windows 親驗補上。
