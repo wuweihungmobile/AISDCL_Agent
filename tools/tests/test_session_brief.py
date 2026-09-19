@@ -196,7 +196,7 @@ class SessionstartBriefTest(unittest.TestCase):
         """DEF-200-344：注入函式的 fail-open 噪音（如 windows-compat-ci #251 撞到的
         `known_model_windows` 查表警語）不得外洩到呼叫端 stderr。"""
         def _noisy_resolve_window(*_a, **_k):
-            sys.stderr.write("known_model_windows fail-open：合成噪音\n")
+            sys.stderr.write("known_model_windows fail-open: synthetic noise\n")
             return (200_000, "指定值（測試）")
         outer = io.StringIO()
         with contextlib.redirect_stderr(outer):
