@@ -5,10 +5,8 @@
 非-OTHER 失誤桶 `CLAIM-FIRST`（宣稱先於查證）——該桶發生的平面是「宣稱本身」，永不
 變成 repo 裡的檔案 ⇒ 靜態掃描器結構上看不見它，所以本鎖每一條壞掉時都是**靜默的**。
 
-🔴 **立案敘事（三組判準各自對應哪一個已實測發生過的失效方向、以及為何凍結成字面樣本
-而不是測試時重讀逐字稿）已逐字搬至** `docs/06_quality/CrossPlatform_R86_Guard_Repin_Evidence.md`
-**§C**；本輪動用棘輪自己指定的「把 WHY 與史料搬出護欄層」出口以兌現淨額 ≤ 0 的到期義務。
-per-assertion 的 WHY **未搬動**，仍在各 class／method 的 docstring 內。
+🔴 立案敘事已逐字搬至 `docs/06_quality/CrossPlatform_R86_Guard_Repin_Evidence.md`
+§C（棘輪自訂淨額 ≤0 出口）；per-assertion WHY 未搬，仍在各 class／method docstring 內。
 """
 from __future__ import annotations
 
@@ -22,6 +20,7 @@ import tempfile
 import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from unittest import mock
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _HOOK = _REPO_ROOT / ".claude" / "hooks" / "check_claim_provenance.py"
@@ -48,13 +47,30 @@ _AXES_OUTSIDE_KNOWN_KINDS = frozenset({"nimbus_quill"})
 _NOW = datetime(2026, 8, 23, 12, 0, tzinfo=UTC)
 
 
+def _hook_env(extra: dict | None = None) -> dict:
+    """建子行程環境：先濾掉本檔 hook 自己的逃生口再疊 `extra`（洩漏會噤聲判準，DEF-200-349）。"""
+    hatches = {"AUTOSDD_UNATTENDED", "AUTOSDD_CLAIM_GUARD_OFF", "AUTOSDD_NAKED_GUARD_OFF",
+              "AUTOSDD_CAUSAL_GUARD_OFF", "AUTOSDD_BLOCK_CLAIM_GUARD_OFF",
+              "AUTOSDD_PACE_GUARD_OFF", "AUTOSDD_CARRIER_GUARD_OFF"}
+    return {**{k: v for k, v in os.environ.items() if k not in hatches}, **(extra or {})}
+
+
+def _hook_env_reads() -> set[str]:
+    """AST 掃描 `_HOOK`：回傳所有 `os.environ.get("...")` 讀到的環境變數字面名。"""
+    return {
+        node.args[0].value
+        for node in ast.walk(ast.parse(_HOOK.read_text(encoding="utf-8")))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute) and node.func.attr == "get"
+        and isinstance(node.func.value, ast.Attribute)
+        and node.func.value.attr == "environ"
+        and node.args and isinstance(node.args[0], ast.Constant)
+        and isinstance(node.args[0].value, str)
+    }
+
+
 # 🔴 **刻意不在本檔驗「hook 檔存在」與「Stop 兩個載具都在」**（本批以雙向注入實測後移除）。
-# 兩者都已有既有鎖在守，重寫一份就是同一份知識住兩個家、而只有一個家會被改：
-#   · 拔掉 Stop 的 POSIX 載具 ⇒ `test_check_hooks_liveness.py` 的
-#     `TestExecFormConversionScope::test_every_active_settings_file_passes_the_form_criteria`
-#     與 `TestHookEntriesAreExecForm::test_real_settings_is_all_exec_form` 實測轉紅（rc=1）。
-#   · 把 hook 檔移走 ⇒ 同檔 `TestHookRegistrationScopeIsShrinkOnly::
-#     test_baseline_scripts_all_exist_on_disk` 實測轉紅（rc=1）。
+# 實測紀錄見 R86 護欄重釘證據檔 §D。
 # 那兩道鎖的分母是**現查磁碟的註冊集合**，本檔新增的條目自動落進它們的射程，
 # 所以本檔只需守「判準本體」與「程序層契約」——註冊面不是本檔的職責。
 
@@ -161,10 +177,9 @@ class TestTheProcessNeverBlocksAndAlwaysFailsOpen(unittest.TestCase):
     """
 
     def _run(self, payload: str, env_extra: dict | None = None):
-        env = {**os.environ, **(env_extra or {})}
         return subprocess.run([sys.executable, str(_HOOK)], input=payload,
-                              capture_output=True, text=True, env=env, timeout=60,
-                              encoding="utf-8", errors="replace")
+                              capture_output=True, text=True, env=_hook_env(env_extra),
+                              timeout=60, encoding="utf-8", errors="replace")
 
     def test_every_degraded_payload_exits_zero_and_says_nothing(self) -> None:
         """壞 JSON／空輸入／缺欄位三種退化 payload 一律靜默放行。
@@ -226,6 +241,14 @@ class TestTheProcessNeverBlocksAndAlwaysFailsOpen(unittest.TestCase):
                         "AUTOSDD_SENTINEL_OFF"):
             self.assertNotIn(foreign, read_names,
                              f"不得**讀** {foreign} 當本守衛的開關（共用會讓一次關閉波及別的守衛）")
+
+    def test_a_leaked_claim_guard_off_does_not_silence_the_value_judgement(self) -> None:
+        """巢狀鎖（DEF-200-349）：拿掉 `_hook_env()` 對 os.environ 的過濾，這支會紅。"""
+        payload = json.dumps({"hook_event_name": "Stop", "transcript_path": str(_HOOK),
+                              "last_assistant_message": "收工：99991 passed。"})  # baseline-ok:語料
+        with mock.patch.dict(os.environ, {"AUTOSDD_CLAIM_GUARD_OFF": "1"}):
+            done = self._run(payload)
+        self.assertIn("99991", done.stderr, "呼叫端洩漏的 AUTOSDD_CLAIM_GUARD_OFF=1 噤聲了真違規")
 
 
 class TestTruncationBiasesTowardsSilenceNotFalseRed(unittest.TestCase):
@@ -324,7 +347,7 @@ class TestTheCausalEscapeHatchIsItsOwn(unittest.TestCase):
 
     def test_it_speaks_on_stderr_but_still_exits_zero(self) -> None:
         done = subprocess.run([sys.executable, str(_HOOK)], input=self._payload(),
-                              capture_output=True, text=True, timeout=60,
+                              capture_output=True, text=True, env=_hook_env(), timeout=60,
                               encoding="utf-8", errors="replace")
         self.assertEqual(done.returncode, 0, "本守衛永不阻斷")
         self.assertIn("monthly spend limit", done.stderr)
@@ -332,11 +355,11 @@ class TestTheCausalEscapeHatchIsItsOwn(unittest.TestCase):
 
     def test_turning_off_the_causal_guard_leaves_the_other_one_armed(self) -> None:
         """關掉因果判準之後，值域判準必須**還在**——否則兩個逃生口只是名字不同。"""
-        env = {**os.environ, "AUTOSDD_CAUSAL_GUARD_OFF": "1"}
         payload = json.dumps({
             "hook_event_name": "Stop",
             "last_assistant_message": _INCIDENT + " 全套 99991 passed。",  # baseline-ok: 合成語料
             "transcript_path": str(self.transcript)})
+        env = _hook_env({"AUTOSDD_CAUSAL_GUARD_OFF": "1"})
         done = subprocess.run([sys.executable, str(_HOOK)], input=payload, env=env,
                               capture_output=True, text=True, timeout=60,
                               encoding="utf-8", errors="replace")
@@ -570,7 +593,7 @@ class TestTheModelChannelIsClampedOnStopHookActive(unittest.TestCase):
             "hook_event_name": "Stop", "stop_hook_active": active,
             "last_assistant_message": _pace_line("session", "77"),
             "transcript_path": str(self.transcript)})
-        env = {**os.environ, "AUTOSDD_TRACE_DIR": self._dir.name}
+        env = _hook_env({"AUTOSDD_TRACE_DIR": self._dir.name})
         return subprocess.run([sys.executable, str(_HOOK)], input=payload, env=env,
                               capture_output=True, text=True, timeout=60,
                               encoding="utf-8", errors="replace")
@@ -604,8 +627,7 @@ class TestThePaceGuardHasItsOwnEscapeHatch(unittest.TestCase):
                 "last_assistant_message":
                     _pace_line("session", "77") + " 收工：99991 passed。",  # baseline-ok: 合成語料
                 "transcript_path": str(transcript)})
-            env = {**os.environ, "AUTOSDD_PACE_GUARD_OFF": "1",
-                   "AUTOSDD_TRACE_DIR": tmp}
+            env = _hook_env({"AUTOSDD_PACE_GUARD_OFF": "1", "AUTOSDD_TRACE_DIR": tmp})
             done = subprocess.run([sys.executable, str(_HOOK)], input=payload, env=env,
                                   capture_output=True, text=True, timeout=60,
                                   encoding="utf-8", errors="replace")
@@ -753,8 +775,7 @@ class TestTheNakedGuardIsItsOwnProcessLevelContract(unittest.TestCase):
         payload = json.dumps({"hook_event_name": "Stop",
                               "last_assistant_message": claim,
                               "transcript_path": str(self.transcript)})
-        env = {**os.environ, "AUTOSDD_TRACE_DIR": self._dir.name,
-               **(env_extra or {})}
+        env = _hook_env({"AUTOSDD_TRACE_DIR": self._dir.name, **(env_extra or {})})
         return subprocess.run([sys.executable, str(_HOOK)], input=payload, env=env,
                               capture_output=True, text=True, timeout=60,
                               encoding="utf-8", errors="replace")
@@ -784,18 +805,8 @@ class TestTheNakedGuardIsItsOwnProcessLevelContract(unittest.TestCase):
 
     def test_the_new_hatch_is_read_and_is_not_a_shared_name(self) -> None:
         """判準問的是本檔**讀**了哪個環境變數（AST 站點），不是文字面出現過。"""
-        read_names = {
-            node.args[0].value
-            for node in ast.walk(ast.parse(_HOOK.read_text(encoding="utf-8")))
-            if isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute) and node.func.attr == "get"
-            and isinstance(node.func.value, ast.Attribute)
-            and node.func.value.attr == "environ"
-            and node.args and isinstance(node.args[0], ast.Constant)
-            and isinstance(node.args[0].value, str)
-        }
-        self.assertIn("AUTOSDD_NAKED_GUARD_OFF", read_names,
-                      "第四個判準必須有自己的逃生口")
+        read_names = _hook_env_reads()
+        self.assertIn("AUTOSDD_NAKED_GUARD_OFF", read_names, "第四個判準必須有自己的逃生口")
         for foreign in ("AUTOSDD_CLAIM_GUARD_OFF", "AUTOSDD_CAUSAL_GUARD_OFF",
                         "AUTOSDD_PACE_GUARD_OFF"):
             self.assertIn(foreign, read_names,
@@ -868,10 +879,9 @@ class TestTheUnbackedBlockClaimHookWiring(unittest.TestCase):
     def _run(self, claim: str, transcript: Path, env_extra: dict | None = None):
         payload = json.dumps({"hook_event_name": "Stop", "last_assistant_message": claim,
                               "transcript_path": str(transcript)})
-        env = {**os.environ, **(env_extra or {})}
-        return subprocess.run([sys.executable, str(_HOOK)], input=payload, env=env,
-                              capture_output=True, text=True, timeout=60,
-                              encoding="utf-8", errors="replace")
+        return subprocess.run([sys.executable, str(_HOOK)], input=payload,
+                              env=_hook_env(env_extra), capture_output=True, text=True,
+                              timeout=60, encoding="utf-8", errors="replace")
 
     def test_a_bare_claim_with_an_empty_transcript_is_flagged_on_stderr(self) -> None:
         transcript = self._write_transcript([])
@@ -914,18 +924,8 @@ class TestTheUnbackedBlockClaimHookWiring(unittest.TestCase):
         self.assertIn("99991", done.stderr, "另一個判準被順手關掉了")
 
     def test_the_new_hatch_is_read_and_is_not_shared(self) -> None:
-        read_names = {
-            node.args[0].value
-            for node in ast.walk(ast.parse(_HOOK.read_text(encoding="utf-8")))
-            if isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute) and node.func.attr == "get"
-            and isinstance(node.func.value, ast.Attribute)
-            and node.func.value.attr == "environ"
-            and node.args and isinstance(node.args[0], ast.Constant)
-            and isinstance(node.args[0].value, str)
-        }
-        self.assertIn("AUTOSDD_BLOCK_CLAIM_GUARD_OFF", read_names,
-                      "第五個判準必須有自己的逃生口")
+        read_names = _hook_env_reads()
+        self.assertIn("AUTOSDD_BLOCK_CLAIM_GUARD_OFF", read_names, "第五個判準必須有自己的逃生口")
         for foreign in ("AUTOSDD_CLAIM_GUARD_OFF", "AUTOSDD_NAKED_GUARD_OFF",
                         "AUTOSDD_CAUSAL_GUARD_OFF", "AUTOSDD_PACE_GUARD_OFF"):
             self.assertIn(foreign, read_names,
@@ -949,8 +949,8 @@ class TestTheBlockClaimEvidenceWindowIsRecentTurnsOnly(unittest.TestCase):
     def _run(self, claim: str, transcript: Path):
         payload = json.dumps({"hook_event_name": "Stop", "last_assistant_message": claim,
                               "transcript_path": str(transcript)})
-        return subprocess.run([sys.executable, str(_HOOK)], input=payload, env=os.environ,
-                              capture_output=True, text=True, timeout=60,
+        return subprocess.run([sys.executable, str(_HOOK)], input=payload,
+                              env=_hook_env(), capture_output=True, text=True, timeout=60,
                               encoding="utf-8", errors="replace")
 
     @staticmethod

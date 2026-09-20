@@ -266,3 +266,27 @@ R85 P2：兌現款(12) 到期義務，單輪淨額上限 5400→3200，並改為
 """
 ```
 
+## §D 2026-09-21 自 test_claim_provenance_r86.py 搬出的實測紀錄（逐字）
+
+護欄行數棘輪凍結值維持 1015、本輪不重釘（見 `tools/tests/test_adr_xplat001_c1c2_lock.py` 的
+`_FROZEN_GUARD_LINES["test_claim_provenance_r86.py"]`）。以下段落逐字
+搬出，原處只留一句不含 `docs/` 路徑字樣的指針；判準本體、判準的理由與反例說明
+一律未搬、未刪，仍在原檔對應 class／method docstring 內。
+
+**來源位置**：模組層範圍註解，`_hook_env_reads()` 函式之後、
+`class TestItCatchesTheRelayedNumber` 之前（遷出前原 L59–L64，緊接在
+「🔴 刻意不在本檔驗『hook 檔存在』與『Stop 兩個載具都在』」那句之後）：
+
+```text
+兩者都已有既有鎖在守，重寫一份就是同一份知識住兩個家、而只有一個家會被改：
+  · 拔掉 Stop 的 POSIX 載具 ⇒ `test_check_hooks_liveness.py` 的
+    `TestExecFormConversionScope::test_every_active_settings_file_passes_the_form_criteria`
+    與 `TestHookEntriesAreExecForm::test_real_settings_is_all_exec_form` 實測轉紅（rc=1）。
+  · 把 hook 檔移走 ⇒ 同檔 `TestHookRegistrationScopeIsShrinkOnly::
+    test_baseline_scripts_all_exist_on_disk` 實測轉紅（rc=1）。
+```
+
+該範圍註解的首句（刻意不在本檔驗「hook 檔存在」與「Stop 兩個載具都在」……）與末兩句
+（那兩道鎖的分母是現查磁碟的註冊集合……註冊面不是本檔的職責）是理由，仍逐字留在
+原檔；上面這段是支撐該理由的**兩筆具體實測轉紅座標**，屬於量測史，故搬出。
+

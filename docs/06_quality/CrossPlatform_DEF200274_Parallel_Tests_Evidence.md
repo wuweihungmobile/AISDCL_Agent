@@ -1506,3 +1506,71 @@ worktree、檔案面互不相交）→ 四方複審 → 收尾單人窗口。主
   guard-total 對帳兩站點（`CrossPlatform_R145_Scan_Findings.md`〈第二十輪附記（R159）〉／`AutoSDD_improving_112.md`）；鎖模組 192 tests OK。
 - 訂正 R157 回報措辭：DEF-200-292 帳本早於本輪 fixed（2026-09-18）；「同模組 111 tests」＝三檔合跑；「雙軌並行不做」真因＝v0.01 凍結
   `snapshot.py` 固定 `.tmp` 檔名競態（本檔 L1133／L1148），非 CPU headroom。
+
+- 雲端（本節於下一輪補記）：2206a3a0 push 六支 workflow 皆 success（windows-compat 35487889144／aisdlc-sdd 35487889168／shellcheck 35487889179／
+  root-infra 35487889186／AutoClaude CI 35487889188／macos-compat 35487889288）；nightly-full 於 push 事件依設計 skipped；pre-push 五 leg 全過（232s）。
+
+## 第十六輪：四方獨立審查「第十五輪是否全部修好」＋三缺口修復（2026-09-21，mac）
+
+### 背景
+
+掌舵者再問四問（Q1 帳本多 CPU 問題是否已解／Q2 功能完備且 GitHub CI 用多 CPU／Q3 頭重腳輕與自動偵測平衡負載／Q4 其他可平行處），
+要求 Architect／SA／SD／QA 四方（皆 Sonnet 5、唯讀、不共享上下文）確認第十五輪宣稱（V1～V8）全部修好；主控（Fable）只裁決、派工、收尾。
+流程：SD 先在安靜機器單獨量測 → Architect／SA／QA 並行唯讀審查 → 7 條 F- 發現各派兩位反駁者（讀碼／重現鏡片）→ 1 條被推翻、1 條降級 →
+完整性批評者裁定四方矛盾 → 兩包實作（Dev-A 隔離 worktree、Dev-B 主樹只動 ONBOARDING.md）→ 配平單人窗口 → 四方複審 → 收尾。
+
+### 四方審查判決（Architect PASS；SA／QA／SD PARTIAL；逐字見 scratchpad 四份 `*_R160_evidence.md`）
+
+- **V1～V4（DEF-200-345～348）四方各自獨立重跑皆 CONFIRMED**：`env AUTOSDD_NET_RATCHET_OFF=1` 與乾淨 env 皆 `Ran 268 tests OK`；
+  `TraceIsolationTest` 10 tests OK；`test_cpu_budget` 41 tests OK、`_platform_physical_count()=10`、`--legs 1`=9、headless=10、ARM 無鍵回 None、
+  SMT 4L/2P 去重=2；三站點 broadcast 字面命中且 ci-gate.sh／AutoClaude conftest 真跑印出 `workers=9`／`nodes confirmed=9`；`-p no:xdist -o addopts=` 不炸。
+  QA 另做「先紅再綠」：跳過 setUp 隔離重現 5／7 翻紅，證實 DEF-200-345 隔離非假鎖。
+- **V5 CI**：四方皆以 `gh run list` 現查 2206a3a0 六支 push workflow 皆 success；`gh run view --log` 逐字：root-infra／AutoClaude CI／windows worker=4、
+  macos=3；nightly-full dispatch（35481684835／35481686471）log `PYTEST_XDIST_AUTO_NUM_WORKERS=3`／`4`＋`[cpu_budget] xdist workers=3/4 source=cpu_budget`。
+  QA 指出這兩支 nightly-full 的 headSha＝1d406c8c，早於第十五輪實作凍結 ff046f79 ⇒ 深度回歸尚未涵蓋該輪修改（F-QA-02，見下）。
+- **V6 無頭重腳輕**：SD 安靜機器 w=9 **145s**／w=10 **141s**／w=6 **189s**，三次 `report_dispatch_imbalance()` 即時判定 0 命中；
+  `dispatch_imbalance.detect_imbalance()` 對 155 個派工單位以 1.5 與 1.3 兩種門檻皆 0 命中；最重單位 `test_archive_defect_log.TestMoveSubsetSelectionIsNamedAndTraceable`
+  103~120s，w=10 時恰逼近 fair_share 1.00x（10 核全開），印證「實體核−1」保留一核的校準。Architect 獨立重跑 w=9 161.56s、最大單位 111.3s＝0.87x fair_share。
+  AutoClaude 預設 `workers=9` 30.97s vs `PYTEST_XDIST_AUTO_NUM_WORKERS=5` 37.55s（passed 4715 相同）⇒ 預設優於調低。
+- **V7／Q4**：四方一致無新可平行項目。Architect：全庫 grep `os.cpu_count`／`multiprocessing.cpu_count`／`sched_getaffinity` 零旁路站點；TLC 已 `-workers auto`；
+  chaos 序列化有 `snapshot.py` 固定 `.tmp` 檔名競態證據。SD：ci-gate.sh 三段序列總和 42.43s／牆鐘 45s，三段並行理論上界 16.41s 但會 27 worker 搶 10 核＋
+  踩同一競態 ⇒ HYPOTHESIS、不建議投入。QA：CI 內全部 pytest 站點普查，PG／mutmut／perf 正確用 `-p no:xdist`，無錯配。
+- **V8**：(a) win32 ctypes 四方仍 UNVERIFIED（只能讀碼）；(b) 護欄主軌約束四方皆未查（完整性批評者點出，收尾接手）；(c) 證據檔確缺 CI 全綠句（F-SA-01／F-QA-04）；
+  (d) mac nightly 09-20 02:00 跑的 HEAD 早於修復 commit，`root_unittests` 半邊 15 紅中 11 支為棘輪對帳紅、已由 2206a3a0 重釘修好；`macos_smoke` 半邊＝DEF-200-343（fixed）。
+
+### 存活／推翻（每條兩位反駁者；被推翻＝2/2）
+
+- **F-QA-01 P1 存活 2/2**：`test_claim_provenance_r86.py` 對 `AUTOSDD_CLAIM_GUARD_OFF` 洩漏未隔離，乾淨 `Ran 67 tests OK` → 洩漏 `FAILED (failures=5)`；
+  DEF-200-345 修法只落在 crossref 一檔、未推廣 ⇒ **DEF-200-349**。
+- **F-SD-01 P2 存活 2/2**：ONBOARDING §7 表③ `nightly-checked-at=2026-09-05` 逾 14 天 ⇒ `TestR74CloudCiStatusIsRecorded` 2 支＋`TestR67R3*` 三平台 3 支紅，
+  **根層全套於 2206a3a0 現為 rc=1**（三種 worker 數失敗集合逐字相同 ⇒ 非 CPU 因素）。Architect 誤計為 3 支，批評者裁定 SD 的 5 支正確。
+- **F-ARCH-01 P3 存活 2/2**：win32 `_SystemLogicalProcessorInformation._union` 寫成 `c_byte*16`（對齊 1 ⇒ offset 12），官方 union 內 `ULONGLONG Reserved[2]`
+  ⇒ offset 16；兩者 sizeof 皆 32 且只讀 `Relationship`，行為不受影響。
+- **F-SA-01／F-QA-04 P3 存活**：〈第十五輪〉缺「六支 push CI 全綠」一句（底層事實為真，本輪已補於該節收尾）。
+- **F-QA-02 P1→P2（1/2 爭議，兩位反駁者皆建議 P2）**：nightly-full 兩平台只涵蓋 1d406c8c；CI 自身 DEF-200-290 advisory 已在 2206a3a0 的 root-infra run 印
+  `::warning::` 並給處置指令 ⇒ 機制正常運作、非靜默風險；週一排程（macos `18 7 * * 1`／windows `12 6 * * 1` UTC）當日會自然涵蓋。
+- **F-QA-03 P2 被推翻 2/2**：「macos_smoke 半邊無帳本追蹤」——帳本 DEF-200-343 逐字記載該事件且 fixed，修復提交 82b248d6 是 HEAD 祖先。
+
+### 主控裁決與實作（兩包並行，檔案面互不相交＝鐵律七；配平由收尾單人窗口串行）
+
+- **Dev-A**（隔離 worktree；`tools/tests/test_claim_provenance_r86.py`、`tools/tests/test_check_hooks_liveness.py`、`tools/lib/cpu_budget.py`）：
+  普查 16 個逃生口 × 9 個 `{**os.environ}` 測試檔（表見 scratchpad `devA_R160_report.md` A2）：claim_provenance 對 CLAIM(5)／NAKED(2)／CAUSAL(1)／BLOCK_CLAIM(2)／PACE(2)
+  翻紅、UNATTENDED／CARRIER 不受影響；**hooks_liveness 對 `AUTOSDD_CARRIER_GUARD_OFF` 翻紅 1 支（普查新抓）**；`test_context_budget_guard` 5 個相關逃生口各跑 659 tests 皆 OK；
+  其餘 6 檔子行程不讀逃生口、不適用。修法：模組級 `_hook_env(extra)` 先濾七個逃生口再疊 extra，七處站點改呼叫；hooks_liveness `_run()` 內聯濾網；
+  各加一支巢狀鎖（拿掉濾網即紅：`'99991' not found`／`'block_destructive_git.py' not found`）。win32 struct 第三欄改 `c_ulonglong * 2`：親算 sizeof 32、
+  offset ProcessorMask 0／Relationship 8／`_union` 16。
+- **Dev-B**（主樹；只動 `ONBOARDING.md` §7 表③／表③-b／錨）：push 軸六列改 2206a3a0 現查（皆 success；`autoclaude-mutation-on-change.yml` 因 paths 未觸發照實記 be53ff0）；
+  排程軸改 2026-09-14 schedule run 34844265895／34852978108（job 層 failure：`check_skip_census` 未登記剖面，DEF-200-183 同型；該剖面判準已於 DEF-200-303 改 advisory，
+  09-20 dispatch 兩平台 nightly-full job 皆 success 3～5.5 分鐘）；錨 `red=none`、`nightly-red` 照實列兩支、`checked-at`／`nightly-checked-at`=2026-09-21T00:44:53+08:00。
+  改後 `TestR74CloudCiStatusIsRecorded` 33 tests OK、整模組 `Ran 281 tests in 162.879s OK`、`--check-snapshot` rc=0、diff 僅 ONBOARDING.md 10+/10−。
+- **配平單人窗口**：Dev-A 交付 +17／+3 行，撞「主軌連續上升兩輪到頂、本輪須 ≤0」⇒ 不重釘、逐檔配平回凍結值（巢狀鎖類別併入既有類別為方法、
+  helper 內聯、實測紀錄逐字搬 `CrossPlatform_R86_Guard_Repin_Evidence.md` §D）。
+
+### 驗證數字（主控親跑，配平後、凍結前；[他包回報] 者為子 agent 本場實跑）
+
+- 兩檔 `wc -l` 1015／3339（＝凍結表值）；`--print-guard-lines` `淨額 102842→102842 (+0)`、`逐檔漂移 0 支`；鎖模組 `test_adr_xplat001_c1c2_lock` 192 tests OK [他包回報]。
+- `test_claim_provenance_r86`：乾淨 env OK；`env AUTOSDD_CLAIM_GUARD_OFF=1 AUTOSDD_PACE_GUARD_OFF=1 AUTOSDD_NAKED_GUARD_OFF=1` OK（修前 `FAILED (failures=5)`）。
+  `test_check_hooks_liveness`：乾淨 OK (skipped=5)；`env AUTOSDD_CARRIER_GUARD_OFF=1` OK (skipped=5)（修前 `FAILED (failures=1)`）。巢狀鎖拿掉濾網各紅一次再還原 [他包回報]。
+- `test_cpu_budget` OK；ctypes 親算 `sizeof 32 offsets [('ProcessorMask', 0), ('Relationship', 8), ('_union', 16)]`；`cpu_budget.py --legs 1` → 9。
+- ruff `tools/ .claude/hooks/` `All checks passed!`；`check_defect_log_crossref.py` rc=0（帳本 278 筆有效狀態紀錄、未結存量 36 不動）。
+- 根層全套 `python tools/run_root_unittests.py`：**rc=0、147s、worker=9**（修前於 2206a3a0 為 rc=1：ONBOARDING 表③ 過期 5 支紅）。

@@ -3285,6 +3285,24 @@ class TestTheStopGuardIsTheAutomaticReaderOfThatEvidence(unittest.TestCase):
     讓任何閘門轉紅。
     """
 
+    _HOOK = _REPO_ROOT / ".claude" / "hooks" / "check_claim_provenance.py"
+
+    def _run(self, fixtures: list, *, leaked_env: dict | None = None):
+        """跑 hook 一次；`leaked_env` 模擬呼叫端 shell 洩漏（DEF-200-349 巢狀鎖用）。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = Path(tmp) / "t.jsonl"
+            transcript.write_text("\n".join(json.dumps(
+                {"type": "system", "attachment": f}) for f in fixtures) + "\n", encoding="utf-8")
+            payload = json.dumps({"hook_event_name": "Stop", "transcript_path": str(transcript),
+                                  "stop_hook_active": False, "last_assistant_message": "收工。"})
+            with mock.patch.dict(os.environ, leaked_env or {}):
+                env = {k: v for k, v in os.environ.items()
+                       if k != "AUTOSDD_CARRIER_GUARD_OFF"}
+                return subprocess.run([sys.executable, str(self._HOOK)], input=payload,
+                                      capture_output=True, text=True, timeout=60,
+                                      env={**env, "AUTOSDD_TRACE_DIR": tmp},
+                                      encoding="utf-8", errors="replace")
+
     # R100：真子行程無 on_windows 注入接縫，native／alien 隨真實 os.name 而定。
     _SPEAKS_FIXTURE, _SILENT_FIXTURE, _SPEAKS_TARGET = (
         (_ALIEN_CARRIER_ENOENT, _NATIVE_CARRIER_EACCES, "check_claim_provenance.py")
@@ -3292,20 +3310,7 @@ class TestTheStopGuardIsTheAutomaticReaderOfThatEvidence(unittest.TestCase):
         (_NATIVE_CARRIER_EACCES, _ALIEN_CARRIER_ENOENT, "block_destructive_git.py"))
 
     def test_the_stop_guard_speaks_when_the_native_carrier_failed(self) -> None:
-        hook = _REPO_ROOT / ".claude" / "hooks" / "check_claim_provenance.py"
-        with tempfile.TemporaryDirectory() as tmp:
-            transcript = Path(tmp) / "t.jsonl"
-            transcript.write_text("\n".join(json.dumps(r) for r in [
-                {"type": "system", "attachment": self._SPEAKS_FIXTURE},
-                {"type": "system", "attachment": self._SILENT_FIXTURE}]) + "\n",
-                encoding="utf-8")
-            payload = json.dumps({"hook_event_name": "Stop", "stop_hook_active": False,
-                                  "last_assistant_message": "收工。",
-                                  "transcript_path": str(transcript)})
-            done = subprocess.run([sys.executable, str(hook)], input=payload,
-                                  capture_output=True, text=True, timeout=60,
-                                  env={**os.environ, "AUTOSDD_TRACE_DIR": tmp},
-                                  encoding="utf-8", errors="replace")
+        done = self._run([self._SPEAKS_FIXTURE, self._SILENT_FIXTURE])
         self.assertEqual(done.returncode, 0, "本守衛永不阻斷")
         self.assertIn(self._SPEAKS_TARGET, done.stderr,
                       "本平台自己那條載具失敗，這支讀者沒說話 ⇒ 證據又回到零讀者狀態")
@@ -3317,22 +3322,17 @@ class TestTheStopGuardIsTheAutomaticReaderOfThatEvidence(unittest.TestCase):
 
         缺這一條，上一條可以靠「永遠出聲」通過，而那支守衛在 mac 上會對每一則回覆都響。
         """
-        hook = _REPO_ROOT / ".claude" / "hooks" / "check_claim_provenance.py"
-        with tempfile.TemporaryDirectory() as tmp:
-            transcript = Path(tmp) / "t.jsonl"
-            transcript.write_text(json.dumps(
-                {"type": "system", "attachment": self._SILENT_FIXTURE}) + "\n",
-                encoding="utf-8")
-            payload = json.dumps({"hook_event_name": "Stop", "stop_hook_active": False,
-                                  "last_assistant_message": "收工。",
-                                  "transcript_path": str(transcript)})
-            done = subprocess.run([sys.executable, str(hook)], input=payload,
-                                  capture_output=True, text=True, timeout=60,
-                                  env={**os.environ, "AUTOSDD_TRACE_DIR": tmp},
-                                  encoding="utf-8", errors="replace")
+        done = self._run([self._SILENT_FIXTURE])
         self.assertEqual(done.returncode, 0)
         self.assertEqual(done.stderr.strip(), "",
                          "跨平台配對的 fail-open 讓守衛出聲了 ⇒ 它會變成每次都響的噪音")
+
+    def test_a_leaked_carrier_guard_off_does_not_silence_this_reader(self) -> None:
+        """巢狀鎖（DEF-200-349）：拿掉 `_env()` 的濾網，這支測試會紅。"""
+        done = self._run([self._SPEAKS_FIXTURE, self._SILENT_FIXTURE],
+                         leaked_env={"AUTOSDD_CARRIER_GUARD_OFF": "1"})
+        self.assertIn(self._SPEAKS_TARGET, done.stderr,
+                      "呼叫端洩漏的 AUTOSDD_CARRIER_GUARD_OFF=1 噤聲了 M9 判準")
 
 
 if __name__ == "__main__":

@@ -147,7 +147,8 @@ def _platform_physical_count() -> int | None:
             _fields_ = [
                 ("ProcessorMask", ctypes.c_void_p),
                 ("Relationship", ctypes.c_int),
-                ("_union", ctypes.c_byte * 16),
+                # 對應官方 union 內 ULONGLONG Reserved[2]；撐出正確對齊（offset=16），內容不讀。
+                ("_union", ctypes.c_ulonglong * 2),
             ]
 
         _RELATION_PROCESSOR_CORE = 0
