@@ -8163,6 +8163,9 @@ def foreign_trace_growth_problems(before: bytes, after: bytes, own_pid: int) -> 
     `"pid": os.getpid()` 欄），那些行不是本測試寫的，容忍它們才是誠實的判準；
     分不清是誰寫的（解析失敗／缺 `pid` 欄）則 fail-loud，不假造一個「反正不是我」
     的寬容去掩蓋真正的歸因缺口。
+    劃界（複審 Architect）：pid 歸因只涵蓋**本行程直接寫入**；巢狀測試若自己 spawn
+    子行程去寫真檔，其 pid≠own_pid 會被當外來而放行——今日兩個巢狀類別皆走
+    `_TRACE_ISOLATION` 沙箱故不觸發，但那是沙箱在守，不是本函式。
 
     輪替判準：`after` 以 `before` 為前綴時取尾端差集當「新增區段」；若不是前綴
     （視窗內檔案被輪替／截斷），視整份 `after` 為新增——這種情況下也只看 `after`

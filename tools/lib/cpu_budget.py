@@ -30,6 +30,9 @@ w=19 173.7s，邏輯核 SMT/E-core 超額訂閱互動情境反而拖慢；10 核
     同根層 CLAUDE.md〈hook 載具〉一節的顧慮）；改用 ctypes 呼叫 kernel32
     `GetLogicalProcessorInformation`，數 `Relationship == RelationProcessorCore`
     （值 0）的筆數。
+    已知劃界（2026-09-20 複審 Architect）：本 API 只回報呼叫執行緒所屬 processor group，
+    >64 邏輯核（多 group）機器會靜默低估；CAP=16 下無影響，需支援時改用
+    `GetLogicalProcessorInformationEx`。
   - 其他平台（BSD 等）：回 None。
 
 誠實劃界：cgroup／容器 CPU 配額與「這台機器有幾顆實體核」是兩個不同的量，本檔

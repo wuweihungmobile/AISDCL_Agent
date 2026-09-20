@@ -1478,3 +1478,31 @@ worktree、檔案面互不相交）→ 四方複審 → 收尾單人窗口。主
   `[cpu_budget] xdist nodes confirmed=9`；`-p no:xdist -o addopts=` `100 passed`。
 - cpu_budget（psutil 缺席）：`_platform_physical_count()=10`（sysctl）、`--legs 1`=9、`AUTOSDD_CPU_HEADLESS=1`=10。
 - `check_defect_log_crossref.py` rc=0。
+
+### 四方複審判決（凍結點 ff046f79；各自獨立、唯讀；逐字見 `*_R159_review.md`）
+
+- **SA：APPROVE**。四項修復逐條 CONFIRMED：修前檔＋洩漏 env 重現 `FAILED (failures=6)`、修後乾淨／洩漏 env 皆 `Ran 268 tests OK`；
+  `foreign_trace_growth_problems` foreign-pid 容忍／own-pid 必抓、舊 byte-exact 判準對純外來成長誤紅（構造樣本證實）；SMT 合成樣本
+  （8 邏輯／4 實體）去重回 4、ARM 無鍵回 None；三站點修前文字對可稽核字面 0 命中（先紅）。帳本四列 675／694／697／691 bytes、
+  crossref rc=0（277 筆）；證據檔〈第十五輪〉抽查 10 個數字 10/10 對得到；本輪新增行輪號字面零命中；文件字面無需同步。
+- **QA：APPROVE**。AutoClaude 全套預設印 `workers=9 source=cpu_budget`＋`nodes confirmed=9`，`PYTEST_XDIST_AUTO_NUM_WORKERS=4` ⇒
+  `workers=4 source=env`＋`confirmed=4`；SDD ci-gate.sh 首行 `broadcast workers=9 source=cpu_budget`，`AUTOSDD_PARALLEL_TESTS_WORKERS=4` ⇒
+  `skipped: workers=4 source=env`；pre-push 廣播區塊三情境（預設／WORKERS=7／PY 缺席）逐字命中 broadcast／skipped／靜默。
+- **SD：APPROVE**。根層全套 w=9／10／**13**（R157 觀察到翻紅的 oversubscription 條件）三次 `TraceIsolationTest` 皆綠，w=9／10 視窗內
+  確有其他 pid 即時寫入痕跡檔（F-SD-01 P3：w=13 視窗恰無外來寫入，為證據巧合缺口非回歸）；`_platform_physical_count()`×100 次
+  穩定回 10、平均 2.20ms／次；KNOWN_RED 三次一致＝護欄棘輪三支（+298，收尾重釘）。
+- **Architect：PARTIAL（兩條 P3 皆文件劃界，四項 CONFIRMED）**。win32 ctypes 結構 sizeof=32／align=8／Relationship@8 逐字對照 x64
+  佈局正確；拿掉 optionalhook 的對照組本機重現 `PluginValidationError`→`INTERNALERROR`，證實該旗標非裝飾。F-ARCH-01：
+  `GetLogicalProcessorInformation` 只回報呼叫執行緒所屬 processor group（>64 邏輯核靜默低估）——收尾補進檔頭劃界；F-ARCH-02：
+  pid 歸因只涵蓋本行程直接寫入、子行程劃界未涵蓋——收尾補進 `foreign_trace_growth_problems` docstring。
+- 主控裁決：無 P1／P2 ⇒ 凍結點通過；兩條 P3 於收尾提交落地（docstring 各 +3 行）。
+
+### 收尾單人窗口（主控親做）
+
+- 帳本 DEF-200-345～348 皆 fixed（同一 commit 立案即結案，未結存量 36 不動、未觸淨額棘輪逃生口）；`check_defect_log_crossref.py` rc=0。
+- 護欄行數棘輪：102515→102842（+327＝內容 +298＋兩條 P3 docstring +3＋本表自身 +26）；回歸鎖軌申報 180（A 120＋C 25＋B 結案鎖 35；
+  平台解析／分派鎖 +118 依既有 cpu_budget 判例歸功能軌），主軌 147 ⇒ 連續上升第二輪到頂，**下一輪主軌必須 ≤0**；cap 到期兌現
+  `(159, 536)`、重新武裝 161／535；`_PHASE2_REVIEW_LOG` 五輪時效到期登記『維持觀察』一列；凍結前綴 238→239、指紋 3765b9dedf5d；
+  guard-total 對帳兩站點（`CrossPlatform_R145_Scan_Findings.md`〈第二十輪附記（R159）〉／`AutoSDD_improving_112.md`）；鎖模組 192 tests OK。
+- 訂正 R157 回報措辭：DEF-200-292 帳本早於本輪 fixed（2026-09-18）；「同模組 111 tests」＝三檔合跑；「雙軌並行不做」真因＝v0.01 凍結
+  `snapshot.py` 固定 `.tmp` 檔名競態（本檔 L1133／L1148），非 CPU headroom。

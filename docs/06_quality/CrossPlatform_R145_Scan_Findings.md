@@ -494,3 +494,26 @@ DEF-200-333。缺陷帳本見
 `CrossPlatform_R158_SessionGate_Statusline_Evidence.md`。此附記為 doc-total 對帳
 （≥2 站點）另一站點寄居 `AutoSDD_improving_112.md`，同 R129～R157 寄居體例。
 round-label-ok
+
+## 第二十輪附記（R159；多 CPU 第十五輪＋DEF-200-345～348 四方獨立審查覆核收尾）
+
+- **體例**：本節非開新一輪 CrossPlatform 掃描輪四件套，僅為單一收尾窗口造成的護欄層逐檔漂移記帳，
+  寄居本檔（同 R129～R158 寄居體例）。上一輪（R158）主軌淨額為正、本輪主軌再為正 ⇒ 連續上升第二輪，
+  `_REPIN_MAX_CONSECUTIVE_RISING_ROUNDS=2` 到頂：**下一輪主表扣除回歸鎖軌後必須 ≤0**（或以史料搬遷抵銷）。
+  本輪申報回歸鎖軌 180（A 包 `test_check_defect_log_crossref` +42／`test_context_budget_guard` +78、C 包
+  `test_ci_gate_xdist_allowlist` +25、B 包 `DetectPhysicalCountTest` +35；平台解析／分派鎖 +118 依既有 cpu_budget
+  判例（本檔第十五輪附記）歸功能軌），主軌 327−180＝147。cap 到期義務兌現：`(159, 536)`，同輪重新武裝 `_REPIN_NET_CAP_DUE_ROUND=161`／
+  `_REPIN_NET_CAP_DUE_TARGET=535`；`_PHASE2_REVIEW_LOG` 五輪時效到期，本輪登記『維持觀察』一列
+  （上一列為提案，連續計數為一）；`_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND=162` 未到期。
+
+<!-- guard-total:R159 --> R159 護欄層累積淨額＝ 102515 → 102842（+327）——多 CPU 第十五輪收尾單人窗口：
+`test_cpu_budget.py` 187→340（DEF-200-347 免 psutil 實體核偵測：DetectPhysicalCountTest +35、ParseIntLineTest +49、
+PlatformPhysicalCountDispatchTest +44、CountProcessorCoresTest +14、ParseProcCpuinfoTest +11）；
+`test_context_budget_guard.py` 12274→12355（DEF-200-346 `foreign_trace_growth_problems`＋五支鎖 +78、複審劃界
+docstring +3）；`test_check_defect_log_crossref.py` 3864→3906（DEF-200-345 `_pop_leaked_net_ratchet_env` 整班隔離＋
+巢狀鎖 +42）；`test_ci_gate_xdist_allowlist.py` 215→240（DEF-200-348 廣播文字鎖 +25）；本表自身 8405→8431
+（主表五格、回歸鎖軌新列、cap 到期兌現＋重新武裝、接鏈列、`_PHASE2_REVIEW_LOG` 到期列、凍結前綴 238→239、
+`_REPIN_LOG_HISTORY_SHA256` 同步重釘）。回歸鎖軌申報 180，主軌 147。缺陷帳本見
+`docs/06_quality/AutoSDD_Defect_Log.md` DEF-200-345～348；證據見 `CrossPlatform_DEF200274_Parallel_Tests_Evidence.md`
+〈第十五輪〉。此附記為 doc-total 對帳（≥2 站點）另一站點寄居 `AutoSDD_improving_112.md`，同 R129～R158 寄居體例。
+round-label-ok
