@@ -8153,6 +8153,43 @@ def trace_isolation_problems(source: str) -> list[str]:
     return problems
 
 
+def foreign_trace_growth_problems(before: bytes, after: bytes, own_pid: int) -> list[str]:
+    """`after` 相對 `before` 新增的那幾行，逐行以 `pid` 欄位歸因；只有 `own_pid`
+    自己寫的行才算「這場測試把紀錄寫進了生產痕跡」。
+
+    WHY（2026-09-20；DEF-200-346）：`quota_trace_path()` 指的是
+    **machine-wide** 的生產痕跡——同機任何並行 Claude Code session 的 hook 呼叫
+    `note_degraded()` 都會在這個視窗裡對同一份檔案追加自己的紀錄（每筆已含
+    `"pid": os.getpid()` 欄），那些行不是本測試寫的，容忍它們才是誠實的判準；
+    分不清是誰寫的（解析失敗／缺 `pid` 欄）則 fail-loud，不假造一個「反正不是我」
+    的寬容去掩蓋真正的歸因缺口。
+
+    輪替判準：`after` 以 `before` 為前綴時取尾端差集當「新增區段」；若不是前綴
+    （視窗內檔案被輪替／截斷），視整份 `after` 為新增——這種情況下也只看 `after`
+    裡的行，不回頭比對已經輪替掉、無從歸因的舊內容。
+    """
+    if after == before:
+        return []
+    added = after[len(before):] if after.startswith(before) else after
+    problems: list[str] = []
+    for raw_line in added.decode("utf-8", errors="replace").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            problems.append(f"無法解析的一行（無法歸因，fail-loud）：{line!r}")
+            continue
+        pid = rec.get("pid") if isinstance(rec, dict) else None
+        if pid is None:
+            problems.append(f"缺 `pid` 欄、無法歸因（fail-loud）：{line!r}")
+            continue
+        if pid == own_pid:
+            problems.append(f"本測試行程（pid={own_pid}）把紀錄寫進了生產痕跡：{line!r}")
+    return problems
+
+
 class TraceIsolationTest(unittest.TestCase):
     """本檔自己的隔離不變量：**測試不得寫進生產的降級觀測面**（見上方 WHY）。"""
 
@@ -8185,15 +8222,57 @@ class TraceIsolationTest(unittest.TestCase):
             "class Unrelated(unittest.TestCase):\n"
             "    def test_x(self):\n        pass\n"), [])
 
+    def test_own_pid_line_is_reported(self) -> None:
+        pid = os.getpid()
+        after = (json.dumps({"pid": pid, "source": "x"}) + "\n").encode()
+        problems = foreign_trace_growth_problems(b"", after, pid)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn(str(pid), problems[0])
+
+    def test_foreign_pid_line_is_tolerated(self) -> None:
+        after = (json.dumps({"pid": 999999, "source": "no-account-key"}) + "\n").encode()
+        self.assertEqual(foreign_trace_growth_problems(b"", after, os.getpid()), [])
+
+    def test_a_line_that_cannot_be_attributed_is_a_problem(self) -> None:
+        """無法解析的一行（非 JSON／JSON 但缺 `pid` 欄）都算歸因失敗，一律 fail-loud。"""
+        for label, added in (
+            ("非 JSON", b"not json at all\n"),
+            ("缺 pid 欄", (json.dumps({"source": "x"}) + "\n").encode()),
+        ):
+            with self.subTest(label=label):
+                problems = foreign_trace_growth_problems(b"", added, os.getpid())
+                self.assertEqual(len(problems), 1, problems)
+
+    def test_no_growth_is_clean(self) -> None:
+        same = b'{"pid": 1}\n'
+        self.assertEqual(foreign_trace_growth_problems(same, same, os.getpid()), [])
+
+    def test_rotation_only_judges_lines_within_after(self) -> None:
+        """`after` 不以 `before` 為前綴（檔案被輪替）時，只看 `after` 內的行。"""
+        pid = os.getpid()
+        before = (json.dumps({"pid": pid, "source": "old-file-before-rotation"}) + "\n").encode()
+        after = (json.dumps({"pid": pid, "source": "new-file-after-rotation"}) + "\n").encode()
+        self.assertFalse(after.startswith(before), "前提失效：after 必須不是 before 的延伸")
+        problems = foreign_trace_growth_problems(before, after, pid)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("new-file-after-rotation", problems[0])
+        self.assertNotIn("old-file-before-rotation", problems[0])
+
     def test_the_real_production_trace_is_untouched_by_this_module(self) -> None:
-        """行為面（靜態判準之外的那一半）：現在跑一遍那兩個類別，真檔一行都不准長。
+        """行為面（靜態判準之外的那一半）：現在跑一遍那兩個類別，真檔不准新增**本測試
+        行程自己**寫的行。
 
         🔴 這一條刻意讀**真的**路徑（不是沙箱）——它問的正是「生產那一份有沒有被寫到」，
         而那件事只有真路徑回答得出來。它只讀不寫。
 
         🔴 R84／SA84-01：巢狀 runner 一律走 `_run_nested_suite`（見該函式的 WHY——這一支
         就是把整個模組的哨兵 pin 沖掉的那一支）。
+
+        2026-09-20（DEF-200-346）：`quota_trace_path()` 是 machine-wide 的
+        生產痕跡，同機並行 session 的 hook 也會在這個視窗裡對它追加自己的紀錄——用
+        `pid` 歸因（見 `foreign_trace_growth_problems` WHY），只容忍別人 pid 的行。
         """
+        own_pid = os.getpid()
         real = qg.quota_trace_path()
         before = real.read_bytes() if real.exists() else b""
         suite = unittest.TestLoader().loadTestsFromNames(
@@ -8201,9 +8280,8 @@ class TraceIsolationTest(unittest.TestCase):
              f"{__name__}.QuotaDecisionEntryIsSingleTest"])
         _run_nested_suite(suite)
         after = real.read_bytes() if real.exists() else b""
-        self.assertEqual(after, before,
-                         f"跑測試把紀錄寫進了生產痕跡 {real}（多了 "
-                         f"{len(after) - len(before)} bytes）")
+        problems = foreign_trace_growth_problems(before, after, own_pid)
+        self.assertEqual(problems, [], f"跑測試把紀錄寫進了生產痕跡 {real}：{problems}")
         self.assertEqual(os.environ.get(guard.SENTINEL_OFF_ENV), "1",
                          "巢狀 runner 把哨兵 pin 沖掉了 ⇒ 本模組**在這一支之後**就再也"
                          "擋不住「同行程測試註冊真 launchd job」（SA84-01 的本體）")

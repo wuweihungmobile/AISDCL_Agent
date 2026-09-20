@@ -94,19 +94,172 @@ class TotalBudgetFormulaTest(unittest.TestCase):
         self.assertEqual(cb.total_budget(cpu_count=4, physical_count=14, headless=True), 4)
 
 
+class ParseIntLineTest(unittest.TestCase):
+    """`_parse_int_line()`：`sysctl -n hw.physicalcpu` 這類單行數字輸出的容錯解析。"""
+
+    def test_parses_trailing_newline(self) -> None:
+        self.assertEqual(cb._parse_int_line("10\n"), 10)
+
+    def test_strips_surrounding_whitespace(self) -> None:
+        self.assertEqual(cb._parse_int_line("  10  \n"), 10)
+
+    def test_non_numeric_returns_none(self) -> None:
+        self.assertIsNone(cb._parse_int_line("sysctl: unknown oid 'hw.physicalcpu'\n"))
+
+    def test_empty_or_blank_returns_none(self) -> None:
+        self.assertIsNone(cb._parse_int_line(""))
+        self.assertIsNone(cb._parse_int_line("\n   \n"))
+
+
+def _two_socket_smt_cpuinfo(sockets: int = 2, cores_per_socket: int = 4,
+                             threads_per_core: int = 2) -> str:
+    """合成 `/proc/cpuinfo`：`sockets` 顆 CPU、每顆 `cores_per_socket` 實體核、
+    每核 `threads_per_core` 條 SMT 執行緒——用來驗證「processor 數 != 實體核數」
+    （預設 2×4×2=16 processor、應算出 8 個實體核）。"""
+    lines: list[str] = []
+    processor = 0
+    for socket in range(sockets):
+        for core in range(cores_per_socket):
+            for _thread in range(threads_per_core):
+                lines += [
+                    f"processor\t: {processor}",
+                    f"physical id\t: {socket}",
+                    f"core id\t: {core}",
+                    "",
+                ]
+                processor += 1
+    return "\n".join(lines)
+
+
+#: 真實 ARM `/proc/cpuinfo` 常見樣本：無 `physical id`／`core id` 兩鍵。
+_ARM_CPUINFO_SAMPLE = (
+    "processor\t: 0\n"
+    "model name\t: ARM Cortex-A72\n"
+    "BogoMIPS\t: 108.00\n"
+    "\n"
+    "processor\t: 1\n"
+    "model name\t: ARM Cortex-A72\n"
+    "BogoMIPS\t: 108.00\n"
+)
+
+
+class ParseProcCpuinfoTest(unittest.TestCase):
+    """`_parse_proc_cpuinfo()`：以 physical id×core id 找實體核，兩鍵缺席回 None。"""
+
+    def test_two_socket_four_core_smt_counts_eight_physical_cores(self) -> None:
+        records = cb._parse_proc_cpuinfo(_two_socket_smt_cpuinfo())
+        self.assertEqual(cb._count_processor_cores(records), 8)
+
+    def test_arm_sample_without_id_keys_returns_none(self) -> None:
+        self.assertIsNone(cb._parse_proc_cpuinfo(_ARM_CPUINFO_SAMPLE))
+
+
+class CountProcessorCoresTest(unittest.TestCase):
+    """`_count_processor_cores()`：對注入 records 去重計數，空／None 回 None。"""
+
+    def test_dedupes_repeated_pairs(self) -> None:
+        records = [(0, 0), (0, 0), (0, 1), (1, 0), (1, 1)]
+        self.assertEqual(cb._count_processor_cores(records), 4)
+
+    def test_none_input_returns_none(self) -> None:
+        self.assertIsNone(cb._count_processor_cores(None))
+
+    def test_empty_list_returns_none(self) -> None:
+        self.assertIsNone(cb._count_processor_cores([]))
+
+
+class PlatformPhysicalCountDispatchTest(unittest.TestCase):
+    """`_platform_physical_count()`：依 `sys.platform` 分派的免第三方依賴退化路徑
+    （darwin／linux 可在任何機器上以 mock 驗證；win32 的 ctypes 分支需要真實
+    Windows 上的 kernel32，見任務 NOTES，本檔僅以本機可行的手段覆蓋前兩者與
+    「其他平台」分支）。"""
+
+    def test_darwin_uses_sysctl(self) -> None:
+        completed = subprocess.CompletedProcess(
+            args=["sysctl", "-n", "hw.physicalcpu"], returncode=0, stdout="10\n", stderr="")
+        with mock.patch.object(sys, "platform", "darwin"), \
+                mock.patch.object(cb.subprocess, "run", return_value=completed) as run_mock:
+            self.assertEqual(cb._platform_physical_count(), 10)
+        args, kwargs = run_mock.call_args
+        self.assertEqual(args[0], ["sysctl", "-n", "hw.physicalcpu"])
+        self.assertEqual(kwargs.get("encoding"), "utf-8")
+
+    def test_darwin_subprocess_exception_returns_none(self) -> None:
+        with mock.patch.object(sys, "platform", "darwin"), \
+                mock.patch.object(cb.subprocess, "run", side_effect=OSError("no sysctl")):
+            self.assertIsNone(cb._platform_physical_count())
+
+    def test_darwin_nonzero_returncode_returns_none(self) -> None:
+        completed = subprocess.CompletedProcess(
+            args=["sysctl"], returncode=1, stdout="", stderr="err")
+        with mock.patch.object(sys, "platform", "darwin"), \
+                mock.patch.object(cb.subprocess, "run", return_value=completed):
+            self.assertIsNone(cb._platform_physical_count())
+
+    def test_linux_reads_proc_cpuinfo(self) -> None:
+        text = _two_socket_smt_cpuinfo()
+        with mock.patch.object(sys, "platform", "linux"), \
+                mock.patch("builtins.open", mock.mock_open(read_data=text)):
+            self.assertEqual(cb._platform_physical_count(), 8)
+
+    def test_linux_missing_proc_cpuinfo_returns_none(self) -> None:
+        with mock.patch.object(sys, "platform", "linux"), \
+                mock.patch("builtins.open", side_effect=OSError("no such file")):
+            self.assertIsNone(cb._platform_physical_count())
+
+    def test_unknown_platform_returns_none(self) -> None:
+        with mock.patch.object(sys, "platform", "aix"):
+            self.assertIsNone(cb._platform_physical_count())
+
+
 class DetectPhysicalCountTest(unittest.TestCase):
-    """`_detect_physical_count()`：optional psutil import 的兩條退化路徑。"""
+    """`_detect_physical_count()`：psutil 優先、否則平台分支、否則 None 的三段
+    分派（2026-09-20 DEF-200-347：psutil 不是本 repo 任何宣告依賴，
+    乾淨環境 import 必炸，此前恆回 None ⇒ 互動預算恆退回邏輯核-1，SMT 機器算錯
+    實體核心數）。"""
 
-    def test_psutil_import_error_returns_none(self) -> None:
-        with mock.patch.dict(sys.modules, {"psutil": None}):
-            self.assertIsNone(cb._detect_physical_count())
-
-    def test_returns_psutil_physical_count_when_available(self) -> None:
+    def test_psutil_available_short_circuits_platform_branch(self) -> None:
         fake_psutil = mock.Mock()
         fake_psutil.cpu_count.return_value = 8
-        with mock.patch.dict(sys.modules, {"psutil": fake_psutil}):
+        with mock.patch.dict(sys.modules, {"psutil": fake_psutil}), \
+                mock.patch.object(cb, "_platform_physical_count") as platform_mock:
             self.assertEqual(cb._detect_physical_count(), 8)
             fake_psutil.cpu_count.assert_called_once_with(logical=False)
+            platform_mock.assert_not_called()
+
+    def test_psutil_absent_falls_back_to_platform_branch(self) -> None:
+        with mock.patch.dict(sys.modules, {"psutil": None}), \
+                mock.patch.object(cb, "_platform_physical_count", return_value=6) as m:
+            self.assertEqual(cb._detect_physical_count(), 6)
+            m.assert_called_once_with()
+
+    def test_psutil_returns_falsy_falls_back_to_platform_branch(self) -> None:
+        fake_psutil = mock.Mock()
+        fake_psutil.cpu_count.return_value = None
+        with mock.patch.dict(sys.modules, {"psutil": fake_psutil}), \
+                mock.patch.object(cb, "_platform_physical_count", return_value=4):
+            self.assertEqual(cb._detect_physical_count(), 4)
+
+    def test_platform_branch_exception_returns_none(self) -> None:
+        with mock.patch.dict(sys.modules, {"psutil": None}), \
+                mock.patch.object(cb, "_platform_physical_count",
+                                   side_effect=RuntimeError("boom")):
+            self.assertIsNone(cb._detect_physical_count())
+
+    def test_platform_branch_none_falls_back_total_budget_to_logical_minus_one(
+            self) -> None:
+        with mock.patch.dict(sys.modules, {"psutil": None}), \
+                mock.patch.object(cb, "_platform_physical_count", return_value=None):
+            self.assertIsNone(cb._detect_physical_count())
+            self.assertEqual(cb.total_budget(cpu_count=8, headless=False), 7)
+
+    def test_live_smoke_returns_none_or_plausible_core_count(self) -> None:
+        """不 mock：本機真實偵測結果須為 None，或落在 `[1, os.cpu_count()]` 之間
+        （這台 mac 應為 10；不同機器上這是量測值，本測試刻意不寫死）。"""
+        detected = cb._detect_physical_count()
+        if detected is not None:
+            self.assertGreaterEqual(detected, 1)
+            self.assertLessEqual(detected, os.cpu_count() or detected)
 
 
 class PerLegBudgetTest(unittest.TestCase):

@@ -59,10 +59,22 @@ if (-not $env:AUTOSDD_PARALLEL_TESTS_WORKERS -and -not $env:PYTEST_XDIST_AUTO_NU
     if ($_cpuBudget -match '^\d+$') {
       $env:AUTOSDD_PARALLEL_TESTS_WORKERS = $_cpuBudget
       $env:PYTEST_XDIST_AUTO_NUM_WORKERS = $_cpuBudget
+      # 2026-09-20（DEF-200-348）：成功路徑必須可稽核（QA F-QA-02／
+      # SD F-SD-02）——修前本段成功時全靜默，審查者只能靠旁證推斷 worker 數。
+      Write-Host "[cpu_budget] broadcast workers=$_cpuBudget source=cpu_budget"
     }
   } else {
     Write-Host "⚠️ cpu_budget 廣播跳過：$_cpuBudgetScript 不存在或執行失敗（fail-open）"
   }
+} else {
+  # 呼叫端已預設其一（尊重手動覆寫優先序）：同樣印一行，讓成功路徑上「為什麼
+  # 沒看到 broadcast workers= 那行」可稽核，不必去猜是沒跑到還是被蓋過。
+  if ($env:AUTOSDD_PARALLEL_TESTS_WORKERS) {
+    $_cpuBudgetPreset = $env:AUTOSDD_PARALLEL_TESTS_WORKERS
+  } else {
+    $_cpuBudgetPreset = $env:PYTEST_XDIST_AUTO_NUM_WORKERS
+  }
+  Write-Host "[cpu_budget] broadcast skipped: workers=$_cpuBudgetPreset source=env"
 }
 
 $fw   = Join-Path $repo "AISDLC_SDD_v0.01"

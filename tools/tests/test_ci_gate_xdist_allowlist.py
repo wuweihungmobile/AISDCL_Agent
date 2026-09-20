@@ -176,6 +176,31 @@ class CpuBudgetExportWiringTest(unittest.TestCase):
                 if needs_workers:
                     self.assertIn("AUTOSDD_PARALLEL_TESTS_WORKERS", text)
 
+    def test_orchestrators_broadcast_success_path(self) -> None:
+        """2026-09-20（DEF-200-348，QA F-QA-02／SD F-SD-02）：三個 shell
+        廣播站點（`ci-gate.sh`／`ci-gate.ps1`／`pre-push`；不含兩支 nightly-full
+        workflow——它們不是本輪 scope）的成功路徑過去全靜默，只有缺檔的 fail-open
+        分支才出聲，審查者只能靠旁證推斷 worker 數。三站點都必須同時含「算出來並
+        匯出」與「呼叫端已預設而跳過」兩條成功路徑各自的可稽核字面（開發期已用
+        `git show HEAD:<路徑>` 核對修前文字對本斷言必定紅，見 DEF-200-348 修復
+        紀錄，本測試只鎖現行工作樹內容）。"""
+        for name, path, _ in self._TARGETS[:3]:  # 只取三個 shell 站點，不含 workflow yml
+            with self.subTest(target=name):
+                assert path.is_file(), f"{name} 不存在：{path}"
+                text = path.read_text(encoding="utf-8")
+                self.assertIn(
+                    "[cpu_budget] broadcast", text,
+                    f"{name} 缺成功路徑可稽核字面 `[cpu_budget] broadcast`",
+                )
+                self.assertIn(
+                    "broadcast workers=", text,
+                    f"{name} 缺「算出來並匯出」分支的可稽核字面 `broadcast workers=`",
+                )
+                self.assertIn(
+                    "broadcast skipped:", text,
+                    f"{name} 缺「呼叫端已預設而跳過」分支的可稽核字面 `broadcast skipped:`",
+                )
+
     def test_ci_gate_broadcasts_target_monorepo_root(self) -> None:
         """DEF-200-326：兩檔住 `AISDLC_SDD/scripts/`，到 monorepo 根還多一層
         ——舊文字直接拼 REPO_ROOT（＝AISDLC_SDD/）是死碼（該路徑不存在，紅綠自證

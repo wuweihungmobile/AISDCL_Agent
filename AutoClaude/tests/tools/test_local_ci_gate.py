@@ -1179,6 +1179,32 @@ def test_cpu_budget_workers_runner_exception_returns_none(tmp_path: Path) -> Non
     assert result is None
 
 
+def test_nodes_confirmed_line_is_a_pure_function() -> None:
+    """`_nodes_confirmed_line` 純函式回歸鎖（2026-09-20 DEF-200-348）：字面
+    格式若被改壞（例如漏掉 `xdist` 或改了鍵名），`AutoClaude/tests/conftest.py::
+    pytest_xdist_setupnodes` 印出的觀測行就對不上文件／審查者的預期字面，本鎖只鎖
+    純函式本身，不需要真跑 xdist。"""
+    conftest = _loaded_conftest()
+    assert conftest is not None
+    assert conftest._nodes_confirmed_line(0) == "[cpu_budget] xdist nodes confirmed=0"
+    assert conftest._nodes_confirmed_line(9) == "[cpu_budget] xdist nodes confirmed=9"
+
+
+def test_pytest_xdist_setupnodes_carries_optionalhook() -> None:
+    """`pytest_xdist_setupnodes` 必須帶 `@pytest.hookimpl(optionalhook=True)`——同
+    `pytest_xdist_auto_num_workers` 的既有紀律（見下一支測試的端對端版本）：`-p
+    no:xdist` 下這個 hookspec 不存在，缺了 optionalhook 會在 `-p no:xdist -o
+    addopts=` 呼叫形態下讓 pluggy 對未知 hookimpl 拋 PluginValidationError ⇒
+    INTERNALERROR rc=3。這裡直接讀 pluggy 蓋在函式物件上的 `pytest_impl` 屬性，給
+    快速、不必真起子行程的鑑別力（拿掉裝飾器 ⇒ 屬性根本不存在 ⇒ 本鎖先紅）。
+    """
+    conftest = _loaded_conftest()
+    assert conftest is not None
+    marker = getattr(conftest.pytest_xdist_setupnodes, "pytest_impl", None)
+    assert marker is not None, "pytest_xdist_setupnodes 未被 @pytest.hookimpl 標記"
+    assert marker["optionalhook"] is True, marker
+
+
 def test_conftest_survives_p_no_xdist_invocation() -> None:
     """複審 ARCH-P1-01／SA-NEW-01：`pytest_xdist_auto_num_workers` 少了
     `@pytest.hookimpl(optionalhook=True)` 時，`-p no:xdist -o addopts=`（gate_pg()／

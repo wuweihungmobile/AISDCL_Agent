@@ -242,11 +242,22 @@ fi
 # （worker 數只影響快慢，不影響正確性），擋下 push 換來的唯一效果是逼人
 # `--no-verify`，得不償失。`test_pre_push_dispatcher.py` 在合成樹真跑本 dispatcher
 # 時，該樹底下沒有 `tools/lib/cpu_budget.py`，本段必須在那種情境下安靜跳過。
-if [ -z "${AUTOSDD_PARALLEL_TESTS_WORKERS:-}" ] && [ -z "${PYTEST_XDIST_AUTO_NUM_WORKERS:-}" ] && [ -n "$PY" ]; then
+# 2026-09-20（DEF-200-348）：成功路徑必須可稽核（QA F-QA-02／SD F-SD-02）
+# ——修前本段成功時全靜默，審查者只能靠旁證推斷 worker 數。分兩支各自印一行：
+# 呼叫端已預設其一 ⇒ "skipped: ... source=env"；本段自己算出來並匯出 ⇒
+# "broadcast workers=... source=cpu_budget"。`$PY` 缺席（既有安靜跳過分支）不印
+# 任何一行——那不是「被 env 蓋過」，硬印 source=env 會誤導審查者。
+if [ -n "${AUTOSDD_PARALLEL_TESTS_WORKERS:-}" ] || [ -n "${PYTEST_XDIST_AUTO_NUM_WORKERS:-}" ]; then
+  _cpu_budget_preset="${AUTOSDD_PARALLEL_TESTS_WORKERS:-${PYTEST_XDIST_AUTO_NUM_WORKERS:-}}"
+  echo "[cpu_budget] broadcast skipped: workers=${_cpu_budget_preset} source=env"
+elif [ -n "$PY" ]; then
   _cpu_budget="$("$PY" "$TOPLEVEL/tools/lib/cpu_budget.py" --legs 1 2>/dev/null || true)"
   case "$_cpu_budget" in
     ''|*[!0-9]*) ;;
-    *) export AUTOSDD_PARALLEL_TESTS_WORKERS="$_cpu_budget" PYTEST_XDIST_AUTO_NUM_WORKERS="$_cpu_budget" ;;
+    *)
+      export AUTOSDD_PARALLEL_TESTS_WORKERS="$_cpu_budget" PYTEST_XDIST_AUTO_NUM_WORKERS="$_cpu_budget"
+      echo "[cpu_budget] broadcast workers=$_cpu_budget source=cpu_budget"
+      ;;
   esac
 fi
 

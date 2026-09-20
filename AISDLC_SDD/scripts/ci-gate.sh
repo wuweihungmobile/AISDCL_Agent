@@ -293,8 +293,16 @@ if [[ -z "${AUTOSDD_PARALLEL_TESTS_WORKERS:-}" && -z "${PYTEST_XDIST_AUTO_NUM_WO
     *)
       export AUTOSDD_PARALLEL_TESTS_WORKERS="${_cpu_budget}"
       export PYTEST_XDIST_AUTO_NUM_WORKERS="${_cpu_budget}"
+      # 2026-09-20（DEF-200-348）：成功路徑必須可稽核（QA F-QA-02／SD
+      # F-SD-02）——修前本段成功時全靜默，審查者只能靠旁證推斷 worker 數。
+      echo "[cpu_budget] broadcast workers=${_cpu_budget} source=cpu_budget"
       ;;
   esac
+else
+  # 呼叫端已預設其一（尊重手動覆寫優先序）：同樣印一行，讓「為什麼沒看到
+  # broadcast workers= 那行」在成功路徑上也可稽核，不必去猜是沒跑到還是被蓋過。
+  _cpu_budget_preset="${AUTOSDD_PARALLEL_TESTS_WORKERS:-${PYTEST_XDIST_AUTO_NUM_WORKERS:-}}"
+  echo "[cpu_budget] broadcast skipped: workers=${_cpu_budget_preset} source=env"
 fi
 
 for VER in "${FW_VERSIONS[@]}"; do

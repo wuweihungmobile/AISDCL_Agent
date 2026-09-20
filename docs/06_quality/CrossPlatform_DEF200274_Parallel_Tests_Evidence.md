@@ -1390,3 +1390,91 @@ headless 實作者把「探針 rc/stdout 皆空」誤記為「& 呼叫限制」�
   不是修復。本輪未能立帳的原因＝工具衝突：帳本未結列淨額棘輪要求同一 commit 配對結案列，而逃生口 `AUTOSDD_NET_RATCHET_OFF=1`
   在 pre-push 同一 env 下洩入根層測試行程，使 test_check_defect_log_crossref 三支 env 敏感測試翻紅（實測 b3dc070 push 被擋）；
   下一輪先讓該三支測試自行隔離該環境變數，再立帳兩筆（TraceIsolationTest 競態、逃生口與 pre-push 互斥）。
+
+## 第十五輪：四方獨立審查「R157 是否全部修好」＋三缺口修復（2026-09-20，R159；首次於 mac 覆核）
+
+### 背景
+
+掌舵者要求 Architect／SA／SD／QA 四方（皆 Sonnet 5、唯讀、不共享上下文）確認第十四輪（R157）的宣稱是否全部修好，並再答四問；
+主控（Fable）只裁決、派工、收尾。本輪首次在 macOS（Apple M1 Max，`hw.physicalcpu=10`＝`hw.logicalcpu=10`、無 SMT；
+根層單一 `.venv` 內 **psutil 缺席**）覆核——上一輪全部量測在 Windows i5-14600K 14P/20L。流程：三方（Architect／SA／QA）並行
+唯讀審查 → SD 單獨在安靜機器上量測 → 15 條 F- 發現各派兩位反駁者（讀碼／重現鏡片）→ 4 條被推翻 → 三包實作（各自隔離
+worktree、檔案面互不相交）→ 四方複審 → 收尾單人窗口。主控於本輪開始時對 main 手動 dispatch 兩平台 nightly-full
+（run 35481684835 macos／35481686471 windows），供 C10／A-01 取證。
+
+### 四方審查判決（皆 PARTIAL；逐字見 scratchpad 四份 `*_R159_evidence.md`，本節只留存活發現）
+
+- **C1～C4、C6、C9 四方皆 CONFIRMED**（各自單獨跑鎖：`test_ci_gate_xdist_allowlist` 8 tests OK 含 `test_ci_gate_broadcasts_target_monorepo_root`；
+  `test_cpu_budget` 22 tests OK；conftest `-p no:xdist -o addopts=` 子行程鎖 6 passed rc=0、env 覆寫 `source=env` 優先實測；
+  本機 `compileall -j0` 0.133s vs 逐檔 5.863s，與註解宣稱 0.14s／5.9s 吻合）。Architect 另以 xdist 3.8.0 原始碼證實
+  `pytest_xdist_auto_num_workers` 只在 controller 呼叫一次（worker 端 `setup_config()` 先把 numprocesses 清 None）。
+- **C5 PARTIAL（平台差，非回歸）**：mac 全套 `4713 passed, 156 skipped in 34.82s`（QA 另一次 32.63s）vs Windows 4858；SD 以 conftest
+  自身判準對 4869 個 collect-only nodeid 重算：**355 支／26 檔**觸碰 PG（R157 稱 25 檔，差 1，非阻斷）。
+- **C7 NOT-VERIFIABLE-ON-MAC**；「同模組 111 tests」＝三檔合跑（`test_windowsapps_guard_bash_parity` 32＋`test_windowsapps_guard_cross_consistency` 76
+  ＋`test_bootstrap_ps1` 3 ⇒ 反駁者實跑 `Ran 111 tests … OK (skipped=3)`）；SA 只算兩檔（108）、QA 算四檔（406）皆誤報，F-SA-05 被推翻、F-QA-04 保留為「文件可讀性」。
+- **C8**：`_zzz_` 排除在 `tools/lib/guard_bucket_policy.py` L318／L352；`design_xdist.md` 字面殘留 2 處＝FSM 日誌資料、非設計引用。
+- **C10 CONFIRMED（本輪 nightly-full 實證，A-01 結案）**：兩平台 dispatch 皆 completed/success。macOS nightly-full
+  `PYTEST_XDIST_AUTO_NUM_WORKERS=3`＋`[cpu_budget] xdist workers=3 source=cpu_budget`；Windows `PYTEST_XDIST_AUTO_NUM_WORKERS=4`＋
+  `[cpu_budget] xdist workers=4 source=cpu_budget`；ci-gate LATEST 軌兩平台皆 `bringing up nodes...`（v0.30：1949／1943 passed；
+  scripts/tests：353／354 passed）。push 面 root-infra／windows／macos worker 4／4／3 QA 逐字重現。AutoClaude CI 主 job
+  已可見 `[cpu_budget] xdist workers=4 source=cpu_budget`＋`bringing up nodes...`，但 `created: N/N workers` 只在帶 `-v` 的
+  Equivalence Snapshot job 出現（F-QA-02 → 包 C）。`DEF-200-292` 帳本早於本輪 fixed（2026-09-18），R157 回報「仍待」措辭過期（F-QA-03，本節訂正）。
+- **C11**：(a) CONFIRMED 且根因由反駁者**受控重現**：`TraceIsolationTest.test_the_real_production_trace_is_untouched_by_this_module`
+  對 machine-wide `$TMPDIR/autosdd_quota_degraded.jsonl`（`quota_gate.quota_trace_path()`＝`tempfile.gettempdir()`，非 `~/.autosdd/traces`）
+  做 byte-exact 前後比對；同機任何 session 的 hook 呼叫 `note_degraded()` 都會寫入（本場 tail 見 5 個不同 pid 在 14 分鐘內寫 `source=no-account-key`）；
+  在測試視窗內注入一行 pid=999999 ⇒ `FAILED (failures=1)`，且斷言訊息誤歸因為「本測試寫髒」。記錄已含 `pid` 欄 ⇒ 改 pid 歸因（包 A）。
+  (b) CONFIRMED 未修，範圍 **6 支非 3 支**（`TestNetNewVsClosedRatchet` 5＋`TestClosingRoundProblemsWiring` 1；乾淨 env `Ran 267 tests OK`、
+  `AUTOSDD_NET_RATCHET_OFF=1` ⇒ `FAILED (failures=6)`）。(c) 未量測，維持 HYPOTHESIS。(d) CONFIRMED：psutil 於 pyproject／requirements／
+  bootstrap 全庫零命中 ⇒ 乾淨環境「自動偵測實體核」結構上恆退回邏輯核（本機 10P=10L 巧合正確；SMT 機器缺 psutil 會算成 min(16,19)=16 而非 13）。
+- **被推翻的 4 條**（各兩位反駁者 2/2）：F-ARCH-03「雙軌並行翻案」——真因＝v0.01 凍結基線 `snapshot.py` 固定 `.tmp` 檔名競態
+  （本檔 L1133／L1148；v0.01 依鐵律不可原地改），與 CPU headroom 無關 ⇒ 維持不做；F-SA-02「subprocess 零隔離」——6 個站點皆經
+  `_isolated_env()` 注入 TMPDIR/TEMP/TMP，`tempfile.gettempdir()` 子行程實測吃到沙箱；F-SA-03「簡報指錯目錄」——簡報從未提
+  `~/.autosdd/traces`，SA 自己把 `endurance_env.py` 與 `quota_gate.py` 兩個 SSOT 混淆；F-SA-05 見 C7。F-SA-04（1/2）：DEF-200-328 列已明寫
+  該 Windows 機 psutil 在場取 14 實體核 ⇒ 「13」無矛盾，不立案。
+
+### SD 量測（mac，安靜機器、序列；逐字見 `sd_R159_evidence.md`）
+
+- 根層全套 `AUTOSDD_PARALLEL_TESTS_WORKERS`＝9（cpu_budget 預設）**145s**／10 **140s**／5 **221s**，三次皆 rc=0；makespan 效率（下界/實測）
+  78.2%／72.9%／92.3%；`detect_imbalance()` 1.5x 與自訂 1.3x 門檻皆 0 命中 ⇒ **無頭重腳輕**；最佳 w=10 僅比預設 9 快 3.4%（雜訊範圍）⇒ 預設維持。
+  `auto_class_level_candidates()` 對 w=5／9／10 皆空集合（fair_share 門檻未達，非矛盾）。`TraceIsolationTest` 三次全綠（R157 是 w=13 觀察到）。
+- AutoClaude 預設 `[cpu_budget] xdist workers=9 source=cpu_budget`；`PYTEST_XDIST_AUTO_NUM_WORKERS=5` ⇒ `workers=5 source=env`。
+- SDD ci-gate.sh：v0.01 序列 11.15s、v0.30 xdist 16.53s；廣播成功路徑全靜默（F-SD-02 → 包 C）。
+- Q4：pre-push 非測試步驟——10 支守門工具皆 <1.5s、ruff <0.1s、`integration_gate.sh --skip-full` 4s ⇒ 無新可平行候選；四項「不做」維持。
+
+### 主控裁決（三包 Sonnet，各自隔離 worktree 交 patch；檔案面互不相交＝鐵律七）
+
+- **包 A**（`tools/tests/test_check_defect_log_crossref.py`、`tools/tests/test_context_budget_guard.py`）：兩類別 setUp 整班隔離 `AUTOSDD_NET_RATCHET_OFF`
+  ＋巢狀鎖；`TraceIsolationTest` 改 `foreign_trace_growth_problems(before, after, own_pid)`——只有 `pid == os.getpid()` 或無法歸因的新增行算洩漏。
+- **包 B**（`tools/lib/cpu_budget.py`、`tools/tests/test_cpu_budget.py`＋字面同步）：`_detect_physical_count()`＝psutil → 平台原生
+  （darwin `sysctl -n hw.physicalcpu`／linux `/proc/cpuinfo` physical id＋core id 唯一組合／win32 ctypes `GetLogicalProcessorInformation`
+  計 RelationProcessorCore，**零 spawn**）→ None；fail-open 契約不變。
+- **包 C**（三個廣播站點＋AutoClaude conftest＋兩支鎖檔）：成功路徑印 `[cpu_budget] broadcast workers=N source=cpu_budget|env`；
+  `pytest_xdist_setupnodes`（optionalhook）印 `[cpu_budget] xdist nodes confirmed=N`。
+- 不做：雙軌並行（真因競態）、pre-push leg 並行（SD 無數字支持）、GH runner SMT 量測（mac 做不到；headless 用邏輯核維持）。
+
+### 實作（三包 Sonnet，各自隔離 worktree 交 patch；主控套 patch 後親驗；帳本 DEF-200-345～348）
+
+- **包 A**：`_pop_leaked_net_ratchet_env()` helper＋兩類別 setUp；鎖 `test_a_leaked_escape_hatch_from_the_caller_cannot_flip_this_class`
+  （拿掉隔離 ⇒ `FAILED (failures=1)`、還原 ⇒ OK）[他包回報]。`foreign_trace_growth_problems()`＋5 支鎖；受控重現（背景 thread 在測試
+  視窗內對真檔追加 pid=999999 一行）：修前 `rc=1`（多了 63 bytes）／修後 `rc=0`，`restored ok: True` [他包回報]。
+- **包 B**：`_detect_physical_count()` 三段（psutil → `_platform_physical_count()` → None）；純函式 `_parse_int_line`／`_parse_proc_cpuinfo`／
+  `_count_processor_cores`；`test_cpu_budget` 22→41。win32 ctypes 分支只經 AST 掃描器守衛檢查、未真跑（劃界）。`parallel_shard.py`／
+  ONBOARDING §7 無 psutil 字面，未動。
+- **包 C**：三站點＋conftest `pytest_xdist_setupnodes`；鎖 `tools/tests/test_ci_gate_xdist_allowlist.py::test_orchestrators_broadcast_success_path`
+  （`git show HEAD:` 修前三檔 grep 皆 0 ⇒ 先紅）與 `AutoClaude/tests/tools/test_local_ci_gate.py`（純函式＋optionalhook 屬性）。任務書指名
+  `tests/test_conftest_pg_group.py` 有誤——既有 conftest 鎖住 `tests/tools/test_local_ci_gate.py`，Dev-C 貼齊慣例。沙箱擋 pwsh ⇒ 主控親跑
+  `Parser::ParseFile` errors=0。
+- 三包 diff 統計（2／2／6 檔）與 worktree staged 逐棵相符後套進主樹；三棵暫時 worktree 收掉（`block_destructive_git` 擋下 `--force` 一次，
+  帶理由豁免後執行）。輪號字面零外洩（程式碼只用日期＋帳本號）。
+
+### 驗證數字（主控親跑，套 patch 後、凍結前）
+
+- root：`test_check_defect_log_crossref` `Ran 268 tests OK`（乾淨 env）／`AUTOSDD_NET_RATCHET_OFF=1` 亦 `OK` rc=0；`test_cpu_budget` `Ran 41 tests OK`；
+  `test_ci_gate_xdist_allowlist` `Ran 9 tests OK`；`test_bash32_compat` 32 OK；`test_pre_push_dispatcher` 31 OK；`TraceIsolationTest` OK；
+  `test_context_budget_guard` `Ran 659 tests` rc=0；`test_platform_neutral_paths` `Ran 177 tests` rc=0。
+- ruff root 5 檔／AutoClaude 2 檔 `All checks passed!`；shellcheck 閘門 `11 筆 / 基線 11 筆 ✅`（pre-push 3 筆皆 HEAD 既有）；pwsh Parser errors=0；
+  ci-gate.ps1 BOM＋CRLF 不變。
+- AutoClaude：`tests/tools/test_local_ci_gate.py`＋`tests/test_conftest_pg_group.py` `100 passed`，輸出 `[cpu_budget] xdist workers=9 source=cpu_budget`／
+  `[cpu_budget] xdist nodes confirmed=9`；`-p no:xdist -o addopts=` `100 passed`。
+- cpu_budget（psutil 缺席）：`_platform_physical_count()=10`（sysctl）、`--legs 1`=9、`AUTOSDD_CPU_HEADLESS=1`=10。
+- `check_defect_log_crossref.py` rc=0。

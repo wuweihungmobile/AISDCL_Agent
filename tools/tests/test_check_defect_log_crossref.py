@@ -3390,6 +3390,26 @@ class TestCrossRowReassignMustAlsoNameAFreshRound(unittest.TestCase):
 
 
 # ============================================================ 帳本減半收斂期機械物①②
+def _pop_leaked_net_ratchet_env(case: unittest.TestCase) -> None:
+    """把呼叫端環境裡可能洩漏的 `AUTOSDD_NET_RATCHET_OFF` 摘掉，測試結束自動還原。
+
+    WHY（2026-09-20；DEF-200-345）：`net_new_vs_closed_problems()` 一看到
+    這個環境變數（pre-push 發現輪逃生口，見 `ledger_closing_guards.py` 模組頂端註解）
+    就整批回空清單——`TestNetNewVsClosedRatchet`／`TestClosingRoundProblemsWiring`
+    原本沒有為此自我隔離，導致「這些測試會不會通過」取決於呼叫端 shell 環境有沒有
+    設這個變數，而不是判準本身的邏輯。用 `mock.patch.dict(os.environ)`（不帶第二個
+    參數＝先原樣快照整份環境）起手，`.stop()`（交給 `addCleanup`）會把整份環境還原成
+    呼叫進來時的樣子；接著立刻 `pop` 掉該鍵，讓每一支測試方法都在「本鍵未設」的
+    已知起點上跑。既有 `test_escape_hatch_env_var_bypasses_a_real_violation` 自己
+    再用 `with mock.patch.dict(...)` 巢狀注入 `"1"` 的行為不受影響（巢狀 patcher
+    正常先進後出）。
+    """
+    patcher = mock.patch.dict(os.environ)
+    patcher.start()
+    case.addCleanup(patcher.stop)
+    os.environ.pop(lcg.AUTOSDD_NET_RATCHET_OFF, None)
+
+
 class TestNetNewVsClosedRatchet(unittest.TestCase):
     """機械物①（淨額棘輪）：`tools/lib/ledger_closing_guards.py`。
 
@@ -3397,6 +3417,9 @@ class TestNetNewVsClosedRatchet(unittest.TestCase):
     所以正樣本斷言淨增筆數逐字出現在訊息裡（不是只看非空清單），且逃生口用
     `mock.patch.dict(os.environ, …)` 真的注入環境變數（不是繞過 `os.environ.get`）。
     """
+
+    def setUp(self) -> None:
+        _pop_leaked_net_ratchet_env(self)
 
     HEAD = ("| ID | 日期 | 發現情境 | 現象與證據 | 嚴重度 | 分流去向 | 狀態 |\n"
             "|---|---|---|---|---|---|---|\n")
@@ -3706,6 +3729,25 @@ class TestStructuralDebtLog(unittest.TestCase):
 class TestClosingRoundProblemsWiring(unittest.TestCase):
     """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R118 round-label-ok
     crossref TestClosingRoundProblemsWiring WHY〉節。"""
+
+    def setUp(self) -> None:
+        _pop_leaked_net_ratchet_env(self)
+
+    def test_a_leaked_escape_hatch_from_the_caller_cannot_flip_this_class(self) -> None:
+        """呼叫端洩漏的 `AUTOSDD_NET_RATCHET_OFF=1` 不得翻轉 `TestNetNewVsClosedRatchet`
+        的判定（2026-09-20；DEF-200-345，見 `_pop_leaked_net_ratchet_env`）。
+
+        巢狀跑整個類別是唯一能在**同一個行程**內重現「外層環境已洩漏」情境的辦法——
+        另起 `subprocess` 雖然也能重現洩漏來源，但新行程一開始環境本就乾淨，反而測不到
+        `setUp` 隔離動作本身有沒有生效，等於繞過了本鎖真正要守的東西。
+        """
+        suite = unittest.TestLoader().loadTestsFromTestCase(TestNetNewVsClosedRatchet)
+        with mock.patch.dict(os.environ, {lcg.AUTOSDD_NET_RATCHET_OFF: "1"}):
+            result = unittest.TextTestRunner(stream=io.StringIO(), verbosity=0).run(suite)
+        self.assertTrue(
+            result.wasSuccessful(),
+            "呼叫端洩漏的 AUTOSDD_NET_RATCHET_OFF=1 翻轉了 TestNetNewVsClosedRatchet 的"
+            "判定——setUp 隔離失效或被繞過")
 
     def test_combined_entry_reports_both_kinds_of_fail(self) -> None:
         repo = Path(tempfile.mkdtemp(prefix="combined_repo_"))

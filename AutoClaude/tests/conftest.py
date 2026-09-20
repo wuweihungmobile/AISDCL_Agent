@@ -807,3 +807,34 @@ def pytest_sessionstart(session):
     terminalreporter = config.pluginmanager.getplugin("terminalreporter")
     if terminalreporter is not None:
         terminalreporter.write_line(_CPU_BUDGET_SOURCE_NOTE)
+
+
+# ──────────────────────────────────────────────────────────────
+# 2026-09-20（DEF-200-348）：`pytest_xdist_auto_num_workers` 的回傳值只是
+# 「建議」worker 數——使用者仍可能用 `-n <N>` 直接蓋過，此時該 hook 根本不會被 xdist
+# 呼叫，`_CPU_BUDGET_SOURCE_NOTE` 也就無從得知「node 真的起了幾個」。`created: N/N
+# workers` 這行事實只有 `-v` 才印得出來，一般 `-q` CI 呼叫端看不到。本段補上 xdist
+# newhooks 的 `pytest_xdist_setupnodes`（controller 端在建立任何 worker node **之前**
+# 呼叫一次，`specs` 是即將建立的 node 規格序列，`len(specs)` 即 xdist 真正打算起的
+# node 數）——與 `pytest_xdist_auto_num_workers` 同一顆「成功路徑可稽核」訴求，不同
+# 觀測點（一個是「算出多少」，一個是「真的起了多少」）。
+# ──────────────────────────────────────────────────────────────
+def _nodes_confirmed_line(n: int) -> str:
+    """純函式：組出 xdist controller 端『node 數已確認』的一行輸出字串。"""
+    return f"[cpu_budget] xdist nodes confirmed={n}"
+
+
+# 🔴 下面 `optionalhook=True` 必須有：同上方 `pytest_xdist_auto_num_workers` 的既有
+# 紀律，`-p no:xdist` 下這個 hookspec 不存在，缺了它會在 `-p no:xdist -o addopts=`
+# 呼叫形態下讓 pluggy 對未知 hookimpl 拋 PluginValidationError ⇒ INTERNALERROR。
+@pytest.hookimpl(optionalhook=True)
+def pytest_xdist_setupnodes(config, specs):
+    """controller 端印一行 `[cpu_budget] xdist nodes confirmed=<N>`（B1 可觀測性延伸；
+    印法比照上面 `pytest_sessionstart` 既有寫法）。本 hook 由 xdist 在**建立任何 worker
+    node 之前**呼叫，且只會在 controller 端存在（worker 尚未建立，天生不需要
+    `workerinput` 判準）；未啟用平行（無 `-n`／`-n 0`）時 xdist 不會建立 DSession，
+    本 hook 也就不會被呼叫，安靜地什麼都不印。
+    """
+    terminalreporter = config.pluginmanager.getplugin("terminalreporter")
+    if terminalreporter is not None:
+        terminalreporter.write_line(_nodes_confirmed_line(len(specs)))
