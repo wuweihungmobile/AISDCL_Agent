@@ -1611,3 +1611,13 @@ worktree、檔案面互不相交）→ 四方複審 → 收尾單人窗口。主
 - 「測試 spawn 會讀逃生口的 hook 卻不過濾呼叫端環境」這一類缺陷，目前只靠一次性普查（16 個逃生口 × 9 個測試檔），**沒有機械物**守新站點；
   本輪不加新掃描器（會再增護欄行數且需四方複審其判準），登記為觀察。
 - nightly-full 深度回歸對本輪 HEAD 的涵蓋：待 push 後 dispatch 或週一排程；在此之前 root-infra-ci 的 DEF-200-290 advisory 會持續 `::warning::`，屬設計內。
+
+### 雲端取證補記（push 799820e1 之後，主控親查 `gh run list --commit`／`gh run view --log`）
+
+- push 觸發：aisdlc-sdd-ci 35529402017／AutoClaude CI 35529402028／root-infra-ci 35529402040 皆 success；windows-compat 35529402018／macos-compat 35529402024
+  的 smoke 被同 ref 的手動 dispatch 依設計取消（smoke job per-ref `cancel-in-progress:true`，見該 workflow 檔頭 2026-07-15 複審註解），由 dispatch run 重跑；
+  shellcheck-ci 因 `paths:` 未觸發。
+- 手動 dispatch（headSha 799820e1）：macos-compat 35529428771 與 windows-compat 35529434436 run 與 nightly-full job **皆 success**——本輪 HEAD 的深度回歸已涵蓋，
+  F-QA-02 於本輪內閉合。log 逐字：macOS nightly-full `[cpu_budget] xdist workers=3 source=cpu_budget`／`xdist nodes confirmed=3`／`4615 passed, 222 skipped in 122.31s`；
+  Windows nightly-full `workers=4`／`nodes confirmed=4`／`4662 passed, 175 skipped in 97.86s`、SDD LATEST fsm_runtime `1943 passed, 14 skipped … 38.86s`；
+  兩平台 smoke 內 ci-gate 與 integration_gate 皆印 `[cpu_budget] broadcast workers=3／4 source=cpu_budget`＋`bringing up nodes...`（DEF-200-348 的成功路徑可稽核行首次於雲端現形）。
