@@ -1574,3 +1574,40 @@ worktree、檔案面互不相交）→ 四方複審 → 收尾單人窗口。主
 - `test_cpu_budget` OK；ctypes 親算 `sizeof 32 offsets [('ProcessorMask', 0), ('Relationship', 8), ('_union', 16)]`；`cpu_budget.py --legs 1` → 9。
 - ruff `tools/ .claude/hooks/` `All checks passed!`；`check_defect_log_crossref.py` rc=0（帳本 278 筆有效狀態紀錄、未結存量 36 不動）。
 - 根層全套 `python tools/run_root_unittests.py`：**rc=0、147s、worker=9**（修前於 2206a3a0 為 rc=1：ONBOARDING 表③ 過期 5 支紅）。
+
+### 四方複審判決（凍結點 36b24265；各自獨立、唯讀；逐字見 scratchpad `*_R160_review.md`）
+
+- **SA：APPROVE**。C1～C7 逐條 CONFIRMED：修前檔在鏡像目錄下逐一洩漏五變數重現 5／2／1／2／2、CARRIER 重現 failures=1；HEAD 版乾淨與六種洩漏皆
+  `Ran 68 tests OK`；表③ 六列＋表③-b 兩列＋錨欄位以 `gh run view` 逐支重查相符（head-sha 為 HEAD 祖先）；`test_doc_loc_baseline_freshness_r60`
+  `Ran 281 tests OK`；帳本列 689 bytes、crossref rc=0（278 筆）；新增行 `R1[0-9]{2}` 僅證據檔內兩處 scratchpad 檔名引註，三支 `.py` 零命中。
+- **QA：APPROVE**。兩檔巢狀鎖「拿掉濾網即紅」各重現一次（`'99991' not found`／`'block_destructive_git.py' not found`）；全 repo 提及
+  `check_claim_provenance` 的測試檔另 3 個逐一核實非 subprocess 洩漏站點；`--check-snapshot` rc=0；幽靈符號鎖仍綠——搬去 `CrossPlatform_R*_*.md`
+  屬 `_SYMBOL_REF_GLOBS` 明文排除面，移除只減引用不造新幽靈。
+- **SD：APPROVE**。根層全套 w=9 獨立重跑 rc=0、發現 4459 個測試（下限 4371）、零 FAILED、無不均告警；AutoClaude 全套 `4715 passed, 156 skipped in 35.96s`
+  仍印 `workers=9`／`nodes confirmed=9`；`test_context_budget_guard` 5 個逃生口清空／洩漏皆 `649 passed, 10 skipped, 228 subtests`；§D 與原檔逐字相同。
+- **Architect：PARTIAL（三條 P3，六項 CONFIRMED）**。AST 掃描 7/7 恰等於 `_hook_env()` 濾網；舊 merge 洩漏 stderr 空（噤聲）vs 新版含 99991 違規訊息；
+  ctypes 舊 offset 12／新 16、sizeof 皆 32 對照 MSDN。F-ARCH-01：`_hook_env_reads()` 抽出後第三處仍逐字重複——**收尾修**；F-ARCH-03：§D 段落首句
+  「兩者都已有既有鎖在守…只有一個家會被改」是判準理由非量測史——**收尾搬回**；F-ARCH-02：hooks_liveness 內聯濾網與 `_hook_env()` 是兩份實作、
+  未收斂進 `_platform_helpers.py`——會動第三支檔的凍結行數 ⇒ **留待下一個淨減法輪**（附記登記）。
+- 主控裁決：無 P1／P2 ⇒ 凍結點通過；兩條 P3 於收尾提交落地並守住 1015 行。
+
+### 收尾單人窗口（主控親做；小修由單一 Sonnet 串行執行、主控親驗）
+
+- 兩條 P3 落地：第三處 AST 掃描改呼叫 `_hook_env_reads()`（全檔 `ast.walk` 只剩共用函式那 1 處）；§D 首句判準理由逐字搬回原檔範圍註解；
+  行數配平 −9＋1＋6（`hatches` 集合一名一行）＋2（兩個 assertIn 訊息獨立一行）＝0，仍 1015；`--print-guard-lines` `淨額 +0`／`逐檔漂移 0 支`；
+  鎖模組 192 tests OK、`test_subprocess_encoding_hygiene` 39 OK [他包回報]；claim_provenance 乾淨與 `CLAIM+CAUSAL+BLOCK_CLAIM` 洩漏皆 OK、ruff 綠（主控親跑）。
+- 護欄行數棘輪：本輪**不重釘**（總量 102842 不變、逐檔零漂移）——「主軌連續上升兩輪後須 ≤0」以零漂移兌現；因本輪未新增申報列，
+  尾端連續上升計數未歸零，**下一次真正重釘仍須淨額 ≤0**。
+- 本機 mac nightly 2026-09-21 02:00（launchd）：`PASS=4 FAIL=0`（`nightly_mac_20260921_020002.log`），跑於凍結 commit 之後的工作樹 ⇒
+  上輪「明天 02:00 才能證明」一項閉合；09-20 那次 FAIL=2 確為更早 HEAD 的棘輪對帳紅＋DEF-200-343。
+- 帳本：DEF-200-349 fixed（同 commit 立案即結案；未結存量 36 不動）；crossref rc=0。F-ARCH-02 與「逃生口洩漏類缺陷缺機械守衛」皆不立列（見劃界）。
+- 雲端取證：push 後主控手動 dispatch 兩平台 nightly-full 對本輪 HEAD 取證，結果補記於本節末尾（另一筆文件提交）。
+
+### 🔴 誠實劃界（本輪仍未解決，不可宣稱已完備）
+
+- win32 `GetLogicalProcessorInformation` 分支：結構佈局已對齊官方定義（親算 offset／sizeof），但**仍未在 Windows 真機跑過**；待掌舵者 Windows 親驗。
+- F-ARCH-02：`test_check_hooks_liveness.py` 內聯濾網與 `test_claim_provenance_r86.py` 的 `_hook_env()` 是同一問題的兩份實作，未收斂進共用檔
+  `tools/tests/_platform_helpers.py`——收斂會改動第三支檔的凍結行數，需要一個淨減法輪一起配平；本輪刻意不做。
+- 「測試 spawn 會讀逃生口的 hook 卻不過濾呼叫端環境」這一類缺陷，目前只靠一次性普查（16 個逃生口 × 9 個測試檔），**沒有機械物**守新站點；
+  本輪不加新掃描器（會再增護欄行數且需四方複審其判準），登記為觀察。
+- nightly-full 深度回歸對本輪 HEAD 的涵蓋：待 push 後 dispatch 或週一排程；在此之前 root-infra-ci 的 DEF-200-290 advisory 會持續 `::warning::`，屬設計內。

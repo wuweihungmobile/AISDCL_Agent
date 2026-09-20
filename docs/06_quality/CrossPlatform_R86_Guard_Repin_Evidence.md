@@ -278,7 +278,6 @@ R85 P2：兌現款(12) 到期義務，單輪淨額上限 5400→3200，並改為
 「🔴 刻意不在本檔驗『hook 檔存在』與『Stop 兩個載具都在』」那句之後）：
 
 ```text
-兩者都已有既有鎖在守，重寫一份就是同一份知識住兩個家、而只有一個家會被改：
   · 拔掉 Stop 的 POSIX 載具 ⇒ `test_check_hooks_liveness.py` 的
     `TestExecFormConversionScope::test_every_active_settings_file_passes_the_form_criteria`
     與 `TestHookEntriesAreExecForm::test_real_settings_is_all_exec_form` 實測轉紅（rc=1）。
@@ -286,7 +285,8 @@ R85 P2：兌現款(12) 到期義務，單輪淨額上限 5400→3200，並改為
     test_baseline_scripts_all_exist_on_disk` 實測轉紅（rc=1）。
 ```
 
-該範圍註解的首句（刻意不在本檔驗「hook 檔存在」與「Stop 兩個載具都在」……）與末兩句
-（那兩道鎖的分母是現查磁碟的註冊集合……註冊面不是本檔的職責）是理由，仍逐字留在
-原檔；上面這段是支撐該理由的**兩筆具體實測轉紅座標**，屬於量測史，故搬出。
+該範圍註解的首句（刻意不在本檔驗「hook 檔存在」與「Stop 兩個載具都在」……）、第二句
+（兩者都已有既有鎖在守……只有一個家會被改）與末兩句（那兩道鎖的分母是現查磁碟的
+註冊集合……註冊面不是本檔的職責）是理由，仍逐字留在原檔；上面這段是支撐該理由的
+**兩筆具體實測轉紅座標**，屬於量測史，故搬出。
 
