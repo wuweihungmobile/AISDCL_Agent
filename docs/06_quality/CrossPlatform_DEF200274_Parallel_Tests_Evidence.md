@@ -1911,3 +1911,12 @@ worktree、檔案面互不相交）→ 四方複審 → 收尾單人窗口。主
 - F-QA-02 的修前重現在實作包 A 手上 0/6 配對（批評者 0/6、readcode 反駁鏡 0/30、QA 1/2、reproduce 反駁鏡 1/1）：屬時序敏感真競態，修法靠讀碼確認而非靠可靠重現，「修後 10/10 rc=0」不能單獨當作修好的證據，讀碼（pid 尾綴確實流進 `endurance_log_path()` 檔名）才是。
 - SDD `scripts/tests/` 裸跑 `-n auto` 經共用層 conftest 涵蓋、`AISDLC_SDD_v0.30/` 裸跑經 rootdir conftest 涵蓋；**凍結基線 v0.01 與中間歷史版依 ADR-XPLAT-001 不改**，那些樹裸跑 `-n auto` 仍走 xdist 內建算法（ci-gate.sh 對非 LATEST 本就不開 xdist，實際曝險為 0）。
 - 四方審查流程缺口（批評者點名）：沒有跨角色去重步驤，同一缺陷被 SD／Architect 各編一號（F-SD-01／F-ARCH-01）；F-ARCH-02 亦重複了上輪已裁決項。下輪審查工作流應在反駁前加一步去重。
+
+### 雲端取證補記（push cb84bc38 之後，主控親查 `gh run list --commit <完整 40 碼 sha>`／`gh run view --json jobs`／`--log`）
+
+- push 觸發：aisdlc-sdd-ci 35622639370 **success**、root-infra-ci 35622639310 **success**（headSha cb84bc38）；macos-compat 35622639308／windows-compat 35622639235 的 smoke 被同 ref 手動 dispatch 依設計取消（per-ref `cancel-in-progress:true`），由 dispatch run 重跑；AutoClaude CI 因 `paths:` 未觸發（本輪未動 `AutoClaude/`）。
+- 手動 dispatch（headSha cb84bc38）：macos-compat 35622701819 與 windows-compat 35622705752 的 run 與三個 job（smoke／nightly-full／失敗提醒）**皆 success**——本輪 HEAD 的深度回歸已涵蓋。
+- **DEF-200-353 在雲端首次現形**：兩平台 nightly-full 的「AISDLC_SDD LATEST fsm_runtime pytest」步驟此前只有 workflow 的 `PYTEST_XDIST_AUTO_NUM_WORKERS` 廣播、xdist 原生讀取而**零可稽核字面**；本輪起該步驟逐字印出 macOS `[cpu_budget] xdist workers=3 source=env`／`[cpu_budget] xdist nodes confirmed=3`／`1949 passed, 8 skipped, 14 subtests passed in 25.87s`，Windows `[cpu_budget] xdist workers=4 source=env`／`nodes confirmed=4`／`1943 passed, 14 skipped, 14 subtests passed in 40.71s`（`source=env` ＝ 廣播優先於 SSOT 現算，優先序鏈在雲端成立）。
+- AutoClaude nightly-full：macOS `[cpu_budget] xdist workers=3 source=cpu_budget`／`nodes confirmed=3`／`4615 passed, 222 skipped in 120.68s`；Windows `workers=4 source=cpu_budget`／`nodes confirmed=4`／`4662 passed, 175 skipped in 129.03s`——passed 數與第十六、十七輪逐字相同（4615／4662），本輪未動 AutoClaude。
+- Windows smoke 的 `ci-gate.ps1`（凍結基線＋LATEST）逐字：`[cpu_budget] broadcast workers=4 source=cpu_budget` → LATEST 軌 `[cpu_budget] xdist workers=4 source=env`／`nodes confirmed=4`；逐軌 `AISDLC_SDD_v0.01: 1476 passed`／`AISDLC_SDD_v0.30: 1943 passed`／`共享 infra scripts/tests/: 364 passed`（＝mac 363＋Windows 多 1 支平台專屬；新鎖檔 10 支已計入）。兩平台 smoke 的 AutoClaude 平台敏感子集（408／407 passed）、perception 單元（48 passed）、integration_gate 皆印 `workers=3／4`＋`nodes confirmed=3／4`。
+- macOS nightly-full **排程軌**（F-SA-01）本補記時仍未觸發，維持〈誠實劃界〉所記；下一個週一 07:18 UTC 排程或人工 dispatch 皆可閉合 DEF-101-703 的 macOS 側條件。
