@@ -75,50 +75,48 @@ def setUpModule() -> None:  # noqa: N802 — unittest 的固定名稱
     🔴 R84／SA84-01：還原動作**不**掛 `addModuleCleanup`（巢狀 runner 會觸發它提前 flush，
     pin 當場消失且後續測試失去保護）；捕捉原值只做一次（`_SENTINEL_PIN_CAPTURED`）。
     完整立案敘事見證據檔 §I-17。
-    🔴 DEF-200-350：同一把 pin 一併罩住 `AUTOSDD_QUOTA_GUARD_OFF`——呼叫端 shell 若帶
-    這個逃生口，`_gate()` in-process 呼叫會讀到 `qg.QUOTA_OFF_ENV` 而整條放行（`decide`
-    0 次），`_isolated_env()` 只濾 subprocess 半邊的環境，對本行程直呼 `_gate()` 的測試
-    不生效，兩者必須同一對函式一起管。
+    🔴 DEF-200-350／F-QA-01：pin 同時罩住 `quota_policy.ENV_SPEC` 每一個鍵，理由見
+    `_pin_sentinel_off`；發現經過與立案敘事已搬至 R86 護欄重釘證據檔 §F。
     """
-    global _SENTINEL_PIN_ORIGINAL, _SENTINEL_PIN_CAPTURED, _QUOTA_PIN_ORIGINAL
+    global _SENTINEL_PIN_ORIGINAL, _SENTINEL_PIN_CAPTURED, _ENV_SPEC_PIN_ORIGINALS
     if not _SENTINEL_PIN_CAPTURED:
         _SENTINEL_PIN_ORIGINAL = os.environ.get(guard.SENTINEL_OFF_ENV)
-        _QUOTA_PIN_ORIGINAL = os.environ.get(qg.QUOTA_OFF_ENV)
+        _ENV_SPEC_PIN_ORIGINALS = {s.name: os.environ.get(s.name) for s in quota_policy.ENV_SPEC
+                                   if s.name != guard.SENTINEL_OFF_ENV}
         _SENTINEL_PIN_CAPTURED = True
     _pin_sentinel_off()
     unittest.addModuleCleanup(_unpin_sentinel_off)
 
 
-#: `setUpModule` 進來之前 `AUTOSDD_SENTINEL_OFF` 的值（只捕捉一次，理由見該函式）。
+#: `setUpModule` 進來之前 `AUTOSDD_SENTINEL_OFF` 與 `ENV_SPEC` 其餘鍵的值（F-QA-01，只捕捉一次）。
 _SENTINEL_PIN_ORIGINAL: str | None = None
 _SENTINEL_PIN_CAPTURED = False
-#: `setUpModule` 進來之前 `AUTOSDD_QUOTA_GUARD_OFF` 的值（DEF-200-350，捕捉時機同上）。
-_QUOTA_PIN_ORIGINAL: str | None = None
+_ENV_SPEC_PIN_ORIGINALS: dict[str, str | None] = {}
 
 
 def _pin_sentinel_off() -> None:
-    """釘上「本行程一律不准武裝真排程器」，且一併拔掉洩漏進來的額度逃生口（DEF-200-350）。
+    """釘上「不准武裝真排程器」，並拔掉洩漏的**全部** `ENV_SPEC` 鍵——任一政策鍵洩漏
+    都會讓本模組 in-process 呼叫（`_gate()`／`pace_report()`）拿到被覆寫的值（F-QA-01）。
 
     冪等 ⇒ 補釘幾次都不會改變語意。
     """
     os.environ[guard.SENTINEL_OFF_ENV] = "1"
-    os.environ.pop(qg.QUOTA_OFF_ENV, None)
+    for name in {spec.name for spec in quota_policy.ENV_SPEC} - {guard.SENTINEL_OFF_ENV}:
+        os.environ.pop(name, None)
 
 
 def _unpin_sentinel_off() -> None:
     """還原成 `setUpModule` 進來前的值。**冪等**：被 flush 兩次也不會留下錯的值。
 
     冪等是必要條件不是客氣——`_run_nested_suite` 會在巢狀 runner 沖掉堆疊之後把本函式
-    重新掛回去，於是它有可能被登記兩次；讀 `_SENTINEL_PIN_ORIGINAL`（而不是閉包裡的
-    某個當下值）讓第二次執行與第一次結果完全相同。`_QUOTA_PIN_ORIGINAL` 走同一套邏輯
-    （DEF-200-350）：兩個變數各自獨立還原，互不依賴對方是否為 `None`。
+    重新掛回去，於是它有可能被登記兩次；讀 `_SENTINEL_PIN_ORIGINAL`／
+    `_ENV_SPEC_PIN_ORIGINALS`（而不是閉包裡的某個當下值）讓第二次執行與第一次結果完全相同。
     """
-    os.environ.pop(guard.SENTINEL_OFF_ENV, None)
-    if _SENTINEL_PIN_ORIGINAL is not None:
-        os.environ[guard.SENTINEL_OFF_ENV] = _SENTINEL_PIN_ORIGINAL
-    os.environ.pop(qg.QUOTA_OFF_ENV, None)
-    if _QUOTA_PIN_ORIGINAL is not None:
-        os.environ[qg.QUOTA_OFF_ENV] = _QUOTA_PIN_ORIGINAL
+    for name, original in {guard.SENTINEL_OFF_ENV: _SENTINEL_PIN_ORIGINAL,
+                           **_ENV_SPEC_PIN_ORIGINALS}.items():
+        os.environ.pop(name, None)
+        if original is not None:
+            os.environ[name] = original
 
 
 def _run_nested_suite(suite: unittest.TestSuite) -> unittest.TestResult:
@@ -4470,7 +4468,7 @@ class Inv5SingleOwnerTest(unittest.TestCase):
         probe = production_engine()  # R60 E-A-03：5.1 優先（DEF-101-509 判準）
         if probe is None:
             self.skipTest("這台機器找不到 powershell，無法現查排程器")
-        sid = "sess-r119"
+        sid = f"sess-r119-{os.getpid()}"  # F-QA-03：pid 尾綴避免雙行程互踩同名真 job
         my_task = f"AutoSDD_Sentinel_{sid}"
         other_task = f"AutoSDD_SessionResume_{sid}"
         backend = sb.SchtasksBackend()
@@ -4502,7 +4500,7 @@ class Inv5SingleOwnerTest(unittest.TestCase):
         背景敘事已搬至 R86 護欄重釘證據檔 §E。"""
         if sys.platform != "darwin":
             self.skipTest("[MAC-NATIVE-ONLY] launchd 只在 macOS 成立")
-        sid = "sess-inv5-mac"
+        sid = f"sess-inv5-mac-{os.getpid()}"  # F-QA-03：pid 尾綴避免雙行程互踩同名真 job
         my_task = f"AutoSDD_Sentinel_{sid}"
         other_task = f"AutoSDD_SessionResume_{sid}"
         backend = sb.LaunchdBackend()
@@ -8885,26 +8883,27 @@ class QuotaDecisionEntryIsSingleTest(unittest.TestCase):
         _quota_cache(self.tmp, 88.0).replace(qg.quota_cache_path())
         self.assertEqual(_gate(self._payload("Workflow")), 2)
 
-    def test_a_leaked_quota_off_is_popped_by_the_module_pin(self) -> None:
-        """巢狀鎖（DEF-200-350）：拿掉 `_pin_sentinel_off()` 內對 `QUOTA_OFF_ENV` 的
-        `pop`，本條會紅——它就是擋住「呼叫端 shell 帶著 `AUTOSDD_QUOTA_GUARD_OFF=1`
-        時整個模組的 `_gate()` 全數靜默放行」的那一行。
+    def test_a_leaked_env_spec_key_is_popped_by_the_module_pin(self) -> None:
+        """巢狀鎖（DEF-200-350／F-QA-01）：只認 `QUOTA_OFF_ENV` 不夠——數值型政策鍵洩漏時
+        `_gate()`／`pace_report()` 仍會拿到被覆寫的值，兩種鍵型各注入一次逐格自證。
         """
-        with unittest.mock.patch.dict(os.environ, {qg.QUOTA_OFF_ENV: "1"}):
-            _pin_sentinel_off()
-            self.assertNotIn(qg.QUOTA_OFF_ENV, os.environ,
-                             "pin 沒有拔掉洩漏進來的額度逃生口 ⇒ 本模組其餘測試"
-                             "會在帶 AUTOSDD_QUOTA_GUARD_OFF=1 的 shell 下整批假紅")
+        for name, leaked in ((qg.QUOTA_OFF_ENV, "1"), ("AUTOSDD_QUOTA_FANOUT_CAP", "1")):
+            with self.subTest(name=name), unittest.mock.patch.dict(os.environ, {name: leaked}):
+                _pin_sentinel_off()
+                self.assertNotIn(name, os.environ, f"pin 沒有拔掉洩漏進來的 {name} ⇒ 假紅會重演")
 
-    def test_the_unpin_restores_the_captured_quota_off_original(self) -> None:
-        """巢狀鎖（DEF-200-350）的另一半：拿掉 `_unpin_sentinel_off()` 的還原邏輯，
-        本條會紅——收尾必須把 `setUpModule` 捕捉到的原值原樣還給呼叫端 shell。
-        """
-        with unittest.mock.patch.dict(os.environ), \
-             unittest.mock.patch.object(sys.modules[__name__], "_QUOTA_PIN_ORIGINAL", "1"):
-            _unpin_sentinel_off()
-            self.assertEqual(os.environ.get(qg.QUOTA_OFF_ENV), "1",
-                             "還原沒有把捕捉到的原值寫回 ⇒ 呼叫端 shell 的逃生口被本模組吃掉")
+    def test_the_unpin_restores_the_captured_env_spec_original(self) -> None:
+        """同一支鎖的另一半：還原必須把捕捉到的原值原樣還給呼叫端 shell（兩種鍵型）。"""
+        for name, original in ((qg.QUOTA_OFF_ENV, "1"), ("AUTOSDD_QUOTA_FANOUT_CAP", "3")):
+            with self.subTest(name=name), unittest.mock.patch.dict(os.environ), \
+                 unittest.mock.patch.dict(_ENV_SPEC_PIN_ORIGINALS, {name: original}):
+                _unpin_sentinel_off()
+                self.assertEqual(os.environ.get(name), original, f"還原沒有把 {name} 的原值寫回")
+
+    def test_the_pin_list_is_derived_from_env_spec_not_copied(self) -> None:
+        """pin 清單須從 `ENV_SPEC` 導出而非手抄——手抄清單在新增鍵時不會自動跟長。"""
+        self.assertGreaterEqual(set(_ENV_SPEC_PIN_ORIGINALS) | {guard.SENTINEL_OFF_ENV},
+                                {spec.name for spec in quota_policy.ENV_SPEC})
 
 
 class QuotaMessagesNameTheAxisTest(unittest.TestCase):
@@ -10369,16 +10368,17 @@ class SentinelReapVerdictTest(unittest.TestCase):
         """🔴 回收**不得靜默**——少了這行痕跡，`--apply` 後的磁碟狀態與「哨兵自己靜默
         消失」完全同形（實機觀測原文＝R89 收尾證據檔）。斷言逐項對應歸因問題：
         誰（task／session_id）、為什麼（why）、排程拆了嗎（unregister_rc）、
-        殘骸掃了幾件（swept）、何時（at）。
+        殘骸掃了幾件（swept）、何時（at）。sid 帶行程 pid（F-QA-02，見 R86 §F）。
         """
-        row, trace = self._apply_once("r83-gc-trace")
+        sid = f"r83-gc-trace-{os.getpid()}"
+        row, trace = self._apply_once(sid)
         self.assertTrue(row["reap"], row)
         self.assertEqual(row["trace"], str(trace), "回收沒有回報痕跡落在哪裡")
         self.assertTrue(trace.is_file(), f"痕跡檔根本沒生出來：{trace}")
         record = json.loads(trace.read_text(encoding="utf-8").splitlines()[-1])
         self.assertEqual(record["event"], "gc_reaped")
-        self.assertEqual(record["session_id"], "r83-gc-trace")
-        self.assertEqual(record["task"], sentinel_lifecycle.TASK_PREFIX + "r83-gc-trace")
+        self.assertEqual(record["session_id"], sid)
+        self.assertEqual(record["task"], sentinel_lifecycle.TASK_PREFIX + sid)
         self.assertEqual(record["unregister_rc"], 0)
         for key in ("why", "swept", "at"):
             self.assertIn(key, record, record)
@@ -10392,7 +10392,7 @@ class SentinelReapVerdictTest(unittest.TestCase):
         """
         with unittest.mock.patch.object(planner, "append_log",
                                         lambda *a, **k: None):
-            row, trace = self._apply_once("r83-gc-trace-mute")
+            row, trace = self._apply_once(f"r83-gc-trace-mute-{os.getpid()}")
         self.assertTrue(row["reap"], row)
         self.assertEqual(row["trace"], "", "痕跡沒寫成，卻回報成寫好了")
         self.assertFalse(trace.is_file(), f"對照組本身壞了：{trace} 竟然存在")

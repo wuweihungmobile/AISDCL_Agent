@@ -59,3 +59,12 @@ windows_native_skips = _shared.windows_native_skips
 NON_WINDOWS_SKIP_TAGS = _shared.NON_WINDOWS_SKIP_TAGS
 non_windows_native_skips = _shared.non_windows_native_skips
 pytest_terminal_summary = _shared.pytest_terminal_summary
+
+# DEF-200-353／F-SD-01（多 CPU 第十八輪）：同款借用，把共用層的 cpu_budget xdist worker
+# 預算 hook 接進官方閘門實際走的路徑（`cd v0.30 && pytest` 時 rootdir=v0.30，
+# 共用層 conftest 落在 confcutdir 之上不會載入，只靠這三行）。不 re-export
+# `pytest_configure`（既有紀律，見上方 WHY 段——那支是 DEF-02-001 跨版 guard，
+# 語意屬於 bare 呼叫情境，與本機制無關）。
+pytest_xdist_auto_num_workers = _shared.pytest_xdist_auto_num_workers
+pytest_xdist_setupnodes = _shared.pytest_xdist_setupnodes
+pytest_sessionstart = _shared.pytest_sessionstart

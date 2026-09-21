@@ -1698,6 +1698,7 @@ worktree、檔案面互不相交）→ 四方複審 → 收尾單人窗口。主
   （上輪普查＝subprocess-spawn 類讀取站點；in-process 讀取站點是另一個未普查子集合）。
 - **F-SD-01 P3 被推翻（反駁 2/2）**：裸 `-n auto` 指令不經 cpu_budget 廣播、xdist 退回 psutil 實體核 10≠SSOT 9；
   本機 w=10 裸跑 14.59s 反而快於 w=9 的 15.91s，結果集合相同 1949 passed；純文件差異，不處置。
+  ↳ 第十八輪訂正：同一裸跑缺口由 SD／Architect 各自再度命中且反駁 0/2 存活，已以 DEF-200-353 落地修復（見〈第十八輪〉）；本輪「純文件差異」的推翻理由自此不再成立。
 
 **完整性批評者 Q5 判決**：CONVERGED **no**（修完 F-QA-01 並重驗前不得宣告收斂）；FIX_NOW F-QA-01、F-QA-02；DEFER F-ARCH-01、F-ARCH-02。
 三方 PASS 非判斷錯誤而是查證範圍止於被點名的兩支檔，唯 QA 延伸到第三支同樣讀逃生口的檔。Q1 半答：DEF-200-289/290/318/330/331 本輪無人獨立
@@ -1800,3 +1801,113 @@ worktree、檔案面互不相交）→ 四方複審 → 收尾單人窗口。主
   `4615 passed, 222 skipped in 105.10s`；Windows nightly-full `workers=4`／`nodes confirmed=4`／`4662 passed, 175 skipped in 141.61s`；兩平台 smoke 的
   AutoClaude 平台敏感子集（408／407 passed）、perception 單元（48 passed）、integration_gate 皆印 `workers=3／4`＋`nodes confirmed=3／4`。
 - 對照第十六輪同款取證（799820e1：macOS 122.31s／Windows 97.86s）：passed 數逐字相同（4615／4662），秒數為雲端 runner 波動，非本輪改動所致。
+
+## 第十八輪：四方獨立審查「第十七輪是否全部修好」＋掌舵者五問＋三缺陷同輪修復（2026-09-21，mac）
+
+### 背景
+
+掌舵者再問同五問（Q1 帳本多 CPU 問題是否已解／Q2 功能完備且 GitHub CI 用多 CPU／Q3 頭重腳輕與自動偵測平衡負載／Q4 其他可平行處／Q5 是否已收斂），
+要求 Architect／SA／SD／QA 四方（皆 Sonnet 5、唯讀、不共享上下文）確認第十七輪宣稱全部修好；主控（Fable）只裁決、派工、收尾。
+流程：SD 先獨佔安靜機器量測 → Architect／SA／QA 並行唯讀審查 → 每條 F- 發現各派兩位反駁者（讀碼鏡／重現鏡）→ 完整性批評者裁定 →
+主控親自重現 P1 → 實作包 A（主樹串行、單一 Sonnet、只動兩檔）→ 實作包 B（主樹串行、單一 Sonnet、只動三檔）→ 兩位複審（Architect 讀碼／QA 重現）→ 收尾單人窗口。
+共 23 個 Sonnet agent 於審查工作流（4 審查＋18 反駁＋1 批評）＋2 實作＋2 複審。本輪刻意把第十七輪〈誠實劃界〉六項逐項派人釘：
+五列帳本獨立重驗（SA）、in-process 逃生口子集合（QA）、共用路徑雙開競態（QA）、worker_count 重複現算與濾網收斂（Architect）、win32 真機（仍待掌舵者）。
+
+### 四方審查判決（SA PASS、CONVERGED yes；SD／Architect／QA PARTIAL、CONVERGED no；逐字見 scratchpad 四份 `*_R162_evidence.md`）
+
+- **Q1 帳本 16 列逐一獨立重驗（SA，補第十七輪半答）**：DEF-200-274／289／290／291／292／318／326／330／331／333／345～350 逐列讀修復站點＋重跑最小證偽驗證，
+  **16/16 CONFIRMED**（含上輪自陳未驗的 289／290／318／330／331）；`test_cpu_budget` `Ran 41 tests in 0.141s` OK；DEF-200-345 洩漏跑 `Ran 268 tests in 9.814s` OK；
+  DEF-200-350 洩漏跑 `Ran 661 tests in 31.924s` OK；`check_defect_log_crossref.py` rc=0；External_Blocked_Log 對本主題仍有 2 筆未結（DEF-101-703 macOS 排程軌、DEF-200-313 待 Windows 互動驗證），Structural_Debt_Log 零殘留。
+- **Q2 CI 多 CPU（SA／SD／批評者各自 `gh run view` 現查）**：Windows `schedule` run 35600885460（headSha＝本輪 HEAD ad88dbd7、conclusion=success）log 逐字
+  `[cpu_budget] xdist workers=4 source=cpu_budget`／`xdist nodes confirmed=4`；macOS dispatch 35557909740（fc1c1777）`workers=3`／`nodes confirmed=3`。
+  **SA 新發現 F-SA-01（P2）**：macOS nightly-full 的 `schedule` 事件本週（cron 18 7 * * 1）截至查證時**未觸發**，最近一次排程軌成功停在 2026-09-14——DEF-101-703 的「排程視窗成功」對 macOS 側尚未達成（Windows 側已於 12:40 UTC 達成）。
+- **Q3／V6 無頭重腳輕（SD 安靜機器單獨量測）**：根層全套 `real=146.89s`（772% cpu）、rc=0、`worker=9`、`發現 4461 個測試（下限 4371）`，`dispatch_imbalance` 三門檻（1.5x 熱點／1.0x over-share／wall/ideal>1.15）**零命中**；
+  與第十七輪 146.53s 差 0.25%。AutoClaude 全套 `4715 passed, 156 skipped in 31.28s`（750% cpu）、`[cpu_budget] xdist nodes confirmed=9`；單一最重測試 17.44s 佔總時長 55.9%，xdist load-based 下其餘 worker 有工作填補，列觀察不列 FINDING。
+  SDD v0.30 `1949 passed, 8 skipped, 14 subtests passed in 14.67s`（294% cpu）vs 序列 45.73s ⇒ 加速比 **3.09x**（第十七輪 3.06x）。QA 對 `detect_imbalance()` 兩個合成案例（8×10.0＋1×30.0 worker=9 ⇒ heavy 2.4545x 被標；3×20.0 worker=8 單位數<worker 數 ⇒ 0 誤報）皆符設計。
+- **Q4 還有哪裡可平行（SD 量化＋SA＋Architect）**：root-infra leg 十支守門工具合計約 **4.02s**（全 rc=0），`local_ci_gate.py` 7～9 個 gate 序列——**F-SD-02（P3）** 可平行化空間 ≤13%、報酬遞減；跨 leg（AutoClaude∥SDD∥root-infra）並行以 CPU-秒換算仍是**淨負**（root-infra 單獨在 3-worker 下預估 300～400s，遠慢於序列總和約 197s）⇒ 先前「不做雙軌並行」裁決在今天的數字下仍成立；
+  mac 本機 nightly 四 stage 序列 27s＋193s＋40s＋67s＝**327s** vs 理論下界 max＝193s（**F-SA-02，P3**；「刻意不平行以避免超訂閱」一句經兩位反駁者全檔普查**查無實據**，訂正為「目前未平行化、是否刻意不可考」）；
+  `per_leg_budget(n_legs>1)` 全庫從未被以 >1 呼叫（預留死路徑）。Architect 走過八支 workflow 全部 pytest／unittest 站點：除 pg_real／mutmut／perf／chaos 四類有資源互斥理由的刻意序列外**全數平行且 worker 來自 SSOT**。
+- **V7 自動偵測一致性（SD／Architect 各自獨立命中同一件）**：AISDLC_SDD 三個已知入口（ci-gate.sh／pre-push／兩支 nightly-full workflow）皆經廣播正確；但 **裸跑** `cd AISDLC_SDD_v0.30 && pytest tools/fsm_runtime/tests/test_phase_h.py -n auto -v` 解出 **gw0..gw9（10）**——樹內無任何 conftest 掛 cpu_budget，xdist 退回 `os.cpu_count()`；
+  加 `PYTEST_XDIST_AUTO_NUM_WORKERS=9` 才回 9。AutoClaude 側 DEF-200-328 早已用 conftest `pytest_xdist_auto_num_workers` 補上同型缺口，SDD 側未對稱 ⇒ **F-SD-01／F-ARCH-01（P2，批評者合併為一條）**。
+- **V8 in-process 逃生口子集合（QA，第十七輪自陳「未測試、純推測」）**：11 變數（`AUTOSDD_CPU_HEADLESS`／`GITHUB_ACTIONS`／`AUTOSDD_PARALLEL_TESTS_WORKERS`／`PYTEST_XDIST_AUTO_NUM_WORKERS`／`AUTOSDD_PARALLEL_TESTS=0|1`／`AUTOSDD_UNATTENDED`／
+  `AUTOSDD_QUOTA_FANOUT_CAP`／`AUTOSDD_TRACE_DIR`／`AUTOSDD_HANDBACK_DIR`／`AUTOSDD_CONTEXT_FEED_DIR`）× 4 模組（test_cpu_budget／test_run_root_unittests／test_ci_gate_xdist_allowlist／test_pre_push_dispatcher）＋ test_context_budget_guard 4 格＝48 格，**47 格 OK、1 格 FAIL**：
+  `env AUTOSDD_QUOTA_FANOUT_CAP=1` ⇒ `test_context_budget_guard` `Ran 661 tests / FAILED (failures=2, skipped=10)`（`QuotaDecisionEntryIsSingleTest.test_a_notice_band_never_locks_workflow_out` `AssertionError: 2 != 0`；`WindowUsageIsToldTheSameWayByBothOutletsTest.test_a_full_window_reads_as_zero_on_both_sides` `'cap=4' not found in '現在可派 0 個 agent（硬上限 cap=1…'`）⇒ **F-QA-01（P1）**。
+  根因：`quota_gate.policy_env()` 回 `{**parse_env_text(.env), **os.environ}`，DEF-200-350 的 pin 只罩兩個布林逃生口，數值覆寫型政策鍵整族沒罩。
+- **V9 共用路徑雙開競態（QA，第十七輪 C5 只有靜態候選）**：`grep` 取候選後對同模組雙開（`subprocess.Popen` 兩行程各 `.wait()`）實測：`test_reaping_a_sentinel_leaves_an_audit_trace` 以字面 sid `"r83-gc-trace"` ⇒ `endurance_log_path()`（`tempfile.gettempdir()/autosdd_resume_log_{session_id_of(plan)}.jsonl`，只取 plan **檔名**）兩行程算出同一路徑互踩痕跡檔 ⇒ **F-QA-02（P2）**；
+  `Inv5SingleOwnerTest.test_real_launchd_listing_feeds_other_owner_for_session` 字面 sid `"sess-inv5-mac"` 向真 launchd 註冊同名 job，一方 `_cleanup()` 先跑另一方就看不到自己剛註冊的 ⇒ **F-QA-03（P2）**。兩者在正式模組級派工（`parallel_shard.run_parallel()` 同一模組只給一個 worker）下**不會**觸發，只有人手雙開／同機多 session 會。
+- **Architect 延後項覆核**：F-ARCH-02（本輪編號）＝第十七輪已裁 DEFER 的 `worker_count()` 4 次重算（`run_root_unittests.py:534/536/539`＋`parallel_shard.py:499`），無新論據，維持 DEFER；兩份逃生口濾網未收斂（第十七輪 F-ARCH-02）本輪未再立條，留淨減法輪。
+
+### 存活／推翻（9 條發現、每條兩位反駁者；被推翻＝2/2；批評者親自抽驗後裁定）
+
+- **F-QA-01 P1 存活（反駁 0/2）→ fix-now**：批評者第三次獨立重現 `RC=1／Ran 661 tests in 30.264s／FAILED (failures=2, skipped=10)`；主控親自重現 rc=1、同兩支（凍結前）。
+- **F-QA-02 P2 存活（反駁 0/2）→ fix-now**：批評者 6/6 配對未重現、readcode 反駁鏡 30/30 未重現，QA 原始 1/2、reproduce 反駁鏡 1/1 命中 ⇒ 合計約 9 配對 2 次命中，判「時序敏感的真競態」；reproduce 反駁鏡「100% 重現」措辭被批評者訂正為誇大。
+- **F-QA-03 P2 存活（反駁 0/2）→ fix-now**：兩位反駁者皆重現、機制精確（真 launchd 後端＋固定 job 名）。
+- **F-SD-01／F-ARCH-01 P2 存活（反駁 0/2＋1/2）→ 批評者裁 defer、主控改裁 fix-now**：Architect 的 reproduce 反駁鏡指出 xdist 原生就讀 `PYTEST_XDIST_AUTO_NUM_WORKERS`、三個入口都沒事，欲降 P3／document-only；批評者維持 P2（DEF-200-328 先例＝「任何呼叫端」而非「已知入口」拿到 SSOT，修法極便宜）。
+  主控裁決 fix-now：掌舵者 Q3 明文要「自動偵測」最佳化，一棵樹裸跑即偏離 SSOT 就是不一致；代價＝兩支 conftest 皆為 ONBOARDING 表② 指紋輸入，須乾淨 venv 回填一次，由收尾單人窗口承擔。
+- **F-SD-02 P3 存活（反駁 0/2）→ document-only**：兩位反駁者逐項計時確認節省上限 2.3～13%，吃重步驟本身已是 xdist 平行。
+- **F-ARCH-02 P3（本輪編號）→ 批評者改判「非新發現」**：與第十七輪已裁 DEFER 的舊項座標、機制、量級逐字相同，不重新起計。
+- **F-SA-01 P2 存活（反駁 0/2）→ document-only**：DEF-101-703 已在外部阻塞帳本追蹤此排程視窗，非新缺口；等下一個週一排程或人工 dispatch 皆可，本輪只記錄。
+- **F-SA-02 P3 存活（反駁 0/2）→ document-only＋措辭訂正**：數字（327s／193s）成立；「刻意設計避免超訂閱」因果句查無實據，改寫為未證實推論。
+- **批評者 MISSING**：`quota_policy_env.py` 登記的政策鍵 QA 只驗了 `AUTOSDD_QUOTA_FANOUT_CAP` 一個，其餘鍵是否同款洩漏未系統性普查 ⇒ 主控把「全鍵矩陣」寫進實作包 A 的驗收（見下）。
+- **批評者 Q5 判決**：CONVERGED **no**（F-QA-01 P1 現役未修前不得宣告收斂）；FIX_NOW F-QA-01／02／03；DEFER F-SD-01；DOCUMENT_ONLY F-SD-02／F-ARCH-02／F-SA-01／F-SA-02。SD／SA「已收斂」在這三項未涵蓋前不成立，QA 對。
+
+### 主控裁決與實作
+
+- **實作包 A**（主樹串行、單一 Sonnet；只動 `tools/tests/test_context_budget_guard.py`＋`docs/06_quality/CrossPlatform_R86_Guard_Repin_Evidence.md` 新 §F）：
+  - F-QA-01：`setUpModule` 的 pin／pop 改**消費 SSOT** `quota_policy.ENV_SPEC`（全部政策鍵與逃生口的唯一登記表）：`_ENV_SPEC_PIN_ORIGINALS` capture-once、`_pin_sentinel_off()` 對 `ENV_SPEC` 每一鍵 pop（`SENTINEL_OFF_ENV` 仍釘 `"1"`）、`_unpin_sentinel_off()` 統一迴圈冪等還原；三個呼叫站點零改動。
+    巢狀鎖三支（併入 `QuotaDecisionEntryIsSingleTest`）：`test_a_leaked_env_spec_key_is_popped_by_the_module_pin`（`QUOTA_OFF_ENV` 與 `AUTOSDD_QUOTA_FANOUT_CAP` 兩鍵型 `subTest`）／`test_the_unpin_restores_the_captured_env_spec_original`／`test_the_pin_list_is_derived_from_env_spec_not_copied`（pin 集合 ⊇ `ENV_SPEC` 名稱集合，手抄清單即紅）。
+  - F-QA-02／03：四處字面 sid 改 `f"...-{os.getpid()}"`（`r83-gc-trace`／`r83-gc-trace-mute`／`sess-inv5-mac`／Windows 對照 `sess-r119`），對應斷言同步改讀變數。
+  - 行數：**12355 不重釘**。實作包自陳（R86 §F-0）：系統性掃描 11 個 ≥8 行候選段落後**無一段是純史料**（全為判準理由，依第十七輪 A-01 教訓不准搬），故配平改靠「新 docstring 一開始就寫短 WHY＋指針」＋「4 支近重複鎖收斂成 3 支 `subTest`」＋「寬度允許時合併 `with`／`assert` 行」；`git diff --numstat` **45/45** 淨零。主控接受此偏離（搬判準理由才是錯誤）；§F 標題由主控訂正為「配平說明與立案敘事」（無搬出史料，不得寫「搬出的史料（逐字）」）。
+- **實作包 B**（主樹串行、單一 Sonnet；只動 `AISDLC_SDD/conftest.py`＋`AISDLC_SDD/AISDLC_SDD_v0.30/conftest.py`＋新檔 `AISDLC_SDD/scripts/tests/test_conftest_xdist_cpu_budget.py`）：
+  - F-SD-01：共用層 `AISDLC_SDD/conftest.py` 鏡射 AutoClaude/tests/conftest.py 的七個名字（`_CPU_BUDGET_PATH`（monorepo 根）／`_positive_int`／`_cpu_budget_workers(env, path, runner)`／`pytest_xdist_auto_num_workers`（optionalhook；優先序 env 覆寫→缺檔 None→CLI 契約 `--legs 1`→例外 None）／`pytest_sessionstart` 印 `[cpu_budget] xdist workers=N source=…`／`_nodes_confirmed_line`／`pytest_xdist_setupnodes`）；
+    LATEST rootdir conftest 比照 R67-F27 既有模式 re-export 三個 hook 名（Copy-on-Evolve 自動帶到下一版；不 re-export `pytest_configure`）；鎖住 `scripts/tests/`（純函式六案＋接線文字鎖＋三支 subprocess 行為鎖），不動 `tools/tests/` ⇒ 護欄棘輪零影響。
+  - 不動 `pytest.ini`／`addopts`（chaos nightly 刻意序列不得被意外開啟平行）。
+    - 實作包 B 流程訂正（自陳）：先 Edit 後才想到要留修前基線，用 `git show HEAD:<path> > <path>` 暫時覆寫回 HEAD 版跑基線、再以備份覆寫回編輯版並 diff 核對一致——不是禁用 git 動詞，但屬「動了工作樹再還原」的形態，主控記錄在此、下輪任務書明令「基線一律在 scratchpad mirror 上跑」。
+  - 根層 `test_subprocess_encoding_hygiene` 對新鎖檔內 spawn `cpu_budget.py` 的站點首次翻紅，實作包在該行尾加 `# child-encoding-ok: cpu_budget.py 只印一個 ASCII 整數，無 CJK 輸出風險`（該測試認可的行內豁免形態；共用層 conftest 的 spawn 本身帶 `encoding="utf-8"` 不需豁免）。
+
+### 驗證數字（主控親跑，凍結前；[他包回報] 者為子 agent 本場實跑）
+
+- 主控親自重現 F-QA-01（裁決前，HEAD 工作樹）：`env AUTOSDD_QUOTA_FANOUT_CAP=1 (cd tools/tests && python -m unittest test_context_budget_guard -q)` ⇒ `FAIL: test_a_notice_band_never_locks_workflow_out`／`FAIL: test_a_full_window_reads_as_zero_on_both_sides`／`Ran 661 tests in 30.480s`／`FAILED (failures=2, skipped=10)` rc=1。
+- 實作包 A 修後，主控親跑三趟：乾淨 `Ran 662 tests in 30.377s / OK (skipped=10)` rc=0；`env AUTOSDD_QUOTA_FANOUT_CAP=1` ⇒ `Ran 662 tests in 30.499s / OK (skipped=10)` rc=0；`env AUTOSDD_QUOTA_GUARD_OFF=1` ⇒ `Ran 662 tests in 30.473s / OK (skipped=10)` rc=0。
+- 全鍵洩漏矩陣 [他包回報]：`ENV_SPEC` 27 鍵＋第十七輪 14 逃生口（5 個重疊）＝**36 個變數各自洩入整檔，36/36 皆 `Ran 662 tests / OK (skipped=10)` rc=0**（矩陣逐格見 scratchpad `devA_R162_evidence.md`／`matrix_results.txt`）。
+- 巢狀鎖紅綠 [他包回報]（scratchpad mirror，未動 repo 檔）：拿掉「pop 全部 ENV_SPEC」退回只 pop `QUOTA_OFF_ENV` ⇒ `FAILED (failures=1)` `AssertionError: 'AUTOSDD_QUOTA_FANOUT_CAP' unexpectedly found in environ(...)`；拿掉統一還原迴圈退回只還原 `SENTINEL_OFF_ENV` ⇒ `FAILED (failures=2)` `AssertionError: None != '1'`／`None != '3'`；`_ENV_SPEC_PIN_ORIGINALS` 改手抄單鍵 ⇒ `FAILED (failures=1)` `{2 keys} not greater than or equal to {27 keys}`；未破壞的 mirror 整類別 `Ran 8 tests / OK`。
+- 雙開競態探針 [他包回報]（`devA_race_probe.py`，`Popen`×2 各 `.wait()`）：修前 HEAD mirror 對 F-QA-02／F-QA-03 各 3 配對皆 rc 0/0（**未重現**，照實記；根因由讀生產碼確認）；修後 live 檔 F-QA-02 **5/5**、F-QA-03 **5/5** 配對 rc=0/0，`launchctl list` 事後無殘留 `AutoSDD_Sentinel_sess*`／`AutoSDD_SessionResume_sess*`。
+- 行數與棘輪（主控親跑）：`wc -l tools/tests/test_context_budget_guard.py` ⇒ **12355**；`--print-guard-lines` ⇒ `淨額 102842→102842 (+0)`／`逐檔漂移 0 支`；`git diff --numstat` ⇒ `45 45`（.py）、`117 0`（R86 §F 純追加）。鎖模組 `test_adr_xplat001_c1c2_lock` `Ran 192 tests in 11.469s / OK` [他包回報]。
+- ruff [他包回報]：`tools/tests/test_context_budget_guard.py` ⇒ `All checks passed!`；EAW 超寬行存量該檔 5→5、`tools/tests/` 全樹 139→139（`_E501_DEBT_CEILING=139` 未成長）。
+- 實作包 B [他包回報]：修前 `test_phase_h.py -n auto -v` 起 gw0..gw9（**10**）；修後 gw0..gw8（**9**），`-q` 印 `[cpu_budget] xdist workers=9 source=cpu_budget`／`[cpu_budget] xdist nodes confirmed=9`；`env PYTEST_XDIST_AUTO_NUM_WORKERS=2` ⇒ `workers=2 source=env`／`nodes confirmed=2`／gw 2；`-p no:xdist -o addopts=` ⇒ `5 passed in 0.08s` rc=0、`[cpu_budget]`／`INTERNALERROR` 命中 0；
+  新鎖 `10 passed in 1.97s`（`-n 2` 亦 `10 passed`，印 `nodes confirmed=2`、無 `workers=` 行——顯式 `-n` 不觸發 auto hook，符合設計）；紅綠自證：對 repo 檔 GREEN、對拿掉 env 覆寫優先序的 scratchpad mirror RED；三棵 SDD 樹 `scripts/tests` **363 passed, 2 skipped**／v0.30 not-chaos **1949 passed, 8 skipped**／chaos `--collect-only` `34/1991 tests collected (1957 deselected)`；
+  `bash scripts/ci-gate.sh` 全跑：`[cpu_budget] broadcast workers=9 source=cpu_budget` → LATEST 軌 pytest `[cpu_budget] xdist workers=9 source=env`（廣播優先序鏈成立）、逐軌 v0.01 **1475 passed**／v0.30 **1949 passed**／scripts/tests **363 passed**、末行「✅ 本機 CI 閘門全數通過」；根層 `test_platform_neutral_paths`＋`test_subprocess_encoding_hygiene` 補豁免後 `Ran 216 tests / OK`；ruff 三檔 `All checks passed!`。
+- 主控親驗實作包 B：`(cd AISDLC_SDD_v0.30 && env -u PYTEST_XDIST_AUTO_NUM_WORKERS -u AUTOSDD_PARALLEL_TESTS_WORKERS python -m pytest tools/fsm_runtime/tests/test_phase_h.py -n auto -v -p no:cacheprovider)` ⇒ `[cpu_budget] xdist workers=9 source=cpu_budget`／`[cpu_budget] xdist nodes confirmed=9`／`45 passed, 3 skipped in 2.15s`、`[gwN]` 去重計數 **9**；
+  新鎖 `(cd AISDLC_SDD && python -m pytest scripts/tests/test_conftest_xdist_cpu_budget.py -q -p no:cacheprovider)` ⇒ `10 passed in 1.96s`；根層 `test_platform_neutral_paths test_subprocess_encoding_hygiene` ⇒ `OK`；`sync_onboarding_baselines.py --check-snapshot` ⇒ **rc=1**，只有 `[macOS 欄／v030] d33203221d44 → f2ec52e30b33` 與 `[macOS 欄／scripts] e00cd1e2f6da → 46d402e3278c` 兩格 presumed stale（設計內；收尾以乾淨 venv 回填）。
+
+### 複審判決（凍結點＝兩包交件後的工作樹；兩位、各自獨立、唯讀；逐字見 scratchpad `*_R162_review.md`）
+
+- **Architect（讀碼鏡）：APPROVE、零 FINDING**。C1～C10 全 CONFIRMED：pin 集合由 `ENV_SPEC` 動態導出；in-process mutation probe 對 `_pin_sentinel_off`／`_unpin_sentinel_off`／`_ENV_SPEC_PIN_ORIGINALS` 各換回退化版三支鎖各自轉紅（failures=1）、換回修好版轉綠；
+  pid 尾綴確實流入 `endurance_log_path()` 檔名（`session_id_of=plan.stem`）、`_cleanup()` 成對 disarm；§F 量化宣稱逐字核對（45/45、107/0、9/0、新檔 269 行、E501 天花板 139、超寬行 5 支座標 17／1324-1326／2763 前後一致）；`_cpu_budget_workers` 四分支與 AutoClaude 逐字同構、`_CPU_BUDGET_PATH` 兩檔各自解到同一支 SSOT（`--legs 1` 回 9）；
+  **雙載入疑慮以 `--trace-config` 實跑兩種 args 順序證偽**（版本目錄自帶 `pytest.ini` ⇒ rootdir／confcutdir 收斂到該版、共用層結構性不載入，只印一行 `nodes confirmed=`）；`from scripts import sdd_version` 與 ci-gate.sh:337／pre-push:513 官方形態相符；`# child-encoding-ok:` 豁免經確認 `cpu_budget.py` 無保護標記且為 `test_subprocess_encoding_hygiene` 官方接受形態（39 passed）；新檔 `check-attr` eol=lf 零 CR；`copy_on_evolve.sh` 走 `git archive HEAD:<版>` 會帶 conftest 到下一版；v0.01 未被觸碰。
+  C9 建議（非阻塞）：第十七輪「F-SD-01 被推翻」處補交叉引用——收尾單人窗口已補一行。
+- **QA（重現鏡）：APPROVE、零 FINDING**。R1～R12 全 CONFIRMED：乾淨 `Ran 662 tests in 30.652s / OK (skipped=10)`；7 種洩漏（`AUTOSDD_QUOTA_FANOUT_CAP`／`QUOTA_GUARD_OFF`／`QUOTA_CAP_CONVERGE`／`QUOTA_HALT_PCT=1.0`／`RESUME_OFF`／`NET_RATCHET_OFF`／`SENTINEL_OFF`）7/7 `Ran 662 tests / OK`；
+  scratchpad mirror 變異 mutA（pop 退回只 pop `QUOTA_OFF_ENV`）⇒ `test_a_leaked_env_spec_key_is_popped_by_the_module_pin` FAIL、mutB（手抄單鍵 dict）⇒ `test_the_pin_list_is_derived_from_env_spec_not_copied` FAIL，各恰 1 支精準轉紅；雙開 3＋3 配對 6/6 `rc1=0 rc2=0`（`launchctl list` 兩筆 `AutoSDD_` 為本 session 與並行 session 的額度哨兵、plist mtime 23:27／23:31 早於探針 23:34，非殘留）；
+  裸跑 `[cpu_budget] xdist workers=9 source=cpu_budget` gw0..gw8 共 9、覆寫 `source=env` gw 2、`-p no:xdist -o addopts=` 5 passed 零 INTERNALERROR；新鎖序跑與 `-n 2` 皆 10 passed，mirror 拿掉 env 優先僅 `test_env_override_takes_priority_and_skips_runner` 轉紅（`assert None == 4`）；`ci-gate.sh` rc=0「逐軌計數：AISDLC_SDD_v0.01:1475 AISDLC_SDD_v0.30:1949 scripts/tests:363」；
+  根層 `test_platform_neutral_paths test_subprocess_encoding_hygiene test_ci_gate_xdist_allowlist test_cpu_budget` `Ran 266 tests / OK`；`--check-snapshot` rc=1 只兩格；ruff 四檔綠；工作樹與主控敘述逐字一致、複審全程零 repo 寫入。
+
+### 收尾單人窗口
+
+- DEF 號回填：`AISDLC_SDD/conftest.py` 註解佔位「DEF 號待主控補」→ DEF-200-353；v0.30 conftest 與新鎖檔首行同步冠名（EAW 寬度現查 ≤100）。
+- R86 §F 標題訂正為「配平說明與 F-QA-01／02／03 立案敘事（無搬出史料，理由見 F-0）」；第十七輪「F-SD-01 被推翻」處補一行交叉引用（Architect C9）。
+- 帳本：DEF-200-351（F-QA-01，P1）／DEF-200-352（F-QA-02＋03，P2）／DEF-200-353（F-SD-01，P2）三列 fixed（同 commit 立案即結案；各 656／574／689 bytes ≤700）；`check_defect_log_crossref.py` → rc=0（282 筆有效狀態紀錄、19 份掃描目標皆無矛盾；`test_defect_id_reference_integrity` `Ran 11 tests / OK`）；未結存量 36 不動。
+- ONBOARDING §7 表② darwin 欄回填（所有程式／文件編修完成後才跑）：`tools/lib/clean_venv_carrier.py`（樹外乾淨 venv、探針 pgextras=absent、docker=down）→ rc=0；`[cigate-scripts-snapshot:]`（macOS 欄）353→**363**、其餘三格值不變（AutoClaude 4615 passed／222 skipped、v0.01 1475、v0.30 1949）、`snapshot-fingerprints-darwin` 錨 `v030=38c50de2f6c3 scripts=e31c750901b4`（`measured-at=2026-09-21 docker=down pgextras=absent interpreter=autoclaude_cleanvenv_20260921T155006Z/bin@3.11.15`）；乾淨 venv 於 finally 自刪、TEMP 殘留 0；回填後 `--check-snapshot` → rc=0（`✅ §7 表② 指紋相符 macOS 欄`）。
+- 根層全套（主控親跑，commit 前）：**rc=0、real 148s、worker=9、發現 4462 個測試（下限 4371）**，無不均告警（三門檻零命中）；第十七輪為 4461 支＝本輪淨增 1 支（實作包 A 4→3 支鎖收斂後淨 +1）。
+- F-SD-02／F-SA-01／F-SA-02 document-only、F-ARCH-01（上輪舊項）維持 DEFER：皆登記於〈誠實劃界〉，不立新帳本列。
+- 雲端取證：push 後主控手動 dispatch 兩平台 nightly-full 對本輪 HEAD 取證，結果補記於本節末尾（另一筆文件提交，同前兩輪做法）。
+
+### 🔴 誠實劃界（本輪仍未解決，不可宣稱已完備）
+
+- win32 `GetLogicalProcessorInformation` 分支：**仍未在 Windows 真機跑過**（第十六、十七輪同款劃界；四方一致標註）；掌舵者 Windows 親驗指令不變：`python tools/tests/test_cpu_budget.py`／`python tools/lib/cpu_budget.py --legs 1`。
+- F-SA-01：macOS nightly-full **排程軌**本週截至本輪凍結仍未觸發過（Windows 側 09-21 12:40 UTC 已成功）；DEF-101-703 對 macOS 側的「排程視窗成功」條件未達成，留外部阻塞帳本追蹤，下一次排程窗口或人工 dispatch 皆可閉合。
+- F-SD-02／F-SA-02（P3、document-only）：root-infra 十支守門工具（約 4s）與 mac nightly 四 stage 序列（327s vs 193s）是真實但投報比低的可平行化空間；「四 stage 刻意不平行」**不可考**，不得寫成設計決策。`per_leg_budget(n_legs>1)` 仍是預留死路徑。
+- 第十七輪 F-ARCH-01（`worker_count()` 4 次重算）維持 DEFER；兩份逃生口濾網（`_hook_env()` 與 hooks_liveness 內聯版）仍未收斂進 `_platform_helpers.py`，留淨減法輪。
+- 洩漏類缺陷（DEF-200-345～351 家族）**仍無機械守衛**：本輪把 `test_context_budget_guard.py` 的普查擴到 `ENV_SPEC` 全鍵（36 變數），但其他 in-process 讀 `os.environ` 的測試檔（QA 的 4 模組×11 變數矩陣只涵蓋多 CPU 相關子集）沒有同等的全鍵矩陣；「這個函式呼叫是否在消費某逃生口語意」在 AST 層仍無可靠判準，維持觀察。
+- F-QA-02 的修前重現在實作包 A 手上 0/6 配對（批評者 0/6、readcode 反駁鏡 0/30、QA 1/2、reproduce 反駁鏡 1/1）：屬時序敏感真競態，修法靠讀碼確認而非靠可靠重現，「修後 10/10 rc=0」不能單獨當作修好的證據，讀碼（pid 尾綴確實流進 `endurance_log_path()` 檔名）才是。
+- SDD `scripts/tests/` 裸跑 `-n auto` 經共用層 conftest 涵蓋、`AISDLC_SDD_v0.30/` 裸跑經 rootdir conftest 涵蓋；**凍結基線 v0.01 與中間歷史版依 ADR-XPLAT-001 不改**，那些樹裸跑 `-n auto` 仍走 xdist 內建算法（ci-gate.sh 對非 LATEST 本就不開 xdist，實際曝險為 0）。
+- 四方審查流程缺口（批評者點名）：沒有跨角色去重步驤，同一缺陷被 SD／Architect 各編一號（F-SD-01／F-ARCH-01）；F-ARCH-02 亦重複了上輪已裁決項。下輪審查工作流應在反駁前加一步去重。

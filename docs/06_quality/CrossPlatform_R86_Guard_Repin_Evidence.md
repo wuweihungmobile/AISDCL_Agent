@@ -417,3 +417,120 @@ hook 身分」的唯一開關來源——只由 settings.json 的 env 區塊釘�
 （第五輪、第七輪已各真實發生一次）。LATEST 版本號一律現查
 `tools.lib.sdd_latest`，不寫死版號（會漂移）。
 ```
+
+---
+
+## §F 2026-09-21 test_context_budget_guard.py 配平說明與 F-QA-01／02／03 立案敘事（多 CPU 第十八輪實作包 A；**無搬出史料**，理由見 F-0）
+
+### F-0 誠實劃界（先讀這段再讀下面的清單）
+
+本輪任務書要求「新增的每一行都要從同檔搬等量史料到本檔抵銷」。實際執行時，先用
+`tools/tests/`（含本檔自身）逐一比對候選段落，判準只認「**這段是不是判準理由（少了會
+漏什麼／為什麼是這個門檻）**」：是則不准搬，不是則搬。系統性掃描本檔（用一支臨時腳本
+列出所有 ≥8 行的 docstring／註解區塊，過濾掉已含「搬至」「見證據檔」「沿革」「立案敘事」
+「立案原文」字樣的既有已遷移段落，只留候選）之後，逐一人工核對候選（見 F-1 清單），
+**結論：本輪沒有找到任何一段滿足「純史料、非判準理由」而又未曾搬過的既有內容**。這與
+本檔沿革一致——`docs/06_quality/CrossPlatform_R{115,122,127,151}_Guard_Prose_Migration.md`
+與本檔既有 §A~§E 累計搬走的量已經很大，本檔剩下的長段落幾乎都是「拿掉這句話，下一個人
+就會把測試改壞」等級的判準理由（例如 `foreign_trace_growth_problems()` 的 pid 歸因劃界、
+`Fix2ResumeCallScriptPathIsJsSafeTest` 的樣本建構理由、`_isolated_env` 的環境隔離理由）。
+
+因此本輪的行數配平**不是靠搬既有史料**，而是靠三件事同時做到（逐項可由
+`git diff --numstat tools/tests/test_context_budget_guard.py` 反查：本次提交 `45 45`，
+淨額 0）：
+
+1. **新增的 docstring 一律從一開始就寫成本檔既有的「短 WHY ＋ 指到本節」格式**，而不是
+   先寫長版再事後搬——這正是本檔對 E-1／E-2／E-3 等既有案例已經在用的格式，本輪只是
+   對三個新缺陷（F-QA-01／02／03）套用同一格式，沒有在檔案裡先製造一段等下要搬的贅字。
+2. **把「本來會變成兩支近乎重複測試」的部分改寫成參數化（`subTest`）**：F-QA-01 原本
+   會需要 4 支近乎相同的鎖（既有 2 支 `*_quota_off_*` 各自對應 QUOTA_OFF_ENV，加新 2 支
+   `*_fanout_cap_*` 對應 FANOUT_CAP），改成 2 支參數化＋1 支「清單須從 ENV_SPEC 導出」
+   的方法，覆蓋面不變（QUOTA_OFF_ENV 與 FANOUT_CAP 兩種鍵型都各自過一次 pin／unpin），
+   方法數從「原 2＋預期新增 2＝4」收斂成 3。
+3. **同一行的 `with`／`assertX` 呼叫在寬度允許（EAW ≤100）時合併成一行**，把本來會是
+   2～3 行的樣板壓成 1 行——逐處寬度已用
+   `sum(2 if east_asian_width(c) in "WF" else 1 for c in line)` 現查過，見下方 F-2。
+
+### F-1 候選清單與逐一核駁（系統性掃描的原始輸出，供覆核者不必重新掃一次）
+
+用以下腳本列出本檔（修改前，`git show HEAD:...`）所有 ≥8 行、且不含既有遷移標記
+（`搬至`／`見證據檔`／`沿革`／`立案敘事`／`立案原文`）的 docstring／註解區塊：
+
+```python
+import re
+lines = open("tools/tests/test_context_budget_guard.py", encoding="utf-8").read().splitlines()
+# ...（見 R162 devA 任務執行過程；掃描器逐段抓 triple-quote 區間，量長度）
+```
+
+輸出（行號為修改前 `HEAD` 版本座標，長度＝行數）：
+
+```text
+17  8285 8301   自證有牙＋根因的可執行證據（ZSentinelPinOutlivesEveryNestedRunnerTest）
+17  8140 8156   foreign_trace_growth_problems() 的 pid 歸因劃界
+15  270  284    DEF-200-239 mac 孿生：兩支 tick 判準不對稱的理由
+13  8248 8260   test_the_real_production_trace_is_untouched_by_this_module
+11  4063 4073   Fix2ResumeCallScriptPathIsJsSafeTest 樣本建構理由
+9   7586 7594   _quota_cache() 的合成快取形狀
+9   3929 3937   R11X 邊界值 AUTOSDD_UNATTENDED=""
+9   2448 2456   append_log 呼叫端不得寫 at=／event= 的理由
+9   2200 2208   R82／Q2-02 的兩個安全條件
+9   743  751    HOME 底下痕跡檔判準自證
+9   165  173    _write_jsonl() 的合成 model 名稱理由（D27）
+```
+
+逐一核駁（節錄理由，完整推理過程見任務執行 transcript）：
+
+- **8285-8301**：解釋「為什麼用哨兵字串而非 `assertIsNone`」——拿掉這段，下一個人會把
+  斷言改回 `assertIsNone` 而重新踩 M-03（leak_fence）的坑。判準理由，不搬。
+- **8140-8156**：解釋 `foreign_trace_growth_problems()` 的 pid 歸因**劃界**（只涵蓋本
+  行程直接寫入，不涵蓋巢狀測試自己 spawn 的子行程）——這是「少了會漏什麼」的直接說明。
+  判準理由，不搬。
+- **270-284**：解釋為何 `_sentinel_tick`／`_resume_tick` 兩支 tick 的隔離判準**不對稱**
+  （只有前者要多守第二接縫）——拿掉會讓人以為兩支可以用同一套判準守，重新製造假綠。
+  判準理由，不搬。
+- **8248-8260**：解釋為何本條要用「跑一遍另外兩個類別」而非直接呼叫函式——鑑別力說明。
+  判準理由，不搬。
+- **4063-4073**：解釋為何樣本刻意用 `str(PureWindowsPath(...))` 而非裸字面（POSIX 上
+  裸反斜線字串測不出這個 bug 的結構性失明）。判準理由，不搬。
+- **其餘（≤9 行）**：逐一檢視後同屬「這條斷言為什麼存在」等級的說明（安全條件、邊界值
+  選擇理由、呼叫端契約），無一段是單純的歷史敘事。
+
+### F-2 F-QA-01／02／03 的討論、發現經過與寬度現查（本輪新增內容的完整版本，供 §F 節首
+段落內 `_pin_sentinel_off`／`setUpModule` 等處的短版指標句展開閱讀）
+
+**F-QA-01 發現經過**：四方複審對第十七輪 DEF-200-350 修法（`_pin_sentinel_off`／
+`_unpin_sentinel_off` 只特化處理 `AUTOSDD_QUOTA_GUARD_OFF` 一個逃生口）覆核時，QA 角色
+以 `env AUTOSDD_QUOTA_FANOUT_CAP=1` 重跑整檔，發現 2 支測試假紅：
+`QuotaDecisionEntryIsSingleTest.test_a_notice_band_never_locks_workflow_out`
+（`AssertionError: 2 != 0`）與
+`WindowUsageIsToldTheSameWayByBothOutletsTest.test_a_full_window_reads_as_zero_on_both_sides`
+（`'cap=4' not found in '現在可派 0 個 agent（硬上限 cap=1…'`）。根因：`quota_gate.
+policy_env()` 回 `{**parse_env_text(...), **os.environ}`，任何呼叫端 shell 帶的政策鍵
+覆寫都會被 in-process 直呼 `_gate()`／`pace_report()` 的測試吃到，而上一輪的 pin／unpin
+只認兩個布林逃生口（`QUOTA_OFF_ENV`／`SENTINEL_OFF_ENV`），完全沒涵蓋數值覆寫型政策鍵。
+修法改成對 `quota_policy.ENV_SPEC`（全部政策鍵與逃生口的唯一登記表）逐一 capture-once
+＋pop，`SENTINEL_OFF_ENV` 仍照舊釘成 `"1"`，其餘全部 pop；module cleanup 冪等還原。
+
+**F-QA-02 發現經過**：`SentinelReapVerdictTest._apply_once(sid)` 以字面 sid（如
+`"r83-gc-trace"`）組出 `plan = tmp / f"autosdd_resume_plan_{sid}.md"`（`tmp` 是每個測試
+自己的 `mkdtemp()`，本身已隔離），但 `planner.endurance_log_path(plan)` 回傳的是
+`Path(tempfile.gettempdir()) / f"autosdd_resume_log_{guard.session_id_of(plan)}.jsonl"
+`——`session_id_of()` 只取**檔名**（`plan.stem`，清洗後即
+`autosdd_resume_plan_r83-gc-trace`），與 `plan` 所在的目錄無關。因此兩個獨立行程即使
+`tmp` 各自不同，只要 `sid` 字面相同，`endurance_log_path()` 就會算出同一條 system
+tempdir 路徑，互踩彼此的稽核痕跡檔。修法：`sid` 帶 `os.getpid()` 尾綴。
+
+**F-QA-03 發現經過**：`Inv5SingleOwnerTest.test_real_launchd_listing_feeds_other_owner_
+for_session`（及 Windows 對照 `test_real_get_scheduledtask_listing_feeds_other_owner_
+for_session`）以字面 sid（`"sess-inv5-mac"`／`"sess-r119"`）向**真排程器**註冊工作名
+`AutoSDD_Sentinel_<sid>`／`AutoSDD_SessionResume_<sid>`。人手雙開同模組測試時，兩個獨立
+行程用同一組工作名，一方的 `_cleanup()`（`backend.disarm(...)`）先跑，另一方就看不到
+自己剛註冊的工作，導致 `assertIn(other_task, real_jobs)` 或後續斷言失敗。修法：sid 同樣
+帶 `os.getpid()` 尾綴，兩支測試（mac／Windows 對照）一併改。
+
+**寬度現查**（East Asian Width 加權，門檻 100，與 `tools/ruff.toml` 的
+`line-length = 100` 同一把尺；量法見 `tools/tests/test_subprocess_encoding_hygiene.py`
+的 `_overlong_line_count()`）：本次提交前 `tools/tests/test_context_budget_guard.py`
+自身超寬行數＝5（`HEAD` 座標 17、1324-1326、2763，皆非本輪觸碰範圍），本次提交後仍為
+5——本輪新增／修改的每一行皆已逐行現查 EAW 寬度 ≤100，`tools/tests/` 全樹超寬行總數
+維持在棘輪上限 `_E501_DEBT_CEILING = 139`（現查值＝139，未超過、未新增）。

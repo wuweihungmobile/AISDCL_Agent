@@ -15,7 +15,9 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -127,3 +129,108 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):  # noqa: ARG0
         )
         for node_id in posix_ids:
             terminalreporter.write_line(f"  - {node_id}")
+
+
+# ──────────────────────────────────────────────────────────────
+# DEF-200-353／F-SD-01（多 CPU 第十八輪；對稱 AutoClaude/tests/conftest.py
+# B1／DEF-200-328 同型缺口）：接根層 `tools/lib/cpu_budget.py` 的實體核心預算。
+# ──────────────────────────────────────────────────────────────
+# 立案：裸跑 `-n auto`（不經 `scripts/ci-gate.sh`／pre-push 的 cpu_budget 廣播）
+# 時 xdist 退回內建演算法（psutil 缺席 → `os.sched_getaffinity` 於 mac 缺席 →
+# `os.cpu_count()` 邏輯核），與 SSOT `cpu_budget.py`（互動環境＝實體核 -1）不一致
+# （實測：`test_phase_h.py -n auto` 起 gw0..gw9 共 10 個，預算應為 9 個）。本節
+# 鏡射 AutoClaude/tests/conftest.py 的七個名字與行為（見該檔同名函式/hook 的完整
+# docstring），唯一差異是 `_CPU_BUDGET_PATH`——本檔位於 `AISDLC_SDD/`，其上一層
+# 才是 monorepo 根。只走 CLI 契約（subprocess 呼叫 `cpu_budget.py --legs 1`），
+# 不 import 根層 `tools/`：套件可能被獨立安裝、`path.exists()` 為 False 時必須
+# 靜默退回 xdist 預設。
+_CPU_BUDGET_PATH = Path(__file__).resolve().parent.parent / "tools" / "lib" / "cpu_budget.py"
+
+#: `pytest_xdist_auto_num_workers` 的量測結果來源，供 `pytest_sessionstart` 印給人看。
+_CPU_BUDGET_SOURCE_NOTE: str | None = None
+
+
+def _positive_int(value: str | None) -> int | None:
+    """把字串解析成正整數；空值／非數字／非正數一律回 None（純函式）。"""
+    if not value:
+        return None
+    try:
+        n = int(value.strip())
+    except (TypeError, ValueError):
+        return None
+    return n if n > 0 else None
+
+
+def _cpu_budget_workers(env, path: Path, runner) -> int | None:
+    """純函式：決定 xdist `-n auto` 的 worker 數。優先序（同 AutoClaude/tests/
+    conftest.py 同名函式）：① `PYTEST_XDIST_AUTO_NUM_WORKERS` 為正整數 ⇒ 直接
+    採用（尊重廣播／手動覆寫）；② `path` 不存在 ⇒ None（fail-open）；③ 呼叫
+    `runner`（簽章比照 `subprocess.run`）取得 `cpu_budget.py --legs 1` 的
+    stdout，為正整數才採用；④ 任何例外 ⇒ None（fail-open，本函式失敗不得弄垮
+    整個 pytest session）。
+    """
+    override = _positive_int(env.get("PYTEST_XDIST_AUTO_NUM_WORKERS"))
+    if override is not None:
+        return override
+    if not path.exists():
+        return None
+    try:
+        result = runner(
+            [sys.executable, str(path), "--legs", "1"],
+            capture_output=True, text=True, encoding="utf-8", timeout=30,
+        )
+        return _positive_int(result.stdout)
+    except Exception:  # noqa: BLE001 — fail-open，見上方 ④
+        return None
+
+
+@pytest.hookimpl(optionalhook=True)  # 🔴 必須有：`-p no:xdist` 下 hookspec 不存在，
+# 缺了會讓 pluggy 對未知 hookimpl 拋 PluginValidationError ⇒ INTERNALERROR。
+def pytest_xdist_auto_num_workers(config):  # noqa: ARG001
+    """xdist newhook（`firstresult=True`，僅 `-n auto` 時被呼叫）：回傳
+    `cpu_budget.py` 算出的 worker 數；回傳 `None` 即交還 xdist 內建預設。
+    """
+    global _CPU_BUDGET_SOURCE_NOTE
+    workers = _cpu_budget_workers(os.environ, _CPU_BUDGET_PATH, subprocess.run)
+    if _positive_int(os.environ.get("PYTEST_XDIST_AUTO_NUM_WORKERS")) is not None:
+        source = "env"
+    elif workers is not None:
+        source = "cpu_budget"
+    else:
+        source = "xdist-default"
+    shown = workers if workers is not None else "<xdist-default>"
+    _CPU_BUDGET_SOURCE_NOTE = f"[cpu_budget] xdist workers={shown} source={source}"
+    return workers
+
+
+def pytest_sessionstart(session):
+    """controller 端印一行 `[cpu_budget] xdist workers=<N> source=<...>`；只在
+    controller 端（非 xdist worker）且 xdist 外掛確實已載入、且上面那支 hook
+    確實被呼叫過（`-n auto`）時才印，避免對 `-p no:xdist` 或顯式 `-n <N>` 誤印。
+    """
+    config = session.config
+    if hasattr(config, "workerinput"):
+        return  # worker 端：這件事只在 controller 有意義
+    if not config.pluginmanager.hasplugin("xdist"):
+        return  # -p no:xdist：本 hook 不會被 xdist 呼叫，印了也是誤導
+    if _CPU_BUDGET_SOURCE_NOTE is None:
+        return  # 非 `-n auto`（例如顯式 `-n 3`）：xdist 未呼叫上面那支 hook
+    terminalreporter = config.pluginmanager.getplugin("terminalreporter")
+    if terminalreporter is not None:
+        terminalreporter.write_line(_CPU_BUDGET_SOURCE_NOTE)
+
+
+def _nodes_confirmed_line(n: int) -> str:
+    """純函式：組出 xdist controller 端『node 數已確認』的一行輸出字串。"""
+    return f"[cpu_budget] xdist nodes confirmed={n}"
+
+
+# 🔴 `optionalhook=True` 理由同上方 `pytest_xdist_auto_num_workers`。
+@pytest.hookimpl(optionalhook=True)
+def pytest_xdist_setupnodes(config, specs):
+    """controller 端印一行 `[cpu_budget] xdist nodes confirmed=<N>`（xdist 在建立
+    任何 worker node 之前呼叫，天生只在 controller 端存在）。
+    """
+    terminalreporter = config.pluginmanager.getplugin("terminalreporter")
+    if terminalreporter is not None:
+        terminalreporter.write_line(_nodes_confirmed_line(len(specs)))
