@@ -75,10 +75,15 @@ def setUpModule() -> None:  # noqa: N802 — unittest 的固定名稱
     🔴 R84／SA84-01：還原動作**不**掛 `addModuleCleanup`（巢狀 runner 會觸發它提前 flush，
     pin 當場消失且後續測試失去保護）；捕捉原值只做一次（`_SENTINEL_PIN_CAPTURED`）。
     完整立案敘事見證據檔 §I-17。
+    🔴 DEF-200-350：同一把 pin 一併罩住 `AUTOSDD_QUOTA_GUARD_OFF`——呼叫端 shell 若帶
+    這個逃生口，`_gate()` in-process 呼叫會讀到 `qg.QUOTA_OFF_ENV` 而整條放行（`decide`
+    0 次），`_isolated_env()` 只濾 subprocess 半邊的環境，對本行程直呼 `_gate()` 的測試
+    不生效，兩者必須同一對函式一起管。
     """
-    global _SENTINEL_PIN_ORIGINAL, _SENTINEL_PIN_CAPTURED
+    global _SENTINEL_PIN_ORIGINAL, _SENTINEL_PIN_CAPTURED, _QUOTA_PIN_ORIGINAL
     if not _SENTINEL_PIN_CAPTURED:
         _SENTINEL_PIN_ORIGINAL = os.environ.get(guard.SENTINEL_OFF_ENV)
+        _QUOTA_PIN_ORIGINAL = os.environ.get(qg.QUOTA_OFF_ENV)
         _SENTINEL_PIN_CAPTURED = True
     _pin_sentinel_off()
     unittest.addModuleCleanup(_unpin_sentinel_off)
@@ -87,11 +92,17 @@ def setUpModule() -> None:  # noqa: N802 — unittest 的固定名稱
 #: `setUpModule` 進來之前 `AUTOSDD_SENTINEL_OFF` 的值（只捕捉一次，理由見該函式）。
 _SENTINEL_PIN_ORIGINAL: str | None = None
 _SENTINEL_PIN_CAPTURED = False
+#: `setUpModule` 進來之前 `AUTOSDD_QUOTA_GUARD_OFF` 的值（DEF-200-350，捕捉時機同上）。
+_QUOTA_PIN_ORIGINAL: str | None = None
 
 
 def _pin_sentinel_off() -> None:
-    """釘上「本行程一律不准武裝真排程器」。冪等 ⇒ 補釘幾次都不會改變語意。"""
+    """釘上「本行程一律不准武裝真排程器」，且一併拔掉洩漏進來的額度逃生口（DEF-200-350）。
+
+    冪等 ⇒ 補釘幾次都不會改變語意。
+    """
     os.environ[guard.SENTINEL_OFF_ENV] = "1"
+    os.environ.pop(qg.QUOTA_OFF_ENV, None)
 
 
 def _unpin_sentinel_off() -> None:
@@ -99,11 +110,15 @@ def _unpin_sentinel_off() -> None:
 
     冪等是必要條件不是客氣——`_run_nested_suite` 會在巢狀 runner 沖掉堆疊之後把本函式
     重新掛回去，於是它有可能被登記兩次；讀 `_SENTINEL_PIN_ORIGINAL`（而不是閉包裡的
-    某個當下值）讓第二次執行與第一次結果完全相同。
+    某個當下值）讓第二次執行與第一次結果完全相同。`_QUOTA_PIN_ORIGINAL` 走同一套邏輯
+    （DEF-200-350）：兩個變數各自獨立還原，互不依賴對方是否為 `None`。
     """
     os.environ.pop(guard.SENTINEL_OFF_ENV, None)
     if _SENTINEL_PIN_ORIGINAL is not None:
         os.environ[guard.SENTINEL_OFF_ENV] = _SENTINEL_PIN_ORIGINAL
+    os.environ.pop(qg.QUOTA_OFF_ENV, None)
+    if _QUOTA_PIN_ORIGINAL is not None:
+        os.environ[qg.QUOTA_OFF_ENV] = _QUOTA_PIN_ORIGINAL
 
 
 def _run_nested_suite(suite: unittest.TestSuite) -> unittest.TestResult:
@@ -212,12 +227,9 @@ def _sentinel_off_lifted():
 def _isolate_trace_dir(case: unittest.TestCase, stack: contextlib.ExitStack) -> None:
     """把 `AUTOSDD_TRACE_DIR` 導到本 case 專屬 tmpdir（除非呼叫端已顯式指定），塞進 `stack`。
 
-    DEF-200-239 測試污染止血：`_resume_tick` 走到 no_progress／exhausted 停止次態時，
-    `relay_machine.settle_window` 會呼叫 `endurance_env.record_unattended_outcome(...)` 往
-    `endurance_env.trace_dir()` 落一行持久結局；若沒隔離，`trace_dir()` 解析到開發者真實
-    `~/.autosdd/traces` ⇒ 每跑一次這類測試就往真 home 寫一行假結局（2026-09-06 全模組
-    實測 7 支洩漏、cursor 殘留值 45）。防禦性隔離讓「新 tick 測試忘了隔離」不再靜默污染；
-    顯式設了 `TRACE_DIR_ENV` 的呼叫端（讀回結局檔做斷言者）維持不變。"""
+    DEF-200-239 測試污染止血：未隔離時 `_resume_tick` 停止次態會經 `settle_window` →
+    `record_unattended_outcome` 往開發者真實 `~/.autosdd/traces` 寫一行假結局；實測數字
+    已搬至 R86 護欄重釘證據檔 §E。顯式設了 `TRACE_DIR_ENV` 的呼叫端維持不變。"""
     if not os.environ.get(endurance_env.TRACE_DIR_ENV):
         stack.enter_context(unittest.mock.patch.dict(
             os.environ, {endurance_env.TRACE_DIR_ENV: str(_tmpdir(case, "trace-iso-"))}))
@@ -998,16 +1010,10 @@ class SettingsChainTest(unittest.TestCase):
     def test_root_and_sdd_latest_settings_require_hook_identity_for_telemetry_writeback(
         self,
     ) -> None:
-        """DEF-200-275 第七輪 D28（SA-R7-01）：根層與 AISDLC_SDD LATEST 兩份 settings.json
-        的 `env` 都必須釘 `SDD_TELEMETRY_WRITEBACK_REQUIRES_HOOK="1"`。
-
-        為何重要：這是 fsm_runtime._telemetry_writeback_allowed 判定「session 是否要求
-        hook 身分」的唯一開關來源——只由 settings.json 的 env 區塊釘，模型碰不到（同族
-        `AUTOSDD_GIT_GUARD_OFF` 逃生口的反面）。少釘任一份，該份 settings 對應的 session
-        （根層 monorepo session／以 AISDLC_SDD LATEST 版本目錄為 cwd 的 session）就完全
-        沒有這道守衛，pytest 外的 ad-hoc FSM 驅動仍會漏加 opt-out 前綴污染 governance/rules
-        （第五輪、第七輪已各真實發生一次）。LATEST 版本號一律現查
-        `tools.lib.sdd_latest`，不寫死版號（會漂移）。
+        """DEF-200-275 第七輪 D28（SA-R7-01）：根層與 AISDLC_SDD LATEST 兩份 settings.json 的
+        `env` 都必須釘 `SDD_TELEMETRY_WRITEBACK_REQUIRES_HOOK="1"`——fsm_runtime 判「session 是否
+        要求 hook 身分」的唯一開關，模型碰不到；少釘任一份，該 session 對 ad-hoc FSM 驅動污染
+        governance/rules 就零守衛。LATEST 版本號現查 `tools.lib.sdd_latest`；原文存查 R86 §E E-6。
         """
         root_settings = _REPO_ROOT / ".claude" / "settings.json"
         root_data = json.loads(root_settings.read_text(encoding="utf-8-sig"))
@@ -3977,16 +3983,9 @@ class Inv1UnattendedZeroPaidProbeTest(unittest.TestCase):
 
 
 class Inv1ScheduledTickMarksUnattendedTest(unittest.TestCase):
-    """M-01（DEF-200-272）：排程器叫起的 tick 行程結構上沒有 `AUTOSDD_UNATTENDED`
-    （launchd plist EnvironmentVariables 只帶 PATH／schtasks -Once 同）⇒ INV1 零付費探針
-    （`probe_quota` 的 `os.environ.get(UNATTENDED_ENV)` 分支）與 INV4 `no_progress_limit()`
-    夾 1 在**真喚醒路徑**上是死碼：免費端點答不出時 fall-through 到付費 `claude -p`（≈31,847
-    tokens）、no_progress 讀 env override 而非夾 1。修法＝`main()` 分派 tick 模式前把旗標
-    補成**缺席才填**（`setdefault`；互動 `--probe-quota` 不經此分支 ⇒ 射程不外溢）。
-
-    紅綠自證：修前 `main()` 不設 ⇒ dispatch 當下 stub 看到 `None`（紅）；接上後看到 `"1"`（綠）。
-    這一支補的正是既有 `Inv1UnattendedZeroPaidProbeTest` 自己 `patch.dict` 塞旗標所**假設、
-    但真路徑沒人設**的那一格。
+    """M-01（DEF-200-272）：排程器叫起的 tick 行程結構上沒有 `AUTOSDD_UNATTENDED` ⇒ INV1／INV4
+    在**真喚醒路徑**上是死碼。修法＝`main()` 分派 tick 模式前 `setdefault` 補旗標。紅綠自證：
+    修前 stub 看到 `None`（紅）；接上後看到 `"1"`（綠）。機制細節已搬至 R86 護欄重釘證據檔 §E。
     """
 
     def _env_seen_at_dispatch(self, argv, attr):
@@ -4463,17 +4462,8 @@ class Inv5SingleOwnerTest(unittest.TestCase):
         self.assertIn("sentinel_single_owner_deferred", events)
 
     def test_real_get_scheduledtask_listing_feeds_other_owner_for_session(self) -> None:
-        """[WINDOWS-NATIVE-ONLY]（M-19）：本檔 INV5 所有測試此前只餵過
-        `_StatefulFakeSchedulerBackend.list_jobs()` 或裸 Python list 字面——「雙後端」
-        目前只是雙後端**注入**（`_both_backends()` 換真的 class 名做主體，但 list_jobs
-        本身仍是記憶體集合），從沒有真的用 Windows 真機 `Get-ScheduledTask` 的輸出格式
-        餵過 `other_owner_for_session`。本測試在真 Windows 上註冊一支真排程工作，
-        用 `SchtasksBackend.list_jobs()`（真跑 `Get-ScheduledTask`）取得真實輸出，
-        餵進 `other_owner_for_session` 驗證真機列舉行為正確辨識同 session 的另一支
-        排程。非 Windows 或這台機器現查不到 schtasks ⇒ 安全跳過（見範本
-        `test_no_ghost_t_r95_task_survives_a_real_windows_scheduler_query`）；在 mac 上
-        這支測試只會顯示 skipped，之後 windows-latest CI 跑到時才會第一次真的驗證。
-        """
+        """[WINDOWS-NATIVE-ONLY]（M-19）：真 Windows `Get-ScheduledTask` 串接測試，
+        背景敘事已搬至 R86 護欄重釘證據檔 §E。"""
         if sys.platform != "win32":
             self.skipTest(
                 "[WINDOWS-NATIVE-ONLY] Get-ScheduledTask 只在 Windows 成立（M-19 立案平台）")
@@ -4508,17 +4498,8 @@ class Inv5SingleOwnerTest(unittest.TestCase):
                          " 沒有正確辨識同 session 的另一支排程")
 
     def test_real_launchd_listing_feeds_other_owner_for_session(self) -> None:
-        """[MAC-NATIVE-ONLY]（規則 5／M-19 的 macOS 對照）：上一支測試（M-19）在真
-        Windows 上補了 `SchtasksBackend.list_jobs()` 的真實串接測試，但 macOS `launchd`
-        側當時完全沒有對等的真實串接測試——只有邏輯正確、平台會 skip 的測試（見
-        `docs/06_quality/WakeChain_IronLaws_Verification.md` 規則 5／規則 7 小節與
-        第四節「待辦」第 6 項登記的雙平台不對稱破洞）。
-        本測試在真 macOS 上用 `LaunchdBackend` 真的 `arm()` 一支排程工作（真跑
-        `launchctl bootstrap`），再真的呼叫 `list_jobs()`（真跑 `launchctl list`）取得真實
-        輸出，餵進 `other_owner_for_session` 驗證真機列舉行為正確辨識同 session 的另一支
-        排程。與上一支不同：這支測試**在這台 mac 開發機上真的會執行並通過**，不是
-        「邏輯正確、平台會 skip」——這正是它存在的價值：macOS 這一側終於有真機驗證。
-        """
+        """[MAC-NATIVE-ONLY]（規則 5／M-19 的 macOS 對照）：真 `launchd` 串接測試，
+        背景敘事已搬至 R86 護欄重釘證據檔 §E。"""
         if sys.platform != "darwin":
             self.skipTest("[MAC-NATIVE-ONLY] launchd 只在 macOS 成立")
         sid = "sess-inv5-mac"
@@ -5318,11 +5299,9 @@ class RearmAndSentinelRearmedBranchesAlsoAlertLoudOnFailureTest(unittest.TestCas
 
 class DisarmClearsTheArmedStampTest(unittest.TestCase):
     """ADR-XPLAT-014 C5'／C10'（DEF-200-269 併修）：拆掉一支哨兵**必須同步清 armed stamp**。
-
-    立案（2026-09-05 18:12～18:41 實跡）：job 被拆、stamp（15:11）仍在 ⇒ 互動 session 的
-    `maybe_arm()` 永遠走 `latched`、`--pace` 只印紅字、25 分鐘零自動續跑。三條會拆哨兵的臂
-    （`_sentinel_tick` disarm／escalate、`_abort_and_unregister`、`quota_back_no_resume`）
-    全部經 `planner._schtasks_remove()` 這一個漏斗 ⇒ 清 stamp 落在漏斗，一次證完。
+    三條會拆哨兵的臂（`_sentinel_tick` disarm／escalate、`_abort_and_unregister`、
+    `quota_back_no_resume`）全部經 `planner._schtasks_remove()` 這一個漏斗 ⇒ 清 stamp
+    落在漏斗，一次證完。立案實跡已搬至 R86 護欄重釘證據檔 §E。
     """
 
     def test_removing_a_sentinel_task_clears_its_armed_stamp(self) -> None:
@@ -8905,6 +8884,27 @@ class QuotaDecisionEntryIsSingleTest(unittest.TestCase):
         """對照組：真的收斂到 prepare 帶時仍然擋——只鎖「不亂擋」會做出一道空轉的閘。"""
         _quota_cache(self.tmp, 88.0).replace(qg.quota_cache_path())
         self.assertEqual(_gate(self._payload("Workflow")), 2)
+
+    def test_a_leaked_quota_off_is_popped_by_the_module_pin(self) -> None:
+        """巢狀鎖（DEF-200-350）：拿掉 `_pin_sentinel_off()` 內對 `QUOTA_OFF_ENV` 的
+        `pop`，本條會紅——它就是擋住「呼叫端 shell 帶著 `AUTOSDD_QUOTA_GUARD_OFF=1`
+        時整個模組的 `_gate()` 全數靜默放行」的那一行。
+        """
+        with unittest.mock.patch.dict(os.environ, {qg.QUOTA_OFF_ENV: "1"}):
+            _pin_sentinel_off()
+            self.assertNotIn(qg.QUOTA_OFF_ENV, os.environ,
+                             "pin 沒有拔掉洩漏進來的額度逃生口 ⇒ 本模組其餘測試"
+                             "會在帶 AUTOSDD_QUOTA_GUARD_OFF=1 的 shell 下整批假紅")
+
+    def test_the_unpin_restores_the_captured_quota_off_original(self) -> None:
+        """巢狀鎖（DEF-200-350）的另一半：拿掉 `_unpin_sentinel_off()` 的還原邏輯，
+        本條會紅——收尾必須把 `setUpModule` 捕捉到的原值原樣還給呼叫端 shell。
+        """
+        with unittest.mock.patch.dict(os.environ), \
+             unittest.mock.patch.object(sys.modules[__name__], "_QUOTA_PIN_ORIGINAL", "1"):
+            _unpin_sentinel_off()
+            self.assertEqual(os.environ.get(qg.QUOTA_OFF_ENV), "1",
+                             "還原沒有把捕捉到的原值寫回 ⇒ 呼叫端 shell 的逃生口被本模組吃掉")
 
 
 class QuotaMessagesNameTheAxisTest(unittest.TestCase):

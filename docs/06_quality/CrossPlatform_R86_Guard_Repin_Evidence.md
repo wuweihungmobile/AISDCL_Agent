@@ -290,3 +290,130 @@ R85 P2：兌現款(12) 到期義務，單輪淨額上限 5400→3200，並改為
 註冊集合……註冊面不是本檔的職責）是理由，仍逐字留在原檔；上面這段是支撐該理由的
 **兩筆具體實測轉紅座標**，屬於量測史，故搬出。
 
+## §E 2026-09-21 自 test_context_budget_guard.py 搬出的實測紀錄（逐字）
+
+護欄行數棘輪凍結值維持 12355、本輪不重釘（見 `tools/tests/test_adr_xplat001_c1c2_lock.py` 的
+`_FROZEN_GUARD_LINES["test_context_budget_guard.py"]`）。DEF-200-350（in-process 呼叫端
+洩漏 `AUTOSDD_QUOTA_GUARD_OFF` 造成 23 支假紅）的修法在 `setUpModule`／`_pin_sentinel_off`／
+`_unpin_sentinel_off` 新增巢狀鎖，行數需與六個既有 docstring 的搬出等量抵銷。以下六段逐字
+搬出；原處改為精簡改寫並指回本節（`已搬至 R86 護欄重釘證據檔 §E`），**不是**單純刪去附加句
+——凡是原句字面在改寫後的新文字裡已找不到逐字對應者，皆完整記在本節，以此為「一字未刪」
+的落實方式。
+
+### E-1 `test_real_get_scheduledtask_listing_feeds_other_owner_for_session`（M-19，[WINDOWS-NATIVE-ONLY]）
+
+**來源位置**：`Inv5SingleOwnerTest`（原檔 INV5 段）內，`test_real_get_
+scheduledtask_listing_feeds_other_owner_for_session` 方法 docstring 全文：
+
+```text
+[WINDOWS-NATIVE-ONLY]（M-19）：本檔 INV5 所有測試此前只餵過
+`_StatefulFakeSchedulerBackend.list_jobs()` 或裸 Python list 字面——「雙後端」
+目前只是雙後端**注入**（`_both_backends()` 換真的 class 名做主體，但 list_jobs
+本身仍是記憶體集合），從沒有真的用 Windows 真機 `Get-ScheduledTask` 的輸出格式
+餵過 `other_owner_for_session`。本測試在真 Windows 上註冊一支真排程工作，
+用 `SchtasksBackend.list_jobs()`（真跑 `Get-ScheduledTask`）取得真實輸出，
+餵進 `other_owner_for_session` 驗證真機列舉行為正確辨識同 session 的另一支
+排程。非 Windows 或這台機器現查不到 schtasks ⇒ 安全跳過（見範本
+`test_no_ghost_t_r95_task_survives_a_real_windows_scheduler_query`）；在 mac 上
+這支測試只會顯示 skipped，之後 windows-latest CI 跑到時才會第一次真的驗證。
+```
+
+判準本體（真機註冊、`list_jobs()` 現查、`other_owner_for_session` 斷言）未動，仍在原檔
+測試方法本體內；skip 條件（非 Windows／查不到 schtasks）的判準理由同時也逐字保留在
+`self.skipTest(...)` 呼叫的字串參數裡（程式碼本身即是理由的另一份記載），故上面這段
+純敘事的部分才是這次搬出的對象。
+
+### E-2 `test_real_launchd_listing_feeds_other_owner_for_session`（規則 5／M-19 的 macOS 對照，[MAC-NATIVE-ONLY]）
+
+**來源位置**：同一類別 `Inv5SingleOwnerTest` 內，`test_real_launchd_listing_feeds_other_owner_for_session` 方法
+docstring 全文：
+
+```text
+[MAC-NATIVE-ONLY]（規則 5／M-19 的 macOS 對照）：上一支測試（M-19）在真
+Windows 上補了 `SchtasksBackend.list_jobs()` 的真實串接測試，但 macOS `launchd`
+側當時完全沒有對等的真實串接測試——只有邏輯正確、平台會 skip 的測試（見
+`docs/06_quality/WakeChain_IronLaws_Verification.md` 規則 5／規則 7 小節與
+第四節「待辦」第 6 項登記的雙平台不對稱破洞）。
+本測試在真 macOS 上用 `LaunchdBackend` 真的 `arm()` 一支排程工作（真跑
+`launchctl bootstrap`），再真的呼叫 `list_jobs()`（真跑 `launchctl list`）取得真實
+輸出，餵進 `other_owner_for_session` 驗證真機列舉行為正確辨識同 session 的另一支
+排程。與上一支不同：這支測試**在這台 mac 開發機上真的會執行並通過**，不是
+「邏輯正確、平台會 skip」——這正是它存在的價值：macOS 這一側終於有真機驗證。
+```
+
+判準本體同 E-1 劃界：真機 `arm()`／`list_jobs()`／`other_owner_for_session` 斷言留在原檔；
+skip 條件字串同樣留在 `self.skipTest(...)` 裡。
+
+### E-3 `Inv1ScheduledTickMarksUnattendedTest`（M-01／DEF-200-272）
+
+**來源位置**：類別 docstring 全文（修前）：
+
+```text
+M-01（DEF-200-272）：排程器叫起的 tick 行程結構上沒有 `AUTOSDD_UNATTENDED`
+（launchd plist EnvironmentVariables 只帶 PATH／schtasks -Once 同）⇒ INV1 零付費探針
+（`probe_quota` 的 `os.environ.get(UNATTENDED_ENV)` 分支）與 INV4 `no_progress_limit()`
+夾 1 在**真喚醒路徑**上是死碼：免費端點答不出時 fall-through 到付費 `claude -p`（≈31,847
+tokens）、no_progress 讀 env override 而非夾 1。修法＝`main()` 分派 tick 模式前把旗標
+補成**缺席才填**（`setdefault`；互動 `--probe-quota` 不經此分支 ⇒ 射程不外溢）。
+
+紅綠自證：修前 `main()` 不設 ⇒ dispatch 當下 stub 看到 `None`（紅）；接上後看到 `"1"`（綠）。
+這一支補的正是既有 `Inv1UnattendedZeroPaidProbeTest` 自己 `patch.dict` 塞旗標所**假設、
+但真路徑沒人設**的那一格。
+```
+
+🔴 誠實劃界：修後留在原檔的版本不是「刪掉這段、其餘逐字保留」，而是**改寫得更精簡**
+（機制細節如 launchd plist 具體欄位、`≈31,847 tokens` 的成本量測、`--probe-quota` 射程
+不外溢的補充、與 `Inv1UnattendedZeroPaidProbeTest` 的交叉引用句，在改寫後的新文字裡都
+已找不到逐字對應）；核心判準語意（M-01 缺陷成因、修法方向、紅綠自證的兩個字面值）在
+新文字裡保留但用字不同。這是本輪行數配平在「完全不可動判準理由」與「凍結行數」兩個
+硬約束之間的實際取捨，逐字記在此處供事後對照。
+
+### E-4 `DisarmClearsTheArmedStampTest`（ADR-XPLAT-014 C5'／C10'／DEF-200-269 併修）
+
+**來源位置**：類別 docstring 第二段（修前，緊接在規則句「拆掉一支哨兵必須同步清 armed
+stamp」之後、漏斗句「三條會拆哨兵的臂……」之前）：
+
+```text
+立案（2026-09-05 18:12～18:41 實跡）：job 被拆、stamp（15:11）仍在 ⇒ 互動 session 的
+`maybe_arm()` 永遠走 `latched`、`--pace` 只印紅字、25 分鐘零自動續跑。
+```
+
+規則句與漏斗句（三條拆哨兵的臂全部經 `planner._schtasks_remove()` 一個漏斗）逐字留在
+原檔——這兩句是判準理由（為何測一個漏斗就夠）；上面這段是支撐立案動機的**具體事故
+時間軸**（日期、兩個時間戳、25 分鐘的量測值），屬於量測史，故搬出。
+
+### E-5 `_isolate_trace_dir`（DEF-200-239 測試污染止血）
+
+**來源位置**：函式 docstring 第二段全文（修前）：
+
+```text
+DEF-200-239 測試污染止血：`_resume_tick` 走到 no_progress／exhausted 停止次態時，
+`relay_machine.settle_window` 會呼叫 `endurance_env.record_unattended_outcome(...)` 往
+`endurance_env.trace_dir()` 落一行持久結局；若沒隔離，`trace_dir()` 解析到開發者真實
+`~/.autosdd/traces` ⇒ 每跑一次這類測試就往真 home 寫一行假結局（2026-09-06 全模組
+實測 7 支洩漏、cursor 殘留值 45）。防禦性隔離讓「新 tick 測試忘了隔離」不再靜默污染；
+顯式設了 `TRACE_DIR_ENV` 的呼叫端（讀回結局檔做斷言者）維持不變。
+```
+
+🔴 誠實劃界同 E-3：修後版本是改寫過的精簡版，不是逐字扣掉一句；`2026-09-06 全模組實測
+7 支洩漏、cursor 殘留值 45` 這個具體量測數字，以及呼叫鏈的中間步驟名稱（`settle_window`
+之前的 `no_progress／exhausted` 次態描述），在新文字裡已無逐字對應，故完整記在本節。
+「未隔離會污染真 home」這個機制性結論在新文字裡以不同措辭保留。
+
+### E-6 `SettingsChainTest.test_root_and_sdd_latest_settings_require_hook_identity_for_telemetry_writeback`（DEF-200-275 第七輪 D28／SA-R7-01）
+
+**來源位置**：方法 docstring 第二段全文（修前）。🔴 Architect 複審（A-01）裁定：這一段是**判準理由本體**
+（唯一開關機制／少釘任一份的後果／governance 污染風險），不是量測史——首版改寫把它整段刪去且宣稱
+「已搬至 §E」而本節當時並無此段，屬「宣稱先於查證」。修正：判準理由以精簡句**留回原檔** docstring
+（唯一開關、模型碰不到、少釘任一份即零守衛、ad-hoc FSM 驅動會污染 governance/rules），本節逐字存查原文；
+「第五輪、第七輪已各真實發生一次」這一句是發生史，只留本節。
+
+```text
+為何重要：這是 fsm_runtime._telemetry_writeback_allowed 判定「session 是否要求
+hook 身分」的唯一開關來源——只由 settings.json 的 env 區塊釘，模型碰不到（同族
+`AUTOSDD_GIT_GUARD_OFF` 逃生口的反面）。少釘任一份，該份 settings 對應的 session
+（根層 monorepo session／以 AISDLC_SDD LATEST 版本目錄為 cwd 的 session）就完全
+沒有這道守衛，pytest 外的 ad-hoc FSM 驅動仍會漏加 opt-out 前綴污染 governance/rules
+（第五輪、第七輪已各真實發生一次）。LATEST 版本號一律現查
+`tools.lib.sdd_latest`，不寫死版號（會漂移）。
+```
