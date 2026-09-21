@@ -1790,3 +1790,13 @@ worktree、檔案面互不相交）→ 四方複審 → 收尾單人窗口。主
 - QA 本場過程自陳環境違規：誤用 `run_in_background: true` 兩次（違反唯讀硬規則），已立即 `TaskStop` 停止並改前景重跑；
   兩個誤啟動的背景任務輸出未被採信（未被讀取或引用）。
 - nightly-full 深度回歸對本輪 HEAD 的涵蓋：待 push 後 dispatch 或週一排程；在此之前 root-infra-ci 的 DEF-200-290 advisory 會 `::warning::`，屬設計內。
+
+### 雲端取證補記（push fc1c1777 之後，主控親查 `gh run list --commit <完整 40 碼 sha>`／`gh run view --json jobs`／`--log`）
+
+- push 觸發：root-infra-ci 35557865738 **success**（headSha fc1c1777）；macos-compat 35557865762／windows-compat 35557865765 的 smoke 被同 ref 手動 dispatch
+  依設計取消（per-ref `cancel-in-progress:true`），由 dispatch run 重跑；aisdlc-sdd-ci／AutoClaude CI／shellcheck-ci 因 `paths:` 未觸發（本輪只動 `tools/tests/` 與 `docs/`）。
+- 手動 dispatch（headSha fc1c1777）：macos-compat 35557909740 與 windows-compat 35557911689 的 run 與三個 job（smoke／nightly-full／失敗提醒）**皆 success**——
+  本輪 HEAD 的深度回歸已涵蓋。log 逐字：macOS nightly-full `[cpu_budget] xdist workers=3 source=cpu_budget`／`xdist nodes confirmed=3`／
+  `4615 passed, 222 skipped in 105.10s`；Windows nightly-full `workers=4`／`nodes confirmed=4`／`4662 passed, 175 skipped in 141.61s`；兩平台 smoke 的
+  AutoClaude 平台敏感子集（408／407 passed）、perception 單元（48 passed）、integration_gate 皆印 `workers=3／4`＋`nodes confirmed=3／4`。
+- 對照第十六輪同款取證（799820e1：macOS 122.31s／Windows 97.86s）：passed 數逐字相同（4615／4662），秒數為雲端 runner 波動，非本輪改動所致。
