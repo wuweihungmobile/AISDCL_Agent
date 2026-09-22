@@ -12,11 +12,15 @@
      寫進 commit 訊息（`--trailers` 只印兩行供除錯）。由 `tools/git-hooks/prepare-commit-msg`
      （非互動式 -m／-F）與 `commit-msg`（互動式：編輯器關閉後）呼叫——provenance 註記，永不
      阻斷 commit。label 與 `platform_utils.os_label()` 同源（windows／mac／linux）。
-  2. 讀端 `infer_recent_platform()`：從 HEAD 沿 first-parent 往回掃有限個 commit——先認
-     trailer（決定性）；沒有 trailer 的舊 commit 退到內容啟發式：該 commit 的 diff 新增行動到
-     ONBOARDING §7 表② 的哪一條 `snapshot-fingerprints-<darwin|win32>` 錨、或
-     `AutoClaude/.perf_baseline.toml` 寫入的 `environment = "<sys.platform>-local"`（兩者都只會
-     在該平台真機上改動）。訊號互相矛盾或都沒有 ⇒ 誠實回 unknown，不猜。
+  2. 讀端 `infer_recent_platform()`：從前沿 rev（fetch 後本機落後時＝origin/<branch>，否則
+     HEAD）沿 first-parent 往回掃有限個 commit——先認 trailer（決定性）；沒有 trailer 的舊
+     commit 退到內容啟發式：該 commit 的 diff 新增行動到 ONBOARDING §7 表② 的哪一條
+     `snapshot-fingerprints-<darwin|win32>` 錨、或 `AutoClaude/.perf_baseline.toml` 寫入的
+     `environment = "<sys.platform>-local"`（兩者都只會在該平台真機上改動）。訊號互相矛盾或
+     都沒有 ⇒ 誠實回 unknown，不猜。前沿由 `resolve_frontier()` 判定（DEF-200-360）：
+     `report_env_detection(..., fetch=True)` 才會真的打一次網路 fetch，`dev_start.py` [2/7]
+     `step_sync` 經 `fetch_or_reuse()` 沿用同一份結果、不重複 fetch；`fetch=False`（預設、
+     CLI、`--no-sync`）則零 subprocess，只讀本機 HEAD。
 
 刻意只依賴 stdlib。平台字面只住 `_SYS_PLATFORM_TO_LABEL` 一處，並由測試釘住與
 `platform_utils.os_label()` 同構（鐵律三：mac 上 sys.platform=darwin、ONBOARDING 錨鍵=darwin、
@@ -90,6 +94,46 @@ def _run_git(repo_root: Path, *args: str) -> str | None:
     return result.stdout
 
 
+def _run_git_raw(repo_root: Path, *args: str, timeout_s: int) -> subprocess.CompletedProcess:
+    """跑 `git -C <repo_root> <args>`，原樣交回 `CompletedProcess`（rc／stdout／stderr）。
+
+    逐字比照 `dev_start._git()` 的例外語意（DEF-200-360）：呼叫端（`step_sync` 的離線訊息）
+    需要真實 rc／stderr 才能組出人讀的失敗原因，不可像 `_run_git()` 那樣把失敗吞成 None。
+    """
+    try:
+        return subprocess.run(
+            ["git", "-C", str(repo_root), *args],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=timeout_s, check=False,
+        )
+    except FileNotFoundError:
+        return subprocess.CompletedProcess(args=args, returncode=127,
+                                           stdout="", stderr="git not found")
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(
+            args=args, returncode=124,
+            stdout="", stderr=f"git {' '.join(args)} 逾時（>{timeout_s}s）")
+
+
+#: [1/7]／[2/7] 共用同一次 `git fetch` 的結果（key＝`repo_root.resolve()`）；一次性——
+#: `fetch_or_reuse()` 讀到就 pop 掉，避免同一份結果被誤用第二次。
+_PREFETCH: dict[Path, subprocess.CompletedProcess] = {}
+
+
+def fetch_or_reuse(repo_root: Path, *, timeout_s: int = 120) -> subprocess.CompletedProcess:
+    """`dev_start.py` [2/7] `step_sync` 的 fetch 入口：[1/7] 已 fetch 過就沿用那次結果，
+    否則自己補做一次——兩種呼叫順序（先 [1/7] 再 [2/7]，或單獨呼叫）皆只打一次網路。"""
+    key = repo_root.resolve()
+    if key in _PREFETCH:
+        return _PREFETCH.pop(key)
+    return _run_git_raw(repo_root, "fetch", "origin", "--prune", timeout_s=timeout_s)
+
+
+def consume_prefetch(repo_root: Path) -> subprocess.CompletedProcess | None:
+    """測試用：清掉尚未被消費的快取（`addCleanup` 避免污染下一個測試）。"""
+    return _PREFETCH.pop(repo_root.resolve(), None)
+
+
 @dataclass(frozen=True)
 class Verdict:
     """`infer_recent_platform()` 的判定結果。
@@ -113,6 +157,30 @@ class Verdict:
     @property
     def method_zh(self) -> str:
         return {"trailer": "trailer", "heuristic": "內容啟發式", "unknown": "無法判定"}[self.method]
+
+
+@dataclass(frozen=True)
+class Frontier:
+    """`resolve_frontier()` 的判定結果：`infer_recent_platform()` 該從哪個 rev 掃。
+
+    rev：傳給 `infer_recent_platform(rev=...)` 的值——"HEAD" 或 "origin/<branch>"。
+    other_rev：只在本機與 origin 分叉時有值（＝remote_ref），供呼叫端另外判一次遠端側。
+    fetched：本次是否真的打了網路且成功（`fetch=False`／無 origin／fetch 失敗皆為 False）。
+    compared：是否真的算出了 ahead/behind（僅 g～j 四個分支為 True）；`fetched=True` 但
+        `compared=False` 代表 fetch 成功卻沒能與 origin 比對（detached HEAD／origin/<branch>
+        不存在／計數失敗），此時摘要仍要提醒「只反映本機 HEAD」（DEF-200-360 四方複審 SA P2）。
+    note：人讀附註，進 [1/7] 第三行的括號。
+    """
+
+    rev: str
+    branch: str | None = None
+    remote_ref: str | None = None
+    ahead: int = 0
+    behind: int = 0
+    fetched: bool = False
+    compared: bool = False
+    note: str = ""
+    other_rev: str | None = None
 
 
 def _trailer_values(repo_root: Path, sha: str, key: str) -> list[str]:
@@ -217,14 +285,108 @@ def infer_recent_platform(
     return Verdict(None, "unknown", shas[0][:7], 0, len(shas), evidence=[reason, *notes])
 
 
+def resolve_frontier(repo_root: Path, *, fetch: bool, timeout_s: int = 120) -> Frontier:
+    """判定 [1/7] 該從哪個 rev 掃 provenance（DEF-200-360：fetch-aware 前沿）。
+
+    `fetch=False`（`--no-sync`／CLI 預設）：零 subprocess，只回本機 HEAD——剛從另一台機器
+    切換過來時這一行可能過時，但代價是不打網路。`fetch=True`：真的 `git fetch origin
+    --prune` 一次（結果進 `_PREFETCH`，供 `fetch_or_reuse()` 沿用，[2/7] 不重複打網路），
+    本機落後 origin 時前沿改成 `origin/<branch>`（讀的是對面機器剛 push 的 commit）；
+    本機領先或同步則仍用本機 HEAD；分叉則兩側都要看，`other_rev` 交回遠端側供呼叫端另判。
+    任何一步失敗（無 origin／fetch 失敗／detached HEAD／無 origin/<branch>／計數失敗）一律
+    誠實退回本機 HEAD，`note` 說明原因——不可猜。
+
+    `timeout_s` 只約束 fetch 本身；其餘本機唯讀查詢（remote get-url／rev-parse／rev-list）
+    固定 `_GIT_TIMEOUT_S`（20 秒），不受 `timeout_s` 影響。
+    """
+    if not fetch:
+        return Frontier(rev="HEAD", note="未 fetch（--no-sync）：只反映本機 HEAD"
+                        "——剛從另一台機器切換過來時這一行可能過時")
+    if _run_git(repo_root, "remote", "get-url", "origin") is None:
+        return Frontier(rev="HEAD", note="無 origin remote：只反映本機 HEAD")
+
+    key = repo_root.resolve()
+    fp = _run_git_raw(repo_root, "fetch", "origin", "--prune", timeout_s=timeout_s)
+    _PREFETCH[key] = fp
+    if fp.returncode != 0:
+        lines = [ln.strip() for ln in (fp.stderr or "").splitlines() if ln.strip()]
+        detail = lines[0] if lines else f"rc={fp.returncode}"
+        return Frontier(rev="HEAD", note=f"fetch 失敗（{detail}）：只反映本機 HEAD")
+
+    branch = (_run_git(repo_root, "rev-parse", "--abbrev-ref", "HEAD") or "").strip()
+    if not branch or branch == "HEAD":
+        return Frontier(rev="HEAD", fetched=True, note="detached HEAD：只反映本機 HEAD")
+    remote_ref = f"origin/{branch}"
+    if _run_git(repo_root, "rev-parse", "--verify", "--quiet", remote_ref) is None:
+        return Frontier(rev="HEAD", branch=branch, fetched=True,
+                        note=f"{remote_ref} 不存在：只反映本機 HEAD")
+
+    def _count(spec: str) -> int | None:
+        out = _run_git(repo_root, "rev-list", "--count", spec)
+        if out is None:
+            return None
+        try:
+            return int(out.strip())
+        except ValueError:
+            return None
+
+    behind = _count(f"HEAD..{remote_ref}")
+    ahead = _count(f"{remote_ref}..HEAD")
+    if behind is None or ahead is None:
+        return Frontier(rev="HEAD", branch=branch, remote_ref=remote_ref, fetched=True,
+                        note="rev-list 計數失敗：只反映本機 HEAD")
+    common = {"branch": branch, "remote_ref": remote_ref, "ahead": ahead, "behind": behind,
+              "fetched": True, "compared": True}
+    if behind > 0 and ahead == 0:
+        return Frontier(rev=remote_ref, note=f"已 fetch；本機 HEAD 落後 {remote_ref} {behind} "
+                        f"commit，判定取 {remote_ref} 最新 commit", **common)
+    if behind == 0 and ahead == 0:
+        return Frontier(rev="HEAD", note=f"已 fetch；本機 HEAD 與 {remote_ref} 同步", **common)
+    if behind == 0 and ahead > 0:
+        return Frontier(rev="HEAD", note=f"已 fetch；本機領先 {remote_ref} {ahead} commit"
+                        f"（未 push），判定取本機 HEAD", **common)
+    return Frontier(rev="HEAD", other_rev=remote_ref,
+                    note=f"已 fetch；與 {remote_ref} 分叉（本地 +{ahead}／遠端 +{behind}），"
+                    f"兩側各判", **common)
+
+
+def _via(verdict: Verdict) -> str:
+    """組「依據哪個 commit 的什麼證據」的人讀片段，第三行與「遠端側」行共用。"""
+    via = f"{verdict.commit} 的 {verdict.evidence[0]}"
+    if verdict.method == "heuristic" and verdict.depth > 1:
+        via += f"，往回第 {verdict.depth} 個 commit（其間 {verdict.depth - 1} 個無訊號）"
+    if verdict.host:
+        via += f"，主機 {verdict.host}"
+    return via
+
+
+def _note_unfetched(summary: str, fr: Frontier | None) -> str:
+    """未 fetch，或 fetch 成功卻沒能與 origin 比對時，在摘要右括號內補一句提醒（DEF-200-360
+    四方複審 SA P2：detached HEAD／origin/<branch> 不存在／計數失敗三種「fetch 成功但沒比對」
+    的情境，摘要也要帶警語，不能只看 `fetched`）。"""
+    if fr is None:
+        return summary
+    if not fr.fetched:
+        warning = "未 fetch，只反映本機 HEAD"
+    elif not fr.compared:
+        warning = "未與 origin 比對，只反映本機 HEAD"
+    else:
+        return summary
+    if summary.endswith("）"):
+        return summary[:-1] + "；" + warning + "）"
+    return summary + "（" + warning + "）"
+
+
 def report_env_detection(
     repo_root: Path, *, now: str, developing: str | None, host: str, is_repo: bool,
-    print_fn=print, warn=None,
+    print_fn=print, warn=None, fetch: bool = False,
 ) -> str:
     """dev_start [1/7] 的三行報告；回傳要寫進 SUMMARY["env"] 的一句話。
 
     只負責「印」與「摘要」：本機切換（developing≠now）驅動 [3/7]／[4/7] 的旗標仍由
     dev_start 自己算、自己消費——那兩步的正確判準是本機記憶，不是 git。
+    `fetch`：是否先做一次 `git fetch`、本機落後 origin 時改讀對面機器剛 push 的 commit
+    （DEF-200-360 前沿判定，見 `resolve_frontier()`）；`False`＝只讀本機 HEAD，零 subprocess。
     """
     print_fn(f"    Now（當前平台）        ：{now}（host: {host}）")
     print_fn(f"    本機上次平台（狀態檔）  ：{developing or '（無紀錄，首次執行）'}"
@@ -234,35 +396,50 @@ def report_env_detection(
     if local_switch:
         print_fn(f"    → 本機跨平台切換（共用工作目錄拓撲）：{developing} → {now}，將執行切換程序")
     verdict: Verdict | None = None
+    other: Verdict | None = None
+    fr: Frontier | None = None
     if not is_repo:
         print_fn("    最近 commit 開發平台    ：（非 git repo，略）")
     else:
-        verdict = infer_recent_platform(repo_root)
+        fr = resolve_frontier(repo_root, fetch=fetch)
+        verdict = infer_recent_platform(repo_root, rev=fr.rev)
+        other = infer_recent_platform(repo_root, rev=fr.other_rev) if fr.other_rev else None
         if verdict.label is None:
             msg = (f"無法從 git 判定最近 commit 的開發平台（{verdict.evidence[0]}）"
-                   "——請自行判讀 [2/7] 拉進的 commit 來自哪台機器")
+                   f"——請自行判讀 [2/7] 拉進的 commit 來自哪台機器；{fr.note}")
             (warn or print_fn)(msg)
         else:
-            via = f"{verdict.commit} 的 {verdict.evidence[0]}"
-            if verdict.method == "heuristic" and verdict.depth > 1:
-                via += f"，往回第 {verdict.depth} 個 commit（其間 {verdict.depth - 1} 個無訊號）"
-            if verdict.host:
-                via += f"，主機 {verdict.host}"
             print_fn(f"    最近 commit 開發平台    ：{verdict.label}"
-                     f"（git {verdict.method_zh}：{via}）")
+                     f"（git {verdict.method_zh}：{_via(verdict)}；{fr.note}）")
             if verdict.label != now:
                 print_fn(f"    → 跨機切換（依 git）：{verdict.label} → {now}"
+                         "——本機快取／venv 不需動作；依賴 hash 由 [4/7]、"
+                         "§7 表② 指紋由 [6/7] 各自判定")
+        if fr.other_rev:
+            if other and other.label:
+                other_txt = f"{other.label}（git {other.method_zh}：{_via(other)}）"
+            else:
+                reason = other.evidence[0] if other and other.evidence else "無訊號"
+                other_txt = f"無法判定（{reason}）"
+            print_fn(f"    遠端側 {fr.remote_ref} 最近 commit 開發平台：{other_txt}")
+            if other and other.label and other.label != now:
+                print_fn(f"    → 跨機切換（依 git，{fr.remote_ref} 側）：{other.label} → {now}"
                          "——本機快取／venv 不需動作；依賴 hash 由 [4/7]、"
                          "§7 表② 指紋由 [6/7] 各自判定")
     git_label = verdict.label if verdict else None
     if local_switch:
         summary = f"{developing} → {now}（本機已切換）"
     elif git_label and git_label != now:
-        summary = f"{git_label} → {now}（跨機切換，git 判定）"
+        take = f"，取 {fr.rev}" if fr and fr.rev != "HEAD" else ""
+        summary = f"{git_label} → {now}（跨機切換，git 判定{take}）"
+    elif fr and fr.other_rev and other and other.label and other.label != now:
+        undeterminable = "；本機側無法判定" if git_label is None else ""
+        summary = (f"{other.label}（{fr.remote_ref} 側）→ {now}"
+                   f"（跨機切換，git 判定，分叉{undeterminable}）")
     elif git_label:
-        summary = f"{now}（無切換；git 最近 commit 亦為 {git_label}）"
+        summary = _note_unfetched(f"{now}（無切換；git 最近 commit 亦為 {git_label}）", fr)
     elif verdict is not None:
-        summary = f"{now}（無本機切換；git 無法判定最近 commit 平台）"
+        summary = _note_unfetched(f"{now}（無本機切換；git 無法判定最近 commit 平台）", fr)
     else:
         summary = f"{now}（無切換）" if developing else f"{now}（首次紀錄）"
     if developing is None and "首次" not in summary:

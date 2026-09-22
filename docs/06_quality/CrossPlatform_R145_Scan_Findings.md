@@ -589,3 +589,28 @@ Sonnet 唯讀；D5（CI yml 四個 worktree 拒絕 step 同步加標記斷言）
 helper（Architect P3）。缺陷帳本見 `docs/06_quality/AutoSDD_Defect_Log.md` DEF-200-359；本附記為 doc-total 對帳（≥2 站點）
 另一站點寄居 `AutoSDD_improving_112.md`，同 R129～R164 寄居體例。
 round-label-ok
+
+### 〈DEF-200-360 附記（R166）〉dev_start [1/7] fetch-aware 前沿判定（2026-09-22，Windows 側單人窗口） round-label-ok
+
+<!-- guard-total:R166 --> R166 護欄層累積淨額＝ 103705 → 104013（+308）——DEF-200-360（`tools/lib/dev_platform_provenance.py`
+`report_env_detection` 以預設 rev="HEAD" 掃本機 HEAD，而 dev_start [1/7] 早於 [2/7] 唯一 fetch 點 ⇒ 雙 clone 拓撲剛切機、
+未先人工 fetch＋ff-only 時三行仍全印 Now；DEF-200-358 的親驗在 merge 之後做、遮掉缺口——四方（Architect／SA／SD／QA，Sonnet 唯讀）
+一致 CONFIRMED，Architect 與 QA 各自沙盒重現）結案回歸鎖：`tools/tests/test_dev_platform_provenance.py` +290
+（`ResolveFrontierTests`：真 git bare origin＋mac_sim／win_sim 雙 clone——落後掃 origin／領先／同步／分叉兩側各判與宣告行／
+`--no-sync` 零 subprocess／fetch 失敗快取／無 origin／detached／新分支／計數失敗／單次 fetch 沿用／`_run_git_raw` 例外語意；
+`DevStartFetchWiringTests` 接線靜態鎖；既有 `ReportEnvDetectionTests` 補「未 fetch」後綴與分叉宣告行斷言）；本表自身漂移 +18
+（R166 新列＋`_REGRESSION_LANE_LOG` 同輪列＋`_FROZEN_PREFIX_REWRITE_LEDGER` 接鏈列、凍結前綴 242→243、`_REPIN_LOG_HISTORY_SHA256`
+同步重釘）。回歸鎖軌全額申報 308（結案鎖與記帳誠實度分類，同 R165 先例），主軌 0（前一輪 R165 主軌 0）。
+生產面改動（不計護欄行數）：`resolve_frontier()`／`Frontier`（含 `compared` 旗標）／`fetch_or_reuse()`／`consume_prefetch()`／
+`_run_git_raw()`（例外語意逐字比照 `dev_start._git`）；`report_env_detection(fetch=…)` 第三行維持單一物理行、分叉多印遠端側行與
+遠端側宣告行、摘要句對未 fetch／未比對兩種情境帶警語；`tools/dev_start.py` 只原地改三行（[1/7] 傳 `fetch=not args.no_sync`、
+`step_sync` 改 `fetch_or_reuse` 沿用、檔頭說明），實際 1950 行不變（SPECIAL_FILES 不重釘）；`MIN_TESTS` 4371→4543（discovery 實測）。
+文件：ONBOARDING §2.1 ①／雙 clone 段改寫為「① 先 fetch 再判定、② 沿用」；useMacWin 第 1 步 d 與回報行補 [1/7] 自帶 fetch 與
+「未 fetch」警語的關係。親驗（主控本場 tool_result）：`test_dev_platform_provenance.py` Ran 72 OK、`test_dev_start.py` Ran 285 OK
+（skipped=38）、ruff／E501 三檔綠、`check_loc_budget` 零違規；QA 在真 repo 走生產路徑 `fetch=True` 一次（「已 fetch；本機 HEAD 與
+origin/main 同步」、rc=0）；四方實作審查 ACCEPT_WITH_FIXES ×4、零 REJECT，P1（分叉遠端側宣告行）＋P2×4 全數當場採納（SD-1 由主控改裁
+為「仍宣告遠端側切換、摘要加註本機側無法判定」）。另：21:30 排程 `AutoClaude_WindowsSmoke` 首次在生產排程環境（`interactive=False`、
+`codepage=950`）rc=0、PASS=12 FAIL=0，DEF-200-359 由排程器自證。後續項：DEF-200-361（CI 四個 worktree 拒絕 step 補標記斷言，獨立 open 列）。
+缺陷帳本見 `docs/06_quality/AutoSDD_Defect_Log.md` DEF-200-360／361；本附記為 doc-total 對帳（≥2 站點）另一站點寄居
+`AutoSDD_improving_112.md`，同 R129～R165 寄居體例。
+round-label-ok

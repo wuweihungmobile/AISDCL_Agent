@@ -10,7 +10,7 @@ tools/dev_start.ps1 —— 皆為薄殼，邏輯集中本檔，無 .sh/.ps1 雙�
 （有別於 check_script_parity.py 守護的三對真雙實作腳本）。
 
 七步驟：
-  [1/7] 環境偵測    — Now／本機上次平台（狀態檔）／git 最近 commit 平台（trailer／啟發式）
+  [1/7] 環境偵測    — Now／本機上次平台（狀態檔）／git 最近 commit 平台（trailer／啟發式；先 fetch）
   [2/7] GitHub 同步 — fetch + ff-only pull；髒工作樹/分叉/離線 → 明示不硬做
   [3/7] 平台切換    — Developing≠Now 時清除含絕對路徑的 .pytest_cache/.ruff_cache
   [4/7] venv/依賴   — 錯平台形狀 .venv 換手保留至 .venv-cache-<flavor>（本平台
@@ -709,8 +709,8 @@ def step_sync(no_sync: bool, is_repo: bool) -> None:
         _warn("未設定 origin remote — 跳過同步")
         SUMMARY["sync"] = "跳過（無 origin）"
         return
-    print("    git fetch origin --prune …")
-    fetch = _git("fetch", "origin", "--prune", timeout=120)  # 逾時由 _git 化為 rc=124
+    print("    git fetch origin --prune …（[1/7] 已 fetch 過則沿用那次結果）")
+    fetch = dev_platform_provenance.fetch_or_reuse(ROOT, timeout_s=120)  # [1/7] 已 fetch 就沿用
     if fetch.returncode != 0:
         # 取第一行非空錯誤（git 多行錯誤的首行才是 fatal: 主因；取末行會得到斷句）
         lines = [ln.strip() for ln in (fetch.stderr or "").splitlines() if ln.strip()]
@@ -1914,7 +1914,7 @@ def main(argv: list[str] | None = None) -> int:
     _hr(1, "環境偵測（Now／本機上次平台／git 最近 commit 平台）")
     SUMMARY["env"] = dev_platform_provenance.report_env_detection(
         ROOT, now=now, developing=developing, host=_platform.node(),
-        is_repo=is_repo, print_fn=print, warn=_warn)
+        is_repo=is_repo, print_fn=print, warn=_warn, fetch=not args.no_sync)
 
     # MUST FIX A 必要配套：POSIX 上 step_venv() 對 bootstrap 直接子行程呼叫
     # start_new_session=True，使其脫離終端機 foreground process group，Ctrl-C

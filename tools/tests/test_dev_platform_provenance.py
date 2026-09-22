@@ -483,7 +483,9 @@ class ReportEnvDetectionTests(unittest.TestCase):
     def test_git_and_now_agree_reports_no_switch(self):
         summary, *_ = self._run(now="windows", developing="windows", is_repo=True,
                                  verdict=_verdict("windows", "trailer"))
-        self.assertEqual(summary, "windows（無切換；git 最近 commit 亦為 windows）")
+        self.assertEqual(
+            summary,
+            "windows（無切換；git 最近 commit 亦為 windows；未 fetch，只反映本機 HEAD）")
 
     def test_unknown_verdict_warns_and_says_undeterminable(self):
         v = _verdict(None, "unknown", evidence=["3 個 commit 皆無 trailer 且無內容線索"])
@@ -492,6 +494,7 @@ class ReportEnvDetectionTests(unittest.TestCase):
         warn.assert_called_once()
         self.assertIn("無法從 git 判定", warn.call_args[0][0])
         self.assertIn("git 無法判定", summary)
+        self.assertIn("；未 fetch，只反映本機 HEAD）", summary)
 
     def test_local_state_switch_takes_precedence_in_summary(self):
         summary, lines, *_ = self._run(now="windows", developing="mac", is_repo=True,
@@ -548,6 +551,293 @@ class CliTests(_SandboxMixin, unittest.TestCase):
             self._commit_unrelated(repo, i)
         res = self._run_cli("--repo-root", str(repo))
         self.assertEqual(res.returncode, 1, res.stdout + res.stderr)
+
+
+class ResolveFrontierTests(_SandboxMixin, unittest.TestCase):
+    """守 DEF-200-360 前沿判定：fetch 後本機落後時改掃 origin/<branch>，其餘情況一律誠實
+    退回本機 HEAD，[1/7]／[2/7] 共用同一次 fetch（`fetch_or_reuse`）不重複打網路。
+    """
+
+    def _make_clone_pair(self) -> tuple[Path, Path, Path]:
+        """bare `origin`（可安全 push／fetch）＋ `win_sim`／`mac_sim` 兩份各自的 clone。"""
+        tmp = Path(tempfile.mkdtemp(prefix="devplat_frontier_"))
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        seed = tmp / "seed"
+        seed.mkdir()
+        self._git_ok("init", "-q", cwd=seed)
+        for args in (("config", "user.email", "t@example.com"),
+                    ("config", "user.name", "Tester"),
+                    ("config", "commit.gpgsign", "false")):
+            self._git_ok(*args, cwd=seed)
+        self._git_ok("commit", "--allow-empty", "-m", "chore: seed", cwd=seed)
+        origin = tmp / "origin.git"
+        self._git_ok("clone", "-q", "--bare", str(seed), str(origin), cwd=tmp)
+        win_sim = tmp / "win_sim"
+        mac_sim = tmp / "mac_sim"
+        for clone in (win_sim, mac_sim):
+            self._git_ok("clone", "-q", str(origin), str(clone), cwd=tmp)
+            for args in (("config", "user.email", "t@example.com"),
+                        ("config", "user.name", "Tester"),
+                        ("config", "commit.gpgsign", "false")):
+                self._git_ok(*args, cwd=clone)
+        return origin, win_sim, mac_sim
+
+    def _branch(self, repo: Path) -> str:
+        return self._git_ok("rev-parse", "--abbrev-ref", "HEAD", cwd=repo).stdout.strip()
+
+    def _push_trailer_commit(self, repo: Path, label: str, host: str) -> None:
+        self._commit_with_trailer(repo, f"feat: {label} update", label, host)
+        self._git_ok("push", "-q", "origin", "HEAD", cwd=repo)
+
+    def test_behind_origin_scans_remote_ref_and_reports_other_machine(self):
+        origin, win_sim, mac_sim = self._make_clone_pair()
+        self.addCleanup(m.consume_prefetch, win_sim)
+        branch = self._branch(win_sim)
+        self._push_trailer_commit(mac_sim, "mac", "mbp")
+
+        fr = m.resolve_frontier(win_sim, fetch=True)
+        self.assertEqual(fr.rev, f"origin/{branch}")
+        self.assertTrue(fr.fetched)
+        self.assertIn("落後", fr.note)
+
+        lines: list[str] = []
+        summary = m.report_env_detection(
+            win_sim, now="windows", developing="windows", host="h", is_repo=True,
+            print_fn=lines.append, warn=mock.Mock(), fetch=True)
+        self.assertTrue(any("→ 跨機切換（依 git）：mac → windows" in ln for ln in lines), lines)
+        self.assertEqual(summary, f"mac → windows（跨機切換，git 判定，取 origin/{branch}）")
+
+    def test_ahead_of_origin_keeps_head(self):
+        origin, win_sim, mac_sim = self._make_clone_pair()
+        self.addCleanup(m.consume_prefetch, win_sim)
+        self._commit_with_trailer(win_sim, "feat: local only", "windows", "winbox")
+
+        fr = m.resolve_frontier(win_sim, fetch=True)
+        self.assertEqual(fr.rev, "HEAD")
+        self.assertTrue(fr.fetched)
+        self.assertIn("領先", fr.note)
+
+    def test_in_sync_keeps_head(self):
+        origin, win_sim, mac_sim = self._make_clone_pair()
+        self.addCleanup(m.consume_prefetch, win_sim)
+
+        fr = m.resolve_frontier(win_sim, fetch=True)
+        self.assertEqual(fr.rev, "HEAD")
+        self.assertTrue(fr.fetched)
+        self.assertTrue(fr.compared)
+        self.assertIn("同步", fr.note)
+
+    def test_diverged_reports_both_sides(self):
+        origin, win_sim, mac_sim = self._make_clone_pair()
+        self.addCleanup(m.consume_prefetch, win_sim)
+        branch = self._branch(win_sim)
+        self._push_trailer_commit(mac_sim, "mac", "mbp")
+        self._commit_with_trailer(win_sim, "feat: local divergent", "windows", "winbox")
+
+        fr = m.resolve_frontier(win_sim, fetch=True)
+        self.assertEqual(fr.rev, "HEAD")
+        self.assertEqual(fr.other_rev, f"origin/{branch}")
+        self.assertEqual((fr.ahead, fr.behind), (1, 1))
+        self.assertIn("分叉", fr.note)
+
+        lines: list[str] = []
+        summary = m.report_env_detection(
+            win_sim, now="windows", developing="windows", host="h", is_repo=True,
+            print_fn=lines.append, warn=mock.Mock(), fetch=True)
+        self.assertTrue(
+            any(f"遠端側 origin/{branch} 最近 commit 開發平台：mac" in ln for ln in lines), lines)
+        self.assertTrue(
+            any(f"→ 跨機切換（依 git，origin/{branch} 側）：mac → windows" in ln for ln in lines),
+            lines)
+        self.assertIn("分叉", summary)
+        self.assertIn("跨機切換", summary)
+
+    def test_no_sync_runs_zero_subprocesses(self):
+        with mock.patch.object(m.subprocess, "run",
+                               side_effect=AssertionError("不得呼叫 subprocess")):
+            fr = m.resolve_frontier(Path("."), fetch=False)
+        self.assertEqual(fr.rev, "HEAD")
+        self.assertIn("未 fetch", fr.note)
+
+        lines: list[str] = []
+        with mock.patch.object(m, "infer_recent_platform",
+                               return_value=_verdict("windows", "trailer")), \
+                mock.patch.object(m.subprocess, "run",
+                                  side_effect=AssertionError("不得呼叫 subprocess")):
+            summary = m.report_env_detection(
+                Path("."), now="windows", developing="windows", host="h",
+                is_repo=True, print_fn=lines.append, warn=mock.Mock(), fetch=False)
+        self.assertIn("未 fetch，只反映本機 HEAD", summary)
+
+    def test_fetch_failure_falls_back_to_head_and_caches_outcome(self):
+        repo = self._make_repo()
+        self.addCleanup(m.consume_prefetch, repo)
+        self._git_ok("remote", "add", "origin", "file:///no-such-path-devplat", cwd=repo)
+
+        fr = m.resolve_frontier(repo, fetch=True)
+        self.assertEqual(fr.rev, "HEAD")
+        self.assertFalse(fr.fetched)
+        self.assertIn("fetch 失敗", fr.note)
+
+        with mock.patch.object(m, "_run_git_raw") as raw:
+            cached = m.fetch_or_reuse(repo)
+        raw.assert_not_called()
+        self.assertNotEqual(cached.returncode, 0)
+
+    def test_no_origin_remote_falls_back_to_head(self):
+        repo = self._make_repo()
+        self.addCleanup(m.consume_prefetch, repo)
+
+        fr = m.resolve_frontier(repo, fetch=True)
+        self.assertEqual(fr.rev, "HEAD")
+        self.assertFalse(fr.fetched)
+        self.assertIn("無 origin", fr.note)
+
+    def test_detached_head_falls_back_to_head(self):
+        origin, win_sim, mac_sim = self._make_clone_pair()
+        self.addCleanup(m.consume_prefetch, win_sim)
+        self._git_ok("checkout", "-q", "--detach", "HEAD", cwd=win_sim)
+
+        fr = m.resolve_frontier(win_sim, fetch=True)
+        self.assertEqual(fr.rev, "HEAD")
+        self.assertTrue(fr.fetched)
+        self.assertFalse(fr.compared)
+        self.assertIn("detached HEAD", fr.note)
+
+    def test_detached_head_summary_says_not_compared(self):
+        """SA P2：detached HEAD 是「fetch 成功但沒比對」情境之一，摘要也要帶警語。"""
+        origin, win_sim, mac_sim = self._make_clone_pair()
+        self.addCleanup(m.consume_prefetch, win_sim)
+        self._git_ok("checkout", "-q", "--detach", "HEAD", cwd=win_sim)
+
+        summary = m.report_env_detection(
+            win_sim, now="windows", developing="windows", host="h", is_repo=True,
+            print_fn=lambda *_: None, warn=mock.Mock(), fetch=True)
+        self.assertIn("未與 origin 比對，只反映本機 HEAD", summary)
+
+    def test_local_only_branch_falls_back_to_head(self):
+        """QA-360-1：本機新建、未 push 的分支在 origin 上不存在 ⇒ 誠實退回 HEAD。"""
+        origin, win_sim, mac_sim = self._make_clone_pair()
+        self.addCleanup(m.consume_prefetch, win_sim)
+        self._git_ok("checkout", "-q", "-b", "feature-x", cwd=win_sim)
+
+        fr = m.resolve_frontier(win_sim, fetch=True)
+        self.assertEqual(fr.rev, "HEAD")
+        self.assertEqual(fr.branch, "feature-x")
+        self.assertTrue(fr.fetched)
+        self.assertFalse(fr.compared)
+        self.assertIn("origin/feature-x 不存在", fr.note)
+
+    def test_diverged_with_undeterminable_remote_side_prints_reason(self):
+        """QA-360-2：遠端側 commit 無 trailer、無內容線索時，不可誤宣告跨機切換。"""
+        origin, win_sim, mac_sim = self._make_clone_pair()
+        self.addCleanup(m.consume_prefetch, win_sim)
+        branch = self._branch(win_sim)
+        self._commit_unrelated(mac_sim, 0)
+        self._git_ok("push", "-q", "origin", "HEAD", cwd=mac_sim)
+        self._commit_with_trailer(win_sim, "feat: local divergent", "windows", "winbox")
+
+        lines: list[str] = []
+        summary = m.report_env_detection(
+            win_sim, now="windows", developing="windows", host="h", is_repo=True,
+            print_fn=lines.append, warn=mock.Mock(), fetch=True)
+        self.assertTrue(
+            any(f"遠端側 origin/{branch} 最近 commit 開發平台：無法判定（" in ln for ln in lines),
+            lines)
+        self.assertFalse(any("跨機切換" in ln for ln in lines), lines)
+        self.assertEqual(summary, "windows（無切換；git 最近 commit 亦為 windows）")
+
+    def test_count_failure_falls_back_to_head(self):
+        """QA-360-3：rev-list --count 失敗（非計數本身以外皆走真 git）⇒ 誠實退回 HEAD。"""
+        origin, win_sim, mac_sim = self._make_clone_pair()
+        self.addCleanup(m.consume_prefetch, win_sim)
+        real_run_git = m._run_git
+
+        def wrapper(repo_root, *args):
+            if args[:2] == ("rev-list", "--count"):
+                return None
+            return real_run_git(repo_root, *args)
+
+        with mock.patch.object(m, "_run_git", side_effect=wrapper):
+            fr = m.resolve_frontier(win_sim, fetch=True)
+        self.assertEqual(fr.rev, "HEAD")
+        self.assertTrue(fr.fetched)
+        self.assertFalse(fr.compared)
+        self.assertIn("計數失敗", fr.note)
+
+    def test_diverged_with_unknown_local_side_still_declares_remote_switch(self):
+        """SD-1：分叉且本機側 unknown 時，遠端側事實仍是已知的，仍要宣告跨機切換，
+        只是摘要要註記本機側無法判定。"""
+        fr = m.Frontier(rev="HEAD", branch="main", remote_ref="origin/main", ahead=1, behind=1,
+                        fetched=True, compared=True, other_rev="origin/main",
+                        note="已 fetch；與 origin/main 分叉（本地 +1／遠端 +1），兩側各判")
+
+        def fake_infer(repo_root, *, rev="HEAD", max_commits=m.DEFAULT_MAX_COMMITS):
+            if rev == "HEAD":
+                return _verdict(None, "unknown", evidence=["3 個 commit 皆無 trailer 且無內容線索"])
+            return _verdict("mac", "trailer", host="mbp", evidence=["Dev-Platform trailer=mac"])
+
+        lines: list[str] = []
+        warn = mock.Mock()
+        with mock.patch.object(m, "resolve_frontier", return_value=fr), \
+                mock.patch.object(m, "infer_recent_platform", side_effect=fake_infer):
+            summary = m.report_env_detection(
+                Path("."), now="windows", developing="windows", host="h", is_repo=True,
+                print_fn=lines.append, warn=warn, fetch=True)
+        warn.assert_called_once()
+        self.assertTrue(
+            any("→ 跨機切換（依 git，origin/main 側）：mac → windows" in ln for ln in lines), lines)
+        self.assertEqual(
+            summary,
+            "mac（origin/main 側）→ windows（跨機切換，git 判定，分叉；本機側無法判定）")
+
+    def test_fetch_or_reuse_without_prior_resolve_self_fetches_once(self):
+        origin, win_sim, mac_sim = self._make_clone_pair()
+        self.addCleanup(m.consume_prefetch, win_sim)
+
+        result = m.fetch_or_reuse(win_sim)
+        self.assertEqual(result.returncode, 0)
+
+    def test_resolve_then_fetch_or_reuse_hits_git_exactly_once(self):
+        origin, win_sim, mac_sim = self._make_clone_pair()
+        self.addCleanup(m.consume_prefetch, win_sim)
+        fetch_calls: list[tuple] = []
+        orig_run_git_raw = m._run_git_raw
+
+        def counting(repo_root, *args, **kwargs):
+            if "fetch" in args:
+                fetch_calls.append(args)
+            return orig_run_git_raw(repo_root, *args, **kwargs)
+
+        with mock.patch.object(m, "_run_git_raw", side_effect=counting):
+            m.resolve_frontier(win_sim, fetch=True)
+            m.fetch_or_reuse(win_sim)
+        self.assertEqual(len(fetch_calls), 1)
+
+    def test_run_git_raw_maps_exceptions_like_dev_start_git(self):
+        with mock.patch.object(m.subprocess, "run",
+                               side_effect=subprocess.TimeoutExpired(cmd="git", timeout=5)):
+            result = m._run_git_raw(Path("."), "fetch", timeout_s=5)
+        self.assertEqual(result.returncode, 124)
+        self.assertIn("逾時", result.stderr)
+
+        with mock.patch.object(m.subprocess, "run", side_effect=FileNotFoundError()):
+            result = m._run_git_raw(Path("."), "fetch", timeout_s=5)
+        self.assertEqual(result.returncode, 127)
+
+
+class DevStartFetchWiringTests(unittest.TestCase):
+    """dev_start.py 接線鎖（DEF-200-360）：[1/7] 傳 fetch 旗標、[2/7] 改沿用 fetch_or_reuse，
+    不再自己重跑一次 `git fetch`（否則 [1/7][2/7] 各打一次網路，失去共用 fetch 的意義）。"""
+
+    def test_dev_start_wires_fetch_aware_frontier(self):
+        text = (_REPO_ROOT / "tools" / "dev_start.py").read_text(encoding="utf-8")
+        self.assertIn("fetch=not args.no_sync", text)
+        self.assertIn("dev_platform_provenance.fetch_or_reuse(ROOT", text)
+        start = text.index("def step_sync(")
+        end = text.index("\ndef ", start + 1)
+        body = text[start:end]
+        self.assertNotIn('_git("fetch"', body)
 
 
 if __name__ == "__main__":

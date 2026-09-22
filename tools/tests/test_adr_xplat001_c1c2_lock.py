@@ -685,7 +685,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 8502,
+    "test_adr_xplat001_c1c2_lock.py": 8520,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 3726,
@@ -709,7 +709,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_context_window_parity.py": 281,
     "test_cpu_budget.py": 340,
     "test_defect_id_reference_integrity.py": 281,
-    "test_dev_platform_provenance.py": 554,
+    "test_dev_platform_provenance.py": 844,
     "test_dev_start.py": 6759,
     "test_dev_start_ps1_lastexitcode.py": 521,
     "test_doc_env_prefix_platform_parity_r60.py": 331,
@@ -2173,6 +2173,16 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "凍結前綴 241→242＋sha＋PHASE2 到期新列）。全額歸回歸鎖軌（結案鎖與記帳誠實度分類，"
      "同 R163 先例），主軌 0：連續上升歸零（前一輪 R164 主軌 267）。逐檔清單見 "
      "CrossPlatform_R145_Scan_Findings.md〈DEF-200-359 附記（R165）〉；帳本見 DEF-200-359 該筆。"),
+    ("R166", 103705, 104013, 308,  # round-label-ok：DEF-200-360 修復窗口
+     "[非淨減法輪][回歸鎖軌全額申報，見 _REGRESSION_LANE_LOG 同輪列] DEF-200-360（dev_start "
+     "[1/7] git 平台判定掃本機 HEAD 且早於 [2/7] 唯一 fetch 點，雙 clone 剛切機未先人工 "
+     "fetch+ff-only 時三行仍全印 Now）結案回歸鎖：test_dev_platform_provenance.py +290"
+     "（ResolveFrontierTests 真 git bare origin＋雙 clone：落後掃 origin／領先／同步／分叉兩側"
+     "各判與宣告行／--no-sync 零 subprocess／fetch 失敗快取／無 origin／detached／新分支／"
+     "計數失敗／單次 fetch 沿用／_run_git_raw 例外語意；DevStartFetchWiringTests 接線靜態鎖；"
+     "既有測試補斷言）＋本表自身漂移 +18（本列＋回歸鎖軌列＋接鏈列＋凍結前綴 242→243＋sha）。"
+     "全額歸回歸鎖軌（結案鎖與記帳誠實度分類，同 R165 先例），主軌 0：維持歸零（前輪 R165 亦 0）。"
+     "逐檔清單見 CrossPlatform_R145_Scan_Findings.md〈DEF-200-360 附記（R166）〉；帳本見該筆。"),
 )
 
 
@@ -2560,6 +2570,11 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "本表自身漂移（同 R163 先例全額申報，含本列與 _GUARD_LINES_REPIN_LOG 同輪列、"
      "cap 到期兌現、凍結前綴 241→242、PHASE2 到期列）＝215（子集＝母項）。逐項見 "
      "CrossPlatform_R145_Scan_Findings.md〈DEF-200-359 附記（R165）〉。"),
+    ("R166", 308,
+     "DEF-200-360 結案回歸鎖（記帳誠實度分類）：test_dev_platform_provenance.py +290 全為結案"
+     "回歸鎖（ResolveFrontierTests 前沿判定分支／接線靜態鎖／既有測試補斷言）＋本表自身漂移"
+     "（同 R165 先例全額申報，含本列、稽核列、接鏈列、前綴 242→243、sha）＝308（子集＝母項）。"
+     "逐項見 CrossPlatform_R145_Scan_Findings.md〈DEF-200-360 附記（R166）〉。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -2844,10 +2859,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 242
+_REPIN_LOG_FROZEN_PREFIX_LEN = 243
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "c4350df6e968d686de71109feca3698111ab53a9323985e098cfd3ee4c981c85")
+    "cf1dc5dab8c1d6563e7fc8089b1cf19ab52c70b868acc9a54d9b320ea3d8245b")
 
 
 def repin_log_history_digest(
@@ -3141,6 +3156,9 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # DEF-200-359：WindowsSmoke 逃生口缺失根治窗口——追加本輪稽核列並依「追加後立即
     # 自我凍結」判例延伸前綴涵蓋該列本身（241→242）。
     ("R165", "8595fde4cf0b", "c4350df6e968", "DEF-200-359"),  # round-label-ok
+    # DEF-200-360：dev_start [1/7] fetch-aware 前沿判定窗口——追加本輪稽核列並依「追加後立即
+    # 自我凍結」判例延伸前綴涵蓋該列本身（242→243）。
+    ("R166", "c4350df6e968", "cf1dc5dab8c1", "DEF-200-360"),  # round-label-ok
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

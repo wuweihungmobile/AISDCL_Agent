@@ -32,7 +32,7 @@
 
 1. 一律先 GitHub 同步（不要先判斷 dev_start 檔存不存在才決定）。首次 clone 時本步跑在 hook 尚未生效的視窗：兩平台 hook 載具都是根層 .venv 裡的直譯器，`block_destructive_git` 等六支守衛要到第 2 步 dev_start 建好 .venv 後才會活，所以本步的「不要 rebase／reset --hard／stash」全靠你遵守，不是機械阻斷。a. git branch --show-current 必須是 main，不是就列分支名與 git status 給我等我決定；不要自行切換，也不要在非 main 跑 merge（--ff-only 會靜默改寫分支指標）。
    b. 確認沒有 nightly 在跑（避免撞同一分鐘造成假紅寫進心跳檔）：`<python> tools/dev_start.py --check-nightly`（首次 clone 還沒有 .venv 時跳過本項、視為 idle）。idle（rc=0）才往下；NIGHTLY-RUNNING（rc=1）等它跑完、期間不跑任何測試；UNDETERMINED（rc=0，判不出來≠沒在跑）自己查行程：mac `ps -eo pid,etime,command | grep -E 'run_local_nightly|-m pytest' | grep -v grep`；win `Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'run_local_nightly|pytest' } | Select-Object ProcessId,CommandLine`。
-   c. git fetch origin（失敗＝離線：明說「本次離線、跳過同步」，第 2 步 dev_start 加 `--no-sync`）；d. git merge --ff-only origin/main（失敗／領先／分叉／未提交變更：列 git status 與 git log main..origin/main 給我等我決定，不要 rebase、reset --hard、stash）；e. 有拉到東西時查是否動到指紋監測面（有＝預期第 7 步要回填）：`git diff --name-only ORIG_HEAD HEAD -- AutoClaude/tests AISDLC_SDD/scripts/tests 'AISDLC_SDD/*/tools/fsm_runtime/tests'`。
+   c. git fetch origin（失敗＝離線：明說「本次離線、跳過同步」，第 2 步 dev_start 加 `--no-sync`）；d. git merge --ff-only origin/main（失敗／領先／分叉／未提交變更：列 git status 與 git log main..origin/main 給我等我決定，不要 rebase、reset --hard、stash）（dev_start [1/7] 現在會自己 fetch 一次、本機落後時直接讀 origin 端 provenance，[2/7] 沿用同一次 fetch 做 ff-only pull——即使跳過 c/d，[1/7] 判定仍正確；c/d 仍建議保留，因為它讓你在 dev_start 自動 ff-only pull 之前先看到 git log main..origin/main 把關）；e. 有拉到東西時查是否動到指紋監測面（有＝預期第 7 步要回填）：`git diff --name-only ORIG_HEAD HEAD -- AutoClaude/tests AISDLC_SDD/scripts/tests 'AISDLC_SDD/*/tools/fsm_runtime/tests'`。
 
 2. 在 repo 根執行 dev_start（指令見上表；timeout 設 10 分鐘上限，bootstrap 合法耗時數分鐘；被中斷就重跑同一條，疑似半殘 .venv 可加 `--force-bootstrap`）。七步（標題取自終端機實印，括號為補充說明）：[1/7] 環境偵測（Now／本機上次平台／git 最近 commit 平台）／[2/7] GitHub 同步（只提醒不自動 stash/rebase/push）／[3/7] 平台切換（跨平台無效快取清理）／[4/7] venv／依賴整備／[5/7] git hooks 檢核（根層 dispatcher）／[6/7] 平台專屬健檢／[7/7] 狀態寫回。
    [4/7] 全樹只准有根層一顆 .venv：印「🔴 偵測到雜散 venv／殘留」即 ❌，照它印出的刪除指令手動刪掉後重跑（刻意不自動刪；`--force-bootstrap` 不會解這一種）。
@@ -44,7 +44,7 @@
 4. shell 狀態不跨工具呼叫存活 ⇒ 之後所有 Python 指令一律用完整路徑 <python>，不要誤用系統 Python；5. 先讀根 CLAUDE.md，進子專案前讀它自己的 CLAUDE.md（override 級規範）；6. 繁體中文回覆。
 7. ONBOARDING §7 表② 本平台欄回填——每次啟動都跑（靠機械判準，不靠記憶）：`<python> tools/sync_onboarding_baselines.py --check-snapshot`。presumed stale 或 baseline-origin 非 self-recorded ⇒ 要回填（觸發源常是第 1 步 merge 拉進對面機器的 commit）；回填照 B 段第 3 步，排在 commit/push 之前，做完把工具輸出貼給我。
 
-完成後簡短回報：首次執行？跨平台切換？（以 [1/7] 第三行「最近 commit 開發平台（git 判定）」為準——「本機上次平台」只記這台機器，雙 clone 拓撲下恆等於 Now，不可拿它回答這一問）同步結果？.venv 重建？hooks 正常？有無待我處理的警告？然後等我下任務，不要自己開工。
+完成後簡短回報：首次執行？跨平台切換？（以 [1/7] 第三行「最近 commit 開發平台（git 判定）」為準——「本機上次平台」只記這台機器，雙 clone 拓撲下恆等於 Now，不可拿它回答這一問；`--no-sync` 或離線時第三行會標「未 fetch，只反映本機 HEAD」，此時不可拿它回答，先完成第 1 步同步再看）同步結果？.venv 重建？hooks 正常？有無待我處理的警告？然後等我下任務，不要自己開工。
 ```
 
 ## 🔁 平台切換 SOP
