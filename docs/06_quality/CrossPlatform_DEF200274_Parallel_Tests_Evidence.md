@@ -2031,3 +2031,20 @@ worktree、檔案面互不相交）→ 四方複審 → 收尾單人窗口。主
 - SDD 凍結基線 v0.01 與中間版 v0.02～v0.29（28 個目錄）裸跑 `-n auto` 走 xdist 內建（v0.01 實測 gw0..gw9＝10）；評估包 C 逐字核對 7 個站點零站點跑中間版、`XDIST_ARGS` 只在 `VER==LATEST` 賦值 ⇒ 實際曝險 0（ADR-XPLAT-001 不改）。
 - 去重階段本輪**零樣本**（四方發現彼此無重複），「去重步驟真的能合併」尚未被實戰驗證；下輪續驗。
 - SDD 加速比 3.09x→2.61x 被裁量測雜訊（零程式碼差異），若下輪再低於 2.5x 應重開 F-SD-01。
+
+### 雲端取證補記（push f3865103 之後，主控親查 `gh run list --commit <完整 40 碼 sha>`／`gh run view --json jobs`／`--log`）
+
+- push 觸發四支：root-infra-ci 35676282840 **success**、AutoClaude CI 35676282815 **success**、macos-compat 35676282859／windows-compat 35676282873 的 smoke 被同 ref 手動 dispatch 依設計取消（per-ref `cancel-in-progress:true`）；`autoclaude-mutation-on-change.yml` **未被 push 觸發**（`paths:` 只認 `AutoClaude/autoclaude/plugins/token_guard/**`，本輪只動 tests）⇒ 手動 dispatch。
+- 手動 dispatch nightly-full（headSha f3865103）：macos-compat 35676308885 三 job **皆 success**——nightly-full 逐字 `[cpu_budget] xdist workers=3 source=cpu_budget`／`nodes confirmed=3`／`4622 passed, 222 skipped in 106.94s`（＝表② darwin 欄回填值 4622，第十八輪 4615＋B 4＋D 3）、SDD LATEST `workers=3 source=env`／`nodes confirmed=3`／`1949 passed, 8 skipped, 14 subtests passed in 28.12s`；
+  windows-compat 35676311723 三 job **皆 success**——`workers=4 source=cpu_budget`／`nodes confirmed=4`／`4669 passed, 175 skipped in 130.55s`（第十八輪 4662＋7）、SDD `workers=4 source=env`／`nodes confirmed=4`／`1943 passed, 14 skipped, 14 subtests passed in 44.19s`；Windows smoke `ci-gate.ps1` `[cpu_budget] broadcast workers=4 source=cpu_budget` → 逐軌 `1476 passed`／`1943 passed`／`364 passed`（廣播優先序鏈兩平台成立）。
+- 🔴 **DEF-200-356 驗收即撞出 DEF-200-357**：dispatch `autoclaude-mutation-on-change.yml` run 35676339115 ⇒ `Successfully installed … mutmut-2.4.3`（鎖版生效）→ `Usage: mutmut run [OPTIONS] [ARGUMENT]`／`Error: No such option '-p'.` → `|| true` 吞掉 → job `success` 01:35:45Z→01:36:15Z（30 秒）→ 下一步 `##[warning]empty mutmut log; refusing to write 0% to history`。
+  四處 argv 同型（`autoclaude-ci.yml:692/769/818`＋`autoclaude-mutation-on-change.yml:91`）：DEF-200-274 第十輪 SA-03 把停用 xdist 的 pytest 旗標直接接在 `mutmut run` 後——mutmut 2.x 的 pytest 指令只能走 `--runner TEXT`（正確參考＝`AutoClaude/tools/run_mutmut_in_docker.sh` 的 `RUNNER_CMD`）。
+  ⇒ 版本漂移（356）與 argv 錯誤（357）兩層疊加：即使版本一直對，mutation 自 2026-09-13 起也從未真跑；`|| true` 讓兩層都靜默。
+- **實作包 E（DEF-200-357；單一 Sonnet；只動兩支 yml＋`test_workflow_mutmut_pin.py`）**：
+  本機端到端煙霧（scratchpad 隔離副本 `mutsmoke/AutoClaude`＋暫存 venv `mm_probe` 裝 mutmut 2.4.3，用完刪）：舊 argv ⇒ `Error: No such option '-p'.` rc=2（反面重現）；新 argv `--runner="python -m pytest -x -q -p no:xdist -o addopts= tests/plugins/token_guard" --no-progress --CI` 對 `autoclaude/plugins/token_guard/compactor.py` ⇒ rc=0、sqlite cache `('ok_killed', 13)` 0 survived（非 TTY 下 mutmut 不印終局摘要，空 `results` 清單＝全 killed 的正常表現）；`--CI` 語意複驗：runner 指到不存在目錄 ⇒ rc=1（原始碼：ci=True 時 fatal=1／其餘=0）⇒ 可取代 `|| true` 做 fail-loud。
+  四處統一為 `--runner="python -m pytest -x -q -p no:xdist -o addopts= <tests-dir>" --no-progress --CI`、移除 `|| true`；`run_mutmut_in_docker.sh` 不動（其 `-c /dev/null` 手法本機證實不需要）。
+  鎖擴充 `test_every_mutmut_run_segment_uses_runner_and_ci_not_bare_flags`（合併 `\` 續行、剝行尾註解；斷言無引號外裸 `-p no:xdist`／`-o addopts=`、必含 `--runner`／`--CI`、無 `|| true`、段數 ≥4）＋`test_segment_violation_detector_has_red_green_self_proof`；`5 passed in 0.37s`（主控親跑）、ruff `All checks passed!`、yaml 兩檔 `yaml-ok`、根層三支 workflow 鎖 `Ran 64 tests in 0.379s / OK`；numstat `6 6`／`2 2`／`130 0`。
+  DEF-200-357 帳本列 P1 fixed（697 bytes；本 commit）。
+  收尾（主控親做）：E 交件後主控第一次根層全套 rc=1、14 支 `test_dev_start` bootstrap／venv 流程測試翻紅——**變因是主控自己讓表② 乾淨 venv 回填（建 venv＋pip install）與根層全套並行**（第一次 rc=0 與第三次單獨重跑 rc=0 皆綠：`real 148.84s`、worker=9、4464 支），照實記為主控排程失誤、非 E 包缺陷；表② 第二次回填 rc=0 ⇒ `[autoclaude-pytest-snapshot:]` 4622→**4624**（E 新鎖 2 支）、錨 `autoclaude=b468881fecf3`、`--check-snapshot` rc=0；crossref rc=0（286 筆）。
+  修後再 dispatch `autoclaude-mutation-on-change.yml` 的真跑結果：<MUT_RESULT>。
+- 第十九輪誠實劃界第 3 條（「`|| true` 仍會吞崩潰」）**本補記解除**：`--CI` 讓致命錯誤 rc=1、survivor rc=0，四處 `|| true` 已移除；仍留：`mutation_baseline_lock.py` 對「全 killed ⇒ `mutmut results` 空清單」的處理是否會誤判為 empty log，待修後真跑一次現查。

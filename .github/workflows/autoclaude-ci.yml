@@ -691,8 +691,8 @@ jobs:
         run: |
           mutmut run --paths-to-mutate=autoclaude/plugins/token_guard \
                      --tests-dir=tests/plugins/token_guard \
-                     --no-progress \
-                     -p no:xdist -o addopts= || true  # mutmut 工具特性：survived mutation 退出碼 != 0；保留 || true 容忍
+                     --runner="python -m pytest -x -q -p no:xdist -o addopts= tests/plugins/token_guard" \
+                     --no-progress --CI  # DEF-200-357: mutmut 2.x 不吃裸 -p/-o，兩旗標移入 --runner；--CI 讓 survived=0 exit、fatal=1（取代 || true）
           mutmut results | tee mutation_token_guard.log
 
       # 連續 7 次達 ≥ 70%（目標 75% -5% 容忍）才鎖定 baseline
@@ -768,8 +768,8 @@ jobs:
           # 改單檔精準（source 單檔 ↔ 單測試）；W1 啟用時實跑 mutmut 驗證 kill_rate。
           mutmut run --paths-to-mutate=autoclaude/plugins/goal_synthesis_plugin.py \
                      --tests-dir=tests/plugins/test_goal_synthesis_plugin.py \
-                     --no-progress \
-                     -p no:xdist -o addopts= || true  # mutmut 工具特性：survived mutation 退出碼 != 0；保留 || true 容忍
+                     --runner="python -m pytest -x -q -p no:xdist -o addopts= tests/plugins/test_goal_synthesis_plugin.py" \
+                     --no-progress --CI  # DEF-200-357: mutmut 2.x 不吃裸 -p/-o，兩旗標移入 --runner；--CI 讓 survived=0 exit、fatal=1（取代 || true）
           mutmut results | tee mutation_goal_synthesis.log
 
       - name: Upload mutation reports (dormant)
@@ -817,8 +817,8 @@ jobs:
         run: |
           mutmut run --paths-to-mutate=autoclaude/core/orchestration \
                      --tests-dir=tests/core/orchestration \
-                     --no-progress \
-                     -p no:xdist -o addopts= || true  # mutmut 工具特性：survived mutation 退出碼 != 0；保留 || true 容忍
+                     --runner="python -m pytest -x -q -p no:xdist -o addopts= tests/core/orchestration" \
+                     --no-progress --CI  # DEF-200-357: mutmut 2.x 不吃裸 -p/-o，兩旗標移入 --runner；--CI 讓 survived=0 exit、fatal=1（取代 || true）
           mutmut results | tee mutation_coordinator.log
 
       - name: Upload mutation reports (dormant)
