@@ -33,7 +33,7 @@ class TestCheckHooksLiveness(unittest.TestCase):
             self.assertTrue(m.check_hooks_liveness())
 
     def test_matching_hooks_path_returns_true_without_warning(self) -> None:
-        """core.hooksPath 與 `<top>/tools/git-hooks` 一致且三支 hook 檔齊備 → PASS，不印警告。"""
+        """core.hooksPath 與 `<top>/tools/git-hooks` 一致且 hook 檔全部齊備 → PASS，不印警告。"""
 
         def fake_run(cmd: list[str]) -> str:
             if cmd[:2] == ["git", "rev-parse"]:
@@ -138,7 +138,7 @@ class TestResolveExpectedHooksDir(unittest.TestCase):
 
 
 class TestIsHooksEffective(unittest.TestCase):
-    """`is_hooks_effective()` 純函式：路徑比對 + 三支 hook 檔齊備 + is_file 可注入。"""
+    """`is_hooks_effective()` 純函式：路徑比對 + hook 檔全部齊備 + is_file 可注入。"""
 
     def test_empty_current_value_is_not_effective(self) -> None:
         self.assertFalse(
@@ -181,7 +181,7 @@ class TestIsHooksEffective(unittest.TestCase):
             ABS_FAKE_REPO, hooks_dir, str(hooks_dir), is_file=safe_is_file
         )
         self.assertTrue(result)
-        self.assertEqual(len(calls), 3)  # pre-commit / pre-push / post-commit
+        self.assertEqual(len(calls), len(m.HOOK_FILENAMES))  # 每支 hook 檔各問一次 is_file
 
 
 class TestRunEncodingRegression(unittest.TestCase):

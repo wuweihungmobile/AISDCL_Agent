@@ -47,9 +47,10 @@ if ($installed.Ok) {
   Write-Host '   pre-commit  → ruff / LOC / CLAUDE.md / .sh EOL（commit 時）'
   Write-Host '   pre-push    → pytest + import-linter + snapshot / ci-gate.sh（push 時）'
   Write-Host '   post-commit → 委派回 .git/hooks/post-commit（advisory，不影響 commit）'
+  Write-Host '   prepare-commit-msg／commit-msg → 補 Dev-Platform／Dev-Host trailer（commit 訊息平台 provenance，永不阻斷）'
   Write-Host '   緊急跳過    → AUTOCLAUDE_SKIP_HOOKS=1 或 git commit/push --no-verify'
 
-  # Mac/Windows 相容性優化：dispatcher hooks（pre-commit/pre-push/post-commit）皆為
+  # Mac/Windows 相容性優化：dispatcher hooks（HOOK_FILENAMES 全部，含 prepare-commit-msg／commit-msg）皆為
   # #!/usr/bin/env bash，需 POSIX shell 直譯器才能執行。core.hooksPath 設定成功不代表
   # commit/push 時真的能跑——非標準 Git for Windows 安裝（缺 Git Bash）會讓使用者要到
   # 第一次 commit/push 才遇到難懂錯誤。此處僅警告、不阻斷安裝（理論上仍可能有其他方式

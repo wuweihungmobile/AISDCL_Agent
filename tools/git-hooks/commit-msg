@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# 根層 dispatcher commit-msg hook — 編輯器關閉後對**最終**訊息補 Dev-Platform／Dev-Host trailer（DEF-200-358）。
+#
+# 為何要兩支 hook：prepare-commit-msg 跑在編輯器開啟**之前**，對「互動式 git commit、樣板 subject
+# 仍是空白佔位」的訊息若先插 trailer，使用者填完 subject 後 trailer 會與 subject 黏成同一段落而不被
+# git 認作 trailer（`%(trailers)` 讀到空；四方複審沙盒實測）。故該情境由 prepare-commit-msg 延後
+# （--defer-if-blank），改由本 hook 在最終訊息上補；非互動式（-m／-F）commit 仍由 prepare-commit-msg
+# 一次補齊。`git commit --no-verify` 會略過本 hook（git 語意）——只有「互動式＋--no-verify」會漏，
+# 讀端 dev_platform_provenance 會誠實退到內容啟發式或回 unknown。
+# 本檔只是薄殼：邏輯全在同目錄的 prepare-commit-msg，以第二參數 commit-msg-final 呼叫；語意同樣是
+# provenance 註記、永不阻斷 commit（任何失敗 exit 0）。
+# ---------------------------------------------------------------------------
+set -u
+
+if [ "${AUTOCLAUDE_SKIP_HOOKS:-0}" = "1" ]; then
+  exit 0
+fi
+
+self_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$self_dir/prepare-commit-msg" ]; then
+  bash "$self_dir/prepare-commit-msg" "${1:-}" "commit-msg-final" || true
+fi
+exit 0

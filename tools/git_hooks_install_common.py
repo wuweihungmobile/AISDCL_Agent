@@ -20,7 +20,8 @@ Write-Host 顏色、bash 的全域變數回傳慣例 —— 不再各自重寫�
       印出 `<repo根>/tools/git-hooks` 絕對路徑（正規化）到 stdout；
       不在 git repo 內時印錯誤到 stderr 並 exit 1。
   assert-hooks-present <hooks_dir> [--prefix P]
-      三支 dispatcher hook 檔（pre-commit/pre-push/post-commit）皆存在則
+      HOOK_FILENAMES 列的五支 dispatcher hook 檔（pre-commit/pre-push/post-commit/
+      prepare-commit-msg/commit-msg）皆存在則
       best-effort chmod +x 後 exit 0；缺一即印錯誤到 stderr 並 exit 1（於第一個
       缺失處停止，與原兩版逐行複製的迴圈行為一致）。
   check-installed <hooks_dir>
@@ -42,7 +43,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _stdio_utf8  # noqa: E402,F401  # Windows 非 UTF-8 終端 print(中文/❌/⚠) 防崩潰保護
 
-HOOK_FILENAMES = ("pre-commit", "pre-push", "post-commit")
+HOOK_FILENAMES = ("pre-commit", "pre-push", "post-commit", "prepare-commit-msg", "commit-msg")
 
 
 def _run(cmd: list[str]) -> tuple[int, str]:
@@ -73,7 +74,7 @@ def missing_hook_files(hooks_dir: Path) -> list[str]:
 
 
 def is_hooks_path_installed(repo_root: Path, hooks_dir: Path, current_value: str) -> bool:
-    """core.hooksPath 目前值是否等於 `hooks_dir`（正規化後）且三支 hook 檔齊備。
+    """core.hooksPath 目前值是否等於 `hooks_dir`（正規化後）且 HOOK_FILENAMES 全部齊備。
 
     `current_value` 依 git 官方支援可存相對路徑，且規範應相對於工作樹根目錄
     （`repo_root`）解讀，而非呼叫當下的 cwd（獨立複審發現：舊版直接

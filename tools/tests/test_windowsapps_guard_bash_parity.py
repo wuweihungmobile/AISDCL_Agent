@@ -84,6 +84,8 @@ _CALLER_FILES = [
     # 去跑 tools/lib/secret_scan.py，故它也成了本 SSOT 的呼叫端。此前根層 pre-commit
     # 完全不碰 python（純 bash），是本輪才長出來的呼叫點。
     _REPO_ROOT / "tools" / "git-hooks" / "pre-commit",
+    # 2026-09-22 新增（DEF-200-358）：根層 prepare-commit-msg 以 pick_repo_python 解析直譯器
+    _REPO_ROOT / "tools" / "git-hooks" / "prepare-commit-msg",
     _REPO_ROOT / "tools" / "lib" / "git_hooks_install_common.sh",
     _REPO_ROOT / "tools" / "dev_start.sh",
     _REPO_ROOT / "tools" / "bootstrap.sh",

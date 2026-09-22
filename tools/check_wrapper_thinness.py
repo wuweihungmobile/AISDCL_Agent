@@ -248,11 +248,13 @@ _PINNED_SHA256: dict[str, str] = {
     # R61（ADR-XPLAT-002 Phase 1-B，DEF-101-088 由零守門的 _EXEMPT_PAIRS 決策豁免升級
     # 為 hash 釘選）：業務邏輯本已下沉 tools/git_hooks_install_common.py 單一真相源，
     # 兩份呼叫端僅剩各自平台原生薄殼呈現層；raw 行數 50/65/40/42 皆 ≤ MAX_LINES=100。
+    # 2026-09-22（DEF-200-358）：兩份薄殼各加一行 prepare-commit-msg 說明文字（純呈現層），
+    # 以 --print-hash 現查重釘；業務邏輯仍全在 tools/git_hooks_install_common.py。
     "AutoClaude/tools/install_git_hooks.sh": (
-        "b8f4aeb6cdd9b3a3cc1f93fc7ba0415cf8d8c7846e54ce397be59984a3deef18"
+        "a91f2455649c7cffdb9b6bb60dc4029a1fdae404d102e8514e97b42b1772cf62"
     ),
     "AutoClaude/tools/install_git_hooks.ps1": (
-        "8133a5d7cd65e0c75a90e92fe3c3cbebdeccab3e73ec69ac08e1cb46cc8b0ce7"
+        "8955ba1cd01593eb2243ec6d6f9f65c15e08cfcbd0f8acb894ab496e95b611cc"
     ),
     "AISDLC_SDD/scripts/install-hooks.sh": (
         "1fd0254e28a13c143d32d44985373e52f26b065529e7c9efc40332eb3bd6833a"

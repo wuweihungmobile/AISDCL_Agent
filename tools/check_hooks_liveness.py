@@ -12,7 +12,7 @@ step 5/7）另外重寫了一份幾乎相同的判定邏輯（含 linked worktre
 永遠指向主 checkout 絕對路徑，比較基準須用主 checkout 推算，不能用當前 worktree 自己的
 根目錄），與本檔的 advisory-only 版本行為分歧（本檔原本完全不處理 linked worktree，
 在該情境下會誤判假警告）。本輪把「判定演算法」（預期 dispatcher 目錄在哪、
-core.hooksPath 目前值是否等於該目錄、三支 hook 檔是否齊備）抽成 `evaluate()` /
+core.hooksPath 目前值是否等於該目錄、HOOK_FILENAMES 列的 hook 檔是否齊備）抽成 `evaluate()` /
 `resolve_expected_hooks_dir()` / `is_hooks_effective()` 三個不含任何 git 子行程呼叫、
 不印訊息的純函式，dev_start.step_hooks() 與本檔的 `check_hooks_liveness()` 皆呼叫
 同一份 `evaluate()`；兩處唯一容許的差異在於「取得輸入的方式」（dev_start 用固定
@@ -50,7 +50,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _stdio_utf8  # noqa: E402,F401  # Windows 非 UTF-8 終端 print(中文/全形標點) 防崩潰保護
 
-HOOK_FILENAMES = ("pre-commit", "pre-push", "post-commit")
+HOOK_FILENAMES = ("pre-commit", "pre-push", "post-commit", "prepare-commit-msg", "commit-msg")
 
 
 def _run(cmd: list[str]) -> str:
@@ -118,7 +118,7 @@ def is_hooks_effective(
     *,
     is_file: Callable[[Path], bool] = lambda p: p.is_file(),
 ) -> bool:
-    """core.hooksPath 目前值是否等於 `hooks_dir` 且三支 hook 檔齊備。
+    """core.hooksPath 目前值是否等於 `hooks_dir` 且 HOOK_FILENAMES 列的 hook 檔全部齊備。
 
     `is_file` 可由呼叫端注入（例如 dev_start.py 傳入自家的 `_safe_is_file()`，
     吞掉外接碟/網路磁碟抖動造成的 OSError）；預設用裸 `Path.is_file()`，與本檔

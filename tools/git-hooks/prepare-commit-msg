@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# 根層 dispatcher prepare-commit-msg hook — 在 commit 訊息尾端補 provenance trailer（DEF-200-358）：
+#     Dev-Platform: windows|mac|linux      Dev-Host: <hostname>
+#
+# 設計說明：
+#   `.dev_env_state.json` 是 gitignored 的本機檔，只記「這台機器上次跑 dev_start 的平台」；
+#   雙機各自 clone 時它恆等於 Now，dev_start [1/7] 因此永遠說「無切換」——即使上一個
+#   commit 其實是在另一台機器上做的（2026-09-22 掌舵者當場指出）。能跨機器的載體只有
+#   git 歷史，所以每個 commit 都帶上「在哪個平台、哪台主機做的」；讀端＝
+#   tools/lib/dev_platform_provenance.py（dev_start [1/7] 呼叫）。
+#   語意＝provenance 註記，**永不阻斷 commit**：任何失敗只在 stderr 出聲並 exit 0。
+#
+# 兩種呼叫模式（第二參數）：
+#   · git 原生 prepare-commit-msg：$1＝訊息檔、$2＝來源（message／template／merge／squash／commit）、
+#     $3＝amend 或 cherry-pick 的 sha。此時訊息本體若還是空白（互動式 commit、編輯器尚未開），
+#     **延後不寫**——先插會讓 trailer 與使用者之後填的 subject 黏成同一段落而不被 git 認作
+#     trailer（四方複審沙盒實測）；非互動式（-m／-F）訊息本體已在，直接補齊。
+#   · 同目錄 commit-msg 薄殼以 $2＝commit-msg-final 轉呼叫：編輯器已關閉、訊息為最終內容，
+#     一律補齊（本體仍空白＝--allow-empty-message，不寫；只有 trailer 的訊息不成段落）。
+#
+# 寫入邏輯優先走 python SSOT（`dev_platform_provenance.py --apply-trailers`：剝除既有同鍵列再
+# 重寫、樣板尾端 `#` 註解區塊保留在 trailer 之後、既有 trailer 段落（如 Co-Authored-By）直接併入）；
+# 直譯器解析不到時退到 uname 對照表＋`git interpret-trailers`（對照表與
+# tools/lib/platform_utils.py::os_label() 同構：Darwin→mac、MINGW/MSYS/CYGWIN→windows、其餘→linux）。
+# `git commit --no-verify` 不會略過 prepare-commit-msg（git 既有語意），AUTOCLAUDE_SKIP_HOOKS=1 會
+# （與其他 dispatcher 一致）。
+# ---------------------------------------------------------------------------
+set -u
+
+if [ "${AUTOCLAUDE_SKIP_HOOKS:-0}" = "1" ]; then
+  exit 0
+fi
+
+MSG_FILE="${1:-}"
+SOURCE="${2:-}"
+[ -n "$MSG_FILE" ] && [ -f "$MSG_FILE" ] || exit 0
+MODE="prepare"
+if [ "$SOURCE" = "commit-msg-final" ]; then
+  MODE="final"
+fi
+
+TOPLEVEL="$(git rev-parse --show-toplevel 2>/dev/null)"
+if [ -z "${TOPLEVEL:-}" ]; then
+  TOPLEVEL="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+fi
+
+PY=""
+if [ -f "$TOPLEVEL/tools/lib/windowsapps_guard.sh" ]; then
+  # shellcheck disable=SC1091
+  . "$TOPLEVEL/tools/lib/windowsapps_guard.sh"
+  PY="$(pick_repo_python "$TOPLEVEL" 2>/dev/null)" || PY=""
+fi
+
+MODULE="$TOPLEVEL/tools/lib/dev_platform_provenance.py"
+if [ -n "$PY" ] && [ -f "$MODULE" ]; then
+  if [ "$MODE" = "prepare" ]; then
+    "$PY" "$MODULE" --apply-trailers "$MSG_FILE" --defer-if-blank >/dev/null 2>&1 \
+      || echo "[prepare-commit-msg dispatcher] ⚠ --apply-trailers 失敗，本次 commit 不註記平台 provenance" >&2
+  else
+    "$PY" "$MODULE" --apply-trailers "$MSG_FILE" >/dev/null 2>&1 \
+      || echo "[prepare-commit-msg dispatcher] ⚠ --apply-trailers 失敗，本次 commit 不註記平台 provenance" >&2
+  fi
+  exit 0
+fi
+
+# ── 退回路徑（解析不到 repo 直譯器）：uname 對照表 ＋ git interpret-trailers ──────────
+# 訊息本體（去 # 註解）仍是空白 ⇒ 同樣不寫（prepare 模式延後給 commit-msg；final 模式＝空訊息不註記）
+if ! grep -v '^#' "$MSG_FILE" | grep -q '[^[:space:]]'; then
+  exit 0
+fi
+case "$(uname -s 2>/dev/null)" in
+  Darwin*) label="mac" ;;
+  MINGW*|MSYS*|CYGWIN*|Windows_NT*) label="windows" ;;
+  *) label="linux" ;;
+esac
+host="$(hostname 2>/dev/null || printf '%s' "${HOSTNAME:-unknown}")"
+[ -n "$host" ] || host="unknown"
+if ! git interpret-trailers --in-place --if-exists replace \
+     --trailer "Dev-Platform: ${label}" --trailer "Dev-Host: ${host}" "$MSG_FILE" 2>/dev/null; then
+  echo "[prepare-commit-msg dispatcher] ⚠ git interpret-trailers 失敗，本次 commit 不註記平台 provenance" >&2
+fi
+exit 0

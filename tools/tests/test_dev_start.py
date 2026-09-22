@@ -407,7 +407,7 @@ class TestStepHooksLinkedWorktree(DevStartTestCase):
             main_root = Path(td) / "main"
             hooks_dir = main_root / "tools" / "git-hooks"
             hooks_dir.mkdir(parents=True)
-            for h in ("pre-commit", "pre-push", "post-commit"):
+            for h in dev_start.check_hooks_liveness.HOOK_FILENAMES:
                 (hooks_dir / h).write_text("#!/bin/sh\n", encoding="utf-8")
             main_git_dir = main_root / ".git"
             main_git_dir.mkdir()
@@ -480,7 +480,8 @@ class TestHooksConstantsConsistency(DevStartTestCase):
         m2 = re.search(r"HOOK_FILENAMES = \(([^)]+)\)", text)
         self.assertIsNotNone(m2, "git_hooks_install_common.py 的 hook 檔名清單宣告格式已變，需同步本測試")
         filenames = tuple(re.findall(r'"([^"]+)"', m2.group(1)))
-        self.assertEqual(filenames, ("pre-commit", "pre-push", "post-commit"))
+        self.assertEqual(filenames, dev_start.check_hooks_liveness.HOOK_FILENAMES)
+        self.assertIn("commit-msg", filenames)
 
 
 class TestVenvCacheHandoffBackup(DevStartTestCase):
@@ -565,7 +566,7 @@ class TestStepHooksIsFileOSError(DevStartTestCase):
             root = Path(td)
             hooks_dir = root / "tools" / "git-hooks"
             hooks_dir.mkdir(parents=True)
-            for h in ("pre-commit", "pre-push", "post-commit"):
+            for h in dev_start.check_hooks_liveness.HOOK_FILENAMES:
                 (hooks_dir / h).write_text("#!/bin/sh\n", encoding="utf-8")
             git_dir = root / ".git"
             git_dir.mkdir()

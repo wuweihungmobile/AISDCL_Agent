@@ -44,7 +44,7 @@
 4. shell 狀態不跨工具呼叫存活 ⇒ 之後所有 Python 指令一律用完整路徑 <python>，不要誤用系統 Python；5. 先讀根 CLAUDE.md，進子專案前讀它自己的 CLAUDE.md（override 級規範）；6. 繁體中文回覆。
 7. ONBOARDING §7 表② 本平台欄回填——每次啟動都跑（靠機械判準，不靠記憶）：`<python> tools/sync_onboarding_baselines.py --check-snapshot`。presumed stale 或 baseline-origin 非 self-recorded ⇒ 要回填（觸發源常是第 1 步 merge 拉進對面機器的 commit）；回填照 B 段第 3 步，排在 commit/push 之前，做完把工具輸出貼給我。
 
-完成後簡短回報：首次執行？跨平台切換？同步結果？.venv 重建？hooks 正常？有無待我處理的警告？然後等我下任務，不要自己開工。
+完成後簡短回報：首次執行？跨平台切換？（以 [1/7] 第三行「最近 commit 開發平台（git 判定）」為準——「本機上次平台」只記這台機器，雙 clone 拓撲下恆等於 Now，不可拿它回答這一問）同步結果？.venv 重建？hooks 正常？有無待我處理的警告？然後等我下任務，不要自己開工。
 ```
 
 ## 🔁 平台切換 SOP

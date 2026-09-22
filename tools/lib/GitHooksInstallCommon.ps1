@@ -136,7 +136,7 @@ function Get-DispatcherHooksDir {
 function Test-DispatcherHooksPresent {
   <#
   .SYNOPSIS
-  安裝前驗證：dispatcher hooks（pre-commit / pre-push / post-commit）必須存在，
+  安裝前驗證：dispatcher hooks（HOOK_FILENAMES 全部，含 prepare-commit-msg／commit-msg）必須存在，
   缺一即 exit 1（post-commit 為 .git/hooks/post-commit 委派器）。判定邏輯見
   tools/git_hooks_install_common.py 的 `assert-hooks-present` 子指令。
   #>
@@ -155,7 +155,7 @@ function Test-DispatcherHooksPresent {
 function Test-GitHooksPathInstalled {
   <#
   .SYNOPSIS
-  安裝後驗證：core.hooksPath 與目標「正規化後等值」且目錄實際含三支 hook 檔
+  安裝後驗證：core.hooksPath 與目標「正規化後等值」且目錄實際含全部 hook 檔
   （杜絕假 ✅）。回傳 PSCustomObject { Cur; Ok }，不 exit（由呼叫端決定成功/失敗訊息）。
   判定邏輯見 tools/git_hooks_install_common.py 的 `check-installed` 子指令。
   #>
@@ -175,7 +175,7 @@ function Test-GitHooksPathInstalled {
 function Write-GitBashMissingWarning {
   <#
   .SYNOPSIS
-  Mac/Windows 相容性警告：dispatcher hooks（pre-commit/pre-push/post-commit）皆為
+  Mac/Windows 相容性警告：dispatcher hooks（HOOK_FILENAMES 全部，含 prepare-commit-msg／commit-msg）皆為
   #!/usr/bin/env bash，需要 Git for Windows 內建的 Git Bash 才能執行；core.hooksPath
   設定成功不代表 commit/push 時真的能跑。僅警告、不阻斷安裝。
   #>

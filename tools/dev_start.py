@@ -10,7 +10,7 @@ tools/dev_start.ps1 —— 皆為薄殼，邏輯集中本檔，無 .sh/.ps1 雙�
 （有別於 check_script_parity.py 守護的三對真雙實作腳本）。
 
 七步驟：
-  [1/7] 環境偵測    — 讀 .dev_env_state.json 的 Developing（上次開發平台）vs Now
+  [1/7] 環境偵測    — Now／本機上次平台（狀態檔）／git 最近 commit 平台（trailer／啟發式）
   [2/7] GitHub 同步 — fetch + ff-only pull；髒工作樹/分叉/離線 → 明示不硬做
   [3/7] 平台切換    — Developing≠Now 時清除含絕對路徑的 .pytest_cache/.ruff_cache
   [4/7] venv/依賴   — 錯平台形狀 .venv 換手保留至 .venv-cache-<flavor>（本平台
@@ -23,9 +23,9 @@ tools/dev_start.ps1 —— 皆為薄殼，邏輯集中本檔，無 .sh/.ps1 雙�
 設計取捨（fail loud，絕不靜默硬做）：
   - 髒工作樹不自動 stash、分叉不自動 rebase、領先不自動 push —— 只明示指令。
   - 離線（fetch 失敗/逾時）→ 警告後繼續，本機整備照常完成。
-  - 狀態檔 .dev_env_state.json 為 gitignored：共用工作目錄時隨磁碟跨機
-    （Developing≠Now 可偵測），雙 clone 時各機獨立（切換恆不觸發、由同步
-    ＋依賴 hash 承擔跨機一致性）—— 兩種拓撲皆正確。
+  - 狀態檔 .dev_env_state.json 為 gitignored、只記本機：共用工作目錄時隨磁碟跨機
+    （本機切換可偵測、驅動 [3/7][4/7]）；雙 clone 時它恆等於 Now，「專案上次在哪開發」
+    改由 [1/7] 讀 git（Dev-Platform trailer／內容啟發式，dev_platform_provenance.py）。
 
 用法：
   source tools/dev_start.sh              # macOS/Linux（結尾自動啟用 .venv）
@@ -104,6 +104,7 @@ sys.path.insert(0, str(ROOT / "tools" / "lib"))
 # 拿掉此名會打壞其下數十個測試；真正呼叫端已搬到 ci_run_status.py（見下一行）。
 import ci_liveness  # noqa: E402,F401
 import ci_run_status  # noqa: E402  # DEF-101-758：最新 run 判讀本體（LOC 死結搬遷）
+import dev_platform_provenance  # noqa: E402  # DEF-200-358：[1/7] git 平台 provenance 本體（同上形態）
 import onboarding_snapshot_note  # noqa: E402  # §7 表② 指紋哨兵本體（同上搬遷形態）
 import platform_utils  # noqa: E402
 import stray_venv  # noqa: E402  # DEF-200-297：開工期雜散 venv 掃描本體
@@ -1518,7 +1519,8 @@ def step_hooks(now: str, is_repo: bool) -> None:
     cur = _git("config", "--get", "core.hooksPath").stdout.strip()
     result = check_hooks_liveness.evaluate(ROOT, gd, gcd, cur, is_file=_safe_is_file)
     if result.ok:
-        print("    ✅ core.hooksPath 指向根層 dispatcher，三支 hook 齊備")
+        hook_n = len(check_hooks_liveness.HOOK_FILENAMES)
+        print(f"    ✅ core.hooksPath 指向根層 dispatcher，{hook_n} 支 hook 齊備")
         SUMMARY["hooks"] = "正常"
         return
     reason = "未設定" if not cur else f"漂移（目前={cur}）"
@@ -1909,14 +1911,10 @@ def main(argv: list[str] | None = None) -> int:
     # 跨 OS 但同 venv flavor（mac⇄linux 皆 posix）：形狀/hash 皆分不出，須強制重裝
     cross_same_flavor = env_changed and _flavor(developing) == _flavor(now)
 
-    _hr(1, "環境偵測（Developing vs Now）")
-    print(f"    Now（當前平台）      ：{now}（host: {_platform.node()}）")
-    print(f"    Developing（上次開發）：{developing or '（無紀錄，首次執行）'}")
-    if env_changed:
-        print(f"    → 偵測到跨平台切換：{developing} → {now}，將執行切換程序")
-        SUMMARY["env"] = f"{developing} → {now}（已切換）"
-    else:
-        SUMMARY["env"] = f"{now}（無切換）" if developing else f"{now}（首次紀錄）"
+    _hr(1, "環境偵測（Now／本機上次平台／git 最近 commit 平台）")
+    SUMMARY["env"] = dev_platform_provenance.report_env_detection(
+        ROOT, now=now, developing=developing, host=_platform.node(),
+        is_repo=is_repo, print_fn=print, warn=_warn)
 
     # MUST FIX A 必要配套：POSIX 上 step_venv() 對 bootstrap 直接子行程呼叫
     # start_new_session=True，使其脫離終端機 foreground process group，Ctrl-C

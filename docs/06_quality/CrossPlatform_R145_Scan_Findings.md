@@ -538,3 +538,27 @@ DEF-200-354～356 四方獨立審查覆核收尾單人窗口：`test_wake_chain_
 `CrossPlatform_DEF200274_Parallel_Tests_Evidence.md`〈第十九輪〉。此附記為 doc-total 對帳（≥2 站點）
 另一站點寄居 `AutoSDD_improving_112.md`，同 R129～R159 寄居體例。
 round-label-ok
+
+### 〈DEF-200-358 附記（R164）〉dev_start [1/7] git 平台 provenance（2026-09-22，Windows 側單人窗口） round-label-ok
+
+<!-- guard-total:R164 --> R164 護欄層累積淨額＝ 102914 → 103490（+576）——DEF-200-358（dev_start [1/7]
+在雙 clone 拓撲下把 gitignored 本機狀態檔 `.dev_env_state.json` 當「專案上次開發平台」回報，掌舵者當場
+指出上次實在 mac）結案回歸鎖：`tools/tests/test_dev_platform_provenance.py` 新檔 +554
+（`tools/git-hooks/prepare-commit-msg`＋`commit-msg` 寫端行為：一般／`--no-verify`／amend replace／
+`AUTOCLAUDE_SKIP_HOOKS`／互動式編輯器（四方複審 P1：樣板 subject 空白時先插 trailer 會黏成同段，改由
+commit-msg 在最終訊息補）／`--allow-empty-message`／Co-Authored-By 保留／python 主路徑（沙盒建真 venv，
+複審 P2：原 43 支全走 uname 退回分支）；`tools/lib/dev_platform_provenance.py` 讀端：trailer 決定性、
+同鍵多列取最後一列（複審 P2）、ONBOARDING 平台錨與 perf `environment` 內容啟發式、矛盾／未知誠實回報；
+`apply_trailers` 純函式；dev_start [1/7] 三行報告；`HOOK_FILENAMES` 兩處常數交叉鎖）；本表自身漂移
++19（R164 新列＋`_REGRESSION_LANE_LOG` 同輪列＋`_FROZEN_PREFIX_REWRITE_LEDGER` 接鏈列、凍結前綴
+240→241、`_REPIN_LOG_HISTORY_SHA256` 同步重釘）＋`test_windowsapps_guard_bash_parity.py` 呼叫者名冊
+登記新 hook +2＋`test_dev_start.py` HOOK_FILENAMES 常數鎖改讀 SSOT +1。回歸鎖軌申報 309（＝軌上限；
+新檔全為結案回歸鎖，超出上限的 245 與名冊、常數鎖、自身漂移一併誠實歸主軌＝267，不申請一次性例外），
+主軌 267 > 0：連續上升第一輪（前一輪 R163 主軌 0）。其餘 tools/tests 檔逐檔淨額 0
+（`test_check_hooks_liveness.py`／`test_git_hooks_install_common.py` 皆為同行數改寫；
+`test_bash32_compat.py` 下限改動已撤回）。
+分桶：`InferRecentPlatformTests` 初判 prose 獨佔 +71，經在 class docstring 指名受測模組
+`tools/lib/dev_platform_provenance.py` 後正確歸 mixed，prose 4469／guard_self 3163 皆未動。
+缺陷帳本見 `docs/06_quality/AutoSDD_Defect_Log.md` DEF-200-358；實作與親驗數字見該 commit 訊息。
+此附記為 doc-total 對帳（≥2 站點）另一站點寄居 `AutoSDD_improving_112.md`，同 R129～R163 寄居體例。
+round-label-ok

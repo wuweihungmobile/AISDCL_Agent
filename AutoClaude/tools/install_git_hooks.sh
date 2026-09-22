@@ -43,6 +43,7 @@ if [ "$GIT_HOOKS_PATH_OK" = "1" ]; then
   echo "   pre-commit  → ruff / LOC / CLAUDE.md / .sh EOL（commit 時）"
   echo "   pre-push    → pytest + import-linter + snapshot / ci-gate.sh（push 時）"
   echo "   post-commit → 委派回 .git/hooks/post-commit（advisory，不影響 commit）"
+  echo "   prepare-commit-msg／commit-msg → 補 Dev-Platform／Dev-Host trailer（commit 訊息平台 provenance，永不阻斷）"
   echo "   緊急跳過    → AUTOCLAUDE_SKIP_HOOKS=1 或 git commit/push --no-verify"
 else
   echo "[install_git_hooks] ❌ 設定失敗：core.hooksPath = '$CUR_HOOKS_PATH'（目錄或 hook 檔不存在）" >&2

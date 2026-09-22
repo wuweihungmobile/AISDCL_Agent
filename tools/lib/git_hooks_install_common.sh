@@ -77,7 +77,7 @@ get_dispatcher_hooks_dir() {
   "$_GHIC_PY" "$_GIT_HOOKS_INSTALL_COMMON_PY" get-hooks-dir || _ghic_bail
 }
 
-# 安裝前驗證：dispatcher hooks（pre-commit/pre-push/post-commit）必須存在，
+# 安裝前驗證：dispatcher hooks（HOOK_FILENAMES 全部，含 prepare-commit-msg／commit-msg）必須存在，
 # 缺一即 exit 1（post-commit 為 .git/hooks/post-commit 委派器）。判定邏輯見
 # tools/git_hooks_install_common.py 的 `assert-hooks-present` 子指令。
 assert_dispatcher_hooks_present() {
@@ -86,7 +86,7 @@ assert_dispatcher_hooks_present() {
   "$_GHIC_PY" "$_GIT_HOOKS_INSTALL_COMMON_PY" assert-hooks-present "$hooks_dir" --prefix "$prefix" || _ghic_bail
 }
 
-# 安裝後驗證：core.hooksPath 解析出的目錄實際存在且含三支 hook 檔（杜絕假 ✅）。
+# 安裝後驗證：core.hooksPath 解析出的目錄實際存在且含全部 hook 檔（杜絕假 ✅）。
 # 不 exit，設全域變數 CUR_HOOKS_PATH / GIT_HOOKS_PATH_OK（bash function 無法回傳
 # 複合值），由呼叫端決定成功/失敗訊息。判定邏輯見 tools/git_hooks_install_common.py
 # 的 `check-installed` 子指令。

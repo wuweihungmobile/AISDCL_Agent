@@ -396,7 +396,9 @@ _TREE_FILE_FLOORS: dict[str, int] = {
     # 推算；方向＝上修＝判準更嚴）。
     # 🔴 R158 重釘 62→64（新增三支回歸鎖，78→81 支，過 80% 腐化上界，詳 round-label-ok
     # CrossPlatform_R158_SessionGate_Statusline_Evidence.md〈棘輪重釘〉）。
-    "tools/tests": 64,
+    # 🔴 2026-09-22 重釘 64→65（DEF-200-358 新增 test_dev_platform_provenance.py，81→82 支，
+    # 64 只剩實測的 78%，`tree_floor_problems()` 第三向逐字指示重釘為 65 ⇒ 照填，零加減推算）。
+    "tools/tests": 65,
     # 🔴 R82 包 A2（DEBT-01）：204 → 205。新增 `AutoClaude/tests/contract/test_w6_deletion.py`
     # （AC2-2 的真斷言落點）後掃描面變 257，下限只剩實測的 79% ⇒ 依 `TREE_FLOOR_RATIO` 的
     # 防腐那一向轉紅。這正是它的設計意圖：下限不跟著長就會愈來愈鬆而沒有任何東西說話。

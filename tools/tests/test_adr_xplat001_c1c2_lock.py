@@ -685,7 +685,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 8450,
+    "test_adr_xplat001_c1c2_lock.py": 8469,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 3726,
@@ -709,7 +709,8 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_context_window_parity.py": 281,
     "test_cpu_budget.py": 340,
     "test_defect_id_reference_integrity.py": 281,
-    "test_dev_start.py": 6758,
+    "test_dev_platform_provenance.py": 554,
+    "test_dev_start.py": 6759,
     "test_dev_start_ps1_lastexitcode.py": 521,
     "test_doc_env_prefix_platform_parity_r60.py": 331,
     "test_doc_loc_baseline_freshness_r60.py": 7123,
@@ -759,7 +760,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_windows_forbidden_filename_parity.py": 1003,
     "test_windows_nightly_anchor_parity.py": 135,
     "test_windows_smoke_heartbeat_doc_sync.py": 197,
-    "test_windowsapps_guard_bash_parity.py": 1042,
+    "test_windowsapps_guard_bash_parity.py": 1044,
     "test_windowsapps_guard_cross_consistency.py": 2174,
     "test_workflow_permission_concurrency_lock.py": 1612,
     "test_workflow_schedule_sync.py": 309,
@@ -2151,6 +2152,16 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "前綴 239→240＋sha）。主軌＝本列淨額−回歸鎖軌同額＝0，連續上升歸零（前兩輪 R158／R159）。"
      "逐檔清單見 CrossPlatform_R145_Scan_Findings.md〈第二十一輪附記（R163）〉；證據見 "
      "CrossPlatform_DEF200274_Parallel_Tests_Evidence.md〈第十九輪〉。"),
+    ("R164", 102914, 103490, 576,  # round-label-ok：DEF-200-358 修復窗口
+     "[非淨減法輪][回歸鎖軌部分申報，見 _REGRESSION_LANE_LOG 同輪列] DEF-200-358（dev_start "
+     "[1/7] 在雙 clone 拓撲下把本機狀態檔當「專案上次開發平台」回報）結案回歸鎖："
+     "test_dev_platform_provenance.py 新檔 +554（prepare-commit-msg／commit-msg 寫端行為含互動式"
+     "編輯器與主路徑／trailer 與內容啟發式讀端／apply_trailers／[1/7] 三行報告／HOOK_FILENAMES "
+     "交叉鎖，全數為新）＋test_windowsapps_guard_bash_parity 呼叫者名冊 +2＋test_dev_start 常數"
+     "鎖改讀 SSOT +1＋本表自身漂移 +19。回歸鎖軌申報 309（＝軌上限；新檔全為結案回歸鎖，超出"
+     "上限的 245 與名冊、常數鎖、本表自身漂移一併誠實歸主軌＝267，不申請一次性例外），主軌 > 0："
+     "連續上升第一輪（前一輪主軌 0）。逐檔清單見 "
+     "CrossPlatform_R145_Scan_Findings.md〈DEF-200-358 附記（R164）〉；帳本見 DEF-200-358 該筆。"),
 )
 
 
@@ -2524,6 +2535,11 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "隔離＋巢狀鎖兩支（+53）＋本表自身漂移（同 L1603~1617 先例全額申報，含本列與 "
      "_GUARD_LINES_REPIN_LOG 同輪列＋凍結前綴 239→240）＝72（子集＝母項）。逐項見 "
      "CrossPlatform_DEF200274_Parallel_Tests_Evidence.md〈第十九輪〉。"),
+    ("R164", 309,
+     "DEF-200-358 結案回歸鎖（記帳誠實度分類）：test_dev_platform_provenance.py 新檔 +554 "
+     "全為結案回歸鎖（prepare-commit-msg 寫端行為／trailer 與內容啟發式讀端／[1/7] 報告／"
+     "HOOK_FILENAMES 交叉鎖），但軌上限 309 ⇒ 只申報 309、餘額連同名冊與本表自身漂移歸主軌"
+     "（部分申報，同既有「回歸鎖軌部分申報」先例；不申請一次性例外）。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -2807,10 +2823,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 240
+_REPIN_LOG_FROZEN_PREFIX_LEN = 241
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "0bf86e99a2d20787e30e70f24c6a6579ab4b0c1a6e32060b878f1286e87f714b")
+    "8595fde4cf0b5bc12a9ff1e0e34d327ce27b39f09e2098087c303c1c9b9bdce3")
 
 
 def repin_log_history_digest(
@@ -3098,6 +3114,9 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R158", "b55177a84c3b", "e402247cc758", "DEF-200-333"),  # round-label-ok
     ("R159", "e402247cc758", "3765b9dedf5d", "DEF-200-345"),  # round-label-ok
     ("R163", "3765b9dedf5d", "0bf86e99a2d2", "DEF-200-354"),  # round-label-ok
+    # DEF-200-358：dev_start [1/7] git 平台 provenance 修復窗口——追加本輪稽核列並依
+    # 「追加後立即自我凍結」判例延伸前綴涵蓋該列本身（240→241）。
+    ("R164", "0bf86e99a2d2", "8595fde4cf0b", "DEF-200-358"),  # round-label-ok
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

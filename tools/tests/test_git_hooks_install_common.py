@@ -69,7 +69,7 @@ class TestMissingHookFiles(unittest.TestCase):
     def test_incomplete_hooks_dir_reports_missing_in_order(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             hooks_dir = _make_hooks_dir(Path(td), complete=False)
-            self.assertEqual(m.missing_hook_files(hooks_dir), ["post-commit"])
+            self.assertEqual(m.missing_hook_files(hooks_dir), list(m.HOOK_FILENAMES[2:]))
 
 
 class TestIsHooksPathInstalled(unittest.TestCase):
