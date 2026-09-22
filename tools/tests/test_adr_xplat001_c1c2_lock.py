@@ -685,7 +685,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 8520,
+    "test_adr_xplat001_c1c2_lock.py": 8546,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 3726,
@@ -709,8 +709,8 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_context_window_parity.py": 281,
     "test_cpu_budget.py": 340,
     "test_defect_id_reference_integrity.py": 281,
-    "test_dev_platform_provenance.py": 844,
-    "test_dev_start.py": 6759,
+    "test_dev_platform_provenance.py": 921,
+    "test_dev_start.py": 6794,
     "test_dev_start_ps1_lastexitcode.py": 521,
     "test_doc_env_prefix_platform_parity_r60.py": 331,
     "test_doc_loc_baseline_freshness_r60.py": 7123,
@@ -2183,6 +2183,19 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "既有測試補斷言）＋本表自身漂移 +18（本列＋回歸鎖軌列＋接鏈列＋凍結前綴 242→243＋sha）。"
      "全額歸回歸鎖軌（結案鎖與記帳誠實度分類，同 R165 先例），主軌 0：維持歸零（前輪 R165 亦 0）。"
      "逐檔清單見 CrossPlatform_R145_Scan_Findings.md〈DEF-200-360 附記（R166）〉；帳本見該筆。"),
+    ("R167", 104013, 104151, 138,  # round-label-ok：DEF-200-362 修復窗口
+     "[非淨減法輪][回歸鎖軌全額申報，見 _REGRESSION_LANE_LOG 同輪列] DEF-200-362（掌舵者要求"
+     "四方覆核 DEF-200-360：跨機切換摘要句過去只有兩個「無切換」分支套 _note_unfetched，"
+     "「跨機切換」分支漏套——離線／detached／無 origin/<branch> 分支時第三行已有警語，摘要"
+     "卻乾淨地說「跨機切換」；另 [1/7] fetch 最長 120 秒零進度提示體感像當機；ONBOARDING／"
+     "useMacWin 缺分叉多印遠端側行與第二種警語（未與 origin 比對）說明）結案回歸鎖："
+     "test_dev_platform_provenance.py（跨機切換摘要分支補套 _note_unfetched 的離線／"
+     "detached／新分支三情境 subTest／fetch 進度行先於第三行的順序斷言／_note_unfetched "
+     "直接鎖／既有測試補「未 fetch」「未與 origin 比對」後綴斷言）＋test_dev_start.py"
+     "（真實接線序列 report_env_detection→step_sync 只打一次 fetch 的整合鎖）＋本表自身"
+     "漂移 +26（本列＋回歸鎖軌列＋接鏈列＋凍結前綴 243→244＋sha＋cap 到期兌現）。全額歸"
+     "回歸鎖軌（結案鎖與記帳誠實度分類，同 R166 先例），主軌 0：維持歸零（前輪 R166 亦 0）。"
+     "逐檔清單見 CrossPlatform_R145_Scan_Findings.md〈DEF-200-362 附記（R167）〉；帳本見該筆。"),
 )
 
 
@@ -2294,6 +2307,8 @@ _REPIN_NET_CAP_SCHEDULE: tuple[tuple[int, int], ...] = (
                   # （`_REPIN_NET_CAP_DUE_ROUND=161`）。同輪重新武裝：步伐維持 1（整數下限）。
     (165, 534),   # 到期輪兌現：cap 降到到期目標本身（同既有判例）。本輪剛好到期 round-label-ok
                   # （`_REPIN_NET_CAP_DUE_ROUND=165`）。同輪重新武裝：步伐維持 1（整數下限）。
+    (167, 533),   # 到期輪兌現：cap 降到到期目標本身（同既有判例）。本輪剛好到期 round-label-ok
+                  # （`_REPIN_NET_CAP_DUE_ROUND=167`）。同輪重新武裝：步伐維持 1（整數下限）。
 )
 #: 生效點＝首列輪號、現行上限＝末列上限，**皆由表導出不另立常數**（R73 判例：一份知識一個家）。
 _REPIN_ROUND_CAP_SINCE = _REPIN_NET_CAP_SCHEDULE[0][0]
@@ -2575,6 +2590,13 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "回歸鎖（ResolveFrontierTests 前沿判定分支／接線靜態鎖／既有測試補斷言）＋本表自身漂移"
      "（同 R165 先例全額申報，含本列、稽核列、接鏈列、前綴 242→243、sha）＝308（子集＝母項）。"
      "逐項見 CrossPlatform_R145_Scan_Findings.md〈DEF-200-360 附記（R166）〉。"),
+    ("R167", 138,
+     "DEF-200-362 結案回歸鎖（記帳誠實度分類）：test_dev_platform_provenance.py 與 "
+     "test_dev_start.py 全為結案回歸鎖（跨機切換摘要句補套 _note_unfetched 的三情境／"
+     "fetch 進度行順序斷言／既有測試補後綴斷言／dev_start 真實接線只打一次 fetch 的"
+     "整合鎖）＋本表自身漂移 +26（同 R166 先例全額申報，含本列、稽核列、接鏈列、"
+     "前綴 243→244、sha、cap 到期兌現）＝138（子集＝母項）。逐項見 "
+     "CrossPlatform_R145_Scan_Findings.md〈DEF-200-362 附記（R167）〉。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -2791,8 +2813,9 @@ def net_cap_schedule_problems(
 #: R157 兌現：cap 降到目標本身（537，見 `(157, 537)` 列），重新武裝：目標 536＜cap round-label-ok
 #: R159 兌現：cap 降到目標本身（536，見 `(159, 536)` 列），重新武裝：目標 535＜cap round-label-ok
 #: R165 兌現：cap 降到目標本身（534，見 `(165, 534)` 列），重新武裝：目標 533＜cap round-label-ok
-_REPIN_NET_CAP_DUE_ROUND = 167  # round-label-ok：到期輪＝兌現輪+2（lookahead 判準的活體對照）
-_REPIN_NET_CAP_DUE_TARGET = 533  # 步伐 1，嚴格低於 cap 534（本輪重新武裝） round-label-ok
+#: R167 兌現：cap 降到目標本身（533，見 `(167, 533)` 列），重新武裝：目標 532＜cap round-label-ok
+_REPIN_NET_CAP_DUE_ROUND = 169  # round-label-ok：到期輪＝兌現輪+2（lookahead 判準的活體對照）
+_REPIN_NET_CAP_DUE_TARGET = 532  # 步伐 1，嚴格低於 cap 533（本輪重新武裝） round-label-ok
 
 #: DEF-200-121：到期輪自身的後設鎖——`_REPIN_NET_CAP_DUE_ROUND` 只准落在「最近稽核輪
 #: ＋ lookahead」以內（歷史母體 85..113 的到期輪一律＝上一次兌現輪 +2）。可延期的到期日
@@ -2859,10 +2882,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 243
+_REPIN_LOG_FROZEN_PREFIX_LEN = 244
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "cf1dc5dab8c1d6563e7fc8089b1cf19ab52c70b868acc9a54d9b320ea3d8245b")
+    "c570fe4d14e37b7a07d7e922b9da30cdcc034d5f36e7446e12dd80ab53d67029")
 
 
 def repin_log_history_digest(
@@ -3159,6 +3182,9 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # DEF-200-360：dev_start [1/7] fetch-aware 前沿判定窗口——追加本輪稽核列並依「追加後立即
     # 自我凍結」判例延伸前綴涵蓋該列本身（242→243）。
     ("R166", "c4350df6e968", "cf1dc5dab8c1", "DEF-200-360"),  # round-label-ok
+    # DEF-200-362：跨機切換摘要句漏套 _note_unfetched 修復窗口——追加本輪稽核列並依
+    # 「追加後立即自我凍結」判例延伸前綴涵蓋該列本身（243→244）。
+    ("R167", "cf1dc5dab8c1", "c570fe4d14e3", "DEF-200-362"),  # round-label-ok
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

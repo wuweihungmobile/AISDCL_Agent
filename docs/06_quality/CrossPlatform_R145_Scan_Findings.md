@@ -614,3 +614,44 @@ origin/main 同步」、rc=0）；四方實作審查 ACCEPT_WITH_FIXES ×4、零
 缺陷帳本見 `docs/06_quality/AutoSDD_Defect_Log.md` DEF-200-360／361；本附記為 doc-total 對帳（≥2 站點）另一站點寄居
 `AutoSDD_improving_112.md`，同 R129～R165 寄居體例。
 round-label-ok
+
+### 〈DEF-200-362 附記（R167）〉跨機切換摘要句漏套 _note_unfetched（2026-09-23，Windows 側單人窗口） round-label-ok
+
+<!-- guard-total:R167 --> R167 護欄層累積淨額＝ 104013 → 104151（+138）——DEF-200-362（掌舵者要求四方覆核
+DEF-200-360：核心修法確認正確，但摘要句過去只有兩個「無切換」分支套 `_note_unfetched`，「跨機切換」分支漏套——
+離線／detached／無 origin/<branch> 分支時第三行已有警語，摘要卻乾淨地說「跨機切換」，誤導成「已與 origin
+比對過」；另 [1/7] fetch 最長 120 秒零進度提示、體感像當機；ONBOARDING／useMacWin 缺分叉多印遠端側行與第二種
+警語（未與 origin 比對）說明）逐項：Q1（`report_env_detection` 的 git_label 分支與分叉分支補套
+`_note_unfetched(…, fr)`）；A1（新增 `FETCH_TIMEOUT_S = 120` 常數取代 `resolve_frontier`／`fetch_or_reuse`
+兩處字面 120，`fetch=True` 時 is_repo 分支呼叫 `resolve_frontier` 前先印一行進度）；S3（`resolve_frontier`
+docstring「零 subprocess」訂正為「本函式零 subprocess（`infer_recent_platform` 仍會跑本機唯讀 git，只是不打
+網路）」）；D1～D4（既有測試補斷言、新增 `_note_unfetched` 直接鎖、`ResolveFrontierTests` 補三情境
+subTest：detached HEAD／fetch 失敗／本機新分支，各自驗第三行與摘要句的警語一致；`test_dev_start.py` 新增
+`TestStepSyncRealGitRepo.test_report_env_detection_then_step_sync_fetches_only_once`——真實接線序列
+`report_env_detection(fetch=True)` → `step_sync` 用計數 wrapper 證明整次只打一次 `git fetch`，且印出的行含
+「[1/7] 已 fetch 過則沿用那次結果」與「已是最新」）。結案回歸鎖：`test_dev_platform_provenance.py`／
+`test_dev_start.py` 兩檔＋本表自身漂移 +26（本列＋回歸鎖軌列＋接鏈列＋凍結前綴 243→244＋sha＋cap 到期兌現：
+`_REPIN_NET_CAP_DUE_ROUND=167` 本輪剛好到期，`_REPIN_NET_CAP_SCHEDULE` 追加 `(167, 533)`，同輪重新武裝下
+一段目標 532）。回歸鎖軌全額申報 138（結案鎖與記帳誠實度分類，同 R166 先例），主軌 0：維持歸零（前輪 R166
+亦 0）。
+生產面改動（不計護欄行數）：`tools/lib/dev_platform_provenance.py`（`FETCH_TIMEOUT_S` 常數、`_note_unfetched`
+兩處補套、fetch 進度提示行、docstring 訂正），`tools/dev_start.py` 一行未動（SPECIAL_FILES 餘裕刻意留白，
+唯讀覆核明令）。文件：ONBOARDING §2.1 ①段補分叉多印行／第二種警語／fetch 進度時長，雙 clone 拓撲段補
+「另一台機器有 commit 尚未 push 時本機看不到屬正確、不是 bug」；useMacWin 第 1 步 d 與回報行同步補齊。
+親驗（主控本場 tool_result）：`test_dev_platform_provenance.py` Ran 76 OK；`test_dev_start.py` Ran 286 OK
+（skipped=38，較上輪 285 多 1）；`test_adr_xplat001_c1c2_lock.py` 全套綠、`--print-guard-lines` 淨額
+104151→104151 (+0)、逐檔漂移 0 支；根層全套 4548 tests rc=0（下限 4543）；ruff 4 檔／crossref／LOC 皆 rc=0；
+dev_start 真跑 [1/7] 在第三行前印出進度行、[2/7] 沿用同一次 fetch。複審鏡（Sonnet，唯讀對抗驗修）：ACCEPT、
+零 P1/P2——突變 m1（拆跨機切換分支的 `_note_unfetched` 包裝）令 4 支測試紅、m2（刪 fetch 進度行）令 1 支紅，
+兩者皆有鑑別力；真 git 沙盒 (a)～(e) 五案全 PASS。兩則 P3 觀察登記於此、刻意不為它們再動 tools/tests（避免第二次
+棘輪重釘）：F1＝「分叉」分支的 `_note_unfetched` 包裝在 `other_rev ⇒ compared=True` 不變式下恆為 no-op，保留為
+防禦性一致性包裝；F2＝`_note_unfetched` 的「未與 origin 比對」分支只由四支整合測試（detached／本機新分支／計數
+失敗／Q1 三情境）間接覆蓋、無直接單元鎖。
+🔴 誠實劃界：mac 側本輪仍未真機驗（新碼只用 git plumbing、無平台分支，理論上零風險，但未實測）；A2（
+`resolve_frontier` 硬編 `origin/<branch>` 而非 `@{upstream}`，與既有 `step_sync` 同構）刻意不在本輪單邊改
+——兩者必須同時改否則 [1/7]／[2/7] 判定會不一致，列為已知邊界、非本輪缺陷；DEF-200-361（CI 四個
+linked-worktree 拒絕 step 補標記斷言）仍 open，與本輪無關；上一輪（DEF-200-360）修復前全套 rc=1 的來源經
+本輪確認為額度哨兵 leak_fence 假紅（[他包回報]），本輪重跑未重現。
+缺陷帳本見 `docs/06_quality/AutoSDD_Defect_Log.md` DEF-200-362；本附記為 doc-total 對帳（≥2 站點）另一站點
+寄居 `AutoSDD_improving_112.md`，同 R129～R166 寄居體例。
+round-label-ok

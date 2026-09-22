@@ -51,6 +51,9 @@ _ANCHOR_RE = re.compile(r"snapshot-fingerprints-(win32|darwin):")
 _PERF_ENV_RE = re.compile(r'environment\s*=\s*"(win32|darwin|linux)-local"')
 DEFAULT_MAX_COMMITS = 20
 _GIT_TIMEOUT_S = 20
+#: resolve_frontier／fetch_or_reuse 的 fetch timeout 預設值（DEF-200-362 A1；
+#: dev_start.py [2/7] 呼叫 fetch_or_reuse 時傳的字面 120 與本常數同值，但該檔凍結不引用本常數）。
+FETCH_TIMEOUT_S = 120
 
 
 def label_for_sys_platform(sys_platform: str) -> str:
@@ -120,7 +123,9 @@ def _run_git_raw(repo_root: Path, *args: str, timeout_s: int) -> subprocess.Comp
 _PREFETCH: dict[Path, subprocess.CompletedProcess] = {}
 
 
-def fetch_or_reuse(repo_root: Path, *, timeout_s: int = 120) -> subprocess.CompletedProcess:
+def fetch_or_reuse(
+    repo_root: Path, *, timeout_s: int = FETCH_TIMEOUT_S
+) -> subprocess.CompletedProcess:
     """`dev_start.py` [2/7] `step_sync` 的 fetch 入口：[1/7] 已 fetch 過就沿用那次結果，
     否則自己補做一次——兩種呼叫順序（先 [1/7] 再 [2/7]，或單獨呼叫）皆只打一次網路。"""
     key = repo_root.resolve()
@@ -285,11 +290,12 @@ def infer_recent_platform(
     return Verdict(None, "unknown", shas[0][:7], 0, len(shas), evidence=[reason, *notes])
 
 
-def resolve_frontier(repo_root: Path, *, fetch: bool, timeout_s: int = 120) -> Frontier:
+def resolve_frontier(repo_root: Path, *, fetch: bool, timeout_s: int = FETCH_TIMEOUT_S) -> Frontier:
     """判定 [1/7] 該從哪個 rev 掃 provenance（DEF-200-360：fetch-aware 前沿）。
 
-    `fetch=False`（`--no-sync`／CLI 預設）：零 subprocess，只回本機 HEAD——剛從另一台機器
-    切換過來時這一行可能過時，但代價是不打網路。`fetch=True`：真的 `git fetch origin
+    `fetch=False`（`--no-sync`／CLI 預設）：本函式零 subprocess（`infer_recent_platform` 仍會跑
+    本機唯讀 git，只是不打網路），只回本機 HEAD——剛從另一台機器切換過來時這一行可能過時，
+    但代價是不打網路。`fetch=True`：真的 `git fetch origin
     --prune` 一次（結果進 `_PREFETCH`，供 `fetch_or_reuse()` 沿用，[2/7] 不重複打網路），
     本機落後 origin 時前沿改成 `origin/<branch>`（讀的是對面機器剛 push 的 commit）；
     本機領先或同步則仍用本機 HEAD；分叉則兩側都要看，`other_rev` 交回遠端側供呼叫端另判。
@@ -401,6 +407,9 @@ def report_env_detection(
     if not is_repo:
         print_fn("    最近 commit 開發平台    ：（非 git repo，略）")
     else:
+        if fetch:
+            print_fn(f"    git fetch origin --prune …（前沿判定用；最長 {FETCH_TIMEOUT_S} 秒，"
+                     "離線可加 --no-sync 略過）")
         fr = resolve_frontier(repo_root, fetch=fetch)
         verdict = infer_recent_platform(repo_root, rev=fr.rev)
         other = infer_recent_platform(repo_root, rev=fr.other_rev) if fr.other_rev else None
@@ -431,11 +440,12 @@ def report_env_detection(
         summary = f"{developing} → {now}（本機已切換）"
     elif git_label and git_label != now:
         take = f"，取 {fr.rev}" if fr and fr.rev != "HEAD" else ""
-        summary = f"{git_label} → {now}（跨機切換，git 判定{take}）"
+        summary = _note_unfetched(f"{git_label} → {now}（跨機切換，git 判定{take}）", fr)
     elif fr and fr.other_rev and other and other.label and other.label != now:
         undeterminable = "；本機側無法判定" if git_label is None else ""
-        summary = (f"{other.label}（{fr.remote_ref} 側）→ {now}"
-                   f"（跨機切換，git 判定，分叉{undeterminable}）")
+        summary = _note_unfetched(
+            f"{other.label}（{fr.remote_ref} 側）→ {now}"
+            f"（跨機切換，git 判定，分叉{undeterminable}）", fr)
     elif git_label:
         summary = _note_unfetched(f"{now}（無切換；git 最近 commit 亦為 {git_label}）", fr)
     elif verdict is not None:

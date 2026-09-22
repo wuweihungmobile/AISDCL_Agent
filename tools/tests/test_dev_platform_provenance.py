@@ -183,6 +183,15 @@ class PureFunctionTests(unittest.TestCase):
         self.assertEqual(labels, set())
         self.assertEqual(evidence, [])
 
+    def test_note_unfetched_passes_through_none_frontier(self):
+        """D2（DEF-200-362）：fr=None（非 git repo 分支不會傳 Frontier）不得誤加警語。"""
+        self.assertEqual(m._note_unfetched("summary", None), "summary")
+
+    def test_note_unfetched_appends_parenthetical_when_summary_has_none(self):
+        """D2：summary 不以「）」結尾時（無括號可併）改開新括號附警語。"""
+        out = m._note_unfetched("plain", m.Frontier(rev="HEAD"))  # 預設 fetched=False
+        self.assertEqual(out, "plain（未 fetch，只反映本機 HEAD）")
+
 
 class InferRecentPlatformTests(_SandboxMixin, unittest.TestCase):
     """守 tools/lib/dev_platform_provenance.py 讀端：trailer 優先、矛盾／未知不猜。"""
@@ -477,7 +486,8 @@ class ReportEnvDetectionTests(unittest.TestCase):
         summary, lines, warn, _ = self._run(now="windows", developing="windows",
                                              is_repo=True, verdict=v)
         self.assertTrue(any("→ 跨機切換（依 git）：mac → windows" in ln for ln in lines))
-        self.assertEqual(summary, "mac → windows（跨機切換，git 判定）")
+        self.assertEqual(summary,
+                         "mac → windows（跨機切換，git 判定；未 fetch，只反映本機 HEAD）")
         warn.assert_not_called()
 
     def test_git_and_now_agree_reports_no_switch(self):
@@ -520,6 +530,28 @@ class ReportEnvDetectionTests(unittest.TestCase):
                       evidence=["ONBOARDING snapshot-fingerprints-darwin 錨變動"])
         _, lines, *_ = self._run(now="mac", developing="mac", is_repo=True, verdict=v)
         self.assertTrue(any("往回第 2 個 commit" in ln for ln in lines))
+
+    def test_fetch_true_prints_progress_line_before_third_line_fetch_false_does_not(self):
+        """A1（DEF-200-362）：fetch=True 時 fetch 最長 120 秒零輸出體感像當機，[1/7] 要先印
+        一行進度；fetch=False（--no-sync／CLI 預設）不打網路，不該印這行。"""
+        fr = m.Frontier(rev="HEAD", fetched=True, compared=True, note="x")
+        v = _verdict("windows", "trailer")
+        with mock.patch.object(m, "resolve_frontier", return_value=fr), \
+                mock.patch.object(m, "infer_recent_platform", return_value=v):
+            lines_true: list[str] = []
+            m.report_env_detection(Path("."), now="windows", developing="windows", host="h",
+                                   is_repo=True, print_fn=lines_true.append,
+                                   warn=mock.Mock(), fetch=True)
+            lines_false: list[str] = []
+            m.report_env_detection(Path("."), now="windows", developing="windows", host="h",
+                                   is_repo=True, print_fn=lines_false.append,
+                                   warn=mock.Mock(), fetch=False)
+        progress_idx = [i for i, ln in enumerate(lines_true) if "git fetch origin --prune" in ln]
+        third_idx = [i for i, ln in enumerate(lines_true) if "最近 commit 開發平台" in ln]
+        self.assertEqual(len(progress_idx), 1, lines_true)
+        self.assertEqual(len(third_idx), 1, lines_true)
+        self.assertLess(progress_idx[0], third_idx[0], lines_true)
+        self.assertFalse(any("git fetch origin --prune" in ln for ln in lines_false), lines_false)
 
 
 class CliTests(_SandboxMixin, unittest.TestCase):
@@ -651,6 +683,7 @@ class ResolveFrontierTests(_SandboxMixin, unittest.TestCase):
             lines)
         self.assertIn("分叉", summary)
         self.assertIn("跨機切換", summary)
+        self.assertNotIn("本機側無法判定", summary)  # D1：本機側已知（windows），不可誤加
 
     def test_no_sync_runs_zero_subprocesses(self):
         with mock.patch.object(m.subprocess, "run",
@@ -728,6 +761,11 @@ class ResolveFrontierTests(_SandboxMixin, unittest.TestCase):
         self.assertFalse(fr.compared)
         self.assertIn("origin/feature-x 不存在", fr.note)
 
+        summary = m.report_env_detection(
+            win_sim, now="windows", developing="windows", host="h", is_repo=True,
+            print_fn=lambda *_: None, warn=mock.Mock(), fetch=True)
+        self.assertIn("未與 origin 比對，只反映本機 HEAD", summary)  # D3
+
     def test_diverged_with_undeterminable_remote_side_prints_reason(self):
         """QA-360-2：遠端側 commit 無 trailer、無內容線索時，不可誤宣告跨機切換。"""
         origin, win_sim, mac_sim = self._make_clone_pair()
@@ -760,10 +798,49 @@ class ResolveFrontierTests(_SandboxMixin, unittest.TestCase):
 
         with mock.patch.object(m, "_run_git", side_effect=wrapper):
             fr = m.resolve_frontier(win_sim, fetch=True)
+            summary = m.report_env_detection(
+                win_sim, now="windows", developing="windows", host="h", is_repo=True,
+                print_fn=lambda *_: None, warn=mock.Mock(), fetch=True)
         self.assertEqual(fr.rev, "HEAD")
         self.assertTrue(fr.fetched)
         self.assertFalse(fr.compared)
         self.assertIn("計數失敗", fr.note)
+        self.assertIn("未與 origin 比對，只反映本機 HEAD", summary)  # D3
+
+    def test_cross_machine_switch_summary_carries_the_right_warning_per_frontier_failure(self):
+        """Q1（DEF-200-362）：過去只有兩個「無切換」摘要分支套 `_note_unfetched`，「跨機切換」
+        分支漏套——離線／detached／無 origin 分支時第三行已有警語，摘要卻乾淨地說「跨機切換」，
+        誤導成「已與 origin 比對過」。用三種「fetch 成功卻沒比對／fetch 失敗」情境收攏在一支。
+        """
+        origin, win_sim, mac_sim = self._make_clone_pair()
+        self.addCleanup(m.consume_prefetch, win_sim)
+        self._commit_with_trailer(win_sim, "feat: mac work", "mac", "mbp")  # 不 push
+
+        def _run():
+            lines: list[str] = []
+            summary = m.report_env_detection(
+                win_sim, now="windows", developing="windows", host="h", is_repo=True,
+                print_fn=lines.append, warn=mock.Mock(), fetch=True)
+            return summary, lines
+
+        with self.subTest("detached HEAD"):
+            self._git_ok("checkout", "-q", "--detach", "HEAD", cwd=win_sim)
+            summary, _ = _run()
+            self.assertIn(
+                "跨機切換，git 判定；未與 origin 比對，只反映本機 HEAD", summary)
+
+        with self.subTest("fetch 失敗"):
+            self._git_ok("remote", "set-url", "origin",
+                         "file:///no-such-path-devplat-q1", cwd=win_sim)
+            summary, lines = _run()
+            self.assertIn("跨機切換，git 判定；未 fetch，只反映本機 HEAD", summary)
+            self.assertTrue(any("fetch 失敗" in ln for ln in lines), lines)
+
+        with self.subTest("本機新分支"):
+            self._git_ok("remote", "set-url", "origin", str(origin), cwd=win_sim)
+            self._git_ok("checkout", "-q", "-b", "feature-z", cwd=win_sim)
+            summary, _ = _run()
+            self.assertIn("未與 origin 比對", summary)
 
     def test_diverged_with_unknown_local_side_still_declares_remote_switch(self):
         """SD-1：分叉且本機側 unknown 時，遠端側事實仍是已知的，仍要宣告跨機切換，

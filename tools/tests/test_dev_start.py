@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import ast
+import contextlib
 import ctypes
 import datetime
 import inspect
@@ -890,6 +891,40 @@ class TestStepSyncRealGitRepo(DevStartTestCase):
 
             self.assertEqual((local / "f.txt").read_text(encoding="utf-8"), "v2-origin\n")
             self.assertIn("已更新", dev_start.SUMMARY.get("sync", ""))
+
+    def test_report_env_detection_then_step_sync_fetches_only_once(self):
+        """D4（DEF-200-362）：dev_start 真實呼叫序列「[1/7] report_env_detection(fetch=True)
+        → [2/7] step_sync」整次只打一次 `git fetch`——DEF-200-360 的「共用一次 fetch」承諾
+        是在 dev_platform_provenance 自己的單元測試裡驗證的，本測試用 dev_start 的真實接線
+        （而非兩支函式各自被直接呼叫）證明承諾在生產路徑下也成立。"""
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            origin, local = self._make_pair(base)
+            dp = dev_start.dev_platform_provenance
+            self.addCleanup(dp.consume_prefetch, local)
+            fetch_calls: list[tuple] = []
+            orig_run_git_raw = dp._run_git_raw
+
+            def counting(repo_root, *args, **kwargs):
+                if "fetch" in args:
+                    fetch_calls.append(args)
+                return orig_run_git_raw(repo_root, *args, **kwargs)
+
+            env_lines: list[str] = []
+            with mock.patch.object(dp, "_run_git_raw", side_effect=counting), \
+                    mock.patch.object(dev_start, "ROOT", local), \
+                    mock.patch.object(dev_start, "_nightly_running", return_value=False):
+                dp.report_env_detection(
+                    local, now="windows", developing="windows", host="h",
+                    is_repo=True, print_fn=env_lines.append, warn=mock.Mock(), fetch=True)
+                sync_buf = io.StringIO()
+                with contextlib.redirect_stdout(sync_buf):
+                    dev_start.step_sync(no_sync=False, is_repo=True)
+
+            self.assertEqual(len(fetch_calls), 1, fetch_calls)
+            sync_out = sync_buf.getvalue()
+            self.assertIn("[1/7] 已 fetch 過則沿用那次結果", sync_out)
+            self.assertIn("已是最新", sync_out)
 
 
 class TestPyprojectTopLevelTableRoster(DevStartTestCase):
