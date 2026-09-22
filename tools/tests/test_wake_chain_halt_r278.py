@@ -18,6 +18,7 @@ import json
 import os
 import sys
 import unittest
+import unittest.mock
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -46,6 +47,41 @@ def _load_claim_guard():
     return module
 
 os.environ[guard.SENTINEL_OFF_ENV] = "1"  # 本檔全程不准碰真排程器（同既有測試慣例）
+
+#: `setUpModule` 進來之前 `ENV_SPEC` 各鍵（`SENTINEL_OFF_ENV` 除外）的值，只捕捉一次。
+_ENV_SPEC_ORIGINALS: dict[str, str | None] = {}
+_ENV_SPEC_CAPTURED = False
+
+
+def _pin_env_spec_off() -> None:
+    """摘掉 `quota_policy.ENV_SPEC` 除 `guard.SENTINEL_OFF_ENV` 外的每一鍵（冪等）。
+
+    DEF-200-354：ENV_SPEC 洩漏會讓 `quota_gate()` 提前 `return 0`，四支 HaltLatch／
+    PrepareLatch 斷言落空；同模式見 `test_context_budget_guard.py._pin_sentinel_off`
+    （pin 從 ENV_SPEC 導出，不手抄）。
+    """
+    for spec in quota_policy.ENV_SPEC:
+        if spec.name != guard.SENTINEL_OFF_ENV:
+            os.environ.pop(spec.name, None)
+
+
+def _unpin_env_spec_off() -> None:
+    """還原成 `setUpModule` 進來前的值（冪等）。"""
+    for name, original in _ENV_SPEC_ORIGINALS.items():
+        os.environ.pop(name, None)
+        if original is not None:
+            os.environ[name] = original
+
+
+def setUpModule() -> None:  # noqa: N802 — unittest 的固定名稱
+    global _ENV_SPEC_ORIGINALS, _ENV_SPEC_CAPTURED
+    if not _ENV_SPEC_CAPTURED:
+        _ENV_SPEC_ORIGINALS = {spec.name: os.environ.get(spec.name)
+                               for spec in quota_policy.ENV_SPEC
+                               if spec.name != guard.SENTINEL_OFF_ENV}
+        _ENV_SPEC_CAPTURED = True
+    _pin_env_spec_off()
+    unittest.addModuleCleanup(_unpin_env_spec_off)
 
 
 def _decision(pct: float, resets_in: float | None) -> quota_policy.Decision:
@@ -554,8 +590,8 @@ class HaltLatchIsSessionScopedTest(unittest.TestCase):
     （`f"halt@{kind}@{reset[:16]}"`），而 `quota_latch_path()` 是 machine-wide 單一檔案。
     同一個 reset 視窗內，第二個撞 halt 的 session 會被第一個 session 的閂鎖擋下
     （`key in latch_read(latch)`），於是永遠不呼叫 `quota_halt_actions()`——不寫自己的
-    halt 標記，也不重新嘗試 spawn。本機此刻真的同時掛兩支哨兵
-    （`8d8773f9-…`／`96d7f386-…`），正是本測試防的場景。
+    halt 標記，也不重新嘗試 spawn。原始觀測（立案當時本機同時掛兩支哨兵）搬至
+    CrossPlatform_R86_Guard_Repin_Evidence.md §G。
     """
 
     def setUp(self) -> None:
@@ -686,6 +722,23 @@ class PrepareLatchIsSessionScopedTest(unittest.TestCase):
         self._gate("sidC-d22prepare")
         self.assertEqual(len(self.plan_calls), 1,
                          "同一 session 在同一視窗重複 prepare 不該重新寫任務書")
+
+
+class EnvSpecLeakIsolationTest(unittest.TestCase):
+    """巢狀鎖（DEF-200-354）：module pin 必須真的擋得住洩漏、且清單不是手抄。"""
+
+    def test_pin_leaves_no_env_spec_key_leaked(self) -> None:
+        """兩種鍵型各注入一次：旗標鍵（`QUOTA_OFF_ENV`）與數值鍵
+        （`AUTOSDD_QUOTA_HALT_PCT`）洩漏時都要被 pin 拔掉。"""
+        for name, leaked in ((qg.QUOTA_OFF_ENV, "1"), ("AUTOSDD_QUOTA_HALT_PCT", "1")):
+            with self.subTest(name=name), unittest.mock.patch.dict(os.environ, {name: leaked}):
+                _pin_env_spec_off()
+                self.assertNotIn(name, os.environ, f"pin 沒有拔掉洩漏進來的 {name}")
+
+    def test_pin_set_is_derived_from_env_spec_not_copied(self) -> None:
+        """pin 集合須涵蓋 `ENV_SPEC` 全名稱集合——手抄清單在新增鍵時不會自動跟長。"""
+        self.assertGreaterEqual(set(_ENV_SPEC_ORIGINALS) | {guard.SENTINEL_OFF_ENV},
+                                {spec.name for spec in quota_policy.ENV_SPEC})
 
 
 class ClaimGuardCatchesAutoContinueWithoutCredentialTest(unittest.TestCase):

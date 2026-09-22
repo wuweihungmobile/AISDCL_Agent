@@ -228,9 +228,58 @@ def _check_pg_dsn_shape() -> None:
             raise pytest.UsageError(f"[{key}] {problem}")
 
 
+# ── DEF-200-355：呼叫端殼層洩入的 `AUTOSDD_QUOTA_*` 會炸 TokenGuardConfig invariant ──
+#
+# `autoclaude/utils/config.py` 的 `_quota_env` 讀根層同名環境變數（R82 C3 刻意的跨
+# 專案橋接，白名單只有這一個前綴），供 `TokenGuardConfig.quota_halt_pct` 必須 >
+# `quota_throttle_pct` 這條合法 invariant 用。橋接本身沒有錯；錯在**測試 session
+# 沒有隔離它**——呼叫端只 export 一個鍵（例如 `AUTOSDD_QUOTA_HALT_PCT=1`）而沒有同時
+# export 另外兩個時，本場 session 內任何一支建構 `TokenGuardConfig()` 的測試都會
+# 撞上 `pydantic.ValidationError`（實測：`tests/test_gap009.py` 31 failed/19 passed）。
+# 修法不動 config.py（invariant 是對的），改在這裡把這一族鍵整批 pin 掉。
+_QUOTA_ENV_PREFIX = "AUTOSDD_QUOTA_"  # 白名單前綴 SSOT：見 config.py 檔頭 `_quota_env`
+                                       # 呼叫點自陳（僅 CONVERGE_PCT／HALT_PCT／
+                                       # DEGRADED_CAP 三鍵）——本函式不手抄名字。
+
+#: `_pop_quota_env_leaks` 記住的原值；`None`＝尚未 pin（或已還原）。
+_POPPED_QUOTA_ENV: dict[str, str] | None = None
+
+
+def _pop_quota_env_leaks() -> dict[str, str]:
+    """capture-once：把 `os.environ` 中所有 `AUTOSDD_QUOTA_*` 鍵彈出並記住原值。
+
+    同一行程內第二次呼叫是 no-op（回傳 `{}`）：`pytest_configure(None)` 本檔已有
+    直接第二次呼叫的既有測試（見 `tests/tools/test_local_ci_gate.py::
+    test_conftest_is_where_the_autodetect_is_wired`）——若不設這道防線，第二次呼叫
+    會用「已經彈不到東西」的空字典覆寫掉第一次記住的真原值，`pytest_unconfigure`
+    還原時就什麼都還原不回去。
+    """
+    global _POPPED_QUOTA_ENV
+    if _POPPED_QUOTA_ENV is not None:
+        return {}
+    _POPPED_QUOTA_ENV = {
+        k: os.environ.pop(k) for k in list(os.environ) if k.startswith(_QUOTA_ENV_PREFIX)
+    }
+    return _POPPED_QUOTA_ENV
+
+
+def _restore_quota_env_leaks() -> None:
+    """`_pop_quota_env_leaks` 的鏡像還原；重複呼叫安全（第二次以後皆 no-op）。"""
+    global _POPPED_QUOTA_ENV
+    if _POPPED_QUOTA_ENV is None:
+        return
+    os.environ.update(_POPPED_QUOTA_ENV)
+    _POPPED_QUOTA_ENV = None
+
+
 def pytest_configure(config):  # noqa: ARG001
-    """在**收集之前**跑一次 PG 自動偵測（模組級 skipif 於收集時求值，晚一步就沒用了）。"""
+    """在**收集之前**跑一次 PG 自動偵測（模組級 skipif 於收集時求值，晚一步就沒用了）。
+
+    controller 與每個 xdist worker 都會跑（各自獨立行程）；DEF-200-355 的 quota env
+    pin 放在最前面，讓後續任何 fixture／collection-time 程式碼都看不到洩漏的鍵。
+    """
     global _PG_AUTODETECT_NOTE
+    _pop_quota_env_leaks()
     _check_pg_dsn_shape()
     try:
         gate = _local_ci_gate()
@@ -243,6 +292,11 @@ def pytest_configure(config):  # noqa: ARG001
     except Exception as exc:  # noqa: BLE001 — 見上方第 ⑤ 條
         _PG_AUTODETECT_NOTE = f"跳過：自動偵測本身出錯（{type(exc).__name__}: {exc}）"
     _reject_pg_present_with_mismatched_xdist_dist(config)
+
+
+def pytest_unconfigure(config):  # noqa: ARG001
+    """`pytest_configure` 的鏡像：還原 DEF-200-355 pin 的 `AUTOSDD_QUOTA_*`（見上方）。"""
+    _restore_quota_env_leaks()
 
 
 # DEF-200-274 X1（主控追加需求）：ONBOARDING §7.1 教開發者把 docker PG 拉起來再跑

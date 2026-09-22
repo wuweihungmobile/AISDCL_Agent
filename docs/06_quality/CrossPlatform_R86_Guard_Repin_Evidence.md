@@ -534,3 +534,55 @@ for_session`）以字面 sid（`"sess-inv5-mac"`／`"sess-r119"`）向**真排�
 自身超寬行數＝5（`HEAD` 座標 17、1324-1326、2763，皆非本輪觸碰範圍），本次提交後仍為
 5——本輪新增／修改的每一行皆已逐行現查 EAW 寬度 ≤100，`tools/tests/` 全樹超寬行總數
 維持在棘輪上限 `_E501_DEBT_CEILING = 139`（現查值＝139，未超過、未新增）。
+
+## §G 2026-09-22 自 test_wake_chain_halt_r278.py 搬出的實測紀錄（逐字）
+
+DEF-200-354（多 CPU 第十九輪實作包 A）：`env AUTOSDD_QUOTA_GUARD_OFF=1` 洩入呼叫端
+環境 ⇒ `HaltLatchIsSessionScopedTest`／`PrepareLatchIsSessionScopedTest` 四支翻紅
+（`Ran 42 tests`／`FAILED (failures=4)`，rc=1；乾淨 env `Ran 42 tests`／`OK`，rc=0）。
+根因：`tools/lib/quota_gate.py` 的 `quota_gate()` 讀 `policy_env()` 合併視圖，一看到
+`QUOTA_OFF_ENV`（或任何洩漏的 `quota_policy.ENV_SPEC` 政策鍵）就在判定分支之前提前
+`return 0`——`waker`／`plan_writer` 從未被呼叫，四支斷言全部落空。修法：整模組
+`setUpModule`／`tearDownModule` 摘掉 `ENV_SPEC` 除 `SENTINEL_OFF_ENV` 外的每一鍵
+（capture-once、冪等還原），同模式見 `test_context_budget_guard.py` 的
+`_pin_sentinel_off`。
+
+**原始觀測**（自 `HaltLatchIsSessionScopedTest` 類別 docstring 搬出）：立案當下
+（DEF-200-281 第二輪／RC-3）本機真的同時掛兩支哨兵（`8d8773f9-…`／
+`96d7f386-…`），是當時促成本測試立案的具體現場，不影響判準本身（判準＝`quota_gate()`
+halt 分支的閂鎖鍵此前不含 sid、`quota_latch_path()` 是 machine-wide 單一檔案，同一
+reset 視窗內第二個撞 halt 的 session 會被第一個誤擋）。
+
+**三種 env 條件逐字**（`tools/tests/` 內執行）：
+```
+$ (cd tools/tests && ../../.venv/bin/python -m unittest test_wake_chain_halt_r278 -q)
+Ran 44 tests in 0.027s
+OK
+rc=0
+
+$ (cd tools/tests && env AUTOSDD_QUOTA_GUARD_OFF=1 ../../.venv/bin/python -m unittest test_wake_chain_halt_r278 -q)
+Ran 44 tests in 0.028s
+OK
+rc=0
+
+$ (cd tools/tests && env AUTOSDD_QUOTA_HALT_PCT=1 ../../.venv/bin/python -m unittest test_wake_chain_halt_r278 -q)
+Ran 44 tests in 0.032s
+OK
+rc=0
+```
+
+**巢狀鎖紅→綠自證**（scratchpad mirror，非 `git show HEAD:` 覆寫工作樹）：
+- 鎖 (a)（`_pin_env_spec_off()` 改壞成 no-op）：
+  `FAILED (failures=2)`（`test_pin_leaves_no_env_spec_key_leaked` 兩個 subTest 皆紅）。
+- 鎖 (b)（pin 集合改成手抄清單，不從 `ENV_SPEC` 導出）：
+  `FAILED (failures=1)`（`test_pin_set_is_derived_from_env_spec_not_copied` 紅，
+  `AssertionError: {'AUTOSDD_QUOTA_GUARD_OFF', 'AUTOSDD_SENTINEL_OFF'} not greater
+  than or equal to {... 24 個 ENV_SPEC 鍵 ...}`）。
+- 兩鎖修回原檔內容後皆綠（`Ran 2 tests`／`OK`）。
+
+**護欄行數棘輪**：改動前 `--print-guard-lines` 尾列草稿＝
+`("R<n>", 102842, 102842, +0, ...)`；改完（含本節配平前）＝
+`("R<n>", 102842, 102897, +55, ...)`。經本節配平（trim `_pin_env_spec_off` docstring
+與 `HaltLatchIsSessionScopedTest` 類別 docstring 的純史料段落）後淨額見實作包 A
+回報；`_FROZEN_GUARD_LINES` 表本身住 `test_adr_xplat001_c1c2_lock.py`（本實作包無權
+改動），故本節僅記錄逐字實測，重釘留待收尾單人窗口。

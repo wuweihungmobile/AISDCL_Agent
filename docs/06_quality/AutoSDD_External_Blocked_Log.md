@@ -36,7 +36,6 @@
 | DEF-ID | 具名阻塞源 | 阻塞起始日 | 解鎖條件（可機械查） | 最近複查日 |
 |---|---|---|---|---|
 | DEF-101-693 | Windows 實機 | 2026-08-21 | 下一個 Windows 真機輪逐列覆核 windows-smoke 22 步（`tools/tests/test_smoke_ci_sync.py::test_registered_smoke_groups_exist_in_that_script` 先行，另需真機執行紀錄） | 2026-08-31 |
-| DEF-101-703 | 其他-DEF-200-291舊碼（census未登記剖面一律判紅）修復ddaf6301／0ee23312晚於最近一次排程run才進main，09-17手動dispatch兩平台nightly-full已success，條件字面要排程run故待09-21排程窗口 | 2026-08-21 | `*-nightly-full`（windows-compat-ci.yml／macos-compat-ci.yml）至少一次排程視窗成功（`gh run list --workflow=windows-compat-ci.yml --event schedule` 見 `conclusion=success` 且 `steps>0`），之後移除 `WAIVER_UNTIL` | 2026-09-17 |
 | DEF-200-075 | 其他-macOS實機（darwin執行面量測值，Windows結構上量不到也修不了） | 2026-08-27 | 回 mac 真機後第一動作＝重量 AutoClaude 樹 skip census（量測入口見主帳本該列配方）；macos-compat-ci 長期紅不可依賴 | 2026-09-17 |
 | DEF-200-313 | Windows 實機 | 2026-09-15 | 回 Windows 真機、人在互動終端機：`python tools/run_root_unittests.py` 跑到一半按 Ctrl-C，再以 `Get-CimInstance Win32_Process` 過濾 CommandLine 含 `run_root_unittests` 或 `unittest` 者須為空；結果寫進 `CrossPlatform_DEF200274_Parallel_Tests_Evidence.md`〈第十一輪〉③ 後移出本表 | 2026-09-15 |
 
@@ -81,7 +80,7 @@ dev_start、AutoClaude 子集／integration_gate、SDD ci-gate 雙軌數列本�
 ＝bootstrap 之後步驟確實用到 `.venv` 的 python，兩半條件（`conclusion=success` 且
 `steps>0`、觀測到 .venv python）同一 run 內達成。主帳本該列狀態同輪改為指向本段。
 
-### DEF-101-703（複查 2026-09-17）
+### DEF-101-703（複查 2026-09-22＝解鎖條件達成，列已移出本表）
 
 複查：08-31／09-07／09-14 三次 `--event schedule` run 的 nightly-full **job** 皆
 `conclusion=failure`（Windows 11 steps／macOS 9 steps），workflow 整體 `success` 只是
@@ -92,8 +91,18 @@ commit `ddaf6301`／`0ee23312`（09-14 20:05~20:18 UTC）**晚於** 09-14 排程
 headSha `33b9470f`（11:24 UTC），`git merge-base --is-ancestor` 證實非其祖先。
 09-17 手動 dispatch 對 `e5bf3c0f`：Windows run `35175312397` nightly-full `success`
 （11 steps）、macOS run `35175314395` nightly-full `success`（9 steps）＝修復已在雲端
-兩平台生效；但條件字面要求 `event schedule`，下一排程窗口 09-21，故列保留、阻塞源改為
+兩平台生效；但條件字面要求 `event schedule`，下一排程窗口 09-21，故當時列保留、阻塞源改為
 真因。`WAIVER_UNTIL` 現值已為 `""`（root-infra-ci.yml），後置動作無需再做。
+
+複查 2026-09-22：條件字面＝`gh run list --workflow=<yml> --event schedule` 見
+`conclusion=success` 且 `steps>0`。Windows run `35600885460`（headSha `ad88dbd7`，
+2026-09-21T12:40:18Z，event=schedule）nightly-full job `success`、steps=11；macOS
+run `35610135865`（headSha `ad88dbd7`，2026-09-21T14:08:26Z，event=schedule）
+nightly-full job `success`、steps=13。兩平台 log 皆印
+`[cpu_budget] xdist workers=4／3 source=cpu_budget`（Windows
+`4662 passed, 175 skipped in 133.63s`／macOS `4615 passed, 222 skipped in 109.01s`）。
+`WAIVER_UNTIL` 已為 `""`，無後置動作。主列（`AutoSDD_Defect_Log_archive_67.md`）狀態
+「closed-by-decision｜移入外部阻塞軌」為歷史事實不改。
 
 ### DEF-200-186（複查 2026-09-17＝解鎖條件達成，列已移出本表）
 

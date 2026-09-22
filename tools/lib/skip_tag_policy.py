@@ -455,7 +455,11 @@ _TREE_FILE_FLOORS: dict[str, int] = {
     # 🔴 DEF-200-305 收尾單人窗口重釘 217 → 218：新增 `tests/tools/test_seed_kb.py` 後該樹
     # 實測 **273** 支，217 只剩實測的 79%（低於 `TREE_FLOOR_RATIO` 的 80%），第三向逐字指示
     # 重釘為 218 ⇒ 本行照填、零加減推算。方向是**上修＝判準更嚴**，不是放寬。
-    "AutoClaude/tests": 218,
+    # 🔴 DEF-200-355／356 收尾單人窗口重釘 218 → 220：新增
+    # `tests/test_conftest_quota_env_isolation.py`＋`tests/tools/test_workflow_mutmut_pin.py`
+    # 後該樹實測 **275** 支，218 只剩實測的 79%（低於 `TREE_FLOOR_RATIO` 的 80%），第三向
+    # 逐字指示重釘為 220 ⇒ 本行照填、零加減推算。方向是**上修＝判準更嚴**，不是放寬。
+    "AutoClaude/tests": 220,
     # 🔴 R84 包 W5：23 → 24。**非本包造成**——`AISDLC_SDD/scripts/tests` 由 29 支長到 30
     # （並行包新增鎖檔），下限只剩實測的 77%、低於 `TREE_FLOOR_RATIO` 的 80% ⇒
     # `tree_floor_problems()` 的第三向（下限已過期）當場判紅並**逐字**指示重釘為 24，本行

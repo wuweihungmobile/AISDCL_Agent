@@ -517,3 +517,24 @@ docstring +3）；`test_check_defect_log_crossref.py` 3864→3906（DEF-200-345 
 `docs/06_quality/AutoSDD_Defect_Log.md` DEF-200-345～348；證據見 `CrossPlatform_DEF200274_Parallel_Tests_Evidence.md`
 〈第十五輪〉。此附記為 doc-total 對帳（≥2 站點）另一站點寄居 `AutoSDD_improving_112.md`，同 R129～R158 寄居體例。
 round-label-ok
+
+## 第二十一輪附記（R163；多 CPU 第十九輪 DEF-200-354～356 四方獨立審查覆核收尾）
+
+- **體例**：本節非開新一輪 CrossPlatform 掃描輪四件套，僅為單一收尾窗口造成的護欄層逐檔漂移記帳，
+  寄居本檔（同 R129～R159 寄居體例）。上一輪（R159）主軌淨額為正、連續上升第二輪已到頂
+  （`_REPIN_MAX_CONSECUTIVE_RISING_ROUNDS=2`）：本輪主軌淨額歸零，streak 重置。
+  本輪申報回歸鎖軌全額 72（`test_wake_chain_halt_r278.py` 模組級 `setUpModule` ENV_SPEC pin＋
+  `EnvSpecLeakIsolationTest` 兩支巢狀鎖 +53＋本表自身漂移 +19），主軌 72−72＝0。cap 到期義務兌現：
+  `(163, 535)`，同輪重新武裝 `_REPIN_NET_CAP_DUE_ROUND=165`／`_REPIN_NET_CAP_DUE_TARGET=534`；
+  `_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND` 具名展延 162→168（非 root-tools 重構持有面，真拆待獨立窗口）。
+
+<!-- guard-total:R163 --> R163 護欄層累積淨額＝ 102842 → 102914（+72）——多 CPU 第十九輪
+DEF-200-354～356 四方獨立審查覆核收尾單人窗口：`test_wake_chain_halt_r278.py` 模組級 ENV_SPEC 隔離
+（`setUpModule` pin 消費 `quota_policy.ENV_SPEC` 全鍵＋`EnvSpecLeakIsolationTest` 兩支巢狀鎖，純史料
+一段搬 R86 §G）+53；本表自身漂移 +19（R163 新列＋`_REGRESSION_LANE_LOG` 同輪列、cap 到期兌現
+`(163, 535)` 並重新武裝 165／534、`_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND` 展延 162→168、凍結前綴
+239→240、`_REPIN_LOG_HISTORY_SHA256` 同步重釘）。回歸鎖軌申報 72（全額），主軌 0。缺陷帳本見
+`docs/06_quality/AutoSDD_Defect_Log.md` DEF-200-354／355／356；證據見
+`CrossPlatform_DEF200274_Parallel_Tests_Evidence.md`〈第十九輪〉。此附記為 doc-total 對帳（≥2 站點）
+另一站點寄居 `AutoSDD_improving_112.md`，同 R129～R159 寄居體例。
+round-label-ok
