@@ -90,6 +90,7 @@ on:
       - "tools/tests/**"
       - "tools/run_root_unittests.py"
       - "tools/lib/cpu_budget.py"  # DEF-200-289：ci-gate.sh／pre-push 消費的跨 leg CPU 預算 SSOT
+      - "tools/lib/dev_platform_provenance.py"  # DEF-200-358：dev_start [1/7] git 平台 provenance，tools/tests 消費
       # R94：tools/tests/test_context_budget_guard.py 直接讀取本檔內容做驗證，
       # 而該測試由本 workflow 執行（tools/tests/ ↔ macos-compat-ci.yml）；
       # 只改 PRD 不改測試檔時，本 workflow 此前不會被觸發（DEF-101-042 同構）。
@@ -525,6 +526,7 @@ on:
       - "tools/tests/**"
       - "tools/run_root_unittests.py"
       - "tools/lib/cpu_budget.py"  # DEF-200-289：ci-gate.sh／pre-push 消費的跨 leg CPU 預算 SSOT
+      - "tools/lib/dev_platform_provenance.py"  # DEF-200-358：dev_start [1/7] git 平台 provenance，tools/tests 消費
       # R94：tools/tests/test_context_budget_guard.py 直接讀取本檔內容做驗證，
       # 而該測試由本 workflow 執行（tools/tests/ ↔ macos-compat-ci.yml）；
       # 只改 PRD 不改測試檔時，本 workflow 此前不會被觸發（DEF-101-042 同構）。
