@@ -28,6 +28,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _platform_helpers import usable_bash_for_fixture  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(_REPO_ROOT / "tools"))
+import git_hooks_install_common as _ghic  # noqa: E402
+
 # 真跑受測 .sh 用的直譯器（WHY 不得寫裸 `"bash"`：見 `TestMacSmokeCliContract._run`
 # 與 `_platform_helpers.usable_bash_for_fixture()` 的 docstring／DEF-101-753）。
 _BASH = usable_bash_for_fixture()
@@ -1386,3 +1389,105 @@ class TestParallelTestsCiWiring(unittest.TestCase):
                 "AUTOSDD_PARALLEL_TESTS=1——平行模式接線被移除，DEF-200-274 的 CI "
                 "覆蓋會靜默退回序列模式",
             )
+
+
+# --- DEF-200-359：linked worktree 拒絕探針「不空洞」機械鎖 -------------------------
+#
+# WHY：windows_smoke_local.ps1 的 [3/9]/[7/9] 與 macos_smoke_local.sh 的 3b/3d 都是
+# 「只驗 rc=1」的探針——rc=1 分不出「worktree 守衛擋的」與「別的前置守衛（例如假 repo
+# 天生無 .venv 時的單一 .venv 守衛）先擋的」，這正是 [3/9] 長期空洞通過、真因
+# GitHooksInstallCommon.ps1 頂層 [Environment]::Exit(1) 帶走整支 smoke 卻無人發現的
+# 成因。本鎖驗四處探針都具備「逃生口＋捕捉輸出＋rc/標記雙斷言」的字面結構——剝除整行
+# `#` 註解後才掃描，註解裡提及某字串是沿革記載，不算實作。
+
+
+def _ps1_hollow_probe_problems(code: str, *, check_bare_call: bool = False) -> list[str]:
+    """DEF-200-359 探針不空洞判準：回傳缺失清單（空＝通過）。`code` 須先剝除整行
+    `#` 註解（見 `_code_only`），否則註解裡提及某字串會滿足斷言而失去鑑別力。"""
+    problems: list[str] = []
+    if "$env:AUTOSDD_ALLOW_PATH_PYTHON = '1'" not in code:
+        problems.append("缺 AUTOSDD_ALLOW_PATH_PYTHON 逃生口設定")
+    if "2>&1 | Out-String" not in code:
+        problems.append("缺 2>&1 | Out-String 捕捉輸出")
+    if not re.search(r"^.*-notmatch.*\$script:LinkedWorktreeRejectMarker.*$", code, re.MULTILINE):
+        problems.append("缺同一行含 -notmatch 與 $script:LinkedWorktreeRejectMarker 的斷言")
+    if check_bare_call and "& $installer" in code:
+        problems.append("仍含裸 `& $installer`（同行程呼叫，DEF-200-359 根因形態）")
+    return problems
+
+
+class TestWorktreeRejectProbesAreNotHollow(unittest.TestCase):
+    """DEF-200-359：四處 linked worktree 拒絕探針不得空洞（見上方模組級 WHY）。"""
+
+    def test_ps1_marker_matches_python_ssot(self) -> None:
+        hits = re.findall(
+            r"^\$script:LinkedWorktreeRejectMarker\s*=\s*'([^']+)'", _read(_PS1), re.MULTILINE
+        )
+        self.assertEqual(
+            len(hits), 1,
+            f"windows_smoke_local.ps1 的 $script:LinkedWorktreeRejectMarker 宣告"
+            f"應恰 1 處，實際 {len(hits)}",
+        )
+        self.assertEqual(
+            hits[0], _ghic.LINKED_WORKTREE_REJECT_MARKER,
+            "windows_smoke_local.ps1 的標記字面值與 SSOT "
+            "tools/git_hooks_install_common.py::LINKED_WORKTREE_REJECT_MARKER 不一致",
+        )
+
+    def test_sh_marker_matches_python_ssot(self) -> None:
+        hits = re.findall(
+            r"^LINKED_WORKTREE_REJECT_MARKER='([^']+)'", _read(_SH), re.MULTILINE
+        )
+        self.assertEqual(
+            len(hits), 1,
+            f"macos_smoke_local.sh 的 LINKED_WORKTREE_REJECT_MARKER 宣告"
+            f"應恰 1 處，實際 {len(hits)}",
+        )
+        self.assertEqual(
+            hits[0], _ghic.LINKED_WORKTREE_REJECT_MARKER,
+            "macos_smoke_local.sh 的標記字面值與 SSOT "
+            "tools/git_hooks_install_common.py::LINKED_WORKTREE_REJECT_MARKER 不一致",
+        )
+
+    def test_ps1_worktree_reject_probes_not_hollow(self) -> None:
+        ps1_text = _read(_PS1)
+        for func_name in ("Test-WorktreeReject", "Test-WorktreeRejectNestedCommand"):
+            body = _code_only(_extract_ps1_function_body(ps1_text, func_name))
+            problems = _ps1_hollow_probe_problems(
+                body, check_bare_call=(func_name == "Test-WorktreeReject")
+            )
+            self.assertEqual(problems, [], f"{func_name}：{problems}")
+            pass_count = len(_PS1_PASS_ITEM_RE.findall(body))
+            self.assertEqual(
+                pass_count, 1, f"{func_name} 函式體內 Pass-Item 應恰 1 個，實際 {pass_count}"
+            )
+
+    def test_sh_worktree_reject_regions_not_hollow(self) -> None:
+        sh_text = _read(_SH)
+        region_3b = _code_only(_region(sh_text, r"# 3b\..*?(?=# 3c\.)", "3b 區塊"))
+        region_3d = _code_only(_region(sh_text, r"# 3d\..*?(?=# ── \[4/7\])", "3d 區塊"))
+        for label, region in (("3b", region_3b), ("3d", region_3d)):
+            self.assertIn(
+                "export AUTOSDD_ALLOW_PATH_PYTHON=1", region, f"{label} 缺逃生口匯出"
+            )
+            self.assertIn(
+                'grep -qF -- "$LINKED_WORKTREE_REJECT_MARKER"', region, f"{label} 缺標記斷言"
+            )
+            self.assertIn('> "$out" 2>&1', region, f"{label} 缺輸出捕捉重導向")
+            pass_count = len(_SH_PASS_RE.findall(region))
+            self.assertEqual(pass_count, 1, f"{label} 區塊內 pass 應恰 1 個，實際 {pass_count}")
+
+    def test_hollow_probe_helper_catches_synthetic_old_version(self) -> None:
+        """紅綠自證：合成一段舊版函式體（同行程 `& $installer`、無逃生口、無標記斷言），
+        證明 helper 真的判紅——不是恆真的形式檢查。"""
+        synthetic_old = (
+            "  $installer = Join-Path $wt $InstallerRel\n"
+            "  & $installer\n"
+            "  $rc = $LASTEXITCODE\n"
+            "  if ($rc -eq 1) { Pass-Item 'x' } else { Fail-Item 'y' }\n"
+        )
+        problems = _ps1_hollow_probe_problems(synthetic_old, check_bare_call=True)
+        self.assertNotEqual(
+            problems, [], "helper 對合成舊版（同行程 & $installer、無逃生口/標記）判綠"
+            "——鑑別力已失效"
+        )

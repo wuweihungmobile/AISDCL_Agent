@@ -15,7 +15,9 @@ Write-Host 顏色、bash 的全域變數回傳慣例 —— 不再各自重寫�
 子指令（見 main() 的 argparse；exit code 為呼叫端唯一應依賴的判斷依據）：
   assert-not-linked-worktree [--prefix P]
       不在 git repo 內、或偵測到 linked worktree（git-dir ≠ git-common-dir）時，
-      印錯誤到 stderr 並 exit 1；否則 exit 0。
+      印錯誤到 stderr 並 exit 1；否則 exit 0。linked worktree 時 stderr 第一行帶
+      ASCII 標記 LINKED_WORKTREE_REJECT_MARKER（DEF-200-359：rc=1 分不出三種失敗
+      形態，僅此分支印該標記）。
   get-hooks-dir [--prefix P]
       印出 `<repo根>/tools/git-hooks` 絕對路徑（正規化）到 stdout；
       不在 git repo 內時印錯誤到 stderr 並 exit 1。
@@ -44,6 +46,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _stdio_utf8  # noqa: E402,F401  # Windows 非 UTF-8 終端 print(中文/❌/⚠) 防崩潰保護
 
 HOOK_FILENAMES = ("pre-commit", "pre-push", "post-commit", "prepare-commit-msg", "commit-msg")
+
+# DEF-200-359：assert-not-linked-worktree 的三種失敗分支皆 return 1，呼叫端單靠 rc
+# 分不出「偵測到 linked worktree」與「根本不在 git repo 內」——windows_smoke_local.ps1
+# 的 [3/9]/[7/9] 正是靠 rc=1 斷言 worktree 拒絕，卻可能被單一 .venv 守衛等前置檢查
+# 以同樣的 rc=1 頂替（空洞通過）。smoke／排程環境主控台常是 cp950 等非 UTF-8
+# codepage，中文訊息會被 mojibake，唯有 ASCII 才是能跨編碼比對的訊號。只有
+# linked-worktree 分支印本標記——另兩個「不在 git repo 內」分支刻意不印，讓消費端
+# 能用「有沒有這個標記」分辨三種失敗形態。
+LINKED_WORKTREE_REJECT_MARKER = "LINKED-WORKTREE-REJECTED"
 
 
 def _run(cmd: list[str]) -> tuple[int, str]:
@@ -106,7 +117,8 @@ def cmd_assert_not_linked_worktree(prefix: str) -> int:
               file=sys.stderr)
         return 1
     if is_linked_worktree(git_dir, git_common_dir):
-        print(f"{prefix}❌ 偵測到 linked worktree（git-dir ≠ git-common-dir）", file=sys.stderr)
+        print(f"{prefix}{LINKED_WORKTREE_REJECT_MARKER} ❌ 偵測到 linked worktree"
+              "（git-dir ≠ git-common-dir）", file=sys.stderr)
         print("   core.hooksPath 寫入共享 .git/config，在 worktree 內安裝/卸載會毒化主 checkout",
               file=sys.stderr)
         print("   （worktree 刪除後閘門靜默全滅）。請在主 checkout 執行安裝。", file=sys.stderr)

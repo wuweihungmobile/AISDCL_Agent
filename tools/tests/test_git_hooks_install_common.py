@@ -407,5 +407,86 @@ class TestDotSourceTrapSafety(unittest.TestCase):
             self.assertIn("STILL_ALIVE", proc.stdout)
 
 
+class TestAssertNotLinkedWorktreeMarker(unittest.TestCase):
+    """DEF-200-359：`assert-not-linked-worktree` 只有 linked-worktree 分支印
+    LINKED_WORKTREE_REJECT_MARKER——rc=1 三種失敗形態（不在 git repo 內／
+    git-common-dir 解析失敗／linked worktree）唯有此分支帶標記，讓呼叫端能分辨
+    「是不是被 worktree 守衛擋的」。直呼 python 模組 CLI，不經 .ps1/.sh 薄殼，
+    天然無單一 .venv 守衛可混淆。"""
+
+    @staticmethod
+    def _git_available() -> bool:
+        try:
+            subprocess.run(["git", "--version"], capture_output=True, timeout=10, check=False)
+            return True
+        except OSError:
+            return False
+
+    def _run_cli(self, cwd: str, prefix: str = "[t] ") -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [sys.executable, str(_REPO_ROOT / "tools" / "git_hooks_install_common.py"),
+             "assert-not-linked-worktree", f"--prefix={prefix}"],
+            cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=15,
+        )
+
+    def setUp(self) -> None:
+        if not self._git_available():
+            self.skipTest("需要 git 在 PATH 上")
+
+    def test_marker_present_in_linked_worktree_absent_in_main_and_non_git(self) -> None:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            repo = Path(td) / "repo"
+            repo.mkdir()
+            subprocess.run(["git", "init", "-q", str(repo)], check=True, timeout=30)
+            subprocess.run(
+                ["git", "-C", str(repo), "config", "user.email", "t@example.com"],
+                check=True, timeout=10,
+            )
+            subprocess.run(
+                ["git", "-C", str(repo), "config", "user.name", "t"], check=True, timeout=10,
+            )
+            (repo / "a.txt").write_text("x", encoding="utf-8")
+            subprocess.run(["git", "-C", str(repo), "add", "a.txt"], check=True, timeout=10)
+            subprocess.run(
+                ["git", "-C", str(repo), "commit", "-q", "-m", "init"], check=True, timeout=10,
+            )
+
+            # (1) linked worktree：rc=1 且含標記
+            wt = Path(td) / "wt"
+            subprocess.run(
+                ["git", "-C", str(repo), "worktree", "add", "--quiet", "--detach", str(wt), "HEAD"],
+                check=True, timeout=30,
+            )
+            result_wt = self._run_cli(str(wt))
+            self.assertEqual(result_wt.returncode, 1, result_wt.stderr)
+            self.assertIn(m.LINKED_WORKTREE_REJECT_MARKER, result_wt.stderr)
+
+            # (2) 主 checkout：rc=0 且不含標記
+            result_main = self._run_cli(str(repo))
+            self.assertEqual(result_main.returncode, 0, result_main.stderr)
+            self.assertNotIn(m.LINKED_WORKTREE_REJECT_MARKER, result_main.stderr)
+
+            subprocess.run(
+                ["git", "-C", str(repo), "worktree", "remove", "--force", str(wt)],
+                check=False, timeout=30,
+            )
+
+        # (3) 非 git 目錄：rc=1 但**不含**標記（證明標記只屬 linked-worktree 分支）
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td2:
+            non_git = Path(td2) / "not_a_repo"
+            non_git.mkdir()
+            result_non_git = self._run_cli(str(non_git))
+            self.assertEqual(result_non_git.returncode, 1, result_non_git.stderr)
+            self.assertNotIn(m.LINKED_WORKTREE_REJECT_MARKER, result_non_git.stderr)
+
+    def test_marker_survives_cp950_mojibake_roundtrip(self) -> None:
+        """cp950 探針：標記緊接 prefix、位於中文之前——即使整行被 cp950 誤解碼，
+        ASCII 標記本身仍可被截出比對（見 git_hooks_install_common.py 檔頭 WHY）。"""
+        line = f"[install_git_hooks] {m.LINKED_WORKTREE_REJECT_MARKER} ❌ 偵測到 linked worktree（git-dir ≠ git-common-dir）"
+        mojibake = line.encode("utf-8").decode("cp950", errors="replace")
+        self.assertIn(m.LINKED_WORKTREE_REJECT_MARKER, mojibake)
+
+
 if __name__ == "__main__":
     unittest.main()

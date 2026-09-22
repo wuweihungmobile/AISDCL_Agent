@@ -120,6 +120,10 @@ if ! is_real_python_candidate "$python_bin"; then
   exit 1
 fi
 
+# SSOT＝tools/git_hooks_install_common.py::LINKED_WORKTREE_REJECT_MARKER，勿手改；
+# 由 tools/tests/test_smoke_ci_sync.py 機械對齊（DEF-200-359）。
+LINKED_WORKTREE_REJECT_MARKER='LINKED-WORKTREE-REJECTED'
+
 PASS=0
 FAIL=0
 FAIL_LIST=""
@@ -366,15 +370,23 @@ esac
 # R10 SD-1/QA-7（DEF-101-135）：原本 worktree add 未檢查，add 失敗時 subshell 的
 # cd 失敗 rc=1 恰等於「拒絕成功」預期值 → 受測腳本根本沒跑也 PASS 的假陽性。
 # add 顯式檢查；subshell 內 cd 失敗改走獨立哨兵 9（比照 [2] 段 `|| exit 9` 手法）。
+# DEF-200-359：子 shell 加逃生口 AUTOSDD_ALLOW_PATH_PYTHON=1（假 repo 無 .venv，
+# 否則單一 .venv 守衛可能先於 worktree 守衛以同款 rc=1 頂替）；rc 與
+# LINKED-WORKTREE-REJECTED 標記雙斷言，堵住「rc=1 但其實是別的守衛擋的」空洞通過。
 wt="$WORK/wt-install-git-hooks-reject"
 if git -C "$FAKE" worktree add --quiet --detach "$wt" HEAD; then
-  ( cd "$wt" || exit 9; bash AutoClaude/tools/install_git_hooks.sh )
+  out="$WORK/wt-install-git-hooks-reject.out"
+  ( cd "$wt" || exit 9; export AUTOSDD_ALLOW_PATH_PYTHON=1; bash AutoClaude/tools/install_git_hooks.sh ) > "$out" 2>&1
   rc=$?
   git -C "$FAKE" worktree remove --force "$wt"
-  if [ "$rc" -eq 1 ]; then
-    pass "install_git_hooks.sh linked worktree 拒絕（rc=1 as expected）"
-  else
+  if [ "$rc" -eq 9 ]; then
+    fail "install_git_hooks.sh：哨兵 9：腳本未被執行（cd 失敗）"
+  elif [ "$rc" -ne 1 ]; then
     fail "install_git_hooks.sh 於 linked worktree 應 exit 1，實際 rc=$rc"
+  elif ! grep -qF -- "$LINKED_WORKTREE_REJECT_MARKER" "$out"; then
+    fail "install_git_hooks.sh rc=1 但未命中拒絕標記——非 worktree 守衛所擋（前置守衛先 exit 或受測 HEAD clone 尚無標記；空洞通過已堵，DEF-200-359）"
+  else
+    pass "install_git_hooks.sh linked worktree 拒絕（rc=1 且拒絕標記命中）"
   fi
 else
   fail "worktree add 失敗——install_git_hooks.sh 拒絕情境未能執行（非假 PASS）"
@@ -400,15 +412,21 @@ fi
 
 # 3d. install-hooks.sh 於 linked worktree 下應正確拒絕（fail-loud）
 # R10 SD-1/QA-7（DEF-101-135）：同 3b——add 顯式檢查 + cd 失敗哨兵 9，堵假 PASS。
+# DEF-200-359：同 3b，逃生口 + rc/標記雙斷言。
 wt="$WORK/wt-install-hooks-reject"
 if git -C "$FAKE" worktree add --quiet --detach "$wt" HEAD; then
-  ( cd "$wt" || exit 9; bash AISDLC_SDD/scripts/install-hooks.sh )
+  out="$WORK/wt-install-hooks-reject.out"
+  ( cd "$wt" || exit 9; export AUTOSDD_ALLOW_PATH_PYTHON=1; bash AISDLC_SDD/scripts/install-hooks.sh ) > "$out" 2>&1
   rc=$?
   git -C "$FAKE" worktree remove --force "$wt"
-  if [ "$rc" -eq 1 ]; then
-    pass "install-hooks.sh linked worktree 拒絕（rc=1 as expected）"
-  else
+  if [ "$rc" -eq 9 ]; then
+    fail "install-hooks.sh：哨兵 9：腳本未被執行（cd 失敗）"
+  elif [ "$rc" -ne 1 ]; then
     fail "install-hooks.sh 於 linked worktree 應 exit 1，實際 rc=$rc"
+  elif ! grep -qF -- "$LINKED_WORKTREE_REJECT_MARKER" "$out"; then
+    fail "install-hooks.sh rc=1 但未命中拒絕標記——非 worktree 守衛所擋（前置守衛先 exit 或受測 HEAD clone 尚無標記；空洞通過已堵，DEF-200-359）"
+  else
+    pass "install-hooks.sh linked worktree 拒絕（rc=1 且拒絕標記命中）"
   fi
 else
   fail "worktree add 失敗——install-hooks.sh 拒絕情境未能執行（非假 PASS）"

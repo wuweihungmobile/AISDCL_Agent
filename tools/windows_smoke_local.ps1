@@ -25,7 +25,8 @@
 #   [2] AutoClaude/tools/install_git_hooks.ps1 於 fake repo 安裝／解除往返
 #   [3] install_git_hooks.ps1 於 linked worktree 內應拒絕 exit 1（worktree add 顯式
 #       檢查失敗即 FAIL、Push-Location 失敗走哨兵 rc=9——同 DEF-101-135「worktree add
-#       未檢查→假 PASS」防護，本 .ps1 版第一天就帶）
+#       未檢查→假 PASS」防護，本 .ps1 版第一天就帶；rc=1 且拒絕標記命中才算 PASS，
+#       DEF-200-359）
 #   [4] AISDLC_SDD/scripts/install-hooks.ps1 安裝往返 + linked worktree 拒絕（各記 1 點）
 #   [5] LATEST install_post_commit.ps1 於 linked worktree 實跑 + 安裝路徑斷言
 #       （--git-common-dir 下 hooks/post-commit 存在、內容含 post_commit_drift.py 與
@@ -46,7 +47,7 @@
 #       「最外層」frame 的 ScriptName，此類非 -File 頂層呼叫會讓 Assert-NotLinkedWorktree
 #       失敗分支從 exit 1 靜默降級為 return，linked worktree 防呆因而失效。已改為改看
 #       呼叫棧 [1]（dot-source 點的直接呼叫者）是否有真實 .ps1 檔案，本步驟即為此修復
-#       的回歸鎖）
+#       的回歸鎖；rc=1 且拒絕標記命中才算 PASS，DEF-200-359）
 #   [8] check_ntfs_paths.py + check_script_parity.py（唯讀，直接對本 repo；R18 全面
 #       掃描補齊——這兩支純 Python、平台無關的檢查先前僅由 macos_smoke_local.sh [5]
 #       覆蓋，Windows 本機 smoke 從未在 Windows 環境下實際跑過，消除兩平台 smoke
@@ -319,6 +320,10 @@ $script:Pass = 0
 $script:Fail = 0
 $script:FailList = @()
 
+# SSOT＝tools/git_hooks_install_common.py::LINKED_WORKTREE_REJECT_MARKER，勿手改；
+# 由 tools/tests/test_smoke_ci_sync.py 機械對齊（DEF-200-359）。
+$script:LinkedWorktreeRejectMarker = 'LINKED-WORKTREE-REJECTED'
+
 # 讀「原生指令輸出的路徑」專用（DEF-101-762）：呼叫期間把主控台輸出編碼釘成 UTF-8。
 # WHY：PowerShell 解碼原生指令 stdout 用的是 `[Console]::OutputEncoding`，而 git／
 # 本 repo 的 python CLI 都以 UTF-8 輸出路徑。在 **cp950**（繁中 Windows 的 OEM 預設，
@@ -480,6 +485,11 @@ function Test-WorktreeRejectNestedCommand {
     [Parameter(Mandatory = $true)][string]$WorktreeName,
     [Parameter(Mandatory = $true)][string]$Label
   )
+  # DEF-200-359 補述：加逃生口 AUTOSDD_ALLOW_PATH_PYTHON=1（假 repo 天生無 .venv，
+  # 單一 .venv 守衛否則會讓安裝器提早 exit 1，與本函式要驗的 worktree 拒絕混淆），
+  # 並改捕捉輸出、以 rc 與 LINKED-WORKTREE-REJECTED 標記雙斷言——只驗 rc=1 分不出
+  # 「worktree 守衛擋的」與「別的前置守衛先擋的」（見 Test-WorktreeReject 上方
+  # 完整 WHY）。
   $wt = Join-Path $script:Work $WorktreeName
   git -C $BaseRepo worktree add --quiet --detach $wt HEAD
   if ($LASTEXITCODE -ne 0) {
@@ -487,23 +497,52 @@ function Test-WorktreeRejectNestedCommand {
     return
   }
   $installer = Join-Path $wt $InstallerRel
-  # 刻意用 -Command 包一層 `& '<installer>'`（而非 -File 直接指向 installer），
-  # 重現「最外層呼叫棧 frame 非真實 .ps1 檔案」的非典型呼叫鏈情境。子行程須先
-  # Set-Location 進 worktree 目錄——linked worktree 偵測靠當前目錄的
-  # git-dir/git-common-dir 判斷，子行程繼承呼叫端 cwd（本 repo 根，非 worktree），
-  # 不切換目錄會讓偵測邏輯連「這是 worktree」都判斷不到，與 [3][4] 既有
-  # Push-Location 進 worktree 再呼叫同一精神。
-  & powershell -NoProfile -Command "Set-Location -LiteralPath '$wt'; & '$installer'" | Out-Null
-  $rc = $LASTEXITCODE
+  $prevAllowPathPython7 = $env:AUTOSDD_ALLOW_PATH_PYTHON
+  $env:AUTOSDD_ALLOW_PATH_PYTHON = '1'
+  $out = ''
+  $rc = 9
+  try {
+    # 刻意用 -Command 包一層 `& '<installer>'`（而非 -File 直接指向 installer），
+    # 重現「最外層呼叫棧 frame 非真實 .ps1 檔案」的非典型呼叫鏈情境。子行程須先
+    # Set-Location 進 worktree 目錄——linked worktree 偵測靠當前目錄的
+    # git-dir/git-common-dir 判斷，子行程繼承呼叫端 cwd（本 repo 根，非 worktree），
+    # 不切換目錄會讓偵測邏輯連「這是 worktree」都判斷不到，與 [3][4] 既有
+    # Push-Location 進 worktree 再呼叫同一精神。
+    $out = & powershell -NoProfile -Command "Set-Location -LiteralPath '$wt'; & '$installer'" 2>&1 | Out-String -Width 4096
+    $rc = $LASTEXITCODE
+  } finally {
+    if ($null -eq $prevAllowPathPython7) {
+      Remove-Item Env:AUTOSDD_ALLOW_PATH_PYTHON -ErrorAction SilentlyContinue
+    } else {
+      $env:AUTOSDD_ALLOW_PATH_PYTHON = $prevAllowPathPython7
+    }
+  }
   git -C $BaseRepo worktree remove --force $wt
-  if ($rc -eq 1) {
-    Pass-Item "${Label}（-Command 非典型呼叫鏈）linked worktree 拒絕（rc=1 as expected）"
+  if ($rc -ne 1) {
+    Fail-Item "${Label}（-Command 非典型呼叫鏈）：應 exit 1，實際 rc=${rc}"
+  } elseif ($out -notmatch $script:LinkedWorktreeRejectMarker) {
+    Fail-Item "${Label}（-Command 非典型呼叫鏈）：rc=1 但輸出未含拒絕標記——非 worktree 守衛所擋（前置守衛先 exit 或受測 HEAD clone 尚無標記；空洞通過已堵，DEF-200-359）"
   } else {
-    Fail-Item "${Label}（-Command 非典型呼叫鏈）：於 linked worktree 應 exit 1，實際 rc=${rc}"
+    Pass-Item "${Label}（-Command 非典型呼叫鏈）linked worktree 拒絕（rc=1 且拒絕標記命中）"
   }
 }
 
 function Test-WorktreeReject {
+  <#
+  .SYNOPSIS
+  DEF-200-359：linked worktree 拒絕守門的根因修復——舊版以呼叫運算子同行程直接
+  呼叫安裝器變數，假 repo 天生無 .venv（git clone 建立），未設
+  AUTOSDD_ALLOW_PATH_PYTHON 逃生口時，安裝器 dot-source 的
+  tools/lib/GitHooksInstallCommon.ps1 頂層 Get-RepoPython 找不到直譯器即呼叫
+  [Environment]::Exit(1)——該 API 直接終止**整個行程**，把呼叫端（本 smoke
+  harness）一起帶走（09-20 起每晚 [3/9] 無彙總行 rc=1 的真因）。修法：
+  ①子行程改走 `powershell.exe -File`（獨立行程，Exit 只殺子行程本身）；
+  ②比照 Test-InstallRoundtrip 掛官方逃生口 AUTOSDD_ALLOW_PATH_PYTHON=1；
+  ③加 rc 與 LINKED-WORKTREE-REJECTED 標記雙斷言——只驗 rc=1 分不出「worktree
+  守衛擋的」與「別的前置守衛（例如少了①②時的單一 .venv 守衛）先擋的」，這正是
+  本缺陷長期空洞通過的形態；標記為 ASCII，在 cp950 等非 UTF-8 排程主控台下
+  仍可跨編碼比對。
+  #>
   param(
     [Parameter(Mandatory = $true)][string]$BaseRepo,
     [Parameter(Mandatory = $true)][string]$InstallerRel,
@@ -517,25 +556,42 @@ function Test-WorktreeReject {
     return
   }
   $rc = 9  # 哨兵：維持 9 代表受測腳本根本沒被執行
+  $out = ''
   try {
     Push-Location -LiteralPath $wt -ErrorAction Stop
+    $prevAllowPathPython3 = $env:AUTOSDD_ALLOW_PATH_PYTHON
+    $env:AUTOSDD_ALLOW_PATH_PYTHON = '1'
     try {
       $installer = Join-Path $wt $InstallerRel
       if (Test-Path -LiteralPath $installer) {
-        & $installer
-        $rc = $LASTEXITCODE
+        try {
+          $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer 2>&1 | Out-String -Width 4096
+          $rc = $LASTEXITCODE
+        } catch {
+          # 子行程 spawn 失敗 → rc 停在哨兵 9（不改動 $rc）
+        }
       }
     } finally {
+      if ($null -eq $prevAllowPathPython3) {
+        Remove-Item Env:AUTOSDD_ALLOW_PATH_PYTHON -ErrorAction SilentlyContinue
+      } else {
+        $env:AUTOSDD_ALLOW_PATH_PYTHON = $prevAllowPathPython3
+      }
       Pop-Location
     }
   } catch {
     # Push-Location 失敗 → rc 停在哨兵 9
   }
   git -C $BaseRepo worktree remove --force $wt
-  if ($rc -eq 1) {
-    Pass-Item "${Label} linked worktree 拒絕（rc=1 as expected）"
+  if ($rc -eq 9) {
+    Fail-Item "${Label}：哨兵 9：受測腳本未被執行"
+  } elseif ($rc -ne 1) {
+    Fail-Item "${Label}：應 exit 1，實際 rc=${rc}"
+  } elseif ($out -notmatch $script:LinkedWorktreeRejectMarker) {
+    $preview = (($out -split "`r?`n") | Select-Object -First 3) -join ' | '
+    Fail-Item "${Label}：rc=1 但輸出未含拒絕標記——非 worktree 守衛所擋（前置守衛如單一 .venv 先 exit，或受測 HEAD clone 尚無標記＝改動未 commit；空洞通過已堵，DEF-200-359）；輸出前 3 行：${preview}"
   } else {
-    Fail-Item "${Label}：於 linked worktree 應 exit 1，實際 rc=${rc}（9=哨兵：腳本未被執行）"
+    Pass-Item "${Label} linked worktree 拒絕（rc=1 且拒絕標記命中）"
   }
 }
 
