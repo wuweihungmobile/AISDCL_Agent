@@ -2031,6 +2031,7 @@ worktree、檔案面互不相交）→ 四方複審 → 收尾單人窗口。主
 - SDD 凍結基線 v0.01 與中間版 v0.02～v0.29（28 個目錄）裸跑 `-n auto` 走 xdist 內建（v0.01 實測 gw0..gw9＝10）；評估包 C 逐字核對 7 個站點零站點跑中間版、`XDIST_ARGS` 只在 `VER==LATEST` 賦值 ⇒ 實際曝險 0（ADR-XPLAT-001 不改）。
 - 去重階段本輪**零樣本**（四方發現彼此無重複），「去重步驟真的能合併」尚未被實戰驗證；下輪續驗。
 - SDD 加速比 3.09x→2.61x 被裁量測雜訊（零程式碼差異），若下輪再低於 2.5x 應重開 F-SD-01。
+- **補記後新增**：mutation kill_rate 解析缺口（`--no-progress`＋`mutmut results` 只列 survived ⇒ `mutation_baseline_lock.py` 讀到 killed=0、`kill_rate=0.00%`）——DEF-200-356／357 讓 mutation 真跑了，但「跑出來的分數」目前是錯的（observing 期不觸發門檻）；下一輪在 AutoClaude 側處理（讀 `.mutmut-cache` 或 `junitxml`），並在 `test_workflow_mutmut_pin.py` 補鎖。
 
 ### 雲端取證補記（push f3865103 之後，主控親查 `gh run list --commit <完整 40 碼 sha>`／`gh run view --json jobs`／`--log`）
 
@@ -2046,5 +2047,7 @@ worktree、檔案面互不相交）→ 四方複審 → 收尾單人窗口。主
   鎖擴充 `test_every_mutmut_run_segment_uses_runner_and_ci_not_bare_flags`（合併 `\` 續行、剝行尾註解；斷言無引號外裸 `-p no:xdist`／`-o addopts=`、必含 `--runner`／`--CI`、無 `|| true`、段數 ≥4）＋`test_segment_violation_detector_has_red_green_self_proof`；`5 passed in 0.37s`（主控親跑）、ruff `All checks passed!`、yaml 兩檔 `yaml-ok`、根層三支 workflow 鎖 `Ran 64 tests in 0.379s / OK`；numstat `6 6`／`2 2`／`130 0`。
   DEF-200-357 帳本列 P1 fixed（697 bytes；本 commit）。
   收尾（主控親做）：E 交件後主控第一次根層全套 rc=1、14 支 `test_dev_start` bootstrap／venv 流程測試翻紅——**變因是主控自己讓表② 乾淨 venv 回填（建 venv＋pip install）與根層全套並行**（第一次 rc=0 與第三次單獨重跑 rc=0 皆綠：`real 148.84s`、worker=9、4464 支），照實記為主控排程失誤、非 E 包缺陷；表② 第二次回填 rc=0 ⇒ `[autoclaude-pytest-snapshot:]` 4622→**4624**（E 新鎖 2 支）、錨 `autoclaude=b468881fecf3`、`--check-snapshot` rc=0；crossref rc=0（286 筆）。
-  修後再 dispatch `autoclaude-mutation-on-change.yml` 的真跑結果：<MUT_RESULT>。
+  修後 push c94d006c：root-infra-ci 35678014619／AutoClaude CI 35678014635／macos-compat 35678014634／windows-compat 35678014665 **四支皆 success**（兩 smoke 真跑、nightly-full 依 push 事件設計 skipped）。
+  **DEF-200-357 真跑驗收**：dispatch `autoclaude-mutation-on-change.yml` run 35678026352（headSha c94d006c）job **success、02:03:11Z→02:09:21Z（6 分 10 秒，對照修前 30 秒）**；log 逐字 `Successfully installed … mutmut-2.4.3` → `1. Running tests without mutations` → `2. Checking mutants` → `Survived 🙁 (59)`；後續步驟 `##[notice]token_guard survived=59 → mutation_backlog_token_guard.md`——**mutation testing 自 2026-09-13 後首次在 CI 真跑**。
+  🔴 同一 log 另見既有解析缺口（本輪不修、記誠實劃界）：`Accrue unique-sha evidence` 印 `token_guard observing — kill_rate=0.00% runs=1/7`——`mutation_baseline_lock.py` 從 `mutmut results` 算 kill_rate，但 `results` 只列 survived、killed 計數只在 `mutmut run` 的進度列（被既有 `--no-progress` 抑制）⇒ killed 恆讀成 0；仍在 observing（7 次才起門檻），不影響本輪判決。修法候選：讀 `.mutmut-cache` sqlite 的 `ok_killed` 計數、或改用 `mutmut junitxml`。
 - 第十九輪誠實劃界第 3 條（「`|| true` 仍會吞崩潰」）**本補記解除**：`--CI` 讓致命錯誤 rc=1、survivor rc=0，四處 `|| true` 已移除；仍留：`mutation_baseline_lock.py` 對「全 killed ⇒ `mutmut results` 空清單」的處理是否會誤判為 empty log，待修後真跑一次現查。
