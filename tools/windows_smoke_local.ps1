@@ -508,8 +508,13 @@ function Test-WorktreeRejectNestedCommand {
     # git-dir/git-common-dir 判斷，子行程繼承呼叫端 cwd（本 repo 根，非 worktree），
     # 不切換目錄會讓偵測邏輯連「這是 worktree」都判斷不到，與 [3][4] 既有
     # Push-Location 進 worktree 再呼叫同一精神。
-    $out = & powershell -NoProfile -Command "Set-Location -LiteralPath '$wt'; & '$installer'" 2>&1 | Out-String -Width 4096
-    $rc = $LASTEXITCODE
+    try {
+      $out = & powershell -NoProfile -Command "Set-Location -LiteralPath '$wt'; & '$installer'" 2>&1 | Out-String -Width 4096
+      $rc = $LASTEXITCODE
+    } catch {
+      # 子行程 spawn 失敗 → rc 停在哨兵 9（不改動 $rc；與 Test-WorktreeReject 對稱，
+      # 四方複審 SD：無 catch 時例外會炸穿到頂層、跳過彙總區塊）
+    }
   } finally {
     if ($null -eq $prevAllowPathPython7) {
       Remove-Item Env:AUTOSDD_ALLOW_PATH_PYTHON -ErrorAction SilentlyContinue
@@ -518,9 +523,11 @@ function Test-WorktreeRejectNestedCommand {
     }
   }
   git -C $BaseRepo worktree remove --force $wt
-  if ($rc -ne 1) {
+  if ($rc -eq 9) {
+    Fail-Item "${Label}（-Command 非典型呼叫鏈）：哨兵 9：子行程未被執行"
+  } elseif ($rc -ne 1) {
     Fail-Item "${Label}（-Command 非典型呼叫鏈）：應 exit 1，實際 rc=${rc}"
-  } elseif ($out -notmatch $script:LinkedWorktreeRejectMarker) {
+  } elseif ($out -notmatch [regex]::Escape($script:LinkedWorktreeRejectMarker)) {
     Fail-Item "${Label}（-Command 非典型呼叫鏈）：rc=1 但輸出未含拒絕標記——非 worktree 守衛所擋（前置守衛先 exit 或受測 HEAD clone 尚無標記；空洞通過已堵，DEF-200-359）"
   } else {
     Pass-Item "${Label}（-Command 非典型呼叫鏈）linked worktree 拒絕（rc=1 且拒絕標記命中）"
@@ -587,7 +594,7 @@ function Test-WorktreeReject {
     Fail-Item "${Label}：哨兵 9：受測腳本未被執行"
   } elseif ($rc -ne 1) {
     Fail-Item "${Label}：應 exit 1，實際 rc=${rc}"
-  } elseif ($out -notmatch $script:LinkedWorktreeRejectMarker) {
+  } elseif ($out -notmatch [regex]::Escape($script:LinkedWorktreeRejectMarker)) {
     $preview = (($out -split "`r?`n") | Select-Object -First 3) -join ' | '
     Fail-Item "${Label}：rc=1 但輸出未含拒絕標記——非 worktree 守衛所擋（前置守衛如單一 .venv 先 exit，或受測 HEAD clone 尚無標記＝改動未 commit；空洞通過已堵，DEF-200-359）；輸出前 3 行：${preview}"
   } else {

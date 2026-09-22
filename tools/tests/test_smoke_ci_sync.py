@@ -65,8 +65,11 @@ def _region(text: str, pattern: str, label: str) -> str:
 
 
 def _code_only(text: str) -> str:
-    """剝掉整行 `#` 註解（yml 與 sh 同款）——本檔既有 `_yml_python_tools` 風格的
-    慣例：註解裡提及某字串是沿革記載/史料，不算實作，不得滿足接線斷言。"""
+    """剝掉整行 `#` 註解（yml 與 sh 同款）與 PowerShell `<# … #>` 區塊註解——本檔既有
+    `_yml_python_tools` 風格的慣例：註解裡提及某字串是沿革記載/史料，不算實作，不得滿足
+    接線斷言。區塊註解一併剝除（DEF-200-359 四方複審 SD）：函式體內的 .SYNOPSIS 散文
+    若逐字貼程式碼片段，會讓「不空洞」判準被文件滿足。"""
+    text = re.sub(r"<#.*?#>", "", text, flags=re.DOTALL)
     return "\n".join(ln for ln in text.splitlines() if not ln.lstrip().startswith("#"))
 
 

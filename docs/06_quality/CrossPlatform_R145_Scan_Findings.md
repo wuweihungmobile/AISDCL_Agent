@@ -562,3 +562,30 @@ commit-msg 在最終訊息補）／`--allow-empty-message`／Co-Authored-By 保�
 缺陷帳本見 `docs/06_quality/AutoSDD_Defect_Log.md` DEF-200-358；實作與親驗數字見該 commit 訊息。
 此附記為 doc-total 對帳（≥2 站點）另一站點寄居 `AutoSDD_improving_112.md`，同 R129～R163 寄居體例。
 round-label-ok
+
+### 〈DEF-200-359 附記（R165）〉WindowsSmoke [3/9] 逃生口缺失根治（2026-09-22，Windows 側單人窗口） round-label-ok
+
+<!-- guard-total:R165 --> R165 護欄層累積淨額＝ 103490 → 103705（+215）——DEF-200-359（`tools/windows_smoke_local.ps1`
+Test-WorktreeReject 同行程呼叫安裝器且無 `AUTOSDD_ALLOW_PATH_PYTHON` 逃生口，`tools/lib/GitHooksInstallCommon.ps1` 頂層
+`[Environment]::Exit(1)` 帶走整支 smoke，09-20 起每晚無彙總行 rc=1；[7/9] 與 mac 3b/3d 同型空洞通過——rc=1 來自 .venv 守衛，
+探針證實）結案回歸鎖：`tools/tests/test_smoke_ci_sync.py` +108（`TestWorktreeRejectProbesAreNotHollow`：ps1／sh 標記字面對齊
+SSOT 常數、ps1 兩函式體與 sh 3b/3d 區塊剝註解後須含逃生口／捕捉／同行標記斷言、Test-WorktreeReject 不得再含裸同行程呼叫、
+Pass 恰一、紅綠自證；`_code_only` 加剝 `<# … #>` 區塊註解（四方複審 SD））；`tools/tests/test_git_hooks_install_common.py` +74
+（`TestAssertNotLinkedWorktreeMarker`：真 temp repo＋`git worktree add` 直呼 python CLI 三分支、cp950 round-trip＋isascii
+（四方複審 QA 訂正 docstring 因果）；git 缺席不 skip——初版帶 skipTest 撞根層 runner「站點分類普查」早退，依
+skip_tag_policy 判例改讓測試真的跑）；本表自身漂移 +33（R165 新列＋`_REGRESSION_LANE_LOG` 同輪列＋cap 到期兌現 `(165, 534)`
+並重新武裝 167／533＋`_FROZEN_PREFIX_REWRITE_LEDGER` 接鏈列、凍結前綴 241→242、`_REPIN_LOG_HISTORY_SHA256` 同步重釘、
+`_PHASE2_REVIEW_LOG` 五輪視窗到期新列 `(165, "[提案]")`——前一筆（第一五九輪）為維持觀察且連續上限 1，僅剩提案／落地兩出路，
+體例同 R141／R153：登記 R129 既存提案未決、非新判斷）。
+回歸鎖軌全額申報 215（結案鎖與記帳誠實度分類，同 R163 先例），主軌 0：連續上升歸零（前一輪 R164 主軌 267）。
+生產面改動（不計護欄行數）：`tools/git_hooks_install_common.py` 新常數 `LINKED_WORKTREE_REJECT_MARKER`（僅 linked-worktree
+分支印於 stderr 首行、ASCII 跨 cp950 可比對）；ps1 兩探針子行程化＋逃生口＋rc／標記雙斷言（`-notmatch [regex]::Escape`，
+與 sh 側 `grep -qF` 語意對齊，四方複審 Architect）；sh 3b/3d 同型；`GitHooksInstallCommon.ps1` .NOTES 補呼叫端契約。
+親驗（主控本場 tool_result）：修前重現 rc=1 無彙總行；修後（75cf7a5）smoke UTF-8 主控台與 cp950 主控台（`codepage=950`，
+與排程環境同形）皆「===== 彙總：PASS=12 FAIL=0 =====」rc=0，[3]／[4]／[7] 三處「rc=1 且拒絕標記命中」、零「找不到 repo 根層
+.venv」。四方設計審查（Spec v0 D1～D8）與四方實作審查（DEF-200-359 三鏡 ACCEPT_WITH_FIXES／SA ACCEPT，零被駁宣稱）皆
+Sonnet 唯讀；D5（CI yml 四個 worktree 拒絕 step 同步加標記斷言）2:2 由主控裁決延後：CI 因 `GITHUB_ACTIONS=true` 從未踩進
+觸發條件、yml 無法 import 常數、只能 push 後驗——列後續項。後續項另有：逃生口 save／restore 樣板在 smoke 內四份重複可抽
+helper（Architect P3）。缺陷帳本見 `docs/06_quality/AutoSDD_Defect_Log.md` DEF-200-359；本附記為 doc-total 對帳（≥2 站點）
+另一站點寄居 `AutoSDD_improving_112.md`，同 R129～R164 寄居體例。
+round-label-ok

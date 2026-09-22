@@ -28,6 +28,10 @@ tools/lib/git_hooks_install_common.sh 兩份 thin wrapper 呼叫，兩者只保�
   互動式 shell 直接手動 dot-source 本檔以逐一測試函式，失敗分支會改用 return
   （見下方 dot-source 陷阱防護），不會誤殺你的互動 shell，但也代表失敗時呼叫
   鏈不會像生產路徑一樣中止——僅供探索/除錯用途，正式安裝請透過既有呼叫端腳本。
+  🔴 呼叫端契約（DEF-200-343／DEF-200-359 同根因兩度命中）：頂層找不到直譯器時走
+  [Environment]::Exit(1)＝終止**整個行程**。任何以同行程（呼叫運算子）呼叫會 dot-source
+  本檔之安裝腳本、且需在其失敗後繼續存活的呼叫端（測試 harness／聚合器），必須改走
+  獨立子行程（powershell.exe -File），或先設 CI／GITHUB_ACTIONS／AUTOSDD_ALLOW_PATH_PYTHON。
 #>
 
 $script:GitHooksInstallCommonPy = [System.IO.Path]::GetFullPath(

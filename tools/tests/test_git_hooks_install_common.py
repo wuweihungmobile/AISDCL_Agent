@@ -412,15 +412,8 @@ class TestAssertNotLinkedWorktreeMarker(unittest.TestCase):
     LINKED_WORKTREE_REJECT_MARKER——rc=1 三種失敗形態（不在 git repo 內／
     git-common-dir 解析失敗／linked worktree）唯有此分支帶標記，讓呼叫端能分辨
     「是不是被 worktree 守衛擋的」。直呼 python 模組 CLI，不經 .ps1/.sh 薄殼，
-    天然無單一 .venv 守衛可混淆。"""
-
-    @staticmethod
-    def _git_available() -> bool:
-        try:
-            subprocess.run(["git", "--version"], capture_output=True, timeout=10, check=False)
-            return True
-        except OSError:
-            return False
+    天然無單一 .venv 守衛可混淆。git 缺席不 skip（本 repo 全部閘門皆以 git 為前提，
+    skip_tag_policy 判例：合法出口是讓測試真的跑，不是加 runtime-skipTest 站點）。"""
 
     def _run_cli(self, cwd: str, prefix: str = "[t] ") -> subprocess.CompletedProcess:
         return subprocess.run(
@@ -429,10 +422,6 @@ class TestAssertNotLinkedWorktreeMarker(unittest.TestCase):
             cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=15,
         )
-
-    def setUp(self) -> None:
-        if not self._git_available():
-            self.skipTest("需要 git 在 PATH 上")
 
     def test_marker_present_in_linked_worktree_absent_in_main_and_non_git(self) -> None:
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
@@ -481,9 +470,13 @@ class TestAssertNotLinkedWorktreeMarker(unittest.TestCase):
             self.assertNotIn(m.LINKED_WORKTREE_REJECT_MARKER, result_non_git.stderr)
 
     def test_marker_survives_cp950_mojibake_roundtrip(self) -> None:
-        """cp950 探針：標記緊接 prefix、位於中文之前——即使整行被 cp950 誤解碼，
-        ASCII 標記本身仍可被截出比對（見 git_hooks_install_common.py 檔頭 WHY）。"""
-        line = f"[install_git_hooks] {m.LINKED_WORKTREE_REJECT_MARKER} ❌ 偵測到 linked worktree（git-dir ≠ git-common-dir）"
+        """cp950 探針：整行以 UTF-8 印出、被 cp950 主控台誤解碼後，標記仍可比對。
+        鎖的是「標記必須純 ASCII」——cp950 對 0x00-0x7F 單位元組直通，ASCII 標記與其
+        相對中文的位置無關地倖存（四方複審 QA 實測前／中／後三種排列皆過）；一旦有人
+        把標記改成含非 ASCII 字元，本測試才會紅。"""
+        self.assertTrue(m.LINKED_WORKTREE_REJECT_MARKER.isascii(), "標記必須純 ASCII")
+        line = (f"[install_git_hooks] {m.LINKED_WORKTREE_REJECT_MARKER} "
+                "❌ 偵測到 linked worktree（git-dir ≠ git-common-dir）")
         mojibake = line.encode("utf-8").decode("cp950", errors="replace")
         self.assertIn(m.LINKED_WORKTREE_REJECT_MARKER, mojibake)
 

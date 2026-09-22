@@ -685,7 +685,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 8469,
+    "test_adr_xplat001_c1c2_lock.py": 8502,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 3726,
@@ -718,7 +718,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_failure_log_rotation.py": 80,
     "test_find_git_bash_parity.py": 1336,
     "test_gha_action_versions.py": 681,
-    "test_git_hooks_install_common.py": 411,
+    "test_git_hooks_install_common.py": 485,
     "test_guard_line_taxonomy_r99.py": 148,
     "test_install_statusline.py": 297,
     "test_install_windows_nightly.py": 1347,
@@ -752,7 +752,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_single_venv_identity.py": 161,
     "test_skip_ceiling_ratchet_direction.py": 724,
     "test_skip_discoverability_r83.py": 742,
-    "test_smoke_ci_sync.py": 1388,
+    "test_smoke_ci_sync.py": 1496,
     "test_statusline_context_feed.py": 204,
     "test_stdio_utf8.py": 76,
     "test_subprocess_encoding_hygiene.py": 1582,
@@ -2162,6 +2162,17 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "上限的 245 與名冊、常數鎖、本表自身漂移一併誠實歸主軌＝267，不申請一次性例外），主軌 > 0："
      "連續上升第一輪（前一輪主軌 0）。逐檔清單見 "
      "CrossPlatform_R145_Scan_Findings.md〈DEF-200-358 附記（R164）〉；帳本見 DEF-200-358 該筆。"),
+    ("R165", 103490, 103705, 215,  # round-label-ok：DEF-200-359 修復窗口
+     "[非淨減法輪][回歸鎖軌全額申報，見 _REGRESSION_LANE_LOG 同輪列] DEF-200-359（WindowsSmoke "
+     "[3/9] 同行程呼叫安裝器且無 AUTOSDD_ALLOW_PATH_PYTHON 逃生口，GitHooksInstallCommon.ps1 頂層 "
+     "[Environment]::Exit(1) 帶走整支 smoke；[7/9]／mac 3b/3d 同型空洞通過）結案回歸鎖："
+     "test_smoke_ci_sync.py TestWorktreeRejectProbesAreNotHollow（標記 SSOT 對齊／ps1 函式體"
+     "與 sh 區塊不空洞／紅綠自證）＋_code_only 剝區塊註解；test_git_hooks_install_common.py "
+     "TestAssertNotLinkedWorktreeMarker（真 worktree 直呼 CLI 三分支／cp950 round-trip＋isascii）；"
+     "本表自身漂移（本列＋回歸鎖軌列＋cap 到期兌現 (165, 534) 並重新武裝 167／533＋接鏈列＋"
+     "凍結前綴 241→242＋sha＋PHASE2 到期新列）。全額歸回歸鎖軌（結案鎖與記帳誠實度分類，"
+     "同 R163 先例），主軌 0：連續上升歸零（前一輪 R164 主軌 267）。逐檔清單見 "
+     "CrossPlatform_R145_Scan_Findings.md〈DEF-200-359 附記（R165）〉；帳本見 DEF-200-359 該筆。"),
 )
 
 
@@ -2271,6 +2282,8 @@ _REPIN_NET_CAP_SCHEDULE: tuple[tuple[int, int], ...] = (
                   # （`_REPIN_NET_CAP_DUE_ROUND=159`）。同輪重新武裝：步伐維持 1（整數下限）。
     (163, 535),   # 到期輪兌現：cap 降到到期目標本身（同既有判例）。本輪剛好到期 round-label-ok
                   # （`_REPIN_NET_CAP_DUE_ROUND=161`）。同輪重新武裝：步伐維持 1（整數下限）。
+    (165, 534),   # 到期輪兌現：cap 降到到期目標本身（同既有判例）。本輪剛好到期 round-label-ok
+                  # （`_REPIN_NET_CAP_DUE_ROUND=165`）。同輪重新武裝：步伐維持 1（整數下限）。
 )
 #: 生效點＝首列輪號、現行上限＝末列上限，**皆由表導出不另立常數**（R73 判例：一份知識一個家）。
 _REPIN_ROUND_CAP_SINCE = _REPIN_NET_CAP_SCHEDULE[0][0]
@@ -2540,6 +2553,13 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "全為結案回歸鎖（prepare-commit-msg 寫端行為／trailer 與內容啟發式讀端／[1/7] 報告／"
      "HOOK_FILENAMES 交叉鎖），但軌上限 309 ⇒ 只申報 309、餘額連同名冊與本表自身漂移歸主軌"
      "（部分申報，同既有「回歸鎖軌部分申報」先例；不申請一次性例外）。"),
+    ("R165", 215,
+     "DEF-200-359 結案回歸鎖（記帳誠實度分類）：test_smoke_ci_sync.py "
+     "TestWorktreeRejectProbesAreNotHollow＋_code_only 區塊註解剝除（+108）、"
+     "test_git_hooks_install_common.py TestAssertNotLinkedWorktreeMarker（+74）＋"
+     "本表自身漂移（同 R163 先例全額申報，含本列與 _GUARD_LINES_REPIN_LOG 同輪列、"
+     "cap 到期兌現、凍結前綴 241→242、PHASE2 到期列）＝215（子集＝母項）。逐項見 "
+     "CrossPlatform_R145_Scan_Findings.md〈DEF-200-359 附記（R165）〉。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -2755,8 +2775,9 @@ def net_cap_schedule_problems(
 #: R155 兌現：cap 降到目標本身（538，見 `(155, 538)` 列），重新武裝：目標 537＜cap round-label-ok
 #: R157 兌現：cap 降到目標本身（537，見 `(157, 537)` 列），重新武裝：目標 536＜cap round-label-ok
 #: R159 兌現：cap 降到目標本身（536，見 `(159, 536)` 列），重新武裝：目標 535＜cap round-label-ok
-_REPIN_NET_CAP_DUE_ROUND = 165  # round-label-ok：到期輪＝兌現輪+2（lookahead 判準的活體對照）
-_REPIN_NET_CAP_DUE_TARGET = 534  # 步伐 1，嚴格低於 cap 535（本輪重新武裝） round-label-ok
+#: R165 兌現：cap 降到目標本身（534，見 `(165, 534)` 列），重新武裝：目標 533＜cap round-label-ok
+_REPIN_NET_CAP_DUE_ROUND = 167  # round-label-ok：到期輪＝兌現輪+2（lookahead 判準的活體對照）
+_REPIN_NET_CAP_DUE_TARGET = 533  # 步伐 1，嚴格低於 cap 534（本輪重新武裝） round-label-ok
 
 #: DEF-200-121：到期輪自身的後設鎖——`_REPIN_NET_CAP_DUE_ROUND` 只准落在「最近稽核輪
 #: ＋ lookahead」以內（歷史母體 85..113 的到期輪一律＝上一次兌現輪 +2）。可延期的到期日
@@ -2823,10 +2844,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 241
+_REPIN_LOG_FROZEN_PREFIX_LEN = 242
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "8595fde4cf0b5bc12a9ff1e0e34d327ce27b39f09e2098087c303c1c9b9bdce3")
+    "c4350df6e968d686de71109feca3698111ab53a9323985e098cfd3ee4c981c85")
 
 
 def repin_log_history_digest(
@@ -3117,6 +3138,9 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # DEF-200-358：dev_start [1/7] git 平台 provenance 修復窗口——追加本輪稽核列並依
     # 「追加後立即自我凍結」判例延伸前綴涵蓋該列本身（240→241）。
     ("R164", "0bf86e99a2d2", "8595fde4cf0b", "DEF-200-358"),  # round-label-ok
+    # DEF-200-359：WindowsSmoke 逃生口缺失根治窗口——追加本輪稽核列並依「追加後立即
+    # 自我凍結」判例延伸前綴涵蓋該列本身（241→242）。
+    ("R165", "8595fde4cf0b", "c4350df6e968", "DEF-200-359"),  # round-label-ok
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。
@@ -7490,6 +7514,15 @@ _PHASE2_REVIEW_LOG: tuple[tuple[int, str, str], ...] = (
      "（送四方複審一事）迄今仍待主控排定、尚未有結果，亦未提出新 Phase 2 提案。"
      "上一列（R153）是『提案』⇒ 連續『維持觀察』計數自本列起算為一，未觸上限"
      "（`_PHASE2_MAX_CONSECUTIVE_DEFERRALS=1`）。依 §6 重新武裝下一個視窗。"),
+    (165, "[提案]",
+     "本輪是 DEF-200-359 WindowsSmoke 逃生口缺失根治收尾單人窗口（護欄層 guard-line 記帳＋"
+     "分軌申報），未觸碰 ADR-XPLAT-013 方向 (c) 觀測→阻斷轉換提案本身——上一列（R159）"
+     "是『維持觀察』，其名額（`_PHASE2_MAX_CONSECUTIVE_DEFERRALS=1`）已用罄，§6 只剩 "
+     "[提案]／[落地] 兩條合法出路。🔴 誠實記載（體例同 R141／R153 那兩筆）：本列**不是**"
+     "對 (c) 方向做出任何新判斷，R129 提出的既存提案（送四方複審一事）迄今仍待主控排定、"
+     "尚未有結果；本列僅是把該既存未決狀態依款(5) 的封閉表格式重新登記一次，純因本輪把"
+     "稽核痕跡機械推進到 R165 而觸發 §6 的 5 輪視窗時效。依 §6 重新武裝下一個視窗"
+     "（連續『維持觀察』計數歸零）。"),
 )
 #: 到期輪由末列導出、不另立常數（一份知識一個家；同 `_REPIN_NET_CAP_SCHEDULE` 的
 #: 「生效點＝首列、現值＝末列，皆由表導出」）。
