@@ -121,6 +121,14 @@ E501／輪號字面零命中。
 | DEF-200-366 | 三平台 CI | 皆未裝 `psutil` ⇒ live smoke 走 `[1, cpu_count]` 弱判準；win32 ctypes 分支的跨值交叉比對只在本機真機驗證過 |
 | DEF-200-367 | 併入 DEF-200-364 同批 v0.30 驗收 | 撞名解除後三支 docker 測試計入 `1962 passed`，未個別分列 |
 
+**本輪 commit `f3f3425`＋`933e53e` push 後雲端（主控親抓 log）**：五支 push 管線（AutoClaude CI／
+root-infra-ci／aisdlc-sdd-ci／windows-compat-ci／macos-compat-ci）全 success；根層 unittest 三平台皆印新
+標籤行 `[cpu_budget] root-unittest workers=4 source=cpu_budget`（ubuntu run 35885129655／windows run
+35885129561）與 `workers=3 source=cpu_budget`（macos run 35885129451），三平台皆 `發現 4577 個測試
+（下限 4543）`；ubuntu 另印 `📊 派工摘要：worker=4｜S=2601.7s｜ideal=650.4s（S/W-bound）｜loss=1.00x｜
+slot 利用率=100.0%`（刷新後的種子檔在無活體快取的 runner 上直接給出滿排程）。DEF-200-369／370／371 的
+新程式碼在三平台 CI 真跑通過（unittest 非 -v，憑證＝總數＋job success）。
+
 附帶觀察（→DEF-200-372，收尾窗口同輪定根因並修復）：`mutation-on-change` 連兩輪皆 `runs=1/7`，
 annotation 顯示「無既往 mutation-history artifact（首輪或已逾 retention）」。主控以 `gh api
 /repos/…/actions/artifacts?name=mutation-history` 現查 `total_count=0`，run 35861043538 只上傳了
@@ -130,8 +138,12 @@ uploaded.`——`actions/upload-artifact` v4 起預設排除點檔，`.mutation_
 端因此恆空、unique-sha 跨 run 累積自 v4+ 遷移起結構性死亡；同一 run 的 report artifact 也只有 2 檔
 （`.mutation_baseline.toml` 被排除）。修法＝五處 upload step 顯式 `include-hidden-files: true`
 （`autoclaude-mutation-on-change.yml` history／report 兩處；`autoclaude-ci.yml` AC4 history／
-mutation token_guard／perf baseline 三處，皆含點檔）。驗收只能雲端：下次 dispatch 後 artifact 列表
-出現 `mutation-history` 且 `runs` 由 1/7 遞增。
+mutation token_guard／perf baseline 三處，皆含點檔）。雲端驗收（push `933e53e` 後兩次 dispatch）：
+run 35885321554 首次出現 `mutation-history` artifact（332 bytes；report artifact 1630→2030 bytes，
+`.mutation_baseline.toml` 開始入包）；run 35886198015 restore 步驟印 `已還原 history：1 筆`、upload
+步驟印 `there will be 1 file uploaded`，`gh api …/artifacts?name=mutation-history` total_count 0→2。
+`runs` 仍 `1/7`：兩次 dispatch 的 token_guard 源碼 `source_sha256` 相同，ADR-SD09-011 同 sha 去重留最新
+——這是設計行為，不是缺口；遞增要等真實 token_guard 源碼變動觸發 on-change。
 
 **22:30 排程 nightly**（在本輪尚未 commit 的中途樹上跑）：`local_ci_gate=1`（護欄棘輪紅，符合
 預期——中途樹本就未收斂，非回歸）；`perf=0` 且 baseline 重鎖（`decide_correction` p95
@@ -151,8 +163,9 @@ mutation token_guard／perf baseline 三處，皆含點檔）。驗收只能雲�
   仍只被舊有弱判準 `[1, cpu_count]` 覆蓋。
 - 22:30 排程 nightly 是在中途未 commit 的樹上跑的，`local_ci_gate=1` 屬預期紅、不代表本輪交
   付有回歸，但這份 nightly 產物也不能拿來當本輪的驗收證據。
-- DEF-200-372（`mutation-on-change` `runs=1/7`）根因已定、旗標已補，但 fixed 的憑證只能在下次
-  dispatch 的雲端 artifact 列表上看到；本輪 push 後若未 dispatch，這筆仍是「修法落地、驗收未到」。
+- DEF-200-372（`mutation-on-change` `runs=1/7`）根因已定、旗標已補、雲端兩次 dispatch 已驗到
+  artifact 出現與 restore 讀回；但 `runs` 遞增本身還沒被觀測到（同 sha 去重），要等下一次真實
+  token_guard 源碼變動的 on-change run 才看得到 2/7。
 
 ### 下一輪候選
 

@@ -696,7 +696,7 @@ round-label-ok
 五缺陷一句話：DEF-200-368（計時快取父鍵不回填 ⇒ 細分決策隨 S 漂移翻轉）／DEF-200-369（互動 CPU 預算「實體核
 −1」低估 SMT 機器可派工數）／DEF-200-370（派工粒度止於類別 ⇒ 單一類別成 makespan 天花板、無瓶頸可觀測性）／
 DEF-200-371（根層 runner 缺 `source=` 標籤、三平台 CI 無法同一 grep 對帳）／DEF-200-372（`mutation-on-change` 連兩輪 `runs=1/7`：upload-artifact v6 預設 include-hidden-files: false 讓點檔
-`.mutation_history.jsonl` 從未上傳，五處 upload step 補旗標，fixed 雲端待驗）。
+`.mutation_history.jsonl` 從未上傳，五處 upload step 補旗標；push 後兩次 dispatch 驗到 artifact 出現與「已還原 history：1 筆」，fixed）。
 
 雲端驗收摘要（commit `ff91997`）：root-infra／windows-compat／macos-compat 根層 unittest 4551 個測試（下限
 4543）worker=4／4／3 皆見 `source=cpu_budget`；aisdlc-sdd-ci v0.30 `1962 passed, 5 skipped`（前次 `1949
