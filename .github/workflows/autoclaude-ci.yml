@@ -644,6 +644,7 @@ jobs:
           path: |
             AutoClaude/.ac4_history.jsonl
             AutoClaude/.ac4_junit.xml
+          include-hidden-files: true  # DEF-200-372：兩個點檔在 v4+ 預設下會被靜默排除
           retention-days: 30
 
   # SD_09 W0 M-01：mutation cron 拆 3 job（ADR-SD09-002 §2.3 落地）
@@ -728,6 +729,7 @@ jobs:
             AutoClaude/mutation_backlog_token_guard.md
             AutoClaude/.mutation_history.jsonl
             AutoClaude/.mutation_baseline.toml
+          include-hidden-files: true  # DEF-200-372：兩個點檔在 v4+ 預設下會被靜默排除
           retention-days: 30
 
   # === Job 2：GoalSynthesisPlugin（dormant，待 W1 啟用）===
@@ -907,4 +909,5 @@ jobs:
             AutoClaude/perf_results.json
             AutoClaude/perf_regression_comment.md
             AutoClaude/.perf_baseline.toml
+          include-hidden-files: true  # DEF-200-372：.perf_baseline.toml 是點檔，v4+ 預設會被靜默排除
           retention-days: 90  # 季度趨勢分析

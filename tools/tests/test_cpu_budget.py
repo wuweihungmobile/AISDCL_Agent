@@ -37,12 +37,36 @@ class TotalBudgetFormulaTest(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def test_interactive_reserves_one_physical_core(self) -> None:
-        cases = {1: 1, 10: 9, 14: 13, 20: 16}
-        for physical, expected in cases.items():
+    def test_interactive_reserves_one_physical_core_plus_half_smt_credit(self) -> None:
+        """互動預算＝`(實體核-1) + floor((邏輯核-實體核)/2)`——SMT 兄弟執行緒給半
+        信用（見 `cpu_budget.py` 檔頭 2026-09-23 QA 實測表：14P/20L 機器 W=16 為
+        實測最佳點）。`(physical, logical)` 皆顯式指定，避免互動分支從此也讀
+        `logical` 後，未顯式控制的 `os.cpu_count()` 讓測試結果隨執行機器漂移。
+        """
+        cases = {
+            (1, 1): 1,     # floor=1
+            (10, 10): 9,   # 無 SMT：退化為 physical-1（既有 M1 Max 校準點不變）
+            (14, 20): 16,  # 14600K：13 + floor(6/2)=3 → 16（QA 實測最佳點）
+            (8, 16): 11,   # 8 條 SMT 執行緒：7 + floor(8/2)=4 → 11
+        }
+        for (physical, logical), expected in cases.items():
+            got = cb.total_budget(
+                cpu_count=logical, physical_count=physical, headless=False)
             self.assertEqual(
-                cb.total_budget(physical_count=physical, headless=False), expected,
-                f"互動 physical={physical} 應得 {expected}（max(1, min(16, physical-1))）")
+                got, expected,
+                f"互動 physical={physical} logical={logical} 應得 {expected}"
+                "（max(1, min(16, (physical-1)+floor((logical-physical)/2)))）")
+
+    def test_physical_undetectable_falls_back_to_logical_minus_one(self) -> None:
+        """`physical` 偵測不到（`_detect_physical_count()` 回 None）時退回
+        `logical`，SMT credit 因此恆為 0——與修法前『邏輯核-1』位元級相同。"""
+        self.assertEqual(cb.total_budget(cpu_count=8, headless=False), 7)
+
+    def test_cap_clamps_high_core_count_machines(self) -> None:
+        """`(24-1)+floor((48-24)/2)=35`，遠超 CAP=16，應被夾住——未實測的高核心
+        數機器上公式本身不會失控溢位。"""
+        self.assertEqual(
+            cb.total_budget(cpu_count=48, physical_count=24, headless=False), 16)
 
     def test_headless_uses_all_logical_cores(self) -> None:
         cases = {1: 1, 4: 4, 9: 9, 16: 16, 20: 16, 100: 16}
@@ -52,13 +76,16 @@ class TotalBudgetFormulaTest(unittest.TestCase):
                 f"headless cpu={cpu} 應得 {expected}（max(1, min(16, cpu)))）")
 
     def test_headless_gets_one_more_worker_than_interactive_below_cap(self) -> None:
-        """本輪核心行為：cap 以下，headless（邏輯核 N）應比互動（實體核 N）多 1 個
-        worker——CI headless 不再白白保留前景那一核（DEF-200-289 收益本體）。"""
+        """cap 以下、無 SMT（physical==logical）時，headless（邏輯核 N）應比互動
+        （實體核 N，SMT credit=0）多 1 個 worker——CI headless 不再白白保留前景
+        那一核（DEF-200-289 收益本體）。兩次呼叫皆顯式帶齊 `cpu_count`／
+        `physical_count`：互動分支自 SMT 半信用公式起也讀 `logical`，不控制它
+        會讓比較面混入執行機器的真實核心數。"""
         for cores in (2, 4, 8):
+            interactive = cb.total_budget(
+                cpu_count=cores, physical_count=cores, headless=False)
             self.assertEqual(
-                cb.total_budget(cpu_count=cores, headless=True),
-                cb.total_budget(physical_count=cores, headless=False) + 1,
-            )
+                cb.total_budget(cpu_count=cores, headless=True), interactive + 1)
 
     def test_floor_is_one_even_with_single_core(self) -> None:
         self.assertEqual(cb.total_budget(cpu_count=1, headless=False), 1)
@@ -88,10 +115,14 @@ class TotalBudgetFormulaTest(unittest.TestCase):
                 "顯式傳入的 headless 參數應勝過環境變數偵測",
             )
 
-    def test_interactive_uses_physical_headless_uses_logical(self) -> None:
-        """同一組 (logical, physical) 下，互動只看 physical、headless 只看 logical。"""
-        self.assertEqual(cb.total_budget(cpu_count=4, physical_count=14, headless=False), 13)
-        self.assertEqual(cb.total_budget(cpu_count=4, physical_count=14, headless=True), 4)
+    def test_interactive_combines_both_headless_uses_logical_only(self) -> None:
+        """SMT 半信用公式起，互動分支不再只看 `physical`——同一組
+        (physical=8, logical=16) 下，互動＝`(8-1)+floor((16-8)/2)=11`（兩個輸入
+        都用到），headless 完全忽略 `physical`、只看 `logical`＝16。"""
+        self.assertEqual(
+            cb.total_budget(cpu_count=16, physical_count=8, headless=False), 11)
+        self.assertEqual(
+            cb.total_budget(cpu_count=16, physical_count=8, headless=True), 16)
 
 
 class ParseIntLineTest(unittest.TestCase):

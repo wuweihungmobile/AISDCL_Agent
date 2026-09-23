@@ -72,10 +72,24 @@ def save_live_cache(module_timings: dict[str, float]) -> None:
     原樣灌進 git 種子檔。只要模組仍在樹上（無論這一輪以模組級或 class 級被
     觀測，前綴集合都含它），其舊鍵（含另一種粒度的鍵）一律保留。
 
-    誠實劃界：模組鍵一旦被自動細分，之後除非「整模組」又被觀測到一次，模組級
-    數字不會再刷新（沿用被保留的舊值）——代價是模組瘦身後仍可能暫時被判定要
-    細分；換來的是不再震盪。每個 class 級 spawn 約多花 ~46ms 加 import 成本，
+    WHY 父鍵需要每輪回填（此前僅 `kept_previous` 保留舊值、不刷新的殘餘缺口）：
+    模組鍵一旦被自動細分成 class 級（或 class 鍵再被拆成方法級）觀測，若父鍵
+    本身只靠 `kept_previous` 沿用歷史舊值，該父鍵就此凍結——之後即使子鍵的
+    真實耗時因程式碼變動、機器負載而改變，父鍵的快取值永遠停在「凍結那一刻」
+    的舊數字。這個舊數字接下來會被拿去跟**每輪都在變動**的 fair_share
+    （`sum(當次所有派工單位耗時)/effective_workers`，隨其他模組的耗時、
+    worker 數一起漂移）比較——凍結的分子對一個持續漂移的分母，在門檻附近會讓
+    同一棵樹、同一個 worker 數兩次重跑跑出不同的拆分決策。修法：本函式對本輪
+    觀測到的每個帶點鍵，把耗時**加總**回它的所有父前綴（`a.B.c` 觀測到時，
+    加總進 `a.B` 與 `a`；`a.B` 觀測到時加總進 `a`）；父鍵本輪沒有被直接觀測到
+    才採用這個加總值，父鍵本輪若也被直接觀測（例如某層仍在整模組派工），
+    直接觀測值優先——父鍵的快取值因此持續追蹤『這一輪子鍵測出來的真實總和』，
+    不再凍結在歷史某一刻。每個 class 級 spawn 約多花 ~46ms 加 import 成本，
     可接受（本輪實測：88 類別合計 223.0s vs 模組級 150s）。
+
+    誠實劃界：本函式仍是**單輪**加總，不是跨輪移動平均——某父鍵這一輪完全沒
+    有任何子鍵、也沒有自己被直接觀測時，沿用 `kept_previous` 的歷史值（與此前
+    行為相同），只有本輪確實觀測到至少一個子鍵或父鍵本身時才會刷新。
 
     原子寫入（`os.replace`，Windows 上一樣是原子操作），寫入失敗只印一行
     warning，不得讓測試套件本身因為快取寫不進去而失敗。
@@ -86,7 +100,13 @@ def save_live_cache(module_timings: dict[str, float]) -> None:
         key: value for key, value in previous.items()
         if key.split(".", 1)[0] in observed_modules
     }
-    merged = {**kept_previous, **module_timings}
+    parent_totals: dict[str, float] = {}
+    for key, elapsed in module_timings.items():
+        parts = key.split(".")
+        for depth in range(1, len(parts)):
+            prefix = ".".join(parts[:depth])
+            parent_totals[prefix] = parent_totals.get(prefix, 0.0) + elapsed
+    merged = {**kept_previous, **parent_totals, **module_timings}
     try:
         tmp = LIVE_CACHE_PATH.with_name(LIVE_CACHE_PATH.name + ".tmp")
         tmp.write_text(

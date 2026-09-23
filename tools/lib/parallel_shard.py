@@ -497,6 +497,8 @@ def run_parallel(
     old_sigterm = signal.signal(signal.SIGTERM, signal.default_int_handler) if is_main else None
     try:
         n = min(worker_count(), len(modules_sorted)) or 1
+        source = "env" if os.environ.get(_ENV_WORKERS) else "cpu_budget"
+        print(f"[cpu_budget] root-unittest workers={n} source={source}")
         threads = [threading.Thread(target=_worker_thread_loop) for _ in range(n)]
         try:
             for t in threads:

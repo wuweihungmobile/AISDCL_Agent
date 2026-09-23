@@ -459,6 +459,11 @@ _GOVERNANCE_DOCS = (
     # 唯一居所在本檔（⇒ 體積守門），且它寫出「該 DEF-ID 詳情現居本檔」的座標宣稱（⇒ 指針
     # 稽核）。命名刻意不帶 R<N> 輪號（非帳本輪次迭代序列產物，見該檔頭 WHY）。即刻登記。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_DEF200274_Parallel_Tests_Evidence.md",
+    # DEF-200-274 證據檔**第二冊**：第一冊已進 Read 工具 256KB 上限的 WARN 帶——體積守門的
+    # 正解是分冊（提高輪替吞吐），不是調高硬線（見 check_defect_log_crossref.py 檔頭探針取證）。
+    # 多 CPU 系列自第二十一輪起續於本檔；帳本 DEF-200-368～372 各筆以「詳見本檔〈第二十一輪〉」
+    # 座標宣稱指向本檔（⇒ 指針稽核＋體積守門）。即刻登記。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_DEF200274_Parallel_Tests_Evidence_2.md",
     # DEF-200-275（SDD-FSM context/budget 計量誤差）證據檔：帳本該列已瘦身成索引 ⇒
     # 現象、建議處置與狀態全文唯一居所在本檔（⇒ 體積守門＋指針稽核）。即刻登記。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_DEF200275_Context_Metering_Evidence.md",

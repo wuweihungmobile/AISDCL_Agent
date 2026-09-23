@@ -3590,13 +3590,16 @@ class ParallelTimingCacheSaveLiveCacheTest(unittest.TestCase):
         return run_root_unittests.parallel_shard.parallel_timing_cache
 
     def test_save_then_read_round_trips(self) -> None:
+        """觀測到的鍵原樣寫回；帶點鍵額外回填父前綴（`mod.a`+`mod.b` 加總
+        寫入 `mod`，見 `save_live_cache()` docstring〈WHY 父鍵需要每輪回填〉）。
+        """
         ptc = self._ptc()
         with tempfile.TemporaryDirectory(prefix="ptc_save_") as td:
             live = Path(td) / "live.json"
             with mock.patch.object(ptc, "LIVE_CACHE_PATH", live):
                 ptc.save_live_cache({"mod.a": 1.25, "mod.b": 2.5})
                 readback = ptc.read_json(live)
-        self.assertEqual(readback, {"mod.a": 1.25, "mod.b": 2.5})
+        self.assertEqual(readback, {"mod": 3.75, "mod.a": 1.25, "mod.b": 2.5})
 
     def test_write_failure_prints_warning_and_does_not_raise(self) -> None:
         ptc = self._ptc()
@@ -3620,15 +3623,27 @@ class ParallelTimingCacheSaveLiveCacheMergePruneTest(unittest.TestCase):
     `auto_class_level_candidates()` 拿到偏低數字判定「不再需要細分」→ 下一輪
     又整模組派工、耗時暴增 → 下下一輪又被觀測成細分鍵……如此震盪。
 
-    本測試釘住：(a) 不相交鍵集合皆保留；(b) 模組已刪除的舊鍵被剪掉、仍在的
-    模組鍵存活；(c) 端到端：模組鍵曾被觀測、下一輪細分觀測後，`load_hints()`
-    對模組鍵仍讀得到新值（不退回種子），且 `auto_class_level_candidates()`
+    後續補強（同一份 DEF-200-363 修復的殘餘缺口）：初版只做到「父鍵不被剪掉」，
+    但父鍵本輪未被直接觀測時只是**原樣保留**上一輪的舊值（`kept_previous`），
+    從此凍結、不再刷新——這個凍結值拿去跟每輪都在變動的 fair_share 比較，會在
+    門檻附近造成同一棵樹、同一個 worker 數兩次重跑跑出不同拆分決策。修法：
+    父鍵改為每輪由其子鍵**回填**（加總），持續追蹤真實現況（見
+    `save_live_cache()` docstring〈WHY 父鍵需要每輪回填〉）。
+
+    本測試釘住：(a) 不相交鍵集合皆保留，且父鍵的值隨子鍵回填而更新；(b) 模組
+    已刪除的舊鍵被剪掉、仍在的模組鍵存活且回填為子鍵加總；(c) 端到端：模組鍵
+    曾被觀測、下一輪細分觀測後，`load_hints()` 對模組鍵讀得到回填後的新值
+    （不退回種子、不凍結在拆分前的舊值），且 `auto_class_level_candidates()`
     仍能判定該模組需要細分。"""
 
     def _ptc(self):
         return run_root_unittests.parallel_shard.parallel_timing_cache
 
     def test_disjoint_key_sets_across_two_saves_both_survive(self) -> None:
+        """(a) 不相交鍵集合皆保留：`m_a`（父鍵）與 `m_a.C1`（子鍵）先後被觀測
+        後皆存活；`m_a` 的值在第二輪回填為子鍵 `m_a.C1` 的加總（2.0），取代
+        第一輪的舊值（1.0）——回填會**改寫**父鍵的值，不是單純保留舊值。
+        """
         ptc = self._ptc()
         with tempfile.TemporaryDirectory(prefix="ptc_merge_") as td:
             live = Path(td) / "live.json"
@@ -3636,9 +3651,17 @@ class ParallelTimingCacheSaveLiveCacheMergePruneTest(unittest.TestCase):
                 ptc.save_live_cache({"m_a": 1.0})
                 ptc.save_live_cache({"m_a.C1": 2.0})
                 readback = ptc.read_json(live)
-        self.assertEqual(readback, {"m_a": 1.0, "m_a.C1": 2.0})
+        self.assertEqual(readback, {"m_a": 2.0, "m_a.C1": 2.0})
 
-    def test_dead_module_key_is_pruned_live_module_key_survives(self) -> None:
+    def test_dead_module_key_is_pruned_live_module_key_backfills_from_child(
+        self,
+    ) -> None:
+        """(b) 死鍵剪枝＋活鍵回填：`dead_mod` 這輪未被任何鍵（直接或透過子鍵）
+        觀測到 ⇒ 剪掉；`live_mod` 這輪透過子鍵 `live_mod.C` 被間接觀測到 ⇒
+        回填為子鍵的值（1.0），取代第一輪凍結的舊值（3.0）——這正是本次修法
+        要的行為：父鍵持續追蹤『這一輪子鍵測出來的真實總和』，不再凍結在
+        歷史某一刻（見 `save_live_cache()` docstring〈WHY 父鍵需要每輪回填〉）。
+        """
         ptc = self._ptc()
         with tempfile.TemporaryDirectory(prefix="ptc_prune_") as td:
             live = Path(td) / "live.json"
@@ -3649,13 +3672,17 @@ class ParallelTimingCacheSaveLiveCacheMergePruneTest(unittest.TestCase):
         self.assertNotIn("dead_mod", readback)
         self.assertIn("live_mod", readback)
         self.assertIn("live_mod.C", readback)
-        self.assertEqual(readback["live_mod"], 3.0)
+        self.assertEqual(
+            readback["live_mod"], 1.0,
+            "應回填為本輪子鍵 live_mod.C 的值，取代第一輪凍結的舊值 3.0")
         self.assertEqual(readback["live_mod.C"], 1.0)
 
     def test_module_key_survives_split_round_and_candidate_still_flagged(self) -> None:
         """端到端：模組鍵在被自動細分成 class 鍵的那一輪觀測後仍存活於活體
-        快取（不退回種子檔的舊數字），且下一輪 `auto_class_level_candidates()`
-        仍能判定該模組需要細分——用本測試檔自身 `__name__` 當模組名（已知可
+        快取（不退回種子檔的舊數字），值回填為本輪 class 鍵的加總
+        （100.0+123.0=223.0，取代第 N 輪的舊值 150.0——追蹤真實現況，不凍結在
+        被拆分前的舊模組值），且下一輪 `auto_class_level_candidates()` 仍能
+        判定該模組需要細分——用本測試檔自身 `__name__` 當模組名（已知可
         import、無 setUpModule/tearDownModule），效果等價於文字上的
         `test_dev_start`，避免真的 import 那支重量級測試檔。
         """
@@ -3677,10 +3704,87 @@ class ParallelTimingCacheSaveLiveCacheMergePruneTest(unittest.TestCase):
                 hints = ptc.load_hints({target, *fillers})
                 all_hints = ptc.load_hints(
                     {target, f"{target}.A", f"{target}.B", *fillers})
-            self.assertEqual(hints[target], 150.0)
+            self.assertEqual(
+                hints[target], 223.0,
+                "模組鍵應回填為本輪 class 鍵（.A+.B）的加總，不退回種子檔的"
+                "舊數字（46.7），也不凍結在被拆分前的舊模組值（150.0）")
         dg = run_root_unittests.dispatch_granularity
         candidates = dg.auto_class_level_candidates(all_hints, worker_count=13)
         self.assertIn(target, candidates)
+
+    def test_save_live_cache_merge_prune_survives_three_level_keys(self) -> None:
+        """D1：類別鍵（`module.Class`）被進一步自動細分成方法鍵
+        （`module.Class.method`）觀測的那一輪，類別鍵與模組鍵本身雖不在新的
+        `module_timings` 裡，但因為模組前綴（`key.split('.', 1)[0]`）仍在
+        `observed_modules` 集合中而繼續存活，且兩者的值都回填為本輪三個方法鍵
+        的加總（20.0+24.0+22.0=66.0，取代第 N 輪的舊值 150.0——見
+        `save_live_cache()` docstring〈WHY 父鍵需要每輪回填〉）——三層鍵
+        （模組／模組.類別／模組.類別.方法）同時存在時不會互相誤剪，且都追蹤
+        本輪的真實總和。
+        """
+        ptc = self._ptc()
+        target = __name__
+        with tempfile.TemporaryDirectory(prefix="ptc_method_merge_") as td:
+            live = Path(td) / "live.json"
+            with mock.patch.object(ptc, "LIVE_CACHE_PATH", live):
+                # 第 N 輪：類別級觀測（尚未被自動細分到方法級）。
+                ptc.save_live_cache({f"{target}.C": 150.0})
+                # 第 N+1 輪：該類別被自動細分成方法鍵觀測，類別級鍵本身未出現
+                # 在這次的 module_timings 裡。
+                ptc.save_live_cache({
+                    f"{target}.C.m1": 20.0, f"{target}.C.m2": 24.0,
+                    f"{target}.C.m3": 22.0,
+                })
+                readback = ptc.read_json(live)
+        self.assertEqual(
+            readback.get(target), 66.0,
+            "模組鍵應回填為本輪三個方法鍵的加總，追蹤真實現況")
+        self.assertEqual(
+            readback.get(f"{target}.C"), 66.0,
+            "類別鍵應回填為本輪三個方法鍵的加總，取代第 N 輪的舊值 150.0，"
+            "不因方法級細分被剪或凍結")
+        self.assertEqual(readback.get(f"{target}.C.m1"), 20.0)
+        self.assertEqual(readback.get(f"{target}.C.m2"), 24.0)
+        self.assertEqual(readback.get(f"{target}.C.m3"), 22.0)
+
+    def test_method_level_key_survives_split_round_and_candidate_still_flagged(
+        self,
+    ) -> None:
+        """D1 版：`test_module_key_survives_split_round_and_candidate_still_
+        flagged` 的類別級姊妹測試——鎖住「連續兩輪決策一致，不因快取結構
+        改變而震盪」：類別鍵在被自動細分成方法鍵的那一輪觀測後仍存活於活體
+        快取，值回填為本輪三個方法鍵的加總（20.0×3=60.0，本測試刻意讓總量
+        與第 N 輪的舊值相同，驗證『守恆時數字不變』；`test_save_live_cache_
+        merge_prune_survives_three_level_keys` 驗證『總量改變時數字也跟著
+        改變』的姊妹象限），且下一輪 `auto_method_level_candidates()` 讀到
+        這份回填後的 `class_hints` 仍能判定同一個類別為方法級候選。
+        """
+        ptc = self._ptc()
+        dg = run_root_unittests.dispatch_granularity
+        cls = _TopLevelDispatchFixtureMultiMethod
+        class_key = f"{__name__}.{cls.__qualname__}"
+        tests = list(unittest.TestLoader().loadTestsFromTestCase(cls))
+        fillers = {f"_ml_filler_{i}": 5.0 for i in range(20)}
+        with tempfile.TemporaryDirectory(prefix="ptc_ml_e2e_") as td:
+            live = Path(td) / "live.json"
+            with mock.patch.object(ptc, "LIVE_CACHE_PATH", live):
+                # 第 N 輪：類別級觀測（尚未被自動細分到方法級）。
+                ptc.save_live_cache({class_key: 60.0, **fillers})
+                # 第 N+1 輪：該類別被自動細分成方法鍵觀測，類別級鍵本身未出現
+                # 在這次的 module_timings 裡。
+                ptc.save_live_cache({
+                    f"{class_key}.test_a": 20.0, f"{class_key}.test_b": 20.0,
+                    f"{class_key}.test_c": 20.0, **fillers,
+                })
+                class_hints = ptc.load_hints({class_key, *fillers})
+            self.assertEqual(
+                class_hints[class_key], 60.0,
+                "類別鍵應回填為本輪三個方法鍵的加總（20+20+20），與第 N 輪的"
+                "舊值恰好相同（總量守恆），不因方法級細分而消失或歸零")
+        candidates = dg.auto_method_level_candidates(tests, class_hints, worker_count=5)
+        self.assertIn(
+            (cls.__module__, cls.__qualname__), candidates,
+            "下一輪仍應判定該類別為方法級候選——決策不因快取結構改變而震盪")
 
 
 class ParallelTimingCacheStalenessReportTest(unittest.TestCase):
@@ -4052,6 +4156,63 @@ class _TopLevelDispatchFixtureA(unittest.TestCase):
         pass
 
 
+class _TopLevelDispatchFixtureMultiMethod(unittest.TestCase):
+    """D1（方法級自動細分）測試用頂層 fixture：無 `setUpClass`／`tearDownClass`
+    覆寫、本模組無 `setUpModule`／`tearDownModule`、方法數 >= 2——通過全部安全
+    網，用於驗證「安全的離群類別會被拆成方法鍵」正向路徑。
+    """
+
+    def test_a(self) -> None:
+        pass
+
+    def test_b(self) -> None:
+        pass
+
+    def test_c(self) -> None:
+        pass
+
+
+class _TopLevelDispatchFixtureWithSetUpClassOverride(unittest.TestCase):
+    """安全網①負向樣本：覆寫 `setUpClass`，永遠不該成為方法級候選。"""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        pass
+
+    def test_a(self) -> None:
+        pass
+
+    def test_b(self) -> None:
+        pass
+
+
+class _TopLevelDispatchFixtureSingleMethod(unittest.TestCase):
+    """安全網③負向樣本：只有一個方法，拆分沒有意義。"""
+
+    def test_only(self) -> None:
+        pass
+
+
+class _TopLevelDispatchFixtureStaticmethodSetUpClass(unittest.TestCase):
+    """P0 邊界樣本：`setUpClass` 寫成 `@staticmethod`（而非 `unittest.TestCase`
+    預期的 `@classmethod`——stdlib 執行期不強制這件事，只要求 `cls.setUpClass()`
+    可被呼叫）。`cls.setUpClass` 解出的是一個**裸函式物件**，沒有 `.__func__`
+    （那是 bound method／classmethod 描述器才有的屬性），此前
+    `_class_has_only_base_fixtures()` 對它直接取 `.__func__` 會 `AttributeError`，
+    拖垮 `auto_method_level_candidates()` 整個候選評估迴圈。
+    """
+
+    @staticmethod
+    def setUpClass() -> None:
+        pass
+
+    def test_a(self) -> None:
+        pass
+
+    def test_b(self) -> None:
+        pass
+
+
 class DispatchGranularityDispatchKeyTest(unittest.TestCase):
     """DEF-200-274 第六輪四方獨立複審（Architect/SA/SD/QA）共同點名的缺口：
     `tools/lib/dispatch_granularity.py` 落地時零測試覆蓋，且該檔 docstring 曾
@@ -4060,8 +4221,9 @@ class DispatchGranularityDispatchKeyTest(unittest.TestCase):
     從『說了才知道是假的』變成『真的有回歸鎖看守』。
 
     白名單一律用 `mock.patch.object` 暫時覆寫成只含本模組（`__name__`），
-    不改動真正的 `CLASS_LEVEL_DISPATCH_MODULES`（那兩個真實白名單檔案另有
-    `DispatchGranularityWhitelistHasNoModuleLevelFixturesTest` 專門驗證）。
+    不改動真正的 `CLASS_LEVEL_DISPATCH_MODULES`（真實白名單成員數量一律現查
+    該常數，另有 `DispatchGranularityWhitelistHasNoModuleLevelFixturesTest`
+    專門驗證）。
     """
 
     def test_non_whitelisted_module_stays_at_module_granularity(self) -> None:
@@ -4172,12 +4334,20 @@ class DispatchGranularityWhitelistHasNoModuleLevelFixturesTest(unittest.TestCase
     未來有人替白名單模組新增 `setUpModule`／`tearDownModule`（原本整檔在同一個
     subprocess 跑一次，細分成 (module, class) 後每個 class 各自的 subprocess 都
     會重跑一次）。本測試把這條最低限度的前提轉成機械不變量。
+
+    QA 2026-09-23 追加：`test_context_budget_guard` 是**已人工核實安全**的
+    例外（模組層 fixture 只 pin／還原 `os.environ`，行程內狀態，per-subprocess
+    重跑成本可忽略——見 `dispatch_granularity._MODULE_FIXTURE_SAFE_EXCEPTIONS`
+    的核實結論）。預設仍是「有模組層 fixture 就判紅」，例外需要先出現在那份
+    名單裡才豁免，不是靜默放寬本測試的判準。
     """
 
     def test_no_whitelisted_module_defines_module_level_fixtures(self) -> None:
         dispatch_granularity = run_root_unittests.dispatch_granularity
         problems = []
         for module_name in sorted(dispatch_granularity.CLASS_LEVEL_DISPATCH_MODULES):
+            if module_name in dispatch_granularity._MODULE_FIXTURE_SAFE_EXCEPTIONS:
+                continue
             module = importlib.import_module(module_name)
             for fixture_name in ("setUpModule", "tearDownModule"):
                 if hasattr(module, fixture_name):
@@ -4185,7 +4355,18 @@ class DispatchGranularityWhitelistHasNoModuleLevelFixturesTest(unittest.TestCase
         self.assertEqual(
             problems, [],
             "白名單模組出現模組層 fixture，細分成 (module, class) 派工後會被重複"
-            "執行、破壞其『整檔只跑一次』的假設：\n  " + "\n  ".join(problems),
+            "執行、破壞其『整檔只跑一次』的假設，且未登記在已核實安全的例外名單"
+            "裡：\n  " + "\n  ".join(problems),
+        )
+
+    def test_module_fixture_safe_exceptions_are_a_subset_of_the_whitelist(self) -> None:
+        dispatch_granularity = run_root_unittests.dispatch_granularity
+        self.assertLessEqual(
+            dispatch_granularity._MODULE_FIXTURE_SAFE_EXCEPTIONS,
+            dispatch_granularity.CLASS_LEVEL_DISPATCH_MODULES,
+            "例外名單存在的意義是『白名單裡哪些模組的模組層 fixture 被人工核實"
+            "過安全』——不是獨立於白名單之外的第二份名單，登記了卻不在白名單裡"
+            "沒有任何效果",
         )
 
 
@@ -4246,6 +4427,148 @@ class DispatchGranularityAutoSplitCandidatesTest(unittest.TestCase):
         self.assertIn("test_dev_start", dg.auto_class_level_candidates(hints, worker_count=19))
 
 
+class DispatchGranularityMethodLevelDispatchKeyTest(unittest.TestCase):
+    """D1（方法級自動細分）：`dispatch_key()` 第三級（方法級）派工鍵——見
+    `DispatchGranularityDispatchKeyTest`（模組／類別兩級）的姊妹類別。
+    """
+
+    def test_method_level_key_round_trips_through_loadTestsFromName(self) -> None:
+        dispatch_granularity = run_root_unittests.dispatch_granularity
+        cls = _TopLevelDispatchFixtureMultiMethod
+        case = cls("test_a")
+        pair = (__name__, cls.__qualname__)
+        with mock.patch.object(
+            dispatch_granularity, "CLASS_LEVEL_DISPATCH_MODULES", frozenset({__name__}),
+        ), mock.patch.object(
+            dispatch_granularity, "METHOD_LEVEL_DISPATCH_CLASSES", frozenset({pair}),
+        ):
+            key = dispatch_granularity.dispatch_key(case)
+        expected_key = f"{__name__}.{cls.__qualname__}.test_a"
+        self.assertEqual(key, expected_key, "方法級派工鍵格式應為 module.Class.method")
+        loaded = list(unittest.TestLoader().loadTestsFromName(key))
+        self.assertEqual(len(loaded), 1, "方法級鍵必須恰好載回一個 test")
+        self.assertEqual(
+            loaded[0].id(), case.id(),
+            "loadTestsFromName 載回的 test 必須與原始 test 是同一支")
+
+    def test_class_not_in_method_level_whitelist_stays_at_class_granularity(self) -> None:
+        """`METHOD_LEVEL_DISPATCH_CLASSES` 未含該 `(module, qualname)` 時，即使
+        `class_level_modules` 有它，仍只細分到類別級，不下探到方法級（預設空
+        集合下的既有行為）。"""
+        dispatch_granularity = run_root_unittests.dispatch_granularity
+        cls = _TopLevelDispatchFixtureMultiMethod
+        case = cls("test_a")
+        with mock.patch.object(
+            dispatch_granularity, "CLASS_LEVEL_DISPATCH_MODULES", frozenset({__name__}),
+        ):
+            key = dispatch_granularity.dispatch_key(case)
+        self.assertEqual(
+            key, f"{__name__}.{cls.__qualname__}",
+            "METHOD_LEVEL_DISPATCH_CLASSES 預設為空，不該下探到方法級")
+
+
+class DispatchGranularityAutoMethodLevelCandidatesTest(unittest.TestCase):
+    """D1（方法級自動細分）：`auto_method_level_candidates()` 五條安全網——
+    倍率判準沿用 `dispatch_imbalance.detect_imbalance()`（`ratio_threshold=1.0`，
+    語意見 D0.3：一旦耗時超過公平份額，排程救不了，只能靠細分）。
+    """
+
+    def _dg(self):
+        return run_root_unittests.dispatch_granularity
+
+    @staticmethod
+    def _real_move_subset_fixture():
+        """天然樣本：`test_archive_defect_log.TestMoveSubsetSelectionIsNamed
+        AndTraceable`——7 支方法、無 `setUpClass`、每方法自帶獨立
+        `tempfile.TemporaryDirectory()` 沙箱（已於本輪落地前人工核實安全）。
+        `hints` 用真實磁碟活體快取記錄的 166.6s ＋ 20 個 filler 鍵湊出與
+        D0.3 實測相同的總量 `S=2381.0s`，讓 `worker_count=13`／`16` 兩個
+        交叉點兩側的 ratio 精確對齊設計稿算出的 0.91×／1.12×。
+        """
+        importlib.import_module("test_archive_defect_log")
+        module = sys.modules["test_archive_defect_log"]
+        cls = module.TestMoveSubsetSelectionIsNamedAndTraceable
+        tests = list(unittest.TestLoader().loadTestsFromTestCase(cls))
+        key = f"{cls.__module__}.{cls.__qualname__}"
+        hints = {key: 166.6, **{f"_real_fixture_filler_{i}": 110.72 for i in range(20)}}
+        return cls, tests, hints
+
+    def test_class_with_setUpClass_override_is_never_a_method_split_candidate(self) -> None:
+        dg = self._dg()
+        cls = _TopLevelDispatchFixtureWithSetUpClassOverride
+        tests = list(unittest.TestLoader().loadTestsFromTestCase(cls))
+        key = f"{__name__}.{cls.__qualname__}"
+        hints = {key: 100.0, "_su_filler": 1.0}
+        candidates = dg.auto_method_level_candidates(tests, hints, worker_count=2)
+        self.assertEqual(
+            candidates, frozenset(), "覆寫 setUpClass 的類別永遠不該被拆成方法級")
+
+    def test_staticmethod_setupclass_does_not_crash_and_is_excluded(self) -> None:
+        """P0：`setUpClass` 寫成 `@staticmethod` 時，`cls.setUpClass` 解出的裸
+        函式沒有 `.__func__`——修復前 `_class_has_only_base_fixtures()` 對它
+        直接取 `.__func__` 會 `AttributeError`，讓 `auto_method_level_
+        candidates()` 對這一個候選的評估以例外中止、拖垮整個候選迴圈（此前
+        無 try/except 兜底）。本測試釘住：例外不再外洩，且該類別因『視同覆寫
+        了 setUpClass』被 fail-closed 排除在候選之外。
+        """
+        dg = self._dg()
+        cls = _TopLevelDispatchFixtureStaticmethodSetUpClass
+        tests = list(unittest.TestLoader().loadTestsFromTestCase(cls))
+        key = f"{__name__}.{cls.__qualname__}"
+        hints = {key: 100.0, "_static_su_filler": 1.0}
+        candidates = dg.auto_method_level_candidates(tests, hints, worker_count=2)
+        self.assertEqual(
+            candidates, frozenset(),
+            "staticmethod 形式的 setUpClass 應被視為覆寫，fail-closed 排除，"
+            "且評估過程不得拋出例外")
+
+    def test_class_with_fewer_than_two_methods_is_never_a_candidate(self) -> None:
+        dg = self._dg()
+        cls = _TopLevelDispatchFixtureSingleMethod
+        tests = list(unittest.TestLoader().loadTestsFromTestCase(cls))
+        key = f"{__name__}.{cls.__qualname__}"
+        hints = {key: 100.0, "_sm_filler": 1.0}
+        candidates = dg.auto_method_level_candidates(tests, hints, worker_count=2)
+        self.assertEqual(candidates, frozenset(), "只有一個方法，拆分沒有意義")
+
+    def test_units_below_spawn_overhead_floor_are_not_split(self) -> None:
+        dg = self._dg()
+        cls = _TopLevelDispatchFixtureMultiMethod
+        tests = list(unittest.TestLoader().loadTestsFromTestCase(cls))
+        key = f"{__name__}.{cls.__qualname__}"
+        # 3 個方法、耗時 10.0s → 平均每方法 3.33s，低於 5.0s（0.5×10）地板。
+        hints = {key: 10.0, "_floor_filler": 0.1}
+        candidates = dg.auto_method_level_candidates(tests, hints, worker_count=2)
+        self.assertEqual(candidates, frozenset(), "低於啟動成本地板不該拆")
+
+    def test_a_safe_imbalanced_class_is_split_into_its_methods(self) -> None:
+        cls, tests, hints = self._real_move_subset_fixture()
+        self.assertEqual(len(tests), 7, "前提：本類別應恰有 7 支測試方法")
+        dg = self._dg()
+        candidates = dg.auto_method_level_candidates(tests, hints, worker_count=16)
+        self.assertIn(
+            (cls.__module__, cls.__qualname__), candidates,
+            "W=16 時 fair_share（148.8s）已低於這個離群類別的耗時（166.6s），該被拆")
+
+    def test_raising_worker_count_lowers_fair_share_and_exposes_new_split_candidates(
+        self,
+    ) -> None:
+        """D0.3 耦合鏈的機械驗證：同一份 hints，`worker_count` 從 13 升到 16，
+        `fair_share` 隨之下降，越過門檻的候選集合自動變大——不需要重新接線。
+        `fair_share(13)=183.2s > 166.6s` 不該抓；`fair_share(16)=148.8s < 166.6s`
+        該抓（見 D0.3 的交叉點分析，數字逐字對齊）。
+        """
+        cls, tests, hints = self._real_move_subset_fixture()
+        dg = self._dg()
+        pair = (cls.__module__, cls.__qualname__)
+        self.assertNotIn(
+            pair, dg.auto_method_level_candidates(tests, hints, worker_count=13),
+            "W=13 時 ratio=0.91×，未過門檻，不該被抓")
+        self.assertIn(
+            pair, dg.auto_method_level_candidates(tests, hints, worker_count=16),
+            "W=16 時 ratio=1.12×，越過門檻，該被抓")
+
+
 class DispatchGranularityAutoSuiteDispatchUnitsTest(unittest.TestCase):
     """`auto_suite_dispatch_units()`：無快取時與 `suite_dispatch_units(tests)` 逐位元
     相同（零回歸）；有 hints 命中安全、非白名單模組時回傳的 dict 含 `module.Class` 鍵。
@@ -4278,6 +4601,54 @@ class DispatchGranularityAutoSuiteDispatchUnitsTest(unittest.TestCase):
             auto = dg.auto_suite_dispatch_units(tests, worker_count=2)
         expected_key = f"{__name__}.{_TopLevelDispatchFixtureA.__qualname__}"
         self.assertIn(expected_key, auto)
+
+    def test_env_zero_matches_module_class_level_only_result_bit_for_bit(self) -> None:
+        """D1 逃生口：`AUTOSDD_DISPATCH_METHOD_LEVEL=0` 時，方法級偵測整段跳過，
+        結果必須與『只做模組/類別層自動偵測』（本輪之前的既有行為）位元級相同。
+        """
+        dg = self._dg()
+        tests = [_TopLevelDispatchFixtureA("test_ok")]
+        fake_hints = {__name__: 100.0, "other.mod": 1.0}
+        with mock.patch.object(self._ptc(), "load_hints", return_value=fake_hints), \
+                mock.patch.dict(os.environ, {"AUTOSDD_DISPATCH_METHOD_LEVEL": "0"}):
+            disabled = dg.auto_suite_dispatch_units(tests, worker_count=2)
+        class_candidates = dg.auto_class_level_candidates(
+            fake_hints, worker_count=2, known_modules=dg.CLASS_LEVEL_DISPATCH_MODULES)
+        expected = dg.suite_dispatch_units(tests, extra_class_level_modules=class_candidates)
+        self.assertEqual(
+            disabled, expected,
+            "env=0 時的結果必須與『只做模組/類別層』的既有行為位元級相同")
+
+    def test_method_level_candidates_are_applied_end_to_end_and_message_is_printed(
+        self,
+    ) -> None:
+        """D1 兩層自動偵測串接的端到端驗證：模組先升級成類別鍵，類別鍵接著被
+        偵測為方法級候選並真的拆成方法鍵，且拆分訊息被印出（供真機執行時人工
+        辨識拆了哪個類別）。"""
+        dg = self._dg()
+        cls = _TopLevelDispatchFixtureMultiMethod
+        tests = list(unittest.TestLoader().loadTestsFromTestCase(cls))
+        class_key = f"{__name__}.{cls.__qualname__}"
+
+        def fake_load_hints(keys):
+            keys = set(keys)
+            if __name__ in keys:
+                return {__name__: 100.0, "other.mod": 1.0}
+            if class_key in keys:
+                return {class_key: 60.0, "other.mod": 1.0}
+            return {}
+
+        buf = io.StringIO()
+        with mock.patch.object(self._ptc(), "load_hints", side_effect=fake_load_hints), \
+                contextlib.redirect_stdout(buf):
+            auto = dg.auto_suite_dispatch_units(tests, worker_count=2)
+        for method_name in ("test_a", "test_b", "test_c"):
+            self.assertIn(
+                f"{class_key}.{method_name}", auto,
+                "方法級候選應被套用，keys_now 應含三個方法鍵")
+        self.assertNotIn(class_key, auto, "類別鍵拆完後不該再殘留原始類別鍵")
+        self.assertIn("🔬 方法級自動細分", buf.getvalue())
+        self.assertIn(class_key, buf.getvalue())
 
 
 class DispatchImbalanceDetectionTest(unittest.TestCase):
@@ -4508,6 +4879,51 @@ class ReportDispatchImbalanceWallClockLossTest(unittest.TestCase):
         output = buf.getvalue()
         self.assertIn("🐢", output)
         self.assertNotIn("最後完工", output, "缺一個可選欄位不該讓整段不印，但也不該憑空造清單")
+
+
+class ReportDispatchImbalanceSummaryLineTest(unittest.TestCase):
+    """D4（cpu80 設計稿）：`📊 派工摘要` 一行——無條件印出（不看既有 🐢 區塊的
+    1.15 loss 門檻），明確標示 `S/W-bound` 或 `max_unit-bound`；`wall_clock`／
+    `workers_used` 任一缺席即整段不印（零特判、零例外）。
+    """
+
+    def test_s_over_w_bound_prints_correct_label(self) -> None:
+        # S=20, workers_used=2 → fair_share=10.0；最長單位=5.0 <= fair_share
+        # → S/W-bound（4 個單位搶 2 個 worker，總工作量本身才是瓶頸）。
+        buf = io.StringIO()
+        result = _FakeParallelResult(
+            {"a": 5.0, "b": 5.0, "c": 5.0, "d": 5.0}, wall_clock=12.0)
+        result.workers_used = 2
+        with contextlib.redirect_stdout(buf):
+            run_root_unittests.dispatch_imbalance.report_dispatch_imbalance(result, worker_count=2)
+        output = buf.getvalue()
+        self.assertIn("📊 派工摘要", output)
+        self.assertIn("worker=2", output)
+        self.assertIn("S/W-bound", output)
+        self.assertNotIn("max_unit-bound", output)
+
+    def test_max_unit_bound_prints_correct_label(self) -> None:
+        # S=65, workers_used=4 → fair_share=16.25；最長單位=50.0 > fair_share
+        # → max_unit-bound（單一離群單位本身就是瓶頸，排程救不了）。
+        buf = io.StringIO()
+        result = _FakeParallelResult(
+            {"a": 50.0, "b": 5.0, "c": 5.0, "d": 5.0}, wall_clock=55.0)
+        result.workers_used = 4
+        with contextlib.redirect_stdout(buf):
+            run_root_unittests.dispatch_imbalance.report_dispatch_imbalance(result, worker_count=4)
+        output = buf.getvalue()
+        self.assertIn("📊 派工摘要", output)
+        self.assertIn("max_unit-bound", output)
+        self.assertNotIn("S/W-bound", output)
+
+    def test_sequential_result_without_workers_used_prints_no_summary_line(self) -> None:
+        """序列模式的 plain `TestResult` 沒有 `workers_used` 屬性——即使
+        `wall_clock` 存在，兩者任一缺席就不印，不得憑空造一個 worker 數。"""
+        buf = io.StringIO()
+        result = _FakeParallelResult({"a": 10.0, "b": 10.0}, wall_clock=11.0)
+        with contextlib.redirect_stdout(buf):
+            run_root_unittests.dispatch_imbalance.report_dispatch_imbalance(result, worker_count=2)
+        self.assertNotIn("📊 派工摘要", buf.getvalue())
 
 
 class ReportModuleTimingsPrintsWorkerCountTest(unittest.TestCase):

@@ -116,6 +116,10 @@ jobs:
         with:
           name: mutation-history
           path: AutoClaude/.mutation_history.jsonl
+          # DEF-200-372：upload-artifact v4+ 預設 include-hidden-files: false ⇒ 這個點檔從未上傳
+          # （log 逐字「No files were found with the provided path」），restore 端恆讀到「無既往
+          # artifact」、runs 永遠 1/7。顯式打開，否則 B2 累積鏈結構性死亡。
+          include-hidden-files: true
           retention-days: 90
           if-no-files-found: ignore
       - name: Upload mutation report (本次證據)
@@ -127,5 +131,6 @@ jobs:
             AutoClaude/mutation_token_guard.log
             AutoClaude/mutation_backlog_token_guard.md
             AutoClaude/.mutation_baseline.toml
+          include-hidden-files: true  # DEF-200-372：.mutation_baseline.toml 是點檔，同上
           retention-days: 30
           if-no-files-found: ignore

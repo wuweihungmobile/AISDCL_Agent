@@ -132,3 +132,26 @@ def report_dispatch_imbalance(result: object, worker_count: int) -> None:
                 print("   最後完工（可能是拖累 makespan 的尾端）：")
                 for key, finish_at in last:
                     print(f"   - {key}: 第 {finish_at:.1f}s 完工")
+
+    # D4（cpu80 設計稿）：無條件（不看 loss 門檻）印一行瓶頸摘要，明確標示
+    # 「S/W-bound」或「max_unit-bound」——比只印數字更能讓人一眼判斷該加
+    # worker 還是該拆單位（見 D0.3 的診斷框架）。`wall_clock`／`workers_used`
+    # 皆用 `getattr(result, ..., None)` 讀：序列模式的 plain `TestResult`
+    # 沒有這兩個屬性，兩者其一缺席就整段不印，零特判、零例外。
+    workers_used = getattr(result, "workers_used", None)
+    if wall and workers_used:
+        total_elapsed = sum(timings.values())
+        longest_key, longest_elapsed = max(timings.items(), key=lambda kv: kv[1])
+        fair_share = total_elapsed / workers_used
+        if fair_share >= longest_elapsed:
+            summary_ideal, bound_label = fair_share, "S/W-bound"
+        else:
+            summary_ideal, bound_label = longest_elapsed, "max_unit-bound"
+        summary_loss = wall / summary_ideal if summary_ideal > 0 else 1.0
+        slot_utilization = total_elapsed / (wall * workers_used) * 100
+        print(
+            f"📊 派工摘要：worker={workers_used}｜S={total_elapsed:.1f}s｜"
+            f"ideal=max(S/W, 最長單位)={summary_ideal:.1f}s（{bound_label}）｜"
+            f"loss={summary_loss:.2f}x｜slot 利用率={slot_utilization:.1f}%｜"
+            f"最長單位：{longest_key} {longest_elapsed:.1f}s"
+        )

@@ -6,9 +6,32 @@
 共用本檔算法，唯一算法來源（帳本 DEF-200-289）。
 
 headless（CI）＝`max(1, min(CAP, 邏輯核))`，不變（CI vCPU 皆 <=10，4/4/3 零回歸）。
-互動環境改用**實體核 -1**：i5-14600K 14P/20L 實測 w=9 196.5s／w=14 166.8s／
-w=19 173.7s，邏輯核 SMT/E-core 超額訂閱互動情境反而拖慢；10 核筆電 8P+2E → 9 是
-既有校準點。CAP 9→16（>16 實體核未量測＝HYPOTHESIS）。
+
+互動環境公式：`max(1, min(CAP, (實體核-1) + floor((邏輯核-實體核)/2)))`——實體核
+-1 為基礎（前台保留一核），SMT 兄弟執行緒（邏輯核超出實體核的部分）不是白工，
+給**半信用**再加回來，比「當成獨立核心」更貼近實測、也比「完全不計」更接近
+觀察到的最佳點。`physical` 量不到時退回 `logical`（此時算式退化為
+`logical-1`，與修法前行為位元級相同）。
+
+2026-09-23 QA 六輪交錯掃描實測（i5-14600K，14P/20L，Windows，每個 worker 數
+（W）跑兩輪取中位數；W=14/15/17/18 未測＝HYPOTHESIS）：
+
+| W  | wall 中位數 | 平均 CPU | 穩態 CPU |
+|----|------------|---------|---------|
+| 13 | 189.4s     | 58.8%   | 74.9%   |
+| 16 | 163.7s     | 74.0%   | 88.9%（最佳點）|
+| 20 | 176.5s     | 72.2%   | 98.9%（S 膨脹，被單一最長單位卡成 max_unit-bound）|
+
+`(14-1) + floor((20-14)/2) = 13+3 = 16`——與實測最佳點吻合。CAP 維持 16
+（>16 實體核仍是 HYPOTHESIS，未實測）。10 核筆電（8P+2E）的既有校準點「9」是
+舊公式（純 physical-1）算出的值，未知其確切邏輯核數（P-core 是否啟用 SMT），
+新公式在該機型上會算出什麼尚未重新實測，本檔誠實標記為 HYPOTHESIS，不臆測
+新值。
+
+舊校準句「w=9 196.5s／w=14 166.8s／w=19 173.7s」已作廢：那組數字量測時全套被
+單一 166.6s 的離群單位（`test_archive_defect_log` 的一支重測試）綁死，不論
+worker 數怎麼加，makespan 都卡在那支測試附近，對「加 worker 有沒有用」這個
+問題零鑑別力（該單位已於後續輪次自動細分掉）。
 
 `_detect_physical_count()` 三段式偵測（2026-09-20 起；Q3「自動偵測」的結構缺口）：
 ① psutil 若可 import 且回正整數就用（涵蓋面最廣，第一順位 optional 依賴，沿用舊行為）；
@@ -208,7 +231,8 @@ def total_budget(
     headless: bool | None = None,
     physical_count: int | None = None,
 ) -> int:
-    """headless 用邏輯核心（不變）；互動用實體核心 -1（見檔頭 WHY）。"""
+    """headless 用邏輯核心（不變）；互動用「實體核心 -1 ＋ SMT 兄弟執行緒半信用」
+    （見檔頭 WHY 與 2026-09-23 QA 實測表）。"""
     logical = cpu_count if cpu_count is not None else (os.cpu_count() or 2)
     if headless is None:
         headless = (
@@ -221,7 +245,8 @@ def total_budget(
     physical = physical_count if physical_count is not None else _detect_physical_count()
     if not physical:
         physical = logical
-    return max(1, min(_CAP, physical - 1))
+    smt_credit = (logical - physical) // 2
+    return max(1, min(_CAP, (physical - 1) + smt_credit))
 
 
 def per_leg_budget(n_legs: int, total: int | None = None) -> int:

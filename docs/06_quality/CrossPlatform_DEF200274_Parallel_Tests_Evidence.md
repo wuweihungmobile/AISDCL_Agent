@@ -2121,3 +2121,5 @@ worktree、檔案面互不相交）→ 四方複審 → 收尾單人窗口。主
 - 三支 docker e2e 測試仍會在高併發下真起容器（撞名已解、逾時類 flake 未觀測到但未做 N 次壓測）；`_probe_docker_available()` 在 env 未設的裸跑情境（非 pytest、非 controller）行為與舊碼逐字相同。
 - 方法級派工（F-SD-02）defer；nightly 重疊（Q4）document-only；`per_leg_budget(n_legs>1)` 死路徑未驗。
 - 去重階段本輪由主控親做（非 Sonnet 去重員；四方發現有 3 組跨角色重複被合併：F01／F02／F03 各三方命中），「去重能合併」本輪首次有實戰樣本。
+
+> 🔴 本冊已達 Read 工具 256KB 上限的 WARN 帶；自第二十一輪起續於 CrossPlatform_DEF200274_Parallel_Tests_Evidence_2.md。

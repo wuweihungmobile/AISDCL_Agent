@@ -676,3 +676,37 @@ DEF-200-365 mutation kill_rate CI 解析缺口）的鎖落在 AISDLC_SDD v0.30 �
 缺陷帳本見 `docs/06_quality/AutoSDD_Defect_Log.md` DEF-200-363～366；證據見 `CrossPlatform_DEF200274_Parallel_Tests_Evidence.md`
 〈第二十輪〉；本附記為 doc-total 對帳（≥2 站點）另一站點寄居 `AutoSDD_improving_112.md`，同 R129～R167 寄居體例。
 round-label-ok
+
+## 多 CPU 第二十一輪附記（R169）
+
+掌舵者兩問（「CPU 只到 34%？」「請讓它用到 80%」）觸發的量測歸因＋方法級細分＋W 政策校準輪。逐檔改動：
+- `tools/lib/dispatch_granularity.py`：新增方法級自動細分（五安全網＋`try/except` fail-closed 兜底）；白名單新增
+  `test_context_budget_guard`／`test_run_root_unittests`／`test_platform_neutral_paths`；新增
+  `_MODULE_FIXTURE_SAFE_EXCEPTIONS` 兜底 `@staticmethod` 形式 `setUpClass`（對抗複審 P0 發現並修正）。
+- `tools/lib/dispatch_imbalance.py`：新增 `📊 派工摘要` 輸出行（worker／S／ideal／瓶頸類型／loss／slot 利用率／
+  最長單位）。
+- `tools/lib/cpu_budget.py`：互動式預算公式改 `(實體核−1)+(邏輯−實體)//2`（本機 14P/20L：13→16；M1 Max
+  10P/10L 仍 9；headless／CI 路徑不變）。
+- `tools/lib/parallel_timing_cache.py`：`save_live_cache` 補父模組前綴加總回填，止住隔輪震盪的殘餘（門檻附近反
+  覆翻轉）。
+- `tools/lib/parallel_shard.py`：新增 `[cpu_budget] root-unittest workers=N source=…` 標籤行，供三平台 CI 同一
+  grep 對帳。
+- `tools/tests/test_run_root_unittests.py` +416 行；`tools/tests/test_cpu_budget.py` +31 行。
+
+五缺陷一句話：DEF-200-368（計時快取父鍵不回填 ⇒ 細分決策隨 S 漂移翻轉）／DEF-200-369（互動 CPU 預算「實體核
+−1」低估 SMT 機器可派工數）／DEF-200-370（派工粒度止於類別 ⇒ 單一類別成 makespan 天花板、無瓶頸可觀測性）／
+DEF-200-371（根層 runner 缺 `source=` 標籤、三平台 CI 無法同一 grep 對帳）／DEF-200-372（`mutation-on-change` 連兩輪 `runs=1/7`：upload-artifact v6 預設 include-hidden-files: false 讓點檔
+`.mutation_history.jsonl` 從未上傳，五處 upload step 補旗標，fixed 雲端待驗）。
+
+雲端驗收摘要（commit `ff91997`）：root-infra／windows-compat／macos-compat 根層 unittest 4551 個測試（下限
+4543）worker=4／4／3 皆見 `source=cpu_budget`；aisdlc-sdd-ci v0.30 `1962 passed, 5 skipped`（前次 `1949
+passed, 8 skipped`，+13＝10 支新測試＋3 支 docker 測試 skip→pass）；`mutation-on-change` run `35861043538`
+marker 段 `Killed (107)`／`Survived (59)` ⇒ `kill_rate=64.46%`（前次 `0.00%`）；三平台 CI 皆未裝 `psutil` ⇒
+DEF-200-366 win32 ctypes 分支雲端仍走弱判準 `[1, cpu_count]`。誠實劃界：整輪平均 CPU 63.5%（W=13）／最佳點
+W=16 時 74.0%（穩態 88.9%），皆未達字面 80%；W=14/15/17/18 未測；三 leg 並行（D3）與動態 ρ 回饋機制（D2）本
+輪皆未落地，defer 理由與下一輪候選詳見證據檔。
+
+缺陷帳本見 `docs/06_quality/AutoSDD_Defect_Log.md` DEF-200-368～372；證據見
+`CrossPlatform_DEF200274_Parallel_Tests_Evidence_2.md`〈第二十一輪〉（第一冊已逼近 Read 工具上限，自本輪起續
+於第二冊）；本附記為 doc-total 對帳（≥2 站點）另一站點寄居 `AutoSDD_improving_112.md`，同 R129～R168 寄居體例。 round-label-ok
+<!-- guard-total:R169 --> R169 護欄層累積淨額＝ 104276 → 104746（+470）——多 CPU 第二十一輪掌舵者兩問「CPU 只到 34%」「請讓它用到 80%」收尾單人窗口（2026-09-23，Windows 11 真機）：`test_run_root_unittests.py` +416（方法級自動細分五安全網＋staticmethod 兜底負向鎖／三層鍵回填與不震盪／候選隨 worker 數翻轉／📊 摘要行兩種 bound 標籤／[cpu_budget] 標籤行／白名單無模組 fixture 或在例外名冊）＋`test_cpu_budget.py` +31（SMT 半信用公式四類機器值＋headless 不變）＋本表自身漂移 +23（新列、回歸鎖軌列、接鏈列、凍結前綴 245→246、sha、cap 到期兌現 `(169, 532)` 並重新武裝 171／531）；回歸鎖軌申報 309（＝軌上限）、主軌 161（三輪歸零後首次上升，streak 1／2）。逐檔清單見本節；量測與雲端驗收見 `CrossPlatform_DEF200274_Parallel_Tests_Evidence_2.md`〈第二十一輪〉。 round-label-ok

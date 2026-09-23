@@ -685,7 +685,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 8570,
+    "test_adr_xplat001_c1c2_lock.py": 8593,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 3726,
@@ -707,7 +707,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_component_sanitizer_shared_layer_lock.py": 293,
     "test_context_budget_guard.py": 12355,
     "test_context_window_parity.py": 281,
-    "test_cpu_budget.py": 368,
+    "test_cpu_budget.py": 399,
     "test_defect_id_reference_integrity.py": 281,
     "test_dev_platform_provenance.py": 921,
     "test_dev_start.py": 6794,
@@ -742,7 +742,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_quota_policy.py": 3416,
     "test_root_guard_known_model_r145.py": 227,
     "test_root_infra_parity.py": 441,
-    "test_run_root_unittests.py": 4538,
+    "test_run_root_unittests.py": 4954,
     "test_sanitize_component_frozen_sdd_versions_lock.py": 317,
     "test_schedule_capability_parity.py": 626,
     "test_script_scan_surface_ssot.py": 391,
@@ -2207,6 +2207,17 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "回歸鎖軌列、接鏈列、凍結前綴 244→245、sha、root-tools 舊尺技術債具名展延 168→173）。全額歸"
      "回歸鎖軌（結案鎖與記帳誠實度分類，同 R167 先例），主軌 0：維持歸零（前輪 R167 亦 0）。"
      "逐檔清單見 CrossPlatform_R145_Scan_Findings.md〈多 CPU 第二十輪附記（R168）〉。"),
+    ("R169", 104276, 104746, 470,  # round-label-ok：多 CPU 第二十一輪掌舵者兩問收尾單人窗口
+     "[非淨減法輪][回歸鎖軌申報 309（＝軌上限），餘額歸主軌，見 _REGRESSION_LANE_LOG 同輪列] "
+     "掌舵者兩問「CPU 只到 34%」「請讓它用到 80%」：DEF-200-368（計時快取父鍵不回填 ⇒ 細分決策"
+     "隨 S 漂移翻轉）／369（互動 CPU 預算實體核−1 在 SMT 機器低估，W=16 最佳）／370（派工粒度"
+     "止於類別 ⇒ 加 W 後單一類別成天花板）／371（根層 runner 無 [cpu_budget] 標籤行）結案回歸鎖："
+     "test_run_root_unittests.py（方法級自動細分安全網＋staticmethod 兜底／三層鍵回填不震盪／"
+     "候選隨 worker 數翻轉／📊 摘要行／標籤行／白名單）＋test_cpu_budget.py（SMT 半信用公式）"
+     "＋本表自身漂移（本列、回歸鎖軌列、接鏈列、凍結前綴 245→246、sha、cap 到期兌現 (169, 532) "
+     "並重新武裝 171／531）。回歸鎖軌 309、主軌 161：三輪歸零後首次上升（streak 1／2）。"
+     "逐檔清單見 CrossPlatform_R145_Scan_Findings.md〈多 CPU 第二十一輪附記（R169）〉；量測與"
+     "雲端驗收見 CrossPlatform_DEF200274_Parallel_Tests_Evidence_2.md〈第二十一輪〉。"),
 )
 
 
@@ -2320,6 +2331,8 @@ _REPIN_NET_CAP_SCHEDULE: tuple[tuple[int, int], ...] = (
                   # （`_REPIN_NET_CAP_DUE_ROUND=165`）。同輪重新武裝：步伐維持 1（整數下限）。
     (167, 533),   # 到期輪兌現：cap 降到到期目標本身（同既有判例）。本輪剛好到期 round-label-ok
                   # （`_REPIN_NET_CAP_DUE_ROUND=167`）。同輪重新武裝：步伐維持 1（整數下限）。
+    (169, 532),   # 到期輪兌現：cap 降到到期目標本身（同既有判例）。本輪剛好到期 round-label-ok
+                  # （`_REPIN_NET_CAP_DUE_ROUND=169`）。同輪重新武裝：步伐維持 1（整數下限）。
 )
 #: 生效點＝首列輪號、現行上限＝末列上限，**皆由表導出不另立常數**（R73 判例：一份知識一個家）。
 _REPIN_ROUND_CAP_SINCE = _REPIN_NET_CAP_SCHEDULE[0][0]
@@ -2615,6 +2628,12 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "（同 R167 先例全額申報，含本列、稽核列、接鏈列、前綴 244→245、sha、舊尺技術債具名"
      "展延）＝125（子集＝母項）。逐項見 CrossPlatform_R145_Scan_Findings.md〈多 CPU 第二十輪"
      "附記（R168）〉。"),
+    ("R169", 309,
+     "DEF-200-368／369／370／371 結案回歸鎖（記帳誠實度分類）：test_run_root_unittests.py "
+     "（方法級自動細分安全網／三層鍵回填不震盪／候選隨 worker 數翻轉／摘要行／標籤行／白名單）"
+     "與 test_cpu_budget.py（SMT 半信用公式）全為結案回歸鎖，母項超出軌上限 ⇒ 部分申報 309"
+     "（＝軌上限，同 R152 先例），餘額歸主軌由款(10)(11) 照算。逐項見 "
+     "CrossPlatform_R145_Scan_Findings.md〈多 CPU 第二十一輪附記（R169）〉。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -2835,8 +2854,9 @@ def net_cap_schedule_problems(
 #: R159 兌現：cap 降到目標本身（536，見 `(159, 536)` 列），重新武裝：目標 535＜cap round-label-ok
 #: R165 兌現：cap 降到目標本身（534，見 `(165, 534)` 列），重新武裝：目標 533＜cap round-label-ok
 #: R167 兌現：cap 降到目標本身（533，見 `(167, 533)` 列），重新武裝：目標 532＜cap round-label-ok
-_REPIN_NET_CAP_DUE_ROUND = 169  # round-label-ok：到期輪＝兌現輪+2（lookahead 判準的活體對照）
-_REPIN_NET_CAP_DUE_TARGET = 532  # 步伐 1，嚴格低於 cap 533（本輪重新武裝） round-label-ok
+#: R169 兌現：cap 降到目標本身（532，見 `(169, 532)` 列），重新武裝：目標 531＜cap round-label-ok
+_REPIN_NET_CAP_DUE_ROUND = 171  # round-label-ok：到期輪＝兌現輪+2（lookahead 判準的活體對照）
+_REPIN_NET_CAP_DUE_TARGET = 531  # 步伐 1，嚴格低於 cap 532（本輪重新武裝） round-label-ok
 
 #: DEF-200-121：到期輪自身的後設鎖——`_REPIN_NET_CAP_DUE_ROUND` 只准落在「最近稽核輪
 #: ＋ lookahead」以內（歷史母體 85..113 的到期輪一律＝上一次兌現輪 +2）。可延期的到期日
@@ -2903,10 +2923,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 245
+_REPIN_LOG_FROZEN_PREFIX_LEN = 246
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "62ff202f16a23983c8dc89118076a960eaf1ef6da67b61f83ecb0bcee4ef505c")
+    "5b81821b1c27a300aba3fef02d573c383abde19f5bbe1f9030e2167d410e99b3")
 
 
 def repin_log_history_digest(
@@ -3209,6 +3229,9 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # DEF-200-363：多 CPU 第二十輪計時快取隔輪震盪修復窗口——追加本輪稽核列並依
     # 「追加後立即自我凍結」判例延伸前綴涵蓋該列本身（244→245）。
     ("R168", "c570fe4d14e3", "62ff202f16a2", "DEF-200-363"),  # round-label-ok
+    # DEF-200-368：多 CPU 第二十一輪計時快取父鍵回填修復窗口——追加本輪稽核列並依
+    # 「追加後立即自我凍結」判例延伸前綴涵蓋該列本身（245→246）。
+    ("R169", "62ff202f16a2", "5b81821b1c27", "DEF-200-368"),  # round-label-ok
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。
