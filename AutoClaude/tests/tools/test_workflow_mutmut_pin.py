@@ -210,6 +210,116 @@ def test_every_mutmut_run_segment_uses_runner_and_ci_not_bare_flags() -> None:
     )
 
 
+def _mutmut_results_segments(text: str) -> list[tuple[str, str]]:
+    """DEF-200-365：擷取每個 `mutmut results | tee <log>` 行與其後第一個非空白指令行。
+
+    對稱於 `_mutmut_run_segments`——後者合併 `mutmut run` 的續行段落，本函式則配對
+    「`mutmut results | tee` 這一行」與「緊接在後的下一個非空白指令行」（跨過空行，
+    `_uncommented` 已先濾掉整行註解；行尾 inline 註解另以 `_strip_unquoted_trailing_comment`
+    剝除，不影響比對）。
+
+    回傳 `(tee_line, next_line)` tuples；`next_line` 找不到時為空字串（該段落沒有
+    後續指令，本身就是一種違規，由呼叫端判定）。
+    """
+    lines = _uncommented(text)
+    segments: list[tuple[str, str]] = []
+    n = len(lines)
+    for i, raw_ln in enumerate(lines):
+        stripped = _strip_unquoted_trailing_comment(raw_ln).strip()
+        if not re.match(r"mutmut results \| tee\s+\S+", stripped):
+            continue
+        next_line = ""
+        for j in range(i + 1, n):
+            candidate = _strip_unquoted_trailing_comment(lines[j]).strip()
+            if not candidate:
+                continue
+            next_line = candidate
+            break
+        segments.append((stripped, next_line))
+    return segments
+
+
+def _cache_counts_violations(text: str) -> list[str]:
+    """DEF-200-365 主契約：每個 `mutmut results | tee <log>` 段的下一行必須是
+    `python tools/mutmut_cache_counts.py >> <同一 log>`（`mutmut results` 結構上永不印
+    Killed，需從 `.mutmut-cache` 補上 marker 段給 `mutation_baseline_lock.py` 讀，
+    見 `AutoClaude/tools/mutmut_cache_counts.py` 檔頭）。回傳違規訊息 list；空 list＝合格。
+    """
+    problems: list[str] = []
+    for tee_line, next_line in _mutmut_results_segments(text):
+        m = re.search(r"mutmut results \| tee\s+(\S+)", tee_line)
+        log_name = m.group(1) if m else None
+        if not next_line:
+            problems.append(f"{tee_line!r} 後面沒有任何後續指令行（缺 cache-counts 補丁）")
+            continue
+        if "tools/mutmut_cache_counts.py" not in next_line:
+            problems.append(
+                f"{tee_line!r} 後一行不是 mutmut_cache_counts.py 補丁：{next_line!r}"
+            )
+            continue
+        if log_name and f">> {log_name}" not in next_line:
+            problems.append(
+                f"{tee_line!r} 後一行未 append 回同一 log（{log_name}）：{next_line!r}"
+            )
+    return problems
+
+
+def test_every_mutmut_results_tee_is_followed_by_cache_counts_append_to_same_log() -> None:
+    """DEF-200-365 主斷言：所有 workflow 的 `mutmut results | tee <log>` 行後緊接
+    `python tools/mutmut_cache_counts.py >> <同一 log>`；且命中段數 >= 4（掃描形態失效
+    不得悄悄綠掉，同紀律 #2／DEF-200-357 手法）。
+    """
+    workflows_dir = _REPO_ROOT / ".github" / "workflows"
+    hits: list[tuple[str, str]] = []
+    violations: list[str] = []
+    for wf in sorted(workflows_dir.glob("*.yml")):
+        text = wf.read_text(encoding="utf-8")
+        rel = str(wf.relative_to(_REPO_ROOT))
+        for tee_line, _next_line in _mutmut_results_segments(text):
+            hits.append((rel, tee_line))
+        violations.extend(f"{rel}: {p}" for p in _cache_counts_violations(text))
+
+    assert not violations, (
+        "以下 `mutmut results | tee` 段落缺少 DEF-200-365 cache-counts 補丁：\n"
+        + "\n".join(violations)
+    )
+    assert len(hits) >= 4, (
+        "命中的 `mutmut results | tee` 段數 < 4 —— 掃描形態可能已失效（0 命中假綠會被"
+        f"誤判為『全部合規』），現查座標：{[wf for wf, _ in hits]}"
+    )
+
+
+def test_cache_counts_append_detector_has_red_green_self_proof() -> None:
+    """mirror 紅綠自證（紀律 #4「驗證鏡子自身要被驗證」）：合成一段缺 helper 行的假 yml
+    文字必須被判至少 1 個 violation；真檔（含正確補丁行）必須零違規。
+    """
+    good = (
+        "          mutmut run --paths-to-mutate=x --runner=\"y\" --no-progress --CI\n"
+        "          mutmut results | tee mutation_token_guard.log\n"
+        "          python tools/mutmut_cache_counts.py >> mutation_token_guard.log"
+        "  # DEF-200-365：results 不印 Killed，從 .mutmut-cache 補 marker 段給"
+        " mutation_baseline_lock\n"
+    )
+    assert _cache_counts_violations(good) == [], (
+        f"正確形態不應被判違規：{_cache_counts_violations(good)}"
+    )
+
+    missing_patch = (
+        "          mutmut results | tee mutation_token_guard.log\n"
+        "          python tools/mutation_baseline_lock.py token_guard"
+        " --log mutation_token_guard.log\n"
+    )
+    problems_missing = _cache_counts_violations(missing_patch)
+    assert problems_missing, "缺 cache_counts 補丁行應被判違規，卻沒有 finding"
+
+    wrong_log = (
+        "          mutmut results | tee mutation_token_guard.log\n"
+        "          python tools/mutmut_cache_counts.py >> mutation_goal_synthesis.log\n"
+    )
+    problems_wrong_log = _cache_counts_violations(wrong_log)
+    assert problems_wrong_log, "append 到錯誤 log 檔名應被判違規，卻沒有 finding"
+
+
 def test_segment_violation_detector_has_red_green_self_proof() -> None:
     """mirror 紅綠自證（紀律 #4「驗證鏡子自身要被驗證」）：
     正確形態必須判 0 violation；拿掉 --runner 退回裸旗標 + || true、或在引號外多出裸旗標，

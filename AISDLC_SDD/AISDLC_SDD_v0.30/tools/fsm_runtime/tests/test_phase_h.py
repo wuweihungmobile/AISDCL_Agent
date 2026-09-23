@@ -1,9 +1,13 @@
 """Phase H / ACT-045~058 — Generative-Adversarial Execution Layer tests."""
 from __future__ import annotations
 
+import importlib.util
 import os
 import sys
+import types
+import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -196,6 +200,12 @@ def test_parse_test_output_fail():
     assert obs.nonzero_exit is True and obs.runtime_errors >= 1
 
 
+# DEF-200-364 B 包第二棒：三態判斷已下沉到 production 面
+# （`sandbox_runner.resolve_docker_available()`），`docker_available()` 現在
+# 自己讀 `SDD_DOCKER_AVAILABLE_ENV`（由 conftest.py::pytest_configure 在
+# controller 端探測恰一次並寫入）。本模組頂層因而與訂正前逐字相同：呼叫一次
+# `docker_available()` 即可，不需要在測試層重覆一份三態邏輯——production
+# 呼叫路徑（`_docker_factory()`）與這裡讀的是同一個函式、同一個 env。
 _DOCKER = None
 try:
     from tools.fsm_runtime.sandbox_runner import docker_available as _da
@@ -280,13 +290,53 @@ requires_docker_success = pytest.mark.skipif(
 )
 
 
+# DEF-200-367：三支 docker 測試（real_pass／real_runtime_fail／e2e_through_fsm）
+# 原本都用 `SandboxSpec(app_id="demo", ...)`、未設 `track_id`。
+# `sandbox_runner.track_container_name(app_id, track_id)` 未帶 track_id 時只用
+# app_id 組出容器名（`sdd-{app_id}`），三者因而算出**相同**容器名 `sdd-demo`；
+# pytest-xdist `-n 13` 下三者若被排到不同 worker 併發執行，`docker run --name
+# sdd-demo` 撞名，其中一次容器實跑失敗（exit 非 0 或輸出被搶佔）⇒ OQS verdict
+# ≠ pass（單檔 `-n 13` 3/3 次重現；全套跑法因負載稀釋、排程較少讓三者同時執行
+# 而看不到）。修法：三者各帶不同 `track_id`，讓
+# `track_container_name(spec.app_id, spec.track_id)` 兩兩相異——這正是
+# `track_id` 這個既有欄位本來就存在的用途（ACT-070 艦隊並行 N 軌不撞名），只是
+# 這三支測試原本沒有使用它；不改生產面命名規則。
+#
+# 三支測試與回歸鎖（見檔尾 `TestDockerTestContainerNamesDoNotCollide`）共用本
+# helper 建構 spec，確保鎖驗證的 spec 與測試實際執行的 spec 是同一份定義，不會
+# 因兩處各自維護一份而彼此漂移。
+_DOCKER_TEST_KINDS = ("real-pass", "real-runtime-fail", "e2e-fsm")
+
+
+def _docker_spec(kind: str):
+    """建構 DEF-200-367 三支 docker 測試共用的 SandboxSpec，各自帶不同 track_id。"""
+    from tools.fsm_runtime.sandbox_runner import SandboxSpec
+    if kind == "real-pass":
+        return SandboxSpec(
+            app_id="demo", image="busybox",
+            test_cmd=["sh", "-c", "echo '10 passed, 0 failed'; exit 0"],
+            timeout_sec=60, track_id="h-real-pass",
+        )
+    if kind == "real-runtime-fail":
+        return SandboxSpec(
+            app_id="demo", image="busybox",
+            test_cmd=["sh", "-c", "echo 'error: boom' >&2; exit 1"],
+            timeout_sec=60, track_id="h-runtime-fail",
+        )
+    if kind == "e2e-fsm":
+        return SandboxSpec(
+            app_id="demo", image="busybox",
+            test_cmd=["sh", "-c", "echo '5 passed, 0 failed'; exit 0"],
+            timeout_sec=60, track_id="h-e2e-fsm",
+        )
+    raise ValueError(f"unknown docker spec kind: {kind!r}")
+
+
 @requires_docker_success
 def test_docker_backend_real_pass():
     # 真實執行接地：容器實跑成功 → OQS pass。
-    from tools.fsm_runtime.sandbox_runner import SandboxSpec, evaluate
-    spec = SandboxSpec(app_id="demo", image="busybox",
-                       test_cmd=["sh", "-c", "echo '10 passed, 0 failed'; exit 0"],
-                       timeout_sec=60)
+    from tools.fsm_runtime.sandbox_runner import evaluate
+    spec = _docker_spec("real-pass")
     res = evaluate(spec, backend="docker")
     assert res.backend == "docker"
     assert res.observation.tests_passed == 10
@@ -302,10 +352,8 @@ def test_docker_backend_real_runtime_fail():
     # （如 subprocess 逾時、非 nonzero_exit 的例外）呈現，本測試會直接把不確定性暴露成
     # CI 紅燈且無防護。暫不變更行為（證據仍支持現況），僅記錄此脆弱點供後續留意。
     # 真實執行接地：容器實跑失敗（exit 1 + stderr）→ OQS runtime_fail。
-    from tools.fsm_runtime.sandbox_runner import SandboxSpec, evaluate
-    spec = SandboxSpec(app_id="demo", image="busybox",
-                       test_cmd=["sh", "-c", "echo 'error: boom' >&2; exit 1"],
-                       timeout_sec=60)
+    from tools.fsm_runtime.sandbox_runner import evaluate
+    spec = _docker_spec("real-runtime-fail")
     res = evaluate(spec, backend="docker")
     assert res.observation.nonzero_exit is True
     assert res.oqs.verdict == "runtime_fail" and res.oqs.passed is False
@@ -314,12 +362,10 @@ def test_docker_backend_real_runtime_fail():
 @requires_docker_success
 def test_docker_backend_e2e_through_fsm(tmp_path):
     # 端到端：IMPLEMENTATION → enter_execution_evaluation → 容器實跑 verdict → exit 路由。
-    from tools.fsm_runtime.sandbox_runner import SandboxSpec, evaluate
+    from tools.fsm_runtime.sandbox_runner import evaluate
     rt = _rt(tmp_path, "ee-docker", "IMPLEMENTATION")
     rt.enter_execution_evaluation()
-    spec = SandboxSpec(app_id="demo", image="busybox",
-                       test_cmd=["sh", "-c", "echo '5 passed, 0 failed'; exit 0"],
-                       timeout_sec=60)
+    spec = _docker_spec("e2e-fsm")
     res = evaluate(spec, backend="docker")
     rt.exit_execution_evaluation(res.oqs.verdict)
     assert rt.state.current == "PR_REVIEW"
@@ -592,3 +638,224 @@ def test_act056_structural_escalation_fsm_writes_diagnostic_abort(tmp_path, monk
     # 證明 diagnostic 真的流入報告（舵手交棒，而非僅 retry exhausted）
     assert "sa-analyst" in content
     assert "舵手" in content or "steersman" in content.lower()
+
+
+# ---------- DEF-200-364: docker 探測 controller-once 回歸鎖 ----------
+
+class TestDockerProbeIsResolvedOnceByController(unittest.TestCase):
+    """DEF-200-364 回歸鎖：pytest-xdist 每個 worker 各自 import 本模組時各自
+    重新探測 docker（`docker info` timeout=10 起探測容器），`-n 13` 造成 13 路
+    併發探測、部分 worker 探測失準 ⇒ 平行模式下 docker-gated 測試被誤判 skip、
+    序列模式卻能通過（單檔 `-n 13` 2/2 次重現 3 skipped）。
+
+    B 包第二棒（覆核發現的殘餘缺口）：只在測試層擋下重複探測不夠——
+    production 呼叫路徑（`_docker_factory()` 經 `get_backend("docker")`）在
+    測試*執行*時會獨立再呼叫一次 `docker_available()`，同樣受 13 路併發影響
+    而失準。修法因而下沉：三態判斷（`resolve_docker_available()`）與唯一原始
+    探測（`_probe_docker_available()`）都搬進 `sandbox_runner.py`，
+    `docker_available()` 本身改讀 `SDD_DOCKER_AVAILABLE_ENV`；
+    `conftest.py::pytest_configure` 在 controller 端探測恰一次並寫入該 env。
+    測試模組頂層（`_DOCKER = docker_available()`）與 production 呼叫路徑現在
+    讀的是**同一個**函式、**同一個** env，不再各自繞過。
+
+    本 class 鎖住三層：
+      1. `sandbox_runner.resolve_docker_available()` 本身的三態判斷（純函式，
+         不依賴 docker，import 自生產面）。
+      2. `conftest.py::pytest_configure` 的三分支（worker 端不探測／env 已設
+         不重探／controller 端探測一次並寫回 env），以 `importlib` 動態載入
+         該檔成獨立模組物件、monkeypatch 探測函式後直接呼叫，同樣不依賴真實
+         docker。
+      3. production 呼叫路徑（`get_backend("docker")` → `_docker_factory()`）
+         確實經 `docker_available()` 讀 env 短路，不再重新探測——直接
+         monkeypatch `sandbox_runner._probe_docker_available` 為會
+         `self.fail()` 的 stub，若探測被重新呼叫（不論 env="0" 或 "1"）本鎖
+         立刻失敗，白盒證明「同一真相源」而非僅巧合行為一致。
+    """
+
+    # ---- 1. sandbox_runner.resolve_docker_available 純函式三態判斷 ----
+
+    def test_env_value_1_short_circuits_true_without_calling_probe(self):
+        from tools.fsm_runtime.sandbox_runner import resolve_docker_available
+        calls = []
+
+        def probe():
+            calls.append(1)
+            return False  # 刻意回 False：驗證 "1" 分支完全不理會 probe 回傳值
+
+        self.assertTrue(resolve_docker_available("1", probe))
+        self.assertEqual(calls, [])
+
+    def test_env_value_0_short_circuits_false_without_calling_probe(self):
+        from tools.fsm_runtime.sandbox_runner import resolve_docker_available
+        calls = []
+
+        def probe():
+            calls.append(1)
+            return True  # 刻意回 True：驗證 "0" 分支完全不理會 probe 回傳值
+
+        self.assertFalse(resolve_docker_available("0", probe))
+        self.assertEqual(calls, [])
+
+    def test_env_value_none_calls_probe_exactly_once_and_returns_its_result(self):
+        from tools.fsm_runtime.sandbox_runner import resolve_docker_available
+        calls = []
+
+        def probe_true():
+            calls.append(1)
+            return True
+
+        self.assertTrue(resolve_docker_available(None, probe_true))
+        self.assertEqual(len(calls), 1)
+
+        calls2 = []
+
+        def probe_false():
+            calls2.append(1)
+            return False
+
+        self.assertFalse(resolve_docker_available(None, probe_false))
+        self.assertEqual(len(calls2), 1)
+
+    def test_illegal_env_value_falls_back_to_probe(self):
+        from tools.fsm_runtime.sandbox_runner import resolve_docker_available
+        for bad_value in ("yes", "true", "2", "", " ", "TRUE", "no"):
+            with self.subTest(bad_value=bad_value):
+                calls = []
+
+                def probe():
+                    calls.append(1)
+                    return True
+
+                self.assertTrue(resolve_docker_available(bad_value, probe))
+                self.assertEqual(len(calls), 1)
+
+    # ---- 2. conftest.py::pytest_configure 三分支（動態載入獨立模組物件） ----
+
+    @staticmethod
+    def _load_conftest_module():
+        conftest_path = Path(__file__).resolve().parent / "conftest.py"
+        spec = importlib.util.spec_from_file_location(
+            "sdd_def200364_conftest_dynamic", conftest_path
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def test_pytest_configure_worker_端不探測且不改動env(self):
+        from tools.fsm_runtime.sandbox_runner import SDD_DOCKER_AVAILABLE_ENV
+        module = self._load_conftest_module()
+        calls = []
+        module._controller_probe_docker_available = lambda: (calls.append(1) or True)
+        fake_config = types.SimpleNamespace(workerinput={"workerid": "gw0"})
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop(SDD_DOCKER_AVAILABLE_ENV, None)
+            module.pytest_configure(fake_config)
+            self.assertEqual(calls, [], "worker 端不得呼叫 probe")
+            self.assertNotIn(
+                SDD_DOCKER_AVAILABLE_ENV, os.environ,
+                "worker 端不得自行寫入 env（應沿用 controller 已注入的值）",
+            )
+
+    def test_pytest_configure_controller端探測一次_結果為True時寫入1(self):
+        from tools.fsm_runtime.sandbox_runner import SDD_DOCKER_AVAILABLE_ENV
+        module = self._load_conftest_module()
+        calls = []
+        module._controller_probe_docker_available = lambda: (calls.append(1) or True)
+        fake_config = types.SimpleNamespace()  # 無 workerinput 屬性 == controller
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop(SDD_DOCKER_AVAILABLE_ENV, None)
+            module.pytest_configure(fake_config)
+            self.assertEqual(len(calls), 1, "controller 端必須探測恰一次")
+            self.assertEqual(os.environ.get(SDD_DOCKER_AVAILABLE_ENV), "1")
+
+    def test_pytest_configure_controller端探測一次_結果為False時寫入0(self):
+        from tools.fsm_runtime.sandbox_runner import SDD_DOCKER_AVAILABLE_ENV
+        module = self._load_conftest_module()
+        calls = []
+        module._controller_probe_docker_available = lambda: (calls.append(1) or False)
+        fake_config = types.SimpleNamespace()
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop(SDD_DOCKER_AVAILABLE_ENV, None)
+            module.pytest_configure(fake_config)
+            self.assertEqual(len(calls), 1, "controller 端必須探測恰一次")
+            self.assertEqual(os.environ.get(SDD_DOCKER_AVAILABLE_ENV), "0")
+
+    def test_pytest_configure_env已預設時尊重覆寫不重探(self):
+        from tools.fsm_runtime.sandbox_runner import SDD_DOCKER_AVAILABLE_ENV
+        module = self._load_conftest_module()
+        calls = []
+        module._controller_probe_docker_available = lambda: (calls.append(1) or True)
+        fake_config = types.SimpleNamespace()
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ[SDD_DOCKER_AVAILABLE_ENV] = "0"
+            module.pytest_configure(fake_config)
+            self.assertEqual(calls, [], "呼叫端已顯式設定時不得重探")
+            self.assertEqual(os.environ.get(SDD_DOCKER_AVAILABLE_ENV), "0")
+
+    # ---- 3. production 呼叫路徑（get_backend("docker")）讀 env 短路，不重探 ----
+
+    def test_docker_factory_reads_env_without_reprobing(self):
+        """DEF-200-364 覆核發現的殘餘缺口白盒證明：`_docker_factory()` 經
+        `get_backend("docker")` 呼叫 `docker_available()` 時，必須直接讀
+        `SDD_DOCKER_AVAILABLE_ENV` 短路，**不得**再次呼叫
+        `_probe_docker_available()`——monkeypatch 成會 `self.fail()` 的 stub，
+        若探測被重新觸發本測試立刻失敗（而非僅比對行為輸出）。
+        """
+        import tools.fsm_runtime.sandbox_runner as sr
+
+        def _must_not_be_called():
+            self.fail("_docker_factory() 不應在 env 已設時重新呼叫探測函式")
+
+        with patch.dict(os.environ, {sr.SDD_DOCKER_AVAILABLE_ENV: "0"}, clear=False):
+            with patch.object(sr, "_probe_docker_available", _must_not_be_called):
+                with self.assertRaises(NotImplementedError):
+                    sr.get_backend("docker")
+
+        with patch.dict(os.environ, {sr.SDD_DOCKER_AVAILABLE_ENV: "1"}, clear=False):
+            with patch.object(sr, "_probe_docker_available", _must_not_be_called):
+                backend = sr.get_backend("docker")
+                self.assertIsInstance(backend, sr.DockerBackend)
+
+
+# ---------- DEF-200-367: 三支 docker 測試容器名不得撞名 ----------
+
+class TestDockerTestContainerNamesDoNotCollide(unittest.TestCase):
+    """DEF-200-367 回歸鎖：`test_docker_backend_real_pass`／
+    `test_docker_backend_real_runtime_fail`／`test_docker_backend_e2e_through_fsm`
+    三支測試原本都用 `SandboxSpec(app_id="demo", ...)`、未設 `track_id`。
+
+    WHY：`sandbox_runner.track_container_name(app_id, track_id)` 在 `track_id`
+    為 `None`（falsy）時只用 `app_id` 組出容器名（`sdd-{app_id}`），三支測試因而
+    對 `docker run --name` 算出**相同**的容器名 `sdd-demo`。pytest-xdist
+    `-n 13` 下三者若被排到不同 worker 併發執行，`docker run --name sdd-demo`
+    對同一個名字撞名，其中一次容器實跑因而失敗（exit 非 0 或輸出被搶佔）
+    ⇒ OQS verdict ≠ pass、FSM 未轉移到預期狀態（單檔 `-n 13` 3/3 次重現；全套
+    跑法因負載稀釋、排程通常不會讓這三者剛好同時執行而看不到）。
+
+    修法（DEF-200-364 B 包第三棒）：三支測試改經 `_docker_spec(kind)`
+    （模組層 helper，測試本體與本鎖共用同一份定義）建構 spec，各自帶不同
+    `track_id`（`"h-real-pass"`／`"h-runtime-fail"`／`"h-e2e-fsm"`），讓
+    `track_container_name(app_id, track_id)` 兩兩相異——這正是 `track_id`
+    這個既有欄位本來就存在的用途（ACT-070 艦隊並行 N 軌不撞名），不改生產面
+    命名規則本身。本鎖不依賴真實 docker：純粹核對三個 spec 算出的容器名字串
+    兩兩相異，失敗時印出完整撞名分組供除錯。
+    """
+
+    def test_three_docker_test_specs_have_distinct_container_names(self):
+        from tools.fsm_runtime.sandbox_runner import track_container_name
+
+        names = {}
+        for kind in _DOCKER_TEST_KINDS:
+            spec = _docker_spec(kind)
+            names[kind] = track_container_name(spec.app_id, spec.track_id)
+
+        distinct = set(names.values())
+        if len(distinct) != len(_DOCKER_TEST_KINDS):
+            groups: dict = {}
+            for kind, name in names.items():
+                groups.setdefault(name, []).append(kind)
+            collisions = {name: kinds for name, kinds in groups.items() if len(kinds) > 1}
+            self.fail(
+                "三支 docker 測試的容器名應兩兩相異，但偵測到撞名："
+                f"{collisions!r}（完整對照：{names!r}）"
+            )

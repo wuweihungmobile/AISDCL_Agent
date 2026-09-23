@@ -253,13 +253,41 @@ class DetectPhysicalCountTest(unittest.TestCase):
             self.assertIsNone(cb._detect_physical_count())
             self.assertEqual(cb.total_budget(cpu_count=8, headless=False), 7)
 
-    def test_live_smoke_returns_none_or_plausible_core_count(self) -> None:
-        """不 mock：本機真實偵測結果須為 None，或落在 `[1, os.cpu_count()]` 之間
-        （這台 mac 應為 10；不同機器上這是量測值，本測試刻意不寫死）。"""
+    def test_live_platform_branch_agrees_with_independent_oracle(self) -> None:
+        """DEF-200-366：不 mock，真機交叉比對——`_platform_physical_count()`
+        才是 win32 走 ctypes／darwin 走 sysctl／linux 讀 `/proc/cpuinfo` 的平台
+        分支本體，此前只有 mock 覆蓋，分支本身從未在真機上被實跑驗證過。改用
+        獨立 oracle（psutil，若可用）交叉比對，而非再加一顆 mock：mock 只能
+        證明「程式碼照設計的邏輯做了」，證明不了「這個邏輯在這台真機上算對了」。
+
+        誠實劃界：有 psutil 才是強判準（與獨立 oracle 逐值比對）；沒有 psutil
+        時只能退回弱判準（落在 `[1, os.cpu_count()]` 合理區間），不假裝成強
+        判準。額外加一條 win32 專屬結構斷言（其餘平台不斷言此項，避免對未實測
+        環境瞎猜）：Windows 真機上 ctypes 分支不得回 `None`。
+        """
+        n = cb._platform_physical_count()
         detected = cb._detect_physical_count()
-        if detected is not None:
-            self.assertGreaterEqual(detected, 1)
-            self.assertLessEqual(detected, os.cpu_count() or detected)
+        for value in (n, detected):
+            if value is not None:
+                self.assertGreaterEqual(value, 1)
+                self.assertLessEqual(value, os.cpu_count() or value)
+
+        try:
+            import psutil
+        except ImportError:
+            psutil = None
+        if psutil is not None and n is not None:
+            oracle = psutil.cpu_count(logical=False)
+            if isinstance(oracle, int) and oracle > 0:
+                self.assertEqual(
+                    n, oracle,
+                    f"_platform_physical_count()={n} 與獨立 oracle "
+                    f"psutil.cpu_count(logical=False)={oracle} 不一致")
+
+        if sys.platform == "win32":
+            self.assertIsNotNone(
+                n, "Windows 真機 ctypes 分支不得回 None（見 cpu_budget.py "
+                   "_platform_physical_count() 的 win32 分支）")
 
 
 class PerLegBudgetTest(unittest.TestCase):

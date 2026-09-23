@@ -11,10 +11,79 @@ ledger 重導向到一個臨時目錄（透過 meta_ledger 既有的 `SDD_META_L
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
 from pathlib import Path
 
 import pytest
+
+# v0.30 根目錄一律現查（本檔與 test_phase_h.py 同目錄深度，`parents[3]` 同樣
+# 解到 `AISDLC_SDD_v0.30/`），供下方匯入 tools.fsm_runtime.sandbox_runner 使用。
+_V030_ROOT = str(Path(__file__).resolve().parents[3])
+if _V030_ROOT not in sys.path:
+    sys.path.insert(0, _V030_ROOT)
+
+# DEF-200-364 B 包第二棒：env 名稱與「原始探測」函式一律 import 生產面的單一
+# 真相源（`sandbox_runner.py`），不再手抄字面字串／各自重寫探測邏輯。
+from tools.fsm_runtime.sandbox_runner import (  # noqa: E402
+    SDD_DOCKER_AVAILABLE_ENV,
+    _probe_docker_available,
+)
+
+
+def _controller_probe_docker_available() -> bool:
+    """安全探測 wrapper：探測本身拋例外時一律回 False。
+
+    DEF-200-364 B 包第二棒：直接呼叫 `sandbox_runner._probe_docker_available()`
+    ——生產面**唯一真正發起探測**的原始函式（不經 `docker_available()` 的 env
+    短路層），避免 controller 端「探測」繞經 env 讀取回頭讀到自己還沒寫的值。
+    """
+    try:
+        return _probe_docker_available()
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def pytest_configure(config):
+    """DEF-200-364：controller 端探測 docker 可用性恰一次，寫入
+    `SDD_DOCKER_AVAILABLE_ENV` 供各 worker／序列模式讀取，杜絕 N 路併發重複
+    探測。
+
+    WHY：`test_phase_h.py` 在模組頂層以 `_DOCKER = docker_available()` 求值
+    （`sandbox_runner._probe_docker_available()` 內部 `docker info` timeout=10
+    後真起探測容器）。pytest-xdist 每個 worker 各自 import 測試模組 ⇒ `-n 13`
+    造成 13 路併發 docker 探測，部分 worker 探測失準，使平行模式下 3 支
+    docker-gated 測試被誤判 skip、而序列模式（同一行程只探測一次）卻能通過
+    （單檔 `-n 13` 2/2 次重現 3 skipped）。
+
+    B 包第二棒覆核發現：只在測試層（`test_phase_h.py` 模組頂層）擋下重複探測
+    並不夠——production 呼叫路徑（`_docker_factory()` 經 `get_backend("docker")`）
+    會在測試*執行*時獨立再呼叫一次 `docker_available()`，同樣受 13 路併發影響
+    而失準（即使 marker 已正確判定可用，測試執行到一半仍可能 `NotImplementedError`）。
+    修法因而下沉：`sandbox_runner.docker_available()` 本身改為讀取
+    `SDD_DOCKER_AVAILABLE_ENV` 的 `resolve_docker_available()`（見該檔），
+    production 呼叫路徑與測試模組頂層現在讀的是**同一個**函式、**同一個** env，
+    不再各自繞過。本 hook 只負責「controller 端探測恰一次、寫入該 env」這一半。
+
+    三個分支：
+    1. `hasattr(config, "workerinput")`（worker 端判準，同本檔既有
+       `pytest_xdist_setupnodes` 用法）⇒ worker 不探測，直接沿用 controller
+       已寫入的 env（xdist popen gateway 在 `pytest_sessionstart` 才 spawn
+       worker 子行程、完整繼承此刻 controller 的 `os.environ`，而
+       `pytest_configure` 先於 `pytest_sessionstart` 執行 ⇒ 這裡設的 env 必被
+       每個 worker 子行程看到）。
+    2. `SDD_DOCKER_AVAILABLE_ENV` 已被呼叫端顯式設定 ⇒ 尊重覆寫，不重探。
+    3. 否則（controller 端、env 未設）⇒ 探測一次並印一行供稽核（比照
+       `[cpu_budget]` 慣例）；序列模式（`-p no:xdist` 或裸跑）同一行程直接
+       落在這個分支，之後模組頂層讀到的就是這裡寫入的值。
+    """
+    if hasattr(config, "workerinput"):
+        return
+    if os.environ.get(SDD_DOCKER_AVAILABLE_ENV) is not None:
+        return
+    ok = _controller_probe_docker_available()
+    os.environ[SDD_DOCKER_AVAILABLE_ENV] = "1" if ok else "0"
+    print(f"[sdd-docker-probe] controller docker_available={ok}")
 
 
 @pytest.fixture(scope="session", autouse=True)

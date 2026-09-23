@@ -694,6 +694,7 @@ jobs:
                      --runner="python -m pytest -x -q -p no:xdist -o addopts= tests/plugins/token_guard" \
                      --no-progress --CI  # DEF-200-357: mutmut 2.x 不吃裸 -p/-o，兩旗標移入 --runner；--CI 讓 survived=0 exit、fatal=1（取代 || true）
           mutmut results | tee mutation_token_guard.log
+          python tools/mutmut_cache_counts.py >> mutation_token_guard.log  # DEF-200-365：results 不印 Killed，從 .mutmut-cache 補 marker 段給 mutation_baseline_lock
 
       # 連續 7 次達 ≥ 70%（目標 75% -5% 容忍）才鎖定 baseline
       # ADR-SD09-011（improving_101）：unique-sha 鎖定累積主通道已改為 autoclaude-mutation-on-change.yml
@@ -771,6 +772,7 @@ jobs:
                      --runner="python -m pytest -x -q -p no:xdist -o addopts= tests/plugins/test_goal_synthesis_plugin.py" \
                      --no-progress --CI  # DEF-200-357: mutmut 2.x 不吃裸 -p/-o，兩旗標移入 --runner；--CI 讓 survived=0 exit、fatal=1（取代 || true）
           mutmut results | tee mutation_goal_synthesis.log
+          python tools/mutmut_cache_counts.py >> mutation_goal_synthesis.log  # DEF-200-365：results 不印 Killed，從 .mutmut-cache 補 marker 段給 mutation_baseline_lock
 
       - name: Upload mutation reports (dormant)
         if: always()
@@ -820,6 +822,7 @@ jobs:
                      --runner="python -m pytest -x -q -p no:xdist -o addopts= tests/core/orchestration" \
                      --no-progress --CI  # DEF-200-357: mutmut 2.x 不吃裸 -p/-o，兩旗標移入 --runner；--CI 讓 survived=0 exit、fatal=1（取代 || true）
           mutmut results | tee mutation_coordinator.log
+          python tools/mutmut_cache_counts.py >> mutation_coordinator.log  # DEF-200-365：results 不印 Killed，從 .mutmut-cache 補 marker 段給 mutation_baseline_lock
 
       - name: Upload mutation reports (dormant)
         if: always()

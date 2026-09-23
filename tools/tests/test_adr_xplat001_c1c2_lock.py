@@ -685,7 +685,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 8546,
+    "test_adr_xplat001_c1c2_lock.py": 8570,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 3726,
@@ -707,7 +707,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_component_sanitizer_shared_layer_lock.py": 293,
     "test_context_budget_guard.py": 12355,
     "test_context_window_parity.py": 281,
-    "test_cpu_budget.py": 340,
+    "test_cpu_budget.py": 368,
     "test_defect_id_reference_integrity.py": 281,
     "test_dev_platform_provenance.py": 921,
     "test_dev_start.py": 6794,
@@ -742,7 +742,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_quota_policy.py": 3416,
     "test_root_guard_known_model_r145.py": 227,
     "test_root_infra_parity.py": 441,
-    "test_run_root_unittests.py": 4465,
+    "test_run_root_unittests.py": 4538,
     "test_sanitize_component_frozen_sdd_versions_lock.py": 317,
     "test_schedule_capability_parity.py": 626,
     "test_script_scan_surface_ssot.py": 391,
@@ -2196,6 +2196,17 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "漂移 +26（本列＋回歸鎖軌列＋接鏈列＋凍結前綴 243→244＋sha＋cap 到期兌現）。全額歸"
      "回歸鎖軌（結案鎖與記帳誠實度分類，同 R166 先例），主軌 0：維持歸零（前輪 R166 亦 0）。"
      "逐檔清單見 CrossPlatform_R145_Scan_Findings.md〈DEF-200-362 附記（R167）〉；帳本見該筆。"),
+    ("R168", 104151, 104276, 125,  # round-label-ok：多 CPU 第二十輪 DEF-200-363／366 收尾單人窗口
+     "[非淨減法輪][回歸鎖軌全額申報，見 _REGRESSION_LANE_LOG 同輪列] DEF-200-363（根層平行 runner "
+     "自動細分隔輪震盪：save_live_cache 整檔覆寫讓已細分模組的模組鍵從活體快取消失，下一輪退回"
+     "種子檔舊值而判定不細分、跑成整模組單位，再下一輪又細分）與 DEF-200-366（cpu_budget win32 "
+     "ctypes 分支只有 mock、無真機鎖）結案回歸鎖：test_run_root_unittests.py（"
+     "ParallelTimingCacheSaveLiveCacheMergePruneTest：鍵集不相交兩次寫回皆存活／死模組鍵剪枝／"
+     "震盪端到端 load_hints 仍讀到模組級新值且候選仍被標記）＋test_cpu_budget.py（live smoke 強化為"
+     "跨平台 oracle：平台分支本體與 psutil 交叉比對、win32 不得回 None）＋本表自身漂移（本列、"
+     "回歸鎖軌列、接鏈列、凍結前綴 244→245、sha、root-tools 舊尺技術債具名展延 168→173）。全額歸"
+     "回歸鎖軌（結案鎖與記帳誠實度分類，同 R167 先例），主軌 0：維持歸零（前輪 R167 亦 0）。"
+     "逐檔清單見 CrossPlatform_R145_Scan_Findings.md〈多 CPU 第二十輪附記（R168）〉。"),
 )
 
 
@@ -2597,6 +2608,13 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "整合鎖）＋本表自身漂移 +26（同 R166 先例全額申報，含本列、稽核列、接鏈列、"
      "前綴 243→244、sha、cap 到期兌現）＝138（子集＝母項）。逐項見 "
      "CrossPlatform_R145_Scan_Findings.md〈DEF-200-362 附記（R167）〉。"),
+    ("R168", 125,
+     "DEF-200-363／366 結案回歸鎖（記帳誠實度分類）：test_run_root_unittests.py（計時快取"
+     "read-merge-prune-write 三鎖：鍵集不相交兩次寫回皆存活／死模組鍵剪枝／震盪端到端）與 "
+     "test_cpu_budget.py（live smoke 強化為跨平台 oracle）全為結案回歸鎖＋本表自身漂移"
+     "（同 R167 先例全額申報，含本列、稽核列、接鏈列、前綴 244→245、sha、舊尺技術債具名"
+     "展延）＝125（子集＝母項）。逐項見 CrossPlatform_R145_Scan_Findings.md〈多 CPU 第二十輪"
+     "附記（R168）〉。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -2705,7 +2723,10 @@ def _regression_lane_cap_basis() -> tuple[str, int]:
 # 🔴 R163 具名展延（鐵律七，不得靜默沿用）round-label-ok：多 CPU 第十九輪 DEF-200-354～356
 # 四方獨立審查收尾單人窗口（QA 全洩漏矩陣＋三缺陷修復），非 root-tools 重構持有面；
 # 真拆待獨立窗口，162 → 168（在 lookahead=5 內，已達上界）。
-_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND = 168
+# 🔴 R168 具名展延（鐵律七，不得靜默沿用）round-label-ok：多 CPU 第二十輪 DEF-200-363～366
+# 四方獨立審查收尾單人窗口（計時快取震盪＋SDD docker 探測＋mutation kill_rate＋win32 oracle），
+# 非 root-tools 重構持有面；真拆待獨立窗口，168 → 173（在 lookahead=5 內，已達上界）。
+_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND = 173
 #: 清償旗標——真拆完成後改 True。刻意用布林而非重建舊尺計數器（ADR §9.3「舊尺已廢」）。
 _ROOT_TOOLS_OLD_SCALE_DEBT_RESOLVED = False
 #: A-2 後設鎖：到期輪只准落在「現查輪＋lookahead」內，推遠（如 9999）當場紅；shrink-only
@@ -2882,10 +2903,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 244
+_REPIN_LOG_FROZEN_PREFIX_LEN = 245
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "c570fe4d14e37b7a07d7e922b9da30cdcc034d5f36e7446e12dd80ab53d67029")
+    "62ff202f16a23983c8dc89118076a960eaf1ef6da67b61f83ecb0bcee4ef505c")
 
 
 def repin_log_history_digest(
@@ -3185,6 +3206,9 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # DEF-200-362：跨機切換摘要句漏套 _note_unfetched 修復窗口——追加本輪稽核列並依
     # 「追加後立即自我凍結」判例延伸前綴涵蓋該列本身（243→244）。
     ("R167", "cf1dc5dab8c1", "c570fe4d14e3", "DEF-200-362"),  # round-label-ok
+    # DEF-200-363：多 CPU 第二十輪計時快取隔輪震盪修復窗口——追加本輪稽核列並依
+    # 「追加後立即自我凍結」判例延伸前綴涵蓋該列本身（244→245）。
+    ("R168", "c570fe4d14e3", "62ff202f16a2", "DEF-200-363"),  # round-label-ok
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

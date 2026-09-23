@@ -3610,6 +3610,79 @@ class ParallelTimingCacheSaveLiveCacheTest(unittest.TestCase):
         self.assertIn("寫入失敗", buf.getvalue())
 
 
+class ParallelTimingCacheSaveLiveCacheMergePruneTest(unittest.TestCase):
+    """DEF-200-363 第十五輪：`save_live_cache()` 從整檔覆寫改為
+    read-merge-prune-write——受測模組 `tools/lib/parallel_timing_cache.py`。
+
+    回歸的震盪機制鏈（見該函式 docstring）：模組級觀測寫入活體快取 → 下一輪
+    該模組被自動細分成多個 `module.Class` 鍵觀測 → 若整檔覆寫，活體快取不再
+    有模組鍵 → `load_hints()` 對模組鍵退回種子檔（可能是舊、偏低的數字）→
+    `auto_class_level_candidates()` 拿到偏低數字判定「不再需要細分」→ 下一輪
+    又整模組派工、耗時暴增 → 下下一輪又被觀測成細分鍵……如此震盪。
+
+    本測試釘住：(a) 不相交鍵集合皆保留；(b) 模組已刪除的舊鍵被剪掉、仍在的
+    模組鍵存活；(c) 端到端：模組鍵曾被觀測、下一輪細分觀測後，`load_hints()`
+    對模組鍵仍讀得到新值（不退回種子），且 `auto_class_level_candidates()`
+    仍能判定該模組需要細分。"""
+
+    def _ptc(self):
+        return run_root_unittests.parallel_shard.parallel_timing_cache
+
+    def test_disjoint_key_sets_across_two_saves_both_survive(self) -> None:
+        ptc = self._ptc()
+        with tempfile.TemporaryDirectory(prefix="ptc_merge_") as td:
+            live = Path(td) / "live.json"
+            with mock.patch.object(ptc, "LIVE_CACHE_PATH", live):
+                ptc.save_live_cache({"m_a": 1.0})
+                ptc.save_live_cache({"m_a.C1": 2.0})
+                readback = ptc.read_json(live)
+        self.assertEqual(readback, {"m_a": 1.0, "m_a.C1": 2.0})
+
+    def test_dead_module_key_is_pruned_live_module_key_survives(self) -> None:
+        ptc = self._ptc()
+        with tempfile.TemporaryDirectory(prefix="ptc_prune_") as td:
+            live = Path(td) / "live.json"
+            with mock.patch.object(ptc, "LIVE_CACHE_PATH", live):
+                ptc.save_live_cache({"dead_mod": 5.0, "live_mod": 3.0})
+                ptc.save_live_cache({"live_mod.C": 1.0})
+                readback = ptc.read_json(live)
+        self.assertNotIn("dead_mod", readback)
+        self.assertIn("live_mod", readback)
+        self.assertIn("live_mod.C", readback)
+        self.assertEqual(readback["live_mod"], 3.0)
+        self.assertEqual(readback["live_mod.C"], 1.0)
+
+    def test_module_key_survives_split_round_and_candidate_still_flagged(self) -> None:
+        """端到端：模組鍵在被自動細分成 class 鍵的那一輪觀測後仍存活於活體
+        快取（不退回種子檔的舊數字），且下一輪 `auto_class_level_candidates()`
+        仍能判定該模組需要細分——用本測試檔自身 `__name__` 當模組名（已知可
+        import、無 setUpModule/tearDownModule），效果等價於文字上的
+        `test_dev_start`，避免真的 import 那支重量級測試檔。
+        """
+        ptc = self._ptc()
+        target = __name__
+        with tempfile.TemporaryDirectory(prefix="ptc_e2e_") as td:
+            seed = Path(td) / "seed.json"
+            live = Path(td) / "live.json"
+            seed.write_text(json.dumps({target: 46.7}), encoding="utf-8")
+            fillers = {f"_filler_{i}": 1.0 for i in range(12)}
+            with mock.patch.object(ptc, "SEED_PATH", seed), \
+                    mock.patch.object(ptc, "LIVE_CACHE_PATH", live):
+                # 第 N 輪：模組級觀測。
+                ptc.save_live_cache({target: 150.0, **fillers})
+                # 第 N+1 輪：該模組被自動細分成 class 鍵觀測，模組級鍵本身
+                # 未出現在這次的 module_timings 裡。
+                ptc.save_live_cache(
+                    {f"{target}.A": 100.0, f"{target}.B": 123.0, **fillers})
+                hints = ptc.load_hints({target, *fillers})
+                all_hints = ptc.load_hints(
+                    {target, f"{target}.A", f"{target}.B", *fillers})
+            self.assertEqual(hints[target], 150.0)
+        dg = run_root_unittests.dispatch_granularity
+        candidates = dg.auto_class_level_candidates(all_hints, worker_count=13)
+        self.assertIn(target, candidates)
+
+
 class ParallelTimingCacheStalenessReportTest(unittest.TestCase):
     """`staleness_report()`：重疊率高於門檻回 `None`；低於門檻回訊息且含
     `refresh_parallel_timing_seed.py`；任一邊為空回 `None`。"""

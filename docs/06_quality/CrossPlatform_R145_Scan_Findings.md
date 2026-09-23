@@ -655,3 +655,24 @@ linked-worktree 拒絕 step 補標記斷言）仍 open，與本輪無關；上�
 缺陷帳本見 `docs/06_quality/AutoSDD_Defect_Log.md` DEF-200-362；本附記為 doc-total 對帳（≥2 站點）另一站點
 寄居 `AutoSDD_improving_112.md`，同 R129～R166 寄居體例。
 round-label-ok
+
+## 多 CPU 第二十輪附記（R168）
+
+<!-- guard-total:R168 --> R168 護欄層累積淨額＝ 104151 → 104276（+125）——DEF-200-363（`tools/lib/parallel_timing_cache.py`
+`save_live_cache` 整檔覆寫造成自動細分隔輪震盪）與 DEF-200-366（`cpu_budget` win32 ctypes 分支只有 mock、無真機鎖）
+收尾單人窗口（2026-09-23，Windows 11 真機首次覆核）。逐檔：
+- `test_run_root_unittests.py` 4465 → 4538（+73）：`ParallelTimingCacheSaveLiveCacheMergePruneTest` 三支——鍵集不相交兩次
+  寫回皆存活／死模組鍵剪枝而活模組鍵存活／震盪端到端（先以模組級 150 寫回、再寫類別鍵集，`load_hints` 對模組鍵仍讀到
+  150 而非種子 46.7，`auto_class_level_candidates` 在 13 worker 下仍把它標記為候選）。紅綠：改回整檔覆寫 ⇒ 兩支紅；
+  拿掉剪枝 ⇒ 只有剪枝鎖紅。
+- `test_cpu_budget.py` 340 → 368（+28）：`test_live_smoke_returns_none_or_plausible_core_count` 強化為
+  `test_live_platform_branch_agrees_with_independent_oracle`——不 mock、直呼平台分支本體 `_platform_physical_count()`，
+  有 psutil 時逐值交叉比對（本機 win32 ctypes 14 ＝ psutil 14）、無 psutil 退回弱判準 `[1, cpu_count]`；win32 不得回
+  None。刻意不新增 skipUnless（不擾動三平台 skip 普查天花板）。
+- `test_adr_xplat001_c1c2_lock.py` 8546 → 8570（+24）：本表自身漂移（R168 稽核列、回歸鎖軌列、接鏈列、凍結前綴
+  244→245、sha、`_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND` 具名展延 168→173——非 root-tools 重構持有面，真拆待獨立窗口）。
+回歸鎖軌全額申報 125、主軌 0（連續歸零）。同輪另兩筆缺陷（DEF-200-364 SDD `docker_available()` 13 路併發探測失準、
+DEF-200-365 mutation kill_rate CI 解析缺口）的鎖落在 AISDLC_SDD v0.30 與 AutoClaude 樹，不在根層護欄層計價面。
+缺陷帳本見 `docs/06_quality/AutoSDD_Defect_Log.md` DEF-200-363～366；證據見 `CrossPlatform_DEF200274_Parallel_Tests_Evidence.md`
+〈第二十輪〉；本附記為 doc-total 對帳（≥2 站點）另一站點寄居 `AutoSDD_improving_112.md`，同 R129～R167 寄居體例。
+round-label-ok

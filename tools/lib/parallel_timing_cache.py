@@ -55,14 +55,42 @@ def order_dispatch_units(units: dict[str, int], hints: dict[str, float]) -> list
 
 
 def save_live_cache(module_timings: dict[str, float]) -> None:
-    """`run_parallel()` 結束後把本次量到的 `{派工鍵: 秒數}` 寫回活體快取。原子寫入
-    （`os.replace`，Windows 上一樣是原子操作），寫入失敗只印一行 warning，
-    不得讓測試套件本身因為快取寫不進去而失敗。
+    """`run_parallel()` 結束後把本次量到的 `{派工鍵: 秒數}` **併入**活體快取
+    （read-merge-prune-write；DEF-200-363，2026-09-23 修正，此前是整檔覆寫）。
+
+    WHY 不能整檔覆寫（震盪機制鏈）：①某模組被自動細分成 `module.Class` 鍵觀測
+    後若整檔覆寫，活體快取裡的模組鍵本身消失；②下一輪 `load_hints()` 對該模組
+    鍵找不到活體快取值，退回種子檔（可能是舊、偏低的數字）；③
+    `auto_class_level_candidates()` 用偏低數字判定「不再需要細分」，該模組又
+    整模組派工、耗時暴增回原本量級；④下下一輪它又被觀測成模組鍵、蓋掉
+    class 鍵……如此反覆震盪（本場實測磁碟現況：活體快取 243 鍵、
+    `test_dev_start` 已被 88 個類別鍵取代、無模組鍵）。
+
+    WHY 剪枝以「模組前綴」（`key.split(".", 1)[0]`）為界：模組已從樹上刪除／
+    改名時，其舊鍵不會出現在任何一次新觀測的模組前綴集合裡，繼續保留只會讓
+    死鍵無限期累積進活體快取，進而被 `refresh_parallel_timing_seed.py`
+    原樣灌進 git 種子檔。只要模組仍在樹上（無論這一輪以模組級或 class 級被
+    觀測，前綴集合都含它），其舊鍵（含另一種粒度的鍵）一律保留。
+
+    誠實劃界：模組鍵一旦被自動細分，之後除非「整模組」又被觀測到一次，模組級
+    數字不會再刷新（沿用被保留的舊值）——代價是模組瘦身後仍可能暫時被判定要
+    細分；換來的是不再震盪。每個 class 級 spawn 約多花 ~46ms 加 import 成本，
+    可接受（本輪實測：88 類別合計 223.0s vs 模組級 150s）。
+
+    原子寫入（`os.replace`，Windows 上一樣是原子操作），寫入失敗只印一行
+    warning，不得讓測試套件本身因為快取寫不進去而失敗。
     """
+    previous = read_json(LIVE_CACHE_PATH)
+    observed_modules = {key.split(".", 1)[0] for key in module_timings}
+    kept_previous = {
+        key: value for key, value in previous.items()
+        if key.split(".", 1)[0] in observed_modules
+    }
+    merged = {**kept_previous, **module_timings}
     try:
         tmp = LIVE_CACHE_PATH.with_name(LIVE_CACHE_PATH.name + ".tmp")
         tmp.write_text(
-            json.dumps(module_timings, ensure_ascii=False, indent=2, sort_keys=True),
+            json.dumps(merged, ensure_ascii=False, indent=2, sort_keys=True),
             encoding="utf-8",
         )
         os.replace(tmp, LIVE_CACHE_PATH)

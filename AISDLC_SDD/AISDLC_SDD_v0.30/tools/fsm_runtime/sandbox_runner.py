@@ -204,7 +204,12 @@ class LocalStubBackend:
         return ExecutionObservation()
 
 
-def docker_available() -> bool:
+# DEF-200-364 B 包第二棒：env 名稱單一真相源——conftest.py／test_phase_h.py
+# 一律 import 本常數，不再各自手抄字面字串 "SDD_DOCKER_AVAILABLE"。
+SDD_DOCKER_AVAILABLE_ENV = "SDD_DOCKER_AVAILABLE"
+
+
+def _probe_docker_available() -> bool:
     """docker CLI 存在、daemon 可連線，且能實際跑起本檔測試用的 Linux 容器。
 
     `docker info` 成功只證明 daemon 可達，不保證能跑 Linux 容器，也不保證
@@ -220,6 +225,11 @@ def docker_available() -> bool:
     現在到底做不做得到」；任何一層失敗（含映像拉取失敗等其他環境問題）一律
     視為不可用並讓 `@requires_docker` 測試正常 skip，而非讓 CI 出現不確定性
     的紅燈。
+
+    🔴 本函式是**唯一真正發起探測**（`docker info` + 實跑容器）的地方，且
+    **有代價、非冪等安全**——13 路併發呼叫本身就是 DEF-200-364 的根因。呼叫端
+    一律經 `docker_available()`／`resolve_docker_available()` 間接呼叫，不要
+    在探測以外的地方直接呼叫本函式（測試回歸鎖的白盒斷言除外）。
     """
     if shutil.which("docker") is None:
         return False
@@ -239,6 +249,54 @@ def docker_available() -> bool:
         return not obs.nonzero_exit
     except (subprocess.SubprocessError, OSError, SandboxPolicyViolation, ValueError):
         return False
+
+
+def resolve_docker_available(env_value: Optional[str], probe) -> bool:
+    """依 `SDD_DOCKER_AVAILABLE_ENV` 環境變數解析 docker 可用性，缺席／非法值
+    才呼叫 `probe()`（DEF-200-364 B 包第二棒：下沉到生產面的單一真相源）。
+
+    🔴 三態判斷刻意用明確字串相等（`== "1"` / `== "0"`），**禁止 truthy 判斷**：
+    `"0"` 是合法的「controller 已探測過、結果為不可用」訊號，若誤用 truthy
+    （例如 `if not env_value`）會把它判成「未設」而重新觸發 `probe()`，讓
+    controller 端一次性探測的用意落空——`"0"`、`None`、`""` 在 truthy 語意下
+    無法區分，但在本函式的語意下必須嚴格區分（`"0"`→確定不可用，`None`/`""`
+    →未知，才需要現查）。
+
+    - `"1"` → True（已知可用，不重探）
+    - `"0"` → False（已知不可用，不重探；同時是操作者顯式覆寫口：手動設
+      `SDD_DOCKER_AVAILABLE=0` 可讓 `_docker_factory()` 直接短路
+      `NotImplementedError`，不必每次呼叫都付出 `docker info` + 容器實跑的
+      時間成本）
+    - `None` 或其他非法字串 → 呼叫 `probe()`（向下相容：未經
+      `conftest.py::pytest_configure` 探測過的裸跑場景，行為與訂正前逐字相同）
+    """
+    if env_value == "1":
+        return True
+    if env_value == "0":
+        return False
+    return probe()
+
+
+def docker_available() -> bool:
+    """docker 是否可用（供 `_docker_factory()` 等 sandbox backend 判斷）。
+
+    DEF-200-364 B 包第二棒：本函式不再自行發起探測，而是委派給
+    `resolve_docker_available()` 讀取 `SDD_DOCKER_AVAILABLE_ENV` 環境變數——
+    controller 端由 pytest 的 `conftest.py::pytest_configure` 探測恰一次並
+    寫入該 env（見該檔）；env 未設時（含未經 conftest 的裸呼叫場景）才落回
+    `_probe_docker_available()` 真正探測一次，與訂正前逐字相同的行為。
+
+    這是 production 面與 pytest 測試套之間的**單一真相源**：pytest-xdist 每個
+    worker（經測試模組頂層 `_DOCKER = docker_available()`）與 production 呼叫
+    路徑（`_docker_factory()` 經 `get_backend("docker")`）都透過**同一個**
+    `docker_available()`、讀到**同一個**環境變數——13 路併發各自重複探測
+    `docker info` + 容器實跑導致探測失準的問題（DEF-200-364），因而在生產與
+    測試兩側被同一個判準根治，而非只在測試層掩蓋、production 呼叫路徑仍各自
+    重新探測一次（DEF-200-364 覆核發現的殘餘缺口）。
+    """
+    return resolve_docker_available(
+        os.environ.get(SDD_DOCKER_AVAILABLE_ENV), _probe_docker_available
+    )
 
 
 class DockerBackend:
