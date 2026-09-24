@@ -7,8 +7,8 @@ p50_ms = 1.625
 p95_ms = 2.091
 p99_ms = 2.091
 samples = 20
-git_sha = "ff91997"
-captured_at = "2026-09-23T14:39:33.662076+00:00"
+git_sha = "d26d4c0"
+captured_at = "2026-09-24T14:48:11.389626+00:00"
 environment = "win32-local"
 
 [dry_run_e2e]
@@ -16,8 +16,8 @@ p50_ms = 5.838
 p95_ms = 10.102
 p99_ms = 10.102
 samples = 20
-git_sha = "ff91997"
-captured_at = "2026-09-23T14:39:33.662076+00:00"
+git_sha = "d26d4c0"
+captured_at = "2026-09-24T14:48:11.389626+00:00"
 environment = "win32-local"
 
 [token_halt_roundtrip]
@@ -25,7 +25,7 @@ p50_ms = 0.508
 p95_ms = 0.564
 p99_ms = 0.564
 samples = 20
-git_sha = "ff91997"
-captured_at = "2026-09-23T14:39:33.662076+00:00"
+git_sha = "d26d4c0"
+captured_at = "2026-09-24T14:48:11.389626+00:00"
 environment = "win32-local"
 
