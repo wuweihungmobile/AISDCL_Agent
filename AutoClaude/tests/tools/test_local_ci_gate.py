@@ -993,7 +993,14 @@ def test_pre_push_dispatcher_actually_invokes_the_census() -> None:
     dispatcher = _REPO_ROOT / "tools" / "git-hooks" / "pre-push"
     assert dispatcher.is_file(), dispatcher
     text = dispatcher.read_text(encoding="utf-8")
-    leg = text.split('if [ "$run_autoclaude" -eq 1 ]')[1].split('if [ "$run_sdd" -eq 1 ]')[0]
+    # 🔴 多 CPU 平衡負載第二十二輪（pre-push 三 leg 並行）：AutoClaude leg 本體已被抽成
+    # `_run_autoclaude_leg()` 函式，供序列／並行兩種呼叫形態共用；重構後 `if [ "$run_
+    # autoclaude" -eq 1 ]`／`if [ "$run_sdd" -eq 1 ]` 這兩個條件式**各出現兩次**（一次在
+    # 並行觸發判定段、一次在序列呼叫分派段），原本「切兩個條件式之間」切到的是並行
+    # 觸發段落，看不到函式本體裡的 `--census-only`。改為直接定位函式本體：從
+    # `_run_autoclaude_leg() {` 到緊接在後定義的 `_run_sdd_leg() {`——切片要跟著函式邊界
+    # 走，不是跟著條件式（條件式在重構後不再是唯一寫法）。
+    leg = text.split('_run_autoclaude_leg() {')[1].split('_run_sdd_leg() {')[0]
     # 🔴 R80 包 A 訂正判準的比較對象：原判準要求該行**字面**出現 `python`，於是 R80 另一包
     # 把 dispatcher 裡寫死的直譯器改成 `"$PY"` 變數（一個純粹正確的重構）之後，這道鎖當場
     # 轉紅——它其實在守「直譯器怎麼拼」，而它宣稱要守的是「census 有沒有真的被執行」。

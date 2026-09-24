@@ -291,7 +291,7 @@ class WorkerCountFormulaTest(unittest.TestCase):
     def test_formula_across_cpu_counts(self) -> None:
         ps = run_root_unittests.parallel_shard
         # cap 現查 tools/lib/cpu_budget.py（本檔不複寫數字）。
-        cases = {0: 1, 1: 1, 2: 1, 9: 8, 10: 9, 100: 16}
+        cases = {0: 1, 1: 1, 2: 1, 9: 8, 10: 9, 100: 18}  # 100 案例被 CAP=18 夾住
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop(ps._ENV_WORKERS, None)  # 清掉本機 shell profile 可能殘留的覆寫
             self._force_interactive_env()

@@ -103,7 +103,9 @@ jobs:
           # 同一個不可修的根因存在、且本 job 只跑這一顆凍結基線，維持序列較保守。
           # 加速空間本就有限（34 支測試、序列 <10s），不值得為它保留一個無法在原地
           # 修復的競態風險。若日後想重新啟用，見上方分析與 §6.5 的可逆收斂建議。
-          python -m pytest tools/fsm_runtime/tests/ -m chaos -v
+          # `-p no:xdist`：本 job 無 addopts 強制平行，加此旗標只是把「本來就
+          # 序列跑」的事實顯式化（零行為改變），供 pytest 呼叫站點普查鎖辨識。
+          python -m pytest tools/fsm_runtime/tests/ -m chaos -v -p no:xdist
 
       - name: Run 100-round chaos sweep
         working-directory: AISDLC_SDD/AISDLC_SDD_v0.01

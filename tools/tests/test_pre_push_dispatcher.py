@@ -316,8 +316,14 @@ class TestPrePushDispatcher(unittest.TestCase):
                 shutil.copy2(sys.executable, link)
         return str(shim)
 
-    def _run_dispatcher(self, stdin_text: str) -> tuple[int, str, str]:
-        """於 fake repo cwd 以探測到的 bash 真跑 dispatcher，回傳 (rc, stdout, stderr)。"""
+    def _run_dispatcher(
+        self, stdin_text: str, extra_env: dict[str, str] | None = None
+    ) -> tuple[int, str, str]:
+        """於 fake repo cwd 以探測到的 bash 真跑 dispatcher，回傳 (rc, stdout, stderr)。
+
+        `extra_env`（多 CPU 平衡負載第二十二輪新增）：測試並行段的逃生口
+        `AUTOSDD_PREPUSH_SERIAL_LEGS` 等場景專屬覆寫，預設 None 不影響既有呼叫點。
+        """
         env = dict(os.environ)
         # 外層若帶跳過旗標（如開發者 shell 殘留），dispatcher 會直接 exit 0，全部斷言失真。
         env.pop("AUTOCLAUDE_SKIP_HOOKS", None)
@@ -338,6 +344,8 @@ class TestPrePushDispatcher(unittest.TestCase):
         env["PATH"] = os.pathsep.join(
             [self._python_dir(), str(Path(_BASH).parent), env.get("PATH", "")]
         )
+        if extra_env:
+            env.update(extra_env)
         proc = subprocess.run(
             [_BASH, "tools/git-hooks/pre-push"],
             cwd=str(self.repo),
@@ -638,6 +646,146 @@ class TestPrePushDispatcher(unittest.TestCase):
         self.assertEqual(
             proc.returncode, 8,
             f"census stub 對 `-` 沒有回報 rc=8：stdout={proc.stdout}\nstderr={proc.stderr}",
+        )
+
+    # ── 多 CPU 平衡負載第二十二輪（Developer B）：AutoClaude leg／SDD leg 背景並行 ──
+
+    def _commit_autoclaude_and_sdd_change(self) -> str:
+        """兩子專案同時各有一行變更、不觸及任何根層檔 → run_autoclaude=1、
+        run_sdd=1、run_rootinfra=0（僅快層），三者之和＝2，恰好觸發並行段。"""
+        self._write("AutoClaude/parallel_probe.txt", "x\n")
+        self._write("AISDLC_SDD/parallel_probe.txt", "x\n")
+        return self._commit_all("autoclaude + sdd change (no root file)")
+
+    def test_two_legs_trigger_parallel_segment_with_headers_and_marker_line(self) -> None:
+        """(a) AutoClaude leg + SDD leg 同時觸發 ⇒ 走並行段：兩份 log 各自的
+        背景標頭行、`[cpu_budget] parallel legs:` 憑證行皆須出現，且兩支子 hook
+        都確實被執行到（marker 存在）、rc=0。
+
+        WHY：這是本輪最核心的承諾——序列時兩支重 leg 疊在一起付出時間，並行後
+        應同時起跑。沒有本測試，「有沒有真的背景並行」只能靠人工計時分辨。
+        """
+        sha = self._commit_autoclaude_and_sdd_change()
+        rc, out, err = self._run_dispatcher(self._push_line(sha, self.base_sha))
+        self.assertEqual(rc, 0, f"stdout={out}\nstderr={err}")
+        self.assertTrue(self.marker_autoclaude.exists(), "並行段下 AutoClaude 子 hook 未執行")
+        self.assertTrue(self.marker_sdd.exists(), "並行段下 AISDLC_SDD 子 hook 未執行")
+        self.assertIn(
+            "AutoClaude leg（背景並行 workers=2", out,
+            f"缺 AutoClaude leg 背景標頭行：\nstdout={out}\nstderr={err}",
+        )
+        self.assertIn(
+            "AISDLC_SDD leg（背景並行 workers=2", out,
+            f"缺 AISDLC_SDD leg 背景標頭行：\nstdout={out}\nstderr={err}",
+        )
+        self.assertIn(
+            "[cpu_budget] parallel legs:", out,
+            f"缺並行 leg 憑證行：\nstdout={out}\nstderr={err}",
+        )
+        # 兩份 log 的實際內容必須被回放進來，不是只印個標頭就交差。
+        self.assertIn("AC_LEG_STUB_OUTPUT_7f3c", out, "AutoClaude leg log 未被回放")
+
+    def test_one_background_leg_failure_is_named_and_blocks_push(self) -> None:
+        """(b) 背景 leg 之一（AISDLC_SDD）rc≠0 ⇒ 整體 rc≠0，且該 leg 被具名點出
+        （不得匿名淹沒在回放的 log 內文裡），另一支背景 leg（AutoClaude）仍如常
+        回報 rc=0。"""
+        self._write(
+            "AISDLC_SDD/.githooks/pre-push",
+            f'#!/usr/bin/env bash\n: > "{self.marker_sdd.as_posix()}"\nexit 1\n',
+        )
+        sha = self._commit_autoclaude_and_sdd_change()
+        rc, out, err = self._run_dispatcher(self._push_line(sha, self.base_sha))
+        self.assertEqual(rc, 1, f"背景 leg 失敗必須擋 push：\nstdout={out}\nstderr={err}")
+        self.assertIn(
+            "❌ AISDLC_SDD leg（背景並行）失敗（rc=1）", out + err,
+            f"失敗的背景 leg 未被具名點出：\nstdout={out}\nstderr={err}",
+        )
+        self.assertIn(
+            "AutoClaude leg（背景並行 workers=2，wall", out,
+            "另一支健康的背景 leg 的標頭行不應消失",
+        )
+        self.assertIn("rc=0）", out.split("AutoClaude leg（背景並行")[1][:40])
+
+    def test_serial_escape_hatch_disables_parallel_segment(self) -> None:
+        """(c) `AUTOSDD_PREPUSH_SERIAL_LEGS=1` ⇒ 強制走序列路徑：兩支子 hook
+        依然都要被執行到（逃生口只關並行形態，不關 leg 本身），但並行段的標頭行
+        與憑證行必須全數消失。"""
+        sha = self._commit_autoclaude_and_sdd_change()
+        rc, out, err = self._run_dispatcher(
+            self._push_line(sha, self.base_sha),
+            extra_env={"AUTOSDD_PREPUSH_SERIAL_LEGS": "1"},
+        )
+        self.assertEqual(rc, 0, f"stdout={out}\nstderr={err}")
+        self.assertTrue(self.marker_autoclaude.exists(), "逃生口不應連 leg 本身都跳過")
+        self.assertTrue(self.marker_sdd.exists(), "逃生口不應連 leg 本身都跳過")
+        self.assertNotIn("背景並行", out, "AUTOSDD_PREPUSH_SERIAL_LEGS=1 時不應出現並行標頭")
+        self.assertNotIn(
+            "[cpu_budget] parallel legs:", out,
+            "AUTOSDD_PREPUSH_SERIAL_LEGS=1 時不應出現並行憑證行",
+        )
+
+    def test_single_leg_trigger_has_no_parallel_segment(self) -> None:
+        """(d) 只有 AutoClaude leg 觸發（未涉 AISDLC_SDD/、也未涉根層檔，root-infra
+        僅快層）⇒ 三者之和為 1，維持原序列路徑，不應出現任何並行段標頭或憑證行。
+        """
+        self._write("AutoClaude/parallel_probe_single.txt", "x\n")
+        sha = self._commit_all("autoclaude only change (single leg)")
+        rc, out, err = self._run_dispatcher(self._push_line(sha, self.base_sha))
+        self.assertEqual(rc, 0, f"stdout={out}\nstderr={err}")
+        self.assertTrue(self.marker_autoclaude.exists())
+        self.assertNotIn("背景並行", out, "單 leg 觸發不應進入並行段")
+        self.assertNotIn(
+            "[cpu_budget] parallel legs:", out, "單 leg 觸發不應印並行憑證行"
+        )
+
+
+class TestParallelLegsWaitFormLock(unittest.TestCase):
+    """多 CPU 平衡負載第二十二輪（鐵律六，DEF-200-044）：`wait` 只能以帶 pid 的
+    形式出現，不得有裸 `wait`（無參數 wait 會等「所有」子行程，讀到的離開碼是
+    最後一個子行程的，等於把兩支背景 leg 各自的 rc 攪成一團、read 到錯的那個）。
+    純文字判準，非 fake-repo 執行——「有沒有真的 wait 到正確的 pid」已由
+    `TestPrePushDispatcher` 的 (a)(b) 兩支背景失敗定位測試覆蓋。
+    """
+
+    def test_wait_only_appears_with_a_pid_argument(self) -> None:
+        lines = DISPATCHER.read_text(encoding="utf-8").splitlines()
+        non_comment = [ln for ln in lines if not ln.strip().startswith("#")]
+        with_pid = [ln for ln in non_comment if 'wait "$pid' in ln]
+        self.assertGreaterEqual(
+            len(with_pid), 2,
+            f"預期至少兩處 `wait \"$pid...\"`（AutoClaude／SDD 兩支背景 leg 各一），"
+            f"實際：{with_pid}",
+        )
+        bare_wait = [
+            ln for ln in non_comment
+            if re.search(r"(?:^|[;&|]|\bthen\b|\belse\b|\bdo\b)\s*wait\s*(?:#.*)?$", ln)
+        ]
+        self.assertEqual(
+            bare_wait, [],
+            f"發現裸 `wait`（無 pid 參數）：{bare_wait}——鐵律六：等待必須有明確的"
+            "事件源，裸 wait 會把多支背景 leg 的離開碼攪在一起",
+        )
+
+    def test_int_term_trap_kills_pids_and_removes_the_log_dir(self) -> None:
+        """QA-2 V5 ③：INT/TERM trap 只 kill 沒有 `rm -rf` 並行 log 暫存目錄，Ctrl-C
+        中斷路徑會洩漏該目錄——中斷路徑沒有任何執行期測試覆蓋（fake-repo 測試不會
+        真的送訊號），只能靠形態鎖：trap 字串必須同時含 `kill` 與
+        `rm -rf "$_prepush_log_dir"`。"""
+        text = DISPATCHER.read_text(encoding="utf-8")
+        trap_lines = [
+            ln for ln in _non_comment_lines(text)
+            if ln.strip().startswith("trap '") and "INT TERM" in ln
+        ]
+        self.assertEqual(
+            len(trap_lines), 1,
+            f"預期恰一行 INT/TERM trap（並行段防孤兒／防洩漏）：{trap_lines}",
+        )
+        trap_line = trap_lines[0]
+        self.assertIn("kill", trap_line, "trap 遺失 kill——背景 leg 防孤兒失效")
+        self.assertIn(
+            'rm -rf "$_prepush_log_dir"', trap_line,
+            "trap 遺失 `rm -rf \"$_prepush_log_dir\"`——Ctrl-C 中斷路徑會洩漏並行 "
+            "log 暫存目錄（QA-2 V5 ③）",
         )
 
 

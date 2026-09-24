@@ -92,7 +92,9 @@ Write-Host "==> [1/3] pytest -m 'not chaos'（全套，含 offline reachability 
 # 把凍結基線唯一沒有的那個修法需求強加給它，複製回 ci-gate.sh 已經修掉的
 # 那個競態——這不是「與 .sh LATEST 軌一致」，而是「與 .sh 凍結基線軌一致」
 # （序列執行），對稱點是允許清單語意本身，不是逐字複製旗標。
-& $py -m pytest tools/fsm_runtime/tests/ -m "not chaos" -q -rs
+# `-p no:xdist`：本樹無 addopts 強制平行，加此旗標只是把「本來就序列跑」的
+# 事實顯式化（零行為改變），讓 pytest 呼叫站點普查鎖辨識出這是刻意序列。
+& $py -m pytest tools/fsm_runtime/tests/ -m "not chaos" -q -rs -p no:xdist
 if ($LASTEXITCODE -ne 0) { throw "pytest 失敗" }
 
 # DEF-200-318：fallback 原本硬寫死只跑凍結基線，從無 LATEST 軌——補上（帶 xdist，

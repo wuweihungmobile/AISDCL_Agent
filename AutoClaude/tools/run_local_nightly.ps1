@@ -1696,7 +1696,9 @@ $rcChaos = Invoke-Stage 'sdd-fsm-chaos (鏡射 aisdlc-sdd-fsm-chaos-nightly)' {
   $chaosSeed = (Get-Date).ToUniversalTime().ToString('yyyyMMdd')
   Push-Location $sddV001
   try {
-    Invoke-Native { & $script:PyExe -m pytest tools/fsm_runtime/tests/ -m chaos -q }
+    # `-p no:xdist`：本樹無 addopts 強制平行，加此旗標只是把「本來就序列跑」
+    # 的事實顯式化（零行為改變），供 pytest 呼叫站點普查鎖辨識為刻意序列。
+    Invoke-Native { & $script:PyExe -m pytest tools/fsm_runtime/tests/ -m chaos -q -p no:xdist }
     $chaosPytestRc = $LASTEXITCODE
     Invoke-Native {
       & $script:PyExe -m tools.fsm_runtime.chaos_runner --rounds 100 --seed $chaosSeed --json |

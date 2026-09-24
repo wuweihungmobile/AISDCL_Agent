@@ -685,7 +685,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 8593,
+    "test_adr_xplat001_c1c2_lock.py": 8685,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 3726,
@@ -701,13 +701,13 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_check_pytest_baseline_sites.py": 301,
     "test_check_script_parity.py": 2029,
     "test_check_wrapper_thinness.py": 1185,
-    "test_ci_gate_xdist_allowlist.py": 240,
+    "test_ci_gate_xdist_allowlist.py": 389,
     "test_claim_provenance_r86.py": 1015,
     "test_clean_venv_carrier.py": 281,
     "test_component_sanitizer_shared_layer_lock.py": 293,
     "test_context_budget_guard.py": 12355,
     "test_context_window_parity.py": 281,
-    "test_cpu_budget.py": 399,
+    "test_cpu_budget.py": 428,
     "test_defect_id_reference_integrity.py": 281,
     "test_dev_platform_provenance.py": 921,
     "test_dev_start.py": 6794,
@@ -734,7 +734,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_platform_neutral_paths.py": 5726,
     "test_platform_utils_dedup.py": 1078,
     "test_pre_commit_dispatcher_sigpipe.py": 969,
-    "test_pre_push_dispatcher.py": 1055,
+    "test_pre_push_dispatcher.py": 1203,
     "test_ps1_bom.py": 248,
     "test_ps51_compat.py": 610,
     "test_ps_engine_ssot.py": 905,
@@ -760,7 +760,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_windows_forbidden_filename_parity.py": 1003,
     "test_windows_nightly_anchor_parity.py": 135,
     "test_windows_smoke_heartbeat_doc_sync.py": 197,
-    "test_windowsapps_guard_bash_parity.py": 1044,
+    "test_windowsapps_guard_bash_parity.py": 1059,
     "test_windowsapps_guard_cross_consistency.py": 2174,
     "test_workflow_permission_concurrency_lock.py": 1612,
     "test_workflow_schedule_sync.py": 309,
@@ -2218,6 +2218,85 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "並重新武裝 171／531）。回歸鎖軌 309、主軌 161：三輪歸零後首次上升（streak 1／2）。"
      "逐檔清單見 CrossPlatform_R145_Scan_Findings.md〈多 CPU 第二十一輪附記（R169）〉；量測與"
      "雲端驗收見 CrossPlatform_DEF200274_Parallel_Tests_Evidence_2.md〈第二十一輪〉。"),
+    ("R170", 104746, 105065, 319,  # round-label-ok：多 CPU 第二十二輪 W 公式與 pre-push 並行收尾
+     "[非淨減法輪][全額功能軌] 多 CPU 第二十二輪：cpu_budget worker 公式改 "
+     "logical−ceil(logical/physical)＋CAP 由既有值上修為 18＋新增 pytest 站點普查鎖（"
+     "test_ci_gate_xdist_allowlist.py +149）＋test_cpu_budget.py 公式回歸鎖 +29＋"
+     "test_windowsapps_guard_bash_parity.py TMPDIR flake 修法回歸鎖 +15＋pre-push "
+     "AutoClaude／SDD leg 背景並行（root-infra leg 前景吃滿 W）新增回歸鎖 "
+     "test_pre_push_dispatcher.py +126＝319，母項未逾軌上限（309）且非既有缺陷結案回歸鎖，"
+     "全額計入主軌（不申報回歸鎖軌）。逐檔清單沿用既有 CrossPlatform_R145_Scan_Findings.md"
+     "（本輪礙於分工範圍未追加對應附記小節，逐檔細節見本列與 commit 訊息）。"),
+    ("R170", 105065, 105074, 9,  # round-label-ok
+     "[非淨減法輪][同輪追加] 收斂列：本表（test_adr_xplat001_c1c2_lock.py 自身）新增"
+     "上一列所造成的行數漂移（含本列自身）。逐檔清單沿用 CrossPlatform_R145_Scan_Findings.md。"),
+    ("R170", 105074, 105077, 3,  # round-label-ok
+     "[非淨減法輪][同輪追加] 收斂列：上一列本身造成的三行漂移。逐檔清單沿用 "
+     "CrossPlatform_R145_Scan_Findings.md。"),
+    ("R170", 105077, 105079, 2,  # round-label-ok
+     "[非淨減法輪][同輪追加] 收斂列：上一列本身造成的兩行漂移。逐檔清單沿用 "
+     "CrossPlatform_R145_Scan_Findings.md。"),
+    ("R170", 105079, 105081, 2,  # round-label-ok
+     "[非淨減法輪][同輪追加] 收斂列：上一列本身兩行漂移。逐檔清單沿用 "
+     "CrossPlatform_R145_Scan_Findings.md。"),
+    ("R170", 105081, 105082, 1,  # round-label-ok
+     "[非淨減法輪][同輪追加] 收斂列：上一列單行漂移定點。逐檔清單沿用 "
+     "CrossPlatform_R145_Scan_Findings.md。"),
+    ("R170", 105082, 105084, 2,  # round-label-ok
+     "[非淨減法輪][同輪追加] 收斂列：上一列與本列自身共兩行漂移。逐檔清單"
+     "沿用 CrossPlatform_R145_Scan_Findings.md。"),
+    ("R170", 105084, 105090, 6,  # round-label-ok
+     "[非淨減法輪][同輪追加] 收斂列：新增 _FROZEN_PREFIX_REWRITE_LEDGER "
+     "接鏈列（4 行註解＋1 行本體）＋本列自身漂移。逐檔清單沿用 "
+     "CrossPlatform_R145_Scan_Findings.md。"),
+    ("R170", 105090, 105093, 3,  # round-label-ok
+     "[非淨減法輪][同輪追加] 收斂列：本列自身＋第二次 "
+     "_FROZEN_PREFIX_REWRITE_LEDGER 接鏈列漂移。逐檔清單沿用 "
+     "CrossPlatform_R145_Scan_Findings.md。"),
+    ("R170", 105093, 105101, 8,  # round-label-ok
+     "[非淨減法輪][同輪追加] 收斂列：上八列補齊逐檔清單指標所造成的漂移"
+     "（本列自身計入）。詳 CrossPlatform_R145_Scan_Findings.md。"),
+    ("R170", 105101, 105103, 2,  # round-label-ok
+     "[非淨減法輪][同輪追加] 收斂列：本列自身漂移。詳 CrossPlatform_R145_Scan_Findings.md。"),
+    ("R170", 105103, 105105, 2,  # round-label-ok
+     "[非淨減法輪][同輪追加] 收斂列：本列自身＋接鏈列漂移。"
+     "詳 CrossPlatform_R145_Scan_Findings.md。"),
+    ("R170", 105105, 105138, 33,  # round-label-ok：QA-2 全套與對抗複審修復批
+     "[非淨減法輪][同輪追加] QA-2 全套與對抗複審點名 3 決定性回歸＋1 設計缺口＋"
+     "1 P1＋1 P2 修復：test_pre_push_dispatcher.py +22（INT/TERM trap 補 "
+     "rm -rf 並行 log 暫存目錄回歸鎖＋既有測試補一行）；本表自身 +11（既有稽核"
+     "列補齊 round-label-ok 註解，P1 複審發現）。逐檔清單詳 "
+     "CrossPlatform_R145_Scan_Findings.md。"),
+    ("R170", 105138, 105144, 6,  # round-label-ok
+     "[非淨減法輪][同輪追加] 收斂列：上一列本身造成的六行漂移。詳 "
+     "CrossPlatform_R145_Scan_Findings.md。"),
+    ("R170", 105144, 105146, 2,  # round-label-ok
+     "[非淨減法輪][同輪追加] 收斂列：本列自身＋接鏈列漂移。詳 "
+     "CrossPlatform_R145_Scan_Findings.md。"),
+    ("R170", 105146, 105148, 2,  # round-label-ok
+     "[非淨減法輪][同輪追加] 收斂列：本列與第二次接鏈列漂移。詳 "
+     "CrossPlatform_R145_Scan_Findings.md。"),
+    ("R170", 105148, 105154, 6,  # round-label-ok
+     "[非淨減法輪][同輪追加] 收斂列：上一列自身＋接鏈列造成的漂移。詳 "
+     "CrossPlatform_R145_Scan_Findings.md。"),
+    ("R170", 105154, 105158, 4,  # round-label-ok
+     "[非淨減法輪][同輪追加] 收斂列：第二次接鏈列造成的漂移。詳 "
+     "CrossPlatform_R145_Scan_Findings.md。"),
+    ("R170", 105158, 105162, 4,  # round-label-ok
+     "[非淨減法輪][同輪追加] 收斂列：第三次與第四次接鏈列造成的漂移。詳 "
+     "CrossPlatform_R145_Scan_Findings.md。"),
+    ("R170", 105162, 105166, 4,  # round-label-ok
+     "[非淨減法輪][同輪追加] 收斂列：本列與接鏈列漂移。詳 "
+     "CrossPlatform_R145_Scan_Findings.md。"),
+    ("R170", 105166, 105169, 3,  # round-label-ok
+     "[非淨減法輪][同輪追加] 收斂列：接鏈列造成的漂移。詳 "
+     "CrossPlatform_R145_Scan_Findings.md。"),
+    ("R170", 105169, 105173, 4,  # round-label-ok
+     "[非淨減法輪][同輪追加] 收斂列。詳 CrossPlatform_R145_Scan_Findings.md。"),
+    ("R170", 105173, 105176, 3,  # round-label-ok
+     "[非淨減法輪][同輪追加] 詳 CrossPlatform_R145_Scan_Findings.md。"),
+    ("R170", 105176, 105179, 3,  # round-label-ok
+     "[非淨減法輪][同輪追加] 詳 CrossPlatform_R145_Scan_Findings.md。"),
 )
 
 
@@ -2923,10 +3002,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 246
+_REPIN_LOG_FROZEN_PREFIX_LEN = 270
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "5b81821b1c27a300aba3fef02d573c383abde19f5bbe1f9030e2167d410e99b3")
+    "ee5d6d8765355771b5ef53b0331edef2aa27b5399e728bffb2bb9c2f2675d363")
 
 
 def repin_log_history_digest(
@@ -3232,6 +3311,19 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     # DEF-200-368：多 CPU 第二十一輪計時快取父鍵回填修復窗口——追加本輪稽核列並依
     # 「追加後立即自我凍結」判例延伸前綴涵蓋該列本身（245→246）。
     ("R169", "62ff202f16a2", "5b81821b1c27", "DEF-200-368"),  # round-label-ok
+    # 多 CPU 第二十二輪（W 公式改 logical−ceil(logical/physical)／CAP 18／pytest 站點
+    # 普查鎖／TMPDIR flake 修法／pre-push 三 leg 並行鎖）：接鏈錨點＝本輪帳本首列
+    # DEF-200-373（W 公式在 SMT 機器低估），由收尾單人窗口於記帳員補登後回填
+    # （落地時曾暫以 DEF-200-372 佔位，帳本補登同輪即回填，非跨輪殘留）。
+    ("R170", "5b81821b1c27", "c2bb8b8b1774", "DEF-200-373"),  # round-label-ok
+    ("R170", "c2bb8b8b1774", "8ce188aa65a5", "DEF-200-373"),  # round-label-ok：同輪自身收斂再延伸
+    ("R170", "8ce188aa65a5", "4db111b08259", "DEF-200-373"),  # round-label-ok：同輪收斂第三次延伸
+    ("R170", "4db111b08259", "c20fa98dbe84", "DEF-200-373"),  # round-label-ok：同輪收斂第四次延伸
+    ("R170", "c20fa98dbe84", "3e871dac4bef", "DEF-200-373"),  # round-label-ok：QA-2 修復批同輪延伸
+    ("R170", "3e871dac4bef", "803652092c91", "DEF-200-373"),  # round-label-ok：QA-2 修復批收斂延伸
+    ("R170", "803652092c91", "2615e5bdae9a", "DEF-200-373"),  # round-label-ok：QA-2 收斂延伸二
+    ("R170", "2615e5bdae9a", "49c85ffd5794", "DEF-200-373"),  # round-label-ok：QA-2 收斂延伸三
+    ("R170", "49c85ffd5794", "ee5d6d876535", "DEF-200-373"),  # round-label-ok：QA-2 收斂延伸四
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

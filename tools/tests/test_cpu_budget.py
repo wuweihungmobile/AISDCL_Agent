@@ -37,17 +37,17 @@ class TotalBudgetFormulaTest(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def test_interactive_reserves_one_physical_core_plus_half_smt_credit(self) -> None:
-        """互動預算＝`(實體核-1) + floor((邏輯核-實體核)/2)`——SMT 兄弟執行緒給半
-        信用（見 `cpu_budget.py` 檔頭 2026-09-23 QA 實測表：14P/20L 機器 W=16 為
-        實測最佳點）。`(physical, logical)` 皆顯式指定，避免互動分支從此也讀
-        `logical` 後，未顯式控制的 `os.cpu_count()` 讓測試結果隨執行機器漂移。
+    def test_interactive_uses_logical_minus_ceil_logical_over_physical(self) -> None:
+        """互動預算＝`logical - ceil(logical/physical)`（見 `cpu_budget.py` 檔頭
+        2026-09-24 QA 實測表：14P/20L 機器 W=18 為本輪選定點，CAP 同步 16→18）。
+        `(physical, logical)` 皆顯式指定，避免互動分支從此也讀 `logical` 後，
+        未顯式控制的 `os.cpu_count()` 讓測試結果隨執行機器漂移。
         """
         cases = {
-            (1, 1): 1,     # floor=1
-            (10, 10): 9,   # 無 SMT：退化為 physical-1（既有 M1 Max 校準點不變）
-            (14, 20): 16,  # 14600K：13 + floor(6/2)=3 → 16（QA 實測最佳點）
-            (8, 16): 11,   # 8 條 SMT 執行緒：7 + floor(8/2)=4 → 11
+            (1, 1): 1,     # 1-ceil(1/1)=0 → floor=1
+            (10, 10): 9,   # 無 SMT：10-ceil(10/10)=9（既有 M1 Max 校準點不變）
+            (14, 20): 18,  # 14600K：20-ceil(20/14)=20-2=18（本輪選定點）
+            (8, 16): 14,   # 8 條 SMT 執行緒：16-ceil(16/8)=16-2=14（HYPOTHESIS）
         }
         for (physical, logical), expected in cases.items():
             got = cb.total_budget(
@@ -55,7 +55,7 @@ class TotalBudgetFormulaTest(unittest.TestCase):
             self.assertEqual(
                 got, expected,
                 f"互動 physical={physical} logical={logical} 應得 {expected}"
-                "（max(1, min(16, (physical-1)+floor((logical-physical)/2)))）")
+                "（max(1, min(18, logical-ceil(logical/physical))))）")
 
     def test_physical_undetectable_falls_back_to_logical_minus_one(self) -> None:
         """`physical` 偵測不到（`_detect_physical_count()` 回 None）時退回
@@ -63,17 +63,17 @@ class TotalBudgetFormulaTest(unittest.TestCase):
         self.assertEqual(cb.total_budget(cpu_count=8, headless=False), 7)
 
     def test_cap_clamps_high_core_count_machines(self) -> None:
-        """`(24-1)+floor((48-24)/2)=35`，遠超 CAP=16，應被夾住——未實測的高核心
-        數機器上公式本身不會失控溢位。"""
+        """`48-ceil(48/24)=48-2=46`，遠超 CAP=18，應被夾住——未實測的高核心數
+        機器上公式本身不會失控溢位。"""
         self.assertEqual(
-            cb.total_budget(cpu_count=48, physical_count=24, headless=False), 16)
+            cb.total_budget(cpu_count=48, physical_count=24, headless=False), 18)
 
     def test_headless_uses_all_logical_cores(self) -> None:
-        cases = {1: 1, 4: 4, 9: 9, 16: 16, 20: 16, 100: 16}
+        cases = {1: 1, 4: 4, 9: 9, 16: 16, 18: 18, 20: 18, 100: 18}
         for cpu, expected in cases.items():
             self.assertEqual(
                 cb.total_budget(cpu_count=cpu, headless=True), expected,
-                f"headless cpu={cpu} 應得 {expected}（max(1, min(16, cpu)))）")
+                f"headless cpu={cpu} 應得 {expected}（max(1, min(18, cpu)))）")
 
     def test_headless_gets_one_more_worker_than_interactive_below_cap(self) -> None:
         """cap 以下、無 SMT（physical==logical）時，headless（邏輯核 N）應比互動
@@ -116,11 +116,11 @@ class TotalBudgetFormulaTest(unittest.TestCase):
             )
 
     def test_interactive_combines_both_headless_uses_logical_only(self) -> None:
-        """SMT 半信用公式起，互動分支不再只看 `physical`——同一組
-        (physical=8, logical=16) 下，互動＝`(8-1)+floor((16-8)/2)=11`（兩個輸入
-        都用到），headless 完全忽略 `physical`、只看 `logical`＝16。"""
+        """互動分支不只看 `physical`——同一組 (physical=8, logical=16) 下，
+        互動＝`16-ceil(16/8)=14`（兩個輸入都用到），headless 完全忽略
+        `physical`、只看 `logical`＝16。"""
         self.assertEqual(
-            cb.total_budget(cpu_count=16, physical_count=8, headless=False), 11)
+            cb.total_budget(cpu_count=16, physical_count=8, headless=False), 14)
         self.assertEqual(
             cb.total_budget(cpu_count=16, physical_count=8, headless=True), 16)
 
@@ -319,6 +319,35 @@ class DetectPhysicalCountTest(unittest.TestCase):
             self.assertIsNotNone(
                 n, "Windows 真機 ctypes 分支不得回 None（見 cpu_budget.py "
                    "_platform_physical_count() 的 win32 分支）")
+
+
+class DetectLogicalCountTest(unittest.TestCase):
+    """`_detect_logical_count()`：優先 `os.sched_getaffinity(0)`（cgroup／容器
+    親和性感知），缺席或例外退回 `os.cpu_count()`（Q3，見 cpu_budget.py 檔頭）。
+    """
+
+    def test_sched_getaffinity_present_used_when_available(self) -> None:
+        """`create=True`：本機（Windows）天生無此屬性，用 mock 補上模擬 Linux。"""
+        with mock.patch.object(
+                os, "sched_getaffinity", lambda pid: {0, 1}, create=True):
+            self.assertEqual(cb._detect_logical_count(), 2)
+
+    def test_sched_getaffinity_absent_falls_back_to_cpu_count(self) -> None:
+        """平台無關寫法：把屬性值蓋成 `None`（不用 `delattr`——Linux CI 上
+        `os.sched_getaffinity` 原生存在，硬刪屬性難以在退出時乾淨還原）；
+        `getattr(os, "sched_getaffinity", None)` 得到與「缺席」等價的觀察
+        結果，Windows／macOS 本機不需要這道 mock 也一樣缺席（鐵律三）。"""
+        with mock.patch.object(os, "sched_getaffinity", None, create=True), \
+                mock.patch.object(cb.os, "cpu_count", return_value=6):
+            self.assertEqual(cb._detect_logical_count(), 6)
+
+    def test_sched_getaffinity_raises_falls_back_to_cpu_count(self) -> None:
+        def _boom(pid: int) -> set[int]:
+            raise OSError("no affinity info")
+
+        with mock.patch.object(os, "sched_getaffinity", _boom, create=True), \
+                mock.patch.object(cb.os, "cpu_count", return_value=5):
+            self.assertEqual(cb._detect_logical_count(), 5)
 
 
 class PerLegBudgetTest(unittest.TestCase):

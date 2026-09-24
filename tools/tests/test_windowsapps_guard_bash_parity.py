@@ -34,8 +34,10 @@ from __future__ import annotations
 import functools
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path, PurePosixPath
 from unittest import mock
@@ -482,6 +484,9 @@ class TestSharedGuardShellFunctionBehavior(unittest.TestCase):
     `test_bash_probe_spec_contract.py` 上踩到的路徑格式陷阱同一根因類別。"""
 
     def _run(self, subdir_name: str, candidate: str = "python") -> bool:
+        """WHY：`TMPDIR` 指到測試專屬目錄，避開共用 `%TEMP%`（16 萬項目＋
+        Defender 即時防護）高並發下 `mktemp -d` 偶發 `ACCESS_DENIED`；不改變
+        任何斷言語意。"""
         script = (
             'set -e\n'
             'tmp="$(mktemp -d)"\n'
@@ -496,10 +501,14 @@ class TestSharedGuardShellFunctionBehavior(unittest.TestCase):
             f'. "{_GUARD_SH.as_posix()}"\n'
             f'is_real_python_candidate {candidate}\n'
         )
+        wag_tmpdir = tempfile.mkdtemp(prefix="wag_test_")
+        self.addCleanup(shutil.rmtree, wag_tmpdir, ignore_errors=True)
+        env = dict(os.environ)
+        env["TMPDIR"] = Path(wag_tmpdir).as_posix()
         r = subprocess.run(
             [_bash_exe(), "-c", script],
             capture_output=True, text=True, timeout=15,
-            encoding="utf-8", errors="replace",
+            encoding="utf-8", errors="replace", env=env,
         )
         return r.returncode == 0
 
@@ -537,6 +546,9 @@ class TestPickRepoPythonBehavior(unittest.TestCase):
     不需要真的複製一份 Python 直譯器。"""
 
     def _run(self, body: str, env_overrides: dict[str, str] | None = None) -> tuple[int, str, str]:
+        """WHY：測試專屬 `TMPDIR`，理由同 `TestSharedGuardShellFunctionBehavior.
+        _run()`（共用 `%TEMP%` 高並發下 AV 競爭導致 `mktemp -d` 偶發
+        `ACCESS_DENIED`），不改變任何斷言語意。"""
         script = (
             'set -e\n'
             'tmp="$(mktemp -d)"\n'
@@ -544,9 +556,12 @@ class TestPickRepoPythonBehavior(unittest.TestCase):
             f'. "{_GUARD_SH.as_posix()}"\n'
             f'{body}\n'
         )
+        wag_tmpdir = tempfile.mkdtemp(prefix="wag_test_")
+        self.addCleanup(shutil.rmtree, wag_tmpdir, ignore_errors=True)
         env = dict(os.environ)
         for var in ("CI", "GITHUB_ACTIONS", "AUTOSDD_ALLOW_PATH_PYTHON"):
             env.pop(var, None)
+        env["TMPDIR"] = Path(wag_tmpdir).as_posix()
         if env_overrides:
             env.update(env_overrides)
         r = subprocess.run(

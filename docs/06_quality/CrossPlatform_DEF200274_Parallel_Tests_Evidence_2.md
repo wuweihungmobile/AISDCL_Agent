@@ -180,3 +180,228 @@ run 35885321554 首次出現 `mutation-history` artifact（332 bytes；report ar
    的純序列段，若能延後或平行化 import，可直接壓縮整輪平均的分母。
 4. （附）**D2 動態 ρ 回饋機制**：待 D1 靜態公式與方法級細分（D4）穩定運行數輪後，再評估是否
    值得疊加動態收斂機制。
+
+## 第二十二輪：掌舵者六問「帳本多 CPU 問題／功能完備＋CI 多 CPU／全面優化平衡負載／其他可多 CPU 面／是否收斂／完成前輪未完成」——完整 W 掃描定位全域最優帶＋三 leg 並行＋收斂宣告（2026-09-24，Windows）
+
+掌舵者六問：①帳本上還有哪些多 CPU 問題？②多 CPU 功能是否完備、CI 是否也已多 CPU？③能否
+全面優化以平衡負載？④還有哪些面向可以多 CPU？⑤這件事是否已可收斂？⑥前一輪承諾但未完成的
+項目是否已補齊？流程：SA 盤點 → 量測員完整 W 掃描 → Architect 設計 → QA-1 三 leg 真並行量測
+→ Developer 兩棒落地 → QA-2 收尾驗證 → 對抗複審 → 記帳員收斂。鏡全 Sonnet（SA／量測員／
+Architect／QA-1／Developer A／Developer B／QA-2／對抗複審／記帳員），主控 Fable 只裁決親驗。
+額度守衛 notice→converge→prepare 三帶皆已觸發（Fable 週額度 83→85%），context 守衛全程擋
+Workflow，每 300s 只准派 1～2 個 Agent，逐個派完。
+
+### 量測（兩張表）
+
+**表一：完整 W=13~20 逐一交錯掃描**（每 W 取兩輪中位，交錯序列
+16,14,15,17,18,18,17,15,14,16 抵銷機器暖機／降頻趨勢；13／20 兩點沿用前一輪掃描值不重測）：
+
+| W | wall 中位 (s) | 整輪 CPU | 穩態 CPU | S (s，估) | 備註 |
+|---|---|---|---|---|---|
+| 13（沿用前輪） | 189.4 | 58.8% | 74.9% | ≈1967 | 基準 |
+| 14 | 180.65 | 71.4% | 78.6% | ≈2208 | |
+| 15 | 172.5 | 74.8% | 83.8% | ≈2251 | |
+| 16 | 167.5 | 77.5% | 87.8% | 2321 | 第 10 輪；第 1 輪 181.8 為首輪暖機離群，兩輪中位 174.65，與前輪 163.7 差 +6.7% 漂移 |
+| 17 | 166.45 | 80.3% | 91.75% | ≈2431 | 本系列首次整輪跨過掌舵者要求的 80% 門檻 |
+| 18 | 164.4 | 82.85% | 95.3% | ≈2541 | wall 最短且利用率最高，本輪選定值 |
+| 20（沿用前輪） | 176.5 | 72.2% | 98.9% | ≈2675 | 利用率最高但 wall 較慢 |
+
+全部 10 輪 📊 摘要行皆判 S/W-bound、slot 利用率 99.8%、loss 1.00x；最長單位（恆為
+`TestPlanRejectsRowsWithExternalResidencePointers`）118～136s；W=18 的 ideal≈141s 已貼近最長
+單位，即 S/W-bound 與 max_unit-bound 的交叉點，故 W>18 邊際效益結構上有限。W=18 兩輪中一輪
+rc=1（`test_windowsapps_guard_bash_parity.TestPickRepoPythonBehavior.test_ci_env_falls_back_to_path_python`
+`mktemp: failed to create directory via template /tmp/tmp.XXXXXXXXXX: Permission denied`，根因與修
+復見下）。**discovery 訂正**：前輪誤植「20s＠6.3%」為 discovery 耗時，本輪重測實測
+discovery 僅 1.6s——前輪誤讀的低谷其實是 worker 匯入暖機，非序列 import 段。
+
+各 leg 隨並行數的耗時 T_leg(w)：AutoClaude leg（loadgroup，PG 在場，4883 passed／10 skipped）
+W=4／8／16 分別 59.3s／36.5s／30.6s；SDD leg（`ci-gate.sh` 雙軌：v0.01 序列 1478 passed≈26.6s
+固定＋v0.30 xdist 1956 passed＋`scripts/tests` 364）W=4／8／16 分別 76.2s／71.8s／67.5s；
+`compileall -j0` 0.41s（序列 0.70s）；`arch_fitness` 0.54s。序列三 leg 總和（W=16）＝
+174.65+30.6+67.5＝272.75s，是三 leg 並行設計的比較基準。
+
+**表二：QA-1 三 leg 真並行量測**（root／AutoClaude／SDD 三 leg 同時起跑）：
+
+| 方案 | root workers | AutoClaude workers | SDD workers | 整組 wall | 省下 | 備註 |
+|---|---|---|---|---|---|---|
+| E1-a | 14 | 2 | 2 | 208.04s | 23.7% | root 側出現 3 支 `mktemp` flake |
+| E1-b | 16 | 2 | 2 | 203.44s | 25.4% | 三 leg 全 rc=0，瓶頸恆在 root |
+
+W=18 三 leg 並行另跑三次，164.1／165.6／165.3s 全綠，flake 出現率 1/5（本階段樣本）。**flake
+診斷**：`test_windowsapps_guard_bash_parity` fixture 自行 `mktemp -d`，Git Bash 的 `/tmp` 對應
+`C:\Users\<user>\AppData\Local\Temp`（實測約 16 萬個項目、Windows Defender 即時防護開啟），高
+並發建立／刪除同一巨大共用目錄時，AV 過濾驅動偶爾讓 `CreateDirectory` 短暫回
+`ACCESS_DENIED`；受測腳本本身零 `mktemp` 呼叫，問題全出在測試 fixture。
+
+### 設計裁決
+
+**採用（各附數字）**：
+
+- **W 公式校準**：互動式 `cpu_budget` 公式改為
+  `max(1, min(CAP, logical − ceil(logical/physical)))`（保留一顆實體核＋其 SMT 兄弟給前景），
+  CAP 由 16 提高到 18。理由：完整 W=13~20 掃描顯示 17／18 整輪 CPU 已達 80.3%／82.85% 且 wall
+  不劣（166.45s／164.4s），16 僅 77.5%，未達掌舵者字面要求的 80%。代價：S 從 2321s（W=16）漲
+  到 2541s（W=18，+9.5%），16～18 之間是平坦帶。換算：(14,20)→18、(10,10)→9、(4,4)→3、
+  (8,16)→14（**HYPOTHESIS**，未實跑）；physical 讀不到時退回 `logical−1`；headless／CI 路徑
+  不變。
+- **邏輯核偵測優先序**：優先讀 `os.sched_getaffinity(0)`（Linux 容器／cgroup 親和性遮罩場
+  景），讀不到才退回既有邏輯核計數。
+- **三 leg 並行**（Architect 判準：savings ≥20% 才值得做，QA-1 實測 25.4%，達標）：pre-push
+  快層守門後，AutoClaude leg／SDD leg 改背景並行各 `workers=2`、root leg 前景吃滿當次 W；逐
+  pid wait；固定順序回放輸出；新增 `[cpu_budget] parallel legs: root=<W> autoclaude=2 sdd=2
+  wall=<N>s` 憑證行；逃生口 `AUTOSDD_PREPUSH_SERIAL_LEGS=1`；`mktemp` 建立暫存目錄失敗時退回
+  序列執行；`trap` 補上背景行程 `kill` 與暫存目錄 `rm`（原始設計缺口，QA-2 前已修復）。
+- **三平台 CI 補 psutil**：`root-infra-ci.yml`／`windows-compat-ci.yml`／`macos-compat-ci.yml`
+  三處 pip 安裝步驟加 `psutil`，解除 DEF-200-366 誠實劃界中「win32 ctypes 分支雲端零覆蓋」的
+  前置缺口（雲端真跑待下次 dispatch）。
+- **收斂判準①落地**：`PytestInvocationSiteCensusTest` 併入
+  `tools/tests/test_ci_gate_xdist_allowlist.py`（34 站點普查：PARALLEL 16／SERIAL 15 登記 18
+  列／UNGOVERNED 3→0），三處 chaos 凍結基線裸呼叫（`AISDLC_SDD/scripts/ci-gate.ps1`、
+  `.github/workflows/aisdlc-sdd-fsm-chaos-nightly.yml`、`AutoClaude/tools/run_local_nightly.ps1`）
+  顯式補 `-p no:xdist`。
+- **TMPDIR 隔離修 flake**：`tempfile.mkdtemp` 餵子行程 `TMPDIR`，複審實機證實 Git Bash 的
+  `mktemp` 尊重 `C:/…` 形式的 `TMPDIR`。
+
+**不值得做（各附數字）**：
+
+- **D2 動態 ρ 回饋**：本輪完整 W=13~20 掃描證實靜態公式落點就是 argmin（鎖
+  `abs(公式值−argmin)≤1`），動態回饋機制的邊際價值已無實測支持。
+- **discovery lazy import**：訂正後實測僅 1.6s（<1% of wall），投入產出比過低。
+- **S 本身瘦身**：三支候選重量級測試合計 89s，除以 W=18 僅貢獻 ≈5s（≈3% of wall，<5% 門
+  檻），且會撞 Rule 9（測試鑑別力）風險，本輪判定不值得做。
+- **`ci-gate.sh` 凍結基線∥LATEST 重疊並行**：最多省 ≤26.6s（v0.01 序列耗時），且 D3 三 leg
+  並行落地後 SDD leg 已被 root leg 遮蔽，不值得在 CI 關鍵腳本上再開一條並行分支。
+- **mutation 分片**：mutmut 2.4.3 無原生平行支援，且 nightly 屬無人值守情境，wall 不阻塞人，
+  下游 sqlite cache 消費者也要跟著改，投入產出比低。
+- **nightly stage 重疊**、**cgroup 配額**、**記憶體上限**：皆屬無人值守或無受害場景（本機
+  128GB RAM、CI 固定 4 worker），本輪判定不值得做。
+
+**誤判澄清**：SA 盤點階段一度判定 AutoClaude CI 的 `test`／`equivalence` job 對並行 worker
+數「無憑證」，經主控親驗雲端 log 推翻——`AutoClaude/tests/conftest.py` 早有
+`pytest_xdist_auto_num_workers` 走 `cpu_budget.py --legs 1`；雲端 run `35885129613` 三個 job
+皆印 `[cpu_budget] xdist workers=4 source=cpu_budget`＋`nodes confirmed=4`；`aisdlc-sdd-ci` run
+`35885129547` 印 `broadcast workers=4 source=cpu_budget`→`xdist workers=4 source=env`→
+`nodes confirmed=4`，即掌舵者第二問（CI 多 CPU 覆蓋完備性）五條 CI 線全部已有可稽核字串。此
+案例提醒：SA 的「無憑證」判定必須親抓雲端 log 覆核，不能只憑存量文件推論。
+
+### 改動與鎖（逐檔）
+
+- `tools/lib/cpu_budget.py`：互動式公式改
+  `max(1, min(CAP, logical − ceil(logical/physical)))`、CAP 16→18；`os.sched_getaffinity(0)`
+  優先序；headless／CI 路徑不變。承 DEF-200-373／DEF-200-374。
+- `tools/git-hooks/pre-push`：三 leg 序列改並行段（AutoClaude／SDD leg 背景 workers=2、root
+  前景滿 W）＋逐 pid wait＋固定順序回放＋`[cpu_budget] parallel legs:` 憑證行＋逃生口
+  `AUTOSDD_PREPUSH_SERIAL_LEGS=1`＋mktemp 失敗退序列＋`trap` 補 kill／rm。承 DEF-200-375。
+- `tools/tests/test_pre_push_dispatcher.py`：新鎖驗證並行段行為、逃生口、`trap` 清理。
+- `tools/tests/test_ci_gate_xdist_allowlist.py`：併入 `PytestInvocationSiteCensusTest`（34 站
+  點普查，PARALLEL 16／SERIAL 15 登記 18 列／UNGOVERNED 3→0）。承 DEF-200-376。
+- `AISDLC_SDD/scripts/ci-gate.ps1`、`.github/workflows/aisdlc-sdd-fsm-chaos-nightly.yml`、
+  `AutoClaude/tools/run_local_nightly.ps1`：三處 chaos 凍結基線裸呼叫補 `-p no:xdist`。承
+  DEF-200-376。
+- `tools/tests/test_windowsapps_guard_bash_parity.py`：fixture 改用 `tempfile.mkdtemp` 餵子行
+  程 `TMPDIR` 隔離，堵住共用 %TEMP% 的 AV 競爭 flake。承 DEF-200-377。
+- `.github/workflows/root-infra-ci.yml`、`.github/workflows/windows-compat-ci.yml`、
+  `.github/workflows/macos-compat-ci.yml`：pip 安裝步驟加 `psutil`。承 DEF-200-378。
+- `tools/tests/test_run_root_unittests.py`：W 值鎖 `{100:16}`→18 同步（此前漏同步鏡像鎖，
+  Developer B 二次重釘補上）。
+- `AutoClaude/tests/tools/test_local_ci_gate.py`：字串切片改跟 `_run_autoclaude_leg() {` 函式
+  邊界（此前漏同步，Developer B 二次重釘補上；函式化會打斷字串切片型鎖是本輪教訓之一）。
+- `tools/tests/test_cpu_budget.py`：新公式與 `os.sched_getaffinity` 優先序鎖；E501 債務改短 5
+  行（未觸發重釘）。
+- `tools/tests/test_adr_xplat001_c1c2_lock.py`：護欄棘輪重釘 104746→105179（+433，本輪兩次重
+  釘）。
+
+### 驗證數字（QA-2，改動落地後、預設 W=18 不覆寫）
+
+- 根層全套 ×3：wall 163.40／164.03／165.71s；整輪 CPU 85.31%／85.46%（第 1 次採樣器失敗未
+  測）；發現 4589 個測試（下限 4543）。
+- `[cpu_budget] root-unittest workers=18 source=cpu_budget`；📊 `worker=18｜
+  S=2552.5～2591.3s｜ideal=141.8～144.0s（S/W-bound）｜loss=1.00x｜slot 99.8%｜最長單位
+  130.3～133.3s`。
+- mktemp flake 三次未再現。
+- **三個決定性回歸**（皆本輪漏同步鏡像鎖，Developer B 已修並二次重釘）：
+  `test_subprocess_encoding_hygiene` E501 債務計數 144>139（改短 5 行，未重釘）；
+  `test_run_root_unittests.py:294` `{100:16}`→18；
+  `AutoClaude/tests/tools/test_local_ci_gate.py:996` 切片改跟 `_run_autoclaude_leg() {` 函式邊
+  界。
+- 設計缺口：pre-push 並行段原本 `trap` 不清暫存目錄，已補 `rm` 並加文字鎖。
+- AutoClaude 全套 `--dist loadgroup`：`1 failed（即上述 test_local_ci_gate，已修）, 4882
+  passed, 10 skipped`；`[cpu_budget] xdist workers=18 source=cpu_budget`／
+  `nodes confirmed=18`。
+- `ci-gate.sh` rc=0，wall 68.41s，`broadcast workers=18`；v0.01 1478／v0.30 1956／
+  `scripts/tests` 364；10 道 lint 全綠。
+- 本機 `.venv` 實際已有 `psutil` 7.2.2 ⇒ 本機 `test_cpu_budget` 走強判準，46 tests OK。
+- **偶發、與本輪 diff 無關**：`test_archive_defect_log.TestArchiveIndexDocIsExternalized.`
+  `test_main_ledger_carries_no_leftover_index_bullet` 全套 1/3 紅（`ADL.apply()` 落地前保全不
+  變量回報 3 筆），根因未查（見缺陷帳本 DEF-200-380）。
+
+### 複審
+
+**對抗複審**：APPROVE-WITH-FIXES，P0 零；P1——重釘帳缺 `round-label-ok` 標記共 10 列（已
+補）；P2——註解誤植（已修）。實機證實：`-p no:xdist` 對未安裝插件只是 `set_blocked`，不影響
+既有行為；`ci-gate.sh` 凍結基線∥LATEST 重疊維持序列是決策豁免，不是遺漏；stdin 以
+`STDIN="$(cat)"` 先捕捉再 fork，無競態。定向回歸鎖修復後全過：`test_adr_xplat001_c1c2_lock`
+192 tests OK、`test_doc_loc_baseline_freshness_r60` 281 tests OK、`test_platform_neutral_paths`
+177 tests OK、`test_pre_push_dispatcher` 37 tests OK、`test_cpu_budget` 46 tests OK、
+`test_ci_gate_xdist_allowlist` 13 tests OK、AutoClaude 單檔 94 passed。
+
+**Architect 另發現（超出多 CPU 範圍，登記為新缺陷）**：`aisdlc-sdd-fsm-chaos-nightly.yml` 三處
+`working-directory` 寫死凍結基線版本，本機 nightly Stage 6 亦鏡射同一版本 ⇒ LATEST（v0.30）
+的 `-m chaos` 測試雲端與本機皆零覆蓋。此發現涉及 Rule 9.9.4「連 3 日失敗鎖 main」的閘門治
+理，主控裁決登記為 open 交掌舵者排期，不在本輪範圍內逕行落地（見缺陷帳本 DEF-200-379）。
+
+### 收斂宣告
+
+掌舵者第五問「是否已可收斂」——五條收斂判準逐條核對：
+
+1. ✅ **整輪 CPU 利用率達成掌舵者原始要求（≥80%）且 wall 不劣化**：QA-2 收尾全套三次 wall
+   163.40／164.03／165.71s，整輪 CPU 85.31%／85.46%（優於掌舵者要求的 80% 門檻，亦優於上一
+   輪最佳點 W=16 的 74.0%）。
+2. ✅ **W 全域最優帶已由完整逐一掃描定位，不再是局部三點外推**：W=13~20 全部 8 個值皆有實
+   測（13／20 沿用前輪、14~18 本輪新測），17／18 兩點構成 ≥80% 的平坦帶；公式改
+   `logical−ceil(logical/physical)`、CAP 18，argmin 鎖 `abs(公式值−argmin)≤1` 已固化為回歸測
+   試（`test_cpu_budget` 46 tests OK）。
+3. ✅ **S/W-bound 與 max_unit-bound 兩類瓶頸的可觀測性已成為標準輸出**：全部 10 輪 W 掃描與
+   QA-2 三次收尾全套皆印 📊 摘要行（worker／S／ideal／瓶頸類型／loss／slot 利用率／最長單
+   位），方法級自動細分（承 DEF-200-370）與計時快取父鍵回填（承 DEF-200-368）持續生效，本輪
+   僅因未同步鏡像鎖短暫回歸，已二次收斂修復。
+4. ✅ **本系列累積的偶發 flake 已定位真因並消除**：`test_windowsapps_guard_bash_parity` 的
+   `mktemp` ACCESS_DENIED 已由對抗複審實機重現定根因（fixture 落共用 %TEMP%、Defender 即時
+   防護與高並發 CreateDirectory 競爭），改用 `TMPDIR` 隔離後 QA-2 三次 W=18 全套未再現（樣本
+   數為本輪誠實劃界的已知限制，見下）。
+5. ✅ **收斂判準①（pytest 呼叫站點普查覆蓋率）已落地，不留治理死角**：34 站點全普查，原
+   UNGOVERNED 3 處（三處 chaos 凍結基線裸呼叫）已顯式補 `-p no:xdist`，UNGOVERNED 歸零。
+
+**宣告**：DEF-200-274 系列（根層 `tools/tests` 本機平行執行 opt-in）自本輪起**收斂**——以上
+五條判準皆 ✅ 且各附證據。後續多 CPU／並行相關發現一律以獨立新缺陷列處理（如本輪
+DEF-200-379／DEF-200-380），**不再開立新一輪多 CPU 迭代**（本欄刻意零輪號，故以「系列」稱
+之，不引用輪號字面）。
+
+### 🔴 誠實劃界
+
+- **拓撲外推屬 HYPOTHESIS**：本輪完整掃描僅在本機 14P/20L 實機上實測；D1' 公式對其他拓撲
+  （例如 8P/16L）的推算值（如 (8,16)→14）**未實跑驗證**，不可引用為結論。
+- **`ci-gate.ps1` fallback 分支本機執行不到**：凍結基線／LATEST 判準與 mktemp 失敗退回序列
+  等 fallback 路徑，在本輪本機真跑環境下結構上不會被觸發，僅由既有靜態／mock 測試覆蓋，未
+  經真機分支驗證。
+- **三 leg 並行是取捨、非全贏**：僅在多區域 push（快層守門＋AutoClaude leg＋SDD 三套皆需要
+  跑）時才省時 25.4%；AutoClaude／SDD 各自被壓到 `workers=2` 後，個別 leg 時長被壓縮空間換取
+  的是拉長——QA-1 量測顯示兩 leg 分別被壓到 163～186s／153～178s，相對其獨立跑滿 W 的情境慢
+  約 5～6 倍；若只有單一 leg 需要跑，此設計無益甚至更慢。
+- **flake 樣本量過小**：本輪對 `mktemp` flake 的觀測樣本僅涵蓋 QA-1 前測 5 次（1 次命中）＋
+  QA-2 收尾 3 次（0 次命中），合計 8 次，未達到可給出置信區間的統計量；「三次未再現」只能宣
+  稱「目前證據支持該根因」，不能宣稱「已徹底根治」。
+- **雲端待驗**：DEF-200-378（三平台 CI 加裝 psutil）與本輪全部改動的雲端 CI 驗收（五支 push
+  管線）皆待下次 push 後才有雲端 log 可核；本節數字全部來自本機 Windows 真機。
+
+### 待主控回填
+
+- 收尾全套 rc：**待主控回填**
+- commit sha：**待主控回填**
+- push 後雲端驗收（五支 push 管線 status／逐字 log 摘錄）：**待主控回填**
+- `python tools/check_defect_log_crossref.py` 本輪（記帳員收工時）現查 rc=1，唯一 ❌ 為淨額棘
+  輪：本輪新增 DEF-200-379／DEF-200-380 兩筆 open、0 筆結案，淨增 2 筆。此為合法「發現輪」情
+  境（出口②）：commit 前需顯式設定環境變數 `AUTOSDD_NET_RATCHET_OFF=1` 並在 commit 訊息寫明
+  理由（本輪修復 6 筆＋新發現 2 筆的淨值計算不計入「修復」抵銷，因為新增即結案的列不算「結
+  案」）。其餘輸出（⚠️ 第一冊逼近體積上限、外部阻塞／結構性長債複查逾期、已結列殘留待辦）皆
+  為本輪之前既有、與本輪無關，不在本輪處置範圍。

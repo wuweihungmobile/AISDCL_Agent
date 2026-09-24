@@ -236,5 +236,154 @@ class CpuBudgetExportWiringTest(unittest.TestCase):
         )
 
 
+# ── DEF-200-368 系列：pytest 呼叫站點普查（掃描器共用 helper；WHY 見類 docstring）──
+def _p(*parts: str) -> Path:
+    return REPO_ROOT.joinpath(*parts)
+
+
+_WORKFLOWS_DIR = REPO_ROOT / ".github" / "workflows"
+_CENSUS_TARGETS: tuple[tuple[str, Path], ...] = (
+    *((f"workflows/{p.name}", p) for p in sorted(_WORKFLOWS_DIR.glob("*.yml"))),
+    ("tools/git-hooks/pre-push", PRE_PUSH),
+    ("AutoClaude/tools/git-hooks/pre-push", _p("AutoClaude", "tools", "git-hooks", "pre-push")),
+    ("AISDLC_SDD/scripts/ci-gate.sh", CI_GATE),
+    ("AISDLC_SDD/scripts/ci-gate.ps1", CI_GATE_PS1),
+    ("AutoClaude/tools/local_ci_gate.py", _p("AutoClaude", "tools", "local_ci_gate.py")),
+    ("AutoClaude/tools/run_local_nightly.ps1",
+     _p("AutoClaude", "tools", "run_local_nightly.ps1")),
+    ("AutoClaude/tools/run_local_nightly.sh", _p("AutoClaude", "tools", "run_local_nightly.sh")),
+)
+
+#: 吃 shell/ps1/yml 的 `-m pytest`，也吃 Python list 呼叫 `"-m", "pytest"`（逗號分隔
+#: 非連續子字串——`local_ci_gate.py` 全部站點皆此形態，只用前者會漏掉整支檔）。
+_PYTEST_INVOKE_RE = re.compile(r'-m\s+pytest\b|"-m",\s*"pytest"')
+#: 呼叫**目標路徑**含此關鍵字 ⇒ SDD／根層層級（需明示旗標才算 PARALLEL）；判準用
+#: 目標路徑而非宿主檔案路徑（`run_local_nightly.ps1` 住 AutoClaude/ 卻呼叫 SDD 目標，
+#: 反之 workflows/*.yml 呼叫 AutoClaude 測試時宿主檔案不住 AutoClaude/，兩邊都會被
+#: 「按宿主路徑判」誤判）。
+_SDD_TARGET_MARKERS = ("fsm_runtime/tests", "AISDLC_SDD")
+_SERIAL_MARK = "no:xdist"
+_PARALLEL_MARKS = ("-n auto", "--dist", "XDIST_ARGS", "AUTOSDD_PARALLEL_TESTS")
+
+
+def _pytest_call_windows(text: str) -> list[tuple[int, str]]:
+    """`(命中行號, 視窗文字)` 列表；視窗＝命中行起最多 6 行（吃跨行旗標）；跳過
+    整行皆注解（`#` 開頭）的命中——那是散文提及，不是呼叫。"""
+    lines = text.splitlines()
+    hits: list[tuple[int, str]] = []
+    for idx, line in enumerate(lines):
+        if line.lstrip().startswith("#") or not _PYTEST_INVOKE_RE.search(line):
+            continue
+        hits.append((idx + 1, "\n".join(lines[idx:idx + 6])))
+    return hits
+
+
+def _classify_site(window: str) -> str:
+    """`"SERIAL"`／`"PARALLEL"`／`"UNGOVERNED"`（分類規則見本段頂端常數 WHY）。"""
+    if _SERIAL_MARK in window:
+        return "SERIAL"
+    if any(marker in window for marker in _SDD_TARGET_MARKERS):
+        return "PARALLEL" if any(m in window for m in _PARALLEL_MARKS) else "UNGOVERNED"
+    return "PARALLEL"  # 非 SDD 目標：AutoClaude／共用 ini addopts 治理
+
+
+def _all_sites() -> list[tuple[str, int, str, str]]:
+    """`(display_name, lineno, window, verdict)` 列表（現查磁碟）。"""
+    sites: list[tuple[str, int, str, str]] = []
+    for display_name, path in _CENSUS_TARGETS:
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8")
+        for lineno, window in _pytest_call_windows(text):
+            sites.append((display_name, lineno, window, _classify_site(window)))
+    return sites
+
+
+#: 理由詞彙：pg_real 單一 DB／perf 計時純度／mutmut runner hash／chaos／凍結基線
+#: snapshot 競態，v0.01 不可原地修／單檔／窄範圍呼叫，平行無收益。
+_JUSTIFIED_SERIAL_SITES: tuple[tuple[str, str, str], ...] = (
+    ("workflows/autoclaude-ci.yml", "test_pgvector_real_recall.py", "pg_real 單一 DB"),
+    ("workflows/autoclaude-ci.yml", "test_pgvector_recall_perf.py",
+     "pg_real 單一 DB／perf 計時純度"),
+    ("workflows/autoclaude-ci.yml", "tests/plugins/token_guard", "mutmut runner hash"),
+    ("workflows/autoclaude-ci.yml", "test_goal_synthesis_plugin.py", "mutmut runner hash"),
+    ("workflows/autoclaude-ci.yml", "tests/core/orchestration", "mutmut runner hash"),
+    ("workflows/autoclaude-ci.yml", "tests/perf/ -v --tb=short -m perf", "perf 計時純度"),
+    ("workflows/autoclaude-mutation-on-change.yml", "tests/plugins/token_guard",
+     "mutmut runner hash"),
+    ("workflows/autoclaude-pg-e2e-on-label.yml", "test_pgvector_real_recall.py",
+     "pg_real 單一 DB"),
+    ("AutoClaude/tools/local_ci_gate.py", "test_claude_md_no_long_lines.py",
+     "單檔／窄範圍呼叫，平行無收益"),
+    ("AutoClaude/tools/local_ci_gate.py", "*pytest_args", "單檔／窄範圍呼叫，平行無收益"),
+    ("AutoClaude/tools/local_ci_gate.py", "test_pg_state_repository_contract.py",
+     "pg_real 單一 DB／單檔／窄範圍呼叫，平行無收益"),
+    ("AutoClaude/tools/run_local_nightly.ps1", "test_pgvector_real_recall.py",
+     "pg_real 單一 DB／單檔／窄範圍呼叫，平行無收益"),
+    ("AutoClaude/tools/run_local_nightly.ps1", "test_pgvector_hnsw_recall.py",
+     "單檔／窄範圍呼叫，平行無收益"),
+    ("AutoClaude/tools/run_local_nightly.ps1", "@contractFiles",
+     "單檔／窄範圍呼叫，平行無收益"),
+    ("AutoClaude/tools/run_local_nightly.ps1", "tests/perf/ -v --tb=short -m perf",
+     "perf 計時純度"),
+    ("AISDLC_SDD/scripts/ci-gate.ps1", '-m "not chaos" -q -rs -p no:xdist',
+     "chaos／凍結基線 snapshot 競態，v0.01 不可原地修"),
+    ("workflows/aisdlc-sdd-fsm-chaos-nightly.yml", "-m chaos -v -p no:xdist",
+     "chaos／凍結基線 snapshot 競態，v0.01 不可原地修"),
+    ("AutoClaude/tools/run_local_nightly.ps1", "-m chaos -q -p no:xdist",
+     "chaos／凍結基線 snapshot 競態，v0.01 不可原地修"),
+)
+
+
+def _registry_diagnostics(
+        sites: list[tuple[str, int, str, str]],
+) -> tuple[list[str], list[tuple[str, str, str]]]:
+    """一次掃描算出兩件事：`(未登記 SERIAL 站點座標, 死列＝比對不到任何站點的登記列)`。"""
+    unregistered: list[str] = []
+    live = {k: False for k in _JUSTIFIED_SERIAL_SITES}
+    for name, lineno, window, verdict in sites:
+        if verdict != "SERIAL":
+            continue
+        matched = [k for k in _JUSTIFIED_SERIAL_SITES if k[0] == name and k[1] in window]
+        if not matched:
+            unregistered.append(f"{name}:{lineno}")
+        for k in matched:
+            live[k] = True
+    return unregistered, [k for k, seen in live.items() if not seen]
+
+
+class PytestInvocationSiteCensusTest(unittest.TestCase):
+    """pytest 呼叫站點普查：SERIAL 須登記理由，PARALLEL 須 ini 或明示旗標可查，不得
+    有「沒人知道是序列還是平行」的 UNGOVERNED 站點（分類規則見 `_classify_site()`）。"""
+
+    def test_every_serial_site_is_registered(self) -> None:
+        unregistered, _dead = _registry_diagnostics(_all_sites())
+        self.assertEqual(
+            unregistered, [],
+            f"以下 SERIAL 站點未登記進 _JUSTIFIED_SERIAL_SITES：{unregistered}")
+
+    def test_no_dead_registry_rows(self) -> None:
+        _unreg, dead = _registry_diagnostics(_all_sites())
+        self.assertEqual(dead, [], f"以下登記列比對不到任何現況站點（死列）：{dead}")
+
+    def test_zero_ungoverned_sites(self) -> None:
+        ungoverned = [f"{n}:{ln}" for n, ln, _w, v in _all_sites() if v == "UNGOVERNED"]
+        self.assertEqual(
+            ungoverned, [],
+            f"以下站點無法辨識平行度意圖（補 -p no:xdist 或登記理由）：{ungoverned}")
+
+    def test_negative_self_proof_unregistered_serial_site_is_caught(self) -> None:
+        """合成片段（含未登記的 `-p no:xdist`）證明「未登記」判準真的會紅——不碰
+        磁碟，純函式，驗證 `_registry_diagnostics()` 本身有鑑別力。"""
+        synthetic = [(
+            "workflows/does-not-exist.yml", 1,
+            "python -m pytest foo/ -p no:xdist -o addopts=\n", "SERIAL",
+        )]
+        unregistered, dead = _registry_diagnostics(synthetic)
+        self.assertEqual(unregistered, ["workflows/does-not-exist.yml:1"])
+        self.assertEqual(dead, list(_JUSTIFIED_SERIAL_SITES),
+                          "合成片段不含任何既有登記列，全部應判死列")
+
+
 if __name__ == "__main__":
     unittest.main()

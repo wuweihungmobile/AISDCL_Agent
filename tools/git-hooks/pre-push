@@ -30,6 +30,11 @@
 #     - push 範圍命中「整合層閘門本體」（tools/integration_gate.* 三支）→ 實跑
 #       tools/integration_gate.sh --skip-full（R67-C18：該閘門在整個自動化層零呼叫端，
 #       唯二執行者是兩支已隨 CI 帳務停擺而多輪未跑的 compat-CI ⇒ 實質已死）
+#     - AutoClaude leg／SDD leg／root-infra 慢層三者中已判定觸發者 ≥2 個時，
+#       AutoClaude leg 與 SDD leg 改在背景並行執行（各固定 2 worker，root-infra
+#       leg 照舊在前景吃滿完整 worker 數；QA 實測序列 272.75s → 並行 203.4s）；
+#       逃生口 AUTOSDD_PREPUSH_SERIAL_LEGS 或 log 暫存目錄建不出來 → 退回序列（見
+#       下方「並行觸發判定」段落）。
 #   分流條件（逐行解析 git 傳入 stdin 的 <local_ref> <local_sha> <remote_ref> <remote_sha>）：
 #     - remote_sha 全零（新分支）→ 用 git merge-base origin/main <local_sha> 回退為比較基準
 #     - local_sha 全零（刪除遠端分支）→ 該行跳過（無需驗證）
@@ -290,7 +295,14 @@ fi
 # exe，路徑會過 MSYS 參數轉換；`cygpath -w` 已被證實可用（Git for Windows 的 bash
 # 啟動器無條件把 `/mingw64/bin:/usr/bin` insert 進內部 PATH 最前面），轉換失敗或
 # 該平台沒有 cygpath（mac／Linux）時原樣傳路徑即可，兩者本就是合法輸入。
-if [ "$run_autoclaude" -eq 1 ]; then
+# 多 CPU 平衡負載第二十二輪（Developer B）：AutoClaude leg／SDD leg 兩支重 leg 改包成
+# function，供下方「序列 vs 並行」兩種呼叫形態共用同一份 leg 本體（Rule 2/3：不重寫邏輯，
+# 只是換一種呼叫方式）。函式內部一律用區域變數 `leg_rc` 取代直接寫外層 `rc`——背景並行時
+# 這兩個 leg 各自跑在獨立子行程（`(...) &`），子行程改外層變數的效果進不了父行程，只有
+# `return` 的離開碼能被 `wait "$pid"; rc=$?` 讀到；序列呼叫（`_run_x_leg || rc=1`）用同一顆
+# 離開碼設外層 rc，語意與改動前逐字相同。
+_run_autoclaude_leg() {
+  local leg_rc=0
   if [ -f "$TOPLEVEL/AutoClaude/tools/git-hooks/pre-push" ]; then
     echo "[pre-push dispatcher] push 範圍含 AutoClaude/ → 執行 AutoClaude pre-push"
     # 🔴 模板不可省（R82 MAC-01）：BSD/macOS 的 mktemp 沒有預設模板，裸 `mktemp` 是
@@ -299,14 +311,14 @@ if [ "$run_autoclaude" -eq 1 ]; then
     _ac_log="$(mktemp "${TMPDIR:-/tmp}/prepush_ac.XXXXXX" 2>/dev/null || echo '')"
     if [ -z "$_ac_log" ]; then
       # mktemp 不可用時退回原行為（少一道 advisory 判準，但絕不擋 push）
-      printf '%s\n' "$STDIN" | bash "$TOPLEVEL/AutoClaude/tools/git-hooks/pre-push" || rc=1
+      printf '%s\n' "$STDIN" | bash "$TOPLEVEL/AutoClaude/tools/git-hooks/pre-push" || leg_rc=1
       echo "[pre-push dispatcher] ⚠ 無法建立暫存檔（mktemp '${TMPDIR:-/tmp}/prepush_ac.XXXXXX' 失敗；真因在暫存目錄不是 git）→ 本次跳過 skip 分群普查" >&2
     else
       # PYTHONUNBUFFERED=1：接上 `tee` 之後 stdout 不再是 tty，python 預設改為區塊
       # 緩衝 ⇒ 使用者會盯著空白等九十秒才一次看到全部輸出。這一個變數把即時性換回來。
       printf '%s\n' "$STDIN" \
         | PYTHONUNBUFFERED=1 bash "$TOPLEVEL/AutoClaude/tools/git-hooks/pre-push" \
-        | tee "$_ac_log" || rc=1
+        | tee "$_ac_log" || leg_rc=1
       _ac_gate_dir="$TOPLEVEL/AutoClaude/tools"
       if [ -n "${AUTOCLAUDE_PUSH_PYTEST_ARGS:-}" ]; then
         echo "[pre-push dispatcher] ⚠ AUTOCLAUDE_PUSH_PYTEST_ARGS 已設 → 跳過 skip 分群普查（母體被縮限，拿去比全樹天花板必然沒有鑑別力）"
@@ -326,7 +338,7 @@ if [ "$run_autoclaude" -eq 1 ]; then
           echo "[pre-push dispatcher] ⚠ skip 分群普查：本平台剖面未登記（advisory，不擋 push）"
         elif [ "$census_rc" -ne 0 ]; then
           echo "[pre-push dispatcher] ❌ AutoClaude skip 分群普查不合格（rc=${census_rc}；S3：skipped 數必須有人管）" >&2
-          rc=1
+          leg_rc=1
         fi
       fi
       rm -f "$_ac_log"
@@ -334,18 +346,76 @@ if [ "$run_autoclaude" -eq 1 ]; then
   else
     # 子 hook 應存在卻缺失＝hooks 體系損壞 → fail-loud，拒絕放行
     echo "[pre-push dispatcher] ❌ 子 hook 缺失：$TOPLEVEL/AutoClaude/tools/git-hooks/pre-push（hooks 體系損壞）" >&2
-    rc=1
+    leg_rc=1
   fi
-fi
+  return "$leg_rc"
+}
 
-if [ "$run_sdd" -eq 1 ]; then
+_run_sdd_leg() {
+  local leg_rc=0
   if [ -f "$TOPLEVEL/AISDLC_SDD/.githooks/pre-push" ]; then
     echo "[pre-push dispatcher] push 範圍含 AISDLC_SDD/ → 執行 AISDLC_SDD pre-push"
-    printf '%s\n' "$STDIN" | bash "$TOPLEVEL/AISDLC_SDD/.githooks/pre-push" || rc=1
+    printf '%s\n' "$STDIN" | bash "$TOPLEVEL/AISDLC_SDD/.githooks/pre-push" || leg_rc=1
   else
     # 子 hook 應存在卻缺失＝hooks 體系損壞 → fail-loud，拒絕放行
     echo "[pre-push dispatcher] ❌ 子 hook 缺失：$TOPLEVEL/AISDLC_SDD/.githooks/pre-push（hooks 體系損壞）" >&2
-    rc=1
+    leg_rc=1
+  fi
+  return "$leg_rc"
+}
+
+# 並行觸發判定（多 CPU 平衡負載第二十二輪）：QA 實測（i5-14600K 14P/20L）序列基準
+# root-infra leg（run_root_unittests）174.65s + AutoClaude leg 30.6s + SDD leg
+# （ci-gate.sh 雙軌）67.5s＝272.75s，root leg 恆為瓶頸（吃滿 broadcast 給的完整
+# worker 數），AutoClaude／SDD 兩側對 worker 數不敏感（AutoClaude workers 4→16
+# 僅 59→31s；SDD 76→68s——I/O／序列段佔比高），故序列疊在 root 前面純屬浪費；
+# 等分（6/6/6）依 S/W-bound 模型會把 root 拉到約 400s，故不採用，兩側 leg 固定
+# 只給 2 worker、root 前景照舊吃滿完整 W。實測配置（root=16／autoclaude=2／
+# sdd=2）整組 wall 203.4s（省 25.4%，三 leg rc 皆 0）。
+# 觸發條件：{AutoClaude leg, SDD leg, root-infra 慢層} 三者中已判定觸發的 leg 數
+# ≥2（普通「只改一個子專案」的 push 恆為 1，維持原序列路徑不變）；逃生口
+# `AUTOSDD_PREPUSH_SERIAL_LEGS`（設了即強制序列，供除錯或懷疑並行段有問題時使用）；
+# log 暫存目錄建不出來（BSD mktemp 裸呼叫即 usage error，故模板不可省）一律
+# fail-safe 退回序列，絕不因並行段本身的失敗擋下 push。
+run_parallel_legs=0
+_prepush_active_legs=$((run_autoclaude + run_sdd + run_rootinfra))
+if [ "$_prepush_active_legs" -ge 2 ] && [ -z "${AUTOSDD_PREPUSH_SERIAL_LEGS:-}" ]; then
+  _prepush_log_dir="$(mktemp -d "${TMPDIR:-/tmp}/prepush.XXXXXX" 2>/dev/null || echo '')"
+  if [ -z "$_prepush_log_dir" ]; then
+    echo "[pre-push dispatcher] ⚠ 無法建立並行 log 暫存目錄（BSD/macOS 常見真因＝TMPDIR 不可寫）→ 退回序列路徑" >&2
+  else
+    run_parallel_legs=1
+  fi
+fi
+
+pid_ac=""
+pid_sdd=""
+if [ "$run_parallel_legs" -eq 1 ]; then
+  # 防孤兒＋防洩漏：Ctrl-C 時把還在跑的背景 leg 一併收掉（不留下失去追蹤的子行程），
+  # 並清掉並行 log 暫存目錄（QA-2 V5 ③：修前只 kill 不 rm -rf，中斷路徑會洩漏目錄）。
+  trap '[ -n "$pid_ac" ] && kill "$pid_ac" 2>/dev/null; [ -n "$pid_sdd" ] && kill "$pid_sdd" 2>/dev/null; rm -rf "$_prepush_log_dir"; true' INT TERM
+  _prepush_parallel_t0=$(date +%s)
+  if [ "$run_autoclaude" -eq 1 ]; then
+    (
+      export AUTOSDD_PARALLEL_TESTS_WORKERS=2 PYTEST_XDIST_AUTO_NUM_WORKERS=2
+      _run_autoclaude_leg
+    ) >"$_prepush_log_dir/autoclaude.log" 2>&1 &
+    pid_ac=$!
+  fi
+  if [ "$run_sdd" -eq 1 ]; then
+    (
+      export AUTOSDD_PARALLEL_TESTS_WORKERS=2 PYTEST_XDIST_AUTO_NUM_WORKERS=2
+      _run_sdd_leg
+    ) >"$_prepush_log_dir/sdd.log" 2>&1 &
+    pid_sdd=$!
+  fi
+  echo "[pre-push dispatcher] AutoClaude／SDD leg 已轉入背景並行（workers=2），root-infra leg 續於前景執行"
+else
+  if [ "$run_autoclaude" -eq 1 ]; then
+    _run_autoclaude_leg || rc=1
+  fi
+  if [ "$run_sdd" -eq 1 ]; then
+    _run_sdd_leg || rc=1
   fi
 fi
 
@@ -496,6 +566,38 @@ if [ "$run_rootinfra" -eq 1 ] || [ "$run_rootinfra_guards" -eq 1 ]; then
       exit $leg_rc
     ) || rc=1
   fi
+fi
+
+# 並行段收尾（多 CPU 平衡負載第二十二輪）：root-infra leg 前景執行完畢後才回放
+# AutoClaude／SDD 兩支背景 leg 的輸出——固定順序（AutoClaude 先、SDD 後），每份
+# log 前各加一行頭（背景／workers／wall／rc），讓讀者不會誤把背景 leg 的輸出
+# 當成與 root-infra leg 同時、依真實時間交錯印出的東西。rc≠0 時額外印一行具名
+# 「❌ … leg」（同本檔既有風格），不得讓失敗的 leg 匿名淹沒在 log 內文裡。
+if [ "$run_parallel_legs" -eq 1 ]; then
+  if [ -n "$pid_ac" ]; then
+    wait "$pid_ac"; rc_ac=$?
+    _prepush_ac_wall=$(( $(date +%s) - _prepush_parallel_t0 ))
+    echo "[pre-push dispatcher] ── AutoClaude leg（背景並行 workers=2，wall ${_prepush_ac_wall}s，rc=${rc_ac}）──"
+    cat "$_prepush_log_dir/autoclaude.log"
+    if [ "$rc_ac" -ne 0 ]; then
+      echo "[pre-push dispatcher] ❌ AutoClaude leg（背景並行）失敗（rc=${rc_ac}）" >&2
+      rc=1
+    fi
+  fi
+  if [ -n "$pid_sdd" ]; then
+    wait "$pid_sdd"; rc_sdd=$?
+    _prepush_sdd_wall=$(( $(date +%s) - _prepush_parallel_t0 ))
+    echo "[pre-push dispatcher] ── AISDLC_SDD leg（背景並行 workers=2，wall ${_prepush_sdd_wall}s，rc=${rc_sdd}）──"
+    cat "$_prepush_log_dir/sdd.log"
+    if [ "$rc_sdd" -ne 0 ]; then
+      echo "[pre-push dispatcher] ❌ AISDLC_SDD leg（背景並行）失敗（rc=${rc_sdd}）" >&2
+      rc=1
+    fi
+  fi
+  trap - INT TERM
+  _prepush_parallel_wall=$(( $(date +%s) - _prepush_parallel_t0 ))
+  echo "[cpu_budget] parallel legs: root=${AUTOSDD_PARALLEL_TESTS_WORKERS:-?} autoclaude=2 sdd=2 wall=${_prepush_parallel_wall}s"
+  rm -rf "$_prepush_log_dir"
 fi
 
 # 根層消費檔 leg（R10 ARCH-1 / DEF-101-125）：於「消費檔命中且 SDD leg 未觸發」時
