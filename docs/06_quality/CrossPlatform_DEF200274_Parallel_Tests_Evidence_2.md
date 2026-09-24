@@ -396,9 +396,42 @@ DEF-200-379／DEF-200-380），**不再開立新一輪多 CPU 迭代**（本欄�
 
 ### 待主控回填
 
-- 收尾全套 rc：**待主控回填**
-- commit sha：**待主控回填**
-- push 後雲端驗收（五支 push 管線 status／逐字 log 摘錄）：**待主控回填**
+- 收尾全套 rc（主控親跑，DEF-ID 回填後、commit 前）：rc=0（另一次同樹 rc=1 僅為淨額棘輪透過
+  `test_check_defect_log_crossref` 兩支活測試浮現，commit 後兩支皆綠、crossref rc=0）；發現 4590 個
+  測試（下限 4543）、wall 161.9s、`[cpu_budget] root-unittest workers=18 source=cpu_budget`、
+  `📊 worker=18｜S=2534.2s｜ideal=140.8s（S/W-bound）｜loss=1.00x｜slot 利用率=99.8%｜最長單位
+  test_archive_defect_log.TestPlanRejectsRowsWithExternalResidencePointers 131.0s`。
+- commit sha：`50042dc`（程式碼＋鎖＋帳本＋本冊；以 `AUTOSDD_NET_RATCHET_OFF=1` 提交、理由寫於
+  commit 訊息）＋ `0605b37`（ONBOARDING §7 表② Windows 欄回填：第一次 push 被 pre-push root-infra
+  leg 的 `sync_onboarding_baselines.py --check-snapshot` 擋下——autoclaude 測試樹指紋
+  7e85a94be029→fdbf8bc16a37 presumed stale；以 `tools/lib/clean_venv_carrier.py` 樹外乾淨 venv 量測、
+  psycopg2／sqlalchemy 探針 ABSENT、未用 `--allow-pg-extras`，四棵樹計數不變）。
+- **pre-push 三 leg 並行首次真跑憑證**（第一次 push，被 ONBOARDING 擋下但三重 leg 皆已跑完）：
+  `[cpu_budget] broadcast workers=18 source=cpu_budget` → `AutoClaude／SDD leg 已轉入背景並行
+  （workers=2），root-infra leg 續於前景執行` → root 前景 `發現 4590 個測試` → 回放
+  `AutoClaude leg（背景並行 workers=2，wall 192s，rc=0）`（內含 `[cpu_budget] xdist workers=2
+  source=env`／`nodes confirmed=2`）、`AISDLC_SDD leg（背景並行 workers=2，wall 195s，rc=0）` →
+  `[cpu_budget] parallel legs: root=18 autoclaude=2 sdd=2 wall=195s`；整條 push 197.8s。第二次 push
+  （`0605b37`）同形態：AutoClaude 193s／SDD 198s 皆 rc=0、`parallel legs … wall=198s`、
+  `✅ 本次 push 觸發的所有 leg 皆通過（rc=0）`、整條 203.6s、`3d3cdc1..0605b37 main -> main`。
+  對照序列預估 174.65+30.6+67.5=272.75s ⇒ 真實 push 省約 25%，與 QA-1 E1-b 一致。
+- push 後雲端驗收（`0605b37`，主控以 `gh run list --commit`＋`gh run view --log` 親抓）：六支 run 全
+  success——root-infra-ci 35955161709／windows-compat-ci 35955161751／macos-compat-ci 35955161707／
+  AutoClaude CI 35955161742／aisdlc-sdd-ci 35955161727／shellcheck-ci 35955161710。逐字摘錄：三平台
+  根層皆 `✅ unittest 數量下限釘選通過：發現 4590 個測試（下限 4543）`；`[cpu_budget] root-unittest
+  workers=4 source=cpu_budget`（ubuntu／windows）與 `workers=3 source=cpu_budget`（macos）；📊 ubuntu
+  `worker=4｜S=2631.4s｜ideal=657.9s（S/W-bound）｜loss=1.00x｜slot 利用率=100.0%`、windows
+  `worker=4｜S=3770.2s｜ideal=942.5s（S/W-bound）｜slot 100.0%`、macos `worker=3｜S=1987.7s｜
+  ideal=662.6s（S/W-bound）｜slot 99.9%`（雲端最長單位皆為 `test_archive_defect_log.
+  TestMoveSubsetSelectionIsNamedAndTraceable` 309.2／401.5／232.0s）；AutoClaude CI `[cpu_budget] xdist
+  workers=4 source=cpu_budget`→`nodes confirmed=4`；aisdlc-sdd-ci `broadcast workers=4 source=cpu_budget`
+  →`xdist workers=4 source=env`→`nodes confirmed=4`；macos SDD 軌 `broadcast workers=3`→`xdist workers=3`
+  →`nodes confirmed=3`。**psutil（DEF-200-378）誠實劃界**：windows log 逐字可見
+  `Using cached psutil-7.2.2-cp37-abi3-win_amd64.whl`；ubuntu／macos 的 tools/tests 相依 pip 行帶
+  `--quiet`，安裝成功只能由「該 step 未紅＋job success」間接推得（pip 裝不到會 fail-loud），且根層
+  unittest 非 `-v`，交叉比對測試是否走強判準無逐支可見字串——三平台皆綠只證明「裝了 psutil 後
+  `_platform_physical_count()` 與 psutil oracle 在 linux／win32／darwin 三分支逐值一致或弱判準成立」
+  這個合取，不能拆開宣稱。
 - `python tools/check_defect_log_crossref.py` 本輪（記帳員收工時）現查 rc=1，唯一 ❌ 為淨額棘
   輪：本輪新增 DEF-200-379／DEF-200-380 兩筆 open、0 筆結案，淨增 2 筆。此為合法「發現輪」情
   境（出口②）：commit 前需顯式設定環境變數 `AUTOSDD_NET_RATCHET_OFF=1` 並在 commit 訊息寫明
