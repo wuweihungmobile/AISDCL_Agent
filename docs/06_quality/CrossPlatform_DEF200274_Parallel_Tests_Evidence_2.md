@@ -910,5 +910,13 @@ WindowsTerminal＝0、孤兒 conhost＝0。
   …／env-disabled=1`（行為鎖不再被 skip）；修補過程中主控另補 `skip_tag_policy.
   _SITE_CLASS_CENSUS["tools/tests"]["runtime-skipTest"]` 33→32（行為鎖移除 runtime skipTest
   後的站點數，全套靜態前置掃描抓到——修復棒 H 被禁跑全套故未見）。
-- 下一次真 `windows-compat-ci`／`macos-compat-ci`／`root-infra-ci` run（本輪修法的
-  commit push 後）：三剖面 M6 是否轉綠、win32 skip census 是否不再含本測試（留白）。
+- 本節修法 commit `ee4bdd4`（push `f901721..ee4bdd4`；pre-push 期間 WMI 過濾版監看
+  pythonw 76 筆、OpenConsole＝0、WindowsTerminal＝0）的雲端 run 全數 success（主控
+  `gh run view --log` 親抓逐字）：root-infra-ci 36156520219、macos-compat-ci 36156520097、
+  windows-compat-ci 36156520147、AutoClaude CI 36156520154、shellcheck-ci 36156520128。三平台
+  `發現 4617 個測試（下限 4543）`；`[skip census] tools/tests@linux 共 83 支：platform=81…`、
+  `tools/tests@darwin 共 47 支：platform=47…`（兩者皆列 `[已標籤 [WINDOWS-NATIVE-ONLY]]
+  test_context_budget_guard.PlannerCheckIsConsoleFreeTest…`＝正確的平台 skip）；
+  `tools/tests@win32 共 43 支：platform=42／…／env-disabled=1`、`[M6 id 集合] tools/tests@win32：
+  ✅ 集合關係成立（本次 skip 43 支）`——行為鎖不在 win32 skip 清單內 ⇒ 在 windows-compat-ci
+  上真的執行並通過。
