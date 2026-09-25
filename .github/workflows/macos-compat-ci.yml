@@ -139,6 +139,10 @@ on:
       # 也須重跑該鎖（DEF-101-042 同構，test_ci_paths_cover_root_consumers 實測揪出）
       - ".github/workflows/aisdlc-sdd-arch-fitness.yml"
       - ".github/workflows/autoclaude-ci.yml"
+      # DEF-200-379：test_workflow_permission_concurrency_lock.py 的
+      # TestFsmChaosNightlyStreakReadsJobLayer 消費此 yml（連敗計數讀 job 層、chaos-latest
+      # 觀察期語意）——只改該 yml 時本 workflow 也須重跑該鎖（DEF-101-042 同構）
+      - ".github/workflows/aisdlc-sdd-fsm-chaos-nightly.yml"
       - "tools/check_script_parity.py"
       - "tools/check_ntfs_paths.py"
       - "tools/check_hooks_liveness.py"
@@ -575,6 +579,10 @@ on:
       # 也須重跑該鎖（DEF-101-042 同構，test_ci_paths_cover_root_consumers 實測揪出）
       - ".github/workflows/aisdlc-sdd-arch-fitness.yml"
       - ".github/workflows/autoclaude-ci.yml"
+      # DEF-200-379：test_workflow_permission_concurrency_lock.py 的
+      # TestFsmChaosNightlyStreakReadsJobLayer 消費此 yml（連敗計數讀 job 層、chaos-latest
+      # 觀察期語意）——只改該 yml 時本 workflow 也須重跑該鎖（DEF-101-042 同構）
+      - ".github/workflows/aisdlc-sdd-fsm-chaos-nightly.yml"
       - "tools/check_script_parity.py"
       - "tools/check_ntfs_paths.py"
       - "tools/check_hooks_liveness.py"

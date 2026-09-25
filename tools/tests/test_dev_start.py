@@ -6597,15 +6597,21 @@ class TestStrayVenvScan(DevStartTestCase):
             self.assertEqual(found, [d], "根層以外的 .venv-cache-* 前綴未被正確收錄")
 
     def test_advisory_lines_carry_platform_specific_delete_command(self) -> None:
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
-            d = root / "AutoClaude" / ".venv"
-            d.mkdir(parents=True)
-            (d / "pyvenv.cfg").write_text("home = /x\n", encoding="utf-8")
-            win_lines = self.stray_venv.advisory_lines(root, is_windows=True)
-            posix_lines = self.stray_venv.advisory_lines(root, is_windows=False)
-            self.assertTrue(any("Remove-Item -Recurse -Force" in ln for ln in win_lines))
-            self.assertTrue(any("rm -rf" in ln for ln in posix_lines))
+        # 本測試只驗證 advisory_lines() 的格式化邏輯，不驗證 find_temp_cleanvenvs()；
+        # 不隔離 tempfile.gettempdir() 會讓它順道真掃本機 TEMP（DEF-200-297 覆核：
+        # 實測 >90 萬個項目、20+ 秒且逐機漂移），與既有 test_temp_cleanvenvs_
+        # leftovers_are_listed 同款隔離。
+        with tempfile.TemporaryDirectory() as fake_temp, \
+                mock.patch("tempfile.gettempdir", return_value=fake_temp):
+            with tempfile.TemporaryDirectory() as td:
+                root = Path(td)
+                d = root / "AutoClaude" / ".venv"
+                d.mkdir(parents=True)
+                (d / "pyvenv.cfg").write_text("home = /x\n", encoding="utf-8")
+                win_lines = self.stray_venv.advisory_lines(root, is_windows=True)
+                posix_lines = self.stray_venv.advisory_lines(root, is_windows=False)
+                self.assertTrue(any("Remove-Item -Recurse -Force" in ln for ln in win_lines))
+                self.assertTrue(any("rm -rf" in ln for ln in posix_lines))
 
     def test_temp_cleanvenv_leftovers_are_listed(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -6658,25 +6664,31 @@ class TestStrayVenvScan(DevStartTestCase):
             self.assertEqual(found, [outer], "命中的 venv 目錄底下不應再下探找第二筆")
 
     def test_enforce_blocks_and_emits_when_stray_present(self) -> None:
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
-            d = root / "AutoClaude" / ".venv"
-            d.mkdir(parents=True)
-            (d / "pyvenv.cfg").write_text("home = /x\n", encoding="utf-8")
-            emitted: list[str] = []
-            ok = self.stray_venv.enforce(root, is_windows=True, emit=emitted.append)
-            self.assertFalse(ok, "偵測到雜散 venv 時 enforce 必須回 False")
-            self.assertEqual(len(emitted), 1)
-            self.assertIn("必須刪除", emitted[0])
-            self.assertIn("Remove-Item -Recurse -Force", emitted[0])
+        # 同上：隔離 tempfile.gettempdir()，本測試不驗證 find_temp_cleanvenvs()。
+        with tempfile.TemporaryDirectory() as fake_temp, \
+                mock.patch("tempfile.gettempdir", return_value=fake_temp):
+            with tempfile.TemporaryDirectory() as td:
+                root = Path(td)
+                d = root / "AutoClaude" / ".venv"
+                d.mkdir(parents=True)
+                (d / "pyvenv.cfg").write_text("home = /x\n", encoding="utf-8")
+                emitted: list[str] = []
+                ok = self.stray_venv.enforce(root, is_windows=True, emit=emitted.append)
+                self.assertFalse(ok, "偵測到雜散 venv 時 enforce 必須回 False")
+                self.assertEqual(len(emitted), 1)
+                self.assertIn("必須刪除", emitted[0])
+                self.assertIn("Remove-Item -Recurse -Force", emitted[0])
 
     def test_enforce_passes_silently_when_clean(self) -> None:
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
-            emitted: list[str] = []
-            ok = self.stray_venv.enforce(root, is_windows=False, emit=emitted.append)
-            self.assertTrue(ok, "無雜散 venv 時 enforce 應回 True")
-            self.assertEqual(emitted, [], "無雜散 venv 時不應呼叫 emit")
+        # 同上：隔離 tempfile.gettempdir()。
+        with tempfile.TemporaryDirectory() as fake_temp, \
+                mock.patch("tempfile.gettempdir", return_value=fake_temp):
+            with tempfile.TemporaryDirectory() as td:
+                root = Path(td)
+                emitted: list[str] = []
+                ok = self.stray_venv.enforce(root, is_windows=False, emit=emitted.append)
+                self.assertTrue(ok, "無雜散 venv 時 enforce 應回 True")
+                self.assertEqual(emitted, [], "無雜散 venv 時不應呼叫 emit")
 
     def test_symlinked_venv_pointing_outside_repo_is_detected(self) -> None:
         """SA 1（SD 1b，2026-09-19 四方複審追加）：`os.walk(followlinks=False)`
@@ -6729,28 +6741,34 @@ class TestStrayVenvScan(DevStartTestCase):
     def test_cli_main_returns_zero_on_clean_repo(self) -> None:
         """B2（SD 1d）CLI 入口：乾淨 repo 根 rc=0（`main()` 不接 sys.argv，見其
         docstring；本測試直呼函式，不繞經 subprocess）。"""
-        with tempfile.TemporaryDirectory() as td:
-            with mock.patch("sys.stderr", new_callable=io.StringIO):
-                rc = self.stray_venv.main([td])
-            self.assertEqual(rc, 0, "乾淨 repo 根應回 rc=0")
+        # 同上：隔離 tempfile.gettempdir()——main() 內部會呼叫 enforce()。
+        with tempfile.TemporaryDirectory() as fake_temp, \
+                mock.patch("tempfile.gettempdir", return_value=fake_temp):
+            with tempfile.TemporaryDirectory() as td:
+                with mock.patch("sys.stderr", new_callable=io.StringIO):
+                    rc = self.stray_venv.main([td])
+                self.assertEqual(rc, 0, "乾淨 repo 根應回 rc=0")
 
     def test_cli_main_returns_one_and_prints_delete_command_on_stray_hit(self) -> None:
         """B2（SD 1d）CLI 入口：命中雜散 venv 時 rc=1，且 stderr 含可複製的刪除
         指令（`Remove-Item`／`rm -rf`，依 `os.name` 決定）。"""
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
-            d = root / "AutoClaude" / ".venv"
-            d.mkdir(parents=True)
-            (d / "pyvenv.cfg").write_text("home = /x\n", encoding="utf-8")
-            captured = io.StringIO()
-            with mock.patch("sys.stderr", captured):
-                rc = self.stray_venv.main([td])
-            self.assertEqual(rc, 1, "命中雜散 venv 時應回 rc=1")
-            out = captured.getvalue()
-            self.assertTrue(
-                "Remove-Item" in out or "rm -rf" in out,
-                f"stderr 未含可複製的刪除指令：{out!r}",
-            )
+        # 同上：隔離 tempfile.gettempdir()。
+        with tempfile.TemporaryDirectory() as fake_temp, \
+                mock.patch("tempfile.gettempdir", return_value=fake_temp):
+            with tempfile.TemporaryDirectory() as td:
+                root = Path(td)
+                d = root / "AutoClaude" / ".venv"
+                d.mkdir(parents=True)
+                (d / "pyvenv.cfg").write_text("home = /x\n", encoding="utf-8")
+                captured = io.StringIO()
+                with mock.patch("sys.stderr", captured):
+                    rc = self.stray_venv.main([td])
+                self.assertEqual(rc, 1, "命中雜散 venv 時應回 rc=1")
+                out = captured.getvalue()
+                self.assertTrue(
+                    "Remove-Item" in out or "rm -rf" in out,
+                    f"stderr 未含可複製的刪除指令：{out!r}",
+                )
 
 
 class TestStepVenvBlocksOnStrayVenv(DevStartTestCase):

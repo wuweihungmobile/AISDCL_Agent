@@ -131,6 +131,128 @@ jobs:
           path: AISDLC_SDD/AISDLC_SDD_v0.01/chaos-report.json
           retention-days: 7
 
+  # DEF-200-379（掌舵者裁決：加軌＋觀察期）— LATEST 演化版軌，與上方 `chaos`
+  # job（凍結基線 AISDLC_SDD_v0.01）獨立、並行、互不相依（無 needs）。
+  #
+  # 為何本軌能平行跑而 `chaos` job 不能：上方 `chaos` job 的
+  # `-p no:xdist` 是刻意序列，因為凍結基線的 `tools/fsm_runtime/snapshot.py::
+  # save_abort_report()` 仍是舊版固定檔名 `.tmp`，多 worker 並行寫入會競態
+  # （見該 job 註解與 AISDLC_SDD/scripts/ci-gate.sh 同款差異化判準）。LATEST 版
+  # 已把該函式改為 `_atomic_write_text` 原子寫入，不受此競態影響 ⇒ 本軌帶
+  # `-n auto --dist worksteal`（本機 2026-09-24 連續 10 次實測全綠，rc=0、
+  # 34 passed、wall 16.3~17.6s，見 DEF-200-379 回報）。
+  #
+  # 🔴 觀察期（DEF-200-379）：本 job 失敗**不計入** Rule 9.9.4「連 3 日 nightly
+  # 失敗鎖定 main」——雙重機制保證，不是只靠 `needs`：
+  #   (a) 下方 `track-streak-and-lock` 的 `needs: chaos` 未變，天然只綁上方
+  #       凍結基線軌，本 job 不在其依賴圖內；
+  #   (b) 更根本的一層——`track-streak-and-lock` 的連敗查詢邏輯本身已改讀
+  #       **job 層**（見該 job 的 `GATING_JOB_NAMES` 環境變數，現值＝上方
+  #       `chaos` job 的顯示名）：即使同一個 workflow run 內本 job 紅導致
+  #       run 層 `conclusion=failure`，只要 `GATING_JOB_NAMES` 不含本 job 的
+  #       顯示名，連敗計數就不會把這種夜晚算進去（三位複審一致命中：修復前
+  #       只讀 run 層 conclusion，觀察期形同虛設）。
+  # 觀察期＝**首次排程 run 起連續 7 次排程 run**（`workflow_dispatch` 手動
+  # 觸發不計入觀察期計數），最早 **2026-10-03**（下一個排程 02:03 UTC）起算
+  # 七次；出口條件與升級動作（觀察期滿後是否／如何把本 job 的顯示名
+  # `fsm-runtime chaos suite (LATEST track — observation period, DEF-200-379)`
+  # 加入 `GATING_JOB_NAMES`、進而併入 Rule 9.9.4 鎖 main 判定）由掌舵者於
+  # 觀察期滿後裁決——本段註解與 `GATING_JOB_NAMES`／`track-streak-and-lock`
+  # 的 `needs` 屆時再訂正（見缺陷帳本 DEF-200-379 後續列）。
+  chaos-latest:
+    name: fsm-runtime chaos suite (LATEST track — observation period, DEF-200-379)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      # LATEST 版號不得寫死（AISDLC_SDD/CLAUDE.md〈版本狀態〉：LATEST 一律現查
+      # `sdd_version.py`）；本步驟在 repo 根呼叫，輸出寫入 GITHUB_OUTPUT 供後續
+      # step 的 `working-directory` 引用。
+      - name: Resolve LATEST version
+        id: latest_version
+        run: |
+          VERSION=$(python AISDLC_SDD/scripts/sdd_version.py)
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Using LATEST version=${VERSION}"
+
+      - name: Install dependencies
+        working-directory: AISDLC_SDD/${{ steps.latest_version.outputs.version }}
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-ci.txt
+
+      - name: Compute reproducible seed from date
+        id: seed
+        run: |
+          # Cross-runner safe: avoid `date +%Y%m%d` (GNU/BSD drift, no-op on
+          # Windows). Python's stdlib is always present and deterministic.
+          SEED=$(python -c "import datetime; print(datetime.date.today().strftime('%Y%m%d'))")
+          echo "seed=${SEED}" >> "$GITHUB_OUTPUT"
+          echo "Using seed=${SEED}"
+
+      # 跨 leg CPU 預算（DEF-200-289 同款鏈：`ci-gate.sh`／`ci-gate.ps1` 的
+      # `[cpu_budget] broadcast workers=N source=cpu_budget` 可稽核字面）。
+      # `cpu_budget.py` 在 `GITHUB_ACTIONS=true`（Actions runner 恆真）下走
+      # headless 分支（純邏輯核，CAP=18），不需要 psutil。算不出來（腳本缺席
+      # 或執行失敗）一律靜默跳過、不擋本 job——worker 數只影響快慢。
+      - name: Broadcast cpu_budget worker count
+        run: |
+          WORKERS="$(python tools/lib/cpu_budget.py --legs 1 2>/dev/null || true)"
+          case "${WORKERS}" in
+            ''|*[!0-9]*)
+              echo "⚠️ cpu_budget 廣播跳過：tools/lib/cpu_budget.py 不存在或執行失敗（fail-open）"
+              ;;
+            *)
+              echo "AUTOSDD_PARALLEL_TESTS_WORKERS=${WORKERS}" >> "$GITHUB_ENV"
+              echo "PYTEST_XDIST_AUTO_NUM_WORKERS=${WORKERS}" >> "$GITHUB_ENV"
+              echo "[cpu_budget] broadcast workers=${WORKERS} source=cpu_budget"
+              ;;
+          esac
+
+      - name: Run chaos-marked pytest suite (LATEST track, parallel)
+        working-directory: AISDLC_SDD/${{ steps.latest_version.outputs.version }}
+        run: |
+          # LATEST 版 `conftest.py` re-export 共用層的 `pytest_xdist_auto_num_workers`／
+          # `pytest_xdist_setupnodes` hook（見本步驟 working-directory 所指的 LATEST
+          # 版樹 conftest.py，DEF-200-353；版號一律經上方 Resolve LATEST version 步驟
+          # 解析，此處不寫死）：本步驟會印 `[cpu_budget] xdist workers=<N> source=env`
+          # （上一步已匯出 `PYTEST_XDIST_AUTO_NUM_WORKERS`）與
+          # `[cpu_budget] xdist nodes confirmed=<N>` 兩行可稽核字面，接住上方的
+          # broadcast 鏈。`-n auto --dist worksteal`：見本 job 頂部 WHY（原子寫入
+          # 已修競態，本機連續 10 次實測全綠）。
+          python -m pytest tools/fsm_runtime/tests/ -m chaos -v -n auto --dist worksteal
+
+      - name: Run 100-round chaos sweep
+        working-directory: AISDLC_SDD/${{ steps.latest_version.outputs.version }}
+        env:
+          CHAOS_ROUNDS: ${{ github.event.inputs.rounds || '100' }}
+        run: |
+          python -m tools.fsm_runtime.chaos_runner \
+            --rounds "${CHAOS_ROUNDS}" \
+            --seed "${{ steps.seed.outputs.seed }}" \
+            --json > chaos-report.json
+          cat chaos-report.json | python -c "import json,sys; d=json.load(sys.stdin); print(f\"bounded={d['bounded_rounds']}/{d['total_rounds']} avg_tokens={d['avg_tokens']} max_steps={d['max_steps']}\")"
+
+      # 理由同上方 `chaos` job 的姊妹步驟：artifact 上傳僅供觀測，不得讓 gate 翻紅。
+      # artifact 名稱加 `-latest` 後綴以與凍結基線軌區分（DEF-200-379）。
+      - name: Upload chaos report
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v6
+        with:
+          name: fsm-chaos-report-latest-${{ steps.seed.outputs.seed }}
+          path: AISDLC_SDD/${{ steps.latest_version.outputs.version }}/chaos-report.json
+          retention-days: 7
+
   # QA Round-3 P1-02 — enforce Rule 9.9.4「連 3 日 nightly 失敗鎖定 main」.
   # Runs only when the chaos job failed. Queries the most recent completed
   # nightly runs; if ≥3 consecutive failures are confirmed, opens a P0 issue
@@ -168,35 +290,63 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           WORKFLOW_FILE: aisdlc-sdd-fsm-chaos-nightly.yml
+          # 🔴 DEF-200-379（三位複審一致命中）：本值必須與 `chaos` job 的顯示名
+          # （上方 `jobs.chaos.name`）逐字一致——job 顯示名沒有共用來源（GitHub
+          # Actions 的 `jobs.<id>.name` 不支援 `env` context），只能靠機械鎖
+          # 互鎖（同型先例：test_workflow_permission_concurrency_lock.py 的
+          # `TestNightlyJobNameSelectorInterlock`；本檔對等鎖見
+          # `TestFsmChaosNightlyStreakReadsJobLayer`）。觀察期滿、掌舵者裁決
+          # 升級後，才把 `chaos-latest` job 的顯示名也加進本值（見上方
+          # `chaos-latest` job 頂部的觀察期註解）。
+          GATING_JOB_NAMES: "fsm-runtime chaos suite"
         run: |
           # Fetch the last 5 completed runs of THIS workflow, ordered newest first.
           # We treat the failing run that triggered this job as the newest entry.
+          #
+          # 🔴 DEF-200-379：本 workflow 自本輪起有兩顆平行、互不相依的 job
+          # （`chaos` 凍結基線／`chaos-latest` LATEST 觀察軌，見上方註解）——任一
+          # 顆紅都會讓 run 層 `conclusion` 報 failure，run 層結構上無法分辨
+          # 「凍結基線真的紅」與「只有觀察軌紅」。Rule 9.9.4「連 3 日鎖 main」
+          # 只認凍結基線（`chaos` job），沿用 run 層會讓觀察期內只因
+          # `chaos-latest` 紅的夜晚被誤計入連敗，違反掌舵者「觀察期內只出聲、
+          # 不計入」的裁決。修法：對每一筆 run 逐一查 job 層
+          # （`/actions/runs/<id>/jobs`），只取顯示名等於 `${GATING_JOB_NAMES}`
+          # 的那個 job 的 conclusion，run 層 conclusion 不再是判準輸入。
           set -eu
-          runs_json=$(gh api \
+          run_ids=$(gh api \
             "/repos/${REPO}/actions/workflows/${WORKFLOW_FILE}/runs?status=completed&per_page=5" \
-            --jq '[.workflow_runs[] | {id: .id, conclusion: .conclusion, created_at: .created_at}]')
-          echo "Recent runs: ${runs_json}"
-          # Export JSON to env so the python subprocess below can read it.
-          export RUNS_JSON="${runs_json}"
-          # Count consecutive failures from newest end. `failure` and `timed_out`
-          # count toward the streak; `success`/`cancelled`/`neutral` break it.
-          streak=$(python3 - <<'PY'
-          import json, os
-          data = json.loads(os.environ.get("RUNS_JSON") or "[]")
-          count = 0
-          for r in data:
-              if r.get("conclusion") in ("failure", "timed_out"):
-                  count += 1
-              else:
-                  break
-          print(count)
-          PY
-          )
+            --jq '.workflow_runs[].id')
+          echo "Recent run ids: ${run_ids}"
+          # Count consecutive job-layer failures from newest end. `failure` and
+          # `timed_out` count toward the streak; anything else (success /
+          # cancelled / skipped / the gating job never ran / gh api error)
+          # breaks it — fail-closed toward "don't count", matching Rule 9.9.4's
+          # intent that only a *confirmed* chaos failure should ratchet the
+          # streak.
+          streak=0
+          for run_id in ${run_ids}; do
+            job_conclusion=$(gh api "/repos/${REPO}/actions/runs/${run_id}/jobs" \
+              --jq ".jobs[] | select(.name == \"${GATING_JOB_NAMES}\") | .conclusion" \
+              2>/dev/null || echo "api-error")
+            job_conclusion="${job_conclusion:-missing}"
+            echo "run ${run_id}: job=\"${GATING_JOB_NAMES}\" conclusion=${job_conclusion}"
+            case "${job_conclusion}" in
+              failure|timed_out)
+                streak=$((streak + 1))
+                ;;
+              *)
+                break
+                ;;
+            esac
+          done
           # The current run is in-progress (conclusion=null) and not yet in
-          # the list — add 1 to include the failure we're responding to.
+          # the list — add 1 to include the failure we're responding to. This
+          # job (`track-streak-and-lock`) only runs when `chaos` itself failed
+          # (`needs: chaos` + `if: failure()`), so the "+1" always refers to a
+          # real `chaos` job failure, never `chaos-latest`.
           actual=$((streak + 1))
           echo "streak=${actual}" >> "$GITHUB_OUTPUT"
-          echo "Consecutive failures including current: ${actual}"
+          echo "Consecutive job-layer failures including current (gating=${GATING_JOB_NAMES}): ${actual}"
 
       - name: Open P0 issue when streak >= 3
         if: steps.streak.outputs.streak >= '3'

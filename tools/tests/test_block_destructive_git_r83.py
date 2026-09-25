@@ -69,6 +69,32 @@ def bash_payload(command: str) -> dict:
     return {"tool_name": "Bash", "tool_input": {"command": command}}
 
 
+# 🔴 模組級釘住（本輪缺陷修復）：`is_foreign_tree()`（`.claude/hooks/
+# block_destructive_git.py`）以 `os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()`
+# 決定專案根。本檔多支測試直接呼叫 `G.destructive_git_hits()`／`G.is_foreign_tree()`
+# （不經 `run_hook()` 的 subprocess——那條路徑另外用 `cwd=str(_REPO_ROOT)` 釘死子行程，
+# 不受本段影響），因此在同一行程內執行時會共用**呼叫者**（`tools/run_root_
+# unittests.py`、`Start-Job` 等驅動器）的 cwd。呼叫者 cwd 一旦落在 repo 外，root 就
+# 解析成別的目錄，讓「檔案系統根含著專案根」一類判準靜默算錯——從非 repo 目錄單獨跑
+# 本模組時，字面固定 9 支測試同時變紅。生產路徑（Claude Code 呼叫 hook）一律會設
+# `CLAUDE_PROJECT_DIR`，這不是 hook 的缺陷，是本檔測試對呼叫者 cwd 的隱含依賴。
+# 釘在模組層級而非逐一補在受影響的 class：本檔沒有任何測試依賴 `CLAUDE_PROJECT_DIR`
+# 缺席時的 fallback 行為（已逐一核對既有 setUp／inline patch 慣例），個別測試裡既有
+# 的 `mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": ...})` 疊在這層之上值不變。
+_MODULE_ENV_PATCH = None
+
+
+def setUpModule() -> None:
+    global _MODULE_ENV_PATCH
+    _MODULE_ENV_PATCH = mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(_REPO_ROOT)})
+    _MODULE_ENV_PATCH.start()
+
+
+def tearDownModule() -> None:
+    if _MODULE_ENV_PATCH is not None:
+        _MODULE_ENV_PATCH.stop()
+
+
 # ── ① 該擋的擋 ─────────────────────────────────────────────────────────────
 class TestDestructiveFormsAreBlocked(unittest.TestCase):
     """每一條都會**不可逆地改動工作樹內容**，一條都不許漏。"""
@@ -582,7 +608,8 @@ class TestStashIsBlockedInEveryTree(_ForeignTreeCase):
 
 class TestTheRelaxationOpensNoNewHoles(_ForeignTreeCase):
     """換樹放寬的四道前提，每一條都對應一個**實測過**的漏擋形態（複審者的警告逐字＝
-    R89 收尾證據檔）。
+    R89 收尾證據檔）。受測對象：`.claude/hooks/block_destructive_git.py` 的
+    `is_foreign_tree()` 換樹放寬邏輯。
     """
 
     def test_dash_c_pointing_back_at_the_shared_tree_wins_over_cd(self) -> None:
@@ -614,11 +641,17 @@ class TestTheRelaxationOpensNoNewHoles(_ForeignTreeCase):
 
     def test_the_filesystem_root_contains_the_project_too(self) -> None:
         """🔴 反向包含的**邊界格**，獨立驗證輪實測出來的漏擋；判準刻意不寫死 `/`，
-        改用 `os.path.abspath(os.sep)` 取當前平台的根（Windows 上是磁碟機根），
-        否則這支鎖在另一個平台上量的是別的東西（史料見 CrossPlatform_DEF200275_
-        Context_Metering_Evidence.md〈第七輪 史料搬遷〉）。
+        改用當前平台的根（Windows 上是磁碟機根），否則這支鎖在另一個平台上量的是
+        別的東西（史料見 CrossPlatform_DEF200275_Context_Metering_Evidence.md
+        〈第七輪 史料搬遷〉）。
+
+        🔴 本輪訂正：舊寫法 `os.path.abspath(os.sep)` 解析的是**呼叫者行程 cwd**
+        所在磁碟機的根，不是專案所在磁碟機的根——呼叫者 cwd 若落在跟 repo 不同的
+        磁碟機（例如從 `C:\\` 驅動、repo 在 `D:\\`），量到的 fs_root 根本不含專案，
+        斷言本身就錯了。改用 `_REPO_ROOT.anchor`：同樣是「當前平台的根」，但錨定在
+        專案自己的磁碟機，不隨呼叫者 cwd 漂移（posix 上兩種寫法等價，恆為 `/`）。
         """
-        fs_root = os.path.abspath(os.sep)
+        fs_root = _REPO_ROOT.anchor
         self.assertTrue(self.hits(f"cd {fs_root} && git clean -fdx"),
                         "檔案系統根含著專案根 ⇒ 不得放寬")
         self.assertTrue(self.hits(f"git -C {fs_root} clean -fdx"))
@@ -716,6 +749,7 @@ class TestTheCriterionItselfCanFail(unittest.TestCase):
     """反 vacuity：判準塌掉時上面每一條都會靜默變綠，所以要直接對判準注入。
 
     形狀取自本 repo 既有慣例——「解析器回空集合 ⇒ 比較恆真通過 ⇒ 靜默失效」。
+    受測對象：`.claude/hooks/block_destructive_git.py` 的 `destructive_git_hits()`。
     """
 
     def test_masking_everything_would_break_the_block_side(self) -> None:
@@ -779,8 +813,15 @@ class TestTheCriterionItselfCanFail(unittest.TestCase):
 
         這一支的存在理由與上面三支不同：它守的不是「判準會不會恆真」，而是
         「**已知會漏的那個寫法不准回來**」（舊寫法下的實測 rc＝R89 收尾證據檔）。
+
+        🔴 `fs_root` 改用 `_REPO_ROOT.anchor`（理由同
+        `test_the_filesystem_root_contains_the_project_too`）：舊寫法
+        `os.path.abspath(os.sep)` 量的是呼叫者 cwd 所在磁碟機的根，呼叫者若跟
+        repo 不同磁碟機，這裡的 `command` 根本沒有落在專案所在磁碟機，下面兩個
+        `assertTrue` 會各自因為不同的錯誤原因巧合為真／假，鎖不到本測試真正要釘的
+        那個字。
         """
-        fs_root = os.path.abspath(os.sep)
+        fs_root = _REPO_ROOT.anchor
         command = f"cd {fs_root} && git clean -fdx"
         with mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(_REPO_ROOT)}):
             self.assertTrue(G.destructive_git_hits(command, start_dir=str(_REPO_ROOT)))
@@ -2279,6 +2320,35 @@ class TestGovernanceFilesAreReadOnlyWhenUnattended(unittest.TestCase):
                                "拿掉摺疊後這個形態應該變回放行——否則摺疊沒有承重")
             self.assertIsNone(G.govwrite_hit({"file_path": ".claude/hooks/NEW_GUARD.PY"}),
                                "拿掉摺疊後這個形態應該變回放行——否則摺疊沒有承重")
+
+
+class TestResultDoesNotDriftWithCallerCwd(unittest.TestCase):
+    """🔴 回歸鎖（本輪缺陷修復）：獨立驗證輪從非 repo 目錄（例如以
+    `tools/run_root_unittests.py` 或 `Start-Job` 驅動、呼叫者 cwd 落在 repo 外）單獨
+    跑本模組時，字面固定 9 支測試同時變紅——本檔多支測試直接呼叫
+    `G.destructive_git_hits()`，而 `is_foreign_tree()` 對 `CLAUDE_PROJECT_DIR` 的
+    fallback 是 `os.getcwd()`，呼叫者 cwd 一旦漂移出 repo，root 就解析錯，讓已知必須
+    命中的形態靜默變成放行（詳見本檔 `setUpModule` 上方註記）。
+
+    本鎖刻意**不**在測試本體內重新 patch `CLAUDE_PROJECT_DIR`：它要釘住的是模組級
+    `setUpModule` 這道釘子本身有沒有在生效——若日後那道釘子被誤刪，本鎖必須是第一個
+    重新變紅的測試，而不是靜默地跟著另外 9 支一起消失在「刻意分散」的假象裡。
+    """
+
+    def test_a_known_hit_survives_the_process_cwd_moving_outside_the_repo(self) -> None:
+        outside = tempfile.mkdtemp(prefix="w-cwd-drift-")
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(outside)
+            fs_root = _REPO_ROOT.anchor  # 錨定專案磁碟機，不用呼叫者 cwd 隱含推導
+            self.assertTrue(
+                G.destructive_git_hits(f"cd {fs_root} && git clean -fdx",
+                                       start_dir=str(_REPO_ROOT)),
+                "呼叫者 cwd 換到 repo 外後，檔案系統根形態從命中變成放行——"
+                "`setUpModule` 的 CLAUDE_PROJECT_DIR 釘住失效了")
+        finally:
+            os.chdir(original_cwd)
+            shutil.rmtree(outside, ignore_errors=True)
 
 
 if __name__ == "__main__":  # pragma: no cover

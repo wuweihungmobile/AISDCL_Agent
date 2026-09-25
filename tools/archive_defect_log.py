@@ -223,7 +223,7 @@ CHECK_CRITERIA: tuple[tuple[str, str], ...] = (
 # `DEF-101-529`／`555`／`558` 後，11 處指針當場失實（**該次事故的時點計數，不是族群量**；
 # 族群量現值看 `--check`），而**當時**只有 `--check`（事後稽核）才抓得到——`plan()`／`apply()`
 # 本身對此毫無鑑別力，等於先製造缺陷、再靠下一次事後稽核去發現它。
-# 本項把同一組掃描搬到搬遷**之前**：`_external_residence_claims_for()` 共用 `check()`
+# 本項把同一組掃描搬到搬遷**之前**：`_residence_claims_index()` 共用 `check()`
 # 判準(4)(6) 已在用的同一批基元（`POINTER_RE`／`NONVERB_RESIDENCE_RE`／`_quotation_kind`／
 # `_fenced_line_numbers`／`_CODE_SPAN_RE`），而不是另寫一份掃描規則——否則帳本／治理文件
 # 內逐字引用判準語法的段落（例如 `CrossPlatform_R60_Fix_Evidence.md` 圍籬區塊內逐字重現
@@ -602,8 +602,9 @@ def plan(ack: frozenset[str] = frozenset(), only: frozenset[str] = frozenset(),
     # 判準⑥（DEF-101-612，指針反向依賴）：只讀一次全部稽核面全文，供下面逐列查詢
     # 「有沒有別的檔宣稱這個 ID 現居主檔」——這正是判準①②③⑤ 完全看不到的那一面
     # （它們只看該列自身狀態），也是 R60 `--apply` 搬走 529／555／558 後 11 處指針
-    # 同時失實的根本成因（見 `MOVE_CRITERIA` 上方 WHY）。
+    # 同時失實的根本成因（見 `MOVE_CRITERIA` 上方 WHY）。索引只建一次、逐列 O(1) 查詢。
     pointer_texts = _read_pointer_audit_texts()
+    residence_claims = _residence_claims_index(pointer_texts)
     movable, needs_ack, blocked = [], [], []
     for v in verdicts:
         if v["blockers"]:
@@ -612,7 +613,7 @@ def plan(ack: frozenset[str] = frozenset(), only: frozenset[str] = frozenset(),
         if v["handoff_marker"] and v["id"] not in ack:
             needs_ack.append(v)
             continue
-        claims = _external_residence_claims_for(v["id"], pointer_texts)
+        claims = residence_claims.get(v["id"], [])
         if claims:
             # 硬擋、不接受 `--ack` 繞過（WHY 見 `MOVE_CRITERIA` 上方註解）：這與判準④
             # 的交棒偵測不同——交棒是主觀判斷，指針居所是可驗證的事實陳述。
@@ -825,53 +826,52 @@ def _read_pointer_audit_texts() -> dict[str, str]:
     return {p.name: p.read_text(encoding="utf-8-sig") for p in _pointer_audit_files()}
 
 
-def _external_residence_claims_for(def_id: str, texts: dict[str, str]) -> list[str]:
-    """回傳 `texts`（`_pointer_audit_files()` 讀出的 `{檔名: 全文}`）中，現況宣稱
-    `def_id` 目前居所為**主檔**的指針描述清單（`file:line：原文`）；空清單＝目前無人
-    做出這類宣稱，搬走它不會讓任何既有指針當場失實。
+def _residence_claims_index(texts: dict[str, str]) -> dict[str, list[str]]:
+    """單次掃描 `texts`（`_pointer_audit_files()` 讀出的 `{檔名: 全文}`），建出
+    `def_id -> 宣稱現居主檔的指針描述清單` 的索引（`file:line：原文`，查無宣稱者不是
+    key，呼叫端一律 `.get(id, [])`）。判準⑥（`plan()`，DEF-101-612「指針反向依賴」）
+    用它把 `check()` 事後才抓得到的「指針宣稱與實況不符」搬到搬遷**之前**判斷（R60
+    `--apply` 搬走 529／555／558 後 11 處居所指針同時失實，詳見 `MOVE_CRITERIA` WHY）。
 
-    判準⑥（`plan()`，DEF-101-612「指針反向依賴」）：`check()` 只能在搬遷**之後**抓到
-    「某指針宣稱的居所與實況不符」；本函式把同一組掃描基元搬到搬遷**之前**——`plan()`
-    據此把這種列直接判為不可搬，而不是任由 `--apply` 先搬、留給下一次 `--check` 事後
-    才報紅（R60 實際發生：`--apply` 搬走 `DEF-101-529`／`555`／`558` 後 11 處居所指針
-    同時失實，詳見 `MOVE_CRITERIA` 上方的 WHY）。
+    🔴 效能（SD 效能鏡，`test_archive_defect_log.py` 母鍵 891s 熱點）：原本 `plan()`
+    對每筆候選列各自全文重掃一次（O(候選列數×稽核檔數)；cProfile 實測 203×196≈4萬次
+    重掃占單次 `plan()` cumtime 99.6%）。改為單一 pass 建索引後為 O(稽核檔數)，
+    `plan()` 對每筆列只是一次 dict 查詢；**不跨呼叫快取**——`texts` 是 `plan()` 當次
+    `_read_pointer_audit_texts()` 讀出的全新 dict，索引只在該次呼叫內用、隨堆疊回收，
+    無內容過期風險。掃描規則不變：沿用 `check()` 判準(4)(6) 同一批基元（`POINTER_RE`／
+    `NONVERB_RESIDENCE_RE`／`_quotation_kind`／`_fenced_line_numbers`／`_CODE_SPAN_RE`），
+    否則帳本／治理文件內逐字引用判準語法的段落會被誤判為宣稱（Pkg-P12 同型假紅）。
 
-    **刻意不重寫掃描規則**：呼叫的是 `check()` 判準(4)(6) 已在用的同一批基元
-    （`POINTER_RE`／`NONVERB_RESIDENCE_RE`／`_quotation_kind`／`_fenced_line_numbers`／
-    `_CODE_SPAN_RE`），否則帳本／治理文件內逐字引用判準語法的段落會被本函式誤判為對
-    某 ID 的真實居所宣稱，重演 Pkg-P12「載具自己假紅」的形狀。
-
-    只回傳「宣稱居所 == 主檔」的出現處（裸『現居 archive_NN』恆為 archive 宣稱，
-    與主檔居所無關，不掃；`_pointer_problems()` 已印證這點——它的 `expected` 只要見到
-    `archive` 群組就直接採信）：
+    只收「宣稱居所 == 主檔」的出現處（裸『現居 archive_NN』恆為 archive 宣稱，不掃；
+    `_pointer_problems()` 已印證——`expected` 只要見到 `archive` 群組就直接採信）：
       · `立帳見`（`POINTER_RE`）：`archive` 群組為空，且 scope ∈ {None, 主檔, 缺陷帳本}，
-        或 scope == 本表 且該行所在檔本身就是主檔（`_pointer_problems()` 的同一條規則）。
+        或 scope == 本表 且該行所在檔本身就是主檔。
       · `見主檔`（`NONVERB_RESIDENCE_RE`）：`archive` 群組為空且 `scope == 主檔`
-        （`見 DEF-x` 無 scope／archive 者是單純引用、非宣稱，同 `check()` 既有的
-        誠實劃界，見該正則上方 docstring）。
+        （`見 DEF-x` 無 scope／archive 者是單純引用、非宣稱）。
     """
-    hits: list[str] = []
+    index: dict[str, list[str]] = {}
     for fname, text in texts.items():
         fenced = _fenced_line_numbers(text)
         for lineno, line in enumerate(text.splitlines(), 1):
             if POINTER_VERB in line:
                 for m in POINTER_RE.finditer(line):
-                    if m.group("id") != def_id or m.group("archive"):
+                    if m.group("archive"):
                         continue
                     if _quotation_kind(line, m.start(), in_fence=lineno in fenced) is not None:
                         continue  # (甲)(乙)(丙) 引述／術語提及／圍籬，非宣稱
                     if m.group("scope") == "本表" and fname != _LEDGER.name:
                         continue  # 宣稱「這份文件裡」，而這份文件不是主檔
-                    hits.append(f"{fname}:{lineno}：「{m.group(0)}」（立帳見・宣稱現居主檔）")
+                    index.setdefault(m.group("id"), []).append(
+                        f"{fname}:{lineno}：「{m.group(0)}」（立帳見・宣稱現居主檔）")
             for m in NONVERB_RESIDENCE_RE.finditer(line):
-                if (m.group("id") != def_id or m.group("archive")
-                        or m.group("scope") != "主檔" or lineno in fenced):
+                if m.group("archive") or m.group("scope") != "主檔" or lineno in fenced:
                     continue
                 spans = [(sp.start(), sp.end()) for sp in _CODE_SPAN_RE.finditer(line)]
                 if any(s <= m.start() < e for s, e in spans):
                     continue  # code span 引述，非宣稱
-                hits.append(f"{fname}:{lineno}：「{m.group(0)}」（見主檔・宣稱現居主檔）")
-    return hits
+                index.setdefault(m.group("id"), []).append(
+                    f"{fname}:{lineno}：「{m.group(0)}」（見主檔・宣稱現居主檔）")
+    return index
 
 
 def check() -> int:

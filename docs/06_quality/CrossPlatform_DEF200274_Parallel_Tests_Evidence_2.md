@@ -438,3 +438,225 @@ DEF-200-379／DEF-200-380），**不再開立新一輪多 CPU 迭代**（本欄�
   理由（本輪修復 6 筆＋新發現 2 筆的淨值計算不計入「修復」抵銷，因為新增即結案的列不算「結
   案」）。其餘輸出（⚠️ 第一冊逼近體積上限、外部阻塞／結構性長債複查逾期、已結列殘留待辦）皆
   為本輪之前既有、與本輪無關，不在本輪處置範圍。
+
+## 系列收斂後四方重驗：掌舵者六問重問（2026-09-25，Windows）
+
+DEF-200-274 系列已於第二十二輪宣告收斂（見上節），本輪非新一輪多 CPU 迭代，而是掌舵者對
+已收斂系列的六問重問：①帳本上是否還有多 CPU 問題？②多 CPU 功能是否完備、CI 是否也已多
+CPU？③能否全面優化、不要頭重腳輕？④還有哪些面向可以多 CPU？⑤這件事是否已可收斂？⑥前
+一輪承諾但未完成的項目是否已補齊？
+
+### 流程與分工
+
+四方角色鏡（Architect／SA／SD／QA）全數 Sonnet 執行，主控 Opus 5.5 只裁決親驗——延續第
+二十二輪的分工形態。修復棒（Developer）依複審 P0/P1/P2 逐項落地後，交由本收尾單人窗口
+（本檔撰寫者）做記帳（缺陷帳本）、護欄棘輪重釘、計時種子刷新與 ONBOARDING §7 回填四件收斂
+工作。收尾階段沒有其他 agent 同時動工作樹（12 支未提交檔已保全為 tag
+`multicpu-recheck-20260925-wip3-preserved`）。
+
+### 量測（他包回報，QA-2／QA-3 實測；標✔為本收尾窗口／主控親驗）
+
+**效能剖析熱點修復前後對照**：
+
+| 項目 | 修前 | 修後 | 備註 |
+|---|---|---|---|
+| `archive_defect_log.plan()` 單次呼叫 | 14.1s（占 cumtime 99.6%） | 0.13s（107x） | O(203×196) 重掃 → 單次索引 `_residence_claims_index()`；輸出逐鍵相等，LOC 淨 0 |
+| `TestStrayVenvScan`（5 支） | 25s | 0.37s | 原掃真實 %TEMP%（約 100 萬項），隨機器狀態漂移屬正確性風險，非僅效能 |
+| `TestPathextReadsAreePlatformGuarded` | 18.7s | 5.5s | 5930 檔內容 sha256 快取（唯一內容約 1200 種） |
+| `test_doc_loc_baseline_freshness_r60` `TestR67R3` 單類 | ~45s | ~30s（單機序列）／~58s（本輪並行下，見誠實劃界） | `measure_loc()` 測試側行程內快取，鍵含 `_LOC_TOOL`／`_REPO_ROOT` |
+
+**根層全套 W=18 wall（他包回報）**：修補前 ~162s → 第一批後 124.7／129.9／129.5s → 全部修補
+後 118.65／118.91／118.69s。S ~2534s → ~1740s；最長單位 131s → ~58s（並行下）。
+
+**W 掃描（QA-3，兩輪中位）**：
+
+| W | wall (s) | 整輪 CPU | 前景延遲中位 (ms) |
+|---|---|---|---|
+| 16 | 128.14 | 72.6% | 37 |
+| 18 | 119.13 | 78.9% | 44 |
+| 19 | 117.08 | 82.8% | 46 |
+| 20 | 115.43 | 82.6% | 57 |
+| 22 | 114.62 | 82.1% | 72 |
+
+其餘量測（他包回報）：14 次全套 mktemp／archive flake 0 命中；DEF-200-311 CPU 壓力測試
+20/20 綠、全套 I/O 負載下 26/26 綠；AutoClaude 全套 4883 passed／10 skipped、
+`nodes confirmed=18`；v0.30 chaos 平行 10/10 綠 ~17s（序列 30s）。
+
+**雲端 CI 多 CPU 憑證（SA 親抓，`0605b37` 批）**：root-infra／AutoClaude／aisdlc-sdd／
+windows-compat／macos-compat 五線皆有 `workers=4` 逐字（macos 3）；另 6 支次要 workflow 中
+4 支不跑 pytest，`mutation-on-change`／`pg-e2e-on-label` 刻意序列已登記（`pg-e2e-on-label`
+近 2.5 個月無雲端 run，屬既有事實非本輪劣化）。
+
+✔ 本收尾窗口親驗：`refresh_parallel_timing_seed.py` rc=0（活體快取 474 個派工單位，種子
+Top-15 重疊率 43%＜50% 門檻，已覆寫）；種子刷新前後三支代表單位：
+`test_archive_defect_log`（模組鍵）807.78s→105.06s；`test_dev_start.TestStrayVenvScan`
+65.92s→1.58s；`test_doc_loc_baseline_freshness_r60.TestR67R3NoUnstatedPlatformAssumption*`
+三平台各約 75s→61s。`test_run_root_unittests.py`（`unittest discover -s tools/tests -p
+test_run_root_unittests.py`，**必須走 discover 而非裸模組路徑呼叫**——後者因
+`__name__` 前綴不同導致 4 支自我參照鎖假紅）：223 tests，`Ran 223 tests in
+71.360s`，`OK`，rc=0。
+
+✔ 本收尾窗口親驗：`test_ci_gate_xdist_allowlist.py`（`unittest discover`）13 tests OK；
+現查 pytest 呼叫站點普查（`_all_sites()` 現場執行）共 **38** 站點——**SERIAL 19／
+PARALLEL 19／登記 19 列／UNGOVERNED 0**（普查補掃 `tools/integration_gate_core.py`／
+`AutoClaude/tools/run_mutmut_in_docker.sh` 兩處，`run_mutmut_in_docker.sh` 已補
+`-p no:xdist`，標示與行為一致）。
+
+✔ 本收尾窗口親驗：`python tools/check_defect_log_crossref.py` rc=0，本輪新引入 ❌ 為零
+（詳見下方〈帳本更新〉）。
+
+### 設計裁決
+
+**掌舵者三項裁決（2026-09-25）**：
+
+1. **DEF-200-379**＝LATEST chaos 加軌＋觀察期（紅要出聲、不計入 Rule 9.9.4 連 3 日失敗鎖
+   main）：`aisdlc-sdd-fsm-chaos-nightly.yml` 新增 `chaos-latest` job；`track-streak-and-lock`
+   的連敗計數改讀**job 層**（`GATING_JOB_NAMES`），排除 run 層被 `chaos-latest` 污染的風
+   險（三方複審一致命中的 P0）；觀察期＝首次排程 run 起連續 7 次，最早 2026-10-03 起由掌
+   舵者裁決是否把 `chaos-latest` 併入 `GATING_JOB_NAMES`（見缺陷帳本 DEF-200-381）。
+2. **護欄棘輪＝核准一次性例外**（名冊上限 3→4）：本輪四方複審要求的結案回歸鎖與自證測試
+   ＋測速修補淨額為正，且前兩輪已連續兩次淨額為正（款(11) 要求主軌 ≤0），本輪需要第三次
+   例外核准，理由見〈護欄層行數棘輪重釘〉。
+3. **整輪 CPU 標準＝70～80% 即符合**（非硬性 ≥80%）：W=18 實測 78.9%，落在此帶內即達標，
+   **W 維持 18**、公式不變。
+
+**W 維持 18 的理由**：W 掃描顯示 16→22 之間 wall 差距僅 128.14s→114.62s（−10.6%），而 CPU
+利用率在 18～20 一帶已進入平坦帶（78.9%／82.8%／82.6%）；掌舵者本輪明確放寬標準為
+70～80%，W=18 的 78.9% 已達標，且 W=18 是第二十二輪已定案、已同步進根層測試鎖
+（`test_run_root_unittests.py` 的 W 值鎖）與 nightly baseline 的既有值，改動 W 會牽動已重
+釘的護欄棘輪與 nightly perf baseline（commit `f720ca6`），對「不要頭重腳輕」（掌舵者第三
+問）而言，維持既有值＋把力氣放在測試熱點修復上，投入產出比更高。
+
+**主控否決「measure_loc 快取放正式碼」**：`tools/tests/test_doc_loc_baseline_freshness_r60.py`
+的區塊註解逐字記載理由——`sync_onboarding_baselines.py`（`measure_loc()` 本體所在）在根
+CLAUDE.md `SPECIAL_FILES` 精確釘行數，且正式 CLI 每次執行只呼叫一次，放正式碼零效益；快
+取只應存在於「本檔測試在同一行程生命期內對同一 repo 內容重複呼叫」這個測試專屬情境，
+`measure_loc()`／`measure_all()` 本體維持每次真跑，不引入生產路徑的陳舊風險。
+
+### 逐檔改動（他包回報，主控裁決收斂；詳細診斷過程另見缺陷帳本 DEF-200-381～385）
+
+- `tools/archive_defect_log.py`：`_residence_claims_index()` 單次建索引，取代逐候選列×逐
+  稽核檔的 O(203×196) 重掃；LOC 淨 0。
+- `tools/tests/test_archive_defect_log.py`：`_stable_snapshot_bytes()`（讀前後 stat＋長度核
+  對、重試、fail loud）＋自證測試 4 支；`_residence_claims_index` 正樣本 6 支（(乙) 術語提
+  及分支經證明從此呼叫端結構上不可觸發，未寫假樣本，見誠實劃界）。
+- `.github/workflows/aisdlc-sdd-fsm-chaos-nightly.yml`：新 job `chaos-latest`（LATEST 由
+  `sdd_version.py` 現查、xdist 走 cpu_budget 字串鏈、100 輪 sweep）；
+  `track-streak-and-lock` 改讀 job 層。
+- `tools/tests/test_workflow_permission_concurrency_lock.py`：
+  `TestFsmChaosNightlyStreakReadsJobLayer` 7 支鎖。
+- `AutoClaude/tools/run_local_nightly.ps1`：Stage 6b LATEST chaos（`sdd_chaos_latest` 欄位；
+  `sdd_version` rc≠0 fail loud；觀察期註記）。
+- `AutoClaude/tests/tools/test_run_local_nightly_static.py`：姊妹鎖同步。
+- `tools/tests/test_ci_gate_xdist_allowlist.py`：普查補掃 `tools/integration_gate_core.py`、
+  `AutoClaude/tools/run_mutmut_in_docker.sh`（現查共 38 站點）。
+- `AutoClaude/tools/run_mutmut_in_docker.sh`：加 `-p no:xdist`，標示與行為對齊。
+- `tools/tests/test_dev_start.py`：`TestStrayVenvScan` 5 支隔離真實 %TEMP%。
+- `tools/tests/test_platform_neutral_paths.py`：`TestPathextReadsAreePlatformGuarded` 內容
+  sha256 快取。
+- `tools/tests/test_doc_loc_baseline_freshness_r60.py`：`measure_loc()` 測試側行程內快取
+  （見上方設計裁決）。
+- `tools/tests/test_block_destructive_git_r83.py`：模組級釘 `CLAUDE_PROJECT_DIR`＋`fs_root`
+  改 `_REPO_ROOT.anchor`＋回歸鎖 `TestResultDoesNotDriftWithCallerCwd`。
+
+### 驗證數字（彙整）
+
+- 他包回報：根層全套 W=18 wall 修補前後對照與 W 掃描表（見上）；AutoClaude 全套 4883
+  passed／10 skipped；v0.30 chaos 平行 10/10 綠。
+- ✔ 主控親跑一次收尾全套：rc=1，唯一非預期紅為 `test_adr_xplat001_c1c2_lock` 3 支**預期**
+  紅（棘輪重釘前的過渡態）；發現 4607 個測試；wall 129.7s。
+- ✔ 主控親自重現：`test_block_destructive_git_r83.py` 從 `C:\` 這類 repo 外 cwd 執行時固定
+  9 支假紅（改前）；改後兩種 cwd 下結果一致（他包回報＋回歸鎖 `TestResultDoesNotDriftWithCallerCwd`）。
+- ✔ 本收尾窗口親驗：見上方〈量測〉區塊逐項（種子刷新、`test_run_root_unittests.py` 223
+  tests OK、`test_ci_gate_xdist_allowlist.py` 13 tests OK、站點普查 38、
+  `check_defect_log_crossref.py` rc=0）。
+
+### 四方複審摘要
+
+Architect／SA／SD／QA 四方獨立複審皆 **APPROVE-WITH-FIXES**。所有 P0／P1／P2 已由修復棒
+C 處理完畢（含 DEF-200-379 的 job 層連敗隔離 P0、`chaos-latest` LATEST 版本現查 P1 等）。
+P3（CI 分片、其餘尚未剖析的熱點）列入下方誠實劃界，不在本輪處置範圍。
+
+### 訂正上一輪（第二十二輪）兩處記載
+
+1. 本檔 L257 與 L296（`tools/tests/test_ci_gate_xdist_allowlist.py` 的站點普查計數）記載有
+   誤；正確值以本輪現查為準——現查（`_all_sites()` 現場執行）共 38 站點，SERIAL 19／
+   PARALLEL 19／登記 19 列／UNGOVERNED 0（見上方〈量測〉）。
+2. 本檔 L361-363 稱「argmin 鎖 `abs(公式值−argmin)≤1` 已固化為回歸測試」——本輪現查
+   `tools/` 全樹（`git grep`）找不到任何名為 argmin 的回歸鎖；`test_cpu_budget.py` 實際只
+   釘公式輸出值與拓撲輸入的對應關係（換算值鎖），並不存在「與逐一掃描 argmin 做差值比
+   對」的鎖。此訂正僅描述兩者的落差，不重述原句字面。
+
+### 收斂判定（掌舵者六問逐一核對）
+
+1. **①帳本多 CPU 問題**：DEF-200-311（偶發 flake，未重現≠已修，維持 open 並補本輪證
+   據）、DEF-200-379（已 fixed，觀察期另立 DEF-200-381 追蹤）、DEF-200-380（已 fixed）為
+   本輪涉及的三筆；另因本輪工作新增 DEF-200-382～385（4 筆 fixed）與 DEF-200-381（1 筆
+   open，觀察期性質，非程式缺陷）。帳本上不再有「未經評估」的多 CPU 問題。
+2. **②多 CPU 完備＋CI 多 CPU**：五條雲端 CI 主線（root-infra／AutoClaude／aisdlc-sdd／
+   windows-compat／macos-compat）皆有 `workers=N` 可稽核逐字；`chaos-latest` 補上 LATEST
+   版本的雲端／本機覆蓋缺口（觀察期中，非「未做」）。
+3. **③全面優化、不要頭重腳輕**：本輪明確以「頭重腳輕」為篩選條件抓出 archive_defect_log
+   單一熱點（99.6% cumtime）與三支測試熱點並修復，未觸及已平坦（16～22 差距 <11%）的 W
+   政策本身，符合掌舵者「不要頭重腳輕」的字面要求。
+4. **④其他可多 CPU 面**：普查站點掃描面補齊（38 站點，0 UNGOVERNED）；CI 分片等 P3 項目
+   列入誠實劃界，判定「已知、暫不值得做」而非「未評估」。
+5. **⑤是否收斂**：**是**——本輪是系列收斂後的重驗，未發現需要重啟系列或推翻第二十二輪收
+   斂宣告的證據；六問皆有明確答覆與證據，剩餘唯一 open 項（DEF-200-381）屬觀察期追蹤性
+   質，解鎖條件與時間點皆已明定，不構成「收斂宣告不成立」的理由。
+6. **⑥完成前輪未完成項**：DEF-200-379／380 兩筆前輪 open 項本輪皆已 fixed；前輪〈待主控
+   回填〉已於 commit `50042dc`／`0605b37` 落地（見上節，非本輪工作）。
+
+**廣義收斂條件**：帳本無新增「未評估」多 CPU 問題、CI 多 CPU 覆蓋五線可稽核、效能熱點已
+篩選並修復頭重腳輕項、剩餘缺口皆有具名解鎖條件。本輪判定五條皆已滿足，**系列維持收斂狀
+態**（不重啟為新一輪多 CPU 迭代），DEF-200-381 觀察期追蹤獨立於系列收斂判定之外。
+
+### 🔴 誠實劃界
+
+- **CI 分片未做**：Architect 本輪重新評估（`gh repo view --json visibility` 現查＝PUBLIC，
+  GitHub-hosted runner 免費、無 OS 分鐘倍率），root-infra unittest 切 matrix shard 理論上可把
+  雲端該步驟壓到 ideal/N，但需新設每 shard 的 MIN_TESTS 下限與跨 shard 彙總機制，本輪未落地
+  （HYPOTHESIS，未實測）；且本輪 S 已降約 31%，收益同比縮小。mutmut 平行被 `pyproject.toml`
+  鎖 2.4.3 的 CLI 不相容（3.x 移除 `--paths-to-mutate`／`--tests-dir`）擋住；TLC 已
+  `-workers auto`；chaos 100 輪 sweep 規模約 30s，行程池固定成本攤不平——三者維持不做。
+- **收尾第一次全套 wall 141.6s／slot 80.3%（loss 1.24x）是一次性排程現象**：單一類別模組
+  `test_extras_quoting_zsh_safety` 本輪被細分成類別級單位、換了快取鍵而暫無歷史耗時，依測試
+  數排序排得太晚成為尾巴（第 120.9s 完工）；隔一次全套即有基準，第二次全套 wall 119.3s、
+  `loss=1.00x`、slot 99.7%。
+- **種子過期警告與刷新工具矛盾**（DEF-200-386，open）：剛執行 `refresh_parallel_timing_seed.py`
+  後的兩次全套仍印 Top-15 重疊率 36%／43%，兩處重疊率的比較面不同，本輪未修。
+- **CI paths 缺口於回填時才被抓到**：修復棒 C 新增的 `TestFsmChaosNightlyStreakReadsJobLayer`
+  讀 `aisdlc-sdd-fsm-chaos-nightly.yml`，但 windows／macos-compat-ci 的 `paths:` 未列該檔，由
+  `AISDLC_SDD/scripts/tests/test_ci_paths_cover_root_consumers.py` 在 ONBOARDING 回填的
+  `--write --with-slow` 步驟擋下；主控補列兩支 workflow 各兩段後該檔 49 passed。本機根層／
+  AutoClaude 全套結構上抓不到這類缺口（只在 SDD ci-gate 跑到）。
+- **`TestR67R3` 單類在並行下 58s、非單機序列 30s**：測試側行程內快取只消除同一行程內重複
+  子行程呼叫的成本；並行環境下多個 worker 各自起一份行程，快取效益不跨行程共享，故並行
+  wall 仍高於單機序列量測值。
+- **`pg-e2e-on-label` 無雲端 run**：近 2.5 個月無 dispatch 紀錄，本輪未新增驗證，沿用既有
+  事實記載。
+- **W 掃描只在 14P/20L 本機拓撲**：本輪未對其他拓撲重新掃描，W=18 的決策僅在本機實機拓撲
+  上有實測支持。
+- **觀察期尚未開始**：DEF-200-381 的 7 次排程 run 判定窗口本輪僅完成程式與鎖落地，尚無任
+  何一次 `chaos-latest` 排程 run 的雲端資料。
+- **DEF-200-311 未重現≠已修**：CPU 壓力 20/20、I/O 負載 26/26 皆綠僅代表本輪未命中，不構
+  成根因已排除的證據，解鎖條件維持不變。
+- **(乙) 分支不可觸發**：`_residence_claims_index` 的術語提及分支經證明從現有呼叫端結構上
+  不可達，本輪未為其撰寫假樣本測試（避免為不可達路徑製造誤導性的「已覆蓋」假象）。
+- **普查站點數僅涵蓋 `_CENSUS_TARGETS` 具名清單**：新增呼叫站點若未同步登記進該常數，仍會
+  在普查掃描面外，本輪未做「掃描面本身是否窮盡」的獨立驗證。
+
+### 待主控回填
+
+- 收尾全套 rc（主控親跑，帳本／棘輪／ONBOARDING 回填落地後、commit 前）：兩次皆 rc=0、
+  `發現 4608 個測試（下限 4543）`、`[cpu_budget] root-unittest workers=18 source=cpu_budget`；
+  第一次 wall 141.6s（一次性排程現象，見誠實劃界）；第二次 wall 119.3s、`📊 派工摘要：
+  worker=18｜S=1773.2s｜ideal=max(S/W, 最長單位)=98.5s（S/W-bound）｜loss=1.00x｜slot 利用率=
+  99.7%｜最長單位：test_doc_loc_baseline_freshness_r60.TestR67R3NoUnstatedPlatformAssumptionDarwin
+  58.4s`。ONBOARDING §7 以 `tools/lib/clean_venv_carrier.py` 回填（psycopg2／sqlalchemy
+  ABSENT、pip rc=0、`--write --with-slow` rc=0；autoclaude 4688 passed／172 skipped、v0.01 1478、
+  v0.30 1956、scripts/tests 364），`--check-snapshot` rc=0；`check_defect_log_crossref.py` rc=0。
+- commit sha：〈待填〉
+- push 後雲端驗收（六支 run，逐字摘錄）：〈待填〉
+- `AUTOSDD_NET_RATCHET_OFF` 是否需要設定：不需要（結案 DEF-200-379／380，新增 open 僅
+  DEF-200-381／386，其餘新列建立即 fixed；`check_defect_log_crossref.py` rc=0）。

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import ast
 import functools
+import hashlib
 import io
 import os
 import re
@@ -1433,38 +1434,65 @@ def _pathext_markers(source: str, *, is_python: bool) -> dict[int, str]:
     return markers
 
 
-def scan_unguarded_pathext(
-    source: str, rel: str, *, is_python: bool | None = None
-) -> tuple[list[str], list[str]]:
-    """純函式核心：回傳 (offenders, stale_markers)，元素皆為 `rel:行號: 說明`。"""
-    if is_python is None:
-        is_python = rel.endswith(".py") or not rel.rpartition(".")[2]
+#: 內容雜湊 → (offender 行號+片段, markers, used) 的行程內快取。全庫掃描（見
+#: `TestPathextReadsAreePlatformGuarded`）現查約 79%（4697/5930）檔案與另一檔
+#: byte-identical（多份凍結版 AISDLC_SDD 快照），逐檔獨立 tokenize／regex 重算
+#: 是本測試最大熱點。鍵含 `is_python`：同內容以不同語言規則掃出的結果不可互用；
+#: 純函式、輸出與 `rel` 無關，故可安全跨檔共用——`rel` 只在下方
+#: `scan_unguarded_pathext` 代回組訊息字串，快取本身不含任何檔名資訊。
+_PathextCore = tuple[list[tuple[int, str]], dict[int, str], set[int]]
+_PATHEXT_SCAN_CACHE: dict[tuple[str, bool], _PathextCore] = {}
+
+
+def _pathext_scan_core(source: str, *, is_python: bool) -> _PathextCore:
+    """回傳 (offender 行號+片段, markers, used)——與 `rel` 無關的可快取核心。"""
     markers = _pathext_markers(source, is_python=is_python)
     lines = source.splitlines()
     guard_first_at: int | None = next(
         (n for n, line in enumerate(lines, 1) if any(g in line for g in _PLATFORM_GUARDS)),
         None,
     )
-    offenders: list[str] = []
+    offender_lines: list[tuple[int, str]] = []
     used: set[int] = set()
     for lineno, line in enumerate(lines, 1):
         code = line.split("#", 1)[0]   # 剝行尾註解（heuristic，見區段劃界）
         if not any(rx.search(code) for rx in _PATHEXT_READ_RES):
             continue
-        # 🔴 `used` 記在「這一行確實有讀取語法」之後、**與守衛判斷無關**：stale 的語意
-        # 是「標記在、但這一行根本沒有要壓下的東西」。若把 `used` 記在守衛判斷之後，
-        # 一支檔案只要在前面某處出現過守衛，其標記就會被判 stale 而要求刪除——刪掉之後
-        # 那一行就只靠「檔案前面有守衛」這個寬判準撐著，鑑別力反而下降。
         if markers.get(lineno):
             used.add(lineno)
             continue
         if guard_first_at is not None and guard_first_at < lineno:
             continue
-        offenders.append(
-            f"{rel}:{lineno}: 讀取 PATHEXT 但該行之前全檔沒有任何平台守衛"
-            f"（`{line.strip()[:70]}`）——PATHEXT 是 Windows-only 概念，POSIX 上不存在"
-            "且執行檔不帶副檔名 ⇒ 依它過濾候選會把所有候選濾光（DEF-101-766 形態）"
-        )
+        offender_lines.append((lineno, line.strip()[:70]))
+    return offender_lines, markers, used
+
+
+def scan_unguarded_pathext(
+    source: str, rel: str, *, is_python: bool | None = None
+) -> tuple[list[str], list[str]]:
+    """純函式核心：回傳 (offenders, stale_markers)，元素皆為 `rel:行號: 說明`。"""
+    if is_python is None:
+        is_python = rel.endswith(".py") or not rel.rpartition(".")[2]
+    cache_key = (
+        hashlib.sha256(source.encode("utf-8", "surrogatepass")).hexdigest(),
+        is_python,
+    )
+    cached = _PATHEXT_SCAN_CACHE.get(cache_key)
+    if cached is None:
+        # 🔴 `used` 記在「這一行確實有讀取語法」之後、**與守衛判斷無關**：stale 的語意
+        # 是「標記在、但這一行根本沒有要壓下的東西」。若把 `used` 記在守衛判斷之後，
+        # 一支檔案只要在前面某處出現過守衛，其標記就會被判 stale 而要求刪除——刪掉之後
+        # 那一行就只靠「檔案前面有守衛」這個寬判準撐著，鑑別力反而下降（見
+        # `_pathext_scan_core` 內同款迴圈，判準未變，只是搬了家）。
+        cached = _pathext_scan_core(source, is_python=is_python)
+        _PATHEXT_SCAN_CACHE[cache_key] = cached
+    offender_lines, markers, used = cached
+    offenders: list[str] = [
+        f"{rel}:{lineno}: 讀取 PATHEXT 但該行之前全檔沒有任何平台守衛"
+        f"（`{snippet}`）——PATHEXT 是 Windows-only 概念，POSIX 上不存在"
+        "且執行檔不帶副檔名 ⇒ 依它過濾候選會把所有候選濾光（DEF-101-766 形態）"
+        for lineno, snippet in offender_lines
+    ]
     stale = [
         f"{rel}:{lineno}: {_PATHEXT_OK_MARKER} 標記 stale"
         f"（{'WHY 留空' if not why else '該行無被壓下的違規'}）"

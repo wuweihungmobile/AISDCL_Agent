@@ -352,7 +352,15 @@ _FROZEN_SHRINK_ONLY_BUCKET_LINES: dict[str, int] = {
     # 掃描器對 `_zzz_` 暫態模組的排除（DEF-200-330，判準邏輯本身非說明文字）落入自守計數；
     # 四方複審 Architect 判「與已揭露未完成項逐字吻合、非功能迴歸」後重釘為
     # `guard_layer_bucket_census.py --grain chunk` 實測值；prose 4469 實測未動。
-    "prose": 4469,
+    # 🔴 系列收斂後四方重驗收尾單人窗口：prose 4469→4311（−158）——
+    # `test_block_destructive_git_r83.py` 的 `TestTheRelaxationOpensNoNewHoles`／
+    # `TestTheCriterionItselfCanFail` 兩支既有測試類別新增 2 行修復回歸鎖說明時，
+    # 兩者的 class docstring 皆補上受測對象 `.claude/hooks/block_destructive_git.py`
+    # 字面（此前只寫散文引用、未指名受測模組，屬分類缺口非成長），使兩者從
+    # `exclusive=prose`（合計 171 行）轉為 `exclusive=mixed`——這是正確分類，不是
+    # 繞過（判準邏輯與桶定義一個字未動）。依本表「合法縮小後必須同步下修」紀律
+    # 重釘為 `guard_layer_bucket_census.py --grain chunk` 實測值。
+    "prose": 4311,
     "guard_self": 3163,
 }
 

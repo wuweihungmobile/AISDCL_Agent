@@ -88,7 +88,14 @@ fi
 echo "[run_mutmut_in_docker] mutmut version OK: 2.4.3" | tee -a "${LOG_FILE}"
 
 # 3) 跑 mutmut（mutant 全 survived / 部分 failed 都允許繼續，後續 baseline_lock 會判斷）
-#    -p no:xdist 已知為 pytest 選項；mutmut 2.x 不支援 → 不傳；若需傳給 runner 走 --runner。
+#    -p no:xdist 顯式寫進 RUNNER_CMD（走 --runner，不是 mutmut 自己的 CLI 選項——
+#    mutmut 2.x 不支援裸 `-p no:xdist` 這個 flag，見上面 workflow 側已用 --runner
+#    包住同類旗標的既有形態）：mutmut 對每個突變體各自完整跑一次測試（逐突變體計時／
+#    快取語意），-c /dev/null 又已略過 pyproject.toml 的 addopts（xdist 若掛在 addopts
+#    就不會生效），平行執行在這裡沒有速度收益反而會與 mutmut 自身的逐突變體隔離假設
+#    衝突；顯式旗標讓「本呼叫是序列」不必依賴 addopts 有沒有恰好開 xdist，對未啟用
+#    xdist 的 pytest 只是 set_blocked、零行為改變（PytestInvocationSiteCensusTest 普查
+#    判準見 tools/tests/test_ci_gate_xdist_allowlist.py 的 _JUSTIFIED_SERIAL_SITES）。
 #    SD_Improving_09 觀察期 #3：用 --runner 自訂 pytest command，明確指定 token_guard 測試目錄
 #    並 override pyproject.toml [tool.pytest.ini_options] testpaths = ["tests"]，避免 baseline 收 1800
 #    個測試（其中含 tests/test_gap014_020.py 依賴 Linux 環境不存在的 `claude` CLI → 假 baseline 失敗）。
@@ -104,7 +111,7 @@ echo "[run_mutmut_in_docker] mutmut version OK: 2.4.3" | tee -a "${LOG_FILE}"
 rm -rf "${MUTWORK}/.mutmut-cache" "${MUTWORK}/.pytest_cache" /workspace/.mutmut-cache /workspace/.pytest_cache
 echo "[run_mutmut_in_docker] cache cleared (.mutmut-cache + .pytest_cache) — forcing fresh baseline" | tee -a "${LOG_FILE}"
 
-RUNNER_CMD="python -m pytest -x --rootdir=${TESTS_DIR} -c /dev/null ${TESTS_DIR}"
+RUNNER_CMD="python -m pytest -x --rootdir=${TESTS_DIR} -c /dev/null -p no:xdist ${TESTS_DIR}"
 echo "[run_mutmut_in_docker] runner: ${RUNNER_CMD}"
 mutmut run \
   --paths-to-mutate="${MODULE_PATH}" \

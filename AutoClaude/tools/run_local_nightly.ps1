@@ -1728,6 +1728,130 @@ $rcChaos = Invoke-Stage 'sdd-fsm-chaos (鏡射 aisdlc-sdd-fsm-chaos-nightly)' {
   }
 }
 
+# ----- Stage 6b: AISDLC_SDD FSM chaos — LATEST 軌（DEF-200-379，觀察期）-----
+# 上方 Stage 6 只鏡射 aisdlc-sdd-fsm-chaos-nightly.yml 的凍結基線軌
+# （AISDLC_SDD_v0.01）；雲端已於 DEF-200-379 加開獨立 `chaos-latest` job 覆蓋
+# LATEST 演化版（觀察期：連續 7 次排程 run，失敗不計入 Rule 9.9.4「連 3 日鎖
+# main」）。本機 nightly **沒有**鎖 main 機制，故本軌不需要對應的觀察期豁免
+# ——失敗就照一般 stage 語意計入 exit（見下方 finalFailures，欄位名
+# `sdd_chaos_latest` 與凍結基線軌 `sdd_chaos` 分開，讀者可分辨是哪一軌紅）。
+# LATEST 版本號一律現查 `scripts/sdd_version.py`（AISDLC_SDD/CLAUDE.md〈版本
+# 狀態〉），不寫死。LATEST 的 `tools/fsm_runtime/snapshot.py::
+# save_abort_report()` 已改原子寫入，不受凍結基線那個共享 tmp 檔競態影響，
+# 故帶 `-n auto --dist worksteal`（worker 數走 cpu_budget SSOT，鏡射
+# ci-gate.sh／aisdlc-sdd-fsm-chaos-nightly.yml 的
+# `[cpu_budget] broadcast workers=N source=cpu_budget` 可稽核字面；本機
+# 2026-09-24 對 AISDLC_SDD_v0.30 連續 10 次實測全綠，rc=0、34 passed、
+# wall 16.3~17.6s，見 DEF-200-379 回報）。
+$rcChaosLatest = Invoke-Stage 'sdd-fsm-chaos-latest（DEF-200-379 觀察期）' {
+  $monoRootChaos = Split-Path -Parent $RepoRoot
+  $sddRootChaos = Join-Path $monoRootChaos 'AISDLC_SDD'
+  $sddVersionScript = Join-Path $sddRootChaos 'scripts\sdd_version.py'
+  if (-not $script:PyExe) {
+    Log "python 不可用 — SDD chaos LATEST 軌無法執行" 'ERROR'
+    $global:LASTEXITCODE = 1
+    return
+  }
+  if (-not (Test-Path $sddVersionScript)) {
+    Log "找不到 $sddVersionScript — SDD chaos LATEST 軌無法解析版本" 'ERROR'
+    $global:LASTEXITCODE = 1
+    return
+  }
+  # 同 Get-MutationLockGate 既有慣例：緊接原生呼叫捕捉 $LASTEXITCODE（R73「讀 rc
+  # 禁接管線」——這裡的管線末端是 cmdlet Out-String 而非 Add-Content 一類會覆寫
+  # $LASTEXITCODE 的 cmdlet，且捕捉點與呼叫點之間無其他原生指令插入）。
+  $sddLatestRaw = & $script:PyExe $sddVersionScript 2>&1 | Out-String
+  $sddLatestRc = $LASTEXITCODE
+  $sddLatestName = $sddLatestRaw.Trim()
+  # QA／SD 複審 P2：rc≠0（sdd_version.py **真的執行失敗**）與「rc=0 但輸出空白」
+  # 前一版被合併成同一個 WARN-跳過分支——sdd_version.py 執行失敗（腳本壞掉／
+  # 環境缺件）被靜默吞成「觀察期跳過」，讀者以為只是暫時沒有演化版可測，實際上
+  # 是解析工具本身壞了都沒人知道。兩者拆開：
+  #   rc≠0            ⇒ ERROR，本 stage 失敗（計入 finalFailures／
+  #                     sdd_chaos_latest 欄位，見下方 END summary）
+  #   rc=0 但輸出空白 ⇒ WARN 跳過——這是 `sdd_version.py` 目前唯一會在 rc=0 下
+  #                     回空字串的合法情境（例如全新 clone、尚未建立任何
+  #                     `AISDLC_SDD_v0.0N/` 演化版目錄），此時「僅凍結基線可測」
+  #                     是正確、非異常的終態，不應計入失敗。
+  # 觀察期（DEF-200-379）：LATEST 軌若能跑起來但 chaos 測試本身紅（下方
+  # pytest_rc／sweep_rc／parse_rc 任一非 0），只在本機 nightly 出聲、不影響雲端
+  # Rule 9.9.4「連 3 日鎖 main」（該規則只綁凍結基線 `chaos` job；本機 nightly
+  # 本無鎖 main 機制，此處失敗一律計入本檔自身的一般 stage exit 語意，與
+  # Rule 9.9.4 是兩件事——見本 stage 頂部「本機 nightly 沒有鎖 main 機制」註解）。
+  if ($sddLatestRc -ne 0) {
+    Log ("sdd_version.py 執行失敗（rc={0}）— SDD chaos LATEST 軌無法解析版本，非「無演化版可測」的正常終態（觀察期 DEF-200-379：本行是本機取證出聲，不影響雲端 Rule 9.9.4 判定）" -f $sddLatestRc) 'ERROR'
+    $global:LASTEXITCODE = 1
+    return
+  }
+  if (-not $sddLatestName) {
+    Log "sdd_version.py 回空字串（rc=0）— 尚無演化版目錄可測，SDD chaos LATEST 軌跳過（僅凍結基線可測；觀察期 DEF-200-379：跳過非失敗，不影響雲端 Rule 9.9.4）" 'WARN'
+    $global:LASTEXITCODE = 0
+    return
+  }
+  if ($sddLatestName -eq 'AISDLC_SDD_v0.01') {
+    Log "LATEST（$sddLatestName）等於凍結基線，無獨立演化版可測，跳過 LATEST 軌" 'WARN'
+    $global:LASTEXITCODE = 0
+    return
+  }
+  $sddLatestDir = Join-Path $sddRootChaos $sddLatestName
+  if (-not (Test-Path $sddLatestDir)) {
+    Log "找不到 $sddLatestDir — SDD chaos LATEST 軌無法執行" 'ERROR'
+    $global:LASTEXITCODE = 1
+    return
+  }
+  # 跨 leg CPU 預算廣播（DEF-200-289 同款鏈）：使用者已顯式設定其一則不覆寫；
+  # 算不出來（cpu_budget.py 缺席或執行失敗）一律 fail-open、不擋本 stage
+  # ——worker 數只影響快慢，不影響正確性。
+  $cpuBudgetScript = Join-Path $monoRootChaos 'tools\lib\cpu_budget.py'
+  if (-not $env:AUTOSDD_PARALLEL_TESTS_WORKERS -and -not $env:PYTEST_XDIST_AUTO_NUM_WORKERS) {
+    if (Test-Path $cpuBudgetScript) {
+      $cpuBudgetRaw = & $script:PyExe $cpuBudgetScript --legs 1 2>&1 | Out-String
+      $cpuBudgetOut = $cpuBudgetRaw.Trim()
+      if ($cpuBudgetOut -match '^\d+$') {
+        $env:AUTOSDD_PARALLEL_TESTS_WORKERS = $cpuBudgetOut
+        $env:PYTEST_XDIST_AUTO_NUM_WORKERS = $cpuBudgetOut
+        Log "[cpu_budget] broadcast workers=$cpuBudgetOut source=cpu_budget"
+      } else {
+        Log "cpu_budget 廣播跳過：$cpuBudgetScript 執行失敗或輸出非整數（fail-open）" 'WARN'
+      }
+    } else {
+      Log "cpu_budget 廣播跳過：$cpuBudgetScript 不存在（fail-open）" 'WARN'
+    }
+  } else {
+    $cpuBudgetPreset = if ($env:AUTOSDD_PARALLEL_TESTS_WORKERS) { $env:AUTOSDD_PARALLEL_TESTS_WORKERS } else { $env:PYTEST_XDIST_AUTO_NUM_WORKERS }
+    Log "[cpu_budget] broadcast skipped: workers=$cpuBudgetPreset source=env"
+  }
+  $chaosSeedLatest = (Get-Date).ToUniversalTime().ToString('yyyyMMdd')
+  Push-Location $sddLatestDir
+  try {
+    # LATEST 版 `conftest.py` re-export 共用層的 `pytest_xdist_auto_num_workers`／
+    # `pytest_xdist_setupnodes` hook（見 AISDLC_SDD/AISDLC_SDD_v0.30/conftest.py
+    # DEF-200-353）：本呼叫會印 `[cpu_budget] xdist workers=<N> source=env` 與
+    # `[cpu_budget] xdist nodes confirmed=<N>` 兩行可稽核字面，接住上方的
+    # broadcast 鏈。
+    Invoke-Native { & $script:PyExe -m pytest tools/fsm_runtime/tests/ -m chaos -q -n auto --dist worksteal }
+    $chaosPytestRcLatest = $LASTEXITCODE
+    Invoke-Native {
+      & $script:PyExe -m tools.fsm_runtime.chaos_runner --rounds 100 --seed $chaosSeedLatest --json |
+        Out-File -Encoding utf8 chaos-report.json
+    }
+    $chaosSweepRcLatest = $LASTEXITCODE
+    # 禁用 %-formatting 理由同上方 Stage 6（DEF-101-503）。
+    Invoke-Native {
+      & $script:PyExe -c "import json; d=json.load(open('chaos-report.json', encoding='utf-8-sig')); print('chaos sweep (LATEST) bounded={}/{} avg_tokens={} max_steps={}'.format(d['bounded_rounds'], d['total_rounds'], d['avg_tokens'], d['max_steps']))"
+    }
+    $chaosParseRcLatest = $LASTEXITCODE
+    if ($chaosPytestRcLatest -ne 0 -or $chaosSweepRcLatest -ne 0 -or $chaosParseRcLatest -ne 0) {
+      Log ("SDD chaos LATEST（{0}）軌失敗：pytest_rc={1} sweep_rc={2} parse_rc={3}（觀察期 DEF-200-379：LATEST 軌紅＝出聲，不影響雲端 Rule 9.9.4「連 3 日鎖 main」——該規則只綁凍結基線 chaos job；此處失敗仍計入本檔自身的一般 stage exit／finalFailures，兩件事不要混為一談）" -f $sddLatestName, $chaosPytestRcLatest, $chaosSweepRcLatest, $chaosParseRcLatest) 'ERROR'
+      $global:LASTEXITCODE = 1
+    } else {
+      $global:LASTEXITCODE = 0
+    }
+  } finally {
+    Pop-Location
+  }
+}
+
 # ----- Cleanup（僅清掉本次新建的臨時 container；既有的不動）-----
 # SD_09 W3 Round 21 audit QA P1-R21-2 修復（紀律 #1 真實 rc）：
 #   舊版 `$global:LASTEXITCODE = 0` 強制清零會吞掉 docker rm 失敗的真實 rc，
@@ -1757,9 +1881,13 @@ $rc4Label = Format-Rc $rc4
 $rc5Label = Format-Rc $rc5
 $rcGateLabel = Format-Rc $rcGate
 $rcChaosLabel = Format-Rc $rcChaos
+$rcChaosLatestLabel = Format-Rc $rcChaosLatest
 # R9 複審 (b)：local_ci_gate 欄位附加於既有五欄之後（不動既有欄位順序，下游以
 # 具名欄位解析不受影響）；R10 QA-6：sdd_chaos 依同慣例再附加於其後。
-Log "END nightly summary: mutation=$rc1Label pg-e2e=$rc2Label perf=$rc3Label drift=$rc4Label obs=$rc5Label local_ci_gate=$rcGateLabel sdd_chaos=$rcChaosLabel"
+# DEF-200-379：sdd_chaos_latest 依同慣例再附加於 sdd_chaos 之後——與凍結基線軌
+# 分開列名，讀者不必猜「紅的是哪一軌」（LATEST 軌無 Rule 9.9.4 鎖 main 對應，
+# 但本機 nightly 沒有鎖 main 機制，兩欄在本檔語意上對等，皆計入一般 stage 失敗）。
+Log "END nightly summary: mutation=$rc1Label pg-e2e=$rc2Label perf=$rc3Label drift=$rc4Label obs=$rc5Label local_ci_gate=$rcGateLabel sdd_chaos=$rcChaosLabel sdd_chaos_latest=$rcChaosLatestLabel"
 $summaryJson = ConvertTo-Json -Compress -InputObject @{
   mutation = [int]$rc1
   'pg-e2e' = [int]$rc2
@@ -1768,6 +1896,7 @@ $summaryJson = ConvertTo-Json -Compress -InputObject @{
   obs = [int]$rc5
   local_ci_gate = [int]$rcGate
   sdd_chaos = [int]$rcChaos
+  sdd_chaos_latest = [int]$rcChaosLatest
   skip_sentinel = $SKIP_RC
 }
 Log "END nightly summary json: $summaryJson"
@@ -2126,7 +2255,8 @@ if ($script:PyExe -and (Test-Path $schedDriftScript)) {
 $finalFailures = @()
 foreach ($pair in @(
     @('local_ci_gate', $rcGate), @('mutation', $rc1), @('pg-e2e', $rc2),
-    @('perf', $rc3), @('drift', $rc4), @('obs', $rc5), @('sdd_chaos', $rcChaos))) {
+    @('perf', $rc3), @('drift', $rc4), @('obs', $rc5), @('sdd_chaos', $rcChaos),
+    @('sdd_chaos_latest', $rcChaosLatest))) {
   $stageRc = [int]$pair[1]
   if ($stageRc -ne $SKIP_RC -and $stageRc -ne 0 -and $stageRc -ne 2) {
     $finalFailures += ('{0}={1}' -f $pair[0], $stageRc)

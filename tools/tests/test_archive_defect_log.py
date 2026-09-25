@@ -18,10 +18,10 @@ import contextlib
 import io
 import os
 import re
-import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -264,19 +264,51 @@ def _run_check() -> tuple[int, list[str], list[str]]:
     return rc, problems, quoted
 
 
+def _stable_snapshot_bytes(path: Path, *, retries: int = 20, delay: float = 0.05) -> bytes:
+    """讀 `path` 的**穩定快照**：`stat()` → `read_bytes()` → 再 `stat()` 一次，只有
+    `(st_mtime_ns, st_size)` 前後相同且讀到的位元組數等於後一次 `st_size` 才視為穩定，
+    否則短暫等待後重試，最多 `retries` 次；仍不穩定就 fail loud（丟出明確訊息），
+    **不得**靜默把撕裂內容當成正常內容回傳。
+
+    DEF-200-380：`_ledger_sandbox()` 原本直接 `shutil.copy2` 帳本家族到沙箱——若同時
+    有人（或記帳 agent）正在編輯帳本，`copy2` 可能拷到「半新半舊」的撕裂內容（QA 探針
+    4000 次拷貝中 20% 非任一版本、2.6% 為拼接），而撕裂內容仍可能通過表頭判準，讓
+    `test_main_ledger_carries_no_leftover_index_bullet` 等測試偶發假紅／假綠。改用本函式
+    取代 `copy2`，把「工作樹現況」這個語意換成「工作樹在快照窗口內的一份自洽快照」，
+    而不是改讀 git HEAD——那會讓測試看不到尚未 commit 的違規（不是本函式要修的問題）。
+    """
+    last_data: bytes | None = None
+    for _ in range(retries):
+        st1 = path.stat()
+        data = path.read_bytes()
+        st2 = path.stat()
+        stable = (st1.st_mtime_ns, st1.st_size) == (st2.st_mtime_ns, st2.st_size)
+        if stable and len(data) == st2.st_size:
+            return data
+        last_data = data
+        time.sleep(delay)
+    raise AssertionError(
+        f"{path} 在快照期間持續被改動（重試 {retries} 次、每次間隔 {delay}s 後仍不穩定）—— "
+        "帳本家族疑似正被同時編輯（例如記帳 agent 併發寫入）。請勿在跑測試時編輯帳本；"
+        f"拒絕把可能撕裂的內容複製進沙箱（DEF-200-380）。最後一次讀到 {len(last_data or b'')} "
+        "bytes，僅供除錯，不會被使用"
+    )
+
+
 @contextlib.contextmanager
 def _ledger_sandbox():
     """把帳本家族複製到 tmp 目錄，並把 `ADL` 的路徑常數指過去，離開時原樣還原。
 
     🔴 為何一定要沙箱：`check()` 的鑑別力只能靠「注入 → 必須轉紅」證明，而注入對象是
     **tracked 的帳本主檔與 archive**。直接改 repo 檔的風險本輪已實際付過代價（本輪一度
-    有 agent 寫穿 15 支 tracked YAML），故一律 `copy2` 到 tmp 後 monkeypatch。
+    有 agent 寫穿 15 支 tracked YAML），故一律先取穩定快照再寫入 tmp 後 monkeypatch
+    （DEF-200-380：不能再用 `shutil.copy2` 直讀——見 `_stable_snapshot_bytes` docstring）。
     """
     with tempfile.TemporaryDirectory() as td:
         dst = Path(td) / "06_quality"
         dst.mkdir(parents=True)
         for src in ADL._family_files():
-            shutil.copy2(src, dst / src.name)
+            (dst / src.name).write_bytes(_stable_snapshot_bytes(src))
         old_quality, old_ledger = ADL._QUALITY_DIR, ADL._LEDGER
         ADL._QUALITY_DIR = dst
         ADL._LEDGER = dst / old_ledger.name
@@ -289,6 +321,168 @@ def _ledger_sandbox():
 def _append_to(path: Path, text: str) -> None:
     """bytes 層追加（不經 os.linesep 翻譯，避免注入本身順手製造 CRLF 假訊號）。"""
     path.write_bytes(path.read_bytes() + text.encode("utf-8"))
+
+
+class _FlappingFile:
+    """假造的『每次 `stat()` 都變』檔案物件，模擬持續被改寫、永遠等不到穩定窗口的來源
+    （供 `TestStableSnapshotRejectsTornConcurrentWrites` 用；不是真的檔案，只需滿足
+    `_stable_snapshot_bytes()` 用到的 `.stat()`／`.read_bytes()` 兩個方法）。
+    """
+
+    def __init__(self, data: bytes):
+        self._data = data
+        self._calls = 0
+
+    def stat(self):
+        self._calls += 1
+        # 每次呼叫的 size 都不同 ⇒ 前後兩次 (mtime_ns, size) 恆不相等，永遠判不穩定。
+        now = time.time()
+        return os.stat_result(
+            (0o100644, 0, 0, 1, 0, 0, len(self._data) + self._calls, now, now, now)
+        )
+
+    def read_bytes(self) -> bytes:
+        return self._data
+
+    def __str__(self) -> str:
+        return "<flapping-file>"
+
+
+class TestStableSnapshotRejectsTornConcurrentWrites(unittest.TestCase):
+    """`_stable_snapshot_bytes()`（DEF-200-380）的自我測試。
+
+    WHY：`_ledger_sandbox()` 原本用 `shutil.copy2` 直接拷貝帳本家族——若拷貝當下有人
+    （或記帳 agent）正在編輯帳本，`copy2` 可能拷到『半新半舊』的撕裂內容，而撕裂內容
+    仍可能通過表頭判準，讓依賴沙箱的測試偶發假紅（誤判撕裂內容裡缺了什麼）或假綠
+    （撕裂剛好拼出看似合法的狀態）——兩者都與被測程式碼的真實行為無關，是**測試載具
+    自己的瑕疵**冒充成受測程式的訊號。修法要求『讀前讀後 stat 相同才算穩定』，本測試
+    坐實兩件事：(a) 永遠等不到穩定窗口的來源必須 fail loud，不能安靜吞下最後一次讀到
+    的撕裂內容去污染下游斷言；(b) 穩定的來源必須原樣正常回傳，不能因為修法而誤傷了
+    原本就會過的情況（控制組——沒有它，上面那條可以被『凡是重試就報錯』滿足）。
+    """
+
+    def test_a_file_whose_stat_never_settles_is_fail_loud_not_silently_sandboxed(self):
+        flapping = _FlappingFile(b"torn content that must never reach the sandbox")
+        with self.assertRaises(AssertionError) as ctx:
+            _stable_snapshot_bytes(flapping, retries=3, delay=0.0)
+        self.assertIn(
+            "持續被改動", str(ctx.exception),
+            "永遠拿不到穩定窗口時必須明確說『這是撕裂讀取的疑慮』，不能只丟一個泛用例外"
+            "讓呼叫端誤以為是其他原因失敗",
+        )
+
+    def test_a_stable_file_is_returned_normally(self):
+        self.assertTrue(_MAIN_LEDGER.exists(), "控制組需要真實帳本主檔存在")
+        data = _stable_snapshot_bytes(_MAIN_LEDGER, retries=3, delay=0.0)
+        self.assertEqual(
+            data, _MAIN_LEDGER.read_bytes(),
+            "穩定來源理應原樣讀回；修法不得誤傷本來就會通過的情況",
+        )
+
+
+class _SettlesAfterNAttempts:
+    """假造『前 N-1 次不穩定、第 N 次收斂』的檔案物件（QA 複審 P3-4 中間案例）。
+
+    與 `_FlappingFile`（永遠不收斂）互補：`_FlappingFile` 只坐實「永遠等不到穩定窗口
+    必須 fail loud」，沒有坐實「重試機制本身真的會讓後續嘗試收斂並成功」——一支只測
+    兩端點（首次即穩定 vs 永遠不穩定）的測試套件，對「重試 N 次後才穩定」這整段中間
+    行為是零鑑別力的：如果 `_stable_snapshot_bytes()` 的迴圈被誤改成只跑一次就死心，
+    既有兩支測試都看不出來（`_FlappingFile` 案例本來就該紅、控制組本來就該綠）。
+    """
+
+    def __init__(self, data: bytes, unstable_attempts: int):
+        self._data = data
+        self._unstable_attempts = unstable_attempts
+        self._stat_calls = 0
+
+    def stat(self):
+        self._stat_calls += 1
+        # 每次「嘗試」呼叫兩次 stat()（st1、st2）；`attempt` 換算目前是第幾次嘗試。
+        attempt = (self._stat_calls - 1) // 2 + 1
+        if attempt <= self._unstable_attempts:
+            # 仍在不穩定窗口：size／mtime 隨每次 stat() 呼叫變動 ⇒ 同一嘗試內
+            # st1 != st2 恆成立。
+            size = len(self._data) + self._stat_calls
+            mtime = 1000.0 + self._stat_calls
+        else:
+            # 已收斂：同一嘗試內兩次 stat() 回傳完全相同的 (mtime, size)。
+            size = len(self._data)
+            mtime = 99999.0
+        return os.stat_result((0o100644, 0, 0, 1, 0, 0, size, mtime, mtime, mtime))
+
+    def read_bytes(self) -> bytes:
+        return self._data
+
+    def __str__(self) -> str:
+        return "<settles-after-n-attempts-file>"
+
+
+class _LengthMismatchOnceFile:
+    """假造『stat() 前後一致（穩定）卻 read_bytes() 讀到的位元組數與 st_size 不符』的
+    torn-read 來源（QA 複審 P3-4 中間案例；DEF-200-380 docstring 點名的第三種撕裂
+    形態）：第一次嘗試 stat 回報的 size 前後相同，但夾在兩次 stat() 中間的
+    `read_bytes()` 讀到的內容長度與該 size 不符；第二次嘗試才回到一致。
+
+    WHY 需要這支獨立於 `_FlappingFile` 的假物件：`_FlappingFile` 的不穩定訊號完全
+    來自 `stat()` 本身變動（`(mtime_ns, size)` 前後不等），無法坐實
+    `_stable_snapshot_bytes()` 的第二道核對 `len(data) == st2.st_size`
+    ——那道核對接住的正是『stat 兩次回報一致，但夾在中間讀到的內容長度另有蹊蹺』
+    這種更隱蔽的撕裂：純看 stat 前後是否相等的判準對它完全瞎眼。
+    """
+
+    def __init__(self, real_data: bytes, torn_data: bytes):
+        self._real_data = real_data
+        self._torn_data = torn_data
+        self._reads = 0
+
+    def stat(self):
+        # 兩次 stat() 恆回報與 real_data 等長的 size——『stat 本身穩定』的假象；
+        # 真正的撕裂藏在 read_bytes() 回傳的位元組數上，不靠 stat 的變動製造不穩定。
+        return os.stat_result(
+            (0o100644, 0, 0, 1, 0, 0, len(self._real_data), 1.0, 1.0, 1.0)
+        )
+
+    def read_bytes(self) -> bytes:
+        self._reads += 1
+        if self._reads == 1:
+            return self._torn_data  # 第一次嘗試：長度與 stat 回報的 st_size 不符
+        return self._real_data
+
+    def __str__(self) -> str:
+        return "<length-mismatch-once-file>"
+
+
+class TestStableSnapshotHandlesIntermediateCases(unittest.TestCase):
+    """`_stable_snapshot_bytes()` 的兩個中間案例（QA 複審 P3-4）：介於『首次即穩定』與
+    『永遠不穩定』兩端點之間的行為，既有測試（`TestStableSnapshotRejectsTornConcurrent
+    Writes`）對它們零鑑別力。
+    """
+
+    def test_it_settles_on_a_later_attempt_and_returns_that_attempts_content(self):
+        """前 N-1 次不穩定、第 N 次穩定 ⇒ 正常回傳第 N 次讀到的內容（不是前面任一次
+        撕裂內容，也不因為前面重試過就誤判失敗）。
+        """
+        data = b"content that only settles on the third attempt"
+        src = _SettlesAfterNAttempts(data, unstable_attempts=2)
+        result = _stable_snapshot_bytes(src, retries=5, delay=0.0)
+        self.assertEqual(
+            result, data,
+            "重試 2 次不穩定後第 3 次收斂，應正常回傳該次讀到的內容",
+        )
+
+    def test_it_retries_when_stat_is_stable_but_the_read_length_disagrees(self):
+        """stat 前後一致但讀到的長度 ≠ st_size ⇒ 視為不穩定並重試，不得把第一次
+        撕裂讀取的內容當成穩定結果回傳。
+        """
+        real_data = b"the real, complete content of the file"
+        torn_data = real_data[:-5]  # 較短的撕裂內容，stat 卻仍回報完整長度
+        src = _LengthMismatchOnceFile(real_data, torn_data)
+        result = _stable_snapshot_bytes(src, retries=5, delay=0.0)
+        self.assertEqual(
+            result, real_data,
+            "stat 前後一致但讀到的長度與 st_size 不符時應視為不穩定並重試，不得把"
+            "第一次撕裂讀取的內容當成穩定結果回傳",
+        )
 
 
 class TestActiveStatusRegexUsesAsciiBoundaries(unittest.TestCase):
@@ -591,6 +785,111 @@ class TestPlanRejectsRowsWithExternalResidencePointers(unittest.TestCase):
                 "DEF-999-994", [v["id"] for v in p["movable"]],
                 "code span 內逐字引述判準語法被判準⑥ 誤判為真實宣稱 —— 未共用 check() 的"
                 "豁免基元（`_quotation_kind`）",
+            )
+
+    def test_pointer_verb_inside_a_fenced_code_block_does_not_block(self):
+        """`_quotation_kind()` 的 (丙) ``` 圍籬區塊例外——逐字重現的『立帳見』指針語法
+        落在圍籬區塊內時不算宣稱（與 (甲) code span 同一原理，只是圍籬跨行、必須用
+        `_fenced_line_numbers()` 的行狀態機才判得出）。
+
+        🔴 誠實劃界（QA 複審 P2-2）：`_quotation_kind()` 的 (乙) 術語提及（動詞後緊接
+        `」`／`』`、無 scope 無 ID 的裸『立帳見」』）在 `_residence_claims_index()` 這個
+        呼叫端**不可能觸發**——本函式只在 `POINTER_RE.finditer(line)` 找到匹配後才呼叫
+        `_quotation_kind(line, m.start(), ...)`，而 `POINTER_RE` 要求「立帳見」後必須緊跟
+        可解析的 DEF-ID（scope 可選、ID 不可選）；(乙) 的條件恰恰是「立帳見」後**沒有**
+        scope／ID、緊接的是閉合引號——兩者互斥，`m.start()` 這個位置不可能同時滿足
+        「POINTER_RE 在此匹配」與「(乙) 的字元序列在此出現」。`check()`（判準(4)）能觸發
+        (乙) 是因為它改走 `line.find(POINTER_VERB)` 逐一掃描動詞出現位置、不要求先有
+        POINTER_RE 匹配；`_residence_claims_index()` 沒有那條路徑，故本測試只補 (丙)，
+        (乙) 不補正樣本（死碼，非遺漏）。
+        """
+        with _ledger_sandbox():
+            self._seed_movable_row()
+            _append_to(
+                ADL._LEDGER,
+                "\n```\n立帳見主檔 `DEF-999-994`\n```\n",
+            )
+            p = ADL.plan()
+            self.assertIn(
+                "DEF-999-994", [v["id"] for v in p["movable"]],
+                "``` 圍籬區塊內逐字重現的『立帳見』指針語法被判準⑥ 誤判為真實宣稱 —— "
+                "未共用 check() 的圍籬豁免（`_fenced_line_numbers()`／`in_fence`）",
+            )
+
+    def test_pointer_verb_scope_bent_is_local_to_the_file_it_appears_in(self):
+        """判準⑥ 的『立帳見本表』scope 只宣稱『指針所在的那份檔現居本表』——同一句話
+        出現在非主檔（archive）內時，宣稱的是『這份 archive 現居本表』，與『現居主檔』
+        無關，`_residence_claims_index()` 必須排除、不得攔下。
+
+        對應分支：`if m.group("scope") == "本表" and fname != _LEDGER.name: continue`。
+        """
+        with _ledger_sandbox() as dst:
+            self._seed_movable_row()
+            archive30 = dst / _ARCHIVE_30.name
+            self.assertTrue(archive30.exists(), "沙箱應已複製 archive_30，前提失效")
+            _append_to(archive30, "\n立帳見本表 `DEF-999-994`。\n")
+            p = ADL.plan()
+            self.assertIn(
+                "DEF-999-994", [v["id"] for v in p["movable"]],
+                "『立帳見本表』出現在 archive（非主檔）內時宣稱的是『該 archive 現居本表』，"
+                "與『現居主檔』無關，不該被判準⑥（指針反向依賴）攔下",
+            )
+
+    def test_nonverb_form_already_claiming_an_archive_does_not_block(self):
+        """NONVERB_RESIDENCE_RE 的排除① — `archive` 群組非空：『見主檔…（現居
+        archive_NN）』宣稱的是『現居該 archive』，與『現居主檔』無關，不該被攔下。
+
+        對應分支：`if m.group("archive") or m.group("scope") != "主檔" or lineno in fenced`
+        —— 本測試以 scope="主檔"（不觸發第二子句）孤立驗證 `archive` 子句本身。
+        """
+        with _ledger_sandbox():
+            self._seed_movable_row()
+            _append_to(ADL._LEDGER, "\n見主檔 `DEF-999-994`（現居 archive_01）。\n")
+            p = ADL.plan()
+            self.assertIn(
+                "DEF-999-994", [v["id"] for v in p["movable"]],
+                "『見…（現居 archive_NN）』的 archive 群組非空時宣稱的是該 archive，"
+                "不該被判準⑥（現居主檔）攔下",
+            )
+
+    def test_nonverb_form_without_main_ledger_scope_does_not_block(self):
+        """NONVERB_RESIDENCE_RE 的排除② — `scope != "主檔"`：裸『見 DEF-x』（無 scope、
+        無現居註記）不算居所宣稱，刻意跳過（強判等同瞎猜，同 NONVERB_RESIDENCE_RE
+        docstring）。本測試以 archive=None（不觸發第一子句）孤立驗證 scope 子句本身。
+        """
+        with _ledger_sandbox():
+            self._seed_movable_row()
+            _append_to(ADL._LEDGER, "\n見 `DEF-999-994`，細節詳下段。\n")
+            p = ADL.plan()
+            self.assertIn(
+                "DEF-999-994", [v["id"] for v in p["movable"]],
+                "『見 DEF-x』（無 scope、無現居註記）不算居所宣稱，不該被判準⑥攔下",
+            )
+
+    def test_nonverb_form_inside_a_fenced_code_block_does_not_block(self):
+        """NONVERB_RESIDENCE_RE 的排除③ — 落在 ``` 圍籬區塊內：逐字重現，不算宣稱。
+        本測試以 scope="主檔"、archive=None（不觸發前兩子句）孤立驗證 fenced 子句本身。
+        """
+        with _ledger_sandbox():
+            self._seed_movable_row()
+            _append_to(ADL._LEDGER, "\n```\n見主檔 `DEF-999-994`\n```\n")
+            p = ADL.plan()
+            self.assertIn(
+                "DEF-999-994", [v["id"] for v in p["movable"]],
+                "圍籬區塊內的『見主檔』方言指針被判準⑥ 誤判為真實宣稱",
+            )
+
+    def test_nonverb_form_inside_a_code_span_does_not_block(self):
+        """NONVERB_RESIDENCE_RE 的排除④ — 落在 inline code span 內：逐字引述，不算宣稱。
+        對應分支：`if any(s <= m.start() < e for s, e in spans): continue`。
+        """
+        with _ledger_sandbox():
+            self._seed_movable_row()
+            _append_to(ADL._LEDGER, "\n範例語法：`見主檔 DEF-999-994`（僅供說明）。\n")
+            p = ADL.plan()
+            self.assertIn(
+                "DEF-999-994", [v["id"] for v in p["movable"]],
+                "code span 內的『見主檔』方言指針被判準⑥ 誤判為真實宣稱",
             )
 
 
@@ -3152,13 +3451,20 @@ class TestArchiveIndexDocIsExternalized(unittest.TestCase):
         )
 
     def test_main_ledger_carries_no_leftover_index_bullet(self):
-        """(丙) 主檔零殘留 bullet；且 `--apply` 把新 bullet 寫進索引檔而非主檔。"""
-        self.assertEqual(
-            ADL.index_bullet_lines(ADL._LEDGER.read_text(encoding="utf-8-sig")), [],
-            "主檔仍殘留歸檔索引 bullet ⇒ 兩份索引並存，判準⑤ 只讀索引檔那一份，"
-            "主檔那份腐化零訊號",
-        )
+        """(丙) 主檔零殘留 bullet；且 `--apply` 把新 bullet 寫進索引檔而非主檔。
+
+        🔴 DEF-200-380：前段「主檔目前零殘留」的檢查與後段 apply() 注入必須讀**同一份**
+        凍結快照——刻意搬進 `_ledger_sandbox()` 之內，讀 `ADL._LEDGER`（此時已被沙箱
+        monkeypatch 指向 tmp 內的穩定快照副本），不直讀 repo 內的 live 檔。若在沙箱外先
+        讀一次 live 檔、再進沙箱讀第二次，兩次讀到的內容可能不是同一個時間點（工作樹在
+        兩次讀之間可能被同時編輯），會讓這支測試偶發假紅／假綠且與本測試要驗的行為無關。
+        """
         with _ledger_sandbox():
+            self.assertEqual(
+                ADL.index_bullet_lines(ADL._LEDGER.read_text(encoding="utf-8-sig")), [],
+                "主檔仍殘留歸檔索引 bullet ⇒ 兩份索引並存，判準⑤ 只讀索引檔那一份，"
+                "主檔那份腐化零訊號",
+            )
             synth_id = "DEF-" + _SYNTH_FAMILY + "9" + "92"
             _append_to(
                 ADL._LEDGER,

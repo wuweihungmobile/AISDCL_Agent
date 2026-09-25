@@ -55,6 +55,7 @@ _AUTOCLAUDE_CI = _REPO_ROOT / ".github" / "workflows" / "autoclaude-ci.yml"
 _WINDOWS_COMPAT_CI = _REPO_ROOT / ".github" / "workflows" / "windows-compat-ci.yml"
 _MACOS_COMPAT_CI = _REPO_ROOT / ".github" / "workflows" / "macos-compat-ci.yml"
 _ROOT_INFRA_CI = _REPO_ROOT / ".github" / "workflows" / "root-infra-ci.yml"
+_FSM_CHAOS_NIGHTLY = _REPO_ROOT / ".github" / "workflows" / "aisdlc-sdd-fsm-chaos-nightly.yml"
 
 # R69：豁免到期的本機示警門檻（天）。CI 上到期即自動轉紅是**設計正確**，但那是
 # 「到期當天才在雲端炸」；本機此前只驗「不得超過 MAX_WAIVER_DAYS 上限」，過期後
@@ -1605,6 +1606,156 @@ class TestTrackedScriptsScanSurfaceCoversUntracked(unittest.TestCase):
             "probe_untracked_only.sh", rels,
             "`-o --exclude-standard`（untracked-not-ignored）呼叫的結果沒有被併進"
             "最終清單——union 邏輯若退化成只認 tracked 呼叫，本測試會抓到",
+        )
+
+
+# DEF-200-379：`chaos-latest`（LATEST 觀察軌）的顯示名——升級判準 (c) 用來確認
+# 觀察期語意沒有被無意破壞。**不是** GATING_JOB_NAMES 目前的合法值（那正是本鎖要
+# 擋的事）；觀察期滿、掌舵者裁決升級後，GATING_JOB_NAMES 才會（且應該）納入它，
+# 屆時要同步改 `TestFsmChaosNightlyStreakReadsJobLayer.
+# test_gating_job_names_does_not_yet_include_chaos_latest`（見該測試 docstring）。
+_CHAOS_LATEST_JOB_DISPLAY_NAME = (
+    "fsm-runtime chaos suite (LATEST track — observation period, DEF-200-379)"
+)
+
+
+class TestFsmChaosNightlyStreakReadsJobLayer(unittest.TestCase):
+    """DEF-200-379（三位複審一致命中）：`aisdlc-sdd-fsm-chaos-nightly.yml` 的
+    `track-streak-and-lock` 連敗計數必須讀 **job 層** conclusion，不得直接消費
+    run 層 `workflow_runs[].conclusion`。
+
+    立案：本 workflow 自 DEF-200-379 起有兩顆平行、互不相依的 job（`chaos` 凍結
+    基線／`chaos-latest` LATEST 觀察軌，無 `needs` 互相依賴）。任一顆紅都會讓
+    run 層 `conclusion` 報 failure，run 層結構上分不出「凍結基線真的紅」與
+    「只有觀察軌紅」。Rule 9.9.4「連 3 日鎖 main」只認凍結基線；若連敗計數沿用
+    run 層，觀察期內只因 `chaos-latest` 紅的夜晚會被誤計入連敗，違反掌舵者
+    「觀察期內只出聲、不計入」的裁決——形同觀察期從未存在。
+
+    同型先例：`TestNightlyJobNameSelectorInterlock`（本檔上方）鎖住 alert 的
+    jq 選擇子與 nightly-full 的 `name:` 互鎖；本類別是同一種「job 顯示名沒有
+    共用來源，只能靠機械鎖互鎖」處境在 fsm-chaos-nightly.yml 的對等物。
+    """
+
+    def _streak_step(self) -> str:
+        text = _FSM_CHAOS_NIGHTLY.read_text(encoding="utf-8")
+        block = _job_block(text, "track-streak-and-lock")
+        m = re.search(
+            r"^      - name: Query recent nightly run conclusions.*?"
+            r"(?=^      - name: |\Z)",
+            block, re.MULTILINE | re.DOTALL,
+        )
+        self.assertIsNotNone(
+            m, "track-streak-and-lock 找不到「Query recent nightly run "
+               "conclusions」step——結構已變動，本鎖失去比對對象",
+        )
+        return m.group(0)
+
+    def test_streak_query_reads_the_job_layer_endpoint(self):
+        """(a) 連敗查詢必須實際呼叫 job 層端點（/actions/runs/<id>/jobs）。"""
+        exec_only = _strip_comment_lines(self._streak_step())
+        self.assertIn(
+            "actions/runs/${run_id}/jobs", exec_only,
+            "streak 查詢沒有呼叫 job 層端點（gh api 的 actions/runs/<id>/jobs）"
+            "——退回只讀 run 層時，同一 run 內 chaos-latest 紅會被算進 chaos 的"
+            "連敗計數（DEF-200-379）",
+        )
+
+    def test_streak_count_does_not_read_run_level_conclusion_directly(self):
+        """(a) 反向：run 層列表查詢（`workflow_runs[]`）的 jq 過濾式不得再取用
+        `.conclusion`——那正是修復前的病因：run 層 conclusion 分不出兩顆 job
+        誰紅，連敗計數不得以它為輸入。
+        """
+        exec_only = _strip_comment_lines(self._streak_step())
+        self.assertNotRegex(
+            exec_only, r"workflow_runs\[\][^\n]*\.conclusion",
+            "run 層列表查詢（workflow_runs[]）的 jq 過濾式仍在取用 `.conclusion`"
+            "——連敗計數必須改讀 job 層，不得以 run 層 conclusion 為輸入"
+            "（DEF-200-379）",
+        )
+
+    def test_gating_job_names_matches_the_chaos_job_display_name_exactly(self):
+        """(b) `GATING_JOB_NAMES` 的值必須與 `jobs.chaos.name` 逐字一致。
+
+        兩者是兩份手寫字面值，中間沒有共用來源（GitHub Actions 的
+        `jobs.<id>.name` 不支援 `env` context，抽成變數這條路不通，同
+        `TestNightlyJobNameSelectorInterlock` docstring 的論證）——改了 `chaos`
+        job 的顯示名卻忘了同步 `GATING_JOB_NAMES`，選擇子會靜默落空、job 層
+        查詢查不到任何 job，連敗計數永遠只等於 1。
+        """
+        text = _FSM_CHAOS_NIGHTLY.read_text(encoding="utf-8")
+        chaos_name = _job_display_name(_job_block(text, "chaos"))
+        m = re.search(r'GATING_JOB_NAMES:\s*"([^"]*)"', self._streak_step())
+        self.assertIsNotNone(
+            m, "streak step 找不到 `GATING_JOB_NAMES:` 環境變數宣告",
+        )
+        self.assertEqual(
+            m.group(1), chaos_name,
+            f"GATING_JOB_NAMES={m.group(1)!r} 與 `chaos` job 的顯示名 "
+            f"{chaos_name!r} 不一致",
+        )
+
+    def test_gating_job_names_does_not_yet_include_chaos_latest(self):
+        """(c) 觀察期未滿：`GATING_JOB_NAMES` 現在不得含 `chaos-latest` 的顯示名。
+
+        🔴 升級時要改這支鎖：觀察期滿（DEF-200-379：首次排程 run 起連續 7 次
+        排程 run，最早 2026-10-03 起）、掌舵者裁決把 `chaos-latest` 併入
+        Rule 9.9.4 鎖 main 判定後，`GATING_JOB_NAMES` 才會（且應該）含
+        `chaos-latest` 的顯示名——屆時本測試要跟著改寫或刪除，不是永久斷言。
+        """
+        m = re.search(r'GATING_JOB_NAMES:\s*"([^"]*)"', self._streak_step())
+        self.assertIsNotNone(
+            m, "streak step 找不到 `GATING_JOB_NAMES:` 環境變數宣告",
+        )
+        self.assertNotIn(
+            _CHAOS_LATEST_JOB_DISPLAY_NAME, m.group(1),
+            "觀察期未滿（DEF-200-379），GATING_JOB_NAMES 卻已含 chaos-latest 的"
+            "顯示名——這會讓觀察軌提早計入 Rule 9.9.4 連敗判定，違反掌舵者裁決",
+        )
+
+    def test_chaos_latest_is_not_in_the_streak_jobs_needs(self):
+        """(d) `chaos-latest` 不得出現在 `track-streak-and-lock` 的 `needs:`。
+
+        該 job 只應依賴凍結基線軌 `chaos`；依賴到觀察軌會讓 `chaos-latest` 單獨
+        失敗就直接觸發連敗判定 job 執行，繞過 job 層 gating（(a)(b)(c) 三支鎖）
+        提供的間接保護——`needs` 決定「這個 job 何時被觸發」，與「觸發後怎麼算
+        連敗」是兩層獨立防線，缺一不可。
+        """
+        text = _FSM_CHAOS_NIGHTLY.read_text(encoding="utf-8")
+        block = _job_block(text, "track-streak-and-lock")
+        m = re.search(r"^    needs:\s*(.+)\s*$", block, re.MULTILINE)
+        self.assertIsNotNone(m, "track-streak-and-lock 找不到 `needs:` 宣告")
+        self.assertNotIn(
+            "chaos-latest", m.group(1),
+            f"track-streak-and-lock 的 needs（{m.group(1)!r}）含 chaos-latest",
+        )
+
+    _HARDCODED_VERSION_RE = re.compile(r"AISDLC_SDD_v0\.\d+")
+
+    def test_chaos_latest_resolves_latest_via_sdd_version_script(self):
+        """(e) `chaos-latest` 的 LATEST 版號必須經 `sdd_version.py` 現查。"""
+        text = _FSM_CHAOS_NIGHTLY.read_text(encoding="utf-8")
+        block = _job_block(text, "chaos-latest")
+        self.assertIn(
+            "AISDLC_SDD/scripts/sdd_version.py", block,
+            "chaos-latest job 內找不到對 sdd_version.py 的呼叫——LATEST 版號的"
+            "解析入口被移除或改寫",
+        )
+
+    def test_chaos_latest_job_scope_has_no_hardcoded_version_literal(self):
+        """(e) `chaos-latest` job 範圍（`_job_block` 定義的區塊，即 `  chaos-latest:`
+        起至下一個同層 job 為止）內不得出現寫死的 `AISDLC_SDD_v0.<數字>` 字面
+        （v0.01 凍結基線軌本身在 `chaos` job 範圍內、不受本鎖管轄）。
+
+        CLAUDE.md〈版本狀態〉：LATEST 一律現查 `sdd_version.py`，不得寫死版號
+        ——寫死的版號會在 LATEST 演進後靜默指向錯誤（或已凍結）的目錄，讀者
+        以為在測 LATEST，其實測的是某個過去的快照。
+        """
+        text = _FSM_CHAOS_NIGHTLY.read_text(encoding="utf-8")
+        block = _job_block(text, "chaos-latest")
+        hits = self._HARDCODED_VERSION_RE.findall(block)
+        self.assertEqual(
+            hits, [],
+            f"chaos-latest job 範圍內出現寫死的版號字面 {hits}",
         )
 
 

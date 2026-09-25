@@ -642,6 +642,57 @@ def test_sdd_chaos_stage_mirrors_ci_workflow(ps1_content: str) -> None:
     )
 
 
+def test_sdd_chaos_latest_stage_resolves_version_and_fails_loud(ps1_content: str) -> None:
+    """DEF-200-379 姊妹案例：SDD chaos LATEST 觀察軌 stage（Stage 6b）必須存在、
+    版號一律經 `sdd_version.py` 現查（不寫死）、summary／finalFailures 含
+    `sdd_chaos_latest` 欄位，且 `sdd_version.py` **執行失敗**（rc≠0）必須讓本 stage
+    失敗——不得與「rc=0 但輸出空白（尚無演化版可測）」這個合法跳過終態混為一談。
+
+    立案（QA／SD 複審 P2）：修復前
+    `if ($sddLatestRc -ne 0 -or -not $sddLatestName) { WARN; return }`
+    把兩種語意完全不同的情況合併成同一個「跳過、視為成功」分支——`sdd_version.py`
+    真的執行失敗（腳本壞掉／環境缺件）時本 stage 靜默 WARN 跳過，讀者以為只是暫時
+    沒有演化版可測，實際上是解析工具本身壞了都沒人知道。
+    """
+    block = _extract_stage_block(
+        ps1_content, "Invoke-Stage 'sdd-fsm-chaos-latest", "Invoke-Stage 'Cleanup'"
+    )
+    assert "sdd_version.py" in block, (
+        "Stage 6b 必須存在且經由 sdd_version.py 解析 LATEST 版號"
+    )
+    # LATEST 版號流向必須是「sdd_version.py 輸出 → $sddLatestName → 建目標路徑」，
+    # 不得改成寫死路徑——刻意只鎖「目標目錄由變數組成」而非「區塊內零版號字面」：
+    # 本 stage 合法需要與凍結基線常數 'AISDLC_SDD_v0.01' 比較（見下方 skip 分支），
+    # 那不是本鎖要擋的對象（同 aisdlc-sdd-fsm-chaos-nightly.yml 的 v0.01 除外）。
+    assert "$sddLatestDir = Join-Path $sddRootChaos $sddLatestName" in block, (
+        "Stage 6b 的 LATEST 目標目錄必須由 $sddLatestName（sdd_version.py 的輸出）"
+        "組成，不得改成寫死路徑字面"
+    )
+    assert "sdd_chaos_latest=" in ps1_content, "END summary 必須含 sdd_chaos_latest 欄位"
+    assert re.search(r"@\('sdd_chaos_latest', \$rcChaosLatest\)", ps1_content), (
+        "sdd_chaos_latest 必須列入終端 exit 決策 pairs（失敗要翻紅 Last Result）"
+    )
+    # rc≠0（sdd_version.py 真的執行失敗）與「rc=0 但輸出空白」必須是兩個獨立分支，
+    # 前者必須讓 Stage 6b 失敗；合併成同一個分支正是修復前的病因。
+    rc_check_idx = block.find("if ($sddLatestRc -ne 0)")
+    assert rc_check_idx > 0, (
+        "Stage 6b 必須把 sdd_version.py 真失敗（rc≠0）與『rc=0 但無演化版』拆成"
+        "兩個獨立分支——合併判斷正是修復前的病因"
+    )
+    rc_branch = block[rc_check_idx : rc_check_idx + 500]
+    assert "$global:LASTEXITCODE = 1" in rc_branch, (
+        "sdd_version.py 執行失敗（rc≠0）必須讓 Stage 6b 失敗（rc=1），不得吞成 WARN 跳過"
+    )
+    empty_name_idx = block.find("if (-not $sddLatestName)")
+    assert empty_name_idx > rc_check_idx, (
+        "『rc=0 但輸出空白（尚無演化版）』必須是獨立於 rc≠0 之外的第二個分支"
+    )
+    empty_name_branch = block[empty_name_idx : empty_name_idx + 400]
+    assert "$global:LASTEXITCODE = 0" in empty_name_branch, (
+        "『尚無演化版可測』是合法終態，必須維持 WARN 跳過（rc=0），不應計入失敗"
+    )
+
+
 def test_docker_skip_streak_escalation(ps1_content: str) -> None:
     """case 23（R10 QA-11 / DEF-101-140）：Docker 連續 SKIP ≥3 必須升級為失敗。
 

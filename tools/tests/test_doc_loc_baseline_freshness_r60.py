@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import ast
 import contextlib
+import copy
 import datetime
 import hashlib
 import inspect
@@ -162,13 +163,60 @@ def historical_provenance_marking_problems(text: str) -> list[str]:
     ]
 
 
+# ────────── `SYNC.measure_loc()` 的**測試檔側**行程內快取（不改動正式碼） ──────────
+# WHY：本檔多處對真實 repo 呼叫 `SYNC.measure_all()`（內含 `measure_loc()`，即
+# `check_loc_budget.py --json` 子行程，實測約 3s／次），且
+# `TestR67R3NoUnstatedPlatformAssumption{Win32,Darwin,Linux}`（見 `_R67R3PlatformNeutrality
+# Probe`）各自把本檔整套姊妹測試在模擬 `sys.platform` 下重跑一次——子行程看不到那個
+# 模擬值，故快取結果與逐次真跑等價；repo 內容在單一測試行程生命期內不會變動。
+# 主控否決把快取放進 `sync_onboarding_baselines.py`（該檔在根 CLAUDE.md `SPECIAL_FILES`
+# 精確釘行數，且正式 CLI 每次執行只呼叫一次、放正式碼零效益）——快取只存在於本測試檔
+# 呼叫點這一層，`measure_loc()`／`measure_all()` 本體維持每次真跑。
+#
+# 鍵含 `(SYNC._LOC_TOOL, SYNC._REPO_ROOT)`：兩者可能被個別測試暫時 monkeypatch（例如
+# `TestR67CliFailsLoud.test_loc_tool_failure_is_reported_as_tool_error_not_stale` 把
+# `_LOC_TOOL` 指到不存在的檔案）；鍵不含兩者會讓替換後的呼叫誤讀舊快取而假綠。
+# 🔴 該測試刻意**不**改走本快取——它驗的是「取值來源壞掉時 fail loud」這條子行程失敗
+# 路徑本身，繞快取即失去鑑別力；其呼叫點原樣保留直呼 `SYNC.measure_loc()`。
+_MEASURE_LOC_CACHE: dict[tuple[str, str], dict[str, int]] = {}
+
+
+def _cached_measure_loc() -> dict[str, int]:
+    """`SYNC.measure_loc()` 的行程內快取包裝，WHY 見上方區塊註解。
+
+    解析失敗（`SYNC.BaselineToolError`）不寫入快取，原樣往上拋。
+    """
+    cache_key = (str(SYNC._LOC_TOOL), str(SYNC._REPO_ROOT))
+    cached = _MEASURE_LOC_CACHE.get(cache_key)
+    if cached is not None:
+        return copy.deepcopy(cached)
+    result = SYNC.measure_loc()
+    _MEASURE_LOC_CACHE[cache_key] = result
+    return copy.deepcopy(result)
+
+
+def _cached_measure_all() -> dict[str, dict[str, int]]:
+    """`SYNC.measure_all()` 的等價包裝：`loc-baseline-live:` 走 `_cached_measure_loc()`，
+    其餘錨點（目前只有 `rootunit-baseline-live:` → `measure_rootunit()`，純讀模組屬性、
+    不必快取）原樣透過 `SYNC._MEASURERS` 呼叫，避免與正式碼的錨點↔量測器對應關係漂移。
+    """
+    return {
+        spec.anchor: (
+            _cached_measure_loc()
+            if spec.anchor == "loc-baseline-live:"
+            else SYNC._MEASURERS[spec.anchor]()
+        )
+        for spec in SYNC._SPECS
+    }
+
+
 class TestOnboardingLiveBaselineFreshness(unittest.TestCase):
     """真實文件 × 真實取值來源的新鮮度比對（本鎖的正職）。"""
 
     def test_documented_live_cells_match_measured_values(self) -> None:
         """§7 表①每一個受鎖格的數字 == 機器當場實測值。"""
         text = _ONBOARDING.read_text(encoding="utf-8-sig")
-        problems = SYNC.check(text, SYNC.measure_all())
+        problems = SYNC.check(text, _cached_measure_all())
         self.assertEqual(
             problems,
             [],
@@ -470,7 +518,7 @@ class TestLockedLineProseIsAlsoManaged(unittest.TestCase):
     def test_real_onboarding_locked_lines_are_prose_clean(self) -> None:
         """真實文件必須通過兩道散文判準（本鎖的正職；落地時它當場抓到主控自己）。"""
         text = _ONBOARDING.read_text(encoding="utf-8-sig")
-        measured = SYNC.measure_all()
+        measured = _cached_measure_all()
         for spec in SYNC._SPECS:
             line = SYNC.anchored_line(text, spec.anchor)
             self.assertEqual(
@@ -867,7 +915,7 @@ class TestProseClaimDialectsAreNotBoundToOnePunctuation(unittest.TestCase):
     def test_real_locked_lines_have_no_unregistered_claims(self) -> None:
         """正職：放寬後的判準對真實受鎖行零殘留（落地時它當場抓到兩條線各一筆）。"""
         text = _ONBOARDING.read_text(encoding="utf-8-sig")
-        measured = SYNC.measure_all()
+        measured = _cached_measure_all()
         for spec in SYNC._SPECS:
             line = SYNC.anchored_line(text, spec.anchor)
             self.assertEqual(
@@ -947,7 +995,7 @@ class TestHistoricalWaiverHasStaleSelfCheck(unittest.TestCase):
         unittest，`--check` 這條被閘門與人工消費的路徑仍然零訊號。
         """
         text = _ONBOARDING.read_text(encoding="utf-8-sig")
-        measured = SYNC.measure_all()
+        measured = _cached_measure_all()
         self.assertEqual(SYNC.check(text, measured), [], "控制組：現況必須乾淨")
 
         original = SYNC._SPECS
@@ -967,7 +1015,7 @@ class TestHistoricalWaiverHasStaleSelfCheck(unittest.TestCase):
     def test_real_specs_have_no_stale_registrations(self) -> None:
         """正職：真實 `_SPECS` 的每一筆 historical 都仍被受鎖行引用。"""
         text = _ONBOARDING.read_text(encoding="utf-8-sig")
-        measured = SYNC.measure_all()
+        measured = _cached_measure_all()
         for spec in SYNC._SPECS:
             line = SYNC.anchored_line(text, spec.anchor)
             self.assertEqual(
@@ -1714,7 +1762,7 @@ class TestR67CliFailsLoud(unittest.TestCase):
         self.assertTrue(parser.parse_args(["--check"]).check)
         self.assertFalse(parser.parse_args([]).check)
         text = _ONBOARDING.read_text(encoding="utf-8-sig")
-        measured = SYNC.measure_all()
+        measured = _cached_measure_all()
         expected = 1 if SYNC.check(text, measured) else 0
         self.assertEqual(SYNC.main(["--check"]), expected)
 

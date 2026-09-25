@@ -252,6 +252,9 @@ _CENSUS_TARGETS: tuple[tuple[str, Path], ...] = (
     ("AutoClaude/tools/run_local_nightly.ps1",
      _p("AutoClaude", "tools", "run_local_nightly.ps1")),
     ("AutoClaude/tools/run_local_nightly.sh", _p("AutoClaude", "tools", "run_local_nightly.sh")),
+    ("tools/integration_gate_core.py", _p("tools", "integration_gate_core.py")),
+    ("AutoClaude/tools/run_mutmut_in_docker.sh",
+     _p("AutoClaude", "tools", "run_mutmut_in_docker.sh")),
 )
 
 #: 吃 shell/ps1/yml 的 `-m pytest`，也吃 Python list 呼叫 `"-m", "pytest"`（逗號分隔
@@ -332,6 +335,9 @@ _JUSTIFIED_SERIAL_SITES: tuple[tuple[str, str, str], ...] = (
      "chaos／凍結基線 snapshot 競態，v0.01 不可原地修"),
     ("AutoClaude/tools/run_local_nightly.ps1", "-m chaos -q -p no:xdist",
      "chaos／凍結基線 snapshot 競態，v0.01 不可原地修"),
+    ("AutoClaude/tools/run_mutmut_in_docker.sh", "-p no:xdist",
+     "mutmut 逐突變體各自完整跑一次測試（逐突變體計時／快取語意）；-c /dev/null 已略過 "
+     "pyproject.toml 的 addopts，平行在此無收益且會與 mutmut 的逐突變體隔離假設衝突"),
 )
 
 
