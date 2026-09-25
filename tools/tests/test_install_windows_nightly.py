@@ -430,6 +430,7 @@ class TestInstallWindowsNightlySyntax(unittest.TestCase):
                 "else { exit 0 }",
             ],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=30,  # 純語法解析（不執行），30 秒遠高於正常耗時
         )
         self.assertEqual(
             proc.returncode, 0,
@@ -519,6 +520,7 @@ class TestInstallWindowsNightlySettingsConstruction(unittest.TestCase):
                 '$($settings.StartWhenAvailable)|$($settings.WakeToRun)"',
             ],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=30,  # 純物件建構＋屬性讀取，30 秒遠高於正常耗時
         )
         self.assertEqual(
             proc.returncode, 0,
@@ -579,6 +581,7 @@ class TestStatusExitCodeRuntime(unittest.TestCase):
             ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
              "-File", str(script), *args],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=60,  # 真跑安裝器（-Status/-WhatIf/-Uninstall），會查 Task Scheduler
         )
 
     def _task_presence(self, names: tuple[str, ...]) -> str:
@@ -591,6 +594,7 @@ class TestStatusExitCodeRuntime(unittest.TestCase):
              'if ($t) { $o += "$n=1" } else { $o += "$n=0" } }; '
              'Write-Output ($o -join ";")'],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=30,  # 唯讀查詢，30 秒遠高於正常耗時
         )
         self.assertEqual(proc.returncode, 0, f"排程存在性查詢失敗：{proc.stderr}")
         return proc.stdout.strip()
@@ -678,10 +682,17 @@ class TestStatusExitCodeRuntime(unittest.TestCase):
                 f"（沒被包住的那支會在 -WhatIf 下真的動 Task Scheduler）。"
                 f"stdout=\n{proc.stdout}",
             )
+        # T5（DEF-200-395）：並行下紅過一次、無法重現、當時輸出沒保留——診斷
+        # 訊息自帶 before／after 快照 ＋ WhatIf 那次 PowerShell 的 rc／stdout／
+        # stderr 尾段，下次再紅時 log 本身就能定位根因，不必事後靠記憶重建。
+        stdout_tail = "\n".join(proc.stdout.splitlines()[-20:])
+        stderr_tail = "\n".join(proc.stderr.splitlines()[-20:])
         self.assertEqual(
             before, after,
             "-WhatIf 前後的排程存在性快照不同 ⇒ -WhatIf 真的變更了 Task Scheduler"
-            f"（before={before} after={after}）",
+            f"（before={before} after={after}）；WhatIf 呼叫 rc={proc.returncode}"
+            f"\nstdout（尾 20 行）=\n{stdout_tail}"
+            f"\nstderr（尾 20 行）=\n{stderr_tail}",
         )
 
 

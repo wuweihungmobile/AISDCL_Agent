@@ -685,7 +685,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 8797,
+    "test_adr_xplat001_c1c2_lock.py": 8842,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 4032,
@@ -697,7 +697,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_check_archive_required.py": 160,
     "test_check_defect_log_crossref.py": 3906,
     "test_check_gha_action_versions.py": 295,
-    "test_check_hooks_liveness.py": 3339,
+    "test_check_hooks_liveness.py": 3526,
     "test_check_pytest_baseline_sites.py": 301,
     "test_check_script_parity.py": 2029,
     "test_check_wrapper_thinness.py": 1185,
@@ -705,7 +705,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_claim_provenance_r86.py": 1015,
     "test_clean_venv_carrier.py": 281,
     "test_component_sanitizer_shared_layer_lock.py": 293,
-    "test_context_budget_guard.py": 12606,
+    "test_context_budget_guard.py": 12663,
     "test_context_window_parity.py": 281,
     "test_cpu_budget.py": 428,
     "test_defect_id_reference_integrity.py": 281,
@@ -721,7 +721,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_git_hooks_install_common.py": 485,
     "test_guard_line_taxonomy_r99.py": 148,
     "test_install_statusline.py": 297,
-    "test_install_windows_nightly.py": 1347,
+    "test_install_windows_nightly.py": 1358,
     "test_mac_endurance_r83.py": 1962,
     "test_mac_readiness_r82.py": 621,
     "test_macos_smoke_skip_honesty.py": 225,
@@ -742,7 +742,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_quota_policy.py": 3416,
     "test_root_guard_known_model_r145.py": 227,
     "test_root_infra_parity.py": 441,
-    "test_run_root_unittests.py": 5019,
+    "test_run_root_unittests.py": 5143,
     "test_sanitize_component_frozen_sdd_versions_lock.py": 317,
     "test_schedule_capability_parity.py": 626,
     "test_script_scan_surface_ssot.py": 391,
@@ -2362,6 +2362,24 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
     ("R172", 106236, 106240, 4,  # round-label-ok
      "[非淨減法輪][同輪追加] 收斂列：_FROZEN_PREFIX_REWRITE_LEDGER 第二次接鏈列造成的漂移，"
      "含本列自身。詳 CrossPlatform_R145_Scan_Findings.md。"),
+    ("R173", 106240, 106619, 379,  # round-label-ok：DEF-200-386 收尾單人窗口
+     "[非淨減法輪][回歸鎖軌申報 309（＝軌上限），餘額歸主軌，見 _REGRESSION_LANE_LOG 同輪列] "
+     "DEF-200-386 種子過期警告矛盾根治：parallel_timing_cache.py 新增 "
+     "current_staleness_report() SSOT。DEF-200-389 家族擴面：v0.30 四份 fsm_runtime 檔補 "
+     "CREATE_NO_WINDOW（BFS 深度三）；console_orphan_census 零增長改印確認行；"
+     "context_budget_guard 負對照改真 WMI 監看；install_windows_nightly 補 timeout。修復棒"
+     "覆審收尾（DEF-200-394／395／396）：BFS 補解相對 import＋WMI 監看 deadline 與量測解耦。"
+     "結案回歸鎖：test_run_root_unittests.py +124、test_check_hooks_liveness.py +187、"
+     "test_context_budget_guard.py +57、test_install_windows_nightly.py +11＋本表自身漂移 "
+     "「見下一列」，母項超出軌上限 ⇒ 部分申報 309（同 R152／R169／R171／R172 先例）。同輪兌現 "
+     "_REPIN_NET_CAP_SCHEDULE 到期義務 (173, 530) 並重新武裝 175／529。逐項見 "
+     "CrossPlatform_R145_Scan_Findings.md〈附記（R173）〉。"),
+    ("R173", 106619, 106664, 45,  # round-label-ok
+     "[非淨減法輪][同輪追加] 收斂列：本表（test_adr_xplat001_c1c2_lock.py 自身）新增上一列、"
+     "回歸鎖軌列、cap 到期兌現列、_FROZEN_PREFIX_REWRITE_LEDGER 接鏈列，及修復棒覆審追加時"
+     "上一列、本列自身與 _REGRESSION_LANE_LOG 同輪列文字重新換行，反覆覆核收斂本身（含本列"
+     "自身）累計造成的行數漂移。詳 CrossPlatform_R145_Scan_Findings.md。餘額歸主軌，見 "
+     "_REGRESSION_LANE_LOG 同輪列。"),
 )
 
 
@@ -2479,6 +2497,8 @@ _REPIN_NET_CAP_SCHEDULE: tuple[tuple[int, int], ...] = (
                   # （`_REPIN_NET_CAP_DUE_ROUND=169`）。同輪重新武裝：步伐維持 1（整數下限）。
     (171, 531),   # 到期輪兌現：cap 降到到期目標本身（同既有判例）。本輪剛好到期 round-label-ok
                   # （`_REPIN_NET_CAP_DUE_ROUND=171`）。同輪重新武裝：步伐維持 1（整數下限）。
+    (173, 530),   # 到期輪兌現：cap 降到到期目標本身（同既有判例）。本輪剛好到期 round-label-ok
+                  # （`_REPIN_NET_CAP_DUE_ROUND=173`）。同輪重新武裝：步伐維持 1（整數下限）。
 )
 #: 生效點＝首列輪號、現行上限＝末列上限，**皆由表導出不另立常數**（R73 判例：一份知識一個家）。
 _REPIN_ROUND_CAP_SINCE = _REPIN_NET_CAP_SCHEDULE[0][0]
@@ -2809,6 +2829,19 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "自身漂移 21（含稽核列、接鏈列、前綴延伸、sha）＝338，母項超出軌上限 ⇒ 部分申報 "
      "309（＝軌上限，同 R152／R169／R171 先例），餘額歸主軌由款(10)(11) 照算。逐項見 "
      "CrossPlatform_R145_Scan_Findings.md〈附記（R172）〉。"),
+    ("R173", 309,
+     "DEF-200-386／389 家族結案回歸鎖（記帳誠實度分類）：test_run_root_unittests.py"
+     "（parallel_timing_cache 種子過期報告純函式＋run_parallel 讀後即報突變自證，+124）、"
+     "test_check_hooks_liveness.py（LATEST hook 可達 import 模組深度 3 BFS 掃描面擴大，"
+     "涵蓋 v0.30 closure_evidence／hub_sync／sandbox_runner／tlc_runner，＋修復棒覆審 BFS 補解"
+     "相對 import，+187）、"
+     "test_context_budget_guard.py（真 WMI 事件監看負對照＋修復棒覆審 deadline 與量測解耦，"
+     "+57）、"
+     "test_install_windows_nightly.py（subprocess timeout 與 WhatIf 斷言，+11）＋本表自身"
+     "漂移 45（含稽核列、接鏈列、cap 到期兌現列、修復棒覆審重新換行）＝424，母項超出軌上限 "
+     "⇒ 部分申報 309"
+     "（＝軌上限，同 R152／R169／R171／R172 先例），餘額歸主軌由款(10)(11) 照算。逐項見 "
+     "CrossPlatform_R145_Scan_Findings.md〈附記（R173）〉。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -2920,7 +2953,10 @@ def _regression_lane_cap_basis() -> tuple[str, int]:
 # 🔴 R168 具名展延（鐵律七，不得靜默沿用）round-label-ok：多 CPU 第二十輪 DEF-200-363～366
 # 四方獨立審查收尾單人窗口（計時快取震盪＋SDD docker 探測＋mutation kill_rate＋win32 oracle），
 # 非 root-tools 重構持有面；真拆待獨立窗口，168 → 173（在 lookahead=5 內，已達上界）。
-_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND = 173
+# 🔴 R173 具名展延（鐵律七，不得靜默沿用）round-label-ok：DEF-200-386 種子過期警告根治＋
+# v0.30 console 洩漏 audit 擴面收尾單人窗口，非 root-tools 重構持有面；
+# 真拆待獨立窗口，173 → 178（在 lookahead=5 內，已達上界）。
+_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND = 178
 #: 清償旗標——真拆完成後改 True。刻意用布林而非重建舊尺計數器（ADR §9.3「舊尺已廢」）。
 _ROOT_TOOLS_OLD_SCALE_DEBT_RESOLVED = False
 #: A-2 後設鎖：到期輪只准落在「現查輪＋lookahead」內，推遠（如 9999）當場紅；shrink-only
@@ -3031,8 +3067,8 @@ def net_cap_schedule_problems(
 #: R167 兌現：cap 降到目標本身（533，見 `(167, 533)` 列），重新武裝：目標 532＜cap round-label-ok
 #: R169 兌現：cap 降到目標本身（532，見 `(169, 532)` 列），重新武裝：目標 531＜cap round-label-ok
 #: R171 兌現：cap 降到目標本身（531，見 `(171, 531)` 列），重新武裝：目標 530＜cap round-label-ok
-_REPIN_NET_CAP_DUE_ROUND = 173  # round-label-ok：到期輪＝兌現輪+2（lookahead 判準的活體對照）
-_REPIN_NET_CAP_DUE_TARGET = 530  # 步伐 1，嚴格低於 cap 531（本輪重新武裝） round-label-ok
+_REPIN_NET_CAP_DUE_ROUND = 175  # round-label-ok：到期輪＝兌現輪+2（lookahead 判準的活體對照）
+_REPIN_NET_CAP_DUE_TARGET = 529  # 步伐 1，嚴格低於 cap 530（本輪重新武裝） round-label-ok
 
 #: DEF-200-121：到期輪自身的後設鎖——`_REPIN_NET_CAP_DUE_ROUND` 只准落在「最近稽核輪
 #: ＋ lookahead」以內（歷史母體 85..113 的到期輪一律＝上一次兌現輪 +2）。可延期的到期日
@@ -3099,10 +3135,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 289
+_REPIN_LOG_FROZEN_PREFIX_LEN = 291
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "8fe3e9b2b14280a75961d5dd87a5992e91e499ebf27179c977f8f4773a8caca7")
+    "b76488c601165ff79582430ad111c2c05699672a8d043d9fd3b41617c1ff33b2")
 
 
 def repin_log_history_digest(
@@ -3430,6 +3466,15 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R172", "0b2e73a520bb", "2bf9d536b2bd", "DEF-200-391"),  # round-label-ok：回歸鎖軌新列延伸
     ("R172", "2bf9d536b2bd", "3e14b8e6687d", "DEF-200-393"),  # round-label-ok：修復棒 H 收尾重釘
     ("R172", "3e14b8e6687d", "8fe3e9b2b142", "DEF-200-393"),  # round-label-ok：接鏈列造成二次重釘
+    ("R173", "8fe3e9b2b142", "da9eafaf2c1c", "DEF-200-386"),  # round-label-ok
+    ("R173", "da9eafaf2c1c", "40175f7507e8", "DEF-200-394"),  # round-label-ok：修復棒覆審
+    # 收尾單人窗口重釘（F1 缺陷編號訂正 DEF-200-394／395／396 ＋ F2 WMI 監看 deadline 與量測
+    # 解耦 ＋ F3 BFS 補解相對 import／UnicodeDecodeError 兜底），就地更新不開新輪。
+    ("R173", "40175f7507e8", "2948983719d7", "DEF-200-394"),  # round-label-ok：自身漂移列接鏈
+    ("R173", "2948983719d7", "c4b8a80ea59c", "DEF-200-394"),  # round-label-ok：接鏈列自身收斂
+    ("R173", "c4b8a80ea59c", "b76488c60116", "DEF-200-394"),  # round-label-ok：理由欄縮短
+    ("R173", "b76488c60116", "9f8511c3b8d7", "DEF-200-394"),  # round-label-ok：接鏈列隨之收斂
+    ("R173", "9f8511c3b8d7", "b76488c60116", "DEF-200-394"),  # round-label-ok：自身漂移列終值
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

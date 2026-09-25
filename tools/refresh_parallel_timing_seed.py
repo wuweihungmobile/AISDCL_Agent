@@ -42,8 +42,10 @@ def main(check_only: bool) -> int:
             file=sys.stderr,
         )
         return 1
-    seed = parallel_timing_cache.read_json(parallel_timing_cache.SEED_PATH)
-    msg = parallel_timing_cache.staleness_report(seed, live)
+    # DEF-200-386：改走單一入口 `current_staleness_report()`（讀舊種子檔 vs.
+    # 這次要被覆寫進去之前的活體快取）——與 `parallel_shard.py` 共用同一個
+    # 比較基準，見該函式 docstring 的根因說明。
+    msg = parallel_timing_cache.current_staleness_report()
     print(msg or "ℹ️ 種子檔與活體快取的 Top-N 熱點重疊率在門檻之上，沒有明顯過期。")
     if check_only:
         return 0

@@ -535,14 +535,22 @@ class HubSyncClient:
         timeout = int(
             self.registry.get("sync_policy", {}).get("pull", {}).get("timeout_seconds", 30)
         )
+        # 🔴 R88／DEF-200-104／DEF-200-394：`creationflags` 非有不可——本函式
+        # 經 `session_start.py` 的 SessionStart hook（`client.pull()`）可達，hook
+        # 載具在 Windows 是 `pythonw.exe`（GUI 子系統、無 console），OS 會替這個
+        # child **另配一個新 console 視窗** ⇒ 每次觸發就閃一次。平台中立：POSIX 上
+        # `getattr` 兜底成 0。
         if (clone_dir / ".git").exists():
             cmd = ["git", "-C", str(clone_dir), "fetch", "origin", ep.branch, "--depth", "1"]
-            subprocess.run(cmd, check=True, timeout=timeout, capture_output=True)
+            subprocess.run(cmd, check=True, timeout=timeout, capture_output=True,
+                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             cmd = ["git", "-C", str(clone_dir), "reset", "--hard", f"origin/{ep.branch}"]
-            subprocess.run(cmd, check=True, timeout=timeout, capture_output=True)
+            subprocess.run(cmd, check=True, timeout=timeout, capture_output=True,
+                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         else:
             cmd = ["git", "clone", "--depth", "1", "--branch", ep.branch, url, str(clone_dir)]
-            subprocess.run(cmd, check=True, timeout=timeout, capture_output=True)
+            subprocess.run(cmd, check=True, timeout=timeout, capture_output=True,
+                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         # Mirror after clone.
         return self._mirror_local(clone_dir, cache_dir)
 

@@ -683,7 +683,13 @@ _SITE_CLASS_CENSUS: dict[str, dict[str, int]] = {
         # 🔴 同輪回填 33→32（DEF-200-393）：該方法改用合成逐字稿後不再有 runtime
         # `self.skipTest(...)` 站點（實測 `site_class_counts()`＝32），行為鎖在所有 Windows
         # 環境都真的跑——站點消失是「讓測試真的跑」的合法出口，不是放寬。
-        "runtime-skipTest": 32,
+        # 🔴 R173（DEF-200-386／389 收尾單人窗口）round-label-ok 重釘 `runtime-skipTest`
+        # 32→33（**非放寬**，同上：本表判準是「相等」）。新站點＝`test_check_hooks_liveness.py`
+        # 的 LATEST hook
+        # 掃描面擴大為深度 3 BFS 新增測試，函式體內 `self.skipTest("[TOOL-ABSENCE] 解不出 "
+        # "SDD LATEST 或該樹無 hook ⇒ 量不到 ≠ 量到合格")`——沿用同檔既有慣例，解不出來時
+        # 明說跳過，不是隱藏失敗。
+        "runtime-skipTest": 33,
         "unclassified": 0,
     },
     # 🔴 R81 包 F 重釘 `windows-only` 9→10：並行包在

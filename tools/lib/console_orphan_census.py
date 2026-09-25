@@ -95,6 +95,10 @@ def report_delta(
               "時間自己開了新 Windows Terminal 分頁，見本檔假紅風險評估）。處置：手動 "
               "`Stop-Process -Id <PID> -Force` 清掉；定位缺旗標站點見 "
               "tools/tests/test_context_budget_guard.py::ConsoleFreeSpawnTest。")
+    else:
+        # DEF-200-397：零增長時此前完全不印，log 分不出「跑了且乾淨」
+        # 與「這段根本沒被執行」——advisory 語意不變（仍只出聲、不影響 rc）。
+        print(f"✅ 孤兒 console 普查：零增長（前 {len(before)}／後 {len(after)}）。")
     return 0
 
 

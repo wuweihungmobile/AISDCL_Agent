@@ -6317,8 +6317,51 @@ class NoWindowBehaviourTest(unittest.TestCase):
         控制組（不帶旗標）必須**有** console（永遠回 0 的壞載具與修好同形）；子行程
         刻意用 `python.exe` 不用 `pythonw.exe`（後者六旗標全 0 ⇒ 整條恆綠）。
         全文＝Resume 證據檔 §L-4.19。
+
+        DEF-200-396 延伸：「none」負對照套的 `STARTUPINFO(SW_HIDE)`（見
+        `_BEHAVIOUR_PROBE` 檔頭註解）此前只手動驗證過三次沒有把 console 升級成
+        Windows Terminal 分頁，沒有任何測試覆蓋。本測試重用
+        `PlannerCheckIsConsoleFreeTest` 的即時 WMI 監看模式（`_LIVE_CONSOLE_WATCH_
+        PS1`）全程武裝監看，斷言量測期間 0 筆 OpenConsole.exe／WindowsTerminal.exe
+        建立事件——且監看器必須真的武裝成功，沒武裝就不能算綠（否則是空洞通過）。
+
+        🔴 審查訂正：`Seconds` 這個 deadline 從腳本啟動（含 PowerShell 冷啟動與
+        `Register-CimIndicationEvent` 武裝耗時）就開始算，不是從量測開始算——慢機器
+        上量測還沒結束監看器已先收工，屆時「0 筆事件」是監看器沒在看，不是真的沒
+        觸發（空洞通過）。`Seconds` 給寬裕值（60），量測結束後改主動核對監看器
+        `poll()` 仍是 `None`（還活著）才採信 0 筆事件，再顯式 `terminate()`，不依賴
+        它跑滿 60 秒才退場——測試總時間不會因此變長。
         """
-        cases = self._measure({"shipped": guard.NO_WINDOW, "none": 0})
+        watcher_script = self.tmp / "watch.ps1"
+        watcher_script.write_text(_LIVE_CONSOLE_WATCH_PS1, encoding="utf-8", newline="\n")
+        events_out, armed_out = self.tmp / "events.txt", self.tmp / "armed.txt"
+        watch_proc = subprocess.Popen(
+            ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
+             "-File", str(watcher_script), str(events_out), str(armed_out), "60"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            creationflags=guard.NO_WINDOW)
+        try:
+            deadline = time.time() + 10
+            while not armed_out.is_file() and time.time() < deadline:
+                time.sleep(0.1)
+            self.assertTrue(
+                armed_out.is_file(),
+                "監看器 10 秒內沒有武裝——本測試本身建不起偵測條件，下面的"
+                "『0 筆事件』不能算數")
+            cases = self._measure({"shipped": guard.NO_WINDOW, "none": 0})
+            time.sleep(2)  # 讓監看器有時間把 WMI 事件寫進檔案（事件是非同步遞送的）
+            self.assertIsNone(
+                watch_proc.poll(),
+                "監看器在量測結束前就已收工，0 筆事件不能算數（deadline 從腳本啟動就"
+                "開始算，不是從量測開始算）")
+        finally:
+            try:
+                watch_proc.terminate()
+                watch_proc.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                watch_proc.kill()
+        events = (events_out.read_text(encoding="utf-8").splitlines()
+                 if events_out.is_file() else [])
         self.assertEqual(
             cases["shipped"]["hwnd"], "0",
             f"帶了 guard.NO_WINDOW 的子行程仍有 console（{cases['shipped']}）⇒ 會彈視窗")
@@ -6326,6 +6369,11 @@ class NoWindowBehaviourTest(unittest.TestCase):
             cases["none"]["hwnd"], "0",
             f"控制組（不帶旗標）竟然也沒有 console：{cases['none']}——那表示本載具"
             "量不到這個缺陷，上一條斷言沒有鑑別力")
+        self.assertFalse(
+            events,
+            f"負對照（不帶 NO_WINDOW）觸發了 {len(events)} 筆 OpenConsole.exe／"
+            f"WindowsTerminal.exe 建立事件：{events}——STARTUPINFO(SW_HIDE) 對升級"
+            "路徑的壓制失效了（此前只手動驗證過，DEF-200-396 補上自動化）。")
 
     def test_the_quiet_carrier_needs_no_flags_at_all(self) -> None:
         """第二層（載具）**獨立於**第一層（旗標）成立：`pythonw.exe` 不帶任何旗標也是 0。
@@ -6432,9 +6480,13 @@ class PlannerCheckIsConsoleFreeTest(unittest.TestCase):
         watcher_script = tmp / "watch.ps1"
         watcher_script.write_text(_LIVE_CONSOLE_WATCH_PS1, encoding="utf-8", newline="\n")
         events_out, armed_out = tmp / "events.txt", tmp / "armed.txt"
+        # 🔴 審查訂正：`Seconds`（deadline）從腳本啟動就開始算，不是從 `proc = subprocess.run(...)`
+        # 開始算——慢機器上量測還沒結束監看器已先收工，屆時「0 筆事件」是監看器沒在看，
+        # 不是真的沒觸發（空洞通過）。給寬裕值，量測結束後改主動核對 `poll()` 仍是 `None`
+        # 才採信 0 筆事件，再顯式 `terminate()`，測試總時間不因此變長。
         watch_proc = subprocess.Popen(
             ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
-             "-File", str(watcher_script), str(events_out), str(armed_out), "8"],
+             "-File", str(watcher_script), str(events_out), str(armed_out), "60"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             creationflags=guard.NO_WINDOW)
         try:
@@ -6448,8 +6500,13 @@ class PlannerCheckIsConsoleFreeTest(unittest.TestCase):
                 capture_output=True, encoding="utf-8", errors="replace", timeout=60,
                 check=False, creationflags=guard.NO_WINDOW)
             time.sleep(2)  # 讓監看器有時間把 WMI 事件寫進檔案（事件是非同步遞送的）
+            self.assertIsNone(
+                watch_proc.poll(),
+                "監看器在量測結束前就已收工，0 筆事件不能算數（deadline 從腳本啟動就"
+                "開始算，不是從量測開始算）")
         finally:
             try:
+                watch_proc.terminate()
                 watch_proc.wait(timeout=15)
             except subprocess.TimeoutExpired:
                 watch_proc.kill()

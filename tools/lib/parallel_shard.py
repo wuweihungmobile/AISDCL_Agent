@@ -586,10 +586,11 @@ def run_parallel(
             merged.errors.append((_FixtureStub(f"shard_crash::{module}"), reason))
         if len(module_timings) >= _CACHE_PERSIST_MIN_UNITS:
             parallel_timing_cache.save_live_cache(module_timings)
-            staleness_msg = parallel_timing_cache.staleness_report(
-                parallel_timing_cache.read_json(parallel_timing_cache.SEED_PATH),
-                module_timings,
-            )
+            # DEF-200-386：改走單一入口 `current_staleness_report()`——直接讀
+            # `save_live_cache()` 剛寫回磁碟的合併後活體快取，不再拿「本輪原始
+            # module_timings」（無父鍵 rollup／無歷史鍵）跟種子檔比，見該函式
+            # docstring 的根因說明。
+            staleness_msg = parallel_timing_cache.current_staleness_report()
             if staleness_msg:
                 print(staleness_msg)
                 if os.environ.get("GITHUB_ACTIONS") == "true":

@@ -2661,8 +2661,8 @@ def _sdd_latest_hook_dir() -> Path | None:
         return None
 
 
-def _console_spawn_offenders(hook_dir: Path | None = None) -> list[str]:
-    """某一棵 hook 樹內**會配 console 視窗**的 spawn 站點（預設 `AutoClaude/tools/hooks/`）。
+def _console_spawn_offenders_in_files(paths) -> list[str]:
+    """`_console_spawn_offenders()` 的核心判準，餵一組明確檔案（而非一整個目錄）。
 
     判準只判「argv[0] 不是 `sys.executable`」那些：本目錄的 hook 由 exec form 的
     `pythonw.exe`（GUI 子系統、無 console）啟動，所以 `sys.executable` 本身也是
@@ -2670,7 +2670,7 @@ def _console_spawn_offenders(hook_dir: Path | None = None) -> list[str]:
     OS **配一個新 console**。刻意不判 `sys.executable` 那一族＝刻意不製造假紅。
     """
     offenders: list[str] = []
-    for path in sorted((hook_dir or _AC_HOOK_DIR).glob("*.py")):
+    for path in sorted(paths):
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             if not isinstance(node, ast.Call):
                 continue
@@ -2684,6 +2684,104 @@ def _console_spawn_offenders(hook_dir: Path | None = None) -> list[str]:
             if not any(kw.arg == "creationflags" for kw in node.keywords):
                 offenders.append(f"{path.name}:{node.lineno} {func.attr}({argv[:60]})")
     return offenders
+
+
+def _console_spawn_offenders(hook_dir: Path | None = None) -> list[str]:
+    """某一棵 hook 樹內**會配 console 視窗**的 spawn 站點（預設 `AutoClaude/tools/hooks/`）。
+    見 `_console_spawn_offenders_in_files()` 的判準說明。
+    """
+    return _console_spawn_offenders_in_files((hook_dir or _AC_HOOK_DIR).glob("*.py"))
+
+
+def _imported_local_module_names(path: Path, root: Path | None = None) -> set[str]:
+    """`path` 的 import 目標之絕對 dotted 名稱集合（AST **全樹**掃描，不限模組層級
+    ——`session_start.py` 把 `hub_sync` 的 import 包在 `if`/`try` 裡，只掃頂層會漏）。
+
+    誠實劃界（DEF-200-394 訂正）：此前整段跳過相對 import（`node.level` 非 0），
+    理由是「LATEST hook 樹用的都是絕對 dotted path」——這個前提不成立：
+    `hub_sync.py` 自己的 `from .anonymizer import ...`／`from .pii_scanner
+    import ...` 都是相對 import，經 `session_start.py → hub_sync.py` 真實可達
+    卻完全不在掃描面內。現在依 `node.level` 從 `path` 所在目錄往上
+    `node.level - 1` 層當解析基準，換算回相對 `root` 的絕對 dotted 名稱（沿用既有
+    `_local_module_path(mod_name, root)` 的解析慣例）；呼叫方沒給 `root`，或解析基準
+    跑出 `root` 之外，一律跳過（與舊行為相同，不製造假紅）。`from a.b import c` 的
+    `c` 也一併登記為候選 `a.b.c`：`rule_loader` 這類形態本身就是一支子模組檔案，
+    不是套件屬性。
+    """
+    names: set[str] = set()
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                names.add(alias.name)
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                if root is None:
+                    continue
+                base_dir = path.parent
+                for _ in range(node.level - 1):
+                    base_dir = base_dir.parent
+                try:
+                    base_parts = base_dir.resolve().relative_to(root.resolve()).parts
+                except ValueError:
+                    continue
+                base_dotted = ".".join(base_parts)
+                if node.module:
+                    full = f"{base_dotted}.{node.module}" if base_dotted else node.module
+                    names.add(full)
+                    for alias in node.names:
+                        names.add(f"{full}.{alias.name}")
+                else:
+                    for alias in node.names:
+                        names.add(f"{base_dotted}.{alias.name}" if base_dotted else alias.name)
+                continue
+            if not node.module:
+                continue
+            names.add(node.module)
+            for alias in node.names:
+                names.add(f"{node.module}.{alias.name}")
+    return names
+
+
+def _local_module_path(module_name: str, root: Path) -> Path | None:
+    """把 `module_name`（例如 `tools.fsm_runtime.hub_sync`）解回 `root` 下的 `.py`
+    檔案；不是本地模組（第三方套件、標準庫……）一律回 `None`。"""
+    rel = Path(*module_name.split("."))
+    candidate = root / rel.with_suffix(".py")
+    if candidate.is_file():
+        return candidate
+    candidate_pkg = root / rel / "__init__.py"
+    if candidate_pkg.is_file():
+        return candidate_pkg
+    return None
+
+
+def _sdd_latest_hook_reachable_modules(hook_dir: Path, *, max_depth: int = 3) -> list[Path]:
+    """`.claude/hooks/*.py` 本身 ＋ 它們 import 可達的本地模組（DEF-200-394／
+    R88 延伸）：`hub_sync.py` 這類被 `session_start.py` 條件式 import 的模組此前
+    完全不在任何掃描面內——只要它在 import 圖上可達（含 `hub_sync.py` 自己的
+    `from .anonymizer import ...` 這類相對 import 再往下一層），就可能在 Windows
+    pythonw 宿主下真的跑到內含缺 `creationflags` 的 subprocess 呼叫（DEF-200-104
+    同型）。深度上界 3（與既有〈鐵律三〉`TestForeignExecutableArgvIsGuarded`
+    transitive 可達性判準同一慣例，防止 import 圖無界展開拖垮測試）。
+    """
+    root = hook_dir.parents[1]  # .claude/hooks -> LATEST 根
+    seen: set[Path] = set(hook_dir.glob("*.py"))
+    frontier = list(seen)
+    depth = 0
+    while frontier and depth < max_depth:
+        next_frontier: list[Path] = []
+        for path in frontier:
+            try:
+                for mod_name in _imported_local_module_names(path, root):
+                    resolved = _local_module_path(mod_name, root)
+                    if resolved is not None and resolved not in seen:
+                        seen.add(resolved)
+                        next_frontier.append(resolved)
+            except (OSError, SyntaxError, UnicodeDecodeError):
+                continue
+        frontier = next_frontier
+        depth += 1
+    return sorted(seen)
 
 
 class TestAutoClaudeHookSpawnsAreConsoleFree(unittest.TestCase):
@@ -2716,10 +2814,17 @@ class TestAutoClaudeHookSpawnsAreConsoleFree(unittest.TestCase):
         self.assertTrue(found, "這棵樹一個 subprocess spawn 站點都掃不到 ⇒ 判準空轉")
 
     def test_the_sdd_latest_hook_tree_is_covered_too(self) -> None:
-        """🔴 R88／DEF-200-104：**第三個掃描面**＝SDD LATEST 的 `.claude/hooks/`。
+        """🔴 R88／DEF-200-104／DEF-200-394：**第三個掃描面**＝SDD LATEST 的
+        `.claude/hooks/*.py` **＋它們 import 可達的本地模組**（`_sdd_latest_hook_
+        reachable_modules()`）。
 
         立案沿革全文搬至 CrossPlatform_R151_Guard_Prose_Migration.md
-        〈test_the_sdd_latest_hook_tree_is_covered_too〉節。
+        〈test_the_sdd_latest_hook_tree_is_covered_too〉節。DEF-200-394：此前只
+        掃 `.claude/hooks/*.py` 本身，漏掉 `session_start.py` 條件式 import 的
+        `tools.fsm_runtime.hub_sync`——`hub_sync._mirror_git()` 的三處
+        `subprocess.run(['git', ...])` 因此完全不在任何掃描面內，直到
+        `knowledge/hub-registry.yaml` 的 `allowed_endpoints` 非空時才會真的觸發
+        （目前預設安裝為空，故休眠）。
 
         🔴 LATEST 走 SSOT 現查（`tools/lib/sdd_latest.resolve_latest_root`），**不寫版號**：
         寫死版號會在下一次 Copy-on-Evolve 時靜默指向凍結面，而那正是本列要防的失明。
@@ -2727,10 +2832,92 @@ class TestAutoClaudeHookSpawnsAreConsoleFree(unittest.TestCase):
         sdd_hooks = _sdd_latest_hook_dir()
         if sdd_hooks is None or not list(sdd_hooks.glob("*.py")):
             self.skipTest("[TOOL-ABSENCE] 解不出 SDD LATEST 或該樹無 hook ⇒ 量不到 ≠ 量到合格")
+        reachable = _sdd_latest_hook_reachable_modules(sdd_hooks)
         self.assertEqual(
-            _console_spawn_offenders(sdd_hooks), [],
-            "SDD LATEST hook 樹有 spawn 站點會在 Windows 配 console 視窗——"
-            "請加 `creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0)`")
+            _console_spawn_offenders_in_files(reachable), [],
+            "SDD LATEST hook 樹（含 import 可達的本地模組）有 spawn 站點會在 Windows 配 "
+            "console 視窗——請加 `creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0)`")
+
+    def test_the_sdd_latest_hook_reachable_scan_includes_hub_sync(self) -> None:
+        """反空轉專項（DEF-200-394）：`hub_sync.py` 必須真的出現在可達集合裡，
+        否則上一格的「涵蓋 hub_sync」宣稱只是巧合（例如 import 圖解析悄悄斷link
+        而集合塌成只剩 hook 檔本身，上一格仍會因為 hook 檔自己乾淨而恆綠）。
+
+        `anonymizer.py`／`pii_scanner.py` 也必須在集合內：兩者是 `hub_sync.py`
+        自己用**相對 import**（`from .anonymizer import ...`）匯入的下一層模組，
+        BFS 若只解得出絕對 dotted import 就會漏掉這兩支（DEF-200-394 正是這個
+        盲區）。
+        """
+        sdd_hooks = _sdd_latest_hook_dir()
+        if sdd_hooks is None or not list(sdd_hooks.glob("*.py")):
+            self.skipTest("[TOOL-ABSENCE] 解不出 SDD LATEST 或該樹無 hook ⇒ 量不到 ≠ 量到合格")
+        reachable = _sdd_latest_hook_reachable_modules(sdd_hooks)
+        self.assertTrue(
+            any(p.name == "hub_sync.py" for p in reachable),
+            f"hub_sync.py 應經 session_start.py 的條件式 import 在可達集合內，實際：{reachable}")
+        self.assertTrue(
+            any(p.name == "anonymizer.py" for p in reachable),
+            f"anonymizer.py 應經 hub_sync.py 的相對 import 在可達集合內，實際：{reachable}")
+        self.assertTrue(
+            any(p.name == "pii_scanner.py" for p in reachable),
+            f"pii_scanner.py 應經 hub_sync.py 的相對 import 在可達集合內，實際：{reachable}")
+
+    def test_the_sdd_latest_hook_reachable_scan_catches_injected_regression(self) -> None:
+        """突變自證（DEF-200-394）：合成一支「hook 匯入一個缺 creationflags 的本地
+        模組」的暫存樹，鎖住判準真的會沿 import 邊往外掃、不是只掃 hook 檔本身。
+        同時合成一段**相對 import**（`hub_sync.py` 自己 `from .helper import ...`），
+        鎖住 BFS 真的會解相對 import，不是只解絕對 dotted path（DEF-200-394）。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            hooks_dir = root / ".claude" / "hooks"
+            hooks_dir.mkdir(parents=True)
+            fsm_dir = root / "tools" / "fsm_runtime"
+            fsm_dir.mkdir(parents=True)
+            (hooks_dir / "session_start.py").write_text(
+                "from tools.fsm_runtime.hub_sync import HubSyncClient\n", encoding="utf-8")
+            (fsm_dir / "hub_sync.py").write_text(
+                "import subprocess\n"
+                "from .helper import helper_fn\n"
+                "def _mirror_git():\n"
+                "    return subprocess.run(['git', 'fetch'], capture_output=True)\n",
+                encoding="utf-8")
+            (fsm_dir / "helper.py").write_text(
+                "import subprocess\n"
+                "def helper_fn():\n"
+                "    return subprocess.run(['git', 'status'], capture_output=True)\n",
+                encoding="utf-8")
+            reachable = _sdd_latest_hook_reachable_modules(hooks_dir)
+            self.assertTrue(any(p.name == "hub_sync.py" for p in reachable),
+                             "合成的 hub_sync.py 未被 import 圖掃到——判準對此形態沒有牙")
+            self.assertTrue(any(p.name == "helper.py" for p in reachable),
+                             "合成的 helper.py（經相對 import 可達）未被 import 圖掃到——"
+                             "BFS 對相對 import 沒有牙")
+            offenders = _console_spawn_offenders_in_files(reachable)
+            self.assertTrue(
+                any("hub_sync.py" in o for o in offenders),
+                f"缺 creationflags 的合成 hub_sync.py 必須被抓到，實際：{offenders}")
+            self.assertTrue(
+                any("helper.py" in o for o in offenders),
+                f"缺 creationflags 的合成 helper.py（相對 import 可達）必須被抓到，實際："
+                f"{offenders}")
+            # 綠向：補回旗標之後不再命中。
+            (fsm_dir / "helper.py").write_text(
+                "import subprocess\n"
+                "def helper_fn():\n"
+                "    return subprocess.run(['git', 'status'], capture_output=True, "
+                "creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))\n",
+                encoding="utf-8")
+            (fsm_dir / "hub_sync.py").write_text(
+                "import subprocess\n"
+                "from .helper import helper_fn\n"
+                "def _mirror_git():\n"
+                "    return subprocess.run(['git', 'fetch'], capture_output=True, "
+                "creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))\n",
+                encoding="utf-8")
+            reachable = _sdd_latest_hook_reachable_modules(hooks_dir)
+            self.assertTrue(any(p.name == "helper.py" for p in reachable),
+                             "綠向覆核：helper.py 仍應經相對 import 可達，不是巧合塌成空集合")
+            self.assertEqual(_console_spawn_offenders_in_files(reachable), [])
 
     def test_the_sdd_scan_face_is_not_vacuous(self) -> None:
         """反空轉：SDD 那一面塌成空的話上一格恆綠（同本檔既有慣例）。"""

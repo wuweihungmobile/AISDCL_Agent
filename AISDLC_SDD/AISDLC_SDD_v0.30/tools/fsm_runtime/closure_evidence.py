@@ -96,6 +96,12 @@ def _run_git(args: List[str], repo_root: Path) -> "tuple[int, str]":
             encoding="utf-8",
             errors="replace",
             timeout=10,
+            # 🔴 R88／DEF-200-104／DEF-200-394：本函式經
+            # `.claude/hooks/closure_evidence_verify.py` 可達，hook 載具在
+            # Windows 是 `pythonw.exe`（GUI 子系統、無 console），OS 會替這個
+            # child **另配一個新 console 視窗**⇒每次觸發就閃一次。平台中立：
+            # POSIX 上 `getattr` 兜底成 0。
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         return proc.returncode, (proc.stdout or "").strip()
     except (subprocess.SubprocessError, FileNotFoundError, OSError) as exc:

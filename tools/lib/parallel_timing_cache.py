@@ -119,6 +119,26 @@ def save_live_cache(module_timings: dict[str, float]) -> None:
               file=sys.stderr)
 
 
+def current_staleness_report(top_n: int = _STALENESS_TOP_N) -> str | None:
+    """`staleness_report()` 的單一入口版本：直接讀磁碟上的種子檔與活體快取，
+    **不接受**呼叫端自組的 `live` 參數。
+
+    DEF-200-386 根因：`parallel_shard.run_parallel()` 此前把「本輪原始
+    `module_timings`」（`save_live_cache()` 尚未合併的 dict——無父鍵 rollup、無
+    `kept_previous` 歷史鍵）直接當 `live` 傳給 `staleness_report()`；而
+    `refresh_parallel_timing_seed.py` 寫入種子檔的是 `read_json(LIVE_CACHE_PATH)`
+    （磁碟合併後的活體快取）。兩邊「live」的定義不一致 ⇒ 剛跑完
+    `refresh_parallel_timing_seed.py` 種子檔理應與活體快取重疊率 100%，卻仍舊
+    回報過期（本機 43%／雲端三平台 30%）。
+
+    呼叫端（`parallel_shard.py`／`refresh_parallel_timing_seed.py`）一律改走本
+    函式，不得再自行組 `live` 參數餵給 `staleness_report()`——本函式讀的
+    `LIVE_CACHE_PATH` 就是 `save_live_cache()` 寫回磁碟**之後**的內容，與種子檔
+    在同一個比較基準上。
+    """
+    return staleness_report(read_json(SEED_PATH), read_json(LIVE_CACHE_PATH), top_n=top_n)
+
+
 def staleness_report(seed: dict[str, float], live: dict[str, float],
                       top_n: int = _STALENESS_TOP_N) -> str | None:
     """種子檔與活體快取的 Top-N（耗時最長）熱點重疊率過低時回傳 advisory 訊息，

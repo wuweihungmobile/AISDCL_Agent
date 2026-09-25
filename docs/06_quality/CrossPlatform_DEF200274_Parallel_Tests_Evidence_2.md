@@ -920,3 +920,95 @@ WindowsTerminal＝0、孤兒 conhost＝0。
   `tools/tests@win32 共 43 支：platform=42／…／env-disabled=1`、`[M6 id 集合] tools/tests@win32：
   ✅ 集合關係成立（本次 skip 43 支）`——行為鎖不在 win32 skip 清單內 ⇒ 在 windows-compat-ci
   上真的執行並通過。
+
+## 收斂後複驗與遺留收尾（2026-09-26）
+
+掌舵者六問重問＋前輪〈Windows console 洩漏事故〉三項遺留。流程：四方唯讀審查（Architect／SA／
+SD／QA，皆 Sonnet，主控 Opus 5.5）→ Developer 實作 → 閘門棒（護欄棘輪重釘＋根層全套＋SDD
+ci-gate）→ 兩面獨立審查（程式正確性／對抗式反駁）→ 審查修補 → 主控收尾。額度 converge 帶下
+守衛擋 Workflow，除首輪四方審查外改逐個派 Agent。
+
+### 六問答覆
+
+1. **帳本多 CPU 問題**：非 fixed 列原有 311／381／386 三筆。386 本輪根治（見下）；381 為觀察期
+   （2026-10-03 起查 7 次排程 run，日曆卡住）；311 為「未重現≠已修」且解鎖條件未滿足。SA 對 9 筆
+   fixed 列做 zero-trust 抽查（宣稱的鎖／函式逐一 Grep），全數真實存在且在守宣稱主題。
+2. **功能完備與 CI 多 CPU**：QA 親跑根層全套 rc=0、`發現 4617 個測試`、`workers=18
+   source=cpu_budget`、`S=2014.1s｜ideal=111.9s（S/W-bound）｜loss=1.00x｜slot 利用率=99.8%`。
+   雲端（ee4bdd4／c5d1722，`gh run view --log` 親抓）：root-infra-ci／windows-compat-ci
+   workers=4、macos-compat-ci workers=3、AutoClaude CI 三 job `xdist workers=4`＋`nodes confirmed=4`、
+   fsm-chaos-nightly 排程 run 36106419756 `xdist workers=4`。Architect 確認 worker 數唯一來源＝
+   `tools/lib/cpu_budget.py`，三個消費端只委派，未見寫死的第二複本。
+3. **頭重腳輕**：未見結構性不均。pre-push root 前景滿 W、AutoClaude／SDD 背景各 2 worker 是 S/W
+   模型下的刻意設計（root leg 恆為瓶頸，另兩 leg 對 worker 數不敏感）；本機 slot 99.8%、loss 1.00x。
+   唯一殘留的「看起來不均」訊號是每次都響的種子過期警告——查明是比較面錯誤（DEF-200-386），
+   不是負載真的不均。
+4. **其他可平行面**：Architect 覆核 CI matrix 分片、nightly stage 平行、SDD ci-gate 兩軌平行、
+   ruff／lint-imports、ONBOARDING 回填量測，結論同前：收益不抵成本或已被 root leg 遮蔽，本輪不做。
+5. **是否收斂**：多 CPU 機制維持收斂，不重啟系列；本輪修掉的是收斂後才被量到的比較面缺陷與
+   console 洩漏的鄰居站點。
+6. **前輪三項遺留**：(a) 負對照不彈窗只在本機驗證 → DEF-200-396 改為全套自動驗證；(b) v0.30 三支
+   缺旗標 → DEF-200-394，且查出 `hub_sync.py` 其實在 hook 路徑上（前輪判斷訂正）；(c)
+   `test_install_windows_nightly` 並行紅一次 → DEF-200-395，QA 30 次壓力（含與全套並行）全綠、
+   當時輸出未保留，改為下次紅燈自帶診斷，維持 open。另補前輪自陳的「普查零增長不出聲」→
+   DEF-200-397。
+
+### 修復
+
+- **DEF-200-386**：`tools/lib/parallel_shard.py::run_parallel()` 在 `save_live_cache()` 後拿
+  「本輪原始耗時」（無父鍵加總、無保留鍵）比種子，而 `tools/refresh_parallel_timing_seed.py`
+  拿磁碟合併後的活體快取比；同一演算法、不同比較面。新增單一入口
+  `parallel_timing_cache.current_staleness_report()`（磁碟種子 vs 磁碟活體快取），兩端改走它。
+  回歸鎖 `RunParallelStalenessAdvisoryReadsMergedLiveCacheTest`：退回舊行為即紅，且紅在 30%，
+  與雲端三平台實際症狀同值。
+- **DEF-200-394**：v0.30 `.claude/hooks/session_start.py` 會 import `tools.fsm_runtime.hub_sync`
+  並呼叫 `pull()` → `_mirror_git()` 的三處 git；hook 載具是 pythonw。`knowledge/hub-registry.yaml`
+  檢入值為 `auto_pull_on_session_start: true`、`allowed_endpoints: []`——只差填一個 endpoint 就重演
+  DEF-200-389。四檔七處子行程（四處 git、兩處 docker、一處 TLC java）補
+  `creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)`，刻意不加 CREATE_NEW_PROCESS_GROUP
+  （保留 Ctrl+C 中斷長跑 TLC）。`closure_evidence.py::_run_git` 是擴大掃描面後新抓到的同型站點。
+  鎖：`tools/tests/test_check_hooks_liveness.py` 的 LATEST hook 掃描面由「hook 檔本身」擴為
+  「hook 可達的 import 模組」。
+- **DEF-200-396**：`NoWindowBehaviourTest.test_the_shipped_flag_really_suppresses_the_console`
+  在負對照量測期間武裝 WMI 建立事件監看（重用 `_LIVE_CONSOLE_WATCH_PS1`），斷言武裝成功與 0 筆
+  OpenConsole／WindowsTerminal 建立事件。突變自證：拿掉 SW_HIDE 即紅，實抓到 WindowsTerminal.exe
+  與 OpenConsole.exe 各一筆，隨後自行收尾，前後數量 0／0、孤兒 conhost 0。
+- **DEF-200-395**：四處 subprocess 補 timeout；WhatIf 斷言訊息帶 before／after 與 PowerShell
+  rc、stdout／stderr 尾段。
+- **DEF-200-397**：`report_delta()` 零增長印 `✅ 孤兒 console 普查：零增長（前 N／後 M）。`
+
+### 獨立審查與修補
+
+兩面審查皆 APPROVE-WITH-FIXES，六條關鍵宣稱（跨平台 skip 集合不變、T2 鎖以真實檔案複本突變
+也會紅、T4 在 windows-compat-ci 上真跑、DEF-200-386 根因、v0.01～v0.29 零改動、無 console 洩漏）
+皆未被推翻。收尾前修掉的四項：監看器 deadline 自腳本啟動起算、餘裕過緊（慢機器上可能量測尚未
+結束監看器已收工，變成空洞的 0 筆）——改為斷言量測結束時監看器仍在線，同型缺口的既有
+`PlannerCheckIsConsoleFreeTest` 一併修；BFS 原本跳過相對 import（漏掉 `hub_sync.py` 以
+`from .anonymizer`／`from .pii_scanner` 帶入的兩支，目前零子行程）——改為解析相對 import；BFS
+補接 `UnicodeDecodeError`；附記「六處 git 子行程」訂正為七處子行程。
+
+### 🔴 誠實劃界
+
+- **雲端種子重疊率**：種子取自 Windows 本機；比較面修正後，雲端若仍報過期，可能是各平台熱點
+  分布真實不同（合法的「該刷新」訊號），不能直接判為本修法失效——下一輪先比對兩邊排名。
+- **DEF-200-396 在雲端的鑑別力未驗**：GitHub windows runner 是否以 Windows Terminal 為預設終端
+  未查；若不是，該斷言在 CI 上恆為 0 筆、只有開發機有鑑別力。
+- **DEF-200-395 未重現≠已修**：本輪只讓下次失敗自帶診斷。
+- **tlc_runner.py 無 timeout**：SD 審查另發現 TLC 呼叫無 timeout（形式化驗證卡住會無界等待），
+  屬另一件事、本輪未改。
+- **v0.01～v0.29 同型站點**：依版本規則不可原地改，未盤點。
+
+### 待主控回填
+
+- 閘門棒（審查前）[他包回報]：根層全套第 3 次 rc=0、`發現 4622 個測試`、`S=1741.2s｜ideal=96.7s｜
+  slot 利用率=99.8%`，三次全套皆無過期警告（未執行 refresh，比較面修正後現有種子即達標）；SDD
+  ci-gate rc=0（v0.01 1478、v0.30 1956、scripts/tests 364 passed，arch_fitness fail=0）；
+  `sync_onboarding_baselines.py --check-snapshot` rc=0。
+- 主控收尾全套（審查修補、帳本與本節落地後）：rc=0、`發現 4622 個測試（下限 4543）`、
+  `[cpu_budget] root-unittest workers=18 source=cpu_budget`、`📊 派工摘要：worker=18｜S=1714.1s｜
+  ideal=max(S/W, 最長單位)=95.2s（S/W-bound）｜loss=1.00x｜slot 利用率=99.7%｜最長單位：
+  test_dev_start.TestBootstrapIncompleteMarker 61.4s`、`[M6 id 集合] tools/tests@win32：✅ 集合關係
+  成立（本次 skip 43 支）`、`✅ 孤兒 console 普查：零增長（前 0／後 0）。`，無過期警告。全套前後
+  現查 OpenConsole／WindowsTerminal／孤兒 conhost 皆 0／0／0；`--check-snapshot` rc=0；
+  `check_defect_log_crossref.py` rc=0。
+- commit、push、雲端驗收：（留白）

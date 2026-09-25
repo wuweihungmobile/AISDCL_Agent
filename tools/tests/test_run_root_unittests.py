@@ -278,6 +278,20 @@ class ConsoleOrphanCensusTest(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertNotIn("❌", buf.getvalue())
 
+    def test_report_delta_prints_a_zero_growth_line_instead_of_going_fully_silent(
+        self,
+    ) -> None:
+        """零增長不等於「這段根本沒被執行」——log 必須留一行分得出兩者，且不含
+        ❌（advisory 語意不變，見上一格既有測試）。"""
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = console_orphan_census.report_delta({("OpenConsole.exe", 1)},
+                                                     {("OpenConsole.exe", 1)})
+        self.assertEqual(rc, 0)
+        out = buf.getvalue()
+        self.assertNotIn("❌", out)
+        self.assertTrue(out.strip(), "零增長時仍必須留下至少一行輸出，不得完全靜默")
+
     def test_report_delta_flags_growth_but_stays_advisory(self) -> None:
         """注入自證：全套執行期間新增了孤兒 console ⇒ 必須印 ❌ 點名 PID，但 rc 仍是 0
         （advisory——理由見模組 docstring 的假紅風險評估：使用者自己開新分頁也會撞上
@@ -3878,6 +3892,25 @@ class ParallelTimingCacheStalenessReportTest(unittest.TestCase):
         self.assertIsNone(ptc.staleness_report({}, {"a": 1.0}))
         self.assertIsNone(ptc.staleness_report({"a": 1.0}, {}))
 
+    def test_current_staleness_report_is_none_right_after_a_refresh(self) -> None:
+        """DEF-200-386（a）：`current_staleness_report()` 是單一入口，直接讀磁碟上
+        的 `SEED_PATH`／`LIVE_CACHE_PATH`——剛跑完 `refresh_parallel_timing_seed.py`
+        （把 live 原樣寫成 seed）那一刻，兩邊內容逐鍵相同，重疊率必為 100%，
+        不得回報過期。此前的臭蟲是呼叫端（`parallel_shard.py`）把「本輪原始
+        module_timings」（未合併）誤當 `live` 餵給 `staleness_report()`，導致剛
+        刷新也照樣過期——本測試鎖住「讀磁碟」這個修法本身的正確性。
+        """
+        ptc = self._ptc()
+        with tempfile.TemporaryDirectory(prefix="ptc_current_report_") as td:
+            seed = Path(td) / "seed.json"
+            live = Path(td) / "live.json"
+            data = {f"mod.{i}": float(100 - i) for i in range(20)}
+            seed.write_text(json.dumps(data), encoding="utf-8")
+            live.write_text(json.dumps(data), encoding="utf-8")
+            with mock.patch.object(ptc, "SEED_PATH", seed), \
+                    mock.patch.object(ptc, "LIVE_CACHE_PATH", live):
+                self.assertIsNone(ptc.current_staleness_report())
+
 
 class RunParallelPersistsLiveCacheOnlyForLargeRunsTest(unittest.TestCase):
     """第九輪批評 D2-TEST-MOCK-TARGET-WRONG 接受並修正：mock 目標必須是
@@ -3998,6 +4031,97 @@ class RunParallelStalenessAdvisoryCiSymmetryTest(unittest.TestCase):
             output = self._run_with_stale_seed()
         self.assertNotIn("::warning::", output)
         self.assertIn("過期", output)
+
+
+class RunParallelStalenessAdvisoryReadsMergedLiveCacheTest(unittest.TestCase):
+    """DEF-200-386（b）回歸鎖：`run_parallel()` 的過期 advisory 必須比對
+    `save_live_cache()` 合併寫回磁碟後的活體快取，不是本輪原始 `module_timings`
+    （未經 parent rollup／`kept_previous` 合併）。此前的臭蟲：呼叫端直接把
+    `module_timings` 當 `live` 餵給 `staleness_report()`；若種子檔反映的是
+    **歷史累積的合併圖像**（含這一輪不會被重新觀測、但因同模組前綴而被
+    `kept_previous` 保留下來的舊 class 鍵），比較面不對稱就會誤報過期。
+
+    場景：這一輪只派工 `pkgNN.Fresh`（20 個 class 級鍵）；活體快取裡預先放著
+    `pkgNN.Old`——與這一輪同前綴、但不會被這一輪重新觀測到的舊 class 鍵
+    （`save_live_cache()` 的 `kept_previous` 語意會把它原樣留下）。種子檔內容＝
+    這一輪「應該」合併出來的完整圖像（parent rollup `pkgNN` ＋ `Old` 舊鍵 ＋
+    `Fresh` 新鍵），數值刻意分兩層（`Old` 恆 0.0、`Fresh`／`pkgNN` 隨 `i` 遞減）
+    ——用真實 `run_parallel()`（fake `Popen` ＋ 依 `i` 遞減的 `time.sleep()`
+    控制 `elapsed`，而非真 subprocess，但 elapsed 仍是貨真價實的 wall-clock
+    差）讓兩邊排序同向，即使 tie-break 邊界受執行緒完成順序影響也不礙事——
+    兩個各恰 15 選的子集合，最壞情況下重疊率仍 ≥ 14/16（遠高於 50% 門檻）。
+
+    若 `run_parallel()` 退回舊行為（直接拿 `module_timings` 比對），比較面會漏掉
+    `pkgNN.Old`／`pkgNN` 這兩層 40 個鍵，重疊率跌破門檻，本測試斷言的「不印
+    過期」就會失敗。
+    """
+
+    _N_GROUPS = 20
+    _DELAY_STEP_SEC = 0.01  # 遠大於一般排程抖動，讓 i 越小 elapsed 越大這個排序可靠成立。
+
+    @classmethod
+    def _fake_popen_factory(cls):
+        class _FakeProc:
+            returncode = 0
+
+            def __init__(self, delay: float):
+                self._delay = delay
+
+            def communicate(self):
+                time.sleep(self._delay)
+                return (
+                    json.dumps({
+                        "testsRun": 1, "skipped": [], "errors": [], "failures": [],
+                        "unexpectedSuccesses": [],
+                    }) + "\n",
+                    "",
+                )
+
+        def fake_popen(argv, **_kwargs):
+            module = argv[-1]  # 形如 "pkg07.Fresh"
+            i = int(module.split(".", 1)[0][3:])
+            delay = (cls._N_GROUPS - i) * cls._DELAY_STEP_SEC
+            return _FakeProc(delay)
+
+        return fake_popen
+
+    def test_hidden_retained_sibling_keys_do_not_trigger_a_false_stale_warning(self) -> None:
+        parallel_shard = run_root_unittests.parallel_shard
+        ptc = parallel_shard.parallel_timing_cache
+        n = self._N_GROUPS
+        modules = {f"pkg{i:02d}.Fresh": 1 for i in range(n)}
+
+        with tempfile.TemporaryDirectory(prefix="ptc_hidden_sibling_") as td:
+            seed_path = Path(td) / "seed.json"
+            live_path = Path(td) / "live.json"
+            pre_existing_live = {f"pkg{i:02d}.Old": 0.0 for i in range(n)}
+            live_path.write_text(json.dumps(pre_existing_live), encoding="utf-8")
+            seed = dict(pre_existing_live)
+            for i in range(n):
+                value = float(n - i)
+                seed[f"pkg{i:02d}"] = value
+                seed[f"pkg{i:02d}.Fresh"] = value
+            seed_path.write_text(json.dumps(seed), encoding="utf-8")
+
+            buf = io.StringIO()
+            with mock.patch.object(ptc, "SEED_PATH", seed_path), \
+                    mock.patch.object(ptc, "LIVE_CACHE_PATH", live_path), \
+                    mock.patch.object(parallel_shard, "worker_count", return_value=4), \
+                    mock.patch.object(parallel_shard.subprocess, "Popen",
+                                       side_effect=self._fake_popen_factory()), \
+                    contextlib.redirect_stdout(buf):
+                parallel_shard.run_parallel(
+                    unittest.TestSuite(), Path(__file__).resolve().parent, modules)
+            output = buf.getvalue()
+            self.assertNotIn(
+                "過期", output,
+                f"合併後活體快取應與種子檔高度重疊，不該印過期警告，實際輸出：{output}")
+            # 白盒複查：確認磁碟活體快取真的把 Old 舊鍵留下來了，否則上面「不印
+            # 過期」有可能只是巧合，不是真的在測 kept_previous 合併語意。
+            merged_live = ptc.read_json(live_path)
+            for i in range(n):
+                self.assertIn(f"pkg{i:02d}.Old", merged_live,
+                               "save_live_cache() 的 kept_previous 應保留同前綴的舊 class 鍵")
 
 
 class ParallelMergeResultSkipCensusParityTest(unittest.TestCase):

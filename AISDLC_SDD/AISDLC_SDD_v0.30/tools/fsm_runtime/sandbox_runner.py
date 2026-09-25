@@ -236,6 +236,10 @@ def _probe_docker_available() -> bool:
     try:
         r = subprocess.run(
             ["docker", "info"], capture_output=True, timeout=10, check=False,
+            # 🔴 R88／DEF-200-104：`creationflags` 非有不可——hook 載具在 Windows 是
+            # `pythonw.exe`（GUI 子系統、無 console），OS 會替這個 child **另配一個新
+            # console 視窗** ⇒ 每次觸發就閃一次。平台中立：POSIX 上 `getattr` 兜底成 0。
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         if r.returncode != 0:
             return False
@@ -336,6 +340,10 @@ class DockerBackend:
                 cmd, capture_output=True, text=True,
                 encoding="utf-8", errors="replace",
                 timeout=spec.timeout_sec, check=False,
+                # 🔴 R88／DEF-200-104：`creationflags` 非有不可——hook 載具在 Windows 是
+                # `pythonw.exe`（GUI 子系統、無 console），OS 會替這個 child **另配一個新
+                # console 視窗** ⇒ 每次觸發就閃一次。平台中立：POSIX 上 `getattr` 兜底成 0。
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
         except (subprocess.TimeoutExpired, UnicodeDecodeError, OSError):
             # 逾時／輸出解碼失敗／OS 層錯誤（如 docker 於探測後消失）＝ runtime 故障

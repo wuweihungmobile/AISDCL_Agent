@@ -96,7 +96,14 @@ def run_tlc(depth: int = 50, *, jar: Path | None = None,
         "-config", cfg, "-workers", "auto", "-depth", str(depth), tla,
     ]
     proc = subprocess.run(cmd, cwd=str(FORMAL_DIR), capture_output=True, text=True,
-                          encoding="utf-8", errors="replace")
+                          encoding="utf-8", errors="replace",
+                          # 🔴 R88／DEF-200-104：`creationflags` 非有不可——hook 載具在
+                          # Windows 是 `pythonw.exe`（GUI 子系統、無 console），OS 會替
+                          # 這個 child **另配一個新 console 視窗**⇒每次觸發就閃一次。
+                          # 平台中立：POSIX 上 `getattr` 兜底成 0。🔴 不加
+                          # `CREATE_NEW_PROCESS_GROUP`：會斷掉使用者 Ctrl+C 中斷長跑
+                          # TLC 的能力（TLC 窮舉驗證可能跑很久）。
+                          creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     out = proc.stdout + "\n" + proc.stderr
 
     no_error = "No error has been found" in out
