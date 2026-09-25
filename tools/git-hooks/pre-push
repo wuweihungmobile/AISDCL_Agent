@@ -40,7 +40,9 @@
 #     - local_sha 全零（刪除遠端分支）→ 該行跳過（無需驗證）
 #     - 任何無法判定的情況（merge-base 失敗、diff 失敗、stdin 空但仍被呼叫等）
 #       → fail-safe：視為兩子專案都有變更（跑全部閘門），寧可多跑不可漏跑
-#   stdin 會原樣轉發給各子 hook（printf '%s\n' "$STDIN" | bash <子hook>），
+#   stdin 會原樣轉發給各子 hook（bash <子hook> <<<"$STDIN"，here-string 而非
+#   printf | bash 管線——後者在 `set -uo pipefail` 下若子 hook 不讀 stdin 就提早
+#   exit，printf 可能收 SIGPIPE 而讓整條管線被誤判非零，見 DEF-200-392），
 #   使需要讀 stdin 的子 hook 行為不變。
 #   緊急跳過：AUTOCLAUDE_SKIP_HOOKS=1 git push ...  或  git push --no-verify
 # ---------------------------------------------------------------------------
@@ -311,13 +313,21 @@ _run_autoclaude_leg() {
     _ac_log="$(mktemp "${TMPDIR:-/tmp}/prepush_ac.XXXXXX" 2>/dev/null || echo '')"
     if [ -z "$_ac_log" ]; then
       # mktemp 不可用時退回原行為（少一道 advisory 判準，但絕不擋 push）
-      printf '%s\n' "$STDIN" | bash "$TOPLEVEL/AutoClaude/tools/git-hooks/pre-push" || leg_rc=1
+      # 🔴 修復棒 G（DEF-200-392）：改用 here-string（bash 內部寫暫存檔供 stdin，不經
+      # 管線）而非 `printf … | bash …`——`set -uo pipefail` 下，子 hook 若不讀 stdin
+      # 就提早 exit（測試替身 `_bash_marker_stub` 正是如此），printf 可能收 SIGPIPE
+      # （141），pipefail 把整條管線判非零 → 子 hook 明明 `exit 0` 卻被判失敗。
+      # 這正是本檔上方（root-infra 分流那段）「不可用 printf | grep -q」註記講的同一
+      # 類 race；此處是它的第二個實例，此前漏補（root-infra-ci #<f901721> 首次在
+      # 並行段 CPU 競爭下真的觸發，SDD leg 明明 `exit 0` 卻回報 rc=1）。
+      bash "$TOPLEVEL/AutoClaude/tools/git-hooks/pre-push" <<<"$STDIN" || leg_rc=1
       echo "[pre-push dispatcher] ⚠ 無法建立暫存檔（mktemp '${TMPDIR:-/tmp}/prepush_ac.XXXXXX' 失敗；真因在暫存目錄不是 git）→ 本次跳過 skip 分群普查" >&2
     else
       # PYTHONUNBUFFERED=1：接上 `tee` 之後 stdout 不再是 tty，python 預設改為區塊
       # 緩衝 ⇒ 使用者會盯著空白等九十秒才一次看到全部輸出。這一個變數把即時性換回來。
-      printf '%s\n' "$STDIN" \
-        | PYTHONUNBUFFERED=1 bash "$TOPLEVEL/AutoClaude/tools/git-hooks/pre-push" \
+      # 同上：改 here-string 餵 stdin，管線只剩 bash | tee 兩段，不再有 printf 的
+      # SIGPIPE-vs-pipefail 競態。
+      PYTHONUNBUFFERED=1 bash "$TOPLEVEL/AutoClaude/tools/git-hooks/pre-push" <<<"$STDIN" \
         | tee "$_ac_log" || leg_rc=1
       _ac_gate_dir="$TOPLEVEL/AutoClaude/tools"
       if [ -n "${AUTOCLAUDE_PUSH_PYTEST_ARGS:-}" ]; then
@@ -355,7 +365,11 @@ _run_sdd_leg() {
   local leg_rc=0
   if [ -f "$TOPLEVEL/AISDLC_SDD/.githooks/pre-push" ]; then
     echo "[pre-push dispatcher] push 範圍含 AISDLC_SDD/ → 執行 AISDLC_SDD pre-push"
-    printf '%s\n' "$STDIN" | bash "$TOPLEVEL/AISDLC_SDD/.githooks/pre-push" || leg_rc=1
+    # 🔴 修復棒 G（DEF-200-392）：同 `_run_autoclaude_leg` 的 here-string 修法——
+    # 避免 `printf … | bash …` 在 `set -uo pipefail` 下被子 hook 提早 exit 觸發
+    # SIGPIPE 誤判非零（root-infra-ci 對 f901721 的並行段實測紅：SDD leg 明明
+    # `exit 0` 卻回報 rc=1，stdout 只有 `-`/警告行、無任何真實失敗訊息）。
+    bash "$TOPLEVEL/AISDLC_SDD/.githooks/pre-push" <<<"$STDIN" || leg_rc=1
   else
     # 子 hook 應存在卻缺失＝hooks 體系損壞 → fail-loud，拒絕放行
     echo "[pre-push dispatcher] ❌ 子 hook 缺失：$TOPLEVEL/AISDLC_SDD/.githooks/pre-push（hooks 體系損壞）" >&2

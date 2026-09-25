@@ -680,7 +680,10 @@ _SITE_CLASS_CENSUS: dict[str, dict[str, int]] = {
         # `self.skipTest("[TOOL-ABSENCE] …")`／`self.skipTest("[ENV-DISABLED] …")`（找不到
         # pythonw.exe／解不出任何逐字稿時明說跳過，不假綠）——同一個方法貢獻一個站點，
         # 故只 +1（不是 +2）。
-        "runtime-skipTest": 33,
+        # 🔴 同輪回填 33→32（DEF-200-393）：該方法改用合成逐字稿後不再有 runtime
+        # `self.skipTest(...)` 站點（實測 `site_class_counts()`＝32），行為鎖在所有 Windows
+        # 環境都真的跑——站點消失是「讓測試真的跑」的合法出口，不是放寬。
+        "runtime-skipTest": 32,
         "unclassified": 0,
     },
     # 🔴 R81 包 F 重釘 `windows-only` 9→10：並行包在

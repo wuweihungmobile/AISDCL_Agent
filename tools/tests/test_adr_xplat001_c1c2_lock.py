@@ -685,7 +685,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 8771,
+    "test_adr_xplat001_c1c2_lock.py": 8797,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 4032,
@@ -705,7 +705,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_claim_provenance_r86.py": 1015,
     "test_clean_venv_carrier.py": 281,
     "test_component_sanitizer_shared_layer_lock.py": 293,
-    "test_context_budget_guard.py": 12607,
+    "test_context_budget_guard.py": 12606,
     "test_context_window_parity.py": 281,
     "test_cpu_budget.py": 428,
     "test_defect_id_reference_integrity.py": 281,
@@ -750,7 +750,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_sentinel_tick_e2e_r145.py": 141,
     "test_session_brief.py": 220,
     "test_single_venv_identity.py": 161,
-    "test_skip_ceiling_ratchet_direction.py": 724,
+    "test_skip_ceiling_ratchet_direction.py": 730,
     "test_skip_discoverability_r83.py": 742,
     "test_smoke_ci_sync.py": 1496,
     "test_statusline_context_feed.py": 204,
@@ -2338,6 +2338,30 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "[非淨減法輪][同輪追加] 收斂列：接鏈列漂移。詳 CrossPlatform_R145_Scan_Findings.md。"),
     ("R172", 106198, 106209, 11,  # round-label-ok
      "[非淨減法輪][同輪追加] 收斂列。詳 CrossPlatform_R145_Scan_Findings.md。"),
+    ("R172", 106209, 106214, 5,  # round-label-ok：同一事故輪後續修補（收尾單人窗口修復棒 H）
+     "[非淨減法輪][同輪追加] 修復棒 H 覆審 G 對 PlannerCheckIsConsoleFreeTest 的 M6 完備性"
+     "（DEF-200-393）：test_context_budget_guard.py -1（改合成逐字稿＋顯式 --transcript，"
+     "移除對真逐字稿存在與否的依賴，連帶移除 [ENV-DISABLED] 第二關 skip 分支）；"
+     "test_skip_ceiling_ratchet_direction.py +6（修復棒 G 三方 CI 復紅修復＋skip ceiling "
+     "天花板同步，darwin 46→47／linux 80→81，DEF-200-392，本輪一併重釘）。詳 "
+     "CrossPlatform_R145_Scan_Findings.md〈附記（R172）〉。"),
+    ("R172", 106214, 106221, 7,  # round-label-ok
+     "[非淨減法輪][同輪追加] 收斂列：上一列自身漂移。詳 "
+     "CrossPlatform_R145_Scan_Findings.md〈附記（R172）〉。"),
+    ("R172", 106221, 106224, 3,  # round-label-ok
+     "[非淨減法輪][同輪追加] 收斂列：連續自身漂移。詳 CrossPlatform_R145_Scan_Findings.md。"),
+    ("R172", 106224, 106226, 2,  # round-label-ok
+     "[非淨減法輪][同輪追加] 收斂列。詳 CrossPlatform_R145_Scan_Findings.md。"),
+    ("R172", 106226, 106228, 2,  # round-label-ok
+     "[非淨減法輪][同輪追加] 收斂列。詳 CrossPlatform_R145_Scan_Findings.md。"),
+    ("R172", 106228, 106232, 4,  # round-label-ok
+     "[非淨減法輪][同輪追加] 收斂列：含本列自身漂移。詳 CrossPlatform_R145_Scan_Findings.md。"),
+    ("R172", 106232, 106236, 4,  # round-label-ok
+     "[非淨減法輪][同輪追加] 收斂列：_FROZEN_PREFIX_REWRITE_LEDGER 接鏈列造成的漂移，含本列 "
+     "自身。詳 CrossPlatform_R145_Scan_Findings.md。"),
+    ("R172", 106236, 106240, 4,  # round-label-ok
+     "[非淨減法輪][同輪追加] 收斂列：_FROZEN_PREFIX_REWRITE_LEDGER 第二次接鏈列造成的漂移，"
+     "含本列自身。詳 CrossPlatform_R145_Scan_Findings.md。"),
 )
 
 
@@ -3075,10 +3099,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 281
+_REPIN_LOG_FROZEN_PREFIX_LEN = 289
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "2bf9d536b2bdf82dabffabce138ef0252e9ed8ca5d053b9fb96d5c9d3c923bb8")
+    "8fe3e9b2b14280a75961d5dd87a5992e91e499ebf27179c977f8f4773a8caca7")
 
 
 def repin_log_history_digest(
@@ -3404,6 +3428,8 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R172", "ecf46fb27335", "efc968920451", "DEF-200-389"),  # round-label-ok
     ("R172", "efc968920451", "0b2e73a520bb", "DEF-200-390"),  # round-label-ok：接鏈列自身漂移延伸
     ("R172", "0b2e73a520bb", "2bf9d536b2bd", "DEF-200-391"),  # round-label-ok：回歸鎖軌新列延伸
+    ("R172", "2bf9d536b2bd", "3e14b8e6687d", "DEF-200-393"),  # round-label-ok：修復棒 H 收尾重釘
+    ("R172", "3e14b8e6687d", "8fe3e9b2b142", "DEF-200-393"),  # round-label-ok：接鏈列造成二次重釘
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

@@ -6422,14 +6422,13 @@ class PlannerCheckIsConsoleFreeTest(unittest.TestCase):
         if pyw.name.lower() != "pythonw.exe":
             self.skipTest(f"[TOOL-ABSENCE] 這個直譯器旁沒有 pythonw.exe（解析到 {pyw}）"
                           "——無 console 父行程這個實驗條件建不起來，跳過比假綠正確")
-        transcript = planner.resolve_transcript(None, None)
-        if transcript is None:
-            self.skipTest(
-                "[ENV-DISABLED] 本機解不出任何逐字稿（無 --session-id／--transcript／"
-                "project_transcript_dir 下無 *.jsonl）⇒ `--check` 會在碰到 `measure()`"
-                "（本測試要驗的那條路）之前就以 rc=1 提早返回，跑下去只會是空測——跳過"
-                "比假綠正確")
         tmp = _tmpdir(self, "planner-console-watch-")
+        # DEF-200-392 覆審：`resolve_transcript(None, None)` 在乾淨 CI runner 上解不到
+        # 逐字稿會令本測試整支 [ENV-DISABLED] skip，而它正是防 console 洩漏事故
+        # （DEF-200-389）再犯的行為鎖。事故路徑不因逐字稿真假而改變（見本 class
+        # docstring：`measure()` 無條件走到 `window_evidence()` 的裸 git 子行程），
+        # 改用合成逐字稿 ＋ 顯式 `--transcript`，不再依賴機台上是否真有逐字稿。
+        transcript = _write_jsonl(tmp / "grow.jsonl", [1_000])
         watcher_script = tmp / "watch.ps1"
         watcher_script.write_text(_LIVE_CONSOLE_WATCH_PS1, encoding="utf-8", newline="\n")
         events_out, armed_out = tmp / "events.txt", tmp / "armed.txt"
@@ -6445,7 +6444,7 @@ class PlannerCheckIsConsoleFreeTest(unittest.TestCase):
             self.assertTrue(armed_out.is_file(),
                             "監看器 10 秒內沒有武裝——本測試本身建不起偵測條件")
             proc = subprocess.run(
-                [str(pyw), str(_PLANNER), "--check"],
+                [str(pyw), str(_PLANNER), "--check", "--transcript", str(transcript)],
                 capture_output=True, encoding="utf-8", errors="replace", timeout=60,
                 check=False, creationflags=guard.NO_WINDOW)
             time.sleep(2)  # 讓監看器有時間把 WMI 事件寫進檔案（事件是非同步遞送的）

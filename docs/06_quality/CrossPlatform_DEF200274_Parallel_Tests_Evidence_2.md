@@ -838,6 +838,77 @@ WT 預設終端下**不可靠**，不得作為修法。
   bash.exe 564／conhost.exe 266／powershell.exe 65／pythonw.exe 42／cmd.exe 23／cscript.exe 4／
   pwsh.exe 3），**OpenConsole.exe＝0、WindowsTerminal.exe＝0**；跑完現查 OpenConsole＝0、
   WindowsTerminal＝0、孤兒 conhost（父已死）＝0。對照事故前每次全套約 29～36 組洩漏。
-- commit sha／push：（留白）
+- commit sha／push：`f901721`（本節上述修復三道鎖落地後的 commit，已 push）。
 - 雲端驗收（windows-compat-ci／macos-compat-ci 兩支 workflow 因本節新增 paths 條目
   是否觸發、`test_ci_paths_cover_root_consumers.py` 雲端結果）：（留白）
+
+### f901721 雲端驗收與後續修補
+
+- **三支 CI 對 `f901721` 全紅，主控擷取 log 逐字歸因**（`ci3_root_full.log`／
+  `ci3_mac.log`／`ci3_win.log`，皆為當場真 GitHub run 輸出）：
+  - `root-infra-ci`（ubuntu）：`[M6 id 集合] tools/tests@linux：❌ 集合關係被破壞（本次
+    skip 83 支）` — `落款缺 ['test_context_budget_guard.PlannerCheckIsConsoleFreeTest.
+    test_planner_check_does_not_spawn_a_visible_terminal']`；另一支獨立紅：
+    `FAIL: test_pre_push_dispatcher.TestPrePushDispatcher.
+    test_two_legs_trigger_parallel_segment_with_headers_and_marker_line`
+    （`AssertionError: 1 != 0`），即 DEF-200-392 的 SIGPIPE 競態。
+  - `macos-compat-ci`：`[M6 id 集合] tools/tests@darwin：❌ 集合關係被破壞（本次 skip
+    47 支）`，同型落款缺口（新測試尚未落款進 `skip_id_ledger.json` 的 darwin 剖面）。
+  - `windows-compat-ci`：`[M6 id 集合] tools/tests@win32：❌ 集合關係被破壞（本次 skip
+    44 支）`；且逐字印出該測試的 skip 理由：`[已標籤 [ENV-DISABLED]]
+    test_context_budget_guard.PlannerCheckIsConsoleFreeTest.
+    test_planner_check_does_not_spawn_a_visible_terminal`／`理由：[ENV-DISABLED]
+    本機解不出任何逐字稿`——證實新增的行為鎖在乾淨 CI runner 上結構上必經
+    `resolve_transcript(None, None) is None` 那一支，從未真正執行過。
+  - 三支同紅的共通根因＝落款檔（`skip_id_ledger.json`）未跟著本節新增的
+    `PlannerCheckIsConsoleFreeTest` 同步三個剖面，而非各自獨立的新缺陷；SIGPIPE 那一支
+    是並存的第二個根因（見 DEF-200-392）。
+- **本機結構性盲區**：本機（win32）跑 `tools/run_root_unittests.py` 只能現查
+  `tools/tests@win32` 一個剖面的 M6／S3 結果，darwin／linux 兩個剖面的落款是否同步
+  必須等真雲端 run；本機看不到、也不該假裝看得到。
+- **修復棒 G 的處置＝落款三剖面補齊＋豁免**：darwin／linux 兩剖面補上該測試的
+  `[WINDOWS-NATIVE-ONLY]` 必然互補 skip（platform 群 ceiling 同步上修），SIGPIPE 以
+  here-string 修法解決（DEF-200-392）；但 win32 剖面選擇用 `_M6_EXEMPT` 豁免這支測試
+  的 `[ENV-DISABLED]` 落款漂移，而不是修掉造成漂移的根本原因。
+- **主控否決該豁免，理由**：`_M6_EXEMPT` 只能讓 M6 判準不再報漂移，改變不了「這支
+  防 console 洩漏事故（DEF-200-389）再犯的行為鎖在 windows-compat-ci 上，因
+  `resolve_transcript(None, None)` 解不到真逐字稿而永遠 `[ENV-DISABLED]` skip、從未
+  真正執行」這個事實——豁免掩蓋的正是防護本身失效。
+- **修復棒 H（DEF-200-393）的修法**：改用 `tempfile` 合成逐字稿（`_write_jsonl`）＋
+  顯式 `--transcript <path>` 餵給 `pythonw session_resume_planner.py --check`，繞開
+  `resolve_transcript` 對「機台上是否真有一份 Claude Code 逐字稿」的依賴——`measure()`
+  仍無條件走到 `guard.window_evidence()` 那條裸 `git ls-files` 子行程（事故路徑不變，
+  只是不再需要真逐字稿才能踩進去）。移除 `_M6_EXEMPT` 第 4 筆與
+  `skip_id_ledger.json` win32 剖面的該筆登記（該測試在 win32 上不再 skip、會真跑）。
+  **突變自證**：暫時拔掉 `AISDLC_SDD/scripts/sdd_version.py` 的 `creationflags`
+  ⇒ 本機真跑該測試紅、逐字列出觸發的 `OpenConsole.exe`／`WindowsTerminal.exe`
+  建立事件；改回後綠。
+
+### 🔴 主控訂正：先前「全套期間 OpenConsole＝0」的量測覆蓋不完整
+
+`console_qa/watch_console.ps1` 對**每一筆**事件再做兩次 `Get-CimInstance` 查父／祖父行程，
+處理速率約每秒 7～8 筆，遠低於全套的行程建立速率 ⇒ 事件在佇列積壓、到期限時未處理的
+**直接丟棄**，且記錄的 `at` 是處理時間而非建立時間。實證：同一支全套在它之下記到
+**0 筆 pythonw**，而改用 WMI 端過濾版（下）記到 72 筆。故本節上方與 `f901721` commit
+訊息中「2964 筆／OpenConsole＝0」「push 期間 4300 筆／0」、以及修復棒 F 的「三次全套建立
+事件＝0」皆**覆蓋不完整、不得作為修補有效的證據**（單獨跑行為鎖那類低流量量測不受影響）。
+
+**權威量測（主控親跑）**：`scratchpad/watch_filtered.ps1`——WMI 查詢端即過濾
+`Name IN (pythonw.exe, OpenConsole.exe, WindowsTerminal.exe)`、時間戳取 `TIME_CREATED`
+（建立時刻），流量小不積壓。三條判準須同時成立才算數：① 覆蓋率正向對照＝全套期間必須
+抓得到 pythonw；② 全套期間 OpenConsole／WindowsTerminal＝0；③ 已知陽性（pythonw 以零旗標
+起 `git --version`）必須被抓到。結果：根層全套 23:41:09～23:43:08 rc=0，① **pythonw 72 筆**
+（23:42:25～23:43:00，即 test_context_budget_guard 等以 pythonw 真跑 planner 的單位）、
+② **OpenConsole＝0、WindowsTerminal＝0**、③ 陽性探針 23:43:09.027 起 pythonw ⇒ 23:43:09.373
+**OpenConsole.exe＋WindowsTerminal.exe 各 1 筆（父 svchost）**。跑完現查 OpenConsole＝0、
+WindowsTerminal＝0、孤兒 conhost＝0。
+
+### 待主控回填（f901721 後續）
+
+- 主控收尾全套（本節修補落地後）：rc=0、`發現 4617 個測試`、`[M6 id 集合] tools/tests@win32：
+  ✅ 集合關係成立（本次 skip 43 支）`、`[skip census] tools/tests@win32 共 43 支：platform=42／
+  …／env-disabled=1`（行為鎖不再被 skip）；修補過程中主控另補 `skip_tag_policy.
+  _SITE_CLASS_CENSUS["tools/tests"]["runtime-skipTest"]` 33→32（行為鎖移除 runtime skipTest
+  後的站點數，全套靜態前置掃描抓到——修復棒 H 被禁跑全套故未見）。
+- 下一次真 `windows-compat-ci`／`macos-compat-ci`／`root-infra-ci` run（本輪修法的
+  commit push 後）：三剖面 M6 是否轉綠、win32 skip census 是否不再含本測試（留白）。

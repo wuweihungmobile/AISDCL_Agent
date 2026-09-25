@@ -77,7 +77,10 @@ _FROZEN_CEILING_MAX: dict[str, dict[str, int]] = {
         S.SKIP_GROUP_UNTAGGED: 0,
     },
     "tools/tests@darwin": {
-        S.SKIP_GROUP_PLATFORM: 46,  # round-label-ok：provenance 見 policy 主表同鍵段（M-19）
+        # 🔴 修復棒 G 上修 46→47：`PlannerCheckIsConsoleFreeTest.
+        # test_planner_check_does_not_spawn_a_visible_terminal`（`[WINDOWS-NATIVE-ONLY]`）
+        # 在 darwin 剖面的必然互補 skip，provenance 見 policy 主表同鍵段。
+        S.SKIP_GROUP_PLATFORM: 47,
         S.SKIP_GROUP_TOOL_ABSENCE: 0,
         S.SKIP_GROUP_ENV_DISABLED: 1,  # round-label-ok：provenance 見 policy 主表同鍵段
         S.SKIP_GROUP_STRUCTURAL: 0,
@@ -89,7 +92,10 @@ _FROZEN_CEILING_MAX: dict[str, dict[str, int]] = {
         # test_real_get_scheduledtask_listing_feeds_other_owner_for_session` 在 linux 剖面
         # 的必然互補 skip（+1），provenance 見 policy 主表同鍵段；此前只同步了 darwin 天花板，
         # 漏了 linux，本次補齊。
-        S.SKIP_GROUP_PLATFORM: 80,  # 對抗式稽核收尾上修 79→80：provenance 見 policy 主表同鍵段
+        # 🔴 修復棒 G 上修 80→81：`PlannerCheckIsConsoleFreeTest.
+        # test_planner_check_does_not_spawn_a_visible_terminal`（`[WINDOWS-NATIVE-ONLY]`）
+        # 在 linux 剖面的必然互補 skip，provenance 見 policy 主表同鍵段。
+        S.SKIP_GROUP_PLATFORM: 81,
         S.SKIP_GROUP_TOOL_ABSENCE: 2,
         S.SKIP_GROUP_ENV_DISABLED: 0,
         S.SKIP_GROUP_STRUCTURAL: 0,

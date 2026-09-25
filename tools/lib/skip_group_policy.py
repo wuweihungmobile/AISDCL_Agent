@@ -507,8 +507,15 @@ _RUNTIME_SKIP_CEILING: dict[str, dict[str, int]] = {
     #   `[skip census] tools/tests@darwin 共 46 支：platform=46／tool-absence=0／
     #    env-disabled=0／structural-pair=0／debt=0／untagged=0／欠債型 0 支（目標 0）`
     # 逐格照填、零加減推算；MAX 表同 commit 同鍵上修。
+    # 🔴 修復棒 G（macos-compat-ci 對 commit f901721 紅）：`platform` 46→**47**——本輪新增
+    # `PlannerCheckIsConsoleFreeTest.test_planner_check_does_not_spawn_a_visible_terminal`
+    # （`[WINDOWS-NATIVE-ONLY]`，console_qa 事故輪的行為鎖）在 darwin 剖面的必然互補 skip
+    # （+1）。取得方式＝真 GitHub macos-compat-ci run（commit f901721）當場印出逐字：
+    #   `[skip census] tools/tests@darwin 共 47 支：platform=47／tool-absence=0／
+    #    env-disabled=0／structural-pair=0／debt=0／untagged=0／欠債型 0 支（目標 0）`
+    # 逐格照填、零加減推算；MAX 表同 commit 同鍵上修（R96/R100 同型判例）。
     "tools/tests@darwin": {
-        SKIP_GROUP_PLATFORM: 46,
+        SKIP_GROUP_PLATFORM: 47,
         SKIP_GROUP_TOOL_ABSENCE: 0,
         # 🔴 誠實劃界（喚醒鏈四方審計修復包收尾訂正）：`test_skip_ledger_co_change_
         # ignores_a_touch_with_no_value_change` 只在本機分支領先 origin/main 且該
@@ -582,8 +589,16 @@ _RUNTIME_SKIP_CEILING: dict[str, dict[str, int]] = {
     #   `[skip census] tools/tests@linux 共 82 支：platform=80／tool-absence=2／
     #    env-disabled=0／structural-pair=0／debt=0／untagged=0／欠債型 2 支（目標 0）`
     # 逐格照填、零加減推算；MAX 表同 commit 同鍵上修（R96/R100 同型判例）。
+    # 🔴 修復棒 G（root-infra-ci 對 commit f901721 紅）：`platform` 80→**81**——本輪新增
+    # `PlannerCheckIsConsoleFreeTest.test_planner_check_does_not_spawn_a_visible_terminal`
+    # （`[WINDOWS-NATIVE-ONLY]`，console_qa 事故輪的行為鎖）在 linux 剖面的必然互補 skip
+    # （+1）。取得方式＝真 GitHub root-infra-ci run（ubuntu-latest，commit f901721）
+    # 當場印出逐字：
+    #   `[skip census] tools/tests@linux 共 83 支：platform=81／tool-absence=2／
+    #    env-disabled=0／structural-pair=0／debt=0／untagged=0／欠債型 2 支（目標 0）`
+    # 逐格照填、零加減推算；MAX 表同 commit 同鍵上修（R96/R100 同型判例）。
     "tools/tests@linux": {
-        SKIP_GROUP_PLATFORM: 80,
+        SKIP_GROUP_PLATFORM: 81,
         SKIP_GROUP_TOOL_ABSENCE: 2,
         SKIP_GROUP_ENV_DISABLED: 0,
         SKIP_GROUP_STRUCTURAL: 0,
@@ -670,8 +685,9 @@ _RUNTIME_SKIP_CEILING_MAX: dict[str, dict[str, int]] = {
     },
     # 🔴 R115 round-label-ok：`platform` 44→45 同 commit 上修，理由同見主表同鍵段。
     # 🔴 喚醒鏈四方審計修復包：`platform` 45→46 同 commit 上修，理由同見主表同鍵段。
+    # 🔴 修復棒 G：`platform` 46→47 同 commit 上修，理由同見主表同鍵段。
     "tools/tests@darwin": {
-        SKIP_GROUP_PLATFORM: 46,
+        SKIP_GROUP_PLATFORM: 47,
         SKIP_GROUP_TOOL_ABSENCE: 0,
         SKIP_GROUP_ENV_DISABLED: 1,  # diff-範圍相依暫態，天花板可同時容納 0/1，理由同見主表同鍵段
         SKIP_GROUP_STRUCTURAL: 0,
@@ -683,8 +699,9 @@ _RUNTIME_SKIP_CEILING_MAX: dict[str, dict[str, int]] = {
     # 🔴 R115 round-label-ok：`platform` 77→78 同 commit 上修，理由同見主表同鍵段。
     # 🔴 R131 round-label-ok 收尾包漏同步：`platform` 78→79 同 commit 上修，理由同見主表同鍵段。
     # 🔴 對抗式稽核收尾追加：`platform` 79→80 同 commit 上修，理由同見主表同鍵段。
+    # 🔴 修復棒 G：`platform` 80→81 同 commit 上修，理由同見主表同鍵段。
     "tools/tests@linux": {
-        SKIP_GROUP_PLATFORM: 80,
+        SKIP_GROUP_PLATFORM: 81,
         SKIP_GROUP_TOOL_ABSENCE: 2,
         SKIP_GROUP_ENV_DISABLED: 0,
         SKIP_GROUP_STRUCTURAL: 0,
