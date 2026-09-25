@@ -1011,4 +1011,17 @@ ci-gate）→ 兩面獨立審查（程式正確性／對抗式反駁）→ 審�
   成立（本次 skip 43 支）`、`✅ 孤兒 console 普查：零增長（前 0／後 0）。`，無過期警告。全套前後
   現查 OpenConsole／WindowsTerminal／孤兒 conhost 皆 0／0／0；`--check-snapshot` rc=0；
   `check_defect_log_crossref.py` rc=0。
-- commit、push、雲端驗收：（留白）
+- commit `a7ec277`；push `c5d1722..a7ec277`，pre-push `[cpu_budget] parallel legs: root=18
+  autoclaude=0 sdd=2 wall=146s`、`✅ 本次 push 觸發的所有 leg 皆通過（rc=0）`；root leg `發現 4622
+  個測試`、`S=1785.1s｜ideal=99.2s｜loss=1.00x｜slot 利用率=99.8%`、普查零增長、無過期警告；SDD leg
+  v0.01 1478／v0.30 1956／scripts/tests 364 passed。push 後現查 OpenConsole／WindowsTerminal 0／0。
+- 雲端（`a7ec277`，主控 `gh run view --log` 親抓）五支全 success：root-infra-ci 36178806924
+  （`workers=4｜S=1346.0s｜ideal=336.5s｜slot 99.8%`、`[M6 id 集合] tools/tests@linux：✅（本次 skip 83
+  支）`）、windows-compat-ci 36178806852（`workers=4｜S=2141.1s｜ideal=535.3s｜slot 99.4%`、`@win32：✅
+  （43 支）`、`✅ 孤兒 console 普查：零增長（前 1／後 1）`；NoWindowBehaviourTest 與
+  PlannerCheckIsConsoleFreeTest 不在 skip 清單⇒真跑且通過）、macos-compat-ci 36178806842
+  （`workers=3｜S=1247.9s｜ideal=416.0s｜slot 99.5%`、`@darwin：✅（47 支）`）、aisdlc-sdd-ci
+  36178806990（`xdist workers=4`＋`nodes confirmed=4`）、AutoClaude CI 36178806865（三 job 皆
+  `xdist workers=4`＋`nodes confirmed=4`）。**三平台 log 皆無「種子檔可能已過期」**（上一輪
+  ee4bdd4／c5d1722 三平台皆報 30%）⇒ DEF-200-386 在雲端同樣消失；上方〈誠實劃界〉第一條的
+  「跨平台熱點差異」風險本次未出現。
