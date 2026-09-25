@@ -596,7 +596,9 @@ if [ "$run_parallel_legs" -eq 1 ]; then
   fi
   trap - INT TERM
   _prepush_parallel_wall=$(( $(date +%s) - _prepush_parallel_t0 ))
-  echo "[cpu_budget] parallel legs: root=${AUTOSDD_PARALLEL_TESTS_WORKERS:-?} autoclaude=2 sdd=2 wall=${_prepush_parallel_wall}s"
+  # DEF-200-387：各 leg 的 worker 數依本次是否觸發印出（0＝未觸發）；此前寫死 autoclaude=2 sdd=2，
+  # 只有 root＋AutoClaude 兩 leg 並行時仍印 sdd=2，憑證行與實況不符。
+  echo "[cpu_budget] parallel legs: root=$((run_rootinfra ? ${AUTOSDD_PARALLEL_TESTS_WORKERS:-0} : 0)) autoclaude=$((run_autoclaude * 2)) sdd=$((run_sdd * 2)) wall=${_prepush_parallel_wall}s"
   rm -rf "$_prepush_log_dir"
 fi
 

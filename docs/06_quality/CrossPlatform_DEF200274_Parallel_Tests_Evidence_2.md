@@ -656,7 +656,35 @@ P3（CI 分片、其餘尚未剖析的熱點）列入下方誠實劃界，不在
   58.4s`。ONBOARDING §7 以 `tools/lib/clean_venv_carrier.py` 回填（psycopg2／sqlalchemy
   ABSENT、pip rc=0、`--write --with-slow` rc=0；autoclaude 4688 passed／172 skipped、v0.01 1478、
   v0.30 1956、scripts/tests 364），`--check-snapshot` rc=0；`check_defect_log_crossref.py` rc=0。
-- commit sha：〈待填〉
-- push 後雲端驗收（六支 run，逐字摘錄）：〈待填〉
+- commit sha：`f720ca6`（2026-09-24 nightly perf baseline 重鎖）＋ `ccd4227`（本節全部改動）。
+  push：`d26d4c0..ccd4227  main -> main`，整條 164.2s；pre-push AutoClaude leg `4884 passed, 10 skipped`
+  （背景並行 workers=2，wall 153s，rc=0），`✅ 本次 push 觸發的所有 leg 皆通過（rc=0）`。本次 SDD leg
+  **未觸發**（本輪未動 `AISDLC_SDD/`），憑證行卻印 `sdd=2` ⇒ 收尾後追加 DEF-200-387（下）。
+- push 後雲端驗收（`ccd4227`）：shellcheck-ci 36089796074 success；**AutoClaude CI 36089796062 failure**
+  ——`PG Contract Tests` 的 alembic 步驟 `ModuleNotFoundError: No module named 'psycopg'`，同一 job
+  安裝行逐字 `sqlalchemy-2.1.0`／`psycopg2-binary-2.9.13`／`alembic-1.20.0`（本機 2.0.51／1.19.0），
+  前一次 `0605b37` 同 job success ⇒ 外部依賴漂移，與本節 diff 無關 ⇒ 收尾後追加 DEF-200-388（下）；
+  其餘四支 success，主控以 `gh run view --log` 親抓逐字：三平台皆 `發現 4608 個測試（下限 4543）`；
+  root-infra 36089796040 `[cpu_budget] root-unittest workers=4 source=cpu_budget`、`📊 派工摘要：
+  worker=4｜S=1337.1s｜ideal=max(S/W, 最長單位)=334.3s（S/W-bound）｜loss=1.00x｜slot 利用率=100.0%`；
+  windows-compat 36089796089 `worker=4｜S=2125.3s｜ideal=…=531.3s（S/W-bound）｜slot 99.9%`；
+  macos-compat 36089796003 `worker=3｜S=1052.2s｜ideal=…=350.7s（S/W-bound）｜slot 99.8%`。對照上一節
+  `0605b37`：ubuntu S 2631.4→1337.1s、ideal 657.9→334.3s（−49%）；windows 3770.2→2125.3s、
+  942.5→531.3s（−44%）；macos 1987.7→1052.2s、662.6→350.7s（−47%）——雲端 W 只有 3～4，同一個 S
+  瘦身換成 wall 的收益遠大於本機（Architect 的雲端重算判斷由此實證）。
+- 手動 dispatch `aisdlc-sdd-fsm-chaos-nightly`（run 36090379807，`ccd4227`）：success；
+  `fsm-runtime chaos suite` success（凍結基線 `34 passed, 1482 deselected in 25.57s`、
+  `bounded=100/100`）；`fsm-runtime chaos suite (LATEST track — observation period, DEF-200-379)`
+  success（`Using LATEST version=AISDLC_SDD_v0.30`、`[cpu_budget] broadcast workers=4 source=cpu_budget`、
+  `[cpu_budget] xdist workers=4 source=env`、`[cpu_budget] xdist nodes confirmed=4`、`34 passed in 11.41s`、
+  `bounded=100/100 avg_tokens=1504.8 max_steps=12`）；`enforce 3-day streak lockdown` skipped（如設計：
+  只在 `chaos` 失敗時執行）。此為 workflow_dispatch，不計入 DEF-200-381 的 7 次**排程** run。
+- **收尾後追加（第二個 commit）**：
+  - DEF-200-387：`tools/git-hooks/pre-push` 憑證行改依觸發狀態印 worker 數（0＝未觸發）；
+    `test_pre_push_dispatcher` 兩 leg 測試改逐字斷言 `root=0 autoclaude=2 sdd=2 wall=`，主控突變
+    自證：還原舊寫死行 ⇒ 該支 FAIL（37 支中 1 支），改回 ⇒ `Ran 37 tests … OK`。
+  - DEF-200-388：`AutoClaude/pyproject.toml` 釘 `sqlalchemy>=2.0,<2.1`（CI 由 pyproject extras 安裝，
+    `pip install -e ".[dev,postgres,pgvector]"`）；解除上限前須先把 strip `+asyncpg` 的各處改顯式
+    `+psycopg2`（寫在該行註解）。
 - `AUTOSDD_NET_RATCHET_OFF` 是否需要設定：不需要（結案 DEF-200-379／380，新增 open 僅
   DEF-200-381／386，其餘新列建立即 fixed；`check_defect_log_crossref.py` rc=0）。

@@ -115,7 +115,12 @@ notifications = [
 # pg-contract / pg-e2e-nightly job 的 alembic 步驟因此失敗）。psycopg2-binary 為預編譯 wheel，
 # 免 CI 安裝 build 依賴。
 postgres = [
-    "sqlalchemy>=2.0",
+    # 🔴 DEF-200-388：SQLAlchemy 2.1 把 `postgresql://`（無驅動後綴）的預設驅動由 psycopg2 改為
+    # psycopg（v3）；本 repo 多處（alembic/env.py、tools/seed_kb.py、tools/local_ci_gate.py、
+    # tests/conftest.py 等）都是 strip `+asyncpg` 後交給預設驅動 ⇒ 2.1 下一律找不到 psycopg。
+    # 2026-09-25 CI 首次解析到 2.1.0，PG Contract 的 alembic 步驟即 ModuleNotFoundError。
+    # 先釘 <2.1 回到與本機一致的 2.0.x。解除本上限前，須先把上述各處改成顯式 `+psycopg2`。
+    "sqlalchemy>=2.0,<2.1",
     "asyncpg>=0.29",
     "psycopg2-binary>=2.9",
     "alembic>=1.13",

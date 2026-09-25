@@ -679,8 +679,8 @@ class TestPrePushDispatcher(unittest.TestCase):
             f"缺 AISDLC_SDD leg 背景標頭行：\nstdout={out}\nstderr={err}",
         )
         self.assertIn(
-            "[cpu_budget] parallel legs:", out,
-            f"缺並行 leg 憑證行：\nstdout={out}\nstderr={err}",
+            "[cpu_budget] parallel legs: root=0 autoclaude=2 sdd=2 wall=", out,
+            f"並行憑證行缺或 leg 標示不符實況（DEF-200-387）：\nstdout={out}\nstderr={err}",
         )
         # 兩份 log 的實際內容必須被回放進來，不是只印個標頭就交差。
         self.assertIn("AC_LEG_STUB_OUTPUT_7f3c", out, "AutoClaude leg log 未被回放")
