@@ -685,7 +685,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 8739,
+    "test_adr_xplat001_c1c2_lock.py": 8771,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 4032,
@@ -705,7 +705,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_claim_provenance_r86.py": 1015,
     "test_clean_venv_carrier.py": 281,
     "test_component_sanitizer_shared_layer_lock.py": 293,
-    "test_context_budget_guard.py": 12355,
+    "test_context_budget_guard.py": 12607,
     "test_context_window_parity.py": 281,
     "test_cpu_budget.py": 428,
     "test_defect_id_reference_integrity.py": 281,
@@ -742,7 +742,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_quota_policy.py": 3416,
     "test_root_guard_known_model_r145.py": 227,
     "test_root_infra_parity.py": 441,
-    "test_run_root_unittests.py": 4954,
+    "test_run_root_unittests.py": 5019,
     "test_sanitize_component_frozen_sdd_versions_lock.py": 317,
     "test_schedule_capability_parity.py": 626,
     "test_script_scan_surface_ssot.py": 391,
@@ -2319,6 +2319,25 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "[非淨減法輪][同輪追加] 收斂列：一次性例外值訂正＋前綴延伸＋sha 更新＋接鏈列＋分桶棘輪 "
      "docstring 訂正回歸鎖＋_PHASE2_REVIEW_LOG 新列＋E501 折行造成的漂移。詳 "
      "CrossPlatform_R145_Scan_Findings.md。"),
+    ("R172", 105860, 106177, 317,  # round-label-ok：console_qa 事故輪收尾單人窗口重釘
+     "[非淨減法輪] console_qa 事故輪收尾單人窗口重釘：本表淨額全數為修復棒 F 落地的行為鎖，"
+     "test_context_budget_guard.py +252（ConsoleFreeSpawnTest 掃描面擴大到 pythonw 可達模組＋"
+     "spec_from_file_location_problems() 新規則＋PlannerCheckIsConsoleFreeTest／"
+     "NoWindowBehaviourTest 行為鎖與 STARTUPINFO(SW_HIDE) 負對照）、test_run_root_unittests.py "
+     "+65（console_orphan_census.wrap() 接線與三支自證測試），未刪任何既有測試以保鑑別力，"
+     "逐項見 CrossPlatform_R145_Scan_Findings.md〈附記（R172）〉。"),
+    ("R172", 106177, 106184, 7,  # round-label-ok
+     "[非淨減法輪][同輪追加] 收斂列：本列自身漂移。詳 "
+     "CrossPlatform_R145_Scan_Findings.md〈附記（R172）〉。"),
+    ("R172", 106184, 106187, 3,  # round-label-ok
+     "[非淨減法輪][同輪追加] 收斂列：上一列自身漂移。詳 "
+     "CrossPlatform_R145_Scan_Findings.md〈附記（R172）〉。"),
+    ("R172", 106187, 106192, 5,  # round-label-ok
+     "[非淨減法輪][同輪追加] 收斂列：連續自身漂移。詳 CrossPlatform_R145_Scan_Findings.md。"),
+    ("R172", 106192, 106198, 6,  # round-label-ok
+     "[非淨減法輪][同輪追加] 收斂列：接鏈列漂移。詳 CrossPlatform_R145_Scan_Findings.md。"),
+    ("R172", 106198, 106209, 11,  # round-label-ok
+     "[非淨減法輪][同輪追加] 收斂列。詳 CrossPlatform_R145_Scan_Findings.md。"),
 )
 
 
@@ -2758,6 +2777,14 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "（普查掃描面補站）、test_block_destructive_git_r83.py（cwd 密封回歸鎖）全為結案回歸鎖，"
      "母項超出軌上限 ⇒ 部分申報 309（＝軌上限，同 R152／R169 先例），餘額歸主軌由款(10)(11) "
      "照算。逐項見 CrossPlatform_R145_Scan_Findings.md〈附記（R171）〉。"),
+    ("R172", 309,
+     "DEF-200-389／390／391 結案回歸鎖（記帳誠實度分類）：test_context_budget_guard.py "
+     "ConsoleFreeSpawnTest 掃描面擴大＋spec_from_file_location_problems 新規則＋"
+     "PlannerCheckIsConsoleFreeTest／NoWindowBehaviourTest（+252）、"
+     "test_run_root_unittests.py console_orphan_census.wrap() 接線與自證（+65）＋本表"
+     "自身漂移 21（含稽核列、接鏈列、前綴延伸、sha）＝338，母項超出軌上限 ⇒ 部分申報 "
+     "309（＝軌上限，同 R152／R169／R171 先例），餘額歸主軌由款(10)(11) 照算。逐項見 "
+     "CrossPlatform_R145_Scan_Findings.md〈附記（R172）〉。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -3048,10 +3075,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 275
+_REPIN_LOG_FROZEN_PREFIX_LEN = 281
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "ecf46fb273356cc014c698b6bec03bbf3f86b6434e2cad74d9b0147cdf11d554")
+    "2bf9d536b2bdf82dabffabce138ef0252e9ed8ca5d053b9fb96d5c9d3c923bb8")
 
 
 def repin_log_history_digest(
@@ -3372,6 +3399,11 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R170", "49c85ffd5794", "ee5d6d876535", "DEF-200-373"),  # round-label-ok：QA-2 收斂延伸四
     ("R171", "ee5d6d876535", "f3c556f6b43f", "DEF-200-382"),  # round-label-ok：本輪收尾
     ("R171", "f3c556f6b43f", "ecf46fb27335", "DEF-200-382"),  # round-label-ok：前綴延伸涵蓋全部列
+    # R172：console_qa 事故輪收尾單人窗口重釘——修復棒 F 行為鎖新增（三道鎖）使護欄層 round-label-ok
+    # 行數重釘，追加後依「追加後立即自我凍結」判例延伸前綴涵蓋全部新列本身（275→279）。
+    ("R172", "ecf46fb27335", "efc968920451", "DEF-200-389"),  # round-label-ok
+    ("R172", "efc968920451", "0b2e73a520bb", "DEF-200-390"),  # round-label-ok：接鏈列自身漂移延伸
+    ("R172", "0b2e73a520bb", "2bf9d536b2bd", "DEF-200-391"),  # round-label-ok：回歸鎖軌新列延伸
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

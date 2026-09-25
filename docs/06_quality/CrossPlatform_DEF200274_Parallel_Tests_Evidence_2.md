@@ -688,3 +688,156 @@ P3（CI 分片、其餘尚未剖析的熱點）列入下方誠實劃界，不在
     `+psycopg2`（寫在該行註解）。
 - `AUTOSDD_NET_RATCHET_OFF` 是否需要設定：不需要（結案 DEF-200-379／380，新增 open 僅
   DEF-200-381／386，其餘新列建立即 fixed；`check_defect_log_crossref.py` rc=0）。
+
+## Windows console 洩漏事故（2026-09-25）
+
+修復棒 F 事故輪：本機累積大量孤兒 console 行程拖垮機器，主控定位根因＋修復＋三道鎖，
+收尾單人窗口（本節撰寫者）複審親跑重現並修復複審抓到的兩個 P1。本節事實面（時間線、
+量測數字、SD／QA 雙證逐字）由主控彙整交棒；P1-1／P1-2 的重現與修復為本節撰寫者親驗。
+
+### 時間線與症狀
+
+本機累積 **630 個 `OpenConsole.exe -Embedding`**（父行程 svchost）＋**630 個孤兒
+`conhost.exe`**（父行程已死）＋一個 **8196 handle** 的 Windows Terminal，約 **9GB**，
+機器被拖垮；主控已全數清除（清後 OpenConsole＝0、孤兒 conhost＝0、WT＝0）。成簇時段：
+09-25 01:10～01:14、02:22～02:56、08:18、11:06～11:39，每簇約 29～36 個，逐一對得上
+當時的根層全套（含主控親跑與兩次 push 的 pre-push 根層 leg）。
+
+### 根因（SD 靜態＋QA 動態雙證）
+
+Windows 11 以 Windows Terminal 為預設終端時，父行程無 console（`pythonw.exe`）而
+console 子行程沒帶 `CREATE_NO_WINDOW` ⇒ Windows 替它新配置一個 console ⇒ svchost 起
+`OpenConsole.exe` 交接；有 WT 視窗開著時被收成分頁長期不散。
+
+- **SD 靜態**：站點＝`AISDLC_SDD/scripts/sdd_version.py::tracked_version_dirs()` 內
+  裸 `subprocess.run(["git", …])` 零 creationflags，經
+  `tools/lib/sdd_latest.py::resolve_latest_root_fast()` 以 `importlib.util.
+  spec_from_file_location` 動態載入呼叫——這條邊對任何靜態 import 掃描結構性隱形。呼叫
+  鏈：`.claude/hooks/context_budget_guard.py` 與 `tools/session_resume_planner.py`（
+  `main()` 內 `measure()` 以 `session_id=None` 呼叫，永不快取）→ `harness_feed.measure()`
+  → `guard.window_evidence(session_id=None)` → `known_model_windows_path()` →
+  `sdd_latest.resolve_latest_root_fast()` → 動態載入 `sdd_version.py` →
+  `tracked_version_dirs()` 內那個裸 `subprocess.run`。測試觸發者＝
+  `test_context_budget_guard.py::QuotaGateIsIndependentOfContextTest`（真呼叫
+  `write_resume_plan()`）與 `NoWindowBehaviourTest` 的 `flags=0` 負對照案例（見下節）。
+- **QA 動態**：以 `Register-CimIndicationEvent` 建立即時行程建立事件監看器
+  （`__InstanceCreationEvent`，`WITHIN 0.2`），只認 `OpenConsole.exe`／
+  `WindowsTerminal.exe`，正反兩例自證：拿掉 `sdd_version.py` 的 creationflags 後監看器
+  立即抓到兩者的建立事件；補回旗標後 0 事件。QA 另實測 `pythonw.exe
+  session_resume_planner.py --check` **1 秒內**即觸發 OpenConsole＋WT ⇒ 正式 session
+  中額度守衛擋扇出、寫任務書／武裝哨兵時**也會中**（`PlannerCheckIsConsoleFreeTest`
+  行為鎖鎖住這條路徑，見下節）。
+
+### 主控的兩個錯判與訂正
+
+1. **量存量的假陰性**：第一版逐支實驗只量「每支跑完後存量」，而沒有 WT 視窗開著時，
+   交接出的 `OpenConsole.exe` 會隨呼叫端結束而消失，量不到；改用即時事件監看器
+   （`_LIVE_CONSOLE_WATCH_PS1`）才抓到——同一支 `sdd_version.py` 缺旗標的缺陷，快照
+   差集法回報「無新增」，同一秒改用即時監看器立刻抓到建立事件。
+2. **`Start-Job` 推測被推翻**：原推測「`Start-Job` 無 console」，實測 `Start-Job` 與
+   本工具殼一樣是「有 console、無視窗」，不是無 console 父行程，推測不成立。
+
+另：QA-1 曾以 `Start-Process -WindowStyle Hidden` 起 16 個燒機行程；WT 為預設終端時
+`Hidden` 無效，一樣彈出 16 個分頁——`-WindowStyle Hidden` 這個常見「防彈窗」手法在
+WT 預設終端下**不可靠**，不得作為修法。
+
+### 修復與三道鎖
+
+**三處補 `CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP`**：`sdd_version.py`（
+`tracked_version_dirs()`）、`sdd_latest.py`（非 fast 版 `resolve_latest_name()`）、
+`tools/lib/git_paths.py::run()`——後者為修復棒 F 盤點鄰居站點時新揪出的同型缺陷
+（`planner → relay_machine → git_paths` 這條鏈同樣由無 console 的 pythonw 呼叫）。
+
+**負對照改用 `STARTUPINFO(SW_HIDE)`**：`ConsoleFreeSpawnTest` 的內層行為探針
+（`_BEHAVIOUR_PROBE`）對本來就刻意不帶 `NO_WINDOW` 的「none」負對照案例額外套
+`STARTUPINFO(STARTF_USESHOWWINDOW, wShowWindow=SW_HIDE)`——對 `GetConsoleWindow()`
+這個探針要量的存在性訊號零影響，但讓這個負對照不再把 console 升級交給 WT 的
+`OpenConsole.exe`／`WindowsTerminal.exe` 承載。實測：不帶時每次跑 flags=0 皆觸發二者
+建立事件；帶了之後三次隔離重跑 0/3 觸發（其中一次仍生一個會自行收尾的
+`conhost.exe`，非本輪判準射程——射程只守 `OpenConsole.exe`／`WindowsTerminal.exe`）。
+
+**三道鎖**（皆帶改壞會紅自證）：
+
+1. `ConsoleFreeSpawnTest`（`tools/tests/test_context_budget_guard.py`）掃描面擴大到
+   pythonw 可達的全部模組（含本次三個新站點，`_CONSOLE_FREE_FLOOR` 由 11 上修到 30），
+   並新增 `spec_from_file_location_problems()`：任何 `importlib.util.
+   spec_from_file_location` 動態載入目標檔都必須能在掃描面裡找到同名檔，否則獨立紅
+   （`test_every_reachable_dynamic_load_target_is_registered`；本輪修復前會紅，因
+   `sdd_latest.py` 動態載入 `sdd_version.py` 而後者當時不在掃描面）。
+2. `PlannerCheckIsConsoleFreeTest`（同檔）：行為鎖，以即時 WMI 事件監看實跑
+   `pythonw.exe session_resume_planner.py --check`，拿掉旗標即紅。
+3. `tools/run_root_unittests.py` 經新檔 `tools/lib/console_orphan_census.py` 在全套
+   unittest 開始前／結束後各盤點一次孤兒 console（`OpenConsole.exe` 不論父行程是誰；
+   父行程已消失的 `conhost.exe`），結束後比開始多即列印 ❌。**advisory（只出聲、不判
+   紅 rc）**：使用者自己在執行窗口內開一個新 WT 分頁會被算成「新增」而誤判，這個風險
+   不可忽略且無法從外部區分，讓一次巧合操作擋下整條 push 的代價比漏抓一次孤兒累積更
+   高（見該檔 docstring 的假紅風險評估）。
+
+**驗收**：三次全套 OpenConsole／WindowsTerminal 建立事件監看＝0。
+
+### 獨立複審與兩個 P1（本節撰寫者親驗修復）
+
+獨立複審結論：**APPROVE-WITH-FIXES**，兩個 P1 已親自重現；P2＝
+`AISDLC_SDD/AISDLC_SDD_v0.30/tools/fsm_runtime/{hub_sync,sandbox_runner,tlc_runner}.py`
+的 subprocess 呼叫無旗標，不在本次事故的 hook 熱路徑上（登記誠實劃界，本輪不修）。
+
+- **P1-1**（帳本 DEF-200-390）：`tools/lib/git_paths.py` 頂層 `from win_spawn import
+  NO_WINDOW`，在僅 `tools/` 於 `sys.path`（未含 `tools/lib`）的消費端下
+  `ModuleNotFoundError`。親跑重現：`test_negative_existence_claims_r82.py` 單獨跑
+  `Ran 1 test … FAILED (errors=1)`（`ModuleNotFoundError: No module named 'win_spawn'`）。
+  修法：移除該 import，改內聯 `getattr(subprocess, "CREATE_NO_WINDOW", 0) |
+  getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)`，循 `sdd_version.py`／
+  `sdd_latest.py` 既有先例（`win_spawn.py` 檔頭自陳「刻意不提供 fallback stub」，代價
+  由此類跨 sys.path 消費端的 import 形態吸收）。修後：
+  `test_negative_existence_claims_r82.py` `Ran 12 tests … OK`；
+  `test_doc_loc_baseline_freshness_r60.py` `Ran 281 tests in 105.794s … OK`；
+  `test_context_budget_guard.py` `Ran 667 tests in 97.856s … OK (skipped=1)`（
+  `no_window_problems()` 判準只認字面含 `NO_WINDOW` 子字串，`CREATE_NO_WINDOW` 天然
+  命中，鎖本身不需改動）。全庫 Grep 確認 `tools/lib/` 下只有 `git_paths.py`／
+  `console_orphan_census.py` 兩處 `from win_spawn import`，後者本就有
+  `try/except ImportError: NO_WINDOW = 0` 防禦，無同型漏網。
+- **P1-2**（帳本 DEF-200-389 一併登記）：新檔 `tools/lib/console_orphan_census.py`
+  未列入 `.github/workflows/windows-compat-ci.yml`／`macos-compat-ci.yml` 的
+  `paths:`（push／pull_request 各兩處），而 `tools/tests/test_run_root_unittests.py`
+  頂層 `import console_orphan_census`。親跑重現：
+  `AISDLC_SDD/scripts/tests/test_ci_paths_cover_root_consumers.py` `2 failed, 47
+  passed`（`根層消費檔未列入 {windows,macos}-compat-ci.yml paths`）。修法：兩份
+  workflow 的 push／pull_request 區塊各補一行 `tools/lib/console_orphan_census.py`
+  （比照 `tools/lib/onboarding_snapshot_note.py` 等相鄰條目的位置與註解風格）。修後：
+  同一測試 `49 passed`。
+
+### 🔴 誠實劃界
+
+- **advisory 普查不擋 rc 的理由**：`console_orphan_census.py` 的孤兒偵測在使用者於
+  執行窗口內自行開新 WT 分頁時會假紅，且無法從外部區分「使用者操作」與本 repo 的
+  bug；讓巧合操作擋下整條 pre-push／CI 的代價高於漏抓一次孤兒累積、留到下次才被發現
+  ——見該檔 docstring。若要升級為阻斷級，建議先量測本判準在真實 pre-push 使用下的
+  誤判率，而非現在就用直覺猜一個門檻。
+- **`STARTUPINFO(SW_HIDE)` 只在本機驗證**：三次隔離重跑皆在本機（有桌面、有 WT）進行；
+  CI runner／無 WT 或無桌面環境的機器上是否同樣有效，**未驗**。
+- **v0.30 fsm_runtime 三支未修**：`hub_sync.py`／`sandbox_runner.py`／
+  `tlc_runner.py` 的 subprocess 呼叫仍缺 creationflags，獨立複審認定其不在本次事故的
+  熱路徑（不由無 console 的 pythonw／CC hook 直接觸發），本輪不修、不追加帳本 open
+  列——僅在此登記，若未來這幾支被納入無 console 父行程的呼叫鏈，須回頭補旗標。
+- **WMI `WITHIN 0.2` 顆粒度**：即時事件監看以 0.2 秒為輪詢粒度，極短命（<0.2s）的
+  console 建立-銷毀理論上可能漏抓，本輪未針對此邊界另行驗證。
+- **`test_install_windows_nightly` 的 WhatIf 那支測試曾在並行下紅一次**：單獨重跑
+  3/3 綠，未深入根因；與本次事故的因果關係未確認，僅記錄不追加缺陷列。
+- **全套層普查成功時不出聲**：`console_orphan_census.report_delta()` 只在「開始前已有
+  孤兒」印 ⚠️、「執行期間新增」印 ❌，零增長時沒有任何輸出行 ⇒ log 裡無法區分「普查
+  跑了且乾淨」與「普查沒被執行」，本輪以外部監看器的建立事件統計補證（見下）。
+
+### 待主控回填
+
+- 主控收尾全套（修復棒 F＋收尾窗口改動落地後、commit 前）：`& .venv\Scripts\python.exe
+  tools\run_root_unittests.py` rc=0、wall 131.3s、`發現 4617 個測試（下限 4543）`、
+  `[cpu_budget] root-unittest workers=18 source=cpu_budget`、`📊 … S=1872.8s｜
+  ideal=…=104.0s（S/W-bound）｜loss=1.00x｜slot 利用率=99.7%`；log 無 ⚠️／❌ 普查行。同時
+  以 `console_qa/watch_console.ps1`（WMI `__InstanceCreationEvent WITHIN 0.2`）監看
+  22:04:11～22:09:11 完整涵蓋全套：行程建立事件 2964 筆（python.exe 1269／git.exe 728／
+  bash.exe 564／conhost.exe 266／powershell.exe 65／pythonw.exe 42／cmd.exe 23／cscript.exe 4／
+  pwsh.exe 3），**OpenConsole.exe＝0、WindowsTerminal.exe＝0**；跑完現查 OpenConsole＝0、
+  WindowsTerminal＝0、孤兒 conhost（父已死）＝0。對照事故前每次全套約 29～36 組洩漏。
+- commit sha／push：（留白）
+- 雲端驗收（windows-compat-ci／macos-compat-ci 兩支 workflow 因本節新增 paths 條目
+  是否觸發、`test_ci_paths_cover_root_consumers.py` 雲端結果）：（留白）

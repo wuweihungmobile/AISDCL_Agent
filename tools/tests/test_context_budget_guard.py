@@ -5777,7 +5777,10 @@ _SPAWN_FUNCS = frozenset({"run", "Popen", "call", "check_call", "check_output"})
 #: 現值＝本輪實測，只准上修（射程靜默縮小是本 repo 記載過的失效方式）。
 #: R84／C3-A 上修 10→11：具名納入 `tools/lib/schedule_backend.py`（兩個 glob 都罩不到，
 #: 理由見 `ConsoleFreeSpawnTest._sources`）。
-_CONSOLE_FREE_FLOOR = 11
+#: console_qa 事故輪上修 11→30（本輪實測 `len(_sources())`）：新增
+#: `AISDLC_SDD/scripts/sdd_version.py`／`tools/lib/sdd_latest.py`／`tools/lib/git_paths.py`／
+#: `tools/lib/platform_utils.py`／`tools/_stdio_utf8.py` 五支，理由同見 `_sources`。
+_CONSOLE_FREE_FLOOR = 30
 
 #: 🔴 合法例外的名字與上限：行尾 `# no-window-ok: <非空理由>`；理由留空無效；上限只准
 #: 調小（今天實測用掉 0 個）。判例與用法全文＝Resume 證據檔 §L-4.6。
@@ -5892,6 +5895,76 @@ def detached_conflict_problems(sources: dict[str, str]) -> list[str]:
     return problems
 
 
+def _spec_from_file_location_calls(tree: ast.AST) -> list[ast.Call]:
+    """`importlib.util.spec_from_file_location(...)` 的呼叫節點（含 `from importlib.util
+    import spec_from_file_location` 之後的裸名呼叫）。"""
+    found = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if isinstance(func, ast.Attribute) and func.attr == "spec_from_file_location":
+            found.append(node)
+        elif isinstance(func, ast.Name) and func.id == "spec_from_file_location":
+            found.append(node)
+    return found
+
+
+def _enclosing_function_of_call(tree: ast.AST, call: ast.Call) -> ast.AST:
+    """含這個呼叫節點的最內層 `FunctionDef`／`AsyncFunctionDef`；找不到就回整棵樹
+    （模組層級呼叫）。
+
+    🔴 刻意不叫 `_enclosing_function`：本檔別處（約 L11066）已有一個同名但簽章不同
+    （`(src, lineno) -> str`）的函式——模組層級重名會讓後定義的覆蓋前一個，兩邊各自
+    的呼叫端會在執行期才炸型別錯誤（本函式命名前實測踩過）。
+    """
+    best = tree
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if any(child is call for child in ast.walk(node)):
+            best = node  # 允許巢狀函式覆寫成更內層的那一個
+    return best
+
+
+def spec_from_file_location_problems(sources: dict[str, str]) -> list[str]:
+    """R84／console_qa 事故輪新規則：`spec_from_file_location` 動態載入的目標檔必須
+    能在**本掃描面**裡找到同名檔——不然下一個動態載入（像本輪的 `sdd_latest.py` →
+    `sdd_version.py`）又會對 `no_window_problems()` 隱形（靜態 import 掃描看不到這條邊）。
+
+    判準刻意保守（不做完整符號執行）：在呼叫所在的最內層函式本體裡找**所有** `.py`
+    結尾的字串常量，只要有一個的檔名（basename）與掃描面裡任何一個 key 的檔名相同，
+    就算「有登記」。找不到任何 `.py` 字面、或找到但沒有一個命中掃描面，都算違規——
+    「看不出動態載入目標是什麼」與「查得到但沒登記」同樣危險，都不得靜默放行。
+    """
+    registered_names = {Path(name).name for name in sources}
+    problems: list[str] = []
+    for name, src in sorted(sources.items()):
+        if "spec_from_file_location" not in src:
+            continue
+        try:
+            tree = ast.parse(src)
+        except SyntaxError as exc:
+            problems.append(f"{name}：AST 解析失敗（{exc}）——掃不到的檔不得靜默放行")
+            continue
+        for call in _spec_from_file_location_calls(tree):
+            scope = _enclosing_function_of_call(tree, call)
+            py_literals = {
+                node.value for node in ast.walk(scope)
+                if isinstance(node, ast.Constant) and isinstance(node.value, str)
+                and node.value.endswith(".py")
+            }
+            hit_names = {Path(lit).name for lit in py_literals} & registered_names
+            if not hit_names:
+                where = f"{name}:{call.lineno}"
+                problems.append(
+                    f"{where}：`spec_from_file_location` 動態載入，但所在函式裡找不到"
+                    f"任何已登記進掃描面的 `.py` 檔名（看到的字面：{sorted(py_literals) or '無'}）"
+                    "——這條動態載入的邊對 `no_window_problems()` 隱形，目標檔若缺"
+                    "`creationflags` 不會被抓到")
+    return problems
+
+
 class ConsoleFreeSpawnTest(unittest.TestCase):
     """宣告集合內每一個 spawn 都帶 no-window 旗標 ＋ 全庫禁 `DETACHED|CNW`。"""
 
@@ -5905,9 +5978,24 @@ class ConsoleFreeSpawnTest(unittest.TestCase):
         """
         # 🔴 R84／C3-A：`schedule_backend.py` 具名加入（不叫 quota_*/sentinel_* ⇒ glob
         # 罩不到，而它是哨兵路徑僅存兩個裸 spawn 的家）。全文＝Resume 證據檔 §L-4.7。
+        # 🔴 console_qa 事故輪：另外四支具名加入——`AISDLC_SDD/scripts/sdd_version.py`／
+        # `tools/lib/sdd_latest.py`／`tools/lib/git_paths.py` 三支都不叫 quota_*/sentinel_*
+        # 也不住 `.claude/hooks/`，此前對本鎖完全隱形（`sdd_latest.py` 以
+        # `importlib.util.spec_from_file_location` 動態載入 `sdd_version.py`，任何靜態
+        # import 掃描都看不到這條邊；本輪事故正是它們缺 `creationflags` 而彈出 630 個
+        # OpenConsole.exe）；`tools/lib/platform_utils.py`／`tools/_stdio_utf8.py` 這一對
+        # 同理補上（`platform_utils.py` 也用 `spec_from_file_location` 動態載入
+        # `_stdio_utf8.py`）——見 `test_every_reachable_dynamic_load_target_is_registered`
+        # 那條新規則：動態載入目標必須在這份掃描面裡找得到，否則獨立紅。
         paths = {
             "tools/session_resume_planner.py": _PLANNER,
             "tools/lib/schedule_backend.py": _REPO_ROOT / "tools" / "lib" / "schedule_backend.py",
+            "AISDLC_SDD/scripts/sdd_version.py":
+                _REPO_ROOT / "AISDLC_SDD" / "scripts" / "sdd_version.py",
+            "tools/lib/sdd_latest.py": _REPO_ROOT / "tools" / "lib" / "sdd_latest.py",
+            "tools/lib/git_paths.py": _REPO_ROOT / "tools" / "lib" / "git_paths.py",
+            "tools/lib/platform_utils.py": _REPO_ROOT / "tools" / "lib" / "platform_utils.py",
+            "tools/_stdio_utf8.py": _REPO_ROOT / "tools" / "_stdio_utf8.py",
         }
         lib = _REPO_ROOT / "tools" / "lib"
         for pattern in ("quota_*.py", "sentinel_*.py"):
@@ -5954,6 +6042,12 @@ class ConsoleFreeSpawnTest(unittest.TestCase):
         # 🔴 R82／HELM-02：這一支是本輪實測漏掉的那一個。具名斷言而不是只靠 glob——
         # 有人把 glob 改窄時，「射程縮小」必須指名道姓地紅，而不是只讓總數少一。
         self.assertIn("tools/lib/quota_meter.py", sources)
+        # 🔴 console_qa 事故輪：這三支是本次事故真正的站點（`sdd_latest.py` 動態載入
+        # `sdd_version.py` 起彈窗；`git_paths.py` 是同一批盤點揪出的鄰居）。具名斷言，
+        # 理由同上——不靠 glob 記得，靠這裡指名道姓。
+        self.assertIn("AISDLC_SDD/scripts/sdd_version.py", sources)
+        self.assertIn("tools/lib/sdd_latest.py", sources)
+        self.assertIn("tools/lib/git_paths.py", sources)
 
     def test_the_escape_hatch_budget_is_not_blown(self) -> None:
         """具名豁免有上限。沒有上限的逃生口會變成預設關法（本 repo 判例）。"""
@@ -6113,6 +6207,44 @@ class ConsoleFreeSpawnTest(unittest.TestCase):
                      'getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)\n'
                      '    | getattr(subprocess, "CREATE_NO_WINDOW", 0)))\n'}), [])
 
+    # ────── console_qa 事故輪：動態載入目標須登記進掃描面（見 `spec_from_file_location_problems`）
+
+    def test_every_reachable_dynamic_load_target_is_registered(self) -> None:
+        """現況控制組：本掃描面裡每一個 `spec_from_file_location` 呼叫，目標檔都找得到。
+
+        本測試在本輪修復**之前**會紅（`sdd_latest.py` 動態載入 `sdd_version.py`，而後者
+        當時不在 `_sources()` 裡；`platform_utils.py` 動態載入 `_stdio_utf8.py` 同理）。
+        """
+        self.assertEqual(spec_from_file_location_problems(self._sources()), [])
+
+    def test_an_unregistered_dynamic_load_target_is_caught(self) -> None:
+        """注入自證：動態載入一個不在掃描面裡的檔名 ⇒ 必須紅。"""
+        src = ('import importlib.util\n'
+               'def load(root):\n'
+               '    target = root / "nowhere_registered.py"\n'
+               '    return importlib.util.spec_from_file_location("m", target)\n')
+        self.assertTrue(spec_from_file_location_problems({"x.py": src}))
+
+    def test_a_dynamic_load_with_no_py_literal_at_all_is_caught(self) -> None:
+        """注入自證：完全看不出目標檔名（路徑純變數運算，沒有 `.py` 字面）⇒ 一樣紅
+        （「看不出來」與「查得到但沒登記」同樣危險，fail-closed，同 `no_window_problems`
+        對不可解析檔案的立場）。"""
+        src = ('import importlib.util\n'
+               'def load(root, suffix):\n'
+               '    target = root / suffix\n'
+               '    return importlib.util.spec_from_file_location("m", target)\n')
+        self.assertTrue(spec_from_file_location_problems({"x.py": src}))
+
+    def test_a_registered_dynamic_load_target_is_accepted(self) -> None:
+        """反向控制組：目標檔名的 `.py` 字面能在掃描面裡找到同名檔 ⇒ 放行。"""
+        src = ('import importlib.util\n'
+               'def load(root):\n'
+               '    target = root / "scripts" / "known.py"\n'
+               '    return importlib.util.spec_from_file_location("m", target)\n')
+        self.assertEqual(
+            spec_from_file_location_problems({"x.py": src, "AISDLC_SDD/scripts/known.py": ""}),
+            [])
+
 
 #: 行為鎖的內層腳本。由 `pythonw.exe` 執行 ⇒ 本行程**沒有 console**，這正是 production
 #: 的條件（schtasks 的 Action 載具、以及 Claude Code 起 hook 的那一層）。
@@ -6127,9 +6259,22 @@ out, combos = Path(sys.argv[1]), json.loads(sys.argv[2])
 # 開視窗」的載具，也就是唯一驗得出旗標效果的被測對象）。
 exe = sys.argv[3] if len(sys.argv) > 3 else str(Path(sys.executable).with_name("python.exe"))
 res = {"parent_has_no_console": ctypes.windll.kernel32.GetConsoleWindow() == 0, "cases": {}}
+# 🔴 本輪修（console_qa 事故）：`STARTUPINFO(STARTF_USESHOWWINDOW, wShowWindow=SW_HIDE)`
+# 對本探針要量的東西（`GetConsoleWindow()` 有沒有 handle）零影響——那是 API 層的存在性，
+# 不是視窗可見性；但它能讓「none」這個負對照（flags=0，本來就是刻意不帶 NO_WINDOW 才會
+# 真的開視窗的那一格）不再把 Windows 升級交給 Windows Terminal 的
+# OpenConsole.exe／WindowsTerminal.exe 承載。實測（建立事件監看器，隔離重跑）：不帶本
+# STARTUPINFO 時 flags=0 每次都觸發 OpenConsole.exe+WindowsTerminal.exe 建立事件；帶了
+# 之後三次隔離重跑 0/3 次觸發（其中一次仍會生出一個會自行收尾的 conhost.exe，非本輪
+# 判準射程——task 5 只守 OpenConsole.exe／WindowsTerminal.exe）。全案例統一套用：「shipped」
+# 這類已帶 CREATE_NO_WINDOW 的案例本來就沒有視窗，套用零風險。
+si = subprocess.STARTUPINFO()
+si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+si.wShowWindow = 0  # SW_HIDE
 for name, flags in combos.items():
     p = subprocess.run([exe, "-c", CHILD], capture_output=True, encoding="utf-8",
-                       errors="replace", timeout=120, check=False, creationflags=flags)
+                       errors="replace", timeout=120, check=False, creationflags=flags,
+                       startupinfo=si)
     res["cases"][name] = {"hwnd": (p.stdout or "").strip(), "rc": p.returncode,
                           "stderr": (p.stderr or "")[:200]}
 out.write_text(json.dumps(res), encoding="utf-8")
@@ -6210,6 +6355,113 @@ class NoWindowBehaviourTest(unittest.TestCase):
         """抑制視窗不得以「拿不到 rc／stderr」為代價——否則排程那一跑會變成黑箱。"""
         cases = self._measure({"shipped": guard.NO_WINDOW})
         self.assertEqual(cases["shipped"]["rc"], 0)
+
+
+#: 行為鎖的即時監看器（PowerShell）。用 `Register-CimIndicationEvent` 訂閱行程建立事件，
+#: 只認 OpenConsole.exe／WindowsTerminal.exe（收斂射程，避免把系統背景雜訊一起算進來）。
+#: 🔴 為什麼不用「呼叫前後 PID 快照差集」：注入自證實測過——git.exe 這種瞬發子行程
+#: 觸發的 OpenConsole.exe／WindowsTerminal.exe 常在快照間隔內就已消失（"生得快、死得快"，
+#: 不像哨兵長跑續航那樣會孤兒累積），快照差集因此漏掉過一次真事故（拿掉 `sdd_version.py`
+#: 的 creationflags 後，快照法仍回報「無新增」；同一秒改用本監看器立刻抓到
+#: `WindowsTerminal.exe`＋`OpenConsole.exe` 建立事件）。即時事件訂閱不受「活多久」影響。
+_LIVE_CONSOLE_WATCH_PS1 = r'''param([string]$EventsOut, [string]$ArmedOut, [double]$Seconds)
+$ErrorActionPreference = 'Stop'
+$keep = @('OpenConsole.exe','WindowsTerminal.exe')
+$deadline = (Get-Date).AddSeconds($Seconds)
+$q = "SELECT * FROM __InstanceCreationEvent WITHIN 0.2 WHERE TargetInstance ISA 'Win32_Process'"
+Register-CimIndicationEvent -Query $q -SourceIdentifier PlannerConsoleWatch
+Set-Content -Path $ArmedOut -Value 'armed' -Encoding UTF8
+try {
+  while ((Get-Date) -lt $deadline) {
+    $ev = Wait-Event -SourceIdentifier PlannerConsoleWatch -Timeout 1
+    if (-not $ev) { continue }
+    try {
+      $p = $ev.SourceEventArgs.NewEvent.TargetInstance
+      Remove-Event -EventIdentifier $ev.EventIdentifier
+      if ($keep -notcontains $p.Name) { continue }
+      $line = "$($p.Name)|$($p.ProcessId)|$($p.CommandLine)"
+      $written = $false
+      for ($i = 1; $i -le 3 -and -not $written; $i++) {
+        try {
+          $stream = [System.IO.FileStream]::new($EventsOut, [System.IO.FileMode]::Append,
+            [System.IO.FileAccess]::Write, [System.IO.FileShare]::ReadWrite)
+          try {
+            $bytes = [Text.Encoding]::UTF8.GetBytes($line + "`n")
+            $stream.Write($bytes, 0, $bytes.Length)
+            $written = $true
+          } finally { $stream.Dispose() }
+        } catch { Start-Sleep -Milliseconds 50 }
+      }
+    } catch {}
+  }
+} finally {
+  Unregister-Event -SourceIdentifier PlannerConsoleWatch -EA SilentlyContinue
+}
+'''
+
+
+@unittest.skipUnless(
+    os.name == "nt",
+    "[WINDOWS-NATIVE-ONLY] console 配置是 Windows 專屬概念——鐵律三：單平台判準不外推")
+class PlannerCheckIsConsoleFreeTest(unittest.TestCase):
+    """行為鎖（console_qa 事故輪）：`pythonw.exe` 起 `tools/session_resume_planner.py
+    --check`（唯讀；QA 實測會在 1 秒內觸發 OpenConsole.exe＋WindowsTerminal.exe 建立的
+    那條路——`measure()` → `harness_feed.measure()` → `guard.window_evidence(session_id=
+    None)` → `known_model_windows_path()` → `sdd_latest.resolve_latest_root_fast()` →
+    importlib 動態載入 `sdd_version.py` → `tracked_version_dirs()` 內那個裸
+    `subprocess.run(["git", ...])`）不得讓 Windows 新開一個可見 terminal。
+
+    🔴 誠實劃界（歸因方式）：用即時 WMI 事件訂閱（見 `_LIVE_CONSOLE_WATCH_PS1`），不是
+    嚴格的行程樹祖系比對——同一秒若剛好有人自己開一支新 Windows Terminal 分頁，會被
+    誤記成本測試觸發。這個誤判方向是保守的（寧可誤紅也不要誤綠）；紅字裡完整印出
+    建立事件的 `Name|PID|CommandLine` 供人工排除巧合。
+    """
+
+    def test_planner_check_does_not_spawn_a_visible_terminal(self) -> None:
+        pyw = Path(guard.quiet_python())
+        if pyw.name.lower() != "pythonw.exe":
+            self.skipTest(f"[TOOL-ABSENCE] 這個直譯器旁沒有 pythonw.exe（解析到 {pyw}）"
+                          "——無 console 父行程這個實驗條件建不起來，跳過比假綠正確")
+        transcript = planner.resolve_transcript(None, None)
+        if transcript is None:
+            self.skipTest(
+                "[ENV-DISABLED] 本機解不出任何逐字稿（無 --session-id／--transcript／"
+                "project_transcript_dir 下無 *.jsonl）⇒ `--check` 會在碰到 `measure()`"
+                "（本測試要驗的那條路）之前就以 rc=1 提早返回，跑下去只會是空測——跳過"
+                "比假綠正確")
+        tmp = _tmpdir(self, "planner-console-watch-")
+        watcher_script = tmp / "watch.ps1"
+        watcher_script.write_text(_LIVE_CONSOLE_WATCH_PS1, encoding="utf-8", newline="\n")
+        events_out, armed_out = tmp / "events.txt", tmp / "armed.txt"
+        watch_proc = subprocess.Popen(
+            ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
+             "-File", str(watcher_script), str(events_out), str(armed_out), "8"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            creationflags=guard.NO_WINDOW)
+        try:
+            deadline = time.time() + 10
+            while not armed_out.is_file() and time.time() < deadline:
+                time.sleep(0.1)
+            self.assertTrue(armed_out.is_file(),
+                            "監看器 10 秒內沒有武裝——本測試本身建不起偵測條件")
+            proc = subprocess.run(
+                [str(pyw), str(_PLANNER), "--check"],
+                capture_output=True, encoding="utf-8", errors="replace", timeout=60,
+                check=False, creationflags=guard.NO_WINDOW)
+            time.sleep(2)  # 讓監看器有時間把 WMI 事件寫進檔案（事件是非同步遞送的）
+        finally:
+            try:
+                watch_proc.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                watch_proc.kill()
+        events = (events_out.read_text(encoding="utf-8").splitlines()
+                 if events_out.is_file() else [])
+        self.assertFalse(
+            events,
+            f"`pythonw session_resume_planner.py --check` 觸發了 {len(events)} 筆 "
+            f"OpenConsole.exe／WindowsTerminal.exe 建立事件：{events}——某個可達的 "
+            f"subprocess spawn 缺 creationflags（rc={proc.returncode}；"
+            f"stderr[:300]={(proc.stderr or '')[:300]!r}）")
 
 
 class UnhandledLimitDetectionTest(unittest.TestCase):

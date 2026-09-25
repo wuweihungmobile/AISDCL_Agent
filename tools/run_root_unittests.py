@@ -738,7 +738,7 @@ def main() -> int:
     #      `python tools/run_root_unittests.py` 傳到 pre-push root-infra leg 與三支 CI。
     if report_untagged_windows_skip_decorators(_TESTS_DIR, _PATTERN):
         return _bail("靜態標籤掃描（不分平台）")
-    return sentinel_lifecycle.leak_fence(lambda: run_with_floor(_TESTS_DIR, MIN_TESTS))
+    import console_orphan_census; return console_orphan_census.wrap(lambda: sentinel_lifecycle.leak_fence(lambda: run_with_floor(_TESTS_DIR, MIN_TESTS)))  # noqa: E402,E501,E702,I001,PLC0415 — console_qa 事故輪：孤兒 console 全套層普查抽到 tools/lib/console_orphan_census.py（本檔 special tier 零餘裕棘輪，DEF-200-162），import 移函式內＋分號同行＝單行取代單行零行數成本
 
 
 #: 本 runner 的 CLI 契約＝**零旗標**（呼叫端實查：`tools/git-hooks/pre-push` root-infra

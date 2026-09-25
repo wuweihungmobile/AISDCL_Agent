@@ -66,6 +66,13 @@ def resolve_latest_name(sdd_root: Path) -> str:
         text=True,
         encoding="utf-8",
         errors="replace",
+        # 🔴 本函式可能被無 console 的 pythonw 宿主呼叫（`context_budget_guard.py` 等
+        # hook），而 `sys.executable` 常是 console 子系統的 `python.exe` ⇒ 不帶旗標時
+        # Windows 必為它新配置一個 console 視窗。內聯 getattr（不 import `win_spawn`）：
+        # 本檔檔頭自陳「只依賴 stdlib」（供 10 支測試檔以 `sys.path.insert` 單獨 import），
+        # 不在此新增 repo 內相依；POSIX 上 `getattr` 取 0 ＝不加任何旗標（鐵律三）。
+        creationflags=(getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                       | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)),
     )
     name = proc.stdout.strip()
     if proc.returncode != 0 or not name:

@@ -82,6 +82,14 @@ def tracked_version_dirs(sdd_root: Path) -> set[str] | None:
             text=True,
             encoding="utf-8",
             check=True,
+            # 🔴 本檔常被無 console 的 pythonw 宿主（Claude Code hook／schtasks 排程）以
+            # importlib 就地載入呼叫（見 `tools/lib/sdd_latest.py::resolve_latest_root_fast`），
+            # 而 `git.exe` 是 console 子系統應用 ⇒ 不帶旗標時 Windows 必為它新配置一個
+            # console 視窗。內聯 getattr（不 import repo 內模組）：本檔會被 AISDLC_SDD 側
+            # bash／pwsh 當獨立 CLI 呼叫，不保證 `tools/lib` 在 sys.path 上；POSIX 上
+            # `getattr` 取 0 ＝不加任何旗標（鐵律三）。
+            creationflags=(getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                           | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)),
         )
     except (OSError, subprocess.CalledProcessError):
         return None

@@ -30,8 +30,12 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import run_root_unittests  # noqa: E402
+import run_root_unittests  # noqa: E402, I001
 from lib import windows_skip_tags  # noqa: E402  # R72：skip 標籤家族的 SSOT（見該檔頭）
+# console_qa 事故輪：`import run_root_unittests`（上一行）的模組層副作用已把
+# `tools/lib` 插進 `sys.path`（該檔 L129），故直接裸名 import 即可拿到**同一個**
+# 模組物件（同 `min_tests_margin` 那句註解的判斷——`from lib import X` 會是第二副本）。
+import console_orphan_census  # noqa: E402
 
 #: DEF-200-170：刻意取 **runner 手上的那一個** module 物件。`tools/lib` 同時也在 `sys.path`
 #: 上（runner 自己插的），改寫成 `from lib import min_tests_margin` 會拿到**第二個副本**，
@@ -215,11 +219,13 @@ class RunRootUnittestsTest(unittest.TestCase):
         self.assertGreaterEqual(suite.countTestCases(), run_root_unittests.MIN_TESTS)
 
     def test_main_is_wrapped_by_the_leak_fence(self) -> None:
-        """M-03：`main()` 的最終 `return` 必須真的呼叫 `sentinel_lifecycle.leak_fence(...)`
-        包住 `run_with_floor(...)`——CI／pre-push 唯一呼叫的漏斗點若漏接這一層，
-        leak_fence 的底線防護（`AUTOSDD_SENTINEL_OFF` 補位＋可稽核暫存檔痕跡）就是
-        死碼、永遠不會被觸發。走 AST 而非字串比對：字串比對對格式重排（換行／空白）
-        敏感，AST 只認呼叫形狀，改個縮排或加個註解都不影響本測試。
+        """M-03（console_qa 事故輪擴充）：`main()` 的最終 `return` 必須是
+        `console_orphan_census.wrap(lambda: sentinel_lifecycle.leak_fence(...))`——
+        `wrap()` 是全套層孤兒 console 普查外層（零行數成本掛進來，見
+        `tools/lib/console_orphan_census.py` WHY：本檔 special tier 零餘裕棘輪，
+        新邏輯只能用「單行取代單行」的方式外掛），`leak_fence` 仍是原本的底線防護
+        （`AUTOSDD_SENTINEL_OFF` 補位＋可稽核暫存檔痕跡）——兩層都不得漏接。走 AST
+        而非字串比對：字串比對對格式重排（換行／空白）敏感，AST 只認呼叫形狀。
         """
         tree = ast.parse(Path(run_root_unittests.__file__).read_text(encoding="utf-8"))
         main_fn = next(
@@ -229,13 +235,72 @@ class RunRootUnittestsTest(unittest.TestCase):
         self.assertIsInstance(
             last_stmt, ast.Return,
             "main() 最後一句不是 return（結構被改了，先讀懂新結構再改本測試）")
-        call = last_stmt.value
-        self.assertIsInstance(call, ast.Call, "main() 的最終 return 不是函式呼叫")
-        self.assertEqual(getattr(call.func, "attr", None), "leak_fence",
-                         f"main() 的最終 return 沒有呼叫 leak_fence(...)：{ast.dump(call.func)}")
-        self.assertEqual(getattr(getattr(call.func, "value", None), "id", None),
+        outer_call = last_stmt.value
+        self.assertIsInstance(outer_call, ast.Call, "main() 的最終 return 不是函式呼叫")
+        self.assertEqual(getattr(outer_call.func, "attr", None), "wrap",
+                         f"main() 的最終 return 沒有呼叫 console_orphan_census.wrap(...)："
+                         f"{ast.dump(outer_call.func)}")
+        self.assertEqual(getattr(getattr(outer_call.func, "value", None), "id", None),
+                         "console_orphan_census",
+                         "外層呼叫的不是 console_orphan_census.wrap")
+        # wrap() 包住的內層仍必須是 sentinel_lifecycle.leak_fence(...)——本輪只是多包
+        # 一層孤兒 console 普查，不是把底線防護換掉。
+        inner_calls = [
+            n for n in ast.walk(outer_call)
+            if isinstance(n, ast.Call) and getattr(n.func, "attr", None) == "leak_fence"
+        ]
+        self.assertTrue(inner_calls,
+                        "console_orphan_census.wrap(...) 內層找不到 "
+                        "sentinel_lifecycle.leak_fence(...) 呼叫——底線防護漏接了")
+        self.assertEqual(getattr(getattr(inner_calls[0].func, "value", None), "id", None),
                          "sentinel_lifecycle",
-                         "呼叫的不是 sentinel_lifecycle.leak_fence")
+                         "內層呼叫的不是 sentinel_lifecycle.leak_fence")
+
+
+class ConsoleOrphanCensusTest(unittest.TestCase):
+    """`tools/lib/console_orphan_census.py`（console_qa 事故輪任務 4(c)）：全套層孤兒
+    console 普查——advisory（只出聲、不判 rc），假紅風險評估見該檔模組 docstring。
+    本類只測**判斷邏輯**（純函式、可注入），不觸碰真實 Windows 行程列舉。
+    """
+
+    def test_wrap_returns_the_inner_rc_unchanged(self) -> None:
+        """`wrap()` 是 advisory 外掛，內層 `fn()` 的 rc 必須原樣穿透。"""
+        with mock.patch.object(console_orphan_census, "snapshot", return_value=None):
+            self.assertEqual(console_orphan_census.wrap(lambda: 1), 1)
+            self.assertEqual(console_orphan_census.wrap(lambda: 0), 0)
+
+    def test_report_delta_is_silent_when_nothing_grew(self) -> None:
+        """沒有新增孤兒 ⇒ 不印 ❌（常亮輸出會退化成背景雜訊，同本 repo 既有紀律）。"""
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = console_orphan_census.report_delta({("OpenConsole.exe", 1)},
+                                                     {("OpenConsole.exe", 1)})
+        self.assertEqual(rc, 0)
+        self.assertNotIn("❌", buf.getvalue())
+
+    def test_report_delta_flags_growth_but_stays_advisory(self) -> None:
+        """注入自證：全套執行期間新增了孤兒 console ⇒ 必須印 ❌ 點名 PID，但 rc 仍是 0
+        （advisory——理由見模組 docstring 的假紅風險評估：使用者自己開新分頁也會撞上
+        同一個訊號，判紅會讓與本輪修復無關的操作把 pre-push／CI 全部擋下）。
+        """
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = console_orphan_census.report_delta(
+                {("OpenConsole.exe", 1)},
+                {("OpenConsole.exe", 1), ("OpenConsole.exe", 2), ("conhost.exe", 3)})
+        self.assertEqual(rc, 0, "本判準刻意 advisory，不得讓 rc 變紅")
+        out = buf.getvalue()
+        self.assertIn("❌", out)
+        self.assertIn("2", out)  # 新增了 2 個
+
+    def test_report_delta_skips_when_either_side_is_none(self) -> None:
+        """非 Windows（`snapshot()` 回 `None`）時整段判準必須閉嘴——不得對著 `None`
+        減集合而炸例外，也不得印出任何東西（POSIX 上這個概念不存在）。"""
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = console_orphan_census.report_delta(None, {("OpenConsole.exe", 1)})
+        self.assertEqual(rc, 0)
+        self.assertEqual(buf.getvalue(), "")
 
 
 class ParallelFallbackToSequentialTest(unittest.TestCase):

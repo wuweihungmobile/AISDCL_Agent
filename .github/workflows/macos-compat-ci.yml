@@ -493,6 +493,11 @@ on:
       #      逐字同 DEF-101-042：只改該檔時其回歸鎖不會跑（與 R80／R81／R86／R98／
       #      R99／R100 同一形態、同一支判準，第七次重犯）。
       - "tools/lib/onboarding_snapshot_note.py"
+      # console_qa 事故輪：本輪新建的根層 SSOT（全套層孤兒 console 普查，由
+      #      tools/run_root_unittests.py 函式內 import、tools/tests/test_run_root_unittests.py
+      #      頂層 import 消費）。漏列的代價逐字同 DEF-101-042：只改該檔時其回歸鎖不會跑
+      #      （與 R80／R81／R86／R98／R99／R100／R109 同一形態、同一支判準，第八次重犯）。
+      - "tools/lib/console_orphan_census.py"
       - "AutoClaude/autoclaude/execution/pre_run_validator.py"
       - "AutoClaude/autoclaude/core/ports/observability.py"
       - "AutoClaude/autoclaude/core/ports/rtm_feedback.py"
@@ -866,6 +871,11 @@ on:
       #      逐字同 DEF-101-042：只改該檔時其回歸鎖不會跑（與 R80／R81／R86／R98／
       #      R99／R100 同一形態、同一支判準，第七次重犯）。
       - "tools/lib/onboarding_snapshot_note.py"
+      # console_qa 事故輪：本輪新建的根層 SSOT（全套層孤兒 console 普查，由
+      #      tools/run_root_unittests.py 函式內 import、tools/tests/test_run_root_unittests.py
+      #      頂層 import 消費）。漏列的代價逐字同 DEF-101-042：只改該檔時其回歸鎖不會跑
+      #      （與 R80／R81／R86／R98／R99／R100／R109 同一形態、同一支判準，第八次重犯）。
+      - "tools/lib/console_orphan_census.py"
       - "AutoClaude/autoclaude/execution/pre_run_validator.py"
       - "AutoClaude/autoclaude/core/ports/observability.py"
       - "AutoClaude/autoclaude/core/ports/rtm_feedback.py"

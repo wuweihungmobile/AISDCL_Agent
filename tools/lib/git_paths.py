@@ -51,6 +51,17 @@ def run(
         encoding="utf-8",
         errors="replace",
         timeout=timeout,
+        # 本函式被 `relay_machine.py`（`tools/session_resume_planner.py` 的續跑本體）
+        # 呼叫，而 planner 常由無 console 的 pythonw 起 ⇒ `git.exe` 這個 console 子系統
+        # 應用不帶旗標時會新配置一個視窗。內聯 getattr（不 import `win_spawn`）：本模組
+        # 被部分消費端以 `sys.path.insert(0, tools/)` ＋ `from lib import git_paths` 匯入
+        # （`tools/tests/test_negative_existence_claims_r82.py` 等），該路徑下 `tools/lib`
+        # 本身不在 sys.path 上，頂層 `from win_spawn import NO_WINDOW` 會
+        # `ModuleNotFoundError`——win_spawn.py 檔頭自陳「刻意不提供 fallback stub」，代價
+        # 由呼叫端的 import 形態吸收，此處循 `sdd_version.py`／`sdd_latest.py` 既有先例改
+        # 內聯 getattr；POSIX 上 `getattr` 取 0 ＝不加任何旗標（鐵律三）。
+        creationflags=(getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                       | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)),
     )
 
 

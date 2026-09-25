@@ -594,7 +594,13 @@ _SITE_CLASS_CENSUS: dict[str, dict[str, int]] = {
     # （powershell.exe 5.1 的主控台 codepage 行為只在 Windows 成立）；② 本機 codepage
     # 已是 UTF-8 時**缺陷重現不了**就明說跳過，而不是把「重現不了」讀成「已修好」。
     "tools/tests": {
-        "windows-only": 14,
+        # 🔴 console_qa 事故輪重釘 `windows-only` 14→15（**非放寬**，同下方各段：本表判準
+        # 是「相等」）。新站點＝`test_context_budget_guard.py::PlannerCheckIsConsoleFreeTest`
+        # 的類別層 `@unittest.skipUnless(os.name == "nt", "[WINDOWS-NATIVE-ONLY] …")`：那是
+        # 「pythonw 起 `session_resume_planner.py --check` 不得讓 Windows 新開可見 terminal」
+        # 的**行為**鎖（console 配置是 Windows 專屬概念，鐵律三），與既有 `NoWindowBehaviourTest`
+        # 同型，帶標籤的 skipUnless 是正確形態，不是隱藏失敗。
+        "windows-only": 15,
         "posix-only": 10,
         # 🔴 本輪重釘 `tool-absence` 36 → 37（**非放寬**：本表判準是「相等」，任一格變動都
         # 必須有人回來改，失敗訊息自己會印出該填的數字 ⇒ 重釘是設計好的流程）。新站點＝
@@ -668,7 +674,13 @@ _SITE_CLASS_CENSUS: dict[str, dict[str, int]] = {
         # （`tools/tests@win32／platform` 43>42）；收尾改為「真目錄＋`Path.is_symlink` 對該候選
         # 回 True 的替身」走同一條分支——鎖在本機真的跑（零 skip），只把「OS 真把它當
         # symlink」那一格留給有特權的環境（mac／CI）覆蓋。合法出口＝讓測試真的跑，不是調天花板。
-        "runtime-skipTest": 32,
+        # 🔴 console_qa 事故輪重釘 `runtime-skipTest` 32→33（**非放寬**，同上：本表判準是
+        # 「相等」）。新站點＝`PlannerCheckIsConsoleFreeTest.
+        # test_planner_check_does_not_spawn_a_visible_terminal` 函式體內兩段
+        # `self.skipTest("[TOOL-ABSENCE] …")`／`self.skipTest("[ENV-DISABLED] …")`（找不到
+        # pythonw.exe／解不出任何逐字稿時明說跳過，不假綠）——同一個方法貢獻一個站點，
+        # 故只 +1（不是 +2）。
+        "runtime-skipTest": 33,
         "unclassified": 0,
     },
     # 🔴 R81 包 F 重釘 `windows-only` 9→10：並行包在
