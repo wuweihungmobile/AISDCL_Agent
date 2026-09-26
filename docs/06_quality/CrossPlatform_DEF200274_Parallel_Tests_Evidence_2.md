@@ -1025,3 +1025,100 @@ ci-gate）→ 兩面獨立審查（程式正確性／對抗式反駁）→ 審�
   `xdist workers=4`＋`nodes confirmed=4`）。**三平台 log 皆無「種子檔可能已過期」**（上一輪
   ee4bdd4／c5d1722 三平台皆報 30%）⇒ DEF-200-386 在雲端同樣消失；上方〈誠實劃界〉第一條的
   「跨平台熱點差異」風險本次未出現。
+
+## 收斂後複驗 II——mac 親驗輪（2026-09-26，Apple M1 Max 10P/10L，Docker down）
+
+掌舵者六問重問＋前輪〈收斂後複驗與遺留收尾〉五項誠實劃界。流程：四方唯讀審查（Architect／SA／SD／QA
+皆 Sonnet，主控 Fable 5.1）→ 主控裁決去重 → Developer 實作 → 兩面複審鏡 → 主控收尾。SD 獨占機器做重量測，
+QA 在三方交卷後才啟動（突變自證需要獨占工作樹）。四方判決：Architect CONDITIONAL／SA CONDITIONAL／
+SD APPROVE／QA APPROVE；18 筆帳本列零信任重驗 18/18 CONFIRMED，無 REFUTED。
+
+### 六問答覆（mac 面）
+
+1. **帳本多 CPU 問題**：非 fixed 列仍是 311（mac 序列 20/20＋xdist 3/3 皆綠，未重現≠已修）、381（chaos-latest
+   排程 1/7、無紅，日曆 2026-10-03 未到）；本輪新立並修掉 DEF-200-398（tlc_runner 逾時，見下）。DEF-200-316
+   方案 B：四方確認**尚未實作**（三份 settings 條目 24/12/6＝設計書修前基線；mac 探針 6 行 posix_spawn ENOENT
+   ＋2 行 SessionStart success，主控與 SA 各親跑一次同值）；設計書 D1～D10 經 Architect 逐項覆核可執行，兩處漂移
+   要訂正（`tools/dev_start.py` 現 1950 行、餘裕 2 非 0；`test_check_hooks_liveness.py` 兩類別行號 +187，以類別名
+   重定位）。**本輪未動**：auto mode 分類器以 [Self-Modification] 擋下改 `.claude/settings.json` 的派工，
+   依規則不得改派其它工具繞過，留掌舵者親手窗口。
+2. **功能完備與 CI 多 CPU**：[他包回報 SD] 根層全套 `workers=9 source=cpu_budget`、`發現 4622 個測試`、
+   `S=813.8s｜ideal=90.4s（S/W-bound）｜loss=1.00x｜slot 利用率=99.6%`、real 109.98s、rc=0；AutoClaude
+   `xdist workers=9`＋`nodes confirmed=9`、4738 passed／156 skipped、31.45s；SDD ci-gate `broadcast workers=9`、
+   v0.01 1475（序列，設計如此）／v0.30 `xdist workers=9` 1959／scripts 363。[他包回報 SA] 雲端 edd36587 三支
+   push run 皆 success：workers=4（ubuntu）／3（macos）／4（windows）、三平台 `發現 4622 個測試`、slot 99.3～99.8%。
+   [他包回報 Architect] 全 repo `cpu_budget` 249 命中逐一分類、8 支 workflow 逐支核過：worker 數唯一來源
+   `tools/lib/cpu_budget.py`，兩處字面數字（pre-push 背景 leg=2、五處 CI job 顯式 `-p no:xdist`）皆有明文 WHY。
+3. **頭重腳輕**：[他包回報 SD] 最長葉節點 test_dev_start 39.5～48.1s ≪ fair_share 85.6～91.0s；W=8／9／10 三次
+   全套零 🚨／⚠️／🐢；`dispatch_imbalance.py` 已接線（run_root_unittests.py:539）、沉默是「無不均可報」。
+   **整輪 CPU（前輪未量）**：top 取樣穩態（去頭尾 10s）W=9 **88.32%**（10 核 W=9 理論上限 ≈90%）；AutoClaude
+   avg 83.31%。W 掃描：W=8 real 109.78s／78.73%／S=728.3s、W=9 109.98s／88.32%／813.8s、W=10 104.51s／88.45%／
+   855.8s——wall 差 <5%（cpu_budget 檔頭跨輪漂移容許 6.7%），公式 `logical−ceil(logical/physical)`=9 在無 SMT
+   機器維持，不調 CAP。
+4. **其他可平行面**（[他包回報 Architect]，附算式）：mac nightly 四 stage 28／148／35／46s＝257s，stage 2/3/4
+   各吃預算 9，跨 stage 並行＝27 worker 搶 10 核（2.7 倍超訂；cpu_budget 實測 1.4 倍超訂即 +9.5% 總工作量）⇒ 不做。
+   **新發現**：ci-gate.sh 三軌序列 12.42＋15.68＋15.24s，背景並行僅 10% 超訂、理論省 27.6s（全輪 10.7%）⇒
+   絕對量小、DOCUMENT_ONLY。TLA+ 五軌現況零自動通道跑（假議題）；mutmut 2.4.3 無平行旋鈕（DOCUMENT_ONLY）；
+   CI 矩陣分片增加計費 runner-分鐘⇒不做；ruff／lint-imports 不做。
+5. **是否收斂**：多 CPU 機制在 mac 亦收斂——核數自動偵測（psutil ABSENT → darwin 分支 `sysctl -n hw.physicalcpu`
+   =10）、worker 廣播、負載平衡、種子過期偵測四機制完備；不重啟系列。
+6. **前輪遺留**：(a) 種子跨平台：`refresh_parallel_timing_seed.py --check` rc=0「沒有明顯過期」，Windows 種子
+   Top-15 vs mac 活體 Top-15 交集 12／聯集 18＝66.7%（門檻 50%）⇒ 維持單一種子；(b) 整輪 CPU 已量（上 3）；
+   (c) tlc_runner 無 timeout ⇒ DEF-200-398 本輪修；(d) v0.01～v0.29：Architect 唯讀盤點 30 版皆
+   `subprocess.run=1 timeout=0`，依版本規則不改，登記於 398 列；(e) DEF-200-396 雲端鑑別力：SA 查明
+   windows-nightly-full 只在 schedule／dispatch 跑、最近排程 09-21 早於修復 ⇒ 主控 dispatch run 36212273769
+   （edd36587）取證，結果見〈待主控回填〉；runner 映像 README 查無 "terminal" 字樣，預裝與否查不到。
+
+### 修復：DEF-200-398 tlc_runner.py 逾時保護（LATEST v0.30）
+
+`subprocess.run` 加 `timeout=DEFAULT_TLC_TIMEOUT_S`（1500s，**嚴格小於**雲端 chaos nightly job 級
+`timeout-minutes: 30`，讓內層先逾時、留下可讀 exit=2 與 log_tail）；`except TimeoutExpired` → `ok=False,
+exit=2`（不用 exit=1：那是「跑完且找到 invariant 違反」）；CLI `--timeout`。鎖 `tools/tests/test_tlc_runner_timeout.py`
+（LATEST 走 `tools/lib/sdd_latest.py` SSOT；ast 靜態鎖／行為紅綠自證／CLI 透傳；[他包回報] 3 ok、拿掉 `timeout=`
+即 2 支紅、ci-gate rc=0 1475／1959／363、ruff 全綠）。
+
+### 獨立審查與修補（三輪）
+
+第一輪：鏡 A（正確性／消費端）REJECT、鏡 B（對抗式反駁）APPROVE-WITH-FIXES。P1×2：`TimeoutExpired.stdout/stderr`
+在 POSIX 即使 `text=True` 仍是 bytes，逾時分支 `(exc.stdout or "") + "\n"` 炸 `TypeError`→rc=1（正是禁止的
+exit=1 語意；第一輪測試手造 str 形狀例外故未攔到）；三支鎖皆未覆蓋「不覆寫預設值」路徑（預設改 None 三鎖仍綠）。
+P2／P3：`ci-gate.sh --full-tlc` 對凍結基線 v0.01 亦跑五軌（依政策不改、仍無 timeout，已揭露）；WHY 註解稱
+「chaos nightly 有 30 分鐘 job 時限」查無此通道（現況零自動通道跑 TLC）；`--timeout 0`／負數無驗證；ast 鎖不查
+`timeout=None`；檔頭退出碼說明未同步。修補：`_as_text()`（None／bytes／str）＋真子行程端對端測試（修法前必炸
+TypeError）＋預設值路徑鎖＋`_positive_float`（>0）＋ValueError＋ast 值檢查＋文案訂正。
+第二輪：兩鏡 APPROVE-WITH-FIXES，上一輪逐條「已修」；**兩鏡交叉**抓到同一新洞：`--timeout inf`／`nan` 繞過
+`<= 0`（inf 重現無界等待；nan 讓 `selectors.select` 拋未捕捉 ValueError，main() 以 exit=1 崩潰）。修補：
+`math.isfinite` 雙防線（CLI type 與 `run_tlc()`）＋ inf／-inf／nan／1e400 測試＋端對端斷言 `subprocess.run`
+從未被呼叫；`_as_text` docstring 訂正（Windows 分支 run() 會再 communicate 一次拿到 str）。
+第三輪：兩鏡 APPROVE（親餵 inf／-inf／nan／1e400／Infinity 全拒、0.5／1e-3／1500／1e300 全收；`main(["--timeout","nan"])`
+改為乾淨 SystemExit(2)）。鎖檔 18 支測試；收尾單人窗口把 docstring 史料壓進本節（359→292 行）以符合回歸鎖軌
+單輪上限 309（核准超額名額已用罄）。附帶事故：鏡 A 第三輪誤呼叫未 mock 的 `run_tlc()` 真的起了一個 TLC java
+（PID 9998，7 核跑 7 分鐘），主控收尾時 kill 回收。
+
+### 🔴 誠實劃界
+- DEF-200-316 方案 B 本輪未實作（auto mode Self-Modification 阻斷）；mac 探針 ENOENT 仍 6 行。
+- DEF-200-396 雲端鑑別力：dispatch run 36212273769（edd36587）三 job success、`✅ 孤兒 console 普查：零增長（前 1／後 1）`，
+  但 runner 映像 `windows-2025-vs2026`（Windows Server 2025）軟體清單 README 36KB 對 terminal／OpenConsole 零命中，
+  而監看器刻意只數 OpenConsole.exe／WindowsTerminal.exe（conhost 在無桌面環境恆 0）⇒ **雲端結構上無鑑別力**，
+  只有 WT 為預設終端的開發機有鑑別力；帳本 396 列已改寫揭露。
+- v0.01～v0.29 tlc_runner 同型缺口依版本規則不改（凍結基線 v0.01 若被任何工具用來跑 TLC，該面仍無 timeout）。
+- SD：top（全機）與 /usr/bin/time（行程樹）兩種 CPU% 量法差距（83～88% vs 68%）如實記錄未深究。
+- SD 用語：「CPU 核數自動偵測」與「派工粒度細分（人工白名單＋偵測建議）」是兩層機制，勿混讀。
+- 主控流程失誤：scratchpad 任務書 `SA.md` 與報告 `sa.md` 在 APFS 為同一檔，四份任務書被報告覆蓋（agent 已先讀完，
+  無損），已入記憶。
+
+### 待主控回填
+
+- 護欄棘輪 R174：106664 → 106966（+302；新檔 292＋本表自身 10），全額申報回歸鎖軌、主軌 0。
+  `_REPIN_LOG_HISTORY_SHA256`／接鏈列 new12 的填寫第一次被 auto mode 以 Self-Modification 擋下，掌舵者明文授權後
+  第二次放行（值＝`--print-guard-lines` 印出的 e8711dba…）；`test_adr_xplat001_c1c2_lock` 192 tests OK。
+- 收尾途中另兩處機械重釘：`_TREE_FILE_FLOORS['tools/tests']` 65→66（runner 靜態掃描早退印出的建議值）；
+  `run_tlc.sh` 檔頭補註後 101 行撞薄殼上限 100，收斂為單行註解回到 100 行（`test_check_wrapper_thinness`＋
+  `test_check_script_parity` 169 tests OK）。
+- 主控收尾全套（mac）：`REAL_RC=0`、`發現 4640 個測試（下限 4543）`、`[cpu_budget] root-unittest workers=9
+  source=cpu_budget`、`📊 派工摘要：worker=9｜S=777.0s｜ideal=max(S/W, 最長單位)=86.3s（S/W-bound）｜loss=1.00x｜
+  slot 利用率=99.6%｜最長單位：test_dev_start 44.3s`、`[M6 id 集合] tools/tests@darwin：✅ 集合關係成立（本次
+  skip 47 支）`，無種子過期警告。SDD ci-gate rc=0（v0.01 1475／v0.30 1959／scripts/tests 363）；
+  `--check-snapshot` rc=0 指紋相符；`check_defect_log_crossref.py` rc=0；ruff 四檔 `All checks passed!`。
+- commit／push／雲端：見 git log 與 `gh run list --commit <sha>`（本節不寫死 sha）。
+

@@ -685,7 +685,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 8842,
+    "test_adr_xplat001_c1c2_lock.py": 8852,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 4032,
@@ -756,6 +756,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_statusline_context_feed.py": 204,
     "test_stdio_utf8.py": 76,
     "test_subprocess_encoding_hygiene.py": 1582,
+    "test_tlc_runner_timeout.py": 292,
     "test_wake_chain_halt_r278.py": 769,
     "test_windows_forbidden_filename_parity.py": 1003,
     "test_windows_nightly_anchor_parity.py": 135,
@@ -2380,6 +2381,11 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "上一列、本列自身與 _REGRESSION_LANE_LOG 同輪列文字重新換行，反覆覆核收斂本身（含本列"
      "自身）累計造成的行數漂移。詳 CrossPlatform_R145_Scan_Findings.md。餘額歸主軌，見 "
      "_REGRESSION_LANE_LOG 同輪列。"),
+    ("R174", 106664, 106966, 302,  # round-label-ok：DEF-200-398 tlc_runner 逾時保護收尾單人窗口
+     "[非淨減法輪][回歸鎖軌申報＝本列淨額全額，見 _REGRESSION_LANE_LOG 同輪列] DEF-200-398 "
+     "結案回歸鎖 test_tlc_runner_timeout.py（ast 靜態鎖／bytes 與 None 逾時形狀／預設值路徑／"
+     "inf 與 nan 拒絕／真子行程端對端；docstring 史料已搬證據檔）＋本表自身漂移。逐項見 "
+     "CrossPlatform_R145_Scan_Findings.md〈附記（R174）〉。"),
 )
 
 
@@ -2842,6 +2848,9 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "⇒ 部分申報 309"
      "（＝軌上限，同 R152／R169／R171／R172 先例），餘額歸主軌由款(10)(11) 照算。逐項見 "
      "CrossPlatform_R145_Scan_Findings.md〈附記（R173）〉。"),
+    ("R174", 302,
+     "DEF-200-398 結案回歸鎖 test_tlc_runner_timeout.py 全額（含本表自身漂移），未超軌上限 "
+     "⇒ 全額申報，主軌 0。逐項見 CrossPlatform_R145_Scan_Findings.md〈附記（R174）〉。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -3135,10 +3144,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 291
+_REPIN_LOG_FROZEN_PREFIX_LEN = 292
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "b76488c601165ff79582430ad111c2c05699672a8d043d9fd3b41617c1ff33b2")
+    "e8711dba8b9029355616968a725f1b7dfc9d61d74575209aff483c7bc9148147")
 
 
 def repin_log_history_digest(
@@ -3475,6 +3484,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R173", "c4b8a80ea59c", "b76488c60116", "DEF-200-394"),  # round-label-ok：理由欄縮短
     ("R173", "b76488c60116", "9f8511c3b8d7", "DEF-200-394"),  # round-label-ok：接鏈列隨之收斂
     ("R173", "9f8511c3b8d7", "b76488c60116", "DEF-200-394"),  # round-label-ok：自身漂移列終值
+    ("R174", "b76488c60116", "e8711dba8b90", "DEF-200-398"),  # round-label-ok
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

@@ -26,7 +26,7 @@
 # Exit codes：
 #   0 — 全部通過
 #   1 — TLC 偵測 invariant violation / liveness violation / deadlock
-#   2 — 環境錯誤（Java 缺失 / jar 下載失敗 / python 缺失）
+#   2 — 環境錯誤（Java 缺失 / jar 下載失敗 / python 缺失 / TLC 逾時，DEF-200-398）
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
