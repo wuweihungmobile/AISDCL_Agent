@@ -382,10 +382,15 @@ class TestCloseKillsCmdShimGrandchild:
             pty.start()
         try:
             deadline = time.time() + 10
-            while not marker.exists() and time.time() < deadline:
+            marker_content = ""
+            while time.time() < deadline:
+                if marker.exists():
+                    marker_content = marker.read_text().strip()
+                    if marker_content:
+                        break
                 time.sleep(0.1)
-            assert marker.exists(), "孫行程未在時限內啟動（測試環境問題，非本次修復範圍）"
-            child_pid = int(marker.read_text().strip())
+            assert marker_content, "孫行程未在時限內啟動（測試環境問題，非本次修復範圍）"
+            child_pid = int(marker_content)
 
             pty.close()
 
@@ -442,10 +447,15 @@ class TestCloseKillsPosixGrandchild:
         pty.start()
         try:
             deadline = time.time() + 10
-            while not marker.exists() and time.time() < deadline:
+            marker_content = ""
+            while time.time() < deadline:
+                if marker.exists():
+                    marker_content = marker.read_text().strip()
+                    if marker_content:
+                        break
                 time.sleep(0.1)
-            assert marker.exists(), "孫行程未在時限內啟動（測試環境問題，非本次修復範圍）"
-            grandchild_pid = int(marker.read_text().strip())
+            assert marker_content, "孫行程未在時限內啟動（測試環境問題，非本次修復範圍）"
+            grandchild_pid = int(marker_content)
             assert _pid_alive(grandchild_pid), "孫行程應已啟動存活"
 
             pty.close()

@@ -727,3 +727,7 @@ W=16 時 74.0%（穩態 88.9%），皆未達字面 80%；W=14/15/17/18 未測；
 ## 附記（R174；DEF-200-398 tlc_runner 逾時保護收尾單人窗口）
 
 <!-- guard-total:R174 --> R174 護欄層累積淨額＝ 106664 → 106966（+302）——DEF-200-398（LATEST `tlc_runner.py` subprocess.run 無 timeout）收尾單人窗口（2026-09-26，mac，Apple M1 Max）：`test_tlc_runner_timeout.py` 新檔 +292（ast 靜態鎖／TimeoutExpired bytes 與 None 形狀→exit=2／預設值路徑／inf 與 nan 拒絕／真子行程端對端；兩面複審三輪後 docstring 史料搬證據檔 359→292）＋本表自身漂移 +10（新列、回歸鎖軌同輪列、接鏈列）。全額申報回歸鎖軌（302 ≤ 軌上限 309），主軌 0、連續上升計數不接續。逐項見 CrossPlatform_DEF200274_Parallel_Tests_Evidence_2.md〈收斂後複驗 II——mac 親驗輪〉。
+
+## 附記（R175；DEF-200-399 macOS CI 雲端假紅根治收尾單人窗口）
+
+<!-- guard-total:R175 --> R175 護欄層累積淨額＝ 106966 → 106985（+19）——DEF-200-399 （macOS CI 雲端假紅根治）收尾單人窗口（2026-09-26，mac，Apple M1 Max）：`test_run_root_unittests.py` 的 `RunParallelStalenessAdvisoryReadsMergedLiveCacheTest` 改執行緒區域假時鐘取代真 sleep（macOS runner 3 核負載排序被打亂致假紅，重疊率 36%／43%）＋本表自身漂移。全額申報回歸鎖軌（17 ≤ 軌上限 309），主軌 0。逐項見 CrossPlatform_R145_Scan_Findings.md〈附記（R175）〉。

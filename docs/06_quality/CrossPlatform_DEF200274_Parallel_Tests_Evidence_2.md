@@ -1122,3 +1122,39 @@ TypeError）＋預設值路徑鎖＋`_positive_float`（>0）＋ValueError＋ast
   `--check-snapshot` rc=0 指紋相符；`check_defect_log_crossref.py` rc=0；ruff 四檔 `All checks passed!`。
 - commit／push／雲端：見 git log 與 `gh run list --commit <sha>`（本節不寫死 sha）。
 
+
+## 雲端假紅補記（2026-09-26，e4bf51af 推送後）
+
+e4bf51af 觸發的雲端 CI 兩支紅（macos-compat-ci run 36232784475／AutoClaude CI run 36232784477），
+同一份碼在 edd36587／a7ec277 皆 success，判定為不穩定假紅而非迴歸。session 中途意外中斷，
+兩個修復包各自狀況不同：AutoClaude 那包完整交卷（STATUS: done）；macOS 那包中途中斷、diff 已
+套用但未留報告，由主控親自驗證後採用。
+
+### DEF-200-399（macOS smoke 紅）
+`RunParallelStalenessAdvisoryReadsMergedLiveCacheTest` 用真 `time.sleep` 10ms 階梯＋4 執行緒量
+`elapsed` 排序，macOS runner 3 核負載下排序被 GitHub Actions 排程抖動打亂，重疊率跌到 36%／43%
+（門檻 50%），連帶 `CarrierVerdictParityTest` 判定載具分歧。修法：改用執行緒區域（`threading.local()`）
+假時鐘 offset 取代真 sleep，`parallel_shard.time.monotonic` 被 patch 成疊加 offset，排序不再受
+排程影響。主控親驗：整模組 `Ran 230 tests` OK；突變自證——退回舊比較面（`staleness_report()` 直接比
+`module_timings`）即紅（重疊率 30%），還原後綠；ruff 綠。
+
+### DEF-200-400（AutoClaude CI 紅）
+`test_close_kills_grandchild_spawned_via_shell_background_job`／`TestCloseKillsCmdShimGrandchild`
+同型：sh 背景工作 `echo $! > marker` 先 truncate 建檔、後寫入 PID，測試只輪詢「檔案存在」即讀，
+在建檔與寫入之間的窗口讀到空字串 ⇒ `int('')` ValueError。修法：輪詢條件改「檔案存在且內容非空」，
+兩處（POSIX／cmd shim）同型寫法一併修。開發包驗證：本機（mac，較快較安靜）修前／修後、無加壓／
+加壓（12 個 `yes`）四組各 30 次皆 30/30 passed——本機未能重現 CI 上的空 marker 競態（低機率、僅
+雲端 Linux + xdist 4 workers 高併發下現形），如實回報「未重現」而非偽稱「已重現」；48 passed 1
+skipped；ruff 綠。`AutoClaude/tests` 指紋樹變動 ⇒ ONBOARDING §7 表② mac 欄已用乾淨 venv 回填
+（autoclaude 4638 passed／222 skipped，指紋 e847688ec487）。
+
+### 護欄棘輪 R175
+`test_run_root_unittests.py` 淨增 19 行（DEF-200-399 修法本身；`test_perception.py` 不在
+guard-line 計數面內）；全額申報回歸鎖軌（19 ≤ 軌上限 309），主軌 0。同輪兌現
+`_REPIN_NET_CAP_SCHEDULE` 到期義務 (175, 529)，重新武裝 177／528。
+
+### 收尾全套
+根層全套第二次 rc=0：`發現 4640 個測試`、`workers=9`、`S=764.7s｜slot 利用率=99.6%`、M6 ✅、無過期
+警告。SDD ci-gate rc=0（1475／1959／363）。`--check-snapshot` rc=0。`check_defect_log_crossref.py`
+rc=0。ruff 三檔（`test_adr_xplat001_c1c2_lock.py`／`test_run_root_unittests.py`／
+`test_perception.py`）全綠。帳本新立 399／400（皆 fixed）。

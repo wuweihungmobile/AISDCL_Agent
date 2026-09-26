@@ -4046,10 +4046,12 @@ class RunParallelStalenessAdvisoryReadsMergedLiveCacheTest(unittest.TestCase):
     （`save_live_cache()` 的 `kept_previous` 語意會把它原樣留下）。種子檔內容＝
     這一輪「應該」合併出來的完整圖像（parent rollup `pkgNN` ＋ `Old` 舊鍵 ＋
     `Fresh` 新鍵），數值刻意分兩層（`Old` 恆 0.0、`Fresh`／`pkgNN` 隨 `i` 遞減）
-    ——用真實 `run_parallel()`（fake `Popen` ＋ 依 `i` 遞減的 `time.sleep()`
-    控制 `elapsed`，而非真 subprocess，但 elapsed 仍是貨真價實的 wall-clock
-    差）讓兩邊排序同向，即使 tie-break 邊界受執行緒完成順序影響也不礙事——
-    兩個各恰 15 選的子集合，最壞情況下重疊率仍 ≥ 14/16（遠高於 50% 門檻）。
+    ——用真實 `run_parallel()`（fake `Popen` ＋ 依 `i` 遞減量餵入 `elapsed`：
+    以執行緒區域（`threading.local()`）假時鐘 offset 取代真 `time.sleep()`
+    ——macOS CI 3 核負載下 10ms 階梯曾被排程抖動打亂，重疊率 36%／43%
+    ＜50% 門檻而假紅）讓兩邊排序同向，即使 tie-break 邊界受執行緒完成順序
+    影響也不礙事——兩個各恰 15 選的子集合，最壞情況下重疊率仍 ≥ 14/16
+    （遠高於 50% 門檻）。
 
     若 `run_parallel()` 退回舊行為（直接拿 `module_timings` 比對），比較面會漏掉
     `pkgNN.Old`／`pkgNN` 這兩層 40 個鍵，重疊率跌破門檻，本測試斷言的「不印
@@ -4060,7 +4062,7 @@ class RunParallelStalenessAdvisoryReadsMergedLiveCacheTest(unittest.TestCase):
     _DELAY_STEP_SEC = 0.01  # 遠大於一般排程抖動，讓 i 越小 elapsed 越大這個排序可靠成立。
 
     @classmethod
-    def _fake_popen_factory(cls):
+    def _fake_popen_factory(cls, tls: threading.local):
         class _FakeProc:
             returncode = 0
 
@@ -4068,7 +4070,7 @@ class RunParallelStalenessAdvisoryReadsMergedLiveCacheTest(unittest.TestCase):
                 self._delay = delay
 
             def communicate(self):
-                time.sleep(self._delay)
+                tls.v = getattr(tls, "v", 0.0) + self._delay
                 return (
                     json.dumps({
                         "testsRun": 1, "skipped": [], "errors": [], "failures": [],
@@ -4104,11 +4106,16 @@ class RunParallelStalenessAdvisoryReadsMergedLiveCacheTest(unittest.TestCase):
             seed_path.write_text(json.dumps(seed), encoding="utf-8")
 
             buf = io.StringIO()
+            tls = threading.local()
+            real_monotonic = time.monotonic
             with mock.patch.object(ptc, "SEED_PATH", seed_path), \
                     mock.patch.object(ptc, "LIVE_CACHE_PATH", live_path), \
                     mock.patch.object(parallel_shard, "worker_count", return_value=4), \
+                    mock.patch.object(
+                        parallel_shard.time, "monotonic",
+                        side_effect=lambda: real_monotonic() + getattr(tls, "v", 0.0)), \
                     mock.patch.object(parallel_shard.subprocess, "Popen",
-                                       side_effect=self._fake_popen_factory()), \
+                                       side_effect=self._fake_popen_factory(tls)), \
                     contextlib.redirect_stdout(buf):
                 parallel_shard.run_parallel(
                     unittest.TestSuite(), Path(__file__).resolve().parent, modules)
