@@ -2158,7 +2158,10 @@ class TestTextIoDeclaresEncoding(unittest.TestCase):
         per_file, stale, detail, scanned = self._scan_repo()
         # 反空轉下限＝落地當回合實測 × 0.95（本輪由「打八折的化石 648」重釘），
         # 並套與各掃描單位同一條腐化上界——單邊下限必然腐化，見 `_scan_roots` WHY。
-        surface = tree_count_verdict("encoding 掃描面", scanned, 812)
+        # 🔴 2026-09-26 重釘 812→965（DEF-200-316 方案 B 新增 tools/lib/hook_carrier_
+        # symlink.py，掃描檔數 1016 已過腐化上界，`tree_count_verdict()` 逐字指示重釘為
+        # 965 ⇒ 照填，零加減推算）。
+        surface = tree_count_verdict("encoding 掃描面", scanned, 965)
         self.assertIsNone(surface, surface or "")
         self.assertEqual(
             stale, [],
@@ -2419,8 +2422,12 @@ class TestScanSurfaceParityWithSisterLock(unittest.TestCase):
         )
 
     def test_the_surface_is_not_trivially_small(self) -> None:
-        """反空轉：兩邊同時崩塌成空集合時「相等」也會成立，故另釘絕對量。"""
-        verdict = tree_count_verdict("兩鎖共同掃描面", len(self._own_files()), 812)
+        """反空轉：兩邊同時崩塌成空集合時「相等」也會成立，故另釘絕對量。
+
+        🔴 2026-09-26 重釘 812→965（同姊妹格：DEF-200-316 方案 B 新增
+        tools/lib/hook_carrier_symlink.py，掃描檔數過腐化上界，逐字指示重釘為 965）。
+        """
+        verdict = tree_count_verdict("兩鎖共同掃描面", len(self._own_files()), 965)
         self.assertIsNone(verdict, verdict or "")
 
 

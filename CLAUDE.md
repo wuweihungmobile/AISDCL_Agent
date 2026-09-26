@@ -70,8 +70,8 @@ monorepo 根目錄（`AISDCL_Agent/`，各機器 checkout 路徑不同）＝**�
 
 ### hook 載具（鐵律一之二：exec form）
 
-- 根層 hook 條目一律 **exec form**（帶 `args`；每支 hook 成對：Windows 載具＝根層 `.venv\Scripts\pythonw.exe`（GUI 子系統，零視窗），POSIX 載具＝根層 `.venv/bin/python`；`args[0]` 皆為同一支啟動器 `_hook_launcher`，住 `.claude/hooks/`）——shell form 在 Windows 每觸發一次就閃一個 console 視窗。2026-09-15 掌舵者裁決前 POSIX 條目是直接 exec 帶 shebang 的啟動器（直譯器＝PATH 上的 `python3`），已改釘根層 .venv：兩平台 hook 直譯器自此只有一個來源，代價是首次 clone 到 bootstrap 建好 `.venv` 前兩平台 hook 皆 fail-open（此前只有 Windows 如此）。
-- 🔴 **不對稱風險**：exec form 載具解析不到時 Claude Code **fail-open**（只記 ERROR、工具照跑）⇒ 全部守衛靜默失效，表徵與「修好了」完全相同。**「不閃窗了」永遠不算驗收通過**，正負兩面一起看（平台各一條，不要照抄另一邊）：
+- 根層 hook 條目一律 **exec form**（帶 `args`）；每支 hook **只有一條** command（Windows 形態載具 `.venv\Scripts\pythonw.exe`），POSIX 由 `tools/lib/hook_carrier_symlink.py` 在 dev_start 建立的符號連結解析到 `.venv/bin/python`。2026-09-17 掌舵者裁決（DEF-200-316，方案 B）：此前是「每支 hook 兩條、各平台各自失敗一條、CC fail-open 吞掉失敗」的配對設計，改為單一載具後**任何 ENOENT 都是真的壞了**，不再有「另一半本來就該失敗」這種噪音。`args[0]` 皆為同一支啟動器 `_hook_launcher`，住 `.claude/hooks/`——shell form 在 Windows 每觸發一次就閃一個 console 視窗。首次 clone 到 dev_start 建好符號連結前，POSIX 上 hook 仍 fail-open（設計上刻意接受的視窗，不是要消滅它）。
+- 🔴 **不對稱風險**：exec form 載具解析不到時 Claude Code **fail-open**（只記 ERROR、工具照跑）⇒ 全部守衛靜默失效，表徵與「修好了」完全相同。**「不閃窗了」永遠不算驗收通過**，正負兩面一起看（平台各一條，不要照抄另一邊）；POSIX 上另補一句 symlink 身分現查（`readlink` 應印 `../bin/python`）：
 
 ```powershell
 Test-Path (Join-Path $env:CLAUDE_PROJECT_DIR '.venv\Scripts\pythonw.exe')   # 載具在不在，必須 True
@@ -80,6 +80,7 @@ Select-String -Path h.log -Pattern 'Hook SessionStart.*success'             # �
 ```
 ```bash
 test -x "$CLAUDE_PROJECT_DIR/.venv/bin/python" && echo carrier-ok            # mac：載具在不在
+readlink "$CLAUDE_PROJECT_DIR/.venv/Scripts/pythonw.exe"                    # 應印 ../bin/python（symlink 身分現查）
 claude -p --model haiku --debug hooks --debug-file h.log "ok"; grep 'Hook SessionStart.*success' h.log
 ```
 

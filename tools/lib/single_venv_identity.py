@@ -8,9 +8,9 @@ WHY 這支非有不可（與既有 `hook_wiring.carrier_liveness_problems` 的�
 但那仍是錯的第二顆 venv：hook 載具應恆指向 repo 唯一的根層 `.venv`，不是「隨便
 一顆存在的 venv」。本模組補的是這一格——**身分**（是不是那唯一一顆），不是
 **存在性**（見 F1 立案筆記；DEF-200-294 的原始事故正是「AutoClaude 子專案底下
-長出第二顆 venv、hook 候選鏈把它撿去用」）。2026-09-15 起 POSIX 載具也改釘根層
-`.venv`（掌舵者裁決，見 `tools/lib/hook_wiring.POSIX_CARRIER_REL`），身分鎖同步
-擴到 POSIX 半邊：判準對稱、訊息對稱。
+長出第二顆 venv、hook 候選鏈把它撿去用」）。方案 B（DEF-200-316）起兩平台共用
+同一條 Windows 形態宣告、POSIX 由符號連結解析，本模組因此只需判 Windows 半邊——
+身分鎖不再需要 POSIX 專屬的第二條判準（原 POSIX 迴圈與 `canonical_posix` 已刪）。
 
 刻意只依賴 stdlib＋`hook_wiring` 既有公開純函式（`expand_tokens`／
 `declared_win_carriers`／`win_carrier_kind`），不碰磁碟——合成 `settings` dict
@@ -29,21 +29,16 @@ import hook_wiring  # noqa: E402
 def single_venv_identity_problems(
     settings: dict, project_dir: str, repo_root: str
 ) -> list[str]:
-    """宣告的 Windows venv 載具與 POSIX 載具，用**這份 settings 自己的專案根**展開＋
-    normpath 後，必須分別等於 `<repo_root>/.venv/Scripts/pythonw.exe` 與
-    `<repo_root>/.venv/bin/python`——同一顆 repo 唯一 venv 的兩個平台半邊。
+    """宣告的 Windows venv 載具，用**這份 settings 自己的專案根**展開＋ normpath 後，
+    必須等於 `<repo_root>/.venv/Scripts/pythonw.exe`——repo 唯一 venv 的載具身分
+    （POSIX 半邊方案 B 起由符號連結解析到同一顆 venv，不再有獨立宣告可比對）。
 
-    Windows 只判 `win_carrier_kind() == "venv"` 的載具；PATH 版（`pythonw.exe` 字面）
+    只判 `win_carrier_kind() == "venv"` 的載具；PATH 版（`pythonw.exe` 字面）
     的實況取決於 session 的 PATH，沒有固定身分可比，射程外（同
-    `hook_wiring.carrier_liveness_problems` 既有的劃界）。POSIX 側判
-    `declared_posix_carriers()` 的每一筆——該函式本身已只認 `is_exec_form` ＋
-    `is_command_hook` 的條目，沒有 PATH 版分歧，不需要額外過濾。
+    `hook_wiring.carrier_liveness_problems` 既有的劃界）。
     """
     canonical_win = os.path.normcase(
         os.path.normpath(os.path.join(repo_root, hook_wiring.WIN_CARRIER_REL))
-    )
-    canonical_posix = os.path.normcase(
-        os.path.normpath(os.path.join(repo_root, hook_wiring.POSIX_CARRIER_REL))
     )
     problems: list[str] = []
     for carrier in sorted(hook_wiring.declared_win_carriers(settings)):
@@ -56,16 +51,6 @@ def single_venv_identity_problems(
             problems.append(
                 f"宣告的 Windows venv 載具 {carrier!r} 用本份 settings 的專案根展開＋"
                 f"normpath 後為 {resolved}，非 repo 唯一的根層 venv {canonical_win}——"
-                "單一 .venv 設計下這是第二顆 venv（或指向不存在的分身）"
-            )
-    for carrier in sorted(hook_wiring.declared_posix_carriers(settings)):
-        resolved = os.path.normcase(
-            os.path.normpath(hook_wiring.expand_tokens([carrier], project_dir)[0])
-        )
-        if resolved != canonical_posix:
-            problems.append(
-                f"宣告的 POSIX venv 載具 {carrier!r} 用本份 settings 的專案根展開＋"
-                f"normpath 後為 {resolved}，非 repo 唯一的根層 venv {canonical_posix}——"
                 "單一 .venv 設計下這是第二顆 venv（或指向不存在的分身）"
             )
     return problems

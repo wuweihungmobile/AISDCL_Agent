@@ -54,21 +54,22 @@ class TestSingleVenvIdentitySynthetic(unittest.TestCase):
 
     def test_zero_level_parent_prefix_is_red(self) -> None:
         """(a) 0 層 `../`（DEF-200-294 事故當時的字面）在 AutoClaude 深度下判紅——
-        展開後不是 repo 唯一那一顆根層 `.venv`（併測 POSIX 對照，同構同一顆 venv）。
+        展開後不是 repo 唯一那一顆根層 `.venv`。方案 B（DEF-200-316）起 POSIX 半邊
+        已無獨立宣告可比對（由符號連結解析），故本案只留 Windows 形態一種——POSIX
+        對照案已隨 `declared_posix_carriers()` 一起刪除，不是遺漏。
         """
-        for carrier in ("${CLAUDE_PROJECT_DIR}/.venv/Scripts/pythonw.exe",
-                        "${CLAUDE_PROJECT_DIR}/.venv/bin/python"):
-            problems = _identity().single_venv_identity_problems(
-                _synthetic_settings(carrier), "/repo/AutoClaude", "/repo")
-            self.assertTrue(problems, f"0 層 ../ 在子專案深度下應判紅，卻回空：{carrier}")
+        carrier = "${CLAUDE_PROJECT_DIR}/.venv/Scripts/pythonw.exe"
+        problems = _identity().single_venv_identity_problems(
+            _synthetic_settings(carrier), "/repo/AutoClaude", "/repo")
+        self.assertTrue(problems, f"0 層 ../ 在子專案深度下應判紅，卻回空：{carrier}")
 
     def test_one_level_parent_prefix_is_green(self) -> None:
-        """(b) 1 層 `../` 展開後落在根層 `.venv` ⇒ 應放行（併測 POSIX 對照）。"""
-        for carrier in ("${CLAUDE_PROJECT_DIR}/../.venv/Scripts/pythonw.exe",
-                        "${CLAUDE_PROJECT_DIR}/../.venv/bin/python"):
-            problems = _identity().single_venv_identity_problems(
-                _synthetic_settings(carrier), "/repo/AutoClaude", "/repo")
-            self.assertEqual(problems, [], (carrier, problems))
+        """(b) 1 層 `../` 展開後落在根層 `.venv` ⇒ 應放行（方案 B 起只剩 Windows
+        形態一種可比對，見上一格 docstring 的 WHY）。"""
+        carrier = "${CLAUDE_PROJECT_DIR}/../.venv/Scripts/pythonw.exe"
+        problems = _identity().single_venv_identity_problems(
+            _synthetic_settings(carrier), "/repo/AutoClaude", "/repo")
+        self.assertEqual(problems, [], (carrier, problems))
 
     def test_path_carrier_is_out_of_scope(self) -> None:
         """(c) PATH 版載具（`pythonw.exe` 字面）的實況取決於 session 的 PATH，

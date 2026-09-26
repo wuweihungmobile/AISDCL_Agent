@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
-  "_comment": "🔴 R81：本檔的 6 條 hook 已由 shell form 轉成 **exec form**（帶 `args`），6 條 → 12 條。病（R80 定案，勿重推導）：Windows 上 shell form 的 hook 是用 Git Bash 的 `bash.exe -c` 起的，而 `bash.exe` 是 console 子系統程式 ⇒ 每觸發一次 hook 就閃一個 console 視窗。exec form 不經 shell、直接 spawn，`command` 指向 GUI 子系統的 `pythonw.exe` 即零視窗。R80 只轉了 monorepo 根層那一份 `.claude/settings.json`，本檔留到 R81；在此之前 AutoClaude 子專案 session 下閃窗一次都沒少。每個邏輯 hook 兩條＝「Windows 載具 + POSIX 載具」，**各平台恰好一條成立、另一條 spawn 失敗**（Windows 上 `.venv/bin/python` 不存在回 ENOENT、POSIX 上 `.venv/Scripts/pythonw.exe` 回 ENOENT），而 CC 對 spawn 失敗是 **fail-open**（只記一行 ERROR、工具照跑）⇒ 兩條不會雙跑。🔴 這也是本形態最大的風險：載具解析不到時**六支守衛會全部靜默失效，而螢幕上的表徵就是「終於不閃窗了」，與修好完全相同** ⇒ 驗收必須正負兩面一起看（正面證據＝`claude -p --debug hooks` 的 `Hook … success`；見根 CLAUDE.md〈鐵律一之二〉）。載具兩件事刻意如此：①Windows 側走 `${CLAUDE_PROJECT_DIR}/../.venv/Scripts/pythonw.exe`——與 POSIX 側 `../.venv/bin/python` 同款相對路徑、同一顆 venv 的兩個平台半邊（🔴 2026-09-15 起 POSIX 側不再是「直接 exec 帶 shebang 的啟動器」，改與 Windows 側同構釘死根層 venv 的直譯器，掌舵者裁決：單一 .venv 設計下 hook 直譯器也只有一個來源）：`CLAUDE_PROJECT_DIR` 是 `AutoClaude/`，回一層 `../` 落在 monorepo 根層唯一的那顆 `.venv`（DEF-200-297 單一 .venv 收斂後，`AutoClaude/.venv` 已定義為不應存在的雜散殘留，見 `tools/lib/stray_venv.py`）；🔴 DEF-200-301 訂正 DEF-200-294 時期的錯誤前提：原文「此載具僅在該目錄自行建了 .venv 時才存在」已隨單一 .venv 設計作廢——現在它應恆指向根層 .venv，若解析不到代表 bootstrap 沒跑過或根 .venv 被誤刪，不是「子專案該不該建自己的 venv」的問題；②兩側 `args[0]` 都是啟動器 `${CLAUDE_PROJECT_DIR}/../.claude/hooks/_hook_launcher.py`——啟動器**只有一個家**（monorepo 根層），刻意不複製第二份到本子專案：同一份知識住兩個家、只有一個家會被改，是本 repo 的頭號病（DEF-101-778 判例）。`../` 只依賴「AutoClaude 是 monorepo 根的直屬子目錄」這個 repo 結構事實，不含任何機器專屬絕對路徑。啟動器行為與舊 `python -c` shim **逐項等價**：自行讀 `CLAUDE_PROJECT_DIR`（CC 注入、不經 shell 展開）、未設時回退 cwd、`os.chdir(root)`、`sys.argv=[目標絕對路徑]+其餘引數`、**目標腳本缺檔＝fail-open exit 0**——修復「cwd≠專案根時 python 缺檔 exit 2 誤觸 PreToolUse deny、全工具硬鎖死」P0（四方複審第四輪）。解析本檔的唯一真相源＝`tools/lib/hook_wiring.py`（**只讀 `command` 找腳本名的解析器在 exec form 下會掃出空集合而恆綠**）；「本檔還剩幾條 shell form」由 `hook_wiring.SHELL_FORM_CENSUS` 以**相等**判準登記（現為 0），回歸鎖 `tools/tests/test_check_hooks_liveness.py::TestExecFormConversionScope`。SD_09 W0 三次 zero-trust audit 後建立的 Hook 治理；哲學：Hook 僅補強 LLM 行為，不替代 CLAUDE.md prompt 規範。env.PYTHONUTF8=1 為 zh-TW Windows（cp950）防禦縱深：強制 hook 子行程 stdin/stdout/stderr 一律 UTF-8，跨平台無副作用。",
+  "_comment": "🔴 R81：本檔的 6 條 hook 已由 shell form 轉成 **exec form**（帶 `args`），6 條 → 12 條（2026-09-26 方案 B 後每支一條＝6 條）。病（R80 定案，勿重推導）：Windows 上 shell form 的 hook 是用 Git Bash 的 `bash.exe -c` 起的，而 `bash.exe` 是 console 子系統程式 ⇒ 每觸發一次 hook 就閃一個 console 視窗。exec form 不經 shell、直接 spawn，`command` 指向 GUI 子系統的 `pythonw.exe` 即零視窗。R80 只轉了 monorepo 根層那一份 `.claude/settings.json`，本檔留到 R81；在此之前 AutoClaude 子專案 session 下閃窗一次都沒少。hook 條目一律單一 Windows 形態載具（`.venv/Scripts/pythonw.exe`），POSIX 由 `tools/lib/hook_carrier_symlink.py` 在 dev_start 建的符號連結解析到同一顆 `.venv`；2026-09-26 方案 B（DEF-200-316）起任何 ENOENT 都是真缺陷，詳見根 CLAUDE.md〈hook 載具〉。🔴 這也是本形態最大的風險：載具解析不到時**六支守衛會全部靜默失效，而螢幕上的表徵就是「終於不閃窗了」，與修好完全相同** ⇒ 驗收必須正負兩面一起看（正面證據＝`claude -p --debug hooks` 的 `Hook … success`；見根 CLAUDE.md〈鐵律一之二〉）。載具兩件事刻意如此：①唯一載具走 `${CLAUDE_PROJECT_DIR}/../.venv/Scripts/pythonw.exe`（POSIX 上是 dev_start 建的符號連結 → `../bin/python`；2026-09-26 方案 B）：`CLAUDE_PROJECT_DIR` 是 `AutoClaude/`，回一層 `../` 落在 monorepo 根層唯一的那顆 `.venv`（DEF-200-297 單一 .venv 收斂後，`AutoClaude/.venv` 已定義為不應存在的雜散殘留，見 `tools/lib/stray_venv.py`）；🔴 DEF-200-301 訂正 DEF-200-294 時期的錯誤前提：原文「此載具僅在該目錄自行建了 .venv 時才存在」已隨單一 .venv 設計作廢——現在它應恆指向根層 .venv，若解析不到代表 bootstrap 沒跑過或根 .venv 被誤刪，不是「子專案該不該建自己的 venv」的問題；②`args[0]` 是啟動器 `${CLAUDE_PROJECT_DIR}/../.claude/hooks/_hook_launcher.py`——啟動器**只有一個家**（monorepo 根層），刻意不複製第二份到本子專案：同一份知識住兩個家、只有一個家會被改，是本 repo 的頭號病（DEF-101-778 判例）。`../` 只依賴「AutoClaude 是 monorepo 根的直屬子目錄」這個 repo 結構事實，不含任何機器專屬絕對路徑。啟動器行為與舊 `python -c` shim **逐項等價**：自行讀 `CLAUDE_PROJECT_DIR`（CC 注入、不經 shell 展開）、未設時回退 cwd、`os.chdir(root)`、`sys.argv=[目標絕對路徑]+其餘引數`、**目標腳本缺檔＝fail-open exit 0**——修復「cwd≠專案根時 python 缺檔 exit 2 誤觸 PreToolUse deny、全工具硬鎖死」P0（四方複審第四輪）。解析本檔的唯一真相源＝`tools/lib/hook_wiring.py`（**只讀 `command` 找腳本名的解析器在 exec form 下會掃出空集合而恆綠**）；「本檔還剩幾條 shell form」由 `hook_wiring.SHELL_FORM_CENSUS` 以**相等**判準登記（現為 0），回歸鎖 `tools/tests/test_check_hooks_liveness.py::TestExecFormConversionScope`。SD_09 W0 三次 zero-trust audit 後建立的 Hook 治理；哲學：Hook 僅補強 LLM 行為，不替代 CLAUDE.md prompt 規範。env.PYTHONUTF8=1 為 zh-TW Windows（cp950）防禦縱深：強制 hook 子行程 stdin/stdout/stderr 一律 UTF-8，跨平台無副作用。",
   "env": {
     "PYTHONUTF8": "1"
   },
@@ -12,14 +12,6 @@
           {
             "type": "command",
             "command": "${CLAUDE_PROJECT_DIR}/../.venv/Scripts/pythonw.exe",
-            "args": [
-              "${CLAUDE_PROJECT_DIR}/../.claude/hooks/_hook_launcher.py",
-              "tools/hooks/enforce_docs_path.py"
-            ]
-          },
-          {
-            "type": "command",
-            "command": "${CLAUDE_PROJECT_DIR}/../.venv/bin/python",
             "args": [
               "${CLAUDE_PROJECT_DIR}/../.claude/hooks/_hook_launcher.py",
               "tools/hooks/enforce_docs_path.py"
@@ -42,14 +34,6 @@
           },
           {
             "type": "command",
-            "command": "${CLAUDE_PROJECT_DIR}/../.venv/bin/python",
-            "args": [
-              "${CLAUDE_PROJECT_DIR}/../.claude/hooks/_hook_launcher.py",
-              "tools/hooks/loc_budget_check.py"
-            ]
-          },
-          {
-            "type": "command",
             "command": "${CLAUDE_PROJECT_DIR}/../.venv/Scripts/pythonw.exe",
             "args": [
               "${CLAUDE_PROJECT_DIR}/../.claude/hooks/_hook_launcher.py",
@@ -58,24 +42,7 @@
           },
           {
             "type": "command",
-            "command": "${CLAUDE_PROJECT_DIR}/../.venv/bin/python",
-            "args": [
-              "${CLAUDE_PROJECT_DIR}/../.claude/hooks/_hook_launcher.py",
-              "tools/hooks/check_sh_eol.py"
-            ]
-          },
-          {
-            "type": "command",
             "command": "${CLAUDE_PROJECT_DIR}/../.venv/Scripts/pythonw.exe",
-            "args": [
-              "${CLAUDE_PROJECT_DIR}/../.claude/hooks/_hook_launcher.py",
-              "tools/hooks/check_ps1_encoding.py"
-            ],
-            "timeout": 10
-          },
-          {
-            "type": "command",
-            "command": "${CLAUDE_PROJECT_DIR}/../.venv/bin/python",
             "args": [
               "${CLAUDE_PROJECT_DIR}/../.claude/hooks/_hook_launcher.py",
               "tools/hooks/check_ps1_encoding.py"
@@ -98,23 +65,7 @@
           },
           {
             "type": "command",
-            "command": "${CLAUDE_PROJECT_DIR}/../.venv/bin/python",
-            "args": [
-              "${CLAUDE_PROJECT_DIR}/../.claude/hooks/_hook_launcher.py",
-              "tools/hooks/check_lang.py"
-            ]
-          },
-          {
-            "type": "command",
             "command": "${CLAUDE_PROJECT_DIR}/../.venv/Scripts/pythonw.exe",
-            "args": [
-              "${CLAUDE_PROJECT_DIR}/../.claude/hooks/_hook_launcher.py",
-              "tools/hooks/claude_md_freshness.py"
-            ]
-          },
-          {
-            "type": "command",
-            "command": "${CLAUDE_PROJECT_DIR}/../.venv/bin/python",
             "args": [
               "${CLAUDE_PROJECT_DIR}/../.claude/hooks/_hook_launcher.py",
               "tools/hooks/claude_md_freshness.py"

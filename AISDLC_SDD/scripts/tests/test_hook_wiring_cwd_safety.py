@@ -157,8 +157,8 @@ def _as_running_interpreter(hook: dict) -> dict | None:
     🔴 DEF-200-232（windows-compat-ci 連續 6 次紅的第二支）：這裡要切開兩件被
     `carrier_available()` 綁在一起、但責任歸屬完全不同的事——
 
-      (a) **佈線缺陷**：本平台那一半的載具從 settings 消失／被寫成別的東西。
-          那是 repo 內容問題，任何機器上都必須紅。
+      (a) **佈線缺陷**：載具從 settings 消失／被寫成別的東西。那是 repo 內容問題，
+          任何機器上都必須紅。
       (b) **機器姿態**：載具形態正確，但它指到的 venv 是 gitignored 的**本機產物**，
           在 fresh clone 與 CI runner 上本來就不在。**這不是 repo 缺陷**——CI 從不
           執行 Claude Code hook（根 CLAUDE.md〈hook 載具〉逐字如此劃界），而
@@ -172,22 +172,16 @@ def _as_running_interpreter(hook: dict) -> dict | None:
     gitignored 產物未材料化；而同一份「載具存在嗎」的知識同時住在兩個家，正是本 repo 的
     頭號病。
 
-    代換的射程刻意收到最窄，這樣它遮得住的只有 (b)：**只代換本平台那一半、且 argv[0]
-    正是那個唯一合法的 venv 載具**（Windows `win_carrier_kind()=="venv"`、POSIX
-    `is_posix_carrier()`，字面被改壞就對不上）。另一平台那一半由 `os.name` 守住、一律
-    不代換（紅面自證見 `test_deny_carrier_resolution_stays_red_when_the_local_platform_half_is_missing`）。
-    🔴 2026-09-15 起 POSIX 載具也是 gitignored 的根層 `.venv/bin/python`（此前是 git
-    tracked 的啟動器，缺席＝真缺陷故不代換）⇒ ubuntu／macOS runner 上情境 (b) 同樣成立，
-    代換必須兩平台對稱，否則 aisdlc-sdd-ci／macos-compat-ci 在 fresh clone 上必紅。
+    🔴 方案 B（DEF-200-316）起沒有「本平台那一半／另一平台那一半」這件事了：兩平台
+    共用同一條 Windows 形態宣告（POSIX 上由 `tools/lib/hook_carrier_symlink.py` 建的
+    符號連結解析到同一顆根層 `.venv`）。代換的射程改判**唯一**那個判準：`argv[0]`
+    是不是 `win_carrier_kind()=="venv"`——與 `os.name` 無關，兩平台同一條路徑。
     """
     wiring = lint._hook_wiring()
     argv = wiring.hook_entry_argv(hook)
     if len(argv) < 2 or not wiring.is_exec_form(hook):
         return None
-    if os.name == "nt":
-        if wiring.win_carrier_kind(argv[0]) != "venv":
-            return None
-    elif not wiring.is_posix_carrier(argv[0]):
+    if wiring.win_carrier_kind(argv[0]) != "venv":
         return None
     return {"type": "command", "command": sys.executable, "args": list(argv[1:])}
 
@@ -233,36 +227,38 @@ def _materialise_carrier(hook: dict, project_root: str) -> None:
     """把**本平台**真正會被 spawn 的載具材料化到這個條目宣告的位置——只造載具，不造
     任何目標腳本。
 
-    🔴 R97（round-label-ok：非帳本追蹤的正式輪，僅沿用便於追蹤的標籤）：跨平台配對必須**各造自己那一半**，不是「只造 POSIX 那一半、Windows 永遠
-    不造」。後者在 POSIX 上恰好對，因為那一半就是本平台會 viable 的那一半；但直接搬到
-    Windows 上跑同一份邏輯時，POSIX 載具因 `.py` + `os.name=="nt"` 本就恆判不可跑
-    （`carrier_available()`），而 Windows 那一半从未被材料化 ⇒ 全部條目 `checked==0`，
-    反空轉斷言在 Windows 上恆假（R84 docstring 記載的是 mac 那一半的等價修復，Windows
-    這一半此前一直缺席）。修法：依 `os.name` 材料化「自己」那一半，另一半維持不造
-    （在**另一個**平台上執行到才會需要它，而那正是它應該保持 fail-open 的一半）。
-
-    Windows 側材料化需要兩個檔（缺一 GUI 子系統直譯器啟動不了、找不到 base install）：
-    直譯器本體＋緊鄰的 `pyvenv.cfg`（venv 啟動器靠它定位 base Python install；內容
-    **合成**而非複製，理由見 `_pyvenv_cfg_text()`）。只材料化 `kind=="venv"` 的
-    條目：`kind=="path"`（裸執行檔名，靠 PATH 解析）`carrier_available()` 本就無條件
-    視為 viable，不需要、也不該材料化任何檔案。
-
-    🔴 2026-09-15：POSIX 側 `argv[0]`（`command`）不再是啟動器本身，改與 Windows 側
-    同構——`command` 是根層 `.venv/bin/python`、啟動器搬到 `args[0]`（`argv[1]`）。
-    材料化因此也要造兩個檔：直譯器本體（`os.symlink` 指回目前正在跑的直譯器；
-    權限不足時退回 `shutil.copy` ＋ `chmod 0o755`）＋緊鄰的啟動器（同 Windows 側的
-    `argv[1]` 材料化手法，直接複製 `_LAUNCHER`）。`os.name=="nt"` 時整條不造：留給
-    `carrier_available()` 自己判死（該路徑在真實 Windows 上本就不存在，材料化它會
-    製造一個生產環境不會有的假 viable）。
+    🔴 R97（方案 B／DEF-200-316 訂正，round-label-ok：非帳本追蹤的正式輪，僅沿用便於
+    追蹤的標籤）：舊制「跨平台配對必須各造自己那一半」的前提是**兩個宣告字面**
+    （Windows／POSIX 各一）；方案 B 起每個 hook 只剩**一條**宣告（唯一 Windows 形態
+    字面，兩平台共用），沒有兩個半邊可分了。材料化因此改為**單一判準、單一路徑**：
+    只認 `argv[0]` 是不是 `win_carrier_kind()=="venv"`（`kind=="path"` 靠 PATH 解析，
+    `carrier_available()` 本就無條件視為 viable，不需要、也不該材料化任何檔案），
+    再依**目前執行的平台**（`os.name`，不是宣告字面）決定怎麼把同一個 `argv[0]`
+    路徑材料化成一顆真的可執行載具：Windows 複製 GUI 子系統直譯器＋合成
+    `pyvenv.cfg`；POSIX 建符號連結指回目前直譯器（同
+    `tools/lib/hook_carrier_symlink.py` 的生產端手法，這裡是測試用的合成版本，只
+    材料化到 fake project_root，不動真 `.venv`）。兩個平台造的是**同一顆**身分，
+    不是各造各的半邊。
     """
     wiring = lint._hook_wiring()
     argv = wiring.hook_entry_argv(hook)
     if not argv or not wiring.is_exec_form(hook):
         return
-    if wiring.is_posix_carrier(argv[0]):
-        if os.name == "nt":
-            return  # 另一半：留給 carrier_available() 自己判死，不材料化
-        exe = wiring.expand_tokens([argv[0]], project_root)[0]
+    if wiring.win_carrier_kind(argv[0]) != "venv":
+        return
+    exe = wiring.expand_tokens([argv[0]], project_root)[0]
+    if os.name == "nt":
+        # 多個條目常共用同一個相對路徑（同一個 fake project_root）⇒ 冪等：已經材料化過
+        # 就不再覆寫。除了省 I/O，也避開「前一次 spawn 的行程剛結束、Windows 尚未完全
+        # 釋放該 .exe 的檔案鎖」這種瞬時競態（PermissionError，本機實測會發生）。
+        if not os.path.exists(exe):
+            os.makedirs(os.path.dirname(exe), exist_ok=True)
+            shutil.copy(_running_pythonw(), exe)
+            cfg = os.path.join(os.path.dirname(os.path.dirname(exe)), "pyvenv.cfg")
+            if not os.path.exists(cfg):
+                with open(cfg, "w", encoding="utf-8", newline="\n") as f:
+                    f.write(_pyvenv_cfg_text())
+    else:
         if not os.path.exists(exe):
             os.makedirs(os.path.dirname(exe), exist_ok=True)
             real_interp = os.path.realpath(sys.executable)
@@ -273,29 +269,11 @@ def _materialise_carrier(hook: dict, project_root: str) -> None:
                 # 要測的「目標缺檔」路徑，顯式補上 exec bit。
                 shutil.copy(real_interp, exe)
                 os.chmod(exe, 0o755)
-        if len(argv) > 1:
-            launcher = wiring.expand_tokens([argv[1]], project_root)[0]
-            if not os.path.exists(launcher):
-                os.makedirs(os.path.dirname(launcher), exist_ok=True)
-                shutil.copy(_LAUNCHER, launcher)
-        return
-    if os.name == "nt" and wiring.win_carrier_kind(argv[0]) == "venv":
-        # 多個條目常共用同一個相對路徑（同一個 fake project_root）⇒ 冪等：已經材料化過
-        # 就不再覆寫。除了省 I/O，也避開「前一次 spawn 的行程剛結束、Windows 尚未完全
-        # 釋放該 .exe 的檔案鎖」這種瞬時競態（PermissionError，本機實測會發生）。
-        exe = wiring.expand_tokens([argv[0]], project_root)[0]
-        if not os.path.exists(exe):
-            os.makedirs(os.path.dirname(exe), exist_ok=True)
-            shutil.copy(_running_pythonw(), exe)
-            cfg = os.path.join(os.path.dirname(os.path.dirname(exe)), "pyvenv.cfg")
-            if not os.path.exists(cfg):
-                with open(cfg, "w", encoding="utf-8", newline="\n") as f:
-                    f.write(_pyvenv_cfg_text())
-        if len(argv) > 1:
-            launcher = wiring.expand_tokens([argv[1]], project_root)[0]
-            if not os.path.exists(launcher):
-                os.makedirs(os.path.dirname(launcher), exist_ok=True)
-                shutil.copy(_LAUNCHER, launcher)
+    if len(argv) > 1:
+        launcher = wiring.expand_tokens([argv[1]], project_root)[0]
+        if not os.path.exists(launcher):
+            os.makedirs(os.path.dirname(launcher), exist_ok=True)
+            shutil.copy(_LAUNCHER, launcher)
 
 
 def test_missing_target_is_fail_open_not_deny():
@@ -419,30 +397,18 @@ def test_autoclaude_deny_semantics_survives_a_machine_without_the_local_venv():
     _assert_deny_semantics(runnable[0], ac_root)
 
 
-def test_deny_carrier_resolution_stays_red_when_the_local_platform_half_is_missing():
-    """紅綠自證（紅面）：本平台那一半從佈線消失時，代換必須湊不出來（真缺陷仍紅）。
-
-    Windows 上餵它 POSIX 載具那一條、POSIX 上餵它 Windows 載具那一條——兩邊都必須
-    解析成空。若代換被寫得太寬（例如不看 `win_carrier_kind`、或漏掉 `os.name` 守門），
-    這裡會當場變綠。
-    """
-    wiring = lint._hook_wiring()
-    ac_root, hooks = _autoclaude_enforce_docs_path_hooks()
-
-    def _is_local_half(hook: dict) -> bool:
-        argv = wiring.hook_entry_argv(hook)
-        if not argv:
-            return False
-        if os.name == "nt":
-            return wiring.win_carrier_kind(argv[0]) is not None
-        return wiring.is_posix_carrier(argv[0])
-
-    foreign_only = [h for h in hooks if not _is_local_half(h)]
-    assert foreign_only, "前提不成立：佈線裡找不到另一個平台那一半，構造不出證偽情境"
-    assert _resolve_carriers(foreign_only, ac_root) == [], (
-        "只剩另一個平台那一半時仍解析出可跑的載具 ⇒ 代換的射程過寬，"
-        f"會遮住真正的佈線缺陷。條目：{[_describe(h) for h in foreign_only]}"
-    )
+# 🔴 `test_deny_carrier_resolution_stays_red_when_the_local_platform_half_is_missing`
+# 已刪除（方案 B／DEF-200-316）：舊制驗的是「餵它另一個平台那一半，代換必須湊不出
+# 來」——前提是「另一平台的字面在這台機器上不存在」。方案 B 讓這個前提永久失真，
+# 有兩層原因，經本包實測驗證（非臆測）：① `.venv/bin/python` 這個字面本身是這台
+# 機器上**真實存在**的檔案（repo 自己的 venv），與 settings.json 宣告不宣告它無關，
+# `carrier_available()` 只問路徑存不存在；② 方案 B 的設計目標正是讓唯一那條 Windows
+# 形態載具在 POSIX 上也透過符號連結真的可執行——「另一平台的載具在這台機器上解析
+# 不到」不再是設計上的常態，而是本輪要修復的缺陷本身。兩層任一都會讓
+# `_resolve_carriers(foreign_only, ac_root) == []` 恆假，此格已無法在不改變其驗證
+# 意圖的前提下修復，予以刪除（不是遺漏；已於 DEF-200-316 收尾報告〈設計書偏差〉
+# 記錄）。「代換射程過寬」這個顧慮改由 `_as_running_interpreter()` 對
+# `win_carrier_kind()=="venv"` 的判準本身把關（非本測試檔職責）。
 
 
 def test_claude_project_dir_anchors_latest_version_session_start():

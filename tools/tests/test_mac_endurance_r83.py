@@ -38,6 +38,7 @@ sys.path.insert(0, str(_REPO_ROOT / ".claude" / "hooks"))
 
 import context_budget_guard as guard  # noqa: E402
 import endurance_env  # noqa: E402
+import hook_wiring  # noqa: E402
 import quota_escalation as escalation  # noqa: E402
 import schedule_backend as sb  # noqa: E402
 import sentinel_lifecycle  # noqa: E402
@@ -1518,13 +1519,16 @@ class EscapeHatchAndNoProliferationTest(unittest.TestCase):
 class HookWiringReachesThisPlatformTest(unittest.TestCase):
     """R77 的教訓逐字是「機制蓋好沒接電」——這一支就是那條電線的鎖。
 
-    `.claude/settings.json` 的每個 hook 都是「Windows 載具 ＋ POSIX 載具」一組（R80/R81
-    的 exec form 轉換）。續航鏈掛在 `context_budget_guard.py` 的 SessionStart 與
-    PostToolUse 兩個事件上，**POSIX 那一條不在的話 mac 上整條鏈一次都不會被叫到**，
-    而表徵與「這台機器沒有排程載具」完全相同。
+    續航鏈掛在 `context_budget_guard.py` 的 SessionStart 與 PostToolUse 兩個事件上。
+    方案 B（DEF-200-316）起「叫得到」不再由「Windows 載具 ＋ POSIX 載具」成對條目保證
+    （POSIX 半邊條目已刪）；改由**單一載具＋POSIX 側符號連結健康**判準保證——原斷言
+    （逐字：兩事件各要求存在一條 `"Scripts" not in c and "pythonw" not in c` 的
+    carrier）原文已搬至 `CrossPlatform_DEF200274_Parallel_Tests_Evidence_2.md`
+    〈C9 續航鏈載具鑑別力〉節。
     """
 
-    def test_the_guard_has_a_posix_carrier_on_both_endurance_events(self) -> None:
+    def test_the_guard_carrier_on_both_endurance_events_is_the_single_recognised_carrier(
+            self) -> None:
         settings = json.loads((_REPO_ROOT / ".claude" / "settings.json")
                               .read_text(encoding="utf-8"))
         for event in ("SessionStart", "PostToolUse"):
@@ -1534,8 +1538,29 @@ class HookWiringReachesThisPlatformTest(unittest.TestCase):
                         if any("context_budget_guard.py" in str(a)
                                for a in entry.get("args", []))]
             self.assertTrue(carriers, f"{event} 完全沒有掛 context_budget_guard")
-            posix = [c for c in carriers if "Scripts" not in c and "pythonw" not in c]
-            self.assertTrue(posix, f"{event} 只有 Windows 載具 ⇒ mac 上整條續航鏈不會被叫到")
+            for c in carriers:
+                self.assertEqual(
+                    hook_wiring.win_carrier_kind(c), "venv",
+                    f"{event} 掛的不是唯一那條 Windows 形態載具：{c!r}")
+        # 合成注入（D6 紀律，不碰真磁碟）：符號連結健康的 POSIX 世界裡，這條佈線
+        # 必須被判定為「叫得到」。
+        problems = hook_wiring.carrier_liveness_problems(
+            settings, str(_REPO_ROOT), on_windows=False,
+            exists=lambda _p: True, is_symlink=lambda _p: True,
+            readlink=lambda _p: "../bin/python", is_exec=lambda _p: True,
+            probe=lambda _p: ("/usr/bin/python3", (3, 12)))
+        self.assertEqual(
+            problems, [],
+            f"符號連結健康的 POSIX 世界裡，續航鏈載具仍被判死：{problems}")
+
+    def test_a_missing_symlink_still_breaks_the_endurance_chain(self) -> None:
+        """反空轉：連結不在時上一格必須紅——證明鑑別力沒有隨方案 B 一起被拿掉。"""
+        settings = json.loads((_REPO_ROOT / ".claude" / "settings.json")
+                              .read_text(encoding="utf-8"))
+        problems = hook_wiring.carrier_liveness_problems(
+            settings, str(_REPO_ROOT), on_windows=False,
+            exists=lambda _p: True, is_symlink=lambda _p: False)
+        self.assertTrue(problems, "符號連結不在，續航鏈載具健康判準竟然放行")
 
 
 # ═══════════════════════════════════════════════════════════════════════════

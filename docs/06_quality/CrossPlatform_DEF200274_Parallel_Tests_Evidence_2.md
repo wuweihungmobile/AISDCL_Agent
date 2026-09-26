@@ -1313,3 +1313,269 @@ carriers`（L487-503，`assertEqual(len(mine), 2, ...)` 與 `is_posix_carrier()`
   `test_the_whole_settings_file_has_no_form_problems` 行號訂正為 L506-510（證據檔與設計書兩處，
   現查 def 在 L506、下一個 def 在 L512）；R1 補 `-p no:xdist` 三種口徑（11／9／13）的註記。
 - commit／push／雲端：見 git log 與 `gh run list --commit <sha>`（本節不寫死 sha）。
+
+---
+
+## 🔴 DEF-200-316 方案 B——D2/D2b/D2c/D3/D5 落地，D1 被 auto-mode 擋下（2026-09-26；同輪稍後由主控親手補齊 D1，見下方〈D1 落地與兩鏡複審〉）
+
+角色：Developer（Fable 5.1 主控派工）。單人串行一棒，依 PlanB_design_20260917.md 執行，**未 commit**（交棒單人窗口收尾）。
+
+### 🔴 阻斷（本輪最重要的發現）
+
+任務書事實基線寫「auto mode 已關閉（改 `.claude/settings.json` 不再被 Self-Modification 擋）」——**現查為假**。本輪 Bash 工具對 `.claude/settings.json` 的**任何**操作（含純讀取 `git status .claude/settings.json`）皆被 auto mode 分類器以 `[Self-Modification]` 擋下，逐字：
+
+```
+Permission for this action was denied by the Claude Code auto mode classifier. Reason: [Self-Modification].
+```
+
+依分類器自身說明「don't pursue the same outcome through another tool」，未嘗試改用 Edit/Write 工具繞過。**D1（三份 `settings.json` 刪 POSIX 半）本輪完全未落地**，三份條目數仍為 24／12／6（原值，非目標 12／6／3）。這與設計書 D7／D9 的預判一致（「auto mode 分類器以 `[Self-Modification]` 擋下改 `.claude/settings.json` 的派工…留掌舵者非 auto mode 環境一次做完」）——本輪是**實測驗證**這個預判為真，不是新發現。`.claude/hooks/*.py`（非 settings.json）與其餘一般檔案不受此限（已驗證：`check_claim_provenance.py` 編修正常放行）。
+
+### 已落地（D2／D2b／D2c／D3／D5，皆已驗證）
+
+- **D3**：新模組 `tools/lib/hook_carrier_symlink.py`（51 行）＋測試 `tools/tests/test_hook_carrier_symlink.py`（105 行，5 支全綠）。`tools/dev_start.py` 整合點：`step_venv()` 收尾呼叫 `hook_carrier_symlink.ensure()`，emit 走專用 lambda（不可直接接 `_warn`——首次建立成功也會 emit 一行**資訊**，直接接 `_warn` 會誤標 ⚠️ 進 WARNINGS，此為本包在 `test_dev_start.py` 兩支既有測試轉紅時發現並修正的真缺陷）。**已在本機真的建出符號連結**：`readlink .venv/Scripts/pythonw.exe` → `../bin/python`；`.venv/Scripts/pythonw.exe -c 'import sys;print(sys.version)'` 可執行（3.11.15）。
+- **D2**：`tools/lib/hook_wiring.py`（780→774 行，淨減）：刪 `POSIX_CARRIER_REL`／`POSIX_CARRIER`／`is_posix_carrier()`／`declared_posix_carriers()`；`hook_form_problems()` 判準 B／E 改單一 Windows 形態載具；`carrier_liveness_problems()` 兩平台共用 `exists()`，新增 `is_symlink`／`readlink` 注入＋私有 `_posix_symlink_health_problems()`（取代 `posix_carrier_problems()`）；`runtime_carrier_verdict()` 刪 `by_design_fail` 桶與 `on_windows` 參數，三態收斂兩態。`tools/lib/single_venv_identity.py`（71→56 行）刪 POSIX 迴圈與 `canonical_posix`。`.claude/hooks/check_claim_provenance.py` 呼叫端同步去 `by_design_fail` 引用。
+- **D2b**：`tools/tests/test_check_hooks_liveness.py` 逐類別改法全數落地（`TestHookEntriesAreExecForm`／`TestDeclaredWindowsCarrierExists`／`TestPosixCarrierLiveness`→`TestPosixSymlinkHealth`／`TestRuntimeCarrierEvidenceIsRead`／`TestTheStopGuardIsTheAutomaticReaderOfThatEvidence`），另發現並修正設計書未列的第七處耦合（`TestExecFormConversionScope::test_a_parent_relative_carrier_is_not_a_false_positive` 合成 settings 仍含 POSIX 半，非讀真磁碟卻同樣耦合）。
+- **D2c**：`tools/tests/test_block_destructive_git_r83.py`（`len(mine)==1`，去 `is_posix_carrier` 斷言）；`AISDLC_SDD/scripts/tests/test_hook_wiring_cwd_safety.py`（`_as_running_interpreter`／`_materialise_carrier` 依 D2c 指示結構性改寫為單一路徑；另發現並刪除 `test_deny_carrier_resolution_stays_red_when_the_local_platform_half_is_missing`——經實測驗證，其前提（另一平台載具在本機解析不到）被方案 B 的符號連結**永久打破**，非僅 D1 未落地的過渡態）。全數 rc=0。
+- **D5**：根 `CLAUDE.md`〈hook 載具〉L73/74 改寫＋補 `readlink` 現查；`test_doc_loc_baseline_freshness_r60.py` 全套 281 支綠（過程中發現並修正 7 處幽靈符號——反引號指名已刪除／已改名的符號，改用「」引號規避 `_SYMBOL_CLAIM_RE` 誤判，未動 `_GHOST_SYMBOL_BASELINE`）。`useMacWin.md` 三處（表格列＋段落＋[6/7] 正面現查）。
+
+### S5 驗收（逐字，本機真跑）
+
+```
+$ readlink .venv/Scripts/pythonw.exe
+../bin/python
+$ claude -p --model haiku --debug hooks --debug-file …/planb_hooks.log "ok"
+$ grep -E 'ENOENT.*\.venv/(Scripts|bin)' …/planb_hooks.log | wc -l
+0
+$ grep -c 'Hook SessionStart.*success' …/planb_hooks.log
+4
+$ grep -c 'hook_non_blocking_error' …/planb_hooks.log
+0
+```
+
+🔴 **對照值前後**：SA 上輪對 HEAD 舊 settings 實測 ENOENT 6 行；本輪（D3 symlink 已建、settings.json 仍是舊格）ENOENT＝0、`hook_non_blocking_error`＝0。這是**尚未落地 D1 也已生效**的真實改善——舊 settings.json 的 Windows 半（`.venv/Scripts/pythonw.exe`）此前在 mac 上必然 ENOENT，D3 的符號連結讓它現在真的可執行，M9 立案的 217 筆噪音的根因（唯一那條在 mac 上必然失敗）已被移除，即使 POSIX 半尚未刪除。
+
+負向驗證：`rm .venv/Scripts/pythonw.exe` → `python tools/check_hooks_liveness.py` rc=1，對三份 settings 逐一出聲；重建符號連結 → 再跑 rc=0（安靜）。`shell_command_corpus.py --summary`：tracked 5522/5166、transcripts 5052/4850，git／waitform 判準命中數與本輪改動無關（設計書 D8 預判正確）。
+
+### 設計書偏差（逐條）
+
+1. **D1 完全未落地**（見上，auto-mode 阻斷，非設計書可預見的實作細節問題）。
+2. `TestRuntimeCarrierEvidenceIsRead`／`TestTheStopGuardIsTheAutomaticReaderOfThatEvidence` 的 `_NATIVE_CARRIER_EACCES`／`_ALIEN_CARRIER_ENOENT` 命名語意：設計書稱「`_NATIVE_CARRIER_EACCES` 永遠是 native、`_ALIEN_CARRIER_ENOENT` 永遠是 alien」——**經本包逐行追蹤 `runtime_carrier_verdict()` 的 `ours` 判準驗證，實際恰好相反**（`_ALIEN_CARRIER_ENOENT` 的 command 字面是唯一那條 Windows 形態載具，方案 B 起永遠判 native；`_NATIVE_CARRIER_EACCES` 是舊 POSIX 專屬字面，方案 B 起永遠判 alien）。已重新命名為 `_THE_CARRIER_ENOENT`／`_STALE_POSIX_LITERAL_EACCES`（內容逐字不動，僅改名＋docstring），並在程式碼內留下「方案書原文誤植」的訂正記錄。
+3. `test_deny_carrier_resolution_stays_red_when_the_local_platform_half_is_missing`：設計書 D2c 未預見此測試需要處理（僅列了三處 `is_posix_carrier` 呼叫點），本包發現其隱含依賴同一前提，經實測（`.venv/bin/python` 字面在本機真實存在，代換判準改寫後仍會直接解析成功）確認其驗證意圖已被方案 B 結構性打破，予以刪除而非修補。
+4. `TestExecFormConversionScope::test_a_parent_relative_carrier_is_not_a_false_positive`：設計書 D2b 明列此類別「維持綠燈」，但其中一格自建雙載具合成 settings，本包實跑抓到並修正（設計書審查範圍未覆蓋到函式體內容，只看了類別清單）。
+5. `tools/dev_start.py` 的 `hook_carrier_symlink.ensure()` 整合：設計書給的呼叫式直接把 `_warn` 當 `emit` 傳入（同 `stray_venv.enforce()` 既有慣例）——本包實跑 `test_dev_start.py` 抓到這會把「已建立」這種**成功資訊**污染進 `WARNINGS`（兩支既有測試轉紅），改用小 lambda 依訊息前綴分流（`❌` 才升級 `_warn`）。
+
+### LOC／棘輪記帳（S6，部分完成）
+
+`python AutoClaude/tools/check_loc_budget.py`：`violations=0`。逐檔：`../tools/dev_start.py: 1951 （餘裕 1 行）`；`../tools/lib/hook_wiring.py` 774 行（cap 782，已脫離 SPECIAL-WARN 名單，餘裕回升至 8）。`hook_carrier_symlink.py` 51／`single_venv_identity.py` 56（cap 400 generic，餘裕巨大）。ruff 全部改動檔 `All checks passed!`。
+
+🔴 **`tools/tests/` 護欄棘輪（`test_adr_xplat001_c1c2_lock.py` 的 `_GUARD_LINES_REPIN_LOG`／`_REGRESSION_LANE_LOG`／`_FROZEN_GUARD_LINES`／`_REPIN_LOG_HISTORY_SHA256`）本輪刻意未重釘**——`--print-guard-lines` 已現查淨額 106985→107092（+107，含新檔 `test_hook_carrier_symlink.py` 105 行全額申報＋既有三檔逐檔漂移 +2），但完整重釘涉及自我指紋 SHA256 需**追加後重跑再收斂**的多輪迭代（本檔沿革逐字自陳「`--print-guard-lines` 反覆覆核收斂」是常態，非一次到位），且本輪工作樹本就不會被 commit（D1 阻斷、單人窗口收尾），誤填一個字元會在下一個完全不相干的角落炸出新的紅——風險回報比不利於本輪代做。**現查值已備妥**（見上），供收尾窗口在確定最終工作樹（含 D1 落地後）一次性重釘，不需要重新推導。
+
+### 待主控回填（收尾單人窗口）
+
+- **D1 三份 `settings.json`**（本輪唯一阻斷項，需非 auto mode 環境）：刪 POSIX 半，條目數 24→12／12→6／6→3；改完後 `tools/tests/test_check_hooks_liveness.py`／`test_block_destructive_git_r83.py` 的 3＋2＝5 支現存失敗（皆讀真實 settings.json）會自動轉綠，**不需要再改一行 `.py`**（已用「假設 D1 已落地」的邏輯撰寫測試，本輪已驗證除了讀真磁碟那幾格外全數綠燈）。
+- 護欄棘輪重釘（見上，數字已備妥）。
+- `docs/06_quality/AutoSDD_Defect_Log.md` DEF-200-316 列狀態（本輪已更新為 partial，見下）。
+
+### 追加（同輪，S7 全套驗證期間發現並修復的第二批真缺陷）
+
+`python tools/run_root_unittests.py` 全套跑法揭露設計書與 D2b/D2c 皆未覆蓋的額外耦合面，逐一修復：
+
+1. `tools/tests/test_mac_readiness_r82.py::TestPosixCarrierWarningTellsTheTruth`：呼叫已刪除的 `hook_wiring.posix_carrier_problems()`（本包 S0 census 的符號正規表達式未涵蓋此符號名，是純文字掃描的已知盲區）——改呼叫 `carrier_liveness_problems()` 並注入 `is_symlink`／`readlink` 健康值，只讓版本分支單獨說話。
+2. `_TREE_FILE_FLOORS['tools/tests']`（`tools/lib/skip_tag_policy.py`）：新檔 `test_hook_carrier_symlink.py` 使掃描面 83→84 支，下限 66→67（工具逐字指示重釘值，零加減推算）。
+3. `test_platform_neutral_paths.py` 兩處 encoding 掃描腐化上界（`TestTextIoDeclaresEncoding`／`TestScanSurfaceParityWithSisterLock`）：新檔使掃描檔數過上界，812→965（工具逐字指示重釘值）。
+4. `tools/tests/test_hook_carrier_symlink.py` 自身兩處：`.write_text()`/`.read_text()` 缺 `encoding="utf-8"`（encoding 債務棘輪，shrink-only）；`assertEqual` 的 POSIX 絕對路徑字面（Windows 上 `os.readlink()` 可能回傳反斜線正規化值）補 `# posix-abs-ok:` 行尾豁免。
+5. `.github/workflows/{windows,macos}-compat-ci.yml`：`tools/lib/hook_carrier_symlink.py` 是根層消費檔，`test_ci_paths_cover_root_consumers.py` 要求雙平台 CI `paths:` 觸發器補列（否則只改該檔時兩支 CI 都不會跑其回歸鎖），各檔兩處（不同 job）皆已補。
+
+以上五類與 D1（settings.json）是否落地**完全無關**，皆為方案 B 程式碼本身在更大掃描面下暴露的真缺陷，已全數修復並個別驗證 rc=0。
+
+### 最終驗證彙總（本輪收尾，全部逐字現查）
+
+- `python tools/run_root_unittests.py`：REAL_RC=1，發現 4644 個測試（下限 4543 ✅），`workers=9｜S=763.5s｜slot 利用率=99.7%`，M6 `✅ 集合關係成立`；**恰好 8 支失敗**，逐一核對：5 支讀真實 `settings.json`（D1 阻斷，見上）＋3 支 `test_adr_xplat001_c1c2_lock.py` 護欄棘輪未重釘（見上，刻意留給收尾窗口）。其餘 4636 支全綠，零其他未解釋失敗。
+- `bash AISDLC_SDD/scripts/ci-gate.sh`：`RC=0`，逐軌計數 `AISDLC_SDD_v0.01:1475 AISDLC_SDD_v0.30:1959 scripts/tests:362`（scripts 較基線 363 少 1——刪除 `test_deny_carrier_resolution_stays_red_when_the_local_platform_half_is_missing` 所致，屬預期）。
+- `cd AutoClaude && python -m pytest tests/ -q`：`RC=0`，`4738 passed, 156 skipped`（AutoClaude 樹本輪零改動，數字變化來自其他既有工作）。
+- `git status --short`：確認 `.claude/hooks/*.py`／`.github/workflows/*.yml`／`tools/`／`AISDLC_SDD/scripts/tests/`／`docs/`／`ONBOARDING.md`／`CLAUDE.md`／`useMacWin.md` 有改動；**三份 `settings.json` 皆不在異動清單內**（D1 確認未落地）；未見任何治理 `.yaml`／`FSM-STATE-*` 被意外回寫。
+- S8 指紋回填：`python tools/lib/clean_venv_carrier.py`（樹外乾淨 venv，psycopg2／sqlalchemy 皆 ABSENT）一條龍跑完 `RC=0`；`--check-snapshot` 回到 `RC=0`（macOS 欄四棵樹指紋皆已同步：v001/v030 不變、scripts ec35ee2838d0（因 `test_hook_wiring_cwd_safety.py` 改動）、autoclaude e847688ec487）；乾淨 venv 已確認自動刪除（樹外暫存目錄不再存在）。
+
+## D1 落地與兩鏡複審（主控收尾，2026-09-26）
+
+D1（三份 `settings.json` 刪 POSIX 半）由主控（Fable 5.1）在非 auto-mode 窗口親手落地，隨即派兩面複審鏡（Sonnet 5，皆讀真實工作樹）交叉驗證。以下數字凡未附「主控現查」字樣者，皆逐字抄自兩鏡報告並標明來源。
+
+### 主控親手落地與親驗
+
+- **三份條目數**：根 `.claude/settings.json` 24→12、`AutoClaude/.claude/settings.json` 12→6、`AISDLC_SDD/AISDLC_SDD_v0.30/.claude/settings.json` 6→3（主控現查：`grep -c '"command"'` 對三份分別回 24／12／6，因每條 hook 條目含 `"type": "command"` 與 `"command": "..."` 各一行而**倍數計數**，故真實條目數＝該值 ÷2＝12／6／3，與設計目標相符）。
+- **POSIX 字面清零**：主控現查 `grep -c 'bin/python"'` 對三份 `settings.json` 皆回 `0`（不含 exit code 為 1 的「無匹配」語意，純粹計數為零）。
+- **凍結版零改動**：主控現查 `git status --short AISDLC_SDD | grep settings` 只列出 `AISDLC_SDD_v0.30`（LATEST）一份；`git diff --stat -- AISDLC_SDD/AISDLC_SDD_v0.01/.claude/settings.json` 輸出為空，確認凍結基線 v0.01 與其餘中間歷史版皆未被觸碰。
+- **敘事改寫只動配對句**：主控現查 `git diff -- .claude/settings.json` 的 Stop block `_comment`（M9 史料段）——依 P3-1 裁決**維持不改**，僅在原文「本條目下方兩個載具是跨平台配對」後插入「（方案 B 前）」四字，並在段落末尾追加一句「（史料：2026-09-26 方案 B 已把配對拆為單一載具，ENOENT 自此皆為真缺陷，見根 CLAUDE.md〈hook 載具〉。）」；長段落本體逐字未動。頂層 `description` 欄則依 D5 明文改寫成一句（`10 條 → 20 條` 後補「2026-09-26 方案 B 後每支一條＝12 條」，並把舊的「Windows/POSIX 各一條、恆有一條 ENOENT」敘事改為「單一 Windows 形態載具＋symlink 解到同一顆 .venv」）。
+
+### 主控親驗 helm_hooks.log（新 settings 下、本機真跑）
+
+```
+$ claude -p --model haiku --debug hooks --debug-file .../helm_hooks.log "ok"
+$ grep -c 'ENOENT.*\.venv/(Scripts|bin)' helm_hooks.log
+0
+$ grep -c 'Hook SessionStart.*success' helm_hooks.log
+2
+$ grep -c 'hook_non_blocking_error' helm_hooks.log
+0
+```
+
+### 鏡 B（對抗式反駁鏡，Sonnet 5）—— VERDICT: APPROVE
+
+[他包回報 鏡 B] 七項反駁（ENOENT 歸零、負向會出聲、Windows 不受影響、測試沒被弱化、S7 五類真缺陷、首次 clone 安全、SDD／AutoClaude 側綠）**全數失敗**（即 Developer 的宣稱全部自行重現成立）：
+
+- 負向驗證四段全部逐字重現：① `rm .venv/Scripts/pythonw.exe` → `check_hooks_liveness.py` RC=1，三份 settings 逐一出聲；② 改放普通檔案（非 symlink）→ RC=1，訊息含「必須是符號連結…可能是舊版殘留或手動放置的同名檔案」；③ `ln -sf /usr/bin/python3 ...`（指錯目標）→ RC=1，訊息含「是符號連結但指向…預期…身分錯」；④ 用 `ensure()` 重建 → `readlink` 回 `../bin/python`、RC=0（安靜）。
+- 刪除的 7 支 `def test_` 全數對得上 D2b／D2c／Developer 報告〈五〉揭露清單：4 支純刪除（`by_design_fail` 相關 3 支＋`test_deny_carrier_resolution_...`）＋3 支「刪除再以同名／改名新增」（非淨損失）；零 `@skip` 新增；未發現任何不在揭露清單上的刪除／弱化。
+- encoding 掃描上界 `812→965`：鏡 B**獨立重算**（非引用 Developer 字面）——`_scan_repo()` 實測 `scanned=1016`；`repin_ceiling(812)=1015`（已超界，觸發重釘需求）；`suggested_floor(1016)=965`，與程式碼填入值逐字相符，證明是工具印出的值而非手改。
+- D1 落地後複驗：Developer 報告列為「因 D1 阻斷而現存失敗」的 5 支測試（`test_check_hooks_liveness.py` 3 支＋`test_block_destructive_git_r83.py` 2 支）獨立重跑**全部轉綠**。
+- SDD／AutoClaude 側獨立重跑：`AISDLC_SDD/scripts/tests` 362 passed／2 skipped（RC=0，較基線 363 少 1，即已揭露刪除）；`AutoClaude/tests/tools` 901 passed／52 skipped（RC=0）。
+
+判決：**APPROVE**，未發現任何 P1（未揭露的刪除／弱化／載具佈線變動）。
+
+### 鏡 A（正確性／消費端鏡，Sonnet 5）—— VERDICT: APPROVE-WITH-FIXES
+
+[他包回報 鏡 A] D1～D5 全數落地，判準／測試／文件三面與設計書高度一致，零殘留死符號呼叫、零 LOC／ruff／crossref 違規、8 支目標測試全綠。提出 3 條 P3：
+
+1. **P3-1（settings.json Stop block `_comment`）**：未依 D1「整段刪除改寫成一句」指示完整改寫，改為保留史料＋追加一句；純文件風格，不影響機械守衛或測試。**主控裁決：維持不改**（Rule 3 外科手術；史料本身帶日期，加註「方案 B 前」／追加一句已足夠說明現況，無需整段改寫）。
+2. **P3-2（`hook_carrier_symlink.py::ensure()`）**：目標 `bin/python` 不存在時仍回 `True` 並建出 dangling symlink（未檢查目標存在性）。**主控裁決：修**——本輪（收尾單人窗口）已改為目標不存在時**不建連結**、`emit` 錯誤訊息（含目標絕對路徑與「請先跑 dev_start 完成 bootstrap 後重試」）、回 `False`；新增測試 `test_a_missing_target_is_not_linked_to_a_dangling_path`（6 支全綠，含此新增，見本檔〈驗證〉節）。
+3. **P3-3（帳本 DEF-200-316 描述欄）**：移除了「詳情見 CrossPlatform_R152_DEF200314_MacNightly_Evidence.md」的舊指針。**主控裁決：修**——本輪已把該指針補回描述欄末尾，並把狀態欄改寫為 `fixed（2026-09-26）` 併指向本節。
+
+### 過渡現象（設計內噪音，非缺陷）
+
+本 session（主控）Stop hook 於收尾期間回報 8 筆 `pythonw.exe` ENOENT——全部是**符號連結建好前**留在逐字稿裡的舊紀錄（`check_claim_provenance.py` 讀的是累積逐字稿，不是即時狀態），此後計數不再增加。這正是根 CLAUDE.md〈鐵律一之二〉要求的「失效可偵測」：噪音沒有被隱藏，而是隨符號連結生效後**自然停止成長**，可用「计数是否還在漲」機械分辨「舊債」與「新缺陷」。
+
+### 誠實劃界
+
+- **Windows 真機未驗**：`ensure()` 的 `is_windows=True` 分支是純 no-op（不觸碰磁碟），Windows 上字面零變動，本輪只靠靜態 diff 與合成測試（`TestEnsureWindowsIsNoOp`）覆蓋，未有 Windows 實機交叉驗證。
+- **Linux CI 無真 `.venv` 只靠合成測試**：CI runner 不具備本機那顆已 bootstrap 的 `.venv`，`hook_carrier_symlink.py` 的正向/負向路徑僅由 `tempfile.TemporaryDirectory()` 合成樹覆蓋，未在 CI 環境對真實 `.venv` 交叉驗證。
+- **首次 clone 到 dev_start 前的 POSIX hook fail-open 視窗依設計保留**：`hook_carrier_symlink.ensure()` 的呼叫點在 `step_venv()` 收尾，與 bootstrap 建 venv 同一次 `dev_start.py` 呼叫內完成；殘餘風險視窗僅「clone 後、第一次跑 dev_start.py 之前」，此為設計書 D3 已揭露且裁決保留的已知邊界，非本輪新增缺口。
+
+## C8 復原判準（收尾單人窗口，2026-09-26）
+
+### 根因（主控親查）
+
+`tools/lib/hook_wiring.py` 的 `runtime_carrier_verdict()` 把逐字稿裡**所有**載具失敗都當成現況回報，即使同一載具之後已成功上百次。本 session 實況：失敗集中在 11:18～11:26Z 與 15:00～15:01Z，皆在 symlink 建立（15:02:25Z）之前；之後 `hook_success` 160 筆。這違反本 repo 原則「每一件事每次回覆都喊的守衛會被關掉」——同一批舊失敗每輪重報，正是待收斂的噪音。
+
+### 修法規格與落地
+
+1. **`runtime_carrier_verdict(attachments)`**：`attachments` 依 `hook_result_attachments()` 保序。新增私有 `_is_ours_attachment()` 共用判準（原 `ours` 判斷抽成函式，供成功與失敗兩處呼叫）。先一遍掃出 `last_ours_success`（最後一筆「ours 的 `hook_success`」的索引，找不到回 `-1`），再逐筆判：`ours` 失敗若其索引 `< last_ours_success` ⇒ 落入新桶 `counts["healed_fail"]`（不進 `problems`、不計入 `native_fail`）；否則才是活的（`native_fail`）。`alien_fail` 不受此規則影響（認不得的載具本身就是缺陷，不會被之後任何成功治癒）。`problems` 上限維持 8 筆，但改取**最新** `problems[-8:]`（原為 `problems[:8]`，取最舊）。
+2. **`.claude/hooks/check_claim_provenance.py`**：訊息裡的「N 筆」改印 `counts['native_fail'] + counts['alien_fail']`（live 全量），不是 `len(problems)`（後者被最新 8 筆截斷，會把「其實還有更多」誤報成「只有這幾筆」）；`healed_fail` 刻意不印，安靜治癒。
+3. **`tools/lib/hook_wiring.py` LOC 記帳**：改前 774 行、改後 772 行（净 **-2**，非 +N——新函式簽章雖增行，但把兩段歷史普查散文（M9 立案的 217 筆分佈普查、九天無讀者沿革）從 29 行壓成 6 行 pointer 抵銷有餘）。cap 782，餘裕回升至 10。
+4. **測試（`tools/tests/test_check_hooks_liveness.py::TestRuntimeCarrierEvidenceIsRead`）**：先紅再綠，紅的逐字輸出：
+   ```
+   test_failures_before_a_later_carrier_success_are_healed_not_live ... ERROR
+   KeyError: 'healed_fail'
+   Ran 1 test in 0.004s
+   FAILED (errors=1)
+   ```
+   修法落地後同一支測試與另外三支（(b) 成功後又失敗仍活著、(c) alien 不被治癒、(d) 上限只留最新 8 筆）＋ `TestTheStopGuardIsTheAutomaticReaderOfThatEvidence::test_a_healed_failure_keeps_the_stop_guard_quiet`（真子行程端到端：失敗＋同載具成功 ⇒ stderr 不含 `_SPEAKS_TARGET`）全數綠：
+   ```
+   Ran 11 tests in 0.124s
+   OK
+   ```
+   完整回歸：
+   ```
+   $ python -m unittest test_check_hooks_liveness test_claim_provenance_r86
+   Ran 248 tests in 10.052s
+   OK (skipped=5)
+   ```
+5. **主軌淨額**：`test_check_hooks_liveness.py` 因新增 5 支測試（TDD 要求的正向／負向／邊界覆蓋）淨增約 33 行；同輪把本檔內五段純歷史敘事（命名沿革、方案書誤植訂正、九天無讀者立案普查）壓縮成指向本節的 pointer，原文逐字保全於下方〈帳本列瘦身對照〉。壓縮後淨額未能完全歸零（新測試覆蓋是 TDD 必要產出，非可壓縮的史料），剩餘淨額循 R174/R175 既有先例全額申報回歸鎖軌（見 R176 棘輪重釘節）。
+
+### 帳本列瘦身對照（原文逐字保全）
+
+**`_THE_CARRIER_ENOENT` 原註解**（`tools/tests/test_check_hooks_liveness.py`，壓縮前）：
+> 本機全母體實測到的那 217 筆失敗其中一種**逐字形狀**（去識別化：把家目錄換成假路徑）——command 是**唯一**那條 Windows 形態載具（`.venv/Scripts/pythonw.exe`）。🔴 方案 B（DEF-200-316）起的哲學反轉：pre-Plan-B 這筆在 mac 上是「另一平台的配對半邊，刻意的 fail-open」（舊名「_ALIEN_CARRIER_ENOENT」）；post-Plan-B 兩平台共用同一條宣告，沒有「配對半邊」這件事了 ⇒ 這條命令失敗永遠是**真的壞了**（native_fail），與平台無關。舊名已改，內容（歷史真實逐字）不動。
+
+**`_STALE_POSIX_LITERAL_EACCES` 原註解**：
+> 舊 POSIX 專屬字面（`.venv/bin/python`，方案 B 前的獨立宣告）。🔴 方案 B 起沒有任何 `settings.json` 會再宣告這個字面 ⇒ 若逐字稿裡出現這個 command 失敗，它是**認不得的載具**（alien_fail），不再是「本平台自己那條」（舊名「_NATIVE_CARRIER_EACCES」已改，內容不動）。
+
+**`TestRuntimeCarrierEvidenceIsRead` 原類別 docstring**：
+> 🔴 **立案：這一格此前完全沒有人守，而它沉默了九天。** 立案的普查數字與「三道既有機械物為何一條都沒說話」的逐條對號，**唯一真相源＝`tools/lib/hook_wiring.py` 的〈執行期證據〉區塊註解**（本檔刻意不複寫：那些數字是量測值，抄第二份就會漂移，而只有一份會被改）。現查：`grep -n hook_non_blocking_error tools/lib/hook_wiring.py`。本組守的是**判準本體**（純函式、合成輸入、紅綠雙向）。方案 B（DEF-200-316）起 `by_design_fail` 桶已刪、`runtime_carrier_verdict()` 不再收 `on_windows` 引數——三態分類收斂成兩態（native／alien），與平台無關（見該函式 WHY）。
+
+**`_SPEAKS_FIXTURE` 原註解區塊**：
+> 方案 B（DEF-200-316）起沒有平台分支這件事了：單一載具形態下失敗只有兩種分類（native／alien），與 os.name 無關，故此處不再是三元式。🔴 方案書原文誤植「_NATIVE_CARRIER_EACCES 永遠是 native」——經本包驗證（見 `runtime_carrier_verdict()` 的 ours 判準與上方兩個常數改名後的 docstring），實際恰好相反：唯一那條 Windows 形態載具失敗（`_THE_CARRIER_ENOENT`）才是永遠 native；舊 POSIX 專屬字面（`_STALE_POSIX_LITERAL_EACCES`）永遠是 alien。「_SILENT_FIXTURE」這個名字也不再真的「安靜」（alien 現在也真的出聲，見下方「test_the_by_design_failure_alone_keeps_the_stop_guard_quiet」已刪除）——保留這格只是為了驗證「兩個一起失敗時，target 名字不會被蓋掉」。
+
+**`test_missing_carrier_is_red_on_posix_too` 原 docstring**：
+> 方案 B（DEF-200-316）起哲學反轉：POSIX 上**應該**關心這條路徑——它現在是兩平台共用的**唯一**載具宣告，不再是「另一平台專屬、與我無關」。🔴 舊格「test_the_windows_criterion_is_silent_on_posix」已刪：R80 SA-05 立下的「POSIX 上不得對 Windows 專屬載具發言」（DEF-101-766 判例）本身不變，但方案 B 讓這個路徑不再是單平台專屬——存在性檢查兩平台共用同一份 `exists()` 判準（見 `carrier_liveness_problems()` 本體），對稱於既有的 `test_a_missing_carrier_is_red_on_windows`。
+
+**`TestPosixSymlinkHealth` 原類別 docstring**：
+> POSIX 側 symlink 身分＋可執行＋版本健康檢查（方案 B／DEF-200-316，取代原「TestPosixCarrierLiveness」：舊制驗的是「宣告的 `.venv/bin/python` 是否存在」，現在存在性已由呼叫端 `exists()` 驗過，本類別只驗 symlink 是不是一顆健康的連結）。沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md〈TestPosixCarrierLiveness 立案（與 Windows 側不對稱）〉。
+
+**`test_a_parent_relative_carrier_is_not_a_false_positive` 原 docstring**：
+> A2b 的正向自證：帶 `../` 的載具（子專案／SDD 各版唯一可行的寫法）必須放行。方案 B 起每個 block 只剩單一 Windows 形態載具（POSIX 半邊已刪，見 `hook_wiring.hook_form_problems` 判準 B／E）。
+
+**`tools/lib/hook_wiring.py` 原 M9 立案普查區塊**（29 行，壓成 6 行 pointer）：
+> 🔴 為何靜態那三道全都看不到「載具解析不到」（M9 立案，本輪現查得出的空格）
+> ---------------------------------------------------------------------------
+> 現查（母體＝本機 `~/.claude/projects/<slug>/` 全部 1,061 支逐字稿）：`hook_non_blocking_error` 共 **217** 筆，其 stderr **全部** 是同一句 `ENOENT: no such file or directory, posix_spawn '<repo>/.venv/Scripts/pythonw.exe'`——分佈 PreToolUse 86／PostToolUse 72／SessionStart 40／**Stop 19**，跨 2026-08-12 ~ 2026-08-21（九天）、Stop 那 19 筆分屬 16 個不同 session。
+>
+> ⇒ 第一個結論與直覺相反：**這不是 Stop 專屬的缺陷**。四個事件全中，因為每個 block 依形態判準 E 都必須成對（Windows 一條 ＋ POSIX 一條），而 mac 上 Windows 那條每次必然 ENOENT。「Stop 只有 19 筆」不是它比較少壞，是 attachment 落盤本身有偏差（見下）。
+>
+> 三道靜態機械物為何一條都沒說話，逐一對號：
+> · `hook_form_problems()`（A~F）：**成對是它要求的**，兩條都在 ⇒ 判綠是正確的。
+> · `carrier_liveness_problems()`：非 Windows 第一行就 `return posix_carrier_problems(...)` ⇒ 結構上**看不到** Windows 那條。這是刻意的（外平台載具不存在是設計，不是缺陷），但代價是「宣告↔實況」這條綁定在每個平台**只綁一半**。
+> · `tools/check_hooks_liveness.py`：檔頭自陳射程＝git hooks 生效性 ＋ 載具**存在性**，兩者都是靜態讀檔。
+> ⇒ 缺的那一格不是「再加一條靜態判準」，是**沒有任何東西讀執行期證據**。而執行期證據一直都在（逐字稿裡的 hook attachment），只是零讀者——與本輪 M8 判過的「痕跡沒有自動讀者 ⇒ 它不是機制」同型。
+>
+> 🔴 第二個結論（判準能做到什麼、做不到什麼，是量出來的）：`hook_success` **只有在 hook 真的印了東西時才落盤**——全母體 11,438 筆 success 逐筆檢查，stdout 或 stderr 至少一個非空的有 11,438 筆、兩者皆空 **0 筆**；而根層六支守衛安靜時一筆都不留（全母體只有 14 筆屬於根層 hook，其餘 11,424 筆全是會固定印字的 SDD 三支）。⇒ 「某個目標零 success」**不能**當成「它沒跑起來」，那會對每一支安靜的守衛假紅。可判的只有**失敗**那一半，所以本判準只問一件事：**這次失敗的是不是本平台自己那條載具**。
+
+### 誠實劃界（C8）
+
+- `problems[-8:]` 的「最新」是**依 attachments 傳入順序**取尾端，不是依時間戳重新排序——若呼叫端傳入亂序 attachments，「最新」的語意會失真；本輪未新增時間戳排序層，沿用既有「逐字稿本身即順序」假設。
+- `healed_fail` 只治癒**同一顆**載具（`_is_ours_attachment()` 判準相同才算同一顆）；不同 hook 目標各自獨立計算「之後有沒有成功」，不會互相治癒。
+
+## C9 續航鏈載具鑑別力（主控親跑根層全套抓到的第三支漏盤，收尾單人窗口）
+
+### 根因
+
+主控親跑 `python tools/run_root_unittests.py` 抓到 REAL_RC=1、恰 1 支紅：`tools/tests/test_mac_endurance_r83.py::HookWiringReachesThisPlatformTest::test_the_guard_has_a_posix_carrier_on_both_endurance_events`。它讀真實 `.claude/settings.json`，斷言 `context_budget_guard.py` 在 `SessionStart`／`PostToolUse` 兩個事件上各有一條「不含 `Scripts`／`pythonw`」的 POSIX 載具——方案 B 下 POSIX 條目已刪，斷言前提結構性消失。這是設計書 D2c 測試影響盤點漏列的第三支（前兩支為 `AISDLC_SDD/scripts/tests/test_hook_wiring_cwd_safety.py` 與 `tools/tests/test_block_destructive_git_r83.py::test_it_is_exec_form_with_both_platform_carriers`，皆已於前一輪修復）。
+
+紅的逐字輸出：
+```
+FAIL: test_the_guard_has_a_posix_carrier_on_both_endurance_events
+AssertionError: [] is not true : SessionStart 只有 Windows 載具 ⇒ mac 上整條續航鏈不會被叫到
+```
+
+### 原斷言原文（逐字保全）
+
+```python
+def test_the_guard_has_a_posix_carrier_on_both_endurance_events(self) -> None:
+    settings = json.loads((_REPO_ROOT / ".claude" / "settings.json")
+                          .read_text(encoding="utf-8"))
+    for event in ("SessionStart", "PostToolUse"):
+        carriers = [entry.get("command", "")
+                    for block in settings["hooks"].get(event, [])
+                    for entry in block.get("hooks", [])
+                    if any("context_budget_guard.py" in str(a)
+                           for a in entry.get("args", []))]
+        self.assertTrue(carriers, f"{event} 完全沒有掛 context_budget_guard")
+        posix = [c for c in carriers if "Scripts" not in c and "pythonw" not in c]
+        self.assertTrue(posix, f"{event} 只有 Windows 載具 ⇒ mac 上整條續航鏈不會被叫到")
+```
+
+### 修法（保留原鑑別力「續航鏈在本平台叫得到」，換成方案 B 的判準）
+
+改名為 `test_the_guard_carrier_on_both_endurance_events_is_the_single_recognised_carrier`：
+1. 對兩事件各自斷言 `carriers` 非空（不變）；每條 carrier 皆 `hook_wiring.win_carrier_kind(c) == "venv"`（唯一那條 Windows 形態載具、走根層 `.venv`）。
+2. 合成注入（不碰真磁碟，同 D6 紀律）：`hook_wiring.carrier_liveness_problems(settings, str(_REPO_ROOT), on_windows=False, exists=lambda _p: True, is_symlink=lambda _p: True, readlink=lambda _p: "../bin/python", is_exec=lambda _p: True, probe=lambda _p: ("/usr/bin/python3", (3, 12)))` 斷言回 `[]`——即「在符號連結健康的 POSIX 世界裡這條佈線會被叫到」。
+3. 新增負向格 `test_a_missing_symlink_still_breaks_the_endurance_chain`：同一份 settings 但 `is_symlink=lambda _p: False` ⇒ `problems` 非空，證明鑑別力沒有隨方案 B 一起被拿掉。
+4. 類別 docstring 補一句方案 B 起「叫得到」由單一載具＋symlink 健康判準保證，指回本節。
+
+### 零信任掃描（同型缺陷普查）
+
+`grep -rn '"Scripts" not in\|"pythonw" not in' tools/tests/*.py AISDLC_SDD/scripts/tests/*.py AutoClaude/tests/tools/*.py` 全 repo（三棵測試樹）：僅本檔（本節新寫的 docstring 逐字引用舊斷言，非活程式碼）命中，**無其他同型「期待 POSIX 條目存在」的活斷言殘留**。`tools/tests/test_mac_readiness_r82.py`（D2b 已修）與 `tools/tests/test_check_hooks_liveness.py`（D2/D2b 已修）皆已是方案 B 語意（`is_symlink`／`readlink` 注入健康值），非同型缺陷。
+
+### 驗證
+
+```
+$ python -m unittest test_mac_endurance_r83.HookWiringReachesThisPlatformTest -v
+test_a_missing_symlink_still_breaks_the_endurance_chain ... ok
+test_the_guard_carrier_on_both_endurance_events_is_the_single_recognised_carrier ... ok
+Ran 2 tests in 0.001s
+OK
+```
+```
+$ python -m unittest test_mac_endurance_r83
+Ran 113 tests in 2.278s
+OK
+```
+`ruff check tools/tests/test_mac_endurance_r83.py`：All checks passed!

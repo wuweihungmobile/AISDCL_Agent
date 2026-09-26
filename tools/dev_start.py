@@ -105,6 +105,7 @@ sys.path.insert(0, str(ROOT / "tools" / "lib"))
 import ci_liveness  # noqa: E402,F401
 import ci_run_status  # noqa: E402  # DEF-101-758：最新 run 判讀本體（LOC 死結搬遷）
 import dev_platform_provenance  # noqa: E402  # DEF-200-358：[1/7] git 平台 provenance 本體（同上形態）
+import hook_carrier_symlink  # noqa: E402  # DEF-200-316：方案 B 單一 hook 載具符號連結本體
 import onboarding_snapshot_note  # noqa: E402  # §7 表② 指紋哨兵本體（同上搬遷形態）
 import platform_utils  # noqa: E402
 import stray_venv  # noqa: E402  # DEF-200-297：開工期雜散 venv 掃描本體
@@ -1486,6 +1487,12 @@ def step_venv(now: str, state: dict, force: bool, cross_same_flavor: bool = Fals
             SUMMARY["venv"] = "❌ 失敗（見上方錯誤）"
         if not stray_venv.enforce(ROOT, platform_utils.is_windows(), _warn):
             ok, SUMMARY["venv"] = False, f'❌ 雜散 venv（見上方）；{SUMMARY.get("venv", "")}'
+        # ensure() 首次建立也會 emit 資訊行（非警告），不可直接接 _warn（會誤標 ⚠️）。
+        elif not hook_carrier_symlink.ensure(
+                ROOT, platform_utils.is_windows(),
+                lambda m: _warn(m) if m.startswith("❌") else print(m)):
+            ok = False
+            SUMMARY["venv"] = f'❌ hook 載具符號連結失敗（見上方）；{SUMMARY.get("venv", "")}'
         return ok
     finally:
         if release_lock:
@@ -1916,15 +1923,9 @@ def main(argv: list[str] | None = None) -> int:
         ROOT, now=now, developing=developing, host=_platform.node(),
         is_repo=is_repo, print_fn=print, warn=_warn, fetch=not args.no_sync)
 
-    # MUST FIX A 必要配套：POSIX 上 step_venv() 對 bootstrap 直接子行程呼叫
-    # start_new_session=True，使其脫離終端機 foreground process group，Ctrl-C
-    # 不會再自然傳到 bootstrap 樹——安裝 SIGINT/SIGTERM handler，於有進行中的
-    # bootstrap 時主動轉發訊號給整個 process group（見
-    # _forward_signal_to_bootstrap_group docstring）。僅 POSIX 安裝：Windows
-    # 分支未使用 start_new_session，既有行為（Ctrl-C 由終端機直接送達整個
-    # 前景 process group）不受影響，不需要、也不應額外安裝本 handler。
-    # 用 try/finally 確保無論如何結束都還原成呼叫前的 handler，不汙染呼叫端
-    # （如測試、或未來把 main() 包進更大程式的情境）。
+    # MUST FIX A 必要配套：POSIX 上 bootstrap 子行程用 start_new_session=True，
+    # Ctrl-C 不再自然傳到 ⇒ 安裝 SIGINT/SIGTERM handler 轉發給整個 process group
+    # （見 _forward_signal_to_bootstrap_group）。僅 POSIX；try/finally 還原 handler。
     old_sigint = old_sigterm = None
     if not platform_utils.is_windows():
         old_sigint = signal.signal(signal.SIGINT, _forward_signal_to_bootstrap_group)

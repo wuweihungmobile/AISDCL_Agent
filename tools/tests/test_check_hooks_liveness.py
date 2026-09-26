@@ -1999,17 +1999,19 @@ class TestHookEntriesAreExecForm(unittest.TestCase):
         self.assertTrue(_hook_wiring().hook_form_problems(bad),
                         "寫死磁碟機路徑竟被放行（DEF-101-778 判例）")
 
-    def test_injection_3_dropping_the_posix_half_is_red(self) -> None:
-        """🔴 本鎖的核心：少一邊**不會有任何東西轉紅**，只會在該平台靜默失去 hook。"""
+    def test_injection_3_a_duplicate_carrier_entry_is_red(self) -> None:
+        """🔴 本鎖的核心（方案 B 起改版：不再是「少一邊」，而是「多一條」）：同一 block
+        內同一目標出現第二條 command，也不會有任何東西轉紅——直到本判準補上
+        「恰好一條」。"""
         bad = self._mutated()
         for entry in bad["hooks"]["PreToolUse"]:
             hooks = entry.get("hooks") or []
-            if len(hooks) >= 2:
-                del hooks[1]  # 砍掉 POSIX 那一條 ⇒ mac/Linux 上這支 hook 消失
+            if hooks:
+                hooks.append(json.loads(json.dumps(hooks[0])))  # 複製同一顆 hook dict
                 break
         problems = _hook_wiring().hook_form_problems(bad)
-        self.assertTrue(problems, "載具配對被拆掉一半竟被放行")
-        self.assertTrue(any("未成對" in p for p in problems), problems)
+        self.assertTrue(problems, "同一目標出現第二條 command 竟被放行")
+        self.assertTrue(any("應恰有 1 條" in p for p in problems), problems)
 
     def test_injection_4_a_command_with_whitespace_is_red(self) -> None:
         """V4 陷阱：`args` 存在時整串 command 會被當成**一個**執行檔路徑（實測 ENOENT）。"""
@@ -2019,15 +2021,16 @@ class TestHookEntriesAreExecForm(unittest.TestCase):
                         "command 含空白竟被放行——它「看起來像對的」，正是危險所在")
 
     def test_injection_5_mixing_two_windows_carriers_is_red(self) -> None:
-        """混用＝一部分 hook 在某些 session 消失；『加第二個當備援』則會讓 hook 跑兩次。"""
+        """混用＝一部分 hook 在某些 session 消失；『加第二個當備援』則會讓 hook 跑兩次。
+
+        方案 B 起每個 block 只剩一條 command，故混用案改用**跨兩個不同**
+        SessionStart block 各自宣告不同種類（而不是同一個 block 的第二個 hook——
+        那個第二格已隨方案 B 消失）。"""
         bad = self._mutated()
         wiring = _hook_wiring()
-        for entry in bad["hooks"]["SessionStart"]:
-            for hook in entry.get("hooks") or []:
-                if hook.get("command") == wiring.WIN_CARRIER_VENV:
-                    hook["command"] = wiring.WIN_CARRIER_PATH
-                    break
-            break
+        session_start = bad["hooks"]["SessionStart"]
+        session_start[0]["hooks"][0]["command"] = wiring.WIN_CARRIER_PATH
+        session_start[1]["hooks"][0]["command"] = wiring.WIN_CARRIER_VENV
         problems = wiring.hook_form_problems(bad)
         self.assertTrue(any("混用" in p for p in problems), problems)
 
@@ -2064,9 +2067,9 @@ class TestHookEntriesAreExecForm(unittest.TestCase):
             wrapped = {"hooks": {"SessionStart": [{"hooks": [hook]}]}}
             self.assertEqual(len(wiring.hook_entry_argv(hook)), argv)
             self.assertEqual(wiring.declared_win_carriers(wrapped), carriers)
-            # 形態鎖：沒寫 type 的那筆必須進入判準（此處缺 POSIX 對半 ⇒ 應紅）；
-            # 明確標成別種 type 的那筆必須被排除（⇒ 應綠）。
-            self.assertEqual(bool(wiring.hook_form_problems(wrapped)), hook is good)
+            # 形態鎖：方案 B 起單一 Windows 形態載具即為完整合法狀態，兩案皆應綠——
+            # 沒寫 type 的那筆不再需要 POSIX 對半；明確標成別種 type 的那筆本就被排除。
+            self.assertEqual(wiring.hook_form_problems(wrapped), [])
 
     def test_restoring_the_real_content_is_green_again(self) -> None:
         """反空轉：上面六格若是因為判準恆紅而通過，這一格會抓到。"""
@@ -2378,21 +2381,15 @@ class TestDeclaredWindowsCarrierExists(unittest.TestCase):
         self.assertTrue(problems, "宣告了 venv 載具、實況卻不存在，判準竟不出聲")
         self.assertIn("全部 hook 都不會跑", problems[0])
 
-    def test_the_windows_criterion_is_silent_on_posix(self) -> None:
-        """反向：mac/Linux 上不得對 **Windows 載具**發言（誤報會讓整道守衛被關掉）。
-
-        🔴 R80 SA-05 訂正本格的斷言對象：原文斷言整個回傳為空，而那把「這個平台沒有
-        Windows 載具問題」寫成了「這個平台沒有載具問題」——POSIX 自己那條同樣是單點
-        失效面。現在改斷言「訊息裡不得出現 Windows 載具」，原意（不誤報）保住，POSIX
-        那半的牙由 `TestPosixCarrierLiveness` 承接。
-        """
+    def test_missing_carrier_is_red_on_posix_too(self) -> None:
+        """方案 B 起哲學反轉：POSIX 上也該關心這條路徑（兩平台共用同一份唯一載具
+        宣告，不再是「另一平台專屬、與我無關」），對稱於既有的
+        `test_a_missing_carrier_is_red_on_windows`。舊格沿革見 C8 復原判準節。"""
         problems = _hook_wiring().carrier_liveness_problems(
             _load_real_settings(), str(_REPO_ROOT),
-            exists=lambda _p: False, on_windows=False,
-            probe=lambda _p: ("/usr/bin/python3", (3, 12)))
-        self.assertEqual(
-            [p for p in problems if "pythonw.exe" in p], [],
-            "POSIX 上對 Windows 專屬載具發言＝誤報（DEF-101-766 同型）")
+            exists=lambda _p: False, on_windows=False)
+        self.assertTrue(problems, "宣告了載具、實況卻不存在，POSIX 上判準竟不出聲")
+        self.assertIn("全部 hook 都不會跑", problems[0])
 
     def test_changing_the_carrier_moves_the_criterion_with_it(self) -> None:
         """雙向綁定自證：把宣告換成 PATH 載具 ⇒ 本判準不再對 venv 路徑發言。"""
@@ -2408,28 +2405,41 @@ class TestDeclaredWindowsCarrierExists(unittest.TestCase):
             [], "PATH 載具的實況取決於 session 的 PATH，靜態判準不得擅自判死")
 
 
-class TestPosixCarrierLiveness(unittest.TestCase):
-    """POSIX 側載具的存在性判準（R80 SA-05）。
-
-    沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
-    〈TestPosixCarrierLiveness 立案（與 Windows 側不對稱）〉。
+class TestPosixSymlinkHealth(unittest.TestCase):
+    """POSIX 側 symlink 身分＋可執行＋版本健康檢查（方案 B，取代原
+    「TestPosixCarrierLiveness」：存在性已由呼叫端 `exists()` 驗過，本類別只驗
+    symlink 本身健不健康）。沿革見 CrossPlatform_R122_Guard_Prose_Migration.md。
     """
 
     def _posix(self, **kwargs) -> list[str]:
         base = {"exists": lambda _p: True, "is_exec": lambda _p: True,
+                "is_symlink": lambda _p: True,
+                "readlink": lambda _p: "../bin/python",
                 "probe": lambda _p: ("/usr/bin/python3", (3, 12))}
         base.update(kwargs)
         return _hook_wiring().carrier_liveness_problems(
             _load_real_settings(), str(_REPO_ROOT), on_windows=False, **base)
 
     def test_a_healthy_posix_world_is_silent(self) -> None:
-        """反空轉：判準若恆紅，下面四格全部失去意義。"""
+        """反空轉：判準若恆紅，下面幾格全部失去意義。"""
         self.assertEqual(self._posix(), [])
 
     def test_a_missing_launcher_is_red(self) -> None:
+        """`exists()` 判的現在是 Windows 形態路徑本身（兩平台共用同一份存在性判準），
+        不是「`.venv/bin/python` 不存在」——訊息文字不變。"""
         problems = self._posix(exists=lambda _p: False)
-        self.assertTrue(problems, "POSIX 載具不存在竟不出聲")
+        self.assertTrue(problems, "載具不存在竟不出聲")
         self.assertIn("全部 hook 都不會跑", problems[0])
+
+    def test_a_non_symlink_at_the_carrier_path_is_red(self) -> None:
+        """該路徑存在但不是符號連結（舊版殘留或手動放置的同名檔案）⇒ 紅。"""
+        problems = self._posix(is_symlink=lambda _p: False)
+        self.assertTrue(any("必須是符號連結" in p for p in problems), problems)
+
+    def test_a_symlink_to_the_wrong_target_is_red(self) -> None:
+        """符號連結存在但指到別處 ⇒ 身分錯，紅。"""
+        problems = self._posix(readlink=lambda _p: "../../somewhere/else")
+        self.assertTrue(any("身分錯" in p for p in problems), problems)
 
     def test_a_launcher_without_the_exec_bit_is_red(self) -> None:
         """POSIX 載具沒有執行位元時 spawn 回 EACCES，而 EACCES 是 fail-open。"""
@@ -2569,15 +2579,14 @@ class TestExecFormConversionScope(unittest.TestCase):
             self.assertEqual(problems, [], f"{rel}：\n  " + "\n  ".join(problems))
 
     def test_a_parent_relative_carrier_is_not_a_false_positive(self) -> None:
-        """A2b 的正向自證：帶 `../` 的載具（子專案／SDD 各版唯一可行的寫法）必須放行。"""
+        """A2b 的正向自證：帶 `../` 的載具（子專案／SDD 各版唯一可行的寫法）必須放行
+        （方案 B 起每個 block 只剩單一 Windows 形態載具）。"""
         wiring = _hook_wiring()
         for depth in ("../", "../../"):
             launcher = f"${{CLAUDE_PROJECT_DIR}}/{depth}.claude/hooks/_hook_launcher.py"
             settings = {"hooks": {"SessionStart": [{"hooks": [
                 {"type": "command",
                  "command": f"${{CLAUDE_PROJECT_DIR}}/{depth}.venv/Scripts/pythonw.exe",
-                 "args": [launcher, ".claude/hooks/x.py"]},
-                {"type": "command", "command": f"${{CLAUDE_PROJECT_DIR}}/{depth}.venv/bin/python",
                  "args": [launcher, ".claude/hooks/x.py"]},
             ]}]}}
             self.assertEqual(wiring.hook_form_problems(settings), [], depth)
@@ -3356,10 +3365,10 @@ class TestNightlyTaskActionsAreWindowless(unittest.TestCase):
 # 執行期證據（本輪 M9）：靜態那三道看不到的那一格
 # ─────────────────────────────────────────────────────────────────────────────
 
-#: 本機全母體實測到的那 217 筆失敗的**逐字形狀**（去識別化：把家目錄換成假路徑）。
-#: 它在本組裡當**綠色對照**用：跨平台配對刻意的 fail-open 必須判成「不是缺陷」，
-#: 否則判準會在 mac 上每一次 hook 都響一次，而那是本 repo 判過的「永遠在響＝沒有警報」。
-_ALIEN_CARRIER_ENOENT = {
+#: 本機全母體實測到的那 217 筆失敗其中一種**逐字形狀**（去識別化）——command 是
+#: **唯一**那條 Windows 形態載具。哲學反轉與舊名（「_ALIEN_CARRIER_ENOENT」）沿革已搬至
+#: CrossPlatform_DEF200274_Parallel_Tests_Evidence_2.md〈C8 復原判準〉節。
+_THE_CARRIER_ENOENT = {
     "type": "hook_non_blocking_error", "hookEvent": "Stop", "exitCode": 1,
     "stderr": "Failed with non-blocking status code: Error occurred while executing "
               "hook command: ENOENT: no such file or directory, posix_spawn "
@@ -3369,9 +3378,9 @@ _ALIEN_CARRIER_ENOENT = {
                ".claude/hooks/check_claim_provenance.py",
 }
 
-#: 同一件事的**真**失效：本平台自己那條載具沒跑起來。這一筆與上面那筆在螢幕上的表徵
-#: 完全相同（都是一行 ERROR、工具照跑），差別只在 `command` 指的是哪一種載具。
-_NATIVE_CARRIER_EACCES = {
+#: 舊 POSIX 專屬字面（方案 B 前的獨立宣告）——方案 B 起沒有任何 settings.json 會再
+#: 宣告它，出現即認不得（alien_fail）。舊名（「_NATIVE_CARRIER_EACCES」）沿革同上節。
+_STALE_POSIX_LITERAL_EACCES = {
     "type": "hook_non_blocking_error", "hookEvent": "PreToolUse", "exitCode": 1,
     "stderr": "EACCES: permission denied, posix_spawn '/fake/repo/.venv/bin/python'",
     "command": "${CLAUDE_PROJECT_DIR}/.venv/bin/python "
@@ -3381,61 +3390,85 @@ _NATIVE_CARRIER_EACCES = {
 
 
 class TestRuntimeCarrierEvidenceIsRead(unittest.TestCase):
-    """🔴 **立案：這一格此前完全沒有人守，而它沉默了九天。**
+    """立案沿革（普查數字、九天無讀者）已搬至
+    CrossPlatform_DEF200274_Parallel_Tests_Evidence_2.md〈C8 復原判準〉節；唯一真相源
+    仍是 `tools/lib/hook_wiring.py` 的〈執行期證據〉區塊註解。
 
-    立案的普查數字與「三道既有機械物為何一條都沒說話」的逐條對號，**唯一真相源＝
-    `tools/lib/hook_wiring.py` 的〈執行期證據〉區塊註解**（本檔刻意不複寫：那些數字是量測
-    值，抄第二份就會漂移，而只有一份會被改）。現查：
-    `grep -n hook_non_blocking_error tools/lib/hook_wiring.py`
-
-    本組守的是**判準本體**（純函式、合成輸入、紅綠雙向）。**刻意不斷言機器狀態**：本機
-    此刻有幾筆 by-design 失敗是量測值，寫進斷言會讓這道鎖在別台機器上假紅。真正會讀本機
-    證據的是 `.claude/hooks/check_claim_provenance.py`（見下一組）。
+    本組守的是**判準本體**（純函式、合成輸入、紅綠雙向），現含 DEF-200-316 收尾單人
+    窗口新增的 `healed_fail` 治癒語意：同一顆載具的失敗只要之後出現過它自己的
+    `hook_success` 就不算活著，problems 只留最新 8 筆。
     """
 
-    def test_the_by_design_cross_platform_failure_is_not_reported_as_a_defect(self) -> None:
-        """綠色對照：那 217 筆必須全部判成「不是缺陷」，只被**數**起來。"""
-        wiring = _hook_wiring()
-        problems, counts = wiring.runtime_carrier_verdict(
-            [_ALIEN_CARRIER_ENOENT] * 19, on_windows=False)
-        self.assertEqual(problems, [],
-                         "跨平台配對的 fail-open 被判成缺陷 ⇒ 這道判準在 mac 上每次都響")
-        self.assertEqual(counts["by_design_fail"], 19,
-                         "噪音底線必須是**可數的**：九天沒人發現的機制就是它沒有數字")
-        self.assertEqual(counts["native_fail"], 0)
-
     def test_the_native_carrier_failure_is_reported(self) -> None:
+        """唯一那條載具真的壞了 ⇒ 必須判成 native_fail 並指名是哪支守衛。"""
         legacy = {"command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py x.py",
                   "stderr": "EACCES posix_spawn"}
         problems, counts = _hook_wiring().runtime_carrier_verdict(
-            [_ALIEN_CARRIER_ENOENT, _NATIVE_CARRIER_EACCES, legacy], on_windows=False)
-        n, b, a = counts["native_fail"], counts["by_design_fail"], counts["alien_fail"]
-        self.assertEqual((n, b, a), (2, 1, 0))
-        self.assertIn("block_destructive_git.py", problems[0],
+            [_THE_CARRIER_ENOENT, legacy])
+        self.assertEqual((counts["native_fail"], counts["alien_fail"]), (2, 0))
+        self.assertIn("check_claim_provenance.py", problems[0],
                       "必須指名是**哪一支守衛**沒跑，否則讀者無從行動")
 
-    def test_the_same_evidence_flips_when_the_platform_flips(self) -> None:
-        """同一份證據在 Windows 上判反過來——判準必須是平台的函式，不是硬編一條載具。
+    def test_a_carrier_the_repo_does_not_recognise_is_also_a_defect(self) -> None:
+        """有人把條目退回 `python -c …`／換了載具 ⇒ 形態判準看不到「實際跑的是別的東西」。
 
-        沒有這一條，`native`／`by_design` 的分類可以靠「永遠把 pythonw 當外平台」通過，
-        而那正是 `carrier_liveness_problems()` 只綁一半的病（DEF-101-766：單平台判準
-        不可無條件外推）。
+        `_STALE_POSIX_LITERAL_EACCES`（方案 B 前的獨立 POSIX 宣告字面）併測：
+        方案 B 起沒有任何 settings.json 會再宣告這個字面，出現即認不得 ⇒ alien。
         """
         wiring = _hook_wiring()
-        problems, counts = wiring.runtime_carrier_verdict(
-            [_ALIEN_CARRIER_ENOENT, _NATIVE_CARRIER_EACCES], on_windows=True)
-        self.assertEqual(counts["native_fail"], 1)
-        self.assertIn("check_claim_provenance.py", problems[0],
-                      "Windows 上該轉紅的是 pythonw 那條")
+        problems, counts = wiring.runtime_carrier_verdict([
+            _STALE_POSIX_LITERAL_EACCES,
+            {"type": "hook_non_blocking_error", "hookEvent": "PostToolUse",
+             "command": "python -c import runpy .claude/hooks/x.py"},
+        ])
+        self.assertEqual(counts["alien_fail"], 2)
+        self.assertEqual(len(problems), 2)
 
-    def test_a_carrier_the_repo_does_not_recognise_is_also_a_defect(self) -> None:
-        """有人把條目退回 `python -c …`／換了載具 ⇒ 形態判準看不到「實際跑的是別的東西」。"""
+    def test_failures_before_a_later_carrier_success_are_healed_not_live(self) -> None:
+        """同一顆載具的失敗如果**之後**還有它自己的 `hook_success`，治癒為
+        `healed_fail`：不進 problems、不計入 `native_fail`（DEF-200-316 收尾單人
+        窗口——每一輪都重報同一批舊失敗的守衛會被關掉）。"""
         wiring = _hook_wiring()
-        problems, counts = wiring.runtime_carrier_verdict([{
-            "type": "hook_non_blocking_error", "hookEvent": "PostToolUse",
-            "command": "python -c import runpy .claude/hooks/x.py"}], on_windows=False)
+        healed_success = {"type": "hook_success", "hookEvent": "SessionStart",
+                          "exitCode": 0, "command": _THE_CARRIER_ENOENT["command"]}
+        problems, counts = wiring.runtime_carrier_verdict(
+            [_THE_CARRIER_ENOENT, _THE_CARRIER_ENOENT, healed_success])
+        self.assertEqual(problems, [])
+        self.assertEqual((counts["healed_fail"], counts["native_fail"]), (2, 0))
+
+    def test_a_failure_after_the_last_success_is_still_live(self) -> None:
+        """成功之後又再失敗一次 ⇒ 那次失敗仍是活的，不會被**更早**那次成功治癒。"""
+        wiring = _hook_wiring()
+        earlier_success = {"type": "hook_success", "hookEvent": "SessionStart",
+                           "exitCode": 0, "command": _THE_CARRIER_ENOENT["command"]}
+        problems, counts = wiring.runtime_carrier_verdict(
+            [earlier_success, _THE_CARRIER_ENOENT])
+        self.assertEqual(len(problems), 1)
+        self.assertEqual(counts["native_fail"], 1)
+
+    def test_an_alien_failure_is_not_healed_by_carrier_success(self) -> None:
+        """`alien_fail` 不吃治癒規則：認不得的載具本身就是缺陷，別條載具之後
+        成功了也治不好它（那是不同的一顆）。"""
+        wiring = _hook_wiring()
+        unrelated_success = {"type": "hook_success", "hookEvent": "SessionStart",
+                             "exitCode": 0, "command": _THE_CARRIER_ENOENT["command"]}
+        problems, counts = wiring.runtime_carrier_verdict(
+            [_STALE_POSIX_LITERAL_EACCES, unrelated_success])
+        self.assertEqual(len(problems), 1)
         self.assertEqual(counts["alien_fail"], 1)
-        self.assertTrue(problems)
+
+    def test_the_problem_cap_keeps_the_newest(self) -> None:
+        """10 筆活著的失敗、stderr 各帶序號 ⇒ `problems` 只留**最新** 8 筆（含最後
+        一筆序號、不含第一筆），計數欄（全量）不受這個上限影響。"""
+        wiring = _hook_wiring()
+        fails = [{**_THE_CARRIER_ENOENT,
+                  "stderr": f"{_THE_CARRIER_ENOENT['stderr']} SEQ={i:02d}"}
+                 for i in range(1, 11)]
+        problems, counts = wiring.runtime_carrier_verdict(fails)
+        self.assertEqual(len(problems), 8)
+        self.assertIn("SEQ=10", problems[-1])
+        self.assertNotIn("SEQ=01", "\n".join(problems))
+        self.assertEqual(counts["native_fail"], 10, "計數欄不受上限影響，仍是全量")
 
     def test_successes_are_counted_but_never_treated_as_coverage(self) -> None:
         """🔴 `hook_success` **只有在 hook 真的印字時才落盤**（本機全母體 11,438 筆 success
@@ -3449,7 +3482,7 @@ class TestRuntimeCarrierEvidenceIsRead(unittest.TestCase):
         problems, counts = wiring.runtime_carrier_verdict([{
             "type": "hook_success", "hookEvent": "Stop", "exitCode": 0,
             "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py "
-                       ".claude/hooks/check_claim_provenance.py"}], on_windows=False)
+                       ".claude/hooks/check_claim_provenance.py"}])
         self.assertEqual(counts["success"], 1)
         self.assertEqual(problems, [])
 
@@ -3458,9 +3491,9 @@ class TestRuntimeCarrierEvidenceIsRead(unittest.TestCase):
         wiring = _hook_wiring()
         records = [{"type": "user", "message": {"role": "user"}},
                    {"type": "system", "attachment": {"type": "todo_changed"}},
-                   {"type": "system", "attachment": _ALIEN_CARRIER_ENOENT}]
+                   {"type": "system", "attachment": _THE_CARRIER_ENOENT}]
         self.assertEqual(wiring.hook_result_attachments(records),
-                         [_ALIEN_CARRIER_ENOENT])
+                         [_THE_CARRIER_ENOENT])
         self.assertEqual(wiring.hook_result_attachments([None, "x", 3]), [])
 
 
@@ -3490,29 +3523,19 @@ class TestTheStopGuardIsTheAutomaticReaderOfThatEvidence(unittest.TestCase):
                                       env={**env, "AUTOSDD_TRACE_DIR": tmp},
                                       encoding="utf-8", errors="replace")
 
-    # R100：真子行程無 on_windows 注入接縫，native／alien 隨真實 os.name 而定。
+    # 方案 B 起沒有平台分支這件事了（native／alien 與 os.name 無關）；命名沿革
+    # （「_SILENT_FIXTURE」為何不再真的安靜、方案書誤植訂正）已搬至
+    # CrossPlatform_DEF200274_Parallel_Tests_Evidence_2.md〈C8 復原判準〉節。
     _SPEAKS_FIXTURE, _SILENT_FIXTURE, _SPEAKS_TARGET = (
-        (_ALIEN_CARRIER_ENOENT, _NATIVE_CARRIER_EACCES, "check_claim_provenance.py")
-        if os.name == "nt" else
-        (_NATIVE_CARRIER_EACCES, _ALIEN_CARRIER_ENOENT, "block_destructive_git.py"))
+        _THE_CARRIER_ENOENT, _STALE_POSIX_LITERAL_EACCES, "check_claim_provenance.py")
 
     def test_the_stop_guard_speaks_when_the_native_carrier_failed(self) -> None:
         done = self._run([self._SPEAKS_FIXTURE, self._SILENT_FIXTURE])
         self.assertEqual(done.returncode, 0, "本守衛永不阻斷")
         self.assertIn(self._SPEAKS_TARGET, done.stderr,
-                      "本平台自己那條載具失敗，這支讀者沒說話 ⇒ 證據又回到零讀者狀態")
+                      "唯一那條載具失敗，這支讀者沒說話 ⇒ 證據又回到零讀者狀態")
         self.assertIn("hookSpecificOutput", done.stdout,
                       "只寫 stderr 等於沒說（exit 0 的 stderr 不進模型 context）")
-
-    def test_the_by_design_failure_alone_keeps_the_stop_guard_quiet(self) -> None:
-        """紅綠自證的另一半：只有跨平台那條失敗時**必須完全安靜**。
-
-        缺這一條，上一條可以靠「永遠出聲」通過，而那支守衛在 mac 上會對每一則回覆都響。
-        """
-        done = self._run([self._SILENT_FIXTURE])
-        self.assertEqual(done.returncode, 0)
-        self.assertEqual(done.stderr.strip(), "",
-                         "跨平台配對的 fail-open 讓守衛出聲了 ⇒ 它會變成每次都響的噪音")
 
     def test_a_leaked_carrier_guard_off_does_not_silence_this_reader(self) -> None:
         """巢狀鎖（DEF-200-349）：拿掉 `_env()` 的濾網，這支測試會紅。"""
@@ -3520,6 +3543,16 @@ class TestTheStopGuardIsTheAutomaticReaderOfThatEvidence(unittest.TestCase):
                          leaked_env={"AUTOSDD_CARRIER_GUARD_OFF": "1"})
         self.assertIn(self._SPEAKS_TARGET, done.stderr,
                       "呼叫端洩漏的 AUTOSDD_CARRIER_GUARD_OFF=1 噤聲了 M9 判準")
+
+    def test_a_healed_failure_keeps_the_stop_guard_quiet(self) -> None:
+        """失敗之後同一顆載具又成功了 ⇒ 治癒，讀者必須真的安靜下來（不是只在
+        `runtime_carrier_verdict()` 單元層級綠，端到端也要真的沒喊）。"""
+        healed_success = {"type": "hook_success", "hookEvent": "SessionStart",
+                          "exitCode": 0, "command": self._SPEAKS_FIXTURE["command"]}
+        done = self._run([self._SPEAKS_FIXTURE, healed_success])
+        self.assertEqual(done.returncode, 0)
+        self.assertNotIn(self._SPEAKS_TARGET, done.stderr,
+                         "同一顆載具之後已成功，讀者仍在喊舊失敗 ⇒ 治癒規則沒接上")
 
 
 if __name__ == "__main__":

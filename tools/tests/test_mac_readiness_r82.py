@@ -408,10 +408,15 @@ class TestPosixCarrierWarningTellsTheTruth(unittest.TestCase):
 
     @staticmethod
     def _below_floor_message() -> str:
+        """方案 B（DEF-200-316）起 `posix_carrier_problems()` 已刪——存在性與 symlink
+        健康檢查合併進 `carrier_liveness_problems()`；`is_symlink`／`readlink` 注入
+        健康值，只讓版本分支（probe 回 3.9）單獨說話，其餘語意不變。"""
         settings = json.loads(_SETTINGS.read_text(encoding="utf-8"))
-        problems = hook_wiring.posix_carrier_problems(
-            settings, str(_REPO_ROOT),
+        problems = hook_wiring.carrier_liveness_problems(
+            settings, str(_REPO_ROOT), on_windows=False,
             exists=lambda _p: True,
+            is_symlink=lambda _p: True,
+            readlink=lambda _p: "../bin/python",
             is_exec=lambda _p: True,
             probe=lambda _p: ("/usr/bin/python3", (3, 9)),
         )

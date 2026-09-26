@@ -485,9 +485,10 @@ class TestHookIsActuallyRegistered(unittest.TestCase):
                          f"matcher 與腳本射程不一致：{matcher}")
 
     def test_it_is_exec_form_with_both_platform_carriers(self) -> None:
-        """R80 起 hook 條目一律 exec form，且每個邏輯 hook 兩條（Windows + POSIX 載具），
-        各平台恰好一條成立、另一條 spawn 失敗（fail-open）。退回 shell form 會讓
-        Windows 每觸發一次就閃一個 console 視窗。"""
+        """R80 起 hook 條目一律 exec form，且每個邏輯 hook**恰好一條**（單一 symlink
+        形態載具，方案 B／DEF-200-316 起），兩平台共用同一條 command，差異只在
+        POSIX 上 symlink 指向的實體。退回 shell form 會讓 Windows 每觸發一次就閃
+        一個 console 視窗。"""
         wiring = self._wiring()
         settings = json.loads(_SETTINGS.read_text(encoding="utf-8-sig"))
         entry = wiring.entries_launching(settings, "block_destructive_git",
@@ -495,13 +496,11 @@ class TestHookIsActuallyRegistered(unittest.TestCase):
         mine = [h for h in entry["hooks"]
                 if any("block_destructive_git" in a
                        for a in wiring.hook_entry_argv(h))]
-        self.assertEqual(len(mine), 2, f"跨平台配對不是兩條：{mine}")
+        self.assertEqual(len(mine), 1, f"單一載具形態下不是恰好一條：{mine}")
         self.assertTrue(all(wiring.is_exec_form(h) for h in mine),
                         "有條目退回 shell form")
         commands = {str(h.get("command", "")) for h in mine}
         self.assertTrue(commands & set(wiring.WIN_CARRIERS), "缺 Windows 載具")
-        self.assertTrue(any(wiring.is_posix_carrier(c) for c in commands),
-                        "缺 POSIX 載具")
 
     def test_the_whole_settings_file_has_no_form_problems(self) -> None:
         """本次新增不得把既有的形態判準弄壞（A~F 全體）。"""

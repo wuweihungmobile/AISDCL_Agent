@@ -355,6 +355,9 @@ on:
       # test_ci_paths_cover_root_consumers.py 當場攔下並要求雙邊補列（該鎖有效）。
       - "tools/lib/single_venv_identity.py"
       - "tools/lib/clean_venv_carrier.py"
+      # DEF-200-316：方案 B 單一 hook 載具符號連結本體，由 tools/dev_start.py 呼叫、
+      # tools/tests/test_hook_carrier_symlink.py 消費；同上機制攔下並要求雙邊補列。
+      - "tools/lib/hook_carrier_symlink.py"
       # R74：本輪新增/新被消費的根層檔——test_ci_paths_cover_root_consumers.py 實測
       # 攔下（DEF-101-042 同構）。CLAUDE.md 由 tools/tests/
       # test_doc_loc_baseline_freshness_r60.py 的鐵律機械物盤點鎖逐行消費；
@@ -784,6 +787,9 @@ on:
       # test_ci_paths_cover_root_consumers.py 當場攔下並要求雙邊補列（該鎖有效）。
       - "tools/lib/single_venv_identity.py"
       - "tools/lib/clean_venv_carrier.py"
+      # DEF-200-316：方案 B 單一 hook 載具符號連結本體，由 tools/dev_start.py 呼叫、
+      # tools/tests/test_hook_carrier_symlink.py 消費；同上機制攔下並要求雙邊補列。
+      - "tools/lib/hook_carrier_symlink.py"
       # R74：本輪新增/新被消費的根層檔——test_ci_paths_cover_root_consumers.py 實測
       # 攔下（DEF-101-042 同構）。CLAUDE.md 由 tools/tests/
       # test_doc_loc_baseline_freshness_r60.py 的鐵律機械物盤點鎖逐行消費；

@@ -685,19 +685,19 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 8864,
+    "test_adr_xplat001_c1c2_lock.py": 8894,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 4032,
     "test_bash32_compat.py": 985,
     "test_bash_probe_spec_contract.py": 859,
-    "test_block_destructive_git_r83.py": 2355,
+    "test_block_destructive_git_r83.py": 2354,
     "test_bootstrap_core.py": 439,
     "test_bootstrap_ps1.py": 160,
     "test_check_archive_required.py": 160,
     "test_check_defect_log_crossref.py": 3906,
     "test_check_gha_action_versions.py": 295,
-    "test_check_hooks_liveness.py": 3526,
+    "test_check_hooks_liveness.py": 3559,
     "test_check_pytest_baseline_sites.py": 301,
     "test_check_script_parity.py": 2029,
     "test_check_wrapper_thinness.py": 1185,
@@ -720,10 +720,11 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_gha_action_versions.py": 681,
     "test_git_hooks_install_common.py": 485,
     "test_guard_line_taxonomy_r99.py": 148,
+    "test_hook_carrier_symlink.py": 131,
     "test_install_statusline.py": 297,
     "test_install_windows_nightly.py": 1358,
-    "test_mac_endurance_r83.py": 1962,
-    "test_mac_readiness_r82.py": 621,
+    "test_mac_endurance_r83.py": 1987,
+    "test_mac_readiness_r82.py": 626,
     "test_macos_smoke_skip_honesty.py": 225,
     "test_maturity_criteria_r79.py": 431,
     "test_negative_existence_claims_r82.py": 370,
@@ -731,7 +732,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_no_invalid_escape_sequences.py": 315,
     "test_ntfs_trailing_space_device_name.py": 698,
     "test_onboarding_parity_interlock.py": 233,
-    "test_platform_neutral_paths.py": 5754,
+    "test_platform_neutral_paths.py": 5761,
     "test_platform_utils_dedup.py": 1078,
     "test_pre_commit_dispatcher_sigpipe.py": 969,
     "test_pre_push_dispatcher.py": 1203,
@@ -749,7 +750,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_sdd_hook_router_r158.py": 189,
     "test_sentinel_tick_e2e_r145.py": 141,
     "test_session_brief.py": 220,
-    "test_single_venv_identity.py": 161,
+    "test_single_venv_identity.py": 162,
     "test_skip_ceiling_ratchet_direction.py": 730,
     "test_skip_discoverability_r83.py": 742,
     "test_smoke_ci_sync.py": 1496,
@@ -2392,6 +2393,28 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "RunParallelStalenessAdvisoryReadsMergedLiveCacheTest 改執行緒區域假時鐘取代真 sleep "
      "（macOS CI 3 核負載排序被打亂致假紅）＋本表自身漂移。逐項見 "
      "CrossPlatform_R145_Scan_Findings.md〈附記（R175）〉。"),
+    ("R176", 106985, 107161, 176,  # round-label-ok：DEF-200-316 方案 B 收尾單人窗口
+     "[非淨減法輪][回歸鎖軌申報＝本列淨額全額，見 _REGRESSION_LANE_LOG 同輪列] DEF-200-316 "
+     "方案 B 結案回歸鎖：新檔 test_hook_carrier_symlink.py 全額（P3-2 dangling symlink "
+     "fail-loud 修復含新測試）＋ C8 healed_fail 治癒語意回歸鎖（test_check_hooks_liveness.py "
+     "新測試覆蓋治癒／未治癒／上限／端到端四情境，既有歷史散文壓縮抵銷，原文逐字保全於"
+     "證據檔）＋ D2b/D2c 既有鎖檔逐檔漂移＋本表自身漂移「見下一列」，未超軌上限 ⇒ 全額申報，"
+     "主軌 0。逐項見 CrossPlatform_R145_Scan_Findings.md〈附記（R176）〉。"),
+    ("R176", 107161, 107180, 19,  # round-label-ok：本表自身漂移收斂列
+     "[非淨減法輪][同輪追加] 收斂列：本表（test_adr_xplat001_c1c2_lock.py 自身）新增上一列、"
+     "本列自身、_REGRESSION_LANE_LOG 同輪列造成的行數漂移，反覆覆核收斂到本行本身也計入為止，"
+     "同 R173/R174/R175 既有體例。餘額歸主軌，見 CrossPlatform_R145_Scan_Findings.md"
+     "〈附記（R176）〉。"),
+    ("R176", 107180, 107205, 25,  # round-label-ok：C9 主控親跑根層全套抓到的第三支漏盤
+     "[非淨減法輪][回歸鎖軌申報＝本列淨額全額，見 _REGRESSION_LANE_LOG 同輪列] C9："
+     "test_mac_endurance_r83.py::HookWiringReachesThisPlatformTest 讀真實 settings.json 斷言 "
+     "POSIX 半邊條目存在，方案 B 下前提消失（設計書 D2c 漏盤第三支）；改為單一載具種類斷言＋"
+     "symlink 健康合成注入判準，新增負向格證明鑑別力未失，原斷言原文逐字保全於證據檔。全額"
+     "申報回歸鎖軌，主軌 0。逐項見 CrossPlatform_R145_Scan_Findings.md〈附記（R176）〉。"),
+    ("R176", 107205, 107216, 11,  # round-label-ok：本表自身漂移收斂列
+     "[非淨減法輪][同輪追加] 收斂列：本表（test_adr_xplat001_c1c2_lock.py 自身）新增上兩列、"
+     "本列自身造成的行數漂移，反覆覆核收斂到本行本身也計入為止，同 R173~R176 既有體例。"
+     "餘額歸主軌，見 CrossPlatform_R145_Scan_Findings.md〈附記（R176）〉。"),
 )
 
 
@@ -2862,6 +2885,11 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
     ("R175", 19,
      "DEF-200-399 結案回歸鎖全額（含本表自身漂移），未超軌上限 ⇒ 全額申報，主軌 0。逐項見 "
      "CrossPlatform_R145_Scan_Findings.md〈附記（R175）〉。"),
+    ("R176", 231,
+     "DEF-200-316 方案 B 結案回歸鎖全額（新檔 test_hook_carrier_symlink.py＋C8 healed_fail "
+     "回歸鎖＋C9 續航鏈載具鑑別力回歸鎖＋既有鎖檔逐檔漂移＋本表自身漂移），未超軌上限 ⇒ "
+     "全額申報，主軌 0。逐項見 CrossPlatform_DEF200274_Parallel_Tests_Evidence_2.md〈D1 落地"
+     "與兩鏡複審（主控收尾）〉〈C8 復原判準〉與〈C9 續航鏈載具鑑別力〉。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -3155,10 +3183,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 293
+_REPIN_LOG_FROZEN_PREFIX_LEN = 297
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "6c1f308c28cf27911f7d4d6d553634600c8a5019792a4b257991148fd99a3783")
+    "439d33eed981f7aceabd98587f0c5ada29f3b07468fd3c3588bb046f68e05c21")
 
 
 def repin_log_history_digest(
@@ -3497,6 +3525,8 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R173", "9f8511c3b8d7", "b76488c60116", "DEF-200-394"),  # round-label-ok：自身漂移列終值
     ("R174", "b76488c60116", "e8711dba8b90", "DEF-200-398"),  # round-label-ok
     ("R175", "e8711dba8b90", "6c1f308c28cf", "DEF-200-399"),  # round-label-ok
+    ("R176", "6c1f308c28cf", "d6cb3c93f516", "DEF-200-316"),  # round-label-ok
+    ("R176", "d6cb3c93f516", "439d33eed981", "DEF-200-316"),  # round-label-ok：C9 追加
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

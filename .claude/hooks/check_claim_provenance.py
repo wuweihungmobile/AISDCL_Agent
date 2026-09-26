@@ -1035,14 +1035,20 @@ def main() -> int:
         # 的地方 ⇒ 「hook 載具到底有沒有解析到」這件事的自動讀者只能是它。靜態那三道結構上
         # 看不到這件事（判準面是 settings.json ＋ 檔案系統，不是執行結果），而執行期證據
         # 此前**零讀者** —— 本機全母體 217 筆 hook 失敗跨九天沒有任何東西說過一句話。
+        # 方案 B（DEF-200-316）起 `runtime_carrier_verdict()` 不再收 `on_windows` 引數、
+        # 也不再有 `by_design_fail` 桶（見該函式 WHY）。
         if hook_wiring is not None and not os.environ.get("AUTOSDD_CARRIER_GUARD_OFF"):
             problems, counts = hook_wiring.runtime_carrier_verdict(
                 hook_wiring.hook_result_attachments(records))
             if problems:
+                # 筆數用 native_fail+alien_fail（live 全量），不是 len(problems)——
+                # 後者被〈最新 8 筆〉截斷，會把「其實還有更多」誤報成「只有這幾筆」；
+                # healed_fail（之後已成功治癒）刻意不印，同一件事每次都喊會被關掉。
+                live_n = counts["native_fail"] + counts["alien_fail"]
                 messages.append(
-                    "🔴 本場逐字稿的執行期證據顯示 hook **本平台自己那條載具**失敗了"
-                    f"（{len(problems)} 筆；另有 {counts['by_design_fail']} 筆是跨平台配對"
-                    "刻意的 fail-open、不計）。CC 對載具失敗只記一行 ERROR 就放行 ⇒ 表徵與"
+                    "🔴 本場逐字稿的執行期證據顯示 hook 載具失敗了"
+                    f"（{live_n} 筆；alien_fail={counts['alien_fail']}）。"
+                    "CC 對載具失敗只記一行 ERROR 就放行 ⇒ 表徵與"
                     "「修好了」完全相同。逐筆：\n    " + "\n    ".join(problems))
         _say(messages, event, quiet)
     except Exception:  # noqa: BLE001 — fail-open，見檔頭 P0

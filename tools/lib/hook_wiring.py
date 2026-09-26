@@ -76,12 +76,10 @@ PROJECT_DIR_PLACEHOLDER = "${CLAUDE_PROJECT_DIR}"
 #: 啟動器的展開前佔位路徑——兩平台的 `args[0]` 皆同一份（2026-09-15 起同構）。
 LAUNCHER = f"{PROJECT_DIR_PLACEHOLDER}/{LAUNCHER_REL}"
 
-#: POSIX 側載具（掌舵者 2026-09-15 裁決）＝根層 .venv 的直譯器本身，與 Windows 側同構
-#: （舊形態是「直接 exec 帶 shebang 的啟動器」，見 `runtime_carrier_verdict()` 相容判準）。
-POSIX_CARRIER_REL = ".venv/bin/python"
-POSIX_CARRIER = f"{PROJECT_DIR_PLACEHOLDER}/{POSIX_CARRIER_REL}"
-
-#: Windows 側載具，**只准二選一、且全檔不得混用**。
+#: Windows 側載具，**只准二選一、且全檔不得混用**。方案 B（DEF-200-316）起這是
+#: **唯一**載具家族：POSIX 上 `.venv/Scripts/pythonw.exe` 由
+#: `tools/lib/hook_carrier_symlink.py` 建的符號連結解析到同一顆根層 `.venv`，
+#: 不再有獨立宣告的 POSIX 載具字串（原 `POSIX_CARRIER_REL`／`POSIX_CARRIER` 已刪）。
 #: venv 版不看 PATH（與 session 怎麼被啟動無關）；PATH 版在 schtasks 起的 session 上
 #: 實測解析不到（那種 session 的 `python` 是 pyenv shim，沒有 `pythonw.exe`）⇒ 會
 #: 靜默失去全部 hook。混用兩種＝一部分 hook 在某些機器消失，且「加第二個當備援」會
@@ -185,15 +183,6 @@ def _normalise(token: str) -> str:
     return _PARENT_PREFIX_RE.sub("", rel.lstrip("/"))
 
 
-# 為何不是 `== POSIX_CARRIER` 的字面比對：子專案（AutoClaude）與 SDD 各版的
-# `CLAUDE_PROJECT_DIR` 指向自己那個目錄，而啟動器只有一個家 ⇒ 那些條目以一段或多段
-# `../` 回到 monorepo 根層取用**同一支檔**。字面比對會把它們判成「沒有宣告 POSIX 載具」，
-# 於是 `posix_carrier_problems()` 對整個子專案靜默失明——而那一側的失效同樣是 fail-open。
-def is_posix_carrier(command: str) -> bool:
-    """`command` 是不是 POSIX 載具（根層 .venv 直譯器），`../` 前綴視為同一個載具。"""
-    return _normalise(str(command)) == POSIX_CARRIER_REL
-
-
 def is_launcher(token: str) -> bool:
     """`token` 是不是啟動器本身（兩平台的 `args[0]` 皆同一份檔），`../` 前綴視為同一個。"""
     return _normalise(str(token)) == LAUNCHER_REL
@@ -263,15 +252,16 @@ def entries_launching(settings: dict, needle: str, event: str = "PreToolUse") ->
 
 # 六條規則（任一違反即回一筆問題；空 list＝綠）：
 #   A 每個 `type=="command"` 條目必須有 `args`（沒有＝shell form＝Windows 上閃窗）
-#   B `command` 只准是兩種載具之一（防有人塞回 `python`／`sh -c`／`cmd /c`）；比對走
-#     `win_carrier_kind()`／`is_posix_carrier()` 的**正規化**版，不是字面（R84／A2b）
+#   B `command` 只准是單一 Windows 形態載具（防有人塞回 `python`／`sh -c`／
+#     `cmd /c`）；比對走 `win_carrier_kind()` 的**正規化**版，不是字面（R84／A2b）。
+#     方案 B（DEF-200-316）起 POSIX 半邊已無獨立字面可比——它由符號連結解析到
+#     同一顆 venv，見 `carrier_liveness_problems()` 的 symlink 健康檢查
 #   C `command` 不得含空白（V4 陷阱：`args` 存在時整串會被當成一個執行檔路徑，
 #     實測 `uv_spawn ENOENT`，而它「看起來像對的」）
 #   D `command` 與所有 `args` 元素不得出現機器專屬絕對路徑（DEF-101-778）
-#   E 每個目標在同一 block 內必須恰好一個 Windows 條目 ＋ 恰好一個 POSIX 條目，
-#     **兩側 `args[0]` 都必須是啟動器**（2026-09-15 起兩側同構；`tail=args[1:]`）
-#     ⚠️ **這條是本鎖的核心**：exec form 的 spawn 失敗是 **fail-open**，少一邊
-#     不會有任何東西轉紅，只會在那個平台靜默失去這個 hook
+#   E 每個目標在同一 block 內必須**恰好一條** command，且必須是單一 Windows 形態
+#     載具、`args[0]` 必須是啟動器（`tail=args[1:]`）——方案 B 起不再要求
+#     「Windows ＋ POSIX 各一條成對」，兩平台現在共用同一條宣告
 #   F 全檔不得混用兩**種** Windows 載具（venv／PATH，見 `WIN_CARRIERS` 旁註記）
 def hook_form_problems(settings: dict) -> list[str]:
     """形態判準 A~F（詳見上方註記）。"""
@@ -306,31 +296,26 @@ def hook_form_problems(settings: dict) -> list[str]:
                         f"{where}: 出現機器專屬絕對路徑"
                         f"（只准 {PROJECT_DIR_PLACEHOLDER} 佔位）：{hits}")
                 kind = win_carrier_kind(command)
-                posix = is_posix_carrier(command)
-                if not kind and not posix:
+                if not kind:
                     problems.append(
-                        f"{where}: command 只准是 {WIN_CARRIERS}（Windows 載具）或 "
-                        f"{POSIX_CARRIER!r}（POSIX 載具），實得 {command!r}")
+                        f"{where}: command 只准是單一 Windows 形態載具 {WIN_CARRIERS}"
+                        f"（方案 B 起 POSIX 半邊由符號連結解析，不再是獨立字面），"
+                        f"實得 {command!r}")
                     continue
-                if kind:
-                    carriers_used.add(kind)
-                # 2026-09-15 起兩側同構：args[0] 一律必須是啟動器。
+                carriers_used.add(kind)
                 if not is_launcher(args[0]):
                     problems.append(
-                        f"{where}: {'Windows' if kind else 'POSIX'} 載具的 args[0] 必須是"
-                        f"啟動器 {LAUNCHER!r}，實得 {args[0]!r}")
+                        f"{where}: 載具的 args[0] 必須是啟動器 {LAUNCHER!r}，"
+                        f"實得 {args[0]!r}")
                     continue
                 tail = tuple(args[1:])
                 pairs.setdefault(tail, {})
-                label = "win" if kind else "posix"
-                pairs[tail][label] = pairs[tail].get(label, 0) + 1
+                pairs[tail]["win"] = pairs[tail].get("win", 0) + 1
             for tail, seen in pairs.items():
-                if seen.get("win", 0) != 1 or seen.get("posix", 0) != 1:
+                if seen.get("win", 0) != 1:
                     problems.append(
-                        f"{where}: 目標 {list(tail)} 的載具未成對（win={seen.get('win', 0)} "
-                        f"posix={seen.get('posix', 0)}，各需恰好 1）⇒ 缺的那一邊在該平台"
-                        "會靜默失去這個 hook，而 spawn 失敗是 fail-open、不會有任何"
-                        "東西轉紅")
+                        f"{where}: 目標 {list(tail)} 應恰有 1 條單一 Windows 形態載具，"
+                        f"實得 win={seen.get('win', 0)}")
     if len(carriers_used) > 1:
         problems.append(
             f"同一份 settings.json 混用了兩種 Windows 載具 {sorted(carriers_used)}："
@@ -355,18 +340,6 @@ def declared_win_carriers(settings: dict) -> set[str]:
     return out
 
 
-def declared_posix_carriers(settings: dict) -> set[str]:
-    """`settings` 內宣告過的 POSIX 載具字串集合（判準與 Windows 側對稱）。"""
-    return {
-        str(hook.get("command", ""))
-        for _event, blocks in (settings.get("hooks") or {}).items()
-        for block in blocks or []
-        for hook in block.get("hooks") or []
-        if is_command_hook(hook) and is_exec_form(hook)
-        and is_posix_carrier(hook.get("command", ""))
-    }
-
-
 # 🔴 為什麼這道非有不可（方案書 §4.3 自己劃出的缺口）：載具解析不到時 CC 只記一行
 # ERROR、工具照跑（**fail-open**）⇒ 六支守衛會**全部靜默失效，而螢幕上的表徵就是
 # 「終於不閃窗了」**——與修好了一模一樣。把缺口寫下來卻不給判準，等於把它登記成
@@ -375,18 +348,17 @@ def declared_posix_carriers(settings: dict) -> set[str]:
 # 🔴 為什麼判準綁「宣告」而不是硬編一個路徑：這樣「有人把載具改成別的東西」也會
 # 被同一條守到（改了宣告就要有對應的實況），而不是只守住今天這一種寫法。
 #
-# 非 Windows 不看 `.venv/Scripts/pythonw.exe`：它在 mac/Linux 本來就不存在，那條在
-# 該平台是**設計上的 fail-open**、不是缺陷（`DEF-101-766`：單平台判準不可無條件外推）。
-# `PATH` 載具同樣不在射程內——它的實況取決於 session 的 PATH，不是磁碟上的檔案，
-# 靜態判準看不到，硬判會變成誤報。
+# 🔴 方案 B（DEF-200-316）起存在性檢查**不再需要按平台分支**：`declared_win_carriers()`
+# 掃出的唯一那條路徑（`.venv/Scripts/pythonw.exe`）在 POSIX 上也會透過
+# `tools/lib/hook_carrier_symlink.py` 建的符號連結真的存在 ⇒ `exists()` 兩平台同一份
+# 判準；POSIX 上額外多驗 symlink 身分＋可執行＋版本（`_posix_symlink_health_problems()`，
+# 取代舊的 `posix_carrier_problems()` 整支獨立函式——原本「非 Windows 直接 return 另一條
+# 判準」的平台互斥分支已隨此收斂）。
 #
-# 🔴 R80 SA-05：非 Windows **不再一律回空**，改判該平台自己的那條載具（見
-# `posix_carrier_problems`）。原本的「回空」把「這個平台沒有 Windows 載具」誤當成
-# 「這個平台沒有載具問題」——而 POSIX 那條同樣是單點失效面，失效同樣靜默。
-#
-# 🔴 誠實劃界（R84）：`project_dir` 是**單一** session 的專案根，而帶 `../` 的載具字串
-# 要用它自己那份 settings 所屬的專案根去展開才對得上 ⇒ 本函式不可拿 monorepo 根去跑
-# 子專案／SDD LATEST 那兩份（會 normpath 到 repo 之外而假紅）。呼叫端現況只餵根層那份。
+# 🔴 誠實劃界（R84，方案 B 下仍成立）：`project_dir` 是**單一** session 的專案根，而帶
+# `../` 的載具字串要用它自己那份 settings 所屬的專案根去展開才對得上 ⇒ 本函式不可拿
+# monorepo 根去跑子專案／SDD LATEST 那兩份（會 normpath 到 repo 之外而假紅）。呼叫端
+# 現況只餵根層那份。
 def carrier_liveness_problems(
     settings: dict,
     project_dir: str,
@@ -394,12 +366,12 @@ def carrier_liveness_problems(
     exists=os.path.exists,
     on_windows: bool = os.name == "nt",
     is_exec=None,
+    is_symlink=None,
+    readlink=None,
     probe=None,
 ) -> list[str]:
-    """**宣告 ↔ 實況**雙向綁定：settings 宣告了 venv 載具 ⇒ 那個路徑必須真的存在。"""
-    if not on_windows:
-        return posix_carrier_problems(
-            settings, project_dir, exists=exists, is_exec=is_exec, probe=probe)
+    """**宣告 ↔ 實況**雙向綁定：settings 宣告了唯一那條 Windows 形態載具 ⇒ 那個路徑
+    必須真的存在（POSIX 上透過符號連結，見上方 WHY）。"""
     problems: list[str] = []
     for carrier in sorted(declared_win_carriers(settings)):
         if win_carrier_kind(carrier) != "venv":
@@ -407,15 +379,21 @@ def carrier_liveness_problems(
         path = expand_tokens([carrier], project_dir)[0]
         if not exists(path):
             problems.append(
-                f"`.claude/settings.json` 宣告 Windows hook 載具 {carrier}，但實況不存在："
+                f"`.claude/settings.json` 宣告 hook 載具 {carrier}，但實況不存在："
                 f"{path}\n"
                 "    ⇒ 這台機器上**全部 hook 都不會跑**（載具 spawn 失敗是 fail-open，"
                 "只記一行 ERROR、工具照跑），\n"
                 "      而螢幕上的表徵與『修好了』完全相同：不閃窗、沒有錯誤。\n"
-                "    修法：在 repo 根跑 bootstrap 重建 .venv"
-                "（tools/bootstrap.ps1 ／ tools/bootstrap.sh），\n"
-                "      或現查一行：Test-Path (Join-Path $env:CLAUDE_PROJECT_DIR "
+                "    修法：mac/linux 跑 dev_start（會自動建立符號連結）；"
+                "Windows 跑 bootstrap 重建 .venv\n"
+                "      （tools/bootstrap.ps1 ／ tools/bootstrap.sh），或現查一行：\n"
+                "      Test-Path (Join-Path $env:CLAUDE_PROJECT_DIR "
                 "'.venv\\Scripts\\pythonw.exe')")
+            continue
+        if not on_windows:
+            problems.extend(_posix_symlink_health_problems(
+                path, is_symlink=is_symlink, readlink=readlink,
+                is_exec=is_exec, probe=probe))
     return problems
 
 
@@ -424,6 +402,11 @@ def carrier_liveness_problems(
 #: 檔頭約定「只依賴 stdlib」，而兩端不一致會由 `tools/tests/test_check_hooks_liveness.py`
 #: 的對照斷言當場轉紅——同一份知識**允許**住兩個家的唯一條件就是有東西在對帳。
 POSIX_MIN_PY = (3, 11)
+
+#: 方案 B（DEF-200-316）symlink 的相對連結目標——與 `tools/lib/hook_carrier_symlink.py`
+#: 的 `_TARGET_REL` 同一顆 venv 的兩個檔名，一份知識兩個家，靠這條字面同步（該模組是
+#: 建立端，本常數是驗證端）。
+POSIX_SYMLINK_TARGET_REL = "../bin/python"
 
 
 def _probe_interpreter(path: str) -> tuple[str | None, tuple[int, int] | None]:
@@ -443,59 +426,70 @@ def _probe_interpreter(path: str) -> tuple[str | None, tuple[int, int] | None]:
     return (path, (major, minor))
 
 
-# 🔴 為何 POSIX 這半非有不可（2026-09-15 起與 Windows 側**同構**，不再不對稱）：
-# `command` 直接釘死 `.venv/bin/python`，不再靠 `PATH` 解析。三種失效——檔不在／
-# 沒有執行位元／版本太舊或壞掉——表徵完全相同：CC 只記一行 ERROR 就放行（fail-open），
-# 螢幕上看起來就是「終於不閃窗了」。代價：clone 到 bootstrap 建好 `.venv` 之前，
-# POSIX 上 hook 全部 fail-open——與 Windows 現況一致，是刻意的對稱。
-def posix_carrier_problems(
-    settings: dict,
-    project_dir: str,
+# 🔴 為何這半非有不可（方案 B／DEF-200-316 起取代舊 `posix_carrier_problems()`）：
+# 呼叫端 `carrier_liveness_problems()` 已驗過**存在性**（唯一那條 Windows 形態路徑，
+# 兩平台共用同一份宣告）；本函式只管 POSIX 上那個路徑**是不是一顆健康的符號連結**——
+# 身分（是不是 dev_start 建的那顆，不是有人手動放的同名檔）＋可執行＋版本。三種失效
+# ——非 symlink／身分錯／沒有執行位元／版本太舊或壞掉——表徵完全相同：CC 只記一行
+# ERROR 就放行（fail-open），螢幕上看起來就是「終於不閃窗了」。代價：clone 到
+# dev_start 建好符號連結之前，POSIX 上 hook 全部 fail-open——與 Windows 現況一致，
+# 是刻意接受的視窗（見 `tools/lib/hook_carrier_symlink.py` 檔頭）。
+def _posix_symlink_health_problems(
+    path: str,
     *,
-    exists=os.path.exists,
+    is_symlink=None,
+    readlink=None,
     is_exec=None,
     probe=None,
 ) -> list[str]:
-    """POSIX 側載具的**宣告 ↔ 實況**綁定（R80 SA-05；WHY 見上方註記）。"""
+    """POSIX 側 symlink 身分＋可執行＋版本健康檢查（WHY 見上方註記）。"""
+    if is_symlink is None:
+        is_symlink = os.path.islink
+    if readlink is None:
+        readlink = os.readlink
     if is_exec is None:
         def is_exec(path: str) -> bool:
             return os.access(path, os.X_OK)
     probe = probe or _probe_interpreter
     problems: list[str] = []
-    for carrier in sorted(declared_posix_carriers(settings)):
-        path = expand_tokens([carrier], project_dir)[0]
-        if not exists(path):
-            problems.append(
-                f"`.claude/settings.json` 宣告 POSIX hook 載具 {carrier}，但實況不存在："
-                f"{path} ⇒ 這台機器上**全部 hook 都不會跑**（spawn 失敗是 fail-open）。"
-                '修法：repo 根跑 bootstrap（tools/bootstrap.sh），現查 '
-                '`test -x "$CLAUDE_PROJECT_DIR/.venv/bin/python"`')
-            continue
-        if not is_exec(path):
-            problems.append(
-                f"POSIX hook 載具 {path} 沒有執行位元 ⇒ spawn 回 EACCES、CC 只記一行 "
-                "ERROR 就放行，六支守衛一起靜默消失。修法：重建根層 .venv"
-                "（`tools/bootstrap.sh`；此檔是 bootstrap 產物、非 git tracked，"
-                "不是 `git update-index --chmod=+x` 能修的）")
-            continue
-        interp, version = probe(path)
-        if interp is None:
-            problems.append(
-                f"POSIX hook 載具 {path} 執行不起來（探測不到版本）⇒ 直接 exec 它會"
-                "失敗，而失敗是 fail-open（六支守衛靜默消失）")
-            continue
-        if version is not None and version < POSIX_MIN_PY:
-            want = ".".join(str(n) for n in POSIX_MIN_PY)
-            got = ".".join(str(n) for n in version)
-            problems.append(
-                f"POSIX hook 載具 {interp} 回報版本 Python {got}，低於本 repo 的下限 "
-                f"{want}（SSOT：tools/bootstrap_core.py）。macOS 系統 python3 常年 3.9，"
-                "若 bootstrap 當初就是用它建的 venv，這行話在 mac 上 day 1 就可能響。\n"
-                "    實測後果（R82 MAC-03；test_mac_readiness_r82.py 現查）：現行 hook 集"
-                "**載入得起來**（`tools/lib/quota_meter.py` 已改用 3.9 相容寫法）。\n"
-                "    真正的風險面：沒有 try/except 保護的那幾格一旦加進 3.11 專屬 import，"
-                "六支守衛會一起靜默消失（spawn／import 失敗是 fail-open）。\n"
-                f"    修法：重建根層 .venv（bootstrap 門檻 {want}）")
+    if not is_symlink(path):
+        problems.append(
+            f"POSIX hook 載具 {path} 必須是符號連結（由 dev_start 建立、指向根層 "
+            ".venv 的直譯器），實況不是——可能是舊版殘留或手動放置的同名檔案，"
+            "不會自動修，需手動刪除後重跑 dev_start")
+        return problems
+    target = str(readlink(path))
+    if os.path.normpath(target) != os.path.normpath(POSIX_SYMLINK_TARGET_REL):
+        problems.append(
+            f"POSIX hook 載具 {path} 是符號連結但指向 {target!r}，預期 "
+            f"{POSIX_SYMLINK_TARGET_REL!r}——身分錯，可能指到別的 venv 或別的相對層數，"
+            "修法：手動刪除後重跑 dev_start 重建")
+        return problems
+    if not is_exec(path):
+        problems.append(
+            f"POSIX hook 載具 {path} 沒有執行位元 ⇒ spawn 回 EACCES、CC 只記一行 "
+            "ERROR 就放行，六支守衛一起靜默消失。修法：重建根層 .venv"
+            "（`tools/bootstrap.sh`；此檔是 bootstrap 產物、非 git tracked，"
+            "不是 `git update-index --chmod=+x` 能修的）")
+        return problems
+    interp, version = probe(path)
+    if interp is None:
+        problems.append(
+            f"POSIX hook 載具 {path} 執行不起來（探測不到版本）⇒ 直接 exec 它會"
+            "失敗，而失敗是 fail-open（六支守衛靜默消失）")
+        return problems
+    if version is not None and version < POSIX_MIN_PY:
+        want = ".".join(str(n) for n in POSIX_MIN_PY)
+        got = ".".join(str(n) for n in version)
+        problems.append(
+            f"POSIX hook 載具 {interp} 回報版本 Python {got}，低於本 repo 的下限 "
+            f"{want}（SSOT：tools/bootstrap_core.py）。macOS 系統 python3 常年 3.9，"
+            "若 bootstrap 當初就是用它建的 venv，這行話在 mac 上 day 1 就可能響。\n"
+            "    實測後果（R82 MAC-03；test_mac_readiness_r82.py 現查）：現行 hook 集"
+            "**載入得起來**（`tools/lib/quota_meter.py` 已改用 3.9 相容寫法）。\n"
+            "    真正的風險面：沒有 try/except 保護的那幾格一旦加進 3.11 專屬 import，"
+            "六支守衛會一起靜默消失（spawn／import 失敗是 fail-open）。\n"
+            f"    修法：重建根層 .venv（bootstrap 門檻 {want}）")
     return problems
 
 
@@ -503,35 +497,12 @@ def posix_carrier_problems(
 # 執行期證據（本輪）：載具**真的**解析到了嗎
 # ─────────────────────────────────────────────────────────────────────────────
 
-# 🔴 為何靜態那三道全都看不到「載具解析不到」（M9 立案，本輪現查得出的空格）
-# ---------------------------------------------------------------------------
-# 現查（母體＝本機 `~/.claude/projects/<slug>/` 全部 1,061 支逐字稿）：
-# `hook_non_blocking_error` 共 **217** 筆，其 stderr **全部** 是同一句
-# `ENOENT: no such file or directory, posix_spawn '<repo>/.venv/Scripts/pythonw.exe'`
-# ——分佈 PreToolUse 86／PostToolUse 72／SessionStart 40／**Stop 19**，跨
-# 2026-08-12 ~ 2026-08-21（九天）、Stop 那 19 筆分屬 16 個不同 session。
-#
-# ⇒ 第一個結論與直覺相反：**這不是 Stop 專屬的缺陷**。四個事件全中，因為每個 block 依
-# 形態判準 E 都必須成對（Windows 一條 ＋ POSIX 一條），而 mac 上 Windows 那條每次必然
-# ENOENT。「Stop 只有 19 筆」不是它比較少壞，是 attachment 落盤本身有偏差（見下）。
-#
-# 三道靜態機械物為何一條都沒說話，逐一對號：
-#   · `hook_form_problems()`（A~F）：**成對是它要求的**，兩條都在 ⇒ 判綠是正確的。
-#   · `carrier_liveness_problems()`：非 Windows 第一行就 `return posix_carrier_problems(...)`
-#     ⇒ 結構上**看不到** Windows 那條。這是刻意的（外平台載具不存在是設計，不是缺陷），
-#     但代價是「宣告↔實況」這條綁定在每個平台**只綁一半**。
-#   · `tools/check_hooks_liveness.py`：檔頭自陳射程＝git hooks 生效性 ＋ 載具**存在性**，
-#     兩者都是靜態讀檔。
-# ⇒ 缺的那一格不是「再加一條靜態判準」，是**沒有任何東西讀執行期證據**。而執行期證據
-# 一直都在（逐字稿裡的 hook attachment），只是零讀者——與本輪 M8 判過的「痕跡沒有自動
-# 讀者 ⇒ 它不是機制」同型。
-#
-# 🔴 第二個結論（判準能做到什麼、做不到什麼，是量出來的）：`hook_success` **只有在
-# hook 真的印了東西時才落盤**——全母體 11,438 筆 success 逐筆檢查，stdout 或 stderr
-# 至少一個非空的有 11,438 筆、兩者皆空 **0 筆**；而根層六支守衛安靜時一筆都不留（全母體
-# 只有 14 筆屬於根層 hook，其餘 11,424 筆全是會固定印字的 SDD 三支）。
-# ⇒ 「某個目標零 success」**不能**當成「它沒跑起來」，那會對每一支安靜的守衛假紅。
-# 可判的只有**失敗**那一半，所以本判準只問一件事：**這次失敗的是不是本平台自己那條載具**。
+# 🔴 為何靜態那三道全都看不到「載具解析不到」（M9 立案）——全母體 217 筆
+# `hook_non_blocking_error` 普查（逐字稿母體、分佈、九天無讀者的沿革）已搬至
+# CrossPlatform_DEF200274_Parallel_Tests_Evidence_2.md〈C8 復原判準〉節，原文逐字保全。
+# 結論仍在：判準只問「這次失敗的是不是本平台自己那條載具」，`hook_success` 只有在
+# hook 真的印了東西時才落盤（全母體 0 筆兩者皆空），故「某目標零 success」不能反推
+# 「沒跑起來」——可判的只有失敗那一半。
 HOOK_RESULT_TYPES = ("hook_success", "hook_non_blocking_error")
 
 
@@ -542,23 +513,29 @@ def hook_result_attachments(records) -> list[dict]:
             and rec["attachment"].get("type") in HOOK_RESULT_TYPES]
 
 
-# 三種分類，各自的**方向**都是設計上決定的：
-#   · `native`：本平台自己那條載具失敗 ⇒ **真的壞了**（那個 hook 這一次沒跑，而 CC 只記
+# 兩種分類（方案 B／DEF-200-316 起 `by_design_fail` 桶已刪，理由見下），各自的
+# **方向**都是設計上決定的：
+#   · `native`：唯一那條載具失敗 ⇒ **真的壞了**（那個 hook 這一次沒跑，而 CC 只記
 #     一行 ERROR 就放行）。這是本判準會轉紅的一類。
-#   · `by_design`：另一個平台那條失敗 ⇒ 跨平台配對刻意的 fail-open，**不是缺陷**。它必須
-#     被**數出來**而不是被忽略：一個每次都響的噪音底線會讓真訊號無法被辨認（本 repo 對
-#     「一個永遠在響的警報等於沒有警報」已有判例），而九天沒人發現正是這個機制。
-#   · `alien`：失敗的 command 兩種載具都不是（有人塞回 `python -c`／改了載具／多了第三種）
-#     ⇒ 也算真的壞了，因為形態判準只看 settings.json，看不到「實際被執行的是別的東西」。
+#   · `alien`：失敗的 command 不是認得的載具（有人塞回 `python -c`／改了載具／多了
+#     第三種）⇒ 也算真的壞了，因為形態判準只看 settings.json，看不到「實際被執行
+#     的是別的東西」。
 # 上限 8 筆是訊息長度的防呆：同一場同一條載具會重複失敗上百次，逐筆列出等於把訊息變成
 # 沒有人會讀的一片牆（計數欄仍然是全量，不受這個上限影響）。
+#
+# 🔴 為何 `by_design_fail` 桶整個刪除（方案 B／DEF-200-316）：舊制每個 block 兩條
+# 命令（Windows＋POSIX），必然有一條在任一平台上 ENOENT——那條「必然失敗」被算成
+# `by_design_fail`，數出來但不報（下方訂正段落即是這段史實）。方案 B 落地後每個
+# block 只剩一條命令，不再有「另一半本來就該失敗」這件事：這一次 spawn 失敗只可能
+# 是真的壞了（native）或認不得的載具（alien），三態分類收斂成兩態，`on_windows`
+# 參數也一併刪除（不再需要靠它決定「這條是不是另一半」）。
 #
 # 🔴 訂正（2026-09-08）：M9 立案時「本平台自己那條失敗 ⇒ 一定是真的壞了」這個推論的**前提**是
 # 「全母體 217 筆 `hook_non_blocking_error` 的 stderr 全部是同一句 ENOENT」（見上方
 # 立案筆記）——那時 100% 樣本都是「行程根本沒 spawn 起來」。但 `block_destructive_git.py`
 # 自己就有一條**設計上刻意**的非阻斷失敗路徑（治理檔保護，PRD §15.5 紅線 10）：有人值守
 # 時印一句提醒（`_GOVWRITE_NOTE_MSG`）就 `return 1`——這也會落盤成同一種
-# `hook_non_blocking_error`，command 也命中本平台自己那條載具，卻不是「沒跑」，是「跑了、
+# `hook_non_blocking_error`，command 也命中唯一那條載具，卻不是「沒跑」，是「跑了、
 # 印了、故意不阻斷地結束」。實測（2026-09-08）：直接重放同一份 payload，exit 1、stderr
 # 逐字是 `_GOVWRITE_NOTE_MSG` 的內容，不含任何 spawn 層錯誤字樣。舊判準把這種情況
 # 誤判成 native_fail，對每一次「編輯治理檔＋有人值守」都會誤報一次守衛沒跑。
@@ -567,43 +544,58 @@ def hook_result_attachments(records) -> list[dict]:
 # （本 repo 具名的 hook 提醒訊息一律以 `[<hook 名>]` 開頭，見 `_GOVWRITE_NOTE_MSG` 等）。
 
 
-def runtime_carrier_verdict(attachments, *, on_windows: bool = os.name == "nt"
-                            ) -> tuple[list[str], dict[str, int]]:
-    """執行期證據 → `(真的壞了的問題清單, 分類計數)`；問題清單非空即紅。"""
+def _is_ours_attachment(att: dict) -> bool:
+    """`is_launcher()` 相容方案 B 前的舊逐字稿（command 本身就是啟動器）：歷史
+    attachment 仍長那樣，不把它判成 alien。"""
+    head = (str(att.get("command") or "").split() or [""])[0]
+    return bool(win_carrier_kind(head)) or is_launcher(head)
+
+
+def runtime_carrier_verdict(attachments) -> tuple[list[str], dict[str, int]]:
+    """執行期證據 → `(真的壞了的問題清單, 分類計數)`；問題清單非空即紅。
+
+    `attachments` 依逐字稿原始順序（`hook_result_attachments()` 保序）。同一顆
+    載具的失敗，只要**之後**還出現過它自己的 `hook_success`，就治癒為
+    `healed_fail`（不進 problems、不計入 `native_fail`）——同一件事每次回覆都喊
+    的守衛會被關掉（DEF-200-316 收尾單人窗口）。`alien_fail` 不受此規則影響：
+    認不得的載具本身就是缺陷，出現一次就算，不會被之後的成功治癒。問題清單只留
+    **最新** 8 筆（`problems[-8:]`）；計數欄不受這個上限影響。
+    """
     counts = dict.fromkeys(
-        ("native_fail", "by_design_fail", "alien_fail", "advisory_exit", "success"), 0)
+        ("native_fail", "alien_fail", "advisory_exit", "success", "healed_fail"), 0)
+    attachments = list(attachments)
+    last_ours_success = max(
+        (i for i, att in enumerate(attachments)
+         if att.get("type") == "hook_success" and _is_ours_attachment(att)),
+        default=-1)
     problems: list[str] = []
-    for att in attachments:
+    for i, att in enumerate(attachments):
         command = str(att.get("command") or "")
-        head = (command.split() or [""])[0]
         if att.get("type") == "hook_success":
             counts["success"] += 1
             continue
-        # `is_launcher(head)` 相容 2026-09-15 前的舊 POSIX 形態（command 本身就是啟動器）：
-        # 逐字稿裡的歷史 attachment 仍長那樣，不把它判成 alien（見 POSIX_CARRIER 旁註記）。
-        win = bool(win_carrier_kind(head))
-        posix = is_posix_carrier(head) or is_launcher(head)
         where = f"[{att.get('hookEvent') or att.get('hookName') or '?'}]"
         stderr = str(att.get("stderr") or "")
-        if win if on_windows else posix:
+        if _is_ours_attachment(att):
             if not spawn_failure.is_spawn_failure(stderr):
                 # 載具真的跑起來了，是 hook 自己選擇非阻斷地回非零（例如治理檔保護
                 # 有人值守時只提醒），不是「這次沒跑」——不計入問題清單。
                 counts["advisory_exit"] += 1
                 continue
+            if i < last_ours_success:
+                counts["healed_fail"] += 1
+                continue
             counts["native_fail"] += 1
             problems.append(
-                f"{where} 本平台自己那條 hook 載具失敗 ⇒ "
+                f"{where} hook 載具失敗 ⇒ "
                 f"{(hook_entry_targets({'command': command}) or ['?'])[0]} 這一次**沒有跑**"
                 f"（CC 只記一行 ERROR 就放行，fail-open）：{stderr[:200]}")
-        elif win or posix:
-            counts["by_design_fail"] += 1
         else:
             counts["alien_fail"] += 1
             problems.append(
-                f"{where} 失敗的 command 不是本 repo 認得的兩種載具之一（形態判準只看 "
-                f"settings.json，看不到實際被執行的是別的東西）：{head!r}")
-    return problems[:8], counts
+                f"{where} 失敗的 command 不是本 repo 認得的載具："
+                f"{(command.split() or [''])[0]!r}")
+    return problems[-8:], counts
 
 
 # ─────────────────────────────────────────────────────────────────────────────
