@@ -1158,3 +1158,158 @@ guard-line 計數面內）；全額申報回歸鎖軌（19 ≤ 軌上限 309）�
 警告。SDD ci-gate rc=0（1475／1959／363）。`--check-snapshot` rc=0。`check_defect_log_crossref.py`
 rc=0。ruff 三檔（`test_adr_xplat001_c1c2_lock.py`／`test_run_root_unittests.py`／
 `test_perception.py`）全綠。帳本新立 399／400（皆 fixed）。
+
+
+## 收斂後複驗 III——mac 四方重驗（2026-09-26，Apple M1 Max 10P/10L，Docker down）
+
+掌舵者六問第三次重問。流程：四方唯讀審查（Architect／SA／SD／QA 皆 Sonnet，主控 Fable 5.1）；
+Architect／SA／SD 並行、QA 後置（突變自證需要獨占工作樹）；四方判決 Architect **CONDITIONAL**／
+SA **APPROVE**／SD **APPROVE**／QA **CONDITIONAL**。QA 對 Architect 報告的一處附屬細節誤標
+（REFUTED）不推翻 Architect 的核心缺陷判斷；本輪帳本零信任重驗（SA 5 筆指定列＋隨機抽 10 筆
+fixed 列，QA 另交叉核對）合計 15/15 CONFIRMED，0 REFUTED、0 STALE。
+
+### 六問答覆（mac 面，第三次）
+
+1. **帳本多 CPU 問題**：[他包回報 SA] 帳本零信任重驗 5 筆指定列＋隨機抽 10 筆 fixed 列，共
+   15/15 CONFIRMED、0 REFUTED、0 STALE。非 fixed 列仍是 311（[他包回報 QA] mac 加壓 20/20
+   綠，未重現≠已修）、381（[他包回報 SA] chaos-latest 觀察期 1/7→2/7，日曆 2026-10-03 未到）、
+   395（[他包回報 QA] mac 上 `[WINDOWS-NATIVE-ONLY]` 皆 skip（2 skipped×20），只有 Windows
+   能重現）。DEF-200-316 方案 B：[他包回報 Architect／SA] 三份 settings 條目仍 24/12/6（未
+   變）、mac 探針仍 6 行 posix_spawn ENOENT＋2 行 SessionStart success——本輪仍**未實作**，
+   結構性卡在掌舵者親手窗口（見下〈主控裁決〉R2／R3）。
+2. **功能完備與 CI 多 CPU**：[他包回報 Architect／SD／QA] 三支獨立全套（Architect S=768.7s、
+   SD S=811.1s、QA S=766.3s）皆 rc=0、`workers=9 source=cpu_budget`、slot 利用率 99.7%、
+   loss=1.00x、零 🚨／⚠️／🐢、零種子過期警告（三次數字同量級、非同一次轉述）。[他包回報 SA]
+   雲端 HEAD f717181b 四支 push run 全 success，逐 job 表（`gh run view --json jobs` 現查）：
+
+   | Workflow | Job | 平台 | workers | 測試數/證據 | 耗時 |
+   |---|---|---|---|---|---|
+   | root-infra-ci (36235336043) | root infra guard | ubuntu | 4（source=cpu_budget） | 發現 4640 個測試；slot 99.9% | 10:17:21→10:24:10 ≈ 6m49s |
+   | AutoClaude CI (36235336034) | Tests + LOC Budget | ubuntu | 4（xdist, nodes confirmed=4） | — | 10:17:22→10:18:50 ≈ 88s |
+   | AutoClaude CI | Equivalence Snapshot | ubuntu | 4（confirmed） | — | 10:18:52→10:19:22 ≈ 30s |
+   | AutoClaude CI | PG Contract Tests | ubuntu | 4（confirmed） | — | 10:18:52→10:20:09 ≈ 77s |
+   | AutoClaude CI | CLAUDE.md Budget + Snapshot Freshness | ubuntu | 不適用（非 pytest，只跑 LOC/新鮮度檢查） | — | 10:17:22→10:17:31 ≈ 9s |
+   | macos-compat-ci (36235336059) | macOS smoke | macos | 3（root-unittest／broadcast／xdist 皆 3，source=cpu_budget/env） | 發現 4640 個測試；slot 99.7% | 10:17:27→10:26:25 ≈ 8m58s |
+   | windows-compat-ci (36235336046) | Windows smoke | windows | 4（root-unittest／xdist／broadcast 皆 4，source=cpu_budget/env） | 發現 4640 個測試；slot 99.4%、loss 1.01x | 10:17:22→10:33:29 ≈ 16m7s |
+
+   四平台 push job 皆逐字印出 `[cpu_budget]` 行，無單核執行；全庫 `-p no:xdist` 實際呼叫行
+   恰 9 行（橫跨 4 個 workflow 檔），皆有明文 WHY（mutation hash 隔離／pg_real 單一 DB／perf
+   計時純度／凍結基線競態），零裸奔單核。
+3. **無頭重腳輕／自動偵測／平衡負載**：[他包回報 SD] D1 自動偵測三方交叉一致（cpu_budget
+   內部函式／`os.cpu_count()`／`sysctl` 皆測得 logical=physical=10、total_budget=9）；D6
+   最長單位 `test_dev_start` 44.1~46.6s ≪ fair_share 85~90s，`loss=1.00x` 代表已達理論最佳
+   排程，數學上不存在頭重腳輕（非「沒抓到」，是連最重的單位都遠低於均分線）。[他包回報
+   Architect] A1 全 repo 平行度字面 421→301 筆非噪音命中，19 筆 `_JUSTIFIED_SERIAL_SITES`
+   全數登記、`test_ci_gate_xdist_allowlist -v` 13 tests OK；pre-push `leg=2` 與 CI 9 處
+   `-p no:xdist` 皆有明文 WHY，零未管制字面。
+4. **其他可平行面**：[他包回報 Architect] 沿用既有六項結論算式全部覆核吻合（nightly 跨
+   stage 2.7 倍超訂不做／`ci-gate.sh` 三軌序列 DOCUMENT_ONLY／TLA+ 五軌零自動通道跑（假
+   議題）／mutmut 2.4.3 無平行旋鈕（本場未獨立驗證，沿用既有結論）／CI 矩陣分片增加計費
+   不做／ruff／lint-imports 不做）；新查五項面向（AutoClaude xdist `worksteal` 與根層／SDD
+   一致性、根層 runner 序列段占比、pre-push 各 leg 分配、SDD v0.01 序列 WHY、`.ps1`／`.sh`
+   對稱性）均無新缺陷。
+5. **是否收斂**：四方一致：多 CPU 機制在 mac 本輪第三次重驗仍收斂（核數自動偵測、worker
+   廣播、負載平衡、種子過期偵測四機制完備），不重啟系列。
+6. **前輪未完成任務**：[他包回報 SA] 唯一真正未完成項目仍是 DEF-200-316 方案 B，結構性卡在
+   auto mode 的 `[Self-Modification]` 分類器（非本 session 或任何 subagent 可繞過）；
+   [他包回報 Architect] 本輪新發現 **P2-1**（方案 B 設計書 D2b 測試影響盤點不完整，漏列
+   `test_hook_wiring_cwd_safety.py` 與 `test_block_destructive_git_r83.py` 兩檔），已回流
+   為設計書新增〈D2c〉節；其餘「待主控回填」項目在 f717181b commit message 中皆已可見落地，
+   非未結事項。
+
+### 主控裁決
+
+主控（Fable 5.1）本輪裁決 R1～R7（原文照錄）：
+
+R1. 多 CPU 系列維持收斂，本輪零程式碼改動：三支獨立全套（Architect／SD／QA 各跑一次）皆
+    rc=0、workers=9 source=cpu_budget、slot 99.7%、loss=1.00x、零 🚨／⚠️／🐢、零種子過期；
+    雲端 HEAD f717181b 四支 push run 全 success、workers 4／4／3／4（ubuntu／ubuntu／macos／
+    windows）皆印 `[cpu_budget]`；全庫 `-p no:xdist` 皆有明文 WHY（口徑差異：SA 數 11 處、
+    Architect 數 9 行實際呼叫行、主控現查文字出現 13 次含 WHY 註解，三者同一結論）；chaos-nightly
+    LATEST track workers=4。不重啟系列。
+R2. Architect P2-1 CONFIRMED（QA 逐行核實）：方案 B 設計書 D2b 漏列兩檔
+    （`AISDLC_SDD/scripts/tests/test_hook_wiring_cwd_safety.py` L190／262／438 呼叫將刪除的
+    `is_posix_carrier()`；`tools/tests/test_block_destructive_git_r83.py::test_it_is_exec_
+    form_with_both_platform_carriers` L487-503 斷言 `len==2` 且需 POSIX 載具，同檔
+    `test_the_whole_settings_file_has_no_form_problems` L506-510 與
+    `test_check_hooks_liveness.py::test_real_settings_is_all_exec_form` L1951-1958 同型
+    耦合）⇒ 本輪把 D2c 補進設計書（設計書在 repo 外，不受 auto mode 阻擋）；兩處漂移以現值
+    訂正（`tools/dev_start.py` 1950 行／cap 1952 餘裕 2；`test_check_hooks_liveness.py` 的
+    `TestRuntimeCarrierEvidenceIsRead` 現 L3383、`TestTheStopGuardIsTheAutomaticReaderOf
+    ThatEvidence` 現 L3467，檔案 3526 行，改以類別名定位）。
+R3. 方案 B 不可分段：測試層耦合證據（兩支測試直接讀真實 `.claude/settings.json` 餵
+    `hook_form_problems()` 斷言 `== []`）⇒ D1＋D2＋D2b＋D2c＋D5 必須同一原子提交，由掌舵者
+    在非 auto mode 窗口親手做。D3（新模組 `hook_carrier_symlink.py`）雖可獨立先做，主控裁決
+    **不預作**：未接線的模組是投機性程式碼（Rule 2），且會觸發護欄棘輪與 LOC 記帳卻無對應
+    功能；留到同一窗口一併做。
+R4. QA 對 Architect 的附屬 REFUTED（grep 命中檔歸屬寫反）：不影響 P2-1 本體；D2c 以 QA 核實
+    後的歸屬為準（`test_check_hooks_liveness.py` 是 D2b 已處理面、非額外命中；
+    `test_block_destructive_git_r83.py` 是真命中）。
+R5. 帳本四列（皆 open 維持）：311 加註「2026-09-26 mac 加壓 20/20 綠，未重現≠已修」；316 加註
+    本輪 P2-1 與 R2／R3 裁決指針；381 觀察期 1/7→2/7；395 加註「mac 上 `[WINDOWS-NATIVE-ONLY]`
+    皆 skip（2 skipped×20），只有 Windows 能重現」。四列現值 676／655／638／667 bytes，上限
+    `ROW_MAX_BYTES=700`，且 `OVERSIZE_ROW_GRANDFATHERED` 清單（36）與超標總量（20027）皆滿額
+    ⇒ **不得讓任何一列超過 700 bytes**：狀態欄改寫成索引（一句現況＋「詳見…」），被移出的
+    原文逐字搬進本節新增的〈帳本列瘦身對照〉小節。
+R6. 主控自陳流程失誤：任務書兩處路徑筆誤（`tools/dispatch_imbalance.py` 應為
+    `tools/lib/dispatch_imbalance.py`；`AISLDC_SDD` 應為 `AISDLC_SDD`）；QA 判準字面「有一條
+    REFUTED 即 CONDITIONAL」未區分附屬／本體，致 QA 判 CONDITIONAL 而六問實無新缺陷——主控
+    以實質裁決。
+R7. SD 觀察到同機 peer session（`aisdcl-agent-bb`）在量測窗外跑同一套件並留 3 個未追蹤暫存檔
+    後自清；本輪三次全套時間窗與其不重疊。
+
+### 設計書 D2c 補記
+
+方案 B 設計書 `~/.autosdd/handoff/PlanB_design_20260917.md`（repo 外）本輪新增
+〈D2c　D2b 漏列的兩個測試檔〉節（回應 Architect P2-1／R2／R4）：逐一列出
+`AISDLC_SDD/scripts/tests/test_hook_wiring_cwd_safety.py`（L190／262／438 三處
+`is_posix_carrier()` 呼叫＋L236 R97「跨平台配對各造一半」前提衝突）與
+`tools/tests/test_block_destructive_git_r83.py::test_it_is_exec_form_with_both_platform_
+carriers`（L487-503，`assertEqual(len(mine), 2, ...)` 與 `is_posix_carrier()` 呼叫兩處
+必炸）的現行斷言原文、方案 B 下會紅的原因、與比照 D2b 規格的「先紅再綠」改法草案（明文
+「改法草案待實作窗口親讀全文後定案」，不預先鎖死函式／常數命名）。同輪並於 D9 表訂正
+`tools/dev_start.py` 現值為 1950 行／餘裕 2（非表定的 1952 行／零餘裕）；D2b 內兩個類別的
+行號引用改以類別名定位（現值 `TestRuntimeCarrierEvidenceIsRead` L3383、
+`TestTheStopGuardIsTheAutomaticReaderOfThatEvidence` L3467，檔案現 3526 行）；D7 補上
+〈測試層耦合證據〉段（R3 的兩支直接讀真實 `settings.json` 的測試），並明文「D3 不預作
+（主控裁決，Rule 2）」。
+
+### 帳本列瘦身對照
+
+| ID | 瘦身前狀態欄原文逐字 | 瘦身後狀態欄原文逐字 | bytes（整列）前→後 |
+|---|---|---|---|
+| DEF-200-311 | open（2026-09-15）；2026-09-17 連跑 20 次 rc 全 0、整檔＋xdist 50 passed（四方 SA 實測；未重現≠已修）；2026-09-25 再補：CPU 壓力 20/20、I/O 負載 26/26 皆綠（他包回報）；未重現≠已修，解鎖條件不變 | open（2026-09-15）；2026-09-26 mac 加壓 20/20 綠，未重現≠已修，解鎖條件不變。詳見 CrossPlatform_DEF200274_Parallel_Tests_Evidence_2.md〈收斂後複驗 III〉。 | 676→611 |
+| DEF-200-316 | open（2026-09-17）；裁決已回填 | open（2026-09-17）；09-26 補 D2c。詳見〈收斂後複驗 III〉 | 655→687 |
+| DEF-200-381 | open（未指派）：同分流去向欄，另需同步鎖 `test_gating_job_names_does_not_yet_include_chaos_latest`。詳見 CrossPlatform_DEF200274_Parallel_Tests_Evidence_2.md〈系列收斂後四方重驗〉 | open（未指派）：觀察期 2/7（2026-09-26 新增一次成功排程，日曆 2026-10-03 未到），同步鎖 `test_gating_job_names_does_not_yet_include_chaos_latest`。詳見 CrossPlatform_DEF200274_Parallel_Tests_Evidence_2.md〈收斂後複驗 III〉。 | 638→690 |
+| DEF-200-395 | open（2026-09-26）：未重現≠已修；承接輪次：**未指派**；解鎖＝該測試下次紅燈時讀斷言自帶的診斷定位根因。詳見 CrossPlatform_DEF200274_Parallel_Tests_Evidence_2.md〈收斂後複驗與遺留收尾（2026-09-26）〉 | open（2026-09-26）：未重現≠已修；mac 上 [WINDOWS-NATIVE-ONLY] 皆 skip（2 skipped×20），只有 Windows 能重現；承接輪次：**未指派**。詳見 CrossPlatform_DEF200274_Parallel_Tests_Evidence_2.md〈收斂後複驗 III〉。 | 667→658 |
+
+（316 因該列其餘欄位本就偏長，瘦身後last欄可用預算僅 85 bytes，故未能塞入完整證據檔檔名，
+以簡短索引「詳見〈收斂後複驗 III〉」代替，完整指針見上表左欄本節；此為 bytes 硬約束下的
+如實取捨，非遺漏。）
+
+### 🔴 誠實劃界
+
+- SD 整輪 wall 未掛 `time`（以 78 筆 1 秒取樣推估 ≈78s 量級，非精確值）；穩態 CPU% 以 top
+  取樣去頭尾 58 筆 ≈92%（上輪 88%，同量級，量法差異不深究）。
+- 逐 worker 負載分佈／最大最小負載比不可得：runner 只印 top5；活體快取父子鍵重複計入
+  （天真加總 S=1270.2s vs 真實 811.1s）。
+- DEF-200-395 在 mac 全 skip，加壓 20 次 rc=0 是 skip 的綠、非真跑。
+- mutmut 2.4.3 無平行旋鈕之結論本場未獨立驗證（套件未裝根層 `.venv`）；沿用上輪。
+- windows nightly-full 最近 schedule run 35600885460（09-21）未逐行覆核 cpu 行，只核了
+  dispatch 36212273769。
+- DEF-200-316 方案 B 仍未實作，mac 探針 ENOENT 仍 6 行；本輪只把設計書補完整。
+- 主控任務書兩處路徑筆誤（R6）：`tools/dispatch_imbalance.py` 應為
+  `tools/lib/dispatch_imbalance.py`；`AISLDC_SDD` 應為 `AISDLC_SDD`。
+
+### 待主控回填
+
+- 主控親驗（收尾單人窗口）：`check_defect_log_crossref.py` rc=0；四列 bytes 611／687／690／658、
+  `oversize_row_problems` 0；`test_doc_loc_baseline_freshness_r60` OK rc=0、`test_archive_defect_log`
+  OK rc=0；根層全套 `REAL_RC=0`、`發現 4640 個測試（下限 4543）`、`[cpu_budget] root-unittest
+  workers=9 source=cpu_budget`、`📊 派工摘要：worker=9｜S=760.7s｜ideal=max(S/W, 最長單位)=84.5s
+  （S/W-bound）｜loss=1.00x｜slot 利用率=99.7%｜最長單位：test_dev_start 43.5s`、
+  `[M6 id 集合] tools/tests@darwin：✅ 集合關係成立（本次 skip 47 支）`，零 🚨／🐢／種子過期行。
+- 複審鏡三條 P3 由主控親手修：瘦身對照表四列改為逐字（自 HEAD 帳本抄，不加外層反引號）；
+  `test_the_whole_settings_file_has_no_form_problems` 行號訂正為 L506-510（證據檔與設計書兩處，
+  現查 def 在 L506、下一個 def 在 L512）；R1 補 `-p no:xdist` 三種口徑（11／9／13）的註記。
+- commit／push／雲端：見 git log 與 `gh run list --commit <sha>`（本節不寫死 sha）。
