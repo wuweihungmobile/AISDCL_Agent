@@ -204,6 +204,25 @@ _M6_EXEMPT: dict[str, str] = {
         "相反，任何單一 tools/tests@win32 落款都會讓另一邊判 [漂移]。解除判準＝兩邊機台"
         "權限狀態一致後移除本項"
     ),
+    # DEF-200-404：`test_hook_carrier_symlink.py` 三支改走同一支 `create_symlink_or_skip`
+    # 探針後，與上一項完全同型（symlink 特殊權限相依、非平台相依）——本機（Koala-MSI，
+    # Developer Mode 關閉）skip、GitHub-hosted windows runner 有權限故真跑；任何單一落款
+    # 都會讓另一邊判 [漂移]。同一份 provenance、同一個解除判準，逐 id 登記（本表以 test-id
+    # 為鍵，不能用類別前綴一筆帶過）。
+    "test_hook_carrier_symlink.TestEnsurePosixCreation.test_missing_link_is_created": (
+        "[DEF-200-404 暫時豁免] 機台 symlink 特殊權限相依（非平台相依），同 R106 那一項；"
+        "解除判準＝兩邊機台權限狀態一致後移除本項"
+    ),
+    "test_hook_carrier_symlink.TestEnsurePosixCreation."
+    "test_a_healthy_existing_link_is_silent_and_idempotent": (
+        "[DEF-200-404 暫時豁免] 機台 symlink 特殊權限相依（非平台相依），同 R106 那一項；"
+        "解除判準＝兩邊機台權限狀態一致後移除本項"
+    ),
+    "test_hook_carrier_symlink.TestEnsureFailLoud."
+    "test_a_symlink_to_the_wrong_target_is_not_overwritten": (
+        "[DEF-200-404 暫時豁免] 機台 symlink 特殊權限相依（非平台相依），同 R106 那一項；"
+        "解除判準＝兩邊機台權限狀態一致後移除本項"
+    ),
     "test_skip_ceiling_ratchet_direction.TestSkipLedgerCoChangeLock."
     "test_skip_ledger_co_change_ignores_a_touch_with_no_value_change": (
         "[喚醒鏈四方審計修復包豁免] diff-範圍相依（非平台相依）：本測試比較 "

@@ -71,7 +71,7 @@ _FROZEN_CEILING_MAX: dict[str, dict[str, int]] = {
     "tools/tests@win32": {
         S.SKIP_GROUP_PLATFORM: 42,  # 對抗式稽核收尾上修 41→42：provenance 見 policy 主表同鍵段
         S.SKIP_GROUP_TOOL_ABSENCE: 0,
-        S.SKIP_GROUP_ENV_DISABLED: 2,
+        S.SKIP_GROUP_ENV_DISABLED: 4,  # DEF-200-404 上修 2→4：帳本具名理由＋實跑 census，見 policy 主表同鍵段
         S.SKIP_GROUP_STRUCTURAL: 0,
         S.SKIP_GROUP_DEBT: 0,
         S.SKIP_GROUP_UNTAGGED: 0,

@@ -143,7 +143,7 @@
     ]
   },
   "tools/tests@win32": {
-    "measured-at": "2026-09-25T14:24:24+00:00（真 GitHub run：windows-compat-ci 對 commit f901721 的 M6 漂移印出的可貼落款；43 支與 2026-09-07 落款相同）。修復棒 H（DEF-200-392 覆審）訂正：G 這裡新增的 `PlannerCheckIsConsoleFreeTest.test_planner_check_does_not_spawn_a_visible_terminal` 條目已移除——該測試原本在 win32 上函式體內 `[ENV-DISABLED]`（`resolve_transcript(None, None)` 在乾淨 CI runner 上解不到逐字稿），本輪改用合成逐字稿 ＋ 顯式 `--transcript`，不再依賴機台上是否真有逐字稿；本機真 pythonw.exe 端到端重跑（`python -m unittest discover -s tools/tests -p test_context_budget_guard.py -k PlannerCheckIsConsoleFreeTest -v`）確認該測試在 win32 上 `ok`（不再出現在任何 skip 清單），需要下一次真 windows-compat-ci run 覆核（本欄由主控／下一輪收尾單人窗口補；本輪未跑根層全套，遵守收尾單人窗口分工）",
+    "measured-at": "2026-09-25T14:24:24+00:00（真 GitHub run：windows-compat-ci 對 commit f901721 的 M6 漂移印出的可貼落款；43 支與 2026-09-07 落款相同）。DEF-200-404 收尾單人窗口（2026-09-27，Windows 本機 Koala-MSI）親跑 tools/run_root_unittests.py 量到 46 支：多出的 3 支＝test_hook_carrier_symlink 改走 create_symlink_or_skip 後在無 symlink 權限機台的 [ENV-DISABLED] skip，與 R106 那一項同型、已逐 id 登記 skip_runtime_report._M6_EXEMPT，故本落款維持有權限 runner 的 43 支不改（本機另有 TestStepSwitchCacheCleanup 多 skip、ConsoleFreeSpawnTest 少 skip，皆既有 _M6_EXEMPT 項）；skip 天花板 tools/tests@win32 env-disabled 2→4 同一次變更上修（skip_group_policy 兩張表＋test_skip_ceiling_ratchet_direction 凍結快照）。修復棒 H（DEF-200-392 覆審）訂正沿用：PlannerCheckIsConsoleFreeTest 條目已移除，需下一次真 windows-compat-ci run 覆核",
     "skipped": [
       "test_context_budget_guard.ConsoleFreeSpawnTest.test_the_prelude_really_stops_the_evidence_from_degrading",
       "test_context_budget_guard.Inv5SingleOwnerTest.test_real_launchd_listing_feeds_other_owner_for_session",
