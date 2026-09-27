@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional
 
@@ -204,6 +205,44 @@ def _telemetry_writeback_allowed(explicit_env: str) -> bool:
             )
         return False
     return True
+
+
+@contextmanager
+def telemetry_writeback_disabled():
+    """暫時把兩個規則遙測 flag 顯式設為 "0"，暫停寫回 tracked `governance/rules/*.yaml`。
+
+    DEF-200-402：chaos_runner 是框架自帶、每晚 nightly／CI 都會跑的**固定驗收載具**（演習，
+    永遠不該記正式帳），性質與 pytest 套件同類——`tests/conftest.py` 的
+    `_isolate_rule_telemetry_default` session autouse fixture 早就對 pytest 行程本身做了同樣
+    的事（顯式設 "0"，見該檔 :131-154）。這裡把同一個「顯式 0 opt-out」慣例搬進 production
+    呼叫端（`chaos_runner.run_chaos_rounds()`），而不是套用上方 D28 的
+    `SDD_TELEMETRY_WRITEBACK_REQUIRES_HOOK`／`SDD_FSM_HOOK_ENTRY` hook 身分機制：D28 的設計
+    初衷是給**互動式** Claude Code session 內「漏加 opt-out 前綴的 ad-hoc 探針」用的加法式
+    守衛；chaos_runner 不是那種探針，它是框架自帶的固定演習迴圈，跟 pytest 同一個範疇——用
+    「顯式 0/1」表達「這次呼叫永遠不記帳」，比借用「假裝自己是 hook」更貼近本質，也完全不會
+    觸碰 `_telemetry_writeback_allowed()` 的四象限判準（那組判準與其 43 處測試專測「hook
+    身分」語意，與本 context manager 完全正交，零改動）。
+
+    **強制覆寫**：不論呼叫端進來前兩個 env 是什麼值（含呼叫端自己顯式設過 "1"），只要進了
+    這個 `with` 區塊就強制看見 "0"——chaos 載具的定位是演習，沒有任何情境下它的規則命中
+    應該被算進真實 fire_count／catch_count。
+
+    巢狀安全：離開時還原**進入前的原始值**，包含「原本不存在（unset）」這個狀態（用
+    `os.environ.pop` 而非寫回空字串），故可安全巢狀呼叫——外層 `with` 結束後看到的是外層
+    自己進入前的值，不會被內層殘留污染。
+    """
+    envs = (_RULE_FIRE_TELEMETRY_ENV, _RULE_CATCH_TELEMETRY_ENV)
+    prior = {k: os.environ.get(k) for k in envs}
+    for k in envs:
+        os.environ[k] = "0"
+    try:
+        yield
+    finally:
+        for k in envs:
+            if prior[k] is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = prior[k]
 
 
 def _reset_today_ledger(*, lock_timeout: float = 1.0) -> dict:

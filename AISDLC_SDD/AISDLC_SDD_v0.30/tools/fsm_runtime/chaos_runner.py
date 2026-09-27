@@ -56,7 +56,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, List, Optional
 
-from .fsm_runtime import FSMRuntime
+from .fsm_runtime import FSMRuntime, telemetry_writeback_disabled
 from .state_loader import FSMState, load_state, save_state
 from .timeout_checker import evaluate_human_pending, mark_entered_now
 from .transition_rules import (
@@ -2075,12 +2075,17 @@ def run_chaos_rounds(
         workdir = Path(tmp)
         cleanup = True
     try:
-        for i in range(n):
-            round_seed = master_rng.randrange(1, 2**31 - 1)
-            result = _run_single_round(i, round_seed, workdir)
-            report.rounds.append(result)
-            if progress_cb is not None:
-                progress_cb(i, result)
+        # DEF-200-402：chaos 是演習載具，永遠不記正式帳——強制停用規則遙測寫回，見
+        # `telemetry_writeback_disabled()` docstring（`fsm_runtime.py`）為何不用 D28 hook
+        # 身分機制。裸 CLI（`python -m tools.fsm_runtime.chaos_runner`）與
+        # `_chaos_b28_benchmark.py` 皆呼叫本函式，一次堵住兩個入口。
+        with telemetry_writeback_disabled():
+            for i in range(n):
+                round_seed = master_rng.randrange(1, 2**31 - 1)
+                result = _run_single_round(i, round_seed, workdir)
+                report.rounds.append(result)
+                if progress_cb is not None:
+                    progress_cb(i, result)
     finally:
         if cleanup:
             shutil.rmtree(workdir, ignore_errors=True)

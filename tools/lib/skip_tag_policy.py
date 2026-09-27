@@ -484,7 +484,11 @@ _TREE_FILE_FLOORS: dict[str, int] = {
     # `test_settings_matcher_r145.py`、複審修復波 Dev-A2 新增 `test_escalation_provenance_r6.py`），
     # 62 只剩實測的 77%，第三向逐字指示「重釘為 64」⇒ 照填、零加減推算；複審全 APPROVE、
     # 全包停工後的單人窗口所量。
-    LATEST_FSM_TESTS_TREE: 64,
+    # 🔴 DEF-200-402 收尾重釘 64 → 65：該樹由 80 支長到 **82**（該輪 SD 新增
+    # `test_chaos_runner_no_governance_writeback.py`；81 支那一步是何時長的本輪未考），
+    # 64 只剩實測的 78%，第三向逐字指示「重釘為 65」⇒ 照填、零加減推算；QA APPROVE、
+    # 全包停工後的收尾單人窗口所量（2026-09-27，Windows）。
+    LATEST_FSM_TESTS_TREE: 65,
 }
 
 #: 下限相對實測值的目標比例（`floor ≈ actual × 本值`）。兩個方向都由它定義：

@@ -519,6 +519,9 @@ _GOVERNANCE_DOCS = (
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R158_SessionGate_Statusline_Evidence.md",
     # 掌舵者五問四方審查（DEF-200-340 結案、401 新立、342 釐清）的詳情面：同一資格，即刻登記。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R177_SessionGate_Recovery_Evidence.md",
+    # chaos_runner 裸 CLI 污染 governance/rules 根治（DEF-200-402 結案、403 新立）的詳情面：
+    # 同一資格，即刻登記。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R178_ChaosRunner_Governance_Writeback_Evidence.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/{CrossPlatform,Quota}_*.md`。這**不是**把具名

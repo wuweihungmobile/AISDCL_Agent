@@ -685,7 +685,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 8924,
+    "test_adr_xplat001_c1c2_lock.py": 8945,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 4032,
@@ -720,7 +720,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_gha_action_versions.py": 681,
     "test_git_hooks_install_common.py": 485,
     "test_guard_line_taxonomy_r99.py": 148,
-    "test_hook_carrier_symlink.py": 131,
+    "test_hook_carrier_symlink.py": 153,
     "test_install_statusline.py": 297,
     "test_install_windows_nightly.py": 1358,
     "test_mac_endurance_r83.py": 1987,
@@ -2428,6 +2428,19 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "本列自身、_REGRESSION_LANE_LOG 同輪列、_REPIN_NET_CAP_SCHEDULE 到期兌現列與重新武裝、"
      "_FROZEN_PREFIX_REWRITE_LEDGER 新列造成的行數漂移，反覆覆核收斂到本行本身也計入為止，"
      "同 R173~R176 既有體例。餘額歸主軌，見 CrossPlatform_R145_Scan_Findings.md〈附記（R177）〉。"),
+    ("R178", 107452, 107474, 22,  # round-label-ok：DEF-200-402／403／404 Windows 切換輪收尾
+     "[非淨減法輪][回歸鎖軌申報＝本列淨額全額，見 _REGRESSION_LANE_LOG 同輪列] DEF-200-404 "
+     "結案回歸鎖：test_hook_carrier_symlink.py 改走 _platform_helpers.create_symlink_or_skip 探針"
+     "（無 symlink 權限的 Windows 上由 FAIL／ERROR 轉為 [ENV-DISABLED] skip，POSIX 斷言零弱化；"
+     "TestEnsurePosixCreation 以共用 setUp 探一次權限）＋本表自身漂移「見下一列」，未超軌上限 ⇒ "
+     "全額申報，主軌 0。逐項見 CrossPlatform_R145_Scan_Findings.md"
+     "〈附記（R178）〉。"),  # round-label-ok
+    ("R178", 107474, 107495, 21,  # round-label-ok：本表自身漂移收斂列
+     "[非淨減法輪][同輪追加] 收斂列：本表（test_adr_xplat001_c1c2_lock.py 自身）新增上一列、"
+     "本列自身、_REGRESSION_LANE_LOG 同輪列、_FROZEN_PREFIX_REWRITE_LEDGER 新列、"
+     "_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND 具名展延 178→183 造成的行數漂移，"
+     "反覆覆核收斂到本行本身也計入為止，同 R173~R177 既有體例。餘額歸主軌，見 "
+     "CrossPlatform_R145_Scan_Findings.md〈附記（R178）〉。"),  # round-label-ok
 )
 
 
@@ -2909,6 +2922,10 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "DEF-200-340／401 結案回歸鎖全額（新檔 test_recovery_hint_passes_ps_lint.py＋"
      "test_session_brief.py 六格＋本表自身漂移），未超軌上限 ⇒ 全額申報，主軌 0。逐項見 "
      "CrossPlatform_R145_Scan_Findings.md〈附記（R177）〉。"),
+    ("R178", 43,  # round-label-ok
+     "DEF-200-404 結案回歸鎖全額（test_hook_carrier_symlink.py 改走 symlink 權限探針＋本表自身"
+     "漂移），未超軌上限 ⇒ 全額申報，主軌 0。逐項見 "
+     "CrossPlatform_R145_Scan_Findings.md〈附記（R178）〉。"),  # round-label-ok
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -3023,7 +3040,10 @@ def _regression_lane_cap_basis() -> tuple[str, int]:
 # 🔴 R173 具名展延（鐵律七，不得靜默沿用）round-label-ok：DEF-200-386 種子過期警告根治＋
 # v0.30 console 洩漏 audit 擴面收尾單人窗口，非 root-tools 重構持有面；
 # 真拆待獨立窗口，173 → 178（在 lookahead=5 內，已達上界）。
-_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND = 178
+# 🔴 R178 具名展延（鐵律七，不得靜默沿用）round-label-ok：Windows 切換啟動輪 DEF-200-402／403／404
+# 收尾單人窗口（chaos_runner 治理 yaml 寫回根治＋symlink 測試 Windows 缺口），非 root-tools
+# 重構持有面；真拆待獨立窗口，178 → 183（在 lookahead=5 內，已達上界）。
+_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND = 183
 #: 清償旗標——真拆完成後改 True。刻意用布林而非重建舊尺計數器（ADR §9.3「舊尺已廢」）。
 _ROOT_TOOLS_OLD_SCALE_DEBT_RESOLVED = False
 #: A-2 後設鎖：到期輪只准落在「現查輪＋lookahead」內，推遠（如 9999）當場紅；shrink-only
@@ -3203,10 +3223,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 299
+_REPIN_LOG_FROZEN_PREFIX_LEN = 301
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "8f0be6de014b3c2527b8ebc8a4991ca776860cb7338c8111e9d740d2525ba843")
+    "81d395774077ef6f86368f59eb27cfda5855957193c1582836a400bfefc2bc95")
 
 
 def repin_log_history_digest(
@@ -3548,6 +3568,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R176", "6c1f308c28cf", "d6cb3c93f516", "DEF-200-316"),  # round-label-ok
     ("R176", "d6cb3c93f516", "439d33eed981", "DEF-200-316"),  # round-label-ok：C9 追加
     ("R177", "439d33eed981", "8f0be6de014b", "DEF-200-340"),  # round-label-ok
+    ("R178", "8f0be6de014b", "81d395774077", "DEF-200-404"),  # round-label-ok
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

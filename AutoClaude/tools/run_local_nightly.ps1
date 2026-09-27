@@ -1847,6 +1847,27 @@ $rcChaosLatest = Invoke-Stage 'sdd-fsm-chaos-latest（DEF-200-379 觀察期）' 
     } else {
       $global:LASTEXITCODE = 0
     }
+    # DEF-200-402 圍籬：chaos_runner 是演習載具，`telemetry_writeback_disabled()`
+    # （AISDLC_SDD/AISDLC_SDD_v0.30/tools/fsm_runtime/fsm_runtime.py）應已封殺對
+    # tracked governance/rules/*.yaml 的寫回——本圍籬是「萬一該防線未來被意外繞過」
+    # 的第二道防線，不取代它。先把圍籬檢查前的 rc 存起來：`git status` 這個原生
+    # 呼叫本身的 exit code 與本圍籬判準無關（--porcelain 髒／淨都回 0），不能讓它
+    # 覆寫掉上面已經算出的真實測試結果。
+    $rcBeforeRulesFence = $LASTEXITCODE
+    $rulesDirtyLines = @(& git status --porcelain -- 'governance/rules' 2>$null)
+    $rulesGitRc = $LASTEXITCODE
+    $rulesDirty = ($rulesDirtyLines -join "`n").Trim()
+    if ($rulesGitRc -ne 0) {
+      # QA P3-2（DEF-200-402 複審）：git 自身失敗（非 git 目錄／PATH 無 git）時 stdout 必空，若只信空字串
+      # 就會靜默讀成「乾淨」——圍籬無法判定也要 fail-loud，不得空洞通過。
+      Log ("SDD chaos LATEST：governance/rules 圍籬無法判定——git status 自身 rc=$rulesGitRc（非 git 目錄或 git 不在 PATH）；空輸出不得讀成乾淨（DEF-200-402 圍籬 fail-loud）") 'ERROR'
+      $global:LASTEXITCODE = 1
+    } elseif ($rulesDirty -ne '') {
+      Log ("SDD chaos LATEST：chaos_runner 弄髒了 governance/rules（不應發生——DEF-200-402 的 telemetry_writeback_disabled() 應已封殺此寫回）。這是 nightly 汙染、不是工作成果，請把下列檔案手動還原回追蹤版本：`n$rulesDirty") 'ERROR'
+      $global:LASTEXITCODE = 1
+    } else {
+      $global:LASTEXITCODE = $rcBeforeRulesFence
+    }
   } finally {
     Pop-Location
   }

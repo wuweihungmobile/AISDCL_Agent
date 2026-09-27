@@ -15,6 +15,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from _platform_helpers import create_symlink_or_skip
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -48,6 +50,21 @@ def _make_target(root: Path) -> None:
 
 
 class TestEnsurePosixCreation(unittest.TestCase):
+    """本類兩支測試都是 (b) 類情境（見 `_platform_helpers.py` docstring 第①類收納
+    判準）：驗證的正是 `ensure()` 在磁碟真的建立符號連結的行為，不是可用替身規避
+    的邏輯分支。Windows 未開啟開發人員模式時 `os.symlink` 會拋 `WinError 1314`
+    （R81 包 F 實查，非缺件），故 `setUp` 先用既有 SSOT `create_symlink_or_skip`
+    探一次同一項權限，無權限時比照既有慣例整類 skip，而非誤判成 `ensure()` 邏輯
+    有缺陷。"""
+
+    def setUp(self) -> None:
+        self._probe_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._probe_dir.cleanup)
+        probe_root = Path(self._probe_dir.name)
+        probe_target = probe_root / "target"
+        probe_target.write_text("", encoding="utf-8")
+        create_symlink_or_skip(self, probe_root / "link", probe_target)
+
     def test_missing_link_is_created(self) -> None:
         """連結不存在、目標存在 ⇒ 建立目錄＋建立連結，`emit` 一行含「已建立」，
         回 `True`；事後 `readlink` 精確等於 `../bin/python`。"""
@@ -82,12 +99,17 @@ class TestEnsureFailLoud(unittest.TestCase):
     def test_a_symlink_to_the_wrong_target_is_not_overwritten(self) -> None:
         """符號連結存在但指到別處（使用者手動改過）⇒ **不覆寫**，`emit` 訊息含
         「不覆寫」，回 `False`；且事後 `readlink` 仍是使用者設的那個錯誤目標——
-        驗證「不覆寫」不是空話。"""
+        驗證「不覆寫」不是空話。
+
+        這是測試 fixture 自己要在磁碟建一顆「使用者手動建錯」的既有符號連結
+        （(a) 類：不是驗證 `ensure()` 的建立行為），Windows 無 symlink 權限時
+        比照既有慣例（`_platform_helpers.create_symlink_or_skip`）skip，而非
+        算失敗。"""
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             link = root / ".venv" / "Scripts" / "pythonw.exe"
             link.parent.mkdir(parents=True)
-            link.symlink_to("/usr/bin/python3")
+            create_symlink_or_skip(self, link, "/usr/bin/python3")
             emitted: list[str] = []
             ok = _symlink().ensure(root, False, emitted.append)
             self.assertFalse(ok)

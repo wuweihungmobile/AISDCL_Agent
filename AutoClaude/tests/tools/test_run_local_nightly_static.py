@@ -693,6 +693,40 @@ def test_sdd_chaos_latest_stage_resolves_version_and_fails_loud(ps1_content: str
     )
 
 
+def test_sdd_chaos_latest_stage_fences_governance_rules_writeback(ps1_content: str) -> None:
+    """DEF-200-402 圍籬（設計書 D3）：Stage 6b 內必須有 `governance/rules` 髒樹圍籬，
+    一旦 chaos_runner 意外把 tracked 規則檔寫髒即 fail-loud（rc=1），不得靜默放行。
+
+    意圖：`telemetry_writeback_disabled()`（D1，fsm_runtime.py）是源頭封殺，本圍籬
+    是「萬一 D1 未來被意外繞過（例如有人重構 run_chaos_rounds 時漏帶 with）」的第二
+    道防線——若有人刪掉這段圍籬，nightly 會恢復到 DEF-200-402 事故當時的樣子：
+    chaos_runner 弄髒 governance/rules 卻沒有任何機械訊號，只能等下一次 `git status`
+    被人手動翻到才發現。
+    """
+    block = _extract_stage_block(
+        ps1_content, "Invoke-Stage 'sdd-fsm-chaos-latest", "Invoke-Stage 'Cleanup'"
+    )
+    fence_idx = block.find("git status --porcelain -- 'governance/rules'")
+    assert fence_idx > 0, (
+        "Stage 6b 必須含 `git status --porcelain -- 'governance/rules'` 圍籬"
+        "（DEF-200-402 D3；刪除＝chaos_runner 寫髒 governance/rules 時零機械訊號）"
+    )
+    fence_branch = block[fence_idx : fence_idx + 700]
+    assert "DEF-200-402" in fence_branch, "圍籬的 ERROR log 必須帶 DEF-200-402 取證錨點"
+    assert "'ERROR'" in fence_branch, "圍籬觸發時必須以 ERROR 等級 Log（取證可見）"
+    assert "$global:LASTEXITCODE = 1" in fence_branch, (
+        "governance/rules 被寫髒時圍籬必須把 Stage 6b 標記為失敗（rc=1；fail-loud，"
+        "不得靜默放行）"
+    )
+    # 圍籬必須位於 chaos-report 解析（parse_rc）之後、Pop-Location 之前——確保它涵蓋
+    # 整個 chaos_runner sweep 呼叫之後的真實磁碟狀態，而不是只檢查呼叫之前。
+    parse_idx = block.find("chaosParseRcLatest")
+    assert 0 < parse_idx < fence_idx, (
+        "圍籬必須位於 chaos-report 解析（$chaosParseRcLatest）之後，"
+        "才能觀察到 chaos_runner sweep 實際跑完後的磁碟狀態"
+    )
+
+
 def test_docker_skip_streak_escalation(ps1_content: str) -> None:
     """case 23（R10 QA-11 / DEF-101-140）：Docker 連續 SKIP ≥3 必須升級為失敗。
 
