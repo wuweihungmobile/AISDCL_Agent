@@ -204,5 +204,21 @@ commit 29545e7 後第四跑：M6 ✅（47 支）；census `共 47 支：platform
 頂層 87 支灌成 95、越過下限 75 的腐化上界 93（同 HEAD 前三跑皆綠 ⇒ 競態非退化）；修法＝計數同時排除 `__pycache__` 與
 `_zzz_`，行數不變、護欄淨額不動。
 
+**DEF-200-406（新立即結；掌舵者問「為何 Stop hook 一直報 alien_fail=7」）**：本 session 啟動早於 merge，載入的是 cdae902
+（DEF-200-316 方案 B）之前的配對式 settings——每支 hook 兩條 command，POSIX 半條 `${CLAUDE_PROJECT_DIR}/.venv/bin/python` 在
+Windows 必失敗、Claude Code 只記 ERROR 放行，逐字稿留下 7 筆；merge 後 `hook_wiring.runtime_carrier_verdict()` 已不認得該字面、
+C8 治癒語意又刻意「alien 不被治癒」⇒ Stop hook 每輪重讀逐字稿都把 7 筆判成 `alien_fail` 永久重報。這是「已退役載具字面」缺一個
+分類的假警報，不是 hooks 壞了（同 session 內執行者以新行程 `claude -p --debug hooks` 得 SessionStart success=2、載具 ENOENT=0）。
+修法（Developer-B，Sonnet，隔離 worktree 交 patch）：`hook_wiring.py` 新增 `RETIRED_CARRIERS = frozenset({...})`（+9，SPECIAL_FILES
+棘輪 782 剛好吃滿），`runtime_carrier_verdict()` 命中即計入 `retired_fail`、不進 problems、不算 alien；`check_claim_provenance.py`
+在 `retired_fail > 0` 時改印一行「ℹ️ 另有 N 筆已退役載具的歷史失敗（settings 換代前的配對式 POSIX 半條），不計入活體判定」（+6）；
+`test_check_hooks_liveness.py` +51：四格新測試（退役字面計數不報、同份逐字稿真 alien 仍紅、退役表與 `declared_win_carriers()` 零交集、
+`mock.patch.object` 拿掉分類即紅）＋既有兩支 alien 測試改用真 alien 字面（該退役字面不再是好例子）。端到端以本 session 真實逐字稿
+（1637 筆、226 筆 hook attachment）跑 `check_claim_provenance.py`：修前 `🔴 …（7 筆；alien_fail=7）`、修後只剩一行 ℹ️；計數欄
+`alien_fail 7→0`、`retired_fail 0→7`。主控套 patch 後 `test_check_hooks_liveness` 184 OK；護欄第二次重釘（+51 ＋本表自身第二次
+收斂 +14 含 lane 列 E501 折行，凍結前綴 301→303，sha 第二次接鏈見 `_FROZEN_PREFIX_REWRITE_LEDGER` 末筆）。派工教訓：`isolation: worktree` 把 worktree 建在
+`.claude/worktrees/` 即 repo 樹內，全庫掃描型鎖（`test_mac_endurance_r83` 三支「一個家」、`TestDirEntryPrimitivesAreAccountedFor`）
+會把它算成第二份複本——並行 worktree 存在期間不得跑根層全套，或跑完前先移除 worktree（第五跑的 4 紅即此因）。
+
 誠實劃界（本節）：雲端 `chaos-latest` job 與 mac 側皆未在本輪真機驗證；push 前最後一次根層全套與 push 後雲端五支 run 結果
 寫在 commit 訊息與下一則回填，不在本節預寫。

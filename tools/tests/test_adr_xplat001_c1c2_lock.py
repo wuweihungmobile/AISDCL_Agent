@@ -685,7 +685,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 8945,
+    "test_adr_xplat001_c1c2_lock.py": 8959,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 4032,
@@ -697,7 +697,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_check_archive_required.py": 160,
     "test_check_defect_log_crossref.py": 3906,
     "test_check_gha_action_versions.py": 295,
-    "test_check_hooks_liveness.py": 3559,
+    "test_check_hooks_liveness.py": 3610,
     "test_check_pytest_baseline_sites.py": 301,
     "test_check_script_parity.py": 2029,
     "test_check_wrapper_thinness.py": 1185,
@@ -2441,6 +2441,18 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND 具名展延 178→183 造成的行數漂移，"
      "反覆覆核收斂到本行本身也計入為止，同 R173~R177 既有體例。餘額歸主軌，見 "
      "CrossPlatform_R145_Scan_Findings.md〈附記（R178）〉。"),  # round-label-ok
+    ("R178", 107495, 107546, 51,  # round-label-ok：DEF-200-406 退役載具分類收尾單人窗口
+     "[非淨減法輪][回歸鎖軌申報＝本列淨額全額，見 _REGRESSION_LANE_LOG 同輪列] DEF-200-406 "
+     "結案回歸鎖：test_check_hooks_liveness.py（runtime_carrier_verdict 新增 RETIRED_CARRIERS "
+     "退役載具分類——退役字面失敗計入 retired_fail 不進問題清單、真 alien 鑑別力不減、退役表與"
+     "現行載具零交集、拿掉分類即紅；既有 alien 測試改用真 alien 字面）＋本表自身漂移「見下一列」，"
+     "未超軌上限 ⇒ 全額申報，主軌 0。逐項見 CrossPlatform_R145_Scan_Findings.md"
+     "〈附記（R178）〉。"),  # round-label-ok
+    ("R178", 107546, 107560, 14,  # round-label-ok：本表自身漂移第二次收斂列
+     "[非淨減法輪][同輪追加] 收斂列：本表（test_adr_xplat001_c1c2_lock.py 自身）新增上一列、"
+     "本列自身、_REGRESSION_LANE_LOG 同輪列改寫、_FROZEN_PREFIX_REWRITE_LEDGER 接鏈列造成的"
+     "行數漂移（同輪第二次收斂，同既有多列收斂體例）。餘額歸主軌，見 "
+     "CrossPlatform_R145_Scan_Findings.md〈附記（R178）〉。"),  # round-label-ok
 )
 
 
@@ -2922,10 +2934,11 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "DEF-200-340／401 結案回歸鎖全額（新檔 test_recovery_hint_passes_ps_lint.py＋"
      "test_session_brief.py 六格＋本表自身漂移），未超軌上限 ⇒ 全額申報，主軌 0。逐項見 "
      "CrossPlatform_R145_Scan_Findings.md〈附記（R177）〉。"),
-    ("R178", 43,  # round-label-ok
-     "DEF-200-404 結案回歸鎖全額（test_hook_carrier_symlink.py 改走 symlink 權限探針＋本表自身"
-     "漂移），未超軌上限 ⇒ 全額申報，主軌 0。逐項見 "
-     "CrossPlatform_R145_Scan_Findings.md〈附記（R178）〉。"),  # round-label-ok
+    ("R178", 108,  # round-label-ok
+     "DEF-200-404／406 結案回歸鎖全額（test_hook_carrier_symlink.py 改走 symlink 權限探針＋"
+     "test_check_hooks_liveness.py 退役載具分類四格＋本表自身漂移兩次收斂），未超軌上限 ⇒ "
+     "全額申報，主軌 0。逐項見 CrossPlatform_R145_Scan_Findings.md"
+     "〈附記（R178）〉。"),  # round-label-ok
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -3223,10 +3236,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 301
+_REPIN_LOG_FROZEN_PREFIX_LEN = 303
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "81d395774077ef6f86368f59eb27cfda5855957193c1582836a400bfefc2bc95")
+    "cd02c8559b6c6311015a9ca1f6f4c5e42070d7e460d8a61be407067bfc2b2c7b")
 
 
 def repin_log_history_digest(
@@ -3569,6 +3582,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R176", "d6cb3c93f516", "439d33eed981", "DEF-200-316"),  # round-label-ok：C9 追加
     ("R177", "439d33eed981", "8f0be6de014b", "DEF-200-340"),  # round-label-ok
     ("R178", "8f0be6de014b", "81d395774077", "DEF-200-404"),  # round-label-ok
+    ("R178", "81d395774077", "cd02c8559b6c", "DEF-200-406"),  # round-label-ok：第二次接鏈
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

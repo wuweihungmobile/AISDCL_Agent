@@ -89,6 +89,10 @@ WIN_CARRIER_VENV = f"{PROJECT_DIR_PLACEHOLDER}/{WIN_CARRIER_REL}"
 WIN_CARRIER_PATH = "pythonw.exe"
 WIN_CARRIERS = (WIN_CARRIER_VENV, WIN_CARRIER_PATH)
 
+#: 已退役的歷史載具字面（DEF-200-406）：方案 B（cdae902）前的 POSIX 半條，換代後舊
+#: 逐字稿裡的失敗是歷史非 alien；新增前先查不在現行載具集合（見 liveness 測試交集判準）。
+RETIRED_CARRIERS: frozenset[str] = frozenset({"${CLAUDE_PROJECT_DIR}/.venv/bin/python"})
+
 #: hook command／args 裡的腳本路徑（正／反斜線皆收）。刻意不去解析 `-c` 那段 Python
 #: 程式碼：shim 本體不含任何 `.py` 字面，路徑一律以引數形式出現。
 _PY_TOKEN_RE = re.compile(r"[\w./\\${}-]*\.py")
@@ -559,10 +563,13 @@ def runtime_carrier_verdict(attachments) -> tuple[list[str], dict[str, int]]:
     `healed_fail`（不進 problems、不計入 `native_fail`）——同一件事每次回覆都喊
     的守衛會被關掉（DEF-200-316 收尾單人窗口）。`alien_fail` 不受此規則影響：
     認不得的載具本身就是缺陷，出現一次就算，不會被之後的成功治癒。問題清單只留
-    **最新** 8 筆（`problems[-8:]`）；計數欄不受這個上限影響。
+    **最新** 8 筆（`problems[-8:]`）；計數欄不受這個上限影響。`retired_fail`
+    （DEF-200-406）：command 命中 `RETIRED_CARRIERS`（settings 換代前的舊字面）不進
+    problems、不算 alien、不吃 healed；判準先於 `alien`／`native` 兩支。
     """
     counts = dict.fromkeys(
-        ("native_fail", "alien_fail", "advisory_exit", "success", "healed_fail"), 0)
+        ("native_fail", "alien_fail", "advisory_exit", "success", "healed_fail",
+         "retired_fail"), 0)
     attachments = list(attachments)
     last_ours_success = max(
         (i for i, att in enumerate(attachments)
@@ -576,6 +583,9 @@ def runtime_carrier_verdict(attachments) -> tuple[list[str], dict[str, int]]:
             continue
         where = f"[{att.get('hookEvent') or att.get('hookName') or '?'}]"
         stderr = str(att.get("stderr") or "")
+        if (command.split() or [""])[0] in RETIRED_CARRIERS:
+            counts["retired_fail"] += 1
+            continue
         if _is_ours_attachment(att):
             if not spawn_failure.is_spawn_failure(stderr):
                 # 載具真的跑起來了，是 hook 自己選擇非阻斷地回非零（例如治理檔保護

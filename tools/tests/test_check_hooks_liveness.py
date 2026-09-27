@@ -3379,7 +3379,9 @@ _THE_CARRIER_ENOENT = {
 }
 
 #: 舊 POSIX 專屬字面（方案 B 前的獨立宣告）——方案 B 起沒有任何 settings.json 會再
-#: 宣告它，出現即認不得（alien_fail）。舊名（「_NATIVE_CARRIER_EACCES」）沿革同上節。
+#: 宣告它。DEF-200-406 起改為 `RETIRED_CARRIERS` 收編的退役字面（`retired_fail`），
+#: 不再算 alien：跨越換代的 session 讀到它是歷史，不是活著的缺陷。舊名
+#: （「_NATIVE_CARRIER_EACCES」）沿革同上節。
 _STALE_POSIX_LITERAL_EACCES = {
     "type": "hook_non_blocking_error", "hookEvent": "PreToolUse", "exitCode": 1,
     "stderr": "EACCES: permission denied, posix_spawn '/fake/repo/.venv/bin/python'",
@@ -3412,12 +3414,14 @@ class TestRuntimeCarrierEvidenceIsRead(unittest.TestCase):
     def test_a_carrier_the_repo_does_not_recognise_is_also_a_defect(self) -> None:
         """有人把條目退回 `python -c …`／換了載具 ⇒ 形態判準看不到「實際跑的是別的東西」。
 
-        `_STALE_POSIX_LITERAL_EACCES`（方案 B 前的獨立 POSIX 宣告字面）併測：
-        方案 B 起沒有任何 settings.json 會再宣告這個字面，出現即認不得 ⇒ alien。
+        DEF-200-406 起 `_STALE_POSIX_LITERAL_EACCES` 已被 `RETIRED_CARRIERS` 收編、
+        不再算 alien（見 `test_a_retired_carrier_literal_is_counted_but_not_reported`）；
+        本測試改用兩個真正認不得的載具字面，維持「真 alien 仍是 alien」的鑑別力。
         """
         wiring = _hook_wiring()
         problems, counts = wiring.runtime_carrier_verdict([
-            _STALE_POSIX_LITERAL_EACCES,
+            {"type": "hook_non_blocking_error", "hookEvent": "PreToolUse",
+             "command": "sh -c 'runpy .claude/hooks/x.py'"},
             {"type": "hook_non_blocking_error", "hookEvent": "PostToolUse",
              "command": "python -c import runpy .claude/hooks/x.py"},
         ])
@@ -3448,12 +3452,15 @@ class TestRuntimeCarrierEvidenceIsRead(unittest.TestCase):
 
     def test_an_alien_failure_is_not_healed_by_carrier_success(self) -> None:
         """`alien_fail` 不吃治癒規則：認不得的載具本身就是缺陷，別條載具之後
-        成功了也治不好它（那是不同的一顆）。"""
+        成功了也治不好它（那是不同的一顆）。DEF-200-406 起改用真正認不得的字面
+        （`_STALE_POSIX_LITERAL_EACCES` 已被 `RETIRED_CARRIERS` 收編，不再是好例子）。
+        """
         wiring = _hook_wiring()
+        real_alien = {"type": "hook_non_blocking_error", "hookEvent": "PostToolUse",
+                      "command": "python -c import runpy .claude/hooks/x.py"}
         unrelated_success = {"type": "hook_success", "hookEvent": "SessionStart",
                              "exitCode": 0, "command": _THE_CARRIER_ENOENT["command"]}
-        problems, counts = wiring.runtime_carrier_verdict(
-            [_STALE_POSIX_LITERAL_EACCES, unrelated_success])
+        problems, counts = wiring.runtime_carrier_verdict([real_alien, unrelated_success])
         self.assertEqual(len(problems), 1)
         self.assertEqual(counts["alien_fail"], 1)
 
@@ -3469,6 +3476,50 @@ class TestRuntimeCarrierEvidenceIsRead(unittest.TestCase):
         self.assertIn("SEQ=10", problems[-1])
         self.assertNotIn("SEQ=01", "\n".join(problems))
         self.assertEqual(counts["native_fail"], 10, "計數欄不受上限影響，仍是全量")
+
+    def test_a_retired_carrier_literal_is_counted_but_not_reported(self) -> None:
+        """DEF-200-406：settings 換代前的舊字面（`_STALE_POSIX_LITERAL_EACCES`，方案 B
+        前的配對式 POSIX 半條）不再算 alien_fail——它只會出現在換代前落盤的舊逐字稿裡，
+        是歷史不是活著的缺陷。"""
+        wiring = _hook_wiring()
+        problems, counts = wiring.runtime_carrier_verdict([_STALE_POSIX_LITERAL_EACCES])
+        self.assertEqual(problems, [])
+        self.assertEqual(counts["retired_fail"], 1)
+        self.assertEqual(counts["alien_fail"], 0)
+
+    def test_a_retired_literal_does_not_mask_a_real_alien_in_the_same_transcript(
+        self,
+    ) -> None:
+        """退役分類不能連帶關掉真 alien 的警報——同一份逐字稿裡兩者都要各自正確分類
+        （鑑別力不減）。"""
+        wiring = _hook_wiring()
+        real_alien = {"type": "hook_non_blocking_error", "hookEvent": "PostToolUse",
+                      "command": "python -c import runpy .claude/hooks/x.py"}
+        problems, counts = wiring.runtime_carrier_verdict(
+            [_STALE_POSIX_LITERAL_EACCES, real_alien])
+        self.assertEqual(counts["retired_fail"], 1)
+        self.assertEqual(counts["alien_fail"], 1)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("'python'", problems[0])
+
+    def test_retired_carriers_never_overlap_the_live_carrier_set(self) -> None:
+        """新增退役字面的前提：它不能是任何現行載具——否則會把活載具的失敗警報
+        永久關掉（`RETIRED_CARRIERS` 旁註明文要求）。"""
+        wiring = _hook_wiring()
+        live = set(wiring.WIN_CARRIERS) | wiring.declared_win_carriers(_load_real_settings())
+        self.assertEqual(wiring.RETIRED_CARRIERS & live, set())
+
+    def test_removing_the_retired_classification_makes_the_literal_alien_again(
+        self,
+    ) -> None:
+        """守住「這個分類真的在生效」：拿掉 `RETIRED_CARRIERS` 的內容，退役字面必須
+        立刻退回 alien_fail——證明上面的 (a) 是這個分類的功勞，不是巧合。"""
+        wiring = _hook_wiring()
+        with mock.patch.object(wiring, "RETIRED_CARRIERS", frozenset()):
+            problems, counts = wiring.runtime_carrier_verdict([_STALE_POSIX_LITERAL_EACCES])
+        self.assertEqual(counts["alien_fail"], 1)
+        self.assertEqual(counts["retired_fail"], 0)
+        self.assertEqual(len(problems), 1)
 
     def test_successes_are_counted_but_never_treated_as_coverage(self) -> None:
         """🔴 `hook_success` **只有在 hook 真的印字時才落盤**（本機全母體 11,438 筆 success

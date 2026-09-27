@@ -1036,7 +1036,10 @@ def main() -> int:
         # 看不到這件事（判準面是 settings.json ＋ 檔案系統，不是執行結果），而執行期證據
         # 此前**零讀者** —— 本機全母體 217 筆 hook 失敗跨九天沒有任何東西說過一句話。
         # 方案 B（DEF-200-316）起 `runtime_carrier_verdict()` 不再收 `on_windows` 引數、
-        # 也不再有 `by_design_fail` 桶（見該函式 WHY）。
+        # 也不再有 `by_design_fail` 桶（見該函式 WHY）。DEF-200-406：settings 換代
+        # （cdae902）前留下的舊 POSIX 半條字面此前被誤判成 alien_fail 而永久重報，
+        # 現已分類為 `retired_fail`（見 hook_wiring.RETIRED_CARRIERS 的 WHY），
+        # 改印一行 ℹ️ 資訊，不進 🔴 逐筆清單。
         if hook_wiring is not None and not os.environ.get("AUTOSDD_CARRIER_GUARD_OFF"):
             problems, counts = hook_wiring.runtime_carrier_verdict(
                 hook_wiring.hook_result_attachments(records))
@@ -1050,6 +1053,10 @@ def main() -> int:
                     f"（{live_n} 筆；alien_fail={counts['alien_fail']}）。"
                     "CC 對載具失敗只記一行 ERROR 就放行 ⇒ 表徵與"
                     "「修好了」完全相同。逐筆：\n    " + "\n    ".join(problems))
+            if counts.get("retired_fail"):
+                messages.append(
+                    f"ℹ️ 另有 {counts['retired_fail']} 筆已退役載具的歷史失敗"
+                    "（settings 換代前的配對式 POSIX 半條），不計入活體判定。")
         _say(messages, event, quiet)
     except Exception:  # noqa: BLE001 — fail-open，見檔頭 P0
         return 0
