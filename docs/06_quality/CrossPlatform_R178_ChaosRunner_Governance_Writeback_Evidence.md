@@ -221,4 +221,23 @@ C8 治癒語意又刻意「alien 不被治癒」⇒ Stop hook 每輪重讀逐字
 會把它算成第二份複本——並行 worktree 存在期間不得跑根層全套，或跑完前先移除 worktree（第五跑的 4 紅即此因）。
 
 誠實劃界（本節）：雲端 `chaos-latest` job 與 mac 側皆未在本輪真機驗證；push 前最後一次根層全套與 push 後雲端五支 run 結果
-寫在 commit 訊息與下一則回填，不在本節預寫。
+見下一節。
+
+## 九、push 與雲端驗收（2026-09-28，Windows，Koala-MSI）
+
+- 本機 commit 鏈（皆在 1118bc3 之上）：`b19a5aa`（perf 基線）→ `846a99c`（表② 第一次回填）→ `12f92c9`（R178 主修法＋二次回填）→
+  `29545e7`（凍結對照／M6 豁免／落款 provenance）→ `0339660`（census 5／floor band 競態）→ `d645711`（DEF-200-406 退役載具）→
+  `92fcc41`（governance_docs 登記行折行）。
+- 第一次 `git push`（HEAD d645711）被 pre-push 根層**快層**擋下：`❌ root-infra：ruff check tools/ .claude/hooks/ 失敗`——
+  `tools/lib/governance_docs.py:524` E501 107 > 100（SD 的登記行；Developer-B 與主控此前只用 `--isolated --select E501` 掃改到的
+  檔，漏了 repo 設定檔判準）；AutoClaude leg／AISDLC_SDD leg 皆 rc=0。折行後 `ruff check tools/ .claude/hooks/` All checks passed。
+- 第二次 push（HEAD 92fcc41）rc=0：`1118bc3..92fcc41  main -> main`；pre-push 三 leg `root=18 autoclaude=2 sdd=2 wall=167s`，
+  根層慢層「發現 4666 個測試」、AutoClaude leg「本機 CI 閘門全綠」、SDD leg「閘門通過」。
+- 雲端五支 push run（對 92fcc41）全 `completed／success`：root-infra-ci 36334071459、windows-compat-ci 36334071418、
+  aisdlc-sdd-ci 36334071507、AutoClaude CI 36334071520、macos-compat-ci 36334071399（`gh run list --json` 依 headSha 篩選；
+  `gh run list --commit <sha>` 在本機 gh 版本回 0 筆，不可用作憑證）。
+- 本 session 的 Stop hook 自 d645711 落地後改印一行「ℹ️ 另有 7 筆已退役載具的歷史失敗（settings 換代前的配對式 POSIX 半條），
+  不計入活體判定。」，🔴 alien_fail=7 警報不再出現（hook 每次執行磁碟上的程式，不必重啟 session）。
+- 尚未真機驗的面：雲端 `chaos-latest` job 是否也不再寫回（runner 拋棄式，本輪未抓其 log 覆核）；mac 側 `run_local_nightly.sh`
+  parity 債（DEF-200-403 open）；有 symlink 權限的 windows runner 對 `tools/tests@win32` 的 census 值（本輪 windows-compat-ci
+  success 只證明它未越過上限，未逐行覆核印出的 census 行）。
