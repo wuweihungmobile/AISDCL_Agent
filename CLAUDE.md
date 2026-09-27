@@ -59,7 +59,7 @@ monorepo 根目錄（`AISDCL_Agent/`，各機器 checkout 路徑不同）＝**�
 |------|--------------|------|--------|
 | `sdd_hook_router.py` | SessionStart；PreToolUse（Write／Edit／Read／Bash／NotebookEdit／Task／Agent／Workflow）；PostToolUse（Write／Edit／Read／Bash／NotebookEdit） | SDD 治理橋接：`SDD_ACTIVE_VERSION` 未設＝休眠 no-op | `SDD_ROUTER_QUIET=1` 靜音 |
 | `block_bash_on_windows.py` | PreToolUse／Bash | Windows 上禁用 Bash 工具（鐵律一）；非 Windows 一律 exit 0 | 無（掌舵者直接指令） |
-| `lint_powershell_command.py` | PreToolUse／PowerShell | 擋「管線後讀 `$LASTEXITCODE`」、行首裸 `cd`／`Set-Location` 帶相對路徑、裸 `bash` + `.sh`（鐵律一、二） | 行尾 `# ps-lint-ok: <WHY>`（獨立註解行無效） |
+| `lint_powershell_command.py` | PreToolUse／PowerShell | 擋「管線後讀 `$LASTEXITCODE`」、行首裸 `cd`／`Set-Location`（不論帶絕對／相對路徑或不帶參數；`Push-Location`／`Pop-Location` 不在此列）、裸 `bash` + `.sh`（鐵律一、二） | 行尾 `# ps-lint-ok: <WHY>`（獨立註解行無效） |
 | `block_destructive_git.py` | PreToolUse／Bash、PowerShell、Write、Edit、NotebookEdit | 毀滅性 git 形態阻斷（鐵律五）＋等待壞形態 `waitform_hits()`（鐵律六）＋治理檔禁寫（PRD §15.5 紅線 10：`AUTOSDD_UNATTENDED` 下保護面唯讀） | `AUTOSDD_GIT_GUARD_OFF`（模型碰不到，須在啟動 claude 前設）；`AUTOSDD_GOVWRITE_GUARD_OFF`（治理面唯讀專屬，與 git 族開關互不相通）；行內 `# git-guard-ok: <理由>`／`# waitform-ok: <WHY>`（`AUTOSDD_UNATTENDED` 有設時行內豁免無效） |
 | `context_budget_guard.py` | SessionStart（自動武裝額度哨兵）；PostToolUse（Read／Task／Grep／Glob／WebFetch／WebSearch／Bash／PowerShell：水位出聲）；PreToolUse（Task／WebFetch／WebSearch／Agent／Workflow：高水位**真的擋下**展開型工具） | context 三段式水位的機械物（見下節）；matcher 刻意不含 Read／Edit／PowerShell——收斂本身需要它們 | `AUTOSDD_CONTEXT_GUARD_OFF`（context 阻斷）／`AUTOSDD_SENTINEL_OFF`（額度哨兵）——**刻意兩個開關**，關掉的是不同的東西 |
 | `check_claim_provenance.py` | Stop | 鐵律四的機械物：量化判決宣稱（`N passed`／`rc=N`…）必須在本場自己的 tool_result 出現過；**只出聲、永不阻斷**；轉述別包交件標 `[他包回報]` | `AUTOSDD_CLAIM_GUARD_OFF`；`AUTOSDD_UNATTENDED` 有設時詞表縮到只認方括號標記 |
@@ -171,7 +171,7 @@ Get-ScheduledTask | Where-Object TaskName -like 'AutoSDD_Sentinel_*' | Get-Sched
 
 ### 鐵律二：一律絕對路徑，禁用裸 `cd`
 
-PowerShell 工具的 cwd **跨呼叫持續**。✅ 絕對路徑；✅ `Push-Location <絕對路徑>; …; Pop-Location` 同呼叫成對；❌ 先 `Set-Location` 下一個呼叫再用相對路徑。機械物＝`lint_powershell_command.py`（行首裸 `cd`／`Set-Location` 帶相對路徑當場擋下；行尾豁免 `# ps-lint-ok: <WHY>`）。事後量測的另一半＝`tools/probe/audit_session.py`（不接任何閘門的 rc）。
+PowerShell 工具的 cwd **跨呼叫持續**。✅ 絕對路徑；✅ `Push-Location <絕對路徑>; …; Pop-Location` 同呼叫成對；❌ 裸 `Set-Location`（不論本次帶的是絕對或相對路徑——風險在**下一次**呼叫的相對路徑，這一次擋不到就晚了）。機械物＝`lint_powershell_command.py`（行首裸 `cd`／`Set-Location`，不論路徑形態一律當場擋下；`Push-Location`／`Pop-Location` 不在此列；行尾豁免 `# ps-lint-ok: <WHY>`）。框架自產的 ESCALATION 恢復指令（`recovery_hint.py`）PowerShell 形態已改 `Push-Location …; & …; Pop-Location`，跨專案鎖＝`tools/tests/test_recovery_hint_passes_ps_lint.py`（DEF-200-340）。事後量測的另一半＝`tools/probe/audit_session.py`（不接任何閘門的 rc）。
 
 ### 鐵律三：寫跨平台程式碼時，強制自問「**這在另一個平台是什麼值？**」
 

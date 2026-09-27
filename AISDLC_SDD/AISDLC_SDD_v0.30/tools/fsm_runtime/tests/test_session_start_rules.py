@@ -156,3 +156,21 @@ def test_decision_trace_staleness_note_pure_function_no_stale_hit():
     trace = [{"ts": "2026-01-01T00:00:00+00:00", "from": "INIT", "to": "SPEC_DRAFTING",
               "trigger": "transition", "reason": "normal start"}]
     assert mod._decision_trace_staleness_note(trace, "SPEC_DRAFTING", blocking) is None
+
+
+def test_decision_trace_staleness_note_guard_clause_blocks_while_still_blocking(tmp_path):
+    """D（S1(d) 鑑別力補洞）：`test_decision_trace_omits_staleness_note_while_still_blocked`
+    走 `_build_context()` 全流程，而 `record_escalation()` 本身不寫 `decision_trace`——於是
+    該測試對 guard clause（`if current_state in blocking_states: return None`）零鑑別力：
+    就算把 guard clause 整段砍掉，`_build_context()` 那條路徑上 `trace` 永遠是空的，
+    `stale_hit` 恆為 False，函式一樣回 None，測試一樣綠。
+
+    本測試直接呼叫純函式、餵一筆*非空*且 reason 含 `TOKEN_BUDGET_CRITICAL` 字樣的
+    decision_trace，`current_state="ESCALATION"`（在 blocking_states 內）——guard clause
+    健在時應立即回 None（阻斷態本身就是正確訊號，不疊加澄清句）；guard clause 被砍掉時
+    會落入下方迴圈命中 `stale_hit=True` 而回傳非 None 字串，兩者可分辨。"""
+    mod = _load_hook()
+    blocking = frozenset({"ESCALATION", "ESCALATION_FINAL", "TERMINATED", "TOKEN_BUDGET_CRITICAL"})
+    trace = [{"ts": "2026-01-01T00:00:00+00:00", "from": "SPEC_DRAFTING", "to": "ESCALATION",
+              "trigger": "transition", "reason": "TOKEN_BUDGET_CRITICAL: cumulative=993581 ratio=0.99"}]
+    assert mod._decision_trace_staleness_note(trace, "ESCALATION", blocking) is None

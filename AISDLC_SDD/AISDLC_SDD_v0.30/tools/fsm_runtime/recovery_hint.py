@@ -140,7 +140,11 @@ def console_python(python: str, *, exists: Optional[Callable[[Path], bool]] = No
 def recovery_command(*, sdd_root: Path, python: str, target: str, reason: str,
                      shell: str = "posix", exists: Optional[Callable[[Path], bool]] = None) -> str:
     """一行可複製的恢復指令。`shell`＝`posix`（bash／zsh：`cd … ;`）或 `powershell`
-    （`Set-Location …; & "<py>" …`——`&` 必須緊貼直譯器路徑前，不是整行最前）。`-m` 是唯一可跑
+    （`Push-Location …; & "<py>" …; Pop-Location`——`&` 必須緊貼直譯器路徑前，不是整行最前；
+    `Push-Location`／`Pop-Location` 必須同一句內成對，否則會被根層
+    `.claude/hooks/lint_powershell_command.py` 的 naked-cd 判準擋下——該判準對任何帶參數的
+    `Set-Location` 皆擋，鐵律二只放行同一呼叫內成對的 `Push-Location`/`Pop-Location`；
+    `Pop-Location` 不會改動 `$LASTEXITCODE`，取用回傳碼不受影響）。`-m` 是唯一可跑
     形態。理由裡的雙引號、`$`、反引號、反斜線一律換成 `'`（SA-R4-09／SD-R2-04）：兩殼的雙引號字串都會
     對 `$`／反引號插值、對反斜線逸出；reason 目前是機器字串，仍不假設它永遠乾淨。"""
     safe_reason = re.sub(r'["$`\\]', "'", reason)
@@ -150,7 +154,7 @@ def recovery_command(*, sdd_root: Path, python: str, target: str, reason: str,
         f'resume-from-escalation --to {target} --reason "{safe_reason}"'
     )
     if shell == "powershell":
-        return f'Set-Location "{sdd_root}"; & {tail}'
+        return f'Push-Location "{sdd_root}"; & {tail}; Pop-Location'
     return f'cd "{sdd_root}" ; {tail}'
 
 

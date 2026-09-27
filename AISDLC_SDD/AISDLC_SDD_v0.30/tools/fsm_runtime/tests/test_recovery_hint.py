@@ -376,11 +376,16 @@ class RecoveryHintTests(_Base):
 
     def test_command_neutralises_shell_metacharacters_in_reason(self) -> None:
         """SA-R4-09／SD-R2-04（P3）：bash 與 PowerShell 的雙引號都會插值 `$`／反引號／反斜線；reason 雖為機器字串，
-        仍一律中和。只斷言 `--reason` 之後那段（Windows 的 sdd_root 本來就含反斜線，鐵律三）。"""
+        仍一律中和。只斷言 `--reason` 之後那段（Windows 的 sdd_root 本來就含反斜線，鐵律三）。
+
+        A（DEF-200-340 修法）：PowerShell 形態的 `--reason` 之後現在多一段 `; Pop-Location`
+        （與 `Push-Location` 同一句內成對，見 `recovery_command()`）——這是修法正當改變的產出，
+        本測試意圖只驗證 reason 中和本身，故先剝掉這段已知後綴再比對，不是為了讓它過而放寬判準。"""
         for shell in ("posix", "powershell"):
             cmd = rh.recovery_command(sdd_root=Path("/x"), python="/p", target="SPEC_DRAFTING",
                                       reason='cost $x `id` back\\slash "q"', shell=shell)
             tail = cmd.split("--reason ", 1)[1]
+            tail = tail.removesuffix("; Pop-Location")
             for ch in ("$", "`", "\\"):
                 self.assertNotIn(ch, tail, msg=cmd)
             self.assertEqual(tail, "\"cost 'x 'id' back'slash 'q'\"", msg=cmd)
@@ -395,7 +400,7 @@ class RecoveryHintTests(_Base):
         self.assertIn(expected, text)
         self.assertNotIn("pythonw", text)
         self.assertIn(f'& "{expected}" -m tools.fsm_runtime.fsm_runtime', text)
-        self.assertIn('Set-Location "', text)
+        self.assertIn('Push-Location "', text)
         self.assertIn('bash/zsh   : cd "', text)
 
     def test_pythonw_without_sibling_console_python_is_kept_verbatim(self) -> None:
@@ -412,8 +417,21 @@ class RecoveryHintTests(_Base):
         # 鐵律三：Path("/x") 在 Windows 渲染成 "\\x"（windows-compat-ci 實測轉紅），期望值與生產碼同一渲染
         root = str(Path("/x"))
         self.assertTrue(posix.startswith(f'cd "{root}" ; "/p" -m tools.fsm_runtime.fsm_runtime'), posix)
-        self.assertTrue(ps.startswith(f'Set-Location "{root}"; & "/p" -m tools.fsm_runtime.fsm_runtime'), ps)
-        self.assertEqual(posix.split(" -m ", 1)[1], ps.split(" -m ", 1)[1])
+        self.assertTrue(ps.startswith(f'Push-Location "{root}"; & "/p" -m tools.fsm_runtime.fsm_runtime'), ps)
+        self.assertEqual(posix.split(" -m ", 1)[1].split("; Pop-Location", 1)[0],
+                         ps.split(" -m ", 1)[1].split("; Pop-Location", 1)[0])
+
+    def test_powershell_form_pairs_push_and_pop_location_in_one_statement(self) -> None:
+        """A（DEF-200-340 修法）：`Set-Location` 帶參數會被根層
+        `.claude/hooks/lint_powershell_command.py` 的 naked-cd 判準擋下（任何帶參數的
+        `Set-Location` 皆擋）；鐵律二只放行同一呼叫內成對的 `Push-Location`/`Pop-Location`。
+        PowerShell 形態必須以 `Push-Location "` 開頭、以 `; Pop-Location` 結尾，且不含
+        `Set-Location`。"""
+        ps = rh.recovery_command(sdd_root=Path("/x"), python="/p", target="PR_REVIEW", reason="r",
+                                 shell="powershell")
+        self.assertTrue(ps.startswith('Push-Location "'), ps)
+        self.assertTrue(ps.endswith('; Pop-Location'), ps)
+        self.assertNotIn("Set-Location", ps)
 
 
 class RecoveryHintMeasurementTests(_Base):

@@ -145,7 +145,9 @@ def _scan_roots() -> list[tuple[Path, int]]:
         # 本輪新增 `tools/lib/parallel_shard.py`，該樹由 163 支長到 164 支，131 這個下限
         # 只還守得住 80% 的掃描面 ⇒ `tree_count_verdict()` 的腐化上界（163）當場紅並直接
         # 給出該填的數字（156 ＝ 164 × 0.95），本列照填、不做加減推算。
-        (_REPO_ROOT / "tools", 156),
+        # 🔴 2026-09-27 重釘 156 → 186（收緊）：新增 test_recovery_hint_passes_ps_lint.py 後
+        # 掃描檔數 196 > 腐化上界 195，判準逐字給出該填的數字（186 ＝ 196 × 0.95），照填。
+        (_REPO_ROOT / "tools", 186),
         (_REPO_ROOT / "AutoClaude" / "tools", 41),
         (_REPO_ROOT / "AutoClaude" / "autoclaude", 194),
         (_REPO_ROOT / "AutoClaude" / "tests", 268),
