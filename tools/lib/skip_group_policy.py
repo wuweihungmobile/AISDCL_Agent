@@ -463,18 +463,21 @@ _RUNTIME_SKIP_CEILING: dict[str, dict[str, int]] = {
     #   `[skip census] tools/tests@win32 共 43 支：platform=42／tool-absence=0／
     #    env-disabled=1／structural-pair=0／debt=0／untagged=0／欠債型 1 支（目標 0）`
     # 逐格照填、零加減推算；MAX 表同 commit 同鍵上修（R96/R100 同型判例）。
-    # 🔴 DEF-200-404 收尾（2026-09-27，Windows 本機無 symlink 權限）：`env-disabled` 2 → **4**
+    # 🔴 DEF-200-404 收尾（2026-09-27，Windows 本機無 symlink 權限）：`env-disabled` 2 → **5**
     # ——`test_hook_carrier_symlink.py` 三支改走 `create_symlink_or_skip` 探針後在無權限機器
-    # 上變 `[ENV-DISABLED]` skip（此前是 2 FAIL＋1 ERROR，根本沒進 census）。取得方式＝
-    # 全包停工後收尾單人窗口親跑 `tools/run_root_unittests.py` 當場印出逐字：
-    #   `[skip census] tools/tests@win32 共 46 支：platform=42／tool-absence=0／
-    #    env-disabled=4／structural-pair=0／debt=0／untagged=0／欠債型 4 支（目標 0）`
-    # 逐格照填、零加減推算（推算值本來是 5，實測 4——這正是「不准推算」紀律的理由）；
-    # 有 symlink 權限的機器（雲端 windows runner）會量到較低值，上限給多不判紅。
+    # 上變 `[ENV-DISABLED]` skip（此前是 2 FAIL＋1 ERROR，根本沒進 census），第一次全套量到
+    # 4；本輪同時上修 `_FROZEN_CEILING_MAX` 字面 ⇒ push 落地前 `test_skip_ceiling_ratchet_
+    # direction` 的 co-change 自我 skip（既有 `_M6_EXEMPT` 項自陳「結構上會隨每次改動這個
+    # 字面值而重新出現」）再 +1。取得方式＝全包停工後收尾單人窗口親跑
+    # `tools/run_root_unittests.py`（commit 29545e7 後）當場印出逐字：
+    #   `[skip census] tools/tests@win32 共 47 支：platform=42／tool-absence=0／
+    #    env-disabled=5／structural-pair=0／debt=0／untagged=0／欠債型 5 支（目標 0）`
+    # 逐格照填、零加減推算；有 symlink 權限、且 diff 已落地的機器（雲端 windows runner）
+    # 會量到較低值，上限給多不判紅。
     "tools/tests@win32": {
         SKIP_GROUP_PLATFORM: 42,
         SKIP_GROUP_TOOL_ABSENCE: 0,
-        SKIP_GROUP_ENV_DISABLED: 4,
+        SKIP_GROUP_ENV_DISABLED: 5,
         SKIP_GROUP_STRUCTURAL: 0,
         SKIP_GROUP_DEBT: 0,
         SKIP_GROUP_UNTAGGED: 0,
@@ -683,11 +686,11 @@ _RUNTIME_SKIP_CEILING_MAX: dict[str, dict[str, int]] = {
     # 🔴 R100（DEF-200-228）：`env-disabled` 1 → **2**，與 `_RUNTIME_SKIP_CEILING` 同鍵
     # 同一個 commit 一起上修；理由（站點盤點式、非聚合 census）見同鍵那一段。
     # 🔴 對抗式稽核收尾追加：`platform` 41→42 同 commit 上修，理由同見主表同鍵段。
-    # 🔴 DEF-200-404 收尾：`env-disabled` 2→4 同 commit 上修，理由（實跑 census 逐字）同見主表同鍵段。
+    # 🔴 DEF-200-404 收尾：`env-disabled` 2→5 同 commit 上修，理由（實跑 census）同見主表同鍵段。
     "tools/tests@win32": {
         SKIP_GROUP_PLATFORM: 42,
         SKIP_GROUP_TOOL_ABSENCE: 0,
-        SKIP_GROUP_ENV_DISABLED: 4,
+        SKIP_GROUP_ENV_DISABLED: 5,
         SKIP_GROUP_STRUCTURAL: 0,
         SKIP_GROUP_DEBT: 0,
         SKIP_GROUP_UNTAGGED: 0,

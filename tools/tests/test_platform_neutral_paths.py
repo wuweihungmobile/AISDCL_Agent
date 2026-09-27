@@ -2466,8 +2466,8 @@ class TestScanRootFloorBand(unittest.TestCase):
         """第二道判準的掃描根用的是另一份清單，同樣受雙邊帶管轄。"""
         counts = []
         for root, recursive, floor in _tmpdir_scan_roots():
-            found = root.rglob("*.py") if recursive else root.glob("*.py")
-            n = len([p for p in found if "__pycache__" not in p.parts])
+            pys = root.rglob("*.py") if recursive else root.glob("*.py")
+            n = sum(1 for p in pys if "__pycache__" not in p.parts and "_zzz_" not in p.name)
             counts.append((root.relative_to(_REPO_ROOT).as_posix(), n, floor))
         problems = floor_band_problems(counts)
         self.assertEqual(problems, [], "\n".join(problems))

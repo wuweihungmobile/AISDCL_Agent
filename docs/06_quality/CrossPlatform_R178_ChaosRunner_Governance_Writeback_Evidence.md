@@ -188,5 +188,21 @@ ruff 過，POSIX 斷言零弱化。`run_root_unittests.py` 無 census-only 模�
 |---|---|---|
 | DEF-200-404 | fixed（2026-09-27） | symlink 測試在無權限 Windows 上假紅，改走 `create_symlink_or_skip` 探針 skip；`tools/tests@win32` 天花板依實跑 census 重釘 |
 
-誠實劃界（本節）：雲端 `chaos-latest` job 與 mac 側皆未在本輪真機驗證；根層全套「commit 後乾淨 env」的第三跑與 push 後
-雲端五支 run 結果寫在 commit 訊息與下一則回填，不在本節預寫。
+commit 12f92c9 後根層全套第三跑（乾淨 env、disk==HEAD）：4662 支、淨額棘輪兩支如 QA C11 轉綠、剩 5 紅全在 skip 治理：
+`_FROZEN_CEILING_MAX['tools/tests@win32']['env-disabled']` 凍結對照（DEF-200-160，住 test_skip_ceiling_ratchet_direction.py）
+須與 policy 兩張表同 commit 上修；co-change 鎖要求 skip_group_policy.py 變動時 skip_id_ledger.json 同動；M6 id 集合落款缺
+test_hook_carrier_symlink 三支——與既有 R106 豁免項 `TestStepSwitchCacheCleanup` 完全同型（無 Developer Mode 本機 skip、有權限
+runner 真跑，任何單一落款都讓另一邊判 [漂移]）⇒ 三支逐 id 登記 `_M6_EXEMPT`，落款維持 runner 量到的 43 支、measured-at 補記本機
+46 支 census 與解除判準（commit 29545e7）。
+
+commit 29545e7 後第四跑：M6 ✅（47 支）；census `共 47 支：platform=42／env-disabled=5`——第五支＝`_FROZEN_CEILING_MAX` 字面
+在 push 前處於 origin/main..HEAD 範圍內，`test_skip_ledger_co_change_ignores_a_touch_with_no_value_change` 依既有豁免項自陳的
+結構自我 skip；依「零加減推算」紀律照實跑值把 policy 兩張表＋凍結對照再上修 4→5（有權限、diff 已落地的 runner 會量到較低值，
+上限給多不判紅）。另兩紅：tools/tests E501 存量 139→140（凍結對照那一行註解過寬，折短後 `ruff --isolated --select E501` 三檔
+0 命中）；**DEF-200-405**（新立即結）`TestScanRootFloorBand.test_tmpdir_floors_are_inside_their_band_too` 非決定性翻紅——
+`_tmpdir_scan_roots()` docstring 自陳排除 `_zzz_*` 合成暫存模組，但這支設定面複本沒排除，W=18 並行時兄弟測試把 tools/tests
+頂層 87 支灌成 95、越過下限 75 的腐化上界 93（同 HEAD 前三跑皆綠 ⇒ 競態非退化）；修法＝計數同時排除 `__pycache__` 與
+`_zzz_`，行數不變、護欄淨額不動。
+
+誠實劃界（本節）：雲端 `chaos-latest` job 與 mac 側皆未在本輪真機驗證；push 前最後一次根層全套與 push 後雲端五支 run 結果
+寫在 commit 訊息與下一則回填，不在本節預寫。
