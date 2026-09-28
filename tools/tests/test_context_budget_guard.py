@@ -12541,7 +12541,7 @@ class HarnessFeedStageTest(unittest.TestCase):
     def test_a_cross_check_diff_is_printed_when_both_sides_measure(self) -> None:
         lines = harness_feed.check_lines(
             {"harness_used": 100, "used": 130, "harness_reason": None})
-        self.assertEqual(lines, ["harness used=100 逐字稿 used=130 差=30"])
+        self.assertEqual(lines, ["harness used=100 逐字稿 used=130 差=30" + harness_feed.DIFF_HINT])
 
     def test_an_absent_feed_reason_is_not_swallowed(self) -> None:
         reason = "無 feed（statusLine 未設定或本 session 尚無 assistant 訊息）"

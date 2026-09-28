@@ -417,7 +417,7 @@ class RecoveryHintTests(_Base):
         # 鐵律三：Path("/x") 在 Windows 渲染成 "\\x"（windows-compat-ci 實測轉紅），期望值與生產碼同一渲染
         root = str(Path("/x"))
         self.assertTrue(posix.startswith(f'cd "{root}" ; "/p" -m tools.fsm_runtime.fsm_runtime'), posix)
-        self.assertTrue(ps.startswith(f'Push-Location "{root}"; & "/p" -m tools.fsm_runtime.fsm_runtime'), ps)
+        self.assertTrue(ps.startswith(f'Push-Location "{root}" -ErrorAction Stop; & "/p" -m tools.fsm_runtime.fsm_runtime'), ps)
         self.assertEqual(posix.split(" -m ", 1)[1].split("; Pop-Location", 1)[0],
                          ps.split(" -m ", 1)[1].split("; Pop-Location", 1)[0])
 
@@ -426,12 +426,14 @@ class RecoveryHintTests(_Base):
         `.claude/hooks/lint_powershell_command.py` 的 naked-cd 判準擋下（任何帶參數的
         `Set-Location` 皆擋）；鐵律二只放行同一呼叫內成對的 `Push-Location`/`Pop-Location`。
         PowerShell 形態必須以 `Push-Location "` 開頭、以 `; Pop-Location` 結尾，且不含
-        `Set-Location`。"""
+        `Set-Location`。DEF-200-407：`Push-Location` 須帶 `-ErrorAction Stop`——它對不存在路徑
+        只丟非終止錯誤，沒有旗標時 `;` 鏈會在錯誤 cwd 繼續跑 `-m`（Windows 真機實測）。"""
         ps = rh.recovery_command(sdd_root=Path("/x"), python="/p", target="PR_REVIEW", reason="r",
                                  shell="powershell")
         self.assertTrue(ps.startswith('Push-Location "'), ps)
         self.assertTrue(ps.endswith('; Pop-Location'), ps)
         self.assertNotIn("Set-Location", ps)
+        self.assertIn('" -ErrorAction Stop; & ', ps)
 
 
 class RecoveryHintMeasurementTests(_Base):

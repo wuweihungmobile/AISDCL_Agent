@@ -23,8 +23,8 @@ import statusline_context_feed as feed  # noqa: E402
 
 
 def _run_cli(argv: list[str], home: Path) -> tuple[int, str, str]:
-    """子行程等級呼叫 CLI；`HOME` 覆寫成 tempdir，絕不動真實使用者設定檔。"""
-    env = {**os.environ, "HOME": str(home)}
+    """子行程呼叫 CLI；HOME 與 USERPROFILE 皆指向 tempdir（Windows 讀後者，DEF-200-409）。"""
+    env = {**os.environ, "HOME": str(home), "USERPROFILE": str(home)}
     proc = subprocess.run([sys.executable, str(_MOD_PATH), *argv], capture_output=True,
                            text=True, encoding="utf-8", env=env, timeout=15, check=False)
     return proc.returncode, proc.stdout, proc.stderr
@@ -244,7 +244,7 @@ class InstallUninstallStatusTest(unittest.TestCase):
 
 
 class CliSubprocessTest(unittest.TestCase):
-    """全程走真的子行程＋真的 argv 解析（`main()` 那一層），`HOME` 覆寫成 tempdir。"""
+    """全程走真的子行程＋argv 解析（`main()` 那一層），HOME 與 USERPROFILE 皆指向 tempdir。"""
 
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()

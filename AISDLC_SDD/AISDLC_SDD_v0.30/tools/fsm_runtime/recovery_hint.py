@@ -154,7 +154,10 @@ def recovery_command(*, sdd_root: Path, python: str, target: str, reason: str,
         f'resume-from-escalation --to {target} --reason "{safe_reason}"'
     )
     if shell == "powershell":
-        return f'Push-Location "{sdd_root}"; & {tail}; Pop-Location'
+        # `-ErrorAction Stop`（DEF-200-407）：`Push-Location` 對不存在路徑只丟**非終止**錯誤、
+        # cwd 不變，`;` 鏈會繼續在錯誤 cwd 跑 `-m`，把清楚的「路徑不存在」換成令人困惑的
+        # 「找不到模組」；加旗標讓鏈在 Push-Location 處中止（Windows pwsh 實測 rc=1、tail 未執行）。
+        return f'Push-Location "{sdd_root}" -ErrorAction Stop; & {tail}; Pop-Location'
     return f'cd "{sdd_root}" ; {tail}'
 
 

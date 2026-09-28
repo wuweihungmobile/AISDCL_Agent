@@ -12,6 +12,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+#: DEF-200-408：差值非 0 最常見的成因是 feed 與逐字稿**各自獨立落盤**的時序差——status line
+#: 先把新一則的 usage 寫進 feed，逐字稿那一則 assistant 記錄還沒寫完，下一次呼叫即歸零
+#: （Windows 真機實測：一次印 差=15,580 ＝該則的 cache_creation，下一次 差=0）。少了這句，
+#: 一個瞬間差值會被讀成「數字不符＝新缺陷」；差=0 時不附，免得每次都多一截噪音。
+DIFF_HINT = "（差值非 0 常見於 feed 與逐字稿寫入時序差，下一次呼叫通常歸零；持續非 0 才需查）"
+
 
 def measure(transcript: Path, guard) -> dict:
     """水位量測（純資料）。判定一律走 `guard`（`context_budget_guard`）的實作，
@@ -57,7 +63,8 @@ def check_lines(data: dict) -> list[str]:
     """
     if data.get("harness_used") is not None and data.get("used") is not None:
         diff = abs(data["harness_used"] - data["used"])
-        return [f"harness used={data['harness_used']:,} 逐字稿 used={data['used']:,} 差={diff:,}"]
+        line = f"harness used={data['harness_used']:,} 逐字稿 used={data['used']:,} 差={diff:,}"
+        return [line + (DIFF_HINT if diff else "")]
     if data.get("harness_reason"):
         return [f"harness feed 未採用：{data['harness_reason']}"]
     if data.get("harness_used") is None and data.get("harness_reason") is None:
