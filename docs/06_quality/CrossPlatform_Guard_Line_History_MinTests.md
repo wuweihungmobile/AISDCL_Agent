@@ -30,3 +30,8 @@ DEF-200-325～331 回歸鎖；觸發＝runner 自檢「零相依沙箱的鑑別�
 🔴 **重釘 4371 → 4543（方向＝收緊；2026-09-22，DEF-200-360 收尾單人窗口）**：以 discovery 探針實測
 直接填入、零加減推算；成長來源＝DEF-200-358～360 回歸鎖（test_dev_platform_provenance.py 新檔並兩度擴充）與
 DEF-200-359 兩支鎖；觸發＝runner 自檢「零相依沙箱的鑑別力餘裕只剩 64／219 支（本層門檻 109）」。
+
+🔴 **重釘 4543 → 4697（方向＝收緊；2026-09-28，DEF-200-417 收尾單人窗口）**：以 discovery 探針實測
+直接填入、零加減推算；成長來源＝掌舵者五問第四次覆核同輪的 DEF-200-413～417 回歸鎖（test_context_budget_guard.py
+halt 澄清句平台鎖四格＋黑框歸因四格＋flash_watch 報表三格、test_session_brief.py 不符分支兩格、
+test_install_statusline.py CLAUDE_CONFIG_DIR 五格）；觸發＝runner 自檢「零相依沙箱的鑑別力餘裕只剩 65／219 支（本層門檻 109）」。

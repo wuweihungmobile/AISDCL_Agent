@@ -29,6 +29,11 @@ spawn 站點有沒有帶 `creationflags`、檢查排程 Action 是不是 `python
   · 只看得到**本使用者權限看得到的**行程；session 0 的服務類行程（S4U 排程工作即屬此類）
     拿不到命令列時會落進「無法歸因」那一格，不會被硬塞進任何一邊。
   · 量測窗之外發生的事，這支不會知道。所以窗要**涵蓋一次哨兵 tick**（見 `--seconds`）。
+  · 🔴 本量測器量的是**行程建立**，不是**視窗可見**（DEF-200-417）：`conhost.exe` 建立事件
+    多半是 `CREATE_NO_WINDOW` 下的隱形視窗，Win11 上使用者真的看得到的黑框承載者其實是
+    `WindowsTerminal.exe`／`OpenConsole.exe`（真機實測：class `CASCADIA_HOSTING_WINDOW_CLASS`，
+    事件序 CREATE→FOREGROUND→SHOW）。「哪一筆建立事件真的變成了一扇可見視窗」量不到；
+    那個問題由 `tools/probe/flash_watch.py`（`SetWinEventHook`）回答。
 
 用法
 ----
@@ -67,9 +72,19 @@ PS_UTF8_PRELUDE = ("$OutputEncoding = [Console]::OutputEncoding = "
 #: 只登記這些映像名。全部行程都記會讓一次 15 分鐘的窗長到沒人看得完，而**黑框**這件事
 #: 只由 console 子系統的映像產生。`conhost.exe` 一定要在裡面：它是「有沒有配置到一個
 #: console」最直接的證據，而它的父行程就是答案。
+#: 🔴 `WindowsTerminal.exe`／`OpenConsole.exe`（DEF-200-417 真機實測補）：Win11 上這兩者才是
+#: 使用者**真的看得到**的黑框承載者（從無 console 的父行程 spawn `powershell.exe` 且不帶
+#: `CREATE_NO_WINDOW` 時，彈出的是 `WindowsTerminal.exe`＋自己的 `PseudoConsoleWindow`，
+#: 不是傳統 `conhost.exe`）；反過來，`conhost.exe 0x4` 多半正是 `CREATE_NO_WINDOW` 建出來的
+#: **隱形**視窗——把它算進「有黑框」會高估，漏了前兩者則會對真正彈出來的那個失明。
 CONSOLE_IMAGES = ("cmd.exe", "conhost.exe", "powershell.exe", "pwsh.exe",
                   "schtasks.exe", "python.exe", "pythonw.exe", "bash.exe",
-                  "git.exe", "wsl.exe", "wscript.exe", "cscript.exe")
+                  "git.exe", "wsl.exe", "wscript.exe", "cscript.exe",
+                  "WindowsTerminal.exe", "OpenConsole.exe")
+
+#: 報表〈可見視窗承載者〉那一行的映像名子集（小寫比對；DEF-200-417）。獨立成常數只為
+#: 讓 `report()` 那一行不用把兩個字面值又抄一次、行也不至於破 100 字元上限。
+_VISIBLE_CARRIER_IMAGES = frozenset({"windowsterminal.exe", "openconsole.exe"})
 
 #: 判「這是本 repo 造成的」的字面。以**路徑與檔名**為準而不是行程名：同一支
 #: `powershell.exe` 可能是我們叫的、也可能是別人叫的，只有命令列分得開。
@@ -89,17 +104,61 @@ def repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
-def classify(record: dict, root: str) -> tuple[str, str]:
+def build_pid_index(records: list[dict]) -> dict[int, tuple[str, str]]:
+    """掃過**整份**量測記錄，建 `ProcessId → (Name, CommandLine)` 對照表（DEF-200-417）。
+
+    🔴 WHY：WMI 事件是非同步佇列，事件到達順序不保證「父行程的建立事件」比「子行程的
+    建立事件」先寫進 jsonl；而父行程若比 `Get-CimInstance` 回呼還短命（見 `classify()`
+    docstring 的實例），`ParentCommandLine` 在那一筆記錄裡會是空字串——但那個父行程
+    **自己的** `__InstanceCreationEvent` 通常已經先被記過一筆（它建立時間本來就早於
+    它生出的子行程）。呼叫端（`report()`）本來就是離線讀完整份 jsonl 才分類，先掃一輪
+    建表不多花一次 I/O。
+    """
+    index: dict[int, tuple[str, str]] = {}
+    for record in records:
+        pid = record.get("ProcessId")
+        if pid is None:
+            continue
+        try:
+            pid_int = int(pid)
+        except (TypeError, ValueError):
+            continue
+        index[pid_int] = (str(record.get("Name") or ""), str(record.get("CommandLine") or ""))
+    return index
+
+
+def classify(
+    record: dict, root: str, pid_index: dict[int, tuple[str, str]] | None = None,
+) -> tuple[str, str]:
     """歸因：回 `(類別, 理由)`。類別＝`repo`／`foreign`／`unattributable`。
 
     🔴 判準的順序即優先序，而且「無法歸因」是**一等公民**而不是垃圾桶：把拿不到命令列
     的行程硬塞進任何一邊，就是本 repo 判過的「量不到 ≠ 量到零」。它必須在報表上自己
     佔一格，讓讀者知道這次量測有多少東西是說不清楚的。
+
+    `pid_index`（DEF-200-417）＝`build_pid_index()` 的結果，預設 `None`（既有呼叫端逐字
+    不變）。真機實測：`claude.exe → bash.exe -c "…pythonw.exe …statusline_context_feed.py"`
+    （父 pid 9676）比 `Get-CimInstance` 查父行程的回呼快，回呼查到時父行程已 `<gone>`，
+    `ParentName`／`ParentCommandLine` 皆空——但 9676 自己的建立事件早先已經被記過一筆，
+    `pid_index` 查得到它的命令列。查得到就頂替 `ParentCommandLine` 續往下判；**查不到才
+    真的是「無法歸因」**——不得因為查表落空就倒向 `foreign`（`foreign` 必須有正面證據：
+    父命令列非空且不含任何 `_REPO_MARKERS`）。
     """
     haystack = " ".join(str(record.get(k) or "") for k in
                         ("CommandLine", "ExecutablePath", "ParentCommandLine"))
     if not haystack.strip():
-        return "unattributable", "命令列與父命令列皆取不到（行程太短命或權限不足）"
+        parent_cmd = ""
+        ppid = record.get("ParentProcessId")
+        if pid_index and ppid not in (None, ""):
+            try:
+                entry = pid_index.get(int(ppid))
+            except (TypeError, ValueError):
+                entry = None
+            if entry:
+                parent_cmd = entry[1]
+        if not parent_cmd.strip():
+            return "unattributable", "命令列與父命令列皆取不到（行程太短命或權限不足）"
+        haystack = parent_cmd
     low = haystack.lower()
     if root and root.lower() in low:
         return "repo", f"命令列含本 repo 路徑：{root}"
@@ -189,21 +248,30 @@ def report(path: Path, root: str | None = None) -> int:
     if not path.is_file():
         print(f"❌ 量測檔不存在：{path}（沒有量到 ≠ 沒有發生）", file=sys.stderr)
         return 1
-    buckets: dict[str, list[tuple[dict, str]]] = {
-        "repo": [], "shell-hop": [], "foreign": [], "unattributable": []}
-    total = 0
+    records: list[dict] = []
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
         line = line.strip()
         if not line:
             continue
         try:
-            record = json.loads(line)
+            records.append(json.loads(line))
         except ValueError:
             continue
-        total += 1
-        kind, why = classify(record, base)
+    pid_index = build_pid_index(records)
+    buckets: dict[str, list[tuple[dict, str]]] = {
+        "repo": [], "shell-hop": [], "foreign": [], "unattributable": []}
+    for record in records:
+        kind, why = classify(record, base, pid_index)
         buckets[kind].append((record, why))
+    total = len(records)
     print(f"量測檔 {path}　console 類行程建立事件 {total} 筆")
+    # 🔴 DEF-200-417：分開列出「誰是可見視窗的承載者」與「誰多半是隱形視窗」，見
+    # CONSOLE_IMAGES 上方註解——這兩行不是三分類歸因的替代品，是同一份記錄的另一個切面。
+    visible_n = sum(1 for r in records
+                    if str(r.get("Name") or "").lower() in _VISIBLE_CARRIER_IMAGES)
+    conhost_n = sum(1 for r in records if str(r.get("Name") or "").lower() == "conhost.exe")
+    print(f"可見視窗承載者（WindowsTerminal.exe／OpenConsole.exe）建立事件 {visible_n} 筆")
+    print(f"conhost.exe（多半是 CREATE_NO_WINDOW 隱形視窗）建立事件 {conhost_n} 筆")
     labels = {"repo": "① 本 repo 造成", "foreign": "② 非本 repo 造成",
               "unattributable": "③ 無法歸因",
               "shell-hop": "①b `shell=True` 的 cmd 跳板（需人工確認是不是本 repo）"}

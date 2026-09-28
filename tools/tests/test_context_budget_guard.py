@@ -10599,6 +10599,129 @@ class ConsoleSpawnAttributionTest(unittest.TestCase):
             encoding="utf-8")
         self.assertEqual(no_window_problems({"probe": source}), [])
 
+    # ── DEF-200-417：黑框歸因量測器對「真正會被使用者看到的視窗」失明 ──────────
+    # 立案全文見 `tools/probe/console_spawn_watch.py` CONSOLE_IMAGES 上方註解與
+    # `classify()` docstring；本節只放回歸鎖。
+
+    def test_console_images_includes_the_visible_win11_carriers(self) -> None:
+        """🔴 真機實測（DEF-200-417）：Win11 上真正彈出來的是 `WindowsTerminal.exe`
+        （class `CASCADIA_HOSTING_WINDOW_CLASS`）／`OpenConsole.exe`，不是傳統
+        `conhost.exe`——`CONSOLE_IMAGES` 漏了它們就會對真正的黑框結構上失明。
+        """
+        watch = self._watch()
+        self.assertIn("WindowsTerminal.exe", watch.CONSOLE_IMAGES)
+        self.assertIn("OpenConsole.exe", watch.CONSOLE_IMAGES)
+
+    def test_a_short_lived_parent_is_recovered_from_the_pid_index(self) -> None:
+        """🔴 DEF-200-417 實例：`claude.exe → bash.exe -c "…pythonw.exe …"`（pid 9676）
+        比 `Get-CimInstance` 查父行程的回呼還快，回呼查到時父行程已 `<gone>`——
+        `ParentName`／`ParentCommandLine` 當場皆空。但 9676 自己的建立事件早先已經被
+        記過一筆，`build_pid_index()` 查得到它的命令列 ⇒ 該歸『本 repo』，不得因為
+        `ParentCommandLine` 空就倒向『無法歸因』（那是低報我方命中，同 shell-hop 那格
+        的既有紀律）。
+        """
+        watch = self._watch()
+        pid_index = watch.build_pid_index([
+            {"ProcessId": 9676, "Name": "bash.exe",
+             "CommandLine": _WMI_REPO + r"\.venv\Scripts\pythonw.exe statusline_context_feed.py"},
+        ])
+        kind, why = watch.classify(
+            {"Name": "conhost.exe", "ParentProcessId": 9676, "ParentName": "<gone>"},
+            _WMI_REPO, pid_index)
+        self.assertEqual(kind, "repo", why)
+
+    def test_a_short_lived_parent_absent_from_the_index_is_unattributable(self) -> None:
+        """🔴 反向控制組：查表落空**不得**倒向 `foreign`——`foreign` 必須有正面證據
+        （父命令列非空且不含任何 `_REPO_MARKERS`）。把這一格判準改回舊邏輯（haystack
+        空字串直接往下走比對，比對不中就落在最後的 `foreign` return）就會在這裡紅：
+        舊邏輯下空 haystack 不含任何 marker ⇒ 判成 foreign，而這一筆其實什麼證據都
+        沒有。同時驗 `pid_index=None`（既有呼叫端逐字不變）與空表兩種情況。
+        """
+        watch = self._watch()
+        kind, why = watch.classify(
+            {"Name": "conhost.exe", "ParentProcessId": 9999, "ParentName": "<gone>"},
+            _WMI_REPO, watch.build_pid_index([]))
+        self.assertEqual(kind, "unattributable", why)
+        kind2, why2 = watch.classify(
+            {"Name": "conhost.exe", "ParentProcessId": 9999, "ParentName": "<gone>"}, _WMI_REPO)
+        self.assertEqual(kind2, "unattributable", why2)
+
+    def test_a_nonempty_unmarked_parent_command_line_is_still_foreign(self) -> None:
+        """正面控制組：父命令列**真的有內容**、也真的不含任何 repo 標記時，仍然要落在
+        `foreign`（`pid_index` 存在與否不改變這條既有路徑——haystack 本來就非空）。
+        """
+        watch = self._watch()
+        kind, why = watch.classify({"ParentCommandLine": _WMI_FOREIGN}, _WMI_REPO,
+                                   watch.build_pid_index([]))
+        self.assertEqual(kind, "foreign", why)
+
+
+class FlashWatchReportTest(unittest.TestCase):
+    """`tools/probe/flash_watch.py` 的 `report()`（DEF-200-417）：純函式、不碰 ctypes，
+    合成 jsonl 餵回去驗統計輸出——任何平台都能跑，不需要真的裝 `SetWinEventHook`。
+    """
+
+    @staticmethod
+    def _flash():
+        sys.path.insert(0, str(_REPO_ROOT / "tools" / "probe"))
+        import flash_watch  # noqa: PLC0415 — probe 不在 import 面，隨用隨載
+        return flash_watch
+
+    def test_report_counts_only_visible_console_carrier_windows(self) -> None:
+        """可見 ＋ class 在白名單內的那一筆才算命中；不可見或不在白名單的 class
+        （工作列、一般應用程式視窗）不得混進命中數或命中列印。
+        """
+        flash = self._flash()
+        with tempfile.TemporaryDirectory() as td:
+            jsonl = Path(td) / "flash.jsonl"
+            rows = (
+                {"class": "CASCADIA_HOSTING_WINDOW_CLASS", "visible": True, "pid": 1,
+                 "exe": "WindowsTerminal.exe", "ppid": 0, "pexe": "?",
+                 "at": "2026-09-28T00:00:00", "event": "SHOW"},
+                {"class": "Shell_TrayWnd", "visible": True, "pid": 2,
+                 "exe": "explorer.exe", "ppid": 0, "pexe": "?",
+                 "at": "2026-09-28T00:00:01", "event": "SHOW"},
+                {"class": "ConsoleWindowClass", "visible": False, "pid": 3,
+                 "exe": "conhost.exe", "ppid": 0, "pexe": "?",
+                 "at": "2026-09-28T00:00:02", "event": "CREATE"},
+            )
+            jsonl.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = flash.report(jsonl)
+        self.assertEqual(rc, 0)
+        out = buf.getvalue()
+        self.assertIn("總視窗事件 3 筆", out)
+        self.assertIn("可見 console 承載者視窗事件 1 筆", out)
+        self.assertIn("WindowsTerminal.exe", out)
+        self.assertNotIn("explorer.exe", out,
+                          "不可見/非白名單 class 的視窗不得混進可見承載者命中列")
+
+    def test_report_on_a_missing_file_says_not_measured_not_zero(self) -> None:
+        """量不到與量到零不是同一件事（本 repo 反覆寫過的紀律）：檔案不存在時必須
+        說清楚，不能安靜印出「0 筆」。
+        """
+        flash = self._flash()
+        with tempfile.TemporaryDirectory() as td:
+            missing = Path(td) / "does_not_exist_DEF_200_417.jsonl"
+            buf = io.StringIO()
+            with contextlib.redirect_stderr(buf):
+                rc = flash.report(missing)
+        self.assertEqual(rc, 1)
+        self.assertIn("沒有量到 ≠ 沒有發生", buf.getvalue())
+
+    def test_main_is_a_noop_success_on_non_windows(self) -> None:
+        """🔴 非 Windows 上沒有 `SetWinEventHook`；`main()` 必須印一句話並回 0（沒有
+        東西好量不是失敗），不得嘗試呼叫 Windows 專屬的 `watch()`（那會直接炸掉，
+        因為非 Windows 上 `ctypes.WinDLL` 這個屬性根本不存在）。
+        """
+        flash = self._flash()
+        buf = io.StringIO()
+        with unittest.mock.patch("sys.platform", "linux"), contextlib.redirect_stderr(buf):
+            rc = flash.main(["--seconds", "1"])
+        self.assertEqual(rc, 0)
+        self.assertIn("只在 Windows 成立", buf.getvalue())
+
 
 class SentinelReapVerdictTest(unittest.TestCase):
     """GC 的判準。🔴 被守的第一性質是**不許誤收**：誤收一支活著的哨兵＝那個 session 的

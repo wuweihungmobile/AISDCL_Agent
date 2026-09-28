@@ -685,7 +685,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 9024,
+    "test_adr_xplat001_c1c2_lock.py": 9042,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 4076,
@@ -705,7 +705,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_claim_provenance_r86.py": 1015,
     "test_clean_venv_carrier.py": 281,
     "test_component_sanitizer_shared_layer_lock.py": 293,
-    "test_context_budget_guard.py": 12705,
+    "test_context_budget_guard.py": 12828,
     "test_context_window_parity.py": 281,
     "test_cpu_budget.py": 428,
     "test_defect_id_reference_integrity.py": 281,
@@ -2495,6 +2495,19 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "_FROZEN_PREFIX_REWRITE_LEDGER 新列造成的行數漂移，反覆覆核收斂到本行也計入為止，"
      "同 R173~R181 既有體例。餘額歸主軌，見 "  # round-label-ok
      "CrossPlatform_R145_Scan_Findings.md〈附記（R182）〉。"),  # round-label-ok
+    ("R182", 107929, 108052, 123,  # round-label-ok：同輪第二包（DEF-200-417 黑框歸因量測器）
+     "[非淨減法輪][回歸鎖軌申報＝本列淨額全額，見 _REGRESSION_LANE_LOG 同輪列] DEF-200-417 "
+     "結案回歸鎖：test_context_budget_guard.py +123（ConsoleSpawnAttributionTest 四格："
+     "CONSOLE_IMAGES 含 WindowsTerminal／OpenConsole、短命父行程由 pid 表回補、表中缺席歸"
+     "無法歸因、無標記父命令列仍 foreign；FlashWatchReportTest 三格：只算可見白名單 class、"
+     "缺檔說量不到、非 Windows 回 0）＋本表自身漂移「見下一列」，未超軌上限 ⇒ 全額申報，"
+     "主軌 0。同輪第三列＝掌舵者回報閃黑框後的第二個修法包。逐項見 "
+     "CrossPlatform_R182_SessionGate_Windows_Recheck4_Evidence.md〈十〉。"),  # round-label-ok
+    ("R182", 108052, 108070, 18,  # round-label-ok：本表自身漂移第二次收斂列
+     "[非淨減法輪][同輪追加] 收斂列：本表（test_adr_xplat001_c1c2_lock.py 自身）新增上一列、"
+     "本列自身、_REGRESSION_LANE_LOG 同輪第二列、_FROZEN_PREFIX_REWRITE_LEDGER 接鏈列造成的行數"
+     "漂移，反覆覆核收斂到本行也計入為止，同 R173~R181 既有體例。餘額歸主軌，見 "  # round-label-ok
+     "CrossPlatform_R145_Scan_Findings.md〈附記（R182）〉。"),  # round-label-ok
 )
 
 
@@ -3000,6 +3013,10 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "test_session_brief.py 不符分支兩格＋test_install_statusline.py ConfigDirOverrideTest "
      "五格＋本表漂移），未超軌上限 ⇒ 全額申報，主軌 0。逐項見 CrossPlatform_R145_Scan_Findings.md"
      "〈附記（R182）〉。"),  # round-label-ok
+    ("R182", 123,  # round-label-ok
+     "DEF-200-417 結案回歸鎖全額（test_context_budget_guard.py 歸因四格＋flash_watch 報表三格"
+     "＋本表漂移），未超軌上限 ⇒ 全額申報，主軌 0。逐項見 CrossPlatform_R145_Scan_Findings.md"
+     "〈附記（R182）〉。"),  # round-label-ok
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -3298,10 +3315,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 309
+_REPIN_LOG_FROZEN_PREFIX_LEN = 311
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "400ca9669d681a32b1bd1fa2e974150234b8f53b52ca1825a633cd9614699ec1")
+    "783155a15210e99a93a1d773a77247838fcfe4dee3555eb6bbc10c2ef56aa786")
 
 
 def repin_log_history_digest(
@@ -3648,6 +3665,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R180", "cd02c8559b6c", "747baab09344", "DEF-200-411"),  # round-label-ok
     ("R181", "747baab09344", "69ba8e55b356", "DEF-200-412"),  # round-label-ok
     ("R182", "69ba8e55b356", "400ca9669d68", "DEF-200-413"),  # round-label-ok
+    ("R182", "400ca9669d68", "783155a15210", "DEF-200-417"),  # round-label-ok
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。
