@@ -76,7 +76,10 @@
 
 ## 七、根層全套、push 與雲端驗收
 
-<待補：check_defect_log_crossref／archive_defect_log --check／sync_onboarding_baselines --check-snapshot／test_adr_xplat001_c1c2_lock 全檔／test_doc_loc_baseline_freshness_r60 全檔／根層全套 RUNNER_RC／commit／push／gh run>
+- 收尾鎖組（主控本場真跑）：`check_defect_log_crossref.py` 第一次 rc=1（418 列缺「承接輪次：**未指派**」字面＝散文式延後，補上後 rc=0）；`archive_defect_log.py --check` rc=0（70 檔／1532 個 ID）；`sync_onboarding_baselines.py --check-snapshot` rc=0；`test_adr_xplat001_c1c2_lock.py` 第一次 `FAILED (failures=2)`——兩道到期鎖皆因輪號走到 R183 觸發：`[時效逾期] 稽核痕跡已走到 R183，超過到期輪 R182（末列 R177 ＋ 視窗 5 輪）`（Phase2 §6 ⇒ 追加 `(183, "[維持觀察]")` 列，上一列 R177 是 [提案] 故計數歸零後為一）與 `[技術債逾期] ADR-XPLAT-013 §9.3／U9 … 到期輪已是 R183`（具名展延 183→188，理由逐字寫在常數上方）；修後 `Ran 192 tests … OK` rc=0；`test_doc_loc_baseline_freshness_r60.py` `Ran 281 tests … OK` rc=0。
+- 根層全套第一跑（`tools/run_root_unittests.py`，worker=18）：`✅ unittest 數量下限釘選通過：發現 4710 個測試（下限 4697）`、`1 failures`＝`test_e501_debt_only_shrinks` `141 not less than or equal to 139`（本表 R183 主列註解行與收斂列兩行東亞寬度超 100）⇒ 原地改短不換行（棘輪 +0 不動、sha 重取 `bd1f875e0ceb…`）；第二跑 `發現 4710 個測試（下限 4697）`／`slot 利用率=99.8%`／`✅ 孤兒 console 普查：零增長（前 0／後 0）`／`RUNNER2_RC=0`、零 FAIL；skip census 46 支（platform 42／env-disabled 4，與 R182 同）。
+- commit `a0107b4`（21 files changed, 504 insertions(+), 29 deletions(-)；pre-commit 過）；push `d8b05db..a0107b4  main -> main`、`[pre-push dispatcher] ✅ 本次 push 觸發的所有 leg 皆通過（rc=0）`、`PUSH_RC=0`；`git rev-parse HEAD`＝`origin/main`＝`a0107b410907cde60d825f512502bb1fb51fcea3`。§7 表② Windows 欄指紋相符（v001=8ffe3c3dabbd／v030=4d902e4a743a／scripts=ec35ee2838d0／autoclaude=35adf49caea0）；macOS 欄上次量測 2026-09-27、此後 2/4 棵樹已變動＝單機交替常態，Mac 輪回填（〈八〉第 5 步）。
+- 雲端（`gh run list --commit a0107b410907cde60d825f512502bb1fb51fcea3 --json name,status,conclusion,databaseId,createdAt` 背景輪詢至全部 completed，主控本場 tool_result 逐字）：`root-infra-ci` 36461220011 **success**、`windows-compat-ci` 36461220088 **success**、`macos-compat-ci` 36461220032 **success**、`AutoClaude CI` 36461220014 **success**（四支皆 createdAt 2026-09-28T17:52:31Z；`aisdlc-sdd-ci` 依路徑未觸發）。Q5 至此可寫「五問本體收斂」：本輪四個修法全部經全套 4710 支 rc=0、push 與雲端四支 success；帳本 open 列與五問相關者只剩 418（承接輪次未指派、第一步已做）。本節為 push 後回填，隨後以 docs commit 再 push 一次。
 
 ## 八、Mac 交棒——下輪第一個新視窗的任務書（掌舵者：「下輪要在MAC執行!」）
 
