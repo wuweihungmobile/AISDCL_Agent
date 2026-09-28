@@ -80,7 +80,7 @@
 
 - 判準：每 100 ms 記錄新行程（含 parent 鏈）＋列舉**可見**的 `ConsoleWindowClass` 視窗（`IsWindowVisible`）；conhost 出現 ≠ 視窗可見（`CREATE_NO_WINDOW` 也會配 conhost）。
 - status line 刷新的行程鏈：`claude.exe → bash.exe（配一支 conhost）→ bash.exe → pythonw.exe（venv launcher）→ pythonw.exe`；hook exec form：`claude.exe → pythonw.exe → pythonw.exe`，零 conhost。
-- v2（09:09:53 起 1500 s，已正常 `end`）：status line 刷新 33 次、hook 行程下 `pythonw.exe → powershell.exe` 11 次、`VISIBLE_CONSOLE_WINDOW` **0**；v3（09:15:12 起 3600 s，統計於 10:06:29）：刷新 117 次、powershell.exe 26 次、可見視窗 **0**（觀測期涵蓋四方審查 23 個子 agent、兩次 `claude -p`、SDD ci-gate、§7 回填與根層全套）。第二次 `claude -p`（09:31:02）的 SessionStart hook spawn 落在 v3 窗內，可見視窗仍 0。
+- v2（09:09:53 起 1500 s，已正常 `end`）：status line 刷新 33 次、hook 行程下 `pythonw.exe → powershell.exe` 11 次、`VISIBLE_CONSOLE_WINDOW` **0**；v3（09:15:12 起 3600 s，最終統計）：刷新 140 次、powershell.exe 32 次、可見視窗 **0**（觀測期涵蓋四方審查 23 個子 agent、兩次 `claude -p`、SDD ci-gate、§7 回填與根層全套）。第二次 `claude -p`（09:31:02）的 SessionStart hook spawn 落在 v3 窗內，可見視窗仍 0。
 - 誠實劃界：本機 `claude.exe` 的父鏈是 `pwsh.exe → antigravity ide.exe`（IDE 整合終端，conhost=21、OpenConsole=0）；EnumWindows 是全域列舉，與終端種類無關，但「掌舵者肉眼看到閃窗」仍是唯一的最終驗收，本檔不宣稱「已解決閃窗」，只宣稱「65 分鐘觀測期零可見 console 視窗」。
 
 ## 八、帳本異動
@@ -114,4 +114,11 @@
 - ruff：本輪改到的檔（repo 設定）皆 `All checks passed!`；根層快層 `ruff check tools/ .claude/hooks/` rc=0；`--isolated --select E501 --line-length 100` 對改到的兩支測試檔：改寫行皆不在命中列（`test_install_statusline.py` 第一版 docstring 兩行 111／101 超寬，縮回後 0 命中）。
 - 帳本：`archive_defect_log.py --check` rc=0（70 檔／1519 個 ID／68 支 archive 對 68 條 bullet）；`check_defect_log_crossref.py` `CROSSREF_RC=0`（帳本 111 筆有效狀態紀錄、19 份掃描目標皆無矛盾、具名治理文件 130 份皆已登記、未結存量 37 列）；主檔 99,163 bytes（輪替前 247,062）。
 - 根層全套 `python tools/run_root_unittests.py`：第一跑 `REAL_RC=1`、`3 failures`（帳本 WARN 帶＋`test_install_statusline` 兩支，皆已修，見〈八〉〈八之二〉）；第二跑（最後一次改帳本與證據檔之後）：`REAL_RC=0`／`✅ unittest 數量下限釘選通過：發現 4666 個測試（下限 4543）`／`[cpu_budget] root-unittest workers=18`／`S=1737.3s｜slot 利用率=99.8%`／`[M6 id 集合] tools/tests@win32：✅ 集合關係成立（本次 skip 46 支）`。
-- push 與雲端五支 run：見下方〈十一〉追記（push 後回填）。
+- push 與雲端五支 run：見〈十一〉。
+
+## 十一、push 與雲端驗收（追記）
+
+- commit `b21554b`（13 files changed, 428 insertions(+), 255 deletions(-)）；pre-commit：`✅ 未觸發歸檔強制門檻`（主檔已在安全區）。
+- `git push origin main`：pre-push `scripts/ci-gate.sh` `AISDLC_SDD_v0.01: 1478 passed`／`AISDLC_SDD_v0.30: 1960 passed`／`scripts/tests/: 363 passed`／`✅ [pre-push] 閘門通過`；`[cpu_budget] parallel legs: root=18 autoclaude=0 sdd=2 wall=150s`；`✅ 本次 push 觸發的所有 leg 皆通過（rc=0）`；`ee0d455..b21554b  main -> main`、`PUSH_RC=0`。
+- 雲端（`gh run list --json headSha` 篩 `b21554b…`，`gh run watch --exit-status` 五支各 rc=0）：`AutoClaude CI` 36368869522 success、`root-infra-ci` 36368869527 success、`windows-compat-ci` 36368869548 success、`aisdlc-sdd-ci` 36368869560 success、`macos-compat-ci` 36368869592 success。
+- 本節與〈七〉v3 最終數字為 push 後回填（本檔隨後以 docs commit 再 push 一次）。
