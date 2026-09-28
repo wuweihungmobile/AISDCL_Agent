@@ -17,6 +17,7 @@ from __future__ import annotations
 import atexit
 import importlib.util
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -47,6 +48,36 @@ def os_label() -> str:
     if sys.platform == "darwin":
         return "mac"
     return "linux"
+
+
+def claude_home(home: Path | None = None) -> Path:
+    """Claude Code 的 `~/.claude` 設定目錄——單一真相源（DEF-200-421）。
+
+    WHY：`tools/install_statusline.py::settings_path()` 已認官方環境變數
+    `CLAUDE_CONFIG_DIR`（設了即整個 `~/.claude` 設定目錄被該目錄取代），但
+    `tools/probe/` 四個逐字稿站點（`audit_session.py`／`causal_form_census.py`／
+    `reset_window_distribution.py`／`shell_command_corpus.py`）各自硬寫
+    `Path.home() / ".claude" / "projects"`，對同一個變數視而不見——
+    `settings.json` 與 `projects/` 是同一棵 `~/.claude` 樹下的手足，此前只有
+    settings 面認它，覆寫被另一半結構上忽略。本函式是兩面共用的單一真相源。
+
+    語意（`home` 顯式給時優先，且**不**再查環境變數——維持
+    `install_statusline.py` 既有測試語意：顯式 `home` 參數＝測試用的假使用者
+    家目錄）：
+      · `home` 非 `None` → `home / ".claude"`。
+      · 否則 `CLAUDE_CONFIG_DIR` 非空白 → `Path(該值)`（該值本身就是取代後的
+        `.claude` 目錄，不再疊加一層 `.claude`；刻意**不**做 `expanduser()`——官方
+        對含 `~` 字面的值怎麼處理未文件化，殼本來就會先展開未加引號的 `~`，這裡
+        照字面用才與 `install_statusline.py` 既有已鎖語意逐字相同）。
+      · 否則 → `Path.home() / ".claude"`。
+    空字串／純空白視同未設。
+    """
+    if home is not None:
+        return home / ".claude"
+    override = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
+    if override:
+        return Path(override)
+    return Path.home() / ".claude"
 
 
 def venv_python_path(venv_dir: Path, is_windows: bool | None = None) -> Path:

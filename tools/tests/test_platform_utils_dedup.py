@@ -333,6 +333,70 @@ class TestPlatformUtilsApi(unittest.TestCase):
             self.assertIs(sys.stdout, fake_stdout, "no-op 路徑不得換掉串流物件")
 
 
+class TestClaudeHome(unittest.TestCase):
+    """`claude_home()`（DEF-200-421）：`~/.claude` 設定目錄解析的單一真相源。
+
+    立案：`tools/install_statusline.py::settings_path()` 早已認官方環境變數
+    `CLAUDE_CONFIG_DIR`，但 `tools/probe/` 四個逐字稿站點各自硬寫
+    `Path.home() / ".claude" / "projects"`，對同一個變數視而不見。本類只鎖
+    `platform_utils.claude_home()` 本體的四種輸入組合；消費端有沒有真的接上
+    由下面 `test_audit_session_project_transcript_dir_honors_the_ssot` 證明。
+    """
+
+    def test_explicit_home_wins(self) -> None:
+        home = Path("/tmp/fake-home-def200421")
+        self.assertEqual(m.claude_home(home), home / ".claude")
+
+    def test_env_override_wins_over_default_home(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": td}):
+                self.assertEqual(m.claude_home(), Path(td))
+
+    def test_unset_env_falls_back_to_path_home(self) -> None:
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("CLAUDE_CONFIG_DIR", None)
+            self.assertEqual(m.claude_home(), Path.home() / ".claude")
+
+    def test_blank_env_is_treated_as_unset(self) -> None:
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": "   "}):
+            self.assertEqual(m.claude_home(), Path.home() / ".claude")
+
+    def test_audit_session_project_transcript_dir_honors_the_ssot(self) -> None:
+        """消費端證明：`tools/probe/audit_session.py::project_transcript_dir()` 真的
+        接上 `claude_home()`，不是自己另留一份硬寫的 `Path.home() / ".claude"`。"""
+        probe_dir = str(Path(__file__).resolve().parents[1] / "probe")
+        if probe_dir not in sys.path:
+            sys.path.insert(0, probe_dir)
+        import audit_session as _audit_session  # noqa: PLC0415 — 隨用隨載，同既有慣例
+
+        with tempfile.TemporaryDirectory() as td:
+            with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": td}):
+                got = _audit_session.project_transcript_dir(_REPO_ROOT)
+        self.assertEqual(
+            got.parent, Path(td) / "projects",
+            f"{got} 的父目錄不是 {Path(td) / 'projects'}——消費端沒有真的接上 SSOT")
+
+    def test_every_transcript_consumer_names_the_ssot_and_no_hardwired_home(self) -> None:
+        """其餘消費端（模組層常數／argparse 預設值／函式預設）沒有端到端呼叫面可注入，
+        改以站點級靜態鎖釘住：來源必含 `claude_home()`，且不得再出現硬寫的
+        `Path.home() / ".claude"`／`expanduser("~")) / ".claude"`（複審指出只鎖
+        `audit_session` 一站，其餘三站與防污染檢查改回硬寫時測試矩陣抓不到）。"""
+        consumers = (
+            "tools/probe/audit_session.py", "tools/probe/causal_form_census.py",
+            "tools/probe/reset_window_distribution.py", "tools/probe/shell_command_corpus.py",
+            "tools/tests/test_doc_loc_baseline_freshness_r60.py",
+        )
+        hardwired = re.compile(r'(Path\.home\(\)|expanduser\("~"\)\))\s*/\s*"\.claude"')
+        for rel in consumers:
+            src = (_REPO_ROOT / rel).read_text(encoding="utf-8")
+            self.assertIn("claude_home()", src, f"{rel} 沒有接上 claude_home() SSOT")
+            # 只判程式碼行：註解行與帶反引號的 docstring 史料（「此前硬寫 `…`」）不算站點。
+            code_hits = [ln for ln in src.splitlines()
+                         if "`" not in ln and not ln.lstrip().startswith("#")
+                         and hardwired.search(ln)]
+            self.assertEqual([], code_hits, f"{rel} 仍有硬寫的 ~/.claude 站點")
+
+
 class TestNoDuplicateDefinitions(unittest.TestCase):
     def test_known_call_sites_exist(self) -> None:
         """清單本身不得腐化（檔案消失須 fail-loud，不得靜默縮小掃描面）。"""

@@ -897,8 +897,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--out", help="任務書落點（預設：系統暫存）")
     parser.add_argument("--check", action="store_true", help="只印當前 context 用量與百分比，不寫檔")  # noqa: E501
     # 🔴 R98：`--pace` 用的目標模型（模型分軌軸只有命中它才進 cap，見 quota_policy）；
-    # `None`＝不知道，一律不進 cap 但仍出聲（見 quota_gate.pace_report 的 WHY）。
-    parser.add_argument("--model", help="--pace 用：目標模型名（不給則模型分軌軸一律不進 cap，只出聲）")  # noqa: E501
+    # DEF-200-420：不給時先從本 session 逐字稿自動推導（harness_feed.active_model_of，
+    # 與 PreToolUse hook 同一組規則），解不出才落回「不進 cap 但仍出聲」
+    # （見 quota_gate.pace_report 的 WHY）。
+    parser.add_argument("--model", help="--pace 用：目標模型名（不給則先從逐字稿自動推導；解不出時模型分軌軸不進 cap、只出聲）")  # noqa: E501
     parser.add_argument("--check-autocompact", action="store_true", dest="check_autocompact", help="只印 harness 的 autocompact 姿態；**被關掉時 rc=1**" "（不需要逐字稿，可單獨跑）")  # noqa: E501
     parser.add_argument("--print-schtasks-command", action="store_true", dest="print_schtasks", help="只印離線排程指令與取證指令，**不執行、不註冊**" "（會一併產生任務書：排程起來的那一跑要吃它）")  # noqa: E501
     parser.add_argument("--register-schtasks", action="store_true", dest="register_schtasks",
@@ -1563,7 +1565,7 @@ def main(argv: list[str]) -> int:
         # （見 pace_report 的 sid 分支）。定位不到 session 時靜默跳過（不依賴逐字稿的契約
         # 不變）；定位得到而 stamp 與排程器現查不一致才出聲。
         aim = resolve_transcript(args.session_id, args.transcript)
-        print(quota_gate.pace_report(model=args.model, sid=guard.session_id_of(aim) if aim else None), end="")  # noqa: E501
+        print(quota_gate.pace_report(model=args.model or harness_feed.active_model_of(aim, guard), sid=guard.session_id_of(aim) if aim else None), end="")  # noqa: E501 — DEF-200-420：自動推導，顯式 --model 優先
         liveness = sentinel_lifecycle.liveness_line(guard.session_id_of(aim)) if aim else ""
         if liveness:
             print(liveness, file=sys.stderr)

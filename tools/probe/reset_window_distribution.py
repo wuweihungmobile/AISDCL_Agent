@@ -44,6 +44,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO_ROOT / "tools"))
 sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
 
+import platform_utils  # noqa: E402 — DEF-200-421：claude_home() SSOT
 import quota_limits as limits  # noqa: E402
 
 # 🔴 本檔整份輸出都是中文 ⇒ 非 UTF-8 locale 下 stdout 會直接 UnicodeEncodeError、
@@ -166,8 +167,10 @@ def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="reset_window_distribution.py", allow_abbrev=False,
         description="撞線→reset 等待窗的實測分布（ADR-XPLAT-004 §2.7）")
-    parser.add_argument("--base", default=str(Path.home() / ".claude" / "projects"),
-                        help="逐字稿根目錄（預設 ~/.claude/projects）")
+    parser.add_argument(
+        "--base", default=str(platform_utils.claude_home() / "projects"),
+        help="逐字稿根目錄（預設 ~/.claude/projects；尊重 CLAUDE_CONFIG_DIR，"
+             "見 platform_utils.claude_home() DEF-200-421）")
     parser.add_argument("--out", default=None, help="逐筆 jsonl 落點")
     args = parser.parse_args(argv)
     base = Path(args.base)

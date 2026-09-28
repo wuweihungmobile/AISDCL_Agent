@@ -72,6 +72,7 @@ from lib import baseline_origin as BO  # noqa: E402  # nightly 探針的解析�
 from lib import ci_liveness as _CI_LIVENESS  # noqa: E402  # job 層 fail-open 正則 SSOT
 from lib import defect_ledger_index as _LEDGER_INDEX  # noqa: E402  # 改派判定的生產 SSOT
 from lib import git_paths as _GIT_PATHS  # noqa: E402  # git argv 的 quotepath SSOT
+from lib import platform_utils as _PLATFORM_UTILS  # noqa: E402  # DEF-200-421：claude_home() SSOT
 from lib import sdd_latest as _SDD_LATEST  # noqa: E402  # LATEST 版名解析 SSOT
 
 hook_command_scripts = _HYGIENE.hook_command_scripts
@@ -6782,8 +6783,13 @@ class TestR85DocNamedLiveCheckEntriesActuallyRun(unittest.TestCase):
             base.mkdir()
             # 🔴 ADR-XPLAT-007 §「合成語料」的硬紅線，且必須是本測試的第一條斷言：
             # fixture 一旦落在真實逐字稿目錄底下，就會把合成撞線注入**所有**歷史分析，
-            # 而那是不可逆的語料污染。
-            real = (Path.home() / ".claude" / "projects").resolve()
+            # 而那是不可逆的語料污染。DEF-200-421：`real` 經 `claude_home()` 取得
+            # （尊重 `CLAUDE_CONFIG_DIR`，與 `reset_window_distribution.py` 本身的預設值
+            # 同一顆 SSOT）——不論該變數有沒有設、指到的目錄存不存在，`resolve()` 仍回一個
+            # 正規化絕對路徑；`base` 恆為本測試自建的 tempdir，兩者實務上不可能重疊，
+            # 唯一會讓斷言真的抓到東西的情境就是「合成 fixture 真的落在該目錄底下」，
+            # 判準方向不變（不會因此變成恆過）。
+            real = (_PLATFORM_UTILS.claude_home() / "projects").resolve()
             self.assertNotIn(real, base.resolve().parents,
                              "合成語料落在真實逐字稿目錄底下＝不可逆的語料污染")
             (base / "syn.jsonl").write_text("\n".join(

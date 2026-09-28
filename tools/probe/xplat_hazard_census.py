@@ -34,6 +34,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import _stdio_utf8  # noqa: E402,F401  （side effect：強制 stdout/stderr 為 UTF-8）
+from lib.win_spawn import NO_WINDOW  # noqa: E402 — DEF-200-418：無視窗旗標 SSOT（tools/lib）
 
 _REPO = Path(__file__).resolve().parents[2]
 
@@ -79,6 +80,7 @@ def _tracked_py() -> list[str]:
         ["git", "-c", "core.quotepath=false", "-C", str(_REPO),
          "ls-files", "-z", "--", "*.py"],
         capture_output=True, text=True, encoding="utf-8", errors="replace", check=True,
+        creationflags=NO_WINDOW,
     )
     out: list[str] = []
     for rel in proc.stdout.split("\0"):

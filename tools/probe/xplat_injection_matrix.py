@@ -210,6 +210,7 @@ def _gates() -> tuple[Gate, ...]:
 def _run(argv: tuple[str, ...], stdin_text: str | None = None) -> tuple[int, str]:
     """跑一道關卡。**不接管線**（rc 直接讀 `returncode`），顯式 encoding（CP950 會失真）。"""
     proc = subprocess.run(
+        # no-window-ok: 互動長跑關卡（全套 unittest／git hook）要保留 Ctrl+C，DEF-200-418 逐站判
         list(argv), cwd=str(_REPO), input=stdin_text, capture_output=True,
         text=True, encoding="utf-8", errors="replace",
     )

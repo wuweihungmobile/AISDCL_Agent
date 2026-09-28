@@ -67,13 +67,28 @@ def settings_path(home: Path | None = None) -> Path:
     `CLAUDE_CONFIG_DIR`（兩平台語意相同：設了即整個 `~/.claude` 設定目錄被該
     目錄取代）優先於 `Path.home()`——設了該變數卻仍固定寫 `~/.claude` 會裝到
     Claude Code 根本不讀的檔，且本檔 `install()`/`status()` 皆會一致誤判成
-    「假的已安裝」。空字串／純空白視同未設。"""
-    if home is not None:
-        return home / ".claude" / "settings.json"
-    override = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
-    if override:
-        return Path(override) / "settings.json"
-    return Path.home() / ".claude" / "settings.json"
+    「假的已安裝」。空字串／純空白視同未設。
+
+    DEF-200-421：判斷邏輯收斂到 `tools/lib/platform_utils.py::claude_home()`
+    （`tools/probe/` 的逐字稿站點是同一個變數的另一個消費端，不得各自維護一份）。
+    區域延遲 import（同 `statusline_context_feed._repo_venv_python()` 的既有
+    慣例，見該函式 docstring：本檔平常零依賴 `tools/lib/` 的 stdlib-only
+    紀律），取不到時整段 `except Exception` 退回原地實作——本函式絕不能因為
+    輔助模組解析失敗而讓安裝器掛掉。"""
+    try:
+        lib_dir = str(Path(__file__).resolve().parent / "lib")
+        if lib_dir not in sys.path:
+            sys.path.insert(0, lib_dir)
+        from platform_utils import claude_home  # noqa: PLC0415
+
+        return claude_home(home) / "settings.json"
+    except Exception:  # noqa: BLE001 — 見 docstring 最後一句
+        if home is not None:
+            return home / ".claude" / "settings.json"
+        override = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
+        if override:
+            return Path(override) / "settings.json"
+        return Path.home() / ".claude" / "settings.json"
 
 
 def _utc_stamp() -> str:

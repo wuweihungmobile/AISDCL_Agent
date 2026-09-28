@@ -685,7 +685,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 9042,
+    "test_adr_xplat001_c1c2_lock.py": 9072,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 4076,
@@ -705,7 +705,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_claim_provenance_r86.py": 1015,
     "test_clean_venv_carrier.py": 281,
     "test_component_sanitizer_shared_layer_lock.py": 293,
-    "test_context_budget_guard.py": 12828,
+    "test_context_budget_guard.py": 12936,
     "test_context_window_parity.py": 281,
     "test_cpu_budget.py": 428,
     "test_defect_id_reference_integrity.py": 281,
@@ -713,7 +713,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_dev_start.py": 6812,
     "test_dev_start_ps1_lastexitcode.py": 521,
     "test_doc_env_prefix_platform_parity_r60.py": 331,
-    "test_doc_loc_baseline_freshness_r60.py": 7171,
+    "test_doc_loc_baseline_freshness_r60.py": 7177,
     "test_extras_quoting_zsh_safety.py": 365,
     "test_failure_log_rotation.py": 80,
     "test_find_git_bash_parity.py": 1336,
@@ -721,7 +721,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_git_hooks_install_common.py": 485,
     "test_guard_line_taxonomy_r99.py": 148,
     "test_hook_carrier_symlink.py": 153,
-    "test_install_statusline.py": 430,
+    "test_install_statusline.py": 446,
     "test_install_windows_nightly.py": 1358,
     "test_mac_endurance_r83.py": 1987,
     "test_mac_readiness_r82.py": 626,
@@ -733,7 +733,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_ntfs_trailing_space_device_name.py": 698,
     "test_onboarding_parity_interlock.py": 233,
     "test_platform_neutral_paths.py": 5761,
-    "test_platform_utils_dedup.py": 1078,
+    "test_platform_utils_dedup.py": 1142,
     "test_pre_commit_dispatcher_sigpipe.py": 969,
     "test_pre_push_dispatcher.py": 1203,
     "test_ps1_bom.py": 248,
@@ -2508,6 +2508,21 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "本列自身、_REGRESSION_LANE_LOG 同輪第二列、_FROZEN_PREFIX_REWRITE_LEDGER 接鏈列造成的行數"
      "漂移，反覆覆核收斂到本行也計入為止，同 R173~R181 既有體例。餘額歸主軌，見 "  # round-label-ok
      "CrossPlatform_R145_Scan_Findings.md〈附記（R182）〉。"),  # round-label-ok
+    ("R183", 108070, 108264, 194,  # round-label-ok：DEF-200-420～422 新立即結收尾單人窗口
+     "[非淨減法輪][回歸鎖軌申報＝本列淨額全額，見 _REGRESSION_LANE_LOG 同輪列] DEF-200-420 "
+     "結案回歸鎖：test_context_budget_guard.py +108（PaceAutoDerivesActiveModelTest 三格："
+     "自動推導判定四欄＝顯式 --model／顯式優先／無 model 欄仍排除；HarnessFeedStageTest "
+     "active_model_of 三格；ConsoleFreeSpawnTest 掃描面策展式納 tools/probe 四個檔＋四行 "
+     "assertIn）＋DEF-200-421 結案回歸鎖：test_platform_utils_dedup.py +64（TestClaudeHome "
+     "六格）、test_install_statusline.py +16（退回分支釘同 SSOT 語意一格）、"
+     "test_doc_loc_baseline_freshness_r60.py +6（第五站點改接 claude_home）＋本表自身漂移"
+     "「見下一列」，未超軌上限 ⇒ 全額申報，主軌 0。逐項見 "
+     "CrossPlatform_R183_SessionGate_Windows_Recheck5_Evidence.md〈四〉。"),  # round-label-ok
+    ("R183", 108264, 108294, 30,  # round-label-ok：本表自身漂移收斂列
+     "[非淨減法輪][同輪追加] 收斂列：本表（test_adr_xplat001_c1c2_lock.py 自身）新增上一列、"
+     "本列自身、_REGRESSION_LANE_LOG 同輪列、_FROZEN_PREFIX_REWRITE_LEDGER 接鏈列、U9 到期輪"
+     "具名展延與 Phase2 到期列造成的漂移，收斂到本行也計入為止。餘額歸主軌，見 "  # round-label-ok
+     "CrossPlatform_R145_Scan_Findings.md〈附記（R183）〉。"),  # round-label-ok
 )
 
 
@@ -3017,6 +3032,11 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "DEF-200-417 結案回歸鎖全額（test_context_budget_guard.py 歸因四格＋flash_watch 報表三格"
      "＋本表漂移），未超軌上限 ⇒ 全額申報，主軌 0。逐項見 CrossPlatform_R145_Scan_Findings.md"
      "〈附記（R182）〉。"),  # round-label-ok
+    ("R183", 194,  # round-label-ok
+     "DEF-200-420／421 結案回歸鎖全額（test_context_budget_guard.py pace 六格＋掃描面四格、"
+     "test_platform_utils_dedup.py 六格、test_install_statusline.py 一格、"
+     "test_doc_loc_baseline_freshness_r60.py 第五站點＋本表漂移），未超軌上限 ⇒ 全額申報，"
+     "主軌 0。逐項見 CrossPlatform_R145_Scan_Findings.md〈附記（R183）〉。"),  # round-label-ok
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -3134,7 +3154,10 @@ def _regression_lane_cap_basis() -> tuple[str, int]:
 # 🔴 R178 具名展延（鐵律七，不得靜默沿用）round-label-ok：Windows 切換啟動輪 DEF-200-402／403／404
 # 收尾單人窗口（chaos_runner 治理 yaml 寫回根治＋symlink 測試 Windows 缺口），非 root-tools
 # 重構持有面；真拆待獨立窗口，178 → 183（在 lookahead=5 內，已達上界）。
-_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND = 183
+# 🔴 R183 具名展延（鐵律七，不得靜默沿用）round-label-ok：掌舵者五問第五次四方覆核
+# DEF-200-420／421／422 新立即結＋418 第一步收尾單人窗口（護欄層記帳＋Mac 交棒任務書），
+# 非 root-tools 重構持有面；真拆待獨立窗口，183 → 188（在 lookahead=5 內，已達上界）。
+_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND = 188
 #: 清償旗標——真拆完成後改 True。刻意用布林而非重建舊尺計數器（ADR §9.3「舊尺已廢」）。
 _ROOT_TOOLS_OLD_SCALE_DEBT_RESOLVED = False
 #: A-2 後設鎖：到期輪只准落在「現查輪＋lookahead」內，推遠（如 9999）當場紅；shrink-only
@@ -3315,10 +3338,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 311
+_REPIN_LOG_FROZEN_PREFIX_LEN = 313
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "783155a15210e99a93a1d773a77247838fcfe4dee3555eb6bbc10c2ef56aa786")
+    "bd1f875e0ceb88f718112833339ccaf6408ef515ba4713b5cfbf43d63bc3ac36")
 
 
 def repin_log_history_digest(
@@ -3666,6 +3689,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R181", "747baab09344", "69ba8e55b356", "DEF-200-412"),  # round-label-ok
     ("R182", "69ba8e55b356", "400ca9669d68", "DEF-200-413"),  # round-label-ok
     ("R182", "400ca9669d68", "783155a15210", "DEF-200-417"),  # round-label-ok
+    ("R183", "783155a15210", "bd1f875e0ceb", "DEF-200-420"),  # round-label-ok
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。
@@ -8063,6 +8087,12 @@ _PHASE2_REVIEW_LOG: tuple[tuple[int, str, str], ...] = (
      "主控排定、尚未有結果；本列僅是把該既存未決狀態依款(5) 的封閉表格式重新登記一次，純因"
      "本輪把稽核痕跡機械推進到 R177 而觸發 §6 的 5 輪視窗時效。依 §6 重新武裝下一個視窗"
      "（連續『維持觀察』計數歸零）。"),
+    (183, "[維持觀察]",
+     "本輪是掌舵者五問第五次四方覆核／DEF-200-420／421／422 新立即結、418 第一步收尾單人"
+     "窗口（護欄層 guard-line 記帳＋分軌申報＋Mac 交棒任務書），未觸碰 ADR-XPLAT-013 方向 (c) "
+     "觀測→阻斷轉換提案本身——R129 提出的既存提案（送四方複審一事）迄今仍待主控排定、尚未有"
+     "結果，亦未提出新 Phase 2 提案。上一列（R177）是『提案』⇒ 連續『維持觀察』計數自本列"
+     "起算為一，未觸上限（`_PHASE2_MAX_CONSECUTIVE_DEFERRALS=1`）。依 §6 重新武裝下一個視窗。"),
 )
 #: 到期輪由末列導出、不另立常數（一份知識一個家；同 `_REPIN_NET_CAP_SCHEDULE` 的
 #: 「生效點＝首列、現值＝末列，皆由表導出」）。

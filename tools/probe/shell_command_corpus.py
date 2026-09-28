@@ -64,7 +64,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import re
 import subprocess
 import sys
@@ -84,6 +83,8 @@ sys.path.insert(0, str(_REPO_ROOT / "tools"))
 #: 被普查的判準**一律 import 生產程式碼**，不在本檔重抄一份。抄一份的話語料會對著一個
 #: 副本跑，而副本與 hook 漂移的那一天，普查結果會變成「對已經不存在的判準做的量測」。
 import block_destructive_git as G  # noqa: E402
+import platform_utils  # noqa: E402 — DEF-200-421：claude_home() SSOT
+from win_spawn import NO_WINDOW  # noqa: E402 — DEF-200-418：無視窗旗標 SSOT（tools/lib）
 
 # 🔴 這兩支的**順序由 ruff isort 決定，不是由「先武裝再輸出」決定**——姊妹 probe 把
 # `_stdio_utf8` 排在前面，本檔排在後面，兩者都對：上面那支 import 到底不印任何東西
@@ -135,7 +136,7 @@ def tracked_fragments(repo_root: Path) -> list[tuple[str, str, str]]:
     out = subprocess.run(
         ["git", "-c", "core.quotepath=false", "ls-files", "-z"],
         cwd=str(repo_root), capture_output=True, text=True, encoding="utf-8",
-        errors="replace", check=False)
+        errors="replace", check=False, creationflags=NO_WINDOW)
     rows: list[tuple[str, str, str]] = []
     for rel in out.stdout.split("\0"):
         if not rel or _FROZEN_RE.match(rel):
@@ -163,8 +164,11 @@ def transcript_commands(root: Path | None = None) -> list[tuple[str, str, str]]:
     且 `name` 落在 `_SHELL_TOOLS` 的那些，取 `input.command`。這**就是** PreToolUse
     payload 的 `tool_input.command`（本輪以臨時 probe 實測對照過同一個欄位）。
     壞列一律跳過並不出聲：逐字稿會被 harness 邊寫邊讀，尾列半截是常態，不是異常。
+
+    DEF-200-421：`root` 未顯式指定時經 `platform_utils.claude_home()` 取得，
+    尊重 `CLAUDE_CONFIG_DIR`（此前硬寫 `~/.claude`，對官方變數視而不見）。
     """
-    base = root or (Path(os.path.expanduser("~")) / ".claude" / "projects")
+    base = root or (platform_utils.claude_home() / "projects")
     rows: list[tuple[str, str, str]] = []
     for jsonl in sorted(base.glob(_TRANSCRIPT_GLOB)):
         try:

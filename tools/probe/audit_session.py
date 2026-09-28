@@ -121,6 +121,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import _stdio_utf8  # noqa: E402,F401  （side effect：強制 stdout/stderr 為 UTF-8）
+from lib import platform_utils  # noqa: E402  # DEF-200-421：claude_home() SSOT
 from lib import rc_after_pipe_real as _rc_real  # noqa: E402  # R80 S7-01 判準本體
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -375,9 +376,13 @@ def project_transcript_dir(repo_root: Path) -> Path:
     slug 規則＝把路徑裡每個非英數字元換成 `-`（本機實測：`d:\\CursorProject\\
     AISDCL_Agent` → `d--CursorProject-AISDCL-Agent`）。這是**觀察到的**編碼方式，
     不是官方契約，所以 `--project-dir` 一律可覆寫，而目錄不存在時 fail-loud。
+
+    DEF-200-421：家目錄一律經 `platform_utils.claude_home()` 取得，尊重
+    `CLAUDE_CONFIG_DIR`（設了即整個 `~/.claude` 目錄被該目錄取代）——此前本函式
+    硬寫 `Path.home() / ".claude"`，對這個官方變數視而不見。
     """
     slug = re.sub(r"[^A-Za-z0-9]", "-", str(repo_root))
-    return Path.home() / ".claude" / "projects" / slug
+    return platform_utils.claude_home() / "projects" / slug
 
 
 def iter_records(path: Path):

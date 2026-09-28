@@ -425,6 +425,22 @@ class ConfigDirOverrideTest(unittest.TestCase):
             doc = _leading_json(out)
             self.assertEqual(doc["path"], str(Path(cfg_dir) / "settings.json"))
 
+    def test_fallback_branch_matches_the_ssot_when_the_helper_import_fails(self) -> None:
+        """DEF-200-421：`settings_path()` 主路徑委派 `platform_utils.claude_home()`，
+        `except Exception` 退回分支是原地實作——兩條路徑必須逐字同語意（複審抓到
+        退回分支曾與 SSOT 分岔）。把 `platform_utils` 在 `sys.modules` 釘成 `None`
+        逼 `from platform_utils import …` 拋 ImportError，走的就是退回分支。"""
+        with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as home_td:
+            with mock.patch.dict(sys.modules, {"platform_utils": None}):
+                with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": td}):
+                    via_env = installer.settings_path()
+                    via_home = installer.settings_path(Path(home_td))
+                with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": "   "}):
+                    via_blank = installer.settings_path()
+            self.assertEqual(via_env, Path(td) / "settings.json")
+            self.assertEqual(via_home, Path(home_td) / ".claude" / "settings.json")
+            self.assertEqual(via_blank, Path.home() / ".claude" / "settings.json")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -66,7 +66,7 @@ gh run list --limit 10 --json workflowName,conclusion,event,createdAt,headSha   
 
 順序不可調換：**閘門先、回填後**——回填寫的是根層 `ONBOARDING.md`，而 pre-push 慢層只在 push 含根層檔時才跑；先回填、後才發現紅，成果會被自己的紅鎖在本機。
 
-1. **跑一次啟動提示詞**（全新 Windows 機器先 `Set-ExecutionPolicy RemoteSigned -Scope CurrentUser`，預設 Restricted 擋掉所有 .ps1）。
+1. **跑一次啟動提示詞**（全新 Windows 機器先 `Set-ExecutionPolicy RemoteSigned -Scope CurrentUser`，預設 Restricted 擋掉所有 .ps1）。接著看 SessionStart 簡報的 `statusLine：` 那一句：印「未安裝」或「已安裝但與本 checkout 不符」時，這台機器的 `~/.claude/settings.json` 還沒有本 checkout 的 status line（每台機器各一份、不隨 clone 走），先 `<python> tools/install_statusline.py --dry-run` 預覽、確認後去掉旗標安裝，再開一個全新 claude 視窗肉眼看最下方有沒有 `ctx NN%`；選配（ONBOARDING §status line、R158），刻意不併入 dev_start——它會動使用者家目錄外的設定檔，不宜由啟動流程無感觸發。
 2. **跑全套閘門確立新平台基線，紅燈在這步清完**（指令見 ONBOARDING §7 與根 CLAUDE.md；本檔不重抄數字）——剛過來的第一輪最容易冒出跨平台缺口，是本步目的、不是意外。
 3. 🔴 **回填本平台 ONBOARDING §7 表②**——整份 SOP 唯一只能在目標平台做的事（跨平台代填＝假 provenance，工具 rc=2 拒絕）。**首選一條龍載具** `tools/lib/clean_venv_carrier.py`（建樹外乾淨 venv → 裝依賴 → 探針 psycopg2／sqlalchemy 必 ABSENT → `--write --with-slow` 回填 → finally 必刪；DEF-200-306）：
    ```bash

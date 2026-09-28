@@ -37,8 +37,13 @@ from collections import Counter
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
+from platform_utils import claude_home  # noqa: E402 — DEF-200-421：SSOT
+
 _HOOK = _REPO_ROOT / ".claude" / "hooks" / "check_claim_provenance.py"
-_TRANSCRIPT_HOME = Path.home() / ".claude" / "projects"
+# DEF-200-421：尊重 `CLAUDE_CONFIG_DIR`（此前硬寫 `Path.home() / ".claude"`，
+# 對官方變數視而不見，見 `claude_home()` docstring）。
+_TRANSCRIPT_HOME = claude_home() / "projects"
 
 #: shape a/b 用：反引號內的 snake_case 識別字＝本 repo 散文指認「量」的主要形態。
 _IDENT_RE = re.compile(r"`([a-z][a-z0-9]{2,}(?:_[a-z0-9]+)+)`")

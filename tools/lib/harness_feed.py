@@ -70,3 +70,26 @@ def check_lines(data: dict) -> list[str]:
     if data.get("harness_used") is None and data.get("harness_reason") is None:
         return ["harness feed 存在但當下無 current_usage（compact 後空窗），本次無交叉比對"]
     return []
+
+
+def active_model_of(transcript: Path | None, guard) -> str | None:
+    """DEF-200-420：本 session 逐字稿最後跑過的模型家族字——與 PreToolUse hook
+    （`context_budget_guard.py` 的 `active_model = model_family(scanned[2]) if
+    scanned and scanned[2] else None`）同一組轉換規則，讓 `--pace` 與守衛看同一把尺。
+    此前 `--pace` 沒有這一步，模型分軌軸（`MODEL_SCOPED_KINDS`）就一律被排除出 cap
+    聚合，給出比守衛寬鬆的假數字（同一份快取下 `--pace` 與 `--pace --model fable`
+    七軸讀數逐字相同，差異全來自 active_model 有無）。
+
+    `transcript` 為 `None`／不是檔案，或掃描途中出任何例外，一律回 `None`（fail-soft：
+    解不出就維持既有「不確定 → 保守排除」行為，不用猜的頂替）。呼叫端的顯式 `--model`
+    優先於本函式——本函式只補「沒給 `--model` 時」的自動推導。
+    """
+    if transcript is None:
+        return None
+    try:
+        if not transcript.is_file():
+            return None
+        _, _, seen_model = guard.scan_transcript(transcript)
+        return guard.model_family(seen_model) or None if seen_model else None
+    except Exception:
+        return None

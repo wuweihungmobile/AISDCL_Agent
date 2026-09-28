@@ -5987,6 +5987,16 @@ class ConsoleFreeSpawnTest(unittest.TestCase):
         # 同理補上（`platform_utils.py` 也用 `spec_from_file_location` 動態載入
         # `_stdio_utf8.py`）——見 `test_every_reachable_dynamic_load_target_is_registered`
         # 那條新規則：動態載入目標必須在這份掃描面裡找得到，否則獨立紅。
+        # 🔴 DEF-200-418：`tools/probe/` 此前完全不在掃描面（兩位獨立審查員實跑同一判準
+        # 各抓到 3 個假紅站點：`shell_command_corpus.py`／`xplat_hazard_census.py`／
+        # `xplat_injection_matrix.py` 皆是 `subprocess.run(["git", …])` 缺
+        # `creationflags`）。**刻意具名列舉四支，不 glob 整個 `tools/probe/`**——該目錄
+        # 大半是文件字串／測試替身裡才提 `subprocess.run` 的分析腳本
+        # （如 `replay_r113_lastmile_driver.py`），全拉進來會製造一批要逐一辯護的假紅
+        # （同本函式 docstring「全拉進來＝要逐一辯護的假紅」的既有原則）。
+        # `console_spawn_watch.py` 本就合規（既有 `NO_WINDOW`），具名納入是為了讓射程
+        # 縮小時指名道姓地紅（同下方 `test_the_scan_surface_has_not_silently_shrunk`
+        # 的具名斷言紀律）。
         paths = {
             "tools/session_resume_planner.py": _PLANNER,
             "tools/lib/schedule_backend.py": _REPO_ROOT / "tools" / "lib" / "schedule_backend.py",
@@ -5996,6 +6006,14 @@ class ConsoleFreeSpawnTest(unittest.TestCase):
             "tools/lib/git_paths.py": _REPO_ROOT / "tools" / "lib" / "git_paths.py",
             "tools/lib/platform_utils.py": _REPO_ROOT / "tools" / "lib" / "platform_utils.py",
             "tools/_stdio_utf8.py": _REPO_ROOT / "tools" / "_stdio_utf8.py",
+            "tools/probe/console_spawn_watch.py":
+                _REPO_ROOT / "tools" / "probe" / "console_spawn_watch.py",
+            "tools/probe/shell_command_corpus.py":
+                _REPO_ROOT / "tools" / "probe" / "shell_command_corpus.py",
+            "tools/probe/xplat_hazard_census.py":
+                _REPO_ROOT / "tools" / "probe" / "xplat_hazard_census.py",
+            "tools/probe/xplat_injection_matrix.py":
+                _REPO_ROOT / "tools" / "probe" / "xplat_injection_matrix.py",
         }
         lib = _REPO_ROOT / "tools" / "lib"
         for pattern in ("quota_*.py", "sentinel_*.py"):
@@ -6048,6 +6066,13 @@ class ConsoleFreeSpawnTest(unittest.TestCase):
         self.assertIn("AISDLC_SDD/scripts/sdd_version.py", sources)
         self.assertIn("tools/lib/sdd_latest.py", sources)
         self.assertIn("tools/lib/git_paths.py", sources)
+        # 🔴 DEF-200-418：`tools/probe/` 四支具名站點——射程不可靜默縮回只剩三支新站點
+        # 而把既有合規的 `console_spawn_watch.py` 漏掉（它此前根本不在掃描面，只是恰好
+        # 自己合規；具名斷言讓「有人以為它一直都被守著」這件事被戳破）。
+        self.assertIn("tools/probe/console_spawn_watch.py", sources)
+        self.assertIn("tools/probe/shell_command_corpus.py", sources)
+        self.assertIn("tools/probe/xplat_hazard_census.py", sources)
+        self.assertIn("tools/probe/xplat_injection_matrix.py", sources)
 
     def test_the_escape_hatch_budget_is_not_blown(self) -> None:
         """具名豁免有上限。沒有上限的逃生口會變成預設關法（本 repo 判例）。"""
@@ -11813,6 +11838,69 @@ class WindowUsageIsToldTheSameWayByBothOutletsTest(unittest.TestCase):
         self.assertNotIn("本視窗已用", line, f"free 帶印出了一道不存在的節流：{line}")
 
 
+class PaceAutoDerivesActiveModelTest(unittest.TestCase):
+    """DEF-200-420：`--pace` 沒給 `--model` 時，此前一律 `active_model=None` ⇒
+    模型分軌軸（`weekly_scoped` 等）恆被排除出 cap 聚合，即使逐字稿真的跑過那個模型。
+    `session_resume_planner.py` 現在補上 `harness_feed.active_model_of()`——與
+    PreToolUse hook（`context_budget_guard.py` 的 `active_model = model_family(
+    scanned[2]) if scanned and scanned[2] else None`）同一組轉換規則，讓 `--pace`
+    與守衛看同一把尺。紅端：同一份快取下 `--pace` 與 `--pace --model fable`
+    此前逐字不同（前者恆帶 `model-scoped-excluded`）。"""
+
+    def setUp(self) -> None:
+        self.tmp = _tmpdir(self, "pace-automodel-")
+        for name, value in (("quota_cache_path", lambda: self.tmp / quota_meter.CACHE_NAME),
+                            ("fanout_ledger_path", lambda: self.tmp / "ledger.d"),
+                            ("quota_latch_path", lambda: self.tmp / "latch.json"),
+                            *_TRACE_ISOLATION(self)):
+            old = getattr(qg, name)
+            setattr(qg, name, value)
+            self.addCleanup(setattr, qg, name, old)
+        # 寬鬆軸：不命中時應該是它決定 cap，不是 halt（同型見 :11078）。
+        _quota_cache(self.tmp, None, extra=(("session", 5.0, 3600.0),
+                                            ("weekly_scoped", 40.0, 60.0)),
+                     scope_models={"weekly_scoped": "Fable"})
+
+    def _pace(self, argv: list[str]) -> str:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(io.StringIO()):
+            rc = planner.main(argv)
+        self.assertEqual(rc, 0, buf.getvalue())
+        return buf.getvalue()
+
+    def test_pace_without_model_matches_the_explicit_fable_flag(self) -> None:
+        ts = _write_jsonl(self.tmp / "fable.jsonl", [36_000], model="claude-fable-5-1")
+        auto = self._pace(["--pace", "--transcript", str(ts)])
+        explicit = self._pace(["--pace", "--model", "fable", "--transcript", str(ts)])
+        self.assertNotIn("model-scoped-excluded", auto,
+                         f"weekly_scoped 軸仍被排除 ⇒ 自動推導沒接上：{auto}")
+        # 只比判定四欄（`cap=… recommended=… band=… binding=…`）：整段輸出（連 `⇒` 那一行
+        # 都是逐軸片語接 tail）含「剩 N 分鐘」，兩次呼叫相隔數秒就可能跨分鐘邊界而假紅；
+        # 判定值才是本格要釘的東西。
+        verdict = lambda text: re.findall(  # noqa: E731
+            r"⇒ cap=\S+ recommended=\S+ band=\S+ binding=\S+", text)
+        self.assertTrue(verdict(auto), f"找不到判定摘要：{auto}")
+        self.assertEqual(verdict(auto), verdict(explicit),
+                         "同一份逐字稿，自動推導與顯式 --model fable 說出不同的判定")
+
+    def test_explicit_model_overrides_a_different_transcript_model(self) -> None:
+        ts = _write_jsonl(self.tmp / "sonnet.jsonl", [36_000], model="claude-sonnet-5")
+        auto = self._pace(["--pace", "--transcript", str(ts)])
+        overridden = self._pace(["--pace", "--model", "fable", "--transcript", str(ts)])
+        self.assertIn("model-scoped-excluded", auto,
+                      f"逐字稿跑的是 sonnet，沒有顯式 --model 卻沒排除 weekly_scoped：{auto}")
+        self.assertNotIn("model-scoped-excluded", overridden,
+                         "顯式 --model fable 沒能覆蓋逐字稿裡的 sonnet")
+
+    def test_a_modelless_transcript_still_excludes_the_axis(self) -> None:
+        """防呆鎖：逐字稿沒有任何 assistant/model 記錄時行為不變（不得誤判成命中）。"""
+        ts = self.tmp / "nomodel.jsonl"
+        ts.write_text('{"type":"user","message":{"role":"user"}}\n',
+                     encoding="utf-8", newline="\n")
+        out = self._pace(["--pace", "--transcript", str(ts)])
+        self.assertIn("model-scoped-excluded", out, out)
+
+
 # 沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md〈DEF-200-169 滾動視窗剩餘秒數的立案〉。
 class FanoutWindowRemainingSecondsTest(unittest.TestCase):
     """派發帳最舊那一筆 → 視窗剩餘秒；三態渲染；`--pace` 真的印得出來。"""
@@ -12700,6 +12788,26 @@ class HarnessFeedStageTest(unittest.TestCase):
             window, source = guard.resolve_window(0, "500000", harness_window=dud)
             self.assertEqual(window, 500_000, repr(dud))
 
+    # ── DEF-200-420：`harness_feed.active_model_of()`（純函式，`guard` 由呼叫端注入，
+    # 同型見上方 `HarnessFeedStageTest` docstring）───────────────────────────────
+    def test_active_model_of_is_none_without_a_transcript(self) -> None:
+        """`None` 與不存在的路徑走同一段 fail-soft 分支——解不出就維持既有「不確定
+        → 保守排除」行為，不是兩套判準。"""
+        self.assertIsNone(harness_feed.active_model_of(None, guard))
+        self.assertIsNone(harness_feed.active_model_of(self.tmp / "missing.jsonl", guard))
+
+    def test_active_model_of_reads_the_last_model_family(self) -> None:
+        """與 PreToolUse hook 同一組轉換規則：回傳值必須與 `guard.model_family()`
+        本身一致，不是重寫的第二套判準。"""
+        ts = _write_jsonl(self.tmp / "sess.jsonl", [1000], model="claude-fable-5-1")
+        self.assertEqual(harness_feed.active_model_of(ts, guard),
+                         guard.model_family("claude-fable-5-1"))
+
+    def test_active_model_of_is_none_when_the_transcript_names_no_model(self) -> None:
+        ts = self.tmp / "nomodel.jsonl"
+        ts.write_text('{"type":"user","message":{"role":"user"}}\n',
+                     encoding="utf-8", newline="\n")
+        self.assertIsNone(harness_feed.active_model_of(ts, guard))
 
     # ── R158：`tools/lib/harness_feed.py::check_lines()`（純函式，紅綠由注入自證， round-label-ok
     # 與上面 `HarnessFeedStageTest` 同一份 fixture 家族，不需要 `self.tmp`）───────
