@@ -132,7 +132,14 @@ def _current_usage_sum(cw: dict) -> int | None:
 
 
 def ui_line(payload: dict) -> str:
-    """`--print-settings-snippet` 之外的主路徑：一行 ASCII 給 status line 顯示。"""
+    """`--print-settings-snippet` 之外的主路徑：一行 ASCII 給 status line 顯示。
+
+    DEF-200-416（掌舵者裁決 (a)）：百分比印 `:.0f`——harness 的 `used_percentage`
+    實測是整數（11／12／13…），此前 `:.1f` 印成 `13.0%` 是格式化出來的假精度（值本身沒有
+    那一位小數）；改成整數後，數字與 harness／`/context` 同源、不自造精度。若 harness 未來
+    送出小數，`:.0f` 的捨入是 Python 的 round-half-even（12.5→12、13.5→14），不是四捨五入；
+    `!` 高水位前綴仍以捨入前的原始值比較 `WARN_RATIO_PCT`。
+    """
     model = payload.get("model") if isinstance(payload.get("model"), dict) else {}
     label = _ascii(model.get("display_name") or model.get("id") or "?")
     cw = payload.get("context_window") if isinstance(payload.get("context_window"), dict) else {}
@@ -143,7 +150,7 @@ def ui_line(payload: dict) -> str:
     used = _current_usage_sum(cw)
     size = cw.get("context_window_size")
     prefix = "!" if used_pct >= WARN_RATIO_PCT else ""
-    return f"{prefix}ctx {used_pct:.1f}% {_fmt_tokens(used)}/{_fmt_tokens(size)} | {label}"
+    return f"{prefix}ctx {used_pct:.0f}% {_fmt_tokens(used)}/{_fmt_tokens(size)} | {label}"
 
 
 def _quote_token(token: str) -> str:

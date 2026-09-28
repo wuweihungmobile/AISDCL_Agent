@@ -78,7 +78,15 @@
 - 雲端（`gh run list --json` 篩 `60e3d86`）：本輪未動 `AISDLC_SDD/` 故 `aisdlc-sdd-ci` 依路徑過濾未觸發（與 R180 同形）；觸發四支＝`windows-compat-ci` 36421418203、`root-infra-ci` 36421418198、`macos-compat-ci` 36421418171、`AutoClaude CI` 36421418146（12:22:32Z 同時起跑）。
 - 雲端結論（`gh run watch --exit-status --interval 30` 四支序列等待 20:23:59→20:40:10 本地時間各 rc=0；再以 `gh run list --json` 現查伺服器 conclusion）：`windows-compat-ci` 36421418203 **success**（12:39:38Z）、`root-infra-ci` 36421418198 **success**（12:27:51Z）、`macos-compat-ci` 36421418171 **success**（12:32:32Z）、`AutoClaude CI` 36421418146 **success**（12:26:09Z）——`60e3d86` 觸發的四支全綠；DEF-200-413 的 `HaltConvergentClarificationPlatformTest` 與 DEF-200-415 的 `ConfigDirOverrideTest` 在 ubuntu／macOS／windows 三平台 runner 皆真跑（皆無平台 skip 標籤）。
 
-## 八、掌舵者側待辦（只有本人能做）
+## 八、掌舵者側待辦（只有本人能做；〈九〉已回收）
 
 1. 本視窗（40a1a0c4）或任一新開視窗最下方是否仍有 `ctx …% … | Fable 5.1`（R181 視窗已見；本視窗渲染那一環只有肉眼能證）。有閃黑窗就跑 `.venv\Scripts\python.exe tools\install_statusline.py --uninstall` 並回報。
 2. 兩個可選偏好（不裁決就維持現狀）：(a) ctx 行改印整數 `ctx 13%`（去掉假精度）；(b) feed 寫檔失敗時「數字照印、另標 feed error」（R181 SD-2）。
+
+## 九、掌舵者回覆後的追記（Q4 本視窗肉眼閉合；裁決 (a) ⇒ DEF-200-416 新立即結）
+
+- 掌舵者逐字回報：「可以看到ctx 48.0% 479.6k/1.0m | Fable 5.1, 我不懂啥麼是有閃黑窗?」⇒ **Q4 在本視窗（40a1a0c4）亦肉眼閉合**，五問最後一環全部收口；「閃黑窗」＝status line 每次刷新跑進料器時若載具不是 `pythonw.exe` 會閃過一個黑色主控台視窗，掌舵者未見即載具正確（此前 R179 已驗 EnumWindows 65 分鐘零可見 console 視窗，本回收僅補人證）。〈八〉第 2 項掌舵者選 **(a)**、(b) 維持現狀。
+- **DEF-200-416**（`tools/statusline_context_feed.py` `ui_line()` 百分比 `:.1f`→`:.0f`＋docstring WHY；`tools/tests/test_statusline_context_feed.py` 五處字面 `ctx 39.4%`→`ctx 39%`（`_SAMPLE` 官方範例的 39.4 四捨五入成 39，紅端＝改回 `:.1f` 即紅）、高水位格改成整數輸入 94 釘 `!ctx 94% `（紅端＝`:.1f` 會印 `94.0%`）、兩個測試改名點出 WHY；帳本列 675 bytes、7 欄）。刻意只改字面不增行：護欄棘輪 `--print-guard-lines` `淨額 107929→107929 (+0)`／`逐檔漂移 0 支`，不需再走重釘儀式。
+- 主控親驗（tool_result 逐字）：`test_statusline_context_feed.py` `Ran 19 … OK` rc=0；`test_install_statusline.py` `Ran 35 … OK` rc=0；ruff 兩檔 `All checks passed!`；E501 兩檔 0 命中；`check_defect_log_crossref.py` rc=0、`archive_defect_log.py --check` rc=0、`check_loc_budget.py --json` rc=0；餵本 session 真實 feed 給改後進料器印 `ctx 50% 498.4k/1.0m | Fable 5.1`（harness `used_percentage=50`，不再有假的 `.0`）。舊格式 `ctx NN.N%` 只存在於 R179～R181 證據檔與記憶檔的歷史敘述，程式碼／測試／hook 零消費端（Sonnet 複審 grep 親核，見下）。
+- Sonnet 唯讀對抗複審 `[他包回報]`：`ACCEPT_WITH_SHOULD_FIX`、must_fix 空；親跑 `test_statusline_context_feed.py` `Ran 19 … OK`、`test_install_statusline.py` `Ran 35 … OK`、`test_session_brief.py` `Ran 29 … OK`、ruff 兩檔過；邊界探針（0／12.5／13.5／39.4／39.6／94／99.9／100／True／None／"13"）無例外、bool／None／字串仍落 `ctx n/a`；全庫 grep 舊格式 `ctx NN.N%` 零程式消費端（兩層 context 守衛與 SDD `context_window.py` 皆直接讀 feed JSON 數值欄）；帳本列 675 bytes／7 欄／發現情境欄零輪號字面。should_fix ①「`:.0f` 是 round-half-even（12.5→12、13.5→14）未寫明」→ 主控已補進 docstring；②「`!` 前綴以原始值判、顯示用捨入值，[83.5, 84.0) 理論曖昧帶由 0.05pp 放大到 0.5pp」→ 不改（`WARN_RATIO_PCT=84.0` 為整數、harness 只送整數，帶打不到；登記為殘餘）。**流程面**：複審正確抓到審查期間本檔多出〈九〉追記（主控所為、docs 追記、非程式碼），與鐵律七第 3 條「複審期間主控不動工作樹」相違——記為本輪流程瑕疵，下次 docs 追記也等複審收工後再寫。
+- 全套／push／雲端：見下方追記。

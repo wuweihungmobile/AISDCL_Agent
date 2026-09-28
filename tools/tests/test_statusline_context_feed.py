@@ -89,8 +89,8 @@ class BuildFeedDocTest(unittest.TestCase):
 
 
 class UiLineTest(unittest.TestCase):
-    def test_normal_line_matches_official_example_shape(self) -> None:
-        self.assertEqual(feed.ui_line(_SAMPLE), "ctx 39.4% 393.9k/1.0m | Fable")
+    def test_official_example_pct_is_printed_as_rounded_integer(self) -> None:
+        self.assertEqual(feed.ui_line(_SAMPLE), "ctx 39% 393.9k/1.0m | Fable")  # DEF-200-416
 
     def test_null_current_usage_prints_na(self) -> None:
         """session 首次 API 呼叫前／`/compact` 後：官方契約是 `used_percentage=null`。"""
@@ -101,9 +101,9 @@ class UiLineTest(unittest.TestCase):
         self.assertEqual(feed.ui_line({"context_window": {"used_percentage": None}}),
                          "ctx n/a | ?")
 
-    def test_high_water_mark_gets_bang_prefix(self) -> None:
-        hot = {**_SAMPLE, "context_window": {**_SAMPLE["context_window"], "used_percentage": 94.0}}
-        self.assertTrue(feed.ui_line(hot).startswith("!ctx 94.0%"))
+    def test_bang_prefix_and_integer_pct_prints_no_fake_decimal(self) -> None:
+        hot = {**_SAMPLE, "context_window": {**_SAMPLE["context_window"], "used_percentage": 94}}
+        self.assertTrue(feed.ui_line(hot).startswith("!ctx 94% "))  # DEF-200-416：整數輸入不得印 .0
 
     def test_below_threshold_has_no_bang(self) -> None:
         self.assertFalse(feed.ui_line(_SAMPLE).startswith("!"))
@@ -120,14 +120,14 @@ class UiLineTest(unittest.TestCase):
         錯用 `total_input_tokens` 會讓本測試印出 700.0k 而轉紅。"""
         payload = {**_SAMPLE, "context_window": {
             **_SAMPLE["context_window"], "total_input_tokens": 700_000}}
-        self.assertEqual(feed.ui_line(payload), "ctx 39.4% 393.9k/1.0m | Fable")
+        self.assertEqual(feed.ui_line(payload), "ctx 39% 393.9k/1.0m | Fable")
 
     def test_missing_current_usage_numerator_is_question_mark(self) -> None:
         """`current_usage` 為 `null`（但 `used_percentage` 仍在）時分子印 `?`，不得
         回退去讀 `total_input_tokens`——那正是 D32b-4 要改掉的耦合。"""
         payload = {**_SAMPLE, "context_window": {
             **_SAMPLE["context_window"], "current_usage": None}}
-        self.assertEqual(feed.ui_line(payload), "ctx 39.4% ?/1.0m | Fable")
+        self.assertEqual(feed.ui_line(payload), "ctx 39% ?/1.0m | Fable")
 
 
 class AtomicWriteAndMainTest(unittest.TestCase):
@@ -140,7 +140,7 @@ class AtomicWriteAndMainTest(unittest.TestCase):
     def test_main_writes_feed_and_prints_ui_line(self) -> None:
         rc, out = _run(json.dumps(_SAMPLE), env={feed.FEED_DIR_ENV: str(self.feed_dir)})
         self.assertEqual(rc, 0)
-        self.assertEqual(out.strip(), "ctx 39.4% 393.9k/1.0m | Fable")
+        self.assertEqual(out.strip(), "ctx 39% 393.9k/1.0m | Fable")
         written = json.loads((self.feed_dir / "abc-123.json").read_text(encoding="utf-8"))
         self.assertEqual(written["session_id"], "abc-123")
         self.assertEqual(written["context_window"]["context_window_size"], 1_000_000)
