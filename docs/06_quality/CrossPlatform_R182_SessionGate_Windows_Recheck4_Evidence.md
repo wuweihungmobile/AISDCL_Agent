@@ -72,7 +72,11 @@
 
 ## 七、根層全套、push 與雲端驗收（追記，主控本場真跑）
 
-- 本節為 push 後回填（同 R179〈十一〉／R180〈七〉／R181〈七〉體例）：根層全套與 push 的逐字 rc 於本檔隨後的 docs commit 追記。
+- 本節為 push 後回填（同 R179〈十一〉／R180〈七〉／R181〈七〉體例，隨後以 docs commit 再 push 一次）。
+- 根層全套 `python tools/run_root_unittests.py`（最後一次改碼與改文件之後，一次過）：`✅ unittest 數量下限釘選通過：發現 4690 個測試（下限 4543）`／`[cpu_budget] root-unittest workers=18`／`S=1759.2s｜ideal=97.7s｜slot 利用率=99.7%`／`[skip census] tools/tests@win32 共 46 支：platform=42／env-disabled=4`／`[M6 id 集合] ✅ 集合關係成立`／`RUNNER_RC=0`、零 FAIL 行。唯一雜訊：`❌ 全套執行期間新增了 1 個孤兒 console 候選：[('conhost.exe', 39532)]`，跑完即查 `Get-Process -Id 39532` 已消失（瞬時候選，與 R181 同形、不阻斷）。
+- commit `60e3d86`（11 files changed, 229 insertions(+), 25 deletions(-)＋新檔本證據檔）。`git push origin main` 一次過：pre-push `[pre-push dispatcher] ✅ 本次 push 觸發的所有 leg 皆通過（rc=0）`（root leg 全套再跑一次 4690 支、又抓到一個瞬時孤兒 console 候選 conhost 5384；帳本閘 `當前輪 R100`、具名治理文件 133 份皆已登記）、`198f09c..60e3d86  main -> main`、`PUSH_RC=0`；`git rev-parse HEAD`＝`origin/main`＝`60e3d86de1d01e9fec5e17c5ec468eeee91c68d2`。
+- 雲端（`gh run list --json` 篩 `60e3d86`）：本輪未動 `AISDLC_SDD/` 故 `aisdlc-sdd-ci` 依路徑過濾未觸發（與 R180 同形）；觸發四支＝`windows-compat-ci` 36421418203、`root-infra-ci` 36421418198、`macos-compat-ci` 36421418171、`AutoClaude CI` 36421418146（12:22:32Z 同時起跑）。
+- 雲端結論（`gh run watch --exit-status --interval 30` 四支序列等待 20:23:59→20:40:10 本地時間各 rc=0；再以 `gh run list --json` 現查伺服器 conclusion）：`windows-compat-ci` 36421418203 **success**（12:39:38Z）、`root-infra-ci` 36421418198 **success**（12:27:51Z）、`macos-compat-ci` 36421418171 **success**（12:32:32Z）、`AutoClaude CI` 36421418146 **success**（12:26:09Z）——`60e3d86` 觸發的四支全綠；DEF-200-413 的 `HaltConvergentClarificationPlatformTest` 與 DEF-200-415 的 `ConfigDirOverrideTest` 在 ubuntu／macOS／windows 三平台 runner 皆真跑（皆無平台 skip 標籤）。
 
 ## 八、掌舵者側待辦（只有本人能做）
 
