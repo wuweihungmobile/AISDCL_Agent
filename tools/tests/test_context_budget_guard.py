@@ -6341,12 +6341,12 @@ class NoWindowBehaviourTest(unittest.TestCase):
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             creationflags=guard.NO_WINDOW)
         try:
-            deadline = time.time() + 10
+            deadline = time.time() + 30  # DEF-200-419：CI runner 冷啟動＋CIM 註冊曾 >10s
             while not armed_out.is_file() and time.time() < deadline:
                 time.sleep(0.1)
             self.assertTrue(
                 armed_out.is_file(),
-                "監看器 10 秒內沒有武裝——本測試本身建不起偵測條件，下面的"
+                "監看器 30 秒內沒有武裝——本測試本身建不起偵測條件，下面的"
                 "『0 筆事件』不能算數")
             cases = self._measure({"shipped": guard.NO_WINDOW, "none": 0})
             time.sleep(2)  # 讓監看器有時間把 WMI 事件寫進檔案（事件是非同步遞送的）
