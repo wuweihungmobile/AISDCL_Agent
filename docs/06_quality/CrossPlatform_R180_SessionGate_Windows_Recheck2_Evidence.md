@@ -67,3 +67,16 @@
 - 帳本：`DEF-200-411` 列 683 bytes、`DEF-200-410` 列 671 bytes（皆 ≤ 700）；主檔 99,844 bytes 在安全區、未觸發輪替。
 - 工作樹：`git status --short` 十二支 M ＋本證據檔 untracked，無其他殘留；`git stash list` 空。
 - 根層全套與 push／雲端：見〈七〉（追記）。
+
+## 七、根層全套、push 與雲端驗收（追記，主控本場真跑）
+
+- 根層全套 `python tools/run_root_unittests.py`（最後一次改碼與改文件之後）：`✅ unittest 數量下限釘選通過：發現 4675 個測試（下限 4543）`（R179 為 4666）／`[cpu_budget] root-unittest workers=18`／`S=1748.5s｜ideal=97.1s｜slot 利用率=99.2%`／`[skip census] tools/tests@win32 共 46 支：platform=42／env-disabled=4`／`[M6 id 集合] ✅ 集合關係成立`／`✅ 孤兒 console 普查：零增長（前 0／後 0）`／`RUNNER_RC=0`、FAIL／ERROR 行 0。
+- commit：第一版 `d07cbb3` 的第一次 push 被 pre-push 根層 leg `tools/check_handoff_carriers.py` 擋下（`❌ 交接項無機械承接載體：1 筆`）——commit 訊息描述 `.bak` 清理時寫了「保存前一輪的真安裝備份」並帶上前一輪的輪號，該判準把「保＋輪號」的字面讀成前瞻延後宣告（假陽性）；依該判準「不改 commit 訊息」的出口是補一列 open 帳本列，但那會是一筆假交接，故在**未 push** 前 amend 改措辭（`aa34d8b`，內容 13 files changed, 314 insertions(+), 17 deletions(-) 不變）。教訓：commit 訊息與交接載體文件裡，「保存／保留」後面不要緊接輪號字樣（本檔追記時同一判準在本段又抓了一次，同樣改措辭即過）。
+- 第二次 `git push origin main`：pre-push `✅ 本次 push 觸發的所有 leg 皆通過（rc=0）`、`6369db4..aa34d8b  main -> main`、`PUSH_RC=0`，`git rev-parse HEAD`＝`origin/main`＝`aa34d8b5cd1ce8e6d477ef200ece1fe7285f3c13`。
+- 雲端（`gh run list --json headSha` 篩 `aa34d8b`，`gh run watch --exit-status` 四支各 rc=0）：`windows-compat-ci` 36381179363 success、`root-infra-ci` 36381179167 success、`macos-compat-ci` 36381179141 success、`AutoClaude CI` 36381179069 success。`aisdlc-sdd-ci` 未觸發＝路徑過濾（本 commit 未動 `AISDLC_SDD/`），不是漏跑。
+- 本節為 push 後回填（本檔隨後以 docs commit 再 push 一次，同 R179〈十一〉體例）。
+
+## 八、掌舵者側待辦（只有本人能做）
+
+1. 開一個全新的 claude 終端視窗，看最下方是否出現 `ctx …% … | Fable 5.1`；有閃黑窗就跑 `.venv\Scripts\python.exe tools\install_statusline.py --uninstall` 並回報（🔴 一律用根層 `.venv` 的 python 跑安裝器；用 pyenv python 跑 `--status` 現已同樣正確，但養成習慣）。
+2. DEF-200-341 的解鎖條件已改為 CI runner 重現（Windows 本機 141 次 0 紅）；是否接受這個治理裁決、或要求重開，由掌舵者拍板。
