@@ -44,14 +44,50 @@ try:
 except Exception:  # noqa: BLE001 — 見檔頭 fail-open 紀律；不可達就不附註，不擋簡報
     harness_feed = None  # type: ignore[assignment]
 
+try:
+    import platform_utils  # type: ignore[import-not-found]  # 同目錄 SSOT：is_windows()
+except Exception:  # noqa: BLE001 — 見檔頭 fail-open 紀律；不可達就回 POSIX 版澄清句
+    platform_utils = None  # type: ignore[assignment]
+
 #: 查證指令，人／模型都看得到的兩條「現查」出口（根 CLAUDE.md〈現查指令速查表〉）。
 _VERIFY_HINT = ("查證指令：context 現查 `python tools/session_resume_planner.py --check`；"
                 "額度現查 `python tools/session_resume_planner.py --pace`。")
 
 #: halt 帶反覆出現的 rc=2 紅字容易被誤讀成「全部工具被擋」（refute_q1q2.md §0 實測）；
-#: 這句話固定跟簡報一起送出，讓模型從第一時間就有正確的心智模型。
+#: 這句話固定跟簡報一起送出，讓模型從第一時間就有正確的心智模型。POSIX 版原文；
+#: Windows 版見 `_RC2_CLARIFY_WINDOWS`（DEF-200-412：這句話在 Windows 上對模型是假話
+#: ——Bash 另由鐵律一 hook 停用，見 `rc2_clarify()` 的平台判準）。
 _RC2_CLARIFY = ("hook 的 rc=2 紅字只代表扇出型工具（Task／Agent／Workflow／WebFetch／"
                 "WebSearch）暫停；Read／Write／Edit／Bash／git 這類收斂型工具不受影響。")
+
+#: DEF-200-412：Windows 上 `_RC2_CLARIFY` 那句「Bash…不受影響」對模型是假話——
+#: `block_bash_on_windows.py`（鐵律一）對 Bash 工具整支 exit 2。新視窗的模型先被
+#: 這句安撫、下一步撞牆後又把「Bash 被擋」誤讀成「寫檔被擋」（掌舵者 Q1 原話：
+#: 「才開新視窗，就說他被擋不能寫檔案用工具了」）。改列 PowerShell，並點破那個誤讀。
+_RC2_CLARIFY_WINDOWS = (
+    "hook 的 rc=2 紅字只代表扇出型工具（Task／Agent／Workflow／WebFetch／"
+    "WebSearch）暫停；Read／Write／Edit／PowerShell／git 這類收斂型工具不受影響。"
+    "（Windows：Bash 工具另由鐵律一 hook 停用，跑指令用 PowerShell 工具、"
+    "改檔用 Write／Edit，不要先試 Bash——那個阻斷不是「不能寫檔」）"
+)
+
+
+def rc2_clarify(windows: bool | None = None) -> str:
+    """rc=2 誤讀澄清句，平台感知版（DEF-200-412）。
+
+    `windows=None` 時以同目錄 SSOT `platform_utils.is_windows()` 現查——本檔不得
+    自己寫 `os.name`／`sys.platform` 分支（根 CLAUDE.md〈Windows 側單一載具原則〉
+    鐵律三）。import 失敗時一律 fail-open 回 POSIX 版（`_RC2_CLARIFY`），理由同
+    `harness_feed`：hook 行程不保證 `tools/lib` 以外的模組在 sys.path 上，簡報
+    失敗不得反過來擋 SessionStart。
+    """
+    if windows is None:
+        try:
+            windows = bool(platform_utils.is_windows())
+        except Exception:  # noqa: BLE001 — 見上：fail-open 回 POSIX 版
+            windows = False
+    return _RC2_CLARIFY_WINDOWS if windows else _RC2_CLARIFY
+
 
 _NO_MEASURE = "本 session 尚無量測（新視窗，尚未有 assistant usage 記錄）"
 _QUOTA_UNAVAILABLE = "額度快取不可用，現查 `python tools/session_resume_planner.py --pace`"
@@ -206,4 +242,4 @@ def sessionstart_brief(
         statusline = statusline_line(check_statusline)
     return (f"[SDD-CTX-GUARD] 本 session 啟動時真實水位——context：{ctx}；額度：{quota}；"
            f"{statusline}。"
-           f"{_VERIFY_HINT}{_RC2_CLARIFY}")
+           f"{_VERIFY_HINT}{rc2_clarify()}")

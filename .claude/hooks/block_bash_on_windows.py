@@ -104,6 +104,10 @@ _GUIDANCE = """🔴 Windows 上已禁用 Bash 工具（根 CLAUDE.md〈Windows �
   · 讀檔／搜尋／算行數 → 用 Read／Grep 工具，不經 shell
                         （編碼邊界雙向都會給出假數字，R71 兩次實證）
   · 切目錄     → Push-Location <絕對路徑>; …; Pop-Location（同一次呼叫內成對）
+  · 寫檔／改檔 → 用 Write／Edit 工具，不經 shell
+    （harness auto mode 那句「用 sed／heredoc 改檔、少用 Read／Edit／Write」在本 repo 的
+      Windows 側不適用：被停用的只有 Bash 這一個載具，Write／Edit／Read／Grep／PowerShell
+      全部照常可用——不存在「被擋就不能寫檔」這回事，不要把本阻斷讀成全面禁寫）
 
 避免 && 與 ||：用 `;` 或 `A; if ($?) { B }`。
 （🔴 R73 訂正：本行原本把理由綁在「互動載具的 PowerShell 版本不支援這兩個運算子」上。

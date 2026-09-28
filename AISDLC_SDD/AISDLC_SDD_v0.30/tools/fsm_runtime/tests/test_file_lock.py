@@ -1,6 +1,7 @@
 """Tests for file_lock advisory lock (M2 QA Round-2 P1-1)."""
 from __future__ import annotations
 
+import contextlib
 import multiprocessing as mp
 import os
 import sys
@@ -300,6 +301,11 @@ class StatTransientPermissionErrorTests(unittest.TestCase):
     ``file_lock()`` 呼叫 ``_is_stale`` 那一行窄窄地吞掉 ``_STAT_TRANSIENT_ERRORS``（Windows 才
     非空），視為「本輪還不知道是否陳舊」而非「必是死鎖」，POSIX 上（空 tuple）逐字不變。兩支
     測試皆顯式 patch ``_ACQUIRE_TRANSIENT_ERRORS``／``_STAT_TRANSIENT_ERRORS``，不依賴主機平台。
+
+    🔴 2026-09-28 R181 訂正（DEF-200-341）：本 class 的「``path.stat()`` 同樣會丟 round-label-ok
+    ``PermissionError``」前提在 Windows 11 26200／Python 3.11.9 真 delete-pending 態下實測**不
+    成立**（``os.stat()`` 回 OK）；本 class 兩支測試皆為 mock 注入，保留作為「常數已加寬時的行為
+    契約」回歸鎖，不代表已觀測到真實逃逸點。真機確定性重現見 ``RealDeletePendingTests``。
     """
 
     def setUp(self) -> None:
@@ -379,6 +385,177 @@ class StatTransientPermissionErrorTests(unittest.TestCase):
                 with file_lock(lock_path, timeout=2.0):
                     self.fail("should not acquire")  # pragma: no cover
         self.assertFalse(lock_path.exists())
+
+
+@contextlib.contextmanager
+def _real_delete_pending(path: Path):
+    """R181 helper（DEF-200-341）：用 ctypes legacy ``FileDispositionInfo`` 對 ``path`` 製造 round-label-ok
+    Windows 真正的 delete-pending 態（非 mock 注入）——建檔→以 ``FILE_SHARE_DELETE`` 開 handle→
+    設 disposition（DeleteFile=TRUE）→yield handle→finally ``CloseHandle``（此時作業系統才真的
+    刪除該名稱）。``ctypes.wintypes`` 依賴 ``ctypes.WinDLL``，在 POSIX 上不存在會於 import 當下
+    炸例外，故本函式把 ``import ctypes`` / ``import ctypes.wintypes`` 放在函式本體內（呼叫時才
+    執行），module 收集期在任何平台都不會觸發；呼叫端 ``RealDeletePendingTests`` 整個 class 已
+    用 ``@unittest.skipUnless(sys.platform == "win32", ...)`` 圍住，非 Windows 上測試方法本身
+    不會被執行。本體另以 ``if sys.platform == "win32":`` 作用域內守衛包住全部 Windows 專屬
+    API（鐵律三：根層 ``tools/tests/test_platform_neutral_paths.py`` 的
+    ``TestForeignPlatformApiIsGuarded`` 掃到本檔，decorator 不算作用域內守衛）。
+    """
+    if sys.platform == "win32":
+        import ctypes
+        import ctypes.wintypes as wt
+
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        generic_read = 0x80000000
+        delete_access = 0x00010000
+        file_share_read = 1
+        file_share_write = 2
+        file_share_delete = 4
+        open_existing = 3
+        file_attribute_normal = 0x80
+        invalid_handle_value = ctypes.c_void_p(-1).value
+        file_disposition_info_class = 4
+
+        class _FileDispositionInfo(ctypes.Structure):
+            # Win32 ``BOOLEAN`` 是 unsigned char；只寫 0/1，用 ``c_ubyte`` 貼近原型（複審 should-fix）
+            _fields_ = [("DeleteFile", ctypes.c_ubyte)]
+
+        k32.CreateFileW.restype = wt.HANDLE
+        k32.CreateFileW.argtypes = [
+            wt.LPCWSTR, wt.DWORD, wt.DWORD, ctypes.c_void_p, wt.DWORD, wt.DWORD, wt.HANDLE,
+        ]
+        k32.SetFileInformationByHandle.restype = wt.BOOL
+        k32.SetFileInformationByHandle.argtypes = [
+            wt.HANDLE, ctypes.c_int, ctypes.c_void_p, wt.DWORD,
+        ]
+        k32.CloseHandle.argtypes = [wt.HANDLE]
+
+        path.write_text(f"pid={os.getpid()} real-delete-pending\n", encoding="utf-8")
+        handle = k32.CreateFileW(
+            str(path),
+            generic_read | delete_access,
+            file_share_read | file_share_write | file_share_delete,
+            None,
+            open_existing,
+            file_attribute_normal,
+            None,
+        )
+        if handle == invalid_handle_value:
+            raise OSError(f"CreateFileW failed, GetLastError={ctypes.get_last_error()}")
+        try:
+            info = _FileDispositionInfo(1)
+            ok = k32.SetFileInformationByHandle(
+                handle, file_disposition_info_class, ctypes.byref(info), ctypes.sizeof(info)
+            )
+            if not ok:
+                raise OSError(
+                    f"SetFileInformationByHandle failed, GetLastError={ctypes.get_last_error()}"
+                )
+            yield handle
+        finally:
+            k32.CloseHandle(handle)
+    else:  # pragma: no cover — 呼叫端 class 已 skipUnless(win32)，此分支只為守衛完整
+        raise unittest.SkipTest("[WINDOWS-NATIVE-ONLY] 真 delete-pending 態只在 Windows 可製造")
+
+
+@unittest.skipUnless(
+    sys.platform == "win32",
+    "[WINDOWS-NATIVE-ONLY] 真 delete-pending 態只能用 Windows FileDispositionInfo 製造"
+    "（POSIX 無此語意）——標籤供版本樹 conftest terminal summary 彙整",
+)
+class RealDeletePendingTests(unittest.TestCase):
+    """R181 真機驗證鎖（2026-09-28，DEF-200-341）：帳本原文宣稱 ``_is_stale()`` 的 ``stat()`` round-label-ok
+    在 Windows delete-pending 態會丟 ``PermissionError``——主控親測（ctypes legacy
+    ``FileDispositionInfo``）證實這個前提不成立：``os.stat()`` 在該態下回 OK，真正丟
+    ``PermissionError`` 的只有 ``os.open(O_CREAT|O_EXCL)``。本 class 用真態（非 mock）補上
+    ``StatTransientPermissionErrorTests``／``AcquireTransientPermissionErrorTests`` 注入式
+    契約測試缺的那一半（兩者保留），把「本機 141 次全綠」背後的結構性原因（``os.unlink`` 走
+    POSIX 立即刪除語意、從未真的進入 delete-pending 視窗）與「加寬 ``_ACQUIRE_TRANSIENT_ERRORS``
+    確實接得住真態逃逸點」兩件事一起釘死，不再只靠 mock 佈置的信念。已知殘餘風險：本 class
+    依賴 CPython 把 ERROR_ACCESS_DENIED 映成 ``PermissionError``，未來版本若改映射本 class 會
+    轉紅——那正是要被看見的訊號，不是要繞過的假紅。
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def test_acquire_survives_real_delete_pending_sentinel(self) -> None:
+        """WHY：這是本包的核心正面案例——真 delete-pending 視窗期間，加寬後的
+        ``file_lock()`` 必須真的等過去而不是巧合地繞過。用 ``threading.Event`` 確保主執行緒
+        在背景執行緒把 disposition 設好之後才開始取鎖（避免時序競態讓測試偶然對到「還沒進入
+        delete-pending」的窗口，那樣通過就對缺陷沒有鑑別力）。elapsed >= 0.2s 證明真的等過
+        背景持有的 0.3s 視窗，不是第一次嘗試就矇對。"""
+        lock_path = self.root / "sentinel.lock"
+        ready_event = threading.Event()
+
+        def _hold() -> None:
+            with _real_delete_pending(lock_path):
+                ready_event.set()
+                time.sleep(0.3)
+            # 離開 with 區塊呼叫 CloseHandle，作業系統在此刻才真的刪除該名稱。
+
+        thread = threading.Thread(target=_hold)
+        thread.start()
+        self.assertTrue(
+            ready_event.wait(timeout=5.0),
+            "背景執行緒未能在期限內完成 disposition 設定，測試佈置本身有問題",
+        )
+        start = time.time()
+        with file_lock(lock_path, timeout=2.0) as acquired_path:
+            elapsed = time.time() - start
+            self.assertTrue(acquired_path.exists())
+        thread.join(timeout=5.0)
+        self.assertFalse(thread.is_alive(), "背景持有執行緒未能如期結束")
+        self.assertGreaterEqual(
+            elapsed, 0.2, "elapsed 太短，疑似沒有真的等過 delete-pending 視窗"
+        )
+        self.assertLess(elapsed, 2.0, "elapsed 逼近或超過 timeout，取鎖不應該這麼慢")
+        self.assertFalse(lock_path.exists())
+
+    def test_is_stale_and_o_excl_shapes_under_real_delete_pending(self) -> None:
+        """WHY：把 CI #250 的形態（``os.open(O_CREAT|O_EXCL)`` 丟 PermissionError）與 R181 訂正 round-label-ok
+        的事實（``_is_stale()`` 的 ``stat()`` 在同一個真態下不丟例外、回傳 False）一起釘住——
+        這兩件事合起來才是「為何只需要加寬 acquire 迴圈、不需要動 ``_is_stale`` 本體」的完整
+        證據，缺一都會讓 file_lock.py 模組 docstring 裡的訂正段落淪為未驗證的宣稱。"""
+        lock_path = self.root / "shape.lock"
+        with _real_delete_pending(lock_path):
+            self.assertFalse(
+                fl_mod._is_stale(lock_path),
+                "真 delete-pending 態下 stat() 應回 OK 且 mtime 新鮮（不應被誤判陳舊）",
+            )
+            with self.assertRaises(PermissionError):
+                os.close(
+                    os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                )
+
+    def test_without_windows_widening_the_real_delete_pending_escapes(self) -> None:
+        """WHY：紅端鎖——證明本 class 有鑑別力。把 ``_ACQUIRE_TRANSIENT_ERRORS`` patch 回 POSIX
+        形狀（不含 PermissionError）後，同一個真態下 ``file_lock()`` 必須讓 PermissionError
+        原樣逸出，而不是被吞成鎖競爭重試。這格證明「加寬」修法本身正是讓
+        ``test_acquire_survives_real_delete_pending_sentinel`` 變綠的原因，不是環境偶然。"""
+        lock_path = self.root / "posix_shape.lock"
+        ready_event = threading.Event()
+
+        def _hold() -> None:
+            with _real_delete_pending(lock_path):
+                ready_event.set()
+                time.sleep(0.3)
+
+        thread = threading.Thread(target=_hold)
+        thread.start()
+        self.assertTrue(
+            ready_event.wait(timeout=5.0),
+            "背景執行緒未能在期限內完成 disposition 設定，測試佈置本身有問題",
+        )
+        with mock.patch.object(fl_mod, "_ACQUIRE_TRANSIENT_ERRORS", (FileExistsError,)):
+            with self.assertRaises(PermissionError):
+                with file_lock(lock_path, timeout=2.0):
+                    self.fail("should not acquire")  # pragma: no cover
+        thread.join(timeout=5.0)
+        self.assertFalse(thread.is_alive(), "背景持有執行緒未能如期結束")
 
 
 if __name__ == "__main__":

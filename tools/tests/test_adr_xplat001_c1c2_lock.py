@@ -685,7 +685,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 8983,
+    "test_adr_xplat001_c1c2_lock.py": 9001,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 4076,
@@ -697,7 +697,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_check_archive_required.py": 160,
     "test_check_defect_log_crossref.py": 3906,
     "test_check_gha_action_versions.py": 295,
-    "test_check_hooks_liveness.py": 3610,
+    "test_check_hooks_liveness.py": 3630,
     "test_check_pytest_baseline_sites.py": 301,
     "test_check_script_parity.py": 2029,
     "test_check_wrapper_thinness.py": 1185,
@@ -750,7 +750,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_script_scan_surface_ssot.py": 391,
     "test_sdd_hook_router_r158.py": 189,
     "test_sentinel_tick_e2e_r145.py": 141,
-    "test_session_brief.py": 321,
+    "test_session_brief.py": 370,
     "test_single_venv_identity.py": 162,
     "test_skip_ceiling_ratchet_direction.py": 730,
     "test_skip_discoverability_r83.py": 742,
@@ -2468,6 +2468,19 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "_FROZEN_PREFIX_REWRITE_LEDGER 新列造成的行數漂移，反覆覆核收斂到本行本身也計入為止，"
      "同 R173~R178 既有體例。餘額歸主軌，見 "  # round-label-ok
      "CrossPlatform_R145_Scan_Findings.md〈附記（R180）〉。"),  # round-label-ok
+    ("R181", 107709, 107778, 69,  # round-label-ok：DEF-200-412 新立即結、341 重開結案收尾單人窗口
+     "[非淨減法輪][回歸鎖軌申報＝本列淨額全額，見 _REGRESSION_LANE_LOG 同輪列] DEF-200-412 "
+     "結案回歸鎖：test_check_hooks_liveness.py +20（TestBlockBashHookGuidanceContent 正向斷言"
+     "一格：指引必含「寫檔／改檔→Write／Edit」與「不存在「被擋就不能寫檔」」）＋"
+     "test_session_brief.py +49（Rc2ClarifyTest 兩格＋SessionstartBriefTest 釘 is_windows=False "
+     "與 Windows 版文案一格）＋本表自身漂移「見下一列」，未超軌上限 ⇒ 全額申報，主軌 0。"
+     "DEF-200-341 的真機測試住 AISDLC_SDD 樹、不在本淨額射程。逐項見 "
+     "CrossPlatform_R181_SessionGate_Windows_Recheck3_Evidence.md〈四〉。"),  # round-label-ok
+    ("R181", 107778, 107796, 18,  # round-label-ok：本表自身漂移收斂列
+     "[非淨減法輪][同輪追加] 收斂列：本表（test_adr_xplat001_c1c2_lock.py 自身）新增上一列、"
+     "本列自身、_REGRESSION_LANE_LOG 同輪列、_FROZEN_PREFIX_REWRITE_LEDGER 新列造成的行數"
+     "漂移，反覆覆核收斂到本行也計入為止，同 R173~R180 既有體例。餘額歸主軌，見 "  # round-label-ok
+     "CrossPlatform_R145_Scan_Findings.md〈附記（R181）〉。"),  # round-label-ok
 )
 
 
@@ -2962,6 +2975,10 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "五格＋test_subprocess_encoding_hygiene.py 下限重釘註記＋本表自身漂移），未超軌上限 ⇒ "
      "全額申報，主軌 0。逐項見 CrossPlatform_R145_Scan_Findings.md"
      "〈附記（R180）〉。"),  # round-label-ok
+    ("R181", 87,  # round-label-ok
+     "DEF-200-412 結案回歸鎖全額（test_check_hooks_liveness.py 正向斷言一格＋test_session_brief.py "
+     "三格＋本表漂移），未超軌上限 ⇒ 全額申報，主軌 0。逐項見 CrossPlatform_R145_Scan_Findings.md"
+     "〈附記（R181）〉。"),  # round-label-ok
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -3259,10 +3276,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 305
+_REPIN_LOG_FROZEN_PREFIX_LEN = 307
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "747baab09344681c538cba17d3af82e4e4db64306bc93afbc62428fb97c4dc96")
+    "69ba8e55b3567d21e0fc317a9d801525ee6f039a26f75d4f095a171456b63982")
 
 
 def repin_log_history_digest(
@@ -3607,6 +3624,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R178", "8f0be6de014b", "81d395774077", "DEF-200-404"),  # round-label-ok
     ("R178", "81d395774077", "cd02c8559b6c", "DEF-200-406"),  # round-label-ok：第二次接鏈
     ("R180", "cd02c8559b6c", "747baab09344", "DEF-200-411"),  # round-label-ok
+    ("R181", "747baab09344", "69ba8e55b356", "DEF-200-412"),  # round-label-ok
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

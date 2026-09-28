@@ -12,6 +12,7 @@ import types
 import unittest
 from datetime import UTC, datetime
 from pathlib import Path
+from unittest import mock
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
@@ -104,6 +105,29 @@ class QuotaLineTest(unittest.TestCase):
         gate = _fake_quota_gate(read_quota=lambda now, path=None: _cache_hit_state())
         got = sb.quota_line(gate, _NOW)
         self.assertNotIn("陳舊快取的退化政策值", got, "非陳舊快取卻被貼了 stale-cache 警語")
+
+
+class Rc2ClarifyTest(unittest.TestCase):
+    """DEF-200-412：rc=2 澄清句平台感知——Windows 版換 PowerShell、點破
+    『被擋≠不能寫檔』這個誤讀。
+
+    WHY：POSIX 版原句「…Read／Write／Edit／Bash／git…不受影響」在 Windows 上對
+    模型是假話——`block_bash_on_windows.py`（鐵律一）對 Bash 工具整支 exit 2。
+    新視窗的模型會先被這句安撫「Bash 沒事」，下一步撞牆後又把「Bash 被擋」誤讀成
+    「寫檔被擋」（掌舵者 Q1 原話：「才開新視窗，就說他被擋不能寫檔案用工具了」）。
+    """
+
+    def test_windows_variant_teaches_powershell_not_bash(self) -> None:
+        got = sb.rc2_clarify(windows=True)
+        self.assertIn("PowerShell", got)
+        self.assertIn("鐵律一 hook 停用", got)
+        self.assertNotIn("／Bash／", got, "Windows 版不該再教 Bash 這個已被停用的載具")
+
+    def test_posix_variant_is_unchanged(self) -> None:
+        self.assertEqual(
+            sb.rc2_clarify(windows=False), sb._RC2_CLARIFY,
+            "POSIX 版必須逐字等於既有 `_RC2_CLARIFY`——不得順手改動 mac/Linux 讀到的句子",
+        )
 
 
 class ContextLineTest(unittest.TestCase):
@@ -224,7 +248,19 @@ class StatuslineLineTest(unittest.TestCase):
 
 
 class SessionstartBriefTest(unittest.TestCase):
-    """整合：四象限全組合都要含兩條查證指令 ＋ rc=2 澄清句，且不崩潰、不消失。"""
+    """整合：四象限全組合都要含兩條查證指令 ＋ rc=2 澄清句，且不崩潰、不消失。
+
+    DEF-200-412：`rc2_clarify()` 內部現查 `platform_utils.is_windows()`——本類別
+    大多數既有測試只關心「兩句都在」這件事，與平台無關，故 `setUp()` 固定釘死
+    POSIX（`False`），讓斷言在任何 CI runner（Windows／macOS／Linux）上都得到同一個
+    字面，不隨「這台機器剛好是什麼平台」漂移。Windows 分支另有專屬測試
+    （`test_windows_platform_swaps_to_powershell_guidance`）明確 patch 成 `True`。
+    """
+
+    def setUp(self) -> None:
+        patcher = mock.patch.object(sb.platform_utils, "is_windows", return_value=False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def _payload(self, transcript: Path | None) -> dict:
         return {"transcript_path": str(transcript) if transcript else None}
@@ -308,6 +344,19 @@ class SessionstartBriefTest(unittest.TestCase):
             check_statusline=lambda: {"installed": False})
         self.assertIn("statusLine：未安裝", got)
         self.assertIn("python tools/install_statusline.py --dry-run", got)
+
+    def test_windows_platform_swaps_to_powershell_guidance(self) -> None:
+        """DEF-200-412 接線面：`platform_utils.is_windows()` 為 True 時，最終簡報也
+        真的換成 PowerShell 版澄清句——不是只有 `rc2_clarify()` 單元本身知道，
+        `sessionstart_brief()` 有把它接進去。"""
+        with mock.patch.object(sb.platform_utils, "is_windows", return_value=True):
+            got = sb.sessionstart_brief(
+                self._payload(None), _cache_miss_gate(),
+                scan_transcript=None, resolve_window=None,
+                window_evidence=None, read_context_feed=None, now=_NOW,
+                check_statusline=self._FAKE_INSTALLED)
+        self.assertIn("PowerShell／git", got)
+        self.assertIn("鐵律一 hook 停用", got)
 
     def _assert_common(self, brief: str) -> None:
         self.assertIn("python tools/session_resume_planner.py --check", brief)

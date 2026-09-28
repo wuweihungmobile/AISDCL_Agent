@@ -69,6 +69,13 @@ _ACQUIRE_TRANSIENT_ERRORS: tuple[type[BaseException], ...] = (
 # `file_lock()` 呼叫 `_is_stale` 那一行窄窄地把 `_STAT_TRANSIENT_ERRORS` 視為「本輪還不知道是
 # 否陳舊」（stale=False，落到下面的 deadline 檢查＋sleep 再試，下一輪重新 stat）。空 tuple 在
 # `except` 子句裡合法＝什麼都不接，POSIX 語意逐字不變。
+# 🔴 2026-09-28 R181 訂正（DEF-200-341）：上段「其內部 `path.stat()` …同樣會丟 round-label-ok
+# `PermissionError`」在 Windows 11 26200／Python 3.11.9 以 ctypes legacy `FileDispositionInfo`
+# 製造的真 delete-pending 態下實測**不成立**——`os.stat()` 回 OK（CPython `win32_xstat_impl`
+# 對 ERROR_ACCESS_DENIED 退回 `FindFirstFileW` 讀目錄屬性），該態下真正丟 PermissionError 的
+# 只有 `os.open(O_CREAT|O_EXCL)`（已由 `_ACQUIRE_TRANSIENT_ERRORS` 接住）。`_STAT_TRANSIENT_ERRORS`
+# 保留為零代價保險（其他 disposition 變體／網路磁碟／未來 CPython 改寫），不再宣稱它接住了已觀測
+# 到的逃逸點。真機確定性重現＝`tests/test_file_lock.py::RealDeletePendingTests`。
 _STAT_TRANSIENT_ERRORS: tuple[type[BaseException], ...] = (
     (PermissionError,) if os.name == "nt" else ()
 )

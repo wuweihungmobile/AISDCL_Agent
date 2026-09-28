@@ -737,7 +737,11 @@ _SITE_CLASS_CENSUS: dict[str, dict[str, int]] = {
         "unclassified": 0,
     },
     LATEST_FSM_TESTS_TREE: {   # 本輪納入；此前整棵樹的 4 個站點對所有機械物隱形
-        "windows-only": 1,
+        # 🔴 DEF-200-341 重開結案（2026-09-28）重釘 `windows-only` 1→2（**非放寬**：本表判準是
+        # 「相等」）。新站點＝`test_file_lock.py::RealDeletePendingTests` 類別層
+        # `@unittest.skipUnless(sys.platform == "win32", "[WINDOWS-NATIVE-ONLY] …")`：真
+        # delete-pending 態只能用 Windows FileDispositionInfo 製造（鐵律三），POSIX 明說跳過。
+        "windows-only": 2,
         "posix-only": 1,
         "tool-absence": 2,
         "runtime-skipTest": 0,

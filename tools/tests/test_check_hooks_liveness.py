@@ -517,6 +517,26 @@ class TestBlockBashHookGuidanceContent(unittest.TestCase):
             "&&／|| 的建議必須說明理由綁在生產引擎（5.1）上，而非綁當下 session 版本",
         )
 
+    def test_teaches_write_edit_for_file_changes(self) -> None:
+        """DEF-200-412：既有四格全是負向斷言（不得教錯什麼），沒有一格鎖住
+        「必須含寫檔指引」這件事——而這正是本輪要補的缺口。
+
+        WHY：harness 的 auto-mode 系統提示逐字教「用 sed／heredoc 改檔、少用
+        Read／Edit／Write」，與 Windows 側鐵律一（Bash 工具整支被停用）疊在一起時，
+        模型會把「Bash 被擋」誤讀成「寫檔這件事被擋」（掌舵者 Q1 原話：「才開新視窗，
+        就說他被擋不能寫檔案用工具了」）。指引裡必須明講 Write／Edit 不受影響，
+        且要點破「被擋≠不能寫檔」這個誤讀本身，否則模型只會照 auto-mode 那句話
+        繼續嘗試 Bash、一路撞牆。
+        """
+        self.assertIn(
+            "Write／Edit", self.text,
+            "指引缺少『寫檔／改檔用 Write／Edit』這一列——DEF-200-412 的缺口",
+        )
+        self.assertIn(
+            "不存在「被擋就不能寫檔」", self.text,
+            "指引沒有點破『Bash 被擋＝全面禁寫』這個誤讀——DEF-200-412 的核心症狀",
+        )
+
 
 _NAMED_TEST_RE = re.compile(r"tools/tests/test_[A-Za-z0-9_]+\.py")
 
