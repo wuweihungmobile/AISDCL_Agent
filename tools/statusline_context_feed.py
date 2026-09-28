@@ -19,6 +19,11 @@ used_percentage,remaining_percentage,current_usage{...}}`／`exceeds_200k_tokens
 
 stdlib-only：status line 的 command 走 shell 子行程，不保證這台機器的 venv 在
 PATH 上，第三方套件一律不可靠。
+
+DEF-200-411：`settings_snippet()` 寫進 `statusLine.command` 的 python 半段是
+**期望值**，只能隨本 checkout 變，不能隨「安裝時用哪支直譯器呼叫本檔」變——
+一律優先取本 checkout 根層 `.venv`（`_repo_venv_python()`），CI 無 `.venv` 時才
+退回 `sys.executable`，並以回傳值的 `_python_basis` 標明退回發生與否。
 """
 from __future__ import annotations
 
@@ -186,14 +191,56 @@ def build_command(python_path: Path, script_path: Path, *, windows: bool | None 
     return f"{_quote_token(python_path.as_posix())} {_quote_token(script_path.as_posix())}"
 
 
-def settings_snippet() -> dict:
-    """可貼進 `~/.claude/settings.json` 的 `statusLine` 區塊（D32-1）。command 用**本
-    checkout** 的絕對 python 與腳本路徑，經 `build_command()`（R158 D2）統一組字。round-label-ok"""
+def _repo_venv_python(repo_root: Path) -> Path | None:
+    """本 checkout 根層 `.venv` 內對應本平台的直譯器路徑；不存在或解析失敗回 `None`
+    （DEF-200-411）。
+
+    WHY 需要 fallback（呼叫端接住 `None` 後退回 `sys.executable`）：
+    windows-compat-ci 的根層 unittest 步驟跑在 `bootstrap.ps1` 之前、根層尚無
+    `.venv`；root-infra-ci／macos-compat-ci 用 `actions/setup-python`，同樣沒有
+    `<repo>/.venv` 這個目錄——這些 runner 上本函式必然回 `None`，讓
+    `settings_snippet()` 退回 `sys.executable`，否則
+    `test_statusline_context_feed.py::SettingsSnippetTest` 斷言 python 路徑存在
+    的那格會轉紅。
+
+    SSOT：`tools/lib/platform_utils.py::venv_python_path()`；區域延遲 import（本檔
+    平常零依賴 `tools/lib/` 的既有慣例，見檔頭 stdlib-only 紀律），整段包
+    `except Exception` 回 `None`——本檔紀律是絕不因輔助函式而讓 status line 空白
+    ／報錯。助手模組一律取**本檔自己**的 `tools/lib`（與 `repo_root` 解耦：合成的
+    root 可以只有 `.venv` 沒有 `tools/lib`，複審實測綁 `repo_root` 會靜默退回）。
+    """
+    try:
+        lib_dir = str(Path(__file__).resolve().parent / "lib")
+        if lib_dir not in sys.path:
+            sys.path.insert(0, lib_dir)
+        from platform_utils import venv_python_path  # noqa: PLC0415
+
+        candidate = venv_python_path(repo_root / ".venv")
+        return candidate if candidate.is_file() else None
+    except Exception:  # noqa: BLE001 — 見 docstring 最後一句
+        return None
+
+
+def settings_snippet(repo_root: Path | None = None) -> dict:
+    """可貼進 `~/.claude/settings.json` 的 `statusLine` 區塊（D32-1）。
+
+    command 的 python 半段優先取**本 checkout 根層 `.venv`**（DEF-200-411：期望值
+    只能隨 checkout 變，不能隨「呼叫者剛好是哪一支直譯器」變——用 pyenv python 或
+    repo venv python 呼叫本檔理應算出同一個答案）；CI runner 尚無 `.venv` 時退回
+    `Path(sys.executable).resolve()`，並在回傳值多一鍵 `_python_basis` 標明實際
+    用了哪一條（`"repo-venv"` 或 `"sys.executable"`），讓退回發生時可被看見、不
+    靜默。腳本路徑不變，經 `build_command()`（R158 D2）統一組字。round-label-ok
+    `repo_root=None`（預設）＝本檔所在 checkout 的根目錄。
+    """
+    root = repo_root if repo_root is not None else Path(__file__).resolve().parent.parent
     script = Path(__file__).resolve()
-    python = Path(sys.executable).resolve()
+    venv_python = _repo_venv_python(root)
+    python = venv_python or Path(sys.executable).resolve()
+    basis = "repo-venv" if venv_python is not None else "sys.executable"
     command = build_command(python, script)
     return {
         "statusLine": {"type": "command", "command": command, "padding": 0},
+        "_python_basis": basis,
         "_comment_windows": (
             "Windows 上 Claude Code 會自動選殼（裝了 Git Bash 走 Git Bash，沒裝才落到"
             "PowerShell——見官方 statusline.md〈Windows configuration〉，不是一律"

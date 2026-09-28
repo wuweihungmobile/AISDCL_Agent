@@ -147,17 +147,22 @@ def uninstall(home: Path | None = None, *, dry_run: bool = False) -> dict:
 
 
 def status(home: Path | None = None) -> dict:
-    """唯讀查現況，不動任何檔案。"""
+    """唯讀查現況，不動任何檔案。`python_basis` 轉述
+    `statusline_context_feed.settings_snippet()` 的同名鍵（DEF-200-411：
+    `"repo-venv"` 或 `"sys.executable"`），讓「退回 `sys.executable`」這件事在
+    `--status` 報告裡可被看見，不靜默。"""
     path = settings_path(home)
     current = load_settings(path)
     installed_value = current.get(STATUS_LINE_KEY)
-    desired = desired_status_line()
+    snippet = _feed.settings_snippet()
+    desired = snippet[STATUS_LINE_KEY]
     return {
         "path": str(path),
         "settings_file_exists": path.is_file(),
         "installed": installed_value is not None,
         "matches_current_checkout": installed_value == desired,
         "statusLine": installed_value,
+        "python_basis": snippet.get("_python_basis"),
     }
 
 

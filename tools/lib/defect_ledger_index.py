@@ -350,6 +350,23 @@ def select_move_subset(
     return chosen, [v for v in movable if v["id"] not in picked], []
 
 
+#: DEF-200-410：鎖標的——別的機械鎖以「本列住主檔」為前提掃描它，
+#: 搬走該鎖即失去標的而紅（全量 `--apply` 實撞過）。值＝{ID: 該鎖座標}；
+#: `plan()` 把它併進判準⑥ 的居所宣稱（硬擋、不接受 `--ack`／`--keep` 繞過）。
+LOCK_TARGETS: dict[str, str] = {
+    "DEF-101-676": (
+        "tools/tests/test_archive_defect_log.py::"
+        "TestUnlockConditionIsMechanicallyChecked._def676_status_cell() 只讀主檔"
+    ),
+}
+
+
+def lock_target_claims(def_id: str) -> list[str]:
+    """判準⑥ 的合成居所宣稱：`def_id` 是某支機械鎖的掃描標的時回一句（DEF-200-410）。"""
+    where = LOCK_TARGETS.get(def_id)
+    return [f"鎖標的（DEF-200-410）：{where}"] if where else []
+
+
 # ----------------------------------------- 未結存量的唯一量測入口與列數棘輪（R74 PKG-2）
 #: 未結案＝仍需要有人接手。`routed` 涵蓋帳本慣用的 `routed（deferred@Rnn）` 寫法；
 #: `None`（狀態欄辨識不出關鍵字）一併納入——「看不出結案」不等於「已結案」。

@@ -12,14 +12,19 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _TOOLS_DIR = _REPO_ROOT / "tools"
 _MOD_PATH = _TOOLS_DIR / "install_statusline.py"
+_FEED_PATH = _TOOLS_DIR / "statusline_context_feed.py"
 
 sys.path.insert(0, str(_TOOLS_DIR))
 import install_statusline as installer  # noqa: E402
 import statusline_context_feed as feed  # noqa: E402
+
+sys.path.insert(0, str(_TOOLS_DIR / "lib"))
+import platform_utils  # noqa: E402 — DesiredInterpreterIsRepoVenvTest 建假 .venv 用
 
 
 def _run_cli(argv: list[str], home: Path) -> tuple[int, str, str]:
@@ -291,6 +296,81 @@ class CliSubprocessTest(unittest.TestCase):
     def test_unknown_flag_is_rejected_not_silently_ignored(self) -> None:
         rc, _out, _err = _run_cli(["--bogus-flag-xyz-not-a-real-flag"], self.home)
         self.assertNotEqual(rc, 0, "未知旗標必須拒收，不得靜默改跑預設路徑")
+
+
+class DesiredInterpreterIsRepoVenvTest(unittest.TestCase):
+    """`tools/statusline_context_feed.py::settings_snippet()` 的期望值不得隨
+    「呼叫者是哪個直譯器」變（DEF-200-411）：用 pyenv python 或 repo venv python
+    呼叫本檔理應算出同一個答案，只能隨 `repo_root`（checkout）本身變；CI 無
+    `.venv` 時才退回 `sys.executable`，並以 `_python_basis` 標明退回發生。"""
+
+    def _make_fake_repo_with_venv(self, root: Path) -> Path:
+        """在 `root` 下建 `.venv` 與本平台假直譯器檔（父目錄一併建立）；
+        Windows 上再放一支同目錄 `pythonw.exe` 假檔（`build_command()` 會優先
+        換成它）。回傳建立的 python.exe／python 假檔路徑。"""
+        venv_python = platform_utils.venv_python_path(root / ".venv")
+        venv_python.parent.mkdir(parents=True, exist_ok=True)
+        venv_python.write_text("", encoding="utf-8")
+        if platform_utils.is_windows():
+            (venv_python.parent / "pythonw.exe").write_text("", encoding="utf-8")
+        return venv_python
+
+    def test_repo_venv_wins_over_two_different_fake_sys_executables(self) -> None:
+        """(a) 兩個不同的假 `sys.executable` 換上去，只要 `repo_root` 帶
+        `.venv`，結果必須相同、且落在 `fake/.venv` 底下——期望值不隨呼叫者變。
+        紅端：把 `settings_snippet()` 裡 `venv_python or Path(sys.executable)...`
+        的 `venv_python or` 拿掉即紅（本格不留壞版本，僅描述）。"""
+        with tempfile.TemporaryDirectory() as td:
+            fake_root = Path(td)
+            self._make_fake_repo_with_venv(fake_root)
+            with tempfile.TemporaryDirectory() as caller_a:
+                fake_exec_a = Path(caller_a) / "python-a"
+                fake_exec_a.write_text("", encoding="utf-8")
+                with mock.patch.object(sys, "executable", str(fake_exec_a)):
+                    snippet_a = feed.settings_snippet(repo_root=fake_root)
+            with tempfile.TemporaryDirectory() as caller_b:
+                fake_exec_b = Path(caller_b) / "python-b"
+                fake_exec_b.write_text("", encoding="utf-8")
+                with mock.patch.object(sys, "executable", str(fake_exec_b)):
+                    snippet_b = feed.settings_snippet(repo_root=fake_root)
+
+        token_a = snippet_a["statusLine"]["command"].split(" ", 1)[0].strip('"')
+        token_b = snippet_b["statusLine"]["command"].split(" ", 1)[0].strip('"')
+        self.assertEqual(token_a, token_b, "兩個不同呼叫者的直譯器不應改變結果")
+        self.assertTrue(
+            token_a.startswith(fake_root.as_posix()),
+            f"{token_a} 應落在 {fake_root.as_posix()} 底下",
+        )
+        self.assertEqual(snippet_a["_python_basis"], "repo-venv")
+        self.assertEqual(snippet_b["_python_basis"], "repo-venv")
+
+    def test_missing_venv_falls_back_to_sys_executable(self) -> None:
+        """(b) `repo_root` 沒有 `.venv` ⇒ 退回 `Path(sys.executable).resolve()`，
+        `_python_basis` 標明 `"sys.executable"`（CI runner 尚無 `.venv` 的形狀）。"""
+        with tempfile.TemporaryDirectory() as td:
+            fake_root = Path(td)  # 刻意不建立 .venv
+            snippet = feed.settings_snippet(repo_root=fake_root)
+        want = feed.build_command(Path(sys.executable).resolve(), _FEED_PATH.resolve())
+        self.assertEqual(snippet["statusLine"]["command"], want)
+        self.assertEqual(snippet["_python_basis"], "sys.executable")
+
+    def test_default_repo_root_matches_actual_checkout(self) -> None:
+        """(c) 無參數呼叫：預設 `repo_root` 必須解析到真正的 checkout 根目錄，
+        與外部直接呼叫 `_repo_venv_python()` 算出的結果一致——確定性斷言，不
+        需要因平台差異而 skip。"""
+        real_root = _FEED_PATH.resolve().parent.parent
+        want_python = feed._repo_venv_python(real_root) or Path(sys.executable).resolve()
+        want = feed.build_command(want_python, _FEED_PATH.resolve())
+        got = feed.settings_snippet()
+        self.assertEqual(got["statusLine"]["command"], want)
+
+    def test_installer_status_reports_python_basis(self) -> None:
+        """(d) `install_statusline.status()` 的報告必須含 `python_basis` 鍵，
+        值落在 `{"repo-venv", "sys.executable"}` 內——安裝器不得自己重算一份。"""
+        with tempfile.TemporaryDirectory() as td:
+            report = installer.status(home=Path(td))
+        self.assertIn("python_basis", report)
+        self.assertIn(report["python_basis"], {"repo-venv", "sys.executable"})
 
 
 if __name__ == "__main__":

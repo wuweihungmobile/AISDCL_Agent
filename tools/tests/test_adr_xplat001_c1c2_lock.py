@@ -685,10 +685,10 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 8959,
+    "test_adr_xplat001_c1c2_lock.py": 8983,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
-    "test_archive_defect_log.py": 4032,
+    "test_archive_defect_log.py": 4076,
     "test_bash32_compat.py": 985,
     "test_bash_probe_spec_contract.py": 859,
     "test_block_destructive_git_r83.py": 2354,
@@ -721,7 +721,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_git_hooks_install_common.py": 485,
     "test_guard_line_taxonomy_r99.py": 148,
     "test_hook_carrier_symlink.py": 153,
-    "test_install_statusline.py": 297,
+    "test_install_statusline.py": 377,
     "test_install_windows_nightly.py": 1358,
     "test_mac_endurance_r83.py": 1987,
     "test_mac_readiness_r82.py": 626,
@@ -757,7 +757,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_smoke_ci_sync.py": 1496,
     "test_statusline_context_feed.py": 204,
     "test_stdio_utf8.py": 76,
-    "test_subprocess_encoding_hygiene.py": 1584,
+    "test_subprocess_encoding_hygiene.py": 1585,
     "test_tlc_runner_timeout.py": 292,
     "test_wake_chain_halt_r278.py": 769,
     "test_windows_forbidden_filename_parity.py": 1003,
@@ -2453,6 +2453,21 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "本列自身、_REGRESSION_LANE_LOG 同輪列改寫、_FROZEN_PREFIX_REWRITE_LEDGER 接鏈列造成的"
      "行數漂移（同輪第二次收斂，同既有多列收斂體例）。餘額歸主軌，見 "
      "CrossPlatform_R145_Scan_Findings.md〈附記（R178）〉。"),  # round-label-ok
+    ("R180", 107560, 107685, 125,  # round-label-ok：DEF-200-411 新立即結、410 結案收尾單人窗口
+     "[非淨減法輪][回歸鎖軌申報＝本列淨額全額，見 _REGRESSION_LANE_LOG 同輪列] DEF-200-411／"
+     "410 結案回歸鎖：test_install_statusline.py +80（DesiredInterpreterIsRepoVenvTest 四格："
+     "statusLine 期望值釘根層 .venv、換兩個假 sys.executable 結果相同、無 .venv 退回並以 "
+     "python_basis 標明）＋test_archive_defect_log.py +44（TestLockTargetIsExemptFromMigration "
+     "五格：鎖標的併入判準⑥、拿掉 LOCK_TARGETS 即回可搬、--plan 子行程同印兩個 ID）＋"
+     "test_subprocess_encoding_hygiene.py +1（_CHILD_SITE_FLOOR 54→65 重釘註記）＋本表自身"
+     "漂移「見下一列」，未超軌上限 ⇒ 全額申報，主軌 0。逐項見 "
+     "CrossPlatform_R180_SessionGate_Windows_Recheck2_Evidence.md〈四〉。"),  # round-label-ok
+    ("R180", 107685, 107709, 24,  # round-label-ok：本表自身漂移收斂列
+     "[非淨減法輪][同輪追加] 收斂列：本表（test_adr_xplat001_c1c2_lock.py 自身）新增上一列、"
+     "本列自身、_REGRESSION_LANE_LOG 同輪列、_REPIN_NET_CAP_SCHEDULE 到期兌現列與重新武裝、"
+     "_FROZEN_PREFIX_REWRITE_LEDGER 新列造成的行數漂移，反覆覆核收斂到本行本身也計入為止，"
+     "同 R173~R178 既有體例。餘額歸主軌，見 "  # round-label-ok
+     "CrossPlatform_R145_Scan_Findings.md〈附記（R180）〉。"),  # round-label-ok
 )
 
 
@@ -2576,6 +2591,9 @@ _REPIN_NET_CAP_SCHEDULE: tuple[tuple[int, int], ...] = (
                   # （`_REPIN_NET_CAP_DUE_ROUND=173`）。同輪重新武裝：步伐維持 1（整數下限）。
     (177, 528),   # 到期輪兌現：cap 降到到期目標本身（同既有判例）。本輪剛好到期 round-label-ok
                   # （`_REPIN_NET_CAP_DUE_ROUND=177`）。同輪重新武裝：步伐維持 1（整數下限）。
+    (180, 527),   # 到期輪兌現：到期輪 179 落在稽核痕跡未走到的輪次， round-label-ok
+                  # 本輪首次重釘就地兌現，cap 降到到期目標本身（同 R126 判例）。 round-label-ok
+                  # 同輪重新武裝下一段：步伐維持 1（整數下限）。
 )
 #: 生效點＝首列輪號、現行上限＝末列上限，**皆由表導出不另立常數**（R73 判例：一份知識一個家）。
 _REPIN_ROUND_CAP_SINCE = _REPIN_NET_CAP_SCHEDULE[0][0]
@@ -2939,6 +2957,11 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "test_check_hooks_liveness.py 退役載具分類四格＋本表自身漂移兩次收斂），未超軌上限 ⇒ "
      "全額申報，主軌 0。逐項見 CrossPlatform_R145_Scan_Findings.md"
      "〈附記（R178）〉。"),  # round-label-ok
+    ("R180", 149,  # round-label-ok
+     "DEF-200-411／410 結案回歸鎖全額（test_install_statusline.py 四格＋test_archive_defect_log.py "
+     "五格＋test_subprocess_encoding_hygiene.py 下限重釘註記＋本表自身漂移），未超軌上限 ⇒ "
+     "全額申報，主軌 0。逐項見 CrossPlatform_R145_Scan_Findings.md"
+     "〈附記（R180）〉。"),  # round-label-ok
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -3168,8 +3191,8 @@ def net_cap_schedule_problems(
 #: R169 兌現：cap 降到目標本身（532，見 `(169, 532)` 列），重新武裝：目標 531＜cap round-label-ok
 #: R171 兌現：cap 降到目標本身（531，見 `(171, 531)` 列），重新武裝：目標 530＜cap round-label-ok
 #: R177 兌現：cap 降到目標本身（528，見 `(177, 528)` 列），重新武裝：目標 527＜cap round-label-ok
-_REPIN_NET_CAP_DUE_ROUND = 179  # round-label-ok：到期輪＝兌現輪+2（lookahead 判準的活體對照）
-_REPIN_NET_CAP_DUE_TARGET = 527  # 步伐 1，嚴格低於 cap 528（本輪重新武裝） round-label-ok
+_REPIN_NET_CAP_DUE_ROUND = 182  # round-label-ok：到期輪＝兌現輪+2（lookahead 判準的活體對照）
+_REPIN_NET_CAP_DUE_TARGET = 526  # 步伐 1，嚴格低於 cap 527（本輪重新武裝） round-label-ok
 
 #: DEF-200-121：到期輪自身的後設鎖——`_REPIN_NET_CAP_DUE_ROUND` 只准落在「最近稽核輪
 #: ＋ lookahead」以內（歷史母體 85..113 的到期輪一律＝上一次兌現輪 +2）。可延期的到期日
@@ -3236,10 +3259,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 303
+_REPIN_LOG_FROZEN_PREFIX_LEN = 305
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "cd02c8559b6c6311015a9ca1f6f4c5e42070d7e460d8a61be407067bfc2b2c7b")
+    "747baab09344681c538cba17d3af82e4e4db64306bc93afbc62428fb97c4dc96")
 
 
 def repin_log_history_digest(
@@ -3583,6 +3606,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R177", "439d33eed981", "8f0be6de014b", "DEF-200-340"),  # round-label-ok
     ("R178", "8f0be6de014b", "81d395774077", "DEF-200-404"),  # round-label-ok
     ("R178", "81d395774077", "cd02c8559b6c", "DEF-200-406"),  # round-label-ok：第二次接鏈
+    ("R180", "cd02c8559b6c", "747baab09344", "DEF-200-411"),  # round-label-ok
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

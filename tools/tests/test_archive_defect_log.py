@@ -3216,6 +3216,50 @@ class TestUnlockConditionIsMechanicallyChecked(unittest.TestCase):
             )
 
 
+class TestLockTargetIsExemptFromMigration(unittest.TestCase):
+    """DEF-200-410：`plan()` 的可搬判準原本不排除「本身是另一支機械鎖掃描標的」的列——
+    `TestUnlockConditionIsMechanicallyChecked._def676_status_cell()` 只讀主檔找
+    `DEF-101-676`，上一輪全量 `--apply` 把該列搬走後本鎖就失去掃描標的而紅（改用
+    `--keep` 才繞過）。解法＝`tools/lib/defect_ledger_index.py` 的 `LOCK_TARGETS`／
+    `lock_target_claims()` 把「該 ID 是某支鎖的掃描標的」合成為判準⑥ 的居所宣稱
+    （硬擋、不接受 `--ack`／`--keep` 繞過），本組驗 `tools/archive_defect_log.py::plan()`
+    真的接上這個合成宣稱。
+    """
+
+    def test_lock_target_is_blocked_with_def200410_in_reason(self):
+        p = ADL.plan()
+        hit = [v for v in p["blocked"] if v["id"] == "DEF-101-676"]
+        self.assertTrue(hit, "DEF-101-676 應出現在 blocked（鎖標的合成宣稱應硬擋它）")
+        self.assertIn("DEF-200-410", "；".join(hit[0]["blockers"]))
+
+    def test_lock_target_is_not_in_movable(self):
+        p = ADL.plan()
+        movable_ids = {v["id"] for v in p["movable"]}
+        self.assertNotIn("DEF-101-676", movable_ids)
+
+    def test_lock_targets_each_have_a_row_in_the_main_ledger(self):
+        lines = ADL._LEDGER.read_text(encoding="utf-8-sig").splitlines()
+        for def_id in ADL._ledger_index.LOCK_TARGETS:
+            found = [ln for ln in lines if ln.startswith(f"| {def_id} |")]
+            self.assertTrue(found, f"{def_id} 在 LOCK_TARGETS 具名，但主檔查無此列")
+
+    def test_removing_lock_target_lets_it_move_again(self):
+        """紅端：拿掉 `LOCK_TARGETS` 後 DEF-101-676 回到可搬，證明擋它的正是這個集合。"""
+        with mock.patch.object(ADL._ledger_index, "LOCK_TARGETS", {}):
+            p = ADL.plan()
+        movable_ids = {v["id"] for v in p["movable"]}
+        self.assertIn("DEF-101-676", movable_ids)
+
+    def test_plan_subprocess_names_both_ids(self):
+        r = subprocess.run(
+            [sys.executable, str(_REPO / "tools" / "archive_defect_log.py"), "--plan"],
+            capture_output=True, text=True, encoding="utf-8", cwd=str(_REPO),
+        )
+        self.assertEqual(r.returncode, 0, r.stderr[-2000:])
+        self.assertIn("DEF-101-676", r.stdout)
+        self.assertIn("DEF-200-410", r.stdout)
+
+
 # 沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md
 # 〈archive 內未結列常設複驗的住所裁決與 R81 轉格〉。
 _ARCHIVE_UNRESOLVED_BASELINE: frozenset[tuple[str, str]] = frozenset({

@@ -613,7 +613,7 @@ def plan(ack: frozenset[str] = frozenset(), only: frozenset[str] = frozenset(),
         if v["handoff_marker"] and v["id"] not in ack:
             needs_ack.append(v)
             continue
-        claims = residence_claims.get(v["id"], [])
+        claims = residence_claims.get(v["id"], []) + _ledger_index.lock_target_claims(v["id"])
         if claims:
             # 硬擋、不接受 `--ack` 繞過（WHY 見 `MOVE_CRITERIA` 上方註解）：這與判準④
             # 的交棒偵測不同——交棒是主觀判斷，指針居所是可驗證的事實陳述。
