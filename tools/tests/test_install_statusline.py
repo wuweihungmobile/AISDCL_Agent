@@ -27,9 +27,20 @@ sys.path.insert(0, str(_TOOLS_DIR / "lib"))
 import platform_utils  # noqa: E402 — DesiredInterpreterIsRepoVenvTest 建假 .venv 用
 
 
-def _run_cli(argv: list[str], home: Path) -> tuple[int, str, str]:
-    """子行程呼叫 CLI；HOME 與 USERPROFILE 皆指向 tempdir（Windows 讀後者，DEF-200-409）。"""
+def _run_cli(
+    argv: list[str], home: Path, *, extra_env: dict | None = None
+) -> tuple[int, str, str]:
+    """子行程呼叫 CLI；HOME 與 USERPROFILE 皆指向 tempdir（Windows 讀後者，DEF-200-409）。
+
+    `CLAUDE_CONFIG_DIR` 一律先從繼承的環境剔除（DEF-200-415）：開發機若剛好匯出
+    了這個變數，fresh-home 隔離會失效，子行程會對真實設定檔 install→uninstall
+    （DEF-200-409 同形的污染）。`extra_env` 供 `ConfigDirOverrideTest` 端到端測試
+    顯式注入該變數；預設 `None` 不改變既有呼叫端行為。
+    """
     env = {**os.environ, "HOME": str(home), "USERPROFILE": str(home)}
+    env.pop("CLAUDE_CONFIG_DIR", None)
+    if extra_env:
+        env.update(extra_env)
     proc = subprocess.run([sys.executable, str(_MOD_PATH), *argv], capture_output=True,
                            text=True, encoding="utf-8", env=env, timeout=15, check=False)
     return proc.returncode, proc.stdout, proc.stderr
@@ -371,6 +382,48 @@ class DesiredInterpreterIsRepoVenvTest(unittest.TestCase):
             report = installer.status(home=Path(td))
         self.assertIn("python_basis", report)
         self.assertIn(report["python_basis"], {"repo-venv", "sys.executable"})
+
+
+class ConfigDirOverrideTest(unittest.TestCase):
+    """`tools/install_statusline.py::settings_path()`（DEF-200-415）：設了
+    Claude Code 官方環境變數 `CLAUDE_CONFIG_DIR` 時，整個 `~/.claude` 設定目錄
+    被該目錄取代，本安裝器不得繼續固定寫 `~/.claude`。"""
+
+    def test_config_dir_env_var_wins_over_home(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": td}):
+                got = installer.settings_path()
+            self.assertEqual(got, Path(td) / "settings.json")
+
+    def test_explicit_home_argument_wins_over_env_var(self) -> None:
+        """測試注入語意不變：顯式 `home` 參數優先於環境變數。"""
+        with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as home_td:
+            with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": td}):
+                got = installer.settings_path(Path(home_td))
+            self.assertEqual(got, Path(home_td) / ".claude" / "settings.json")
+
+    def test_unset_env_var_falls_back_to_home(self) -> None:
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("CLAUDE_CONFIG_DIR", None)
+            got = installer.settings_path()
+        self.assertEqual(got, Path.home() / ".claude" / "settings.json")
+
+    def test_blank_env_var_is_treated_as_unset(self) -> None:
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": "   "}):
+            got = installer.settings_path()
+        self.assertEqual(got, Path.home() / ".claude" / "settings.json")
+
+    def test_end_to_end_subprocess_honors_config_dir(self) -> None:
+        """子行程端到端：`--status` 報告的 `path` 落在 `CLAUDE_CONFIG_DIR` 底下，
+        不論該目錄底下有沒有 `settings.json`（本格只斷言 `path`，`installed`／
+        `rc` 皆可）。"""
+        with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as cfg_dir:
+            rc, out, err = _run_cli(
+                ["--status"], Path(home), extra_env={"CLAUDE_CONFIG_DIR": cfg_dir}
+            )
+            self.assertIn(rc, (0, 1), err)
+            doc = _leading_json(out)
+            self.assertEqual(doc["path"], str(Path(cfg_dir) / "settings.json"))
 
 
 if __name__ == "__main__":

@@ -23,9 +23,10 @@ WHY
 安全性：寫入前一律先把既有檔案原樣備份成
 `settings.json.bak-<UTC YYYYmmddTHHMMSSZ>`（僅在檔案原本存在、且本次真的要寫入
 時才建立；已是期望值的安裝視為冪等 no-op，不建立備份也不改動檔案）。HOME 目錄
-一律經 `Path.home()` 取得——測試以環境變數／monkeypatch 覆寫即可注入 tempdir，
-不需要另開一條「測試專用路徑」參數污染正式介面（各函式仍接受顯式 `home` 參數
-供測試直接呼叫，CLI 層一律用預設值）。
+一律經 `Path.home()` 取得，但 `CLAUDE_CONFIG_DIR`（Claude Code 官方環境變數）
+設定時優先於 `Path.home()`（DEF-200-415，見 `settings_path()`）——測試以環境
+變數／monkeypatch 覆寫即可注入 tempdir，不需要另開一條「測試專用路徑」參數污染
+正式介面（各函式仍接受顯式 `home` 參數供測試直接呼叫，CLI 層一律用預設值）。
 
 誠實劃界（待 Windows 親驗，見 R158 analysis_docs.md G2／analysis_sd.md D2／ round-label-ok
 refute_q3q4ci.md 3(a)）：
@@ -42,6 +43,7 @@ stdlib-only（同 `statusline_context_feed.py` 的既有紀律：不保證第三
 from __future__ import annotations
 
 import json
+import os
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -59,9 +61,19 @@ _KNOWN_FLAGS = ("--uninstall", "--status", "--dry-run", "--print-command")
 
 def settings_path(home: Path | None = None) -> Path:
     """`~/.claude/settings.json` 的絕對路徑。`home` 覆寫供測試以 tempdir 注入；
-    CLI 層一律用預設值（`Path.home()`，於 POSIX 上尊重 `$HOME` 環境變數）。"""
-    base = home if home is not None else Path.home()
-    return base / ".claude" / "settings.json"
+    CLI 層一律用預設值（`Path.home()`，於 POSIX 上尊重 `$HOME` 環境變數）。
+
+    DEF-200-415：`home` 未顯式指定時，Claude Code 官方環境變數
+    `CLAUDE_CONFIG_DIR`（兩平台語意相同：設了即整個 `~/.claude` 設定目錄被該
+    目錄取代）優先於 `Path.home()`——設了該變數卻仍固定寫 `~/.claude` 會裝到
+    Claude Code 根本不讀的檔，且本檔 `install()`/`status()` 皆會一致誤判成
+    「假的已安裝」。空字串／純空白視同未設。"""
+    if home is not None:
+        return home / ".claude" / "settings.json"
+    override = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
+    if override:
+        return Path(override) / "settings.json"
+    return Path.home() / ".claude" / "settings.json"
 
 
 def _utc_stamp() -> str:

@@ -9262,6 +9262,44 @@ class QuotaMessagesNameTheAxisTest(unittest.TestCase):
             self._assert_every_pct_is_qualified("🔴 額度水位 54.0%（≥95%）⇒ 停止派發。")
 
 
+class HaltConvergentClarificationPlatformTest(unittest.TestCase):
+    """DEF-200-413：`tools/lib/quota_messages.py::halt_convergent_clarification()` 的平台分支。
+
+    `HALT_CONVERGENT_CLARIFICATION` 逐字「收斂型工具（Read／Write／Edit／Bash／git）
+    不受影響」在 Windows 上是假話——Bash 工具另由鐵律一 hook
+    （`.claude/hooks/block_bash_on_windows.py`）整支停用，與 DEF-200-412 已修好的
+    `tools/lib/session_brief.py::_RC2_CLARIFY_WINDOWS` 是同一句話的姊妹站點。
+    (a)(b) 兩格只鎖常數存在；(c)(d) 兩格 patch `qm.platform_utils.is_windows` 後改讀
+    `quota_halt_repeat_message()` 的實際輸出，證明呼叫點真的接上了平台判準，不是只有
+    常數本身存在卻沒人用。
+    """
+
+    def test_windows_variant_mentions_powershell_and_hook_disablement(self) -> None:
+        text = qm.halt_convergent_clarification(windows=True)
+        self.assertIn("PowerShell", text)
+        self.assertIn("鐵律一 hook 停用", text)
+        self.assertNotIn("／Bash／", text)
+
+    def test_posix_variant_equals_the_legacy_constant(self) -> None:
+        self.assertEqual(qm.halt_convergent_clarification(windows=False),
+                         qm.HALT_CONVERGENT_CLARIFICATION)
+
+    def test_the_repeat_message_switches_to_powershell_when_patched_windows(self) -> None:
+        decision = _decision((("session", 96.0, 600.0), ("weekly_all", 57.0, 6 * 86400.0)))
+        now = datetime.now(UTC).astimezone()
+        with unittest.mock.patch.object(qm.platform_utils, "is_windows", return_value=True):
+            text = qm.quota_halt_repeat_message(decision, now)
+        self.assertIn("PowerShell", text)
+        self.assertNotIn("／Bash／", text)
+
+    def test_the_repeat_message_keeps_bash_when_patched_posix(self) -> None:
+        decision = _decision((("session", 96.0, 600.0), ("weekly_all", 57.0, 6 * 86400.0)))
+        now = datetime.now(UTC).astimezone()
+        with unittest.mock.patch.object(qm.platform_utils, "is_windows", return_value=False):
+            text = qm.quota_halt_repeat_message(decision, now)
+        self.assertIn("／Bash／", text)
+
+
 class QuotaEnvFileIsActuallyLoadedTest(unittest.TestCase):
     """🔴 訴求 6c：`.env.example` 列出來的鍵必須**真的生效**。
 
@@ -10958,6 +10996,10 @@ class QuotaGateIsWiredToTheBurnPathTest(unittest.TestCase):
         都印的重複訊息（撞牆期間人唯一持續看得到的那一則）此前**沒有**首則訊息的「收斂不受
         影響」澄清 ⇒ Q1／Q2 使用者誤讀「被擋」的合理成因之一。紅端＝舊碼的重複訊息只有
         「額度仍在停止水位：扇出一律不執行，任務書已在磁碟上。」一行，不含這三件事。
+
+        DEF-200-413：hook 以子行程跑在**同一平台**，故用 `qm.halt_convergent_clarification()`
+        （不帶參數，平台現查）當期望值——平台現值即期望值，不寫死「／Bash／」那個 POSIX 字面
+        （Windows 上會是「／PowerShell／」，見同函式）。
         """
         _quota_cache(self.tmp, 96.0)
         rc1, err1 = _run_hook(self._post("Read"), self.tmp)
@@ -10965,7 +11007,7 @@ class QuotaGateIsWiredToTheBurnPathTest(unittest.TestCase):
         rc2, err2 = _run_hook(self._post("Read"), self.tmp)
         self.assertEqual(rc2, 2, "第二次呼叫沒進 halt ⇒ 閂鎖沒命中，測不到重複訊息")
         self.assertIn("你剛才那次工具呼叫已正常執行完成", err2)
-        self.assertIn("Read／Write／Edit／Bash／git", err2)
+        self.assertIn(qm.halt_convergent_clarification(), err2)
         self.assertIn("Task／Agent／Workflow／WebFetch／WebSearch", err2)
         self.assertIn("python tools/session_resume_planner.py --pace", err2)
 

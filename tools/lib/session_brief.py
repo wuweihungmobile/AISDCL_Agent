@@ -201,14 +201,25 @@ def statusline_line(check_status: Callable[[], dict] = _default_check_statusline
     """G1：statusLine 安裝狀態那一行——重用 `tools/install_statusline.py::status()`
     既有的查現況邏輯，不重寫判準。`check_status` 由呼叫端／測試注入覆寫（預設值即
     真的呼叫該函式）；任何例外一律 fail-open 成「查不到」，不得讓 SessionStart 崩掉。
+
+    DEF-200-414：`matches_current_checkout` 鍵缺席時預設 `True`（維持既有三格測試
+    語意不變）；`installed` 為真但與本 checkout 不符時（repo 搬家／.venv 重建／被
+    其他工具改寫都會這樣）另回第三種句子，不得誤報成「已安裝」。
     """
     try:
-        installed = bool(check_status().get("installed"))
+        report = check_status()
+        installed = bool(report.get("installed"))
+        matches = bool(report.get("matches_current_checkout", True))
     except Exception as exc:  # noqa: BLE001 — 見上
         return f"statusLine：查不到（{exc}）"
-    if installed:
-        return "statusLine：已安裝"
-    return f"statusLine：未安裝（安裝：{_STATUSLINE_INSTALL_HINT}）"
+    if not installed:
+        return f"statusLine：未安裝（安裝：{_STATUSLINE_INSTALL_HINT}）"
+    if not matches:
+        return (
+            "statusLine：已安裝但與本 checkout 不符"
+            f"（repo 搬家／.venv 重建／被改寫都會這樣；重裝：{_STATUSLINE_INSTALL_HINT}）"
+        )
+    return "statusLine：已安裝"
 
 
 def sessionstart_brief(

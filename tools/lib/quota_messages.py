@@ -46,6 +46,11 @@ try:  # 排程載具：拿不到時只影響 `evidence_hint()` 那一句，不�
 except Exception:  # noqa: BLE001
     schedule_backend = None  # type: ignore[assignment]
 
+try:
+    import platform_utils  # type: ignore[import-not-found]  # 同目錄 SSOT：is_windows()
+except Exception:  # noqa: BLE001 — 見上方 fail-open 紀律；不可達就回 POSIX 版澄清句
+    platform_utils = None  # type: ignore[assignment]
+
 # `quota_pace` 是本族的葉子（它一支同層模組都不 import）⇒ 相依方向仍是單向的，
 # 且 `quota_policy` 早就 import 它（`as W`）：本行沒有新增任何一條相依邊的方向。
 import quota_pace  # noqa: E402
@@ -276,11 +281,42 @@ def reset_horizon_phrase(branch: str, resets_at: object, now: datetime | None = 
 # 1140 行附近的既有註解）此前沒有帶「收斂不受影響」的澄清——而它偏偏是撞牆期間人唯一
 # 持續看得到的版本。首則訊息（下面 `quota_halt_message()` 的 head）與重複訊息現在共用
 # 同一句，人話面 SSOT 收斂到這裡，避免兩處各自遣詞再度漂移。
+# Windows 版見 `_HALT_CONVERGENT_CLARIFICATION_WINDOWS`（DEF-200-413：Windows 上
+# Bash 工具另由鐵律一 hook（`block_bash_on_windows.py`）整支停用，「Bash…不受影響」
+# 對模型是假話，與 `session_brief.py::_RC2_CLARIFY_WINDOWS`＝同一句話的姊妹站點）。
 HALT_CONVERGENT_CLARIFICATION = (
     "你剛才那次工具呼叫已正常執行完成；收斂型工具（Read／Write／Edit／Bash／git）"
     "不受影響，只有扇出型（Task／Agent／Workflow／WebFetch／WebSearch）暫停；"
     "真實數字現查：`python tools/session_resume_planner.py --pace`"
 )
+
+# DEF-200-413：Windows 上 `HALT_CONVERGENT_CLARIFICATION` 那句「Bash…不受影響」對模型
+# 是假話——`block_bash_on_windows.py`（鐵律一）對 Bash 工具整支 exit 2。改列 PowerShell，
+# 並比照 `session_brief.py::_RC2_CLARIFY_WINDOWS` 補上同一句括號說明。
+_HALT_CONVERGENT_CLARIFICATION_WINDOWS = (
+    "你剛才那次工具呼叫已正常執行完成；收斂型工具（Read／Write／Edit／PowerShell／git）"
+    "不受影響，只有扇出型（Task／Agent／Workflow／WebFetch／WebSearch）暫停；"
+    "（Windows：Bash 工具另由鐵律一 hook 停用，跑指令用 PowerShell 工具、"
+    "改檔用 Write／Edit，不要先試 Bash——那個阻斷不是「不能寫檔」）"
+    "真實數字現查：`python tools/session_resume_planner.py --pace`"
+)
+
+
+def halt_convergent_clarification(windows: bool | None = None) -> str:
+    """halt 帶「收斂不受影響」澄清句，平台感知版（DEF-200-413）。
+
+    `windows=None` 時以同目錄 SSOT `platform_utils.is_windows()` 現查——本檔不得
+    自己寫 `os.name`／`sys.platform` 分支（根 CLAUDE.md〈Windows 側單一載具原則〉
+    鐵律三）。import 失敗時一律 fail-open 回 POSIX 版
+    （`HALT_CONVERGENT_CLARIFICATION`）：hook 行程不保證 `tools/lib` 以外的模組在
+    `sys.path` 上，簡報失敗不得反過來擋住 halt 訊息本身。
+    """
+    if windows is None:
+        try:
+            windows = bool(platform_utils.is_windows())
+        except Exception:  # noqa: BLE001 — 見上：fail-open 回 POSIX 版
+            windows = False
+    return _HALT_CONVERGENT_CLARIFICATION_WINDOWS if windows else HALT_CONVERGENT_CLARIFICATION
 
 
 # 🔴 **開頭不再印裸百分比**（R82／M7）：舊版第一行是「額度水位 54%（≥95%…）」，而裸的
@@ -291,7 +327,7 @@ def quota_halt_message(decision: quota_policy.Decision, act: dict) -> str:
     """halt 的一次性訊息。三支分支**字串必須不同**，否則「不排程」與「排不了」外觀相同。"""
     head = (f"🔴 額度到達**停止**水位（最緊的一條＝{act['kind'] or '未知'}）⇒ **停止派發**："
             "扇出型工具一律不執行。\n"
-            f"   {HALT_CONVERGENT_CLARIFICATION}\n"
+            f"   {halt_convergent_clarification()}\n"
             f"   {quota_policy.describe(decision)}\n"
             f"   任務書：{act['plan'] or '（寫不出來——逐字稿路徑不可得）'}\n")
     # 修4：期程句印**被選中的** reset（≥halt 最早可 reset 軸），不再印 binding 的 None。
@@ -362,7 +398,7 @@ def quota_halt_repeat_message(decision: quota_policy.Decision, now: datetime) ->
     """
     return (f"🔴 {quota_policy.describe(decision)}\n"
             "   額度仍在停止水位：扇出一律不執行，任務書已在磁碟上。\n"
-            f"   {HALT_CONVERGENT_CLARIFICATION}\n"
+            f"   {halt_convergent_clarification()}\n"
             + throttle_horizon_line(decision, now))
 
 

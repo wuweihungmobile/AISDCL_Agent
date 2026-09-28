@@ -216,10 +216,25 @@ class ContextLineTest(unittest.TestCase):
 
 
 class StatuslineLineTest(unittest.TestCase):
-    """G1 三格：已安裝／未安裝／查不到（注入會拋例外的 callable）。零 I/O——
-    `check_status` 全由測試注入替身，不觸及真正的 `install_statusline.status()`。"""
+    """G1 四格：已安裝／未安裝／查不到／已安裝但與本 checkout 不符（DEF-200-414）。
+    零 I/O——`check_status` 全由測試注入替身，不觸及真正的
+    `install_statusline.status()`。"""
 
     def test_installed_reports_installed(self) -> None:
+        got = sb.statusline_line(lambda: {"installed": True})
+        self.assertEqual(got, "statusLine：已安裝")
+
+    def test_installed_but_mismatched_reports_mismatch(self) -> None:
+        """DEF-200-414：`matches_current_checkout` 為假時不得誤報成「已安裝」。"""
+        got = sb.statusline_line(
+            lambda: {"installed": True, "matches_current_checkout": False}
+        )
+        self.assertIn("已安裝但與本 checkout 不符", got)
+        self.assertIn("python tools/install_statusline.py --dry-run", got)
+        self.assertNotEqual(got, "statusLine：已安裝")
+
+    def test_missing_matches_key_defaults_to_installed(self) -> None:
+        """缺 `matches_current_checkout` 鍵時預設視為相符（既有三格測試語意不變）。"""
         got = sb.statusline_line(lambda: {"installed": True})
         self.assertEqual(got, "statusLine：已安裝")
 
