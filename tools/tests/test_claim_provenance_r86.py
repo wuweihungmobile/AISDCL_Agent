@@ -1011,5 +1011,213 @@ class TestTheBlockClaimEvidenceWindowIsRecentTurnsOnly(unittest.TestCase):
                          "只有一則真人訊息時沒有邊界，應退回全場既有行為")
 
 
+#: 出處欄位的形態（值域是逐字稿觀察所得、非官方契約，見 `_is_genuine_user_turn`）。
+#: `_NOTICE_OLD` 是 `turnOrigin` 問世（CC 2.1.277）之前的通知形態：只有 `origin.kind`（本機
+#: 母體 2.1.248～2.1.276 共 370 筆），`promptSource` 早期為 `sdk`、2.1.270 起為 `system`。
+_HUMAN = {"origin": {"kind": "human"}, "promptSource": "typed", "turnOrigin": "human"}
+_NOTICE = {"origin": {"kind": "task-notification"}, "promptSource": "system",
+           "turnOrigin": "task_notification"}
+_NOTICE_OLD = {"origin": {"kind": "task-notification"}, "promptSource": "sdk"}
+_PEER = {"origin": {"kind": "peer"}, "isMeta": True, "promptSource": "system",
+         "turnOrigin": "peer"}
+
+
+class TestTheTurnBoundaryIgnoresHarnessGeneratedUserRecords(unittest.TestCase):
+    """DEF-200-423：回合邊界只認操作者輸入（數字與判準全文見 `_is_genuine_user_turn`）。
+
+    背景 agent 收工通知、peer 訊息、slash／skill 展開也以 role=user 落盤；把它們當『回合』，
+    邊界就滑到最近一則通知，兩則真人訊息之間的 hook 阻斷被擠出窗口 ⇒ 收尾摘要一提
+    『被擋』就假紅。另守：本 hook 自己的 Stop 警報不得當佐證（否則自己洗白自己）。
+    """
+
+    def setUp(self) -> None:
+        self._dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._dir.cleanup)
+
+    def _write(self, lines: list[str]) -> Path:
+        path = Path(self._dir.name) / "t.jsonl"
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return path
+
+    def _hits(self, lines: list[str]) -> list[dict]:
+        """與 `main()` 同一條三步管線：讀逐字稿 → 切窗口 → 判『被擋』宣稱。"""
+        stamped, records, turns = G._read_transcript(str(self._write(lines)))
+        evidence = G._block_claim_evidence(stamped, records, turns)
+        return G.unbacked_block_claim_hits(_BLOCKED_CLAIM, evidence)
+
+    def _run(self, lines: list[str]):
+        # 借鄰班的 `_run`：多一個 subprocess 站點就得重釘 `_CHILD_SITE_FLOOR`。
+        return TestTheBlockClaimEvidenceWindowIsRecentTurnsOnly._run(
+            self, _BLOCKED_CLAIM, self._write(lines))
+
+    @staticmethod
+    def _user(when: str, content, **fields) -> str:
+        return json.dumps({"type": "user", "timestamp": when,
+                           "message": {"role": "user", "content": content}, **fields})
+
+    @staticmethod
+    def _quota_block(when: str) -> str:
+        """額度守衛擋下 Workflow 的 tool_result（帶 `kind=`／`band=`／`cap=`）。"""
+        block = {"type": "tool_result", "tool_use_id": "t1",
+                 "content": "kind=session 21% band=prepare cap=1 ⇒ Workflow 不可派"}
+        return json.dumps({"type": "user", "timestamp": when,
+                           "message": {"role": "user", "content": [block]}})
+
+    @staticmethod
+    def _context(event, text: str) -> str:
+        att = {"type": "hook_additional_context", "content": [text]}
+        if event is not None:
+            att["hookEvent"] = event
+        return json.dumps({"type": "attachment", "timestamp": "2026-09-28T16:01:00Z",
+                           "attachment": att})
+
+    def _storm(self) -> list[str]:
+        """事故形狀：真人 A → 阻斷 → 通知×2（新舊形態各一）→ peer → slash 展開（只有
+        isMeta）→ 真人 B。"""
+        return [
+            self._user("2026-09-28T16:00:00Z", "第一則：請開工", **_HUMAN),
+            self._quota_block("2026-09-28T16:08:35Z"),
+            self._user("2026-09-28T17:12:59Z", "<task-notification>\n<task-id>a1", **_NOTICE_OLD),
+            self._user("2026-09-28T17:43:13Z", "<task-notification>\n<task-id>a2", **_NOTICE),
+            self._user("2026-09-28T17:48:00Z", "Another Claude session sent a message:", **_PEER),
+            self._user("2026-09-28T17:50:00Z", "<command-name>/x</command-name>", isMeta=True),
+            self._user("2026-09-28T18:00:00Z", "第二則：收工了嗎？", **_HUMAN),
+        ]
+
+    def test_notifications_and_meta_records_are_not_turn_boundaries(self) -> None:
+        """舊謂詞把 4 則 harness 記錄都算回合 ⇒ 邊界落在 slash 展開，16:08 的阻斷被擠出窗口。"""
+        self.assertEqual(self._hits(self._storm()), [], "通知／peer／展開被當成回合邊界")
+
+    def test_the_hook_process_is_silent_on_that_shape(self) -> None:
+        """同一形狀走真的 hook 行程：`main()` 必須把整筆記錄交給謂詞。"""
+        done = self._run(self._storm())
+        self.assertEqual(done.returncode, 0, "本守衛永不阻斷")
+        self.assertNotIn("被擋／水位", done.stderr)
+
+    def test_operator_prompts_still_bound_the_window(self) -> None:
+        """對照組：`human`（打字）與 `sdk`（`claude -p`）仍是邊界，否則『修好了』與『判準被
+        關掉了』的輸出一模一樣。"""
+        for name, fields in (("typed", _HUMAN), ("claude -p", {"turnOrigin": "sdk"})):
+            with self.subTest(prompt=name):
+                lines = [
+                    self._user("2026-09-28T16:00:00Z", "第一則", **fields),
+                    self._quota_block("2026-09-28T16:08:35Z"),
+                    self._user("2026-09-28T16:30:00Z", "第二則（邊界）", **fields),
+                    self._user("2026-09-28T18:00:00Z", "第三則", **fields),
+                ]
+                self.assertTrue(self._hits(lines), "邊界之前的阻斷不應再替本回合背書")
+
+    def test_records_without_provenance_keep_the_content_shape_verdict(self) -> None:
+        """欄位全缺（舊版逐字稿／既有合成語料）與修前逐字相同：純字串是真人、清一色
+        tool_result 是中繼。"""
+        relay = [{"type": "tool_result", "content": "x"}]
+        for record in (None, {}, {"type": "user", "timestamp": "2026-09-28T16:00:00Z"}):
+            with self.subTest(record=record):
+                self.assertTrue(G._is_genuine_user_turn("隨手打的一句話", record))
+                self.assertFalse(G._is_genuine_user_turn(relay, record))
+                self.assertFalse(G._is_genuine_user_turn("  ", record))
+        lines = [
+            self._user("2026-09-28T16:00:00Z", "第一則"),
+            self._quota_block("2026-09-28T16:08:35Z"),
+            self._user("2026-09-28T16:30:00Z", "第二則（邊界）"),
+            self._user("2026-09-28T18:00:00Z", "第三則"),
+        ]
+        self.assertTrue(self._hits(lines), "無出處欄位的純字串仍是回合邊界")
+
+    def test_an_unknown_provenance_value_is_not_a_boundary(self) -> None:
+        """未知的新值一律不算邊界：窗口變大＝多收證據（D24 既定 fail-open 方向）；反過來
+        當邊界，下一版 Claude Code 多一種 harness 訊息就讓假紅無聲復發。"""
+        lines = [
+            self._user("2026-09-28T16:00:00Z", "第一則", **_HUMAN),
+            self._quota_block("2026-09-28T16:08:35Z"),
+            self._user("2026-09-28T17:00:00Z", "某種新的 harness 訊息",
+                       origin={"kind": "something-new"}),
+            self._user("2026-09-28T18:00:00Z", "第二則", **_HUMAN),
+        ]
+        self.assertEqual(self._hits(lines), [], "未知 origin.kind 被當成邊界")
+        self.assertFalse(G._is_genuine_user_turn("x", {"turnOrigin": "something_new"}))
+
+    def test_a_task_notification_body_is_not_a_boundary_without_provenance(self) -> None:
+        """舊版逐字稿沒有任何出處欄位：內容前綴是唯一線索（備援排除），且只認句首。"""
+        body = "<task-notification>\n<task-id>a1</task-id>\n</task-notification>"
+        lines = [
+            self._user("2026-09-28T16:00:00Z", "第一則"),
+            self._quota_block("2026-09-28T16:08:35Z"),
+            self._user("2026-09-28T17:00:00Z", body),
+            self._user("2026-09-28T18:00:00Z", "第二則"),
+        ]
+        self.assertEqual(self._hits(lines), [], "無欄位的通知本文被當成邊界")
+        self.assertFalse(G._is_genuine_user_turn([{"type": "text", "text": body}], {}))
+        self.assertTrue(G._is_genuine_user_turn("我貼一段 " + body, {}), "只認句首前綴")
+
+    def test_slash_echoes_and_compact_summaries_are_not_boundaries_either(self) -> None:
+        """複審鏡 SF-1：本機 slash 指令至今仍無出處欄位，回聲對（`<command-name>`＋
+        `<local-command-stdout>`）同一時刻落兩筆，當邊界會把窗口塌到只剩當前回合；compact
+        續接摘要是 harness 代筆。三者都走前綴備援排除（fail-open：只會讓窗口變大）。"""
+        for body in ("<command-name>/model</command-name>",
+                     "<local-command-stdout>Set model to opus</local-command-stdout>",
+                     "This session is being continued from a previous conversation…"):
+            with self.subTest(body=body[:20]):
+                lines = [
+                    self._user("2026-09-28T16:00:00Z", "第一則"),
+                    self._quota_block("2026-09-28T16:08:35Z"),
+                    self._user("2026-09-28T17:00:00Z", body),
+                    self._user("2026-09-28T17:00:00Z", body),
+                    self._user("2026-09-28T18:00:00Z", "第二則"),
+                ]
+                self.assertEqual(self._hits(lines), [], "無欄位的 slash 回聲／續接摘要被當成邊界")
+
+    def test_the_predicate_never_raises_on_odd_record_shapes(self) -> None:
+        """複審鏡 SF-3：`main()` 吞下一切例外 ⇒ 謂詞一炸，五個判準整場靜默。怪形狀（非 dict
+        的 record／origin／turnOrigin、`isMeta` 非布林）只准回布林，不准拋。"""
+        odd = (["x"], "x", 0, {"origin": "task-notification"}, {"origin": ["human"]},
+               {"turnOrigin": ["human"]}, {"isMeta": "true"}, {"origin": {"kind": None}},
+               {"origin": {}, "turnOrigin": ""})
+        for record in odd:
+            with self.subTest(record=record):
+                self.assertIsInstance(G._is_genuine_user_turn("一句話", record), bool)
+                self.assertIsInstance(G._is_genuine_user_turn([{"type": "text"}], record), bool)
+        self.assertTrue(G._is_genuine_user_turn("一句話", {"origin": {"kind": "sdk"}}),
+                        "複審鏡 SF-5：`claude -p` 不論標在 origin.kind 或 turnOrigin 都算操作者")
+
+    def test_a_stop_hooks_deny_message_is_still_evidence(self) -> None:
+        """複審鏡 SF-3 對照組：Stop 事件跳過的只有本 hook 的 `hook_additional_context` 警報；
+        `hook_blocking_error`（真的 deny 訊息本體）不分事件一律算佐證。"""
+        deny = json.dumps({"type": "attachment", "timestamp": "2026-09-28T16:01:00Z",
+                           "attachment": {"type": "hook_blocking_error", "hookEvent": "Stop",
+                                          "blockingError": {"blockingError": "deny: used=1"}}})
+        lines = [self._user("2026-09-28T16:00:00Z", "第一則", **_HUMAN), deny]
+        self.assertEqual(self._hits(lines), [], "Stop 的 hook_blocking_error 被連坐跳過")
+
+    def test_the_hooks_own_stop_alert_is_not_evidence_for_the_next_claim(self) -> None:
+        """本 hook 的警報以 `hook_additional_context`（`hookEvent=Stop`）落盤，內文列舉
+        deny／[SDD-CTX]／used=／--check＝`BLOCK_EVIDENCE_RE` 的詞表 ⇒ 收進證據面，同窗口
+        第二次同型宣稱就被自己的警報洗白。"""
+        alert = ("🔴 這一則有 1 句「被擋／水位」宣稱，但本場沒有任何 deny／[SDD-FSM]／"
+                 "[SDD-CTX]／used= 佐證。請先跑 `python tools/session_resume_planner.py --check`")
+        lines = [self._user("2026-09-28T16:00:00Z", "第一則", **_HUMAN),
+                 self._context("Stop", alert)]
+        self.assertTrue(self._hits(lines), "自己的警報替下一則同型宣稱背書")
+
+    def test_notices_from_other_hook_events_still_count_as_evidence(self) -> None:
+        """對照組：其他事件的通知（`hookEvent` 缺席的舊版記錄照舊）仍算佐證。"""
+        for event in ("PostToolUse", "SessionStart", None):
+            with self.subTest(hookEvent=event):
+                lines = [self._user("2026-09-28T16:00:00Z", "第一則", **_HUMAN),
+                         self._context(event, "[SDD-CTX][WARN] used=800000 window=1000000")]
+                self.assertEqual(self._hits(lines), [])
+
+    def test_a_claim_with_no_block_on_record_still_speaks_and_names_both_gauges(self) -> None:
+        """正控：兩則真人訊息、全場從未阻斷 ⇒ 仍要出聲（修的是邊界，不是把判準修死）；
+        指路要含額度面——`--check` 只量 context，額度帶（band=／cap=）在 `--pace`。"""
+        lines = [self._user("2026-09-28T16:00:00Z", "第一則", **_HUMAN),
+                 self._user("2026-09-28T18:00:00Z", "第二則", **_HUMAN)]
+        done = self._run(lines)
+        self.assertEqual(done.returncode, 0)
+        self.assertIn("被擋／水位", done.stderr, "判準被修死了：無佐證的宣稱不再出聲")
+        self.assertIn("--check", done.stderr)
+        self.assertIn("--pace", done.stderr, "指路缺額度面")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,107 @@
+# CrossPlatform R184 — 掌舵者五問第六次四方獨立覆核（Windows 11 再執行一輪）／DEF-200-423～428 證據檔
+
+> 輪次：2026-09-29，Windows 11 Pro 10.0.26200（Koala-MSI），Claude Code 2.1.284（前輪 2.1.283）；主控 Fable 5.1（session `96af6c38`），子 agent 皆 Sonnet：四方 4（Architect／SA／SD／QA）＋Developer 2＋唯讀對抗複審 2＝8 包。額度守衛本場自動推導 model=Fable（DEF-200-420 修法生效）落 converge 帶 `cap=2 recommended=1`（每 300 秒最多 2 次扇出，主控第三個 Agent 被 PreToolUse 擋下一次），故全程逐個 `Agent`、每 300 秒 ≤2，**沒有 wf_id**；各包回報 JSON 落 session scratchpad（`r184_architect.json`／`r184_sa.json`／`r184_sd.json`／`r184_qa.json`／`r184_dev_a.json`／`r184_dev_b.json`／`r184_review_a.json`／`r184_review_b.json`），摘錄於〈三〉〈四〉。
+> 流程：AISDLC 精簡版（掌舵者「省去非必要文件，只留一定需要文件」＝本證據檔＋帳本列＋`governance_docs.py` 登記＋R177 一行訂正）——主控親測落事實包 → 四方唯讀獨立審查 → 主控裁決 → Developer 兩包**並行**（鎖持有面互不相交：Dev-A＝`.claude/hooks/check_claim_provenance.py`＋`tools/tests/test_claim_provenance_r86.py`；Dev-B＝`tools/lib/harness_feed.py`＋`tools/lib/endurance_env.py`＋`tools/tests/test_context_budget_guard.py`，包內 H4→H3 串行）→ 每包一位唯讀對抗複審（兼驗單方發現）→ 收尾單人窗口（should_fix 親修、帳本、棘輪重釘、全套、push）。本輪**不派反駁鏡**：所有要修的發現都由 ≥2 方獨立命中且各有實跑（見〈三〉），單方發現由主控親驗（R177 引據）或交複審鏡驗（DEF-200-427 四站點）。
+> 前輪：`CrossPlatform_R183_SessionGate_Windows_Recheck5_Evidence.md`。掌舵者本輪原話：「派出Architect / SA / SD / QA 四方專家獨立審查,請確認以上都已經修好！」＋「Windows 11還沒收斂, 在執行一輪!」＋「Windows 若再閃黑框，先掛 tools/probe/flash_watch ==> 授權請執行!」。
+
+## 一、五問第六次判定（含與 R183 的差異）
+
+| 問 | R184 判定 | 一句話（本場親測或四方實跑） | 與 R183 的差異 |
+|---|---|---|---|
+| Q1 新視窗就說被擋、不查真實數據 | **原始指控 NOT-A-DEFECT（維持）；新抓使用者看得到的「被擋」類噪音 DEF-200-423 FIXED** | SA：R183 後兩支新逐字稿 Bash `tool_use` 0、`PreToolUse:Bash` 阻斷 0、助理「被擋／不能寫」自述 0 筆真自述；QA 刻意觸 Bash 一次，阻斷訊息逐字含「不存在『被擋就不能寫檔』這回事」，Write／Edit 全程無障礙，且 QA 自己的 prompt 尾端就帶著 harness auto mode「用 Bash、少用 Read／Edit／Write」那句（＝Q1 症狀的觸發文字）。**但** R183 收尾摘要被 Stop hook 出聲「本場沒有任何 deny…佐證」是**與事實相反**的話（Workflow 真的被擋在 #149）——三方以 hook 自己的函式回放到逐字吻合，主控本場 09:18 又現場重現一次。 | 多一個機械化的假紅源被修掉 |
+| Q2 不用真實 /context 或 API 查數據 | **PARTIAL（維持）＋機制面補兩刀：DEF-200-424 FIXED、DEF-200-426 closed-by-decision** | 兩支新 session 前 5 次工具呼叫皆含 `--check`／`--pace`（SA）；QA 反攻 DEF-200-420：`--pace` 自動推導與 `--model fable` 四欄同值、`--model sonnet` 對照組不同 ⇒ 420 站得住。新抓：新視窗零 assistant usage 時 `--pace` 模型失明（主控 08:50 CLI 印 `cap=3 band=notice`，09:04 守衛印 `cap=2 band=converge`）⇒ 424；SessionStart 簡報 stale-cache 不補量 ⇒ 426 設計取捨不做。 | 424 修掉一個「查了真實數據卻查到比守衛寬鬆的數字」的新視窗情境 |
+| Q3 印出的數字與 /context 不符 | **NOT-A-DEFECT（維持，四方一致）** | 主控 `--check`：`harness used=115,333 逐字稿 used=115,333 差=0`；Architect／QA 同視窗稍後 `225,522＝225,522 差=0`；SA 對 `888b2ff4` `587,233＝587,233`；QA 餵本視窗 feed 進進料器印 `ctx 23% 225.5k/1.0m | Fable 5.1`（整數、無 .0）；2.1.284 feed 遞迴鍵集合與 2.1.283 **完全相同**（19 鍵），孤兒 feed 少的只有 `current_usage` 四子鍵。 | 無 |
+| Q4 Windows 沒有 ctx 行 | **Windows FIXED（維持）；Mac UNVERIFIED（維持）** | `--status` installed／matches true、`python_basis repo-venv`、rc=0（主控、Architect、QA 各跑一次）；本 TUI 的 feed 檔由 statusLine 指令即時寫入（08:52:23→09:07:31 隨回合更新）＝harness 真的在呼叫該指令；渲染那一環只有掌舵者肉眼（R182 已兩視窗肉眼）。 | 無 |
+| Q5 收斂了嗎 | **五問本體收斂（維持）；本輪新結三件（423／424／425）、一件設計取捨（426）、兩件登記 open（427／428）；418 維持 open** | 掌舵者「還沒收斂」最可能的可見殘餘＝R183 收尾那句與事實相反的 Stop 警報（423）＋新視窗第一個 `--check` 以 ❌ 開場（425）——兩者都在本輪修掉。〈七〉push 與雲端全綠前，本欄只能寫 OPEN；push 後見〈七〉。 | — |
+
+## 二、主控親測事實（本場 tool_result 逐字）
+
+- HEAD=`90b6123`=origin/main、工作樹 clean、無 stash（動工前）。本視窗 SessionStart 簡報逐字：「context：本 session 尚無量測（新視窗，尚未有 assistant usage 記錄）；額度：額度量不到（reason=stale-cache（資料在，但已 23649s > TTL 180s ⇒ 重量一次即可，不是取數壞掉））⇒ cap=2 recommended=2 band=unmeasured binding=- …（陳舊快取的退化政策值，不是量測值：第一次扇出型工具呼叫前 PreToolUse 會自動補量一次、零 token；要現在看：python tools/session_resume_planner.py --pace）；statusLine：已安裝。」＋Windows 版 rc=2 澄清句。
+- 第一動作 `--check`（首輪、逐字稿零 assistant usage）：`❌ …掃不到任何帶 message.usage 的 assistant 記錄 —— 「量不到」與「量到零」必須分得開，故不印百分比。逐字稿剛建立、或欄位格式已變更都會走到這裡。` `CHECK_RC=0`（**只印這一段**，未印 `check_lines` 第三分支＝Dev-B 後來定名的形態 (b)）。`--pace`：`現在可派 2 個 agent（硬上限 cap=3，本視窗已用 0 次）｜band=notice｜最緊的一條＝seven_day 50%`、weekly_scoped `74% band=converge cap=2 model=Fable note=burn-ahead+model-scoped-excluded`、`⇒ cap=3 recommended=2 band=notice binding=seven_day`、`來源=cache 量測於=2026-09-29T08:49:55+08:00`（＝`--pace` 自己補量了，SessionStart 沒有）。
+- 第二次 `--check`：`used 115,333 水位 11.5% window 1,000,000〔harness 回報〕 harness used=115,333 逐字稿 used=115,333 差=0` rc=0。本視窗 feed `…\context_feed\96af6c38-….json`：`ts 2026-09-29T08:52:23+08:00`、`total_input_tokens 115333`、`used_percentage 12`、`version 2.1.284`。
+- 09:04 派第三個 Agent 時 PreToolUse 守衛逐字：`kind=weekly_scoped 75% … band=converge … cap=2 model=Fable note=burn-ahead … ⇒ cap=2 recommended=1 band=converge binding=weekly_scoped` ＋ `每 300s 最多 2 次扇出，本視窗已用 2 次 ⇒ Agent 本次不執行`（守衛已從逐字稿解到 Fable；同一份快取 08:50 的 CLI 因逐字稿尚無 assistant 記錄解不出模型而排除該軸 ⇒ DEF-200-424 的親遇實例）。
+- **逐字稿結構化探針（零 token）**：`888b2ff4`（R183）Workflow 阻斷落盤＝`type=user` tool_result `is_error=True` #149（2026-09-28T16:08:35Z，含 `cap=4 recommended=2 band=notice … Workflow 本次不執行`），Agent 阻斷 #275／#278（16:23Z）；role=user 非 tool_result 訊息：#8／#9 `/effort` 展開（16:00:28Z）、#12 掌舵者 prompt（16:01:12Z）、其後 `<task-notification>` ×4（17:12:59Z／17:43:13Z／17:48:51Z／18:10:01Z）；Stop hook 出聲 attachment #1515（18:14:15Z）。修前 `_is_genuine_user_turn()` 對 `<task-notification>`／`<command-name>`／`isMeta` 零排除；`_block_claim_evidence()` 邊界＝`sorted(user_turns)[-2]`。
+- **本場現場重現**：本場真人 prompt 只有 #12（00:49:12Z）；#315 `<task-notification>`（01:17:00Z）與兩則 agent-message 進來後，主控 01:18 那則提「歷史 12 筆「被擋／水位」警報」被 Stop hook 出聲 `這一則有 1 句「被擋／水位」宣稱（「被擋」），但本場沒有任何 deny／…佐證`（attachment #332，01:18:44Z）——而本場 01:04Z 的 Agent 阻斷 tool_result 明明在逐字稿裡。
+- **兩支舊逐字稿今早被寫入**（本 session 建立 08:49:02 之前）：`888b2ff4….jsonl` LastWriteTime 08:47:21、`98113f03….jsonl`（2026-09-04 R128 舊場）08:48:35；尾端記錄型別 cost-state／ai-title／atis-latch／last-prompt／file-history-snapshot（無 timestamp），無新對話 turn。SA 追查：repo 內零逐字稿寫入站點、五個型別字面全 repo 零命中；`98113f03` 的 boot log 今日有 **08:47:53、08:48:35** 兩行 session-start（＝掌舵者從 resume 選單開了該舊場兩次、未送訊息即關），與其 mtime 同秒 ⇒ 是 Claude Code 本體 resume 補寫 metadata，不是本 repo 工具（H5 排除）。
+- **flash_watch**（掌舵者授權）：08:54:46 武裝 `--seconds 3300` 第一段，09:49:46 結束：**總視窗事件 493 筆、可見 console 承載者視窗事件 0 筆**（`ConsoleWindowClass ×2` 皆 `visible: false`——pwsh／python 子行程帶隱藏 console，其一父鏈是 venv 轉接到基底 `pythonw.exe`＝hook 載具；白名單本含該 class，計 0 正確）；期中 QA 09:12 快照 108／0、跑完 `claude -p` 後 09:16 131／0。第二段 09:50 起武裝覆蓋修法、複審與收尾全套，最終數見〈六〉。
+- **R177 引據親驗**：`tools/tests/test_session_brief.py:50-53` 現值＝`_cache_miss_gate()` helper（`read_quota` 恆丟 OSError），「零網路」只出現在第 57 行 `QuotaLineTest` class docstring，沒有任何會因打網路而紅的斷言；`.claude/settings.json` 第 28 行 `_comment` 的「每次開 session 都卡是不可接受的代價」上下文逐字＝「註冊動作走 detached 子行程故不阻塞 session 開場（同步外呼 powershell.exe 註冊 schtasks 實測數秒，…）」，同段還寫「恆 exit 0、不出聲、不量水位」（R158/P6 之後已非現況）。⇒ R177〈四〉第 53 行「兩條明文裁決」引據不實（Architect 單方發現，主控親驗成立）。
+
+## 三、四方分析（摘要；各包 JSON 住 scratchpad）
+
+| 發現 | 來源與實跑 | 主控裁決 |
+|---|---|---|
+| H1 claim guard D24 回合邊界把 harness 生成 role=user 當真人（P2） | 主控探針；**Architect** 三形態回放（V0 現行 turns=16／邊界 17:48:51Z／命中 3＝Stop 訊息逐字；V1 只剔 `<task-notification>` 字面 turns=12／邊界落在一則 peer 訊息／命中 0 只是被寬鬆詞 `--check` 碰巧救回；V2 結構化 provenance turns=3／邊界 16:00:28Z／deny 在窗內／命中 0）；**SA** 六變體同結論＋全母體 64 支 1,023 筆「真人回合」中 harness 生成 815 筆（79.7%：task-notification 563／agent-message 123／slash・caveat・stdout 119／isMeta 純文字 50…）、13/64 支符合「真人 ≤1 且 task-notification ≥2」、歷史 12 筆同型警報回放 12/12 假紅；**QA** 黑箱：截到第 1515 行前副本直接跑與經 `_hook_launcher` 皆重現「3 句」、rc=0；**SD** 判準優先序 isMeta→origin.kind→內容前綴備援 | 立 **DEF-200-423** 同輪修（Dev-A）；不改窗口規則、不只排字面 |
+| H1-b Stop 自己的警報 attachment 自證（P3） | **Architect** 實測進證據面 240 字元、命中 `deny`、hits 1→0；**QA** 含第 1516 行申訴的副本靜音、截到 1514 出聲；SA 讀碼同判 | 併入 423（Dev-A 一行過濾＋一格鎖） |
+| H2 SessionStart 簡報 stale-cache 不補量 | **Architect** PARTIAL P4：無任何文件禁止 SessionStart 打網路，但 PreToolUse／`--pace` 本就補量、補量會使 `quota_gate.py:1069`／`quota_meter.py:725` 兩處「唯一」變假（兩檔餘裕各 1 行）、**共用 stamp 失敗即連坐**；**SD** 設計了限縮版（`_try_refresh` 2 秒、`event='SessionStart'`、尊重 `AUTOSDD_QUOTA_GUARD_OFF`、失敗改誠實文案）但**獨立**抓到同一個共用名額倒退面（`pace_state()` 也用同一顆 `claim_refresh_slot()`） | **不做**，立 **DEF-200-426** closed-by-decision（可重開）；R177 引據訂正（〈八〉） |
+| H3 `--check` 新視窗首輪 ❌（P4） | 主控親遇；**Architect** 定位 `endurance_env.py:400-405 check_report()` 與 `harness_feed.check_lines()` 第三分支「compact 後空窗」；**SD** 設計 `fresh_window` 鍵 | 立 **DEF-200-425** 同輪修（Dev-B） |
+| H4 `--pace` 新視窗模型失明（P3） | 主控親遇（08:50 vs 09:04）；**SD** 設計 feed `model.id` 退用（`read_context_feed()` 不回 model、guard 餘裕 1 行不得加鍵）、建議升 P3（派工依據會多派）；**QA** observation-C 同型 | 立 **DEF-200-424** 同輪修（Dev-B） |
+| QA candidate-B：421 殘餘四處非逐字稿站點（靜態） | **QA** 單方、未執行；**複審鏡 B** 靜態複核四處**全屬實**（逐行貼出），並指出 `~/.claude.json` 是 `.claude` 目錄的手足檔、不能天真套 `claude_home()` | 立 **DEF-200-427** open（解鎖條件寫進帳本） |
+| SA 旁證：其他 hook 阻斷不在證據詞表、`--check` 過寬、複述題目被抓 | **SA** 單方（第 3 點有實例 #1426 `PreToolUse:PowerShell hook error`） | 立 **DEF-200-428** open |
+| SD 額外：`session_brief.quota_line()` 呼叫 `decide()` 未傳 active_model | **SD** 單方讀碼 | 登記於〈五〉，本輪不修（SessionStart 時 feed 未必存在、guard 餘裕 1 行） |
+| SA T4／H5：兩支舊逐字稿今早被寫入 | **SA** boot log 同秒佐證 | 不立 DEF（Claude Code 本體行為） |
+| SA T5：2.1.284 statusLine schema | **SA** 遞迴鍵比對 19 鍵相同、消費端實跑 | 無動作 |
+
+## 四、修法（Developer／複審 `[他包回報]`；主控收尾窗口親驗見〈六〉）
+
+**DEF-200-423**（`.claude/hooks/check_claim_provenance.py`＋`tools/tests/test_claim_provenance_r86.py`；Dev-A，複審鏡 A ACCEPT_WITH_SHOULD_FIX、must_fix 空）
+- `_is_genuine_user_turn(content, record=None)`：先內容形態（`record` 缺席逐字沿用舊行為）；`record` 為 dict 時 `isMeta is True` ⇒ 否、`origin.kind` 存在且不在操作者值域 ⇒ 否、`turnOrigin` 存在且不在操作者值域 ⇒ 否、兩欄皆缺 ⇒ 內容前綴備援。`_read_transcript()` 把整筆 record 傳給謂詞。`_block_evidence_text()` 跳過 `attachment.hookEvent == "Stop"` 的 `hook_additional_context`——欄位以 `888b2ff4` 第 1516 行實值核對（`hookEvent`／`hookName` 皆 `"Stop"`；65 支普查 267 筆 `hook_additional_context` 全帶 `hookEvent`：Stop 170、SessionStart 66、PostToolUse 31，本 hook 簽名只出現在 Stop）。出聲文案補「`--check`（context 水位）或 `--pace`（額度；輸出恆帶 band=／cap=）」。docstring 改寫「47 筆…皆為真人」那句為 2026-09-29 現查母體（65 支／1,030 筆／harness 822＝79.8%／修後 208；歷史 13 筆警報回放修前 13/13 出聲、修後 13/13 靜音、全場皆有佐證＝真陽性 0）。
+- 紅端 `[他包回報]`：M1 關 provenance 分支 ⇒ 4 FAIL（含程序層「`'被擋／水位' unexpectedly found`」）；M2 關 Stop 跳過 ⇒ 1 FAIL；單規則突變 M3～M7 各 1～3 紅；複審鏡 A 13 個突變對 9 格的擊殺矩陣：7 格「拿掉修法必紅」、2 格對照組各被擊殺，存活 3（M15 `isMeta` 真值判斷、M19 record 護欄形態、M21 Stop 跳過擴到 `hook_blocking_error`）。黑箱：QA 截斷副本 `888b2ff4_before_1515.jsonl` 舊 hook（git HEAD 位元組）出聲 3 句、新 hook 靜音 rc=0；含第 1516 行申訴的副本舊 hook 靜音＝**自洗白的真實資料證明**；合成「窗口內只有自己的 Stop 警報」新 hook 出聲、M2 靜音、舊 hook 靜音。正控 B1／B2／P1／P2（兩則真人、全場無阻斷、有無 harness 雜訊）皆出聲。全母體邊界效應：≥2 回合的檔 49→45、邊界改變 38 檔（34 檔前移，中位數前移 139.2 分鐘、最大 1052.6）。
+- 主控收尾親修複審 should_fix：SF-1 備援前綴改 `_HARNESS_BODY_PREFIXES`（`<task-notification>`／`<command-name>`／`<local-command-stdout>`／`This session is being continued`）＋一格（slash 回聲對同時刻兩筆＋續接摘要皆不算邊界；複審 what-if：45 有效檔中 19 檔邊界會動、18 檔只是退回全場、1 檔現行窗口反而窄 273.8 分鐘）；SF-2 `_NOTICE_OLD` 註解版本區間改為「`turnOrigin` 問世（2.1.277）前、2.1.248～2.1.276 共 370 筆」；SF-3 怪形狀不拋例外一格（非 dict record／origin／turnOrigin、`isMeta` 字串）＋「Stop 的 `hook_blocking_error` 仍算佐證」一格（封 M19／M21 型存活）；SF-5 `origin.kind` 與 `turnOrigin` 共用 `_OPERATOR_TURN_ORIGINS=("human","sdk")`。SF-4（`isMeta` 只認 JSON true；母體 259/259 皆 true）維持規格字面只登記。測試 68→77（Dev-A）→80（收尾）。
+- 誠實劃界：provenance 欄位是觀察所得、非官方契約（`origin`／`isMeta` 自 2.1.248、`turnOrigin` 自 2.1.277；57/65 支帶欄位）；未涵蓋 subagents 子目錄與 Mac 母體；`hookEvent=="Stop"` 跳過對其他 Stop hook 的附帶影響未逐一盤點（本 repo 根層只註冊本檔一支 Stop hook）。
+
+**DEF-200-424**（`tools/lib/harness_feed.py::_feed_model_family()`＋`active_model_of()` 退用分支、`tools/tests/test_context_budget_guard.py` HarnessFeedStageTest 三格＋PaceAutoDerivesActiveModelTest 端到端一格與 `setUp` feed 目錄隔離；Dev-B，複審鏡 B ACCEPT_WITH_SHOULD_FIX、must_fix 空）
+- 逐字稿優先、解不出才讀同 session feed 的 `model.id`（走 guard 既有 `session_id_of`／`context_feed_path`／`model_family`，`session_id` 精確比對；不存在／壞 JSON／sid 不符／缺 model／認不出家族一律 None；不改 `read_context_feed()`——guard 餘裕 1 行且 SDD v0.30 有孿生函式受 parity 管）。
+- 紅端 `[他包回報]`：MUTATION-1 退用分支恆 None ⇒ 3 紅（含端到端 `'model-scoped-excluded' unexpectedly found`）；-2 拿掉 sid 比對 ⇒ 1 紅；-3 feed 排在逐字稿前 ⇒ 1 紅。合成快取重現主控 08:50 vs 09:04：修前 `cap=4 recommended=2 band=notice binding=seven_day`、修後 `cap=2 recommended=1 band=converge binding=weekly_scoped`＝`--model fable` 四欄逐字相同。複審鏡 B 黑箱六情境：有 feed 的兩種新視窗四欄相同且不含 `model-scoped-excluded`；無 feed／feed 認不出家族／sid 不符／逐字稿 sonnet 而 feed fable 四種對照皆維持排除（最後一種證逐字稿優先）；scratchpad 突變副本回 None、真檔回 `fable`。
+- 主控收尾親修 should_fix S3：`test_pace_prints_the_banner_at_the_start_of_output` 的 `patch.dict` 補 `AUTOSDD_CONTEXT_FEED_DIR`（無 model 逐字稿會走退用分支，不碰真 home）。複審鏡 B 資訊項：PreToolUse hook 的 `active_model` 仍只讀逐字稿（`context_budget_guard.py:1004-1006`），新視窗零記錄那一刻 `--pace` 可能比同一刻的 hook 更嚴（安全側），第一則記錄落盤後收斂。
+
+**DEF-200-425**（`harness_feed.measure()` 新鍵 `fresh_window`、`endurance_env.check_report()` ℹ️ 分支、`check_lines()` 第三分支措辭、`test_context_budget_guard.py` 五格＋一格既有期望字串；Dev-B，複審鏡 B 接受偏離）
+- **Dev-B 的合理偏離（複審鏡 B 獨立重放後接受）**：SD 假設新視窗首輪 feed 的 `current_usage` 為 null（形態 a），但真實首輪 `--check`（主控本場 `96af6c38` 行 47、`40a1a0c4` 行 45）都是「feed 已有 usage、逐字稿尚無任何 assistant 記錄」（形態 b：`check_lines()` 三個 if 全不成立回 `[]`，只有 `harness_used` 非 None 才會發生；最終落盤的逐字稿在該 tool_use 之前已有 3 筆帶 usage 的 assistant 記錄 ⇒ 執行當下尚未落盤——落盤時序本身未直接觀測）。照規格字面做，真實首輪仍是 ❌、修法空轉 ⇒ 定義改為 `used is None and model is None and feed["reason"] is None`（逐字稿零 assistant 記錄＋feed 讀得通，`current_usage` 有無不論），並保住「逐字稿見到 model 卻無可用 usage＝欄位漂移」的 ❌。
+- 修後：(a)(b) 皆印 `ℹ️ <逐字稿>／新視窗：逐字稿還沒有任何帶 message.usage 的 assistant 記錄（第一則回應落盤前的正常態，harness feed 已在，不是故障）。「量不到」與「量到零」必須分得開，故不印百分比；第一則回應落盤後再跑一次即有數字，額度現查 --pace。若不是剛開的視窗卻持續如此，才是逐字稿欄位格式已變更。` rc=0；無 feed ⇒ ❌ 原句＋「harness feed 未採用：無 feed…」；第三分支改「harness feed 存在但當下無 current_usage（新視窗尚無第一次 API 回應，或 compact 後空窗），本次無交叉比對」；第二分支一字未動（`session_brief._harness_reason_note` 借用、有測試釘）。`fresh_window` 不改 planner：`session_resume_planner.py:152-154 measure()` 是 `harness_feed.measure()` 薄轉呼叫，同一 dict 流到 `check_report`（:1597）與 `check_lines`（:1600），由接線鎖 `test_the_planner_check_path_carries_fresh_window_into_the_report` 釘住。
+- 紅端 `[他包回報]`：MUTATION-A `fresh_window` 恆假 ⇒ 3 紅；-B `check_report` 無視旗標 ⇒ 2 紅；-C 退化成只看 `used is None` ⇒ 3 紅；-D 第三分支退回只講 compact ⇒ 3 紅。複審鏡 B 黑箱 11 情境：(a)(b) ℹ️、(c) ❌、usage 不可用／空 dict ❌、compact 空窗（逐字稿 used=125）正常報告、sid 不符／缺 window ❌＋reason 行；ℹ️ 文案對 claim guard 全部 17 個正規式逐一 search 只命中兩個斷詞輔助式、證據式零命中；`--check` 11 情境與 `--pace` 12 次呼叫 rc 全 0。
+- 主控收尾親修複審 should_fix：S1（假格漏洞：assistant 記錄整個沒有 usage 鍵／改名 `token_usage`／只有 `<synthetic>` 記錄時 `scan_transcript` 的 usage 預篩讓 model 也讀不到 ⇒ 被判新視窗）⇒ `harness_feed._has_any_assistant_record()` 便宜再掃一次（讀不到一律當「有」＝維持 ❌），`fresh_window` 加 `and not …`，measure 表補一格；S2 ℹ️ 文案負向清單補 `--check`／`band=`／`cap=`／`kind=`（對齊 `BLOCK_EVIDENCE_RE`，防日後改文案反過來餵 claim guard）；S4（compact 空窗仍列「新視窗」成因＝文字雜訊）只登記。測試 684→693（Dev-B）→694（收尾；skipped 1＝`[MAC-NATIVE-ONLY] launchd`）。
+
+**DEF-200-426**（closed-by-decision）與 **R177 訂正**：見〈三〉H2 列與〈八〉；程式碼零改動。R177 原檔第 53 行下加一則訂正註記（原文不改寫）。
+
+**DEF-200-427／428**（open，承接輪次未指派）：帳本自載解鎖條件；427 四站點由複審鏡 B 逐行貼出屬實（`context_budget_guard.py:703`、`quota_meter.py:80`、`endurance_env.py:358`、`test_wake_chain_halt_r278.py:117`），並註記 `~/.claude.json` 是 `.claude` 目錄的**手足檔**，套 `claude_home()/".claude.json"` 預設會變成錯的 `~/.claude/.claude.json`，需另一支輔助函式；`CLAUDE_CONFIG_DIR` 是否連帶搬動 `.credentials.json`／`.claude.json` 只有間接證據、官方文件字面未驗 ⇒ 解鎖第一步就是那個實驗。
+
+## 五、方法論註記與誠實劃界
+
+- **本輪零反駁鏡**：R183 慣例「單方命中一律兩鏡、兩方獨立命中且有實跑者免鏡」——本輪要修的三件（423／424／425）分別由 3／2／2 方獨立命中且各有實跑或主控親遇；單方發現走「主控親驗」（R177 引據）或「併入複審鏡任務」（427 靜態複核），省下的額度直接給 Developer 與複審。
+- **額度 converge 帶**：`cap=2/300s` 由守衛從逐字稿自動推導 Fable 得出（420 修法生效的第一個真實派工窗口）；四方 4 包分兩波、Developer 2 包同波、複審 2 包同波；subagent 用量 `[他包回報]`：Architect 279k／SA 279k／QA 255k／SD 316k／Dev-A 415k／Dev-B 345k／複審 A 300k／複審 B 278k tokens。
+- **Developer 並行的合法性**：兩包鎖持有面互不相交（常數／史料／消費端／測試檔皆不同檔），符合鐵律七；重釘儀式（護欄棘輪、guard-total 兩站點、§7 回填、帳本、`governance_docs.py`）全部留給收尾單人窗口；審查期間主控不動工作樹（兩鏡皆收工後才進收尾）。
+- **provenance 欄位是觀察所得、非官方契約**：`origin.kind`（自 CC 2.1.248）／`turnOrigin`（自 2.1.277）／`isMeta`；普查母體＝本機 64～65 支頂層逐字稿（活母體，四方數字差在 ±數筆），未含 subagents 子目錄、未含 Mac 母體。欄位全缺時退回今日行為＝不會比現況更差；未知新值一律「不算邊界」（窗口變大＝D24 既定 fail-open 方向）。
+- **H2 不做的理由不是「不能」而是「代價」**：兩方獨立算出共用 `claim_refresh_slot()` 的連坐倒退；若掌舵者堅持「第一眼就是真數字」，SD 的限縮版設計（`r184_sd.json` designs[H2]）可直接落地，代價已寫清。
+- **兩支舊逐字稿被寫入**只證到「Claude Code 本體 resume／關窗補寫 metadata」這一環（`98113f03` boot log 同秒；`888b2ff4` 08:47:21 為關窗時序推論、未驗）。
+- **SD 額外發現**（`quota_line()` 未傳 active_model ⇒ 簡報同樣排除模型分軌軸）：與 424 同型但 SessionStart 時 feed 未必已寫（statusLine 與 SessionStart 同時啟動、順序未定）、guard 呼叫端餘裕 1 行 ⇒ 本輪不修，待 424 落地後下輪評估把 `harness_feed.active_model_of()` 接進簡報。
+- **主控自己的坑**：① 三個測試呼叫把輸出接管線再讀 rc 被 `lint_powershell_command` 擋下（上輪已記的教訓再犯一次）⇒ 改輸出落檔、rc 自成一句；② 加 DEF 標籤讓兩行 docstring 超寬（104／107），折行又連鎖出 109／104，第三次重排整段才過；③ 第一版帳本六列有四列超過 700 bytes（最高 906），削字兩輪才全數 ≤700。
+- **Q4 最後一環**與 **Mac 面**仍只有掌舵者肉眼與 Mac 真機能證；R183〈八〉任務書仍有效，本輪新增三條 Mac 面待驗見〈八〉。
+
+## 六、收尾親驗（主控本場真跑，rc 逐字）
+
+- 單檔鎖（should_fix 親修定稿後）：`test_claim_provenance_r86.py` `Ran 80 tests … OK` `CLAIM_RC=0`；`test_check_hooks_liveness.py` `Ran 185 tests … OK` `LIVENESS_RC=0`；`test_context_budget_guard.py` 整檔 `Ran 693 tests in 107.280s OK (skipped=1)` `GUARD_FULL_RC=0`（S1／S3 兩處補格後再跑見下）；`test_session_brief.py` 29 OK、`test_statusline_context_feed.py` 19 OK、`test_context_window_parity.py` 8 OK（RC 皆 0）。
+- 黑箱（最終版 hook）：`r184_hook_blackbox.py` 對 QA 截斷副本 `[before_1515] claim_len=3044 rc=0 stdout_len=0 stderr=''`（靜音）、正控 `[positive] rc=0 stdout_len=718 stderr='🔴 這一則有 1 句「被擋／水位」宣稱…'`（出聲）⇒ `BLACKBOX_OK` `BB_RC=0`。
+- 衛生：`ruff check` 五檔 `All checks passed!` RC=0（折行三次：104／107 → 109 → 104 → 0）；E501 isolated：`test_context_budget_guard.py` 5 筆＝修前基線（行 17／1322／1323／1324／2761）、`test_claim_provenance_r86.py` 0 筆；`git diff --check` rc=0；`check_loc_budget.py --json` `total_violation False`、四類 violations 皆 0、四支改動檔皆不在任何 warn band。
+- flash_watch 第一段最終：493 筆／可見 console 0（見〈二〉）；第二段（09:50～10:45，覆蓋修法、複審與收尾重釘）：**382 筆／可見 console 0**（`ConsoleWindowClass ×2` 皆 `visible: false`：python.exe 子行程，父鏈各為 pythonw.exe／pwsh.exe）；第三段 10:47 起覆蓋根層全套與 push，見〈七〉。
+- 帳本：六列（423～428）插在 422 列之後，逐列 byte 數 696／688／688／683／683／695（≤700）、7 欄、「發現情境」欄零輪號字面；`check_defect_log_crossref.py` 第一次 rc=1＝唯一 ❌ 為**淨額棘輪**（本輪新增未結 427／428 兩筆＞結案 0 筆）⇒ 本輪為發現輪，依 R182 慣例以 `AUTOSDD_NET_RATCHET_OFF=1` 通過（`CROSSREF2_RC=0`，理由寫進 commit 訊息與本節）；`archive_defect_log.py --check` rc=0（70 檔／1538 個 ID）；`check_pytest_baseline_sites.py` rc=0；`sync_onboarding_baselines.py --check-snapshot` rc=0（§7 表② Windows 欄指紋相符）。
+- 護欄棘輪重釘（十三遍收斂，儀式全程主控親做）：第一次 `--print-guard-lines` `淨額 108294→108643 (+349)`＝`test_claim_provenance_r86.py 1015→1223 (+208)`＋`test_context_budget_guard.py 12936→13077 (+141)`；本表主列＋收斂列＋`_REGRESSION_LANE_LOG` 同輪列＋`_FROZEN_PREFIX_REWRITE_LEDGER` 接鏈列＋款(12) 到期兌現 `(184, 525)` 與重新武裝 `DUE_ROUND 184→186／TARGET 525→524` 後自身漂移 +24。鎖檔隨即紅出**款(11)「連續 3 輪主軌淨額為正（R182 主軌 41／R183 主軌 30／R184）」**——合法出口只有讓本輪主軌 ≤0，不走一次性例外名冊（那需四方複審核准並上修名冊上限）⇒ 同輪把鎖檔兩段純史料註解（U9 舊尺技術債具名展延沿革 R121～R178 共 50 行、到期義務兌現沿革 R113～R182 共 31 行）原文搬進 `CrossPlatform_Guard_Line_History.md` 新節〈R184 淨減法搬遷〉（TOC 第 29 項；該檔 222,434→232,172 bytes，未逾 262,144）、程式碼各留一行指針，鎖檔 9096→9020 行；再紅出分軌守衛「[子項大於母項] 回歸鎖軌 +309 大於同輪主表淨額 +297」⇒ 回歸鎖軌申報改 297（＝主表淨額）、主軌 0。最終 `淨額 108591→108591 (+0)`、`逐檔漂移 0 支`、凍結前綴 313→315、sha 鏈 `bd1f875e0ceb`→`d5cf66772eef`；`test_adr_xplat001_c1c2_lock.py` `Ran 192 tests … OK` RC=0。本輪合計 108294→108591（+297）：`test_claim_provenance_r86.py` +208、`test_context_budget_guard.py` +141、本表 −52（重釘列 +27、刪 79 行史料）。
+- 期間撞到的 tools/tests E501 存量棘輪：`139→143` 紅（我的四行：主列括號 101、回歸鎖軌列 107、兩行指針 153／130）⇒ 縮短到東亞寬度 ≤100（兩行指針同時補 `round-label-ok`，因 `test_no_code_file_claims_a_round_beyond_the_ledger` 抓到指針行自稱 R121 > 帳本當前輪 R100 而無標記）；再紅 `139→141`（兩行「逐項見 CrossPlatform_R184_…」101／107）⇒ 改「見 …〈四〉」；最終 `test_subprocess_encoding_hygiene.py` `Ran 39 tests … OK` RC=0。每次改字都要重取 sha（共取 sha 五次）。
+- 其餘收尾鎖：`test_doc_loc_baseline_freshness_r60.py` `Ran 281 tests … OK` RC=0；`test_platform_neutral_paths.py` `Ran 177 tests … OK` RC=0；`test_check_defect_log_crossref.py`（`AUTOSDD_NET_RATCHET_OFF=1`）`Ran 268 tests … OK` RC=0（未設該變數時 `TestMain.test_main_against_real_repo_is_clean` 等兩格會隨真閘門的淨額棘輪一起紅，屬發現輪預期）。
+- doc-total 兩站點：`CrossPlatform_R145_Scan_Findings.md`〈附記（R184）〉與 `AutoSDD_improving_112.md` 尾列皆記 `108294 → 108591（+297）`。
+
+## 七、根層全套、push 與雲端驗收
+
+（收尾回填）
+
+## 八、R177 引據訂正與 Mac 交棒增補
+
+**R177 訂正**（`CrossPlatform_R177_SessionGate_Recovery_Evidence.md`〈四〉第 53 行原文「`test_session_brief.py:53` 零網路回歸鎖＋`context_budget_guard.py` SessionStart 條目 `timeout=10` 的登記註解「每次開 session 都卡是不可接受的代價」＝兩條明文裁決」）：① 該測試檔第 50～53 行是 `_cache_miss_gate()` helper，「零網路」只是第 57 行 class docstring 的自述，**沒有任何否定式斷言**會因 SessionStart 打網路而紅——它不是「回歸鎖」；② settings.json 第 28 行那句講的是「同步外呼 `powershell.exe` 註冊 schtasks 實測數秒」，是排程註冊的 detached 化理由，**不是 HTTP 補量禁令**（usage 端點 RTT 實測 0.33～0.41 秒）。R177「不做 SessionStart 補量」的**決定本輪維持**（理由改為〈三〉H2 列的共用名額連坐＋餘裕），只是引據換掉；R177 原檔第 53 行下已加訂正註記，原文不改寫。
+
+**Mac 交棒增補**（承 R183〈八〉，全部指令形態沿用該節）：
+1. provenance 欄位在 Mac 逐字稿是否同形：`ls ~/.claude/projects/<slug>/*.jsonl` 取一支，用 python 掃 `type=user` 記錄的 `isMeta`／`origin.kind`／`turnOrigin` 值域，應與〈五〉所列一致；不一致＝DEF-200-423 的謂詞在 Mac 退回內容形態（不會更差，但要登記）。
+2. 新視窗第一動作 `--check` 應印 ℹ️ 中性行（DEF-200-425），不再是 ❌；`--pace` 在零 assistant usage 時應已從 feed 解出模型（DEF-200-424）——與同視窗 SessionStart 簡報額度行對照。
+3. R183〈八〉第 3 步 Q4 安裝 statusLine 後開全新視窗肉眼看 `ctx NN%`，仍是只有掌舵者能簽收的一環。
+
+## 九、掌舵者側待辦（只有本人能做）
+
+1. Mac 第一個視窗：把 R183〈八〉＋本檔〈八〉增補貼給模型；Q4 的 `ctx` 行肉眼簽收。
+2. Windows 再閃黑框：先掛 `flash_watch.py`（本輪已示範整場武裝：兩段各 55 分鐘，見〈二〉〈六〉〈七〉），再做「開新分頁／新視窗」那個動作。

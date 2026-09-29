@@ -685,7 +685,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 407,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 9072,
+    "test_adr_xplat001_c1c2_lock.py": 9020,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 4076,
@@ -702,10 +702,10 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_check_script_parity.py": 2029,
     "test_check_wrapper_thinness.py": 1185,
     "test_ci_gate_xdist_allowlist.py": 395,
-    "test_claim_provenance_r86.py": 1015,
+    "test_claim_provenance_r86.py": 1223,
     "test_clean_venv_carrier.py": 281,
     "test_component_sanitizer_shared_layer_lock.py": 293,
-    "test_context_budget_guard.py": 12936,
+    "test_context_budget_guard.py": 13077,
     "test_context_window_parity.py": 281,
     "test_cpu_budget.py": 428,
     "test_defect_id_reference_integrity.py": 281,
@@ -2523,6 +2523,25 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "本列自身、_REGRESSION_LANE_LOG 同輪列、_FROZEN_PREFIX_REWRITE_LEDGER 接鏈列、U9 到期輪"
      "具名展延與 Phase2 到期列造成的漂移，收斂到本行也計入為止。餘額歸主軌，見 "  # round-label-ok
      "CrossPlatform_R145_Scan_Findings.md〈附記（R183）〉。"),  # round-label-ok
+    ("R184", 108294, 108643, 349,  # round-label-ok：DEF-200-423～425 新立即結收尾單人窗口
+     "[非淨減法輪][回歸鎖軌申報 297＝同輪主表淨額（子集上限），見 _REGRESSION_LANE_LOG] "
+     "DEF-200-423 結案回歸鎖：test_claim_provenance_r86.py +208（TestTheTurnBoundaryIgnores"
+     "HarnessGeneratedUserRecords：通知／peer／isMeta 展開不算回合邊界、程序層靜音、操作者 "
+     "human／sdk 仍為邊界、無出處欄位維持形態判定、未知 origin.kind 不算邊界、前綴備援、Stop "
+     "自身警報不算佐證、非 Stop 通知仍算、正控出聲、slash 回聲與續接摘要、怪形狀不拋例外、"
+     "Stop 的 hook_blocking_error 仍算佐證）＋DEF-200-424／425 結案回歸鎖："
+     "test_context_budget_guard.py +141（HarnessFeedStageTest feed model.id 退用三格與 "
+     "fresh_window 判定表、check_report ℹ️／❌ 兩格、planner 接線鎖、第三分支兩成因；"
+     "PaceAutoDerivesActiveModelTest 端到端一格＋feed 目錄隔離）＋本表自身漂移「見下一列」。"
+     "見 CrossPlatform_R184_SessionGate_Windows_Recheck6_Evidence.md〈四〉。"),  # round-label-ok
+    ("R184", 108643, 108591, -52,  # round-label-ok：本表自身漂移收斂列（淨減法）
+     "[同輪追加][淨減法] 收斂列：本表（test_adr_xplat001_c1c2_lock.py 自身）新增上一列、"
+     "本列自身、_REGRESSION_LANE_LOG 同輪列、_FROZEN_PREFIX_REWRITE_LEDGER 接鏈列、"
+     "_REPIN_NET_CAP_SCHEDULE 到期兌現列與重新武裝共 +24；同輪刪 79 行純史料註解（U9 具名"
+     "展延沿革 R121～R178、到期義務兌現沿革 R113～R182）原文搬進 "
+     "CrossPlatform_Guard_Line_History.md〈R184 淨減法搬遷〉節、各留一行指針，抵銷後本輪"
+     "主軌淨額 297−297＝0 ≤ 0，款(11) 連續上升計數歸零。收斂到本行也計入為止，見 "
+     "CrossPlatform_R184_SessionGate_Windows_Recheck6_Evidence.md〈六〉。"),  # round-label-ok
 )
 
 
@@ -2651,6 +2670,8 @@ _REPIN_NET_CAP_SCHEDULE: tuple[tuple[int, int], ...] = (
                   # 同輪重新武裝下一段：步伐維持 1（整數下限）。
     (182, 526),   # 到期輪兌現：cap 降到到期目標本身（同既有判例）。本輪剛好到期 round-label-ok
                   # （`_REPIN_NET_CAP_DUE_ROUND=182`）。同輪重新武裝：步伐維持 1（整數下限）。
+    (184, 525),   # 到期輪兌現：cap 降到到期目標本身（同既有判例）。本輪剛好到期 round-label-ok
+                  # （`_REPIN_NET_CAP_DUE_ROUND=184`）。同輪重新武裝：步伐維持 1（整數下限）。
 )
 #: 生效點＝首列輪號、現行上限＝末列上限，**皆由表導出不另立常數**（R73 判例：一份知識一個家）。
 _REPIN_ROUND_CAP_SINCE = _REPIN_NET_CAP_SCHEDULE[0][0]
@@ -3037,6 +3058,10 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "test_platform_utils_dedup.py 六格、test_install_statusline.py 一格、"
      "test_doc_loc_baseline_freshness_r60.py 第五站點＋本表漂移），未超軌上限 ⇒ 全額申報，"
      "主軌 0。逐項見 CrossPlatform_R145_Scan_Findings.md〈附記（R183）〉。"),  # round-label-ok
+    ("R184", 297,  # round-label-ok
+     "DEF-200-423／424／425 回歸鎖淨額 349 超過軌上限 309；同輪收斂列刪 79 行史料後"
+     "主表淨額 297 ⇒ 依子項不得大於母項只申報 297，主軌淨額 0 ≤ 0（款(11) 計數歸零）。"
+     "見 CrossPlatform_R184_SessionGate_Windows_Recheck6_Evidence.md〈四〉。"),  # round-label-ok
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -3104,56 +3129,7 @@ def _regression_lane_cap_basis() -> tuple[str, int]:
 # ADR-XPLAT-013 §9.3／U9（D-5 裁決，R116 round-label-ok）：四支 `[ROOT-TOOLS]` 檔舊尺債到期輪。
 # 本批只落地「到期輪常數＋機械保底」半格；真拆未做、over_by 現查 187（逐檔數字、判準
 # 出處與惡化態勢＝`CrossPlatform_R116_Scan_Findings.md` §D-5，本檔不重抄史料）。
-# 🔴 精準修復輪具名展延 121 → 127（判準出口②，**不得靜默沿用**故理由逐字寫在這裡）：
-# 本輪標的是帳本三筆缺陷結案，四支 `[ROOT-TOOLS]` 檔的真拆屬獨立重構持有面——依鐵律七，
-# 其常數／史料／消費端跨檔，任一並行包手上都做不完，只能由獨立的收尾單人窗口做。本輪實際
-# 完成的是**同族的另一半**：護欄層散文搬遷抵銷（見 `_GUARD_LINES_REPIN_LOG` 末列），它證實
-# 「把史料逐字搬進具名證據檔」在本 repo 是可行且安全的路徑，而那正是真拆要用的手法 ⇒ 展延
-# 換到的不是時間而是一個已驗證的手法。取 `_ROOT_TOOLS_DEBT_DUE_MAX_LOOKAHEAD` 的上界而非
-# 更近的輪次，理由是真拆需要一個不與缺陷結案競爭的獨立窗口；再展延須另附理由，不得沿用本段。
-# 🔴 落地輪具名展延 127 → 130（新理由）：本輪以舊尺（空行與行首 # 免費）實測 round-label-ok
-# 三支檔 over_by＝quota_gate 90／quota_meter 67／hook_wiring 28（planner 已在 750 tier 下為 0），
-# 並逐檔勘查「docstring 搬證據檔」手法的可及面：quota_gate／quota_meter 的 docstring 敘事
-# 各約 84／111 行可覆蓋自身超額，**hook_wiring 全檔 docstring 皆為單行、敘事全住 # 註解 ⇒
-# 該手法對它零效益**，28 行只能靠真拆（抽共用模組）解。真拆屬獨立重構持有面（鐵律七），
-# 本輪主軸為款(11) 護欄層淨額義務與五筆結案；逐檔勘查座標見 CrossPlatform_R127_Scan_Findings.md §3。
-# 🔴 R130 具名展延（鐵律七，不得靜默沿用）round-label-ok：喚醒鏈死碼修復窗口，
-# 非 root-tools 重構持有面；真拆待獨立窗口，130 → 132。
-# 🔴 R132 具名展延（鐵律七，不得靜默沿用）round-label-ok：喚醒鏈規則2/3/5/7/8收尾窗口，
-# 非 root-tools 重構持有面；真拆待獨立窗口，132 → 133。
-# 🔴 R133 具名展延（鐵律七，不得靜默沿用）round-label-ok：DEF-200-274 本機平行執行落地
-# 窗口，非 root-tools 重構持有面；真拆待獨立窗口，133 → 135（在 lookahead=5 內）。
-# 🔴 R135 具名展延（鐵律七，不得靜默沿用）round-label-ok：DEF-200-274 第四輪四方複審收尾
-# 窗口（work-stealing 動態派工重構＋TOCTOU 緩解），非 root-tools 重構持有面；
-# 真拆待獨立窗口，135 → 137（在 lookahead=5 內）。
-# 🔴 R137 具名展延（鐵律七，不得靜默沿用）round-label-ok：DEF-200-274 第五輪四方獨立複審
-# 收尾窗口（全庫 TOCTOU 病灶排查修復），非 root-tools 重構持有面；
-# 真拆待獨立窗口，137 → 142（在 lookahead=5 內）。
-# 🔴 R142 具名展延（鐵律七，不得靜默沿用）round-label-ok：DEF-200-275（SDD-FSM
-# context 計量誤報三輪修復）／DEF-200-277（跨平台假設 meta-test sysconfig 暖機
-# 時機）兩個獨立缺陷收尾窗口，非 root-tools 重構持有面；
-# 真拆待獨立窗口，142 → 147（在 lookahead=5 內，已達上界）。
-# 🔴 R147 具名展延（鐵律七，不得靜默沿用）round-label-ok：DEF-200-274 第九輪收尾
-# 單人窗口（護欄層 guard-line 記帳＋pytest-xdist／自動多核心落地），非 root-tools
-# 重構持有面；真拆待獨立窗口，147 → 152（在 lookahead=5 內，已達上界）。
-# 🔴 R152 具名展延（鐵律七，不得靜默沿用）round-label-ok：單一 .venv 四方審查殘餘
-# 收尾單人窗口（DEF-200-307～310 護欄層記帳），非 root-tools 重構持有面；
-# 真拆待獨立窗口，152 → 157（在 lookahead=5 內，已達上界）。
-# 🔴 R157 具名展延（鐵律七，不得靜默沿用）round-label-ok：多 CPU 第十四輪四方審查／複審
-# 收尾單人窗口（DEF-200-325～331 護欄層記帳），非 root-tools 重構持有面；
-# 真拆待獨立窗口，157 → 162（在 lookahead=5 內，已達上界）。
-# 🔴 R163 具名展延（鐵律七，不得靜默沿用）round-label-ok：多 CPU 第十九輪 DEF-200-354～356
-# 四方獨立審查收尾單人窗口（QA 全洩漏矩陣＋三缺陷修復），非 root-tools 重構持有面；
-# 真拆待獨立窗口，162 → 168（在 lookahead=5 內，已達上界）。
-# 🔴 R168 具名展延（鐵律七，不得靜默沿用）round-label-ok：多 CPU 第二十輪 DEF-200-363～366
-# 四方獨立審查收尾單人窗口（計時快取震盪＋SDD docker 探測＋mutation kill_rate＋win32 oracle），
-# 非 root-tools 重構持有面；真拆待獨立窗口，168 → 173（在 lookahead=5 內，已達上界）。
-# 🔴 R173 具名展延（鐵律七，不得靜默沿用）round-label-ok：DEF-200-386 種子過期警告根治＋
-# v0.30 console 洩漏 audit 擴面收尾單人窗口，非 root-tools 重構持有面；
-# 真拆待獨立窗口，173 → 178（在 lookahead=5 內，已達上界）。
-# 🔴 R178 具名展延（鐵律七，不得靜默沿用）round-label-ok：Windows 切換啟動輪 DEF-200-402／403／404
-# 收尾單人窗口（chaos_runner 治理 yaml 寫回根治＋symlink 測試 Windows 缺口），非 root-tools
-# 重構持有面；真拆待獨立窗口，178 → 183（在 lookahead=5 內，已達上界）。
+# 🔴 R121～R178 具名展延全文見 Guard_Line_History.md〈U9 具名展延沿革〉（R184 搬遷） round-label-ok
 # 🔴 R183 具名展延（鐵律七，不得靜默沿用）round-label-ok：掌舵者五問第五次四方覆核
 # DEF-200-420／421／422 新立即結＋418 第一步收尾單人窗口（護欄層記帳＋Mac 交棒任務書），
 # 非 root-tools 重構持有面；真拆待獨立窗口，183 → 188（在 lookahead=5 內，已達上界）。
@@ -3239,39 +3215,10 @@ def net_cap_schedule_problems(
 #: 設計（5400→3200 起）與 R89 互斥推導全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈到期義務與重新武裝 WHY〉節；R101 起歷次兌現的 round-label-ok
 #: 逐段沿革搬至 CrossPlatform_Guard_Line_History.md〈到期義務兌現沿革〉節。
-#: 本次兌現（結構性長債分軌輪，2026-08-30）：cap 降到目標本身（585，見 `(113, 585)` 列），
-#: 同輪重新武裝下一段：步伐 8 < 前一段的 10，續守「步伐刻意變小」且目標嚴格低於現行 cap。
-#: R115 收斂棒兌現 round-label-ok：cap 降到目標本身（577，見 `(115, 577)` 列），同輪重新武裝下一段：
-#: 步伐 7 < 前一段的 8，續守「步伐刻意變小」且目標嚴格低於現行 cap。
-#: R117 喚醒鏈批兌現 round-label-ok：cap 降到目標本身（570，見 `(117, 570)` 列），同輪重新武裝：
-#: 步伐 6 < 前一段的 7，續守「步伐刻意變小」且嚴格低於現行 cap。
-#: R119 P1-6 批兌現 round-label-ok：cap 降到目標本身（564，見 `(119, 564)` 列），同輪重新武裝：
-#: 步伐 4 < 前一段的 5（R122 兌現於 `(122, 559)`，重新武裝 124／555 round-label-ok）。
-#: R126 落地輪兌現 round-label-ok：cap 降到目標本身（555，見 `(126, 555)` 列），同輪重新武裝：
-#: R129 喚醒鏈零浪費收尾兌現 round-label-ok：cap 降到目標本身（552，見 `(129, 552)` 列），同輪重新
-#: 武裝下一段：步伐 2 < 前一段的 3，續守「步伐刻意變小」且目標嚴格低於現行 cap。
-#: R131 喚醒鏈四方審計對抗查證收尾兌現 round-label-ok：cap 降到目標本身（550，見 `(131, 550)`
-#: 列），同輪重新武裝下一段：步伐 1 < 前一段的 2，續守「步伐刻意變小」且目標嚴格低於現行 cap。
-#: R135 DEF-200-274 第四輪四方複審收尾兌現 round-label-ok：cap 降到目標本身（548，見
-#: `(135, 548)` 列），同輪重新武裝下一段：目標 547 嚴格低於現行 cap 548（步伐已降至
-#: 整數下限 1，無法再變小，維持同步伐、僅前進到期輪，續守「目標嚴格低於現行 cap」）。
-#: DEF-200-275 第六輪收尾兌現：cap 降到目標本身（543，見 `(145, 543)` 列），同輪重新 round-label-ok
-#: 武裝下一段：目標 542 嚴格低於現行 cap 543（步伐已是整數下限 1，維持同步伐、只前進到期輪）。
-#: R149 兌現（DEF-200-293/294/295 root-infra 收尾）：cap 降到目標本身（541，見 round-label-ok
-#: `(149, 541)` 列），同輪重新武裝下一段：目標 540 嚴格低於現行 cap 541（步伐維持 1）。
-#: R151 兌現（DEF-200-301～306 單一 .venv 收斂收尾）：cap 降到目標本身（540，見 round-label-ok
-#: `(151, 540)` 列），同輪重新武裝下一段：目標 539 嚴格低於現行 cap 540（步伐維持 1）。
-#: R155 兌現：cap 降到目標本身（538，見 `(155, 538)` 列），重新武裝：目標 537＜cap round-label-ok
-#: R157 兌現：cap 降到目標本身（537，見 `(157, 537)` 列），重新武裝：目標 536＜cap round-label-ok
-#: R159 兌現：cap 降到目標本身（536，見 `(159, 536)` 列），重新武裝：目標 535＜cap round-label-ok
-#: R165 兌現：cap 降到目標本身（534，見 `(165, 534)` 列），重新武裝：目標 533＜cap round-label-ok
-#: R167 兌現：cap 降到目標本身（533，見 `(167, 533)` 列），重新武裝：目標 532＜cap round-label-ok
-#: R169 兌現：cap 降到目標本身（532，見 `(169, 532)` 列），重新武裝：目標 531＜cap round-label-ok
-#: R171 兌現：cap 降到目標本身（531，見 `(171, 531)` 列），重新武裝：目標 530＜cap round-label-ok
-#: R177 兌現：cap 降到目標本身（528，見 `(177, 528)` 列），重新武裝：目標 527＜cap round-label-ok
-#: R182 兌現：cap 降到目標本身（526，見 `(182, 526)` 列），重新武裝：目標 525＜cap round-label-ok
-_REPIN_NET_CAP_DUE_ROUND = 184  # round-label-ok：到期輪＝兌現輪+2（lookahead 判準的活體對照）
-_REPIN_NET_CAP_DUE_TARGET = 525  # 步伐 1，嚴格低於 cap 526（本輪重新武裝） round-label-ok
+#: R113～R182 兌現沿革見 Guard_Line_History.md〈到期義務兌現沿革〉R184 搬遷追加小節 round-label-ok
+#: R184 兌現：cap 降到目標本身（525，見 `(184, 525)` 列），重新武裝：目標 524＜cap round-label-ok
+_REPIN_NET_CAP_DUE_ROUND = 186  # round-label-ok：到期輪＝兌現輪+2（lookahead 判準的活體對照）
+_REPIN_NET_CAP_DUE_TARGET = 524  # 步伐 1，嚴格低於 cap 525（本輪重新武裝） round-label-ok
 
 #: DEF-200-121：到期輪自身的後設鎖——`_REPIN_NET_CAP_DUE_ROUND` 只准落在「最近稽核輪
 #: ＋ lookahead」以內（歷史母體 85..113 的到期輪一律＝上一次兌現輪 +2）。可延期的到期日
@@ -3338,10 +3285,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 313
+_REPIN_LOG_FROZEN_PREFIX_LEN = 315
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "bd1f875e0ceb88f718112833339ccaf6408ef515ba4713b5cfbf43d63bc3ac36")
+    "d5cf66772eef734920ed5dd83e7e50e789a0181c10f3526f8af0eef844c731ac")
 
 
 def repin_log_history_digest(
@@ -3690,6 +3637,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R182", "69ba8e55b356", "400ca9669d68", "DEF-200-413"),  # round-label-ok
     ("R182", "400ca9669d68", "783155a15210", "DEF-200-417"),  # round-label-ok
     ("R183", "783155a15210", "bd1f875e0ceb", "DEF-200-420"),  # round-label-ok
+    ("R184", "bd1f875e0ceb", "d5cf66772eef", "DEF-200-423"),  # round-label-ok
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

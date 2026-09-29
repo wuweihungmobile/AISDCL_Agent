@@ -51,6 +51,7 @@
 
 **不做**
 - SessionStart 網路補量：`test_session_brief.py:53` 零網路回歸鎖＋`context_budget_guard.py` SessionStart 條目 `timeout=10` 的登記註解「每次開 session 都卡是不可接受的代價」＝兩條明文裁決；PreToolUse 已會在第一次扇出型工具前補量（`quota_gate.py:1064`）。
+  - 🔴 訂正（2026-09-29，R184 收尾親驗，DEF-200-426）：上列兩條引據**不實**——該測試檔第 50～53 行是 `_cache_miss_gate()` helper、「零網路」只是第 57 行 class docstring 的自述、沒有任何會因打網路而紅的斷言；settings.json 該註解講的是同步外呼 `powershell.exe` 註冊 schtasks 的 detached 化理由，不是 HTTP 補量禁令。「不做」的決定維持，理由改為 `claim_refresh_slot()` 名額與 `--pace`／PreToolUse 共用、一失敗即連坐，且 `quota_gate.py`／`context_budget_guard.py` 餘裕各 1 行。全文見 `CrossPlatform_R184_SessionGate_Windows_Recheck6_Evidence.md`〈八〉。
 - DEF-200-342 自癒／候選 A：D19 明文 fail-closed（`fsm_runtime.py:633-636`）、帳本自訂解鎖條件＝Windows 實值、三位反駁者 REFUTED；且 QA 探針證明新視窗形態本就不會被它擋（〈六〉）。
 - naked-cd 判準放寬：R78/R79 兩輪加嚴皆為「放寬一格即繞過口」的實測教訓；修產生端更小。
 - 新診斷腳本 `tools/probe/session_gate_diagnose.py`：既有 `--check`／`--pace`＋R158 §七清單＋本輪簡報已覆蓋（Rule 2）。

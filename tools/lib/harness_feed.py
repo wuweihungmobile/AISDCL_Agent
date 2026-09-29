@@ -10,6 +10,7 @@ stdlib only（同 `tools/lib/endurance_env.py` 的既有慣例）：不 import
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 #: DEF-200-408：差值非 0 最常見的成因是 feed 與逐字稿**各自獨立落盤**的時序差——status line
@@ -25,6 +26,15 @@ def measure(transcript: Path, guard) -> dict:
 
     `feed` 只讀一次（D32b-1a 同型修復）：`guard.window_evidence()` 收下已讀好的
     `feed`，不再自己重讀一次 status line 進料。
+
+    `fresh_window`（DEF-200-425）＝新視窗首輪：逐字稿還沒有任何帶 usage 的 assistant 記錄（`used` 與
+    `model` 皆 `None`），而 feed 這一側讀得通（`reason is None`＝存在、session 相符、window
+    為正）。feed 有沒有 `current_usage` 不論：TUI 剛開時為 null；首輪自己的 `--check` 則實測
+    遇到 feed 已有值、逐字稿仍無任何 usage 記錄（本機頂層逐字稿裡兩次真跑出 ❌ 的首輪
+    `--check`，`check_lines()` 都回空，那只有 `harness_used` 非 None 才會發生；成因推測＝逐字稿
+    要等整則回應收完才落盤，首輪的工具呼叫在那之前就跑了）。feed 不存在（reason 非空）分不出
+    是新視窗還是欄位格式漂移 ⇒ 不算；逐字稿已見到 model 卻沒有可用 usage ⇒ 不算（格式漂移的
+    警報要留著）。`endurance_env.check_report()` 只讀這個旗標，不 import 本檔。
     """
     used, peak, model = guard.scan_transcript(transcript)
     sid = guard.session_id_of(transcript)
@@ -41,10 +51,25 @@ def measure(transcript: Path, guard) -> dict:
         "window_source": source,
         "harness_used": feed["used"],
         "harness_reason": feed["reason"],
+        "fresh_window": (used is None and model is None and feed["reason"] is None
+                         and not _has_any_assistant_record(transcript)),
         "may_block": guard.may_block(source),
         "ratio": (used / window) if (used is not None and window > 0) else None,
         "tier": guard.tier_of(used, window) if used is not None else None,
     }
+
+
+def _has_any_assistant_record(transcript: Path) -> bool:
+    """DEF-200-425 複審鏡 S1：`scan_transcript()` 只看含 `usage` 字樣的行，assistant 記錄若
+    整個沒有 usage 鍵（欄位改名／只有 `<synthetic>` 記錄）`model` 也會是 None，`fresh_window`
+    就把「欄位格式漂移」誤判成「新視窗」。這裡便宜地再掃一次：逐字稿裡**有任何** assistant
+    記錄就不是新視窗（❌ 警報留著）。讀不到一律當「有」——方向是維持警報，不是靜音。"""
+    try:
+        with transcript.open(encoding="utf-8", errors="replace") as fh:
+            return any('"type": "assistant"' in line or '"type":"assistant"' in line
+                       for line in fh)
+    except OSError:
+        return True
 
 
 def check_lines(data: dict) -> list[str]:
@@ -59,7 +84,9 @@ def check_lines(data: dict) -> list[str]:
     `used=None, reason=None`——這是該函式**唯一**兩欄同時為 `None` 的分支（其餘每一個
     「不採用」分支都會賦一個非空 `reason` 字串，見該函式最後一行與上面兩行對照）。
     此前這個分支落到 `return []`，連「不採用」這件事本身都被悄悄吞掉，違反本函式與
-    `read_context_feed()` 自己 docstring 的設計意圖——現在補一行明講原因。
+    `read_context_feed()` 自己 docstring 的設計意圖——現在補一行明講原因。新視窗首輪
+    （TUI 剛開、第一次 API 回應之前）同樣是 `current_usage: null`，措辭因此兩種成因並列，
+    不把根本沒 compact 過的新視窗說成 compact 後空窗。
     """
     if data.get("harness_used") is not None and data.get("used") is not None:
         diff = abs(data["harness_used"] - data["used"])
@@ -68,8 +95,29 @@ def check_lines(data: dict) -> list[str]:
     if data.get("harness_reason"):
         return [f"harness feed 未採用：{data['harness_reason']}"]
     if data.get("harness_used") is None and data.get("harness_reason") is None:
-        return ["harness feed 存在但當下無 current_usage（compact 後空窗），本次無交叉比對"]
+        return ["harness feed 存在但當下無 current_usage"
+                "（新視窗尚無第一次 API 回應，或 compact 後空窗），本次無交叉比對"]
     return []
+
+
+def _feed_model_family(transcript: Path, guard) -> str | None:
+    """DEF-200-424（DEF-200-420 延伸）：新視窗首輪逐字稿還沒有任何 assistant 記錄
+    （`scan_transcript` 回不出 model），模型只有 status line feed 知道——feed 在 TUI 啟動時
+    就寫了 `model.id`，`current_usage` 為 null 也一樣。`read_context_feed()` 的回傳沒有
+    `model.id`（只回 `{window, note, used, reason}`），故這裡自己讀 feed 檔；路徑、sid、
+    家族字一律走 `guard` 既有函式，`session_id` 比對式與 `read_context_feed()` 同一條。
+
+    feed 不存在、壞 JSON、`session_id` 不符、缺 `model.id`、認不出家族一律回 `None`（fail-soft）。
+    """
+    sid = guard.session_id_of(transcript)
+    try:
+        doc = json.loads(guard.context_feed_path(sid).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(doc, dict) or doc.get("session_id") != sid:
+        return None
+    model = doc.get("model")
+    return (guard.model_family(model.get("id")) or None) if isinstance(model, dict) else None
 
 
 def active_model_of(transcript: Path | None, guard) -> str | None:
@@ -79,6 +127,11 @@ def active_model_of(transcript: Path | None, guard) -> str | None:
     此前 `--pace` 沒有這一步，模型分軌軸（`MODEL_SCOPED_KINDS`）就一律被排除出 cap
     聚合，給出比守衛寬鬆的假數字（同一份快取下 `--pace` 與 `--pace --model fable`
     七軸讀數逐字相同，差異全來自 active_model 有無）。
+
+    逐字稿優先：它有 model 字串就以它為準（與 hook 同尺）；只有逐字稿還沒有任何 assistant
+    記錄（新視窗首輪，hook 那一側此時也解不出）才退用 status line feed 的 `model.id`
+    （`_feed_model_family`）。此前新視窗首輪 `--pace` 因此排除模型軸、印出比守衛寬鬆的
+    cap，等到第一則回應落盤後 hook 才從逐字稿解到模型而收緊——同一個視窗前後兩種說法。
 
     `transcript` 為 `None`／不是檔案，或掃描途中出任何例外，一律回 `None`（fail-soft：
     解不出就維持既有「不確定 → 保守排除」行為，不用猜的頂替）。呼叫端的顯式 `--model`
@@ -90,6 +143,8 @@ def active_model_of(transcript: Path | None, guard) -> str | None:
         if not transcript.is_file():
             return None
         _, _, seen_model = guard.scan_transcript(transcript)
-        return guard.model_family(seen_model) or None if seen_model else None
+        if seen_model:
+            return guard.model_family(seen_model) or None
+        return _feed_model_family(transcript, guard)
     except Exception:
         return None

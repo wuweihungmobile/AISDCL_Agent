@@ -4876,7 +4876,9 @@ class Fix3UnattendedOutcomeBannerTest(unittest.TestCase):
         transcript = trace / "sidP.jsonl"
         transcript.write_text('{"type":"assistant"}\n', encoding="utf-8", newline="\n")
         buf = io.StringIO()
-        with unittest.mock.patch.dict(os.environ, {endurance_env.TRACE_DIR_ENV: str(trace)}):
+        with unittest.mock.patch.dict(os.environ, {endurance_env.TRACE_DIR_ENV: str(trace),
+                                                   guard.CONTEXT_FEED_DIR_ENV: str(trace)}):
+            # feed 目錄一併隔離：無 model 的逐字稿會走 feed 退用分支（DEF-200-424），不碰真 home
             endurance_env.record_unattended_outcome(
                 "sidP", "exhausted", reset_returned=False, handback_path="/h/p.md")
             with unittest.mock.patch.object(planner.quota_gate, "pace_report",
@@ -11860,6 +11862,11 @@ class PaceAutoDerivesActiveModelTest(unittest.TestCase):
         _quota_cache(self.tmp, None, extra=(("session", 5.0, 3600.0),
                                             ("weekly_scoped", 40.0, 60.0)),
                      scope_models={"weekly_scoped": "Fable"})
+        # 逐字稿沒有模型時 `active_model_of` 會退讀 feed：feed 目錄導向 tmp，不讀真實 home。
+        feed_env = unittest.mock.patch.dict(
+            os.environ, {guard.CONTEXT_FEED_DIR_ENV: str(self.tmp)}, clear=False)
+        feed_env.start()
+        self.addCleanup(feed_env.stop)
 
     def _pace(self, argv: list[str]) -> str:
         buf = io.StringIO()
@@ -11899,6 +11906,21 @@ class PaceAutoDerivesActiveModelTest(unittest.TestCase):
                      encoding="utf-8", newline="\n")
         out = self._pace(["--pace", "--transcript", str(ts)])
         self.assertIn("model-scoped-excluded", out, out)
+
+    def test_pace_on_a_fresh_window_takes_the_model_from_the_feed(self) -> None:
+        """新視窗首輪：逐字稿還沒有 assistant 記錄，模型只有 status line feed 知道。此前
+        `--pace` 在這個狀態排除模型軸、印出比守衛寬鬆的 cap，等第一則回應落盤後 hook 才收緊。"""
+        ts = _write_jsonl(self.tmp / "sess-harness.jsonl", [])
+        _write_feed(self.tmp, {**_FEED_SAMPLE, "context_window": {
+            **_FEED_SAMPLE["context_window"], "current_usage": None}})
+        auto = self._pace(["--pace", "--transcript", str(ts)])
+        explicit = self._pace(["--pace", "--model", "fable", "--transcript", str(ts)])
+        self.assertNotIn("model-scoped-excluded", auto, f"新視窗仍排除模型軸 ⇒ 沒讀到 feed：{auto}")
+        verdict = lambda text: re.findall(  # noqa: E731
+            r"⇒ cap=\S+ recommended=\S+ band=\S+ binding=\S+", text)
+        self.assertTrue(verdict(auto), f"找不到判定摘要：{auto}")
+        self.assertEqual(verdict(auto), verdict(explicit),
+                         "新視窗的自動推導與顯式 --model fable 說出不同的判定")
 
 
 # 沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md〈DEF-200-169 滾動視窗剩餘秒數的立案〉。
@@ -12809,6 +12831,44 @@ class HarnessFeedStageTest(unittest.TestCase):
                      encoding="utf-8", newline="\n")
         self.assertIsNone(harness_feed.active_model_of(ts, guard))
 
+    def test_active_model_of_falls_back_to_the_feed_on_a_fresh_transcript(self) -> None:
+        """新視窗首輪：逐字稿還沒有任何 assistant 記錄（hook 那一側此時同樣解不出模型），
+        模型只有 status line feed 知道——`current_usage` 為 null 時 feed 也已有 `model.id`。
+        此前這裡回 `None` ⇒ `--pace` 排除模型分軌軸，印出比守衛寬鬆的 cap。"""
+        ts = _write_jsonl(self.tmp / "sess-harness.jsonl", [])
+        self.assertEqual(guard.scan_transcript(ts), (None, 0, None), "前提：逐字稿零 assistant")
+        _write_feed(self.tmp, {**_FEED_SAMPLE, "context_window": {
+            **_FEED_SAMPLE["context_window"], "current_usage": None}})
+        self.assertEqual(harness_feed.active_model_of(ts, guard), "fable")
+
+    def test_active_model_of_prefers_the_transcript_over_the_feed(self) -> None:
+        """逐字稿有模型字串就以它為準（與 hook 同尺）；feed 說的是另一個家族也不採。"""
+        ts = _write_jsonl(self.tmp / "sess-harness.jsonl", [1000], model="claude-opus-5")
+        _write_feed(self.tmp, _FEED_SAMPLE)  # feed 說 fable
+        self.assertEqual(harness_feed.active_model_of(ts, guard), "opus")
+
+    def test_active_model_of_ignores_a_foreign_or_broken_feed(self) -> None:
+        """feed 只在「確實是本 session 的、而且真的寫了 model.id」時才算數：別人的 feed
+        （`session_id` 不符）、壞 JSON、缺 `model`、model 不是物件、認不出家族——一律 `None`。
+        `_feed_model_family` 自己也不得拋（外層的 try 會把例外吞成 `None`，只驗外層就看不出
+        內層有沒有守住）。"""
+        ts = _write_jsonl(self.tmp / "sess-harness.jsonl", [])
+        feed = _write_feed(self.tmp, _FEED_SAMPLE)
+        self.assertEqual(harness_feed.active_model_of(ts, guard), "fable", "對照組：好 feed 讀得到")
+        cases = {
+            "session_id 不符": json.dumps({**_FEED_SAMPLE, "session_id": "someone-else"}),
+            "壞 JSON": "{not json",
+            "不是物件": "[1, 2]",
+            "缺 model 鍵": json.dumps({k: v for k, v in _FEED_SAMPLE.items() if k != "model"}),
+            "model 不是物件": json.dumps({**_FEED_SAMPLE, "model": "claude-fable-5-1"}),
+            "model.id 認不出家族": json.dumps({**_FEED_SAMPLE, "model": {"id": "mystery-9"}}),
+        }
+        for name, raw in cases.items():
+            with self.subTest(name):
+                feed.write_text(raw, encoding="utf-8")
+                self.assertIsNone(harness_feed.active_model_of(ts, guard))
+                self.assertIsNone(harness_feed._feed_model_family(ts, guard))
+
     # ── R158：`tools/lib/harness_feed.py::check_lines()`（純函式，紅綠由注入自證， round-label-ok
     # 與上面 `HarnessFeedStageTest` 同一份 fixture 家族，不需要 `self.tmp`）───────
     def test_a_cross_check_diff_is_printed_when_both_sides_measure(self) -> None:
@@ -12832,7 +12892,88 @@ class HarnessFeedStageTest(unittest.TestCase):
             {"harness_used": None, "used": 130, "harness_reason": None})
         self.assertEqual(
             lines,
-            ["harness feed 存在但當下無 current_usage（compact 後空窗），本次無交叉比對"])
+            ["harness feed 存在但當下無 current_usage"
+             "（新視窗尚無第一次 API 回應，或 compact 後空窗），本次無交叉比對"])
+
+    def test_the_null_usage_branch_names_both_a_fresh_window_and_a_compact_gap(self) -> None:
+        """新視窗首輪（TUI 剛開、還沒有第一次 API 回應）與 compact 後空窗，feed 端都是
+        `current_usage: null`；措辭只講 compact 會把根本沒 compact 過的新視窗說錯。"""
+        for used in (None, 130):  # 逐字稿零 usage（新視窗）／逐字稿留有舊 usage（compact 空窗）
+            with self.subTest(used=used):
+                (line,) = harness_feed.check_lines(
+                    {"harness_used": None, "used": used, "harness_reason": None})
+                self.assertIn("新視窗", line)
+                self.assertIn("compact", line)
+
+    def test_measure_marks_a_fresh_window_only_when_the_feed_side_is_readable(self) -> None:
+        """`fresh_window`＝逐字稿零 assistant usage（`used`／`model` 皆 None）且 feed 讀得通。
+        真格：TUI 剛開（feed 的 current_usage 為 null）；第一則回應到手但逐字稿還沒落盤
+        （feed 已有值——首輪自己的 `--check` 實際遇到的形狀：本機頂層逐字稿裡兩次真跑出 ❌
+        的首輪 `--check`，`check_lines()` 都回空，那只有 `harness_used` 非 None 才會發生）。
+        假格：沒有 feed（分不出新視窗還是欄位格式漂移）、別人的 feed、compact 空窗
+        （逐字稿留有舊 usage）、逐字稿見到 model 卻沒有可用 usage（格式漂移的警報要留著）、
+        assistant 記錄整個沒有 usage 鍵（複審鏡 S1：`scan_transcript` 的 usage 預篩會讓 model
+        也讀不到，只靠 `model is None` 會把欄位改名誤判成新視窗）。DEF-200-425。"""
+        ts, feed = self.tmp / "sess-harness.jsonl", self.tmp / "sess-harness.json"
+        user = '{"type":"user","message":{"role":"user"}}\n'
+        assistant = lambda usage: json.dumps(  # noqa: E731
+            {"type": "assistant", "message": {"model": "claude-fable-5-1", "usage": usage}}) + "\n"
+        no_usage_key = json.dumps(
+            {"type": "assistant", "message": {"model": "claude-fable-5-1"}}) + "\n"
+        null_usage = {**_FEED_SAMPLE, "context_window": {
+            **_FEED_SAMPLE["context_window"], "current_usage": None}}
+        cases = (  # (名稱, 逐字稿全文, feed 文件（None＝不寫檔）, 期望)
+            ("TUI 剛開：feed 的 current_usage 為 null", user, null_usage, True),
+            ("第一則回應到手：feed 已有值、逐字稿還沒落盤", user, _FEED_SAMPLE, True),
+            ("沒有 feed 檔", user, None, False),
+            ("別人的 feed", user, {**_FEED_SAMPLE, "session_id": "someone-else"}, False),
+            ("compact 空窗：逐字稿留有舊 usage", user + assistant(_usage(2, 3, 125)),
+             null_usage, False),
+            ("逐字稿見到 model 卻沒有可用 usage", user + assistant({"input_tokens": "x"}),
+             null_usage, False),
+            ("assistant 記錄整個沒有 usage 鍵（欄位改名／synthetic）", user + no_usage_key,
+             _FEED_SAMPLE, False),
+        )
+        for name, text, doc, want in cases:
+            with self.subTest(name):
+                ts.write_text(text, encoding="utf-8", newline="\n")
+                feed.unlink(missing_ok=True)
+                if doc is not None:
+                    feed.write_text(json.dumps(doc), encoding="utf-8")
+                self.assertIs(harness_feed.measure(ts, guard)["fresh_window"], want)
+
+    def test_a_fresh_window_check_report_is_informational_not_an_error(self) -> None:
+        """`tools/lib/endurance_env.py::check_report()`：新視窗首輪的「量不到」是正常態，
+        開場不該是紅叉。仍要說明「量不到 ≠ 量到零」且不印百分比、不導向 `used=` 字面
+        （那會被當成水位佐證，把「沒量到」洗成「有佐證」）。"""
+        text = endurance_env.check_report(
+            {"used": None, "transcript": "T.jsonl", "fresh_window": True}, guard)
+        self.assertTrue(text.startswith("ℹ️ T.jsonl"), text)
+        for needle in ("新視窗", "量不到", "量到零", "--pace"):
+            self.assertIn(needle, text)
+        # 複審鏡 S2：負向清單對齊 claim guard 的 BLOCK_EVIDENCE_RE 詞表——文案若帶這些字面，
+        # Stop hook 會把一句「新視窗尚無數字」當成「查過了」的佐證。
+        for needle in ("❌", "%", "used=", "--check", "band=", "cap=", "kind="):
+            self.assertNotIn(needle, text)
+
+    def test_a_no_usage_report_without_a_confirmed_fresh_window_keeps_the_alarm(self) -> None:
+        """對照組：旗標為假或缺席（含 feed 不存在、分不出新視窗還是欄位格式漂移）⇒ 維持
+        ❌ 原句。若分類只看 `used is None`，這格就紅（「量不到」與「新視窗」被混為一談）。"""
+        for name, data in (("旗標為假", {"used": None, "transcript": "T", "fresh_window": False}),
+                           ("缺旗標", {"used": None, "transcript": "T"})):
+            with self.subTest(name):
+                text = endurance_env.check_report(data, guard)
+                self.assertTrue(text.startswith("❌ T"), text)
+                self.assertIn("掃不到任何帶 message.usage 的 assistant 記錄", text)
+
+    def test_the_planner_check_path_carries_fresh_window_into_the_report(self) -> None:
+        """接線鎖：`planner.measure()` 是 `harness_feed.measure()` 的薄轉呼叫，`fresh_window`
+        必須一路流到 `check_report()`——中途遺失＝靜默維持舊 ❌，不崩、也沒人發現。"""
+        ts = _write_jsonl(self.tmp / "sess-harness.jsonl", [])
+        _write_feed(self.tmp, _FEED_SAMPLE)
+        data = planner.measure(ts)
+        self.assertIs(data["fresh_window"], True)
+        self.assertTrue(endurance_env.check_report(data, guard).startswith("ℹ️"))
 
     def test_may_block_accepts_the_harness_source(self) -> None:
         _, source = guard.resolve_window(0, harness_window=500_000)

@@ -398,8 +398,19 @@ def autocompact_report(posture: dict, guard) -> str:
 
 
 def check_report(data: dict, guard) -> str:
-    """`--check` 的輸出。量不到時**明說量不到**，不印一個看起來像 0% 的數字。"""
+    """`--check` 的輸出。量不到時**明說量不到**，不印一個看起來像 0% 的數字。
+
+    DEF-200-425：`data["fresh_window"]`（`harness_feed.measure()` 的判定，本檔不 import 它）
+    為真＝新視窗首輪的正常態，印中性 ℹ️ 而非 ❌；缺鍵或為假（含 feed 不存在、分不出新視窗
+    還是欄位格式漂移）維持 ❌ 原句。兩者都不印百分比、rc 不變。
+    """
     if data["used"] is None:
+        if data.get("fresh_window"):
+            return (f"ℹ️ {data['transcript']}\n   新視窗：逐字稿還沒有任何帶 message.usage 的"
+                    " assistant 記錄（第一則回應落盤前的正常態，harness feed 已在，不是故障）。"
+                    "「量不到」與「量到零」必須分得開，故不印百分比；第一則回應落盤後再跑一次"
+                    "即有數字，額度現查 --pace。若不是剛開的視窗卻持續如此，"
+                    "才是逐字稿欄位格式已變更。\n")
         return (f"❌ {data['transcript']}\n   掃不到任何帶 message.usage 的 assistant 記錄"
                 " —— 「量不到」與「量到零」必須分得開，故不印百分比。"
                 "逐字稿剛建立、或欄位格式已變更都會走到這裡。\n")

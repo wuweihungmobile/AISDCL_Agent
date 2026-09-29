@@ -258,8 +258,9 @@ role=user 訊息之後」（本回合＋前一回合），見下方「證據面�
 --------------------------------------------------
 上面 40% 的覆蓋率量的是「全場」窗口的代價——SD-06 指出這個窗口大到會讓**任何時間點**
 出現過的通知，替**之後所有**「被擋」宣稱背書，即使早已過期或無關。`main()` 呼叫
-`_block_claim_evidence()` 把窗口收斂為「倒數第二則**真人**（非 tool_result 中繼）
-role=user 訊息之後」（本回合＋前一回合）：`_read_transcript()` 額外回傳 `user_turns`
+`_block_claim_evidence()` 把窗口收斂為「倒數第二則**真人**（非 tool_result 中繼、非
+harness 代筆，見 `_is_genuine_user_turn`）role=user 訊息之後」（本回合＋前一回合）：
+`_read_transcript()` 額外回傳 `user_turns`
 （真人訊息的落款時刻，依檔案序），少於兩則時沒有邊界可切、退回全場（覆蓋本段假紅普查
 的 4 筆案例——那些語料本來就不含任何真人 role=user 訊息，行為不變）；邊界找得到時，
 只有落款 `>= 邊界` 的 `tool_result`／attachment 才算數。`>=` 而非 `>`、落款解析不出的
@@ -774,23 +775,74 @@ _INTERESTING = ('"tool_result"', '"hook_success"', '"hook_non_blocking_error"',
                 '"role":"user"', '"role": "user"')
 
 
-def _is_genuine_user_turn(content) -> bool:
-    """`content` 是**真人打字**的一輪發言，不是 tool_result 中繼（D24 回合邊界判準）。
+#: 操作者輸入的出處值域（`origin.kind`／`turnOrigin`）。`claude -p` 的 prompt 是
+#: `turnOrigin == "sdk"`：同樣是人下的指令，所以與 `human` 並列。觀察所得、不是官方契約。
+_OPERATOR_TURN_ORIGINS = ("human", "sdk")
 
-    Claude Code 逐字稿把工具結果包成 `role=user` 訊息回灌給模型——這在檔案裡跟真人
-    打的字長得一樣（`message.role == "user"`），差別只在 `content`：中繼訊息的
-    `content` 是清一色 `type=tool_result` 的 block 清單；真人訊息要嘛是純字串，要嘛
-    清單裡至少有一個非 `tool_result` 的 block（例如 `text`，含 slash-command 展開）。
-    本機全母體現查（47 筆 role=user 記錄）：8 筆純字串／1 筆非 tool_result 清單皆為
-    真人發言，38 筆清一色 tool_result 清單皆為中繼——用這個分野挑出來的『回合邊界』
-    與人類直覺的『這是新的一輪』一致。
+#: 沒有任何出處欄位的記錄裡，認得出「這不是人打的一輪發言」的內容前綴：背景 agent 收工
+#: 通知（舊版逐字稿）、slash 指令的回聲對（`<command-name>`＋`<local-command-stdout>` 同一
+#: 時刻落兩筆、至今仍無出處欄位——當邊界會讓窗口塌到只剩當前回合）、compact 續接摘要。
+#: 全部是 fail-open 方向：多排除只會讓窗口變大。
+_HARNESS_BODY_PREFIXES = ("<task-notification>", "<command-name>",
+                          "<local-command-stdout>", "This session is being continued")
+
+
+def _is_genuine_user_turn(content, record=None) -> bool:
+    """`content` 是**真人打字**的一輪發言，不是 tool_result 中繼、也不是 harness 代筆
+    （D24 回合邊界判準；`record` 分支是 DEF-200-423 後補的出處欄位判準）。
+
+    ① **內容形態**（`record` 缺席時只有這一層，行為與 D24 原版逐字相同）：Claude Code
+    逐字稿把工具結果包成 `role=user` 訊息回灌給模型，差別只在 `content`——中繼訊息是清一色
+    `type=tool_result` 的 block 清單；純字串、或清單裡至少有一個非 `tool_result` 的 block，
+    先算真人。
+    ② **出處欄位**（`record`＝整筆逐字稿記錄時才判）：形態擋不住 harness 自己生成的訊息——
+    `<task-notification>`（背景 agent 收工通知）、peer 訊息（「Another Claude session sent
+    a message」）、slash 指令展開（`<command-name>`／`<local-command-stdout>`／caveat）、
+    skill 展開 companion 也以 `role=user` 落盤，形態上與真人打字無法區分。優先序：
+    `isMeta is True` ⇒ 否；`origin.kind` 存在且不在 `_OPERATOR_TURN_ORIGINS` ⇒ 否；
+    `turnOrigin` 存在且不在 `_OPERATOR_TURN_ORIGINS` ⇒ 否（兩欄同一值域，`claude -p` 的
+    prompt 不論標在哪一欄都算操作者）；兩欄位**都缺**（舊版／合成語料／本機 slash 指令）⇒
+    退回①，僅以 `_HARNESS_BODY_PREFIXES` 內容前綴為備援排除。未知的新值一律「不算邊界」：
+    窗口變大＝多收證據，是 D24 既定的 fail-open 方向（見 `_block_claim_evidence`）。
+
+    量測（2026-09-29 現查；欄位是**觀察所得、非官方契約**）：此前這裡寫「本機全母體現查
+    （47 筆 role=user 記錄）…皆為真人發言」——母體長大後那句為假，已改寫。現跑：母體＝
+    `~/.claude/projects/<slug>/*.jsonl` 頂層 65 支（不含 `subagents/`），非 tool_result 的
+    `role=user` 記錄 1,030 筆，其中 harness 生成 822 筆（79.8%：`isMeta` 257、
+    `origin.kind=task-notification` 565），修後算回合的剩 208 筆。歷史 13 筆「被擋／水位」
+    警報同母體回放：修前 13/13 重現、修後 13/13 靜音，且 13 筆的全場逐字稿都找得到佐證
+    （真陽性 0）。欄位覆蓋：65 支中 57 支帶任一出處欄位；`origin`／`isMeta` 最早見於
+    CC 2.1.248、`turnOrigin` 最早見於 2.1.277。**沒有任何出處欄位**的本機 slash 指令記錄
+    （`/model`、`/effort` 與其 stdout，母體 79 筆）只剩形態可判，由 `_HARNESS_BODY_PREFIXES`
+    的前綴備援排除（複審鏡 what-if：45 個有效檔中 19 檔邊界會動，其中 18 檔只是退回全場、
+    1 檔現行窗口反而窄 273.8 分鐘＝假紅面）。重跑普查：逐行解析頂層逐字稿，取非 tool_result
+    的 `role=user` 記錄，依 `(origin.kind, isMeta, turnOrigin)` 分組計數。
     """
     if isinstance(content, str):
-        return bool(content.strip())
-    if isinstance(content, list):
+        shaped = bool(content.strip())
+    elif isinstance(content, list):
         blocks = [b for b in content if isinstance(b, dict)]
-        return bool(blocks) and any(b.get("type") != "tool_result" for b in blocks)
-    return False
+        shaped = bool(blocks) and any(b.get("type") != "tool_result" for b in blocks)
+    else:
+        shaped = False
+    if not shaped or not isinstance(record, dict):
+        return shaped
+    if record.get("isMeta") is True:
+        return False
+    origin = record.get("origin")
+    kind = origin.get("kind") if isinstance(origin, dict) else None
+    turn_origin = record.get("turnOrigin")
+    if kind is not None and kind not in _OPERATOR_TURN_ORIGINS:
+        return False
+    if turn_origin is not None and turn_origin not in _OPERATOR_TURN_ORIGINS:
+        return False
+    if kind is None and turn_origin is None:
+        lead = content
+        if isinstance(content, list):
+            lead = next((b["text"] for b in content
+                         if isinstance(b, dict) and isinstance(b.get("text"), str)), "")
+        return not lead.lstrip().startswith(_HARNESS_BODY_PREFIXES)
+    return True
 
 
 def _read_transcript(transcript_path: str, byte_cap: int = 32 * 1024 * 1024
@@ -835,7 +887,7 @@ def _read_transcript(transcript_path: str, byte_cap: int = 32 * 1024 * 1024
                 continue
             content = message.get("content")
             if (when is not None and message.get("role") == "user"
-                    and _is_genuine_user_turn(content)):
+                    and _is_genuine_user_turn(content, record)):
                 user_turns.append(when)
             if not isinstance(content, list):
                 continue
@@ -864,6 +916,13 @@ def _block_evidence_text(records: list) -> str:
     這兩型 attachment 是「被擋」與「[SDD-CTX]／[SDD-FSM] 通知」在逐字稿裡唯一的落盤
     形態（見 `_INTERESTING` 旁註的母體現查）。任何形狀不符一律跳過，不得讓一筆壞資料
     拖垮整支 hook（與本檔其餘 I/O 收口同一慣例）。
+
+    🔴 **`hookEvent == "Stop"` 的 `hook_additional_context` 不算佐證**：那是本 hook 自己
+    上一則警報的落盤形態（`attachment.hookEvent`／`hookName` 皆為 `"Stop"`；警報內文
+    列舉 `deny／[SDD-FSM]／[SDD-CTX]／used=／--check`，正是 `BLOCK_EVIDENCE_RE` 的詞表）。
+    Stop 事件在回覆**之後**才觸發，它的內容只可能是對某則宣稱的評語，不可能是被擋事件
+    本身的觀測；收進來，第二次起同窗口的同型宣稱就被自己的警報洗白。`hookEvent` 缺席
+    （舊版／合成語料）維持既有行為：照收。
     """
     parts: list[str] = []
     for rec in records:
@@ -877,6 +936,8 @@ def _block_evidence_text(records: list) -> str:
             if isinstance(text, str):
                 parts.append(text)
         elif kind == "hook_additional_context":
+            if att.get("hookEvent") == "Stop":
+                continue  # 本 hook 自己的警報：不得替下一則同型宣稱背書（見 docstring）
             content = att.get("content")
             if isinstance(content, list):
                 parts.extend(str(c) for c in content if isinstance(c, str))
@@ -1024,8 +1085,9 @@ def main() -> int:
                 messages.append(
                     f"🔴 這一則有 {len(blocked)} 句「被擋／水位」宣稱（{listed}），但本場"
                     "沒有任何 deny／[SDD-FSM]／[SDD-CTX]／used= 佐證。請先跑 "
-                    "`python tools/session_resume_planner.py --check`，或逐字引用 hook "
-                    "訊息裡的 used=/window=。"
+                    "`python tools/session_resume_planner.py --check`（context 水位）"
+                    "或 `--pace`（額度；輸出恆帶 band=／cap=），"
+                    "或逐字引用 hook 訊息裡的 used=/window=。"
                     "（判準：.claude/hooks/check_claim_provenance.py"
                     "；關閉：AUTOSDD_BLOCK_CLAIM_GUARD_OFF=1）")
         if not os.environ.get("AUTOSDD_PACE_GUARD_OFF"):
