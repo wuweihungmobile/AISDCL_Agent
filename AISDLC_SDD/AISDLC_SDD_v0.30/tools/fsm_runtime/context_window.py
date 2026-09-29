@@ -545,7 +545,7 @@ def read_context_feed(session_id: str | None, observed_model: object) -> dict:
         raw = context_feed_path(session_id).read_text(encoding="utf-8")
     except FileNotFoundError:
         return {**empty, "reason": "無 feed（statusLine 未設定或本 session 尚無 assistant 訊息）"}
-    except OSError:
+    except (OSError, ValueError):  # ValueError＝非 UTF-8 位元組（UnicodeDecodeError）也算讀不到
         return {**empty, "reason": "feed 讀不到（非不存在）"}
     try:
         doc = json.loads(raw)

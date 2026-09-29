@@ -25,9 +25,12 @@ ctx5 輪兩個缺口（掌舵者五問 Q1／Q4 的機制面補強）：
       `cap=2 recommended=2 band=unmeasured` 是退化政策值、不是量測值，容易被模型誤讀
       成硬限制；含 `stale-cache` 時追加固定文案，講清楚「PreToolUse 會自動補量、
       零 token」，不含時不動。
+  DEF-200-432：`quota_line()` 的 `decide()` 此前沒帶 `active_model` ⇒ 新鮮快取下簡報的
+      cap 比 `--pace`／守衛寬（模型分軌軸被排除）；`_active_model()` 補上（payload `model`
+      → 逐字稿 → feed，判準本體住 `harness_feed.start_model_of()`），缺席時行為逐字不變。
 
 回歸鎖：`tools/tests/test_session_brief.py`（額度×context 四象限＋G1 statusLine
-三格＋feed reason 一格＋G2 stale-cache 兩格）；接線面：
+三格＋feed reason 一格＋G2 stale-cache 兩格＋DEF-200-432 active_model 各格）；接線面：
 `tools/tests/test_context_budget_guard.py::HandbackSessionStartAnnounceTest`。
 """
 from __future__ import annotations
@@ -100,7 +103,8 @@ _STALE_CACHE_NOTE = (
 )
 
 
-def quota_line(quota_gate: object, now: datetime | None = None) -> str:
+def quota_line(quota_gate: object, now: datetime | None = None,
+               active_model: str | None = None) -> str:
     """額度那一行。零網路、只讀快取；讀不到／判不出來一律 fail-open 成人話。
 
     `quota_gate`＝呼叫端已 import 好的 `tools/lib/quota_gate` 模組（它內部持有
@@ -108,15 +112,36 @@ def quota_line(quota_gate: object, now: datetime | None = None) -> str:
 
     G2：`describe()` 文字含 `stale-cache` 時（快取過期，`decide()` 回退到
     `degraded_cap`）追加 `_STALE_CACHE_NOTE`，避免模型把退化值誤讀成硬限制。
+
+    DEF-200-432：`active_model`（家族字，如 `fable`）傳給 `decide()`，模型分軌軸（`weekly_scoped`
+    等）才會進 cap 聚合，簡報的 `⇒ cap=…` 才與 `--pace`／守衛同尺；此前缺席，新鮮快取下簡報
+    印 `cap=4 band=notice`、同一份快取數秒後 `--pace` 印 `cap=1 band=prepare`。快取有量到軸
+    時句尾附 ` active_model=<家族>`（讓人看得出這個 cap 是按哪個模型算的；`-p` 沒有 feed、
+    payload 也不帶模型時 `active_model=None`，行為與此前逐字相同）。
     """
     at = now or datetime.now().astimezone()
     try:
         policy, _problems = quota_gate.quota_policy.load_policy(quota_gate.policy_env())
-        decision = quota_gate.quota_policy.decide(quota_gate.read_quota(at), at, policy)
+        decision = quota_gate.quota_policy.decide(
+            quota_gate.read_quota(at), at, policy, active_model=active_model)
         text = quota_gate.quota_policy.describe(decision)
+        if active_model and decision.per_axis:
+            text += f"　active_model={active_model}"
     except Exception:  # noqa: BLE001 — 簡報失敗不得反過來擋 SessionStart
         return _QUOTA_UNAVAILABLE
     return f"{text}{_STALE_CACHE_NOTE}" if "stale-cache" in text else text
+
+
+def _active_model(payload: dict, transcript: Path | None, guard: object) -> str | None:
+    """DEF-200-432：簡報額度行的 active model；判準本體住 `harness_feed.start_model_of()`。
+    `guard`（`context_budget_guard` 模組）缺席、`harness_feed` 不可達、任何例外一律 `None`
+    ＝維持此前行為（見檔頭 fail-open 紀律）。"""
+    if guard is None or harness_feed is None:
+        return None
+    try:
+        return harness_feed.start_model_of(payload, transcript, guard)
+    except Exception:  # noqa: BLE001 — 見檔頭 fail-open 紀律
+        return None
 
 
 def _harness_reason_note(feed: object) -> str:
@@ -232,12 +257,16 @@ def sessionstart_brief(
     *,
     now: datetime | None = None,
     check_statusline: Callable[[], dict] = _default_check_statusline,
+    guard: object = None,
 ) -> str:
     """組出 SessionStart 要 `emit_to_model` 的那一整行簡報
     （額度＋context＋statusLine 安裝狀態＋查證指令）。
 
     `check_statusline` 是新增的 keyword-only 參數、帶預設值：`context_budget_guard.py`
     既有的六個位置引數呼叫（未傳這個新參數）逐字相容，不需要跟著改那一行呼叫。
+    `guard`（DEF-200-432，同樣 keyword-only、預設 `None`）＝呼叫端的 `context_budget_guard`
+    模組本身，供 `harness_feed.start_model_of()` 取 `model_family`／`scan_transcript` 等；
+    缺席時額度行不帶 active_model，與此前逐字相同。
 
     DEF-200-344：注入函式（`resolve_window` 等）本身也可能 fail-open 出聲到
     stderr（如 `known_model_windows` 查表失手），本函式整段包
@@ -249,7 +278,7 @@ def sessionstart_brief(
         ctx = context_line(
             transcript, scan_transcript=scan_transcript, resolve_window=resolve_window,
             window_evidence=window_evidence, read_context_feed=read_context_feed)
-        quota = quota_line(quota_gate, now)
+        quota = quota_line(quota_gate, now, _active_model(payload, transcript, guard))
         statusline = statusline_line(check_statusline)
     return (f"[SDD-CTX-GUARD] 本 session 啟動時真實水位——context：{ctx}；額度：{quota}；"
            f"{statusline}。"

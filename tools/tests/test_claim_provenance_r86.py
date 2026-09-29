@@ -1200,8 +1200,8 @@ class TestTheTurnBoundaryIgnoresHarnessGeneratedUserRecords(unittest.TestCase):
         self.assertTrue(self._hits(lines), "自己的警報替下一則同型宣稱背書")
 
     def test_notices_from_other_hook_events_still_count_as_evidence(self) -> None:
-        """對照組：其他事件的通知（`hookEvent` 缺席的舊版記錄照舊）仍算佐證。"""
-        for event in ("PostToolUse", "SessionStart", None):
+        """對照組：守衛的水位通知仍算佐證；SessionStart 除外（DEF-200-430）。"""
+        for event in ("PostToolUse", "PreToolUse", None):
             with self.subTest(hookEvent=event):
                 lines = [self._user("2026-09-28T16:00:00Z", "第一則", **_HUMAN),
                          self._context(event, "[SDD-CTX][WARN] used=800000 window=1000000")]
@@ -1217,6 +1217,172 @@ class TestTheTurnBoundaryIgnoresHarnessGeneratedUserRecords(unittest.TestCase):
         self.assertIn("被擋／水位", done.stderr, "判準被修死了：無佐證的宣稱不再出聲")
         self.assertIn("--check", done.stderr)
         self.assertIn("--pace", done.stderr, "指路缺額度面")
+
+
+#: 真實 hook 阻斷訊息（DEF-200-428）：全文不含 `BLOCK_EVIDENCE_RE` 任一詞（本機 131 筆中 106 筆）。
+_HOOK_BLOCK_TEXT = (
+    "PreToolUse:PowerShell hook error: [${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py "
+    ".claude/hooks/block_destructive_git.py]: 🔴 這條指令的等待機制會靜默壞掉，已擋下（鐵律六）")
+
+#: 原生權限拒絕的訊息（CC 2.1.223 的實錄：`is_error` 卻沒有 `toolDenialKind`）；同樣不含詞表字樣。
+_NATIVE_DENIAL_TEXT = ("<tool_use_error>File is in a directory that is denied by your "
+                       "permission settings.</tool_use_error>")
+
+
+def _at(minute: int) -> str:
+    """同一天的整分鐘落款（帶 offset：naive 時間戳不落盤）。"""
+    return f"2026-09-29T12:{minute:02d}:00Z"
+
+
+class TestTheBlockClaimEvidenceReadsStructuredDenials(unittest.TestCase):
+    """DEF-200-428／430（受測：`.claude/hooks/check_claim_provenance.py` 的 `_tool_denial_kind`／
+    `_read_transcript`／`_block_evidence_text`）：428 證據改認落盤的 `toolDenialKind` 欄位（備援：
+    `is_error` 且行首 `PreToolUse:<Tool> hook error`／原生 denied）；430 簡報不算佐證。"""
+
+    def setUp(self) -> None:
+        self._dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._dir.cleanup)
+
+    def _write(self, lines: list[str]) -> Path:
+        path = Path(self._dir.name) / "t.jsonl"
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return path
+
+    def _hits(self, lines: list[str]) -> list[dict]:
+        """與 `main()` 同一條三步管線：讀逐字稿 → 切窗口 → 判『被擋』宣稱。"""
+        stamped, records, turns = G._read_transcript(str(self._write(lines)))
+        evidence = G._block_claim_evidence(stamped, records, turns)
+        return G.unbacked_block_claim_hits(_BLOCKED_CLAIM, evidence)
+
+    def _run(self, lines: list[str]):
+        # 借鄰班的 `_run`：多一個 subprocess 站點就得重釘 `_CHILD_SITE_FLOOR`。
+        return TestTheBlockClaimEvidenceWindowIsRecentTurnsOnly._run(
+            self, _BLOCKED_CLAIM, self._write(lines))
+
+    @staticmethod
+    def _human(when: str) -> str:
+        return json.dumps({"type": "user", "timestamp": when,
+                           "message": {"role": "user", "content": "請開工"}, **_HUMAN})
+
+    @staticmethod
+    def _result(when: str, text, is_error=None, **top) -> str:
+        """一筆 tool_result 記錄；`top` 是頂層欄位（真實阻斷帶 `toolDenialKind`）。"""
+        block = {"type": "tool_result", "tool_use_id": "toolu_x", "content": text}
+        if is_error is not None:
+            block["is_error"] = is_error
+        return json.dumps({"type": "user", "timestamp": when,
+                           "message": {"role": "user", "content": [block]}, **top})
+
+    @staticmethod
+    def _context(when: str, event, text: str) -> str:
+        return json.dumps({"type": "attachment", "timestamp": when, "attachment": {
+            "type": "hook_additional_context", "hookEvent": event, "content": [text]}})
+
+    def test_a_structured_denial_backs_the_claim_even_when_its_text_says_nothing(self) -> None:
+        self.assertIsNone(G.BLOCK_EVIDENCE_RE.search(_HOOK_BLOCK_TEXT), "前提失效：文字已在詞表內")
+        denied = [self._human(_at(0)), self._result(
+            _at(1), _HOOK_BLOCK_TEXT, is_error=True, toolDenialKind="permission-rule")]
+        self.assertEqual(self._hits(denied), [], "結構化阻斷沒被認成佐證")
+        done = self._run(denied)
+        self.assertEqual(done.returncode, 0, "本守衛永不阻斷")
+        self.assertNotIn("被擋／水位", done.stderr)
+        plain = [self._human(_at(0)), self._result(_at(1), _HOOK_BLOCK_TEXT)]
+        self.assertTrue(self._hits(plain), "對照組：同一段文字不帶欄位就不該算佐證")
+
+    def test_any_non_empty_kind_counts_and_empty_ones_do_not(self) -> None:
+        """欄位值是觀察所得（本機全是 `permission-rule`），故認任一非空值、不點名；空值不算。"""
+        for value, backed in (("permission-rule", True), ("some-new-kind", True),
+                              ("", False), (None, False), (False, False), (0, False)):
+            with self.subTest(toolDenialKind=value):
+                lines = [self._human(_at(0)),
+                         self._result(_at(1), "無關文字", toolDenialKind=value)]
+                self.assertEqual(not self._hits(lines), backed)
+
+    def test_a_bare_denial_record_is_read_even_without_a_tool_result_block(self) -> None:
+        """前篩鎖：欄位是判準本體，單獨出現（沒有 `tool_result` 字面）也要進得來。"""
+        bare = json.dumps({"type": "user", "timestamp": _at(1),
+                           "toolDenialKind": "permission-rule"})
+        self.assertEqual(self._hits([self._human(_at(0)), bare]), [])
+
+    def test_a_denial_text_on_an_error_result_backs_it_without_the_field(self) -> None:
+        self.assertIsNone(G.BLOCK_EVIDENCE_RE.search(_NATIVE_DENIAL_TEXT), "前提失效：字樣在詞表內")
+        listed = [{"type": "text", "text": _HOOK_BLOCK_TEXT}]
+        for name, content in (("hook error", _HOOK_BLOCK_TEXT), ("blocks", listed),
+                              ("native", _NATIVE_DENIAL_TEXT)):
+            with self.subTest(content=name):
+                lines = [self._human(_at(0)), self._result(_at(1), content, is_error=True)]
+                self.assertEqual(self._hits(lines), [])
+
+    def test_the_same_words_in_ordinary_output_are_not_evidence(self) -> None:
+        quoted = "Exit code 1\nAssertionError: 'PreToolUse:PowerShell hook error: [x]' not in out"
+        for name, kwargs, text in (
+                ("一般結果", {}, _HOOK_BLOCK_TEXT),
+                ("一般結果裡的原生拒絕字面", {}, _NATIVE_DENIAL_TEXT),
+                ("一般結果裡的欄位名字面", {}, "toolDenialKind: permission-rule ⇒ 一次被擋"),
+                ("is_error 明確為假", {"is_error": False}, _HOOK_BLOCK_TEXT),
+                ("is_error 但字面不在行首", {"is_error": True}, quoted),
+                ("is_error 但與阻斷無關", {"is_error": True}, "Exit code 1\nNo such file")):
+            with self.subTest(name):
+                lines = [self._human(_at(0)), self._result(_at(1), text, **kwargs)]
+                self.assertTrue(self._hits(lines), f"{name}被當成阻斷佐證")
+
+    def test_a_denial_outside_the_recent_window_no_longer_backs_a_later_claim(self) -> None:
+        def denial(minute: int) -> str:
+            return self._result(_at(minute), _HOOK_BLOCK_TEXT, is_error=True,
+                                toolDenialKind="permission-rule")
+        stale = [self._human(_at(0)), denial(1), self._human(_at(2)), self._human(_at(4))]
+        fresh = [self._human(_at(0)), self._human(_at(2)), denial(3), self._human(_at(4))]
+        self.assertTrue(self._hits(stale), "兩回合前的阻斷替現在的宣稱背書了")
+        self.assertEqual(self._hits(fresh), [], "邊界之後（前一回合）的阻斷該算數")
+
+    def test_a_session_start_brief_is_not_evidence_but_a_guards_notice_is(self) -> None:
+        brief = ("[SDD-CTX-GUARD] context：本 session 尚無量測（新視窗）；額度：cap=2 "
+                 "band=unmeasured；現查 python tools/session_resume_planner.py --check／--pace")
+        self.assertTrue(G.BLOCK_EVIDENCE_RE.search(brief), "前提失效：簡報字面不在詞表內")
+        opening = [self._human(_at(0)), self._context(_at(1), "SessionStart", brief)]
+        self.assertTrue(self._hits(opening), "SessionStart 簡報替宣稱背書了")
+        done = self._run(opening)
+        self.assertEqual(done.returncode, 0)
+        self.assertIn("被擋／水位", done.stderr)
+        for event in ("PreToolUse", "PostToolUse"):
+            with self.subTest(hookEvent=event):
+                lines = [self._human(_at(0)), self._context(_at(1), event, brief)]
+                self.assertEqual(self._hits(lines), [])
+
+    def test_the_alert_names_the_structured_field_and_the_defect(self) -> None:
+        done = self._run([self._human(_at(0))])
+        self.assertIn("被擋／水位", done.stderr)
+        for needle in ("toolDenialKind", "DEF-200-428"):
+            self.assertIn(needle, done.stderr)
+
+    def test_the_live_record_shape_is_read_end_to_end(self) -> None:
+        live = self._result(
+            _at(1), _HOOK_BLOCK_TEXT, is_error=True, toolDenialKind="permission-rule",
+            toolUseResult="Error: " + _HOOK_BLOCK_TEXT, sourceToolAssistantUUID="a1",
+            version="2.1.284", userType="external", isSidechain=False)
+        done = self._run([self._human(_at(0)), live, self._human(_at(2))])
+        self.assertEqual(done.returncode, 0)
+        self.assertNotIn("被擋／水位", done.stderr)
+
+    def test_odd_record_shapes_never_raise(self) -> None:
+        """`main()` 吞例外 ⇒ 這裡一拋五個判準整場靜默；怪形狀（含不可雜湊 `hookEvent`）不得拋。"""
+        errors = [{"type": "tool_result", "is_error": True, "content": None},
+                  {"type": "tool_result", "is_error": True, "content": [None, 5, {"text": None}]}]
+        odd = ({}, {"type": "user"}, {"type": "assistant", "toolDenialKind": "x"},
+               {"type": "user", "message": "x"}, {"type": "user", "message": {"content": "x"}},
+               {"type": "user", "message": {"content": [None, "x", 3, {"type": "tool_result"}]}},
+               {"type": "user", "message": {"content": errors}})
+        for record in odd:
+            with self.subTest(record=record):
+                self.assertIsNone(G._tool_denial_kind(record))
+        self.assertTrue(G._tool_denial_kind({"type": "user", "toolDenialKind": {"k": 1}}))
+        att = {"attachment": {"type": "hook_additional_context", "hookEvent": ["SessionStart"],
+                              "content": ["x"]}}
+        text = G._block_evidence_text([att, {"tool_denial": "k"}, None, "x"])
+        self.assertIn("x", text)
+        self.assertIn(G._DENIAL_MARK, text)
+        # 內部旗標必須是不可列印字元：可讀字面會在 Read 到本 hook 原始碼時被當成佐證（自洗白）。
+        self.assertFalse(G._DENIAL_MARK.isprintable())
 
 
 if __name__ == "__main__":

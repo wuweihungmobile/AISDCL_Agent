@@ -133,6 +133,12 @@ mac 清掉的檔案與 Windows 一模一樣，而事故就發生在 macOS——�
   （前四者毀的不是未提交的工作樹內容；`apply -R` 是把剛套上的 patch 退回去的正當手法而且
   可逆 ⇒ 擋它是製造誤擋）。R84 起**在**射程內的新成員：`git worktree remove --force`
   （不帶 `--force` 時 git 自己會因樹是髒的而拒絕）與 `git checkout-index -f`。
+· **判準③的 call operator 邊界**（DEF-200-429，續 DEF-200-158）：`&` 之前（引號／註解
+  遮蔽後以 `_` 佔位、去尾端空白）為空，或以 `&><|{(=` 收尾，一律當 PowerShell 呼叫運算子放行。
+  仍會**誤放**：`cmd --opt= &`（尾端 `=` 被當賦值右值 ⇒ 漏擋）。仍會**誤擋**：`return & exe`
+  （關鍵字後）、`<# 註解 #> & exe`（區塊註解遮蔽後是佔位）、`Set-Location C:\\dir\\`↵`& exe`
+  （路徑以反斜線收尾 ⇒ `_LINE_CONT_RE` 把兩行折成一段）——誤擋走 `# waitform-ok: <理由>`。
+  `"./job.sh" &`（引號包住的命令＋後綴 `&`）**不**在此列：quoted 視圖看得到前文 ⇒ 仍擋。
 """
 
 from __future__ import annotations
@@ -899,26 +905,38 @@ _PGREP_VALUE_LONG = frozenset({
 _WAITFORM_EXEMPT_RE = re.compile(r"#\s*waitform-ok:\s*\S")
 
 
-def _fold(command: str) -> str:
-    """遮蔽 ＋ 折回 bash 行接續，回**與原字串等長**的結構面（判準①②共用）。"""
-    return _LINE_CONT_RE.sub(lambda m: " " * len(m.group(0)), mask_inert(command))
+def _fold(command: str, *, quoted: bool = False) -> str:
+    """遮蔽 ＋ 折回 bash 行接續，回**與原字串等長**的結構面（判準①②③共用）。
+
+    `quoted=True`（DEF-200-429）：被遮掉的**非空白**字元改填 `_` 佔位而不是空白，用來回答
+    「這個 `&` 之前**有沒有東西**」——`"./job.sh" &` 遮蔽後前文全空白，會被誤當成段首的
+    call operator。只換空白字元 ⇒ `;`／換行位置不變，兩個視圖切出的段一一對應。
+    """
+    masked = mask_inert(command)
+    if quoted:
+        masked = "".join("_" if m == " " and c not in " \t\r\n" else m
+                         for m, c in zip(masked, command))
+    return _LINE_CONT_RE.sub(lambda m: " " * len(m.group(0)), masked)
 
 
 def _background_amps(segment: str) -> bool:
-    """這一段裡有沒有**真的背景化**的 `&`（排除 `&&`／`2>&1`／`&>`／`|&`）。
+    """這一段裡有沒有**真的背景化**的 `&`（排除 `&&`／`2>&1`／`&>`／`|&`／call operator）。
 
     每一種排除都對應一個會製造假紅的真實寫法：`a && b`（邏輯與）、`cmd 2>&1`（重導，
-    與背景毫無語意關係）、`cmd &> log`（bash 的合併重導）、`cmd |& next`（管線含 stderr）。
+    與背景毫無語意關係）、`cmd &> log`（bash 的合併重導）、`cmd |& next`（管線含 stderr）、
+    PowerShell 呼叫運算子 `& <exe>`（DEF-200-158 只放行段首；DEF-200-429 擴及**任何**前面
+    沒有命令可背景化的位置：`; & $py x`、縮排後的 `& $py x`、`$r = & git …`、`{ & exe }`、
+    `(& exe)`、`| & exe`）。判準＝`&` 之前（去尾端空白）為空，或以 `&><|{(=` 收尾。
+    後綴 `cmd &` 前文以命令字元收尾 ⇒ 仍是背景。呼叫端要餵 `_fold(quoted=True)` 的段。
     """
     for i, ch in enumerate(segment):
         if ch != "&":
             continue
         if i + 1 < len(segment) and segment[i + 1] in "&>":
             continue                                   # `&&` / `&>`
-        if i == 0 or segment[i - 1] in "&><|":
-            continue                                   # `&&` 的後半 / `2>&1` / `|&` /
-                                                         # 段首（PowerShell call operator
-                                                         # `& 'C:\...\exe'`，前面沒有命令可背景化）
+        head = segment[:i].rstrip()
+        if not head or head[-1] in "&><|{(=":
+            continue                                   # 見 docstring：前面沒有命令可背景化
         return True
     return False
 
@@ -990,7 +1008,8 @@ def waitform_hits(command: str, *, run_in_background: bool = False) -> list[str]
     · ② `until`／`while` 的**條件內**出現裸 `pgrep -f <非自我否定 pattern>`
     · ③ `run_in_background=True` 搭一個**自己就會立刻返回**的指令（背景 `&`／`disown`）
       — 本輪實測 payload 真的帶得到這個旗標（`tool_input.run_in_background: true`，
-        前景呼叫則整個 key 不存在）⇒ 這一條不是靜態推論。
+        前景呼叫則整個 key 不存在）⇒ 這一條不是靜態推論。前綴 `&`（PowerShell 呼叫運算子
+        `; & exe`／`= & exe`／`{ & exe }`）不算背景，見 `_background_amps()`（DEF-200-429）。
 
     🔴 `wait` 豁免（全指令任一處出現即成立）**只罩 ①③、不罩 ②**——`until ! pgrep …` 的
     死鎖與有沒有 `wait` 無關。這個不對稱是實作逐字的形狀（①③ 住在 `if not waited:` 內、
@@ -1002,8 +1021,10 @@ def waitform_hits(command: str, *, run_in_background: bool = False) -> list[str]
 
     waited = bool(_WAIT_RE.search(masked))
     if not waited:
-        for segment in _STMT_SEP_RE.split(masked):
-            if not _background_amps(segment):
+        # 兩個視圖切出的段一一對應：`&` 的前文看 quoted 視圖，動詞看 masked 視圖
+        for segment, shown in zip(_STMT_SEP_RE.split(masked),
+                                  _STMT_SEP_RE.split(_fold(command, quoted=True))):
+            if not _background_amps(shown):
                 continue
             if _NOHUP_RE.search(segment) or _DETACH_RE.search(segment):
                 hits["nohup／disown／setsid ＋ 背景 `&`：這個工作**脫離 harness 的完成追蹤**"
@@ -1012,7 +1033,8 @@ def waitform_hits(command: str, *, run_in_background: bool = False) -> list[str]
             elif run_in_background:
                 hits["`run_in_background: true` 搭一個自己就會立刻返回的指令（段內有背景 "
                      "`&`）：叫醒你的是**外層殼結束**的那一刻，而它 0 秒就結束 ⇒ 通知到達時"
-                     "工作還在跑"] = None
+                     "工作還在跑（PowerShell 的 `& <exe>` 是呼叫運算子、不算背景；被擋的若是"
+                     "這種寫法＝誤判，請回報 DEF-200-429）"] = None
         if run_in_background and _DETACH_RE.search(masked):
             hits["`run_in_background: true` 搭 `disown`／`setsid`：同上，外層殼與真正的"
                  "工作已經沒有父子關係 ⇒ harness 追蹤不到它結束"] = None

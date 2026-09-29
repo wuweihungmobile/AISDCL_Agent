@@ -1073,7 +1073,9 @@ class TestIronLaw6CriteriaHaveTeeth(unittest.TestCase):
         時會誤觸「自己就會立刻返回」判準。
         """
         for good in ("nohup make a && make b", "nohup python x.py 2>&1 | tee log",
-                     "nohup bash x.sh &> /tmp/log"):
+                     "nohup bash x.sh &> /tmp/log",
+                     "exec 3<&0",              # `<&`：fd 複製（複審補格：四種排除此前只列三種）
+                     "nohup make |& tee log"):  # `|&`：管線含 stderr，同上
             with self.subTest(good=good):
                 self.assertEqual(G.waitform_hits(good), [])
         self.assertEqual(
@@ -1106,6 +1108,101 @@ class TestIronLaw6CriteriaHaveTeeth(unittest.TestCase):
         finally:
             G._COND_END_RE = original  # type: ignore[assignment]
         self.assertEqual(G.waitform_hits(good), [])
+
+
+def _rib_payload(command: str, tool: str = "PowerShell", background: bool = True) -> dict:
+    """前景呼叫整個 `run_in_background` key 不存在（上面 `TestIronLaw6EndToEnd` 實測過）。"""
+    tool_input: dict = {"command": command}
+    if background:
+        tool_input["run_in_background"] = True
+    return {"tool_name": tool, "tool_input": tool_input}
+
+
+#: 主控本場真的被擋下的那條（路徑與 `ARMED_AT` 表達式是還原的；承載判準的只有結構）。
+_DEF429_ARMED = (
+    "$py='D:\\p\\python.exe'; $out='D:\\s\\f.jsonl'; "  # platform-ok: 還原被擋指令
+    "\"ARMED_AT=$(Get-Date -Format o)\"; "
+    "& $py D:\\p\\tools\\probe\\flash_watch.py --seconds 3300 --out $out; "
+    "\"FLASH1_RC=$LASTEXITCODE\""
+)
+#: 修前必紅（HEAD 只放行 index 0）、修後必放行：`&` 之前沒有命令可背景化的各種位置。
+_DEF429_CALL_OPERATOR = (
+    _DEF429_ARMED,
+    '"x"; & $py y.py',                          # 第 2+ 個 statement
+    "$py = 'a'\n  & $py y.py",                   # 多行＋縮排（不縮排時 HEAD 本來就過）
+    "$r = & git rev-parse HEAD",                # 賦值右值
+    "Push-Location x; & $py y.py; Pop-Location",  # 鐵律二的官方成對形態
+    '. "$(git rev-parse --show-toplevel)/tools/lib/Find-GitBash.ps1"; '
+    "& (Find-GitBash) 'tools/x.sh'",            # 根 CLAUDE.md 鐵律一 `.sh` 官方形態
+    "if ($ok) { & $py y.py }", "Write-Output $(& $py y.py)", "Get-Date | & $tool",
+)
+#: 修前修後都必擋：**後綴** `&`（前文以命令字元收尾），含引號包住的命令（遮蔽後前文全空白）。
+_DEF429_STILL_BACKGROUND = (
+    ("PowerShell", "python y.py &"), ("Bash", "python y.py &"),
+    ("Bash", "nohup python y.py > log 2>&1 &"), ("PowerShell", "Start-Process x; python y.py &"),
+    ("PowerShell", '"./job.sh" &'), ("PowerShell", "& $py y.py &"),
+)
+
+
+class TestDef200429CallOperatorIsNotABackgroundAmp(unittest.TestCase):
+    """DEF-200-429（DEF-200-158 殘餘；受測：`.claude/hooks/block_destructive_git.py` 的
+    `_background_amps()`／`_fold(quoted=)`／`waitform_hits()`）：判準③ 只放行 index 0 ⇒
+    `; & $py x`／縮排／`$r = & exe`／`| & exe` 誤判為背景。兩向鎖：放行 `& exe`、仍擋 `cmd &`。"""
+
+    def test_call_operator_positions_are_not_background(self) -> None:
+        for command in _DEF429_CALL_OPERATOR:
+            with self.subTest(command=command[:60]):
+                self.assertEqual(G.waitform_hits(command, run_in_background=True), [])
+
+    def test_a_suffix_amp_is_still_background_in_every_shell(self) -> None:
+        for tool, command in _DEF429_STILL_BACKGROUND:
+            with self.subTest(tool=tool, command=command[:60]):
+                self.assertTrue(G.waitform_hits(command, run_in_background=True))
+                self.assertEqual(run_hook(_rib_payload(command, tool)).returncode, 2)
+
+    def test_the_quoted_view_is_what_keeps_a_quoted_command_blocked(self) -> None:
+        command = '"./job.sh" &'
+        self.assertFalse(G._background_amps(G._fold(command)), "遮蔽視圖前文全空白，看不到命令")
+        self.assertTrue(G._background_amps(G._fold(command, quoted=True)))
+
+    def test_both_views_split_into_the_same_segments(self) -> None:
+        """`waitform_hits()` 以 `zip` 並排兩個視圖；長度或分隔符錯位時 `zip` 只會靜默截斷。"""
+        command = "echo 'a;b'; \"x\ny\" ; & $py z.py\n  & $py w.py \\\n  --k"
+        plain, quoted = G._fold(command), G._fold(command, quoted=True)
+        self.assertEqual(len(plain), len(quoted))
+        self.assertEqual([m.span() for m in G._STMT_SEP_RE.finditer(plain)],
+                         [m.span() for m in G._STMT_SEP_RE.finditer(quoted)])
+
+    def test_the_census_probe_reads_the_real_flag_from_the_transcript(self) -> None:
+        """探針此前把旗標寫死 False ⇒ 判準③ 從未被真實母體量過（本缺陷躲這麼久的結構原因）。"""
+        sys.path.insert(0, str(_REPO_ROOT / "tools" / "probe"))
+        import shell_command_corpus as C  # noqa: PLC0415
+        events = [{"message": {"content": [{"type": "tool_use", "name": "PowerShell",
+                   "input": {"command": "python y.py &", **flag}}]}}
+                  for flag in ({"run_in_background": True}, {})]
+        with tempfile.TemporaryDirectory(prefix="def429-corpus-") as tmp:
+            (Path(tmp) / "slug").mkdir()
+            (Path(tmp) / "slug" / "s.jsonl").write_text(
+                "".join(json.dumps(e) + "\n" for e in events), encoding="utf-8")
+            rows = C.transcript_commands(Path(tmp))
+        self.assertEqual([r[3] for r in rows], [True, False])
+        with mock.patch.object(C, "transcript_commands", return_value=rows):
+            recs = C.build(["transcripts"], "waitform")   # 同一字串、旗標不同 ⇒ 不得去重
+        self.assertEqual({(r["background"], bool(r["hits"]["waitform"])) for r in recs},
+                         {(True, True), (False, False)})
+
+    def test_end_to_end_stdin_json_and_the_hatches(self) -> None:
+        self.assertEqual(run_hook(_rib_payload(_DEF429_ARMED)).returncode, 0)
+        blocked = run_hook(_rib_payload("python y.py &"))
+        self.assertEqual(blocked.returncode, 2, blocked.stderr)
+        self.assertIn("DEF-200-429", blocked.stderr)
+        # 對照：前景呼叫不由判準③管（判準①也不成立：沒有 nohup／disown／setsid）
+        self.assertEqual(G.waitform_hits("python y.py &"), [])
+        self.assertEqual(run_hook(_rib_payload("python y.py &", background=False)).returncode, 0)
+        # 行內豁免的既有行為不變：擋得住的形態靠它放行；本來就放行的形態加上它也照放
+        for command in ("python y.py &", _DEF429_ARMED):
+            self.assertEqual(run_hook(_rib_payload(
+                f"{command}  # waitform-ok: call operator")).returncode, 0)
 
 
 class TestTheFalsePositiveCensusIsRerunnable(unittest.TestCase):

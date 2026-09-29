@@ -512,7 +512,7 @@ def read_context_feed(session_id: str | None, observed_model: object) -> dict:
         raw = context_feed_path(session_id).read_text(encoding="utf-8")
     except FileNotFoundError:
         return {**empty, "reason": "無 feed（statusLine 未設定或本 session 尚無 assistant 訊息）"}
-    except OSError:
+    except (OSError, ValueError):  # ValueError＝非 UTF-8 位元組（UnicodeDecodeError）也算讀不到
         return {**empty, "reason": "feed 讀不到（非不存在）"}
     try:
         doc = json.loads(raw)
@@ -989,7 +989,7 @@ def main() -> int:
             if session_brief is not None and quota_gate is not None:  # R158／P6 round-label-ok
                 emit_to_model(event, session_brief.sessionstart_brief(
                     payload, quota_gate, scan_transcript, resolve_window,
-                    window_evidence, read_context_feed))
+                    window_evidence, read_context_feed, guard=sys.modules[__name__]))
             return 0
         blocking = event == "PreToolUse"
         # 🔴 R83：額度軸只在真的推理過的這兩個事件上動作（白名單，不是「不是 PreToolUse
@@ -998,12 +998,12 @@ def main() -> int:
         measuring = event in ("PreToolUse", "PostToolUse")
         raw_path = payload.get("transcript_path")
         transcript = Path(raw_path) if isinstance(raw_path, str) and raw_path.strip() else None
-        # 🔴 DEF-200-202：模型分軌軸需要 `active_model` 才進 cap 聚合；提前掃逐字稿讓兩把
-        # 尺共用同一次結果（`model_family()` 正規化到與 `axis.scope_model` casefold 相等
-        # 的家族字，依據見 `quota_gate.quota_gate` 檔頭）。
+        # 🔴 DEF-200-202／433：模型分軌軸要有 `active_model` 才進 cap 聚合（依據見
+        # `quota_gate.quota_gate` 檔頭）；逐字稿無 model（新視窗首輪）退用 feed 的 model.id。
         scanned = (scan_transcript(transcript) if measuring and transcript
                   and transcript.is_file() else None)
-        active_model = model_family(scanned[2]) if scanned and scanned[2] else None
+        active_model = model_family(scanned[2] if scanned and scanned[2] else transcript
+                                    and read_context_feed(session_id_of(transcript), None)["note"])
         if measuring and quota_gate is not None and (quota_stop := quota_gate.quota_gate(
                 payload, blocking=BLOCKING_TOOLS, latch_read=announced_latches,
                 latch_write=remember_latch, plan_writer=write_resume_plan,

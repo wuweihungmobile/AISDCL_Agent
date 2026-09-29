@@ -547,6 +547,10 @@ _GOVERNANCE_DOCS = (
     # 登記 open；Windows 11 再執行一輪）的詳情面：同一資格，即刻登記。
     _REPO_ROOT / "docs" / "06_quality"
     / "CrossPlatform_R184_SessionGate_Windows_Recheck6_Evidence.md",
+    # 掌舵者五問第七次四方覆核（DEF-200-428～433 結案、434 登記 open；waitform 呼叫運算子
+    # 假紅／claim guard 結構化阻斷證據／planner session 釘定）的詳情面：同一資格，即刻登記。
+    _REPO_ROOT / "docs" / "06_quality"
+    / "CrossPlatform_R185_SessionGate_Windows_Recheck7_Evidence.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/{CrossPlatform,Quota}_*.md`。這**不是**把具名

@@ -403,14 +403,20 @@ def check_report(data: dict, guard) -> str:
     DEF-200-425：`data["fresh_window"]`（`harness_feed.measure()` 的判定，本檔不 import 它）
     為真＝新視窗首輪的正常態，印中性 ℹ️ 而非 ❌；缺鍵或為假（含 feed 不存在、分不出新視窗
     還是欄位格式漂移）維持 ❌ 原句。兩者都不印百分比、rc 不變。
+    新視窗首輪補印（審查 H5，尚未編 DEF 號）：feed 已有 `used`（`harness_used` 非 None）時
+    補一行 harness 回報數字——那是 harness 自己的數字（與 /context 同源），只是尚無逐字稿可
+    交叉比對；沒有就不補。
     """
     if data["used"] is None:
         if data.get("fresh_window"):
+            seen = data.get("harness_used")
+            harness = ("" if seen is None
+                       else f"   harness 回報 used={seen:,}（feed，尚無逐字稿可交叉比對）\n")
             return (f"ℹ️ {data['transcript']}\n   新視窗：逐字稿還沒有任何帶 message.usage 的"
                     " assistant 記錄（第一則回應落盤前的正常態，harness feed 已在，不是故障）。"
                     "「量不到」與「量到零」必須分得開，故不印百分比；第一則回應落盤後再跑一次"
                     "即有數字，額度現查 --pace。若不是剛開的視窗卻持續如此，"
-                    "才是逐字稿欄位格式已變更。\n")
+                    "才是逐字稿欄位格式已變更。\n" + harness)
         return (f"❌ {data['transcript']}\n   掃不到任何帶 message.usage 的 assistant 記錄"
                 " —— 「量不到」與「量到零」必須分得開，故不印百分比。"
                 "逐字稿剛建立、或欄位格式已變更都會走到這裡。\n")

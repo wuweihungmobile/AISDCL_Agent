@@ -10,7 +10,6 @@ stdlib only（同 `tools/lib/endurance_env.py` 的既有慣例）：不 import
 """
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 #: DEF-200-408：差值非 0 最常見的成因是 feed 與逐字稿**各自獨立落盤**的時序差——status line
@@ -18,6 +17,44 @@ from pathlib import Path
 #: （Windows 真機實測：一次印 差=15,580 ＝該則的 cache_creation，下一次 差=0）。少了這句，
 #: 一個瞬間差值會被讀成「數字不符＝新缺陷」；差=0 時不附，免得每次都多一截噪音。
 DIFF_HINT = "（差值非 0 常見於 feed 與逐字稿寫入時序差，下一次呼叫通常歸零；持續非 0 才需查）"
+
+#: DEF-200-431：Claude Code 注入工具子行程（與 hook 子行程）環境的「本視窗 session id」。
+#: 真機實測：PowerShell 工具內 `$env:CLAUDE_CODE_SESSION_ID` 即本視窗的逐字稿檔名。
+SESSION_ID_ENV = "CLAUDE_CODE_SESSION_ID"
+#: `pick_transcript()` 回的來源標籤（`session_line()` 原樣印給使用者看，不用猜這份數字是誰的）。
+SOURCE_TRANSCRIPT = "參數 --transcript"
+SOURCE_ARG = "參數 --session-id"
+SOURCE_ENV = f"環境變數 {SESSION_ID_ENV}"
+_LATEST_CAVEAT = "；同 slug 有多個視窗時可能不是本視窗，要精準請帶 --session-id"
+
+
+def pick_transcript(base: Path, session_id: str | None, environ) -> tuple[Path | None, str]:
+    """DEF-200-431：在逐字稿目錄 `base` 下決定「本視窗」是哪一支，回 `(路徑或 None, 來源標籤)`。
+
+    優先序：`--session-id` 明示（檔不存在＝`None`，明示的參數不退用）→ 環境變數
+    `CLAUDE_CODE_SESSION_ID` 且對應檔存在 → 最後修改（退用）。此前只有最後一階：掌舵者慣開
+    多視窗，另一個視窗（或 headless `claude -p`）一寫檔就成為「最後修改」，`--check`／`--pace`
+    便讀到別人的逐字稿——連「重啟指令 claude -r <id>」都是別人的 id，而「差=0」交叉比對看不出
+    被劫持（feed 依 sid 取，跟著錯的逐字稿走）。環境變數只認 `[A-Za-z0-9_-]`（不讓它變成路徑）。
+    """
+    if session_id:
+        candidate = base / f"{session_id}.jsonl"
+        return (candidate if candidate.is_file() else None), SOURCE_ARG
+    env_sid = str(environ.get(SESSION_ID_ENV) or "").strip()
+    bare = env_sid.replace("-", "").replace("_", "")
+    if env_sid and bare.isascii() and bare.isalnum():  # 只認 ASCII 英數：docstring 與程式同一句話
+        if (candidate := base / f"{env_sid}.jsonl").is_file():
+            return candidate, SOURCE_ENV
+    found = [p for p in base.glob("*.jsonl") if p.is_file()]
+    latest = max(found, key=lambda p: p.stat().st_mtime) if found else None
+    why = (f"{SESSION_ID_ENV}={env_sid} 對應的逐字稿不存在，已退用" if env_sid
+           else f"未設 {SESSION_ID_ENV}")
+    return latest, f"最後修改（{why}{_LATEST_CAVEAT}）"
+
+
+def session_line(source: str, sid: str) -> str:
+    """DEF-200-431：`--check`／`--pace`／任務書輸出的「session 來源」那一行。"""
+    return f"session 來源＝{source}（sid={sid}）"
 
 
 def measure(transcript: Path, guard) -> dict:
@@ -103,21 +140,17 @@ def check_lines(data: dict) -> list[str]:
 def _feed_model_family(transcript: Path, guard) -> str | None:
     """DEF-200-424（DEF-200-420 延伸）：新視窗首輪逐字稿還沒有任何 assistant 記錄
     （`scan_transcript` 回不出 model），模型只有 status line feed 知道——feed 在 TUI 啟動時
-    就寫了 `model.id`，`current_usage` 為 null 也一樣。`read_context_feed()` 的回傳沒有
-    `model.id`（只回 `{window, note, used, reason}`），故這裡自己讀 feed 檔；路徑、sid、
-    家族字一律走 `guard` 既有函式，`session_id` 比對式與 `read_context_feed()` 同一條。
+    就寫了 `model.id`，`current_usage` 為 null 也一樣。
+
+    DEF-200-433：解析本體改走 `guard.read_context_feed()` 的 `note`（`model=<id>`，`model_family`
+    是子字串比對，直接認得出家族），不再自己讀一次 feed 檔——PreToolUse hook 的退路（守衛不得
+    import 本檔）用的正是同一條，三個消費者（hook／`--pace`／SessionStart 簡報）從此只有一種
+    解析，不會在「feed 缺 `context_window_size`」這類邊角各說各話。
 
     feed 不存在、壞 JSON、`session_id` 不符、缺 `model.id`、認不出家族一律回 `None`（fail-soft）。
     """
-    sid = guard.session_id_of(transcript)
-    try:
-        doc = json.loads(guard.context_feed_path(sid).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    if not isinstance(doc, dict) or doc.get("session_id") != sid:
-        return None
-    model = doc.get("model")
-    return (guard.model_family(model.get("id")) or None) if isinstance(model, dict) else None
+    note = guard.read_context_feed(guard.session_id_of(transcript), None)["note"]
+    return guard.model_family(note) or None
 
 
 def active_model_of(transcript: Path | None, guard) -> str | None:
@@ -129,9 +162,11 @@ def active_model_of(transcript: Path | None, guard) -> str | None:
     七軸讀數逐字相同，差異全來自 active_model 有無）。
 
     逐字稿優先：它有 model 字串就以它為準（與 hook 同尺）；只有逐字稿還沒有任何 assistant
-    記錄（新視窗首輪，hook 那一側此時也解不出）才退用 status line feed 的 `model.id`
-    （`_feed_model_family`）。此前新視窗首輪 `--pace` 因此排除模型軸、印出比守衛寬鬆的
-    cap，等到第一則回應落盤後 hook 才從逐字稿解到模型而收緊——同一個視窗前後兩種說法。
+    記錄（新視窗首輪）才退用 status line feed 的 `model.id`（`_feed_model_family`）。此前
+    新視窗首輪 `--pace` 因此排除模型軸、印出比守衛寬鬆的 cap，等到第一則回應落盤後 hook
+    才從逐字稿解到模型而收緊——同一個視窗前後兩種說法。DEF-200-433：hook 端此前只讀逐字稿
+    （本函式的 docstring 曾宣稱與它同尺，新視窗首輪並不成立），現已補上同一條 feed 退路，
+    兩邊才真的同尺（鎖：`ActiveModelFallsBackToFeedInTheGuardTest`）。
 
     `transcript` 為 `None`／不是檔案，或掃描途中出任何例外，一律回 `None`（fail-soft：
     解不出就維持既有「不確定 → 保守排除」行為，不用猜的頂替）。呼叫端的顯式 `--model`
@@ -148,3 +183,24 @@ def active_model_of(transcript: Path | None, guard) -> str | None:
         return _feed_model_family(transcript, guard)
     except Exception:
         return None
+
+
+def start_model_of(payload: dict, transcript: Path | None, guard) -> str | None:
+    """DEF-200-432：SessionStart 簡報額度行的 active model（`decide(active_model=…)` 用）。
+
+    此前簡報的 `decide()` 一律沒帶 active_model ⇒ 新鮮快取下模型分軌軸被排除，簡報印
+    `cap=4 band=notice`，同一份快取數秒後 `--pace`／守衛印 `cap=1 band=prepare`（Fable）。
+
+    順序：payload 的 `model`（新視窗那一刻逐字稿檔常還沒建、feed 與 hook 賽跑差 0～1 秒，
+    只有它保證在場；真機實測 headless `-p` 的 payload 不帶此鍵，互動式 startup／resume 為
+    靜態閱讀所見、runtime 未擷取）→ 逐字稿存在時與 `--pace` 同一個函式（`active_model_of`，
+    含它「逐字稿無 model 才退 feed」的規則）→ 逐字稿檔還不存在時直接查同 sid 的 feed
+    （`active_model_of` 對不存在的檔回 None，故補直呼 `_feed_model_family`——它只取路徑的
+    stem，不要求檔在）。皆解不出回 `None`＝與此前行為逐字相同。
+    """
+    family = guard.model_family(payload.get("model")) if isinstance(payload, dict) else ""
+    if family or transcript is None:
+        return family or None
+    if transcript.is_file():
+        return active_model_of(transcript, guard)
+    return _feed_model_family(transcript, guard)

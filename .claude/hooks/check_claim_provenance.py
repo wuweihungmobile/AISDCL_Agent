@@ -271,6 +271,27 @@ harness 代筆，見 `_is_genuine_user_turn`）role=user 訊息之後」（本�
 `tools/tests/test_claim_provenance_r86.py::TestTheBlockClaimEvidenceWindowIsRecentTurnsOnly`。
 處置同其餘判準：**只出聲，永不阻斷**。
 
+證據面改認結構欄位、拿掉每場必有的簡報（DEF-200-428／430）
+----------------------------------------------------------
+詞表對「別的 hook 的阻斷訊息」結構性失明。本機頂層 68 支逐字稿（2026-09-29 現查）帶
+`toolDenialKind` 的記錄 138 筆／39 支；其中 hook 阻斷 131 筆，106 筆（80.9%，36 支）的
+訊息不含 `BLOCK_EVIDENCE_RE` 任一詞 ⇒ 真的被擋、事後一句「本場被擋一次」照樣判無佐證。
+擴詞表走不通（現查：`已擋下` 只中 131 筆裡的 21 筆；`擋下` 一般結果 276 筆雜訊、`鐵律`
+244 筆、裸 `hook error` 10 筆）⇒ 改認 Claude Code 自己落盤的**結構**：`type=user` 記錄
+頂層任一非空的 `toolDenialKind`（138/138 皆有）＝一次被擋，與訊息文字無關；欄位缺席時
+（CC 2.1.223 等舊版尚無此欄）的備援只認 `is_error` 的 tool_result 且內文是**行首**的
+`PreToolUse:<Tool> hook error` 或原生的 `denied by your|permission …`（341 筆無欄位的
+`is_error` 結果只有 1 筆原生拒絕命中；同字面在一般結果的 8＋2 筆都不算）。兩者由
+`_tool_denial_kind()` 收進 `records`，`_block_evidence_text()` 再補一個內部旗標
+（`_DENIAL_MARK`）進證據字串——旗標是控制字元而非可讀字面：可讀字面會在 Read 到本檔或
+證據檔時出現在一般輸出，重演下一段講的那種失鑑別。
+另一半是拿掉：`hookEvent=SessionStart` 的 `hook_additional_context`（簡報）每個新視窗
+必有、字面帶 `--check`／`cap=`／`band=`（本機 69 筆，28 筆含詞表字樣），等於替新視窗
+第一回合所有「被擋／水位」宣稱背書；一個每場都成立的證據沒有鑑別力，「才開新視窗就說
+被擋」因此抓不到。與 `hookEvent=Stop`（本 hook 自己的警報）同理排除；PreToolUse／
+PostToolUse 守衛自己的水位通知照舊算數。回歸鎖：`tools/tests/test_claim_provenance_r86.py`
+的 `TestTheBlockClaimEvidenceReadsStructuredDenials`。
+
 誠實劃界（本檔抓不到什麼）
 ------------------------
 · **不帶值的判決只治「赤裸」那一型**（第四個判準）：本場零工具輸出 ＋ 同句堆疊 ≥2 個
@@ -303,6 +324,14 @@ harness 代筆，見 `_is_genuine_user_turn`）role=user 訊息之後」（本�
   （見「證據面窄化」段）。少於兩則真人訊息（例如 session 剛開始的第一輪）時沒有邊界可
   切，仍退回全場——這個殘餘缺口在實務上代價很低（那個時間點逐字稿本來就短），但誠實
   登記：它不是「窮盡消除全場代價」，只是把代價收斂到「兩回合前及更早」那一段。
+· `toolDenialKind` 是**觀察所得的欄位、不是官方契約**（本機 138/138，CC 2.1.248～2.1.284
+  共 14 個版本皆有）。欄位改名或消失時，備援只剩 `_DENIAL_TEXT_RE` 的兩種字面（限
+  `is_error`）；連字面也變了就退回舊詞表——判準會在真被擋時重新出聲（假紅方向，文案已
+  附回報指引）。原生阻斷（如 `Remove-Item on system path … is blocked`，本機 7 筆）只有
+  欄位這條路：詞表與備援字面都不認它。
+· SessionStart 簡報不算佐證的代價：新視窗第一回合若只是轉述簡報裡的水位／額度字樣（沒跑
+  `--check`／`--pace`），「被擋／水位」宣稱同樣會出聲——這是設計（簡報是啟動當下的快照、
+  且每場都有），指路的兩條指令都是零 token 的一行。
 
 判準本體 `unsourced_verdict_hits()` 是純函式，由 `tools/tests/test_claim_provenance_r86.py`
 機械釘住（含合成注入紅綠雙向自證）。依賴方向與 `lint_powershell_command.py` 同：
@@ -685,6 +714,12 @@ BLOCK_CLAIM_RE = re.compile(
     r"deny|denied|blocked|context\s*已滿|context\s*爆|水位過高|水位太高)",
     re.IGNORECASE)
 
+#: 結構化阻斷證據的內部旗標（DEF-200-428）：`_block_evidence_text` 為每筆 `_tool_denial_kind`
+#: 命中的記錄補一段，證據面因此維持「一段字串＋一條 regex」的既有契約。刻意是控制字元而不是
+#: 可讀字面：可讀字面（如 `toolDenialKind=`）在 Read 到本檔或證據檔時會出現在一般 tool_result，
+#: 重演 DEF-200-430「每場都成立的證據沒有鑑別力」；控制字元不會出現在檔案內容或工具輸出。
+_DENIAL_MARK = "\x1ftool-denial\x1f"
+
 #: 本場「這件事真的發生過」的佐證形狀。`deny`／`[SDD-FSM]`／`[SDD-CTX]` 是機械物自己印的
 #: 字首，`used=` 是 D12 之後每則 deny 訊息必帶的真實數字，`--check` 是查證指令本身的名字
 #: ——引用了查證指令也算「已經去查過」，不強迫一定要逐字貼出 deny 內容。
@@ -697,7 +732,8 @@ BLOCK_CLAIM_RE = re.compile(
 #:     本 repo 任何 hook 印的字，是 harness 內建的，逐字固定、本機全母體實測 6 筆逐字相同。
 BLOCK_EVIDENCE_RE = re.compile(
     r"(permissionDecision|deny|\[SDD-FSM\]|\[SDD-CTX\]|used=|--check|"
-    r"kind=|band=|cap=|requested permissions|haven't granted)", re.IGNORECASE)
+    r"kind=|band=|cap=|requested permissions|haven't granted|"
+    + re.escape(_DENIAL_MARK) + ")", re.IGNORECASE)
 
 
 def unbacked_block_claim_hits(claim_text: str, evidence_text: str) -> list[dict]:
@@ -710,7 +746,7 @@ def unbacked_block_claim_hits(claim_text: str, evidence_text: str) -> list[dict]
     落盤成 hook attachment（見 `_block_evidence_text`），一個字樣都沒有就代表本場沒有
     這件事的任何痕跡，那句「被擋了」只能是記憶／臆測，不是這一場真的發生過的事。
 
-    `evidence_text` 是**全場**的證據（tool_result ＋ 兩型 hook attachment 的合併文字），
+    `evidence_text` 是**全場**的證據（tool_result ＋ 兩型 hook attachment ＋ 結構化阻斷旗標），
     不逐句比對——被擋事件與宣稱它的那句話本來就常常不在同一句裡（先被擋、事後收工時
     才提一句），逐句比對會對這個判準結構性失明。
     """
@@ -772,7 +808,10 @@ _INTERESTING = ('"tool_result"', '"hook_success"', '"hook_non_blocking_error"',
                 # hits()` 因此量不到『回合邊界』。兩種寫法都收：真實落盤是 `"role":"user"`
                 # （無空白）；`json.dumps` 預設吐 `"role": "user"`（一個空白）——本檔測試
                 # 用後者合成逐字稿，兩邊都要匹配。
-                '"role":"user"', '"role": "user"')
+                '"role":"user"', '"role": "user"',
+                # DEF-200-428：結構化阻斷欄位。真實記錄同時帶 `"tool_result"` 而被前篩收進來，
+                # 但欄位是判準本體、不該賴另一個字面的巧合——欄位單獨出現也要進得來。
+                '"toolDenialKind"')
 
 
 #: 操作者輸入的出處值域（`origin.kind`／`turnOrigin`）。`claude -p` 的 prompt 是
@@ -845,10 +884,50 @@ def _is_genuine_user_turn(content, record=None) -> bool:
     return True
 
 
+#: 備援判準：`toolDenialKind` 缺席時（CC 2.1.223 等舊版尚無此欄），只認 `is_error` 的
+#: tool_result 且內文是下列兩種阻斷字面之一：**行首**的 `PreToolUse:<Tool> hook error`
+#: （harness 給 hook 阻斷的固定前綴）；原生權限拒絕的 `denied by your|permission …`（本機
+#: 1 筆：`<tool_use_error>File is in a directory that is denied by your permission settings.`）。
+#: 行首錨定與 `is_error` 限定都是降雜訊：同字面出現在一般輸出（Read 到證據檔、測試失敗的
+#: 斷言引文）不算阻斷——`denied by …` 無欄位結果共 3 筆，1 筆 `is_error` 真阻斷、2 筆引文。
+_DENIAL_TEXT_RE = re.compile(
+    r"^[ \t]*PreToolUse:\S+ hook error|(?i:denied by (?:your|permission))", re.MULTILINE)
+
+
+def _tool_denial_kind(record: dict) -> str | None:
+    """DEF-200-428：`record` 是一次工具被阻斷的結果記錄 ⇒ 非空標籤，否則 `None`。
+
+    ① **結構欄位優先**：`type=user` 記錄頂層任一非空的 `toolDenialKind`（本機 138/138；
+    觀察所得、非官方契約，見檔頭誠實劃界），與訊息文字無關。② **備援**：欄位缺席時，
+    `is_error` 的 tool_result 且內文符合 `_DENIAL_TEXT_RE`。形狀不符一律回 `None`、
+    絕不拋——`main()` 吞下一切例外，這裡一炸五個判準整場靜默。
+    """
+    if record.get("type") != "user":
+        return None
+    kind = record.get("toolDenialKind")
+    if kind:
+        return str(kind)
+    message = record.get("message")
+    content = message.get("content") if isinstance(message, dict) else None
+    if not isinstance(content, list):
+        return None
+    for block in content:
+        if (not isinstance(block, dict) or block.get("type") != "tool_result"
+                or block.get("is_error") is not True):
+            continue
+        inner = block.get("content")
+        if isinstance(inner, list):
+            inner = "\n".join(str(b.get("text") or "") for b in inner if isinstance(b, dict))
+        if isinstance(inner, str) and _DENIAL_TEXT_RE.search(inner):
+            return "denial-text"
+    return None
+
+
 def _read_transcript(transcript_path: str, byte_cap: int = 32 * 1024 * 1024
                      ) -> tuple[list, list, list]:
-    """一次掃完 → `([(落款時刻|None, 工具輸出文字)], [帶 hook attachment 的記錄],
-    [真人 role=user 訊息的落款時刻，依檔案序])`。
+    """一次掃完 → `([(落款時刻|None, 工具輸出文字)], [帶 hook attachment 的記錄，以及
+    `_tool_denial_kind` 命中的 `{"timestamp", "tool_denial"}` 摘要], [真人 role=user 訊息
+    的落款時刻，依檔案序])`。
 
     `byte_cap` 是防呆而非效能手段：本機最大逐字稿 6.0 MB／全場 51 支掃完 10.3 s
     ⇒ 單場遠在預算內。超過上限時**回空字串會讓每個數字都變成命中**（截斷偏向假紅），
@@ -881,6 +960,9 @@ def _read_transcript(transcript_path: str, byte_cap: int = 32 * 1024 * 1024
                 continue
             if isinstance(record.get("attachment"), dict):
                 records.append(record)
+            denial = _tool_denial_kind(record)
+            if denial:
+                records.append({"timestamp": record.get("timestamp"), "tool_denial": denial})
             when = _parse_aware(record.get("timestamp"))
             message = record.get("message")
             if not isinstance(message, dict):
@@ -909,23 +991,35 @@ def _tool_output_digits(transcript_path: str, byte_cap: int = 32 * 1024 * 1024) 
                      _read_transcript(transcript_path, byte_cap)[0])
 
 
+#: `hook_additional_context` 不算「被擋」佐證的事件。用 tuple 而非 set：`hookEvent` 來自
+#: 逐字稿 JSON，可能是 list/dict 等不可雜湊值，`in set` 會拋、`in tuple` 只做相等比對。
+_NON_EVIDENCE_HOOK_EVENTS = ("Stop", "SessionStart")
+
+
 def _block_evidence_text(records: list) -> str:
     """第五個判準（D15）要用的佐證文字：`hook_blocking_error` 的 deny 訊息本體
-    （`blockingError.blockingError`）＋ `hook_additional_context` 的通知內容（`content`）。
+    （`blockingError.blockingError`）＋ `hook_additional_context` 的通知內容（`content`）
+    ＋ 每筆結構化阻斷（`_tool_denial_kind` 摘要）的內部旗標 `_DENIAL_MARK`。
 
-    這兩型 attachment 是「被擋」與「[SDD-CTX]／[SDD-FSM] 通知」在逐字稿裡唯一的落盤
-    形態（見 `_INTERESTING` 旁註的母體現查）。任何形狀不符一律跳過，不得讓一筆壞資料
-    拖垮整支 hook（與本檔其餘 I/O 收口同一慣例）。
+    兩型 attachment 是「[SDD-CTX]／[SDD-FSM] 通知」在逐字稿裡的落盤形態（見 `_INTERESTING`
+    旁註的母體現查）；PreToolUse 的 hook 阻斷**不**以 `hook_blocking_error` 落盤（本機該型
+    64 筆全是 PostToolUse），而是 `toolDenialKind` 記錄（DEF-200-428，見檔頭）。任何形狀
+    不符一律跳過，不得讓一筆壞資料拖垮整支 hook（與本檔其餘 I/O 收口同一慣例）。
 
-    🔴 **`hookEvent == "Stop"` 的 `hook_additional_context` 不算佐證**：那是本 hook 自己
-    上一則警報的落盤形態（`attachment.hookEvent`／`hookName` 皆為 `"Stop"`；警報內文
-    列舉 `deny／[SDD-FSM]／[SDD-CTX]／used=／--check`，正是 `BLOCK_EVIDENCE_RE` 的詞表）。
-    Stop 事件在回覆**之後**才觸發，它的內容只可能是對某則宣稱的評語，不可能是被擋事件
-    本身的觀測；收進來，第二次起同窗口的同型宣稱就被自己的警報洗白。`hookEvent` 缺席
-    （舊版／合成語料）維持既有行為：照收。
+    🔴 **`hookEvent` 為 `Stop`／`SessionStart` 的 `hook_additional_context` 不算佐證**
+    （`_NON_EVIDENCE_HOOK_EVENTS`）。Stop：那是本 hook 自己上一則警報的落盤形態
+    （`attachment.hookEvent`／`hookName` 皆為 `"Stop"`；警報內文列舉 `deny／[SDD-FSM]／
+    [SDD-CTX]／used=／--check`，正是 `BLOCK_EVIDENCE_RE` 的詞表）。Stop 事件在回覆**之後**
+    才觸發，它的內容只可能是對某則宣稱的評語，不可能是被擋事件本身的觀測；收進來，第二次
+    起同窗口的同型宣稱就被自己的警報洗白。SessionStart（DEF-200-430）：每個新視窗必有
+    的簡報，字面必帶 `--check`／`cap=`／`band=`，對第一回合的證據永遠非空、沒有鑑別力。
+    `hookEvent` 缺席（舊版／合成語料）維持既有行為：照收。
     """
     parts: list[str] = []
     for rec in records:
+        if isinstance(rec, dict) and rec.get("tool_denial"):
+            parts.append(_DENIAL_MARK + str(rec["tool_denial"]))
+            continue
         att = rec.get("attachment") if isinstance(rec, dict) else None
         if not isinstance(att, dict):
             continue
@@ -936,8 +1030,8 @@ def _block_evidence_text(records: list) -> str:
             if isinstance(text, str):
                 parts.append(text)
         elif kind == "hook_additional_context":
-            if att.get("hookEvent") == "Stop":
-                continue  # 本 hook 自己的警報：不得替下一則同型宣稱背書（見 docstring）
+            if att.get("hookEvent") in _NON_EVIDENCE_HOOK_EVENTS:
+                continue  # 自己的警報／每場必有的簡報：不得替宣稱背書（見 docstring）
             content = att.get("content")
             if isinstance(content, list):
                 parts.extend(str(c) for c in content if isinstance(c, str))
@@ -1084,7 +1178,9 @@ def main() -> int:
                 listed = "／".join(f"「{h['phrase']}」" for h in blocked[:4])
                 messages.append(
                     f"🔴 這一則有 {len(blocked)} 句「被擋／水位」宣稱（{listed}），但本場"
-                    "沒有任何 deny／[SDD-FSM]／[SDD-CTX]／used= 佐證。請先跑 "
+                    "沒有任何 deny／[SDD-FSM]／[SDD-CTX]／used= 佐證（hook 阻斷已改認 "
+                    "toolDenialKind 結構欄位；若你真的被擋卻仍看到本訊息，請回報 "
+                    "DEF-200-428）。請先跑 "
                     "`python tools/session_resume_planner.py --check`（context 水位）"
                     "或 `--pace`（額度；輸出恆帶 band=／cap=），"
                     "或逐字引用 hook 訊息裡的 used=/window=。"

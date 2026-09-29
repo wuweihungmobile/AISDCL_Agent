@@ -7,10 +7,15 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
+import os
+import re
+import shutil
 import sys
+import tempfile
 import types
 import unittest
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest import mock
 
@@ -51,6 +56,32 @@ def _cache_miss_gate():
     """`quota_gate` 替身：`read_quota` 恆丟 `OSError`（模擬無快取，3 個測試共用）。"""
     return _fake_quota_gate(read_quota=lambda now, path=None: (_ for _ in ()).throw(
         OSError("合成：無快取")))
+
+
+def _scoped_state() -> quota_policy.QuotaState:
+    """DEF-200-432：與真機 `--pace` 同形的新鮮讀數（Fable 分軌軸 `weekly_scoped` 已進收緊帶）。"""
+    def iso(minutes: int) -> str:
+        return (_NOW + timedelta(minutes=minutes)).isoformat()
+    axes = (quota_policy.Axis("five_hour", 12.0, iso(200)),
+            quota_policy.Axis("seven_day", 50.0, iso(4864)),
+            quota_policy.Axis("weekly_scoped", 86.0, iso(4864), scope_model="Fable"))
+    return quota_policy.QuotaState(axes, _NOW.isoformat(), "cache", "ok")
+
+
+_VERDICT = re.compile(r"⇒ cap=(\S+) recommended=(\S+) band=(\S+) binding=(\S+)")
+
+
+def _verdict(text: str) -> tuple[str, ...]:
+    """額度行的判定四欄 `(cap, recommended, band, binding)`；找不到回 `()`（斷言端會紅）。"""
+    m = _VERDICT.search(text)
+    return m.groups() if m else ()
+
+
+def _decided(active_model: str | None) -> tuple[str, ...]:
+    """期望值：對同一份讀數跑真的 `decide()`，取同一組四欄——不在測試裡重寫判準。"""
+    policy, _problems = quota_policy.load_policy({})
+    d = quota_policy.decide(_scoped_state(), _NOW, policy, active_model=active_model)
+    return (str(d.cap), str(d.recommended_fanout), d.band, d.binding.kind if d.binding else "-")
 
 
 class QuotaLineTest(unittest.TestCase):
@@ -379,6 +410,149 @@ class SessionstartBriefTest(unittest.TestCase):
         self.assertIn("rc=2", brief, "缺少『rc=2 紅字只代表扇出暫停』的誤讀澄清句")
         self.assertIn("Read／Write／Edit／Bash／git", brief)
         self.assertIn("statusLine：已安裝", brief, "G1 的 statusLine 那一句沒有進最終簡報")
+
+
+class QuotaLineActiveModelTest(unittest.TestCase):
+    """DEF-200-432（受測：`session_brief.quota_line`）：額度行的 `decide()` 此前沒帶
+    `active_model` ⇒ 簡報 `cap=8 band=notice`、`--pace` 卻是 `cap=1 band=prepare`（Fable）。
+    鎖：傳得進去／會改判定／不傳＝逐字不變；期望值取自真的 `decide()`，且帶／不帶兩值須不同。"""
+
+    def _gate(self):
+        return _fake_quota_gate(read_quota=lambda now, path=None: _scoped_state())
+
+    def test_active_model_reaches_decide(self) -> None:
+        seen: list[object] = []
+        real = quota_policy.decide
+
+        def _spy(*args, **kwargs):
+            seen.append(kwargs.get("active_model", "<未傳>"))
+            return real(*args, **kwargs)
+
+        gate = types.SimpleNamespace(
+            quota_policy=types.SimpleNamespace(
+                load_policy=quota_policy.load_policy, decide=_spy,
+                describe=quota_policy.describe),
+            read_quota=lambda now, path=None: _scoped_state(), policy_env=lambda: {})
+        sb.quota_line(gate, _NOW, "fable")
+        sb.quota_line(gate, _NOW)
+        self.assertEqual(seen, ["fable", None], "active_model 沒傳進 decide()（或缺席時不是 None）")
+
+    def test_the_fable_line_speaks_the_verdict_decide_gives_and_differs_from_blind(self) -> None:
+        blind = _verdict(sb.quota_line(self._gate(), _NOW))
+        fable = _verdict(sb.quota_line(self._gate(), _NOW, "fable"))
+        self.assertEqual(fable, _decided("fable"), "簡報的判定與真的 decide(fable) 不同")
+        self.assertEqual(blind, _decided(None))
+        self.assertNotEqual(fable, blind, "夾具對模型沒有鑑別力：帶不帶 fable 判定相同")
+        self.assertEqual(fable[3], "weekly_scoped", "Fable 軸沒成為 binding ⇒ 沒進 cap 聚合")
+
+    def test_another_model_keeps_the_scoped_axis_out(self) -> None:
+        self.assertEqual(_verdict(sb.quota_line(self._gate(), _NOW, "sonnet")),
+                         _verdict(sb.quota_line(self._gate(), _NOW)))
+
+    def test_the_line_says_which_model_it_was_computed_for(self) -> None:
+        with_model = sb.quota_line(self._gate(), _NOW, "fable")
+        self.assertIn("active_model=fable", with_model)
+        self.assertIn("model=Fable", with_model, "軸自己的 scope_model 字面（與 --pace 同）不見了")
+        self.assertNotIn("active_model=", sb.quota_line(self._gate(), _NOW))
+
+    def test_no_model_is_byte_identical_to_the_legacy_call(self) -> None:
+        legacy = sb.quota_line(self._gate(), _NOW)
+        self.assertEqual(sb.quota_line(self._gate(), _NOW, None), legacy)
+
+    def test_an_unmeasured_line_carries_no_model_marker(self) -> None:
+        """快取量不到（`axes == ()`）時模型沒有作用，不附標記（免得退化政策值旁多一句假精確）。"""
+        stale = quota_policy.QuotaState((), "", "stale-cache", "stale-cache（測試）")
+        got = sb.quota_line(_fake_quota_gate(read_quota=lambda now, path=None: stale),
+                            _NOW, "fable")
+        self.assertIn("stale-cache", got)
+        self.assertNotIn("active_model=", got)
+
+
+class SessionstartBriefActiveModelTest(unittest.TestCase):
+    """DEF-200-432（受測：`sessionstart_brief(guard=…)` → `_active_model` →
+    `harness_feed.start_model_of`）：新視窗逐字稿檔常還沒建，順序＝payload `model` → 逐字稿 →
+    同 sid feed `model.id`（headless `-p` 的 payload 不帶 `model`）。`guard` 用真的模組。"""
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="brief-model-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        hooks_dir = str(_REPO_ROOT / ".claude" / "hooks")
+        if hooks_dir not in sys.path:
+            sys.path.insert(0, hooks_dir)
+        import context_budget_guard  # noqa: PLC0415 — 延遲：只有本類需要真守衛
+        self.guard = context_budget_guard
+        env = mock.patch.dict(
+            os.environ, {context_budget_guard.CONTEXT_FEED_DIR_ENV: str(self.tmp)}, clear=False)
+        env.start()
+        self.addCleanup(env.stop)
+        self.gate = _fake_quota_gate(read_quota=lambda now, path=None: _scoped_state())
+        self.transcript = self.tmp / "sess-brief.jsonl"  # 刻意不建檔：新視窗那一刻它還不存在
+
+    def _write_feed(self, model_id: str, *, sid: str = "sess-brief") -> None:
+        (self.tmp / f"{sid}.json").write_text(json.dumps({
+            "session_id": sid, "model": {"id": model_id},
+            "context_window": {"context_window_size": 1_000_000, "current_usage": None},
+        }), encoding="utf-8")
+
+    def _brief(self, payload: dict, **extra: object) -> str:
+        return sb.sessionstart_brief(
+            payload, self.gate, scan_transcript=lambda p: (None, 0, None),
+            resolve_window=lambda *a, **k: (1_000_000, "測試"), window_evidence=lambda *a, **k: {},
+            read_context_feed=lambda *a: {}, now=_NOW,
+            check_statusline=lambda: {"installed": True}, **extra)
+
+    def _payload(self, **extra: object) -> dict:
+        return {"transcript_path": str(self.transcript), **extra}
+
+    def test_the_payload_model_makes_the_brief_speak_the_pace_verdict(self) -> None:
+        got = self._brief(self._payload(model="claude-fable-5-1"), guard=self.guard)
+        self.assertEqual(_verdict(got), _decided("fable"))
+        self.assertNotEqual(_verdict(got), _decided(None), "夾具對模型沒有鑑別力")
+        self.assertIn("active_model=fable", got)
+
+    def test_without_a_payload_model_a_fresh_feed_supplies_it(self) -> None:
+        self._write_feed("claude-fable-5-1")
+        got = self._brief(self._payload(), guard=self.guard)
+        self.assertEqual(_verdict(got), _decided("fable"))
+
+    def test_the_payload_beats_the_feed(self) -> None:
+        self._write_feed("claude-fable-5-1")
+        got = self._brief(self._payload(model="claude-sonnet-5-5"), guard=self.guard)
+        self.assertEqual(_verdict(got), _decided(None), "feed 說 fable 卻壓過了 payload 的 sonnet")
+        self.assertIn("active_model=sonnet", got)
+
+    def test_a_feed_that_says_sonnet_keeps_the_fable_axis_out(self) -> None:
+        self._write_feed("claude-sonnet-5-5")
+        got = self._brief(self._payload(), guard=self.guard)
+        self.assertEqual(_verdict(got), _decided(None))
+        self.assertIn("active_model=sonnet", got)
+
+    def test_nothing_known_is_byte_identical_to_the_legacy_call(self) -> None:
+        legacy = self._brief(self._payload())
+        self.assertEqual(self._brief(self._payload(), guard=self.guard), legacy)
+        self.assertNotIn("active_model", legacy)
+
+    def test_a_foreign_feed_is_not_believed(self) -> None:
+        self._write_feed("claude-fable-5-1", sid="sess-brief")
+        (self.tmp / "sess-brief.json").write_text(json.dumps({
+            "session_id": "someone-else", "model": {"id": "claude-fable-5-1"},
+            "context_window": {"context_window_size": 1_000_000}}), encoding="utf-8")
+        got = self._brief(self._payload(), guard=self.guard)
+        self.assertEqual(_verdict(got), _decided(None))
+        self.assertNotIn("active_model=", got)
+
+    def test_without_a_guard_the_payload_model_cannot_be_resolved(self) -> None:
+        """既有的六位置引數呼叫（沒傳 `guard`）逐字相容：即使 payload 帶了模型也照舊。"""
+        got = self._brief(self._payload(model="claude-fable-5-1"))
+        self.assertEqual(_verdict(got), _decided(None))
+        self.assertNotIn("active_model", got)
+
+    def test_a_broken_guard_fails_open_to_the_legacy_line(self) -> None:
+        def _boom(_model: object) -> str:
+            raise RuntimeError("合成：guard 壞了")
+        broken = types.SimpleNamespace(model_family=_boom)
+        got = self._brief(self._payload(model="claude-fable-5-1"), guard=broken)
+        self.assertEqual(_verdict(got), _decided(None), "guard 壞掉不該讓簡報崩潰或改判")
 
 
 if __name__ == "__main__":

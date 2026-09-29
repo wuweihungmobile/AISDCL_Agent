@@ -122,25 +122,26 @@ _SCHTASKS_PRINCIPAL = ("New-ScheduledTaskPrincipal -UserId \"$env:USERDOMAIN\\$e
                        "-LogonType S4U -RunLevel Limited")
 
 
-# 優先序：`--transcript` 顯式路徑 → `--session-id` 對應的 `<id>.jsonl` →
-# 專案目錄下**最後修改**的那一支（根 CLAUDE.md 對「當前 session」的既有判準）。
-def resolve_transcript(
-    session_id: str | None = None,
-    transcript: str | None = None,
-    repo_root: Path | None = None,
-) -> Path | None:
-    """定位本 session 的逐字稿；`None`＝找不到（呼叫端負責 fail-loud）。"""
+# 優先序：`--transcript` 顯式路徑 → `--session-id` 對應的 `<id>.jsonl` → 環境變數
+# `CLAUDE_CODE_SESSION_ID`（DEF-200-431：多視窗時「最後修改」會是別人的）→ 專案目錄下
+# **最後修改**的那一支（根 CLAUDE.md 對「當前 session」的既有判準，現為最後一階退用）。
+# 判準本體住 `harness_feed.pick_transcript()`；這裡只多回一個「來源」標籤給呼叫端印出來。
+def resolve_transcript_source(session_id: str | None = None, transcript: str | None = None,
+                              repo_root: Path | None = None) -> tuple[Path | None, str]:
+    """`(逐字稿或 None, 來源標籤)`；`None`＝找不到（呼叫端負責 fail-loud）。"""
     if transcript:
         candidate = Path(transcript)
-        return candidate if candidate.is_file() else None
+        return (candidate if candidate.is_file() else None), harness_feed.SOURCE_TRANSCRIPT
     base = project_transcript_dir(repo_root or _REPO_ROOT)
     if not base.is_dir():
-        return None
-    if session_id:
-        candidate = base / f"{session_id}.jsonl"
-        return candidate if candidate.is_file() else None
-    found = [p for p in base.glob("*.jsonl") if p.is_file()]
-    return max(found, key=lambda p: p.stat().st_mtime) if found else None
+        return None, ""
+    return harness_feed.pick_transcript(base, session_id, os.environ)
+
+
+def resolve_transcript(session_id: str | None = None, transcript: str | None = None,
+                       repo_root: Path | None = None) -> Path | None:
+    """定位本 session 的逐字稿；`None`＝找不到（呼叫端負責 fail-loud）。"""
+    return resolve_transcript_source(session_id, transcript, repo_root)[0]
 
 
 # 🔴 R79：window 的證據來源改由 `guard.window_evidence()` 一次收齊。本檔自己不重寫
@@ -1564,8 +1565,10 @@ def main(argv: list[str]) -> int:
         # 修3（R95；ADR §2.9）：哨兵活性欄，同時 D23 用 sid 判本 session 是否 halt 未過期
         # （見 pace_report 的 sid 分支）。定位不到 session 時靜默跳過（不依賴逐字稿的契約
         # 不變）；定位得到而 stamp 與排程器現查不一致才出聲。
-        aim = resolve_transcript(args.session_id, args.transcript)
+        aim, source = resolve_transcript_source(args.session_id, args.transcript)
         print(quota_gate.pace_report(model=args.model or harness_feed.active_model_of(aim, guard), sid=guard.session_id_of(aim) if aim else None), end="")  # noqa: E501 — DEF-200-420：自動推導，顯式 --model 優先
+        if aim:  # DEF-200-431：印出 session 來源（stderr，stdout 的四欄判定不動）
+            print(harness_feed.session_line(source, guard.session_id_of(aim)), file=sys.stderr)
         liveness = sentinel_lifecycle.liveness_line(guard.session_id_of(aim)) if aim else ""
         if liveness:
             print(liveness, file=sys.stderr)
@@ -1579,7 +1582,7 @@ def main(argv: list[str]) -> int:
     if args.remove_schtasks:
         return _schtasks_remove(args.task_name)
 
-    transcript = resolve_transcript(args.session_id, args.transcript)
+    transcript, source = resolve_transcript_source(args.session_id, args.transcript)
     if transcript is None and args.arm_sentinel and args.transcript:
         # 🔴 唯一一個「路徑還不存在也接受」的入口，而且理由是結構性的：哨兵由
         # SessionStart 武裝，而那一刻逐字稿檔案往往還沒被建立出來。它不做量測、
@@ -1587,13 +1590,14 @@ def main(argv: list[str]) -> int:
         # 在 payload 裡給的）。其餘入口一律維持 fail-loud。
         transcript = Path(args.transcript)
     if transcript is None:
-        print(f"❌ 找不到逐字稿。依序試過：--transcript / --session-id / {project_transcript_dir(_REPO_ROOT)} 下最後修改的 *.jsonl。\n   fail-loud 是刻意的：定位不到 session 時產出的任務書會綁錯 session id，而那個 id 正是重啟指令唯一的參數。", file=sys.stderr)  # noqa: E501
+        print(f"❌ 找不到逐字稿。依序試過：--transcript / --session-id / 環境變數 CLAUDE_CODE_SESSION_ID / {project_transcript_dir(_REPO_ROOT)} 下最後修改的 *.jsonl。\n   fail-loud 是刻意的：定位不到 session 時產出的任務書會綁錯 session id，而那個 id 正是重啟指令唯一的參數。", file=sys.stderr)  # noqa: E501
         return 1
 
     data = measure(transcript)
 
     if args.check:
         print(endurance_env.unattended_outcome_banner(), end="")  # noqa: E501 — FIX3(b)：無人續跑停下未讀結局，開頭主動印
+        print(harness_feed.session_line(source, data["session_id"]))  # DEF-200-431：這份數字是誰的
         print(endurance_env.check_report(data, guard), end="")
         # D32-4／D32b-3：harness 旁註（分子交叉比對，或未採用時的 reason）一份判準
         # 給 CLI 與 hook 共用，見 `harness_feed.check_lines()`。
@@ -1635,6 +1639,7 @@ def main(argv: list[str]) -> int:
     print(f"✅ 可重啟點任務書骨架已寫到：{out}")
     print("   🔴 帶 TODO: 的欄位本工具不代填——它不知道你驗過什麼。")
     print(f"   重啟指令（可直接複製）：claude -r {data['session_id']}")
+    print(f"   {harness_feed.session_line(source, data['session_id'])}")  # DEF-200-431
     # 兩條武裝路的差別在被呼叫的那個函式，不在這個分派——合成一句是為了騰出 LOC
     # 餘裕（本檔 `guardrail_cli` tier 上限 750，門檻一格都沒有調高），語意不變：
     # `--arm-sentinel` 仍優先於 `--arm-endurance`。

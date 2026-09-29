@@ -427,7 +427,7 @@ def _isolated_env(tmp: Path, *, real_scheduler: bool = False) -> dict[str, str]:
                  "AUTOSDD_QUOTA_FANOUT_CAP", "AUTOSDD_HANDBACK_DIR",
                  # D32：status line feed 目錄——不清掉的話，開發機上若真的裝了 status
                  # line，子行程會讀到真實 feed 檔而讓 window 判定的測試變得不確定。
-                 "AUTOSDD_CONTEXT_FEED_DIR"):
+                 "AUTOSDD_CONTEXT_FEED_DIR", "CLAUDE_CODE_SESSION_ID"):  # 後者：DEF-200-431
         env.pop(flag, None)
     # 🔴 R84／C3-P4c：**預設不准碰真的排程器**，要碰得自己具名（`real_scheduler=True`）。
     # 立案實測（launchctl 孤兒哨兵）原文＝Resume 證據檔 §L-3.3；TMPDIR 隔離為何擋不住
@@ -11131,6 +11131,37 @@ class QuotaGateIsWiredToTheBurnPathTest(unittest.TestCase):
         self.assertEqual(guard.main(), 2,
                          "逐字稿真的用 Fable、該軸也真的撞 halt，卻沒被擋 ⇒ 接線沒生效")
 
+    def test_a_fresh_window_takes_its_model_from_the_feed_so_the_scoped_axis_brakes(self) -> None:
+        """DEF-200-433：新視窗首輪逐字稿（零 assistant 記錄）＋ feed 說 Fable、Fable 軸已撞 halt
+        ⇒ 必擋（此前只讀逐字稿 ⇒ `active_model` None ⇒ 放行）。對照組：feed 說 sonnet ⇒ 不擋。"""
+        _quota_cache(self.tmp, None, extra=(("session", 5.0, 3600.0),
+                                            ("weekly_scoped", 99.0, 60.0)),
+                     scope_models={"weekly_scoped": "Fable"})  # 落在 setUp 已改道的快取路徑
+        feed_env = unittest.mock.patch.dict(
+            os.environ, {guard.CONTEXT_FEED_DIR_ENV: str(self.tmp)}, clear=False)
+        feed_env.start()
+        self.addCleanup(feed_env.stop)
+        sink = open(os.devnull, "w", encoding="utf-8")
+        self.addCleanup(sink.close)
+        old_err, sys.stderr = sys.stderr, sink
+        self.addCleanup(setattr, sys, "stderr", old_err)
+        for name, value in (("write_resume_plan", lambda t: str(self.tmp / "p.md")),
+                            ("arm_when_earned", lambda t: None),
+                            ("arm_quota_wakeup", lambda t, p: {"armed": True})):
+            old = getattr(guard, name)
+            setattr(guard, name, value)
+            self.addCleanup(setattr, guard, name, old)
+        fresh = _write_jsonl(self.tmp / "sid-fresh.jsonl", [])
+        self.addCleanup(setattr, guard, "read_payload", guard.read_payload)
+        guard.read_payload = lambda: {"hook_event_name": "PostToolUse", "tool_name": "Read",
+                                      "transcript_path": str(fresh)}
+        _write_feed(self.tmp, {**_FEED_SAMPLE, "session_id": "sid-fresh",
+                               "model": {"id": "claude-sonnet-5"}})
+        self.assertEqual(guard.main(), 0, "feed 說 sonnet 卻擋了 ⇒ Fable 軸被誤命中")
+        _write_feed(self.tmp, {**_FEED_SAMPLE, "session_id": "sid-fresh"})  # 模型 claude-fable-5-1
+        self.assertEqual(guard.main(), 2,
+                         "新視窗首輪 feed 說 Fable、該軸也撞 halt，卻沒被擋 ⇒ 守衛仍只讀逐字稿")
+
     def test_post_tool_use_at_halt_writes_a_plan_and_says_so(self) -> None:
         """紅端這裡是 rc=0／stderr 0B／零任務書——那正是訴求 6c 至今沒生效的那一格。"""
         _quota_cache(self.tmp, 96.0)
@@ -11921,6 +11952,32 @@ class PaceAutoDerivesActiveModelTest(unittest.TestCase):
         self.assertTrue(verdict(auto), f"找不到判定摘要：{auto}")
         self.assertEqual(verdict(auto), verdict(explicit),
                          "新視窗的自動推導與顯式 --model fable 說出不同的判定")
+
+    def test_pace_follows_the_env_session_and_names_the_source_on_stderr(self) -> None:
+        """DEF-200-431：不帶 `--transcript`／`--session-id` 時，`--pace` 的模型跟環境變數的視窗走、
+        不被較新的別人劫持（此前 cap 偏寬）。來源行走 stderr，stdout 的四欄判定契約不動。"""
+        mine = _write_jsonl(self.tmp / "sid-mine.jsonl", [36_000], model="claude-fable-5-1")
+        other = _write_jsonl(self.tmp / "sid-other.jsonl", [36_000], model="claude-sonnet-5")
+        now = time.time()
+        os.utime(mine, (now - 600, now - 600))  # 本視窗的較舊
+        os.utime(other, (now, now))  # 別的視窗較新＝「最後修改」
+        env = unittest.mock.patch.dict(os.environ, {}, clear=False)
+        env.start()
+        self.addCleanup(env.stop)
+        os.environ[harness_feed.SESSION_ID_ENV] = "sid-mine"
+        out, err = io.StringIO(), io.StringIO()
+        with unittest.mock.patch.object(planner, "project_transcript_dir", return_value=self.tmp), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = planner.main(["--pace"])
+        self.assertEqual(rc, 0, out.getvalue())
+        self.assertNotIn("model-scoped-excluded", out.getvalue(), "讀到別的視窗的 sonnet ⇒ 被劫持")
+        verdict = lambda text: re.findall(  # noqa: E731
+            r"⇒ cap=\S+ recommended=\S+ band=\S+ binding=\S+", text)
+        explicit = self._pace(["--pace", "--transcript", str(mine)])
+        self.assertTrue(verdict(out.getvalue()), out.getvalue())
+        self.assertEqual(verdict(out.getvalue()), verdict(explicit))
+        self.assertIn(f"session 來源＝{harness_feed.SOURCE_ENV}（sid=sid-mine）", err.getvalue())
+        self.assertNotIn("session 來源", out.getvalue(), "來源行不得進 stdout")
 
 
 # 沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md〈DEF-200-169 滾動視窗剩餘秒數的立案〉。
@@ -12747,6 +12804,14 @@ class HarnessFeedStageTest(unittest.TestCase):
         got = guard.read_context_feed("sess-harness", "claude-fable-5-1")
         self.assertIsNone(got["window"])
 
+    def test_non_utf8_bytes_are_read_as_unreadable_not_raised(self) -> None:
+        """複審 SF1（DEF-200-433 新曝險）：守衛在額度閘之前多讀一次 feed；非 UTF-8 位元組若讓
+        `read_context_feed()` 拋 `UnicodeDecodeError`，`main()` 的 fail-open 會連額度閘一起跳過。"""
+        (self.tmp / "sess-harness.json").write_bytes(b"\xff\xfe\x00\x81garbage")
+        got = guard.read_context_feed("sess-harness", "claude-fable-5-1")
+        self.assertIsNone(got["window"])
+        self.assertEqual(got["reason"], "feed 讀不到（非不存在）")
+
     def test_model_family_mismatch_is_rejected(self) -> None:
         _write_feed(self.tmp, _FEED_SAMPLE)
         got = guard.read_context_feed("sess-harness", "claude-sonnet-5")
@@ -13059,6 +13124,416 @@ class HarnessFeedStageTest(unittest.TestCase):
         self.assertEqual(rc, 2, stderr)
         self.assertIn("harness feed 未採用", stderr)
         self.assertIn("無 feed", stderr)
+
+    def test_a_fresh_window_report_shows_the_harness_number_when_the_feed_has_one(self) -> None:
+        """審查 H5：新視窗首輪 `--check` 只印 ℹ️，但 feed（與 /context 同源）此時常已有 `used`；
+        有就補一行（仍是 ℹ️、不印百分比、rc 不變），沒有就不補。"""
+        base = {"used": None, "transcript": "T.jsonl", "fresh_window": True}
+        shown = endurance_env.check_report({**base, "harness_used": 257_479}, guard)
+        self.assertTrue(shown.startswith("ℹ️ T.jsonl"), shown)
+        self.assertIn("harness 回報 used=257,479（feed，尚無逐字稿可交叉比對）", shown)
+        self.assertNotIn("harness 回報", endurance_env.check_report(
+            {**base, "harness_used": None}, guard), "feed 沒有數字卻印了 harness 回報")
+        self.assertNotIn("harness 回報", endurance_env.check_report(base, guard))
+        # 接線：真的 measure() → check_report()，數字來自 feed 而不是測試自己捏的
+        ts = _write_jsonl(self.tmp / "sess-harness.jsonl", [])
+        _write_feed(self.tmp, _FEED_SAMPLE)
+        self.assertIn("harness 回報 used=393,900", endurance_env.check_report(
+            planner.measure(ts), guard))
+
+
+#: DEF-200-431／432／433 共用：額度行判定四欄 `⇒ cap=… recommended=… band=… binding=…`。
+_VERDICT_RE = re.compile(r"⇒ cap=(\S+) recommended=(\S+) band=(\S+) binding=(\S+)")
+
+
+def _brief_verdict(text: str) -> tuple[str, ...]:
+    """額度行的判定四欄；找不到回 `()`（斷言端會紅，不會靜默通過）。"""
+    m = _VERDICT_RE.search(text)
+    return m.groups() if m else ()
+
+
+def _scoped_quota_state(now: datetime) -> quota_policy.QuotaState:
+    """與真機 `--pace` 同形的新鮮讀數：Fable 分軌軸已進收緊帶、其餘軸寬鬆。"""
+    def iso(minutes: int) -> str:
+        return (now + timedelta(minutes=minutes)).isoformat()
+    return quota_policy.QuotaState(
+        (quota_policy.Axis("five_hour", 12.0, iso(200)),
+         quota_policy.Axis("seven_day", 50.0, iso(4864)),
+         quota_policy.Axis("weekly_scoped", 86.0, iso(4864), scope_model="Fable")),
+        now.isoformat(), "cache", "ok")
+
+
+def _decided_verdict(state: quota_policy.QuotaState, now: datetime,
+                     active_model: str | None) -> tuple[str, ...]:
+    """期望值：對同一份讀數跑真的 `decide()` 取同一組四欄——不在測試裡重寫判準。"""
+    policy, _problems = quota_policy.load_policy({})
+    d = quota_policy.decide(state, now, policy, active_model=active_model)
+    return (str(d.cap), str(d.recommended_fanout), d.band, d.binding.kind if d.binding else "-")
+
+
+class PlannerSessionResolutionTest(unittest.TestCase):
+    """DEF-200-431（受測：`harness_feed.pick_transcript`／`session_resume_planner.
+    resolve_transcript_source`／`--check` 的來源行）：不帶 `--session-id` 時此前取「最後修改」的
+    逐字稿，無視 `CLAUDE_CODE_SESSION_ID` ⇒ 多視窗下 `--check` 與重啟指令會綁到別人的 session。"""
+
+    def setUp(self) -> None:
+        self.tmp = _tmpdir(self, "session-pick-")
+        self.base = self.tmp / "proj"  # 假的逐字稿目錄（planner 只看這一層）
+        self.base.mkdir()
+        self.mine = _write_jsonl(self.base / "sid-mine.jsonl", [111_000], model="claude-fable-5-1")
+        self.other = _write_jsonl(self.base / "sid-other.jsonl", [222_000],
+                                  model="claude-haiku-4-5")
+        self.decoy = _write_jsonl(self.tmp / "decoy.jsonl", [333_000])  # 目錄之外
+        now = time.time()
+        os.utime(self.mine, (now - 600, now - 600))  # 本視窗的較舊
+        os.utime(self.other, (now, now))  # 別的視窗較新＝「最後修改」
+        self.assertGreater(self.other.stat().st_mtime, self.mine.stat().st_mtime, "夾具前提")
+        env = unittest.mock.patch.dict(os.environ, {
+            guard.CONTEXT_FEED_DIR_ENV: str(self.tmp / "feed"),
+            endurance_env.TRACE_DIR_ENV: str(self.tmp / "traces")}, clear=False)
+        env.start()
+        self.addCleanup(env.stop)
+        proj = unittest.mock.patch.object(planner, "project_transcript_dir", return_value=self.base)
+        proj.start()
+        self.addCleanup(proj.stop)
+        self._env(None)
+
+    @staticmethod
+    def _env(sid: str | None) -> None:
+        """顯式設（`None`＝刪）`CLAUDE_CODE_SESSION_ID`，不繼承開發機真值（由 setUp 還原）。"""
+        if sid is None:
+            os.environ.pop(harness_feed.SESSION_ID_ENV, None)
+        else:
+            os.environ[harness_feed.SESSION_ID_ENV] = sid
+
+    def _main(self, argv: list[str]) -> tuple[str, str]:
+        out, err = io.StringIO(), io.StringIO()
+        with unittest.mock.patch.object(planner.sentinel_lifecycle, "liveness_line",
+                                        lambda *_a, **_k: ""), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = planner.main(argv)
+        self.assertEqual(rc, 0, out.getvalue() + err.getvalue())
+        return out.getvalue(), err.getvalue()
+
+    def test_the_env_session_beats_a_newer_foreign_transcript(self) -> None:
+        self._env("sid-mine")
+        got, source = planner.resolve_transcript_source()
+        self.assertEqual(got, self.mine, "被最後修改的別人劫持了")
+        self.assertEqual(source, harness_feed.SOURCE_ENV)
+        self.assertEqual(planner.resolve_transcript(), self.mine, "薄包裝與本體答案不一致")
+
+    def test_an_env_session_without_a_transcript_falls_back_and_says_why(self) -> None:
+        self._env("sid-gone")
+        got, source = planner.resolve_transcript_source()
+        self.assertEqual(got, self.other)
+        self.assertTrue(source.startswith("最後修改"), source)
+        self.assertIn("sid-gone", source)
+        self.assertIn("不存在", source)
+
+    def test_without_the_env_the_last_modified_is_used_and_admitted(self) -> None:
+        got, source = planner.resolve_transcript_source()
+        self.assertEqual(got, self.other, "環境變數未設時必須維持既有行為")
+        self.assertTrue(source.startswith("最後修改"), source)
+        self.assertIn(f"未設 {harness_feed.SESSION_ID_ENV}", source)
+
+    def test_explicit_arguments_beat_the_env(self) -> None:
+        self._env("sid-mine")
+        got, source = planner.resolve_transcript_source("sid-other")
+        self.assertEqual((got, source), (self.other, harness_feed.SOURCE_ARG))
+        got, source = planner.resolve_transcript_source(None, str(self.other))
+        self.assertEqual((got, source), (self.other, harness_feed.SOURCE_TRANSCRIPT))
+
+    def test_an_explicit_session_id_that_does_not_exist_is_not_replaced_by_the_env(self) -> None:
+        """明示的參數不退用：點名的 id 找不到就是找不到（呼叫端 fail-loud），不換成別的。"""
+        self._env("sid-mine")
+        self.assertEqual(planner.resolve_transcript_source("sid-nope"),
+                         (None, harness_feed.SOURCE_ARG))
+
+    def test_an_env_value_that_is_not_a_plain_id_never_becomes_a_path(self) -> None:
+        unsafe = ("../decoy", "..\\decoy", "sid-mine/../../decoy", "sid mine", "sid-mine.jsonl",
+                  "   ", "C:\\x\\decoy")  # platform-ok: 刻意構造的不合格值，只驗被拒絕
+        for bad in unsafe:
+            with self.subTest(env=bad):
+                self._env(bad)
+                got, _source = planner.resolve_transcript_source()
+                self.assertEqual(got, self.other, "不合格的環境變數值應視同無效，退用最後修改")
+                self.assertNotEqual(got, self.decoy)
+
+    def test_check_reads_the_env_session_and_names_the_source(self) -> None:
+        self._env("sid-mine")
+        out, _err = self._main(["--check"])
+        self.assertIn(f"session 來源＝{harness_feed.SOURCE_ENV}（sid=sid-mine）", out)
+        self.assertIn("session   sid-mine", out)
+        self.assertIn("111,000", out)
+        self.assertIn("claude -r sid-mine", out, "重啟指令綁到別人的 id")
+        self.assertNotIn("sid-other", out)
+        self.assertNotIn("haiku", out)
+
+    def test_check_without_the_env_admits_it_is_guessing(self) -> None:
+        out, _err = self._main(["--check"])
+        self.assertIn("session 來源＝最後修改", out)
+        self.assertIn(f"未設 {harness_feed.SESSION_ID_ENV}", out)
+        self.assertIn("session   sid-other", out)
+
+    def test_the_plan_writer_names_the_source_next_to_the_restart_command(self) -> None:
+        """任務書骨架綁的 session id 就是重啟指令唯一的參數；綁錯的後果最重，來源要看得見。"""
+        self._env("sid-mine")
+        plan = self.tmp / "plan.md"
+        out, _err = self._main(["--out", str(plan)])
+        self.assertIn("claude -r sid-mine", out)
+        self.assertIn(f"session 來源＝{harness_feed.SOURCE_ENV}（sid=sid-mine）", out)
+        self.assertIn("sid-mine", plan.read_text(encoding="utf-8"))
+
+    def test_the_cli_still_fails_loud_when_nothing_can_be_located(self) -> None:
+        empty = self.tmp / "empty"
+        empty.mkdir()
+        self._env("sid-mine")
+        err = io.StringIO()
+        with unittest.mock.patch.object(planner, "project_transcript_dir", return_value=empty), \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+            rc = planner.main(["--check"])
+        self.assertEqual(rc, 1)
+        self.assertIn("找不到逐字稿", err.getvalue())
+
+
+class StartModelOfTest(unittest.TestCase):
+    """DEF-200-432（受測：`harness_feed.start_model_of`，純函式）：簡報額度行的 active model，順序
+    payload `model` → 逐字稿最後模型 → 同 sid feed `model.id`；逐字稿檔還沒建時也要退到 feed。"""
+
+    def setUp(self) -> None:
+        self.tmp = _tmpdir(self, "start-model-")
+        env = unittest.mock.patch.dict(
+            os.environ, {guard.CONTEXT_FEED_DIR_ENV: str(self.tmp)}, clear=False)
+        env.start()
+        self.addCleanup(env.stop)
+        self.missing = self.tmp / "sess-harness.jsonl"  # 刻意不建
+
+    def test_the_payload_model_beats_the_transcript_and_the_feed(self) -> None:
+        ts = _write_jsonl(self.tmp / "sess-harness.jsonl", [1000], model="claude-sonnet-5")
+        _write_feed(self.tmp, {**_FEED_SAMPLE, "model": {"id": "claude-opus-5"}})
+        self.assertEqual(
+            harness_feed.start_model_of({"model": "claude-fable-5-1"}, ts, guard), "fable")
+
+    def test_without_a_payload_model_the_transcript_beats_the_feed(self) -> None:
+        ts = _write_jsonl(self.tmp / "sess-harness.jsonl", [1000], model="claude-sonnet-5")
+        _write_feed(self.tmp, _FEED_SAMPLE)  # feed 說 fable
+        self.assertEqual(harness_feed.start_model_of({}, ts, guard), "sonnet")
+
+    def test_a_transcript_that_does_not_exist_yet_still_falls_back_to_the_feed(self) -> None:
+        _write_feed(self.tmp, _FEED_SAMPLE)
+        self.assertFalse(self.missing.exists(), "夾具前提：逐字稿檔不存在")
+        self.assertEqual(harness_feed.start_model_of({}, self.missing, guard), "fable")
+        self.assertIsNone(harness_feed.active_model_of(self.missing, guard),
+                          "對照：active_model_of 對不存在的檔回 None（本函式為何不能只靠它）")
+
+    def test_a_zero_assistant_transcript_falls_back_to_the_feed(self) -> None:
+        ts = _write_jsonl(self.tmp / "sess-harness.jsonl", [])
+        _write_feed(self.tmp, _FEED_SAMPLE)
+        self.assertEqual(harness_feed.start_model_of({}, ts, guard), "fable")
+
+    def test_an_existing_transcript_with_an_unrecognised_model_is_not_overruled_by_the_feed(
+            self) -> None:
+        """與 `--pace` 同規則：逐字稿有 model 字串（哪怕認不出家族）就以它為準；全無才退 feed。"""
+        ts = _write_jsonl(self.tmp / "sess-harness.jsonl", [1000])  # 預設模型 claude-test-double-3
+        _write_feed(self.tmp, _FEED_SAMPLE)  # feed 說 fable
+        self.assertIsNone(harness_feed.active_model_of(ts, guard), "夾具前提")
+        self.assertIsNone(harness_feed.start_model_of({}, ts, guard))
+
+    def test_nothing_known_is_none(self) -> None:
+        self.assertIsNone(harness_feed.start_model_of({}, self.missing, guard))
+        self.assertIsNone(harness_feed.start_model_of({}, None, guard))
+        self.assertIsNone(harness_feed.start_model_of(None, None, guard))  # type: ignore[arg-type]
+
+    def test_an_unrecognisable_payload_model_falls_through(self) -> None:
+        """認不出家族的 `model`（未來新模型名、空字串、非字串）不得吞掉後面兩階。"""
+        _write_feed(self.tmp, _FEED_SAMPLE)
+        for junk in ("mystery-9", "", None, 42, {"id": "x"}):
+            with self.subTest(model=junk):
+                self.assertEqual(
+                    harness_feed.start_model_of({"model": junk}, self.missing, guard), "fable")
+
+    def test_a_payload_model_needs_no_transcript_at_all(self) -> None:
+        self.assertEqual(
+            harness_feed.start_model_of({"model": "claude-opus-5"}, None, guard), "opus")
+
+
+class SessionStartBriefIsModelAwareTest(unittest.TestCase):
+    """DEF-200-432（接線面：`guard.main()` 的 SessionStart 分支 → `session_brief.
+    sessionstart_brief(guard=…)`）：簡報額度行此前不帶 `active_model` ⇒ 與 `--pace` 判定分歧
+    （簡報 `cap=8 band=notice`／`--pace` `cap=1 band=prepare`）。期望值取自真的 `decide()`。"""
+
+    def setUp(self) -> None:
+        self.tmp = _tmpdir(self, "brief-model-wire-")
+        (self.tmp / "hb").mkdir()
+        self.transcript = self.tmp / "sid-brief.jsonl"  # 刻意不建：新視窗那一刻它還不存在
+        self.now = datetime.now(UTC).astimezone()
+        self.state = _scoped_quota_state(self.now)
+        env = unittest.mock.patch.dict(os.environ, {
+            guard.CONTEXT_FEED_DIR_ENV: str(self.tmp),
+            endurance_env.HANDBACK_DIR_ENV: str(self.tmp / "hb"),
+            guard.SENTINEL_OFF_ENV: "1"}, clear=False)
+        env.start()
+        self.addCleanup(env.stop)
+        self.seen: list[tuple[str, str]] = []
+        emit = lambda event, msg: self.seen.append((event, msg)) is None  # noqa: E731
+        for target, name, value in ((guard.quota_gate, "read_quota",
+                                     lambda now, path=None: self.state),
+                                    (guard, "emit_to_model", emit)):
+            patcher = unittest.mock.patch.object(target, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def _expect(self, active_model: str | None) -> tuple[str, ...]:
+        return _decided_verdict(self.state, self.now, active_model)
+
+    def _write_feed(self, model_id: str) -> None:
+        _write_feed(self.tmp, {**_FEED_SAMPLE, "session_id": "sid-brief",
+                               "model": {"id": model_id}})
+
+    def _brief(self, **payload: object) -> str:
+        body = {"hook_event_name": "SessionStart", "transcript_path": str(self.transcript),
+                **payload}
+        with unittest.mock.patch.object(guard, "read_payload", return_value=body):
+            self.assertEqual(guard.main(), 0)
+        briefs = [m for _event, m in self.seen if "[SDD-CTX-GUARD]" in m]
+        self.assertEqual(len(briefs), 1, "SessionStart 沒有送出真實數字簡報")
+        self.seen.clear()
+        return briefs[0]
+
+    def test_a_fresh_window_brief_speaks_the_pace_verdict_when_the_feed_says_fable(self) -> None:
+        self._write_feed("claude-fable-5-1")
+        got = self._brief()
+        self.assertEqual(_brief_verdict(got), self._expect("fable"),
+                         "簡報額度行沒按 Fable 算 ⇒ 仍比 --pace 寬")
+        self.assertNotEqual(self._expect("fable"), self._expect(None), "夾具對模型沒有鑑別力")
+        self.assertIn("model=Fable", got)
+        self.assertIn("active_model=fable", got)
+
+    def test_the_payload_model_alone_is_enough(self) -> None:
+        got = self._brief(model="claude-fable-5-1")
+        self.assertEqual(_brief_verdict(got), self._expect("fable"))
+
+    def test_another_model_keeps_the_fable_axis_out(self) -> None:
+        self._write_feed("claude-sonnet-5-5")
+        got = self._brief()
+        self.assertEqual(_brief_verdict(got), self._expect(None))
+        self.assertIn("active_model=sonnet", got)
+
+    def test_nothing_known_is_the_legacy_brief(self) -> None:
+        got = self._brief()
+        self.assertEqual(_brief_verdict(got), self._expect(None))
+        self.assertNotIn("active_model", got)
+
+    def test_the_real_launcher_path_wires_the_guard_module_too(self) -> None:
+        """production 的 hook 經 `_hook_launcher.py` 以 `runpy.run_path` 起，`guard` 指到暫時模組——
+        in-process 的 `guard.main()` 測不到，故子行程真跑一次。"""
+        tmp = _tmpdir(self, "brief-launcher-")
+        _quota_cache(tmp, None, extra=(("session", 5.0, 3600.0),
+                                       ("weekly_scoped", 90.0, 3 * 86400.0)),
+                     scope_models={"weekly_scoped": "Fable"})
+        launcher = _REPO_ROOT / ".claude" / "hooks" / "_hook_launcher.py"
+
+        def run(**payload: object) -> str:
+            body = {"hook_event_name": "SessionStart",
+                    "transcript_path": str(tmp / "sid-launch.jsonl"), **payload}
+            proc = subprocess.run(  # child-encoding-ok: launcher 轉手 runpy，guard 自帶 UTF-8
+                [sys.executable, str(launcher), ".claude/hooks/context_budget_guard.py"],
+                input=json.dumps(body), env=_isolated_env(tmp), capture_output=True,
+                encoding="utf-8", errors="replace", timeout=180, check=False)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            briefs = [o["additionalContext"] for o in _emitted(proc.stdout)
+                      if "[SDD-CTX-GUARD]" in o["additionalContext"]]
+            self.assertEqual(len(briefs), 1, proc.stdout + proc.stderr)
+            return briefs[0]
+
+        blind = run()
+        aware = run(model="claude-fable-5-1")
+        self.assertNotIn("binding=weekly_scoped", blind, "夾具對模型沒有鑑別力")
+        self.assertIn("binding=weekly_scoped", aware,
+                      "launcher 路徑沒把 guard 傳進 sessionstart_brief ⇒ 簡報仍不知道模型")
+        self.assertIn("active_model=fable", aware)
+
+
+class ActiveModelFallsBackToFeedInTheGuardTest(unittest.TestCase):
+    """DEF-200-433（受測：`context_budget_guard.main()` 的 `active_model` 解析）：此前只讀逐字稿 ⇒
+    新視窗首輪模型軸被排除，比 `--pace`（DEF-200-424 起退用 feed）寬。spy 攔 `quota_gate.quota_gate`
+    收到的 `active_model`，並與 planner 的 `harness_feed.active_model_of` 逐格對照（同尺）。"""
+
+    def setUp(self) -> None:
+        self.tmp = _tmpdir(self, "guard-model-")
+        env = unittest.mock.patch.dict(
+            os.environ, {guard.CONTEXT_FEED_DIR_ENV: str(self.tmp)}, clear=False)
+        env.start()
+        self.addCleanup(env.stop)
+        self.seen: list[object] = []
+        spy = unittest.mock.patch.object(
+            guard.quota_gate, "quota_gate",
+            side_effect=lambda payload, **kw: self.seen.append(kw.get("active_model", "<未傳>")))
+        spy.start()
+        self.addCleanup(spy.stop)
+        noop = unittest.mock.patch.object(guard, "arm_when_earned", lambda t: None)
+        noop.start()
+        self.addCleanup(noop.stop)
+
+    def _feed(self, sid: str, model_id: object = "claude-fable-5-1", **over: object) -> None:
+        _write_feed(self.tmp, {**_FEED_SAMPLE, "session_id": sid, "model": {"id": model_id},
+                               **over})
+
+    def _active(self, transcript: Path | None, event: str = "PreToolUse") -> object:
+        payload: dict = {"hook_event_name": event, "tool_name": "Read"}
+        if transcript is not None:
+            payload["transcript_path"] = str(transcript)
+        self.seen.clear()
+        with unittest.mock.patch.object(guard, "read_payload", return_value=payload), \
+                contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(guard.main(), 0)
+        self.assertEqual(len(self.seen), 1, "額度閘沒被問到恰好一次 ⇒ 接線斷了")
+        return self.seen[0]
+
+    def test_a_fresh_transcript_takes_the_model_from_the_feed_like_pace_does(self) -> None:
+        ts = _write_jsonl(self.tmp / "sid-fresh.jsonl", [])
+        self._feed("sid-fresh")
+        self.assertEqual(guard.scan_transcript(ts), (None, 0, None), "夾具前提：逐字稿零 assistant")
+        self.assertEqual(self._active(ts), "fable")
+        self.assertEqual(self._active(ts, "PostToolUse"), "fable")
+        self.assertEqual(harness_feed.active_model_of(ts, guard), "fable", "planner 那把尺")
+
+    def test_a_transcript_that_does_not_exist_yet_still_takes_the_feed(self) -> None:
+        self._feed("sid-nofile")
+        self.assertEqual(self._active(self.tmp / "sid-nofile.jsonl"), "fable")
+
+    def test_the_transcript_model_beats_the_feed(self) -> None:
+        ts = _write_jsonl(self.tmp / "sid-both.jsonl", [1000], model="claude-sonnet-5")
+        self._feed("sid-both")  # feed 說 fable
+        self.assertEqual(self._active(ts), "sonnet", "feed 蓋過了逐字稿 ⇒ 與 --pace 不同尺")
+        self.assertEqual(harness_feed.active_model_of(ts, guard), "sonnet")
+
+    def test_nothing_known_stays_none(self) -> None:
+        ts = _write_jsonl(self.tmp / "sid-blank.jsonl", [])
+        self.assertIsNone(self._active(ts), "沒有 feed 卻憑空猜了模型")
+        self.assertIsNone(harness_feed.active_model_of(ts, guard))
+        self.assertIsNone(self._active(None), "payload 沒給逐字稿路徑 ⇒ 沒有 sid 可查 feed")
+
+    def test_a_foreign_broken_or_unrecognisable_feed_is_not_believed(self) -> None:
+        ts = _write_jsonl(self.tmp / "sid-picky.jsonl", [])
+        feed = self.tmp / "sid-picky.json"
+        good = {**_FEED_SAMPLE, "session_id": "sid-picky"}
+        cases = {
+            "session_id 不符": json.dumps({**good, "session_id": "someone-else"}),
+            "壞 JSON": "{not json",
+            "不是物件": "[1, 2]",
+            "缺 model 鍵": json.dumps({k: v for k, v in good.items() if k != "model"}),
+            "model.id 認不出家族": json.dumps({**good, "model": {"id": "mystery-9"}}),
+            # 邊角：feed 不合格到連 window 都不採用時，模型也不採用（共用 `read_context_feed()`）。
+            "缺 context_window_size": json.dumps({**good, "context_window": {}}),
+        }
+        feed.write_text(json.dumps(good), encoding="utf-8")
+        self.assertEqual(self._active(ts), "fable", "對照組：好 feed 讀得到")
+        for name, raw in cases.items():
+            with self.subTest(name):
+                feed.write_text(raw, encoding="utf-8")
+                self.assertIsNone(self._active(ts))
+                self.assertIsNone(harness_feed.active_model_of(ts, guard))
 
 
 def tearDownModule() -> None:
