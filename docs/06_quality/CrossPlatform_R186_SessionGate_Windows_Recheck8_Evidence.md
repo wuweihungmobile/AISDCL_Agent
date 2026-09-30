@@ -74,7 +74,11 @@
 
 ## 七、根層全套、push 與雲端驗收
 
-（收尾時回填。）
+- 根層全套見〈六〉（`SUITE_FINAL_RC=0`、4876 個測試、真實 TEMP 圍籬零變動）。
+- commit `80dbd90`（74 files changed, 4633 insertions(+), 1418 deletions(-)；pre-commit `✅ 全部通過`，ROOT-TOOLS-WARN 三支 tools/lib 餘裕 ≤1 行為既有非阻塞提示）。
+- push：`38f4cbd..80dbd90  main -> main`、`[pre-push dispatcher] ✅ 本次 push 觸發的所有 leg 皆通過（rc=0）`（`[cpu_budget] parallel legs: root=18 autoclaude=2 sdd=2 wall=170s`；`✅ 本機 CI 閘門全數通過（版本：AISDLC_SDD_v0.01 AISDLC_SDD_v0.30）`、FRAMEWORK_STATUS.md 新鮮）、`PUSH_RC=0`；`git rev-parse HEAD`＝`origin/main`＝`80dbd90a66bfccdd6df93f795d36d70504a8c086`。
+- 雲端（主控 PowerShell 迴圈每 60 秒 `gh run list --commit 80dbd90a66bfccdd6df93f795d36d70504a8c086` 輪詢至全部 completed，2026-10-01 00:41:09 收斂）：`aisdlc-sdd-ci` 36743817768 **success**、`AutoClaude CI` 36743817894 **success**、`macos-compat-ci` 36743817906 **success**、`root-infra-ci` 36743817675 **success**、`windows-compat-ci` 36743817580 **success**（`CLOUD_DONE non_success=0`）。`macos-compat-ci` 成功＝本輪新測試已在雲端 macOS runner 跑過（〈八〉第 6 條的一部分）；真機項目仍待 Mac。
+- **Q5 本輪結論**：修復面全部落地（全套、pre-push 三 leg、雲端五支 success），但依 SA 操作型定義**尚未收斂**（〈一〉Q5）；下一輪 R187 在 Mac 執行驗證輪。本節為 push 後回填，隨後以 docs commit 再 push 一次。
 
 ## 八、Mac 交棒（掌舵者：「下輪到 MAC 執行!」；承 R183～R185〈八〉，指令形態沿用）
 
