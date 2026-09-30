@@ -6,16 +6,10 @@ sdd-fsm-chaos stage 用一行式印 bounded 摘要取證：
 
     & $script:PyExe -c "... print('bounded=%s/%s' % (d['a'], d['b'])) ..."
 
-該檔 `$script:PyExe` 解析到的 `python`，在裝了 pyenv-win 的機器上是 **python.bat**
-shim（不是 python.exe）。batch 會先對命令列做百分號展開，把 `%s` 這種未定義的
-`%x` 序列直接吃掉，送到 Python 手上時 `'...%s...' % (...)` 已變成 `'...'(...)`
-＝字串後面直接接括號 → `SyntaxWarning: 'str' object is not callable` +
-`TypeError`，rc=1。
-
-危害不是「少印一行摘要」而是**訊號污染**：chaos 測試本身 34 支全過
-（pytest_rc=0 sweep_rc=0），卻因 parse_rc=1 讓整個 stage 判 fail、nightly
-exit=1；隔天早上 `tools/dev_start.py` 的心跳哨兵便報「上一輪 nightly 有失敗」，
-把使用者導去追一個不存在的迴歸，真失敗反而被淹沒在常亮紅燈裡。
+該檔 `$script:PyExe` 在裝了 pyenv-win 的機器上是 **python.bat** shim：batch 先對命令列做百分號展
+開，把 `%s` 吃掉，`'...%s...' % (...)` 變成 `'...'(...)` ⇒ TypeError rc=1——危害是**訊號污染**
+（chaos 測試本身全過卻讓整個 stage 判 fail、nightly exit=1，導去追不存在的迴歸）。事故全文搬至
+Guard_Line_History_2.md〈R186 淨減法搬遷〉§47。  round-label-ok
 
 判準：`.ps1` 全檔掃描（**不排除 AISDLC_SDD 凍結版本**——R44/R45/R46 三輪連續
 事故的結構性根因正是「新規則預設排除凍結版本」，故本檔一視同仁；落地當下實測

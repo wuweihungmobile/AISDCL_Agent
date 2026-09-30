@@ -66,19 +66,10 @@ def _load_parity():
     return module
 
 
-# 🔴 R79 ARCH：本檔第 2 件事（`TestNonPythonSitesCallTheSsot`）取代了 866 行機械。
-#
-# 舊形狀：`root-infra-ci.yml` 第 2 道與 `tools/windows_smoke_local.ps1` [1/9] 各自
-# 用 `Get-ChildItem -Recurse -Filter *.ps1` 列舉同一份掃描面（＝SSOT 的第 2、第 3 份
-# 複本）。因為兩者是 YAML／PowerShell、無法 import 本 SSOT，repo 改為「偵測三份是否
-# 同步」——`tools/tests/_ci_scan_anchors.py`（154 行）三條對抗式正則錨 ＋
-# `tools/tests/test_ci_scan_anchors.py`（712 行，8 class／26 支）鎖那三條錨的鑑別力。
-# 該路線已翻車兩次（R56 的 `-Path` 具名參數假設、R57 的大小寫敏感假設），且錨自己的
-# docstring 逐條寫著三種**已實測抓不到**的逃逸形態（`[System.IO.Directory]::GetFiles()`／
-# `Get-Item`／`Resolve-Path`）——軍備競賽結構上追不完。
-#
-# 新形狀：兩個非 Python 站點改為**呼叫**本 SSOT 的 `--list` CLI 取得掃描面。「三份
-# 不同步」自此在結構上不可能發生（只剩一份），那 866 行連同三種已知逃逸一起退場。
+# 🔴 本檔第 2 件事（`TestNonPythonSitesCallTheSsot`）取代了 866 行對抗式正則錨
+# （`tools/tests/_ci_scan_anchors.py`＋`tools/tests/test_ci_scan_anchors.py`）：兩個非 Python 站點
+# 改為**呼叫** SSOT 的 `--list` CLI，「三份不同步」結構上不可能發生；舊路線沿革搬至
+# Guard_Line_History_2.md〈R186 淨減法搬遷〉§60。  round-label-ok
 # 殘餘義務只剩兩條，且兩條都不需要解析 PowerShell 參數形態：
 #   (a) 兩個站點真的呼叫 SSOT（正面）；
 #   (b) 兩個站點沒有自己再長出一份 `.ps1` 列舉（負面）——這一條才是有牙的那條，
@@ -90,14 +81,8 @@ def _load_parity():
 #: 兩個非 Python 站點呼叫 SSOT 時**必須**出現的識別字／旗標，逐格附「少了它會怎樣」。
 #: 這不是風格檢查：每一格對應一種**靜默**失效——CLI 仍回 rc=0，看起來一切正常。
 #:
-#: 🔴 R79 四方複審（ARCH blocking）補進 `--with-latest`：本表原先只有三格，而少一個
-#: `--with-latest` 會讓 AISDLC_SDD LATEST 版整棵樹逸出掃描面。複審實測：掃描面由 20 支
-#: 縮成 16 支、LATEST 那一棵的 per-tree 下限**完全沒有被檢查**，而 CLI 回 **rc=0**、
-#: 本鎖兩支測試**全綠**。也就是說：本輪拿來取代 866 行對抗式錨的那句立論（「掃描面
-#: 靜默縮小必須 rc=1、複本不同步結構上不可能發生」）被這道替代鎖自己重新開了一個縫，
-#: 而 LATEST 樹正是 Copy-on-Evolve 每升一版就換路徑、最容易被人順手拿掉的那一格。
-#: 同輪落在 pre-push 的姊妹鎖（`tools/tests/test_pre_push_dispatcher.py`）對同一件事有守
-#: ——同一輪、同一件事、兩道鎖鑑別力不一致，弱的那道守的正是本次異動的兩個主站點。
+#: 🔴 R79 四方複審補進 `--with-latest`：少它 LATEST 整棵樹逸出掃描面（20 支縮成 16 支），而 CLI 仍
+#: rc=0、兩支測試全綠。全文搬至 Guard_Line_History_2.md〈R186 淨減法搬遷〉§61。  round-label-ok
 #:
 #: 「哪些旗標算必要」不是口味問題，是**量測值**：見
 #: `TestNonPythonSitesCallTheSsot.test_a_flag_that_changes_the_scan_surface_must_be_required`

@@ -95,11 +95,28 @@ class UiLineTest(unittest.TestCase):
     def test_null_current_usage_prints_na(self) -> None:
         """session 首次 API 呼叫前／`/compact` 後：官方契約是 `used_percentage=null`。"""
         payload = {**_SAMPLE, "context_window": {"used_percentage": None}}
-        self.assertEqual(feed.ui_line(payload), "ctx n/a | Fable")
+        self.assertEqual(feed.ui_line(payload), "ctx n/a (until next reply) | Fable")
 
     def test_missing_model_falls_back_to_question_mark(self) -> None:
         self.assertEqual(feed.ui_line({"context_window": {"used_percentage": None}}),
-                         "ctx n/a | ?")
+                         "ctx n/a (until next reply) | ?")
+
+    def test_na_names_the_window_when_the_payload_has_one(self) -> None:
+        """DEF-200-442：掌舵者看不懂裸 `ctx n/a`——首回覆前 payload 已帶視窗大小就說出來；
+        缺席／非數值／非正值一律省略該欄。量不到≠量到零：整條不得有 `%`、不得印 0。"""
+        opus = {"model": {"id": "claude-opus-5-5", "display_name": "Opus 5.5"}}
+
+        def line(size: object) -> str:
+            cw = {"used_percentage": None, "context_window_size": size}
+            return feed.ui_line({**opus, "context_window": cw})
+
+        self.assertEqual(line(1_000_000), "ctx n/a of 1.0m (until next reply) | Opus 5.5")
+        for bad in (None, True, "1000000", 0, -1):
+            with self.subTest(size=bad):
+                self.assertEqual(line(bad), "ctx n/a (until next reply) | Opus 5.5")
+        for size in (1_000_000, 200_000, None, 0):
+            self.assertTrue(line(size).isascii())
+            self.assertNotIn("%", line(size))
 
     def test_bang_prefix_and_integer_pct_prints_no_fake_decimal(self) -> None:
         hot = {**_SAMPLE, "context_window": {**_SAMPLE["context_window"], "used_percentage": 94}}

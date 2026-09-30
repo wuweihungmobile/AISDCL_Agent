@@ -7,18 +7,10 @@ WHY：Windows 11 內建的是 **Windows PowerShell 5.1**（Desktop edition，隨
 （`??`／`?.`／`&&`／`||` 鏈接／`-AsHashtable`／`ForEach-Object -Parallel`／
 `$IsWindows`…）在 5.1 上多半是 **parse error 或執行期才炸**，而既有防護全部驗不到：
 
-  - `root-infra-ci.yml` 第 2 道的 `Parser::ParseFile` 跑在 `runs-on: ubuntu-latest`
-    ＝PowerShell 7 Core 的 parser，結構上驗的是 7 的文法，不是 5.1 的。
-  - `windows-compat-ci.yml` 在 windows-latest 上的**預設**引擎是 `shell: pwsh`
-    （＝PowerShell 7 Core），少數刻意例外：windows-smoke 有走 `shell: bash` 的
-    dispatcher hooks 步驟，windows-nightly-full 有走 `shell: powershell`（＝原生
-    5.1）的步驟實跑 bootstrap.ps1／dev_start.ps1／install_post_commit.ps1。
-    （**R57 QA-R57-04 訂正**了本段原文的過期宣稱；該訂正史料逐字遷至
-    `docs/06_quality/CrossPlatform_R89_Closure_Evidence.md` §A-1。此處刻意不寫死
-    各引擎的步驟支數，逐 job 的 shell 分佈一律以 workflow 檔本身為準。）
-  - 其餘只有 `windows-compat-ci.yml` 檔頭 R5 段落的**人工宣稱**（當時列名七支
-    「均未見 PS7-only 語法」），該宣稱立於 2026-07-14、13+ 輪未複驗，實測 active
-    `.ps1` 已 21 支＝涵蓋率 7/21，且會隨新增檔案靜默過期。
+既有防護都驗不到 5.1：`root-infra-ci.yml` 第 2 道的 parse 跑在 ubuntu（＝PowerShell 7 Core 的
+parser，驗的是 7 的文法）；`windows-compat-ci.yml` 預設引擎是 `shell: pwsh`（7），少數刻意例外以該
+workflow 檔頭為準；其餘只有該檔頭 R5 段落的人工宣稱（涵蓋率 7/21，且會隨新增檔案靜默過期）。
+R57 QA-R57-04 訂正的史料搬至 Guard_Line_History_2.md〈R186 淨減法搬遷〉§46。  round-label-ok
 
 平台待遇不對稱是本檔存在的直接理由：macOS 側的同構風險（系統 /bin/bash 3.2 vs
 ubuntu bash 5.x）早已有 `tools/tests/test_bash32_compat.py` 機械鎖，Windows 側對應物

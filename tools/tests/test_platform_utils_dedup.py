@@ -164,21 +164,10 @@ def _tracked_only_py_files(root: Path | None = None) -> list[str]:
 def _repo_py_files(root: Path | None = None) -> list[str]:
     """掃描面＝**tracked ∪ untracked-not-ignored** 的 `.py`（R70／`DEF-101-752`）。
 
-    為何要納入 untracked：見檔頭②。`git ls-files` 的 tracked-only 語意讓「還沒
-    `git add` 的新檔」對本鎖完全不存在，而**新檔正是複製貼上最可能發生的地方**；
-    R69 的 `platform_caps.py` 全程 untracked，四輪四方複審＋多次全套實跑零訊號。
-    `-o --exclude-standard` 仍尊重 `.gitignore`，故原本靠 `.gitignore` 排除
-    `.venv/`／`__pycache__/`（實測 `AISDLC_SDD/` 下有 4,800+ 支這類 `.py`）的效果
-    一個都沒少——實測本 repo untracked-not-ignored 的 `.py` 現為 0 支，
-    即本次擴面對**耗時**同樣近乎零代價。
-
-    `_zzz_` 前綴排除（DEF-200-274 第六輪）：擴面納入 untracked 後，本函式會與
-    `tools/tests/` 內其他測試（`LoadBalancingRegressionTest`／
-    `ParallelShardStderrBackpressureRegressionTest` 等）動態建立又
-    `addCleanup` 刪除的合成暫存模組（`_zzz_*.py`）產生 TOCTOU 競態——本函式列出
-    時檔案還在，讀取時已被另一條 worker thread 的 cleanup 刪除，觸發
-    `FileNotFoundError`。這些合成檔從不是本鎖要驗的「真實原始碼」，先例見
-    `test_pre_push_dispatcher.py`／`test_ps_engine_ssot.py`（同一批第五輪修法）。
+    納入 untracked 的理由見檔頭②（新檔正是複製貼上最可能發生的地方；`-o --exclude-standard` 仍尊重
+    `.gitignore`）。`_zzz_` 前綴排除：其他測試動態建立又刪除的合成暫存模組會與本函式產生 TOCTOU 競
+    態，且從不是本鎖要驗的真實原始碼。兩段沿革（DEF-200-274 第六輪）搬至
+    Guard_Line_History_2.md〈R186 淨減法搬遷〉§40。  round-label-ok
     """
     paths = _git_py_paths(root=root) | _git_py_paths("-o", "--exclude-standard", root=root)
     return sorted(p for p in paths if not Path(p).name.startswith("_zzz_"))
@@ -188,30 +177,10 @@ def _scan_repo_py_for(pattern: re.Pattern[str], root: Path | None = None) -> lis
     """全 repo（tracked ∪ untracked-not-ignored 的 `.py`）機械掃描，回傳命中檔案的
     repo 相對路徑清單。
 
-    R57 修正（A5）：兩支掃描測試的 docstring 都自稱「全 repo 機械掃描」，實際
-    掃描面卻只有 `AutoClaude/` 與根層 `tools/` 兩棵樹——`AISDLC_SDD/`（含
-    `scripts/`、`conftest.py`、各版 `tools/fsm_runtime/`）與 `.claude/hooks/`
-    下的 `.py` 全部在外，第 9 份複製貼上落在那些位置時本鎖零訊號。名實不符的
-    掃描面本身就是誤導：複審者讀 docstring 會以為已全域覆蓋而不再追查。
-
-    改用 `git ls-files` 而非 `rglob`：`AISDLC_SDD/` 底下有數千個 venv/快取 `.py`
-    （實測 4,829 支），rglob 全掃既慢又得維護排除清單；追蹤檔天然排除這些，且與
-    同 repo 姊妹鎖（`test_windowsapps_guard_cross_consistency.py` 的 repo-wide
-    掃描）採同一政策。R57 實測：擴面後三個函式名的命中集合皆不變（仍只有
-    `tools/lib/platform_utils.py`），新增偽陽性 0，故擴面在**命中集合**上零代價
-    （R57 round 1 QA-R57-06 訂正：健壯性與耗時上並非零代價——實測 5,427 支
-    tracked `.py`、單次模組耗時約 2.7s，且 `git ls-files` 會列出「index 有、工作樹
-    沒有」的檔案）。
-
-    讀不到的檔案一律**紅燈**（SD-R57-04／QA-R57-06）：git 追蹤卻讀不到 ⇒ 本鎖
-    宣稱的「全 repo 掃描面」已縮小，而縮小掉的內容無從得知（sparse checkout 下
-    缺席的檔案在 repo 裡是有內容的，靜默跳過＝真 fail-open）。故收齊全部讀不到
-    的路徑後以 AssertionError 給出可診斷訊息，而非裸 FileNotFoundError traceback
-    （原行為），也不是 `except OSError: continue` 的靜默跳過。
-
-    R70：掃描面已由 tracked-only 擴為 tracked ∪ untracked-not-ignored
-    （見 `_repo_py_files()`）；上兩段的 `git ls-files` 敘述與耗時實測皆為當時原文，
-    刻意保留為沿革。
+    掃描面曾名實不符（僅 `AutoClaude/` 與根層 `tools/` 兩棵樹，`AISDLC_SDD/`／`.claude/hooks/` 全
+    在外），現為 `_repo_py_files()` 的 tracked ∪ untracked-not-ignored（`git ls-files`，追蹤檔天然
+    排除 venv／快取）。讀不到的檔案一律**紅燈**（掃描面已縮小而縮小掉什麼無從得知），不得靜默跳
+    過。R57／R70 沿革與實測搬至 Guard_Line_History_2.md〈R186 淨減法搬遷〉§41。  round-label-ok
     """
     offenders: list[str] = []
     unreadable: list[str] = []
@@ -333,6 +302,22 @@ class TestPlatformUtilsApi(unittest.TestCase):
             self.assertIs(sys.stdout, fake_stdout, "no-op 路徑不得換掉串流物件")
 
 
+# DEF-200-427：硬寫家目錄的三種形態＝`/ ".claude"`、`.joinpath(".claude"…)`、
+# `os.path.join(expanduser("~"), ".claude"…)`（舊正則只認 `/`，hook 存根走 joinpath 而繞過）。
+_HOME = r'(Path\.home\(\)|expanduser\("~"\)\))\s*(/\s*|\.joinpath\(\s*)'
+_HARDWIRED = re.compile(_HOME + r'"\.claude"|expanduser\("~"\),\s*"\.claude"')
+_HARDWIRED_JSON = re.compile(_HOME + r'"\.claude\.json"')
+_FALLBACK_OK = re.compile(r"#\s*claude-home-fallback-ok:\s*\S")
+
+
+def unexempted_home_sites(src: str, pattern: re.Pattern[str]) -> list[str]:
+    """只判程式碼行：註解行與帶反引號的 docstring 史料不算站點；同行帶
+    `# claude-home-fallback-ok: <理由>`（理由必填）明示豁免的也不算。"""
+    return [ln for ln in src.splitlines()
+            if "`" not in ln and not ln.lstrip().startswith("#") and pattern.search(ln)
+            and not _FALLBACK_OK.search(ln)]
+
+
 class TestClaudeHome(unittest.TestCase):
     """`claude_home()`（DEF-200-421）：`~/.claude` 設定目錄解析的單一真相源。
 
@@ -361,6 +346,22 @@ class TestClaudeHome(unittest.TestCase):
         with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": "   "}):
             self.assertEqual(m.claude_home(), Path.home() / ".claude")
 
+    def test_claude_json_path_has_its_own_shape(self) -> None:
+        """DEF-200-427：`.claude.json` 預設是 `~/.claude` 的**手足檔**，覆寫時才長在覆寫目錄**
+        底下**——形狀與 `claude_home()` 不同，不能用 `claude_home() / ".claude.json"` 湊合。"""
+        home = Path("/tmp/fake-home-def200427")
+        with tempfile.TemporaryDirectory() as td:
+            for label, env, arg, want in (
+                    ("explicit-home", {"CLAUDE_CONFIG_DIR": td}, home, home / ".claude.json"),
+                    ("override", {"CLAUDE_CONFIG_DIR": td}, None, Path(td) / ".claude.json"),
+                    ("blank", {"CLAUDE_CONFIG_DIR": "  "}, None, Path.home() / ".claude.json"),
+                    ("unset", {}, None, Path.home() / ".claude.json")):
+                with self.subTest(label), mock.patch.dict(os.environ, env):
+                    if not env:
+                        os.environ.pop("CLAUDE_CONFIG_DIR", None)
+                        self.assertNotEqual(m.claude_json_path(), m.claude_home() / ".claude.json")
+                    self.assertEqual(m.claude_json_path(arg), want)
+
     def test_audit_session_project_transcript_dir_honors_the_ssot(self) -> None:
         """消費端證明：`tools/probe/audit_session.py::project_transcript_dir()` 真的
         接上 `claude_home()`，不是自己另留一份硬寫的 `Path.home() / ".claude"`。"""
@@ -380,21 +381,65 @@ class TestClaudeHome(unittest.TestCase):
         """其餘消費端（模組層常數／argparse 預設值／函式預設）沒有端到端呼叫面可注入，
         改以站點級靜態鎖釘住：來源必含 `claude_home()`，且不得再出現硬寫的
         `Path.home() / ".claude"`／`expanduser("~")) / ".claude"`（複審指出只鎖
-        `audit_session` 一站，其餘三站與防污染檢查改回硬寫時測試矩陣抓不到）。"""
+        `audit_session` 一站，其餘三站與防污染檢查改回硬寫時測試矩陣抓不到）。joinpath／
+        `os.path.join` 形態同判；不可達存根以同行 `# claude-home-fallback-ok: <理由>` 明示。"""
         consumers = (
             "tools/probe/audit_session.py", "tools/probe/causal_form_census.py",
             "tools/probe/reset_window_distribution.py", "tools/probe/shell_command_corpus.py",
             "tools/tests/test_doc_loc_baseline_freshness_r60.py",
+            # DEF-200-427：非逐字稿站點（hook 的 settings 鏈／憑證檔／喚醒鏈測試的建目錄）。
+            ".claude/hooks/context_budget_guard.py", "tools/lib/quota_meter.py",
+            "tools/tests/test_wake_chain_halt_r278.py",
         )
-        hardwired = re.compile(r'(Path\.home\(\)|expanduser\("~"\)\))\s*/\s*"\.claude"')
-        for rel in consumers:
-            src = (_REPO_ROOT / rel).read_text(encoding="utf-8")
-            self.assertIn("claude_home()", src, f"{rel} 沒有接上 claude_home() SSOT")
-            # 只判程式碼行：註解行與帶反引號的 docstring 史料（「此前硬寫 `…`」）不算站點。
-            code_hits = [ln for ln in src.splitlines()
-                         if "`" not in ln and not ln.lstrip().startswith("#")
-                         and hardwired.search(ln)]
-            self.assertEqual([], code_hits, f"{rel} 仍有硬寫的 ~/.claude 站點")
+        # DEF-200-427：`.claude.json` 是手足檔、字面不同（`_HARDWIRED` 認不得它）⇒ 另一列。
+        sites = [(rel, "claude_home()", _HARDWIRED) for rel in consumers]
+        sites.append(("tools/lib/endurance_env.py", "claude_json_path()", _HARDWIRED_JSON))
+        for rel, call, pattern in sites:
+            with self.subTest(consumer=rel):  # 各站點各自判：一站未落地不遮住其餘站點
+                src = (_REPO_ROOT / rel).read_text(encoding="utf-8")
+                # assertTrue 而非 assertIn：後者失敗時會把整支原始碼印進訊息。
+                self.assertTrue(call in src, f"{rel} 沒有接上 {call} SSOT")
+                self.assertEqual([], unexempted_home_sites(src, pattern),
+                                 f"{rel} 仍有硬寫的家目錄站點")
+
+    def test_a_hardwired_home_site_is_red_in_every_spelling_unless_marked(self) -> None:
+        """DEF-200-427：舊正則只認 `/ ".claude"`，`.joinpath(".claude")`／`os.path.join(…)` 形態
+        整個繞過（站點改回這些形態鎖不會紅）。未標記一律紅；同行明示豁免（理由必填）才放行。"""
+        for src in ('Path.home() / ".claude"', 'Path.home().joinpath(".claude")',
+                    'Path(os.path.expanduser("~")).joinpath(".claude", "x")',
+                    'os.path.join(os.path.expanduser("~"), ".claude")'):
+            with self.subTest(src=src):
+                line = f"    return {src}"
+                self.assertEqual(unexempted_home_sites(line, _HARDWIRED), [line])
+                for mark, want in (("  # claude-home-fallback-ok: 存根", 0),
+                                   ("  # claude-home-fallback-ok:", 1)):  # 沒寫理由不算
+                    self.assertEqual(len(unexempted_home_sites(line + mark, _HARDWIRED)), want)
+        json_line = '    return Path.home().joinpath(".claude.json")'
+        self.assertEqual(unexempted_home_sites(json_line, _HARDWIRED_JSON), [json_line])
+
+    def test_quota_meter_credentials_follow_the_config_dir(self) -> None:
+        """`CREDENTIALS` 是 import 時求值的模組層常數 ⇒ 以私有名稱另載一份來量（模組層只有
+        常數、無副作用），不 reload 別的測試與 `quota_gate` 都握著的那一份。"""
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "_quota_meter_def200427", _REPO_ROOT / "tools" / "lib" / "quota_meter.py")
+        fresh = importlib.util.module_from_spec(spec)
+        with tempfile.TemporaryDirectory() as td, mock.patch.dict(
+                os.environ, {"CLAUDE_CONFIG_DIR": td}):
+            spec.loader.exec_module(fresh)
+            self.assertEqual(fresh.CREDENTIALS, Path(td) / ".credentials.json")
+
+    def test_endurance_env_reads_claude_json_where_the_config_dir_says(self) -> None:
+        """`autocompact_posture()` 稽核的 `.claude.json` 路徑跟著 `CLAUDE_CONFIG_DIR` 走；
+        guard 以不讀任何真檔的替身注入，不碰真實家目錄。"""
+        import endurance_env
+        stub = mock.Mock(CC_WINDOW_ENV="CC_WINDOW_DEF200427", CC_WINDOW_KEY="autoCompactWindow")
+        stub.settings_chain.return_value = []
+        stub.settings_value.return_value = None
+        with tempfile.TemporaryDirectory() as td, mock.patch.dict(
+                os.environ, {"CLAUDE_CONFIG_DIR": td}):
+            got = endurance_env.autocompact_posture(stub)["config_path"]
+        self.assertEqual(got, str(Path(td) / ".claude.json"))
 
 
 class TestNoDuplicateDefinitions(unittest.TestCase):
@@ -686,26 +731,17 @@ class TestScanSurfaceCoversUntrackedFiles(unittest.TestCase):
 # 有一支公認的共用入口（`import _stdio_utf8`，R74 實測 15 支消費者），但仍有檔案直接寫
 # `sys.stdout.reconfigure(encoding="utf-8", ...)` 就地重做一次。
 #
-# 🔴 **R75 訂正（本段原文自己就是那個病）**：上一行原本逐字寫「`tools/_stdio_utf8.py`
-# **已經是 SSOT**」。那句話在寫下的當時就是假的——同一份知識當時有**兩個各自宣稱是
-# SSOT 的家**：`tools/_stdio_utf8.py::reconfigure_stdio_utf8`（`.reconfigure()` 就地改、
-# import 期生效）與 `tools/lib/platform_utils.py::init_utf8_streams`（`TextIOWrapper`
-# 換掉串流、只在 `__main__` 呼叫），實作／啟用時機／對測試替身的行為三者皆不同，而
-# 本檔的兩把鎖（`:335` 的 def 唯一性、下方這個行內複本棘輪）**都只守自己那一支**。
-# 把「其中一支是 SSOT」寫成註解，正是讓那個衝突躲過複審的原因（同 R73「訂正註記逐字
-# 引述假話＝製造新假話」）。R75 已真正去重（唯一實作＝`tools/lib/platform_utils.py`，
-# `_stdio_utf8` 逐字委派同一個函式物件），並補上
-# `TestR75StdioUtf8HasOneImplementation`——**兩把鎖從此看得見彼此**。
+# 🔴 R75 訂正：`_stdio_utf8` 與 `platform_utils.init_utf8_streams` 曾是兩個各自宣稱 SSOT 的家，已
+# 去重（唯一實作＝`tools/lib/platform_utils.py`，`_stdio_utf8` 委派同一函式物件），並補
+# `TestR75StdioUtf8HasOneImplementation` 讓兩把鎖互相看見；訂正原文搬至
+# Guard_Line_History_2.md〈R186 淨減法搬遷〉§42。  round-label-ok
 #
 # 誠實劃界（本輪刻意**不**收斂，只讓它可量測）：
 #   · 有些行內複本是**合法的**——`tools/_stdio_utf8.py` 自己、以及刻意驗證行為的鎖
 #     （`test_subprocess_encoding_hygiene.py`）、以及測試 fixture 的假 CLI。故判準是
 #     **shrink-only 棘輪**而不是「零容忍」：現況凍結，只准變少。
-#   · 診斷階段曾以「43 份行內複本 vs 19 個 SSOT 消費者」描述本筆。**本輪以下方判準
-#     實測不複現**：`sys.std{out,err}.reconfigure(` 形態為 9 處／8 檔，`import
-#     _stdio_utf8` 消費者 15 支（`PYTHONUTF8` 字樣另有 46 處／19 檔，那是環境變數
-#     設定、不是本 SSOT 的行內複本，兩者不可混為一談）。故本棘輪釘的是**本輪實測值**，
-#     不是任何轉述的數字——這正是本檔一貫的「不寫死轉述來的量」紀律。
+#   · 判準釘的是**本輪實測值**而非任何轉述的數字（診斷階段的「43 份 vs 19 個」轉述實測不複現；逐項
+#     實測搬至 Guard_Line_History_2.md〈R186 淨減法搬遷〉§43）。  round-label-ok
 _INLINE_STDIO_RE = re.compile(r"(?:sys\.)?std(?:out|err)\s*\.\s*reconfigure\s*\(")
 #: 🔴 R75：**唯一實作**所在（`reconfigure_stdio_utf8`，import 期即生效）。
 #: 選它而非 `tools/lib/platform_utils.py` 的理由＝**可搬遷契約**（見該檔檔頭與下方

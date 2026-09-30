@@ -511,7 +511,7 @@ def main() -> int:
                 "本次不 lint。刻意不阻斷：硬擋唯一的 shell 載具，代價遠大於漏掉一次 lint；"
                 "但也不靜默——守衛失效必須看得見。\n"
             )
-            return 1
+            return 1  # degraded-payload: payload 讀不出來，本次沒 lint
 
         tool = str(payload.get("tool_name") or "")
         if tool != OWN_TOOL:
@@ -520,7 +520,7 @@ def main() -> int:
             sys.stderr.write(
                 "[lint_powershell_command] payload 沒有 tool_name ⇒ 無法判定射程，本次不 lint。\n"
             )
-            return 1
+            return 1  # degraded-payload: 沒有 tool_name，本次沒 lint
 
         tool_input = payload.get("tool_input")
         command = tool_input.get("command") if isinstance(tool_input, dict) else None
@@ -528,7 +528,7 @@ def main() -> int:
             sys.stderr.write(
                 "[lint_powershell_command] PowerShell payload 沒有 command 字串 ⇒ 本次不 lint。\n"
             )
-            return 1
+            return 1  # degraded-payload: 沒有 command 字串，本次沒 lint
 
         # 🔴 授權邊界先判，且**不經 `lint_command()`**：那支函式第一件事是認行內豁免，
         # 而無人看管的那個回合可以自己寫出豁免註解。順序本身就是判準的一部分。

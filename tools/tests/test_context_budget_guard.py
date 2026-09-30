@@ -39,6 +39,7 @@ import unittest
 import unittest.mock
 import urllib.error
 import urllib.request
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path, PureWindowsPath
 
@@ -69,14 +70,12 @@ from _ps_engine import production_engine  # noqa: E402  # R60 E-A-03：5.1 優�
 
 
 def setUpModule() -> None:  # noqa: N802 — unittest 的固定名稱
-    """🔴 R84／C3-P4c：整個測試模組**一律不准碰真的排程器**（in-process 那一半，子行程
-    半邊由 `_isolated_env(real_scheduler=False)` 負責）。立案：`_gate()` 同行程呼叫走真的
-    `quota_halt_actions` → `spawn_sentinel`，會在開發機上留一支永遠沒人收的 launchd job。
-    🔴 R84／SA84-01：還原動作**不**掛 `addModuleCleanup`（巢狀 runner 會觸發它提前 flush，
-    pin 當場消失且後續測試失去保護）；捕捉原值只做一次（`_SENTINEL_PIN_CAPTURED`）。
-    完整立案敘事見證據檔 §I-17。
-    🔴 DEF-200-350／F-QA-01：pin 同時罩住 `quota_policy.ENV_SPEC` 每一個鍵，理由見
-    `_pin_sentinel_off`；發現經過與立案敘事已搬至 R86 護欄重釘證據檔 §F。
+    """🔴 整個測試模組**一律不准碰真的排程器**（in-process 這一半；子行程半邊由
+    `_isolated_env(real_scheduler=False)` 負責）：`_gate()` 同行程呼叫會走真的
+    `quota_halt_actions` → `spawn_sentinel`，在開發機留下一支沒人收的排程。還原動作不掛
+    `addModuleCleanup`（巢狀 runner 會提前 flush 而 pin 消失），捕捉原值只做一次；pin 罩住
+    `quota_policy.ENV_SPEC` 每一個鍵（理由見 `_pin_sentinel_off`）。R84／DEF-200-350 立案敘事搬至
+    Guard_Line_History_2.md〈R186 淨減法搬遷〉§11。  round-label-ok
     """
     global _SENTINEL_PIN_ORIGINAL, _SENTINEL_PIN_CAPTURED, _ENV_SPEC_PIN_ORIGINALS
     if not _SENTINEL_PIN_CAPTURED:
@@ -133,7 +132,7 @@ def _run_nested_suite(suite: unittest.TestSuite) -> unittest.TestResult:
         unittest.addModuleCleanup(_unpin_sentinel_off)
 
 
-def _gate(payload: dict, event: str = "PreToolUse") -> int:
+def _gate(payload: dict, event: str = "PreToolUse", active_model: str | None = None) -> int:
     """跑額度閘，且**注入的是 hook 端真正會傳的那五個能力**。
 
     🔴 R82／Q2-02：閘搬出 hook 之後，「hook 有沒有把正確的東西接上去」變成一個可以
@@ -144,7 +143,7 @@ def _gate(payload: dict, event: str = "PreToolUse") -> int:
                          latch_read=guard.announced_latches,
                          latch_write=guard.remember_latch,
                          plan_writer=guard.write_resume_plan,
-                         waker=guard.arm_quota_wakeup, event=event)
+                         waker=guard.arm_quota_wakeup, event=event, active_model=active_model)
 
 
 def _usage(inp: int, creation: int, read: int, out: int = 999_999) -> dict:
@@ -979,6 +978,16 @@ class SettingsChainTest(unittest.TestCase):
         low = self._write("low.json", {"model": "sonnet"})
         self.assertEqual(guard.settings_value("model", [high, low]), "opus[1m]")
         self.assertEqual(guard.settings_value("model", [low, high]), "sonnet")
+
+    def test_the_user_layer_follows_claude_config_dir(self) -> None:
+        """DEF-200-427：user 層 settings 走 `claude_home()`——`CLAUDE_CONFIG_DIR` 設了，整個設定
+        目錄（含 window／model 釘值所在的 settings.json）都跟著搬；空白視同未設（預設家目錄）。"""
+        root = self.tmp / "repo"
+        for raw, want in ((str(self.tmp), self.tmp / "settings.json"),
+                          ("  ", Path.home() / ".claude" / "settings.json")):
+            with self.subTest(raw=raw), unittest.mock.patch.dict(
+                    os.environ, {"CLAUDE_CONFIG_DIR": raw}):
+                self.assertEqual(guard.settings_chain(root)[-1], want)
 
     def test_missing_or_broken_files_are_skipped_not_fatal(self) -> None:
         broken = self.tmp / "broken.json"
@@ -5978,27 +5987,11 @@ class ConsoleFreeSpawnTest(unittest.TestCase):
         射程限定 `quota_*`／`sentinel_*` 兩族（全拉進來＝要逐一辯護的假紅）。
         立案全文（quota_meter 隱形站點）＝Resume 證據檔 §L-4.20。
         """
-        # 🔴 R84／C3-A：`schedule_backend.py` 具名加入（不叫 quota_*/sentinel_* ⇒ glob
-        # 罩不到，而它是哨兵路徑僅存兩個裸 spawn 的家）。全文＝Resume 證據檔 §L-4.7。
-        # 🔴 console_qa 事故輪：另外四支具名加入——`AISDLC_SDD/scripts/sdd_version.py`／
-        # `tools/lib/sdd_latest.py`／`tools/lib/git_paths.py` 三支都不叫 quota_*/sentinel_*
-        # 也不住 `.claude/hooks/`，此前對本鎖完全隱形（`sdd_latest.py` 以
-        # `importlib.util.spec_from_file_location` 動態載入 `sdd_version.py`，任何靜態
-        # import 掃描都看不到這條邊；本輪事故正是它們缺 `creationflags` 而彈出 630 個
-        # OpenConsole.exe）；`tools/lib/platform_utils.py`／`tools/_stdio_utf8.py` 這一對
-        # 同理補上（`platform_utils.py` 也用 `spec_from_file_location` 動態載入
-        # `_stdio_utf8.py`）——見 `test_every_reachable_dynamic_load_target_is_registered`
-        # 那條新規則：動態載入目標必須在這份掃描面裡找得到，否則獨立紅。
-        # 🔴 DEF-200-418：`tools/probe/` 此前完全不在掃描面（兩位獨立審查員實跑同一判準
-        # 各抓到 3 個假紅站點：`shell_command_corpus.py`／`xplat_hazard_census.py`／
-        # `xplat_injection_matrix.py` 皆是 `subprocess.run(["git", …])` 缺
-        # `creationflags`）。**刻意具名列舉四支，不 glob 整個 `tools/probe/`**——該目錄
-        # 大半是文件字串／測試替身裡才提 `subprocess.run` 的分析腳本
-        # （如 `replay_r113_lastmile_driver.py`），全拉進來會製造一批要逐一辯護的假紅
-        # （同本函式 docstring「全拉進來＝要逐一辯護的假紅」的既有原則）。
-        # `console_spawn_watch.py` 本就合規（既有 `NO_WINDOW`），具名納入是為了讓射程
-        # 縮小時指名道姓地紅（同下方 `test_the_scan_surface_has_not_silently_shrunk`
-        # 的具名斷言紀律）。
+        # 具名納入的掃描站點：不叫 quota_*/sentinel_*（glob 罩不到）的 `schedule_backend.py`、動態
+        # 載入目標（`sdd_version.py`／`sdd_latest.py`／`git_paths.py`／`platform_utils.py`／
+        # `_stdio_utf8.py`）與 `tools/probe/` 具名四支（刻意不 glob 整個目錄，避免要逐一辯護的假
+        # 紅）；逐項理由與事故沿革（R84／C3-A、console_qa 事故、DEF-200-418）搬至
+        # Guard_Line_History_2.md〈R186 淨減法搬遷〉§12。  round-label-ok
         paths = {
             "tools/session_resume_planner.py": _PLANNER,
             "tools/lib/schedule_backend.py": _REPO_ROOT / "tools" / "lib" / "schedule_backend.py",
@@ -8242,16 +8235,16 @@ class QuotaKindBranchTest(unittest.TestCase):
         decision = _decision((("session", 96.0, 3600.0),))
         base = {"plan": "P", "kind": "session", "sentinel_off": False, "posix": False}
         texts = {
-            "armed": qg.quota_halt_message(
+            "armed": qm.quota_halt_message(
                 decision, {**base, "branch": qg.QUOTA_BRANCH_ARM, "armed": True}),
-            "weekly": qg.quota_halt_message(
+            "weekly": qm.quota_halt_message(
                 decision, {**base, "branch": qg.QUOTA_BRANCH_NOTIFY, "armed": False}),
-            "spend": qg.quota_halt_message(
+            "spend": qm.quota_halt_message(
                 decision, {**base, "branch": qg.QUOTA_BRANCH_ESCALATE, "armed": False}),
-            "posix": qg.quota_halt_message(
+            "posix": qm.quota_halt_message(
                 decision, {**base, "branch": qg.QUOTA_BRANCH_ARM, "armed": False,
                            "posix": True}),
-            "sentinel_off": qg.quota_halt_message(
+            "sentinel_off": qm.quota_halt_message(
                 decision, {**base, "branch": qg.QUOTA_BRANCH_ARM, "armed": False,
                            "sentinel_off": True}),
         }
@@ -8294,7 +8287,7 @@ class QuotaHaltMessagePointsAtThisPlatformTest(unittest.TestCase):
         old = qm.schedule_backend
         qm.schedule_backend = stub
         self.addCleanup(setattr, qm, "schedule_backend", old)
-        return qg.quota_halt_message(
+        return qm.quota_halt_message(
             _decision((("session", 96.0, 600.0),)),
             {"plan": "P", "kind": "session", "branch": qg.QUOTA_BRANCH_ARM,
              "armed": True, "sentinel_off": False, "posix": False})
@@ -9261,7 +9254,7 @@ class QuotaMessagesNameTheAxisTest(unittest.TestCase):
 
     def test_the_halt_message_qualifies_every_percentage(self) -> None:
         decision = _decision((("session", 96.0, 600.0), ("weekly_all", 57.0, 6 * 86400.0)))
-        text = qg.quota_halt_message(decision, {
+        text = qm.quota_halt_message(decision, {
             "plan": "P", "kind": "session", "branch": qg.QUOTA_BRANCH_ARM,
             "armed": True, "sentinel_off": False, "posix": False})
         self._assert_every_pct_is_qualified(text)
@@ -9277,11 +9270,28 @@ class QuotaMessagesNameTheAxisTest(unittest.TestCase):
     def test_every_axis_is_mentioned_not_only_the_binding_one(self) -> None:
         """加碼：兩軸同時 halt 時**兩軸都要說**（舊訊息只渲染 `worst()` 那一格）。"""
         decision = _decision((("session", 99.0, 600.0), ("weekly_all", 97.0, 6 * 86400.0)))
-        text = qg.quota_halt_message(decision, {
+        text = qm.quota_halt_message(decision, {
             "plan": "P", "kind": "session", "branch": qg.QUOTA_BRANCH_ARM,
             "armed": True, "sentinel_off": False, "posix": False})
         for kind in ("session", "weekly_all"):
             self.assertIn(f"kind={kind}", text, "只說了最緊的那一軸 ⇒ 讀者看不到全貌")
+
+    def test_every_halt_notice_form_qualifies_every_percentage(self) -> None:
+        """DEF-200-435 新增的三種 halt 訊息（PreToolUse 首則／重複、PostToolUse 提醒）也走 M7。"""
+        decision = _decision((("session", 96.0, 600.0), ("weekly_all", 57.0, 6 * 86400.0)))
+        act = {"plan": "P", "kind": "session", "branch": qg.QUOTA_BRANCH_ARM,
+               "armed": True, "sentinel_off": False, "posix": False}
+        now = datetime.now(UTC).astimezone()
+        for event, first in (("PreToolUse", act), ("PreToolUse", None), ("PostToolUse", act)):
+            with self.subTest(event=event, first=bool(first)):
+                self._assert_every_pct_is_qualified(
+                    qm.halt_notice(decision, now, event, "Agent", first)[0])
+
+    def test_the_target_scoped_block_message_qualifies_every_percentage(self) -> None:
+        """DEF-200-436 新增的「只擋這一次派工」訊息也走 M7。"""
+        text = qm.halt_notice(_halt_state("fable"), datetime.now(UTC).astimezone(), "PreToolUse",
+                              "Agent", False, "fable", scoped=True)[0]
+        self._assert_every_pct_is_qualified(text)
 
     def test_the_judge_catches_a_bare_percentage(self) -> None:
         """判準自證：貼回舊形狀的第一行 ⇒ 必紅（否則這一類只是在數 `%` 這個字）。"""
@@ -9325,6 +9335,107 @@ class HaltConvergentClarificationPlatformTest(unittest.TestCase):
         with unittest.mock.patch.object(qm.platform_utils, "is_windows", return_value=False):
             text = qm.quota_halt_repeat_message(decision, now)
         self.assertIn("／Bash／", text)
+
+
+def _halt_state(active_model: str | None, *, shared: bool = False) -> quota_policy.Decision:
+    """Fable 分軌軸 99%（停止）＋一條寬鬆軸；`shared=True` 另加全模型共用的 `weekly_all` 99%。"""
+    now = datetime.now(UTC).astimezone()
+    at = lambda s: (now + timedelta(seconds=s)).isoformat()  # noqa: E731
+    axes = [quota_policy.Axis("session", 5.0, at(3600)),
+            quota_policy.Axis("weekly_scoped", 99.0, at(6 * 86400), scope_model="Fable")]
+    if shared:
+        axes.append(quota_policy.Axis("weekly_all", 99.0, at(6 * 86400)))
+    return quota_policy.decide(quota_policy.QuotaState(tuple(axes), now.isoformat(), "test"),
+                               now, quota_policy.DEFAULT_POLICY, active_model=active_model)
+
+
+class HaltNoticeTest(unittest.TestCase):
+    """DEF-200-435：`quota_messages.halt_notice()`——halt 帶這一次說什麼、用什麼 rc 說（純函式）。"""
+
+    _ACT = {"plan": "P", "kind": "session", "branch": qg.QUOTA_BRANCH_ARM, "armed": True,
+            "sentinel_off": False, "posix": False}
+
+    def _notice(self, event: str, act: dict | None, tool: str = "Agent",
+                model: str | None = None) -> tuple[str, int]:
+        return qm.halt_notice(_decision((("session", 96.0, 600.0),)),
+                              datetime.now(UTC).astimezone(), event, tool, act, model)
+
+    def test_only_a_blocked_call_is_an_error_shaped_message(self) -> None:
+        pre_first = self._notice("PreToolUse", self._ACT)
+        pre_again = self._notice("PreToolUse", None)
+        post_first = self._notice("PostToolUse", self._ACT, "Read")
+        self.assertEqual((pre_first[1], pre_again[1], post_first[1]), (2, 2, 0),
+                         "工具真被擋才是 rc=2；PostToolUse 只是提醒（rc=0）")
+        self.assertEqual(self._notice("PostToolUse", None, "Read"), ("", 0), "說過一次就必須安靜")
+        for text in (pre_first[0], pre_again[0]):
+            self.assertIn("沒有執行", text)
+            self.assertNotIn("已正常執行完成", text, "工具沒執行卻說已正常執行完成")
+        self.assertIn("一次性提醒", post_first[0])
+        self.assertNotIn("已被擋下", post_first[0], "提醒不得讀成「被擋」")
+
+    def test_the_repeat_headline_names_halt_model_and_reset(self) -> None:
+        first = self._notice("PreToolUse", None, model="fable")[0].splitlines()[0]
+        for token in ("停止水位", "session", "模型=fable", "reset="):
+            self.assertIn(token, first)
+        self.assertNotIn("horizon=", first, "首行又是 describe() 軸傾印")
+
+    def test_the_clarification_first_clause_follows_the_event(self) -> None:
+        legacy = qm.halt_convergent_clarification(windows=False)
+        blocked = qm.halt_convergent_clarification(windows=False, event="PreToolUse", tool="Agent")
+        self.assertTrue(blocked.startswith("這次 Agent 呼叫已被擋下、沒有執行；"))
+        self.assertEqual(blocked.split("；", 1)[1], legacy.split("；", 1)[1], "其餘必須同源")
+        self.assertIn("這次 扇出型 呼叫", qm.halt_convergent_clarification(
+            windows=False, event="PreToolUse"))
+
+    def test_the_model_hint_says_when_switching_models_helps(self) -> None:
+        scoped = qm.halt_model_hint(_halt_state("fable"))
+        self.assertIn("換模型有用", scoped)
+        self.assertIn("Fable", scoped)
+        for label, decision in (("另有全模型共用軸也停止", _halt_state("fable", shared=True)),
+                                ("分軌軸未命中、停的是別條軸", _halt_state("sonnet", shared=True))):
+            with self.subTest(label):
+                self.assertIn("換模型沒有用", qm.halt_model_hint(decision))
+        self.assertIn("換模型沒有用", qm.halt_model_hint(_decision((("weekly_all", 99.0, 600.0),))))
+
+    def test_a_target_scoped_block_names_the_target_and_claims_no_side_effects(self) -> None:
+        """DEF-200-436：只針對這次派工指名模型的停止——rc=2、點名目標模型、不宣稱視窗級副作用。"""
+        now = datetime.now(UTC).astimezone()
+        text, rc = qm.halt_notice(_halt_state("fable"), now, "PreToolUse", "Agent", False,
+                                  "fable", scoped=True)
+        self.assertEqual(rc, 2)
+        for phrase in ("fable", "沒有執行", "換模型有用", "只擋這一次"):
+            self.assertIn(phrase, text)
+        for phrase in ("任務書：", "已武裝", "已在磁碟上", "已正常執行完成"):
+            self.assertNotIn(phrase, text, f"只擋派工卻宣稱了視窗級的事：{phrase}")
+        self.assertIn(qm.halt_convergent_clarification(event="PreToolUse", tool="Agent"), text)
+
+    def test_a_target_scoped_block_does_not_speak_for_the_window_model(self) -> None:
+        """DEF-200-436：scoped 的主情境是視窗屬別家模型（Sonnet 視窗派 `model: fable`），閘門端看
+        不到視窗家族，「本視窗自己的回合仍耗該模型額度」在那裡為假；視窗自己停止時才說。"""
+        decision, now = _halt_state("fable"), datetime.now(UTC).astimezone()
+        own = "本視窗自己的回合仍耗該模型額度"
+        scoped = qm.halt_notice(decision, now, "PreToolUse", "Agent", None, "fable", scoped=True)[0]
+        self.assertNotIn(own, scoped)
+        for text in (qm.halt_model_hint(decision),  # 視窗自己停止時這句為真，不得連同 scoped 拿掉
+                     qm.halt_notice(decision, now, "PostToolUse", "Read", self._ACT, "fable")[0]):
+            self.assertIn(own, text)
+
+    def test_the_scoped_predicate_needs_a_named_target_and_a_model_scoped_halt(self) -> None:
+        scoped, shared = _halt_state("fable"), _halt_state("fable", shared=True)
+        pre = {"tool_name": "Agent", "tool_input": {"model": "fable"}}
+        fork = {**pre, "tool_input": {"model": "fable", "subagent_type": "fork"}}
+        for label, payload, event, model, decision, want in (
+                ("指名目標＋只停分軌軸", pre, "PreToolUse", "fable", scoped, True),
+                ("Task 同理", {**pre, "tool_name": "Task"}, "PreToolUse", "fable", scoped, True),
+                ("另有共用軸停止", pre, "PreToolUse", "fable", shared, False),
+                ("PostToolUse", pre, "PostToolUse", "fable", scoped, False),
+                ("hook 沒有採用目標（家族不符）", pre, "PreToolUse", "sonnet", scoped, False),
+                ("沒有 active_model", pre, "PreToolUse", None, scoped, False),
+                ("不指名", {"tool_name": "Agent", "tool_input": {}}, "PreToolUse", "fable",
+                 scoped, False),
+                ("fork 忽略 model", fork, "PreToolUse", "fable", scoped, False)):
+            with self.subTest(label):
+                self.assertEqual(qm.halt_dispatch_scoped(payload, event, model, decision), want)
 
 
 class QuotaEnvFileIsActuallyLoadedTest(unittest.TestCase):
@@ -9802,6 +9913,53 @@ class ThrottleBandSaysHowLongItLastsTest(unittest.TestCase):
         self.assertIn("好幾天", far)
         self.assertIn("很快就會自己解除", near)
         self.assertIn("沒有 reset 可以等", none_at_all)
+
+    def test_a_hysteresis_held_cap_does_not_claim_days_of_throttle(self) -> None:
+        """DEF-200-435（SA 實證）：cap 被遲滯維持（放寬每個最小停留時間只 +1）而低於 binding 軸
+        自己的 cap 時，「這道節流會連續套用好幾天」是假話——真因是分鐘尺度的遲滯，不是遠期 reset。"""
+        own = _decision((("weekly_all", 75.0, 5 * 86400.0),))
+        held = replace(own, cap=own.cap - 1,
+                       recommended_fanout=min(own.recommended_fanout, own.cap - 1))
+        now = datetime.now(UTC).astimezone()
+        self.assertIn("好幾天", qg.quota_throttle_message(own, "Agent", 2, now),
+                      "對照組：未被遲滯壓低時照舊")
+        text = qg.quota_throttle_message(held, "Agent", 2, now)
+        self.assertNotIn("好幾天", text, "遲滯維持的 cap 被說成要等好幾天")
+        self.assertIn("遲滯", text)
+
+    def test_the_far_reset_sentence_is_true_in_every_context_that_prints_it(self) -> None:
+        """DEF-200-435：遠期 reset 那句由五個語境共用（Agent 節流、halt 重複阻斷、Workflow 節
+        流、`--pace`、prepare），此前多帶的「等窗口清空就能再派」只對 Agent 節流為真，其餘叫人
+        等一個不會來的事件＝無做工空轉同形。`--pace` 那一格在 WiredToTheBurnPath 類。"""
+        now = datetime.now(UTC).astimezone()
+        far, cases = 5 * 86400.0, {}
+        shared = _decision((("weekly_all", 75.0, far),))
+        cases["Agent 節流"] = qg.quota_throttle_message(shared, "Agent", 2, now)
+        cases["Workflow 節流"] = qg.quota_throttle_message(shared, "Workflow", 0, now)
+        cases["halt 重複阻斷"] = qm.quota_halt_repeat_message(
+            _decision((("weekly_all", 99.0, far),)), now, "PreToolUse", "Agent", "opus")
+        cases["prepare 訊息"] = qm.quota_prepare_message(
+            _decision((("weekly_all", 90.0, far),)), "plan.md", now)
+        for label, text in cases.items():
+            with self.subTest(label):
+                self.assertIn("好幾天", text, "對照組：cap 會持續到遠期 reset 這件事仍要說")
+                for phrase in ("窗口清空", "被擋的這一次", "不是等一下就好"):
+                    self.assertNotIn(phrase, text, f"{label}：這句話在此語境為假或自相矛盾")
+        self.assertIn("等一下再派", cases["Agent 節流"], "Agent 節流（窗口會滾動）才有這句")
+
+    def test_the_far_reset_sentence_never_claims_the_cap_will_not_loosen(self) -> None:
+        """DEF-200-435：同為 75%，cap 隨 reset 逼近自己放寬（2→4→8），此句卻曾斷言不會放寬（每
+        次 `--pace` 都印）；停止帶反過來：cap 恆為 0、到 reset 才解除，不得說會逐步放寬。前提與
+        禁句同一格；唯一來源 `throttle_horizon_line()`，直接判它。"""
+        caps = {m: _decision((("weekly_all", 75.0, m * 60.0),)).cap for m in (7200, 1440, 480)}
+        self.assertTrue(caps[7200] < caps[1440] < caps[480], f"前提不成立：{caps}")
+        now = datetime.now(UTC).astimezone()
+        text = qm.throttle_horizon_line(_decision((("weekly_all", 75.0, 5 * 86400.0),)), now)
+        self.assertIn("好幾天", text, "對照組：遠期 reset 的句子有印出來")
+        for phrase in ("不會自己放寬", "不會放寬", "不放寬", "才解除"):  # 後者是停止帶的措辭
+            self.assertNotIn(phrase, text, "cap 會隨 reset 逼近放寬，這句是假話")
+        halt = qm.throttle_horizon_line(_decision((("weekly_all", 99.0, 5 * 86400.0),)), now)
+        self.assertNotIn("逐步放寬", halt, "停止帶 cap 恆為 0 直到 reset，不隨 reset 逼近放寬")
 
     def test_the_cap_ladder_now_moves_with_the_reset_distance(self) -> None:
         """R82/R86 訂正；cap 隨 reset 距離變動之完整立案見證據檔 §I-21（R92 搬出）。"""
@@ -11065,10 +11223,21 @@ class QuotaGateIsWiredToTheBurnPathTest(unittest.TestCase):
             old = getattr(qg, name)
             setattr(qg, name, value)
             self.addCleanup(setattr, qg, name, old)
+        self.addCleanup(self._drain_model_msgs)  # in-process 的 halt 提醒排進送模型緩衝，不得外洩
+
+    @staticmethod
+    def _drain_model_msgs() -> None:
+        with contextlib.redirect_stdout(io.StringIO()):
+            qg.flush_to_model()
 
     def _post(self, tool: str) -> dict:
         return {"hook_event_name": "PostToolUse", "tool_name": tool,
                 "transcript_path": str(self.transcript)}
+
+    def _pre(self, tool: str = "Agent", transcript: Path | None = None, **extra: object) -> dict:
+        """PreToolUse payload。DEF-200-435 起 halt 帶只有這一條路會 rc=2（PostToolUse 是提醒）。"""
+        return {"hook_event_name": "PreToolUse", "tool_name": tool,
+                "transcript_path": str(transcript or self.transcript), **extra}
 
     def test_the_post_tool_use_matcher_covers_the_burn_path(self) -> None:
         matchers = [m for m, argv in _hook_invocations("PostToolUse")
@@ -11116,18 +11285,17 @@ class QuotaGateIsWiredToTheBurnPathTest(unittest.TestCase):
             setattr(guard, name, value)
             self.addCleanup(setattr, guard, name, old)
         # 對照組：`active_model` 缺席（紅端本身）——weekly_scoped 撞 halt 也不擋。
-        self.assertEqual(_gate(self._post("Read"), event="PostToolUse"), 0,
+        # 觀測面是 PreToolUse×Agent：DEF-200-435 之後 PostToolUse 的 halt 只是 rc=0 的提醒。
+        self.assertEqual(_gate(self._pre()), 0,
                          "紅端前提不成立：不帶 active_model 時本該零煞車力")
         other_ts = _write_jsonl(self.tmp / "other.jsonl", [36_000], model="claude-sonnet-5")
         old_read = guard.read_payload
-        guard.read_payload = lambda: {"hook_event_name": "PostToolUse", "tool_name": "Read",
-                                      "transcript_path": str(other_ts)}
+        guard.read_payload = lambda: self._pre(transcript=other_ts)
         self.addCleanup(setattr, guard, "read_payload", old_read)
         self.assertEqual(guard.main(), 0,
                          "模型不同時 Fable 軸仍被誤煞車 ⇒ R98 的既有排除被本輪弄壞了")
         fable_ts = _write_jsonl(self.tmp / "fable.jsonl", [36_000], model="claude-fable-5")
-        guard.read_payload = lambda: {"hook_event_name": "PostToolUse", "tool_name": "Read",
-                                      "transcript_path": str(fable_ts)}
+        guard.read_payload = lambda: self._pre(transcript=fable_ts)
         self.assertEqual(guard.main(), 2,
                          "逐字稿真的用 Fable、該軸也真的撞 halt，卻沒被擋 ⇒ 接線沒生效")
 
@@ -11153,8 +11321,7 @@ class QuotaGateIsWiredToTheBurnPathTest(unittest.TestCase):
             self.addCleanup(setattr, guard, name, old)
         fresh = _write_jsonl(self.tmp / "sid-fresh.jsonl", [])
         self.addCleanup(setattr, guard, "read_payload", guard.read_payload)
-        guard.read_payload = lambda: {"hook_event_name": "PostToolUse", "tool_name": "Read",
-                                      "transcript_path": str(fresh)}
+        guard.read_payload = lambda: self._pre(transcript=fresh)
         _write_feed(self.tmp, {**_FEED_SAMPLE, "session_id": "sid-fresh",
                                "model": {"id": "claude-sonnet-5"}})
         self.assertEqual(guard.main(), 0, "feed 說 sonnet 卻擋了 ⇒ Fable 軸被誤命中")
@@ -11162,35 +11329,258 @@ class QuotaGateIsWiredToTheBurnPathTest(unittest.TestCase):
         self.assertEqual(guard.main(), 2,
                          "新視窗首輪 feed 說 Fable、該軸也撞 halt，卻沒被擋 ⇒ 守衛仍只讀逐字稿")
 
-    def test_post_tool_use_at_halt_writes_a_plan_and_says_so(self) -> None:
-        """紅端這裡是 rc=0／stderr 0B／零任務書——那正是訴求 6c 至今沒生效的那一格。"""
+    def test_post_tool_use_at_halt_writes_a_plan_and_says_so_once_without_an_error(self) -> None:
+        """DEF-200-435：PostToolUse 時工具已跑完、無可擋，halt 提醒不得以 rc=2 紅字出現（會被讀
+        成「工具被擋」）⇒ exit 0＋`additionalContext`；任務書仍要真的落磁碟（訴求 6c）。"""
         _quota_cache(self.tmp, 96.0)
-        rc, err = _run_hook(self._post("Read"), self.tmp)
-        self.assertEqual(rc, 2, "PostToolUse 在 halt 帶沒出聲 ⇒ stderr 到不了模型")
-        self.assertIn("停止派發", err)
+        rc, err, out = _run_hook3(self._post("Read"), self.tmp)
+        self.assertEqual((rc, err), (0, ""), "halt 提醒又是錯誤樣式（rc!=0 或 stderr 有字）")
+        ctx = json.loads(out)["hookSpecificOutput"]
+        self.assertEqual(ctx["hookEventName"], "PostToolUse")
+        for word in ("停止", "照常可用", "reset", qm.halt_convergent_clarification()):
+            self.assertIn(word, ctx["additionalContext"])
         self.assertTrue(list(self.tmp.glob(f"{guard.PLAN_PREFIX}*.md")),
                         "halt 帶沒把任務書寫到磁碟上（訴求 6c 的「記錄所有狀態」）")
 
-    def test_the_repeated_halt_message_still_says_convergent_tools_are_unaffected(
-            self) -> None:
-        """R158（refute_q1q2.md §S4／§0 本場實測）：閂鎖命中後、每一次 Read／Bash round-label-ok
-        都印的重複訊息（撞牆期間人唯一持續看得到的那一則）此前**沒有**首則訊息的「收斂不受
-        影響」澄清 ⇒ Q1／Q2 使用者誤讀「被擋」的合理成因之一。紅端＝舊碼的重複訊息只有
-        「額度仍在停止水位：扇出一律不執行，任務書已在磁碟上。」一行，不含這三件事。
-
-        DEF-200-413：hook 以子行程跑在**同一平台**，故用 `qm.halt_convergent_clarification()`
-        （不帶參數，平台現查）當期望值——平台現值即期望值，不寫死「／Bash／」那個 POSIX 字面
-        （Windows 上會是「／PowerShell／」，見同函式）。
-        """
+    def test_the_halt_notice_is_said_once_then_silent_but_fanout_still_blocks(self) -> None:
+        """DEF-200-435：提醒只說一次；撞牆期間唯一出聲的 PreToolUse 扇出阻斷須如實說「這次呼叫
+        沒有執行」（此前沿用「已正常執行完成」，與第一行矛盾）。期望字串向 SSOT 要。"""
         _quota_cache(self.tmp, 96.0)
-        rc1, err1 = _run_hook(self._post("Read"), self.tmp)
-        self.assertEqual(rc1, 2, "第一次呼叫沒進 halt ⇒ 本測試前提不成立")
-        rc2, err2 = _run_hook(self._post("Read"), self.tmp)
-        self.assertEqual(rc2, 2, "第二次呼叫沒進 halt ⇒ 閂鎖沒命中，測不到重複訊息")
-        self.assertIn("你剛才那次工具呼叫已正常執行完成", err2)
-        self.assertIn(qm.halt_convergent_clarification(), err2)
-        self.assertIn("Task／Agent／Workflow／WebFetch／WebSearch", err2)
-        self.assertIn("python tools/session_resume_planner.py --pace", err2)
+        self.assertIn("additionalContext", _run_hook3(self._post("Read"), self.tmp)[2])
+        for _ in range(2):
+            self.assertEqual(_run_hook3(self._post("Read"), self.tmp), _SILENT,
+                             "第二次起 PostToolUse 必須完全安靜（不是再印一次 rc=2）")
+        rc, err = _run_hook(self._pre("Agent"), self.tmp)
+        self.assertEqual(rc, 2, "扇出邊緣在 halt 帶必須照擋")
+        for phrase in ("已被擋下", "沒有執行",
+                       qm.halt_convergent_clarification(event="PreToolUse", tool="Agent")):
+            self.assertIn(phrase, err)
+        self.assertNotIn("已正常執行完成", err, "工具沒執行卻說「已正常執行完成」")
+
+    def test_a_blocked_first_call_says_the_halt_in_its_first_line_and_not_executed(self) -> None:
+        """DEF-200-435：halt 首見在 PreToolUse×Agent（新視窗第一個量測呼叫）：首則同樣不得說
+        「已正常執行完成」，副作用照做一次；CC 摺疊列只顯示首行⇒首行要講清楚是停止水位。"""
+        _quota_cache(self.tmp, 96.0)
+        rc, err = _run_hook(self._pre("Agent"), self.tmp)
+        self.assertEqual(rc, 2)
+        self.assertIn("停止", err.splitlines()[0])
+        self.assertIn("已被擋下", err)
+        self.assertNotIn("已正常執行完成", err)
+        self.assertTrue(list(self.tmp.glob(f"{guard.PLAN_PREFIX}*.md")), "首見沒寫任務書")
+
+    def test_the_repeated_block_headline_names_halt_model_and_reset_not_an_axis_dump(self) -> None:
+        """DEF-200-435 殘餘：重複阻斷訊息首行此前是 describe() 軸傾印（`band=free cap=None`
+        排第一），摺疊列看起來與停止水位相反。首行要直接點明 halt、哪個模型、reset 時刻。"""
+        _quota_cache(self.tmp, 96.0)
+        _run_hook(self._pre("Agent"), self.tmp)            # 首則
+        rc, err = _run_hook(self._pre("Agent"), self.tmp)  # 重複
+        first = err.splitlines()[0]
+        self.assertEqual(rc, 2)
+        for token in ("停止水位", "session", "模型=", "reset="):
+            self.assertIn(token, first)
+        self.assertNotIn("horizon=", first, "首行又是 describe() 軸傾印")
+
+    def test_the_notice_key_is_per_session_model_and_reset_window(self) -> None:
+        """DEF-200-435：「說一次」的單位＝(逐字稿 sid, 模型家族, 停止軸, reset 分鐘)，換任一格才
+        再提醒；鍵不含模型就會讓 Fable 的提醒吃掉 Opus 視窗的那一則（反之亦然）。"""
+        _quota_cache(self.tmp, 96.0)  # session 軸停止：與模型無關，單獨檢驗鍵的各維度
+        a = _write_jsonl(self.tmp / "sid-a.jsonl", [36_000])
+        b = _write_jsonl(self.tmp / "sid-b.jsonl", [36_000])
+        self.assertTrue(self._notice(a, "fable"), "首次必須提醒")
+        self.assertEqual(self._notice(a, "fable"), "", "同 sid 同模型第二次必須安靜")
+        self.assertTrue(self._notice(b, "fable"), "換 sid（新視窗／子 agent）要再提醒")
+        self.assertTrue(self._notice(a, "sonnet"), "同視窗換模型家族要再提醒")
+        self.assertEqual(self._notice(a, "sonnet"), "", "新鍵說過一次後也要安靜")
+        _quota_cache(self.tmp, 96.0, resets_in=7200.0)
+        self.assertTrue(self._notice(a, "fable"), "reset 翻頁（新的視窗期）要再提醒")
+
+    def _notice(self, transcript: Path, model: str | None) -> str:
+        """in-process 跑一次 PostToolUse 額度閘，回這次排進「送模型那份 JSON」的文字（`''`＝安靜）。
+        任務書／喚醒以替身取代（不起 planner 子行程）；閂鎖走 hook 真正的 `announced_latches`。"""
+        payload = {"hook_event_name": "PostToolUse", "tool_name": "Read",
+                   "transcript_path": str(transcript)}
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            rc = qg.quota_gate(payload, blocking=guard.BLOCKING_TOOLS,
+                               latch_read=guard.announced_latches,
+                               latch_write=guard.remember_latch,
+                               plan_writer=lambda t: str(self.tmp / "p.md"),
+                               waker=lambda t, p: {"armed": True},
+                               event="PostToolUse", active_model=model)
+            said = qg.flush_to_model()
+        self.assertEqual(rc, 0, "PostToolUse 的 halt 只提醒、不得回非 0")
+        return said
+
+    def test_a_halted_pace_prints_the_real_reading_when_the_cache_is_fresh(self) -> None:
+        """DEF-200-435 殘餘：halt 標記未過期時 `--pace` 此前宣稱「量不到」，快取新鮮時為假。快
+        取新鮮 ⇒ 印逐軸真實讀數（仍不打 API）；真的不可用才說沒有讀數；`--check` 末行共用同句。"""
+        now = datetime.now(UTC).astimezone()
+        sid = "sid-halted-pace"
+        reset_at = (now + timedelta(seconds=600)).isoformat()
+        qg.write_halt_marker(sid, {"sid": sid, "reset_at": reset_at, "at": now.isoformat(),
+                                   "band": "halt", "binding": "session"})
+        _quota_cache(self.tmp, 96.0)
+        fresh = qg.pace_report(now=now, sid=sid)
+        self.assertIn("halted", fresh)
+        self.assertIn("kind=session", fresh, "快取新鮮卻沒印真實讀數")
+        _quota_cache(self.tmp, 96.0, age=600.0)
+        stale = qg.pace_report(now=now, sid=sid)
+        self.assertNotIn("kind=", stale, "快取已過期卻印了讀數")
+        self.assertIn("沒有新鮮快取", stale)
+        line = qm.halted_band_line({"reset_at": "2999-01-01T00:00:00+00:00"}, now)
+        for text in (fresh, stale, line):
+            self.assertNotIn("量不到本來就是事實", text)
+
+    def test_a_fable_halt_does_not_poison_an_opus_window(self) -> None:
+        """DEF-200-437（重放實測）：遲滯檔此前不分模型——Fable 視窗的 halt（cap=0）寫進去後，緊接著
+        的 Opus 視窗首個 Agent 被「cap=0」擋下，而 Opus 自己各軸的 cap 是 2。遲滯鍵＝模型家族。"""
+        far = 72 * 3600.0
+        _quota_cache(self.tmp, None, extra=(("session", 5.0, 3600.0), ("weekly_all", 75.0, far),
+                                            ("weekly_scoped", 99.0, far)),
+                     scope_models={"weekly_scoped": "Fable"})
+        self.assertTrue(self._notice(self.transcript, "fable"), "前提：Fable 視窗確實撞了 halt")
+        self.assertEqual(_gate(self._pre("Agent"), active_model="opus"), 0,
+                         "Opus 視窗首個 Agent 被 Fable 的 halt 遲滯擋下")
+        stability = qg.quota_stability
+        self.assertEqual(stability.load_state(scope="fable").cap, 0, "Fable 自己的遲滯被蓋掉")
+        self.assertGreaterEqual(stability.load_state(scope="opus").cap, 1)
+
+    def test_a_pace_query_never_changes_what_the_guard_enforces(self) -> None:
+        """DEF-200-437：`--pace` 帶攤提的（可能更緊的）cap 此前寫進**守衛共用**的遲滯檔——查一次
+        就讓之後一段時間內的扇出多擋一格（諮詢指令改了執法值）。兩把尺各有遲滯檔，`--pace` 只准
+        寫 pace 那把；以替身讓其 cap 嚴於守衛，隔離「接線」（攤提算法見 test_quota_policy）。"""
+        _quota_cache(self.tmp, 75.0, kind="seven_day", resets_in=72 * 3600.0,
+                     extra=(("five_hour", 4.0, 42 * 60.0),))
+        self._pace_contract_to_tmp()
+        real = quota_policy.decide
+        now = datetime.now(UTC).astimezone()
+        unpaced = real(qg.read_quota(now), now, quota_policy.DEFAULT_POLICY,
+                       active_model="opus").cap
+
+        def stricter_when_paced(state, now, policy, ratio=None, *a, **k):  # noqa: ANN001,ANN002
+            decision = real(state, now, policy, ratio, *a, **k)
+            return decision if ratio is None else replace(
+                decision, cap=1, recommended_fanout=min(decision.recommended_fanout, 1))
+
+        for target, value in ((qg, "burn_ratio"), (quota_policy, "decide")):
+            old = getattr(target, value)
+            self.addCleanup(setattr, target, value, old)
+        qg.burn_ratio = lambda state: (3.69, "n=21", "")
+        quota_policy.decide = stricter_when_paced
+        qg.pace_report(model="opus")
+        stability = qg.quota_stability
+        self.assertIsNone(stability.load_state(scope="opus"), "--pace 寫進了守衛那把尺的遲滯檔")
+        self.assertEqual(stability.load_state(scope="opus", ruler="pace").cap, 1,
+                         "前提：pace 有寫自己那把")
+        for n in range(1, unpaced + 1):  # 沒查過 --pace 時守衛放行 cap 個；查過也必須一樣多
+            self.assertEqual(_gate(self._pre("Agent"), active_model="opus"), 0,
+                             f"查過一次 --pace 之後，第 {n} 個 Agent 被多擋了一格")
+        self.assertEqual(stability.load_state(scope="opus").cap, unpaced,
+                         "守衛的執法 cap 被 --pace 改動")
+        self.assertTrue((self.tmp / "autosdd_pace_opus.json").is_file(),
+                        "pace 契約沒帶 model ⇒ 家族兄弟檔沒寫（canonical 仍是 last-writer-wins）")
+
+    def _pace_contract_to_tmp(self) -> None:
+        """`pace_contract.contract_path()` 走系統暫存（引擎讀的那份）——測試不得寫真的那個。"""
+        old = qg.pace_contract.contract_path
+        qg.pace_contract.contract_path = lambda: self.tmp / "autosdd_pace.json"
+        self.addCleanup(setattr, qg.pace_contract, "contract_path", old)
+
+    def test_the_pace_report_far_reset_sentence_does_not_promise_a_window_clears(self) -> None:
+        """DEF-200-435：`--pace` 每次（cap 非 None 即印）都帶遠期 reset 那句，而它根本沒有任何呼叫
+        被擋——「被擋的這一次只要等窗口清空就能再派」在這個語境無所指，且叫人等一個不會來的事件。"""
+        _quota_cache(self.tmp, 75.0, kind="weekly_all", resets_in=5 * 86400.0)
+        self._pace_contract_to_tmp()
+        text = qg.pace_report(model="opus")
+        self.assertIn("好幾天", text, "前提：遠期 reset 的節流句有印出來")
+        for phrase in ("窗口清空", "被擋的這一次", "不是等一下就好"):
+            self.assertNotIn(phrase, text, "--pace 語境下這句話為假或自相矛盾")
+
+    def test_a_halted_pace_says_whether_switching_the_model_family_helps(self) -> None:
+        """DEF-200-435：halt 未過期時 `--pace` 走短路，此前缺 `halt_model_hint`（其餘三處都有
+        「換模型有沒有用」那句）。只在判讀本身確實停止時才印：不停止時印出來會是假話。"""
+        now = datetime.now(UTC).astimezone()
+        sid = "sid-halted-pace-hint"
+        reset_at = (now + timedelta(seconds=600)).isoformat()
+        qg.write_halt_marker(sid, {"sid": sid, "reset_at": reset_at, "at": now.isoformat(),
+                                   "band": "halt", "binding": "x"})
+        _quota_cache(self.tmp, None,
+                     extra=(("session", 5.0, 3600.0), ("weekly_scoped", 99.0, 60.0)),
+                     scope_models={"weekly_scoped": "Fable"})
+        scoped = qg.pace_report(now=now, sid=sid, model="fable")
+        self.assertIn("halted", scoped, "前提：走的是 halt 標記短路")
+        self.assertIn("換模型有用", scoped, "短路版 --pace 沒有換模型有沒有用那一句")
+        other = qg.pace_report(now=now, sid=sid, model="sonnet")
+        self.assertNotIn("換模型", other, "該模型判讀並未停止，卻印了換模型的結論（假話）")
+        _quota_cache(self.tmp, None, extra=(("session", 5.0, 3600.0), ("weekly_all", 99.0, 60.0)))
+        self.assertIn("換模型沒有用", qg.pace_report(now=now, sid=sid, model="opus"),
+                      "全模型共用軸停止時，短路版沒說換模型沒有用")
+
+    def test_a_raw_model_id_in_pace_reads_like_its_family_word(self) -> None:
+        """DEF-200-437：`--pace --model claude-fable-5`（原始 id）此前不被當家族字，Fable 分軌
+        軸被遮出攤提（放寬煞車）。原始 id 與家族字必須同答案：首行逐字相同。"""
+        mins = 60.0
+        _quota_cache(self.tmp, None, extra=(
+            ("session", 3.0, 257 * mins), ("five_hour", 3.0, 257 * mins),
+            ("weekly_all", 75.0, 3557 * mins), ("seven_day", 75.0, 3557 * mins),
+            ("weekly_scoped", 97.0, 3557 * mins)), scope_models={"weekly_scoped": "Fable"})
+        self._pace_contract_to_tmp()
+        now = datetime.now(UTC).astimezone()  # 同一個 now：兩次呼叫跨分鐘邊界會讓「剩 N 分鐘」差 1
+        raw = qg.pace_report(now=now, model="claude-fable-5").splitlines()[0]
+        family = qg.pace_report(now=now, model="fable").splitlines()[0]
+        self.assertEqual(raw, family, "原始 id 與家族字讀出不同的答案")
+        self.assertIn("band=halt", raw, "擁有者自己的分軌軸（Fable 97%）沒讓它停止")
+        self.assertTrue((self.tmp / "autosdd_pace_fable.json").is_file(),
+                        "原始 id 沒落到該家族的 pace 兄弟檔")
+
+    def test_a_failing_halt_action_takes_neither_the_brake_nor_the_reminder_with_it(self) -> None:
+        """DEF-200-435：halt 副作用（寫任務書／武裝喚醒）拋例外時，例外一路冒到 hook catch-all
+        ⇒ rc=0 **放行**（煞車消失）、提醒丟失、閂鎖已寫（之後永遠靜默）。要求：① 煞車不依賴副作
+        用；② 提醒照送並如實說動作失敗；③ 副作用只試一次（否則 spawn 風暴）；④ 之後仍只說一次。"""
+        _quota_cache(self.tmp, 96.0)
+        calls: list[int] = []
+
+        def boom(*_a: object, **_k: object) -> dict:
+            calls.append(1)
+            raise RuntimeError("planner exploded")
+
+        old = qg.quota_halt_actions
+        qg.quota_halt_actions = boom
+        self.addCleanup(setattr, qg, "quota_halt_actions", old)
+        blocked_err = io.StringIO()
+        with contextlib.redirect_stderr(blocked_err):
+            rc_pre = _gate(self._pre("Agent"))
+        self.assertEqual(rc_pre, 2, "副作用拋例外時煞車跟著消失（rc!=2）")
+        self.assertIn("停止", blocked_err.getvalue())
+        self.assertIn("planner exploded", blocked_err.getvalue(), "失敗被吞掉、提醒沒說動作失敗")
+        other = _write_jsonl(self.tmp / "other.jsonl", [36_000])
+        rc_post = _gate({**self._post("Read"), "transcript_path": str(other)}, event="PostToolUse")
+        said = qg.flush_to_model()
+        self.assertEqual(rc_post, 0)
+        self.assertIn("planner exploded", said, "PostToolUse 首見的提醒沒有送出（或沒說動作失敗）")
+        self.assertEqual(len(calls), 2, "每個新鍵各試一次副作用，共兩次")
+        self.assertEqual(_gate(self._post("Read"), event="PostToolUse"), 0)
+        self.assertEqual(qg.flush_to_model(), "", "說過一次之後必須安靜")
+        self.assertEqual(len(calls), 2, "副作用失敗後每次呼叫都重試 ⇒ spawn 風暴")
+
+    def test_the_halt_latch_is_written_before_the_side_effects_run(self) -> None:
+        """DEF-200-435：閂鎖先於副作用——副作用執行期間再進來的呼叫（平行 hook 行程的縮影）要讀到
+        「說過了」而不再進副作用；閂鎖排在動作之後＝平行行程各自重跑一輪（spawn 風暴）。"""
+        _quota_cache(self.tmp, 96.0)
+        calls: list[int] = []
+
+        def reenter(*_a: object, **_k: object) -> dict:
+            calls.append(1)
+            if len(calls) < 3:  # 閂鎖後寫時內層會再進來；封頂避免無窮遞迴
+                with contextlib.redirect_stderr(io.StringIO()):
+                    _gate(self._pre("Agent"))
+            return HaltNoticeTest._ACT
+
+        old = qg.quota_halt_actions
+        qg.quota_halt_actions = reenter
+        self.addCleanup(setattr, qg, "quota_halt_actions", old)
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(_gate(self._pre("Agent")), 2)
+        self.assertEqual(len(calls), 1, "副作用執行期間再進來的呼叫又跑了一輪 ⇒ 閂鎖排在動作之後")
 
     def test_the_halt_side_effects_run_exactly_once_per_reset_window(self) -> None:
         """副作用（寫任務書＋spawn 武裝）必須在閂鎖**之內**：否則 95% 之後每一次
@@ -11209,13 +11599,14 @@ class QuotaGateIsWiredToTheBurnPathTest(unittest.TestCase):
         old_err, sys.stderr = sys.stderr, sink
         self.addCleanup(setattr, sys, "stderr", old_err)
         rcs = {_gate(self._post("Read"), event="PostToolUse") for _ in range(20)}
-        self.assertEqual(rcs, {2}, "halt 帶有幾次沒回 2 ⇒ 訊號斷斷續續")
+        self.assertEqual(rcs, {0}, "PostToolUse 的 halt 只提醒、每一次都必須 rc=0（DEF-200-435）")
         self.assertEqual(len(calls), 1, f"halt 副作用跑了 {len(calls)} 次 ⇒ spawn 風暴")
 
     def test_quota_halt_does_not_preempt_the_context_sentinel(self) -> None:
         """Δ13＝接電**引入**的新缺陷（不是既有債）：halt 帶每次都回 2 ⇒ hook 提早 return ⇒
         整個 halt 期間 `arm_when_earned` 一次都不執行；而額度那層的喚醒武裝只在閂鎖第一次
-        觸發時試一次、失敗不重試 ⇒ 兩層續航都沒了。紅端實測：武裝次數由 5 掉到 0。"""
+        觸發時試一次、失敗不重試 ⇒ 兩層續航都沒了。紅端實測：武裝次數由 5 掉到 0。
+        DEF-200-435 起 PostToolUse 的 halt 回 0、不提早 return，本測試仍鎖「哨兵每次都被武裝」。"""
         _quota_cache(self.tmp, 96.0).replace(qg.quota_cache_path())
         armed: list[object] = []
         for name, value in (("read_payload", lambda: self._post("Read")),
@@ -11229,9 +11620,9 @@ class QuotaGateIsWiredToTheBurnPathTest(unittest.TestCase):
         self.addCleanup(sink.close)
         old_err, sys.stderr = sys.stderr, sink
         self.addCleanup(setattr, sys, "stderr", old_err)
-        self.assertEqual(guard.main(), 2, "halt 帶沒回 2 ⇒ 這條測的前提就不成立")
+        self.assertEqual(guard.main(), 0, "halt 帶 PostToolUse 不是錯誤樣式（DEF-200-435）")
         self.assertTrue(armed, "halt 帶下 context 哨兵一次都沒被武裝（Δ13 復發）")
-        self.assertEqual(guard.main(), 2)
+        self.assertEqual(guard.main(), 0)
         self.assertEqual(len(armed), 2,
                          "只有閂鎖那一次武裝 ⇒ halt 期間其餘每一次呼叫都沒有續航保護")
 
@@ -11439,6 +11830,195 @@ class QuotaGateIsWiredToTheBurnPathTest(unittest.TestCase):
         creds = _cred_kwargs(self, meter, "win32", readable=True)
         reading, _reason = meter.measure_detail(4, **creds)
         self.assertIsNone(reading["account_key"])
+
+
+class QuotaGateDecidesOnTheDispatchTargetModelTest(unittest.TestCase):
+    """DEF-200-436：PreToolUse 扇出閘此前一律問**視窗自己的**模型——Fable 視窗停止時連 `model:
+    sonnet` 的子 agent 都派不出去，反向 Sonnet 視窗派 `model: fable`（已停止）卻被放行。Agent／
+    Task 帶 `model` 時改問目標家族；缺席／inherit／認不出／fork／Workflow 退回視窗模型＝舊行
+    為。目標家族的停止只擋這一次派工，不替視窗落 session 級副作用（halt 標記／任務書／喚醒）。"""
+
+    def setUp(self) -> None:
+        self.tmp = _tmpdir(self, "target-model-")
+        # 逐字稿檔名（＝session id）帶本次暫存目錄名：hook 對 sid 衍生的狀態檔路徑因此唯一，收尾才
+        # 斷得了「真實 %TEMP% 沒有被本類留下東西」（共用 sid 會被別的測試類的殘留誤導）。
+        self.token = self.tmp.name
+        self.fable = self._window("fable", "claude-fable-5")
+        self.sonnet = self._window("sonnet", "claude-sonnet-5")
+        for name, value in (("quota_cache_path", lambda: self.tmp / quota_meter.CACHE_NAME),
+                            ("fanout_ledger_path", lambda: self.tmp / "l.d"),
+                            ("quota_latch_path", lambda: self.tmp / "latch.json"),
+                            *_TRACE_ISOLATION(self)):
+            self._patch(qg, name, value)
+        for name, value in (("write_resume_plan", lambda t: str(self.tmp / "p.md")),
+                            ("arm_when_earned", lambda t: None),
+                            ("arm_quota_wakeup", lambda t, p: {"armed": True}),
+                            ("state_path", lambda sid, tmp_dir=None: self.tmp / f"ctx-{sid}.json")):
+            self._patch(guard, name, value)
+        self._patch(qg.pace_contract, "contract_path", lambda: self.tmp / "autosdd_pace.json")
+        self._patch(sys, "stderr", open(os.devnull, "w", encoding="utf-8"))
+        self.addCleanup(sys.stderr.close)
+        # Fable 分軌軸 99%（停止）＋一條寬鬆軸：停止與否只取決於「問的是不是 Fable」。
+        _quota_cache(self.tmp, None,
+                     extra=(("session", 5.0, 3600.0), ("weekly_scoped", 99.0, 60.0)),
+                     scope_models={"weekly_scoped": "Fable"})
+        self.addCleanup(QuotaGateIsWiredToTheBurnPathTest._drain_model_msgs)
+        self.addCleanup(self._assert_real_temp_is_untouched)
+
+    def _assert_real_temp_is_untouched(self) -> None:
+        """hook 對 sid 衍生 `autosdd_ctxguard_<sid>.latches.d` 目錄；不隔離 `state_path` 就寫進
+        真實 %TEMP%（此前每次全套留 2 個）。sid 帶唯一 token，零命中才算乾淨。"""
+        left = sorted(p.name for p in Path(tempfile.gettempdir()).glob(f"autosdd_*{self.token}*"))
+        self.assertEqual(left, [], "測試把 hook 狀態寫進了真實暫存目錄")
+
+    def _window(self, name: str, model: str) -> Path:
+        """一個「視窗」＝一份用該模型跑過的逐字稿（sid＝檔名，帶唯一 token）。"""
+        return _write_jsonl(self.tmp / f"{self.token}-{name}.jsonl", [36_000], model=model)
+
+    def _patch(self, obj: object, name: str, value: object) -> None:
+        old = getattr(obj, name)
+        setattr(obj, name, value)
+        self.addCleanup(setattr, obj, name, old)
+
+    @staticmethod
+    def _payload(transcript: Path, tool: str = "Agent", tool_input: object = None,
+                 event: str = "PreToolUse") -> dict:
+        payload = {"hook_event_name": event, "tool_name": tool, "transcript_path": str(transcript)}
+        if tool_input is not None:
+            payload["tool_input"] = tool_input
+        return payload
+
+    def _main(self, transcript: Path, tool: str = "Agent", tool_input: object = None,
+              event: str = "PreToolUse") -> int:
+        payload = self._payload(transcript, tool, tool_input, event)
+        with unittest.mock.patch.object(guard, "read_payload", return_value=payload):
+            return guard.main()
+
+    def test_a_fable_window_may_dispatch_a_subagent_on_another_family(self) -> None:
+        # Task 與 Agent 同理：只鎖 Agent 時，把 hook 的 ("Agent", "Task") 改成 ("Agent",) 全類仍綠。
+        for tool in ("Agent", "Task"):
+            for model in ("sonnet", "claude-sonnet-5-5", "opus", "haiku", "SONNET"):
+                with self.subTest(tool=tool, model=model):
+                    self.assertEqual(self._main(self.fable, tool, {"model": model}), 0,
+                                     "目標家族沒停止卻被視窗的 Fable 停止水位擋下")
+
+    def test_the_window_model_still_rules_when_the_target_says_nothing_usable(self) -> None:
+        for label, tool, tool_input in (
+                ("沒帶 tool_input", "Agent", None), ("空 tool_input", "Agent", {}),
+                ("inherit", "Agent", {"model": "inherit"}),
+                ("認不出家族", "Agent", {"model": "mythos"}),
+                ("model 是 None", "Agent", {"model": None}), ("tool_input 形狀不對", "Agent", "x"),
+                ("fork 忽略 model", "Agent", {"model": "sonnet", "subagent_type": "fork"}),
+                ("Workflow 看不到內部模型", "Workflow", {"model": "sonnet"}),
+                ("目標就是 Fable", "Agent", {"model": "fable"}),
+                ("Task 同理", "Task", {"model": "fable"})):
+            with self.subTest(label):
+                self.assertEqual(self._main(self.fable, tool, tool_input), 2,
+                                 f"{label}：應退回視窗模型（Fable 停止）而擋下")
+
+    def test_a_sonnet_window_cannot_dispatch_into_a_halted_family(self) -> None:
+        """反向：只鎖放寬一個方向會被「順手修好」，另一個方向必須同時鎖。"""
+        for tool in ("Agent", "Task"):
+            with self.subTest(tool=tool):
+                self.assertEqual(self._main(self.sonnet, tool, {"model": "fable"}), 2,
+                                 "派往已停止的 Fable 家族卻被放行")
+        for tool_input in (None, {"model": "sonnet"}, {"model": "inherit"}):
+            with self.subTest(tool_input=tool_input):
+                self.assertEqual(self._main(self.sonnet, tool_input=tool_input), 0)
+
+    def test_a_window_dispatching_into_a_halted_family_is_blocked_without_a_session_halt(
+            self) -> None:
+        """DEF-200-436：自己模型沒停止的視窗試派已停止的 Fable，不得因此被標成 halted（否則
+        `--pace` 首行變「🔴 halted」直到 Fable reset）。只擋這一次、明說目標模型。"""
+        effects: list[str] = []
+        self._patch(guard, "write_resume_plan",
+                    lambda t: effects.append("plan") or str(self.tmp / "p.md"))
+        self._patch(guard, "arm_quota_wakeup",
+                    lambda t, p: effects.append("wake") or {"armed": True})
+        for attempt in (1, 2):  # 第二次必須同樣出聲：這條路不吃閂鎖
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                rc = self._main(self.sonnet, tool_input={"model": "fable"})
+            self.assertEqual(rc, 2, f"第 {attempt} 次：派往已停止的 Fable 家族卻被放行")
+            for phrase in ("fable", "沒有執行", "換模型有用"):
+                self.assertIn(phrase, err.getvalue())
+            self.assertNotIn("任務書：", err.getvalue(), "只擋派工卻宣稱留下了任務書")
+        self.assertEqual(effects, [], "只擋這一次派工卻做了視窗級副作用（任務書／喚醒）")
+        self.assertFalse(qg.halt_marker_path(self.sonnet.stem).exists(),
+                         "替自己模型沒停止的視窗落了 halt 標記")
+        first = qg.pace_report(sid=self.sonnet.stem, model="sonnet").splitlines()[0]
+        self.assertIn("現在可派", first, "視窗自己的 --pace 沒有印「現在可派」")
+        self.assertNotIn("halted", first, "視窗自己的 --pace 首行被 halt 標記短路成 halted")
+
+    def test_the_windows_own_halt_still_records_the_session_level_effects(self) -> None:
+        """對照組：視窗**自己的**模型撞 halt 時，session 級副作用（halt 標記）照舊——沒有這一格，
+        「一律不做副作用」也能讓上一格全綠。兩條路：PreToolUse×Agent 不帶 model、PostToolUse。"""
+        post = lambda ts: self._main(ts, "Read", None, "PostToolUse")  # noqa: E731
+        for label, name, run in (("Agent 不帶 model", "own-pre", lambda ts: self._main(ts)),
+                                 ("PostToolUse", "own-post", post)):
+            ts = self._window(name, "claude-fable-5")
+            with self.subTest(label):
+                run(ts)
+                self.assertTrue(qg.halt_marker_path(ts.stem).exists(),
+                                f"{label}：視窗自己的模型停止了卻沒落 halt 標記")
+
+    def test_a_halt_from_a_shared_axis_is_the_windows_own_even_when_the_target_is_named(
+            self) -> None:
+        """方向鎖：全模型共用軸停止＝不論派往哪個家族、視窗自己也停了 ⇒ session 級副作用照做。
+        判準是「停止的軸是不是只有模型分軌軸」，不是「派工有沒有指名家族」。"""
+        _quota_cache(self.tmp, None,
+                     extra=(("session", 5.0, 3600.0), ("weekly_all", 99.0, 60.0)))
+        self.assertEqual(self._main(self.sonnet, tool_input={"model": "sonnet"}), 2)
+        self.assertTrue(qg.halt_marker_path(self.sonnet.stem).exists(),
+                        "共用軸停止、視窗自己也停了，卻沒落 halt 標記（block-only 判得太寬）")
+
+    def test_naming_the_halted_family_defers_the_window_level_effects_to_its_own_events(
+            self) -> None:
+        """視窗是 Fable、派工也指名 fable：PreToolUse payload 與「Sonnet 視窗派 fable」除逐字稿
+        路徑外逐字相同、閘門端分不出 ⇒ 這一次只擋、不落標記；視窗自己的下一個工具事件才落。"""
+        ts = self._window("same-family", "claude-fable-5")
+        self.assertEqual(self._main(ts, tool_input={"model": "fable"}), 2)
+        self.assertFalse(qg.halt_marker_path(ts.stem).exists())
+        self._main(ts, "Read", None, "PostToolUse")
+        self.assertTrue(qg.halt_marker_path(ts.stem).exists(),
+                        "視窗自己的 PostToolUse 沒有補落 halt 標記")
+
+    def test_the_gates_dispatch_target_agrees_with_what_the_hook_asked(self) -> None:
+        """hook 求 `active_model` 的「派工目標」與閘門端 `dispatch_target()` 是同一判準的兩份複
+        本（閘門不得 import hook），漂移會把「視窗自己的停止」誤當「只針對這次派工」。hook 傳進
+        閘門的 `active_model` 須等於 `dispatch_target(payload)`，無目標時等於視窗家族。"""
+        seen: list[object] = []
+        self._patch(qg, "quota_gate",
+                    lambda payload, **kw: seen.append(kw.get("active_model")) or 0)
+        forms = (("指名 fable", "Agent", {"model": "fable"}, "PreToolUse"),
+                 ("Task 指名完整 id", "Task", {"model": "claude-fable-5-1"}, "PreToolUse"),
+                 ("指名顯示名", "Agent", {"model": "Opus 5.5"}, "PreToolUse"),
+                 ("inherit", "Agent", {"model": "inherit"}, "PreToolUse"),
+                 ("沒帶 tool_input", "Agent", None, "PreToolUse"),
+                 ("空 tool_input", "Agent", {}, "PreToolUse"),
+                 ("tool_input 形狀不對", "Agent", "x", "PreToolUse"),
+                 ("model 不是字串", "Agent", {"model": 7}, "PreToolUse"),
+                 ("fork", "Agent", {"model": "fable", "subagent_type": "fork"}, "PreToolUse"),
+                 ("Workflow", "Workflow", {"model": "fable"}, "PreToolUse"),
+                 ("PostToolUse", "Agent", {"model": "fable"}, "PostToolUse"))
+        targets = []
+        for label, tool, tool_input, event in forms:
+            payload = self._payload(self.sonnet, tool, tool_input, event)
+            target = qm.dispatch_target(payload, event)
+            targets.append(target)
+            with self.subTest(label):
+                self._main(self.sonnet, tool, tool_input, event)
+                self.assertEqual(seen[-1], target or "sonnet")
+        self.assertGreaterEqual(len([t for t in targets if t]), 3, "語料大半沒有目標＝判準空轉")
+        self.assertGreaterEqual(len([t for t in targets if not t]), 6, "語料沒有涵蓋退回視窗模型")
+
+    def test_post_tool_use_always_measures_the_window_model(self) -> None:
+        """PostToolUse 量的是「這個視窗自己的燃燒」：即使 tool_input 帶別家族 model 也不得改寫
+        ——若被誤套目標模型，Fable 視窗的提醒會消失（這裡以「提醒仍有」斷言）。"""
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(self._main(self.fable, "Task", {"model": "sonnet"}, "PostToolUse"), 0)
+            said = qg.flush_to_model()
+        self.assertIn("停止", said, "PostToolUse 被誤套目標模型 ⇒ Fable 視窗的 halt 提醒消失")
 
 
 # ═══════════════════════════════════════════════════════════════════════════

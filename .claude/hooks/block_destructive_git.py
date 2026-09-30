@@ -67,6 +67,10 @@ repo 原話：**擋到讓人無法工作的守衛會被整個關掉，而被關�
   **守衛靜默失效**，exit 1 已滿足（理由全文見證據檔 §史料搬遷）。「rc==2 才必須配窄
   matcher」由 `tools/tests/test_check_hooks_liveness.py::degraded_payload_verdict`
   機械釘住；本檔 matcher＝`OWN_TOOLS ∪ GOV_TOOLS`（R95 起）＝**恰好等於自己的射程**。
+· 只想提醒的正常運作（有人值守改治理檔、`refs/stash` 被看不見的路動過）→ **exit 0＋
+  `emit_to_model`**，不佔 exit 1：CC 只認 0（放行）與 2（阻斷），其餘碼一律顯示成
+  hook error（DEF-200-440）。本檔的 exit 1 只留給上一條的退化 payload，每處同一行帶
+  `# degraded-payload: <理由>`（`tools/tests/test_block_destructive_git_r83.py` 家族鎖）。
 · 任何非預期例外 → exit 0（fail-open）。`.claude/settings.json` description 記載過的 P0：
   hook 誤觸 PreToolUse deny 會把**所有**工具硬鎖死，守衛自身絕不可成為那種故障源。
 
@@ -162,10 +166,13 @@ sys.path.insert(0, os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
     "tools", "lib"))
 try:
-    from platform_utils import read_hook_payload  # type: ignore[import-not-found]
+    from platform_utils import emit_to_model, read_hook_payload  # type: ignore[import-not-found]
 except Exception:  # noqa: BLE001 — 共用層不可達＝退化，不是崩潰（fail-open 是 P0）
     def read_hook_payload() -> dict:  # type: ignore[misc]
         return {}
+
+    def emit_to_model(event: str, msg: str) -> bool:  # type: ignore[misc]
+        return False  # 送不進模型 ⇒ 治理檔提醒消失（提醒面 fail-quiet，不影響阻斷語意）
 
 # 🔴 自己的 stdout／stderr 強制 UTF-8（DEF-101-789）。缺這段時：locale 表達不了 CJK
 # （en-US ＝ cp1252）→ 整段指引變 `\uXXXX` 逃脫字面；locale 表達得了但非 UTF-8
@@ -1200,7 +1207,8 @@ _GOVWRITE_BLOCK_MSG = (
     "  本條刻意沒有行內豁免；人的出口＝啟動 claude 前設 " + GOVWRITE_OFF_ENV + "。\n")
 _GOVWRITE_NOTE_MSG = (
     "[block_destructive_git] 提醒：{rel} 是治理檔（PRD §15.5 紅線 10 保護面）。"
-    "有人值守 ⇒ 只出聲不阻斷；無人值守回合對它是唯讀的，改完請跑對應守衛測試。\n")
+    "這只是提醒，這次寫入已放行（有人值守 ⇒ 只出聲不阻斷）；"
+    "無人值守回合對它是唯讀的，改完請跑對應守衛測試。")
 
 
 def govwrite_hit(tool_input: object) -> str | None:
@@ -1243,6 +1251,9 @@ def main() -> int:
         # 非 dict 一律回 `{}`，於是下面「讀不出 tool_name ⇒ rc=1 出聲不阻斷」那一支
         # 完全不變。
         payload = read_hook_payload()
+        # 事件名取 payload 原值不得寫死（與實際事件不符時 CC 整份丟掉）；本 hook 只註冊在
+        # PreToolUse，缺席才退回它。兩條提醒（治理檔／stash 偵測）共用。
+        event = str(payload.get("hook_event_name") or "PreToolUse")
 
         tool = str(payload.get("tool_name") or "")
         if not tool:
@@ -1250,7 +1261,7 @@ def main() -> int:
                 "[block_destructive_git] payload 讀不出 tool_name（壞 JSON／空 stdin）⇒ "
                 "本次不檢查。刻意不阻斷：硬擋唯一的 shell 載具，代價遠大於漏掉一次檢查；"
                 "但也不靜默——守衛失效必須看得見。\n")
-            return 1
+            return 1  # degraded-payload: tool_name 讀不出，本次沒檢查
         # 🔴 R95 治理面唯讀（GOV_TOOLS 一族）。刻意判在 GUARD_OFF_ENV **之前**：那個
         # 開關是 git／等待兩族的逃生口，不得順手把治理面唯讀一起關掉（兩族各自有開關，
         # 同本檔「不與既有變數共用」的既有論述；具名測試釘住兩個方向）。
@@ -1264,8 +1275,10 @@ def main() -> int:
             if os.environ.get(UNATTENDED_ENV):
                 sys.stderr.write(_GOVWRITE_BLOCK_MSG.format(rel=rel))
                 return 2
-            sys.stderr.write(_GOVWRITE_NOTE_MSG.format(rel=rel))
-            return 1
+            # DEF-200-440：有人值守只是提醒。rc=1 會被 CC 標成 hook error（看起來像被擋），
+            # 改走 emit_to_model（stdout 單一 JSON）＋ rc=0。
+            emit_to_model(event, _GOVWRITE_NOTE_MSG.format(rel=rel))
+            return 0
         if os.environ.get(GUARD_OFF_ENV) or tool not in OWN_TOOLS:
             # 前者＝git／等待兩族「人的逃生口」（模型改不到 hook 行程的環境，見模組
             # docstring）；後者＝matcher 被改寬時的第二道限縮。
@@ -1276,7 +1289,7 @@ def main() -> int:
         if not isinstance(command, str) or not command.strip():
             sys.stderr.write(
                 f"[block_destructive_git] {tool} payload 沒有 command 字串 ⇒ 本次不檢查。\n")
-            return 1
+            return 1  # degraded-payload: 沒有 command 字串，本次沒檢查
 
         # payload 的 `cwd` 只是**起點**：實測它恆為專案根（即使指令自己 `cd` 去別處），
         # 所以真正的落腳目錄一律由指令字串推導（見模組 docstring）。傳它進去是為了讓
@@ -1307,17 +1320,20 @@ def main() -> int:
         if wait_hits and has_waitform_exemption(command) and not unattended:
             wait_hits = []
 
-        # 偵測層（見上方 R84 偵測層說明）：出聲但**絕不阻斷**。rc=1 是 Claude Code 對
-        # 「stderr 給人看、工具照跑」的那一格，與本檔既有的退化 payload 分支同一格。
+        # 偵測層（見上方 R84 偵測層說明）：只是提醒、**絕不阻斷**，也不得佔 rc=1——CC 只認
+        # 0（放行）與 2（阻斷），其餘碼一律顯示成 hook error（DEF-200-440 同族）。⇒ 不阻斷
+        # 時走 emit_to_model＋rc=0；要阻斷時 note 照舊併進下方 stderr，不重複送。
         # 🔴 R84／SD-04：ack 的語意是「**接下來真的會有**一次 stash 經過本守衛」⇒ 它必須
         # ①用 `git_invocations()` 判而不是子字串（否則 `grep … stash` 就能把哨兵消音）、
         # ②在本次要阻斷時為 False（被擋下的指令根本不會跑，它解釋不了任何 ref 變動）。
         # 兩者缺一，下一輪真正隱形的那條路就會被靜默吞掉——而吞掉是**永久**的。
         note = stash_ref_sentinel(
             start_dir, stash_writer_seen(command) and not (hits or wait_hits))
-        sys.stderr.write(note or "")
         if not hits and not wait_hits and not authz:
-            return 1 if note else 0
+            if note:
+                emit_to_model(event, note)
+            return 0
+        sys.stderr.write(note or "")
 
         message = ""
         # 授權邊界排在最前面：它回答的是「你這一跑有沒有權限做這件事」，而其餘兩族

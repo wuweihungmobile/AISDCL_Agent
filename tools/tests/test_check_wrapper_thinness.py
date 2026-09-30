@@ -769,11 +769,8 @@ class TestForbiddenKeywordsCoverEveryPin(unittest.TestCase):
 # ══════════════════════════════════════════════════════════════════════════════
 # R74：根層守門工具的「未知引數 fail-loud」行為級鎖（R67-D20 射程自 3 站擴至全部）
 # ══════════════════════════════════════════════════════════════════════════════
-# 🔴 **為何併進本檔而非另立新檔**：`tools/tests/test_adr_xplat001_c1c2_lock.py` 的
-# `TestGuardLayerRatchet` 是 shrink-only 棘輪，`DEF-101-561③` 明文裁決「禁止新增
-# 鎖檔、只准合併／刪除」（🔴 R78 ARCH-03 訂正：那是 R74 當時**檔數**棘輪的語意；R77 起
-# 換成逐檔行數表，現行語意是**淨行數不得上升**。R73 首版新建獨立檔案當場被擋下的實錄見
-# `test_check_hooks_liveness.py` 同款註記）。本檔是「根層守門工具自身契約」的既有家。
+# 併進本檔而非另立新檔的取捨（棘輪語意沿革）搬至
+# Guard_Line_History_2.md〈R186 淨減法搬遷〉§7。  round-label-ok
 #
 # 🔴 **為何是行為級枚舉而不是逐檔比對原始碼**：R67-D20 的修法只落在三支具名工具上，
 # 於是同一個洞在其餘工具身上活了七輪。實測（本輪唯讀）：`check_wrapper_thinness.py`
@@ -784,14 +781,9 @@ class TestForbiddenKeywordsCoverEveryPin(unittest.TestCase):
 #   · 「靜默吞掉」是**行為**，故判準也只能是行為——比對原始碼有沒有某個 import
 #     會被任何一種等價寫法繞過（同 `DEF-101-757` 的劃界結案形態）。
 #
-# 🔴 **R74 射程修復（SD 獨立複審抓到）：判準原本是 `glob("check_*.py")`，用檔名劃界**
-# ——於是不叫 `check_*` 的工具全部在射程外，而**後果最大的那一支正好在射程外**：
-# `tools/run_root_unittests.py` 是 pre-push root-infra leg ＋ 三支 CI 真正執行的那一支，
-# 修前全檔 grep `argv|argparse|_cli_flags` 零命中，帶未知旗標時直接跑預設路徑、跑完整棵樹
-# （逾 120 秒），最終 rc 反映的是「套件結果」而非「旗標被拒收」。它逃掉的唯一原因是檔名。
-# ⇒ 判準改為 **`tools/*.py` 中帶 `if __name__ == "__main__"` 者**（＝真正的 CLI 入口）。
-# 這與 `DEF-101-757`「已知的鎖射程缺口不得只以劃界結案」同型，只是這次的界是**檔名**；
-# 修法刻意**不是**「把那一支加進白名單」——那等於把同一個機制再用一次。
+# 判準＝`tools/*.py` 中帶 `if __name__ == "__main__"` 者（真正的 CLI 入口），不用檔名劃界；修法刻
+# 意不是把逃掉的那支加進白名單。R74 射程修復的實測（`run_root_unittests.py` 帶未知旗標跑完整棵樹）
+# 搬至 Guard_Line_History_2.md〈R186 淨減法搬遷〉§8。  round-label-ok
 _BOGUS_ARGV = "--bogus-flag-xyz-not-a-real-flag"
 
 #: CLI 入口的判準。刻意只認 `__main__` guard，**不**額外要求「而且要讀 `sys.argv`」：

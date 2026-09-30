@@ -1,93 +1,22 @@
 #!/usr/bin/env python3
 """nightly 載具的直譯器必須「決定性 + 可取證」（DEF-101-506，紀律 #14 延伸；
-DEF-200-302 起改為「釘死」而非「使其等價」，見下方訂正）。
+DEF-200-302 起改為「釘死」而非「使其等價」。
 
-WHY（2026-07-27 真機事故，DEF-101-506 立案時的原始問題）：
-`run_local_nightly.ps1` 把直譯器存成字面 token `$script:PyExe = 'python'`，每個
-呼叫點都由 PATH **現場解析**。於是同一支 nightly：
+WHY：`run_local_nightly.ps1` 曾把直譯器存成字面 token、由 PATH 現場解析，schtasks（pyenv-win）與已
+啟用 venv 的終端機跑出的紅綠不可互相比較，log 也只印字面 token 而無法事後指認。現行政策＝兩平台一
+律**絕對路徑釘死**根層 `.venv`、找不到即 fail-loud，不靠 PATH 現場解析。
 
-  - schtasks 排程下 → pyenv-win 的 python（`python.bat` shim，且裝了 psycopg2）
-  - 已啟用 monorepo .venv 的終端機／agent 下 → `.venv\\Scripts\\python.exe`
-    （真 .exe，且**未**裝 `[postgres,pgvector]` 選配）
-
-兩者跑出來的紅綠不可互相比較：實測一次以 .venv 跑出 `pg-e2e=1`（psycopg2 缺席）
-與 `perf=1` 兩個假紅並寫進 `nightly_latest.log`；更隱蔽的是它讓 DEF-101-503
-（`%` 被 batch shim 吃掉）的修復「綠得沒有鑑別力」——真 .exe 本來就不觸發該 bug，
-沒修也會綠。而 log 當時只印字面 token「python」，事後完全無法指認是哪一顆。
-
-🔴 **DEF-200-302 訂正（掌舵者 2026-09-15 裁決 B 案）**：DEF-101-506 當時的修法＝讓
-schtasks 與已啟用 venv 兩種啟動方式「殊途同歸」（互動 shell 偵測到已啟用 venv
-就把它的 Scripts 從本行程 PATH 剝除，使解析退回 pyenv 全域）；本檔原本因此在
-下方（已刪除的）A/D 兩類鎖住這段「正規化」邏輯與其斜線比對細節。前提已由主控
-本場實測推翻：根層 .venv 的 `pyvenv.cfg` home 本身就是同一顆 pyenv-win 3.11.9
-二進位，且 xdist／psycopg2／sqlalchemy／pgvector／asyncpg／alembic／pytest 七
-項在 pyenv 全域與根 .venv 兩邊皆 PRESENT——「兩套互不受控、可能分岔的依賴集
-合」這個風險已不成立（2026-09-13 nightly 曾因 PATH 上的 pyenv 全域缺 xdist 而
-pytest rc=4，正是那個風險的真實代價）。故 Windows 側改為與 mac 側同款「絕對路
-徑釘死」：不論 schtasks 或已啟用 venv 的終端機／agent 觸發，`run_local_nightly.
-ps1`／`windows_smoke_local.ps1` 一律直接使用 `<repo 根>/.venv/Scripts/python.exe`
-絕對路徑，不再靠 PATH 現場解析「使其等價」；找不到就 fail-loud（exit 1）。
-
-本檔鎖五件事（B/C 為既有行級靜態檢查；E 為 Windows 絕對路徑釘死鎖，鎖的三支檔＝
-`AutoClaude/tools/run_local_nightly.ps1`／`tools/windows_smoke_local.ps1`／
-`AutoClaude/tools/local_ci_gate.ps1`；新增 F 為 DEF-200-302 mac 側補齊，鎖的兩支
-檔＝`AutoClaude/tools/run_local_nightly.sh`／`tools/macos_smoke_local.sh`）：
+本檔鎖（細目見各測試的 docstring）：
   B. 兩支載具都必須把**解析後的直譯器路徑**寫進 log（禁止只印字面 token）。
-  C. mac 側維持「絕對路徑釘死」而非 PATH 現場解析（見 F：本輪起兩支 .sh 皆已
-     拔除缺席時的 PATH 退路，不再只是「主路徑釘死、缺席仍退回現場解析」）。
-  E.（DEF-200-302 新增）Windows 側兩支 .ps1（`run_local_nightly.ps1`／
-     `windows_smoke_local.ps1`）都必須絕對路徑釘死根層 `.venv\\Scripts\\
-     python.exe`、都必須有 fail-loud 分支（`Test-Path` 不成立即 `exit 1`）；
-     `run_local_nightly.ps1` 不得再把 PATH 現場解析的 `Test-IsRealPython
-     -CandidateName 'python'` 當直譯器決定者，也不得再含「偵測 `$env:VIRTUAL_ENV`
-     即剝除其 Scripts」的正規化區塊；nightly 對 `local_ci_gate.ps1` 的呼叫必須
-     帶 `--unattended`（DEF-200-291 無人值守 advisory 降級的前置條件）。
-  F.（DEF-200-302 mac 側補齊，2026-09-15）`run_local_nightly.sh` 與
-     `macos_smoke_local.sh` 都必須絕對路徑釘死根層 `.venv/bin/python`、都必須
-     有 fail-loud 分支（`[ ! -x "$PY" ]`／`[ ! -x "$python_bin" ]` 不成立即
-     `exit 1`）；兩檔皆不得再含 `command -v python || command -v python3` 這類
-     缺席時退回 PATH 現場解析的分支——`run_local_nightly.sh` 原本就有這段退路
-     （C 項此前只驗證「主路徑有沒有釘死」，沒驗證「缺席時是否真的 fail-loud」，
-     故放過了它），`macos_smoke_local.sh` 則原本只用 `is_real_python_candidate
-     python` 判斷 PATH 上的 python 是否為真直譯器，未保證它就是本 repo 根層
-     .venv 那一顆。
-  G.（DEF-200-314 新增，2026-09-17）mac launchd nightly 三症狀之二：
-     `run_local_nightly.sh` 對 `local_ci_gate.sh` 的呼叫必須帶 `--unattended`
-     （E 項已鎖 Windows 側 `-Unattended`，本項補 mac 對稱半——鐵律三漏補）；
-     且必須以存在性探測 prepend 兩種 Homebrew bin 前綴（`/opt/homebrew/bin`
-     與 `/usr/local/bin`，不可用 `brew --prefix`），修 launchd 極簡 PATH 缺
-     pwsh 導致需要 powershell/pwsh 的測試從 platform skip 落成 untagged、
-     撞 skip 天花板的問題。
-  H.（DEF-200-315 新增，2026-09-19 掌舵者裁決）：互動式入口（git hooks／
-     integration_gate／ci-gate）改優先釘死 repo 根層 .venv，不再從 PATH 現場挑
-     python/python3——與本檔既有 B~G 項守的「nightly 載具」屬同一類危害的
-     不同呼叫面。本輪（Dev-A1）鎖住五組檔：`tools/git-hooks/pre-commit`／
-     `tools/git-hooks/pre-push`／`tools/integration_gate.sh`／
-     `tools/integration_gate.ps1`／`AISDLC_SDD/scripts/ci-gate.sh`／
-     `AISDLC_SDD/scripts/ci-gate.ps1`（Dev-A2 會再擴充
-     `_INTERACTIVE_ENTRY_FILES`）。
-     Dev-A2 棒擴充 AutoClaude/tools 消費端＋安裝共用核心＋copy_on_evolve：
-     `AutoClaude/tools/local_ci_gate.sh`／`.ps1`、`AutoClaude/tools/run_act.sh`／
-     `.ps1`、`AutoClaude/tools/g0_gate_check.ps1`、
-     `AutoClaude/tools/sd06_w3_staging_dryrun.sh`、
-     `AISDLC_SDD/scripts/copy_on_evolve.sh`、`tools/lib/git_hooks_install_common.sh`、
-     `tools/lib/GitHooksInstallCommon.ps1` 皆呼叫標準 SSOT，套用 H1~H3。
-     🔴 `AutoClaude/tools/git-hooks/pre-push`／`pre-commit`（子 hook，非根層
-     dispatcher）判準不同：它們維持自己既有的 ①②③ 候選鏈（根層 .venv 健康探針
-     → 子專案 venv 只警告 → PATH python/python3），不呼叫 `pick_repo_python`
-     本身，只把既有 ③ PATH 段落包進
-     `repo_python_path_fallback_allowed` 條件——標準 H1/H2 判準不適用，改由 H5
-     以專屬正則驗證該包住形態。
-
-原 A 項（Windows PATH 正規化區塊行級檢查）與 D 項（該正規化比對式的行為級鎖，
-DEF-101-522）鎖的正是本輪拔除的那段邏輯，隨程式碼一併移除——史料見 git 歷史與
-docs/06_quality/AutoSDD_Defect_Log.md 的 DEF-200-302 條目，不再保留無程式碼可
-對照的死鎖。
-
-刻意仍不鎖「兩平台必須用同一顆直譯器」這個問題本身的框架：mac 釘
-`.venv/bin/python`、Windows 釘 `.venv\\Scripts\\python.exe`，兩邊本就分屬各自
-平台的 `.venv`、路徑分隔符也天然不同——這不是「兩顆不同的直譯器」，只是同一
-種「絕對路徑釘死」政策在兩個平台上的自然表達。
+  C／F. mac 側兩支 .sh 絕對路徑釘死 `.venv/bin/python` 並有 fail-loud 分支，不得含 `command -v
+        python || command -v python3` 這類退回 PATH 的分支。
+  E. Windows 側兩支 .ps1 絕對路徑釘死 `.venv\\Scripts\\python.exe` 並有 fail-loud 分支，不得再含剝
+     除 `$env:VIRTUAL_ENV` 的正規化區塊；nightly 呼叫 `local_ci_gate.ps1` 須帶 `--unattended`。
+  G. mac nightly 對 `local_ci_gate.sh` 同樣帶 `--unattended`，並以存在性探測 prepend Homebrew
+     bin。
+  H. 互動式入口（git hooks／integration_gate／ci-gate 等）優先釘死根層 .venv、不從 PATH 現場挑。
+刻意不鎖「兩平台必須同一顆直譯器」：兩邊本就各有自己的 `.venv`，是同一種政策的自然表達。事故立案、
+訂正與 B~H 各項逐字沿革搬至 Guard_Line_History_2.md〈R186 淨減法搬遷〉§35。  round-label-ok
 """
 from __future__ import annotations
 

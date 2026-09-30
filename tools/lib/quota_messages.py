@@ -126,9 +126,11 @@ def halted_band_line(halt_marker: dict | None, now: datetime) -> str | None:
     純函式（同本檔通篇紀律）：不讀任何檔，`halt_marker` 由呼叫端已經呼叫過
     `quota_gate.read_halt_marker(sid)` 取得——本檔不得反向 import `quota_gate`
     （見檔頭〈相依方向是單向的〉）。刻意不打任何 API：halt 標記已經把答案寫在磁碟上，
-    「量不到」在 halt 期間本來就是事實，不需要再花一次探測才知道（那正是 SD-07 要堵的
-    洞——INV-H3 之前，`--pace`/`--check` 在 halt 期間會落到 `unmeasured` 判定，可能
-    連帶觸發 `quota_meter` 補量探測，而 halt 期間不該再花任何一次 API）。
+    不需要再花一次探測才知道（那正是 SD-07 要堵的洞——INV-H3 之前，`--pace`/`--check`
+    在 halt 期間會落到 `unmeasured` 判定，可能連帶觸發 `quota_meter` 補量探測，而 halt
+    期間不該再花任何一次 API）。DEF-200-435：本行此前逐字宣稱「量不到本來就是事實」，
+    快取仍新鮮時那句為假（`--check` 末行共用本行）——措辭只陳述「本行只讀標記檔」，
+    逐軸真實讀數由 `halted_pace_text()` 補在本行之後。
     """
     if not halt_marker:
         return None
@@ -137,7 +139,23 @@ def halted_band_line(halt_marker: dict | None, now: datetime) -> str | None:
         return None  # 已過期：不算「halted」，落回既有判定（會走 probe 分支自然恢復）
     reset_text = halt_marker.get("reset_at") or "（無法解析）"
     return (f"🔴 halted，reset 於 {reset_text}"
-            "（本 sid 的 halt 標記尚未過期；依 D23 不打 API，量不到本來就是事實）")
+            "（本 sid 的 halt 標記尚未過期；這一行只讀標記檔、不打 API，逐軸讀數看 `--pace`）")
+
+
+def halted_pace_text(halted: str, state: quota_policy.QuotaState, now: datetime,
+                     policy: quota_policy.Policy, model: str | None = None) -> str:
+    """`--pace` 在本 sid 有未過期 halt 標記時的全文（DEF-200-435）。純函式：`state` 由呼叫端讀快取。
+
+    快取新鮮 ⇒ 標記行之後印逐軸真實讀數（`describe`，仍不打 API）；快取真的不可用才說沒有讀數。
+    此前一律只回標記行、第二次 `--pace` 起模型拿不到任何數字，且那一行宣稱「量不到本來就是事實」。
+    判讀本身確實停止時再補「換模型有沒有用」（與 halt 首則／重複訊息／提醒同一句）；不停止時不印——
+    標記是 session 級、判讀是依 `model` 算的，兩者可以不同步，印出結論會是假話。
+    """
+    if not state.usable():
+        return halted + "\n  （沒有新鮮快取可讀：halt 期間不打 API 補量，所以本次沒有逐軸讀數）\n"
+    decision = quota_policy.decide(state, now, policy, active_model=model)
+    hint = f"  {halt_model_hint(decision)}\n" if decision.band == quota_policy.BAND_HALT else ""
+    return f"{halted}\n  {quota_policy.describe(decision)}\n{hint}"
 
 
 # 🔴 DEF-200-274 第十輪／SA-04（反駁者在現行程式碼上重現）：`halt_verdict()` 判「標記
@@ -302,7 +320,8 @@ _HALT_CONVERGENT_CLARIFICATION_WINDOWS = (
 )
 
 
-def halt_convergent_clarification(windows: bool | None = None) -> str:
+def halt_convergent_clarification(windows: bool | None = None, event: str = "PostToolUse",
+                                  tool: str = "") -> str:
     """halt 帶「收斂不受影響」澄清句，平台感知版（DEF-200-413）。
 
     `windows=None` 時以同目錄 SSOT `platform_utils.is_windows()` 現查——本檔不得
@@ -310,52 +329,124 @@ def halt_convergent_clarification(windows: bool | None = None) -> str:
     鐵律三）。import 失敗時一律 fail-open 回 POSIX 版
     （`HALT_CONVERGENT_CLARIFICATION`）：hook 行程不保證 `tools/lib` 以外的模組在
     `sys.path` 上，簡報失敗不得反過來擋住 halt 訊息本身。
+
+    DEF-200-435：`event="PreToolUse"`＝扇出工具根本沒執行，首句「你剛才那次工具呼叫已正常
+    執行完成」對它是假話（且與同則訊息的「扇出型工具一律不執行」互相矛盾）⇒ 只換首句，
+    其餘（收斂工具清單、Windows 括號、`--pace` 指令）與預設值同源；預設值輸出逐字不變。
     """
     if windows is None:
         try:
             windows = bool(platform_utils.is_windows())
         except Exception:  # noqa: BLE001 — 見上：fail-open 回 POSIX 版
             windows = False
-    return _HALT_CONVERGENT_CLARIFICATION_WINDOWS if windows else HALT_CONVERGENT_CLARIFICATION
+    text = _HALT_CONVERGENT_CLARIFICATION_WINDOWS if windows else HALT_CONVERGENT_CLARIFICATION
+    if event == "PreToolUse":
+        return f"這次 {tool or '扇出型'} 呼叫已被擋下、沒有執行；" + text.split("；", 1)[1]
+    return text
 
 
 # 🔴 **開頭不再印裸百分比**（R82／M7）：舊版第一行是「額度水位 54%（≥95%…）」，而裸的
 # 「54%」正是掌舵者當場誤讀的**那個**形狀——那個數字沒有說自己是哪一桶、什麼時候 reset。
 # 改由 `quota_policy.describe()` 逐軸渲染，每一個 % 都自帶 `kind=` 與剩餘分鐘（或明文
 # 「reset 距離不明」），而且**每一軸都說**，不是只說最緊的那一格。
-def quota_halt_message(decision: quota_policy.Decision, act: dict) -> str:
-    """halt 的一次性訊息。三支分支**字串必須不同**，否則「不排程」與「排不了」外觀相同。"""
-    head = (f"🔴 額度到達**停止**水位（最緊的一條＝{act['kind'] or '未知'}）⇒ **停止派發**："
-            "扇出型工具一律不執行。\n"
-            f"   {halt_convergent_clarification()}\n"
-            f"   {quota_policy.describe(decision)}\n"
-            f"   任務書：{act['plan'] or '（寫不出來——逐字稿路徑不可得）'}\n")
+def _halt_subject(kind: str, decision: quota_policy.Decision, model: str | None) -> str:
+    """halt 訊息首行括號內那一段：哪條軸、哪個模型、reset 何時。CC 摺疊列只顯示首行，這三件
+    事不在首行就只看得到別的（DEF-200-435：重複訊息首行曾是 describe() 的軸傾印）。"""
+    return (f"最緊的一條＝{kind}；模型={model or '未知'}；"
+            f"reset={halt_resets_at(decision) or '沒有 reset 可等'}")
+
+
+def _halted_axes(decision: quota_policy.Decision) -> list:
+    """真的在煞車、且在停止水位的軸。被排除的分軌軸（`NOTE_MODEL_EXCLUDED`）與保險軸不算——
+    它們沒進 cap 聚合，沒在煞車。"""
+    return [r.axis for r in decision.per_axis
+            if r.band == quota_policy.BAND_HALT and r.axis.kind not in quota_policy.FALLBACK_KINDS
+            and quota_policy.NOTE_MODEL_EXCLUDED not in r.note]
+
+
+def halt_is_model_scoped(decision: quota_policy.Decision) -> bool:
+    """停止的軸是不是**全部**都是模型分軌軸（只停某個家族）；有一條全模型共用軸也停止 ⇒ False。"""
+    halted = _halted_axes(decision)
+    return bool(halted) and all(a.kind in quota_policy.MODEL_SCOPED_KINDS for a in halted)
+
+
+def halt_model_hint(decision: quota_policy.Decision, own_window: bool = True) -> str:
+    """halt 帶「換模型有沒有用」那一句（DEF-200-435）。
+
+    只有**進 cap 聚合**的停止軸全是模型分軌軸時，改派別家族的子 agent 才有用；只要有一條全
+    模型共用的軸也在停止水位，換模型就沒用（判準＝`halt_is_model_scoped()`）。提醒本視窗自己的
+    回合仍耗該模型額度：子 agent 派得出去不等於父視窗的額度沒在燒；別家族自己的 cap 與派發帳
+    仍適用，所以說「不受這條軸限制」而不說「照常」。
+
+    DEF-200-436：`own_window=False`＝呼叫端是派工目標閘（`halt_dispatch_message()`），閘門端看
+    不到視窗家族（視窗多半屬別家模型）⇒ 不替視窗下結論，省略「本視窗自己的回合…」那半句；其餘
+    呼叫端的 `model` 就是視窗自己的模型（進 cap 聚合的分軌軸只含該家族），那半句為真。
+    """
+    if halt_is_model_scoped(decision):
+        names = "／".join(sorted({a.scope_model or a.kind for a in _halted_axes(decision)}))
+        tail = ("；但本視窗自己的回合仍耗該模型額度，長工作請用 `/model` 切換家族。"
+                if own_window else "。")
+        return (f"換模型有用：停止的只有模型分軌軸（{names}）⇒ 派 Agent 時帶 `model:` 指定不是"
+                f" {names} 的家族，即可不受這條軸限制地派發（仍受各軸 cap）{tail}")
+    return "換模型沒有用：停止的軸是全模型共用 ⇒ 只能等 reset 或提額，先做不扇出的收斂工作。"
+
+
+def quota_halt_message(decision: quota_policy.Decision, act: dict, event: str = "PostToolUse",
+                       tool: str = "", model: str | None = None) -> str:
+    """halt 的首則訊息。三支分支**字串必須不同**，否則「不排程」與「排不了」外觀相同。
+
+    DEF-200-435：`event` 決定這則話的性質——`PreToolUse`＝扇出工具被擋下的阻斷訊息（rc=2，
+    明說這次呼叫沒有執行）；其餘＝工具已跑完的一次性提醒（exit 0、走 additionalContext，
+    **不是錯誤**：CC 把 PostToolUse 的 rc=2 標成 hook error，人與模型都讀成「工具被擋」）。
+    """
+    blocked = event == "PreToolUse"
+    subject = _halt_subject(act["kind"] or "未知", decision, model)
+    head = (f"🔴 額度到達**停止**水位（{subject}）⇒ **停止派發**：扇出型工具一律不執行。\n"
+            if blocked else
+            f"🟡 額度到達**停止**水位（{subject}）——這是一次性提醒，不是錯誤；照常可用的工具"
+            "都不受影響。\n")
+    failed = act.get("failed")  # 副作用拋例外時 `halt_actions_guarded()` 放進來的失敗原因
+    no_plan = "（執行失敗，見下）" if failed else "（寫不出來——逐字稿路徑不可得）"
+    head += (f"   {halt_convergent_clarification(event=event, tool=tool)}\n"
+             f"   {halt_model_hint(decision)}\n"
+             f"   {quota_policy.describe(decision)}\n"
+             f"   任務書：{act['plan'] or no_plan}\n")
     # 修4：期程句印**被選中的** reset（≥halt 最早可 reset 軸），不再印 binding 的 None。
     # DEF-200-200 ③：`now` 走 `act.get`（`quota_halt_actions` 已把它放進去）——既有直接
     # 組 act dict 的呼叫端沒有這一鍵時沿用舊句子，不會因為缺鍵就炸掉。
     horizon = reset_horizon_phrase(act["branch"], halt_resets_at(decision),
                                    act.get("now"), act.get("measured_at"))
-    if act["posix"]:
+    if failed:
+        tail = (f"   ⚠️ 任務書／喚醒動作執行失敗（{failed}）⇒ 不保證已留下任務書、也不保證已武裝"
+                "喚醒；halt 本身照常生效。收斂後請手動跑 `python tools/session_resume_planner.py` "
+                "補任務書。\n")
+    elif act["posix"]:
         # 🔴 SA-B7：沒有排程載具的平台若沿用 weekly 那支「不排程」的靜默路徑，
         # 「不排程」與「排不了」會長得一模一樣。
         # 🔴 R83／F2-② 訂正本句的平台清單（原文寫「schtasks 只在 Windows 成立…mac/Linux
         # 請自行以 launchd／cron 掛」——R83 已把 mac 接上 launchd ⇒ `posix` 這個鍵在 mac
         # 上是 False，這一支**走不到** mac；把 mac 寫在這裡是拿過期事實當指引）。
-        return head + ("   ⚠️ 本平台**沒有排程載具**（Windows 走 schtasks、macOS 走 "
-                       "launchd，本平台兩者皆無）⇒ 已寫任務書，但**沒有武裝任何喚醒**。"
-                       "請自行以 cron／systemd-timer 掛，或留在這裡等人回來。\n")
-    if act["branch"] == QUOTA_BRANCH_ARM and act["armed"]:
-        return head + f"   ✅ 已武裝喚醒（{horizon}）。{evidence_hint()}\n"
-    if act["branch"] == QUOTA_BRANCH_ARM:
-        return head + ("   ⚠️ 這一條的 reset 近在眼前、本來該武裝喚醒，但**這次沒有武裝**："
-                       + ("哨兵逃生口有設（AUTOSDD_SENTINEL_OFF）。\n" if act["sentinel_off"]
-                          else "拿不到逐字稿路徑 ⇒ 沒有可以掛的任務書。\n"))
-    if act["branch"] == QUOTA_BRANCH_NOTIFY:
-        return head + (f"   🔴 這一條的 {horizon} ⇒ 「等」幾乎沒有意義，"
-                       "本次**刻意不排程**（排一支七天後才響的工作而痕跡全綠＝R59 事故同形）。"
-                       "改做不吃額度的工作，或降扇出／切小模型。\n")
-    return head + (f"   🔴 這一條{horizon} ⇒ 排程是錯的動作，"
-                   "只有人去提額才會回來。\n")
+        tail = ("   ⚠️ 本平台**沒有排程載具**（Windows 走 schtasks、macOS 走 "
+                "launchd，本平台兩者皆無）⇒ 已寫任務書，但**沒有武裝任何喚醒**。"
+                "請自行以 cron／systemd-timer 掛，或留在這裡等人回來。\n")
+    elif act["branch"] == QUOTA_BRANCH_ARM and act["armed"]:
+        tail = f"   ✅ 已武裝喚醒（{horizon}）。{evidence_hint()}\n"
+    elif act["branch"] == QUOTA_BRANCH_ARM:
+        tail = ("   ⚠️ 這一條的 reset 近在眼前、本來該武裝喚醒，但**這次沒有武裝**："
+                + ("哨兵逃生口有設（AUTOSDD_SENTINEL_OFF）。\n" if act["sentinel_off"]
+                   else "拿不到逐字稿路徑 ⇒ 沒有可以掛的任務書。\n"))
+    elif act["branch"] == QUOTA_BRANCH_NOTIFY:
+        tail = (f"   🔴 這一條的 {horizon} ⇒ 「等」幾乎沒有意義，"
+                "本次**刻意不排程**（排一支七天後才響的工作而痕跡全綠＝R59 事故同形）。"
+                "改做不吃額度的工作，或降扇出／切小模型。\n")
+    else:
+        tail = (f"   🔴 這一條{horizon} ⇒ 排程是錯的動作，"
+                "只有人去提額才會回來。\n")
+    if blocked:
+        return head + tail
+    # 提醒是模型這一輪唯一會收到的 halt 訊息：reset 時刻一定要在；同一視窗不會再說第二次。
+    return (head + tail + ("" if horizon in tail else f"   {horizon}\n")
+            + "   （同一視窗不再重複提醒；只有扇出型工具被擋下時才會再說一次。）\n")
 
 
 # halt 帶用 `reset_branch()` 分得出 arm／notify／escalate，**throttle 帶此前完全不分**
@@ -368,6 +459,15 @@ def quota_halt_message(decision: quota_policy.Decision, act: dict) -> str:
 def throttle_horizon_line(decision: quota_policy.Decision, now: datetime,
                           measured_at: object = None) -> str:
     """節流帶要說出「這道限制會套多久」。已過期的時刻**不得**說「很快就會自己解除」。"""
+    # 🔴 DEF-200-435：cap 被遲滯維持（低於 binding 軸自己的 cap）時，下面所有以 binding 的 reset
+    # 為期程的句子都不成立——放寬由最小停留時間決定，與那條軸的 reset 無關（實測：各軸 cap=2、
+    # 終值 cap=1 的 Opus 視窗被告知「連續套用好幾天」，真因是分鐘尺度的遲滯）。
+    own = next((r.cap for r in decision.per_axis if r.axis is decision.binding), None)
+    if decision.cap is not None and own is not None and decision.cap < own:
+        dwell = int(quota_policy.DEFAULT_POLICY.min_dwell_seconds)
+        return (f"   ⏳ 目前 cap={decision.cap} 由遲滯維持（這條軸自己的 cap 是 {own}）：各軸水位"
+                f"不變的話，每個最小停留時間（出廠 {dwell} 秒，可由 .env 調）最多放寬 1 階，"
+                "不是要等到那條軸的 reset。\n")
     # 修4：halt 帶改讀多軸選擇——撞牆期間人唯一持續看得到的就是這一則（R89 判例），
     # binding 無 reset 時印「不會自己解除」而喚醒其實已武裝＝訊息說假話。
     resets_at = (halt_resets_at(decision) if decision.band == quota_policy.BAND_HALT
@@ -380,9 +480,19 @@ def throttle_horizon_line(decision: quota_policy.Decision, now: datetime,
         return f"   ⏳ 這一條的 {horizon}。\n"
     if branch == QUOTA_BRANCH_ESCALATE:
         return f"   ⏳ 這一條{horizon} ⇒ 這道節流不會自己解除。\n"
+    # 🔴 DEF-200-435：本句是五個語境共用的（Agent 節流／Workflow 節流／halt 重複阻斷／`--pace`／
+    # prepare），所以只准寫**每個語境都為真**的話——此前多帶的「被擋的這一次只要等窗口清空就能再派」
+    # 只對 Agent 節流成立（halt 的 cap=0 等任何窗口都派不出去；Workflow 與窗口無關；`--pace`／
+    # prepare 沒有「被擋的這一次」），等於叫人等一個不會來的事件。窗口滾動的說法留在 Agent 分支。
+    # DEF-200-435：放寬與否要依帶別如實說——非停止帶同水位下 cap 隨 reset 逼近 2→4→8，不得斷言
+    # 不會放寬；停止帶 cap 恆為 0、到 reset 才解除，不得說會逐步放寬（鎖＝
+    # `ThrottleBandSaysHowLongItLastsTest`）。
     if branch == QUOTA_BRANCH_NOTIFY:
-        return (f"   ⏳ 這一條的 {horizon} ⇒ 這道節流會**連續套用好幾天**，不是等一下"
-                "就好。改做不吃額度的工作，或降扇出／切小模型。\n")
+        halted = decision.band == quota_policy.BAND_HALT
+        eases = ("要等到 reset 才解除，停止帶不隨時間放寬" if halted
+                 else "水位不變時，隨 reset 逼近才逐步放寬")
+        return (f"   ⏳ 這一條的 {horizon} ⇒ 這個 cap 會**連續套用好幾天**（{eases}）。"
+                "改做不吃額度的工作，或降扇出／切小模型。\n")
     return f"   ⏳ 這一條的 {horizon} ⇒ 這道節流很快就會自己解除。\n"
 
 
@@ -391,15 +501,121 @@ def throttle_horizon_line(decision: quota_policy.Decision, now: datetime,
 # 一個家，不是把常數搬過去、組字留在呼叫端兩處各自維護。輸出與搬移前相同，另加一行
 # `HALT_CONVERGENT_CLARIFICATION`（DECISION P2；見
 # `tools/tests/test_context_budget_guard.py` 的既有回歸鎖）。
-def quota_halt_repeat_message(decision: quota_policy.Decision, now: datetime) -> str:
+def quota_halt_repeat_message(decision: quota_policy.Decision, now: datetime,
+                              event: str = "PostToolUse", tool: str = "",
+                              model: str | None = None) -> str:
     """halt 閂鎖命中後的重複訊息。同一個 `reset_branch()`，`quota_halt_message()` 的
     第三個出口——`act` 那份 dict 只在**第一次**觸發時建立（見 `quota_gate.py` 的閂鎖
     註解），這裡只吃 `decision`／`now` 兩個原語，不依賴 `act`。
+
+    DEF-200-435：首行直接點明停止水位／哪條軸／哪個模型／reset 時刻（此前首行是 describe() 的
+    軸傾印，CC 摺疊列看到 `band=free cap=None` 排第一，與 halt 相反）；`event`／`tool` 讓
+    PreToolUse 的阻斷如實說「這次呼叫沒有執行」。describe() 仍逐軸印出，只是不再當首行。
     """
-    return (f"🔴 {quota_policy.describe(decision)}\n"
-            "   額度仍在停止水位：扇出一律不執行，任務書已在磁碟上。\n"
-            f"   {halt_convergent_clarification()}\n"
+    kind = decision.binding.kind if decision.binding is not None else "未知"
+    return (f"🔴 額度仍在停止水位（{_halt_subject(kind, decision, model)}）："
+            "扇出一律不執行，任務書已在磁碟上。\n"
+            f"   {halt_convergent_clarification(event=event, tool=tool)}\n"
+            f"   {halt_model_hint(decision)}\n"
+            f"   {quota_policy.describe(decision)}\n"
             + throttle_horizon_line(decision, now))
+
+
+def halt_latch_key(sid: str, model: str | None, decision: quota_policy.Decision) -> str:
+    """halt 閂鎖鍵：(逐字稿 sid, 模型家族, 停止軸, reset 分鐘)——換任何一格才再說一次
+    （DEF-200-435）。reset 截到分鐘：`resets_at` 有次秒級抖動（它是 now＋剩餘算出來的）。
+    sid 進鍵是因為閂鎖檔是 machine-wide 單檔；模型進鍵是因為同一視窗換家族後停止的軸可能
+    換了一批（Fable 停止、改派 Sonnet 不該被前一則提醒吃掉）。"""
+    return (f"halt@{sid}@{model or '-'}@{decision.binding.kind}"
+            f"@{str(halt_resets_at(decision))[:16]}")
+
+
+#: hook 求 `active_model` 時把 `tool_input.model` 當「派工目標」的工具（`Workflow` 看不到內部）。
+DISPATCH_TARGET_TOOLS = ("Agent", "Task")
+
+
+def dispatch_target(payload: object, event: str) -> str:
+    """這次呼叫是 PreToolUse×Agent／Task 且 `tool_input.model` 認得出家族 ⇒ 該家族字；否則 `""`。
+
+    與 hook `main()` 求 `active_model` 時的「派工目標」同一判準：fork 忽略 model、吃父模型；
+    inherit／缺席／認不出／形狀不對一律退回視窗模型。hook（`.claude/hooks/`）本檔不得 import，
+    所以這是同一判準的第二份複本——漂移由 `test_context_budget_guard.py` 逐形態比對 hook 實際
+    傳進閘門的 `active_model`（`QuotaGateDecidesOnTheDispatchTargetModelTest`）。
+    """
+    ti = payload.get("tool_input") if isinstance(payload, dict) else None
+    if (event != "PreToolUse" or not isinstance(ti, dict) or ti.get("subagent_type") == "fork"
+            or payload.get("tool_name") not in DISPATCH_TARGET_TOOLS):
+        return ""
+    return quota_policy.family_key(ti.get("model"))
+
+
+def halt_dispatch_scoped(payload: object, event: str, model: str | None,
+                         decision: quota_policy.Decision) -> bool:
+    """這次 halt 是不是「只針對這一次派工指名的模型」（DEF-200-436）。
+
+    成立＝hook 問的是派工目標（`dispatch_target()` 等於 `model`）**且**停止的只有模型分軌軸
+    （`halt_is_model_scoped()`）。此時視窗自己的模型是否也停止，閘門端看不出來（Sonnet 視窗派
+    `fable` 與 Fable 視窗派 `fable` 的 PreToolUse payload 除逐字稿路徑外逐字相同，而視窗模型
+    只有 hook 讀得到）⇒ 只擋這一次，不替視窗落 session 級副作用（halt 標記／任務書／喚醒）：
+    自己沒停止的視窗被標成 halted，`--pace` 會略過「現在可派」直到目標家族 reset（數天）。視窗
+    自己的停止由它自己的工具事件落地。有一條全模型共用軸也在停止 ⇒ 不論派往哪一家視窗自己都
+    停了，照舊走副作用。
+    """
+    return (bool(model) and dispatch_target(payload, event) == model
+            and halt_is_model_scoped(decision))
+
+
+def halt_dispatch_message(decision: quota_policy.Decision, now: datetime, tool: str,
+                          model: str | None) -> str:
+    """派工指名的模型已在停止水位、只擋這一次呼叫的阻斷訊息（DEF-200-436；rc=2 由 `halt_notice`
+    給）。不宣稱任何視窗級的事（任務書／喚醒／標記）：那些沒有做。"""
+    kind = decision.binding.kind if decision.binding is not None else "未知"
+    return (f"🔴 這次 {tool or '扇出型'} 呼叫指名的模型（{model}）已到額度**停止**水位"
+            f"（{_halt_subject(kind, decision, model)}）⇒ 這次呼叫已被擋下、沒有執行。\n"
+            "   只擋這一次派工：沒有替整個視窗落 halt 標記／任務書／喚醒（視窗自己的模型若也停止，"
+            "會在視窗自己的工具事件上另行提醒）。\n"
+            f"   {halt_convergent_clarification(event='PreToolUse', tool=tool)}\n"
+            f"   {halt_model_hint(decision, own_window=False)}\n"
+            f"   {quota_policy.describe(decision)}\n"
+            + throttle_horizon_line(decision, now))
+
+
+def halt_notice(decision: quota_policy.Decision, now: datetime, event: str, tool: str,
+                act: dict | None, model: str | None = None,
+                scoped: bool = False) -> tuple[str, int]:
+    """halt 帶這一次要說什麼、以什麼 rc 說，回 `(text, rc)`（DEF-200-435；純函式）。
+
+    `act` 只在閂鎖首見時非空（重複呼叫傳 `None`/`False`）。`PreToolUse`＝扇出邊緣，工具真的
+    被擋 ⇒ rc=2，首則／重複各一版，皆明說這次呼叫沒有執行。其餘事件（`PostToolUse`）＝工具
+    已跑完、沒有東西可擋 ⇒ 只在首見時以 rc=0 提醒一次（呼叫端走 `additionalContext`，不走
+    stderr），之後 `("", 0)` 完全安靜。`scoped`（`halt_dispatch_scoped()`，DEF-200-436）＝只擋這一次
+    派工、不落視窗級副作用 ⇒ 不吃閂鎖、每次都出聲（rc=2），訊息點名目標模型。
+    """
+    if scoped:
+        return halt_dispatch_message(decision, now, tool, model), 2
+    if event == "PreToolUse":
+        return ((quota_halt_message(decision, act, event, tool, model) if act
+                 else quota_halt_repeat_message(decision, now, event, tool, model)), 2)
+    return (quota_halt_message(decision, act, event, tool, model), 0) if act else ("", 0)
+
+
+def halt_actions_guarded(run, payload: dict, decision: quota_policy.Decision, now: datetime,
+                         **kw: object) -> dict:
+    """halt 副作用（任務書／喚醒／標記）的安全殼（DEF-200-435）。
+
+    `run`＝`quota_gate.quota_halt_actions`（注入；本檔不得 import `quota_gate`）。副作用拋例外時
+    回一份帶 `failed` 的 act，而不是讓例外冒到 hook 的 catch-all——那會讓 rc=0 **放行**（煞車本身
+    消失）、提醒也丟，而閂鎖已先寫 ⇒ 之後永遠靜默。煞車與提醒不得依賴副作用成功；副作用只試一次
+    （閂鎖仍是先寫：若改成動作成功後才寫，平行的 hook 行程在動作期間全數讀到「沒說過」而各自
+    spawn 一輪，持續失敗時更是每次呼叫都重試的 spawn 風暴）。
+    """
+    try:
+        return run(payload, decision, now, **kw)
+    except Exception as why:  # noqa: BLE001 — 副作用壞掉不得帶走煞車與提醒
+        binding = decision.binding
+        return {"branch": reset_branch(halt_resets_at(decision), now), "plan": "", "armed": False,
+                "now": now, "failed": f"{type(why).__name__}: {why}", "sentinel_off": False,
+                "posix": False, "kind": binding.kind if binding is not None else ""}
 
 
 # ── 6C：85~95%「準備下一次 reset」那一帶真的要做的事（R84／SA-03）────────────────

@@ -192,7 +192,7 @@ QuotaGateIsWiredToTheBurnPathTest`
 |---|---|---|
 | C-1 | `PostToolUse` matcher 必須涵蓋燒額度那條路（`Read`／`Bash` 至少在內） | `test_the_post_tool_use_matcher_covers_the_burn_path` |
 | C-2 | 額度判定入口不得被 `blocking`（扇出名單）罩住，且必須把 `event` 傳下去 | `test_the_quota_call_is_no_longer_gated_on_the_fanout_edge` |
-| C-3 | `PostToolUse` 在 halt 帶必須寫任務書並在 stderr 出聲 | `test_post_tool_use_at_halt_writes_a_plan_and_says_so` |
+| C-3 | `PostToolUse` 在 halt 帶必須寫任務書並提醒一次（exit 0＋additionalContext，非錯誤樣式；DEF-200-435 起不再 stderr＋rc=2） | `test_post_tool_use_at_halt_writes_a_plan_and_says_so_once_without_an_error` |
 | C-4 | halt 副作用（寫任務書＋spawn 武裝）每個 reset 視窗只跑一次，不得 spawn 風暴 | `test_the_halt_side_effects_run_exactly_once_per_reset_window` |
 | C-5 | halt 帶不得搶占 context 哨兵的武裝時機 | `test_quota_halt_does_not_preempt_the_context_sentinel` |
 | C-6 | `PostToolUse` 絕不記派發帳（同一次 `Task` 不得被 Pre／Post 各記一次） | `test_post_tool_use_never_charges_the_dispatch_ledger` |

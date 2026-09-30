@@ -61,7 +61,7 @@ monorepo 根目錄（`AISDCL_Agent/`，各機器 checkout 路徑不同）＝**�
 | `block_bash_on_windows.py` | PreToolUse／Bash | Windows 上禁用 Bash 工具（鐵律一）；非 Windows 一律 exit 0 | 無（掌舵者直接指令） |
 | `lint_powershell_command.py` | PreToolUse／PowerShell | 擋「管線後讀 `$LASTEXITCODE`」、行首裸 `cd`／`Set-Location`（不論帶絕對／相對路徑或不帶參數；`Push-Location`／`Pop-Location` 不在此列）、裸 `bash` + `.sh`（鐵律一、二） | 行尾 `# ps-lint-ok: <WHY>`（獨立註解行無效） |
 | `block_destructive_git.py` | PreToolUse／Bash、PowerShell、Write、Edit、NotebookEdit | 毀滅性 git 形態阻斷（鐵律五）＋等待壞形態 `waitform_hits()`（鐵律六）＋治理檔禁寫（PRD §15.5 紅線 10：`AUTOSDD_UNATTENDED` 下保護面唯讀） | `AUTOSDD_GIT_GUARD_OFF`（模型碰不到，須在啟動 claude 前設）；`AUTOSDD_GOVWRITE_GUARD_OFF`（治理面唯讀專屬，與 git 族開關互不相通）；行內 `# git-guard-ok: <理由>`／`# waitform-ok: <WHY>`（`AUTOSDD_UNATTENDED` 有設時行內豁免無效） |
-| `context_budget_guard.py` | SessionStart（自動武裝額度哨兵）；PostToolUse（Read／Task／Grep／Glob／WebFetch／WebSearch／Bash／PowerShell：水位出聲）；PreToolUse（Task／WebFetch／WebSearch／Agent／Workflow：高水位**真的擋下**展開型工具） | context 三段式水位的機械物（見下節）；matcher 刻意不含 Read／Edit／PowerShell——收斂本身需要它們 | `AUTOSDD_CONTEXT_GUARD_OFF`（context 阻斷）／`AUTOSDD_SENTINEL_OFF`（額度哨兵）——**刻意兩個開關**，關掉的是不同的東西 |
+| `context_budget_guard.py` | SessionStart（清哨兵閂鎖＋真實水位簡報；武裝延後到 PostToolUse 累積夠工作量）；PostToolUse（Read／Task／Grep／Glob／WebFetch／WebSearch／Bash／PowerShell：水位出聲）；PreToolUse（Task／WebFetch／WebSearch／Agent／Workflow：高水位**真的擋下**展開型工具） | context 三段式水位的機械物（見下節）；**PreToolUse** matcher 刻意不含 Read／Edit／PowerShell——收斂本身需要它們；額度 halt 帶的 PostToolUse 只提醒一次（非錯誤樣式），Agent／Task 帶 `model` 時依目標模型判額度軸 | `AUTOSDD_CONTEXT_GUARD_OFF`（context 阻斷）／`AUTOSDD_SENTINEL_OFF`（額度哨兵）——**刻意兩個開關**，關掉的是不同的東西 |
 | `check_claim_provenance.py` | Stop | 鐵律四的機械物：量化判決宣稱（`N passed`／`rc=N`…）必須在本場自己的 tool_result 出現過；**只出聲、永不阻斷**；轉述別包交件標 `[他包回報]` | `AUTOSDD_CLAIM_GUARD_OFF`；`AUTOSDD_UNATTENDED` 有設時詞表縮到只認方括號標記 |
 | `check_ps1_encoding.py` | PostToolUse／Write、Edit | `.ps1` 寫入當下就地補回 CRLF（橋接自 AutoClaude tools/hooks） | 無 |
 | `check_sh_eol.py` | PostToolUse／Write、Edit | `.sh`／`.bash` 行尾守門（非 `.sh`／`.bash` → exit 0；橋接自 AutoClaude tools/hooks） | 無 |
@@ -125,7 +125,7 @@ claude -r <sessionId>   # 帶回完整 context 續跑 ← 推薦：高風險動�
 claude -c               # 續接最近一次對話
 ```
 
-- session ID＝`~/.claude/projects/<專案 slug>/` 下**最後修改**的那支 `.jsonl` 檔名。**暫停前務必寫進任務書**。
+- session ID＝環境變數 `CLAUDE_CODE_SESSION_ID`（工具內可讀；`--check`／`--pace` 首行「session 來源＝…」印出實際採用哪一個）；缺席才退用 `~/.claude/projects/<專案 slug>/` 下**最後修改**的那支 `.jsonl` 檔名（多視窗時常是別的視窗）。**暫停前務必寫進任務書**。
 - 要全自動才加 OS 排程（schtasks 叫 `claude -p -r <sessionId> "<任務書>"`），必須寫 log 取證、只允許低風險動作。`claude -p` 這種非互動 subprocess spawn 在 `CLAUDECODE=1` 下可於 session 內驗；仍掛住的是 wexpect pty spawn 那一條（DEF-101-913，見 `docs/06_quality/CrossPlatform_R79_Debt_Audit.md`）。
 
 ### 工具選型（別再選錯）
@@ -134,8 +134,8 @@ claude -c               # 續接最近一次對話
 |------|------|------|
 | **Token reset 後重啟** | **磁碟任務書 ＋ `claude -r`** | 唯一不依賴 session 存活的路 ← 本節主線 |
 | session 開著、人離開一下要它自己做完 | `/loop`／`ScheduleWakeup` | 同 session、同一個 Token 池；單次上限 1 小時、終端全程不能關；🔴 **沒有任何憑證**（不寫磁碟、無登錄、拿不到 NextRunTime）⇒ 失效是靜默的，**不是 token reset 的方案** |
-| 開工前先掛額度哨兵 | `python tools/session_resume_planner.py --arm-sentinel` | SessionStart 已自動做；此列是手動補武裝／驗證用。憑證同為 NextRunTime |
-| **派工前問「現在能派幾個 agent」** | `python tools/session_resume_planner.py --pace` | 零 token。🔴 值是 (水位%, 距 reset) 的函式——**每次派工前現查，不得記住上次的值** |
+| 開工前先掛額度哨兵 | `python tools/session_resume_planner.py --arm-sentinel` | SessionStart 只清閂鎖，PostToolUse 累積夠工作量後自動武裝；此列是手動補武裝／驗證用。憑證同為 NextRunTime |
+| **派工前問「現在能派幾個 agent」** | `python tools/session_resume_planner.py --pace` | 零 token。🔴 值是 (水位%, 距 reset) 的函式——**每次派工前現查，不得記住上次的值**；另依當前模型分軌（別家模型的專屬週額度不算進來） |
 | 跨 session／機器會睡的定時工作 | `schtasks`（照 `tools/install_windows_nightly.ps1` 的 `New-ScheduledTaskSettingsSet` 建法；該安裝器住 monorepo 根層 `tools/`） | 四項設定缺一即漏跑：`WakeToRun=True`／`StartWhenAvailable=True`／`DisallowStartIfOnBatteries=False`／`StopIfGoingOnBatteries=False`（cmdlet 參數名與物件屬性名**不同**，見該檔檔頭 DEF-101-249） |
 | ❌ 不要用 | `CronCreate` | `CronList` 印 `[session-only]`＝session 關掉就沒了，**不是離線排程** |
 

@@ -23,6 +23,7 @@ WHY 這支鎖存在：六包並行工作樹上的 `git stash` 真實事故——
 
 from __future__ import annotations
 
+import ast
 import json
 import ntpath  # R96／B-8：Windows 路徑語意的**真實實作**，注入用（不是手捏的假貨）
 import os
@@ -1514,12 +1515,10 @@ class TestR84TheNewCriteriaHaveTeeth(unittest.TestCase):
 # R84 偵測層：攔截器**結構上**接不到的那一半
 # ══════════════════════════════════════════════════════════════════════════════
 class TestR84StashRefSentinel(unittest.TestCase):
-    """🔴 誠實劃界要求的另一半：擋不到的必須**看得見**。
-
-    判準刻意只看 `refs/stash`：它**只會**因 stash push／pop／drop／clear 而變。
-    本守衛結構上碰不到的那四條路、以及第一版為何不看 `logs/HEAD`，逐字＝
-    `docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`。
-    """
+    """🔴 誠實劃界要求的另一半：擋不到的必須**看得見**。判準刻意只看 `refs/stash`（只會因 stash
+    push／pop／drop／clear 而變）；被測端＝`.claude/hooks/block_destructive_git.py` 的
+    `stash_ref_sentinel`。結構上碰不到的四條路與第一版為何不看 `logs/HEAD`，逐字＝
+    `docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`。"""
 
     def setUp(self) -> None:
         self.root = Path(tempfile.mkdtemp(prefix="w-sentinel-"))
@@ -1570,17 +1569,33 @@ class TestR84StashRefSentinel(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="w-no-git-") as empty:
             self.assertIsNone(G.stash_ref_sentinel(empty))
 
-    def test_end_to_end_the_note_is_loud_but_never_blocking(self) -> None:
-        """🔴 rc **必須是 1 不是 2**：它是偵測不是攔截。把它做成阻斷，等於用一個
-        「事後才知道」的訊號去擋一條與它無關的工具呼叫——那種守衛會被整個關掉。"""
+    def test_end_to_end_the_note_is_an_advisory_not_an_error(self) -> None:
+        """🔴 rc 必須是 0：偵測不是攔截（2 會擋無關工具呼叫；1 被 CC 標成 hook error，
+        DEF-200-440 同族）。提醒走 `emit_to_model`＝stdout 單一 JSON，stderr 必須空。"""
         self.ref.write_text("aaaaaaaaaaaa\n", encoding="utf-8")
         payload = {"tool_name": "Bash", "cwd": str(self.root),
                    "tool_input": {"command": "echo hi"}}
-        self.assertEqual(run_hook(payload).returncode, 0)
+        first = run_hook(payload)
+        self.assertEqual((first.returncode, first.stdout, first.stderr), (0, "", ""))
         self.ref.write_text("bbbbbbbbbbbb\n", encoding="utf-8")
         proc = run_hook(payload)
-        self.assertEqual(proc.returncode, 1, proc.stderr)
-        self.assertIn("refs/stash", proc.stderr)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stderr, "", "提醒走 stdout JSON，stderr 必須空")
+        hso = json.loads(proc.stdout)["hookSpecificOutput"]
+        self.assertEqual(hso["hookEventName"], "PreToolUse")
+        self.assertIn("refs/stash", hso["additionalContext"])
+
+    def test_a_note_riding_a_blocked_call_stays_in_stderr_exactly_once(self) -> None:
+        """要阻斷時 note 照舊併進 stderr（rc=2 不變）；不得再 emit 一份造成重複。"""
+        self.ref.write_text("aaaaaaaaaaaa\n", encoding="utf-8")
+        payload = {"tool_name": "Bash", "cwd": str(self.root),
+                   "tool_input": {"command": "echo hi"}}
+        run_hook(payload)  # 記基線
+        self.ref.write_text("bbbbbbbbbbbb\n", encoding="utf-8")
+        proc = run_hook({**payload, "tool_input": {"command": "git stash push -u"}})
+        self.assertEqual(proc.returncode, 2, proc.stderr)
+        self.assertEqual(proc.stderr.count("🔴 refs/stash"), 1, proc.stderr)
+        self.assertEqual(proc.stdout, "", "阻斷路徑不得再送 additionalContext")
 
     def test_the_state_file_lives_next_to_the_thing_it_watches(self) -> None:
         """狀態檔住 `.git/`（不是 tempdir）⇒ 天生逐 repo 隔離，兩個 checkout 不互相汙染。
@@ -2033,8 +2048,8 @@ class TestR84SentinelAckIsNotASubstring(unittest.TestCase):
         self.ref.write_text("bbbbbbbbbbbb\n", encoding="utf-8")
         proc = run_hook({"tool_name": "Bash", "cwd": str(self.root),
                          "tool_input": {"command": "echo hi"}})
-        self.assertEqual(proc.returncode, 1, proc.stderr)
-        self.assertIn("refs/stash", proc.stderr,
+        self.assertEqual(proc.returncode, 0, proc.stderr)  # DEF-200-440：提醒不再佔 rc=1
+        self.assertIn("refs/stash", proc.stdout,
                       "被擋下的那條指令替一個它沒有造成的變動背了書")
 
     def test_an_exempted_stash_does_acknowledge(self) -> None:
@@ -2047,6 +2062,7 @@ class TestR84SentinelAckIsNotASubstring(unittest.TestCase):
         proc = run_hook({"tool_name": "Bash", "cwd": str(self.root),
                          "tool_input": {"command": "echo hi"}})
         self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout, "", "提醒不再佔 rc=1 ⇒ rc=0 不再證明靜默，stdout 才是")
 
 
 class TestR84TheWaitformDocstringIsTheSingleHome(unittest.TestCase):
@@ -2262,11 +2278,60 @@ class TestGovernanceFilesAreReadOnlyWhenUnattended(unittest.TestCase):
                         env=self._env(**{G.UNATTENDED_ENV: "1"}))
         self.assertEqual(proc.returncode, 2, proc.stderr)
 
-    def test_attended_is_loud_but_not_blocking(self) -> None:
-        """主 session 每輪都要改這些檔——擋了，守衛就會被整個關掉（repo 判例）。"""
-        proc = run_hook(self._payload(".claude/settings.json"), env=self._env())
-        self.assertEqual(proc.returncode, 1, proc.stderr)
-        self.assertIn("治理檔", proc.stderr, "出聲面必須說明這是治理檔")
+    def _sandbox_env(self, **extra: str) -> dict[str, str]:
+        """專案根導到暫存目錄（DEF-200-440）：目標檔不必存在，hook 也不寫任何檔。"""
+        tmp = tempfile.TemporaryDirectory(prefix="def440-")
+        self.addCleanup(tmp.cleanup)
+        return {"CLAUDE_PROJECT_DIR": tmp.name, **extra}
+
+    def test_attended_is_an_advisory_not_an_error(self) -> None:
+        """主 session 每輪都要改這些檔，擋了守衛會被關掉。DEF-200-440：提醒不得用 CC 標成 hook
+        error 的 rc（rc=1 像被擋）⇒ rc=0＋stdout 單一 JSON；Write／Edit／NotebookEdit 同格。"""
+        for tool in sorted(G.GOV_TOOLS):
+            with self.subTest(tool=tool):
+                proc = run_hook(self._payload(".claude/settings.json", tool),
+                                env=self._sandbox_env())
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                self.assertEqual(proc.stderr, "", "提醒走 stdout JSON，stderr 必須空")
+                hso = json.loads(proc.stdout)["hookSpecificOutput"]
+                self.assertEqual(hso["hookEventName"], "PreToolUse")
+                for word in ("治理檔", "有人值守", "這只是提醒，這次寫入已放行"):
+                    self.assertIn(word, hso["additionalContext"])
+
+    def test_the_advisory_names_the_event_the_payload_names(self) -> None:
+        """hookEventName 與實際事件不符時 CC 整份丟掉（`emit_to_model` 約束①）⇒ 取
+        payload 原值不得寫死；缺席才退回本 hook 唯一註冊的事件。"""
+        for event, want in (("PostToolUse", "PostToolUse"), (None, "PreToolUse")):
+            with self.subTest(event=event):
+                payload = {**self._payload(".claude/settings.json"),
+                           **({"hook_event_name": event} if event else {})}
+                proc = run_hook(payload, env=self._sandbox_env())
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                got = json.loads(proc.stdout)["hookSpecificOutput"]["hookEventName"]
+                self.assertEqual(got, want)
+
+    def test_the_only_nonzero_nonblocking_exit_is_the_degraded_payload(self) -> None:
+        """DEF-200-440：治理面一族的 rc 只准 0（放行／提醒）或 2（真擋）；rc=1 專屬「讀不出
+        payload」，不兼作提醒。無人值守仍真擋，阻斷路徑不再送 additionalContext。"""
+        cases = (("attended", ".claude/settings.json", {}, 0),
+                 ("unattended", ".claude/settings.json", {G.UNATTENDED_ENV: "1"}, 2),
+                 ("escape-hatch", ".claude/settings.json", {G.GOVWRITE_OFF_ENV: "1"}, 0),
+                 ("unprotected", "docs/notes.md", {}, 0))
+        for tool in sorted(G.GOV_TOOLS):
+            for label, path, extra, want in cases:
+                with self.subTest(tool=tool, case=label):
+                    proc = run_hook(self._payload(path, tool),
+                                    env=self._sandbox_env(**extra))
+                    self.assertEqual(proc.returncode, want, proc.stderr)
+                    if want == 2:
+                        self.assertEqual(proc.stdout, "", "阻斷路徑不得再送提醒")
+            with self.subTest(tool=tool, case="undeterminable"):
+                proc = run_hook({"tool_name": tool, "tool_input": {}},
+                                env=self._sandbox_env())
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+        for raw in ("", "{not json"):
+            with self.subTest(raw=raw):
+                self.assertEqual(run_hook(None, raw=raw).returncode, 1)
 
     def test_paths_off_the_protected_list_pass_even_when_unattended(self) -> None:
         for rel in self.NOT_PROTECTED:
@@ -2416,6 +2481,111 @@ class TestGovernanceFilesAreReadOnlyWhenUnattended(unittest.TestCase):
                                "拿掉摺疊後這個形態應該變回放行——否則摺疊沒有承重")
             self.assertIsNone(G.govwrite_hit({"file_path": ".claude/hooks/NEW_GUARD.PY"}),
                                "拿掉摺疊後這個形態應該變回放行——否則摺疊沒有承重")
+
+
+# ── 家族結構鎖（DEF-200-440）：hook 的 exit code 只認 0 與 2 ──────────────────────────
+_DEGRADED_MARK = re.compile(r"#\s*degraded-payload:\s*\S")
+_EXIT_CALLEES = ("sys.exit", "exit", "quit", "SystemExit", "os._exit")
+
+
+def _off_contract(expr: ast.AST) -> bool:
+    """運算式可能是 0／2 以外的結束碼：整數（含負數）或字串等字面值（字串參數的 `sys.exit` 是
+    rc 1）；`a if c else b` 兩支都看。`None`、bool、經變數或呼叫的值判不到（見類別 docstring）。"""
+    if isinstance(expr, ast.IfExp):
+        return _off_contract(expr.body) or _off_contract(expr.orelse)
+    try:
+        value = ast.literal_eval(expr)
+    except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
+        return False
+    exempt = value is None or isinstance(value, bool) or (type(value) is int and value in (0, 2))
+    return not exempt
+
+
+def _own_returns(fn: ast.AST) -> list[ast.Return]:
+    """`fn` 自己的 return 敘述（不進巢狀函式／lambda／class）。"""
+    found: list[ast.Return] = []
+    stack = list(ast.iter_child_nodes(fn))
+    while stack:
+        node = stack.pop()
+        if isinstance(node, ast.Return):
+            found.append(node)
+        elif not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                   ast.Lambda, ast.ClassDef)):
+            stack.extend(ast.iter_child_nodes(node))
+    return found
+
+
+def unmarked_off_contract_exit_sites(sources: dict[str, str]) -> list[str]:
+    """結束碼在 0／2 之外卻沒有行內標記 `# degraded-payload: <理由>` 的站點（空＝通過；純函式，
+    紅綠由注入自證）。站點＝①任何位置的 `sys.exit`／`exit`／`quit`／`SystemExit`／`os._exit` 帶
+    0／2 以外的字面值；②出口函式（`main`、被 `sys.exit(f())` 直接餵的 `f`）自己的 `return
+    <n>`。輔助函式的 `return 1` 不是 exit code（如 `fix_ps1_encoding`）⇒ 不判。"""
+    problems: list[str] = []
+    for rel, text in sorted(sources.items()):
+        lines, tree = text.splitlines(), ast.parse(text)
+        exits = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and n.args
+                 and ast.unparse(n.func) in _EXIT_CALLEES]
+        funnels = {"main"} | {c.args[0].func.id for c in exits
+                              if isinstance(c.args[0], ast.Call)
+                              and isinstance(c.args[0].func, ast.Name)}
+        sites: list[ast.AST] = [c for c in exits if _off_contract(c.args[0])]
+        for fn in ast.walk(tree):
+            if isinstance(fn, ast.FunctionDef) and fn.name in funnels:
+                sites += [r for r in _own_returns(fn) if r.value and _off_contract(r.value)]
+        problems += [f"{rel}:{n.lineno} `{lines[n.lineno - 1].strip()}`"
+                     for n in sites if not _DEGRADED_MARK.search(lines[n.lineno - 1])]
+    return problems
+
+
+class TestHookExitCodesAreZeroOrTwoExceptDegradedPayload(unittest.TestCase):
+    """🔴 CC 的 hook 契約只認 0（放行）與 2（阻斷），其他碼一律顯示成 hook error（DEF-200-440：
+    提醒被誤用過兩次）。⇒ 只想提醒必須 rc=0＋`emit_to_model`；非 0／2 只留給**一種**真失效
+    （payload 讀不出來、守衛這次沒檢查），並要求同一行帶 `# degraded-payload: <理由>`。射程＝
+    `.claude/hooks/*.py`＋根層註冊的兩支橋接 hook（只在 AutoClaude session 跑的
+    `AutoClaude/tools/hooks/check_lang.py` 不在內，另案）。誠實劃界：看不到經變數的 rc（`rc =
+    3; return rc`）與 bool（`sys.exit(True)`）；標記語意靠複審。"""
+
+    _BRIDGES = ("AutoClaude/tools/hooks/check_ps1_encoding.py",
+                "AutoClaude/tools/hooks/check_sh_eol.py")
+
+    def _sources(self) -> dict[str, str]:
+        paths = sorted((_REPO_ROOT / ".claude" / "hooks").glob("*.py"))
+        paths += [_REPO_ROOT / rel for rel in self._BRIDGES]
+        return {p.relative_to(_REPO_ROOT).as_posix(): p.read_text(encoding="utf-8")
+                for p in paths}
+
+    def test_every_off_contract_exit_in_the_real_hooks_is_marked(self) -> None:
+        sources = self._sources()
+        for rel in (".claude/hooks/block_destructive_git.py", *self._BRIDGES):
+            self.assertIn(rel, sources, "掃描面縮水 ⇒ 本鎖恆綠")
+        self.assertEqual(unmarked_off_contract_exit_sites(sources), [])
+
+    def test_red_every_unmarked_off_contract_exit_shape_is_caught(self) -> None:
+        """合成注入（缺陷本體）：0／2 以外的每一種結束碼寫法，沒標記就必須紅。"""
+        for src in ("def main():\n    return 1\n",
+                    "def main():\n    return 1 if note else 0\n",
+                    "import sys\nsys.exit(1)\n",
+                    "exit(1)\n",
+                    "raise SystemExit(1)\n",
+                    "def main():\n    return 1  # degraded-payload:\n",  # 標記沒寫理由不算
+                    "import sys\ndef run():\n    return 1\nsys.exit(run())\n",  # 被 exit 直接餵
+                    # DEF-200-440 SF-1：原判準只認整數 1，下面六種同為非 0／2 的結束碼卻回報 0 站點
+                    "import os\nos._exit(1)\n", "import sys\nsys.exit('msg')\n",  # 字串參數＝rc 1
+                    "raise SystemExit('msg')\n", "def main():\n    return 3\n",
+                    "import sys\nsys.exit(3)\n", "import sys\nsys.exit(-1)\n"):  # -1 是 UnaryOp
+            with self.subTest(src=src):
+                self.assertEqual(len(unmarked_off_contract_exit_sites({"fake.py": src})), 1)
+
+    def test_green_marked_and_non_exit_shapes_pass(self) -> None:
+        for src in ("def main():\n    return 1  # degraded-payload: payload 讀不出\n",
+                    "def helper():\n    return 1\n\n\ndef main():\n    return 0\n",  # 非出口
+                    "def main():\n    return True\n",                      # bool 不是 1
+                    'def main():\n    """return 1／sys.exit(1) 只在 docstring"""\n    return 2\n',
+                    "import sys\nsys.exit(0)\n",
+                    "import os, sys\nsys.exit(2)\nos._exit(2)\nsys.exit(None)\n",  # 契約內的碼
+                    "def main():\n    return -1  # degraded-payload: x\n"):  # 非 0／2 但明示
+            with self.subTest(src=src):
+                self.assertEqual(unmarked_off_contract_exit_sites({"fake.py": src}), [])
 
 
 class TestResultDoesNotDriftWithCallerCwd(unittest.TestCase):

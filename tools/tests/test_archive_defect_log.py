@@ -351,14 +351,11 @@ class _FlappingFile:
 class TestStableSnapshotRejectsTornConcurrentWrites(unittest.TestCase):
     """`_stable_snapshot_bytes()`（DEF-200-380）的自我測試。
 
-    WHY：`_ledger_sandbox()` 原本用 `shutil.copy2` 直接拷貝帳本家族——若拷貝當下有人
-    （或記帳 agent）正在編輯帳本，`copy2` 可能拷到『半新半舊』的撕裂內容，而撕裂內容
-    仍可能通過表頭判準，讓依賴沙箱的測試偶發假紅（誤判撕裂內容裡缺了什麼）或假綠
-    （撕裂剛好拼出看似合法的狀態）——兩者都與被測程式碼的真實行為無關，是**測試載具
-    自己的瑕疵**冒充成受測程式的訊號。修法要求『讀前讀後 stat 相同才算穩定』，本測試
-    坐實兩件事：(a) 永遠等不到穩定窗口的來源必須 fail loud，不能安靜吞下最後一次讀到
-    的撕裂內容去污染下游斷言；(b) 穩定的來源必須原樣正常回傳，不能因為修法而誤傷了
-    原本就會過的情況（控制組——沒有它，上面那條可以被『凡是重試就報錯』滿足）。
+    WHY：`_ledger_sandbox()` 原本直接 `shutil.copy2` 拷貝帳本家族，拷貝當下若有人在編輯會拷到半新
+    半舊的撕裂內容，讓沙箱測試偶發假紅／假綠（測試載具自己的瑕疵冒充成受測程式的訊號）。修法要求
+    『讀前讀後 stat 相同才算穩定』，本測試坐實：(a) 永遠等不到穩定窗口的來源必須 fail loud；(b) 穩
+    定的來源必須原樣回傳（控制組）。推導全文搬至
+    Guard_Line_History_2.md〈R186 淨減法搬遷〉§5。  round-label-ok
     """
 
     def test_a_file_whose_stat_never_settles_is_fail_loud_not_silently_sandboxed(self):

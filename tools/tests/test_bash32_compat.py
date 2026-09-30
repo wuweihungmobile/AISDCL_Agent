@@ -740,15 +740,9 @@ class TestGnuDateNanoseconds(unittest.TestCase):
 # ══════════════════════════════════════════════════════════════════════════════
 # R81 包 G（XPL-S1-02）— 同一套判準，第二個掃描面：workflow 的 inline `run:`
 # ══════════════════════════════════════════════════════════════════════════════
-# 缺陷本體：本檔的知識寫得很完整（連 `tools/macos_smoke_local.sh` 檔頭都逐字複述一遍），
-# 但**同一份知識住兩個家、只有 `.sh` 那個家被鎖**——`_scan_trees()` 實測回傳 6 棵、
-# 合計 29 支檔，副檔名集合是 `['.sh', '<none>']`，`.yml` **一支都不看**。
-#
-# 危害面是不對稱的：Windows 開發機的 Git Bash 帶 GNU userland、ubuntu CI 也是 GNU，
-# 兩邊都會給出「這樣寫沒問題」的假訊號；只有 macos-latest 的 BSD userland 會炸，而
-# `macos-compat-ci.yml` 的 inline `run:` 剛好就是唯一跑在那裡的東西，也剛好一個觀測者
-# 都沒有。落地當回合實測：用**本檔自己的 `_PATTERNS`** 掃 12 支 workflow 的 inline
-# `run:`，命中 3 筆 `date -d`（GNU-only），全在 `root-infra-ci.yml`。
+# 缺陷本體：同一份 BSD/GNU 知識住兩個家、只有 `.sh` 那個家被鎖，workflow 的 inline `run:` 一支都不
+# 看；而只有 macos-latest 的 BSD userland 會炸。落地實測（`date -d` 命中）沿革搬至
+# Guard_Line_History_2.md〈R186 淨減法搬遷〉§6。  round-label-ok
 #
 # 判準把 `runs-on` 當**輸入**而不是寫死：
 #   · 檔內任一 `runs-on:` 提到 macos ⇒ 該檔全部 `run:` 命中判**紅**（今天 0 筆，零成本）；

@@ -126,27 +126,9 @@ def _scan_roots() -> list[tuple[Path, int]]:
     〈第七輪 史料搬遷（Dev-Trim8）〉。"""
     latest = _latest_root()
     return [
-        # 🔴 R80 收尾單人窗口重釘 77 → 92（**方向是收緊**：下限拉高＝要求更大的掃描面）。
-        # 觸發＝本輪三支護欄層檔的判準本體下沉 `tools/lib/`（DEF-101-957／958），`tools` 樹
-        # 由 95 支長到 97 支，而 77 這個下限只還守得住 79% 的掃描面 ⇒ `tree_count_verdict()`
-        # 的腐化上界當場紅並直接給出該填的數字（92 ＝ 97 × 0.95），本列照填、不做加減推算。
-        # 🔴 R83 收輪單人窗口重釘 92 → 110（**方向是收緊**，同上一段語意）。觸發＝本輪
-        # 並行包在 `tools` 樹下新增四支檔（`tools/lib/schedule_backend.py` ＋ 三支回歸鎖
-        # `tools/tests/test_block_destructive_git_r83.py`／`test_mac_endurance_r83.py`／
-        # `test_skip_discoverability_r83.py`），該樹由 112 支長到 116 支，92 這個下限只
-        # 還守得住 79% 的掃描面 ⇒ `tree_count_verdict()` 的腐化上界（115）當場紅並直接
-        # 給出該填的數字（110 ＝ 116 × 0.95），本列照填、不做加減推算。
-        # 🔴 R97 追加當輪重釘 110 → 131（**方向是收緊**，同上一段語意）。觸發＝本輪  round-label-ok
-        # 新增 `tools/lib/worktree_paths.py`／`tools/lib/ledger_staleness.py`／
-        # `tools/lib/failure_log_rotation.py` 三支模組，該樹由 130 支長到 138 支，
-        # 110 這個下限只還守得住 80% 的掃描面 ⇒ `tree_count_verdict()` 的腐化上界
-        # （137）當場紅並直接給出該填的數字（131 ＝ 138 × 0.95），本列照填、不做加減推算。
-        # 🔴 DEF-200-274 落地當輪重釘 131 → 156（**方向是收緊**，同上一段語意）。觸發＝
-        # 本輪新增 `tools/lib/parallel_shard.py`，該樹由 163 支長到 164 支，131 這個下限
-        # 只還守得住 80% 的掃描面 ⇒ `tree_count_verdict()` 的腐化上界（163）當場紅並直接
-        # 給出該填的數字（156 ＝ 164 × 0.95），本列照填、不做加減推算。
-        # 🔴 2026-09-27 重釘 156 → 186（收緊）：新增 test_recovery_hint_passes_ps_lint.py 後
-        # 掃描檔數 196 > 腐化上界 195，判準逐字給出該填的數字（186 ＝ 196 × 0.95），照填。
+        # per-tree 下限＝`tree_count_verdict()` 腐化上界逐字給出的數字（實測 × 0.95，方向＝收緊，
+        # 照填不推算）；逐輪重釘沿革（77→92→110→131→156→186）搬至
+        # Guard_Line_History_2.md〈R186 淨減法搬遷〉§64。  round-label-ok
         (_REPO_ROOT / "tools", 186),
         (_REPO_ROOT / "AutoClaude" / "tools", 41),
         (_REPO_ROOT / "AutoClaude" / "autoclaude", 194),

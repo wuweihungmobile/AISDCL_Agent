@@ -464,6 +464,23 @@ MODEL_HINT_BANDS = (BAND_CONVERGE, BAND_PREPARE, BAND_HALT)
 #: 用的模型沒有意義）。
 MODEL_SCOPED_KINDS = frozenset({"weekly_scoped", "seven_day_opus", "seven_day_sonnet"})
 
+#: 🔴 DEF-200-437：模型家族字（與 hook `model_family()` 同一組、同一個先後順序）＝遲滯檔／pace
+#: 兄弟檔的分檔鍵，也是 `active_model` 與分軌軸綁定（`_model_active()`／`_amort_skip()`）的唯一
+#: 正規化。元組逐字釘在 hook 那一組上（`test_quota_policy.py` 的
+#: `TestFamilyKeyAgreesWithTheHookModelFamily`）：此前這裡另立精確比對，同一個字串兩邊答案不同。
+MODEL_FAMILIES = ("opus", "sonnet", "haiku", "fable")
+
+
+def family_key(model: object) -> str:
+    """`model` → 家族字；認不出＝空字串（見 `MODEL_FAMILIES`）。
+
+    與 hook `model_family()` **逐字同語意**（`str()`＋strip＋lower＋依序做子字串包含比對），
+    所以 `claude-opus-5-5`、`opus[1m]`、`Opus 5.5` 與 `opus` 是同一家；回傳值只可能是四個固定
+    家族字之一或空字串，呼叫端拿它組檔名時，任意字串進不了檔名（`../x`、`opus/../x` 也一樣）。
+    """
+    text = str(model or "").strip().lower()
+    return next((family for family in MODEL_FAMILIES if family in text), "")
+
 
 # 🔴 為何需要（實測走得到的靜默路徑）：`AUTOSDD_QUOTA_CAP_PREPARE=16` 之下 90% 拿到
 # cap 16、60% 拿到 8——水位愈高反而愈鬆，而 `load_policy` 當時回 `problems=[]`：每個值
@@ -510,13 +527,14 @@ def axis_recommended(pct: float, minutes: float | None, p: Policy) -> int:
 #     只調高餵給 `pct_band` 的水位、永不調低 ⇒ 結構上不可能放寬。
 #   `axis.pct` 仍是伺服器給的原值（事實不得被改寫）；被攤提調高過的軸在 note 裡具名。
 def axes_of(state: QuotaState, now: datetime, p: Policy,
-            ratio: float | None = None, ratio_note: str = "") -> tuple[AxisReading, ...]:
+            ratio: float | None = None, ratio_note: str = "",
+            active_model: str | None = None) -> tuple[AxisReading, ...]:
     """逐軸解析的**唯一正規路徑**：`minutes` 只能從 `axis.resets_at` 導出。"""
     resolved = W.resolve(  # 🔴 帶號分鐘進去：負值的 mid 強制在 `horizon()`，不在這裡
         _rows(state), tuple(_delta_minutes(a.resets_at, now, state.measured_at)
                             for a in state.axes),
         ratio, ratio_note, p.accel_window_minutes, p.far_horizon_minutes, p.halt_pct,
-        p.pace_ceiling, p.converge_pct)
+        p.pace_ceiling, p.converge_pct, _amort_skip(state, active_model))
     readings = []
     for axis, (pct, horizon, minutes, note) in zip(state.axes, resolved):
         band = pct_band(pct, p)
@@ -573,12 +591,31 @@ def _binding_key(r: AxisReading) -> tuple[float, float, float, str]:
 # 否則一個本次派工完全沒碰過的模型（實測＝Fable）會被當成硬牆。任一邊缺席（不知道要
 # 問誰／伺服器沒說這一軸是誰）一律當「不算命中」——同 repo 通篇「量不到 ≠ 量到零」
 # 的方向：不確定時保守地排除，不確定時**不**放行也不猜著放進去。
+#
+# 🔴 DEF-200-441：綁定鍵不再是 `scope_model` 與 `active_model` 的**全等**。伺服器把顯示名改成
+# 「Opus 5.5」、或改發頂層 `seven_day_opus`／`seven_day_sonnet`（`scope_model` 缺席）時，全等
+# 比對會讓該軸永遠被排除＝零煞車，失敗表徵與「沒在用這個模型」相同（R87 同型）。今天線上
+# 的伺服器把那兩個頂層桶發成 null，所以線上行為不變；這是前置，不是現況缺陷。
+def _scope_of(axis: Axis) -> str | None:
+    """這一軸屬於哪個模型（casefold 後的名稱）：`scope_model` 有值就用它；缺席時，kind 自帶
+    家族字的頂層桶（`seven_day_opus`／`seven_day_sonnet`）由 kind 導出；都沒有 ⇒ `None`
+    （來源不明；`weekly_scoped` 缺 `scope_model` 屬此——量不到不猜）。"""
+    if isinstance(axis.scope_model, str) and axis.scope_model.strip():
+        return axis.scope_model.strip().casefold()
+    if axis.kind in MODEL_SCOPED_KINDS and axis.kind.startswith("seven_day_"):
+        return axis.kind.removeprefix("seven_day_")
+    return None
+
+
 def _model_active(axis: Axis, active_model: str | None) -> bool:
-    """`axis.scope_model` 是否等於 `active_model`（大小寫不敏感）；任一邊缺席／非字串
-    （快取讀出的異形欄位，同 `quota_meter` 對「原樣帶出不猜、不拋例外」的既有紀律）
-    一律不算命中——拋例外會讓整條額度軸變成量不到，比保守地判「不算命中」更糟。"""
-    return (isinstance(active_model, str) and isinstance(axis.scope_model, str)
-            and axis.scope_model.strip().casefold() == active_model.strip().casefold())
+    """`active_model` 的家族字（`family_key()`：原始 id、`opus[1m]` 都先歸到家族）是否**包含於**
+    這一軸所屬模型的名稱（大小寫不敏感：「Opus 5.5」命中 `opus`、「Sonnet」不命中 `opus`）；任一邊
+    缺席／認不出家族／非字串（快取讀出的異形欄位，同 `quota_meter` 對「原樣帶出不猜、不拋例外」的
+    既有紀律）一律不算命中——拋例外會讓整條額度軸變成量不到，比保守地判「不算命中」更糟。
+    `"" in s` 恆真，所以空字串必須先擋。"""
+    want = family_key(active_model)
+    scope = _scope_of(axis)
+    return bool(want) and scope is not None and want in scope
 
 
 def _in_cap_gate(r: AxisReading, active_model: str | None) -> bool:
@@ -587,6 +624,20 @@ def _in_cap_gate(r: AxisReading, active_model: str | None) -> bool:
     if r.axis.kind in FALLBACK_KINDS:
         return False
     return r.axis.kind not in MODEL_SCOPED_KINDS or _model_active(r.axis, active_model)
+
+
+# 🔴 DEF-200-438：攤提與 gate 同尺——別家模型的 model-scoped 軸不進攤提（證據與舊判詞為何被
+# 推翻見 `quota_pace.amortize` 上方）。方向刻意比 gate 窄：只在 active_model **已知**時才遮；
+# 未知（`None`／空白）維持納入＝舊行為（量不到≠量到零；納入只會更緊），擁有該軸的模型同理。
+# 只遮 model-scoped 一類，保險軸（`FALLBACK_KINDS`）照舊留在攤提裡。回傳與 `state.axes` 同序。
+# DEF-200-437：「已知」的判準是 `family_key()` 認得出家族——非空但認不出的字串（`mythos`）此前被當
+# 成已知而遮掉所有分軌軸，擁有者的軸反被遮＝放寬了煞車；認不出＝不知道是誰＝一軸都不遮。
+def _amort_skip(state: QuotaState, active_model: str | None) -> tuple[bool, ...]:
+    """True＝這一軸不進攤提（也不被攤提抬水位）；模型未知／認不出家族 ⇒ `()`＝一軸都不遮。"""
+    if not family_key(active_model):
+        return ()
+    return tuple(a.kind in MODEL_SCOPED_KINDS and not _model_active(a, active_model)
+                 for a in state.axes)
 
 
 # 🔴 為何 rec 不能也取 `min(逐軸 rec)`（那會讓本案要治的病原封不動復發）：weekly 這種
@@ -605,8 +656,9 @@ def decide(state: QuotaState, now: datetime, p: Policy,
     # 🔴 `active_model`（R98）＝這次要問的目標模型；`None`＝不知道（既有呼叫端全部沿用
     # 這個預設，行為對它們**逐字不變**——本輪之前不存在的參數，缺席不影響任何既有呼叫）。
     # 同樣不進 `Policy`：它是**這一次呼叫**的性質，不是門檻，見 `_in_cap_gate()`。
+    # DEF-200-438：同一個值也決定攤提要不要遮掉別家模型的軸（`_amort_skip()`）。
     """跨軸聚合：`cap = min(逐軸 cap)`＝煞車；`rec = min(base×pace, cap)`＝加速。"""
-    readings = axes_of(state, now, p, ratio, ratio_note)
+    readings = axes_of(state, now, p, ratio, ratio_note, active_model)
     if not readings:
         # 🔴 R100／PRD F1：`axes == ()` ⇒ `cap ≤ cap_prepare`。夾在**這裡**而不是只靠出廠
         # 值，是為了讓 operator 顯式把 `AUTOSDD_QUOTA_DEGRADED_CAP` 調鬆時不變式仍然成立
@@ -699,7 +751,8 @@ def decide(state: QuotaState, now: datetime, p: Policy,
         # 而放寬是本案唯一不准無證據發生的方向（同 `horizon_band` 負值分支的判詞）。
         amort=W.amort_for(_rows(state),
                           tuple(_delta_minutes(a.resets_at, now, state.measured_at)
-                                for a in state.axes), ratio, ratio_note),
+                                for a in state.axes), ratio, ratio_note,
+                          _amort_skip(state, active_model)),
         model_hint=hint)
 
 

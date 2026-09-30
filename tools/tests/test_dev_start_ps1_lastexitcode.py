@@ -80,25 +80,18 @@ class TestDevStartPs1DotSourceLastExitCode(unittest.TestCase):
             )
             # 🔴 R67 round 3（DEF-101-70x）：PATH 指向一個**空目錄**，不是 `/usr/bin:/bin`。
             #
-            # 原寫法自稱「PATH 只留最基本目錄，排除任何 py/python 候選」——那句話在
-            # macOS（12.3 起 `/usr/bin/python` 已移除，只剩 `python3`）與 Windows
-            # （沒有 `/usr/bin`）上恰好為真，在 **Linux 上為假**：ubuntu runner 的
-            # `/usr/bin/python` 是實存可執行檔 ⇒ `Test-IsRealPython` 命中、
-            # 「找不到 Python 直譯器」那條**受測分支從頭到尾沒被執行**，腳本改去執行
-            # 不存在的 `tools/dev_start.py`，測試看到的是 python 自己的
-            # `can't open file` 與 `RC_AFTER=2`。CI 首次在 Linux 跑本鎖即紅
-            # （root-infra-ci run 30697855439），紅的不是受測物，是測試的前提。
+            # 原寫法在 Linux 上為假：ubuntu runner 的 `/usr/bin/python` 實存 ⇒ `Test-IsRealPython`
+            # 命中、「找不到 Python 直譯器」那條受測分支從未被執行（紅的是測試前提）。沿革搬至
+            # Guard_Line_History_2.md〈R186 淨減法搬遷〉§14。  round-label-ok
             # 空目錄讓「PATH 內沒有任何 Python 候選」這句話在**每個**平台上都literally 為真。
             #
             # `PYPROBE_*` 是本測試的**前提自證**（見 test 內的斷言）：把「前提悄悄不成立」
             # 從「斷言訊息看不懂」變成「當場點名 PATH 淨化失效」。
             #
-            # [Console]::OutputEncoding 設 UTF-8（R42 修復，DEF-101-350）：本機
-            # 為繁體中文 Windows（Big5/950 codepage），dev_start.ps1 的中文錯誤
-            # 訊息若不明確指定輸出編碼會被以錯誤 codepage 解讀成亂碼，斷言
-            # 因而誤判失敗——同一根因/同一修法比照本輪稍早
-            # test_install_post_commit_windowsapps_guard.py::_run_with_shadowed_python()
-            # 的既有修復。
+            # [Console]::OutputEncoding 設 UTF-8（DEF-101-350）：繁中 Windows（Big5/950）下中文錯
+            # 誤訊息會被解成亂碼而讓斷言誤判失敗；同
+            # `test_install_post_commit_windowsapps_guard.py` 的既有修法。沿革搬至
+            # Guard_Line_History_2.md〈R186 淨減法搬遷〉§15。  round-label-ok
             empty_bin = Path(td) / "empty_bin"
             empty_bin.mkdir()
             cmd = (
@@ -222,22 +215,10 @@ _ZSH_SKIP_REASON = (
 )
 
 
-# 🔴 R79（D-skipped #6）：reason 前綴補 `[POSIX-NATIVE-ONLY]`。這個站點與同 repo 8 筆
-# 已標籤者**完全同形**（例 `test_dev_start.py:1362`），差別只在沒帶標籤，於是 runner 的
-# skip 明細把它底下的 6 支測試印成「未標籤」，與真正的環境性 skip（缺 zsh／缺舊直譯器／
-# 無 symlink 權限，共 5 筆）混在同一桶。後果不是美觀問題：S3「徹底消除 skipped」的分流
-# 者照那份輸出讀，會把「補環境就能救回」的工作量高估一倍，或反過來去修根本不該在
-# Windows 跑的測試。標上之後 `_POSIX_TAG_RATCHET["tools/tests"]` 由 1 降為 0（連同
-# shrink-only 天花板一起下修——天花板不跟著降＝把剛還掉的欠債額度留著日後無聲用回去）。
-# 🔴 R82 CARRIER-02：class 級述詞由 `os.name == "nt"` 改成「兩支殼都解不到」。
-#
-# 舊述詞把 6 支整組判成 `[POSIX-NATIVE-ONLY]`，理由是「不在 Windows 上驗證非目標平台
-# 的殼」。R82 逐支實跑推翻了那個歸類：Windows 上 **Git Bash 是真的 bash**（不是模擬層），
-# 上面七項契約（sourced 偵測、`${BASH_SOURCE[0]}` 路徑解析、rc 透傳、venv 啟用、零殘留）
-# 走的就是 `.sh` 那條程式碼路徑，一項都沒有依賴 POSIX 專屬語意。實測：只把 `_SH_BASH`
-# 換成 Git Bash 絕對路徑，bash 三支立刻 2 綠 1 紅，而唯一那個紅是斷言把 `/` 與 `\` 當成
-# 不同字串（Git Bash 回報的 `VIRTUAL_ENV` 用正斜線），不是受測物的行為缺陷。
-# ⇒ 這 6 支裡真正 mac-only 的只有 zsh 那 3 支（見各自的 method 級 skip）。
+# 🔴 class 級 skip 述詞＝「兩支殼都解不到」：Windows 上 Git Bash 是真的 bash，七項契約走的就是
+# `.sh` 那條程式碼路徑，不依賴 POSIX 專屬語意；真正 mac-only 的只有 zsh 那 3 支（見各自的 method
+# 級 skip）。R79 標籤補齊與 R82 述詞改判的實測沿革搬至
+# Guard_Line_History_2.md〈R186 淨減法搬遷〉§16。  round-label-ok
 @unittest.skipIf(
     _ZSH is None and _SH_BASH is None,
     "[TOOL-ABSENCE] 本機 zsh 與 bash 都解不到——`tools/dev_start.sh` 的兩條殼路徑"

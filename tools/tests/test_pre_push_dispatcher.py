@@ -1034,15 +1034,10 @@ class TestAutoClaudeSubHookPytestDistDecision(unittest.TestCase):
 
 
 # ── 指名鎖檔必須存在（R67 round 2，QA-R67-03）──────────────────────────────────
-# WHY：本檔 setUp 與 `tools/git-hooks/pre-push` 的註解同時把
-# `test_integration_gate_local_carrier.py` 指名為「路徑觸發抓不到的另兩種腐爛」的
-# 守門者，而那支檔案**從未存在**（`ls` rc=1、全庫 `find` 零命中；真正的守門依
-# `DEF-101-561③` 併進了 `test_find_git_bash_parity.py` 的既有姊妹鎖）。
-# 實害是治理面：那段註解正是 DEF-101-639 修法正當性的核心論證，指向不存在的容器＝讀者
-# 現查時無法驗證；更糟的是下一輪若有人執行「檔案不存在 ⇒ 這層守門沒落地」的推論，會誤判
-# 本輪修復不完整並重做一次。本 repo 對「指名不存在的容器」已有明文硬規則
-# （`docs/06_quality/CrossPlatform_Scan_Dimensions.md` 硬規則③ 第一點：禁止寫「記入某某
-# 帳本」而該帳本不是真實檔案路徑），本筆是同一形態發生在程式碼註解上。
+# WHY：曾有註解指名一支從未存在的鎖檔當守門者——指向不存在的容器＝讀者現查時無法驗證，還會讓下一輪
+# 誤判「這層守門沒落地」而重做；本 repo 對「指名不存在的容器」已有明文硬規則，本鎖把同一形態在程式
+# 碼註解上機械化。R67 round 2 實測與立案沿革搬至
+# Guard_Line_History_2.md〈R186 淨減法搬遷〉§45。  round-label-ok
 #
 # 掃描面（為何不只掃本檔與 pre-push）：同一形態在 `tools/tests/` 其他鎖檔一樣會發生，
 # 而成本只是一次 rglob；掃描面取兩者聯集。

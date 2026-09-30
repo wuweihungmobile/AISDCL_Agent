@@ -534,15 +534,15 @@ def hook_result_attachments(records) -> list[dict]:
 # 是真的壞了（native）或認不得的載具（alien），三態分類收斂成兩態，`on_windows`
 # 參數也一併刪除（不再需要靠它決定「這條是不是另一半」）。
 #
-# 🔴 訂正（2026-09-08）：M9 立案時「本平台自己那條失敗 ⇒ 一定是真的壞了」這個推論的**前提**是
-# 「全母體 217 筆 `hook_non_blocking_error` 的 stderr 全部是同一句 ENOENT」（見上方
-# 立案筆記）——那時 100% 樣本都是「行程根本沒 spawn 起來」。但 `block_destructive_git.py`
-# 自己就有一條**設計上刻意**的非阻斷失敗路徑（治理檔保護，PRD §15.5 紅線 10）：有人值守
-# 時印一句提醒（`_GOVWRITE_NOTE_MSG`）就 `return 1`——這也會落盤成同一種
-# `hook_non_blocking_error`，command 也命中唯一那條載具，卻不是「沒跑」，是「跑了、
-# 印了、故意不阻斷地結束」。實測（2026-09-08）：直接重放同一份 payload，exit 1、stderr
-# 逐字是 `_GOVWRITE_NOTE_MSG` 的內容，不含任何 spawn 層錯誤字樣。舊判準把這種情況
-# 誤判成 native_fail，對每一次「編輯治理檔＋有人值守」都會誤報一次守衛沒跑。
+# 🔴 訂正（2026-09-08）：M9 立案時「本平台自己那條失敗 ⇒ 一定是真的壞了」的**前提**是
+# 「全母體 217 筆 `hook_non_blocking_error` 全是同一句 ENOENT」（見上方立案筆記）。但當時
+# `block_destructive_git.py` 的治理檔提醒（PRD §15.5 紅線 10）有人值守時 `return 1`——同樣
+# 落盤成 `hook_non_blocking_error`、command 也命中唯一那條載具，卻不是「沒跑」，而是「跑了、
+# 印了、故意不阻斷地結束」，舊判準因此對每次「編輯治理檔＋有人值守」誤報一次守衛沒跑。
+# 現況（DEF-200-440）：CC 只認 0 與 2，其餘碼一律顯示成 hook error，提醒放 rc=1 會長得像
+# 守衛壞了 ⇒ 治理檔與 stash 偵測兩條提醒都已改成 rc=0＋`emit_to_model`；仍落成
+# `advisory_exit` 的只剩退化 payload（`# degraded-payload:` 標記，家族鎖＝
+# `test_block_destructive_git_r83.py`）與修法前的歷史逐字稿，故這一桶保留。
 # 修法：真的 spawn 失敗必然帶 OS／runtime 的 spawn 層錯誤字樣（ENOENT／EACCES／EPERM／
 # ENOEXEC／EFTYPE 這類 errno 名，緊跟著 `spawn`）；hook 自己的訊息不會湊巧長這樣
 # （本 repo 具名的 hook 提醒訊息一律以 `[<hook 名>]` 開頭，見 `_GOVWRITE_NOTE_MSG` 等）。
@@ -588,8 +588,8 @@ def runtime_carrier_verdict(attachments) -> tuple[list[str], dict[str, int]]:
             continue
         if _is_ours_attachment(att):
             if not spawn_failure.is_spawn_failure(stderr):
-                # 載具真的跑起來了，是 hook 自己選擇非阻斷地回非零（例如治理檔保護
-                # 有人值守時只提醒），不是「這次沒跑」——不計入問題清單。
+                # 載具真的跑起來了，是 hook 自己選擇回非零（例如退化 payload 的失效訊號；
+                # 修法前的治理檔提醒也長這樣，DEF-200-440），不是「這次沒跑」——不計入問題清單。
                 counts["advisory_exit"] += 1
                 continue
             if i < last_ours_success:

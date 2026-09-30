@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import ast
 import contextlib
+import fnmatch
 import functools
 import importlib
 import inspect
@@ -18,6 +19,7 @@ import os
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -36,6 +38,7 @@ from lib import windows_skip_tags  # noqa: E402  # R72：skip 標籤家族的 SS
 # `tools/lib` 插進 `sys.path`（該檔 L129），故直接裸名 import 即可拿到**同一個**
 # 模組物件（同 `min_tests_margin` 那句註解的判斷——`from lib import X` 會是第二副本）。
 import console_orphan_census  # noqa: E402
+import pace_contract  # noqa: E402  # DEF-200-444：TempFenceTest 的字面相等鎖對端
 
 #: DEF-200-170：刻意取 **runner 手上的那一個** module 物件。`tools/lib` 同時也在 `sys.path`
 #: 上（runner 自己插的），改寫成 `from lib import min_tests_margin` 會拿到**第二個副本**，
@@ -315,6 +318,223 @@ class ConsoleOrphanCensusTest(unittest.TestCase):
             rc = console_orphan_census.report_delta(None, {("OpenConsole.exe", 1)})
         self.assertEqual(rc, 0)
         self.assertEqual(buf.getvalue(), "")
+
+
+class TempFenceTest(unittest.TestCase):
+    """DEF-200-444：全套曾實測改寫**真實** %TEMP% 下的 autosdd_pace*.json（引擎
+    `file_quota_meter` 讀的就是那份，TTL 內可能拿測試的假決策當派工上限）。家族級修法＝
+    `sentinel_lifecycle.temp_fence`：全套期間 TEMP／TMP／TMPDIR 與 `tempfile.tempdir` 指向專屬
+    隔離根（含 worker 與孫行程）、跑完清掉，並比對真實 TEMP 下配速契約檔的前後雜湊。本類只對**
+    合成的假真實 TEMP**（`real_tmp=`）動手，絕不碰這台機器真的 %TEMP%。"""
+
+    def setUp(self) -> None:
+        env = mock.patch.dict(os.environ)  # 圍籬若壞了，汙染不得帶進同行程的其他測試
+        env.start()
+        self.addCleanup(env.stop)
+        self.addCleanup(setattr, tempfile, "tempdir", tempfile.tempdir)
+        self.real = Path(tempfile.mkdtemp(prefix="tf_real_"))
+        self.addCleanup(shutil.rmtree, self.real, ignore_errors=True)
+        self.fence = run_root_unittests.sentinel_lifecycle.temp_fence
+
+    def _fenced(self, run):
+        """在假真實 TEMP 上跑圍籬並收 stdout；回 `(rc, 輸出)`。"""
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            rc = self.fence(run, real_tmp=self.real)
+        return rc, out.getvalue()
+
+    def test_in_process_child_and_contract_path_resolve_inside_the_isolated_root(self) -> None:
+        """修前必紅：沒有圍籬時三者都是真實 TEMP。先讓 `tempfile` 快取落地＝最壞情形
+        （Python 只在第一次 `gettempdir()` 讀環境變數，只改 env 對已快取的行程無效）。"""
+        tempfile.gettempdir()
+        seen: dict[str, str] = {}
+
+        def _run() -> int:
+            seen["root"] = tempfile.gettempdir()
+            seen["contract"] = str(pace_contract.contract_path().parent)
+            probe = subprocess.run(
+                [sys.executable, "-c", "import tempfile; print(tempfile.gettempdir())"],
+                capture_output=True, encoding="utf-8", errors="replace", timeout=60,
+                check=False)
+            seen["child"] = probe.stdout.strip()
+            seen["existed"] = str(Path(seen["root"]).is_dir())
+            return 0
+
+        rc, _ = self._fenced(_run)
+        root = Path(seen["root"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(root.parent, self.real, "隔離根必須建在（假）真實 TEMP 底下")
+        self.assertEqual(seen["existed"], "True", "跑的當下隔離根必須真的存在")
+        self.assertEqual(Path(seen["child"]), root,
+                         "子行程看到的 TEMP 不是隔離根 ⇒ worker／孫行程仍會寫真實 TEMP")
+        self.assertEqual(Path(seen["contract"]), root,
+                         "配速契約寫入端 contract_path() 仍指向真實 TEMP（DEF-200-444 原症狀）")
+
+    def test_environment_and_cache_are_restored_and_the_root_is_removed(self) -> None:
+        names = ("TEMP", "TMP", "TMPDIR")
+        os.environ.pop("TMPDIR", None)  # 原本沒設的，結束後必須回到「沒設」而不是空字串
+        before = {n: os.environ.get(n) for n in names}
+        cache = tempfile.tempdir
+        seen: dict[str, Path] = {}
+
+        def _run() -> int:
+            seen["root"] = Path(tempfile.gettempdir())
+            if seen["root"].parent != self.real:  # 圍籬沒生效：不得替它把垃圾寫進真實 TEMP
+                return 0
+            leaf = seen["root"] / "deep" / "er"
+            leaf.mkdir(parents=True)
+            readonly = leaf / "ro.txt"
+            readonly.write_text("x", encoding="utf-8")
+            os.chmod(readonly, stat.S_IREAD)  # Windows 唯讀檔（git 物件同形態）會擋 rmtree
+            return 0
+
+        self._fenced(_run)
+        self.assertEqual(seen["root"].parent, self.real, "圍籬沒生效：TEMP 沒指向隔離根")
+        self.assertEqual({n: os.environ.get(n) for n in names}, before)
+        self.assertEqual(tempfile.tempdir, cache, "tempfile 快取沒還原")
+        self.assertFalse(seen["root"].exists(), "跑完隔離根沒清掉（含巢狀目錄與唯讀檔）")
+
+    def test_a_raising_run_still_restores_and_cleans_then_propagates(self) -> None:
+        before = dict(os.environ)
+        seen: dict[str, Path] = {}
+
+        def _boom() -> int:
+            seen["root"] = Path(tempfile.gettempdir())
+            raise RuntimeError("boom")
+
+        with self.assertRaises(RuntimeError):
+            self._fenced(_boom)
+        self.assertEqual(dict(os.environ), before)
+        self.assertFalse(seen["root"].exists())
+
+    def test_drifted_real_pace_files_are_named_with_their_kind_and_rc_is_untouched(self) -> None:
+        changed = self.real / pace_contract.CONTRACT_NAME
+        untouched = self.real / "autosdd_pace_fable.json"
+        vanished = self.real / "autosdd_pace_sonnet.json"
+        for path in (changed, untouched, vanished):
+            path.write_text('{"cap": 4}', encoding="utf-8")
+
+        def _escape() -> int:  # 模擬某個測試繞過隔離、直接動真實 TEMP
+            changed.write_text('{"cap": 0}', encoding="utf-8")
+            (self.real / "autosdd_pace_opus.json").write_text("{}", encoding="utf-8")
+            vanished.unlink()
+            return 7
+
+        rc, out = self._fenced(_escape)
+        self.assertEqual(rc, 7, "圍籬是 advisory：內層 rc 必須原樣穿透")
+        self.assertIn("❌", out)
+        self.assertIn(f"{changed.name}（變更）", out)
+        self.assertIn("autosdd_pace_opus.json（新增）", out)
+        self.assertIn(f"{vanished.name}（消失）", out)
+        self.assertNotIn(untouched.name, out, "沒變動的兄弟檔不得被點名")
+        self.assertIn("真實 session", out, "『也可能是真 session 自己跑了 --pace』那句不得被刪")
+
+    def test_a_clean_run_prints_one_green_line_and_ignores_unwatched_files(self) -> None:
+        (self.real / "autosdd_pace.json").write_text('{"cap": 4}', encoding="utf-8")
+
+        def _quiet() -> int:  # 真 session 本來就會動 quota 快取：不在判準射程，不得報
+            (self.real / "autosdd_quota.json").write_text("{}", encoding="utf-8")
+            return 0
+
+        rc, out = self._fenced(_quiet)
+        self.assertEqual(rc, 0)
+        self.assertNotIn("❌", out)
+        self.assertIn("✅", out)
+        self.assertEqual(len(out.strip().splitlines()), 1, out)
+
+    def test_an_uncreatable_root_degrades_to_unfenced_with_a_warning(self) -> None:
+        before = dict(os.environ)
+        seen: list[dict[str, str]] = []
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+            rc = self.fence(lambda: seen.append(dict(os.environ)) or 3,
+                            real_tmp=self.real / "no_such_dir")
+        self.assertEqual(rc, 3, "量測器故障不得改變 run() 的 rc")
+        self.assertEqual(seen, [before], "建不起隔離根時不得半套改環境")
+        self.assertIn("⚠️", err.getvalue())
+
+    def test_a_root_that_survives_cleanup_is_reported_and_not_claimed_clean(self) -> None:
+        class _Stuck:  # 清不掉的隔離根（殘存行程握著檔案的替身）：cleanup 是空的
+            def __init__(self, **kwargs: str) -> None:
+                self.name = tempfile.mkdtemp(prefix="stuck_", dir=kwargs["dir"])
+
+            def cleanup(self) -> None:
+                pass
+
+        with mock.patch.object(tempfile, "TemporaryDirectory", _Stuck):
+            rc, out = self._fenced(lambda: 0)
+        self.assertEqual(rc, 0, "清不乾淨只出聲，不改 rc")
+        self.assertIn("⚠️", out)
+        self.assertNotIn("已建立並清除", out, "沒清乾淨卻宣稱已清除＝說謊的綠燈")
+
+    def test_parallel_workers_inherit_the_fenced_temp(self) -> None:
+        """worker 由 `run_parallel()` 以 `dict(os.environ)` 複本 Popen：圍籬須在其之前改環境。
+        哪天 `child_env` 改成白名單本格即紅——否則 worker 靜默回寫真實 TEMP。"""
+        parallel_shard = run_root_unittests.parallel_shard
+
+        class _Case(unittest.TestCase):
+            def test_ok(self):
+                pass
+
+        ok_payload = json.dumps({"testsRun": 1, "skipped": [], "errors": [], "failures": [],
+                                 "unexpectedSuccesses": []})
+        inner = _fake_shard_procs(["never"], "", ok_payload)
+        envs: list = []
+
+        def fake_popen(argv, **kwargs):
+            envs.append(kwargs.get("env"))
+            return inner(argv, **kwargs)
+
+        def _run() -> int:
+            with mock.patch.object(parallel_shard, "worker_count", return_value=1), \
+                    mock.patch.object(parallel_shard.subprocess, "Popen",
+                                      side_effect=fake_popen):
+                result = parallel_shard.run_parallel(
+                    unittest.TestSuite([_Case("test_ok")]),
+                    Path(__file__).resolve().parent, {"tests.mod_ok": 1})
+            return 0 if result.wasSuccessful() else 1
+
+        rc, _ = self._fenced(_run)
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(envs), 1, "worker 沒被 Popen 出來")
+        for name in ("TEMP", "TMP", "TMPDIR"):
+            self.assertEqual(Path(envs[0][name]).parent, self.real,
+                             f"worker 的 {name} 不在隔離根 ⇒ 圍籬到不了 worker")
+
+    def test_main_runs_the_suite_inside_temp_fence_inside_leak_fence(self) -> None:
+        """接線鎖（AST，同 `test_main_is_wrapped_by_the_leak_fence`）：`temp_fence` 包住
+        `run_with_floor` 且在 `leak_fence` **內層**——`leak_fence` 的 `$TMPDIR` 新增差集量真實
+        TEMP，圍籬生效時該為零；放外層量的是隔離根，會把每個測試寫的檔誤報成新增。"""
+        tree = ast.parse(Path(run_root_unittests.__file__).read_text(encoding="utf-8"))
+        main_fn = next(n for n in ast.walk(tree)
+                       if isinstance(n, ast.FunctionDef) and n.name == "main")
+        last = main_fn.body[-1]
+        self.assertIsInstance(last, ast.Return, "main() 最後一句不是 return（結構被改了）")
+
+        def _calls(root: ast.AST, attr: str) -> list[ast.Call]:
+            return [n for n in ast.walk(root)
+                    if isinstance(n, ast.Call) and getattr(n.func, "attr", None) == attr]
+
+        leak = _calls(last, "leak_fence")
+        self.assertTrue(leak, "main() 找不到 leak_fence(...) 呼叫")
+        fence = _calls(leak[0], "temp_fence")
+        self.assertTrue(fence, "temp_fence 不在 leak_fence 內層——全套沒被圍籬包住（DEF-200-444）")
+        self.assertEqual(getattr(getattr(fence[0].func, "value", None), "id", None),
+                         "sentinel_lifecycle")
+        self.assertTrue(
+            any(getattr(n.func, "id", None) == "run_with_floor"
+                for n in ast.walk(fence[0]) if isinstance(n, ast.Call)),
+            "run_with_floor 沒被 temp_fence 包住")
+
+    def test_watch_glob_matches_the_pace_contract_names_but_not_staging_files(self) -> None:
+        """字面相等鎖：`pace_contract.CONTRACT_NAME` 改名而圍籬沒跟上，比對面就靜默瞎掉，
+        而失敗表徵與「零變動」的 ✅ 完全相同。"""
+        glob = run_root_unittests.sentinel_lifecycle.REAL_TEMP_WATCH_GLOB
+        canonical = Path(pace_contract.CONTRACT_NAME)
+        for name in (canonical.name, f"{canonical.stem}_fable{canonical.suffix}"):
+            self.assertTrue(fnmatch.fnmatch(name, glob), f"{name} 不在圍籬的比對面")
+        self.assertFalse(fnmatch.fnmatch(f"{canonical.name}.4242.tmp", glob),
+                         "`write()` 的 staging 暫存檔（.tmp）不得被當成契約檔")
 
 
 class ParallelFallbackToSequentialTest(unittest.TestCase):
@@ -742,14 +962,10 @@ class UntaggedWindowsLikeSkipsTest(unittest.TestCase):
         (base / f"{mod}.py").write_text(
             template.replace("__REASON__", untagged), encoding="utf-8"
         )
-        # R72：`untagged_windows_like_skips` 已隨 skip 標籤家族搬進
-        # `tools/lib/windows_skip_tags.py`（見該檔頭），平台閘讀的是**該模組**的判定。
-        # 🔴 R82（SA B-1）：這裡原本 patch 的是 `windows_skip_tags.os` 的 `name` ＝
-        # **行程全域**的 `os.name`。pytest 載具下 `AssertionRewritingHook` 會對每一支
-        # 新 import 的模組呼叫 `Path()`，patch 期間那必定拋 `PosixPath` 例外 ⇒ 下面
-        # 合成出來的樹 import 失敗、塌成 `_FailedTest`、收集數低於下限 ⇒ **兩次**
-        # `run_with_floor` 都回 1：紅的那一半理由是錯的，綠的那一半永遠綠不了。
-        # R100：真表自本輪起非空，隔離它避免合成樹被 stale 自檢誤判 rc=1。
+        # R72 起 `untagged_windows_like_skips` 住 `tools/lib/windows_skip_tags.py`，平台閘讀的是該
+        # 模組的判定：patch 該模組的平台判定，不 patch 行程全域 `os.name`（pytest 載具下會讓合成樹
+        # import 失敗、兩次 `run_with_floor` 都回 1）；真表自 R100 起非空，隔離它避免 stale 自檢誤
+        # 判。沿革搬至 Guard_Line_History_2.md〈R186 淨減法搬遷〉§49。  round-label-ok
         with mock.patch.object(windows_skip_tags, "running_on_windows", lambda: False), \
              mock.patch.dict(run_root_unittests._WINDOWS_SKIP_TAG_EXEMPT, {}, clear=True):
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
@@ -1960,14 +2176,10 @@ _ZERO_DEP_PROBE_TIMEOUT = 600
 
 
 def _zero_dep_child_env() -> dict[str, str]:
-    """斷『平行』遞迴（與既有 `_ZERO_DEP_PROBE_ENV` 斷『skip 掃描』遞迴的精神一致，
-    但是兩件獨立的事，不合併成同一個旗標）。DEF-200-274 第九輪 P0：D1 把
-    `AUTOSDD_PARALLEL_TESTS` 未設的語意從「序列」改成「auto（真實樹＋workers>1
-    即平行）」後，本探針子行程對 `R._TESTS_DIR`（貨真價實的真樹）整套重跑一次時
-    （`floor`／`main` 模式）會被新語意捲入、疊加在外層已在跑的 fan-out 之上
-    （DEF-101-803 遞迴熱點史料：823s→3813s 且仍逾時）。不管外層 `AUTOSDD_
-    PARALLEL_TESTS` 是什麼值（未設／"1"／zshrc 殘留），探針子行程一律強制序列
-    ——退回 D1 之前的「未設＝序列」基準，不被新語意捲入。
+    """斷『平行』遞迴（與 `_ZERO_DEP_PROBE_ENV` 斷『skip 掃描』遞迴的精神一致，但是兩件獨立的
+    事）。探針子行程對真樹整套重跑時，不管外層 `AUTOSDD_PARALLEL_TESTS` 是什麼值（未設／"1"／zshrc
+    殘留）一律強制序列，不被「未設＝auto」的新語意捲入而疊加在外層 fan-out 上。DEF-200-274 第九輪
+    P0 史料搬至 Guard_Line_History_2.md〈R186 淨減法搬遷〉§50。  round-label-ok
     """
     child_env = {**os.environ, _ZERO_DEP_PROBE_ENV: "1"}
     child_env[run_root_unittests.parallel_shard._ENV_ON] = "0"
@@ -2435,26 +2647,11 @@ class ZeroDepProbeFlagIsNotAFailOpenTest(unittest.TestCase):
 
 # `tools/tests/` 的**外部可執行檔**前置宣告（SSOT）——`(命令名, pip 名)`。
 #
-# WHY（R69 終審 SD 實測；與 `run_root_unittests._THIRD_PARTY_PREREQS` 是同一個病的
-# 第二種形狀）：那份清單守的是「import 得到嗎」，對「PATH 上有沒有這支執行檔」結構性
-# 盲目。R69 把 `ruff check tools/` 接進 `tools/git-hooks/pre-push` 快層第 ④ 段（缺 ruff
-# ＝fail-loud，刻意不軟跳過），而 `test_pre_push_dispatcher.py` 有 5 支測試在 tmp repo
-# 內**真跑**該 dispatcher 並斷言 rc==0 ⇒ 本目錄自此隱性要求 PATH 上有 ruff。當時三支跑
-# runner 的 workflow 只有 root-infra-ci.yml 裝 ruff ⇒ **同一批 tools/tests 在三個平台有
-# 兩種結果**，原本綠著的 macos-compat-ci 會被打紅（SD 單變因 A/B：PATH 上放假 ruff →
-# Ran 17 OK；唯一差別拿掉 ruff → FAILED〔failures=5〕）。
-#
-# 🔴 為何解法是「三支 workflow 都補裝」而不是「缺 ruff 就 skip」：快層那道 fail-loud 是
-# 本輪刻意訂的政策，軟跳過會讓它退回「宣告有、執行者無」的原病（見 tools/ruff.toml
-# 檔頭）。落差在**環境**不在 dispatcher。
-#
-# 🔴 為何 SSOT 放在測試檔而非 `run_root_unittests.py`（誠實劃界）：該檔受
-# `AutoClaude/tools/check_loc_budget.py` 的 SPECIAL_FILES **shrink-only 行數棘輪**管制
-# （門檻＝納管當下行數 754，只准往下改），本包實測往該檔加 69 行當場撞紅（`[special<=754]
-# 823 > 754`）。代價明說：因此**沒有** runner 開場 fail-fast 那一層，缺工具時仍會先看到
-# dispatcher 那 5 支紅字；補償是下方 `ExternalToolPrereqDeclarationTest` 會在同一次執行
-# 裡多紅一支並**點名真正的原因**。要買回 fail-fast 就得先把該檔壓到 754 行以下——那是
-# 另一個包的工作，見交件回報的帳本請求。
+# WHY：`ruff check tools/` 接進 pre-push 快層後，`test_pre_push_dispatcher.py` 有數支測試隱性要求
+# PATH 上有 ruff，而三支跑 runner 的 workflow 只有 root-infra-ci 裝它 ⇒ 同一批測試在三個平台有兩種
+# 結果。解法是三支都補裝、不是缺 ruff 就 skip；SSOT 放測試檔而非 `run_root_unittests.py`
+# （SPECIAL_FILES 行數棘輪），缺工具時由下方 `ExternalToolPrereqDeclarationTest` 點名真因。沿革全
+# 文搬至 Guard_Line_History_2.md〈R186 淨減法搬遷〉§51。  round-label-ok
 _EXTERNAL_TOOL_PREREQS: tuple[tuple[str, str], ...] = (
     ("ruff", "ruff"),
 )
@@ -3299,14 +3496,11 @@ class ParallelShardPopenFailureKillsAlreadyStartedProcsTest(unittest.TestCase):
             def __init__(self) -> None:
                 self.killed = False
                 self.waited = False
-                # 🔴 第四輪複審發現的既存 fixture 缺口（非本輪引入）：本 mock 原本漏了
-                # `returncode`，`_worker_thread_loop()` 對成功 Popen 的分支一定會存取它
-                # （`results.put((module, proc.returncode, ...))`）——先前的舊版
-                # `run_parallel()` 只取 `thread_errors` 第一筆例外就 raise，恰好讓
-                # mod.b 那個「刻意」的 OSError 蓋過這個「意外」的 AttributeError，兩者
-                # 長得一樣（都是「有例外被攔下」），此測試因此從未真的獨立驗證過
-                # mod.a 分支能走到 `results.put()` 那一步。修復後的 `run_parallel()`
-                # 會把兩條 worker thread 的例外都排空印出，讓這個潛在缺口第一次現形。
+                # 本 mock 原本漏了 `returncode`（`_worker_thread_loop()` 對成功 Popen 的分支一定會
+                # 存取它）：舊版 `run_parallel()` 只取第一筆例外 raise，讓 mod.b 刻意的 OSError 蓋
+                # 過意外的 AttributeError，測試因此從未獨立驗證 mod.a 走得到 `results.put()`；修復
+                # 後兩條 worker 的例外都會被排空印出。第四輪複審發現的沿革搬至
+                # Guard_Line_History_2.md〈R186 淨減法搬遷〉§52。  round-label-ok
                 self.returncode = 0
 
             def kill(self) -> None:
@@ -3696,18 +3890,10 @@ class ParallelTimingCacheSaveLiveCacheMergePruneTest(unittest.TestCase):
     """DEF-200-363 第十五輪：`save_live_cache()` 從整檔覆寫改為
     read-merge-prune-write——受測模組 `tools/lib/parallel_timing_cache.py`。
 
-    回歸的震盪機制鏈（見該函式 docstring）：模組級觀測寫入活體快取 → 下一輪
-    該模組被自動細分成多個 `module.Class` 鍵觀測 → 若整檔覆寫，活體快取不再
-    有模組鍵 → `load_hints()` 對模組鍵退回種子檔（可能是舊、偏低的數字）→
-    `auto_class_level_candidates()` 拿到偏低數字判定「不再需要細分」→ 下一輪
-    又整模組派工、耗時暴增 → 下下一輪又被觀測成細分鍵……如此震盪。
-
-    後續補強（同一份 DEF-200-363 修復的殘餘缺口）：初版只做到「父鍵不被剪掉」，
-    但父鍵本輪未被直接觀測時只是**原樣保留**上一輪的舊值（`kept_previous`），
-    從此凍結、不再刷新——這個凍結值拿去跟每輪都在變動的 fair_share 比較，會在
-    門檻附近造成同一棵樹、同一個 worker 數兩次重跑跑出不同拆分決策。修法：
-    父鍵改為每輪由其子鍵**回填**（加總），持續追蹤真實現況（見
-    `save_live_cache()` docstring〈WHY 父鍵需要每輪回填〉）。
+    回歸機制（震盪）：模組級觀測 → 下一輪被細分成 `module.Class` 鍵 → 整檔覆寫使模組鍵消失 →
+    `load_hints()` 退回偏低種子值 → 判定不再細分 → 再度整模組派工。後續補強：父鍵未被直接觀測時
+    `kept_previous` 會凍結舊值，改為每輪由子鍵回填加總（見 `save_live_cache()` docstring）。全文搬
+    至 Guard_Line_History_2.md〈R186 淨減法搬遷〉§53。  round-label-ok
 
     本測試釘住：(a) 不相交鍵集合皆保留，且父鍵的值隨子鍵回填而更新；(b) 模組
     已刪除的舊鍵被剪掉、仍在的模組鍵存活且回填為子鍵加總；(c) 端到端：模組鍵
@@ -4041,17 +4227,10 @@ class RunParallelStalenessAdvisoryReadsMergedLiveCacheTest(unittest.TestCase):
     **歷史累積的合併圖像**（含這一輪不會被重新觀測、但因同模組前綴而被
     `kept_previous` 保留下來的舊 class 鍵），比較面不對稱就會誤報過期。
 
-    場景：這一輪只派工 `pkgNN.Fresh`（20 個 class 級鍵）；活體快取裡預先放著
-    `pkgNN.Old`——與這一輪同前綴、但不會被這一輪重新觀測到的舊 class 鍵
-    （`save_live_cache()` 的 `kept_previous` 語意會把它原樣留下）。種子檔內容＝
-    這一輪「應該」合併出來的完整圖像（parent rollup `pkgNN` ＋ `Old` 舊鍵 ＋
-    `Fresh` 新鍵），數值刻意分兩層（`Old` 恆 0.0、`Fresh`／`pkgNN` 隨 `i` 遞減）
-    ——用真實 `run_parallel()`（fake `Popen` ＋ 依 `i` 遞減量餵入 `elapsed`：
-    以執行緒區域（`threading.local()`）假時鐘 offset 取代真 `time.sleep()`
-    ——macOS CI 3 核負載下 10ms 階梯曾被排程抖動打亂，重疊率 36%／43%
-    ＜50% 門檻而假紅）讓兩邊排序同向，即使 tie-break 邊界受執行緒完成順序
-    影響也不礙事——兩個各恰 15 選的子集合，最壞情況下重疊率仍 ≥ 14/16
-    （遠高於 50% 門檻）。
+    場景：這一輪只派工 `pkgNN.Fresh`，活體快取預放同前綴但不會被重新觀測的舊 class 鍵 `pkgNN.Old`
+    （`save_live_cache()` 的 `kept_previous` 會保留）；種子檔＝本輪應合併出的完整圖像；用真實
+    `run_parallel()`（fake `Popen`＋執行緒區域假時鐘）讓兩邊排序同向。假時鐘取捨沿革搬至
+    Guard_Line_History_2.md〈R186 淨減法搬遷〉§54。  round-label-ok
 
     若 `run_parallel()` 退回舊行為（直接拿 `module_timings` 比對），比較面會漏掉
     `pkgNN.Old`／`pkgNN` 這兩層 40 個鍵，重疊率跌破門檻，本測試斷言的「不印
@@ -4139,15 +4318,11 @@ class ParallelMergeResultSkipCensusParityTest(unittest.TestCase):
     tools/tests 全樹的整合層級間接證據，`merge_results()` 自身若重建有缺陷不會
     被單獨鎖住。
 
-    現場事實（先確認才動工）：`_worker_main()`（parallel_shard.py 第236~240行）
-    對 `start_dir` 有 `assert start_dir == tests_dir`——本 worker 目前只為真
-    tools/tests 設計，無法用真 subprocess 對合成暫存樹跑 `run_parallel()`（會在
-    assert 處讓 worker 以 rc=1 崩潰，變成 `shard_crashed` 而非真實 skip 語意）。
-    退回手造 per-worker payload：對同一批合成測試各自真跑一次
-    `unittest.TextTestRunner`（模擬 worker 在子行程內的真跑），用與
-    `_worker_main` 完全同款的 `parallel_shard._entries()` 序列化，再交
-    `merge_results()` 彙總——資料形狀因此與真實平行路徑保真，只是把「子行程」
-    換成「同一行程內的第二次真跑」。
+    現場事實：`_worker_main()` 對 `start_dir` 有 `assert start_dir == tests_dir`，worker 只為真
+    tools/tests 設計，無法用真 subprocess 對合成暫存樹跑 `run_parallel()`；故手造 per-worker
+    payload——對同一批合成測試各自真跑一次 `unittest.TextTestRunner`，用與 `_worker_main` 同款的
+    `parallel_shard._entries()` 序列化再交 `merge_results()`（資料形狀保真，只是把子行程換成同行程
+    第二次真跑）。推導搬至 Guard_Line_History_2.md〈R186 淨減法搬遷〉§55。  round-label-ok
     """
 
     def setUp(self) -> None:

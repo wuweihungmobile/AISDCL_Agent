@@ -1,28 +1,10 @@
 #!/usr/bin/env python3
 """find_git_bash 兩套實作結構等價鎖（R17 DEF-101-236 修復配套）。
 
-背景（Scan-A 掃描實證的兩處真實語意分歧，已於本輪修復）：
-  1. 環境變數空值處理：`tools/lib/Find-GitBash.ps1` 舊版對
-     `$env:ProgramFiles(x86)` 等環境變數不存在時直接做字串插值，會插出裸路徑
-     （如缺變數時 `"${env:ProgramFiles(x86)}\\Git\\bin\\bash.exe"` 變成
-     `"\\Git\\bin\\bash.exe"`）仍呼叫 `Test-Path`；
-     `tools/integration_gate_core.py::find_git_bash()` 明確 `if not base: continue`
-     跳過。PS1 版已改用 `[System.Environment]::GetEnvironmentVariable` + 明確空值
-     判斷對齊。
-  2. System32 排除鬆緊：PS1 版 regex `-notmatch '\\System32\\'` 要求完整路徑段
-     匹配；Python 版原本 `"system32" not in found.lower()` 任意子字串命中即排除
-     （較寬鬆，可能誤傷路徑含 "system32" 子字串但非該目錄段的候選）。Python 版
-     已改為 `_has_system32_segment()` 依 `PureWindowsPath` 路徑段逐一比對對齊。
-
-  3. **R60 P10-2（真 parity 缺陷，兩側對同一輸入相反裁決）**：上述第 2 點的靜態鎖
-     只比對「兩邊拿哪個**字面詞**去比」，對「用什麼**手法**比」全然盲目。實測
-     `C:/Windows/System32/bash.exe`（正斜線寫法；Windows 上與反斜線寫法指向同一個
-     檔案）PS 側行內 regex `-notmatch '\\System32\\'` 判**放行**、Python 側
-     `PureWindowsPath` 逐段比對判**排除**；且可觸達——`(Get-Command bash).Source` 由
-     「PATH 條目 + 檔名」拼成，PATH 條目寫正斜線時 Source 就帶正斜線，修前
-     `Find-GitBash` 實測回傳了 WSL 的 bash。PS 側已改為 `Test-HasSystem32Segment`
-     逐段比對（Python 側為正解、不動），並新增下方 `TestSystem32VerdictParity`
-     **行為表 parity 鎖**。
+背景：Scan-A 實證兩處真實語意分歧（環境變數空值處理、System32 排除鬆緊）已修復，R60 P10-2 再補上
+「兩側對同一輸入相反裁決」的行為表 parity 鎖 `TestSystem32VerdictParity`（PS 側改用
+`Test-HasSystem32Segment` 逐段比對，Python 側為正解）。三點逐項說明全文搬至
+Guard_Line_History_2.md〈R186 淨減法搬遷〉§25。  round-label-ok
 
 比對手法（兩層，缺一都有實證盲區）：
   - **靜態文字結構比對**：用正則從兩份原始碼各自抽出「候選路徑清單的 (環境變數名,
@@ -871,20 +853,12 @@ class TestFindGitBashCallSites(unittest.TestCase):
 # R67-C18：tools/integration_gate.{sh,ps1,_core.py} 的本機活體載具
 # ===========================================================================
 #
-# 為何住在本檔（收納契約，非雜物抽屜）：本檔已是 `tools/integration_gate_core.py` 的
-# 既有鎖檔（上方 `find_git_bash` 家族即該模組的函式），import 與 `_PY_PATH` 都指著它。
-# `DEF-101-561③`（由 `test_adr_xplat001_c1c2_lock.py::TestGuardLayerRatchet` 機械強制）
-# 要求「把新判準擴充進既有鎖檔」，本節即依該裁決把新判準併進同一模組的既有鎖檔。
-# 🔴 R78 ARCH-03 訂正：該棘輪量的已不是**檔數**（R77 退場），而是逐檔行數表的**淨額**
-# ——新增檔案只要同一次變更內刪掉等量以上的行就合法，別把舊語意當現行規則照抄。
+# 為何住在本檔（收納契約、棘輪語意沿革）搬至
+# Guard_Line_History_2.md〈R186 淨減法搬遷〉§26。  round-label-ok
 #
-# WHY 這組鎖必須存在（Rule 9 — 鎖意圖而不只鎖行為）：
-# 整合層閘門的存在理由是「兩子專案各自綠燈不代表整合綠燈」（[3/5] SDD bridge 整合煙霧、
-# [4/5] 回退驗證、[5/5] cc-switch A/B）。但 R67 全庫普查實測：它在整個自動化層**零呼叫端**
-# ——唯二執行者是 .github/workflows/macos-compat-ci.yml 與 windows-compat-ci.yml 各一行
-# （`bash tools/integration_gate.sh --skip-full` / `./tools/integration_gate.ps1 -SkipFull`），
-# 而兩支 compat-CI 因 CI 帳務停擺（DEF-101-081）已多輪未真正執行。
-# **雲端是唯一執行者的東西＝實質已死**：閘門本體被改壞在本機任何流程都不會紅。
+# WHY：整合層閘門在整個自動化層零呼叫端（唯二執行者是已停擺的兩支 compat-CI）＝實質已死，閘門本體
+# 被改壞在本機任何流程都不會紅。R67 全庫普查實測搬至
+# Guard_Line_History_2.md〈R186 淨減法搬遷〉§27。  round-label-ok
 #
 # 三條各自獨立、彼此補不到的缺口：
 #   A. 編排語意（`main` / `run_section` / `--skip-full` / 例外處理）——R67 動工前實測

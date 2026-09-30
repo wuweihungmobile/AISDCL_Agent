@@ -1,20 +1,9 @@
 """act 本機自建 runner 映像的機械鎖 —— `.actrc` ↔ `run_act_core` ↔ `tools/act/Dockerfile`。
 
-WHY 這三處必須被綁在一起（R77 實測到的破口與它的修法）：
-  `act -n`（dry-run）對 root-infra-ci.yml 回 rc=0，但**真跑**到第 3 個 step
-  （`pwsh 語法解析 + UTF-8 BOM 守門`）就 `exitcode 127` —— `.actrc` 釘的
-  `catthehacker/ubuntu:act-latest` 沒有 pwsh，而 GitHub 的 ubuntu-latest runner 自帶。
-  修法是自建一顆薄映像（base ＋ pwsh ＋ gh）並把 `.actrc` 指過去。於是「映像 tag」這個
-  字面值同時住在三個地方：`.actrc` 的 `-P` 行、`run_act_core.RUNNER_IMAGE`（`--build-image`
-  build 出來的 tag、`ensure_images()` 檢查存在性的對象）、以及 Dockerfile 檔頭的說明。
-  三處只要有一處漂掉，失敗方向都是**靜默的**：
-
-    · `.actrc` 指到一個不存在的 tag ⇒ act 帶 `--pull=false` 會去 pull 一個 registry 上
-      不存在的映像然後失敗 —— 這一種還算大聲。
-    · `.actrc` 指回 base、而 `run_act_core` 仍 build/檢查自建 tag ⇒ `ensure_images()`
-      一路綠燈（那顆自建映像確實在），act 卻起 base 容器，pwsh 那步**又**回 127。
-      畫面上是「準備階段全綠、跑到一半才炸」，而準備階段的綠與這次失敗毫無關係。
-      這正是本 repo 反覆在治的「鎖存在但沒有鑑別力」。
+WHY 這三處必須被綁在一起：`act -n` 對 root-infra-ci 回 rc=0，真跑到第 3 步卻 `exitcode 127`（base
+映像沒有 pwsh）；修法是自建薄映像並把 `.actrc` 指過去，於是映像 tag 同時住在 `.actrc`、
+`run_act_core.RUNNER_IMAGE`、Dockerfile 檔頭三處，任一處漂掉都是**靜默**失效（準備階段全綠、跑到一
+半才炸）。R77 實測破口全文搬至 Guard_Line_History_2.md〈R186 淨減法搬遷〉§3。  round-label-ok
 
 判準刻意只鎖「三處對得上」與「Dockerfile 真的在補那兩支工具」，**不**去 docker 跑任何
 東西：本檔隨 `tools/run_root_unittests.py` 在每次根層 push 與 root-infra-ci 內執行，那兩處
@@ -223,15 +212,11 @@ class TestActRunLedgerIsMeasuredNotDeclared(unittest.TestCase):
 class TestRunActShellFlagParity(unittest.TestCase):
     """兩支 `run_act` 薄殼必須到得了核心宣告的**每一個**長旗標（SD-06／LOCKBLIND）。
 
-    🔴 這條鎖存在的理由是一個真實的、被兩道專職對等檢查器同時放行的落差：R77 給
-    `run_act.sh` 接上了 `--workflow`／`--event`，`run_act.ps1` 卻沒有——Windows 是本 repo
-    的主要開發平台，而它的薄殼因此指不到 11 支 workflow 裡的 10 支。當時
-    `check_script_parity.py` 與 `check_wrapper_thinness.py` **雙雙 rc=0**：
-      · `check_wrapper_thinness` 是**逐檔** hash 釘選 —— 它問「這份檔案有沒有變」，
-        兩側各自更新各自的 pin 就都是綠的，它從不把兩側拿來互相比較；
-      · `check_script_parity` 對 hash 釘選類的對子只做「有沒有納管」與鍵集合交叉鎖，
-        _MARKER_PAIRS（唯一會比對兩側內容的機制）對這一對是空的。
-    ⇒ 專門守對等的鎖看不見對等落差。只補旗標而不補判準，同型缺陷會再來一次。
+    🔴 存在理由：R77 給 `run_act.sh` 接上 `--workflow`／`--event` 而 `run_act.ps1` 沒有，
+    `check_script_parity` 與 `check_wrapper_thinness` 卻雙雙 rc=0（前者對 hash 釘選對子只看納管、
+    後者逐檔 hash，兩者都不把兩側互相比較）⇒ 專門守對等的鎖看不見對等落差。只補旗標而不補判準，同
+    型缺陷會再來一次。落差實測全文搬至
+    Guard_Line_History_2.md〈R186 淨減法搬遷〉§4。  round-label-ok
 
     判準刻意**由核心的 argparse 現查**（`parse_args([])` 的 Namespace 欄位），不是在這裡
     抄一份旗標清單：抄的那一份會變成第三個會腐化的家，而它腐化的方向正好是「看起來

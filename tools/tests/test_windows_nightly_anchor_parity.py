@@ -15,25 +15,9 @@ RunAtLoad 補跑靜態錨點（R15，唯讀 grep 工作樹）」，以五個功�
 睡眠錯過仍補跑，即 launchd `RunAtLoad` 的 Windows 對應物）。也就是說：機制對稱，
 **只有守門不對稱**——這些機制在 Windows 側可被靜默移除而無任何訊號。
 
-**為何補在這裡而不是補一步 [10/10] 進 `windows_smoke_local.ps1`**：
-  1. macOS [7/7] 自述「唯讀 grep 工作樹、平台無關」——它做的事根本不需要 pwsh，
-     放在本機 smoke 只是歷史選擇（且 SA-R15-REV-6 已記載該組錨點刻意只入本地
-     smoke、無 CI 對應，屬本地專屬防線）。
-  2. 補成 Python unittest 者，四道守門（pre-push root-infra leg、root-infra-ci
-     step 8、windows/macos smoke）**全部**都會跑到，覆蓋面嚴格大於只補進
-     Windows 本機 smoke（後者只有真 Windows 機器上手動跑才生效——而本輪主題正是
-     「Windows 專屬守門長期沒在 Windows 上跑過」，見 DEF-101-348）。
-  3. 補進 `.ps1` 需連動 `$MinPass` 下限與 `test_smoke_ci_sync.py` 的步驟語意鎖，
-     且在 macOS 上無法真跑驗證，收益/風險比不划算。
-
-錨點只認**功能碼**（剝除 `<# … #>` 區塊註解、整行 `#` 註解與**尾隨行內註解**），
-比照 macOS 側 QA-R15-REV-1 訂正：註解裡留著舊字樣會讓錨點假陽性。剝除範圍與
-已知邊界以 `tools/tests/_platform_helpers.strip_ps_comments` 的 docstring 為準
-（R57 QA-R57-03：初版漏剝尾隨行內註解，真刪 `-WakeToRun` 只要在註解留字樣即可讓
-6 支全綠）。該函式與其鑑別力測試已於 R57 round 2（SA-R57R2-03）從本檔與
-`test_find_git_bash_parity.py` 的兩份逐字複本收斂進 `_platform_helpers.py`，
-一致性由 `test_find_git_bash_parity.py::TestPsCommentStripperSsotCallsiteLock`
-機械守護（本檔不得再自帶同名定義）。
+補成 Python unittest（而非 `windows_smoke_local.ps1` 的 [10/10] 步驟）讓四道守門全部跑到；錨點只認
+**功能碼**（剝註解的邊界以 `_platform_helpers.strip_ps_comments` 的 docstring 為準）。放置取捨與
+R57 沿革全文搬至 Guard_Line_History_2.md〈R186 淨減法搬遷〉§68。  round-label-ok
 
 執行：python3 tools/run_root_unittests.py
 """

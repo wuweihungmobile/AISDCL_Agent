@@ -3,13 +3,9 @@
 
 執行：python3 -m unittest discover -s tools/tests
 
-缺陷現象（R60 Scan-F F-01，實測於 Windows 11 + Git Bash MINGW64_NT-10.0-26200）：
-該腳本在**非 Darwin** 平台把兩項無法驗證的子測試以「SKIP-計-PASS」計入 PASS，
-收尾印出的 `===== 彙總：PASS=13 FAIL=0 =====` ＋ `全部通過 ✅` ＋ `rc=0` 與**真
-macOS 滿版全驗**逐字相同、計數相同（兩平台皆恰 13——兩處互斥分支已由
-`tools/tests/test_smoke_ci_sync.py::_SH_EXCLUSIVE_PASS_GROUPS` 登記），事後稽核
-無從分辨「在 Windows 上跑過」與「在 macOS 上全綠」。R59 由 DEF-101-511/512 立的
-原則（「讓結論自己說出降級事實」）當輪未回頭套用到這支腳本。
+缺陷現象（R60 F-01）：該腳本在**非 Darwin** 平台把兩項無法驗證的子測試以「SKIP-計-PASS」計入
+PASS，收尾的彙總行與 rc=0 和真 macOS 滿版全驗逐字相同，事後無從分辨。實測經過搬至
+Guard_Line_History_2.md〈R186 淨減法搬遷〉§30。  round-label-ok
 
 本檔鎖的不變量（刻意全部走靜態結構＋一支真跑載具，不需要 macOS）：
   1. `SKIPPED_AS_PASS` 計數器存在且初始化為 0。

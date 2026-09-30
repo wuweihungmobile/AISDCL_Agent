@@ -296,16 +296,24 @@ class Amort(NamedTuple):
 # 同窗長的多軸（今天 `session` 與 `five_hour` 一對；長窗那一側是 `weekly_all`、
 # `weekly_scoped`、`seven_day` **三軸**）取**最保守**的那一格：用量取 max、長窗剩餘分鐘取
 # max（窗數愈多 ⇒ 每窗配額愈小 ⇒ 愈緊）、短窗剩餘分鐘取 min（最早蒸發）。
-# 🔴 被誤讀過一次，所以把判詞寫在這裡：長窗那一側**含 `MODEL_SCOPED_KINDS`**，而
-#   `quota_policy._in_cap_gate()`（R98）把同一批軸排除在 **cap 聚合**外。兩邊不同**不是
-#   漏修**：`binding` 與攤提問的是兩個不同的問題，而攤提這一側納入它的方向是**保守側**
-#   ——`remaining = 100 − max(pct)` 與 `amort_relaxed()` 的 `max(pct) < converge` 都只會
-#   因為多一個較高的軸而**更緊**（實測 weekly_scoped 61 在場 allowance=61.8pp、抽掉後
-#   76.1pp）⇒ 它結構上不可能替任何人核准超支，而把排除搬過來是**拿掉一個煞車**＝放寬。
-#   本檔檔頭〈為什麼本輪不動 far×0.5〉已判：「放寬要有證據」，而落款實測該軸
-#   2026-08-15~17 真的從 0 走到 69（是牆，只是近日沒動）⇒ 刻意不排除。
-#   獨立第二理由：排除規則的鍵是**桶名集合**，本段第一句就是「不由桶名」。
-#   方向鎖＝`test_quota_policy.TestAmortizationNamesTheAxisItActuallyUsed`。
+# 🔴 判詞（DEF-200-438 於 2026-09-30 反轉；舊判詞「刻意不排除」的理由與反轉證據都留在這裡）：
+#   · 本函式這支**原語**仍是「納入只會更緊」的純函式——`remaining = 100 − max(pct)` 與
+#     `amort_relaxed()` 的 `max(pct) < converge` 都只會因為多一個較高的軸而**更緊**（實測
+#     weekly_scoped 61 在場 allowance=61.8pp、抽掉後 76.1pp）。這條性質不變，仍由
+#     `TestAmortizationNamesTheAxisItActuallyUsed` 直接呼叫本函式鎖住；所以**排除不在本函式
+#     內做**（搬進原語＝對所有呼叫端無條件放寬），而是由呼叫端（`quota_policy.decide()`／
+#     `axes_of()` 經 `skip`）用 `mask_windows()` 遮掉「別家模型」的軸。
+#   · 舊判詞為何被推翻：它把「納入是保守側」當成「不必排除」，漏算了**誰被這份保守煞住**。
+#     2026-09-30 主控在 Opus session 兩次親跑 `--pace`（18:35／18:47）：five_hour 1%／4%
+#     卻印 `kind=five_hour … band=prepare … cap=1 note=amortized`——Fable weekly_scoped 97%
+#     混進攤提（剩 3pp ⇒ 本窗配額 0.93pp ⇒ five_hour 被抬到 94）；同快取同模型 gate 算
+#     cap=2 band=converge（gate 自 R98 起就排除別家模型的軸）。R98 對 gate 判的「用沒碰過的
+#     模型水位節流真正在用的模型＝嚴重錯誤」在攤提面同樣成立；「放寬要有證據」的證據就是這
+#     兩次親測加沙箱重現（修後 `--pace` 與 gate 對同快取同模型給同一個 cap／band／binding）。
+#   · 方向仍是保守的：只排除 active_model **已知且不命中** 的 model-scoped 軸；擁有該軸的模型
+#     與 active_model 未知一律維持納入（擁有者不被放寬；量不到≠量到零）。
+#   · 舊判詞第二理由（排除規則的鍵是桶名集合）仍成立的部分：`MODEL_SCOPED_KINDS` 只決定
+#     「這一軸有沒有資格被遮」，命中與否仍由 `quota_policy._model_active()` 對 scope_model 判。
 def amortize(named_pcts, minutes, wins, ratio, ratio_note: str = ""):
     """跨窗攤提。`None`＝條件不足（缺換算比／只有一種窗長／沒有可用軸）。
 
@@ -385,15 +393,22 @@ def band_inputs(named_pcts, minutes, wins, ratio, halt_pct: float,
 # `rows` ＝ `[(kind, pct, resets_at, pct_note)]`（`pct_note` 由 `quota_policy._sane_pct`
 # 產生：水位本身壞掉時的字面，本檔不重新實作一份）。
 # `deltas` ＝ `[(帶號分鐘|None, note)]`（負值＝時鐘偏移，一路帶進 `horizon()` 才不會變死碼）。
+def mask_windows(wins, skip) -> tuple:
+    """DEF-200-438：`skip`（與 `wins` 同序的布林）為真的軸，窗長換成 `None`——`amortize()`
+    的 `w is not None` 過濾使它不進攤提，`band_inputs()` 的 `win is None` 分支使它的水位
+    不被攤提抬高；一個遮罩同時達成兩件事。`skip` 為空＝不遮。逐軸 horizon 不吃這份遮罩。"""
+    return tuple(None if s else w for w, s in zip(wins, skip)) if skip else wins
+
+
 def resolve(rows, deltas, ratio, ratio_note: str, accel_abs: float, far_abs: float,
             halt_pct: float, pace_ceiling: float = 1.0,
-            converge_pct: float | None = None) -> tuple:
+            converge_pct: float | None = None, skip=()) -> tuple:
     """`[(餵給 pct_band 的水位, 視野檔位, 夾 0 的剩餘分鐘|None, 合併後的 note)]`。"""
     wins = windows(tuple((kind, at) for kind, _pct, at, _n in rows))
     grammar = tuple(window_minutes(kind) for kind, _pct, _at, _n in rows)
     shown = band_inputs(tuple((kind, pct) for kind, pct, _at, _n in rows),
-                        tuple(d[0] for d in deltas), wins, ratio, halt_pct, ratio_note,
-                        converge_pct)[0]
+                        tuple(d[0] for d in deltas), mask_windows(wins, skip), ratio,
+                        halt_pct, ratio_note, converge_pct)[0]
     out = []
     for (_kind, pct, _at, pct_note), (raw, note), win, gwin, feed in zip(
             rows, deltas, wins, grammar, shown):
@@ -414,12 +429,12 @@ def resolve(rows, deltas, ratio, ratio_note: str, accel_abs: float, far_abs: flo
     return tuple(out)
 
 
-def amort_for(rows, deltas, ratio, ratio_note: str = ""):
+def amort_for(rows, deltas, ratio, ratio_note: str = "", skip=()):
     """`resolve()` 的攤提那一半，單獨拿出來給 `Decision.amort` 用（同一組輸入）。"""
     return amortize(tuple((kind, pct) for kind, pct, _at, _n in rows),
                     tuple(d[0] for d in deltas),
-                    windows(tuple((kind, at) for kind, _pct, at, _n in rows)),
-                    ratio, ratio_note)
+                    mask_windows(windows(tuple((kind, at) for kind, _pct, at, _n in rows)),
+                                 skip), ratio, ratio_note)
 
 
 # 🔴 一行內要能回答「為什麼空著也不能衝」。刻意**一個 `%` 都不出現**、全用 `pp`：

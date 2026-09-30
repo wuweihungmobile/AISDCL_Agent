@@ -156,6 +156,8 @@ def _real_known_models() -> tuple[dict[str, int], str, dict[str, int], str]:
 _LOOKUP_STAGE_CASES = [
     (0, "claude-fable-5-1", "查表"),
     (0, "claude-haiku-4-5", "查表"),
+    (0, "claude-opus-5-5", "查表"),  # DEF-200-439：5.5 世代——無 feed 的子 agent 只能靠這兩列
+    (0, "claude-sonnet-5-5", "查表"),
     (0, "claude-mystery-9", "推斷"),
 ]
 
@@ -275,6 +277,48 @@ class HarnessStageParityTest(unittest.TestCase):
                 os.environ, {"AUTOSDD_CONTEXT_FEED_DIR": td}, clear=False):
             for sid in ("abc-123", "sess.with.dots", "17e2da67-e140-43a8-9817-d1b6f61f3f7a"):
                 self.assertEqual(guard.context_feed_path(sid), cw.context_feed_path(sid))
+
+
+def settings_chain_problems(td: str) -> list[str]:
+    """DEF-200-427：settings 鏈最後一項（使用者層）在三種 `CLAUDE_CONFIG_DIR` 狀態下，root hook
+    與 SDD 孿生都必須指到 `claude_home()` 語意的那一檔；`root` 只用來組路徑，不需存在。"""
+    root, default = Path(td) / "proj", Path.home() / ".claude" / "settings.json"
+    problems: list[str] = []
+    for label, env, want in (("override", {"CLAUDE_CONFIG_DIR": td}, Path(td) / "settings.json"),
+                             ("blank", {"CLAUDE_CONFIG_DIR": "   "}, default),
+                             ("unset", {}, default)):
+        with mock.patch.dict(os.environ, env):
+            if label == "unset":
+                os.environ.pop("CLAUDE_CONFIG_DIR", None)
+            for side, chain in (("root", guard.settings_chain), ("sdd", cw.settings_chain)):
+                if (got := chain(root)[-1]) != want:
+                    problems.append(f"settings_chain[{label}] {side}: {got} != {want}")
+    home = Path(td) / "home"
+    with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": td}):
+        if cw.settings_chain(root, home)[-1] != home / ".claude" / "settings.json":
+            problems.append("settings_chain[explicit home] sdd: 顯式 home 被環境變數蓋掉了")
+    return problems
+
+
+class SettingsChainParityTest(unittest.TestCase):
+    """DEF-200-427：使用者層 settings 路徑兩側同構。SDD 孿生不得 import 根層
+    `platform_utils.claude_home()`（兩子專案刻意不跨 import）⇒ 自足實作＋本鎖。"""
+
+    def test_both_sides_honor_the_config_dir_and_explicit_home(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            self.assertEqual(settings_chain_problems(td), [])
+
+    def test_bug_injection_on_either_side_is_attributed_to_that_side(self) -> None:
+        """自證：各自退回硬寫 `~/.claude` 時，問題清單必須點名**那一側**——只斷言
+        「清單非空」會在另一側本來就紅時空洞通過。"""
+        def legacy(root: Path | None = None, home: Path | str | None = None) -> list[Path]:
+            return [Path("a"), Path("b"), Path.home() / ".claude" / "settings.json"]
+
+        for side, owner in (("root", guard), ("sdd", cw)):
+            with self.subTest(side=side), tempfile.TemporaryDirectory() as td, \
+                    mock.patch.object(owner, "settings_chain", legacy):
+                self.assertTrue(any(f"override] {side}:" in p for p in settings_chain_problems(td)),
+                                msg=f"injected {side} legacy chain but parity did not name it")
 
 
 if __name__ == "__main__":

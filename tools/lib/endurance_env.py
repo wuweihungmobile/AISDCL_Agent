@@ -73,6 +73,8 @@ import tempfile
 import time
 from pathlib import Path
 
+from platform_utils import claude_json_path
+
 #: 痕跡目錄的逃生口（測試／CI 指到沙箱用）。人設得到、模型改不到自己那一份。
 TRACE_DIR_ENV = "AUTOSDD_TRACE_DIR"
 
@@ -355,7 +357,7 @@ _PCT_OVERRIDE_ENV = "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"
 def autocompact_posture(guard) -> dict:
     """harness 自己那一半：現在到底有沒有東西在自動 compact，window 是多少。"""
     kills = {name: os.environ.get(name) for name in _AUTOCOMPACT_KILL_ENVS if os.environ.get(name)}
-    config_path = Path(os.path.expanduser("~")) / ".claude.json"
+    config_path = claude_json_path()  # DEF-200-427：手足檔／覆寫目錄底下，形狀見該函式
     configured = guard.settings_value(_GLOBAL_CONFIG_KEY, [config_path])
     layer_off = [str(p) for p in guard.settings_chain() if guard.settings_value(_GLOBAL_CONFIG_KEY, [p]) is False]  # noqa: E501
     effective = not kills and guard.settings_value(_GLOBAL_CONFIG_KEY, guard.settings_chain()) is not False  # noqa: E501

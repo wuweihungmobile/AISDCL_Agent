@@ -116,6 +116,19 @@ class KnownModelWindowsPathFailOpenTests(unittest.TestCase):
         self.assertEqual(table.get("claude-haiku-4-5"), 200_000)
         self.assertTrue(note, "D27：查表來源說明（refreshed_at／seeded_from）不得是空字串")
 
+    def test_the_real_table_knows_the_5_5_generation_windows(self) -> None:
+        """DEF-200-439：子 agent／headless 沒有 feed，窗口只能靠查表。表缺 id ⇒ 窗退成
+        200k 保守下界，170k 就被喊成 85%（真實是 17%）——一類只在無 feed 時出現的假警報。"""
+        table, note = guard.load_known_model_windows(guard.known_model_windows_path())
+        for model in ("claude-opus-5-5", "claude-sonnet-5-5"):
+            with self.subTest(model=model):
+                self.assertEqual(table.get(model), 1_000_000)
+                window, source = guard.resolve_window(
+                    170_000, observed_model=model, known_models=table, known_models_note=note)
+                self.assertEqual(window, 1_000_000)
+                self.assertIn("查表值", source)
+                self.assertIsNone(guard.tier_of(170_000, window), "17% 不該有任何 tier")
+
     def test_corrupt_json_is_fail_open_not_a_crash(self) -> None:
         buf = io.StringIO()
         with tempfile.TemporaryDirectory() as td:

@@ -67,6 +67,8 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from platform_utils import claude_home
+
 #: 下方三處 `timezone.utc` 用法皆帶 noqa（規則 UP017）：ruff 建議的 `datetime.UTC`
 #: 別名要 3.11+ 才有，套用會在 mac 系統預設 python3（常年 3.9）上重新引入崩潰
 #: （2026-09-08 立案：`isinstance(x, int | float)` 那類 3.10+ 構造也在同一批修過）。
@@ -77,7 +79,9 @@ USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 
 #: 憑證檔（Claude Code 自己維護；互動 session 活著時它會自己 refresh 並回寫）。
 #: Windows／Linux／WSL 走這一條；macOS 見 `_keychain_token()`。
-CREDENTIALS = Path(os.path.expanduser("~")) / ".claude" / ".credentials.json"
+#: 目錄經 `platform_utils.claude_home()` 解析（尊重 `CLAUDE_CONFIG_DIR`，DEF-200-427）；
+#: 模組層常數於 import 時求值——行程中途才改環境變數不會讓它跟著動。
+CREDENTIALS = claude_home() / ".credentials.json"
 
 #: 🔴 **R82／L4-03：macOS 的憑證不在檔案系統上，在 login Keychain。**
 #: R81 版**刻意不加平台分支**，理由是「沒有 mac 真機，寫一個驗不了的分支正是 DEF-101-766

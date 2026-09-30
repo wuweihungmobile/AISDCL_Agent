@@ -19,21 +19,11 @@ tools/tests/ 內未來新測試直接複用，不必重新踩雷。
 情境），比照本檔邏輯在 AutoClaude/tests/conftest.py 加對稱 fixture 並互相加文件連結
 ——兩套測試框架 pytest root 不同，不強求單一檔案共用，但邏輯必須一致。
 
-R57 SA-R57R2-03 收斂：`cut_ps_inline_comment`／`strip_ps_comments`（PowerShell
-註解剝除，供「錨點只認功能碼、不認註解」的靜態鎖使用）原本在
-`test_find_git_bash_parity.py` 與 `test_windows_nightly_anchor_parity.py` 各存一份
-AST 逐字相同的複本，且無一致性鎖——同輪卻把 `_ci_scan_anchors.py` 的三份複本以
-「三份複製只是把同一個盲點抄了三遍」為由收斂，兩套標準。事後被 A-R57R2-02／
-R57R2-QA-01 證實：兩份複本確實同時帶著同一個 here-string 起始誤判的 fail-open。
-故一併收斂進本檔，呼叫端一致性由
-`test_find_git_bash_parity.py::TestPsCommentStripperSsotCallsiteLock` 機械守護。
-
-R69 後續（DEF-101-753）同判例第二次套用：`usable_bash_for_fixture()`（取得一支真的
-能跑 .sh 的 bash）原本在 `test_bash_probe_spec_contract.py` 與
-`test_macos_smoke_skip_honesty.py` 各存一份 fixture 用途複本、且**排除規則不一致**，
-而 `test_smoke_ci_sync.py` 乾脆兩份都沒用、直接把字面值 `"bash"` 交給 subprocess ⇒
-Windows CI 上跑到 WSL 佔位 bash 翻紅。三處收斂為本檔一份，呼叫端一致性由
-`test_bash_probe_spec_contract.py::TestNoBareBashInvocationInToolsTests` 機械守護。
+R57／R69 收斂：`cut_ps_inline_comment`／`strip_ps_comments` 與 `usable_bash_for_fixture()` 原各有
+多份複本（且排除規則不一致），已收斂進本檔；呼叫端一致性由
+`test_find_git_bash_parity.py::TestPsCommentStripperSsotCallsiteLock`／
+`test_bash_probe_spec_contract.py::TestNoBareBashInvocationInToolsTests` 機械守護。收斂沿革搬至
+Guard_Line_History_2.md〈R186 淨減法搬遷〉§1。  round-label-ok
 """
 from __future__ import annotations
 

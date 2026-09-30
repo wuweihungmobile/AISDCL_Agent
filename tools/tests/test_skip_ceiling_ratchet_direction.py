@@ -273,20 +273,9 @@ class TestCeilingMaxDirectionLock(unittest.TestCase):
 
 
 # ── P1-6：skip 天花板①②③ 與 M6 落款④ 的共同變更鎖 ───────────────────────────── round-label-ok
-#: WHY：R115 落地 `_RUNTIME_SKIP_CEILING`／`_RUNTIME_SKIP_CEILING_MAX`／本檔 round-label-ok
-#: `_FROZEN_CEILING_MAX` 三張表的平台互補上修（commit `7f8c96a`）時漏補第四層
-#: M6 落款 `docs/06_quality/skip_id_ledger.json`——直到下一個 commit `5d5dd37`
-#: 才補上。四層座標、已否決形態（層與層互相派生／「① 總和 vs ④ 列表長度」靜態
-#: 互查——後者判準是 `total_got > total_cap` 的上限語意，漏補只會讓 ④ 更小，對
-#: 目標痛點恆綠）逐項見 `docs/04_planning/R118_HANDOFF.md` 的 P1-6 節，此處不重複。round-label-ok
-#:
-#: 🔴 R119 修復包 round-label-ok：判準粒度由**檔案級**改為**剖面鍵值級**。原版寫成「①②③任一
-#: 檔案出現在變更清單即紅」，落地當回合就抓到了自己——本鎖自身的程式碼就住在
-#: `_CO_CHANGE_SOURCE_PATHS` 其中一個檔案裡，commit `a1fbbba`（新增本節程式碼）
-#: 只是在幫這道鎖本身加程式碼，`_FROZEN_CEILING_MAX` 一個字元都沒有動過，檔案級
-#: 判準卻照樣要求同動 ④——往後任何對這兩個檔案的無關改動（加註解、加測試、修
-#: typo）都會被誤擋，而「擋到讓人無法工作的守衛會被整個關掉，比沒有守衛更糟」
-#: 正是 `block_destructive_git.py` 檔頭自己講的道理，不該只在那一支鎖上算數。
+#: WHY：上修天花板①②③時曾漏補第四層 M6 落款 `skip_id_ledger.json`（四層座標與已否決形態見當輪交棒
+#: 書 P1-6 節）；判準粒度為**剖面鍵值級**而非檔案級（檔案級會誤擋對同檔的無關改動，落地當回合即抓
+#: 到自己）。沿革搬至 Guard_Line_History_2.md〈R186 淨減法搬遷〉§62。  round-label-ok
 #:
 #: 新判準：**只有當①②③所轄的剖面鍵值 dict（`_RUNTIME_SKIP_CEILING`／
 #: `_RUNTIME_SKIP_CEILING_MAX`／`_FROZEN_CEILING_MAX`）字面本身在 `origin/main..HEAD`

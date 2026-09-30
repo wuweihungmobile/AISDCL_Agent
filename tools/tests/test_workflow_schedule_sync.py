@@ -14,13 +14,9 @@ cron（DEF-01-004 修復模式）——代價是 cron 與 if 字串**逐字耦�
 以 regex 抽取而非 yaml 解析：零第三方依賴（根層 unittest 環境不保證 pyyaml），
 且 `# - cron:` 註解態（dormant）天然不被行首錨定匹配吸入。
 
-R15 SCAN-C-9：`_IF_REF_RE` 無行首錨定、掃全文——若未來刪 job 時留下含
-`github.event.schedule == '...'` 字樣的整行註解（本檔 dormant cron 註記慣例正是
-這種形態），集合仍相等、cron 白燒 runner 而零訊號。修法：比對前先剝除「整行註解」
-（`\\s*#` 起頭的行）。取捨說明：只剝整行、不剝行尾註解——(1) 行尾註解形態在受掃
-workflow 現況不存在，主要風險面（刪 job 留整行註解）已被覆蓋；(2) 行尾剝法需分辨
-字串常值內的 `#`（如 cron 欄位雖不含 # 但 run 指令行可能含），保守整行剝除
-零誤剝風險。若未來出現行尾註解含 schedule 字樣的形態，再擴充剝法。
+R15 SCAN-C-9：比對前先剝除「整行註解」（只剝整行、不剝行尾註解；刪 job 留整行註解是主要風險面，行
+尾剝法需分辨字串內的 `#`，保守整行剝除零誤剝風險）。取捨全文搬至
+Guard_Line_History_2.md〈R186 淨減法搬遷〉§81。  round-label-ok
 """
 from __future__ import annotations
 

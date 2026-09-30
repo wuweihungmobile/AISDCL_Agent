@@ -2,18 +2,11 @@
 """Windows Store App Execution Alias（WindowsApps 空殼）排除 guard 收斂鎖
 （R37 Architect 架構最佳化重構）。
 
-背景：同一條規則（排除 WindowsApps 底下的 python.exe/python3.exe 空殼別名，
-未真裝 Python 時 `Get-Command python` 仍會找到它，執行只會跳出 Microsoft Store
-提示）過去在 `tools/bootstrap.ps1`（2 處）與 `tools/dev_start.ps1`（1 處）逐字
-內嵌了三份獨立複製，互不相通，導致同一缺陷類別連續復發四次（DEF-101-273／
-279／300／303）——其中 DEF-101-303（`$PyCand`/`$Py3Cand` 變數與 `Get-Command`
-命令名稱錯配的手誤風險）正是「內嵌而非呼叫共用函式」才可能發生的錯配類型。
-
-R37 抽出 `tools/lib/WindowsAppsGuard.ps1::Test-IsRealPython` 共用函式（比照
-`tools/lib/Find-GitBash.ps1` 既有先例），三處呼叫端改為 dot-source 後呼叫該
-函式，取代原本各自內嵌的判斷式。三份內嵌複製彼此語意一致的問題已隨之消失
-（只剩 1 份實作），本檔的舊靜態 regex/文字交叉比對手法（鎖「三份複製彼此一致」）
-不再有意義，重構為：
+背景：同一條規則（排除 WindowsApps 空殼別名）曾在 bootstrap.ps1／dev_start.ps1 內嵌三份複本，同缺
+陷類別復發四次（DEF-101-273／279／300／303）；R37 抽出
+`tools/lib/WindowsAppsGuard.ps1::Test-IsRealPython` 共用函式，舊的「三份複製彼此一致」文字比對不再
+有意義，重構為下列三鎖。背景全文搬至
+Guard_Line_History_2.md〈R186 淨減法搬遷〉§74。  round-label-ok
   ① 存在性檢查：`bootstrap.ps1`／`dev_start.ps1` 確實 dot-source 共用檔案 +
      呼叫 `Test-IsRealPython`（且不得殘留內嵌判斷式，防未來繞過共用函式又
      內嵌一份）。
@@ -544,12 +537,9 @@ class TestDevStartPs1WindowsAppsGuard(unittest.TestCase):
 # ④ repo-wide 前瞻防增生鎖：不得有新的 WindowsApps guard 獨立副本繞過 SSOT
 #    （R40 Architect 架構最佳化）。
 #
-# 背景：本檔頂部 docstring 記載的復發模式（DEF-101-273/279/300/303）過去每次
-# 都是「內嵌重寫」被人工掃描碰運氣抓到；R37 抽出 SSOT 後，①②節只鎖「3 個
-# 已知具名檔案」的行為細節，若有人在 repo 別處新增第 4、5 個呼叫點卻忘記
-# dot-source SSOT（或乾脆內嵌重寫一份判斷式），①②節完全看不見——這正是本節
-# 要收斂的缺口：repo-wide 掃描「有沒有經過 SSOT」，不管新檔案叫什麼名字、
-# 放在哪裡。
+# 背景：①②節只鎖「已知具名檔案」的行為細節，若有人在 repo 別處新增呼叫點卻忘記 dot-source SSOT（或
+# 內嵌重寫一份判斷式）它們完全看不見；本節 repo-wide 掃描「有沒有經過 SSOT」，不管新檔案叫什麼、放
+# 在哪裡。復發模式沿革搬至 Guard_Line_History_2.md〈R186 淨減法搬遷〉§75。  round-label-ok
 # ---------------------------------------------------------------------------
 def _latest_sdd_root() -> Path:
     """LATEST 版根目錄（sdd_version.py SSOT；解析失敗即 AssertionError）。委派
@@ -660,30 +650,9 @@ def _is_test_py(rel: str) -> bool:
     測試檔內出現判斷式字面值是「對 SSOT 內容做斷言」，非生產路徑第二實作。"""
     return "/tests/" in rel or Path(rel).name.startswith("test_")
 
-# R44 Architect 深度架構評估找到的系統性缺口：`test_ps1_mentions_of_windowsapps_all_go_through_ssot`
-# 只掃「檔案內文字提及 WindowsApps 字面值」者——若一支 .ps1 直接裸呼叫 python
-# 卻從未提及 WindowsApps 這個字（例如只寫了 `Get-Command python` 或連
-# `Get-Command` 判斷都沒有、直接 `& python ...`），舊判準完全不會去檢查它，
-# 是比「有判斷但沒 SSOT」更原始的繞過形狀。以下為此新掃描（不再要求先提及
-# WindowsApps 字面值）已知需要豁免的檔案，皆附理由：
-#
-# R44 二審 Architect 對抗式複審揪出：本清單原本還登記 `AISDLC_SDD/scripts/
-# ci-gate.ps1`，理由引用 bash 側 `test_migrated_with_fallback_branch_is_not_flagged`
-# 判例（guard 檔案物理缺席才降級用裸判斷）——但親自檢查 ci-gate.ps1 原始碼後
-# 發現兩者並不對等：`tools/lib/WindowsAppsGuard.ps1` 在該情境下明明存在、可以
-# 像本輪其他呼叫端一樣直接 dot-source 後判斷，只是先前選擇不接上，並非「做不
-# 到」。既然可補救、成本又低（僅需 2 行），已直接補上 guard（見 ci-gate.ps1
-# fallback 分支開頭），故該檔已從本豁免清單移除——多出的 SSOT dot-source +
-# `Test-IsRealPython` 呼叫自然通過下方 repo-wide 掃描，成為新的回歸鎖。
-#
-# R44 SA 另一位一審對抗式複審（同一輪、獨立於上一段的 Architect 二審）對僅存的
-# `AutoClaude/tools/g0_gate_check.ps1` 一筆豁免提出同款質疑：豁免理由（假設呼叫
-# 者已透過 bootstrap.ps1／dev_start.ps1 整備過環境）本身只是「未強制的假設」——
-# 沒有任何機制保證排程／人工執行這支腳本時，該次環境真的整備成功過，只要機器上
-# 仍只有 WindowsApps 空殼，一樣會重現本輪要修的原始缺口。親自確認 `tools/lib/
-# WindowsAppsGuard.ps1` 在該情境下同樣物理存在、可補救、成本同樣低（同款 2 行）
-# ——故已直接補上 guard（見 g0_gate_check.ps1 開頭，`$Log`／`W()` 定義好之後、
-# 兩處裸 `python` 呼叫之前），該檔已從本豁免清單移除，目前無殘留豁免項。
+# `_EXEMPT_PS1_FILES`（裸 `python` 呼叫點掃描的已知豁免檔，皆須附理由）目前為空：R44 兩輪對抗式複
+# 審證明先前登記的兩筆（`ci-gate.ps1`、`g0_gate_check.ps1`）皆可直接補 guard（各兩行），已補並移出
+# 清單。缺口本體與複審經過搬至 Guard_Line_History_2.md〈R186 淨減法搬遷〉§76。  round-label-ok
 _EXEMPT_PS1_FILES: set[str] = set()
 
 # 真正的 dot-source 呼叫語法（PowerShell dot-source 運算子只能出現在陳述式
@@ -828,15 +797,9 @@ def _has_real_ssot_entrypoint_call(text: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# R44 SA 一審對抗式複審揪出：`test_python_calls_in_ps1_all_go_through_ssot` 舊版
-# 只做「檔案層級」判斷——`if _has_real_dot_source_of_ssot(text) and
-# _has_real_test_is_real_python_call(text): continue` 只要檔案內某處存在真正
-# 的 dot-source SSOT 陳述式、某處存在真正呼叫 Test-IsRealPython 的陳述式，
-# 全檔即視為安全，不檢查每一個裸 python 呼叫點是否真的受該次判斷保護。實測：
-# 把 `AutoClaude/tools/run_local_nightly.ps1` 改回「僅 1 處 guard、其餘 15+
-# 處裸呼叫且與 guard 判斷結果無關」的狀態（bug-injection 對抗式驗證，改壞後
-# 確認測試仍綠），該測試依舊全綠——因為判準只看「guard 是否存在」，不看
-# 「guard 的判斷結果是否真的擋住了這些呼叫」。
+# R44 SA 一審證偽：舊版只做檔案層級判斷（全檔有一處 guard 即視為安全），把 `run_local_nightly.ps1`
+# 改回僅 1 處 guard、其餘 15+ 處裸呼叫與 guard 結果無關，測試仍全綠。證偽實測搬至
+# Guard_Line_History_2.md〈R186 淨減法搬遷〉§77。  round-label-ok
 #
 # 修復：改為呼叫點層級判斷。掃描現存全部正確呼叫端（bootstrap.ps1／
 # dev_start.ps1／local_ci_gate.ps1／run_act.ps1／integration_gate.ps1／
@@ -1300,57 +1263,12 @@ class TestNoOrphanWindowsAppsImplementation(unittest.TestCase):
 # ═══════════════════════════════════════════════════════════════════════════
 # Python 側「零 guard 裸 python 名稱」repo-wide 前瞻掃描（R60，B-01）
 #
-# WHY 這一層原本缺席：同一個 guard 家族在另兩種語言各有**兩條**前瞻掃描軸——
-#   .sh ：`test_repo_wide_scan_finds_no_unmigrated_sh_scripts`（有裸 `command -v` 判斷
-#         但沒接 SSOT）＋ `test_repo_wide_scan_finds_no_zero_guard_python_calls`
-#         （整支檔案零可用性判斷、直接裸呼叫）
-#   .ps1：`test_ps1_mentions_of_windowsapps_all_go_through_ssot`（有提及但沒走 SSOT）
-#         ＋ `test_python_calls_in_ps1_all_go_through_ssot`（有呼叫但沒 guard）
-# Python 側只有 `test_windows_apps_predicate_impls_are_all_registered` 一條，而它的兩個
-# 錨（函式名 `def *windows*apps*` ∪ 引號界定 `"windowsapps"` 字面值）都長在「**判斷式
-# 實作**」上。對於一支**從頭到尾不提 WindowsApps、只是把裸 `python` 名稱交給 OS 解析**
-# 的新檔案，兩錨結構上完全看不到它——正是 `_has_zero_guard_python_call` 在 .sh 側處理的
-# 那個形狀（R44 曾在該側掰出真實命中）。實測本檔既有 helper 對此形狀正反皆零訊號：
-#   bare subprocess / which() 無 guard → `_matches_stub_anchor` 皆 False；
-#   對照組（第二份 predicate 實作）→ True ⇒ 鎖沒壞，是掃描面缺這個形狀。
-#
-# 軸別澄清（R60 反駁者訂正 (1)，勿再混指）：本節補的是**呼叫端納管（enrollment）**，
-# 不是 `CrossPlatform_Scan_Dimensions.md` §(2) 講的「三份實作之間的行為等價」。等價軸在
-# Python 側**已有**機械鎖（同檔 `test_bootstrap_core_py_has_symmetric_stub_detector`
-# ＋ `tools/tests/test_bootstrap_core.py` 五支行為測試，含「拔掉 guard 就會挑到空殼」的
-# bug-injection）。把兩條軸說成同一條會導出錯誤的修法。
-#
-# 暴露面比另兩種語言**窄**（R60 反駁者訂正 (2)，本節不宣稱相反）：bootstrap 悖論的內容是
-# 「guard 必須在 Python 可用之前就能運作」，故 Python 側這份本質上只在真直譯器已存在時才
-# 跑（`sys.executable` 必然可用）。本節因此是**前瞻性**防護（動工時 repo 內 live 違規＝0，
-# 由本輪獨立 AST 全掃確認），而不是「Python 側是最後也最容易被繞過的一環」。
-#
-# WHY 判準刻意寬鬆（字面值而非呼叫語法）：窄判準（只認 `which("python")`／subprocess
-# argv[0] 字面值／`or "python3"` 兜底）對本 repo 自己的**正典形狀盲**——`tools/
-# bootstrap_core.py` 是把候選名放進 list literal（`["python", "python3", …]`）再以
-# `shutil.which(parts[0])` 解析，變數化之後窄判準看不到任何裸名。實測窄判準只命中 2 支、
-# 且**不含** bootstrap_core.py 自己；再發明者最可能照抄的就是這個正典形狀。故比照 .sh 側
-# `_invokes_python_bare`（刻意用寬鬆全字比對，理由同款：R44 目標形狀就含變數預設值間接
-# 呼叫）改採字面值判準。過度觸發是 fail-loud（有人得看一眼並登記角色），漏報才是 fail-open。
-#
-# 相對 .sh/.ps1 的一個結構性優勢（可正面主張）：本節走 **AST**，註解與 docstring 由語法
-# 結構天然排除，不需要 `_strip_bash_comment` 那類逐字元剝註解——而 R46 已證明那條路是無底洞
-# （繞過從整行註釋 → no-op 前綴 → heredoc 逐層復發）。
-#
-# 邊界宣稱（三段式，見 CrossPlatform_Scan_Dimensions.md §「邊界宣稱必須實測」）：
-#   【已實測涵蓋】① `subprocess.run(["python", "x.py"])`；② `shutil.which("python3")`；
-#     ③ 正典多候選 list literal ＋ `which(變數)`（窄判準對此盲）；④ shell 字串形態
-#     `subprocess.run("python -m foo", shell=True)`；⑤ `sys.executable or "python3"` 兜底；
-#     ⑥ 帶 guard 的檔案（`_matches_stub_anchor`）不重複計入本軸；⑦ 掃描面塌陷為 0 份 →
-#     等值斷言翻紅；⑧ 無法 parse 的候選 `.py` → AssertionError（不靜默略過）。
-#   【已實測不涵蓋】① 註解／docstring 內的提及（AST 結構性排除，**刻意**如此，見上）；
-#     ② 測試檔（`_is_test_py`，同姊妹掃描判準）；③ 凍結版 v0.01~v0.29（Copy-on-Evolve）；
-#     ④ 尚未 `git add` 的新檔（`git ls-files` 固有性質）；⑤ 字面值被拆開或間接組出
-#     （`"pyth" + "on"`、f-string、`os.environ["PY"]`）——與 `_matches_stub_anchor` 的
-#     K／O 既知邊界同源，屬靜態掃描天花板；⑥ 首 token 非裸名者（`"py -3.11"`／
-#     `"python3.11"`／`"python:3.11-slim"`）——前者是 Windows py launcher（不經 PATH 撞
-#     WindowsApps，`bootstrap_core.py:141` 註解已論證），後兩者是版本化名稱/docker tag。
-#   【未窮舉】本清單只是本輪真正跑過的項目，不主張已列出全部繞過路徑。
+# WHY：同一個 guard 家族在 .sh／.ps1 各有兩條前瞻掃描軸，Python 側原本只有「判斷式實作登記」一條，
+# 而它的兩個錨都長在判斷式上——對「從頭到尾不提 WindowsApps、只把裸 `python` 名稱交給 OS 解析」的新
+# 檔結構上全盲。本節補的是**呼叫端納管**（非實作間行為等價）；判準刻意寬鬆（字面值而非呼叫語法，過
+# 度觸發是 fail-loud）、走 AST（註解／docstring 天然排除）。刻意不涵蓋：註解／docstring 提及、測試
+# 檔、凍結版、字面值被拆開或間接組出者（靜態掃描天花板）。已實測涵蓋／不涵蓋的逐項清單與 R44／R46
+# 沿革全文搬至 Guard_Line_History_2.md〈R186 淨減法搬遷〉§78。  round-label-ok
 # ═══════════════════════════════════════════════════════════════════════════
 # 首個空白分隔 token 恰為裸 `python`／`python3`（`$` 錨定尾端或空白）——即「會被交給 OS／
 # shell 當指令首 token 的裸直譯器名稱」。`python3.11`／`python:3.11-slim`／`py -3.11`

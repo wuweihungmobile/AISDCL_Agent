@@ -25,6 +25,7 @@ AutoSDD_Sentinel_* 工作…）」＝假陰性——專門用來發現增生的�
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -547,6 +548,116 @@ def leak_fence(run):
     except OSError:
         pass  # 落痕跡失敗不得反過來變成測試跑不完的故障源（同既有 append_log 紀律）
     return max(rc, 0, fence_rc)
+
+
+#: 真實 TEMP 下**有人會讀**的共享契約檔 glob（DEF-200-444）：配速契約 canonical
+#: （`pace_contract.CONTRACT_NAME`，引擎 `file_quota_meter.read_pace()` 的讀取面）
+#: ＋`_<家族>` 兄弟檔。刻意只看這一族：`autosdd_quota.json` 等真 session 本來就會在全套期間
+#: 自己更新，全看＝常態假紅。以 `.json` 收尾＝不含 `write()` 的 staging 暫存檔
+#: （`….json.<pid>.tmp`）。與 `pace_contract` 的字面相等鎖＝
+#: `tools/tests/test_run_root_unittests.py::TempFenceTest`。
+REAL_TEMP_WATCH_GLOB = "autosdd_pace*.json"
+
+#: 三個變數一起指：Python `tempfile` 讀 TMPDIR→TEMP→TMP，Windows 原生 API／PowerShell 讀 TMP→TEMP，
+#: 漏掉任何一個，某一類子行程就回到真實 TEMP。
+TEMP_FENCE_ENV = ("TEMP", "TMP", "TMPDIR")
+
+#: 隔離根前綴。刻意**不以 `autosdd_` 開頭**：`leak_fence` 的輔助訊號 glob 就是 `autosdd_*`，
+#: 隔離根自己不得被它算成「新增的洩漏」。
+TEMP_FENCE_PREFIX = "suite_tmp_"
+
+
+def _watched_digests(root: Path) -> dict[str, str]:
+    """`root` 頂層符合 `REAL_TEMP_WATCH_GLOB` 的 `檔名 -> sha256 前 16 碼`；
+    讀不到（被鎖／剛被換掉）記 `?`。"""
+    out: dict[str, str] = {}
+    for path in sorted(root.glob(REAL_TEMP_WATCH_GLOB)):
+        try:
+            out[path.name] = hashlib.sha256(path.read_bytes()).hexdigest()[:16]
+        except OSError:
+            out[path.name] = "?"
+    return out
+
+
+def temp_fence(run, real_tmp: Path | None = None):
+    """真實 TEMP 狀態圍籬（DEF-200-444）：`run()` 期間整個全套（含 worker 與孫行程）的暫存根
+    指向專屬隔離目錄、跑完清掉；並在前後比對真實 TEMP 下配速契約檔的雜湊，有變動印 ❌。
+    **advisory：`run()` 的 rc 原樣回傳**（體例同 `console_orphan_census.wrap`）。
+    `real_tmp` 僅供測試注入。
+
+    缺陷本體：`pace_contract.contract_path()` 取 `tempfile.gettempdir()`，全套裡上百處
+    `pace_report`／`--pace` 因而把真實 TEMP 下的 autosdd_pace*.json 改寫成測試的假決策（實測：
+    一次全套前後三份內容全變）；autosdd_pace.json 的讀者是 AutoClaude 引擎，TTL 內可能拿假決策
+    當派工上限。逐站點注入補不完（`autosdd_quota*`／`autosdd_resume_*` 等同型站點還有一整族），
+    所以在全套層一次隔離整個 TEMP。三個機制缺一不可：
+      ① 三個環境變數一起改（worker 由 `parallel_shard` 以 `dict(os.environ)` 複本 Popen，環境要在
+         `run_parallel` 之前改才帶得到）；
+      ② 同步改 `tempfile.tempdir` 快取（Python 只在第一次 `gettempdir()` 讀環境變數：序列模式與
+         主行程裡只改 env，對已快取的行程完全無效）；
+      ③ 真實路徑在改環境**之前**取得（比對面必須是真實 TEMP，不是隔離根）。
+
+    🔴 誠實劃界：
+      · 射程只含經 `tools/run_root_unittests.py` 的全套；直接 `python -m unittest discover -s
+        tools/tests -p X.py` 不經本圍籬，照舊寫真實 TEMP。
+      · 子行程若以**不含** TEMP／TMP／TMPDIR 的 env 啟動、或寫死真實路徑，圍籬管不到——那正是
+        比對面存在的理由（只看配速契約一族；其餘由 `leak_fence` 的 `autosdd_*` 新增差集輔助出聲，
+        本圍籬內層於它，所以那行訊號同時是逃逸偵測器）。
+      · ❌ 也可能是同時段真實 session 自己跑了 `--pace`：兩者無法從檔案內容區分，故 advisory。
+      · 硬殺（taskkill /F／SIGKILL）會留下 `suite_tmp_*` 隔離根，可手動刪除。
+      · 隔離根讓每條暫存路徑多 19 個字元（前綴＋8 碼隨機＋分隔符）：TEMP 本身已逼近 Windows
+        MAX_PATH 的機器上，深層測試路徑（git 物件目錄）會先撞 260。實測（沙盒 TEMP 基底 132
+        字元）：無圍籬過、有圍籬 3 支 git push 測試報 `Filename too long`；一般 TEMP（32~41
+        字元）離 260 還有 80 字元以上餘裕。macOS／Linux 面本機未驗（tools/ 內無 unix socket，
+        故不受 AF_UNIX 104 字元路徑上限影響）。
+      · 建不起隔離根或清不乾淨＝只出聲（⚠️）不改 rc：量測器故障不得反過來變成全套跑不完的故障源。
+      · `run()` 拋例外時：環境／快取照樣還原、隔離根照樣清掉，例外原樣往外拋，不做前後比對。
+    """
+    old_cache = tempfile.tempdir  # 先於任何 gettempdir()：還原的目標是「原本的狀態」，含尚未快取
+    real = Path(real_tmp) if real_tmp is not None else Path(tempfile.gettempdir())
+    before = _watched_digests(real)
+    saved = {name: os.environ.get(name) for name in TEMP_FENCE_ENV}
+    try:
+        root = tempfile.TemporaryDirectory(
+            prefix=TEMP_FENCE_PREFIX, dir=str(real), ignore_cleanup_errors=True)
+    except OSError as exc:
+        root = None
+        print(f"[temp_fence] ⚠️  隔離根建不起來（{exc}）⇒ 本輪全套**沒有**隔離 TEMP，"
+              "測試會直接碰真實 TEMP。", file=sys.stderr)
+    try:
+        if root is not None:
+            for name in TEMP_FENCE_ENV:
+                os.environ[name] = root.name
+            tempfile.tempdir = root.name
+        rc = run()
+    finally:
+        tempfile.tempdir = old_cache
+        for name, value in saved.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+        if root is not None:
+            root.cleanup()
+    left = root is not None and Path(root.name).exists()
+    if left:
+        print(f"⚠️  真實 TEMP 圍籬：隔離根沒清乾淨（{root.name}；多半是殘存行程還握著檔案）"
+              "——可手動刪除，不影響 rc。")
+    after = _watched_digests(real)
+    drift = {name: "新增" if name not in before else "消失" if name not in after else "變更"
+             for name in sorted(set(before) | set(after)) if before.get(name) != after.get(name)}
+    if drift:
+        listing = "、".join(f"{name}（{kind}）" for name, kind in drift.items())
+        print(f"❌ 真實 TEMP 圍籬：全套期間真實 TEMP 下的配速契約檔有變動：{listing}"
+              "——疑似某個測試繞過了 TEMP 隔離（子行程以不含 TEMP 的 env 啟動／寫死真實路徑），"
+              "也可能是同時段有真實 session 跑了 `--pace`（本圍籬無法區分）。advisory：不改 rc。"
+              "引擎讀 autosdd_pace.json，TTL 內可能拿到假決策；處置＝在真實 session 重跑一次 "
+              "`python tools/session_resume_planner.py --pace` 覆寫回真值。")
+    else:
+        state = ("隔離根已建立並清除" if root is not None and not left
+                 else "隔離未完整（見上方 ⚠️）")
+        print(f"✅ 真實 TEMP 圍籬：全套期間真實 TEMP 下 {REAL_TEMP_WATCH_GLOB} 零變動"
+              f"（前 {len(before)}／後 {len(after)} 份）；{state}。")
+    return rc
 
 
 if __name__ == "__main__":

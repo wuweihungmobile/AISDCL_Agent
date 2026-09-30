@@ -2049,19 +2049,10 @@ class TestR67SlowMeasurementWindowIsFingerprintBracketed(unittest.TestCase):
 #      (c) 全掃描面**零筆** LOC token（`total`／`baseline`／`cap` 形態，含已掛豁免者）⇒ 違規。
 #          這一條治的是「把數字整段刪掉本鎖就空轉」，與 `check_pytest_baseline_sites.py` 的
 #          SSOT anchor 自檢同形。
-#          🔴 **R71 錨點改指（本條原文自己預告過的那件事真的發生了）**：原文寫「改為指向
-#          live 來源而不寫死數字本身是更好的作法，但它會讓本鎖失去唯一的活體比對——真要
-#          那樣改，請在同一個 commit 內把本條錨點自檢改指新的活體站點」。R71 正是那一輪：
-#          `ADR-XPLAT-003` 的四處 `total=／cap=` 已全數改為時代快照（掛豁免）或改指 SSOT，
-#          `ADR-XPLAT-002` 的兩處本來就掛著豁免 ⇒ 非豁免受管 token 歸零。
-#          依原文指示同 commit 完成兩件事：
-#            ① 本條的計數改為「**掃描面上還看得見 LOC token 的形態**」（豁免者也計入）——
-#               它守的是「regex 與掃描面還活著」，這一層仍然有效且仍會在整段刪除時翻紅；
-#            ② **活體比對改指 `ONBOARDING.md` §7 表① 的 `loc-baseline-live:` 那一格**，
-#               由本檔 `TestR69AdrMeasurementTokensAreLive::
-#               test_live_loc_ssot_station_carries_the_live_comparison` 直接對現查值比對。
-#               該格本就是本 repo 指定的唯一 live 家、且有 `--write` 一鍵回填，
-#               ADR 不必也不該再開第二個家（理由與 ADR §8(b) 對 pytest 計數一字不差）。
+#          🔴 R71 錨點改指：非豁免受管 token 已歸零，計數改為「掃描面上還看得見 LOC token 的形態」
+#          （豁免者也計入），活體比對改指 `ONBOARDING.md` §7 表① 的 `loc-baseline-live:` 格（見
+#          `test_live_loc_ssot_station_carries_the_live_comparison`）。改指經過搬至
+#          Guard_Line_History_2.md〈R186 淨減法搬遷〉§17。  round-label-ok
 _ADR_DIR = _REPO_ROOT / "docs" / "04_planning" / "ADR"
 _ADR_WAIVER = "adr-measurement-historical:"
 _ADR_LOC_TOKEN_RE = re.compile(r"\b(total|baseline|cap|violations)=(\d+)")
@@ -2755,14 +2746,10 @@ _SUBPROJECT_SCOPE_MARK = "僅 AutoClaude 子專案 session"
 #: 補了掃描器就把該列的機械物欄改掉，並把該項從此處刪除——兩邊由下方雙向判準綁住。
 _IRON_LAW3_UNCOVERED: tuple[str, ...] = (
     "副檔名判斷",
-    # 🔴 R80（包 B）：`$env:*` 讀取／`Get-Command` 解析／大小寫敏感度 三項移出本清單。
-    # 前兩項是**本輪補上站點級判準**（`TestPowerShellPlatformSensitiveSites`）⇒ 分子 +1 +1；
-    # 第三項則是**訂正一筆假事實**——`tools/check_ntfs_paths.py` 的大小寫碰撞正規化鍵
-    # 早就存在、也早就接在 pre-commit 與四支 CI workflow 上，本表卻自 R74 起一直說沒人守。
-    # 這個方向（**低報分子**）本鎖結構上看不見：它只讀那張表**自己說**有沒有機械物，
-    # 從不問「這句話是真的嗎」。補上的證偽判準住在
-    # `tools/tests/test_platform_neutral_paths.py::TestIronLaw3NoMechanismClaimsAreFalsifiable`
-    # ——每一格自陳沒人守者必須登記一組證偽探針（token × 已審視清單）並通過它。
+    # 🔴 R80：`$env:*` 讀取／`Get-Command` 解析／大小寫敏感度三項已移出本清單（前兩項補上站點級判
+    # 準、第三項訂正一筆「沒人守」的假事實）；低報分子本鎖結構上看不見，證偽判準住
+    # `test_platform_neutral_paths.py` 的 `TestIronLaw3NoMechanismClaimsAreFalsifiable`。沿革搬至
+    # Guard_Line_History_2.md〈R186 淨減法搬遷〉§18。  round-label-ok
     #
     # R79／R80／R85 三筆自本清單移出的沿革（含「有鎖在守假話」的 .py 行尾一案）已搬至
     # CrossPlatform_R127_Guard_Prose_Migration.md；合法路徑不變＝補了掃描器就改機械物欄。
@@ -3720,13 +3707,10 @@ _GHOST_SYMBOL_BASELINE: frozenset[str] = frozenset({
     "test_untracked_action_is_ignored",
 })
 #: **shrink-only 天花板**：本表的筆數只准變少。
-#: 為何需要它（R79 立案理由）：上方那句「只准變少」在 R78~R79 之間**只是散文**——
-#: `test_the_baseline_is_not_stale` 只管「已解析得到／已無人引用」這兩種 stale，
-#: 對「順手多登記一筆新幽靈」零訊號，而那正是這道鎖最省力的關法。
-#: 擴掃描面而多看見存量時，重釘本值並在交件回報寫出前後值與理由（同 `_FROZEN_GUARD_LINES`
-#: 的重釘紀律）；**不得**為了讓一筆新寫下的懸空引用過關而調高它。
-#: 33→32→31→30→29 的逐格收緊沿革（R85／R89／R95／R115）已搬至 round-label-ok
-#: CrossPlatform_R127_Guard_Prose_Migration.md。26→25：幽靈已清（DEF-200-306 收尾）。
+#: 只准變少（上方那句在 R78~R79 間只是散文，對「順手多登記一筆新幽靈」零訊號）。擴掃描面多看見存量
+#: 時，重釘本值並在交件回報寫出前後值與理由（同 `_FROZEN_GUARD_LINES` 的重釘紀律）；**不得**為了讓
+#: 新的懸空引用過關而調高它。逐格收緊沿革（33→…→26→25）已搬至
+#: Guard_Line_History_2.md〈R186 淨減法搬遷〉§19。  round-label-ok
 _GHOST_SYMBOL_BASELINE_CEILING = 25
 
 _SYMBOL_INDEX_CACHE: dict[str, frozenset[str]] = {}
@@ -4631,13 +4615,9 @@ class TestR81GhostPathClaims(unittest.TestCase):
     def test_a_machine_local_ignore_rule_never_grants_the_third_state(self) -> None:
         """🔴 第三態的來源本身也必須是 repo 事實（R82／P4 複驗補洞的紅綠自證）。
 
-        補洞前的缺陷：判準只問「被不被 ignore」而不問「**是誰宣告的**」，於是
-        `$GIT_DIR/info/exclude`（`git clone` 就地新建、untracked）與 `core.excludesFile`
-        （使用者家目錄的全域 ignore）也能授予第三態。那兩個檔都不隨 repo 走 ⇒ 同一條宣稱
-        在 A 機器判 `'ignored'`、在 B 機器判 `'missing'`，紅照樣在平台間漂移——與本包原本
-        要治的病同型，只是量測面從「檔案系統」換成「這台機器的 git 設定」。複驗當回合在
-        本機實測它已經活著：`.git/info/exclude` 有 10 條 repo 完全沒宣告的 `**/.claude/*`
-        規則，`AutoClaude/.claude/agent-registry.json` 因此被判成第三態。
+        補洞前的缺陷：判準只問「被不被 ignore」不問「是誰宣告的」，`$GIT_DIR/info/exclude` 與
+        `core.excludesFile` 這兩個不隨 repo 走的來源也能授予第三態，紅在平台間漂移。本機實測沿革搬
+        至 Guard_Line_History_2.md〈R186 淨減法搬遷〉§20。  round-label-ok
 
         本測試**自建一個臨時 repo**，而不是斷言本機那 10 條規則：那 10 條是機器狀態，拿它
         當輸入的測試在別台機器上會空轉（＝那個平台從此沒有覆蓋）。臨時 repo 讓三種 ignore
@@ -6437,13 +6417,9 @@ _HANDOFF_MARK = "handoff-claim-verified:"
 def _handoff_claim_blocks(text: str) -> list[list[str]]:
     """把「開場必讀／還沒做」類章節切成區塊：**每個標題一塊、每個條目一塊**。
 
-    🔴 R82 Q4-01（本輪改的就是這一段）：上一版**只看條目**——`_HANDOFF_ITEM_RE` 不命中
-    就不開區塊，於是整段散文連同它底下的 fenced code 一律被丟掉。當時寫下的理由是
-    「前言是體例與訂正說明的住處，把它當成宣稱會逼人在規則本身上貼標記（噪音）」，
-    而 R81 的交棒書把那個理由的前提打掉了：它的 §3「交給 R82 的待辦」七個小節**一條
-    list item 都沒有**，全是段落散文＋fenced code ⇒ 整節不進分母，該份交棒書當回合
-    實測**整份 0 命中**（探針：直接 import 本模組呼叫 `_handoff_problems`）。
-    也就是說「用散文寫」變成一個免費的逃逸口，而且是**無聲**的——鎖照跑、照綠。
+    🔴 R82 Q4-01：上一版只看條目（`_HANDOFF_ITEM_RE`），散文體例（無 list item）的整節不進分母、整
+    份 0 命中——「用散文寫」成了免費且無聲的逃逸口。實測經過搬至
+    Guard_Line_History_2.md〈R186 淨減法搬遷〉§21。  round-label-ok
     現行語意：射程內的**標題行自己也開一塊**（標題文字計入該塊，因為「尚未建立」這類
     宣稱常常就寫在小節標題上），塊身延伸到下一個標題或下一個條目為止。
 
@@ -6513,14 +6489,10 @@ _HANDOFF_ROUND_RE = re.compile(r"R(\d+)_HANDOFF", re.IGNORECASE)
 
 #: 本鎖目前**一筆宣稱都收不到**的交棒書——具名登記，不是放行。
 #:
-#: 🔴 為何需要這張表（R82 Q4-01 的誠實劃界）：反崩塌斷言由「跨文件加總 ≥1」改成
-#: 「逐文件 ≥1」之後，這三份當回合實測就是 0。成因**不是**它們沒有待辦，而是取材面
-#: 還有**第二個縫**，在 `_HANDOFF_SECTION_WORDS`（章節觸發字）那一軸：
-#:   · R75／R76 的待辦大節叫「交給 R76／R77 的事」，不含任何觸發字 ⇒ 整份 blocks=0；
-#:   · R78 的「交給 R79 的事」同理，其條目用「未溯源／未指派」這類不在
-#:     `_HANDOFF_STALE_WORDS` 的措辭 ⇒ 收到了區塊也命中 0。
-#: 本輪刻意不動那一軸：把「交給」加進觸發字，R76 §5-1 會當場轉紅（實測 1 筆），
-#: 而那三份檔不在本包的檔案所有權內，並行輪次動它們會與別包互踩。⇒ 登記＋交棒。
+#: 🔴 為何需要這張表（誠實劃界）：反崩塌斷言改為「逐文件 ≥1」後這三份當回合實測為 0——取材面的第二
+#: 個縫在 `_HANDOFF_SECTION_WORDS`（章節觸發字）。刻意不動那一軸（把「交給」加進觸發字會讓另一份當
+#: 場轉紅，且那三份檔不在本包所有權內）⇒ 登記＋交棒。實測沿革搬至
+#: Guard_Line_History_2.md〈R186 淨減法搬遷〉§22。  round-label-ok
 #:
 #: 🔴 三道牙讓這筆登記不可能永久化，也不可能被拿來當「下一輪的關法」：
 #:   ① **自清**：登記在案的檔一旦收得到宣稱，本鎖立刻紅並要求把它刪掉（只准縮）；

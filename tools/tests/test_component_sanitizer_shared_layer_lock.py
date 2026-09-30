@@ -16,38 +16,19 @@ Windows 保留裝置名／控制字元／長度上限強化）。本檔鎖住這
      程式碼，非跨版本共用同一顆記憶體物件），代表 SSOT 已經分裂，
      DEF-101-358 修好的「改一處、全版本立即生效」保證就會失真）。
 
-方法論：對每個版本目錄用 subprocess 起一個乾淨行程匯入該版本的
-`tools.fsm_runtime.state_loader`（cwd/sys.path 皆限定該版本根目錄），實測呼叫
-`_sanitize_component()` 對已知危險輸入的行為，而非只做文字 pattern 比對——
-behavioral 驗證比純文字比對更難被規避：若日後有人把委派邏輯內嵌展開成看似
-不同的寫法，文字比對可能誤判為異常，但只要行為仍等價，behavioral 驗證仍會
-通過；反之若有人真的另外寫了一份新的弱化實作，文字比對可能因湊巧含有相似
-字串而誤判通過，behavioral 驗證則不會被騙。
-
-刻意用 subprocess 而非同行程 import（理由同
-`tools/tests/test_sanitize_component_frozen_sdd_versions_lock.py`::
-`_latest_sdd_version_name` 與 `test_state_component_sanitizer_parity.py` 的既有
-選擇）：30 個版本的 `tools.fsm_runtime.state_loader` 是同一個完全限定模組
-名稱，同行程內用 `sys.path` 插拔 + `sys.modules` 手動清快取雖然可行，但每次
-都要正確清乾淨三層（`tools` / `tools.fsm_runtime` / `tools.fsm_runtime.
-state_loader`），一次沒清乾淨就會讓後面的版本悄悄沿用前一個版本已快取的模組
-物件、產生假陽性通過；subprocess 天生行程隔離，不需要人工維護清快取的
-正確性，用執行時間換正確性。
+方法論：對每個版本目錄用 subprocess 起乾淨行程匯入該版 `state_loader`，實測
+`_sanitize_component()` 對已知危險輸入的行為（行為驗證比文字比對更難規避；子行程天生行程隔離，不必
+人工清 `sys.modules` 快取，用執行時間換正確性）。方法論推導與 subprocess 取捨全文搬至
+Guard_Line_History_2.md〈R186 淨減法搬遷〉§9。  round-label-ok
 
 方法論邊界（誠實記載，同既有鎖 docstring 先例）：本檔只驗證「委派目標是否為
 預期的共用模組檔案 + 已知危險輸入是否被擋下」，非窮舉所有可能的繞過手法；若
 未來需要更細緻的資料流分析，屬另一個層次的驗證，非本檔涵蓋範圍。
 
-R66 追加（Review round 1 QA 發現，DEF-101-627）：`tools/lib/sdd_latest.py`
-（R66 新增，DEF-101-624）當時只做手動 bug-injection 驗證、未落成任何測試檔的
-永久斷言。本應為它新增專屬 `tools/tests/test_sdd_latest.py`，但 `DEF-101-561③`
-棘輪（`TestGuardLayerRatchet`）自 R61 起要求 `tools/tests/` 擴充既有檔、或先合併／
-刪除等量舊物再加（🔴 R78 ARCH-03 訂正：R66 當時量的是**檔數**，R77 起改量逐檔行數的
-**淨額**——新增檔案本身不違規，淨額上升才違規）——故改把 `FROZEN_VERSION_DIR_RE`
-的 `.fullmatch()` 回歸鎖、`resolve_latest_name`/`resolve_latest_root` 的
-success/fail-loud 覆蓋，併入本檔（本檔是原始兩個肇事呼叫端之一，且已 import
-`sdd_latest`）；`exclude_frozen_sdd_versions` 的過濾語意併入姊妹檔
-`test_sanitize_component_frozen_sdd_versions_lock.py`（見該檔同款追加段）。
+R66 追加（DEF-101-627）：本應為 `sdd_latest` 新增專屬 `tools/tests/test_sdd_latest.py`，但棘輪要求
+擴充既有檔，故其回歸鎖併入本檔；`exclude_frozen_sdd_versions` 過濾語意併入姊妹檔
+`test_sanitize_component_frozen_sdd_versions_lock.py`。沿革搬至
+Guard_Line_History_2.md〈R186 淨減法搬遷〉§10。  round-label-ok
 
 執行：python -m pytest tools/tests/test_component_sanitizer_shared_layer_lock.py -v
 """

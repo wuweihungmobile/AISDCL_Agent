@@ -55,7 +55,7 @@ _TESTS_DIR = Path(__file__).resolve().parent / "tests"
 # 下限釘選：低於此數＝測試大規模靜默消失（目錄/pattern/路徑壞掉），紅燈。
 # 刻意刪減測試時同步下修；新增測試累積到吃掉**零相依鑑別力餘裕**的一半即被提醒重釘、
 # 吃掉四分之三即讓閘門變紅（判準＝`tools/lib/min_tests_margin.py`，見下方 DEF-200-170 段）。
-MIN_TESTS = 4697  # 🔴 重釘 4543 → 4697（方向＝收緊；2026-09-28，DEF-200-417 收尾單人窗口）：discovery 探針實測直接填入、零加減推算；成長來源＝DEF-200-413～417 回歸鎖（test_context_budget_guard.py／test_session_brief.py／test_install_statusline.py），runner 自檢「餘裕只剩 65／219」提示重釘。歷來完整逐輪沿革（含每次重釘理由）已搬至 docs/06_quality/CrossPlatform_Guard_Line_History_MinTests.md，本行不再原地累加。
+MIN_TESTS = 4876  # 🔴 重釘 4697 → 4876（方向＝收緊；2026-10-01，DEF-200-435～444 收尾單人窗口）：discovery 探針實測直接填入、零加減推算；成長來源＝DEF-200-435～444／427 回歸鎖（test_context_budget_guard.py／test_quota_policy.py／test_run_root_unittests.py／test_block_destructive_git_r83.py 等），runner 自檢「餘裕只剩 40／219」提示重釘。歷來完整逐輪沿革（含每次重釘理由）已搬至 docs/06_quality/CrossPlatform_Guard_Line_History_MinTests.md，本行不再原地累加。
 
 # R57「人工 ratchet 自己會腐化」（R15 釘完連續 11 輪沒人重釘）的兩層解：① WARN 只印不擋、
 # ② 保鮮期斷言會紅，且兩層門檻刻意不同，否則 WARN 一響閘門已紅、①毫無意義。立意成立，
@@ -738,7 +738,7 @@ def main() -> int:
     #      `python tools/run_root_unittests.py` 傳到 pre-push root-infra leg 與三支 CI。
     if report_untagged_windows_skip_decorators(_TESTS_DIR, _PATTERN):
         return _bail("靜態標籤掃描（不分平台）")
-    import console_orphan_census; return console_orphan_census.wrap(lambda: sentinel_lifecycle.leak_fence(lambda: run_with_floor(_TESTS_DIR, MIN_TESTS)))  # noqa: E402,E501,E702,I001,PLC0415 — console_qa 事故輪：孤兒 console 全套層普查抽到 tools/lib/console_orphan_census.py（本檔 special tier 零餘裕棘輪，DEF-200-162），import 移函式內＋分號同行＝單行取代單行零行數成本
+    import console_orphan_census; return console_orphan_census.wrap(lambda: sentinel_lifecycle.leak_fence(lambda: sentinel_lifecycle.temp_fence(lambda: run_with_floor(_TESTS_DIR, MIN_TESTS))))  # noqa: E402,E501,E702,I001,PLC0415 — console_qa 事故輪：孤兒 console 全套層普查抽到 tools/lib/console_orphan_census.py（本檔 special tier 零餘裕棘輪，DEF-200-162），import 移函式內＋分號同行＝單行取代單行零行數成本；DEF-200-444：leak_fence 內層再包 sentinel_lifecycle.temp_fence（真實 TEMP 圍籬，同行內加一層仍零行數成本）
 
 
 #: 本 runner 的 CLI 契約＝**零旗標**（呼叫端實查：`tools/git-hooks/pre-push` root-infra

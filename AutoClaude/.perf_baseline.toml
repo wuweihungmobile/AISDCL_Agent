@@ -16,8 +16,8 @@ p50_ms = 5.85
 p95_ms = 9.863
 p99_ms = 9.863
 samples = 20
-git_sha = "9ccb5ac"
-captured_at = "2026-09-29T14:36:43.790385+00:00"
+git_sha = "38f4cbd"
+captured_at = "2026-09-30T14:36:36.309683+00:00"
 environment = "win32-local"
 
 [token_halt_roundtrip]
@@ -25,7 +25,7 @@ p50_ms = 0.504
 p95_ms = 0.558
 p99_ms = 0.558
 samples = 20
-git_sha = "9ccb5ac"
-captured_at = "2026-09-29T14:36:43.790385+00:00"
+git_sha = "38f4cbd"
+captured_at = "2026-09-30T14:36:36.309683+00:00"
 environment = "win32-local"
 

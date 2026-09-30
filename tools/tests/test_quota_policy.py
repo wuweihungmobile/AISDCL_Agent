@@ -27,6 +27,7 @@ from __future__ import annotations
 import ast
 import dataclasses
 import inspect
+import io
 import json
 import os
 import random
@@ -1424,15 +1425,11 @@ _UNMEASURABLE_REASONS = (
 # 分母是**現查** meter 的 `REASON_*` 宣告集合，不是寫死清單。全文＝Pace 證據檔 §7-R95-L5。
 _METER_REASON_RE = re.compile(r"^REASON_([A-Z0-9_]+)\s*=\s*\"([^\"]+)\"", re.MULTILINE)
 #: 「量到了」的字面，語意上不屬本表——例外必須**具名**而不是靠註解。
-#: 🔴 R100 新增第二個成員 `http-429-floor`：它與 `ok` 同族（都**帶著讀數**回來），只是
-#: 那份讀數是一個 pct 下界 100 的單軸**地板**（`quota_meter.rate_limited_reading()`）。
-#: 把它登記進 `_UNMEASURABLE_REASONS` 會是一句假話——那張表的每一項都會被 `m9_problems()`
-#: 造成 `axes == ()` 的合成態去掃，而 429 這條路**結構上不可能** `axes == ()`，於是
-#: 「量不到不得等於不設限」那兩條不變量會對一個不存在的形狀成立，分母虛胖一項。
-#: 它不是漏登記：本例外由 `test_context_budget_guard.py::
-#: RateLimitIsAFloorNotAnUnknownTest::test_a_429_lands_on_halt_and_not_on_unmeasured`
-#: 承接（斷言同一個字面回來時 `reading is not None` 且落在 halt 側）⇒ 兩表互斥即可，
-#: 見下方 `test_the_exemptions_are_not_also_registered_as_unmeasurable`。
+#: 🔴 R100 新增第二個成員 `http-429-floor`：與 `ok` 同族（都帶著讀數回來；讀數是 pct 下界 100 的單
+#: 軸地板），登記進 `_UNMEASURABLE_REASONS` 會是假話（429 路徑結構上不可能 `axes == ()`）；本例外
+#: 由 `test_context_budget_guard.py::RateLimitIsAFloorNotAnUnknownTest` 承接，兩表互斥見下方
+#: `test_the_exemptions_are_not_also_registered_as_unmeasurable`。完整推導搬至
+#: Guard_Line_History_2.md〈R186 淨減法搬遷〉§48。  round-label-ok
 _NOT_A_FAILURE = ("ok", "http-429-floor")
 
 
@@ -2405,9 +2402,9 @@ class TestR98ModelScopedAxisDoesNotBindWithoutDispatch(unittest.TestCase):
         self.assertIn(Q.NOTE_MODEL_EXCLUDED, text)
 
     def test_an_axis_without_a_known_scope_model_stays_excluded(self) -> None:
-        """`seven_day_opus`／`seven_day_sonnet` 今天在本帳號是 `null`（見 Probe）：一旦
-        它們哪天帶著空的 `scope_model` 出現，仍必須保守排除，不得因為「反正是 None」
-        就放行——`None == None` 不是「命中」。"""
+        """分軌軸（`weekly_scoped`）缺 `scope_model`＝來源不明：仍必須保守排除，不得因為「反正
+        是 None」就放行（`None == None` 不是「命中」）。DEF-200-441 對 kind 自帶家族字的頂層桶
+        另有導出，見 `TestModelScopedBindingSurvivesNamingDrift`。"""
         d = Q.decide(self._r98_state(), NOW, P, active_model="claude-sonnet-5")
         self.assertNotEqual(d.binding.kind, "weekly_scoped")
 
@@ -2444,8 +2441,53 @@ class TestR98ModelScopedAxisDoesNotBindWithoutDispatch(unittest.TestCase):
                             "兩個帳號的判定必須各自成立，證明沒有跨呼叫的殘留狀態")
 
 
+class TestModelScopedBindingSurvivesNamingDrift(unittest.TestCase):
+    """DEF-200-441：模型分軌軸與視窗模型的綁定不得因命名一漂移就靜默失明。舊判準是
+    `scope_model` 與 `active_model` 的**全等**比對：伺服器改顯示名（「Opus 5.5」）或改發頂層
+    `seven_day_opus`／`seven_day_sonnet`（`scope_model` 缺席）時該軸永遠被排除＝零煞車，表徵與
+    「帳號沒在用這個模型」完全相同（與 R87 同型）。線上那兩個頂層桶仍是 null：前置鎖，非現況缺
+    陷。🔴 放寬成「包含」的代價是誤命中，方向鎖（別家／空字串／來源不明不得命中）與正例同重。"""
+
+    @staticmethod
+    def _decide(model, kind="weekly_scoped", scope_model=None) -> Q.Decision:
+        """該分軌軸 92%@3557（weekly 窗），其餘軸都很空；命中它的視窗 cap 會被它壓到 1。"""
+        st = Q.QuotaState((
+            Q.Axis("session", 5.0, at(257)), Q.Axis("five_hour", 5.0, at(257)),
+            Q.Axis("weekly_all", 40.0, at(3557)), Q.Axis("seven_day", 40.0, at(3557)),
+            Q.Axis(kind, 92.0, at(3557), scope_model=scope_model)),
+            NOW.isoformat(), "endpoint", "ok")
+        return Q.decide(st, NOW, P, active_model=model)
+
+    def test_a_display_name_with_a_version_suffix_still_binds(self) -> None:
+        for shown in ("Opus", "OPUS", "Opus 5.5", "Claude Opus 5.5"):
+            with self.subTest(scope_model=shown):
+                d = self._decide("opus", scope_model=shown)
+                self.assertEqual((d.cap, d.band, d.binding.kind),
+                                 (1, Q.BAND_PREPARE, "weekly_scoped"),
+                                 "顯示名一帶版號分軌軸就失明了（全等比對）")
+
+    def test_a_top_level_family_bucket_binds_its_own_family(self) -> None:
+        for family in ("opus", "sonnet"):
+            with self.subTest(family=family):
+                d = self._decide(family, kind=f"seven_day_{family}")
+                self.assertEqual((d.cap, d.binding.kind), (1, f"seven_day_{family}"),
+                                 "頂層家族桶（scope_model 缺席）結構上永不啟用")
+
+    def test_other_families_and_unknown_sources_never_match(self) -> None:
+        unbound = (("fable", "seven_day_opus", None), ("sonnet", "seven_day_opus", None),
+                   ("opus", "seven_day_sonnet", None), ("opus", "weekly_scoped", "Sonnet 5.5"),
+                   ("opus", "weekly_scoped", None),  # 分軌軸但來源不明：量不到不猜
+                   ("", "weekly_scoped", "Opus 5.5"), ("  ", "weekly_scoped", "Opus 5.5"))
+        for model, kind, shown in unbound:
+            with self.subTest(model=model, kind=kind, scope_model=shown):
+                d = self._decide(model, kind=kind, scope_model=shown)
+                self.assertIsNone(d.cap, "誤命中：別家／空字串／來源不明的軸不得進 cap 聚合")
+                self.assertNotEqual(d.binding.kind, kind)
+
+
 # ═══════════════════════════════════════════════════════════════════════════
-# `explain()` 必須具名真的被用到的那一軸、且納入方向為保守側；立案沿革已搬至
+# `explain()` 必須具名真的被用到的那一軸、且原語 `amortize()` 的納入方向為保守側（別家模型
+# 軸的排除在呼叫端，見 `TestPaceAmortizationUsesTheGateRuler`）；立案沿革已搬至
 # CrossPlatform_R127_Guard_Prose_Migration.md〈TestAmortizationNamesTheAxisItActuallyUsed〉。
 # ═══════════════════════════════════════════════════════════════════════════
 class TestAmortizationNamesTheAxisItActuallyUsed(unittest.TestCase):
@@ -2491,11 +2533,11 @@ class TestAmortizationNamesTheAxisItActuallyUsed(unittest.TestCase):
                          ("session", 37.0), "短窗平手仍須維持既有字面與取值")
 
     def test_including_the_model_scoped_axis_can_only_tighten(self) -> None:
-        """② 方向鎖：`_in_cap_gate` 排除的軸仍留在攤提裡，而差異方向恆為「只會更緊」
-        ⇒ 它結構上不可能替任何人核准超支。這一條同時擋住反向的「順手修好」：把排除搬進
-        `amortize()` 就是放寬，而本 repo 對放寬一律要求證據。
-        🔴 嚴格不等式那一格是鑑別力所在——只用 `<=` 時，搬排除會讓兩組相等而全部假綠
-        （本輪注入實測到）。"""
+        """② 方向鎖：**原語** `amortize()` 納入 model-scoped 軸的差異方向恆為「只會更緊」⇒ 原語
+        結構上不可能替任何人核准超支。DEF-200-438 之後別家模型的軸由**呼叫端**（`decide()`／
+        `axes_of()`）在 active_model 已知時遮掉（理由見 `quota_pace.amortize` 上方判詞，決策面
+        的鎖是 `TestPaceAmortizationUsesTheGateRuler`）；把排除搬進原語仍禁止（對所有呼叫端無條
+        件放寬）。🔴 嚴格不等式是鑑別力所在：只用 `<=` 時搬排除會讓兩組相等而全部假綠。"""
         base = self._base()
         for scoped in (0.0, 30.0, 52.0, 61.0, 71.0, 99.0):
             with self.subTest(scoped=scoped):
@@ -2518,6 +2560,150 @@ class TestAmortizationNamesTheAxisItActuallyUsed(unittest.TestCase):
         self.assertTrue(W.amort_relaxed(self._amort(), 70.0))
         self.assertTrue(W.amort_relaxed(self._base(), 70.0),
                         "抽掉它就翻轉的話本結論才會不成立")
+
+
+class TestPaceAmortizationUsesTheGateRuler(unittest.TestCase):
+    """DEF-200-438：`--pace` 的攤提與 cap 聚合用同一把尺——別家的 model-scoped 軸不進攤提。
+
+    立案：Opus session 親跑 `--pace`，five_hour 1%／4% 卻印 `band=prepare cap=1 note=amortized`
+    ——Fable weekly_scoped 97% 混進攤提，而 gate 早已依 R98 把它排除在 cap 聚合外（同快取 gate
+    算 cap=2 band=converge）。「用沒碰過的模型水位節流真正在用的模型」R98 判為嚴重錯誤，攤提面
+    同樣適用。🔴 方向：只排除 active_model **已知且該軸不命中** 的 model-scoped 軸；擁有該軸的
+    模型與「不知道是誰」一律納入（量不到≠量到零）。"""
+
+    RATIO = 3.69
+
+    @staticmethod
+    def _state() -> Q.QuotaState:
+        """主控親測形態：短窗兩軸 3%@257 分鐘；週軸 75%@3557；Fable 分軌 97%@3557。"""
+        return Q.QuotaState((
+            Q.Axis("session", 3.0, at(257)), Q.Axis("five_hour", 3.0, at(257)),
+            Q.Axis("weekly_all", 75.0, at(3557)), Q.Axis("seven_day", 75.0, at(3557)),
+            Q.Axis("weekly_scoped", 97.0, at(3557), scope_model="Fable")),
+            NOW.isoformat(), "endpoint", "ok")
+
+    def _pace(self, model) -> Q.Decision:
+        return Q.decide(self._state(), NOW, P, self.RATIO, "n=21", active_model=model)
+
+    @staticmethod
+    def _reading(d: Q.Decision, kind: str) -> Q.AxisReading:
+        return next(r for r in d.per_axis if r.axis.kind == kind)
+
+    def test_a_foreign_model_scoped_axis_no_longer_tightens_the_pace_decision(self) -> None:
+        for model in ("opus", "sonnet"):
+            with self.subTest(model=model):
+                d = self._pace(model)
+                self.assertEqual((d.cap, d.band, d.binding.kind),
+                                 (2, Q.BAND_CONVERGE, "seven_day"),
+                                 "Fable 97% 經攤提把 five_hour 3% 抬成緊帶（舊行為 cap=1）")
+                self.assertIn(d.amort.total_kind, ("weekly_all", "seven_day"))
+                self.assertEqual(self._reading(d, "five_hour").band, Q.BAND_FREE)
+                scoped = self._reading(d, "weekly_scoped")  # 被排除的軸照樣完整顯示、不被抬水位
+                self.assertEqual((scoped.axis.pct, scoped.band), (97.0, Q.BAND_HALT))
+
+    def test_pace_and_gate_agree_for_the_same_cache_and_model(self) -> None:
+        gate = Q.decide(self._state(), NOW, P, active_model="opus")
+        pace = self._pace("opus")
+        self.assertEqual((pace.cap, pace.band, pace.binding.kind),
+                         (gate.cap, gate.band, gate.binding.kind),
+                         "同快取同模型 `--pace` 與守衛仍是兩把尺（主控親測 cap=1 vs 2）")
+
+    def test_the_owning_model_is_not_relaxed(self) -> None:
+        """對照組：擁有該軸的模型不得被放寬——防止有人用「全排除」蒙混。"""
+        d = self._pace("fable")
+        self.assertEqual((d.cap, d.band, d.binding.kind), (0, Q.BAND_HALT, "weekly_scoped"))
+        self.assertEqual(d.amort.total_kind, "weekly_scoped", "擁有者視窗的攤提排掉了自己的軸")
+
+    def test_an_unknown_model_keeps_the_axis_in_the_amortization(self) -> None:
+        """方向鎖（保守側）：不知道是誰就不猜著排除，結果與排除規則存在前逐字相同。"""
+        for model in (None, "", "  "):
+            with self.subTest(model=model):
+                d = self._pace(model)
+                self.assertEqual((d.cap, d.band, d.binding.kind),
+                                 (1, Q.BAND_PREPARE, "five_hour"))
+                self.assertEqual(d.amort.total_kind, "weekly_scoped")
+
+    def test_without_a_ratio_the_decision_is_unchanged(self) -> None:
+        """gate 形（不帶換算比）逐字不變：排除只作用在攤提，而攤提沒有換算比就不存在。"""
+        for model, want in (("opus", (2, Q.BAND_CONVERGE, "seven_day")),
+                            (None, (2, Q.BAND_CONVERGE, "seven_day")),
+                            ("fable", (0, Q.BAND_HALT, "weekly_scoped"))):
+            with self.subTest(model=model):
+                d = Q.decide(self._state(), NOW, P, active_model=model)
+                self.assertEqual((d.cap, d.band, d.binding.kind), want)
+                self.assertIsNone(d.amort)
+
+
+_HOOK_PATH = _REPO / ".claude" / "hooks" / "context_budget_guard.py"
+
+
+def _hook():
+    """根 hook（`model_family()` 的本家）。延後 import：同一行程裡其他測試檔也以這個名字載入它。"""
+    if str(_HOOK_PATH.parent) not in sys.path:
+        sys.path.insert(0, str(_HOOK_PATH.parent))
+    import context_budget_guard  # noqa: PLC0415
+
+    return context_budget_guard
+
+
+def _hook_family_tuple() -> tuple[str, ...]:
+    """hook `model_family()` 內 `for family in (...)` 那組字（AST 取值：hook 沒有把它做成常數）。"""
+    tree = ast.parse(_HOOK_PATH.read_text(encoding="utf-8"))
+    fn = next(n for n in ast.walk(tree)
+              if isinstance(n, ast.FunctionDef) and n.name == "model_family")
+    loop = next(n for n in ast.walk(fn)
+                if isinstance(n, ast.For) and isinstance(n.iter, ast.Tuple))
+    return tuple(c.value for c in loop.iter.elts)
+
+
+class TestFamilyKeyAgreesWithTheHookModelFamily(unittest.TestCase):
+    """DEF-200-437：「這個模型字串是哪一家」只有一種答案。
+
+    hook 的 `model_family()`（子字串比對）是 `active_model` 的來源；遲滯檔／pace 兄弟檔／攤提遮
+    罩用的 `family_key()` 此前另立精確比對，對 `claude-opus-5-5`、`opus[1m]`、`Opus 5.5` 答案不
+    同：`--pace --model <原始 id>` 時擁有者自己的分軌軸被 `_amort_skip` 遮出攤提（放寬煞車）。
+    判準本體不另造第二份：同語意＋家族元組逐字釘在 hook 那一組上。"""
+
+    CORPUS = ("claude-opus-5-5", "claude-fable-5-1", "claude-sonnet-5-5",
+              "claude-haiku-4-5-20251001", "opus", "Opus 5.5", "opus[1m]", "sonnet", "fable",
+              "haiku", "inherit", "", None, "mythos", "  FABLE  ", "opus sonnet",
+              "claude-SONNET-5", 7, ["opus"])
+
+    def test_the_family_tuple_is_the_hooks_own(self) -> None:
+        self.assertEqual(Q.MODEL_FAMILIES, _hook_family_tuple(),
+                         "家族元組與 hook `model_family()` 那組字不同步（順序也算：先命中者勝）")
+
+    def test_every_model_string_gets_the_same_answer_from_both(self) -> None:
+        guard = _hook()
+        answers = [guard.model_family(raw) for raw in self.CORPUS]
+        self.assertGreaterEqual(len([a for a in answers if a]), 10, "語料大半認不出家族＝判準空轉")
+        for raw, want in zip(self.CORPUS, answers):
+            with self.subTest(raw=raw):
+                self.assertEqual(Q.family_key(raw), want)
+
+    def test_a_raw_model_id_is_read_like_its_family_word(self) -> None:
+        """擁有者自己的分軌軸不得因為傳進來的是原始 id 就被遮：`--pace --model claude-fable-5`
+        與 `--model fable` 必須是同一個答案（遮罩、cap、binding、攤提所用的軸逐項相同）。"""
+        st = TestPaceAmortizationUsesTheGateRuler._state()
+        for raw, family in (("claude-fable-5", "fable"), ("Fable 5.1", "fable"),
+                            ("claude-opus-5-5", "opus"), ("claude-sonnet-5-5", "sonnet")):
+            with self.subTest(raw=raw):
+                self.assertEqual(Q._amort_skip(st, raw), Q._amort_skip(st, family))
+                a = Q.decide(st, NOW, P, 3.69, "n=21", active_model=raw)
+                b = Q.decide(st, NOW, P, 3.69, "n=21", active_model=family)
+                self.assertEqual((a.cap, a.band, a.binding.kind, a.amort.total_kind),
+                                 (b.cap, b.band, b.binding.kind, b.amort.total_kind))
+        self.assertEqual(Q._amort_skip(st, "claude-fable-5"), (False,) * len(st.axes),
+                         "Fable 視窗（原始 id）的 Fable 分軌軸被遮出攤提＝擁有者被放寬")
+        self.assertEqual(Q.decide(st, NOW, P, active_model="claude-fable-5").binding.kind,
+                         "weekly_scoped", "原始 id 沒讓擁有者自己的分軌軸進 cap 聚合")
+
+    def test_an_unrecognised_model_string_keeps_every_axis_in_the_amortization(self) -> None:
+        """認不出家族＝不知道是誰：與 `None` 同，一軸都不遮（納入只會更緊，不猜著放寬）。"""
+        st = TestPaceAmortizationUsesTheGateRuler._state()
+        for raw in ("mythos", "inherit", "../x", 7):
+            with self.subTest(raw=raw):
+                self.assertEqual(Q._amort_skip(st, raw), ())
 
 
 class AvailabilityHysteresisTest(unittest.TestCase):
@@ -2860,6 +3046,196 @@ class StabilityConstantsTest(unittest.TestCase):
     def test_safety_bands_matches_quota_gate_draining_bands(self) -> None:
         self.assertEqual(QS.SAFETY_BANDS, frozenset(QG.DRAINING_BANDS),
                          "SAFETY_BANDS 與 quota_gate.DRAINING_BANDS 已經漂移")
+
+
+class TestStabilityIsKeyedByModelFamilyAndRuler(unittest.TestCase):
+    """DEF-200-437：遲滯檔的鍵＝（模型家族, 尺），不再是帳號級單檔；兩個獨立污染源各一把鎖：
+    ① 家族：遲滯輸入 `decision.cap` 對模型的相依只經 `_in_cap_gate()` 的 model-scoped 軸成員資格，
+       同家族共用一份歷史是對的；Fable halt 寫下的 cap=0 讓 Opus 視窗首個扇出被擋才是污染。
+    ② 尺：`--pace`（帶攤提）與守衛（不帶）對同一份快取算出不同 cap，`--pace` 卻把較嚴的 cap 存
+       進守衛共用的遲滯檔（重演：兩次 Agent 間插一次 `--pace` 即被擋）。查詢不得改變執法值。"""
+
+    T0 = datetime(2026, 9, 30, 12, 0, 0, tzinfo=UTC)
+    FAMILIES = ("opus", "sonnet", "haiku", "fable")
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="def437_stability_"))
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        env = mock.patch.dict(os.environ, {EE.TRACE_DIR_ENV: str(self.tmp / "traces")})
+        env.start()
+        self.addCleanup(env.stop)
+
+    def _at(self, seconds: float) -> datetime:
+        return self.T0 + timedelta(seconds=seconds)
+
+    def test_a_fable_halt_does_not_poison_an_opus_window(self) -> None:
+        self.assertEqual(QS.evaluate(0, Q.BAND_HALT, self._at(0), scope="fable"), 0)
+        got = QS.evaluate(2, Q.BAND_CONVERGE, self._at(5), scope="opus")
+        self.assertEqual(got, 2, "Fable 的 halt 遲滯歷史污染了 Opus 視窗（共用單檔＝被 cap=0 擋）")
+        self.assertEqual(QS.load_state(scope="fable").cap, 0, "Opus 的寫入蓋掉了 Fable 的歷史")
+        self.assertEqual(QS.load_state(scope="opus").cap, 2)
+
+    def test_hysteresis_inside_one_key_is_unchanged(self) -> None:
+        """方向鎖：分檔只換「誰跟誰共用歷史」；同一把鍵內放寬仍是 ≥300 秒且每次 +1。"""
+        for key in ({"scope": "fable"}, {"ruler": "pace"}, {"scope": "fable", "ruler": "pace"}):
+            with self.subTest(**key):
+                QS.evaluate(0, Q.BAND_HALT, self._at(0), **key)
+                self.assertEqual(QS.evaluate(2, Q.BAND_CONVERGE, self._at(5), **key), 0,
+                                 "停留未滿 300 秒卻放寬了")
+                self.assertEqual(QS.evaluate(2, Q.BAND_CONVERGE, self._at(301), **key), 1,
+                                 "放寬一次應只 +1")
+
+    def test_a_pace_query_does_not_change_what_the_guard_enforces(self) -> None:
+        def second_agent_cap(pace_query_in_between: bool) -> int | None:
+            with tempfile.TemporaryDirectory(prefix="def437_ruler_") as td, \
+                    mock.patch.dict(os.environ, {EE.TRACE_DIR_ENV: td}):
+                self.assertEqual(
+                    QS.evaluate(2, Q.BAND_CONVERGE, self._at(0), scope="opus"), 2)
+                if pace_query_in_between:  # `--pace` 帶攤提算出較嚴的 1（收緊立即落地）
+                    QS.evaluate(1, Q.BAND_PREPARE, self._at(10), scope="opus", ruler="pace")
+                return QS.evaluate(2, Q.BAND_CONVERGE, self._at(20), scope="opus")
+
+        quiet, queried = second_agent_cap(False), second_agent_cap(True)
+        self.assertEqual(quiet, 2, "對照組本身就不是 2——前提壞了")
+        self.assertEqual(queried, quiet, "先跑 --pace 壓低了守衛的執法值（查詢改變了執法）")
+
+    def test_the_legacy_account_file_belongs_to_the_unkeyed_gate_caller_only(self) -> None:
+        legacy = QS.state_path()
+        self.assertEqual(legacy.name, QS.STATE_NAME, "不帶鍵的呼叫端必須仍讀寫既有檔（免遷移）")
+        legacy.parent.mkdir(parents=True, exist_ok=True)
+        legacy.write_text(json.dumps(
+            {"schema": QS.SCHEMA, "cap": 1,
+             "last_change": self.T0.isoformat(timespec="seconds")}), encoding="utf-8")
+        self.assertEqual(QS.load_state().cap, 1)
+        for key in ({"scope": "opus"}, {"ruler": "pace"}, {"scope": "opus", "ruler": "pace"}):
+            with self.subTest(**key):
+                self.assertIsNone(QS.load_state(**key), "舊檔被別的鍵讀到了（污染面沒縮小）")
+        self.assertEqual(QS.evaluate(4, Q.BAND_NOTICE, self._at(1)), 1,
+                         "舊檔的遲滯必須仍對未分檔的呼叫端生效")
+        self.assertEqual(QS.evaluate(4, Q.BAND_NOTICE, self._at(1), scope="opus"), 4)
+
+    def test_a_full_model_id_keys_the_same_file_as_its_family_word(self) -> None:
+        """DEF-200-437：`--pace --model <原始 id>` 此前落到不分家族的共用檔（與守衛用的家族字檔
+        分兩份）。`family_key` 與 hook `model_family()` 同語意後，含家族字的字串都落到該家族那
+        份；檔名仍只由四個固定家族字組成（夾帶的路徑成分進不了檔名）。"""
+        shared = QS.state_path()
+        for raw, family in (("claude-opus-5[1m]", "opus"), ("opus/../x", "opus"),
+                            ("Claude-Fable-5-1", "fable"), ("sonnet-5", "sonnet")):
+            with self.subTest(raw=raw):
+                for ruler in (QS.RULER_GATE, QS.RULER_PACE):
+                    got = QS.state_path(scope=raw, ruler=ruler)
+                    self.assertEqual(got, QS.state_path(scope=family, ruler=ruler))
+                    self.assertNotEqual(got, shared)
+                    self.assertEqual(got.parent, shared.parent, "檔名夾帶了路徑成分")
+
+    def test_unknown_keys_share_the_unkeyed_file_and_never_name_a_file(self) -> None:
+        shared = QS.state_path()
+        for scope in (None, "", "  ", "mythos", "../x", 7):
+            with self.subTest(scope=scope):
+                self.assertEqual(QS.state_path(scope=scope), shared)
+        for ruler in (None, "", "gate", "mythos", "../x", 7):
+            with self.subTest(ruler=ruler):
+                self.assertEqual(QS.state_path(ruler=ruler), shared)
+        self.assertEqual(QS.state_path(scope=" Fable "), QS.state_path(scope="fable"))
+        self.assertEqual(QS.state_path(ruler=" PACE "), QS.state_path(ruler="pace"))
+        QS.evaluate(3, Q.BAND_NOTICE, self._at(0), scope="../x", ruler="../y")  # 不拋例外
+        left = {p.name for p in shared.parent.iterdir()}
+        self.assertTrue(all(n.startswith(QS.STATE_NAME) for n in left), f"長出奇怪檔名：{left}")
+
+    def test_every_family_and_ruler_has_its_own_file_next_to_the_shared_one(self) -> None:
+        shared = QS.state_path()
+        want = {(None, "gate"): shared.name, (None, "pace"): "autosdd_quota_stability_pace.json"}
+        for fam in self.FAMILIES:
+            want[(fam, "gate")] = f"autosdd_quota_stability_{fam}.json"
+            want[(fam, "pace")] = f"autosdd_quota_stability_{fam}_pace.json"
+        got = {key: QS.state_path(scope=key[0], ruler=key[1]) for key in want}
+        for key, path in got.items():
+            with self.subTest(key=key):
+                self.assertEqual((path.parent, path.name), (shared.parent, want[key]))
+        self.assertEqual(len(set(got.values())), len(want), "兩把鍵撞到同一個檔")
+        self.assertEqual((QS.RULER_GATE, QS.RULER_PACE), ("gate", "pace"))
+
+    def test_the_free_band_clears_only_its_own_key(self) -> None:
+        QS.evaluate(0, Q.BAND_HALT, self._at(0), scope="fable")
+        QS.evaluate(2, Q.BAND_PREPARE, self._at(0), scope="opus")
+        QS.evaluate(2, Q.BAND_PREPARE, self._at(0), scope="opus", ruler="pace")
+        self.assertIsNone(QS.evaluate(None, Q.BAND_FREE, self._at(1), scope="opus"))
+        self.assertIsNone(QS.load_state(scope="opus"), "free 帶沒清掉自己那份")
+        self.assertEqual(QS.load_state(scope="fable").cap, 0, "opus 回 free 把 fable 的歷史清了")
+        self.assertEqual(QS.load_state(scope="opus", ruler="pace").cap, 2,
+                         "gate 尺回 free 把 pace 尺的歷史也清了")
+
+
+class TestPaceContractSiblingPerFamily(unittest.TestCase):
+    """DEF-200-437：`pace_contract.write(..., model=)` 另寫家族兄弟檔（canonical 不動）。引擎讀
+    的 `autosdd_pace.json` 是 last-writer-wins——Fable 的 `--pace` 寫出 cap=0 會被 Opus 視窗的引
+    擎讀到，兄弟檔讓各家族各有不互蓋的真相。「引擎依模型讀」是跨包另案（讀端住 AutoClaude/）。"""
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="def437_pace_"))
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.canon = self.tmp / PC.CONTRACT_NAME
+
+    def _write(self, *specs, model=None, dest: Path | None = None) -> bool:
+        st = state(*specs)
+        return PC.write(Q.decide(st, NOW, P), st, P.max_fanout, P.halt_pct,
+                        path=dest or self.canon, model=model)
+
+    def _read(self, name: str) -> dict:
+        return json.loads((self.tmp / name).read_text(encoding="utf-8"))
+
+    def test_a_family_write_adds_a_sibling_with_the_identical_payload(self) -> None:
+        self.assertTrue(self._write(("session", 96, 20), model="fable"))
+        sibling = (self.tmp / "autosdd_pace_fable.json").read_bytes()
+        self.assertEqual(self.canon.read_bytes(), sibling, "兄弟檔與 canonical 內容不同")
+        (self.tmp / "plain").mkdir()  # 對照：不帶 model 寫出的 canonical 必須逐位元組相同
+        self._write(("session", 96, 20), dest=self.tmp / "plain" / PC.CONTRACT_NAME)
+        self.assertEqual((self.tmp / "plain" / PC.CONTRACT_NAME).read_bytes(), sibling,
+                         "canonical 隨 model 參數改變＝引擎讀端契約被動到")
+        st = state(("session", 96, 20))
+        body = self._read(PC.CONTRACT_NAME)
+        self.assertEqual(set(body), set(PC.payload(Q.decide(st, NOW, P), st, P.max_fanout,
+                                                   P.halt_pct)), "payload 鍵集合被動到")
+        self.assertEqual((body["schema"], body["cap"]), (PC.CONTRACT_SCHEMA, 0))
+
+    def test_families_do_not_overwrite_each_other(self) -> None:
+        self._write(("session", 96, 20), model="fable")
+        self._write(("session", 0, 30), model="opus")
+        fable, opus = self._read("autosdd_pace_fable.json"), self._read("autosdd_pace_opus.json")
+        self.assertEqual((fable["cap"], fable["band"]), (0, Q.BAND_HALT), "fable 的決策被蓋掉")
+        self.assertEqual((opus["cap"], opus["band"]), (P.max_fanout, Q.BAND_FREE))
+        self.assertEqual(self._read(PC.CONTRACT_NAME), opus, "canonical 仍是最後寫入者")
+
+    def test_no_model_or_an_unknown_model_writes_only_the_canonical_file(self) -> None:
+        for model in (None, "", "mythos", "../x", 7):
+            with self.subTest(model=model):
+                self.assertTrue(self._write(("session", 0, 30), model=model))
+                self.assertEqual([p.name for p in self.tmp.iterdir()], [PC.CONTRACT_NAME])
+
+    def test_a_full_model_id_writes_its_family_sibling(self) -> None:
+        """DEF-200-437：`--pace --model claude-fable-5` 此前因 `family_key` 只認家族字而沒寫。"""
+        self.assertTrue(self._write(("session", 96, 20), model="claude-fable-5"))
+        self.assertEqual(sorted(p.name for p in self.tmp.iterdir()),
+                         ["autosdd_pace.json", "autosdd_pace_fable.json"])
+
+    def test_a_failing_sibling_is_soft_and_leaves_the_canonical_written(self) -> None:
+        (self.tmp / "autosdd_pace_fable.json").mkdir()  # os.replace 蓋不掉目錄 ⇒ OSError
+        err = io.StringIO()
+        with mock.patch.object(sys, "stderr", err):
+            ok = self._write(("session", 0, 30), model="fable")
+        self.assertFalse(ok, "兄弟檔寫失敗卻回報成功")
+        self.assertEqual(self._read(PC.CONTRACT_NAME)["schema"], PC.CONTRACT_SCHEMA,
+                         "兄弟檔失敗連帶讓引擎讀的 canonical 也沒寫")
+        self.assertIn("autosdd_pace_fable.json", err.getvalue(), "失敗沒出聲或沒指名哪一份")
+        self.assertNotIn("保守地板", err.getvalue(), "引擎不讀兄弟檔，不得借用「走保守地板」那句")
+
+    def test_a_failing_canonical_still_says_the_engine_falls_to_the_floor(self) -> None:
+        self.canon.mkdir()
+        err = io.StringIO()
+        with mock.patch.object(sys, "stderr", err):
+            ok = self._write(("session", 0, 30))
+        self.assertFalse(ok)
+        self.assertIn("保守地板", err.getvalue())
 
 
 #: 獨立行程的 worker：壁鐘 barrier 對齊後，對同一個計數檔做一次「讀 → +1 → 寫」——

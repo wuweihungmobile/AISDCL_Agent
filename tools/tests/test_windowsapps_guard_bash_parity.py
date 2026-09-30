@@ -107,17 +107,10 @@ _CALLER_FILES = [
     # 註解）與根層 ONBOARDING.md 皆記載過 Windows Git Bash 實跑情境，已改用
     # 共用 guard。
     _REPO_ROOT / "tools" / "macos_smoke_local.sh",
-    # R56 新增：三支「早已收斂、只是從未登記」的呼叫端（實測 grep 全庫命中 15 支、
-    # 本清單只有 12 支）。未登記的代價＝不受 `test_all_known_callers_source_shared_guard`
-    # 與 `test_no_raw_unguarded_python_check_remains` 兩道白名單斷言保護，只剩
-    # repo-wide 前瞻掃描這層（該層對「已收斂→退化為裸判斷」有鑑別力，但對本檔
-    # docstring 記載的兩種偽裝手法失明）。補登記不需改任何 shell 程式碼。
-    # 後兩筆一律以 `_LATEST_SDD_ROOT`（sdd_version.py SSOT 動態解析）組出，不可
-    # 寫死版本目錄名——R56 訂正：初版寫死 `AISDLC_SDD_v0.30`，與
-    # `test_caller_files_matches_repo_wide_scan` 實掃側的動態解析結構性不對稱，
-    # 下一次 Copy-on-Evolve 建 v0.31 時 v0.30 淪為凍結版被實掃排除 →
-    # `declared - actual` 出現這兩筆而打紅 CI，且 LATEST 新版的同名呼叫端反而
-    # 脫離三道白名單斷言保護。
+    # R56 新增：三支早已收斂、只是從未登記的呼叫端（未登記＝不受兩道白名單斷言保護）；後兩筆一律以
+    # `_LATEST_SDD_ROOT`（sdd_version.py SSOT 動態解析）組出，不可寫死版本目錄名（寫死會在
+    # Copy-on-Evolve 建新版時打紅 CI，且 LATEST 新版的同名呼叫端脫離保護）。沿革搬至
+    # Guard_Line_History_2.md〈R186 淨減法搬遷〉§69。  round-label-ok
     _REPO_ROOT / "AISDLC_SDD" / "scripts" / "copy_on_evolve.sh",
     _LATEST_SDD_ROOT / "tools" / "arch_fitness" / "run_self_evolution.sh",
     _LATEST_SDD_ROOT / "tools" / "install_hooks" / "install_post_commit.sh",
@@ -139,17 +132,10 @@ _RAW_CHECK_RE = re.compile(r"command\s+-v\s+python3?\s*>\s*/dev/null")
 # _RAW_CHECK_RE 的窄比對抓不到）。
 _LOOSE_RAW_CHECK_RE = re.compile(r"command\s+-v\s+python3?\b")
 
-# R43 二審 Architect 一審複查揪出：TestBashCallersEnrollment 原本只驗證固定
-# 白名單（_CALLER_FILES），不是真正的 repo-wide 前瞻鎖——同一類「防增生鎖只
-# 蓋到已知案例」缺陷（R41 對 _sanitize_component 呼叫點也犯過一次）。改為對
-# git-tracked 全部 `*.sh` 做前瞻掃描；下列為明確判斷「WindowsApps 空殼排除
-# guard 不適用」而豁免的檔案，皆附理由，供未來覆核：
-# R56 修正（SA／SD 各自獨立回報同一根因）：本集合的豁免理由一律須**自足**證明
-# 「該腳本不存在 Windows 執行情境」。禁止以「同上一筆」或「某平台 PATH 上不會有
-# WindowsApps」作為唯一依據——後者已於 R55 被判定論證方向錯誤（見下方
-# `_CALLER_FILES` 內 macos_smoke_local.sh 那一筆的 R55 註解：只證明「本平台 PATH
-# 乾淨」不足以豁免，必須另證「本腳本無 Windows 執行情境」），該筆亦因此被移出本
-# 集合。此告示存在的理由：同一錯誤論證已被複製兩次。
+# 下列為明確判斷「WindowsApps 空殼排除 guard 不適用」而豁免的檔案。豁免理由一律須**自足**證明「該
+# 腳本不存在 Windows 執行情境」，禁止以「同上一筆」或「某平台 PATH 上不會有 WindowsApps」為唯一依
+# 據（後者論證方向錯誤，同一錯誤論證已被複製兩次）。R43 二審與 R56 修正沿革搬至
+# Guard_Line_History_2.md〈R186 淨減法搬遷〉§70。  round-label-ok
 _EXEMPT_SH_FILES = {
     # macOS 專屬 nightly 薄聚合器（docstring 明文「bash 3.2（macOS /bin/bash）」+
     # Windows 對等品是完全獨立的 run_local_nightly.ps1）→ 結構性只在 macOS 執行，
@@ -157,19 +143,10 @@ _EXEMPT_SH_FILES = {
     # 出現在 macOS PATH 上。（R56 訂正：原寫「同上理由豁免」，但 R55 已把被指涉
     # 的前一筆 macos_smoke_local.sh 移出本集合，理由句成為懸空引用。）
     "AutoClaude/tools/run_local_nightly.sh",
-    # R44 Architect 深度架構評估新增：本檔docstring 第 2 行明文「由
-    # tools/run_local_nightly.ps1 透過 `docker run python:3.11-slim bash
-    # /workspace/tools/run_mutmut_in_docker.sh` 呼叫」——結構性只在 Linux
-    # container 內執行（官方 python:3.11-slim image 為 base，python3 保證存在於
-    # 該映像檔），Windows Store App Execution Alias 空殼是 Windows 原生 PATH
-    # 專屬機制，Linux container 內不可能出現；且本腳本無任何 Windows 直接執行
-    # 情境——唯一呼叫端是 run_local_nightly.ps1 的 `docker run`，宿主端只負責啟
-    # 容器、腳本本體始終在容器內跑。
-    # （R56 訂正：原文結尾援引「同 macos_smoke_local.sh／run_local_nightly.sh 的
-    # 『非 Windows 執行環境』豁免精神」，但 macos_smoke_local.sh 已於 R55 因該論證
-    # 方向錯誤被移出本集合、成為懸空且已被否決的先例引用。改為上述自足論證：
-    # 前半證「容器內 PATH 不可能有 WindowsApps」，後半證「無 Windows 執行情境」，
-    # 後者才是本集合的真正判準。）
+    # `run_mutmut_in_docker.sh` 豁免：唯一呼叫端是 `run_local_nightly.ps1` 的 `docker run
+    # python:3.11-slim`，腳本本體只在 Linux container 內跑（PATH 不可能有 WindowsApps 空殼），且無
+    # 任何 Windows 直接執行情境（後者才是本集合的真正判準）。R44 新增與 R56 訂正的論證沿革搬至
+    # Guard_Line_History_2.md〈R186 淨減法搬遷〉§71。  round-label-ok
     "AutoClaude/tools/run_mutmut_in_docker.sh",
 }
 
@@ -272,16 +249,10 @@ def _tracked_files() -> tuple[str, ...]:
 def _tracked_non_sh_shell_scripts() -> tuple[str, ...]:
     """git tracked、**非 `*.sh` 但檔頭 shebang 指向 shell** 的檔案（repo-relative）。
 
-    🔴 R67 B4（本函式的存在理由，取代原本的硬編目錄名冊）：git hook 依慣例沒有
-    副檔名，`_tracked_sh_files()`（`git ls-files -- "*.sh"`）天生掃不到——那是
-    DEF-101-381 的根因。R46 補的第一版用 `git ls-files -- tools/git-hooks/*
-    AutoClaude/tools/git-hooks/* AISDLC_SDD/.githooks/*` 三個**寫死的目錄**補洞，
-    於是掃描面本身變成一份人工名冊：本 monorepo 的 hooks 目錄數已從 1 長到 3，
-    第 4 個（新子專案／`.husky/`／Copy-on-Evolve 新版樹自帶 hooks）是可預期的
-    演進，而屆時在該目錄放一支裸 `command -v python` 的 hook，**全部 29 支測試
-    仍全綠、零訊號**（R67 實測：連根層 1139 支 unittest 也全數逃過）——正是
-    R60 對 `tools/_script_scan_surface.py` 治過的「名冊沒有完整性鎖」同一個病，
-    只是換了一條腿。
+    🔴 存在理由（R67 B4，取代原本的硬編目錄名冊）：git hook 依慣例沒有副檔名，
+    `_tracked_sh_files()` 天生掃不到；寫死三個 hooks 目錄會讓掃描面變成人工名冊——第 4 個目錄出現時
+    全部測試仍綠、零訊號（同 R60 對 `tools/_script_scan_surface.py` 治過的病）。實測沿革搬至
+    Guard_Line_History_2.md〈R186 淨減法搬遷〉§72。  round-label-ok
 
     改法：不再問「有哪些 hooks 目錄」，改問「repo 裡有哪些 shell 腳本」——以
     `git ls-files` 全庫逐檔讀檔頭 shebang 推導。名冊消失，掃描面即與 repo 實況
@@ -522,12 +493,8 @@ class TestSharedGuardShellFunctionBehavior(unittest.TestCase):
         **嚴格覆蓋且更嚴**：該表把同一個暫存樣本檔同時餵給四份實作（`windowsapps_guard.sh`
         即本檔測的那一份、`WindowsAppsGuard.ps1`、`bootstrap_core.py`、以及 PS 呼叫端），
         逐列比對四方判定是否一致。逐案對照——
-          · 「真直譯器路徑」`C:\\Python311\\python.exe`（expected_stub=False）承接「真候選接受」；
-          · 反斜線／正斜線／混用分隔符／MSYS 掛載路徑共 6 列（expected_stub=True）承接
-            「`WindowsApps` 空殼拒絕」，且多守住本類**從未測過**的分隔符變體；
-          · 「大小寫變體」`…\\WINDOWSAPPS\\python.exe` 承接大小寫那支；
-          · 「誘餌：子字串非完整段」`C:\\Users\\me\\MyWindowsAppsBackup\\python.exe` 承接誘餌
-            那支，樣本連目錄名都逐字相同。
+          表格各列的逐案對照（承接關係）搬至
+          Guard_Line_History_2.md〈R186 淨減法搬遷〉§73。  round-label-ok
         本支**不刪**，因為它問的是另一件事：`command -v` 找不到候選時的行為。那條路徑
         一次都沒有被 `_VERDICT_CASES` 走到（那張表餵的是既有路徑字串，不做 PATH 查找）。
         """

@@ -11,12 +11,9 @@
 
   (2) **行尾閘（R74）**——進 commit 的 `.sh`／無副檔名 hook 檔不得含 CR。
 
-🔴 為何 (2) 併進本檔而非另立新檔：`tools/tests/` 有一道護欄層 shrink-only 棘輪
-（`DEF-101-561③`；R74 當時量的是檔數。🔴 R78 ARCH-03 訂正：R77 起接手者是
-`test_adr_xplat001_c1c2_lock.py::TestGuardLayerRatchet` 的逐檔行數表，現行語意是
-**淨行數不得上升**、不是「禁止新增檔案」）。本檔是最貼近的家——它已經備好「真 git repo ＋ 真 commit
-觸發 dispatcher」這套沙盒（行尾閘唯一能被行為級驗證的方式就是真的 commit 一次），
-新開一支等於把同一套 fixture 抄第二份，還會撞上那條裁決。
+為何 (2) 併進本檔而非另立新檔：本檔已備好「真 git repo ＋ 真 commit 觸發 dispatcher」沙盒（行尾閘
+唯一能被行為級驗證的方式就是真的 commit 一次）；棘輪語意沿革搬至
+Guard_Line_History_2.md〈R186 淨減法搬遷〉§44。  round-label-ok
 
 執行：python3 -m unittest discover -s tools/tests -p "test_*.py" -v
 """

@@ -80,6 +80,23 @@ def claude_home(home: Path | None = None) -> Path:
     return Path.home() / ".claude"
 
 
+def claude_json_path(home: Path | None = None) -> Path:
+    """Claude Code 的 `.claude.json` 全域設定檔——與 `claude_home()` 同源（DEF-200-427）。
+
+    WHY 不是 `claude_home() / ".claude.json"`：預設下它是 `~/.claude` 的**手足檔**
+    （`~/.claude.json`），覆寫時才長在 `CLAUDE_CONFIG_DIR` 目錄**底下**（第一步實證：
+    指空目錄跑 `claude -p`，`.claude.json` 在該目錄長出）。兩種形狀不同，套 `claude_home()`
+    會在預設下得到錯的 `~/.claude/.claude.json`。語意同 `claude_home()`：顯式 `home` 優先且
+    不查環境變數；空字串／純空白視同未設；該值照字面用、不 `expanduser()`。
+    """
+    if home is not None:
+        return home / ".claude.json"
+    override = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
+    if override:
+        return Path(override) / ".claude.json"
+    return Path.home() / ".claude.json"
+
+
 def venv_python_path(venv_dir: Path, is_windows: bool | None = None) -> Path:
     """venv_dir 內對應本平台的直譯器路徑：windows → Scripts/python.exe，否則 bin/python。
 

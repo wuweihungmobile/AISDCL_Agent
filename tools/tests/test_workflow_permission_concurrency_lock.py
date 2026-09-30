@@ -12,34 +12,20 @@ R15 裸修——本地測試/pre-push 對兩者零機械鎖，日後有人不慎
 不引入獨立 check_*.py 工具位（防線預算制搭載優先序：擴充/新增 unittest
 掃描器 ＞ 新建獨立工具位，見 docs/04_planning/AutoSDD_Iteration_Prompt_Template.md）。
 
-R68 擴充（Pkg-4「CI／nightly 死亡通道」；檔名雖仍稱 permission/concurrency，
-實質已是「compat-CI／root-infra-ci 的 workflow YAML 機械鎖聚落」——依鎖檔數
-棘輪紀律〔DEF-101-561③，tools/tests/ shrink-only〕不另開新檔，一律擴充既有檔）：
-  1. `TestNightlyAlertConclusionWhitelist` — 兩支 `*-nightly-alert` 的結論判讀
-     必須是 **success 白名單**（fail-closed）。修復前為黑名單（只有字面
-     "failure" 算紅），cancelled／timed_out／skipped／conclusion 為 null／job
-     顯示名被加前綴 五種情境全部 fail-open 成「綠燈」，進而**自動關閉**一張
-     仍然有效的 P1 issue 並留言「已恢復綠燈」——告警器主動抹除紅燈證據。
-  2. `TestNightlyJobNameSelectorInterlock` — alert 的 jq `startswith("…")`
-     選擇子字串必須是 nightly-full `name:` 的前綴。兩者是兩份手寫字面值，
-     本 repo 慣例會在 job 名後綴輪次註記，一改名選擇子就落空成 "unknown"。
-     GitHub Actions 的 `jobs.<id>.name` 不支援 `env` context，無法用共用變數
-     消滅漂移面，故只能用機械鎖互鎖。
-  3. `TestRootInfraNightlyStalenessSentinel` — root-infra-ci.yml 第 15 道
-     （nightly-full 排程陳舊度哨兵）必須存在、必須阻斷、必須同時查兩支
-     workflow 的成功紀錄。此道是 R68 對「兩支 nightly-full 自 2026-07-14 起
-     18 天零成功而三道既有哨兵結構上都偵測不到」的直接修復（誠實劃界見該
-     workflow 檔頭第 15 道：本道與被偵測者同計費平面）。
-     **R69 訂正（DEF-101-703）**：R68 版寫死 `--event schedule`，與它自己印出的
-     處置指令（`gh workflow run` ⇒ `event=workflow_dispatch`）實證互斥、照做也
-     解不開；且無 `if:`／無豁免途徑 ⇒ 對每一次 push 都必紅＝死鎖。現行判準改為
-     「兩事件都計入」＋「帶到期日／理由／長度上限的顯式豁免」，本類別同步鎖住
-     **反 fail-open 三道保險**，確保豁免不能退化成永久假綠。
-  4. `TestCompatCiScriptTriggerSymmetry` — 兩支 compat-CI 的 `paths` 白名單
-     對全部 tracked `*.sh`／`*.ps1` 的觸發面必須**完全對稱、零豁免**。
-     windows 側逐一列舉 `.sh`、macos 側用 `**/*.sh` 兜底（反之亦然）的不對稱
-     設計本身保留（改成兩側都通配會讓凍結版樹下的腳本也觸發，代價不成比例），
-     但「列舉面漏一支」從此有機械訊號。
+R68 擴充：本檔實質已是「compat-CI／root-infra-ci 的 workflow YAML 機械鎖聚落」（依鎖檔數棘輪紀律一
+律擴充既有檔）。四個聚落類別：
+  1. `TestNightlyAlertConclusionWhitelist`：兩支 `*-nightly-alert` 的結論判讀須為 **success 白名單
+     **（fail-closed；黑名單會把 cancelled／timed_out／skipped／null 讀成綠燈而自動關閉仍有效的 P1
+     issue）。
+  2. `TestNightlyJobNameSelectorInterlock`：alert 的 jq `startswith(...)` 選擇子須為 nightly-full
+     `name:` 的前綴（兩份手寫字面值，`jobs.<id>.name` 不支援 env，只能機械互鎖）。
+  3. `TestRootInfraNightlyStalenessSentinel`：root-infra-ci 第 15 道 nightly-full 陳舊度哨兵須存
+     在、須阻斷、須同查兩支 workflow 的成功紀錄，且豁免須帶到期日／理由／長度上限（反 fail-open 三
+     道保險）。
+  4. `TestCompatCiScriptTriggerSymmetry`：兩支 compat-CI 的 `paths` 白名單對全部 tracked `*.sh`／
+     `*.ps1` 的觸發面須完全對稱、零豁免。
+R68 立案事故說明與 R69 訂正（DEF-101-703）全文搬至
+Guard_Line_History_2.md〈R186 淨減法搬遷〉§79。  round-label-ok
 """
 from __future__ import annotations
 
@@ -1013,15 +999,9 @@ class TestRootInfraNightlyStalenessSentinel(unittest.TestCase):
 # ══════════════════════════════════════════════════════════════════════════════
 # 本輪 R77-55：concurrency 的 **repo-wide 枚舉**（不再只看 5 個具名常數）
 # ══════════════════════════════════════════════════════════════════════════════
-# 🔴 缺陷本體：本檔上方全部 concurrency 斷言都綁在 `_ARCH_FITNESS`／`_AUTOCLAUDE_CI`／
-# 兩支 compat-CI／`_ROOT_INFRA_CI` 這 5 個**具名常數**上，而且問的都是「那一段字面值
-# 還在不在」。於是：
-#   ① 沒被具名的 workflow 上，同一類缺陷完全隱形——實查 11 支，有 3 支的 workflow 層
-#      group 只綁 `github.ref` 卻帶 `cancel-in-progress: true`，其中兩支同時被 schedule
-#      與 workflow_dispatch 觸發；
-#   ② 「group 分不分得出事件類型」這個**判準**本身，全 repo 沒有任何一支測試在問。
-# 而這正是 R7／R15／R23 已經在 autoclaude-ci 與兩支 compat-CI 上各修過一次的缺陷——
-# 修的是站點，不是判準，所以它在沒被具名的檔案上原封不動地活著。
+# 🔴 缺陷本體：上方 concurrency 斷言全綁在 5 個具名常數、只問「字面值還在不在」，對沒被具名的
+# workflow 與「group 分不分得出事件類型」這個判準本身零覆蓋——修的是站點不是判準。全文搬至
+# Guard_Line_History_2.md〈R186 淨減法搬遷〉§80。  round-label-ok
 #
 # 為什麼「不分事件」會出事：`cancel-in-progress: true` 的語意是「同 group 的新 run
 # 取消舊 run」。group 只綁 ref 時，在 main 上一次 workflow_dispatch 就會取消掉正在跑的

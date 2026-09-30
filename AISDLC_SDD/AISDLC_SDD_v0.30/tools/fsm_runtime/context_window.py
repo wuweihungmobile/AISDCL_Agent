@@ -497,13 +497,22 @@ def repo_root(env: os._Environ | dict | None = None) -> Path:
 
 
 def settings_chain(root: Path | None = None, home: Path | str | None = None) -> list[Path]:
-    """Claude Code settings 檔，由高優先到低優先（與姊妹守衛同一條鏈）。"""
+    """Claude Code settings 檔，由高優先到低優先（與姊妹守衛同一條鏈）。
+
+    使用者層（最後一項）與根層 `platform_utils.claude_home()` 逐項同語意（DEF-200-427；
+    本子專案不跨 import 根層，故自足實作、由根層 `test_context_window_parity.py` 釘住）：
+    顯式 `home` 優先且不查環境；否則 `CLAUDE_CONFIG_DIR` 非空白時，該值本身就是取代後的
+    `.claude` 目錄（不再疊加一層）；否則 `~/.claude`。"""
     base = root or repo_root()
-    home_dir = Path(home) if home else Path(os.path.expanduser("~"))
+    if home:
+        claude_dir = Path(home) / ".claude"
+    else:
+        override = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
+        claude_dir = Path(override) if override else Path(os.path.expanduser("~")) / ".claude"
     return [
         base / ".claude" / "settings.local.json",
         base / ".claude" / "settings.json",
-        home_dir / ".claude" / "settings.json",
+        claude_dir / "settings.json",
     ]
 
 

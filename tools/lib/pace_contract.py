@@ -33,6 +33,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from quota_policy import family_key
+
 #: 檔名。**必須**等於 `autoclaude/infra/adapters/file_quota_meter.py:PACE_CACHE_NAME`。
 CONTRACT_NAME = "autosdd_pace.json"
 
@@ -42,6 +44,11 @@ CONTRACT_SCHEMA = "autosdd.pace/1"
 #: 寫檔失敗時的一次性提示（fail-soft：`--pace` 的 rc 與那一行輸出都不得因此改變）。
 WRITE_FAILED_HINT = ("⚠️  配速契約寫不進去（{path}：{why}）⇒ 引擎側會走保守地板 cap"
                      "（**不是**不設限）。`--pace` 本身不受影響。\n")
+
+#: 家族兄弟檔（DEF-200-437）寫失敗的提示。引擎目前只讀 canonical，所以**不得**借用上一句的
+#: 「引擎走保守地板」——那對兄弟檔是假話；canonical 失敗時才會另外印上一句。
+SIBLING_WRITE_FAILED_HINT = ("⚠️  配速契約的家族兄弟檔寫不進去（{path}：{why}）⇒ 只影響"
+                             "依模型讀的消費者；引擎讀的 canonical 不受這一句影響。\n")
 
 
 def contract_path() -> Path:
@@ -100,16 +107,29 @@ def payload(decision, state, max_fanout: int, halt_pct: float) -> dict:
 # fail-soft 是硬要求：`--pace` 的既有契約是零 token、且掌舵者每隔幾十分鐘就查一次
 # ⇒ 寫檔失敗不得讓它的 rc 變非零、也不得讓它印不出原本那一行。失敗只在 stderr 說一次。
 def write(decision, state, max_fanout: int, halt_pct: float,
-          path: Path | None = None) -> bool:
-    """寫契約。回「有沒有真的寫成」——失敗**不拋例外**，只出聲一次。"""
+          path: Path | None = None, model: str | None = None) -> bool:
+    """寫契約。回「每一份都寫成了沒有」——失敗**不拋例外**，各只出聲一次。
+
+    DEF-200-437：`model` 是家族字時，除 canonical（引擎讀的那份，格式與 schema 一字不動、
+    不加新鍵）外，同一個迴圈再寫一份同內容的兄弟檔 `<canonical 主檔名>_<家族><副檔名>`
+    （預設 `autosdd_pace_fable.json`）。canonical 仍是 last-writer-wins；兄弟檔讓各家族的
+    決策各有一份不互蓋的真相。`None`／未知家族字＝只寫 canonical（與此前逐字相同）。
+    """
     target = path or contract_path()
-    staging = target.with_name(f"{target.name}.{os.getpid()}.tmp")
-    try:
-        with staging.open("w", encoding="utf-8", newline="\n") as f:
-            f.write(json.dumps(payload(decision, state, max_fanout, halt_pct),
-                                ensure_ascii=False, indent=2))
-        os.replace(staging, target)
-    except OSError as why:
-        sys.stderr.write(WRITE_FAILED_HINT.format(path=target, why=why))
-        return False
-    return True
+    body = json.dumps(payload(decision, state, max_fanout, halt_pct),
+                      ensure_ascii=False, indent=2)
+    outs = [(target, WRITE_FAILED_HINT)]
+    if (family := family_key(model)):
+        outs.append((target.with_name(f"{target.stem}_{family}{target.suffix}"),
+                     SIBLING_WRITE_FAILED_HINT))
+    ok = True
+    for dest, hint in outs:  # 單一 `os.replace` 站點：兩份共用同一段處置（見上方注記）
+        staging = dest.with_name(f"{dest.name}.{os.getpid()}.tmp")
+        try:
+            with staging.open("w", encoding="utf-8", newline="\n") as f:
+                f.write(body)
+            os.replace(staging, dest)
+        except OSError as why:
+            sys.stderr.write(hint.format(path=dest, why=why))
+            ok = False
+    return ok

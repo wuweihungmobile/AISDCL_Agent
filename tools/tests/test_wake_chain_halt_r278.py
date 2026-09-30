@@ -14,6 +14,8 @@ CrossPlatform_R151_Guard_Prose_Migration.md〈test_wake_chain_halt_r278.py 模�
 """
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import sys
@@ -30,6 +32,7 @@ sys.path.insert(0, str(_REPO_ROOT / ".claude" / "hooks"))
 import importlib.util as _ilu  # noqa: E402
 
 import context_budget_guard as guard  # noqa: E402
+import platform_utils  # noqa: E402
 import quota_gate as qg  # noqa: E402
 import quota_messages  # noqa: E402
 import quota_policy  # noqa: E402
@@ -109,19 +112,22 @@ class ResolveHaltTranscriptTest(unittest.TestCase):
         self.assertEqual((cand, source), (ts, "payload"))
 
     def test_missing_payload_falls_back_to_env_derived_slug(self) -> None:
-        """RC-1 的直接修復：這是紅端本身——修前 `quota_gate` 沒有這支函式。"""
-        root = self.tmp / "repo"
-        root.mkdir()
+        """RC-1 直接修復（紅端：修前 `quota_gate` 沒有這支函式）。DEF-200-427：逐字稿目錄經
+        `claude_home()` 解析且 `CLAUDE_CONFIG_DIR` 指到暫存樹，測試不碰真實家目錄。"""
+        # root 只用來算 slug、不必存在；刻意取短——slug 取自 root 全路徑，若用 tmp 底下的路徑，
+        # 目錄樹長度會是 TEMP 長度的兩倍，在長 TEMP 的 Windows 上撞 MAX_PATH。
+        root = Path(os.sep) / "proj-def278"
         import re
         slug = re.sub(r"[^A-Za-z0-9]", "-", str(root))
-        proj = Path.home() / ".claude" / "projects" / slug
-        proj.mkdir(parents=True, exist_ok=True)
-        self.addCleanup(lambda: __import__("shutil").rmtree(proj, ignore_errors=True))
+        patcher = unittest.mock.patch.dict(os.environ, {
+            "CLAUDE_CONFIG_DIR": str(self.tmp / "cfg"),
+            "CLAUDE_CODE_SESSION_ID": "sid-def278", "CLAUDE_PROJECT_DIR": str(root)})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        proj = platform_utils.claude_home() / "projects" / slug
+        self.assertTrue(proj.is_relative_to(self.tmp), f"{proj} 不在暫存樹內＝碰到真實家目錄")
+        proj.mkdir(parents=True)
         (proj / "sid-def278.jsonl").write_text("{}\n", encoding="utf-8")
-        old_env = dict(os.environ)
-        os.environ["CLAUDE_CODE_SESSION_ID"] = "sid-def278"
-        os.environ["CLAUDE_PROJECT_DIR"] = str(root)
-        self.addCleanup(lambda: (os.environ.clear(), os.environ.update(old_env)))
         cand, source = qg.resolve_halt_transcript({})
         self.assertEqual(source, "env-derived")
         self.assertEqual(cand, proj / "sid-def278.jsonl")
@@ -620,6 +626,7 @@ class HaltLatchIsSessionScopedTest(unittest.TestCase):
             setattr(qg, name, value)
             self.addCleanup(setattr, qg, name, old)
         self.waker_calls: list[str] = []
+        self.notices: list[bool] = []  # 每次 `_gate()` 有沒有向模型送出 halt 提醒
 
     def _transcript(self, sid: str) -> Path:
         ts = self.tmp / f"{sid}.jsonl"
@@ -628,13 +635,19 @@ class HaltLatchIsSessionScopedTest(unittest.TestCase):
 
     def _gate(self, sid: str) -> int:
         ts = self._transcript(sid)
-        return qg.quota_gate(
+        rc = qg.quota_gate(
             {"hook_event_name": "PostToolUse", "tool_name": "Read",
              "transcript_path": str(ts)},
             blocking=guard.BLOCKING_TOOLS, latch_read=guard.announced_latches,
             latch_write=guard.remember_latch, plan_writer=lambda t: "plan-path",
             waker=lambda t, p: (self.waker_calls.append(str(t)) or {"armed": True}),
             event="PostToolUse")
+        # DEF-200-435：PostToolUse 的 halt 只經 `emit_to_model` 提醒一次（只累積、不輸出）⇒
+        # 就地排進緩衝區並記下「這次有沒有說話」，也免得它在 atexit 印到真的 stdout。
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            platform_utils.flush_to_model()
+        self.notices.append(bool(out.getvalue().strip()))
+        return rc
 
     def test_two_sessions_in_the_same_window_both_get_their_own_marker(self) -> None:
         """紅端＝修前第二個 sid 的 `_gate()` 會撞進「已閂鎖」分支：`waker` 只被叫一次、
@@ -642,7 +655,8 @@ class HaltLatchIsSessionScopedTest(unittest.TestCase):
         """
         rc_a = self._gate("sidA-def281rc3")
         rc_b = self._gate("sidB-def281rc3")
-        self.assertEqual((rc_a, rc_b), (2, 2), "halt 帶必須擋下兩次呼叫，不影響本測試主張")
+        self.assertEqual((rc_a, rc_b), (0, 0), "PostToolUse 的 halt 只提醒、不是 hook 錯誤")
+        self.assertEqual(self.notices, [True, True], "B 首見＝自己也該被提醒一次，不被 A 吞掉")
         self.assertEqual(len(self.waker_calls), 2,
                          "第二個 session 被第一個的機器級閂鎖誤擋 ⇒ RC-3 復發")
         self.assertIsNotNone(qg.read_halt_marker("sidA-def281rc3"),
@@ -656,7 +670,8 @@ class HaltLatchIsSessionScopedTest(unittest.TestCase):
         """
         rc1 = self._gate("sidC-def281rc3")
         rc2 = self._gate("sidC-def281rc3")
-        self.assertEqual((rc1, rc2), (2, 2))
+        self.assertEqual((rc1, rc2), (0, 0))
+        self.assertEqual(self.notices, [True, False], "提醒只說一次，之後安靜")
         self.assertEqual(len(self.waker_calls), 1,
                          "同一 session 在同一視窗重複 halt 不該重新 spawn"
                          "（one-shot 語意被打破）")

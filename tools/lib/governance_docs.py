@@ -551,6 +551,12 @@ _GOVERNANCE_DOCS = (
     # 假紅／claim guard 結構化阻斷證據／planner session 釘定）的詳情面：同一資格，即刻登記。
     _REPO_ROOT / "docs" / "06_quality"
     / "CrossPlatform_R185_SessionGate_Windows_Recheck7_Evidence.md",
+    # 掌舵者五問第八次四方覆核（DEF-200-435～444 結案、427／434 結案；halt 只提醒一次／依目標
+    # 模型判額度／遲滯依模型與尺分家／測試隔離真實 TEMP）的詳情面：同一資格，即刻登記。
+    _REPO_ROOT / "docs" / "06_quality"
+    / "CrossPlatform_R186_SessionGate_Windows_Recheck8_Evidence.md",
+    # 護欄層行數棘輪史料歸檔的第二冊（第一冊逼近 Read 工具上限，淨減法搬遷改落本檔）：即刻登記。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_Guard_Line_History_2.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/{CrossPlatform,Quota}_*.md`。這**不是**把具名

@@ -13,14 +13,11 @@
 子專案，兩者都不可依賴 monorepo 根層 `tools/lib/*.py`（子專案邊界，見各自檔內註解）。
 本檔只負責「漂移即知」，**不合併四者**。
 
-**R57 訂正（DEF-101-478／round 2 SA-R57R2-04）**：本段原文寫「三處」並只列前三處，
-而同一輪的 R57 修復已把第 4 處（`component_sanitizer.py`）納入同一缺陷的修復範圍、
-且在本檔新增了 `TestCrossSubprojectSampleParity` 跨子專案樣本鎖——**檔頭與檔身當場
-矛盾**。這與本輪判為 P2 的 `windows-compat-ci.yml` 檔頭失實（DEF-101-486）是同一
-缺陷類別（「宣稱與實況不符」），由 round 2 SA 抓出，一併訂正。第 4 處的行為鎖因
-子專案邊界不可跨界 import 而置於
-`AISDLC_SDD/scripts/tests/test_component_sanitizer_reserved_trailing_space.py`；
-本檔只以 AST 讀檔比對其**樣本清單**（實作可以四份，樣本沒有理由分歧）。
+第 4 處（`component_sanitizer.py`）的行為鎖因子專案邊界不可跨界 import，置於
+`AISDLC_SDD/scripts/tests/test_component_sanitizer_reserved_trailing_space.py`；本檔只以 AST 讀檔
+比對其**樣本清單**（實作可以四份，樣本沒有理由分歧）。R57 訂正（檔頭原寫「三處」而同輪修復已納入第
+4 處，檔頭與檔身當場矛盾）的經過搬至
+Guard_Line_History_2.md〈R186 淨減法搬遷〉§65。  round-label-ok
 
 DEF-101（後續修復）：`AutoClaude/autoclaude/models/escalation.py`
 （EscalationDump.save）與 `AutoClaude/autoclaude/plugins/checkpoint/_escalation.py`
@@ -608,54 +605,11 @@ class TestEscalationModulesReuseSharedSanitizer(unittest.TestCase):
 # ═══════════════════════════════════════════════════════════════════════════
 # repo-wide 前瞻枚舉鎖
 #
-# WHY 前瞻性：以上斷言全是**具名枚舉**（逐一 import 已知 4 份再兩兩比對），只驗白名單內
-# 彼此一致，對「有人新增第 5 份較弱的獨立重寫」零訊號。而「新站點」正是本家族真實的復發
-# 形狀：DEF-101-219／295／343／346／349／384／390／442／478（**R59 QA 複審逐筆撈帳本原文後訂正本句原先的過度宣稱**：這 9 筆**並非全是「新增獨立重寫」**——`478` 實為**白名單內四份實作的一致行為漂移**（保留名+尾隨空白+副檔名形態四處一起逃逸），`384`／`390`／`442` 則是**新的「漏淨化呼叫點」**，那類檔案的原始碼**根本不含**保留名清單或禁用字元集合字面值，**本鎖的兩個錨結構上看不到它們**。本鎖只覆蓋「新增第 N+1 份**獨立重寫**」這一類；漏淨化呼叫點需要 AST 前瞻掃描〔`442` 原文已明講此機制〕，本輪只把 AST 掃描器當一次性前提查核用過、未機械化，見下方【已實測不涵蓋】)。此前本句原寫「共 9 筆全是新站點，無一筆是
-# 白名單內漂移。`docs/06_quality/CrossPlatform_Scan_Dimensions.md` 因此把「parity 鎖須確實
-# 有前瞻性（抓得到第 N+1 份）」列為必要重複家族的常設要求（R43 曾為此翻修一次）。本節補上
-# 該常設要求——動工時實測**零違規**，故非修現存 bug。
-#
-# WHY 等值而非下限：下限只在「多一份」時說話，對「某道淨化閘被刪掉」完全沉默，且下限自身
-# 會腐化（`run_root_unittests.MIN_TESTS` 連 11 輪沒人重釘的判例）。等值一次拿到兩個方向：
-# 多一份＝可能有未經審的第 5 份；少一份＝某道閘消失了（stale 自檢）。等值另外免費得到
-# fail-open 防護——pathspec／排除清單被改壞而掃到 0 份時 hits=[] ≠ 註冊表必然翻紅，故刻意
-# **不設** `_MIN_SCANNED` 這類額外下限測試。
-#
-# WHY 不照抄姊妹檔：`test_windowsapps_guard_cross_consistency.py` 同款掃描段 868 行、跨
-# R40→R57 翻修約 6 輪、至今掛一筆永久 open 的 P3，體積幾乎全花在「排除註解／字串內的假命中」
-# （三語言剝註解、heredoc、引號配對…），而 R46 已證明那是無底洞（繞過從整行註釋→no-op
-# 前綴→heredoc 逐層復發）。本節刻意反向取捨：錨保持**粗粒度、不剝註解**。代價是註解提到
-# 裝置名清單也會命中（過度觸發）——但過度觸發是 fail-loud（有人得看一眼並登記），漏報才是
-# fail-open。代價的**處理**方式（不只承認，見上方 R57「明文承認代價 ≠ 處理了代價」判例）＝
-# 註冊表每筆必帶「角色」註記，逼登記者當場分診「是第 5 份實作，還是只是提及」。
-#
-# 邊界宣稱（三段式，見 CrossPlatform_Scan_Dimensions.md §「邊界宣稱必須實測」）：
-#   【已實測涵蓋】① 4 份權威實作全數命中；② 第 5 份實作的三語言形態皆命中——Python
-#     `set()`／`frozenset()`／`re.compile(r"^(CON|PRN|…)$")`、bash case glob（`*'<'*|*'>'*|…`
-#     與 `CON|PRN|AUX|NUL|COM[0-9]`）、PowerShell `@('CON','PRN',…)` 與 `'<>:"|?*'`；
-#     ③ 大小寫不敏感（`('con','prn','aux','nul')` 命中）；④ 無副檔名的 `tools/git-hooks/
-#     pre-commit` 在候選面內；⑤ `git ls-files` rc≠0 → AssertionError；⑥ 掃描面塌陷為 0 份
-#     → 等值斷言翻紅。
-#   【已實測不涵蓋】① 測試檔內的第 5 份實作（`_is_ntfs_test_file` 排除全部 `/tests/` 與
-#     `test_*.py`；測試檔出現清單是「對 SSOT 做斷言」，沿用姊妹檔 `_is_test_py` 同款判準）；
-#     ② 凍結版 v0.01~v0.29（Copy-on-Evolve 不回改）——實測當前凍結版內**零**錨命中，故該
-#     分支改以等價路徑實測：把 LATEST 傳成不存在的版本號後，v0.30 整棵樹 105 份候選（含真實
-#     錨命中的生產檔 `counterfactual_replay.py`）全數掉出候選面；③（R82 訂正，`DEF-101-752`：
-#     原「尚未 `git add` 的新檔——ls-files 固有性質」已改列入【已實測涵蓋】——`_ntfs_scan_candidates`
-#     現以 `-o --exclude-standard` 併掃 untracked-not-ignored，未 add 的新檔不再是盲區）；
-#     ④ 三種副檔名與三處 hook 目錄之外的檔案（`*.md`／`*.yml` 刻意不
-#     納入：帳本與文件遍地提及——實測 tracked `*.md`/`*.yml` 中錨命中 6 份，納入只製造偽陽性）。
-#     ⑤（R59 SD-R59-02 補，實測）**跨行排版與非正典順序的第 5 份實作**：兩錨都要求
-#     字面依序出現且間隙 ≤5 字元，故 PEP8 4 空白縮排的「一名一行」寫法必逃（間隙 8>5）、
-#     字母序 `{"AUX","CON","NUL","PRN"}` 必逃、Windows 檔案總管本身的字元順序
-#     `[\/:*?"<>|]` 必逃、每項帶行內註解必逃、PowerShell 多行陣列必逃。**現實意義不低**：
-#     真的第 5 份若含 COM1~9／LPT1~9，單行會超過 ruff line-length=100，幾乎必然寫成多行。
-#     ⑥（R59 QA-R59-01 補，實測）**新的「漏淨化呼叫點」**（DEF-101-384／390／442 的形狀）：
-#     那類檔案的原始碼根本不含任何錨字面值，兩錨結構上看不到；`442` 帳本原文已明講所需
-#     機制是 AST 前瞻掃描，本輪只把 AST 掃描器當一次性前提查核用過、**未機械化**。
-#   【未窮舉】**本清單並非窮舉**，只是本輪真正跑過的項目，不代表已列出全部繞過路徑：任何
-#     「錨字面值被改寫但語意等價」的寫法（`CON` 拆成 `"C" + "ON"`、`chr()` 組出字元集合、
-#     清單搬進 JSON/YAML 資料檔後讀取…）都在偵測範圍外。本段**不主張**殘餘風險只有某幾項。
+# WHY 前瞻性：以上斷言全是具名枚舉，對「新增第 5 份較弱的獨立重寫」零訊號；等值（而非下限）斷言同
+# 時守「多一份」與「某道淨化閘被刪」，並免費得到掃描面崩塌即紅的 fail-open 防護。錨保持粗粒度、不
+# 剝註解：過度觸發是 fail-loud（登記時逼人分診「第 5 份實作 vs 只是提及」），漏報才是 fail-open。
+# 已實測涵蓋／不涵蓋／未窮舉的三段式邊界、DEF 沿革與 R59／R82 訂正全文搬至
+# Guard_Line_History_2.md〈R186 淨減法搬遷〉§66。  round-label-ok
 # ═══════════════════════════════════════════════════════════════════════════
 _SCAN_PATHSPECS = ("*.py", "*.sh", "*.ps1")
 # 無副檔名的 hook 檔（`pre-commit` 是 4 份權威實作之一）：以目錄 pathspec 納入，
@@ -807,23 +761,12 @@ class TestNtfsSanitizerSiteEnumerationIsForwardLooking(unittest.TestCase):
 # ──────────────────────────────────────────────────────────────────────────
 # R69：兩筆「AISDLC_SDD 側跨樹 import autoclaude」的收容處
 # ──────────────────────────────────────────────────────────────────────────
-# 背景（DEF-101-6xx，`aisdlc-sdd-ci` run 30720156045 由綠轉紅）：R68 在
-# `AISDLC_SDD/scripts/tests/test_ntfs_length_gate.py` 與
-# `AISDLC_SDD/AISDLC_SDD_v0.30/tools/fsm_runtime/tests/
-#  test_state_component_sanitizer_parity.py` 兩處直接 `from autoclaude...` import
-# AutoClaude 生產套件。AISDLC_SDD 的 CI 相依只鎖 `AISDLC_SDD_v0.01/
-# requirements-ci.txt`（pyyaml + pytest），而 `autoclaude.utils.__init__` 會連帶
-# 拉進 pydantic ⇒ 前者在 CI 上硬 fail、後者以 `try/except ImportError` 收掉而**8 支
-# 測試在 CI 上永遠 skip**（乾淨 venv 實測 `8 skipped`——正是 R68 抓過的「靜默不跑」
-# 病，本機因裝了 AutoClaude 而兩者都測不出來）。
-#
-# 為何收容在**本檔**而非各自原地修：本檔就是本 repo 既定的「跨子專案一致性鎖歸屬根層
-# 整合層」載體（見檔頭四處實作說明與 TestCrossSubprojectSampleParity），且本檔已合法
-# `from autoclaude.utils import logger`——根層 root-infra-ci 依
-# `tools/run_root_unittests.py::_THIRD_PARTY_PREREQS` 安裝第三方相依，pydantic 恆在。
-# 搬過來之後：斷言一條沒少、且從「CI 上永遠 skip」變成「CI 上真的跑」。
-# 復發防護＝`AISDLC_SDD/scripts/tests/test_cross_subproject_import_isolation.py`
-# 的靜態掃描（禁止兩子專案互相 import）。
+# 本節收容兩筆「AISDLC_SDD 側跨樹 import autoclaude」的測試：AISDLC_SDD CI 只裝 pyyaml＋pytest，原
+# 處 import autoclaude 會連帶拉進 pydantic，一筆在 CI 硬 fail、另一筆被 `try/except ImportError`
+# 收掉而永遠 skip。收容在本檔（已合法 import `autoclaude.utils.logger`，根層 root-infra-ci 恆有
+# pydantic）後，斷言一條沒少且從「CI 上永遠 skip」變成真的跑；復發防護＝
+# `AISDLC_SDD/scripts/tests/test_cross_subproject_import_isolation.py` 的靜態掃描。R68／R69 事故實
+# 測搬至 Guard_Line_History_2.md〈R186 淨減法搬遷〉§67。  round-label-ok
 
 _SDD_COMPONENT_SANITIZER = REPO_ROOT / "AISDLC_SDD" / "scripts" / "component_sanitizer.py"
 _AUTOCLAUDE_LOGGER_SRC = REPO_ROOT / "AutoClaude" / "autoclaude" / "utils" / "logger.py"

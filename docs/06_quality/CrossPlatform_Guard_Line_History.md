@@ -64,6 +64,7 @@ Architect 複審（R98 三審）點名了根因：**逐輪重釘的敘事不該�
 
 29. [dev_start 史料搬遷](#dev_start-史料搬遷)
 30. [R185 淨減法搬遷：上限表逐列註解、R74 刪登記沿革、R60 兩列理由](#r185-淨減法搬遷上限表逐列註解r74-刪登記沿革r60-兩列理由)
+31. [R186 淨減法搬遷（本檔逼近體積上限，全文改落第二冊 `CrossPlatform_Guard_Line_History_2.md`）](CrossPlatform_Guard_Line_History_2.md)
 
 ---
 
@@ -3282,3 +3283,50 @@ v0.30 才有（本包獨立以逐版 grep 覆核）⇒ 該缺陷**不存在凍�
 `.claude/hooks/context_budget_guard.py` 原 1001～1003 行三行註解在 DEF-200-433 落地時壓成兩行騰位（raw 行數硬牆 1089），
 被省掉的一句原文：「提前掃逐字稿讓兩把尺共用同一次結果」——即 PreToolUse 守衛把逐字稿掃描提前到額度閘之前，
 是為了 context 尺與額度尺共用同一次掃描結果，不各自再掃一次。casefold 依據仍在 `quota_gate.py`／`quota_policy.py`。
+
+
+## DEF-200-435 搬遷：`context_budget_guard.py` 純史料註解（raw 行數棘輪抵銷）
+
+> 搬遷自 `.claude/hooks/context_budget_guard.py`（DEF-200-435／436／427 同包；原文逐字保全，僅去掉註解前綴與縮排）。
+> 抵銷對象：DEF-200-436 目標模型判定（+7 行）與 DEF-200-427 `claude_home` 存根（+3 行）兩處新增；
+> DEF-200-435 使 PostToolUse 的 halt 不再回 2，原本補呼叫哨兵武裝的 5 行（3 行註解＋2 行程式）成為死碼、一併移除。
+> 原位各留一行指針，或壓成只剩現行行為說明的短註解；三段皆為純註解，知識零刪除。
+
+### (A) `scan_transcript()` 合成記錄註解（原 5 行，現壓成 2 行現行行為說明）
+
+🔴 R79：合成記錄整筆退出**用量累計**，不只是退出 model 判定——
+它的 usage 三欄都在且都是 0（佔位不是用量），採計會讓水位在額度
+耗盡那一刻掉成 0.0% ⇒ 最需要任務書的那一刻守衛整支靜默。
+完整立案敘事（全庫 135 筆實測）見
+`CrossPlatform_R91_Scan_Findings.md` §A-8（R92 搬出）。
+
+### (B) `spawn_sentinel_gc()` 的兩段註解（原 2 行與 3 行）
+
+🔴 R84／C3-P4b：`sentinel_lifecycle.gc()` 此前零自動呼叫端，殘骸哨兵照樣醒來（全文搬
+moved_lore.md）。取捨同 `spawn_sentinel`：detached／自己的哨兵不能被自己收掉／吞例外。
+
+🔴 沒有 `--gc` 這個旗標：回收**就是**這支 CLI 的唯一動作（`main()` 無子指令）。
+多送一個不存在的旗標會讓 argparse 直接 rc=2 而什麼都不收，且因為 stdout 全丟
+DEVNULL，那個失敗**完全靜默**——正是本輪在治的那一族。
+
+### (C) 載具參照 import 上方的註解（原 2 行，現壓成 1 行）
+
+🔴 R83／W2-A：四個武裝站點一律問 `_has_carrier()`（不再各自判一次平台），理由與
+沿革全文搬證據檔同節。
+
+### (D) `main()` 的 Δ13 補呼叫（原 3 行註解＋2 行程式；DEF-200-435 移除）
+
+🔴 R83／Δ13：halt 帶在 PostToolUse 每次都回 2，本 hook 在這裡提早 return——
+下面的 `arm_when_earned()` 仍須在此補呼叫一次，否則整個 halt 期間 context
+續航哨兵會靜默失去所有武裝機會（兩層續航職責不同，全文搬 moved_lore.md）。
+
+```python
+if not blocking and transcript is not None and transcript.is_file():
+    arm_when_earned(transcript)
+```
+
+移除理由：halt 帶的 PostToolUse 現在回 0（一次性提醒，見 `quota_messages.halt_notice()`），
+`quota_stop` 只可能在 PreToolUse 非 0，而補呼叫的條件是 `not blocking`——兩者互斥，
+該分支結構上到不了。`arm_when_earned()` 改由原本就在的「早退之前、每次 PostToolUse 都走」
+那一處負責（`QuotaGateIsWiredToTheBurnPathTest.test_quota_halt_does_not_preempt_the_context_sentinel`
+仍鎖「halt 期間哨兵每一次都被武裝」）。

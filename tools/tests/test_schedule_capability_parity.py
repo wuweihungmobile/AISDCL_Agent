@@ -1,12 +1,7 @@
 """tools/tests/test_schedule_capability_parity.py — 排程能力對照契約（R22 DEF-101-233 殘留修復）。
 
-背景：DEF-101-233（R16 Architect 架構檢視）建議補「排程能力對照契約」機械測試，
-斷言 mac 支援子命令集合 ⊆ Windows 支援子命令集合；`tools/install_windows_nightly.ps1`
-自 R19 建立後，五輪掃描/複審（R19~R22）皆確認此測試從未真正落地——
-`tools/check_script_parity.py` 把這對腳本登記為 `_EXEMPT_PAIRS`（放棄字面比對），
-註解暗示「行為對等由 test_install_windows_nightly.py 守門」，但該檔實際只驗證
-Windows 腳本自身結構，從未跨檔比對 mac 側能力集合，形成「兩邊都以為對方在管」
-的治理縫隙（R22 Architect 一審發現）。
+背景：DEF-101-233 建議補「排程能力對照契約」機械測試，R19~R22 五輪皆確認從未落地（兩邊都以為對方在
+管的治理縫隙）。沿革搬至 Guard_Line_History_2.md〈R186 淨減法搬遷〉§56。  round-label-ok
 
 設計原則（R22 SD 一審技術指引）：**禁止字面旗標字串集合比對**——mac `--render-only`
 與 Windows `-WhatIf` 語意對等但字面完全不同（前者是自訂旗標產出 plist 供 lint，
@@ -14,17 +9,10 @@ Windows 腳本自身結構，從未跨檔比對 mac 側能力集合，形成「�
 改用「語意能力 → 各平台實際承載物」的對照表，各自以靜態 regex 從原始碼抽取實際
 存在的承載物，逐一比對映射表宣稱的能力是否兩邊都有對應物。
 
-🔴 R60 DEF-101-539（Scan-C C-01）：本檔原以 **pytest 模組層函式風格**撰寫，而四道
-執行 `tools/tests` 的閘門（`tools/git-hooks/pre-push` root-infra leg、
-`.github/workflows/root-infra-ci.yml`、`windows-compat-ci.yml`、`macos-compat-ci.yml`）
-全部走 `tools/run_root_unittests.py` 的 `unittest discover`——它只收 `TestCase` 子類，
-模組層 `def test_*` **一支都不收**。實測 `python -m unittest tools.tests.
-test_schedule_capability_parity` → `Ran 0 tests ... OK`，同一檔 pytest → 6 passed。
-落地於 R22（0053f2a，2026-07-22），至 R59 之間帶「相容性 R」的收輪 commit 有 **34 支**，
-這道鎖從未在任何閘門裡跑過一次。改寫為 `TestCase` 類別風格即真正被收集。
-根因不只本檔一支寫錯——**「單檔貢獻 0 支測試」在現行守門下零訊號**（`MIN_TESTS`
-下限只抓大規模消失；R60 實測下限值 661 與實況 661 相等＝缺席已被固化進下限），
-故同時補 `TestUnittestDiscoverConformance` 這道 repo-wide 前瞻鎖，見該類別 docstring。
+🔴 R60 DEF-101-539：本檔曾以 pytest 模組層函式風格撰寫，四道閘門走的 `unittest discover` 一支都不
+收（`Ran 0 tests ... OK`）；改寫為 `TestCase` 類別才真正被收集，並補
+`TestUnittestDiscoverConformance` repo-wide 前瞻鎖（「單檔貢獻 0 支測試」在現行守門下零訊號）。實
+測沿革搬至 Guard_Line_History_2.md〈R186 淨減法搬遷〉§57。  round-label-ok
 
 執行：python3 -m unittest discover -s tools/tests -p "test_*.py" -v
 """
@@ -61,15 +49,9 @@ from skip_tag_policy import (  # noqa: E402
 #: `tools/tests/` 頂層 `test_*.py` 的檔數下限。**不是本檔的常數——直接取自 SSOT**
 #: `tools/lib/skip_tag_policy.py` 的 `_TREE_FILE_FLOORS['tools/tests']`。
 #:
-#: 🔴 R85／訴求 2：這裡原本自己寫一份 `_SCAN_FLOOR = <數字>`，並附著逐輪重釘的敘事；
-#: 而該常數的註記自己就寫著「兩者量的是**同一棵樹的同一件事**，兩個下限各自漂移才是
-#: 真正的問題形態」，同時承認「兩處必須相等這件事沒有任何機械物在守」（列入交棒）。
-#: 那道缺口本輪以**取消第二個家**收掉：兩處不可能不相等，因為只剩一處。
-#: 原先「刻意不 import 對方、避免兩道獨立的鎖共用失效點」的顧慮**不成立**——共用的是
-#: 一個純資料常數，不是判準；兩支測試的判準（本檔的兩向斷言、對方的三向斷言）各自獨立，
-#: 而讓兩個下限各自漂移的代價已經在 R78／R82／R83 連三輪的手動同步裡付過。
-#: 重釘方式不變：由下方 `test_scan_surface_is_not_silently_empty` 的第二向斷言逐字指示，
-#: 改在 SSOT 那一處填值（本檔不再需要跟著改）。
+#: 🔴 原本這裡自己寫一份下限並附逐輪重釘敘事；兩個下限量的是同一棵樹的同一件事，取消第二個家即不可
+#: 能不相等（重釘方式由 `test_scan_surface_is_not_silently_empty` 的第二向斷言逐字指示，改在 SSOT
+#: 填值）。沿革搬至 Guard_Line_History_2.md〈R186 淨減法搬遷〉§58。  round-label-ok
 _SCAN_FLOOR = _SKIP_TREE_FLOORS["tools/tests"]
 
 
@@ -510,20 +492,10 @@ class TestUnittestDiscoverConformance(unittest.TestCase):
                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and \
                         node.name.startswith("test"):
                     module_level.append(f"{path.name}::{node.name}")
-            # 🔴 R83：先把**同一份檔案內**「基底鏈最終抵達 TestCase」的類別名收成一個
-            # 集合，再拿它當第二種合格基底。
-            # 立案是實測到的假陽性：`test_block_destructive_git_r83.py` 有一個共用夾具
-            # `class _ForeignTreeCase(unittest.TestCase)`，其三個子類別
-            # （`class TestStashIsBlockedInEveryTree(_ForeignTreeCase)` 等）被本鎖判為
-            # 「未繼承 TestCase」——而 unittest discover **確實收得到它們**（當回合實測那三類
-            # 貢獻 16 支真的在跑的測試）。⇒ 舊判準只比基底的**字面**，解析不了本地基底鏈。
-            # 為何非修不可、不能叫人把階層攤平：本鎖的立論是「unittest 不收 ⇒ 覆蓋靜默消失」，
-            # 而這裡覆蓋沒有消失 ⇒ 它報的不是那件事。逼人為了過鎖去複製共用夾具，等於用假紅
-            # 換來三份手抄夾具，正是本 repo 反覆判過的「同一份知識住多個家」。
-            # 🔴 刻意只解析**一份檔案內**的基底鏈（不跨檔）：跨檔要 import 解析，那會讓本鎖
-            # 從純 AST 掃描變成半個 import 系統，失效模式遠比它擋的東西更難看見。跨檔繼承的
-            # 測試基底在本 repo 目前是 0 個站點；真的出現時它會以假紅的形態被看見（fail-loud
-            # 方向），而不是靜默放行。
+            # 🔴 本地基底鏈：先把同一份檔案內「基底鏈最終抵達 TestCase」的類別名收成集合當第二種合
+            # 格基底（舊判準只比基底字面，對共用夾具的子類別假紅）；刻意只解析一份檔案內、不跨檔——
+            # 跨檔要 import 解析，會讓本鎖從純 AST 掃描變成半個 import 系統。R83 立案實測搬至
+            # Guard_Line_History_2.md〈R186 淨減法搬遷〉§59。  round-label-ok
             local_testcase_names: set[str] = set()
             for _ in range(8):  # 迭代到不動點：基底鏈深度上限，防病態自我繼承時無限迴圈
                 grew = False

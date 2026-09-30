@@ -665,16 +665,16 @@ _GUARD_LINE_STALE_SLACK = 0.02
 #: 寫出淨額與理由——讓方向在 diff 上一望即知。
 #: 🔴 本表含**本檔自己**，所以動本檔就會動到本表 ⇒ 改完必須重跑一次並用實測值收斂。
 _FROZEN_GUARD_LINES: dict[str, int] = {
-    "_platform_helpers.py": 407,
-    "_ps_engine.py": 115,
-    "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 8913,
+    "_platform_helpers.py": 397,
+    "_ps_engine.py": 83,
+    "test_act_local_runner_image.py": 307,
+    "test_adr_xplat001_c1c2_lock.py": 8927,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
-    "test_archive_defect_log.py": 4076,
-    "test_bash32_compat.py": 985,
+    "test_archive_defect_log.py": 4073,
+    "test_bash32_compat.py": 979,
     "test_bash_probe_spec_contract.py": 859,
-    "test_block_destructive_git_r83.py": 2451,
+    "test_block_destructive_git_r83.py": 2621,
     "test_bootstrap_core.py": 439,
     "test_bootstrap_ps1.py": 160,
     "test_check_archive_required.py": 160,
@@ -683,73 +683,73 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_check_hooks_liveness.py": 3630,
     "test_check_pytest_baseline_sites.py": 301,
     "test_check_script_parity.py": 2029,
-    "test_check_wrapper_thinness.py": 1185,
+    "test_check_wrapper_thinness.py": 1177,
     "test_ci_gate_xdist_allowlist.py": 395,
     "test_claim_provenance_r86.py": 1389,
     "test_clean_venv_carrier.py": 281,
-    "test_component_sanitizer_shared_layer_lock.py": 293,
-    "test_context_budget_guard.py": 13552,
-    "test_context_window_parity.py": 281,
+    "test_component_sanitizer_shared_layer_lock.py": 274,
+    "test_context_budget_guard.py": 14132,
+    "test_context_window_parity.py": 325,
     "test_cpu_budget.py": 428,
-    "test_defect_id_reference_integrity.py": 281,
+    "test_defect_id_reference_integrity.py": 276,
     "test_dev_platform_provenance.py": 921,
     "test_dev_start.py": 6812,
-    "test_dev_start_ps1_lastexitcode.py": 521,
+    "test_dev_start_ps1_lastexitcode.py": 502,
     "test_doc_env_prefix_platform_parity_r60.py": 331,
-    "test_doc_loc_baseline_freshness_r60.py": 7177,
-    "test_extras_quoting_zsh_safety.py": 365,
+    "test_doc_loc_baseline_freshness_r60.py": 7149,
+    "test_extras_quoting_zsh_safety.py": 352,
     "test_failure_log_rotation.py": 80,
-    "test_find_git_bash_parity.py": 1336,
-    "test_gha_action_versions.py": 681,
+    "test_find_git_bash_parity.py": 1310,
+    "test_gha_action_versions.py": 676,
     "test_git_hooks_install_common.py": 485,
     "test_guard_line_taxonomy_r99.py": 148,
     "test_hook_carrier_symlink.py": 153,
     "test_install_statusline.py": 446,
-    "test_install_windows_nightly.py": 1358,
+    "test_install_windows_nightly.py": 1355,
     "test_mac_endurance_r83.py": 1987,
     "test_mac_readiness_r82.py": 626,
-    "test_macos_smoke_skip_honesty.py": 225,
-    "test_maturity_criteria_r79.py": 431,
-    "test_negative_existence_claims_r82.py": 370,
-    "test_nightly_interpreter_determinism.py": 820,
-    "test_no_invalid_escape_sequences.py": 315,
+    "test_macos_smoke_skip_honesty.py": 221,
+    "test_maturity_criteria_r79.py": 412,
+    "test_negative_existence_claims_r82.py": 362,
+    "test_nightly_interpreter_determinism.py": 749,
+    "test_no_invalid_escape_sequences.py": 308,
     "test_ntfs_trailing_space_device_name.py": 698,
     "test_onboarding_parity_interlock.py": 233,
-    "test_platform_neutral_paths.py": 5761,
-    "test_platform_utils_dedup.py": 1142,
-    "test_pre_commit_dispatcher_sigpipe.py": 969,
-    "test_pre_push_dispatcher.py": 1203,
+    "test_platform_neutral_paths.py": 5744,
+    "test_platform_utils_dedup.py": 1178,
+    "test_pre_commit_dispatcher_sigpipe.py": 966,
+    "test_pre_push_dispatcher.py": 1198,
     "test_ps1_bom.py": 248,
-    "test_ps51_compat.py": 610,
+    "test_ps51_compat.py": 602,
     "test_ps_engine_ssot.py": 905,
-    "test_python_c_percent_shim.py": 119,
-    "test_quota_policy.py": 3416,
+    "test_python_c_percent_shim.py": 113,
+    "test_quota_policy.py": 3792,
     "test_recovery_hint_passes_ps_lint.py": 103,
-    "test_root_guard_known_model_r145.py": 227,
+    "test_root_guard_known_model_r145.py": 240,
     "test_root_infra_parity.py": 441,
-    "test_run_root_unittests.py": 5150,
+    "test_run_root_unittests.py": 5325,
     "test_sanitize_component_frozen_sdd_versions_lock.py": 317,
-    "test_schedule_capability_parity.py": 626,
-    "test_script_scan_surface_ssot.py": 391,
+    "test_schedule_capability_parity.py": 598,
+    "test_script_scan_surface_ssot.py": 376,
     "test_sdd_hook_router_r158.py": 189,
     "test_sentinel_tick_e2e_r145.py": 141,
     "test_session_brief.py": 559,
     "test_single_venv_identity.py": 162,
-    "test_skip_ceiling_ratchet_direction.py": 730,
-    "test_skip_discoverability_r83.py": 742,
+    "test_skip_ceiling_ratchet_direction.py": 719,
+    "test_skip_discoverability_r83.py": 731,
     "test_smoke_ci_sync.py": 1496,
-    "test_statusline_context_feed.py": 204,
+    "test_statusline_context_feed.py": 221,
     "test_stdio_utf8.py": 76,
-    "test_subprocess_encoding_hygiene.py": 1585,
+    "test_subprocess_encoding_hygiene.py": 1567,
     "test_tlc_runner_timeout.py": 292,
-    "test_wake_chain_halt_r278.py": 769,
-    "test_windows_forbidden_filename_parity.py": 1003,
-    "test_windows_nightly_anchor_parity.py": 135,
+    "test_wake_chain_halt_r278.py": 784,
+    "test_windows_forbidden_filename_parity.py": 946,
+    "test_windows_nightly_anchor_parity.py": 119,
     "test_windows_smoke_heartbeat_doc_sync.py": 197,
-    "test_windowsapps_guard_bash_parity.py": 1059,
-    "test_windowsapps_guard_cross_consistency.py": 2174,
-    "test_workflow_permission_concurrency_lock.py": 1763,
-    "test_workflow_schedule_sync.py": 309,
+    "test_windowsapps_guard_bash_parity.py": 1026,
+    "test_windowsapps_guard_cross_consistency.py": 2092,
+    "test_workflow_permission_concurrency_lock.py": 1743,
+    "test_workflow_schedule_sync.py": 305,
     "test_workflow_timeout_coverage.py": 158,
     "test_worktree_paths.py": 104,
 }
@@ -2535,6 +2535,15 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "＋本表自身 −107（重釘列 +14、同輪刪 121 行純史料註解搬進 Guard_Line_History.md"
      "〈R185 淨減法搬遷〉節）。回歸鎖軌申報 309（軌上限），主軌 496 ≤ 525。逐項見 "
      "CrossPlatform_R185_SessionGate_Windows_Recheck7_Evidence.md〈四〉〈六〉。"),  # round-label-ok
+    ("R186", 109396, 110201, +805,  # round-label-ok
+     "[非淨減法輪][回歸鎖軌申報 309（軌上限），見 _REGRESSION_LANE_LOG 同輪列] 掌舵者五問第八次"
+     "四方覆核（DEF-200-435～444 結案回歸鎖＋DEF-200-427 結案）：test_context_budget_guard.py "
+     "+580／test_quota_policy.py +376／test_run_root_unittests.py +175／"
+     "test_block_destructive_git_r83.py +170 等新增回歸鎖＋本表自身 +14（重釘列、回歸鎖軌同輪列、"
+     "接鏈列）；Trim 棒同輪刪 1078 行純史料註解原文搬進 CrossPlatform_Guard_Line_History_2.md、"
+     "刪 61 行本輪新增散文。主軌 496 ≤ 524（款(11) 連續上升第 2 輪，R185 為第 1 輪；R187 主軌必須 "
+     "≤ 0）。逐項見 "
+     "CrossPlatform_R186_SessionGate_Windows_Recheck8_Evidence.md〈四〉〈六〉。"),  # round-label-ok
 )
 
 
@@ -2560,7 +2569,7 @@ _REPIN_NET_CAP_SCHEDULE: tuple[tuple[int, int], ...] = (
     (129, 552), (131, 550), (133, 549), (135, 548), (137, 547), (139, 546), (141, 545),
     (143, 544), (145, 543), (147, 542), (149, 541), (151, 540), (153, 539), (155, 538),
     (157, 537), (159, 536), (163, 535), (165, 534), (167, 533), (169, 532), (171, 531),
-    (173, 530), (175, 529), (177, 528), (180, 527), (182, 526), (184, 525),
+    (173, 530), (175, 529), (177, 528), (180, 527), (182, 526), (184, 525), (186, 524),
 )
 #: 生效點＝首列輪號、現行上限＝末列上限，**皆由表導出不另立常數**（R73 判例：一份知識一個家）。
 _REPIN_ROUND_CAP_SINCE = _REPIN_NET_CAP_SCHEDULE[0][0]
@@ -2954,6 +2963,10 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
     ("R185", 309,  # round-label-ok
      "DEF-200-428～433 結案回歸鎖淨額 912 超過軌上限 309 ⇒ 申報 309（≤ 主表淨額 805），"
      "主軌 496 ≤ 525。見 CrossPlatform_R145_Scan_Findings.md〈附記（R185）〉。"),  # round-label-ok
+    ("R186", 309,  # round-label-ok
+     "DEF-200-435～444／427 結案回歸鎖淨額超過軌上限 309 ⇒ 申報 309（≤ 主表淨額），"
+     "主軌 496 ≤ 524。見 "
+     "CrossPlatform_R186_SessionGate_Windows_Recheck8_Evidence.md〈四〉。"),  # round-label-ok
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -3108,9 +3121,9 @@ def net_cap_schedule_problems(
 #: CrossPlatform_R97_Scan_Findings.md〈到期義務與重新武裝 WHY〉節；R101 起歷次兌現的 round-label-ok
 #: 逐段沿革搬至 CrossPlatform_Guard_Line_History.md〈到期義務兌現沿革〉節。
 #: R113～R182 兌現沿革見 Guard_Line_History.md〈到期義務兌現沿革〉R184 搬遷追加小節 round-label-ok
-#: R184 兌現：cap 降到目標本身（525，見 `(184, 525)` 列），重新武裝：目標 524＜cap round-label-ok
-_REPIN_NET_CAP_DUE_ROUND = 186  # round-label-ok：到期輪＝兌現輪+2（lookahead 判準的活體對照）
-_REPIN_NET_CAP_DUE_TARGET = 524  # 步伐 1，嚴格低於 cap 525（本輪重新武裝） round-label-ok
+#: R184 兌現 (184, 525)；R186 兌現：cap 降到目標本身 524，重新武裝目標 523 round-label-ok
+_REPIN_NET_CAP_DUE_ROUND = 188  # round-label-ok：到期輪＝兌現輪+2（lookahead 判準的活體對照）
+_REPIN_NET_CAP_DUE_TARGET = 523  # 步伐 1，嚴格低於 cap 524（本輪重新武裝） round-label-ok
 
 #: DEF-200-121：到期輪自身的後設鎖——`_REPIN_NET_CAP_DUE_ROUND` 只准落在「最近稽核輪
 #: ＋ lookahead」以內（歷史母體 85..113 的到期輪一律＝上一次兌現輪 +2）。可延期的到期日
@@ -3177,10 +3190,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 316
+_REPIN_LOG_FROZEN_PREFIX_LEN = 317
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "61ea6814f294d3b1a18c9e6f4013488436dd0aef14d4a9603ff4717e7f2f0bea")
+    "fab77716902fa58bb46ed0dfd09831912f305335a5ea4bf882c7cb267cb6bbbf")
 
 
 def repin_log_history_digest(
@@ -3531,6 +3544,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R183", "783155a15210", "bd1f875e0ceb", "DEF-200-420"),  # round-label-ok
     ("R184", "bd1f875e0ceb", "d5cf66772eef", "DEF-200-423"),  # round-label-ok
     ("R185", "d5cf66772eef", "61ea6814f294", "DEF-200-429"),  # round-label-ok
+    ("R186", "61ea6814f294", "fab77716902f", "DEF-200-435"),  # round-label-ok
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

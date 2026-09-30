@@ -67,13 +67,16 @@ sys.path.insert(0, os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
     "tools", "lib"))
 try:
-    from platform_utils import emit_to_model, read_payload  # type: ignore[import-not-found]
+    from platform_utils import claude_home, emit_to_model, read_payload  # type: ignore[import]
 except Exception:  # noqa: BLE001 — 共用層不可達＝退化，不是崩潰（fail-open 是 P0）
     def read_payload() -> dict | None:  # type: ignore[misc]
         return None
 
     def emit_to_model(event: str, msg: str) -> bool:  # type: ignore[misc]
         return False  # 送不進模型 ⇒ 只剩 stderr 那一半
+
+    def claude_home() -> Path:  # type: ignore[misc]
+        return Path.home().joinpath(".claude")  # claude-home-fallback-ok: platform_utils 不可達
 
 try:
     import quota_gate  # type: ignore[import-not-found]  # 額度水位節流閘，與 context 水位零交集
@@ -85,8 +88,7 @@ try:
 except Exception:  # noqa: BLE001 — 見上
     sentinel_lifecycle = None  # type: ignore[assignment]
 
-# 🔴 R83／W2-A：四個武裝站點一律問 `_has_carrier()`（不再各自判一次平台），理由與
-# 沿革全文搬證據檔同節。
+# 🔴 四個武裝站點一律問 `_has_carrier()`（不再各自判一次平台）；沿革見證據檔同節。
 try:
     import schedule_backend  # type: ignore[import-not-found]  # 排程載具（schtasks／launchd／沒有）
 except Exception:  # noqa: BLE001 — 見上
@@ -280,11 +282,8 @@ def scan_transcript(path: Path) -> tuple[int | None, int, str | None]:
                     continue
                 seen_model = message.get("model")
                 if seen_model == SYNTHETIC_MODEL:
-                    # 🔴 R79：合成記錄整筆退出**用量累計**，不只是退出 model 判定——
-                    # 它的 usage 三欄都在且都是 0（佔位不是用量），採計會讓水位在額度
-                    # 耗盡那一刻掉成 0.0% ⇒ 最需要任務書的那一刻守衛整支靜默。
-                    # 完整立案敘事（全庫 135 筆實測）見
-                    # `CrossPlatform_R91_Scan_Findings.md` §A-8（R92 搬出）。
+                    # 合成記錄整筆退出**用量累計**（usage 三欄皆 0 的佔位；採計會讓額度耗盡那刻水位
+                    # 掉成 0.0% ⇒ 守衛靜默）。史料見 Guard_Line_History.md〈DEF-200-435 搬遷〉。
                     continue
                 if isinstance(seen_model, str):
                     model = seen_model
@@ -700,7 +699,7 @@ def settings_chain(root: Path | None = None) -> list[Path]:
     return [
         base / ".claude" / "settings.local.json",
         base / ".claude" / "settings.json",
-        Path(os.path.expanduser("~")) / ".claude" / "settings.json",
+        claude_home() / "settings.json",
     ]
 
 
@@ -809,8 +808,7 @@ def arm_sentinel(payload: dict) -> None:
                      f" （閂鎖已清；武裝延後到累積夠工作量的那一刻）｜孤兒回收 spawn={swept} ===\n")
 
 
-# 🔴 R84／C3-P4b：`sentinel_lifecycle.gc()` 此前零自動呼叫端，殘骸哨兵照樣醒來（全文搬
-# moved_lore.md）。取捨同 `spawn_sentinel`：detached／自己的哨兵不能被自己收掉／吞例外。
+# 取捨同 `spawn_sentinel`：detached／自己的哨兵不被收掉／吞例外（史料見 Guard_Line_History.md）。
 def spawn_sentinel_gc(keep_sid: str) -> bool:
     """Detached 起 `sentinel_lifecycle --gc --apply`；回「有沒有真的 spawn 出去」。"""
     lifecycle = repo_root() / "tools" / "lib" / "sentinel_lifecycle.py"
@@ -818,9 +816,8 @@ def spawn_sentinel_gc(keep_sid: str) -> bool:
         return False
     try:
         subprocess.Popen(  # noqa: S603 — 參數全是本檔算出來的路徑／本 session 的 id
-            # 🔴 沒有 `--gc` 這個旗標：回收**就是**這支 CLI 的唯一動作（`main()` 無子指令）。
-            # 多送一個不存在的旗標會讓 argparse 直接 rc=2 而什麼都不收，且因為 stdout 全丟
-            # DEVNULL，那個失敗**完全靜默**——正是本輪在治的那一族。
+            # 🔴 沒有 `--gc` 旗標：回收**就是**這支 CLI 的唯一動作（`main()` 無子指令）；多送不存在
+            # 的旗標 ⇒ argparse rc=2 什麼都不收，且 stdout 全丟 DEVNULL ⇒ 失敗**完全靜默**。
             [quiet_python(), str(lifecycle), "--apply", "--keep", keep_sid],
             stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL, creationflags=NO_WINDOW)
@@ -978,7 +975,7 @@ def main() -> int:
                 "⚠️  context 水位守衛讀不出 hook payload（壞 JSON 或空 stdin）"
                 "——本次不做任何量測。守衛沒有靜默失效，但它這一次確實沒看到東西。\n"
             )
-            return 1
+            return 1  # degraded-payload: 讀不出 payload，本次確實沒量測
         event = str(payload.get("hook_event_name") or "")
         if event == "SessionStart":
             # 清武裝閂鎖（R82／HELM-02：真正武裝延後到 PostToolUse）＋ v2.1.13 G2 未讀
@@ -1002,18 +999,20 @@ def main() -> int:
         # `quota_gate.quota_gate` 檔頭）；逐字稿無 model（新視窗首輪）退用 feed 的 model.id。
         scanned = (scan_transcript(transcript) if measuring and transcript
                   and transcript.is_file() else None)
-        active_model = model_family(scanned[2] if scanned and scanned[2] else transcript
-                                    and read_context_feed(session_id_of(transcript), None)["note"])
+        # 🔴 DEF-200-436：派 Agent／Task 帶 `model` 時問**目標**家族（fork 忽略 model、吃父模型；
+        # inherit／缺席／認不出／Workflow ⇒ 退回視窗模型）。PostToolUse 量的永遠是視窗自己的燃燒。
+        ti = payload.get("tool_input")
+        target = (ti.get("model") if blocking and isinstance(ti, dict)
+                  and payload.get("tool_name") in ("Agent", "Task")
+                  and ti.get("subagent_type") != "fork" else None)
+        active_model = model_family(target) or model_family(
+            scanned[2] if scanned and scanned[2] else transcript
+            and read_context_feed(session_id_of(transcript), None)["note"])
         if measuring and quota_gate is not None and (quota_stop := quota_gate.quota_gate(
                 payload, blocking=BLOCKING_TOOLS, latch_read=announced_latches,
                 latch_write=remember_latch, plan_writer=write_resume_plan,
                 waker=arm_quota_wakeup, event=event, active_model=active_model or None)):
-            # 🔴 R83／Δ13：halt 帶在 PostToolUse 每次都回 2，本 hook 在這裡提早 return——
-            # 下面的 `arm_when_earned()` 仍須在此補呼叫一次，否則整個 halt 期間 context
-            # 續航哨兵會靜默失去所有武裝機會（兩層續航職責不同，全文搬 moved_lore.md）。
-            if not blocking and transcript is not None and transcript.is_file():
-                arm_when_earned(transcript)
-            return quota_stop
+            return quota_stop  # 只有 PreToolUse 的扇出阻斷回非 0；PostToolUse 的 halt 是 rc=0 提醒
         if transcript is None:
             return 0  # 量測暫時不可得 ≠ 輸入壞掉，見模組 docstring 的行為契約
         if not transcript.is_file():

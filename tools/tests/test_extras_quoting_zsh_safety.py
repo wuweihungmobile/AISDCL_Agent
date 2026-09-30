@@ -131,19 +131,11 @@ _EXCLUDED_SUBSTRINGS = (
     "README_Prompt_v0.1_history",
 )
 
-# R57 round 1 Architect／QA 交叉指出（DEF-101-479）：原掃描面只有 tracked `*.md`，
-# 完全看不到**執行期真的印給使用者複製貼上**的訊息——`AutoClaude/tools/git-hooks/pre-push`
-# 與 `AutoClaude/tools/local_ci_gate.py` 當時各有一處壞形態，這道鎖卻全綠。那比文件更要命：
-# 那是 push 被擋當下的唯一指引，mac 使用者照做 → `zsh: no matches found` → 再 push 再被擋，
-# 形成迴圈。故掃描面擴為「tracked *.md + *.sh + *.py + 三處 git-hooks 無副檔名檔」。
-# R59（DEF-101-507）再加 `*.toml`/`*.yaml`/`*.yml`：`AutoClaude/pyproject.toml` 的 extras
-# 註解（6 處）與 `AutoClaude/config.yaml`（1 處）原本連掃描面都進不去，而 pyproject 的
-# 註解正是「要裝選配時最先讀到的一行」；`.github/workflows/*.yml` 已全用雙引號，加入
-# 後實跑確認零誤報。`.ps1` 仍刻意不納入：PowerShell 無此 glob 語意，納入只會製造偽陽性。
-# R59 SD-R59-06：加入 `*.yaml` 後掃描面由 ~3,000 暴增到 24,140 份（單模組 20.3s，
-# 且是每次 pre-push／根層 unittest 都要付的延遲），暴增主因是 AISDLC_SDD 30 個凍結版
-# 的 governance/R-*.yaml 與 docs_template。凍結版依 Copy-on-Evolve 政策不回改，
-# 掃它們對本鎖零收益，故以 pathspec 排除；LATEST 版仍在掃描面內。
+# 掃描面沿革：原掃描面只有 tracked `*.md`，看不到執行期真的印給使用者複製貼上的訊息，故擴為 `*.md`
+# ＋`*.sh`＋`*.py`＋三處 git-hooks 無副檔名檔，再加 `*.toml`／`*.yaml`／`*.yml`；`.ps1` 刻意不納入
+# （PowerShell 無此 glob 語意，納入只會製造偽陽性）；凍結版 yaml 依 Copy-on-Evolve 不回改、掃它們
+# 零收益，故以 pathspec 排除（LATEST 仍在掃描面內）。逐輪擴面的實測搬至
+# Guard_Line_History_2.md〈R186 淨減法搬遷〉§23。  round-label-ok
 _SCAN_PATHSPECS = (
     "*.md", "*.sh", "*.py", "*.toml", "*.yaml", "*.yml",
     ":(exclude)AISDLC_SDD/AISDLC_SDD_v0.0*/**/*.yaml",
@@ -187,14 +179,9 @@ _EXEMPT_RE = re.compile(r"zsh-glob-ok:\s*(?P<why>.*?)\s*(?:-->\s*)?$")
 # `_MAX_EXEMPTIONS` 為其衍生值（sanity net）。
 
 # ── R59 ARCH-R59-02：豁免預算必須分兩本帳 ─────────────────────────────────────
-# 問題（Architect 一審實測）：`_MAX_EXEMPTIONS` 的設計意圖是偵測「豁免被當成繞過後門」，
-# 但實測 9 筆已用豁免裡有 8 筆**在本鎖檔自己內部**——因為判準 (4) 的三段式邊界宣稱
-# **要求**逐項列出被涵蓋／不涵蓋的壞形態，而列出壞形態就得引述壞形態、就得申請豁免。
-# 於是這個計數器現在量的主要是「本鎖的規格文件有多長」，不是「有沒有人濫用豁免」。
-# 後果可預測：下一輪只要新增一種形態、依判準補一行病例樣本就撞頂，而撞頂訊息會說
-# 「疑似被當成繞過手段」——**把成因指錯人**，最省力的反應就是再調高上限（R57→R59 已
-# 調過一次 5→10）。這正是姊妹檔 test_windowsapps_guard_cross_consistency.py 的腐化
-# 路徑起點：機制被自己的文件需求推著鬆綁。
+# 問題：單一總上限同時量「本鎖規格文件有多長」與「有沒有人濫用豁免」，撞頂訊息把成因指錯人、最省力
+# 的反應是再調高數字。立案實測（R57→R59 已調過一次上限）搬至
+# Guard_Line_History_2.md〈R186 淨減法搬遷〉§24。  round-label-ok
 #
 # 修法：拆兩本帳。本鎖檔自身的病例樣本走寬上限**並加下限**（樣本被整段刪掉＝三段式
 # 宣稱失去查證性，同樣要紅）；本鎖檔**之外**的豁免走嚴格上限——那才是原本想守的訊號。

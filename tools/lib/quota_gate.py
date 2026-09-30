@@ -91,6 +91,7 @@ import endurance_env  # noqa: E402
 # fallback stub 等於讓同一份字面有第二個家，而且會用錯的答案靜默通過。
 import pace_contract  # noqa: E402  # R86：配速檔案契約的寫入端（引擎側唯一的傳遞方式）
 import quota_availability  # noqa: E402  # R102／PRD §4.2.4(a)：可得性軸遲滯（內部已 fail-soft）  round-label-ok
+import quota_messages  # noqa: E402  # DEF-200-435：新 helper 走模組屬性（from-import 每名佔一行，tier 餘裕僅 1 行）
 import quota_pace  # noqa: E402  # R86：窗長／燃燒率／跨窗攤提（同樣是判讀原語）
 import quota_policy  # noqa: E402
 import quota_stability  # noqa: E402  # R102／PRD §4.2.4(b)(c)(d)：死區／變化率／最小停留時間  round-label-ok
@@ -121,14 +122,15 @@ from quota_messages import (  # noqa: E402,F401
     core_signature_change_note,
     evidence_hint,
     fanout_window_line,
+    halt_latch_key,  # DEF-200-435：halt 閂鎖鍵／訊息組字都住人話面；本檔只接線
     halt_marker_or_rejection,  # DEF-200-281／F-1：re-export，同 quota_messages 檔頭慣例
+    halt_notice,
     halt_resets_at,
     halt_verdict,  # noqa: F401  # DEF-200-278／INV-H2：re-export，見 quota_messages 檔頭慣例
     halted_band_line,  # D23（SD-07）：re-export，同上一行慣例
+    halted_pace_text,
     model_hint_line,
     pace_line,
-    quota_halt_message,
-    quota_halt_repeat_message,  # R158：1140-1147 重複訊息的組字邏輯搬回這裡 round-label-ok
     quota_prepare_message,
     reset_branch,
     reset_horizon_phrase,
@@ -690,9 +692,10 @@ def refresh_quota_blocking(timeout: int = QUOTA_SYNC_TIMEOUT_SECONDS, *,
     下一波扇出整批通過（本機佐證：刷新痕跡與快取 `measured_at` 之間 69 分鐘零自動刷新）。
 
     代價量過了，不是猜的：端點 RTT 實測 **0.33／0.36／0.41 秒**，逾時上界 4 秒；且它
-    **只在扇出型工具**上、每 TTL 至多一次（`claim_refresh_slot`）⇒ 不是「給每一次工具
-    呼叫加上網路延遲」那個被否決的形態。收斂型工具（讀檔、寫檔、跑 git）在上游
-    `tool not in blocking` 就返回了，一次都碰不到這裡。
+    **只在快取已不可用時**、且每 TTL 至多一次（`claim_refresh_slot`）⇒ 不是「給每一次工具
+    呼叫加上網路延遲」那個被否決的形態。PreToolUse 的收斂型工具（讀檔、寫檔、跑 git）在上游
+    `tool not in blocking` 就返回了；PostToolUse 對註冊面上每個工具都會走到這裡（燃燒
+    額度的正是那條路），所以這一格同樣受每 TTL 一次的名額節制（DEF-200-435 訂正舊句）。
     """
     if quota_meter is None:
         note_degraded("meter-missing", "取數器 import 不到（共用層不可達）", event=event)
@@ -905,14 +908,14 @@ def pace_report(now: datetime | None = None, model: str | None = None,
                 sid: str | None = None) -> str:
     """`--pace` 的全文：第一行是那個數字，第二行起是逐軸明細（每個 % 都帶 kind 與分鐘）。
 
-    D23（SD-07）：本 sid 的 halt 標記未過期時直接短路回「halted」那一行，**不**進
-    `pace_state()`（它在快取不可用時可能補打一次 `/api/oauth/usage`）——halt 期間
-    量不到本來就是事實，不需要再花一次 API 才知道。
+    D23（SD-07）：本 sid 的 halt 標記未過期時短路，**不**進 `pace_state()`（它在快取不可用時
+    可能補打一次 `/api/oauth/usage`）——halt 期間不需要再花一次 API。DEF-200-435：短路仍**讀**
+    快取（只讀檔、不打 API）：新鮮 ⇒ 標記行之後印逐軸真實讀數；不可用才說沒有讀數。
     """
     now = now or datetime.now().astimezone()
-    if (halted := halted_band_line(read_halt_marker(sid or ""), now)):
-        return halted + "\n"
     policy, problems = quota_policy.load_policy(policy_env())
+    if (halted := halted_band_line(read_halt_marker(sid or ""), now)):
+        return halted_pace_text(halted, read_quota(now), now, policy, model)
     state = pace_state(now)
     # 🔴 `live` 落款進去是為了**下一輪**：per-agent 燃燒率＝Δpct ÷（Δ分鐘 × 併發數），
     # 而併發數不記下來就永遠算不出來（本輪的 r 只到「每 pp 換幾 pp」這一層）。
@@ -931,14 +934,16 @@ def pace_report(now: datetime | None = None, model: str | None = None,
     decision = quota_policy.decide(state, now, policy, ratio, ratio_note, active_model=model)
     # 🔴 R102：把 cap 寫進契約檔這一步，是引擎唯一真的會讀到 cap 的地方（`quota_gate()` 的  round-label-ok  # noqa: E501
     # 派發帳只擋 hook 觸發的扇出型工具呼叫，引擎自己的併發排程走這份檔案契約）——平穩性
-    # 機制若只接進 `quota_gate()`，引擎那一側仍然看得到原始的、會抖動的 cap。兩處共用同一份
-    # 持久狀態（`quota_availability`／`quota_stability` 皆 per-account、非 per-呼叫端），
-    # 故 `--pace` 與 hook 判定看到的是**同一段**遲滯歷史，不會互相矛盾。
+    # 機制若只接進 `quota_gate()`，引擎那一側仍然看得到原始的、會抖動的 cap。可得性狀態
+    # （`quota_availability`）仍是 per-account 共用；平穩性遲滯（`quota_stability`）
+    # 則按（模型家族, 尺）分檔（DEF-200-437）：`--pace` 帶 ratio 算出的更緊 cap 只准寫
+    # **pace 那把尺**（`ruler=RULER_PACE`），不得改守衛的執法狀態——此前兩者共用一份，
+    # 查一次 `--pace` 就讓之後一個最小停留時間內的扇出多擋一格；另外各家族也互不污染。
     avail = quota_availability.evaluate(now, state.usable(),
                                         exit_streak=policy.availability_exit_streak,
                                         min_dwell_seconds=policy.availability_min_dwell_seconds)
     stabilized = quota_stability.evaluate(
-        decision.cap, decision.band, now,
+        decision.cap, decision.band, now, scope=model, ruler=quota_stability.RULER_PACE,
         min_dwell_seconds=policy.min_dwell_seconds,
         unmeasured=avail.availability == quota_availability.AVAILABILITY_UNMEASURED)
     if stabilized != decision.cap:
@@ -947,7 +952,7 @@ def pace_report(now: datetime | None = None, model: str | None = None,
     # 🔴 R86 跨包：引擎（`autoclaude/`）**不准** import 本層（`.importlinter` 的
     # `no-harness-import`）⇒ 唯一的傳遞方式是檔案契約。fail-soft 在 `pace_contract.write`
     # 內（寫不進去只在 stderr 說一次，`--pace` 的 rc 與那一行輸出都不受影響）。
-    pace_contract.write(decision, state, policy.max_fanout, policy.halt_pct)
+    pace_contract.write(decision, state, policy.max_fanout, policy.halt_pct, model=model)
     tail = f"\n⚠️ .env 有設錯：{'；'.join(problems)}" if problems else ""
     # 🔴 R89／`DEF-200-112`：這一行此前**只有撞牆時才說得出來**。`--pace` 是舵手派工前
     # 查的那個出口，而它對 cap=0 只印「reset 距離不明」——「等 20 分鐘就好」與「只能等
@@ -1100,7 +1105,7 @@ def quota_gate(payload: dict, *, blocking, latch_read, latch_write,
                                         min_dwell_seconds=policy.availability_min_dwell_seconds,
                                         event=event)
     stabilized = quota_stability.evaluate(
-        decision.cap, decision.band, now,
+        decision.cap, decision.band, now, scope=active_model,
         min_dwell_seconds=policy.min_dwell_seconds,
         unmeasured=avail.availability == quota_availability.AVAILABILITY_UNMEASURED)
     if stabilized != decision.cap:
@@ -1109,9 +1114,9 @@ def quota_gate(payload: dict, *, blocking, latch_read, latch_write,
         decision = replace(decision, cap=stabilized,
                            recommended_fanout=min(decision.recommended_fanout, stabilized))
     if decision.band == quota_policy.BAND_HALT:
-        latch = quota_latch_path()
-        # 閂鎖鍵帶 (kind, reset 分鐘)：新的視窗＝重新武裝一次。截到分鐘是因為 `resets_at`
-        # 有次秒級抖動（它是 now+剩餘算出來的），字串相等比較會每次都判「reset 變了」。
+        # 閂鎖鍵帶 (sid, 模型家族, kind, reset 分鐘)（組字見 `halt_latch_key()`）：新的視窗＝重新
+        # 武裝一次。截到分鐘是因為 `resets_at` 有次秒級抖動（它是 now+剩餘算出來的），字串
+        # 相等比較會每次都判「reset 變了」。
         # 🔴 R83／D2：`kind` 改由 `decision` 直接算，好讓**副作用整段移進閂鎖之內**。
         # 舊順序無條件先跑 `quota_halt_actions()`（它會寫一份任務書 ＋ spawn 一支
         # planner），只有訊息受閂鎖節制。在只有 PreToolUse×扇出會呼叫本閘的年代那還撐得
@@ -1126,26 +1131,26 @@ def quota_gate(payload: dict, *, blocking, latch_read, latch_write,
         # 會被第一個 session 的閂鎖誤擋（`quota_latch_path()` 是 machine-wide 單一檔案）
         # ⇒ 永遠拿不到自己的 halt 標記。sid 取法與 `quota_halt_actions()` 寫入標記檔名
         # 用的**同一個**來源（已解析的逐字稿 stem），兩處故意一致。
-        transcript, _ = resolve_halt_transcript(payload)
-        sid = transcript.stem if transcript else "unknown"
-        key = f"halt@{sid}@{decision.binding.kind}@{str(halt_resets_at(decision))[:16]}"
-        if key not in latch_read(latch):
-            latch_write(latch, key)
-            act = quota_halt_actions(payload, decision, now,
-                                     plan_writer=plan_writer, waker=waker)
-            sys.stderr.write(quota_halt_message(decision, act))
-        else:
-            # 🔴 R83：此句原本逐字說「`{tool}` 仍然不執行」——那在 PostToolUse 上是**假話**
-            # （那次 Read／Bash 已經執行完了，PostToolUse 的 exit 2 只回饋 stderr）。訊息裡
-            # 混一句假話比少一欄更難看見，故改成對兩個事件都為真的說法。
-            # 🔴 R89／`DEF-200-112`：閂鎖之後這則會**每一次** Read／Bash 都印，也就是撞牆
-            # 期間人唯一持續看得到的那一則；而它此前不帶期程 ⇒ 「等一下就好」與「只能等
-            # 人」在整個 halt 期間都分不出來。第一則（`quota_halt_message`）分得出來，但它
-            # 一個 reset 視窗只印一次，早就捲出畫面了。同一個 `reset_branch()`，第三個出口。
-            # 🔴 R158：組字邏輯整段搬回 `quota_messages.quota_halt_repeat_message()`。round-label-ok
-            # 人話面只有一個家，不是把常數搬過去、組字留在這裡兩處各自維護。
-            sys.stderr.write(quota_halt_repeat_message(decision, now))
-        return 2
+        # DEF-200-436：停止的只有「這次派工指名的模型」的分軌軸時，只擋這一次（不吃閂鎖、不做視窗級
+        # 副作用）——視窗自己沒停止卻被落 halt 標記，`--pace` 會被短路成 halted 直到目標家族 reset。
+        scoped = quota_messages.halt_dispatch_scoped(payload, event, active_model, decision)
+        sid = (resolve_halt_transcript(payload)[0] or Path("unknown")).stem
+        key = halt_latch_key(sid, active_model, decision)
+        if (first := not scoped and key not in latch_read(quota_latch_path())):
+            latch_write(quota_latch_path(), key)
+        # DEF-200-435：副作用拋例外不得帶走煞車與提醒（`halt_actions_guarded()` 的 docstring）；
+        # 閂鎖刻意仍先寫——改成動作成功後才寫會讓平行的 hook 行程各自重跑一輪副作用。
+        act = first and quota_messages.halt_actions_guarded(
+            quota_halt_actions, payload, decision, now, plan_writer=plan_writer, waker=waker)
+        # 🔴 DEF-200-435：halt 帶只有 PreToolUse×扇出邊緣是「真的擋下」（rc=2，首則／重複兩版都
+        # 如實說這次呼叫沒有執行）。PostToolUse 的工具早已跑完、沒有東西可擋，以前照樣 rc=2
+        # ⇒ CC 把每一次 Read／PowerShell 標成 hook error，人與模型都讀成「工具被擋、不能用」。
+        # 現在首見時 exit 0＋`additionalContext` 提醒一次（副作用仍只做那一次），之後完全安靜。
+        # 鍵多帶模型家族：同視窗換家族後停止的軸可能換了一批。訊息組字全在 `halt_notice()`
+        # （人話面唯一的家）；`act` 為 False＝閂鎖已命中＝重複。
+        text, rc = halt_notice(decision, now, event, tool, act, active_model, scoped)
+        sys.stderr.write(text) if rc else emit_to_model(event, text)  # ''：emit 不收、等於靜默
+        return rc
     # 🔴 R84／6C（SA-03）：prepare 帶（85~95%）的準備動作。位置刻意在 halt **之後**、
     # 在下面那道早退**之前**——早退對 `PostToolUse` 與 free 帶無條件 `return 0`，把這一段
     # 放在它後面就等於一行都到不了（那正是本缺陷的形狀：函式對了但沒人叫它）。

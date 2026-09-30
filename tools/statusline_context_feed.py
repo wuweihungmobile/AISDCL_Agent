@@ -146,7 +146,12 @@ def ui_line(payload: dict) -> str:
     used_pct = cw.get("used_percentage")
     if not isinstance(used_pct, (int, float)) or isinstance(used_pct, bool):
         # session 首次 API 呼叫前／`/compact` 後到下一次呼叫前，官方契約是 null。
-        return f"ctx n/a | {label}"
+        # DEF-200-442：自解釋「下一次回覆後才有數字」；量不到≠量到零，不印任何百分比或 0，
+        # 視窗大小只在 payload 帶了正的數值時才印。
+        size = cw.get("context_window_size")
+        has_size = isinstance(size, (int, float)) and not isinstance(size, bool) and size > 0
+        of = f" of {_fmt_tokens(size)}" if has_size else ""
+        return f"ctx n/a{of} (until next reply) | {label}"
     used = _current_usage_sum(cw)
     size = cw.get("context_window_size")
     prefix = "!" if used_pct >= WARN_RATIO_PCT else ""

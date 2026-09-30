@@ -2992,17 +2992,12 @@ def scan_foreign_platform_api(source: str, rel: str) -> tuple[list[str], list[st
     return offenders, stale
 
 
-#: 站點級判準上線當回合的**存量**：檔案級特赦收成作用域級之後，仍未被任何作用域
-#: 守衛罩住的使用點數，逐檔精確計數。
-#: 判準是**雙向精確比對**：多一筆紅（新增了未守衛的使用點）、少一筆也紅（債已還，
-#: 請把數字改小）——只准降不准升的單邊寫法會讓這張表變成一張永久保護傘。
-#: 合法出口只有兩條：① 把站點改成作用域內守衛；② 該行行尾加 `_XPLAT_OK_MARKER` 標記。
-#: （本註解刻意不寫出那個標記的字面值——本檔自己也在掃描面內，寫出來就會被
-#:   `_xplat_markers()` 當成一個真的豁免標記而判 stale。）
-#: 🔴 表列債的逐筆沿革——R79 誠實劃界（`tools/dev_start.py` 訊號 handler 不屬包所有權、
-#:   只登記不代改）與 R81（XPL-S1-04）詞彙表補 `ctypes.*` 後 4→5 的逐點實測（9 站點
-#:   8 個被既有作用域守衛罩住、`:1051` 安全性寄託呼叫端）——
-#:   全文搬至 CrossPlatform_Guard_Line_History.md〈作用域級存量債表沿革〉節。
+#: 站點級判準上線當回合的**存量**：仍未被任何作用域守衛罩住的使用點數，逐檔精確計數（雙向精確比
+#: 對：多一筆紅、少一筆也紅——單邊只准降會變成永久保護傘）。合法出口只有兩條：① 改成作用域內守衛；②
+#: 行尾加 `_XPLAT_OK_MARKER` 標記。（本註解刻意不寫出標記字面值：本檔自己也在掃描面內，寫出來會被
+#: `_xplat_markers()` 當成真的豁免標記而判 stale。）表列債的逐筆沿革全文見
+#: CrossPlatform_Guard_Line_History.md〈作用域級存量債表沿革〉節；壓縮前原文搬至
+#: Guard_Line_History_2.md〈R186 淨減法搬遷〉§37。  round-label-ok
 _FOREIGN_API_SCOPE_DEBT: dict[str, int] = {
     "tools/dev_start.py": 5,
 }
@@ -3696,17 +3691,9 @@ _DIRENT_PRIMITIVES: frozenset[str] = frozenset(
 #: 這幾個模組的同名函式與檔案系統無關，納入即假紅（`dataclasses.replace(obj)` 實測
 #: 會被單純的「1 個引數」啟發式命中）。
 _NON_PATH_REPLACE_OWNERS: frozenset[str] = frozenset({"dataclasses", "attr", "attrs", "copy"})
-#: 存量：**live 樹**內未處置 `PermissionError`／`OSError` 的站點數。
-#: 判準是雙向精確比對（同本檔其餘欠債表的理由）。
-#: 🔴 掃描面刻意不含凍結版 v0.01~v0.29，兩個理由缺一不可：① Copy-on-Evolve 禁改
-#:   凍結版，那裡結構上不會出現「新寫的」違規，掃它得不到可行動的訊號；② 當回合
-#:   實測含凍結版時整支測試要 **133 秒**（凍結版 1,131 筆是同一批程式碼被複製 29 次），
-#:   而護欄層的執行時間本身已是本輪一筆獨立 finding。凍結版的那 1,131 筆是**已量到、
-#:   刻意不進帳**的事實，不是沒看見。
-#: DEF-200-202 四方複審修復窗口：`QuotaGateIsWiredToTheBurnPathTest` 新增回歸測試
-#: 多用了一次既有 fixture 慣用句式 `<Path>.replace(qg.quota_cache_path())`
-#: （同檔既有測試已大量使用同一句式，未另立新形態）。
-# 沿革已搬至 CrossPlatform_R151_Guard_Prose_Migration.md〈_DIRENT_UNGUARDED_DEBT 逐輪重釘〉節。
+#: 存量：**live 樹**內未處置 `PermissionError`／`OSError` 的站點數（雙向精確比對，同本檔其餘欠債
+#: 表）。掃描面刻意不含凍結版（Copy-on-Evolve 禁改，且含之整支測試要 133 秒）。逐輪重釘沿革與
+#: DEF-200-202 修復窗口說明搬至 Guard_Line_History_2.md〈R186 淨減法搬遷〉§38。  round-label-ok
 _DIRENT_UNGUARDED_DEBT: dict[str, int] = {"live": 37}
 
 
@@ -4274,13 +4261,9 @@ _PATHEXT_FRAG = "PATH" + "EXT"
 def _injection_criteria() -> dict[str, Callable[[str, str], tuple[list[str], list[str]]]]:
     """本檔全部判準的統一入口——語料逐題過**每一道**，不是只過一道。
 
-    🔴 R85／ARCH-02：這句話在 R85-P12 之後有一段時間是**假的**。當時 AST 對帳實測
-    「12 定義 / 8 接線」——`scan_foreign_exe_argv`（P12 同輪新增）與另外三道從未被接進來。
-    後果不是「少擋一點」而是**方向相反**：M5 注入矩陣量到的攔截率會低報，而低報會讓
-    下一輪去補一道已經存在的判準（同 R80 對「大小寫敏感度」那一格低報分子的判決）。
-    實測直呼 `scan_foreign_exe_argv` 對 b8／b11 兩題 HIT，而表上兩題都記著 False。
-    本輪把**全部 12 道**接齊；另三道對現行語料零命中（實測），接進來是為了讓上面那句
-    宣稱不再需要人記得去維護——分母由函式定義本身決定，不是由這張手抄清單決定。
+    🔴 R85／ARCH-02：分母由函式定義本身決定（AST 對帳），不是由這張手抄清單決定——R85-P12 之後曾有
+    一段時間「12 定義／8 接線」，M5 攔截率因此低報。對帳實測沿革搬至
+    Guard_Line_History_2.md〈R186 淨減法搬遷〉§39。  round-label-ok
     """
     return {
         "drive-literal": scan_drive_literal,

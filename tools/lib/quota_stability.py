@@ -73,10 +73,19 @@ SAFETY_BANDS = frozenset({quota_policy.BAND_PREPARE, quota_policy.BAND_HALT})
 #: 該欄位註解），本檔的常數只是**函式簽章的預設值**，不是唯一的家。
 MIN_DWELL_SECONDS_DEFAULT = 300.0
 
-#: 持久化檔名（住 `endurance_env.trace_dir()`）。per-account，不帶 session id——理由同
-#: `quota_availability.STATE_NAME`：併發上限的平穩歷史是帳號層級的事實。
-STATE_NAME = "autosdd_quota_stability.json"
+#: 持久化檔名（住 `endurance_env.trace_dir()`）。不帶 session id。🔴 DEF-200-437：鍵＝
+#: （模型家族, 尺），不再是帳號級單檔。舊理由（同 `quota_availability.STATE_NAME`：平穩歷史
+#: 是帳號層級的事實）對「可得性」成立——快取本身與模型無關；對**併發上限**不成立：遲滯的
+#: 輸入是 `decision.cap`，而 cap 隨 active_model（model-scoped 軸成員資格）與尺（`--pace`
+#: 帶攤提、守衛不帶）而變。不同家族／不同尺共用一份歷史，就是 A 的 cap（例：Fable halt 的
+#: 0；`--pace` 攤提出的 1）變成 B 的遲滯起點，B 要等 300 秒×每次 +1 才放得開。
+#: 不帶鍵（`None`／未知家族字 × gate 尺）仍是下面這個既有檔名——免遷移。
+STATE_STEM = "autosdd_quota_stability"
+STATE_NAME = STATE_STEM + ".json"
 SCHEMA = "autosdd.quota_stability.v1"
+#: 兩把尺：守衛（gate，不帶攤提）是執法值的唯一持有者；`--pace`（pace，帶攤提）只准動自己
+#: 那份遲滯，否則「先查一次再派」會把查詢的較嚴 cap 帶進執法（QA 沙箱 S3／S4 重演）。
+RULER_GATE, RULER_PACE = "gate", "pace"
 
 
 @dataclass(frozen=True)
@@ -87,16 +96,23 @@ class StabilityState:
     last_change: str  # 最近一次「數值真的變了」的時刻（aware ISO 字串）
 
 
-def state_path() -> Path:
-    return endurance_env.trace_dir() / STATE_NAME
+def state_path(scope: str | None = None, ruler: str = RULER_GATE) -> Path:
+    """遲滯檔路徑。`scope`＝模型家族（見 `quota_policy.family_key`；`None`／未知＝不分家族），
+    `ruler`＝哪一把尺（只有 `"pace"` 另成一份，其餘一律當 gate 尺）。兩個鍵都不接受任意字串
+    進檔名：家族只由四個家族字組成、尺只有兩種。"""
+    family = quota_policy.family_key(scope)
+    pace = isinstance(ruler, str) and ruler.strip().casefold() == RULER_PACE
+    stem = "_".join(x for x in (STATE_STEM, family, RULER_PACE if pace else None) if x)
+    return endurance_env.trace_dir() / f"{stem}.json"
 
 
-def load_state(path: Path | None = None) -> StabilityState | None:
+def load_state(path: Path | None = None, scope: str | None = None,
+               ruler: str = RULER_GATE) -> StabilityState | None:
     """讀回上次持久化的狀態；讀不到／格式不對／schema 不符一律回 `None`（＝沒有可信歷史，
     下一次 `stabilize()` 會把這一次的目標值當成起點，不偽造一段假的停留時間）。
     """
     try:
-        data = json.loads((path or state_path()).read_text(encoding="utf-8"))
+        data = json.loads((path or state_path(scope, ruler)).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
     if not isinstance(data, dict) or data.get("schema") != SCHEMA:
@@ -108,9 +124,10 @@ def load_state(path: Path | None = None) -> StabilityState | None:
     return StabilityState(cap, last_change)
 
 
-def save_state(state: StabilityState | None, path: Path | None = None) -> bool:
+def save_state(state: StabilityState | None, path: Path | None = None,
+               scope: str | None = None, ruler: str = RULER_GATE) -> bool:
     """R7 同款原子寫入；`state=None` 表示**清空**（free 帶，見檔頭），改為刪除既有檔。"""
-    target = path or state_path()
+    target = path or state_path(scope, ruler)
     if state is None:
         try:
             target.unlink(missing_ok=True)
@@ -171,21 +188,25 @@ def stabilize(prev: StabilityState | None, target: int, band: str, now: datetime
 
 def evaluate(target: int | None, band: str, now: datetime, *,
             min_dwell_seconds: float = MIN_DWELL_SECONDS_DEFAULT,
-            unmeasured: bool = False) -> int | None:
+            unmeasured: bool = False, scope: str | None = None,
+            ruler: str = RULER_GATE) -> int | None:
     """**唯一正規入口**：讀舊狀態 → 套用平穩機制 → 落地 → 回傳穩定後的 cap。
 
     `target=None`（free 帶）⇒ 直接放行且清空持久狀態（見檔頭），回 `None`。
+    `scope`／`ruler`＝遲滯歷史的鍵（DEF-200-437，見 `STATE_NAME` 上方）：呼叫端傳它自己的
+    active_model 與尺；free 帶只清**自己**那一份。
     """
     if target is None:
-        save_state(None)
+        save_state(None, scope=scope, ruler=ruler)
         return None
 
     def _critical_section() -> StabilityState:
-        nxt = stabilize(load_state(), target, band, now,
+        nxt = stabilize(load_state(scope=scope, ruler=ruler), target, band, now,
                         min_dwell_seconds=min_dwell_seconds, unmeasured=unmeasured)
-        save_state(nxt)
+        save_state(nxt, scope=scope, ruler=ruler)
         return nxt
     # 🔴 R102 修復（四方審查 F24／QA MUST FIX）：同 `quota_availability.evaluate()`——  round-label-ok  # noqa: E501
     # 讀-算-寫整段互斥，理由與命名慣例見 `quota_ledger.with_lock()` docstring。
-    lock_path = state_path().with_suffix(state_path().suffix + ".lock")
+    path = state_path(scope, ruler)  # 鎖隨資料檔走：同一份資料永遠是同一把鎖
+    lock_path = path.with_suffix(path.suffix + ".lock")
     return quota_ledger.with_lock(lock_path, _critical_section).cap

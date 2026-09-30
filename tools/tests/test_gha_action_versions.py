@@ -19,15 +19,10 @@
      本體必須全 ASCII（R76-02）。詳見 `TestPowershellRunBodyIsAscii` 的
      docstring——含它**守不到**哪一面的誠實劃界。
 
-【B 節為何不用 pyyaml、C 節為何可以】B 節立於「根層 stdlib-only」前提（R57），
-自帶縮限用途的縮排掃描器 `parse_shell_distribution()`（已實測涵蓋根層 11 支
-workflow 中 7 支、與 `yaml.safe_load` 逐 job 比對全部相等；帶 `defaults:` 區塊的
-4 支主動 raise 不猜測；非本 repo 的任意 YAML 寫法一律不保證，失效方向是紅燈）。
-R68 起該前提已由 repo 自己推翻——`tools/run_root_unittests.py` 的
-`_THIRD_PARTY_PREREQS` 已把 pyyaml 列為受管相依（三道機械物看守安裝），C 節
-因此直接用 pyyaml 判「run 本體」這個值，不重複造第二套掃描器；B 節維持原樣
-（不改動既有綠鎖）。史料見 CrossPlatform_DEF200275_Context_Metering_Evidence.md
-〈第七輪 史料搬遷〉。
+【B 節自帶縮限用途的縮排掃描器 `parse_shell_distribution()`、C 節直接用 pyyaml】B 節立於「根層
+stdlib-only」前提（R57），該前提 R68 起已被 repo 自己推翻（pyyaml 已是受管相依）；C 節因此不重造第
+二套掃描器，B 節維持原樣。更早史料見 CrossPlatform_DEF200275_Context_Metering_Evidence.md〈第七輪
+史料搬遷〉；取捨全文搬至 Guard_Line_History_2.md〈R186 淨減法搬遷〉§28。  round-label-ok
 
 執行：python3 -m unittest tools.tests.test_gha_action_versions -v
 （亦由 tools/run_root_unittests.py discover 納入）

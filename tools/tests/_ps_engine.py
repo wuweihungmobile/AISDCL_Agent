@@ -1,48 +1,16 @@
 #!/usr/bin/env python3
 """PowerShell 引擎能力述詞 SSOT（R60 Scan-E E-A-03）。
 
-WHY：`tools/tests/` 內對「本機有哪個 PowerShell 引擎、要拿哪一個去跑」這件事，
-R60 實查有 **6 個檔案／10 處行內寫法／5 種語意**，無具名 SSOT、也沒有任何鎖防止
-第 N+1 份選錯（而「選錯」在本 repo 已有兩次實證：DEF-101-285、DEF-101-509）：
+WHY：`tools/tests/` 對「本機有哪個 PowerShell 引擎、拿哪一個去跑」曾散落 6 檔／10 處／5 種語意而無
+具名 SSOT，「選錯」已有兩次實證（DEF-101-285、DEF-101-509）。現行政策：`production_engine()` ＝生
+產引擎、**5.1 優先**（`PRODUCTION_ENGINE_PRECEDENCE` 順序即判準，不得對調），pwsh 7 只作本機根本沒
+有 5.1 時的兜底；`native_ps51()`（語意④）不得 fallback；引擎可用性是**機器屬性**，一律現查
+`available_engines()`，不得寫成常數。另立模組而非塞進 `_platform_helpers.py`（其收納契約只有兩
+類）。語意①~⑤ 清單、與 DEF-101-509 的方向衝突、R69／R73 訂正全文搬至
+Guard_Line_History_2.md〈R186 淨減法搬遷〉§2。  round-label-ok
 
-  語意①「生產引擎，5.1 優先」`which("powershell") or which("pwsh")`——6 處。
-  語意②「有沒有任一引擎」（skip 述詞）`which(...) is None and which(...) is None`——5 處。
-  語意③「在 Windows 且有任一引擎」（`.cmd`／PATHEXT 語意測試專用）——2 處。
-  語意④「只認原生 5.1，不得 fallback」`which("powershell")` 單獨用——2 處。
-  語意⑤「**pwsh 7 優先**」`which("pwsh") or which("powershell")`——1 處（3 個消費點）。
-
-⑤ 與 R59 **DEF-101-509 拍板的判準方向相反**。該判準原文（`test_install_windows_nightly.py`
-的 WHY 區塊）：「生產是以 `powershell -ExecutionPolicy Bypass -File` 執行＝5.1，而 `pwsh`
-解析用的是 PS 7 文法…本檔所在的 `tools/` 樹受 `test_ps51_compat.py` 的『PS 5.1 相容』
-政策約束，故以 5.1 優先解析與該政策一致」。⑤ 會靜默 fallback 到另一個引擎、測不出差別；GitHub-hosted
-runner、任何 `winget install Microsoft.PowerShell` 過的開發機、以及 `brew install
-powershell` 過的 macOS 開發機都同時有兩者（🔴 **R69 訂正、R74 改寫**：本段原先把撰寫
-當下那台機器的引擎清單寫成了本檔的常數，R69 在 macOS 真機上實測推翻。引擎可用性是
-**機器屬性**，一律現查 `available_engines()`；R74 另把原訂正註記裡逐字保留的那句舊話
-一併刪除——留著它等於在樹裡多存一句假話，而擴射程後的鎖正好抓到它），
-於是會用 **PS 7** 去驗一支受 5.1 政策約束的檔案——與 DEF-101-509 修掉的是同一類判準
-錯誤、只是方向相反。本檔因此把「生產引擎＝5.1 優先」寫成唯一的
-具名述詞（`production_engine()`），讓「選誰」這件事只有一處可改、且有鎖看著。
-
-**為何另立一支模組、不塞進 `_platform_helpers.py`**：該檔 docstring 自己已明列收納
-契約僅兩類（跨平台測試 fixture、供靜態鎖消費的原始碼解析 SSOT），並記載 R57 因塞進
-第三類而出現「雜物抽屜的早期訊號」的教訓。引擎述詞既非 fixture 也非原始碼解析器，
-故比照同目錄 `_ci_scan_anchors.py` 的先例，單一關注點獨立成檔。
-
-守門：`tools/tests/test_ps_engine_ssot.py`
-  - 優先序（含「兩引擎都在」的合成情境——合成是為了讓判準在**任何**機器上都測得到
-    方向，不依賴該機器剛好裝了哪些引擎；R69 訂正：原註記把引擎可用性寫成了本機常數。
-    🔴 R73 補記（DEF-101-777）：該註記的訂正只涵蓋本檔，射程外的同型句子四輪後同時
-    變成假事實——鎖已擴至整個 `tools/` 樹，見 `test_ps_engine_ssot.py`
-    `TestNoStaleLocalEngineClaims`）
-  - `native_ps51()` 不得 fallback
-  - repo-wide 反增生掃描：`tools/tests/*.py` 不得再出現行內引擎挑選（附具名豁免＋stale
-    自檢）。**判定走 `ast`**（R60 round-2 訂正）：只認真正的 `shutil.which("powershell"
-    |"pwsh")` 呼叫節點，docstring／註解／字串常數內拿舊實作當史料引述**不算命中**。
-    先前的逐行文字判定會被史料引述誤命中，使檔案級豁免永遠退不了場、被豁免的檔案
-    零覆蓋（ARCH-R60-06／SA-R60-03／SD-R60-03／QA-R60-07 四方獨立命中）。
-  - 正向委派鎖：已遷移消費檔的引擎述詞函式本體必須呼叫 `production_engine()`、
-    不得回退成行內 `shutil.which`（import 級鎖看不到「留 import、改本體」這條路）
+守門：`tools/tests/test_ps_engine_ssot.py`（優先序含兩引擎都在的合成情境、`native_ps51()` 不得
+fallback、repo-wide 反增生掃描走 `ast`、正向委派鎖）。
 
 執行：python3 -m unittest discover -s tools/tests
 """
