@@ -241,7 +241,7 @@ PowerShell 工具的 cwd **跨呼叫持續**。✅ 絕對路徑；✅ `Push-Loca
 | ❌ | 讀 rc 時接管線 | 真 rc 被吃掉（接 `tail -1` → rc=0）。mac 工具殼是 zsh：`${PIPESTATUS[0]}` 回空字串、要寫 `${pipestatus[1]}`——機制與修法住 `useMacWin.md` §C，本節不複寫 |
 
 - 機械物＝`block_destructive_git.py` 的 `waitform_hits()`（行內豁免 `# waitform-ok: <WHY>`）。**判準有哪幾條、各判什麼，唯一真相源＝該函式 docstring**（本段刻意不複寫條列），現查：`sed -n "/^def waitform_hits/,/\"\"\"$/p" .claude/hooks/block_destructive_git.py`。
-- 誠實劃界：攔截器接得住「寫出壞形態」，接不住「該掛的沒掛」（Monitor 掛沒掛不在任何指令字串裡）；「讀 rc 接管線」在 Bash／zsh 側零攔截器（唯一守它的 `lint_powershell_command.py` matcher 是 PowerShell）——DEF-200-086。逐筆座標見 [docs/06_quality/AutoSDD_Defect_Log.md](docs/06_quality/) 的 DEF-200-044／045／086。
+- 誠實劃界：攔截器接得住「寫出壞形態」，接不住「該掛的沒掛」（Monitor 掛沒掛不在任何指令字串裡）；「讀 rc 接管線」在 Bash 側自 DEF-200-086 起由 `waitform_hits()` 判準④守「rc 遮蔽型濾器（`tail`／`head`／`tee`…）接 `$?`」形態——`grep` 這類 rc 有語意的濾器刻意不判，`PIPESTATUS`／`pipefail`／`# waitform-ok:` 豁免——DEF-200-086；PowerShell 側另由 `lint_powershell_command.py` 守。逐筆座標見 [docs/06_quality/AutoSDD_Defect_Log.md](docs/06_quality/) 的 DEF-200-044／045／086。
 
 ### 🔴 鐵律七：並行派工前，先切「鎖的持有面」（平台無關；DEF-200-049）
 
@@ -342,7 +342,7 @@ bash tools/fsm_runtime/formal/run_tlc.sh                      # TLA+/TLC（自�
 | context 水位 | `python tools/session_resume_planner.py --check` |
 | harness autocompact 姿態 | `python tools/session_resume_planner.py --check-autocompact`（關閉時 rc=1） |
 | 可派 agent 數（每次派工前） | `python tools/session_resume_planner.py --pace` |
-| reset 後自動重啟排程 | `python tools/session_resume_planner.py --register-schtasks`／`--verify-schtasks`／`--remove-schtasks` |
+| reset 後自動重啟排程 | `python tools/session_resume_planner.py --register-schtasks`／`--verify-schtasks`／`--remove-schtasks`（🔴 手動路徑不寫續航狀態塊、醒來會 abort，DEF-200-456；要自動續跑改用 `--arm-endurance`／`--arm-sentinel`） |
 | reset 視窗分佈 | `python tools/probe/reset_window_distribution.py` |
 | 失誤歸因分群 | `python tools/probe/misstep_attribution.py` |
 | shell 指令母體普查 | `python tools/probe/shell_command_corpus.py --summary` |

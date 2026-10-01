@@ -345,6 +345,39 @@ def halt_convergent_clarification(windows: bool | None = None, event: str = "Pos
     return text
 
 
+def degraded_detail(reason: str, refresh_failed: bool) -> str:
+    """量不到通知的 detail（DEF-200-453）：本行程的補量真的失敗才說「取數失敗」，否則引快取
+    自己的 `reason` 原句（stale-cache／expired-window 的原句本來就寫「不是取數壞掉」）。
+    後半句恆真：走到這裡就是逐字稿地板也沒有。史料見
+    docs/06_quality/CrossPlatform_R189_SessionGate_Family_Lock_Audit_Evidence.md〈九〉。"""
+    return ("取數失敗" if refresh_failed else reason) + "，且逐字稿裡沒有未復原的撞線可以當地板"
+
+
+def degraded_convergent_clarification(windows: bool | None = None) -> str:
+    """量不到通知（PostToolUse）的「收斂型工具不受影響」澄清句（DEF-200-453）。
+
+    與 halt 版同源——平台分支與工具清單住 `halt_convergent_clarification()`，本檔不得有第二份：
+    只取它「…不受影響」那半句；後半的「只有扇出型…暫停」是 halt 專屬，量不到時扇出型只是被
+    收緊到硬上限（`degraded_cap`）而不是停用，照抄會叫模型停派。"""
+    head = halt_convergent_clarification(windows).partition("，只有扇出型")[0]
+    return head + "，扇出型工具只受上面那個硬上限約束，量到讀數就依真實水位重判。"
+
+
+def degraded_message(source: str, detail: str, posture: str, trace: object, ttl: int,
+                     event: str = "PreToolUse") -> str:
+    """量不到通知全文（純渲染；閂鎖、痕跡、發射在 `quota_gate.note_degraded`）。PostToolUse 的
+    通知是工具跑完**之後**才出現的紅字，補一句澄清；PreToolUse 被評估的就是扇出呼叫本身，
+    「已正常執行完成」對它是假話，不借用。"""
+    text = (f"⚠️  額度水位**量不到**（source={source}）⇒ {posture}\n"
+            f"   這不是「額度很寬鬆」：{detail}。\n"
+            f"   現查：`python tools/lib/quota_meter.py --json`（失敗時會印 reason）；"
+            f"痕跡：{trace}\n"
+            f"   （同一個 source 每 {ttl} 秒只說一次）\n")
+    if event != "PostToolUse":
+        return text
+    return text + f"   {degraded_convergent_clarification()}\n"
+
+
 # 🔴 **開頭不再印裸百分比**（R82／M7）：舊版第一行是「額度水位 54%（≥95%…）」，而裸的
 # 「54%」正是掌舵者當場誤讀的**那個**形狀——那個數字沒有說自己是哪一桶、什麼時候 reset。
 # 改由 `quota_policy.describe()` 逐軸渲染，每一個 % 都自帶 `kind=` 與剩餘分鐘（或明文
@@ -449,6 +482,14 @@ def quota_halt_message(decision: quota_policy.Decision, act: dict, event: str = 
             + "   （同一視窗不再重複提醒；只有扇出型工具被擋下時才會再說一次。）\n")
 
 
+#: DEF-200-452：`band=unmeasured`（`binding is None`）的期程句。「沒有 reset 可以等…只有人去提額」
+#: 是替**量到的軸沒有 reset**（月度支出）寫的，量不到誤入同一句會與同則訊息「重量一次即可，不是
+#: 取數壞掉」自相矛盾、還叫人去提額；量不到與 reset 無關，答案是等下一次補量或現查 `--pace`。
+UNMEASURED_HORIZON_LINE = (
+    "   ⏳ 這道收緊是因為額度**量不到**，不是在等 reset：下一次補量（每個快取 TTL 至多一次）"
+    "拿到讀數就依真實水位重判；現查：`python tools/session_resume_planner.py --pace`。\n")
+
+
 # halt 帶用 `reset_branch()` 分得出 arm／notify／escalate，**throttle 帶此前完全不分**
 # ⇒ 週額度偏高時 cap 會連續套用好幾天，與 five_hour 同水位（最多 5 小時）代價差一個
 # 數量級，而訊息裡讀不出差別。
@@ -459,6 +500,8 @@ def quota_halt_message(decision: quota_policy.Decision, act: dict, event: str = 
 def throttle_horizon_line(decision: quota_policy.Decision, now: datetime,
                           measured_at: object = None) -> str:
     """節流帶要說出「這道限制會套多久」。已過期的時刻**不得**說「很快就會自己解除」。"""
+    if decision.band == quota_policy.BAND_UNMEASURED:
+        return UNMEASURED_HORIZON_LINE
     # 🔴 DEF-200-435：cap 被遲滯維持（低於 binding 軸自己的 cap）時，下面所有以 binding 的 reset
     # 為期程的句子都不成立——放寬由最小停留時間決定，與那條軸的 reset 無關（實測：各軸 cap=2、
     # 終值 cap=1 的 Opus 視窗被告知「連續套用好幾天」，真因是分鐘尺度的遲滯）。

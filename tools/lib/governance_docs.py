@@ -564,6 +564,11 @@ _GOVERNANCE_DOCS = (
     # nightly 樹身分）的詳情面：同一資格，即刻登記。
     _REPO_ROOT / "docs" / "06_quality"
     / "CrossPlatform_R188_SessionGate_Hook_Voice_Evidence.md",
+    # 掌舵者五問家族級結構鎖審計輪（第十一次四方覆核；硬上限輪；額度補量名額輸家誤判、
+    # unmeasured 措辭、Bash 側接管線讀 rc 攔截、schtasks 手動路徑拒退 5h 假設）的詳情面：
+    # 同一資格，即刻登記。
+    _REPO_ROOT / "docs" / "06_quality"
+    / "CrossPlatform_R189_SessionGate_Family_Lock_Audit_Evidence.md",
     # 護欄層行數棘輪史料歸檔的第二冊（第一冊逼近 Read 工具上限，淨減法搬遷改落本檔）：即刻登記。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_Guard_Line_History_2.md",
 )

@@ -237,6 +237,64 @@ def claim_once(stamp: Path, ttl: float, now: float | None = None) -> bool:
     return True
 
 
+def claim_once_within(stamp: Path, ttl: float, grace: float = 1.0, *,
+                      clock: Callable[[], float] = time.time,
+                      sleep: Callable[[float], None] = time.sleep) -> bool:
+    """`claim_once()`，但見戳記**將於 `grace` 秒內到期**就等換屆再搶一次（DEF-200-451）。
+
+    WHY：快取 `measured_at` 截斷到秒、名額戳記是 ns——同一牆鐘秒內 claim＋寫快取時，快取比
+    名額早 0～0.8 秒過期。那段次秒視窗裡「快取已 stale、名額仍被持有、沒有人在飛」，
+    `await_winner()` 無人可等（它只等在飛的贏家），輸家直接落「量不到」並說假話。
+    `grace=1.0`＝該視窗的結構性上界（claim 與寫入落在同一牆鐘秒 ⇒ 差 < 1 秒），不是調出來
+    的。仍是每 TTL 一次補量：等到的是**換屆**；一群輸家同一刻醒來搶，`claim_once` 的 stat→
+    unlink→create 之間可被插隊，故最後一搶在短鎖內序列化。史料（驚群壓測數字）見
+    docs/06_quality/CrossPlatform_R189_SessionGate_Family_Lock_Audit_Evidence.md〈九〉。
+    """
+    now = clock()
+    if claim_once(stamp, ttl, now):
+        return True
+    try:
+        left = ttl - (now - stamp.stat().st_mtime)
+    except OSError:
+        return False
+    if not 0 < left <= grace:
+        return False
+    sleep(left + 0.05)  # +0.05：蓋過計時器粒度（Windows 約 15.6ms），醒來時戳記必已過期
+    lock = stamp.with_name(stamp.name + ".lock")  # 臨界區微秒級，逾 1 秒未釋放必是孤兒
+    return with_lock(lock, lambda: claim_once(stamp, ttl, clock()),
+                     stale_after=1.0, max_wait=1.5)
+
+
+def await_winner(stamp: Path, budget: float, ready: Callable[[], bool], *,
+                 step: float = 0.05, clock: Callable[[], float] = time.time,
+                 sleep: Callable[[float], None] = time.sleep,
+                 mono: Callable[[], float] = time.monotonic) -> bool:
+    """搶輸者等贏家（DEF-200-451）：`claim_once()` 沒交代的另一半——輸了之後怎麼辦。
+
+    戳記年齡 < `budget` ⇒ 持戳者的工作還在飛：每 `step` 秒問一次 `ready()`，回它第一次為真；
+    戳記缺席／已超過 `budget`（贏家不在飛）或剩餘時間用完 ⇒ `False`，呼叫端照舊判定。
+
+    🔴 條件與上界各是一條不變式，不是優化：① 只在贏家**在飛**時等——快取本來就壞了的行程若
+    也等，每個都白等一輪，等待本身變成延遲來源；② 剩餘時間以 `min(budget, left)` 封頂
+    （Windows 的 `st_mtime` 時鐘粒度可讓年齡為負，見 `claim_once` 的 DEF-200-296 註記）⇒
+    等得再久也不超過贏家自己的逾時；③ 年齡讀牆鐘（mtime 在牆鐘域）、**期限讀單調鐘
+    `mono`**——期限若也讀牆鐘，等待中途時鐘被往回撥（校時、VM 還原）會把上界推到一小時後，
+    撐到 hook 逾時（＝fail-open）才收尾。零網路、零新增 HTTP：只重讀贏家寫下的快取。
+    史料（0.33～0.41 秒的 RTT 實測、57 筆假警報、兩筆活體誤擋）見
+    docs/06_quality/CrossPlatform_R189_SessionGate_Family_Lock_Audit_Evidence.md〈九〉。
+    """
+    try:
+        left = budget - (clock() - stamp.stat().st_mtime)
+    except OSError:
+        return False
+    deadline = mono() + min(budget, left)
+    while mono() < deadline:
+        if ready():
+            return True
+        sleep(step)
+    return False
+
+
 def append_record(path: Path, record: dict) -> bool:
     """把一筆記錄以**單次 `os.write`** append 上去；回「寫進去了沒」。
 

@@ -132,6 +132,118 @@ def _decision_trace_staleness_note(
     )
 
 
+def _short_sid(sid: object) -> str:
+    """session id 前 8 碼（橫幅辨識用）；空值／髒資料一律印「不明」，橫幅不得因欄位型別拋例外。"""
+    return str(sid)[:8] if sid else "不明"
+
+
+def _pending_posture(auto: dict, caller_sid: Optional[str], m, window) -> str:
+    """AUTO_COMPACT_PENDING 殘留態下「本視窗實際會被怎麼對待」——與 PreToolUse 實際放行判準同構。
+
+    逐條對應 `context_ledger_pre.main()`／`FSMRuntime.assert_tool_allowed()`（判準若改，兩邊一起改，
+    由 test_session_start_rules.py 的 parity 測試釘住）：
+    - ``UNMETERED``：本視窗量不到 usage（全新視窗首擊／compact 後尚無新 usage）⇒ D11 放行並附
+      `[UNMETERED]`（規格檔 Write/Edit 除外），之後依實測水位判定。與是否為 owner 無關。
+    - ``OTHER_WINDOW``：owner 記錄存在、本視窗 session id 已知且不是它 ⇒ D19 非 owner 不套
+      「只准 compact 工具」限制。
+    - ``RELEASING``：owner／查無 owner 記錄（`assert_tool_allowed` 保守 fail-closed 視同 owner）且
+      實測 <85% ⇒ D4：第一次工具呼叫即自動釋放 PENDING。
+    - ``RESTRICTED``：其餘（owner／查無 owner 記錄且 ≥85%，或分母無法解析）⇒ 只放行 compact 相關操作。
+    """
+    from tools.fsm_runtime.context_window import auto_compact_exit_due  # type: ignore
+    owner = auto.get("pending_owner")
+    owner_sid = owner.get("session_id") if isinstance(owner, dict) else None
+    if m is None or m.used is None:
+        return "UNMETERED"
+    if caller_sid is not None and owner_sid is not None and caller_sid != owner_sid:
+        return "OTHER_WINDOW"
+    if window and auto_compact_exit_due(m.used, window):
+        return "RELEASING"
+    return "RESTRICTED"
+
+
+def _pending_banner(
+    auto: dict, payload: dict | None, resume_state: object, snapshot: object, missing_note: str,
+) -> str:
+    """AUTO_COMPACT_PENDING 殘留橫幅（DEF-200-454）：文案依 `_pending_posture` 分四態。
+
+    WHY：PENDING 是**專案級**狀態，會跨視窗殘留；舊橫幅對任何新視窗一律寫「🔴 必須立即呼叫 Skill:
+    stage-compaction」，但 PreToolUse 實際只對「owner（或查無 owner 記錄）且水位 ≥85%」的視窗限制
+    工具——首擊量不到 usage 放行並附 `[UNMETERED]`（D11）、非 owner 不受限（D19）、水位 <85% 自動
+    釋放（D4）。橫幅說會被擋、行為卻放行，是模型「新視窗一開就說自己被擋」的活樣本。本函式讓文案
+    與同一份判準對齊：只有真會被擋的姿態才保留「必須」語氣。純文案與分支，零放行邏輯改動。
+    任何例外只退成「不下結論」一行（SessionStart 注入不得因橫幅崩潰）。
+    """
+    owner = auto.get("pending_owner")
+    owner_sid = owner.get("session_id") if isinstance(owner, dict) else None
+    raw_sid = payload.get("session_id") if isinstance(payload, dict) else None
+    caller_sid = raw_sid.strip() if isinstance(raw_sid, str) and raw_sid.strip() else None
+    owner_note = _short_sid(owner_sid)
+    if owner_sid is not None and owner_sid == caller_sid:
+        owner_note += "〔即本視窗〕"
+    head = (
+        f"[SDD-FSM][AUTO-COMPACT] 上次 Session 於 90% Token 中止（resume_state={resume_state}；owner={owner_note}）。\n"
+        f"  Snapshot: {snapshot}{missing_note}\n"
+    )
+    try:
+        from tools.fsm_runtime.context_window import CRIT_RATIO, WARN_RATIO  # type: ignore
+        m, window, _source = _recovery_measurement(payload)
+        posture = _pending_posture(auto, caller_sid, m, window)
+        warn, crit = f"{WARN_RATIO:.0%}", f"{CRIT_RATIO:.0%}"
+        spec_guard = (
+            "規格檔（docs/01_requirements|02_architecture|03_testing）的 Write/Edit 於 PENDING 期間"
+            "仍受 SPEC-GUARD 約束（Rule 9.6）"
+        )
+        if owner_sid is None:
+            who = "所處的 PENDING 查無 owner 記錄（保守視同 owner）"
+        elif caller_sid is None:
+            who = "的 session id 不明（保守視同 owner）"
+        else:
+            who = "為 PENDING owner"
+        reading = ""
+        if m is not None and m.used is not None:
+            reading = (
+                f"實測 used={m.used:,}／window={window:,}（{m.used / window:.0%}）" if window
+                else f"實測 used={m.used:,}／window=未知（分母無法解析）"
+            )
+        if posture == "RESTRICTED":
+            why = f"已 ≥{warn}" if window else "保守視為受限"
+            return head + (
+                f"  🔴 本視窗{who}，{reading}，{why}：PreToolUse 只放行 compact 相關操作。\n"
+                "  🔴 必須立即呼叫 Skill: stage-compaction 完成壓縮；完成後會自動回到 resume_state 繼續執行。"
+            )
+        if posture == "RELEASING":
+            return head + (
+                f"  ℹ️ 本視窗{who}，{reading}，已 <{warn}：不受限；第一次工具呼叫時 PreToolUse 會自動釋放 "
+                "PENDING 並回到 resume_state，無須 stage-compaction。"
+            )
+        if posture == "OTHER_WINDOW":
+            return head + (
+                f"  ℹ️ PENDING 殘留來自他窗（owner={_short_sid(owner_sid)}）：本視窗不是 owner，"
+                f"不受「只准 compact 工具」限制，工具照常放行（本視窗{reading}）。\n"
+                f"  ℹ️ 本視窗自身水位 ≥{warn} 起提示 compaction、≥{crit} 起擋非 compact 工具（與 PENDING 殘留無關）；"
+                f"{spec_guard}。"
+            )
+        # UNMETERED
+        if owner_sid is not None and caller_sid is not None and caller_sid != owner_sid:
+            after = (
+                f"本視窗不是 owner（owner={_short_sid(owner_sid)}），不受「只准 compact 工具」限制；"
+                f"自身水位 ≥{warn} 起提示 compaction、≥{crit} 起擋非 compact 工具"
+            )
+        else:
+            after = f"本視窗{who}：實測 ≥{warn} 才限制為 compact 工具，<{warn} 即自動釋放 PENDING"
+        return head + (
+            "  ℹ️ 本視窗尚無 usage 量測（全新視窗首擊／compact 後尚無新 usage）⇒ 首擊放行"
+            "（[SDD-CTX][AUTO-COMPACT][UNMETERED]）；之後依本視窗實測水位決定。\n"
+            f"  ℹ️ {after}；{spec_guard}。"
+        )
+    except Exception as exc:  # noqa: BLE001 — never block session start
+        return head + (
+            f"  ⚠️ 本視窗姿態判定失敗（{exc!r}）— 本橫幅不下結論；實際放行以 PreToolUse 為準，"
+            "被擋時 deny 訊息會帶真實數字與解除規則。"
+        )
+
+
 def _build_context(payload: dict | None = None) -> dict:
     if os.environ.get("SDD_HOOKS_DISABLE") == "1":
         return {
@@ -355,11 +467,7 @@ def _build_context(payload: dict | None = None) -> dict:
             if snapshot_missing
             else ""
         )
-        warnings.append(
-            f"[SDD-FSM][AUTO-COMPACT] 上次 Session 於 90% Token 中止（resume_state={resume_state}）。\n"
-            f"  Snapshot: {snapshot}{missing_note}\n"
-            "  🔴 必須立即呼叫 Skill: stage-compaction 完成壓縮；完成後會自動回到 resume_state 繼續執行。"
-        )
+        warnings.append(_pending_banner(auto, payload, resume_state, snapshot, missing_note))
 
     lines = [
         "[SDD-FSM] Session bootstrap",

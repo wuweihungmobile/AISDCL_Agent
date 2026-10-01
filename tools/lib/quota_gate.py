@@ -589,9 +589,27 @@ def claim_refresh_slot() -> bool:
     🔴 舊實作是 check-then-act，零原子性 ⇒ 16 個壁鐘 barrier 對齊的行程實測
     **CLAIM=16 SKIP=0**（設計意圖 1），也就是這個成本節流器在它唯一要治的情境下完全
     失效。原子性住在共用層的 `claim_once()`（`O_CREAT|O_EXCL`）。
+    DEF-200-451：搶輸時若名額戳記 1 秒內到期（快取 `measured_at` 截斷到秒，先於名額過期的
+    次秒視窗），`claim_once_within()` 等到換屆再搶一次——仍是每個 TTL 一次補量。
     """
-    return (quota_ledger.claim_once(refresh_stamp_path(), QUOTA_CACHE_TTL_SECONDS)
+    return (quota_ledger.claim_once_within(refresh_stamp_path(), QUOTA_CACHE_TTL_SECONDS)
             if quota_ledger is not None else False)
+
+
+def settled_quota(won: bool) -> quota_policy.QuotaState:
+    """補量那一步之後的**重讀**（DEF-200-451）。`won`＝本行程搶到名額並已自己補過量。
+
+    `claim_refresh_slot()` 只回答「誰去補」，沒交代輸家怎麼辦：贏家 HTTP 在飛（實測 0.33～
+    0.41 秒）時輸家此前直接把過期快取判成「量不到」⇒ 套 `degraded_cap`，平行 Agent 被誤擋
+    （rc=2）、PostToolUse 印假警報。輸家（`won=False`）改為先有界地等贏家把快取寫出來
+    （`quota_ledger.await_winner`，上界＝同步取數逾時），再重讀；贏家自己不等（剛補完，補失敗
+    時等自己是白等）。等不到就照舊判量不到——那時「量不到」才是真話。
+    史料見 docs/06_quality/CrossPlatform_R189_SessionGate_Family_Lock_Audit_Evidence.md〈九〉。
+    """
+    if not won and quota_ledger is not None:
+        quota_ledger.await_winner(refresh_stamp_path(), QUOTA_SYNC_TIMEOUT_SECONDS,
+                                  lambda: read_quota(datetime.now().astimezone()).usable())
+    return read_quota(datetime.now().astimezone())
 
 
 # 🔴 R84：這一格從 `claim_refresh_slot()` 內的寫死路徑抽成一支可 swap 的函式，理由與
@@ -646,21 +664,17 @@ def note_degraded(source: str, detail: str, *, event: str = "PreToolUse") -> str
     那是本 repo 反覆判過的形態。閂鎖用的是**原子的** `claim_once()`——42 個平行 hook
     同時降級時恰好一個說話，而不是 42 個一起說（或因為 state 檔互踩而說得沒有規律）。
     """
-    if quota_ledger is None:
-        return ""
-    if not quota_ledger.claim_once(degraded_stamp_path(source), QUOTA_CACHE_TTL_SECONDS):
+    stamp = degraded_stamp_path(source)
+    if quota_ledger is None or not quota_ledger.claim_once(stamp, QUOTA_CACHE_TTL_SECONDS):
         return ""
     trace = quota_trace_path()
     quota_ledger.append_record(trace, {
         "at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "source": source, "detail": detail, "pid": os.getpid(),
         "state": quota_policy.BAND_UNMEASURED})
-    msg = (
-        f"⚠️  額度水位**量不到**（source={source}）⇒ {degraded_posture()}\n"
-        f"   這不是「額度很寬鬆」：{detail}。\n"
-        f"   現查：`python tools/lib/quota_meter.py --json`（失敗時會印 reason）；"
-        f"痕跡：{trace}\n"
-        f"   （同一個 source 每 {QUOTA_CACHE_TTL_SECONDS} 秒只說一次）\n")
+    # DEF-200-453：全文組字（含 PostToolUse 的收斂型工具澄清）住人話面 `quota_messages`。
+    msg = quota_messages.degraded_message(source, detail, degraded_posture(), trace,
+                                          QUOTA_CACHE_TTL_SECONDS, event)
     sys.stderr.write(msg)
     # 🔴 R82／L4-02：stderr 在這條放行路上沒有讀者（契約自述：要 exit 2 才回饋給模型），
     # 而 L4 依設計必須不節流 ⇒ 換通道不換 rc。完整立案與紅綠自證見
@@ -886,14 +900,15 @@ def quota_prepare_actions(payload: dict, decision: quota_policy.Decision, now: d
 #   而那一次打的是 `/api/oauth/usage`——**不是模型推論**（見 `quota_meter.USAGE_URL`），
 #   不吃額度、不進 5 小時視窗。派工前查一次不會讓被查的那個數字變大。
 def pace_state(now: datetime) -> quota_policy.QuotaState:
-    """讀快取；不可用且本 TTL 還沒人量過時補量一次。"""
+    """讀快取；不可用且本 TTL 還沒人量過時補量一次；名額被搶走則等贏家（DEF-200-451）。"""
     state = read_quota(now)
-    if state.usable() or quota_meter is None or not claim_refresh_slot():
+    if state.usable() or quota_meter is None:
         return state
-    reading = quota_meter.measure_detail(QUOTA_SYNC_TIMEOUT_SECONDS)[0]
-    if reading is not None:
-        quota_meter.write_cache(reading, quota_cache_path())
-    return read_quota(datetime.now().astimezone())
+    if won := claim_refresh_slot():
+        reading = quota_meter.measure_detail(QUOTA_SYNC_TIMEOUT_SECONDS)[0]
+        if reading is not None:
+            quota_meter.write_cache(reading, quota_cache_path())
+    return settled_quota(won)
 
 
 # 🔴 R86：多出的第三行是**攤提**（掌舵者不滿的直接原因）。他看到「短窗 16% used／45 分鐘
@@ -1070,13 +1085,16 @@ def quota_gate(payload: dict, *, blocking, latch_read, latch_write,
         note_degraded("policy-invalid", "；".join(problems), event=event)
     now = datetime.now().astimezone()
     state = read_quota(now)
-    if not state.usable() and claim_refresh_slot():
+    unmeasured = failed = False   # `unmeasured` 在下面的地板判定才賦值；併一行省一個計價行
+    if not state.usable():
         # 🔴 唯一會碰網路的一格，三個條件同時成立才到得了：扇出型工具 ＋ 已經量不到 ＋
         # 本 TTL 視窗還沒有人量過。理由與實測代價見 `refresh_quota_blocking` 的 WHY。
-        refresh_quota_blocking(event=event)
+        # DEF-200-451：搶輸名額的行程不補量，但也不得把「贏家 HTTP 還在飛」讀成量不到——
+        # 由 `settled_quota()` 有界地等贏家再重讀（贏家自己不等）。`failed`＝本行程自己補量
+        # 失敗，是下面 `degraded_detail()` 唯一允許說「取數失敗」的依據（DEF-200-453）。
+        failed = (won := claim_refresh_slot()) and not refresh_quota_blocking(event=event)
+        state = settled_quota(won)
         now = datetime.now().astimezone()
-        state = read_quota(now)
-    unmeasured = False
     if not state.usable():
         floor = quota_floor_reading(payload, now)
         if floor is None:
@@ -1093,7 +1111,7 @@ def quota_gate(payload: dict, *, blocking, latch_read, latch_write,
     decision = quota_policy.decide(state, now, policy, active_model=active_model)
     if unmeasured:
         note_degraded(state.source or "unknown",
-                      "取數失敗，且逐字稿裡沒有未復原的撞線可以當地板", event=event)
+                      quota_messages.degraded_detail(state.reason, failed), event=event)
     # 🔴 R102／PRD §4.2.4：平穩性機制接線。`unmeasured` 這裡已經是「這次讀完（含 L3 地板  round-label-ok  # noqa: E501
     # 替補之後）到底讀不讀得到」的最終結論——`quota_availability.evaluate()` 要的正是
     # 這個訊號（不是取代它，是替它加上遲滯：單次瞬斷不足以判定「已進入不可得」，見該檔

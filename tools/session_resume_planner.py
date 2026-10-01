@@ -95,6 +95,7 @@ import relay_machine  # noqa: E402  # v2.1.13 G3+G4：接力狀態機＋哨兵�
 import resume_route  # noqa: E402  # v2.1.13 G1：喚醒 argv 權限姿態＋A-PRE 預檢的家（tools/lib）
 import schedule_backend  # noqa: E402  # R83：平台差異（schtasks／launchd）唯一收斂點
 import sentinel_lifecycle  # noqa: E402  # R95 修3：哨兵活性欄（armed stamp vs 現查）
+import session_brief  # noqa: E402  # DEF-200-231：觸發時刻解析＋--check 末行 FSM（lib）
 
 import _stdio_utf8  # noqa: E402,F401  # Windows 非 UTF-8 終端印中文／emoji 防崩潰
 from probe.audit_session import project_transcript_dir  # noqa: E402
@@ -201,15 +202,15 @@ SENTINEL_TICK = "--sentinel-tick"
 # 消費者，兩邊的字面由 `tools/tests/test_check_hooks_liveness.py` 的注入證明綁在一起。
 UNATTENDED_ENV = "AUTOSDD_UNATTENDED"
 RESUME_OFF_ENV = "AUTOSDD_RESUME_OFF"
-#: 預設觸發時刻運算式。留成 PowerShell 運算式而不是寫死時間：使用者要改成 CLI 印的
-#: reset 時間時，改的是同一個字串，印出來的與真的註冊出去的**不會分岔**。
-#:
-#: 🔴 R79：這個預設**只在 `--register-schtasks` 手動路徑上還算數，且它是猜的**。
-#: `--arm-endurance` 一律不使用它——那條路的觸發時刻只能從逐字稿觀測（見
-#: `guard.parse_reset_at` 的 WHY：全庫 7 個相異 reset 值沒有一個落在 5 小時格點上，
-#: 本檔實測 `3:50am`／`12:20pm` 這種值就是反證）。把「當下機器的偶然事實寫成常數」
-#: 是本 repo 反覆判過的形態（R73 同型）；此處保留它只是為了不動既有手動路徑的行為，
-#: 並在下面這個常數旁把它的地位講清楚：**它不是 reset 時刻，是一個預設猜測**。
+#: 🔴 DEF-200-231①：**被禁止的形態，不再是任何預設**（`--at` 預設為 `None`、
+#: `schtasks_command()` 的 `at_expr` 無預設值）。`--at` 缺席時的觸發時刻由
+#: `session_brief.schtasks_trigger()` 取實測 reset，解不出就拒絕。常數本身刻意留著：
+#: ADR-XPLAT-004／005／014、`ResetArithmeticTest` 與 `schedule_backend`／
+#: `quota_limits` 的註解都以這個名字指稱「假設 5 小時」那個缺陷，
+#: 刪掉會讓這些引用懸空（沒有任何程式碼 import 它）。reset 是滾動視窗、
+#: 只能觀測不能算（全庫 7 個相異 reset 值沒有一個落在 5 小時格點上，`3:50am`／
+#: `12:20pm` 就是反證）。此前該處的立案段落全文已搬進
+#: docs/06_quality/CrossPlatform_R189_SessionGate_Family_Lock_Audit_Evidence.md〈九〉。
 DEFAULT_AT_EXPR = "(Get-Date).AddHours(5)"
 
 #: 探測重試上限。上界＝5 × 一次探測（本檔實測 31,847 tokens／$0.0176）≈ 16 萬 tokens，
@@ -276,8 +277,9 @@ _EVIDENCE_TEMPLATE = ( "Get-ScheduledTask -TaskName '{task}' | Get-ScheduledTask
 # 指令跑掉（注入），而且失效發生在 `powershell.exe` 那一端、本行程只看得到一個 rc。
 # 射程誠實劃界：只處理單引號。雙引號不必處理——Windows 檔名不允許 `"`，而本檔所有
 # 內插點都落在單引號字串裡。**`at_expr` 刻意不跳脫**：它按設計就是一段 PowerShell
-# 運算式（預設值 `(Get-Date).AddHours(5)` 就是），跳脫會讓它失效；它的來源是 `--at`
-# （人手打的）或本檔自己用 `strftime` 產的字面時間，不是路徑那種外部字串。
+# 運算式（例如人手打的 `--at (Get-Date).AddMinutes(30)`），跳脫會讓它失效；它的來源
+# 是 `--at`（人手打的）或 `session_brief.schtasks_trigger()` 產的字面時間，不是路徑
+# 那種外部字串。
 def _ps_single_quote(text: str) -> str:
     return text.replace("'", "''")
 
@@ -288,13 +290,15 @@ def _ps_single_quote(text: str) -> str:
 # 另有一份把整份任務書內嵌進 `-Command` 當 prompt 的實作，那份有兩個獨立缺陷
 # （任務書一長就撞命令列長度上限；骨架裡的 `TODO:` 佔位會被當成指令餵進去），
 # 而且它與續航那份是同一件事的兩個家。
-def schtasks_command(plan_path: str, task_name: str = DEFAULT_TASK_NAME,
-                     at_expr: str = DEFAULT_AT_EXPR) -> str:
-    """`--print-schtasks-command` 的輸出：註冊腳本 ＋ 它沒有被執行的聲明。"""
+def schtasks_command(plan_path: str, task_name: str = DEFAULT_TASK_NAME, *,
+                     at_expr: str, observed: bool) -> str:
+    """`--print-schtasks-command` 的輸出：註冊腳本 ＋ 它沒有被執行的聲明。`observed`＝
+    觸發時刻取自額度快取的實測 reset（`--at` 缺席）；標頭只說這次真的走的那條路，顯式
+    `--at` 不得印「省略 --at＝…」。"""
     return (
         "# 🔴 以下指令本次**沒有執行**，也沒有建立任何排程（本旗標只印）。\n#    要真的註冊並當場取證：改用 --register-schtasks（同一份字串，不是另一份）。\n"  # noqa: E501
         "# 🔴 執行完**必須**貼出最後那道取證指令的輸出才准宣稱「已排程」——\n#    「我下了指令」不等於「它真的排進去了」（反『事後諸葛』取證規則）。\n"  # noqa: E501
-        f"# 🔴 `{at_expr}` 是**猜的**，不是 reset 時刻。要正確的觸發時刻請改用\n#    --arm-endurance（它從逐字稿原文觀測，見 ADR-XPLAT-004 §2.1）；還沒撞線就想掛著請用 --arm-sentinel。\n"  # noqa: E501
+        f"# 觸發時刻 {at_expr}：{session_brief.trigger_basis(observed)}。\n#    已撞線請改用 --arm-endurance（逐字稿原文，見 ADR-XPLAT-004 §2.1）；還沒撞線就想掛著請用 --arm-sentinel。\n"  # noqa: E501
         + endurance_schtasks_script(plan_path, task_name, at_expr))
 
 
@@ -912,8 +916,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="移除排程並驗證它真的不見了")
     parser.add_argument("--task-name", default=DEFAULT_TASK_NAME,
                         help=f"排程工作名稱（預設 {DEFAULT_TASK_NAME}）")
-    parser.add_argument("--at", default=DEFAULT_AT_EXPR,
-                        help=f"觸發時刻（PowerShell 運算式／時間字串；預設 {DEFAULT_AT_EXPR}）")
+    parser.add_argument("--at", default=None,
+                        help="觸發時刻（PowerShell 運算式／時間字串）；省略＝取額度快取的實測 resets_at＋緩衝，解不出即拒絕")  # noqa: E501
     parser.add_argument("--arm-endurance", action="store_true", dest="arm_endurance", help="額度耗盡續航武裝：從逐字稿觀測 reset 時刻 → 寫任務書＋狀態塊 → " "註冊一次性 schtasks → 取證。月度支出上限一律拒絕武裝（等待無效）")  # noqa: E501
     parser.add_argument("--probe-quota", action="store_true", dest="probe_quota",
                         help="花一次最便宜的呼叫問「額度回來了沒」；額度通時 rc=0、耗盡時 rc=1")
@@ -1608,6 +1612,7 @@ def main(argv: list[str]) -> int:
         # 標記真的在才呼叫會建目錄的 `read_halt_marker()`（見該函式 WHY）。單行 if
         # 沿用本檔 guardrail_cli tier 餘裕為 0 的既有慣例。
         if _halt_marker_probe_path(data["session_id"]).is_file() and (halted := quota_gate.halted_band_line(quota_gate.read_halt_marker(data["session_id"]), datetime.now().astimezone())): print(halted)  # noqa: E501,E701
+        print(session_brief.sdd_fsm_line())  # Q1 外驗證據：SDD FSM 現況（原值，不判阻斷）
         if (liveness := sentinel_lifecycle.liveness_line(data["session_id"])):  # 修3：同 --pace
             print(liveness, file=sys.stderr)
         if args.print_schtasks:
@@ -1649,21 +1654,24 @@ def main(argv: list[str]) -> int:
         return arm(args, transcript, out)
     # 🔴 R97（round-label-ok：非帳本追蹤的正式輪，僅沿用便於追蹤的標籤）：per-session 命名（同 `_arm_endurance`）——兩條路共用同一個算法，讓  # noqa: E501
     # `--print-schtasks-command` 印出的指令與 `--register-schtasks` 真的註冊的是同一份。
-    if args.print_schtasks:
-        print("\n" + schtasks_command(str(out), resume_task_name(data["session_id"], args.task_name), args.at), end="")  # noqa: E501
-    if args.register_schtasks:
-        print()
+    if args.print_schtasks or args.register_schtasks:
         task = resume_task_name(data["session_id"], args.task_name)
         # 🔴 M-13：`--register-schtasks` 不經 `_register_and_record`（直接呼叫
         # `_register_at_expr`），INV5 檢查此前完全漏查這條手動路徑；顯式補一站，
         # 與 `_arm_endurance` 共用同一個判準函式，不重寫第二份。
-        if relay_machine.single_owner_conflict(data["session_id"], task, out):
+        # DEF-200-231①：INV5 先於時刻解析——同 session 已有排程時，結局不因解不出而改變。
+        if args.register_schtasks and relay_machine.single_owner_conflict(data["session_id"], task, out):  # noqa: E501
             print(f"ℹ️  INV5 單一擁有者：session {data['session_id']} 已由其他排程巡邏/續跑，不重複武裝（擇一擁有，零重複探測）。")  # noqa: E501
             return 0
-        rc, moment = _register_at_expr(str(out), task, args.at, RESUME_TICK)
-        if rc != 0:
-            return 1
-        print(schedule_backend.select().credential_line(moment))
+        # 🔴 DEF-200-231①：印出的與真註冊的共用同一個觸發時刻（`--at` 缺席 ⇒ 只取實測）。
+        at_expr, at, refusal = session_brief.schtasks_trigger(args.at, quota_gate, skew_seconds=RESET_SKEW_SECONDS)  # noqa: E501
+        if at_expr is None: print(refusal, file=sys.stderr); return 1  # noqa: E701,E702
+        if args.print_schtasks: print("\n" + schtasks_command(str(out), task, at_expr=at_expr, observed=args.at is None), end="")  # noqa: E701,E501
+        if args.register_schtasks:
+            print()
+            rc, moment = _register_at_expr(str(out), task, at_expr, RESUME_TICK, at)
+            if rc != 0: return 1  # noqa: E701
+            print(schedule_backend.select().credential_line(moment))
     return 0
 
 

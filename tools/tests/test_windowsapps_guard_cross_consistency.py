@@ -1415,6 +1415,10 @@ _ZERO_GUARD_BARE_PY_SITES = {
         "本筆）——前兩次都只把個案登記掉，沒有人去改「收尾在 commit 前跑」這個順序，"
         "所以它必然再來一次。"
     ),
+    "tools/lib/session_brief.py": (
+        "非呼叫：`_STATUSLINE_INSTALL_HINT` 是 `_install_command()` 組不出絕對路徑時退回的顯示用"
+        "提示字串（給人／模型看），本檔不 spawn 它；同 `tools/probe/xplat_injection_matrix.py`"
+    ),
     "tools/sync_onboarding_baselines.py": (
         "非呼叫：`argparse.ArgumentParser(prog=\"python tools/sync_onboarding_baselines.py\")`"
         "——只用於 usage/help 輸出，與上面 `AutoClaude/autoclaude/tools/sdd_compile.py` 同型。"

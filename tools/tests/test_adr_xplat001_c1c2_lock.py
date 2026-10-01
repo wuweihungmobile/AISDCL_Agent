@@ -668,13 +668,13 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 397,
     "_ps_engine.py": 83,
     "test_act_local_runner_image.py": 307,
-    "test_adr_xplat001_c1c2_lock.py": 8955,
+    "test_adr_xplat001_c1c2_lock.py": 8978,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 4073,
     "test_bash32_compat.py": 979,
     "test_bash_probe_spec_contract.py": 859,
-    "test_block_destructive_git_r83.py": 2663,
+    "test_block_destructive_git_r83.py": 2851,
     "test_bootstrap_core.py": 439,
     "test_bootstrap_ps1.py": 160,
     "test_check_archive_required.py": 160,
@@ -688,7 +688,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_claim_provenance_r86.py": 1389,
     "test_clean_venv_carrier.py": 281,
     "test_component_sanitizer_shared_layer_lock.py": 274,
-    "test_context_budget_guard.py": 14139,
+    "test_context_budget_guard.py": 14302,
     "test_context_window_parity.py": 325,
     "test_cpu_budget.py": 428,
     "test_defect_id_reference_integrity.py": 276,
@@ -733,7 +733,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_script_scan_surface_ssot.py": 376,
     "test_sdd_hook_router_r158.py": 189,
     "test_sentinel_tick_e2e_r145.py": 141,
-    "test_session_brief.py": 559,
+    "test_session_brief.py": 726,
     "test_single_venv_identity.py": 162,
     "test_skip_ceiling_ratchet_direction.py": 719,
     "test_skip_discoverability_r83.py": 731,
@@ -742,12 +742,12 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_stdio_utf8.py": 76,
     "test_subprocess_encoding_hygiene.py": 1567,
     "test_tlc_runner_timeout.py": 292,
-    "test_wake_chain_halt_r278.py": 791,
+    "test_wake_chain_halt_r278.py": 1066,
     "test_windows_forbidden_filename_parity.py": 946,
     "test_windows_nightly_anchor_parity.py": 119,
     "test_windows_smoke_heartbeat_doc_sync.py": 197,
     "test_windowsapps_guard_bash_parity.py": 1026,
-    "test_windowsapps_guard_cross_consistency.py": 2092,
+    "test_windowsapps_guard_cross_consistency.py": 2096,
     "test_workflow_permission_concurrency_lock.py": 1743,
     "test_workflow_schedule_sync.py": 305,
     "test_workflow_timeout_coverage.py": 158,
@@ -2562,6 +2562,15 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "導出、刪手列白名單、合成自證一格）＋本表自身 +13（重釘列、回歸鎖軌同輪列、"
      "接鏈列、到期義務兌現與 U9 具名展延）。主軌 0 ≤ 0。逐項見 "
      "CrossPlatform_R188_SessionGate_Hook_Voice_Evidence.md〈四〉〈六〉。"),  # round-label-ok
+    ("R189", 110563, 111383, +820,  # round-label-ok
+     "[非淨減法輪][回歸鎖軌申報 309（＝軌上限），見 _REGRESSION_LANE_LOG 同輪列] "
+     "掌舵者五問家族級結構鎖審計輪（DEF-200-451／452／453／454／086／231 結案回歸鎖）："
+     "test_block_destructive_git_r83.py +188／test_context_budget_guard.py +163／"
+     "test_session_brief.py +167／test_wake_chain_halt_r278.py +275／"
+     "test_windowsapps_guard_cross_consistency.py +4＋本表自身 +23（重釘列、回歸鎖軌"
+     "同輪列、接鏈列、Phase 2 時效列）；同輪搬遷史料 451 行原文進證據檔〈九-F〉"
+     "（淨減 371 行；搬遷部分 AST 比對零可執行改動）。主軌 511 ≤ 523（款(11) 連續上升第 1 輪）。"
+     "逐項見 CrossPlatform_R189_SessionGate_Family_Lock_Audit_Evidence.md〈四〉〈六〉〈九〉。"),
 )
 
 
@@ -2993,6 +3002,10 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "DEF-200-447／449 結案回歸鎖全額（結束碼鎖母體導出與合成自證＋本表自身漂移），"
      "未超軌上限 ⇒ 全額申報，主軌 0 ≤ 0。見 "
      "CrossPlatform_R188_SessionGate_Hook_Voice_Evidence.md〈四〉。"),  # round-label-ok
+    ("R189", 309,  # round-label-ok
+     "DEF-200-451／452／453／454／086／231 結案回歸鎖淨額超過軌上限 309 ⇒ 申報 309"
+     "（≤ 主表淨額 820），主軌 511 ≤ 523。見 "
+     "CrossPlatform_R189_SessionGate_Family_Lock_Audit_Evidence.md〈四〉。"),  # round-label-ok
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -3216,10 +3229,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 319
+_REPIN_LOG_FROZEN_PREFIX_LEN = 320
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "a2fe4b152479c294d1a64206ef601bf98e3e5eb3e9645b34530da078ba71d250")
+    "c326e2f45237529e885e80f7d2b425cba4bf5b627050e62ccd91680e8fa32654")
 
 
 def repin_log_history_digest(
@@ -3573,6 +3586,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R186", "61ea6814f294", "fab77716902f", "DEF-200-435"),  # round-label-ok
     ("R187", "fab77716902f", "46d7412f002f", "DEF-200-445"),  # round-label-ok
     ("R188", "46d7412f002f", "a2fe4b152479", "DEF-200-447"),  # round-label-ok
+    ("R189", "a2fe4b152479", "c326e2f45237", "DEF-200-451"),  # round-label-ok
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。
@@ -7976,6 +7990,15 @@ _PHASE2_REVIEW_LOG: tuple[tuple[int, str, str], ...] = (
      "觀測→阻斷轉換提案本身——R129 提出的既存提案（送四方複審一事）迄今仍待主控排定、尚未有"
      "結果，亦未提出新 Phase 2 提案。上一列（R177）是『提案』⇒ 連續『維持觀察』計數自本列"
      "起算為一，未觸上限（`_PHASE2_MAX_CONSECUTIVE_DEFERRALS=1`）。依 §6 重新武裝下一個視窗。"),
+    (189, "[提案]",
+     "本輪是掌舵者五問家族級結構鎖審計輪（DEF-200-451／452／453／454／086／231 結案回歸鎖收尾"
+     "單人窗口；護欄層 guard-line 記帳＋分軌申報），未觸碰 ADR-XPLAT-013 方向 (c) 觀測→阻斷"
+     "轉換提案本身——上一列（R183）是『維持觀察』，其名額（`_PHASE2_MAX_CONSECUTIVE_DEFERRALS=1`）"
+     "已用罄，§6 只剩 [提案]／[落地] 兩條合法出路。🔴 誠實記載（體例同 R141／R153／R165／R177）："
+     "本列**不是**對 (c) 方向做出任何新判斷，R129 提出的既存提案（送四方複審一事）迄今仍待主控"
+     "排定、尚未有結果；本列僅把該既存未決狀態依款(5) 的封閉表格式重新登記，純因本輪把稽核痕跡"
+     "機械推進到 R189 而觸發 §6 的 5 輪視窗時效。依 §6 重新武裝下一個視窗（連續『維持觀察』"
+     "計數歸零）。"),
 )
 #: 到期輪由末列導出、不另立常數（一份知識一個家；同 `_REPIN_NET_CAP_SCHEDULE` 的
 #: 「生效點＝首列、現值＝末列，皆由表導出」）。

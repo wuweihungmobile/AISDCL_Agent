@@ -15,9 +15,11 @@ CrossPlatform_R151_Guard_Prose_Migration.md〈test_wake_chain_halt_r278.py 模�
 from __future__ import annotations
 
 import contextlib
+import inspect
 import io
 import json
 import os
+import re
 import sys
 import unittest
 import unittest.mock
@@ -38,6 +40,7 @@ import quota_messages  # noqa: E402
 import quota_policy  # noqa: E402
 import schedule_backend as sb  # noqa: E402
 import sentinel_lifecycle  # noqa: E402  # DEF-200-446：模組級圍籬原語
+import session_brief  # noqa: E402  # DEF-200-231：觸發時刻解析／`--check` FSM 行
 
 import session_resume_planner as planner  # noqa: E402
 
@@ -785,6 +788,278 @@ class ClaimGuardCatchesAutoContinueWithoutCredentialTest(unittest.TestCase):
         hits = self.g.naked_verdict_hits(
             "重置後會自動繼續、已排程並自動續跑，不需要人介入。", "")
         self.assertTrue(hits, "自動續跑類宣稱疊加後沒有被判準抓到")
+
+
+def _usage_transcript(path: Path) -> Path:
+    """最小可量測逐字稿：一筆帶 usage 的 assistant 記錄（`measure()` 吃得動）。"""
+    usage = {"input_tokens": 2, "cache_creation_input_tokens": 3,
+             "cache_read_input_tokens": 995, "output_tokens": 1}
+    message = {"model": "claude-test-double-3", "usage": usage}
+    record = json.dumps({"type": "assistant", "message": message})
+    path.write_text(record + "\n", encoding="utf-8", newline="\n")
+    return path
+
+
+class RegisterSchtasksTimeIsObservedNotGuessedTest(unittest.TestCase):
+    """DEF-200-231①（受測：`tools/session_resume_planner.py` 的 `--print-schtasks-command`／
+    `--register-schtasks`）：缺 `--at` 時，觸發時刻只取**實測**的 resets_at（額度快取）＋緩衝；
+    解不出就拒絕，不得退回 `(Get-Date).AddHours(5)`（根 CLAUDE.md：reset 時刻是滾動視窗，
+    只能觀測不能算）。事故形狀（DEF-200-231）：快取明明寫著 14:00，這條手動路徑卻排在 now+5h。
+    全程行程內＋假排程後端：不真註冊、不打 usage 端點（`read_quota` 零網路）。"""
+
+    def setUp(self) -> None:
+        import tempfile
+        self.tmp = Path(tempfile.mkdtemp(prefix="def231_"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
+        env = {"AUTOSDD_QUOTA_CACHE_DIR": str(self.tmp),
+               "AUTOSDD_TRACE_DIR": str(self.tmp / "trace")}
+        patcher = unittest.mock.patch.dict(os.environ, env)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.transcript = _usage_transcript(self.tmp / "sidDef231.jsonl")
+        self.plan = self.tmp / "plan.md"
+
+    def _cache(self, *axes: tuple[str, float, float | None],
+               age: float = 0.0, tz: timezone | None = None,
+               zulu: bool = False) -> datetime:
+        """種一份合成快取，回傳它用的基準 now（期望值與快取共用同一個 now，
+        才不會因跨秒邊界偶發不等）：`axes`＝`(kind, pct, 距 reset 秒數；None＝無 reset
+        可等)`。"""
+        now = datetime.now(UTC).astimezone()
+
+        def iso(seconds: float | None) -> str | None:
+            if seconds is None:
+                return None
+            text = (now + timedelta(seconds=seconds)).astimezone(tz).isoformat()
+            return text.replace("+00:00", "Z") if zulu else text
+
+        measured = (now - timedelta(seconds=age)).isoformat(timespec="seconds")
+        rows = [{"kind": k, "pct": pct, "resets_at": iso(r)} for k, pct, r in axes]
+        body = {"schema": qg.quota_schema(), "source": "endpoint",
+                "measured_at": measured, "axes": rows}
+        (self.tmp / "autosdd_quota.json").write_text(
+            json.dumps(body), encoding="utf-8", newline="\n")
+        return now
+
+    def _main(self, *argv: str) -> tuple[int, str, str]:
+        out, err = io.StringIO(), io.StringIO()
+        args = ["--transcript", str(self.transcript), "--out", str(self.plan), *argv]
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = planner.main(args)
+        return rc, out.getvalue(), err.getvalue()
+
+    def _register(self, *argv: str) -> tuple[int, str, list]:
+        """跑 `--register-schtasks`，回 `(rc, stderr, 底層註冊呼叫的位置引數清單)`；
+        後端與註冊皆替身。"""
+        calls: list[tuple] = []
+
+        class _Backend:
+            name, credential_key = "fake", "next_run_time"
+
+            def list_jobs(self, prefix):  # noqa: ARG002 — 同 M-13 既有替身
+                return []
+
+            def credential_line(self, moment):
+                return f"credential={moment}"
+
+        def _fake_register(*args, **_kwargs):
+            calls.append(args)
+            return 0, "NEXT"
+
+        select = unittest.mock.patch.object(
+            planner.schedule_backend, "select", return_value=_Backend())
+        register = unittest.mock.patch.object(
+            planner, "_register_at_expr", side_effect=_fake_register)
+        with select, register:
+            rc, _out, err = self._main("--register-schtasks", *argv)
+        return rc, err, calls
+
+    @staticmethod
+    def _fire(resets_in: float, now: datetime) -> datetime:
+        """期望的觸發時刻：實測 reset ＋ `RESET_SKEW_SECONDS`，換到本機時區。"""
+        skew = planner.RESET_SKEW_SECONDS
+        return (now + timedelta(seconds=resets_in + skew)).astimezone()
+
+    def test_a_cached_reset_is_what_gets_printed_not_five_hours(self) -> None:
+        """核心：快取說 90 分鐘後 reset ⇒ 印出的觸發時刻 ≈ now＋92 分鐘（reset＋緩衝），
+        絕不是 now＋5h。獨立於實作公式再核一次：把字面解回本機時刻（帶 offset，跨 DST
+        不偏一小時），與現在相減。"""
+        self._cache(("session", 90.0, 5400.0))
+        rc, out, err = self._main("--print-schtasks-command")
+        self.assertEqual(rc, 0, err)
+        self.assertNotIn("AddHours(5)", out, "仍印出『假設 5 小時』的猜測值")
+        literal = re.search(r"-At '([^']+)'", out)
+        self.assertIsNotNone(literal, f"輸出沒有單引號時間字面：{out[-600:]}")
+        moment = datetime.strptime(literal.group(1), "%Y-%m-%d %H:%M:%S").astimezone()
+        gap = (moment - datetime.now().astimezone()).total_seconds()
+        self.assertAlmostEqual(gap, 5400 + planner.RESET_SKEW_SECONDS, delta=90,
+                               msg="觸發時刻不是『實測 reset ＋緩衝』")
+
+    def test_a_utc_reset_prints_in_the_machine_local_timezone(self) -> None:
+        """時區收斂不下沉（`-At '<字串>'` 一律被當成**機器本地時區**）：真快取的
+        `resets_at` 是伺服器給的 UTC 字串；少了 `.astimezone()`，排程照樣成立、
+        NextRunTime 照樣拿得到，只是整個偏一個時區差，醒在錯的時刻而取證全綠。夾具刻意不
+        用本機 offset 字串（那樣拿掉 `.astimezone()` 也過），並加兩個固定的非 UTC offset
+        （+14／-12）：本機時區至多等於其中一個，所以不論跑在哪個時區（CI 多半是 UTC），
+        變異都至少有一格會紅。"""
+        zones = (("+00:00", UTC, False), ("Z", UTC, True),
+                 ("+14:00", timezone(timedelta(hours=14)), False),
+                 ("-12:00", timezone(timedelta(hours=-12)), False))
+        for label, tz, zulu in zones:
+            with self.subTest(offset=label):
+                now = self._cache(("session", 90.0, 5400.0), tz=tz, zulu=zulu)
+                rc, out, err = self._main("--print-schtasks-command")
+                self.assertEqual(rc, 0, err)
+                literal = re.search(r"-At '([^']+)'", out)
+                self.assertIsNotNone(literal, out[-400:])
+                self.assertEqual(
+                    literal.group(1), f"{self._fire(5400.0, now):%Y-%m-%d %H:%M:%S}",
+                    "UTC 字串沒有被換算成本機時區再印")
+
+    def test_the_header_describes_the_branch_that_was_taken(self) -> None:
+        """印出的標頭只能說**這次真的走的那條路**：省略 `--at` 才是「取額度快取實測
+        reset」；顯式 `--at` 是操作者宣稱的時刻，印「省略 --at＝…」對它是假話。"""
+        self._cache(("session", 90.0, 5400.0))
+        _, observed, _ = self._main("--print-schtasks-command")
+        _, explicit, _ = self._main(
+            "--print-schtasks-command", "--at", "(Get-Date).AddMinutes(30)")
+        self.assertIn("省略 --at＝額度快取", observed)
+        self.assertNotIn("省略 --at", explicit)
+        self.assertIn("--at 顯式指定", explicit)
+
+    def test_the_halted_axis_reset_wins_over_a_far_binding_axis(self) -> None:
+        """沿用 `halt_resets_at`（≥halt 各軸中最早可解析者）而不是另造一套挑軸：session
+        96% 已停、一小時後 reset；weekly 99%（binding，最緊的一軸）兩天後才 reset ⇒
+        要等的是 session 那一個。若改取 binding 的 reset，
+        會排到兩天後（或被視界擋下而拒絕），而 5 小時窗一小時後就翻頁了。"""
+        now = self._cache(("session", 96.0, 3600.0), ("weekly_all", 99.0, 172800.0))
+        rc, out, err = self._main("--print-schtasks-command")
+        self.assertEqual(rc, 0, err)
+        self.assertIn(f"-At '{self._fire(3600.0, now):%Y-%m-%d %H:%M:%S}'", out)
+
+    def test_an_unobservable_reset_refuses_before_printing_anything(self) -> None:
+        """憲法：解不出時刻一律拒絕——rc≠0、stderr 出聲「拒絕退回假設 5 小時」、stdout
+        不得已經印出可貼的註冊腳本（印了就是把猜測交到使用者手上）。三種解不出：沒快取；
+        快取過 TTL（≠ resets_at 還活著，DEF-200-200，訊息要指路 `--pace`）；只有兩天後才
+        reset 的週軸（超出 6 小時可等視界，七天後才響的排程＝痕跡全綠的空等）。"""
+        old = qg.QUOTA_CACHE_TTL_SECONDS + 300.0
+        cases = (
+            ("沒有快取", None, 0.0, ()),
+            ("快取過 TTL", ("session", 90.0, 5400.0), old, ("stale-cache", "--pace")),
+            ("週軸過遠", ("weekly_all", 30.0, 172800.0), 0.0, ("遠超 6 小時",)),
+        )
+        for label, axis, age, expected in cases:
+            with self.subTest(label):
+                if axis is not None:
+                    self._cache(axis, age=age)
+                rc, out, err = self._main("--print-schtasks-command")
+                self.assertNotEqual(rc, 0)
+                for fragment in ("拒絕退回「假設 5 小時」", *expected):
+                    self.assertIn(fragment, err)
+                self.assertNotIn("Register-ScheduledTask", out)
+                self.assertNotIn("AddHours(5)", out + err)
+
+    def test_an_explicit_at_passes_through_untouched(self) -> None:
+        """人顯式給的 `--at` 照舊（不讀快取、不拒絕）：操作者知道自己在宣稱什麼時刻——
+        印出與真註冊兩條路都一樣，運算式原樣下傳、結構化 `at` 仍是 `None`。"""
+        rc, out, err = self._main(
+            "--print-schtasks-command", "--at", "(Get-Date).AddMinutes(30)")
+        self.assertEqual(rc, 0, err)
+        self.assertIn("-At (Get-Date).AddMinutes(30)", out)
+        self.assertNotIn("AddHours(5)", out)
+        rc, err, calls = self._register("--at", "'2099-01-01 00:00:00'")
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(len(calls), 1, calls)
+        _plan, _task, at_expr, tick, *rest = calls[0]
+        self.assertEqual((at_expr, tick, (rest or [None])[0]),
+                         ("'2099-01-01 00:00:00'", planner.RESUME_TICK, None))
+
+    def test_register_hands_the_observed_moment_and_a_structured_at_over(self) -> None:
+        """真註冊那條路拿到的是同一份觀測值：字面給 schtasks、結構化的本機時區 `at` 給
+        launchd（`at=None` ⇒ mac 後端只寫重複觸發、不寫時刻——
+        印出來的與真註冊的會分岔）。"""
+        now = self._cache(("session", 90.0, 5400.0))
+        rc, err, calls = self._register()
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(len(calls), 1, calls)
+        _plan, _task, at_expr, tick, at = calls[0]
+        self.assertEqual(at_expr, f"'{self._fire(5400.0, now):%Y-%m-%d %H:%M:%S}'")
+        self.assertEqual(tick, planner.RESUME_TICK)
+        self.assertIsNotNone(at.tzinfo, "結構化 at 必須帶 tzinfo")
+        gap = (at - now).total_seconds()
+        self.assertAlmostEqual(gap, 5400 + planner.RESET_SKEW_SECONDS, delta=90)
+
+    def test_register_without_an_observation_never_reaches_the_scheduler(self) -> None:
+        """「拒絕武裝」要在**註冊之前**：解不出時刻時底層註冊呼叫次數必須為 0（只看 rc
+        會被『註冊了、只是回非零』的實作騙過）。"""
+        rc, err, calls = self._register()
+        self.assertNotEqual(rc, 0)
+        self.assertIn("拒絕退回「假設 5 小時」", err)
+        self.assertEqual(calls, [], "解不出時刻卻仍呼叫了底層註冊")
+
+    def test_the_guess_is_not_a_default_anywhere(self) -> None:
+        """結構面：`--at` 的 argparse 預設與 `schtasks_command(at_expr=)`
+        都不得再帶預設值——任何忘了帶 `--at` 的呼叫端都不能靜默走猜測路（ADR-XPLAT-014
+        約束 1）。`DEFAULT_AT_EXPR` 這個名字仍留著，
+        只是被禁止的形態的對照物（既有文件與測試引用它），不是預設。"""
+        self.assertIsNone(planner.build_parser().parse_args([]).at)
+        param = inspect.signature(planner.schtasks_command).parameters["at_expr"]
+        self.assertIs(param.default, inspect.Parameter.empty)
+
+    def test_a_cache_read_failure_refuses_with_the_reason(self) -> None:
+        """讀快取本身拋例外 ⇒ 走拒絕並把例外帶進訊息；不得吞掉後退回猜測，也不得往上拋成
+        traceback。"""
+        boom = OSError("合成：讀不到")
+        with unittest.mock.patch.object(qg, "read_quota", side_effect=boom):
+            at_expr, at, why = session_brief.schtasks_trigger(None, qg, skew_seconds=120)
+        self.assertEqual((at_expr, at), (None, None))
+        self.assertIn("拒絕退回「假設 5 小時」", why)
+        self.assertIn("合成：讀不到", why)
+
+
+class CheckPrintsTheSddFsmLineTest(unittest.TestCase):
+    """`--check` 末行補印 SDD FSM 現況：模型在 Q1 說「被擋」時，
+    要有一條可外驗的機器級證據。純展示——不判阻斷（判準在 SDD 側）、不寫檔（`--check`
+    的既有契約）。"""
+
+    def setUp(self) -> None:
+        import tempfile
+        self.tmp = Path(tempfile.mkdtemp(prefix="def_fsm_check_"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
+        env = {"AUTOSDD_TRACE_DIR": str(self.tmp / "trace"),
+               "AUTOSDD_QUOTA_CACHE_DIR": str(self.tmp),
+               "AUTOSDD_CONTEXT_FEED_DIR": str(self.tmp / "feed")}
+        patcher = unittest.mock.patch.dict(os.environ, env)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.transcript = _usage_transcript(self.tmp / "sidFsm.jsonl")
+
+    def _check_lines(self, version: str | None) -> list[str]:
+        """跑 `--check`，回 stdout 的行；`version=None` ＝ `SDD_ACTIVE_VERSION` 未設。"""
+        os.environ.pop("SDD_ACTIVE_VERSION", None)
+        if version is not None:
+            os.environ["SDD_ACTIVE_VERSION"] = version
+        out = io.StringIO()
+        no_liveness = unittest.mock.patch.object(
+            planner.sentinel_lifecycle, "liveness_line", return_value="")
+        with no_liveness, contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(io.StringIO()):
+            rc = planner.main(["--check", "--transcript", str(self.transcript)])
+        self.assertEqual(rc, 0)
+        return out.getvalue().splitlines()
+
+    def test_unset_prints_dormant_as_the_last_stdout_line(self) -> None:
+        """未設 ⇒ 末行說「休眠」：沒有這行，模型只能靠猜判斷 SDD 守門有沒有在管這個
+        session。"""
+        lines = self._check_lines(None)
+        self.assertEqual(lines[-1], "SDD FSM：休眠（SDD_ACTIVE_VERSION 未設）")
+
+    def test_set_prints_the_state_report_as_the_last_stdout_line(self) -> None:
+        """有設 ⇒ 末行是狀態報告（本測試指到不存在的版本，與開發機上真狀態檔無關）：
+        「無狀態檔」。"""
+        lines = self._check_lines("99.99")
+        self.assertTrue(lines[-1].startswith("SDD FSM：無狀態檔"), lines[-1])
+        self.assertIn("99.99", lines[-1])
 
 
 if __name__ == "__main__":

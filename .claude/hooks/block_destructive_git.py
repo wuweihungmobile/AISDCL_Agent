@@ -143,6 +143,13 @@ mac 清掉的檔案與 Windows 一模一樣，而事故就發生在 macOS——�
   （關鍵字後）、`<# 註解 #> & exe`（區塊註解遮蔽後是佔位）、`Set-Location C:\\dir\\`↵`& exe`
   （路徑以反斜線收尾 ⇒ `_LINE_CONT_RE` 把兩行折成一段）——誤擋走 `# waitform-ok: <理由>`。
   `"./job.sh" &`（引號包住的命令＋後綴 `&`）**不**在此列：quoted 視圖看得到前文 ⇒ 仍擋。
+· **判準④（管線尾節遮蔽 rc）只認指令字串字面**（DEF-200-086）：看不到 `-c` operand／
+  `ssh host '…'` 內的管線、`sudo tail`／`xargs` 這類前綴包裝、zsh 的 `$status`、`$?` 之前
+  隔了別的指令（那讀的是別人的 rc）、函式／`trap` 內的讀取，更看不到**背景工作完成通知
+  的 exit code**（不在任何指令字串裡）。豁免是**整條指令**粒度：任一處有 `PIPESTATUS`／
+  `pipefail` 就不判，一句用對、另一句用錯會漏——此為漏擋方向。誤擋方向：白名單濾器以
+  `exit` 傳有語意的 rc（`sort -c`／`awk '{exit N}'`／`sed '/x/q1'`）照樣命中，走
+  `# waitform-ok:`。
 """
 
 from __future__ import annotations
@@ -381,7 +388,12 @@ def argv_git_fragments(command: str) -> str:
     return ";".join(out)
 
 
-def mask_inert(text: str, *, keep_comments: bool = False) -> str:
+#: `$?`／`${?}` 的讀取（`\$?` 逃脫與 `$$?`〔PID ＋ glob〕不算）。
+_STATUS_READ_RE = re.compile(r"(?<![\\$])\$(?:\?|\{\?\})")
+
+
+def mask_inert(text: str, *, keep_comments: bool = False,
+               keep_status: bool = False) -> str:
     """把「不是可執行結構」的區段換成**等長**空白：引號字串、here-string／heredoc、註解。
 
     等長是關鍵：遮蔽後與原字串位置一一對應，切段與比對才不會位移（體例同
@@ -395,6 +407,10 @@ def mask_inert(text: str, *, keep_comments: bool = False) -> str:
 
     `keep_comments=True`：註解**原樣保留**、字串照樣遮。只有行內豁免偵測在用——它要的
     正是「這個標記住在真註解裡，不是住在一段被引號包起來的資料裡」。
+
+    `keep_status=True`（判準④，DEF-200-086）：**雙引號**字串內的 `$?`／`${?}` 原樣保留
+    ——`echo "rc=$?"` 的 `$?` 會被殼展開，整段遮掉就看不見最常見的讀法；單引號內不展開，
+    照遮。
     """
     out = list(text)
     n = len(text)
@@ -425,6 +441,9 @@ def mask_inert(text: str, *, keep_comments: bool = False) -> str:
                     break
                 j += 1
             blank(i, min(j + 1, n))
+            if keep_status and ch == '"':
+                for m in _STATUS_READ_RE.finditer(text, i, j):
+                    out[m.start():m.end()] = m.group()
             i = min(j + 1, n)
             continue
         # PowerShell 區塊註解 <# … #>
@@ -910,16 +929,34 @@ _PGREP_VALUE_LONG = frozenset({
 #: 判準②的行內豁免。**刻意與 `# git-guard-ok:` 不同字樣**：共用一個標記會讓「為了
 #: 放行一個等待形態而寫的豁免」順手把毀滅性 git 一起放行（同本檔既有的兩層逃生口論述）。
 _WAITFORM_EXEMPT_RE = re.compile(r"#\s*waitform-ok:\s*\S")
+#: 判準④（DEF-200-086）的 rc 遮蔽型濾器：管線的 rc 是**最後一節**的 rc，而這些濾器
+#: 幾乎不會失敗 ⇒ 前面指令的失敗被整個吃掉。🔴 刻意**不含** `grep`／`rg`／`test`／
+#: `jq`：它們的 rc 有語意（`ls | grep x; echo $?` 是合法用法），判它們是整批假紅，
+#: 會讓這道鎖被整個關掉。白名單內以 `exit` 傳有語意 rc 的用法（`sort -c`、
+#: `awk '{exit N}'`、`sed '/x/q1'`）判準分不出來，會被擋——出口是 `# waitform-ok:`
+#: （見 `waitform_hits` docstring）。
+_RCMASK_FILTERS = frozenset({
+    "tail", "head", "tee", "sed", "awk", "cut", "sort", "uniq", "wc", "cat", "tr",
+    "column", "less", "more"})
+#: 語句／管線運算子，在遮蔽面上切。第一個選擇分支只負責**吃掉**重導（`2>&1`／`&>`），
+#: 讓它的 `&` 不被當成背景運算子；真正的邊界是第 1 個捕獲群。`{`／`}` 刻意不切
+#: （`${?}` 要保持完整）。
+_PIPE_OPS_RE = re.compile(r"[<>]&|&>>?|(\|&|\|\||&&|[|;&\n()`])")
+#: 豁免（指令任一處出現即整條不判）：這三個是 rc **不被**遮蔽的正解，不是遮蔽。
+_RCMASK_SAFE_RE = re.compile(r"pipestatus|pipe_?fail", re.IGNORECASE)
+#: ④ 命中理由的固定前綴：`main()` 靠它決定頁尾附哪一份（只有 ④ 時不附等待機制那份
+#: 長篇指引）。
+_RCPIPE_TAG = "管線尾節是 rc 遮蔽型濾器"
 
 
-def _fold(command: str, *, quoted: bool = False) -> str:
-    """遮蔽 ＋ 折回 bash 行接續，回**與原字串等長**的結構面（判準①②③共用）。
+def _fold(command: str, *, quoted: bool = False, keep_status: bool = False) -> str:
+    """遮蔽 ＋ 折回 bash 行接續，回**與原字串等長**的結構面（判準①～④共用）。
 
     `quoted=True`（DEF-200-429）：被遮掉的**非空白**字元改填 `_` 佔位而不是空白，用來回答
     「這個 `&` 之前**有沒有東西**」——`"./job.sh" &` 遮蔽後前文全空白，會被誤當成段首的
     call operator。只換空白字元 ⇒ `;`／換行位置不變，兩個視圖切出的段一一對應。
     """
-    masked = mask_inert(command)
+    masked = mask_inert(command, keep_status=keep_status)
     if quoted:
         masked = "".join("_" if m == " " and c not in " \t\r\n" else m
                          for m, c in zip(masked, command))
@@ -1008,8 +1045,45 @@ def _self_negating(pattern: str) -> bool:
     return bool(re.search(r"\[[^\]]+\]", pattern))
 
 
-def waitform_hits(command: str, *, run_in_background: bool = False) -> list[str]:
-    """鐵律六的命中理由（空 list＝通過）。**三條**判準，共用同一個遮蔽面。
+def _rcmask_filter(view: str) -> str | None:
+    """判準④的本體：`view`（`_fold(keep_status=True)`）裡有沒有「尾節是遮蔽型濾器的
+    管線，且**緊接的下一個指令**讀 `$?`」；有則回該濾器名。`$?` 永遠是上一個指令的
+    rc，隔了別的指令讀到的就不是管線的 rc。"""
+    view = re.sub(r"(\|&?)[ \t]*\n+", r"\1 ", view)  # 運算子結尾換行：bash 視為同一條
+    parts: list[tuple[str, str]] = []
+    opened: list[bool] = []  # 每個尚未關閉的 `(` 是不是行程替換 `<(`／`>(`
+    sep, pos = "", 0
+    for m in _PIPE_OPS_RE.finditer(view):
+        op = m.group(1)
+        if op is None:
+            continue  # 重導（`2>&1`／`&>`）只是被吃掉，不是邊界
+        if op == "(":
+            opened.append(m.start() > 0 and view[m.start() - 1] in "<>")
+        elif op == ")" and opened and opened.pop():
+            op = ")<"  # 行程替換的收尾：裡面的管線 rc 本來就讀不到 `$?`
+        parts.append((sep, view[pos:m.start()]))
+        sep, pos = op, m.end()
+    parts.append((sep, view[pos:]))
+    for i, (sep, text) in enumerate(parts[:-1]):
+        if sep not in ("|", "|&") or parts[i + 1][0] in ("|", "|&", ")<"):
+            continue  # 不是管線的**最後一節**（或它收在行程替換裡）
+        words = text.split()
+        while words and re.match(r"\w+=", words[0]):
+            words.pop(0)  # `LC_ALL=C sort` 的前綴賦值
+        name = words[0].rsplit("/", 1)[-1] if words else ""
+        # 索引前掃，不用切片 `parts[i + 1:]`：切片每個濾器命中複製一次整串尾巴，n 條管線
+        # 是 O(n²)（8 萬條 19.8 秒，超過 PreToolUse 逾時 10 秒＝hook 被殺＝fail-open，連
+        # 毀滅性 git 守衛一併失效）。`islice` 要走過前 i 項，同樣平方。DEF-200-086。
+        if name in _RCMASK_FILTERS and _STATUS_READ_RE.search(
+                next((parts[j][1] for j in range(i + 1, len(parts))
+                      if parts[j][1].strip()), "")):
+            return name
+    return None
+
+
+def waitform_hits(command: str, *, run_in_background: bool = False,
+                  tool: str = "Bash") -> list[str]:
+    """鐵律六的命中理由（空 list＝通過）。**四條**判準，共用同一個遮蔽面。
 
     · ① `nohup`／`disown`／`setsid` 與背景 `&` 同一 statement
     · ② `until`／`while` 的**條件內**出現裸 `pgrep -f <非自我否定 pattern>`
@@ -1017,10 +1091,21 @@ def waitform_hits(command: str, *, run_in_background: bool = False) -> list[str]
       — 本輪實測 payload 真的帶得到這個旗標（`tool_input.run_in_background: true`，
         前景呼叫則整個 key 不存在）⇒ 這一條不是靜態推論。前綴 `&`（PowerShell 呼叫運算子
         `; & exe`／`= & exe`／`{ & exe }`）不算背景，見 `_background_amps()`（DEF-200-429）。
+    · ④ （僅 `tool="Bash"`；DEF-200-086）管線**尾節**是 rc 遮蔽型濾器（`tail`／`head`／
+      `tee`／`sed`／`awk`／`cut`／`sort`／`uniq`／`wc`／`cat`／`tr`／`column`／`less`／
+      `more`），且**緊接的下一個指令**讀 `$?`／`${?}`：讀到的是濾器的 rc，不是前面指令
+      的。豁免：指令內任一處有 `PIPESTATUS`／`pipestatus`／`pipefail`（行內
+      `# waitform-ok:` 走 `main()` 的共用豁免）。🔴 刻意**不判** `grep`／`rg`／`test`／
+      `jq`（rc 有語意，`ls | grep x; echo $?` 合法）與「只有管線、沒讀 rc」。PowerShell
+      側的 `$LASTEXITCODE` 另由 `lint_powershell_command.py` 守。
+      🔴 **誤擋方向的劃界**：白名單內的濾器若以 `exit` 傳**有語意的 rc** 也會被擋——
+      `sort -c`（未排序回 1）、`awk '{exit 3}'`、`sed '/x/q1'`——判準分不出濾器自己的 rc
+      語意（transcripts 母體零例）。出口：行內 `# waitform-ok: <WHY>`（理由必填；
+      `AUTOSDD_UNATTENDED` 有設時無效），或改讀 `${PIPESTATUS[0]}`。
 
-    🔴 `wait` 豁免（全指令任一處出現即成立）**只罩 ①③、不罩 ②**——`until ! pgrep …` 的
+    🔴 `wait` 豁免（全指令任一處出現即成立）**只罩 ①③、不罩 ②④**——`until ! pgrep …` 的
     死鎖與有沒有 `wait` 無關。這個不對稱是實作逐字的形狀（①③ 住在 `if not waited:` 內、
-    ② 在它外面）。🔴 **本 docstring 是這一族「有幾條判準」的 SSOT**：實作住在這裡，而
+    ②④ 在它外面）。🔴 **本 docstring 是這一族「有幾條判準」的 SSOT**：實作住在這裡，而
     CLAUDE.md 鐵律六與缺陷帳本各自另有一份不同版本（QA-03：同一份知識三個家、三種內容）。
     """
     masked = _fold(command)
@@ -1060,11 +1145,21 @@ def waitform_hits(command: str, *, run_in_background: bool = False) -> list[str]
                  f"`man pgrep` 只排除**自己與祖先**，所以單支試跑永遠是綠的。"
                  f"改成字元類自我否定：`{operand[:1]}[{operand[1:2] or '_'}]{operand[2:]}` "
                  f"這種形態（只否定自己、不減損鑑別力）"] = None
+
+    if tool == "Bash" and not _RCMASK_SAFE_RE.search(command):
+        name = _rcmask_filter(_fold(command, keep_status=True))
+        if name:
+            hits[f"{_RCPIPE_TAG}：`… | {name}` 之後讀 `$?`，讀到的是 `{name}` 的 rc、"
+                 f"不是前面那條指令的——前面失敗會被整個吃掉（`sh -c 'exit 7' | tail -1; "
+                 f"echo $?` 印 0），表徵與成功相同（DEF-200-086）。正解：先導檔再讀 "
+                 f"rc——`cmd > /tmp/o.log 2>&1; echo rc=$?; tail -5 /tmp/o.log`；或 "
+                 f"bash 用 `${{PIPESTATUS[0]}}`、zsh 用 `${{pipestatus[1]}}`"
+                 f"（Bash 工具殼是 zsh）"] = None
     return list(hits)
 
 
 def has_waitform_exemption(command: str) -> bool:
-    """判準①②③的行內豁免（只認住在**真註解**裡的 `# waitform-ok: <理由>`）。"""
+    """判準①～④的行內豁免（只認住在**真註解**裡的 `# waitform-ok: <理由>`）。"""
     return bool(_WAITFORM_EXEMPT_RE.search(mask_inert(command, keep_comments=True)))
 
 
@@ -1088,6 +1183,15 @@ _WAITFORM_FOOTER = (
     "  🔴 只有「等額度 reset」與「等人介入」是合法的無事件源停等。其餘任何停等都必須有"
     "一個\n"
     "     會**主動叫醒你**的事件源；掛不掛得上，是派工前就要決定的事，不是事後補救。\n"
+    "\n"
+    "  真的確定要這樣寫？在指令內加行內豁免 `# waitform-ok: <理由>`（理由必填）。\n"
+)
+_RCPIPE_FOOTER = (
+    "\n"
+    "  本判準只認**尾節**是 tail／head／tee／sed／awk／cut／sort／uniq／wc／cat／\n"
+    "  tr／column／less／more 的管線，且**緊接**的下一個指令讀 `$?`；`grep`／`rg`／\n"
+    "  `test`／`jq` 這類 rc 有語意的濾器**不判**，指令內有 `PIPESTATUS`／`pipestatus`／\n"
+    "  `pipefail` 也放行。\n"
     "\n"
     "  真的確定要這樣寫？在指令內加行內豁免 `# waitform-ok: <理由>`（理由必填）。\n"
 )
@@ -1300,7 +1404,8 @@ def main() -> int:
         # 🔴 鐵律六那一族的旗標來源是 payload 自己（本輪實測：前景呼叫**沒有**這個 key、
         # `run_in_background: true` 的呼叫有 ⇒ `bool(...)` 兩向都正確，不需要預設值特判）。
         wait_hits = waitform_hits(
-            command, run_in_background=bool(tool_input.get("run_in_background")))
+            command, run_in_background=bool(tool_input.get("run_in_background")),
+            tool=tool)
 
         unattended = bool(os.environ.get(UNATTENDED_ENV))
         # 🔴 R85／P12：授權邊界（無人看管 ⇒ 禁動 git 歷史）。此前只有 Windows 那支
@@ -1344,8 +1449,10 @@ def main() -> int:
             message += (_HEADER + "".join(f"   · {h}\n" for h in hits)
                         + (_UNATTENDED_NOTE if unattended else _FOOTER))
         if wait_hits:
+            rc_only = all(h.startswith(_RCPIPE_TAG) for h in wait_hits)
             message += (_WAITFORM_HEADER + "".join(f"   · {h}\n" for h in wait_hits)
-                        + (_WAITFORM_UNATTENDED_NOTE if unattended else _WAITFORM_FOOTER))
+                        + (_WAITFORM_UNATTENDED_NOTE if unattended
+                           else _RCPIPE_FOOTER if rc_only else _WAITFORM_FOOTER))
         sys.stderr.write(message)
         return 2
     except Exception:  # noqa: BLE001 — fail-open 是刻意的，見模組 docstring 的 P0

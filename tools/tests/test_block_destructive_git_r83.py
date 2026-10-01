@@ -33,6 +33,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -70,18 +71,9 @@ def bash_payload(command: str) -> dict:
     return {"tool_name": "Bash", "tool_input": {"command": command}}
 
 
-# 🔴 模組級釘住（本輪缺陷修復）：`is_foreign_tree()`（`.claude/hooks/
-# block_destructive_git.py`）以 `os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()`
-# 決定專案根。本檔多支測試直接呼叫 `G.destructive_git_hits()`／`G.is_foreign_tree()`
-# （不經 `run_hook()` 的 subprocess——那條路徑另外用 `cwd=str(_REPO_ROOT)` 釘死子行程，
-# 不受本段影響），因此在同一行程內執行時會共用**呼叫者**（`tools/run_root_
-# unittests.py`、`Start-Job` 等驅動器）的 cwd。呼叫者 cwd 一旦落在 repo 外，root 就
-# 解析成別的目錄，讓「檔案系統根含著專案根」一類判準靜默算錯——從非 repo 目錄單獨跑
-# 本模組時，字面固定 9 支測試同時變紅。生產路徑（Claude Code 呼叫 hook）一律會設
-# `CLAUDE_PROJECT_DIR`，這不是 hook 的缺陷，是本檔測試對呼叫者 cwd 的隱含依賴。
-# 釘在模組層級而非逐一補在受影響的 class：本檔沒有任何測試依賴 `CLAUDE_PROJECT_DIR`
-# 缺席時的 fallback 行為（已逐一核對既有 setUp／inline patch 慣例），個別測試裡既有
-# 的 `mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": ...})` 疊在這層之上值不變。
+# 🔴 模組級釘住：`is_foreign_tree()` 以 `CLAUDE_PROJECT_DIR`（缺席則 `os.getcwd()`）決定專案根；
+# 呼叫者 cwd 落在 repo 外時 9 支同時變紅（本檔對 cwd 的隱含依賴，不是 hook 缺陷）。
+# 史料搬至 CrossPlatform_R189_SessionGate_Family_Lock_Audit_Evidence.md〈九-F〉§1。
 _MODULE_ENV_PATCH = None
 
 
@@ -171,13 +163,7 @@ class TestDestructiveFormsAreBlocked(unittest.TestCase):
 
     def test_a_backslash_line_continuation_does_not_smuggle_it_past(self) -> None:
         """行接續（`\\` ＋ 換行）在 bash 是**行內空白**，判準必須先折回去才切段。
-
-        WHY 這條值得一支具名測試：`_SEP_RE` 把 `\\n` 當語句邊界，所以在折回去之前，
-        立案的那條指令只要在 `git` 後面換行就整條漏擋——**繞過方式不需要任何巧思，
-        把長指令排版一下就會自然發生**。獨立驗證輪實測：本機 60 份逐字稿的 4,087 條
-        shell 指令裡有 30 條用了行接續、其中 17 條是 git 指令，不是假想形態。
-        這一向壞掉時是靜默的（守衛照跑、照回 0），故不能只靠 BLOCKED 那張單行清單守。
-        """
+        史料搬至 CrossPlatform_R189_SessionGate_Family_Lock_Audit_Evidence.md〈九-F〉§2。"""
         for command in ("git \\\n  stash -q -u --keep-index",
                         "git checkout \\\n  -- tools/lib/quota_meter.py",
                         "git -C /Users/x/repo \\\n  stash pop",
@@ -297,13 +283,8 @@ class TestQuotingAndHeredocAreInert(unittest.TestCase):
 # ── ③ 退化 payload ─────────────────────────────────────────────────────────
 class TestDegradedPayloadIsLoudButNotBlocking(unittest.TestCase):
     """壞 JSON／空 stdin／缺欄位 ⇒ rc=1（出聲但不阻斷），**不是** rc=0 也不是 rc=2。
-
-    WHY 不硬擋：Bash（mac）／PowerShell（Windows）是這台機器上唯一的 shell 載具，
-    對一份根本讀不出內容的 payload 硬擋它，等於用一個讀不懂的輸入換掉整個工作面。
-    WHY 不靜默：守衛失效必須看得見——靜默放行是本 repo 一再判紅的那個方向。
-    （`tools/tests/test_check_hooks_liveness.py::degraded_payload_verdict` 是同一條
-      判準的通用版；本檔負責證明**這一支**真的落在它允許的那一格。）
-    """
+    WHY：不硬擋（唯一的 shell 載具不能被讀不懂的輸入換掉）、不靜默（守衛失效必須看得見）。
+    史料搬至 CrossPlatform_R189_SessionGate_Family_Lock_Audit_Evidence.md〈九-F〉§3。"""
 
     def test_malformed_json(self) -> None:
         proc = run_hook(None, raw="{not json")
@@ -442,12 +423,7 @@ class TestScopeIsNotWidened(unittest.TestCase):
     def test_own_tools_are_the_ones_this_harness_actually_emits(self) -> None:
         """🔴 R80 的教訓：圈一組永遠不出現的工具名＝阻斷臂蓋好了卻永遠不觸發，
         而所有單元測試照樣全綠（`Task` 在 8,106 次 tool_use 裡出現 0 次）。
-
-        本條刻意**不**去掃逐字稿（那是機器狀態、CI 上不存在，會讓全新 clone 必紅），
-        改釘「兩個平台各自的 shell 載具都在射程內」這個結構事實：mac 送指令的工具是
-        `Bash`，Windows 因鐵律一禁用 Bash ⇒ 一律走 `PowerShell`。少任一個，就有一整個
-        平台不受守。
-        """
+        史料搬至 CrossPlatform_R189_SessionGate_Family_Lock_Audit_Evidence.md〈九-F〉§4。"""
         self.assertEqual(set(G.OWN_TOOLS), {"Bash", "PowerShell"})
 
     def test_it_runs_on_every_platform(self) -> None:
@@ -644,13 +620,7 @@ class TestTheRelaxationOpensNoNewHoles(_ForeignTreeCase):
         改用當前平台的根（Windows 上是磁碟機根），否則這支鎖在另一個平台上量的是
         別的東西（史料見 CrossPlatform_DEF200275_Context_Metering_Evidence.md
         〈第七輪 史料搬遷〉）。
-
-        🔴 本輪訂正：舊寫法 `os.path.abspath(os.sep)` 解析的是**呼叫者行程 cwd**
-        所在磁碟機的根，不是專案所在磁碟機的根——呼叫者 cwd 若落在跟 repo 不同的
-        磁碟機（例如從 `C:\\` 驅動、repo 在 `D:\\`），量到的 fs_root 根本不含專案，
-        斷言本身就錯了。改用 `_REPO_ROOT.anchor`：同樣是「當前平台的根」，但錨定在
-        專案自己的磁碟機，不隨呼叫者 cwd 漂移（posix 上兩種寫法等價，恆為 `/`）。
-        """
+        史料搬至 CrossPlatform_R189_SessionGate_Family_Lock_Audit_Evidence.md〈九-F〉§5。"""
         fs_root = _REPO_ROOT.anchor
         self.assertTrue(self.hits(f"cd {fs_root} && git clean -fdx"),
                         "檔案系統根含著專案根 ⇒ 不得放寬")
@@ -810,17 +780,7 @@ class TestTheCriterionItselfCanFail(unittest.TestCase):
     def test_the_root_boundary_fix_is_load_bearing(self) -> None:
         """把 `_dir_prefix()` 換回修訂前那個寫法（`p + os.sep`），檔案系統根那一格
         必須當場變成放行——那證明擋住它的真的是這次的訂正，不是別的判準恰好也擋了它。
-
-        這一支的存在理由與上面三支不同：它守的不是「判準會不會恆真」，而是
-        「**已知會漏的那個寫法不准回來**」（舊寫法下的實測 rc＝R89 收尾證據檔）。
-
-        🔴 `fs_root` 改用 `_REPO_ROOT.anchor`（理由同
-        `test_the_filesystem_root_contains_the_project_too`）：舊寫法
-        `os.path.abspath(os.sep)` 量的是呼叫者 cwd 所在磁碟機的根，呼叫者若跟
-        repo 不同磁碟機，這裡的 `command` 根本沒有落在專案所在磁碟機，下面兩個
-        `assertTrue` 會各自因為不同的錯誤原因巧合為真／假，鎖不到本測試真正要釘的
-        那個字。
-        """
+        史料搬至 CrossPlatform_R189_SessionGate_Family_Lock_Audit_Evidence.md〈九-F〉§6。"""
         fs_root = _REPO_ROOT.anchor
         command = f"cd {fs_root} && git clean -fdx"
         with mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(_REPO_ROOT)}):
@@ -846,7 +806,8 @@ class TestTheCriterionItselfCanFail(unittest.TestCase):
 # ══════════════════════════════════════════════════════════════════════════════
 # 鐵律六（R84／`DEF-200-044`／`045`）— `waitform_hits()` 的回歸鎖
 # ══════════════════════════════════════════════════════════════════════════════
-#: 該擋的：三條判準各自的真實形態。前兩筆逐字取自 R83 收輪的實帳指令。
+#: 該擋的：判準①②③各自的真實形態（④ 另見 `_RCPIPE_BLOCK`）。
+#: 前兩筆逐字取自 R83 收輪的實帳指令。
 _WAITFORM_BLOCK: tuple[tuple[str, bool], ...] = (
     # 判準①：立案那條 nightly（實帳 00:39 → 01:27 共 48 分鐘零工作）
     ("nohup bash AutoClaude/tools/run_local_nightly.sh --force > /tmp/n.log 2>&1 &", False),
@@ -895,12 +856,7 @@ _WAITFORM_ALLOW: tuple[tuple[str, bool], ...] = (
 
 class TestIronLaw6BadFormsAreBlocked(unittest.TestCase):
     """鐵律六：**等待／確認的機制自己靜默壞掉 ⇒ 無做工空轉**（`DEF-200-044`）。
-
-    WHY 這一族值得一道阻斷臂：失敗的表徵與「還在正常進行」**完全相同**——R83 收輪實帳
-    00:39 → 01:27 共 48 分鐘零工作，靠掌舵者來問才發現。而 `until ! pgrep -f <字面>`
-    的兄弟互匹在**單支試跑下永遠是綠的**（`man pgrep` 只排除自己與祖先），所以它連
-    「試一次就知道」都做不到。
-    """
+    史料搬至 CrossPlatform_R189_SessionGate_Family_Lock_Audit_Evidence.md〈九-F〉§7。"""
 
     def test_every_bad_form_is_blocked(self) -> None:
         for command, background in _WAITFORM_BLOCK:
@@ -1036,12 +992,7 @@ class TestIronLaw6CriteriaHaveTeeth(unittest.TestCase):
 
     def test_the_wait_carve_out_is_load_bearing(self) -> None:
         """`wait` 豁免救的是**同一段**裡 nohup ＋ `&` ＋ `wait` 的形態。
-
-        🔴 探針選擇是本輪實測訂正過的：第一版拿 SD-02 那條唯一假陽性
-        （`nohup true; python … & BGPID=$!; wait $BGPID`）當探針，結果注入後**仍然放行**
-        ⇒ 那條假陽性其實是被**切段**收掉的，不是被 `wait` 豁免收掉的。兩道收窄各救哪一族
-        不能用直覺分配——注入測試當場把它量了出來（同 SD-02「需兩道收窄」的兩道各自成立）。
-        """
+        史料搬至 CrossPlatform_R189_SessionGate_Family_Lock_Audit_Evidence.md〈九-F〉§8。"""
         good = "nohup ./a.sh > /tmp/log 2>&1 & wait"
         original = G._WAIT_RE
         try:
@@ -1206,6 +1157,283 @@ class TestDef200429CallOperatorIsNotABackgroundAmp(unittest.TestCase):
                 f"{command}  # waitform-ok: call operator")).returncode, 0)
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# 鐵律六判準④（DEF-200-086）— 管線尾節是 rc 遮蔽型濾器，其後緊接著讀 `$?`
+# ══════════════════════════════════════════════════════════════════════════════
+#: 該擋的。第一筆逐字取自缺陷帳本的立案形態（修前 `waitform_hits()` 回 `[]`）。
+_RCPIPE_BLOCK: tuple[str, ...] = (
+    "sh -c 'exit 7' | tail -1; echo $?",  # 立案逐字：印 0，真 rc 是 7
+    'make 2>&1 | head -5; echo "rc=$?"',  # 雙引號內的 `$?` 照樣會展開
+    "python run.py 2>&1 | tee /tmp/o.log\necho $?",  # 多行形態
+    "cmd | tail -1; rc=$?",  # 賦值形
+    "pytest -q |& tail -3; RC=$?; echo $RC",  # `|&` ＋ 大寫賦值
+    "(cmd | tail -1); echo ${?}",  # 子殼 ＋ `${?}`
+    "out=$(cmd | wc -l); echo $?",  # 命令替換
+    "cmd | sort | uniq -c; [ $? -eq 0 ] && echo ok",  # 多節管線 ＋ test
+    "FOO=1 cmd | LC_ALL=C sort; echo $?",  # env 前綴
+    'cmd | head -1 && echo "rc=$?"',  # `&&` 接續
+    "cmd | grep x | tail -1; echo $?",  # 只看尾節：grep 在中間不豁免
+    "cmd | tail -1 2>&1; echo $?",  # 尾節自帶重導
+    "cmd |\n  tail -1\necho $?",  # 管線運算子結尾換行
+    "bash <<'EOF'\ncmd | tail -1; echo $?\nEOF",  # 殼擁有的 heredoc body 會執行
+)
+
+#: 不該擋的。每一筆都是合法形態，或「讀到的 `$?` 不是管線 rc」的形態。
+_RCPIPE_ALLOW: tuple[str, ...] = (
+    "ls | grep x; echo $?",  # grep 的 rc 有語意（匹配與否）
+    "cmd | rg foo; echo $?",
+    "cmd | jq .a; echo $?",
+    "cmd | tail -1 | grep ok; echo $?",  # 尾節是 grep
+    "cmd | tail -1; echo ${PIPESTATUS[0]}",  # bash 正解
+    "cmd | tail -1; echo ${pipestatus[1]}",  # zsh 正解
+    "set -o pipefail; cmd | tail -1; echo $?",
+    "set -euo pipefail\ncmd | tail -1; echo $?",
+    "setopt pipefail; cmd | tail -1; echo $?",
+    "cmd | tail -1",  # 沒讀 rc
+    "cmd | tail -1; echo done",
+    "cmd > f; echo $?",  # 沒有管線
+    "cmd > /tmp/o.log 2>&1; echo rc=$?; tail -5 /tmp/o.log",  # 正解：先導檔再讀 rc
+    "cmd 2>&1 > /tmp/o; echo $?",  # `2>&1` 的 `&` 不是管線
+    "cmd || tail -1; echo $?",  # `||` 不是管線
+    "cmd | tail -1; echo '$?'",  # 單引號內不展開
+    "cmd | tail -1; echo \\$?",  # 反斜線逃脫
+    "cmd | tail -1; echo done; echo $?",  # `$?` 屬於 echo，不屬於管線
+    "echo 'cmd | tail -1; echo $?'",  # 引號內的管線是資料
+    'git commit -m "x | tail -1; echo $?"',  # 同上（雙引號）
+    "cat > run.sh <<'EOF'\ncmd | tail -1; echo $?\nEOF",  # 非殼的 heredoc＝寫檔資料
+    "cmd | tail -1  # echo $?",  # 註解
+    "diff <(a | sort) <(b | sort); echo $?",  # 行程替換內的管線：`$?` 是 diff 的
+    "read x < <(cmd | head -1); echo $?",  # 同上：`$?` 是 read 的
+)
+
+
+class TestIronLaw6RcMaskedByPipe(unittest.TestCase):
+    """DEF-200-086（受測：`.claude/hooks/block_destructive_git.py` 的 `waitform_hits()`
+    判準④）。
+
+    WHY：管線的 rc 是**最後一節**的 rc。`cmd | tail -1; echo $?` 讀到的是 `tail` 的 0，
+    前面 `cmd` 的失敗（`sh -c 'exit 7'` 的 7）被整個吃掉，而「失敗」與「成功」在輸出上
+    **完全同形**——與鐵律六同一個病（確認機制自己靜默壞掉）。修前 Bash／zsh 側零攔截器
+    （唯一守它的 `lint_powershell_command.py` matcher 是 PowerShell）。
+    精準度是這道鎖的命：只判尾節是 rc 遮蔽型濾器者；`grep`／`rg`／`jq` 的 rc 有語意，
+    不判。
+    """
+
+    def test_every_masked_pipe_read_is_blocked(self) -> None:
+        for command in _RCPIPE_BLOCK:
+            with self.subTest(command=command[:60]):
+                self.assertTrue(G.waitform_hits(command), "遮蔽 rc 的讀法未被擋下")
+
+    def test_every_legitimate_form_is_allowed(self) -> None:
+        """假紅是這道鎖的生死線：擋到讓人無法工作的守衛會被整個關掉。"""
+        for command in _RCPIPE_ALLOW:
+            with self.subTest(command=command[:60]):
+                self.assertEqual(G.waitform_hits(command), [], "判準④誤擋了一個正確形態")
+
+    def test_powershell_is_out_of_range(self) -> None:
+        """PowerShell 側的 `$LASTEXITCODE` 另由 `lint_powershell_command.py` 守。"""
+        for command in _RCPIPE_BLOCK:
+            with self.subTest(command=command[:60]):
+                self.assertEqual(G.waitform_hits(command, tool="PowerShell"), [])
+
+    def test_the_hit_names_the_filter_and_teaches_the_fix(self) -> None:
+        hits = G.waitform_hits("sh -c 'exit 7' | tail -1; echo $?")
+        self.assertEqual(len(hits), 1, hits)
+        for needle in ("tail", "DEF-200-086", "先導檔", "PIPESTATUS", "pipestatus"):
+            self.assertIn(needle, hits[0])
+
+    def test_the_read_must_be_the_very_next_command(self) -> None:
+        """`$?` 永遠是**上一個**指令的 rc：隔了別的指令，讀到的就不是管線的 rc。"""
+        self.assertTrue(G.waitform_hits("cmd | tail -1; echo $?"))
+        self.assertEqual(G.waitform_hits("cmd | tail -1; true; echo $?"), [])
+
+    def test_wait_does_not_exempt_criterion_four(self) -> None:
+        """`waitform_hits()` docstring：`wait` 豁免只罩 ①③、不罩 ②④（DEF-200-086）。"""
+        self.assertTrue(G.waitform_hits("sh -c 'exit 7' | tail -1; echo $?; wait"))
+
+    def test_the_census_probe_replays_criterion_four(self) -> None:
+        """普查探針以預設 `tool` 呼叫判準；預設若改走別處，④ 的假紅普查會靜默失明。"""
+        sys.path.insert(0, str(_REPO_ROOT / "tools" / "probe"))
+        import shell_command_corpus as C  # noqa: PLC0415
+        hits = C._predicate_hits("sh -c 'exit 7' | tail -1; echo $?", "waitform")
+        self.assertTrue(hits["waitform"])
+
+    def test_the_census_probe_judges_a_powershell_row_like_the_hook(self) -> None:
+        """普查探針必須把逐字稿的**工具名**帶進判準：hook 對 PowerShell 不判④（那一側由
+        `lint_powershell_command.py` 守），母體若一律以預設 Bash 重放，含 PowerShell 的
+        母體（Windows 機）會多報假紅——假紅普查的數字就對不上 hook 真正會擋的集合。"""
+        sys.path.insert(0, str(_REPO_ROOT / "tools" / "probe"))
+        import shell_command_corpus as C  # noqa: PLC0415
+        bad = "sh -c 'exit 7' | tail -1; echo $?"
+        events = [{"message": {"content": [{"type": "tool_use", "name": name,
+                   "input": {"command": bad}}]}} for name in ("Bash", "PowerShell")]
+        with tempfile.TemporaryDirectory(prefix="def086-corpus-") as tmp:
+            (Path(tmp) / "slug").mkdir()
+            (Path(tmp) / "slug" / "s.jsonl").write_text(
+                "".join(json.dumps(e) + "\n" for e in events), encoding="utf-8")
+            rows = C.transcript_commands(Path(tmp))
+        with mock.patch.object(C, "transcript_commands", return_value=rows):
+            recs = C.build(["transcripts"], "waitform")
+        self.assertEqual({(r["tool"], bool(r["hits"]["waitform"])) for r in recs},
+                         {("Bash", True), ("PowerShell", False)})
+
+    #: 白名單內濾器以 `exit` 傳**有語意的 rc** 的合法用法：判準看不出差別，會被擋
+    #: （誤擋方向）。
+    _KNOWN_FALSE_POSITIVES = ("cmd | sort -c; echo $?",
+                              "cmd | awk '{exit 3}'; echo $?",
+                              "cmd | sed '/x/q1'; echo $?")
+
+    def test_the_documented_false_positives_are_hit_and_each_has_an_exit(self) -> None:
+        """`waitform_hits()` docstring 的誤擋方向劃界：這三種形態會命中（判準不懂濾器自
+        己的 rc 語意），出口是行內 `# waitform-ok: <WHY>`。劃界與行為一起鎖：docstring
+        說會擋、實際卻放行（或反之），下一個讀它的人就會信錯方向。"""
+        doc = G.waitform_hits.__doc__ or ""
+        for needle in ("sort -c", "awk", "sed", "waitform-ok"):
+            self.assertIn(needle, doc, f"docstring 沒有劃出誤擋方向：{needle}")
+        for command in self._KNOWN_FALSE_POSITIVES:
+            with self.subTest(command=command):
+                self.assertTrue(G.waitform_hits(command), "劃界說會擋，實際卻放行")
+                exempt = run_hook(bash_payload(f"{command}  # waitform-ok: exit 有語意"))
+                self.assertEqual(exempt.returncode, 0, exempt.stderr)
+
+    def test_the_shared_helpers_name_all_four_criteria(self) -> None:
+        """`_fold`／`has_waitform_exemption` 的 docstring 此前停在「判準①②③」，④ 也走同
+        一個遮蔽面與同一個行內豁免——讀它的人會以為 ④ 另有一套。"""
+        for fn in (G._fold, G.has_waitform_exemption):
+            doc = fn.__doc__ or ""
+            self.assertIn("①～④", doc, fn.__name__)
+            self.assertNotIn("①②③", doc, fn.__name__)
+
+
+class TestIronLaw6RcMaskedByPipeScalesLinearly(unittest.TestCase):
+    """DEF-200-086：判準④的成本必須與管線數成線性，否則守衛自己就是繞行面。切片版
+    （`parts[i + 1:]`）實測 8 萬條管線 19.5～19.8 秒，超過 PreToolUse 的 10 秒逾時＝整支
+    hook 被殺＝fail-open，**連毀滅性 git 守衛一併失效**。判準用**比值**不用絕對秒數：慢 CI
+    比開發機慢 2～3 倍、再加多 worker 擁擠，固定上界會假紅；比值與機器速度無關（線性約
+    8、擁擠下 6.8～11、平方版約 59，門檻 24 兩側各離 2 倍以上）。絕對上限只當逾時保險。"""
+
+    @staticmethod
+    def _best_of_three(pipelines: int) -> tuple[float, list]:
+        command = "a | tail -1; " * pipelines + "echo $?"
+        runs = []
+        for _ in range(3):                                    # 取最快一次，避開 GC 抖動
+            began = time.perf_counter()
+            hits = G.waitform_hits(command)
+            runs.append(time.perf_counter() - began)
+        return min(runs), hits
+
+    def test_cost_scales_linearly_and_stays_inside_the_hook_timeout(self) -> None:
+        small, small_hits = self._best_of_three(10_000)
+        large, large_hits = self._best_of_three(80_000)       # 約 1MB
+        self.assertTrue(small_hits and large_hits, "大輸入下尾端的真陽沒被判到")
+        self.assertLess(large / small, 24,
+                        f"輸入放大 8 倍、成本放大 {large / small:.1f} 倍：非線性（平方版約 59）")
+        self.assertLess(large, 10.0, f"8 萬條管線 {large:.2f}s：逼近 hook 逾時＝fail-open")
+
+
+class TestIronLaw6RcMaskedByPipeEndToEnd(unittest.TestCase):
+    """真的起 child 行程量 rc ＋ 驗指引可讀（同本檔既有的 end-to-end 紀律）。"""
+
+    _BAD = "sh -c 'exit 7' | tail -1; echo $?"
+
+    def test_exits_two_with_guidance(self) -> None:
+        proc = run_hook(bash_payload(self._BAD))
+        self.assertEqual(proc.returncode, 2, proc.stderr)
+        for needle in ("DEF-200-086", "先導檔", "PIPESTATUS", "pipestatus",
+                       "waitform-ok"):
+            self.assertIn(needle, proc.stderr)
+        self.assertNotIn("until ! pgrep", proc.stderr, "④ 單獨命中不該附等待機制指引")
+
+    def test_the_powershell_tool_passes_the_same_string(self) -> None:
+        proc = run_hook({"tool_name": "PowerShell", "tool_input": {"command": self._BAD}})
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
+    def test_the_correct_forms_pass(self) -> None:
+        for command in (
+                "sh -c 'exit 7' > /tmp/o.log 2>&1; echo rc=$?; tail -1 /tmp/o.log",
+                "sh -c 'exit 7' | tail -1; echo ${pipestatus[1]}"):
+            with self.subTest(command=command):
+                proc = run_hook(bash_payload(command))
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+
+    def test_exemption_is_its_own_hatch(self) -> None:
+        exempt = run_hook(bash_payload(f"{self._BAD}  # waitform-ok: 刻意重現"))
+        self.assertEqual(exempt.returncode, 0, exempt.stderr)
+        other = run_hook(bash_payload(f"{self._BAD}  # git-guard-ok: 不該放行"))
+        self.assertEqual(other.returncode, 2, other.stderr)
+
+    def test_exemption_is_void_when_unattended(self) -> None:
+        proc = run_hook(bash_payload(f"{self._BAD}  # waitform-ok: 刻意"),
+                        env={G.UNATTENDED_ENV: "1"})
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("無人看管", proc.stderr)
+
+    def test_mixed_hits_keep_both_fixes(self) -> None:
+        proc = run_hook(bash_payload(f"nohup ./a.sh > log 2>&1 &\n{self._BAD}"))
+        self.assertEqual(proc.returncode, 2, proc.stderr)
+        self.assertIn("DEF-200-086", proc.stderr)
+        self.assertIn("until ! pgrep", proc.stderr, "混合命中時等待機制指引不得消失")
+
+
+class TestIronLaw6RcMaskedByPipeHasTeeth(unittest.TestCase):
+    """🔴 合成注入：每個載重零件被拿掉時，判準必須失去鑑別力。
+    （同 `TestIronLaw6CriteriaHaveTeeth`）"""
+
+    def test_the_filter_whitelist_is_what_keeps_grep_out(self) -> None:
+        good = "ls | grep x; echo $?"
+        self.assertEqual(G.waitform_hits(good), [])
+        original = G._RCMASK_FILTERS
+        try:
+            G._RCMASK_FILTERS = original | {"grep"}  # type: ignore[assignment]
+            self.assertTrue(G.waitform_hits(good), "白名單加入 grep 後仍放行 ⇒ 不靠它判")
+        finally:
+            G._RCMASK_FILTERS = original  # type: ignore[assignment]
+        self.assertEqual(G.waitform_hits(good), [])
+
+    def test_keeping_status_inside_double_quotes_is_load_bearing(self) -> None:
+        """`echo "rc=$?"` 是最常見的寫法，而雙引號內容預設被遮成空白 ⇒ 讀取整個看不見。"""
+        bad = 'make 2>&1 | head -5; echo "rc=$?"'
+        self.assertTrue(G.waitform_hits(bad))
+        original = G._fold
+        try:
+            G._fold = lambda command, **kw: original(  # type: ignore[assignment]
+                command, **{k: v for k, v in kw.items() if k != "keep_status"})
+            self.assertEqual(G.waitform_hits(bad), [],
+                             "不保留雙引號內的 `$?` 仍擋得住 ⇒ keep_status 不是載重件")
+        finally:
+            G._fold = original  # type: ignore[assignment]
+        self.assertTrue(G.waitform_hits(bad))
+
+    def test_the_safe_marker_is_load_bearing(self) -> None:
+        good = "set -o pipefail; cmd | tail -1; echo $?"
+        self.assertEqual(G.waitform_hits(good), [])
+        original = G._RCMASK_SAFE_RE
+        try:
+            G._RCMASK_SAFE_RE = re.compile(r"(?!x)x")  # type: ignore[assignment]
+            self.assertTrue(G.waitform_hits(good), "拿掉豁免標記後仍放行 ⇒ 不靠它判")
+        finally:
+            G._RCMASK_SAFE_RE = original  # type: ignore[assignment]
+        self.assertEqual(G.waitform_hits(good), [])
+
+    def test_the_operator_split_is_load_bearing(self) -> None:
+        """`2>&1` 的 `&` 不是邊界、`||` 不是兩根管線：天真切法兩個方向各錯一個。"""
+        redirect_bad = "cmd | tail -1 2>&1; echo $?"
+        or_good = "cmd || tail -1; echo $?"
+        self.assertTrue(G.waitform_hits(redirect_bad))
+        self.assertEqual(G.waitform_hits(or_good), [])
+        original = G._PIPE_OPS_RE
+        try:
+            G._PIPE_OPS_RE = re.compile(r"([|;&\n()`])")  # type: ignore[assignment]
+            self.assertEqual(G.waitform_hits(redirect_bad), [],
+                             "天真切法竟仍擋得住 ⇒ 重導的 `&` 辨識不是載重件")
+            self.assertTrue(G.waitform_hits(or_good),
+                            "天真切法竟未誤擋 `||` ⇒ 兩字元運算子優先序不是載重件")
+        finally:
+            G._PIPE_OPS_RE = original  # type: ignore[assignment]
+        self.assertTrue(G.waitform_hits(redirect_bad))
+        self.assertEqual(G.waitform_hits(or_good), [])
+
+
 class TestTheFalsePositiveCensusIsRerunnable(unittest.TestCase):
     """🔴 假紅普查必須留下**可重跑**的產物（`DEF-200-046`／SD-04）。
 
@@ -1286,15 +1514,7 @@ class TestTheHookStaysInsideItsLocTier(unittest.TestCase):
     更走到**零餘裕**（`[ROOT-TOOLS-WARN]` 段實測 750/750）。把「還在預算內」寫成散文等於
     沒寫——下一個往這支 hook 加判準的人需要的是一個會紅的東西。
     判準本身**不複寫預算數字**（現查 `check_loc_budget` 的 SSOT，同 CLAUDE.md 的既有政策）。
-
-    🔴 ADR-XPLAT-013 之後本鎖的**語意變了，鑑別力也變了**，照實記：`count_loc` 已改為
-    只算斷言行（docstring／裸字串／整行 `#` 一律免費），該檔的計價因此一次性大幅下降，
-    本鎖從「幾乎貼著上限」變成「離上限很遠」。⇒ 它現在守的不再是「再加一行就破線」，
-    而是「這支 hook 的**判斷邏輯量**不得長到 tier 之外」——那才是 tier 本來想守的東西，
-    但它作為早期預警的靈敏度確實下降了。距上限的實測餘裕現查
-    `python AutoClaude/tools/check_loc_budget.py --json` 的 `root_tools_warn_band`
-    （本檔刻意不寫死那個數字：它是量測值，寫下去下一輪就過期）。
-    """
+    史料搬至 CrossPlatform_R189_SessionGate_Family_Lock_Audit_Evidence.md〈九-F〉§9。"""
 
     def test_the_hook_is_within_its_root_tools_tier(self) -> None:
         sys.path.insert(0, str(_REPO_ROOT / "AutoClaude" / "tools"))
@@ -1488,14 +1708,7 @@ class TestR84TheNewCriteriaHaveTeeth(unittest.TestCase):
 
     def test_the_first_literal_must_be_git_check_is_load_bearing(self) -> None:
         """🔴 收窄「序列的第一個字面必須是 git 執行檔」——全語料實測它收掉 3 筆假紅。
-
-        拿掉它，一張**命令字串表**會被整串攤平成一段假指令而命中。逐字用普查裡真的
-        撞到的那一筆（一支探針在列舉 `-p` 家族要不要擋），不是好寫測試的簡化版。
-
-        🔴 注入形態是**收窄前的實作本體**，不是去戳 `_GIT_EXE_RE`：那個 regex 同時是
-        `git_invocations()` 找執行檔用的（改它會連掃描器一起弄壞，於是注入後反而不命中
-        ——本輪第一版就是這樣寫的，測試紅了才發現注的不是同一個零件）。
-        """
+        史料搬至 CrossPlatform_R189_SessionGate_Family_Lock_Audit_Evidence.md〈九-F〉§10。"""
         table = '("git checkout -p","git checkout -p -- tools/","git restore -p")'
         self.assertEqual(G.destructive_git_hits(table, start_dir=str(_REPO_ROOT)), [])
 
@@ -1843,31 +2056,12 @@ class TestR84WorktreeRemoveForce(unittest.TestCase):
 
     def _as_windows(self) -> tuple:
         """把 Windows 的路徑語意**整包**顯式注入：`os.path` → `ntpath`。
-
-        🔴 P0-1：識別邏輯搬到 `tools/lib/worktree_paths.py`
-        （`is_under_disposable_worktree()`）後，正規化不再只靠 `normcase`——`realpath`
-        才是解掉 `..` 那一半（見該模組測試 `test_worktree_paths.py`）。兩者都要注入
-        `ntpath` 語意才能讓 mac／Linux 也真的走進混合分隔符／大小寫這兩格：
-        `ntpath.realpath` 在沒有 `nt` 模組時（POSIX）退化成純字面 `normpath`／
-        `abspath`，不摸磁碟（CPython `ntpath.py` 原始碼確認），所以在假造的
-        Windows 語意下兩平台結果一致。
-
-        🔴 整包換而非逐個換（R98）：漏掉分隔符那一格＝混血平台（mac 假紅／Windows
-        恆綠）；WHY 全文見 `tools/lib/worktree_paths.py` 模組 docstring。
-        """
+        史料搬至 CrossPlatform_R189_SessionGate_Family_Lock_Audit_Evidence.md〈九-F〉§11。"""
         return mock.patch.object(G.os, "path", ntpath)
 
     def test_the_mixed_separator_shape_is_judged_on_every_platform(self) -> None:
         """🔴 R96 收尾／B-8：混合分隔符那條放行路必須在**兩個平台**都真的走得進去。
-
-        此前唯一在守它的是上一支放行清單裡那一行
-        `f"…{_REPO_ROOT}/.claude/worktrees/agent-ac3ed"`——只有在 `_REPO_ROOT` 渲染成
-        反斜線（Windows）時才合成得出混合分隔符；macOS／Linux 上 `_REPO_ROOT` 是純正
-        斜線 ⇒ 混合形態**結構上造不出來** ⇒ 把正規化整個刪掉，mac 全綠。也就是說，R96
-        對「單平台專屬判準在對面平台失效」的修法，它自己的回歸鎖犯了同一個錯。
-        修法＝顯式注入 Windows 語意（`ntpath.normcase`／`ntpath.realpath` 就是 Windows
-        上真正在跑的那份實作），於是 mac 上也真的比到同一條判準。
-        """
+        史料搬至 CrossPlatform_R189_SessionGate_Family_Lock_Audit_Evidence.md〈九-F〉§12。"""
         victim = str(_REPO_ROOT).replace("/", "\\") + "/.claude/worktrees/agent-ac3ed"
         command = f"git worktree remove --force {victim}"
         with self._as_windows():
@@ -1883,12 +2077,7 @@ class TestR84WorktreeRemoveForce(unittest.TestCase):
 
     def test_the_windows_case_insensitive_shape_is_judged(self) -> None:
         """🔴 R96 收尾／B-8 的配套鎖（`normcase` 換法一併治好的第二個 Windows 失明）。
-
-        NTFS 大小寫不敏感 ⇒ `…\\.CLAUDE\\WORKTREES\\agent-x` 與小寫寫法指的是**同一棵
-        樹**，而 `.replace("/", os.sep)` 版本比不到 ⇒ 同一類 routine teardown 只要換個
-        大小寫寫法就又被誤擋。改用 `normcase` 之後兩種寫法同判——「改了沒人守」是本
-        repo 反覆判過的形態，所以這一支與換法同輪落地。
-        """
+        史料搬至 CrossPlatform_R189_SessionGate_Family_Lock_Audit_Evidence.md〈九-F〉§13。"""
         victim = str(_REPO_ROOT).replace("/", "\\") + "\\.CLAUDE\\WORKTREES\\agent-ac3ed"
         command = f"git worktree remove --force {victim}"
         with self._as_windows():
@@ -1915,12 +2104,7 @@ class TestR84WorktreeRemoveForce(unittest.TestCase):
     def test_dotdot_traversal_disguised_as_disposable_worktree_is_blocked(self) -> None:
         """P0-1：字面上帶著拋棄式樹前綴、`..` 解開後其實落在樹外（甚至是 repo 根自己）的
         `git worktree remove --force`，不得被舊版的純字串包含判準放行。
-
-        R96 版判準是 `_DISPOSABLE_WT in normcase(victim)`，不解析 `..` ⇒
-        `.claude/worktrees/../../AutoClaude` 字面上仍帶著 `.claude\\worktrees\\` 這段
-        子字串而被誤判放行；同一招甚至能繞出 `.claude/worktrees/../..`＝repo 根自己。
-        兩例當回合唯讀實測見 P0-1 修復前的 `_worktree_hit()` 註解（已隨修復移除）。
-        """
+        史料搬至 CrossPlatform_R189_SessionGate_Family_Lock_Audit_Evidence.md〈九-F〉§14。"""
         for suffix in (r"\.claude\worktrees\..\..\AutoClaude", r"\.claude\worktrees\..\.."):
             victim = str(_REPO_ROOT) + suffix
             command = f"git worktree remove --force {victim}"
@@ -2066,7 +2250,7 @@ class TestR84SentinelAckIsNotASubstring(unittest.TestCase):
 
 
 class TestR84TheWaitformDocstringIsTheSingleHome(unittest.TestCase):
-    """QA-03：同一份知識三個家、三種內容（hook docstring 說三條、CLAUDE.md 鐵律六說兩條、
+    """QA-03：同一份知識三個家、三種內容（hook docstring 說四條、CLAUDE.md 鐵律六說兩條、
     帳本的③ 又是第三種東西）。**SSOT ＝ `waitform_hits()` 的 docstring**（實作所在）。
 
     這一條把「docstring 與實作逐字相符」做成機械物：docstring 自陳幾條，就必須真的有
@@ -2074,10 +2258,10 @@ class TestR84TheWaitformDocstringIsTheSingleHome(unittest.TestCase):
     反覆判紅的「鎖存在但沒有鑑別力」。
     """
 
-    def test_the_docstring_declares_three_and_all_three_can_fire_alone(self) -> None:
+    def test_the_docstring_declares_four_and_all_four_can_fire_alone(self) -> None:
         doc = G.waitform_hits.__doc__ or ""
-        self.assertIn("**三條**判準", doc, "docstring 沒有明說幾條 ⇒ 讀者只能去猜")
-        for marker in ("· ①", "· ②", "· ③"):
+        self.assertIn("**四條**判準", doc, "docstring 沒有明說幾條 ⇒ 讀者只能去猜")
+        for marker in ("· ①", "· ②", "· ③", "· ④"):
             self.assertIn(marker, doc)
         # ①：nohup ＋ 背景 &（前景呼叫，旗標為 False）
         self.assertTrue(G.waitform_hits("nohup python x.py > log 2>&1 &"))
@@ -2086,10 +2270,14 @@ class TestR84TheWaitformDocstringIsTheSingleHome(unittest.TestCase):
         # ③：只有旗標為真時才成立（同一條指令在前景是放行的）
         self.assertEqual(G.waitform_hits("python x.py &"), [])
         self.assertTrue(G.waitform_hits("python x.py &", run_in_background=True))
+        # ④：只有 Bash 工具才成立（同一條指令在 PowerShell 是放行的；DEF-200-086）
+        four = "sh -c 'exit 7' | tail -1; echo $?"
+        self.assertTrue(G.waitform_hits(four))
+        self.assertEqual(G.waitform_hits(four, tool="PowerShell"), [])
 
     def test_the_wait_carve_out_asymmetry_is_documented_and_real(self) -> None:
-        """docstring 宣稱 `wait` 豁免**只罩 ①③、不罩 ②** ⇒ 兩向都實測。"""
-        self.assertIn("只罩 ①③、不罩 ②", G.waitform_hits.__doc__ or "")
+        """docstring 宣稱 `wait` 豁免**只罩 ①③、不罩 ②④** ⇒ 兩向都實測。"""
+        self.assertIn("只罩 ①③、不罩 ②④", G.waitform_hits.__doc__ or "")
         self.assertEqual(G.waitform_hits("nohup python x.py & wait"), [])
         self.assertTrue(
             G.waitform_hits("until ! pgrep -f 'run_root_unittests'; do :; done; wait"),

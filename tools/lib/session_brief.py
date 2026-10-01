@@ -29,17 +29,32 @@ ctx5 輪兩個缺口（掌舵者五問 Q1／Q4 的機制面補強）：
       cap 比 `--pace`／守衛寬（模型分軌軸被排除）；`_active_model()` 補上（payload `model`
       → 逐字稿 → feed，判準本體住 `harness_feed.start_model_of()`），缺席時行為逐字不變。
 
-回歸鎖：`tools/tests/test_session_brief.py`（額度×context 四象限＋G1 statusLine
-三格＋feed reason 一格＋G2 stale-cache 兩格＋DEF-200-432 active_model 各格）；接線面：
-`tools/tests/test_context_budget_guard.py::HandbackSessionStartAnnounceTest`。
+DEF-200-411：`statusline_line()` 的安裝提示改給**可直接貼上的絕對路徑指令**
+（`_install_command()`）。舊提示是裸 `python tools/…`，依賴 cwd 與 PATH 上排前面的
+python（Windows 的實況是 pyenv），而這句話要經 `additionalContext` 轉述給模型、
+再由模型轉給人。
+DEF-200-231①：`schtasks_trigger()`（手動排程路徑的觸發時刻只取實測 reset）與
+`sdd_fsm_line()`（`--check` 末行的 SDD FSM 現況）也住這裡——`session_resume_planner.py`
+的 `guardrail_cli` tier LOC 餘裕只有個位數；兩者皆循「呼叫端注入」慣例，不 import
+quota_gate／SDD runtime。
+
+回歸鎖：`tools/tests/test_session_brief.py`（額度×context 四象限＋G1 statusLine 三格＋
+feed reason 一格＋G2 stale-cache 兩格＋DEF-200-432 active_model 各格＋可貼安裝指令三格＋
+SDD FSM 行八格）；接線面：
+`tools/tests/test_context_budget_guard.py::HandbackSessionStartAnnounceTest`、
+`tools/tests/test_wake_chain_halt_r278.py` 的
+`RegisterSchtasksTimeIsObservedNotGuessedTest`（`schtasks_trigger`）與
+`CheckPrintsTheSddFsmLineTest`（`sdd_fsm_line`）。
 """
 from __future__ import annotations
 
 import contextlib
 import io
+import os
+import re
 import sys
-from collections.abc import Callable
-from datetime import datetime
+from collections.abc import Callable, Mapping
+from datetime import datetime, timedelta
 from pathlib import Path
 
 try:
@@ -217,9 +232,34 @@ def _default_check_statusline() -> dict:
     return install_statusline.status()
 
 
-#: G1：statusLine 未安裝時附的一句安裝提示（`--dry-run` 先預覽、去掉旗標才真的寫檔，
-#: 見 `tools/install_statusline.py` 檔頭四模式）。
-_STATUSLINE_INSTALL_HINT = "`python tools/install_statusline.py --dry-run` 預覽後去掉旗標安裝"
+#: DEF-200-411：`_install_command()` 組不出絕對路徑時的 fail-open 退路——裸指令（相對
+#: 路徑、依賴 cwd 與 PATH）。外層文案（`statusline_line()`）已說「貼上即安裝；先預覽就
+#: 在尾端加 --dry-run」（`--dry-run` 先預覽、去掉旗標才真的寫檔，見
+#: `tools/install_statusline.py` 檔頭四模式），所以這裡**不得**自帶 `--dry-run` 或
+#: 「預覽後去掉旗標」，否則同一句話自相矛盾。
+_STATUSLINE_INSTALL_HINT = "python tools/install_statusline.py"
+
+
+def _install_command(root: Path | None = None, windows: bool | None = None) -> str:
+    """可直接貼上的安裝指令：絕對路徑＋本 checkout `.venv` 直譯器（無則
+    `sys.executable`，與 `settings_snippet()` 同序），與 cwd、PATH 上的 python 無關
+    （DEF-200-411 的兩個失敗面）。Windows 加 `& `（PowerShell 呼叫運算子：帶引號的首
+    token 不加只會被當字串印出）並用**單引號**字串：雙引號內 `$`／反引號會被內插或跳脫、
+    路徑被靜默改寫，單引號內全是字面（內嵌單引號寫成兩個，同 planner 的
+    `_ps_single_quote`）。POSIX 維持雙引號。任何例外退回舊提示（fail-open）。`root`／
+    `windows` 是測試注入縫，production 一律現查。"""
+    try:
+        base = root or Path(__file__).resolve().parents[2]
+        win = platform_utils.is_windows() if windows is None else windows
+        venv = platform_utils.venv_python_path(base / ".venv", win)
+        py, script = (venv if venv.is_file() else Path(sys.executable),
+                      base / "tools" / "install_statusline.py")
+        if win:
+            return "& " + " ".join(
+                "'" + str(p).replace("'", "''") + "'" for p in (py, script))
+        return f'"{py}" "{script}"'
+    except Exception:  # noqa: BLE001 — 見檔頭 fail-open 紀律
+        return _STATUSLINE_INSTALL_HINT
 
 
 def statusline_line(check_status: Callable[[], dict] = _default_check_statusline) -> str:
@@ -238,13 +278,107 @@ def statusline_line(check_status: Callable[[], dict] = _default_check_statusline
     except Exception as exc:  # noqa: BLE001 — 見上
         return f"statusLine：查不到（{exc}）"
     if not installed:
-        return f"statusLine：未安裝（安裝：{_STATUSLINE_INSTALL_HINT}）"
+        return ("statusLine：未安裝（貼上即安裝；先預覽就在尾端加 --dry-run："
+                f"{_install_command()}）")
     if not matches:
         return (
             "statusLine：已安裝但與本 checkout 不符"
-            f"（repo 搬家／.venv 重建／被改寫都會這樣；重裝：{_STATUSLINE_INSTALL_HINT}）"
+            "（repo 搬家／.venv 重建／被改寫都會這樣；"
+            f"重裝，貼上即可：{_install_command()}）"
         )
     return "statusLine：已安裝"
+
+
+_FSM_STATE_RE = re.compile(
+    r"^ {2}current_state:[ \t]*([\"']?)([A-Za-z0-9_]+)\1", re.MULTILINE)
+
+
+def sdd_fsm_line(env: Mapping[str, str] | None = None,
+                 repo_root: Path | None = None) -> str:
+    """`--check` 末行：SDD router 的 FSM 現況，給模型在 Q1「說被擋」時一條可外驗的
+    機器級證據。**只印原始 `current_state`、不判是否阻斷**——阻斷態清單的唯一真相源在
+    SDD 側（`fsm_runtime`），這裡抄一份就是第二個家。純文字 regex 讀，不 import SDD
+    runtime、不需 yaml。版本號驗證同 router（去前導 v、須 `\\d+\\.\\d+`，否則放行不路由，
+    且不得拼進路徑——DEF-CLDREV-028）；狀態檔鍵同 `state_loader.project_from_env`
+    （`SDD_PROJECT`，否則版本目錄的上一層資料夾名）。"""
+    e = os.environ if env is None else env
+    raw = str(e.get("SDD_ACTIVE_VERSION", "")).strip()
+    if not raw:
+        return "SDD FSM：休眠（SDD_ACTIVE_VERSION 未設）"
+    ver = raw[1:] if raw[:1] in ("v", "V") else raw
+    if not re.fullmatch(r"\d+\.\d+", ver):
+        return (f"SDD FSM：SDD_ACTIVE_VERSION={raw!r} 格式非法（須形如 0.19）"
+                "⇒ router 放行、未套用守門")
+    sdd = (repo_root or Path(__file__).resolve().parents[2]) / "AISDLC_SDD"
+    path = (sdd / f"AISDLC_SDD_v{ver}" / "build" / "reports" / "fsm"
+            / f"FSM-STATE-{e.get('SDD_PROJECT') or sdd.name}.yaml")
+    try:
+        body = path.read_text(encoding="utf-8")
+        mtime = datetime.fromtimestamp(path.stat().st_mtime).astimezone()
+    except (OSError, ValueError):
+        return f"SDD FSM：無狀態檔（SDD_ACTIVE_VERSION={raw}；預期 {path}）"
+    stamp = mtime.isoformat(timespec="seconds")
+    state = _FSM_STATE_RE.search(body)
+    if state is None:
+        return f"SDD FSM：狀態檔讀不出 current_state（{path}，mtime {stamp}）"
+    return f"SDD FSM：current_state={state.group(2)}（狀態檔 {path}，mtime {stamp}）"
+
+
+#: DEF-200-231①：`--at` 缺席又解不出實測 reset 時的拒絕語（與 `_arm_endurance` 同族）。
+_NO_OBSERVED_RESET = (
+    "❌ 未給 --at，額度快取也給不出可等的 reset 時刻（{why}）"
+    "⇒ **拒絕退回「假設 5 小時」**。\n"
+    "   reset 是滾動視窗，只能觀測、不能算：猜出來的時刻會讓排程醒在錯的時間，"
+    "而取證規則照樣是綠的。\n"
+    "   快取過期先跑 `python tools/session_resume_planner.py --pace`"
+    "（補量一次、零 token）再重試；已撞線請改用 --arm-endurance（從逐字稿原文觀測）；"
+    "要自己指定時刻請顯式給 --at。\n"
+)
+
+
+def trigger_basis(observed: bool) -> str:
+    """`--print-schtasks-command` 標頭裡「這個觸發時刻從哪來」那句：只說這次真的走的那條路
+    （`schtasks_trigger()` 缺 `--at` 取實測 reset；顯式 `--at` 是操作者宣稱的時刻）。"""
+    return ("省略 --at＝額度快取的實測 resets_at＋緩衝（解不出即拒絕，不猜）" if observed
+            else "以 --at 顯式指定（操作者宣稱的時刻，原樣下傳，未對照額度快取）")
+
+
+def schtasks_trigger(
+    given: str | None, quota_gate: object, *, skew_seconds: int,
+    now: datetime | None = None,
+) -> tuple[str | None, datetime | None, str]:
+    """手動排程路徑的觸發時刻：回 `(at_expr, 結構化 at, 拒絕語)`。
+
+    顯式 `--at`（`given`）＝操作者宣稱的時刻，原樣下傳、結構化 at 為 `None`（同此前）。
+    缺席時只取**實測**：額度快取 → `decide()` → `halt_resets_at()`（≥halt 各軸中最早
+    可解析者，無則 binding）＋緩衝，且 `reset_branch()` 須判 arm（6 小時可等視界）。
+    量不到／太舊／太遠／已過一律 `(None, None, 拒絕語)`，**不得退回猜的時刻**
+    （ADR-XPLAT-014 的 L1＋L4 兩格；已撞線後的逐字稿觀測值是 `--arm-endurance` 那條
+    路）。字面格式同 `register_endurance`（本機時區、單引號）。`quota_gate` 由呼叫端
+    注入（同 `quota_line`）；`skew_seconds` 由呼叫端給——緩衝常數的唯一家是 planner
+    的 `RESET_SKEW_SECONDS`，這裡不抄第二份。"""
+    if given is not None:
+        return given, None, ""
+    at_now = now or datetime.now().astimezone()
+    try:
+        policy, _problems = quota_gate.quota_policy.load_policy(quota_gate.policy_env())
+        state = quota_gate.read_quota(at_now)
+        decision = quota_gate.quota_policy.decide(state, at_now, policy)
+        raw = quota_gate.halt_resets_at(decision)
+        branch = quota_gate.reset_branch(raw, at_now)
+        fire = None
+        if branch == quota_gate.QUOTA_BRANCH_ARM:
+            fire = datetime.fromisoformat(str(raw)).astimezone()
+            fire += timedelta(seconds=skew_seconds)
+        if fire is not None and fire > at_now:
+            return f"'{fire:%Y-%m-%d %H:%M:%S}'", fire, ""
+        why = (f"額度快取不可用：{state.reason}" if not state.usable() else
+               f"觸發時刻 {fire:%H:%M:%S} 已過（額度應已回來，請跑 --probe-quota 確認）"
+               if fire is not None else
+               quota_gate.reset_horizon_phrase(branch, raw, at_now, state.measured_at))
+    except Exception as exc:  # noqa: BLE001 — 讀不出一律走拒絕，不退回猜測
+        why = f"讀額度快取失敗：{exc}"
+    return None, None, _NO_OBSERVED_RESET.format(why=why)
 
 
 def sessionstart_brief(

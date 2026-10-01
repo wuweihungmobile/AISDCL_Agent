@@ -49,7 +49,9 @@
 # 去重規則（明文，因為它決定了「唯一數」這個量）
 # ----------------------------------------------
 # · 鍵＝**指令字串逐字**（不 strip、不正規化空白、不折行接續）＋ `run_in_background` 旗標
-#   （DEF-200-429：同一字串在前景／背景是判準③ 的兩個不同輸入）。理由：判準吃的就是逐字
+#   （DEF-200-429：同一字串在前景／背景是判準③ 的兩個不同輸入）＋ **工具名**
+#   （DEF-200-086：判準④ 只判 Bash，同一字串在 Bash／PowerShell 是兩個不同輸入）。
+#   理由：判準吃的就是逐字
 #   原文，任何正規化都會讓語料與判準的輸入面不一致——而不一致的方向是「語料比真實輸入乾淨」，
 #   也就是**低報假紅**。
 # · 同一字串多次出現＝`occurrences` 累加，`first_source` 記第一次見到的座標（可回溯）。
@@ -58,9 +60,10 @@
 # 輸出（JSONL，一列一個唯一指令）
 # -------------------------------
 #     {"corpus":…, "sha12":…, "occurrences":…, "first_source":…, "reason":…,
-#      "command":…, "background":…, "hits":{"git":[…],"waitform":[…]}}
+#      "command":…, "background":…, "tool":…, "hits":{"git":[…],"waitform":[…]}}
 # `reason` 是**逐筆歸屬理由**（這條字串為什麼在語料裡、從哪個欄位抽出來的），不是分類標籤。
-# `background`＝該次呼叫的 `run_in_background`（transcripts 取真值；tracked 恆 False）。
+# `background`＝該次呼叫的 `run_in_background`（transcripts 取真值；tracked 恆 False）；
+# `tool`＝該次呼叫的工具名（transcripts 取真值；tracked 恆 Bash＝hook 的預設）。
 from __future__ import annotations
 
 import argparse
@@ -129,8 +132,9 @@ def _sha12(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()[:12]
 
 
-def tracked_fragments(repo_root: Path) -> list[tuple[str, str, str, bool]]:
-    """`tracked` 面：`(command, source, reason, background)`；tracked 行沒有旗標 ⇒ 恆 False。
+def tracked_fragments(repo_root: Path) -> list[tuple[str, str, str, bool, str]]:
+    """`tracked` 面：`(command, source, reason, background, tool)`；tracked 行沒有旗標 ⇒
+    `background` 恆 False、`tool` 恆 `"Bash"`（hook 的預設）。
 
     走 `git ls-files -z` ＋ `core.quotepath=false`（鐵律三「git 路徑列舉」那一列的規矩：
     非 ASCII 路徑不帶這兩個旗標會被 C-quote 掉、檔案靜默掉出掃描面）。
@@ -139,7 +143,7 @@ def tracked_fragments(repo_root: Path) -> list[tuple[str, str, str, bool]]:
         ["git", "-c", "core.quotepath=false", "ls-files", "-z"],
         cwd=str(repo_root), capture_output=True, text=True, encoding="utf-8",
         errors="replace", check=False, creationflags=NO_WINDOW)
-    rows: list[tuple[str, str, str, bool]] = []
+    rows: list[tuple[str, str, str, bool, str]] = []
     for rel in out.stdout.split("\0"):
         if not rel or _FROZEN_RE.match(rel):
             continue
@@ -155,12 +159,14 @@ def tracked_fragments(repo_root: Path) -> list[tuple[str, str, str, bool]]:
             if frag and _ANCHOR_RE.search(line):
                 rows.append((frag, f"{rel}:{lineno}",
                              "tracked 檔內整行（該行含判準集合聯集裡的錨 token："
-                             "git 執行檔／nohup／disown/setsid／pgrep）", False))
+                             "git 執行檔／nohup／disown/setsid／pgrep）",
+                             False, "Bash"))
     return rows
 
 
-def transcript_commands(root: Path | None = None) -> list[tuple[str, str, str, bool]]:
-    """`transcripts` 面：`(command, source, reason, background)`。
+def transcript_commands(
+        root: Path | None = None) -> list[tuple[str, str, str, bool, str]]:
+    """`transcripts` 面：`(command, source, reason, background, tool)`。
 
     逐字稿是 JSONL，每列一個事件；`assistant` 訊息的 `content` 陣列裡 `type=="tool_use"`
     且 `name` 落在 `_SHELL_TOOLS` 的那些，取 `input.command`。這**就是** PreToolUse
@@ -171,9 +177,11 @@ def transcript_commands(root: Path | None = None) -> list[tuple[str, str, str, b
     尊重 `CLAUDE_CONFIG_DIR`（此前硬寫 `~/.claude`，對官方變數視而不見）。
     DEF-200-429：同一個 `input` 的 `run_in_background`（缺欄＝False，與 hook 的
     `bool(tool_input.get(...))` 同形）一併取出——此前寫死 False，判準③ 從未被真實母體普查。
+    DEF-200-086：工具名（`block["name"]`）同樣取出——判準④ 只判 Bash，母體若一律以預設
+    工具重放，含 PowerShell 的母體會多報 hook 實際不會擋的假紅。
     """
     base = root or (platform_utils.claude_home() / "projects")
-    rows: list[tuple[str, str, str, bool]] = []
+    rows: list[tuple[str, str, str, bool, str]] = []
     for jsonl in sorted(base.glob(_TRANSCRIPT_GLOB)):
         try:
             text = jsonl.read_text(encoding="utf-8", errors="replace")
@@ -202,12 +210,13 @@ def transcript_commands(root: Path | None = None) -> list[tuple[str, str, str, b
                         command, f"{jsonl.parent.name}/{jsonl.name}:{lineno}",
                         f"逐字稿 assistant tool_use name={block.get('name')} 的 "
                         f"input.command＝PreToolUse payload 的 tool_input.command 同一欄位",
-                        bool(tool_input.get("run_in_background"))))
+                        bool(tool_input.get("run_in_background")),
+                        str(block.get("name"))))
     return rows
 
 
-def _predicate_hits(command: str, which: str,
-                    background: bool = False) -> dict[str, list[str]]:
+def _predicate_hits(command: str, which: str, background: bool = False,
+                    tool: str = "Bash") -> dict[str, list[str]]:
     """對一條指令跑被普查的判準。**start_dir 固定為專案根**＝production 的 fail-closed 起點。"""
     hits: dict[str, list[str]] = {}
     if which in ("git", "all"):
@@ -216,25 +225,27 @@ def _predicate_hits(command: str, which: str,
         # 🔴 旗標來自語料自己：transcripts 面取逐字稿 `input.run_in_background` 的真值，
         # tracked 面沒有旗標 ⇒ False（只量判準①②）。判準③ 只在旗標為真時才可能命中，所以
         # 兩面**不能**併成一個 waitform 數字比較——看 `background` 欄與摘要的分列。
-        hits["waitform"] = G.waitform_hits(command, run_in_background=background)
+        hits["waitform"] = G.waitform_hits(
+            command, run_in_background=background, tool=tool)
     return hits
 
 
 def build(corpora: list[str], which: str) -> list[dict]:
-    records: dict[tuple[str, str, bool], dict] = {}
+    records: dict[tuple[str, str, bool, str], dict] = {}
     for corpus in corpora:
         rows = (tracked_fragments(_REPO_ROOT) if corpus == "tracked"
                 else transcript_commands())
-        for command, source, reason, background in rows:
-            key = (corpus, command, background)   # 旗標不同＝判準③ 的輸入不同，不得去重
+        for command, source, reason, background, tool in rows:
+            # 旗標不同＝判準③ 的輸入不同、工具名不同＝判準④ 的輸入不同，皆不得去重
+            key = (corpus, command, background, tool)
             if key in records:
                 records[key]["occurrences"] += 1
                 continue
             records[key] = {
                 "corpus": corpus, "sha12": _sha12(command), "occurrences": 1,
                 "first_source": source, "reason": reason, "command": command,
-                "background": background,
-                "hits": _predicate_hits(command, which, background),
+                "background": background, "tool": tool,
+                "hits": _predicate_hits(command, which, background, tool),
             }
     return [records[k] for k in sorted(records)]
 

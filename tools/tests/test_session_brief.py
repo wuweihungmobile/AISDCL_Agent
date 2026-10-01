@@ -25,6 +25,21 @@ import quota_policy  # noqa: E402
 import session_brief as sb  # noqa: E402
 
 _NOW = datetime(2026, 9, 20, 1, 0, 0, tzinfo=UTC)
+#: 簡報給的安裝指令形狀：POSIX `"<直譯器>" "<腳本>"`、Windows `& '<直譯器>' '<腳本>'`
+#: （兩 token 都是引號包住的絕對路徑；PowerShell 用單引號＝字面，內嵌單引號寫成兩個）。
+_PASTEABLE = re.compile(
+    r"^(?:& '((?:[^']|'')+)' '((?:[^']|'')+)'|\"([^\"]+)\" \"([^\"]+)\")$")
+_FSM_YAML = "fsm_state:\n  current_state: SPEC_DRAFTING\n  current_sprint: 1\n"
+
+
+def _fsm_tree(case: unittest.TestCase, body: str, project: str = "AISDLC_SDD"):
+    """假 repo 根：版本 0.99 的 `build/reports/fsm/FSM-STATE-<project>.yaml`。"""
+    root = Path(tempfile.mkdtemp(prefix="sdd-fsm-"))
+    case.addCleanup(shutil.rmtree, root, True)
+    fsm = root / "AISDLC_SDD" / "AISDLC_SDD_v0.99" / "build" / "reports" / "fsm"
+    fsm.mkdir(parents=True)
+    (fsm / f"FSM-STATE-{project}.yaml").write_text(body, encoding="utf-8")
+    return root, fsm / f"FSM-STATE-{project}.yaml"
 
 
 def _fake_quota_gate(*, read_quota=None, policy_env=None):
@@ -261,7 +276,7 @@ class StatuslineLineTest(unittest.TestCase):
             lambda: {"installed": True, "matches_current_checkout": False}
         )
         self.assertIn("已安裝但與本 checkout 不符", got)
-        self.assertIn("python tools/install_statusline.py --dry-run", got)
+        self.assertIn("install_statusline.py", got)
         self.assertNotEqual(got, "statusLine：已安裝")
 
     def test_missing_matches_key_defaults_to_installed(self) -> None:
@@ -272,8 +287,79 @@ class StatuslineLineTest(unittest.TestCase):
     def test_not_installed_reports_install_hint(self) -> None:
         got = sb.statusline_line(lambda: {"installed": False})
         self.assertIn("statusLine：未安裝", got)
-        self.assertIn("python tools/install_statusline.py --dry-run", got,
+        self.assertIn("install_statusline.py", got,
                       "未安裝時沒帶出安裝指令")
+
+    def test_install_hint_is_a_pasteable_absolute_command(self) -> None:
+        """簡報給的安裝指令要與 cwd、PATH 上的 python 無關（DEF-200-411 的兩個失敗面）：
+        兩個 token 都是存在的絕對路徑。舊提示是裸 `python tools/…`（相對路徑），換個
+        cwd、或 PATH 上排前面的是 pyenv python 就裝不起來——掌舵者 Q4 連問四輪「Windows
+        為何沒有 ctx 行」的最後一個洞。"""
+        cmd = sb._install_command()
+        match = _PASTEABLE.match(cmd)
+        self.assertIsNotNone(match, f"不是可貼的『直譯器／腳本』兩 token 形狀：{cmd}")
+        py, script = (g.replace("''", "'") for g in match.groups() if g is not None)
+        for token in (py, script):
+            self.assertTrue(Path(token).is_absolute() and Path(token).is_file(), token)
+        self.assertEqual(Path(script), _REPO_ROOT / "tools" / "install_statusline.py")
+        for installed in ({"installed": False},
+                          {"installed": True, "matches_current_checkout": False}):
+            self.assertIn(cmd, sb.statusline_line(lambda: installed),
+                          "未安裝／不相符兩種文案都要帶同一條可貼指令")
+
+    def test_install_command_picks_the_checkout_venv_and_the_platform_lead(self) -> None:
+        """直譯器優先取本 checkout 的 `.venv`（缺才退回 `sys.executable`，與
+        `settings_snippet()` 同序）；Windows 前綴 `& `（PowerShell 呼叫運算子：
+        帶引號的首 token 不加它只會被當字串印出、不會執行），POSIX 不加。`root`／
+        `windows` 是注入縫：Windows 形狀在 Mac 上也要被鎖住。"""
+        root = Path(tempfile.mkdtemp(prefix="brief-root-"))
+        self.addCleanup(shutil.rmtree, root, True)
+        script = root / "tools" / "install_statusline.py"
+        for windows, lead, q in ((False, "", '"'), (True, "& ", "'")):
+            with self.subTest(windows=windows):
+                self.assertEqual(sb._install_command(root, windows),
+                                 f"{lead}{q}{sys.executable}{q} {q}{script}{q}",
+                                 "無 .venv 時該退回 sys.executable")
+                venv_py = sb.platform_utils.venv_python_path(root / ".venv", windows)
+                venv_py.parent.mkdir(parents=True, exist_ok=True)
+                venv_py.write_text("", encoding="utf-8")
+                self.assertEqual(sb._install_command(root, windows),
+                                 f"{lead}{q}{venv_py}{q} {q}{script}{q}")
+                venv_py.unlink()
+
+    def test_a_windows_command_survives_powershell_special_characters(self) -> None:
+        """Windows 形態用 PowerShell 單引號字串：`$`、反引號在雙引號內會被內插／跳脫（路
+        徑被靜默改寫成別的東西），單引號內全是字面，內嵌單引號寫成兩個。以 PowerShell 的
+        字面規則把指令解回 token，必須逐字還原原路徑——含空白、`$`、反引號、單引號的路徑
+        各一。"""
+        for name in ("plain", "with space", "a$b", "a`b", "O'Brien", "$env_path `x' y"):
+            with self.subTest(name=name):
+                root = Path(tempfile.gettempdir()) / name
+                cmd = sb._install_command(root, True)
+                match = re.fullmatch(r"& '((?:[^']|'')*)' '((?:[^']|'')*)'", cmd)
+                self.assertIsNotNone(match, f"不是 `& '直譯器' '腳本'`：{cmd}")
+                self.assertEqual(
+                    [t.replace("''", "'") for t in match.groups()],
+                    [sys.executable, str(root / "tools" / "install_statusline.py")])
+
+    def test_the_fail_open_sentence_does_not_contradict_itself(self) -> None:
+        """`_install_command()` 退回舊提示時，外層文案已說「貼上即安裝；先預覽就在尾端加
+        --dry-run」，所以退回的指令本身不得再帶 `--dry-run` 或「預覽後去掉旗標」——否則同
+        一句話一邊叫人貼上就裝、一邊說那是預覽。"""
+        with mock.patch.object(sb.platform_utils, "venv_python_path",
+                               side_effect=RuntimeError("合成：組不出")):
+            line = sb.statusline_line(lambda: {"installed": False})
+        self.assertIn("貼上即安裝", line)
+        self.assertEqual(line.count("--dry-run"), 1, line)
+        self.assertNotIn("去掉旗標", line)
+
+    def test_install_command_fails_open_to_the_old_hint(self) -> None:
+        """組不出絕對路徑時退回舊提示、簡報照出——安裝提示壞掉不得讓 SessionStart 崩潰。"""
+        with mock.patch.object(sb.platform_utils, "venv_python_path",
+                               side_effect=RuntimeError("合成：組不出")):
+            self.assertEqual(sb._install_command(), sb._STATUSLINE_INSTALL_HINT)
+            self.assertIn("statusLine：未安裝",
+                          sb.statusline_line(lambda: {"installed": False}))
 
     def test_check_status_exception_fails_open_to_unknown(self) -> None:
         """任何例外（包含注入的替身直接拋出）都要收斂成「查不到」，不得讓
@@ -291,6 +377,87 @@ class StatuslineLineTest(unittest.TestCase):
         import inspect
         default = inspect.signature(sb.statusline_line).parameters["check_status"].default
         self.assertIs(default, sb._default_check_statusline)
+
+
+class SddFsmLineTest(unittest.TestCase):
+    """`--check` 末行（給模型在 Q1「說被擋」時一條可外驗的證據）：只印 SDD router 的原始
+    `current_state`，不判是否阻斷——阻斷態清單的唯一真相源在 SDD 側（`fsm_runtime`），
+    這裡抄一份就是第二個家。純文字 regex 讀，不 import SDD 的 fsm_runtime、不需 yaml。"""
+
+    def test_unset_reports_dormant(self) -> None:
+        """`SDD_ACTIVE_VERSION` 缺席／空白＝router 休眠；簡報要說「休眠」，
+        不能留白讓人猜。"""
+        dormant = "SDD FSM：休眠（SDD_ACTIVE_VERSION 未設）"
+        for env in ({}, {"SDD_ACTIVE_VERSION": ""}, {"SDD_ACTIVE_VERSION": "  "}):
+            with self.subTest(env=env):
+                self.assertEqual(sb.sdd_fsm_line(env), dormant)
+
+    def test_set_prints_the_raw_state_the_path_and_the_mtime(self) -> None:
+        """有設 ⇒ 印狀態檔裡的 `current_state` 原值＋路徑＋真實 mtime（帶 offset 的
+        ISO）：20 天沒被任何 hook 寫過的殘留態，要靠 mtime 才看得出來。
+        範本形態（帶引號＋行尾註解）也要讀得動。"""
+        template = 'fsm_state:\n  current_state: "INIT"          # 當前 FSM 狀態\n'
+        for body, state in ((_FSM_YAML, "SPEC_DRAFTING"), (template, "INIT")):
+            with self.subTest(state=state):
+                root, path = _fsm_tree(self, body)
+                stamp = datetime(2026, 9, 11, 0, 44, 57, tzinfo=UTC).timestamp()
+                os.utime(path, (stamp, stamp))
+                got = sb.sdd_fsm_line({"SDD_ACTIVE_VERSION": "0.99"}, root)
+                self.assertIn(f"current_state={state}（", got)
+                self.assertIn(str(path), got)
+                shown = re.search(r"mtime ([^）]+)）", got).group(1)
+                self.assertEqual(datetime.fromisoformat(shown).timestamp(), stamp)
+
+    def test_a_leading_v_is_accepted_like_the_router(self) -> None:
+        """router 的 `_normalize_version` 去前導 v（`v0.99` ＝ `0.99`）；簡報若不認，
+        同一份設定下 router 在跑、簡報卻說「無狀態檔」。"""
+        root, _ = _fsm_tree(self, _FSM_YAML)
+        self.assertEqual(sb.sdd_fsm_line({"SDD_ACTIVE_VERSION": "v0.99"}, root),
+                         sb.sdd_fsm_line({"SDD_ACTIVE_VERSION": "0.99"}, root))
+
+    def test_set_without_a_state_file_says_so(self) -> None:
+        """版本有設但狀態檔不存在 ⇒ 明說「無狀態檔」並印預期路徑，不得假裝成某個狀態。"""
+        root = Path(tempfile.mkdtemp(prefix="sdd-fsm-"))
+        self.addCleanup(shutil.rmtree, root, True)
+        got = sb.sdd_fsm_line({"SDD_ACTIVE_VERSION": "0.99"}, root)
+        self.assertIn("無狀態檔", got)
+        self.assertIn("FSM-STATE-AISDLC_SDD.yaml", got)
+        self.assertNotIn("current_state=", got)
+
+    def test_a_malformed_version_never_becomes_a_path(self) -> None:
+        """router 對 `0.19/../../x` 這類值放行不路由（DEF-CLDREV-028 路徑注入）；
+        簡報這一側不得把它拼進路徑讀檔——格式不符一律只報「格式非法」。"""
+        root, _ = _fsm_tree(self, _FSM_YAML)
+        for bad in ("0.99/../..", "..", "0.99\\..", "abc", "1"):
+            with self.subTest(bad=bad):
+                got = sb.sdd_fsm_line({"SDD_ACTIVE_VERSION": bad}, root)
+                self.assertIn("格式非法", got)
+                self.assertNotIn("current_state=", got)
+
+    def test_sdd_project_override_selects_its_own_state_file(self) -> None:
+        """狀態檔鍵＝`SDD_PROJECT`（有設）否則版本目錄的上一層資料夾名（同
+        `state_loader.project_from_env`）；鍵不同就會讀到別人的檔——目錄裡另有一堆
+        `FSM-STATE-test-*.yaml` 殘檔。"""
+        body = "fsm_state:\n  current_state: ESCALATION\n"
+        root, _ = _fsm_tree(self, body, project="custom")
+        env = {"SDD_ACTIVE_VERSION": "0.99", "SDD_PROJECT": "custom"}
+        self.assertIn("current_state=ESCALATION（", sb.sdd_fsm_line(env, root))
+
+    def test_it_reports_the_state_without_judging_it(self) -> None:
+        """阻斷態也只印原值、不下「阻斷／不阻斷」判決：判決要靠 SDD 側那份清單，
+        這裡不維護第二份。"""
+        root, _ = _fsm_tree(self, "fsm_state:\n  current_state: ESCALATION\n")
+        got = sb.sdd_fsm_line({"SDD_ACTIVE_VERSION": "0.99"}, root)
+        self.assertIn("current_state=ESCALATION（", got)
+        self.assertNotIn("阻斷", got)
+
+    def test_an_unreadable_state_is_reported_as_such(self) -> None:
+        """狀態檔在但讀不出 `current_state` ⇒ 照實說讀不出，
+        不退回任何預設狀態（假狀態比沒有更糟）。"""
+        root, _ = _fsm_tree(self, "garbage: true\n")
+        got = sb.sdd_fsm_line({"SDD_ACTIVE_VERSION": "0.99"}, root)
+        self.assertIn("讀不出 current_state", got)
+        self.assertNotIn("current_state=", got)
 
 
 class SessionstartBriefTest(unittest.TestCase):
@@ -389,7 +556,7 @@ class SessionstartBriefTest(unittest.TestCase):
             window_evidence=None, read_context_feed=None, now=_NOW,
             check_statusline=lambda: {"installed": False})
         self.assertIn("statusLine：未安裝", got)
-        self.assertIn("python tools/install_statusline.py --dry-run", got)
+        self.assertIn("install_statusline.py", got)
 
     def test_windows_platform_swaps_to_powershell_guidance(self) -> None:
         """DEF-200-412 接線面：`platform_utils.is_windows()` 為 True 時，最終簡報也
