@@ -13,7 +13,7 @@ R186 在 Windows 修的 13 列（DEF-200-427／434～444）在 Mac **全部確�
 |---|---|---|---|
 | Q1 新視窗就說被擋 | **Mac 機制面 PASS；活體零重現（樣本極小）** | 5 條機制（435～438／440）SD 合成沙盒＋SA 黑盒皆重現「修前紅、修後綠」`[他包回報]`；QA 逐字稿普查：09-27 起開窗 7 份零阻斷態簡報、零真「被擋」，ENOENT 噪音全在 09-26 symlink 落地前 `[他包回報]`；主控本場 hook 探針 SessionStart success=2、.venv ENOENT=0。 | R186 為合成重演；本輪加 Mac 真機黑盒與逐字稿母體 |
 | Q2 不用真實數據 | **PASS** | 主控本場第 7／8 個工具呼叫即 `--pace`＋`--check`（前 6 個是切換 SOP 規定的 git／dev_start），SessionStart 簡報已印真實數字；QA：Mac 兩支互動 cli session 第 1 個 tool_use 即現查 `[他包回報]`。 | 無變化；n 太小不構成比率 |
-| Q3 數字與 /context 不符 | **NOT-A-DEFECT（Mac 活體 4/4）** | `--check` `harness used=106,569 逐字稿 used=106,569 差=0`（主控）；SD 167,108、SA 167,108／183,542 皆差=0 `[他包回報]`；statusLine feed 檔住 `~/.autosdd/context_feed/<sid>.json`，主控先前 `ls … | tail -3` 沒看到是排序截斷、非檔不在。`/context` 仍 USER-ONLY。 | 新增 Mac 活體樣本 |
+| Q3 數字與 /context 不符 | **NOT-A-DEFECT（Mac 活體 4/4）** | `--check` `harness used=106,569 逐字稿 used=106,569 差=0`（主控）；SD 167,108、SA 167,108／183,542 皆差=0 `[他包回報]`；statusLine feed 檔住 `~/.autosdd/context_feed/<sid>.json`，主控先前 `ls … | tail -3` 沒看到是排序截斷、非檔不在。`/context` 掌舵者於本場親跑（2026-10-01 15:00 台北）：面板印 `543.7k/1m tokens (54%)`；逐字稿在該指令之前最後一筆 assistant usage＝543,652（06:59:25Z）⇒ **差 48 tokens（≤0.1k，顯示四捨五入尾數）**，三者（面板／底列 feed／逐字稿）同源成立；指令之後第一筆 usage 跳到 547,208 是 `/context` 輸出本身回灌約 3.5k tokens 的時序差，不是分歧。 | 新增 Mac 活體樣本；USER-ONLY 的最後一環在 Mac 補齊 |
 | Q4 Windows 沒有 ctx 行 | **NOT-A-DEFECT（Mac 已裝且相符）** | `install_statusline.py --status` `installed: true, matches_current_checkout: true`；合成 stdin 印 `ctx n/a of 1.0m (until next reply) | Fable 5.1` 與 `ctx 18% 175.2k/1.0m | Fable 5.1` `[他包回報]`。Windows 缺行＝每機使用者層一份＋UI 提問框蓋住，Mac 不能替 Windows 驗。 | 無變化 |
 | Q5 收斂了嗎 | **未收斂** | 五判準：①否（/context 與肉眼 A/B 仍 USER-ONLY）②否（R187 命中 P2 ⇒ 連續零輪數 0／2）③否（五問相關 11 列未結的承接欄仍是舊輪號或「未指派」`[他包回報]`）④否（配速契約目錄家族此前完全無鎖）⑤是。 | R186「修復完成進驗證輪」；本輪驗證輪本身又命中家族成員 |
 
@@ -51,7 +51,7 @@ R186 在 Windows 修的 13 列（DEF-200-427／434～444）在 Mac **全部確�
 
 ## 五、誠實劃界與未驗
 
-- `/context` 自驗三步、Q4 肉眼 A/B：USER-ONLY（Mac 與 Windows 皆是）。
+- `/context` 自驗三步：**Mac 已由掌舵者親跑並相符（見〈一〉Q3）**；Windows 仍 USER-ONLY。Q4 肉眼 A/B：USER-ONLY（Mac 與 Windows 皆是）。比對紀律：要對齊 `/context` **之前**最後一筆 assistant usage，不能拿它之後的 `--check`（指令輸出回灌後數字會再長）。
 - Q1 活體零重現的樣本：R177 之後 Mac 上人新開的互動窗口只有 1 支（加本場 2 支）`[他包回報]` ⇒ 是「未見」不是「證明不會」。
 - Fable 活體 halt 在 Mac 無法重現（weekly_scoped 10%）：Q1 五條機制皆為合成沙盒驗證。
 - R186 的 `replay_new_window.py` 住 Windows 主控 scratchpad，Mac 無法重演 13 症狀；以 SD T2／T5 沙盒替代。
