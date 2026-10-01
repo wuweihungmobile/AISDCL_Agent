@@ -267,7 +267,7 @@ ignore_imports =
 ;   `tools.*` 是套件外 external import、不進 grimp 的圖，八條 contract 全綠。
 ;   （對照實測：加 `tools` 進 root_packages 後 Analyzed 由 205 → 252 files。）
 ;
-; 唯一合規路徑：走**檔案契約**——adapter 只讀 `%TEMP%/autosdd_quota.json`
+; 唯一合規路徑：走**檔案契約**——adapter 只讀家目錄（或 `AUTOSDD_QUOTA_CACHE_DIR`）下的 `autosdd_quota.json`
 ;   （純 stdlib json + tempfile），檔不在／schema 不符／過期一律回「量不到」。
 ;   見 autoclaude/infra/adapters/file_quota_meter.py 與 core/ports/quota_meter.py。
 ;

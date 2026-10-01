@@ -39,6 +39,7 @@ from lib import windows_skip_tags  # noqa: E402  # R72：skip 標籤家族的 SS
 # 模組物件（同 `min_tests_margin` 那句註解的判斷——`from lib import X` 會是第二副本）。
 import console_orphan_census  # noqa: E402
 import pace_contract  # noqa: E402  # DEF-200-444：TempFenceTest 的字面相等鎖對端
+import quota_meter  # noqa: E402  # DEF-200-445：圍籬要隔離的快取目錄變數名 SSOT
 
 #: DEF-200-170：刻意取 **runner 手上的那一個** module 物件。`tools/lib` 同時也在 `sys.path`
 #: 上（runner 自己插的），改寫成 `from lib import min_tests_margin` 會拿到**第二個副本**，
@@ -321,11 +322,14 @@ class ConsoleOrphanCensusTest(unittest.TestCase):
 
 
 class TempFenceTest(unittest.TestCase):
-    """DEF-200-444：全套曾實測改寫**真實** %TEMP% 下的 autosdd_pace*.json（引擎
-    `file_quota_meter` 讀的就是那份，TTL 內可能拿測試的假決策當派工上限）。家族級修法＝
-    `sentinel_lifecycle.temp_fence`：全套期間 TEMP／TMP／TMPDIR 與 `tempfile.tempdir` 指向專屬
-    隔離根（含 worker 與孫行程）、跑完清掉，並比對真實 TEMP 下配速契約檔的前後雜湊。本類只對**
-    合成的假真實 TEMP**（`real_tmp=`）動手，絕不碰這台機器真的 %TEMP%。"""
+    """DEF-200-444／445：全套曾實測改寫**真實** %TEMP% 下的 autosdd_pace*.json。DEF-200-444
+    當時以為引擎 `file_quota_meter` 讀的就是那份；實際上引擎讀 quota 快取目錄（家目錄或
+    `AUTOSDD_QUOTA_CACHE_DIR`），寫入端改走 `quota_meter.cache_path()` 之後，全套寫的才是引擎
+    真的會讀的那份（TTL 內可能拿測試的假決策當派工上限）。家族級修法＝
+    `sentinel_lifecycle.temp_fence`：全套期間 TEMP／TMP／TMPDIR、快取目錄與
+    `tempfile.tempdir` 指向專屬隔離根（含 worker 與孫行程）、跑完清掉，並比對真實契約目錄下
+    配速契約檔的前後雜湊。本類只對**合成的假真實目錄**（`real_tmp=`／scratch 快取目錄）動手，
+    絕不碰這台機器真的 %TEMP% 與家目錄。"""
 
     def setUp(self) -> None:
         env = mock.patch.dict(os.environ)  # 圍籬若壞了，汙染不得帶進同行程的其他測試
@@ -337,15 +341,16 @@ class TempFenceTest(unittest.TestCase):
         self.fence = run_root_unittests.sentinel_lifecycle.temp_fence
 
     def _fenced(self, run):
-        """在假真實 TEMP 上跑圍籬並收 stdout；回 `(rc, 輸出)`。"""
-        out = io.StringIO()
-        with contextlib.redirect_stdout(out):
+        """在假真實 TEMP 上跑圍籬並收 stdout；回 `(rc, 輸出)`。正常（後進先出）的出場不得出聲。"""
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             rc = self.fence(run, real_tmp=self.real)
+        self.assertNotIn("亂序", err.getvalue(), "正常出場不得有亂序警告（會變成被無視的雜訊）")
         return rc, out.getvalue()
 
     def test_in_process_child_and_contract_path_resolve_inside_the_isolated_root(self) -> None:
-        """修前必紅：沒有圍籬時三者都是真實 TEMP。先讓 `tempfile` 快取落地＝最壞情形
-        （Python 只在第一次 `gettempdir()` 讀環境變數，只改 env 對已快取的行程無效）。"""
+        """修前必紅：沒有圍籬時前兩者是真實 TEMP、契約目錄是真實快取目錄。先讓 `tempfile` 快取落地
+        ＝最壞情形（Python 只在第一次 `gettempdir()` 讀環境變數，只改 env 對已快取的行程無效）。"""
         tempfile.gettempdir()
         seen: dict[str, str] = {}
 
@@ -368,11 +373,80 @@ class TempFenceTest(unittest.TestCase):
         self.assertEqual(Path(seen["child"]), root,
                          "子行程看到的 TEMP 不是隔離根 ⇒ worker／孫行程仍會寫真實 TEMP")
         self.assertEqual(Path(seen["contract"]), root,
-                         "配速契約寫入端 contract_path() 仍指向真實 TEMP（DEF-200-444 原症狀）")
+                         "配速契約寫入端 contract_path() 仍指向真實契約目錄（快取目錄）")
+
+    def test_the_quota_cache_dir_follows_the_fence_so_the_pace_contract_lands_in_the_root(
+            self) -> None:
+        """DEF-200-445：配速契約住 quota 快取目錄、不在 TEMP——圍籬只改 TEMP 一族時，全套照樣
+        寫引擎真的會讀的那一份。修前必紅：快取目錄變數沒被改 ⇒ 契約落回真實（家）目錄。"""
+        os.environ.pop(quota_meter.CACHE_DIR_ENV, None)  # 最壞情形：開發者沒設，預設落家目錄
+        seen: dict[str, str] = {}
+
+        def _run() -> int:
+            seen["root"] = tempfile.gettempdir()
+            seen["env"] = os.environ.get(quota_meter.CACHE_DIR_ENV, "")
+            seen["meter"] = str(quota_meter.cache_path().parent)
+            seen["contract"] = str(pace_contract.contract_path().parent)
+            return 0
+
+        self._fenced(_run)
+        root = Path(seen["root"])
+        self.assertEqual(Path(seen["env"]), root, "快取目錄環境變數沒指向隔離根")
+        self.assertEqual(Path(seen["meter"]), root, "quota 快取目錄沒落在隔離根")
+        self.assertEqual(Path(seen["contract"]), root, "配速契約寫入端落在隔離根之外")
+        self.assertNotIn(quota_meter.CACHE_DIR_ENV, os.environ, "跑完沒還原成「沒設」")
+
+    def test_a_write_bypassing_the_fence_into_the_real_cache_dir_is_named(self) -> None:
+        """DEF-200-445：不注入 `real_tmp`（生產路徑）時比對面＝`quota_meter.cache_path().parent`，
+        不是 TEMP——繞過圍籬直接寫真實快取目錄的契約檔必須被點名（修前比對面是 TEMP，這種繞過
+        隱形）；開發者預先設定的快取目錄跑完必須原值還原。"""
+        os.environ[quota_meter.CACHE_DIR_ENV] = str(self.real)  # 假的「真實快取目錄」
+        (self.real / "autosdd_pace_fable.json").write_text("{}", encoding="utf-8")
+
+        def _escape() -> int:  # 某個測試寫死真實快取目錄、完全繞過圍籬
+            (self.real / pace_contract.CONTRACT_NAME).write_text("{}", encoding="utf-8")
+            return 0
+
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            rc = self.fence(_escape)
+        self.assertEqual(rc, 0)
+        self.assertIn("❌", out.getvalue())
+        self.assertIn(f"{pace_contract.CONTRACT_NAME}（新增）", out.getvalue())
+        self.assertNotIn("autosdd_pace_fable.json", out.getvalue(), "沒變動的兄弟檔不得被點名")
+        self.assertEqual(os.environ[quota_meter.CACHE_DIR_ENV], str(self.real),
+                         "預先設定的快取目錄沒有原值還原")
+
+    def test_the_isolated_root_is_built_under_real_temp_never_under_the_watched_dir(self) -> None:
+        """DEF-200-445：比對面搬到快取目錄（預設＝家目錄）後，隔離根仍必須建在真實 TEMP 下——
+        建進比對面會讓全套每個暫存檔都變成「契約目錄的新增內容」，清不掉時污染的是家目錄。"""
+        real_tmp = Path(tempfile.gettempdir())
+        os.environ[quota_meter.CACHE_DIR_ENV] = str(self.real)
+        seen: dict[str, Path] = {}
+
+        def _run() -> int:
+            seen["root"] = Path(os.environ[quota_meter.CACHE_DIR_ENV])
+            return 0
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.fence(_run)
+        root = seen["root"]
+        self.assertEqual(root.parent, real_tmp, "隔離根不在真實 TEMP 之下")
+        self.assertNotEqual(root, self.real, "快取目錄沒被改指到隔離根")
+        self.assertNotIn(self.real, root.parents, "隔離根被建進比對面（真實快取目錄）之下")
+
+    def test_an_unresolvable_home_never_crashes_the_fence(self) -> None:
+        """量測器故障不得反過來變成全套跑不完的故障源：`Path.home()` 解析不出來（沒有 HOME 的
+        容器）時比對面退回、`run()` 照跑、rc 原樣穿透。"""
+        with mock.patch.object(quota_meter, "cache_path", side_effect=RuntimeError("no home")), \
+                contextlib.redirect_stdout(io.StringIO()):
+            rc = self.fence(lambda: 9)
+        self.assertEqual(rc, 9)
 
     def test_environment_and_cache_are_restored_and_the_root_is_removed(self) -> None:
-        names = ("TEMP", "TMP", "TMPDIR")
-        os.environ.pop("TMPDIR", None)  # 原本沒設的，結束後必須回到「沒設」而不是空字串
+        names = ("TEMP", "TMP", "TMPDIR", quota_meter.CACHE_DIR_ENV)
+        for name in ("TMPDIR", quota_meter.CACHE_DIR_ENV):  # 原本沒設的，結束後必須回到「沒設」
+            os.environ.pop(name, None)  # 而不是空字串
         before = {n: os.environ.get(n) for n in names}
         cache = tempfile.tempdir
         seen: dict[str, Path] = {}
@@ -406,6 +480,38 @@ class TempFenceTest(unittest.TestCase):
             self._fenced(_boom)
         self.assertEqual(dict(os.environ), before)
         self.assertFalse(seen["root"].exists())
+
+    def test_nested_fences_restore_each_layer_and_clean_each_root(self) -> None:
+        """DEF-200-446：runner 圍籬在外、模組圍籬在內是真實形態——內層必須建在外層隔離根之下，
+        各還各的：內層出場時外層仍在，外層出場才回到原本（含原本沒設的快取變數）。"""
+        lifecycle = run_root_unittests.sentinel_lifecycle
+        os.environ.pop(quota_meter.CACHE_DIR_ENV, None)
+        outer = lifecycle.fence_enter(self.real)
+        inner = lifecycle.fence_enter()
+        outer_root, inner_root = Path(outer["root"].name), Path(inner["root"].name)
+        self.assertEqual(inner_root.parent, outer_root, "內層沒建在外層隔離根之下")
+        lifecycle.fence_exit(inner)
+        self.assertEqual(Path(os.environ[quota_meter.CACHE_DIR_ENV]), outer_root)
+        self.assertEqual(Path(tempfile.gettempdir()), outer_root, "內層出場把外層也拆了")
+        self.assertFalse(inner_root.exists())
+        lifecycle.fence_exit(outer)
+        self.assertNotIn(quota_meter.CACHE_DIR_ENV, os.environ)
+        self.assertFalse(outer_root.exists())
+
+    def test_an_out_of_order_exit_is_named_and_never_strands_the_environment(self) -> None:
+        """後進先出被打破（外層先出場）不得靜默：⚠️ 點名「亂序」；內層之後才出場也不得把環境
+        寫回已被外層一併刪掉的目錄——最終仍回到最初值。"""
+        names = ("TEMP", "TMP", "TMPDIR", quota_meter.CACHE_DIR_ENV)
+        before, cache = {n: os.environ.get(n) for n in names}, tempfile.tempdir
+        lifecycle = run_root_unittests.sentinel_lifecycle
+        outer, inner = lifecycle.fence_enter(self.real), lifecycle.fence_enter()
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            lifecycle.fence_exit(outer)
+            lifecycle.fence_exit(inner)
+        self.assertIn("亂序", err.getvalue())
+        self.assertEqual({n: os.environ.get(n) for n in names}, before)
+        self.assertEqual(tempfile.tempdir, cache)
 
     def test_drifted_real_pace_files_are_named_with_their_kind_and_rc_is_untouched(self) -> None:
         changed = self.real / pace_contract.CONTRACT_NAME
@@ -497,7 +603,7 @@ class TempFenceTest(unittest.TestCase):
         rc, _ = self._fenced(_run)
         self.assertEqual(rc, 0)
         self.assertEqual(len(envs), 1, "worker 沒被 Popen 出來")
-        for name in ("TEMP", "TMP", "TMPDIR"):
+        for name in ("TEMP", "TMP", "TMPDIR", quota_meter.CACHE_DIR_ENV):
             self.assertEqual(Path(envs[0][name]).parent, self.real,
                              f"worker 的 {name} 不在隔離根 ⇒ 圍籬到不了 worker")
 
@@ -535,6 +641,98 @@ class TempFenceTest(unittest.TestCase):
             self.assertTrue(fnmatch.fnmatch(name, glob), f"{name} 不在圍籬的比對面")
         self.assertFalse(fnmatch.fnmatch(f"{canonical.name}.4242.tmp", glob),
                          "`write()` 的 staging 暫存檔（.tmp）不得被當成契約檔")
+
+
+#: DEF-200-446：會碰配速契約寫端的 `(模組, 函式)`；模組名只比點分名的最後一段（容許相對匯入）。
+_PACE_WRITERS = {("quota_gate", "pace_report"), ("quota_gate", "run_pace"),
+                 ("quota_gate", "main"), ("pace_contract", "write"),
+                 ("quota_meter", "write_cache"), ("session_resume_planner", "main")}
+
+
+def _calls_pace_writer(source: str) -> bool:
+    """`source` 有沒有一個**呼叫**解析到 `_PACE_WRITERS`：先以 import 表還原別名（`import X as Y`
+    ⇒ Y:X；`from X import f as g` ⇒ g:X.f），再取點分呼叫目標的最後兩段比對。
+
+    盲區：子行程腳本字串、`getattr`／`runpy`／`importlib` 動態取用、經 helper 拿到的模組物件
+    （`m = _meter(); m.write_cache()`）、實例屬性轉手都看不見；docstring／註解／字串常數提到
+    這些名字不算（算了，本鎖自己的名單與自證原始碼會把本檔判成寫端）。"""
+    tree, alias = ast.parse(source), {}
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Import):
+            alias.update({a.asname: a.name for a in n.names if a.asname})
+        elif isinstance(n, ast.ImportFrom):  # 相對匯入的 `module` 可為空，取尾兩段時無妨
+            alias.update({a.asname or a.name: f"{n.module or ''}.{a.name}" for a in n.names})
+    calls = (ast.unparse(n.func).partition(".") for n in ast.walk(tree) if isinstance(n, ast.Call))
+    return any(tuple(".".join(filter(None, (alias.get(head, head), rest))).split(".")[-2:])
+               in _PACE_WRITERS for head, _, rest in calls)
+
+
+def _module_fence_problems(source: str, name: str) -> list[str]:
+    """寫端模組必須定義 `setUpModule`（體內**呼叫** `fence_enter`）與 `tearDownModule`（體內
+    **呼叫** `fence_exit`）；非寫端回 `[]`。只引用不呼叫（`x = SL.fence_enter`）不算；只認頂層
+    `def`：以別名或賦值掛上的 fixture 看不見。"""
+    if not _calls_pace_writer(source):
+        return []
+    fixtures = {n.name: n for n in ast.parse(source).body if isinstance(n, ast.FunctionDef)}
+    return [f"{name}: 寫端模組缺 {fixture}（體內須呼叫 {primitive}）"
+            for fixture, primitive in (("setUpModule", "fence_enter"),
+                                       ("tearDownModule", "fence_exit"))
+            if fixture not in fixtures or not any(
+                isinstance(n, ast.Call) and ast.unparse(n.func).split(".")[-1] == primitive
+                for n in ast.walk(fixtures[fixture]))]
+
+
+class TestWriterModulesDeclareTheModuleFence(unittest.TestCase):
+    """DEF-200-446：`temp_fence` 只罩經 runner 的全套，單模組直跑不經它——一小時內三次把真實
+    配速檔改寫成夾具值，而 DEF-200-445 修後引擎在 TTL 內真的讀得到。家族鎖綁的是「會碰配速
+    契約寫端」這個性質（不是今天有沒有真的寫出去）：該類模組必須在模組層自帶
+    `setUpModule`／`tearDownModule`，並與全套共用 `sentinel_lifecycle` 的進出原語。"""
+
+    _WRITER = "import quota_gate as qg\n\n\ndef test_x():\n    qg.pace_report(1)\n\n\n"
+    _ENTER = "def setUpModule():\n    {}\n\n\n"
+    _EXIT = "def tearDownModule():\n    SL.fence_exit(HANDLES.pop())\n"
+
+    def test_fixtures_must_call_the_fence_primitives(self) -> None:
+        """對照組（接好圍籬＝乾淨）加三種注入：缺 `setUpModule`／有它卻不呼叫原語（真實的坑：
+        模組早有 `setUpModule` 釘別的東西）／只引用不呼叫（`kept = SL.fence_enter`）＝都沒進場。"""
+        for label, enter, expected in (
+                ("接好", self._ENTER.format("HANDLES.append(SL.fence_enter())"), 0),
+                ("只釘別的", self._ENTER.format("pin()"), 1),
+                ("只引用", self._ENTER.format("kept = SL.fence_enter"), 1), ("缺 setUp", "", 1)):
+            with self.subTest(label):
+                problems = _module_fence_problems(self._WRITER + enter + self._EXIT, "m")
+                self.assertEqual(len(problems), expected, problems)
+                self.assertTrue(all("setUpModule" in p for p in problems), problems)
+
+    def test_writer_detection_resolves_aliases_and_ignores_text_and_homonyms(self) -> None:
+        """別名不得逃過判準（`planner.main(["--pace"])` 正是 cbg 現行寫法）；反向：同名別名指向
+        別的模組、docstring／字串提到寫端名字都不是寫端——判準看解析後的 `(模組, 函式)` 呼叫。"""
+        for source, is_writer in (
+                ("import session_resume_planner as planner\nplanner.main(['--pace'])\n", True),
+                ("import pace_contract as pc\npc.write(1)\n", True),
+                ("from quota_gate import pace_report as pr\npr()\n", True),
+                ("import other as qg\nqg.pace_report()\n", False),
+                ('"""說明 pace_report( 與 PC.write( 。"""\nNAME = "qg.main("\n', False)):
+            with self.subTest(source=source):
+                self.assertIs(_calls_pace_writer(source), is_writer)
+
+    def test_every_writer_module_on_disk_declares_the_fence(self) -> None:
+        """現況：全部 `tools/tests` 模組。寫端清單另釘＝已知三支（不多不少）：認不出任何寫端
+        （分母 0）時不得以「零問題」假綠，多認出的也要被看見而不是默默多一支。"""
+        problems, writers = [], set()
+        for path in sorted(Path(__file__).resolve().parent.glob("test_*.py")):
+            source = path.read_text(encoding="utf-8")
+            problems += _module_fence_problems(source, path.name)
+            if _calls_pace_writer(source):
+                writers.add(path.name)
+        self.assertEqual(problems, [], "寫端測試模組沒接模組級圍籬 ⇒ 單模組直跑改寫真實配速契約。"
+                         "修法：模組層加 setUpModule／tearDownModule，以後進先出的 handle 堆疊"
+                         "呼叫 sentinel_lifecycle 的 fence_enter／fence_exit"
+                         "（範本見 test_quota_policy.py）")
+        self.assertEqual(writers, {"test_context_budget_guard.py", "test_quota_policy.py",
+                                   "test_wake_chain_halt_r278.py"},
+                         "偵測器認出的寫端不是已知三支（認不出＝分母 0 假綠；多認出＝先看是不是"
+                         "誤判，真的新寫端接好圍籬後把檔名加進本集合）")
 
 
 class ParallelFallbackToSequentialTest(unittest.TestCase):
@@ -4707,8 +4905,8 @@ class DispatchGranularityWhitelistHasNoModuleLevelFixturesTest(unittest.TestCase
     會重跑一次）。本測試把這條最低限度的前提轉成機械不變量。
 
     QA 2026-09-23 追加：`test_context_budget_guard` 是**已人工核實安全**的
-    例外（模組層 fixture 只 pin／還原 `os.environ`，行程內狀態，per-subprocess
-    重跑成本可忽略——見 `dispatch_granularity._MODULE_FIXTURE_SAFE_EXCEPTIONS`
+    例外（模組層 fixture 只 pin／還原 `os.environ` 並進出私有暫存目錄圍籬，皆隨各自的
+    subprocess 生滅，重跑成本可忽略——見 `dispatch_granularity._MODULE_FIXTURE_SAFE_EXCEPTIONS`
     的核實結論）。預設仍是「有模組層 fixture 就判紅」，例外需要先出現在那份
     名單裡才豁免，不是靜默放寬本測試的判準。
     """

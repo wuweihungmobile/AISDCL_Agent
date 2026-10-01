@@ -27,7 +27,7 @@
 # 無關）挑出來再投影的，其餘每一條線的 reset 期程就在那兩行被丟掉。對本 adapter 的實際
 # 代價：`resume_wait_seconds` 只對 `_WAITABLE_KINDS` 回秒數，而投影上來的 kind 常是
 # `weekly_all` ⇒ 額度軸**實質恆回 None**、AutoResumeService 永遠回落寫死延遲。
-# 升版**不寫相容層**：快取是 %TEMP% 內 TTL 綁定的衍生物，替它寫遷移是純負債；
+# 升版**不寫相容層**：快取是家目錄（或覆寫目錄）內 TTL 綁定的衍生物，替它寫遷移是純負債；
 # 讀到舊 schema 一律 None（＝量不到），而那正是既有測試釘住的正確行為。
 from __future__ import annotations
 

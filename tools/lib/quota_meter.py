@@ -154,7 +154,7 @@ REASON_RATE_LIMITED = "http-429-floor"
 #: file_quota_meter.py` 的 `self._path` ＋同檔檔頭那張路徑表；另有 `.importlinter` 與
 #: port 檔的散文各一處）。那不是疏漏而是**契約所迫**：`AutoClaude/.importlinter` 明文
 #: 禁止引擎 import monorepo 根層護欄層，唯一合規路徑就是「adapter 只讀
-#: `%TEMP%/autosdd_quota.json`」這條**檔案契約** ⇒ 兩側必須各自持有字面。
+#: 家目錄（或覆寫目錄）的 `autosdd_quota.json`」這條**檔案契約** ⇒ 兩側必須各自持有字面。
 #: ⇒ 誠實的說法是：**字面兩個家、算法一個判準**。對齊由具名機械物守，不靠人記得：
 #:   `tools/tests/test_quota_policy.py::TestM8bCacheHomeStaysInSync`
 #:   （比的是**目錄運算式**：只有一側搬家即紅，兩側同一次 commit 一起搬才綠）

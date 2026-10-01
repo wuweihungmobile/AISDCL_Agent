@@ -16,6 +16,8 @@ import json
 import logging
 import os
 import re
+import subprocess
+import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
@@ -36,6 +38,7 @@ from autoclaude.core.ports.quota_meter import (
     effective_fanout,
 )
 from autoclaude.infra.adapters.file_quota_meter import (
+    CACHE_DIR_ENV,
     DEFAULT_TTL_SECONDS,
     PACE_TTL_SECONDS,
     FileQuotaMeterAdapter,
@@ -316,6 +319,104 @@ class TestDegradedCapMirrorsTheRootDeclaration:
         from autoclaude.core.wiring import build_quota_meter
         assert build_quota_meter(2).read_pace().cap == 2   # 契約不存在 ⇒ 落在地板上
         assert build_quota_meter().read_pace().cap == DEGRADED_CAP
+
+
+# ─────────────────────────────────────────────────────────────
+# DEF-200-445：寫入端（根層）與讀取端（本引擎）必須落在**同一個目錄**
+# ─────────────────────────────────────────────────────────────
+# 引擎側不得 in-process import 根層 `tools`（ACQ-02）⇒ 根側一律經子行程碰（純 stdlib）。
+_ROOT_LIB = REPO.parent / "tools" / "lib"
+
+#: conftest 的 `_hermetic_quota_cache` 在每個測試把 `FileQuotaMeterAdapter.__init__` 換成「預設路徑
+#: 一律指向 tmp」的包裝；本節驗的正是**預設目錄解析**（env 覆寫或家目錄），所以在 import 當下
+#: （fixture 尚未介入）留一份原版建構子。
+_REAL_ADAPTER_INIT = FileQuotaMeterAdapter.__init__
+
+_ROOT_PATHS = (
+    "import json, pace_contract, quota_meter\n"
+    "print(json.dumps({'pace': str(pace_contract.contract_path()),\n"
+    "                  'quota': str(quota_meter.cache_path())}))\n"
+)
+
+#: 子行程裡「真寫入端寫一份契約」：`pct` 由呼叫端代入，回寫出去的 cap／band 當期望值。
+_ROOT_WRITE = """\
+import json
+from datetime import UTC, datetime, timedelta
+import pace_contract
+import quota_policy as Q
+now = datetime.now(UTC)
+axis = Q.Axis(kind="session", pct={pct}, resets_at=(now + timedelta(minutes=30)).isoformat())
+state = Q.QuotaState(axes=(axis,), measured_at=now.isoformat(), source="endpoint", reason="ok")
+policy = Q.DEFAULT_POLICY
+decision = Q.decide(state, now, policy)
+body = pace_contract.payload(decision, state, policy.max_fanout, policy.halt_pct)
+ok = pace_contract.write(decision, state, policy.max_fanout, policy.halt_pct)
+print(json.dumps({{"ok": ok, "cap": body["cap"], "band": body["band"]}}))
+"""
+
+
+def _root_side(code: str, **env_overrides: str) -> dict:
+    """在子行程跑根層程式碼，回它印的那行 JSON。
+
+    先剝掉所有 `AUTOSDD_*`（開發者匯出的逃生口不得改變本節的落點），再套 `env_overrides`。"""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("AUTOSDD_")}
+    env.update(env_overrides)
+    proc = subprocess.run(
+        [sys.executable, "-c", f"import sys; sys.path.insert(0, {str(_ROOT_LIB)!r})\n{code}"],
+        capture_output=True, encoding="utf-8", errors="replace", timeout=120,
+        check=False, env=env)
+    assert proc.returncode == 0, proc.stderr
+    return json.loads(proc.stdout.strip().splitlines()[-1])
+
+
+def _default_adapter() -> FileQuotaMeterAdapter:
+    """用**未被 conftest 密封**的建構子造 adapter＝生產路徑的預設目錄解析。"""
+    adapter = object.__new__(FileQuotaMeterAdapter)
+    _REAL_ADAPTER_INIT(adapter)
+    return adapter
+
+
+class TestPaceContractWriterAndEngineReaderShareOneDirectory:
+    """DEF-200-445：根層寫入端寫 TEMP、引擎讀取端讀家目錄，兩邊從未碰面——引擎自 DEF-200-012 起
+    一直走降級地板，而兩側各自的測試全綠（檔名與 schema 字面逐字相等，目錄沒人比）。"""
+
+    def test_the_override_env_moves_writer_and_reader_to_the_same_directory(
+            self, tmp_path, monkeypatch):
+        """逃生口 `AUTOSDD_QUOTA_CACHE_DIR` 是一個旋鈕：兩側都必須吃它，
+        否則設了它反而讓兩邊分家。"""
+        monkeypatch.setenv(CACHE_DIR_ENV, str(tmp_path))
+        writer = _root_side(_ROOT_PATHS, **{CACHE_DIR_ENV: str(tmp_path)})
+        engine = _default_adapter()
+        assert Path(writer["quota"]) == engine._path
+        assert Path(writer["pace"]) == engine._pace_path
+        assert engine._pace_path.parent == tmp_path, "兩側一起落到別處的假相等"
+
+    def test_without_the_override_both_sides_default_to_the_home_directory(
+            self, tmp_path, monkeypatch):
+        """預設落點＝家目錄：子行程改 HOME／USERPROFILE（POSIX／Windows 各讀一個），本行程改
+        `Path.home`，兩邊必須收斂到同一個（假）家目錄。"""
+        monkeypatch.delenv(CACHE_DIR_ENV, raising=False)
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        writer = _root_side(_ROOT_PATHS, HOME=str(tmp_path), USERPROFILE=str(tmp_path))
+        engine = _default_adapter()
+        assert Path(writer["quota"]) == engine._path == tmp_path / "autosdd_quota.json"
+        assert Path(writer["pace"]) == engine._pace_path == tmp_path / "autosdd_pace.json"
+
+    @pytest.mark.parametrize(("pct", "halt"), [(10.0, False), (96.0, True)], ids=["free", "halt"])
+    def test_a_contract_written_by_the_real_writer_is_read_by_the_real_reader(
+            self, pct, halt, tmp_path, monkeypatch):
+        """真 E2E：子行程裡根層 `pace_contract.write(...)` → 本行程引擎 `read_pace()`，兩邊各走各的
+        預設目錄解析、不注入任何 path。修前引擎讀不到 ⇒ 降級（地板 cap／unmeasured／degraded），
+        連 halt 的 cap=0 都送不過去。"""
+        monkeypatch.setenv(CACHE_DIR_ENV, str(tmp_path))
+        written = _root_side(_ROOT_WRITE.format(pct=pct), **{CACHE_DIR_ENV: str(tmp_path)})
+        assert written["ok"] is True
+        assert written["band"] != BAND_UNMEASURED, "寫出去的就是降級形態 ⇒ 本測試沒有鑑別力"
+        got = _default_adapter().read_pace()
+        assert (got.cap, got.band) == (written["cap"], written["band"])
+        assert got.source != "degraded"
+        # 期望值不跟著寫出去的值走：halt 門檻上移時，halt 格不得悄悄變成別的帶
+        assert (got.cap == 0) if halt else (got.cap >= 1), f"cap={got.cap} band={got.band}"
 
 
 # ─────────────────────────────────────────────────────────────

@@ -1,4 +1,7 @@
-"""配速**檔案契約**的寫入端：根層算完的 `Decision` → `<tempdir>/autosdd_pace.json`。"""
+"""配速**檔案契約**的寫入端：根層算完的 `Decision` → `autosdd_pace.json`。
+
+目錄＝與 `autosdd_quota.json` 同目錄（SSOT＝`quota_meter.cache_path()`；DEF-200-445）。
+"""
 # ─────────────────────────────────────────────────────────────────────────────
 # WHY 這一支檔存在（R86／SA×Dev 跨包；讀取端與 schema 的權威在引擎側）
 # ---------------------------------------------------------------------------
@@ -25,14 +28,21 @@
 #   `TestR86ThePaceContractWriterMatchesTheEngineReader` 逐字比對兩邊的常數。
 #   沒有它，改掉任一邊 ⇒ 寫入者寫一份沒有人讀的檔，而**失敗表徵與成功完全相同**
 #   （引擎照跑、只是永遠走保守地板；`quota_cache_path()` 的 docstring 已記載過同型判例）。
+#
+# 🔴 第三個縫是**目錄**（DEF-200-445）：上面那把鎖只比兩個字面，看不到「檔名對、目錄錯」——
+#   寫入端曾走 `tempfile` 的暫存目錄、引擎讀家目錄，兩邊一個多月沒碰面而全套綠燈。目錄現在
+#   一律經 `quota_meter.cache_path()`（引擎以 `_path.with_name(...)` 衍生同一個目錄），鎖＝
+#   `tools/tests/test_quota_policy.py::TestPaceContractLivesBesideTheQuotaCache`（根層）＋
+#   `AutoClaude/tests/test_r86_pace_contract.py` 的
+#   `TestPaceContractWriterAndEngineReaderShareOneDirectory`（真寫入端→真讀取端）。
 from __future__ import annotations
 
 import json
 import os
 import sys
-import tempfile
 from pathlib import Path
 
+import quota_meter
 from quota_policy import family_key
 
 #: 檔名。**必須**等於 `autoclaude/infra/adapters/file_quota_meter.py:PACE_CACHE_NAME`。
@@ -52,8 +62,13 @@ SIBLING_WRITE_FAILED_HINT = ("⚠️  配速契約的家族兄弟檔寫不進去
 
 
 def contract_path() -> Path:
-    """契約檔路徑。與 `autosdd_quota.json` **同目錄**（引擎側以 `with_name` 定位）。"""
-    return Path(tempfile.gettempdir()) / CONTRACT_NAME
+    """契約檔路徑：與 `autosdd_quota.json` **同目錄**（引擎側以 `with_name` 定位）。
+
+    目錄的 SSOT＝`quota_meter.cache_path()`（`AUTOSDD_QUOTA_CACHE_DIR` 或家目錄）。
+    DEF-200-445：修前錯走 `tempfile.gettempdir()`，而引擎自 DEF-200-012 把快取搬到家目錄起
+    讀的就是那一份 ⇒ 兩側從未碰面，引擎永遠回降級決策（cap＝地板、band＝unmeasured）。
+    """
+    return quota_meter.cache_path().with_name(CONTRACT_NAME)
 
 
 # 🔴 `cap` 的型別在契約裡是 `int` 且 `>= 0`（讀取端 `type(cap) is int and cap >= 0`），
@@ -115,7 +130,11 @@ def write(decision, state, max_fanout: int, halt_pct: float,
     （預設 `autosdd_pace_fable.json`）。canonical 仍是 last-writer-wins；兄弟檔讓各家族的
     決策各有一份不互蓋的真相。`None`／未知家族字＝只寫 canonical（與此前逐字相同）。
     """
-    target = path or contract_path()
+    try:
+        target = path or contract_path()
+    except (OSError, RuntimeError) as why:  # 家目錄解析不出來：`Path.home()` 拋 RuntimeError
+        sys.stderr.write(WRITE_FAILED_HINT.format(path="<契約路徑解析不出>", why=why))
+        return False
     body = json.dumps(payload(decision, state, max_fanout, halt_pct),
                       ensure_ascii=False, indent=2)
     outs = [(target, WRITE_FAILED_HINT)]
@@ -126,6 +145,8 @@ def write(decision, state, max_fanout: int, halt_pct: float,
     for dest, hint in outs:  # 單一 `os.replace` 站點：兩份共用同一段處置（見上方注記）
         staging = dest.with_name(f"{dest.name}.{os.getpid()}.tmp")
         try:
+            # 目錄不保證存在（覆寫目錄或家目錄，不像 `gettempdir()`）：與 `write_cache` 同語意先建
+            dest.parent.mkdir(parents=True, exist_ok=True)
             with staging.open("w", encoding="utf-8", newline="\n") as f:
                 f.write(body)
             os.replace(staging, dest)

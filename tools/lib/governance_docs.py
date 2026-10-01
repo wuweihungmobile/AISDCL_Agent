@@ -555,6 +555,10 @@ _GOVERNANCE_DOCS = (
     # 模型判額度／遲滯依模型與尺分家／測試隔離真實 TEMP）的詳情面：同一資格，即刻登記。
     _REPO_ROOT / "docs" / "06_quality"
     / "CrossPlatform_R186_SessionGate_Windows_Recheck8_Evidence.md",
+    # 掌舵者五問 Mac 驗證輪（第九次四方覆核；DEF-200-445／446 新立即結、447 登記 open；配速契約
+    # 寫端與引擎讀端目錄分家＋模組級圍籬家族鎖）的詳情面：同一資格，即刻登記。
+    _REPO_ROOT / "docs" / "06_quality"
+    / "CrossPlatform_R187_SessionGate_Mac_Verification_Evidence.md",
     # 護欄層行數棘輪史料歸檔的第二冊（第一冊逼近 Read 工具上限，淨減法搬遷改落本檔）：即刻登記。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_Guard_Line_History_2.md",
 )

@@ -230,7 +230,7 @@ R79 已實測 reset 是**滾動視窗、錨在該區塊第一次用量**。若 `
 
 | 事項 | 決定 |
 |---|---|
-| 路徑／schema | `<tempdir>/autosdd_pace.json`／`autosdd.pace/1`（兩邊字面由判準逐字比對） |
+| 路徑／schema | `<tempdir>/autosdd_pace.json`／`autosdd.pace/1`（兩邊字面由判準逐字比對）。🔴 DEF-200-445 訂正（2026-10-01）：目錄＝與 `autosdd_quota.json` 同目錄、SSOT＝`quota_meter.cache_path()`（`AUTOSDD_QUOTA_CACHE_DIR` 或家目錄）；`<tempdir>` 為 R86 當時值，R105 讀端搬家後寫端未跟上即該缺陷 |
 | `measured_at` | 一律搬 `QuotaState.measured_at`＝**額度被量到**的時刻，**不是** `now` |
 | `cap` 映射 | `None`（不設限）⇒ `max_fanout`；halt ⇒ `0`。**不得寫 `None`** |
 | 失敗處理 | fail-soft：寫不進去只在 stderr 說一次，`--pace` 的 rc 與輸出都不變 |

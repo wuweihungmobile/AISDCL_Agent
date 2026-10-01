@@ -59,8 +59,20 @@ import quota_meter as M  # noqa: E402
 import quota_pace as W  # noqa: E402
 import quota_policy as Q  # noqa: E402
 import quota_stability as QS  # noqa: E402  # R102：併發上限死區/變化率/最小停留時間  round-label-ok
+import sentinel_lifecycle as SL  # noqa: E402  # DEF-200-446：模組級圍籬原語
 
 _MODULE_SRC = (_REPO / "tools" / "lib" / "quota_policy.py").read_text(encoding="utf-8")
+
+_MODULE_FENCES: list[dict] = []  # DEF-200-446：模組級圍籬 handle 堆疊（後進先出）
+
+
+def setUpModule() -> None:  # DEF-200-446：單模組直跑也不得碰真實 TEMP／快取目錄
+    _MODULE_FENCES.append(SL.fence_enter())
+
+
+def tearDownModule() -> None:
+    SL.fence_exit(_MODULE_FENCES.pop())
+
 
 #: 固定時刻（aware）。刻意不用 `datetime.now()`——判準不得隨掛鐘漂移。
 NOW = datetime(2026, 8, 9, 5, 15, 3, tzinfo=UTC)
@@ -1406,6 +1418,74 @@ class TestM8bCacheHomeStaysInSync(unittest.TestCase):
         self.assertEqual(found[_METER.name].group(1), found[_ADAPTER.name].group(1),
                          "CACHE_DIR_ENV 兩家字面不同步（DEF-200-225）："
                          f"{ {n: m.group(1) for n, m in found.items()} }")
+
+
+class TestPaceContractLivesBesideTheQuotaCache(unittest.TestCase):
+    """DEF-200-445：配速契約的寫入端寫 TEMP、引擎讀取端讀家目錄，分家一個多月沒人發現——
+    `TestR86…` 只比檔名與 schema 兩個字面，`TestM8b…` 只比 quota 快取本身。引擎以
+    `_path.with_name(...)` 衍生契約檔，所以**目錄**必須由同一個 SSOT（`quota_meter.cache_path()`）
+    決定；跨側的真寫入→真讀取 E2E 住 `AutoClaude/tests/test_r86_pace_contract.py`。"""
+
+    def setUp(self) -> None:
+        env = mock.patch.dict(os.environ)  # 本類改的環境變數不得外洩到同行程的其他測試
+        env.start()
+        self.addCleanup(env.stop)
+        os.environ.pop(M.CACHE_DIR_ENV, None)
+        self.tmp = Path(tempfile.mkdtemp(prefix="pc_beside_"))
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+
+    def test_the_cache_dir_override_moves_both_files_together(self) -> None:
+        """一個旋鈕要同時搬動兩個檔：任一側不認它，兩邊就不再碰面，而失敗表徵與成功相同。"""
+        os.environ[M.CACHE_DIR_ENV] = str(self.tmp)
+        self.assertEqual(PC.contract_path().parent, M.cache_path().parent)
+        self.assertEqual(PC.contract_path().parent, self.tmp)
+
+    def test_without_the_override_both_files_live_in_the_home_directory(self) -> None:
+        """預設落點＝家目錄（DEF-200-012：macOS 每個 launchd 服務的 `$TMPDIR` 各自獨立，
+        暫存目錄不能是跨行程共享契約的家）。"""
+        with mock.patch.object(Path, "home", return_value=self.tmp):
+            self.assertEqual(PC.contract_path().parent, M.cache_path().parent)
+            self.assertEqual(PC.contract_path().parent, self.tmp)
+
+    def test_the_writer_never_resolves_its_directory_from_the_temp_dir_again(self) -> None:
+        """DEF-200-445 的原症狀字面是 `gettempdir`。AST 判準只看程式碼、不看 docstring 與註解：
+        說明文字可以提它，呼叫不行。"""
+        tree = ast.parse((_REPO / "tools" / "lib" / "pace_contract.py").read_text(
+            encoding="utf-8"))
+        hits = [n.lineno for n in ast.walk(tree)
+                if (isinstance(n, ast.Attribute) and n.attr == "gettempdir")
+                or (isinstance(n, ast.Name) and n.id == "gettempdir")]
+        self.assertEqual(hits, [], f"pace_contract.py 的程式碼又在用 gettempdir（行 {hits}）")
+
+    def test_the_family_sibling_is_written_beside_the_canonical_file(self) -> None:
+        """DEF-200-437 的家族兄弟檔由 canonical 的檔名衍生——目錄一旦分家，兄弟檔跟著失蹤。
+        走預設路徑（不注入 `path=`）：兩份都必須落在 quota 快取目錄。"""
+        os.environ[M.CACHE_DIR_ENV] = str(self.tmp)
+        st = state(("session", 10, 30))
+        self.assertTrue(PC.write(Q.decide(st, NOW, P), st, P.max_fanout, P.halt_pct,
+                                 model="claude-fable-5-1"))
+        self.assertEqual(sorted(p.name for p in self.tmp.glob("autosdd_pace*.json")),
+                         ["autosdd_pace.json", "autosdd_pace_fable.json"])
+        self.assertEqual((self.tmp / "autosdd_pace_fable.json").read_text(encoding="utf-8"),
+                         (self.tmp / "autosdd_pace.json").read_text(encoding="utf-8"))
+
+    def test_a_cache_dir_that_does_not_exist_yet_is_created_by_the_first_write(self) -> None:
+        """目錄不再保證存在（修前走的 `gettempdir()` 必存在）：覆寫目錄指向尚未建立的子目錄時，
+        寫入端須與 `quota_meter.write_cache` 同語意先建；否則首次寫入只回 False、引擎走保守地板。"""
+        target = self.tmp / "not" / "yet"
+        os.environ[M.CACHE_DIR_ENV] = str(target)
+        st = state(("session", 10, 30))
+        self.assertTrue(PC.write(Q.decide(st, NOW, P), st, P.max_fanout, P.halt_pct))
+        self.assertTrue((target / PC.CONTRACT_NAME).is_file())
+
+    def test_an_unresolvable_home_makes_write_fail_soft_instead_of_raising(self) -> None:
+        """`Path.home()` 拋 RuntimeError（家目錄解析不出）時，`write()` 說一次、回 False，不拋。"""
+        st, err = state(("session", 10, 30)), io.StringIO()
+        with mock.patch.object(Path, "home", side_effect=RuntimeError("no home")), \
+                mock.patch.object(sys, "stderr", err):
+            ok = PC.write(Q.decide(st, NOW, P), st, P.max_fanout, P.halt_pct)
+        self.assertFalse(ok)
+        self.assertEqual(err.getvalue().count("⚠️"), 1, err.getvalue())
 
 
 # ═══════════════════════════════════════════════════════════════════════════

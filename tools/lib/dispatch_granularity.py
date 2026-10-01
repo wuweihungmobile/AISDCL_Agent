@@ -66,8 +66,8 @@ _PLACEHOLDER_MODULE = "unittest.loader"
 #: 設自己類別的 `cls.*` 屬性、不被其他類別讀取，其餘皆為模組層唯讀常數
 #: （import 期算好，測試執行期不再被寫入），細分安全。
 #: `test_context_budget_guard`（QA 2026-09-23 核實追加）：**有**
-#: `setUpModule`／`tearDownModule`，但只 pin／還原 `os.environ`（行程內狀態，
-#: 子行程天然隔離、per-subprocess 重跑成本可忽略）——見
+#: `setUpModule`／`tearDownModule`，但只 pin／還原 `os.environ`＋進出模組級圍籬（私有暫存
+#: 目錄，DEF-200-446；行程內狀態，子行程天然隔離、per-subprocess 重跑成本可忽略）——見
 #: `_MODULE_FIXTURE_SAFE_EXCEPTIONS` 的核實結論，本模組是目前唯一的例外。
 CLASS_LEVEL_DISPATCH_MODULES: frozenset[str] = frozenset({
     "test_doc_loc_baseline_freshness_r60",
@@ -84,10 +84,11 @@ CLASS_LEVEL_DISPATCH_MODULES: frozenset[str] = frozenset({
 #:
 #: `test_context_budget_guard`：`setUpModule`（`_pin_sentinel_off()`）／
 #: `tearDownModule` 只 pin／還原 `os.environ`（`AUTOSDD_SENTINEL_OFF` 與
-#: `quota_policy.ENV_SPEC` 全部鍵）＋註冊 `addModuleCleanup`，皆為行程內狀態，
-#: 無磁碟／全域資源副作用；細分後每個 class 級 subprocess 各自重跑一次的成本
-#: 可忽略（純 dict 讀寫，微秒等級，且每個 subprocess 本就需要自己一份 pin，
-#: 重跑不是浪費而是必要）。
+#: `quota_policy.ENV_SPEC` 全部鍵）＋註冊 `addModuleCleanup`，皆為行程內狀態；
+#: DEF-200-446 起另進出模組級圍籬（`fence_enter`／`fence_exit`：一個私有暫存目錄＋四個
+#: 環境變數，隨各自的 subprocess 建立與清除，不跨 subprocess 共享）。細分後每個 class 級
+#: subprocess 各自重跑一次的成本可忽略（dict 讀寫加一次 mkdir／rmtree，毫秒等級，且每個
+#: subprocess 本就需要自己一份 pin 與圍籬，重跑不是浪費而是必要）。
 _MODULE_FIXTURE_SAFE_EXCEPTIONS: frozenset[str] = frozenset({
     "test_context_budget_guard",
 })

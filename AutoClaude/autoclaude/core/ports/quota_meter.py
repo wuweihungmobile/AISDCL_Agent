@@ -9,7 +9,7 @@
 # 🔴 為什麼是 port 而不是直接 import 根層 tools/lib/quota_meter.py：
 #   AutoClaude 是可安裝套件，`tools/` 只是它此刻所在的 monorepo harness；pip install 之後
 #   那個模組根本不存在（ADR-XPLAT-004 §4：套件不得依賴 harness 內臟）。
-#   合規路徑＝**檔案契約**：adapter 只讀 %TEMP%/autosdd_quota.json。
+#   合規路徑＝**檔案契約**：adapter 只讀家目錄（或覆寫目錄）的 autosdd_quota.json（DEF-200-012）。
 #   這個方向現在真的有閘門了：.importlinter 的 no-harness-import contract（R82 ACQ-02）。
 #
 # 🔴 R82／C6 的**誠實劃界：這一軸「已設計、未接線」，缺的是刷新者不是讀者。**
@@ -185,7 +185,8 @@ NO_RESET = datetime.max.replace(tzinfo=UTC)
 # ⇒ 唯一合規的形狀＝**檔案契約**：根層算完把 `Decision` 寫成一份 JSON，引擎只讀、不算。
 #
 # 契約檔（照抄，勿重新發明；路徑與 schema 的另一個家在 harness 那一側）：
-#   路徑    <tempdir>/autosdd_pace.json（與既有 autosdd_quota.json 同目錄，見 adapter）
+#   路徑    與 autosdd_quota.json 同目錄＝adapter 的 `_path.with_name(...)`（DEF-200-012
+#           後＝`AUTOSDD_QUOTA_CACHE_DIR` 或家目錄；DEF-200-445 前寫入端錯寫在 tempdir）
 #   schema  必須等於 "autosdd.pace/1"
 #   cap             int ≥ 0        —— 現在能派幾個並發單位（0＝halt 帶；**沒有 null**）
 #   band            str            —— free／notice／converge／prepare／halt／unmeasured

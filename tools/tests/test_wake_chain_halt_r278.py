@@ -37,6 +37,7 @@ import quota_gate as qg  # noqa: E402
 import quota_messages  # noqa: E402
 import quota_policy  # noqa: E402
 import schedule_backend as sb  # noqa: E402
+import sentinel_lifecycle  # noqa: E402  # DEF-200-446：模組級圍籬原語
 
 import session_resume_planner as planner  # noqa: E402
 
@@ -54,6 +55,7 @@ os.environ[guard.SENTINEL_OFF_ENV] = "1"  # 本檔全程不准碰真排程器（
 #: `setUpModule` 進來之前 `ENV_SPEC` 各鍵（`SENTINEL_OFF_ENV` 除外）的值，只捕捉一次。
 _ENV_SPEC_ORIGINALS: dict[str, str | None] = {}
 _ENV_SPEC_CAPTURED = False
+_MODULE_FENCES: list[dict] = []  # DEF-200-446：模組級圍籬 handle 堆疊（後進先出）
 
 
 def _pin_env_spec_off() -> None:
@@ -85,6 +87,11 @@ def setUpModule() -> None:  # noqa: N802 — unittest 的固定名稱
         _ENV_SPEC_CAPTURED = True
     _pin_env_spec_off()
     unittest.addModuleCleanup(_unpin_env_spec_off)
+    _MODULE_FENCES.append(sentinel_lifecycle.fence_enter())  # DEF-200-446：直跑也不碰真實 TEMP
+
+
+def tearDownModule() -> None:
+    sentinel_lifecycle.fence_exit(_MODULE_FENCES.pop())
 
 
 def _decision(pct: float, resets_in: float | None) -> quota_policy.Decision:

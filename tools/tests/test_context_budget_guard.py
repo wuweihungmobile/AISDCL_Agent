@@ -85,7 +85,13 @@ def setUpModule() -> None:  # noqa: N802 — unittest 的固定名稱
         _SENTINEL_PIN_CAPTURED = True
     _pin_sentinel_off()
     unittest.addModuleCleanup(_unpin_sentinel_off)
+    _MODULE_FENCES.append(sentinel_lifecycle.fence_enter())  # DEF-200-446：直跑也不碰真實 TEMP
 
+
+#: DEF-200-446 模組級圍籬的 handle 堆疊：後進先出，因為巢狀 runner 會對本模組的 fixture 再跑
+#: 一輪。單一變數會被內層覆寫、外層 handle 失去最後一個參照，`TemporaryDirectory` 的 finalizer
+#: 便在模組中途把仍在使用的外層隔離根刪掉（實測 29 支測試的 `mkdtemp` 報 FileNotFoundError）。
+_MODULE_FENCES: list[dict] = []
 
 #: `setUpModule` 進來之前 `AUTOSDD_SENTINEL_OFF` 與 `ENV_SPEC` 其餘鍵的值（F-QA-01，只捕捉一次）。
 _SENTINEL_PIN_ORIGINAL: str | None = None
@@ -423,7 +429,7 @@ def _isolated_env(tmp: Path, *, real_scheduler: bool = False) -> dict[str, str]:
                  "CLAUDE_CODE_AUTO_COMPACT_WINDOW", "AUTOSDD_CONTEXT_GUARD_OFF",
                  "AUTOSDD_CONTEXT_SIGNAL_OFF", "AUTOSDD_TRACE_DIR",
                  "AUTOSDD_SENTINEL_OFF", "AUTOSDD_QUOTA_GUARD_OFF",
-                 "AUTOSDD_QUOTA_FANOUT_CAP", "AUTOSDD_HANDBACK_DIR",
+                 "AUTOSDD_QUOTA_FANOUT_CAP", "AUTOSDD_HANDBACK_DIR", "AUTOSDD_QUOTA_CACHE_DIR",
                  # D32：status line feed 目錄——不清掉的話，開發機上若真的裝了 status
                  # line，子行程會讀到真實 feed 檔而讓 window 判定的測試變得不確定。
                  "AUTOSDD_CONTEXT_FEED_DIR", "CLAUDE_CODE_SESSION_ID"):  # 後者：DEF-200-431
@@ -11480,7 +11486,7 @@ class QuotaGateIsWiredToTheBurnPathTest(unittest.TestCase):
                         "pace 契約沒帶 model ⇒ 家族兄弟檔沒寫（canonical 仍是 last-writer-wins）")
 
     def _pace_contract_to_tmp(self) -> None:
-        """`pace_contract.contract_path()` 走系統暫存（引擎讀的那份）——測試不得寫真的那個。"""
+        """`pace_contract.contract_path()` 走 quota 快取同目錄（引擎讀的那份）——測試不得寫真的。"""
         old = qg.pace_contract.contract_path
         qg.pace_contract.contract_path = lambda: self.tmp / "autosdd_pace.json"
         self.addCleanup(setattr, qg.pace_contract, "contract_path", old)
@@ -14124,6 +14130,7 @@ def tearDownModule() -> None:
     只累積、由 `atexit` 送出，而好幾個 in-process 呼叫 `qg.quota_gate()` 的類別會把訊息
     排進去卻不讀它。排掉而不是關掉：真正在斷言送達的那幾組自己會先 flush。
     """
+    sentinel_lifecycle.fence_exit(_MODULE_FENCES.pop())  # 與 setUpModule 的進入後進先出成對
     with contextlib.redirect_stdout(io.StringIO()):
         qg.flush_to_model()
 
