@@ -70,7 +70,9 @@
 ## 七、根層全套、push 與雲端驗收
 
 - **第三次根層全套（runner，最後一次寫入之後）**：`✅ unittest 數量下限釘選通過：發現 4892 個測試（下限 4876）`（R187 4891 → +1＝`test_block_destructive_git_r83.py` 的合成母體自證）；`[cpu_budget] root-unittest workers=9 source=cpu_budget`；`S=783.3s … slot 利用率=99.6%｜最長單位：test_dev_start 43.9s`；`[skip census] tools/tests@darwin 共 47 支：platform=47／…／untagged=0`；`[M6 id 集合] … ✅`；`✅ 真實 TEMP 圍籬：全套期間真實契約目錄（與 autosdd_quota.json 同目錄）下 autosdd_pace*.json 零變動（前 2／後 2 份；目錄 /Users/wuweihong）；隔離根已建立並清除。`；**`REAL_RC=0`**（本輪未結 38→37，淨減 ⇒ 淨額棘輪綠，不需 `AUTOSDD_NET_RATCHET_OFF`）。前兩次全套的早退與 2 紅見〈六〉。
-- **push 與雲端**：（push 後回填）
+- **第一次 push**（commit `22e513f5`）被 pre-push root-infra leg 擋下：兩個 ❌ 同一根因——`check_handoff_carriers.py` `❌ 交接項無機械承接載體：1 筆：…CrossPlatform_R188_SessionGate_Hook_Voice_Evidence.md:110 這一行把工作延後到未來輪（[承接輪次／承接者] R189），卻沒有帳本承接列（本行完全沒有 DEF-ID）` 與 `test_check_defect_log_crossref.TestDef200241GrandfatheringReadsLedgerClosureNotTheClock.test_the_real_repo_is_green_under_strict_with_closure_facts`（同一筆）；〈八〉三行補完整 DEF-ID 後 `check_handoff_carriers.py` ✅、crossref rc=0、`test_check_defect_log_crossref test_defect_id_reference_integrity` `Ran 279 tests … OK`，`git commit --amend` 為 `14255b17`。AutoClaude leg 第一次即 rc=0（workers=2，wall 128s）。
+- **第二次 push**：`[pre-push dispatcher] ✅ 本次 push 觸發的所有 leg 皆通過（rc=0）`（`[cpu_budget] parallel legs: root=9 autoclaude=2 sdd=0 wall=127s`）、`1fbbc64b..14255b17  main -> main`、PUSH_RC=0；`git rev-parse HEAD`＝`origin/main`＝`14255b17591c9fbd8b55defa615f1d78d3d4f2a4`；工作樹乾淨。
+- **雲端（`14255b17`，5 支觸發，背景輪詢至全部 completed）**：`AutoClaude CI` 36851412303 **success**、`shellcheck-ci` 36851412384 **success**、`root-infra-ci` 36851412305 **success**、`macos-compat-ci` 36851412336 **success**、`windows-compat-ci` 36851412308 **success**（`non_success 0`）。`aisdlc-sdd-ci` 未觸發（paths 白名單；SDD 樹零改動；缺席＝未驗證、非通過）。鏡 B 提醒：`windows-compat-ci` 的 AutoClaude 子集 `-k` 選不到 nightly 新測試，故 Windows 側 DEF-200-450 的憑證仍待 `windows-nightly-full` 或真機。本節為 push 後回填，以 docs commit 再 push 一次。
 
 ## 八、交棒／掌舵者側待辦
 
