@@ -85,7 +85,10 @@ Developer-C 三件合計：舊碼副本跑最終版測試 `Ran 108 tests … FAI
 
 ## 七、根層全套、push 與雲端驗收
 
-（push 後回填）
+- **根層全套**：收尾棒兩次（第一次 `REAL_RC=1` 恰 1 紅＝windowsapps 裸 python 註冊表、E7(a) 單引號形態造成；補註冊後第二次 `REAL_RC=0`，`發現 4960 個測試（下限 4876）`、workers=9、S=813.1s、slot 99.7%、skip 47 全 platform、M6 ✅、真實 TEMP 圍籬 ✅）`[他包回報]`；主控親讀 `root_full2.out` 逐字相符。commit 前主控親跑 `test_adr_xplat001_c1c2_lock test_doc_loc_baseline_freshness_r60 test_defect_id_reference_integrity test_check_defect_log_crossref` `Ran 752 tests in 128.223s` `OK`。
+- **第一次 push**（commit `4f64ab83`）被 pre-push root-infra leg 擋下，兩個 ❌ 同一根因（與 R188 同型）：`check_handoff_carriers.py` `❌ 交接項無機械承接載體：1 筆`＝`CrossPlatform_R189_SessionGate_Family_Lock_Audit_Evidence.md:942 這一行把工作延後到未來輪（[列 R…（backlog 指派）] R183），卻沒有帳本承接列（本行完全沒有 DEF-ID）`（〈九-F〉搬遷史料的到期義務那行；commit 前該檔尚未 tracked，判準②只掃 tracked 交接載體，故主控 commit 前的 rc=0 是假綠）與 `test_check_defect_log_crossref.TestDef200241GrandfatheringReadsLedgerClosureNotTheClock.test_the_real_repo_is_green_under_strict_with_closure_facts`（同一筆）。補承接列 DEF-200-207（ADR-XPLAT-013 治理面）於該行與〈八〉兩處後 `check_handoff_carriers.py` ✅、兩鎖模組 OK、crossref rc=0，`git commit --amend` 為 `5b0ac5c1`。
+- **第二次 push**：`[cpu_budget] parallel legs: root=9 autoclaude=0 sdd=2 wall=120s`、`[pre-push dispatcher] ✅ 本次 push 觸發的所有 leg 皆通過（rc=0）`、`9fb0a604..5b0ac5c1  main -> main`、PUSH_RC=0；`git rev-parse HEAD`＝`origin/main`＝`5b0ac5c1a0a3c98a22f008b718e3b81695f4302e`；工作樹乾淨。
+- **雲端（`5b0ac5c1`，5 支觸發：AutoClaude CI 36902409968、windows-compat-ci 36902409931、macos-compat-ci 36902410041、root-infra-ci 36902410059、aisdlc-sdd-ci 36902410114——本輪 SDD 樹有改動故 aisdlc-sdd-ci 亦觸發；shellcheck-ci 未觸發＝paths 白名單，缺席＝未驗證、非通過）**：背景輪詢 9 次（每 90s）至全部 completed：`root-infra-ci` **success**、`aisdlc-sdd-ci` **success**、`AutoClaude CI` **success**、`macos-compat-ci` **success**、`windows-compat-ci` **success**（non_success 0）。本節為 push 後回填，以 docs commit 再 push 一次。
 
 ## 八、交棒／掌舵者側待辦
 
