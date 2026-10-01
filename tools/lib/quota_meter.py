@@ -62,8 +62,6 @@ import os
 import subprocess
 import sys
 import time
-import urllib.error
-import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -619,6 +617,11 @@ def fetch_usage(token: str,
     """
     # 🔴 header 只帶這兩個是**實測**結論（Architect 的對照組）：`anthropic-beta` 與
     # claude-cli 的 User-Agent 都不是必要條件 ⇒ 不必偽裝成 CLI，少一個會隨版本漂移的耦合面。
+    # 🔴 延遲 import（DEF-200-448）：`urllib.request` 在 sys.platform=='darwin' 時模組層
+    # import macOS 專屬 `_scproxy`；本模組被 hook／圍籬廣泛 import，import 期必須平台中立
+    # （R67R3 假平台探針在 Linux／Windows 模擬 darwin 時實炸 ModuleNotFoundError）。
+    import urllib.error  # noqa: PLC0415 — 延遲 import，理由見上
+    import urllib.request  # noqa: PLC0415 — 延遲 import，理由見上
     req = urllib.request.Request(USAGE_URL, headers={
         "Authorization": f"Bearer {token}", "Content-Type": "application/json"})
     try:

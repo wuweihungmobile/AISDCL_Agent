@@ -9843,9 +9843,9 @@ class RateLimitIsAFloorNotAnUnknownTest(unittest.TestCase):
             raise urllib.error.HTTPError(meter.USAGE_URL, 429, "Too Many Requests",
                                          msg, None)
 
-        old = meter.urllib.request.urlopen
-        meter.urllib.request.urlopen = boom
-        self.addCleanup(setattr, meter.urllib.request, "urlopen", old)
+        old = urllib.request.urlopen  # DEF-200-448：quota_meter 內延遲 import，替身下在全域模組
+        urllib.request.urlopen = boom
+        self.addCleanup(setattr, urllib.request, "urlopen", old)
 
     def _decide_on(self, reading: dict | None, meter: object) -> object:
         """把 `measure_detail()` 的產物走完**真正的**下游（快取 → 判讀 → 決策）。"""
