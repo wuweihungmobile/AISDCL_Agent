@@ -226,6 +226,67 @@ fi
 # 補印解析結果，與 .ps1 側取證對稱（紀律 #14 延伸）。
 printf 'python 直譯器：%s [v%s]\n' "$PY" "$("$PY" -c 'import sys; print(sys.version.split()[0])' 2>/dev/null)"
 
+# 樹身分（DEF-200-450）：本輪「到底跑的是哪棵樹」必須寫進 RunId log。
+# WHY：2026-09-28～10-01 連續四晚 nightly 跑在舊樹 1118bc30 上（立案時落後 30 個 commit），
+# RunId log 逐字相同（「發現 4662 個測試（下限 4543）」）而無人察覺——log 沒有樹身分，
+# 「跑舊樹」與「跑 HEAD」的日誌無從區分，這份 log 對「HEAD 綠不綠」的驗收力為零。
+# Windows 側 run_local_nightly.ps1（DEF-101-887）早有 `git context:`／`SAMPLE VALIDITY:`
+# 兩行，本函式是 mac 側對等實作（欄位名逐字沿用，兩平台 log 可用同一條 grep）。
+# 🔴 只印 stdout（進 RunId log），**不碰心跳檔**：write_heartbeat 的行格式是三站點契約。
+# 🔴 全程唯讀、取樣失敗絕不中斷 nightly：GIT_OPTIONAL_LOCKS=0 讓 `git status` 連順手刷新
+# index 的寫入都不做（不與使用者同時進行的 git 操作搶 index.lock）；任何取值失敗一律印
+# unknown。指紋刻意含內容（status 狀態列 ＋ tracked 檔的 diff 全文）：只雜湊狀態列的話，
+# 「對已在清單內的檔再改一次」對它完全不可見（理由同 .ps1 的樣本效度戳記）。diff 取
+# plumbing `diff-index -p`、不用 porcelain `git diff HEAD`：後者實測即使帶
+# GIT_OPTIONAL_LOCKS=0 仍會為刷新 stat 資訊改寫 index（git 2.54 實測；兩者輸出逐位元相同）。
+# HEAD 年齡用 git 的 epoch 秒（%ct）配 `date +%s` 算，不碰 BSD/GNU 分歧的 `date -d`。
+TREE_STALE_HOURS=72  # HEAD 超過此小時數未更新 ⇒ 疑似本機沒 git pull（立案的四晚即此形態）
+_ro_git() { GIT_OPTIONAL_LOCKS=0 git -C "${ROOT}" "$@" 2>/dev/null; }
+_ro_val() {  # 唯讀取值：失敗或空輸出 ⇒ 印 unknown（取樣失敗不得讓腳本死掉）
+  if _g_out="$(_ro_git "$@")" && [ -n "${_g_out}" ]; then printf '%s' "${_g_out}"; else printf 'unknown'; fi
+}
+print_tree_identity() {
+  _ti_branch="$(_ro_val rev-parse --abbrev-ref HEAD)"
+  _ti_sha="$(_ro_val rev-parse --short HEAD)"
+  _ti_head="$(_ro_val log -1 --format='%cI %ct' HEAD)"  # "<ISO 時間> <epoch 秒>"；取不到則整串為 unknown
+  printf 'git context: branch=%s sha=%s head_date=%s origin_main=%s origin_main_date=%s behind_origin_main=%s（本機 ref，未 fetch，落後數可能低估）\n' \
+    "${_ti_branch}" "${_ti_sha}" "${_ti_head%% *}" \
+    "$(_ro_val rev-parse --short origin/main)" "$(_ro_val log -1 --format=%cI origin/main)" \
+    "$(_ro_val rev-list --count HEAD..origin/main)"
+  _ti_state="unknown"; _ti_dirty="-1"; _ti_fp="unknown"
+  if _ti_porcelain="$(_ro_git -c core.quotepath=false status --porcelain)"; then
+    _ti_dirty="$(printf '%s\n' "${_ti_porcelain}" | grep -c .)"
+    if [ -n "${_ti_porcelain}" ]; then _ti_state="dirty"; else _ti_state="clean"; fi
+    _ti_fp="$({ printf '%s\n' "${_ti_porcelain}"; _ro_git diff-index -p --no-ext-diff HEAD; } \
+      | "$PY" -c 'import hashlib,sys;'\
+' sys.stdout.write(hashlib.sha256(sys.stdin.buffer.read()).hexdigest()[:12])' 2>/dev/null)"
+    # 只認非空的十六進位：子行程往 stdout 印垃圾（橫幅／警告）時，單判空字串會照單全收。
+    # 用 write 不用 print：輸出不帶換行——Windows 原生 python.exe 會把 \n 譯成 \r\n，而 $(…) 只
+    # 剝 \n，CR 會黏進指紋。程式碼刻意維持「無換行、無引號」的單一 argv（兩段單引號以行尾反斜線
+    # 相接成同一個字），不引入 MSYS 傳參的新變數。
+    case "${_ti_fp}" in ''|*[!0123456789abcdef]*) _ti_fp="unknown" ;; esac
+  fi
+  printf 'SAMPLE VALIDITY: tree_state=%s dirty_entries=%s tree_fingerprint=%s head=%s\n' \
+    "${_ti_state}" "${_ti_dirty}" "${_ti_fp}" "${_ti_sha}"
+  case "${_ti_state}" in
+    clean) ;;
+    dirty) printf '⚠️ SAMPLE VALIDITY: 本輪在**非乾淨**工作樹上採集（%s 筆未提交變更）⇒ 本輪任何紅燈都可能是「量到半成品」而非真缺陷，任何綠燈也不代表 HEAD 為綠；判讀本輪 log 前先確認上列指紋對應的是誰的作業\n' "${_ti_dirty}" ;;
+    *) printf '⚠️ SAMPLE VALIDITY: 工作樹狀態取樣失敗——本輪樣本效度**未知**，不得當成乾淨\n' ;;
+  esac
+  _ti_ts="${_ti_head##* }"
+  case "${_ti_ts}" in
+    ''|*[!0-9]*) ;;  # 取不到 commit 時間（unknown）⇒ 不判陳舊；上面的 git context 行已把 unknown 攤開
+    *)
+      _ti_age_s=$(( $(date +%s) - _ti_ts ))
+      if [ "${_ti_age_s}" -gt $(( TREE_STALE_HOURS * 3600 )) ]; then
+        printf '⚠️ SAMPLE VALIDITY: HEAD 已 %s 小時未更新（%s）——本機可能尚未 git pull；本輪綠燈不代表 origin/main 綠\n' \
+          "$(( _ti_age_s / 3600 ))" "${_ti_head%% *}"
+      fi
+      ;;
+  esac
+}
+print_tree_identity
+
 PASS=0; FAIL=0; FAIL_NAMES=""
 
 run_stage() {  # $1=編號 $2=名稱 $3...=指令；失敗記名不中斷（逐 stage 收集，故不用 set -e）

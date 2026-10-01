@@ -559,6 +559,11 @@ _GOVERNANCE_DOCS = (
     # 寫端與引擎讀端目錄分家＋模組級圍籬家族鎖）的詳情面：同一資格，即刻登記。
     _REPO_ROOT / "docs" / "06_quality"
     / "CrossPlatform_R187_SessionGate_Mac_Verification_Evidence.md",
+    # 掌舵者五問 Mac 再驗證輪（第十次四方覆核；DEF-200-447 結案、449／450 新立即結；
+    # 三支 AutoClaude 提醒型 hook 改 rc=0 JSON 出聲＋結束碼鎖母體改 settings 導出＋
+    # nightly 樹身分）的詳情面：同一資格，即刻登記。
+    _REPO_ROOT / "docs" / "06_quality"
+    / "CrossPlatform_R188_SessionGate_Hook_Voice_Evidence.md",
     # 護欄層行數棘輪史料歸檔的第二冊（第一冊逼近 Read 工具上限，淨減法搬遷改落本檔）：即刻登記。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_Guard_Line_History_2.md",
 )

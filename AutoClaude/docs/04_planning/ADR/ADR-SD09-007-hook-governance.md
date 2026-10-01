@@ -21,7 +21,7 @@ W0 W1 W2 演進至今共設計 8 個 hook（4 active + 4 backlog），缺乏統�
 
 | Hook | 事件 | Script | 動作 | 單元測試 |
 |------|------|--------|------|---------|
-| 語言檢查 | Stop | `tools/hooks/check_lang.py` | 偵測 assistant 訊息含韓/日/簡體 → stderr warn（exit 1，不阻斷）| ≥ 3 case |
+| 語言檢查 | Stop | `tools/hooks/check_lang.py` | 偵測 assistant 訊息含韓/日/簡體 → systemMessage 警示（exit 0，不阻斷；DEF-200-447）| ≥ 3 case |
 | 文件路徑強制 | PreToolUse(Write) | `tools/hooks/enforce_docs_path.py` | `.md` 必須在 `docs/0[1-8]_*/` 或根層白名單；違規 exit 2 阻斷 | ≥ 3 case |
 | LOC 預算檢查 | PostToolUse(Edit\|Write) | `tools/hooks/loc_budget_check.py` | `.py` 超 tier budget → warn；CLAUDE.md > 400 行 → exit 2 阻斷 | ≥ 3 case |
 | Snapshot 新鮮度 | Stop | `tools/hooks/claude_md_freshness.py` | `snapshot_sync.py --check` drift → warn；CLAUDE.md > 400 行 → exit 2 | ≥ 3 case |

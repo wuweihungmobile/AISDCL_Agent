@@ -24,6 +24,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path, PureWindowsPath
 
 import pytest
@@ -541,3 +542,406 @@ def test_bug_injection_dedup_pattern_matching_heartbeat_file_is_caught(sh_conten
         " False——若仍為 True，代表該判斷式本身沒有鑑別力（純字面子字串比對"
         "抓不到這個退化，這正是本 case 存在的理由）"
     )
+
+
+# --- DEF-200-450：樹身分（`git context:`／`SAMPLE VALIDITY:`）-----------------------
+#
+# WHY：2026-09-28～10-01 連續四晚 nightly 跑在舊樹上（立案時落後 30 個 commit），RunId
+# log 逐字相同（「發現 4662 個測試（下限 4543）」）而無人察覺——log 沒有「跑的是哪棵
+# 樹」，跑舊樹與跑 HEAD 的日誌無從區分，驗收力為零。Windows 側 .ps1 早有這兩行
+# （DEF-101-887），本節鎖 .sh 的對等實作。心跳檔三站點契約一個位元組都不准動。
+
+_TREE_IDENTITY_LINE_SHAPES = (
+    "git context: branch=%s sha=%s head_date=%s origin_main=%s origin_main_date=%s "
+    "behind_origin_main=%s",
+    "SAMPLE VALIDITY: tree_state=%s dirty_entries=%s tree_fingerprint=%s head=%s",
+)
+# 兩平台共用的欄位名（.ps1 用 {0}／字串內插組行，故只比欄位名、不比整行）。
+_TREE_IDENTITY_FIELDS = (
+    "git context: branch=", " sha=", "tree_state=", "dirty_entries=",
+    "tree_fingerprint=", " head=",
+)
+_TREE_IDENTITY_TOKENS = ("SAMPLE VALIDITY", "git context", "tree_state", "print_tree_identity")
+
+
+def _function_body(code: str, name: str) -> str:
+    """抽出頂層 `name() {` 至行首 `}` 的函式本體；抽不到即 fail-loud（不回空字串）。"""
+    m = re.search(rf"^{re.escape(name)}\(\) \{{$.*?^\}}$", code, re.M | re.DOTALL)
+    assert m, f"找不到頂層函式 {name}()——抽取正則已與實作漂移"
+    return m.group(0)
+
+
+def _tree_identity_is_wired_in_place(code: str) -> bool:
+    """樹身分函式的定義與呼叫都在 `python 直譯器：` 之後、第一個 `run_stage 1` 之前。"""
+    banner = code.find("python 直譯器：")
+    definition = re.search(r"^print_tree_identity\(\) \{$", code, re.M)
+    call = re.search(r"^print_tree_identity$", code, re.M)
+    first_stage = re.search(r"^run_stage 1 ", code, re.M)
+    if banner < 0 or not (definition and call and first_stage):
+        return False
+    return banner < definition.start() < call.start() < first_stage.start()
+
+
+def _heartbeat_is_free_of_tree_identity(code: str) -> bool:
+    body = _function_body(code, "write_heartbeat")
+    return not any(token in body for token in _TREE_IDENTITY_TOKENS)
+
+
+def test_tree_identity_lines_exist_and_share_field_names_with_the_ps1(sh_content: str) -> None:
+    """.sh 必須印 `git context:`／`SAMPLE VALIDITY:` 兩行，欄位名與 .ps1 逐字相同。
+
+    沒有樹身分，四晚跑舊樹的日誌與跑 HEAD 的日誌逐字相同，驗收力為零（DEF-200-450）。
+    欄位名對稱是第二層意圖：兩平台 log 要能被同一條 grep／同一支解析器讀，任何一側改名
+    而另一側沒跟，下游就只剩一個平台看得見樹身分。
+    """
+    code = _code_only(sh_content)
+    for shape in _TREE_IDENTITY_LINE_SHAPES:
+        assert shape in code, f"nightly.sh 缺樹身分輸出行：{shape!r}"
+    for anchor in ("rev-parse --short HEAD", "status --porcelain", "diff-index -p --no-ext-diff"):
+        assert anchor in code, f"nightly.sh 缺樹身分取樣指令 {anchor!r}（指紋要含 diff 內容）"
+    ps1 = (_REPO_ROOT / "tools" / "run_local_nightly.ps1").read_text(encoding="utf-8")
+    for field in _TREE_IDENTITY_FIELDS:
+        assert field in ps1, f"run_local_nightly.ps1 沒有欄位 {field!r}——兩平台欄位名已分歧"
+        assert field in code, f"nightly.sh 沒有欄位 {field!r}——兩平台欄位名已分歧"
+
+
+def test_tree_identity_is_emitted_after_the_interpreter_banner_and_before_the_first_stage(
+    sh_content: str,
+) -> None:
+    """位置鎖：樹身分要在 `$PY` 釘死並印出之後（指紋用它算）、第一個 stage 之前。
+
+    放在 stage 之後，stage 1 一旦把整支腳本拖死或被 kill 就永遠印不出來——而「跑的是哪
+    棵樹」正是 stage 失敗時最需要的證據。
+    """
+    code = _code_only(sh_content)
+    assert _tree_identity_is_wired_in_place(code), (
+        "樹身分必須在 `python 直譯器：` 之後、第一個 `run_stage 1` 之前定義並呼叫"
+    )
+    # 真突變（驗證鏡子自身）：把呼叫移到所有 stage 之後，判準必須翻轉為 False。
+    mutated = re.sub(
+        r"^print_tree_identity$\n", "", code, count=1, flags=re.M
+    ) + "print_tree_identity\n"
+    assert mutated != code, "突變未生效——找不到獨占一行的 print_tree_identity 呼叫"
+    assert not _tree_identity_is_wired_in_place(mutated), (
+        "呼叫被移到 stage 之後，位置判準仍為 True——判準本身沒有鑑別力"
+    )
+
+
+def test_tree_identity_never_enters_the_heartbeat_function(sh_content: str) -> None:
+    """心跳三站點契約（dev_start.py／install_mac_nightly.sh／baseline_origin.py 皆以固定
+    行位置讀它）一個位元組都不准動：樹身分只進 RunId log，不得出現在 write_heartbeat。"""
+    code = _code_only(sh_content)
+    body = _function_body(code, "write_heartbeat")
+    # 對照組：抽到的確實是心跳本體（抽成空殼會讓下面的否定斷言恆真）。
+    assert "nightly_mac heartbeat（UTC）" in body and "nightly 彙總：PASS=" in body
+    assert _heartbeat_is_free_of_tree_identity(code), "樹身分漏進了心跳函式"
+    # 真突變：在心跳寫入群組裡塞一行樹身分，判準必須翻轉為 False。
+    mutated = code.replace(
+        "printf 'log=%s\\n'", "printf 'SAMPLE VALIDITY: x\\n'; printf 'log=%s\\n'", 1
+    )
+    assert mutated != code, "突變未生效——找不到心跳的 log= 指標行"
+    assert not _heartbeat_is_free_of_tree_identity(mutated), "漏入心跳的樹身分沒被判準抓到"
+
+
+# 功能面：把真的 .sh 放進一棵「真 git repo ＋ 假 .venv」的沙箱，實跑到 stage 失敗為止
+# （沙箱內 stage 腳本全不存在 ⇒ 四個 stage 立刻失敗、整趟不到兩秒），再讀 RunId log。
+# 不改用「把函式抽進探針腳本」：位置（直譯器橫幅之後、stage 之前）與 `exec` 改道後的
+# 落點正是要驗的東西，抽出來就驗不到了。
+
+@pytest.fixture
+def hermetic_git(
+    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    """切斷繼承來的 git 環境：hook 行程（pre-commit／pre-push 跑本檔時）會帶 GIT_DIR／
+    GIT_INDEX_FILE，使用者的 ~/.gitconfig 可能帶 gpgsign／hooksPath／templateDir——沙箱
+    repo 的 init／commit 不該被任何一個左右，更不該碰到真 repo 的索引。
+
+    `GIT_CONFIG_GLOBAL` 只管 config，管不到全域排除檔：git 還會讀
+    `$XDG_CONFIG_HOME/git/ignore`（未設則 `$HOME/.config/git/ignore`）。使用者在那裡忽略的
+    檔名（如 half_done.py）會讓沙箱裡的未追蹤檔憑空消失，髒樹測試因此假紅；所以 HOME 與
+    XDG_CONFIG_HOME 也要改指一個空的兄弟目錄（不能放在沙箱 repo 之內，否則它自己就成了
+    未追蹤條目）。"""
+    for key in [k for k in os.environ if k.startswith("GIT_")]:
+        monkeypatch.delenv(key)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    home = tmp_path_factory.mktemp("hermetic_home")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(home / ".config"))
+
+
+def _git(repo: Path, *args: str, env: dict[str, str] | None = None) -> str:
+    proc = subprocess.run(
+        ["git", "-C", str(repo), *args],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=60, env={**os.environ, **(env or {})},
+    )
+    assert proc.returncode == 0, f"git {args} rc={proc.returncode}: {proc.stderr}"
+    return proc.stdout
+
+
+def _tree_sandbox(
+    root: Path, *, age_days: int = 0, git_repo: bool = True, origin_ahead: bool = False
+) -> Path:
+    """`_sandbox_nightly` ＋ 假 `.venv/bin/python`（過 .venv 守門、轉呼叫本機直譯器）＋
+    已 commit 的 git repo（HEAD 往前撥 age_days 天；origin_ahead＝origin/main 領先一個
+    commit，樹內容相同故工作樹仍乾淨）。`.gitignore` 照真 repo 蓋掉 .venv／logs。"""
+    script = _sandbox_nightly(root)
+    py = root / ".venv" / "bin" / "python"
+    py.parent.mkdir(parents=True)
+    py.write_text(
+        f'#!/bin/sh\nexec "{Path(sys.executable).as_posix()}" "$@"\n',
+        encoding="utf-8", newline="\n",
+    )
+    py.chmod(0o755)
+    (root / ".gitignore").write_text(".venv/\nAutoClaude/logs/\n", encoding="utf-8", newline="\n")
+    if not git_repo:
+        return script
+    stamp = f"{int(time.time()) - age_days * 86400} +0000"
+    ident = {
+        "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_AUTHOR_DATE": stamp,
+        "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t", "GIT_COMMITTER_DATE": stamp,
+    }
+    _git(root, "init", "-q")
+    _git(root, "symbolic-ref", "HEAD", "refs/heads/main")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "seed", env=ident)
+    if origin_ahead:
+        child = _git(root, "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "ahead", env=ident)
+        _git(root, "update-ref", "refs/remotes/origin/main", child.strip())
+    return script
+
+
+def _nightly_log(root: Path) -> str:
+    logs = sorted((root / "AutoClaude" / "logs").glob("nightly_mac_2*.log"))
+    assert logs, "沙箱沒有產生 RunId log——腳本在寫 log 之前就死了"
+    return logs[0].read_text(encoding="utf-8", errors="replace")
+
+
+@_POSIX_ONLY
+@pytest.mark.usefixtures("hermetic_git")
+def test_tree_identity_names_the_real_head_and_how_far_behind_origin_it_is(
+    tmp_path: Path,
+) -> None:
+    """乾淨樹：log 裡印的 sha 必須就是這棵樹實際的 HEAD、落後數必須是真的落後數。
+
+    DEF-200-450 的失敗形態是「log 對跑的是哪個 commit 一個字也沒說」。這裡不只查欄位
+    存在，而是拿沙箱 repo 自己的 `rev-parse` 當對照：印出來的 sha 與 origin/main 的 sha
+    刻意不同，才分得出腳本印的是 HEAD 還是別的東西。
+    """
+    _run_sh(_tree_sandbox(tmp_path, origin_ahead=True))
+    log = _nightly_log(tmp_path)
+    head = _git(tmp_path, "rev-parse", "--short", "HEAD").strip()
+    origin = _git(tmp_path, "rev-parse", "--short", "origin/main").strip()
+    assert head != origin, "測試前提不成立：HEAD 與 origin/main 應是不同 commit"
+    iso = r"\d{4}-\d\d-\d\dT\S+"
+    assert re.search(
+        rf"^git context: branch=main sha={head} head_date={iso} origin_main={origin} "
+        rf"origin_main_date={iso} behind_origin_main=1（本機 ref",
+        log, re.M,
+    ), f"git context 行與沙箱 repo 的實況對不上：{log!r}"
+    assert re.search(
+        rf"^SAMPLE VALIDITY: tree_state=clean dirty_entries=0 "
+        rf"tree_fingerprint=[0-9a-f]{{12}} head={head}$",
+        log, re.M,
+    ), f"乾淨樹的樣本效度行不對：{log!r}"
+    assert "⚠️ SAMPLE VALIDITY" not in log, "乾淨且新鮮的樹不該出任何樣本效度警告"
+    marks = ("python 直譯器：", "git context:", "SAMPLE VALIDITY: tree_state=", "--- [1/4]")
+    positions = [log.index(m) for m in marks]
+    assert positions == sorted(positions), f"樹身分不在直譯器橫幅與第一個 stage 之間：{marks}"
+
+
+@_POSIX_ONLY
+@pytest.mark.usefixtures("hermetic_git")
+def test_dirty_tree_is_flagged_and_the_fingerprint_sees_content_not_just_status(
+    tmp_path: Path,
+) -> None:
+    """髒樹：標 dirty＋筆數＋警告；指紋含內容——同一支檔、同一個 ` M` 狀態列、只改內容，
+    指紋必須不同（只雜湊 status 的話，「對已在清單內的檔再改一次」完全不可見）。"""
+    def run(name: str, note: str, extra_untracked: bool = False) -> tuple[str, str]:
+        root = tmp_path / name
+        script = _tree_sandbox(root)
+        with (root / ".gitignore").open("a", encoding="utf-8", newline="\n") as fh:
+            fh.write(note)
+        if extra_untracked:
+            (root / "half_done.py").write_text("print('wip')\n", encoding="utf-8")
+        entries = 2 if extra_untracked else 1
+        _run_sh(script)
+        log = _nightly_log(root)
+        m = re.search(
+            rf"^SAMPLE VALIDITY: tree_state=dirty dirty_entries={entries} "
+            r"tree_fingerprint=([0-9a-f]{12}) head=",
+            log, re.M,
+        )
+        assert m, f"髒樹沒被標成 dirty/{entries}：{log!r}"
+        return m.group(1), log
+
+    fp_a1, log_a1 = run("a1", "# edit-A\n")
+    fp_a2, _ = run("a2", "# edit-A\n")
+    fp_b, _ = run("b", "# edit-B\n")
+    assert fp_a1 == fp_a2, "同一份髒樹內容，指紋必須可重現（否則 differ 斷言無意義）"
+    assert fp_a1 != fp_b, "只改內容、狀態列相同的兩棵髒樹指紋相同——指紋沒含 diff 內容"
+    assert "⚠️ SAMPLE VALIDITY: 本輪在**非乾淨**工作樹上採集（1 筆未提交變更）" in log_a1
+    # 還沒 `git add` 的新檔是最常見的半成品形態：未追蹤條目也必須計入筆數。
+    fp_c, log_c = run("c", "# edit-A\n", extra_untracked=True)
+    assert "（2 筆未提交變更）" in log_c, "未追蹤的新檔沒被計入 dirty_entries"
+    assert fp_c != fp_a1, "多了一個未追蹤檔，指紋卻沒變"
+
+
+@_POSIX_ONLY
+@pytest.mark.usefixtures("hermetic_git")
+@pytest.mark.parametrize(("age_days", "warns"), [(2, False), (4, True)])
+def test_stale_head_warning_fires_only_beyond_72_hours(
+    tmp_path: Path, age_days: int, warns: bool
+) -> None:
+    """HEAD 超過 72 小時未更新才警告：48 小時不得喊（否則每個週末都誤報）、96 小時必須
+    喊——後者正是 DEF-200-450 那四晚的訊號（本機沒 git pull，跑的一直是舊樹）。"""
+    _run_sh(_tree_sandbox(tmp_path, age_days=age_days))
+    log = _nightly_log(tmp_path)
+    m = re.search(r"^⚠️ SAMPLE VALIDITY: HEAD 已 (\d+) 小時未更新（(\S+)）", log, re.M)
+    if not warns:
+        assert m is None, f"{age_days} 天前的 HEAD 不該觸發陳舊警告：{m and m.group(0)}"
+        return
+    assert m, f"{age_days} 天前的 HEAD 必須觸發陳舊警告：{log!r}"
+    assert abs(int(m.group(1)) - age_days * 24) <= 1, f"小時數算錯：{m.group(0)}"
+    assert f"head_date={m.group(2)} " in log, "警告裡的日期必須就是 git context 印的 head_date"
+    assert "本機可能尚未 git pull" in log
+
+
+@_POSIX_ONLY
+@pytest.mark.usefixtures("hermetic_git")
+def test_tree_identity_degrades_to_unknown_outside_a_git_repo_without_aborting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """取樣失敗必須攤開成 unknown，且絕不拖垮 nightly：非 git 樹印 unknown＋樣本效度未知
+    警告，之後四個 stage 照跑完、彙總行照印、exit 1 仍反映 stage 失敗。"""
+    # 禁止 git 往上找到外層 repo（tmp_path 若恰好位於某個 repo 內，會讓本測試假紅）。
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path.resolve().parent))
+    proc = _run_sh(_tree_sandbox(tmp_path, git_repo=False))
+    log = _nightly_log(tmp_path)
+    assert (
+        "git context: branch=unknown sha=unknown head_date=unknown origin_main=unknown "
+        "origin_main_date=unknown behind_origin_main=unknown"
+    ) in log, f"非 git 樹的 git context 行應全為 unknown：{log!r}"
+    assert (
+        "SAMPLE VALIDITY: tree_state=unknown dirty_entries=-1 "
+        "tree_fingerprint=unknown head=unknown"
+    ) in log
+    assert "樣本效度**未知**，不得當成乾淨" in log
+    assert "小時未更新" not in log, "取不到 commit 時間不得憑空判陳舊"
+    assert "--- [4/4] sdd_ci_gate FAIL" in log, "樣本取失敗後，stage 必須照跑完"
+    assert "===== nightly 彙總：PASS=0 FAIL=4 =====" in log
+    assert proc.returncode == 1, f"stage 失敗的 exit 語意被取樣失敗改掉了：rc={proc.returncode}"
+
+
+def _stub_fingerprint_python(root: Path, on_hashlib: str) -> None:
+    """換掉沙箱的 `.venv/bin/python`：引數含 `hashlib`（＝指紋那一行）時改跑 `on_hashlib`
+    這段 sh，其餘呼叫照舊轉給本機直譯器。.venv 在 .gitignore 內，不影響樹狀態。"""
+    py = root / ".venv" / "bin" / "python"
+    py.write_text(
+        f'#!/bin/sh\ncase "$*" in\n  *hashlib*) {on_hashlib} ;;\nesac\n'
+        f'exec "{Path(sys.executable).as_posix()}" "$@"\n',
+        encoding="utf-8", newline="\n",
+    )
+
+
+@_POSIX_ONLY
+@pytest.mark.usefixtures("hermetic_git")
+@pytest.mark.parametrize(
+    "on_hashlib",
+    [
+        pytest.param("echo 'NOT-A-HASH garbage line'", id="garbage-on-stdout"),
+        pytest.param("exit 3", id="exits-nonzero-silently"),
+    ],
+)
+def test_a_fingerprint_that_is_not_a_hash_degrades_to_unknown_without_aborting(
+    tmp_path: Path, on_hashlib: str
+) -> None:
+    """指紋子行程印垃圾或直接失敗 ⇒ `tree_fingerprint=unknown`，四個 stage 照跑、exit 語意不變。
+
+    WHY：指紋是「這份 log 跑的是哪棵樹」的身分欄。舊版只判空字串，子行程往 stdout 印的任何
+    東西（sitecustomize 橫幅、警告、被包裝過的 python）都會被照單全收成「指紋」——垃圾值比
+    unknown 更糟：unknown 會被讀者當成「沒量到」，垃圾值卻會被當成一個合法但對不上任何一棵
+    樹的指紋，把「兩晚是不是同一棵樹」的比對帶歪。
+    """
+    script = _tree_sandbox(tmp_path)
+    _stub_fingerprint_python(tmp_path, on_hashlib)
+    proc = _run_sh(script)
+    log = _nightly_log(tmp_path)
+    assert re.search(
+        r"^SAMPLE VALIDITY: tree_state=clean dirty_entries=0 "
+        r"tree_fingerprint=unknown head=[0-9a-f]+$",
+        log, re.M,
+    ), f"垃圾指紋沒被降級成 unknown：{log!r}"
+    assert "NOT-A-HASH" not in log
+    assert "--- [4/4] sdd_ci_gate FAIL" in log, "指紋取樣失敗後，stage 必須照跑完"
+    assert "===== nightly 彙總：PASS=0 FAIL=4 =====" in log
+    assert proc.returncode == 1, f"stage 失敗的 exit 語意被取樣失敗改掉了：rc={proc.returncode}"
+
+
+# 把 stdout 開成 newline="\r\n" 的直譯器墊片：重現 Windows 原生 python.exe 的文字模式行為。
+# 🔴 這**不是**強制 stdio-UTF-8 的站點（不帶 encoding、只改 newline 翻譯），所以刻意把
+# `sys.stdout.buffer` 先取進區域變數再包：R75 的「stdio-UTF-8 唯一實作」shrink-only 棘輪
+# （tools/tests/test_platform_utils_dedup.py `_STDIO_FORCE_RE` b 判準）寬判
+# 「`TextIOWrapper(` 直接包 std 串流 `.buffer`」的字面，直寫會被算成第 24 處複本而紅；本墊片與該
+# 棘輪守的「第二套 UTF-8 強制實作」無關。
+_CRLF_STDOUT_SHIM = (
+    "import io, sys\n"
+    "_raw_stdout = sys.stdout.buffer\n"
+    'sys.stdout = io.TextIOWrapper(_raw_stdout, newline="\\r\\n", write_through=True)\n'
+    "exec(sys.argv[2])\n"  # argv = [本墊片, "-c", <原本要跑的程式碼>]
+)
+
+
+@_POSIX_ONLY
+@pytest.mark.usefixtures("hermetic_git")
+def test_the_fingerprint_survives_a_python_whose_stdout_turns_newlines_into_crlf(
+    tmp_path: Path,
+) -> None:
+    """Windows 原生 python.exe 的文字模式 stdout 會把 `\\n` 譯成 `\\r\\n`；bash 的 `$(…)` 只剝
+    `\\n`，CR 黏進指紋 ⇒ 被「只認十六進位」的判準當垃圾丟成 unknown，樹身分白白失去。
+
+    所以指紋那一行不得輸出換行（`print(..., end="")`）。mac／Linux 的直譯器不譯換行，這個
+    回歸只有 Windows 才看得到——這裡用墊片重現該行為，並以控制組證明替身確實會輸出 CRLF
+    （否則下面的斷言對任何實作都成立）。
+    """
+    script = _tree_sandbox(tmp_path)
+    shim = tmp_path / ".venv" / "crlf_stdout_shim.py"
+    shim.write_text(_CRLF_STDOUT_SHIM, encoding="utf-8", newline="\n")
+    exe = Path(sys.executable).as_posix()
+    _stub_fingerprint_python(tmp_path, f'exec "{exe}" "{shim.as_posix()}" "$@"')
+    control = subprocess.run(
+        [str(tmp_path / ".venv" / "bin" / "python"), "-c",
+         "import hashlib; print(hashlib.sha256(b'').hexdigest()[:12])"],
+        capture_output=True, timeout=30,
+    )
+    assert control.stdout.endswith(b"\r\n"), f"控制組失敗：替身沒輸出 CRLF：{control.stdout!r}"
+    _run_sh(script)
+    log = _nightly_log(tmp_path)
+    assert re.search(r"tree_fingerprint=[0-9a-f]{12} head=", log), (
+        f"指紋被換行弄壞（CR 黏進欄位）或被降成 unknown：{log!r}"
+    )
+    assert "\r" not in log, "log 裡不該出現 CR——指紋那一行不得輸出換行"
+
+
+@_POSIX_ONLY
+@pytest.mark.usefixtures("hermetic_git")
+def test_tree_identity_is_read_only_the_git_index_stays_byte_identical(tmp_path: Path) -> None:
+    """唯讀鎖：凌晨取樣不得與使用者同時進行的 git 操作搶 index.lock。
+
+    `git status` 在 stat 資訊過期時會順手改寫 index（要取 index.lock）；只有
+    GIT_OPTIONAL_LOCKS=0 才不會。構造：撥動一支 tracked 檔的 mtime（內容不變）⇒ stat-dirty。
+    控制組（腳本跑完後的一次裸 `git status`）證明這個構造確實會讓 index 被改寫，否則
+    「位元組相同」的斷言對任何實作都成立。
+    """
+    script = _tree_sandbox(tmp_path)
+    touched = tmp_path / ".gitignore"
+    st = touched.stat()
+    os.utime(touched, ns=(st.st_atime_ns, st.st_mtime_ns + 5_000_000_000))
+    index = tmp_path / ".git" / "index"
+    before = index.read_bytes()
+    _run_sh(script)
+    assert "SAMPLE VALIDITY: tree_state=clean" in _nightly_log(tmp_path), "前提：沙箱應已取樣"
+    assert index.read_bytes() == before, "樹身分取樣改寫了 git index——它不是唯讀的"
+    _git(tmp_path, "status", "--porcelain")
+    assert index.read_bytes() != before, "控制組失敗：裸 git status 沒改寫 index，構造無效"

@@ -127,7 +127,7 @@ tier／`ABSOLUTE_LIMIT`／`SPECIAL_FILES`／`_FROZEN_GUARD_LINES` 全部門檻**
 
 **§2.2 WHY**：回 0 會讓「語法錯誤」變成**零成本**，也就是「最省預算的手法是把檔弄壞」——那是本案要關的套利門的鏡像版本，失效方向比破線更糟。
 
-**§2.3** 呼叫端二擇一，兩條都會留下痕跡：①讓例外傳播（`build_reports()`／`root_tools_reports()` 走這條，逐檔迴圈 fail-loud）；②翻譯成一筆具名違規／WARN（PostToolUse hook `loc_budget_check.py` 走這條，rc=1 且印出理由——靜默 `return 0` 等於「剛寫壞的檔沒有任何訊號」）。
+**§2.3** 呼叫端二擇一，兩條都會留下痕跡：①讓例外傳播（`build_reports()`／`root_tools_reports()` 走這條，逐檔迴圈 fail-loud）；②翻譯成一筆具名違規／WARN（PostToolUse hook `loc_budget_check.py` 走這條，exit 0 且經 stdout JSON `additionalContext` 出聲——DEF-200-447：CC 只認 0／2，exit 1 會顯示成 hook error，而只改 `return 0` 則對 CC 靜默；靜默等於「剛寫壞的檔沒有任何訊號」）。
 
 **§2.4** 回歸鎖＝`test_count_loc_refuses_to_price_an_unparseable_file`。
 

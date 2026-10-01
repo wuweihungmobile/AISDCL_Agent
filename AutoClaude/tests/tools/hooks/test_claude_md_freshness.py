@@ -30,13 +30,16 @@ def _load_hook_module():
 
 
 def test_real_repo_freshness_ok():
-    """目前 repo 狀態：CLAUDE.md ≤ 400 + snapshot 同步 → exit 0。
+    """目前 repo 狀態：CLAUDE.md ≤ 400 → exit 0（snapshot 漂移也是 0，提醒走 stdout JSON）。
 
-    Note: 若 Architecture Snapshot 偶有漂移，會回 1（warn）；本測試容許 0 或 1，
-    但禁止 2（阻斷），因為阻斷代表 CLAUDE.md > 400 — 這違反 ADR-SD08-001。
+    WHY（DEF-200-447）：此前容許 `in (0, 1)`——1 在 CC 是 hook error，不是 warn。現在
+    只准 0；2（阻斷）代表 CLAUDE.md > 400，違反 ADR-SD08-001。stdout 若非空必為單一
+    JSON（兩份相接＝CC parse 失敗）。
     """
     result = _run()
-    assert result.returncode in (0, 1), f"rc={result.returncode}, stderr={result.stderr}"
+    assert result.returncode == 0, f"rc={result.returncode}, stderr={result.stderr}"
+    if result.stdout.strip():
+        assert isinstance(json.loads(result.stdout), dict), result.stdout
 
 
 def test_oversized_claude_md_blocks(tmp_path, monkeypatch):

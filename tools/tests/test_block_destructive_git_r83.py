@@ -2537,28 +2537,70 @@ def unmarked_off_contract_exit_sites(sources: dict[str, str]) -> list[str]:
     return problems
 
 
+def hook_script_population(root: Path) -> dict[str, str]:
+    """`root` 底下會被 Claude Code 載入的 hook 腳本 → `{repo 相對路徑: 原始碼}`（導出，不手列）。
+
+    ＝三份活躍 settings.json（`hook_wiring.discover_active_settings`＋`settings_targets`）註冊的
+    腳本 ∪ `.claude/hooks/*.py`。🔴 `settings_targets` 回的是**相對各 settings 專案根**
+    （`CLAUDE_PROJECT_DIR`＝settings 檔的上上層）的路徑：AutoClaude 回 `tools/hooks/x.py`，接到
+    repo 根會解到不存在的 `<根>/tools/hooks/`，若對缺檔 `continue`，母體會靜默縮水而鎖仍綠 ⇒
+    缺檔一律 fail-loud。只讀 JSON 與原始碼文字，不 import 任何 SDD 模組。"""
+    import hook_wiring  # noqa: PLC0415 — tools/lib 已在本檔 sys.path
+    paths = set((root / ".claude" / "hooks").glob("*.py"))
+    for rel_settings in hook_wiring.discover_active_settings(root):
+        settings_path = root / rel_settings
+        settings = json.loads(settings_path.read_text(encoding="utf-8-sig"))
+        for _event, target in hook_wiring.settings_targets(settings):
+            script = settings_path.parent.parent / target
+            if not script.is_file():
+                raise AssertionError(f"{rel_settings} 註冊了不存在的 {target}：母體會靜默縮水")
+            paths.add(script)
+    return {p.relative_to(root).as_posix(): p.read_text(encoding="utf-8") for p in sorted(paths)}
+
+
 class TestHookExitCodesAreZeroOrTwoExceptDegradedPayload(unittest.TestCase):
     """🔴 CC 的 hook 契約只認 0（放行）與 2（阻斷），其他碼一律顯示成 hook error（DEF-200-440：
-    提醒被誤用過兩次）。⇒ 只想提醒必須 rc=0＋`emit_to_model`；非 0／2 只留給**一種**真失效
-    （payload 讀不出來、守衛這次沒檢查），並要求同一行帶 `# degraded-payload: <理由>`。射程＝
-    `.claude/hooks/*.py`＋根層註冊的兩支橋接 hook（只在 AutoClaude session 跑的
-    `AutoClaude/tools/hooks/check_lang.py` 不在內，另案）。誠實劃界：看不到經變數的 rc（`rc =
-    3; return rc`）與 bool（`sys.exit(True)`）；標記語意靠複審。"""
+    提醒被誤用過兩次；DEF-200-447 在 AutoClaude 三支提醒型 hook 又找到六處）。⇒ 只想提醒必須
+    rc=0＋`emit_to_model`／`systemMessage`；非 0／2 只留給**一種**真失效（payload 讀不出來、
+    守衛這次沒檢查），並要求同一行帶 `# degraded-payload: <理由>`。射程＝三份活躍 settings.json
+    註冊的全部 hook 腳本 ∪ `.claude/hooks/*.py`（`hook_script_population` 導出，不手列：手列
+    白名單對 AutoClaude 三支結構性失明）。誠實劃界：看不到經變數／經呼叫的 rc（`rc = 3; return
+    rc`）與 bool（`sys.exit(True)`）；輔助函式的 `return 1` 不是出口 ⇒ 三支 `main()` 一律只回
+    字面量，行為由 `AutoClaude/tests/tools/hooks/test_def447_voice.py` 承重；標記語意靠複審。"""
 
-    _BRIDGES = ("AutoClaude/tools/hooks/check_ps1_encoding.py",
-                "AutoClaude/tools/hooks/check_sh_eol.py")
-
-    def _sources(self) -> dict[str, str]:
-        paths = sorted((_REPO_ROOT / ".claude" / "hooks").glob("*.py"))
-        paths += [_REPO_ROOT / rel for rel in self._BRIDGES]
-        return {p.relative_to(_REPO_ROOT).as_posix(): p.read_text(encoding="utf-8")
-                for p in paths}
+    _MUST_COVER = (
+        ".claude/hooks/block_destructive_git.py",
+        "AutoClaude/tools/hooks/check_lang.py",
+        "AutoClaude/tools/hooks/claude_md_freshness.py",
+        "AutoClaude/tools/hooks/loc_budget_check.py",
+        "AutoClaude/tools/hooks/check_ps1_encoding.py",
+        "AutoClaude/tools/hooks/check_sh_eol.py",
+    )
 
     def test_every_off_contract_exit_in_the_real_hooks_is_marked(self) -> None:
-        sources = self._sources()
-        for rel in (".claude/hooks/block_destructive_git.py", *self._BRIDGES):
+        sources = hook_script_population(_REPO_ROOT)
+        for rel in self._MUST_COVER:
             self.assertIn(rel, sources, "掃描面縮水 ⇒ 本鎖恆綠")
+        self.assertGreaterEqual(len(sources), 15, "母體塌縮 ⇒ 判準恆綠")
         self.assertEqual(unmarked_off_contract_exit_sites(sources), [])
+
+    def test_population_follows_each_settings_own_project_root_and_fails_loud(self) -> None:
+        """合成：子專案 settings 的相對路徑要接在**該 settings 的專案根**上；登記了缺檔就紅。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            hook = root / "SUB" / "tools" / "hooks" / "x.py"
+            hook.parent.mkdir(parents=True)
+            hook.write_text("import sys\nsys.exit(0)\n", encoding="utf-8")
+            launcher = "${CLAUDE_PROJECT_DIR}/../.claude/hooks/_hook_launcher.py"
+            entry = {"type": "command", "command": "py", "args": [launcher, "tools/hooks/x.py"]}
+            settings = root / "SUB" / ".claude" / "settings.json"
+            settings.parent.mkdir(parents=True)
+            settings.write_text(json.dumps({"hooks": {"Stop": [{"hooks": [entry]}]}}),
+                                encoding="utf-8")
+            self.assertEqual(set(hook_script_population(root)), {"SUB/tools/hooks/x.py"})
+            hook.unlink()
+            with self.assertRaises(AssertionError):
+                hook_script_population(root)
 
     def test_red_every_unmarked_off_contract_exit_shape_is_caught(self) -> None:
         """合成注入（缺陷本體）：0／2 以外的每一種結束碼寫法，沒標記就必須紅。"""

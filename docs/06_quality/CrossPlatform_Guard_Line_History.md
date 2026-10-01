@@ -3104,9 +3104,9 @@ WHY（測意圖非僅行為，Rule 9）：`tools/fsm_runtime/snapshot.py::save_a
 
 > 搬遷自 `tools/tests/test_adr_xplat001_c1c2_lock.py` 兩段純史料註解（2026-09-29 R184 收尾單人窗口，款(11) 主軌淨額抵銷；原文全文保全、知識零刪除，程式碼內各留一行指針；最新一次展延／兌現仍留在原檔常數上方）。
 
-### U9 舊尺技術債具名展延沿革（R121～R178）
+### U9 舊尺技術債具名展延沿革（R121～R183）
 
-原址：`_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND` 常數上方（ADR-XPLAT-013 §9.3／U9 立案三行與 R183 最新展延仍在原檔）。
+原址：`_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND` 常數上方（ADR-XPLAT-013 §9.3／U9 立案三行與 R188 最新展延仍在原檔；R183 條於 R188 展延覆寫原檔前搬入本節）。
 
 🔴 精準修復輪具名展延 121 → 127（判準出口②，**不得靜默沿用**故理由逐字寫在這裡）：
 本輪標的是帳本三筆缺陷結案，四支 `[ROOT-TOOLS]` 檔的真拆屬獨立重構持有面——依鐵律七，
@@ -3158,6 +3158,10 @@ v0.30 console 洩漏 audit 擴面收尾單人窗口，非 root-tools 重構持�
 🔴 R178 具名展延（鐵律七，不得靜默沿用）round-label-ok：Windows 切換啟動輪 DEF-200-402／403／404
 收尾單人窗口（chaos_runner 治理 yaml 寫回根治＋symlink 測試 Windows 缺口），非 root-tools
 重構持有面；真拆待獨立窗口，178 → 183（在 lookahead=5 內，已達上界）。
+🔴 R183 具名展延（鐵律七，不得靜默沿用）round-label-ok：掌舵者五問第五次四方覆核
+DEF-200-420／421／422 新立即結＋418 第一步收尾單人窗口（護欄層記帳＋Mac 交棒任務書），
+非 root-tools 重構持有面；真拆待獨立窗口，183 → 188（在 lookahead=5 內，已達上界）。
+`_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND = 188`
 
 ### 到期義務兌現沿革——R184 搬遷追加（R113～R182）
 

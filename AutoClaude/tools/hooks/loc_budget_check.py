@@ -5,8 +5,11 @@
 
 行為：
   - 非 .py / 非 CLAUDE.md → exit 0
-  - .py 檔超 tier budget → stderr warn（exit 1，不阻斷）
-  - .py 檔超絕對紅線 750 → stderr warn（exit 1）
+  - .py 檔超 tier budget／超絕對紅線 750／無法計價 → 提醒（exit 0，不阻斷）
+  - CLAUDE.md 進預警帶（≥ 上限-20 行）→ 提醒（exit 0，不阻斷）
+  - 提醒＝stderr 留底（exit 0 下只進 debug log）＋ stdout 單一 JSON `additionalContext`
+    （PostToolUse：進模型 context、不續跑）。DEF-200-447：CC 只認 0／2，exit 1 會被
+    顯示成 hook error；單純改 `return 0` 則提醒對 CC 完全靜默（ADR-XPLAT-013 §2.3）
   - CLAUDE.md > 400 行 → stderr error（exit 2，阻斷）
   - CLAUDE.md 單行 > 800 codepoint → stderr error（exit 2，阻斷；流程改善 #10a）
 
@@ -26,10 +29,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from hook_path_scope import (  # noqa: E402
     repo_relative_posix as _repo_relative_posix,  # type: ignore[import-not-found]
 )
+from platform_utils import emit_to_model, read_hook_payload  # noqa: E402,F401
 from platform_utils import (  # noqa: E402
     init_utf8_streams as _init_utf8_streams,  # type: ignore[import-not-found]
 )
-from platform_utils import read_hook_payload  # noqa: E402,F401
 
 # 對齊 tests/contract/test_claude_md_no_long_lines.py（MAX_LINE_CHARS=800，codepoint 計）
 MAX_CLAUDE_MD_LINE_CHARS = 800
@@ -46,6 +49,16 @@ try:
 except ImportError as exc:  # pragma: no cover — 安全 fallback
     print(f"[loc_budget_check] 無法 import check_loc_budget：{exc}", file=sys.stderr)
     sys.exit(0)
+
+
+#: 提醒型（severity 1）訊息；`main()` 以 `emit_to_model` 送出。提醒不是結束碼（DEF-200-447）。
+_ADVISORIES: list[str] = []
+
+
+def _advise(msg: str) -> None:
+    """stderr 留底（exit 0 下只進 debug log）＋收進清單，由 `main()` 送進模型 context。"""
+    print(msg, file=sys.stderr)
+    _ADVISORIES.append(msg)
 
 
 def normalize_rel_path(file_path: str) -> Path | None:
@@ -81,24 +94,19 @@ def check_python_file(rel: Path) -> int:
     try:
         loc = count_loc(abs_path)
     except UnparseableSourceError as exc:
-        print(
-            f"[loc_budget_check] WARN: '{rel.as_posix()}' 無法計價——{exc}",
-            file=sys.stderr,
-        )
+        _advise(f"[loc_budget_check] WARN: '{rel.as_posix()}' 無法計價——{exc}")
         return 1
     tier, budget = classify_file(rel)
     if loc > ABSOLUTE_LIMIT:
-        print(
+        _advise(
             f"[loc_budget_check] WARN: '{rel.as_posix()}' loc={loc} "
-            f"超絕對紅線 {ABSOLUTE_LIMIT}（ADR-SD07-001）。",
-            file=sys.stderr,
+            f"超絕對紅線 {ABSOLUTE_LIMIT}（ADR-SD07-001）。"
         )
         return 1
     if loc > budget:
-        print(
+        _advise(
             f"[loc_budget_check] WARN: '{rel.as_posix()}' loc={loc} "
-            f"超 tier '{tier}' budget {budget}（ADR-SD07-001）。",
-            file=sys.stderr,
+            f"超 tier '{tier}' budget {budget}（ADR-SD07-001）。"
         )
         return 1
     return 0
@@ -129,14 +137,13 @@ def check_special_file(rel: Path) -> int:
     warn_threshold = max_lines - 20
     if actual >= warn_threshold:
         remaining = max_lines - actual
-        print(
+        _advise(
             f"[loc_budget_check] WARN: '{rel_posix}' 行數 {actual} ≥ 預警閾值 {warn_threshold} "
             f"（紅線 {max_lines}；剩 {remaining} 行 buffer）。"
             f"請考慮下沉至 docs/05_development/sprint_history.md "
-            f"§1.x（W 期間骨架先行 SOP）或對應 docs/06_quality/。",
-            file=sys.stderr,
+            f"§1.x（W 期間骨架先行 SOP）或對應 docs/06_quality/。"
         )
-        # 預警不阻斷（rc=1 同 .py tier warn 語意）
+        # 預警不阻斷：severity 1（helper 內部值，絕不直接當結束碼，見 main()）
         return 1
     return 0
 
@@ -173,8 +180,8 @@ def check_claude_md_line_length(rel: Path) -> int:
     return 0
 
 
-def main() -> int:
-    payload = read_hook_payload()
+def _check(payload: dict) -> int:
+    """原 `main()` 本體：回 severity 0（OK）／1（提醒）／2（阻斷）。severity ≠ 結束碼。"""
     tool_input = payload.get("tool_input") or {}
     file_path = tool_input.get("file_path") or ""
     if not file_path:
@@ -200,6 +207,17 @@ def main() -> int:
         return check_python_file(rel)
 
     return rc
+
+
+def main() -> int:
+    payload = read_hook_payload()
+    rc = _check(payload)
+    if rc != 2 and _ADVISORIES:
+        # 提醒 ≠ 結束碼（DEF-200-447）：exit 0 下 stderr／純文字 stdout 只進 debug log（靜默），
+        # ADR-XPLAT-013 §2.3「不靜默」只能由 JSON 通道承接。事件名取 payload 原值（約束①）。
+        event = str(payload.get("hook_event_name") or "PostToolUse")
+        emit_to_model(event, "\n".join(_ADVISORIES))
+    return 2 if rc == 2 else 0
 
 
 if __name__ == "__main__":

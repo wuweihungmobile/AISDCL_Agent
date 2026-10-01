@@ -37,15 +37,17 @@ def _load_hook_module():
 
 
 def test_real_claude_md_under_limit():
-    """目前 repo 內的 CLAUDE.md（≤ 400 行）→ exit 0 或 1（≥ 380 預警）。
+    """目前 repo 內的 CLAUDE.md（≤ 400 行）→ exit 0（≥ 380 預警帶也是 0）。
 
-    SD_09 R18 後續新增 380 預警閾值（max_lines - 20），預警 rc=1 不阻斷。
+    SD_09 R18 後續新增 380 預警閾值（max_lines - 20）。WHY（DEF-200-447）：預警不是結束碼——
+    CC 只認 0／2，exit 1 會被顯示成 hook error；預警改走 stdout 單一 JSON `additionalContext`。
+    不斷言行數（會隨 CLAUDE.md 漂）：stdout 若非空，必為單一 JSON 且事件名回聲 payload 原值。
     """
     assert CLAUDE_MD.exists()
-    result = _run({"tool_input": {"file_path": str(CLAUDE_MD)}})
-    assert result.returncode in (0, 1), f"stderr={result.stderr}"
-    # 確保非阻斷（rc != 2）
-    assert result.returncode != 2, f"unexpected BLOCK: stderr={result.stderr}"
+    result = _run({"hook_event_name": "PostToolUse", "tool_input": {"file_path": str(CLAUDE_MD)}})
+    assert result.returncode == 0, f"rc={result.returncode} stderr={result.stderr}"
+    if result.stdout.strip():
+        assert json.loads(result.stdout)["hookSpecificOutput"]["hookEventName"] == "PostToolUse"
 
 
 def test_oversized_claude_md_blocks(tmp_path, monkeypatch):

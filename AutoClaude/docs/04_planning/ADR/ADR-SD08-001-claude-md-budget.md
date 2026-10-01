@@ -233,7 +233,7 @@ claude-md-budget:
 | 2 | per-H2 區段預算 + H3 sprint 段 ≤ 15 行（regex 自動覆蓋 `^### SD_Improving_\d+`） | `tests/contract/test_claude_md_section_budget.py` | CI |
 | 3 | 單行 ≤ 800 字元（擋「累積敘事 1 line」反模式） | `tests/contract/test_claude_md_no_long_lines.py` | CI |
 | 4 | SSOT 雙向連結驗證（Nightly Discipline + Sprint H3 對應 sprint_history.md §1.N） | `tests/contract/test_nightly_discipline_link.py` + `tests/contract/test_claude_md_sprint_anchor.py`（**新增 R22**） | CI |
-| 5 | 380 預警 + W 期間骨架自動產生 | `tools/hooks/loc_budget_check.py`（≥ 380 WARN rc=1）+ `tools/scaffold_sprint_section.py`（**新增 R22**，Sprint W0 第一步） | PostToolUse hook + 一次性 CLI |
+| 5 | 380 預警 + W 期間骨架自動產生 | `tools/hooks/loc_budget_check.py`（≥ 380 WARN；exit 0＋additionalContext，DEF-200-447）+ `tools/scaffold_sprint_section.py`（**新增 R22**，Sprint W0 第一步） | PostToolUse hook + 一次性 CLI |
 
 ### 9.3 SOP 與 onboarding
 
