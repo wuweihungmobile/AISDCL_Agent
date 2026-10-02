@@ -93,7 +93,9 @@
 
 ## 七、根層全套、push 與雲端驗收
 
-- 全套與重釘見〈六〉；commit／push／雲端 run 結論由 push 後的 docs 回填 commit 補上（本 commit 內不預寫宣稱）。
+- **一條龍（主控親跑）**：套用鏡 B 21 條訂正後，`AUTOSDD_NET_RATCHET_OFF=1` 單次 crossref rc=0、無逃生口 rc=1 且只剩 `淨額棘輪違反：本輪新增未結 4 筆 > 結案 0 筆 … 新增：DEF-200-463、DEF-200-464、DEF-200-465、DEF-200-466`；`check_handoff_carriers.py` rc=0；`archive_defect_log.py --check` rc=0；`--unresolved-count` `未結列數＝37／全部 167 列`；`git diff --check` rc=0；`sync_onboarding_baselines.py --check` rc=0、`--check-snapshot` rc=0；`check_loc_budget.py --json` rc=0；`ruff check tools/ .claude/hooks` `All checks passed!`；`test_doc_loc_baseline_freshness_r60` OK；`test_check_defect_log_crossref` 恰 2 紅（淨額）。`git add -A`（20 檔）→ `AUTOSDD_NET_RATCHET_OFF=1 git commit`（理由在訊息內）→ `[main 7931ced2] … 20 files changed, 714 insertions(+), 99 deletions(-)`、pre-commit `✅ 未觸發歸檔強制門檻`／`bash -n 語法檢查` 通過。
+- **push（背景阻塞）**：`[pre-push dispatcher] push 範圍含根層檔 → 執行 root-infra 閘門（快層守門 + 慢層 py_compile/unittest）` → `[pre-push dispatcher] ✅ 本次 push 觸發的所有 leg 皆通過（rc=0）` → `933f0b16..7931ced2  main -> main`、`PUSH_RC=0`；`git fetch` 後 `git rev-parse HEAD origin/main` 兩者皆 `7931ced219b048ff9638b60a5fb24467a15bfc59`；工作樹 0 行。pre-push 另印：`Windows 欄上次量測 2026-09-28（距今 5 天），此後 2/4 棵樹已變動 … 不計入本機 rc`。
+- **雲端（`7931ced219b048ff9638b60a5fb24467a15bfc59`；背景輪詢 14 次至全部 completed）**：AutoClaude CI 37040455443 **success**、windows-compat-ci 37040455441 **success**、root-infra-ci 37040455447 **success**、macos-compat-ci 37040455512 **success**（push 事件 4 支，non_success 0）；aisdlc-sdd-ci／shellcheck-ci 依 paths 白名單未觸發（缺席＝未驗證、非通過）。本節為 push 後回填，以 docs commit 再 push 一次（HEAD＝origin/main 以該次 push 回報為準）。
 
 ## 八、交棒／掌舵者側待辦
 
