@@ -1333,6 +1333,15 @@ class TestIronLaw6RcMaskedByPipeEndToEnd(unittest.TestCase):
             self.assertIn(needle, proc.stderr)
         self.assertNotIn("until ! pgrep", proc.stderr, "④ 單獨命中不該附等待機制指引")
 
+    def test_the_one_line_fix_leads_the_message(self) -> None:
+        """SA-01：正解曾埋在第三段。④ 單獨命中時 stderr 首行就是解法；混合命中仍以
+        總綱標頭開頭（兩邊的解法都在，見 `test_mixed_hits_keep_both_fixes`）。"""
+        first = run_hook(bash_payload(self._BAD)).stderr.splitlines()[0]
+        for needle in ("正解", "echo rc=$?", "DEF-200-086"):
+            self.assertIn(needle, first)
+        mixed = run_hook(bash_payload(f"nohup ./a.sh > log 2>&1 &\n{self._BAD}")).stderr
+        self.assertNotIn("正解", mixed.splitlines()[0])
+
     def test_the_powershell_tool_passes_the_same_string(self) -> None:
         proc = run_hook({"tool_name": "PowerShell", "tool_input": {"command": self._BAD}})
         self.assertEqual(proc.returncode, 0, proc.stderr)

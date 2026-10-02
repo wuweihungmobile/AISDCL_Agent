@@ -242,6 +242,33 @@ class Rc2ClarifyTest(unittest.TestCase):
         )
 
 
+class VerifyHintTest(unittest.TestCase):
+    """SA-01：簡報教兩條現查指令時一併教安全形態。新視窗 2/2 的首個工具呼叫寫
+    `--pace 2>&1 | head -40; echo "rc=$?"` 被鐵律六守衛（正確）擋下——缺的是行動點。"""
+
+    def test_each_platform_keeps_the_commands_and_teaches_the_safe_form(self) -> None:
+        for windows, must in ((False, ("導檔", "| head")), (True, ("`cd`", "Push-Location"))):
+            hint = sb.verify_hint(windows=windows)
+            for needle in ("--check", "--pace", "直接跑") + must:
+                self.assertIn(needle, hint, (windows, needle))
+
+    def test_no_variant_recommends_the_masked_pipe_form(self) -> None:
+        """反例鎖：被點名的壞形態只准出現在『別／不要』的語境，不得寫成可照抄的完整指令。"""
+        for windows in (False, True):
+            hint = sb.verify_hint(windows=windows)
+            self.assertTrue("別" in hint or "不要" in hint, hint)
+            self.assertNotRegex(hint, r"\|\s*(head|tail)\b[^`]*;\s*echo")
+
+    def test_the_brief_carries_the_platform_variant(self) -> None:
+        self.assertNotEqual(sb.verify_hint(windows=True), sb.verify_hint(windows=False))
+        for windows in (False, True):
+            with mock.patch.object(sb.platform_utils, "is_windows", return_value=windows):
+                got = sb.sessionstart_brief(
+                    {}, _cache_miss_gate(), None, None, None, None, now=_NOW,
+                    check_statusline=lambda: {"installed": True})
+            self.assertIn(sb.verify_hint(windows=windows), got)
+
+
 class ContextLineTest(unittest.TestCase):
     """象限：context〈有 usage〉／〈無 usage〉。四個依賴函式全部由呼叫端注入。"""
 
@@ -443,6 +470,30 @@ class StatuslineLineTest(unittest.TestCase):
         import inspect
         default = inspect.signature(sb.statusline_line).parameters["check_status"].default
         self.assertIs(default, sb._default_check_statusline)
+
+
+class StatuslineSystemMessageTest(unittest.TestCase):
+    """SA-02／Q4：簡報只進模型 context、人看不到——statusLine 沒裝好時另給人一句
+    （`systemMessage`）；裝好、查不到、compact（session 中途重注）一律 `None`，不每場吵。"""
+
+    def test_missing_or_mismatched_speaks_with_the_pasteable_command(self) -> None:
+        for report in ({"installed": False},
+                       {"installed": True, "matches_current_checkout": False}):
+            msg = sb.statusline_system_message({"source": "startup"}, lambda: report)
+            self.assertIn(sb._install_command(), msg or "")
+            self.assertIn("install_statusline.py", msg or "")
+
+    def test_installed_unreadable_and_compact_stay_silent(self) -> None:
+        def boom() -> dict:
+            raise OSError("合成：查不到")
+        for payload, check in (({}, lambda: {"installed": True}), ({}, boom),
+                               ({"source": "compact"}, lambda: {"installed": False})):
+            self.assertIsNone(sb.statusline_system_message(payload, check))
+
+    def test_windows_gets_the_powershell_form(self) -> None:
+        with mock.patch.object(sb.platform_utils, "is_windows", return_value=True):
+            msg = sb.statusline_system_message({}, lambda: {"installed": False})
+        self.assertIn(sb._install_command(windows=True), msg or "")
 
 
 class SddFsmLineTest(unittest.TestCase):

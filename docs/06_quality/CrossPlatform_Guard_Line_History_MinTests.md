@@ -35,3 +35,9 @@ DEF-200-359 兩支鎖；觸發＝runner 自檢「零相依沙箱的鑑別力餘�
 直接填入、零加減推算；成長來源＝掌舵者五問第四次覆核同輪的 DEF-200-413～417 回歸鎖（test_context_budget_guard.py
 halt 澄清句平台鎖四格＋黑框歸因四格＋flash_watch 報表三格、test_session_brief.py 不符分支兩格、
 test_install_statusline.py CLAUDE_CONFIG_DIR 五格）；觸發＝runner 自檢「零相依沙箱的鑑別力餘裕只剩 65／219 支（本層門檻 109）」。
+
+🔴 **（沿革補登，R191 收尾單人窗口追溯）**
+
+🔴 **重釘 4876 → 5046（方向＝收緊；2026-10-02，五問修復輪收尾單人窗口）：discovery 探針實測直接填入、零加減推算；成長來源＝DEF-200-197／198／199／203／455／456／457 回歸鎖（test_quota_policy.py／test_context_budget_guard.py／test_mac_endurance_r83.py／test_sentinel_tick_e2e_r145.py／test_block_destructive_git_r83.py／test_quota_reconcile_gap.py），runner 自檢「餘裕只剩 49／219」提示重釘。
+
+🔴 **重釘 4876 → 5046（方向＝收緊；2026-10-02，五問修復輪收尾單人窗口）：discovery 探針實測直接填入、零加減推算；成長來源＝DEF-200-197／198／199／203／455／456／457 回歸鎖（test_quota_policy.py／test_context_budget_guard.py／test_mac_endurance_r83.py／test_sentinel_tick_e2e_r145.py／test_block_destructive_git_r83.py／test_quota_reconcile_gap.py），runner 自檢「餘裕只剩 49／219」提示重釘。

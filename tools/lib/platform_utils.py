@@ -262,16 +262,23 @@ def read_hook_payload() -> dict:
 #     （鎖＝`tools/tests/test_context_budget_guard.py::SingleEmitterHasOneFlushSiteTest`）。
 #     選 `atexit` 而不是在 `main()` 裡 try/finally：`main()` 有六個 return 出口，且既有
 #     接線鎖以 AST 認 `main` 這個函式名（改名會打紅它）。
+#  ④ **`systemMessage` 是同一份 JSON 的第二條出口，不是第二份 JSON**（SA-02）：`additionalContext`
+#     只進模型 context、人看不到；要讓人看到只有頂層 `systemMessage`（`AutoClaude/tools/hooks/
+#     check_lang.py` 同款）。它與 `hookSpecificOutput` 並列在**同一份**裡 ⇒ 約束③不變，
+#     `atexit` 登記仍只此一處。
 _MODEL_MSGS: list[str] = []
+_USER_MSGS: list[str] = []  # 給人看（頂層 `systemMessage`）；與 `_MODEL_MSGS` 同進同出
 _MODEL_EVENT = ""
 
 
-def emit_to_model(event: str, msg: str) -> bool:
+def emit_to_model(event: str, msg: str, system_message: str | None = None) -> bool:
     """把 `msg` 排進「這個行程要送給模型的那一份 JSON」；回「有沒有被收下」。
 
     `event` 必須是 payload 的 `hook_event_name` 原值（見上方約束①）。第二次以後的呼叫
     **併入**同一份，事件名沿用第一次收下的那個——同一次 hook 呼叫裡兩軸的事件名必然相同，
     不同就是呼叫端傳錯了，而那時把後者丟掉比讓兩則一起消失安全。
+    `system_message` 非空白時另排進頂層 `systemMessage`（給人看，見約束④）；與 `msg` 同進同出
+    （`msg` 沒被收下它也不收），空白視同沒給 ⇒ 輸出逐位元組等於沒有這個參數時。
     任何輸入都不得拋例外（hook 崩潰會讓守衛的判定靜默消失，見上方 `read_payload` 的 P0）。
     """
     global _MODEL_EVENT
@@ -281,6 +288,8 @@ def emit_to_model(event: str, msg: str) -> bool:
         _MODEL_EVENT = event
         atexit.register(flush_to_model)
     _MODEL_MSGS.append(str(msg))
+    if isinstance(system_message, str) and system_message.strip():
+        _USER_MSGS.append(system_message.strip())
     return True
 
 
@@ -294,11 +303,13 @@ def flush_to_model() -> str:
         return ""
     body = "\n".join(_MODEL_MSGS)
     _MODEL_MSGS.clear()
+    doc: dict = {"hookSpecificOutput": {"hookEventName": _MODEL_EVENT,
+                                        "additionalContext": body}}
+    if _USER_MSGS:
+        doc["systemMessage"] = "\n".join(_USER_MSGS)
+        _USER_MSGS.clear()
     try:
-        sys.stdout.write(json.dumps(
-            {"hookSpecificOutput": {"hookEventName": _MODEL_EVENT,
-                                    "additionalContext": body}},
-            ensure_ascii=True) + "\n")
+        sys.stdout.write(json.dumps(doc, ensure_ascii=True) + "\n")
         sys.stdout.flush()
     except Exception:  # noqa: BLE001 — 見 docstring 最後一句
         return ""

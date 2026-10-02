@@ -163,6 +163,18 @@ mac 清掉的檔案與 Windows 一模一樣，而事故就發生在 macOS——�
   引號外的反斜線規則是 bash 語意，該引號被當跳脫 ⇒ 同行尾巴漏擋（修前命中）。代價：同一條指令
   若同時有失同步與合法的多行字串，後者內部會被第二視圖當成可執行結構（方向是誤擋、不是漏擋）。
   史料見本輪證據檔〈九〉。
+· **登記補遺**（SD-03／ARCH-02，不改判準）：皆為合成形態，真實語料〈5,264 條唯一指令〉
+  零實例，P3／P4。
+  · 漏擋：`${#…}` 的 `#` 被當註解吃掉同行尾巴。
+  · 漏擋：引號包住的光桿執行檔 `"git" stash`、`& 'git' stash`（同上「執行檔路徑被引號包住」一族）。
+  · 漏擋：載具 `iex`／`Invoke-Expression`、`cmd /c "…"`、`Start-Process`；`pwsh -Command`
+    只漏 operand 內再包 `iex`／`-EncodedCommand` 的形態（直形態兩工具皆擋，複審鏡實測）。
+  · 漏擋：`-c`／`eval` operand 內的 `nohup … &`（判準①看不到 operand 內部）。
+  · 漏擋：`-c` operand 的 `\\"` 跳脫與 `'"'"'` 拼接。
+  · 漏擋：`bash <<< 'git stash'`（here-string 的 word 被當資料遮掉）。
+  · 漏擋：`trap 'git stash' EXIT`（trap 內容在之後才執行）。
+  · 誤擋（P05）：PowerShell 反引號跳脫引號內獨立成段的 `git stash`，
+    例 `Write-Output "abc`"; git stash"`。
 """
 
 from __future__ import annotations
@@ -1276,6 +1288,12 @@ _WAITFORM_HEADER = (
     "進行」完全相同。**\n"
     "  本次命中：\n"
 )
+# SA-01：④ 單獨命中時首行就給解法——正解曾埋在第三段，新視窗被擋後要讀完才找得到出口。
+_RCPIPE_LEAD = (
+    "🔴 已擋下：`… | head`／`… | tail` 之後讀 `$?`，讀到的是 head／tail 的 rc。"
+    "正解：`cmd > /tmp/o.log 2>&1; echo rc=$?; tail -n 20 /tmp/o.log`"
+    "（輸出很短就直接跑，別接管線；鐵律六／`DEF-200-086`）\n"
+)
 _WAITFORM_FOOTER = (
     "\n"
     "  改用**有契約的**事件源（照鐵律六的 ✅ 那兩格）：\n"
@@ -1557,7 +1575,8 @@ def main() -> int:
                         + (_UNATTENDED_NOTE if unattended else _FOOTER))
         if wait_hits:
             rc_only = all(h.startswith(_RCPIPE_TAG) for h in wait_hits)
-            message += (_WAITFORM_HEADER + "".join(f"   · {h}\n" for h in wait_hits)
+            message += ((_RCPIPE_LEAD if rc_only else "") + _WAITFORM_HEADER
+                        + "".join(f"   · {h}\n" for h in wait_hits)
                         + (_WAITFORM_UNATTENDED_NOTE if unattended
                            else _RCPIPE_FOOTER if rc_only else _WAITFORM_FOOTER))
         sys.stderr.write(message)

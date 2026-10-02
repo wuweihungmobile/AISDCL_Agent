@@ -40,8 +40,9 @@ quota_gate／SDD runtime。
 
 回歸鎖：`tools/tests/test_session_brief.py`（額度×context 四象限＋G1 statusLine 三格＋
 feed reason 一格＋G2 stale-cache 兩格＋DEF-200-432 active_model 各格＋可貼安裝指令三格＋
-SDD FSM 行八格）；接線面：
+SDD FSM 行八格＋SA-01 查證指令安全形態三格＋SA-02 人看得到的 statusLine 一句三格）；接線面：
 `tools/tests/test_context_budget_guard.py::HandbackSessionStartAnnounceTest`、
+`::SessionStartTellsTheHumanTest`（SA-02 端到端：真 hook 的 stdout 多一個頂層 `systemMessage`）、
 `tools/tests/test_wake_chain_halt_r278.py` 的
 `RegisterSchtasksTimeIsObservedNotGuessedTest`（`schtasks_trigger`）與
 `CheckPrintsTheSddFsmLineTest`（`sdd_fsm_line`）。
@@ -68,15 +69,25 @@ except Exception:  # noqa: BLE001 — 見檔頭 fail-open 紀律；不可達就�
     platform_utils = None  # type: ignore[assignment]
 
 #: 查證指令，人／模型都看得到的兩條「現查」出口（根 CLAUDE.md〈現查指令速查表〉）。
-_VERIFY_HINT = ("查證指令：context 現查 `python tools/session_resume_planner.py --check`；"
-                "額度現查 `python tools/session_resume_planner.py --pace`。")
+_CHECK_PACE = ("context 現查 `python tools/session_resume_planner.py --check`；"
+               "額度現查 `python tools/session_resume_planner.py --pace`。")
+#: SA-01：兩條的輸出都很短，新視窗首個工具呼叫卻常寫 `… | head -40; echo "rc=$?"`，被鐵律六守衛
+#: （判準④，判斷正確）擋下——缺的是行動點，所以簡報一併教安全形態。Windows 版對應 `cd` 開場與管線
+#: 後讀 `$LASTEXITCODE`（`lint_powershell_command.py` 擋同形態），見 `verify_hint()`。
+_VERIFY_HINT = ("查證指令（輸出很短，直接跑；要 rc 先導檔再讀，"
+                "別在 `| head`／`| tail` 之後讀 rc）：" + _CHECK_PACE)
+_VERIFY_HINT_WINDOWS = (
+    "查證指令（輸出很短，直接跑；不要用 `cd` 開場（用絕對路徑或 `Push-Location …; …; "
+    "Pop-Location` 同呼叫成對）；要 rc 先存變數或導檔，別在管線之後讀 `$LASTEXITCODE`）："
+    + _CHECK_PACE)
 
 #: halt 帶反覆出現的 rc=2 紅字容易被誤讀成「全部工具被擋」（refute_q1q2.md §0 實測）；
 #: 這句話固定跟簡報一起送出，讓模型從第一時間就有正確的心智模型。POSIX 版原文；
 #: Windows 版見 `_RC2_CLARIFY_WINDOWS`（DEF-200-412：這句話在 Windows 上對模型是假話
 #: ——Bash 另由鐵律一 hook 停用，見 `rc2_clarify()` 的平台判準）。
 _RC2_CLARIFY = ("hook 的 rc=2 紅字只代表扇出型工具（Task／Agent／Workflow／WebFetch／"
-                "WebSearch）暫停；Read／Write／Edit／Bash／git 這類收斂型工具不受影響。")
+                "WebSearch）暫停；Read／Write／Edit／Bash／git 這類收斂型工具不受影響。"
+                "（壞寫法的 Bash 另由指令形態守衛擋下，stderr 附一行解法，照改重跑即可。）")
 
 #: DEF-200-412：Windows 上 `_RC2_CLARIFY` 那句「Bash…不受影響」對模型是假話——
 #: `block_bash_on_windows.py`（鐵律一）對 Bash 工具整支 exit 2。新視窗的模型先被
@@ -86,25 +97,32 @@ _RC2_CLARIFY_WINDOWS = (
     "hook 的 rc=2 紅字只代表扇出型工具（Task／Agent／Workflow／WebFetch／"
     "WebSearch）暫停；Read／Write／Edit／PowerShell／git 這類收斂型工具不受影響。"
     "（Windows：Bash 工具另由鐵律一 hook 停用，跑指令用 PowerShell 工具、"
-    "改檔用 Write／Edit，不要先試 Bash——那個阻斷不是「不能寫檔」）"
+    "改檔用 Write／Edit，不要先試 Bash——那個阻斷不是「不能寫檔」；"
+    "壞寫法的 PowerShell 指令會被 lint 擋下，訊息附出口，照改重跑即可）"
 )
 
 
-def rc2_clarify(windows: bool | None = None) -> str:
-    """rc=2 誤讀澄清句，平台感知版（DEF-200-412）。
-
-    `windows=None` 時以同目錄 SSOT `platform_utils.is_windows()` 現查——本檔不得
-    自己寫 `os.name`／`sys.platform` 分支（根 CLAUDE.md〈Windows 側單一載具原則〉
-    鐵律三）。import 失敗時一律 fail-open 回 POSIX 版（`_RC2_CLARIFY`），理由同
-    `harness_feed`：hook 行程不保證 `tools/lib` 以外的模組在 sys.path 上，簡報
-    失敗不得反過來擋 SessionStart。
-    """
+def _windows(windows: bool | None) -> bool:
+    """平台判準的單一入口：`None` 時以同目錄 SSOT `platform_utils.is_windows()` 現查——本檔
+    不得自己寫 `os.name`／`sys.platform` 分支（根 CLAUDE.md〈Windows 側單一載具原則〉鐵律三）。
+    import 失敗時一律 fail-open 回 POSIX（`False`），理由同 `harness_feed`：hook 行程不保證
+    `tools/lib` 以外的模組在 sys.path 上，簡報失敗不得反過來擋 SessionStart。"""
     if windows is None:
         try:
-            windows = bool(platform_utils.is_windows())
+            return bool(platform_utils.is_windows())
         except Exception:  # noqa: BLE001 — 見上：fail-open 回 POSIX 版
-            windows = False
-    return _RC2_CLARIFY_WINDOWS if windows else _RC2_CLARIFY
+            return False
+    return windows
+
+
+def rc2_clarify(windows: bool | None = None) -> str:
+    """rc=2 誤讀澄清句，平台感知版（DEF-200-412）；平台判準見 `_windows()`。"""
+    return _RC2_CLARIFY_WINDOWS if _windows(windows) else _RC2_CLARIFY
+
+
+def verify_hint(windows: bool | None = None) -> str:
+    """查證指令＋安全形態，平台感知版（SA-01；模式同 `rc2_clarify()`）。"""
+    return _VERIFY_HINT_WINDOWS if _windows(windows) else _VERIFY_HINT
 
 
 _NO_MEASURE = "本 session 尚無量測（新視窗，尚未有 assistant usage 記錄）"
@@ -270,6 +288,12 @@ def _install_command(root: Path | None = None, windows: bool | None = None) -> s
         return _STATUSLINE_INSTALL_HINT
 
 
+def _statusline_flags(report: dict) -> tuple[bool, bool]:
+    """`(installed, matches_current_checkout)`；DEF-200-414：`matches` 鍵缺席時預設 `True`。
+    給模型的 `statusline_line()` 與給人的 `statusline_system_message()` 共用這一個判準。"""
+    return bool(report.get("installed")), bool(report.get("matches_current_checkout", True))
+
+
 def statusline_line(check_status: Callable[[], dict] = _default_check_statusline) -> str:
     """G1：statusLine 安裝狀態那一行——重用 `tools/install_statusline.py::status()`
     既有的查現況邏輯，不重寫判準。`check_status` 由呼叫端／測試注入覆寫（預設值即
@@ -280,9 +304,7 @@ def statusline_line(check_status: Callable[[], dict] = _default_check_statusline
     其他工具改寫都會這樣）另回第三種句子，不得誤報成「已安裝」。
     """
     try:
-        report = check_status()
-        installed = bool(report.get("installed"))
-        matches = bool(report.get("matches_current_checkout", True))
+        installed, matches = _statusline_flags(check_status())
     except Exception as exc:  # noqa: BLE001 — 見上
         return f"statusLine：查不到（{exc}）"
     if not installed:
@@ -295,6 +317,25 @@ def statusline_line(check_status: Callable[[], dict] = _default_check_statusline
             f"重裝，貼上即可：{_install_command()}）"
         )
     return "statusLine：已安裝"
+
+
+def statusline_system_message(
+        payload: dict, check_status: Callable[[], dict] = _default_check_statusline) -> str | None:
+    """SA-02／Q4：statusLine 沒裝好時給**人**看的一句（`systemMessage`）。簡報只進模型 context
+    （`additionalContext`）、人看不到——Windows 11 沒有 `ctx NN% …` 那行時，人無從知道原因。
+    未安裝、或已安裝但與本 checkout 不符 ⇒ 一句＋可貼安裝指令（同簡報的 `_install_command()`）；
+    已裝好、查不到、`compact`（session 中途重注，人早看過）⇒ `None`——寧可少說，不每場吵。
+    任何例外一律 `None`（fail-open：這句話壞了不得連累簡報本體）。"""
+    try:
+        if payload.get("source") == "compact":
+            return None
+        installed, matches = _statusline_flags(check_status())
+    except Exception:  # noqa: BLE001 — 見檔頭 fail-open 紀律
+        return None
+    if installed and matches:
+        return None
+    return ("ℹ️ 畫面最下方沒有 `ctx NN% …` 狀態列（statusLine 未安裝或與本 checkout 不符）。"
+            f"貼上即安裝：{_install_command()}")
 
 
 _FSM_STATE_RE = re.compile(
@@ -432,4 +473,4 @@ def sessionstart_brief(
         statusline = statusline_line(check_statusline)
     return (f"[SDD-CTX-GUARD] 本 session 啟動時真實水位——context：{ctx}；額度：{quota}；"
            f"{statusline}。"
-           f"{_VERIFY_HINT}{rc2_clarify()}")
+           f"{verify_hint()}{rc2_clarify()}")

@@ -72,7 +72,7 @@ except Exception:  # noqa: BLE001 — 共用層不可達＝退化，不是崩潰
     def read_payload() -> dict | None:  # type: ignore[misc]
         return None
 
-    def emit_to_model(event: str, msg: str) -> bool:  # type: ignore[misc]
+    def emit_to_model(event: str, msg: str, *_: object) -> bool:  # type: ignore[misc]
         return False  # 送不進模型 ⇒ 只剩 stderr 那一半
 
     def claude_home() -> Path:  # type: ignore[misc]
@@ -986,7 +986,8 @@ def main() -> int:
             if session_brief is not None and quota_gate is not None:  # R158／P6 round-label-ok
                 emit_to_model(event, session_brief.sessionstart_brief(
                     payload, quota_gate, scan_transcript, resolve_window,
-                    window_evidence, read_context_feed, guard=sys.modules[__name__]))
+                    window_evidence, read_context_feed, guard=sys.modules[__name__]),
+                    session_brief.statusline_system_message(payload))
             return 0
         blocking = event == "PreToolUse"
         # 🔴 R83：額度軸只在真的推理過的這兩個事件上動作（白名單，不是「不是 PreToolUse

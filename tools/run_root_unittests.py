@@ -55,7 +55,7 @@ _TESTS_DIR = Path(__file__).resolve().parent / "tests"
 # 下限釘選：低於此數＝測試大規模靜默消失（目錄/pattern/路徑壞掉），紅燈。
 # 刻意刪減測試時同步下修；新增測試累積到吃掉**零相依鑑別力餘裕**的一半即被提醒重釘、
 # 吃掉四分之三即讓閘門變紅（判準＝`tools/lib/min_tests_margin.py`，見下方 DEF-200-170 段）。
-MIN_TESTS = 5046  # 🔴 重釘 4876 → 5046（方向＝收緊；2026-10-02，五問修復輪收尾單人窗口）：discovery 探針實測直接填入、零加減推算；成長來源＝DEF-200-197／198／199／203／455／456／457 回歸鎖（test_quota_policy.py／test_context_budget_guard.py／test_mac_endurance_r83.py／test_sentinel_tick_e2e_r145.py／test_block_destructive_git_r83.py／test_quota_reconcile_gap.py），runner 自檢「餘裕只剩 49／219」提示重釘。歷來完整逐輪沿革（含每次重釘理由）已搬至 docs/06_quality/CrossPlatform_Guard_Line_History_MinTests.md，本行不再原地累加。
+MIN_TESTS = 5058  # 🔴 重釘 5046 → 5058（方向＝收緊；2026-10-03，五問驗證輪收尾單人窗口）：discovery 探針實測直接填入、零加減推算；成長來源＝DEF-200-460／461／462 回歸鎖（test_mac_endurance_r83.py／test_session_brief.py／test_block_destructive_git_r83.py／test_context_budget_guard.py）。歷來完整逐輪沿革（含每次重釘理由）已搬至 docs/06_quality/CrossPlatform_Guard_Line_History_MinTests.md，本行不再原地累加。
 
 # R57「人工 ratchet 自己會腐化」（R15 釘完連續 11 輪沒人重釘）的兩層解：① WARN 只印不擋、
 # ② 保鮮期斷言會紅，且兩層門檻刻意不同，否則 WARN 一響閘門已紅、①毫無意義。立意成立，

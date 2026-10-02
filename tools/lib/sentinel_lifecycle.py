@@ -199,8 +199,13 @@ def armed_but_missing(task: str, jobs: list[str] | None) -> bool:
     return jobs is not None and task not in jobs
 
 
-def plan_state(plan: Path) -> str | None:
-    """任務書狀態塊裡的 `state`；讀不出來回 `None`（＝「量不到」，不是「終態」）。
+def plan_evidence(plan: Path) -> tuple[str, str | None]:
+    """任務書狀態塊裡的 `(transcript, state)`；讀不出來回 `("", None)`（＝「量不到」非「終態」）。
+
+    🔴 ARCH-01（DEF-200-455 同根）：`transcript` 是哨兵武裝時寫進狀態塊、**它自己盯的**
+    逐字稿絕對路徑（planner 的 `_sentinel_tick`／`_run_resume` 讀的也是這一格）＝GC 的**所有權
+    證明**。GC 的目標（launchd／schtasks 工作）是 per-user 全域的，證據就必須和目標一樣全域；
+    呼叫者 HOME 下的專案目錄只是本地證據，拿它判別人的哨兵＝隔離 HOME 下全機活哨兵被 bootout。
 
     解析走 planner 的 `parse_relay`（**唯一的家**，本檔不抄第二份格式知識）。
     lazy import：planner 會把 `.claude/hooks` 接進 `sys.path` 並 import 整條 hook 鏈，
@@ -208,12 +213,19 @@ def plan_state(plan: Path) -> str | None:
     """
     planner = _planner_module()
     if planner is None:
-        return None
+        return "", None
     try:
-        state = planner.parse_relay(plan.read_text(encoding="utf-8"))
+        relay = planner.parse_relay(plan.read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001 — 讀不到就當「量不到」，判準那一側自己會保守處理
-        return None
-    return str(state.get("state")) if isinstance(state, dict) else None
+        return "", None
+    if not isinstance(relay, dict):
+        return "", None
+    return str(relay.get("transcript") or ""), str(relay.get("state"))
+
+
+def plan_state(plan: Path) -> str | None:
+    """任務書狀態塊裡的 `state`；讀不出來回 `None`（＝「量不到」，不是「終態」）。"""
+    return plan_evidence(plan)[1]
 
 
 def reap_verdict(*, transcript_exists: bool | None, idle_seconds: float | None,
@@ -224,8 +236,11 @@ def reap_verdict(*, transcript_exists: bool | None, idle_seconds: float | None,
     順序即優先序，**最保守的先判**：
       ① 受保護（呼叫端指名 or 它是最近仍在寫的那一支）⇒ 絕不收。這一條擋在最前面，
          是因為誤收一支活著的哨兵＝把那個 session 的續航靜默弄丟，而弄丟是看不見的。
-      ② `transcript_exists is None`（＝**量不到**：逐字稿目錄根本定位不到）⇒ 絕不收。
-      ③ 逐字稿不存在 ⇒ 收（session 連檔都沒了，哨兵醒來也只會 fail-loud 空轉）。
+      ② `transcript_exists is None`（＝**量不到**：這支哨兵任務書記的逐字稿路徑取不到——任務書
+         缺席／解析不出／沒有該欄／非絕對路徑）⇒ 絕不收。
+      ③ 逐字稿（任務書記的那個絕對路徑）不存在 ⇒ 收（session 連檔都沒了，哨兵醒來也只會 fail-loud
+         空轉）；**但**任務書狀態在 `REAPABLE_WHEN_IDLE` 之外（如 `waiting`）仍不收——與 ⑥ 同理，
+         等額度期間不拆（ARCH-01 補的一道）。
       ④ 還在寫（閒置未達門檻）⇒ 不收。
       ⑤ 閒置達門檻 **且** 任務書是終態／根本讀不出來 ⇒ 收。
       ⑥ 其餘（閒置達門檻但狀態是 `waiting`／`sentinel`）⇒ **不收**：等額度的那段期間
@@ -241,10 +256,12 @@ def reap_verdict(*, transcript_exists: bool | None, idle_seconds: float | None,
     if protected:
         return False, "protected（指名保留或逐字稿仍在寫）"
     if transcript_exists is None:
-        return False, ("逐字稿目錄定位不到 ⇒ **量不到 ≠ 不存在**，一律拒絕回收"
-                       "（請先確認 tools/session_resume_planner.py 可 import）")
+        return False, ("取不到這支哨兵任務書記的逐字稿路徑 ⇒ **量不到 ≠ 不存在**，一律拒絕回收"
+                       "（任務書缺席／解析不出／沒有該欄，或 planner 載不進來）")
     if not transcript_exists:
-        return True, "逐字稿不存在"
+        if state is None or state in REAPABLE_WHEN_IDLE:
+            return True, "逐字稿不存在"
+        return False, f"逐字稿不存在，但任務書狀態是 `{state}` ⇒ 可能還在等額度，不收"
     if idle_seconds is None or idle_seconds < min_idle:
         idle = "unknown" if idle_seconds is None else f"{idle_seconds / 3600:.1f}h"
         return False, f"逐字稿仍活躍（閒置 {idle} < {min_idle / 3600:.0f}h）"
@@ -272,7 +289,8 @@ def _planner_module():
 
 
 def _transcript_dir() -> Path | None:
-    """逐字稿目錄；`None`＝**定位不到**（不是「裡面沒有東西」，見 `reap_verdict` ②）。"""
+    """逐字稿目錄；`None`＝**定位不到**。現只供 `_newest_session()` 保護用；
+    判決證據改走 `plan_evidence()`（哨兵自己任務書記的絕對路徑），不再以本目錄判孤兒。"""
     planner = _planner_module()
     if planner is None:
         return None
@@ -376,26 +394,33 @@ def gc(*, apply: bool = False, keep: tuple[str, ...] = (),
     塌成同一個 `[]`，於是 `main()` 印出「沒有任何工作」並 rc=0 ⇒ **假陰性被回報成成功**。
     這一格與 `reap_verdict` ② 是同一條紀律，只是那一支守的是「哪一支可以收」、
     這一支守的是「有沒有東西可收」——兩個問題各自都會把「量不到」讀成「量到零」。
+
+    🔴 證據來源（ARCH-01，DEF-200-455 同根）：每支哨兵的存在／閒置／狀態**只**取自它自己任務書
+    （`<tmp>/autosdd_resume_plan_<sid>.md`）狀態塊記的逐字稿絕對路徑（`plan_evidence`）；呼叫者
+    的專案目錄（`_transcript_dir()`）只用來找「最近仍在寫的那一支」（`_newest_session` 保護），
+    **不**用來判別人的哨兵。任務書缺席／解析不出／沒有該欄 ⇒ 量不到 ⇒ 不收；這不會留下殭屍，
+    （前提＝該 job 自己醒得來；job 醒不來且任務書已被系統清掉的殭屍為已知殘餘，GC 恆量不到）
+    三種哨兵下次醒來都自己處理（`session_resume_planner._sentinel_tick`）：缺席 ⇒
+    `_abort_and_unregister`、解析不出 ⇒ `_heal_relay` 自癒、沒有該欄 ⇒ 逐字稿 `Path("")`
+    不存在 ⇒ 靜默 disarm。
     """
     tasks = sentinel_task_names()
     if tasks is None:
         return None
-    base = _transcript_dir()
-    if base is not None and not base.is_dir():  # 目錄不在＝量不到（HOME 被隔離／換機），不是檔被刪
-        base = None
     tmp = Path(tmp_dir or tempfile.gettempdir())
-    protected_ids = set(keep) | {_newest_session(base)}
+    protected_ids = set(keep) | {_newest_session(_transcript_dir())}
     now = time.time()
     rows: list[dict] = []
     for task in tasks:
         sid = session_of(task)
-        # 🔴 `base is None` 一律傳 `None`（＝量不到），**不得**塌成 `False`：
-        # 那個塌陷正是本檔第一版實跑 dry-run 時把三支哨兵全判成可收的原因。
-        transcript = (base / f"{sid}.jsonl") if base is not None else None
-        exists = None if base is None else bool(transcript and transcript.is_file())
-        idle = (now - transcript.stat().st_mtime) if exists else None
         plan = tmp / f"autosdd_resume_plan_{sid}.md"
-        state = plan_state(plan) if exists else None
+        recorded, state = plan_evidence(plan)
+        transcript = Path(recorded) if recorded else None
+        # 🔴 沒記／非絕對路徑一律傳 `None`（＝量不到），**不得**塌成 `False`：那個塌陷正是本檔第一版
+        # 實跑 dry-run 時把三支哨兵全判成可收的原因（相對路徑以 GC 自己的 cwd 解析＝又是本地證據）。
+        exists = (transcript.is_file() if transcript is not None and transcript.is_absolute()
+                  else None)
+        idle = (now - transcript.stat().st_mtime) if exists else None
         reap, why = reap_verdict(transcript_exists=exists, idle_seconds=idle,
                                  state=state, protected=sid in protected_ids,
                                  min_idle=min_idle)
@@ -407,7 +432,7 @@ def gc(*, apply: bool = False, keep: tuple[str, ...] = (),
             # 痕跡**最後**寫：這一行要能同時交代排程與殘骸兩件事的結果，而它的落檔路徑
             # 只由任務書**路徑字串**推導（不讀那個檔）⇒ 殘骸已被刪掉不影響它。
             row["trace"] = _record_reap(plan, task=task, session_id=sid, why=why,
-                                        unregister_rc=row["unregister_rc"],
+                                        unregister_rc=row["unregister_rc"], transcript=recorded,
                                         swept=row["swept"])
         rows.append(row)
     return rows

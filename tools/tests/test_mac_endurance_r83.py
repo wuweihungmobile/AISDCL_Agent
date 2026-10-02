@@ -446,6 +446,13 @@ class BackendInterfaceIsSymmetricTest(unittest.TestCase):
         self.assertIn("沒有排程載具", hints[2])
 
 
+def _write_relay_plan(root: Path, sid: str, transcript: str | None, state: str) -> None:
+    """任務書狀態塊；`transcript`＝哨兵盯的逐字稿絕對路徑＝GC 的所有權證明（None＝沒有該欄）。"""
+    relay = {"state": state, **({} if transcript is None else {"transcript": transcript})}
+    (root / f"{guard.PLAN_PREFIX}{sid}.md").write_text(
+        planner.render_relay(relay), encoding="utf-8", newline="\n")
+
+
 class RecyclingArmIsWiredTest(unittest.TestCase):
     """🔴 R83 複審 A-01（本輪最嚴重的一筆）：mac 的續航「武裝接通了、回收一行都沒接」。
     史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§58。"""
@@ -562,26 +569,48 @@ class RecyclingArmIsWiredTest(unittest.TestCase):
         for row in rows:
             self.assertIn("量不到", row["why"])
 
-    def test_gc_still_reaps_a_true_orphan_when_the_dir_exists(self) -> None:
-        """對照組：目錄在、該 session 的檔不在＝真孤兒，仍要收（不得把 GC 鈍化成永不收）。"""
+    def test_gc_judges_each_sentinel_by_the_transcript_its_own_plan_recorded(self) -> None:
+        """🔴 ARCH-01（DEF-200-455 同根）：GC 的證據要和目標一樣全域——存在／閒置／狀態一律取自
+        **那支哨兵自己任務書**記的逐字稿絕對路徑，不拿呼叫者 HOME 下的專案目錄去猜（隔離 HOME
+        下該目錄存在卻不含別人的檔）。改寫自前一版對照組「目錄在、檔不在 ⇒ 收」：那個預期正是
+        缺陷本身；現在只有記的路徑真的不存在（且不在等額度）才是孤兒，且痕跡帶著該路徑。
+        可達：SessionStart → spawn_sentinel_gc → `--apply --keep <sid>` 每場無條件起；舊的
+        「目錄不存在 ⇒ 量不到」只靠 GC 比專案目錄誕生早約 60 ms 的時序躲過（QA 實測）。"""
         scratch = tempfile.TemporaryDirectory(prefix="r83_gc_orphan_")
         self.addCleanup(scratch.cleanup)
         tmp = Path(scratch.name)
-        base = tmp / "projects"
+        base, real = tmp / "projects", tmp / "real"  # base＝呼叫者的專案目錄（在，卻不含哨兵的檔）
         base.mkdir()
-        (base / "live.jsonl").write_text("{}\n", encoding="utf-8", newline="\n")
+        real.mkdir()
+        (real / "alive.jsonl").write_text("{}\n", encoding="utf-8", newline="\n")
+        for sid, state in (("alive", "armed"), ("gone", "disarmed"), ("waiting", "waiting")):
+            _write_relay_plan(tmp, sid, str(real / f"{sid}.jsonl"), state)
+        _write_relay_plan(tmp, "relative", "rel/x.jsonl", "disarmed")
+        _write_relay_plan(tmp, "nofield", None, "disarmed")
+        (tmp / f"{guard.PLAN_PREFIX}garbled.md").write_text(
+            "state: disarmed\n", encoding="utf-8", newline="\n")
+        sids = ("alive", "gone", "waiting", "relative", "nofield", "garbled", "noplan")
         removed: list[str] = []
         with mock.patch.object(sentinel_lifecycle, "_transcript_dir", return_value=base), \
                 mock.patch.object(sentinel_lifecycle, "sentinel_task_names",
-                                  return_value=["AutoSDD_Sentinel_orphan",
-                                                "AutoSDD_Sentinel_live"]), \
+                                  return_value=[f"AutoSDD_Sentinel_{s}" for s in sids]), \
                 mock.patch.object(sentinel_lifecycle, "_remove_task",
                                   side_effect=lambda task: removed.append(task) or 0), \
-                mock.patch.object(sentinel_lifecycle, "_record_reap", return_value=""):
-            rows = sentinel_lifecycle.gc(apply=True, tmp_dir=str(tmp))
-        self.assertEqual(removed, ["AutoSDD_Sentinel_orphan"])
-        self.assertEqual({row["session_id"]: row["reap"] for row in rows},
-                         {"orphan": True, "live": False})
+                mock.patch.object(sentinel_lifecycle, "_record_reap", return_value="") as trace:
+            rows = {r["session_id"]: r for r in sentinel_lifecycle.gc(apply=True, tmp_dir=str(tmp))}
+        self.assertEqual(removed, ["AutoSDD_Sentinel_gone"], rows)  # 真孤兒仍收（不鈍化成永不收）
+        self.assertEqual(trace.call_args.kwargs["transcript"], str(real / "gone.jsonl"))
+        self.assertIn("仍活躍", rows["alive"]["why"])
+        self.assertIn("waiting", rows["waiting"]["why"])  # 路徑沒了、但任務書說還在等額度 ⇒ 不拆
+        for sid in ("relative", "nofield", "garbled", "noplan"):  # 缺席／解析不出／沒有該欄／非絕對
+            self.assertIn("量不到", rows[sid]["why"], sid)
+
+    def test_a_vanished_transcript_does_not_reap_a_session_that_is_still_waiting(self) -> None:
+        """③ 的狀態閘（與 ⑥ 同理：等額度期間不拆）；`state=None`（讀不出）仍收，對齊既有判例。"""
+        for state, want in (("waiting", False), ("disarmed", True), (None, True)):
+            reap, why = sentinel_lifecycle.reap_verdict(
+                transcript_exists=False, idle_seconds=None, state=state, protected=False)
+            self.assertEqual(reap, want, f"state={state}: {why}")
 
     def test_the_cli_never_reports_a_false_negative_as_success(self) -> None:
         """🔴 A-01 的**回報**那一半：修前兩個結局共用同一句話與同一個 rc=0。
@@ -1498,18 +1527,26 @@ class EscapeHatchAndNoProliferationTest(unittest.TestCase):
         out = json.loads(proc.stdout)["hookSpecificOutput"]
         self.assertIn("[SDD-CTX-GUARD]", out["additionalContext"])
 
-    def _gc_launchctl_rows(self, *, projects_dir: bool) -> list[str]:
+    def _gc_launchctl_rows(self, *, projects_dir: bool, recorded: str = "") -> list[str]:
         """隔離 HOME、不設逃生口、真 hook SessionStart ⇒ 回假 launchctl 收到的每一行。
 
         PATH 前置假 launchctl（只記錄）⇒ 無論紅綠都碰不到真排程器。回收行程是 detached 的，
         所以輪詢到它退場（以它對假 launchctl 的 ppid 為準）才回傳；沒跑完就 fail。
-        `projects_dir`＝逐字稿目錄是否存在（False＝HOME 被隔離的真實情境）。
+        `projects_dir`＝逐字稿目錄是否存在（False＝HOME 被隔離的真實情境）。`recorded`＝兩支哨兵
+        任務書記的逐字稿絕對路徑（住隔離 HOME 之外）："live"＝檔在、"gone"＝被刪、""＝無任務書。
         """
         scratch = tempfile.TemporaryDirectory(prefix="r83_gc_iso_")
         self.addCleanup(scratch.cleanup)
         tmp = Path(scratch.name)
-        for sub in ("bin", "home", "tmp", "traces", "cfg"):
+        for sub in ("bin", "home", "tmp", "traces", "cfg", "real"):
             (tmp / sub).mkdir()
+        if recorded:
+            for sid in ("live-a", "live-b"):
+                path = tmp / "real" / f"{sid}.jsonl"
+                if recorded == "live":
+                    path.write_text("{}\n", encoding="utf-8", newline="\n")
+                _write_relay_plan(tmp / "tmp", sid, str(path),
+                                  "armed" if recorded == "live" else "disarmed")
         if sys.platform != "darwin":
             return self._gc_inprocess_rows(tmp, projects_dir=projects_dir)
         log = tmp / "launchctl.log"
@@ -1577,16 +1614,21 @@ class EscapeHatchAndNoProliferationTest(unittest.TestCase):
         return [r for r in rows if r.split("argv=", 1)[1].split()[:1] not in (["list"], ["print"])]
 
     def test_session_start_in_an_isolated_home_never_unloads_a_live_sentinel(self) -> None:
-        """🔴 DEF-200-455 進程級 e2e：HOME 被隔離（逐字稿目錄不存在）時，真 hook SessionStart
-        spawn 的回收行程不得對活哨兵發出任何寫類 launchctl（macOS）；其他平台以行程內同判準跑。"""
-        rows = self._gc_launchctl_rows(projects_dir=False)
-        self.assertEqual(self._writes(rows), [],
-                         "隔離 HOME 下 GC 對活哨兵發了寫類 launchctl（DEF-200-455）")
+        """🔴 DEF-200-455 進程級 e2e：HOME 被隔離時，真 hook SessionStart spawn 的回收行程不得
+        對活哨兵發出任何寫類 launchctl（macOS）；其他平台以行程內同判準跑。三個形狀都要零寫類：
+        目錄不存在／目錄在但任務書缺席（量不到）／目錄在而任務書記的路徑檔在（ARCH-01：修前
+        目錄一存在就把全機活哨兵 bootout）。"""
+        for projects_dir, recorded in ((False, ""), (True, ""), (True, "live")):
+            with self.subTest(projects_dir=projects_dir, recorded=recorded):
+                rows = self._gc_launchctl_rows(projects_dir=projects_dir, recorded=recorded)
+                self.assertEqual(self._writes(rows), [],
+                                 "隔離 HOME 下 GC 對活哨兵發了寫類 launchctl（DEF-200-455）")
 
     def test_the_same_harness_does_unload_a_true_orphan(self) -> None:
-        """對照組（e2e 版）：逐字稿目錄在、兩支哨兵的檔都不在＝真孤兒 ⇒ 假 launchctl 必須看到
-        bootout。少了它，上一支的「零寫類」可能只是替身壞了（本檔曾因 printf 選項誤判空轉）。"""
-        rows = self._gc_launchctl_rows(projects_dir=True)
+        """對照組（e2e 版；改寫自前一版「目錄在、檔不在 ⇒ 收」——那個預期正是缺陷）：任務書記的
+        路徑真的被刪、狀態終態 ⇒ 假 launchctl 必須看到 bootout。少了它，上一支的「零寫類」
+        可能只是替身壞了。"""
+        rows = self._gc_launchctl_rows(projects_dir=True, recorded="gone")
         outs = [r.split("argv=", 1)[1] for r in self._writes(rows)]
         for label in ("AutoSDD_Sentinel_live-a", "AutoSDD_Sentinel_live-b"):
             self.assertTrue(any(o.startswith("bootout ") and o.endswith(label) for o in outs),

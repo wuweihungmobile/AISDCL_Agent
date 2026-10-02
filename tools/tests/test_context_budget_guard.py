@@ -3351,7 +3351,7 @@ class HandbackSessionStartAnnounceTest(unittest.TestCase):
         guard.read_payload = lambda: {"hook_event_name": "SessionStart",
                                       "transcript_path": str(self.tmp / "t.jsonl")}
         self.addCleanup(setattr, guard, "emit_to_model", guard.emit_to_model)
-        guard.emit_to_model = lambda event, msg: seen.append((event, msg)) is None
+        guard.emit_to_model = lambda event, msg, *_: seen.append((event, msg)) is None
         self.assertEqual(guard.main(), 0)
         # R158／P6：SessionStart 現在還會無條件多送一行真實數字簡報（見下方新測試）， round-label-ok
         # 「恰好 1 次」不再成立——這裡改判「handback 訊息在呼叫清單中」，意圖不變：
@@ -3390,7 +3390,7 @@ class HandbackSessionStartAnnounceTest(unittest.TestCase):
                                       "transcript_path": str(transcript)}
         seen: list[tuple[str, str]] = []
         self.addCleanup(setattr, guard, "emit_to_model", guard.emit_to_model)
-        guard.emit_to_model = lambda event, msg: seen.append((event, msg)) is None
+        guard.emit_to_model = lambda event, msg, *_: seen.append((event, msg)) is None
         self.assertEqual(guard.main(), 0)
         briefs = [m for _, m in seen if "[SDD-CTX-GUARD]" in m]
         self.assertEqual(len(briefs), 1, "SessionStart 沒有送出真實數字簡報")
@@ -3425,7 +3425,7 @@ class HandbackSessionStartAnnounceTest(unittest.TestCase):
                                       "transcript_path": str(self.tmp / "nope.jsonl")}
         seen: list[tuple[str, str]] = []
         self.addCleanup(setattr, guard, "emit_to_model", guard.emit_to_model)
-        guard.emit_to_model = lambda event, msg: seen.append((event, msg)) is None
+        guard.emit_to_model = lambda event, msg, *_: seen.append((event, msg)) is None
         self.assertEqual(guard.main(), 0)
         briefs = [m for _, m in seen if "[SDD-CTX-GUARD]" in m]
         self.assertEqual(len(briefs), 1, "額度讀不到時簡報整條消失了")
@@ -11265,12 +11265,14 @@ class SentinelReapVerdictTest(unittest.TestCase):
     def _apply_once(self, sid: str):  # noqa: ANN202
         """跑一次真的 `gc(apply=True)`，但**不碰排程器**（`_remove_task` 換替身）。
 
-        逐字稿目錄刻意「定位得到、那支檔不存在」＝可收那一條路；殘骸也真的落在磁碟上，
-        所以掃殘骸與寫痕跡的先後順序是被真的走過一次的，不是靠讀原始碼推論的。
+        任務書記的逐字稿絕對路徑真的不存在（狀態終態）＝可收那一條路（ARCH-01：證據取自哨兵自己
+        的任務書，不取呼叫者的專案目錄）；殘骸也真的落在磁碟上，所以掃殘骸與寫痕跡的先後順序
+        是被真的走過一次的，不是靠讀原始碼推論的。
         """
         tmp = _tmpdir(self, "gc-trace-")
         plan = tmp / f"autosdd_resume_plan_{sid}.md"
-        plan.write_text("state: disarmed\n", encoding="utf-8", newline="\n")
+        relay = planner.render_relay({"state": "disarmed", "transcript": str(tmp / "gone.jsonl")})
+        plan.write_text(relay, encoding="utf-8", newline="\n")
         trace = planner.endurance_log_path(plan)
         self.addCleanup(lambda: trace.unlink(missing_ok=True))
         with unittest.mock.patch.object(
@@ -13377,6 +13379,65 @@ class SingleEmitterHasOneFlushSiteTest(unittest.TestCase):
             {"fake.py": "import atexit\natexit.register(flush_to_model)\nflush_to_model()\n"}))
 
 
+class EmitToModelSystemMessageTest(unittest.TestCase):
+    """SA-02：`emit_to_model(system_message=)` 讓**人**看得到——頂層 `systemMessage` 與
+    `hookSpecificOutput` 並列，仍是一個行程一份 JSON；不給時輸出逐位元組等於修前（HEAD 快照）。"""
+
+    #: 修前（HEAD 933f0b16）對 ("第一則 a", 'second "q"\nline2') 的 stdout，逐位元組。
+    _HEAD = ('{"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": '
+             '"\\u7b2c\\u4e00\\u5247 a\\nsecond \\"q\\"\\nline2"}}\n')
+
+    def _stdout(self, system_message: object = None) -> str:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            try:
+                qg.emit_to_model("SessionStart", "第一則 a")
+                qg.emit_to_model("SessionStart", 'second "q"\nline2', system_message)
+            finally:
+                qg.flush_to_model()  # 排空，不留給 atexit
+        return buf.getvalue()
+
+    def test_without_it_the_bytes_equal_head_and_blank_counts_as_without(self) -> None:
+        for blank in (None, "", "   "):
+            self.assertEqual(self._stdout(blank), self._HEAD, repr(blank))
+
+    def test_with_it_one_top_level_key_is_added_and_the_rest_is_untouched(self) -> None:
+        out = self._stdout("給人看的")
+        doc = json.loads(out)  # 單一 JSON 物件＝一個行程一份
+        self.assertEqual(doc["systemMessage"], "給人看的")
+        self.assertEqual(doc["hookSpecificOutput"], json.loads(self._HEAD)["hookSpecificOutput"])
+        self.assertEqual(out.count("\n"), 1)
+        self.assertIn("\\u7d66", out, "ensure_ascii=True（約束②）")
+
+
+class SessionStartTellsTheHumanTest(unittest.TestCase):
+    """SA-02／Q4（端到端）：真 hook（子行程、隔離 HOME／快取）在 statusLine 沒裝時，於同一份
+    stdout JSON 多一個頂層 `systemMessage`（簡報只進模型 context、人看不到）；裝好的不帶。"""
+
+    def _run(self, tmp: Path, source: str = "startup") -> dict:
+        env = _isolated_env(tmp)
+        env.pop("CLAUDE_CONFIG_DIR", None)  # 設了就不讀 $HOME/.claude（DEF-200-415）
+        env.update(AUTOSDD_QUOTA_CACHE_DIR=str(tmp / "q"), AUTOSDD_TRACE_DIR=str(tmp / "t"))
+        body = {"hook_event_name": "SessionStart", "source": source,
+                "transcript_path": str(tmp / "sid-human.jsonl")}
+        proc = subprocess.run([sys.executable, str(_HOOK)], input=json.dumps(body), env=env,
+                              capture_output=True, encoding="utf-8", errors="replace",
+                              timeout=180, check=False)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(len(proc.stdout.splitlines()), 1, proc.stdout)  # 一個行程一份 JSON
+        return json.loads(proc.stdout)
+
+    def test_missing_statusline_speaks_to_the_human_and_installed_does_not(self) -> None:
+        import install_statusline  # noqa: PLC0415 — `tools/` 已在上方 sys.path
+        tmp = _tmpdir(self, "sl-human-")
+        doc = self._run(tmp)
+        self.assertIn("install_statusline.py", doc["systemMessage"])
+        self.assertIn("[SDD-CTX-GUARD]", doc["hookSpecificOutput"]["additionalContext"])
+        self.assertNotIn("systemMessage", self._run(tmp, "compact"))
+        install_statusline.install(tmp)
+        self.assertNotIn("systemMessage", self._run(tmp))
+
+
 class EveryHookEscapeHatchIsDeclaredTest(unittest.TestCase):
     """🔴 R82／C2 的那條路要對**每一個**逃生口成立：`.env` 裡設了卻不生效＝「關掉了」
     與「沒關掉」外觀相同。分母現查 hook 自己宣告的 `*_OFF_ENV` 常數，不寫死清單。
@@ -14225,7 +14286,7 @@ class SessionStartBriefIsModelAwareTest(unittest.TestCase):
         env.start()
         self.addCleanup(env.stop)
         self.seen: list[tuple[str, str]] = []
-        emit = lambda event, msg: self.seen.append((event, msg)) is None  # noqa: E731
+        emit = lambda event, msg, *_: self.seen.append((event, msg)) is None  # noqa: E731
         for target, name, value in ((guard.quota_gate, "read_quota",
                                      lambda now, path=None: self.state),
                                     (guard, "emit_to_model", emit)):

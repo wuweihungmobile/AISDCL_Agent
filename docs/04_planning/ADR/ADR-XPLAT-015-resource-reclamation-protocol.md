@@ -113,7 +113,7 @@
 ### 3.4 孤兒判準真值表 `orphan_verdict()` 與 `gc()` 母體擴充
 
 - **家**：`tools/lib/sentinel_lifecycle.py`（count_loc 213/400〔實測〕，餘裕最大）；與 `reap_verdict` `:214-249` 並列，**重用**它而不重寫。
-- **主人錨點來源**：讀任務書 RELAY 狀態塊（`plan_state` `:197-212` 走 `planner.parse_relay` `session_resume_planner.py:373`，塊內有 `session_id`／`transcript`）；**檔名 `autosdd_resume_plan_<sid>.md` 只作加速**，不是判準（planner `--out` 是自由路徑，`session_resume_planner.py:1473`〔實讀〕；手動 `--arm-sentinel --out ~/x/plan.md` 的合法哨兵不得因檔名被誤收）。讀不出 ⇒ `owner=unknown`。
+- **主人錨點來源**：讀任務書 RELAY 狀態塊（`plan_evidence()`（`plan_state` 已成其薄包裝）走 `planner.parse_relay` `session_resume_planner.py:373`，塊內有 `session_id`／`transcript`）；**檔名 `autosdd_resume_plan_<sid>.md` 只作加速**，不是判準（planner `--out` 是自由路徑，`session_resume_planner.py:1473`〔實讀〕；手動 `--arm-sentinel --out ~/x/plan.md` 的合法哨兵不得因檔名被誤收）。讀不出 ⇒ `owner=unknown`。
 - **真值表**（`present` 來自 `list_jobs(label)` 精確查；`owner` 由 plan 軸＋`reap_verdict` 合成）：
 
 | present × owner | `alive` | `dead` | `unknown` |
@@ -122,9 +122,9 @@
 | **ABSENT**（`[]`） | 無物可收 | 無物可收 | 無物可收 |
 | **UNMEASURABLE**（`None`） | 不收、rc=1、出聲 | 不收、rc=1、出聲 | 不收、rc=1、出聲 |
 
-  - `dead`＝下列**任一**：① `--plan` 檔不存在；② launchd 自報 `definition` plist 不在磁碟（殭屍態；Win 無此態）；③ `planner` 路徑檔不存在；④ `reap_verdict(...)` 回 `True`（逐字稿不存在／閒置 ≥6h 且狀態 ∈ `REAPABLE_WHEN_IDLE` `:64`）。
+  - `dead`＝下列**任一**：① `--plan` 檔不存在；② launchd 自報 `definition` plist 不在磁碟（殭屍態；Win 無此態）；③ `planner` 路徑檔不存在；④ `reap_verdict(...)` 回 `True`（任務書記錄的逐字稿路徑不存在且狀態 ∈ `REAPABLE_WHEN_IDLE`／閒置 ≥6h 且狀態 ∈ `REAPABLE_WHEN_IDLE`——DEF-200-460 修法後 ③ 亦有 state 閘）。
   - `alive`＝`reap_verdict` 回 `False` 且理由是 protected／仍活躍／`waiting`。
-  - `unknown`＝`_transcript_dir()` 回 `None`（`:269`）∨ plan 在但 `parse_relay` 讀不出且無其他線索。
+  - `unknown`＝任務書證據缺席／`parse_relay` 讀不出／無 `transcript` 欄／記錄路徑非絕對（`sentinel_lifecycle.plan_evidence()`；DEF-200-460 修法後 `gc()` 的存在／閒置／state 一律取自哨兵**自己任務書**記錄的逐字稿絕對路徑，`_transcript_dir()` 只剩餵 `_newest_session()` 保護——此前「`_transcript_dir()` 回 `None`」那半句已被取代）∨ plan 在但無其他線索。
   - `foreign` 一律不進表。`--keep` 與 `_newest_session`（`:280-289`）保護面**原封不動**。
 - **`gc()` 改動**：母體＝`sentinel_task_names()` ∪ `owned_jobs()` 的 label（任一為 `None` ⇒ 整體 `None`，沿 `:375-376`）；每列多 `kind`／`plan`／`definition`／`planner` 欄。**非前綴族（`kind=fixture`）第一階段只列不收**：`--apply` 對它們 `reap=True` 但 `applied=False`，需 `--apply-fixtures` 顯式旗標才動（§7 Q1）。**回收順序改為「先 `_remove_task` 拆排程、再 `_sweep_artifacts`」**（堵住 §1.2-2 tmpdir 被 job 重建）。
 - **痕跡**：`_record_reap`（`:343-361`）對非前綴孤兒的 plan 父目錄常已不在 ⇒ `append_log` 失敗回 `""`；且 `_remove_task` 走同步 `disarm` 不會產生 `autosdd_sentinel_bootout_<label>.log` ⇒ 收掉一支 `T-*` 在磁碟上一字不剩（與 `:332-342` 立案的病同形）。**修法**：`gc()` 每次執行無論有無回收都 append 一行 JSON 報表到 `endurance_env.trace_dir()/autosdd_gc_report.jsonl`（`seen`／`kept`／`reaped`／`unverifiable` 四數＋逐筆 label／kind／why／`unregister_rc`／`after_listing`）——「沒觸發＝檔不長大」；`liveness_line` 加印「上次 GC 時間＋四數」。`~/.autosdd/traces/autosdd_sentinel_{launchd,bootout}_*.log` **刻意不刪**（本輪還原 8 次循環的唯一鑑識材料），只在報表列大小。
