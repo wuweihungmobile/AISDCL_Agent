@@ -357,6 +357,31 @@ def apply_reset_at(state: dict, new_reset_at: str) -> None:
     state["reset_at"] = new_reset_at
 
 
+#: `reset_source` 白名單：觀測值，或被誠實標示的宣稱；猜出來的 reset 不在內。消費端＝planner
+#: 的 `relay_problems`。後兩個字面各自獨立（ADR-XPLAT-014 約束 2／3）：L0 不借 `operator`、
+#: L1 不借 `transcript-verbatim`。史料見本輪證據檔〈九〉。
+SOURCE_ASSERTED = "operator-asserted"  # L0：操作者顯式 --at 宣稱的時刻（不是觀測值）
+SOURCE_AUTHORITATIVE = "endpoint-authoritative"  # L1：額度端點實測的 resets_at
+RESET_SOURCES = ("transcript-verbatim", "probe-verbatim", "operator", "halt-marker",
+                 SOURCE_ASSERTED, SOURCE_AUTHORITATIVE)
+
+
+def manual_state(session_id: str, plan: Path, args, task: str, transcript: Path,
+                 at: datetime | None) -> dict:
+    """手動 `--register-schtasks` 寫進任務書的狀態塊（DEF-200-456）：骨架與武裝路徑同一份。
+
+    `at`＝結構化時刻，只有缺 `--at`、取額度快取實測時才非 `None`（觸發時刻＝reset＋緩衝）
+    ⇒ 端點權威值；顯式 `--at` 是操作者宣稱，`reset_at` 留空。
+    """
+    planner = _planner()
+    state = planner._base_state(session_id, plan, args, "manual", task)
+    state.update(transcript=str(transcript), reset_at="", reset_source=SOURCE_ASSERTED)
+    if at is not None:
+        skew = timedelta(seconds=planner.RESET_SKEW_SECONDS)
+        state.update(reset_at=(at - skew).isoformat(), reset_source=SOURCE_AUTHORITATIVE)
+    return state
+
+
 def _planner():
     """lazy import `session_resume_planner`（同 `sentinel_lifecycle._planner_module()`
     既有理由：planner 模組層已 `import relay_machine`，模組層互相 import 會成環）。

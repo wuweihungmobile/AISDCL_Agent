@@ -75,6 +75,9 @@ ENV_SPEC: tuple[EnvVar, ...] = (
     EnvVar("AUTOSDD_QUOTA_COMPACT_COST_BUDGET_PP", "compact_cost_budget_pp", 3.0,
            "float", 0.0, 100.0,
            "一次 /compact 預估消耗的額度百分點（PRD §4.3；須 < prepare − converge）", "policy"),
+    EnvVar("AUTOSDD_QUOTA_WRAP_MINUTES", "wrap_minutes", 5.0, "float", 2.0, None,
+           "收尾保留段：進 cap 聚合的軸剩餘分鐘低於此值 ⇒ 建議派工數收到 cap_prepare"
+           "（出廠＝一個扇出視窗；須 < accel_window）", "policy"),
     EnvVar("AUTOSDD_QUOTA_CAP_NOTICE", "cap_notice", 8, "int", 1.0, None,
            "notice 帶的 base cap", "policy"),
     EnvVar("AUTOSDD_QUOTA_CAP_CONVERGE", "cap_converge", 4, "int", 1.0, None,
@@ -273,6 +276,12 @@ def load_policy(env: Mapping[str, str]) -> tuple[Policy, list[str]]:
         problems.append(
             f"accel_window({policy.accel_window_minutes}) 必須小於 "
             f"far_horizon({policy.far_horizon_minutes})，否則 mid 檔是空的 ⇒ 整組採用預設")
+        return DEFAULT_POLICY, problems
+    if policy.wrap_minutes >= policy.accel_window_minutes:
+        problems.append(
+            f"wrap_minutes({policy.wrap_minutes}) 必須小於 accel_window"
+            f"({policy.accel_window_minutes})，否則整個 near 檔都成了收尾帶、加速（錨點①）"
+            "結構上不可觀測 ⇒ 整組採用預設")
         return DEFAULT_POLICY, problems
     # DEF-200-137／PRD §6.1 不變式 6：壓縮成本邊際必須小於 (DRAIN − WARN)，否則邊際吃掉整個
     # converge 帶，`draining()` 會在 WARN 線上就禁止壓縮（收緊到失去鑑別力）。

@@ -135,12 +135,10 @@ REASON_NO_CREDENTIALS_DARWIN = "no-credentials-darwin"
 REASON_KEYCHAIN_TIMEOUT = "keychain-timeout"
 REASON_UNREACHABLE = "meter-unreachable"
 REASON_NO_BUCKETS = "no-buckets"
-#: 🔴 429 **不併入** `http-{status}`——併進去的淨效果與條文完全相反：`reading=None` ⇒
-#: `BAND_UNMEASURED` ⇒ `cap=degraded_cap`，比「量到 70% CONVERGE 帶」還寬鬆，而 429 是
-#: 額度吃緊最強的**直接**證據。PRD §8 第 1 列逐字要求「必須把 429 視為遙測低估的證據，
-#: 將 `U5h` 推估值上修」、「重試耗盡 → `FREEZING`」（＝cap 0）。⇒ 本字面走地板讀數，
-#: 不走「量不到」。
-REASON_RATE_LIMITED = "http-429-floor"
+#: 🔴 429 是**遙測端點**（usage）自己的限流，不是模型額度：走「量不到」（`reading=None`），不得被
+#: 轉譯成「量到 100%」的地板讀數（一次遙測限流會變成全面停工；見本輪證據檔〈九〉）。字面獨立於
+#: `http-{status}`，好讓痕跡分得出「被限流」與其他 HTTP 失敗；伺服器報的恢復時刻走旁檔。
+REASON_RATE_LIMITED_UNMEASURED = "http-429-unmeasured"
 
 #: 快取檔。🔴 **刻意不帶 session id**：額度是 **per-account** 的單一池，而
 #: `%TEMP%` 實測有 20 個以上相異 session 各持一份自己的狀態檔。帶 sid 的快取會讓
@@ -680,11 +678,9 @@ RETRY_AFTER_HEADERS = ("retry-after", "anthropic-ratelimit-unified-reset",
 def retry_after_at(headers: object, now: datetime) -> str | None:
     """伺服器**自己報**的恢復時刻（ISO 字串）；解不出 ⇒ `None`。
 
-    🔴 這支存在的理由不是「多一個欄位」，是它讓 429 的下游落在**觀測**那一側：
-    `resets_at` 有值 ⇒ halt 分支走 `arm_reset`（在伺服器說的時刻醒）；沒值 ⇒ 走
-    `escalate`（叫人）。本 repo 憲法「reset 時刻是滾動視窗，只能觀測不能算」禁止的是
-    **算**；`Retry-After` 是伺服器交出來的觀測值，不是我們推出來的。
-    ⇒ 解不出時**一律回 `None`**，絕不退回「假設 N 秒」。
+    🔴 `Retry-After` 是伺服器交出來的**觀測值**，不是我們算的（憲法：reset 時刻是滾動視窗，
+    只能觀測不能算）。它只用來在畫面上說「遙測通道何時可再量」（旁檔，見 `write_retry_hint`），
+    不參與任何水位判讀。⇒ 解不出時**一律回 `None`**，絕不退回「假設 N 秒」。
     """
     if not isinstance(headers, dict):
         return None
@@ -716,37 +712,40 @@ def retry_after_at(headers: object, now: datetime) -> str | None:
     return None
 
 
-def rate_limited_reading(headers: object, now: datetime) -> dict:
-    """429 的**地板讀數**：單軸、`pct=100.0`。形狀沿用 `quota_gate.quota_floor_reading()`
-    的 transcript-floor 樣板，`via` 換成本模組自己的字面。
+#: 429 的 `Retry-After` 旁檔：與額度快取同目錄、不同檔。快取只放「量到的」；限流提示不是量測值，
+#: 不得進 `core_signature()`／`record_burn()` 的輸入面（見本輪證據檔〈九〉）。
+RETRY_HINT_NAME = "autosdd_quota_retry.json"
 
-    🔴 為什麼是「讀數」而不是「量不到」：`None` 在下游是 `BAND_UNMEASURED` ⇒
-    `cap=degraded_cap`（出廠等於 `cap_converge`）⇒ 429 換來的是比 70% 帶還寬鬆的姿態。
-    回一個 pct 下界 100 的單軸讀數則落進 `BAND_HALT`，方向與 PRD §8-1「上修 U5h」
-    ／「重試耗盡 → FREEZING」一致，而呼叫端**一行都不必改**（`decide()` 早就吃單軸）。
 
-    🔴 **本修法刻意不做行程內退避重試**（與 PRD §8-1 字面「最多 5 次」的差異，理由三條，
-    任一條成立就足以否決那個形態）：
-      1. **紅線**：§15.5 紅線 1 對 T5 的豁免是**四條件**的，其中一條逐字是「TTL≥180s
-         節流」。在 90~300s 內連打 3~5 次 GET 直接違反使那次呼叫合法的前提。
-      2. **關鍵路徑**：唯一的呼叫端 `quota_gate.refresh_quota_blocking()` 跑在
-         PreToolUse／PostToolUse hook 裡（該函式 docstring 自陳「推翻了『網路呼叫永遠
-         不在 hook 關鍵路徑上』」）⇒ 在那裡 sleep 是把使用者的每一次工具呼叫凍住。
-      3. **退避本來就已經存在，而且是對的那一種**：本讀數會被寫進快取，`read_quota()`
-         在 `QUOTA_CACHE_TTL_SECONDS` 內直接命中它 ⇒ 淨效果就是「退避一個 TTL 視窗、
-         期間持 halt 姿態、零額外呼叫」。重試只可能**放寬**（下一次量到低讀數就離開
-         halt），而 fail-safe 的方向是收緊 ⇒ 重試在這一格不是保險，是漏洞。
-    """
-    when = retry_after_at(headers, now)
-    return {"schema": SCHEMA, "axes": [{"kind": "rate_limited", "pct": 100.0,
-                                        "resets_at": when, "group": None,
-                                        "is_active": True, "severity": "critical",
-                                        "scope_model": None, "via": REASON_RATE_LIMITED}],
-            "source": "endpoint", "http_status": 429,
-            "measured_at": now.isoformat(timespec="seconds"),
-            "denominator": {"kind": "rate-limited", "cross_check": None,
-                            "text": "429：伺服器拒絕回報用量本身即為上限證據"},
-            "schema_keys": [], "posture": {}, "account_key": None}
+def _retry_hint_path(cache: Path | None = None) -> Path:
+    return (cache or cache_path()).with_name(RETRY_HINT_NAME)
+
+
+def _retry_hint_set(cache: Path | None, when: str | None) -> None:
+    """旁檔的唯一寫入口：`when` 為 `None` ⇒ 刪檔。I/O 失敗吞掉（提示不是額度判定的依據）。"""
+    path = _retry_hint_path(cache)
+    try:
+        if when is None:
+            path.unlink(missing_ok=True)
+        else:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps({"retry_after": when}), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def write_retry_hint(headers: object, now: datetime) -> None:
+    """429：把伺服器自己報的恢復時刻落旁檔；解不出／非正值（見 `retry_after_at`）⇒ 清舊檔。"""
+    _retry_hint_set(None, retry_after_at(headers, now))
+
+
+def read_retry_hint(cache: Path | None = None) -> str | None:
+    """旁檔裡的恢復時刻原字串；缺檔／壞檔／空值 ⇒ `None`（不猜）。是否已過去由呈現端對 now 判。"""
+    try:
+        hint = json.loads(_retry_hint_path(cache).read_text(encoding="utf-8")).get("retry_after")
+    except (OSError, ValueError, AttributeError):
+        return None
+    return hint if isinstance(hint, str) and hint.strip() else None
 
 
 def measure_detail(timeout: int = HTTP_TIMEOUT_SECONDS,
@@ -776,10 +775,11 @@ def measure_detail(timeout: int = HTTP_TIMEOUT_SECONDS,
     if status == 0:
         return None, REASON_UNREACHABLE
     if status == 429:
-        # 🔴 這一格的順序是判準的一部分：擺在 `status != 200` 之後就永遠到不了
-        # （429 會先被折成 `http-429` ⇒ `None` ⇒ 量不到），而那正是本修法要治的缺陷。
-        return rate_limited_reading(headers,
-                                    datetime.now(timezone.utc).astimezone()), REASON_RATE_LIMITED  # noqa: UP017
+        # 🔴 429 是遙測端點的限流，不是額度讀數 ⇒ 回「量不到」；伺服器報的恢復時刻走旁檔。
+        # 順序是判準的一部分：擺在 `status != 200` 之後就會被折成通用的 `http-429`。
+        # 刻意不做行程內退避重試（TTL≥180s 紅線與 hook 關鍵路徑；見本輪證據檔〈九〉）。
+        write_retry_hint(headers, datetime.now(timezone.utc).astimezone())  # noqa: UP017
+        return None, REASON_RATE_LIMITED_UNMEASURED
     if status != 200 or not isinstance(payload, dict):
         return None, f"http-{status}"
     axes = bucket_readings(payload)
@@ -849,6 +849,7 @@ def write_cache(reading: dict, path: Path | None = None) -> bool:
             f.write(json.dumps(payload, ensure_ascii=False, indent=2))
     except OSError:
         return False
+    _retry_hint_set(target, None)   # 量到了＝限流已解除：旁檔不得留到下一次量不到才說過時的話
     return True
 
 

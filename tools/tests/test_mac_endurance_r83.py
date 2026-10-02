@@ -27,7 +27,7 @@ import sys
 import tempfile
 import time
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -44,6 +44,16 @@ import schedule_backend as sb  # noqa: E402
 import sentinel_lifecycle  # noqa: E402
 
 import session_resume_planner as planner  # noqa: E402
+
+_MODULE_FENCES: list[dict] = []  # DEF-200-446：模組級圍籬 handle 堆疊（後進先出）
+
+
+def setUpModule() -> None:  # DEF-200-446：單模組直跑也不得碰真實 TEMP／快取／痕跡目錄
+    _MODULE_FENCES.append(sentinel_lifecycle.fence_enter())
+
+
+def tearDownModule() -> None:
+    sentinel_lifecycle.fence_exit(_MODULE_FENCES.pop())
 
 _GUARD_SRC = (_REPO_ROOT / ".claude" / "hooks" / "context_budget_guard.py")
 _SENTINEL_SRC = (_REPO_ROOT / "tools" / "lib" / "sentinel_lifecycle.py")
@@ -184,22 +194,10 @@ class SelectIsTheOnlyPlatformQuestionTest(unittest.TestCase):
 # ═══════════════════════════════════════════════════════════════════════════
 # 🔴 R83 複審 A-02／F-6：「唯一提問點」這句宣稱原本**只有一支檔在守**
 # ═══════════════════════════════════════════════════════════════════════════
-# 立案實測史料（原文＝Guard_Repin 證據檔 §E-2）與「判準為什麼問誰在驅動排程器而不是
-# 誰在問 os.name」的推導，全文搬至 docs/06_quality/CrossPlatform_Guard_Line_History.md
-# 〈mac endurance 唯一提問點段落史〉節。
-# ⇒ 判準：凡把排程器原語（argv 首字 `launchctl`／`schtasks`，或腳本含 `-ScheduledTask`
-# cmdlet）餵給 runner 的站點，一律只能住在**宣告過的家**裡。分母是現查出來的檔集合。
+# 史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§55。
 _SCHED_CMDLET = "-ScheduledTask"
 _SCHED_ARGV0 = ("launchctl", "schtasks", "schtasks.exe")
-#: 「真的把它餵出去」的那一層。判準只看**呼叫點的引數**——`print("…用 Get-ScheduledTask
-#: 查…")` 這種散文因此一律放行。這個限縮是實測後的決定，不是偏好：改用「字串字面出現」
-#: 當判準的話，收斂當回合實測全庫非家命中 **24 筆**（散落 8 支檔），而其中絕大多數是
-#: message／docstring 散文（`tools/dev_start.py` 的建議文、`tools/check_script_parity.py`
-#: 的說明、`tools/lib/baseline_origin.py` 的檔頭）——那些檔多半不在本包授權面內，會變成
-#: 要逐一辯護的假紅，而那種鎖活不過一輪（本 repo 判過）。
-#: 🔴 這個限縮的代價寫清楚：**「先把腳本存成模組常數、再餵給 runner」的形態掃不到**
-#: （`tools/check_scheduled_task_drift.py` 正是那個形狀，故它不在今天的命中集內）。
-#: 這是判準的已知盲區，登記在這裡而不是留給下一個人自己撞到。
+#: 史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§56。
 _RUNNERS = frozenset({"run", "Popen", "call", "check_call", "check_output",
                       "run_powershell", "_powershell", "_run"})
 #: 排程器原語**宣告過的家**。每一項附理由；空理由不算宣告（見下方判準）。
@@ -396,12 +394,7 @@ class BackendInterfaceIsSymmetricTest(unittest.TestCase):
 
     def test_red_a_method_added_to_only_one_backend(self) -> None:
         """注入①：只有一個後端有的方法必紅。
-
-        🔴 注入用的名字由 `list_jobs` 換成 `list_orphans`（R83 複審 A-01 回補之後，
-        `list_jobs` 已經是**真的共同契約面**，拿它當單邊注入就再也構造不出紅 ⇒ 那會讓這一條
-        變成恆綠的假鎖）。判準本身一字未改，換的只是注入語料——上一條測試守的才是
-        「`list_jobs` 三個後端都有」這件事。
-        """
+        史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§57。"""
         class OnlyHere(sb.NoCarrierBackend):
             def list_orphans(self, prefix: str) -> list:
                 return []
@@ -425,11 +418,7 @@ class BackendInterfaceIsSymmetricTest(unittest.TestCase):
 
     def test_the_launchd_only_exemptions_really_have_no_outside_consumer(self) -> None:
         """白名單不是免死金牌：每一項都必須零外部消費者，否則它就是契約面的一部分。
-
-        少了這一條，下一個人只要把新方法加進 `_LAUNCHD_ONLY` 就能繞過整道鎖（實測：
-        把 `evidence_hint` 塞進白名單，對稱判準當場轉綠）——那正是本 repo 判過的
-        「有鎖在守假話」：檔案在、判準在、測試全綠。
-        """
+        史料搬至 CrossPlatform_Guard_Line_History_2.md〈R190 收尾棒〉§10。 round-label-ok"""
         for name in (*_LAUNCHD_ONLY, "evidence_hint"):
             users = sorted(p.relative_to(_REPO_ROOT).as_posix()
                            for p in _outside_consumers(name))
@@ -459,14 +448,7 @@ class BackendInterfaceIsSymmetricTest(unittest.TestCase):
 
 class RecyclingArmIsWiredTest(unittest.TestCase):
     """🔴 R83 複審 A-01（本輪最嚴重的一筆）：mac 的續航「武裝接通了、回收一行都沒接」。
-
-    立案實測史料搬遷，原文＝Guard_Repin 證據檔 §E-4。
-
-    本類守三件事，缺一個都會讓修復退回去：
-      ① 接線（回收臂真的問 `select()`）；
-      ② 列舉層把「量不到」與「量到零」分開（`None` vs `[]`）——A-01 的表徵就是這兩者塌成一個；
-      ③ **回報**：量不到時 `main()` 不得 rc=0 說「沒有任何工作」。
-    """
+    史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§58。"""
 
     def test_both_recycling_arms_go_through_the_single_question(self) -> None:
         source = _SENTINEL_SRC.read_text(encoding="utf-8")
@@ -559,6 +541,48 @@ class RecyclingArmIsWiredTest(unittest.TestCase):
                                return_value=[]):
             self.assertEqual(sentinel_lifecycle.gc(), [])
 
+    def test_gc_treats_a_missing_transcript_dir_as_unmeasurable_not_orphan(self) -> None:
+        """🔴 DEF-200-455：逐字稿「目錄」不存在（HOME 被隔離／換機）＝量不到，不是檔被刪了。
+
+        修前它被判成「逐字稿不存在 ⇒ 收」，對**每一支**活哨兵 bootout。史料見證據檔〈九〉。
+        """
+        scratch = tempfile.TemporaryDirectory(prefix="r83_gc_nodir_")
+        self.addCleanup(scratch.cleanup)
+        tmp = Path(scratch.name)
+        removed: list[str] = []
+        with mock.patch.object(sentinel_lifecycle, "_transcript_dir",
+                               return_value=tmp / "no-such-dir"), \
+                mock.patch.object(sentinel_lifecycle, "sentinel_task_names",
+                                  return_value=["AutoSDD_Sentinel_a", "AutoSDD_Sentinel_b"]), \
+                mock.patch.object(sentinel_lifecycle, "_remove_task",
+                                  side_effect=lambda task: removed.append(task) or 0):
+            rows = sentinel_lifecycle.gc(apply=True, tmp_dir=str(tmp))
+        self.assertEqual(removed, [], "目錄不存在竟卸載了活哨兵（DEF-200-455）")
+        self.assertEqual([row["reap"] for row in rows], [False, False])
+        for row in rows:
+            self.assertIn("量不到", row["why"])
+
+    def test_gc_still_reaps_a_true_orphan_when_the_dir_exists(self) -> None:
+        """對照組：目錄在、該 session 的檔不在＝真孤兒，仍要收（不得把 GC 鈍化成永不收）。"""
+        scratch = tempfile.TemporaryDirectory(prefix="r83_gc_orphan_")
+        self.addCleanup(scratch.cleanup)
+        tmp = Path(scratch.name)
+        base = tmp / "projects"
+        base.mkdir()
+        (base / "live.jsonl").write_text("{}\n", encoding="utf-8", newline="\n")
+        removed: list[str] = []
+        with mock.patch.object(sentinel_lifecycle, "_transcript_dir", return_value=base), \
+                mock.patch.object(sentinel_lifecycle, "sentinel_task_names",
+                                  return_value=["AutoSDD_Sentinel_orphan",
+                                                "AutoSDD_Sentinel_live"]), \
+                mock.patch.object(sentinel_lifecycle, "_remove_task",
+                                  side_effect=lambda task: removed.append(task) or 0), \
+                mock.patch.object(sentinel_lifecycle, "_record_reap", return_value=""):
+            rows = sentinel_lifecycle.gc(apply=True, tmp_dir=str(tmp))
+        self.assertEqual(removed, ["AutoSDD_Sentinel_orphan"])
+        self.assertEqual({row["session_id"]: row["reap"] for row in rows},
+                         {"orphan": True, "live": False})
+
     def test_the_cli_never_reports_a_false_negative_as_success(self) -> None:
         """🔴 A-01 的**回報**那一半：修前兩個結局共用同一句話與同一個 rc=0。
 
@@ -591,14 +615,7 @@ _CRED_KEY_LITERALS = (sb.CRED_KEY_SCHTASKS, sb.CRED_KEY_LAUNCHD)
 
 def credential_key_copies(source: str) -> list[str]:
     """在**程式碼**（非註解）裡直接寫出憑證鍵字面的站點。純函式，紅綠由注入自證。
-
-    兩條刻意的排除，各自有理由（都是實測出來的假紅來源）：
-      · **註解**：解釋「Windows＝next_run_time、mac＝schedule_credential」是在說明語意，
-        不是第二個實作。掃註解會把說明判成違規——本 repo 判過的假紅形態。
-      · **同名函式**：`next_run_time` 也是本檔一支解析函式的名字（`def next_run_time(text)`），
-        它與「鍵名」毫無關係。所以判準只認鍵**真正會出現的兩種形態**：引號字串，或
-        `key=` 這種 kwarg／賦值；`def key(` 與 `key(...)` 這種呼叫一律不算。
-    """
+    史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§59。"""
     hits = []
     for lineno, line in enumerate(source.splitlines(), 1):
         code = line.split("#")[0]
@@ -670,11 +687,7 @@ class MacCredentialTest(unittest.TestCase):
 
     def test_the_mac_credential_never_states_a_next_run_time(self) -> None:
         """誠實劃界的機械物：憑證字串裡**不得**出現任何時刻。
-
-        launchd 不報「下次幾點跑」（實測：print 輸出裡 next／fire／due 皆不存在），任何
-        時刻都只能是我們自己推算的。憑證裡放一個推算時刻，就是把它偽裝成排程器的陳述
-        ——而那正是 Windows 側 `NextRunTime` 之所以能當憑證的理由被掏空的方式。
-        """
+        史料搬至 CrossPlatform_Guard_Line_History_2.md〈R190 收尾棒〉§11。 round-label-ok"""
         cred = sb.LaunchdBackend()._credential("AutoSDD_Sentinel_x", self._GOOD)
         import re
         self.assertIsNone(re.search(r"\d{1,2}:\d{2}", cred), f"憑證裡混進了時刻：{cred}")
@@ -724,14 +737,7 @@ def _print_output(interval: int, argv: list[str], path: str,
         lines += [f"\t{kind} coalition = {{", "\t\tID = 2027", f"\t\ttype = {kind}",
                   "\t\tstate = active", "\t}"]
     lines += [f"\trun interval = {interval} seconds"]
-    # 🔴 R83-B：`StartCalendarInterval` 的回讀形狀取自真機實測（`launchctl print
-    # gui/501/com.autoclaude.nightly` 當回合逐字）。它**不是**一個扁平欄位——住在
-    # `event triggers` → `<label>.<launchd 自編的數字>` → `descriptor` 裡（depth 4），
-    # 而同一份輸出後面還有一個 `event channels` 區塊也用 `"鍵" => 值` 的形態。
-    # 兩件都照抄進 fixture 的理由與 R83／QA 那次巢狀訂正逐字同構：**fixture 比真實世界簡單
-    # 就是最貴的一種假綠**（那一次扁平 fixture 讓 30 條綠全數成立，而真機憑證在說假話）。
-    # `event channels` 裡刻意放一個 `"port" => …`：解析器若不用 `_CAL_KEYS` 白名單而是
-    # 「看到 `=>` 就收」，它就會把 port 收進 calendar ⇒ 這個誘餌讓那種寫法轉紅。
+    # 史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§60。
     if calendar:
         lines += ["\tevent triggers = {", "\t\tcom.example.job.268435470 => {",
                   "\t\t\tkeepalive = 0", "\t\t\tservice = L",
@@ -802,17 +808,7 @@ class ArmRefusesToClaimWithoutReadbackTest(unittest.TestCase):
 
     def test_the_state_in_the_credential_is_the_jobs_own_not_a_nested_blocks(self) -> None:
         """🔴 R83／QA 複驗抓到的真紅：憑證的 `state` 欄回報的是**巢狀子區塊**的值。
-
-        真機實測（QA 當回合）：`launchctl list` 印 PID `-`、`launchctl print` 最外層逐字
-        `state = not running`，而同一刻憑證印 `state = active`。成因是 `launchctl print`
-        的輸出裡 `state = ` 出現三次，解析器「掃到就覆蓋」⇒ 最後一個（jetsam coalition 的
-        `active`，恆為 active）贏。job 第一次執行**之前**那兩個子區塊還不存在，所以這個
-        缺陷躲過了武裝當下那一次取證，只在跑過一次之後才出現。
-
-        它不參與閘門判定（`_descriptor_problems` 不看 state）⇒ 不會造成假武裝；但它寫在
-        **憑證字串**裡，而憑證是〈反事後諸葛〉那條規則要求貼出來的那一行。憑證裡混一句
-        假話，比缺那一欄更難看見——本 repo 對「有鎖在守假話」的判例同型。
-        """
+        史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§61。"""
         out = _print_output(planner.SENTINEL_INTERVAL_SECONDS, self._want_argv(),
                             self._want_path())
         self.assertEqual(out.count("state = active"), 2, "fixture 沒有真機的巢狀塊")
@@ -825,13 +821,7 @@ class ArmRefusesToClaimWithoutReadbackTest(unittest.TestCase):
 
     def test_verify_refuses_a_job_it_did_not_arm(self) -> None:
         """🔴 R83／QA 複驗抓到的第二筆真紅：`verify_cli` 只驗「存在」，卻印「相符」。
-
-        真機重現（QA 當回合）：把 label 換成每 7 秒跑一次 `/bin/echo I-AM-NOT-THE-SENTINEL`
-        的 plist 再 bootstrap，`--verify-schtasks` 仍回 **rc=0** 並逐字印
-        「run interval = 7 seconds〔launchd 回讀，與請求相符〕｜argv 回讀 2 項相符」。
-        兩句話都是假的——那條路上 `_descriptor_problems` 一次都沒被呼叫過。
-        Windows 那一側沒有對稱的洞：`NextRunTime` 是排程器自己算的值，不需要比對請求。
-        """
+        史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§62。"""
         good = {"interval": planner.SENTINEL_INTERVAL_SECONDS,
                 "argv": self._want_argv(), "path": self._want_path(), "state": "not running"}
         self.assertEqual(sb.LaunchdBackend()._verify_problems("AutoSDD_Sentinel_t", good), [])
@@ -855,13 +845,7 @@ class ArmRefusesToClaimWithoutReadbackTest(unittest.TestCase):
 
     def test_the_verify_arm_is_actually_wired_to_its_own_gate(self) -> None:
         """🔴 判準的**接線**也要有人守，不只是判準本身。
-
-        本測試是 QA 自證時抓到的第三個洞：上面兩條分別直呼 `_verify_problems` 與
-        `_credential`，於是「把它們從 `verify_cli` 裡拆掉」這種退化**兩條都不會紅**
-        （實測：把呼叫點改回 `self._credential(task_name, live)` → 33 條全綠）。
-        機制蓋好沒接電，與沒蓋一樣——本 repo 對此有 R77 的判例。故這一條走整支
-        `verify_cli`，斷言的是它**印出來的那一行**與它的 rc。
-        """
+        史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§63。"""
         rc, printed = self._verify_cli(_print_output(
             planner.SENTINEL_INTERVAL_SECONDS, self._want_argv(), self._want_path()))
         self.assertEqual(rc, 0)
@@ -922,16 +906,7 @@ class ArmRefusesToClaimWithoutReadbackTest(unittest.TestCase):
 
 class SelfDisarmTest(unittest.TestCase):
     """③ 自我解除：**同步 bootout 會把自己殺掉**（真機實測，不是推論）。
-
-    合成實驗逐字（R83 當回合，本機 macOS 25.5.0）：一支 LaunchAgent 的 job 在自己的
-    行程裡跑 `launchctl bootout gui/<uid>/<自己>`，log 只留下 `start <epoch>` 這一行，
-    `bootout` 那一行的 rc **從來沒有被寫出來**——行程死在那一句。
-    後果不是「少一行 log」：`_sentinel_tick` 的 disarm／escalate 分支在解除**之後**還要
-    叫人、還要寫稽核痕跡，同步拆會讓「正常下班」與「需要人介入」兩條路的痕跡一起消失，
-    而那正是這整套續航唯一有價值的那一格。
-    對照實驗（同一天、同一支 job）：改成 detached 延後拆之後，主行程把該寫的全部寫完、
-    正常退場，3 秒後子行程才 bootout，`bootout rc=0`、`launchctl print` 隨即回 113。
-    """
+    史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§64。"""
 
     def setUp(self) -> None:
         self._real_run, self._real_popen = sb._run, subprocess.Popen
@@ -1060,15 +1035,7 @@ class SelfDisarmTest(unittest.TestCase):
 
 class CalendarMomentReachesThePlistTest(unittest.TestCase):
     """🔴 R83-B ⑤：`arm_reset` 要求的**時刻**必須真的到得了 launchd，而憑證必須說實話。
-
-    修前實況的逐位元組實測史料搬遷，原文＝Guard_Repin 證據檔 §E-7。
-
-    本類別守的四件事，每一件都附合成注入的紅：
-      ① 真的截止時刻 ⇒ plist 必須帶 `StartCalendarInterval`（相異時刻 ⇒ 相異 plist）；
-      ② 回讀不含那個時刻 ⇒ **不准發憑證**（rc=1、憑證空）；
-      ③ 巡邏那一支刻意**不**帶 calendar（否則每 15 分鐘就要 bootout+bootstrap 一輪）；
-      ④ 分鐘粒度只准往後取整，絕不提早（提早＝白燒一次探測，而探測是唯一花 token 的動作）。
-    """
+    史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§65。"""
 
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp(prefix="r83b_cal_"))
@@ -1147,11 +1114,7 @@ class CalendarMomentReachesThePlistTest(unittest.TestCase):
 
     def test_the_patrol_moment_deliberately_gets_no_calendar(self) -> None:
         """巡邏的 `at` 恆為 `now + interval` ⇒ 不寫 calendar，且必須走**冪等**路徑。
-
-        這不是省事：寫了就代表下一個 tick 的回讀不符 ⇒ 每 15 分鐘 bootout+bootstrap 一輪，
-        而 bootstrap 是整條鏈上唯一會讓哨兵消失的動作。憑證此時必須明說「只有巡邏觸發」
-        ＋最壞死等秒數，不准留白（留白會讓它與「排到了確切時刻」看起來一樣）。
-        """
+        史料搬至 CrossPlatform_Guard_Line_History_2.md〈R190 收尾棒〉§12。 round-label-ok"""
         rc, cred = self._arm(self.now + timedelta(seconds=900), None)
         self.assertEqual(rc, 0, cred)
         self.assertNotIn("StartCalendarInterval", self._plist())
@@ -1405,12 +1368,7 @@ class WindowsPathIsUnchangedTest(unittest.TestCase):
 
     def test_the_new_structured_moment_changes_nothing_on_the_schtasks_side(self) -> None:
         """🔴 R83-B 驗收條件：Windows 那一側**行為零改變**。
-
-        `at` 這個新參數在 schtasks 後端刻意不使用——`-Once -At <時刻>` 本來就吃時刻，語意
-        已完整由 `at_expr` 表達 ⇒ 再讀一次結構化的 `at` 只會製造第二個真相源。
-        判準取「兩次呼叫送出的 PowerShell 腳本逐字相同」：只要有人開始讀 `at`，這一條就紅。
-        以替身模擬 `os.name == 'nt'`，不需要真的有 powershell.exe。
-        """
+        史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§66。"""
         scripts: list[str] = []
 
         def _fake(script: str):
@@ -1454,6 +1412,29 @@ class WindowsPathIsUnchangedTest(unittest.TestCase):
 
     def test_the_windows_credential_line_is_still_the_next_run_time_sentence(self) -> None:
         self.assertIn("NextRunTime = X", sb.select(os_name="nt").credential_line("X"))
+
+
+#: 假 `launchctl`（mac 專用 e2e 的 PATH 前置替身）：讀類回罐頭、寫類只記錄，絕不碰真 launchd。
+#: 每行記 `<pid> ppid=<呼叫它的行程 pid> argv=<參數>`——測試靠 ppid 等 detached 行程退場。
+_FAKE_LAUNCHCTL = """#!/bin/sh
+printf '%s ppid=%s argv=%s\\n' "$$" "$PPID" "$*" >> "{log}"
+case "$1" in
+  list) printf 'PID\\tStatus\\tLabel\\n'; printf -- '-\\t0\\t%s\\n' {labels} ;;
+  print) exit 113 ;;
+esac
+exit 0
+"""
+
+
+def _pid_alive(pid: int) -> bool:
+    """POSIX：該 pid 還活著嗎（僅供 mac 專用 e2e；呼叫端已先擋掉非 darwin）。"""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
 
 
 class EscapeHatchAndNoProliferationTest(unittest.TestCase):
@@ -1507,7 +1488,9 @@ class EscapeHatchAndNoProliferationTest(unittest.TestCase):
         payload = json.dumps({"hook_event_name": "SessionStart",
                               "transcript_path": str(Path(tempfile.gettempdir())
                                                      / "r83-no-such-session.jsonl")})
+        # DEF-200-455：真 hook 會 spawn 回收行程；本測試不驗回收，逃生口必設（見證據檔〈九〉）。
         proc = subprocess.run([sys.executable, str(_GUARD_SRC)], input=payload,
+                              env={**os.environ, guard.SENTINEL_OFF_ENV: "1"},
                               capture_output=True, encoding="utf-8", errors="replace",
                               timeout=60, check=False)
         self.assertEqual(proc.returncode, 0, proc.stderr)
@@ -1515,17 +1498,79 @@ class EscapeHatchAndNoProliferationTest(unittest.TestCase):
         out = json.loads(proc.stdout)["hookSpecificOutput"]
         self.assertIn("[SDD-CTX-GUARD]", out["additionalContext"])
 
+    def _gc_launchctl_rows(self, *, projects_dir: bool) -> list[str]:
+        """隔離 HOME、不設逃生口、真 hook SessionStart ⇒ 回假 launchctl 收到的每一行。
+
+        PATH 前置假 launchctl（只記錄）⇒ 無論紅綠都碰不到真排程器。回收行程是 detached 的，
+        所以輪詢到它退場（以它對假 launchctl 的 ppid 為準）才回傳；沒跑完就 fail。
+        `projects_dir`＝逐字稿目錄是否存在（False＝HOME 被隔離的真實情境）。
+        """
+        if sys.platform != "darwin":
+            self.skipTest("[MAC-NATIVE-ONLY] 假 launchctl 替身只在 macOS 成立")
+        scratch = tempfile.TemporaryDirectory(prefix="r83_gc_iso_")
+        self.addCleanup(scratch.cleanup)
+        tmp = Path(scratch.name)
+        for sub in ("bin", "home", "tmp", "traces", "cfg"):
+            (tmp / sub).mkdir()
+        log = tmp / "launchctl.log"
+        shim = tmp / "bin" / "launchctl"
+        shim.write_text(_FAKE_LAUNCHCTL.format(
+            log=log, labels="AutoSDD_Sentinel_live-a AutoSDD_Sentinel_live-b"),
+            encoding="utf-8", newline="\n")
+        shim.chmod(0o755)
+        env = dict(os.environ)
+        for name in (guard.SENTINEL_OFF_ENV, "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_SESSION_ID",
+                     "AUTOSDD_CONTEXT_GUARD_OFF", "AUTOSDD_QUOTA_GUARD_OFF"):
+            env.pop(name, None)
+        env.update({"HOME": str(tmp / "home"), "USERPROFILE": str(tmp / "home"),
+                    "TMPDIR": str(tmp / "tmp"), "AUTOSDD_TRACE_DIR": str(tmp / "traces"),
+                    "AUTOSDD_QUOTA_CACHE_DIR": str(tmp / "tmp"),
+                    "CLAUDE_PROJECT_DIR": str(_REPO_ROOT),
+                    "PATH": f"{tmp / 'bin'}{os.pathsep}{os.environ.get('PATH', '')}"})
+        if projects_dir:
+            env["CLAUDE_CONFIG_DIR"] = str(tmp / "cfg")
+            with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(tmp / "cfg")}):
+                planner.project_transcript_dir(planner._REPO_ROOT).mkdir(parents=True)
+        payload = json.dumps({"hook_event_name": "SessionStart", "transcript_path":
+                              str(tmp / "tmp" / "r83-no-such-session.jsonl")})
+        proc = subprocess.run([sys.executable, str(_GUARD_SRC)], input=payload, env=env,
+                              capture_output=True, encoding="utf-8", errors="replace",
+                              timeout=60, check=False)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        deadline, rows = time.monotonic() + 30, []
+        while time.monotonic() < deadline:
+            rows = log.read_text(encoding="utf-8").splitlines() if log.is_file() else []
+            parents = {int(m.group(1)) for r in rows if (m := re.search(r"ppid=(\d+)", r))}
+            if parents and not any(_pid_alive(p) for p in parents):
+                return rows
+            time.sleep(0.05)
+        self.fail(f"detached 回收行程 30 秒內沒有跑完（或根本沒跑）：{rows}")
+
+    @staticmethod
+    def _writes(rows: list[str]) -> list[str]:
+        """假 launchctl 收到的**寫類**呼叫（list／print 以外的一切子命令）。"""
+        return [r for r in rows if r.split("argv=", 1)[1].split()[:1] not in (["list"], ["print"])]
+
+    def test_session_start_in_an_isolated_home_never_unloads_a_live_sentinel(self) -> None:
+        """🔴 DEF-200-455 進程級 e2e：HOME 被隔離（逐字稿目錄不存在）時，真 hook SessionStart
+        spawn 的回收行程不得對活哨兵發出任何寫類 launchctl。"""
+        rows = self._gc_launchctl_rows(projects_dir=False)
+        self.assertEqual(self._writes(rows), [],
+                         "隔離 HOME 下 GC 對活哨兵發了寫類 launchctl（DEF-200-455）")
+
+    def test_the_same_harness_does_unload_a_true_orphan(self) -> None:
+        """對照組（e2e 版）：逐字稿目錄在、兩支哨兵的檔都不在＝真孤兒 ⇒ 假 launchctl 必須看到
+        bootout。少了它，上一支的「零寫類」可能只是替身壞了（本檔曾因 printf 選項誤判空轉）。"""
+        rows = self._gc_launchctl_rows(projects_dir=True)
+        outs = [r.split("argv=", 1)[1] for r in self._writes(rows)]
+        for label in ("AutoSDD_Sentinel_live-a", "AutoSDD_Sentinel_live-b"):
+            self.assertTrue(any(o.startswith("bootout ") and o.endswith(label) for o in outs),
+                            f"真孤兒 {label} 沒被 bootout ⇒ 本 harness 看不見卸載：{rows}")
+
 
 class HookWiringReachesThisPlatformTest(unittest.TestCase):
     """R77 的教訓逐字是「機制蓋好沒接電」——這一支就是那條電線的鎖。
-
-    續航鏈掛在 `context_budget_guard.py` 的 SessionStart 與 PostToolUse 兩個事件上。
-    方案 B（DEF-200-316）起「叫得到」不再由「Windows 載具 ＋ POSIX 載具」成對條目保證
-    （POSIX 半邊條目已刪）；改由**單一載具＋POSIX 側符號連結健康**判準保證——原斷言
-    （逐字：兩事件各要求存在一條 `"Scripts" not in c and "pythonw" not in c` 的
-    carrier）原文已搬至 `CrossPlatform_DEF200274_Parallel_Tests_Evidence_2.md`
-    〈C9 續航鏈載具鑑別力〉節。
-    """
+    史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§67。"""
 
     def test_the_guard_carrier_on_both_endurance_events_is_the_single_recognised_carrier(
             self) -> None:
@@ -1656,12 +1701,7 @@ class MacSleepPostureIsSaidOutLoudTest(unittest.TestCase):
 
     def test_the_wording_has_exactly_one_home(self) -> None:
         """同一句話兩個家是本 repo 反覆判過的形態：措辭只准住 `SLEEP_CAVEAT`。
-
-        🔴 取樣範圍刻意**結構收窄到字串常數**（`ast.Constant`），不拿整份檔當 haystack：
-        那兩支檔的**註解**本來就在解釋這件事（本輪新增的 WHY 段就是），而註解不是被測對象
-        ——先例＝`TestNoAssertionSamplesALiveDocumentWholesale` 記載的「取樣範圍畫錯」那一族，
-        本輪實測就先紅過一次（該鎖點名本測試逐字）。
-        """
+        史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§68。"""
         needle = endurance_env.SLEEP_CAVEAT[:12]
         for src in (_BACKEND_SRC, _SENTINEL_SRC):
             literals = [node.value for node in ast.walk(ast.parse(src.read_text(
@@ -1718,13 +1758,7 @@ class DurableTraceHomeTest(unittest.TestCase):
 
     def test_a_home_that_cannot_be_created_degrades_instead_of_raising(self) -> None:
         """痕跡留不下來**絕不可**升級成續航本身的故障源（同 `append_log` 的既有紀律）。
-
-        驗 `trace_dir()` 的**第一層**：`mkdir` 就失敗（走 `except OSError`）。
-        🔴 R96 訂正製造手法（原為 `chmod(0o500)`——NTFS 不理 POSIX mode bits ⇒ 該退化分支在
-        Windows 上結構上進不去、鎖在 mac 綠而 Windows 恆紅）：改用「父層是一個檔案」，兩平台
-        都拋 `OSError` 子類 ⇒ 都真的走進那一支，不必為任何一邊加 skip。診斷見
-        `CrossPlatform_R96_Closure_Evidence.md` §2④(a)。
-        """
+        史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§69。"""
         not_a_dir = self.tmp / "not-a-dir"
         not_a_dir.write_text("x", encoding="utf-8", newline="\n")
         os.environ[endurance_env.TRACE_DIR_ENV] = str(not_a_dir / "traces")
@@ -1733,16 +1767,7 @@ class DurableTraceHomeTest(unittest.TestCase):
 
     def test_a_permission_error_on_mkdir_also_degrades(self) -> None:
         """第一層的**另一個例外子類**：`PermissionError`（家目錄權限）。
-
-        🔴 R96 把上一支的製造手法從 `chmod(0o500)` 換成「父層是一個檔案」之後，被打中的
-        例外子類由 `PermissionError` 變成 `NotADirectoryError`（mac）／`FileExistsError`
-        （Windows 本機實測：errno 17、winerror 183——**不是** `NotADirectoryError`）。
-        三者都被同一句 `except OSError` 接住，所以換法本身沒錯——但**覆蓋面掉了一個
-        子類**：把 `trace_dir()` 的 `except OSError` 窄化掉，R96 之前 mac 抓得到、之後
-        抓不到，而家目錄權限正是 mac 上真正常見的那個失效形態。
-        🔴 用注入而不是 `skipUnless(darwin)`：後者會讓 Windows 的 `platform` skip 群再 +1、
-        當場撞上 skip 天花板棘輪（兩道鎖互為對方違規）。注入是平台中性的，兩邊都真的跑。
-        """
+        史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§70。"""
         fallback = Path(tempfile.gettempdir())
         want = self.tmp / "denied" / "traces"
         os.environ[endurance_env.TRACE_DIR_ENV] = str(want)
@@ -1755,12 +1780,7 @@ class DurableTraceHomeTest(unittest.TestCase):
 
     def test_a_home_that_exists_but_is_unwritable_also_degrades(self) -> None:
         """驗 `trace_dir()` 的**第二層**：`mkdir` 成功但寫不進去（`os.access` 為假）。
-
-        兩層各自要有鎖（該函式註解逐字說明兩層都檢查是刻意的），而這一層的失敗表徵是
-        「痕跡檔不會長大」＝與「沒觸發」同形。用注入而非檔案系統權限（真正唯讀的目錄在
-        Windows 上做不出來，見上一支）；`gettempdir()` 先在 patch 外求值，免得 `tempfile`
-        的可寫探測跟著失真。
-        """
+        史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§71。"""
         fallback = Path(tempfile.gettempdir())
         want = self.tmp / "exists"
         os.environ[endurance_env.TRACE_DIR_ENV] = str(want)
@@ -1981,6 +2001,133 @@ class PlanReapHasOneHomeTest(unittest.TestCase):
         innocent = ('def disarm(self, task):\n'
                     '    self.plist_path(task).unlink()\n')
         self.assertEqual(plan_unlink_sites({"tools/lib/z.py": innocent}), [])
+
+
+def _read_jsonl(path: Path) -> list[dict]:
+    if not path.is_file():
+        return []
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
+
+
+class UnloadTraceSurvivesIsolationTest(unittest.TestCase):
+    """DEF-200-455 P3：誰卸載了哪支排程，必須留在**隔離吃不掉**的地方。
+
+    修前沒有任何 caller 痕跡，唯一的 `gc_reaped` 落在 `$TMPDIR`——事故當下它正是被隔離的
+    假 `$TMPDIR` 連同證據一起刪掉。只有走真的 `_run` 漏斗才記；替身 `_run` 不寫。
+    史料見本輪證據檔〈九〉。
+    """
+
+    def setUp(self) -> None:
+        scratch = tempfile.TemporaryDirectory(prefix="r83_unload_")
+        self.addCleanup(scratch.cleanup)
+        self.tmp = Path(scratch.name)
+        env = {"AUTOSDD_TRACE_DIR": str(self.tmp / "traces"), "XPC_SERVICE_NAME": "",
+               "HOME": str(self.tmp / "home"), "USERPROFILE": str(self.tmp / "home")}
+        for patcher in (mock.patch.dict(os.environ, env),
+                        mock.patch.object(sb, "LAUNCH_AGENTS_DIR", self.tmp / "agents")):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def _trace(self) -> list[dict]:
+        return _read_jsonl(self.tmp / "traces" / endurance_env.UNLOAD_TRACE_NAME)
+
+    def test_a_bootout_through_the_funnel_leaves_one_attributed_row(self) -> None:
+        def _fake_run(argv, **_kwargs):
+            return subprocess.CompletedProcess(argv, 113 if argv[1] == "print" else 0, "", "")
+
+        with mock.patch.object(sb.subprocess, "run", side_effect=_fake_run):
+            self.assertEqual(sb.LaunchdBackend().disarm("AutoSDD_Sentinel_r190-probe"), 0)
+        rows = self._trace()
+        self.assertEqual([r["op"] for r in rows], ["bootout"], "readback 的 print 不是卸載，不得記")
+        row = rows[0]
+        self.assertEqual(row["label"], "AutoSDD_Sentinel_r190-probe")
+        self.assertEqual((row["pid"], row["ppid"]), (os.getpid(), os.getppid()))
+        self.assertEqual(row["home"], str(self.tmp / "home"), "隔離狀態必須被寫進證據")
+        self.assertIn("test_a_bootout_through_the_funnel", row["caller"])
+        for key in ("ts", "argv", "session_id", "xpc", "tmpdir", "reason"):
+            self.assertIn(key, row)
+
+    def test_every_other_unload_path_is_recorded_too(self) -> None:
+        task = "AutoSDD_Sentinel_r190-self"
+        self.addCleanup(sb._SELF_DISARMED.pop, task, None)
+        with mock.patch.dict(os.environ, {"XPC_SERVICE_NAME": task}), \
+                mock.patch.object(sb.subprocess, "Popen") as popen:
+            self.assertEqual(sb.LaunchdBackend().disarm(task), 0)
+        self.assertEqual(popen.call_count, 1)
+        done = subprocess.CompletedProcess([], 0, stdout="REMOVED\n", stderr="")
+        with mock.patch.object(planner, "run_powershell", return_value=done):
+            self.assertEqual(sb.SchtasksBackend().disarm("AutoSDD_Sentinel_r190-win"), 0)
+        self.assertEqual([(r["op"], r["label"]) for r in self._trace()],
+                         [("deferred-bootout", task), ("unregister", "AutoSDD_Sentinel_r190-win")])
+
+    def test_a_replaced_run_leaves_no_row_and_a_broken_trace_never_breaks_the_unload(self) -> None:
+        seen: list[list[str]] = []
+        with mock.patch.object(sb, "_run", _fake_runner({"print": (113, "")}, seen)):
+            self.assertEqual(sb.LaunchdBackend().disarm("AutoSDD_Sentinel_r190-probe"), 0)
+        self.assertEqual(self._trace(), [], "替身 _run 竟寫了痕跡 ⇒ 單元測試會污染真痕跡檔")
+        with mock.patch.object(endurance_env, "uid_trace_dir", side_effect=OSError("boom")):
+            self.assertFalse(endurance_env.record_unload("bootout", "AutoSDD_Sentinel_x"))
+
+    def test_the_trace_location_does_not_follow_home_on_posix(self) -> None:
+        env = {k: v for k, v in os.environ.items() if k != endurance_env.TRACE_DIR_ENV}
+        env.update(HOME=str(self.tmp / "home"), USERPROFILE=str(self.tmp / "home"))
+        with mock.patch.dict(os.environ, env, clear=True), \
+                mock.patch.object(tempfile, "tempdir", "/plain-outside-any-fence"):  # 圍籬外
+            where = endurance_env.uid_trace_dir()
+        if os.name == "nt":  # 誠實登記的缺口：Windows 無 pwd，仍跟 USERPROFILE 走
+            self.assertEqual(where, self.tmp / "home" / ".autosdd" / "traces")
+        else:
+            import pwd
+            self.assertEqual(where, Path(pwd.getpwuid(os.getuid()).pw_dir) / ".autosdd" / "traces")
+            self.assertNotIn(self.tmp, where.parents, "痕跡位置跟著被隔離的 HOME 走 ⇒ 會一起消失")
+
+
+class SentinelEventHistoryIsAppendOnlyTest(unittest.TestCase):
+    """DEF-200-455 P4：marker 只留最新一筆，relatch 會蓋掉首次武裝的 turns／span；事件史
+    另存追加式檔（marker 語意不變）。呼叫端給了 `tmp_dir` ⇒ 事件史跟 marker 同住（單元測試
+    因此不污染真痕跡目錄）；沒給（production）⇒ 住持久痕跡目錄。史料見本輪證據檔〈九〉。"""
+
+    def setUp(self) -> None:
+        scratch = tempfile.TemporaryDirectory(prefix="r83_events_")
+        self.addCleanup(scratch.cleanup)
+        self.tmp = Path(scratch.name)
+        base = datetime(2026, 8, 9, 10, 0, 0, tzinfo=UTC)
+        rows = [{"type": "assistant", "message": {"model": "claude-opus-5", "usage": {}},
+                 "timestamp": (base + timedelta(seconds=30 * i)).isoformat().replace("+00:00", "Z")}
+                for i in range(40)]
+        self.transcript = self.tmp / "p4.jsonl"
+        self.transcript.write_text("".join(json.dumps(r) + "\n" for r in rows),
+                                   encoding="utf-8", newline="\n")
+
+    @staticmethod
+    def _spawn(*_args: object) -> bool:
+        return True
+
+    def test_relatch_does_not_erase_the_first_arming_record(self) -> None:
+        kw = {"plan_path": "p.md", "spawn": self._spawn, "tmp_dir": str(self.tmp)}
+        first = sentinel_lifecycle.maybe_arm(self.transcript, "sid-p4", **kw)
+        second = sentinel_lifecycle.maybe_arm(
+            self.transcript, "sid-p4", list_jobs=lambda: [], relatch_interval=0.0, **kw)
+        events = _read_jsonl(self.tmp / "autosdd_sentinel_events_sid-p4.jsonl")
+        self.assertEqual((first, second), ("armed", "relatched"))
+        self.assertEqual([e["event"] for e in events], ["sentinel_armed", "sentinel_relatched"])
+        self.assertEqual(events[0]["turns"], 40, "首次武裝的回合數被蓋掉了")
+        marker = json.loads(sentinel_lifecycle.arm_marker_path(
+            "sid-p4", str(self.tmp)).read_text(encoding="utf-8"))
+        self.assertEqual(marker["event"], "sentinel_relatched", "marker 必須維持「最新一筆」")
+
+    def test_without_a_caller_dir_the_history_lands_in_the_durable_trace_dir(self) -> None:
+        volatile = self.tmp / "volatile"
+        volatile.mkdir()
+        with mock.patch.dict(os.environ, {"AUTOSDD_TRACE_DIR": str(self.tmp / "traces")}), \
+                mock.patch("tempfile.gettempdir", return_value=str(volatile)):
+            why = sentinel_lifecycle.maybe_arm(
+                self.transcript, "sid-p4d", plan_path="p.md", spawn=self._spawn)
+        self.assertEqual(why, "armed")
+        events = _read_jsonl(self.tmp / "traces" / "autosdd_sentinel_events_sid-p4d.jsonl")
+        self.assertEqual([e["event"] for e in events], ["sentinel_armed"])
+        self.assertFalse((volatile / "autosdd_sentinel_events_sid-p4d.jsonl").exists(),
+                         "事件史落在易失的暫存目錄 ⇒ 被隔離的 TMPDIR 一起帶走")
 
 
 if __name__ == "__main__":

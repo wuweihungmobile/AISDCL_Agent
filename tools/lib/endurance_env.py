@@ -77,6 +77,8 @@ from platform_utils import claude_json_path
 
 #: 痕跡目錄的逃生口（測試／CI 指到沙箱用）。人設得到、模型改不到自己那一份。
 TRACE_DIR_ENV = "AUTOSDD_TRACE_DIR"
+#: 測試圍籬隔離根的前綴（SSOT；`sentinel_lifecycle.TEMP_FENCE_PREFIX` 引用本值）；見 `fenced_root`。
+FENCE_PREFIX = "suite_tmp_"
 
 #: 家目錄下的持久痕跡居所（相對於 `Path.home()`）。
 TRACE_HOME_PARTS = (".autosdd", "traces")
@@ -109,6 +111,22 @@ NOT_APPLICABLE = -1
 # 解析形態（ENV 逃生口 → 家目錄居所 → 唯讀／建不出來時退回系統暫存）抽成**單一定義**，
 # traces 與 handback 兩個居所共用——「同一句話兩個家」是本 repo 反覆判過的形態。兩層
 # 判斷（`mkdir` 失敗／建了但不可寫）逐字承接自 `trace_dir_status()` 原文，行為零變。
+def fenced_root() -> Path | None:
+    """行程 `tempfile.tempdir` 指向測試圍籬隔離根（`FENCE_PREFIX`）時回該根，否則 `None`。
+    只給 `uid_trace_dir`（不跟 HOME 走的居所）當後備：圍籬內的測試常把環境清空，但這個行程
+    全域仍在。HOME 基礎的居所**不走**本後備——各自隔離 HOME 的測試需要各自的目錄，
+    共用圍籬根會讓 halt 標記／結局檔跨測試互讀（第二次全套實證）。"""
+    root = Path(tempfile.gettempdir())
+    # 子行程的 TMPDIR 常是圍籬根底下測試自建的子目錄（名字不帶前綴）⇒ 往上找最近的圍籬祖先。
+    return next((c for c in (root, *root.parents) if c.name.startswith(FENCE_PREFIX)), None)
+
+
+def fence_trace_dir(root: Path | str, leaf: str = "traces") -> Path:
+    """圍籬內持久居所（SSOT；`fence_enter` 把 `TRACE_DIR_ENV` 釘到 `<根>/traces`）。
+    `leaf` 沿用各居所自己的尾段（traces／handback／plans），圍籬內三個居所不得收成同一格。"""
+    return Path(root) / leaf
+
+
 def _durable_dir_status(env_var: str, parts: tuple[str, ...]) -> tuple[Path, bool]:
     override = os.environ.get(env_var, "").strip()
     want = Path(override) if override else Path.home().joinpath(*parts)
@@ -128,6 +146,57 @@ def trace_dir_status() -> tuple[Path, bool]:
 
 def trace_dir() -> Path:
     return trace_dir_status()[0]
+
+
+#: 卸載痕跡檔名；住「每 uid 一份」的居所（`uid_trace_dir`），不跟 `$HOME`／`$TMPDIR` 走。
+UNLOAD_TRACE_NAME = "autosdd_sentinel_unloads.jsonl"
+#: `caller` 往上走時跳過的檔（載具自己與 stdlib 的 `subprocess`）。
+_SKIP_FRAMES = ("schedule_backend.py", "endurance_env.py", "subprocess.py")
+
+
+def uid_trace_dir() -> Path:
+    """卸載痕跡的目錄：`AUTOSDD_TRACE_DIR` 顯式值優先；POSIX 取 passwd 的家目錄（隔離 `$HOME`
+    吃不掉）；非 POSIX 無 `pwd`，退回跟 `$HOME` 走的 `trace_dir()`——誠實登記的缺口：Windows
+    測試若隔離 USERPROFILE，痕跡仍會一起被隔離。"""
+    if not os.environ.get(TRACE_DIR_ENV, "").strip():
+        fenced = fenced_root()
+        if fenced is not None:  # 圍籬內（含環境被清空）：留在 <隔離根>/traces，不逃到真實家目錄
+            return fence_trace_dir(fenced)
+        try:
+            import pwd  # noqa: PLC0415 — POSIX 專屬；捕 ImportError 即是平台守衛
+            return Path(pwd.getpwuid(os.getuid()).pw_dir).joinpath(*TRACE_HOME_PARTS)
+        except (ImportError, AttributeError, KeyError, OSError):
+            pass
+    return trace_dir()
+
+
+def record_unload(op: str, target: str, *, reason: str = "") -> bool:
+    """卸載／重載排程的稽核痕跡：append 一列 JSONL；回「寫了沒」，寫不進去一律吞掉。
+
+    只由載具漏斗呼叫（`schedule_backend._run` 等）：誰（`caller` 呼叫鏈、`argv`、`pid`）、
+    在什麼隔離狀態下（`home`／`tmpdir`）卸載了哪支排程事後可查。留不下痕跡不得讓卸載本身
+    失敗。史料見本輪證據檔〈九〉。
+    """
+    try:
+        frames, frame = [], sys._getframe(0)
+        while frame is not None and len(frames) < 4:
+            name = Path(frame.f_code.co_filename).name
+            if name not in _SKIP_FRAMES:
+                frames.append(f"{name}:{frame.f_code.co_name}:{frame.f_lineno}")
+            frame = frame.f_back
+        row = {"ts": time.strftime(_OUTCOME_STAMP), "op": op, "reason": str(reason)[:300],
+               "label": str(target).rsplit("/", 1)[-1].removesuffix(".plist"),
+               "caller": "<-".join(frames), "argv": sys.argv[:3], "pid": os.getpid(),
+               "ppid": os.getppid(), "home": str(Path.home()), "tmpdir": tempfile.gettempdir(),
+               "session_id": os.environ.get("CLAUDE_CODE_SESSION_ID", ""),
+               "xpc": os.environ.get("XPC_SERVICE_NAME", "")}
+        base = uid_trace_dir()
+        base.mkdir(parents=True, exist_ok=True)
+        with (base / UNLOAD_TRACE_NAME).open("a", encoding="utf-8", newline="\n") as handle:
+            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except Exception:  # noqa: BLE001 — 留不下痕跡不得讓卸載本身失敗
+        return False
+    return True
 
 
 #: handback 交接檔目錄的逃生口（v2.1.13 G2；慣例同 `TRACE_DIR_ENV`：測試／CI 指到沙箱，

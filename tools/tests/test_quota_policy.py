@@ -28,6 +28,7 @@ import ast
 import dataclasses
 import inspect
 import io
+import itertools
 import json
 import os
 import random
@@ -110,7 +111,7 @@ _TABLE = [
     ("S4-3 今天的實測活值",
      state(("session", 61, 13.5), ("weekly_all", 57, 8233)), 4, 4, "weekly_all"),
     ("S4-4 79%@3min",
-     state(("session", 79, 3)), 8, 4, "session"),
+     state(("session", 79, 3)), 4, 2, "session"),
     ("S4-5 79%@240min",
      state(("session", 79, 240)), 4, 2, "session"),
     ("S4-6 79%@6d",
@@ -200,6 +201,10 @@ class TestTheTableIsProducedByTheRuleNotByHand(unittest.TestCase):
                 base = min(Q._base_rec(r.band, P) for r in readings)
                 rec = Q._bound(Q._clamp(int(base * Q._pace_of(readings, P)), P),
                                None if cap == _INF else int(cap))
+                live = [r.minutes for r in readings if r.minutes is not None
+                        and not {Q.NOTE_ELAPSED, Q.NOTE_SKEW} & set(r.note.split("+"))]
+                if live and min(live) < P.wrap_minutes:   # 收尾保留段：只動 rec，不動 cap
+                    rec = min(rec, P.cap_prepare)
                 self.assertEqual(cap, QC.cap_num(want_cap), f"{label}: cap")
                 self.assertEqual(rec, want_rec, f"{label}: rec")
 
@@ -408,9 +413,10 @@ _SWEEP_MINUTES = (1, 5, 15, 30, 31, 120, 360, 361, 1000, 8640)
 
 
 def m1b_problems(decide_fn, other: tuple, pct: float = 0.0) -> list[str]:
-    """固定一條長期程軸，掃短期程軸的 reset 距離：`rec` 必須**動**且方向正確。"""
+    """固定一條長期程軸，掃短期程軸的 reset 距離：`rec` 必須**動**且方向正確。收尾帶
+    （剩餘分鐘 < `wrap_minutes`）內 rec 被刻意壓到 cap_prepare，不在加速可觀測性的掃描面。"""
     recs = [decide_fn(state(("session", pct, m), other)).recommended_fanout
-            for m in _SWEEP_MINUTES]
+            for m in _SWEEP_MINUTES if m >= P.wrap_minutes]
     problems = []
     if len(set(recs)) < 2:
         problems.append(
@@ -463,10 +469,11 @@ class TestM1bAccelerationSurvivesAggregation(unittest.TestCase):
             state(("session", 0, 30), _LOOSE_WEEKLY)).recommended_fanout, 4)
 
     def test_the_hard_cap_still_moves_with_the_short_axis(self) -> None:
-        """cap 那一半也要看得見期程：session 90% 在 near/mid/far 三檔 ⇒ 4/2/1。"""
+        """cap 那一半也要看得見期程：session 90% 在 near/mid/far 三檔 ⇒ 2/2/1（cap 隨期程單調
+        不增：near 不再放寬，只有 far 收緊；加速由 rec 那一半承接，見上方掃描）。"""
         caps = [Q.decide(state(("session", 90, m), _TIGHT_WEEKLY), NOW, P).cap
                 for m in (3, 240, 8640)]
-        self.assertEqual(caps, [4, 2, 1])
+        self.assertEqual(caps, [2, 2, 1])
 
     def test_a_tighter_axis_still_wins_the_hard_cap(self) -> None:
         """反向鑑別力：加速**不得**穿過煞車。weekly 撞線 ⇒ 兩者皆 0，掃描全平。"""
@@ -546,22 +553,47 @@ class TestM1bAccelerationSurvivesAggregation(unittest.TestCase):
 # ═══════════════════════════════════════════════════════════════════════════
 # M2 reset 距離必須真的影響輸出（6b 的存在性證明）
 # ═══════════════════════════════════════════════════════════════════════════
+def m2_problems_capped(cap_fn, rec_fn) -> list[str]:
+    """M2（期程必須真的影響輸出）在 cap 不吃加速乘數之後的判準：固定 pct=79，cap 隨 reset 變遠
+    **非遞增**且遠端嚴格小於中段（near 不再放寬 cap）；加速只剩 rec 一個出口，rec 仍須
+    near>mid>far。`QC.m2_problems` 要求 cap 近端嚴格大於中段，與 `DEF-200-198` 的設計互斥。"""
+    problems = []
+    near, mid, far = (QC.cap_num(cap_fn(79, m)) for m in (3, 240, 8640))
+    if not near >= mid > far:
+        problems.append(f"79% 的 cap 未隨期程單調（要 near≥mid>far）：{near}/{mid}/{far}")
+    seq = [QC.cap_num(cap_fn(79, m)) for m in range(1, 20000, 37)]
+    if any(b > a for a, b in zip(seq, seq[1:], strict=False)):
+        problems.append("cap 隨 minutes 增大而變寬（方向掃描失敗）")
+    if cap_fn(20, 3) is not None or cap_fn(20, 240) is not None:
+        problems.append("free 帶的 cap 不該被設限")
+    recs = [rec_fn(79, m) for m in (3, 240, 8640)]
+    if not recs[0] > recs[1] > recs[2]:
+        problems.append(f"79% 的 rec 未隨期程遞減：{recs}（加速只剩 rec 這個出口）")
+    if rec_fn(20, 3) <= rec_fn(20, 240):
+        problems.append("free 帶的『加速』沒有出口（rec 必須隨 reset 逼近而變大）")
+    return problems
+
+
 class TestM2HorizonActuallyMoves(unittest.TestCase):
     def test_green_the_real_implementation_passes(self) -> None:
         self.assertEqual(
-            QC.m2_problems(lambda pct, m: Q.axis_cap(pct, m, P),
-                        lambda pct, m: Q.axis_recommended(pct, m, P)), [])
+            m2_problems_capped(lambda pct, m: Q.axis_cap(pct, m, P),
+                               lambda pct, m: Q.axis_recommended(pct, m, P)), [])
 
-    def test_the_three_horizons_are_three_different_caps(self) -> None:
-        """規格 M2 的定點：8 / 4 / 2。今天實測三者皆 `tier=normal cap=None`。"""
+    def test_the_cap_ladder_steps_down_only_at_far_and_the_rec_ladder_has_three_values(
+            self) -> None:
+        """規格 M2 的定點：cap 4 / 4 / 2（near 不再放寬）、rec 4 / 2 / 1（加速只在 rec）。"""
         self.assertEqual(
             [Q.axis_cap(79, 3, P), Q.axis_cap(79, 240, P), Q.axis_cap(79, 8640, P)],
-            [8, 4, 2])
+            [4, 4, 2])
+        self.assertEqual(
+            [Q.axis_recommended(79, 3, P), Q.axis_recommended(79, 240, P),
+             Q.axis_recommended(79, 8640, P)], [4, 2, 1])
 
     def test_red_when_the_minutes_parameter_is_ignored(self) -> None:
         """注入：`axis_cap` 無視 `minutes`（＝今天 shipped 的形態）⇒ 必紅。"""
-        problems = QC.m2_problems(lambda pct, _m: Q.axis_cap(pct, 240, P),
-                               lambda pct, _m: Q.axis_recommended(pct, 240, P))
+        problems = m2_problems_capped(lambda pct, _m: Q.axis_cap(pct, 240, P),
+                                      lambda pct, _m: Q.axis_recommended(pct, 240, P))
         self.assertTrue(problems, "無視 minutes 卻沒轉紅＝零鑑別力")
 
     def test_red_when_the_direction_is_inverted(self) -> None:
@@ -569,8 +601,8 @@ class TestM2HorizonActuallyMoves(unittest.TestCase):
         inverted = {Q.AXIS_NEAR: 0.5, Q.AXIS_MID: 1.0,
                     Q.AXIS_FAR: 2.0, Q.AXIS_NONE: 2.0}
         self.assertTrue(
-            QC.m2_problems(lambda pct, m: _mult_cap(pct, m, inverted),
-                        lambda pct, m: Q.axis_recommended(pct, m, P)))
+            m2_problems_capped(lambda pct, m: _mult_cap(pct, m, inverted),
+                               lambda pct, m: Q.axis_recommended(pct, m, P)))
 
 
 def _mult_cap(pct: float, minutes: float | None, table: dict) -> int | None:
@@ -863,7 +895,7 @@ class TestM4AccelerationFailsClosed(unittest.TestCase):
         self.assertIsNone(reading.minutes)
         self.assertEqual(reading.horizon, Q.AXIS_NONE)
         self.assertEqual(reading.note, Q.NOTE_MISSING)
-        self.assertEqual(Q.axis_cap(88, 5, P), 4)   # 硬塞 5 分鐘會得到完全不同的答案
+        self.assertEqual(Q.axis_cap(88, 5, P), 2)   # 硬塞 5 分鐘會得到完全不同的答案
 
     def test_clock_skew_is_zero_minutes_but_forced_mid(self) -> None:
         """M4-③：偏移 ⇒ `minutes==0.0`、`note=clock-skew`、檔位**強制 mid**。"""
@@ -1498,19 +1530,17 @@ _UNMEASURABLE_REASONS = (
     "no-credentials", "no-credentials-darwin", "keychain-timeout",
     "http-401", "http-5xx", "meter-unreachable", "no-buckets",
     "stale-cache", "expired-cache", "schema-mismatch", "no-cache",
+    "http-429-unmeasured",
 )
 
 
 # 🔴 立案（R83／F2-③，同 `TestM8SchemaStaysInSync` 形狀）：漏登記＝失明而 rc 全綠。
 # 分母是**現查** meter 的 `REASON_*` 宣告集合，不是寫死清單。全文＝Pace 證據檔 §7-R95-L5。
 _METER_REASON_RE = re.compile(r"^REASON_([A-Z0-9_]+)\s*=\s*\"([^\"]+)\"", re.MULTILINE)
-#: 「量到了」的字面，語意上不屬本表——例外必須**具名**而不是靠註解。
-#: 🔴 R100 新增第二個成員 `http-429-floor`：與 `ok` 同族（都帶著讀數回來；讀數是 pct 下界 100 的單
-#: 軸地板），登記進 `_UNMEASURABLE_REASONS` 會是假話（429 路徑結構上不可能 `axes == ()`）；本例外
-#: 由 `test_context_budget_guard.py::RateLimitIsAFloorNotAnUnknownTest` 承接，兩表互斥見下方
-#: `test_the_exemptions_are_not_also_registered_as_unmeasurable`。完整推導搬至
-#: Guard_Line_History_2.md〈R186 淨減法搬遷〉§48。  round-label-ok
-_NOT_A_FAILURE = ("ok", "http-429-floor")
+#: 「量到了」的字面，語意上不屬本表——例外必須**具名**而不是靠註解。目前只有 `ok`：429 已改走
+#: 「量不到」（`http-429-unmeasured`，登記在上表），兩表互斥見下方
+#: `test_the_exemptions_are_not_also_registered_as_unmeasurable`。
+_NOT_A_FAILURE = ("ok",)
 
 
 def reason_registry_problems(meter_src: str, registered: tuple[str, ...]) -> list[str]:
@@ -2450,7 +2480,20 @@ class TestR98ModelScopedAxisDoesNotBindWithoutDispatch(unittest.TestCase):
         self.assertIn(d.binding.kind, ("weekly_all", "seven_day"))
         self.assertEqual(d.band, Q.BAND_FREE)
         self.assertIsNone(d.cap, "42% 未過 notice 門檻，cap 不該被 61% 的旁支模型壓低")
-        self.assertGreater(d.recommended_fanout, 4, "整輪扇出被腰斬正是本缺陷的可觀後果")
+        self.assertGreaterEqual(d.recommended_fanout, 4, "整輪扇出被腰斬正是本缺陷的可觀後果")
+        # 排除軸中立：被排除的 weekly_scoped（61%／halt 帶 97%）與「完全沒有該軸」，決策逐欄相同。
+        base = self._r98_state(scope_model="Fable")
+        bare = dataclasses.replace(
+            base, axes=tuple(a for a in base.axes if a.kind != "weekly_scoped"))
+        want = Q.decide(bare, NOW, P)
+        for pct in (61.0, 97.0):   # 97＝halt 帶：若誤入 gate，rec 會被壓到 0
+            hot = dataclasses.replace(base, axes=tuple(
+                dataclasses.replace(a, pct=pct) if a.kind == "weekly_scoped" else a
+                for a in base.axes))
+            got = Q.decide(hot, NOW, P)
+            with self.subTest(excluded_pct=pct):
+                self.assertEqual((got.cap, got.recommended_fanout, got.band),
+                                 (want.cap, want.recommended_fanout, want.band), "排除軸改了決策")
 
     def test_a_mismatched_active_model_is_excluded_the_same_way(self) -> None:
         """`active_model` 給了、但與伺服器回報的模型不同（本 session 真實模型）：
@@ -2644,12 +2687,7 @@ class TestAmortizationNamesTheAxisItActuallyUsed(unittest.TestCase):
 
 class TestPaceAmortizationUsesTheGateRuler(unittest.TestCase):
     """DEF-200-438：`--pace` 的攤提與 cap 聚合用同一把尺——別家的 model-scoped 軸不進攤提。
-
-    立案：Opus session 親跑 `--pace`，five_hour 1%／4% 卻印 `band=prepare cap=1 note=amortized`
-    ——Fable weekly_scoped 97% 混進攤提，而 gate 早已依 R98 把它排除在 cap 聚合外（同快取 gate
-    算 cap=2 band=converge）。「用沒碰過的模型水位節流真正在用的模型」R98 判為嚴重錯誤，攤提面
-    同樣適用。🔴 方向：只排除 active_model **已知且該軸不命中** 的 model-scoped 軸；擁有該軸的
-    模型與「不知道是誰」一律納入（量不到≠量到零）。"""
+    史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§72。"""
 
     RATIO = 3.69
 
@@ -2994,12 +3032,7 @@ class AvailabilityHysteresisTest(unittest.TestCase):
 class ConcurrencyStabilityTest(unittest.TestCase):
     """R102（第二棒）／PRD §4.2.4(b)(c)(d)：死區／變化率限制／最小停留時間  round-label-ok
     （`tools/lib/quota_stability.py`）。
-
-    每一支斷言**行為／方向**（同 `AvailabilityHysteresisTest` 的既有風格），涵蓋任務書
-    逐字列出的六項：死區內不變更／死區外按變化率限速／安全方向不受限速／stay time
-    未到不允許增加但允許減少／availability=unmeasured 時放寬全部失效／（第六項＝R16，
-    見 `DynamicPacingBootCheckTest`）。
-    """
+    史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§73。"""
 
     NOW = datetime(2026, 8, 24, 12, 0, 0, tzinfo=UTC)
 
@@ -3495,12 +3528,7 @@ class DynamicPacingBootCheckTest(unittest.TestCase):
 class ConcurrencyDecisionPathWiringTest(unittest.TestCase):
     """接線面：`quota_stability`／`quota_availability` 必須真的被**呼叫**，不是蓋好沒接電
     （同 repo 既有『函式對了但沒人叫它』判例，見 `quota_policy.py` 對 M10 的引用）。
-
-    源碼檢查而非完整 E2E：`quota_gate()`／`pace_report()` 都依賴一整條全域暫存路徑
-    （`quota_ledger`／`quota_meter` 快取檔），完整 E2E 需要重建那整條環境；本鎖對
-    「接線存在」有鑑別力（改壞任何一邊都會紅），機制本體的行為鑑別力由
-    `ConcurrencyStabilityTest`／`AvailabilityHysteresisTest` 承擔。
-    """
+    史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§74。"""
 
     _SRC = (_REPO / "tools" / "lib" / "quota_gate.py").read_text(encoding="utf-8")
 
@@ -3591,14 +3619,7 @@ class TestR104BurstingOkAndEwmaBurnRate(unittest.TestCase):
 
 # ── DEF-200-230：額度取數端點的「單一家」回歸鎖（PRD §15.5 紅線 1 條件 (b)） ──────────
 # 立案敘事（帳本 DEF-200-230 逐字）已搬至 CrossPlatform_R127_Guard_Prose_Migration.md。
-#
-# 🔴 為何 needle 是**組出來**的、不寫成一個完整字面：本檔自己也在掃描面上（tracked `.py`），
-# 寫全就成了第二個家、鎖對自己轉紅——把判準寫成「除了本檔以外」則是自己給自己開豁免，
-# 那條出口一開，下一個人照抄就多一個豁免。組回處只有 `_usage_url_needle()` 一個。
-#
-# 誠實劃界：本鎖判「完整 URL 字面」的相異檔數，**不判**有人把 host 與 path 分成兩個常數
-# 拼起來（那與本檔自己的做法同形，機械上分不出來）；也不管 `.md`／`.ps1`（文件引述端點
-# 是合法的，實測 `docs/` 下 6 處皆為史料與 ADR 引用）。
+# 史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§75。
 _USAGE_URL_HALVES = ("api.anthropic.com", "/api/oauth/usage")
 #: 唯一合法的家（相對 repo 根的 posix 路徑）。
 _USAGE_URL_HOME = "tools/lib/quota_meter.py"
@@ -3866,6 +3887,377 @@ class TestDef200243InheritedWindowMayOnlyTighten(unittest.TestCase):
                      NOW, P, ratio=1.0)
         self.assertIsNotNone(d.amort, "三軸含短窗與長窗卻算不出攤提 ⇒ 攤提通道被本修法弄壞")
         self.assertEqual(d.amort.rate_window, 300.0, "速率軸窗長不再是繼承後的 300 ⇒ 攤提也被拆了")
+
+
+#: HEAD 的 rec 表（band × horizon）：W1 只准收緊 cap、一格 rec 都不准動（歷史快照常數）。
+_REC_SNAPSHOT = {
+    Q.BAND_FREE: (16, 8, 4, 4), Q.BAND_NOTICE: (8, 4, 2, 2),
+    Q.BAND_CONVERGE: (4, 2, 1, 1), Q.BAND_PREPARE: (2, 1, 1, 1), Q.BAND_HALT: (0, 0, 0, 0)}
+_HORIZONS = (Q.AXIS_NEAR, Q.AXIS_MID, Q.AXIS_FAR, Q.AXIS_NONE)
+
+
+class TestDef200198CapIsABrakeNotAnAccelerator(unittest.TestCase):
+    """`DEF-200-198`（M198-1）：加速乘數只准作用在 rec，不得抬高 cap——notice×near 此前
+    8×2.0＝16＝`max_fanout`，結構上擋不了任何扇出。cap 隨 horizon 單調不增（near==mid 是新
+    設計），rec 的 near>mid>far 三值與錨點①（free×near rec 16）一格不動。"""
+
+    def test_no_cell_caps_at_max_fanout_and_rec_is_unchanged(self) -> None:
+        for band, recs in _REC_SNAPSHOT.items():
+            for horizon, want_rec in zip(_HORIZONS, recs, strict=True):
+                with self.subTest(band=band, horizon=horizon):
+                    cap = Q._cap_for(band, horizon, P)
+                    self.assertTrue(cap is None or cap < P.max_fanout,
+                                    f"cap={cap} 等於 max_fanout={P.max_fanout} ⇒ 擋不了任何扇出")
+                    if cap is not None and band != Q.BAND_HALT:
+                        self.assertLessEqual(cap, Q._base_cap(band, P),
+                                             "cap 被加速乘數抬過 base ⇒ 煞車被抹掉")
+                    self.assertEqual(Q._rec_for(band, horizon, P), want_rec,
+                                     "rec 不得因 cap 夾層而變（W1 只動 cap）")
+
+    def test_the_cap_still_depends_on_the_horizon_only_downward(self) -> None:
+        """cap 仍是 horizon 的函式（far 嚴格小於 mid），只是 near 不再放寬到 mid 之上。"""
+        for band in (Q.BAND_NOTICE, Q.BAND_CONVERGE, Q.BAND_PREPARE):
+            near, mid, far, none = (Q._cap_for(band, h, P) for h in _HORIZONS)
+            self.assertEqual(near, mid, f"{band}: near 的 cap 不得高於 mid")
+            self.assertGreater(mid, far, f"{band}: far 必須比 mid 更緊（cap 仍是期程的函式）")
+            self.assertEqual(far, none)
+
+    def test_the_helm_anchor_one_free_near_is_untouched(self) -> None:
+        """錨點①「剩 30Min 就 Reset、還有 100% 沒用 ⇒ 加速」住在 free 帶：cap None、rec 16。"""
+        self.assertIsNone(Q._cap_for(Q.BAND_FREE, Q.AXIS_NEAR, P))
+        self.assertEqual(Q._rec_for(Q.BAND_FREE, Q.AXIS_NEAR, P), P.max_fanout)
+        d = Q.decide(state(("session", 0, 30)), NOW, P)
+        self.assertEqual((d.cap, d.recommended_fanout), (None, 16))
+
+    def test_an_env_knob_can_still_push_a_cell_back_to_max_fanout_and_that_is_the_second_arm(
+            self) -> None:
+        """出廠值下 cap==max_fanout 不可達，但 `AUTOSDD_QUOTA_CAP_NOTICE=16` 把它推回可達——
+        所以 `pace_line` 的第二臂判準不是死碼（cbg 側釘措辭）；本格只釘「可達」這個前提。"""
+        policy, problems = Q.load_policy({"AUTOSDD_QUOTA_CAP_NOTICE": "16"})
+        self.assertEqual(problems, [])
+        self.assertEqual(Q._cap_for(Q.BAND_NOTICE, Q.AXIS_MID, policy), policy.max_fanout)
+
+    def test_the_factory_pace_far_is_untouched_by_the_pacing_batch(self) -> None:
+        """DEF-200-199 的已否決方向（動 `pace_far` 會同時鬆掉週軸）：出廠值逐字釘死。
+        此前只有 `_mult(far)==P.pace_far`（引用而非字面）一鎖，改 0.75 時全綠。"""
+        self.assertEqual(Q.DEFAULT_POLICY.pace_far, 0.5)
+        spec = next(s for s in Q.ENV_SPEC if s.name == "AUTOSDD_QUOTA_PACE_FAR")
+        self.assertEqual(spec.default, 0.5)
+
+
+class TestDef200197RateLimitIsUnmeasuredAndSyntheticReadingsAreNamed(unittest.TestCase):
+    """`DEF-200-197`（M197-1／E3）：429 是遙測端點的限流、不是模型額度——走「量不到」而不是
+    「量到 100%」的地板讀數；repo 自己合成的讀數（逐字稿地板）note 說 `synthetic-reading`，
+    不再冒充伺服器吐出的陌生桶（`unknown-kind`）。判別以 provenance（`via`），不是 kind 清單。"""
+
+    def _floor_state(self, via: str) -> Q.QuotaState:
+        floor = Q.Axis(kind="quota_session", pct=100.0, resets_at=at(60), via=via)
+        return Q.QuotaState((floor,), NOW.isoformat(), "transcript-floor", "transcript-floor")
+
+    def test_the_429_reason_is_registered_as_unmeasurable_and_the_floor_shape_is_gone(self) -> None:
+        self.assertEqual(M.REASON_RATE_LIMITED_UNMEASURED, "http-429-unmeasured")
+        self.assertIn(M.REASON_RATE_LIMITED_UNMEASURED, _UNMEASURABLE_REASONS)
+        for gone in ("REASON_RATE_LIMITED", "rate_limited_reading"):
+            self.assertFalse(hasattr(M, gone), f"{gone} 還在 ⇒ 429 又有機會被轉譯成量到 100%")
+
+    def test_the_transcript_floor_axis_says_synthetic_and_not_unknown_kind(self) -> None:
+        note = Q.decide(self._floor_state("transcript-floor"), NOW, P).per_axis[0].note
+        self.assertIn(Q.NOTE_SYNTHETIC, note)
+        self.assertNotIn(Q.NOTE_UNKNOWN, note, "repo 自己合成的軸被說成伺服器吐出的陌生桶")
+
+    def test_the_literal_and_the_member_set_are_named(self) -> None:
+        self.assertEqual(Q.NOTE_SYNTHETIC, "synthetic-reading")
+        self.assertEqual(Q.SYNTHETIC_VIA, frozenset({"transcript-floor"}))
+
+    def test_a_server_axis_of_the_same_unknown_kind_still_says_unknown_kind(self) -> None:
+        """對照組：判別看 provenance——同一個 kind 由伺服器端點吐出時仍是 `unknown-kind`。"""
+        note = Q.decide(self._floor_state("limits[].percent"), NOW, P).per_axis[0].note
+        self.assertIn(Q.NOTE_UNKNOWN, note)
+        self.assertNotIn(Q.NOTE_SYNTHETIC, note)
+
+    def test_the_synthetic_note_classifies_nothing_and_leaves_the_fingerprint_alone(self) -> None:
+        """B17：只動 note 字面一面——band／cap／rec／binding 與指紋一個位元都不變。"""
+        floor = Q.decide(self._floor_state("transcript-floor"), NOW, P)
+        server = Q.decide(self._floor_state("limits[].percent"), NOW, P)
+        for field in ("cap", "recommended_fanout", "band"):
+            self.assertEqual(getattr(floor, field), getattr(server, field), field)
+        self.assertEqual(floor.binding.kind, server.binding.kind)
+        self.assertNotIn("quota_session", Q.KNOWN_KINDS, "自造讀數的 kind 不得收進 KNOWN_KINDS")
+        with mock.patch.object(QG, "note_degraded", return_value=""):
+            self.assertEqual(QG.core_signature(self._floor_state("transcript-floor")),
+                             QG.core_signature(self._floor_state("limits[].percent")))
+
+    def test_the_production_floor_stamps_a_via_that_the_set_knows(self) -> None:
+        """兩個家對得上：`quota_floor_reading` 蓋的 `via` 必須在 `SYNTHETIC_VIA` 裡。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = Path(tmp) / "s.jsonl"
+            ok = {"type": "assistant", "timestamp": "2026-08-07T18:00:00Z",
+                  "message": {"model": "claude-opus-5", "usage": {"input_tokens": 5}}}
+            hit = {"type": "assistant", "timestamp": "2026-08-07T18:36:53Z",
+                   "message": {"model": "<synthetic>", "content": [
+                       {"text": "You've hit your session limit \u00b7 resets 9am (Asia/Taipei)"}]}}
+            transcript.write_text(json.dumps(ok) + "\n" + json.dumps(hit) + "\n",
+                                  encoding="utf-8", newline="\n")
+            floor = QG.quota_floor_reading({"transcript_path": str(transcript)}, NOW)
+        self.assertIsNotNone(floor, "前提不成立：地板夾具沒有被判成未復原的撞線")
+        self.assertTrue(floor.axes and all(a.via in Q.SYNTHETIC_VIA for a in floor.axes))
+
+
+class TestDef200198TWrapMustFinishGuard(unittest.TestCase):
+    """`DEF-200-198` 拆殘（T_WRAP；PRD 增補檔 §5.3）：剩餘分鐘低於 `wrap_minutes`（出廠＝一個扇出
+    視窗 5 分）⇒ 建議派工數收到 `cap_prepare`、reason 具名 `must-finish`；cap 與 band 一格不動
+    （本段治的是「派了也做不完」，不是「額度不夠」）。只看進 cap 聚合的軸，排除已過期（elapsed）
+    與鐘偏移（clock-skew）的軸——它們的分鐘數被夾成 0，不是「真的剩 0 分鐘」。"""
+
+    def _decide(self, *specs, **kw) -> Q.Decision:
+        return Q.decide(state(*specs), NOW, kw.pop("policy", P), **kw)
+
+    def test_the_factory_wrap_equals_the_fanout_window_and_has_a_floor(self) -> None:
+        """policy 不得 import gate，故以對等測試釘出廠值＝`FANOUT_WINDOW_SECONDS/60`。"""
+        self.assertEqual(Q.Policy().wrap_minutes * 60, QG.FANOUT_WINDOW_SECONDS)
+        spec = next(s for s in Q.ENV_SPEC if s.name == "AUTOSDD_QUOTA_WRAP_MINUTES")
+        self.assertEqual((spec.attr, spec.default, spec.lo), ("wrap_minutes", 5.0, 2.0))
+        self.assertIn("AUTOSDD_QUOTA_WRAP_MINUTES", Q.render_env_example())
+
+    def test_crossing_the_wrap_line_caps_the_recommendation_but_never_the_cap(self) -> None:
+        """掃過 `wrap_minutes` 兩側與邊界：越線 ⇒ rec≤cap_prepare＋reason 具名，cap／band 不動。"""
+        wrap = P.wrap_minutes
+        for pct in (0, 55, 75):
+            inside = self._decide(("session", pct, wrap - 0.01))
+            edge = self._decide(("session", pct, wrap))
+            outside = self._decide(("session", pct, wrap + 0.01))
+            with self.subTest(pct=pct):
+                self.assertLessEqual(inside.recommended_fanout, P.cap_prepare)
+                self.assertIn(Q.NOTE_MUST_FINISH, inside.reason.split(","))
+                self.assertEqual((inside.cap, inside.band), (outside.cap, outside.band),
+                                 "must-finish 動到了 cap 或 band（它只准動 rec）")
+                self.assertEqual((edge.cap, edge.band), (outside.cap, outside.band))
+                for clear in (edge, outside):
+                    self.assertNotIn(Q.NOTE_MUST_FINISH, clear.reason.split(","),
+                                     "邊界值（剛好等於 wrap）不屬收尾帶：判準是嚴格小於")
+        # 越線真的壓低了建議值（不是本來就不高）：free 帶 near 的 rec 是 16。
+        self.assertEqual(self._decide(("session", 0, wrap + 0.01)).recommended_fanout, 16)
+        self.assertEqual(self._decide(("session", 0, wrap - 0.01)).recommended_fanout,
+                         P.cap_prepare)
+
+    def test_zero_minutes_left_is_not_a_halt_and_still_recommends_at_least_one(self) -> None:
+        """P15：`T_rem=0`（resets_at 恰等於現在、未過期）非 halt ⇒ rec 落在 [1, cap_prepare]；
+        下界不得是 0（禁止靜默鎖死）。"""
+        for pct in (0, 75, 90):
+            d = self._decide(("session", pct, 0))
+            with self.subTest(pct=pct):
+                self.assertNotEqual(d.band, Q.BAND_HALT)
+                self.assertGreaterEqual(d.recommended_fanout, 1)
+                self.assertLessEqual(d.recommended_fanout, P.cap_prepare)
+                self.assertIn(Q.NOTE_MUST_FINISH, d.reason.split(","))
+        # 程式性構造（env 的下界是 1）：收尾保留段也不得把非 halt 鎖死。
+        weird = self._decide(("session", 40, 0), policy=Q.Policy(cap_prepare=0))
+        self.assertGreaterEqual(weird.recommended_fanout, 1)
+
+    def test_the_smallest_remaining_gate_axis_decides(self) -> None:
+        near = self._decide(("session", 0, 3), ("weekly_all", 20, 8640))
+        far = self._decide(("session", 0, 120), ("weekly_all", 20, 8640))
+        self.assertIn(Q.NOTE_MUST_FINISH, near.reason.split(","))
+        self.assertNotIn(Q.NOTE_MUST_FINISH, far.reason.split(","))
+
+    def test_an_axis_that_is_not_really_ending_does_not_trigger(self) -> None:
+        """四個不觸發格：鐘偏移／已翻頁（分鐘被夾 0）、無期程、保險軸與別家模型軸（不進 gate）。"""
+        skewed = self._decide(("session", 0, -5))                   # reset 在量測前就已過去
+        elapsed = Q.decide(Q.QuotaState((Q.Axis("session", 0.0, at(-2)),),
+                                        (NOW - timedelta(minutes=10)).isoformat(), "endpoint"),
+                           NOW, P)                                   # 量測後才翻頁
+        no_horizon = self._decide(("weekly_all", 20, None))
+        insurance = self._decide(("session", 0, 120), ("spend", 90, 3))
+        scoped = Q.Axis("weekly_scoped", 30.0, at(3), scope_model="Fable")
+        scoped_st = Q.QuotaState((axis("session", 0, 120), scoped), NOW.isoformat(), "endpoint")
+        other_model = Q.decide(scoped_st, NOW, P, active_model="Sonnet")
+        for label, d, minutes_clamped in (("鐘偏移", skewed, True), ("已翻頁", elapsed, True),
+                                          ("無期程", no_horizon, False),
+                                          ("保險軸", insurance, False),
+                                          ("別家模型軸", other_model, False)):
+            with self.subTest(label):
+                self.assertNotIn(Q.NOTE_MUST_FINISH, d.reason.split(","))
+        self.assertEqual(next(r.minutes for r in skewed.per_axis), 0.0, "前提：偏移軸分鐘被夾 0")
+        self.assertEqual(next(r.minutes for r in elapsed.per_axis), 0.0, "前提：翻頁軸分鐘被夾 0")
+        # 對照組：命中的模型軸（進 gate）剩 3 分鐘就是真的在收尾。
+        hit = Q.decide(scoped_st, NOW, P, active_model="Fable")
+        self.assertIn(Q.NOTE_MUST_FINISH, hit.reason.split(","))
+
+    def test_the_wrap_knob_is_tunable_and_must_stay_below_the_accel_window(self) -> None:
+        """env 鍵接通 `Policy`；且必須 < accel_window（否則整個 near 帶都成收尾帶＝錨點①消失）。"""
+        policy, problems = Q.load_policy({"AUTOSDD_QUOTA_WRAP_MINUTES": "10"})
+        self.assertEqual((problems, policy.wrap_minutes), ([], 10.0))
+        self.assertIn(Q.NOTE_MUST_FINISH,
+                      self._decide(("session", 0, 8), policy=policy).reason.split(","))
+        self.assertNotIn(Q.NOTE_MUST_FINISH, self._decide(("session", 0, 8)).reason.split(","))
+        for raw in ("30", "45"):          # == accel_window（30）與其上
+            bad, problems = Q.load_policy({"AUTOSDD_QUOTA_WRAP_MINUTES": raw})
+            with self.subTest(raw=raw):
+                self.assertTrue(any("wrap_minutes" in x for x in problems), problems)
+                self.assertEqual(bad, Q.DEFAULT_POLICY, "壞設定必須整組退回預設")
+        floor, problems = Q.load_policy({"AUTOSDD_QUOTA_WRAP_MINUTES": "1"})
+        self.assertTrue(problems, "低於下界 2 被靜默接受")
+        self.assertEqual(floor.wrap_minutes, P.wrap_minutes)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# DEF-200-199（L1-γ）：rec 的跨軸聚合——稀缺度與節奏同軸；唯有近期程加速（pace>1）沿用 base×pace
+# ═══════════════════════════════════════════════════════════════════════════
+#: 4 個非 halt band × 4 horizon ＝ 16 格；三軸全笛卡兒積＝ 4096 組（只斷言方向與非空，不凍導出數）。
+_G_CELLS = [(b, h) for b in (Q.BAND_FREE, Q.BAND_NOTICE, Q.BAND_CONVERGE, Q.BAND_PREPARE)
+            for h in _HORIZONS]
+#: 出廠值之外再掃兩組合法 Policy：出廠值下 cap 恰為 rec 的兩倍，加速臂取 min／max 的 base 輸出相同，
+#: 只掃出廠值會讓這類改動隱形。
+_G_POLICIES = (P, Q.Policy(pace_near=1.5, pace_far=0.5),
+               Q.Policy(cap_notice=6, cap_converge=3, cap_prepare=1, pace_near=3.0, pace_far=0.25))
+
+
+def _g_gate(trio, pol=P) -> tuple:
+    """(band, horizon)×3 ⇒ 三條注入讀數（kind 非保險軸／非分軌＝全進 gate；cap 取生產值）。"""
+    return tuple(Q.AxisReading(Q.Axis(f"k{i}", 0.0, None), b, h, Q._cap_for(b, h, pol),
+                               Q._rec_for(b, h, pol), None, "") for i, (b, h) in enumerate(trio))
+
+
+def _g_decide(gate: tuple, pol=P) -> Q.Decision:
+    """真 `decide()`：只把 `axes_of` 換成注入讀數——gate／binding／rec 聚合與收尾段全是生產碼。"""
+    st = Q.QuotaState(tuple(r.axis for r in gate), NOW.isoformat(), "endpoint")
+    with mock.patch.object(Q, "axes_of", return_value=gate):
+        return Q.decide(st, NOW, pol)
+
+
+def _g_veto(gate) -> bool:
+    return any(r.horizon == Q.AXIS_NONE and r.cap is not None for r in gate)
+
+
+def _g_pace(gate, pol=P) -> float:
+    """凍結的舊 pace 律：最短期程那一軸的乘數；期程不明且真的在煞車的軸一票否決（夾 1.0）。"""
+    fastest = max(Q._mult(r.horizon, pol) for r in gate)
+    return min(1.0, fastest) if _g_veto(gate) else fastest
+
+
+def _g_today(gate, pol=P) -> int:
+    """凍結的舊聚合律＝修前的 `decide()`：base 取最緊稀缺度、乘最短期程乘數、夾 binding cap。"""
+    caps = [r.cap for r in gate if r.cap is not None]
+    base = min(Q._base_rec(r.band, pol) for r in gate)
+    return Q._bound(Q._clamp(int(base * _g_pace(gate, pol)), pol), min(caps) if caps else None)
+
+
+def _g_per_axis_min(gate, veto_clamp: bool = True, pol=P) -> int:
+    """逐軸 `_rec_for` 取 min；否決在場時近期程軸只准當 mid（乘數夾 1.0）＝施工圖 L1 原文的聚合。"""
+    veto = veto_clamp and _g_veto(gate)
+    return min(Q._rec_for(r.band, Q.AXIS_MID if veto and r.horizon == Q.AXIS_NEAR else r.horizon,
+                          pol) for r in gate)
+
+
+def g_direction_problems(rec_fn, pol=P) -> list[str]:
+    """判準本體（PRD 增補檔 §7 P8 ＋錨點①一格）：4096 組對舊聚合律——① 放寬（new>old）組數 == 0；
+    ② 收緊組數 > 0；③ 舊律在近期程加速（pace>1）的組，新律必須逐格等於舊律。`rec_fn(gate, pol)`。"""
+    loosened = tightened = squeezed = 0
+    for trio in itertools.product(_G_CELLS, repeat=3):
+        gate = _g_gate(trio, pol)
+        old, new = _g_today(gate, pol), rec_fn(gate, pol)
+        loosened += new > old
+        tightened += new < old
+        squeezed += _g_pace(gate, pol) > 1.0 and new != old
+    problems = []
+    if loosened:
+        problems.append(f"對舊聚合律放寬 {loosened} 組（方向鎖：必須 0）")
+    if not tightened:
+        problems.append("收緊組數為 0：同軸聚合什麼都沒治（A／A2 反向原封不動）")
+    if squeezed:
+        problems.append(f"錨點①被壓：{squeezed} 組近期程加速（pace>1）被改判")
+    return problems
+
+
+class TestDef200199RecFollowsOneAxisUnlessANearAxisAccelerates(unittest.TestCase):
+    """`DEF-200-199`（L1-γ）：此前 rec 的稀缺度（base）與節奏（pace）可來自兩條不相干的軸，週軸
+    在自己窗裡的位置就讓 rec 4→8（A／A2）。γ＝無近期程加速時逐軸取 min（同軸；否決夾層保留）；
+    近期程加速（pace>1）時沿用 base×pace——錨點①在多軸下不得被長窗軸吃掉（L1 原文會讓
+    helm-anchor 由 (16,16) 變 (16,4)）。已知殘餘：近期程臂仍是兩軸乘積，見施工圖增補註記。"""
+
+    def test_p8_the_real_decide_never_loosens_tightens_somewhere_and_keeps_the_anchor(self) -> None:
+        for pol in _G_POLICIES:
+            with self.subTest(pace_near=pol.pace_near, cap_prepare=pol.cap_prepare):
+                self.assertEqual(g_direction_problems(
+                    lambda g, pl: _g_decide(g, pl).recommended_fanout, pol), [])
+
+    def test_p8_red_dropping_the_veto_clamp_loosens_something(self) -> None:
+        """注入：逐軸 min 但拿掉 `AXIS_NONE` 否決夾層 ⇒ 必有組放寬（施工圖引的反例同形）。"""
+        problems = g_direction_problems(lambda g, pl: _g_per_axis_min(g, False, pl))
+        self.assertTrue(any("放寬" in x for x in problems), problems)
+
+    def test_p8_red_reverting_to_the_cross_axis_law_tightens_nothing(self) -> None:
+        """注入：退回跨軸 base×pace（舊律）⇒ 收緊組數 0 ⇒ 判準必紅（它不是只會對新律說綠）。"""
+        problems = g_direction_problems(_g_today)
+        self.assertTrue(any("收緊組數為 0" in x for x in problems), problems)
+
+    def test_p8_red_l1_original_squeezes_the_near_anchor_and_only_that(self) -> None:
+        """注入：L1 原文（逐軸 min、不分近期程）——不放寬、有收緊，唯獨近期程加速的組被壓 ⇒ 只有錨點①
+        那一條轉紅。這是 γ 與 L1 原文的唯一分野，也是第三條判準不是廢話的證據。"""
+        problems = g_direction_problems(lambda g, pl: _g_per_axis_min(g, True, pl))
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("錨點①被壓", problems[0])
+
+    def test_p9_the_rec_is_one_axes_own_output_unless_a_near_axis_accelerates(self) -> None:
+        """放寬後的 P9（增補檔 §7 原式要求 rec 恆為單軸自洽輸出，與錨點①互斥）：pace<=1 ⇒ rec＝逐軸
+        `_rec_for`（否決在場時近期程軸只當 mid）的 min＝某一條真實軸的輸出；pace>1（近期程加速）
+        ⇒ rec＝舊律 base×pace（已知殘餘：兩軸乘積）。"""
+        for pol in _G_POLICIES:
+            wrong = []
+            for trio in itertools.product(_G_CELLS, repeat=3):
+                gate = _g_gate(trio, pol)
+                want = (_g_today(gate, pol) if _g_pace(gate, pol) > 1.0
+                        else _g_per_axis_min(gate, True, pol))
+                got = _g_decide(gate, pol).recommended_fanout
+                if got != want:
+                    wrong.append((trio, got, want))
+            with self.subTest(pace_near=pol.pace_near, cap_prepare=pol.cap_prepare):
+                self.assertEqual(wrong[:3], [], f"{len(wrong)} 組與結構判準不符")
+
+    def test_moving_the_weekly_axis_between_far_and_mid_no_longer_moves_rec(self) -> None:
+        """帳本 A／A2：session／five_hour 同為 far、一格未動，只把週軸在自己窗裡的位置由剩 6000 分
+        （far）移到 5000 分（mid）——此前 rec 4→8（週軸的『位置』蓋過兩條短窗軸的『餘裕』）。"""
+        def rec(weekly_minutes):
+            return Q.decide(state(("session", 4, 283), ("five_hour", 4, 283),
+                                  ("seven_day", 40, weekly_minutes)), NOW, P).recommended_fanout
+        self.assertEqual([rec(m) for m in (6000, 5000, 4000, 2000, None)], [4, 4, 4, 4, 4])
+        # 邊界＝近期程加速臂：週軸真的快 reset（<=1008 分，窗的 10%）沿用 base×pace ⇒ 16，不脫鉤。
+        self.assertEqual([rec(m) for m in (1008, 500, 60)], [16, 16, 16])
+
+    def test_the_four_scenarios_of_the_pacing_drawing(self) -> None:
+        """施工圖情境表（真 `decide()`；修前 A=4／A2=8／B=8／C=1／A39=4）：只有 A2 因同軸聚合
+        8→4，與裁決 Q9(i) 已接受的 A2=4 同值；cap 與其餘各格不動。"""
+        short = (("session", 4, 283), ("five_hour", 4, 283))
+        rows = [("A", short + (("seven_day", 40, 6000),), None, 4),
+                ("A2", short + (("seven_day", 40, 5000),), None, 4),
+                ("B", (("session", 53, 6), ("five_hour", 53, 6), ("seven_day", 40, 5000)), 8, 8),
+                ("C", short + (("seven_day", 70, 6000),), 2, 1),
+                ("A39", short + (("seven_day", 39, 6000),), None, 4)]
+        for label, specs, want_cap, want_rec in rows:
+            with self.subTest(scenario=label):
+                d = Q.decide(state(*specs), NOW, P)
+                self.assertEqual((d.cap, d.recommended_fanout), (want_cap, want_rec))
+
+    def test_the_helm_anchor_contrast_gamma_vs_l1_original(self) -> None:
+        """錨點①多軸對照：近期程軸旁邊有長窗軸的三個情境，γ 的值（＝既有 helm-anchor／S4-3 逐字引用
+        的值）與 L1 原文的值不同——對照組不同，才證明那幾支鎖對 L1 原文有牙。"""
+        short = (("session", 4, 283), ("five_hour", 4, 283))
+        for label, specs, want in (
+                ("helm", (("session", 0, 30), _LOOSE_WEEKLY), 16),
+                ("S4-3", (("session", 61, 13.5), ("weekly_all", 57, 8233)), 4),
+                ("週軸近期程", short + (("seven_day", 40, 500),), 16)):
+            with self.subTest(case=label):
+                st = state(*specs)
+                self.assertEqual(Q.decide(st, NOW, P).recommended_fanout, want)
+                self.assertNotEqual(_g_per_axis_min(Q.axes_of(st, NOW, P)), want, "對照組沒有分歧")
+
+    def test_the_veto_counterexample_of_the_drawing_stays_at_one(self) -> None:
+        """施工圖 L1 引的反例 `free×near＋notice×none＋prepare×near`：舊律 1；逐軸 min 若漏掉否決
+        夾層會變 2（放寬）。真 `decide()` 必須仍是 1。"""
+        gate = _g_gate(((Q.BAND_FREE, Q.AXIS_NEAR), (Q.BAND_NOTICE, Q.AXIS_NONE),
+                        (Q.BAND_PREPARE, Q.AXIS_NEAR)))
+        self.assertEqual((_g_today(gate), _g_per_axis_min(gate, False)), (1, 2))
+        self.assertEqual(_g_decide(gate).recommended_fanout, 1)
 
 
 if __name__ == "__main__":

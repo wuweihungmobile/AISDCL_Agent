@@ -50,13 +50,7 @@ min_tests_margin = run_root_unittests.min_tests_margin
 
 class RatchetDriftWarningTest(unittest.TestCase):
     """R57 新增：下限 ratchet 過期提醒（`ratchet_drift_message`）。
-
-    WHY（測意圖）：R15 把 MIN_TESTS 釘在 290 後**連續 11 輪沒人重釘**，到 R57 時
-    實況已 530——下限只擋得住「蒸發 240 支以上」，鑑別力失效 45%，而整段期間
-    閘門完全沒吭過聲。人工 ratchet 沒有自我提醒就必然腐化，本測試鎖住那道提醒
-    真的會在漂移超過門檻時出現、且不會在正常範圍內吵人（吵人的警告會被無視，
-    等於沒有）。
-    """
+    史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§76。"""
 
     def test_no_warning_within_ratio(self) -> None:
         self.assertIsNone(run_root_unittests.ratchet_drift_message(100, 100))
@@ -95,12 +89,7 @@ class RatchetDriftWarningTest(unittest.TestCase):
         ——純 WARN 會被當背景噪音無視（正是 R15 起連續 11 輪沒人重釘的心理機制），
         必須有一道會紅的線。刻意用紅線倍數而非 WARN 倍數：在 [WARN, STALE] 這段
         緩衝區內只該被提醒、不該被擋（見 run_root_unittests 的兩層設計註解）。
-
-        鑑別力邊界（不做「保鮮」的絕對宣稱）：本斷言的通過區間是
-        MIN_TESTS ∈ [count / RATCHET_STALE_RATIO, count]，以 count=560 為例即
-        [448, 560]——它擋得住 R15 那種釘 290 的極端腐化，**擋不住**「釘在 450」
-        這種中度失準的新 pin（QA-R57-07 實測）。中度失準由 WARN 層先吭聲。
-        """
+        史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§77。"""
         count = run_root_unittests.discover_suite(
             run_root_unittests._TESTS_DIR
         ).countTestCases()
@@ -114,15 +103,7 @@ class RatchetDriftWarningTest(unittest.TestCase):
 
     def test_current_pin_still_has_zero_dep_discrimination_headroom(self) -> None:
         """🔴 DEF-200-170：真正會先響的那道紅線——綁的是**零相依餘裕**，不是比例。
-
-        WHY 上面那支不夠（不是重複，是它結構上到不了）：上面的紅線比 `count ÷ MIN_TESTS
-        > 1.25`，而零相依沙箱只蒸發 `collapse_loss` 支（落地當回合實測 178，遠小於
-        `0.25 × MIN_TESTS`）⇒ 下限失去零相依鑑別力那一刻，比例線連 WARN 都還沒到，
-        五輪同型復發每次都是環境判準先炸並把讀者指往「相依沒裝齊」。
-
-        本斷言是那五輪缺的那道線：餘裕剩不到四分之一就紅，**早於**環境判準失效，
-        紅字直接帶著該重釘成多少。重釘一律由收尾單人窗口在所有並行包停工後做一次。
-        """
+        史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§78。"""
         suite = run_root_unittests.discover_suite(run_root_unittests._TESTS_DIR)
         self.assertIsNone(
             min_tests_margin.headroom_message(
@@ -137,12 +118,7 @@ class RatchetDriftWarningTest(unittest.TestCase):
 
     def test_the_absolute_gap_criterion_reds_a_pin_that_lags_too_far(self) -> None:
         """紅綠自證（合成注入，不依賴當回合實況）＋兩條門檻的相對位置。
-
-        WHY 本軸與上面兩支不重複（`min_tests_margin.ABSOLUTE_GAP_FRACTION` 的 WHY 的
-        測試面）：餘裕軸的分母是 `collapse_loss`，`loss <= 0` 時它逐字回 `None`＝
-        **不適用**——那幾支相依模組哪天不再整份塌，整條軸靜音，後備只剩 25% 比例線。
-        本軸的分母是實跑數自己，結構上不會變成「不適用」。
-        """
+        史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§79。"""
         self.assertLess(
             min_tests_margin.ABSOLUTE_GAP_FRACTION,
             run_root_unittests.RATCHET_STALE_RATIO - 1.0,
@@ -161,12 +137,7 @@ class RatchetDriftWarningTest(unittest.TestCase):
 
     def test_current_pin_gap_is_within_the_absolute_tolerance(self) -> None:
         """棘輪本體（實況面）：`實跑收集數 − MIN_TESTS` 不得吃掉超過實跑數的容忍比例。
-
-        WHY 這一支要存在（M-20 的另一半）：`InvariantLocksArePresentTest` 已讓「整批刪掉
-        INV 測試類別」變成會紅的事，但**下限自己的餘裕大小**沒人守——下限落後實跑數越
-        遠，「可靜默蒸發幾支測試仍不紅」就越大，而那個數字就是本 runner 唯一的地板的
-        鑑別力。紅字直接帶著該重釘成多少；重釘一律由收尾單人窗口在並行包停工後做一次。
-        """
+        史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§80。"""
         count = run_root_unittests.discover_suite(
             run_root_unittests._TESTS_DIR
         ).countTestCases()
@@ -498,6 +469,45 @@ class TempFenceTest(unittest.TestCase):
         self.assertNotIn(quota_meter.CACHE_DIR_ENV, os.environ)
         self.assertFalse(outer_root.exists())
 
+    def test_the_fence_also_pins_the_durable_trace_dir_so_unload_records_stay_inside(self) -> None:
+        """DEF-200-455 複審鏡 A D-01：`record_unload` 刻意以 passwd 家目錄落點、不吃隔離 HOME，
+        圍籬因此必須顯式把持久痕跡目錄指進隔離根，否則 fixture 的卸載列會寫進真實 traces。
+        紅面＝退回只釘快取的舊清單時，痕跡目錄逃出隔離根。"""
+        lifecycle = run_root_unittests.sentinel_lifecycle
+        env_name = lifecycle.endurance_env.TRACE_DIR_ENV
+        os.environ.pop(env_name, None)
+        handle = lifecycle.fence_enter(self.real)
+        try:
+            root = Path(handle["root"].name)
+            traces = root / "traces"  # 與 TEMP 分住：讀取端第二候選 gettempdir() 不得讀到痕跡
+            self.assertEqual(Path(os.environ[env_name]), traces, "圍籬沒把持久痕跡目錄指進隔離根")
+            inside = lifecycle.endurance_env.uid_trace_dir()
+            self.assertEqual(inside, traces, f"卸載痕跡目錄 {inside} 不在隔離根內")
+            self.assertTrue(lifecycle.endurance_env.record_unload(
+                "bootout", "AutoSDD_Sentinel_fence_probe", reason="fence-probe"))
+            self.assertTrue((traces / lifecycle.endurance_env.UNLOAD_TRACE_NAME).exists())
+        finally:
+            lifecycle.fence_exit(handle)
+        self.assertNotIn(env_name, os.environ)
+        handle = lifecycle.fence_enter(self.real)
+        try:
+            os.environ.pop(env_name, None)  # 圍籬內測試常清空環境：靠行程 tempdir 仍認得隔離根
+            self.assertEqual(lifecycle.endurance_env.uid_trace_dir(),
+                             Path(handle["root"].name) / "traces",
+                             "環境被清掉時痕跡目錄逃出隔離根（tempdir 前綴偵測失效）")
+        finally:
+            lifecycle.fence_exit(handle)
+        # 紅面＝兩道保護都不在（圍籬沒釘痕跡目錄 ＋ 沒有 tempdir 前綴後備）⇒ 痕跡逃出隔離根
+        with mock.patch.object(lifecycle.endurance_env, "FENCE_PREFIX", "zz_never_"):
+            handle = lifecycle.fence_enter(self.real)
+            try:
+                os.environ.pop(env_name, None)  # 模擬「圍籬沒釘」
+                escaped = lifecycle.endurance_env.uid_trace_dir()
+                self.assertNotIn(Path(handle["root"].name), (escaped, *escaped.parents),
+                                 "紅面失效：兩道保護都拿掉竟也關得住")
+            finally:
+                lifecycle.fence_exit(handle)
+
     def test_an_out_of_order_exit_is_named_and_never_strands_the_environment(self) -> None:
         """後進先出被打破（外層先出場）不得靜默：⚠️ 點名「亂序」；內層之後才出場也不得把環境
         寫回已被外層一併刪掉的目錄——最終仍回到最初值。"""
@@ -717,7 +727,7 @@ class TestWriterModulesDeclareTheModuleFence(unittest.TestCase):
                 self.assertIs(_calls_pace_writer(source), is_writer)
 
     def test_every_writer_module_on_disk_declares_the_fence(self) -> None:
-        """現況：全部 `tools/tests` 模組。寫端清單另釘＝已知三支（不多不少）：認不出任何寫端
+        """現況：全部 `tools/tests` 模組。寫端清單另釘＝已知五支（不多不少）：認不出任何寫端
         （分母 0）時不得以「零問題」假綠，多認出的也要被看見而不是默默多一支。"""
         problems, writers = [], set()
         for path in sorted(Path(__file__).resolve().parent.glob("test_*.py")):
@@ -730,8 +740,9 @@ class TestWriterModulesDeclareTheModuleFence(unittest.TestCase):
                          "呼叫 sentinel_lifecycle 的 fence_enter／fence_exit"
                          "（範本見 test_quota_policy.py）")
         self.assertEqual(writers, {"test_context_budget_guard.py", "test_quota_policy.py",
-                                   "test_wake_chain_halt_r278.py"},
-                         "偵測器認出的寫端不是已知三支（認不出＝分母 0 假綠；多認出＝先看是不是"
+                                   "test_wake_chain_halt_r278.py", "test_quota_reconcile_gap.py",
+                                   "test_sentinel_tick_e2e_r145.py"},
+                         "偵測器認出的寫端不是已知五支（認不出＝分母 0 假綠；多認出＝先看是不是"
                          "誤判，真的新寫端接好圍籬後把檔名加進本集合）")
 
 
@@ -955,13 +966,7 @@ class ReportWindowsNativeSkipsTest(unittest.TestCase):
 
     def test_reporters_are_actually_wired_into_run_with_floor(self):
         """QA-R59-02：單元測了但**沒接線**是本 repo 最常見的假綠形狀。
-
-        上面 5 支鎖全部直接呼叫 `report_all_skips(result)`，沒有一支斷言 `run_with_floor`
-        真的呼叫它——刪掉 runner 裡那一行，5 支鎖照樣全綠，runner 回到只印 `skipped=N`，
-        DEF-101-510 完全復發。技法（`inspect.getsource`）R57 已為 `dump_failure_detail`
-        用過（見本檔 DumpFailureDetailTest），本輪補上並順手把既有債
-        `report_windows_native_skips` 一併鎖住。
-        """
+        史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§81。"""
         src = inspect.getsource(run_root_unittests.run_with_floor)
         for fn in ("report_windows_native_skips(result)", "report_all_skips(result)"):
             self.assertIn(
@@ -1063,12 +1068,7 @@ class UntaggedWindowsLikeSkipsTest(unittest.TestCase):
 
     def test_on_windows_the_check_is_silent(self) -> None:
         """在原生 Windows 上必須整組閉嘴。
-
-        測意圖：標籤語意是「這支只在原生 Windows 有價值，**這次環境不符沒跑**」，
-        在 Windows 上這類測試根本不會 skip；Windows 上會 skip 的是 POSIX-only 測試，
-        而它們的理由幾乎必然提到 Windows（例：「Windows 無 symlink 權限」）。若少了
-        這個平台閘，整片 POSIX-only skip 會在 Windows 上被誤判成漏標＝假紅。
-        """
+        史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§82。"""
         result = self._result_with_skips(
             ("m.C.test_posix_only", "Windows 無 symlink 權限（WinError 1314），此測試僅 POSIX 有意義"),
         )
@@ -1104,12 +1104,7 @@ class UntaggedWindowsLikeSkipsTest(unittest.TestCase):
     def test_reporter_prints_offender_and_the_fix_instruction(self) -> None:
         result = self._result_with_skips(("m.C.test_x", "PATHEXT 語意僅在 Windows 成立"))
         buf = io.StringIO()
-        # R72：`untagged_windows_like_skips` 已隨 skip 標籤家族搬進
-        # `tools/lib/windows_skip_tags.py`（見該檔頭），平台閘讀的是**該模組**的判定。
-        # 🔴 R82（SA B-1）：patch 目標由 `windows_skip_tags.os` 的 `name` 屬性改為
-        # 模組層函式 `running_on_windows`——前者改的是**行程全域**的 `os.name`，會讓
-        # `pathlib.Path()` 在 Windows 上整段拋 `PosixPath` 例外，於是同一份判準在
-        # pytest 與 unittest 兩個載具下給出相反判決（WHY 全文見 `running_on_windows`）。
+        # 史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§83。
         with mock.patch.object(windows_skip_tags, "running_on_windows", lambda: False):
             with contextlib.redirect_stderr(buf):
                 offenders = run_root_unittests.report_untagged_windows_like_skips(result)
@@ -1183,15 +1178,7 @@ class UntaggedWindowsLikeSkipsTest(unittest.TestCase):
 
 class WindowsSkipTagExemptionSelfCheckTest(unittest.TestCase):
     """本輪：具名豁免表 `_WINDOWS_SKIP_TAG_EXEMPT` 的 stale／格式自檢。
-
-    WHY（實測到的缺口，不是理論）：動工前往該表塞一筆指向不存在檔案的豁免、以及
-    一筆指向真檔但根本不需要豁免的條目，整支本檔（73 tests）兩次都**零 failure**。
-    對照組是同一支 runner 的姊妹表 `_COLLECTION_EXEMPT`：塞一筆多餘豁免當場紅。
-    ⇒ 同一個 repo 對「豁免表要有 stale 自檢」有明確認知，卻只實作在兩張表中的一張；
-    本表現在是空的所以看起來乾淨，第一筆進去的那天起它就是一張只進不出的永久豁免表。
-
-    本組鎖的是判準本身（純函式 ＋ 合成注入），另加一支接線鎖確認 rc 真的被消費。
-    """
+    史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§84。"""
 
     def _result_with_skips(self, *skips: tuple[str, str]) -> unittest.TestResult:
         class _T:
@@ -1229,14 +1216,7 @@ class WindowsSkipTagExemptionSelfCheckTest(unittest.TestCase):
 
     def test_an_exemption_is_not_stale_where_its_test_actually_ran(self) -> None:
         """🔴 DEF-200-233 迴歸鎖（macos-compat-ci 連續紅的真因，方向鎖不是門檻鎖）。
-
-        WHY（Rule 9 — 鎖的是意圖）：stale 面的輸入是**本平台這一次真的 skip 了什麼**。
-        一支測試在本平台**跑掉了**（例：zsh 站點在 darwin 上，zsh 是預設殼）時，它當然
-        不會出現在重掃結果裡——但那是「本平台對這筆豁免沒話可說」，**不是**「豁免過期」。
-        修前兩者塌成同一個結論，於是 darwin 把 7 筆**仍在 linux 上承重**的豁免全判 stale；
-        照那個判決移除會當場讓 root-infra-ci 轉紅（同一份判準在兩個平台給出互斥的指示）。
-        本鎖釘住方向：`skipped_here` 不含它 ⇒ 一個字都不准說。
-        """
+        史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§85。"""
         self.assertEqual(
             windows_skip_tags.exemption_problems(
                 {"m.C.test_ran_here": "R100：reason 只是拿 Windows 做比較性陳述"},
@@ -1296,12 +1276,7 @@ class WindowsSkipTagExemptionSelfCheckTest(unittest.TestCase):
 
     def test_the_check_is_wired_into_the_runner_and_reds_the_run(self) -> None:
         """接線鎖 ＋ rc 鎖：單元測了卻沒接線、或接線了不改 rc，都是假綠。
-
-        注入方式刻意是 `mock.patch.dict` **活體模組屬性**——`run_root_unittests`
-        的名字與 `windows_skip_tags` 的必須是同一個 dict，否則既有的 patch 契約
-        （見 `test_hints_and_tag_are_shared_with_the_runtime_lock_not_copied`）
-        已經悄悄退化成兩份副本。
-        """
+        史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§86。"""
         # R100：`clear=True`——真表非空，`clear=False` 會讓既有筆數疊進 `problems`。
         # DEF-200-233：注入的豁免必須指向**本次真的 skip 掉**的那一支，否則新判準（正確地）
         # 判它「本平台沒話可說」而回空——接線鎖會退化成恆綠。
@@ -1426,15 +1401,7 @@ class UnregisteredSkipTagVocabularyTest(unittest.TestCase):
 
     def test_nonliteral_reasons_are_recovered_for_the_vocabulary_lock(self) -> None:
         """R79 的**非字面 reason** 抽取面（`nonliteral_skip_reason_prefixes`）。
-
-        WHY 這一支非補不可（QA-R79）：上面那道詞彙鎖的輸入原本只有 `literal_eval`
-        成功的站點，而 R76 指名的唯一已知違規實例（`self.skipTest(f"[TOOL-MISSING] …")`）
-        正好是 f-string ⇒「已知缺陷 → 建了鎖 → 鎖看不到那個已知缺陷」，隱形三輪。
-        R79 補上抽取面卻**零回歸鎖**，注入證明只活在會被丟掉的 scratchpad。
-        判準的核心是「標籤依契約住在 reason 最前面 ⇒ 取開頭常數片段就夠判，不需求值」，
-        兩種形態（f-string／`+` 串接）都要吃得下，而**字面值不得重複計**（那一批由
-        `skip_decorator_sites` 承接，兩面各自對自己的存量帳）。
-        """
+        史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§87。"""
         source = textwrap.dedent(
             """\
             import unittest
@@ -1521,13 +1488,7 @@ class StaticWindowsSkipTagScanTest(unittest.TestCase):
 
     def test_skipif_windows_predicate_is_not_flagged(self) -> None:
         """🔴 本鎖的核心鑑別力：方向相反者**不得**被抓。
-
-        `skipIf(<Windows 述詞>)` ＝「Windows 上才 skip」＝ POSIX-only 測試，它的
-        reason 幾乎必然提到 Windows（例：「Windows 無 symlink 權限」），而
-        `[WINDOWS-NATIVE-ONLY]`（「只在原生 Windows 才有價值、這次沒跑」）對它是
-        錯的語意。少了這一條，本掃描對真實樹會噴 7 筆假紅（落地前實測值），沒有
-        任何人會容忍它留在閘門裡——假紅比沒有鎖更糟。
-        """
+        史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§88。"""
         self.assertEqual(
             windows_skip_tags.untagged_windows_skip_decorators(
                 self._src("skipIf", self._WIN_PRED,
@@ -1583,15 +1544,7 @@ class StaticWindowsSkipTagScanTest(unittest.TestCase):
 
     def test_hints_and_tag_are_shared_with_the_runtime_lock_not_copied(self) -> None:
         """判準面必須與 runtime 那道鎖**共用同一份常數**，不是各抄一份。
-
-        兩層驗證：
-          ① 物件同一性——`run_root_unittests` 的名字必須就是 `windows_skip_tags` 的
-             那個物件（R72 抽模組後靠再匯出維持既有呼叫端；若哪天變成各持一份副本，
-             既有的 `mock.patch.dict(run_root_unittests._WINDOWS_SKIP_TAG_EXEMPT, …)`
-             會靜默失效——patch 到的是另一個 dict）。
-          ② 行為——換掉關鍵詞面後靜態掃描的判定必須跟著變；若它抄了一份字面關鍵詞，
-             這裡會紋風不動。兩份判準各自漂移，正是 R67-F11 當初要修的形狀的再版。
-        """
+        史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§89。"""
         for name in ("WINDOWS_NATIVE_SKIP_TAG", "_WINDOWS_LIKE_SKIP_HINTS",
                      "_WINDOWS_SKIP_TAG_EXEMPT"):
             self.assertIs(
@@ -1683,13 +1636,7 @@ class StaticWindowsSkipTagScanTest(unittest.TestCase):
             "report_untagged_windows_skip_decorators(_TESTS_DIR, _PATTERN)", src,
             "main() 未呼叫靜態標籤掃描——掃描器存在但沒接線，等於沒有",
         )
-        # 🔴 R86：判準由字面 `return 1` 放寬為 `return 1` 或 `return _bail(...)`，
-        # 而 rc 那一半改由**真的呼叫**來量（見下方 assert），不再靠字面推論。
-        # WHY：本鎖把「rc 有沒有被收斂」綁在一個字面上，於是本輪把四條早退
-        # 路徑改成 `_bail(<階段名>)`（同 rc=1，只多印一行「零執行」）時它判紅
-        # ——而那個改動**嚴格增強**了它要守的東西（修前 rc=1 但畫面零 FAIL
-        # 行，人會誤讀成通過；R85 已具名交棒）。字面鎖的代價正是這個：**它會
-        # 擋住讓它守的性質變強的修法**，而該鎖的是「rc 真的非零」這個行為。
+        # 史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§90。
         self.assertRegex(
             src,
             r"if report_untagged_windows_skip_decorators\(_TESTS_DIR, _PATTERN\):"
@@ -2227,16 +2174,7 @@ class CollectionIntegrityTest(unittest.TestCase):
 
 class ExecutionGapTest(unittest.TestCase):
     """R60 Pkg-P8：**收集數 ≠ 執行數**——下限守門結構性看不到的一整類覆蓋損失。
-
-    WHY（測意圖）：`MIN_TESTS`／ratchet 守的是 `countTestCases()`（收集數），但真正
-    跑了幾支是 `result.testsRun`。`setUpClass`／`setUpModule` 拋 `SkipTest` 時，
-    `TestSuite.run` 對該類別每支測試走 `continue`、`test(result)` 從未被呼叫 ⇒
-    `testsRun` 不增加，而收集數**完全不變**。實測（本類別 fixture）：收集 11／執行 2／
-    `result.skipped` 只多一筆 `setUpClass (...)`／`wasSuccessful()` 仍為 True ⇒ rc=0。
-    整個類別的覆蓋無聲消失，下限守的那個數字連動都沒動。本 repo 正在使用該模式
-    （`test_macos_smoke_skip_honesty.TestSummaryTailRealRun.setUpClass` 缺 bash 時
-    `raise SkipTest`），故這是實況風險而非理論風險。
-    """
+    史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§91。"""
 
     @staticmethod
     def _suite_with_class_fixture(n: int, exc: Exception | None):
@@ -2564,12 +2502,7 @@ class MinTestsMarginCriterionTest(unittest.TestCase):
 
     def test_the_runner_does_not_cry_repin_on_real_sandbox_counts(self) -> None:
         """③ 的真資料半格：餵**真沙箱量到的**逐模組收集數給提醒層，不得喊重釘。
-
-        WHY 不看沙箱 `floor` 的 stdout（第一版就那樣寫、當場自查發現它今天**恆真**）：
-        沙箱裡收集數低於下限 ⇒ `run_with_floor` 在 `report_floor_failure` 就 `return 1`，
-        根本走不到提醒層 ⇒ 那是一道 vacuous 鎖。改餵真沙箱計數，判準就得自己撐住。
-        `count` 刻意取遠高於下限的值，讓「不適用」是判準的決定而非數字不夠大。
-        """
+        史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§92。"""
         sandbox_mods = _zero_dep_collect()["mods"]
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
@@ -2668,12 +2601,7 @@ class MinTestsMarginCriterionTest(unittest.TestCase):
 
 class ThirdPartyPrereqDeclarationTest(unittest.TestCase):
     """`_THIRD_PARTY_PREREQS` 是「`MIN_TESTS` 得以成立的前提」的宣告（R68）。
-
-    WHY（測意圖）：`MIN_TESTS` 是**單一值**——相依齊備環境下的實測值。本輪曾被提議
-    改成「環境感知的雙下限」（完整相依用高值、零相依用低值），該設計會把一個**壞掉
-    的環境升格成合法的第二種環境**，讓 CI 在 122 支迴歸鎖一支都沒跑的狀態下印綠燈。
-    本組鎖住的正是相反的語意：零相依環境**必須**判紅，而且要說清楚紅在哪裡。
-    """
+    史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§93。"""
 
     def test_declared_prereqs_are_present_in_this_environment(self) -> None:
         """宣告面的**真實性**：清單裡的每一個都必須真的裝得到。
@@ -2752,12 +2680,7 @@ class FloorFailureAttributionTest(unittest.TestCase):
 )
 class ZeroDepEnvironmentDiscriminationTest(unittest.TestCase):
     """零相依環境（＝三支 CI 的等價環境）下的鑑別力鎖（R68）。
-
-    🔴 鑑別力邊界（誠實劃界）：本組證明的是「宣告清單裡那幾個相依被拿掉時，閘門會
-    判紅且會正確歸因」。它**不**證明清單是完備的——若未來有人加進第四個相依而沒
-    登記，本組抓不到（那半邊由 `CiPrereqInstallLockTest` 的 SSOT 綁定與 runner 的
-    「相依都在卻仍有佔位測試」分支承接）。
-    """
+    史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§94。"""
 
     def test_blocked_prereqs_reproduce_collection_collapse(self) -> None:
         """模擬手法的**保真度**自檢：擋掉宣告的相依後，真實樹的收集數必須真的掉到
@@ -2827,12 +2750,7 @@ class ZeroDepProbeFlagIsNotAFailOpenTest(unittest.TestCase):
 
     def test_group_is_skipped_exactly_when_the_probe_flag_is_set(self) -> None:
         """釘住 skip 的**接線**：條件必須恰好是那個旗標，不寬不窄。
-
-        `@unittest.skipIf` 在 class 建立時就把判定結果寫成 `__unittest_skip__`，故此處讀到的
-        是「本次執行到底 skip 了沒」這個既成事實，不是重算一次條件。上一支保證「旗標為 1 時
-        真的在探針內」，本支保證「不在探針內時那三支鎖真的被執行」——把條件改寬（例如改成
-        任何非空值即 skip、或退化成無條件 `@unittest.skip`）會讓本支當場紅。
-        """
+        史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§95。"""
         in_probe = os.environ.get(_ZERO_DEP_PROBE_ENV) == "1"
         skipped = bool(getattr(ZeroDepEnvironmentDiscriminationTest, "__unittest_skip__", False))
         self.assertEqual(
@@ -2910,13 +2828,7 @@ class CiPrereqInstallLockTest(unittest.TestCase):
     @staticmethod
     def _installed_package_names(before: list[str]) -> set[str]:
         """把 job 內出現過的 `pip install` 目標正規化成「套件名」集合（R69）。
-
-        為何需要正規化（而上面那道第三方相依鎖直接比對字面 token 就夠）：釘版與引號
-        是**外部工具**這一側的既有寫法——`root-infra-ci.yml` 寫的是
-        `pip install ... 'ruff==0.15.21'`（版本釘選是本 repo 對 lint 工具的明文紀律，
-        見 AutoClaude/pyproject.toml）。若照字面比對，一個正確裝了 ruff 的 job 會被
-        判成沒裝，本鎖就只能靠「大家別釘版」活著——那不是鎖，是巧合。
-        """
+        史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§96。"""
         names: set[str] = set()
         for line in before:
             m = CiPrereqInstallLockTest._PIP_INSTALL_RE.search(line)
@@ -2958,13 +2870,7 @@ class CiPrereqInstallLockTest(unittest.TestCase):
 
 class ExternalToolPrereqDeclarationTest(unittest.TestCase):
     """外部工具宣告的**真實性**與缺工具時的**歸因**（R69）。
-
-    WHY（測意圖非僅行為）：這一整類缺陷的殺傷力不在紅燈本身，在**紅字把人指向哪裡**
-    ——R68 對 import 相依修的正是這點（把「環境不完整」誤報成「測試消失」）。缺 ruff
-    的環境會讓 `test_pre_push_dispatcher.py` 5 支測試以「rc 1 != 0」失敗，讀者被指往
-    「分流邏輯壞了」這條全錯的路（R69 SD 實測即如此顯形）。本類的價值＝在同一次執行
-    裡多紅一支、並在訊息裡把真正的原因與修法講清楚。
-    """
+    史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§97。"""
 
     def test_declared_tools_are_present_and_name_the_real_cause_when_not(self) -> None:
         missing = [(cmd, pip) for cmd, pip in _EXTERNAL_TOOL_PREREQS if shutil.which(cmd) is None]
@@ -3392,14 +3298,7 @@ class ParallelShardCrashLeakFenceIntegrationTest(unittest.TestCase):
 
 class ParallelShardStderrBackpressureRegressionTest(unittest.TestCase):
     """DEF-200-274 第三輪複審 Problem 1：stderr backpressure 真實子行程回歸測試。
-
-    刻意**不** mock `subprocess.Popen`（既有 `ParallelShard*` 測試全 mock，從未真的
-    碰到 `_worker_main()` 的 fd 重導向與真實 OS pipe 行為）：SLOW 模組只 sleep，
-    LOUD 模組同時對 stderr 寫超過 OS pipe buffer 的內容並自量耗時；修復前序列
-    `Popen()` 會讓 LOUD 被 SLOW 的 `communicate()` 卡住，修復後動態工作竊取應使
-    兩者耗時互不相干。事故經過與逐輪修復細節史料見證據檔〈第七輪 史料搬遷
-    （Dev-Trim8）〉。
-    """
+    史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§98。"""
 
     _SLOW_MODULE = f"_zzz_backpressure_repro_a_slow_{os.getpid()}"
     _LOUD_MODULE = f"_zzz_backpressure_repro_z_loud_{os.getpid()}"
@@ -3462,15 +3361,7 @@ class ParallelShardStderrBackpressureRegressionTest(unittest.TestCase):
 class LoadBalancingRegressionTest(unittest.TestCase):
     """DEF-200-274 第四輪：證明動態工作竊取真的達成負載平衡，不靠測試方法數這個
     權重估計準不準。
-
-    形狀刻意對舊版 `weighted_shards()`（已刪除；依方法數貪婪裝箱）不利：TRIVIAL
-    （10 支瞬間通過的方法）＋ SLOW_A／SLOW_B（各 1 支 `sleep()`）。實際以
-    `worker_count=3`（＝模組數）跑，讓三模組啟動瞬間各自被一條 thread 認領、
-    全程零佇列競爭；斷言總耗時遠低於 `2 × _SLEEP_SECONDS`，`worker_count` 改回 1
-    重跑則因排隊而逼近該值、已手動驗證過。取捨動機、`worker_count=2` 手算對照組
-    與兩輪對抗式複審 finding 的因果敘事訂正史料見證據檔〈第七輪 史料搬遷
-    （Dev-Trim8）〉。
-    """
+    史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§99。"""
 
     _TRIVIAL_MODULE = f"_zzz_loadbalance_repro_trivial_{os.getpid()}"
     _SLOW_MODULE_A = f"_zzz_loadbalance_repro_slow_a_{os.getpid()}"
@@ -3749,12 +3640,7 @@ class ParallelShardMultipleThreadFailuresAreAllReportedTest(unittest.TestCase):
     """DEF-200-274 第四輪 Architect 複審阻斷條件：`run_parallel()` 此前只用
     `thread_errors.get_nowait()` 取**第一筆**例外就 `raise`，兩條以上 worker thread
     幾乎同時失敗時，其餘例外物件永遠留在佇列裡、從未被印出——診斷資訊真的遺失。
-
-    本測試讓 3 個 worker thread 全部因不同的 Popen 失敗而拋出例外（3 個模組、
-    `worker_count=3` 保證每個模組各自一條 thread、無人能倖存去消化佇列），斷言
-    最終結果的 `errors` 訊息裡看得到**全部三筆**失敗的線索，而不是只有一筆
-    ——這正是 Architect 建議的回歸測試形狀。
-    """
+    史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§100。"""
 
     def test_three_simultaneous_popen_failures_all_surface_in_the_error_text(self) -> None:
         parallel_shard = run_root_unittests.parallel_shard
@@ -3831,14 +3717,7 @@ class ParallelShardWorkerThreadBaseExceptionDoesNotEscapeTest(unittest.TestCase)
 class ParallelShardRealSubprocessProtocolIntegrationTest(unittest.TestCase):
     """DEF-200-274 第三輪複審 Problem 3：涵蓋 `run_parallel()`/`_worker_main()` JSON
     協定通道本身的真實子行程整合測試，刻意**不** mock `subprocess.Popen`。
-
-    3 個 shard 同時涵蓋兩件既有 mock 版測試從未真的走過的路徑：(a) `shard0` 單一
-    payload 塞五種結果型態，證明真實 stdout JSON 能被 `json.loads`／`merge_results()`
-    正確彙總；(b) `shard1`／`shard2` 匯入當下即對 stderr／stdout 寫超過 OS pipe
-    buffer 的內容並自量耗時，驗證 backpressure 不會卡死（另包硬性逾時避免真卡死
-    拖住整個測試行程）。與既有 `ParallelShardStderrBackpressureRegressionTest`
-    的差異史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
-    """
+    史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§101。"""
 
     _MIXED_MODULE = f"_zzz_protocol_repro_a_mixed_{os.getpid()}"
     _LOUD_STDERR_MODULE = f"_zzz_protocol_repro_b_loud_stderr_{os.getpid()}"
@@ -4087,17 +3966,7 @@ class ParallelTimingCacheSaveLiveCacheTest(unittest.TestCase):
 class ParallelTimingCacheSaveLiveCacheMergePruneTest(unittest.TestCase):
     """DEF-200-363 第十五輪：`save_live_cache()` 從整檔覆寫改為
     read-merge-prune-write——受測模組 `tools/lib/parallel_timing_cache.py`。
-
-    回歸機制（震盪）：模組級觀測 → 下一輪被細分成 `module.Class` 鍵 → 整檔覆寫使模組鍵消失 →
-    `load_hints()` 退回偏低種子值 → 判定不再細分 → 再度整模組派工。後續補強：父鍵未被直接觀測時
-    `kept_previous` 會凍結舊值，改為每輪由子鍵回填加總（見 `save_live_cache()` docstring）。全文搬
-    至 Guard_Line_History_2.md〈R186 淨減法搬遷〉§53。  round-label-ok
-
-    本測試釘住：(a) 不相交鍵集合皆保留，且父鍵的值隨子鍵回填而更新；(b) 模組
-    已刪除的舊鍵被剪掉、仍在的模組鍵存活且回填為子鍵加總；(c) 端到端：模組鍵
-    曾被觀測、下一輪細分觀測後，`load_hints()` 對模組鍵讀得到回填後的新值
-    （不退回種子、不凍結在拆分前的舊值），且 `auto_class_level_candidates()`
-    仍能判定該模組需要細分。"""
+    史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§102。"""
 
     def _ptc(self):
         return run_root_unittests.parallel_shard.parallel_timing_cache
@@ -4714,12 +4583,7 @@ class ParallelShardSigtermIgnoredOffMainThreadTest(unittest.TestCase):
 
 class _TopLevelDispatchFixtureA(unittest.TestCase):
     """DEF-200-274 第六輪：供 `DispatchGranularity*Test` 使用的頂層 fixture 類別。
-
-    刻意定義在模組層（非某個測試方法內部），使 `__qualname__` 不含 `<locals>`，
-    才能拿來驗證「白名單模組的頂層類別會被 `dispatch_key()` 細分」這條正向路徑
-    ——巢狀類別測（fail-closed 分支）則沿用既有慣例、直接在測試方法內部定義
-    區域類別即可自然取得含 `<locals>` 的 `__qualname__`，不需要本 fixture。
-    """
+    史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§103。"""
 
     def test_ok(self) -> None:
         pass
@@ -4784,16 +4648,7 @@ class _TopLevelDispatchFixtureStaticmethodSetUpClass(unittest.TestCase):
 
 class DispatchGranularityDispatchKeyTest(unittest.TestCase):
     """DEF-200-274 第六輪四方獨立複審（Architect/SA/SD/QA）共同點名的缺口：
-    `tools/lib/dispatch_granularity.py` 落地時零測試覆蓋，且該檔 docstring 曾
-    宣稱『兩份 `_PLACEHOLDER_MODULE`／`_module_of()` 複本是否同步由本測試檔
-    看守』——查無實據。本測試類別（與下面兩個姊妹類別）補齊覆蓋，讓這句話
-    從『說了才知道是假的』變成『真的有回歸鎖看守』。
-
-    白名單一律用 `mock.patch.object` 暫時覆寫成只含本模組（`__name__`），
-    不改動真正的 `CLASS_LEVEL_DISPATCH_MODULES`（真實白名單成員數量一律現查
-    該常數，另有 `DispatchGranularityWhitelistHasNoModuleLevelFixturesTest`
-    專門驗證）。
-    """
+    史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§104。"""
 
     def test_non_whitelisted_module_stays_at_module_granularity(self) -> None:
         dispatch_granularity = run_root_unittests.dispatch_granularity
@@ -4903,13 +4758,7 @@ class DispatchGranularityWhitelistHasNoModuleLevelFixturesTest(unittest.TestCase
     未來有人替白名單模組新增 `setUpModule`／`tearDownModule`（原本整檔在同一個
     subprocess 跑一次，細分成 (module, class) 後每個 class 各自的 subprocess 都
     會重跑一次）。本測試把這條最低限度的前提轉成機械不變量。
-
-    QA 2026-09-23 追加：`test_context_budget_guard` 是**已人工核實安全**的
-    例外（模組層 fixture 只 pin／還原 `os.environ` 並進出私有暫存目錄圍籬，皆隨各自的
-    subprocess 生滅，重跑成本可忽略——見 `dispatch_granularity._MODULE_FIXTURE_SAFE_EXCEPTIONS`
-    的核實結論）。預設仍是「有模組層 fixture 就判紅」，例外需要先出現在那份
-    名單裡才豁免，不是靜默放寬本測試的判準。
-    """
+    史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§105。"""
 
     def test_no_whitelisted_module_defines_module_level_fixtures(self) -> None:
         dispatch_granularity = run_root_unittests.dispatch_granularity

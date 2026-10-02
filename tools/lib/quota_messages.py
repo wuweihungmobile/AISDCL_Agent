@@ -15,8 +15,9 @@ R88／LOC-01 的落地物。此前這一族住在 `tools/lib/quota_gate.py`，�
   · `quota_throttle_message()` — 它吃 `UNBOUNDED_FANOUT_TOOLS`／`FANOUT_WINDOW_SECONDS`
     ／`QUOTA_OFF_ENV` 三個**閘門常數**，搬過來會讓 `quota_messages → quota_gate` 反向成立
     ⇒ 循環 import。它呼叫的 `throttle_horizon_line()` 走 `quota_gate` 的 re-export 解析。
-  · `pace_report()`／`pace_state()`／`posture_line()` — 前兩者讀快取、記燃燒帳、寫檔案
-    契約（狀態與 IO 層）；`posture_line()` 讀 `quota_cache_path()`。三者都不是純渲染。
+  · `pace_report()`／`pace_state()` — 讀快取、記燃燒帳、寫檔案契約（狀態與 IO 層），不是純
+    渲染。（`posture_line()` 後來搬進本檔：快取路徑由 `pace_report()` 傳入，本檔仍不碰
+    `quota_cache_path()`；見本輪證據檔〈九〉。）
 
 🔴 **相依方向是單向的**：本檔**不得** import `quota_gate`。與 `quota_gate` 檔頭同一條
 規則：`tools/lib/*` 只准**裸名 import**（`from lib import X` 會讓同一份原始碼在同一個
@@ -35,9 +36,11 @@ R88／LOC-01 的落地物。此前這一族住在 `tools/lib/quota_gate.py`，�
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from datetime import datetime, timedelta
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -490,6 +493,17 @@ UNMEASURED_HORIZON_LINE = (
     "拿到讀數就依真實水位重判；現查：`python tools/session_resume_planner.py --pace`。\n")
 
 
+def telemetry_retry_line(retry_after: object, now: datetime) -> str:
+    """量不到若是遙測端點限流（429），補一句伺服器自己報的恢復時刻；沒有、解不出或已過去 ⇒ `""`
+    （此時整句逐字等於沒有 Retry-After 的量不到句）。字面自帶尺名（遙測通道），不與額度尺的
+    「節流」共用詞；那是模型額度的話，見本輪證據檔〈九〉。"""
+    when = _aware(retry_after)
+    if when is None or when <= now:
+        return ""
+    return (f"   📡 遙測通道（usage 端點）被限流，伺服器回報 {retry_after} 之後可再量；"
+            "這與模型額度無關。\n")
+
+
 # halt 帶用 `reset_branch()` 分得出 arm／notify／escalate，**throttle 帶此前完全不分**
 # ⇒ 週額度偏高時 cap 會連續套用好幾天，與 five_hour 同水位（最多 5 小時）代價差一個
 # 數量級，而訊息裡讀不出差別。
@@ -501,7 +515,7 @@ def throttle_horizon_line(decision: quota_policy.Decision, now: datetime,
                           measured_at: object = None) -> str:
     """節流帶要說出「這道限制會套多久」。已過期的時刻**不得**說「很快就會自己解除」。"""
     if decision.band == quota_policy.BAND_UNMEASURED:
-        return UNMEASURED_HORIZON_LINE
+        return UNMEASURED_HORIZON_LINE + telemetry_retry_line(decision.retry_after, now)
     # 🔴 DEF-200-435：cap 被遲滯維持（低於 binding 軸自己的 cap）時，下面所有以 binding 的 reset
     # 為期程的句子都不成立——放寬由最小停留時間決定，與那條軸的 reset 無關（實測：各軸 cap=2、
     # 終值 cap=1 的 Opus 視窗被告知「連續套用好幾天」，真因是分鐘尺度的遲滯）。
@@ -715,14 +729,18 @@ def quota_prepare_message(decision: quota_policy.Decision, plan: str, now: datet
 #: ——那正是第一輪 D1 修掉的那個形態（本檔判例逐字：「訊息裡混一句假話比少一欄更難看見」），
 #: 而預設值讓同一個病復發時**外觀與正確輸出相同**。拿掉之後它變成 `TypeError`：全 repo 只有
 #: 兩個呼叫端（`quota_gate.pace_report()` 與本族的渲染鎖），兩者本來就顯式傳值 ⇒ 零成本。
-def pace_line(decision: quota_policy.Decision, live: int) -> str:
-    """**一行**：能派幾個／cap／band／距 reset／binding 是哪一軸（SA-02 要的五項）。"""
+def pace_line(decision: quota_policy.Decision, live: int, max_fanout: int) -> str:
+    """**一行**：能派幾個／cap／band／距 reset／binding 是哪一軸（SA-02 要的五項）。
+    `max_fanout` 必填（同 `live`）：擋不了人的兩種 cap 要連同它的值說出口（見本輪證據檔〈九〉）。"""
     if decision.cap is None:
-        head = f"現在可派 {decision.recommended_fanout} 個 agent（硬上限 cap=不設限）"
+        head = (f"現在可派 {decision.recommended_fanout} 個 agent（硬上限 cap=不設限）"
+                f" ⇒ 這一格結構上不擋任何扇出（節流由 rec 諮詢值承擔；max_fanout={max_fanout}）")
     else:
         left = min(decision.recommended_fanout, max(0, decision.cap - live))
         head = (f"現在可派 {left} 個 agent（硬上限 cap={decision.cap}，"
                 f"本視窗已用 {live} 次）")
+        if decision.cap >= max_fanout:
+            head += f" ⇒ cap 已等於 max_fanout={max_fanout}，等同無節流"
     head += f"｜band={decision.band}"
     axis = decision.binding
     if axis is None:
@@ -730,6 +748,34 @@ def pace_line(decision: quota_policy.Decision, live: int) -> str:
     when = next((f"剩 {int(r.minutes)} 分鐘" for r in decision.per_axis
                  if r.axis is axis and r.minutes is not None), "reset 距離不明")
     return head + f"｜最緊的一條＝{axis.kind} {axis.pct:g}% {when}"
+
+
+def posture_line(path: Path) -> str:
+    """派工**前置檢查**那一行：帳號指紋 ＋ credits 姿態（R87／`DEF-200-R87-spend`）。
+
+    🔴 掌舵者裁決逐字：「配置 Agents 前，要先知道 Account Type and Account 是否有
+    Usage credits 再進行配置」。事故當下 `--pace` 只講得出水位，講不出
+    「訂閱窗用完之後還有沒有救」——而後者才是 13 個 subagent 全滅的直接原因。
+
+    🔴 三種讀不出來的情形一律回報**無 fallback**（保守方向）：快取不可用、
+    取數層版本較舊（沒有 `posture` 欄）、欄位形狀不對。「量不到 ≠ 量到零」。
+    """
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        posture = data["posture"]
+        fingerprint = tuple(posture["plan_fingerprint"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return "派工前置：帳號姿態讀不出來 ⇒ 一律當作**無 credits fallback**（保守）"
+    if not posture.get("credits_present"):
+        state = "此帳號**沒有** usage credits ⇒ 訂閱窗本身即硬牆"
+    elif posture.get("fallback_available"):
+        state = "credits **可用** ⇒ 訂閱窗用完後仍有 fallback"
+    else:
+        why = "已耗盡" if posture.get("credits_exhausted") else ""
+        why += "、" if why and not posture.get("credits_enabled") else ""
+        why += "已停用" if not posture.get("credits_enabled") else ""
+        state = f"credits {why} ⇒ **無 fallback**，訂閱窗即硬牆"
+    return f"派工前置：方案指紋={'+'.join(fingerprint) or '(空)'}｜{state}"
 
 
 # 🔴 `DEF-200-169`：扇出滾動視窗那一行的**渲染面**。取數／推算住 `quota_gate.

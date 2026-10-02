@@ -85,6 +85,7 @@ from datetime import datetime, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import quota_messages  # noqa: E402
 import quota_pace  # noqa: E402
 
 COMPATIBLE = "compatible"
@@ -359,6 +360,35 @@ def cli(spec: str, at: str | None) -> int:
     verdict, rendered = reconcile_report(spec, when, ledger_text=text, axes=axes)
     print(rendered, end="")
     return 0 if verdict else 2
+
+
+def gap_line(ledger_text: str, *, k: int = 5,
+             horizon_s: float = quota_messages.RESET_ARM_HORIZON_SECONDS) -> str:
+    """落款樣本的**連續性（斷層）**提醒：最近 `k` 列的相鄰間隔最大值 > `horizon_s` ⇒ 一行警語。
+
+    尺＝既有的「可等視界」（`quota_messages.RESET_ARM_HORIZON_SECONDS`，不另立常數）：兩個
+    相鄰樣本相距超過它，就沒有依據斷言它們落在同一個 reset 視窗內自洽。閉於上界（恰一個視界
+    不判、多 1 秒判）。解析與去重沿用 `quota_pace.rows_from_jsonl`；判不出（列數不足、帳本壞、
+    時間戳壞或不帶 offset）一律回空字串，不得掛 `--pace`。只出聲，不阻斷、不改任何判定。
+    史料與實測見本輪證據檔〈九〉。
+    """
+    whens = sorted(w for w in (_aware(row[0]) for row in quota_pace.rows_from_jsonl(ledger_text))
+                   if w is not None)[-k:]
+    worst = max((b - a).total_seconds() for a, b in zip(whens, whens[1:])) if len(whens) > 1 else 0
+    if worst <= horizon_s:
+        return ""
+    return (f"⚠️ 落款樣本有斷層：最近 {k} 列間最大間隔 {worst / 60:.1f} 分鐘"
+            f"（> {horizon_s / 3600:g} 小時可等視界）⇒ 引述任何讀數必須帶量測時間戳"
+            "（`量測於=`），且不得稱「同一視窗內自洽」\n")
+
+
+def ledger_gap_line() -> str:
+    """`--pace` 的接線：讀真落款再判斷層；讀不到＝空字串（`quota_gate` 延後 import，同 `cli`）。"""
+    import quota_gate  # noqa: PLC0415 — 見 docstring
+    try:
+        return gap_line(quota_gate.burn_ledger_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
 
 
 # ── `--self-test`：合成注入紅綠自證（DEF-200-213④；體例照 `check_handoff_carriers.py`）。

@@ -94,7 +94,7 @@
 # 原結論是「launchd 走重複觸發、**不吃時刻**，所以 `at` 這個參數刻意不使用」。前半（重複
 # 觸發當底盤）今天仍然成立且保留；後半**在寫下的那一輪就是錯的**，而它的代價已經發生：
 #   · 事實一（本輪逐位元組實測）：四個相異 `at_expr`（`'2026-08-10 23:02:00'`／
-#     `'2027-01-01 00:00:00'`／`(Get-Date).AddHours(5)`／空字串）產出的 plist
+#     `'2027-01-01 00:00:00'`／一段 `(Get-Date).AddHours(…)` 運算式／空字串）產出的 plist
 #     **sha256 完全相同**，相異指紋數 = 1 ⇒ 那個引數結構上到不了 plist。
 #   · 事實二：而決策層（`sentinel_decide` 的 `arm_reset`）當時逐字印「⇒ **重排到那個
 #     時刻**（本次零 token）」。**那句話是假的**，而它是唯一有人會讀的那一行。
@@ -212,11 +212,16 @@ DEFER_WAIT_CAP_SECONDS = 3900
 NO_WINDOW = (getattr(subprocess, "CREATE_NO_WINDOW", 0)
              | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
 
+#: 會卸載／重載排程的 launchctl 子命令：走到 `_run` 漏斗就留一列稽核痕跡（`record_unload`）。
+_UNLOAD_VERBS = ("bootout", "bootstrap", "remove", "unload")
+
 
 # 跑一個外部指令，回 `(rc, stdout+stderr)`。跑不起來一律 `(127, 訊息)`。
 def _run(argv: list[str], timeout: int = 60) -> tuple[int, str]:
     # `encoding=`／`errors=` 明寫：`tools/tests/test_subprocess_encoding_hygiene.py`
     # 守的那一條（預設編碼在不同平台不同，非 ASCII 會靜默降解）。
+    if len(argv) > 2 and argv[0] == "launchctl" and argv[1] in _UNLOAD_VERBS:
+        endurance_env.record_unload(argv[1], argv[-1])  # 卸載的唯一漏斗：誰卸的事後可查
     try:
         proc = subprocess.run(argv, capture_output=True, encoding="utf-8",
                               errors="replace", timeout=timeout, check=False,
@@ -298,7 +303,7 @@ class SchtasksBackend:
     # 註冊／重排並當場取證。回 `(rc, NextRunTime)`；拿不到憑證一律 rc=1。
     # body 與搬家前的 `session_resume_planner._register_at_expr` **逐字相同**。
     # `at_expr` 是 PowerShell 觸發運算式（`'2026-08-09 09:02:00'` 或
-    # `(Get-Date).AddHours(5)`），時區收斂由呼叫端做完（見 planner 的 R80 段）。
+    # `(Get-Date).AddMinutes(30)`），時區收斂由呼叫端做完（見 planner 的 R80 段）。
     # 🔴 `at` 在本後端**刻意不使用**，而這一次「不使用」是對的：`schtasks` 的
     # `-Once -At <時刻>` 本來就吃時刻，那個語意已經完整地由 `at_expr` 表達 ⇒ 再讀一次
     # 結構化的 `at` 只會製造第二個真相源。本包的驗收條件之一是「Windows 那一側行為零
@@ -340,6 +345,7 @@ class SchtasksBackend:
         planner = _planner()
         if planner is None:
             return 1
+        endurance_env.record_unload("unregister", task_name)
         task_q = planner._ps_single_quote(task_name)
         proc = planner.run_powershell(
             f"Unregister-ScheduledTask -TaskName '{task_q}' -Confirm:$false\n"
@@ -404,8 +410,8 @@ class LaunchdBackend:
     # ——時刻走 `at` 這個結構化參數（見檔頭 R83-B 那一段與 `_calendar_of`）。兩個參數並存
     # 是刻意的：時區收斂＋格式化留在 `register_endurance`（與載具無關、且既有回歸鎖
     # `ResetFrameIsNotTheMachineClockTest` 打在那個落點），而「時刻」這個語意本身要下沉到
-    # 吃得動它的地方。`at=None` ＝呼叫端沒有時刻可給（例：`--print-schtasks-command` 的
-    # `DEFAULT_AT_EXPR` 是一段 PowerShell 運算式，解析它是假精確）。
+    # 吃得動它的地方。`at=None` ＝呼叫端沒有結構化時刻可給（例：顯式 `--at` 給的是一段
+    # PowerShell 運算式，解析它是假精確；缺 `--at` 取實測 reset 時則帶結構化 `at`）。
     def arm(self, plan_path: str, task_name: str, at_expr: str, tick: str,
             at: datetime | None = None) -> tuple[int, str]:
         planner = _planner()
@@ -770,6 +776,7 @@ class LaunchdBackend:
         # `no matches found`、`grep -rl parent-gone "$TMPDIR"` rc=1）⇒ 修好了與沒修好在事後
         # 外觀相同。持久居所與「為什麼它真的不會蒸發」的理由見 `endurance_env` ①。
         trace = endurance_env.trace_dir() / f"autosdd_sentinel_bootout_{task_name}.log"
+        endurance_env.record_unload("deferred-bootout", task_name, reason=cmds)
         script = (f'p={os.getpid()}; n=0; '
                   f'while kill -0 $p 2>/dev/null && [ $n -lt {DEFER_WAIT_CAP_SECONDS} ]; '
                   f'do sleep 1; n=$((n+1)); done; '

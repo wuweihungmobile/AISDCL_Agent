@@ -21,6 +21,7 @@ from unittest import mock
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
+import quota_gate  # noqa: E402
 import quota_policy  # noqa: E402
 import session_brief as sb  # noqa: E402
 
@@ -151,6 +152,71 @@ class QuotaLineTest(unittest.TestCase):
         gate = _fake_quota_gate(read_quota=lambda now, path=None: _cache_hit_state())
         got = sb.quota_line(gate, _NOW)
         self.assertNotIn("陳舊快取的退化政策值", got, "非陳舊快取卻被貼了 stale-cache 警語")
+
+
+class UnmeasuredLineCaveatTest(unittest.TestCase):
+    """每一種「量不到」的 reason，額度行都要附退化政策值附註（此前只有 `stale-cache` 附）。
+
+    狀態一律由真的 `quota_gate.read_quota()` 對合成快取檔產出（不手寫 reason 字串），判準是
+    `band == unmeasured`，不是列舉 reason——新增第六種量不到的原因也不得變成裸 `cap=2`。
+    史料見本輪證據檔〈九〉。
+    """
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="brief-unmeasured-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        patcher = mock.patch.dict(os.environ, {"AUTOSDD_QUOTA_CACHE_DIR": str(self.tmp)})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.cache = self.tmp / "cache.json"
+
+    def _line(self, body: object | None) -> str:
+        if body is not None:
+            self.cache.write_text(json.dumps(body), encoding="utf-8")
+        gate = _fake_quota_gate(read_quota=lambda now, path=None: quota_gate.read_quota(
+            now, self.cache))
+        return sb.quota_line(gate, _NOW)
+
+    def _fresh(self, **overrides: object) -> dict:
+        resets = (_NOW + timedelta(hours=2)).isoformat()
+        axis = {"kind": "session", "pct": 40.0, "resets_at": resets}
+        body = {"schema": quota_gate.quota_schema(), "source": "endpoint",
+                "measured_at": (_NOW - timedelta(seconds=10)).isoformat(), "axes": [axis]}
+        return {**body, **overrides}
+
+    def test_every_unmeasured_reason_carries_the_caveat(self) -> None:
+        stale = self._fresh(measured_at=(_NOW - timedelta(hours=6)).isoformat())
+        dead = self._fresh(axes=[{"kind": "session", "pct": 40.0,
+                                  "resets_at": (_NOW - timedelta(seconds=30)).isoformat()}])
+        cases = (("no-cache", None), ("bad-cache", []), ("schema-mismatch", {"schema": "bogus"}),
+                 ("stale-cache", stale), ("expired-window", dead))
+        for reason, body in cases:
+            with self.subTest(reason):
+                got = self._line(body)
+                self.assertIn(f"reason={reason}", got, "夾具沒有產出預期的 reason")
+                self.assertIn("band=unmeasured", got)
+                for fragment in ("退化政策值，不是量測值", "PreToolUse 會自動補量一次、零 token",
+                                 "python tools/session_resume_planner.py --pace"):
+                    self.assertIn(fragment, got)
+
+    def test_only_a_stale_cache_is_called_stale(self) -> None:
+        """附註不得對非陳舊的原因說「陳舊快取」——量不到的原因要求 operator 做的事各不相同。"""
+        self.assertNotIn("陳舊快取", self._line(None))
+        stale = self._fresh(measured_at=(_NOW - timedelta(hours=6)).isoformat())
+        self.assertIn("陳舊快取的退化政策值", self._line(stale))
+
+    def test_the_criterion_is_the_band_not_a_list_of_reason_strings(self) -> None:
+        """一個從未見過的 reason 字面照樣附註（改成逐字列舉 reason 必紅）。"""
+        invented = quota_policy.QuotaState((), "", "future-source", "future-reason-xyz")
+        gate = _fake_quota_gate(read_quota=lambda now, path=None: invented)
+        got = sb.quota_line(gate, _NOW)
+        self.assertIn("reason=future-reason-xyz", got)
+        self.assertIn("退化政策值，不是量測值", got)
+
+    def test_a_usable_cache_gets_no_caveat(self) -> None:
+        got = self._line(self._fresh())
+        self.assertIn("kind=session", got)
+        self.assertNotIn("退化政策值", got, "量得到的讀數不得被貼上退化警語")
 
 
 class Rc2ClarifyTest(unittest.TestCase):

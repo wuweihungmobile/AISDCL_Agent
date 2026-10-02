@@ -202,16 +202,8 @@ SENTINEL_TICK = "--sentinel-tick"
 # 消費者，兩邊的字面由 `tools/tests/test_check_hooks_liveness.py` 的注入證明綁在一起。
 UNATTENDED_ENV = "AUTOSDD_UNATTENDED"
 RESUME_OFF_ENV = "AUTOSDD_RESUME_OFF"
-#: 🔴 DEF-200-231①：**被禁止的形態，不再是任何預設**（`--at` 預設為 `None`、
-#: `schtasks_command()` 的 `at_expr` 無預設值）。`--at` 缺席時的觸發時刻由
-#: `session_brief.schtasks_trigger()` 取實測 reset，解不出就拒絕。常數本身刻意留著：
-#: ADR-XPLAT-004／005／014、`ResetArithmeticTest` 與 `schedule_backend`／
-#: `quota_limits` 的註解都以這個名字指稱「假設 5 小時」那個缺陷，
-#: 刪掉會讓這些引用懸空（沒有任何程式碼 import 它）。reset 是滾動視窗、
-#: 只能觀測不能算（全庫 7 個相異 reset 值沒有一個落在 5 小時格點上，`3:50am`／
-#: `12:20pm` 就是反證）。此前該處的立案段落全文已搬進
-#: docs/06_quality/CrossPlatform_R189_SessionGate_Family_Lock_Audit_Evidence.md〈九〉。
-DEFAULT_AT_EXPR = "(Get-Date).AddHours(5)"
+#: 「`--at` 缺席就假設 5 小時」的預設已整支刪除：`--at` 預設 `None`、`schtasks_command()`
+#: 的 `at_expr` 無預設值；缺席時的觸發時刻取實測 reset，解不出即拒絕。史料見本輪證據檔〈九〉。
 
 #: 探測重試上限。上界＝5 × 一次探測（本檔實測 31,847 tokens／$0.0176）≈ 16 萬 tokens，
 #: 約等於主 session 醒來一次的 3/4。**這個數字是挑的、不是量出來的**，照實寫：它是
@@ -426,8 +418,7 @@ def relay_problems(state: object) -> list[str]:
     # 自癒是**用當下 argv 重建 `_base_state()`**，會把操作者原本設定的 `allow_resume`
     # 靜默重置回預設值（見 `_heal_relay()`/`_base_state()`）。halt 標記的 `reset_at` 本身
     # 就是觀測值（`quota_gate.halt_marker_or_rejection()` 寫入前已驗證），故補上白名單。
-    if live and state.get("reset_source") not in (
-            "transcript-verbatim", "probe-verbatim", "operator", "halt-marker"):
+    if live and state.get("reset_source") not in relay_machine.RESET_SOURCES:
         problems.append(f"reset_source={state.get('reset_source')!r} 不是觀測值 ⇒ "
                         "不准用來武裝（猜出來的時刻會讓它醒在錯的時間）")
     return problems
@@ -1010,8 +1001,12 @@ def _base_state(session_id: str, plan: Path, args, kind: str, task: str) -> dict
 
 # 武裝／重排的共同尾段。三條路走同一份，是因為「拿不到 `NextRunTime` 卻仍把 state
 # 寫成 armed」這種假綠只要有一條路漏掉就等於沒有防；集中一處才有辦法一次證完。
-def _register_and_record(plan: Path, state: dict, at: datetime, tick: str) -> tuple[int, str]:
+def _register_and_record(plan: Path, state: dict, at: datetime | None, tick: str,
+                         at_expr: str | None = None) -> tuple[int, str]:
     """寫狀態 → 註冊排程 → 取憑證 → 把憑證（或 abandoned）寫回狀態。
+
+    `at_expr` 只有手動 `--register-schtasks` 帶（操作者給的觸發運算式；此時 `at` 可為
+    `None`）：給了就以它註冊、`at` 原樣下傳；缺席＝由 `at` 推算（`register_endurance`）。
 
     🔴 M-13：INV5 單一擁有者檢查下沉到此（`_arm_sentinel` 自己另有一站更早的同款檢查，
     此站補的是 `_arm_endurance` 手動路徑此前完全不查的洞）。同 session 已有另一支
@@ -1033,7 +1028,8 @@ def _register_and_record(plan: Path, state: dict, at: datetime, tick: str) -> tu
     except OSError:
         state["state"] = "abandoned"
         return 1, ""
-    rc, moment = register_endurance(state, at, tick)
+    rc, moment = (_register_at_expr(str(plan), state["task_name"], at_expr, tick, at)
+                  if at_expr is not None else register_endurance(state, at, tick))
     # 憑證寫進**該後端自己的鍵**（Windows＝next_run_time、mac＝schedule_credential）。
     # 兩者語意不同，共用一個鍵會讓「推算值」與「排程器回報值」在狀態檔裡分不開。
     state[schedule_backend.select().credential_key] = moment
@@ -1571,6 +1567,7 @@ def main(argv: list[str]) -> int:
         # 不變）；定位得到而 stamp 與排程器現查不一致才出聲。
         aim, source = resolve_transcript_source(args.session_id, args.transcript)
         print(quota_gate.pace_report(model=args.model or harness_feed.active_model_of(aim, guard), sid=guard.session_id_of(aim) if aim else None), end="")  # noqa: E501 — DEF-200-420：自動推導，顯式 --model 優先
+        print(quota_reconcile.ledger_gap_line(), end="")  # DEF-200-203：落款斷層提醒（只出聲）
         if aim:  # DEF-200-431：印出 session 來源（stderr，stdout 的四欄判定不動）
             print(harness_feed.session_line(source, guard.session_id_of(aim)), file=sys.stderr)
         liveness = sentinel_lifecycle.liveness_line(guard.session_id_of(aim)) if aim else ""
@@ -1656,9 +1653,8 @@ def main(argv: list[str]) -> int:
     # `--print-schtasks-command` 印出的指令與 `--register-schtasks` 真的註冊的是同一份。
     if args.print_schtasks or args.register_schtasks:
         task = resume_task_name(data["session_id"], args.task_name)
-        # 🔴 M-13：`--register-schtasks` 不經 `_register_and_record`（直接呼叫
-        # `_register_at_expr`），INV5 檢查此前完全漏查這條手動路徑；顯式補一站，
-        # 與 `_arm_endurance` 共用同一個判準函式，不重寫第二份。
+        # 🔴 M-13：INV5 在此先查一站（與 `_arm_endurance` 共用同一個判準函式，不重寫第二份）；
+        # `_register_and_record` 內另有同款一站（衝突回 DEFERRED_CREDENTIAL），走到時此站已先擋。
         # DEF-200-231①：INV5 先於時刻解析——同 session 已有排程時，結局不因解不出而改變。
         if args.register_schtasks and relay_machine.single_owner_conflict(data["session_id"], task, out):  # noqa: E501
             print(f"ℹ️  INV5 單一擁有者：session {data['session_id']} 已由其他排程巡邏/續跑，不重複武裝（擇一擁有，零重複探測）。")  # noqa: E501
@@ -1669,9 +1665,11 @@ def main(argv: list[str]) -> int:
         if args.print_schtasks: print("\n" + schtasks_command(str(out), task, at_expr=at_expr, observed=args.at is None), end="")  # noqa: E701,E501
         if args.register_schtasks:
             print()
-            rc, moment = _register_at_expr(str(out), task, at_expr, RESUME_TICK, at)
+            state = relay_machine.manual_state(data["session_id"], out, args, task, transcript, at)
+            rc, moment = _register_and_record(out, state, at, RESUME_TICK, at_expr)
             if rc != 0: return 1  # noqa: E701
             print(schedule_backend.select().credential_line(moment))
+            print("   ℹ️  醒來那一跑" + ("會自動續跑。" if args.allow_resume else "只探測＋留痕。"))
     return 0
 
 

@@ -49,7 +49,7 @@
 #   相異 rec 值只有一個，而且比中性基準（8）還小 ⇒ **本案要治的病原封不動復發**。
 #
 #   解（兩個角色，兩種聚合，各自對一個方向負責）：
-#     · `cap`＝硬上限，**逐軸各自帶自己的 horizon 乘數再取 min**。煞車方向由它承接：
+#     · `cap`＝硬上限，**逐軸各自帶自己的 horizon 乘數（夾上界 1.0）再取 min**。煞車方向由它承接：
 #       加入任何一軸永不放寬（M3 的 property 不變），halt 一票否決。
 #     · `rec`＝諮詢值，拆成「水位有多緊」×「此刻有多便宜」：
 #         base = min(逐軸 base_rec)      ← 稀缺度是逐軸的，取最緊
@@ -59,6 +59,7 @@
 #   為什麼兩個方向都成立：`rec ≤ cap` 恆成立 ⇒ 加速**只能在最緊那一軸允許的空間內**
 #   發生，weekly 撞線時 cap=0 ⇒ rec=0，「不停」結構上不可能；而 cap 被長期程軸釘住
 #   時 rec 仍隨最短期程移動 ⇒ 加速訊號不再被吃掉。
+#   （DEF-200-199 γ：無近期程加速（pace<=1）時 rec 改取逐軸 min；見 `_rec_of_gate`。）
 #
 # 🔴 它在什麼情況下會做錯（誠實劃界，不是免責聲明）：
 #   (a) `pace` 只問「最短的那個 reset 有多近」，不問**那是哪一軸**。一個我們並不在乎
@@ -159,6 +160,14 @@ NOTE_BAD_PCT, NOTE_UNKNOWN = "bad-pct", "unknown-kind"
 #: 同族紀律：**只准多說一句，不參與分類**——這一句只出現在 `note`／`describe()`，
 #: `band`／`cap`／`rec` 三欄一律不受影響（見 `decide()` 的建構順序）。
 NOTE_MODEL_EXCLUDED = "model-scoped-excluded"
+#: 🔴 DEF-200-197（E3）：repo 自己合成的讀數（逐字稿地板）。判別看 provenance（`Axis.via`）不看
+#: kind 清單——地板的 kind 取自 `quota_limits` 的 `LIMIT_*`、不在 `KNOWN_KINDS`。note 說
+#: `synthetic-reading`，不再冒充伺服器吐出的陌生桶；同族紀律：只動 note 字面，`KNOWN_KINDS`
+#: 與 `core_signature()` 不動。
+NOTE_SYNTHETIC = "synthetic-reading"
+SYNTHETIC_VIA = frozenset({"transcript-floor"})
+#: 🔴 DEF-200-198 拆殘（T_WRAP）：進 cap 聚合的軸剩餘分鐘低於 `Policy.wrap_minutes` ⇒ 收尾保留段。
+NOTE_MUST_FINISH = "must-finish"
 
 _INF = float("inf")
 
@@ -207,6 +216,9 @@ class QuotaState:
     #: （見 `quota_meter.account_key_of()`）。**新增欄位帶預設值**——所有既有建構點皆傳
     #: 4 個位置參數，本欄不影響任何一處。唯一消費端是 `quota_gate.core_signature()`。
     account_key: str | None = None
+    #: 🔴 DEF-200-197：量不到的成因若是遙測端點限流（429），伺服器報的恢復時刻原字串；`None`＝沒有。
+    #: 只描述取數面發生了什麼、不參與分類；建構一律用 keyword（見本輪證據檔〈九〉）。
+    retry_after: str | None = None
 
     def usable(self) -> bool:
         """有沒有任何一軸可判讀（**指名軸別**才拿得到數字）。"""
@@ -270,6 +282,9 @@ class Policy:
     # 帶跨欄位不變式（PRD §6.1 第 6 條：`< prepare_pct − converge_pct`），住這裡才受 `load_policy()`
     # 的 live fail-safe 保護——`.env` 把邊際或錨點調到違反不變式時整組退回預設並出聲。
     compact_cost_budget_pp: float = 3.0
+    # 🔴 DEF-200-198 拆殘（T_WRAP）：收尾保留段門檻（分鐘）。出廠 5＝`FANOUT_WINDOW_SECONDS/60`——
+    # policy 不得 import gate，同值由 `test_quota_policy.py` 的對等測試釘；須 < accel_window。
+    wrap_minutes: float = 5.0
 
 
 DEFAULT_POLICY = Policy()
@@ -306,6 +321,8 @@ class Decision:
     # 結構上讀不到它們的輸入 ⇒ 「hint 不得放寬 cap」是建構順序保證的，不是靠自律。
     # 與 hook 側 `context_budget_guard.model_hint`（context 窗長判定用）**同名不同物**。
     model_hint: str = ""
+    # 🔴 DEF-200-197：量不到時原樣帶 `QuotaState.retry_after`（遙測限流的恢復時刻）；只給人話面用。
+    retry_after: str | None = None
 
 
 # ── 時間：只把伺服器給的瞬時字串轉成「現在還剩幾分鐘」，不持久化任何時長 ──────────
@@ -429,7 +446,8 @@ def _cap_for(band: str, horizon: str, p: Policy) -> int | None:
     base = _base_cap(band, p)
     if base is None:
         return None
-    cap = _clamp(int(base * _mult(horizon, p)), p)
+    # 🔴 乘數夾上界 1.0：加速只准作用在 rec，cap 是煞車（見本輪證據檔〈九〉）。
+    cap = _clamp(int(base * min(1.0, _mult(horizon, p))), p)
     # 🔴 覆寫是**上限**，不是拿去參與乘法的 base。舊寫法 `base = override` 會被
     # horizon 乘數放大——`AUTOSDD_QUOTA_FANOUT_CAP=8` 在 near 檔實得 16，也就是一個
     # 名字叫 CAP 的旋鈕給出了**比使用者要求的還鬆**的值。只收緊、不放寬。
@@ -519,7 +537,8 @@ def axis_recommended(pct: float, minutes: float | None, p: Policy) -> int:
 # 🔴 時鐘偏移的方向鎖：`minutes < 0` ⇒ 夾 0 **且強制 mid**。偏移絕不允許把預算調高
 # ——一台快 6 小時的機器會讓「reset 就在眼前，衝」永遠成立。
 # （說明寫成 `#` 而非 docstring：`count_loc` 計 docstring 行、不計註解行，而本檔 tier
-#   餘裕個位數；同 `quota_gate.py`／`session_resume_planner.py` 既有作法，一字未刪。）
+#   餘裕現查 `check_loc_budget.py --json`；同 `quota_gate.py`／`session_resume_planner.py`
+#   既有作法，一字未刪。）
 # 🔴 R86：這裡多了兩個 `quota_pace` 呼叫，兩者治的是**不同**的缺陷，不要混讀：
 #   · `effective_horizon`（缺陷 A＋B）＝逐軸的事：相對窗長的門檻 ＋ 燃燒率，並帶
 #     「無節省證據時不得比絕對門檻鬆」的夾層 ⇒ 窗長解不出的軸逐格等於今天的行為。
@@ -539,7 +558,9 @@ def axes_of(state: QuotaState, now: datetime, p: Policy,
     for axis, (pct, horizon, minutes, note) in zip(state.axes, resolved):
         band = pct_band(pct, p)
         # 🔴 只加一句話，**不改任何分類**（`band`／`cap`／`rec` 三欄都在這一行之外算完）。
-        note = "+".join(x for x in (note, "" if axis.kind in KNOWN_KINDS else NOTE_UNKNOWN) if x)
+        extra = (NOTE_SYNTHETIC if axis.via in SYNTHETIC_VIA
+                 else "" if axis.kind in KNOWN_KINDS else NOTE_UNKNOWN)
+        note = "+".join(x for x in (note, extra) if x)
         readings.append(AxisReading(axis, band, horizon, _cap_for(band, horizon, p),
                                    _rec_for(band, horizon, p), minutes, note))
     return tuple(readings)
@@ -569,6 +590,17 @@ def _pace_of(readings: tuple[AxisReading, ...], p: Policy) -> float:
     if any(r.horizon == AXIS_NONE and r.cap is not None for r in readings):
         return min(1.0, fastest)
     return fastest
+
+
+# 🔴 DEF-200-199（L1-γ）：加速臂（pace>1＝有近期程且無否決）沿用 base×pace（錨點①）；其餘逐軸取 min
+# （稀缺度與節奏同軸）。min 一律跑在 `gate` 上（DEF-200-202）。史料與實測見本輪證據檔〈九〉。
+def _rec_of_gate(gate: tuple[AxisReading, ...], p: Policy, binding_cap: int | None) -> int:
+    """諮詢值的跨軸聚合：近期程加速沿用 base×pace，否則逐軸 min（每軸乘數夾 1.0）。"""
+    pace = _pace_of(gate, p)
+    if pace > 1.0:
+        return _bound(_clamp(int(min(_base_rec(r.band, p) for r in gate) * pace), p), binding_cap)
+    return min(_bound(_clamp(int(_base_rec(r.band, p) * min(1.0, _mult(r.horizon, p))), p), r.cap)
+               for r in gate)
 
 
 # 🔴 R84／SA-06 同一條不變式的第二面（回報面）：`remaining = _INF if minutes is None`
@@ -640,7 +672,7 @@ def _amort_skip(state: QuotaState, active_model: str | None) -> tuple[bool, ...]
                  for a in state.axes)
 
 
-# 🔴 為何 rec 不能也取 `min(逐軸 rec)`（那會讓本案要治的病原封不動復發）：weekly 這種
+# 🔴 為何 rec 的加速臂不能也取 `min(逐軸 rec)`（那會讓本案要治的病原封不動復發）：weekly 這種
 # 長期程軸的 horizon 幾乎恆為 far ⇒ 它的 ×0.5 永遠 binding，短期程軸的 ×2 一次都出不
 # 來。實測固定 weekly 57%@8233min、把 session 的 reset 掃過 8640 倍的範圍，`min(逐軸
 # rec)` 給出的相異值只有一個。拆成「稀缺度取 min × 節奏取最短期程」之後加速看得見，
@@ -657,7 +689,7 @@ def decide(state: QuotaState, now: datetime, p: Policy,
     # 這個預設，行為對它們**逐字不變**——本輪之前不存在的參數，缺席不影響任何既有呼叫）。
     # 同樣不進 `Policy`：它是**這一次呼叫**的性質，不是門檻，見 `_in_cap_gate()`。
     # DEF-200-438：同一個值也決定攤提要不要遮掉別家模型的軸（`_amort_skip()`）。
-    """跨軸聚合：`cap = min(逐軸 cap)`＝煞車；`rec = min(base×pace, cap)`＝加速。"""
+    """跨軸聚合：`cap = min(逐軸 cap)`＝煞車；`rec` 見 `_rec_of_gate`（加速臂／逐軸 min）。"""
     readings = axes_of(state, now, p, ratio, ratio_note, active_model)
     if not readings:
         # 🔴 R100／PRD F1：`axes == ()` ⇒ `cap ≤ cap_prepare`。夾在**這裡**而不是只靠出廠
@@ -669,7 +701,7 @@ def decide(state: QuotaState, now: datetime, p: Policy,
         return Decision(
             cap=floor, recommended_fanout=floor,
             band=BAND_UNMEASURED, binding=None, per_axis=(),
-            reason=state.reason or "unmeasurable")
+            reason=state.reason or "unmeasurable", retry_after=state.retry_after)
     # 🔴 R89／憲法裁決：**保險池不得一票否決主力**。掌舵者原話「付費額度是一個保險，
     # 你把它當成主要，本末倒置」；官方 UI 逐字「Turn on usage credits to keep using
     # Claude **if you hit a plan limit**」；PRD §6 4b 的預設是 `OVERAGE_POLICY=FREEZE`
@@ -701,13 +733,18 @@ def decide(state: QuotaState, now: datetime, p: Policy,
             if r.axis.kind in MODEL_SCOPED_KINDS and r not in gate_list else r
             for r in readings)
     binding = min(gate, key=_binding_key)
+    # 🔴 T_WRAP：只看進 cap 聚合的軸；已翻頁（elapsed）與鐘偏移（clock-skew）的軸分鐘被夾成 0，
+    # 那不是「真的剩 0 分鐘」，不得觸發（見本輪證據檔〈九〉）。
+    live = [r.minutes for r in gate if r.minutes is not None
+            and not {NOTE_ELAPSED, NOTE_SKEW} & set(r.note.split("+"))]
+    wrap = bool(live) and min(live) < p.wrap_minutes
     # 🔴 `if notes else` 分支是冗餘的（`",".join(["x"])` 不產生尾逗號）——R89 就地簡化，
     # 行為逐字等價。（此處原先接著一句「騰出的餘裕給下面那道地板」，那道地板已於本輪
     # 拆除，故該句一併刪去——留著就是一個指向不存在物的散文。）
     reason = ",".join([state.reason, *sorted(
         {r.note for r in readings if r.note}
-        | ({f"gate_excluded={'+'.join(excluded)}"} if excluded else set()))])
-    base = min(_base_rec(r.band, p) for r in gate)
+        | ({f"gate_excluded={'+'.join(excluded)}"} if excluded else set())
+        | ({NOTE_MUST_FINISH} if wrap else set()))])
     # R95：hint 的取樣面＝`gate`（保險軸不進 cap 聚合，也不由它觸發降級建議——R89 同判）。
     hint = ",".join(sorted({r.axis.kind for r in gate if r.band in MODEL_HINT_BANDS or (
         r.axis.kind in MODEL_SCOPED_KINDS and r.band != BAND_FREE)}))
@@ -741,10 +778,10 @@ def decide(state: QuotaState, now: datetime, p: Policy,
     #    要保留「先派一個看看」的取證協定是**另案**：正確的鍵不是保險軸的 band，而是
     #    `account_posture()["fallback_available"] is False` **且**訂閱軸已進 prepare 帶；
     #    本輪沒有任何量測支持任何一個門檻值 ⇒ 不在這裡發明數字。
+    rec = _rec_of_gate(gate, p, binding.cap)
     return Decision(
         cap=binding.cap,
-        recommended_fanout=_bound(
-            _clamp(int(base * _pace_of(gate, p)), p), binding.cap),
+        recommended_fanout=min(rec, max(1, p.cap_prepare)) if wrap else rec,
         band=binding.band, binding=binding.axis, per_axis=readings, reason=reason,
         # 🔴 餵**帶號**分鐘（不是 `minutes_to_reset` 那個夾 0 的版本）：時鐘偏移的軸必須
         # 被攤提整個排除。夾 0 之後長窗軸會變成「窗數 1、配額＝全部剩餘」＝**放寬**，

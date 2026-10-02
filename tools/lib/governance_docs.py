@@ -569,6 +569,9 @@ _GOVERNANCE_DOCS = (
     # 同一資格，即刻登記。
     _REPO_ROOT / "docs" / "06_quality"
     / "CrossPlatform_R189_SessionGate_Family_Lock_Audit_Evidence.md",
+    # 掌舵者五問修復輪（第十二次四方覆核；Pacing 落地包 W1／W2／W5／W3-γ、喚醒鏈 455／456／203、
+    # 守衛 mask_inert 漏判 457）的詳情面與各列索引的原文：同一資格，即刻登記。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R190_FixRound_Evidence.md",
     # 護欄層行數棘輪史料歸檔的第二冊（第一冊逼近 Read 工具上限，淨減法搬遷改落本檔）：即刻登記。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_Guard_Line_History_2.md",
 )

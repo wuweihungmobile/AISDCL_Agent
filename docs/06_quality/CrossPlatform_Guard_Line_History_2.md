@@ -1747,3 +1747,114 @@ workflow 現況不存在，主要風險面（刪 job 留整行註解）已被覆
 字串常值內的 `#`（如 cron 欄位雖不含 # 但 run 指令行可能含），保守整行剝除
 零誤剝風險。若未來出現行尾註解含 schedule 字樣的形態，再擴充剝法。
 ```
+
+### R190 收尾棒搬遷史料（續；逐字 append）
+本節接續 `CrossPlatform_R190_FixRound_Evidence.md`〈九-F〉：證據檔因體積逼近治理文件上限，最後 12 段 docstring 尾段改搬到這裡。以下每一小節是從 `tools/tests/` 三支鎖檔（`test_block_destructive_git_r83.py`／`test_context_budget_guard.py`／`test_mac_endurance_r83.py`）搬出的 docstring 尾段**逐字原文**，原位留一行指針（`史料搬至 CrossPlatform_Guard_Line_History_2.md〈R190 收尾棒〉§k。`）；各小節標題的 `L起-迄` 皆指搬遷前快照的行號。剝 docstring 後 `ast.dump` 與搬遷前逐字相同。
+
+#### §1　`test_block_destructive_git_r83.py`　FunctionDef:test_the_loop_condition_boundary_is_load_bearing docstring L1046-1052（搬出原 L1048-1052，5 行）
+```text
+
+        🔴 探針同樣是實測訂正過的：第一版拿 `pgrep … | while read p` 當探針，注入後仍
+        放行——因為那條救它的是**位置順序**（pgrep 在 `while` 之前，本來就不在掃描區間內），
+        不是條件邊界。真正只有邊界救得了的是「pgrep 在 `do` **之後**」這一族。
+        """
+```
+
+#### §2　`test_block_destructive_git_r83.py`　FunctionDef:test_a_stash_the_guard_already_saw_is_not_reported docstring L1756-1762（搬出原 L1758-1762，5 行）
+```text
+
+        ack **不是**子字串判定，也**不含**「被擋」與 `stash create` 兩種（前者根本不會跑、
+        後者一個字節都不動那個 ref ⇒ 都解釋不了任何變動）；被訂正掉的兩處假事實逐字＝
+        `docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`。
+        判準與紅綠自證見 `TestR84SentinelAckIsNotASubstring`。"""
+```
+
+#### §3　`test_block_destructive_git_r83.py`　ClassDef:TestR84TheWaitformDocstringIsTheSingleHome docstring L2253-2259（搬出原 L2255-2259，5 行）
+```text
+
+    這一條把「docstring 與實作逐字相符」做成機械物：docstring 自陳幾條，就必須真的有
+    幾條判準各自能單獨命中。只斷言「docstring 裡有 ① ② ③」會恆綠——那正是本 repo
+    反覆判紅的「鎖存在但沒有鑑別力」。
+    """
+```
+
+#### §4　`test_block_destructive_git_r83.py`　ClassDef:TestGovernanceFilesAreReadOnlyWhenUnattended docstring L2387-2393（搬出原 L2389-2393，5 行）
+```text
+
+    六個方向對齊本檔既有慣例：①該擋的擋（無人值守 × 保護面 × 三種寫檔工具）；
+    ②不該擋的放行（有人值守／保護面之外／專案根之外的同名檔）；③逃生口；
+    ④開關不共用（**雙向**都驗）；⑤退化 payload fail-open；⑥判準本身可證偽。
+    """
+```
+
+#### §5　`test_context_budget_guard.py`　FunctionDef:test_the_new_evidence_lines_do_not_break_the_next_run_time_credential docstring L2015-2021（搬出原 L2017-2021，5 行）
+```text
+
+        判準看的是**產出**：把新增的兩段輸出接在真實形態的取證輸出上，取回的值必須逐字
+        不變。`LogonType`／`RunLevel`／`UserId` 三個欄名都不以 `nextruntime` 開頭，所以
+        這件事在設計上就成立——但「設計上成立」正是需要被釘住的那種宣稱。
+        """
+```
+
+#### §6　`test_context_budget_guard.py`　FunctionDef:test_the_guard_is_registered_on_both_events_that_the_sentinel_needs docstring L2644-2650（搬出原 L2646-2650，5 行）
+```text
+
+        🔴 R82／HELM-02 起是**兩個**事件，缺一即斷：SessionStart 清閂鎖（`claude -r`
+        續接時能重新武裝）、PostToolUse 才是真正會註冊排程的那一個。此前只驗前者，
+        而武裝已經搬到後者 ⇒ 只驗一個等於把接線的一半交給運氣。
+        """
+```
+
+#### §7　`test_context_budget_guard.py`　ClassDef:PaceAutoDerivesActiveModelTest docstring L12786-12792（搬出原 L12788-12792，5 行）
+```text
+    `session_resume_planner.py` 現在補上 `harness_feed.active_model_of()`——與
+    PreToolUse hook（`context_budget_guard.py` 的 `active_model = model_family(
+    scanned[2]) if scanned and scanned[2] else None`）同一組轉換規則，讓 `--pace`
+    與守衛看同一把尺。紅端：同一份快取下 `--pace` 與 `--pace --model fable`
+    此前逐字不同（前者恆帶 `model-scoped-excluded`）。"""
+```
+
+#### §8　`test_context_budget_guard.py`　FunctionDef:test_a_single_session_climbing_the_warn_band_speaks_exactly_once docstring L13122-13128（搬出原 L13124-13128，5 行）
+```text
+
+        「每 5pp 重新武裝」提案的評估與代價逐字見證據檔 §I-6——該提案一落地必須
+        先讓本條轉紅（它也會打紅 `LatchRearmTest::
+        test_the_same_tier_and_window_still_only_fires_once`，與本案正交，另輪處理）。
+        """
+```
+
+#### §9　`test_context_budget_guard.py`　FunctionDef:test_end_to_end_hook_reports_harness_source_and_appends_cross_check docstring L13975-13981（搬出原 L13977-13981，5 行）
+```text
+
+        `_isolated_env()` 把子行程的 `HOME` 蓋成 `home_dir`、且明確 pop 掉
+        `AUTOSDD_CONTEXT_FEED_DIR`（見該函式 R+D32 補的隔離）⇒ feed 必須寫在
+        `context_feed_path()` 沒有旗標時的預設位置：`$HOME/.autosdd/context_feed/`。
+        """
+```
+
+#### §10　`test_mac_endurance_r83.py`　FunctionDef:test_the_launchd_only_exemptions_really_have_no_outside_consumer docstring L437-442（搬出原 L438-442，5 行）
+```text
+
+        少了這一條，下一個人只要把新方法加進 `_LAUNCHD_ONLY` 就能繞過整道鎖（實測：
+        把 `evidence_hint` 塞進白名單，對稱判準當場轉綠）——那正是本 repo 判過的
+        「有鎖在守假話」：檔案在、判準在、測試全綠。
+        """
+```
+
+#### §11　`test_mac_endurance_r83.py`　FunctionDef:test_the_mac_credential_never_states_a_next_run_time docstring L724-729（搬出原 L725-729，5 行）
+```text
+
+        launchd 不報「下次幾點跑」（實測：print 輸出裡 next／fire／due 皆不存在），任何
+        時刻都只能是我們自己推算的。憑證裡放一個推算時刻，就是把它偽裝成排程器的陳述
+        ——而那正是 Windows 側 `NextRunTime` 之所以能當憑證的理由被掏空的方式。
+        """
+```
+
+#### §12　`test_mac_endurance_r83.py`　FunctionDef:test_the_patrol_moment_deliberately_gets_no_calendar docstring L1201-1206（搬出原 L1202-1206，5 行）
+```text
+
+        這不是省事：寫了就代表下一個 tick 的回讀不符 ⇒ 每 15 分鐘 bootout+bootstrap 一輪，
+        而 bootstrap 是整條鏈上唯一會讓哨兵消失的動作。憑證此時必須明說「只有巡邏觸發」
+        ＋最壞死等秒數，不准留白（留白會讓它與「排到了確切時刻」看起來一樣）。
+        """
+```

@@ -110,12 +110,15 @@ def rc2_clarify(windows: bool | None = None) -> str:
 _NO_MEASURE = "本 session 尚無量測（新視窗，尚未有 assistant usage 記錄）"
 _QUOTA_UNAVAILABLE = "額度快取不可用，現查 `python tools/session_resume_planner.py --pace`"
 
-#: G2：`describe()` 文字含 `stale-cache` 時固定追加的一句——退化政策值不是量測值，
-#: 且 PreToolUse 會在第一次扇出型工具呼叫前自動補量一次（零 token），不必人介入。
-_STALE_CACHE_NOTE = (
-    "（陳舊快取的退化政策值，不是量測值：第一次扇出型工具呼叫前 PreToolUse 會自動補量"
-    "一次、零 token；要現在看：python tools/session_resume_planner.py --pace）"
+#: G2：額度量不到時固定追加的一句——退化政策值不是量測值，且 PreToolUse 會在第一次扇出型工具
+#: 呼叫前自動補量一次（零 token），不必人介入。`stale-cache` 專屬說「陳舊快取」；其餘量不到
+#: 的原因（無快取／壞檔／schema 不符／視窗已翻頁…）共用不帶原因的版本，判準是 band 而非 reason。
+_DEGRADED_TAIL = (
+    "不是量測值：第一次扇出型工具呼叫前 PreToolUse 會自動補量一次、零 token；"
+    "要現在看：python tools/session_resume_planner.py --pace）"
 )
+_STALE_CACHE_NOTE = "（陳舊快取的退化政策值，" + _DEGRADED_TAIL
+_UNMEASURED_NOTE = "（退化政策值，" + _DEGRADED_TAIL
 
 
 def quota_line(quota_gate: object, now: datetime | None = None,
@@ -126,7 +129,9 @@ def quota_line(quota_gate: object, now: datetime | None = None,
     `quota_policy`），本函式不自己 import——理由同檔頭：不長出第二份「怎麼判額度」。
 
     G2：`describe()` 文字含 `stale-cache` 時（快取過期，`decide()` 回退到
-    `degraded_cap`）追加 `_STALE_CACHE_NOTE`，避免模型把退化值誤讀成硬限制。
+    `degraded_cap`）追加 `_STALE_CACHE_NOTE`，避免模型把退化值誤讀成硬限制；其餘量不到的
+    原因（`band == unmeasured`）追加 `_UNMEASURED_NOTE`——此前只有 `stale-cache` 附註，
+    無快取／壞檔／schema 不符／視窗已翻頁時簡報只剩裸 `cap=2 band=unmeasured`。
 
     DEF-200-432：`active_model`（家族字，如 `fable`）傳給 `decide()`，模型分軌軸（`weekly_scoped`
     等）才會進 cap 聚合，簡報的 `⇒ cap=…` 才與 `--pace`／守衛同尺；此前缺席，新鮮快取下簡報
@@ -142,9 +147,12 @@ def quota_line(quota_gate: object, now: datetime | None = None,
         text = quota_gate.quota_policy.describe(decision)
         if active_model and decision.per_axis:
             text += f"　active_model={active_model}"
+        unmeasured = decision.band == quota_gate.quota_policy.BAND_UNMEASURED
     except Exception:  # noqa: BLE001 — 簡報失敗不得反過來擋 SessionStart
         return _QUOTA_UNAVAILABLE
-    return f"{text}{_STALE_CACHE_NOTE}" if "stale-cache" in text else text
+    if "stale-cache" in text:
+        return f"{text}{_STALE_CACHE_NOTE}"
+    return f"{text}{_UNMEASURED_NOTE}" if unmeasured else text
 
 
 def _active_model(payload: dict, transcript: Path | None, guard: object) -> str | None:
@@ -336,6 +344,13 @@ _NO_OBSERVED_RESET = (
 )
 
 
+#: `--at ""`（空白）不是時刻：照單全收會把它記成「操作者宣稱的 reset」，而宣稱的是空的。
+_EMPTY_AT = (
+    "❌ --at 是空字串 ⇒ 沒有時刻可排，拒絕。\n"
+    "   要等額度 reset 請省略 --at（取額度快取的實測 reset）；要自己指定請給非空的時刻運算式。\n"
+)
+
+
 def trigger_basis(observed: bool) -> str:
     """`--print-schtasks-command` 標頭裡「這個觸發時刻從哪來」那句：只說這次真的走的那條路
     （`schtasks_trigger()` 缺 `--at` 取實測 reset；顯式 `--at` 是操作者宣稱的時刻）。"""
@@ -349,7 +364,8 @@ def schtasks_trigger(
 ) -> tuple[str | None, datetime | None, str]:
     """手動排程路徑的觸發時刻：回 `(at_expr, 結構化 at, 拒絕語)`。
 
-    顯式 `--at`（`given`）＝操作者宣稱的時刻，原樣下傳、結構化 at 為 `None`（同此前）。
+    顯式 `--at`（`given`）＝操作者宣稱的時刻，原樣下傳、結構化 at 為 `None`（同此前）；
+    空白字串不是時刻 ⇒ 回拒絕語。
     缺席時只取**實測**：額度快取 → `decide()` → `halt_resets_at()`（≥halt 各軸中最早
     可解析者，無則 binding）＋緩衝，且 `reset_branch()` 須判 arm（6 小時可等視界）。
     量不到／太舊／太遠／已過一律 `(None, None, 拒絕語)`，**不得退回猜的時刻**
@@ -358,7 +374,7 @@ def schtasks_trigger(
     注入（同 `quota_line`）；`skew_seconds` 由呼叫端給——緩衝常數的唯一家是 planner
     的 `RESET_SKEW_SECONDS`，這裡不抄第二份。"""
     if given is not None:
-        return given, None, ""
+        return (given, None, "") if given.strip() else (None, None, _EMPTY_AT)
     at_now = now or datetime.now().astimezone()
     try:
         policy, _problems = quota_gate.quota_policy.load_policy(quota_gate.policy_env())

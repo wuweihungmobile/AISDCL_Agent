@@ -1418,7 +1418,7 @@ class ResetArithmeticTest(unittest.TestCase):
 
     def test_the_real_incident_is_sixteen_minutes_not_five_hours(self) -> None:
         """實測那次：08:44 撞線、訊息說 9am ⇒ 只要等 16 分鐘。
-        而 `DEFAULT_AT_EXPR` 的「+5 小時」會排到 13:44——晚 4 小時 44 分。"""
+        而假設「固定 +5 小時」會排到 13:44——晚 4 小時 44 分。"""
         now = self._at(0, 44)  # UTC 00:44 == Asia/Taipei 08:44
         reset = guard.parse_reset_at(_REAL_SESSION_LIMIT, now)
         self.assertIsNotNone(reset)
@@ -1456,7 +1456,7 @@ class ResetArithmeticTest(unittest.TestCase):
     def test_five_hours_is_not_a_valid_substitute(self) -> None:
         """觀測到的 7 個 reset 值（3:50am／4am／9am／11pm／12:20pm／12:30pm／6pm）
         **沒有一個**落在 5 小時的固定格點上 ⇒ reset 是滾動視窗，只能觀測不能算。
-        這一條就是 `DEFAULT_AT_EXPR` 那個 `AddHours(5)` 是缺陷的證據。"""
+        這一條就是「`--at` 缺席就固定加 5 小時」是缺陷的證據。"""
         observed = ("3:50am", "4am", "9am", "11pm", "12:20pm", "12:30pm", "6pm")
         minutes = {guard.parse_reset_at(f"resets {v}", _NOON).minute for v in observed}
         self.assertNotEqual(minutes, {0},
@@ -1541,8 +1541,14 @@ class RelayStateTest(unittest.TestCase):
         self.assertTrue(planner.relay_problems({**self.GOOD, "next_run_time": "   "}))
 
     def test_a_guessed_reset_may_not_arm(self) -> None:
-        self.assertTrue(planner.relay_problems({**self.GOOD, "reset_source": "assumed-5h"}))
-        for source in ("transcript-verbatim", "probe-verbatim", "operator"):
+        """白名單＝6 個字面，逐字釘死（ADR-XPLAT-014 約束 2：不得新造第三個字面）。"""
+        for guess in ("assumed-5h", "quota-cache", "meter-observed"):
+            with self.subTest(guess=guess):
+                self.assertTrue(planner.relay_problems({**self.GOOD, "reset_source": guess}))
+        pinned = ("transcript-verbatim", "probe-verbatim", "operator", "halt-marker",
+                  "operator-asserted", "endpoint-authoritative")
+        self.assertEqual(set(relay_machine.RESET_SOURCES), set(pinned))
+        for source in pinned:
             with self.subTest(source=source):
                 self.assertEqual(
                     planner.relay_problems({**self.GOOD, "reset_source": source}), [])
@@ -1898,12 +1904,7 @@ class TickDecisionTest(unittest.TestCase):
 
     def test_still_closed_without_a_parseable_reset_refuses_to_guess(self) -> None:
         """🔴 R100／PRD §4.5.10 登記改法：本鎖此前同時鎖住**兩件**事，只有一件是對的。
-
-        「拒絕用猜的」是本 repo 憲法（reset 只能觀測不能算）⇒ 一字不動保留。
-        「所以只能死」是它自己多出來的結論——`stop`／`abandoned` 的代價是**永眠**
-        （伺服器永遠不報時刻就永遠不醒）⇒ 改成掛回零成本巡邏。本鎖**不得整支刪掉**：
-        刪了就把「不猜」一起丟了。
-        """
+        史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§51。"""
         decision = self._tick(guard.LIMIT_SESSION, "session limit, no time given")
         self.assertEqual(decision["action"], planner.PATROL_HANDBACK)
         self.assertNotEqual(decision["state"], "abandoned")
@@ -2008,11 +2009,7 @@ class EnduranceWiringTest(unittest.TestCase):
     def test_the_new_evidence_lines_do_not_break_the_next_run_time_credential(self) -> None:
         """🔴 上一條加的輸出**絕不可**動到 `next_run_time()`——它是本 repo 反〈事後諸葛〉
         取證規則的機械形態（拿不到非空字串就不准宣稱已排程），弄壞它比彈窗嚴重得多。
-
-        判準看的是**產出**：把新增的兩段輸出接在真實形態的取證輸出上，取回的值必須逐字
-        不變。`LogonType`／`RunLevel`／`UserId` 三個欄名都不以 `nextruntime` 開頭，所以
-        這件事在設計上就成立——但「設計上成立」正是需要被釘住的那種宣稱。
-        """
+        史料搬至 CrossPlatform_Guard_Line_History_2.md〈R190 收尾棒〉§5。 round-label-ok"""
         evidence = ("TaskName       : AutoSDD_Sentinel_x\n"
                     "LastRunTime    : 2026/8/11 10:00:00\n"
                     "LastTaskResult : 0\n"
@@ -2637,11 +2634,7 @@ class SentinelWiringTest(unittest.TestCase):
     def test_the_guard_is_registered_on_both_events_that_the_sentinel_needs(self) -> None:
         """🔴 本包的重點不是工具、是**接電**。沒有這兩個註冊條目，哨兵就永遠只是一支
         「要人記得去按」的指令——而那正是 R77『機制蓋好沒接電』的第三次復發。
-
-        🔴 R82／HELM-02 起是**兩個**事件，缺一即斷：SessionStart 清閂鎖（`claude -r`
-        續接時能重新武裝）、PostToolUse 才是真正會註冊排程的那一個。此前只驗前者，
-        而武裝已經搬到後者 ⇒ 只驗一個等於把接線的一半交給運氣。
-        """
+        史料搬至 CrossPlatform_Guard_Line_History_2.md〈R190 收尾棒〉§6。 round-label-ok"""
         for event in ("SessionStart", "PostToolUse"):
             commands = [argv for _, argv in _hook_invocations(event)]
             # 比對**完整路徑**而不是裸檔名：`tools/tests/test_context_budget_guard.py`
@@ -3804,13 +3797,7 @@ def _both_backends():
 
 class Inv1UnattendedZeroPaidProbeTest(unittest.TestCase):
     """INV1：無人看管等額度＝零付費呼叫。
-
-    `AUTOSDD_UNATTENDED` 有設時，免費端點（`endpoint_probe_verdict`）給不出**正向**結論 ⇒
-    `probe_quota` **絕不** spawn 付費 `claude -p` 探針（本機一次 ≈ 31,847 tokens）；維持零
-    成本、text 不含 reset 字面 ⇒ `tick_plan` 走 `PATROL_HANDBACK` 繼續等（不猜、不付費）。
-    紅綠自證：gate 落地前 `probe_quota` fall-through 到 `subprocess.run([...-p...])` ⇒ spy
-    記到一次 spawn（紅）；接上後零 spawn（綠）。
-    """
+    史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§52。"""
 
     def test_unattended_endpoint_unmeasured_makes_zero_paid_probes(self) -> None:
         for label, backend in _both_backends():
@@ -4332,12 +4319,12 @@ class Inv5SingleOwnerTest(unittest.TestCase):
         self.assertIn("sentinel_single_owner_deferred", events)
 
     def test_register_schtasks_cli_defers_when_a_sentinel_owns_the_session(self) -> None:
-        """M-13：`--register-schtasks` 手動路徑**不經** `_register_and_record`（直接呼叫
-        `_register_at_expr`），INV5 檢查此前完全漏查這條路（現查 `grep -n
-        register_schtasks tools/session_resume_planner.py` 可證：真正的分派早於
-        `_register_and_record` 就直接呼叫底層函式）。假後端種一筆同 session 的哨兵，
-        斷言 CLI 沒有真的又跑去註冊（`_register_at_expr` 呼叫次數為 0），且留下
-        `sentinel_single_owner_deferred` 痕跡。"""
+        """M-13：`--register-schtasks` 手動路徑的 INV5 站在 `main()` 內、先於時刻解析
+        （手動路徑現已改走 `_register_and_record` 寫同一份續航狀態塊，但 INV5 的
+        第一站仍是 `main()` 這一格，`_register_and_record` 內另有第二道同款檢查）。
+        假後端種一筆同 session 的哨兵，斷言 CLI 沒有真的又跑去註冊
+        （`_register_at_expr` 呼叫次數為 0），且留下 `sentinel_single_owner_deferred`
+        痕跡。"""
         tmp = _tmpdir(self, "inv5-cli-")
         transcript = _write_jsonl(tmp / "sidCli.jsonl", [1000])
         plan = tmp / "plan.md"
@@ -7696,12 +7683,7 @@ class ResetFrameIsNotTheMachineClockTest(unittest.TestCase):
 
     def test_the_declared_zone_makes_three_machines_agree(self) -> None:
         """訊息自報時區可解析時，三個框架必須給出**完全相同的絕對時刻**（機器無關）。
-
-        🔴 誠實劃界（不粉飾）：Windows 上沒有 tz 資料庫，這一條走 else 分支，斷言的是
-        **已載明的退路**——框架退回 `now` 的時區（那正是 harness 算繪那個字串時用的時區），
-        於是三格本來就不會一致。兩個分支都有斷言、都會跑，沒有一格是靜默放行；
-        上一條測試才是在兩個平台都咬得住的那一支。
-        """
+        史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§53。"""
         moments = {d["reset_at"] for d in self._decisions()}
         if guard.declared_zone(_REAL_SESSION_LIMIT) is not None:
             self.assertEqual(len(moments), 1,
@@ -7870,10 +7852,11 @@ class QuotaUnmeasurableTest(unittest.TestCase):
     def test_measure_returns_none_on_every_failure_shape(self) -> None:
         meter = _meter()
         original = meter.fetch_usage
-        # 🔴 R93：`fetch_usage` 回 3-tuple，第三格在失敗形狀下皆 `{}`；R100：HTTP 429 已移出
-        # 本母體（改由 `RateLimitIsAFloorNotAnUnknownTest` 承接，且驗到 halt）。
+        # 🔴 R93：`fetch_usage` 回 3-tuple，第三格在失敗形狀下皆 `{}`；HTTP 429 曾一度移出
+        # 本母體（當時被譯成 halt 地板），自 DEF-200-197 修法起回到本母體：429＝量不到，
+        # Retry-After 另走旁檔，不再產生讀數。
         # 史料搬至 CrossPlatform_R189_SessionGate_Family_Lock_Audit_Evidence.md〈九-F〉§45。
-        shapes = {"HTTP 401": (401, None, {}),
+        shapes = {"HTTP 401": (401, None, {}), "HTTP 429": (429, None, {}),
                   "連線層失敗": (0, None, {}), "200 但不是 dict": (200, "nope", {}),
                   "200 但沒有任何桶": (200, {"limits": [], "five_hour": {}}, {})}
         try:
@@ -9420,15 +9403,7 @@ class QuotaMessagesNameTheAxisTest(unittest.TestCase):
 
 class HaltConvergentClarificationPlatformTest(unittest.TestCase):
     """DEF-200-413：`tools/lib/quota_messages.py::halt_convergent_clarification()` 的平台分支。
-
-    `HALT_CONVERGENT_CLARIFICATION` 逐字「收斂型工具（Read／Write／Edit／Bash／git）
-    不受影響」在 Windows 上是假話——Bash 工具另由鐵律一 hook
-    （`.claude/hooks/block_bash_on_windows.py`）整支停用，與 DEF-200-412 已修好的
-    `tools/lib/session_brief.py::_RC2_CLARIFY_WINDOWS` 是同一句話的姊妹站點。
-    (a)(b) 兩格只鎖常數存在；(c)(d) 兩格 patch `qm.platform_utils.is_windows` 後改讀
-    `quota_halt_repeat_message()` 的實際輸出，證明呼叫點真的接上了平台判準，不是只有
-    常數本身存在卻沒人用。
-    """
+    史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§54。"""
 
     def test_windows_variant_mentions_powershell_and_hook_disablement(self) -> None:
         text = qm.halt_convergent_clarification(windows=True)
@@ -9660,6 +9635,9 @@ class _FakeMeter:
 
     def cache_path(self) -> Path:
         return self.cache
+
+    def read_retry_hint(self, cache: Path | None = None) -> str | None:
+        return None   # 假的量測器沒有 429 旁檔；簽章跟著 production 走（`_blank` 會呼叫它）
 
 
 class QuotaDegradationIsAudibleTest(unittest.TestCase):
@@ -10017,8 +9995,30 @@ class MeterFailureShapesTest(unittest.TestCase):
 
 
 class RateLimitIsAFloorNotAnUnknownTest(unittest.TestCase):
-    """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
-    cbg RateLimitIsAFloorNotAnUnknownTest WHY〉節。"""
+    """`DEF-200-197`：429 是遙測端點（usage）的限流、不是模型額度——走「量不到」（band=unmeasured、
+    cap=degraded_cap），不得被轉譯成「量到 100%」的 halt 地板；伺服器報的 `Retry-After` 走 meter
+    自己的旁檔、不進額度快取，並在畫面上自帶尺名（遙測通道）。類名沿用舊稱（`parallel_timing_seed`
+    以類名為鍵）；語意已反轉：舊稱描述的是被推翻的「地板」設計。"""
+
+    def setUp(self) -> None:
+        self.tmp = _tmpdir(self, "q429-")
+        for name, value in (("quota_cache_path", lambda: self.tmp / quota_meter.CACHE_NAME),
+                            ("fanout_ledger_path", lambda: self.tmp / "ledger.d"),
+                            ("quota_latch_path", lambda: self.tmp / "latch.json"),
+                            *_TRACE_ISOLATION(self)):
+            old = getattr(qg, name)
+            setattr(qg, name, value)
+            self.addCleanup(setattr, qg, name, old)
+        # 旁檔住 `cache_path()` 旁：指到本案專屬目錄，別讓 `Retry-After` 漏進模組圍籬共用的根。
+        env = unittest.mock.patch.dict(os.environ, {quota_meter.CACHE_DIR_ENV: str(self.tmp)})
+        env.start()
+        self.addCleanup(env.stop)
+        self.meter = _meter()
+        self.creds = _cred_kwargs(self, self.meter, "darwin", readable=True)
+        real = self.meter.measure_detail
+        # `refresh_quota_blocking` 只傳 timeout：憑證注入縫由這層補上（同 production 呼叫形狀）。
+        self.meter.measure_detail = lambda timeout=4, **kw: real(timeout, **self.creds)
+        self.addCleanup(setattr, self.meter, "measure_detail", real)
 
     def _fake_429(self, meter: object, headers: dict) -> None:
         """注入一個**回 429 的假 opener**（不是替掉 `fetch_usage`）。
@@ -10035,60 +10035,120 @@ class RateLimitIsAFloorNotAnUnknownTest(unittest.TestCase):
         urllib.request.urlopen = boom
         self.addCleanup(setattr, urllib.request, "urlopen", old)
 
-    def _decide_on(self, reading: dict | None, meter: object) -> object:
-        """把 `measure_detail()` 的產物走完**真正的**下游（快取 → 判讀 → 決策）。"""
-        policy, gate = quota_policy, qg
+    @staticmethod
+    def _problems_of_429(decision: quota_policy.Decision) -> list[str]:
+        """429 的決策必須是「量不到」：unmeasured、收緊但不鎖死、不憑空生出軸。"""
+        cap_prepare = quota_policy.DEFAULT_POLICY.cap_prepare
+        problems = []
+        if decision.band != quota_policy.BAND_UNMEASURED:
+            problems.append(f"band={decision.band}：429 被轉譯成量到的水位")
+        if decision.cap is None or not 0 < decision.cap <= cap_prepare:
+            problems.append(f"cap={decision.cap}：量不到要 1<=cap<=cap_prepare({cap_prepare})")
+        if decision.per_axis:
+            problems.append("429 憑空生出了軸")
+        return problems
+
+    def _decision_now(self) -> tuple[quota_policy.Decision, datetime]:
         now = datetime.now(UTC).astimezone()
-        path = _tmpdir(self, "q429-") / "cache.json"
-        if reading is None:      # 舊行為的對照組：量不到就是沒有快取
-            return policy.decide(gate.read_quota(now, path), now, policy.Policy())
-        meter.write_cache(reading, path)
-        return policy.decide(gate.read_quota(now, path), now, policy.Policy())
+        return quota_policy.decide(qg.read_quota(now), now,
+                                   quota_policy.DEFAULT_POLICY), now
 
-    def test_a_429_lands_on_halt_and_not_on_unmeasured(self) -> None:
-        """本項唯一的止血斷言：429 ⇒ halt 側，**不是** unmeasured 側。"""
-        meter, policy = _meter(), quota_policy
-        self._fake_429(meter, {"Retry-After": "120"})
-        creds = _cred_kwargs(self, meter, "darwin", readable=True)
-        reading, reason = meter.measure_detail(4, **creds)
-        self.assertIsNotNone(reading, f"429 仍回 None ⇒ 又折回量不到（reason={reason}）")
-        self.assertEqual(reason, meter.REASON_RATE_LIMITED)
-        decision = self._decide_on(reading, meter)
-        self.assertEqual(decision.band, policy.BAND_HALT, "429 沒有落進 halt")
-        self.assertEqual(decision.cap, 0, "halt 帶的 cap 必須是 0（＝FREEZING）")
+    def test_a_429_is_unmeasured_and_never_a_halt_or_a_wake_up(self) -> None:
+        """本項的止血斷言：429 ⇒ `(None, 量不到字面)` ⇒ unmeasured；走真閘也不得停工、
+        不得寫任務書、不得武裝喚醒（真實事故：兩個 agent 窗在真實額度三成時收到停止水位）。"""
+        self._fake_429(self.meter, {"Retry-After": "120"})
+        reading, reason = self.meter.measure_detail(4)
+        self.assertIsNone(reading, f"429 回了讀數 ⇒ 又把「量不到」轉譯成「量到 100%」：{reading}")
+        self.assertEqual(reason, self.meter.REASON_RATE_LIMITED_UNMEASURED)
+        decision, _ = self._decision_now()
+        self.assertEqual(self._problems_of_429(decision), [])
+        acted: list = []
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            rc = qg.quota_gate(
+                {"tool_name": "Agent", "hook_event_name": "PreToolUse"}, blocking=("Agent",),
+                latch_read=lambda path: set(),
+                latch_write=lambda *a: acted.append(("latch", a)),
+                plan_writer=lambda *a, **k: acted.append(("plan", a)),
+                waker=lambda *a, **k: acted.append(("waker", a)) or {})
+        self.assertEqual(acted, [], "429 觸發了 halt 動作（閂鎖／任務書／喚醒）")
+        self.assertNotIn("停止水位", buf.getvalue())
+        self.assertIn("量不到", buf.getvalue(), "量不到卻沒有出聲")
+        self.assertIn(rc, (0, 2))
 
-    def test_red_the_old_shape_would_have_been_looser_than_the_converge_band(self) -> None:
-        """**紅綠自證**：把修法拿掉（reading=None）必須讓姿態變成比 70% 帶更寬鬆。
+    def test_red_the_old_floor_shape_is_caught_by_the_same_criterion(self) -> None:
+        """**紅綠自證**：把舊形態（429 ⇒ pct=100 的單軸地板讀數寫進快取）貼回來，同一條判準必紅。"""
+        now = datetime.now(UTC).astimezone()
+        floor = {"schema": self.meter.SCHEMA, "source": "endpoint", "http_status": 429,
+                 "measured_at": now.isoformat(timespec="seconds"), "account_key": None,
+                 "axes": [{"kind": "rate_limited", "pct": 100.0, "resets_at": None,
+                           "group": None, "is_active": True, "severity": "critical",
+                           "scope_model": None, "via": "http-429-floor"}]}
+        self.meter.write_cache(floor, qg.quota_cache_path())
+        decision, _ = self._decision_now()
+        self.assertEqual(decision.band, quota_policy.BAND_HALT, "前提不成立：舊形態應落 halt")
+        self.assertTrue(self._problems_of_429(decision), "舊形態沒被判準抓到＝零鑑別力")
 
-        這一格同時是「為什麼舊形態是缺陷而不只是不夠好」的證據：同一個輸入下，
-        unmeasured 的 cap **嚴格大於** CONVERGE 帶的 cap 是不成立的（出廠兩者相等），
-        但它與 halt 的 0 相比是**放行**——而 429 的正確答案在 halt 那一側。
-        """
-        policy = quota_policy
-        loose = self._decide_on(None, _meter())
-        self.assertEqual(loose.band, policy.BAND_UNMEASURED)
-        self.assertGreater(loose.cap, 0, "舊形態若不放行，本項就沒有在修任何東西")
+    def test_a_429_leaves_the_last_good_cache_and_the_burn_ledger_untouched(self) -> None:
+        """好快取 ⇒ 429 ⇒ 快取一個位元組都不動、落款不長新列（舊形態把 `fp: []` 的合成列寫進去、
+        還抹掉 account_key／posture）。快取先過期才會走到補量那一支。"""
+        cache = _quota_cache(self.tmp, 30.0, age=600.0, account_key="acct-0123456789")
+        before = cache.read_bytes()
+        self._fake_429(self.meter, {"Retry-After": "120"})
+        report = qg.pace_report()
+        self.assertEqual(cache.read_bytes(), before, "429 蓋掉了上一份好快取")
+        ledger = qg.burn_ledger_path()
+        rows = ledger.read_text(encoding="utf-8").splitlines() if ledger.exists() else []
+        self.assertEqual(rows, [], "429 讓落款長出新列（合成讀數進了攤提樣本）")
+        self.assertIn("量不到", report)
+        self.assertIn("遙測通道", report, "`--pace` 沒把遙測限流的恢復時刻說出口")
 
-    def test_the_server_reported_retry_after_becomes_the_observed_reset(self) -> None:
-        """`Retry-After` ⇒ `resets_at`；標頭缺席 ⇒ `None`（**絕不猜**）。
+    def test_the_server_reported_retry_after_reaches_the_screen_as_a_telemetry_sentence(
+            self) -> None:
+        """`Retry-After` ⇒ meter 旁檔 ⇒ `QuotaState.retry_after` ⇒ `Decision.retry_after` ⇒ 畫面
+        一句「遙測通道……」。字面自帶尺名、不借用「節流」一詞（那是額度尺的詞）。"""
+        self._fake_429(self.meter, {"Retry-After": "120"})
+        self.meter.measure_detail(4)
+        hint = self.meter.read_retry_hint()
+        self.assertIsNotNone(hint, "429 的 Retry-After 沒有落旁檔")
+        now = datetime.now(UTC).astimezone()
+        state = qg.read_quota(now)
+        self.assertEqual((state.axes, state.retry_after), ((), hint))
+        decision = quota_policy.decide(state, now, quota_policy.DEFAULT_POLICY)
+        self.assertEqual(decision.retry_after, hint)
+        # 遙測退避不是額度 reset：reset 時刻的取用端都不得讀到它（否則 60 秒的退避會變成排程）。
+        self.assertIsNone(qm.binding_resets_at(decision))
+        self.assertIsNone(qm.halt_resets_at(decision))
+        line = qm.throttle_horizon_line(decision, now)
+        self.assertIn(qm.UNMEASURED_HORIZON_LINE, line, "量不到的主句不見了")
+        self.assertIn("遙測通道", line)
+        self.assertIn(hint, line)
+        for phrase in ("提額", "不會自己解除", "沒有 reset 可以等", "節流"):
+            self.assertNotIn(phrase, line, f"遙測限流被說成額度尺的話：{phrase}")
 
-        方向是規範性的：`resets_at` 有值 ⇒ halt 分支 `arm_reset`（在伺服器說的時刻
-        醒）；沒值 ⇒ `escalate`（叫人）。憲法禁止的是**算** reset，而 `Retry-After`
-        是伺服器交出來的**觀測值**。
-        """
-        meter = _meter()
-        creds = _cred_kwargs(self, meter, "darwin", readable=True)
-        self._fake_429(meter, {"Retry-After": "120"})
-        self.assertIsNotNone(meter.measure_detail(4, **creds)[0]["axes"][0]["resets_at"])
-        self._fake_429(meter, {})
-        self.assertIsNone(meter.measure_detail(4, **creds)[0]["axes"][0]["resets_at"],
-                          "標頭缺席時憑空生出一個時刻＝在猜 reset（憲法禁止）")
-        # 🔴 DEF-200-196：`Retry-After: 0`（或負值）不可信，此前落入
-        # `now + timedelta(seconds=secs)` ⇒ `resets_at≈measured_at`，讀起來像「立刻重
-        # 置」——同樣是在猜，只是猜出來的時刻恰好貼著現在。
-        self._fake_429(meter, {"Retry-After": "0"})
-        self.assertIsNone(meter.measure_detail(4, **creds)[0]["axes"][0]["resets_at"],
-                          "Retry-After:0 不得被讀成「現在」——那不是伺服器給的觀測值")
+    def test_an_untrustworthy_or_expired_retry_after_prints_the_plain_unmeasured_line(
+            self) -> None:
+        """`Retry-After: 0`（DEF-200-196）全程沒有值；旁檔裡已過去的時刻不採信——兩者的句子都
+        必須逐字等於沒有 Retry-After 時的量不到句（不得憑空說「可再量」）。"""
+        for label, header in (("0 秒", "0"), ("已過去的 epoch", "1700000000")):
+            with self.subTest(label):
+                self._fake_429(self.meter, {"Retry-After": header})
+                self.meter.measure_detail(4)
+                if header == "0":
+                    self.assertIsNone(self.meter.read_retry_hint(), "Retry-After:0 落了旁檔")
+                decision, now = self._decision_now()
+                self.assertEqual(qm.throttle_horizon_line(decision, now),
+                                 qm.UNMEASURED_HORIZON_LINE)
+
+    def test_a_later_good_measurement_clears_the_retry_hint(self) -> None:
+        """限流解除（200）寫快取成功後旁檔必須消失：否則下一次量不到會印一句過時的「遙測限流」。"""
+        self._fake_429(self.meter, {"Retry-After": "120"})
+        self.meter.measure_detail(4)
+        self.assertIsNotNone(self.meter.read_retry_hint(), "前提不成立：旁檔沒寫出來")
+        good = {"schema": self.meter.SCHEMA, "source": "endpoint", "axes": [],
+                "measured_at": datetime.now(UTC).astimezone().isoformat(timespec="seconds")}
+        self.assertTrue(self.meter.write_cache(good, qg.quota_cache_path()))
+        self.assertIsNone(self.meter.read_retry_hint(), "寫快取成功後旁檔還在")
 
 
 class ThrottleBandSaysHowLongItLastsTest(unittest.TestCase):
@@ -10161,11 +10221,11 @@ class ThrottleBandSaysHowLongItLastsTest(unittest.TestCase):
         self.assertIn("等一下再派", cases["Agent 節流"], "Agent 節流（窗口會滾動）才有這句")
 
     def test_the_far_reset_sentence_never_claims_the_cap_will_not_loosen(self) -> None:
-        """DEF-200-435：同為 75%，cap 隨 reset 逼近自己放寬（2→4→8），此句卻曾斷言不會放寬（每
-        次 `--pace` 都印）；停止帶反過來：cap 恆為 0、到 reset 才解除，不得說會逐步放寬。前提與
-        禁句同一格；唯一來源 `throttle_horizon_line()`，直接判它。"""
+        """DEF-200-435：同為 75%，cap 隨 reset 逼近自己放寬（far→mid：2→4；near 起不再放寬），此
+        句卻曾斷言不會放寬（每次 `--pace` 都印）；停止帶反過來：cap 恆為 0、到 reset 才解除，不得說
+        會逐步放寬。前提與禁句同一格；唯一來源 `throttle_horizon_line()`，直接判它。"""
         caps = {m: _decision((("weekly_all", 75.0, m * 60.0),)).cap for m in (7200, 1440, 480)}
-        self.assertTrue(caps[7200] < caps[1440] < caps[480], f"前提不成立：{caps}")
+        self.assertTrue(caps[7200] < caps[1440] <= caps[480], f"前提不成立：{caps}")
         now = datetime.now(UTC).astimezone()
         text = qm.throttle_horizon_line(_decision((("weekly_all", 75.0, 5 * 86400.0),)), now)
         self.assertIn("好幾天", text, "對照組：遠期 reset 的句子有印出來")
@@ -10176,11 +10236,13 @@ class ThrottleBandSaysHowLongItLastsTest(unittest.TestCase):
 
     def test_the_cap_ladder_now_moves_with_the_reset_distance(self) -> None:
         """R82/R86 訂正；cap 隨 reset 距離變動之完整立案見證據檔 §I-21（R92 搬出）。"""
-        near = _decision((("weekly_all", 85.0, 600.0),)).cap
-        mid = _decision((("weekly_all", 85.0, 20 * 3600.0),)).cap
-        far = _decision((("weekly_all", 85.0, 5 * 86400.0),)).cap
-        self.assertGreater(near, mid, "reset 近在眼前卻沒有比較寬鬆 ⇒ 6b 沒有接上")
-        self.assertGreater(mid, far, "reset 遠在五天後卻沒有比較緊 ⇒ 6b 沒有接上")
+        near = _decision((("weekly_all", 85.0, 600.0),))
+        mid = _decision((("weekly_all", 85.0, 20 * 3600.0),))
+        far = _decision((("weekly_all", 85.0, 5 * 86400.0),))
+        self.assertEqual(near.cap, mid.cap, "cap 不吃加速乘數：近端與中段同 cap（加速只在 rec）")
+        self.assertGreater(near.recommended_fanout, mid.recommended_fanout,
+                           "reset 近在眼前卻沒有比較寬鬆 ⇒ 6b 沒有接上")
+        self.assertGreater(mid.cap, far.cap, "reset 遠在五天後卻沒有比較緊 ⇒ 6b 沒有接上")
         self.assertEqual(_decision((("weekly_all", 96.0, 3600.0),)).cap, 0)
         self.assertEqual(_decision((("weekly_all", 96.0, 600.0),)).cap, 0,
                          "halt 帶吃了 horizon 乘數 ⇒ 「停止」變成可以被時間放寬")
@@ -12517,6 +12579,51 @@ class QuotaPaceOutletIsReachableTest(unittest.TestCase):
                 if deny:
                     self.assertNotIn(deny, report, f"{name}：{report}")
 
+    def test_pace_line_says_out_loud_when_the_cap_cannot_throttle(self) -> None:
+        """DEF-200-198（M198-2）：`cap` 為 None（free 帶）或 ≥ `max_fanout` ＝ 這一格結構上擋不了
+        任何扇出，輸出面必須說出口，且帶 `max_fanout` 的值（沒有值可對帳的宣稱不算宣稱）。"""
+        fanout = quota_policy.DEFAULT_POLICY.max_fanout
+        free = _decision((("session", 20.0, 3600.0),))
+        line = qg.pace_line(free, 0, fanout)
+        self.assertIn("不擋任何扇出", line, line)
+        self.assertIn(f"max_fanout={fanout}", line, "free 臂沒帶 max_fanout 的值")
+        # 第二臂：出廠值下不可達，env 把 cap_notice 推到 16 就可達（判準不是死碼）。
+        loose = _decision((("session", 55.0, 3600.0),), {"AUTOSDD_QUOTA_CAP_NOTICE": "16"})
+        self.assertEqual(loose.cap, fanout, "前提不成立：cap 沒有等於 max_fanout")
+        line = qg.pace_line(loose, 0, fanout)
+        self.assertIn("等同無節流", line, line)
+        self.assertIn(f"max_fanout={fanout}", line, "第二臂沒帶 max_fanout 的值")
+        # 對照組：真的在節流的格子兩句都不得出現（否則是替有牙的 cap 說假話）。
+        tight = _decision((("session", 75.0, 3600.0),))
+        line = qg.pace_line(tight, 0, fanout)
+        for phrase in ("不擋任何扇出", "等同無節流"):
+            self.assertNotIn(phrase, line, f"cap={tight.cap} 真的在節流卻說「{phrase}」")
+        self.assertNotIn("本視窗已用", qg.pace_line(free, 0, fanout), "free 帶不借用節流措辭")
+        with self.assertRaises(TypeError, msg="max_fanout 必須必填（同 live 的既有判例）"):
+            qg.pace_line(free, 0)  # type: ignore[call-arg]
+
+    def test_the_pace_report_says_the_policy_max_fanout_not_a_constant(self) -> None:
+        """呼叫端傳的是**這次載入的 policy** 的 `max_fanout`（`.env` 改了就跟著變），不是寫死值。"""
+        _quota_cache(self.tmp, 20.0)
+        env = unittest.mock.patch.dict(os.environ, {"AUTOSDD_QUOTA_MAX_FANOUT": "12"})
+        env.start()
+        self.addCleanup(env.stop)
+        self.assertIn("max_fanout=12", qg.pace_report().splitlines()[0])
+
+    def test_the_pace_report_carries_the_posture_line_read_from_the_cache_path(self) -> None:
+        """`posture_line` 搬進人話面之後的接線鎖：快取路徑由 `pace_report` 傳入；讀不出來一律說
+        「無 credits fallback」（保守），讀得出來照 posture 欄說話；re-export 與本尊同一個物件。"""
+        cache = _quota_cache(self.tmp, 20.0)
+        self.assertIn("帳號姿態讀不出來", qg.pace_report(), "種的快取沒有 posture 欄，應走保守句")
+        body = json.loads(cache.read_text(encoding="utf-8"))
+        body["posture"] = {"plan_fingerprint": ["five_hour", "seven_day"],
+                           "credits_present": True, "fallback_available": True}
+        cache.write_text(json.dumps(body), encoding="utf-8", newline="\n")
+        report = qg.pace_report()
+        self.assertIn("方案指紋=five_hour+seven_day", report)
+        self.assertIn("credits **可用**", report)
+        self.assertIs(qg.posture_line, qm.posture_line)
+
 
 # 沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md〈R96／B-3 兩個出口必須說同一句話的立案〉。
 class WindowUsageIsToldTheSameWayByBothOutletsTest(unittest.TestCase):
@@ -12619,13 +12726,14 @@ class WindowUsageIsToldTheSameWayByBothOutletsTest(unittest.TestCase):
         self.assertGreater(cap, rec, f"cap={cap} rec={rec}：cap 不大於 rec ⇒ 「純差值」"
                                      "與「min」在第一格重合，本條分不出它們")
         self.assertGreaterEqual(rec, 2, f"rec={rec}：第二格要的 `rec − 1 >= 1` 構造不出來")
-        empty = qg.pace_line(decision, 0)
+        fanout = quota_policy.DEFAULT_POLICY.max_fanout
+        empty = qg.pace_line(decision, 0, fanout)
         self.assertIn(f"現在可派 {rec} 個", empty,
                       f"視窗還空著時印的不是配速建議 {rec}：{empty}")
         self.assertNotIn(f"現在可派 {cap} 個", empty,
                          f"視窗還空著時印了裸 cap {cap}＝把畫面數字放大到守衛之上：{empty}")
         live = cap - (rec - 1)
-        partial = qg.pace_line(decision, live)
+        partial = qg.pace_line(decision, live, fanout)
         self.assertIn(f"現在可派 {rec - 1} 個", partial,
                       f"視窗剩餘（{rec - 1}）已低於配速建議（{rec}），印的卻不是剩餘："
                       f"{partial}")
@@ -12637,7 +12745,7 @@ class WindowUsageIsToldTheSameWayByBothOutletsTest(unittest.TestCase):
         ⇒ 印一個 `cap − live` 就是替一道不存在的節流編數字。措辭必須逐字維持舊樣。"""
         free = _decision((("session", 20.0, 3600.0),))
         self.assertIsNone(free.cap, "free 帶的 cap 不是 None ⇒ 本對照組的前提不成立")
-        line = qg.pace_line(free, 7)
+        line = qg.pace_line(free, 7, quota_policy.DEFAULT_POLICY.max_fanout)
         self.assertIn("cap=不設限", line)
         self.assertNotIn("本視窗已用", line, f"free 帶印出了一道不存在的節流：{line}")
 
@@ -12645,11 +12753,7 @@ class WindowUsageIsToldTheSameWayByBothOutletsTest(unittest.TestCase):
 class PaceAutoDerivesActiveModelTest(unittest.TestCase):
     """DEF-200-420：`--pace` 沒給 `--model` 時，此前一律 `active_model=None` ⇒
     模型分軌軸（`weekly_scoped` 等）恆被排除出 cap 聚合，即使逐字稿真的跑過那個模型。
-    `session_resume_planner.py` 現在補上 `harness_feed.active_model_of()`——與
-    PreToolUse hook（`context_budget_guard.py` 的 `active_model = model_family(
-    scanned[2]) if scanned and scanned[2] else None`）同一組轉換規則，讓 `--pace`
-    與守衛看同一把尺。紅端：同一份快取下 `--pace` 與 `--pace --model fable`
-    此前逐字不同（前者恆帶 `model-scoped-excluded`）。"""
+    史料搬至 CrossPlatform_Guard_Line_History_2.md〈R190 收尾棒〉§7。 round-label-ok"""
 
     def setUp(self) -> None:
         self.tmp = _tmpdir(self, "pace-automodel-")
@@ -12981,11 +13085,7 @@ class WarnBandLatchTest(unittest.TestCase):
     def test_a_single_session_climbing_the_warn_band_speaks_exactly_once(self) -> None:
         """🔴 **把現行行為釘成契約**：同一 session 由 84% 爬到 93% 只出聲**一次**
         （閂鎖鍵＝(tier, window)；每次都出聲的守衛會被整個關掉）。
-
-        「每 5pp 重新武裝」提案的評估與代價逐字見證據檔 §I-6——該提案一落地必須
-        先讓本條轉紅（它也會打紅 `LatchRearmTest::
-        test_the_same_tier_and_window_still_only_fires_once`，與本案正交，另輪處理）。
-        """
+        史料搬至 CrossPlatform_Guard_Line_History_2.md〈R190 收尾棒〉§8。 round-label-ok"""
         spoke = [pct for pct in (84, 87, 90, 93)
                  if any("水位" in o["additionalContext"]
                         for o in _emitted(self._run(pct * 1000, "climb.jsonl")))]
@@ -13834,11 +13934,7 @@ class HarnessFeedStageTest(unittest.TestCase):
     def test_end_to_end_hook_reports_harness_source_and_appends_cross_check(self) -> None:
         """子行程等級：feed 檔存在時，hook 的 hard 訊息裡 window 來源標 harness、且交叉
         比對那一行真的出現（用故意灌水的逐字稿 used 觸發 >5% 差）。
-
-        `_isolated_env()` 把子行程的 `HOME` 蓋成 `home_dir`、且明確 pop 掉
-        `AUTOSDD_CONTEXT_FEED_DIR`（見該函式 R+D32 補的隔離）⇒ feed 必須寫在
-        `context_feed_path()` 沒有旗標時的預設位置：`$HOME/.autosdd/context_feed/`。
-        """
+        史料搬至 CrossPlatform_Guard_Line_History_2.md〈R190 收尾棒〉§9。 round-label-ok"""
         home_dir = _tmpdir(self, "harness-e2e-")
         transcript_used = 950_000  # 遠高於 feed 的 393,900 ⇒ 差 > 5%
         transcript = home_dir / "e2e-sess.jsonl"

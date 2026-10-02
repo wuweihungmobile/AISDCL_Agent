@@ -381,6 +381,8 @@ def gc(*, apply: bool = False, keep: tuple[str, ...] = (),
     if tasks is None:
         return None
     base = _transcript_dir()
+    if base is not None and not base.is_dir():  # 目錄不在＝量不到（HOME 被隔離／換機），不是檔被刪
+        base = None
     tmp = Path(tmp_dir or tempfile.gettempdir())
     protected_ids = set(keep) | {_newest_session(base)}
     now = time.time()
@@ -567,11 +569,14 @@ TEMP_FENCE_ENV = ("TEMP", "TMP", "TMPDIR")
 #: 同一個隔離根還要指到的第四個變數：quota 快取目錄（DEF-200-445）。配速契約與
 #: `autosdd_quota.json` 一樣住在那裡、不在 TEMP——只隔離 TEMP 一族時，全套照樣寫引擎真的會讀的
 #: 那一份。自帶 HOME 沙箱的測試（`_isolated_env` 之類）須自己清掉它，否則 HOME 管不到快取位置。
-CACHE_FENCE_ENV = (quota_meter.CACHE_DIR_ENV,)
+#: 第五個變數：持久痕跡目錄（`endurance_env.TRACE_DIR_ENV`）。卸載痕跡 `record_unload` 刻意以
+#: passwd 家目錄落點、不吃隔離 HOME（DEF-200-455：隔離正是讓證據消失的原因），所以圍籬
+#: 必須顯式把它指進隔離根，否則全套與單模組直跑會把 fixture 卸載列寫進真實 traces。
+CACHE_FENCE_ENV = (quota_meter.CACHE_DIR_ENV, endurance_env.TRACE_DIR_ENV)
 
 #: 隔離根前綴。刻意**不以 `autosdd_` 開頭**：`leak_fence` 的輔助訊號 glob 就是 `autosdd_*`，
 #: 隔離根自己不得被它算成「新增的洩漏」。
-TEMP_FENCE_PREFIX = "suite_tmp_"
+TEMP_FENCE_PREFIX = endurance_env.FENCE_PREFIX  # SSOT 住 endurance_env：uid_trace_dir 要認得隔離根
 
 
 def _watched_digests(root: Path) -> dict[str, str]:
@@ -611,6 +616,11 @@ def fence_enter(parent: Path | None = None) -> dict:
               "測試會直接碰真實 TEMP 與快取目錄。", file=sys.stderr)
     else:
         os.environ.update(dict.fromkeys(TEMP_FENCE_ENV + CACHE_FENCE_ENV, handle["root"].name))
+        # 持久痕跡釘到隔離根的子目錄：與 TEMP 同目錄時，讀取端的第二候選 `gettempdir()` 會讀到
+        # 別支測試剛寫的結局檔（複審鏡 A R-1）。
+        traces = endurance_env.fence_trace_dir(handle["root"].name)
+        traces.mkdir(parents=True, exist_ok=True)
+        os.environ[endurance_env.TRACE_DIR_ENV] = str(traces)
         tempfile.tempdir = handle["root"].name
     return handle
 
@@ -624,8 +634,12 @@ def fence_exit(handle: dict) -> None:
     """
     root = handle["root"]
     if root is not None:
-        held = [tempfile.tempdir, *(os.environ.get(n) for n in handle["saved"])]
-        if any(value != root.name for value in held):
+        want = {n: root.name for n in handle["saved"]}
+        want[endurance_env.TRACE_DIR_ENV] = str(endurance_env.fence_trace_dir(root.name))
+        held = [(tempfile.tempdir, root.name),
+                *((os.environ.get(n), want[n]) for n in handle["saved"]
+                  if os.environ.get(n) is not None)]  # 被測試清掉的變數不算亂序（複審鏡 A N-11）
+        if any(value != expect for value, expect in held):
             print(f"[temp_fence] ⚠️  fence_exit 亂序：目前隔離根 {tempfile.tempdir} ≠ 本 handle "
                   f"{root.name}（後進先出被打破；外層根已被清掉時，本層不再把環境還原進它）",
                   file=sys.stderr)

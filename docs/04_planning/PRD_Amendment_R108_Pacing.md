@@ -1203,3 +1203,21 @@ V_FLOOR_MINUTES 的家 = .env 鍵 AUTOSDD_QUOTA_VSAFE_FLOOR_MINUTES，出廠值 
   5. §7 P16／P17／P18 三條新／改判準**本輪只有設計、沒有測試碼**（架構輪紀律）。P16／P17 的紅面**已由本輪的探針實跑過**（windows-home 的 1972／2796、`windows(spend 單獨) = (None,)` vs 加同 reset 鄰軸後的 `(43200.0, 43200.0)`、封閉面的 0）⇒ 判準不是「寫起來應該會紅」，是「本輪真的看到它紅了」。**P18 的紅面本輪未跑**（除數面在 `tools/lib/` 尚不存在，只有 PRD 條文）⇒ 這一格誠實標為「設計時未見紅」。
      - 🔴 **這句「已實跑」對其中兩臂本來是假的，三審 QA 抓到，本版逐臂劃界（三審承接輪重跑，值皆〔本輪實測〕）**：**P16 第 ④ 臂**——二審那一版寫的是「> 0」，而擴大母體上 windows(2796) 與 hybrid(2036) **皆 > 0**、封閉面上三個 home **建構上等價**（皆 0）⇒ 那個寫法對「家被換掉」**在任何一個面上都紅不起來**，二審的「已實跑」只跑到了數字、沒跑到鑑別力。本版改成比較式斷言（**2796 > 2036**，同一取樣面）之後才真的有紅面，另補第 ⑤ 臂（gate 母體合取項，**0 → 7515／0 → 8691**）並訂正原括號誤引的「1972」。**P17 第 ③ 臂**——二審具名的注入（`spend` ＋ `monthly_all`）在兩個家下**都**判「不適用」（43200 ≥ 地板 10080）⇒ **恆綠**；本版換成 `spend` ＋ `five_hour`（同 `resets_at`）之後 `windows()` 繼承出 **300 < 10080**、分類由「不適用」翻「適用」，紅面才成立。⇒ **兩臂的「本輪真的看到它紅了」只對本版（三審承接輪）的寫法成立，對二審那一版不成立**，此處不沿用那句話替舊寫法背書。
   6. **一審承接輪的一項探針結論被本版判為無鑑別力**：`L2abs` 在 32800 個加軸對中違反數 0 —— 那個 0 來自「窗長被手填成軸的內在屬性」的注入面，對 `windows()` 當家的缺陷結構上失明。本版在 §0.3.1 說明它為什麼失明，並**不再引用它（含 `L2rel` 的 645）作為任何結論的依據**。
+
+---
+
+## R190 勘誤（事實性；施工輪回填，不改上文任何條文）
+
+- (a) §6.2／§7 P18 的 `V_FLOOR_MINUTES`（`AUTOSDD_QUOTA_VSAFE_FLOOR_MINUTES`）只適用 PRD 參考實作：`tools/lib` 沒有 `V_safe` 除數面（`tools`／`AutoClaude/autoclaude`／`.claude` 現查零命中）⇒ 不設鍵、P18 不入 `tools/tests`。落地的只有 `T_WRAP_MINUTES` 一鍵：`AUTOSDD_QUOTA_WRAP_MINUTES`（出廠 5＝`FANOUT_WINDOW_SECONDS/60`、下界 2、須小於 `accel_window_minutes`）。
+- (b) §2.3 P3(a)／落點 ⑥ 的「`binding is None` 臂仍印『這道節流不會自己解除』」在施工時已不成立：量不到那一臂早已改回 `UNMEASURED_HORIZON_LINE`（DEF-200-452）。本批只在它之後追加一句自帶尺名的「遙測通道…」（`retry_after` 解得出且未過期才印）；無值或已過期時整句逐字等於 `UNMEASURED_HORIZON_LINE`。
+- (c) §2.5 的 `SYNTHETIC_KINDS` 以 provenance 實作：`SYNTHETIC_VIA = frozenset({"transcript-floor"})`（成員是 `Axis.via` 不是 kind），note 字面 `synthetic-reading`；只動 note 一面，`KNOWN_KINDS`／`core_signature()` 不動（B17）。
+- (d) §2.3 M197-4 的 6 落點管線（`measure_detail` 加寬 3 元組＋`note_degraded(extra=)`＋痕跡檔）未照辦，改採旁檔：`measure_detail` 仍回 2 元組，`Retry-After` 落 `quota_meter` 自有旁檔 `autosdd_quota_retry.json`（與額度快取同目錄、不同檔），經 `QuotaState.retry_after`→`Decision.retry_after` 送到人話面；`REASON_RATE_LIMITED` 改名 `REASON_RATE_LIMITED_UNMEASURED`（字面 `http-429-unmeasured`）。
+
+## R190 增補註記（提案，待掌舵者追認與 R191 四方確認）：L1-γ 偏離
+
+- 偏離對象：§4.2 L1「`rec` 改為 `min(逐軸 _rec_for)`」（含 §6.1 (2)、§7 P8／P9）。L1 原文在本輪實測會推翻錨點①的多軸版本：`test_the_helm_anchor_survives_a_second_axis` 由 (16, 16) 變 (16, 4)、`TestM1b` 掃描只剩單一值（寬鬆週軸 [4]／緊週軸 [2]）、S4-1 與 S4-3 兩列各錯一值。這些鎖逐字引用掌舵者錨點①原句，不由施工輪自行翻轉。
+- 採用 L1-γ（主控裁決）：`pace>1`（有近期程軸且無否決）時 `rec` 沿用今天的 `base×pace`（錨點①）；否則逐軸取 `min`，`AXIS_NONE` 否決夾層保留（每軸乘數夾 1.0）；`min` 一律跑在 `gate` 上（DEF-200-202）。實作＝`quota_policy._rec_of_gate`，`_pace_of` 保留。
+- 方向鎖〔本輪實測，出廠值，三軸 4096 組〕：收緊 624／相等 3472／放寬 0／加速被壓 0（L1 原文＝1422／2674／0／36）。四數皆為出廠值導出量，不入判準：P8 只斷言「放寬 == 0、收緊 > 0、加速組逐格等於舊律」，並多掃兩組合法 Policy。
+- P9 放寬：原式（`rec` 恆為某一條真實軸的自洽輸出）與錨點①互斥。改為 `pace<=1` ⇒ `rec ==` 逐軸 `_rec_for`（否決在場時近期程軸只當 mid）的 `min`；`pace>1` ⇒ `rec ==` 舊律 `base×pace`。
+- 殘餘（known-and-accepted）：近期程軸在場、而另一軸帶位更緊（converge／prepare／notice 的 far／mid）的 762 組，`rec` 仍是兩軸乘積（L1 原文會更緊，γ 不治）；γ 與 L1 原文共差 798 組，皆屬 `pace>1`。
+- 連帶：A2 由 8 變 4（session／five_hour 同為 far 時，週軸位置移動不再改 `rec`；與裁決 Q9(i) 已接受的 A2=4 同值）；`TestR98…` 的 `rec>4` 下界改 `>=4`，並補「排除軸中立」斷言。

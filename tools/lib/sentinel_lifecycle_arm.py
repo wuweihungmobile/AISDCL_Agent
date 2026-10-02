@@ -70,6 +70,7 @@ import tempfile
 import time
 from pathlib import Path
 
+import endurance_env
 from quota_limits import SYNTHETIC_MODEL
 
 #: 值得續航的最小 assistant 回合數。取值依據見模組 docstring（實測分佈，非拍腦袋）。
@@ -173,16 +174,27 @@ def _relatch_stamp(marker: Path) -> Path:
     return marker.with_name(f"autosdd_sentinel_relatch_{marker.stem[len(ARM_MARKER_PREFIX):]}")
 
 
-def _write_marker(marker: Path, session_id: str, transcript: Path, event: str,
-                  **fields: object) -> bool:
+def _write_marker(marker: Path, session_id: str, transcript: Path, event: str, *,
+                  tmp_dir: str | None = None, **fields: object) -> bool:
+    record = json.dumps(
+        {"session_id": session_id, "event": event,
+         "armed_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "transcript": str(transcript),
+         **fields}, ensure_ascii=False)
     try:
         with marker.open("w", encoding="utf-8", newline="\n") as f:
-            f.write(json.dumps(
-                {"session_id": session_id, "event": event,
-                 "armed_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "transcript": str(transcript),
-                 **fields}, ensure_ascii=False))
+            f.write(record)
     except OSError:
         return False
+    # marker 只留最新一筆（relatch 會蓋掉首次武裝的 turns／span）⇒ 事件史另存追加式檔：呼叫端
+    # 給了 `tmp_dir` 就跟 marker 同住（測試不污染真痕跡），否則住持久痕跡目錄。
+    # 這是附加證據：寫不進去不得讓武裝本身失敗。史料見本輪證據檔〈九〉。
+    try:
+        base = Path(tmp_dir) if tmp_dir else endurance_env.trace_dir()
+        with (base / f"autosdd_sentinel_events_{session_id}.jsonl").open(
+                "a", encoding="utf-8", newline="\n") as f:
+            f.write(record + "\n")
+    except OSError:
+        pass
     return True
 
 
@@ -209,7 +221,7 @@ def _relatch_if_vanished(marker: Path, transcript: Path, session_id: str, plan_p
     if not spawn(str(transcript), plan_path):
         return "relatch-spawn-failed"
     return ("relatched" if _write_marker(marker, session_id, transcript, "sentinel_relatched",
-                                         relatched_from="armed_but_missing")
+                                         relatched_from="armed_but_missing", tmp_dir=tmp_dir)
             else "relatched-unlatched")
 
 
@@ -239,7 +251,7 @@ def maybe_arm(transcript: Path, session_id: str, *, plan_path: str, spawn,
 
     quota_ledger.claim_once(_relatch_stamp(marker), relatch_interval)
     if not _write_marker(marker, session_id, transcript, "sentinel_armed",
-                         turns=turns, span_seconds=round(span, 1)):
+                         turns=turns, span_seconds=round(span, 1), tmp_dir=tmp_dir):
         # 閂鎖寫不進去＝下一次工具呼叫會再武裝一次（`Force=$true`，冪等）。
         # 明說而不是靜默：兩者的痕跡必須分得開。
         return "armed-unlatched"

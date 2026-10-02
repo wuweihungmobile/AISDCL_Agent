@@ -342,7 +342,7 @@ bash tools/fsm_runtime/formal/run_tlc.sh                      # TLA+/TLC（自�
 | context 水位 | `python tools/session_resume_planner.py --check` |
 | harness autocompact 姿態 | `python tools/session_resume_planner.py --check-autocompact`（關閉時 rc=1） |
 | 可派 agent 數（每次派工前） | `python tools/session_resume_planner.py --pace` |
-| reset 後自動重啟排程 | `python tools/session_resume_planner.py --register-schtasks`／`--verify-schtasks`／`--remove-schtasks`（🔴 手動路徑不寫續航狀態塊、醒來會 abort，DEF-200-456；要自動續跑改用 `--arm-endurance`／`--arm-sentinel`） |
+| reset 後自動重啟排程 | `python tools/session_resume_planner.py --register-schtasks`／`--verify-schtasks`／`--remove-schtasks`（手動路徑自 DEF-200-456 修復起同樣寫續航狀態塊、醒來依 `allow_resume` 續跑；預防性武裝仍用 `--arm-sentinel`、已撞線用 `--arm-endurance`） |
 | reset 視窗分佈 | `python tools/probe/reset_window_distribution.py` |
 | 失誤歸因分群 | `python tools/probe/misstep_attribution.py` |
 | shell 指令母體普查 | `python tools/probe/shell_command_corpus.py --summary` |

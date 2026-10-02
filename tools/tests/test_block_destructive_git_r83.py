@@ -1045,11 +1045,7 @@ class TestIronLaw6CriteriaHaveTeeth(unittest.TestCase):
     def test_the_loop_condition_boundary_is_load_bearing(self) -> None:
         """`pgrep` 必須在**條件內**才算——迴圈**體**裡的 pgrep 每一輪都會重跑並結束，
         不是那個永不成立的退出條件。
-
-        🔴 探針同樣是實測訂正過的：第一版拿 `pgrep … | while read p` 當探針，注入後仍
-        放行——因為那條救它的是**位置順序**（pgrep 在 `while` 之前，本來就不在掃描區間內），
-        不是條件邊界。真正只有邊界救得了的是「pgrep 在 `do` **之後**」這一族。
-        """
+        史料搬至 CrossPlatform_Guard_Line_History_2.md〈R190 收尾棒〉§1。 round-label-ok"""
         good = "while read -r line; do pgrep -f run_root_unittests; done < hosts.txt"
         self.assertEqual(G.waitform_hits(good), [])
         original = G._COND_END_RE
@@ -1210,14 +1206,7 @@ _RCPIPE_ALLOW: tuple[str, ...] = (
 class TestIronLaw6RcMaskedByPipe(unittest.TestCase):
     """DEF-200-086（受測：`.claude/hooks/block_destructive_git.py` 的 `waitform_hits()`
     判準④）。
-
-    WHY：管線的 rc 是**最後一節**的 rc。`cmd | tail -1; echo $?` 讀到的是 `tail` 的 0，
-    前面 `cmd` 的失敗（`sh -c 'exit 7'` 的 7）被整個吃掉，而「失敗」與「成功」在輸出上
-    **完全同形**——與鐵律六同一個病（確認機制自己靜默壞掉）。修前 Bash／zsh 側零攔截器
-    （唯一守它的 `lint_powershell_command.py` matcher 是 PowerShell）。
-    精準度是這道鎖的命：只判尾節是 rc 遮蔽型濾器者；`grep`／`rg`／`jq` 的 rc 有語意，
-    不判。
-    """
+    史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§47。"""
 
     def test_every_masked_pipe_read_is_blocked(self) -> None:
         for command in _RCPIPE_BLOCK:
@@ -1509,12 +1498,7 @@ class TestTheFalsePositiveCensusIsRerunnable(unittest.TestCase):
 
 class TestTheHookStaysInsideItsLocTier(unittest.TestCase):
     """🔴 鐵律六那一族是加在**既有** hook 上的，而該檔一直是這一層最靠近上限的檔之一。
-
-    立案理由：本包落地時該檔 `count_loc` 距 `guardrail_cli` tier 只剩兩位數餘裕，後來
-    更走到**零餘裕**（`[ROOT-TOOLS-WARN]` 段實測 750/750）。把「還在預算內」寫成散文等於
-    沒寫——下一個往這支 hook 加判準的人需要的是一個會紅的東西。
-    判準本身**不複寫預算數字**（現查 `check_loc_budget` 的 SSOT，同 CLAUDE.md 的既有政策）。
-    史料搬至 CrossPlatform_R189_SessionGate_Family_Lock_Audit_Evidence.md〈九-F〉§9。"""
+    史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§48。"""
 
     def test_the_hook_is_within_its_root_tools_tier(self) -> None:
         sys.path.insert(0, str(_REPO_ROOT / "AutoClaude" / "tools"))
@@ -1755,11 +1739,7 @@ class TestR84StashRefSentinel(unittest.TestCase):
     def test_a_stash_the_guard_already_saw_is_not_reported(self) -> None:
         """🔴 假紅面為零就靠這個 ack 位元：上一次呼叫**真的帶著一次會改 `refs/stash` 的
         呼叫、而且那次呼叫沒有被本守衛擋下** ⇒ 那次變動**不是隱形的路**。
-
-        ack **不是**子字串判定，也**不含**「被擋」與 `stash create` 兩種（前者根本不會跑、
-        後者一個字節都不動那個 ref ⇒ 都解釋不了任何變動）；被訂正掉的兩處假事實逐字＝
-        `docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`。
-        判準與紅綠自證見 `TestR84SentinelAckIsNotASubstring`。"""
+        史料搬至 CrossPlatform_Guard_Line_History_2.md〈R190 收尾棒〉§2。 round-label-ok"""
         self.ref.write_text("aaaaaaaaaaaa\n", encoding="utf-8")
         G.stash_ref_sentinel(str(self.root), ack=True)
         self.ref.write_text("bbbbbbbbbbbb\n", encoding="utf-8")
@@ -1889,12 +1869,7 @@ class TestR84TheDashCCarrierIsJudged(unittest.TestCase):
 
     def test_the_relaxation_killers_also_run_on_the_carrier_plane(self) -> None:
         """🔴 這一條是落地當回合**自測抓到的洞**，不是事後補的裝飾。
-
-        `-c` 的 operand 住在引號裡 ⇒ 在殼文字那個遮蔽面上整段是空白，`_RELAX_KILLER_RE`
-        看不到它裡面的子殼括號。於是 `sh -c '(cd /wt); git clean -fdx'` 會被判成「落在
-        /wt」而**放行**——實際上 `)` 已經結束了 cd 的作用域、git 落在共用工作樹。
-        修法：放寬殺手在兩個平面上各跑一次。兩向都驗：老實的 `cd` 該放行、子殼該擋。
-        """
+        史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§49。"""
         with tempfile.TemporaryDirectory(prefix="w-carrier-") as foreign, \
                 mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(_REPO_ROOT)}):
             self.assertEqual(
@@ -2252,11 +2227,7 @@ class TestR84SentinelAckIsNotASubstring(unittest.TestCase):
 class TestR84TheWaitformDocstringIsTheSingleHome(unittest.TestCase):
     """QA-03：同一份知識三個家、三種內容（hook docstring 說四條、CLAUDE.md 鐵律六說兩條、
     帳本的③ 又是第三種東西）。**SSOT ＝ `waitform_hits()` 的 docstring**（實作所在）。
-
-    這一條把「docstring 與實作逐字相符」做成機械物：docstring 自陳幾條，就必須真的有
-    幾條判準各自能單獨命中。只斷言「docstring 裡有 ① ② ③」會恆綠——那正是本 repo
-    反覆判紅的「鎖存在但沒有鑑別力」。
-    """
+    史料搬至 CrossPlatform_Guard_Line_History_2.md〈R190 收尾棒〉§3。 round-label-ok"""
 
     def test_the_docstring_declares_four_and_all_four_can_fire_alone(self) -> None:
         doc = G.waitform_hits.__doc__ or ""
@@ -2287,14 +2258,7 @@ class TestR84TheWaitformDocstringIsTheSingleHome(unittest.TestCase):
 # ── ⑧ 授權邊界：無人看管回合禁動 git 歷史（R85／P12，**mac 側先前零機械物**）──────
 class TestUnattendedAuthzHasTeethOnEveryPlatform(unittest.TestCase):
     """R79 立的 Auto Pilot 條件，在 macOS 上到 R85 為止**一行都不會跑**。
-
-    立案與假紅普查（母體＝transcripts，假陽性 0）原文＝GovWrite 證據檔 §6.7；數字一律現查。
-
-    本類與姊妹鎖 `test_check_hooks_liveness.TestUnattendedCommitPushBlock` 守**同一條
-    規則的另一個平台**，四件事逐一對齊（每一件都帶反向，只帶一個方向必在另一向恆綠）：
-    ①有訊號×動 git 歷史→exit 2；②**沒有訊號**×同一批→exit 0（互動 session 零附帶面，
-    這一條壞掉＝掌舵者自己的 commit 被鎖死）；③有訊號×無關指令→放行；④行內豁免無效。
-    """
+    史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§50。"""
 
     #: 有訊號時**必須擋**。前 5 筆是 mac 專有形態（Windows 那支姊妹鎖沒有的）。
     MUST_BLOCK = (
@@ -2386,11 +2350,7 @@ class TestUnattendedAuthzHasTeethOnEveryPlatform(unittest.TestCase):
 class TestGovernanceFilesAreReadOnlyWhenUnattended(unittest.TestCase):
     """立案（R87 實帳：繞過 halt 改取數層 ⇒ 13 agent 全滅）與設計取捨、實測 rc 逐字＝
     docs/06_quality/CrossPlatform_R95_GovWrite_Evidence.md §1~§3；本類是其紅綠自證。
-
-    六個方向對齊本檔既有慣例：①該擋的擋（無人值守 × 保護面 × 三種寫檔工具）；
-    ②不該擋的放行（有人值守／保護面之外／專案根之外的同名檔）；③逃生口；
-    ④開關不共用（**雙向**都驗）；⑤退化 payload fail-open；⑥判準本身可證偽。
-    """
+    史料搬至 CrossPlatform_Guard_Line_History_2.md〈R190 收尾棒〉§4。 round-label-ok"""
 
     #: 保護面全集（與 hook 內 SSOT `_GOV_EXACT` ∪ `.claude/hooks/*.py` 逐筆對齊；
     #: 這裡刻意逐字重抄一份當**期望值**——期望值引用 SSOT 本身會讓測試恆真）。
@@ -2845,6 +2805,314 @@ class TestResultDoesNotDriftWithCallerCwd(unittest.TestCase):
         finally:
             os.chdir(original_cwd)
             shutil.rmtree(outside, ignore_errors=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SD-11：`mask_inert()` 引號失同步 ⇒ 其後的鐵律五／六判準全部看不見（fail-open）
+# ══════════════════════════════════════════════════════════════════════════════
+#: 修前會讓引號奇偶差一的形態：外層雙引號內的 `$(…)`，其內再有 `\"` 或「單引號夾雙引號」。
+#: 最後一個 `"` 開出永不收尾的字串，把其後到結尾全遮成空白。S1～S4 是最小化形態，S6 取自
+#: 真實逐字稿，J1／J2／J4 是 agent 抽 JSON 欄位的**自然寫法**。史料見本輪證據檔〈九〉。
+_DESYNC_FORMS: tuple[tuple[str, str], ...] = (
+    ("S1", 'echo "$(echo "\\"")"'),
+    ("S2", 'echo "$(echo "a\\"b")"'),
+    ("S3", 'x="$(printf "%s" "\\"q\\"")"'),
+    ("S4", 'echo "$(grep -c -e "\\"x\\"" f)"'),
+    ("S6", "echo \"$(grep -c 'bin/python\"' f)\""),
+    ("J1", 'V="$(python3 -c "print(\\"hi\\")")"'),
+    ("J2", 'echo "$(python3 -c "import json;print(json.load(open(\\"f\\"))[\\"a\\"])")"'),
+    ("J4", 'echo "$(jq -r ".a \\| select(. == \\"x\\")" f)"'),
+)
+#: 負向對照：這幾條修前就正確（巢狀引號奇偶剛好對），修後必須維持原判決。
+_DESYNC_CONTROLS: tuple[tuple[str, str], ...] = (
+    ("N1", 'echo "path=$(dirname "$0")"'),
+    ("N2", 'msg="$(git log -1 --format="%s")"'),
+    ("N3", "sed \"s/\\\"/'/g\" f"),
+    ("N4", 'python -c "print(\\"hi\\")"'),
+    ("S5", "printf '%s' \"$(grep -c '\"type\": \"command\"' f)\""),
+)
+#: PowerShell 的跳脫字元是反引號：一個 `` `" `` 就讓奇偶差一，與 `$(…)` 遞迴無關。
+_PS_FORM = 'Write-Host "Don`"t"'
+_GIT_TAILS = ("git stash", "git reset --hard", "git clean -fd")
+_BG_TAIL = "nohup sleep 5 > /dev/null 2>&1 &"
+_RC_TAIL = 'git ls-files | head -3; echo "rc=$?"'
+
+
+class TestMaskInertQuoteDesyncKeepsTheTailVisible(unittest.TestCase):
+    """🔴 SD-11：外層雙引號內的 `$(…)` 帶巢狀引號時，修前 `mask_inert()` 引號奇偶差一，最後
+    一個 `"` 開出永不收尾的字串、把其後到結尾**全遮成空白** ⇒ 鐵律五三個毀滅性動詞與鐵律六
+    四條判準對那一段全部失明（守衛 fail-open，且同一支函式同時承載兩條鐵律）。"""
+
+    def test_a_destructive_git_on_the_next_line_is_still_judged(self) -> None:
+        for name, form in (*_DESYNC_FORMS, ("PS", _PS_FORM)):
+            for tail in _GIT_TAILS:
+                with self.subTest(form=name, tail=tail):
+                    self.assertTrue(G.destructive_git_hits(f"{form}\n{tail}"),
+                                    f"{form!r} 之後的 {tail!r} 被遮蔽器吞掉 ⇒ 鐵律五漏擋")
+
+    def test_the_wait_criteria_still_see_the_next_line(self) -> None:
+        for name, form in (*_DESYNC_FORMS, ("PS", _PS_FORM)):
+            for tail in (_BG_TAIL, _RC_TAIL):
+                with self.subTest(form=name, tail=tail[:24]):
+                    self.assertTrue(G.waitform_hits(f"{form}\n{tail}"),
+                                    f"{form!r} 之後的 {tail!r} 被遮蔽器吞掉 ⇒ 鐵律六漏判")
+
+    def test_the_same_line_tail_is_judged_once_the_nesting_is_understood(self) -> None:
+        """同一行的尾巴沒有「下一行」可退（第二視圖救不了）：只有把字串收尾判對才看得見。"""
+        for name, form in _DESYNC_FORMS:
+            for joiner in (" ; ", " && "):
+                with self.subTest(form=name, joiner=joiner):
+                    self.assertTrue(G.destructive_git_hits(f"{form}{joiner}git stash"))
+                    self.assertTrue(G.waitform_hits(f"{form}{joiner}{_BG_TAIL}"))
+
+    def test_the_forms_alone_are_inert_and_the_controls_keep_their_verdict(self) -> None:
+        for name, form in (*_DESYNC_FORMS, *_DESYNC_CONTROLS, ("PS", _PS_FORM)):
+            for command in (form, f"{form}\nls -la"):
+                with self.subTest(form=name, command=command[-12:]):
+                    self.assertEqual(G.destructive_git_hits(command), [])
+                    self.assertEqual(G.waitform_hits(command), [])
+        for name, form in _DESYNC_CONTROLS:
+            with self.subTest(control=name):
+                self.assertTrue(G.destructive_git_hits(f"{form}\ngit stash"))
+                self.assertTrue(G.destructive_git_hits(f"{form} ; git stash"))
+
+    def test_text_inside_the_string_stays_data(self) -> None:
+        """修前的反向誤擋：`)` 之後同一個字串裡的 ` git stash` 被當成裸字、擋掉一條無害指令。"""
+        for command in ('echo "$(echo "\\"") git stash"',
+                        'echo "$(echo "\\""); git reset --hard"',
+                        'echo "a $(echo "b\\"c") git clean -fd d"'):
+            with self.subTest(command=command):
+                self.assertEqual(G.destructive_git_hits(command), [])
+
+    def test_the_mask_keeps_its_length_and_hides_exactly_the_string(self) -> None:
+        command = f"{_DESYNC_FORMS[0][1]}\ngit stash"
+        masked = G.mask_inert(command)
+        self.assertEqual(len(masked), len(command))
+        self.assertEqual(masked.split("\n")[1], "git stash")
+        self.assertEqual(masked.split("\n")[0].strip(), "echo")
+
+    def test_an_inline_exemption_is_only_honoured_in_a_real_comment(self) -> None:
+        form = _DESYNC_FORMS[3][1]
+        self.assertTrue(G.has_exemption(f"{form} # git-guard-ok: probe\ngit stash"))
+        self.assertFalse(G.has_exemption('echo "$(echo "\\"") # git-guard-ok: probe"'))
+
+
+class TestMaskInertSecondViewOnlyRunsAfterADesync(unittest.TestCase):
+    """fail-closed 網：任何引號掃描器看不懂而掃到 EOF 仍未收尾的字串，最多隱藏**同一行**的
+    其餘部分，不得把 EOF 前全遮；而**沒有失同步時**多行字串的內部仍是資料（網不能常駐，否則
+    每一則多行 commit message 都變成誤擋）。"""
+
+    #: 掃描器看不懂的形態（ANSI-C、PowerShell 反引號與結尾反斜線、根本沒收尾）。
+    UNFORESEEN = (
+        ("PS backtick", _PS_FORM),
+        ("ANSI-C", "echo $'it\\'s'"),
+        ("unterminated", 'echo "abc'),
+        ("PS path", 'Set-Location "C:\\dir\\"'),  # platform-ok: 守衛語料字面
+    )
+
+    def test_later_lines_stay_visible(self) -> None:
+        for name, first in self.UNFORESEEN:
+            for tail in _GIT_TAILS:
+                with self.subTest(form=name, tail=tail):
+                    self.assertTrue(G.destructive_git_hits(f"{first}\n{tail}"))
+            for tail in (_BG_TAIL, _RC_TAIL):
+                with self.subTest(form=name, tail=tail[:24]):
+                    self.assertTrue(G.waitform_hits(f"{first}\n{tail}"))
+
+    def test_a_well_formed_multiline_string_still_hides_its_interior(self) -> None:
+        for command in ('git commit -m "first line\ngit stash is just text\nlast line"\nls',
+                        "git commit -m 'one\ngit reset --hard is text\ntwo'\nls",
+                        'echo "$(echo "x")" "a\ngit clean -fd\nb"'):
+            with self.subTest(command=command):
+                self.assertEqual(G.destructive_git_hits(command), [])
+
+
+class TestBackslashEscapedQuoteOutsideStringsIsNotAnOpener(unittest.TestCase):
+    """引號外的反斜線跳過下一字元：`echo don\\'t` 的 `\\'` 是跳脫的撇號，不是單引號字串的開頭。
+    修前它開出永不收尾的字串、把其後（含**同一行**）全遮；而且它與別的失同步互相抵銷時會讓
+    漏擋被碰巧掩蓋（差分模糊測試：拿掉本規則，修前命中的指令有一批變成放行）。"""
+
+    ESCAPED = ("echo don\\'t", 'echo \\"hi\\"', 'grep -E \\"a|b\\" f')
+
+    def test_a_destructive_git_after_it_is_judged_on_the_same_and_the_next_line(self) -> None:
+        for form in self.ESCAPED:
+            for joiner in (" ; ", " && ", "\n"):
+                with self.subTest(form=form, joiner=joiner):
+                    self.assertTrue(G.destructive_git_hits(f"{form}{joiner}git stash"))
+                    self.assertTrue(G.waitform_hits(f"{form}{joiner}{_BG_TAIL}"))
+
+    def test_text_after_it_that_is_a_real_string_stays_data(self) -> None:
+        for command in ("echo don\\'t \"git stash\"", "echo \\\"hi\\\" 'git reset --hard'",
+                        "echo \\\\\"git stash\"", "echo a\\\\'git clean -fd'"):
+            with self.subTest(command=command):
+                self.assertEqual(G.destructive_git_hits(command), [])
+
+    def test_an_escaped_backslash_does_not_escape_the_quote_after_it(self) -> None:
+        """`\\\\` 是一個字面反斜線，其後的引號照常開字串——跳過**兩個**字元而不是只認 `\\"`。"""
+        self.assertTrue(G.destructive_git_hits('echo \\\\"x" ; git stash'))
+        self.assertTrue(G.destructive_git_hits("echo a\\\\'b' ; git stash"))
+
+
+class TestCommitHeredocIsOneStringWhateverItsBodyQuotes(unittest.TestCase):
+    """`git commit -m "$(cat <<'EOF' … EOF` 換行 `)"` 是 agent 最常寫的形態：body 裡的引號、
+    撇號、括號都不得影響字串在哪裡收尾（修前奇數個 `"` 會把 body 的行當成裸字而**誤擋**，
+    也會把訊息之後的真指令吞掉而**漏擋**）。"""
+
+    #: body 裡**提到**毀滅性指令（資料）：整則 commit 指令不得被擋。
+    DATA_BODIES = (
+        "fix: git stash create is safe",
+        'intro "quoted\nfix: git stash removal',
+        "don't (a) isn't b) c\nline: git reset --hard",
+        'say "hi" and "bye"\ngit clean -fd is data',
+        "don't isn't can't\ngit stash",
+    )
+    #: 只有奇怪的引號／括號、沒有任何毀滅性字樣：訊息**之後**的真指令才是唯一命中來源
+    #: （body 含毀滅字樣時修前的誤擋會讓「之後有沒有被判」這一問失去鑑別力）。
+    QUOTE_BODIES = (
+        'intro "quoted\nplain text',
+        "don't (a) isn't b) c\nplain",
+        'say "hi" and "bye"\nplain',
+        "don't isn't can't\nplain",
+    )
+
+    @staticmethod
+    def _commit(body: str, after: str = "") -> str:
+        return f"git commit -m \"$(cat <<'EOF'\n{body}\nEOF\n)\"{after}"
+
+    def test_the_body_is_data(self) -> None:
+        for body in self.DATA_BODIES:
+            with self.subTest(body=body[:30]):
+                self.assertEqual(G.destructive_git_hits(self._commit(body)), [])
+                self.assertEqual(G.waitform_hits(self._commit(body)), [])
+
+    def test_a_real_git_after_the_message_is_judged(self) -> None:
+        for body in self.QUOTE_BODIES:
+            self.assertEqual(G.destructive_git_hits(self._commit(body)), [], body)
+            for after in (" && git stash", "\ngit reset --hard"):
+                with self.subTest(body=body[:30], after=after):
+                    self.assertTrue(G.destructive_git_hits(self._commit(body, after)))
+
+
+class TestUnclosedHereStringIsNotAHereString(unittest.TestCase):
+    """`@"` 後面找不到 `"@` 時它根本不是 PowerShell here-string（bash 的 `curl -d @"$f"`）：
+    修前整段掃到 EOF 全遮。真正的 here-string 仍整段當資料。"""
+
+    def test_curl_at_quote_does_not_swallow_the_rest(self) -> None:
+        for tail in ("\ngit stash", " ; git stash", "\ngit reset --hard"):
+            with self.subTest(tail=tail):
+                self.assertTrue(G.destructive_git_hits(f'curl -d @"$f" http://x{tail}'))
+        self.assertEqual(G.destructive_git_hits('curl -d @"$f" http://x'), [])
+
+    def test_a_real_here_string_still_hides_its_body(self) -> None:
+        for command in ('$x = @"\ngit stash\n"@', "$x = @'\ngit reset --hard\n'@"):
+            with self.subTest(command=command):
+                self.assertEqual(G.destructive_git_hits(command), [])
+        self.assertTrue(G.destructive_git_hits('$x = @"\nfoo\n"@\ngit stash'))
+
+
+class TestMaskInertDesyncEndToEnd(unittest.TestCase):
+    """真的起 child 行程、餵 hook 入口 stdin（`CLAUDE_PROJECT_DIR` 指向 repo）；指令只是
+    payload 字串，hook 從不執行它。修前 `X` 加換行加 `git stash` 是 rc=0。"""
+
+    @staticmethod
+    def _run(command: str) -> subprocess.CompletedProcess[str]:
+        return run_hook(bash_payload(command), env={"CLAUDE_PROJECT_DIR": str(_REPO_ROOT)})
+
+    def test_the_control_git_stash_alone_exits_two(self) -> None:
+        proc = self._run("git stash")
+        self.assertEqual(proc.returncode, 2, proc.stderr)
+
+    def test_a_destructive_git_after_the_form_exits_two(self) -> None:
+        form = _DESYNC_FORMS[3][1]
+        for tail in _GIT_TAILS:
+            with self.subTest(tail=tail):
+                proc = self._run(f"{form}\n{tail}")
+                self.assertEqual(proc.returncode, 2, proc.stderr)
+
+    def test_the_wait_forms_after_the_form_exit_two(self) -> None:
+        form = _DESYNC_FORMS[3][1]
+        for tail in (_BG_TAIL, _RC_TAIL):
+            with self.subTest(tail=tail[:24]):
+                proc = self._run(f"{form}\n{tail}")
+                self.assertEqual(proc.returncode, 2, proc.stderr)
+
+    def test_the_form_alone_exits_zero_silently(self) -> None:
+        for _name, form in (*_DESYNC_FORMS[:2], *_DESYNC_CONTROLS[:1]):
+            with self.subTest(form=form):
+                proc = self._run(f"{form}\nls")
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                self.assertEqual(proc.stderr.strip(), "")
+
+
+class TestMaskInertDesyncFixHasTeeth(unittest.TestCase):
+    """合成注入：三個載重零件各自被拿掉時，對應的形態必須**重新漏判**——證明擋住它的是
+    那個零件，不是別的東西恰好也擋了。零件會互相補位（遞迴掃描、引號外的反斜線跳脫都讓字串
+    收尾判對；第二個視圖兜住看不懂的形態），所以鑑別形態各選「其他零件救不了」的那一種。"""
+
+    def test_without_the_nested_scan_the_same_line_tail_is_hidden_again(self) -> None:
+        """鑑別形態取 S6（單引號夾雙引號）：`\\"` 類形態另有「引號外反斜線跳脫」兜著，關掉巢狀
+        掃描後仍會被平掃碰巧收對；只有 S6 與 commit heredoc 必須靠 `$( … )` 內引號自成一格。"""
+        commands = (f"{dict(_DESYNC_FORMS)['S6']} ; git stash",
+                    "git commit -m \"$(cat <<'EOF'\nintro \"quoted\nplain\nEOF\n)\" && git stash")
+        original = G._quote_close
+        for command in commands:
+            self.assertTrue(G.destructive_git_hits(command), command)
+            try:
+                G._quote_close = (  # type: ignore[assignment]
+                    lambda text, i, lim, nest, depth=0: original(text, i, lim, False, depth))
+                self.assertEqual(G.destructive_git_hits(command), [],
+                                 "拿掉巢狀掃描後同行尾巴仍被擋 ⇒ 擋住它的不是遞迴掃描")
+            finally:
+                G._quote_close = original  # type: ignore[assignment]
+            self.assertTrue(G.destructive_git_hits(command), "注入沒有復原")
+
+    def test_without_the_outside_escape_the_same_line_tail_is_hidden_again(self) -> None:
+        for command in ("echo don\\'t ; git stash", 'echo \\"hi\\" ; git stash'):
+            self.assertTrue(G.destructive_git_hits(command), command)
+            with mock.patch.object(G, "_SHELL_ESCAPE", "\0"):  # 永不匹配 ⇒ 規則被拿掉
+                self.assertEqual(G.destructive_git_hits(command), [],
+                                 "拿掉引號外跳脫規則後同行尾巴仍被擋 ⇒ 擋住它的不是該規則")
+            self.assertTrue(G.destructive_git_hits(command), "注入沒有復原")
+
+    def test_without_the_second_view_the_next_line_is_hidden_again(self) -> None:
+        command = f"{_PS_FORM}\ngit stash"
+        self.assertTrue(G.destructive_git_hits(command))
+        original = G._mask_pass
+        try:
+            G._mask_pass = (  # type: ignore[assignment]
+                lambda text, keep_comments, keep_status, loose:
+                original(text, keep_comments, keep_status, False))
+            self.assertEqual(G.destructive_git_hits(command), [],
+                             "拿掉第二個視圖後下一行仍被擋 ⇒ 擋住它的不是失同步網")
+        finally:
+            G._mask_pass = original  # type: ignore[assignment]
+        self.assertTrue(G.destructive_git_hits(command), "注入沒有復原")
+
+
+class TestMaskInertNestedScanIsBounded(unittest.TestCase):
+    """守衛自己不得成為故障源：巢狀掃描的遞迴深度有上限（否則病態輸入的 RecursionError 會
+    被 `main()` 的 fail-open 吞掉＝整支守衛對那條指令失效），失敗退回平掃的成本與輸入成線性。"""
+
+    def test_deep_nesting_neither_raises_nor_changes_the_length(self) -> None:
+        for depth in (10, 17, 200, 3000):
+            command = "echo " + '"$(' * depth + "x" + ')"' * depth + "\ngit stash"
+            with self.subTest(depth=depth):
+                self.assertEqual(len(G.mask_inert(command)), len(command))
+                self.assertTrue(G.destructive_git_hits(command))
+
+    def test_unbalanced_openers_cost_scales_linearly(self) -> None:
+        def best(openers: int) -> float:
+            command = 'echo "$(" ' * openers + "\ngit stash"
+            runs = []
+            for _ in range(3):
+                began = time.perf_counter()
+                G.mask_inert(command)
+                runs.append(time.perf_counter() - began)
+            return min(runs)
+
+        small, large = best(500), best(4_000)
+        self.assertLess(large / small, 24, f"輸入放大 8 倍、成本放大 {large / small:.1f} 倍")
+        self.assertLess(large, 2.0, f"4,000 個未收尾開頭 {large:.2f}s：逼近 hook 逾時＝fail-open")
 
 
 if __name__ == "__main__":  # pragma: no cover

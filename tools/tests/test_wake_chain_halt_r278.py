@@ -496,7 +496,7 @@ class SentinelDecideRecognizesHaltMarkerTest(unittest.TestCase):
     def test_halt_marker_reset_source_passes_the_relay_credential_check(self) -> None:
         """DEF-200-281／F-4 端到端演練（真 launchd）揪出的整合缺口：`halt_verdict()` 的
         `arm_reset` 分支寫回 `reset_source="halt-marker"`，但 `relay_problems()` 修前
-        只認 `transcript-verbatim`／`probe-verbatim`／`operator` 三種——下一輪 tick 會把
+        的白名單只有 `transcript-verbatim`／`probe-verbatim`／`operator`——下一輪 tick 會把
         這個合法狀態塊判成「猜出來的 reset」而觸發不必要的 `_heal_relay()` 自癒，自癒又
         會把 `allow_resume` 靜默重置回預設值（見 `_heal_relay`／`_base_state`）。"""
         state = {"schema": planner.RELAY_SCHEMA, "session_id": "sid-halt-marker",
@@ -1000,8 +1000,7 @@ class RegisterSchtasksTimeIsObservedNotGuessedTest(unittest.TestCase):
     def test_the_guess_is_not_a_default_anywhere(self) -> None:
         """結構面：`--at` 的 argparse 預設與 `schtasks_command(at_expr=)`
         都不得再帶預設值——任何忘了帶 `--at` 的呼叫端都不能靜默走猜測路（ADR-XPLAT-014
-        約束 1）。`DEFAULT_AT_EXPR` 這個名字仍留著，
-        只是被禁止的形態的對照物（既有文件與測試引用它），不是預設。"""
+        約束 1）。「`--at` 缺席就固定加 5 小時」的常數已整支刪除（程式碼零引用）。"""
         self.assertIsNone(planner.build_parser().parse_args([]).at)
         param = inspect.signature(planner.schtasks_command).parameters["at_expr"]
         self.assertIs(param.default, inspect.Parameter.empty)

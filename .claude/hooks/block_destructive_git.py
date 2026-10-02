@@ -150,6 +150,19 @@ mac 清掉的檔案與 Windows 一模一樣，而事故就發生在 macOS——�
   `pipefail` 就不判，一句用對、另一句用錯會漏——此為漏擋方向。誤擋方向：白名單濾器以
   `exit` 傳有語意的 rc（`sort -c`／`awk '{exit N}'`／`sed '/x/q1'`）照樣命中，走
   `# waitform-ok:`。
+· **引號失同步（SD-11）**：`mask_inert()` 判字串收尾時認得 `"…"` 內的 `$( … )`（巢狀引號／
+  heredoc／括號深度；超過 `_NEST_MAX` 層或掃不成就退回平掃），引號外的反斜線跳過下一字元，並在
+  任何字串掃到 EOF 仍未收尾時，以「字串不跨行」的第二視圖聯集補判。修前漏判、已修：
+  `"$(… "\\"" …)"` 與 `"$(… '…"…' …)"`（含同行尾巴）、`echo don\\'t` 這種引號外的跳脫引號、
+  `curl -d @"$f"`（沒有收尾的 `@"` 不是 here-string）；PowerShell 反引號 `` `" ``、ANSI-C
+  `$'…\\'…'`、`"C:\\dir\\"` 這類掃描器看不懂的形態，  # platform-ok: 守衛語料
+  **下一行起**已看得見。🔴 仍擋不到：那些看不懂
+  形態的**同一行後半**；雙引號內命令替換的**內容**（`"$(git stash)"` 會執行卻被當資料遮掉，
+  修前即如此）；`<<` 位移運算子與 `<<< word` 被當 heredoc 開頭而吞到 EOF（修前即如此）。
+  🔴 **唯一比修前弱的形態**：PowerShell 裸字路徑以反斜線結尾又緊貼引號開頭（`C:\\dir\\"x"`）——
+  引號外的反斜線規則是 bash 語意，該引號被當跳脫 ⇒ 同行尾巴漏擋（修前命中）。代價：同一條指令
+  若同時有失同步與合法的多行字串，後者內部會被第二視圖當成可執行結構（方向是誤擋、不是漏擋）。
+  史料見本輪證據檔〈九〉。
 """
 
 from __future__ import annotations
@@ -392,6 +405,74 @@ def argv_git_fragments(command: str) -> str:
 _STATUS_READ_RE = re.compile(r"(?<![\\$])\$(?:\?|\{\?\})")
 
 
+#: `"…"` 內 `$( … )` 巢狀掃描的深度上限：超過就當掃不成、退回平掃。不設上限時，病態輸入的
+#: `RecursionError` 會被 `main()` 的 fail-open 吞掉＝守衛對那條指令整個失效。
+_NEST_MAX = 16
+#: 引號外的跳脫字元（bash 語意）；PowerShell 的反斜線只是路徑字元，代價見檔頭〈誠實劃界〉。
+_SHELL_ESCAPE = "\\"
+#: heredoc 開頭 `<<[-] [引號]WORD`：主迴圈與 `$( … )` 內的略過共用同一個家。
+_HEREDOC_OPEN_RE = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][\w.-]*)\1")
+
+
+def _heredoc_term_end(text: str, body: int, word: str, lim: int) -> int:
+    """從 `body`（開頭那行的換行處）起找獨立一行的 `word`；回該行結尾的索引，找不到回 -1。"""
+    m = re.compile(r"^[ \t]*" + re.escape(word) + r"[ \t]*$", re.MULTILINE).search(
+        text, body, lim)
+    return m.end() if m else -1
+
+
+# 引號收尾的判定（SD-11）：史料與修前形態見本輪證據檔〈九〉。
+def _quote_close(text: str, i: int, lim: int, nest: bool, depth: int = 0) -> int:
+    """`text[i]` 是引號開頭 → 回收尾引號的索引；`lim` 之前找不到回 -1。
+
+    `"…"` 內的 `$( … )` 是獨立的殼語境，裡面的引號與 heredoc 自成一格（`nest=True`）；
+    `nest=False` 是平掃：反斜線跳過下一字元、遇同款引號即收（修前唯一的做法）。"""
+    quote, j = text[i], i + 1
+    while j < lim:
+        c = text[j]
+        if c == quote:
+            return j
+        if quote == '"':
+            if c == "\\":
+                j += 1
+            elif nest and c == "$" and text.startswith("$(", j):
+                j = _subst_close(text, j + 2, lim, depth + 1)
+                if j < 0:
+                    return -1
+        j += 1
+    return -1
+
+
+def _subst_close(text: str, j: int, lim: int, depth: int) -> int:
+    """`$(` 之後的索引 → 配對 `)` 的索引；掃不成（括號不平衡、heredoc 沒收尾、太深）回 -1。"""
+    level = 1
+    while j < lim and depth <= _NEST_MAX:
+        c = text[j]
+        if c in "'\"":
+            j = _quote_close(text, j, lim, True, depth)
+            if j < 0:
+                return -1
+        elif c == "\\":
+            j += 1
+        elif c == "<" and text.startswith("<<", j):
+            if text.startswith("<<<", j):
+                j += 2
+            elif m := _HEREDOC_OPEN_RE.match(text, j):
+                body = text.find("\n", j)
+                end = _heredoc_term_end(text, body, m.group(2), lim) if 0 <= body < lim else -1
+                if end < 0:
+                    return -1
+                j = end - 1
+        elif c == "(":
+            level += 1
+        elif c == ")":
+            level -= 1
+            if level == 0:
+                return j
+        j += 1
+    return -1
+
+
 def mask_inert(text: str, *, keep_comments: bool = False,
                keep_status: bool = False) -> str:
     """把「不是可執行結構」的區段換成**等長**空白：引號字串、here-string／heredoc、註解。
@@ -411,10 +492,29 @@ def mask_inert(text: str, *, keep_comments: bool = False,
     `keep_status=True`（判準④，DEF-200-086）：**雙引號**字串內的 `$?`／`${?}` 原樣保留
     ——`echo "rc=$?"` 的 `$?` 會被殼展開，整段遮掉就看不見最常見的讀法；單引號內不展開，
     照遮。
+
+    🔴 **兩個視圖的聯集**（SD-11）：先在正常視圖遮一次；若有字串掃到 EOF 仍未收尾（＝失同步，
+    修前會把 EOF 前全遮）就再用「字串不跨行」的視圖遮一次，任一視圖看得見的字元就算看得見
+    ——只會少遮、不會多遮；沒有失同步時行為與單一視圖逐字相同（多行字串的內部仍是資料）。
     """
+    masked, desync = _mask_pass(text, keep_comments, keep_status, False)
+    if not desync:
+        return masked
+    loose, _ = _mask_pass(text, keep_comments, keep_status, True)
+    return "".join(a if a != " " else b for a, b in zip(masked, loose))
+
+
+def _mask_pass(text: str, keep_comments: bool, keep_status: bool,
+               loose: bool) -> tuple[str, bool]:
+    """`mask_inert()` 的單一視圖；回 `(遮蔽後字串, 有沒有字串掃到上限仍未收尾)`。
+
+    `loose=True`：字串不跨行（上限＝該行行尾），失同步最多隱藏同一行的其餘部分。"""
     out = list(text)
     n = len(text)
     i = 0
+    nest = True  # 巢狀掃描失敗過一次就不再試（退回修前行為），成本才與輸入成線性
+    desync = False
+    eol = -1
 
     def blank(start: int, end: int) -> None:
         for k in range(start, min(end, n)):
@@ -423,23 +523,33 @@ def mask_inert(text: str, *, keep_comments: bool = False,
 
     while i < n:
         ch = text[i]
+        # 殼語境的反斜線跳過下一字元：`\"`／`\'` 是跳脫的引號、不是字串開頭（`echo don\'t`）
+        if ch == _SHELL_ESCAPE:
+            i += 2
+            continue
         # PowerShell here-string：@'…'@ / @"…"@
         if ch == "@" and i + 1 < n and text[i + 1] in "'\"":
             quote = text[i + 1]
             end = text.find(quote + "@", i + 2)
-            end = n if end < 0 else end + 2
-            blank(i, end)
-            i = end
-            continue
+            # 沒有收尾的 `@"` 不是 here-string（bash 的 `curl -d @"$f"`）：落到下面的引號分支
+            if end >= 0:
+                blank(i, end + 2)
+                i = end + 2
+                continue
         if ch in "'\"":
-            j = i + 1
-            while j < n:
-                if text[j] == "\\" and ch == '"':
-                    j += 2  # bash 的 "…" 內 \" 是逃脫；'…' 內沒有逃脫
-                    continue
-                if text[j] == ch:
-                    break
-                j += 1
+            lim = n
+            if loose:  # 第二視圖：字串不跨行
+                if i >= eol:
+                    eol = text.find("\n", i)
+                    eol = n if eol < 0 else eol
+                lim = eol
+            j = _quote_close(text, i, lim, nest)  # bash 的 "…" 內 \" 是逃脫；'…' 內沒有逃脫
+            if j < 0 and nest and ch == '"':
+                nest = False  # 巢狀掃不成：退回平掃（修前行為），之後的字串也不再試
+                j = _quote_close(text, i, lim, False)
+            if j < 0:
+                desync = True  # 平掃也掃不到收尾＝失同步（見檔頭〈誠實劃界〉）
+                j = lim
             blank(i, min(j + 1, n))
             if keep_status and ch == '"':
                 for m in _STATUS_READ_RE.finditer(text, i, j):
@@ -456,7 +566,7 @@ def mask_inert(text: str, *, keep_comments: bool = False,
             continue
         # bash heredoc：<<[-] [引號]WORD  → 遮到獨立一行的 WORD 為止
         if ch == "<" and text.startswith("<<", i) and not text.startswith("<<<", i):
-            m = re.match(r"<<-?\s*(['\"]?)([A-Za-z_][\w.-]*)\1", text[i:])
+            m = _HEREDOC_OPEN_RE.match(text, i)
             if m:
                 word = m.group(2)
                 body = text.find("\n", i)
@@ -464,11 +574,8 @@ def mask_inert(text: str, *, keep_comments: bool = False,
                     blank(i, n)
                     i = n
                     continue
-                end = n
-                for line_m in re.finditer(r"^[ \t]*" + re.escape(word) + r"[ \t]*$",
-                                          text[body:], re.MULTILINE):
-                    end = body + line_m.end()
-                    break
+                end = _heredoc_term_end(text, body, word, n)
+                end = n if end < 0 else end
                 # 🔴 R84：body 是不是可執行結構，由 heredoc 的**擁有者**決定（見檔頭 R84
                 # 記錄）。餵給殼 ⇒ 只遮 `<<WORD` 本身、停在 `body` 讓主迴圈照常往下遮
                 # body 內的引號與註解；餵給別的直譯器 ⇒ 整段當資料遮掉（維持既有行為）。
@@ -492,7 +599,7 @@ def mask_inert(text: str, *, keep_comments: bool = False,
             i = end
             continue
         i += 1
-    return "".join(out)
+    return "".join(out), desync
 
 
 def has_exemption(command: str) -> bool:

@@ -102,7 +102,7 @@ _LIMIT_MARKS: tuple[tuple[str, tuple[str, ...]], ...] = (
 #: `resets 9am` ／ `resets 12:20pm` 兩種格式都要吃。全庫實測到 7 個相異 reset 值
 #: （`3:50am` `4am` `9am` `11pm` `12:20pm` `12:30pm` `6pm`），**沒有一個落在 5 小時的
 #: 固定格點上** ⇒ reset 時刻是滾動視窗、錨在該區塊第一次用量，只能**觀測**不能算。
-#: 這就是 `session_resume_planner.DEFAULT_AT_EXPR` 那個 `AddHours(5)` 是缺陷的證據。
+#: 這就是「假設 reset 固定在 5 小時後」是缺陷的證據（該預設已整支刪除）。
 _RESET_RE = re.compile(r"resets\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)", re.IGNORECASE)
 
 #: 訊息自報的 IANA 時區，例：`… resets 9am (Asia/Taipei)`。全庫語料實測**每一筆**
