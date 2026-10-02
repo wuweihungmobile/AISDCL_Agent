@@ -701,11 +701,10 @@ _SITE_CLASS_CENSUS: dict[str, dict[str, int]] = {
         # 掃描面擴大為深度 3 BFS 新增測試，函式體內 `self.skipTest("[TOOL-ABSENCE] 解不出 "
         # "SDD LATEST 或該樹無 hook ⇒ 量不到 ≠ 量到合格")`——沿用同檔既有慣例，解不出來時
         # 明說跳過，不是隱藏失敗。
-        # 🔴 哨兵 GC 隔離 HOME 根因修復（DEF-200-455）重釘 `runtime-skipTest` 33→34（非放寬）：
-        # `test_mac_endurance_r83.py` 新增進程級 e2e 以 PATH 前置假 `launchctl` 證明隔離 HOME
-        # 下 SessionStart 不得卸載活哨兵，非 macOS 以函式體內 `self.skipTest("[MAC-NATIVE-ONLY]…")`
-        # 退場——launchd 只在 macOS 成立，帶標籤 skip 是正確形態，不是隱藏失敗。
-        "runtime-skipTest": 34,
+        # 哨兵 GC 隔離 HOME 根因修復（DEF-200-455）的進程級 e2e 曾以 `[MAC-NATIVE-ONLY]` skip 退場
+        # （本格一度 33→34）；雲端 linux／win32 的 M6 與分群天花板當場紅（platform 群只准降）⇒
+        # 改為非 macOS 走行程內同判準、不跳過，本格回到 33。
+        "runtime-skipTest": 33,
         "unclassified": 0,
     },
     # 🔴 R81 包 F 重釘 `windows-only` 9→10：並行包在

@@ -1505,13 +1505,13 @@ class EscapeHatchAndNoProliferationTest(unittest.TestCase):
         所以輪詢到它退場（以它對假 launchctl 的 ppid 為準）才回傳；沒跑完就 fail。
         `projects_dir`＝逐字稿目錄是否存在（False＝HOME 被隔離的真實情境）。
         """
-        if sys.platform != "darwin":
-            self.skipTest("[MAC-NATIVE-ONLY] 假 launchctl 替身只在 macOS 成立")
         scratch = tempfile.TemporaryDirectory(prefix="r83_gc_iso_")
         self.addCleanup(scratch.cleanup)
         tmp = Path(scratch.name)
         for sub in ("bin", "home", "tmp", "traces", "cfg"):
             (tmp / sub).mkdir()
+        if sys.platform != "darwin":
+            return self._gc_inprocess_rows(tmp, projects_dir=projects_dir)
         log = tmp / "launchctl.log"
         shim = tmp / "bin" / "launchctl"
         shim.write_text(_FAKE_LAUNCHCTL.format(
@@ -1546,6 +1546,31 @@ class EscapeHatchAndNoProliferationTest(unittest.TestCase):
             time.sleep(0.05)
         self.fail(f"detached 回收行程 30 秒內沒有跑完（或根本沒跑）：{rows}")
 
+    def _gc_inprocess_rows(self, tmp: Path, *, projects_dir: bool) -> list[str]:
+        """非 macOS 沒有 launchd 可 spawn：同一判準改在行程內跑（不跳過、不假綠）——隔離 HOME
+        照樣由環境驅動 `_transcript_dir()`，只把列舉與卸載換成記錄用替身，回傳形狀同假
+        launchctl。"""
+        rows: list[str] = []
+        labels = ["AutoSDD_Sentinel_live-a", "AutoSDD_Sentinel_live-b"]
+        env = {"HOME": str(tmp / "home"), "USERPROFILE": str(tmp / "home"),
+               "TMPDIR": str(tmp / "tmp"), "AUTOSDD_TRACE_DIR": str(tmp / "traces"),
+               "AUTOSDD_QUOTA_CACHE_DIR": str(tmp / "tmp"),
+               "CLAUDE_CONFIG_DIR": str(tmp / "cfg"), "CLAUDE_PROJECT_DIR": str(_REPO_ROOT)}
+
+        def _record(task: str) -> int:
+            rows.append(f"ppid=0 argv=bootout gui/501/{task}")
+            return 0
+
+        with mock.patch.dict(os.environ, env), \
+                mock.patch.object(sentinel_lifecycle, "sentinel_task_names", return_value=labels), \
+                mock.patch.object(sentinel_lifecycle, "_remove_task", side_effect=_record):
+            if projects_dir:
+                planner.project_transcript_dir(planner._REPO_ROOT).mkdir(parents=True,
+                                                                         exist_ok=True)
+            sentinel_lifecycle.gc(apply=True, keep=("r83-no-such-session",),
+                                  tmp_dir=str(tmp / "tmp"))
+        return rows
+
     @staticmethod
     def _writes(rows: list[str]) -> list[str]:
         """假 launchctl 收到的**寫類**呼叫（list／print 以外的一切子命令）。"""
@@ -1553,7 +1578,7 @@ class EscapeHatchAndNoProliferationTest(unittest.TestCase):
 
     def test_session_start_in_an_isolated_home_never_unloads_a_live_sentinel(self) -> None:
         """🔴 DEF-200-455 進程級 e2e：HOME 被隔離（逐字稿目錄不存在）時，真 hook SessionStart
-        spawn 的回收行程不得對活哨兵發出任何寫類 launchctl。"""
+        spawn 的回收行程不得對活哨兵發出任何寫類 launchctl（macOS）；其他平台以行程內同判準跑。"""
         rows = self._gc_launchctl_rows(projects_dir=False)
         self.assertEqual(self._writes(rows), [],
                          "隔離 HOME 下 GC 對活哨兵發了寫類 launchctl（DEF-200-455）")

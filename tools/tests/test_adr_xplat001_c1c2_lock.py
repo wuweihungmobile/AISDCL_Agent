@@ -619,7 +619,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 397,
     "_ps_engine.py": 83,
     "test_act_local_runner_image.py": 307,
-    "test_adr_xplat001_c1c2_lock.py": 8619,
+    "test_adr_xplat001_c1c2_lock.py": 8620,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 4073,
@@ -657,7 +657,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_hook_carrier_symlink.py": 153,
     "test_install_statusline.py": 446,
     "test_install_windows_nightly.py": 1355,
-    "test_mac_endurance_r83.py": 2134,
+    "test_mac_endurance_r83.py": 2159,
     "test_mac_readiness_r82.py": 626,
     "test_macos_smoke_skip_honesty.py": 221,
     "test_maturity_criteria_r79.py": 412,
@@ -2523,7 +2523,7 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "同輪列、接鏈列、Phase 2 時效列）；同輪搬遷史料 451 行原文進證據檔〈九-F〉"
      "（淨減 371 行；搬遷部分 AST 比對零可執行改動）。主軌 511 ≤ 523（款(11) 連續上升第 1 輪）。"
      "逐項見 CrossPlatform_R189_SessionGate_Family_Lock_Audit_Evidence.md〈四〉〈六〉〈九〉。"),
-    ("R190", 111383, 112142, +759,  # round-label-ok
+    ("R190", 111383, 112168, +785,  # round-label-ok
      "[非淨減法輪][回歸鎖軌申報 309（＝軌上限），見 _REGRESSION_LANE_LOG 同輪列] "
      "掌舵者五問修復輪（DEF-200-197／198／199／203／455／456／457 結案回歸鎖）："
      "test_quota_policy.py／test_block_destructive_git_r83.py／"
@@ -3191,7 +3191,7 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 _REPIN_LOG_FROZEN_PREFIX_LEN = 321
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "7747db3fd2bc7b1aa77c470624483dfb9aca275e6f58ce308a5aca1ed08dae3b")
+    "22765c3a1d2f8e46013634c9f6d47d1b29b2f799d0256013ba9f766f4fb7e54c")
 
 
 def repin_log_history_digest(
@@ -3542,6 +3542,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R188", "46d7412f002f", "a2fe4b152479", "DEF-200-447"),  # round-label-ok
     ("R189", "a2fe4b152479", "c326e2f45237", "DEF-200-451"),  # round-label-ok
     ("R190", "c326e2f45237", "7747db3fd2bc", "DEF-200-197"),  # round-label-ok
+    ("R190", "7747db3fd2bc", "22765c3a1d2f", "DEF-200-455"),  # round-label-ok
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。
