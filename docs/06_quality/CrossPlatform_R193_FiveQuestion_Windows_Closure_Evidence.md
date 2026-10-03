@@ -83,7 +83,9 @@
 - **根層全套第一跑（背景阻塞）**：`ROOT_RC=1`、`1 failures / 0 errors`＝`test_sentinel_tick_e2e_r145.ManualRegisterThenWakeE2ETest.test_manual_register_leaves_a_healthy_relay_block`（`'會自動續跑' not found in … 醒來那一跑只探測＋留痕`）⇒ 根因＝本機 repo 根 `.env` 有 `AUTOSDD_RESUME_OFF=1`、`planner.main()` 的 `apply_env_defaults` 填進環境後 parser 預設翻關（DEF-200-480 新立即結，setUp 密封）；`發現 5138 個測試（下限 5101）`、`[skip census] tools/tests@win32 共 46 支：platform=42／env-disabled=4（symlink 權限，Developer Mode 未開）／untagged=0`、`[M6 id 集合] ✅`、`✅ 真實 TEMP 圍籬 … 零變動`、`✅ 孤兒 console 普查：零增長（前 0／後 0）`。第二跑見〈七〉。
 
 ## 七、根層全套、push 與雲端驗收
-（收尾後回填）
+- **根層全套第二跑（主控親跑，背景阻塞；DEF-200-480 密封＋棘輪第二次收斂之後）**：`ROOT_RC=0`、`✅ unittest 數量下限釘選通過：發現 5138 個測試（下限 5101）`、`[cpu_budget] root-unittest workers=18`、`S=1590.0s … slot 利用率=99.8%`、`[skip census] tools/tests@win32 共 46 支：platform=42／env-disabled=4／untagged=0`、`[M6 id 集合] ✅`、`✅ 真實 TEMP 圍籬 … 零變動`、`✅ 孤兒 console 普查：零增長（前 0／後 0）`。MIN_TESTS 5101 與 ONBOARDING `[rootunit-baseline-live:] {'tests': 5101}` 相等（`sync_onboarding_baselines.py --check` rc=0）、下限語意成立（5138 ≥ 5101），本輪不重釘。
+- **commit／push（主控親跑）**：`git add -A`（40 檔）→ `git commit -F`（pre-commit `✅ 全部通過`；`[ROOT-TOOLS-WARN]` session_resume_planner.py 746／750 餘裕 4 行、quota_escalation.py／skip_group_policy.py 餘裕 0，非阻塞）⇒ `a5d2c9f`、`40 files changed, 1476 insertions(+), 174 deletions(-)`；`git push origin main` ⇒ `[pre-push] ✅ 本機 CI 閘門全綠`、`[cpu_budget] parallel legs: root=18 autoclaude=2 sdd=0 wall=156s`、`[pre-push dispatcher] ✅ 本次 push 觸發的所有 leg 皆通過（rc=0）`、`a051468..a5d2c9f  main -> main`、PUSH_RC=0；`git rev-parse HEAD origin/main` 皆 `a5d2c9fccbf98c70a53bd448a6acfc3404a38275`。
+- **雲端（`a5d2c9fc`；背景輪詢 11 次至全部 completed）**：AutoClaude CI 37109845441 **success**（08:32:30Z）、root-infra-ci 37109845459 **success**（08:36:31Z）、macos-compat-ci 37109845557 **success**（08:39:39Z）、windows-compat-ci 37109845461 **success**（08:41:09Z）——push 事件 4 支，non_success 0；aisdlc-sdd-ci／shellcheck-ci 依 paths 白名單未觸發（本輪未改 AISDLC_SDD 與 .sh；缺席＝未驗證、非通過）。本節為 push 後回填，以 docs commit 再 push 一次（HEAD＝origin/main 以該次 push 回報為準）。
 
 ## 八、交棒／掌舵者側待辦
 
