@@ -114,6 +114,7 @@ on:
       #      漏列的代價逐字同 DEF-101-042：只改該檔時其回歸鎖不會跑
       #      （tools/tests/test_install_statusline.py／test_session_brief.py 消費）。
       - "tools/install_statusline.py"
+      - "tools/session_gate_acceptance.py"
       - "tools/lib/session_brief.py"
       # R79（同一個形態的第三次：新增判準消費了根層檔卻沒補 paths，由
       # AISDLC_SDD/scripts/tests/test_ci_paths_cover_root_consumers.py 逐字點名）。
@@ -562,6 +563,7 @@ on:
       #      漏列的代價逐字同 DEF-101-042：只改該檔時其回歸鎖不會跑
       #      （tools/tests/test_install_statusline.py／test_session_brief.py 消費）。
       - "tools/install_statusline.py"
+      - "tools/session_gate_acceptance.py"
       - "tools/lib/session_brief.py"
       # R79（同一個形態的第三次：新增判準消費了根層檔卻沒補 paths，由
       # AISDLC_SDD/scripts/tests/test_ci_paths_cover_root_consumers.py 逐字點名）。
