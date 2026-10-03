@@ -297,55 +297,61 @@ def reset_horizon_phrase(branch: str, resets_at: object, now: datetime | None = 
     return f"reset 在 {resets_at}（{hours} 小時內）"
 
 
-# 🔴 R158（反駁者 refute_q1q2.md §S4／§0 本場實測；Q1／Q2 誤讀「被擋」的合理成因 round-label-ok
-# 之一）：halt 帶第二次以後、**每一次** Read／Bash 都印的那則重複訊息（見 `quota_gate.py`
-# 1140 行附近的既有註解）此前沒有帶「收斂不受影響」的澄清——而它偏偏是撞牆期間人唯一
-# 持續看得到的版本。首則訊息（下面 `quota_halt_message()` 的 head）與重複訊息現在共用
-# 同一句，人話面 SSOT 收斂到這裡，避免兩處各自遣詞再度漂移。
-# Windows 版見 `_HALT_CONVERGENT_CLARIFICATION_WINDOWS`（DEF-200-413：Windows 上
-# Bash 工具另由鐵律一 hook（`block_bash_on_windows.py`）整支停用，「Bash…不受影響」
-# 對模型是假話，與 `session_brief.py::_RC2_CLARIFY_WINDOWS`＝同一句話的姊妹站點）。
-HALT_CONVERGENT_CLARIFICATION = (
-    "你剛才那次工具呼叫已正常執行完成；收斂型工具（Read／Write／Edit／Bash／git）"
-    "不受影響，只有扇出型（Task／Agent／Workflow／WebFetch／WebSearch）暫停；"
-    "真實數字現查：`python tools/session_resume_planner.py --pace`"
-)
+# 收斂型工具清單那句的**單一導出**：簡報（`session_brief.py`）與 halt／量不到三種訊息都呼叫它，
+# 不得在別處抄第二份清單、也不得對成句做字串手術。限定語＝寫壞的指令只擋**那一次呼叫**，工具
+# 本身沒被停用；Windows 的 Bash 由鐵律一 hook（`block_bash_on_windows.py`）另行停用，所以那
+# 一邊列 PowerShell。刻意不含全形分號與「，只有」：呼叫端拿它組句。
+def convergent_tools_clause(windows: bool) -> str:
+    """收斂型工具清單句：清單與限定語只在這裡寫一次。POSIX 列 Bash、Windows 列 PowerShell，
+    兩者只差殼。"""
+    shell = "PowerShell" if windows else "Bash"
+    return f"收斂型工具（Read／Write／Edit／{shell}／git，寫壞的 {shell} 只擋那一次呼叫）不受影響"
 
-# DEF-200-413：Windows 上 `HALT_CONVERGENT_CLARIFICATION` 那句「Bash…不受影響」對模型
-# 是假話——`block_bash_on_windows.py`（鐵律一）對 Bash 工具整支 exit 2。改列 PowerShell，
-# 並比照 `session_brief.py::_RC2_CLARIFY_WINDOWS` 補上同一句括號說明。
-_HALT_CONVERGENT_CLARIFICATION_WINDOWS = (
-    "你剛才那次工具呼叫已正常執行完成；收斂型工具（Read／Write／Edit／PowerShell／git）"
-    "不受影響，只有扇出型（Task／Agent／Workflow／WebFetch／WebSearch）暫停；"
-    "（Windows：Bash 工具另由鐵律一 hook 停用，跑指令用 PowerShell 工具、"
-    "改檔用 Write／Edit，不要先試 Bash——那個阻斷不是「不能寫檔」）"
-    "真實數字現查：`python tools/session_resume_planner.py --pace`"
-)
+
+_HALT_DONE = "你剛才那次工具呼叫已正常執行完成"
+_HALT_PAUSE = "，只有扇出型（Task／Agent／Workflow／WebFetch／WebSearch）暫停；"
+# Windows 上 Bash 工具由鐵律一 hook 整支停用：只換清單不夠，還要點破「那個阻斷不是不能寫檔」
+# （與 `session_brief.py` 的 Windows 簡報句是姊妹站點，兩處各有自己的後半）。
+_HALT_WINDOWS_NOTE = ("（Windows：Bash 工具另由鐵律一 hook 停用，跑指令用 PowerShell 工具、"
+                      "改檔用 Write／Edit，不要先試 Bash——那個阻斷不是「不能寫檔」）")
+_HALT_PACE = "真實數字現查：`python tools/session_resume_planner.py --pace`"
+
+
+def _is_windows(windows: bool | None = None) -> bool:
+    """平台判準的單一入口：`None` 時以同目錄 SSOT `platform_utils.is_windows()` 現查——本檔
+    不得自己寫 `os.name`／`sys.platform` 分支（根 CLAUDE.md〈Windows 側單一載具原則〉鐵律三）。
+    import 失敗時一律 fail-open 回 POSIX：hook 行程不保證 `tools/lib` 以外的模組在
+    `sys.path` 上，組句失敗不得反過來擋住 halt 訊息本身。"""
+    if windows is not None:
+        return windows
+    try:
+        return bool(platform_utils.is_windows())
+    except Exception:  # noqa: BLE001 — 見上：fail-open 回 POSIX 版
+        return False
+
+
+def _halt_rest(windows: bool) -> str:
+    """halt 澄清句首句**之後**的全部：清單句＋扇出暫停＋（Windows 括號）＋現查指令。兩種首句
+    （已執行完成／沒有執行）共用它，PreToolUse 版因此不必對成句做字串手術。"""
+    return (convergent_tools_clause(windows) + _HALT_PAUSE
+            + (_HALT_WINDOWS_NOTE if windows else "") + _HALT_PACE)
+
+
+# POSIX 版的公開常數（既有回歸鎖與呼叫端沿用）；Windows 版走 `halt_convergent_clarification(True)`。
+HALT_CONVERGENT_CLARIFICATION = f"{_HALT_DONE}；{_halt_rest(False)}"
 
 
 def halt_convergent_clarification(windows: bool | None = None, event: str = "PostToolUse",
                                   tool: str = "") -> str:
-    """halt 帶「收斂不受影響」澄清句，平台感知版（DEF-200-413）。
-
-    `windows=None` 時以同目錄 SSOT `platform_utils.is_windows()` 現查——本檔不得
-    自己寫 `os.name`／`sys.platform` 分支（根 CLAUDE.md〈Windows 側單一載具原則〉
-    鐵律三）。import 失敗時一律 fail-open 回 POSIX 版
-    （`HALT_CONVERGENT_CLARIFICATION`）：hook 行程不保證 `tools/lib` 以外的模組在
-    `sys.path` 上，簡報失敗不得反過來擋住 halt 訊息本身。
+    """halt 帶收斂型工具澄清句，平台感知版（DEF-200-413）；平台判準見 `_is_windows()`。
 
     DEF-200-435：`event="PreToolUse"`＝扇出工具根本沒執行，首句「你剛才那次工具呼叫已正常
     執行完成」對它是假話（且與同則訊息的「扇出型工具一律不執行」互相矛盾）⇒ 只換首句，
-    其餘（收斂工具清單、Windows 括號、`--pace` 指令）與預設值同源；預設值輸出逐字不變。
+    其餘同源（`_halt_rest()`）；預設值的輸出與換首句前逐字相同。
     """
-    if windows is None:
-        try:
-            windows = bool(platform_utils.is_windows())
-        except Exception:  # noqa: BLE001 — 見上：fail-open 回 POSIX 版
-            windows = False
-    text = _HALT_CONVERGENT_CLARIFICATION_WINDOWS if windows else HALT_CONVERGENT_CLARIFICATION
-    if event == "PreToolUse":
-        return f"這次 {tool or '扇出型'} 呼叫已被擋下、沒有執行；" + text.split("；", 1)[1]
-    return text
+    first = (f"這次 {tool or '扇出型'} 呼叫已被擋下、沒有執行" if event == "PreToolUse"
+             else _HALT_DONE)
+    return f"{first}；{_halt_rest(_is_windows(windows))}"
 
 
 def degraded_detail(reason: str, refresh_failed: bool) -> str:
@@ -357,13 +363,13 @@ def degraded_detail(reason: str, refresh_failed: bool) -> str:
 
 
 def degraded_convergent_clarification(windows: bool | None = None) -> str:
-    """量不到通知（PostToolUse）的「收斂型工具不受影響」澄清句（DEF-200-453）。
+    """量不到通知（PostToolUse）的收斂型工具澄清句（DEF-200-453）。
 
-    與 halt 版同源——平台分支與工具清單住 `halt_convergent_clarification()`，本檔不得有第二份：
-    只取它「…不受影響」那半句；後半的「只有扇出型…暫停」是 halt 專屬，量不到時扇出型只是被
-    收緊到硬上限（`degraded_cap`）而不是停用，照抄會叫模型停派。"""
-    head = halt_convergent_clarification(windows).partition("，只有扇出型")[0]
-    return head + "，扇出型工具只受上面那個硬上限約束，量到讀數就依真實水位重判。"
+    與 halt 版同源——清單句與平台判準各只有一個家（`convergent_tools_clause()`／
+    `_is_windows()`）；後半的「只有扇出型…暫停」是 halt 專屬，量不到時扇出型只是被收緊到
+    硬上限（`degraded_cap`）而不是停用，照抄會叫模型停派，所以這裡自己組後半。"""
+    return (f"{_HALT_DONE}；{convergent_tools_clause(_is_windows(windows))}"
+            "，扇出型工具只受上面那個硬上限約束，量到讀數就依真實水位重判。")
 
 
 def degraded_message(source: str, detail: str, posture: str, trace: object, ttl: int,
@@ -439,8 +445,8 @@ def quota_halt_message(decision: quota_policy.Decision, act: dict, event: str = 
     subject = _halt_subject(act["kind"] or "未知", decision, model)
     head = (f"🔴 額度到達**停止**水位（{subject}）⇒ **停止派發**：扇出型工具一律不執行。\n"
             if blocked else
-            f"🟡 額度到達**停止**水位（{subject}）——這是一次性提醒，不是錯誤；照常可用的工具"
-            "都不受影響。\n")
+            f"🟡 額度到達**停止**水位（{subject}）——這是一次性提醒，不是錯誤；"
+            f"{convergent_tools_clause(_is_windows())}，照常可用。\n")
     failed = act.get("failed")  # 副作用拋例外時 `halt_actions_guarded()` 放進來的失敗原因
     no_plan = "（執行失敗，見下）" if failed else "（寫不出來——逐字稿路徑不可得）"
     head += (f"   {halt_convergent_clarification(event=event, tool=tool)}\n"
@@ -716,7 +722,7 @@ def quota_prepare_message(decision: quota_policy.Decision, plan: str, now: datet
 #: ／rec=2 ⇒ 差值印 4、今天印 2）——那一格從來沒有壞過，而放大是本檔唯一不准無證據發生的
 #: 方向（同 `quota_policy.decide()` 對攤提夾 0 的判詞）。取 min 之後兩個病都不在：畫面數字
 #: 恆 ≤ 守衛真的會放行的量（`live_dispatches() >= cap` 即擋），也恆 ≤ 配速建議（R86 攤提
-#: 那條軸不被本行悄悄繞過）。`live == cap` 時 min 的結果仍是 0，QA 指名的跨層對帳鎖不受影響。
+#: 那條軸不被本行悄悄繞過）。`live == cap` 時 min 的結果仍是 0，QA 指名的跨層對帳鎖照樣成立。
 #: 🔴 R96 二審（SD／QA 各自獨立注射命中同一個缺口）：上面這一整段辯護在寫下的當時**零觀測
 #: 者**——把本行改成純差值 `max(0, cap - live)`，R96 新增的四支全部 GREEN。結構成因是
 #: `test_a_full_window_reads_as_zero_on_both_sides` 刻意構造 `live == cap`，而**在那一格

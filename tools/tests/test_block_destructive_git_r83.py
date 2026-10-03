@@ -1180,7 +1180,7 @@ _RCPIPE_ALLOW: tuple[str, ...] = (
     "cmd | rg foo; echo $?",
     "cmd | jq .a; echo $?",
     "cmd | tail -1 | grep ok; echo $?",  # 尾節是 grep
-    "cmd | tail -1; echo ${PIPESTATUS[0]}",  # bash 正解
+    "cmd | tail -1; echo ${PIPESTATUS[0]}",  # bash 正解（消費端固定 SHELL=bash；zsh 見下表）
     "cmd | tail -1; echo ${pipestatus[1]}",  # zsh 正解
     "set -o pipefail; cmd | tail -1; echo $?",
     "set -euo pipefail\ncmd | tail -1; echo $?",
@@ -1203,6 +1203,30 @@ _RCPIPE_ALLOW: tuple[str, ...] = (
 )
 
 
+#: zsh（mac 的 Bash 工具殼）下該擋的：大寫 `PIPESTATUS` 的**執行面**讀取（含雙引號內、含
+#: `:-$?` 退路），且全指令沒有小寫 `pipestatus`／`pipefail`。zsh 沒有大寫那個名字，讀到空字串。
+_RCPIPE_ZSH_BLOCK: tuple[str, ...] = (
+    "cmd | tail -1; echo ${PIPESTATUS[0]}",
+    'cmd 2>&1 | tail -4; echo "crossref rc=${PIPESTATUS[0]}"',  # 真實逐字稿的形態
+    'cmd | head -3; echo "${PIPESTATUS[0]:-$?}"',  # 退路印出被遮蔽的 `$?`＝假綠
+    "cmd | grep x; echo $PIPESTATUS",  # 不帶花括號；尾節是 grep 也一樣讀空
+    "cmd | tee /tmp/o.log\nrc=${PIPESTATUS[0]}",  # 多行賦值
+)
+
+#: zsh 下不該擋的：小寫（zsh 正解）、`pipefail`、只提到名字而不讀、zsh 不會展開的位置。
+_RCPIPE_ZSH_ALLOW: tuple[str, ...] = (
+    "cmd | tail -1; echo ${pipestatus[1]}",
+    'cmd | tail -1; echo "${PIPESTATUS[0]:-${pipestatus[1]}}"',  # 可攜寫法：小寫在
+    "set -o pipefail; cmd | tail -1; echo ${PIPESTATUS[0]}",
+    "grep -n PIPESTATUS .claude/hooks/block_destructive_git.py",  # 只是搜名字
+    "echo '${PIPESTATUS[0]}'",  # 單引號內不展開
+    "cat > run.sh <<'EOF'\ncmd | tail -1; echo ${PIPESTATUS[0]}\nEOF",  # 非殼的 heredoc＝資料
+    "bash -c 'cmd | tail -1; echo ${PIPESTATUS[0]}'",  # operand 在 bash 裡跑，外層 zsh 不展開
+    "cmd | tail -1; echo \\${PIPESTATUS[0]}",  # 反斜線逃脫：字面
+    "cmd > /tmp/o.log 2>&1; echo rc=$?; tail -5 /tmp/o.log",  # 正解：先導檔再讀 rc
+)
+
+
 class TestIronLaw6RcMaskedByPipe(unittest.TestCase):
     """DEF-200-086（受測：`.claude/hooks/block_destructive_git.py` 的 `waitform_hits()`
     判準④）。
@@ -1214,9 +1238,11 @@ class TestIronLaw6RcMaskedByPipe(unittest.TestCase):
                 self.assertTrue(G.waitform_hits(command), "遮蔽 rc 的讀法未被擋下")
 
     def test_every_legitimate_form_is_allowed(self) -> None:
-        """假紅是這道鎖的生死線：擋到讓人無法工作的守衛會被整個關掉。"""
+        """假紅是這道鎖的生死線：擋到讓人無法工作的守衛會被整個關掉。殼釘 bash：表內大寫
+        `PIPESTATUS` 那筆只在非 zsh 殼成立（zsh 一格見 `TestIronLaw6ZshHasNoUppercasePipestatus`）。"""
         for command in _RCPIPE_ALLOW:
-            with self.subTest(command=command[:60]):
+            with self.subTest(command=command[:60]), \
+                    mock.patch.dict(os.environ, {"SHELL": "/bin/bash"}):
                 self.assertEqual(G.waitform_hits(command), [], "判準④誤擋了一個正確形態")
 
     def test_powershell_is_out_of_range(self) -> None:
@@ -1430,6 +1456,130 @@ class TestIronLaw6RcMaskedByPipeHasTeeth(unittest.TestCase):
             G._PIPE_OPS_RE = original  # type: ignore[assignment]
         self.assertTrue(G.waitform_hits(redirect_bad))
         self.assertEqual(G.waitform_hits(or_good), [])
+
+
+class TestIronLaw6ZshHasNoUppercasePipestatus(unittest.TestCase):
+    """判準④ 的 zsh 一格：Bash 工具殼在 mac 是 zsh，大寫 `${PIPESTATUS[0]}` 在那裡展開成
+    空字串（zsh 的陣列叫小寫 `pipestatus`、下標從 1）——讀到的不是 rc，表徵與成功相同。
+    豁免只在「殼不是 zsh」時對大寫成立；殼由 `SHELL`（缺席且 darwin ⇒ zsh）判定。"""
+
+    #: `SHELL` 的值（殼的路徑字面值）：具名常數，不直接寫進 assert 的引數。
+    _ZSH, _BASH = "/bin/zsh", "/bin/bash"
+
+    @staticmethod
+    def _under(shell: str, command: str, tool: str = "Bash") -> list[str]:
+        with mock.patch.dict(os.environ, {"SHELL": shell}):
+            return G.waitform_hits(command, tool=tool)
+
+    def test_zsh_blocks_every_uppercase_pipestatus_read(self) -> None:
+        for command in _RCPIPE_ZSH_BLOCK:
+            with self.subTest(command=command[:60]):
+                hits = self._under(self._ZSH, command)
+                self.assertEqual(len(hits), 1, hits)
+                self.assertTrue(hits[0].startswith(G._RCZSH_TAG), hits)
+
+    def test_bash_and_unknown_shells_keep_the_exemption(self) -> None:
+        for shell in (self._BASH, "/usr/bin/fish", "/bin/sh"):
+            for command in _RCPIPE_ZSH_BLOCK:
+                with self.subTest(shell=shell, command=command[:40]):
+                    self.assertEqual(self._under(shell, command), [])
+
+    def test_zsh_allows_the_correct_and_the_non_reading_forms(self) -> None:
+        """假紅是這道鎖的生死線：只在 zsh 真的會把它展開成空字串的位置才擋。"""
+        for command in _RCPIPE_ZSH_ALLOW:
+            with self.subTest(command=command[:60]):
+                self.assertEqual(self._under(self._ZSH, command), [])
+
+    def test_a_bash_owned_heredoc_body_is_the_documented_false_positive(self) -> None:
+        """誤擋方向的劃界：餵給殼的 heredoc body 判準看成可執行結構，但它在 bash 裡跑、
+        `PIPESTATUS` 其實有效。出口是行內 `# waitform-ok: <WHY>`。劃界與行為一起鎖。"""
+        command = "bash <<'EOF'\ncmd | tail -1; echo ${PIPESTATUS[0]}\nEOF"
+        self.assertTrue(self._under(self._ZSH, command))
+        self.assertEqual(self._under(self._BASH, command), [])
+
+    def test_the_hit_teaches_the_fix_in_zsh_terms(self) -> None:
+        hit = self._under(self._ZSH, _RCPIPE_ZSH_BLOCK[0])[0]
+        for needle in ("PIPESTATUS", "空字串", "pipestatus", "先導檔", "DEF-200-086"):
+            self.assertIn(needle, hit)
+
+    def test_the_other_tools_are_out_of_range(self) -> None:
+        self.assertEqual(self._under(self._ZSH, _RCPIPE_ZSH_BLOCK[0], tool="PowerShell"), [])
+
+    def test_the_shell_judgement_is_a_pure_function_of_env_and_platform(self) -> None:
+        cases = (
+            ({"SHELL": "/bin/zsh"}, "linux", True),
+            ({"SHELL": "/opt/homebrew/bin/zsh"}, "win32", True),
+            ({"SHELL": "zsh"}, "linux", True),
+            ({"SHELL": "/bin/bash"}, "darwin", False),  # 有明說就信它，不看平台
+            ({"SHELL": "/bin/sh"}, "darwin", False),
+            ({"SHELL": "/bin/zsh5"}, "darwin", False),  # basename 必須恰為 zsh
+            ({}, "darwin", True),  # 缺席＋darwin ⇒ zsh（macOS 預設殼）
+            ({"SHELL": ""}, "darwin", True),  # 空字串視同缺席
+            ({}, "linux", False),
+            ({}, "win32", False),
+        )
+        for env, platform, want in cases:
+            with self.subTest(env=env, platform=platform):
+                self.assertIs(G._tool_shell_is_zsh(env, platform), want)
+
+    def test_the_defaults_read_the_live_environment(self) -> None:
+        with mock.patch.dict(os.environ, {"SHELL": "/bin/zsh"}):
+            self.assertTrue(G._tool_shell_is_zsh())
+        with mock.patch.dict(os.environ, {"SHELL": "/bin/bash"}):
+            self.assertFalse(G._tool_shell_is_zsh())
+        with mock.patch.dict(os.environ):
+            os.environ.pop("SHELL", None)
+            self.assertIs(G._tool_shell_is_zsh(), sys.platform == "darwin")
+
+    def test_the_shell_judgement_is_what_flips_the_verdict(self) -> None:
+        """合成注入：拿掉殼判定（恆非 zsh）⇒ 同一條指令回到放行，證明鑑別力在這一格。"""
+        command = _RCPIPE_ZSH_BLOCK[0]
+        self.assertTrue(self._under(self._ZSH, command))
+        with mock.patch.object(G, "_tool_shell_is_zsh", return_value=False):
+            self.assertEqual(G.waitform_hits(command), [])
+
+
+class TestIronLaw6ZshPipestatusEndToEnd(unittest.TestCase):
+    """真的起 child 行程：rc、首行解法、行內豁免、無人看管。`SHELL` 由本測試顯式給，
+    不繼承執行者的殼（否則同一支測試在 mac 與 CI 會判出不同的結果）。"""
+
+    _BAD = "cmd | tail -1; echo ${PIPESTATUS[0]}"
+    _ZSH = {"SHELL": "/bin/zsh"}
+
+    def test_zsh_exits_two_and_the_first_line_leads_with_the_fix(self) -> None:
+        proc = run_hook(bash_payload(self._BAD), env=self._ZSH)
+        self.assertEqual(proc.returncode, 2, proc.stderr)
+        first = proc.stderr.splitlines()[0]
+        for needle in ("${PIPESTATUS[0]}", "空字串", "${pipestatus[1]}", "echo rc=$?", "沒有執行"):
+            self.assertIn(needle, first)
+        self.assertNotIn("until ! pgrep", proc.stderr, "單獨命中不該附等待機制指引")
+
+    def test_bash_passes_the_same_command(self) -> None:
+        proc = run_hook(bash_payload(self._BAD), env={"SHELL": "/bin/bash"})
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
+    def test_the_inline_exemption_is_still_its_own_hatch(self) -> None:
+        exempt = run_hook(bash_payload(f"{self._BAD}  # waitform-ok: 刻意重現"), env=self._ZSH)
+        self.assertEqual(exempt.returncode, 0, exempt.stderr)
+        other = run_hook(bash_payload(f"{self._BAD}  # git-guard-ok: 不該放行"), env=self._ZSH)
+        self.assertEqual(other.returncode, 2, other.stderr)
+
+    def test_the_exemption_is_void_when_unattended(self) -> None:
+        proc = run_hook(bash_payload(f"{self._BAD}  # waitform-ok: 刻意"),
+                        env={**self._ZSH, G.UNATTENDED_ENV: "1"})
+        self.assertEqual(proc.returncode, 2, proc.stderr)
+        self.assertIn("無人看管", proc.stderr)
+
+    def test_every_one_line_fix_says_this_call_did_not_run_and_bash_still_works(self) -> None:
+        """首行的主語：此前「已擋下」沒說誰被擋——前綴是 harness 加的 hook error，新視窗的
+        模型會把它讀成「Bash／寫檔都被擋」。兩種首行（`$?` 形與 zsh 形）一律先說這一次呼叫
+        沒執行、只擋這條指令字串。"""
+        for command, env in ((TestIronLaw6RcMaskedByPipeEndToEnd._BAD, {}), (self._BAD, self._ZSH)):
+            with self.subTest(command=command):
+                first = run_hook(bash_payload(command), env=env).stderr.splitlines()[0]
+                for needle in ("這一次呼叫沒有執行", "只擋這條指令字串", "Bash／Write／Edit"):
+                    self.assertIn(needle, first)
+                self.assertNotIn("已擋下", first)
 
 
 class TestTheFalsePositiveCensusIsRerunnable(unittest.TestCase):
@@ -2452,8 +2602,11 @@ class TestGovernanceFilesAreReadOnlyWhenUnattended(unittest.TestCase):
                 self.assertEqual(proc.stderr, "", "提醒走 stdout JSON，stderr 必須空")
                 hso = json.loads(proc.stdout)["hookSpecificOutput"]
                 self.assertEqual(hso["hookEventName"], "PreToolUse")
-                for word in ("治理檔", "有人值守", "這只是提醒，這次寫入已放行"):
+                for word in ("治理檔", "有人值守只提醒", "這次寫入會照常執行、不需處理",
+                             "只有無人值守（AUTOSDD_UNATTENDED）的回合才會擋這類檔"):
                     self.assertIn(word, hso["additionalContext"])
+                self.assertNotIn("對它是唯讀的", hso["additionalContext"],
+                                 "不帶條件的「唯讀」會被讀成這次寫入被擋")
 
     def test_the_advisory_names_the_event_the_payload_names(self) -> None:
         """hookEventName 與實際事件不符時 CC 整份丟掉（`emit_to_model` 約束①）⇒ 取

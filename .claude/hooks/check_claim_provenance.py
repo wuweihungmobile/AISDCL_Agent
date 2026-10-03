@@ -516,9 +516,14 @@ _STALE_AWARE_RE = re.compile(
     r"(過期|重跑|重新量|再量|現在量到|升到|降到|舊值|前值|兩個時刻|相隔|照實記)")
 
 #: 「軸 ＋ 百分比」。`[%％]` 收全角（覆蓋成本一個字元）；裸數字刻意不收（見檔頭 M6）。
+#: 🔴 軸名到百分比之間**不得夾著另一個軸名**：否則 `（seven_day，剩 988 分鐘；session 是 13%）`
+#: 的 13 會綁給 seven_day（跨軸誤綁定）⇒ 找不到錨點，對**正確引述**誤報並多燒一回合；也會把
+#: 真的過期的 session 讀數降級成 unanchored 而漏判。等價於「百分比綁到它之前最近的軸名」。選
+#: 「跨度排除軸名」而非「每個百分比往前回頭找軸」：維持單一 regex 與 `finditer` 的非重疊配對
+#: 語意（hits 的順序與 `seen` 去重鍵都不變），回頭掃描要另寫第二套配對。
 _PACE_READING_RE = re.compile(
-    "(" + "|".join(PACE_AXES)
-    + rf")[^\n]{{0,{PACE_VALUE_WINDOW}}}?(\d{{1,3}}(?:\.\d+)?)\s*[%％]")
+    "(" + "|".join(PACE_AXES) + rf")(?:(?!{'|'.join(PACE_AXES)})[^\n]){{0,{PACE_VALUE_WINDOW}}}?"
+    + r"(\d{1,3}(?:\.\d+)?)\s*[%％]")
 
 #: 作者自己貼出來的量測時刻。**要求帶 offset**：不帶 offset 的字串算 age 要猜時區，而
 #: naive 本地時間戳在本 repo 是明文禁止持久化的形態（鐵律三的機械物之一）。解析不到就
@@ -552,7 +557,7 @@ def stale_pace_hits(claim_text: str, stamped: list, now) -> list[dict]:
 
     純函式。`stamped`＝本場 `tool_result` 的 `[(落款時刻|None, 文字)]`（時序）；`now` 必須
     帶 tzinfo。回傳每筆帶 `kind`：`"stale"`＝真的過期（會出聲）／`"unanchored"`＝軸綁定
-    讀數但全場找不到錨點（**登記的盲區，不出聲、只計數**，見檔頭 M7）。
+    讀數但全場找不到錨點（**登記的盲區：放行、不阻斷，但出一則 ℹ️ 並計數**，見檔頭 M7）。
     """
     own = None
     match = _MEASURED_AT_RE.search(claim_text)

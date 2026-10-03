@@ -573,6 +573,8 @@ _GOVERNANCE_DOCS = (
     # 守衛 mask_inert 漏判 457）的詳情面與各列索引的原文：同一資格，即刻登記。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R190_FixRound_Evidence.md",
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R191_FiveQuestion_Verification_Evidence.md",
+    # 判準②′ 生效第 1 輪（第十四次四方覆核；zsh 漏攔根因修、②′ 機械化、丙案）：即刻登記。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R192_FiveQuestion_Convergence_Evidence.md",
     # 護欄層行數棘輪史料歸檔的第二冊（第一冊逼近 Read 工具上限，淨減法搬遷改落本檔）：即刻登記。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_Guard_Line_History_2.md",
 )

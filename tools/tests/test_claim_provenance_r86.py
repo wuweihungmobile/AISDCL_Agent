@@ -516,6 +516,43 @@ class TestTheTriggerCoversTheMeasuredBypasses(unittest.TestCase):
                          "裸數字若開始命中，請先重跑普查再改這一條")
 
 
+class TestAPercentBindsToItsOwnAxisNotToOneAcrossAnotherAxis(unittest.TestCase):
+    """軸名與百分比之間夾著**另一個軸名**時，那個百分比屬於後者（跨軸誤綁定）。
+
+    成因：原判準是「軸名＋至多 40 個任意字元＋百分比」，軸名會綁到其後**第一個**百分比，
+    不管中間隔了誰——`（seven_day，剩 988 分鐘；session 是 13%）` 被綁成 `seven_day=13`，找不到
+    錨點，對**正確引述**誤報「找不到任何錨點」並逼模型多跑一回合（離線重現：探針 3 支中 2 支；
+    本機 28 筆軸綁定讀數中 4 筆跨度含另一軸名）。測意圖：被處罰的是照實引述，而且同一個
+    綁定錯誤還會讓**真的過期**的讀數被當成 unanchored 漏掉（第四格）。
+    """
+
+    _CROSSED = "binding 軸是（`seven_day`，剩 988 分鐘；`session` 是 13%）"
+    _OUTPUT = "kind=session 13% 剩 128 分鐘 band=free\nkind=seven_day 95% 剩 988 分鐘 band=halt"
+
+    def _hits(self, claim: str, age: timedelta | None):
+        stamped = [] if age is None else [(_NOW - age, self._OUTPUT)]
+        return [(h["axis"], h["value"], h["kind"]) for h in G.stale_pace_hits(claim, stamped, _NOW)]
+
+    def test_a_faithful_quote_across_another_axis_name_is_not_flagged(self) -> None:
+        self.assertEqual(self._hits(self._CROSSED, timedelta(seconds=10)), [],
+                         "13% 是 session 的值、錨點也在——正確引述不得被唸成找不到錨點")
+
+    def test_each_axis_followed_by_its_own_percent_binds_as_before(self) -> None:
+        claim = "kind=session 13% 剩 128 分鐘；kind=seven_day 95% 剩 988 分鐘"
+        self.assertEqual(self._hits(claim, None),
+                         [("session", "13", "unanchored"), ("seven_day", "95", "unanchored")])
+        self.assertEqual(self._hits(claim, timedelta(seconds=10)), [])
+
+    def test_a_reading_that_really_has_no_anchor_is_still_flagged_with_its_own_axis(self) -> None:
+        self.assertEqual(self._hits(self._CROSSED, None), [("session", "13", "unanchored")],
+                         "錨不到的真讀數必須仍被點名，而且綁到它自己的軸")
+
+    def test_a_stale_reading_across_another_axis_name_is_still_stale(self) -> None:
+        self.assertEqual(self._hits(self._CROSSED, timedelta(hours=4)),
+                         [("session", "13", "stale")],
+                         "綁錯軸會讓四小時前的真讀數被降級成 unanchored（漏判）")
+
+
 class TestTheUnanchoredBlindSpotIsCountedNotHidden(unittest.TestCase):
     """M7：「錨不到＝放行」製造反向誘因（照實引述舊數字被唸、憑空捏一個不會）。
 

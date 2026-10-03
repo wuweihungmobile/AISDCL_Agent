@@ -7292,8 +7292,11 @@ class OrphanModeWatchTest(unittest.TestCase):
         self.tmp = _tmpdir(self, "orphan-watch-")
         self.transcript = self.tmp / "sid-orphan.jsonl"
         self.log = self.tmp / "trail.jsonl"
-        os.environ[endurance_env.TRACE_DIR_ENV] = str(self.tmp / "traces")
-        self.addCleanup(os.environ.pop, endurance_env.TRACE_DIR_ENV, None)
+        # DEF-200-464：還原原值而非 pop（pop 會把圍籬釘的 TRACE_DIR 一併吃掉）
+        trace_env = unittest.mock.patch.dict(
+            os.environ, {endurance_env.TRACE_DIR_ENV: str(self.tmp / "traces")})
+        trace_env.start()
+        self.addCleanup(trace_env.stop)
 
     def _write_main(self) -> None:
         self.transcript.write_text(json.dumps({
@@ -7451,8 +7454,11 @@ class NotifyQueueRedeliveryTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = _tmpdir(self, "notify-queue-")
         self.log = self.tmp / "trail.jsonl"
-        os.environ[endurance_env.TRACE_DIR_ENV] = str(self.tmp / "traces")
-        self.addCleanup(os.environ.pop, endurance_env.TRACE_DIR_ENV, None)
+        # DEF-200-464：還原原值而非 pop（pop 會把圍籬釘的 TRACE_DIR 一併吃掉）
+        trace_env = unittest.mock.patch.dict(
+            os.environ, {endurance_env.TRACE_DIR_ENV: str(self.tmp / "traces")})
+        trace_env.start()
+        self.addCleanup(trace_env.stop)
         # 佇列本身只在使用者**已開啟**桌面通知時才有意義（`queue_notify()` 對
         # `NOTIFY_ENV` 未設一律短路，避免每一支從未設過這個變數的既有測試都把
         # 記錄寫進真的 `endurance_env.trace_dir()`——本輪落地當回合真的撞見過）。
@@ -8251,8 +8257,11 @@ def _TRACE_ISOLATION(test: unittest.TestCase) -> tuple:  # noqa: N802 — 與同
     """
     # WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
     # cbg _TRACE_ISOLATION 共用格沿革 WHY〉節。
-    os.environ[endurance_env.TRACE_DIR_ENV] = str(test.tmp / "traces")
-    test.addCleanup(os.environ.pop, endurance_env.TRACE_DIR_ENV, None)
+    # DEF-200-464：還原原值而非 pop（pop 會把圍籬釘的 TRACE_DIR 一併吃掉）
+    trace_env = unittest.mock.patch.dict(
+        os.environ, {endurance_env.TRACE_DIR_ENV: str(test.tmp / "traces")})
+    trace_env.start()
+    test.addCleanup(trace_env.stop)
     return (("quota_trace_path", lambda: test.tmp / "trace.jsonl"),
             ("degraded_stamp_path", lambda source: test.tmp / f"stamp-{source}"),
             ("refresh_stamp_path", lambda: test.tmp / "refresh.stamp"),

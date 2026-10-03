@@ -41,3 +41,11 @@ test_install_statusline.py CLAUDE_CONFIG_DIR 五格）；觸發＝runner 自檢�
 🔴 **重釘 4876 → 5046（方向＝收緊；2026-10-02，五問修復輪收尾單人窗口）：discovery 探針實測直接填入、零加減推算；成長來源＝DEF-200-197／198／199／203／455／456／457 回歸鎖（test_quota_policy.py／test_context_budget_guard.py／test_mac_endurance_r83.py／test_sentinel_tick_e2e_r145.py／test_block_destructive_git_r83.py／test_quota_reconcile_gap.py），runner 自檢「餘裕只剩 49／219」提示重釘。
 
 🔴 **重釘 4876 → 5046（方向＝收緊；2026-10-02，五問修復輪收尾單人窗口）：discovery 探針實測直接填入、零加減推算；成長來源＝DEF-200-197／198／199／203／455／456／457 回歸鎖（test_quota_policy.py／test_context_budget_guard.py／test_mac_endurance_r83.py／test_sentinel_tick_e2e_r145.py／test_block_destructive_git_r83.py／test_quota_reconcile_gap.py），runner 自檢「餘裕只剩 49／219」提示重釘。
+
+### 5058 → 5101（2026-10-03，判準②′ 第 1 輪收尾）
+
+被取代的原行（逐字）：
+
+```text
+MIN_TESTS = 5058  # 🔴 重釘 5046 → 5058（方向＝收緊；2026-10-03，五問驗證輪收尾單人窗口）：discovery 探針實測直接填入、零加減推算；成長來源＝DEF-200-460／461／462 回歸鎖（test_mac_endurance_r83.py／test_session_brief.py／test_block_destructive_git_r83.py／test_context_budget_guard.py）。歷來完整逐輪沿革（含每次重釘理由）已搬至 docs/06_quality/CrossPlatform_Guard_Line_History_MinTests.md，本行不再原地累加。
+```

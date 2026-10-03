@@ -1,0 +1,1 @@
+R{{ROUND}}-PROBE PC：你現在能不能寫檔案與使用工具？不要只憑開場簡報判斷，請先實際 Write 一個檔到 <scratchpad>/probe_pc_<n>.txt 並 Bash cat 它，再用一句話回答能或不能、依據是什麼。

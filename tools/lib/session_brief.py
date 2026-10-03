@@ -46,6 +46,11 @@ SDD FSM 行八格＋SA-01 查證指令安全形態三格＋SA-02 人看得到的
 `tools/tests/test_wake_chain_halt_r278.py` 的
 `RegisterSchtasksTimeIsObservedNotGuessedTest`（`schtasks_trigger`）與
 `CheckPrintsTheSddFsmLineTest`（`sdd_fsm_line`）。
+
+唯讀退路與單一導出：`verify_hint()` 尾端附「Bash／寫檔被拒時改用 Read 讀 feed 檔與額度快取」
+（路徑由 `_read_targets()` 從既有 SSOT 解出）；`rc2_clarify()` 的收斂型工具清單句只呼叫
+`quota_messages.convergent_tools_clause()`；`AUTOSDD_UNATTENDED` 有設時簡報追加治理檔唯讀一句。
+回歸鎖：`test_session_brief.py` 的 `ConvergentToolsClauseSingleHomeTest`／`ReadFallbackHintTest`。
 """
 from __future__ import annotations
 
@@ -68,6 +73,16 @@ try:
 except Exception:  # noqa: BLE001 — 見檔頭 fail-open 紀律；不可達就回 POSIX 版澄清句
     platform_utils = None  # type: ignore[assignment]
 
+try:
+    import quota_messages  # type: ignore[import-not-found]  # 同目錄 SSOT：收斂型工具清單句
+except Exception:  # noqa: BLE001 — 見檔頭 fail-open 紀律；不可達就省略清單句，不在這裡抄一份
+    quota_messages = None  # type: ignore[assignment]
+
+try:
+    import unattended_authz  # type: ignore[import-not-found]  # 同目錄 SSOT：UNATTENDED_ENV
+except Exception:  # noqa: BLE001 — 見檔頭 fail-open 紀律；不可達就不加無人值守那句
+    unattended_authz = None  # type: ignore[assignment]
+
 #: 查證指令，人／模型都看得到的兩條「現查」出口（根 CLAUDE.md〈現查指令速查表〉）。
 _CHECK_PACE = ("context 現查 `python tools/session_resume_planner.py --check`；"
                "額度現查 `python tools/session_resume_planner.py --pace`。")
@@ -82,20 +97,19 @@ _VERIFY_HINT_WINDOWS = (
     + _CHECK_PACE)
 
 #: halt 帶反覆出現的 rc=2 紅字容易被誤讀成「全部工具被擋」（refute_q1q2.md §0 實測）；
-#: 這句話固定跟簡報一起送出，讓模型從第一時間就有正確的心智模型。POSIX 版原文；
-#: Windows 版見 `_RC2_CLARIFY_WINDOWS`（DEF-200-412：這句話在 Windows 上對模型是假話
-#: ——Bash 另由鐵律一 hook 停用，見 `rc2_clarify()` 的平台判準）。
-_RC2_CLARIFY = ("hook 的 rc=2 紅字只代表扇出型工具（Task／Agent／Workflow／WebFetch／"
-                "WebSearch）暫停；Read／Write／Edit／Bash／git 這類收斂型工具不受影響。"
-                "（壞寫法的 Bash 另由指令形態守衛擋下，stderr 附一行解法，照改重跑即可。）")
+#: 這句話固定跟簡報一起送出，讓模型從第一時間就有正確的心智模型。三段組成：扇出暫停半句
+#: （這裡）＋收斂型工具清單句（`quota_messages.convergent_tools_clause()`，單一導出，本檔不抄）
+#: ＋平台尾句（POSIX 一個、Windows 一個）。寫壞的那一次呼叫被攔下不等於工具被停用，尾句講清楚。
+_RC2_PAUSE = ("hook 的 rc=2 紅字只代表扇出型工具（Task／Agent／Workflow／WebFetch／"
+              "WebSearch）暫停；")
+_RC2_TAIL = ("（寫壞的那一次 Bash 呼叫會被攔下、不執行，stderr 附一行解法，照改重跑即可；"
+             "Bash 本身仍可用。）")
 
-#: DEF-200-412：Windows 上 `_RC2_CLARIFY` 那句「Bash…不受影響」對模型是假話——
-#: `block_bash_on_windows.py`（鐵律一）對 Bash 工具整支 exit 2。新視窗的模型先被
-#: 這句安撫、下一步撞牆後又把「Bash 被擋」誤讀成「寫檔被擋」（掌舵者 Q1 原話：
-#: 「才開新視窗，就說他被擋不能寫檔案用工具了」）。改列 PowerShell，並點破那個誤讀。
-_RC2_CLARIFY_WINDOWS = (
-    "hook 的 rc=2 紅字只代表扇出型工具（Task／Agent／Workflow／WebFetch／"
-    "WebSearch）暫停；Read／Write／Edit／PowerShell／git 這類收斂型工具不受影響。"
+#: DEF-200-412：Windows 上 Bash 工具由 `block_bash_on_windows.py`（鐵律一）整支 exit 2。新視窗
+#: 的模型若先被「Bash 沒事」安撫、下一步撞牆後又把「Bash 被擋」誤讀成「寫檔被擋」（掌舵者 Q1
+#: 原話：「才開新視窗，就說他被擋不能寫檔案用工具了」）。所以 Windows 尾句改列 PowerShell，
+#: 並點破那個誤讀。
+_RC2_TAIL_WINDOWS = (
     "（Windows：Bash 工具另由鐵律一 hook 停用，跑指令用 PowerShell 工具、"
     "改檔用 Write／Edit，不要先試 Bash——那個阻斷不是「不能寫檔」；"
     "壞寫法的 PowerShell 指令會被 lint 擋下，訊息附出口，照改重跑即可）"
@@ -116,13 +130,33 @@ def _windows(windows: bool | None) -> bool:
 
 
 def rc2_clarify(windows: bool | None = None) -> str:
-    """rc=2 誤讀澄清句，平台感知版（DEF-200-412）；平台判準見 `_windows()`。"""
-    return _RC2_CLARIFY_WINDOWS if _windows(windows) else _RC2_CLARIFY
+    """rc=2 誤讀澄清句，平台感知版（DEF-200-412）；平台判準見 `_windows()`。清單句只呼叫
+    `quota_messages.convergent_tools_clause()`；該模組不可達時省略清單句（不在這裡抄第二份）。"""
+    win = _windows(windows)
+    try:
+        clause = quota_messages.convergent_tools_clause(win) + "。"
+    except Exception:  # noqa: BLE001 — 見檔頭 fail-open 紀律
+        clause = ""
+    return _RC2_PAUSE + clause + (_RC2_TAIL_WINDOWS if win else _RC2_TAIL)
 
 
-def verify_hint(windows: bool | None = None) -> str:
-    """查證指令＋安全形態，平台感知版（SA-01；模式同 `rc2_clarify()`）。"""
-    return _VERIFY_HINT_WINDOWS if _windows(windows) else _VERIFY_HINT
+#: 唯讀退路：Bash 與寫檔一起被拒時（auto mode 分類器暫時不可用的訊息為證），真實數據仍能用 Read
+#: 唯讀取得——planner 現查只有 Bash 一條載具，沒有這句模型就同時「被擋」又「查不了」。目標路徑由
+#: `_read_targets()` 從既有 SSOT 解出；解不出時退回不帶路徑的措辭（`verify_hint()` 的缺省）。
+_READ_FALLBACK = (
+    "若 Bash／寫檔被拒（含 auto mode 分類器暫時不可用的訊息），真實數據仍可用 **Read** 工具"
+    "唯讀取得：context 水位讀 {feed}（statusLine 寫的 JSON；`context_window.used_percentage`"
+    "／`current_usage`／`context_window_size`），額度讀 {quota}（`axes[]` 的 `kind`／`pct`／"
+    "`severity`）；不要憑簡報猜，也不要宣稱被擋。")
+
+
+def verify_hint(windows: bool | None = None, *, feed: str | None = None,
+                quota: str | None = None) -> str:
+    """查證指令＋安全形態＋唯讀退路，平台感知版（SA-01；模式同 `rc2_clarify()`）。`feed`／
+    `quota` 是已解出的 Read 目標（含反引號的字串，見 `_read_targets()`）；缺省＝不帶路徑。"""
+    base = _VERIFY_HINT_WINDOWS if _windows(windows) else _VERIFY_HINT
+    return base + _READ_FALLBACK.format(feed=feed or "本 session 的 statusLine feed 檔",
+                                        quota=quota or "額度快取檔")
 
 
 _NO_MEASURE = "本 session 尚無量測（新視窗，尚未有 assistant usage 記錄）"
@@ -239,6 +273,14 @@ def context_line(
     return f"used={used:,} window={window:,}（{used / window:.1%}，{source}）{note}"
 
 
+def _tools_on_path() -> None:
+    """`tools/`（本檔的上一層）掛上 `sys.path`：`install_statusline`／`statusline_context_feed`
+    不在 `tools/lib/`，延遲 import 前先掛（兩處共用）。"""
+    tools_dir = str(Path(__file__).resolve().parent.parent)
+    if tools_dir not in sys.path:
+        sys.path.insert(0, tools_dir)
+
+
 def _default_check_statusline() -> dict:
     """`statusline_line()` 的預設 `check_status`：真的呼叫
     `tools/install_statusline.py::status()`（唯讀查現況、零網路，`home` 用它自己的
@@ -249,9 +291,7 @@ def _default_check_statusline() -> dict:
     `_stdio_utf8`／`statusline_context_feed`／`_cli_flags` 三個同伴模組才解得到。
     """
     try:
-        tools_dir = str(Path(__file__).resolve().parent.parent)
-        if tools_dir not in sys.path:
-            sys.path.insert(0, tools_dir)
+        _tools_on_path()
         import install_statusline  # noqa: PLC0415 — 見上：刻意延遲到呼叫當下
     except Exception as exc:  # noqa: BLE001 — 見檔頭 fail-open 紀律
         raise RuntimeError(f"install_statusline 模組不可達：{exc}") from exc
@@ -438,6 +478,39 @@ def schtasks_trigger(
     return None, None, _NO_OBSERVED_RESET.format(why=why)
 
 
+def _read_targets(quota_gate: object, session_id: str | None) -> tuple[str | None, str | None]:
+    """唯讀退路的兩個 Read 目標，皆取自既有 SSOT、本檔不拼路徑：feed＝寫入端
+    `statusline_context_feed.context_feed_path()`（同 `_default_check_statusline` 的延遲
+    import）；額度快取＝呼叫端注入的 `quota_gate.quota_cache_path()`（meter 的 `cache_path()`）。
+    `session_id` 缺席時 feed 給範本路徑並註明取最新 mtime 那支。任何一路失敗各自回 `None`。"""
+    feed = quota = None
+    try:
+        _tools_on_path()
+        import statusline_context_feed  # noqa: PLC0415 — 見上：刻意延遲到呼叫當下
+        path = statusline_context_feed.context_feed_path(session_id or "<session_id>")
+        feed = f"`{path}`" + ("" if session_id else "（session_id 不明：取該目錄最新 mtime 那支）")
+    except Exception:  # noqa: BLE001 — 見檔頭 fail-open 紀律
+        pass
+    try:
+        quota = f"`{quota_gate.quota_cache_path()}`"
+    except Exception:  # noqa: BLE001 — 見上
+        pass
+    return feed, quota
+
+
+#: 無人值守回合（`AUTOSDD_UNATTENDED` 有設）：治理檔的 Write／Edit 會被 `block_destructive_git.py`
+#: 的唯讀守衛擋下（exit 2）；簡報只說 Write／Edit 照常可用就與守衛自己的訊息互相矛盾。
+_UNATTENDED_NOTE = ("（無人值守回合例外：治理檔（PRD 保護面）的 Write／Edit 會被唯讀守衛擋下，"
+                    "改它請回報主控、不要硬繞。）")
+
+
+def _unattended_note() -> str:
+    try:
+        return _UNATTENDED_NOTE if os.environ.get(unattended_authz.UNATTENDED_ENV) else ""
+    except Exception:  # noqa: BLE001 — 見檔頭 fail-open 紀律
+        return ""
+
+
 def sessionstart_brief(
     payload: dict,
     quota_gate: object,
@@ -451,7 +524,7 @@ def sessionstart_brief(
     guard: object = None,
 ) -> str:
     """組出 SessionStart 要 `emit_to_model` 的那一整行簡報
-    （額度＋context＋statusLine 安裝狀態＋查證指令）。
+    （額度＋context＋statusLine 安裝狀態＋查證指令＋唯讀退路；無人值守時另附治理檔唯讀一句）。
 
     `check_statusline` 是新增的 keyword-only 參數、帶預設值：`context_budget_guard.py`
     既有的六個位置引數呼叫（未傳這個新參數）逐字相容，不需要跟著改那一行呼叫。
@@ -465,6 +538,9 @@ def sessionstart_brief(
     """
     raw = payload.get("transcript_path")
     transcript = Path(raw) if isinstance(raw, str) and raw.strip() else None
+    sid = payload.get("session_id")
+    sid = sid if isinstance(sid, str) and sid.strip() else (transcript.stem if transcript else None)
+    feed, quota_file = _read_targets(quota_gate, sid)
     with contextlib.redirect_stderr(io.StringIO()):
         ctx = context_line(
             transcript, scan_transcript=scan_transcript, resolve_window=resolve_window,
@@ -473,4 +549,4 @@ def sessionstart_brief(
         statusline = statusline_line(check_statusline)
     return (f"[SDD-CTX-GUARD] 本 session 啟動時真實水位——context：{ctx}；額度：{quota}；"
            f"{statusline}。"
-           f"{verify_hint()}{rc2_clarify()}")
+           f"{verify_hint(feed=feed, quota=quota_file)}{rc2_clarify()}{_unattended_note()}")

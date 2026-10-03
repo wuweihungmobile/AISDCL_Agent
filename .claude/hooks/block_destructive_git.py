@@ -146,10 +146,13 @@ mac 清掉的檔案與 Windows 一模一樣，而事故就發生在 macOS——�
 · **判準④（管線尾節遮蔽 rc）只認指令字串字面**（DEF-200-086）：看不到 `-c` operand／
   `ssh host '…'` 內的管線、`sudo tail`／`xargs` 這類前綴包裝、zsh 的 `$status`、`$?` 之前
   隔了別的指令（那讀的是別人的 rc）、函式／`trap` 內的讀取，更看不到**背景工作完成通知
-  的 exit code**（不在任何指令字串裡）。豁免是**整條指令**粒度：任一處有 `PIPESTATUS`／
-  `pipefail` 就不判，一句用對、另一句用錯會漏——此為漏擋方向。誤擋方向：白名單濾器以
-  `exit` 傳有語意的 rc（`sort -c`／`awk '{exit N}'`／`sed '/x/q1'`）照樣命中，走
-  `# waitform-ok:`。
+  的 exit code**（不在任何指令字串裡）。豁免是**整條指令**粒度：任一處有小寫 `pipestatus`／
+  `pipefail`（大寫 `PIPESTATUS` 只在殼不是 zsh 時算）就不判，一句用對、另一句用錯會漏——
+  此為漏擋方向。誤擋方向：白名單濾器以 `exit` 傳有語意的 rc（`sort -c`／
+  `awk '{exit N}'`／`sed '/x/q1'`）照樣命中，走 `# waitform-ok:`。
+  zsh 一格（殼由 `SHELL` 判，缺席且 darwin ⇒ zsh）只認**執行面**的大寫 `$PIPESTATUS`／
+  `${PIPESTATUS…}` 讀取；誤擋：餵給 bash 的 heredoc body 內它其實有效，走
+  `# waitform-ok:`；漏擋：工具殼是 zsh 而 `SHELL` 不是（login 殼與工具殼不同時）。
 · **引號失同步（SD-11）**：`mask_inert()` 判字串收尾時認得 `"…"` 內的 `$( … )`（巢狀引號／
   heredoc／括號深度；超過 `_NEST_MAX` 層或掃不成就退回平掃），引號外的反斜線跳過下一字元，並在
   任何字串掃到 EOF 仍未收尾時，以「字串不跨行」的第二視圖聯集補判。修前漏判、已修：
@@ -415,6 +418,11 @@ def argv_git_fragments(command: str) -> str:
 
 #: `$?`／`${?}` 的讀取（`\$?` 逃脫與 `$$?`〔PID ＋ glob〕不算）。
 _STATUS_READ_RE = re.compile(r"(?<![\\$])\$(?:\?|\{\?\})")
+#: 大寫 `$PIPESTATUS`／`${PIPESTATUS…}`／`${#PIPESTATUS…}` 的讀取（區分大小寫，逃脫同上）。
+#: zsh 沒有這個名字：判準④的 zsh 一格在遮蔽面上用它找讀取。
+_PIPESTATUS_READ_RE = re.compile(r"(?<![\\$])\$(?:\{#?)?PIPESTATUS\b")
+#: `mask_inert(keep_status=True)` 在雙引號內原樣保留的讀取＝上面兩者的聯集。
+_KEPT_READS_RE = re.compile(f"{_STATUS_READ_RE.pattern}|{_PIPESTATUS_READ_RE.pattern}")
 
 
 #: `"…"` 內 `$( … )` 巢狀掃描的深度上限：超過就當掃不成、退回平掃。不設上限時，病態輸入的
@@ -501,9 +509,9 @@ def mask_inert(text: str, *, keep_comments: bool = False,
     `keep_comments=True`：註解**原樣保留**、字串照樣遮。只有行內豁免偵測在用——它要的
     正是「這個標記住在真註解裡，不是住在一段被引號包起來的資料裡」。
 
-    `keep_status=True`（判準④，DEF-200-086）：**雙引號**字串內的 `$?`／`${?}` 原樣保留
-    ——`echo "rc=$?"` 的 `$?` 會被殼展開，整段遮掉就看不見最常見的讀法；單引號內不展開，
-    照遮。
+    `keep_status=True`（判準④，DEF-200-086）：**雙引號**字串內的 `$?`／`${?}`／大寫
+    `$PIPESTATUS`／`${PIPESTATUS…}` 原樣保留——`echo "rc=$?"` 的 `$?` 會被殼展開，整段遮掉
+    就看不見最常見的讀法；單引號內不展開，照遮。
 
     🔴 **兩個視圖的聯集**（SD-11）：先在正常視圖遮一次；若有字串掃到 EOF 仍未收尾（＝失同步，
     修前會把 EOF 前全遮）就再用「字串不跨行」的視圖遮一次，任一視圖看得見的字元就算看得見
@@ -564,7 +572,7 @@ def _mask_pass(text: str, keep_comments: bool, keep_status: bool,
                 j = lim
             blank(i, min(j + 1, n))
             if keep_status and ch == '"':
-                for m in _STATUS_READ_RE.finditer(text, i, j):
+                for m in _KEPT_READS_RE.finditer(text, i, j):
                     out[m.start():m.end()] = m.group()
             i = min(j + 1, n)
             continue
@@ -1061,11 +1069,27 @@ _RCMASK_FILTERS = frozenset({
 #: 讓它的 `&` 不被當成背景運算子；真正的邊界是第 1 個捕獲群。`{`／`}` 刻意不切
 #: （`${?}` 要保持完整）。
 _PIPE_OPS_RE = re.compile(r"[<>]&|&>>?|(\|&|\|\||&&|[|;&\n()`])")
-#: 豁免（指令任一處出現即整條不判）：這三個是 rc **不被**遮蔽的正解，不是遮蔽。
+#: 豁免（指令任一處出現即整條不判）：這三個是 rc **不被**遮蔽的正解，不是遮蔽。例外：大寫
+#: `PIPESTATUS` 在 zsh 殼不算（zsh 沒有它，讀到空字串），見 `waitform_hits` ④。
 _RCMASK_SAFE_RE = re.compile(r"pipestatus|pipe_?fail", re.IGNORECASE)
 #: ④ 命中理由的固定前綴：`main()` 靠它決定頁尾附哪一份（只有 ④ 時不附等待機制那份
-#: 長篇指引）。
+#: 長篇指引）。`_RCZSH_TAG`＝同一判準的 zsh 一格（讀大寫 `PIPESTATUS`），同樣只有 ④。
 _RCPIPE_TAG = "管線尾節是 rc 遮蔽型濾器"
+_RCZSH_TAG = "zsh 沒有大寫 `PIPESTATUS`"
+_RCZSH_HIT = (_RCZSH_TAG + "：`${PIPESTATUS[…]}` 在 zsh（本機 Bash 工具殼）展開成**空字串**，讀到的"
+              "不是 rc——表徵與成功相同（DEF-200-086）。bash 才有大寫；zsh 的陣列叫小寫 "
+              "`pipestatus`、下標從 1 起（`${pipestatus[1]}`）。正解：先導檔再讀 rc——"
+              "`cmd > /tmp/o.log 2>&1; echo rc=$?; tail -5 /tmp/o.log`")
+
+
+def _tool_shell_is_zsh(env: dict[str, str] | None = None, platform: str | None = None) -> bool:
+    """Bash 工具的殼是不是 zsh（純函式；`env`／`platform` 可注入，缺省取行程環境與
+    `sys.platform`）。`SHELL` 的 basename 恰為 `zsh` ⇒ 是；`SHELL` 缺席（或空）才看平台：
+    darwin 的預設殼是 zsh。其餘一律否——bash／未知殼維持放行（寧可漏擋，不誤擋）。"""
+    shell = (os.environ if env is None else env).get("SHELL", "")
+    if shell:
+        return re.split(r"[\\/]", shell)[-1] == "zsh"
+    return (sys.platform if platform is None else platform) == "darwin"
 
 
 def _fold(command: str, *, quoted: bool = False, keep_status: bool = False) -> str:
@@ -1213,14 +1237,19 @@ def waitform_hits(command: str, *, run_in_background: bool = False,
     · ④ （僅 `tool="Bash"`；DEF-200-086）管線**尾節**是 rc 遮蔽型濾器（`tail`／`head`／
       `tee`／`sed`／`awk`／`cut`／`sort`／`uniq`／`wc`／`cat`／`tr`／`column`／`less`／
       `more`），且**緊接的下一個指令**讀 `$?`／`${?}`：讀到的是濾器的 rc，不是前面指令
-      的。豁免：指令內任一處有 `PIPESTATUS`／`pipestatus`／`pipefail`（行內
-      `# waitform-ok:` 走 `main()` 的共用豁免）。🔴 刻意**不判** `grep`／`rg`／`test`／
-      `jq`（rc 有語意，`ls | grep x; echo $?` 合法）與「只有管線、沒讀 rc」。PowerShell
-      側的 `$LASTEXITCODE` 另由 `lint_powershell_command.py` 守。
+      的。豁免：指令內任一處有小寫 `pipestatus`／`pipefail`，或大寫 `PIPESTATUS`（僅殼
+      不是 zsh 時；行內 `# waitform-ok:` 走 `main()` 的共用豁免）。🔴 刻意**不判**
+      `grep`／`rg`／`test`／`jq`（rc 有語意，`ls | grep x; echo $?` 合法）與「只有管線、
+      沒讀 rc」。PowerShell 側的 `$LASTEXITCODE` 另由 `lint_powershell_command.py` 守。
+      🔴 **zsh 一格**：殼是 zsh（`_tool_shell_is_zsh()`）且無小寫／`pipefail` 時，**執行面**
+      讀大寫 `$PIPESTATUS`／`${PIPESTATUS…}`（雙引號內照樣展開；單引號、反斜線逃脫、非殼
+      heredoc 是資料）也命中——zsh 沒有這個名字，讀到空字串，與管線尾節是誰無關。
       🔴 **誤擋方向的劃界**：白名單內的濾器若以 `exit` 傳**有語意的 rc** 也會被擋——
       `sort -c`（未排序回 1）、`awk '{exit 3}'`、`sed '/x/q1'`——判準分不出濾器自己的 rc
-      語意（transcripts 母體零例）。出口：行內 `# waitform-ok: <WHY>`（理由必填；
-      `AUTOSDD_UNATTENDED` 有設時無效），或改讀 `${PIPESTATUS[0]}`。
+      語意（transcripts 母體零例）；餵給 bash 的 heredoc body 內的大寫 `PIPESTATUS` 其實
+      有效，zsh 一格仍會擋。出口：行內 `# waitform-ok: <WHY>`（理由必填；
+      `AUTOSDD_UNATTENDED` 有設時無效），或改讀 `${PIPESTATUS[0]}`（bash）／
+      `${pipestatus[1]}`（zsh）。
 
     🔴 `wait` 豁免（全指令任一處出現即成立）**只罩 ①③、不罩 ②④**——`until ! pgrep …` 的
     死鎖與有沒有 `wait` 無關。這個不對稱是實作逐字的形狀（①③ 住在 `if not waited:` 內、
@@ -1265,9 +1294,14 @@ def waitform_hits(command: str, *, run_in_background: bool = False,
                  f"改成字元類自我否定：`{operand[:1]}[{operand[1:2] or '_'}]{operand[2:]}` "
                  f"這種形態（只否定自己、不減損鑑別力）"] = None
 
-    if tool == "Bash" and not _RCMASK_SAFE_RE.search(command):
-        name = _rcmask_filter(_fold(command, keep_status=True))
-        if name:
+    zsh = _tool_shell_is_zsh()
+    # 豁免標記：大寫 `PIPESTATUS` 只在殼不是 zsh 時算；小寫 `pipestatus` 與 `pipefail` 一律算
+    safe = [m for m in _RCMASK_SAFE_RE.findall(command) if not (zsh and m == "PIPESTATUS")]
+    if tool == "Bash" and not safe:
+        view = _fold(command, keep_status=True)
+        if zsh and _PIPESTATUS_READ_RE.search(view):
+            hits[_RCZSH_HIT] = None
+        elif name := _rcmask_filter(view):
             hits[f"{_RCPIPE_TAG}：`… | {name}` 之後讀 `$?`，讀到的是 `{name}` 的 rc、"
                  f"不是前面那條指令的——前面失敗會被整個吃掉（`sh -c 'exit 7' | tail -1; "
                  f"echo $?` 印 0），表徵與成功相同（DEF-200-086）。正解：先導檔再讀 "
@@ -1289,10 +1323,17 @@ _WAITFORM_HEADER = (
     "  本次命中：\n"
 )
 # SA-01：④ 單獨命中時首行就給解法——正解曾埋在第三段，新視窗被擋後要讀完才找得到出口。
+# 首行先講主語：前面還有 harness 加的 hook error 前綴，無主語的「已擋下」會被讀成「Bash 被擋」。
+_RC_NOT_RUN = "🔴 這一次呼叫沒有執行（只擋這條指令字串，Bash／Write／Edit 本身都能用）："
 _RCPIPE_LEAD = (
-    "🔴 已擋下：`… | head`／`… | tail` 之後讀 `$?`，讀到的是 head／tail 的 rc。"
+    _RC_NOT_RUN + "`… | head`／`… | tail` 之後讀 `$?`，讀到的是 head／tail 的 rc。"
     "正解：`cmd > /tmp/o.log 2>&1; echo rc=$?; tail -n 20 /tmp/o.log`"
     "（輸出很短就直接跑，別接管線；鐵律六／`DEF-200-086`）\n"
+)
+_RCZSH_LEAD = (
+    _RC_NOT_RUN + "`${PIPESTATUS[0]}` 在 zsh（本機 Bash 工具殼）展開成空字串，讀到的不是 rc。"
+    "zsh 要寫 `${pipestatus[1]}`（下標從 1 起）；最穩："
+    "`cmd > /tmp/o.log 2>&1; echo rc=$?; tail -n 20 /tmp/o.log`（鐵律六／`DEF-200-086`）\n"
 )
 _WAITFORM_FOOTER = (
     "\n"
@@ -1316,7 +1357,7 @@ _RCPIPE_FOOTER = (
     "  本判準只認**尾節**是 tail／head／tee／sed／awk／cut／sort／uniq／wc／cat／\n"
     "  tr／column／less／more 的管線，且**緊接**的下一個指令讀 `$?`；`grep`／`rg`／\n"
     "  `test`／`jq` 這類 rc 有語意的濾器**不判**，指令內有 `PIPESTATUS`／`pipestatus`／\n"
-    "  `pipefail` 也放行。\n"
+    "  `pipefail` 也放行（zsh 殼例外：只有大寫 `PIPESTATUS` 不算，zsh 沒有它）。\n"
     "\n"
     "  真的確定要這樣寫？在指令內加行內豁免 `# waitform-ok: <理由>`（理由必填）。\n"
 )
@@ -1436,8 +1477,8 @@ _GOVWRITE_BLOCK_MSG = (
     "  本條刻意沒有行內豁免；人的出口＝啟動 claude 前設 " + GOVWRITE_OFF_ENV + "。\n")
 _GOVWRITE_NOTE_MSG = (
     "[block_destructive_git] 提醒：{rel} 是治理檔（PRD §15.5 紅線 10 保護面）。"
-    "這只是提醒，這次寫入已放行（有人值守 ⇒ 只出聲不阻斷）；"
-    "無人值守回合對它是唯讀的，改完請跑對應守衛測試。")
+    "這次寫入會照常執行、不需處理（有人值守只提醒）；"
+    "只有無人值守（AUTOSDD_UNATTENDED）的回合才會擋這類檔，改完請跑對應守衛測試。")
 
 
 def govwrite_hit(tool_input: object) -> str | None:
@@ -1574,8 +1615,9 @@ def main() -> int:
             message += (_HEADER + "".join(f"   · {h}\n" for h in hits)
                         + (_UNATTENDED_NOTE if unattended else _FOOTER))
         if wait_hits:
-            rc_only = all(h.startswith(_RCPIPE_TAG) for h in wait_hits)
-            message += ((_RCPIPE_LEAD if rc_only else "") + _WAITFORM_HEADER
+            rc_only = all(h.startswith((_RCPIPE_TAG, _RCZSH_TAG)) for h in wait_hits)
+            lead = _RCZSH_LEAD if any(h.startswith(_RCZSH_TAG) for h in wait_hits) else _RCPIPE_LEAD
+            message += ((lead if rc_only else "") + _WAITFORM_HEADER
                         + "".join(f"   · {h}\n" for h in wait_hits)
                         + (_WAITFORM_UNATTENDED_NOTE if unattended
                            else _RCPIPE_FOOTER if rc_only else _WAITFORM_FOOTER))

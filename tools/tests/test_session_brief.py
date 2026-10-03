@@ -2,7 +2,9 @@
 """`tools/lib/session_brief.py` 的回歸鎖（R158／P6：四象限——額度〈有／無快取〉× round-label-ok
 context〈有／無 usage〉，量不到就照實說；ctx5 輪另補 G1（statusLine 安裝狀態三格＋
 feed reason 兩格）與 G2（stale-cache 追加文案兩格）。接線面另見
-`test_context_budget_guard.py::HandbackSessionStartAnnounceTest`。"""
+`test_context_budget_guard.py::HandbackSessionStartAnnounceTest`。
+另收 `tools/session_gate_acceptance.py`（單一指令驗收）的回歸鎖：它只重用簡報的函式，
+且 `tools/tests` 檔數壓線，故併在本檔而不另開新檔。"""
 from __future__ import annotations
 
 import contextlib
@@ -22,8 +24,10 @@ from unittest import mock
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
 import quota_gate  # noqa: E402
+import quota_messages as qm  # noqa: E402
 import quota_policy  # noqa: E402
 import session_brief as sb  # noqa: E402
+import unattended_authz  # noqa: E402
 
 _NOW = datetime(2026, 9, 20, 1, 0, 0, tzinfo=UTC)
 #: 簡報給的安裝指令形狀：POSIX `"<直譯器>" "<腳本>"`、Windows `& '<直譯器>' '<腳本>'`
@@ -235,11 +239,11 @@ class Rc2ClarifyTest(unittest.TestCase):
         self.assertIn("鐵律一 hook 停用", got)
         self.assertNotIn("／Bash／", got, "Windows 版不該再教 Bash 這個已被停用的載具")
 
-    def test_posix_variant_is_unchanged(self) -> None:
-        self.assertEqual(
-            sb.rc2_clarify(windows=False), sb._RC2_CLARIFY,
-            "POSIX 版必須逐字等於既有 `_RC2_CLARIFY`——不得順手改動 mac/Linux 讀到的句子",
-        )
+    def test_posix_variant_is_the_pause_half_plus_the_single_clause(self) -> None:
+        got = sb.rc2_clarify(windows=False)
+        self.assertTrue(got.startswith(sb._RC2_PAUSE), got)
+        self.assertIn(qm.convergent_tools_clause(False) + "。", got)
+        self.assertNotIn("PowerShell", got, "POSIX 版不該提 Windows 的載具")
 
 
 class VerifyHintTest(unittest.TestCase):
@@ -266,7 +270,8 @@ class VerifyHintTest(unittest.TestCase):
                 got = sb.sessionstart_brief(
                     {}, _cache_miss_gate(), None, None, None, None, now=_NOW,
                     check_statusline=lambda: {"installed": True})
-            self.assertIn(sb.verify_hint(windows=windows), got)
+            self.assertIn(sb._VERIFY_HINT_WINDOWS if windows else sb._VERIFY_HINT, got)
+            self.assertNotIn(sb._VERIFY_HINT if windows else sb._VERIFY_HINT_WINDOWS, got)
 
 
 class ContextLineTest(unittest.TestCase):
@@ -688,6 +693,23 @@ class SessionstartBriefTest(unittest.TestCase):
         self.assertIn("PowerShell／git", got)
         self.assertIn("鐵律一 hook 停用", got)
 
+    def _cache_miss_brief(self) -> str:
+        return sb.sessionstart_brief(
+            self._payload(None), _cache_miss_gate(),
+            scan_transcript=None, resolve_window=None,
+            window_evidence=None, read_context_feed=None, now=_NOW,
+            check_statusline=self._FAKE_INSTALLED)
+
+    def test_an_unattended_turn_is_told_which_writes_the_guard_blocks(self) -> None:
+        """無人值守時治理檔的 Write／Edit 會被唯讀守衛擋下（exit 2）：簡報若只說 Write／Edit
+        照常可用，就與守衛自己的訊息互相矛盾。互動 session 一律不加這句。"""
+        sentence = "治理檔（PRD 保護面）的 Write／Edit 會被唯讀守衛擋下"
+        with mock.patch.dict(os.environ, {unattended_authz.UNATTENDED_ENV: "1"}):
+            self.assertIn(sentence, self._cache_miss_brief())
+        with mock.patch.dict(os.environ):
+            os.environ.pop(unattended_authz.UNATTENDED_ENV, None)
+            self.assertNotIn(sentence, self._cache_miss_brief())
+
     def _assert_common(self, brief: str) -> None:
         self.assertIn("python tools/session_resume_planner.py --check", brief)
         self.assertIn("python tools/session_resume_planner.py --pace", brief)
@@ -837,6 +859,362 @@ class SessionstartBriefActiveModelTest(unittest.TestCase):
         broken = types.SimpleNamespace(model_family=_boom)
         got = self._brief(self._payload(model="claude-fable-5-1"), guard=broken)
         self.assertEqual(_verdict(got), _decided(None), "guard 壞掉不該讓簡報崩潰或改判")
+
+
+def _halt_decision() -> quota_policy.Decision:
+    """停止水位的真 `decide()` 結果（五小時軸 99%）：組 halt 訊息用，不手捏 Decision。"""
+    state = quota_policy.QuotaState(
+        (quota_policy.Axis("five_hour", 99.0, (_NOW + timedelta(minutes=30)).isoformat()),),
+        _NOW.isoformat(), "cache", "ok")
+    policy, _problems = quota_policy.load_policy({})
+    return quota_policy.decide(state, _NOW, policy)
+
+
+class ConvergentToolsClauseSingleHomeTest(unittest.TestCase):
+    """「收斂型工具清單」那句只有一個導出：`quota_messages.convergent_tools_clause()`。
+
+    立案：同一份清單住在簡報（POSIX／Windows 各一）與 halt 訊息（POSIX／Windows 各一）四個家，
+    其中兩處靠對成句做字串手術（切全形分號、切「，只有扇出型」）衍生——改任一份字面（尤其插入
+    全形分號）就悄悄壞。現在只有函式本體一處持有字面，其餘一律呼叫它。"""
+
+    _LIBS = ("quota_messages.py", "session_brief.py")
+    _PHRASE = "不受影響"
+
+    @staticmethod
+    def _source(name: str) -> str:
+        return (_REPO_ROOT / "tools" / "lib" / name).read_text(encoding="utf-8")
+
+    @staticmethod
+    def _outside_the_def(text: str) -> str:
+        """去掉 `convergent_tools_clause` 的整個本體（到下一行頂格的非空白為止）。"""
+        return re.sub(r"^def convergent_tools_clause\(.*?(?=^\S)", "", text, flags=re.S | re.M)
+
+    @staticmethod
+    def _tools_of(text: str) -> set[str]:
+        found = re.search(r"收斂型工具（([^，）]+)", text)
+        return set(found.group(1).split("／")) if found else set()
+
+    def test_the_phrase_survives_only_inside_the_function_body(self) -> None:
+        inside = 0
+        for name in self._LIBS:
+            text = self._source(name)
+            rest = self._outside_the_def(text)
+            self.assertNotIn(self._PHRASE, rest, f"{name}：函式本體之外又抄了一份")
+            inside += text.count(self._PHRASE) - rest.count(self._PHRASE)
+        self.assertEqual(inside, 1, "字面該恰好只住在函式本體一處")
+
+    def test_the_grep_lock_can_fail(self) -> None:
+        """判準自證：把字面塞回本體之外，鎖就必須看得到。"""
+        text = self._source("quota_messages.py") + "\n# 又抄了一份：不受影響\n"
+        self.assertIn(self._PHRASE, self._outside_the_def(text))
+
+    def test_no_string_surgery_is_left_on_the_composed_sentence(self) -> None:
+        text = self._source("quota_messages.py")
+        for surgery in ('.split("；"', ".partition("):
+            self.assertNotIn(surgery, text)
+
+    def test_the_clause_is_safe_to_compose(self) -> None:
+        for windows in (False, True):
+            clause = qm.convergent_tools_clause(windows)
+            self.assertNotIn("；", clause)
+            self.assertNotIn("，只有", clause)
+            self.assertTrue(clause.endswith(self._PHRASE), clause)
+
+    def test_every_consumer_names_the_same_tools_per_platform(self) -> None:
+        decision = _halt_decision()
+        act = {"plan": "P", "kind": "five_hour", "branch": qm.QUOTA_BRANCH_ARM,
+               "armed": True, "sentinel_off": False, "posix": False}
+        for windows in (False, True):
+            want = self._tools_of(qm.convergent_tools_clause(windows))
+            self.assertIn("git", want)
+            with mock.patch.object(sb.platform_utils, "is_windows", return_value=windows):
+                consumers = {
+                    "簡報": sb.rc2_clarify(),
+                    "halt": qm.halt_convergent_clarification(),
+                    "halt 阻斷": qm.halt_convergent_clarification(event="PreToolUse", tool="Agent"),
+                    "量不到": qm.degraded_convergent_clarification(),
+                    "halt 抬頭": qm.quota_halt_message(decision, act, "PostToolUse", "Read"),
+                }
+            for label, text in consumers.items():
+                with self.subTest(windows=windows, consumer=label):
+                    self.assertEqual(self._tools_of(text), want)
+        self.assertEqual(self._tools_of(qm.convergent_tools_clause(False)) - {"Bash"},
+                         self._tools_of(qm.convergent_tools_clause(True)) - {"PowerShell"},
+                         "兩個平台只該差殼（Bash／PowerShell）")
+
+    def test_a_bad_shell_call_is_said_to_stop_only_that_call(self) -> None:
+        for windows, shell in ((False, "Bash"), (True, "PowerShell")):
+            clause = qm.convergent_tools_clause(windows)
+            self.assertIn(f"寫壞的 {shell} 只擋那一次呼叫", clause)
+            for text in (sb.rc2_clarify(windows), qm.halt_convergent_clarification(windows),
+                         qm.degraded_convergent_clarification(windows)):
+                with self.subTest(shell=shell):
+                    self.assertIn(clause, text)
+
+    def test_the_posix_brief_says_the_bad_call_does_not_run_and_bash_still_works(self) -> None:
+        got = sb.rc2_clarify(windows=False)
+        for needle in ("寫壞的那一次 Bash 呼叫會被攔下、不執行", "Bash 本身仍可用", "照改重跑即可"):
+            self.assertIn(needle, got)
+        self.assertNotIn("另由指令形態守衛擋下", got)
+
+    def test_the_composed_halt_sentences_keep_their_first_clause_contract(self) -> None:
+        """首句隨事件換、其餘同源：PreToolUse 沒執行，不得說「已正常執行完成」。"""
+        legacy = qm.halt_convergent_clarification(windows=False)
+        blocked = qm.halt_convergent_clarification(windows=False, event="PreToolUse", tool="Agent")
+        self.assertEqual(legacy, qm.HALT_CONVERGENT_CLARIFICATION)
+        self.assertTrue(legacy.startswith("你剛才那次工具呼叫已正常執行完成；"))
+        self.assertTrue(blocked.startswith("這次 Agent 呼叫已被擋下、沒有執行；"))
+        self.assertEqual(blocked.split("；", 1)[1], legacy.split("；", 1)[1])
+
+
+class ReadFallbackHintTest(unittest.TestCase):
+    """真實數據的載具原先只有 Bash（planner `--check`／`--pace`）：auto mode 分類器暫時不可用
+    時 Bash 與寫檔一起被拒，模型同時「被擋」又「查不了真實數據」。Read 工具唯讀、不經那個
+    分類器，所以簡報多給一條唯讀退路：feed 檔（context）與額度快取檔，路徑取自既有 SSOT。"""
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="brief-read-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        env = mock.patch.dict(os.environ, {"AUTOSDD_CONTEXT_FEED_DIR": str(self.tmp / "feed"),
+                                           "AUTOSDD_QUOTA_CACHE_DIR": str(self.tmp / "quota")})
+        env.start()
+        self.addCleanup(env.stop)
+        self.gate = _fake_quota_gate(read_quota=lambda now, path=None: _cache_hit_state())
+        self.gate.quota_cache_path = quota_gate.quota_cache_path  # 真的 SSOT：meter 的 cache_path
+
+    def _brief(self, payload: dict, *, windows: bool = False, gate: object = None) -> str:
+        with mock.patch.object(sb.platform_utils, "is_windows", return_value=windows):
+            return sb.sessionstart_brief(
+                payload, gate or self.gate, scan_transcript=None, resolve_window=None,
+                window_evidence=None, read_context_feed=None, now=_NOW,
+                check_statusline=lambda: {"installed": True})
+
+    def test_both_platforms_teach_the_read_tool_fallback(self) -> None:
+        for windows in (False, True):
+            hint = sb.verify_hint(windows=windows)
+            for needle in ("**Read**", "auto mode", "唯讀", "used_percentage", "current_usage",
+                           "context_window_size", "axes[]", "severity", "不要憑簡報猜",
+                           "不要宣稱被擋"):
+                self.assertIn(needle, hint, (windows, needle))
+
+    def test_the_brief_names_the_resolved_feed_and_quota_files_on_both_platforms(self) -> None:
+        feed, quota = self.tmp / "feed" / "sess-abc.json", self.tmp / "quota" / "autosdd_quota.json"
+        for windows in (False, True):
+            got = self._brief({"session_id": "sess-abc"}, windows=windows)
+            with self.subTest(windows=windows):
+                self.assertIn(f"`{feed}`", got)
+                self.assertIn(f"`{quota}`", got)
+                self.assertIn("**Read**", got)
+
+    def test_the_paths_come_from_the_ssot_not_from_a_second_spelling(self) -> None:
+        """路徑與寫入端 `statusline_context_feed.context_feed_path()`、meter 的 `cache_path()`
+        逐字相同——不設環境覆寫時也一樣（預設目錄含 `context_feed`／`autosdd_quota.json`）。"""
+        sys.path.insert(0, str(_REPO_ROOT / "tools"))
+        import statusline_context_feed  # noqa: PLC0415 — 延遲：只有本格要對帳寫入端
+        with mock.patch.dict(os.environ):
+            os.environ.pop("AUTOSDD_CONTEXT_FEED_DIR")
+            os.environ.pop("AUTOSDD_QUOTA_CACHE_DIR")
+            got = self._brief({"session_id": "sess-abc"})
+            feed = statusline_context_feed.context_feed_path("sess-abc")
+            self.assertIn(str(feed), got)
+            self.assertIn("context_feed", str(feed))
+            self.assertIn(str(quota_gate.quota_cache_path()), got)
+            self.assertTrue(str(quota_gate.quota_cache_path()).endswith("autosdd_quota.json"))
+
+    def test_the_session_id_comes_from_the_payload_then_the_transcript_name(self) -> None:
+        transcript = self.tmp / "from-transcript.jsonl"
+        by_payload = self._brief({"session_id": "from-payload", "transcript_path": str(transcript)})
+        self.assertIn("from-payload.json", by_payload)
+        self.assertNotIn("from-transcript.json", by_payload)
+        self.assertIn("from-transcript.json", self._brief({"transcript_path": str(transcript)}))
+
+    def test_without_a_session_id_the_template_and_the_newest_mtime_rule_are_given(self) -> None:
+        got = self._brief({})
+        self.assertIn(str(self.tmp / "feed" / "<session_id>.json"), got)
+        self.assertIn("最新 mtime", got)
+
+    def test_an_unreachable_ssot_degrades_to_a_pathless_sentence_not_a_crash(self) -> None:
+        bare = _fake_quota_gate(read_quota=lambda now, path=None: _cache_hit_state())
+        with mock.patch.dict(sys.modules, {"statusline_context_feed": None}):
+            got = self._brief({"session_id": "sess-abc"}, gate=bare)
+        self.assertIn("**Read**", got)
+        self.assertNotIn("sess-abc.json", got)
+        self.assertNotIn("autosdd_quota.json", got)
+
+
+def _load_sga():
+    """延遲載入驗收工具：`tools/` 只在需要它的格才進 `sys.path`（同下方對帳寫入端的作法）；
+    工具檔缺席時只讓本類別的測試紅，不拖垮整個模組的匯入。"""
+    tools = str(_REPO_ROOT / "tools")
+    if tools not in sys.path:
+        sys.path.insert(0, tools)
+    import session_gate_acceptance  # noqa: PLC0415 — 延遲，理由見 docstring
+    return session_gate_acceptance
+
+
+_REPORT_KEYS = frozenset({
+    "schema", "generated_at", "platform", "os_label", "host", "python_version", "cc_version",
+    "repo_head", "statusline", "hook_carrier", "verify_hint", "fsm_current_state",
+    "fsm_line", "check", "trace_dir"})
+
+
+class SessionGateAcceptanceTest(unittest.TestCase):
+    """單一指令驗收（`tools/session_gate_acceptance.py`）把「這個平台的守門真的裝好了」收成
+    一份貼回即可判讀的 JSON。測意圖：證據只准**量到什麼寫什麼**——量不到寫 null／error、
+    不崩潰、不弄髒真實家目錄；Windows 格（簡報給 `Push-Location`／`LASTEXITCODE` 兩個安全
+    形態 token）是 Mac 側唯一能預先釘住的那一半，平台一翻轉兩格必須跟著翻。"""
+
+    def setUp(self) -> None:
+        import endurance_env  # noqa: PLC0415 — 延遲；且須在改 HOME 之前解出「真實」居所
+        self.sga = _load_sga()
+        self.real = Path.home().joinpath(*endurance_env.TRACE_HOME_PARTS)
+        self.real_before = self._real_stamps()
+        self.home = Path(tempfile.mkdtemp(prefix="gate-accept-"))
+        self.addCleanup(shutil.rmtree, self.home, True)
+        self.traces = self.home / "traces"
+        self.assertNotEqual(self.real, self.traces)
+        env = mock.patch.dict(os.environ, {
+            "HOME": str(self.home), "USERPROFILE": str(self.home),
+            "AUTOSDD_TRACE_DIR": str(self.traces),
+            "AUTOSDD_CONTEXT_FEED_DIR": str(self.home / "feed"),
+            "AUTOSDD_QUOTA_CACHE_DIR": str(self.home / "quota")})
+        env.start()
+        self.addCleanup(env.stop)
+        for key in ("CLAUDE_CONFIG_DIR", "CLAUDE_CODE_SESSION_ID"):
+            os.environ.pop(key, None)
+
+    def _real_stamps(self) -> dict[str, int]:
+        return {p.name: p.stat().st_mtime_ns
+                for p in self.real.glob("session_gate_acceptance_*.json")}
+
+    def _run(self, argv: list[str] | None = None) -> tuple[int, dict]:
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            rc = self.sga.cli([] if argv is None else argv)
+        return rc, (json.loads(out.getvalue()) if out.getvalue().strip() else {})
+
+    def test_the_report_has_exactly_the_documented_keys(self) -> None:
+        rc, report = self._run()
+        self.assertEqual(rc, 0)
+        self.assertEqual(set(report), _REPORT_KEYS)
+        self.assertEqual(set(report["statusline"]), {
+            "installed", "matches_current_checkout", "python_basis", "settings_file_exists"})
+        self.assertEqual(set(report["hook_carrier"]), {"path", "exists", "is_symlink"})
+        self.assertEqual(set(report["verify_hint"]), {
+            "default_push_location", "default_lastexitcode", "windows_variant_both"})
+        self.assertEqual(set(report["check"]), {"rc", "diff_line", "lines", "banner", "stderr"})
+        self.assertEqual(report["platform"], sys.platform)
+        stamp = datetime.fromisoformat(report["generated_at"])
+        self.assertIsNotNone(stamp.utcoffset(), "不帶 offset 的時間戳無法跨機器比對新舊")
+
+    def test_the_windows_cells_flip_with_the_platform_and_the_variant_has_both_tokens(self) -> None:
+        cells = {}
+        for windows in (True, False):
+            with mock.patch.object(sb.platform_utils, "is_windows", return_value=windows):
+                cells[windows] = self.sga.hint_cells()
+        self.assertEqual(cells[True], {"default_push_location": True,
+                                       "default_lastexitcode": True, "windows_variant_both": True})
+        self.assertEqual(cells[False], {"default_push_location": False,
+                                        "default_lastexitcode": False, "windows_variant_both": True})
+        for token in ("Push-Location", "LASTEXITCODE"):
+            self.assertIn(token, sb.verify_hint(windows=True))
+
+    def test_an_unknown_flag_is_rejected_loudly_and_writes_nothing(self) -> None:
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = self.sga.cli(["--bogus"])
+        self.assertEqual(rc, 2)
+        self.assertEqual(out.getvalue(), "", "拒收時不得印出任何一份看起來像證據的 JSON")
+        self.assertIn("--bogus", err.getvalue())
+        self.assertEqual(list(self.traces.glob("*")), [])
+
+    def test_the_only_write_is_one_json_under_the_injected_trace_dir(self) -> None:
+        rc, report = self._run()
+        self.assertEqual(rc, 0)
+        written = list(self.traces.iterdir())
+        self.assertEqual(len(written), 1, [p.name for p in written])
+        self.assertTrue(written[0].name.startswith("session_gate_acceptance_"))
+        self.assertEqual(json.loads(written[0].read_text(encoding="utf-8")), report)
+        self.assertEqual(report["trace_dir"], str(self.traces))
+        self.assertEqual(self._real_stamps(), self.real_before, "真實 trace 居所被動了")
+
+    def test_nothing_to_measure_is_a_null_cell_not_a_crash_and_never_a_pass(self) -> None:
+        rc, report = self._run()
+        self.assertEqual(rc, 0)
+        self.assertIsNone(report["cc_version"])
+        self.assertIs(report["statusline"]["installed"], False)
+        self.assertIs(report["statusline"]["settings_file_exists"], False)
+        self.assertIsNone(report["check"]["diff_line"])
+        self.assertIsInstance(report["check"]["rc"], int)
+        self.assertNotEqual(report["check"]["rc"], 0, "沒有逐字稿卻回 0＝把量不到寫成通過")
+
+    def test_a_raising_collector_becomes_an_error_cell_and_the_rest_survives(self) -> None:
+        import install_statusline  # noqa: PLC0415 — `tools/` 已由 `_load_sga()` 放進 sys.path
+        import session_resume_planner as planner  # noqa: PLC0415
+        for exc in (RuntimeError("boom"), SystemExit(2)):
+            with self.subTest(exc=type(exc).__name__):
+                with mock.patch.object(planner, "main", side_effect=exc), \
+                        mock.patch.object(install_statusline, "status", side_effect=OSError("x")):
+                    rc, report = self._run()
+                self.assertEqual(rc, 0)
+                self.assertEqual(report["check"], {"rc": None, "error": type(exc).__name__})
+                self.assertEqual(report["statusline"], {"error": "OSError"})
+                self.assertEqual(set(report), _REPORT_KEYS)
+
+    def test_the_in_process_planner_call_leaves_the_environment_as_it_found_it(self) -> None:
+        def leak(env, root=None):  # 與 planner 的 `apply_env_defaults` 同形：把預設填進環境
+            env["GATE_ACCEPT_ENV_LEAK_PROBE"] = "1"
+            return []
+        before = dict(os.environ)
+        with mock.patch.object(quota_gate, "apply_env_defaults", side_effect=leak):
+            self._run()
+        self.assertEqual(dict(os.environ), before, "planner 填的環境變數洩漏到呼叫端")
+
+    def test_repo_head_reads_loose_packed_and_detached_refs(self) -> None:
+        sha, other = "a" * 40, "b" * 40
+        repo = self.home / "repo"
+        git = repo / ".git"
+        (git / "refs" / "heads").mkdir(parents=True)
+        (git / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+        loose = git / "refs" / "heads" / "main"
+        loose.write_text(sha + "\n", encoding="utf-8")
+        self.assertEqual(self.sga.repo_head(repo), sha, "鬆散 ref")
+        loose.unlink()
+        (git / "packed-refs").write_text(
+            f"# pack-refs with: peeled\n{other} refs/heads/dev\n{sha} refs/heads/main\n",
+            encoding="utf-8")
+        self.assertEqual(self.sga.repo_head(repo), sha, "只住在 packed-refs")
+        (git / "HEAD").write_text(other + "\n", encoding="utf-8")
+        self.assertEqual(self.sga.repo_head(repo), other, "detached HEAD 直接是 sha")
+        (git / "HEAD").write_text("ref: refs/heads/gone\n", encoding="utf-8")
+        self.assertIsNone(self.sga.repo_head(repo), "兩處都找不到＝量不到，不是猜一個")
+
+    def test_hook_carrier_reports_existence_of_the_literal_path(self) -> None:
+        repo = self.home / "repo-carrier"
+        literal = (".venv", "Scripts", "pythonw.exe")  # platform-ok: hook 載具字面（兩平台同名）
+        self.assertEqual(self.sga.hook_carrier(repo),
+                         {"path": "/".join(literal), "exists": False, "is_symlink": False})
+        carrier = repo.joinpath(*literal)
+        carrier.parent.mkdir(parents=True)
+        carrier.write_bytes(b"")
+        self.assertEqual(self.sga.hook_carrier(repo)["exists"], True)
+        self.assertEqual(self.sga.hook_carrier(repo)["is_symlink"], False)
+
+    def test_cc_version_is_the_last_versioned_record_of_the_newest_transcript(self) -> None:
+        from probe.audit_session import project_transcript_dir  # noqa: PLC0415
+        base = project_transcript_dir(_REPO_ROOT)
+        self.assertTrue(str(base).startswith(str(self.home)), "逐字稿目錄沒有跟著隔離的家走")
+        base.mkdir(parents=True)
+        self.assertIsNone(self.sga.cc_version(_REPO_ROOT), "目錄在、逐字稿不在")
+        old, new = base / "old.jsonl", base / "new.jsonl"
+        old.write_text(json.dumps({"version": "1.0.0"}) + "\n", encoding="utf-8")
+        new.write_text("\n".join([
+            json.dumps({"type": "user", "version": "2.1.287"}),
+            json.dumps({"type": "assistant", "version": "2.1.288"}),
+            json.dumps({"type": "file-history-snapshot"}),
+            '{"half-written']) + "\n", encoding="utf-8")
+        os.utime(old, (1_000_000_000, 1_000_000_000))
+        self.assertEqual(self.sga.cc_version(_REPO_ROOT), "2.1.288")
 
 
 if __name__ == "__main__":
