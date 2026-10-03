@@ -199,6 +199,17 @@ class ManualRegisterThenWakeE2ETest(unittest.TestCase):
             planner.schedule_backend, "select", return_value=self.backend)
         select.start()
         self.addCleanup(select.stop)
+        # DEF-200-480：本 e2e 驗的是 `--allow-resume` 的**程式預設**（開）。`planner.main()`
+        # 先把 repo 根 `.env` 的逃生口填進環境，機器本地若設 AUTOSDD_RESUME_OFF=1，預設就翻成
+        # 關 ⇒ 把 `.env` 根指到沒有 `.env` 的臨時目錄，讓測試對機器設定密封（語意不變：真環境
+        # 變數仍優先）。上面的 patch.dict 已快照環境，這裡順手清掉行程繼承的同名鍵。
+        os.environ.pop(planner.RESUME_OFF_ENV, None)
+        real_defaults = planner.quota_gate.apply_env_defaults
+        dotenv = unittest.mock.patch.object(
+            planner.quota_gate, "apply_env_defaults",
+            lambda env, root=None: real_defaults(env, root=self.tmp))
+        dotenv.start()
+        self.addCleanup(dotenv.stop)
         self.sid = "sidManualE2E"
         self.transcript = self.tmp / f"{self.sid}.jsonl"
         self.transcript.write_text('{"type":"assistant","message":{"model":"claude-opus-5",'

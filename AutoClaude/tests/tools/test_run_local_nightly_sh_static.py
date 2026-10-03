@@ -910,8 +910,11 @@ def test_the_fingerprint_survives_a_python_whose_stdout_turns_newlines_into_crlf
     shim.write_text(_CRLF_STDOUT_SHIM, encoding="utf-8", newline="\n")
     exe = Path(sys.executable).as_posix()
     _stub_fingerprint_python(tmp_path, f'exec "{exe}" "{shim.as_posix()}" "$@"')
+    # 控制組也走 `_BASH` 載具：替身是 `#!/bin/sh` 腳本，直接當 argv[0] 執行只有 POSIX 的
+    # execve 認得 shebang；Windows 的 CreateProcess 回 WinError 193（不是有效的 Win32 應用
+    # 程式）——本檔其餘測試全部經 `_run_sh`（bash 絕對路徑）跑替身，唯獨這一行例外。
     control = subprocess.run(
-        [str(tmp_path / ".venv" / "bin" / "python"), "-c",
+        [str(_BASH), (tmp_path / ".venv" / "bin" / "python").as_posix(), "-c",
          "import hashlib; print(hashlib.sha256(b'').hexdigest()[:12])"],
         capture_output=True, timeout=30,
     )

@@ -997,6 +997,18 @@ class ReadFallbackHintTest(unittest.TestCase):
                            "不要宣稱被擋"):
                 self.assertIn(needle, hint, (windows, needle))
 
+    def test_both_platforms_say_a_permission_prompt_is_not_a_hook_block(self) -> None:
+        """退路的兩個 Read 目標在 cwd 外、planner 現查也常要核准：模型把這種權限詢問讀成「被擋」就會
+        放棄現查並宣稱被擋。句子只掛在唯讀退路之後（整則訊息一次），不進其他段落。"""
+        for windows in (False, True):
+            with self.subTest(windows=windows):
+                hint = sb.verify_hint(windows=windows)
+                self.assertEqual(hint.count("權限詢問"), 1, hint)
+                after_fallback = hint.split("不要宣稱被擋", 1)[1]
+                for needle in ("權限詢問", "harness", "不是 hook 阻斷", "核准"):
+                    self.assertIn(needle, after_fallback, (windows, needle))
+                self.assertNotIn("權限詢問", sb.rc2_clarify(windows=windows))
+
     def test_the_brief_names_the_resolved_feed_and_quota_files_on_both_platforms(self) -> None:
         feed, quota = self.tmp / "feed" / "sess-abc.json", self.tmp / "quota" / "autosdd_quota.json"
         for windows in (False, True):

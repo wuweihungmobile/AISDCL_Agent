@@ -25,6 +25,7 @@
 from __future__ import annotations
 
 import ast
+import contextlib
 import dataclasses
 import inspect
 import io
@@ -2836,7 +2837,10 @@ class AvailabilityHysteresisTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp(prefix="r102_availability_"))
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
-        self.addCleanup(os.environ.pop, EE.TRACE_DIR_ENV, None)
+        # DEF-200-464：還原整份環境而非 pop（pop 會把模組圍籬釘的 TRACE_DIR 一併吃掉）
+        env = mock.patch.dict(os.environ)
+        env.start()
+        self.addCleanup(env.stop)
         os.environ[EE.TRACE_DIR_ENV] = str(self.tmp / "traces")
 
     # ── (a) 進入 unmeasured：立即生效，不受遲滯／dwell 約束 ──────────────────────
@@ -3039,7 +3043,10 @@ class ConcurrencyStabilityTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp(prefix="r102_stability_"))
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
-        self.addCleanup(os.environ.pop, EE.TRACE_DIR_ENV, None)
+        # DEF-200-464：還原整份環境而非 pop（pop 會把模組圍籬釘的 TRACE_DIR 一併吃掉）
+        env = mock.patch.dict(os.environ)
+        env.start()
+        self.addCleanup(env.stop)
         os.environ[EE.TRACE_DIR_ENV] = str(self.tmp / "traces")
 
     def _state(self, cap: int, at: datetime | None = None) -> QS.StabilityState:
@@ -3105,6 +3112,18 @@ class ConcurrencyStabilityTest(unittest.TestCase):
                            min_dwell_seconds=300.0, unmeasured=True)
         self.assertIs(nxt, prev, "量不到時放寬方向必須整段失效，dwell 再久都不該放行")
 
+    def test_the_age_limit_only_releases_a_reading_that_is_itself_unmeasurable(self) -> None:
+        """DEF-200-466：年齡上限只放掉「這一刻的讀數也量不到」（band＝unmeasured）的舊前值；
+        讀數已回來、僅可得性遲滯還沒離開時 band 是真實水位帶，前值再老也維持（即上一支鎖的
+        情境）。否則一次成功的讀數就把前值一步放開，繞過 PRD (a) 的離開遲滯與 (c) 的每次至多
+        +1。輸入刻意相同，只有 band 不同。"""
+        prev = self._state(0, at=self.NOW)
+        later = self.NOW + timedelta(seconds=QS.MAX_HELD_AGE_SECONDS + 1)
+        for band, want in ((Q.BAND_UNMEASURED, 2), (Q.BAND_NOTICE, 0)):
+            with self.subTest(band=band):
+                nxt = QS.stabilize(prev, 2, band, later, unmeasured=True)
+                self.assertEqual(nxt.cap, want, f"{band} 帶：年齡上限的放與留不對")
+
     def test_unmeasured_still_tightens_immediately_and_directly(self) -> None:
         """量不到時收緊方向「永遠立即生效」——即使帶別不是安全帶，也不受 (c) 的 ±1 限速。"""
         prev = self._state(8, at=self.NOW)
@@ -3159,6 +3178,138 @@ class StabilityConstantsTest(unittest.TestCase):
     def test_safety_bands_matches_quota_gate_draining_bands(self) -> None:
         self.assertEqual(QS.SAFETY_BANDS, frozenset(QG.DRAINING_BANDS),
                          "SAFETY_BANDS 與 quota_gate.DRAINING_BANDS 已經漂移")
+
+    def test_the_held_age_limit_is_the_reset_arm_horizon_and_outlives_one_dwell(self) -> None:
+        """DEF-200-466：量不到時沿用持久 cap 的年齡上限與「6 小時內才算近」是同一把尺（單一出口，
+        不另寫字面），且不得短於一次最小停留——否則停留都沒滿的 cap 就先被當成過期。"""
+        self.assertEqual(QS.MAX_HELD_AGE_SECONDS, QM.RESET_ARM_HORIZON_SECONDS)
+        self.assertGreaterEqual(QS.MAX_HELD_AGE_SECONDS, QS.MIN_DWELL_SECONDS_DEFAULT)
+
+
+class StabilityHeldAgeTest(unittest.TestCase):
+    """DEF-200-466：量不到時 `stabilize()` 回前值（放寬方向整段失效），而持久 cap 沒有任何東西會
+    讓它自己過期——上一個視窗的 halt 殘值（cap=0）可被無限期沿用，新視窗仍被擋。年齡上限只作用在
+    「量不到」這一支；量得到仍走慢放寬（PRD §4.2.4(c) 每次至多 +1，不得被年齡繞過）。"""
+
+    NOW = datetime(2026, 10, 3, 12, 0, 0, tzinfo=UTC)
+    WEEK = 7 * 86400.0
+
+    def _held(self, cap: int, age_seconds: float) -> QS.StabilityState:
+        stamp = (self.NOW - timedelta(seconds=age_seconds)).isoformat(timespec="seconds")
+        return QS.StabilityState(cap, stamp)
+
+    def _unmeasured(self, prev: QS.StabilityState, **kw) -> QS.StabilityState:
+        """量不到、這一刻的目標是 2（`degraded_cap`）：前值 0 要不要被沿用。"""
+        return QS.stabilize(prev, 2, Q.BAND_UNMEASURED, self.NOW, unmeasured=True, **kw)
+
+    def test_a_week_old_halt_zero_is_not_held_while_unmeasured(self) -> None:
+        nxt = self._unmeasured(self._held(0, self.WEEK))
+        self.assertEqual(nxt.cap, 2, "一週前的 halt 殘值（cap=0）量不到時仍被無限期沿用")
+        self.assertEqual(nxt.last_change, self.NOW.isoformat(timespec="seconds"),
+                         "退回目標值卻沒有重新落款（把舊時間戳帶進了新值）")
+
+    def test_a_recent_zero_is_still_held_while_unmeasured(self) -> None:
+        prev = self._held(0, 600.0)
+        self.assertIs(self._unmeasured(prev), prev, "控制組：10 分鐘前的 cap=0 量不到時必須沿用")
+
+    def test_the_limit_is_inclusive_and_one_second_past_it_is_not(self) -> None:
+        edge = self._held(0, QS.MAX_HELD_AGE_SECONDS)
+        self.assertIs(self._unmeasured(edge), edge, "剛好等於上限就不沿用（判準是嚴格大於）")
+        past = self._held(0, QS.MAX_HELD_AGE_SECONDS + 1)
+        self.assertEqual(self._unmeasured(past).cap, 2, "超過上限一秒仍被沿用")
+
+    def test_an_unreadable_stamp_is_not_held_forever(self) -> None:
+        self.assertEqual(self._unmeasured(QS.StabilityState(0, "not-a-time")).cap, 2,
+                         "年齡不可知的前值被無限期沿用")
+
+    def test_the_measured_branch_ignores_the_age_and_still_relaxes_one_step(self) -> None:
+        """量得到時舊前值只是穩定、不是過期：0→2 仍每次至多 +1，不得因年齡一步跳到目標。"""
+        nxt = QS.stabilize(self._held(0, self.WEEK), 2, Q.BAND_CONVERGE, self.NOW)
+        self.assertEqual(nxt.cap, 1, "年齡上限漏進了量得到分支，繞過 PRD (c) 的每次至多 +1")
+
+    def test_evaluate_applies_the_limit_to_the_persisted_state_and_forwards_an_override(
+            self) -> None:
+        with tempfile.TemporaryDirectory(prefix="def466_age_") as td, \
+                mock.patch.dict(os.environ, {EE.TRACE_DIR_ENV: td}):
+            QS.save_state(self._held(0, self.WEEK))
+            got = QS.evaluate(2, Q.BAND_UNMEASURED, self.NOW, unmeasured=True)
+            self.assertEqual((got, QS.load_state().cap), (2, 2), "舊 cap 沒被放掉或沒有落地")
+            QS.save_state(self._held(0, 600.0))
+            self.assertEqual(QS.evaluate(2, Q.BAND_UNMEASURED, self.NOW, unmeasured=True), 0)
+            self.assertEqual(QS.evaluate(2, Q.BAND_UNMEASURED, self.NOW, unmeasured=True,
+                                         max_age_seconds=60.0), 2, "上限沒有透傳到 stabilize()")
+
+
+class DegradedNoticeCapIsTheEnforcedCapTest(unittest.TestCase):
+    """DEF-200-466：量不到首則通知的「硬上限收到 N」必須是致動器真的會用的 N。此前通知在
+    `quota_stability.evaluate()` 之前出聲、印 `decide()` 的未平穩值——持久 cap=0 時印「收到 2」，
+    實際 Agent 卻被擋（上限 0）。分母用致動器的行為（rc），不只比字面。"""
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="def466_notice_"))
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        env = mock.patch.dict(os.environ, {EE.TRACE_DIR_ENV: str(self.tmp / "traces")})
+        env.start()
+        self.addCleanup(env.stop)
+
+        def blank(*_args, **_kwargs) -> Q.QuotaState:
+            return QG._blank("stale-cache", "stale-cache")
+
+        swaps = {"quota_cache_path": lambda: self.tmp / "c.json",
+                 "fanout_ledger_path": lambda: self.tmp / "l.d",
+                 "quota_latch_path": lambda: self.tmp / "latch.json",
+                 "quota_trace_path": lambda: self.tmp / "trace.jsonl",
+                 "degraded_stamp_path": lambda source: self.tmp / f"stamp-{source}",
+                 "policy_env": lambda *_a, **_k: {},
+                 "read_quota": blank, "settled_quota": blank,
+                 "claim_refresh_slot": lambda: False,
+                 "quota_floor_reading": lambda *_a, **_k: None}
+        for name, value in swaps.items():
+            patcher = mock.patch.object(QG, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    @staticmethod
+    def _ago(**kw) -> str:
+        return (datetime.now(UTC) - timedelta(**kw)).isoformat(timespec="seconds")
+
+    @staticmethod
+    def _degraded() -> int:
+        """量不到時 `decide()` 自己算的上限（不寫死 2：出廠值可被 `.env` 調）。"""
+        return Q.decide(QG._blank("posture-probe"), NOW, P).cap
+
+    def _notice(self, held: QS.StabilityState | None) -> tuple[int, int]:
+        """走真的 `quota_gate()`（量不到、無地板、PreToolUse×Agent），回 `(rc, 通知印的上限)`。"""
+        if held is not None:
+            QS.save_state(held)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+            rc = QG.quota_gate(
+                {"hook_event_name": "PreToolUse", "tool_name": "Agent", "transcript_path": ""},
+                blocking=("Agent",), latch_read=lambda _p: set(),
+                latch_write=lambda _p, _k: None, plan_writer=lambda *_a, **_k: "",
+                waker=lambda *_a, **_k: {})
+            QG.flush_to_model()   # 排空 emit_to_model 的累積，不留給 atexit／後面的測試
+        said = re.search(r"硬上限收到 (\d+)", err.getvalue())
+        self.assertIsNotNone(said, f"通知沒有姿態句：{err.getvalue()!r}")
+        return rc, int(said.group(1))
+
+    def test_without_history_the_notice_and_the_enforced_cap_are_the_degraded_cap(self) -> None:
+        self.assertEqual(self._notice(None), (0, self._degraded()), "控制組：沒有持久歷史")
+
+    def test_a_recent_halt_zero_is_held_and_the_notice_says_zero(self) -> None:
+        held = QS.StabilityState(0, self._ago(minutes=10))
+        self.assertEqual(self._notice(held), (2, 0), "通知印的上限與致動器真正用的不同源")
+
+    def test_a_week_old_zero_is_dropped_and_the_notice_says_the_degraded_cap(self) -> None:
+        held = QS.StabilityState(0, self._ago(days=7))
+        self.assertEqual(self._notice(held), (0, self._degraded()), "舊 halt 殘值擋住了新視窗")
+        self.assertEqual(QS.load_state().cap, self._degraded(), "退回的值沒有落地")
+
+    def test_degraded_posture_prints_a_given_cap_and_computes_its_own_otherwise(self) -> None:
+        self.assertIn("收到 0（", QG.degraded_posture(cap=0))
+        self.assertIn("收到 3（", QG.degraded_posture(cap=3))
+        self.assertIn(f"收到 {self._degraded()}（", QG.degraded_posture())
 
 
 class TestStabilityIsKeyedByModelFamilyAndRuler(unittest.TestCase):

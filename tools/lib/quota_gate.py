@@ -632,7 +632,7 @@ def degraded_stamp_path(source: str) -> Path:
     return Path(tempfile.gettempdir()) / f"{DEGRADED_STAMP_PREFIX}{safe}.stamp"
 
 
-def degraded_posture(now: datetime | None = None) -> str:
+def degraded_posture(now: datetime | None = None, cap: int | None = None) -> str:
     """量不到時**這一刻真正的姿態**，由 `decide()` 的回傳值算出來。
 
     🔴 立案（R100／PRD §4.1.5 R-4.1.5-2）：本函式取代的那一句逐字寫
@@ -644,16 +644,22 @@ def degraded_posture(now: datetime | None = None) -> str:
     🔴 為什麼是**算**而不是「把字串改對」：字串改對只會在下一次調 `degraded_cap` 時再度
     漂開（那正是本輪要修的那一族）。這裡呼叫的是**同一個** `decide()`，於是姿態字面與
     致動器結構上不可能不一致——判準因此是「同源」而不是「某句特定文案」。
+
+    DEF-200-466：`cap`＝呼叫端手上**實際要執法的值**（平穩機制之後），有給就直接印它；
+    此前一律印上面那個未平穩的 `decide()` 值——持久 cap=0 時印「收到 2」而致動器擋在 0。
+    沒給（降級通報的其他來源，還沒走到平穩機制）才自己算。
     """
     when = now or datetime.now().astimezone()
-    cap = quota_policy.decide(_blank("posture-probe"), when,
-                              quota_policy.load_policy(policy_env())[0]).cap
+    if cap is None:
+        cap = quota_policy.decide(_blank("posture-probe"), when,
+                                  quota_policy.load_policy(policy_env())[0]).cap
     if cap is None:                       # 結構上到不了；到得了就是 fail-safe 破了
         return "本次**不設限**（⚠️ 量不到卻不設限＝fail-safe 已失效，請查 decide()）。"
     return f"本次扇出硬上限收到 {cap}（量不到 ⇒ 收緊，不是放行）。"
 
 
-def note_degraded(source: str, detail: str, *, event: str = "PreToolUse") -> str:
+def note_degraded(source: str, detail: str, *, event: str = "PreToolUse",
+                  cap: int | None = None) -> str:
     """額度軸降級時**出一次聲 ＋ 留一行痕跡**；回「這一次真的說出口的那段話」（`""`＝沒說）。
 
     🔴 立案（SD-B2 四支注入探針，落地前實測全部 rc=0／stderr 0 bytes／零痕跡）：
@@ -675,7 +681,7 @@ def note_degraded(source: str, detail: str, *, event: str = "PreToolUse") -> str
         "source": source, "detail": detail, "pid": os.getpid(),
         "state": quota_policy.BAND_UNMEASURED})
     # DEF-200-453：全文組字（含 PostToolUse 的收斂型工具澄清）住人話面 `quota_messages`。
-    msg = quota_messages.degraded_message(source, detail, degraded_posture(), trace,
+    msg = quota_messages.degraded_message(source, detail, degraded_posture(cap=cap), trace,
                                           QUOTA_CACHE_TTL_SECONDS, event)
     sys.stderr.write(msg)
     # 🔴 R82／L4-02：stderr 在這條放行路上沒有讀者（契約自述：要 exit 2 才回饋給模型），
@@ -1083,9 +1089,6 @@ def quota_gate(payload: dict, *, blocking, latch_read, latch_write,
     # 反覆記載的『機制蓋好沒接電』）。量不到時 `decide()` 回 `degraded_cap`（不是不設限、
     # 也永不 halt）：R81 複審探針實測「快取過期 600s ＋ 額度 99%」時 42 次派發放行 42。
     decision = quota_policy.decide(state, now, policy, active_model=active_model)
-    if unmeasured:
-        note_degraded(state.source or "unknown",
-                      quota_messages.degraded_detail(state.reason, failed), event=event)
     # 🔴 R102／PRD §4.2.4：平穩性機制接線。`unmeasured` 這裡已經是「這次讀完（含 L3 地板  round-label-ok  # noqa: E501
     # 替補之後）到底讀不讀得到」的最終結論——`quota_availability.evaluate()` 要的正是
     # 這個訊號（不是取代它，是替它加上遲滯：單次瞬斷不足以判定「已進入不可得」，見該檔
@@ -1105,6 +1108,12 @@ def quota_gate(payload: dict, *, blocking, latch_read, latch_write,
         # 建議值也必須跟著夾一次，否則畫面會出現「建議 4、上限 7」這種自相矛盾的組合。
         decision = replace(decision, cap=stabilized,
                            recommended_fanout=min(decision.recommended_fanout, stabilized))
+    if unmeasured:
+        # DEF-200-466：出聲在平穩機制**之後**——姿態句印的上限必須是致動器真的會用的值。
+        # 此前先出聲、印 `decide()` 的未平穩值：持久 cap=0 被沿用時印「收到 2」、實際擋在 0。
+        note_degraded(state.source or "unknown",
+                      quota_messages.degraded_detail(state.reason, failed), event=event,
+                      cap=decision.cap)
     if decision.band == quota_policy.BAND_HALT:
         # 閂鎖鍵帶 (sid, 模型家族, kind, reset 分鐘)（組字見 `halt_latch_key()`）：新的視窗＝重新
         # 武裝一次。截到分鐘是因為 `resets_at` 有次秒級抖動（它是 now+剩餘算出來的），字串

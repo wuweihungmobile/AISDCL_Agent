@@ -90,7 +90,11 @@ for _stream in (sys.stdout, sys.stderr):
         # main() 的 try 之外、繞得過那道保險。指引印不漂亮遠好過守衛自己變成故障源。
         pass
 
-_GUIDANCE = """🔴 Windows 上已禁用 Bash 工具（根 CLAUDE.md〈Windows 側單一載具原則〉鐵律一）。
+# DEF-200-469：範圍與出口在**第一句**（harness 會在 stderr 前加約 190 字元的 `hook error`
+# 前綴，新視窗讀到的第一個詞是它）。下面三行以行尾反斜線接成同一行，只為滿足 100 欄上限。
+_GUIDANCE = """🔴 Windows 上只停用 Bash 這一個工具（鐵律一）；\
+PowerShell／Read／Write／Edit／Grep 照常可用，同一件事改用 PowerShell 工具重做即可\
+（根 CLAUDE.md〈Windows 側單一載具原則〉）。
 
 改用 **PowerShell 工具**：
   · 跑 python  → & '<repo 根>\\.venv\\Scripts\\python.exe' <絕對路徑腳本>

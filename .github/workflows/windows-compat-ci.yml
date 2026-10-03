@@ -249,6 +249,7 @@ on:
       #      （tools/tests/test_install_statusline.py／test_session_brief.py 消費）。
       - "tools/install_statusline.py"
       - "tools/session_gate_acceptance.py"
+      - "docs/06_quality/FiveQuestion_Audit_Protocol/params.json"
       - "tools/lib/session_brief.py"
       # R79（同一個形態的第三次：新增判準消費了根層檔卻沒補 paths，由
       # AISDLC_SDD/scripts/tests/test_ci_paths_cover_root_consumers.py 逐字點名）。
@@ -690,6 +691,7 @@ on:
       #      （tools/tests/test_install_statusline.py／test_session_brief.py 消費）。
       - "tools/install_statusline.py"
       - "tools/session_gate_acceptance.py"
+      - "docs/06_quality/FiveQuestion_Audit_Protocol/params.json"
       - "tools/lib/session_brief.py"
       # R79（同一個形態的第三次：新增判準消費了根層檔卻沒補 paths，由
       # AISDLC_SDD/scripts/tests/test_ci_paths_cover_root_consumers.py 逐字點名）。

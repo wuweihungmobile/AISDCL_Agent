@@ -364,7 +364,7 @@ class TestBlockBashHookBehaviourOnWindows(unittest.TestCase):
     def test_bash_tool_is_blocked_with_exit_2(self) -> None:
         rc, err = _run_hook(json.dumps({"tool_name": "Bash"}))
         self.assertEqual(rc, 2, f"Bash 工具必須被阻斷（exit 2）；實得 rc={rc}\n{err}")
-        self.assertIn("Windows 上已禁用 Bash 工具", err, "阻斷時必須輸出可讀指引")
+        self.assertIn("Windows 上只停用 Bash 這一個工具", err, "阻斷時必須輸出可讀指引")
 
     def test_non_bash_tool_is_allowed(self) -> None:
         """射程不得擴大：matcher 若被改寬，守衛自己也必須認得 tool_name。
@@ -427,7 +427,7 @@ class TestBlockBashHookGuidanceSurvivesNonUtf8Locale(unittest.TestCase):
     〈TestBlockBashHookGuidanceSurvivesNonUtf8Locale WHY〉。
     """
 
-    _NEEDLE = "Windows 上已禁用 Bash 工具"
+    _NEEDLE = "Windows 上只停用 Bash 這一個工具"
 
     def test_guidance_is_readable_without_inherited_pythonutf8(self) -> None:
         rc, err = _run_hook(json.dumps({"tool_name": "Bash"}), force_os_name="nt")
@@ -536,6 +536,17 @@ class TestBlockBashHookGuidanceContent(unittest.TestCase):
             "不存在「被擋就不能寫檔」", self.text,
             "指引沒有點破『Bash 被擋＝全面禁寫』這個誤讀——DEF-200-412 的核心症狀",
         )
+
+    def test_the_first_line_says_only_bash_is_disabled_and_what_still_works(self) -> None:
+        """DEF-200-469：harness 在 hook 的 stderr 前加約 190 字元的 `hook error` 前綴，新視窗讀
+        到的第一個詞是「hook error」⇒ 範圍（只停用 Bash 這一個工具）、能用什麼、怎麼做，
+        都要在**第一句**，而不是埋到最後一個條列。`force_os_name` 讓非 Windows 也跑得到。"""
+        rc, err = _run_hook(json.dumps({"tool_name": "Bash"}), force_os_name="nt")
+        self.assertEqual(rc, 2, err)
+        first = err.splitlines()[0]
+        for needle in ("只停用 Bash 這一個工具", "PowerShell／Read／Write／Edit", "照常可用",
+                       "改用 PowerShell 工具重做"):
+            self.assertIn(needle, first, f"第一句缺「{needle}」：{first!r}")
 
 
 _NAMED_TEST_RE = re.compile(r"tools/tests/test_[A-Za-z0-9_]+\.py")
@@ -951,6 +962,15 @@ class TestLintPowerShellHookBehaviour(unittest.TestCase):
             f"阻斷訊息第一行沒有豁免出口，讀者要翻到最後才看得到：{first_line!r}",
         )
 
+    def test_the_first_line_says_only_this_call_was_not_run(self) -> None:
+        """DEF-200-469：harness 的 `hook error` 前綴會把 hook 自己的第一句擠到約 190 字元之後，
+        新視窗會把它讀成「PowerShell／寫檔都被擋」⇒ 範圍句（只擋這一次呼叫、哪些工具照常可用）
+        必須和出口同在第一行。"""
+        _rc, err = self._lint("cd AutoClaude")
+        first_line = (err.strip().splitlines() or [""])[0]
+        for needle in ("這一次呼叫沒有執行", "只擋這條指令字串", "PowerShell／Read／Write／Edit"):
+            self.assertIn(needle, first_line, f"第一行缺「{needle}」：{first_line!r}")
+
     def test_inline_exemption_releases_the_guard(self) -> None:
         rc, err = self._lint("cd x  # ps-lint-ok: 重現缺陷用")
         self.assertEqual(rc, 0, f"行內豁免失效——沒有出口的窄守衛會被關掉\n{err}")
@@ -1044,6 +1064,14 @@ class TestUnattendedCommitPushBlock(unittest.TestCase):
                 self.assertIn(
                     _UNATTENDED_ENV, err,
                     f"擋了但沒說是哪個訊號造成的（{label}）——讀者無從得知怎麼關：{err}")
+
+    def test_the_boundary_block_also_leads_with_the_scope_sentence(self) -> None:
+        """DEF-200-469：授權邊界的阻斷同樣被 harness 的 `hook error` 前綴包住，範圍句（只擋
+        這一次呼叫、PowerShell 本身能用）也要是第一句，不只 lint 那一種。"""
+        rc, err = self._lint("git push origin main", unattended=True)
+        self.assertEqual(rc, 2, err)
+        self.assertTrue(err.splitlines()[0].startswith("🔴 這一次呼叫沒有執行（只擋這條指令字串；"),
+                        err.splitlines()[0])
 
     def test_without_the_signal_the_same_commands_are_untouched(self) -> None:
         """🔴 反向：互動 session 必須零附帶面。這一條壞掉＝掌舵者的 commit 被鎖死。"""

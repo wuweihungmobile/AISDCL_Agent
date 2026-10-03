@@ -1800,7 +1800,10 @@ class DurableTraceHomeTest(unittest.TestCase):
 
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp(prefix="r84_trace_"))
-        self.addCleanup(os.environ.pop, endurance_env.TRACE_DIR_ENV, None)
+        # DEF-200-464：還原整份環境而非 pop（pop 會把模組圍籬釘的 TRACE_DIR 一併吃掉）
+        env = mock.patch.dict(os.environ)
+        env.start()
+        self.addCleanup(env.stop)
 
     def test_the_override_is_honoured_and_created(self) -> None:
         """逃生口：單元測試不得在開發者家目錄留下移動零件。"""

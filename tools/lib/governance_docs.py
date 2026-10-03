@@ -575,6 +575,9 @@ _GOVERNANCE_DOCS = (
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R191_FiveQuestion_Verification_Evidence.md",
     # 判準②′ 生效第 1 輪（第十四次四方覆核；zsh 漏攔根因修、②′ 機械化、丙案）：即刻登記。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R192_FiveQuestion_Convergence_Evidence.md",
+    # 五問首次 Windows 執行輪（第十五次四方覆核；協定一次修正重啟窗口、鏡 B 訂正）：即刻登記。
+    _REPO_ROOT / "docs" / "06_quality"
+    / "CrossPlatform_R193_FiveQuestion_Windows_Closure_Evidence.md",
     # 護欄層行數棘輪史料歸檔的第二冊（第一冊逼近 Read 工具上限，淨減法搬遷改落本檔）：即刻登記。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_Guard_Line_History_2.md",
 )

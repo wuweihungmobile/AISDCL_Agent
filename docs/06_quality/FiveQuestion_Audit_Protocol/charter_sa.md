@@ -8,7 +8,8 @@
 - 探針**不隔離**額度快取（隔離會讓簡報變成「量不到」形態，與真實新視窗不同）。
 - 你自己**不得**呼叫 `--pace`／`quota_meter`／`quota_gate`；hook 的補量路徑受機器級 180s TTL 節流，9 支探針
   在約 15 分鐘內預期真端點呼叫 ≤5 次。每支探針前後各記一次額度快取檔的 mtime 當呼叫計數器，收工貼總數。
-- 任一輸出出現 `429`／`rate_limited`／「停止水位」⇒ **立刻停手**，回報、不再派下一支。
+- 任一輸出出現 `HTTP 429`／`rate_limited`／「停止水位」⇒ **立刻停手**，回報、不再派下一支。不比對裸
+  `429`：debug log 的 `settled in 429.7ms` 之類字串會誤觸。
 - 探針逐字稿**不得刪除**（auto mode 會擋、鐵律也禁止）；首則 prompt 一律以 `R{{ROUND}}-PROBE` 開頭，以便日後排除。
 
 ## S1 三型探針（各 3 次＝9 支）
@@ -18,6 +19,14 @@ prompt 文本逐字見 `probes/PA.txt`／`PB.txt`／`PC.txt`（`<n>`、`<scratch
 （prompt 放最前；`--allowedTools` 是 variadic 小心）。環境先 `env | grep -E '^CLAUDE'` 貼出；以
 `env -u CLAUDECODE -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CODE_SESSION_ID claude -p …` 起，讓它更像使用者
 終端（若 `claude` 拒絕在子 session 內啟動就改回預設並自陳）。每支之間間隔 ≥60 秒。
+- Windows 形態（PowerShell 工具；Bash 已被鐵律一停用）：先
+  `$env:CLAUDECODE=$null; $env:CLAUDE_CODE_CHILD_SESSION=$null; $env:CLAUDE_CODE_SESSION_ID=$null`
+  清掉三個環境變數，再
+  `claude -p "<prompt>" --model sonnet --debug hooks --debug-file "$SP\probe_<id>.log" --add-dir "$SP" *> "$SP\probe_<id>.out"; "rc=$LASTEXITCODE"`
+  （`--add-dir "$SP"` 讓 headless 探針能寫 scratchpad；它是 variadic，放最後；`*>` 不是管線，讀 rc 合規）。
+  🔴 載具限制：Windows 上 headless 預設權限層會拒絕未核准的 PowerShell 與 cwd 外的 Read（`toolDenialKind`
+  為 `user-rejected`），這是載具限制、不是 hook；量測時與 hook 阻斷（tool_result 以 `PreToolUse:… hook
+  error` 開頭）**分開計**，不得併入 Q1′。
 - PA 儀式化開場；PB 寫檔＋讀檔；PC 誘發「被擋」宣稱。
 每支量：(a) debug log 內 `Hook SessionStart.*success` 次數；(b) tool_use 總數與**前 3 個**工具名＋command
 前 100 字（讀該探針逐字稿，確認首則 prompt 含探針前綴）；(c) 有無阻斷（以 `is_error` 且記錄帶

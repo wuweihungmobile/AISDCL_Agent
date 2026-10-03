@@ -42,7 +42,7 @@ import urllib.error
 import urllib.request
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta, timezone
-from pathlib import Path, PureWindowsPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _HOOK = _REPO_ROOT / ".claude" / "hooks" / "context_budget_guard.py"
@@ -14205,8 +14205,10 @@ class PlannerSessionResolutionTest(unittest.TestCase):
         self.assertIn("sid-mine", plan.read_text(encoding="utf-8"))
 
     def test_the_cli_still_fails_loud_when_nothing_can_be_located(self) -> None:
-        empty = self.tmp / "empty"
-        empty.mkdir()
+        # DEF-200-471：環境變數的 sid 會跨 slug 找；`empty` 若與放著 sid-mine 的 `proj` 同層，
+        # 就等於「別的 slug 有它」——要讓「到處都找不到」成立，得把它放到沒有手足目錄的地方。
+        empty = self.tmp / "nowhere" / "empty"
+        empty.mkdir(parents=True)
         self._env("sid-mine")
         err = io.StringIO()
         with unittest.mock.patch.object(planner, "project_transcript_dir", return_value=empty), \
@@ -14214,6 +14216,114 @@ class PlannerSessionResolutionTest(unittest.TestCase):
             rc = planner.main(["--check"])
         self.assertEqual(rc, 1)
         self.assertIn("找不到逐字稿", err.getvalue())
+
+
+class SessionTranscriptWriterReaderMatrixTest(unittest.TestCase):
+    """DEF-200-471（受測：`tools/lib/harness_feed.py::pick_transcript`）：writer＝harness 把 session
+    寫在 `<claude_home>/projects/<slug(啟動 cwd)>/<sid>.jsonl`，reader＝planner 只問 repo 根那一個
+    slug 目錄；子目錄啟動的 session 落在別的 slug，兩邊對不上就靜默讀到他窗（`--check` rc=0）。
+    性質（writer==reader）：已知 sid（環境變數或 `--session-id`）⇒ 回的就是 writer 寫的那一支，
+    與啟動 cwd 無關；沒有 sid ⇒ 維持本 slug 最後修改（承認在猜，不跨 slug 瞎猜）。兩邊的 slug 都走
+    **生產的** `project_transcript_dir`（`CLAUDE_CONFIG_DIR` 注入假家目錄），路徑風味 Windows／POSIX
+    各一組。"""
+
+    _FLAVORS = (("windows", PureWindowsPath("D:/Work/AISDCL_Agent")),
+                ("posix", PurePosixPath("/Users/koala/AISDCL_Agent")))
+    _SID = "sid-writer-1"
+
+    @staticmethod
+    def _touch(path: Path, age: int) -> Path:
+        """建一支假逐字稿並把 mtime 設成 `age` 秒前（越小越新）。"""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{}\n", encoding="utf-8", newline="\n")
+        stamp = time.time() - age
+        os.utime(path, (stamp, stamp))
+        return path
+
+    def _home(self):
+        """假的 `~/.claude`：只有 with 區塊內，`project_transcript_dir` 才解到它底下。"""
+        return unittest.mock.patch.dict(
+            os.environ, {"CLAUDE_CONFIG_DIR": str(_tmpdir(self, "writer-reader-"))})
+
+    def _cell(self, root: PureWindowsPath | PurePosixPath,
+              cwd: PureWindowsPath | PurePosixPath, mode: str, noisy: bool) -> None:
+        with self._home():
+            written = self._touch(planner.project_transcript_dir(cwd) / f"{self._SID}.jsonl", 600)
+            base = planner.project_transcript_dir(root)
+            other = self._touch(base / "sid-neighbour.jsonl", 0) if noisy else None
+        got, source = harness_feed.pick_transcript(
+            base, self._SID if mode == "arg" else None,
+            {harness_feed.SESSION_ID_ENV: self._SID} if mode == "env" else {})
+        if mode == "none":
+            self.assertEqual(got, other or (written if cwd == root else None),
+                             "沒有 sid 時必須維持本 slug 最後修改（不跨 slug 猜）")
+            self.assertTrue(source.startswith("最後修改"), source)
+            return
+        label = harness_feed.SOURCE_ENV if mode == "env" else harness_feed.SOURCE_ARG
+        self.assertEqual(got, written, "回的不是 writer 寫的那一支（被他窗或他 slug 劫持）")
+        if cwd == root:
+            self.assertEqual(source, label)
+        else:
+            self.assertTrue(source.startswith(label) and written.parent.name in source, source)
+
+    def test_a_known_sid_finds_the_writers_file_wherever_the_session_started(self) -> None:
+        cells = 0
+        for flavor, root in self._FLAVORS:
+            wheres = {"root": root, "subdir": root / "AutoClaude",
+                      "deeper": root / "AISDLC_SDD" / "AISDLC_SDD_v0.30",
+                      "elsewhere": root.parent / "scratch"}
+            for where, cwd in wheres.items():
+                for mode in ("env", "arg", "none"):
+                    for noisy in (False, True):
+                        with self.subTest(flavor=flavor, cwd=where, sid=mode, noisy=noisy):
+                            self._cell(root, cwd, mode, noisy)
+                        cells += 1
+        self.assertEqual(cells, 48, "矩陣被悄悄縮小了")
+
+    def test_a_sid_that_exists_nowhere_is_not_replaced_by_a_neighbours_file(self) -> None:
+        """任何 slug 都沒有這個 sid ⇒ 環境變數照舊退用本 slug 最後修改並說明「不存在」；明示的 id
+        找不到＝`None`。別的 slug 底下別人的檔不是候選。"""
+        root = self._FLAVORS[1][1]
+        with self._home():
+            base = planner.project_transcript_dir(root)
+            mine = self._touch(base / "sid-neighbour.jsonl", 5)
+            self._touch(planner.project_transcript_dir(root / "AutoClaude")
+                        / "sid-elsewhere.jsonl", 0)
+        got, source = harness_feed.pick_transcript(
+            base, None, {harness_feed.SESSION_ID_ENV: "sid-gone"})
+        self.assertEqual(got, mine)
+        self.assertTrue(source.startswith("最後修改") and "不存在" in source, source)
+        self.assertEqual(harness_feed.pick_transcript(base, "sid-gone", {}),
+                         (None, harness_feed.SOURCE_ARG))
+
+    def test_a_sid_with_glob_characters_never_matches_another_session(self) -> None:
+        """跨 slug 搜尋用 glob：sid 裡的 `*`／`?`／`[` 不得讓它變成萬用字元而撿到別人的逐字稿。"""
+        root = self._FLAVORS[0][1]
+        with self._home():
+            base = planner.project_transcript_dir(root)
+            mine = self._touch(base / "sid-mine.jsonl", 5)
+            self._touch(planner.project_transcript_dir(root / "AutoClaude") / "sid-abc.jsonl", 0)
+        for bad in ("*", "sid-*", "sid-?bc", "sid-[a]bc"):
+            with self.subTest(sid=bad):
+                self.assertEqual(harness_feed.pick_transcript(base, bad, {}),
+                                 (None, harness_feed.SOURCE_ARG), "明示的 id 被當成萬用字元")
+                got, _source = harness_feed.pick_transcript(
+                    base, None, {harness_feed.SESSION_ID_ENV: bad})
+                self.assertEqual(got, mine, "不合格的環境變數值應視同無效，退用最後修改")
+
+    def test_the_own_slug_wins_and_among_other_slugs_the_newest_wins(self) -> None:
+        """同一個 sid 多處都有：本 slug 優先（標籤不帶「跨 slug」）；
+        只在他 slug 時取最近寫入的。"""
+        root, env = self._FLAVORS[0][1], {harness_feed.SESSION_ID_ENV: self._SID}
+        name = f"{self._SID}.jsonl"
+        with self._home():
+            base = planner.project_transcript_dir(root)
+            self._touch(planner.project_transcript_dir(root / "AutoClaude") / name, 900)
+            newer = self._touch(planner.project_transcript_dir(root / "scratch") / name, 100)
+            self.assertEqual(harness_feed.pick_transcript(base, None, env)[0], newer)
+            own = self._touch(base / name, 3000)  # 最舊，但在本 slug
+        self.assertEqual(harness_feed.pick_transcript(base, None, env),
+                         (own, harness_feed.SOURCE_ENV))
 
 
 class StartModelOfTest(unittest.TestCase):

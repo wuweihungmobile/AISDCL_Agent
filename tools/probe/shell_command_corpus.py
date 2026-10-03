@@ -121,9 +121,14 @@ _ANCHOR_RE = re.compile(
     r"|nohup|disown|setsid|pgrep"            # 鐵律六 判準①③／②
     r")(?![\w.-])")
 
-#: `transcripts` 面：這台機器上 Claude Code 的逐字稿。`*` 是**專案 slug**——刻意掃全部
-#: 專案而不只當前那一個：hook 是使用者層級行為，換一個 checkout 不會換掉模型的習慣。
-_TRANSCRIPT_GLOB = "*/*.jsonl"
+#: `transcripts` 面：這台機器上 Claude Code 的逐字稿，**遞迴**掃 `projects/` 底下全部
+#: `*.jsonl`——刻意掃全部專案而不只當前那一個：hook 是使用者層級行為，換一個 checkout 不會
+#: 換掉模型的習慣。🔴 為什麼是遞迴（DEF-200-472）：主逐字稿 `<slug>/<sid>.jsonl` 只是母體的
+#: 一部分；子 agent 的住 `<slug>/<sid>/subagents/agent-*.jsonl`，workflow 的再深一層
+#: （`subagents/workflows/wf_*/agent-*.jsonl`）。舊寫法 `*/*.jsonl` 只看第一層，一整塊真實
+#: 輸入面靜默不在母體裡，而「假紅 0」的結論只對那一塊成立（輸出與「很乾淨」同形）。
+#: 母體大小與掃描檔數都是**這台機器的量測值**：`--summary` 現印，不得跨機互相替代、不得寫成常數。
+_TRANSCRIPT_GLOB = "**/*.jsonl"
 #: 只取真的會送進 shell 的工具（＝被守的那支 hook 的 `OWN_TOOLS`，現查不寫死）。
 _SHELL_TOOLS = frozenset(G.OWN_TOOLS)
 
@@ -164,6 +169,11 @@ def tracked_fragments(repo_root: Path) -> list[tuple[str, str, str, bool, str]]:
     return rows
 
 
+def transcript_files(root: Path | None = None) -> list[Path]:
+    """`transcripts` 面要掃的逐字稿檔（遞迴）；`transcript_commands()` 與摘要共用。"""
+    return sorted((root or platform_utils.claude_home() / "projects").glob(_TRANSCRIPT_GLOB))
+
+
 def transcript_commands(
         root: Path | None = None) -> list[tuple[str, str, str, bool, str]]:
     """`transcripts` 面：`(command, source, reason, background, tool)`。
@@ -179,10 +189,12 @@ def transcript_commands(
     `bool(tool_input.get(...))` 同形）一併取出——此前寫死 False，判準③ 從未被真實母體普查。
     DEF-200-086：工具名（`block["name"]`）同樣取出——判準④ 只判 Bash，母體若一律以預設
     工具重放，含 PowerShell 的母體會多報 hook 實際不會擋的假紅。
+    DEF-200-472：遞迴掃（含 `subagents/`）；`source`＝相對 `root` 的 POSIX 路徑，巢狀檔的
+    slug 與 sid 不遺失。
     """
     base = root or (platform_utils.claude_home() / "projects")
     rows: list[tuple[str, str, str, bool, str]] = []
-    for jsonl in sorted(base.glob(_TRANSCRIPT_GLOB)):
+    for jsonl in transcript_files(base):
         try:
             text = jsonl.read_text(encoding="utf-8", errors="replace")
         except OSError:
@@ -207,7 +219,7 @@ def transcript_commands(
                 command = tool_input.get("command")
                 if isinstance(command, str) and command.strip():
                     rows.append((
-                        command, f"{jsonl.parent.name}/{jsonl.name}:{lineno}",
+                        command, f"{jsonl.relative_to(base).as_posix()}:{lineno}",
                         f"逐字稿 assistant tool_use name={block.get('name')} 的 "
                         f"input.command＝PreToolUse payload 的 tool_input.command 同一欄位",
                         bool(tool_input.get("run_in_background")),
@@ -268,6 +280,8 @@ def main(argv: list[str] | None = None) -> int:
         mine = [r for r in records if r["corpus"] == corpus]
         total = sum(r["occurrences"] for r in mine)
         print(f"[{corpus}] 母體 {total} 筆／去重後 {len(mine)} 種唯一字面")
+        if corpus == "transcripts":   # 掃描檔數現印：glob 哪天又被收窄，這個數會先掉
+            print(f"    掃描逐字稿檔 {len(transcript_files())} 個（glob={_TRANSCRIPT_GLOB}）")
         for name in ("git", "waitform"):
             sel = [r for r in mine if r["hits"].get(name)]
             if args.predicate in (name, "all"):

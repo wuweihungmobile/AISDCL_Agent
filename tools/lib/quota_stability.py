@@ -54,7 +54,7 @@ from pathlib import Path
 import endurance_env  # noqa: E402  # 持久目錄 SSOT（同 quota_availability.py 的依賴面）
 import quota_ledger  # noqa: E402  # R102：`with_lock()` 互斥原語（同 quota_availability.py）  round-label-ok
 import quota_policy  # noqa: E402  # 帶別常數（BAND_PREPARE／BAND_HALT）；零 I/O，可安全依賴
-from quota_messages import _aware  # noqa: E402  # ISO 字串 → aware datetime 的唯一解析器
+from quota_messages import RESET_ARM_HORIZON_SECONDS, _aware  # noqa: E402  # 解析器＋6 小時尺
 
 #: PRD (c) 舊條文（v2.0~v2.1.7）點名的 DRAINING／FREEZING 帶別，逐格對映
 #: `quota_gate.DRAINING_BANDS`（R91 既有登記：`(BAND_PREPARE, BAND_HALT)`）。本檔不
@@ -72,6 +72,11 @@ SAFETY_BANDS = frozenset({quota_policy.BAND_PREPARE, quota_policy.BAND_HALT})
 #: PRD (d) 逐字出廠值：300 秒。可由 `.env`／`Policy.min_dwell_seconds` 調（見 `quota_policy.py`
 #: 該欄位註解），本檔的常數只是**函式簽章的預設值**，不是唯一的家。
 MIN_DWELL_SECONDS_DEFAULT = 300.0
+
+#: DEF-200-466：量不到時沿用持久 cap 的年齡上限（見 `stabilize()` 的量不到分支）。取
+#: `quota_messages.RESET_ARM_HORIZON_SECONDS`＝同一把「6 小時內才算近」的尺，不另寫字面；
+#: 刻意不進 `Policy`（零 I/O 判讀層不收旋鈕，要調時再升級）。
+MAX_HELD_AGE_SECONDS = RESET_ARM_HORIZON_SECONDS
 
 #: 持久化檔名（住 `endurance_env.trace_dir()`）。不帶 session id。🔴 DEF-200-437：鍵＝
 #: （模型家族, 尺），不再是帳號級單檔。舊理由（同 `quota_availability.STATE_NAME`：平穩歷史
@@ -156,12 +161,15 @@ def save_state(state: StabilityState | None, path: Path | None = None,
 
 def stabilize(prev: StabilityState | None, target: int, band: str, now: datetime, *,
              min_dwell_seconds: float = MIN_DWELL_SECONDS_DEFAULT,
-             unmeasured: bool = False) -> StabilityState:
+             unmeasured: bool = False,
+             max_age_seconds: float = MAX_HELD_AGE_SECONDS) -> StabilityState:
     """遲滯的**一步**（純函式，紅綠由呼叫端合成注入自證；同 `quota_availability.advance()`）。
 
     `target`＝這一刻 `decide()` 算出來的 cap（**呼叫端必須先排除 `None`**，見 `evaluate()`）。
     沒有歷史（`prev is None`）⇒ 直接採用這一刻的目標值，不偽造停留時間（同
     `quota_availability._default_state` 的既有紀律）。
+    DEF-200-466：量不到時前值老於 `max_age_seconds`（或落款讀不懂）⇒ 視同沒有歷史，同上；
+    只限這一刻讀數也量不到（`band` 為 unmeasured）——讀數已回來、僅可得性遲滯未離開者不放。
     """
     if prev is None:
         return StabilityState(target, now.isoformat(timespec="seconds"))
@@ -177,9 +185,17 @@ def stabilize(prev: StabilityState | None, target: int, band: str, now: datetime
         # 相容（`quota_gate.py` 兩處呼叫皆傳入 `decision.band`），本函式內部不再用它限速。
         return StabilityState(target, now.isoformat(timespec="seconds"))
     # target > current：放寬方向
-    if unmeasured:
-        return prev  # PRD (a) 接線：量不到 ⇒ 放寬方向全部失效，維持不變
     changed_at = _aware(prev.last_change)
+    if unmeasured:
+        # DEF-200-466：量不到時維持前值，但持久 cap 沒有東西會讓它自己過期——上一個視窗的
+        # halt 殘值（0）會被無限期沿用。老於 `max_age_seconds` ⇒ 視同沒有可信歷史、採目標值
+        # （同 `prev is None`）。只放掉「這一刻的讀數也量不到」的（band＝unmeasured，目標＝
+        # degraded 下限）：讀數已回來、只是可得性遲滯還沒離開時 band 是真實水位帶，仍維持前值
+        # ——PRD (a) 的離開遲滯與 (c) 的每次至多 +1 不被年齡繞過。量得到分支完全不動。
+        stale = changed_at is None or (now - changed_at).total_seconds() > max_age_seconds
+        if stale and band == quota_policy.BAND_UNMEASURED:
+            return StabilityState(target, now.isoformat(timespec="seconds"))
+        return prev  # PRD (a) 接線：量不到 ⇒ 放寬方向全部失效，維持不變
     dwell = (now - changed_at).total_seconds() if changed_at is not None else min_dwell_seconds
     if dwell < min_dwell_seconds:
         return prev  # (d) 尚未停留滿：不允許增加
@@ -189,12 +205,14 @@ def stabilize(prev: StabilityState | None, target: int, band: str, now: datetime
 def evaluate(target: int | None, band: str, now: datetime, *,
             min_dwell_seconds: float = MIN_DWELL_SECONDS_DEFAULT,
             unmeasured: bool = False, scope: str | None = None,
-            ruler: str = RULER_GATE) -> int | None:
+            ruler: str = RULER_GATE,
+            max_age_seconds: float = MAX_HELD_AGE_SECONDS) -> int | None:
     """**唯一正規入口**：讀舊狀態 → 套用平穩機制 → 落地 → 回傳穩定後的 cap。
 
     `target=None`（free 帶）⇒ 直接放行且清空持久狀態（見檔頭），回 `None`。
     `scope`／`ruler`＝遲滯歷史的鍵（DEF-200-437，見 `STATE_NAME` 上方）：呼叫端傳它自己的
     active_model 與尺；free 帶只清**自己**那一份。
+    `max_age_seconds`＝量不到時沿用前值的年齡上限，透傳給 `stabilize()`（DEF-200-466）。
     """
     if target is None:
         save_state(None, scope=scope, ruler=ruler)
@@ -202,7 +220,8 @@ def evaluate(target: int | None, band: str, now: datetime, *,
 
     def _critical_section() -> StabilityState:
         nxt = stabilize(load_state(scope=scope, ruler=ruler), target, band, now,
-                        min_dwell_seconds=min_dwell_seconds, unmeasured=unmeasured)
+                        min_dwell_seconds=min_dwell_seconds, unmeasured=unmeasured,
+                        max_age_seconds=max_age_seconds)
         save_state(nxt, scope=scope, ruler=ruler)
         return nxt
     # 🔴 R102 修復（四方審查 F24／QA MUST FIX）：同 `quota_availability.evaluate()`——  round-label-ok  # noqa: E501

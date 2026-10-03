@@ -3,8 +3,9 @@ r"""Session 守門的單一指令驗收：唯讀蒐集既有狀態，印一份 J
 
 用途：Q4′（每個平台至少一筆「statusLine 已安裝且相符、簡報給安全形態」的證據）原本要掌舵者
 手動跑十餘項清單；本檔收成一條指令，整份輸出貼回即可由別台機器讀檔判定。零 subprocess、
-不呼叫 `--pace`、不碰額度路徑；唯一的寫入是 `trace_dir()` 下的
-`session_gate_acceptance_<host>.json`。
+不呼叫 `--pace`、不碰額度路徑；唯一的檔案寫入是 `trace_dir()` 下的
+`session_gate_acceptance_<host>.json`（另有 planner `--check` 推進「未讀結局」游標的
+副作用，見下段）。
 
 Windows 執行形態（不用 cd）：
 & (Join-Path $repo '.venv\Scripts\python.exe') (Join-Path $repo 'tools\session_gate_acceptance.py')

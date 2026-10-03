@@ -4,7 +4,8 @@
 槽位：輪號 R{{ROUND}}、起算 HEAD `{{HEAD}}`、日期 {{DATE}}、上輪 {{PREV_ROUND}}。
 
 ## Q1 上輪修法在 HEAD 的回歸（單模組、背景阻塞、rc 逐字）
-對上輪的每個修法跑對應單模組測試。🔴 必須 `cd tools/tests` 後用 `python -m unittest <module>`：從 repo
+對上輪的每個修法跑對應單模組測試。🔴 必須 `cd tools/tests`（Windows：`Push-Location '<repo>\tools\tests'`
+… `Pop-Location` 在同一次呼叫內成對，禁裸 `cd`）後用 `python -m unittest <module>`：從 repo
 根用點路徑會 ImportError 而整模組靜默沒跑——兩種都試一次，貼實際生效的那條。大檔用 `run_in_background: true`
 配 `> "$SP/x.log" 2>&1; echo REAL_RC=$?`，等它真的結束再讀。每支貼 unittest 最後兩行（`Ran N tests` 與
 `OK`／`FAILED`）＋`rc=`；有紅就貼紅燈全文。
@@ -24,6 +25,8 @@ planner 現查在第幾個 tool_use／助理文字中命中「被擋／無法寫
 
 ## Q4 Q4′ Mac
 `python tools/install_statusline.py --status > "$SP/x.log" 2>&1; echo rc=$?`，逐字貼。Windows 證據缺席＝不通過。
+Windows：`install_statusline.py --status` 與丙案 JSON（`tools/session_gate_acceptance.py` 的產物）皆由主控提供；
+QA 不跑 `session_gate_acceptance.py`（它會推進未讀結局游標），只讀主控貼出的輸出或檔案。
 
 ## Q5 量測器能力缺口
 用 Q2 的實跑結果對照判準②′ 的五個量，列「已有／缺」清單（給 Developer 的最小增量規格；不是你去改）。

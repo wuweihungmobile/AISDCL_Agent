@@ -1539,6 +1539,12 @@ class TestIronLaw6ZshHasNoUppercasePipestatus(unittest.TestCase):
             self.assertEqual(G.waitform_hits(command), [])
 
 
+#: 範圍句裡「本身都能用」的工具清單。Windows 上 Bash 工具被鐵律一停用（DEF-200-469），寫
+#: 「Bash 本身都能用」是假話 ⇒ 兩個平台各一份；刻意**不**從 hook 匯入，否則抓不到寫錯的那一份。
+_USABLE_TOOLS = ("PowerShell／Read／Write／Edit" if sys.platform == "win32"
+                 else "Bash／Read／Write／Edit")
+
+
 class TestIronLaw6ZshPipestatusEndToEnd(unittest.TestCase):
     """真的起 child 行程：rc、首行解法、行內豁免、無人看管。`SHELL` 由本測試顯式給，
     不繼承執行者的殼（否則同一支測試在 mac 與 CI 會判出不同的結果）。"""
@@ -1570,16 +1576,38 @@ class TestIronLaw6ZshPipestatusEndToEnd(unittest.TestCase):
         self.assertEqual(proc.returncode, 2, proc.stderr)
         self.assertIn("無人看管", proc.stderr)
 
-    def test_every_one_line_fix_says_this_call_did_not_run_and_bash_still_works(self) -> None:
+    def test_every_one_line_fix_says_this_call_did_not_run_and_the_tools_still_work(self) -> None:
         """首行的主語：此前「已擋下」沒說誰被擋——前綴是 harness 加的 hook error，新視窗的
         模型會把它讀成「Bash／寫檔都被擋」。兩種首行（`$?` 形與 zsh 形）一律先說這一次呼叫
-        沒執行、只擋這條指令字串。"""
+        沒執行、只擋這條指令字串。「本身都能用」的工具清單依平台各寫各的（DEF-200-469）。"""
         for command, env in ((TestIronLaw6RcMaskedByPipeEndToEnd._BAD, {}), (self._BAD, self._ZSH)):
             with self.subTest(command=command):
                 first = run_hook(bash_payload(command), env=env).stderr.splitlines()[0]
-                for needle in ("這一次呼叫沒有執行", "只擋這條指令字串", "Bash／Write／Edit"):
+                for needle in ("這一次呼叫沒有執行", "只擋這條指令字串", _USABLE_TOOLS):
                     self.assertIn(needle, first)
                 self.assertNotIn("已擋下", first)
+                if sys.platform == "win32":
+                    self.assertNotIn("Bash／", first, "Windows 上 Bash 被鐵律一停用，不得寫它能用")
+
+
+class TestEveryBlockMessageLeadsWithTheScopeSentence(unittest.TestCase):
+    """DEF-200-469：harness 會在 hook 的 stderr 前加 `PreToolUse:<工具> hook error: [載具 hook]:`
+    （約 190 字元），新視窗讀到的第一個詞是 "hook error" ⇒「只擋這一次呼叫、哪些工具照常可用」
+    必須是 hook 輸出的**第一句**——不只 ④ 單獨命中那一種，每一種阻斷都一樣。"""
+
+    def test_the_first_line_is_the_scope_sentence_whatever_blocked(self) -> None:
+        for label, command, env in (
+                ("毀滅性 git", "git stash", {}),
+                ("等待機制", "nohup ./a.sh > log 2>&1 &", {}),
+                ("兩族混合", "git stash\nnohup ./a.sh > log 2>&1 &", {}),
+                ("無人看管的授權邊界", "git push", {G.UNATTENDED_ENV: "1"})):
+            with self.subTest(case=label):
+                proc = run_hook(bash_payload(command), env=env)
+                self.assertEqual(proc.returncode, 2, proc.stderr)
+                first = proc.stderr.splitlines()[0]
+                self.assertTrue(first.startswith("🔴 這一次呼叫沒有執行（只擋這條指令字串，"),
+                                first)
+                self.assertIn(_USABLE_TOOLS, first)
 
 
 class TestTheFalsePositiveCensusIsRerunnable(unittest.TestCase):
@@ -1653,6 +1681,119 @@ class TestTheFalsePositiveCensusIsRerunnable(unittest.TestCase):
             rows = C.transcript_commands(Path(tmp))
         self.assertEqual([r[0] for r in rows], ["nohup ./a.sh & echo x"])
         self.assertIn("tool_input.command", rows[0][2])   # 逐筆歸屬理由必須寫出欄位來源
+
+    def test_the_transcript_extractor_recurses_into_subagent_transcripts(self) -> None:
+        """DEF-200-472：子 agent／workflow 逐字稿住在 `<slug>/<sid>/subagents/…`（workflow 再深
+        一層）。只掃第一層 ⇒ 母體只含主逐字稿，「假紅 0」只對那一塊成立，而輸出與「很乾淨」
+        同形。母體大小是機器本地的量測值，所以本鎖只用合成目錄，不斷言任何本機數字。"""
+        sys.path.insert(0, str(_REPO_ROOT / "tools" / "probe"))
+        import shell_command_corpus as C  # noqa: PLC0415
+        placed = {"slug/sid.jsonl": "echo main", "slug/sid/subagents/agent-a.jsonl": "echo sub",
+                  "slug/sid/subagents/workflows/wf_1/agent-b.jsonl": "echo wf",
+                  "slug/sid/subagents/agent-c.jsonl": "echo main"}   # 與主檔同一字串
+        with tempfile.TemporaryDirectory(prefix="def472-corpus-") as tmp:
+            for rel, command in placed.items():
+                path = Path(tmp) / rel
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(json.dumps({"message": {"content": [
+                    {"type": "tool_use", "name": "Bash", "input": {"command": command}}]}}) + "\n",
+                    encoding="utf-8")
+            rows = C.transcript_commands(Path(tmp))
+        self.assertEqual(sorted(r[0] for r in rows),
+                         ["echo main", "echo main", "echo sub", "echo wf"])
+        sources = {r[0]: r[1] for r in rows}
+        # 來源座標＝相對路徑：巢狀檔不得只剩 `subagents/agent-….jsonl`（slug 與 sid 遺失）
+        self.assertEqual(sources["echo sub"], "slug/sid/subagents/agent-a.jsonl:1")
+        self.assertEqual(sources["echo wf"], "slug/sid/subagents/workflows/wf_1/agent-b.jsonl:1")
+        with mock.patch.object(C, "transcript_commands", return_value=rows):
+            recs = C.build(["transcripts"], "none")      # 去重鍵不變：同字串跨檔＝唯一 1、次數 2
+        self.assertEqual({r["command"]: r["occurrences"] for r in recs},
+                         {"echo main": 2, "echo sub": 1, "echo wf": 1})
+
+
+#: DEF-200-463：(needle, kind, ((tool, 見證指令), …))。needle＝該項在檔頭〈誠實劃界〉登記補遺
+#: 裡的**唯一**關鍵詞；kind＝`miss`（登記的是漏擋 ⇒ 見證必須仍放行）／`block`（登記的是誤擋
+#: ⇒ 見證必須仍被擋）。Start-Process 只對引號引數成立；未加引號的 `-ArgumentList stash` 會被擋。
+_REGISTERED_GAPS = (
+    ("${#", "miss", (("Bash", "echo ${#x}; git stash"),)),
+    ("光桿執行檔", "miss", (("Bash", '"git" stash'), ("PowerShell", "& 'git' stash"))),
+    ("Start-Process", "miss", (
+        ("PowerShell", 'iex "git stash"'), ("PowerShell", 'Invoke-Expression "git stash"'),
+        ("PowerShell", 'cmd /c "git stash"'),
+        ("PowerShell", "Start-Process git -ArgumentList 'stash'"),
+        ("PowerShell", "pwsh -Command \"iex 'git stash'\""),
+        ("PowerShell", "pwsh -EncodedCommand ZwBpAHQAIABzAHQAYQBzAGgA"))),   # UTF-16LE b64
+    ("nohup", "miss", (("Bash", 'bash -c "nohup sleep 9 &"'), ("Bash", "eval 'nohup sleep 9 &'"))),
+    ("拼接", "miss", (("Bash", 'bash -c "echo \\"x\\"; git stash"'),
+                    ("Bash", "bash -c 'echo '\"'\"'x'\"'\"'; git stash'"))),
+    ("<<<", "miss", (("Bash", "bash <<< 'git stash'"),)),
+    ("trap", "miss", (("Bash", "trap 'git stash' EXIT"),)),
+    ("P05", "block", (("PowerShell", 'Write-Output "abc`"; git stash"'),)),
+    ("描述文字", "block", (("PowerShell", "$r = @'\nbash -c 'git stash'\n'@"),
+                         ("Bash", "echo 'subprocess.run([\"git\",\"stash\"])' > n.py"))),
+)
+
+
+def _guard_hits(tool: str, command: str) -> list[str]:
+    """兩族判準合起來的命中＝hook `main()` 會不會阻斷這條指令。"""
+    return (G.destructive_git_hits(command, start_dir=str(_REPO_ROOT))
+            + G.waitform_hits(command, run_in_background=False, tool=tool))
+
+
+class TestRegisteredGapsAreWitnessed(unittest.TestCase):
+    """DEF-200-463：檔頭〈誠實劃界〉的「登記補遺」是**機械記錄**，不是散文（體例同
+    `TestR84ArgvExecPrefix.test_the_boundary_is_recorded_not_pretended_closed`）。
+
+    兩個方向都咬：守衛哪天抓到某個漏擋形態（或不再誤擋），登記就必須改，否則下一輪的人
+    以為那一類還沒修；登記與見證表多登少登皆紅。刻意**不**對本機活逐字稿斷言「零實例」
+    （機器本地量測值，換一台機器就假紅）；語料實例數現跑 `shell_command_corpus.py`。
+    """
+
+    def _registered_items(self) -> list[str]:
+        doc = G.__doc__ or ""
+        self.assertIn("**登記補遺**", doc, "檔頭〈誠實劃界〉的「登記補遺」段不見了")
+        return re.split(r"\n  · ", doc.split("**登記補遺**", 1)[1])[1:]
+
+    def test_every_registered_gap_is_still_what_the_registry_says(self) -> None:
+        for needle, kind, witnesses in _REGISTERED_GAPS:
+            for tool, command in witnesses:
+                with self.subTest(gap=needle, command=command):
+                    hits = _guard_hits(tool, command)
+                    if kind == "miss":
+                        self.assertEqual(hits, [], f"{command!r} 現在被擋下了 ⇒ 登記補遺的"
+                                         f"「{needle}」該改了：移到「已修」並同步刪見證表那一列")
+                    else:
+                        self.assertTrue(
+                            hits, f"{command!r} 不再誤擋 ⇒ 登記補遺的「{needle}」該改了")
+
+    def test_the_registry_and_the_witness_table_correspond_one_to_one(self) -> None:
+        items = self._registered_items()
+        for needle, kind, _witnesses in _REGISTERED_GAPS:
+            with self.subTest(gap=needle):
+                owners = [i for i in items if needle in i]
+                self.assertEqual(
+                    len(owners), 1, f"登記補遺裡含 {needle!r} 的項目有 {len(owners)} 個")
+                self.assertTrue(owners[0].startswith("漏擋" if kind == "miss" else "誤擋"),
+                                f"{needle!r} 的極性（漏擋／誤擋）與登記不符")
+        unwitnessed = [i[:24] for i in items if sum(n in i for n, _k, _w in _REGISTERED_GAPS) != 1]
+        self.assertEqual(unwitnessed, [],
+                         "登記了卻沒有（或不只一條）見證的項目：新登記要同步加見證")
+
+    def test_the_controls_prove_the_witnesses_are_not_vacuous(self) -> None:
+        """對照組：同一個呼叫面餵會被擋的形態必須有命中，否則「見證回 []」只是呼叫姿勢錯了。
+        後三條釘住登記的**形態專屬**：Start-Process 未加引號的引數形、`pwsh -Command` 直形態
+        （兩工具）會被擋，不是整族漏；資料區段內的純散文不被擋，誤擋只限 `-c`／argv 形態字面。"""
+        for tool, command in (("Bash", "git stash"), ("Bash", "bash -c 'git stash'"),
+                              ("PowerShell", "git reset --hard"), ("Bash", "nohup sleep 9 &"),
+                              ("PowerShell", "Start-Process git -ArgumentList stash"),
+                              ("PowerShell", 'pwsh -Command "git stash"'),
+                              ("Bash", 'pwsh -Command "git stash"')):
+            with self.subTest(command=command):
+                self.assertTrue(_guard_hits(tool, command),
+                                f"對照組 {command!r} 竟放行 ⇒ 見證失去鑑別力")
+        prose = "$r = @'\nnote: git stash is dangerous\n'@"
+        self.assertEqual(_guard_hits("PowerShell", prose), [],
+                         "資料區段內的純散文被擋 ⇒ 誤擋登記該放寬描述")
 
 
 class TestTheHookStaysInsideItsLocTier(unittest.TestCase):

@@ -270,9 +270,14 @@ _BASH_HINT = (
 #: 🔴 出口寫在**第一行**（R78／SA-01 附帶）：上一版把它放在頁尾，第一次撞到的人
 #: 先讀到的是三段責備、最後才看到出口——而「窄守衛必須有出口」正是本檔的設計前提，
 #: 出口看不見等於沒有。
+#: 🔴 DEF-200-469：範圍句是**任何一種**阻斷訊息的第一句（lint 命中與無人看管的授權邊界皆然），
+#: 且在出口之前、同在第一行——harness 的 `hook error` 前綴會把 hook 自己的第一句擠到約 190
+#: 字元之後，無主語的出口會被讀成「PowerShell 整支被擋」。
+_SCOPE = ("🔴 這一次呼叫沒有執行（只擋這條指令字串；"
+          "PowerShell／Read／Write／Edit 本身都能用）。")
 _HEADER = (
-    "🔴 需要就地寫出這個形態？在指令內加行內豁免 `# ps-lint-ok: <理由>`（理由必填）"
-    "即放行——寫文件／寫探針／重現缺陷本來就會寫出違規形態，那不是違規。\n"
+    _SCOPE + "要就地寫出這個形態？加行內豁免 `# ps-lint-ok: <理由>`（理由必填）即放行——"
+    "寫文件／寫探針／重現缺陷本來就會寫出違規形態，那不是違規。\n"
     "以下是本次命中的項目：\n\n"
 )
 _FOOTER = (
@@ -535,7 +540,8 @@ def main() -> int:
         if os.environ.get(UNATTENDED_ENV):
             blocked = unattended_hits(command)
             if blocked:
-                sys.stderr.write(authz_header("ps-lint-ok") + "\n".join(blocked) + "\n")
+                sys.stderr.write(
+                    _SCOPE + "\n" + authz_header("ps-lint-ok") + "\n".join(blocked) + "\n")
                 return 2
 
         hits = lint_command(command)

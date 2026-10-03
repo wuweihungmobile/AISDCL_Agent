@@ -134,7 +134,9 @@ def resolve_transcript_source(session_id: str | None = None, transcript: str | N
         candidate = Path(transcript)
         return (candidate if candidate.is_file() else None), harness_feed.SOURCE_TRANSCRIPT
     base = project_transcript_dir(repo_root or _REPO_ROOT)
-    if not base.is_dir():
+    # DEF-200-471：本 slug 目錄可以不存在（只從子目錄啟動過）——跨 slug 的 sid 搜尋只需要上層
+    # projects 目錄在；兩者皆無才是真的找不到。
+    if not (base.is_dir() or base.parent.is_dir()):
         return None, ""
     return harness_feed.pick_transcript(base, session_id, os.environ)
 

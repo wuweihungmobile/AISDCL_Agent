@@ -48,7 +48,8 @@ SDD FSM 行八格＋SA-01 查證指令安全形態三格＋SA-02 人看得到的
 `CheckPrintsTheSddFsmLineTest`（`sdd_fsm_line`）。
 
 唯讀退路與單一導出：`verify_hint()` 尾端附「Bash／寫檔被拒時改用 Read 讀 feed 檔與額度快取」
-（路徑由 `_read_targets()` 從既有 SSOT 解出）；`rc2_clarify()` 的收斂型工具清單句只呼叫
+（路徑由 `_read_targets()` 從既有 SSOT 解出；其後一句說明權限詢問是 harness 權限層、不是 hook
+阻斷——Read 目標在 cwd 外、planner 現查也常要核准）；`rc2_clarify()` 的收斂型工具清單句只呼叫
 `quota_messages.convergent_tools_clause()`；`AUTOSDD_UNATTENDED` 有設時簡報追加治理檔唯讀一句。
 回歸鎖：`test_session_brief.py` 的 `ConvergentToolsClauseSingleHomeTest`／`ReadFallbackHintTest`。
 """
@@ -147,7 +148,8 @@ _READ_FALLBACK = (
     "若 Bash／寫檔被拒（含 auto mode 分類器暫時不可用的訊息），真實數據仍可用 **Read** 工具"
     "唯讀取得：context 水位讀 {feed}（statusLine 寫的 JSON；`context_window.used_percentage`"
     "／`current_usage`／`context_window_size`），額度讀 {quota}（`axes[]` 的 `kind`／`pct`／"
-    "`severity`）；不要憑簡報猜，也不要宣稱被擋。")
+    "`severity`）；不要憑簡報猜，也不要宣稱被擋。若跳出權限詢問，那是 harness 權限層、"
+    "不是 hook 阻斷，核准即可。")
 
 
 def verify_hint(windows: bool | None = None, *, feed: str | None = None,

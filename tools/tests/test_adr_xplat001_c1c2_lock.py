@@ -619,27 +619,27 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 397,
     "_ps_engine.py": 83,
     "test_act_local_runner_image.py": 307,
-    "test_adr_xplat001_c1c2_lock.py": 8649,
+    "test_adr_xplat001_c1c2_lock.py": 8670,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 4073,
     "test_bash32_compat.py": 979,
     "test_bash_probe_spec_contract.py": 859,
-    "test_block_destructive_git_r83.py": 3281,
+    "test_block_destructive_git_r83.py": 3422,
     "test_bootstrap_core.py": 439,
     "test_bootstrap_ps1.py": 160,
     "test_check_archive_required.py": 160,
     "test_check_defect_log_crossref.py": 3906,
     "test_check_gha_action_versions.py": 295,
-    "test_check_hooks_liveness.py": 3630,
+    "test_check_hooks_liveness.py": 3658,
     "test_check_pytest_baseline_sites.py": 301,
     "test_check_script_parity.py": 2029,
     "test_check_wrapper_thinness.py": 1177,
     "test_ci_gate_xdist_allowlist.py": 395,
-    "test_claim_provenance_r86.py": 1426,
+    "test_claim_provenance_r86.py": 1743,
     "test_clean_venv_carrier.py": 281,
     "test_component_sanitizer_shared_layer_lock.py": 274,
-    "test_context_budget_guard.py": 14468,
+    "test_context_budget_guard.py": 14578,
     "test_context_window_parity.py": 325,
     "test_cpu_budget.py": 428,
     "test_defect_id_reference_integrity.py": 276,
@@ -657,7 +657,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_hook_carrier_symlink.py": 153,
     "test_install_statusline.py": 446,
     "test_install_windows_nightly.py": 1355,
-    "test_mac_endurance_r83.py": 2201,
+    "test_mac_endurance_r83.py": 2204,
     "test_mac_readiness_r82.py": 626,
     "test_macos_smoke_skip_honesty.py": 221,
     "test_maturity_criteria_r79.py": 412,
@@ -674,7 +674,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_ps51_compat.py": 602,
     "test_ps_engine_ssot.py": 905,
     "test_python_c_percent_shim.py": 113,
-    "test_quota_policy.py": 4264,
+    "test_quota_policy.py": 4415,
     "test_quota_reconcile_gap.py": 145,
     "test_recovery_hint_passes_ps_lint.py": 103,
     "test_root_guard_known_model_r145.py": 240,
@@ -684,8 +684,8 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_schedule_capability_parity.py": 598,
     "test_script_scan_surface_ssot.py": 376,
     "test_sdd_hook_router_r158.py": 189,
-    "test_sentinel_tick_e2e_r145.py": 297,
-    "test_session_brief.py": 1221,
+    "test_sentinel_tick_e2e_r145.py": 308,
+    "test_session_brief.py": 1233,
     "test_single_venv_identity.py": 162,
     "test_skip_ceiling_ratchet_direction.py": 719,
     "test_skip_discoverability_r83.py": 731,
@@ -2550,6 +2550,17 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "test_context_budget_guard.py +9＋本表自身漂移（重釘列、回歸鎖軌同輪列、"
      "到期兌現列、接鏈列）。主軌 ≤ 521（款(11) 連續上升第 1 輪，R191 歸零後）。"
      "逐檔清單見 CrossPlatform_R192_FiveQuestion_Convergence_Evidence.md〈四〉〈九〉。"),
+    ("R193", 112937, 113731, +794,  # round-label-ok
+     "[非淨減法輪][回歸鎖軌申報 309（＝軌上限），見 _REGRESSION_LANE_LOG 同輪列] "
+     "掌舵者五問首次 Windows 執行輪（DEF-200-463／466／471／472 結案回歸鎖"
+     "＋②′ 量測器與協定修正鎖＋hook 範圍句平台鎖）：test_claim_provenance_r86.py +317／"
+     "test_quota_policy.py +151／test_block_destructive_git_r83.py +141／"
+     "test_context_budget_guard.py +110／test_check_hooks_liveness.py +28／"
+     "test_session_brief.py +12／test_sentinel_tick_e2e_r145.py +11（480 對機器 .env 密封）／"
+     "test_mac_endurance_r83.py +3＋本表自身漂移（重釘列、"
+     "回歸鎖軌同輪列、接鏈列、U9 具名展延）。主軌 485 ≤ 521（款(11) 連續上升第 2 輪，"
+     "R192 為第 1 輪；R194 主軌必須 ≤ 0）。逐檔清單見 "
+     "CrossPlatform_R193_FiveQuestion_Windows_Closure_Evidence.md〈四〉〈六〉。"),
 )
 
 
@@ -2997,6 +3008,12 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "DEF-200-469（不受影響句單一導出的 grep 鎖與兩平台集合鎖；test_session_brief.py 約 110）"
      "合計 309 申報回歸鎖軌；其餘（T3 唯讀退路、丙案驗收腳本 10 格）歸主軌。"
      "見 CrossPlatform_R192_FiveQuestion_Convergence_Evidence.md〈四〉〈九〉。"),
+    ("R193", 309,  # round-label-ok
+     "DEF-200-466（年齡上限限定 unmeasured＋訊息同源；test_quota_policy.py +151）、"
+     "DEF-200-471（跨 slug 48 格 writer==reader 矩陣；test_context_budget_guard.py +110）、"
+     "DEF-200-463／472（登記雙向鎖＋遞迴語料鎖；test_block_destructive_git_r83.py 部分 48）"
+     "——母項 794 超出軌上限 ⇒ 部分申報 309（＝軌上限，同 R152／R169 先例），餘額歸主軌"
+     "由款(10)(11) 照算。見 CrossPlatform_R193_FiveQuestion_Windows_Closure_Evidence.md〈四〉。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -3062,7 +3079,10 @@ def _regression_lane_cap_basis() -> tuple[str, int]:
 # 🔴 R188 具名展延（鐵律七，不得靜默沿用）round-label-ok：DEF-200-447／449 AutoClaude hook 出聲
 # 修復收尾單人窗口（護欄層記帳），非 root-tools 重構持有面；真拆待獨立窗口，
 # 188 → 193（在 lookahead=5 內，已達上界；前次具名展延 183 → 188）。
-_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND = 193
+# 🔴 R193 具名展延（鐵律七，不得靜默沿用）round-label-ok：五問首次 Windows 執行輪，持有面全在
+# hook／量測器／協定與結案回歸鎖（護欄層記帳），非 root-tools 重構；真拆仍待獨立窗口，
+# 193 → 198（在 lookahead=5 內，已達上界；前次具名展延 188 → 193）。
+_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND = 198
 #: 清償旗標——真拆完成後改 True。刻意用布林而非重建舊尺計數器（ADR §9.3「舊尺已廢」）。
 _ROOT_TOOLS_OLD_SCALE_DEBT_RESOLVED = False
 #: A-2 後設鎖：到期輪只准落在「現查輪＋lookahead」內，推遠（如 9999）當場紅；shrink-only
@@ -3215,10 +3235,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 323
+_REPIN_LOG_FROZEN_PREFIX_LEN = 324
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "8b3ab8b64522a97aecfae21cae490a735ffe8531bcbc54b785d4f0e8634311bb")
+    "84991a4ce0d593fc7cc87e07ef6558867f22d0ac774a8d5cc1266f6f4702bdfd")
 
 
 def repin_log_history_digest(
@@ -3572,6 +3592,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R190", "7747db3fd2bc", "22765c3a1d2f", "DEF-200-455"),  # round-label-ok
     ("R191", "22765c3a1d2f", "e5dd2c337e82", "DEF-200-460"),  # round-label-ok
     ("R192", "e5dd2c337e82", "8b3ab8b64522", "DEF-200-467"),  # round-label-ok
+    ("R193", "8b3ab8b64522", "84991a4ce0d5", "DEF-200-474"),  # round-label-ok
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

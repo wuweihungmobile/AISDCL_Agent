@@ -166,11 +166,14 @@ mac 清掉的檔案與 Windows 一模一樣，而事故就發生在 macOS——�
   引號外的反斜線規則是 bash 語意，該引號被當跳脫 ⇒ 同行尾巴漏擋（修前命中）。代價：同一條指令
   若同時有失同步與合法的多行字串，後者內部會被第二視圖當成可執行結構（方向是誤擋、不是漏擋）。
   史料見本輪證據檔〈九〉。
-· **登記補遺**（SD-03／ARCH-02，不改判準）：皆為合成形態，真實語料〈5,264 條唯一指令〉
-  零實例，P3／P4。
+· **登記補遺**（SD-03／ARCH-02，不改判準）：皆為合成形態，P3／P4。真實語料的實例數是
+  量測值（母體含子 agent 逐字稿）：現跑 `python tools/probe/shell_command_corpus.py --summary`，
+  不寫成常數。機械記錄＝`tools/tests/test_block_destructive_git_r83.py::TestRegisteredGapsAreWitnessed`
+  （DEF-200-463）：每項各有見證指令，守衛哪天抓到（或不再誤擋）即紅；登記與見證表多登少登皆紅。
   · 漏擋：`${#…}` 的 `#` 被當註解吃掉同行尾巴。
   · 漏擋：引號包住的光桿執行檔 `"git" stash`、`& 'git' stash`（同上「執行檔路徑被引號包住」一族）。
-  · 漏擋：載具 `iex`／`Invoke-Expression`、`cmd /c "…"`、`Start-Process`；`pwsh -Command`
+  · 漏擋：載具 `iex`／`Invoke-Expression`、`cmd /c "…"`、`Start-Process`（只對引數被引號包住
+    的形態：`-ArgumentList 'stash'`；未加引號的 `-ArgumentList stash` 會被擋）；`pwsh -Command`
     只漏 operand 內再包 `iex`／`-EncodedCommand` 的形態（直形態兩工具皆擋，複審鏡實測）。
   · 漏擋：`-c`／`eval` operand 內的 `nohup … &`（判準①看不到 operand 內部）。
   · 漏擋：`-c` operand 的 `\\"` 跳脫與 `'"'"'` 拼接。
@@ -178,6 +181,9 @@ mac 清掉的檔案與 Windows 一模一樣，而事故就發生在 macOS——�
   · 漏擋：`trap 'git stash' EXIT`（trap 內容在之後才執行）。
   · 誤擋（P05）：PowerShell 反引號跳脫引號內獨立成段的 `git stash`，
     例 `Write-Output "abc`"; git stash"`。
+  · 誤擋：here-string／heredoc／引號資料內的**描述文字**含 `sh -c '<毀滅性 git>'` 或
+    `["git","stash"]` 這類 `-c`／argv 形態字面（兩個平面讀原文、不經遮蔽，為了接住 heredoc 內
+    的 Python 呼叫）；用 PowerShell here-string 寫報告／測試會被擋 ⇒ 改用 Edit／Write 寫檔。
 """
 
 from __future__ import annotations
@@ -1324,7 +1330,11 @@ _WAITFORM_HEADER = (
 )
 # SA-01：④ 單獨命中時首行就給解法——正解曾埋在第三段，新視窗被擋後要讀完才找得到出口。
 # 首行先講主語：前面還有 harness 加的 hook error 前綴，無主語的「已擋下」會被讀成「Bash 被擋」。
-_RC_NOT_RUN = "🔴 這一次呼叫沒有執行（只擋這條指令字串，Bash／Write／Edit 本身都能用）："
+# DEF-200-469：範圍句是**任何一種**阻斷訊息的第一句（見 `main()` 末段）。「本身都能用」的清單依
+# 平台各寫各的——hook 零相依，自己判平台：Windows 上 Bash 工具被鐵律一停用，寫它能用是假話。
+_USABLE_TOOLS = ("PowerShell／Read／Write／Edit" if sys.platform == "win32"
+                 else "Bash／Read／Write／Edit")
+_RC_NOT_RUN = f"🔴 這一次呼叫沒有執行（只擋這條指令字串，{_USABLE_TOOLS} 本身都能用）："
 _RCPIPE_LEAD = (
     _RC_NOT_RUN + "`… | head`／`… | tail` 之後讀 `$?`，讀到的是 head／tail 的 rc。"
     "正解：`cmd > /tmp/o.log 2>&1; echo rc=$?; tail -n 20 /tmp/o.log`"
@@ -1621,7 +1631,10 @@ def main() -> int:
                         + "".join(f"   · {h}\n" for h in wait_hits)
                         + (_WAITFORM_UNATTENDED_NOTE if unattended
                            else _RCPIPE_FOOTER if rc_only else _WAITFORM_FOOTER))
-        sys.stderr.write(message)
+        # DEF-200-469：範圍句＝第一句。④ 單獨命中的 lead 自己就以它開頭，其餘（git／①②③／
+        # 授權邊界／混合）在前面補一行，不改各段標頭。
+        sys.stderr.write(message if message.startswith(_RC_NOT_RUN)
+                         else _RC_NOT_RUN + "\n" + message)
         return 2
     except Exception:  # noqa: BLE001 — fail-open 是刻意的，見模組 docstring 的 P0
         return 0

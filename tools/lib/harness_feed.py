@@ -28,23 +28,52 @@ SOURCE_ENV = f"環境變數 {SESSION_ID_ENV}"
 _LATEST_CAVEAT = "；同 slug 有多個視窗時可能不是本視窗，要精準請帶 --session-id"
 
 
+def _plain_id(value: str) -> bool:
+    """只認 ASCII 英數與 `-`／`_`：sid 不得變成路徑片段或 glob 萬用字元。"""
+    bare = value.replace("-", "").replace("_", "")
+    return bare.isascii() and bare.isalnum()
+
+
+def _find_by_sid(base: Path, sid: str) -> tuple[Path | None, str]:
+    """DEF-200-471：`<sid>.jsonl` 在哪，回 `(路徑或 None, 命中的他 slug 目錄名)`。
+    本 slug 命中或找不到時，slug 名為空字串。
+
+    逐字稿住在**啟動 cwd** 的 slug 目錄下，`base` 卻是 repo 根的 slug：從子目錄啟動的 session
+    （例如 `AutoClaude/`）落在別的 slug，只看 `base` 就找不到、轉而讀到他窗。先看 `base`，再看
+    同層其他 slug 目錄（多份取最近寫入者）；sid 不合格時不搜（glob 元字元不得進樣式）。
+    """
+    if (own := base / f"{sid}.jsonl").is_file():
+        return own, ""
+    if _plain_id(sid):
+        hits = [p for p in base.parent.glob(f"*/{sid}.jsonl") if p.is_file()]
+        if hits:
+            newest = max(hits, key=lambda p: p.stat().st_mtime)
+            return newest, newest.parent.name
+    return None, ""
+
+
+def _tag(source: str, slug: str) -> str:
+    return source + (f"（跨 slug 命中 {slug}）" if slug else "")
+
+
 def pick_transcript(base: Path, session_id: str | None, environ) -> tuple[Path | None, str]:
     """DEF-200-431：在逐字稿目錄 `base` 下決定「本視窗」是哪一支，回 `(路徑或 None, 來源標籤)`。
 
-    優先序：`--session-id` 明示（檔不存在＝`None`，明示的參數不退用）→ 環境變數
-    `CLAUDE_CODE_SESSION_ID` 且對應檔存在 → 最後修改（退用）。此前只有最後一階：掌舵者慣開
-    多視窗，另一個視窗（或 headless `claude -p`）一寫檔就成為「最後修改」，`--check`／`--pace`
-    便讀到別人的逐字稿——連「重啟指令 claude -r <id>」都是別人的 id，而「差=0」交叉比對看不出
-    被劫持（feed 依 sid 取，跟著錯的逐字稿走）。環境變數只認 `[A-Za-z0-9_-]`（不讓它變成路徑）。
+    優先序：`--session-id` 明示（本 slug → 同層他 slug 都沒有＝`None`，明示的參數不退用）→ 環境變數
+    `CLAUDE_CODE_SESSION_ID` 且對應檔存在（同樣兩段查找，DEF-200-471）→ 最後修改（退用，只看本
+    slug）。此前只有最後一階：掌舵者慣開多視窗，另一個視窗（或 headless `claude -p`）一寫檔就成為
+    「最後修改」，`--check`／`--pace` 便讀到別人的逐字稿——連「重啟指令 claude -r <id>」都是別人的
+    id，而「差=0」交叉比對看不出被劫持（feed 依 sid 取，跟著錯的逐字稿走）。環境變數只認
+    `[A-Za-z0-9_-]`（不讓它變成路徑）。
     """
     if session_id:
-        candidate = base / f"{session_id}.jsonl"
-        return (candidate if candidate.is_file() else None), SOURCE_ARG
+        hit, slug = _find_by_sid(base, session_id)
+        return hit, _tag(SOURCE_ARG, slug)
     env_sid = str(environ.get(SESSION_ID_ENV) or "").strip()
-    bare = env_sid.replace("-", "").replace("_", "")
-    if env_sid and bare.isascii() and bare.isalnum():  # 只認 ASCII 英數：docstring 與程式同一句話
-        if (candidate := base / f"{env_sid}.jsonl").is_file():
-            return candidate, SOURCE_ENV
+    if _plain_id(env_sid):  # 只認 ASCII 英數：docstring 與程式同一句話
+        hit, slug = _find_by_sid(base, env_sid)
+        if hit:
+            return hit, _tag(SOURCE_ENV, slug)
     found = [p for p in base.glob("*.jsonl") if p.is_file()]
     latest = max(found, key=lambda p: p.stat().st_mtime) if found else None
     why = (f"{SESSION_ID_ENV}={env_sid} 對應的逐字稿不存在，已退用" if env_sid

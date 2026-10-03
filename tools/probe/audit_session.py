@@ -18,8 +18,10 @@ jsonl 的事後量測器（立案實測與各判準的沿革全文見證據檔�
 通過成「本輪零違規」——那個失效方向看起來正好像「變乾淨了」，比紅更危險。
 
 設計約束（各條的實測與沿革見證據檔〈九〉）：
-  · 崩塌判準必須**逐支**：合計面的歷史總量會蓋掉「今天起每一支都抽不到」的格式變更；純問答的
-    session 是真實的假陽性——去看那一支、在交件寫明理由，不是把判準關掉。
+  · 崩塌判準必須**逐支**：合計面的歷史總量會蓋掉「今天起每一支都抽不到」的格式變更；只用過
+    已知非 shell 工具（`NON_SHELL_TOOLS`）或根本沒用過工具的 session（純問答／活體探針）不入崩塌
+    分母，否則 `--parity` 在真實窗口恆 rc=1——代價：這類 session 的格式變更不再被逐支抓到，只剩
+    合計面 `shell_calls == 0` 兜底；叫過 shell 或認不得的工具、卻一條指令都抽不到者仍是崩塌訊號。
   · 計數**逐工具**（`COMMAND_PATTERNS`）：不同工具的指令不共用分母；Bash 的形態集合刻意為空。
   · 四個計數是字串形態偵測、宣稱對帳是啟發式：數量級可信，確切值不可引用成常數；列出的每一筆
     都是待人工看一眼的線索，不是判決。
@@ -190,6 +192,20 @@ COMMAND_PATTERNS: dict[str, dict[str, re.Pattern[str]]] = {
 
 #: 帶 `command` 欄、會落進本稽核射程的工具（由上表推導，不另立第二個家）。
 SHELL_TOOLS = tuple(COMMAND_PATTERNS)
+
+#: 不會帶 shell command 的內建工具名：整支只用過這些（或 `mcp__*`）的 session 沒有「該抽到
+#: command」的前提，不是崩塌訊號（例：只 Write 的活體探針、純讀檔）。名字不在這張表、也不在
+#: `COMMAND_PATTERNS` ＝認不得的工具（改名／新增），仍可能是格式變更 ⇒ 照舊算崩塌候選。表是
+#: 啟發式：新工具名出現前只會多報、不會漏報（報了就去看那一支）。
+NON_SHELL_TOOLS = frozenset({
+    "Read", "Write", "Edit", "MultiEdit", "NotebookEdit", "Glob", "Grep", "Agent", "Task",
+    "TodoWrite", "Skill", "ToolSearch", "WebFetch", "WebSearch", "Workflow", "SendMessage",
+    "AskUserQuestion"})
+
+
+def _shell_capable(tool_totals: dict[str, int]) -> bool:
+    """本支叫過「可能帶 shell command、或認不得」的工具嗎（逐支崩塌判準的前提之一）。"""
+    return any(n not in NON_SHELL_TOOLS and not n.startswith("mcp__") for n in tool_totals)
 
 #: 阻斷的唯一判準＝harness 自己蓋的章：`tool_result.is_error` 為真，且該記錄帶 `toolDenialKind`。
 #: 子字串比對會被引文騙（grep 證據檔把 hook 錯誤字樣印出來即被誤判成被擋）。
@@ -516,13 +532,16 @@ def scan_transcript(path: Path, window_size: int = DEFAULT_WINDOW,
         "bash_attempt_details": bash_attempts,
         "patterns": counts,
         # 逐支崩塌訊號（見檔頭〈設計約束〉）：**有記錄**卻一支帶 command 的 shell 呼叫都抽不到。前提
-        # 用 `records` 而不是 `tool_use_total`（連 tool_use 都認不出來正是最徹底的格式變更）。🔴 逐
-        # 筆切片下前提改為「**shell 工具真的被叫過**、卻一條指令都抽不到」：子窗裡沒跑 shell 是正常
-        # 狀態，沿用 `records>0` 會讓警報在分期用法下常響（常響的警報等於沒有）。誠實劃界：切片下連
-        # 工具名都認不出來（`PowerShell` 被改名）時本判準看不到，由合計面的 `shell_calls == 0` 兜
-        # 底。
-        "collapsed": (shell_tool_calls > 0 if sliced else records_total > 0)
-        and shell_calls == 0,
+        # 原用 `records`（連 tool_use 都認不出來正是最徹底的格式變更），現再要求本支叫過「可能帶
+        # shell command、或認不得」的工具（`_shell_capable`）：零 tool_use（純問答）與只用過
+        # Write／Read 等已知非 shell 工具（活體探針）的 session 不是崩塌，它們曾讓 `--parity` 在
+        # 真實窗口恆 rc=1。代價：認不得 tool_use 時，工具名恰落在 `NON_SHELL_TOOLS` 者只剩合計面
+        # `shell_calls == 0` 兜底。🔴 逐筆切片下前提改為「**shell 工具真的被叫過**、卻一條指令都
+        # 抽不到」：子窗裡沒跑 shell 是正常狀態，沿用 `records>0` 會讓警報在分期用法下常響（常響
+        # 的警報等於沒有）。誠實劃界：切片下連工具名都認不出來（`PowerShell` 被改名）時本判準
+        # 看不到，由合計面兜底。
+        "collapsed": (shell_tool_calls > 0 if sliced else
+                      records_total > 0 and _shell_capable(tool_totals)) and shell_calls == 0,
         "unsupported_claims": unsupported,
         # 分母（命中 CLAIM_RE 的句子總數）。只印分子時，「CLAIM_RE 失效」與「真的
         # 零違規」長得一模一樣，而後者是沒有人會去追的那一種。
@@ -720,12 +739,13 @@ def _used(usage: dict) -> int:
     return sum(int(usage.get(k) or 0) for k in _USAGE_KEYS)
 
 
-def session_profile(path: Path) -> dict:
-    """單趟掃描主執行緒（非 isSidechain）：tool_use 序列與阻斷、助理文字、簡報、最後 usage。"""
+def session_profile(path: Path, lookback: int = DEFAULT_WINDOW) -> dict:
+    """單趟掃描主執行緒（非 isSidechain）：tool_use 序列與阻斷、助理文字、簡報、最後 usage。
+    `lookback`＝宣稱往回看幾個 tool_result 找阻斷（②′ 讀 params.json 的 `claim_lookback`）。"""
     prof: dict = {"sid": path.stem, "entry": "", "start": None, "cwd": "", "uses": [],
                   "texts": [], "brief": False, "usage": None, "usage_ts": None}
     by_id: dict[str, dict] = {}
-    recent: deque[bool] = deque(maxlen=DEFAULT_WINDOW)  # 最近幾個 tool_result 是否為阻斷
+    recent: deque[bool] = deque(maxlen=max(1, lookback))  # 最近 lookback 個 tool_result 是否為阻斷
     for rec in iter_records(path):
         if rec.get("isSidechain"):
             continue
@@ -808,29 +828,45 @@ def feed_diffs(pop: list[dict], limit: int) -> list[int]:
     return out[:limit]
 
 
-def five_question(profs: list[dict], since: datetime | None, entries: set[str], prm: dict) -> None:
-    """②′ 的 Q1′a／b／c、Q2′、Q3′ 在同一母體上的量測，直接印表（Q4′ 人供）。母體＝頂層逐字稿、
-    entrypoint ∈ entries、≥1 個 tool_use、**起點** ≥ since（逐 session 起點，非檔案 mtime）。"""
+def first_check_index(uses: list[dict], planner: re.Pattern, feed: re.Pattern) -> int | None:
+    """Q2′ 首次現查的呼叫序號（1 起算；從未＝None）：planner CLI（Bash／PowerShell），或 Read 簡報
+    給的唯讀退路（context feed／額度快取檔）——讀它同樣是在現查真實數據。"""
+    def hit(u: dict) -> bool:
+        if u["name"] in ("Bash", "PowerShell"):
+            return bool(planner.search(str(u["input"].get("command"))))
+        return u["name"] == "Read" and bool(feed.search(str(u["input"].get("file_path"))))
+
+    return next((i for i, u in enumerate(uses, 1) if hit(u)), None)
+
+
+def five_question(profs: list[dict], since: datetime | None, entries: set[str], prm: dict,
+                  until: datetime | None = None) -> None:
+    """②′ 的 Q1′a／b／c、Q2′、Q3′ 在同一母體上的量測，直接印表（Q4′ 見 `--protocol-status`）。母體
+    ＝頂層逐字稿、entrypoint ∈ entries、≥1 個 tool_use、**起點**在 [since, until)（逐 session 起點，
+    非檔案 mtime）。判準常數（前 N 個呼叫、宣稱只計前 N 個呼叫…）一律讀 `prm`＝params.json。"""
     os.environ.setdefault("CLAUDE_PROJECT_DIR", str(_REPO_ROOT))  # govwrite 的 oracle 以它定專案根
     pop = sorted((p for p in profs if p["entry"] in entries and p["uses"]
-                  and (since is None or p["start"] >= since)), key=lambda p: p["start"])
+                  and (since is None or p["start"] >= since)
+                  and (until is None or p["start"] < until)), key=lambda p: p["start"])
     bdg, planner = _hook_module("block_destructive_git"), re.compile(prm["planner_re"])
     cl, ex, qt = (re.compile(prm[k], re.I) for k in ("claim_re", "claim_exc_re", "quote_re"))
     blk = [(p, i, u) for p in pop for i, u in enumerate(p["uses"], 1) if u["block"]]
-    ev = [{"sid": p["sid"][:8], "seq": i, "tool": u["name"], "kind": u["block"][0],
-           "by": u["block"][1], "oracle": judge_block(u, p["cwd"], bdg, prm)}
+    ev = [{"date": p["start"].astimezone().date().isoformat(), "sid": p["sid"][:8], "seq": i,
+           "tool": u["name"], "kind": u["block"][0], "by": u["block"][1],
+           "oracle": judge_block(u, p["cwd"], bdg, prm)}
           for p, i, u in blk if u["block"][0] != "non-hook"]
     mis, nor = ([e for e in ev if e["oracle"] == o] for o in ("MISBLOCK", "no-oracle"))
-    claims = [(s, sup) for p in pop for n, sup, text in p["texts"] if n < 10
+    claims = [(s, sup) for p in pop for n, sup, text in p["texts"] if n < prm["claim_max_uses"]
               for s in _sentences(qt.sub("", text)) if cl.search(s) and not ex.search(s)]
     bare = [s[:120] for s, sup in claims if not sup]
-    win = pop[-prm["q1c_n"]:]
-    # 前 5 個呼叫的分子只計 hook 來源（含 SDD router）的阻斷；auto-mode／人拒絕不計
-    hk = [[bool(u["block"]) and u["block"][0] != "non-hook" for u in p["uses"][:5]] for p in win]
+    win, first_n = pop[-prm["q1c_n"]:], prm["q1c_first_calls"]
+    # 前 N 個呼叫的分子只計 hook 來源（含 SDD router）的阻斷；auto-mode／人拒絕不計
+    hk = [[bool(u["block"]) and u["block"][0] != "non-hook" for u in p["uses"][:first_n]]
+          for p in win]
     hit5, first = sum(map(any, hk)), sum(h[0] for h in hk)
-    idx = [(p["sid"][:8], next((i for i, u in enumerate(p["uses"], 1) if u["name"] in
-            ("Bash", "PowerShell") and planner.search(str(u["input"].get("command")))), None),
-            p["brief"]) for p in pop if len(p["uses"]) >= prm["q2_max_index"]]
+    feed = re.compile(prm["feed_read_re"])
+    idx = [(p["sid"][:8], first_check_index(p["uses"], planner, feed), p["brief"])
+           for p in pop if len(p["uses"]) >= prm["q2_max_index"]]
     late = [r[:2] for r in idx if r[1] is None or r[1] > prm["q2_max_index"]]
     diffs = feed_diffs(pop, prm["q3_n"])
 
@@ -841,11 +877,13 @@ def five_question(profs: list[dict], since: datetime | None, entries: set[str], 
         print(f"  {label}  {status}  {detail}")
 
     other = Counter(u["block"][1] for _, _, u in blk if u["block"][0] == "non-hook")
-    print(f"### ②′ 五問量測：母體 {len(pop)} 支（{sorted(entries)}・起點≥{since or '無'}）")
+    print(f"### ②′ 五問量測：母體 {len(pop)} 支（{sorted(entries)}・起點≥{since or '無'}"
+          f"{f'・起點<{until}' if until else ''}）")
     show("Q1′a 誤擋", len(pop), 1, f"{len(mis)}／hook 阻斷 {len(ev)}；無 oracle {len(nor)}",
          bool(mis), bool(nor))
     show("Q1′b 宣稱≠阻斷", len(pop), 1, f"{len(bare)}／{len(claims)} {bare[:3]}", human=bool(bare))
-    show("Q1′c 前5呼叫被擋", len(win), prm["q1c_n"], f"{hit5}／{len(win)}（≤{prm['q1c_gate']}）；"
+    show(f"Q1′c 前{first_n}呼叫被擋", len(win), prm["q1c_n"],
+         f"{hit5}／{len(win)}（≤{prm['q1c_gate']}）；"
          f"首呼叫被擋 {first}／{len(win)}",
          len(win) >= prm["q1c_n"] and hit5 / len(win) > prm["q1c_gate"])
     show("Q2′ 首查序號", len(idx), prm["q2_min_n"],
@@ -853,7 +891,7 @@ def five_question(profs: list[dict], since: datetime | None, entries: set[str], 
     show("Q3′ feed 差", len(diffs), prm["q3_min_pairs"],
          f"{len(diffs)} 對；max|差|={max(map(abs, diffs), default=0)} {diffs}",
          any(abs(d) > prm["q3_tolerance_tokens"] for d in diffs))
-    print("  Q4′ 各平台 --status  本檔不量（Mac 另跑 --status；Windows 人供）")
+    print("  Q4′ 本檔不量；九格見 --protocol-status（讀本機 trace_dir 的丙案 JSON；別台的先拷來）")
     print(f"  非 hook 阻斷（auto-mode／人拒絕，不入 Q1′）：{dict(other) or '無'}")
     print("  hook 阻斷逐筆（oracle＝HEAD 判準重放）：" + ("" if ev else "無"))
     for event in ev:
@@ -861,29 +899,11 @@ def five_question(profs: list[dict], since: datetime | None, entries: set[str], 
 
 
 def protocol_status(prm: dict) -> int:
-    """`--protocol-status`：協定 manifest 雜湊＋輪帳本窗口長度＋評估式。rc 恆 0（不得接閘門）。"""
-    import hashlib
-    man = sorted((p.relative_to(_PROTOCOL_DIR).as_posix(),
-                  hashlib.sha256(p.read_bytes().replace(b"\r\n", b"\n")).hexdigest())
-                 for p in _PROTOCOL_DIR.rglob("*") if p.is_file() and p.name[0] != ".")
-    sha = hashlib.sha256(json.dumps(man, ensure_ascii=False).encode("utf-8")).hexdigest()
-    rows = [json.loads(ln) for ln in _LEDGER.read_text(encoding="utf-8").splitlines()
-            if ln.strip()] if _LEDGER.is_file() else []
-    need, run = prm["rounds_required"], 0
-    for row in reversed(rows):  # 窗口＝尾端連續同 sha 的列，遇 window_reset 即止
-        if row["protocol_sha256"] != rows[-1]["protocol_sha256"]:
-            break
-        run += 1
-        if row.get("window_reset"):
-            break
-    ok = (run >= need and sum(len(r["new_p_le2"]) for r in rows[-need:]) <= 2
-          and sum(r["p1"] for r in rows[-need:]) == 0 and not rows[-1]["new_p_le2"])
-    verdict = ("PROTOCOL-CHANGED（需新列帶 window_reset:true＋理由）"
-               if rows and rows[-1]["protocol_sha256"] != sha
-               else f"NOT-EVALUABLE({run}/{need})" if run < need else "PASS" if ok else "FAIL")
-    print(f"### ②′ 協定狀態\n  protocol_sha256={sha}（manifest {len(man)} 檔）")
-    print(f"  輪帳本 {len(rows)} 列；window_len={run}；評估: {verdict}")
-    return 0
+    """`--protocol-status`：雜湊＋輪帳本窗口＋完整性閘＋Q4′ 九格（實作住 `fivequestion_ledger`）。
+    rc 恆 0（不得接閘門）。"""
+    from probe import fivequestion_ledger  # noqa: PLC0415 — 只有本旗標才需要
+
+    return fivequestion_ledger.protocol_status(prm, _PROTOCOL_DIR, _LEDGER, _REPO_ROOT)
 
 
 def probe_selftest() -> list[str]:
@@ -907,15 +927,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--transcript", action="append", default=[],
                         help="直接指定一支 .jsonl（可重複）")
     parser.add_argument("--since", help="只掃 mtime >= 此 ISO 時刻的逐字稿"
-                                        "（2026-08-07 或 2026-08-07T00:05:53）")
+                                        "（2026-08-07 或 2026-08-07T00:05:53）；"
+                                        "--five-question 另以 session 起點二次過濾")
     parser.add_argument("--until", help="只掃 mtime < 此 ISO 時刻的逐字稿"
                                         "（與 --since 併用即『觀測者上線前／後』分期）")
     parser.add_argument("--record-since", dest="record_since",
                         help="**逐筆**時間切片下界（ISO）。分期比較一律用這個，"
                              "不要用 --since：後者切的是檔案 mtime，跨越分界點的長 "
-                             "session 會整支落在後段（本輪實測誤差 3,284 vs 7）")
+                             "session 會整支落在後段（本輪實測誤差 3,284 vs 7）；"
+                             "--five-question 以它當 session 起點切片（優先於 --since）")
     parser.add_argument("--record-until", dest="record_until",
-                        help="**逐筆**時間切片上界（ISO，不含）")
+                        help="**逐筆**時間切片上界（ISO，不含）；"
+                             "--five-question 以它當 session 起點切片的上界")
     parser.add_argument("--latest", type=int,
                         help="只掃最近改動的 N 支（每輪量測建議搭配它或 --since）")
     parser.add_argument("--window", type=int, default=DEFAULT_WINDOW,
@@ -930,7 +953,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--exclude-sid", action="append", default=[], help="明示剔除某 session id")
     parser.add_argument("--five-question", action="store_true", help="印判準②′ 五問量測（rc 恆 0）")
     parser.add_argument("--entrypoint", default="cli,claude-vscode", help="②′ 母體 entrypoint")
-    parser.add_argument("--protocol-status", action="store_true", help="印審計協定雜湊與輪帳本窗口")
+    parser.add_argument("--protocol-status", action="store_true",
+                        help="印協定雜湊、輪帳本窗口、完整性閘與 Q4′ 九格（rc 恆 0）")
     parser.add_argument("--max-claims", type=int, default=10)
     parser.add_argument("--selftest", action="store_true",
                         help="對已知正解／已知違規各數組跑 `rc-after-pipe-real`"
@@ -938,7 +962,8 @@ def main(argv: list[str] | None = None) -> int:
                              "語料的判定當作紅的那一半。有任何一組不符即 rc=1")
     parser.add_argument("--parity", action="store_true",
                         help="把量測窗裡每一條 unique PowerShell 指令同時餵給攔截端與"
-                             "量測端，列出判定分歧（有分歧即 rc=1）")
+                             "量測端，列出判定分歧（有分歧即 rc=1；掃描面崩塌亦 rc=1，"
+                             "零 tool_use 的 session 不算崩塌）")
     parser.add_argument("--json", action="store_true", dest="as_json")
     args = parser.parse_args(argv)
 
@@ -997,11 +1022,13 @@ def main(argv: list[str] | None = None) -> int:
         # naive 視為本機時區，否則與逐字稿的帶時區時戳無法比較（TypeError）。
         return parsed if parsed.tzinfo else parsed.astimezone()
 
-    if args.five_question:
-        entries = {e.strip() for e in args.entrypoint.split(",") if e.strip()}
-        five_question([session_profile(p) for p in paths], _iso(args.since), entries, _params())
-        return 0
     rec_since, rec_until = _iso(args.record_since), _iso(args.record_until)
+    if args.five_question:  # 逐筆切片旗標在此＝session 起點切片（優先於 --since）
+        entries = {e.strip() for e in args.entrypoint.split(",") if e.strip()}
+        prm = _params()
+        profs = [session_profile(p, prm["claim_lookback"]) for p in paths]
+        five_question(profs, rec_since or _iso(args.since), entries, prm, rec_until)
+        return 0
     results = [scan_transcript(p, args.window, rec_since, rec_until) for p in paths]
     summary = aggregate(results)
     summary["criterion_fingerprint"] = criterion_fingerprint()

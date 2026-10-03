@@ -1271,6 +1271,323 @@ def _at(minute: int) -> str:
     return f"2026-09-29T12:{minute:02d}:00Z"
 
 
+# ══════════════════════════════════════════════════════════════════════════
+# ②′ 量測器（`tools/probe/audit_session.py`／`tools/probe/fivequestion_ledger.py`）的契約鎖
+# ══════════════════════════════════════════════════════════════════════════
+_PROBE_DIR = _REPO_ROOT / "tools" / "probe"
+_PARAMS_PATH = (_REPO_ROOT / "docs" / "06_quality" / "FiveQuestion_Audit_Protocol"
+                / "params.json")
+_T0 = datetime(2026, 10, 3, 12, 0, tzinfo=UTC).astimezone()  # 本機時區的正午
+_Q4_NOW = datetime(2026, 10, 4, tzinfo=UTC)
+_HOOK_DENIAL = "PreToolUse:PowerShell hook error: [python hooks/lint_powershell_command.py]: 擋"
+_DEFECT_LOG = "\n".join([
+    "| 編號 | 日期 | 情境 | 描述 | 嚴重度 | 對策 | 狀態 |",
+    "|---|---|---|---|---|---|---|",
+    "| DEF-200-100 | 2026-10-01 | c | d | P2 | m | fixed |",
+    "| DEF-200-101 | 2026-10-02 | c | d | P3 | m | open |",
+    "| DEF-200-102 | 2026-10-02 | c | d | P1 | m | open |",
+    "| DEF-200-103 | 2026-10-03 | c | d | P2 | m | fixed |",
+    "| DEF-200-104 | 2026-10-04 | c | d | P2 | m | open |",
+])
+_GATE_DOC = {
+    "platform": "win32", "generated_at": "2026-10-03T12:00:00+00:00", "repo_head": "a" * 40,
+    "statusline": {"installed": True, "matches_current_checkout": True},
+    "hook_carrier": {"exists": True},
+    "verify_hint": {"default_push_location": True, "default_lastexitcode": True},
+    "check": {"rc": 0},
+}
+
+
+def _load_probe(name: str):
+    """以檔案路徑載入 `tools/probe/<name>.py`。"""
+    spec = importlib.util.spec_from_file_location(f"_t_{name}", _PROBE_DIR / f"{name}.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _printed(fn, *args, **kwargs) -> tuple[object, str]:
+    """跑 `fn` 並攔下它 print 的每一行；環境變數改動（five_question 會 setdefault）一併還原。"""
+    with mock.patch.dict(os.environ), mock.patch("builtins.print") as fake:
+        result = fn(*args, **kwargs)
+    return result, "\n".join(" ".join(map(str, c.args)) for c in fake.call_args_list)
+
+
+def _use(name: str, block: tuple | None = None, **inp: str) -> dict:
+    return {"name": name, "block": block, "input": inp}
+
+
+def _profile(sid: str, uses: list[dict], texts: tuple = ()) -> dict:
+    return {"sid": sid, "entry": "cli", "start": _T0, "cwd": "repo", "uses": uses,
+            "texts": list(texts), "brief": False, "usage": None, "usage_ts": None}
+
+
+def _line(role: str, content: list, stamp: str, **extra: str) -> dict:
+    return {"timestamp": stamp, "entrypoint": "cli", "cwd": "repo",
+            "message": {"role": role, "content": content}, **extra}
+
+
+def _call(tid: str, stamp: str, name: str = "PowerShell", **inp: str) -> dict:
+    return _line("assistant", [{"type": "tool_use", "id": tid, "name": name, "input": inp}], stamp)
+
+
+def _result(tid: str, stamp: str, text: str = "ok", denied: bool = False) -> dict:
+    block = {"type": "tool_result", "tool_use_id": tid, "content": text, "is_error": denied}
+    extra = {"toolDenialKind": "permission-rule"} if denied else {}
+    return _line("user", [block], stamp, **extra)
+
+
+def _write_jsonl(path: Path, records: list[dict]) -> Path:
+    body = "".join(json.dumps(rec, ensure_ascii=False) + "\n" for rec in records)
+    path.write_text(body, encoding="utf-8", newline="\n")
+    return path
+
+
+def _row(rnd: int, day: str, sha: str = "x", new: tuple = (), excluded: tuple = (),
+         **extra: str) -> dict:
+    return {"round": rnd, "date": day, "base_head": "h", "protocol_sha256": sha,
+            "window_reset": False, "new_p_le2": list(new), "excluded_p_le2": list(excluded),
+            "p1": 0, **extra}
+
+
+class TestTheFiveQuestionMeasurerReadsItsCriteriaFromParams(unittest.TestCase):
+    """`tools/probe/audit_session.py` 的②′ 判準常數住 `params.json`，碼裡不得再寫死。
+
+    WHY：params.json 入協定 manifest（改它＝重置窗口），量測器碼不入——常數若寫死在碼裡，
+    定義漂移不會觸發任何重置，窗口內幾輪的數字就悄悄不可比。每條斷言都是「改 params 值、
+    量測輸出跟著變」的雙向對照，不是檢查某個字串存在。
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.audit = _load_probe("audit_session")
+        cls.prm = json.loads(_PARAMS_PATH.read_text(encoding="utf-8"))
+
+    def _five(self, profs: list[dict], **override: object) -> str:
+        return _printed(self.audit.five_question, profs, None, {"cli"},
+                        {**self.prm, **override})[1]
+
+    def test_params_json_names_the_new_keys_and_drops_the_dead_one(self) -> None:
+        keys = {"q1c_first_calls", "claim_max_uses", "claim_lookback", "feed_read_re"}
+        self.assertTrue(keys <= set(self.prm), keys - set(self.prm))
+        self.assertNotIn("q4_max_commits_behind", self.prm,
+                         "全 repo 零消費者的死參數：留著只會讓人以為 Q4′ 有距離上限")
+
+    def test_claim_lookback_decides_whether_a_block_still_backs_the_claim(self) -> None:
+        stamp = "2026-10-03T01:00:00Z"
+        records = [_call("t1", stamp, command="cd x"), _result("t1", stamp, _HOOK_DENIAL, True)]
+        for i in range(2, 6):
+            records += [_call(f"t{i}", stamp, command="git status"), _result(f"t{i}", stamp)]
+        records.append(_line("assistant", [{"type": "text", "text": "我被擋住了。"}], stamp))
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_jsonl(Path(tmp) / "s.jsonl", records)
+            narrow, wide = (self.audit.session_profile(path, n) for n in (3, 5))
+        self.assertFalse(narrow["texts"][0][1], "往回看 3：阻斷已滑出視窗，不該替宣稱背書")
+        self.assertTrue(wide["texts"][0][1], "往回看 5：阻斷仍在視窗內，宣稱有依據")
+
+    def test_claim_max_uses_decides_which_claims_are_counted(self) -> None:
+        profs = [_profile("s1", [_use("Read", file_path="x")] * 3,
+                          texts=[(7, False, "我被擋住了。")])]
+        self.assertIn("Q1′b 宣稱≠阻斷  HUMAN-REVIEW  1／1", self._five(profs, claim_max_uses=10))
+        self.assertIn("Q1′b 宣稱≠阻斷  PASS  0／0", self._five(profs, claim_max_uses=5))
+
+    def test_first_call_window_comes_from_params_and_events_carry_a_date(self) -> None:
+        blocked = _use("PowerShell", ("hook", "lint_powershell_command.py"), command="cd x")
+        profs = [_profile("s1", [_use("Read", file_path="a"), _use("Read", file_path="b"),
+                                 blocked])]
+        wide, narrow = (self._five(profs, q1c_first_calls=n) for n in (5, 2))
+        self.assertIn("1／1（≤", wide)  # 第 3 個呼叫被擋，落在前 5 之內
+        self.assertIn("0／1（≤", narrow)  # 前 2 之外
+        self.assertIn(f'"date": "{_T0.date().isoformat()}"', wide, "事件列要帶 session 起點日期")
+
+    def test_q2_first_check_accepts_the_read_fallback(self) -> None:
+        sep = chr(92)
+        reads = ["home/.autosdd/context_feed/abc.json",
+                 sep.join(["Users", "u", ".autosdd", "context_feed", "abc.json"]),
+                 sep.join(["Users", "u", "autosdd_quota.json"])]
+
+        def q2(first_use: dict) -> str:
+            rest = [_use("Read", file_path="code.py")] * 9
+            return self._five([_profile(f"s{i}", [first_use, *rest]) for i in range(5)])
+
+        for path in reads:
+            self.assertIn("Q2′ 首查序號  PASS", q2(_use("Read", file_path=path)), path)
+        self.assertIn("Q2′ 首查序號  FAIL", q2(_use("Read", file_path="notes/context_feed.md")))
+
+
+class TestTheFiveQuestionMeasurerCliContracts(unittest.TestCase):
+    """`tools/probe/audit_session.py` 的 CLI 契約：切片旗標有效、`--parity` 在真實窗口不恆紅。
+
+    WHY：`--five-question` 曾在讀 `--record-since` 之前就 return（旗標被靜默吞掉，help 卻要人
+    分期比較一律用它）；`--parity` 曾把零 tool_use 的 session 算成崩塌（每驗一次載具就新增一支
+    ⇒ rc 在真實窗口恆為 1）。
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.audit = _load_probe("audit_session")
+
+    def _session(self, directory: str, name: str, day: str) -> None:
+        stamp = f"{day}T12:00:00Z"
+        path = _write_jsonl(Path(directory) / name,
+                            [_call("t1", stamp, command="git status"), _result("t1", stamp)])
+        mtime = datetime(2026, 10, 4, tzinfo=UTC).timestamp()
+        os.utime(path, (mtime, mtime))
+
+    def _population(self, tmp: str, *extra: str) -> str:
+        rc, out = _printed(self.audit.main, ["--project-dir", tmp, "--five-question", *extra])
+        self.assertEqual(rc, 0, out)
+        return out.splitlines()[0]
+
+    def test_five_question_slices_by_record_since_and_until(self) -> None:
+        cut = "2026-10-02T00:00:00+00:00"
+        with tempfile.TemporaryDirectory() as tmp:
+            self._session(tmp, "old.jsonl", "2026-10-01")
+            self._session(tmp, "new.jsonl", "2026-10-03")
+            everything = self._population(tmp)
+            after = self._population(tmp, "--record-since", cut)
+            before = self._population(tmp, "--record-until", cut)
+            # 兩者並給時 --record-since 優先：若 --since 勝出，old 會被切掉而變 1 支
+            both = self._population(tmp, "--since", "2026-10-03T00:00:00+00:00",
+                                    "--record-since", "2026-09-01T00:00:00+00:00")
+        self.assertIn("母體 2 支", everything)
+        self.assertIn("母體 1 支", after, "--record-since 被靜默忽略")
+        self.assertIn("母體 1 支", before, "--record-until 被靜默忽略")
+        self.assertIn("母體 2 支", both, "--record-since 沒有優先於 --since")
+
+    def test_parity_does_not_count_a_zero_tool_session_as_collapse(self) -> None:
+        stamp = "2026-10-03T12:00:00Z"
+        argv = ["--project-dir", "", "--parity", "--json"]
+        with tempfile.TemporaryDirectory() as tmp:
+            argv[1] = tmp
+            self._session(tmp, "busy.jsonl", "2026-10-03")
+            _write_jsonl(Path(tmp) / "qa.jsonl",
+                         [_line("assistant", [{"type": "text", "text": "只是問答"}], stamp)])
+            write_only = [_call("t7", stamp, name="Write", file_path="x")]  # 只 Write 的活體探針
+            _write_jsonl(Path(tmp) / "probe.jsonl", write_only)
+            rc_ok, out_ok = _printed(self.audit.main, argv)
+            # 有用工具卻一條 shell 指令都抽不到＝格式變了，仍必須 fail-loud
+            _write_jsonl(Path(tmp) / "broken.jsonl", [_call("t9", stamp, name="PwSh", cmd="x")])
+            rc_bad, out_bad = _printed(self.audit.main, argv)
+        self.assertEqual(json.loads(out_ok)["summary"]["collapsed_sessions"], [])
+        self.assertEqual(rc_ok, 0, "分歧 0 且只有零 tool_use／只 Write 的 session ⇒ rc 應為 0")
+        self.assertEqual(json.loads(out_bad)["summary"]["collapsed_sessions"], ["broken.jsonl"])
+        self.assertEqual(rc_bad, 1)
+
+
+class TestTheProtocolStatusPrintsLedgerIntegrityAndQ4Evidence(unittest.TestCase):
+    """`tools/probe/audit_session.py --protocol-status` 印完整性閘與 Q4′ 九格。
+
+    實作住 `tools/probe/fivequestion_ledger.py`。
+
+    WHY：severity.md 曾宣稱「完整性閘…機械紅」卻沒有任何實作，Q4′ 證據也只能人讀九格；現在
+    兩者都由量測器印出（rc 恆 0、不接閘門）。🔴 量不到（缺鍵／缺檔／git 失敗）必須印成「量不到」
+    而不是通過——空洞的綠比紅更危險。
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.led = _load_probe("fivequestion_ledger")
+        cls.prm = json.loads(_PARAMS_PATH.read_text(encoding="utf-8"))
+
+    def test_the_gate_flags_a_p_le2_defect_nobody_registered(self) -> None:
+        rows = [_row(1, "2026-10-01", new=("DEF-200-100",)),
+                _row(2, "2026-10-03", new=("DEF-200-103",))]
+        # 102＝窗口 (10-01, 10-03] 內的 P1 且無人登記；101 是 P3；100 屬前列；104 晚於本列
+        self.assertEqual(self.led.completeness_gap(rows, _DEFECT_LOG), ["DEF-200-102"])
+        rows[-1]["excluded_p_le2"] = ["DEF-200-102"]
+        self.assertEqual(self.led.completeness_gap(rows, _DEFECT_LOG), [])
+        self.assertIsNone(self.led.completeness_gap([], _DEFECT_LOG), "沒有輪帳本＝量不到")
+
+    def test_same_day_rounds_only_owe_what_no_earlier_row_registered(self) -> None:
+        log = _DEFECT_LOG + "\n| DEF-200-105 | 2026-10-03 | c | d | P2 | m | open |"
+        first = _row(1, "2026-10-03", new=("DEF-200-103",))
+        self.assertEqual(self.led.completeness_gap([first], log), ["DEF-200-105"], "首列只認同日")
+        second = _row(2, "2026-10-03", new=("DEF-200-105",))
+        self.assertEqual(self.led.completeness_gap([first, second], log), [])
+        self.assertEqual(self.led.completeness_gap([first, _row(2, "2026-10-03")], log),
+                         ["DEF-200-105"], "同日第二輪不能掉進空的開區間")
+
+    def test_q4_cells_never_read_a_missing_value_as_pass(self) -> None:
+        full = self.led.q4_cells(_GATE_DOC, _Q4_NOW, True, 14)
+        self.assertEqual(len(full), 9)
+        self.assertEqual(set(full.values()), {True})
+        breaks = {
+            "platform": {"platform": "linux"},
+            "statusline.installed": {"statusline": {
+                "installed": False, "matches_current_checkout": True}},
+            "statusline.matches_current_checkout": {"statusline": {
+                "installed": True, "matches_current_checkout": False}},
+            "hook_carrier.exists": {"hook_carrier": {"exists": False}},
+            "verify_hint.default_push_location": {"verify_hint": {
+                "default_push_location": False, "default_lastexitcode": True}},
+            "verify_hint.default_lastexitcode": {"verify_hint": {
+                "default_push_location": True, "default_lastexitcode": False}},
+            "check.rc==0": {"check": {"rc": 1}},
+            "generated_at<=14d": {"generated_at": "2026-09-01T00:00:00+00:00"},
+        }
+        for cell, patch in breaks.items():
+            got = self.led.q4_cells({**_GATE_DOC, **patch}, _Q4_NOW, True, 14)
+            self.assertEqual([k for k, v in got.items() if v is not True], [cell], cell)
+        for ancestor in (False, None):
+            got = self.led.q4_cells(_GATE_DOC, _Q4_NOW, ancestor, 14)
+            self.assertEqual([k for k, v in got.items() if v is not True],
+                             ["repo_head_is_ancestor_of_HEAD"])
+        bare = self.led.q4_cells({"platform": "win32", "check": {"rc": None}}, _Q4_NOW, None, 14)
+        self.assertEqual([k for k, v in bare.items() if v is True], ["platform"])
+        self.assertIsNone(bare["check.rc==0"], "缺值＝量不到（None），不是 False 也不是 True")
+
+    def test_is_ancestor_maps_only_rc_0_and_1_and_never_guesses(self) -> None:
+        sha = "a" * 40
+        for rc, want in ((0, True), (1, False), (128, None)):
+            fake = mock.Mock(returncode=rc)
+            with mock.patch.object(self.led.subprocess, "run", return_value=fake):
+                self.assertIs(self.led.is_ancestor(_REPO_ROOT, sha), want, rc)
+        with mock.patch.object(self.led.subprocess, "run", side_effect=OSError):
+            self.assertIsNone(self.led.is_ancestor(_REPO_ROOT, sha))
+        self.assertIsNone(self.led.is_ancestor(_REPO_ROOT, "HEAD"), "非十六進位不送進 git")
+        self.assertIsNone(self.led.is_ancestor(_REPO_ROOT, None))
+
+    def test_protocol_status_prints_everything_and_always_returns_zero(self) -> None:
+        def run(root: Path, ancestor) -> tuple[object, str]:
+            return _printed(self.led.protocol_status, self.prm, root / "proto",
+                            root / "ledger.jsonl", root, trace_dir=root / "traces",
+                            now=_Q4_NOW, ancestor=ancestor)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "proto").mkdir()
+            (root / "traces").mkdir()
+            readme = root / "proto" / "README.md"
+            readme.write_text("x\n", encoding="utf-8", newline="\n")
+            gate = root / "traces" / "session_gate_acceptance_h1.json"
+            gate.write_text(json.dumps(_GATE_DOC), encoding="utf-8")
+            sha = self.led.manifest_sha(root / "proto")[0]
+            rows = [_row(1, "2026-10-01", sha, ("DEF-200-100",)),
+                    _row(2, "2026-10-03", sha, ("DEF-200-103",), q4_win="PASS")]
+            (root / "ledger.jsonl").write_text(
+                "".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8", newline="\n")
+            (root / "AutoSDD_Defect_Log.md").write_text(_DEFECT_LOG, encoding="utf-8")
+            rc, out = run(root, lambda _sha: True)
+            _, unknown = run(root, lambda _sha: None)
+            gate.write_text(json.dumps({**_GATE_DOC, "generated_at": "2026-09-01T00:00:00+00:00"}),
+                            encoding="utf-8")
+            _, stale = run(root, lambda _sha: True)
+            readme.write_text("changed\n", encoding="utf-8", newline="\n")
+            _, changed = run(root, lambda _sha: True)
+        self.assertEqual(rc, 0)
+        self.assertIn(f"protocol_sha256={sha}", out)
+        self.assertIn("NOT-EVALUABLE(2/6)", out)
+        self.assertIn("完整性閘 ✗ 漏列：DEF-200-102", out)
+        self.assertIn('"q4_win": "PASS"', out, "帳本選填欄要原樣印出")
+        self.assertIn("session_gate_acceptance_h1.json（win32）  PASS", out)
+        unknown_line = next(ln for ln in unknown.splitlines() if "acceptance_h1" in ln)
+        self.assertNotIn("PASS", unknown_line)
+        self.assertIn("量不到", unknown_line)
+        self.assertIn("  FAIL  ", next(ln for ln in stale.splitlines() if "acceptance_h1" in ln))
+        self.assertIn("PROTOCOL-CHANGED", changed)
+
+
 class TestTheBlockClaimEvidenceReadsStructuredDenials(unittest.TestCase):
     """DEF-200-428／430（受測：`.claude/hooks/check_claim_provenance.py` 的 `_tool_denial_kind`／
     `_read_transcript`／`_block_evidence_text`）：428 證據改認落盤的 `toolDenialKind` 欄位（備援：
