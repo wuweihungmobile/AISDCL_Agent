@@ -7409,8 +7409,9 @@ class OrphanModeWatchTest(unittest.TestCase):
         `queue_notify()` 對 `NOTIFY_ENV` 未設一律短路（見該函式 WHY），本條測的是
         「使用者已開啟桌面通知、但這一次投遞失敗」那個情境，故需顯式開啟。
         """
-        os.environ[escalation.NOTIFY_ENV] = "1"
-        self.addCleanup(os.environ.pop, escalation.NOTIFY_ENV, None)
+        notify_env = unittest.mock.patch.dict(os.environ, {escalation.NOTIFY_ENV: "1"})
+        notify_env.start()
+        self.addCleanup(notify_env.stop)  # DEF-200-464：還原原值而非 pop
         self._write_main()
         self._agent()
         now = datetime.now().astimezone()
@@ -7462,8 +7463,9 @@ class NotifyQueueRedeliveryTest(unittest.TestCase):
         # 佇列本身只在使用者**已開啟**桌面通知時才有意義（`queue_notify()` 對
         # `NOTIFY_ENV` 未設一律短路，避免每一支從未設過這個變數的既有測試都把
         # 記錄寫進真的 `endurance_env.trace_dir()`——本輪落地當回合真的撞見過）。
-        os.environ[escalation.NOTIFY_ENV] = "1"
-        self.addCleanup(os.environ.pop, escalation.NOTIFY_ENV, None)
+        notify_env = unittest.mock.patch.dict(os.environ, {escalation.NOTIFY_ENV: "1"})
+        notify_env.start()
+        self.addCleanup(notify_env.stop)  # DEF-200-464：還原原值而非 pop
 
     def _queue_items(self) -> list[dict]:
         path = escalation.notify_queue_path()
@@ -8325,6 +8327,22 @@ class TraceIsolationTest(unittest.TestCase):
     def test_no_quota_test_leaks_into_the_production_trace(self) -> None:
         self.assertEqual(trace_isolation_problems(
             Path(__file__).read_text(encoding="utf-8")), [])
+
+    def test_no_test_restores_the_environment_by_popping_a_key(self) -> None:
+        """DEF-200-464：以 `addCleanup` 掛 `os.environ.pop` 不是還原——pop 把「原本就有值」的鍵
+        （模組圍籬釘的 TRACE_DIR、使用者設的逃生口）清掉，後面的測試改跑在被動過的環境上；
+        還原要用 `mock.patch.dict(os.environ)` 的整份快照。掃整個 `tools/tests/`：同形站點
+        散在多個檔，逐點補修會漏（DEF-200-464 殘餘的 5 處就是這樣留下的）。"""
+        pattern = re.compile(r"addCleanup\(\s*os\.environ\.pop")
+        # 紅綠自證：單行與折行兩種壞形態都抓得到（樣本字串拆開寫，免得本檔自己命中）
+        for bad in ("addCleanup(" "os.environ.pop", "addCleanup(\n    " "os.environ.pop"):
+            self.assertTrue(pattern.search(bad), f"判準抓不到壞形態：{bad!r}")
+        found: list[str] = []
+        for path in sorted(Path(__file__).resolve().parent.glob("*.py")):
+            text = path.read_text(encoding="utf-8")
+            found += [path.name + ":" + str(text.count("\n", 0, m.start()) + 1)
+                      for m in pattern.finditer(text)]
+        self.assertEqual(found, [], f"以 pop 取代還原的 addCleanup 站點：{found}")
 
     def test_red_the_two_classes_this_round_fixed_would_be_caught(self) -> None:
         """注入＝修前的 `setUp` 原形（四格 swap、漏兩格）⇒ 必紅。"""
@@ -10289,8 +10307,10 @@ class NotifyIsNeverModalTest(unittest.TestCase):
         old = escalation.subprocess.run
         escalation.subprocess.run = self._run
         self.addCleanup(setattr, escalation.subprocess, "run", old)
+        env = unittest.mock.patch.dict(os.environ)  # DEF-200-464：還原整份環境而非 pop
+        env.start()
+        self.addCleanup(env.stop)
         os.environ.pop(escalation.NOTIFY_ENV, None)
-        self.addCleanup(os.environ.pop, escalation.NOTIFY_ENV, None)
 
     def _run(self, argv, **kwargs):  # noqa: ANN001, ANN202
         self.calls.append(list(argv))

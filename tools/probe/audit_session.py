@@ -18,10 +18,11 @@ jsonl 的事後量測器（立案實測與各判準的沿革全文見證據檔�
 通過成「本輪零違規」——那個失效方向看起來正好像「變乾淨了」，比紅更危險。
 
 設計約束（各條的實測與沿革見證據檔〈九〉）：
-  · 崩塌判準必須**逐支**：合計面的歷史總量會蓋掉「今天起每一支都抽不到」的格式變更；只用過
-    已知非 shell 工具（`NON_SHELL_TOOLS`）或根本沒用過工具的 session（純問答／活體探針）不入崩塌
-    分母，否則 `--parity` 在真實窗口恆 rc=1——代價：這類 session 的格式變更不再被逐支抓到，只剩
-    合計面 `shell_calls == 0` 兜底；叫過 shell 或認不得的工具、卻一條指令都抽不到者仍是崩塌訊號。
+  · 崩塌判準必須**逐支**：合計面的歷史總量會蓋掉「今天起每一支都抽不到」的格式變更；只用過已知
+    非 shell 工具（`params.json` 的 `parity_non_shell_tools`）或根本沒用過工具的 session（純問答／
+    活體探針）不入崩塌分母，否則 `--parity` 在真實窗口恆 rc=1——代價：這類 session 的格式變更不再被
+    逐支抓到，只剩合計面 `shell_calls == 0` 兜底；叫過 shell 或認不得的工具、卻一條指令都抽不到者
+    仍是崩塌訊號。
   · 計數**逐工具**（`COMMAND_PATTERNS`）：不同工具的指令不共用分母；Bash 的形態集合刻意為空。
   · 四個計數是字串形態偵測、宣稱對帳是啟發式：數量級可信，確切值不可引用成常數；列出的每一筆
     都是待人工看一眼的線索，不是判決。
@@ -85,20 +86,6 @@ mask_regions = _lint_ps_hook.mask_regions
 #:
 #: 🔴 修改守則：本字典要與 hook 那份**逐字相同**（連換行位置都相同才好 diff）。
 SHARED_PATTERN_SOURCE: dict[str, str] = {
-    # 管線接進這些 cmdlet 之後再讀 rc，才算命中（不是看到任何 `|` 都算）。
-    # 🔴 R78／SA-01：**內建別名與全名同列**。上一版只列全名，實測 12 組「別名 vs
-    # 全名、其餘字元逐字相同」的配對 **12/12 不對稱**（`| select -First 5` 放行、
-    # `| Select-Object -First 5` 擋下）——而 `select` 正是「提前結束管線」最常見的
-    # 寫法，等於這道鎖擋掉的剛好是沒人會寫的那一半。每個別名自帶右邊界
-    # `(?![\w-])` 以免吃到 `selection`／`sortable`；`%` 與 `?` 另用 `(?=\s|\{|$)`，
-    # 避免誤傷 `$_ % 2` 那類真正的運算子用法。
-    "pipe-cmdlets": (
-        r"(?:Select-Object|Select-String|Out-\w+|Format-\w+|Sort-Object"
-        r"|Measure-Object|ForEach-Object|Where-Object|Tee-Object"
-        r"|head|tail|findstr)(?![\w-])"
-        r"|(?:select|sls|sort|measure|foreach|where|ft|fl|oh|tee)(?![\w-])"
-        r"|[%?](?=\s|\{|$)"
-    ),
     # 裸 cd／Set-Location 的**動詞面**（不含錨點——兩邊各自接自己的邊界）。
     # 🔴 R78／SD-01：補上 `chdir`／`sl` 兩個內建別名；並**移除 `(?!-)`**——
     # `Set-Location -Path X` 與 `cd X` 是同一件事，上一版只因為下一個字元是 `-`
@@ -118,39 +105,25 @@ SHARED_PATTERN_SOURCE: dict[str, str] = {
 }
 
 def _rc_after_pipe(command: str) -> bool:
-    """規則①的量測端＝**攔截端那支函式本身**（不再自寫第二份判準）。
-
-    自寫的扁平正則與攔截端在兩個相反方向同時失準（多行指令低報、把正解形態高報），借過來之後
-    這個欄位的語意才真的等於「攔截器會擋的那件事」。沿革見證據檔〈九〉。
-    """
+    """規則①的量測端＝**攔截端那支函式本身**（不再自寫第二份判準：自寫的扁平正則曾在兩個相反方向
+    同時失準，多行指令低報、把正解形態高報）。沿革見證據檔〈九〉。"""
     return bool(_lint_ps_hook._rc_after_pipe(
         mask_regions(command, keep_expandable=False),
         mask_regions(command, keep_expandable=True),
     ))
 
 
-# 🔴 把「攔截端會擋什麼」與「真的會量到假 rc 幾次」拆成兩欄：判準本體、pwsh 實測表與紅綠自證語料
-# 住 `tools/lib/rc_after_pipe_real.py`；下面兩支是薄殼，只把已載入的 hook 模組餵進去。
-
-
 def _rc_after_pipe_real(command: str) -> bool:
-    """上游原生 × 截斷型管線 × 之後讀 rc ＝ 真的會量到假 rc 的那一種。"""
+    """上游原生 × 截斷型管線 × 之後讀 rc ＝ 真的會量到假 rc 的那一種（答案表見 `run_selftest`）。"""
     return _rc_real.rc_after_pipe_real(command, _lint_ps_hook)
-
-
-def rc_selftest() -> list[str]:
-    """`--selftest`：跑那張實測語料表，回傳失敗訊息清單（空＝全綠）。"""
-    return _rc_real.selftest(_lint_ps_hook)
 
 
 #: PowerShell 工具面的形態偵測器。鍵即報表欄名；值是 `str -> truthy/falsy` 的**可呼叫**（規則①借的
 #: 是攔截端的函式、不是正則）。`inline-loop` 已拆成兩欄且舊欄名刻意不保留：新舊數字**不可比較**。
 _POWERSHELL_PATTERNS: dict[str, object] = {
-    # 🔴 **對拍錨，不是違規次數**：逐字等於攔截端會擋的那件事（攔截端刻意偏擋，全母體實測 91.4% 是
-    # 誤報），**不得**被引用成「違規了幾次」；存在的理由是讓 `--parity` 證明兩端沒漂移。
+    # DEF-200-481 起兩欄同吃攔截端判準（上游原生 × 提前結束管線或原生消費者 × 之後讀 rc；
+    # 真機答案表見 `tools/lib/rc_after_pipe_real.py`）；`rc-after-pipe` 留作 `--parity` 對拍錨。
     "rc-after-pipe": _rc_after_pipe,
-    # 🔴 **唯一可引用為「量到幾次真風險」的那一欄**：上游原生指令 × 實測會提前結束的管線元素 ×
-    # 之後才讀 rc，三者同時成立才算（逐形態實測依據見 `tools/lib/rc_after_pipe_real.py`）。
     "rc-after-pipe-real": _rc_after_pipe_real,
     # 現寫的控制流：沒有任何測試看過這段碼，寫錯了只會表現成「數字怪怪的」。
     "inline-loop-statement": re.compile(
@@ -193,19 +166,14 @@ COMMAND_PATTERNS: dict[str, dict[str, re.Pattern[str]]] = {
 #: 帶 `command` 欄、會落進本稽核射程的工具（由上表推導，不另立第二個家）。
 SHELL_TOOLS = tuple(COMMAND_PATTERNS)
 
-#: 不會帶 shell command 的內建工具名：整支只用過這些（或 `mcp__*`）的 session 沒有「該抽到
-#: command」的前提，不是崩塌訊號（例：只 Write 的活體探針、純讀檔）。名字不在這張表、也不在
-#: `COMMAND_PATTERNS` ＝認不得的工具（改名／新增），仍可能是格式變更 ⇒ 照舊算崩塌候選。表是
-#: 啟發式：新工具名出現前只會多報、不會漏報（報了就去看那一支）。
-NON_SHELL_TOOLS = frozenset({
-    "Read", "Write", "Edit", "MultiEdit", "NotebookEdit", "Glob", "Grep", "Agent", "Task",
-    "TodoWrite", "Skill", "ToolSearch", "WebFetch", "WebSearch", "Workflow", "SendMessage",
-    "AskUserQuestion"})
-
-
 def _shell_capable(tool_totals: dict[str, int]) -> bool:
-    """本支叫過「可能帶 shell command、或認不得」的工具嗎（逐支崩塌判準的前提之一）。"""
-    return any(n not in NON_SHELL_TOOLS and not n.startswith("mcp__") for n in tool_totals)
+    """本支叫過「可能帶 shell command、或認不得」的工具嗎（逐支崩塌判準的前提之一）。
+
+    不會帶 command 的內建工具表＝`params.json` 的 `parity_non_shell_tools`；整支只用過這些（或
+    `mcp__*`）的 session 沒有「該抽到 command」的前提。不在表也不在 `COMMAND_PATTERNS` ＝認不得
+    的工具（改名／新增），仍算崩塌候選（只會多報、不會漏報）。"""
+    non_shell = _params()["parity_non_shell_tools"]
+    return any(n not in non_shell and not n.startswith("mcp__") for n in tool_totals)
 
 #: 阻斷的唯一判準＝harness 自己蓋的章：`tool_result.is_error` 為真，且該記錄帶 `toolDenialKind`。
 #: 子字串比對會被引文騙（grep 證據檔把 hook 錯誤字樣印出來即被誤判成被擋）。
@@ -532,14 +500,11 @@ def scan_transcript(path: Path, window_size: int = DEFAULT_WINDOW,
         "bash_attempt_details": bash_attempts,
         "patterns": counts,
         # 逐支崩塌訊號（見檔頭〈設計約束〉）：**有記錄**卻一支帶 command 的 shell 呼叫都抽不到。前提
-        # 原用 `records`（連 tool_use 都認不出來正是最徹底的格式變更），現再要求本支叫過「可能帶
-        # shell command、或認不得」的工具（`_shell_capable`）：零 tool_use（純問答）與只用過
-        # Write／Read 等已知非 shell 工具（活體探針）的 session 不是崩塌，它們曾讓 `--parity` 在
-        # 真實窗口恆 rc=1。代價：認不得 tool_use 時，工具名恰落在 `NON_SHELL_TOOLS` 者只剩合計面
-        # `shell_calls == 0` 兜底。🔴 逐筆切片下前提改為「**shell 工具真的被叫過**、卻一條指令都
-        # 抽不到」：子窗裡沒跑 shell 是正常狀態，沿用 `records>0` 會讓警報在分期用法下常響（常響
-        # 的警報等於沒有）。誠實劃界：切片下連工具名都認不出來（`PowerShell` 被改名）時本判準
-        # 看不到，由合計面兜底。
+        # 再要求本支叫過「可能帶 shell command、或認不得」的工具（`_shell_capable`）：零 tool_use 與
+        # 只用過非 shell 工具（`parity_non_shell_tools`）的 session 不是崩塌（它們曾讓 `--parity` 在
+        # 真實窗口恆 rc=1）。🔴 逐筆切片下前提改為「**shell 工具真的被叫過**、卻一條指令都抽不到」：
+        # 子窗裡沒跑 shell 是正常狀態，沿用 `records>0` 會讓警報常響（等於沒有）。誠實劃界：切片下連
+        # 工具名都認不出來（`PowerShell` 被改名）時本判準看不到，由合計面 `shell_calls == 0` 兜底。
         "collapsed": (shell_tool_calls > 0 if sliced else
                       records_total > 0 and _shell_capable(tool_totals)) and shell_calls == 0,
         "unsupported_claims": unsupported,
@@ -743,7 +708,7 @@ def session_profile(path: Path, lookback: int = DEFAULT_WINDOW) -> dict:
     """單趟掃描主執行緒（非 isSidechain）：tool_use 序列與阻斷、助理文字、簡報、最後 usage。
     `lookback`＝宣稱往回看幾個 tool_result 找阻斷（②′ 讀 params.json 的 `claim_lookback`）。"""
     prof: dict = {"sid": path.stem, "entry": "", "start": None, "cwd": "", "uses": [],
-                  "texts": [], "brief": False, "usage": None, "usage_ts": None}
+                  "texts": [], "brief": False, "usage": None, "usage_ts": None, "pm": ""}
     by_id: dict[str, dict] = {}
     recent: deque[bool] = deque(maxlen=max(1, lookback))  # 最近 lookback 個 tool_result 是否為阻斷
     for rec in iter_records(path):
@@ -751,6 +716,7 @@ def session_profile(path: Path, lookback: int = DEFAULT_WINDOW) -> dict:
             continue
         prof["entry"] = prof["entry"] or str(rec.get("entrypoint") or "")
         prof["cwd"] = prof["cwd"] or str(rec.get("cwd") or "")
+        prof["pm"] = prof["pm"] or str(rec.get("permissionMode") or "")  # auto 才有分類器
         prof["start"] = prof["start"] or _record_time(rec)
         att = rec.get("attachment") if isinstance(rec.get("attachment"), dict) else {}
         if not prof["uses"] and att.get("hookName") == "SessionStart:startup":
@@ -811,21 +777,30 @@ def judge_block(use: dict, cwd: str, bdg, prm: dict) -> str:
     return "correct" if any(hits) else "MISBLOCK"
 
 
-def feed_diffs(pop: list[dict], limit: int) -> list[int]:
-    """最近 limit 支（feed 在、且不舊於逐字稿最後一筆 usage）的 feed used 減逐字稿 used。"""
+def feed_diffs(pop: list[dict], limit: int, now: datetime,
+               quiescent_s: float) -> tuple[list[int], int]:
+    """最近 limit 支（feed 在、且不舊於逐字稿最後一筆 usage）的 feed used 減逐字稿 used。
+
+    「不舊於」以秒為解析度（feed 的 `ts` 只到秒、逐字稿到毫秒）。只納入**靜止**配對：
+    `now − max(feed.ts, 逐字稿最後 usage 時刻) ≥ quiescent_s`——在途視窗的逐字稿落盤落後 feed 一則
+    （實測 3～19 秒），差值是一則訊息的增量、不是兩個來源不一致；不靜止者排除並計數。
+    回 `(差值, 因不靜止而排除的配對數)`。"""
     from statusline_context_feed import context_feed_path  # 唯一的 feed 路徑實作，不另拼
 
-    out: list[int] = []
+    pairs: list[tuple[int, bool]] = []  # 新→舊：(差, 靜止嗎)
     for p in reversed(pop):
         try:
             doc = json.loads(context_feed_path(p["sid"]).read_text(encoding="utf-8"))
-            fresh = datetime.fromisoformat(doc["ts"]) >= p["usage_ts"]
+            ts = datetime.fromisoformat(doc["ts"])
+            fresh = (p["usage_ts"] - ts).total_seconds() < 1  # feed ts 只到秒、逐字稿到毫秒
             diff = _used(doc["context_window"]["current_usage"]) - p["usage"]
+            quiet = (now - max(ts, p["usage_ts"])).total_seconds() >= quiescent_s
         except (OSError, ValueError, KeyError, TypeError):
             continue  # 無 feed／壞 feed／無 usage＝量不到，不入 N
         if fresh and doc.get("session_id") == p["sid"]:
-            out.append(diff)
-    return out[:limit]
+            pairs.append((diff, quiet))
+    pairs = pairs[:limit]
+    return [d for d, quiet in pairs if quiet], sum(not quiet for _, quiet in pairs)
 
 
 def first_check_index(uses: list[dict], planner: re.Pattern, feed: re.Pattern) -> int | None:
@@ -863,12 +838,13 @@ def five_question(profs: list[dict], since: datetime | None, entries: set[str], 
     # 前 N 個呼叫的分子只計 hook 來源（含 SDD router）的阻斷；auto-mode／人拒絕不計
     hk = [[bool(u["block"]) and u["block"][0] != "non-hook" for u in p["uses"][:first_n]]
           for p in win]
-    hit5, first = sum(map(any, hk)), sum(h[0] for h in hk)
+    hit_n, first = sum(map(any, hk)), sum(h[0] for h in hk)
     feed = re.compile(prm["feed_read_re"])
     idx = [(p["sid"][:8], first_check_index(p["uses"], planner, feed), p["brief"])
            for p in pop if len(p["uses"]) >= prm["q2_max_index"]]
     late = [r[:2] for r in idx if r[1] is None or r[1] > prm["q2_max_index"]]
-    diffs = feed_diffs(pop, prm["q3_n"])
+    diffs, busy = feed_diffs(pop, prm["q3_n"], datetime.now().astimezone(),
+                             prm["q3_quiescent_seconds"])
 
     def show(label: str, n: int, need: int, detail: str, bad: bool = False, human: bool = False):
         """FAIL 優先；其次需人工複核；樣本數不足就誠實說量不到，不寫 PASS。"""
@@ -879,17 +855,20 @@ def five_question(profs: list[dict], since: datetime | None, entries: set[str], 
     other = Counter(u["block"][1] for _, _, u in blk if u["block"][0] == "non-hook")
     print(f"### ②′ 五問量測：母體 {len(pop)} 支（{sorted(entries)}・起點≥{since or '無'}"
           f"{f'・起點<{until}' if until else ''}）")
+    print(f"  母體 permissionMode：{dict(Counter(p.get('pm') or '?' for p in pop))}")
     show("Q1′a 誤擋", len(pop), 1, f"{len(mis)}／hook 阻斷 {len(ev)}；無 oracle {len(nor)}",
          bool(mis), bool(nor))
-    show("Q1′b 宣稱≠阻斷", len(pop), 1, f"{len(bare)}／{len(claims)} {bare[:3]}", human=bool(bare))
+    show("Q1′b 宣稱≠阻斷", len(pop), prm["q1b_min_n"], f"{len(bare)}／{len(claims)} {bare[:3]}",
+         human=bool(bare))
     show(f"Q1′c 前{first_n}呼叫被擋", len(win), prm["q1c_n"],
-         f"{hit5}／{len(win)}（≤{prm['q1c_gate']}）；"
+         f"{hit_n}／{len(win)}（≤{prm['q1c_gate']}）；"
          f"首呼叫被擋 {first}／{len(win)}",
-         len(win) >= prm["q1c_n"] and hit5 / len(win) > prm["q1c_gate"])
+         len(win) >= prm["q1c_n"] and hit_n / len(win) > prm["q1c_gate"])
     show("Q2′ 首查序號", len(idx), prm["q2_min_n"],
          f"逾期或從未 {len(late)}／{len(idx)} {late}；有簡報 {sum(r[2] for r in idx)}", bool(late))
     show("Q3′ feed 差", len(diffs), prm["q3_min_pairs"],
-         f"{len(diffs)} 對；max|差|={max(map(abs, diffs), default=0)} {diffs}",
+         f"{len(diffs)} 對；max|差|={max(map(abs, diffs), default=0)} {diffs}；"
+         f"NOT-QUIESCENT {busy}",
          any(abs(d) > prm["q3_tolerance_tokens"] for d in diffs))
     print("  Q4′ 本檔不量；九格見 --protocol-status（讀本機 trace_dir 的丙案 JSON；別台的先拷來）")
     print(f"  非 hook 阻斷（auto-mode／人拒絕，不入 Q1′）：{dict(other) or '無'}")
@@ -919,6 +898,32 @@ def probe_selftest() -> list[str]:
         if bool(cl.search(text) and not ex.search(text)) != bool(want):
             bad.append(f"宣稱句型：{text!r} 應判 {want}")
     return bad
+
+
+def run_selftest(table=None, judge=None) -> int:
+    """`--selftest`：答案表（pwsh／PS 5.1 真機實測）每一列，判準都要判對；表要有鑑別力（expect 為
+    True 與 False 的列各 ≥1，否則恆回同一值的判準也能全對）。rc＝1：任一列不符／表缺任一類／②′
+    量測自證有錯。`table`／`judge` 供單元測試注入。"""
+    table = _rc_real._RC_SELFTEST if table is None else table
+    judge = _rc_after_pipe_real if judge is None else judge
+    probe_bad = probe_selftest()  # ②′ 自證另計，不灌進答案表的判錯數
+    print(f"### `rc-after-pipe-real` 紅綠自證（{len(table)} 組，"
+          "答案＝pwsh 7.6.6／PS 5.1 兩引擎真機實測值）")
+    wrong = 0
+    for command, expected, measured, why in table:
+        got = judge(command)
+        wrong += got is not expected
+        print(f"  {'✅' if got is expected else '❌'} 實測{measured:9s} "
+              f"應判={str(expected):5s} 判={str(got):5s}  {why}")
+    flags = [bool(row[1]) for row in table]
+    problems = [] if True in flags and False in flags else [
+        "答案表缺 expect=True 或 expect=False 的列 ⇒ 恆回同一值的判準也能全對，自證是空的"]
+    print(f"\n  判錯 {wrong} / {len(table)}；expect=True {sum(flags)} 列、"
+          f"expect=False {len(flags) - sum(flags)} 列")
+    print(f"  ②′ 量測自證（阻斷判準＋宣稱句型）判錯 {len(probe_bad)} 組")
+    for line in probe_bad + problems:
+        print(f"  ❌ {line}", file=sys.stderr)
+    return 1 if (wrong or probe_bad or problems) else 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -957,9 +962,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="印協定雜湊、輪帳本窗口、完整性閘與 Q4′ 九格（rc 恆 0）")
     parser.add_argument("--max-claims", type=int, default=10)
     parser.add_argument("--selftest", action="store_true",
-                        help="對已知正解／已知違規各數組跑 `rc-after-pipe-real`"
-                             "（答案來自 pwsh 真機實測），並同時印出舊判準對同一批"
-                             "語料的判定當作紅的那一半。有任何一組不符即 rc=1")
+                        help="對答案表（pwsh／PS 5.1 真機實測）每一列跑 `rc-after-pipe-real`，"
+                             "要求判準全對、且表內 expect=True／False 各 ≥1 列；"
+                             "任一組不符、表缺任一類即 rc=1")
     parser.add_argument("--parity", action="store_true",
                         help="把量測窗裡每一條 unique PowerShell 指令同時餵給攔截端與"
                              "量測端，列出判定分歧（有分歧即 rc=1；掃描面崩塌亦 rc=1，"
@@ -970,30 +975,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.protocol_status:
         return protocol_status(_params())
     if args.selftest:
-        failures, probe_bad = rc_selftest(), probe_selftest()  # ②′ 自證另計，不灌進「新判準判錯」
-        print("### `rc-after-pipe-real` 紅綠自證"
-              f"（{len(_rc_real._RC_SELFTEST)} 組，答案＝pwsh 7.6.4 真機實測值）")
-        print("  🔴 綠的那一半：修正後的判準對每一組都要判對。")
-        print("  🔴 紅的那一半：同一批語料餵給**舊判準**（＝攔截端那支借來的函式），"
-              "看它錯在哪——\n     判準沒有鑑別力時，兩欄會一模一樣。")
-        old_wrong = 0
-        for command, expected, measured, why in _rc_real._RC_SELFTEST:
-            new_verdict = _rc_after_pipe_real(command)
-            old_verdict = _rc_after_pipe(command)
-            old_wrong += int(old_verdict is not expected)
-            print(f"  {'✅' if new_verdict is expected else '❌'} "
-                  f"實測{measured:9s} 應判={str(expected):5s} "
-                  f"新={str(new_verdict):5s} 舊={str(old_verdict):5s}  {why}")
-        print(f"\n  新判準判錯 {len(failures)} / {len(_rc_real._RC_SELFTEST)}；"
-              f"舊判準判錯 {old_wrong} / {len(_rc_real._RC_SELFTEST)}")
-        print(f"  ②′ 量測自證（阻斷判準＋宣稱句型）判錯 {len(probe_bad)} 組")
-        if old_wrong == 0:
-            print("  ⚠️ 舊判準一組都沒判錯 ⇒ 這批語料對「修了什麼」沒有鑑別力，"
-                  "自證是空的；請補進真的會分開兩者的形態。", file=sys.stderr)
-        for line in failures + probe_bad:
-            print(f"  ❌ {line}", file=sys.stderr)
-        # 舊判準零錯誤也算紅：那表示這份語料證明不了本輪修了任何東西。
-        return 1 if (failures or probe_bad or old_wrong == 0) else 0
+        return run_selftest()
 
     exclude = list(args.exclude) + args.exclude_sid
     if args.exclude_self:

@@ -8,6 +8,21 @@
     "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "90",
     "SDD_TELEMETRY_WRITEBACK_REQUIRES_HOOK": "1"
   },
+  "permissions": {
+    "_comment": "DEF-200-476（掌舵者裁決：授權在 repo 層加唯讀 allow）。立案：兩次 SA headless 探針（22 次中 20 次、19 次中 18 次工具呼叫被權限層拒絕，toolDenialKind＝user-rejected）顯示新視窗的 planner `--check`／`--pace` 現查與兩個唯讀退路 Read（feed 檔 ~/.autosdd/context_feed/<sid>.json、額度快取 ~/autosdd_quota.json，皆在 cwd 外）全數要核准，模型把權限詢問讀成「被擋」而放棄現查。刻意只放這兩類唯讀：不放 defaultMode（互動視窗的權限姿態是使用者個人選擇）、不放 additionalDirectories（連 Edit 一起放行，過寬）、不放 Write／Edit／任何 git 動詞，deny 不動；集合與簡報字面、SSOT 路徑的對準由 tools/tests/test_session_brief.py::RepoSettingsReadOnlyAllowTest 雙向鎖住。形態：①簡報字面（python tools/session_resume_planner.py --check*／--pace*，與 settings.unattended.json 同形，Bash 與 PowerShell 各一份；useMacWin.md 第 0 步亦改教同一字面）②中段萬用形（python *session_resume_planner.py …）：SA 實測模型會把腳本寫成絕對路徑，用 * 讓 tracked 檔不含機器路徑；已知窄性殘餘：* 可吃任意參數，python -c <碼> session_resume_planner.py --check 這類字面也會被涵蓋，只在此取便利、不得再放寬③Read 兩條用 ~/ 家目錄形（跨平台，官方文件建議）。驗證狀態（2026-10-03，本機 headless `claude -p --permission-mode dontAsk --model haiku` 探針，被拒＝規則沒匹配）：改前 Read 額度快取與 PowerShell 相對字面皆 DENIED（紅端）；改後 Read(~/autosdd_quota.json) READ-OK、PowerShell 相對字面 PS-OK、`python <絕對腳本路徑> --check` PS-OK（中段 * 形有效）、呼叫運算子 `& '…'` 形 PS-DENIED（刻意不涵蓋）、`.venv\\Scripts\\python.exe tools/… --check` PS-DENIED ⇒ 該族（venv 相對形）四條規則移除、不得再加回；Glob 目錄不被 Read 規則涵蓋（要讀具名 feed 檔）。auto mode 是否先判 allow、是否丟棄中段 * 形態＝只能掌舵者真實視窗驗。專案層 allow 在 folder 未信任時不生效（官方文件）。機器專屬形態（//c/Users/<user>/… 的 Read 絕對形、planner 絕對路徑）含使用者名與磁碟機，只能進 gitignored 的 .claude/settings.local.json，不得進本檔。",
+    "allow": [
+      "PowerShell(python tools/session_resume_planner.py --check*)",
+      "PowerShell(python tools/session_resume_planner.py --pace*)",
+      "Bash(python tools/session_resume_planner.py --check*)",
+      "Bash(python tools/session_resume_planner.py --pace*)",
+      "PowerShell(python *session_resume_planner.py --check*)",
+      "PowerShell(python *session_resume_planner.py --pace*)",
+      "Bash(python *session_resume_planner.py --check*)",
+      "Bash(python *session_resume_planner.py --pace*)",
+      "Read(~/.autosdd/context_feed/*.json)",
+      "Read(~/autosdd_quota.json)"
+    ]
+  },
   "hooks": {
     "SessionStart": [
       {

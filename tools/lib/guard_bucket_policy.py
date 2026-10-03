@@ -360,8 +360,14 @@ _FROZEN_SHRINK_ONLY_BUCKET_LINES: dict[str, int] = {
     # `exclusive=prose`（合計 171 行）轉為 `exclusive=mixed`——這是正確分類，不是
     # 繞過（判準邏輯與桶定義一個字未動）。依本表「合法縮小後必須同步下修」紀律
     # 重釘為 `guard_layer_bucket_census.py --grain chunk` 實測值。
+    # 🔴 五問第十六次四方覆核收尾單人窗口（DEF-200-476／481／482）：guard_self 3163→3176（+13）
+    # ——成長全在自守桶的結構必然處：鎖檔 test_adr_xplat001_c1c2_lock.py 本輪重釘列、回歸鎖軌同輪列、
+    # 到期兌現列與接鏈列（鎖檔自身漂移 +20，部分被同檔史料壓縮抵銷），加上 DEF-200-464 殘餘的
+    # 圍籬鎖（掃 tools/tests/*.py 的 `addCleanup(os.environ.pop` 判準，守測試衛生＝只能是 guard_self
+    # 成員）。四方（Architect／QA／SD／SA）本輪皆已覆核且 Trim 棒同輪搬遷 189 行史料；值取自
+    # `bucket_ratchet_problems()` 自己印出的普查實測（同一支 census 函式），零加減推算。
     "prose": 4311,
-    "guard_self": 3163,
+    "guard_self": 3176,
 }
 
 #: 棘輪吃的粒度與估計量。寫成常數而不是散文，是為了讓 probe 與棘輪不可能各讀一種

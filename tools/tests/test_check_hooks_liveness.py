@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import ast
+import importlib.util
 import json
 import os
 import re
@@ -22,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 # 平台中立的假「絕對」repo 根（WHY 見 _platform_helpers 常數旁註解；R11 真 Mac
 # 首跑實證：寫死 "D:/repo" 在 POSIX 非絕對路徑 → join/resolve 語意分歧假紅）。
 from _platform_helpers import ABS_FAKE_REPO  # noqa: E402
+from _ps_engine import available_engines as _ps_available_engines  # noqa: E402
 
 import check_hooks_liveness as m  # noqa: E402
 
@@ -819,15 +821,18 @@ class TestLintPowerShellHookBehaviour(unittest.TestCase):
         ("字串裡引述豁免標記，句尾那個 cd 仍是貨真價實的違規",
          "Write-Output 'never write # ps-lint-ok: like this'; cd AutoClaude",
          "Push-Location"),
-        # ── R79：偏向擋的**代價**就地記錄（不是漏，是刻意）──
-        # 裸原生指令（`git`）確實會重設 rc，但本判準只認呼叫運算子與「語句開頭是
-        # 執行檔」，認不得它 ⇒ 這一條會被擋。全史 913 條真實指令實測只有 1 條落在
-        # 這一格（0.11%），出口是行內豁免（阻斷訊息第一行就寫著）。
-        # 🔴 若日後補上「裸原生指令也算重設」的判準，本列會轉紅——那是正確行為：
-        # 取捨變了就必須有人重新決定，不能靜默改掉。
-        ("偏向擋的代價：裸原生指令 git 其實會重設 rc，但本判準認不得（出口＝行內豁免）",
-         'git status | Measure-Object -Line\ngit commit -m x 2>&1\n'
-         '"rc=$LASTEXITCODE"',
+        # ── DEF-200-481：真機判準（兩引擎逐列實測，答案表＝tools/lib/rc_after_pipe_real.py）──
+        ("原生消費者 python：讀到的是消費者的 rc（5），不是 git 的（0）",
+         'git log --oneline -n 40 | python -c "import sys; sys.exit(5)"\n"rc=$LASTEXITCODE"',
+         "LASTEXITCODE"),
+        ("script block 內的外部指令也是上游（after=7／-1）",
+         '& { git log --oneline -n 40 } | Select-Object -First 1\n"rc=$LASTEXITCODE"',
+         "LASTEXITCODE"),
+        ("管線在行尾、截斷元素在下一行（續行；after=7／-1）",
+         'git log --oneline -n 40 |\nSelect-Object -First 1\n"rc=$LASTEXITCODE"',
+         "LASTEXITCODE"),
+        ("-First 的縮寫 -f 同樣提前結束管線（after=7／-1）",
+         'git log --oneline -n 40 | Select-Object -f 1\n"rc=$LASTEXITCODE"',
          "LASTEXITCODE"),
     )
 
@@ -882,13 +887,30 @@ class TestLintPowerShellHookBehaviour(unittest.TestCase):
         ("豁免理由裡有撇號（先遮蔽再找豁免會把它吃掉）",
          "cd x  # ps-lint-ok: don't touch this"),
         ("一般指令", "git log --oneline -3"),
+        # ── DEF-200-481 掌舵者裁決（取代 R79 偏向擋）；after＝pwsh 7／PS 5.1 實測 ──
+        ("原「偏向擋的代價」列：裸 git 會重設 rc（git commit 的 rc 不是種子 7）",
+         'git status | Measure-Object -Line\ngit commit -m x 2>&1\n"rc=$LASTEXITCODE"'),
+        ("非截斷 cmdlet 消費者 Out-String（0／0）",
+         '& git status | Out-String\n"rc=$LASTEXITCODE"'),
+        ("非截斷 cmdlet 消費者 ForEach-Object（0／0）",
+         '& git status | ForEach-Object { $_ }\n"rc=$LASTEXITCODE"'),
+        ("Select-Object -Last 讀完全部輸入（0／0）",
+         '& git status | Select-Object -Last 3\n"rc=$LASTEXITCODE"'),
+        ("Tee-Object 不截斷（0／0）", '& git status | Tee-Object out.txt\n"rc=$LASTEXITCODE"'),
+        ("-First 加 -Wait 取消提前結束（0／0）",
+         'git log --oneline -n 40 | Select-Object -First 1 -Wait\n"rc=$LASTEXITCODE"'),
+        ("括號分組先完整跑完才進管線（0／0）",
+         '(git log --oneline -n 40) | Select-Object -First 1\n"rc=$LASTEXITCODE"'),
+        ("上游是 cmdlet：-First 不碰 rc（7／7，前一個外部指令的真 rc 原樣保留）",
+         'Get-ChildItem . | Select-Object -First 1\n"rc=$LASTEXITCODE"'),
     )
 
     def test_pipe_aliases_are_judged_the_same_as_their_full_names(self) -> None:
-        """SA-01：別名與全名其餘字元逐字相同 ⇒ 判定必須相同，且必須是「擋」。
+        """SA-01：別名與全名其餘字元逐字相同 ⇒ 判定必須相同。
 
         不對稱本身就是缺陷：`select -First N` 是提前結束管線最常見的寫法，
-        只認全名等於這道鎖擋掉的剛好是沒人會寫的那一半。
+        只認全名等於這道鎖擋掉的剛好是沒人會寫的那一半。DEF-200-481 起擋不擋由真機判準決定：
+        只有 Select-Object／select 的 -First 會提前結束管線，其餘 cmdlet 兩個引擎都放行。
         """
         for alias, full in self.PIPE_ALIAS_PAIRS:
             with self.subTest(alias=alias, full=full):
@@ -896,7 +918,8 @@ class TestLintPowerShellHookBehaviour(unittest.TestCase):
                     f'& git status | {alias} -First 3\n"rc=$LASTEXITCODE"')
                 rc_full, err_f = self._lint(
                     f'& git status | {full} -First 3\n"rc=$LASTEXITCODE"')
-                self.assertEqual(rc_full, 2, f"全名版就沒擋；{err_f}")
+                want = 2 if full == "Select-Object" else 0
+                self.assertEqual(rc_full, want, f"全名版判定不符（期望 rc={want}）；{err_f}")
                 self.assertEqual(
                     rc_alias, rc_full,
                     f"`| {alias}` rc={rc_alias} 但 `| {full}` rc={rc_full}——"
@@ -952,15 +975,16 @@ class TestLintPowerShellHookBehaviour(unittest.TestCase):
         for needle in ("Push-Location", "Find-GitBash", "LASTEXITCODE"):
             self.assertIn(needle, err, f"三條違規未一次報齊，缺 {needle}")
 
-    def test_the_exemption_exit_is_on_the_first_line(self) -> None:
-        """出口寫在頁尾等於沒有：第一次撞到的人先讀到三段責備才看到出路，而
-        「窄守衛必須有出口」是這支 hook 的設計前提（SA-01 附帶）。"""
+    def test_the_first_line_points_at_the_rewrite_exit_and_the_exemption_follows(self) -> None:
+        """QA-193-05：命中的絕大多數是不小心寫出來的，第一行該指向各項「出口」那一行（改寫後重跑）；
+        刻意寫出違規形態才需要的行內豁免說明排在後面，且仍須完整（理由必填）。"""
         _rc, err = self._lint("cd AutoClaude")
         first_line = (err.strip().splitlines() or [""])[0]
-        self.assertIn(
-            "ps-lint-ok", first_line,
-            f"阻斷訊息第一行沒有豁免出口，讀者要翻到最後才看得到：{first_line!r}",
-        )
+        self.assertIn("出口", first_line, f"第一行沒指向改寫出口：{first_line!r}")
+        self.assertNotIn("ps-lint-ok", first_line, "豁免說明回到第一行，改寫出口被擠到後面")
+        self.assertIn("理由必填", err, "豁免說明必須完整保留（理由必填）")
+        self.assertLess(err.index("Push-Location"), err.index("ps-lint-ok"),
+                        "豁免說明先於改寫出口出現")
 
     def test_the_first_line_says_only_this_call_was_not_run(self) -> None:
         """DEF-200-469：harness 的 `hook error` 前綴會把 hook 自己的第一句擠到約 190 字元之後，
@@ -1576,7 +1600,10 @@ _PARITY_HITS = (
     ("naked-cd", "sl /repo/a"),
     ("naked-cd", "cd"),  # R79：不帶參數，上一版兩邊都放行
     ("rc-after-pipe", "& git status | select -First 3\n$LASTEXITCODE"),
-    ("rc-after-pipe", "& git status | Tee-Object out.txt\n$LASTEXITCODE"),
+    ("rc-after-pipe", "& git status | Select-Object -Index 0\n$LASTEXITCODE"),
+    ("rc-after-pipe", "git status | select -First 3\n$LASTEXITCODE"),  # 詞彙表裸字當上游
+    ("rc-after-pipe", "& git status | findstr zzz\n$LASTEXITCODE"),  # 原生消費者
+    ("rc-after-pipe", "git status | findstr zzz\n$LASTEXITCODE"),
     ("bare-bash-sh", "bash tools/install_mac_nightly.sh"),
     ("bare-bash-sh", "bash.exe tools/install_mac_nightly.sh"),
 )
@@ -1595,7 +1622,31 @@ _PARITY_CLEAN = (
     "Get-ChildItem",
     ". /repo/tools/lib/Find-GitBash.ps1; & (Find-GitBash) /repo/a.sh",
     "git log --oneline -3",
+    # DEF-200-481：非截斷 cmdlet 消費者、詞彙表重設、無原生上游（兩端都必須放行）
+    "& git status | Tee-Object out.txt\n$LASTEXITCODE",
+    "& git status | Out-String\n$LASTEXITCODE",
+    "& git status | Select-Object -Last 3\n$LASTEXITCODE",
+    "& git status | Select-String x\n$LASTEXITCODE",
+    "& git status | select -First 3\ngit status --porcelain\n$LASTEXITCODE",
+    "Get-ChildItem . | select -First 3\n$LASTEXITCODE",
 )
+
+
+#: PowerShell 內建別名／關鍵字的常見表，連同兩引擎分歧名 curl／wget／more：詞彙表若與它相交，
+#: 裸字重設會把別名誤認成外部執行檔，進而清掉污染——唯一危險的方向。
+_PS_BUILTIN_NAMES = frozenset(
+    "echo ls dir cat type cd chdir sl rm del ren cp copy move mv pwd md mkdir rmdir select"
+    " sort where foreach measure sls gc sc gi gci gcm gm iwr irm man help cls clear history"
+    " kill ps sleep tee write ft fl oh popd pushd gal sal gp sp gv sv rv ni ri mi ci gl gu nal"
+    " compare diff group set get new test out format if else for while do switch try catch"
+    " finally function param return throw break continue exit curl wget more".split())
+
+
+def _load_module(name: str, path: Path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _shared_pattern_source(path: Path) -> dict[str, str]:
@@ -1688,6 +1739,38 @@ class TestHookAndProbeShareOneCriterion(unittest.TestCase):
                         "違規率會被系統性低估",
                     )
 
+    def test_native_heads_are_disjoint_from_builtin_aliases_and_keywords(self) -> None:
+        """DEF-200-481 性質鎖（靜態）：詞彙表不得含內建別名／關鍵字／引擎分歧名。"""
+        heads = _load_module("_lint_hook_heads", _LINT_HOOK)._NATIVE_HEADS
+        self.assertIn("git", heads, "詞彙表空了或改名 ⇒ 本鎖會恆綠")
+        self.assertEqual(heads & _PS_BUILTIN_NAMES, frozenset(),
+                         "詞彙表含別名／關鍵字：裸字重設會誤清污染（唯一危險的方向）")
+
+    def test_native_heads_are_not_live_aliases_functions_or_cmdlets(self) -> None:
+        """同上（動態；有 pwsh 才查，刻意不用 skipTest——skip 普查會紅）。"""
+        heads = sorted(_load_module("_lint_hook_live", _LINT_HOOK)._NATIVE_HEADS)
+        pwsh = _ps_available_engines().get("pwsh")  # 引擎解析走 _ps_engine SSOT
+        if pwsh:
+            names = ",".join(f"'{head}'" for head in heads)
+            proc = subprocess.run(
+                [pwsh, "-NoProfile", "-Command",
+                 f"Get-Command -Name {names} -CommandType Alias,Function,Cmdlet "
+                 "-ErrorAction SilentlyContinue | ForEach-Object Name; 'ran'; exit 0"],
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                timeout=120)
+            self.assertEqual(
+                proc.stdout.split(), ["ran"],
+                f"詞彙表名字在 pwsh 是別名／函式／cmdlet（或指令沒跑完）：{proc.stdout}")
+
+    def test_the_answer_table_is_a_unit_gate_on_the_hook_criterion(self) -> None:
+        """DEF-200-481：真機答案表（兩引擎實測值）升成單元閘，對上攔截端的判準本體。"""
+        real = _load_module(
+            "_rc_real_gate", _REPO_ROOT / "tools" / "lib" / "rc_after_pipe_real.py")
+        table = real._RC_SELFTEST
+        self.assertEqual({row[1] for row in table}, {True, False}, "答案表只剩單一極性")
+        self.assertGreaterEqual(len(table), 18)
+        self.assertEqual(real.selftest(_load_module("_lint_hook_gate", _LINT_HOOK)), [])
+
 
 # 沿革已搬至 CrossPlatform_R122_Guard_Prose_Migration.md〈註冊面棘輪的立案與分工（R78／QA-03）〉。
 
@@ -1745,11 +1828,7 @@ _REGISTRATION_BASELINE: dict[tuple[str, str], frozenset[str]] = {
         {"Write", "Edit"}),
     ("PostToolUse", "AutoClaude/tools/hooks/check_sh_eol.py"): frozenset(
         {"Write", "Edit"}),
-    # 🔴 R79 由**並行的另一個包**新增的 PreToolUse 條目（`.claude/settings.json` 不在
-    # 本包的檔案所有權內，本包只負責讓帳對得上——同 `_SITE_CLASS_CENSUS` 的既有紀律）。
-    # 語意是「動手**之前**先看水位」，圈的是三個會一次吃掉大量 context 的工具。
-    # 收輪者請依當場實測重驗這一格：若那個包最後把條目撤掉，本列必須跟著撤，否則
-    # 棘輪會對著一個不存在的註冊喊紅。
+    # 交接註記搬至 Guard_Line_History_2.md〈R194 淨減法搬遷〉§123。  round-label-ok
     ("PreToolUse", ".claude/hooks/context_budget_guard.py"): frozenset(
         {"Task", "WebFetch", "WebSearch"}),
     # R78 context 水位觀測者。matcher 刻意不含 Write|Edit（那些內容在模型寫出時

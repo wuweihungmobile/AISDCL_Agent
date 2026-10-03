@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
 """tools/check_wrapper_thinness.py 的單元測試（S20 → R10 拍板案(a) hash 釘選）。
 
-R10（DEF-101-134）守門改制：權威判定＝正規化內容 sha256 釘選（白名單化，
-終結黑名單軍備競賽——曾三輪被 `for(`/`python3 -c`/`.ForEach(` 繞過）；
-黑名單降級為非權威的補充訊號。既有關鍵字測試保留：fake root 內容
-必然使 hash 紅燈，關鍵字診斷應伴隨出現（史料回歸鎖繼續有效）。
+權威判定＝正規化內容 sha256 釘選（白名單化，終結黑名單軍備競賽）；黑名單關鍵字降為非權威的補充訊號。
+既有關鍵字測試保留：fake root 內容必然使 hash 紅燈，關鍵字診斷應伴隨出現。
 
-R60 Scan-E E-A-02：關鍵字偵測原本整段巢狀在「hash 已紅」分支內（＝兩道防線
-串聯，更新 pin 即整組失效），已改為**並聯**。本檔下方 `TestKeywordDetectionParallel`
-是該修復的回歸鎖（含「pin 已更新」的紅燈斷言＋兩個正控），10 個 forbidden 注入樣本
-（R85 起收斂成單一表驅動判準，見 TestCheckWrapperThinness 內的注入表）全部走
-`_make_fake_root()`＝必然 hash 紅燈態，對「pin 已更新」這條路徑天生零訊號，故必須另立。
+關鍵字偵測與 hash 為**並聯**（不是巢狀在「hash 已紅」分支內，否則更新 pin 即整組失效）：回歸鎖是下
+方 `TestKeywordDetectionParallel`（含「pin 已更新」的紅燈斷言＋兩個正控；forbidden 注入樣本全走
+`_make_fake_root()`＝必然 hash 紅燈態，對該路徑零訊號故須另立）。守門改制與並聯修復（R10／
+DEF-101-134、R60 Scan-E E-A-02）沿革搬至
+Guard_Line_History_2.md〈R194 淨減法搬遷〉§99。  round-label-ok
 
 執行：python3 -m unittest discover -s tools/tests -p "test_*.py" -v
 """

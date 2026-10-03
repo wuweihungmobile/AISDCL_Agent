@@ -69,11 +69,7 @@ def _latest_root() -> Path:
 
 
 # ── per-tree 檔數下限的「腐化偵測帶」（R75／DEF-101-800）────────────────────
-# 🔴 缺陷本體：下限原本是**單邊**的，而單邊下限只會腐化——樹會長大、下限不會，
-# 於是它實際守住的比例逐年下滑。R75 QA 實測：`tools` 樹 files=81 對 floor=18
-# ⇒ 掉掉 63/81（78%）掃描面仍然全綠，而那個 18 的來源是 2026-07-19 首掃數
-# 打八折，中間 R74 又是新增檔案最多的一輪。**「掃描面靜默縮小必紅」這個存在
-# 理由當時已經不成立**，鎖還在，牙掉了。
+# 缺陷本體沿革搬至 Guard_Line_History_2.md〈R194 淨減法搬遷〉§96。  round-label-ok
 #
 # 機制（刻意不外接基線同步器）：改成**雙邊帶**。
 #   · 低於下限 ⇒ 縮面（原意，不變）；
@@ -654,11 +650,7 @@ class TestSubprocessEncodingHygiene(unittest.TestCase):
 class TestChildEncodingHygiene(unittest.TestCase):
     """判準二：起 Python child 的呼叫，child 自己必須有 UTF-8 stdio 保護。
 
-    WHY 這道到 R74 才出現：判準一（parent 解碼）2026-07-19 就上線了，而出事那一行
-    對它完全合規——`text=True` 有 `encoding="utf-8"`、有 `errors="replace"`。
-    repo 只守了一半，另一半連判準都沒有，於是 `.claude/hooks/block_bash_on_windows.py`
-    在無保護狀態下漂了一整輪，直到 GitHub windows-latest（en-US ＝ cp1252）把
-    整段中文指引印成 `\\uXXXX` 才被看見（DEF-101-789）。
+    立案沿革搬至 Guard_Line_History_2.md〈R194 淨減法搬遷〉§122。  round-label-ok
     """
 
     def test_python_child_targets_have_utf8_stdio_protection(self) -> None:

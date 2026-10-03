@@ -108,8 +108,8 @@ dump hook 實測確認兩個欄位都在，且逐字稿當下**已經含**那一
 
 判準：句子裡出現「軸名 ＋ 百分比」（`PACE_AXES` × `PACE_VALUE_WINDOW` 字元窗），而那個
 讀數的**量測時刻**距今超過該軸自己的 TTL ⇒ 出聲。量測時刻兩條路取得：作者自己貼的
-`量測於=<ISO>`（優先），否則往本場 `tool_result` 回溯找同一個「軸＋值」的錨點、取那筆
-落款時刻。
+`量測於=<ISO>`（優先），否則往本場 `tool_result`（DEF-200-477 起另含 SessionStart 簡報，
+見 `_session_start_anchors`）回溯找同一個「軸＋值」的錨點、取那筆落款時刻。
 
 🔴 **逃生口是算術，不是「在場即抑制」**：貼了 `量測於` 不等於免罰——本判準把那個時刻
 **解析出來算 age**，只有 `age <= TTL` 才靜音。立案是量出來的：先前設計版的抑制器（在場
@@ -329,9 +329,10 @@ PostToolUse 守衛自己的水位通知照舊算數。回歸鎖：`tools/tests/t
   `is_error`）；連字面也變了就退回舊詞表——判準會在真被擋時重新出聲（假紅方向，文案已
   附回報指引）。原生阻斷（如 `Remove-Item on system path … is blocked`，本機 7 筆）只有
   欄位這條路：詞表與備援字面都不認它。
-· SessionStart 簡報不算佐證的代價：新視窗第一回合若只是轉述簡報裡的水位／額度字樣（沒跑
-  `--check`／`--pace`），「被擋／水位」宣稱同樣會出聲——這是設計（簡報是啟動當下的快照、
-  且每場都有），指路的兩條指令都是零 token 的一行。
+· SessionStart 簡報對第五判準仍不算佐證（DEF-200-430）：新視窗第一回合若只是轉述簡報裡的
+  水位／額度字樣（沒跑 `--check`／`--pace`），「被擋／水位」宣稱同樣會出聲——這是設計
+  （簡報是啟動當下的快照、且每場都有），指路的兩條指令都是零 token 的一行。第三判準則自
+  DEF-200-477 起以簡報**落款**當錨點：落款是組出時刻、不是量測時刻，最多把讀數看新 ≤180 秒。
 
 判準本體 `unsourced_verdict_hits()` 是純函式，由 `tools/tests/test_claim_provenance_r86.py`
 機械釘住（含合成注入紅綠雙向自證）。依賴方向與 `lint_powershell_command.py` 同：
@@ -350,7 +351,7 @@ import re
 import sys
 
 # `timezone.utc` 不用 `datetime.UTC`（py311+）：hook 鏈須在 mac 預設直譯器載入。
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 # payload 讀取與 UTF-8 stdio 都住共用層 `tools/lib/platform_utils.py`，形態逐字對齊姊妹檔
 # `block_destructive_git.py`／`lint_powershell_command.py`（同一個 shim、同一個 except 語意）。
@@ -543,7 +544,7 @@ def _parse_aware(text: str):
 
 
 def _anchor_time(axis: str, value: str, stamped: list):
-    """本場工具輸出裡「這個軸綁這個值」最後一次出現的落款時刻（`None`＝全場無錨點）。"""
+    """錨點池（`_pace_anchors`）裡「這個軸綁這個值」最後一次出現的落款時刻（`None`＝無錨點）。"""
     needle = re.compile(re.escape(axis) + rf"[^\n]{{0,{PACE_VALUE_WINDOW}}}"
                         + re.escape(value))
     for when, text in reversed(stamped):
@@ -555,9 +556,10 @@ def _anchor_time(axis: str, value: str, stamped: list):
 def stale_pace_hits(claim_text: str, stamped: list, now) -> list[dict]:
     """`claim_text` 裡引述的**過期**額度讀數，以及錨不到的那一類（`[]`＝沒有）。
 
-    純函式。`stamped`＝本場 `tool_result` 的 `[(落款時刻|None, 文字)]`（時序）；`now` 必須
-    帶 tzinfo。回傳每筆帶 `kind`：`"stale"`＝真的過期（會出聲）／`"unanchored"`＝軸綁定
-    讀數但全場找不到錨點（**登記的盲區：放行、不阻斷，但出一則 ℹ️ 並計數**，見檔頭 M7）。
+    純函式。`stamped`＝錨點池 `[(落款時刻|None, 文字)]`（時序；`main()` 傳 `_pace_anchors()`
+    ＝本場 `tool_result` ＋ SessionStart 簡報）；`now` 必須帶 tzinfo。回傳每筆帶 `kind`：
+    `"stale"`＝真的過期（會出聲）／`"unanchored"`＝軸綁定讀數但找不到錨點（**登記的盲區：
+    放行、不阻斷，但出一則 ℹ️ 並計數**，見檔頭 M7）。
     """
     own = None
     match = _MEASURED_AT_RE.search(claim_text)
@@ -1045,6 +1047,46 @@ def _block_evidence_text(records: list) -> str:
     return "\n".join(parts)
 
 
+#: 降級簡報的共有字面（`session_brief._STALE_CACHE_NOTE`／`_UNMEASURED_NOTE`）：含它＝自陳不是
+#: 量測值 ⇒ 不錨。本檔不 import repo 模組而就地寫死，漂移由 `test_claim_provenance_r86.py` 對帳。
+_BRIEF_DEGRADED = "退化政策值"
+#: 簡報錨點往前推幾秒：0＝以落款為錨（掌舵者裁決）；要保守改成 180（額度快取 TTL，見下）。
+_BRIEF_ANCHOR_LAG_S = 0
+
+
+def _session_start_anchors(records: list) -> list:
+    """SessionStart 簡報 → `[(錨定時刻, 文字)]`，只餵第三判準（DEF-200-477）。
+
+    新視窗第一回合的額度數字只在簡報（hook attachment，非 tool_result）裡，如實轉述也被判
+    「找不到任何錨點」。🔴 與 `_block_evidence_text` 的排除互不牽動：第五判準仍不認簡報
+    （DEF-200-430）。降級簡報（含 `_BRIEF_DEGRADED`）與落款解析不出的記錄都不錨。
+    🔴 **時刻偏差**：錨定時刻＝簡報**組出**時刻、不是量測時刻；非降級簡報代表快取在 TTL
+    （`quota_gate.QUOTA_CACHE_TTL_SECONDS`，現 180 秒）內，故最多把讀數看新 ≤180 秒——快軸
+    （`session`／`five_hour`，`PACE_TTL_S` 現 135／133 秒）偏差大於 TTL，慢軸（`seven_day`／
+    `weekly_all`，約 23 分鐘）可忽略；要保守改 `_BRIEF_ANCHOR_LAG_S`。
+    """
+    out = []
+    for rec in records:
+        att = rec.get("attachment") if isinstance(rec, dict) else None
+        if (not isinstance(att, dict) or att.get("type") != "hook_additional_context"
+                or att.get("hookEvent") != "SessionStart"):
+            continue
+        content = att.get("content")
+        if isinstance(content, list):
+            content = "\n".join(c for c in content if isinstance(c, str))
+        when = _parse_aware(rec.get("timestamp"))
+        if isinstance(content, str) and when is not None and _BRIEF_DEGRADED not in content:
+            out.append((when - timedelta(seconds=_BRIEF_ANCHOR_LAG_S), content))
+    return out
+
+
+def _pace_anchors(stamped: list, records: list) -> list:
+    """第三判準的錨點池（`tool_result` ＋ SessionStart 簡報）依落款排序、`None` 排最前：
+    `_anchor_time` 由後往前找，取到的才是最新那筆。只餵 `stale_pace_hits`，其餘判準不含簡報。"""
+    return sorted(stamped + _session_start_anchors(records),
+                  key=lambda item: item[0].timestamp() if item[0] else float("-inf"))
+
+
 def _block_claim_evidence(stamped: list, records: list, user_turns: list) -> str:
     """D15 判準專用的證據面（D24；DEF-200-275 第六輪；SD-06 收斂版）。
 
@@ -1114,7 +1156,7 @@ def _pace_messages(hits: list[dict]) -> list[str]:
     blind = [h for h in hits if h.get("kind") == "unanchored"]
     if blind:
         out.append(
-            f"ℹ️ 另有 {len(blind)} 個軸綁定讀數在本場工具輸出裡**找不到任何錨點**"
+            f"ℹ️ 另有 {len(blind)} 個軸綁定讀數在本場工具輸出或簡報裡**找不到任何錨點**"
             f"（可能是輸出被截斷，也可能是憑空寫的——判準在散文平面上分不出來）。"
             f"本守衛對這一類**放行**：這是**登記的盲區，不是通過**。"
             f"累計（{FRESHNESS_TRACE}）：過期 {totals[0]} 筆／錨不到 {totals[1]} 筆。")
@@ -1192,8 +1234,8 @@ def main() -> int:
                     "（判準：.claude/hooks/check_claim_provenance.py"
                     "；關閉：AUTOSDD_BLOCK_CLAIM_GUARD_OFF=1）")
         if not os.environ.get("AUTOSDD_PACE_GUARD_OFF"):
-            messages += _pace_messages(
-                stale_pace_hits(claim, stamped, datetime.now(timezone.utc)))
+            messages += _pace_messages(stale_pace_hits(
+                claim, _pace_anchors(stamped, records), datetime.now(timezone.utc)))
         # 🔴 執行期證據（M9）：本檔是全 repo 唯一每一則回覆都會跑、且**手上已經有逐字稿**
         # 的地方 ⇒ 「hook 載具到底有沒有解析到」這件事的自動讀者只能是它。靜態那三道結構上
         # 看不到這件事（判準面是 settings.json ＋ 檔案系統，不是執行結果），而執行期證據

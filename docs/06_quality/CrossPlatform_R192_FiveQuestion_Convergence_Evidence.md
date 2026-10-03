@@ -21,7 +21,7 @@
 - `claude --version` ⇒ `2.1.288 (Claude Code)`。`git log -1 --format='%ci %h' 7931ced2` ⇒ `2026-10-03 01:21:56 +0800 7931ced2`。
 - 主控任務書的母體宣稱**錯誤**（QA EV-01 訂正）：主控以 mtime 與首則 user 列判 `cd33883f` 為修法後 Sonnet 純問答，QA 查該 session 唯一 user prompt 是 2026-09-08、mtime 被無時戳 cost-state 列改寫 ⇒ 修法後真實母體只有 `c00d202a`（本窗，N=1）＋`6880f760` 切點後尾巴 9 個呼叫。
 - `--unresolved-count`：`未結列數＝37`（起點）。棘輪常數 `_REPIN_NET_CAP_DUE_ROUND = 192`／`_REPIN_NET_CAP_DUE_TARGET = 521`（`test_adr_xplat001_c1c2_lock.py:3135-3136`）、`_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND = 193`（:3050）。
-- `claude_home` 出口：`tools/lib/platform_utils.py:53`（SSOT）＋`.claude/hooks/context_budget_guard.py:78`（fallback，標 `claude-home-fallback-ok`）；逐字稿目錄沒有跨模組共用的函式，僅 `tools/probe/audit_session.py:266` 有一份 `project_transcript_dir`（`tools/session_gate_acceptance.py:100` 借用；R193 鏡 B 訂正，原寫「函式不存在」）。`quota_messages.py:310／:319／:443` 仍有「不受影響」句。`~/autosdd_quota.json` schema `autosdd.quota/2`、`source=endpoint`、`http_status=200`。
+- `claude_home` 出口：`tools/lib/platform_utils.py:53`（SSOT）＋`.claude/hooks/context_budget_guard.py:78`（fallback，標 `claude-home-fallback-ok`）；逐字稿目錄沒有跨模組共用的函式，僅 `tools/probe/audit_session.py` 的 `project_transcript_dir()` 一份（`tools/session_gate_acceptance.py` 借用；R193 鏡 B 訂正，原寫「函式不存在」；R194 鏡 C F12 把行號改為函式名——同 commit 已讓行號漂移）。`quota_messages.py:310／:319／:443` 仍有「不受影響」句。`~/autosdd_quota.json` schema `autosdd.quota/2`、`source=endpoint`、`http_status=200`。
 - 本窗被守衛擋下：0 次（截至派工時）。
 
 ## 三、四方摘要 `[他包回報]`

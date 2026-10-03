@@ -578,6 +578,9 @@ _GOVERNANCE_DOCS = (
     # 五問首次 Windows 執行輪（第十五次四方覆核；協定一次修正重啟窗口、鏡 B 訂正）：即刻登記。
     _REPO_ROOT / "docs" / "06_quality"
     / "CrossPlatform_R193_FiveQuestion_Windows_Closure_Evidence.md",
+    # 五問第十六次四方覆核（lint 規則①精準化、permissions.allow、②′ 協定批次修訂）：即刻登記。
+    _REPO_ROOT / "docs" / "06_quality"
+    / "CrossPlatform_R194_FiveQuestion_Permission_Precision_Evidence.md",
     # 護欄層行數棘輪史料歸檔的第二冊（第一冊逼近 Read 工具上限，淨減法搬遷改落本檔）：即刻登記。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_Guard_Line_History_2.md",
 )

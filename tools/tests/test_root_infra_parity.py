@@ -172,14 +172,10 @@ class TestRootInfraParity(unittest.TestCase):
             )
 
     def test_first_guard_header_scope_matches_step_implementation(self) -> None:
-        """R56 新增（Architect 與 SA 各自獨立回報同一根因）：檔頭第 1 道敘述是
-        ONBOARDING.md §6 明文指定的權威來源（原文「詳細內容以 workflow 檔頭註解
-        為準，避免每次擴充都要同步改動兩處」）。R56 把該 step 的掃描面由
-        `find tools`（10 檔）擴為全庫 `git ls-files`（174 檔）時檔頭漏改，被指定
-        的真相源反而成了錯的一方；同形狀的「多站點敘述漂移」本 repo 已連踩四輪
-        （R54 DEF-101-431／R55「9 支」／本輪 pre-push「五支」）。故機械斷言：
-        step **非註解行**採用的掃描機制關鍵字，必須同時出現在檔頭第 1 道敘述裡
-        ——未來任一方向擴面/縮面而檔頭沒跟上即紅。"""
+        """step **非註解行**採用的掃描機制關鍵字，必須同時出現在檔頭第 1 道敘述裡（該敘述是
+        ONBOARDING.md §6 明文指定的權威來源）——未來任一方向擴面／縮面而檔頭沒跟上即紅。立案（掃描
+        面由 `find tools` 擴為全庫 `git ls-files` 時檔頭漏改，多站點敘述漂移連踩四輪）沿革搬至
+        Guard_Line_History_2.md〈R194 淨減法搬遷〉§113。  round-label-ok"""
         text = _CI_YML.read_text(encoding="utf-8")
         header = _FIRST_GUARD_HEADER_RE.search(text)
         self.assertIsNotNone(header, "root-infra-ci.yml 找不到檔頭第 1 道（bash -n）敘述區塊")

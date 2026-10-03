@@ -14,9 +14,11 @@ import ast
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -24,6 +26,9 @@ from unittest import mock
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _HOOK = _REPO_ROOT / ".claude" / "hooks" / "check_claim_provenance.py"
+sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
+import quota_policy  # noqa: E402  # DEF-200-477：簡報夾具走真的 `quota_line()`（writer==reader）
+import session_brief  # noqa: E402
 
 
 def _load():
@@ -378,10 +383,7 @@ def _pace_line(axis: str = "session", pct: str = "16") -> str:
 class TestTheEscapeHatchIsArithmeticNotPresence(unittest.TestCase):
     """🔴 **本組是本輪否決權複審 M2＋M4 的直接產物，斷言方向刻意與規格版相反。**
 
-    規格版寫的紅綠自證是「插入 4 小時前的『量測於』⇒ 回空清單」——那**把事故寫成契約**：
-    立案的事故形狀就是「把四小時前的 pace 區塊整塊貼上」，而那份規格會讓那個動作**變成
-    合法的靜音手法**。複審量到的代價：在整個母體上，「在場即抑制」型抑制器**一次都沒有
-    做對過** ⇒ 它不是逃生口，是隨機靜音器。
+    規格版紅綠自證被否決的經過搬至 Guard_Line_History_2.md〈R194 淨減法搬遷〉§129。  round-label-ok
 
     所以這裡的契約是：**時間戳自己過期 ⇒ 仍命中，且訊息要帶出它的 age**；只有「真的剛量」
     才靜音。第二條（真的剛量 → 靜音）是逃生口該有的紅綠自證，缺它就無法證明抑制器有
@@ -669,6 +671,108 @@ class TestThePaceGuardHasItsOwnEscapeHatch(unittest.TestCase):
         self.assertEqual(done.returncode, 0)
         self.assertNotIn("錨不到", done.stderr, "逃生口沒有真的關掉本判準")
         self.assertIn("99991", done.stderr, "另一個判準被順手關掉了")
+
+
+class TestTheSessionStartBriefIsAnAnchorForTheStaleReadingJudgement(unittest.TestCase):
+    """DEF-200-477（受測：hook 的 `_session_start_anchors`／`_pace_anchors`／`main()` 接線）。
+
+    WHY：新視窗第一回合的額度數字只在 SessionStart 簡報（hook attachment，非 tool_result）裡，
+    第三判準的錨點此前只認 tool_result ⇒ 如實轉述也被唸「找不到任何錨點」並多跑一回合。反方向
+    一起守，否則簡報當錨點就成了新的隨機靜音器：憑空數字、值不符、過期轉述、降級簡報、別的
+    hook 事件都仍要出聲；第五判準對簡報的排除（DEF-200-430）不動。
+    """
+
+    _CLAIM = "session 27%（band=free）"
+
+    @staticmethod
+    def _brief(note: str = "") -> str:
+        """真 `session_brief.quota_line()` 對 27% 新鮮讀數印的額度行（writer==reader）＋ `note`。"""
+        axis = quota_policy.Axis("session", 27.0, (_NOW + timedelta(hours=2)).isoformat())
+        state = quota_policy.QuotaState((axis,), _NOW.isoformat(), "cache", "ok")
+        gate = types.SimpleNamespace(quota_policy=quota_policy, policy_env=dict,
+                                     read_quota=lambda now, path=None: state)
+        return "[SDD-CTX-GUARD] 額度：" + session_brief.quota_line(gate, _NOW) + note
+
+    @staticmethod
+    def _record(text: str, at: datetime = _NOW, event: str = "SessionStart") -> dict:
+        return {"timestamp": at.isoformat(), "attachment": {
+            "type": "hook_additional_context", "hookEvent": event, "content": [text]}}
+
+    def _kinds(self, after: timedelta, records: list, claim: str = _CLAIM) -> list[str]:
+        """與 `main()` 同一條：錨點池 → `stale_pace_hits`；`now`＝簡報落款＋`after`。"""
+        pool = G._pace_anchors([], records)
+        return [h["kind"] for h in G.stale_pace_hits(claim, pool, _NOW + after)]
+
+    def test_a_faithful_relay_of_a_fresh_brief_is_silent(self) -> None:
+        """T1：照實轉述剛送達的簡報——被處罰的正解，也就是立案形態。"""
+        self.assertEqual(self._kinds(timedelta(seconds=60), [self._record(self._brief())]), [],
+                         "如實轉述簡報數字仍被判找不到錨點 ⇒ DEF-200-477 復發")
+
+    def test_the_same_relay_hours_later_is_stale_not_unanchored(self) -> None:
+        """T2：簡報當錨點不等於永久免罰——落款過了 TTL 照樣出聲，且帶得出 age。"""
+        pool = G._pace_anchors([], [self._record(self._brief())])
+        hits = G.stale_pace_hits(self._CLAIM, pool, _NOW + timedelta(hours=4))
+        self.assertEqual([(h["kind"], h["axis"]) for h in hits], [("stale", "session")])
+        self.assertEqual(hits[0]["age_s"], 4 * 3600 + G._BRIEF_ANCHOR_LAG_S)
+
+    def test_a_number_the_brief_never_said_stays_unanchored(self) -> None:
+        """T3：憑空數字（沒有簡報）與值不符（簡報 27%、轉述 61%）都仍判錨不到。"""
+        self.assertEqual(self._kinds(timedelta(seconds=60), []), ["unanchored"])
+        self.assertEqual(self._kinds(timedelta(seconds=60), [self._record(self._brief())],
+                                     "session 61%（band=free）"), ["unanchored"])
+
+    def test_a_later_tool_result_beats_the_older_brief(self) -> None:
+        """錨點取**最新**那筆：簡報之後重跑 `--pace` 量到同一個值，引述它不是過期讀數。"""
+        later = _NOW + timedelta(hours=4)
+        remeasured = [(later - timedelta(seconds=30), "kind=session 27% 剩 90 分鐘 band=free")]
+        pool = G._pace_anchors(remeasured, [self._record(self._brief())])
+        self.assertEqual(G.stale_pace_hits(self._CLAIM, pool, later), [],
+                         "簡報（四小時前）蓋過了更新的量測 ⇒ 錨點池沒有依時刻排序")
+
+    def test_only_an_undegraded_session_start_brief_anchors(self) -> None:
+        """T4：自陳『退化政策值』的簡報不是量測值；別的事件的 hook 通知（含本 hook 自己上一則
+        警報＝`Stop`）也不得當錨點，否則警報自己洗白下一次引述。"""
+        cases = {f"降級附註 {note[:8]}": self._record(self._brief(note))
+                 for note in (session_brief._STALE_CACHE_NOTE, session_brief._UNMEASURED_NOTE)}
+        cases.update({f"hookEvent={event}": self._record(self._brief(), event=event)
+                      for event in ("Stop", "PostToolUse", "PreToolUse")})
+        for label, record in cases.items():
+            with self.subTest(label):
+                self.assertEqual(self._kinds(timedelta(seconds=60), [record]), ["unanchored"])
+
+    def test_the_conservative_variant_is_one_constant(self) -> None:
+        """偏差上界的保守解：錨點往前推一個快取 TTL ⇒ 組出 100 秒的簡報，讀數可能已 280 秒舊。"""
+        records = [self._record(self._brief())]
+        self.assertEqual(self._kinds(timedelta(seconds=100), records), [])
+        with mock.patch.object(G, "_BRIEF_ANCHOR_LAG_S", 180):
+            self.assertEqual(self._kinds(timedelta(seconds=100), records), ["stale"])
+
+    def test_the_fifth_judgement_and_the_degraded_marker_are_untouched(self) -> None:
+        """T5：簡報照舊進不了第五判準的佐證面（DEF-200-430）；hook 就地寫死的降級字面與簡報同源。"""
+        self.assertEqual(G._block_evidence_text([self._record(self._brief())]), "")
+        for note in (session_brief._STALE_CACHE_NOTE, session_brief._UNMEASURED_NOTE):
+            self.assertIn(G._BRIEF_DEGRADED, note, "簡報改了降級附註字面 ⇒ 降級簡報會被當成錨點")
+
+    def test_the_hook_process_reads_the_brief_from_the_real_transcript(self) -> None:
+        """接線鎖：`main()` 真的把簡報餵進第三判準（上面只證明 `_pace_anchors` 本身是對的）。
+        借鄰班的 `_run`：多一個 subprocess 站點就得重釘 `_CHILD_SITE_FLOOR`。"""
+        now = datetime.now(UTC)
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = Path(tmp) / "t.jsonl"
+
+            def say(*records: dict) -> str:
+                transcript.write_text("".join(json.dumps(r) + "\n" for r in records),
+                                      encoding="utf-8")
+                done = TestTheUnbackedBlockClaimHookWiring._run(
+                    self, self._CLAIM, transcript, {"AUTOSDD_TRACE_DIR": tmp})
+                self.assertEqual(done.returncode, 0, "本守衛永不阻斷")
+                return done.stderr
+
+            fresh = say(self._record(self._brief(), now - timedelta(seconds=20)))
+            self.assertNotRegex(fresh, "找不到任何錨點|已經過期",
+                                "新鮮簡報沒被當錨點 ⇒ main() 沒接上")
+            self.assertIn("已經過期", say(self._record(self._brief(), now - timedelta(hours=4))))
+            self.assertIn("找不到任何錨點", say(), "對照組：沒有簡報＝修前的行為")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1368,10 +1472,127 @@ class TestTheFiveQuestionMeasurerReadsItsCriteriaFromParams(unittest.TestCase):
                         {**self.prm, **override})[1]
 
     def test_params_json_names_the_new_keys_and_drops_the_dead_one(self) -> None:
-        keys = {"q1c_first_calls", "claim_max_uses", "claim_lookback", "feed_read_re"}
+        keys = {"q1c_first_calls", "claim_max_uses", "claim_lookback", "feed_read_re",
+                "q1b_min_n", "q3_quiescent_seconds", "parity_non_shell_tools"}
         self.assertTrue(keys <= set(self.prm), keys - set(self.prm))
         self.assertNotIn("q4_max_commits_behind", self.prm,
                          "全 repo 零消費者的死參數：留著只會讓人以為 Q4′ 有距離上限")
+
+    def test_the_window_widths_and_gates_are_pinned_and_typed(self) -> None:
+        """DEF-200-482：Q1′c 看前 10 個呼叫（seq 6～12 的早期阻斷在 5 看不到）、取最近 10 支
+        （每輪 1～3 支真實 session，六輪窗口內才可達）；新鍵型別要對（寫成字串的 60 會讓
+        `now - ts >= '60'` 炸）。前 N 個呼叫與 Q2′／Q1′b 的窗同寬（README 宣稱，這裡釘住）。"""
+        prm = self.prm
+        self.assertEqual(list(prm), sorted(prm), "params.json 的鍵必須維持字母序（diff 可讀）")
+        self.assertEqual((prm["q1c_n"], prm["q1c_first_calls"]), (10, 10))
+        self.assertEqual({prm["q1c_first_calls"], prm["q2_max_index"], prm["claim_max_uses"]}, {10})
+        self.assertIsInstance(prm["q1b_min_n"], int)
+        self.assertGreaterEqual(prm["q1b_min_n"], 1)
+        self.assertIsInstance(prm["q3_quiescent_seconds"], (int, float))
+        self.assertGreater(prm["q3_quiescent_seconds"], 0)
+        tools = prm["parity_non_shell_tools"]
+        self.assertTrue(tools and all(isinstance(t, str) for t in tools), tools)
+        self.assertEqual(len(tools), len(set(tools)), "重複的工具名")
+
+    def test_the_readme_names_exactly_the_keys_params_json_has(self) -> None:
+        """writer==reader：params.json 是 writer，README 的鍵清單是 reader（人讀的契約）。新增鍵卻
+        沒在 README 說明＝讀的人不知道有這把尺；README 點名不存在的鍵＝說明在騙人。"""
+        readme = (_PARAMS_PATH.parent / "README.md").read_text(encoding="utf-8")
+        block = readme.split("- `params.json`", 1)[1].split("\n## ", 1)[0]
+        named = set(re.findall(r"`([a-z][a-z0-9_]*)`", block))
+        self.assertEqual(named, set(self.prm), "README 的 params 鍵清單與 params.json 不相等")
+
+    def test_the_non_shell_tool_list_comes_from_params_not_from_code(self) -> None:
+        self.assertFalse(hasattr(self.audit, "NON_SHELL_TOOLS"), "判準常數又寫回量測器碼裡")
+        stamp = "2026-10-03T01:00:00Z"
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_jsonl(Path(tmp) / "w.jsonl",
+                                [_call("t1", stamp, name="Write", file_path="x")])
+            shipped = self.audit.scan_transcript(path)["collapsed"]
+            emptied = {**self.prm, "parity_non_shell_tools": []}
+            with mock.patch.object(self.audit, "_params", return_value=emptied):
+                without_the_list = self.audit.scan_transcript(path)["collapsed"]
+        self.assertEqual((shipped, without_the_list), (False, True),
+                         "只用 Write 的 session：清單在＝不是崩塌；清單空＝認不得的工具＝崩塌候選")
+
+    def test_q1b_is_not_evaluable_below_its_minimum_population(self) -> None:
+        """Q1′b 此前對 0／0 印 PASS（其餘判準都有 NOT-EVALUABLE）；最小母體住 params。"""
+        def session(i: int) -> dict:
+            return _profile(f"s{i}", [_use("Read", file_path="x")])
+
+        one, five = ([session(i) for i in range(n)] for n in (1, 5))
+        self.assertIn("Q1′b 宣稱≠阻斷  NOT-EVALUABLE(1/5)  0／0", self._five(one))
+        self.assertIn("Q1′b 宣稱≠阻斷  PASS  0／0", self._five(five))
+        self.assertIn("Q1′b 宣稱≠阻斷  PASS  0／0", self._five(one, q1b_min_n=1),
+                      "最小母體沒有讀 params")
+
+    def _feed_pair(self, directory: str, sid: str, usage: int, usage_ts: datetime,
+                   feed_ts: datetime, feed_used: int) -> dict:
+        """有 feed 檔的 session 輪廓：逐字稿尾端 (usage, usage_ts)、feed (feed_used, feed_ts)。"""
+        doc = {"session_id": sid, "ts": feed_ts.isoformat(timespec="seconds"),
+               "context_window": {"current_usage": {"input_tokens": feed_used}}}
+        Path(directory, f"{sid}.json").write_text(json.dumps(doc), encoding="utf-8")
+        return {**_profile(sid, [_use("Read", file_path="x")]),
+                "usage": usage, "usage_ts": usage_ts}
+
+    def test_the_q3_quiescent_gate_excludes_pairs_from_an_in_flight_window(self) -> None:
+        """DEF-200-482：Q3′ 只納入靜止配對（在途視窗的差值是一則訊息的增量，100 token 的容忍對它無
+        意義）；控制組＝閘門關掉（0 秒）時同一組輸入對在途窗 FAIL，證明是閘門讓它不假紅。另釘「不
+        舊於」的解析度：feed 的 ts 只到秒、逐字稿到毫秒，同一秒的配對不得被當成過期而靜默消失。"""
+        import statusline_context_feed as scf  # noqa: PLC0415 — `tools/` 由載入量測器時進 sys.path
+
+        now = datetime.now().astimezone()
+        same_second = (now - timedelta(seconds=300)).replace(microsecond=519000)
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.dict(os.environ, {scf.FEED_DIR_ENV: tmp}):
+            busy = self._feed_pair(tmp, "busy", 150_000, now - timedelta(seconds=6),
+                                   now - timedelta(seconds=5), 150_000 + 18_767)  # feed 先一則
+            quiet = self._feed_pair(tmp, "quiet", 90_000, now - timedelta(seconds=700),
+                                    now - timedelta(seconds=600), 90_000)
+            same = self._feed_pair(tmp, "same", 70_000, same_second,
+                                   same_second.replace(microsecond=0), 70_000)
+            behind = self._feed_pair(tmp, "behind", 50_000, now - timedelta(seconds=400),
+                                     now - timedelta(seconds=405), 50_000)  # feed 比逐字稿舊
+            pop = [behind, same, quiet, busy]  # `feed_diffs` 由新往舊取
+            self.assertEqual(self.audit.feed_diffs(pop, 10, now, 60), ([0, 0], 1))
+            self.assertEqual(self.audit.feed_diffs(pop, 10, now, 0), ([18_767, 0, 0], 0),
+                             "控制組：閘門關掉時在途窗的差值必須現形")
+            self.assertEqual(self.audit.feed_diffs(pop, 10, now, 10_000), ([], 3), "都不靜止")
+            gated = self._five([quiet, busy], q3_min_pairs=1)
+            opened = self._five([quiet, busy], q3_quiescent_seconds=0)
+        self.assertIn("Q3′ feed 差  PASS  1 對；max|差|=0 [0]；NOT-QUIESCENT 1", gated)
+        self.assertIn("Q3′ feed 差  FAIL  2 對；max|差|=18767 [18767, 0]；NOT-QUIESCENT 0", opened)
+
+    def test_selftest_rc_is_zero_only_for_a_table_that_is_right_and_can_discriminate(self) -> None:
+        """DEF-200-482：`--selftest` 此前有「舊判準」欄（＝同一支函式）與 `舊判準零錯 ⇒ rc=1`，兩欄
+        恆相等 ⇒ rc=1 是結構必然、紅綠自證空轉。現在：答案表每列判對 ⇒ rc=0；任一列不符 ⇒ rc=1；
+        表內 expect 為 True 與 False 的列缺任一類（恆回同一值的判準也能全對）⇒ rc=1。用判準替身
+        注入，不起子行程。"""
+        def risky(command: str) -> bool:
+            return command.startswith("risky")
+
+        def table(*rows: tuple[str, bool]) -> tuple:
+            return tuple((cmd, want, "after=7/-1", "原因") for cmd, want in rows)
+
+        def run(rows: tuple, judge) -> tuple[object, str]:
+            return _printed(self.audit.run_selftest, rows, judge)
+
+        good = table(("risky a", True), ("safe a", False))
+        flipped = table(("risky a", False), ("safe a", False))
+        all_true, all_false = table(("risky a", True), ("risky b", True)), table(("safe a", False))
+        self.assertEqual(run(good, risky)[0], 0)
+        rc, out = run(flipped, risky)
+        self.assertEqual(rc, 1, "一列的答案與判準不符卻 rc=0")
+        self.assertIn("❌", out)
+        for rows, judge in ((all_true, lambda _c: True), (all_false, lambda _c: False)):
+            rc, out = run(rows, judge)
+            self.assertEqual(rc, 1, "只有單一類答案的表（鑑別力為零）卻 rc=0")
+            self.assertIn("缺 expect=True 或 expect=False", out)
+        real_rc, real_out = _printed(self.audit.main, ["--selftest"])
+        rows = self.audit._rc_real._RC_SELFTEST
+        self.assertEqual(real_rc, 0, real_out)
+        self.assertIn(f"判錯 0 / {len(rows)}", real_out)
+        self.assertNotIn("舊判準", real_out, "同一支函式的兩欄恆相等，不該再印")
 
     def test_claim_lookback_decides_whether_a_block_still_backs_the_claim(self) -> None:
         stamp = "2026-10-03T01:00:00Z"
@@ -1388,6 +1609,8 @@ class TestTheFiveQuestionMeasurerReadsItsCriteriaFromParams(unittest.TestCase):
     def test_claim_max_uses_decides_which_claims_are_counted(self) -> None:
         profs = [_profile("s1", [_use("Read", file_path="x")] * 3,
                           texts=[(7, False, "我被擋住了。")])]
+        profs += [_profile(f"s{i}", [_use("Read", file_path="x")])  # 湊滿 Q1′b 的最小母體
+                  for i in range(2, 6)]
         self.assertIn("Q1′b 宣稱≠阻斷  HUMAN-REVIEW  1／1", self._five(profs, claim_max_uses=10))
         self.assertIn("Q1′b 宣稱≠阻斷  PASS  0／0", self._five(profs, claim_max_uses=5))
 

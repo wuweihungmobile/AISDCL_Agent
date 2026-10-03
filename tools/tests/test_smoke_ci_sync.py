@@ -1196,11 +1196,7 @@ class TestActWorkflowReachability(unittest.TestCase):
     def test_workflows_without_push_are_blocked_not_silently_green(self) -> None:
         """`on:` 不含預設事件者，必須被 preflight **阻斷**，不得零執行卻回 rc=0。
 
-        WHY 這條非有不可：本輪把 `--workflow` 接上之後，第一次真跑就踩到——act 對事件
-        對不上的 workflow 是「不跑任何 job 然後回 rc=0」，畫面上只有一行 `Using docker
-        host`。實測逐字：`--workflow …arch-fitness.yml --job pr-advisory` → ACT_RC=0、
-        零 job 執行。全庫 11 支裡有 5 支的 `on:` 不含 push ⇒ 把 workflow 指得到這件事
-        **本身**讓這個假綠第一次變得碰得到，兩者必須同批落地。
+        立案沿革搬至 Guard_Line_History_2.md〈R194 淨減法搬遷〉§115。  round-label-ok
         """
         no_push = 0
         for path in self.core.workflow_files():

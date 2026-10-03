@@ -1,16 +1,12 @@
 #!/usr/bin/env python3
 """tools/lib/platform_utils.py 收斂止血鎖（R16 架構最佳化 — Architect 建議 A/E）。
 
-本測試機械鎖住三件事：(1) `platform_utils` 模組本身 API 存在且行為正確（兩平台皆
-`_init_utf8_streams()` 無條件包裝，見 `test_hooks_stdin_utf8.py`：POSIX 上不強制重新
-包裝會讓阻斷級 hook 的中文錯誤訊息讀成亂碼）；(2) 8 個已知呼叫點不再各自定義
-`_init_utf8_streams()`；(3) `resolve_latest_name`／`resolve_latest_root`／
-`exclude_frozen_sdd_versions` 三函式 repo-wide 唯一定義鎖（R66 追加，DEF-101-629）。
-不變量以「**每一個相依孤島內，各 helper 只准有一個定義點**」為界（R70／DEF-101-751：
-`autoclaude` 為可獨立 pip 安裝套件，跨孤島各留一份＋以鎖釘住一致性），掃描面涵蓋
-tracked ∪ untracked-not-ignored（R70／DEF-101-752：untracked 天然不可見曾讓衝突躲過
-四輪複審）。史料見 CrossPlatform_DEF200275_Context_Metering_Evidence.md
-〈第七輪 史料搬遷〉。
+本測試機械鎖住三件事：(1) `platform_utils` 模組本身 API 存在且行為正確（兩平台皆無條件包裝
+`_init_utf8_streams()`，見 `test_hooks_stdin_utf8.py`）；(2) 8 個已知呼叫點不再各自定義它；(3)
+`resolve_latest_name`／`resolve_latest_root`／`exclude_frozen_sdd_versions` 三函式 repo-wide 唯一
+定義。不變量以「**每一個相依孤島內，各 helper 只准有一個定義點**」為界（`autoclaude` 為可獨立 pip
+安裝套件，跨孤島各留一份＋以鎖釘住一致性），掃描面涵蓋 tracked ∪ untracked-not-ignored。立案沿革搬
+至 Guard_Line_History_2.md〈R194 淨減法搬遷〉§118。  round-label-ok
 
 執行：python3 -m unittest discover -s tools/tests -p "test_*.py" -v
 """
@@ -663,21 +659,15 @@ class TestIslandInvariantIsNotAToothlessWhitelist(unittest.TestCase):
 class TestScanSurfaceCoversUntrackedFiles(unittest.TestCase):
     """掃描面盲區封閉鎖（R70 `DEF-101-752`）——本輪最有價值的一筆證據的機械化。
 
-    事故本身：`platform_caps.py` 在 R69 全程是 untracked，而本檔的掃描面是
-    `git ls-files`（tracked-only）。於是它與 R17 不變量的衝突躲過了**四輪四方
-    複審**、以及收尾者多次 `run_root_unittests.py` 全套實跑（皆 `Ran 1581 … OK`），
-    直到 `git add -A` 讓它變成 tracked 的**那一刻**才在 pre-push 顯形。
-    ⇒「驗證載具自己有盲區」的教科書級樣本：不是鎖寫錯，是鎖**看不到**該看的地方。
+    事故沿革搬至 Guard_Line_History_2.md〈R194 淨減法搬遷〉§120。  round-label-ok
 
     本鎖造一支真的 untracked（且非 ignored）的違規 `.py`，同一支測試內對照兩個
     掃描面：修前的 tracked-only 看不到它／修後的看得到且判紅。缺任一半都證明不了
     「盲區已封」——只證明「現在掃得到」的話，掃描面被改回去時本鎖不會說話。
 
-    🔴 R85／QA-06：探針改造在**測試專屬的拋棄式 git repo** 內，共用工作樹零足跡。
-    此前它造在 repo 根（`_scan_surface_probe_<pid>/`）——pid 只讓**自己**的目錄唯一，
-    擋不住「別的行程掃到我的探針」：探針依定義是一支違規檔，而本檔的掃描面是全 repo
-    ⇒ 並行時互相污染（QA 實測 traceback 裡的 pid 不屬於報錯的那個行程，兩種載具的
-    失敗支數因此對不起來）。拋棄式 repo 讓污染在**結構上**不可能，不是靠清理得夠快。
+    🔴 探針造在**測試專屬的拋棄式 git repo** 內，共用工作樹零足跡（並行時別的行程掃到我的探針而互
+    相污染，在結構上不可能）。立案沿革（R85／QA-06）搬至
+    Guard_Line_History_2.md〈R194 淨減法搬遷〉§119。  round-label-ok
     """
 
     def test_untracked_offender_is_invisible_to_old_surface_and_caught_by_new(self) -> None:

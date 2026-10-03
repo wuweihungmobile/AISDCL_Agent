@@ -405,10 +405,7 @@ class TestPs51ScanConfigPinning(unittest.TestCase):
         """樹清單本體＋per-tree 下限釘選——刪掉 scan_trees() 一列整棵樹會靜默出界，
         且上一支測試仍全綠（同 test_bash32_compat.TestScanConfigPinning 的存在理由）。
 
-        R56 round 5 修正（QA B-3）：本方法名為 `keys_and_floors_pinned`，實作卻只
-        比 keys、`_floor` 從未進入斷言——名實不符會誤導後續審查員以為下限已受保護
-        （現況 8/7/2/4 與實數零餘裕，縮面雖仍會被上一支測試的 assertGreaterEqual
-        擋下，但「下限值本身被下修」這條路徑當時零訊號）。改為連 floor 一起釘。
+        沿革搬至 Guard_Line_History_2.md〈R194 淨減法搬遷〉§128。  round-label-ok
         """
         keys_floors = [(key, floor) for key, _files, floor in scan_trees()]
         self.assertEqual(

@@ -11,7 +11,7 @@
 註解／docstring 段**原文逐字**搬到這裡（僅去掉註解前綴與縮排，置於 fenced 區塊保全原貌），
 原位只留判準邏輯與一行指標；知識零刪除，只是換地方住——被棘輪管轄的測試檔不該承載逐輪敘事。
 
-🔴 每一節的 `§N` 編號即原始碼指標 `〈R186 淨減法搬遷〉§N` 所指的位置；索引依編號排列。
+🔴 每一節的 `§N` 編號即原始碼指標 `〈R186 淨減法搬遷〉§N` 所指的位置；索引依編號排列。 R194 的搬遷節（§82 起連號，指標 `〈R194 淨減法搬遷〉§N`）接在檔尾。
 
 **索引**：
 
@@ -96,6 +96,61 @@
 79. §79 workflow 許可／併發鎖聚落：R68 擴充四類別的事故說明與 R69 訂正（DEF-101-703）
 80. §80 workflow concurrency repo-wide 枚舉：缺陷本體（R77-55，修站點不修判準）
 81. §81 schedule cron 同步鎖：R15 SCAN-C-9 整行註解剝除取捨
+82. §82 extras 引號鎖：`_UNQUOTED_EXTRAS_RE` 逐分支 (a)~(e) 的訂正沿革（R57 round 1 SD 複審、R59 新增三件）
+83. §83 extras 引號鎖：已加引號形態下限（`_MIN_QUOTED_DOT`／`_MIN_QUOTED_NAMED`）的實測分解（R57／R59、二審 QA-R59-P3-2 訂正）
+84. §84 extras 引號鎖：`_MAX_EXEMPTIONS` 由寫死的 10 改為衍生值（R59 二審 ARCH-R59-02-C1 訂正）
+85. §85 extras 引號鎖：`_scan_targets()` 由 tracked-only 改為聯集掃描面的立案沿革（R69 真 fail-open、R70／DEF-101-752）
+86. §86 extras 引號鎖：豁免總數上限的 R59 實測與單一總上限缺陷的訂正沿革（R57 的 5 調到 10、R59 二審再訂正）
+87. §87 交棒宣稱鎖：R82 Q4-01 的另一半——命中數加總使最新一份掉到 0 打不出來（R78 SD-03 同病在同檔復發）
+88. §88 退場判準／改派判準：R76-08 缺陷本體——綁字面 token 的判準讓「照規矩訂正文件」反而轉紅
+89. §89 活文件掃描面納入 `AutoSDD_improving_*.md`：R81 QA B-3 的注入實測與存量成本
+90. §90 路徑宣稱判準：`path_claim_bases()` 兩個多出基準的實測筆數（7 筆／6 筆）與 R73 判例
+91. §91 雲端 nightly 紅燈判準（表③）：R76-03 立案——run 層 conclusion 通道零讀者，continue-on-error 讓紅 job 下 run 仍 success
+92. §92 表① 受鎖欄欄頭鎖：WHY——平台中立的 MIN_TESTS 釘選掛在標示「Windows 11 實測」的欄頭底下（SA-R67-07、DEF-101-562 欄頭版）
+93. §93 表① macOS 欄鎖：WHY——macOS 欄是純散文、寫死的 `616（skipped=4；R57 量測）` 落後實況約九輪而無機械物看見（R60 ARCH-R60-03）
+94. §94 nightly_summary 有界讀取鎖：上一版是零鑑別力的死鎖（把 `f.seek` 整行刪掉仍 6/6 全綠；與 DEF-101-763 同構）
+95. §95 幽靈路徑基線：R81 SA-B3 登記的 `CrossPlatform_R81_Review.md` 於本輪建立後被自清機制要求刪除（豁免不會永久化的活體證據）
+96. §96 subprocess 編碼鎖：per-tree 檔數下限「腐化偵測帶」的缺陷本體（R75 QA 實測 files=81 對 floor=18、DEF-101-800）
+97. §97 dev_start ps1／sh 被 source 鎖：兩部分的立案沿革（DEF-101-304／R35 發現、R67-C17 併入既有鎖檔、CI 帳務停擺）
+98. §98 `_platform_helpers.py` `_PS_COMMENT_LEAD`：R57 round 3／4 補右括號類與引號類收尾字元、「為什麼安全」理由訂正與全語料實掃
+99. §99 wrapper thinness 鎖：R10 守門改制（黑名單軍備競賽三輪被繞過）與 R60 Scan-E E-A-02 關鍵字偵測由串聯改並聯
+100. §100 PowerShell 引擎 SSOT 鎖：機器屬性寫成常數的立案（R69 原案、R73 擴射程 DEF-101-777、DEF-101-757 同型復發）
+101. §101 PowerShell 引擎 SSOT 鎖：`_STALE_CLAIM_RE` 主語與否定詞視窗 8→16 字的經過（R74 DEF-101-777）與 R73 教訓
+102. §102 排程能力對照契約：R75 訂正（SD 追加②）——寫死的下限 40 腐化、改與 skip_tag_policy 共用逐樹下限政策
+103. §103 WindowsApps guard 交叉一致性鎖：站點偵測三輪訂正逐步收斂鑑別力（函式名錨→雙錨→re.I、scoped_prefixes 縮面漏 16 支）
+104. §104 WindowsApps guard 交叉一致性鎖：R44 SA 一審追加揪出——初版判準是檔案層級（1 處 guard、15+ 處裸呼叫仍全綠）
+105. §105 dev_start 版本探測碼逐字相同鎖：R71（DEF-101-760）——上面那支鎖只看版本數字，單邊改掉探測碼時本檔與 CI 全綠
+106. §106 dev_start Mutex 鎖：R59 QA-R59-05——原為全檔 assertIn，Mutex 名在 .ps1 內出現兩次而被訊息字面滿足（DEF-101-504 保護歸零）
+107. §107 dev_start 新四態 str 態：斷言不得寫死 POSIX 字面值 `/elsewhere`（R69 windows-compat-ci 實紅；改比對 `str(Path(...))`）
+108. §108 WindowsApps bash guard：`_tracked_*` 掃描面擴為 tracked ∪ untracked 的 R82（DEF-101-752）立案與姊妹函式刻意不比照的理由
+109. §109 WindowsApps bash guard 行為測試：fixture 路徑由 bash 自身 `mktemp -d` 建立的緣由（R43 實測：磁碟機代號冒號腰斬 `$PATH`）
+110. §110 WindowsApps bash guard：`_CALLER_FILES` R55 新增一支——原登記於 `_EXEMPT_SH_FILES` 的豁免理由論證方向錯誤
+111. §111 歸檔判準③：R68 改寫（DEF-101-676）——取代舊的 `assertNotIn(v["id"], claimed)`，改寫動機與代價量化
+112. §112 歸檔樣本座標鎖：為何需要（那句話原本不寫樣本住哪一支檔，被以主檔為掃描面的複查讀成 stale）
+113. §113 root-infra 對等鎖：R56 立案——檔頭第 1 道敘述是被指定的真相源卻在掃描面擴張時漏改（R54 DEF-101-431／R55「9 支」同形狀）
+114. §114 帳本交叉參照鎖：R75 把指針樣式由「只認 R60 那一組檔名」放寬為任一輪的 `CrossPlatform_R<n>_*.md`（R60／R68／R75 兩層化）
+115. §115 smoke ↔ CI 同步：`--workflow` 接上後第一次真跑踩到的假綠（act 對事件對不上的 workflow 不跑任何 job 卻回 rc=0；全庫 5/11 支 on: 不含 push）
+116. §116 Windows 禁用檔名鎖：構造形判準的 WHY——R60 插入新裝置名使間隙由 ≤5 變 17，三處實作同時掉出錨①而註冊表等值斷言毫無反應
+117. §117 Windows 禁用檔名鎖：logger.py 以 rsplit 剝副檔名而漏判多重副檔名保留名（R33 QA 二審、DEF-101-295 追加修復）
+118. §118 platform_utils 收斂止血鎖：模組 docstring 的立案沿革（R16 架構最佳化、R66 DEF-101-629、R70 DEF-101-751／752）
+119. §119 掃描面盲區封閉鎖：R85／QA-06 探針由 repo 根改造在拋棄式 git repo 內的緣由（pid 只讓自己的目錄唯一，擋不住別的行程掃到探針）
+120. §120 掃描面盲區封閉鎖：事故本身——`platform_caps.py` 在 R69 全程 untracked 而躲過四輪四方複審與多次全套實跑（R70／DEF-101-752）
+121. §121 bootstrap_core pick_python() WindowsApps 空殼排除 guard 回歸鎖：WHY 全文（DEF-101-273/279 兩輪修復、R16 架構收斂後缺 guard、R31 補齊）
+122. §122 subprocess 編碼鎖：WHY 這道到 R74 才出現——判準一（parent 解碼）合規的那一行 hook 在 windows-latest（cp1252）把中文指引印成亂碼（DEF-101-789）
+123. §123 hook 註冊普查：R79 由並行包新增的 PreToolUse 條目（`.claude/settings.json` 不在本包所有權內）的交接註記
+124. §124 Windows nightly 安裝器：R73（DEF-101-779）原本斷言 help 區塊含某個時刻字面值而把觸發時間釘進鎖裡（ADR-SD09-012 五項排程設定連兩輪沒人敢套）
+125. §125 dev_start：DEF-101-762 在 LATEST 版 SDD 樹上的兩個同形態站點（以 `git rev-parse` 輸出反推路徑，cp950 下損毀）與 R71 參數化到第二支
+126. §126 check_script_parity 具名輪次正控樣本：E-05／R77-13 訂正——原本寫死一個不存在的輪號（與「未指派」等效的假承諾），改自帳本現查當前輪推導下一輪
+127. §127 check_script_parity：R80 S5-05——原本逐一寫 `patches[0]…patches[5]` 六個索引（`_patched()` 少回一個元素時是 IndexError 而非有意義的紅燈），改用 ExitStack 依實際長度展開
+128. §128 PS 5.1 相容鎖：R56 round 5 修正（QA B-3）——`keys_and_floors_pinned` 名實不符，只比 keys、`_floor` 從未進入斷言
+129. §129 claim provenance 第三判準：規格版紅綠自證（插入 4 小時前的『量測於』⇒ 回空清單）把事故寫成契約，「在場即抑制」型抑制器在整個母體上一次都沒做對過
+130. §130 sanitize 凍結版鎖：R44 QA 一審發現的時序缺陷——初版用 `git show HEAD:<path>`，本輪修復一旦 commit 就對全部 7 個 subTest 恆紅，改錨定固定 SHA
+131. §131 sanitize 凍結版鎖：bug-injection「修復前」重放基準點固定錨定在 DEF-101-357 修復前的父提交（R43 收尾 commit），不用 `git show HEAD:<path>`
+132. §132 dev_start mac nightly 鎖：R59 ARCH-R59-04——原寫 `.split("/")[-1]` 只鎖檔名不鎖目錄，鎖目錄搬走而檔名不變時本鎖照綠、DEF-101-504 復發且零訊號
+133. §133 DEF-200-481：lint 規則①換成真機三條件判準——devB 從 `.claude/hooks/lint_powershell_command.py` 等檔刪除／改寫的原文（逐字，行號＝HEAD 版）
+134. §134 DEF-200-477：SessionStart 簡報當第三判準錨點——devC 從 `.claude/hooks/check_claim_provenance.py` 改寫／刪除的散文（逐字，行號＝HEAD 7efc4c0）
+135. §135 DEF-200-479／481／482：`quota_gate.py`／`audit_session.py`——devD 被改寫／刪除的散文與被取代的程式碼（逐字）
+136. §136 本輪新增測試的 docstring 壓縮前原文（逐字；Trim 棒壓成 ≤3 行，保留 DEF 編號與 WHY）
 
 ---
 
@@ -1857,4 +1912,1318 @@ workflow 現況不存在，主要風險面（刪 job 留整行註解）已被覆
         而 bootstrap 是整條鏈上唯一會讓哨兵消失的動作。憑證此時必須明說「只有巡邏觸發」
         ＋最壞死等秒數，不准留白（留白會讓它與「排到了確切時刻」看起來一樣）。
         """
+```
+
+## R194 淨減法搬遷
+
+> 搬遷自 `tools/tests/*.py`（2026-10-03 R194 收尾單人窗口 Trim 棒，款(11) 淨額抵銷；原文全文保全、知識零刪除；僅去掉註解前綴與縮排）。原位各留一行指標，或壓成只剩現行行為說明的短註解。§82 起連號；§C 部分（devB／devC／devD 從 hook／lib 刪下的散文）無原位指標，僅供查證。
+
+### §82 extras 引號鎖：`_UNQUOTED_EXTRAS_RE` 逐分支 (a)~(e) 的訂正沿革（R57 round 1 SD 複審、R59 新增三件）
+
+原址：`tools/tests/test_extras_quoting_zsh_safety.py` `_UNQUOTED_EXTRAS_RE` 上方註解（`# R57 round 1 SD 複審訂正沿革` 起）（搬遷前 L87-L105）。含 `zsh-glob-ok` 豁免標記的三行病例樣本（原 L88／L98／L105）因本鎖的豁免預算（`_MIN_SELF_SAMPLES`／`_MAX_EXTERNAL_EXEMPTIONS`）而**必須留在原址**，下文以占位行標示。
+
+```text
+R57 round 1 SD 複審訂正沿革（皆經實測，見 DEF-101-479）：
+（原 L88：含 zsh-glob-ok 豁免標記的病例樣本，未搬、仍在原址）
+    這種帶 GNU 長旗標的寫法整條漏報（實測 old=False / new=True）。改為 `--?[A-Za-z][A-Za-z-]*`。
+(b) 原有的前方 lookbehind `(?<!["'])` 是**死碼**：加引號版長成 `install -e '.[dev]'`，該位置
+    的字元是 `'` 而 `\.\[` 本身就要求是 `.`，正則在此必然失配，lookbehind 沒有額外作用。
+    實測 6 組樣本在「有 lookbehind／無 lookbehind」下結果完全相同，故移除並訂正註解。
+
+R59 新增三件（DEF-101-507／508）：
+(c) 裸 `.[` 分支前置一個 **選配的路徑前綴** `(?:[^\s'"]*[/\\])?`——R57 版的錨要求 `.[`
+    緊接在旗標之後，故下列這種寫法整條漏報。POSIX `/` 與 Windows `\` 兩種分隔符都吃
+    （`bootstrap_core.py` 用 `os.sep` 組路徑，兩者都會出現）：
+（原 L98：含 zsh-glob-ok 豁免標記的病例樣本，未搬、仍在原址）
+(d) **具名套件**分支 `[A-Za-z_][A-Za-z0-9_.-]*\[…\]`：DEF-101-507 的本體。名稱字元類
+    刻意不含空白，故 `pip install foo   # 見 [附註]` 這種「同行後方另有方括號」不誤報。
+(e) **插值 target**分支 `\$?\{[^}!]*\}`（R59 SD-R59-04 起排除 `!`，見下）：DEF-101-508 在原始碼裡的真實長相如下，方括號
+    在字面上根本不存在，(a)~(d) 全都看不到它。無論插值進來的是什麼，你都無法保證它
+    不含 glob 元字元或空白，故「印給使用者複製貼上的插值 target 一律要加引號」是這裡
+    唯一站得住的規則：
+（原 L105：含 zsh-glob-ok 豁免標記的病例樣本，未搬、仍在原址）
+```
+
+### §83 extras 引號鎖：已加引號形態下限（`_MIN_QUOTED_DOT`／`_MIN_QUOTED_NAMED`）的實測分解（R57／R59、二審 QA-R59-P3-2 訂正）
+
+原址：`tools/tests/test_extras_quoting_zsh_safety.py` `_MIN_QUOTED_DOT` 上方註解第二段（搬遷前 L155-L161）。
+
+```text
+R57 修復後裸/路徑形態實測 30 處，R59 擴面後為 35；具名形態 R59 修復後實測 42 處。
+42 的分解（二審 QA-R59-P3-2 訂正：初稿寫「41 處本輪新加引號 + ONBOARDING 1 處」，
+41 這個數字對不上帳本 DEF-101-507 記的 40 處，差額是本鎖 docstring 自帶的正確樣本）：
+  40 處＝本輪 DEF-101-507 實際新加引號的站點（與帳本一致）
++  1 處＝`ONBOARDING.md` 那處 R57 自己就寫對的 `'AutoClaude[dev,…]'`
++  1 處＝本鎖 docstring 內自帶的正確形態樣本（掃描面含本檔，故自己也被計入）
+兩者各取約 6 成的保守下限。
+```
+
+### §84 extras 引號鎖：`_MAX_EXEMPTIONS` 由寫死的 10 改為衍生值（R59 二審 ARCH-R59-02-C1 訂正）
+
+原址：`tools/tests/test_extras_quoting_zsh_safety.py` `_MAX_EXEMPTIONS` 上方註解（搬遷前 L195-L198）。
+
+```text
+R59 二審 ARCH-R59-02-C1 訂正：本常數原為寫死的 10，於是「自身樣本寬上限 20」在結構上
+**不可達**——總帳先綁死，實際自身天花板是 `10 − external`（實測 7），headroom 只剩 1，
+我要修的失效模式原封不動還在（下輪補 2 行病例樣本就翻紅，訊息仍把成因指錯人）。
+改為**衍生值**：分帳成為權威，總帳降格為 sanity net（仍保留 fail-loud 網，不刪測試）。
+```
+
+### §85 extras 引號鎖：`_scan_targets()` 由 tracked-only 改為聯集掃描面的立案沿革（R69 真 fail-open、R70／DEF-101-752）
+
+原址：`tools/tests/test_extras_quoting_zsh_safety.py` `_scan_targets()` docstring 第二段（搬遷前 L205-L212）。
+
+```text
+🔴 本函式原名 `_tracked_scan_targets`、只跑 `git ls-files`，而本檔 docstring
+「已實測不涵蓋」節逐字寫著「未 tracked 的新檔在 `git add` 前掃不到（`git ls-files`
+固有性質，**與 `test_platform_utils_dedup.py` 同政策**）」——R69 證明那個政策是
+真 fail-open：`AutoClaude/autoclaude/utils/platform_caps.py` 全程 untracked，
+使它與 dedup 鎖的衝突躲過四輪四方複審與多次全套實跑，直到 `git add -A` 才顯形。
+該檔已於 R70 改為聯集掃描面，本檔同步（否則「同政策」這句話會指向一個已經不存在
+的政策，讀者仍會以為盲區是刻意取捨）。`-o --exclude-standard` 尊重 `.gitignore`，
+`_EXCLUDED_SUBSTRINGS` 過濾與 `_MIN_SCANNED` 下限皆不受影響。
+```
+
+### §86 extras 引號鎖：豁免總數上限的 R59 實測與單一總上限缺陷的訂正沿革（R57 的 5 調到 10、R59 二審再訂正）
+
+原址：`tools/tests/test_extras_quoting_zsh_safety.py` `_MAX_EXEMPTIONS` 上方註解（`# 豁免總數上限` 段後半）（搬遷前 L173-L179）。
+
+```text
+R59 實測 9 行：`ONBOARDING.md` §5 雷區表 1 行 + 本檔 docstring／註解的病例樣本 8 行
+（本檔是這道鎖的實作，且判準 (4) 的三段式**要求**逐項列出被涵蓋/不涵蓋的壞形態，
+內含壞形態是本質需求；整檔排除才是 fail-open，故仍走逐行豁免）。上限自 R57 的 5
+調到 10 即為此擴面所需，非放寬紀律。**R59 二審再訂正**：單一總上限本身就是缺陷來源
+——它把「本鎖的規格文件有多長」與「有沒有人濫用豁免」混在同一個計數器裡，撞頂訊息
+會把成因指錯人，最省力的反應就是再調高數字。現行權威已改為下方兩本分帳，
+`_MAX_EXEMPTIONS` 為其衍生值（sanity net）。
+```
+
+### §87 交棒宣稱鎖：R82 Q4-01 的另一半——命中數加總使最新一份掉到 0 打不出來（R78 SD-03 同病在同檔復發）
+
+原址：`tools/tests/test_doc_loc_baseline_freshness_r60.py` docstring（搬遷前 L6522-L6525）。
+
+```text
+🔴 R82 Q4-01 的另一半：上一版把每一份交棒書的命中數加總後才判 `>=1`，於是 R79
+那 7 筆讓總量永遠 ≥1，**最新一份掉到 0 在結構上打不出來**（R81 交棒書就是這樣
+整份 0 命中而全綠的）。這正是本檔 docstring 自己記載過的 R78 SD-03 錯誤——判準
+建在只會單調增長的歷史總量上——在**同一支檔案內復發**。
+```
+
+### §88 退場判準／改派判準：R76-08 缺陷本體——綁字面 token 的判準讓「照規矩訂正文件」反而轉紅
+
+原址：`tools/tests/test_doc_loc_baseline_freshness_r60.py` 註解（搬遷前 L5721-L5726）。
+
+```text
+🔴 缺陷本體（R76-08，「有鎖在守假話」的實例）：`CrossPlatform_Scan_Dimensions.md`
+硬規則② 的「已實測不涵蓋」清單裡，**否定語意**（「無回執」「零改派」）自 R74 起已被
+`_REASSIGN_NEGATED_RE` 涵蓋，那一項因此成了假話；而釘住它的判準是
+`assertIn("否定語意", rule2)`——綁**字面 token**。兩件事合起來的方向是最壞的那個：
+照本檔自訂的規矩去訂正文件，根層閘門反而會**轉紅**（該文件自陳的規矩是「被涵蓋時
+翻紅、強迫改文件」，實況卻是「改文件才紅」）。
+```
+
+### §89 活文件掃描面納入 `AutoSDD_improving_*.md`：R81 QA B-3 的注入實測與存量成本
+
+原址：`tools/tests/test_doc_loc_baseline_freshness_r60.py` `AutoSDD_improving_*.md` glob 條目上方註解（搬遷前 L3980-L3985）。
+
+```text
+🔴 R81 QA B-3：軌道① 的**唯一驅動器**（根 CLAUDE.md 明定），每輪最多人照著讀的
+活文件——卻是本面上線時整片失明的一角。注入實測：同一句假路徑放進交棒書兩顆牙都
+咬，放進 `AutoSDD_improving_105.md` 則 13 tests OK 直接放行，而四項誠實劃界一句
+都沒提到它（「有鎖在守，但那一面不在射程」比沒有鎖更難看見）。收進來的存量成本
+實測僅 3 筆（全在最新一份、且全是該檔自己聲明「本輪尚未建立」的產出目標），
+遠低於程式碼面那 49 筆 ⇒ 沒有「製造大批假紅」的顧慮。
+```
+
+### §90 路徑宣稱判準：`path_claim_bases()` 兩個多出基準的實測筆數（7 筆／6 筆）與 R73 判例
+
+原址：`tools/tests/test_doc_loc_baseline_freshness_r60.py` `path_claim_bases()` docstring（搬遷前 L3994-L4003）。
+
+```text
+解析基準。**衍生自** `_MECHANISM_PATH_BASES`，不另開一份清單——那份常數已寫明
+「子專案段落的相對路徑相對於該子專案目錄」的理由，本面適用同一條。多的兩個都是
+實測逼出來的，不是預防性擴面：
+  · 套件根 `AutoClaude/autoclaude`——CLAUDE.md 架構大圖以 `execution/playbook_runner.py`
+    這種**套件內**相對路徑指認模組（實測 7 筆），少了它會整批誤報。
+  · SDD LATEST 版根——ADR 與 ONBOARDING 以 `tools/fsm_runtime/state_loader.py`、
+    `cicd/SDD_CICD_BASE_LAYER.md` 這種**版內**相對路徑指路（實測 6 筆）。版名走既有
+    SSOT `tools/lib/sdd_latest.py`，**不在本檔再寫一份版號 regex**（R73 判例）。
+LATEST 解析失敗即 `AssertionError`（fail-loud，同 `read_adr_docs`：掃描邊界不得
+靜默縮小——縮小的方向永遠是「看起來變乾淨」）。
+```
+
+### §91 雲端 nightly 紅燈判準（表③）：R76-03 立案——run 層 conclusion 通道零讀者，continue-on-error 讓紅 job 下 run 仍 success
+
+原址：`tools/tests/test_doc_loc_baseline_freshness_r60.py` docstring（搬遷前 L4987-L4990）。
+
+```text
+WHY（R76-03）：表③ 記的是 run 層 `conclusion`，而 job 層 `continue-on-error: true`
+讓那個 job 紅掉時 run 仍是 `success` ⇒ 表③ 六列全 ✅ 與「裡面有 job 是紅的」可以
+同時為真。該通道在本 repo 已實測**零讀者**（唯一顯形處是一張沒人看的 GitHub issue），
+一筆真實 P1 因此橫跨數輪的「雲端全綠」宣稱。
+```
+
+### §92 表① 受鎖欄欄頭鎖：WHY——平台中立的 MIN_TESTS 釘選掛在標示「Windows 11 實測」的欄頭底下（SA-R67-07、DEF-101-562 欄頭版）
+
+原址：`tools/tests/test_doc_loc_baseline_freshness_r60.py` `test_table1_locked_column_header_does_not_speak_for_a_provenance` docstring 第二段（搬遷前 L1456-L1461）。
+
+```text
+WHY（成因是結構性的，不是筆誤）：`rootunit-baseline-live` 抽的 token 取自
+`run_root_unittests.MIN_TESTS`，那是一個**平台中立**的下限釘選——誰在哪台機器重釘
+都寫進同一格。而該格所在欄的欄頭長年寫著「Windows 11（R60 收尾實測）」，於是
+R67 在 Darwin 真機重釘後，一個 macOS 量得的數字就靜靜掛在標示「Windows 11 實測」
+的欄頭底下。**產生器把 token 洗新鮮了，欄頭卻沒有任何機械物在看**——與 DEF-101-562
+（「只保證被抽取的 token 新鮮，不保證同一行的散文新鮮」）是同一個病灶的欄頭版。
+```
+
+### §93 表① macOS 欄鎖：WHY——macOS 欄是純散文、寫死的 `616（skipped=4；R57 量測）` 落後實況約九輪而無機械物看見（R60 ARCH-R60-03）
+
+原址：`tools/tests/test_doc_loc_baseline_freshness_r60.py` docstring（搬遷前 L1428-L1431）。
+
+```text
+WHY：`rootunit-baseline-live` 鎖只抽**右欄**那個 `N tests OK` token，macOS 欄是純
+散文。原本該格寫死 `616（skipped=4；R57 量測）`，落後實況約九輪而**任何機械物都
+抓不到**——它根本不在鎖的取值範圍內；而該格與受鎖格同處一張標榜「live 格（有機械
+鎖）」的表內，讀者會誤以為「有鎖所以可信」（R60 ARCH-R60-03 的原始成因）。
+```
+
+### §94 nightly_summary 有界讀取鎖：上一版是零鑑別力的死鎖（把 `f.seek` 整行刪掉仍 6/6 全綠；與 DEF-101-763 同構）
+
+原址：`tools/tests/test_doc_loc_baseline_freshness_r60.py` docstring（搬遷前 L2646-L2650）。
+
+```text
+🔴 本支上一版是**零鑑別力的死鎖**（本批注入實測：把 `f.seek(…)` 整行刪掉、改成
+`f.read()` 讀滿全檔，6/6 照樣全綠）。它斷言的是「檔頭誘餌不出現在**輸出那一行**」，
+而 `nightly_summary()` 取的是 `hits[-1]`——檔尾的真彙總行**永遠**會蓋掉檔頭誘餌，
+於是它證的其實是「取最後一筆命中」，跟有沒有界完全無關；docstring 卻宣稱後者。
+「寫了鎖沒驗鎖」與 DEF-101-763 的 fallback 文案同構：看起來有守，實際一天沒守過。
+```
+
+### §95 幽靈路徑基線：R81 SA-B3 登記的 `CrossPlatform_R81_Review.md` 於本輪建立後被自清機制要求刪除（豁免不會永久化的活體證據）
+
+原址：`tools/tests/test_doc_loc_baseline_freshness_r60.py` 註解（搬遷前 L4038-L4042）。
+
+```text
+── R81 SA-B3：上一格曾登記 `docs/06_quality/CrossPlatform_R81_Review.md`（計畫書 §6
+把本輪產出目標逐份列出，而該檔在寫下那一行時尚未建立）。**該檔已於本輪建立**，
+`stale_path_baseline_problems()` 的第一款當場轉紅並要求刪除該筆登記 ⇒ 已刪，天花板
+同步下修。留這段註解是為了記下**這道鎖的自清機制真的動作過一次**：豁免不會永久化，
+不是因為有人記得回來清，是因為清不掉就會紅。
+```
+
+### §96 subprocess 編碼鎖：per-tree 檔數下限「腐化偵測帶」的缺陷本體（R75 QA 實測 files=81 對 floor=18、DEF-101-800）
+
+原址：`tools/tests/test_subprocess_encoding_hygiene.py` 註解（搬遷前 L72-L76）。
+
+```text
+🔴 缺陷本體：下限原本是**單邊**的，而單邊下限只會腐化——樹會長大、下限不會，
+於是它實際守住的比例逐年下滑。R75 QA 實測：`tools` 樹 files=81 對 floor=18
+⇒ 掉掉 63/81（78%）掃描面仍然全綠，而那個 18 的來源是 2026-07-19 首掃數
+打八折，中間 R74 又是新增檔案最多的一輪。**「掃描面靜默縮小必紅」這個存在
+理由當時已經不成立**，鎖還在，牙掉了。
+```
+
+### §97 dev_start ps1／sh 被 source 鎖：兩部分的立案沿革（DEF-101-304／R35 發現、R67-C17 併入既有鎖檔、CI 帳務停擺）
+
+原址：`tools/tests/test_dev_start_ps1_lastexitcode.py` 模組 docstring 第二、三段（搬遷前 L4-L15）。
+
+```text
+第一部分（DEF-101-304）：`tools/dev_start.ps1` dot-source 失敗分支曾未對
+`$LASTEXITCODE` 賦值（呼叫前殘值可能是 0 而誤判成功），對等的 `.sh` 用 `return 1`
+正確傳遞失敗，兩邊曾不對稱（R35 發現）；本測試只驗證「找不到 Python 直譯器」這條
+分支（PATH 清空即可穩定觸發）。
+
+第二部分（R67-C17 併入既有鎖檔，非新開一支）：`source tools/dev_start.sh` 是使用者
+每天開工的第一道指令，該檔的 zsh 專屬路徑（`ZSH_EVAL_CONTEXT`／`${(%):-%x}`）此前
+全 repo 零活體驗證（CI 帳務停擺、`bash -n`/`zsh -n` 只做語法解析）。斷言刻意走
+**行程外側通道**（證物寫進重導向檔、Python 端檢查）——同一 shell 內斷言在 sourced
+偵測壞掉時會被 dev_start.sh 檔尾 `exit` 直接殺掉、後面斷言一行都不執行卻仍 rc=0；
+「斷言被跳過」因此變成「證物檔不存在」＝當場紅，而不是靜默通過（史料見
+CrossPlatform_DEF200275_Context_Metering_Evidence.md〈第七輪 史料搬遷〉）。
+```
+
+### §98 `_platform_helpers.py` `_PS_COMMENT_LEAD`：R57 round 3／4 補右括號類與引號類收尾字元、「為什麼安全」理由訂正與全語料實掃
+
+原址：`tools/tests/_platform_helpers.py` `_PS_COMMENT_LEAD` 上方註解（搬遷前 L288-L296）。
+
+```text
+R57 round 3：原集合漏掉右括號類與引號類收尾字元，使「功能碼後緊接 `#`」的五種
+真實 PowerShell 註解形態不被剝除（ground truth＝pwsh 7 parser 的 Comment token；
+對照組 `c#`／`$#` 等現行設計要保護的情形不受影響，64 案差分實測 FAIL_CLOSED=0）。
+round 4 訂正「為什麼安全」的理由：保護來源是 command/argument（bareword）解析
+模式（bareword 本身可含 `#`），不是「前一字元是字母／`$`」——同一個 `$x#c` 在
+expression 模式下 `#` 就是註解，原理由與 PowerShell 真實規則不等價。bug-injection
+與全語料實掃（137 支 `.ps1`、2,847 個真 Comment token，現況洩漏數 0）等逐項量測
+全文搬至 `docs/06_quality/CrossPlatform_R104_Scan_Findings.md`〈_PS_COMMENT_LEAD
+沿革〉節；已知不涵蓋的第 5 條見 `strip_ps_comments` docstring。
+```
+
+### §99 wrapper thinness 鎖：R10 守門改制（黑名單軍備競賽三輪被繞過）與 R60 Scan-E E-A-02 關鍵字偵測由串聯改並聯
+
+原址：`tools/tests/test_check_wrapper_thinness.py` 模組 docstring 第二、三段（搬遷前 L4-L13）。
+
+```text
+R10（DEF-101-134）守門改制：權威判定＝正規化內容 sha256 釘選（白名單化，
+終結黑名單軍備競賽——曾三輪被 `for(`/`python3 -c`/`.ForEach(` 繞過）；
+黑名單降級為非權威的補充訊號。既有關鍵字測試保留：fake root 內容
+必然使 hash 紅燈，關鍵字診斷應伴隨出現（史料回歸鎖繼續有效）。
+
+R60 Scan-E E-A-02：關鍵字偵測原本整段巢狀在「hash 已紅」分支內（＝兩道防線
+串聯，更新 pin 即整組失效），已改為**並聯**。本檔下方 `TestKeywordDetectionParallel`
+是該修復的回歸鎖（含「pin 已更新」的紅燈斷言＋兩個正控），10 個 forbidden 注入樣本
+（R85 起收斂成單一表驅動判準，見 TestCheckWrapperThinness 內的注入表）全部走
+`_make_fake_root()`＝必然 hash 紅燈態，對「pin 已更新」這條路徑天生零訊號，故必須另立。
+```
+
+### §100 PowerShell 引擎 SSOT 鎖：機器屬性寫成常數的立案（R69 原案、R73 擴射程 DEF-101-777、DEF-101-757 同型復發）
+
+原址：`tools/tests/test_ps_engine_ssot.py` docstring（搬遷前 L646-L652）。
+
+```text
+WHY（R69 原案）：`_ps_engine.py` 曾把「這台機器缺 pwsh 7」寫成常數，那是撰寫
+當輪那台 Windows 機器的屬性；平台／環境可用性是輪次屬性，治理文件與護欄程式
+一律指向現查來源。R73 擴射程（`DEF-101-777`）：R69 的鎖只圈一個檔，這台機器
+後來裝上 PowerShell 7 後射程外的同型句子同時變成假事實，實查命中 5 處（含
+本檔自己 3 處）——`DEF-101-757`「已知的鎖射程缺口不得只以劃界結案」的同型
+復發。判準刻意窄：只抓「本機 + 無/沒有/不存在 + 引擎名」斷言句，另有兩類
+結構性豁免各有獨立鎖。史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
+```
+
+### §101 PowerShell 引擎 SSOT 鎖：`_STALE_CLAIM_RE` 主語與否定詞視窗 8→16 字的經過（R74 DEF-101-777）與 R73 教訓
+
+原址：`tools/tests/test_ps_engine_ssot.py` `_STALE_CLAIM_RE` 上方註解（搬遷前 L566-L573）。
+
+```text
+「把機器屬性寫成常數」的句型判準。**射程單位＝邏輯段，不是物理行**（R74 修
+`DEF-101-777` 的漏抓面，見 `_logical_segments` 與 `stale_local_engine_claims`）。
+
+🔴 R74 放寬主語與否定詞之間的視窗（8 → 16 字）：舊視窗是照最短句型的長度訂的，
+主語後面只要插一段括號補述（實測逃掉的那個站點插了 11 字的機型括號）就超窗漏抓。
+窗放寬不會讓判準失控——`[^。]` 仍把射程關在**同一個句子**內，這才是真正的邊界。
+逐字樣本一律只放在下方 `test_detector_catches_*` 的樣本清單裡並帶行尾豁免標記，
+不寫進說明散文（R73 教訓：訂正註記逐字引述假話＝在樹裡多留一句假話）。
+```
+
+### §102 排程能力對照契約：R75 訂正（SD 追加②）——寫死的下限 40 腐化、改與 skip_tag_policy 共用逐樹下限政策
+
+原址：`tools/tests/test_schedule_capability_parity.py` docstring（搬遷前 L435-L440）。
+
+```text
+🔴 R75 訂正（SD 追加②）：下限原為寫死的 `40`、註解寫「R60 實測 43 份」，而 R75
+實測已是 53 份 ⇒ 下限只剩實測的 75%，對「靜默縮面」的鑑別力被吃掉一截，而
+**沒有任何東西會在它過期時說話**——這與 R74 自己踩到的 `MIN_TESTS` 腐化 11 輪
+是同一種病。現改為與 `tools/lib/skip_tag_policy.py` 的逐樹下限**共用同一條政策**
+（下限＝實測的 `TREE_FLOOR_RATIO`），並補上第二個方向的斷言：下限一旦跌破該比例
+就是一筆失敗，逼人回來重釘。比例常數刻意 import 而非在此再寫一份 0.8。
+```
+
+### §103 WindowsApps guard 交叉一致性鎖：站點偵測三輪訂正逐步收斂鑑別力（函式名錨→雙錨→re.I、scoped_prefixes 縮面漏 16 支）
+
+原址：`tools/tests/test_windowsapps_guard_cross_consistency.py` docstring（搬遷前 L1196-L1205）。
+
+```text
+三輪訂正逐步收斂鑑別力：①以函式名為錨曾被逐字相同、只改函式名的第二
+實作完整逃過，改以判斷式內容為錨並比照 `_EXEMPT_PS1_FILES` 慣例登記
+白名單；②函式名錨與運算式錨互補，改為 `_STUB_NAME_RE` ∪
+`_STUB_PREDICATE_RE` 雙錨判定；③兩錨原大小寫敏感，補 `re.I` 收攏
+（既知邊界：改名且嵌進更大字串或字串串接組出者仍逃得掉）。掃描面亦曾
+因 `scoped_prefixes` 縮面漏掉 16 支生產 `.py`，改為與姊妹 `.ps1`／`.sh`
+掃描同政策（只排凍結版與測試檔）。白名單有 stale 檢查（登記項不再命中
+任一錨即翻紅），測試檔本身排除在外（同檔內出現字面值是斷言 SSOT 內容，
+非第二實作）。逐輪實測數字與 bug-injection 案例史料見證據檔
+〈第七輪 史料搬遷（Dev-Trim8）〉。
+```
+
+### §104 WindowsApps guard 交叉一致性鎖：R44 SA 一審追加揪出——初版判準是檔案層級（1 處 guard、15+ 處裸呼叫仍全綠）
+
+原址：`tools/tests/test_windowsapps_guard_cross_consistency.py` docstring（搬遷前 L1139-L1144）。
+
+```text
+R44 SA 一審追加揪出：初版判準是檔案層級（只要檔案內某處存在 guard
+陳述即視為全檔安全），實測構造「1 處 guard、其餘 15+ 處裸呼叫與判斷
+結果無關」仍全綠。改用 `_all_python_invocations_are_ssot_protected`：
+呼叫點層級，要求每個裸呼叫歸類到 (A) guard 失敗即 fail-fast 或
+(B) guard 結果存變數、全呼叫點改用該變數，任一歸類不到即未受保護。
+真實案例清單與逐輪追加史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
+```
+
+### §105 dev_start 版本探測碼逐字相同鎖：R71（DEF-101-760）——上面那支鎖只看版本數字，單邊改掉探測碼時本檔與 CI 全綠
+
+原址：`tools/tests/test_dev_start.py` 註解（搬遷前 L5414-L5419）。
+
+```text
+🔴 R71（DEF-101-760）：上面那支鎖**只看版本數字**，看不到探測碼本體。兩份
+`.sh`／`.ps1` 的檔頭都白紙黑字寫「用**同一段**探測碼（同構，非各自發明）」，
+但那是散文——實測（本輪動工前）單邊把探測碼改掉，本檔與 CI 全部照樣綠燈。
+DEF-101-760 正是踩在這個縫上：`else ""` 在 bash 沒事、在 PowerShell 5.1 會被
+吃掉一個雙引號而整條失效，於是「兩側寫法必須逐字相同」這個假設一旦破裂，
+就只剩其中一個平台的使用者會炸，而且沒有任何機械物會出聲。
+```
+
+### §106 dev_start Mutex 鎖：R59 QA-R59-05——原為全檔 assertIn，Mutex 名在 .ps1 內出現兩次而被訊息字面滿足（DEF-101-504 保護歸零）
+
+原址：`tools/tests/test_dev_start.py` 註解（搬遷前 L1003-L1007）。
+
+```text
+R59 QA-R59-05：原為全檔 assertIn，而該 Mutex 名在 .ps1 內出現兩次
+（功能碼的 New-Object 與一行 Write-Output 訊息）。只改功能碼那一處、保留訊息
+字面，本鎖與 AutoClaude 側同款全檔鎖都會照綠，而 `_nightly_running()` 對真的
+在跑的 nightly 靜默回 False＝假「沒在跑」，DEF-101-504 的保護整體歸零。
+改為鎖住**實際建立 Mutex 的那一句**。
+```
+
+### §107 dev_start 新四態 str 態：斷言不得寫死 POSIX 字面值 `/elsewhere`（R69 windows-compat-ci 實紅；改比對 `str(Path(...))`）
+
+原址：`tools/tests/test_dev_start.py` `str` 態測試 docstring 第二段（搬遷前 L2909-L2913）。
+
+```text
+🔴 R69（windows-compat-ci 假紅）：斷言不得寫死 POSIX 字面值 `"/elsewhere"`——生產碼印的是
+`Path` 物件，其 `str()` 在 Windows 是 `\\elsewhere\\AutoClaude\\…`，字面值必然
+落空（windows-compat-ci 實紅）。改比對 `str(Path(self._ELSEWHERE))`：兩平台各自
+正規化後仍要求**整條目標路徑**出現在訊息裡——比原本只找 `/elsewhere` 更嚴，
+不是把斷言改弱。
+```
+
+### §108 WindowsApps bash guard：`_tracked_*` 掃描面擴為 tracked ∪ untracked 的 R82（DEF-101-752）立案與姊妹函式刻意不比照的理由
+
+原址：`tools/tests/test_windowsapps_guard_bash_parity.py` docstring（搬遷前 L179-L187）。
+
+```text
+🔴 R82（`DEF-101-752`）：擴為 union 上 `-o --exclude-standard`——尚未 `git add`
+的新 `.sh` 原本天生不可見（同 `test_platform_utils_dedup.py` 檔頭②事故形狀）。
+本函式只餵「offender 必須為空」形態的掃描（`test_no_raw_unguarded_python_check_remains`
+等），加寬掃描面只會多抓真違規，無副作用。**姊妹函式
+`_tracked_non_sh_shell_scripts()`／`_tracked_files()` 刻意不比照**：它們餵的是
+`test_hook_dir_roster_matches_repo_state` 這種「名冊 vs 實況」等值斷言，任何本機
+未加入 git 的草稿 `.sh`（不論放在哪個目錄）都會被判成「名冊外的新 hooks 目錄」而
+偽陽——那不是同一種掃描語意，需要拆成獨立判準才能安全擴面，非本輪處置範圍（見
+帳本 `DEF-101-752` 該列）。
+```
+
+### §109 WindowsApps bash guard 行為測試：fixture 路徑由 bash 自身 `mktemp -d` 建立的緣由（R43 實測：磁碟機代號冒號腰斬 `$PATH`）
+
+原址：`tools/tests/test_windowsapps_guard_bash_parity.py` docstring（搬遷前 L448-L455）。
+
+```text
+fixture 的暫存目錄與候選可執行檔全部由 **bash 自身**的 `mktemp -d` 建立，
+不透過 Python `tempfile` 產生 Windows 樣式路徑（`C:\\Users\\...`）字面塞進
+`$PATH`——R43 實測發現 `C:/...` 這類含磁碟機代號冒號的路徑塞進以 `:` 分隔的
+`$PATH` 字串會被冒號本身腰斬（`C` 與 `/Users/...` 誤判為兩個獨立、皆不存在
+的路徑片段），導致 fixture 目錄從未真正被搜尋到、`command -v python` 悄悄
+改為命中繼承自呼叫端行程環境的其他 `python`（如已啟用的 `.venv`），使本測試
+看似「跑過」卻完全沒驗證到目標邏輯——與本輪（R43 baseline agent）在真實
+`test_bash_probe_spec_contract.py` 上踩到的路徑格式陷阱同一根因類別。
+```
+
+### §110 WindowsApps bash guard：`_CALLER_FILES` R55 新增一支——原登記於 `_EXEMPT_SH_FILES` 的豁免理由論證方向錯誤
+
+原址：`tools/tests/test_windowsapps_guard_bash_parity.py` 註解（搬遷前 L104-L108）。
+
+```text
+R55 新增：原登記於 _EXEMPT_SH_FILES，豁免理由「WindowsApps 資料夾不可能
+出現在 macOS PATH 上」論證方向錯誤——真正風險是本腳本是否會被跑在
+Windows 上，而腳本自身檔頭（[2b] 段落註解、`-c core.longpaths=true`
+註解）與根層 ONBOARDING.md 皆記載過 Windows Git Bash 實跑情境，已改用
+共用 guard。
+```
+
+### §111 歸檔判準③：R68 改寫（DEF-101-676）——取代舊的 `assertNotIn(v["id"], claimed)`，改寫動機與代價量化
+
+原址：`tools/tests/test_archive_defect_log.py` docstring（搬遷前 L635-L642）。
+
+```text
+判準③ 的 R68 改寫（DEF-101-676）：「被宣稱過」不再是 blocker，取而代之的義務是
+「搬走後那句宣稱仍解析得到」。
+
+取代舊的 `assertNotIn(v["id"], claimed)`：舊斷言把「被提過」永久等同「不可搬」，
+危害其實是搬走後 `_scan_target()` 找不到；補上 `gate._load_archive_status()`
+使帳本 SSOT 真正涵蓋主檔∪archive 家族後，兩者解耦。改寫動機與代價量化史料見
+證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。本條正向驗證新義務：對每一筆「被宣稱過
+＆ 可搬」的列，斷言它在帳本家族內解析得到且狀態與宣稱一致。
+```
+
+### §112 歸檔樣本座標鎖：為何需要（那句話原本不寫樣本住哪一支檔，被以主檔為掃描面的複查讀成 stale）
+
+原址：`tools/tests/test_archive_defect_log.py` docstring（搬遷前 L3355-L3357）。
+
+```text
+為何需要（本輪實證）：那句話原本只寫「實測家族內…」而不寫樣本住哪一支檔，
+於是一次以**主檔**為掃描面的複查把它讀成 stale（樣本其實住 archive）。
+一句對的話因為缺座標而被讀成錯的，下一次就可能被「順手訂正」成真的錯的。
+```
+
+### §113 root-infra 對等鎖：R56 立案——檔頭第 1 道敘述是被指定的真相源卻在掃描面擴張時漏改（R54 DEF-101-431／R55「9 支」同形狀）
+
+原址：`tools/tests/test_root_infra_parity.py` docstring（搬遷前 L175-L182）。
+
+```text
+R56 新增（Architect 與 SA 各自獨立回報同一根因）：檔頭第 1 道敘述是
+ONBOARDING.md §6 明文指定的權威來源（原文「詳細內容以 workflow 檔頭註解
+為準，避免每次擴充都要同步改動兩處」）。R56 把該 step 的掃描面由
+`find tools`（10 檔）擴為全庫 `git ls-files`（174 檔）時檔頭漏改，被指定
+的真相源反而成了錯的一方；同形狀的「多站點敘述漂移」本 repo 已連踩四輪
+（R54 DEF-101-431／R55「9 支」／本輪 pre-push「五支」）。故機械斷言：
+step **非註解行**採用的掃描機制關鍵字，必須同時出現在檔頭第 1 道敘述裡
+——未來任一方向擴面/縮面而檔頭沒跟上即紅。
+```
+
+### §114 帳本交叉參照鎖：R75 把指針樣式由「只認 R60 那一組檔名」放寬為任一輪的 `CrossPlatform_R<n>_*.md`（R60／R68／R75 兩層化）
+
+原址：`tools/tests/test_check_defect_log_crossref.py` 註解（搬遷前 L1075-L1079）。
+
+```text
+🔴 R75：樣式由「只認 R60 那一組檔名」放寬為**任一輪的 `CrossPlatform_R<n>_*.md`**。
+原因與 DEF-101-757 同型：兩層化（主檔留摘要＋指針、詳情外置）R60 用過、R68 用過、
+R75 又用了一次（`CrossPlatform_R75_Review_Evidence.md`，20 個具名節指針），而本鎖的
+樣式把輪號寫死 ⇒ 同一種指針換一輪就整批逸出，這正是本鎖要防的「指針靜默失實」。
+放寬只擴**發現面**，判準（錨必須真的存在於被指名的那份檔）一字未改。
+```
+
+### §115 smoke ↔ CI 同步：`--workflow` 接上後第一次真跑踩到的假綠（act 對事件對不上的 workflow 不跑任何 job 卻回 rc=0；全庫 5/11 支 on: 不含 push）
+
+原址：`tools/tests/test_smoke_ci_sync.py` docstring（搬遷前 L1199-L1203）。
+
+```text
+WHY 這條非有不可：本輪把 `--workflow` 接上之後，第一次真跑就踩到——act 對事件
+對不上的 workflow 是「不跑任何 job 然後回 rc=0」，畫面上只有一行 `Using docker
+host`。實測逐字：`--workflow …arch-fitness.yml --job pr-advisory` → ACT_RC=0、
+零 job 執行。全庫 11 支裡有 5 支的 `on:` 不含 push ⇒ 把 workflow 指得到這件事
+**本身**讓這個假綠第一次變得碰得到，兩者必須同批落地。
+```
+
+### §116 Windows 禁用檔名鎖：構造形判準的 WHY——R60 插入新裝置名使間隙由 ≤5 變 17，三處實作同時掉出錨①而註冊表等值斷言毫無反應
+
+原址：`tools/tests/test_windows_forbidden_filename_parity.py` docstring（搬遷前 L733-L738）。
+
+```text
+WHY：姊妹鎖取兩錨聯集，只要禁用字元集合的錨②還命中，某份實作掉出錨①也
+照樣全綠——R60 插入新裝置名到中間造成間隙從 ≤5 變 17 時，三處實作同時
+掉出錨①，註冊表等值斷言毫無反應。改認構造形：管線分隔、四名之間不得有
+任何其他字元。殘留 fail-open（如實揭露）：註解裡的偽裝字樣仍可滿足本鎖，
+徹底根治需 AST 解析四種語言（R46 已證明無底洞），本鎖只攔「無意識插中間」
+這個真實發生過的動作。史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
+```
+
+### §117 Windows 禁用檔名鎖：logger.py 以 rsplit 剝副檔名而漏判多重副檔名保留名（R33 QA 二審、DEF-101-295 追加修復）
+
+原址：`tools/tests/test_windows_forbidden_filename_parity.py` 註解（搬遷前 L313-L316）。
+
+```text
+R33 QA 二審發現：logger.py 原用 rsplit(".", 1) 剝副檔名（只切最後一個點），對多重
+副檔名的保留名（如 lpt5.tar.gz）算出 stem="lpt5.tar" 而漏判；check_ntfs_paths.py／
+bash 皆用「第一個點起」剝離（split(".", 1) / ${seg%%.*}），三者對此不對稱。已改
+logger.py 為 split(".", 1) 與另兩處一致（DEF-101-295 追加修復）。
+```
+
+### §118 platform_utils 收斂止血鎖：模組 docstring 的立案沿革（R16 架構最佳化、R66 DEF-101-629、R70 DEF-101-751／752）
+
+原址：`tools/tests/test_platform_utils_dedup.py` 模組 docstring（搬遷前 L4-L13）。
+
+```text
+本測試機械鎖住三件事：(1) `platform_utils` 模組本身 API 存在且行為正確（兩平台皆
+`_init_utf8_streams()` 無條件包裝，見 `test_hooks_stdin_utf8.py`：POSIX 上不強制重新
+包裝會讓阻斷級 hook 的中文錯誤訊息讀成亂碼）；(2) 8 個已知呼叫點不再各自定義
+`_init_utf8_streams()`；(3) `resolve_latest_name`／`resolve_latest_root`／
+`exclude_frozen_sdd_versions` 三函式 repo-wide 唯一定義鎖（R66 追加，DEF-101-629）。
+不變量以「**每一個相依孤島內，各 helper 只准有一個定義點**」為界（R70／DEF-101-751：
+`autoclaude` 為可獨立 pip 安裝套件，跨孤島各留一份＋以鎖釘住一致性），掃描面涵蓋
+tracked ∪ untracked-not-ignored（R70／DEF-101-752：untracked 天然不可見曾讓衝突躲過
+四輪複審）。史料見 CrossPlatform_DEF200275_Context_Metering_Evidence.md
+〈第七輪 史料搬遷〉。
+```
+
+### §119 掃描面盲區封閉鎖：R85／QA-06 探針由 repo 根改造在拋棄式 git repo 內的緣由（pid 只讓自己的目錄唯一，擋不住別的行程掃到探針）
+
+原址：`tools/tests/test_platform_utils_dedup.py` docstring（搬遷前 L676-L680）。
+
+```text
+🔴 R85／QA-06：探針改造在**測試專屬的拋棄式 git repo** 內，共用工作樹零足跡。
+此前它造在 repo 根（`_scan_surface_probe_<pid>/`）——pid 只讓**自己**的目錄唯一，
+擋不住「別的行程掃到我的探針」：探針依定義是一支違規檔，而本檔的掃描面是全 repo
+⇒ 並行時互相污染（QA 實測 traceback 裡的 pid 不屬於報錯的那個行程，兩種載具的
+失敗支數因此對不起來）。拋棄式 repo 讓污染在**結構上**不可能，不是靠清理得夠快。
+```
+
+### §120 掃描面盲區封閉鎖：事故本身——`platform_caps.py` 在 R69 全程 untracked 而躲過四輪四方複審與多次全套實跑（R70／DEF-101-752）
+
+原址：`tools/tests/test_platform_utils_dedup.py` docstring（搬遷前 L666-L670）。
+
+```text
+事故本身：`platform_caps.py` 在 R69 全程是 untracked，而本檔的掃描面是
+`git ls-files`（tracked-only）。於是它與 R17 不變量的衝突躲過了**四輪四方
+複審**、以及收尾者多次 `run_root_unittests.py` 全套實跑（皆 `Ran 1581 … OK`），
+直到 `git add -A` 讓它變成 tracked 的**那一刻**才在 pre-push 顯形。
+⇒「驗證載具自己有盲區」的教科書級樣本：不是鎖寫錯，是鎖**看不到**該看的地方。
+```
+
+### §121 bootstrap_core pick_python() WindowsApps 空殼排除 guard 回歸鎖：WHY 全文（DEF-101-273/279 兩輪修復、R16 架構收斂後缺 guard、R31 補齊）
+
+原址：`tools/tests/test_bootstrap_core.py` 模組 docstring（搬遷前 L4-L11）。
+
+```text
+WHY：`tools/bootstrap.ps1` 在 DEF-101-273/279 兩輪修復中，對 `python`/`python3`
+裸名候選加了 WindowsApps 空殼別名靜態路徑排除 guard——全新 Windows 11 機器上這兩個
+名字常被系統自動註冊為 App Execution Alias 空殼，`shutil.which()`/`Get-Command`
+找得到、但實際執行只會跳出 Microsoft Store 安裝提示，不會執行任何 Python 碼；用
+「執行結果」判斷（`_probe_ok()`）在此情境不可靠，正是 `.ps1` 改用靜態路徑比對的
+原因。但作為「單一真相源」的 `bootstrap_core.py::pick_python()`（R16 架構收斂後
+真正決定建立 `.venv` 用哪個直譯器的核心邏輯）此前完全沒有這道 guard，本測試鎖住
+R31 補齊的對稱修復，防未來退化回舊版純執行探測判斷。
+```
+
+### §122 subprocess 編碼鎖：WHY 這道到 R74 才出現——判準一（parent 解碼）合規的那一行 hook 在 windows-latest（cp1252）把中文指引印成亂碼（DEF-101-789）
+
+原址：`tools/tests/test_subprocess_encoding_hygiene.py` docstring（搬遷前 L657-L661）。
+
+```text
+WHY 這道到 R74 才出現：判準一（parent 解碼）2026-07-19 就上線了，而出事那一行
+對它完全合規——`text=True` 有 `encoding="utf-8"`、有 `errors="replace"`。
+repo 只守了一半，另一半連判準都沒有，於是 `.claude/hooks/block_bash_on_windows.py`
+在無保護狀態下漂了一整輪，直到 GitHub windows-latest（en-US ＝ cp1252）把
+整段中文指引印成 `\\uXXXX` 才被看見（DEF-101-789）。
+```
+
+### §123 hook 註冊普查：R79 由並行包新增的 PreToolUse 條目（`.claude/settings.json` 不在本包所有權內）的交接註記
+
+原址：`tools/tests/test_check_hooks_liveness.py` 註解（搬遷前 L1830-L1834）。
+
+```text
+🔴 R79 由**並行的另一個包**新增的 PreToolUse 條目（`.claude/settings.json` 不在
+本包的檔案所有權內，本包只負責讓帳對得上——同 `_SITE_CLASS_CENSUS` 的既有紀律）。
+語意是「動手**之前**先看水位」，圈的是三個會一次吃掉大量 context 的工具。
+收輪者請依當場實測重驗這一格：若那個包最後把條目撤掉，本列必須跟著撤，否則
+棘輪會對著一個不存在的註冊喊紅。
+```
+
+### §124 Windows nightly 安裝器：R73（DEF-101-779）原本斷言 help 區塊含某個時刻字面值而把觸發時間釘進鎖裡（ADR-SD09-012 五項排程設定連兩輪沒人敢套）
+
+原址：`tools/tests/test_install_windows_nightly.py` 註解（搬遷前 L233-L239）。
+
+```text
+🔴 R73（DEF-101-779）：原本斷言 help 區塊含某個時刻字面值，即把觸發時間**釘進鎖裡**
+釘進鎖裡。那個字面值與本機實際排程（22:30）不符，而 install 路徑是
+Unregister→Register ⇒ 「跑安裝器套設定」會靜默把時間改掉，於是 ADR-SD09-012
+點名的五項排程設定連兩輪沒人敢套。時間改為參數後，鎖要釘的是**結構**：
+兩個 trigger 都必須吃參數（不得再回頭寫死），且參數都要有格式驗證。
+刻意**不**斷言預設值等於本機現行排程——那會把「這台機器排幾點」寫成鎖的常數，
+正是 DEF-101-777 同一個病（見 test_ps_engine_ssot.py::TestNoStaleLocalEngineClaims）。
+```
+
+### §125 dev_start：DEF-101-762 在 LATEST 版 SDD 樹上的兩個同形態站點（以 `git rev-parse` 輸出反推路徑，cp950 下損毀）與 R71 參數化到第二支
+
+原址：`tools/tests/test_dev_start.py` 註解（搬遷前 L5948-L5952）。
+
+```text
+DEF-101-762 在 LATEST 版 SDD 樹上的**兩個**同形態站點：都以 `git rev-parse` 的輸出反推
+路徑，cp950 下損毀即整條路不可用。R71 落地時只鎖了 install_post_commit.ps1，run_tlc.ps1
+雖已同法修好，卻只有 `check_script_parity._LATEST_PINNED_SHA256` 的 hash 釘選——那只證明
+「內容沒被動過」，證明不了「釘選在讀取之前」，而後者正是本缺陷的形狀。「同棵樹、同形態、
+只鎖一支」就是 DEF-101-757 入規要防的鎖射程缺口，故 R71 參數化到第二支（成本＝一個 case）。
+```
+
+### §126 check_script_parity 具名輪次正控樣本：E-05／R77-13 訂正——原本寫死一個不存在的輪號（與「未指派」等效的假承諾），改自帳本現查當前輪推導下一輪
+
+原址：`tools/tests/test_check_script_parity.py` docstring（搬遷前 L1467-L1470）。
+
+```text
+🔴 本輪（E-05／R77-13）訂正：具名輪次的正控樣本原本寫死一個**不存在的輪號**，
+於是這支「證明合法寫法會通過」的對照組，用的是一個與『未指派』等效（永遠不到
+期）的假承諾當範例——判準的正控自己就是它該擋的東西。改為自帳本現查當前輪推導
+下一輪，樣本因此永遠是「真的可能被排進來」的那一個，且不隨輪次推進而過期。
+```
+
+### §127 check_script_parity：R80 S5-05——原本逐一寫 `patches[0]…patches[5]` 六個索引（`_patched()` 少回一個元素時是 IndexError 而非有意義的紅燈），改用 ExitStack 依實際長度展開
+
+原址：`tools/tests/test_check_script_parity.py` 註解（搬遷前 L140-L143）。
+
+```text
+🔴 R80 S5-05：原本逐一寫 `patches[0]…patches[5]` 六個索引。`_patched()` 少回一個
+元素（本輪刪掉已死的 _MARKER_PAIRS 名冊）時，這裡是 IndexError 而不是有意義的
+紅燈——索引數字是這個 helper 與它的生產者之間第二個必須手動同步的家。改用
+ExitStack 依實際長度展開，數量從此只有一個家。
+```
+
+### §128 PS 5.1 相容鎖：R56 round 5 修正（QA B-3）——`keys_and_floors_pinned` 名實不符，只比 keys、`_floor` 從未進入斷言
+
+原址：`tools/tests/test_ps51_compat.py` docstring（搬遷前 L408-L411）。
+
+```text
+R56 round 5 修正（QA B-3）：本方法名為 `keys_and_floors_pinned`，實作卻只
+比 keys、`_floor` 從未進入斷言——名實不符會誤導後續審查員以為下限已受保護
+（現況 8/7/2/4 與實數零餘裕，縮面雖仍會被上一支測試的 assertGreaterEqual
+擋下，但「下限值本身被下修」這條路徑當時零訊號）。改為連 floor 一起釘。
+```
+
+### §129 claim provenance 第三判準：規格版紅綠自證（插入 4 小時前的『量測於』⇒ 回空清單）把事故寫成契約，「在場即抑制」型抑制器在整個母體上一次都沒做對過
+
+原址：`tools/tests/test_claim_provenance_r86.py` docstring（搬遷前 L386-L389）。
+
+```text
+規格版寫的紅綠自證是「插入 4 小時前的『量測於』⇒ 回空清單」——那**把事故寫成契約**：
+立案的事故形狀就是「把四小時前的 pace 區塊整塊貼上」，而那份規格會讓那個動作**變成
+合法的靜音手法**。複審量到的代價：在整個母體上，「在場即抑制」型抑制器**一次都沒有
+做對過** ⇒ 它不是逃生口，是隨機靜音器。
+```
+
+### §130 sanitize 凍結版鎖：R44 QA 一審發現的時序缺陷——初版用 `git show HEAD:<path>`，本輪修復一旦 commit 就對全部 7 個 subTest 恆紅，改錨定固定 SHA
+
+原址：`tools/tests/test_sanitize_component_frozen_sdd_versions_lock.py` docstring（搬遷前 L209-L213）。
+
+```text
+R44 QA 一審發現並修正的時序缺陷：初版用 `git show HEAD:<path>` 而非固定
+SHA，這個假設只在『本輪修復尚未 commit』的當下短暫成立——一旦本輪修復
+（含本測試檔自身）被 commit，HEAD 就會變成『修復後』內容，導致
+`test_every_target_file_pre_fix_head_content_fails_the_lock` 對全部 7 個
+subTest 恆紅。改錨定固定 SHA 後，重放內容不再受後續任何 commit 影響。
+```
+
+### §131 sanitize 凍結版鎖：bug-injection「修復前」重放基準點固定錨定在 DEF-101-357 修復前的父提交（R43 收尾 commit），不用 `git show HEAD:<path>`
+
+原址：`tools/tests/test_sanitize_component_frozen_sdd_versions_lock.py` 註解（搬遷前 L85-L93）。
+
+```text
+bug-injection 鑑別力鎖的「修復前」重放基準點——固定錨定在本輪 DEF-101-357
+修復（29 版 × 7 檔 203 處改動）尚未提交前的父提交（R43 收尾 commit），刻意
+不用 `git show HEAD:<path>`（R44 QA 一審發現：HEAD 會隨每次 commit 移動，
+一旦本輪修復——含本測試檔自身——被 commit，HEAD 就變成『修復後』內容，
+`TestExpectedSanitizeCallDiscriminatesRealHistoricalRegression` 會對全部 7
+支檔案恆紅，而非只在本輪修復提交前這段短暫視窗內成立）。改用此固定 SHA 後，
+該測試永遠重放同一段『修復前』真實歷史內容，不受後續任何 commit 影響；若此
+commit 在未來因淺層 clone（CI `actions/checkout` 預設 fetch-depth=1）或歷史
+重寫而不可達，`_pre_fix_baseline_text()` 會 skipTest（非 fail-red）。
+```
+
+### §132 dev_start mac nightly 鎖：R59 ARCH-R59-04——原寫 `.split("/")[-1]` 只鎖檔名不鎖目錄，鎖目錄搬走而檔名不變時本鎖照綠、DEF-101-504 復發且零訊號
+
+原址：`tools/tests/test_dev_start.py` 註解（搬遷前 L996-L1000）。
+
+```text
+R59 ARCH-R59-04：原寫 `.split("/")[-1]`＝只鎖檔名 `.nightly_mac.lock`，
+不鎖目錄。把 `.sh` 的鎖目錄從 AutoClaude/logs/ 搬到別處而檔名不變 → 本鎖照樣
+綠，而 `_nightly_running()` 會永遠在錯的路徑找不到鎖、回 False＝假「沒在跑」，
+DEF-101-504 原樣復發且零訊號。這是「鎖自己留了一個它宣稱要守的洞」，且與同一
+測試 Windows 側鎖完整 Mutex 字面值的做法不對稱。改鎖完整相對路徑。
+```
+
+### §133 DEF-200-481：lint 規則①換成真機三條件判準——devB 從 `.claude/hooks/lint_powershell_command.py` 等檔刪除／改寫的原文（逐字，行號＝HEAD 版）
+
+原址：`.claude/hooks/lint_powershell_command.py`／`tools/probe/audit_session.py`／`tools/lib/rc_after_pipe_real.py` 一帶（R194 五方迭代中該 Developer 從 hook／lib 刪下的散文，原樣保全；內文自帶的 `##`／`###` 小標與圍欄為原檔結構，故以長圍欄包住）。
+
+``````text
+# devB 刪除的原文（逐字；行號＝HEAD 版）
+
+DEF-200-481：lint 規則①換成真機三條件判準。下列為被刪／被改寫的原文，供收尾者搬進沿革檔。
+
+## .claude/hooks/lint_powershell_command.py
+
+### E1 module docstring 指標（改寫處的原句只有一行，原樣保留在新文字內）（HEAD L22-L22）
+
+````text
+不必去動註冊面。
+````
+
+### E2 SHARED_PATTERN_SOURCE['pipe-cmdlets'] 條目（含 R78／SA-01 註解）（HEAD L164-L177）
+
+````text
+    # 管線接進這些 cmdlet 之後再讀 rc，才算命中（不是看到任何 `|` 都算）。
+    # 🔴 R78／SA-01：**內建別名與全名同列**。上一版只列全名，實測 12 組「別名 vs
+    # 全名、其餘字元逐字相同」的配對 **12/12 不對稱**（`| select -First 5` 放行、
+    # `| Select-Object -First 5` 擋下）——而 `select` 正是「提前結束管線」最常見的
+    # 寫法，等於這道鎖擋掉的剛好是沒人會寫的那一半。每個別名自帶右邊界
+    # `(?![\w-])` 以免吃到 `selection`／`sortable`；`%` 與 `?` 另用 `(?=\s|\{|$)`，
+    # 避免誤傷 `$_ % 2` 那類真正的運算子用法。
+    "pipe-cmdlets": (
+        r"(?:Select-Object|Select-String|Out-\w+|Format-\w+|Sort-Object"
+        r"|Measure-Object|ForEach-Object|Where-Object|Tee-Object"
+        r"|head|tail|findstr)(?![\w-])"
+        r"|(?:select|sls|sort|measure|foreach|where|ft|fl|oh|tee)(?![\w-])"
+        r"|[%?](?=\s|\{|$)"
+    ),
+````
+
+### E3 _PIPE_INTO_RE／_RC_READ_RE／R79 偏向擋辯護／_statement_resets_rc（HEAD L202-L238）
+
+````text
+_PIPE_INTO_RE = re.compile(
+    r"\|\s*(" + SHARED_PATTERN_SOURCE["pipe-cmdlets"] + r")", re.IGNORECASE
+)
+_RC_READ_RE = re.compile(r"\$LASTEXITCODE", re.IGNORECASE)
+#: 「rc 已被重新建立」——**真的發起了一次呼叫**。用途見 `_rc_after_pipe()`：
+#: 截斷管線造成的污染會**一直延續**，但 hint 教的正解 `& <exe> <args>; "rc=$LASTEXITCODE"`
+#: 本來就會重設 rc，不該被前面某一句的管線牽連。
+#:
+#: 🔴 R79：上一版把「重設」判太寬，而寬的方向正是這條規則存在的唯一理由的反面
+#: （放行一條會讓真 rc=7 被讀成 0 的指令）。兩個口子都是「提到」而非「執行」：
+#:   · 呼叫運算子的左邊界只排除 `&` 與英數字 ⇒ `2>&1`／`1>&2` 的那個 `&`（左邊是 `>`）
+#:     被當成呼叫。`2>&1` 在最近 12 支逐字稿的 547 條 unique 指令裡佔約一半，觸發面極大。
+#:   · `.exe` 出現在**任何位置**都算 ⇒ `Get-Command python.exe`、`Test-Path …\cmd.exe`
+#:     這種只是把路徑當資料的語句被當成執行。
+#: pwsh 7.6.4 真機實測：這三種語句一個都沒有重設 `$LASTEXITCODE`（前值原樣保留）。
+#: 修法是把兩個口子各自收到「命令位置」上：
+#:   ① 呼叫運算子的左邊界加上 `>`，把重導向合併排除；
+#:   ② `.exe`／`.cmd`／`.bat` 只在**語句的第一個 token** 才算數（`_NATIVE_HEAD_RE`）——
+#:      那才是「這一句在跑一支外部執行檔」，寫在參數位置的同一個字面只是資料。
+#: 仍然刻意窄：裸原生指令（`git status` 這種不帶 `&`、不帶副檔名者）**不算**重設，
+#: 於是判定偏向擋。這個方向是刻意的——「同一個指令字串裡既有截斷管線又要讀 rc」
+#: 本身就是這條規則要消滅的混寫，而行內豁免是它的出口。
+#: 誠實劃界：偏向擋的代價已在真實語料上量過（見 `tools/tests/test_check_hooks_liveness.py`
+#: 的 `TestLintPowerShellHookBehaviour` 兩向表），不是靠推測。
+_RC_RESET_RE = re.compile(r"(?<![&\w>])&(?!&)\s*\S", re.IGNORECASE)
+#: 語句**開頭**就是一支外部執行檔（`python.exe a.py`／`<venv>/bin/tool.cmd`）＝真的在跑東西。
+#: 錨在開頭是關鍵：`Get-Command python.exe` 的第一個 token 是 cmdlet，`.exe` 只是參數。
+_NATIVE_HEAD_RE = re.compile(r"^\s*[^\s;|&]*\.(?:exe|cmd|bat)(?![\w])", re.IGNORECASE)
+
+
+def _statement_resets_rc(statement: str) -> bool:
+    """這一句是否真的重新發起了一次呼叫（⇒ `$LASTEXITCODE` 被重寫）。
+
+    純函式、吃**一句**（不是整條指令）：`.exe` 的「必須在開頭」這個條件只有在語句
+    邊界上才判得準，用 `search(..., pos, endpos)` 是判不到的（`^` 不會錨在 `pos`）。
+    """
+    return bool(_RC_RESET_RE.search(statement) or _NATIVE_HEAD_RE.search(statement))
+````
+
+### E4a _RC_HINT（HEAD L251-L257）
+
+````text
+_RC_HINT = (
+    "🔴 讀 rc 不要接管線。pwsh 7.x 提前中斷管線時**不更新** $LASTEXITCODE（保留前一個值，"
+    "真 rc=3 可能讀成 0＝真紅被讀成綠）；PS 5.1 則寫入 -1；加 2>&1 又會翻轉。"
+    "沒有方向可以憑記憶——就是不要接。\n"
+    "  出口：& <exe> <args>; \"rc=$LASTEXITCODE\"   ← rc 自成一句，前面那一句不接任何管線\n"
+    "  要篩輸出就先落檔或分兩次呼叫；要一支固定 rc 語意的載具走 tools/probe/。"
+)
+````
+
+### E4b _HEADER／_FOOTER（HEAD L278-L286）
+
+````text
+_HEADER = (
+    _SCOPE + "要就地寫出這個形態？加行內豁免 `# ps-lint-ok: <理由>`（理由必填）即放行——"
+    "寫文件／寫探針／重現缺陷本來就會寫出違規形態，那不是違規。\n"
+    "以下是本次命中的項目：\n\n"
+)
+_FOOTER = (
+    "\n（刻意極窄：本守衛只擋這三件事，其餘一律放行——誤報讓機制被整個關掉，"
+    "比漏擋更糟。回歸鎖：tools/tests/test_check_hooks_liveness.py）"
+)
+````
+
+### E5 _rc_after_pipe（含 R78／R79 長 docstring）（HEAD L427-L455）
+
+````text
+def _rc_after_pipe(structural: str, expandable: str) -> bool:
+    """規則①：**先後順序**與**跨語句污染**都算數。
+
+    上一版兩個方向都錯：
+    · 漏擋（SD-01）——只看「緊鄰的下一句」（`parts[index + 1]`），中間插任何一句
+      就逃出視窗，而 `$x = 1` 這種句子根本不會重設 `$LASTEXITCODE`，rc 照樣是髒的。
+      改成污染會**一直延續**到某一句真的重新發起呼叫（`_RC_RESET_RE`）為止。
+    · 誤擋（QA-01）——`"rc=$LASTEXITCODE" | Out-File` 是先展開變數再進管線，
+      rc 讀取發生在任何管線中斷**之前**，完全安全卻被硬擋，因為判準只問「同一句
+      有沒有同時出現」不問先後。改成比位置：rc 在管線**之後**才算命中。
+
+    🔴 R79：污染的**解除**條件改由 `_statement_resets_rc()` 判（吃一句、不吃座標）。
+    上一版把「提到一支 exe」與「`2>&1` 裡的 `&`」都當成呼叫，於是一句話就能把污染
+    旗標清掉——而清掉之後放行的，正是這條規則唯一要防的那件事。
+    """
+    contaminated = False
+    for start, end in statement_spans(structural):
+        pipe = _PIPE_INTO_RE.search(structural, start, end)
+        pipe_pos = pipe.start() if pipe else -1
+        for read in _RC_READ_RE.finditer(expandable[start:end]):
+            if contaminated or (pipe_pos >= 0 and start + read.start() > pipe_pos):
+                return True
+        if pipe_pos >= 0:
+            contaminated = True
+        elif _statement_resets_rc(structural[start:end]):
+            contaminated = False
+    return False
+
+
+````
+
+## tools/lib/rc_after_pipe_real.py
+
+### 舊檔頭 docstring（L1-L50）（HEAD L1-L50）
+
+````text
+"""`rc-after-pipe-real` 判準本體（R80／S7-01＋S7-09）——「真的會量到假 rc」的那一欄。
+
+為何住在 `tools/lib/` 而不是 `tools/probe/audit_session.py` 裡（R80 收尾包移出）：
+消費端受根層 `guardrail_cli<=750` 的 LOC 分級管，而該分級的合法出口逐字寫著
+「先拆職責／抽共用模組（先例：tools/lib/ci_liveness.py），確認為不可壓縮的真實功能後
+才具名調高」。本模組就是那個「拆職責」——它是一組**純函式＋一張實測語料表**，與逐字稿
+掃描、報表、CLI 全無耦合，本來就該獨立。**不得**為了讓它留在原地而調高 LOC 上限。
+
+依賴注入：兩支判準要用攔截端（`.claude/hooks/lint_powershell_command.py`）的純函式，
+但那支 hook 只能是**被借的一方**（它由 `runpy.run_path` 起、`sys.path` 上沒有 `tools/`，
+import 期爆掉會破壞它的 fail-open 契約）。故本模組**不自己載入 hook**——由呼叫端把已載入
+的 hook 模組傳進來。這也避免了「同一份載入邏輯住兩個家」。
+
+──────────────────────────────────────────────────────────────────────────
+🔴 S7-01＋S7-09：把「攔截端會擋什麼」與「真的會量到假 rc 幾次」拆成兩欄
+──────────────────────────────────────────────────────────────────────────
+上一欄（`rc-after-pipe`）＝攔截端那支函式本身。R79 把它借過來，理由是「兩端不會
+再漂移」——那件事達成了，但它同時把**攔截端刻意保守的偏擋**整批灌進了量測數字，
+而那個數字正是拿來對根 CLAUDE.md 下結論用的。攔截端偏擋是對的（誤報有行內豁免
+當出口，漏擋沒有）；量測器偏擋不是——它會讓「這條規則有多少真違規」整整高一個
+數量級，而下結論的人看到的是量測器。
+
+R80 pwsh 7.6.4 真機逐形態實測（腳本與逐字輸出見交件的證據檔），seed 一律先灌 7、
+再看 `$LASTEXITCODE` 有沒有被寫成 git 的真 rc(0)：
+
+  git log … | Select-Object -First 1   → after=7  ← STALE：真 rc 完全沒被寫入
+  git log … | select      -First 1     → after=7  ← 同上（別名）
+  git log … | Select-Object -Index 0   → after=7  ← 同上
+  git log … | Select-String / Sort-Object / Measure-Object / ForEach-Object
+            / Where-Object / Out-Null / Out-String / Format-Table / Tee-Object
+            / % {…} / findstr           → after=0  ← 全部正確寫入，一個都不污染
+  git log … | Select-Object -Last 1 / -Skip 1 / -First 1 -Wait / -First 999
+                                       → after=0  ← 不提前結束管線就不污染
+  $v = git log …; $v | Select-Object -First 1 → after=0 ← 左邊是變數不是原生指令
+
+⇒ 真正會產生「真紅被讀成綠」的條件是三個**同時**成立，不是「看到管線就算」：
+  ① 管線左段真的在跑一支**外部執行檔**（cmdlet 管線根本不碰 `$LASTEXITCODE`）；
+  ② 管線接進的是**會提前結束**的元素（實測只有 `-First N`／`-Index N`，且 `-Wait`
+     會取消提前結束、`-First N` 在 N 大於輸出筆數時也不會）；
+  ③ 之後才讀 `$LASTEXITCODE`。
+
+本 repo 逐字稿全母體實測（見報表的量測窗）：`rc-after-pipe` 152 命中裡有 139 筆
+（91.4%）不滿足這三條 ⇒ 那一欄**不可**被引用成「違規次數」。誤報的大宗正好是根
+CLAUDE.md 逐字教的正解形態（`& <exe> …; "rc=$LASTEXITCODE"` 之後另起一句用管線
+篩輸出）——方向是「越遵守規則、違規率越高」，用它做的歸因符號相反。
+
+🔴 兩欄都留、都印，不合併：`rc-after-pipe` 是**對拍錨**（`--parity` 與
+`TestHookAndProbeShareOneCriterion` 靠它證明兩端沒漂移），`rc-after-pipe-real`
+是**唯一可引用為「量到幾次真風險」的那一欄**。
+"""
+````
+
+### 被刪的判準函式與舊自證語料註解（含 S7-09 史料）（HEAD L57-L160）
+
+````text
+#: 實測會提前結束管線的元素。`-Wait` 明確排除（實測 after=0）。
+#: 刻意**不**收 `head`：pwsh 沒有這個指令，它只在 Bash 工具面成立而那一面另有鐵律一。
+_TRUNCATING_PIPE_RE = re.compile(
+    r"\|\s*(?:Select-Object|select)(?![\w-])"
+    r"(?![^|;\n]*-Wait(?![\w-]))"
+    r"[^|;\n]*?(?:-First|-Index)(?![\w-])",
+    re.IGNORECASE,
+)
+
+#: 語句開頭若是這些字，那**不是**外部執行檔（PowerShell 內建別名／關鍵字）。
+#: 這張表是「裸原生指令偵測」的偽陰性面：漏收一個別名就會把它誤判成原生呼叫、
+#: 進而誤以為污染被清掉（＝漏報方向）。刻意只收**真的會出現在語句開頭**的那些。
+_PS_ALIAS_HEADS = frozenset("""
+echo ls dir cat type cd chdir sl rm del ren cp copy move mv pwd md mkdir rmdir
+select sort where foreach measure sls gc sc gi gci gcm gm iwr irm man help cls
+clear history kill ps sleep tee write ft fl oh popd pushd gal sal gp sp gv sv
+rv ni ri mi ci gl gu nal compare diff group set get new test out format
+""".split())
+_PS_KEYWORD_HEADS = frozenset("""
+if else elseif for foreach while do switch try catch finally function param
+return throw break continue begin process end filter class enum using exit
+trap data dynamicparam hidden static
+""".split())
+_STATEMENT_HEAD_RE = re.compile(r"^\s*(?:&\s*)?['\"]?([A-Za-z][\w.\\/:-]*)")
+
+
+def head_is_native_invocation(statement: str) -> bool:
+    """語句開頭是不是一支**外部執行檔**（⇒ 它會重寫 `$LASTEXITCODE`）。
+
+    🔴 S7-09：攔截端的 `_statement_resets_rc()` 明文把「裸原生指令（`git status`
+    這種不帶 `&`、不帶副檔名者）」判成**不算**重設，並自陳那是刻意偏擋。pwsh 7.6.4
+    實測那句話是假的——`& cmd /c exit 7` 之後跑 `git status`，`$LASTEXITCODE` 由 7
+    變成 0；`git nosuchsubcmd` 變成 1；`cmd /c exit 3` 變成 3。跨語句實測同樣成立：
+    `git … | Select-Object -First 1` 造成的污染，被下一句裸 `git status` 清乾淨
+    （after=0），被 `$x = 1` 清不掉（after=7）。
+    ⇒ 攔截端偏擋的**代價方向**與它自陳的相反：它不是「多擋一點」，是把污染的存續
+    區間算得比實際長，於是同一條指令後面所有的 rc 讀取都被判成違規。這個代價此前
+    從未從量測數字裡扣掉，本函式就是扣掉它的地方。
+
+    判準（誠實劃界）：帶 `.exe`／`.cmd`／`.bat` 副檔名 → 是；含 `-` 的 token 視為
+    Verb-Noun cmdlet → 否；其餘裸字若不在內建別名／關鍵字表裡 → 視為外部執行檔。
+    這是**啟發式**：使用者自訂函式（`function gp { … }` 之後寫 `gp`）會被誤判成原生
+    呼叫（偽陽性、方向是漏報）。表本身是偽陰性面，見 `_PS_ALIAS_HEADS`。
+    """
+    match = _STATEMENT_HEAD_RE.match(statement)
+    if not match:
+        return False
+    token = match.group(1)
+    if re.search(r"\.(?:exe|cmd|bat|com)$", token, re.IGNORECASE):
+        return True
+    base = token.rsplit("\\", 1)[-1].rsplit("/", 1)[-1].lower()
+    if "-" in base:  # Verb-Noun ＝ cmdlet，不是外部執行檔
+        return False
+    return base not in _PS_ALIAS_HEADS and base not in _PS_KEYWORD_HEADS
+
+
+def statement_invokes_native(statement: str, hook: Any) -> bool:
+    """這一句有沒有真的發起一次外部呼叫（＝`$LASTEXITCODE` 被重寫）。
+
+    攔截端那兩個條件（呼叫運算子 `&`、`.exe` 開頭）**原樣沿用**，另補上實測證明
+    會重設的第三種：裸原生指令。三者取聯集，不是另起一套。
+    """
+    return bool(
+        hook._RC_RESET_RE.search(statement)
+        or hook._NATIVE_HEAD_RE.search(statement)
+        or head_is_native_invocation(statement)
+    )
+
+
+def rc_after_pipe_real(command: str, hook: Any) -> bool:
+    """實測會產生**錯的 rc 讀數**的形態（上游原生 × 截斷型管線 × 之後讀 rc）。
+
+    與 `rc-after-pipe`（＝攔截端那支函式）的差別只有兩處，兩處都由真機實測支撐
+    （見本檔檔頭）：
+      · 管線元素收窄到**實測會提前結束**的那兩個參數，其餘 14 種一律不算；
+      · 管線左段必須真的在跑外部執行檔，且污染的解除認得裸原生指令。
+    """
+    structural = hook.mask_regions(command, keep_expandable=False)
+    expandable = hook.mask_regions(command, keep_expandable=True)
+    contaminated = False
+    for start, end in hook.statement_spans(structural):
+        segment = structural[start:end]
+        truncating = _TRUNCATING_PIPE_RE.search(segment)
+        pipe_pos = -1
+        if truncating and statement_invokes_native(segment[:truncating.start()], hook):
+            pipe_pos = start + truncating.start()
+        for read in hook._RC_READ_RE.finditer(expandable[start:end]):
+            if contaminated or (pipe_pos >= 0 and start + read.start() > pipe_pos):
+                return True
+        if pipe_pos >= 0:
+            contaminated = True
+        elif statement_invokes_native(segment, hook):
+            contaminated = False
+    return False
+
+
+#: 🔴 `rc-after-pipe-real` 的紅綠自證語料（`--selftest`，可重跑）。
+#:
+#: 每一列的 `expect` **不是我認為它應該是什麼**，而是 pwsh 7.6.4 真機量出來的：先
+#: `& cmd /c exit 7` 把 `$LASTEXITCODE` 灌成 7，跑該形態，再讀一次——讀到 7 表示
+#: 真 rc 根本沒被寫入（＝STALE＝這條規則要防的「真紅被讀成綠」），讀到 0/3 表示
+#: rc 被正確寫入（＝安全）。`after` 欄記的就是那個實測值，改判準時請連它一起重測，
+#: 不要只改 `expect`。本 repo 的紀律 #4：驗證載具本身要被驗證——這張表就是這道判準的
+#: 那一層，而它此前不存在（判準整支向 hook 借，沒有任何一組已知答案在守它）。
+````
+
+## tools/probe/audit_session.py
+
+### pipe-cmdlets 條目（含 R78／SA-01 註解）（HEAD L88-L101）
+
+````text
+    # 管線接進這些 cmdlet 之後再讀 rc，才算命中（不是看到任何 `|` 都算）。
+    # 🔴 R78／SA-01：**內建別名與全名同列**。上一版只列全名，實測 12 組「別名 vs
+    # 全名、其餘字元逐字相同」的配對 **12/12 不對稱**（`| select -First 5` 放行、
+    # `| Select-Object -First 5` 擋下）——而 `select` 正是「提前結束管線」最常見的
+    # 寫法，等於這道鎖擋掉的剛好是沒人會寫的那一半。每個別名自帶右邊界
+    # `(?![\w-])` 以免吃到 `selection`／`sortable`；`%` 與 `?` 另用 `(?=\s|\{|$)`，
+    # 避免誤傷 `$_ % 2` 那類真正的運算子用法。
+    "pipe-cmdlets": (
+        r"(?:Select-Object|Select-String|Out-\w+|Format-\w+|Sort-Object"
+        r"|Measure-Object|ForEach-Object|Where-Object|Tee-Object"
+        r"|head|tail|findstr)(?![\w-])"
+        r"|(?:select|sls|sort|measure|foreach|where|ft|fl|oh|tee)(?![\w-])"
+        r"|[%?](?=\s|\{|$)"
+    ),
+````
+
+### 兩支薄殼上方的過期註解（HEAD L132-L133）
+
+````text
+# 🔴 把「攔截端會擋什麼」與「真的會量到假 rc 幾次」拆成兩欄：判準本體、pwsh 實測表與紅綠自證語料
+# 住 `tools/lib/rc_after_pipe_real.py`；下面兩支是薄殼，只把已載入的 hook 模組餵進去。
+````
+
+### 兩欄註解（對拍錨／唯一可引用欄）（HEAD L149-L154）
+
+````text
+    # 🔴 **對拍錨，不是違規次數**：逐字等於攔截端會擋的那件事（攔截端刻意偏擋，全母體實測 91.4% 是
+    # 誤報），**不得**被引用成「違規了幾次」；存在的理由是讓 `--parity` 證明兩端沒漂移。
+    "rc-after-pipe": _rc_after_pipe,
+    # 🔴 **唯一可引用為「量到幾次真風險」的那一欄**：上游原生指令 × 實測會提前結束的管線元素 ×
+    # 之後才讀 rc，三者同時成立才算（逐形態實測依據見 `tools/lib/rc_after_pipe_real.py`）。
+    "rc-after-pipe-real": _rc_after_pipe_real,
+````
+
+## tools/tests/test_check_hooks_liveness.py
+
+### import 行（新增 importlib.util）（HEAD L9-L10）
+
+````text
+import ast
+import json
+````
+
+### MUST_BLOCK 末列「偏向擋的代價」（連同 R79 註解）（HEAD L822-L832）
+
+````text
+        # ── R79：偏向擋的**代價**就地記錄（不是漏，是刻意）──
+        # 裸原生指令（`git`）確實會重設 rc，但本判準只認呼叫運算子與「語句開頭是
+        # 執行檔」，認不得它 ⇒ 這一條會被擋。全史 913 條真實指令實測只有 1 條落在
+        # 這一格（0.11%），出口是行內豁免（阻斷訊息第一行就寫著）。
+        # 🔴 若日後補上「裸原生指令也算重設」的判準，本列會轉紅——那是正確行為：
+        # 取捨變了就必須有人重新決定，不能靜默改掉。
+        ("偏向擋的代價：裸原生指令 git 其實會重設 rc，但本判準認不得（出口＝行內豁免）",
+         'git status | Measure-Object -Line\ngit commit -m x 2>&1\n'
+         '"rc=$LASTEXITCODE"',
+         "LASTEXITCODE"),
+    )
+````
+
+### MUST_PASS 新增列（HEAD L884-L884）
+
+````text
+        ("一般指令", "git log --oneline -3"),
+````
+
+### 別名對稱測試 docstring（HEAD L888-L892）
+
+````text
+        """SA-01：別名與全名其餘字元逐字相同 ⇒ 判定必須相同，且必須是「擋」。
+
+        不對稱本身就是缺陷：`select -First N` 是提前結束管線最常見的寫法，
+        只認全名等於這道鎖擋掉的剛好是沒人會寫的那一半。
+        """
+````
+
+### 別名對稱測試 assert（HEAD L899-L899）
+
+````text
+                self.assertEqual(rc_full, 2, f"全名版就沒擋；{err_f}")
+````
+
+### 第一行豁免出口測試（HEAD L955-L963）
+
+````text
+    def test_the_exemption_exit_is_on_the_first_line(self) -> None:
+        """出口寫在頁尾等於沒有：第一次撞到的人先讀到三段責備才看到出路，而
+        「窄守衛必須有出口」是這支 hook 的設計前提（SA-01 附帶）。"""
+        _rc, err = self._lint("cd AutoClaude")
+        first_line = (err.strip().splitlines() or [""])[0]
+        self.assertIn(
+            "ps-lint-ok", first_line,
+            f"阻斷訊息第一行沒有豁免出口，讀者要翻到最後才看得到：{first_line!r}",
+        )
+````
+
+### _PARITY_HITS 的 Tee-Object 列（Tee-Object 不截斷，移到 _PARITY_CLEAN）（HEAD L1579-L1579）
+
+````text
+    ("rc-after-pipe", "& git status | Tee-Object out.txt\n$LASTEXITCODE"),
+````
+
+### _PARITY_CLEAN 結尾（HEAD L1597-L1598）
+
+````text
+    "git log --oneline -3",
+)
+````
+``````
+
+### §134 DEF-200-477：SessionStart 簡報當第三判準錨點——devC 從 `.claude/hooks/check_claim_provenance.py` 改寫／刪除的散文（逐字，行號＝HEAD 7efc4c0）
+
+原址：`.claude/hooks/check_claim_provenance.py`（R194 五方迭代中該 Developer 從 hook／lib 刪下的散文，原樣保全；內文自帶的 `##`／`###` 小標與圍欄為原檔結構，故以長圍欄包住）。
+
+``````text
+# devC 被改寫／刪除的散文（逐字；行號＝HEAD 7efc4c0 的原檔行號）
+
+## `.claude/hooks/check_claim_provenance.py`
+
+### 原 :111-112（檔頭第三個判準段；改為「`tool_result`（DEF-200-477 起另含 SessionStart 簡報，見 `_session_start_anchors`）」）
+```
+`量測於=<ISO>`（優先），否則往本場 `tool_result` 回溯找同一個「軸＋值」的錨點、取那筆
+落款時刻。
+```
+
+### 原 :332-334（檔頭〈誠實劃界〉；改為「第五判準仍不算佐證（DEF-200-430）…第三判準自 DEF-200-477 起以簡報落款當錨點」）
+```
+· SessionStart 簡報不算佐證的代價：新視窗第一回合若只是轉述簡報裡的水位／額度字樣（沒跑
+  `--check`／`--pace`），「被擋／水位」宣稱同樣會出聲——這是設計（簡報是啟動當下的快照、
+  且每場都有），指路的兩條指令都是零 token 的一行。
+```
+
+### 原 :546（`_anchor_time` docstring）
+```
+    """本場工具輸出裡「這個軸綁這個值」最後一次出現的落款時刻（`None`＝全場無錨點）。"""
+```
+
+### 原 :558-560（`stale_pace_hits` docstring 第二段）
+```
+    純函式。`stamped`＝本場 `tool_result` 的 `[(落款時刻|None, 文字)]`（時序）；`now` 必須
+    帶 tzinfo。回傳每筆帶 `kind`：`"stale"`＝真的過期（會出聲）／`"unanchored"`＝軸綁定
+    讀數但全場找不到錨點（**登記的盲區：放行、不阻斷，但出一則 ℹ️ 並計數**，見檔頭 M7）。
+```
+
+### 原 :1117（`_pace_messages` 盲區訊息，一行）
+```
+            f"ℹ️ 另有 {len(blind)} 個軸綁定讀數在本場工具輸出裡**找不到任何錨點**"
+```
+
+## 非散文（程式碼行）被取代者，僅供對帳
+
+- `.claude/hooks/check_claim_provenance.py` 原 :1195-1196：
+  `messages += _pace_messages(` ／ `stale_pace_hits(claim, stamped, datetime.now(timezone.utc)))`
+- `tools/tests/test_mac_endurance_r83.py` 原 :1901、:1942：
+  `self.addCleanup(os.environ.pop, endurance_env.PLAN_DIR_ENV, None)`（各一行）
+- `tools/tests/test_context_budget_guard.py` 原 :7412-7413、:7465-7466、:10292-10293：
+  `os.environ[escalation.NOTIFY_ENV] = "1"` ＋ `self.addCleanup(os.environ.pop, escalation.NOTIFY_ENV, None)`（前兩處）；
+  `os.environ.pop(escalation.NOTIFY_ENV, None)` ＋ `self.addCleanup(os.environ.pop, escalation.NOTIFY_ENV, None)`（第三處）
+``````
+
+### §135 DEF-200-479／481／482：`quota_gate.py`／`audit_session.py`——devD 被改寫／刪除的散文與被取代的程式碼（逐字）
+
+原址：`tools/lib/quota_gate.py`／`tools/probe/audit_session.py`（R194 五方迭代中該 Developer 從 hook／lib 刪下的散文，原樣保全；內文自帶的 `##`／`###` 小標與圍欄為原檔結構，故以長圍欄包住）。
+
+``````text
+# devD 被改寫／刪除的散文與被取代的程式碼（逐字；行號＝動工前工作樹原檔行號）
+
+行號說明：`tools/lib/quota_gate.py` 動工前＝HEAD 7efc4c0（git status 未列為修改）；`tools/probe/audit_session.py`
+動工前＝devB 改後的工作樹版（1049 行）。
+
+## `tools/lib/quota_gate.py`
+
+### 原 :638-642（`degraded_posture` docstring 第二段「立案」；改為首行括號指標 `（PRD §4.1.5 R-4.1.5-2）`）
+```
+    🔴 立案（R100／PRD §4.1.5 R-4.1.5-2）：本函式取代的那一句逐字寫
+    `⇒ 本次不節流，扇出照常放行。`，而同一支檔 `quota_gate()` 內的註解自述「量不到時
+    `decide()` 回 `degraded_cap`（不是不設限、也永不 halt）」⇒ **同一個決策有兩份互相
+    矛盾的敘述，而只有訊息那一份有讀者**（`decide()` 算出來的 cap 不會出現在畫面上）。
+    兩個方向的誤判都真的會發生：operator 以為沒保護而過度手動收斂，或以為有保護而加派。
+```
+（其後一個空行一併刪；第三段「為什麼是**算**…」保留。）
+
+### 原 :648-650（DEF-200-466 段；改寫為 DEF-200-466／479 合併段）
+```
+    DEF-200-466：`cap`＝呼叫端手上**實際要執法的值**（平穩機制之後），有給就直接印它；
+    此前一律印上面那個未平穩的 `decide()` 值——持久 cap=0 時印「收到 2」而致動器擋在 0。
+    沒給（降級通報的其他來源，還沒走到平穩機制）才自己算。
+```
+
+### 原 :948-949（`pace_report` 內 walrus 說明；「餘裕為 0（500/500）」已是假數字——動工前實為 488/500）
+```
+    # 用 walrus 而不是多一行 `live = …`：本檔 `guardrail_hub` tier 餘裕為 0（500/500），
+    # 取數次數與時點逐字不變（同一次呼叫、同一個 `now`），只是把值留下來給第二個消費者。
+```
+
+### 非散文（程式碼行）被取代者，僅供對帳
+- 原 :653-655（`degraded_posture` 自己算 cap 的三行）：
+```
+    if cap is None:
+        cap = quota_policy.decide(_blank("posture-probe"), when,
+                                  quota_policy.load_policy(policy_env())[0]).cap
+```
+
+## `tools/probe/audit_session.py`
+
+### 原 :21-24（檔頭〈設計約束〉第一條；`NON_SHELL_TOOLS` 改指 params.json）
+```
+  · 崩塌判準必須**逐支**：合計面的歷史總量會蓋掉「今天起每一支都抽不到」的格式變更；只用過
+    已知非 shell 工具（`NON_SHELL_TOOLS`）或根本沒用過工具的 session（純問答／活體探針）不入崩塌
+    分母，否則 `--parity` 在真實窗口恆 rc=1——代價：這類 session 的格式變更不再被逐支抓到，只剩
+    合計面 `shell_calls == 0` 兜底；叫過 shell 或認不得的工具、卻一條指令都抽不到者仍是崩塌訊號。
+```
+
+### 原 :118-119（`_rc_after_pipe_real` 上方註解；其內容已在 `_POWERSHELL_PATTERNS` 註解與函式 docstring）
+```
+# 🔴 DEF-200-481：兩欄同吃攔截端判準；pwsh 實測答案表與紅綠自證語料住
+# `tools/lib/rc_after_pipe_real.py`，下面兩支是薄殼，只把已載入的 hook 模組餵進去。
+```
+
+### 原 :108-112（`_rc_after_pipe` docstring；壓縮為 2 行，保留「借攔截端函式／兩向失準／沿革指標」）
+```
+    """規則①的量測端＝**攔截端那支函式本身**（不再自寫第二份判準）。
+
+    自寫的扁平正則與攔截端在兩個相反方向同時失準（多行指令低報、把正解形態高報），借過來之後
+    這個欄位的語意才真的等於「攔截器會擋的那件事」。沿革見證據檔〈九〉。
+    """
+```
+
+### 原 :127-129（`rc_selftest()` 整支刪除，改由 `run_selftest()` 自己逐列判）
+```
+def rc_selftest() -> list[str]:
+    """`--selftest`：跑那張實測語料表，回傳失敗訊息清單（空＝全綠）。"""
+    return _rc_real.selftest(_lint_ps_hook)
+```
+
+### 原 :180-187（`NON_SHELL_TOOLS` 註解＋常數；常數搬進 params.json 的 `parity_non_shell_tools`，註解併入 `_shell_capable` docstring）
+```
+#: 不會帶 shell command 的內建工具名：整支只用過這些（或 `mcp__*`）的 session 沒有「該抽到
+#: command」的前提，不是崩塌訊號（例：只 Write 的活體探針、純讀檔）。名字不在這張表、也不在
+#: `COMMAND_PATTERNS` ＝認不得的工具（改名／新增），仍可能是格式變更 ⇒ 照舊算崩塌候選。表是
+#: 啟發式：新工具名出現前只會多報、不會漏報（報了就去看那一支）。
+NON_SHELL_TOOLS = frozenset({
+    "Read", "Write", "Edit", "MultiEdit", "NotebookEdit", "Glob", "Grep", "Agent", "Task",
+    "TodoWrite", "Skill", "ToolSearch", "WebFetch", "WebSearch", "Workflow", "SendMessage",
+    "AskUserQuestion"})
+```
+
+### 原 :518-526（`scan_transcript` 回傳 dict 內「collapsed」上方註解；壓縮為 6 行，刪「代價」句——與檔頭〈設計約束〉第一條重複）
+```
+        # 逐支崩塌訊號（見檔頭〈設計約束〉）：**有記錄**卻一支帶 command 的 shell 呼叫都抽不到。前提
+        # 原用 `records`（連 tool_use 都認不出來正是最徹底的格式變更），現再要求本支叫過「可能帶
+        # shell command、或認不得」的工具（`_shell_capable`）：零 tool_use（純問答）與只用過
+        # Write／Read 等已知非 shell 工具（活體探針）的 session 不是崩塌，它們曾讓 `--parity` 在
+        # 真實窗口恆 rc=1。代價：認不得 tool_use 時，工具名恰落在 `NON_SHELL_TOOLS` 者只剩合計面
+        # `shell_calls == 0` 兜底。🔴 逐筆切片下前提改為「**shell 工具真的被叫過**、卻一條指令都
+        # 抽不到」：子窗裡沒跑 shell 是正常狀態，沿用 `records>0` 會讓警報在分期用法下常響（常響
+        # 的警報等於沒有）。誠實劃界：切片下連工具名都認不出來（`PowerShell` 被改名）時本判準
+        # 看不到，由合計面兜底。
+```
+
+### 原 :943-946（`--selftest` argparse help）
+```
+                        help="對已知正解／已知違規各數組跑 `rc-after-pipe-real`"
+                             "（答案來自 pwsh 真機實測），並同時印出舊判準對同一批"
+                             "語料的判定當作紅的那一半。有任何一組不符即 rc=1")
+```
+
+### 原 :956-980（`main()` 內 `--selftest` 區塊；整段由 `run_selftest()` 取代。「舊判準」欄＝攔截端同一支函式，兩欄恆相等 ⇒ `old_wrong==0 ⇒ rc=1` 是結構必然）
+```
+    if args.selftest:
+        failures, probe_bad = rc_selftest(), probe_selftest()  # ②′ 自證另計，不灌進「新判準判錯」
+        print("### `rc-after-pipe-real` 紅綠自證"
+              f"（{len(_rc_real._RC_SELFTEST)} 組，答案＝pwsh 7.6.4 真機實測值）")
+        print("  🔴 綠的那一半：修正後的判準對每一組都要判對。")
+        print("  🔴 紅的那一半：同一批語料餵給**舊判準**（＝攔截端那支借來的函式），"
+              "看它錯在哪——\n     判準沒有鑑別力時，兩欄會一模一樣。")
+        old_wrong = 0
+        for command, expected, measured, why in _rc_real._RC_SELFTEST:
+            new_verdict = _rc_after_pipe_real(command)
+            old_verdict = _rc_after_pipe(command)
+            old_wrong += int(old_verdict is not expected)
+            print(f"  {'✅' if new_verdict is expected else '❌'} "
+                  f"實測{measured:9s} 應判={str(expected):5s} "
+                  f"新={str(new_verdict):5s} 舊={str(old_verdict):5s}  {why}")
+        print(f"\n  新判準判錯 {len(failures)} / {len(_rc_real._RC_SELFTEST)}；"
+              f"舊判準判錯 {old_wrong} / {len(_rc_real._RC_SELFTEST)}")
+        print(f"  ②′ 量測自證（阻斷判準＋宣稱句型）判錯 {len(probe_bad)} 組")
+        if old_wrong == 0:
+            print("  ⚠️ 舊判準一組都沒判錯 ⇒ 這批語料對「修了什麼」沒有鑑別力，"
+                  "自證是空的；請補進真的會分開兩者的形態。", file=sys.stderr)
+        for line in failures + probe_bad:
+            print(f"  ❌ {line}", file=sys.stderr)
+        # 舊判準零錯誤也算紅：那表示這份語料證明不了本輪修了任何東西。
+        return 1 if (failures or probe_bad or old_wrong == 0) else 0
+```
+
+### 非散文（程式碼行）被取代者，僅供對帳
+- 原 :798-812 `feed_diffs`（簽章 `(pop, limit) -> list[int]`、無靜止閘、`fresh = datetime.fromisoformat(doc["ts"]) >= p["usage_ts"]`、`return out[:limit]`）。
+- 原 :866-877 Q1′b 的 `show("Q1′b …", len(pop), 1, …)`（最小母體寫死 1）、Q1′c 區域變數 `hit5`（改 `hit_n`）。
+``````
+
+### §136 本輪新增測試的 docstring 壓縮前原文（逐字；Trim 棒壓成較短版本，保留 DEF 編號與 WHY）
+
+原址：本輪新增測試的 docstring（Developer 當輪撰寫）。
+
+`tools/tests/test_claim_provenance_r86.py` 搬遷前 L1542-L1546：
+
+```text
+DEF-200-482：Q3′ 量的是「兩個來源是否一致」，不是「逐字稿落盤落後 feed 一則」——在途
+視窗的差值是一則訊息的增量（QA 實測 18767＝相鄰兩則的 used 增量），100 token 的容忍對它
+無意義 ⇒ 只納入靜止配對。控制組＝閘門關掉（0 秒）時同一組輸入對在途窗 FAIL，證明是閘門
+讓它不假紅。另釘「不舊於」的解析度：feed 的 ts 只到秒、逐字稿到毫秒，同一秒的配對不得
+被當成過期而靜默消失。
 ```

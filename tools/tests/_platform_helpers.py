@@ -285,15 +285,11 @@ def ps_utf8_command(snippet: str) -> str:
 
 # `#` 只在引號外、且位於行首或這些字元之後才算註解起點（避免誤剝 `$#`、`c#`）。
 #
-# R57 round 3：原集合漏掉右括號類與引號類收尾字元，使「功能碼後緊接 `#`」的五種
-# 真實 PowerShell 註解形態不被剝除（ground truth＝pwsh 7 parser 的 Comment token；
-# 對照組 `c#`／`$#` 等現行設計要保護的情形不受影響，64 案差分實測 FAIL_CLOSED=0）。
-# round 4 訂正「為什麼安全」的理由：保護來源是 command/argument（bareword）解析
-# 模式（bareword 本身可含 `#`），不是「前一字元是字母／`$`」——同一個 `$x#c` 在
-# expression 模式下 `#` 就是註解，原理由與 PowerShell 真實規則不等價。bug-injection
-# 與全語料實掃（137 支 `.ps1`、2,847 個真 Comment token，現況洩漏數 0）等逐項量測
-# 全文搬至 `docs/06_quality/CrossPlatform_R104_Scan_Findings.md`〈_PS_COMMENT_LEAD
-# 沿革〉節；已知不涵蓋的第 5 條見 `strip_ps_comments` docstring。
+# 收尾字元集合含右括號類與引號類（ground truth＝pwsh 7 parser 的 Comment token；`c#`／`$#` 等要保
+# 護的情形不受影響）；保護來源是 command/argument（bareword）解析模式（bareword 本身可含 `#`），不
+# 是「前一字元是字母／`$`」。全文量測見 `docs/06_quality/CrossPlatform_R104_Scan_Findings.md`
+# 〈_PS_COMMENT_LEAD 沿革〉；已知不涵蓋的第 5 條見 `strip_ps_comments` docstring。R57 round 3／4
+# 的差分實測沿革搬至 Guard_Line_History_2.md〈R194 淨減法搬遷〉§98。  round-label-ok
 _PS_COMMENT_LEAD = " \t;|({,)}]\"'"
 # here-string 起始 token（`@"`／`@'`）只在行首或這些「分隔語境」之後才成立。
 # R57 A-R57R2-02：舊版只用 `re.search(r'@(["\'])\s*$', line)` 比對整行行尾，

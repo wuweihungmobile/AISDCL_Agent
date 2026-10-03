@@ -47,7 +47,7 @@ SDD FSM 行八格＋SA-01 查證指令安全形態三格＋SA-02 人看得到的
 `RegisterSchtasksTimeIsObservedNotGuessedTest`（`schtasks_trigger`）與
 `CheckPrintsTheSddFsmLineTest`（`sdd_fsm_line`）。
 
-唯讀退路與單一導出：`verify_hint()` 尾端附「Bash／寫檔被拒時改用 Read 讀 feed 檔與額度快取」
+唯讀退路與單一導出：`verify_hint()` 尾端附「現查指令跑不起來時改用 Read 讀 feed 檔與額度快取」
 （路徑由 `_read_targets()` 從既有 SSOT 解出；其後一句說明權限詢問是 harness 權限層、不是 hook
 阻斷——Read 目標在 cwd 外、planner 現查也常要核准）；`rc2_clarify()` 的收斂型工具清單句只呼叫
 `quota_messages.convergent_tools_clause()`；`AUTOSDD_UNATTENDED` 有設時簡報追加治理檔唯讀一句。
@@ -90,12 +90,16 @@ _CHECK_PACE = ("context 現查 `python tools/session_resume_planner.py --check`�
 #: SA-01：兩條的輸出都很短，新視窗首個工具呼叫卻常寫 `… | head -40; echo "rc=$?"`，被鐵律六守衛
 #: （判準④，判斷正確）擋下——缺的是行動點，所以簡報一併教安全形態。Windows 版對應 `cd` 開場與管線
 #: 後讀 `$LASTEXITCODE`（`lint_powershell_command.py` 擋同形態），見 `verify_hint()`。
+#: DEF-200-476：repo 權限白名單（.claude/settings.json permissions.allow）認的是下面這兩條的字面；
+#: 模型改寫成絕對路徑或 `& '…'` 形式就會再跳權限詢問。兩個平台版共用同一句。
+_LITERAL_NOTE = ("這兩條照字面執行（相對路徑、cwd 已是 repo 根；不要改寫成絕對路徑或 & '…' 形式"
+                 "——權限白名單認的是這個字面）；")
 _VERIFY_HINT = ("查證指令（輸出很短，直接跑；要 rc 先導檔再讀，"
-                "別在 `| head`／`| tail` 之後讀 rc）：" + _CHECK_PACE)
+                "別在 `| head`／`| tail` 之後讀 rc）：" + _LITERAL_NOTE + _CHECK_PACE)
 _VERIFY_HINT_WINDOWS = (
-    "查證指令（輸出很短，直接跑；不要用 `cd` 開場（用絕對路徑或 `Push-Location …; …; "
+    "查證指令（輸出很短，直接跑；不要用 `cd` 開場（要換目錄就用 `Push-Location …; …; "
     "Pop-Location` 同呼叫成對）；要 rc 先存變數或導檔，別在管線之後讀 `$LASTEXITCODE`）："
-    + _CHECK_PACE)
+    + _LITERAL_NOTE + _CHECK_PACE)
 
 #: halt 帶反覆出現的 rc=2 紅字容易被誤讀成「全部工具被擋」（refute_q1q2.md §0 實測）；
 #: 這句話固定跟簡報一起送出，讓模型從第一時間就有正確的心智模型。三段組成：扇出暫停半句
@@ -109,10 +113,10 @@ _RC2_TAIL = ("（寫壞的那一次 Bash 呼叫會被攔下、不執行，stderr
 #: DEF-200-412：Windows 上 Bash 工具由 `block_bash_on_windows.py`（鐵律一）整支 exit 2。新視窗
 #: 的模型若先被「Bash 沒事」安撫、下一步撞牆後又把「Bash 被擋」誤讀成「寫檔被擋」（掌舵者 Q1
 #: 原話：「才開新視窗，就說他被擋不能寫檔案用工具了」）。所以 Windows 尾句改列 PowerShell，
-#: 並點破那個誤讀。
+#: 並明列照常可用的工具；句中不引述症狀字面（引述即預示，DEF-200-476）。
 _RC2_TAIL_WINDOWS = (
     "（Windows：Bash 工具另由鐵律一 hook 停用，跑指令用 PowerShell 工具、"
-    "改檔用 Write／Edit，不要先試 Bash——那個阻斷不是「不能寫檔」；"
+    "改檔用 Write／Edit，不要先試 Bash（PowerShell／Write／Edit 照常可用）；"
     "壞寫法的 PowerShell 指令會被 lint 擋下，訊息附出口，照改重跑即可）"
 )
 
@@ -141,15 +145,16 @@ def rc2_clarify(windows: bool | None = None) -> str:
     return _RC2_PAUSE + clause + (_RC2_TAIL_WINDOWS if win else _RC2_TAIL)
 
 
-#: 唯讀退路：Bash 與寫檔一起被拒時（auto mode 分類器暫時不可用的訊息為證），真實數據仍能用 Read
-#: 唯讀取得——planner 現查只有 Bash 一條載具，沒有這句模型就同時「被擋」又「查不了」。目標路徑由
+#: 唯讀退路：兩條現查指令因權限詢問或分類器暫時不可用而跑不起來時，真實數據仍能用 Read 唯讀取得
+#: ——沒有這句模型就同時「被擋」又「查不了」；條件句不預寫「寫檔被拒」劇本（DEF-200-476）。目標路徑由
 #: `_read_targets()` 從既有 SSOT 解出；解不出時退回不帶路徑的措辭（`verify_hint()` 的缺省）。
 _READ_FALLBACK = (
-    "若 Bash／寫檔被拒（含 auto mode 分類器暫時不可用的訊息），真實數據仍可用 **Read** 工具"
+    "若上面兩條現查指令因權限詢問或分類器暫時不可用而跑不起來，真實數據仍可用 **Read** 工具"
     "唯讀取得：context 水位讀 {feed}（statusLine 寫的 JSON；`context_window.used_percentage`"
     "／`current_usage`／`context_window_size`），額度讀 {quota}（`axes[]` 的 `kind`／`pct`／"
-    "`severity`）；不要憑簡報猜，也不要宣稱被擋。若跳出權限詢問，那是 harness 權限層、"
-    "不是 hook 阻斷，核准即可。")
+    "`severity`）；不要憑簡報猜，也不要宣稱被擋。這兩條指令與兩個 Read 路徑已列在 repo "
+    "權限白名單（.claude/settings.json permissions.allow），照字面執行不應再跳詢問；若跳出權限"
+    "詢問，那是 harness 權限層、不是 hook 阻斷，核准即可。")
 
 
 def verify_hint(windows: bool | None = None, *, feed: str | None = None,

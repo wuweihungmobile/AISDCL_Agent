@@ -4,7 +4,7 @@
 槽位：輪號 R{{ROUND}}、起算 HEAD `{{HEAD}}`、日期 {{DATE}}、上輪 {{PREV_ROUND}}。
 
 ## A1 Q1 通道普查
-列一張表：對「在本 repo 新開一個互動 session」的前 5 個工具呼叫，**每一條**可能 (i) 真的拒絕
+列一張表：對「在本 repo 新開一個互動 session」的前 N 個工具呼叫（N＝`q1c_first_calls`），**每一條**可能 (i) 真的拒絕
 Write／Edit／Bash，或 (ii) 送進模型 context 一段會被讀成「我被擋了、不能寫檔／用工具」的文字 的機制。涵蓋：
 - `.claude/settings.json` 登記的每一條 hook：逐條讀對應 hook 檔，找出「exit 2／deny 的觸發條件」與
   「送進 context 的文字首行」；
@@ -13,7 +13,7 @@ Write／Edit／Bash，或 (ii) 送進模型 context 一段會被讀成「我被�
 - 額度面：額度 halt／unmeasured 訊息在什麼水位帶會出現在 SessionStart／PostToolUse，會不會讓模型推論
   「連收斂型工具都不能用」。
 每列欄位：機制／觸發條件／平台（Mac／Win／皆）／exit code 或 deny 形態／送進 context 的首行逐字／
-新視窗前 5 次呼叫會不會撞到／上輪修法有沒有碰到它／殘餘風險判定。
+新視窗前 N 次呼叫會不會撞到／上輪修法有沒有碰到它／殘餘風險判定。
 結論：上輪修完後，Q1 症狀**還開著的通道有哪幾條**，各自是「我們的缺陷」還是「harness 行為」。
 
 ## A2 上輪修法在 HEAD 的結構完整性

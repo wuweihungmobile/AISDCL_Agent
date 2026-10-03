@@ -1,0 +1,121 @@
+# CrossPlatform R194 — 掌舵者五問系列第十六次四方覆核（Windows 11 第二輪；DEF-200-476 permissions.allow 落地、lint 規則①精準化 DEF-200-481、②′ 協定批次修訂 DEF-200-482；鏡 C 零信任稽核 R193 文字）證據檔
+
+> 日期 2026-10-03；平台 Windows 11 Pro 10.0.26300（主機 Koala-MSI）；Claude Code 2.1.288；pwsh 7.6.6；主控 Fable 5.1（max effort），Architect／SA／SD／QA 四方、複審鏡 C、Developer 各棒皆 Sonnet（掌舵者指令：Subagent 用 Sonnet 5.5 省 Fable token）。
+> 起點 HEAD `7efc4c06`（R193〈七〉回填 commit，2026-10-03T16:42:40+08:00）＝origin/main、工作樹乾淨；R193 主修法 commit `a5d2c9fc`（2026-10-03T16:25:38+08:00）＝②′ 分期切點。掌舵者原話：三問逐字（新視窗說被擋不能寫檔／不用真實 /context 或 API 查數據／是否已收斂）＋「派出 Architect / SA / SD / QA 四方專家獨立審查，請確認以上都已經修好」＋兩項裁決（DEF-200-476 授權加 permissions.allow；lint 62 筆歷史阻斷「以最佳理想化、不考量成本角度進行決策」）。
+> 本檔屬帳本級治理文件（登記於 `tools/lib/governance_docs.py`）。
+
+## 〇、一句話結論
+三問第十六次驗（Windows 第二輪）：Q1 在我方 hook 層仍看不到「新視窗被擋不能寫檔」（本機 41 支終端 session 全為 auto mode、逐字稿零筆分類器拒絕字樣、零筆「被擋不能寫檔」宣稱、首呼叫 Bash 0／38、前 10 呼叫被 hook 擋 2／10 ≤ 0.25），但四方獨立量到一條**還開著的我方通道**＝lint 規則①過擋（歷史 62 筆阻斷 58 筆良性；9,926～9,971 筆 distinct 指令重放現行擋 176～177、真風險 7）⇒ 依掌舵者「理想化、不計成本」裁決立 **DEF-200-481（P2，計入 `new_p_le2`）** 並同輪根治（三條件真機判準、hook 與量測端一份；重放新擋 7、漏擋 0）；harness 權限層那一條由 **DEF-200-476 permissions.allow 落地**堵住（headless dontAsk 探針 Read／相對字面／絕對腳本路徑 OK；SA 第二波 planner 執行 6/6、宣稱被擋 0/3；allow 命中後 repo hook 照跑）；Q2 本窗第 1 個工具呼叫即現查（SOP 第 0 步生效）、簡報加「照字面執行」句、477 讓簡報數字有錨點；Q3 **未收斂**：②′ 量尺四處缺口（Q3′ 量到落盤延遲而非一致性等）趁 window_len=1 批次修正（**DEF-200-482，P2 列 `excluded_p_le2`**）⇒ `PROTOCOL-CHANGED`、窗口自 R194 重數 1/6、最早可評估 **R199**（評估式另要求末輪 `new_p_le2`=0，本輪為 1 故 R194 自身不可能是末輪）。棘輪：款(11) 兌現主軌 0 ≤ 0、(194, 520) 兌現並重新武裝 196／519。四方 Architect／QA CONDITIONAL（各 1 新 P2）、SD／SA APPROVE；鏡 C 對 R193 文字 CONDITIONAL（0 P1／1 P2／11 P3）→ 12 條訂正已套用。
+
+## 一、三問第十六次判定（Windows 11）
+
+| 問 | 判定 | 一句話（主控親測或他包實跑） | 本輪動作 |
+|---|---|---|---|
+| Q1 新視窗就說被擋不能寫檔案用工具 | **hook 層看不到症狀；我方唯一還開著的通道（lint 規則①過擋）本輪根治；harness 權限層由 476 堵 planner 兩條＋feed 兩個 Read；分類器不可用路徑無本機樣本（headless 走不到、互動母體零筆）** | 本機 41 支終端 session 全為 permissionMode=auto、逐字稿零筆分類器拒絕字樣、零筆「被擋不能寫檔」宣稱、首個工具呼叫是 Bash 的 0／38 `[他包回報 QA]`；hook 層前 5 呼叫被擋 0／20、Write／Edit 被 hook 擋 0 `[他包回報 Architect／QA]`；還開著的我方通道只剩 lint 規則①過擋（新立 DEF-200-481，本輪修）；harness 權限層由 DEF-200-476 permissions.allow 堵 planner 兩條＋feed 兩個 Read | 476 落地＋鎖＋headless 實測；481 精準化 |
+| Q2 不用真實 /context 或 API 查數據 | **未見症狀（本窗 #1 現查；修法後母體 1、Q2′ NOT-EVALUABLE(1/5)）**；SA 第二波 PA 3/3 百分比皆有工具輸出錨點 | 本窗第 1 個工具呼叫即 `--check`、第 2 個即 `--pace`（主控親測；SOP 第 0 步生效）；修法後母體 1 支 Q2′ 逾期 0／1 NOT-EVALUABLE(1/5) | 簡報加「照字面執行」句、477 讓簡報數字有錨點 |
+| Q3 是否已收斂 | **否** | 協定本輪批次修訂（DEF-200-482）⇒ window_reset，窗口自 R194 重數 1/6；最早可評估 R199；本輪新 P≤2＝1（481） | 詳〈八〉 |
+
+## 二、主控親測事實（本場 tool_result 逐字）
+- **開場現查（第 0 步，第 1／2 個工具呼叫）**：`--check` rc=0 `used 86,050`、`window 1,000,000〔harness 回報…〕`、`水位 8.6% → 低於 84%`、`harness used=86,050 逐字稿 used=86,050 差=0`；`--pace` rc=0 `現在可派 4 個 agent（硬上限 cap=不設限）｜band=free｜最緊的一條＝weekly_scoped 12%`、`weekly_all 15%`、`session 1%`、`量測於=2026-10-03T20:04:31+08:00`。派工前再查：20:17 `session 9%、weekly_all 16%、recommended=4、扇出視窗全空`；20:52 `session 37%、weekly_all 20%、weekly_scoped 16%、band=free`。
+- **②′ 協定狀態（修法前）**：`--protocol-status` rc=0 `protocol_sha256=547759c7…（manifest 11 檔）`、`輪帳本 2 列；window_len=1；評估: NOT-EVALUABLE(1/6)`、`完整性閘 ✓`、`Q4′ session_gate_acceptance_Koala-MSI.json（win32） PASS` 九格全 ✓。
+- **②′ 量測（修法前碼，`--five-question --record-since 2026-10-03T16:25:38+08:00`）**：`母體 1 支`、`Q1′a 誤擋 PASS 0／hook 阻斷 0`、`Q1′b PASS 0／0`、`Q1′c NOT-EVALUABLE(1/20) 0／1；首呼叫被擋 0／1`、`Q2′ NOT-EVALUABLE(1/5) 逾期或從未 0／1；有簡報 1`、**`Q3′ feed 差 FAIL 1 對；max|差|=18767`**、`非 hook 阻斷：無`、`hook 阻斷逐筆：無`。同窗 20:1x 再跑 `--check`：`used 216,008`、`水位 21.6%`、`差=0`（Q3′ 的 18767 是在途 API 呼叫／逐字稿落盤落後 feed 一則的時序，見〈四〉DEF-200-482）。
+- **棘輪起算值**：`--print-guard-lines` ⇒ `淨額 113731→113731 (+0)`、`逐檔漂移 0 支`。
+- **守衛假紅普查基線**：`shell_command_corpus.py --summary --corpus transcripts` rc=0 `母體 10918 筆／去重後 10104 種唯一字面`、`掃描逐字稿檔 573 個`、`判準 git: 命中 10 種唯一／10 次`、`判準 waitform: 命中 0 種唯一／0 次`、`run_in_background=true: 430 種唯一／443 次，waitform 命中 0`。
+- **環境事實**：`claude --version` ⇒ `2.1.288 (Claude Code)`；`pwsh` ⇒ `7.6.6`；`git check-ignore -v .claude/settings.local.json` ⇒ `.gitignore:41:**/.claude/settings.local.json`；使用者層 `C:\Users\wuwei\.claude\settings.json` 有 `autoMode`（`soft_deny`＝`$defaults`＋2 條 git 毀滅形態）、`model: fable`、statusLine 已安裝、**無** `permissions`／`defaultMode`；repo `.claude/settings.json` 修法前**無** `permissions` 鍵。
+- **②′ 協定與量測（Dev-D 修法＋主控併修 charter 三處「前 5」之後，主控親跑）**：`--protocol-status` rc=0 `protocol_sha256=c62fa4355d142d4900114109f657ffaa791a76d21a97ae993af7a0012da4b155（manifest 11 檔）`、追加 R194 列前印 `PROTOCOL-CHANGED（需新列帶 window_reset:true＋理由）`、追加後 `輪帳本 3 列；window_len=1；評估: NOT-EVALUABLE(1/6)`、`完整性閘 ✓`、Q4′ Windows 九格全 ✓；`--five-question --record-since 2026-10-03T16:25:38+08:00`：`母體 1 支`、`母體 permissionMode：{'auto': 1}`、`Q1′a 誤擋 FAIL 1／hook 阻斷 1`（本窗唯一 hook 阻斷＝舊 lint 規則①擋我 `| Select-Object -Last 4` 後讀 rc，新判準重放判 MISBLOCK＝481 症狀本身、發生於新 hook 安裝前）、`Q1′b NOT-EVALUABLE(1/5) 0／0`、`Q1′c 前10呼叫被擋 NOT-EVALUABLE(1/10) 0／1；首呼叫被擋 0／1`、`Q2′ NOT-EVALUABLE(1/5) 逾期或從未 0／1；有簡報 1`、`Q3′ feed 差 NOT-EVALUABLE(0/3) 0 對；NOT-QUIESCENT 1`、`非 hook 阻斷：{'automode-blocked': 1}`（＝主控被分類器擋的那一次，量測器自 Dev-D 起認得 auto mode 拒絕）；全母體 `38 支`、`permissionMode：{'bypassPermissions': 6, 'auto': 32}`、`Q1′a FAIL 76／hook 阻斷 110`（59 筆歷史 lint 阻斷在新判準下現形為過擋＋17 筆 R185 已修 bdg 歷史）、`Q1′c 前10呼叫被擋 PASS 2／10（≤0.25）；首呼叫被擋 0／10`、`Q2′ FAIL 9／37`（皆 R193 已知歷史）、`Q3′ PASS 9 對；max|差|=0；NOT-QUIESCENT 1`；`--selftest` rc=0 `判錯 0 / 18；expect=True 8 列、expect=False 10 列`。
+- **額度水位**：派 Trim 棒前 `--pace` ⇒ `band=converge`（five_hour／session 75%，cap=2、recommended=1）——本輪最後一個 agent 單派、未超 cap；weekly_all 27%、weekly_scoped 21%。
+- **主控本窗被守衛／分類器擋下**：見上（auto mode `[Self-Modification]` 1 次；舊 lint 規則① 1 次）。
+
+## 三、四方、鏡與各棒摘要 `[他包回報]`（token／呼叫數取自 harness 完成通知）
+- **Architect（CONDITIONAL；新 P≤2＝1＝ARCH-194-01；約 33.6 萬 token／51 次）**：H1 設定事實成立、因果不可判（Windows 真實母體「新視窗 Write／Edit 被任何機制拒」0 樣本；非 hook 阻斷只有 permission-rule 7）；H2 機制成立、作為主因不可判（Bash 阻斷母體 8，seq≤12 者 2）；H3 不成立為「兩套對齊規則」、成立為「兩個取樣時刻」（audit 與 planner 相隔 2 秒皆印 12,636；3 分鐘後兩套同值 358,138；全母體 Q3′ 10 對只有當下視窗非 0；逐字稿落盤落後 feed 3～19 秒）；A1 通道表 14 條、Q1 還開著 5 條（lint 過擋＝我方 P2；Bash×auto mode 提示碰撞；harness 權限詢問／分類器；router FSM deny；措辭 priming）；A6 lint 理想解＝規則①改吃 pwsh 真機判準、不計成本下「維持偏向擋」無正當理由；A7 加 permissions.allow 不撞既有鎖（hook_wiring 只讀 hooks；`UnattendedPermissionPostureTest` 只讀 unattended 檔）、writer≠reader 洞＝簡報教裸 python 而 block_bash 指引教 venv 絕對路徑；A8 Trim 候選 甲級 157＋乙級 157＋丙級 311 行。
+- **QA（CONDITIONAL；新 P≤2＝1＝QA-194-01；約 41.3 萬 token／48 次）**：13 支單模組全 OK rc=0（cbg 793／quota_policy 331／bdg 238／liveness 188／adr 192／sentinel_e2e 8…）；`--selftest` rc=0（新判準 0／10 錯）、`--parity` rc=0（0／3080 分歧）；全母體 38 支：Q1′a FAIL 17／109（全為 R185 已修歷史）、Q1′c PASS 0／20、Q2′ FAIL 9／37、Q3′ PASS；修法後 1 支：Q1′c／Q2′／Q3′ NOT-EVALUABLE；**cli 41/41 permissionMode=auto、vscode 6/6 bypassPermissions、sdk-cli 35/35 default**；逐字稿零筆 auto-mode／classifier／unavailable 字樣；H2 不支持（首呼叫 Bash 0／38）；全 slug 7 個目錄只有本 repo 有可比對 session；QA-194-01 Q3′ 18767＝相鄰兩則 message 的 used 增量（168,823−150,056）＝feed 先逐字稿一則；QA-194-04 lint 62 筆＝PowerShell 62/62、unsafe 4／safe 58（93.5%），safe 分桶 `Select-Object -Last` 22／`ForEach-Object` 14／`Out-String` 5／`Select-String` 4／`Where-Object` 3／`Out-File` 3／`-First` 搭非原生上游 3／其他 4，pwsh 7.6.6 與 PS 5.1 真機皆 after=3（安全）；QA-194-06（476 基線）headless 探針 planner 被拒 14／16、feed／quota Read 被拒 12／12，互動 38 支 planner 非 hook 阻斷 0／98；QA-194-03 AutoClaude pytest 在 PG 在場須 `--dist loadgroup`（X1 守衛 rc=4）。
+- **SD（APPROVE；新 P≤2＝0；約 40.6 萬 token／49 次）**：D6 真機（pwsh 7.6.6／PS 5.1.26100.9444）：裸 git／python／findstr／cmd 兩引擎皆重設 rc，函式／別名遮蔽皆不重設，`curl` 兩引擎分歧（pwsh7=0／ps5.1=7）；既有 `_RC_SELFTEST` 十列全重現；語料重放（580 支逐字稿、9,926 筆 distinct PowerShell 指令）：現行規則①擋 176、pwsh 真風險 7（4.0%）、漏擋 0；成因＝cmdlet 消費者非截斷管線 158／上游非原生 9／真風險 7／後有原生重設 2；詞彙表單做只移除 32；主槓桿＝管線元素收窄；理想版主軌約 −62、只做詞彙表 +34；D5 規則清單 A1～A4／B1～B4／D1～D2＋鎖四條；D7 `_session_start_anchors` 設計；D8 479 分兩段（第一段可做、第二段需人工決策）；SD-194-03 `_RC_HINT`「加 2>&1 又會翻轉」兩引擎皆未重現。
+- **SA（APPROVE；新 P≤2＝0；約 37.8 萬 token／47 次）**：9 支 Windows headless 探針 rc 全 0、19 次呼叫 0 次成功執行：權限層 user-rejected 18（PowerShell planner 6／Read feed・quota 6／Write 6）＋hook 正確阻斷 1（pc_3 Bash cat）；`--add-dir "$SP"` 對 Write 與 cwd 外 Read 無放行效果；**W-3：模型實發 planner 指令 6/6 是 `python D:\…\tools\session_resume_planner.py --check|--pace`（絕對腳本路徑，不是簡報的相對字面）**；W-2：`classic.PreToolUse settled` 是 harness 內建 plugin 事件、不是 repo hook，權限層先拒時 repo hook 沒跑（R193 「派發 22/22」不能證明 repo hook 有跑）；簡報兩句新修法 9/9 在場、9/9 回覆歸層正確、Stop hook 多跑回合 0/9；`sa\wave2.ps1` 備妥（落地後 PA×3）。
+- **鏡 C（CONDITIONAL；0 P1／1 P2／11 P3；約 33.0 萬 token／50 次）**：對 R193 證據檔與帳本 14 列：單模組 9 支全 rc=0、`git show --stat a5d2c9fc`＝40 檔、雲端 8 支 run 皆 success、帳本 14 列 ≤700 bytes、三道帳本閘門 rc=0；訂正 12 條（P2＝〈〇〉Q2 句過度開脫），去向見〈九〉。
+- **Developer-A（476；partial→主控接手落地；約 33.3 萬 token／46 次）**：核心 Edit 被 auto mode 分類器 `[Self-Modification]` 拒絕，未重試、未繞過、未建 settings.local.json；備妥 14 條 allow＋`_comment`、44 行鎖測試、三個依賴補丁與探針載具，記憶體內驗證 33 項 ALL-OK；紅端探針 red_a／red_c 皆 DENIED；Δ3／Δ4 簡報措辭已落地、`test_session_brief` 92 OK、liveness 188 OK。
+- **Developer-C（477＋464 殘餘；done；約 40.5 萬 token／202 次，上限 70 大幅超出、如實自陳）**：`check_claim_provenance.py` +55／−13（`_session_start_anchors`／`_pace_anchors`、`_BRIEF_ANCHOR_LAG_S=0` 保守旋鈕、檔頭誠實劃界同步）；`test_claim_provenance_r86.py` +106（T1～T5＋較新 tool_result 勝舊簡報＋旋鈕＋真行程接線）、沙箱變異 7 種壞形態全殺；真行程：簡報 20 秒前 rc=0 靜默／4 小時前「已經過期…session=27%（量測於 240 分鐘前，TTL 135 秒）」／無簡報「找不到任何錨點」；真逐字稿 85 支 70 筆簡報成錨點（31 筆含軸讀數）；464 殘餘 5 站點改 `mock.patch.dict＋addCleanup(stop)`＋新鎖 `TraceIsolationTest.test_no_test_restores_the_environment_by_popping_a_key`（HEAD blob 恰命中 5、工作樹 0）；`test_claim_provenance_r86` 114 OK、`test_mac_endurance_r83` 124 OK、`test_context_budget_guard` 794 OK (skipped=1)；指出 E501 棘輪因他包一行寬 101 翻紅（主控已折行）。
+- **Developer-B（481；partial→主控接手安裝；約 50.0 萬 token／104 次，上限 70 超出、如實自陳）**：四檔在 scratchpad 鏡像完成並驗收（hook +99／−73、lib +57／−161、audit +4／−20、tests +82；主軌淨 −94）；就地安裝 `.claude/hooks/lint_powershell_command.py` 被 auto mode 分類器 `[Self-Modification]` 拒絕、未繞過；鏡像：7 個 class `Ran 45 OK`、`--parity` 分歧 0（3102 條）、ruff 四檔綠；語料重放（588 支逐字稿、distinct 9971）：舊 hook 擋 177、新 hook 擋 7、舊 lib 三條件擋 7、漏擋 0；兩引擎重測 18 列「不一致列數：0」（新增 8 列 after＝pwsh7／PS5.1：裸 python 0/0、裸 cmd 3/3、function 遮蔽 7/−1、Set-Alias 遮蔽 7/−1、curl 0/−1、findstr 消費者 1/1、cmdlet 上游 -First 7/7、Out-File 0/0）；對規格偏離 7 點（`_blocking_pipe` 不帶 shadowed、截斷參數含縮寫、左段續行併回、`_DEFINES_RE` 多一個 `$`…）皆附實測；指出 `--selftest` 結構矛盾（舊欄＝新欄 ⇒ rc=1 必然）→ 交 Dev-D。
+- **SA 第二波（476 落地後 PA×3；done；3 次呼叫）**：log 3/3 `Adding 10 allow rule(s) to destination 'projectSettings'`；planner `--check`／`--pace` 執行 6/6（第一波 0/6）、指令字面 6/6 為相對形（第一波 6/6 絕對路徑；簡報「照字面執行」句生效，原因未驗）、權限層拒絕 0/6、三支回覆百分比 3/3 有工具輸出錨點、宣稱被擋 0/3、Stop hook 額外回合 0/3；撤回第一波 W-2 (b)(c)(d)（通過的 hook 靜默不落行）；Read 兩條規則因 planner 成功而未被觸發（本波無證據，主控探針 a／g 另證）。
+- **Developer-D（482 協定批次＋479 第一段；done；約 63.6 萬 token／237 次，上限 70 大幅超出、如實自陳）**：params.json +5／−2（`parity_non_shell_tools`／`q1b_min_n`=5／`q3_quiescent_seconds`=60 新增、`q1c_first_calls` 5→10、`q1c_n` 20→10）、README +11／−5、discipline +6／−4（鏡 C F10）、charter_qa +3／−2；`audit_session.py` +79／−97（Q3′ 靜止閘 `feed_diffs(…, now, quiescent_s)` 回 `(diffs, 排除數)`＋`NOT-QUIESCENT j`、Q1′b need 讀 `q1b_min_n`、parity 表讀 params、`--selftest` 改 `run_selftest(table, judge)` 拿掉舊欄且 expect 兩類缺一 rc=1、母體加印 `permissionMode` 分布、順手修 Q3′ `fresh` 秒／毫秒比對讓同一則訊息不再被判過期）；`quota_gate.py` +14／−14（`_QUOTA_CTX` 記 active_model、`degraded_posture` 走致動器同一穩定器唯讀變體——偏離 SD 原案：遲滯檔依模型家族分檔，只讀家族空那份在 production 無效）；測試 claim +123、quota_policy +48；單模組 claim 120／quota_policy 333／liveness 191／cbg 794／doc_loc 281／platform_neutral 177／subprocess_encoding 39／negative_existence 12 皆 OK；`--selftest` rc=0 判錯 0／18；`--parity` 分歧 0／3115；紅綠自證：HEAD 舊版 `degraded_posture` 跑新鎖紅 5；誤發 Bash 1 次被鐵律一 hook 擋。指出 charter_arch／charter_sd 三處「前 5」未同步（主控已併修）、Q1′a 全母體在新判準重放下 FAIL 76／110＝59 筆歷史 lint 過擋現形（修法生效證據）。
+- **Developer-E（478）**：本輪**未派**——護欄行數棘輪只數 `tools/tests`，五棒回歸鎖已 +437、軌上限 309、款(11) 要求 R194 主軌 ≤0，478 的 writer==reader 矩陣擴充會再加測試行而 `tools/tests` 可搬史料只剩約 120 行 ⇒ 改派 R195（SD〈D4〉設計已就緒）。
+- **Trim 棒（done；約 59.0 萬 token／66 次）**：`tools/tests` 淨額 +438→+249（淨減 189 行）；52 個錨點 op、24 支檔只動註解／docstring（施工腳本逐 op 驗證：去 docstring 後 ast.dump 與原檔相同、warnings-as-errors 編譯、新行寬 ≤100）；史料檔 `CrossPlatform_Guard_Line_History_2.md` 檔尾新增 `## R194 淨減法搬遷` §82～§136（§82～§132 搬遷原文、§133～§135 Dev-B／C／D 從 hook／lib／probe 刪下的散文、§136 壓縮前原文），大小 227,403 bytes；逐檔 extras −33／doc_loc −34／dev_start −14／windowsapps_bash −11／platform_utils_dedup −10…；34 個相關模組單跑全 OK，唯一紅＝`test_ps_engine_ssot.TestNoInlineEngineSelection` 抓到 Dev-B 新測試行內 `shutil.which("pwsh")`（主控改走 `_ps_engine.available_engines()` SSOT 後 28 OK）；判斷不是純史料而留下的候選：extras 20-34（撐 `zsh-glob-ok` 樣本下限）、doc_loc 5983-5999（現行三段式誠實劃界）。
+
+## 四、新發現、嚴重度裁決與修法
+
+| 列 | 裁決（主控） | 來源 | 修法（本輪落地） |
+|---|---|---|---|
+| **DEF-200-481**（新立；＝ARCH-194-01／QA-194-04／SD-194-04） | **P2，計入 `new_p_le2`**（誤擋收斂型工具 PowerShell；一次呼叫內可恢復故非 P1；R193 以「設計取捨」不立列，掌舵者本輪裁決理想化 ⇒ 依 severity.md 字面登記） | Architect／QA／SD 三方獨立 | Dev-B：lint 規則①改為 pwsh／PS 5.1 真機三條件判準（上游原生 × 提前結束管線或原生消費者 × 之後讀 rc；裸原生指令重設、函式／別名遮蔽守衛；詞彙表 28 名）；`pipe-cmdlets` 兩份同刪；訊息 Δ1／Δ2；`_RC_SELFTEST` +8 列兩引擎重測（收尾回填數字） |
+| **DEF-200-482**（新立；＝ARCH-194-02／QA-194-01／ARCH-194-03／SD〈下次重置再議〉／鏡 C F10） | **P2（量錯的尺被判準消費升一級），列 `excluded_p_le2` 並附理由**（審計協定與量測器自身缺口，非 session 守門本體；比照 DEF-200-474） | Architect／QA／SD／鏡 C | Dev-D：params.json 加 `q3_quiescent_seconds`（Q3′ 排除在途視窗）、`q1b_min_n`（Q1′b 不再對 0/0 印 PASS）、`q1c_first_calls` 5→10、`q1c_n` 20→10、`parity_non_shell_tools`；量測器對應改動；README／discipline（F10 句）同步 ⇒ `PROTOCOL-CHANGED`、輪帳本 R194 列 `window_reset:true`（收尾回填新 sha） |
+| **DEF-200-476**（結案） | fixed | 掌舵者裁決 | Dev-A：repo `.claude/settings.json` 加 `permissions.allow`（planner 兩條 × {Bash, PowerShell} × 三種字面＋兩個 `Read(~/…)`）＋`test_session_brief.py` 四條鎖＋簡報「照字面執行」句＋useMacWin 第 0 步具體字面＋headless `dontAsk` 紅綠實測（收尾回填） |
+| **DEF-200-477**（結案） | fixed | SD D7 | Dev-C：`_session_start_anchors()` 只餵第三判準、降級簡報不錨、DEF-200-430 排除面不動；T1～T5（收尾回填） |
+| **DEF-200-478**（結案） | fixed | Architect A4／SD D4／ARCH-194-04 | Dev-E：`platform_utils.projects_root／project_slug／find_session_transcript` 單一導出、`quota_gate.resolve_halt_transcript` 補跨 slug、`/projects` 手接點收斂、WriterReaderMatrix 擴充（收尾回填） |
+| **DEF-200-479** | （收尾回填：第一段 fixed／第二段 open 需掌舵者裁決 fail-safe vs fail-open） | SD D8 | Dev-D 第一段 |
+| DEF-200-464（殘餘補修） | 狀態不變（fixed），對策欄訂正 | 鏡 C F08 | Dev-C：5 處 `addCleanup(os.environ.pop, …)` 改快照還原＋圍籬鎖「pop 不得取代還原」（收尾回填） |
+| DEF-200-463／193／207 | 文字訂正 | 鏡 C F05／F06／F07 | 帳本 193 列「R193 先定義」→「R194 先定義」（位元組不變）；463 狀態欄補「模糊進 nightly 未做、由雙向鎖取代」；207 維持帳本 R117+ 開放式承接、R193〈八〉文字訂正 |
+
+**不立列（主控裁決）**：QA-194-02（量測缺口：非 hook 阻斷不入 Q1′、permissionMode 不記——併入 482 的量測器輸出改善，不另立）；QA-194-03（X1 守衛對 PG 在場的 pytest 要求 `--dist loadgroup`＝既有設計，任務書寫錯指令）；QA-194-05（簡報 1590 字含 blocked 類字 5 次＝措辭 priming，SD Δ3／Δ4 處理）；QA-194-07（Q4′ 證據產於修法前；收尾由主控重產）；QA-194-09（`Remove-Item` 權限規則＝harness 行為）；SD-194-01／02／03（措辭 delta 併入 Dev-A／B）；SD-194-05（`lint-imports` 含 `-` 被判 cmdlet——隨 481 詞彙表修掉）；SD-194-06（478 敘述訂正併入 Dev-E）；SD-194-07／08／09（資訊）；ARCH-194-05／06（資訊）；SA W-2（待 Dev-A 探針驗 repo hook 是否仍跑）／W-7（auto mode 分類器路徑 headless 走不到）。
+
+**harness 通道（非我方缺陷，不立列）**：互動終端預設 auto mode（本機 41/41）、分類器可用性、權限詢問、`Remove-Item` 靜態規則、auto mode 系統提示「盡量用 Bash」與鐵律一碰撞。
+
+## 五、誠實劃界與未驗
+- **Q1 的 harness 面仍無直接樣本**：掌舵者症狀「才開新視窗就說被擋」在本機 41 支終端逐字稿從未被記錄；auto mode 分類器不可用的拒絕字樣 0 筆（headless 探針不進 auto mode、互動母體零筆）⇒「已消失」與「仍存在」都沒有資料基礎；我方能證明的是 hook 層零誤擋（新判準下）與權限層兩類已放行。
+- **permissions.allow 在 auto mode 下是否先於分類器判、中段 `*` 形是否被 auto mode 丟棄**：官方文件說 allow 在分類器之前判定、窄規則保留，但本機只以 headless `dontAsk`（無分類器）實測；掌舵者真實視窗要自己看一次「新視窗首動作不跳詢問」才算驗。
+- **修法後真實母體仍 n=1（本窗）**；Q1′c／Q2′／Q3′ 皆 NOT-EVALUABLE；Q1′a 對本窗 FAIL 1/1 是舊 lint 在新 hook 安裝前擋我一次（481 症狀本身），不是新判準誤擋。
+- **Q4′ 兩平台**：Windows 本輪重產（修法後）；Mac 仍 `[前輪 R192]`。
+- **DEF-200-478 零落地**（款(11) 主軌 ≤0 結構義務下回歸鎖軌無餘裕，改派 R195）；**479 第二段**需掌舵者裁決（量不到超過 6 小時後 halt 要 fail-safe 還是 fail-open）；465／459／242／246／199／193／207 本輪零落地（承接 R195）。
+- **Developer 工具呼叫全數超標**（Dev-A 46 內；Dev-B 104／Dev-C 202／Dev-D 237／Trim 66；上限 70）；Dev-A 與 Dev-B 的核心寫入被 auto mode 分類器 `[Self-Modification]` 拒絕後由主控親手落地（分類器對子代理改 `.claude/` 比對主控嚴）。
+- **`[他包回報]` 未親跑**：四方／鏡／各棒的全部數字；主控親跑範圍＝〈二〉〈六〉〈七〉。
+- **並行相撞一次**：bdg 模組與 liveness／parity／selftest 同時並跑時回 rc=−1073741819，單跑即綠。
+- **Mac 未驗**：本輪所有修法（lint 判準的 darwin 路徑、`_ps_engine` SSOT 在無 pwsh 機器的分支）只在 Windows 實跑。
+- **副作用**：探針逐字稿（Dev-A red_a／red_c、主控 green a～h、SA 第一波 9 支＋第二波 3 支，皆 sdk-cli、②′ 母體自動排除）留在本機 projects 目錄；`session_gate_acceptance_Koala-MSI.json` 重寫；scratchpad 各角色暫存未入庫。
+
+## 六、收尾親驗（主控親跑；本場 tool_result 逐字）
+- **DEF-200-476 落地（主控親手；Dev-A 的 Edit 被 auto mode 分類器以 `[Self-Modification]` 拒絕後未繞過，交回主控）**：`.claude/settings.json` 加頂層 `permissions.allow`（最終 10 條：`PowerShell|Bash(python tools/session_resume_planner.py --check*|--pace*)`、`PowerShell|Bash(python *session_resume_planner.py --check*|--pace*)`、`Read(~/.autosdd/context_feed/*.json)`、`Read(~/autosdd_quota.json)`）；`tools/tests/test_session_brief.py` 新增 `RepoSettingsReadOnlyAllowTest`（允許集合雙向相等／簡報兩條字面兩載具皆被涵蓋／Read 規則追 SSOT 路徑（HOME 改到暫存目錄再算）／窄性鎖）；`tools/lib/session_brief.py` 加 `_LITERAL_NOTE`「這兩條照字面執行（相對路徑…不要改寫成絕對路徑或 & '…' 形式——權限白名單認的是這個字面）」＋`_READ_FALLBACK` 補白名單句（Δ3／Δ4 由 Dev-A 落地）；`useMacWin.md` 第 0 步改教兩平台同字面裸 `python`。`test_session_brief` `Ran 96 tests … OK` rc=0；`test_context_budget_guard.SettingsChainTest`＋`.UnattendedPermissionPostureTest` `Ran 11 tests … OK` rc=0；ruff `All checks passed!`；`git diff --check` rc=0；E501（東亞寬度）只剩 HEAD 原有 1 行（:1135）。治理檔 hook 提醒逐字「這次寫入會照常執行、不需處理（有人值守只提醒）」。
+- **headless `dontAsk` 探針（`claude -p --model haiku --permission-mode dontAsk --output-format json --debug hooks`，repo 根；被拒＝規則沒匹配；載具 `$SP\devA_probe.ps1`，Dev-A 建）**：改前紅端 `[他包回報 Dev-A]` red_a Read 額度快取 `READ-DENIED`（n=1，`projectSettings with 0 rule(s)`）、red_c PowerShell 相對字面 `PS-DENIED`。改後主控親跑：a `READ-OK` `permission_denials n=0`、log `Adding 14 allow rule(s) to destination 'projectSettings'`；c `python tools/session_resume_planner.py --check` `PS-OK` n=0（tool_result 首行 `session 來源＝環境變數 CLAUDE_CODE_SESSION_ID…`）；e `python D:\CursorProject\AISDCL_Agent\tools\session_resume_planner.py --check`（SA 實測模型形態）`PS-OK` n=0（中段 `*` 形有效）；d `.venv\Scripts\python.exe tools/session_resume_planner.py --check` `PS-DENIED` n=1（反斜線 venv 規則＝死規則 ⇒ 該族 4 條移除、allow 14→10，`Adding 10 allow rule(s)` 於後續探針 log 確認）；f `& 'D:\…\python.exe' 'D:\…\session_resume_planner.py' --check` `PS-DENIED`（刻意不涵蓋）；b Glob `C:\Users\wuwei\.autosdd\context_feed\*.json` `READ-DENIED`（Glob 目錄不被 Read 規則涵蓋）；g Read 具名 feed 檔 `C:\Users\wuwei\.autosdd\context_feed\7d664c9d-….json` `READ-OK` n=0（簡報教的正是具名檔）。
+- **SA W-2 駁回（allow 命中是否繞過 repo hook）**：h `--allowedTools 'PowerShell(cd tools)'`＋指令 `cd tools` ⇒ `PS-DENIED（Hook 攔截：鐵律二禁裸 cd）`，debug log `Hook PreToolUse: {'PowerShell': {'error:': 1}}`，tool_result 首行 `PreToolUse:PowerShell hook error: […lint_powershell_command.py]` ⇒ allow 放行之後 repo PreToolUse hook 照跑；c／e／g 的 log 無 `Hook PreToolUse:PowerShell` 行是因 hook 靜默 rc=0 不落行（a／g 的 Read hook 有印 JSON 才落行）。
+- **主控本窗被守衛／分類器擋下**：auto mode 分類器 `[Self-Modification]` 1 次（PowerShell 指令內含以 python 讀 `.claude/settings.json` 驗 JSON 的片段；未另行追求，JSON 合法性改以 harness 自己載入 `14 allow rule(s)`／`10 allow rule(s)` 為證）；lint hook 規則① 1 次（`Get-Content … | Select-Object -Last 4` 之後讀 rc＝DEF-200-481 的過擋形態，拆句重跑即過）。
+- **DEF-200-481 安裝與親驗（主控把 Dev-B 的 `$SP\devB_staged\` 四檔 Copy-Item 進工作樹；`git diff --stat` ⇒ `4 files changed, 262 insertions(+), 274 deletions(-)`）**：`test_check_hooks_liveness` 全模組 `Ran 191 tests in 15.325s OK` rc=0（R193 為 188）；`test_block_destructive_git_r83` `Ran 238 tests in 11.261s OK` rc=0（與 liveness／parity／selftest 四支並跑時一次回 rc=−1073741819（STATUS_ACCESS_VIOLATION），單獨重跑即綠——並行相撞、非程式缺陷，誠實登記）；`test_session_brief` `Ran 96 OK`；`audit_session.py --parity --record-since 2026-10-03T16:25:38+08:00` rc=0 `3110 條 unique 指令；判定分歧 0 筆`；`--selftest` rc=1 `新判準判錯 0 / 18；舊判準判錯 0 / 18`（Dev-B 指出的結構矛盾：判準單一化後兩欄同函式，交 Dev-D 改語意）；ruff 八檔 `All checks passed!`；`check_loc_budget --json` 四類 violations 皆 `[]`；`git diff --check` rc=0。語料重放（主控親跑 `devB_replay.py --hook <安裝後 hook>`，快取母體 `distinct=9971 出現=10600`）：`h_old 舊hook擋 177 / 178`、`h_new 新hook擋 7 / 7`、`lib_old 舊lib三條件 7 / 7`、`exempt 9 / 9`、`shadowed(新守衛命中) 29 / 0`；新 hook 擋的 7 筆逐字見 `$SP\replay_main.log`、漏擋（舊 lib 三條件判 True、新 hook 放行）0、新 hook 多擋 0、新擋舊放 0、舊擋→新放 A（cmdlet 消費者）158／B（截斷管線但上游非原生）10／C（截斷管線後有原生重設）2、縮寫截斷參數 0。根 CLAUDE.md 機械守衛總表 lint 列描述同步為三條件判準。
+- **Q4′ 證據重產**：`session_gate_acceptance.py` rc=0 ⇒ `generated_at 2026-10-03T22:16:53+08:00`、`platform win32`、`cc_version 2.1.288`、`repo_head 7efc4c06…`、statusline `installed true／matches_current_checkout true`、hook_carrier `exists true`、verify_hint 三格 true、`check.rc 0`（`差=2,437` 在途時序差，planner 自己的 DIFF_HINT 已說明）。
+- **棘輪重釘（主控親跑；結構編修→print→填數→print→填 sha，兩次收斂）**：Trim 棒交件 `113731→113980 (+249)`；主控修 liveness SSOT import 後 `113731→113981 (+250)`；`apply_frozen_guard_lines.py` 機械套回 `_FROZEN_GUARD_LINES` 全表 ⇒ `113981→113981 (+0)`、`逐檔漂移 0 支`；追加重釘列、回歸鎖軌同輪列、`(194, 520)` 兌現列、`_REPIN_NET_CAP_DUE_ROUND` 194→196／`_DUE_TARGET` 520→519、`_REPIN_LOG_FROZEN_PREFIX_LEN` 324→325、接鏈列後鎖檔自身 `8670 -> 8691 (+21)`；填數 `("R194", 113731, 114002, +271, …)`、回歸鎖軌申報 271（＝主表淨額 ⇒ 主軌 0 ≤ 0；款(11) R192／R193 連升兩輪後本輪兌現）後 `114002→114002 (+0)`、`逐檔漂移 0 支`、sha `4215caed3535…`（接鏈 `84991a4ce0d5→4215caed3535`，載體 DEF-200-481）。guard-total 兩站點（`AutoSDD_improving_112.md`／`CrossPlatform_R145_Scan_Findings.md`）各追加一列。鎖模組單跑與全套見〈七〉。
+
+## 七、根層全套、push 與雲端驗收
+（push 後回填。）
+
+## 八、交棒／掌舵者側待辦
+
+### Q5 評估（掌舵者原話：「是否修復已經收斂，不用再進行？請詳細回覆是否已經收斂？給我評估說明」）
+- **症狀面**：Q1 我方 hook 層本輪把最後一條還開著的通道（lint 規則①過擋：Windows 新視窗最早、最常撞到的「被擋」體驗，佔歷史 hook 阻斷 57%）根治；harness 權限層對 planner 現查與 feed 讀取已白名單放行（headless 實測 6/6）。殘餘只剩 harness 自身（auto mode 分類器可用性、其他 PowerShell 指令的分類器判定、`Remove-Item` 靜態規則）——我方碼無法再降，能做的是簡報措辭（已做）。Q2 本窗第 1 個呼叫即現查；簡報數字自 477 起有錨點。
+- **量測面（②′）**：協定四處缺口（含 Q3′ 結構性假 FAIL）本輪批次修正並凍結（sha `c62fa435…`）⇒ 窗口重數 1/6、**最早 R199**；本輪家族內 `new_p_le2`=1（481），依評估式末輪必須為 0 ⇒ R195～R199 需連續零新 P≤2。
+- **為什麼還不能說收斂**：(a) 窗口 1/6；(b) 修法後真實母體 n=1；(c) auto mode 路徑零樣本；(d) Mac 側全部未驗。
+- **建議（採 Architect A5）**：協定已凍結，R195～R198 改「量測器出數＋一方（QA）複核＋只在量測出現新 P≤2 時才展開四方」降頻；Windows／Mac 交替累積真實 session；R199 若 6 輪零新 P≤2 且末輪為零，可首次宣告收斂。
+
+### 掌舵者裁決項（請回覆）
+1. **DEF-200-479 第二段**：量不到超過 6 小時後，halt 該 fail-safe（撐著）還是 fail-open（放寬回降級 cap）？裁決後才寫持久檔欄位語意。
+2. **auto mode 真實視窗驗收**：請在你平常的 Windows 終端開一個新視窗，第一個動作照簡報跑 `python tools/session_resume_planner.py --check`（相對字面），回報有沒有跳權限詢問——這是 476 在 auto mode 下唯一的真實證據來源。
+
+### 下輪的機械義務（主控記名）
+- 護欄行數棘輪：本輪兌現 (194, 520) 並重新武裝 `_REPIN_NET_CAP_DUE_ROUND=196`／`_TARGET=519`；款(11) 連升計數歸零。U9 `_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND=198` 不變。
+- 承接列：**DEF-200-478 → R195**（SD〈D4〉設計已就緒）；**DEF-200-479 第二段 → 掌舵者裁決後**；DEF-200-465／459／242／246／199／193 → R195；207 帳本 R117+ 開放式。
+- ②′：協定 sha `c62fa4355d142d4900114109f657ffaa791a76d21a97ae993af7a0012da4b155`，**自此不得再動協定目錄任何一字**（再改＝再重置）；R195 收尾先 `--protocol-status` 確認 sha 未變。
+- R195 第一件事：鏡稽核本檔（本檔文字未經複審鏡稽核）＋本輪帳本列（481／482 新立；476／477／479／478／464／463／193 訂正）。
+
+### 本輪未做（不塗綠）
+- DEF-200-478 零落地；479 第二段；465／459／242／246／199／193／207 零落地。
+- 本檔鏡稽核、Mac 側驗證、auto mode 真實視窗驗收、Fable 模型探針：未做。
+
+## 九、鏡 C〈文件訂正清單〉（R193 證據檔與帳本；逐條去向）
+
+| 編號 | 對象 | 問題類型 | 嚴重度 | 去向 |
+|---|---|---|---|---|
+| F01 | R193〈〇〉Q2 句；輪帳本 R193 列 `q2` 欄 | 過度開脫（16/16 寫成 SOP 規定，實證約 11/16）＋漏載 Q2′ 字面 FAIL | **P2** | 〈〇〉已改；輪帳本 append-only，於 R194 列 `note` 註記 |
+| F02 | R193〈八〉行 107、〈五〉、輪帳本 note、commit 訊息 | 新立列為 473～480 八列，漏 480 | P3 | 〈八〉已改；R194 列 `note` 補記 |
+| F03 | R193〈六〉「帳本 180 筆」 | 過期讀數（HEAD 181） | P3 | 已加註 |
+| F04 | R193〈七〉「40 檔」 | 未揭露 `.perf_baseline.toml` 髒檔入庫 | P3 | 已加註 |
+| F05 | 帳本 DEF-200-193 狀態欄 | 「R193 先定義」自相矛盾 | P3 | 已改「R194 先定義」（位元組不變） |
+| F06 | R193〈八〉「207 → R194」vs 帳本 R117+ | 載體字面不符 | P3 | 〈八〉已改為「帳本承接＝R117+ 開放式」 |
+| F07 | 帳本 DEF-200-463 | 對策欄「模糊進 nightly 棘輪」無機械物 | P3 | 狀態欄已補「未做、由雙向鎖取代」 |
+| F08 | 帳本 DEF-200-464 | 「鎖判準未補」無載體；HEAD 仍有 5 處同形 | P3 | Dev-C 本輪補修 5 處＋圍籬鎖；對策欄收尾訂正 |
+| F09 | R193〈三〉token 數 | 疑似複製誤植 | P3 | 〈三〉標題已加「未逐一核對」 |
+| F10 | 協定 discipline.md `--check` 游標句與報告落檔句 | F15 修一半 | P3 | 併入 DEF-200-482 批次修訂 |
+| F11 | R193〈八〉收斂條件加碼 | 協定外加碼未標示 | P3 | 已加註 |
+| F12 | R192〈二〉行號 | 行號漂移 | P3 | 已改函式名 |

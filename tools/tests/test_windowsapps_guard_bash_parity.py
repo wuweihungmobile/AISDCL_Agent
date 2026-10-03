@@ -101,11 +101,7 @@ _CALLER_FILES = [
     # `_tracked_extensionless_hook_files()` 對此方法論盲區的補強。
     _REPO_ROOT / "AutoClaude" / "tools" / "git-hooks" / "pre-commit",
     _REPO_ROOT / "AutoClaude" / "tools" / "git-hooks" / "pre-push",
-    # R55 新增：原登記於 _EXEMPT_SH_FILES，豁免理由「WindowsApps 資料夾不可能
-    # 出現在 macOS PATH 上」論證方向錯誤——真正風險是本腳本是否會被跑在
-    # Windows 上，而腳本自身檔頭（[2b] 段落註解、`-c core.longpaths=true`
-    # 註解）與根層 ONBOARDING.md 皆記載過 Windows Git Bash 實跑情境，已改用
-    # 共用 guard。
+    # R55 新增登記的立案沿革搬至 Guard_Line_History_2.md〈R194 淨減法搬遷〉§110。  round-label-ok
     _REPO_ROOT / "tools" / "macos_smoke_local.sh",
     # R56 新增：三支早已收斂、只是從未登記的呼叫端（未登記＝不受兩道白名單斷言保護）；後兩筆一律以
     # `_LATEST_SDD_ROOT`（sdd_version.py SSOT 動態解析）組出，不可寫死版本目錄名（寫死會在
@@ -176,15 +172,11 @@ def _tracked_sh_files() -> list[str]:
     子專案），比照既有 `test_windowsapps_guard_cross_consistency.py::_tracked_files`
     慣例，用 `git ls-files` 而非 `Path.rglob`（天然排除 `.git`/`.venv`/`__pycache__`）。
 
-    🔴 R82（`DEF-101-752`）：擴為 union 上 `-o --exclude-standard`——尚未 `git add`
-    的新 `.sh` 原本天生不可見（同 `test_platform_utils_dedup.py` 檔頭②事故形狀）。
-    本函式只餵「offender 必須為空」形態的掃描（`test_no_raw_unguarded_python_check_remains`
-    等），加寬掃描面只會多抓真違規，無副作用。**姊妹函式
-    `_tracked_non_sh_shell_scripts()`／`_tracked_files()` 刻意不比照**：它們餵的是
-    `test_hook_dir_roster_matches_repo_state` 這種「名冊 vs 實況」等值斷言，任何本機
-    未加入 git 的草稿 `.sh`（不論放在哪個目錄）都會被判成「名冊外的新 hooks 目錄」而
-    偽陽——那不是同一種掃描語意，需要拆成獨立判準才能安全擴面，非本輪處置範圍（見
-    帳本 `DEF-101-752` 該列）。
+    🔴 擴為 union（`-o --exclude-standard`）：尚未 `git add` 的新 `.sh` 不得天生不可見。本函式只餵
+    「offender 必須為空」形態的掃描，加寬掃描面只會多抓真違規；**姊妹函式
+    `_tracked_non_sh_shell_scripts()`／`_tracked_files()` 刻意不比照**（它們餵「名冊 vs 實況」等值
+    斷言，未入 git 的草稿 `.sh` 會偽陽）。R82（DEF-101-752）沿革搬至
+    Guard_Line_History_2.md〈R194 淨減法搬遷〉§108。  round-label-ok
     """
     proc = subprocess.run(
         ["git", "-C", str(_REPO_ROOT), "-c", "core.quotePath=false",
@@ -445,14 +437,11 @@ def _has_zero_guard_python_call(text: str) -> bool:
 class TestSharedGuardShellFunctionBehavior(unittest.TestCase):
     """實際以 subprocess 執行共用函式，驗證三種情境判斷正確。
 
-    fixture 的暫存目錄與候選可執行檔全部由 **bash 自身**的 `mktemp -d` 建立，
-    不透過 Python `tempfile` 產生 Windows 樣式路徑（`C:\\Users\\...`）字面塞進
-    `$PATH`——R43 實測發現 `C:/...` 這類含磁碟機代號冒號的路徑塞進以 `:` 分隔的
-    `$PATH` 字串會被冒號本身腰斬（`C` 與 `/Users/...` 誤判為兩個獨立、皆不存在
-    的路徑片段），導致 fixture 目錄從未真正被搜尋到、`command -v python` 悄悄
-    改為命中繼承自呼叫端行程環境的其他 `python`（如已啟用的 `.venv`），使本測試
-    看似「跑過」卻完全沒驗證到目標邏輯——與本輪（R43 baseline agent）在真實
-    `test_bash_probe_spec_contract.py` 上踩到的路徑格式陷阱同一根因類別。"""
+    fixture 的暫存目錄與候選可執行檔全部由 **bash 自身**的 `mktemp -d` 建立，不透過 Python
+    `tempfile` 產生 Windows 樣式路徑（含磁碟機代號冒號）字面塞進以 `:` 分隔的 `$PATH`——冒號會把路
+    徑腰斬，使 fixture 目錄從未真正被搜尋到、`command -v python` 悄悄命中繼承環境的其他 `python`
+    （如已啟用的 `.venv`），本測試看似「跑過」卻沒驗證到目標邏輯。R43 實測沿革搬至
+    Guard_Line_History_2.md〈R194 淨減法搬遷〉§109。  round-label-ok"""
 
     def _run(self, subdir_name: str, candidate: str = "python") -> bool:
         """WHY：`TMPDIR` 指到測試專屬目錄，避開共用 `%TEMP%`（16 萬項目＋

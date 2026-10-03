@@ -310,10 +310,7 @@ class TestReservedNameCrossConsistency(unittest.TestCase):
             self.assertNotEqual(rc, 0, f"bash 誤攔了非保留名 {name!r}：{out!r}")
 
 
-# R33 QA 二審發現：logger.py 原用 rsplit(".", 1) 剝副檔名（只切最後一個點），對多重
-# 副檔名的保留名（如 lpt5.tar.gz）算出 stem="lpt5.tar" 而漏判；check_ntfs_paths.py／
-# bash 皆用「第一個點起」剝離（split(".", 1) / ${seg%%.*}），三者對此不對稱。已改
-# logger.py 為 split(".", 1) 與另兩處一致（DEF-101-295 追加修復）。
+# 立案沿革搬至 Guard_Line_History_2.md〈R194 淨減法搬遷〉§117。  round-label-ok
 MULTI_EXTENSION_RESERVED = ["lpt5.tar.gz", "com1.a.b.c", "aux.setup.retry"]
 
 
@@ -730,12 +727,10 @@ class TestNtfsSanitizerSiteEnumerationIsForwardLooking(unittest.TestCase):
     def test_each_authoritative_impl_keeps_base_device_names_adjacent(self) -> None:
         """R60 新增：4 份權威實作的保留名**交替構造**必須讓四個基本裝置名保持相鄰。
 
-        WHY：姊妹鎖取兩錨聯集，只要禁用字元集合的錨②還命中，某份實作掉出錨①也
-        照樣全綠——R60 插入新裝置名到中間造成間隙從 ≤5 變 17 時，三處實作同時
-        掉出錨①，註冊表等值斷言毫無反應。改認構造形：管線分隔、四名之間不得有
-        任何其他字元。殘留 fail-open（如實揭露）：註解裡的偽裝字樣仍可滿足本鎖，
-        徹底根治需 AST 解析四種語言（R46 已證明無底洞），本鎖只攔「無意識插中間」
-        這個真實發生過的動作。史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
+        WHY：姊妹鎖取兩錨聯集，錨②還命中時某份實作掉出錨①也照樣全綠；本鎖改認構造形：管線分隔、四
+        名之間不得有任何其他字元。殘留 fail-open（如實揭露）：註解裡的偽裝字樣仍可滿足本鎖，徹底根
+        治需 AST 解析四種語言，本鎖只攔「無意識插中間」。R60 間隙由 ≤5 變 17 的事故沿革搬至
+        Guard_Line_History_2.md〈R194 淨減法搬遷〉§116。  round-label-ok
         """
         impls = [rel for rel, role in _KNOWN_NTFS_ANCHOR_SITES.items() if role.startswith("實作")]
         self.assertEqual(

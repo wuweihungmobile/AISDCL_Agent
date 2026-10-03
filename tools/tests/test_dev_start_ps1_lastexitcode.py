@@ -1,18 +1,13 @@
 #!/usr/bin/env python3
 """tools/dev_start 兩支殼（.ps1 / .sh）的「被 source 時 rc 語意」回歸鎖。
 
-第一部分（DEF-101-304）：`tools/dev_start.ps1` dot-source 失敗分支曾未對
-`$LASTEXITCODE` 賦值（呼叫前殘值可能是 0 而誤判成功），對等的 `.sh` 用 `return 1`
-正確傳遞失敗，兩邊曾不對稱（R35 發現）；本測試只驗證「找不到 Python 直譯器」這條
-分支（PATH 清空即可穩定觸發）。
+第一部分（DEF-101-304）：`tools/dev_start.ps1` dot-source 失敗分支必須對 `$LASTEXITCODE` 賦值（對
+等的 `.sh` 用 `return 1`）；只驗「找不到 Python 直譯器」這條分支（PATH 清空即可觸發）。
 
-第二部分（R67-C17 併入既有鎖檔，非新開一支）：`source tools/dev_start.sh` 是使用者
-每天開工的第一道指令，該檔的 zsh 專屬路徑（`ZSH_EVAL_CONTEXT`／`${(%):-%x}`）此前
-全 repo 零活體驗證（CI 帳務停擺、`bash -n`/`zsh -n` 只做語法解析）。斷言刻意走
-**行程外側通道**（證物寫進重導向檔、Python 端檢查）——同一 shell 內斷言在 sourced
-偵測壞掉時會被 dev_start.sh 檔尾 `exit` 直接殺掉、後面斷言一行都不執行卻仍 rc=0；
-「斷言被跳過」因此變成「證物檔不存在」＝當場紅，而不是靜默通過（史料見
-CrossPlatform_DEF200275_Context_Metering_Evidence.md〈第七輪 史料搬遷〉）。
+第二部分：`source tools/dev_start.sh` 的 zsh／bash 行為對等（見下方覆蓋清單）。斷言走
+**行程外側通道**（證物寫進重導向檔、Python 端檢查）：同一 shell 內斷言會被 dev_start.sh 檔尾
+`exit` 殺掉卻仍 rc=0，改走證物檔後「斷言被跳過」＝「證物檔不存在」＝當場紅。兩部分的立案沿革搬至
+Guard_Line_History_2.md〈R194 淨減法搬遷〉§97。  round-label-ok
 
 第二部分覆蓋（每項在 zsh 與 bash 各跑一次，鎖住兩殼行為對等）：
   1. 被 source 時**不得**殺掉呼叫端 shell（證物檔必須存在）

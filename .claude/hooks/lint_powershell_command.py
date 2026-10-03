@@ -21,6 +21,9 @@ WHY
 （見 `_EXEMPT_RE`），需要寫出違規形態時（例如撰寫文件或重現缺陷）能就地放行，
 不必去動註冊面。
 
+規則①（讀 rc 不接管線）擋的是 pwsh 7.6／PS 5.1 真機實測會讀到錯 rc 的三條件交集，不是「看到
+管線就擋」；判準住 `_rc_after_pipe()`，真機答案表與紅綠自證見 tools/lib/rc_after_pipe_real.py。
+
 行為契約
 --------
 · 非 Windows（`os.name != 'nt'`）→ exit 0。mac/Linux 的載具規則不同，
@@ -161,20 +164,6 @@ _EXEMPT_RE = re.compile(r"#\s*ps-lint-ok:\s*\S")
 #: `TestHookAndProbeShareOneCriterion` 兩向釘住——① 兩份字典字面相等；
 #: ② 同一批指令字串餵進兩邊，判定必須一致（後者連「不經由本字典的第二份複本」也抓得到）。
 SHARED_PATTERN_SOURCE: dict[str, str] = {
-    # 管線接進這些 cmdlet 之後再讀 rc，才算命中（不是看到任何 `|` 都算）。
-    # 🔴 R78／SA-01：**內建別名與全名同列**。上一版只列全名，實測 12 組「別名 vs
-    # 全名、其餘字元逐字相同」的配對 **12/12 不對稱**（`| select -First 5` 放行、
-    # `| Select-Object -First 5` 擋下）——而 `select` 正是「提前結束管線」最常見的
-    # 寫法，等於這道鎖擋掉的剛好是沒人會寫的那一半。每個別名自帶右邊界
-    # `(?![\w-])` 以免吃到 `selection`／`sortable`；`%` 與 `?` 另用 `(?=\s|\{|$)`，
-    # 避免誤傷 `$_ % 2` 那類真正的運算子用法。
-    "pipe-cmdlets": (
-        r"(?:Select-Object|Select-String|Out-\w+|Format-\w+|Sort-Object"
-        r"|Measure-Object|ForEach-Object|Where-Object|Tee-Object"
-        r"|head|tail|findstr)(?![\w-])"
-        r"|(?:select|sls|sort|measure|foreach|where|ft|fl|oh|tee)(?![\w-])"
-        r"|[%?](?=\s|\{|$)"
-    ),
     # 裸 cd／Set-Location 的**動詞面**（不含錨點——兩邊各自接自己的邊界）。
     # 🔴 R78／SD-01：補上 `chdir`／`sl` 兩個內建別名；並**移除 `(?!-)`**——
     # `Set-Location -Path X` 與 `cd X` 是同一件事，上一版只因為下一個字元是 `-`
@@ -199,43 +188,73 @@ SHARED_PATTERN_SOURCE: dict[str, str] = {
 #: 全部入口，比逐個補個案穩。
 _CMD_START = r"(?:^|[;\n|&{}()])\s*"
 
-_PIPE_INTO_RE = re.compile(
-    r"\|\s*(" + SHARED_PATTERN_SOURCE["pipe-cmdlets"] + r")", re.IGNORECASE
-)
 _RC_READ_RE = re.compile(r"\$LASTEXITCODE", re.IGNORECASE)
-#: 「rc 已被重新建立」——**真的發起了一次呼叫**。用途見 `_rc_after_pipe()`：
-#: 截斷管線造成的污染會**一直延續**，但 hint 教的正解 `& <exe> <args>; "rc=$LASTEXITCODE"`
-#: 本來就會重設 rc，不該被前面某一句的管線牽連。
-#:
-#: 🔴 R79：上一版把「重設」判太寬，而寬的方向正是這條規則存在的唯一理由的反面
-#: （放行一條會讓真 rc=7 被讀成 0 的指令）。兩個口子都是「提到」而非「執行」：
-#:   · 呼叫運算子的左邊界只排除 `&` 與英數字 ⇒ `2>&1`／`1>&2` 的那個 `&`（左邊是 `>`）
-#:     被當成呼叫。`2>&1` 在最近 12 支逐字稿的 547 條 unique 指令裡佔約一半，觸發面極大。
-#:   · `.exe` 出現在**任何位置**都算 ⇒ `Get-Command python.exe`、`Test-Path …\cmd.exe`
-#:     這種只是把路徑當資料的語句被當成執行。
-#: pwsh 7.6.4 真機實測：這三種語句一個都沒有重設 `$LASTEXITCODE`（前值原樣保留）。
-#: 修法是把兩個口子各自收到「命令位置」上：
-#:   ① 呼叫運算子的左邊界加上 `>`，把重導向合併排除；
-#:   ② `.exe`／`.cmd`／`.bat` 只在**語句的第一個 token** 才算數（`_NATIVE_HEAD_RE`）——
-#:      那才是「這一句在跑一支外部執行檔」，寫在參數位置的同一個字面只是資料。
-#: 仍然刻意窄：裸原生指令（`git status` 這種不帶 `&`、不帶副檔名者）**不算**重設，
-#: 於是判定偏向擋。這個方向是刻意的——「同一個指令字串裡既有截斷管線又要讀 rc」
-#: 本身就是這條規則要消滅的混寫，而行內豁免是它的出口。
-#: 誠實劃界：偏向擋的代價已在真實語料上量過（見 `tools/tests/test_check_hooks_liveness.py`
-#: 的 `TestLintPowerShellHookBehaviour` 兩向表），不是靠推測。
+# 規則①的判準（DEF-200-481；pwsh 7.6／PS 5.1 逐形態真機答案表＝tools/lib/rc_after_pipe_real.py）：
+# 只擋「上游是外部執行檔 × 管線提前結束（Select-Object -First／-Index，-Wait 取消）或消費者也是
+# 外部執行檔（rc 換成消費者的）× 之後才讀 $LASTEXITCODE」；cmdlet 管線不碰 rc、其餘 cmdlet 消費者
+# 兩個引擎都正確寫入，放行。污染延續到下一次真的外部呼叫才解除：呼叫運算子、.exe／.cmd／.bat
+# 開頭，或 _NATIVE_HEADS 內的裸字（裸 `git status` 也會重設 rc）。同一條指令定義了 function／
+# filter／別名時詞彙表重設整條停用（遮蔽後的 git 不是外部執行檔）；profile／dot-source 內的
+# 定義看不到（殘餘）。
+# 呼叫運算子（左邊界排除 `2>&1` 的 &）。
 _RC_RESET_RE = re.compile(r"(?<![&\w>])&(?!&)\s*\S", re.IGNORECASE)
-#: 語句**開頭**就是一支外部執行檔（`python.exe a.py`／`<venv>/bin/tool.cmd`）＝真的在跑東西。
-#: 錨在開頭是關鍵：`Get-Command python.exe` 的第一個 token 是 cmdlet，`.exe` 只是參數。
+# 語句**開頭**是 .exe／.cmd／.bat（`Get-Command python.exe` 的 .exe 在參數位置，只是資料）。
 _NATIVE_HEAD_RE = re.compile(r"^\s*[^\s;|&]*\.(?:exe|cmd|bat)(?![\w])", re.IGNORECASE)
+#: 裸原生指令詞彙：pwsh 7.6 Get-Command 判 Application、PS 5.1 同為外部執行檔者。刻意排除兩引擎
+#: 分歧名 curl／sc／more／wget（5.1 是別名／函式）與機器專屬安裝 claude／docker／node／java／
+#: alembic／uvicorn／python3／7z；與內建別名／關鍵字的交集由 test_check_hooks_liveness.py 釘為空。
+_NATIVE_HEADS = frozenset(
+    "git gh python pip pip3 uv uvx pytest ruff lint-imports pwsh powershell cmd findstr attrib"
+    " icacls ipconfig netstat nslookup ping reg robocopy schtasks tar taskkill tasklist wsl xcopy"
+    .split())
+_HEAD_WORD_RE = re.compile(r"^\s*([A-Za-z][\w-]*)(?![\w.\\/:-])")
+_DEFINES_RE = re.compile(
+    r"(?<![-\w$])(?:function|filter)\s+[\w:-]+"
+    r"|(?<![-\w$])(?:set-alias|new-alias|sal|nal)(?![-\w])",
+    re.IGNORECASE,
+)
+_TRUNCATING_PIPE_RE = re.compile(
+    r"\|\s*(?:Select-Object|select)(?![\w-])"
+    r"(?![^|;\n]*-Wait(?![\w-]))"
+    r"[^|;\n]*?-(?:F(?:i(?:r(?:st?)?)?)?|Ind(?:ex?)?)(?![\w-])",
+    re.IGNORECASE,
+)
+_NATIVE_CONSUMER_RE = re.compile(
+    r"(?<!\|)\|(?!\|)\s*(?:(?:" + "|".join(sorted(_NATIVE_HEADS | {"head", "tail"}))
+    + r")(?![\w.\\/:-])|[^\s;|&]*\.(?:exe|cmd|bat)(?![\w]))",
+    re.IGNORECASE,
+)
+_ELEMENT_SPLIT_RE = re.compile(r"\|\|?|&&|\{")
 
 
-def _statement_resets_rc(statement: str) -> bool:
-    """這一句是否真的重新發起了一次呼叫（⇒ `$LASTEXITCODE` 被重寫）。
+def _head_is_native(element: str, shadowed: bool = False) -> bool:
+    """開頭是不是外部執行檔：`.exe`／`.cmd`／`.bat` 首 token，或詞彙表內的裸字。
+    `shadowed`＝同一條指令定義了函式／別名，裸字不再保證是外部執行檔。"""
+    if _NATIVE_HEAD_RE.search(element):
+        return True
+    word = _HEAD_WORD_RE.match(element)
+    return bool(word) and not shadowed and word.group(1).lower() in _NATIVE_HEADS
 
-    純函式、吃**一句**（不是整條指令）：`.exe` 的「必須在開頭」這個條件只有在語句
-    邊界上才判得準，用 `search(..., pos, endpos)` 是判不到的（`^` 不會錨在 `pos`）。
-    """
-    return bool(_RC_RESET_RE.search(statement) or _NATIVE_HEAD_RE.search(statement))
+
+def _statement_resets_rc(statement: str, shadowed: bool = False) -> bool:
+    """這一句是否真的重新發起了一次外部呼叫（⇒ `$LASTEXITCODE` 被重寫）。吃**一句**：`.exe` 的
+    「必須在開頭」只有在語句邊界上才判得準。`shadowed`＝同一條指令定義了函式／別名，裸字不算。"""
+    return bool(_RC_RESET_RE.search(statement) or _head_is_native(statement, shadowed))
+
+
+def _pipeline_has_native(left: str) -> bool:
+    """管線左段有沒有外部執行檔在跑：掃每個元素的開頭（含 `{ }` 內、`||`／`&&` 之後），不只語句首。
+    括號分組 `(git x) | …` 先完整跑完才進管線，不算；遮蔽時仍算（保守＝多擋）。"""
+    return bool(_RC_RESET_RE.search(left)
+                or any(_head_is_native(part) for part in _ELEMENT_SPLIT_RE.split(left)))
+
+
+def _blocking_pipe(segment: str) -> int | None:
+    """這一句裡**最早**會讓之後的 rc 讀數出錯的管線位置（相對 segment；沒有＝None）：
+    右邊是提前結束的元素或另一支外部執行檔，且左段真的有外部執行檔在跑。"""
+    hits = [hit.start() for rx in (_TRUNCATING_PIPE_RE, _NATIVE_CONSUMER_RE)
+            for hit in rx.finditer(segment)]
+    return next((pos for pos in sorted(hits) if _pipeline_has_native(segment[:pos])), None)
 _NAKED_CD_RE = re.compile(
     _CMD_START + SHARED_PATTERN_SOURCE["naked-cd"], re.IGNORECASE
 )
@@ -249,11 +268,14 @@ _SH_SCRIPT_RE = re.compile(r"\.sh(?![\w])", re.IGNORECASE)
 _FIND_GIT_BASH_RE = re.compile(r"Find-GitBash", re.IGNORECASE)
 
 _RC_HINT = (
-    "🔴 讀 rc 不要接管線。pwsh 7.x 提前中斷管線時**不更新** $LASTEXITCODE（保留前一個值，"
-    "真 rc=3 可能讀成 0＝真紅被讀成綠）；PS 5.1 則寫入 -1；加 2>&1 又會翻轉。"
-    "沒有方向可以憑記憶——就是不要接。\n"
-    "  出口：& <exe> <args>; \"rc=$LASTEXITCODE\"   ← rc 自成一句，前面那一句不接任何管線\n"
-    "  要篩輸出就先落檔或分兩次呼叫；要一支固定 rc 語意的載具走 tools/probe/。"
+    "🔴 先單獨跑 `& <exe> <args>`（不接管線），下一句再讀 rc。\n"
+    "  出口：& <exe> <args>; \"rc=$LASTEXITCODE\"   ← rc 自成一句，前面那一句不接任何管線；"
+    "要篩輸出就先落檔或分兩次呼叫\n"
+    "  原因（pwsh 7.6／PS 5.1 真機）：外部執行檔的輸出接進會提前結束的管線"
+    "（Select-Object -First／-Index）時，它的真 rc 不會被寫入——pwsh 7 保留前一個值、PS 5.1 寫 -1，"
+    "兩種都是錯值（真 rc=3 讀成 0＝真紅被讀成綠）；接進另一支外部執行檔（findstr 等）時，讀到的是"
+    "那一支自己的 rc。其餘 cmdlet 消費者（Select-String／Out-String／ForEach-Object／"
+    "Select-Object -Last…）不受影響。答案表：tools/lib/rc_after_pipe_real.py"
 )
 _CD_HINT = (
     "🔴 禁裸 cd／Set-Location（鐵律二）。PowerShell 工具的 cwd **會跨呼叫持續**，"
@@ -276,13 +298,13 @@ _BASH_HINT = (
 _SCOPE = ("🔴 這一次呼叫沒有執行（只擋這條指令字串；"
           "PowerShell／Read／Write／Edit 本身都能用）。")
 _HEADER = (
-    _SCOPE + "要就地寫出這個形態？加行內豁免 `# ps-lint-ok: <理由>`（理由必填）即放行——"
-    "寫文件／寫探針／重現缺陷本來就會寫出違規形態，那不是違規。\n"
+    _SCOPE + "照下面各項「出口」那一行改寫後重跑即可。\n"
     "以下是本次命中的項目：\n\n"
 )
 _FOOTER = (
-    "\n（刻意極窄：本守衛只擋這三件事，其餘一律放行——誤報讓機制被整個關掉，"
-    "比漏擋更糟。回歸鎖：tools/tests/test_check_hooks_liveness.py）"
+    "\n（刻意要原樣寫出這個形態——寫文件／寫探針／重現缺陷本來就會——才加行內豁免 "
+    "`# ps-lint-ok: <理由>`（理由必填）即放行。刻意極窄：本守衛只擋這三件事，其餘一律放行——"
+    "誤報讓機制被整個關掉，比漏擋更糟。回歸鎖：tools/tests/test_check_hooks_liveness.py）"
 )
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -424,31 +446,35 @@ def statement_spans(masked: str) -> list[tuple[int, int]]:
     return spans
 
 
-def _rc_after_pipe(structural: str, expandable: str) -> bool:
-    """規則①：**先後順序**與**跨語句污染**都算數。
-
-    上一版兩個方向都錯：
-    · 漏擋（SD-01）——只看「緊鄰的下一句」（`parts[index + 1]`），中間插任何一句
-      就逃出視窗，而 `$x = 1` 這種句子根本不會重設 `$LASTEXITCODE`，rc 照樣是髒的。
-      改成污染會**一直延續**到某一句真的重新發起呼叫（`_RC_RESET_RE`）為止。
-    · 誤擋（QA-01）——`"rc=$LASTEXITCODE" | Out-File` 是先展開變數再進管線，
-      rc 讀取發生在任何管線中斷**之前**，完全安全卻被硬擋，因為判準只問「同一句
-      有沒有同時出現」不問先後。改成比位置：rc 在管線**之後**才算命中。
-
-    🔴 R79：污染的**解除**條件改由 `_statement_resets_rc()` 判（吃一句、不吃座標）。
-    上一版把「提到一支 exe」與「`2>&1` 裡的 `&`」都當成呼叫，於是一句話就能把污染
-    旗標清掉——而清掉之後放行的，正是這條規則唯一要防的那件事。
-    """
-    contaminated = False
+def _pipeline_spans(structural: str) -> list[tuple[int, int]]:
+    """`statement_spans` 再把續行（行尾或行首的 `|`）併回同一條管線，左段才看得到上一行的指令。"""
+    merged: list[tuple[int, int]] = []
     for start, end in statement_spans(structural):
-        pipe = _PIPE_INTO_RE.search(structural, start, end)
-        pipe_pos = pipe.start() if pipe else -1
+        if merged and (structural[merged[-1][0]:merged[-1][1]].rstrip().endswith("|")
+                       or structural[start:end].lstrip().startswith("|")):
+            merged[-1] = (merged[-1][0], end)
+        else:
+            merged.append((start, end))
+    return merged
+
+
+def _rc_after_pipe(structural: str, expandable: str) -> bool:
+    """規則①：管線污染 × 之後的 rc 讀取（先後與跨語句都算）。
+
+    污染只由 `_blocking_pipe()` 開始、只由 `_statement_resets_rc()` 解除，一直延續到下一次真的外部
+    呼叫（`$x = 1` 清不掉）；同一句內 rc 讀取要在污染管線**之後**才算
+    （`"rc=$LASTEXITCODE" | Out-File` 是先展開再進管線，安全）。
+    """
+    shadowed = bool(_DEFINES_RE.search(structural))
+    contaminated = False
+    for start, end in _pipeline_spans(structural):
+        pipe_pos = _blocking_pipe(structural[start:end])
         for read in _RC_READ_RE.finditer(expandable[start:end]):
-            if contaminated or (pipe_pos >= 0 and start + read.start() > pipe_pos):
+            if contaminated or (pipe_pos is not None and read.start() > pipe_pos):
                 return True
-        if pipe_pos >= 0:
+        if pipe_pos is not None:
             contaminated = True
-        elif _statement_resets_rc(structural[start:end]):
+        elif _statement_resets_rc(structural[start:end], shadowed):
             contaminated = False
     return False
 

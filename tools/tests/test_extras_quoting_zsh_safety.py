@@ -84,24 +84,11 @@ _INSTALL_PREFIX = r"(?:uv[ \t]+)?pip[ \t]+install[ \t]+(?:--?[A-Za-z][A-Za-z-]*[
 # 用單引號；雙引號在 zsh 下同樣抑制 glob，故本正則對兩者都不誤報（起始位置是引號時，
 # 四個分支的第一個字元需求皆失配）。
 #
-# R57 round 1 SD 複審訂正沿革（皆經實測，見 DEF-101-479）：
+# 分支 (a)~(e) 的訂正沿革（R57 round 1 SD 複審、R59 新增三件）搬至
+# Guard_Line_History_2.md〈R194 淨減法搬遷〉§82。  round-label-ok
+# 下列三行是被漏報過的壞形態病例樣本，行內豁免標記不可移（自身樣本下限 `_MIN_SELF_SAMPLES`）：
 # (a) 旗標段原為 `(?:-[A-Za-z]+\s+)*`，**只吃單槓短旗標**——`pip install --upgrade -e .[dev]`  # zsh-glob-ok: 正則沿革說明必須引述被漏報的壞形態
-#     這種帶 GNU 長旗標的寫法整條漏報（實測 old=False / new=True）。改為 `--?[A-Za-z][A-Za-z-]*`。
-# (b) 原有的前方 lookbehind `(?<!["'])` 是**死碼**：加引號版長成 `install -e '.[dev]'`，該位置
-#     的字元是 `'` 而 `\.\[` 本身就要求是 `.`，正則在此必然失配，lookbehind 沒有額外作用。
-#     實測 6 組樣本在「有 lookbehind／無 lookbehind」下結果完全相同，故移除並訂正註解。
-#
-# R59 新增三件（DEF-101-507／508）：
-# (c) 裸 `.[` 分支前置一個 **選配的路徑前綴** `(?:[^\s'"]*[/\\])?`——R57 版的錨要求 `.[`
-#     緊接在旗標之後，故下列這種寫法整條漏報。POSIX `/` 與 Windows `\` 兩種分隔符都吃
-#     （`bootstrap_core.py` 用 `os.sep` 組路徑，兩者都會出現）：
 #         pip install -e /abs/path/.[dev]  # zsh-glob-ok: 正則沿革要說明「原本漏報什麼」就必須引述該壞形態
-# (d) **具名套件**分支 `[A-Za-z_][A-Za-z0-9_.-]*\[…\]`：DEF-101-507 的本體。名稱字元類
-#     刻意不含空白，故 `pip install foo   # 見 [附註]` 這種「同行後方另有方括號」不誤報。
-# (e) **插值 target**分支 `\$?\{[^}!]*\}`（R59 SD-R59-04 起排除 `!`，見下）：DEF-101-508 在原始碼裡的真實長相如下，方括號
-#     在字面上根本不存在，(a)~(d) 全都看不到它。無論插值進來的是什麼，你都無法保證它
-#     不含 glob 元字元或空白，故「印給使用者複製貼上的插值 target 一律要加引號」是這裡
-#     唯一站得住的規則：
 #         _err(f"…pip install -e {autoclaude_target}")  # zsh-glob-ok: DEF-101-508 的真實形態病例樣本
 _UNQUOTED_EXTRAS_RE = re.compile(
     _INSTALL_PREFIX
@@ -152,13 +139,7 @@ _MIN_SCANNED = 3000
 
 # 已加引號的正確形態下限：本鎖若只斷言「沒有未加引號」，把全部 extras 指令從文件裡
 # 刪光也會綠。釘正確形態的數量下限，讓「修復被整段刪除」也有訊號。
-# R57 修復後裸/路徑形態實測 30 處，R59 擴面後為 35；具名形態 R59 修復後實測 42 處。
-# 42 的分解（二審 QA-R59-P3-2 訂正：初稿寫「41 處本輪新加引號 + ONBOARDING 1 處」，
-# 41 這個數字對不上帳本 DEF-101-507 記的 40 處，差額是本鎖 docstring 自帶的正確樣本）：
-#   40 處＝本輪 DEF-101-507 實際新加引號的站點（與帳本一致）
-# +  1 處＝`ONBOARDING.md` 那處 R57 自己就寫對的 `'AutoClaude[dev,…]'`
-# +  1 處＝本鎖 docstring 內自帶的正確形態樣本（掃描面含本檔，故自己也被計入）
-# 兩者各取約 6 成的保守下限。
+# 實測分解與保守下限的由來搬至 Guard_Line_History_2.md〈R194 淨減法搬遷〉§83。  round-label-ok
 _MIN_QUOTED_DOT = 20
 _MIN_QUOTED_NAMED = 25
 
@@ -170,13 +151,8 @@ _EXEMPT_RE = re.compile(r"zsh-glob-ok:\s*(?P<why>.*?)\s*(?:-->\s*)?$")
 # 豁免總數上限：豁免是給「必須引述壞例子」這類少數情境用的，不是給人繞過的後門。
 # 超過此數＝豁免正在被濫用，fail-loud 要求人重新檢視（同 check_script_parity 對
 # `_SINGLE_SIDED_EXEMPT` 的 stale 反向檢查精神）。
-# R59 實測 9 行：`ONBOARDING.md` §5 雷區表 1 行 + 本檔 docstring／註解的病例樣本 8 行
-# （本檔是這道鎖的實作，且判準 (4) 的三段式**要求**逐項列出被涵蓋/不涵蓋的壞形態，
-# 內含壞形態是本質需求；整檔排除才是 fail-open，故仍走逐行豁免）。上限自 R57 的 5
-# 調到 10 即為此擴面所需，非放寬紀律。**R59 二審再訂正**：單一總上限本身就是缺陷來源
-# ——它把「本鎖的規格文件有多長」與「有沒有人濫用豁免」混在同一個計數器裡，撞頂訊息
-# 會把成因指錯人，最省力的反應就是再調高數字。現行權威已改為下方兩本分帳，
-# `_MAX_EXEMPTIONS` 為其衍生值（sanity net）。
+# 現行權威是下方兩本分帳，`_MAX_EXEMPTIONS` 為其衍生值（sanity net）。9 行實測、上限 5→10 與單一總
+# 上限缺陷的訂正沿革搬至 Guard_Line_History_2.md〈R194 淨減法搬遷〉§86。  round-label-ok
 
 # ── R59 ARCH-R59-02：豁免預算必須分兩本帳 ─────────────────────────────────────
 # 問題：單一總上限同時量「本鎖規格文件有多長」與「有沒有人濫用豁免」，撞頂訊息把成因指錯人、最省力
@@ -192,24 +168,15 @@ _MIN_SELF_SAMPLES = 6
 # 本檔之外的豁免：這是真正該嚴管的一本帳（R59 實測僅 ONBOARDING.md §5 雷區表 1 行）。
 _MAX_EXTERNAL_EXEMPTIONS = 3
 
-# R59 二審 ARCH-R59-02-C1 訂正：本常數原為寫死的 10，於是「自身樣本寬上限 20」在結構上
-# **不可達**——總帳先綁死，實際自身天花板是 `10 − external`（實測 7），headroom 只剩 1，
-# 我要修的失效模式原封不動還在（下輪補 2 行病例樣本就翻紅，訊息仍把成因指錯人）。
-# 改為**衍生值**：分帳成為權威，總帳降格為 sanity net（仍保留 fail-loud 網，不刪測試）。
+# 本常數為**衍生值**（分帳成為權威、總帳降格為 sanity net）。訂正沿革搬至
+# Guard_Line_History_2.md〈R194 淨減法搬遷〉§84。  round-label-ok
 _MAX_EXEMPTIONS = _MAX_SELF_SAMPLES + _MAX_EXTERNAL_EXEMPTIONS
 
 
 def _scan_targets() -> list[Path]:
     """掃描面＝**tracked ∪ untracked-not-ignored**（R70／`DEF-101-752`）。
 
-    🔴 本函式原名 `_tracked_scan_targets`、只跑 `git ls-files`，而本檔 docstring
-    「已實測不涵蓋」節逐字寫著「未 tracked 的新檔在 `git add` 前掃不到（`git ls-files`
-    固有性質，**與 `test_platform_utils_dedup.py` 同政策**）」——R69 證明那個政策是
-    真 fail-open：`AutoClaude/autoclaude/utils/platform_caps.py` 全程 untracked，
-    使它與 dedup 鎖的衝突躲過四輪四方複審與多次全套實跑，直到 `git add -A` 才顯形。
-    該檔已於 R70 改為聯集掃描面，本檔同步（否則「同政策」這句話會指向一個已經不存在
-    的政策，讀者仍會以為盲區是刻意取捨）。`-o --exclude-standard` 尊重 `.gitignore`，
-    `_EXCLUDED_SUBSTRINGS` 過濾與 `_MIN_SCANNED` 下限皆不受影響。
+    更名與聯集掃描面的立案沿革搬至 Guard_Line_History_2.md〈R194 淨減法搬遷〉§85。  round-label-ok
     """
     paths = []
     seen: set[str] = set()

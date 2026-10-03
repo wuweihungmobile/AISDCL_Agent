@@ -432,12 +432,10 @@ class TestUnittestDiscoverConformance(unittest.TestCase):
     def test_scan_surface_is_not_silently_empty(self) -> None:
         """掃描面自檢：本鎖若因目錄結構變動而掃到 0 份檔案，必須紅而非靜默通過。
 
-        🔴 R75 訂正（SD 追加②）：下限原為寫死的 `40`、註解寫「R60 實測 43 份」，而 R75
-        實測已是 53 份 ⇒ 下限只剩實測的 75%，對「靜默縮面」的鑑別力被吃掉一截，而
-        **沒有任何東西會在它過期時說話**——這與 R74 自己踩到的 `MIN_TESTS` 腐化 11 輪
-        是同一種病。現改為與 `tools/lib/skip_tag_policy.py` 的逐樹下限**共用同一條政策**
-        （下限＝實測的 `TREE_FLOOR_RATIO`），並補上第二個方向的斷言：下限一旦跌破該比例
-        就是一筆失敗，逼人回來重釘。比例常數刻意 import 而非在此再寫一份 0.8。
+        🔴 下限＝實測的 `TREE_FLOOR_RATIO` 倍（與 `tools/lib/skip_tag_policy.py` 的逐樹下限共用同
+        一條政策，比例常數 import 而非在此再寫一份），下限一旦跌破該比例就是一筆失敗，逼人回來重釘。
+        R75 訂正（SD 追加②）沿革搬至
+        Guard_Line_History_2.md〈R194 淨減法搬遷〉§102。  round-label-ok
         """
         modules = self._test_modules()
         self.assertGreaterEqual(

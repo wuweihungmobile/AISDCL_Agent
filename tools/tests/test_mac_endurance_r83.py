@@ -1898,7 +1898,10 @@ class PlanDirWiringTest(unittest.TestCase):
 
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp(prefix="r131_plandir_"))
-        self.addCleanup(os.environ.pop, endurance_env.PLAN_DIR_ENV, None)
+        # DEF-200-464：還原整份環境而非 pop（pop 會把原本有值的鍵一併清掉）
+        env = mock.patch.dict(os.environ)
+        env.start()
+        self.addCleanup(env.stop)
 
     def test_plan_dir_env_is_distinct_from_traces_and_handback(self) -> None:
         self.assertNotEqual(endurance_env.PLAN_DIR_ENV, endurance_env.TRACE_DIR_ENV)
@@ -1939,7 +1942,10 @@ class ReapPlansDefaultRootFollowsPlanDirTest(unittest.TestCase):
 
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp(prefix="r131_reap_plandir_"))
-        self.addCleanup(os.environ.pop, endurance_env.PLAN_DIR_ENV, None)
+        # DEF-200-464：還原整份環境而非 pop（pop 會把原本有值的鍵一併清掉）
+        env = mock.patch.dict(os.environ)
+        env.start()
+        self.addCleanup(env.stop)
 
     def test_reap_plans_with_no_root_scans_the_durable_plan_dir_not_system_tmp(self) -> None:
         os.environ[endurance_env.PLAN_DIR_ENV] = str(self.tmp)

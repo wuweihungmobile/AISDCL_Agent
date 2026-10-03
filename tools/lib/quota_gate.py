@@ -170,6 +170,9 @@ QUOTA_SYNC_TIMEOUT_SECONDS = 4
 #: 三者關掉的是三件不同的事（context 阻斷／續航哨兵／額度節流），共用一個開關會讓「我只是
 #: 想暫時別被擋」順手把另外兩層一起關掉，而那件事沒有人會注意到。
 QUOTA_OFF_ENV = "AUTOSDD_QUOTA_GUARD_OFF"
+#: DEF-200-479：`quota_gate()` 進場記下的目標模型家族（＝遲滯檔的鍵）。沒給 cap 的 6 個降級呼叫點
+#: 不知道自己服務哪個家族，姿態句借它讀致動器真正用的那份遲滯歷史（行程內單次進場即定）。
+_QUOTA_CTX: dict[str, str | None] = {"model": None}
 #: 🔴 `QUOTA_CAP_ENV`（`AUTOSDD_QUOTA_FANOUT_CAP`）的墓碑：cap 覆寫的讀取與夾制整條搬到
 #: `quota_policy.ENV_SPEC`／`Policy.fanout_cap_override`（那裡它是**上限**，只收緊不放寬；
 #: 舊版把它當乘法的 base，於是 `=8` 在 near 檔實得 16——一個名字叫 CAP 的旋鈕給出比使用者
@@ -633,26 +636,23 @@ def degraded_stamp_path(source: str) -> Path:
 
 
 def degraded_posture(now: datetime | None = None, cap: int | None = None) -> str:
-    """量不到時**這一刻真正的姿態**，由 `decide()` 的回傳值算出來。
-
-    🔴 立案（R100／PRD §4.1.5 R-4.1.5-2）：本函式取代的那一句逐字寫
-    `⇒ 本次不節流，扇出照常放行。`，而同一支檔 `quota_gate()` 內的註解自述「量不到時
-    `decide()` 回 `degraded_cap`（不是不設限、也永不 halt）」⇒ **同一個決策有兩份互相
-    矛盾的敘述，而只有訊息那一份有讀者**（`decide()` 算出來的 cap 不會出現在畫面上）。
-    兩個方向的誤判都真的會發生：operator 以為沒保護而過度手動收斂，或以為有保護而加派。
+    """量不到時**這一刻真正的姿態**，由 `decide()` 的回傳值算出來（PRD §4.1.5 R-4.1.5-2）。
 
     🔴 為什麼是**算**而不是「把字串改對」：字串改對只會在下一次調 `degraded_cap` 時再度
     漂開（那正是本輪要修的那一族）。這裡呼叫的是**同一個** `decide()`，於是姿態字面與
     致動器結構上不可能不一致——判準因此是「同源」而不是「某句特定文案」。
 
-    DEF-200-466：`cap`＝呼叫端手上**實際要執法的值**（平穩機制之後），有給就直接印它；
-    此前一律印上面那個未平穩的 `decide()` 值——持久 cap=0 時印「收到 2」而致動器擋在 0。
-    沒給（降級通報的其他來源，還沒走到平穩機制）才自己算。
+    DEF-200-466：`cap`＝呼叫端手上實際要執法的值（平穩機制之後），有給就直接印它。DEF-200-479：
+    沒給（6 個降級呼叫點，還沒走到平穩機制）＝與致動器同一支 `stabilize()` 的唯讀一步（讀當前
+    家族的遲滯檔、不寫），不再印未平穩的 `decide()` 值；注入 `now` 時維持純函式、不讀磁碟。
     """
     when = now or datetime.now().astimezone()
     if cap is None:
-        cap = quota_policy.decide(_blank("posture-probe"), when,
-                                  quota_policy.load_policy(policy_env())[0]).cap
+        policy = quota_policy.load_policy(policy_env())[0]
+        probe = quota_policy.decide(_blank("posture-probe"), when, policy)
+        cap = (probe.cap if probe.cap is None or now is not None else quota_stability.stabilize(
+            quota_stability.load_state(scope=_QUOTA_CTX["model"]), probe.cap, probe.band, when,
+            min_dwell_seconds=policy.min_dwell_seconds, unmeasured=True).cap)
     if cap is None:                       # 結構上到不了；到得了就是 fail-safe 破了
         return "本次**不設限**（⚠️ 量不到卻不設限＝fail-safe 已失效，請查 decide()）。"
     return f"本次扇出硬上限收到 {cap}（量不到 ⇒ 收緊，不是放行）。"
@@ -945,8 +945,7 @@ def pace_report(now: datetime | None = None, model: str | None = None,
     # 🔴 R96／B-2：同一個 `live` 現在**還要餵給 `pace_line()`**——舵手派工前問的那個數字
     # 此前只讀 cap 側（`recommended_fanout`），而守衛擋人的判準是滾動視窗派發帳
     # ⇒ 實測「`--pace` 印可派 2 個」與「`Agent` 被擋、本視窗已用 2 次」同一刻並存。
-    # 用 walrus 而不是多一行 `live = …`：本檔 `guardrail_hub` tier 餘裕為 0（500/500），
-    # 取數次數與時點逐字不變（同一次呼叫、同一個 `now`），只是把值留下來給第二個消費者。
+    # 用 walrus 留值：取數次數與時點逐字不變（同一次呼叫、同一個 `now`），只是給第二個消費者。
     root = fanout_ledger_path()
     record_burn(state, live := live_dispatches(root, now))
     # 🔴 `DEF-200-169`：**先** `live_dispatches()`（它會 prune 掉滾出視窗的目錄項）**再**問
@@ -1052,6 +1051,7 @@ def quota_gate(payload: dict, *, blocking, latch_read, latch_write,
     tool = str(payload.get("tool_name") or "")
     if event == "PreToolUse" and tool not in blocking:
         return 0  # 扇出邊緣才看名單：收斂（讀檔、寫任務書、跑 git）不受額度節流影響
+    _QUOTA_CTX["model"] = active_model  # DEF-200-479：降級姿態句找遲滯檔用（見 degraded_posture）
     # 🔴 R82／C2：逃生口與門檻讀**同一份**合併視圖（`.env` 當預設、真 env 覆寫）。
     # 舊版讀 `os.environ` ⇒ `.env` 裡設的那個開關是假話。判準往下挪一格是**行為等價**的
     # （非扇出型工具兩條路都回 0），換到的是「本檔只讀一次環境」。

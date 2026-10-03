@@ -8,6 +8,7 @@ feed reason 兩格）與 G2（stale-cache 追加文案兩格）。接線面另�
 from __future__ import annotations
 
 import contextlib
+import fnmatch
 import io
 import json
 import os
@@ -238,6 +239,8 @@ class Rc2ClarifyTest(unittest.TestCase):
         self.assertIn("PowerShell", got)
         self.assertIn("鐵律一 hook 停用", got)
         self.assertNotIn("／Bash／", got, "Windows 版不該再教 Bash 這個已被停用的載具")
+        self.assertIn("PowerShell／Write／Edit 照常可用", got)
+        self.assertNotIn("不能寫檔", got, "句中引述症狀字面＝預示症狀（DEF-200-476）")
 
     def test_posix_variant_is_the_pause_half_plus_the_single_clause(self) -> None:
         got = sb.rc2_clarify(windows=False)
@@ -992,19 +995,21 @@ class ReadFallbackHintTest(unittest.TestCase):
     def test_both_platforms_teach_the_read_tool_fallback(self) -> None:
         for windows in (False, True):
             hint = sb.verify_hint(windows=windows)
-            for needle in ("**Read**", "auto mode", "唯讀", "used_percentage", "current_usage",
+            for needle in ("**Read**", "分類器", "唯讀", "used_percentage", "current_usage",
                            "context_window_size", "axes[]", "severity", "不要憑簡報猜",
                            "不要宣稱被擋"):
                 self.assertIn(needle, hint, (windows, needle))
+            self.assertNotIn("寫檔被拒", hint, (windows, "條件句不預寫劇本（DEF-200-476）"))
 
     def test_both_platforms_say_a_permission_prompt_is_not_a_hook_block(self) -> None:
         """退路的兩個 Read 目標在 cwd 外、planner 現查也常要核准：模型把這種權限詢問讀成「被擋」就會
-        放棄現查並宣稱被擋。句子只掛在唯讀退路之後（整則訊息一次），不進其他段落。"""
+        放棄現查並宣稱被擋。解釋句只掛在唯讀退路之後（整則訊息一次；開頭條件子句也提到「權限詢問」
+        不算解釋句），不進其他段落。"""
         for windows in (False, True):
             with self.subTest(windows=windows):
                 hint = sb.verify_hint(windows=windows)
-                self.assertEqual(hint.count("權限詢問"), 1, hint)
                 after_fallback = hint.split("不要宣稱被擋", 1)[1]
+                self.assertEqual(after_fallback.count("權限詢問"), 1, hint)
                 for needle in ("權限詢問", "harness", "不是 hook 阻斷", "核准"):
                     self.assertIn(needle, after_fallback, (windows, needle))
                 self.assertNotIn("權限詢問", sb.rc2_clarify(windows=windows))
@@ -1227,6 +1232,55 @@ class SessionGateAcceptanceTest(unittest.TestCase):
             '{"half-written']) + "\n", encoding="utf-8")
         os.utime(old, (1_000_000_000, 1_000_000_000))
         self.assertEqual(self.sga.cc_version(_REPO_ROOT), "2.1.288")
+
+
+class RepoSettingsReadOnlyAllowTest(unittest.TestCase):
+    """DEF-200-476：repo settings 的 permissions.allow 只准是簡報教的兩條 planner 現查＋兩個唯讀退路
+    Read 目標。涵蓋判定摹仿 harness（去 Tool(…) 外殼、含 * 者萬用比對），不重寫它的比對器。"""
+    _SETTINGS = _REPO_ROOT / ".claude" / "settings.json"
+    #: venv 相對形（`.venv\Scripts\python.exe tools/…`）在 headless dontAsk 探針實測
+    #: PS-DENIED＝死規則，已移除；SOP 第 0 步改教與簡報相同的裸 python 字面。
+    _HEADS = {"PowerShell": ("python tools/", "python *"),
+              "Bash": ("python tools/", "python *")}
+    _ALLOW = frozenset(f"{t}({h}session_resume_planner.py --{f}*)" for t, hs in _HEADS.items()
+                       for h in hs for f in ("check", "pace")) | {
+        "Read(~/.autosdd/context_feed/*.json)", "Read(~/autosdd_quota.json)"}
+    _NARROW = re.compile(
+        r"^Read\(~/(\.autosdd/context_feed/\*\.json|autosdd_quota\.json)\)$|"
+        r"^(Bash|PowerShell)\((python|\.venv\S*python(\.exe)?) \S*session_resume_planner\.py "
+        r"--(check|pace)\*\)$")
+
+    def _allow(self) -> list[str]:
+        return json.loads(self._SETTINGS.read_text(encoding="utf-8"))["permissions"]["allow"]
+
+    def _covered(self, tool: str, text: str) -> bool:
+        rules = [(r.partition("(")[0], r.partition("(")[2][:-1]) for r in self._allow()]
+        return any(t == tool and (fnmatch.fnmatchcase(text, p) if "*" in p else text == p)
+                   for t, p in rules)
+
+    def test_allow_equals_the_constant_table_without_duplicates(self) -> None:
+        self.assertEqual(sorted(self._allow()), sorted(self._ALLOW), "集合不等或有重複規則")
+
+    def test_each_brief_command_is_covered_on_both_carriers(self) -> None:
+        for cmd in re.findall(r"`([^`]+)`", sb._CHECK_PACE):
+            for tool in ("Bash", "PowerShell"):
+                self.assertTrue(self._covered(tool, cmd), (tool, cmd))
+
+    def test_read_rules_cover_the_briefs_read_targets_under_any_home(self) -> None:
+        home = tempfile.mkdtemp(prefix="allow-home-")
+        self.addCleanup(shutil.rmtree, home, True)
+        env = dict.fromkeys(("HOME", "USERPROFILE"), home) | {
+            "AUTOSDD_CONTEXT_FEED_DIR": "", "AUTOSDD_QUOTA_CACHE_DIR": ""}
+        with mock.patch.dict(os.environ, env):
+            for shown in sb._read_targets(quota_gate, "x"):
+                rel = "~/" + Path(shown.strip("`")).relative_to(Path.home()).as_posix()
+                self.assertTrue(self._covered("Read", rel), rel)
+
+    def test_no_rule_widens_beyond_the_two_read_only_families(self) -> None:
+        for rule in self._allow():
+            self.assertRegex(rule, self._NARROW)
+            self.assertNotRegex(
+                rule, r"^(Write|Edit|NotebookEdit)\(|git (commit|push)|Remove-|\*\*")
 
 
 if __name__ == "__main__":

@@ -632,14 +632,10 @@ class TestPlanNeverProposesActiveRows(unittest.TestCase):
                          "三分類必須是主檔全部表格列的一個劃分（不重不漏）")
 
     def test_claimed_rows_may_be_movable_but_must_stay_resolvable(self):
-        """判準③ 的 R68 改寫（DEF-101-676）：「被宣稱過」不再是 blocker，取而代之的義務是
-        「搬走後那句宣稱仍解析得到」。
-
-        取代舊的 `assertNotIn(v["id"], claimed)`：舊斷言把「被提過」永久等同「不可搬」，
-        危害其實是搬走後 `_scan_target()` 找不到；補上 `gate._load_archive_status()`
-        使帳本 SSOT 真正涵蓋主檔∪archive 家族後，兩者解耦。改寫動機與代價量化史料見
-        證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。本條正向驗證新義務：對每一筆「被宣稱過
-        ＆ 可搬」的列，斷言它在帳本家族內解析得到且狀態與宣稱一致。
+        """判準③（DEF-101-676）：「被宣稱過」不再是 blocker，取而代之的義務是「搬走後那句宣稱仍解
+        析得到」。本條正向驗證新義務：對每一筆「被宣稱過＆可搬」的列，斷言它在帳本家族內解析得到且
+        狀態與宣稱一致（帳本 SSOT 經 `gate._load_archive_status()` 涵蓋主檔∪archive 家族）。R68 改
+        寫動機與代價量化沿革搬至 Guard_Line_History_2.md〈R194 淨減法搬遷〉§111。  round-label-ok
         """
         p = ADL.plan()
         claimed = ADL._status_claimed_ids()
@@ -3352,9 +3348,7 @@ class TestArchiveUnresolvedRowsAreRatcheted(unittest.TestCase):
 class TestTemporalNarrativeSamplesStayUncaught(unittest.TestCase):
     """把 `NONVERB_RESIDENCE_RE` 上方那句「時態性敘述不會被誤收」接上機械物。
 
-    為何需要（本輪實證）：那句話原本只寫「實測家族內…」而不寫樣本住哪一支檔，
-    於是一次以**主檔**為掃描面的複查把它讀成 stale（樣本其實住 archive）。
-    一句對的話因為缺座標而被讀成錯的，下一次就可能被「順手訂正」成真的錯的。
+    立案沿革搬至 Guard_Line_History_2.md〈R194 淨減法搬遷〉§112。  round-label-ok
     兩條缺一不可：樣本仍在（否則是對不存在字串的空斷言）＋樣式仍零命中。
     """
 

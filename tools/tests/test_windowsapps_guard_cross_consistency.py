@@ -1136,12 +1136,10 @@ class TestNoOrphanWindowsAppsImplementation(unittest.TestCase):
         python 但未 dot-source SSOT 且未呼叫 Test-IsRealPython」者，不再要求
         先提及 WindowsApps 字面值。
 
-        R44 SA 一審追加揪出：初版判準是檔案層級（只要檔案內某處存在 guard
-        陳述即視為全檔安全），實測構造「1 處 guard、其餘 15+ 處裸呼叫與判斷
-        結果無關」仍全綠。改用 `_all_python_invocations_are_ssot_protected`：
-        呼叫點層級，要求每個裸呼叫歸類到 (A) guard 失敗即 fail-fast 或
-        (B) guard 結果存變數、全呼叫點改用該變數，任一歸類不到即未受保護。
-        真實案例清單與逐輪追加史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
+        判準是呼叫點層級（`_all_python_invocations_are_ssot_protected`）：每個裸呼叫都要歸類到 (A)
+        guard 失敗即 fail-fast 或 (B) guard 結果存變數、全呼叫點改用該變數，任一歸類不到即未受保護。
+        R44 SA 一審追加揪出的初版缺陷（檔案層級判準）與真實案例清單沿革搬至
+        Guard_Line_History_2.md〈R194 淨減法搬遷〉§104。  round-label-ok
         """
         latest_name = _latest_sdd_root().name
         scoped_ps1 = _exclude_frozen_sdd_versions(_tracked_files("*.ps1"), latest_name)
@@ -1193,16 +1191,11 @@ class TestNoOrphanWindowsAppsImplementation(unittest.TestCase):
     def test_windows_apps_predicate_impls_are_all_registered(self) -> None:
         """Python 側 WindowsApps 空殼判斷式的實作站點必須全部登記在案。
 
-        三輪訂正逐步收斂鑑別力：①以函式名為錨曾被逐字相同、只改函式名的第二
-        實作完整逃過，改以判斷式內容為錨並比照 `_EXEMPT_PS1_FILES` 慣例登記
-        白名單；②函式名錨與運算式錨互補，改為 `_STUB_NAME_RE` ∪
-        `_STUB_PREDICATE_RE` 雙錨判定；③兩錨原大小寫敏感，補 `re.I` 收攏
-        （既知邊界：改名且嵌進更大字串或字串串接組出者仍逃得掉）。掃描面亦曾
-        因 `scoped_prefixes` 縮面漏掉 16 支生產 `.py`，改為與姊妹 `.ps1`／`.sh`
-        掃描同政策（只排凍結版與測試檔）。白名單有 stale 檢查（登記項不再命中
-        任一錨即翻紅），測試檔本身排除在外（同檔內出現字面值是斷言 SSOT 內容，
-        非第二實作）。逐輪實測數字與 bug-injection 案例史料見證據檔
-        〈第七輪 史料搬遷（Dev-Trim8）〉。
+        站點偵測以判斷式內容為錨（並比照 `_EXEMPT_PS1_FILES` 慣例登記白名單）：取 `_STUB_NAME_RE`
+        ∪ `_STUB_PREDICATE_RE` 雙錨並大小寫不敏感（既知邊界：改名且嵌進更大字串或字串串接組出者仍
+        逃得掉）；掃描面與姊妹 `.ps1`／`.sh` 同政策（只排凍結版與測試檔）。白名單有 stale 檢查，測
+        試檔本身排除在外。三輪訂正的逐輪實測與 bug-injection 案例沿革搬至
+        Guard_Line_History_2.md〈R194 淨減法搬遷〉§103。  round-label-ok
         """
         latest_name = _latest_sdd_root().name
         all_py = _exclude_frozen_sdd_versions(_tracked_files("*.py"), latest_name)

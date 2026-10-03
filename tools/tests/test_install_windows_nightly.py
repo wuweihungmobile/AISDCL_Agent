@@ -230,13 +230,10 @@ class TestInstallWindowsNightlyStructure(unittest.TestCase):
         self.assertIn("-WindowStyle Hidden", self.text)
         self.assertIn("run_local_nightly.ps1", self.text)
         self.assertIn("-Daily", self.text)
-        # 🔴 R73（DEF-101-779）：原本斷言 help 區塊含某個時刻字面值，即把觸發時間**釘進鎖裡**
-        # 釘進鎖裡。那個字面值與本機實際排程（22:30）不符，而 install 路徑是
-        # Unregister→Register ⇒ 「跑安裝器套設定」會靜默把時間改掉，於是 ADR-SD09-012
-        # 點名的五項排程設定連兩輪沒人敢套。時間改為參數後，鎖要釘的是**結構**：
-        # 兩個 trigger 都必須吃參數（不得再回頭寫死），且參數都要有格式驗證。
-        # 刻意**不**斷言預設值等於本機現行排程——那會把「這台機器排幾點」寫成鎖的常數，
-        # 正是 DEF-101-777 同一個病（見 test_ps_engine_ssot.py::TestNoStaleLocalEngineClaims）。
+        # 鎖要釘的是**結構**：兩個 trigger 都必須吃參數（不得再回頭寫死），且參數都要有格式驗證；
+        # 刻意**不**斷言預設值等於本機現行排程（那會把「這台機器排幾點」寫成鎖的常數，DEF-101-777
+        # 同一個病）。R73（DEF-101-779）沿革搬至
+        # Guard_Line_History_2.md〈R194 淨減法搬遷〉§124。  round-label-ok
         self.assertIn("-Daily -At $NightlyAt", self.text,
                       "nightly trigger 必須吃 $NightlyAt 參數，不得寫死時間字面值")
         self.assertIn("-Daily -At $SmokeAt", self.text,

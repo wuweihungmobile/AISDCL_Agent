@@ -137,10 +137,7 @@ class TestSingleSidedEnrollment(unittest.TestCase):
         )
 
     def _run_enrollment(self, fake_root: Path, single_exempt: dict[str, str]):
-        # 🔴 R80 S5-05：原本逐一寫 `patches[0]…patches[5]` 六個索引。`_patched()` 少回一個
-        # 元素（本輪刪掉已死的 _MARKER_PAIRS 名冊）時，這裡是 IndexError 而不是有意義的
-        # 紅燈——索引數字是這個 helper 與它的生產者之間第二個必須手動同步的家。改用
-        # ExitStack 依實際長度展開，數量從此只有一個家。
+        # 沿革搬至 Guard_Line_History_2.md〈R194 淨減法搬遷〉§127。  round-label-ok
         with contextlib.ExitStack() as stack:
             for patch in self._patched(fake_root, single_exempt):
                 stack.enter_context(patch)
@@ -1464,10 +1461,7 @@ class TestR67UnpinnedExitObligation(unittest.TestCase):
     def test_reason_with_exit_anchor_is_green(self) -> None:
         """對照組（雙向）：帶錨點即通過——證明紅燈來自缺錨點，不是 fixture 本身壞掉。
 
-        🔴 本輪（E-05／R77-13）訂正：具名輪次的正控樣本原本寫死一個**不存在的輪號**，
-        於是這支「證明合法寫法會通過」的對照組，用的是一個與『未指派』等效（永遠不到
-        期）的假承諾當範例——判準的正控自己就是它該擋的東西。改為自帳本現查當前輪推導
-        下一輪，樣本因此永遠是「真的可能被排進來」的那一個，且不隨輪次推進而過期。
+        訂正沿革搬至 Guard_Line_History_2.md〈R194 淨減法搬遷〉§126。  round-label-ok
         """
         current = m._current_round()
         self.assertIsNotNone(current, "真 repo 內帳本必須推得出當前輪，否則本正控空轉")

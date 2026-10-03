@@ -1425,10 +1425,7 @@ class TestR67PerPlatformFingerprints(unittest.TestCase):
     def test_table1_macos_cell_declares_it_is_not_lock_covered(self) -> None:
         """R67-F28：表① 的 macOS 欄必須自陳「不受 live 鎖管轄」，且不得再寫死收集總數。
 
-        WHY：`rootunit-baseline-live` 鎖只抽**右欄**那個 `N tests OK` token，macOS 欄是純
-        散文。原本該格寫死 `616（skipped=4；R57 量測）`，落後實況約九輪而**任何機械物都
-        抓不到**——它根本不在鎖的取值範圍內；而該格與受鎖格同處一張標榜「live 格（有機械
-        鎖）」的表內，讀者會誤以為「有鎖所以可信」（R60 ARCH-R60-03 的原始成因）。
+        WHY 立案沿革搬至 Guard_Line_History_2.md〈R194 淨減法搬遷〉§93。  round-label-ok
         故判準有兩條：(a) 該格必須自陳不受鎖管轄；(b) 不得再寫死收集總數（改指向 live 值）。
         """
         lines = _ONBOARDING.read_text(encoding="utf-8-sig").split("\n")
@@ -1453,12 +1450,7 @@ class TestR67PerPlatformFingerprints(unittest.TestCase):
     def test_table1_locked_column_header_does_not_speak_for_a_provenance(self) -> None:
         """SA-R67-07 的回歸鎖：表① **受鎖欄的欄頭**不得代言量測平台／時點。
 
-        WHY（成因是結構性的，不是筆誤）：`rootunit-baseline-live` 抽的 token 取自
-        `run_root_unittests.MIN_TESTS`，那是一個**平台中立**的下限釘選——誰在哪台機器重釘
-        都寫進同一格。而該格所在欄的欄頭長年寫著「Windows 11（R60 收尾實測）」，於是
-        R67 在 Darwin 真機重釘後，一個 macOS 量得的數字就靜靜掛在標示「Windows 11 實測」
-        的欄頭底下。**產生器把 token 洗新鮮了，欄頭卻沒有任何機械物在看**——與 DEF-101-562
-        （「只保證被抽取的 token 新鮮，不保證同一行的散文新鮮」）是同一個病灶的欄頭版。
+        WHY 立案沿革搬至 Guard_Line_History_2.md〈R194 淨減法搬遷〉§92。  round-label-ok
 
         判準刻意寫成**正面斷言**（欄頭必須自陳中立），不寫成「不得出現『收尾實測』」：
         訂正段必須逐字引述被推翻的原句才能讓讀者辨認版本，而這一格是**單行巨欄**
@@ -2643,11 +2635,7 @@ class TestR71NightlyProbeActuallyParsesEachPlatformsOwnFormat(unittest.TestCase)
     def test_probe_window_is_bounded_so_a_multi_megabyte_log_is_not_slurped(self) -> None:
         """全量 log 可達數 MB：窗格必須有界。以**實際讀進記憶體的位元組數**機械證明。
 
-        🔴 本支上一版是**零鑑別力的死鎖**（本批注入實測：把 `f.seek(…)` 整行刪掉、改成
-        `f.read()` 讀滿全檔，6/6 照樣全綠）。它斷言的是「檔頭誘餌不出現在**輸出那一行**」，
-        而 `nightly_summary()` 取的是 `hits[-1]`——檔尾的真彙總行**永遠**會蓋掉檔頭誘餌，
-        於是它證的其實是「取最後一筆命中」，跟有沒有界完全無關；docstring 卻宣稱後者。
-        「寫了鎖沒驗鎖」與 DEF-101-763 的 fallback 文案同構：看起來有守，實際一天沒守過。
+        上一版缺陷沿革搬至 Guard_Line_History_2.md〈R194 淨減法搬遷〉§94。  round-label-ok
 
         改法：用 duck-typed Path 替身把 `read()` 真正吐出的位元組記帳。任何形態的整檔讀
         （`f.read()` 不 seek／先讀全檔再切尾）都會讓帳超出上限而轉紅；繞過 `path.open()`
@@ -3977,12 +3965,9 @@ _PATH_CLAIM_GLOBS: tuple[str, ...] = (
     "docs/06_quality/CrossPlatform_Scan_Dimensions.md",
     "docs/04_planning/*HANDOFF*.md",
     "docs/04_planning/ADR/*.md",
-    # 🔴 R81 QA B-3：軌道① 的**唯一驅動器**（根 CLAUDE.md 明定），每輪最多人照著讀的
-    # 活文件——卻是本面上線時整片失明的一角。注入實測：同一句假路徑放進交棒書兩顆牙都
-    # 咬，放進 `AutoSDD_improving_105.md` 則 13 tests OK 直接放行，而四項誠實劃界一句
-    # 都沒提到它（「有鎖在守，但那一面不在射程」比沒有鎖更難看見）。收進來的存量成本
-    # 實測僅 3 筆（全在最新一份、且全是該檔自己聲明「本輪尚未建立」的產出目標），
-    # 遠低於程式碼面那 49 筆 ⇒ 沒有「製造大批假紅」的顧慮。
+    # 軌道① 的**唯一驅動器**（根 CLAUDE.md 明定），每輪最多人照著讀的活文件；納入掃描面的存量成本
+    # 實測僅 3 筆（遠低於程式碼面那 49 筆），無「製造大批假紅」的顧慮。注入實測與存量成本沿革搬至
+    # Guard_Line_History_2.md〈R194 淨減法搬遷〉§89。  round-label-ok
     "docs/04_planning/AutoSDD_improving_*.md",
 )
 #: 解析基準的快取（`path_claim_bases` 要跑一次 subprocess，而本檔的平台中立性鎖會把
@@ -3991,16 +3976,12 @@ _PATH_CLAIM_BASES_CACHE: list[tuple[str, ...]] = []
 
 
 def path_claim_bases(repo_root: Path) -> tuple[str, ...]:
-    """解析基準。**衍生自** `_MECHANISM_PATH_BASES`，不另開一份清單——那份常數已寫明
-    「子專案段落的相對路徑相對於該子專案目錄」的理由，本面適用同一條。多的兩個都是
-    實測逼出來的，不是預防性擴面：
-      · 套件根 `AutoClaude/autoclaude`——CLAUDE.md 架構大圖以 `execution/playbook_runner.py`
-        這種**套件內**相對路徑指認模組（實測 7 筆），少了它會整批誤報。
-      · SDD LATEST 版根——ADR 與 ONBOARDING 以 `tools/fsm_runtime/state_loader.py`、
-        `cicd/SDD_CICD_BASE_LAYER.md` 這種**版內**相對路徑指路（實測 6 筆）。版名走既有
-        SSOT `tools/lib/sdd_latest.py`，**不在本檔再寫一份版號 regex**（R73 判例）。
-    LATEST 解析失敗即 `AssertionError`（fail-loud，同 `read_adr_docs`：掃描邊界不得
-    靜默縮小——縮小的方向永遠是「看起來變乾淨」）。
+    """解析基準。**衍生自** `_MECHANISM_PATH_BASES`，不另開一份清單（子專案段落的相對路徑相對於該
+    子專案目錄，本面適用同一條）。多的兩個基準是實測逼出來的：套件根 `AutoClaude/autoclaude`
+    （CLAUDE.md 架構大圖以套件內相對路徑指認模組）、SDD LATEST 版根（ADR 與 ONBOARDING 以版內相對
+    路徑指路；版名走既有 SSOT `tools/lib/sdd_latest.py`）。LATEST 解析失敗即 `AssertionError`
+    （fail-loud：掃描邊界不得靜默縮小）。實測筆數（7／6）與 R73 判例沿革搬至
+    Guard_Line_History_2.md〈R194 淨減法搬遷〉§90。  round-label-ok
     """
     if not _PATH_CLAIM_BASES_CACHE:
         latest = _SDD_LATEST.resolve_latest_name(repo_root / "AISDLC_SDD")
@@ -4035,11 +4016,7 @@ _GHOST_PATH_BASELINE: frozenset[str] = frozenset({
     "AutoClaude/.github/workflows/pg-e2e-on-label.yml",
     "AutoClaude/tools/reschedule_g0_gatecheck.ps1",
     "context_ledger_pre/post.py",
-    # ── R81 SA-B3：上一格曾登記 `docs/06_quality/CrossPlatform_R81_Review.md`（計畫書 §6
-    # 把本輪產出目標逐份列出，而該檔在寫下那一行時尚未建立）。**該檔已於本輪建立**，
-    # `stale_path_baseline_problems()` 的第一款當場轉紅並要求刪除該筆登記 ⇒ 已刪，天花板
-    # 同步下修。留這段註解是為了記下**這道鎖的自清機制真的動作過一次**：豁免不會永久化，
-    # 不是因為有人記得回來清，是因為清不掉就會紅。
+    # 自清機制記載搬至 Guard_Line_History_2.md〈R194 淨減法搬遷〉§95。  round-label-ok
     "formal/README.md",
     "formal/SDD_FSM.tla",
     "install_hooks/install_post_commit.ps1",
@@ -4984,10 +4961,7 @@ _NIGHTLY_MAX_AGE_DAYS = 14
 def cloud_fail_open_jobs(workflows_dir: Path) -> list[str]:
     """`<workflow>.yml:<job>` — 帶 **job 層** `continue-on-error: true` 的 job（現查）。
 
-    WHY（R76-03）：表③ 記的是 run 層 `conclusion`，而 job 層 `continue-on-error: true`
-    讓那個 job 紅掉時 run 仍是 `success` ⇒ 表③ 六列全 ✅ 與「裡面有 job 是紅的」可以
-    同時為真。該通道在本 repo 已實測**零讀者**（唯一顯形處是一張沒人看的 GitHub issue），
-    一筆真實 P1 因此橫跨數輪的「雲端全綠」宣稱。
+    立案沿革（R76-03）搬至 Guard_Line_History_2.md〈R194 淨減法搬遷〉§91。  round-label-ok
 
     掃描面現查而非寫死：寫死清單在「某支 workflow 新增一個 fail-open job」那天靜默縮面
     （同 `push_triggered_workflows` 的紀律）。
@@ -5718,12 +5692,7 @@ class TestR75CloudCriteriaAreSatisfiableAtAnyCommit(unittest.TestCase):
 
 # ── R76：「已實測不涵蓋」清單必須綁**現行行為**，不得綁字面 token ──────────────
 #
-# 🔴 缺陷本體（R76-08，「有鎖在守假話」的實例）：`CrossPlatform_Scan_Dimensions.md`
-# 硬規則② 的「已實測不涵蓋」清單裡，**否定語意**（「無回執」「零改派」）自 R74 起已被
-# `_REASSIGN_NEGATED_RE` 涵蓋，那一項因此成了假話；而釘住它的判準是
-# `assertIn("否定語意", rule2)`——綁**字面 token**。兩件事合起來的方向是最壞的那個：
-# 照本檔自訂的規矩去訂正文件，根層閘門反而會**轉紅**（該文件自陳的規矩是「被涵蓋時
-# 翻紅、強迫改文件」，實況卻是「改文件才紅」）。
+# 缺陷本體（R76-08）沿革搬至 Guard_Line_History_2.md〈R194 淨減法搬遷〉§88。  round-label-ok
 #
 # 本段是那條規矩的機械面：清單成員與**探針實跑的結果**雙向綁定——探針說「此刻仍未涵蓋」
 # 就必須列著，說「已涵蓋」就必須不在清單內。探針跑的是生產判定函式本身
@@ -6519,10 +6488,7 @@ def _handoff_perdoc_problems(
 ) -> list[str]:
     """逐文件判定——**刻意不跨文件加總**。
 
-    🔴 R82 Q4-01 的另一半：上一版把每一份交棒書的命中數加總後才判 `>=1`，於是 R79
-    那 7 筆讓總量永遠 ≥1，**最新一份掉到 0 在結構上打不出來**（R81 交棒書就是這樣
-    整份 0 命中而全綠的）。這正是本檔 docstring 自己記載過的 R78 SD-03 錯誤——判準
-    建在只會單調增長的歷史總量上——在**同一支檔案內復發**。
+    立案沿革搬至 Guard_Line_History_2.md〈R194 淨減法搬遷〉§87。  round-label-ok
     """
     problems: list[str] = []
     for rel, text in docs:

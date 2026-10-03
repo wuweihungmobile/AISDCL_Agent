@@ -3311,6 +3311,54 @@ class DegradedNoticeCapIsTheEnforcedCapTest(unittest.TestCase):
         self.assertIn("收到 3（", QG.degraded_posture(cap=3))
         self.assertIn(f"收到 {self._degraded()}（", QG.degraded_posture())
 
+    def _gate(self, active_model: str | None) -> tuple[int, list[int]]:
+        """走真的 `quota_gate()`，讓取數失敗（`refresh_quota_blocking` ⇒ 沒給 cap 的降級呼叫點）
+        先出聲；回 `(rc, 依序印出的上限)`：第一則出自沒給 cap 的呼叫點、第二則是致動器自己。"""
+        meter = mock.Mock(measure_detail=lambda *_a, **_k: (None, "no-credentials"))
+        err = io.StringIO()
+        with mock.patch.object(QG, "quota_meter", meter), \
+                mock.patch.object(QG, "claim_refresh_slot", lambda: True), \
+                mock.patch.dict(QG._QUOTA_CTX), \
+                contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+            rc = QG.quota_gate(
+                {"hook_event_name": "PreToolUse", "tool_name": "Agent", "transcript_path": ""},
+                blocking=("Agent",), latch_read=lambda _p: set(),
+                latch_write=lambda _p, _k: None, plan_writer=lambda *_a, **_k: "",
+                waker=lambda *_a, **_k: {}, active_model=active_model)
+            QG.flush_to_model()
+        return rc, [int(n) for n in re.findall(r"硬上限收到 (\d+)", err.getvalue())]
+
+    def test_the_cap_less_sites_print_what_the_actuator_enforces(self) -> None:
+        """DEF-200-479（writer==reader）：6 個降級呼叫點不傳 cap，姿態句改讀與致動器同一支
+        `stabilize()` 的唯讀一步（含家族鍵）。第一則（沒給 cap）、第二則（致動器）與落地的持久
+        cap 必須同值；此前第一則印未平穩的「收到 2」而致動器擋在 0。"""
+        for name, held in (("無歷史", None),
+                           ("10 分鐘前的 0", QS.StabilityState(0, self._ago(minutes=10))),
+                           ("10 分鐘前的 1", QS.StabilityState(1, self._ago(minutes=10))),
+                           ("7 天前的 0", QS.StabilityState(0, self._ago(days=7)))):
+            for family in (None, "fable"):
+                with self.subTest(case=name, family=family):
+                    for stamp in self.tmp.glob("stamp-*"):
+                        stamp.unlink()  # 每個子案例都要有自己的首則通知（TTL 閂鎖）
+                    for scope in (None, "fable"):  # 歷史只放在被測的那個家族鍵上
+                        QS.save_state(held if scope == family else None, scope=scope)
+                    rc, said = self._gate(family)
+                    self.assertEqual(len(said), 2, f"兩則通知都該有姿態句：{said}")
+                    self.assertEqual(said[0], said[1], "沒給 cap 的呼叫點與致動器不同源")
+                    self.assertEqual(said[1], QS.load_state(scope=family).cap, "與落地的 cap 不同")
+                    if name == "10 分鐘前的 0":
+                        self.assertEqual((rc, said), (2, [0, 0]), "最近的 halt 殘值被印成別的值")
+
+    def test_the_read_only_step_never_writes_and_an_injected_now_stays_pure(self) -> None:
+        QS.save_state(QS.StabilityState(0, self._ago(minutes=10)))
+        path = QS.state_path()
+        before = path.read_bytes()
+        with mock.patch.dict(QG._QUOTA_CTX, {"model": None}):
+            self.assertIn("收到 0（", QG.degraded_posture(), "沒讀到持久的 cap")
+            self.assertEqual(path.read_bytes(), before, "唯讀一步竟寫了遲滯檔")
+            self.assertIn(f"收到 {self._degraded()}（", QG.degraded_posture(NOW),
+                          "注入 now 必須是純函式（不讀磁碟）：否則離線重放隨機器狀態漂移")
+
 
 class TestStabilityIsKeyedByModelFamilyAndRuler(unittest.TestCase):
     """DEF-200-437：遲滯檔的鍵＝（模型家族, 尺），不再是帳號級單檔；兩個獨立污染源各一把鎖：

@@ -82,15 +82,11 @@ _IMPORT_LINE_RE = re.compile(r"from\s+\.state_loader\s+import\s+.*_sanitize_comp
 # 此下限只會被超過、不會被打破；若數字倒退，代表掃描邊界被靜默縮小，須查明。
 _MIN_EXPECTED_FROZEN_VERSIONS = 29
 
-# bug-injection 鑑別力鎖的「修復前」重放基準點——固定錨定在本輪 DEF-101-357
-# 修復（29 版 × 7 檔 203 處改動）尚未提交前的父提交（R43 收尾 commit），刻意
-# 不用 `git show HEAD:<path>`（R44 QA 一審發現：HEAD 會隨每次 commit 移動，
-# 一旦本輪修復——含本測試檔自身——被 commit，HEAD 就變成『修復後』內容，
-# `TestExpectedSanitizeCallDiscriminatesRealHistoricalRegression` 會對全部 7
-# 支檔案恆紅，而非只在本輪修復提交前這段短暫視窗內成立）。改用此固定 SHA 後，
-# 該測試永遠重放同一段『修復前』真實歷史內容，不受後續任何 commit 影響；若此
-# commit 在未來因淺層 clone（CI `actions/checkout` 預設 fetch-depth=1）或歷史
-# 重寫而不可達，`_pre_fix_baseline_text()` 會 skipTest（非 fail-red）。
+# bug-injection 鑑別力鎖的「修復前」重放基準點：固定錨定在 DEF-101-357 修復（29 版 × 7 檔 203 處改
+# 動）尚未提交前的父提交，刻意不用 `git show HEAD:<path>`（HEAD 會隨每次 commit 移動，修復一旦提交
+# 鑑別力測試就對全部 7 支檔案恆紅）。若此 commit 因淺層 clone（CI `actions/checkout` 預設
+# fetch-depth=1）或歷史重寫而不可達，`_pre_fix_baseline_text()` 會 skipTest（非 fail-red）。R44 QA
+# 一審發現的時序缺陷沿革搬至 Guard_Line_History_2.md〈R194 淨減法搬遷〉§131。  round-label-ok
 _PRE_FIX_BASELINE_SHA = "5ccccb065a8209e430eaba25c6e8e4ba1727e4e6"
 
 
@@ -206,11 +202,7 @@ class TestExpectedSanitizeCallDiscriminatesRealHistoricalRegression(unittest.Tes
     production_to_fpl.py／counterfactual_replay.py 兩個泛用 AST 掃描盲點案例』
     的直接證據，非事後臆測。
 
-    R44 QA 一審發現並修正的時序缺陷：初版用 `git show HEAD:<path>` 而非固定
-    SHA，這個假設只在『本輪修復尚未 commit』的當下短暫成立——一旦本輪修復
-    （含本測試檔自身）被 commit，HEAD 就會變成『修復後』內容，導致
-    `test_every_target_file_pre_fix_head_content_fails_the_lock` 對全部 7 個
-    subTest 恆紅。改錨定固定 SHA 後，重放內容不再受後續任何 commit 影響。"""
+    R44 QA 一審時序缺陷沿革搬至 Guard_Line_History_2.md〈R194 淨減法搬遷〉§130。  round-label-ok"""
 
     def _pre_fix_baseline_text(self, fname: str) -> str:
         rel = f"AISDLC_SDD/AISDLC_SDD_v0.01/tools/fsm_runtime/{fname}"

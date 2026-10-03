@@ -993,18 +993,15 @@ class TestNightlyRunningDetection(DevStartTestCase):
         靜默失效（永遠回「沒在跑」），沒有任何其他訊號會提醒。"""
         sh = (Path(dev_start.ROOT) / "AutoClaude" / "tools" / "run_local_nightly.sh")
         ps1 = (Path(dev_start.ROOT) / "AutoClaude" / "tools" / "run_local_nightly.ps1")
-        # R59 ARCH-R59-04：原寫 `.split("/")[-1]`＝只鎖檔名 `.nightly_mac.lock`，
-        # 不鎖目錄。把 `.sh` 的鎖目錄從 AutoClaude/logs/ 搬到別處而檔名不變 → 本鎖照樣
-        # 綠，而 `_nightly_running()` 會永遠在錯的路徑找不到鎖、回 False＝假「沒在跑」，
-        # DEF-101-504 原樣復發且零訊號。這是「鎖自己留了一個它宣稱要守的洞」，且與同一
-        # 測試 Windows 側鎖完整 Mutex 字面值的做法不對稱。改鎖完整相對路徑。
+        # 鎖完整相對路徑（不是只鎖檔名 `.nightly_mac.lock`）：把 `.sh` 的鎖目錄從 AutoClaude/logs/
+        # 搬到別處而檔名不變時，`_nightly_running()` 會永遠在錯的路徑找不到鎖、回 False＝假「沒在
+        # 跑」。立案沿革（R59 ARCH-R59-04）搬至
+        # Guard_Line_History_2.md〈R194 淨減法搬遷〉§132。  round-label-ok
         self.assertIn(dev_start._NIGHTLY_POSIX_LOCK,
                       sh.read_text(encoding="utf-8", errors="replace"))
-        # R59 QA-R59-05：原為全檔 assertIn，而該 Mutex 名在 .ps1 內出現兩次
-        # （功能碼的 New-Object 與一行 Write-Output 訊息）。只改功能碼那一處、保留訊息
-        # 字面，本鎖與 AutoClaude 側同款全檔鎖都會照綠，而 `_nightly_running()` 對真的
-        # 在跑的 nightly 靜默回 False＝假「沒在跑」，DEF-101-504 的保護整體歸零。
-        # 改為鎖住**實際建立 Mutex 的那一句**。
+        # 鎖住**實際建立 Mutex 的那一句**（該 Mutex 名在 .ps1 內出現兩次，全檔 assertIn 會被訊息字
+        # 面滿足）。沿革（R59 QA-R59-05、DEF-101-504）搬至
+        # Guard_Line_History_2.md〈R194 淨減法搬遷〉§106。  round-label-ok
         ps1_text = ps1.read_text(encoding="utf-8", errors="replace")
         self.assertIn(
             f"System.Threading.Mutex($false, '{dev_start._NIGHTLY_MUTEX_NAME}')",
@@ -2906,11 +2903,7 @@ class TestLaunchdNightlyLoaded(DevStartTestCase):
         label 但排程其實指向別份 checkout」。此時**不得**沿用 True 態的「已載入、
         尚未跑過第一輪」正常措辭——那會讓使用者以為本 repo 有 nightly 兜底，實際沒有。
 
-        🔴 R69（windows-compat-ci 假紅）：斷言不得寫死 POSIX 字面值 `"/elsewhere"`——生產碼印的是
-        `Path` 物件，其 `str()` 在 Windows 是 `\\elsewhere\\AutoClaude\\…`，字面值必然
-        落空（windows-compat-ci 實紅）。改比對 `str(Path(self._ELSEWHERE))`：兩平台各自
-        正規化後仍要求**整條目標路徑**出現在訊息裡——比原本只找 `/elsewhere` 更嚴，
-        不是把斷言改弱。
+        R69 沿革搬至 Guard_Line_History_2.md〈R194 淨減法搬遷〉§107。  round-label-ok
         """
         out = f"{self._DECOY}\n-\t0\tcom.autoclaude.nightly\n"
         note, printed = self._heartbeat_with_launchctl(out, plist_target=self._ELSEWHERE)
@@ -5411,12 +5404,9 @@ class TestMinPythonVersionSsotSync(unittest.TestCase):
                 f"{label} 側版本探測碼與核心 _MIN_PY={core_mm} 不同步",
             )
 
-    # 🔴 R71（DEF-101-760）：上面那支鎖**只看版本數字**，看不到探測碼本體。兩份
-    # `.sh`／`.ps1` 的檔頭都白紙黑字寫「用**同一段**探測碼（同構，非各自發明）」，
-    # 但那是散文——實測（本輪動工前）單邊把探測碼改掉，本檔與 CI 全部照樣綠燈。
-    # DEF-101-760 正是踩在這個縫上：`else ""` 在 bash 沒事、在 PowerShell 5.1 會被
-    # 吃掉一個雙引號而整條失效，於是「兩側寫法必須逐字相同」這個假設一旦破裂，
-    # 就只剩其中一個平台的使用者會炸，而且沒有任何機械物會出聲。
+    # DEF-101-760：`else ""` 在 bash 沒事、在 PowerShell 5.1 會被吃掉一個雙引號而整條失效，故兩側
+    # 探測碼必須逐字相同；上面那支鎖只看版本數字、看不到探測碼本體。沿革（R71）搬至
+    # Guard_Line_History_2.md〈R194 淨減法搬遷〉§105。  round-label-ok
     def test_version_probe_literal_is_byte_identical_across_both_shells(self) -> None:
         sh_probe, ps_probe = self._extract_probes()
         self.assertEqual(
@@ -5945,11 +5935,7 @@ _SUBCOMMANDS = (
 # 只准在 Invoke-CommonPy 內」，字面隨之更新，語意不變。
 _RAW_PY_CALL = "& $script:GitHooksInstallCommonPython $script:GitHooksInstallCommonPy"
 
-# DEF-101-762 在 LATEST 版 SDD 樹上的**兩個**同形態站點：都以 `git rev-parse` 的輸出反推
-# 路徑，cp950 下損毀即整條路不可用。R71 落地時只鎖了 install_post_commit.ps1，run_tlc.ps1
-# 雖已同法修好，卻只有 `check_script_parity._LATEST_PINNED_SHA256` 的 hash 釘選——那只證明
-# 「內容沒被動過」，證明不了「釘選在讀取之前」，而後者正是本缺陷的形狀。「同棵樹、同形態、
-# 只鎖一支」就是 DEF-101-757 入規要防的鎖射程缺口，故 R71 參數化到第二支（成本＝一個 case）。
+# 立案沿革搬至 Guard_Line_History_2.md〈R194 淨減法搬遷〉§125。  round-label-ok
 _LATEST_REV_PARSE_SITES = (
     ("tools/install_hooks/install_post_commit.ps1",
      "它用 `git rev-parse --git-common-dir` 的輸出反推 repo 根，cp950 下中文路徑損毀會讓它"

@@ -13,8 +13,9 @@
 ## Q2 真實逐字稿普查（Q1′／Q2′ 的分子分母；本章最重要的量）
 母體：逐字稿目錄下**頂層**檔（不含 `subagents/`），entrypoint ∈ {cli, claude-vscode}、≥1 個 tool_use；
 起點晚於修法 commit 者為「修法後」，其餘為「修法前基線」。headless 的 `sdk-cli` 全是探針，排除。
-對每支輸出：sid／model／工具呼叫總數／**前 5 個 tool_use**（工具名＋command 或 file_path 前 100 字）／每個
-tool_use 的 tool_result 是否為阻斷（以 `is_error` 且記錄帶 `toolDenialKind` 為準；引文不算）／**首次**
+對每支輸出：sid／model／工具呼叫總數／**前 N 個 tool_use**（N＝`params.json` 的 `q1c_first_calls`；
+工具名＋command 或 file_path 前 100 字）／每個 tool_use 的 tool_result 是否為阻斷（以 `is_error` 且
+記錄帶 `toolDenialKind` 為準；引文不算）／**首次**
 planner 現查在第幾個 tool_use／助理文字中命中「被擋／無法寫／不能用工具／blocked」的句子（逐字貼，≤3 句）
 及該句之前是否真有阻斷。優先用 `python tools/probe/audit_session.py --five-question`（先看 `--help`）；它不印
 的量自己寫 ≤80 行腳本，自陳偏離。產出一張表＋ Q1′ 三個數＋ Q2′ 一個數。

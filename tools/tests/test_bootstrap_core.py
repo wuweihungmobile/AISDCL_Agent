@@ -1,14 +1,11 @@
 #!/usr/bin/env python3
 """bootstrap_core.py::pick_python() WindowsApps 空殼排除 guard 回歸鎖（R31 Scan-B 修復）。
 
-WHY：`tools/bootstrap.ps1` 在 DEF-101-273/279 兩輪修復中，對 `python`/`python3`
-裸名候選加了 WindowsApps 空殼別名靜態路徑排除 guard——全新 Windows 11 機器上這兩個
-名字常被系統自動註冊為 App Execution Alias 空殼，`shutil.which()`/`Get-Command`
-找得到、但實際執行只會跳出 Microsoft Store 安裝提示，不會執行任何 Python 碼；用
-「執行結果」判斷（`_probe_ok()`）在此情境不可靠，正是 `.ps1` 改用靜態路徑比對的
-原因。但作為「單一真相源」的 `bootstrap_core.py::pick_python()`（R16 架構收斂後
-真正決定建立 `.venv` 用哪個直譯器的核心邏輯）此前完全沒有這道 guard，本測試鎖住
-R31 補齊的對稱修復，防未來退化回舊版純執行探測判斷。
+WHY：`tools/bootstrap.ps1` 對 `python`／`python3` 裸名候選加了 WindowsApps 空殼別名靜態路徑排除
+guard（全新 Windows 11 上這兩個名字常是 App Execution Alias 空殼，執行只會跳出 Microsoft Store 安
+裝提示，故以 `_probe_ok()` 的執行結果判斷不可靠）；作為單一真相源的
+`bootstrap_core.py::pick_python()` 必須有對稱的 guard，本測試鎖住它。立案沿革（DEF-101-273/279、
+R31）搬至 Guard_Line_History_2.md〈R194 淨減法搬遷〉§121。  round-label-ok
 
 執行：python -m pytest tools/tests/test_bootstrap_core.py -v
 """
