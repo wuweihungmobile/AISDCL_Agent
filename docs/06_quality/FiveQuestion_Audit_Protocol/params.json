@@ -1,9 +1,10 @@
 {
-  "claim_exc_re": "沒有|並未|未|不是|不會|不算|本來會|\\bwould\\b|DRY[-_ ]RUN|不受影響|only a warning|如果|若是|萬一|可能會|假如|\\bif\\b|SDD-CTX-GUARD|rc=2 紅字|嗎|呢|？|\\?|能不能|是不是|有沒有",
+  "claim_exc_re": "(沒有|並未|未)(被|受|遭|阻|擋|拒|鎖|封|禁)|不是|不會|不算|本來會|\\bwould\\b|DRY[-_ ]RUN|不受影響|only a warning|如果|若是|萬一|可能會|假如|\\bif\\b|SDD-CTX-GUARD|rc=2 紅字|嗎|呢|？|\\?|能不能|是不是|有沒有",
   "claim_lookback": 3,
   "claim_max_uses": 10,
-  "claim_re": "(?<![沒未不無非並])(被(擋|阻擋|攔截?|阻斷|拒絕|鎖住?|鎖死|封鎖|禁止)|擋住了?|完全鎖住|什麼都不能做|(無法|不能|不可以|沒辦法)(使用|寫入|寫檔|執行|呼叫|用)[^。，\\n]{0,6}(工具|Write|Edit|Bash|Read|檔案|指令))|\\b(blocked|locked out|denied|(can'?t|cannot|unable to)\\s+(use|write|run|call)\\s+(any\\s+)?(tools?|Write|Edit|Bash|Read))\\b",
+  "claim_re": "(?<![沒未不無非並])(被(擋|阻擋|攔截?|阻斷|拒絕|鎖住?|鎖死|封鎖|禁止)|擋住了?|完全鎖住|什麼都不能做|(無法|不能|不可以|沒辦法)(使用|寫入|寫檔|執行|呼叫|用)[^。，\\n]{0,6}(工具|Write|Edit|Bash|Read|檔案|指令))|\\b(blocked|locked out|denied|(can'?t|cannot|unable to)\\s+(use|write|run|call)\\s+(any\\s+)?(tools?|Write|Edit|Bash|Read))\\b|被拒(絕)?(了)?|拒絕了?我|擋下了?我|沒有[^。，\\n]{0,4}(寫入|修改|執行)?權限|停在權限詢問|requested permissions? to|user[- ]rejected|permission (was )?denied",
   "converge_tools": ["Read", "Write", "Edit", "MultiEdit", "NotebookEdit", "Bash", "PowerShell", "Glob", "Grep"],
+  "exposure_min_hits": 1,
   "feed_read_re": "context_feed[/\\\\][^/\\\\]+\\.json$|autosdd_quota\\.json$",
   "parity_non_shell_tools": ["Read", "Write", "Edit", "MultiEdit", "NotebookEdit", "Glob", "Grep", "Agent", "Task", "TodoWrite", "Skill", "ToolSearch", "WebFetch", "WebSearch", "Workflow", "SendMessage", "AskUserQuestion"],
   "planner_re": "session_resume_planner\\.py[^\\n;|&]*?\\s--(?:check|pace)(?![-\\w])",
@@ -19,5 +20,7 @@
   "q3_tolerance_tokens": 100,
   "q4_max_age_days": 14,
   "quote_re": "「[^」]*」|`[^`]*`|“[^”]*”|\"[^\"]*\"",
-  "rounds_required": 6
+  "rounds_required": 6,
+  "symptom_baseline_since": "2026-10-03T23:26:09+08:00",
+  "symptom_streak_required": 2
 }

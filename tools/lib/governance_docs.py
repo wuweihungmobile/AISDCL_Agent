@@ -590,6 +590,10 @@ _GOVERNANCE_DOCS = (
     # 即刻登記。
     _REPO_ROOT / "docs" / "06_quality"
     / "CrossPlatform_R196_FiveQuestion_Lvalue_Closure_Evidence.md",
+    # 五問第十九次四方覆核（收斂判準 v2＝症狀閘、暴露度定級、守衛面准入；症狀真實歷史來源歸因；
+    # 鏡稽核上一輪證據檔文字與輪帳本漏列補登）：即刻登記。
+    _REPO_ROOT / "docs" / "06_quality"
+    / "CrossPlatform_R197_FiveQuestion_Convergence_Criterion_Evidence.md",
     # 護欄層行數棘輪史料歸檔的第二冊（第一冊逼近 Read 工具上限，淨減法搬遷改落本檔）：即刻登記。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_Guard_Line_History_2.md",
 )

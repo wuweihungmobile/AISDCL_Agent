@@ -70,9 +70,15 @@ monorepo 根目錄（`AISDCL_Agent/`，各機器 checkout 路徑不同）＝**�
 
 ### 權限姿態（harness 層，不是 hook；R196 裁決）
 
-- 互動視窗自 Claude Code 2.1.283 起**內建起始模式＝auto**。官方文件（permission-modes#protected-paths）：auto 下寫入 `.claude/**` 等受保護路徑一律交分類器、`permissions.allow` 不能預先放行；分類器不可用時**拒絕而非詢問**。這不是 hook 阻斷——拒絕文字開頭是 `Permission for this action was denied by the Claude Code auto mode classifier`。
+- 互動視窗自 Claude Code 2.1.283 起**內建起始模式＝auto**（changelog 原文：2.1.283 先限第三方供應商／關閉遙測者，2.1.284 擴及所有方案與供應商；R197 文件查證）。官方文件（permission-modes#protected-paths）：auto 下寫入 `.claude/**` 等受保護路徑一律交分類器、`permissions.allow` 不能預先放行；分類器不可用時**拒絕而非詢問**。這不是 hook 阻斷——拒絕文字開頭是 `Permission for this action was denied by the Claude Code auto mode classifier`。
 - **常態維持 auto**（唯一能無人看管的互動姿態）。要套 `.claude/` 批次（hook／settings）時：Shift+Tab 兩下切到 acceptEdits、在 `.claude` 詢問框選「allow … .claude folder for this session」，套完切回 auto；auto 下被拒一次 ⇒ `/permissions` → Recently denied → 按 `r` 人工核准重試。**不要**改派子代理或換路徑繞過；子代理成品一律 staged 到 scratchpad 交主控。
 - 否決兩案：寫 hook 對 `.claude/hooks/**` 回 allow（守衛層自己改自己，正是分類器 `[Self-Modification]` 要擋的事）；專案 `settings.json` 設 `defaultMode`（改變全隊預設姿態，且設 auto／bypassPermissions 不生效）。本機母體（近 21 天 41 個互動視窗、6,613 次呼叫）的 98 筆 `toolDenialKind`：hook 90／路徑保護 6／分類器 2，分類器 2 筆皆為主控改 `.claude/` 時。
+
+### 守衛面准入（R197 裁決：量、不挖）
+
+- 守衛面＝`.claude/hooks/**`、`.claude/settings*.json`（含 permissions.allow）、`tools/lib/{session_brief,quota_messages,harness_feed,quota_gate,quota_policy,quota_stability,sentinel_lifecycle}.py`、`tools/session_resume_planner.py`。**新增任何一行守衛碼或鎖的前提＝暴露證據**（`docs/06_quality/FiveQuestion_Audit_Protocol/severity.md`〈暴露度〉三取一：掌舵者真機回報 sid＋seq／非構造性逐字稿實際發生／真實語料非探針種子 ≥1 命中）；沒有就登記證據檔〈理論洞清單〉（P4）、不立輪、不同輪修。
+- 審查角色「量、不挖」：跑既有指標與重測（Q1′～Q4′、答案表兩引擎、語料重放），不構造變體去找新缺陷；構造性命中 NEW_P_LE_2 計 0。WHY：R179～R196 十八輪有 17 輪守衛面淨增（合計 +10,139 行）、74/80 筆缺陷同輪修，審查對擴張中的面做對抗搜尋 ⇒ 發現率約 0.8 P2／輪、結構上無不動點（DEF-200-481→483→484 連三輪即此型：後兩者在 9,646 筆真實指令自然寫法命中 0）。
+- 收斂宣告看症狀閘、不看發現率：判定式與指令住 `docs/06_quality/FiveQuestion_Audit_Protocol/README.md`〈窗口規則與收斂判定〉；家族計數降為資訊欄。再開四方的觸發條件沿用 R196 T1～T7（R196 證據檔〈八〉），但 T1 反轉：動到守衛面 ⇒ 先附暴露證據，而不是擴大搜尋。
 
 ### hook 載具（鐵律一之二：exec form）
 

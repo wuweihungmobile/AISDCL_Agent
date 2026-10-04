@@ -2032,7 +2032,7 @@ API_AUTO_CONTINUE_NEXT_PERIOD=false          # 【新增】
      排程；只做觀測與自檢輸出。
      🔴 **【R196 註記｜依設計未實作（DEF-200-246，closed-by-decision）】** 現交付＝桌面 loud＋自檢印 DRY_RUN
      （決策逐字見 `AutoClaude/autoclaude/main.py` 的 `run_boot_self_check` 上方註解）；`integration_queue`
-     為保留欄位、零生產寫者。**重新開啟觸發條件（可偵測；本節為單一出處，G5 與 §7 只指回此處）**：
+     為保留欄位、零生產寫者。**重新開啟觸發條件（①機械可偵測、②③為人工事件；本節為單一出處，G5 與 §7 只指回此處）**：
      ① `autoclaude/` 出現 `integration_queue` 的第一個生產寫者（機械偵測＝反向存在鎖
      `AutoClaude/tests/contract/test_def200246_integration_queue_tripwire.py` 轉紅）；
      ② 多 agent worktree 整合功能立案；③ 出現「哪些 playbook 該被 dry_run 擋」的判準。
