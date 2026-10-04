@@ -2030,6 +2030,12 @@ API_AUTO_CONTINUE_NEXT_PERIOD=false          # 【新增】
      下一次介面變動時給不出任何判斷依據）。
   3. **`DRY_RUN` 的語意必須是真的不動作**：未知版本下不得派工、不得寫 worktree、不得註冊
      排程；只做觀測與自檢輸出。
+     🔴 **【R196 註記｜依設計未實作（DEF-200-246，closed-by-decision）】** 現交付＝桌面 loud＋自檢印 DRY_RUN
+     （決策逐字見 `AutoClaude/autoclaude/main.py` 的 `run_boot_self_check` 上方註解）；`integration_queue`
+     為保留欄位、零生產寫者。**重新開啟觸發條件（可偵測；本節為單一出處，G5 與 §7 只指回此處）**：
+     ① `autoclaude/` 出現 `integration_queue` 的第一個生產寫者（機械偵測＝反向存在鎖
+     `AutoClaude/tests/contract/test_def200246_integration_queue_tripwire.py` 轉紅）；
+     ② 多 agent worktree 整合功能立案；③ 出現「哪些 playbook 該被 dry_run 擋」的判準。
 - 🔴 **未知版本不阻止啟動**（阻止啟動＝CLI 一升版就整套停擺，那種守衛會被整個關掉，比沒有
   守衛更糟），但必須 **loud**：走 §4.5.7 R-4.5.7-3 的桌面通道一次，並在自檢輸出印出「本次
   以 DRY_RUN 執行」與確認方式。
@@ -2062,7 +2068,7 @@ API_AUTO_CONTINUE_NEXT_PERIOD=false          # 【新增】
 | G2 | 佇列讀不出來 ≠ 0 筆 | 單元測試：注入壞 checksum ⇒ 輸出含「狀態不明」，且**不得**含「0 筆」。**這一格是本節最容易寫成假綠的地方** |
 | G3 | 啟動當下已在 `DRAINING` 以上 ⇒ 只登記不重排 | 單元測試（注入 band=prepare／halt 兩例） |
 | G4 | `claude --version` 讀不到 ⇒ 視為未知版本並進 DRY_RUN（fail-safe） | 單元測試（讀取失敗注入）。**紅綠自證**：把它改成「讀不到就當已驗證」必須轉紅 |
-| G5 | DRY_RUN 真的不動作 | 整合測試：斷言零派工、零 worktree 寫入、零排程註冊 |
+| G5 | DRY_RUN 真的不動作 | 整合測試：斷言零派工、零 worktree 寫入、零排程註冊。🔴 **【R196 註記｜依設計未實作（DEF-200-246，closed-by-decision）】** 現交付＝桌面 loud＋自檢印 DRY_RUN（`dry_run` 判決未接進執行器），本格斷言不成立於現行實作；重新開啟觸發條件見 R-6.2-2 ③ 註記（單一出處） |
 | G6 | 已驗證清單是 git-tracked 檔 | 靜態判準：`git ls-files` 命中該路徑（本機狀態檔會落空 ⇒ 紅） |
 | G7 | 空間檢查發生在寫 patch **之前** | 單元測試：以呼叫順序斷言（mock 兩支，比對呼叫序）。順序反了必須紅——這正是本條的全部價值 |
 | G8 | 門檻是 bytes 對 bytes | 單元測試：同一個「可用百分比」下，預估寫入量大／小兩例必須得到不同判定 |
@@ -2170,7 +2176,7 @@ API_AUTO_CONTINUE_NEXT_PERIOD=false          # 【新增】
 - `resume_plan` 只存**參數**，不存可直接執行的完整 shell 命令字串。v1 把 `resumption_command` 存成完整命令（含引號內的中文提示）會有 shell 注入與引號轉義風險，且讓 state.json 從資料變成可執行碼。
 - `agents` 為陣列；每個 Agent 有自己的 session、分支、checkpoint。
 - 記錄 `quota_cost_pp`：累積實際成本資料，可用於「Step 額度預算」的自適應校準。
-- 【v2.1.9 新增】`integration_queue[].status` 的枚舉為 **`PENDING_VERIFY | CONFLICT | VERIFY_FAILED | MERGED`**（前三者＝§6.2 R-6.2-1 的「待處理集合」，`MERGED` 為終態）。上方範例的 `PENDING_VERIFY` 是這個枚舉的成員，不是自由字串。🔴 枚舉必須在**這一節**定義而不是散落在各節條文裡：§6.2 的掃描集合、§6.1 不變式 11 與 §11.6 的驗收都以它為分母，分母若沒有單一的家，各處各抄一份的漂移方向是**漏抄**（本次修憲即因此把不存在的 `QUEUED` 寫進掃描集合，見 R-6.2-1）。
+- 【v2.1.9 新增】`integration_queue[].status` 的枚舉為 **`PENDING_VERIFY | CONFLICT | VERIFY_FAILED | MERGED`**（前三者＝§6.2 R-6.2-1 的「待處理集合」，`MERGED` 為終態）。上方範例的 `PENDING_VERIFY` 是這個枚舉的成員，不是自由字串。🔴 枚舉必須在**這一節**定義而不是散落在各節條文裡：§6.2 的掃描集合、§6.1 不變式 11 與 §11.6 的驗收都以它為分母，分母若沒有單一的家，各處各抄一份的漂移方向是**漏抄**（本次修憲即因此把不存在的 `QUEUED` 寫進掃描集合，見 R-6.2-1）。🔴 **【R196 註記｜依設計未實作（DEF-200-246，closed-by-decision）】** `integration_queue` 為保留欄位、零生產寫者（`autoclaude/` 內只有欄位定義與開機自檢的讀者）；重新開啟觸發條件見 §6.2 R-6.2-2 ③ 註記（單一出處）。
 - `checksum_sha256` + 原子寫入：防止在凍結途中斷電造成半寫入而無法恢復。
 - SHA 使用完整 40 字元十六進位（v1 的 16 字元非法）。
 - 時間同時提供 ISO 8601（含時區）與 epoch，且兩者必須一致（v1 範例不一致）。
@@ -2182,6 +2188,7 @@ API_AUTO_CONTINUE_NEXT_PERIOD=false          # 【新增】
 | # | 異常事件 | 觸發情境 | 防禦機制 |
 | :-- | :---- | :---- | :---- |
 | 1 | **非預期 429** | 遙測落後於真實用量，或其他裝置同時消耗 | 優先**遵循回應中的重試建議標頭**；無標頭時採 full jitter 退避：`sleep = rand(0, min(300, 10·2^n))`，最多 5 次。v1 的固定 10/30/90s 無 jitter，多 Agent 同時撞牆會同步重試造成雷群。重試耗盡 → `FREEZING`。**且必須把 429 視為遙測低估的證據**，將 `U5h` 推估值上修 |
+| 1b | **遙測端點自身回 429**（`quota_meter` 取數被限流） | 讀數端被限流，**不是**用量證據 | 視為「量不到」（`unmeasured`：不覆寫快取與指紋、不造合成讀數；扇出上限走 `degraded_cap`、**永不 halt**）；伺服器帶 `Retry-After` 時只作為恢復時刻顯示（`Decision.retry_after`）。列 1 的「將 `U5h` 推估值上修」與「重試耗盡 → `FREEZING`」只適用於**推論端（主 API）**的非預期 429，不適用本列（施工圖 v2.1.10 §2.3；DEF-200-197） |
 | 2 | **重置時間漂移** | 後端重置延遲 | **【v2.1.8 修憲，全文見 §4.5.10】** 觀測優先：醒來重新觀測 `U5h < RESET_CONFIRM_PERCENT`；確認不了**既不猜也不終止**，掛回零成本哨兵巡邏兜底重試（掛點＝`tools/session_resume_planner.py --arm-sentinel`）。**原條文的固定級距（30s→300s、最多 10 次）已降級**為「單次量測失敗」的重試（≤3 次／≤90s，🔴 **【v2.1.9】射程限於「同一次醒來的行程內」**——跨醒來的重排間隔是另一層，家＝既有常數 `tools/session_resume_planner.py::TRANSIENT_RETRY_SECONDS`，兩層不得折成一個數字），不再是「等 reset」的主路——固定級距是在猜 reset 時刻，與「reset 只能觀測不能算」直接衝突。例外：月度支出上限仍 `escalate`（等不回來） |
 | 3 | **Git index.lock 殘留** | 中斷時 git 操作未完成 | 檢查鎖檔 **mtime 與持有 PID 是否存活**；僅清理確認陳舊者。v1 的「清理陳舊鎖」若無存活檢查，可能刪掉正在使用的鎖而毀損 repo |
 | 4 | **斷電／強制重啟** | — | `INIT` 掃描 state.json + checksum 驗證；提供 `autoclaude resume` 與 `--force-fresh`。若 checksum 失敗 → 回退到 `AUTOCLAUDE_STATE_RETAIN_VERSIONS`（【v2.1.15】前綴對齊全庫慣例，出廠值 5）中最近的有效版本 |

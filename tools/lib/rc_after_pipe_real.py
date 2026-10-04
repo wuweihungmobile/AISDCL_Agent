@@ -17,6 +17,11 @@
   ④ 賦值／括號包住不改變 ②（DEF-200-483）：`$o = git … | Select -First 1`、`$(git … | …)`、
      `@(…)`、`(git … | …) | …`（截斷發生在括號內）真 rc 同樣沒被寫入；`(git …) | …`（括號先閉合）
      與 `$o = git status`（賦值右側的裸 git 重設 rc）則 rc 正確。
+  ⑤ 賦值左值族同 ④（DEF-200-484）：`[string]$o`、`${o}`、`$a, $b`、`$h.k`、`$h['k']` 都是賦值，
+     管線頭仍是右側的原生指令；讀 rc 的寫法含 `${LASTEXITCODE}`／`$global:`／
+     `Get-Variable LASTEXITCODE`；`Select-Object` 可帶模組前綴（`Microsoft.PowerShell.Utility`
+     限定名）；括號內的裸原生（`$o = (git …)`／`$(git …)`／`@(git …)`）立刻跑完、重設 rc，
+     `{ }` 內不一定跑、不算。
 """
 
 from __future__ import annotations
@@ -36,7 +41,8 @@ def rc_after_pipe_real(command: str, hook: Any) -> bool:
 #: `$LASTEXITCODE`，記成 `after=<pwsh 7>/<PS 5.1>`。讀到 7／-1＝真 rc 根本沒被寫入（真紅被讀成
 #: 綠）；讀到別的值＝rc 被寫入（或被消費者換掉）。改判準時請連 `measured` 一起用兩個引擎重測，
 #: 不要只改 `expect`（2026-10-04 以 pwsh 7.6.6／PS 5.1.26100.9444 逐列重測：既有 18 列原值全數
-#: 重現、DEF-200-483 新增 11 列為同日實測；`python` 形態須先有輸出，靜默退出的 -First 1 不截斷）。
+#: 重現、DEF-200-483 新增 11 列與 DEF-200-484 新增 14 列為同日實測；`python` 形態須先有輸出，
+#: 靜默退出的 -First 1 不截斷）。
 _RC_SELFTEST: tuple[tuple[str, bool, str, str], ...] = (
     # ── 已知違規（真 rc 被吃掉或換了主人） ──────────────────────────────
     ('git log --oneline -n 40 | Select-Object -First 1\n"rc=$LASTEXITCODE"',
@@ -110,6 +116,43 @@ _RC_SELFTEST: tuple[tuple[str, bool, str, str], ...] = (
      False, "after=0/0", "賦值包住但 Select-String 不提前結束 ⇒ rc 正確"),
     ('git log --oneline -n (1 | Select-Object -First 1)\n"rc=$LASTEXITCODE"',
      False, "after=0/0", "括號內只是 cmdlet 上游：外面的 git 在引數算完後才跑 ⇒ rc 正確"),
+    # ── DEF-200-484：賦值左值族／rc 讀法／模組前綴／括號內重設（判準曾一律放行或假紅） ──────
+    ('[string]$o = git log --oneline -n 40 | Select-Object -First 1\n"rc=$LASTEXITCODE"',
+     True, "after=7/-1", "型別標註賦值：左值族同 ④，管線頭仍是右側的 git"),
+    ('[string[]]$o = git log --oneline -n 40 | Select-Object -First 1\n"rc=$LASTEXITCODE"',
+     True, "after=7/-1", "陣列型別標註同上"),
+    ('$a, $b = git log --oneline -n 40 | Select-Object -First 1\n"rc=$LASTEXITCODE"',
+     True, "after=7/-1", "逗號列多重賦值同上"),
+    ('${o} = git log --oneline -n 40 | Select-Object -First 1\n"rc=$LASTEXITCODE"',
+     True, "after=7/-1", "`${o}` 形式的變數名同上（`${` 的 `{` 不是區塊起頭）"),
+    ('$h = @{}\n$h.k = git log --oneline -n 40 | Select-Object -First 1\n"rc=$LASTEXITCODE"',
+     True, "after=7/-1", "成員賦值同上"),
+    ('$h = @{}\n$h[\'k\'] = git log --oneline -n 40 | Select-Object -First 1\n"rc=$LASTEXITCODE"',
+     True, "after=7/-1", "索引賦值同上"),
+    ('$o = python -c "print(\'x\'); import sys; sys.exit(3)" | Out-String -Stream'
+     ' | Select-Object -First 1\n"rc=$LASTEXITCODE"',
+     True, "after=7/-1", "原生接中間 cmdlet 再截斷：真 rc=3 同樣沒被寫入"),
+    ('$o = python -c "print(\'x\'); import sys; sys.exit(3)" | Where-Object { $_ }'
+     ' | Select-Object -First 1\n"rc=$LASTEXITCODE"',
+     True, "after=7/3",
+     "同上夾 Where-Object：兩引擎分歧（PS 5.1 讀到真 rc、pwsh 7 污染），任一引擎污染即擋"),
+    ('git log --oneline -n 40 | Select-Object -First 1\n"rc=${LASTEXITCODE}"',
+     True, "after=7/-1", "讀法 `${LASTEXITCODE}` 與 `$LASTEXITCODE` 是同一個變數"),
+    ('git log --oneline -n 40 | Select-Object -First 1\n"rc=$($global:LASTEXITCODE)"',
+     True, "after=7/-1", "讀法 `$global:LASTEXITCODE` 同上"),
+    ('git log --oneline -n 40 | Select-Object -First 1\n'
+     '$rc = (Get-Variable LASTEXITCODE).Value\n"rc=$rc"',
+     True, "after=7/-1", "讀法 `(Get-Variable LASTEXITCODE).Value` 同上"),
+    ('$o = git log --oneline -n 40 | Microsoft.PowerShell.Utility\\Select-Object -First 1\n'
+     '"rc=$LASTEXITCODE"',
+     True, "after=7/-1",
+     "模組限定名同樣截斷（不賦值的寫法 PS 5.1 讀值有競態：-1 或真 rc 0；pwsh 7 恆為 7）"),
+    ('git log --oneline -n 40 | Select-Object -First 1 | Out-Null\n'
+     '[string]$o = git status --porcelain\n"rc=$LASTEXITCODE"',
+     False, "after=0/0", "型別標註賦值右側的裸 git 也重設 rc：污染在它之後被清乾淨"),
+    ('git log --oneline -n 40 | Select-Object -First 1 | Out-Null\n'
+     '$o = (git status --porcelain)\n"rc=$LASTEXITCODE"',
+     False, "after=0/0", "括號內的裸 git 立刻跑完＝重設 rc（`$( )`／`@( )` 同；`{ }` 內不算）"),
 )
 
 

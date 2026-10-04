@@ -47,13 +47,14 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 from pathlib import Path
 
 import endurance_env  # noqa: E402  # 持久目錄 SSOT（同 quota_availability.py 的依賴面）
 import quota_ledger  # noqa: E402  # R102：`with_lock()` 互斥原語（同 quota_availability.py）  round-label-ok
 import quota_policy  # noqa: E402  # 帶別常數（BAND_PREPARE／BAND_HALT）；零 I/O，可安全依賴
+from platform_utils import emit_to_model  # noqa: E402  # 送達模型的唯一發射口
 from quota_messages import RESET_ARM_HORIZON_SECONDS, _aware  # noqa: E402  # 解析器＋6 小時尺
 
 #: PRD (c) 舊條文（v2.0~v2.1.7）點名的 DRAINING／FREEZING 帶別，逐格對映
@@ -73,10 +74,13 @@ SAFETY_BANDS = frozenset({quota_policy.BAND_PREPARE, quota_policy.BAND_HALT})
 #: 該欄位註解），本檔的常數只是**函式簽章的預設值**，不是唯一的家。
 MIN_DWELL_SECONDS_DEFAULT = 300.0
 
-#: DEF-200-466：量不到時沿用持久 cap 的年齡上限（見 `stabilize()` 的量不到分支）。取
+#: DEF-200-466／479：量不到時沿用持久 cap 的盲區上限（距上次量到；見 `stabilize()`）。取
 #: `quota_messages.RESET_ARM_HORIZON_SECONDS`＝同一把「6 小時內才算近」的尺，不另寫字面；
 #: 刻意不進 `Policy`（零 I/O 判讀層不收旋鈕，要調時再升級）。
 MAX_HELD_AGE_SECONDS = RESET_ARM_HORIZON_SECONDS
+#: DEF-200-479：fail-open 放手那一次的出聲（只在持久 cap 被放寬時發一次，之後 cap 已是新值）。
+FAIL_OPEN_NOTICE = (f"額度連續量不到超過 {MAX_HELD_AGE_SECONDS // 3600} 小時（或 halt 等的 reset "
+                    "已過）⇒ 不再沿用那個 halt，扇出上限放回降級值；一量到就依真實水位收緊。")
 
 #: 持久化檔名（住 `endurance_env.trace_dir()`）。不帶 session id。🔴 DEF-200-437：鍵＝
 #: （模型家族, 尺），不再是帳號級單檔。舊理由（同 `quota_availability.STATE_NAME`：平穩歷史
@@ -99,6 +103,8 @@ class StabilityState:
 
     cap: int
     last_change: str  # 最近一次「數值真的變了」的時刻（aware ISO 字串）
+    reset_at: str | None = None  # 量到的 halt 在等的 reset（`halt_resets_at`）；None＝未知
+    confirmed_at: str | None = None  # 最後一次「真的量到」的時刻；None＝舊檔（退回 last_change）
 
 
 def state_path(scope: str | None = None, ruler: str = RULER_GATE) -> Path:
@@ -126,7 +132,9 @@ def load_state(path: Path | None = None, scope: str | None = None,
     if (not isinstance(cap, int) or isinstance(cap, bool) or cap < 0
             or not isinstance(last_change, str) or _aware(last_change) is None):
         return None
-    return StabilityState(cap, last_change)
+    opt = [data.get(k) if _aware(data.get(k)) is not None else None
+           for k in ("reset_at", "confirmed_at")]
+    return StabilityState(cap, last_change, *opt)
 
 
 def save_state(state: StabilityState | None, path: Path | None = None,
@@ -139,9 +147,7 @@ def save_state(state: StabilityState | None, path: Path | None = None,
         except OSError:
             return False
         return True
-    payload = json.dumps(
-        {"schema": SCHEMA, "cap": state.cap, "last_change": state.last_change},
-        ensure_ascii=False)
+    payload = json.dumps({"schema": SCHEMA, **asdict(state)}, ensure_ascii=False)
     tmp = target.with_suffix(target.suffix + ".tmp")
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -168,7 +174,7 @@ def stabilize(prev: StabilityState | None, target: int, band: str, now: datetime
     `target`＝這一刻 `decide()` 算出來的 cap（**呼叫端必須先排除 `None`**，見 `evaluate()`）。
     沒有歷史（`prev is None`）⇒ 直接採用這一刻的目標值，不偽造停留時間（同
     `quota_availability._default_state` 的既有紀律）。
-    DEF-200-466：量不到時前值老於 `max_age_seconds`（或落款讀不懂）⇒ 視同沒有歷史，同上；
+    DEF-200-466／479：量不到時，reset 已過或盲過 `max_age_seconds` ⇒ 視同沒有歷史，同上；
     只限這一刻讀數也量不到（`band` 為 unmeasured）——讀數已回來、僅可得性遲滯未離開者不放。
     """
     if prev is None:
@@ -192,7 +198,11 @@ def stabilize(prev: StabilityState | None, target: int, band: str, now: datetime
         # （同 `prev is None`）。只放掉「這一刻的讀數也量不到」的（band＝unmeasured，目標＝
         # degraded 下限）：讀數已回來、只是可得性遲滯還沒離開時 band 是真實水位帶，仍維持前值
         # ——PRD (a) 的離開遲滯與 (c) 的每次至多 +1 不被年齡繞過。量得到分支完全不動。
-        stale = changed_at is None or (now - changed_at).total_seconds() > max_age_seconds
+        # DEF-200-479：已知 reset ⇒ 到點才放；無 reset ⇒ 盲滿上限才放。盲＝距上次真的量到，
+        # 舊檔無落款退回 last_change；一路量得到的長 halt 遇單次瞬斷，不再因 last_change 老而放。
+        due, since = _aware(prev.reset_at), _aware(prev.confirmed_at) or changed_at
+        stale = now >= due if due is not None else (
+            since is None or (now - since).total_seconds() > max_age_seconds)
         if stale and band == quota_policy.BAND_UNMEASURED:
             return StabilityState(target, now.isoformat(timespec="seconds"))
         return prev  # PRD (a) 接線：量不到 ⇒ 放寬方向全部失效，維持不變
@@ -205,7 +215,7 @@ def stabilize(prev: StabilityState | None, target: int, band: str, now: datetime
 def evaluate(target: int | None, band: str, now: datetime, *,
             min_dwell_seconds: float = MIN_DWELL_SECONDS_DEFAULT,
             unmeasured: bool = False, scope: str | None = None,
-            ruler: str = RULER_GATE,
+            ruler: str = RULER_GATE, reset_at: object = None, event: str | None = None,
             max_age_seconds: float = MAX_HELD_AGE_SECONDS) -> int | None:
     """**唯一正規入口**：讀舊狀態 → 套用平穩機制 → 落地 → 回傳穩定後的 cap。
 
@@ -219,9 +229,16 @@ def evaluate(target: int | None, band: str, now: datetime, *,
         return None
 
     def _critical_section() -> StabilityState:
-        nxt = stabilize(load_state(scope=scope, ruler=ruler), target, band, now,
-                        min_dwell_seconds=min_dwell_seconds, unmeasured=unmeasured,
-                        max_age_seconds=max_age_seconds)
+        prev = load_state(scope=scope, ruler=ruler)
+        nxt = stabilize(prev, target, band, now, min_dwell_seconds=min_dwell_seconds,
+                        unmeasured=unmeasured, max_age_seconds=max_age_seconds)
+        # DEF-200-479：真的量到＝落款「上次量到」並記下 halt 在等的 reset；量不到的呼叫絕不刷新
+        # （否則 6 小時的盲永遠數不滿）。放寬了持久 cap（fail-open）的那一次出聲一次。
+        if band != quota_policy.BAND_UNMEASURED:
+            rst = str(reset_at) if band == quota_policy.BAND_HALT and _aware(reset_at) else None
+            nxt = replace(nxt, confirmed_at=now.isoformat(timespec="seconds"), reset_at=rst)
+        elif event and prev is not None and nxt.cap > prev.cap:
+            emit_to_model(event, FAIL_OPEN_NOTICE)
         save_state(nxt, scope=scope, ruler=ruler)
         return nxt
     # 🔴 R102 修復（四方審查 F24／QA MUST FIX）：同 `quota_availability.evaluate()`——  round-label-ok  # noqa: E501

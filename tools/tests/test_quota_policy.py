@@ -3194,9 +3194,13 @@ class StabilityHeldAgeTest(unittest.TestCase):
     NOW = datetime(2026, 10, 3, 12, 0, 0, tzinfo=UTC)
     WEEK = 7 * 86400.0
 
-    def _held(self, cap: int, age_seconds: float) -> QS.StabilityState:
-        stamp = (self.NOW - timedelta(seconds=age_seconds)).isoformat(timespec="seconds")
-        return QS.StabilityState(cap, stamp)
+    def _at(self, seconds: float) -> str:
+        return (self.NOW + timedelta(seconds=seconds)).isoformat(timespec="seconds")
+
+    def _held(self, cap: int, age_seconds: float, **at: float) -> QS.StabilityState:
+        """`reset_at=`／`confirmed_at=`＝距 NOW 的秒數（正＝未來）；皆缺＝v1 舊檔形態。"""
+        return QS.StabilityState(cap, self._at(-age_seconds),
+                                 **{key: self._at(secs) for key, secs in at.items()})
 
     def _unmeasured(self, prev: QS.StabilityState, **kw) -> QS.StabilityState:
         """量不到、這一刻的目標是 2（`degraded_cap`）：前值 0 要不要被沿用。"""
@@ -3238,6 +3242,56 @@ class StabilityHeldAgeTest(unittest.TestCase):
             self.assertEqual(QS.evaluate(2, Q.BAND_UNMEASURED, self.NOW, unmeasured=True), 0)
             self.assertEqual(QS.evaluate(2, Q.BAND_UNMEASURED, self.NOW, unmeasured=True,
                                          max_age_seconds=60.0), 2, "上限沒有透傳到 stabilize()")
+
+    def test_a_halt_whose_reset_is_still_ahead_is_held_however_old_it_is(self) -> None:
+        """DEF-200-479：已知 reset 還沒到時，年齡（含盲了 7 小時）不得放掉 halt——舊規則會放。"""
+        prev = self._held(0, self.WEEK, reset_at=3600.0, confirmed_at=-7 * 3600.0)
+        self.assertIs(self._unmeasured(prev), prev, "reset 還沒到卻被年齡放掉")
+
+    def test_a_halt_whose_reset_has_passed_is_released_to_the_degraded_cap(self) -> None:
+        """DEF-200-479：reset 一過、量不到就無從確認 halt 還在不在 ⇒ fail-open，不等滿 6 小時。"""
+        nxt = self._unmeasured(self._held(0, 600.0, reset_at=-1.0, confirmed_at=-60.0))
+        self.assertEqual(nxt.cap, 2, "reset 已過仍沿用 halt")
+
+    def test_with_no_known_reset_only_the_blind_duration_releases_it(self) -> None:
+        """DEF-200-479：單次瞬斷不得因 last_change 老而放，永久量不到又不得永久停派。"""
+        fresh = self._held(0, self.WEEK, confirmed_at=-600.0)  # 一週前才變 0，10 分鐘前還量得到
+        self.assertIs(self._unmeasured(fresh), fresh, "剛量到過的長 halt 因 last_change 老而被放")
+        blind = self._held(0, self.WEEK, confirmed_at=-QS.MAX_HELD_AGE_SECONDS - 1)
+        self.assertEqual(self._unmeasured(blind).cap, 2, "盲超過上限仍沿用")
+
+    def test_a_v1_file_without_the_new_keys_loads_and_keeps_the_old_clock(self) -> None:
+        """DEF-200-479：升級日不得讓既有持久檔失效——沒有新欄位的舊檔照舊鐘走。"""
+        with tempfile.TemporaryDirectory(prefix="def479_") as td, \
+                mock.patch.dict(os.environ, {EE.TRACE_DIR_ENV: td}):
+            QS.state_path().parent.mkdir(parents=True, exist_ok=True)
+            v1 = {"schema": QS.SCHEMA, "cap": 0, "last_change": self._at(-self.WEEK)}
+            QS.state_path().write_text(json.dumps(v1), encoding="utf-8")
+            old = QS.load_state()
+            self.assertEqual((old.reset_at, old.confirmed_at), (None, None))
+            self.assertEqual(QS.evaluate(2, Q.BAND_UNMEASURED, self.NOW, unmeasured=True), 2)
+
+    def test_evaluate_records_the_halt_reset_and_a_blind_call_never_refreshes_the_clock(
+            self) -> None:
+        """DEF-200-479：一次釘四件事——撐到 reset、盲不刷新時鐘、放手只出聲一次、量到即收緊。"""
+        reset, blind = self._at(30 * 3600.0), {"unmeasured": True, "event": "PostToolUse"}
+        at7h, past = (self.NOW + timedelta(hours=h) for h in (7, 31))
+        tick = timedelta(seconds=1)
+        with tempfile.TemporaryDirectory(prefix="def479_") as td, \
+                mock.patch.dict(os.environ, {EE.TRACE_DIR_ENV: td}), \
+                mock.patch.object(QS, "emit_to_model") as said:
+            self.assertEqual(QS.evaluate(0, Q.BAND_HALT, self.NOW, reset_at=reset), 0)
+            seen = QS.load_state()
+            self.assertEqual((seen.reset_at, seen.confirmed_at), (reset, self._at(0)))
+            self.assertEqual(QS.evaluate(2, Q.BAND_UNMEASURED, at7h, **blind), 0,
+                             "reset 在 30h 後，盲 7h 不得放")
+            self.assertEqual(QS.load_state().confirmed_at, seen.confirmed_at,
+                             "盲的呼叫刷新了上次量到")
+            self.assertEqual(QS.evaluate(2, Q.BAND_UNMEASURED, past, **blind), 2)
+            self.assertEqual(QS.evaluate(2, Q.BAND_UNMEASURED, past + tick, **blind), 2)
+            said.assert_called_once_with("PostToolUse", QS.FAIL_OPEN_NOTICE)
+            self.assertEqual(QS.evaluate(0, Q.BAND_HALT, past + 2 * tick, reset_at=reset), 0,
+                             "量到沒有立即收緊")
 
 
 class DegradedNoticeCapIsTheEnforcedCapTest(unittest.TestCase):
@@ -3752,6 +3806,15 @@ class ConcurrencyDecisionPathWiringTest(unittest.TestCase):
         self.assertLess(body.index("quota_stability.evaluate("),
                         body.index("pace_contract.write("),
                         "平穩化必須發生在寫入引擎契約**之前**，否則引擎讀到的是舊值")
+
+    def test_both_rulers_forward_the_halt_reset_to_the_stabilizer(self) -> None:
+        """DEF-200-479：兩處呼叫都得把 halt 在等的 reset 交給遲滯層，否則 reset 感知是死碼。"""
+        calls = [n for n in ast.walk(ast.parse(self._SRC)) if isinstance(n, ast.Call)
+                 and ast.unparse(n.func) == "quota_stability.evaluate"]
+        kws = [{k.arg: ast.unparse(k.value) for k in c.keywords} for c in calls]
+        self.assertEqual([k.get("reset_at") for k in kws], ["halt_resets_at(decision)"] * 2)
+        self.assertEqual(sum(k.get("event") == "event" for k in kws), 1,
+                         "守衛尺沒帶 event ⇒ 放手時出不了聲")
 
 
 # R104／PRD §4.2.5＋§4.2.1：`bursting_ok()`／`ewma_burn_rate()`——只算不接線，round-label-ok

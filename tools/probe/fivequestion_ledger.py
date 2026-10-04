@@ -170,6 +170,11 @@ def protocol_status(prm: dict, protocol_dir: Path, ledger: Path, repo_root: Path
     print(f"### ②′ 協定狀態\n  protocol_sha256={sha}（manifest {n_files} 檔）")
     print(f"  輪帳本 {len(rows)} 列；window_len={run}；評估: {verdict}")
     print("  （評估僅含家族計數與 p1；Q1′～Q4′ 不在內，見 --five-question 與下列各行）")
+    win = rows[-run:] if run else []  # 純加印（ARCH-196-04）：不參與上面的判定
+    n_new, n_exc = (sum(len(r[k]) for r in win) for k in ("new_p_le2", "excluded_p_le2"))
+    print(f"  窗口內登記 raw={n_new + n_exc}（new {n_new}＋excluded {n_exc}）｜"
+          f"公式可見={n_new}（excluded 不入評估式；raw>可見＝有 P≤2 以排除承擔，"
+          "查 excluded_reason／window_reset）")
     for row in rows:
         extra = {k: row[k] for k in OPTIONAL_FIELDS if k in row}
         if extra:

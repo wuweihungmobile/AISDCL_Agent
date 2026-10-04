@@ -1165,6 +1165,12 @@ class PreToolUseBlockTest(unittest.TestCase):
         self.assertIn("Task", err)
         self.assertIn("/compact", err)  # posix-abs-ok: Claude Code 的 slash 指令，不是路徑
 
+    def test_the_block_message_names_the_converging_tools_from_the_single_source(self) -> None:
+        """防手寫清單句改回去（本輪即因此漂移出缺 Write）：收斂工具清單只能來自單一導出。"""
+        msg = guard.block_message(950_000, 1_000_000, "feed", "Agent")
+        self.assertIn(qm.convergent_tools_clause(), msg)
+        self.assertNotIn("仍然放行", msg)
+
     def test_converging_tools_stay_allowed(self) -> None:
         """收斂還得做得完（寫任務書、跑 git）——擋到無法收斂的守衛會被整個關掉。"""
         for tool in ("Read", "Edit", "Write", "PowerShell", "Bash", "Grep"):
@@ -11346,6 +11352,31 @@ class SentinelReapVerdictTest(unittest.TestCase):
         self.assertTrue(row["reap"], row)
         self.assertEqual(row["trace"], "", "痕跡沒寫成，卻回報成寫好了")
         self.assertFalse(trace.is_file(), f"對照組本身壞了：{trace} 竟然存在")
+
+    def test_the_hook_arms_and_the_gc_reads_plans_in_the_same_directory(self) -> None:
+        """DEF-200-465：武裝端寫任務書的目錄＝GC 預設掃的目錄；任一邊改家另一邊沒跟，GC 會靜默變成
+        永遠量不到（保守側＝不收，外觀與「沒有殘骸」相同）。看行為：兩邊各自算出的路徑對帳。
+        已知不在鎖內：planner 手動 `--arm-sentinel` 預設另一個家（GC 量不到＝保守側）。"""
+        tmp, seen = _tmpdir(self, "plan-home-"), []
+        fake = unittest.mock.Mock(
+            maybe_arm=lambda transcript, sid, spawn, plan_path: seen.append(plan_path))
+        with unittest.mock.patch.object(tempfile, "tempdir", str(tmp)), \
+                unittest.mock.patch.object(guard, "_has_carrier", return_value=True), \
+                unittest.mock.patch.object(guard, "sentinel_lifecycle", fake), \
+                unittest.mock.patch.dict(os.environ, {guard.SENTINEL_OFF_ENV: ""}):
+            guard.arm_when_earned(tmp / "sid-465.jsonl")
+        plan = tmp / "autosdd_resume_plan_sid-465.md"
+        relay = planner.render_relay({"state": "disarmed", "transcript": str(tmp / "gone.jsonl")})
+        plan.write_text(relay, encoding="utf-8", newline="\n")
+        with unittest.mock.patch.object(tempfile, "tempdir", str(tmp)), \
+                unittest.mock.patch.object(
+                    sentinel_lifecycle, "sentinel_task_names",
+                    return_value=[sentinel_lifecycle.TASK_PREFIX + "sid-465"]), \
+                unittest.mock.patch.object(sentinel_lifecycle, "_transcript_dir",
+                                           return_value=_tmpdir(self, "tx-")):
+            row = sentinel_lifecycle.gc()[0]  # 預設 tmp_dir＝tempfile.gettempdir()
+        self.assertEqual(Path(seen[0]), plan, "武裝端寫的任務書路徑不是 GC 預設會讀的那個")
+        self.assertTrue(row["reap"], f"GC 讀不到武裝端寫的任務書 ⇒ 量不到：{row}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════

@@ -59,7 +59,7 @@ monorepo 根目錄（`AISDCL_Agent/`，各機器 checkout 路徑不同）＝**�
 |------|--------------|------|--------|
 | `sdd_hook_router.py` | SessionStart；PreToolUse（Write／Edit／Read／Bash／NotebookEdit／Task／Agent／Workflow）；PostToolUse（Write／Edit／Read／Bash／NotebookEdit） | SDD 治理橋接：`SDD_ACTIVE_VERSION` 未設＝休眠 no-op | `SDD_ROUTER_QUIET=1` 靜音 |
 | `block_bash_on_windows.py` | PreToolUse／Bash | Windows 上禁用 Bash 工具（鐵律一）；非 Windows 一律 exit 0 | 無（掌舵者直接指令） |
-| `lint_powershell_command.py` | PreToolUse／PowerShell | 擋「上游原生指令 × 提前結束的管線（`Select-Object`／`select` 的 `-First`／`-Index`）或原生消費者 × 之後讀 `$LASTEXITCODE`」（DEF-200-481 精準化：裸原生指令會重設 rc、函式／別名定義時停用重設；非截斷 cmdlet 消費者不再被擋；真機答案表＝`tools/lib/rc_after_pipe_real.py`；DEF-200-483 補洞：元素頭先剝賦值前綴、左段只取最近未閉合括號之後——`$o = git …`／`$(…)`／`(…)` 包住的上游一樣擋，已閉合分組 `(git x) | select -First 1` 放行）、行首裸 `cd`／`Set-Location`（不論帶絕對／相對路徑或不帶參數；`Push-Location`／`Pop-Location` 不在此列）、裸 `bash` + `.sh`（鐵律一、二） | 行尾 `# ps-lint-ok: <WHY>`（獨立註解行無效） |
+| `lint_powershell_command.py` | PreToolUse／PowerShell | 擋「上游原生指令 × 提前結束的管線（`Select-Object`／`select` 的 `-First`／`-Index`）或原生消費者 × 之後讀 `$LASTEXITCODE`」（DEF-200-481 精準化：裸原生指令會重設 rc、函式／別名定義時停用重設；非截斷 cmdlet 消費者不再被擋；真機答案表＝`tools/lib/rc_after_pipe_real.py`；DEF-200-483 補洞：元素頭先剝賦值前綴、左段只取最近未閉合括號之後——`$o = git …`／`$(…)`／`(…)` 包住的上游一樣擋，已閉合分組 `(git x) | select -First 1` 放行；DEF-200-484 封閉左值族：型別標註／`${}`／逗號列／成員／索引賦值一樣剝、`${LASTEXITCODE}`／`$global:` 讀法與模組限定 `Select-Object` 一樣認、括號／`$( )` 內的裸原生視為重設 rc）、行首裸 `cd`／`Set-Location`（不論帶絕對／相對路徑或不帶參數；`Push-Location`／`Pop-Location` 不在此列）、裸 `bash` + `.sh`（鐵律一、二） | 行尾 `# ps-lint-ok: <WHY>`（獨立註解行無效） |
 | `block_destructive_git.py` | PreToolUse／Bash、PowerShell、Write、Edit、NotebookEdit | 毀滅性 git 形態阻斷（鐵律五）＋等待壞形態 `waitform_hits()`（鐵律六）＋治理檔禁寫（PRD §15.5 紅線 10：`AUTOSDD_UNATTENDED` 下保護面唯讀） | `AUTOSDD_GIT_GUARD_OFF`（模型碰不到，須在啟動 claude 前設）；`AUTOSDD_GOVWRITE_GUARD_OFF`（治理面唯讀專屬，與 git 族開關互不相通）；行內 `# git-guard-ok: <理由>`／`# waitform-ok: <WHY>`（`AUTOSDD_UNATTENDED` 有設時行內豁免無效） |
 | `context_budget_guard.py` | SessionStart（清哨兵閂鎖＋真實水位簡報；武裝延後到 PostToolUse 累積夠工作量）；PostToolUse（Read／Task／Grep／Glob／WebFetch／WebSearch／Bash／PowerShell：水位出聲）；PreToolUse（Task／WebFetch／WebSearch／Agent／Workflow：高水位**真的擋下**展開型工具） | context 三段式水位的機械物（見下節）；**PreToolUse** matcher 刻意不含 Read／Edit／PowerShell——收斂本身需要它們；額度 halt 帶的 PostToolUse 只提醒一次（非錯誤樣式），Agent／Task 帶 `model` 時依目標模型判額度軸 | `AUTOSDD_CONTEXT_GUARD_OFF`（context 阻斷）／`AUTOSDD_SENTINEL_OFF`（額度哨兵）——**刻意兩個開關**，關掉的是不同的東西 |
 | `check_claim_provenance.py` | Stop | 鐵律四的機械物：量化判決宣稱（`N passed`／`rc=N`…）必須在本場自己的 tool_result 出現過；**只出聲、永不阻斷**；轉述別包交件標 `[他包回報]` | `AUTOSDD_CLAIM_GUARD_OFF`；`AUTOSDD_UNATTENDED` 有設時詞表縮到只認方括號標記 |
@@ -67,6 +67,12 @@ monorepo 根目錄（`AISDCL_Agent/`，各機器 checkout 路徑不同）＝**�
 | `check_sh_eol.py` | PostToolUse／Write、Edit | `.sh`／`.bash` 行尾守門（非 `.sh`／`.bash` → exit 0；橋接自 AutoClaude tools/hooks） | 無 |
 
 文件宣稱 ↔ 註冊實況由 `tools/tests/test_doc_loc_baseline_freshness_r60.py::TestR74RootClaudeMdHookClaimsMatchRegistration` 與 `tools/tests/test_doc_loc_baseline_freshness_r60.py::TestR79EveryRegisteredHookIsNamedInClaudeMd` 雙向＋第三向機械釘住（已註冊未點名、未註冊卻寫成會跑，皆紅）。
+
+### 權限姿態（harness 層，不是 hook；R196 裁決）
+
+- 互動視窗自 Claude Code 2.1.283 起**內建起始模式＝auto**。官方文件（permission-modes#protected-paths）：auto 下寫入 `.claude/**` 等受保護路徑一律交分類器、`permissions.allow` 不能預先放行；分類器不可用時**拒絕而非詢問**。這不是 hook 阻斷——拒絕文字開頭是 `Permission for this action was denied by the Claude Code auto mode classifier`。
+- **常態維持 auto**（唯一能無人看管的互動姿態）。要套 `.claude/` 批次（hook／settings）時：Shift+Tab 兩下切到 acceptEdits、在 `.claude` 詢問框選「allow … .claude folder for this session」，套完切回 auto；auto 下被拒一次 ⇒ `/permissions` → Recently denied → 按 `r` 人工核准重試。**不要**改派子代理或換路徑繞過；子代理成品一律 staged 到 scratchpad 交主控。
+- 否決兩案：寫 hook 對 `.claude/hooks/**` 回 allow（守衛層自己改自己，正是分類器 `[Self-Modification]` 要擋的事）；專案 `settings.json` 設 `defaultMode`（改變全隊預設姿態，且設 auto／bypassPermissions 不生效）。本機母體（近 21 天 41 個互動視窗、6,613 次呼叫）的 98 筆 `toolDenialKind`：hook 90／路徑保護 6／分類器 2，分類器 2 筆皆為主控改 `.claude/` 時。
 
 ### hook 載具（鐵律一之二：exec form）
 

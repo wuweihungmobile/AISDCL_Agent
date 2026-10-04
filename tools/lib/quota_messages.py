@@ -301,10 +301,10 @@ def reset_horizon_phrase(branch: str, resets_at: object, now: datetime | None = 
 # 不得在別處抄第二份清單、也不得對成句做字串手術。限定語＝寫壞的指令只擋**那一次呼叫**，工具
 # 本身沒被停用；Windows 的 Bash 由鐵律一 hook（`block_bash_on_windows.py`）另行停用，所以那
 # 一邊列 PowerShell。刻意不含全形分號與「，只有」：呼叫端拿它組句。
-def convergent_tools_clause(windows: bool) -> str:
+def convergent_tools_clause(windows: bool | None = None) -> str:
     """收斂型工具清單句：清單與限定語只在這裡寫一次。POSIX 列 Bash、Windows 列 PowerShell，
-    兩者只差殼。"""
-    shell = "PowerShell" if windows else "Bash"
+    兩者只差殼；`None`＝以 `_is_windows()` 現查平台。"""
+    shell = "PowerShell" if _is_windows(windows) else "Bash"
     return f"收斂型工具（Read／Write／Edit／{shell}／git，寫壞的 {shell} 只擋那一次呼叫）不受影響"
 
 

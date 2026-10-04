@@ -973,7 +973,8 @@ def pace_report(now: datetime | None = None, model: str | None = None,
     stabilized = quota_stability.evaluate(
         decision.cap, decision.band, now, scope=model, ruler=quota_stability.RULER_PACE,
         min_dwell_seconds=policy.min_dwell_seconds,
-        unmeasured=avail.availability == quota_availability.AVAILABILITY_UNMEASURED)
+        unmeasured=avail.availability == quota_availability.AVAILABILITY_UNMEASURED,
+        reset_at=halt_resets_at(decision))
     if stabilized != decision.cap:
         decision = replace(decision, cap=stabilized,
                            recommended_fanout=min(decision.recommended_fanout, stabilized))
@@ -1108,7 +1109,8 @@ def quota_gate(payload: dict, *, blocking, latch_read, latch_write,
     stabilized = quota_stability.evaluate(
         decision.cap, decision.band, now, scope=active_model,
         min_dwell_seconds=policy.min_dwell_seconds,
-        unmeasured=avail.availability == quota_availability.AVAILABILITY_UNMEASURED)
+        unmeasured=avail.availability == quota_availability.AVAILABILITY_UNMEASURED,
+        reset_at=halt_resets_at(decision), event=event)
     if stabilized != decision.cap:
         # `rec <= cap` 是既有不變式（見 `quota_policy._bound()`）：cap 被平穩機制改寫後，
         # 建議值也必須跟著夾一次，否則畫面會出現「建議 4、上限 7」這種自相矛盾的組合。

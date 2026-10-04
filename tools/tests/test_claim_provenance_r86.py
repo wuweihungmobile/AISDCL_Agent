@@ -1810,6 +1810,41 @@ class TestTheProtocolStatusPrintsLedgerIntegrityAndQ4Evidence(unittest.TestCase)
         self.assertIn("  FAIL  ", next(ln for ln in stale.splitlines() if "acceptance_h1" in ln))
         self.assertIn("PROTOCOL-CHANGED", changed)
 
+    def test_the_ledger_verdict_thresholds_hold_at_their_boundaries(self) -> None:
+        """WHY：門檻（Σnew_p_le2<=2、Σp1==0、末列空）寫死在碼不在 params（ARCH-196-03），PASS／
+        FAIL 分支原本零斷言；邊界行為至少要有鎖，才不會被「順手放寬一格」悄悄改掉。
+        每列＝(new 個數, excluded 個數, p1)；另釘 ARCH-196-04 的「raw vs 公式可見」加印。"""
+        need = self.prm["rounds_required"]
+        zeros = [(0, 0, 0)] * (need - 2)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "proto").mkdir()
+            (root / "proto" / "README.md").write_text("x\n", encoding="utf-8", newline="\n")
+            sha = self.led.manifest_sha(root / "proto")[0]
+
+            def printed(spec: list[tuple[int, int, int]]) -> str:
+                rows = [_row(i, f"2026-10-{i:02d}", sha, tuple(f"N{i}-{k}" for k in range(n)),
+                             tuple(f"X{i}-{k}" for k in range(x)), p1=p1)
+                        for i, (n, x, p1) in enumerate(spec, 1)]
+                (root / "ledger.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows),
+                                                   encoding="utf-8", newline="\n")
+                return _printed(self.led.protocol_status, self.prm, root / "proto",
+                                root / "ledger.jsonl", root, trace_dir=root / "traces",
+                                now=_Q4_NOW, ancestor=lambda _sha: True)[1]
+
+            for label, spec, want in (
+                ("Σnew=2 末列空 p1=0", [(1, 0, 0), (1, 0, 0)] + zeros, "PASS"),
+                ("Σnew=3", [(2, 0, 0), (1, 0, 0)] + zeros, "FAIL"),
+                ("末列非空", [(0, 0, 0)] * (need - 1) + [(1, 0, 0)], "FAIL"),
+                ("某列 p1=1", [(1, 0, 0), (1, 0, 1)] + zeros, "FAIL"),
+                (f"{need - 1} 列", [(0, 0, 0)] * (need - 1), f"NOT-EVALUABLE({need - 1}/{need})"),
+            ):
+                line = next(ln for ln in printed(spec).splitlines() if "評估:" in ln)
+                self.assertTrue(line.endswith(f"評估: {want}"), f"{label}：{line}")
+            out = printed([(1, 1, 0), (1, 0, 0)] + zeros)
+        self.assertIn("raw=3", out, "new 2＋excluded 1：排除不入評估式，但 raw 必須看得見")
+        self.assertIn("公式可見=2", out)
+
 
 class TestTheBlockClaimEvidenceReadsStructuredDenials(unittest.TestCase):
     """DEF-200-428／430（受測：`.claude/hooks/check_claim_provenance.py` 的 `_tool_denial_kind`／

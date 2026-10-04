@@ -188,14 +188,16 @@ SHARED_PATTERN_SOURCE: dict[str, str] = {
 #: 全部入口，比逐個補個案穩。
 _CMD_START = r"(?:^|[;\n|&{}()])\s*"
 
-_RC_READ_RE = re.compile(r"\$LASTEXITCODE", re.IGNORECASE)
+_RC_READ_RE = re.compile(  # DEF-200-484：讀法含 `${…}`／`$global:`／`$script:`／`Get-Variable`
+    r"\$\{?(?:global:|script:)?LASTEXITCODE\}?|(?:Get-Variable|gv)\s+(?:-Name\s+)?LASTEXITCODE",
+    re.IGNORECASE)
 # 規則①的判準（DEF-200-481；pwsh 7.6／PS 5.1 逐形態真機答案表＝tools/lib/rc_after_pipe_real.py）：
 # 只擋「上游是外部執行檔 × 管線提前結束（Select-Object -First／-Index，-Wait 取消）或消費者也是
 # 外部執行檔（rc 換成消費者的）× 之後才讀 $LASTEXITCODE」；cmdlet 管線不碰 rc、其餘 cmdlet 消費者
 # 兩個引擎都正確寫入，放行。污染延續到下一次真的外部呼叫才解除：呼叫運算子、.exe／.cmd／.bat
 # 開頭，或 _NATIVE_HEADS 內的裸字（裸 `git status` 也會重設 rc）。同一條指令定義了 function／
 # filter／別名時詞彙表重設整條停用（遮蔽後的 git 不是外部執行檔）；profile／dot-source 內的
-# 定義看不到（殘餘）。DEF-200-483：元素頭先剝前導賦值（`$o = git …` 的管線頭是右側的 git）；
+# 定義看不到（殘餘）。DEF-200-483／484：元素頭先剝前導賦值（含型別標註／`${o}`／成員／索引左值）；
 # 管線左段只取**最近一個未閉合括號**之後——`$(git x | select -First 1)`／`(git x | …)` 括號內被
 # 截斷＝擋，`(git x) | select -First 1` 先跑完才進管線＝放行（兩引擎真機 0／0）。
 # 呼叫運算子（左邊界排除 `2>&1` 的 &）。
@@ -216,7 +218,7 @@ _DEFINES_RE = re.compile(
     re.IGNORECASE,
 )
 _TRUNCATING_PIPE_RE = re.compile(
-    r"\|\s*(?:Select-Object|select)(?![\w-])"
+    r"\|\s*(?:[\w.]+\\)?(?:Select-Object|select)(?![\w-])"  # DEF-200-484：可帶模組前綴
     r"(?![^|;\n]*-Wait(?![\w-]))"
     r"[^|;\n]*?-(?:F(?:i(?:r(?:st?)?)?)?|Ind(?:ex?)?)(?![\w-])",
     re.IGNORECASE,
@@ -226,9 +228,14 @@ _NATIVE_CONSUMER_RE = re.compile(
     + r")(?![\w.\\/:-])|[^\s;|&]*\.(?:exe|cmd|bat)(?![\w]))",
     re.IGNORECASE,
 )
-_ELEMENT_SPLIT_RE = re.compile(r"\|\|?|&&|\{")
+_ELEMENT_SPLIT_RE = re.compile(r"\|\|?|&&|(?<!\$)\{")  # `${o}` 的 `{` 不是區塊起頭
 #: 元素前導的賦值（`$o =`／`$o +=`／`$script:o =`）：`$o = git log …` 的管線頭是右側的 git。
-_ASSIGN_PREFIX_RE = re.compile(r"^\s*\$[\w:]+\s*(?:[-+*/%]?=)\s*")
+#: DEF-200-484 左值族：型別標註 `[int]$n`、`${o}`、逗號列 `$a, $b`、成員 `$h.k`、索引 `$h[0]`。
+_TYPE = r"\[(?:[^\[\]]|\[[^\[\]]*\])*\]"  # `[string]`／`[string[]]`，同時當索引 `['k']`
+_LVALUE = r"(?:" + _TYPE + r"\s*)*(?:\$\{[^}]*\}|\$[\w:]+)(?:\.\w+|" + _TYPE + r")*"
+_ASSIGN_PREFIX_RE = re.compile(
+    r"^\s*" + _LVALUE + r"(?:\s*,\s*" + _LVALUE + r")*\s*(?:[-+*/%]?=)\s*")
+_GROUP_OPEN_RE = re.compile(r"[$@]?\(")  # 括號內的外部呼叫立刻跑完（`{ }` 不一定跑，不算）
 
 
 def _head_is_native(element: str, shadowed: bool = False) -> bool:
@@ -244,7 +251,8 @@ def _head_is_native(element: str, shadowed: bool = False) -> bool:
 def _statement_resets_rc(statement: str, shadowed: bool = False) -> bool:
     """這一句是否真的重新發起了一次外部呼叫（⇒ `$LASTEXITCODE` 被重寫）。吃**一句**：`.exe` 的
     「必須在開頭」只有在語句邊界上才判得準。`shadowed`＝同一條指令定義了函式／別名，裸字不算。"""
-    return bool(_RC_RESET_RE.search(statement) or _head_is_native(statement, shadowed))
+    return bool(_RC_RESET_RE.search(statement) or any(
+        _head_is_native(part, shadowed) for part in _GROUP_OPEN_RE.split(statement)))
 
 
 def _inside_open_group(left: str) -> str:

@@ -844,6 +844,41 @@ class TestLintPowerShellHookBehaviour(unittest.TestCase):
         ("括號內被截斷、括號外再接管線 `(git … | Select-Object -First 1) | Out-Null`",
          '(git log --oneline -n 40 | Select-Object -First 1) | Out-Null\n"rc=$LASTEXITCODE"',
          "LASTEXITCODE"),
+        # ── DEF-200-484：賦值左值族／rc 讀法／模組前綴（兩引擎 after=7／-1；原整類放行）──
+        ("型別標註賦值 `[string]$o = git … | Select-Object -First 1`",
+         '[string]$o = git log --oneline -n 40 | Select-Object -First 1\n"rc=$LASTEXITCODE"',
+         "LASTEXITCODE"),
+        ("陣列型別標註 `[string[]]$o = …`",
+         '[string[]]$o = git log --oneline -n 40 | Select-Object -First 1\n"rc=$LASTEXITCODE"',
+         "LASTEXITCODE"),
+        ("逗號列多重賦值 `$a, $b = git … | select -First 1`",
+         '$a, $b = git log --oneline -n 40 | select -First 1\n"rc=$LASTEXITCODE"',
+         "LASTEXITCODE"),
+        ("`${o}` 形式的變數名（`${` 的 `{` 不是區塊起頭）",
+         '${o} = git log --oneline -n 40 | select -First 1\n"rc=$LASTEXITCODE"',
+         "LASTEXITCODE"),
+        ("成員賦值 `$h.k = git … | select -First 1`",
+         '$h = @{}\n$h.k = git log --oneline -n 40 | select -First 1\n"rc=$LASTEXITCODE"',
+         "LASTEXITCODE"),
+        ("索引賦值 `$h['k'] = git … | select -First 1`",
+         "$h = @{}\n$h['k'] = git log --oneline -n 40 | select -First 1\n\"rc=$LASTEXITCODE\"",
+         "LASTEXITCODE"),
+        ("對照：參數內的 `=` 不是賦值，不得被左值族剝掉（仍擋）",
+         'git log --pretty=format:%h | select -First 1\n"rc=$LASTEXITCODE"',
+         "LASTEXITCODE"),
+        ("讀法 `${LASTEXITCODE}`（after=7／-1）",
+         'git log --oneline -n 40 | select -First 1\n"rc=${LASTEXITCODE}"',
+         "LASTEXITCODE"),
+        ("讀法 `$($global:LASTEXITCODE)`（after=7／-1）",
+         'git log --oneline -n 40 | select -First 1\n"rc=$($global:LASTEXITCODE)"',
+         "LASTEXITCODE"),
+        ("讀法 `(Get-Variable LASTEXITCODE).Value`（after=7／-1）",
+         'git log --oneline -n 40 | select -First 1\n$rc = (Get-Variable LASTEXITCODE).Value',
+         "LASTEXITCODE"),
+        ("模組限定名 `Microsoft.PowerShell.Utility\\Select-Object`（pwsh 7 污染）",
+         'git log --oneline -n 40 | Microsoft.PowerShell.Utility\\Select-Object -First 1\n'
+         '"rc=$LASTEXITCODE"',
+         "LASTEXITCODE"),
     )
 
     #: `(夾在管線與 rc 讀取中間的那一句, 它是否真的重設了 rc)`——其餘字元逐字相同。
@@ -919,6 +954,19 @@ class TestLintPowerShellHookBehaviour(unittest.TestCase):
         ("賦值右側的裸 git 也重設 rc（污染之後 `$o = git status` 再讀，0／0）",
          'git log | Select-Object -First 1 | Out-Null\n'
          '$o = git status --porcelain\n"rc=$LASTEXITCODE"'),
+        # ── DEF-200-484 對照：左值族賦值右側／括號內的裸 git 重設 rc、非截斷的安全形態（0／0）──
+        ("型別標註賦值右側的裸 git 重設 rc（`[string]$o = git status` 再讀，0／0）",
+         'git log | Select-Object -First 1 | Out-Null\n'
+         '[string]$o = git status --porcelain\n"rc=$LASTEXITCODE"'),
+        ("括號內的裸 git 立刻跑完＝重設 rc（污染之後 `$o = (git status)` 再讀，0／0）",
+         'git log | Select-Object -First 1 | Out-Null\n'
+         '$o = (git status --porcelain)\n"rc=$LASTEXITCODE"'),
+        ("左值族賦值但消費者不截斷 `[string]$o = git … | Select-String`（0／0）",
+         '[string]$o = git log --oneline -n 40 | Select-String \'commit\'\n"rc=$LASTEXITCODE"'),
+        ("先落變數再截斷：管線左邊是變數不是原生（0／0）",
+         '$v = git log --oneline -n 40\n$v | Select-Object -First 1\n"rc=$LASTEXITCODE"'),
+        ("賦值包住的 `$o = git … | Select-Object -Last 1` 讀完全部輸入（0／0）",
+         '$o = git log --oneline -n 40 | Select-Object -Last 1\n"rc=$LASTEXITCODE"'),
     )
 
     def test_pipe_aliases_are_judged_the_same_as_their_full_names(self) -> None:
@@ -1624,6 +1672,18 @@ _PARITY_HITS = (
     ("rc-after-pipe", "$o = git status | select -First 3\n$LASTEXITCODE"),
     ("rc-after-pipe", "$o = $(git status | select -First 3)\n$LASTEXITCODE"),
     ("rc-after-pipe", "(git status | select -First 3) | Out-Null\n$LASTEXITCODE"),
+    # DEF-200-484：賦值左值族（型別標註／${}／逗號列／成員／索引）、rc 讀法、模組限定名
+    ("rc-after-pipe", "[string]$o = git status | select -First 3\n$LASTEXITCODE"),
+    ("rc-after-pipe", "[string[]]$o = git status | select -First 3\n$LASTEXITCODE"),
+    ("rc-after-pipe", "$a, $b = git status | select -First 3\n$LASTEXITCODE"),
+    ("rc-after-pipe", "${o} = git status | select -First 3\n$LASTEXITCODE"),
+    ("rc-after-pipe", "$h.k = git status | select -First 3\n$LASTEXITCODE"),
+    ("rc-after-pipe", "$h['k'] = git status | select -First 3\n$LASTEXITCODE"),
+    ("rc-after-pipe", "git status | select -First 3\n${LASTEXITCODE}"),
+    ("rc-after-pipe", "git status | select -First 3\n$global:LASTEXITCODE"),
+    ("rc-after-pipe", "git status | select -First 3\n(Get-Variable LASTEXITCODE).Value"),
+    ("rc-after-pipe",
+     "git status | Microsoft.PowerShell.Utility\\Select-Object -First 3\n$LASTEXITCODE"),
     ("bare-bash-sh", "bash tools/install_mac_nightly.sh"),
     ("bare-bash-sh", "bash.exe tools/install_mac_nightly.sh"),
 )
@@ -1652,6 +1712,9 @@ _PARITY_CLEAN = (
     # DEF-200-483：括號已閉合（git 先跑完）／賦值右側的裸 git 重設 rc
     "(git status) | select -First 3\n$LASTEXITCODE",
     "git status | select -First 3\n$o = git status\n$LASTEXITCODE",
+    # DEF-200-484：左值族賦值右側／括號內的裸 git 重設 rc
+    "git status | select -First 3\n[string]$o = git status\n$LASTEXITCODE",
+    "git status | select -First 3\n$o = (git status)\n$LASTEXITCODE",
 )
 
 
