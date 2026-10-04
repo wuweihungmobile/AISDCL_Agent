@@ -581,6 +581,10 @@ _GOVERNANCE_DOCS = (
     # 五問第十六次四方覆核（lint 規則①精準化、permissions.allow、②′ 協定批次修訂）：即刻登記。
     _REPO_ROOT / "docs" / "06_quality"
     / "CrossPlatform_R194_FiveQuestion_Permission_Precision_Evidence.md",
+    # 五問第十七次四方覆核（真實 auto mode 新視窗首筆樣本、lint 規則①賦值／括號漏攔 DEF-200-483、
+    # DEF-200-478 兩個「哪一支是我」讀者收斂、鏡 D 訂正上一輪證據檔文字）：即刻登記。
+    _REPO_ROOT / "docs" / "06_quality"
+    / "CrossPlatform_R195_FiveQuestion_AutoMode_Window_Evidence.md",
     # 護欄層行數棘輪史料歸檔的第二冊（第一冊逼近 Read 工具上限，淨減法搬遷改落本檔）：即刻登記。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_Guard_Line_History_2.md",
 )

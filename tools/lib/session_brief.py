@@ -105,19 +105,22 @@ _VERIFY_HINT_WINDOWS = (
 #: 這句話固定跟簡報一起送出，讓模型從第一時間就有正確的心智模型。三段組成：扇出暫停半句
 #: （這裡）＋收斂型工具清單句（`quota_messages.convergent_tools_clause()`，單一導出，本檔不抄）
 #: ＋平台尾句（POSIX 一個、Windows 一個）。寫壞的那一次呼叫被攔下不等於工具被停用，尾句講清楚。
-_RC2_PAUSE = ("hook 的 rc=2 紅字只代表扇出型工具（Task／Agent／Workflow／WebFetch／"
-              "WebSearch）暫停；")
+#: SD-195-01：主語限定為額度／水位守衛——Windows 的 Bash 阻斷與 lint 阻斷同為 rc=2，泛稱
+#: 「hook 的 rc=2 只代表扇出暫停」會與同段的 Windows 尾句牴觸。
+_RC2_PAUSE = ("額度／水位守衛（context_budget_guard）的 rc=2 紅字只代表扇出型工具（Task／Agent／"
+              "Workflow／WebFetch／WebSearch）暫停；")
 _RC2_TAIL = ("（寫壞的那一次 Bash 呼叫會被攔下、不執行，stderr 附一行解法，照改重跑即可；"
              "Bash 本身仍可用。）")
 
 #: DEF-200-412：Windows 上 Bash 工具由 `block_bash_on_windows.py`（鐵律一）整支 exit 2。新視窗
 #: 的模型若先被「Bash 沒事」安撫、下一步撞牆後又把「Bash 被擋」誤讀成「寫檔被擋」（掌舵者 Q1
-#: 原話：「才開新視窗，就說他被擋不能寫檔案用工具了」）。所以 Windows 尾句改列 PowerShell，
-#: 並明列照常可用的工具；句中不引述症狀字面（引述即預示，DEF-200-476）。
+#: 原話：「才開新視窗，就說他被擋不能寫檔案用工具了」）。所以 Windows 版列 PowerShell，並明列
+#: 照常可用的工具；句中不引述症狀字面（引述即預示，DEF-200-476）。SD-195-03：這兩件事原本住在
+#: 簡報最尾端（撰寫時真機實測：1727 字元中的第 1601 字起）、首次工具呼叫前易被略過 ⇒ 前移到
+#: 簡報第一句（`windows_lead()`），本尾句只留 lint 這一件。
 _RC2_TAIL_WINDOWS = (
-    "（Windows：Bash 工具另由鐵律一 hook 停用，跑指令用 PowerShell 工具、"
-    "改檔用 Write／Edit，不要先試 Bash（PowerShell／Write／Edit 照常可用）；"
-    "壞寫法的 PowerShell 指令會被 lint 擋下，訊息附出口，照改重跑即可）"
+    "（Windows：壞寫法的 PowerShell 指令會被 lint 擋下、訊息附出口，照改重跑即可；"
+    "Bash 的停用與照常可用的工具見本簡報開頭）"
 )
 
 
@@ -145,16 +148,35 @@ def rc2_clarify(windows: bool | None = None) -> str:
     return _RC2_PAUSE + clause + (_RC2_TAIL_WINDOWS if win else _RC2_TAIL)
 
 
+def windows_lead(windows: bool | None = None) -> str:
+    """簡報**第一句**（僅 Windows；SD-195-03）：Bash 工具由鐵律一 hook 停用、跑指令改用
+    PowerShell、哪些工具照常可用。清單句只呼叫 `quota_messages.convergent_tools_clause()`
+    （單一導出，本檔不抄）；該模組不可達時只省略清單句。POSIX 回空字串；平台判準見 `_windows()`。"""
+    if not _windows(windows):
+        return ""
+    try:
+        listing = "；" + quota_messages.convergent_tools_clause(True)
+    except Exception:  # noqa: BLE001 — 見檔頭 fail-open 紀律
+        listing = ""
+    return f"（Windows：Bash 工具由鐵律一 hook 停用，跑指令用 PowerShell 工具{listing}。）"
+
+
 #: 唯讀退路：兩條現查指令因權限詢問或分類器暫時不可用而跑不起來時，真實數據仍能用 Read 唯讀取得
 #: ——沒有這句模型就同時「被擋」又「查不了」；條件句不預寫「寫檔被拒」劇本（DEF-200-476）。目標路徑由
 #: `_read_targets()` 從既有 SSOT 解出；解不出時退回不帶路徑的措辭（`verify_hint()` 的缺省）。
+#: ARCH-195-08：末句講分類器拒絕的**射程**（只針對那一個路徑；`.claude/**` 是官方文件列的受保護
+#: 路徑，allow 規則不能預先放行）並給出路（成品落 scratchpad 交人落地）；措辭不引述症狀字面。
 _READ_FALLBACK = (
     "若上面兩條現查指令因權限詢問或分類器暫時不可用而跑不起來，真實數據仍可用 **Read** 工具"
     "唯讀取得：context 水位讀 {feed}（statusLine 寫的 JSON；`context_window.used_percentage`"
     "／`current_usage`／`context_window_size`），額度讀 {quota}（`axes[]` 的 `kind`／`pct`／"
-    "`severity`）；不要憑簡報猜，也不要宣稱被擋。這兩條指令與兩個 Read 路徑已列在 repo "
-    "權限白名單（.claude/settings.json permissions.allow），照字面執行不應再跳詢問；若跳出權限"
-    "詢問，那是 harness 權限層、不是 hook 阻斷，核准即可。")
+    "`severity`）；不要憑簡報猜；沒看到阻斷訊息就不要說被擋（看到了就如實引原文）。這兩條指令"
+    "與兩個 Read 路徑已列在 repo 權限白名單（.claude/settings.json permissions.allow），"
+    "照字面執行不應再跳詢問；若跳出權限詢問，那是 harness 權限層、不是 hook 阻斷，有人在就核准；"
+    "headless 無人可核准時改走上面的 Read 退路。"
+    "auto mode 分類器對某一次 Write／Edit 的拒絕只針對那一個路徑（典型＝`.claude/` 下的設定與 "
+    "hook 檔，官方文件列為受保護路徑、allow 規則不能預先放行）；repo 其他檔照常可改，"
+    "成品先落 scratchpad 交掌舵者落地。")
 
 
 def verify_hint(windows: bool | None = None, *, feed: str | None = None,
@@ -554,6 +576,7 @@ def sessionstart_brief(
             window_evidence=window_evidence, read_context_feed=read_context_feed)
         quota = quota_line(quota_gate, now, _active_model(payload, transcript, guard))
         statusline = statusline_line(check_statusline)
-    return (f"[SDD-CTX-GUARD] 本 session 啟動時真實水位——context：{ctx}；額度：{quota}；"
+    lead = windows_lead()  # 僅 Windows 非空；緊接標記、先於一切（POSIX 簡報逐字不變）
+    return (f"[SDD-CTX-GUARD]{lead} 本 session 啟動時真實水位——context：{ctx}；額度：{quota}；"
            f"{statusline}。"
            f"{verify_hint(feed=feed, quota=quota_file)}{rc2_clarify()}{_unattended_note()}")

@@ -834,6 +834,16 @@ class TestLintPowerShellHookBehaviour(unittest.TestCase):
         ("-First 的縮寫 -f 同樣提前結束管線（after=7／-1）",
          'git log --oneline -n 40 | Select-Object -f 1\n"rc=$LASTEXITCODE"',
          "LASTEXITCODE"),
+        # ── DEF-200-483：賦值／括號／子運算式包住的原生上游（兩引擎 after=7／-1；原整類放行）──
+        ("賦值包住的原生上游 `$o = git … | Select-Object -First 1`",
+         '$o = git log --oneline -n 40 | Select-Object -First 1\n"rc=$LASTEXITCODE"',
+         "LASTEXITCODE"),
+        ("子運算式內的管線 `$o = $(git … | Select-Object -First 1)`",
+         '$o = $(git log --oneline -n 40 | Select-Object -First 1)\n"rc=$LASTEXITCODE"',
+         "LASTEXITCODE"),
+        ("括號內被截斷、括號外再接管線 `(git … | Select-Object -First 1) | Out-Null`",
+         '(git log --oneline -n 40 | Select-Object -First 1) | Out-Null\n"rc=$LASTEXITCODE"',
+         "LASTEXITCODE"),
     )
 
     #: `(夾在管線與 rc 讀取中間的那一句, 它是否真的重設了 rc)`——其餘字元逐字相同。
@@ -903,6 +913,12 @@ class TestLintPowerShellHookBehaviour(unittest.TestCase):
          '(git log --oneline -n 40) | Select-Object -First 1\n"rc=$LASTEXITCODE"'),
         ("上游是 cmdlet：-First 不碰 rc（7／7，前一個外部指令的真 rc 原樣保留）",
          'Get-ChildItem . | Select-Object -First 1\n"rc=$LASTEXITCODE"'),
+        # ── DEF-200-483 對照：賦值包住但安全／賦值右側的裸 git 重設 rc（皆 0／0）──
+        ("賦值包住的非截斷管線 `$o = git … | Select-String`（0／0）",
+         '$o = git log --oneline -n 40 | Select-String \'commit\'\n"rc=$LASTEXITCODE"'),
+        ("賦值右側的裸 git 也重設 rc（污染之後 `$o = git status` 再讀，0／0）",
+         'git log | Select-Object -First 1 | Out-Null\n'
+         '$o = git status --porcelain\n"rc=$LASTEXITCODE"'),
     )
 
     def test_pipe_aliases_are_judged_the_same_as_their_full_names(self) -> None:
@@ -1604,6 +1620,10 @@ _PARITY_HITS = (
     ("rc-after-pipe", "git status | select -First 3\n$LASTEXITCODE"),  # 詞彙表裸字當上游
     ("rc-after-pipe", "& git status | findstr zzz\n$LASTEXITCODE"),  # 原生消費者
     ("rc-after-pipe", "git status | findstr zzz\n$LASTEXITCODE"),
+    # DEF-200-483：賦值／子運算式／括號包住的原生上游（gap 0~4 變體由 gap 測試自動展開）
+    ("rc-after-pipe", "$o = git status | select -First 3\n$LASTEXITCODE"),
+    ("rc-after-pipe", "$o = $(git status | select -First 3)\n$LASTEXITCODE"),
+    ("rc-after-pipe", "(git status | select -First 3) | Out-Null\n$LASTEXITCODE"),
     ("bare-bash-sh", "bash tools/install_mac_nightly.sh"),
     ("bare-bash-sh", "bash.exe tools/install_mac_nightly.sh"),
 )
@@ -1629,6 +1649,9 @@ _PARITY_CLEAN = (
     "& git status | Select-String x\n$LASTEXITCODE",
     "& git status | select -First 3\ngit status --porcelain\n$LASTEXITCODE",
     "Get-ChildItem . | select -First 3\n$LASTEXITCODE",
+    # DEF-200-483：括號已閉合（git 先跑完）／賦值右側的裸 git 重設 rc
+    "(git status) | select -First 3\n$LASTEXITCODE",
+    "git status | select -First 3\n$o = git status\n$LASTEXITCODE",
 )
 
 
@@ -1768,7 +1791,7 @@ class TestHookAndProbeShareOneCriterion(unittest.TestCase):
             "_rc_real_gate", _REPO_ROOT / "tools" / "lib" / "rc_after_pipe_real.py")
         table = real._RC_SELFTEST
         self.assertEqual({row[1] for row in table}, {True, False}, "答案表只剩單一極性")
-        self.assertGreaterEqual(len(table), 18)
+        self.assertGreaterEqual(len(table), 29)
         self.assertEqual(real.selftest(_load_module("_lint_hook_gate", _LINT_HOOK)), [])
 
 

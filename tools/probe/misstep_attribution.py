@@ -210,6 +210,8 @@ def transcript_items(project_dir: Path | None = None,
     `control=True` 時回傳的是**對照組**：同一批 assistant text 區塊裡**沒有**自陳
     失誤的那些。用途見 `control_lift()`——沒有對照組，「最大的桶是 X」這句話就無法
     與「這個 repo 平常就常講 X」分開。
+
+    單一 slug 目錄即母體定義，不是「哪一支是我」的決策（那個走 `harness_feed.pick_transcript`）。
     """
     base = project_dir or project_transcript_dir(_REPO_ROOT)
     if not base.is_dir():

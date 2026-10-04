@@ -310,10 +310,11 @@ def convergent_tools_clause(windows: bool) -> str:
 
 _HALT_DONE = "你剛才那次工具呼叫已正常執行完成"
 _HALT_PAUSE = "，只有扇出型（Task／Agent／Workflow／WebFetch／WebSearch）暫停；"
-# Windows 上 Bash 工具由鐵律一 hook 整支停用：只換清單不夠，還要點破「那個阻斷不是不能寫檔」
+# Windows 上 Bash 工具由鐵律一 hook 整支停用：只換清單不夠，還要明講哪些工具照常可用；句中不引述
+# 「不能寫檔」之類的症狀字面（引述即預示，與 `session_brief.py` 一致；SD-195-04）。
 # （與 `session_brief.py` 的 Windows 簡報句是姊妹站點，兩處各有自己的後半）。
 _HALT_WINDOWS_NOTE = ("（Windows：Bash 工具另由鐵律一 hook 停用，跑指令用 PowerShell 工具、"
-                      "改檔用 Write／Edit，不要先試 Bash——那個阻斷不是「不能寫檔」）")
+                      "改檔用 Write／Edit，不要先試 Bash；其餘工具照常可用，清單見前句）")
 _HALT_PACE = "真實數字現查：`python tools/session_resume_planner.py --pace`"
 
 

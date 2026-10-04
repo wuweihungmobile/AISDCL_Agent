@@ -34,6 +34,7 @@ import time
 from pathlib import Path
 
 import endurance_env
+import harness_feed
 import quota_meter
 import schedule_backend
 from sentinel_lifecycle_arm import (
@@ -301,15 +302,19 @@ def _transcript_dir() -> Path | None:
 
 
 def _newest_session(base: Path | None) -> str:
-    """最近被寫的那一支逐字稿的 session id（＝根 CLAUDE.md 對「當前 session」的既有判準）。
+    """「當前 session」的 id（DEF-200-478：判準唯一的家＝`harness_feed.pick_transcript()`，與
+    `session_resume_planner.resolve_transcript()` 是同一個函式）：環境變數 `CLAUDE_CODE_SESSION_ID`
+    對應的逐字稿優先（本 slug → 他 slug），沒有才退回最後修改的那一支（排程情境本來就沒有它）。
 
     🔴 這是 GC 的**安全底線**，不是便利功能：它讓「忘了加 --keep」不會演變成把正在跑的
-    那一輪的續航拆掉。判準與 `session_resume_planner.resolve_transcript()` 逐字同源。
+    那一輪的續航拆掉。只看最後修改的舊版在多視窗下會保護到別人的 session（他窗一寫檔就成了
+    「最後修改」，DEF-200-431 同型）。本 slug 目錄可以不存在（只從子目錄啟動過）：判準同 planner，
+    上層 projects 目錄在即可跨 slug 找。
     """
-    if base is None or not base.is_dir():
+    if base is None or not (base.is_dir() or base.parent.is_dir()):
         return ""
-    found = [p for p in base.glob("*.jsonl") if p.is_file()]
-    return max(found, key=lambda p: p.stat().st_mtime).stem if found else ""
+    found, _ = harness_feed.pick_transcript(base, None, os.environ)
+    return found.stem if found else ""
 
 
 def _remove_task(task: str) -> int:

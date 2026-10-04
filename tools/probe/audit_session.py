@@ -250,7 +250,9 @@ def comparison_surfaces(command: str) -> dict[str, str]:
 def project_transcript_dir(repo_root: Path) -> Path:
     """`repo_root` 對應的 Claude Code 逐字稿目錄。slug＝把路徑裡每個非英數字元換成 `-`
     （觀察到的編碼、非官方契約，故 `--project-dir` 一律可覆寫、目錄不存在時 fail-loud）。
-    DEF-200-421：家目錄一律經 `platform_utils.claude_home()`，尊重 `CLAUDE_CONFIG_DIR`。"""
+    DEF-200-421：家目錄一律經 `platform_utils.claude_home()`，尊重 `CLAUDE_CONFIG_DIR`。
+    DEF-200-478：本目錄在 `main()` 的語料枚舉裡是「單一 slug 即母體定義」，不是「哪一支是我」的
+    決策（那個走 `harness_feed.pick_transcript`）。"""
     slug = re.sub(r"[^A-Za-z0-9]", "-", str(repo_root))
     return platform_utils.claude_home() / "projects" / slug
 

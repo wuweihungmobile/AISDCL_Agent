@@ -87,6 +87,10 @@ except Exception:  # noqa: BLE001 — 見上
 # 給它第二層 fallback 等於讓同一份退化知識有兩個家，而那正是本 repo 反覆判過的形態。
 import endurance_env  # noqa: E402
 
+# DEF-200-478：「哪一支逐字稿是本視窗」的判準唯一的家＝`harness_feed.pick_transcript()`（stdlib
+# only、同目錄，無循環）；本檔不另寫第二份（此前環境 sid 只在單一 slug 下拼檔名）。
+import harness_feed  # noqa: E402
+
 # 判讀原語。**刻意沒有 try/except**：能力提供者可以降級，判讀原語不行——給它
 # fallback stub 等於讓同一份字面有第二個家，而且會用錯的答案靜默通過。
 import pace_contract  # noqa: E402  # R86：配速檔案契約的寫入端（引擎側唯一的傳遞方式）
@@ -790,19 +794,21 @@ def quota_floor_reading(payload: dict, now: datetime) -> quota_policy.QuotaState
 # 且不管真正原因是什麼，訊息一律印同一句「拿不到逐字稿路徑」（本場實測重現：
 # `payload={}` 與「transcript 存在但 plan_writer 失敗」兩種完全不同的成因，
 # 修前輸出逐字相同）。本函式把「找逐字稿」拆成可測的純函式，並提供
-# `CLAUDE_CODE_SESSION_ID`＋`project_transcript_dir()` 這條 fallback。
+# `CLAUDE_CODE_SESSION_ID`＋`project_transcript_dir()` 這條 fallback（DEF-200-478：env sid 的
+# 查找交給 `harness_feed.pick_transcript()`，與 planner 同一個函式，含跨 slug）。
 def resolve_halt_transcript(payload: dict) -> tuple[Path | None, str]:
     """halt 交棒的逐字稿還原。回 `(路徑或 None, 來源)`；來源＝`payload`／`env-derived`／`unavailable`。"""  # noqa: E501
     raw = payload.get("transcript_path") if isinstance(payload, dict) else None
     cand = Path(raw) if isinstance(raw, str) and raw.strip() else None
     if cand is not None and cand.is_file():
         return cand, "payload"
-    sid = str(os.environ.get("CLAUDE_CODE_SESSION_ID") or "").strip()
-    if sid and project_transcript_dir is not None:
+    if os.environ.get(harness_feed.SESSION_ID_ENV) and project_transcript_dir is not None:
         root = Path(os.environ.get("CLAUDE_PROJECT_DIR") or Path.cwd())
-        cand = project_transcript_dir(root) / f"{sid}.jsonl"
-        if cand.is_file():
-            return cand, "env-derived"
+        found, why = harness_feed.pick_transcript(project_transcript_dir(root), None, os.environ)
+        # 只收「環境 sid 命中」：`pick_transcript` 的最後一階（最後修改）會撿到他窗的檔，而 halt
+        # 標記以 sid 為鍵落盤——劫持＝替別人的 session 寫停止標記，所以那一階在這裡視同找不到。
+        if found is not None and why.startswith(harness_feed.SOURCE_ENV):
+            return found, "env-derived"
     return None, "unavailable"
 
 

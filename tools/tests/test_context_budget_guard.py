@@ -14345,6 +14345,61 @@ class SessionTranscriptWriterReaderMatrixTest(unittest.TestCase):
         self.assertEqual(harness_feed.pick_transcript(base, None, env),
                          (own, harness_feed.SOURCE_ENV))
 
+    # DEF-200-478 的 writer oracle：逐字取自真實 harness 寫出的目錄名（本機 projects 普查）。
+    # Windows 磁碟機字母保留啟動 shell 給的小寫，reader 從 `resolve()` 拿到大寫——NTFS／APFS 不分
+    # 大小寫所以讀得到、字串比對才失配，故用 casefold 比。
+    _GOLDEN = ((PureWindowsPath("D:/CursorProject/AISDCL_Agent"), "d--CursorProject-AISDCL-Agent"),
+               (PurePosixPath("/Users/koala/AISDCL_Agent"), "-Users-koala-AISDCL-Agent"))
+
+    def test_the_slug_rule_reproduces_what_the_writer_really_wrote(self) -> None:
+        """上面的矩陣兩側都走生產的 slug 推導，規則改錯時兩邊一起錯、仍相等；這裡拿真實輸出對。"""
+        for cwd, golden in self._GOLDEN:
+            with self.subTest(cwd=str(cwd)):
+                self.assertEqual(planner.project_transcript_dir(cwd).name.casefold(),
+                                 golden.casefold())
+
+    def _reader_cell(self, root, cwd, noisy: bool, label: str) -> None:
+        tmp = _tmpdir(self, "writer-reader-")
+        cfg = {"set": {"CLAUDE_CONFIG_DIR": str(tmp / "cfg")}, "blank": {"CLAUDE_CONFIG_DIR": "  "},
+               "unset": {}}[label]
+        home = tmp / "cfg" if label == "set" else tmp / ".claude"  # 預期值獨立算
+        env = {"HOME": str(tmp), "USERPROFILE": str(tmp), "CLAUDE_CODE_SESSION_ID": self._SID,
+               "CLAUDE_PROJECT_DIR": str(root), **cfg}
+        with unittest.mock.patch.dict(os.environ, env):
+            if not cfg:
+                os.environ.pop("CLAUDE_CONFIG_DIR", None)
+            base = planner.project_transcript_dir(root)
+            self.assertEqual(base.parent.parent, home, "claude_home() 解到別的家目錄")
+            self._touch(home / "projects" / planner.project_transcript_dir(cwd).name
+                        / f"{self._SID}.jsonl", 600)
+            if noisy:
+                self._touch(base / "sid-neighbour.jsonl", 0)  # 他窗剛寫的檔：最後修改的會是它
+            readers = {
+                "planner": lambda: planner.resolve_transcript_source(repo_root=root)[0],
+                "halt 交棒": lambda: qg.resolve_halt_transcript({})[0],
+                "哨兵 GC 安全底線": lambda: sentinel_lifecycle._newest_session(base)}
+            for name, read in readers.items():
+                got = read()
+                self.assertEqual(getattr(got, "stem", got), self._SID, f"{name}沒回 writer 那一支")
+            # sid 對不上任何檔：halt 標記以 sid 為鍵，不得退用「最後修改」亂猜（那會替他窗寫標記）
+            os.environ["CLAUDE_CODE_SESSION_ID"] = "sid-gone"
+            self.assertEqual(qg.resolve_halt_transcript({}), (None, "unavailable"))
+
+    def test_every_which_one_is_me_reader_names_the_writers_file(self) -> None:
+        """DEF-200-478（受測：三個「哪一支是我」的讀者）：writer 寫在 `<claude 家>/projects/
+        <slug(啟動 cwd)>/<sid>.jsonl`，環境變數有 sid ⇒ planner／halt 交棒／哨兵 GC 安全底線回的都
+        是那一支，不論啟動位置（根／子目錄＝別的 slug，連本 slug 目錄都可能不存在）、有沒有一支更
+        新的他窗檔、`CLAUDE_CONFIG_DIR` 設定／未設／空白（三態各驗一次 `claude_home()`）。"""
+        cells = 0
+        for flavor, root in self._FLAVORS:
+            for where, cwd in (("root", root), ("subdir", root / "AutoClaude")):
+                for noisy in (False, True):
+                    for label in ("set", "unset", "blank"):
+                        with self.subTest(flavor=flavor, cwd=where, noisy=noisy, home=label):
+                            self._reader_cell(root, cwd, noisy, label)
+                        cells += 1
+        self.assertEqual(cells, 24, "矩陣被悄悄縮小了")
+
 
 class StartModelOfTest(unittest.TestCase):
     """DEF-200-432（受測：`harness_feed.start_model_of`，純函式）：簡報額度行的 active model，順序

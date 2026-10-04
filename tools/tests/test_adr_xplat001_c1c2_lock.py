@@ -619,7 +619,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 393,
     "_ps_engine.py": 83,
     "test_act_local_runner_image.py": 307,
-    "test_adr_xplat001_c1c2_lock.py": 8691,
+    "test_adr_xplat001_c1c2_lock.py": 8717,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 4067,
@@ -631,7 +631,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_check_archive_required.py": 160,
     "test_check_defect_log_crossref.py": 3904,
     "test_check_gha_action_versions.py": 295,
-    "test_check_hooks_liveness.py": 3737,
+    "test_check_hooks_liveness.py": 3760,
     "test_check_pytest_baseline_sites.py": 301,
     "test_check_script_parity.py": 2023,
     "test_check_wrapper_thinness.py": 1175,
@@ -639,7 +639,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_claim_provenance_r86.py": 1966,
     "test_clean_venv_carrier.py": 281,
     "test_component_sanitizer_shared_layer_lock.py": 274,
-    "test_context_budget_guard.py": 14598,
+    "test_context_budget_guard.py": 14653,
     "test_context_window_parity.py": 325,
     "test_cpu_budget.py": 428,
     "test_defect_id_reference_integrity.py": 276,
@@ -685,7 +685,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_script_scan_surface_ssot.py": 376,
     "test_sdd_hook_router_r158.py": 189,
     "test_sentinel_tick_e2e_r145.py": 308,
-    "test_session_brief.py": 1287,
+    "test_session_brief.py": 1321,
     "test_single_venv_identity.py": 162,
     "test_skip_ceiling_ratchet_direction.py": 719,
     "test_skip_discoverability_r83.py": 731,
@@ -2571,6 +2571,17 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "（重釘列、回歸鎖軌同輪列、到期兌現列 (194, 520) 並重新武裝 196／519、接鏈列）。"
      "主軌 0 ≤ 0（款(11) 連續上升第 2 輪後本輪必須 ≤ 0；R192／R193 為第 1／2 輪）。"
      "逐檔清單見 CrossPlatform_R194_FiveQuestion_Permission_Precision_Evidence.md〈四〉〈六〉。"),
+    ("R195", 114002, 114140, +138,  # round-label-ok
+     "[非淨減法輪][回歸鎖軌申報 78（DEF-200-478／483 回歸鎖）≤ 軌上限 309，"
+     "見 _REGRESSION_LANE_LOG 同輪列] 掌舵者五問第十七次四方覆核（真實 auto mode 新視窗"
+     "首筆樣本；DEF-200-483 lint 規則①賦值／括號漏攔根治、DEF-200-478 兩個「哪一支是我」"
+     "讀者收斂、簡報前置句與 halt 訊息措辭）："
+     "test_context_budget_guard.py +55（478 黃金向量＋三讀者矩陣）／test_session_brief.py +33"
+     "（Windows 前置句、守衛主語、單一導出清單鎖）／test_check_hooks_liveness.py +23（483 行為鎖、"
+     "parity 命中與清白形態、答案表下限 18→29）；加本表自身漂移（重釘列、回歸鎖軌同輪列、接鏈列、"
+     "Phase 2 §6 到期的『維持觀察』列）。"
+     "主軌 60（＝138−78）≤ 520（款(11) 連升第 1 輪；R194 主軌 0）。逐檔清單見 "
+     "CrossPlatform_R195_FiveQuestion_AutoMode_Window_Evidence.md〈四〉〈六〉。"),
 )
 
 
@@ -3033,6 +3044,13 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "新增測試行皆為缺陷回歸鎖；同輪 Trim 棒搬遷 −189 ⇒ 主表淨額 271、申報 271（＝主表淨額，"
      "R191 先例）⇒ 主軌 0 ≤ 0。"
      "見 CrossPlatform_R194_FiveQuestion_Permission_Precision_Evidence.md〈四〉〈六〉。"),
+    ("R195", 78,  # round-label-ok
+     "DEF-200-478（SessionTranscriptWriterReaderMatrixTest 黃金向量 P-a／三讀者矩陣 P-b／"
+     "claude_home 三態 P-c；test_context_budget_guard.py +55）、DEF-200-483（賦值／括號包住的"
+     "原生上游 MUST_BLOCK／MUST_PASS、_PARITY_HITS／_PARITY_CLEAN、答案表下限 18→29；"
+     "test_check_hooks_liveness.py +23）"
+     "＝缺陷回歸鎖 78；其餘 +33（test_session_brief.py 措辭鎖，SD-195 P3 批次無 DEF 列）歸主軌。"
+     "見 CrossPlatform_R195_FiveQuestion_AutoMode_Window_Evidence.md〈四〉〈六〉。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -3255,10 +3273,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 325
+_REPIN_LOG_FROZEN_PREFIX_LEN = 326
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "4215caed3535f81e0bfb7e9017aa47ee2e984a54473fbe4a3eb6fd9ce008ad36")
+    "8f82574a324334fefceac8317fd5752675b67c92999d78e08baa50e3c1fca39a")
 
 
 def repin_log_history_digest(
@@ -3614,6 +3632,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R192", "e5dd2c337e82", "8b3ab8b64522", "DEF-200-467"),  # round-label-ok
     ("R193", "8b3ab8b64522", "84991a4ce0d5", "DEF-200-474"),  # round-label-ok
     ("R194", "84991a4ce0d5", "4215caed3535", "DEF-200-481"),  # round-label-ok
+    ("R195", "4215caed3535", "8f82574a3243", "DEF-200-483"),  # round-label-ok
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。
@@ -7750,6 +7769,13 @@ _PHASE2_REVIEW_LOG: tuple[tuple[int, str, str], ...] = (
      "排定、尚未有結果；本列僅把該既存未決狀態依款(5) 的封閉表格式重新登記，純因本輪把稽核痕跡"
      "機械推進到 R189 而觸發 §6 的 5 輪視窗時效。依 §6 重新武裝下一個視窗（連續『維持觀察』"
      "計數歸零）。"),
+    (195, "[維持觀察]",
+     "本輪是掌舵者五問第十七次四方覆核（DEF-200-483 lint 規則①賦值／括號漏攔根治、DEF-200-478 兩個"
+     "「哪一支是我」讀者收斂、簡報前置句）收尾單人窗口（護欄層 guard-line 記帳＋分軌申報），未觸碰"
+     " ADR-XPLAT-013 方向 (c) 觀測→阻斷轉換提案本身——R129 提出的既存提案（送四方複審一事）迄今仍待"
+     "主控排定、尚未有結果，亦未提出新 Phase 2 提案。上一列（R189）是『提案』⇒ 連續『維持觀察』計數"
+     "自本列起算為一，未觸上限（`_PHASE2_MAX_CONSECUTIVE_DEFERRALS=1`）。"
+     "依 §6 重新武裝下一個視窗。"),
 )
 #: 到期輪由末列導出、不另立常數（一份知識一個家；同 `_REPIN_NET_CAP_SCHEDULE` 的
 #: 「生效點＝首列、現值＝末列，皆由表導出」）。

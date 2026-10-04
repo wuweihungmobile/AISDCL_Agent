@@ -237,9 +237,9 @@ class Rc2ClarifyTest(unittest.TestCase):
     def test_windows_variant_teaches_powershell_not_bash(self) -> None:
         got = sb.rc2_clarify(windows=True)
         self.assertIn("PowerShell", got)
-        self.assertIn("鐵律一 hook 停用", got)
+        self.assertIn("lint 擋下", got)
+        self.assertIn("見本簡報開頭", got, "Bash 停用與照常可用的工具已前移到簡報第一句")
         self.assertNotIn("／Bash／", got, "Windows 版不該再教 Bash 這個已被停用的載具")
-        self.assertIn("PowerShell／Write／Edit 照常可用", got)
         self.assertNotIn("不能寫檔", got, "句中引述症狀字面＝預示症狀（DEF-200-476）")
 
     def test_posix_variant_is_the_pause_half_plus_the_single_clause(self) -> None:
@@ -247,6 +247,24 @@ class Rc2ClarifyTest(unittest.TestCase):
         self.assertTrue(got.startswith(sb._RC2_PAUSE), got)
         self.assertIn(qm.convergent_tools_clause(False) + "。", got)
         self.assertNotIn("PowerShell", got, "POSIX 版不該提 Windows 的載具")
+
+    def test_the_pause_half_names_the_guard_not_every_hook(self) -> None:
+        """Windows 的 Bash 阻斷與 lint 阻斷同為 rc=2：泛稱「hook 的 rc=2 只代表扇出暫停」會與
+        同段的 Windows 尾句牴觸（SD-195-01）。"""
+        for windows in (False, True):
+            got = sb.rc2_clarify(windows=windows)
+            self.assertTrue(got.startswith("額度／水位守衛（context_budget_guard）的 rc=2"), got)
+            self.assertNotIn("hook 的 rc=2", got)
+
+    def test_the_windows_halt_note_lists_what_works_without_quoting_the_symptom(self) -> None:
+        """清單只住 `convergent_tools_clause()` 一份（單一導出）；Windows 註記只回指它，
+        不抄第二份。"""
+        for event in ("PostToolUse", "PreToolUse"):
+            got = qm.halt_convergent_clarification(windows=True, event=event, tool="Agent")
+            self.assertIn(qm.convergent_tools_clause(True), got)
+            self.assertIn("其餘工具照常可用", got)
+            self.assertEqual(got.count("Read／Write／Edit"), 1, "工具清單在同一則訊息出現兩次")
+            self.assertNotIn("不能寫檔", got, "句中引述症狀字面＝預示症狀（DEF-200-476）")
 
 
 class VerifyHintTest(unittest.TestCase):
@@ -696,6 +714,22 @@ class SessionstartBriefTest(unittest.TestCase):
         self.assertIn("PowerShell／git", got)
         self.assertIn("鐵律一 hook 停用", got)
 
+    def test_the_windows_brief_leads_with_the_disabled_bash_and_the_working_tools(self) -> None:
+        """新視窗的模型要在**第一句**就拿到「哪個工具停用、哪些照常可用」（原句住簡報尾端易被
+        略過；SD-195-03）；POSIX 簡報不加這句；兩個平台都不引述症狀字面。"""
+        brief = {}
+        for windows in (True, False):
+            with mock.patch.object(sb.platform_utils, "is_windows", return_value=windows):
+                brief[windows] = self._cache_miss_brief()
+        lead = ("[SDD-CTX-GUARD]（Windows：Bash 工具由鐵律一 hook 停用，跑指令用 PowerShell "
+                "工具；" + qm.convergent_tools_clause(True) + "。） 本 session 啟動時真實水位——")
+        self.assertTrue(brief[True].startswith(lead), brief[True][:300])
+        self.assertTrue(brief[False].startswith("[SDD-CTX-GUARD] 本 session 啟動時真實水位——"))
+        self.assertNotIn("（Windows：", brief[False])
+        for windows, got in brief.items():
+            for symptom in ("不能寫檔", "也不要宣稱被擋"):
+                self.assertNotIn(symptom, got, (windows, symptom))
+
     def _cache_miss_brief(self) -> str:
         return sb.sessionstart_brief(
             self._payload(None), _cache_miss_gate(),
@@ -997,7 +1031,7 @@ class ReadFallbackHintTest(unittest.TestCase):
             hint = sb.verify_hint(windows=windows)
             for needle in ("**Read**", "分類器", "唯讀", "used_percentage", "current_usage",
                            "context_window_size", "axes[]", "severity", "不要憑簡報猜",
-                           "不要宣稱被擋"):
+                           "沒看到阻斷訊息就不要說被擋", "只針對那一個路徑", "受保護路徑"):
                 self.assertIn(needle, hint, (windows, needle))
             self.assertNotIn("寫檔被拒", hint, (windows, "條件句不預寫劇本（DEF-200-476）"))
 
@@ -1008,9 +1042,9 @@ class ReadFallbackHintTest(unittest.TestCase):
         for windows in (False, True):
             with self.subTest(windows=windows):
                 hint = sb.verify_hint(windows=windows)
-                after_fallback = hint.split("不要宣稱被擋", 1)[1]
+                after_fallback = hint.split("沒看到阻斷訊息就不要說被擋", 1)[1]
                 self.assertEqual(after_fallback.count("權限詢問"), 1, hint)
-                for needle in ("權限詢問", "harness", "不是 hook 阻斷", "核准"):
+                for needle in ("權限詢問", "harness", "不是 hook 阻斷", "有人在就核准", "headless"):
                     self.assertIn(needle, after_fallback, (windows, needle))
                 self.assertNotIn("權限詢問", sb.rc2_clarify(windows=windows))
 

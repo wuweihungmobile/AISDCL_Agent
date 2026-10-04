@@ -14,6 +14,9 @@
      不被寫入；接另一支外部執行檔（findstr 等）⇒ 讀到消費者自己的 rc；其餘 cmdlet 消費者一律正確。
   ③ 之後才讀，且中間沒有一次真的外部呼叫——裸 `git status`／`python …`／`cmd /c …` 都會重設 rc；
      被函式／別名遮蔽的同名指令不會；curl／sc／more／wget 兩引擎分歧（5.1 是別名），不算重設。
+  ④ 賦值／括號包住不改變 ②（DEF-200-483）：`$o = git … | Select -First 1`、`$(git … | …)`、
+     `@(…)`、`(git … | …) | …`（截斷發生在括號內）真 rc 同樣沒被寫入；`(git …) | …`（括號先閉合）
+     與 `$o = git status`（賦值右側的裸 git 重設 rc）則 rc 正確。
 """
 
 from __future__ import annotations
@@ -32,7 +35,8 @@ def rc_after_pipe_real(command: str, hook: Any) -> bool:
 #: 每列的 `measured` 是兩個引擎真機量出來的：先 `& cmd /c exit 7` 灌種子，跑該形態，再讀
 #: `$LASTEXITCODE`，記成 `after=<pwsh 7>/<PS 5.1>`。讀到 7／-1＝真 rc 根本沒被寫入（真紅被讀成
 #: 綠）；讀到別的值＝rc 被寫入（或被消費者換掉）。改判準時請連 `measured` 一起用兩個引擎重測，
-#: 不要只改 `expect`（2026-10-03 以 pwsh 7.6.6／PS 5.1.26100.9444 逐列重測，既有 10 列原值重現）。
+#: 不要只改 `expect`（2026-10-04 以 pwsh 7.6.6／PS 5.1.26100.9444 逐列重測：既有 18 列原值全數
+#: 重現、DEF-200-483 新增 11 列為同日實測；`python` 形態須先有輸出，靜默退出的 -First 1 不截斷）。
 _RC_SELFTEST: tuple[tuple[str, bool, str, str], ...] = (
     # ── 已知違規（真 rc 被吃掉或換了主人） ──────────────────────────────
     ('git log --oneline -n 40 | Select-Object -First 1\n"rc=$LASTEXITCODE"',
@@ -55,6 +59,23 @@ _RC_SELFTEST: tuple[tuple[str, bool, str, str], ...] = (
      True, "after=0/-1", "curl 兩引擎分歧（7 是 curl.exe、5.1 是別名）：不入詞彙表"),
     ('git log --oneline -n 40 | findstr zzzqqq\n"rc=$LASTEXITCODE"',
      True, "after=1/1", "原生消費者：讀到的是 findstr 的 rc（1）而不是 git 的（0）"),
+    # ── DEF-200-483：賦值／括號／子運算式包住的原生上游（判準曾一律放行） ──────
+    ('$o = git log --oneline -n 40 | Select-Object -First 1\n"rc=$LASTEXITCODE"',
+     True, "after=7/-1", "賦值包住的原生上游：管線頭是右側的 git，真 rc 沒被寫入"),
+    ('$o = python -c "print(\'x\'); import sys; sys.exit(3)" 2>&1 | Select-Object -First 1\n'
+     '"rc=$LASTEXITCODE"',
+     True, "after=7/-1", "同上帶 2>&1：真 rc=3 被吃（python 有輸出，-First 1 才會提前結束）"),
+    ('$o = $(git log --oneline -n 40 | Select-Object -First 1)\n"rc=$LASTEXITCODE"',
+     True, "after=7/-1", "子運算式內的管線：git 在 $( ) 內就被截斷"),
+    ('(git log --oneline -n 40 | Select-Object -First 1) | Out-Null\n"rc=$LASTEXITCODE"',
+     True, "after=7/-1", "括號內被截斷、括號外再接管線"),
+    ('Write-Output (git log --oneline -n 40 | Select-Object -First 1) | Out-Null\n'
+     '"rc=$LASTEXITCODE"',
+     True, "after=7/-1", "cmdlet 引數內的括號管線，同上"),
+    ('$o = @(git log --oneline -n 40 | Select-Object -First 1)\n"rc=$LASTEXITCODE"',
+     True, "after=7/-1", "陣列子運算式 @( ) 同 $( )"),
+    ('$o = @()\n$o += git log --oneline -n 40 | Select-Object -First 1\n"rc=$LASTEXITCODE"',
+     True, "after=7/-1", "複合賦值 += 的右側同樣是管線頭"),
     # ── 已知正解（rc 被正確寫入，或根本沒有外部指令在管線裡） ──────────────
     ('git log --oneline -n 40 | Select-String \'commit\'\n"rc=$LASTEXITCODE"',
      False, "after=0/0", "Select-String 不提前結束管線 ⇒ rc 正確"),
@@ -80,6 +101,15 @@ _RC_SELFTEST: tuple[tuple[str, bool, str, str], ...] = (
      False, "after=7/7", "無原生上游：-First 不碰 rc（前一個外部指令的真 rc 原樣保留）"),
     ('git log --oneline -n 40 | Out-File x.txt\n"rc=$LASTEXITCODE"',
      False, "after=0/0", "Out-File 不截斷 ⇒ git 的真 rc 被正確寫入"),
+    ('(git log --oneline -n 40) | Select-Object -First 1\n"rc=$LASTEXITCODE"',
+     False, "after=0/0", "已閉合的分組：git 先完整跑完才進管線 ⇒ rc 正確（對照 DEF-200-483）"),
+    ('git log --oneline -n 40 | Select-Object -First 1 | Out-Null\n'
+     '$o = git status --porcelain\n"rc=$LASTEXITCODE"',
+     False, "after=0/0", "賦值右側的裸 git 也重設 rc：污染在它之後被清乾淨"),
+    ('$o = git log --oneline -n 40 | Select-String \'commit\'\n"rc=$LASTEXITCODE"',
+     False, "after=0/0", "賦值包住但 Select-String 不提前結束 ⇒ rc 正確"),
+    ('git log --oneline -n (1 | Select-Object -First 1)\n"rc=$LASTEXITCODE"',
+     False, "after=0/0", "括號內只是 cmdlet 上游：外面的 git 在引數算完後才跑 ⇒ rc 正確"),
 )
 
 

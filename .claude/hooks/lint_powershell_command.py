@@ -195,7 +195,9 @@ _RC_READ_RE = re.compile(r"\$LASTEXITCODE", re.IGNORECASE)
 # 兩個引擎都正確寫入，放行。污染延續到下一次真的外部呼叫才解除：呼叫運算子、.exe／.cmd／.bat
 # 開頭，或 _NATIVE_HEADS 內的裸字（裸 `git status` 也會重設 rc）。同一條指令定義了 function／
 # filter／別名時詞彙表重設整條停用（遮蔽後的 git 不是外部執行檔）；profile／dot-source 內的
-# 定義看不到（殘餘）。
+# 定義看不到（殘餘）。DEF-200-483：元素頭先剝前導賦值（`$o = git …` 的管線頭是右側的 git）；
+# 管線左段只取**最近一個未閉合括號**之後——`$(git x | select -First 1)`／`(git x | …)` 括號內被
+# 截斷＝擋，`(git x) | select -First 1` 先跑完才進管線＝放行（兩引擎真機 0／0）。
 # 呼叫運算子（左邊界排除 `2>&1` 的 &）。
 _RC_RESET_RE = re.compile(r"(?<![&\w>])&(?!&)\s*\S", re.IGNORECASE)
 # 語句**開頭**是 .exe／.cmd／.bat（`Get-Command python.exe` 的 .exe 在參數位置，只是資料）。
@@ -225,11 +227,14 @@ _NATIVE_CONSUMER_RE = re.compile(
     re.IGNORECASE,
 )
 _ELEMENT_SPLIT_RE = re.compile(r"\|\|?|&&|\{")
+#: 元素前導的賦值（`$o =`／`$o +=`／`$script:o =`）：`$o = git log …` 的管線頭是右側的 git。
+_ASSIGN_PREFIX_RE = re.compile(r"^\s*\$[\w:]+\s*(?:[-+*/%]?=)\s*")
 
 
 def _head_is_native(element: str, shadowed: bool = False) -> bool:
-    """開頭是不是外部執行檔：`.exe`／`.cmd`／`.bat` 首 token，或詞彙表內的裸字。
+    """開頭是不是外部執行檔：`.exe`／`.cmd`／`.bat` 首 token，或詞彙表內的裸字（先剝前導賦值）。
     `shadowed`＝同一條指令定義了函式／別名，裸字不再保證是外部執行檔。"""
+    element = _ASSIGN_PREFIX_RE.sub("", element, count=1)
     if _NATIVE_HEAD_RE.search(element):
         return True
     word = _HEAD_WORD_RE.match(element)
@@ -242,9 +247,23 @@ def _statement_resets_rc(statement: str, shadowed: bool = False) -> bool:
     return bool(_RC_RESET_RE.search(statement) or _head_is_native(statement, shadowed))
 
 
+def _inside_open_group(left: str) -> str:
+    """`left` 內最近一個**未閉合**的 `(`（含 `$(`／`@(`）之後的部分；沒有未閉合括號＝原樣。
+    `(git x | select -First 1)` 的 git 在括號**內**被截斷；`(git x) | select -First 1` 的 git 先
+    完整跑完才進管線（括號已閉合，不在這一段裡）。"""
+    opens: list[int] = []
+    for index, char in enumerate(left):
+        if char == "(":
+            opens.append(index)
+        elif char == ")" and opens:
+            opens.pop()
+    return left[opens[-1] + 1:] if opens else left
+
+
 def _pipeline_has_native(left: str) -> bool:
     """管線左段有沒有外部執行檔在跑：掃每個元素的開頭（含 `{ }` 內、`||`／`&&` 之後），不只語句首。
-    括號分組 `(git x) | …` 先完整跑完才進管線，不算；遮蔽時仍算（保守＝多擋）。"""
+    左段先收斂到最近未閉合括號之後（`_inside_open_group`）；遮蔽時仍算（保守＝多擋）。"""
+    left = _inside_open_group(left)
     return bool(_RC_RESET_RE.search(left)
                 or any(_head_is_native(part) for part in _ELEMENT_SPLIT_RE.split(left)))
 

@@ -101,6 +101,10 @@ PowerShell／Read／Write／Edit／Grep 照常可用，同一件事改用 PowerS
     （<repo 根> 現查：$env:CLAUDE_PROJECT_DIR，或 git rev-parse --show-toplevel。
       本檔刻意不寫死任何磁碟機路徑——它會被 commit 進 repo，對其他 checkout 一律是錯的指引，
       且 tools/tests/test_platform_neutral_paths.py 會逐行掃描並判紅）
+    🔴 例外＝簡報那兩條現查指令：照字面 `python tools/session_resume_planner.py --check`／
+      `--pace`（裸 python＋相對路徑）——repo 權限白名單（.claude/settings.json
+      permissions.allow）認的是這個字面；改寫成上面的 venv 絕對路徑或 & '…' 呼叫運算子形
+      會掉出白名單而多跳一次權限詢問（planner 純標準庫，裸 python 跑得動）
   · 跑 .sh     → . '<repo 根>/tools/lib/Find-GitBash.ps1'; & (Find-GitBash) '<正斜線腳本路徑>'
     （🔴 **不要**寫裸 `bash <script>`：`Get-Command bash` 會解析到 system32 的 WSL
       佔位版，且反斜線路徑的分隔符會被整批吃掉——R73 雙引擎各實測一次。
