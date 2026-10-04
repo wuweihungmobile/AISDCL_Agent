@@ -86,8 +86,11 @@
 - 第一 commit `9fde0c0`（pre-commit 全過、11 檔）後 push 被 pre-push 的 strict 判準擋下：`TestDef200241GrandfatheringReadsLedgerClosureNotTheClock` 判本檔〈五〉原句（把症狀閘機械化延到下一輪、行內無 DEF-ID）為裸承接句（本段刻意不逐字重述該句——引文也會被鎖當承接句，R196 同型教訓）。第一反應＝新立 DEF 列當載體 ⇒ `check_defect_log_crossref.py` 以 HEAD 為基線判「本輪新增未結 1 > 結案 0」（485／486 的結案已在第一 commit 內）；主控欲以 `git commit --amend` 併回單一 commit，被 auto mode 分類器拒絕（`[Git Destructive]`）；再試工具指名出口②（`AUTOSDD_NET_RATCHET_OFF=1`＋commit 訊息寫理由）亦被分類器拒絕（`[Safety Bypass Flag]`）。兩次皆如實引原文、不繞道。最終出口＝**不承接、改裁決不排程**（上段）：撤回新列、刪去輪號目標 ⇒ 無裸承接句、帳本相對 HEAD 零變動，第二 commit 不帶任何旗標。教訓：「延後到下輪」在本 repo 是要付載體稅的動作，先問「真的要做嗎」。
 - 根層全套、pre-push、雲端 run 見〈七〉回填。
 
-## 七、根層全套、push 與雲端驗收
-（commit 後回填：全套 `ROOT_RC`、測試支數、push 的 pre-push leg、四支 workflow run id 與結論。）
+## 七、根層全套、push 與雲端驗收（主控親跑；本場 tool_result）
+- 根層全套：第一跑 5176 支 1 紅（程式檔輪號字面，見〈六〉）；第二跑 `run_root_unittests.py` exit 0、「✅ unittest 數量下限釘選通過：發現 5176 個測試（下限 5101）」、無失敗明細；真實 TEMP 圍籬零變動、孤兒 console 零增長。
+- commit：`9fde0c0`（主修法，11 檔 +202／−27，pre-commit 全過）、`690d5c5`（承接句改裁決，1 檔 +6／−4）。第一次 push 被 pre-push strict 判準擋下（〈六〉）；第二次 push「[pre-push dispatcher] ✅ 本次 push 觸發的所有 leg 皆通過（rc=0）」「28514cc..690d5c5 main -> main」PUSH_RC=0；`HEAD=690d5c58 origin/main=690d5c58`。
+- 雲端（`gh run watch --exit-status` 四支皆 rc=0；`gh run list` 結論）：root-infra-ci 37218760168 success／AutoClaude CI 37218760170 success／windows-compat-ci 37218760185 success／macos-compat-ci 37218760190 success（headSha 690d5c58…）；aisdlc-sdd-ci／shellcheck-ci 依 paths 白名單未觸發（缺席＝未驗證、非通過）。
+- 本〈七〉回填 commit 的雲端 run 由 R198 開場對帳（同 R196 慣例）。
 
 ## 八、交棒／掌舵者側待辦
 ### Q5 評估（掌舵者原話：「是否修復已經收斂？給我評估說明；找出一直無法收斂的根因、徹底解決」）
