@@ -586,7 +586,8 @@ _GOVERNANCE_DOCS = (
     _REPO_ROOT / "docs" / "06_quality"
     / "CrossPlatform_R195_FiveQuestion_AutoMode_Window_Evidence.md",
     # 五問第十八次四方覆核（DEF-200-484 lint 規則①左值族封閉、DEF-200-479 第二段 R3 fail-open、
-    # DEF-200-465 互釘、DEF-200-246 closed-by-decision、權限姿態裁決、鏡稽核上一輪證據檔文字）：即刻登記。
+    # DEF-200-465 互釘、DEF-200-246 closed-by-decision、權限姿態裁決、鏡稽核上一輪證據檔文字）：
+    # 即刻登記。
     _REPO_ROOT / "docs" / "06_quality"
     / "CrossPlatform_R196_FiveQuestion_Lvalue_Closure_Evidence.md",
     # 護欄層行數棘輪史料歸檔的第二冊（第一冊逼近 Read 工具上限，淨減法搬遷改落本檔）：即刻登記。
