@@ -101,10 +101,14 @@
 - 輪帳本追加（scratchpad `append_r200_row.py`）⇒ 「rows 8->9 crlf=False bom=False row_bytes=3189」rc=0；`--protocol-status` ⇒ 「protocol_sha256=5c9aadf258efbc64f7236c8b4862152c1238edeb99b8fc960c58347acdf90750（manifest 11 檔）」「輪帳本 9 列；window_len=1；評估: NOT-EVALUABLE(1/6)」（資訊欄）、R200 列選填欄照印（含 `symptom_streak`）、「完整性閘 ✓」、Q4′ win32 PASS 九格 ✓（仍只一行、darwin 缺檔）。
 - `check_defect_log_crossref.py` ⇒ rc=0（既有 warning 同 R199：當前輪 R100 由帳本現查推得、外部阻塞軌 3 筆、結構性長債軌 7 筆）；`check_handoff_carriers.py`（**`git add` 之後**跑，R199 教訓）⇒ 第一次 rc=1「本檔:113 這一行把工作延後到未來輪（[延後至 R…] R203），卻沒有帳本承接列（本行完全沒有 DEF-ID）」⇒ 白話段補「（帳本載體 DEF-200-490）」後重跑 rc=0「✅ 每一筆前瞻延後宣稱都有帳本承接載體」（tracked 交接載體 188 份、前瞻延後行 86 筆；commit 718 則、含前瞻延後宣告 31 筆）；`AutoClaude/tools/check_loc_budget.py --json` ⇒ total 17318／cap 20438、tier／special／root_tools／absolute violations 皆 0 rc=0（`tools/lib/governance_docs.py` +5 行）。
 - 守衛面量具：`git status --short` 列出的變更無任一守衛面路徑（`.claude/**`、七支 lib、planner）⇒ 865f061→本輪收尾守衛面淨增 0；`git diff --numstat` ⇒ `4 1 AutoSDD_Defect_Log.md`／`8 8 R199 證據檔`／`138 0 本檔`／`6 6 README.md`／`2 2 charter_sa.md`／`1 1 PB.txt`／`1 1 PC.txt`／`1 0 FiveQuestion_Round_Ledger.jsonl`／`5 0 tools/lib/governance_docs.py`（本檔行數隨〈六〉〈七〉回填再變）。
+- **收尾重跑症狀閘指令 1／2（SA 三支探針落地後、commit 之後）**：指令 1 ⇒ 「母體 32 支…{'auto': 8, 'default': 19, 'dontAsk': 2, 'acceptEdits': 3}」「Q1′a PASS 0／hook 阻斷 7」「Q1′b PASS 0／8」「**Q1′c PASS 2／10（≤0.25）；首呼叫被擋 0／10**」「Q2′ PASS 逾期或從未 0／5」「Q3′ PASS 5 對；max|差|=0」「非 hook 阻斷：{'automode-blocked': 3, 'user-rejected': 14, 'permission-rule': 2}」rc=0——主控親證 SA-200-01（探針 PB／PC 的兩筆 Bash 正確攔截進入 Q1′c 視窗、餘裕 0）；指令 2 ⇒ 「母體 5 支」「Q1′c NOT-EVALUABLE(5/10) 0／5」「Q2′ PASS 逾期或從未 0／5」rc=0（真實層不受探針影響）。本輪正式量測仍取探針前的指令 1（母體 29、0/10；〈二〉）。
 - 根層全套、commit、push、雲端見〈七〉。
 
 ## 七、根層全套、push 與雲端驗收（主控親跑；本場 tool_result）
-- （根層全套、commit、push、雲端 run 完成後回填；在此之前本節不得被讀成已驗證）
+- 根層全套（`.venv\Scripts\python.exe tools/run_root_unittests.py`、`AUTOSDD_SENTINEL_OFF=1`，背景阻塞、log 落 scratchpad、rc 寫檔不接管線）：一跑即綠，`ROOT_RC=0`、「✅ unittest 數量下限釘選通過：發現 5176 個測試（下限 5101）」「[M6 id 集合] tools/tests@win32：✅ 集合關係成立（本次 skip 46 支）」「✅ 真實 TEMP 圍籬：…autosdd_pace*.json 零變動（前 4／後 4 份）」「✅ 孤兒 console 普查：零增長（前 1／後 1）」；無 FAIL／ERROR 行。
+- commit `af8931b`（9 檔 +166／−19；pre-commit：「✅ 未觸發歸檔強制門檻」「變更含根層基建 → bash -n 語法檢查」全過）；push：「[pre-push dispatcher] 雲端 CI 現況（DEF-101-733）：最新 run（root-infra-ci）= success」「✅ 本次 push 觸發的所有 leg 皆通過（rc=0）」「865f061..af8931b main -> main」`PUSH_RC=0`；`HEAD=af8931bf origin/main=af8931bf`。第一次 push 即過——本輪在 commit 前已於 `git add` 後跑 `check_handoff_carriers.py` 並修掉一處（〈六〉），R199 教訓生效。
+- 雲端（`gh run watch --exit-status --interval 30` 四支皆 `WATCH_RC=0`；`gh run list --commit af8931bf78586744d0a06199456ab3aeac94560a` 結論，查核時刻 2026-10-05T16:10:42+08:00）：root-infra-ci 37280182631 success／AutoClaude CI 37280182709 success／windows-compat-ci 37280182634 success／macos-compat-ci 37280182650 success；aisdlc-sdd-ci／shellcheck-ci 依 paths 白名單未觸發（缺席＝未驗證、非通過）。
+- 本〈七〉回填 commit 的雲端 run 由 R201 開場對帳（同 R197～R199 慣例；對帳項、非承接項）。
 
 ## 八、交棒／掌舵者側待辦
 ### Q5 評估（掌舵者原話：「是否修復已經收斂？給我評估說明；找出一直無法收斂的根因、徹底解決」）
