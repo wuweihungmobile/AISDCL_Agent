@@ -93,7 +93,9 @@ def is_ancestor(repo_root: Path, sha: object) -> bool | None:
 
 def q4_cells(doc: dict, now: datetime, ancestor: bool | None,
              max_age_days: float) -> dict[str, bool | None]:
-    """丙案 JSON 的九格：True／False／None（量不到）。缺鍵、型別不符一律 None，絕不當通過。"""
+    """丙案 JSON 的九格：True／False／None（量不到）。缺鍵、型別不符一律 None，絕不當通過。
+    verify_hint 兩格＝Windows 專屬提示字樣（Push-Location／LASTEXITCODE）是否出現在產出機簡報：
+    win32 須在、darwin 須不在（簡報平台中立）——兩平台期望值相反，不是恆 True（DEF-200-491）。"""
     def at(*path: str) -> object:
         cur: object = doc
         for key in path:
@@ -105,6 +107,11 @@ def q4_cells(doc: dict, now: datetime, ancestor: bool | None,
         return value if isinstance(value, bool) else None
 
     plat, rc = at("platform"), at("check", "rc")
+
+    def hint(key: str) -> bool | None:
+        value = flag("verify_hint", key)
+        return None if value is None else value == (plat == "win32")
+
     try:
         stamp = datetime.fromisoformat(str(at("generated_at")))
         age = abs((now - stamp).total_seconds()) / 86400
@@ -115,8 +122,8 @@ def q4_cells(doc: dict, now: datetime, ancestor: bool | None,
         "statusline.installed": flag("statusline", "installed"),
         "statusline.matches_current_checkout": flag("statusline", "matches_current_checkout"),
         "hook_carrier.exists": flag("hook_carrier", "exists"),
-        "verify_hint.default_push_location": flag("verify_hint", "default_push_location"),
-        "verify_hint.default_lastexitcode": flag("verify_hint", "default_lastexitcode"),
+        "verify_hint.default_push_location": hint("default_push_location"),
+        "verify_hint.default_lastexitcode": hint("default_lastexitcode"),
         "check.rc==0": rc == 0 if isinstance(rc, int) and not isinstance(rc, bool) else None,
         f"generated_at<={max_age_days:g}d": None if age is None else age <= max_age_days,
         "repo_head_is_ancestor_of_HEAD": ancestor,

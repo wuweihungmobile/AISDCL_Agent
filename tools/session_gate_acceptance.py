@@ -10,10 +10,14 @@ r"""Session 守門的單一指令驗收：唯讀蒐集既有狀態，印一份 J
 Windows 執行形態（不用 cd）：
 & (Join-Path $repo '.venv\Scripts\python.exe') (Join-Path $repo 'tools\session_gate_acceptance.py')
 
-Q4′ 機械判式（讀 JSON 即判，缺一格即不通過）：
-  platform=="win32" ∧ statusline.installed ∧ statusline.matches_current_checkout
-  ∧ hook_carrier.exists ∧ verify_hint.default_push_location ∧ verify_hint.default_lastexitcode
+Q4′ 機械判式（讀 JSON 即判，缺一格即不通過；判式住 `fivequestion_ledger.py::q4_cells`）：
+  platform∈{win32,darwin} ∧ statusline.installed ∧ statusline.matches_current_checkout
+  ∧ hook_carrier.exists ∧ verify_hint.default_push_location==(platform=="win32")
+  ∧ verify_hint.default_lastexitcode==(platform=="win32")
   ∧ check.rc==0 ∧ generated_at 距今 ≤14 天 ∧ repo_head 為本 repo HEAD 的祖先。
+  verify_hint 兩格量「Windows 專屬提示字樣是否出現在產出機簡報」：win32 須在、darwin 須不在
+  （POSIX 簡報天生不含 Push-Location／LASTEXITCODE；對 darwin 也要求 True 會使 Mac 證據
+  恆 FAIL，DEF-200-491）。
 
 誠實劃界：量不到的格寫 null 或 `{"error": <類名>}`，絕不寫成通過；輸出含 host 與絕對路徑
 （trace_dir／fsm_line），貼進公開位置前先去識別化。`check` 是 planner 的 `--check` 在行程內

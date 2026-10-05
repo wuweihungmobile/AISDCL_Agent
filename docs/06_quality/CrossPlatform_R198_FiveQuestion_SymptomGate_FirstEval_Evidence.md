@@ -26,7 +26,7 @@
 - **ONBOARDING 表③ SOP 第 6 步現查**：`gh run list --workflow windows-compat-ci.yml --event schedule --limit 1` ⇒ run 36430699401、sha c94af63e、2026-09-28、job「Windows nightly full suite（深度回歸，非阻斷） => success」；macos-compat-ci.yml ⇒ run 36443729739、sha 97505179、2026-09-28、「macOS nightly full suite（深度回歸，非阻斷） => success」；查核時刻 `2026-10-05T09:57:51+08:00`。
 - **哨兵現查**：`Get-ScheduledTask … AutoSDD_Sentinel_*` 兩筆；本窗 96cb8319… NextRunTime `2026/10/5 上午 09:29:31`（LastTaskResult 267011＝尚未首跑）。
 - **版本**：`claude --version` ⇒ `2.1.289 (Claude Code)`。`python` 在本機 PowerShell 解析到 pyenv shim（`python.bat`）；tools/tests 單跑一律改用根層 `.venv\Scripts\python.exe`＋`AUTOSDD_SENTINEL_OFF=1`。
-- **帳本列 bytes（改後）**：487=641、488=657、489=654、193=642、199=595、242=636、246=693（皆 ≤700）；`ruff check` 三支改動 py ⇒ `All checks passed!` rc=0。
+- **帳本列 bytes（改後）**：487=641、488=657、489=654、193=642、199=595、242=636、246=692（皆 ≤700；本行 199／242 為中途值，定稿見〈六〉；246 原誤寫 693，R199 鏡稽核訂正）；`ruff check` 三支改動 py ⇒ `All checks passed!` rc=0。
 - **單模組**：`test_claim_provenance_r86.py` ⇒ `Ran 121 tests` OK rc=0；`test_check_hooks_liveness.py` ⇒ `Ran 191 tests` OK rc=0（答案表下限 43 生效）。
 
 ## 三、四方摘要 `[他包回報]`（token 取自 harness 完成通知；皆 Sonnet、唯讀）
@@ -55,7 +55,7 @@
 |---|---|---|
 | 1 | **症狀閘首評＝NOT-EVALUABLE、streak 0**（可評四行 PASS；Q2′ 3/5；Q4′ Mac 缺檔） | 輪帳本 R198 列 `symptom_streak: 0`（新欄，`OPTIONAL_FIELDS` 加入、`--protocol-status` 照印） |
 | 2 | **協定可執行性修訂（一次 reset）**：README 指令 3 指名 `audit_session.py --protocol-status` 並寫明函式庫直跑無輸出、「兩條」改三項、占位值出處、Q4′ 他台 JSON 須拷入本機 trace_dir、`評估:` 行為資訊欄、`symptom_streak` 欄、全史數字受保留期影響只用基線切片、〈四〉指標改〈三〉；discipline 50 次改預算＋自陳；charter_arch／sd／qa 各加一句收斂依據與「量、不挖」約束 | `FiveQuestion_Audit_Protocol/`（README／discipline／三章程）；protocol sha c8cc8fac→be414e92；輪帳本 R198 列 `window_reset:true`；DEF-200-488 fixed |
-| 3 | **鏡稽核訂正批次**（DEF-200-487 fixed）：R197E〈〇〉〈二〉:20〈四〉4.2／裁決 4／:59／:75／:83／:97／:99／:108；R196E:43／:50／:54；帳本 246 列「SD／SA／QA 無異議」改「其餘角色無記錄」；`test_check_hooks_liveness.py` 答案表下限 29→43（同行改值、tools/tests 淨額 0） | 兩份證據檔、帳本、1 支測試檔 |
+| 3 | **鏡稽核訂正批次**（DEF-200-487 fixed）：R197E〈〇〉〈二〉:20〈四〉4.2／裁決 4／:59／:75／:83／:97／:99（共 9 處；原誤列 :108 實未改，R199 鏡稽核訂正）；R196E:43／:50／:54；帳本 246 列「SD／SA／QA 無異議」改「其餘角色無記錄」；`test_check_hooks_liveness.py` 答案表下限 29→43（同行改值、tools/tests 淨額 0） | 兩份證據檔、帳本、1 支測試檔 |
 | 4 | **DEF-200-489 closed-by-decision**（量測母體隨保留期漂移）：README 註記＋證據檔規範（全史數字必附量測時刻與母體數；收斂只用基線切片）；不加碼。重開條件＝(1) 宣告前基線切片（自 10-03 起算，約 2026-11-02 起）開始被清理；(2) 任一判決需要全史數字 | 帳本列；README |
 | 5 | **DEF-200-242 closed-by-decision**（free 帶 cap 恆 None）：本機落款 187 列重放 five_hour 翻頁 50 次、有限 cap→free 7 次、翻頁後首列 `live` 全 ≤1＝暴露 0 `[他包回報]`；free 直通是 `quota_stability.py` 檔頭明載的設計、PRD §11.2「待承重」標註維持。重開條件＝(1) 非探針落款出現「翻頁後 ≤10 分內 live > cap_notice 且同窗升到 notice 以上」≥1 筆（`quota_burn.jsonl` 已記 live／resets_at，重放腳本約 40 行、不需新碼）；(2) 掌舵者真機回報 reset 後暴衝（附 `--pace` 輸出）；(3) 掌舵者重申 PRD §11.2 為硬需求 ⇒ 採 R190〈四〉A6 設計（估 lib +18～25、gate +2～4、tests +70～110；常數／史料／消費端跨 ≥2 檔 ⇒ 單包串行） | 帳本列 |
 | 6 | **DEF-200-193 closed-by-decision**（跨窗分期）：R95 §2.2 觸發條件（長窗 ≥converge 且窗尾殘量被浪費的實案）僅條件命中（本機 16/50 翻頁）、需求面證據 0（`live` 最大 4）`[他包回報]`；「超支」定義未裁。重開條件＝(1) 重放出現「長窗 ≥converge、同窗 live ≥1 持續、翻頁時短窗 <50、且掌舵者確認需求被節流」≥1 窗；(2) 掌舵者要求跨窗分期；(3) 199 的 L2／L3 若落地使攤提分母變動（估 quota_pace +30～45、tests +60～90；與 242／199 共檔 ⇒ 串行） | 帳本列 |
@@ -90,7 +90,7 @@
 - SA 包未落 SA.md（其系統規則禁子代理寫報告 .md，全文在完成通知）；本檔〈三〉SA 列取自該通知。
 
 ## 六、收尾親驗（主控親跑；本場 tool_result）
-- 帳本列 UTF-8 bytes（定稿）：487=641、488=657、489=654、490=689、193=642、199=568、242=697、246=693（皆 ≤700）。242 列結案文第一版 778 bytes 被 `check_defect_log_crossref.py` 擋下（「單列上限 700」＋「存量列超標總量 14716 > 14638：既有豁免列被改長 78 bytes」兩道同紅）⇒ 砍掉 R190 證據檔指針後 697。
+- 帳本列 UTF-8 bytes（定稿）：487=641、488=657、489=654、490=689、193=642、199=568、242=697、246=692（皆 ≤700；246 原誤寫 693，R199 鏡稽核訂正）。242 列結案文第一版 778 bytes 被 `check_defect_log_crossref.py` 擋下（「單列上限 700」＋「存量列超標總量 14716 > 14638：既有豁免列被改長 78 bytes」兩道同紅）⇒ 砍掉 R190 證據檔指針後 697。
 - `ruff check tools/lib/governance_docs.py tools/probe/fivequestion_ledger.py tools/tests/test_check_hooks_liveness.py` ⇒ `All checks passed!` rc=0。
 - 單模組（`.venv\Scripts\python.exe`＋`AUTOSDD_SENTINEL_OFF=1`）：`test_claim_provenance_r86.py` ⇒ `Ran 121 tests` OK rc=0（README↔params 鍵鎖、OPTIONAL_FIELDS 新欄）；`test_check_hooks_liveness.py` ⇒ `Ran 191 tests` OK rc=0（答案表下限 43 生效）；`test_doc_loc_baseline_freshness_r60.py` ⇒ `Ran 281 tests` OK rc=0（ONBOARDING 表③-b 兩列＋錨三欄、根 CLAUDE.md 新字、治理文件登記）。
 - `--print-guard-lines` ⇒ 「淨額 114350→114350 (+0)」「逐檔漂移 0 支」、prefix_len 328（追加後）、sha `7c1d18c28c25…` 不變（29→43 為同行改值）。
@@ -121,9 +121,9 @@
 5. **後續兩輪建議降頻為「只量不審」**（三條指令＋QA 單方複核）；R196 T1～T7 觸發才升全套；T7 將於 10-17 兩份 Q4′ JSON 到期時觸發。
 
 ### 下輪的機械義務
-- 棘輪：本輪 +0、無重釘；款(12) `_REPIN_NET_CAP_DUE_ROUND=198／_TARGET=518`、U9 `_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND=198` 以 `live_repin_round()`＝R196 為時鐘，沉睡中；第一個含重釘列的輪次一次付清（含主軌 ≤0，SD-198-01）；Phase 2 末列 (195) 視窗 5 ⇒ R200 到期（須 `[提案]`／`[落地]`）。
+- 棘輪：本輪 +0、無重釘；款(12) `_REPIN_NET_CAP_DUE_ROUND=198／_TARGET=518`、U9 `_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND=198` 以 `live_repin_round()`＝R196 為時鐘，沉睡中；第一個含重釘列的輪次一次付清（含主軌 ≤0，SD-198-01）；Phase 2 末列 (195) 視窗 5 ⇒ 判準 live>200：輪號 ≥201 的重釘列才紅、零重釘輪不觸發，屆時須 `[提案]`／`[落地]`（原寫「R200 到期」，R199 鏡稽核訂正）。
 - 症狀閘：每輪三條指令（README 字面），結果寫輪帳本 q1a…q4_mac＋`symptom_streak`。
-- 日曆鎖：ONBOARDING 表③ nightly 錨效期至 2026-10-19；Q4′ 兩份 JSON 效期至 2026-10-17；`tools/ruff.toml` E501 豁免到期 2026-11-02；DEF-200-489 基線切片清理窗約 2026-11-02。
+- 日曆鎖：ONBOARDING 表③ nightly 錨最後安全日 2026-10-19（`.days` 取整，首個紅燈 2026-10-20T09:57:51+08:00；原寫「效期至 10-19」，R199 鏡稽核訂正）；Q4′ 兩份 JSON 效期至 2026-10-17；`tools/ruff.toml` E501 豁免到期 2026-11-02；DEF-200-489 基線切片清理窗約 2026-11-02。
 - 守衛面量具：證據檔〈二〉固定一行 `git diff --numstat <上輪收尾 commit> HEAD -- <守衛面路徑>`（本輪 28514cc→b5b093b 空、b5b093b→本輪收尾見〈六〉）。
 
 ### 本輪未做（不塗綠）

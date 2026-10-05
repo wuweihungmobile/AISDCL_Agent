@@ -1733,22 +1733,14 @@ class TestTheProtocolStatusPrintsLedgerIntegrityAndQ4Evidence(unittest.TestCase)
 
     def test_q4_cells_never_read_a_missing_value_as_pass(self) -> None:
         full = self.led.q4_cells(_GATE_DOC, _Q4_NOW, True, 14)
-        self.assertEqual(len(full), 9)
-        self.assertEqual(set(full.values()), {True})
-        breaks = {
-            "platform": {"platform": "linux"},
-            "statusline.installed": {"statusline": {
-                "installed": False, "matches_current_checkout": True}},
-            "statusline.matches_current_checkout": {"statusline": {
-                "installed": True, "matches_current_checkout": False}},
-            "hook_carrier.exists": {"hook_carrier": {"exists": False}},
-            "verify_hint.default_push_location": {"verify_hint": {
-                "default_push_location": False, "default_lastexitcode": True}},
-            "verify_hint.default_lastexitcode": {"verify_hint": {
-                "default_push_location": True, "default_lastexitcode": False}},
-            "check.rc==0": {"check": {"rc": 1}},
-            "generated_at<=14d": {"generated_at": "2026-09-01T00:00:00+00:00"},
-        }
+        self.assertEqual((len(full), set(full.values())), (9, {True}))
+        hints, off = _GATE_DOC["verify_hint"], dict.fromkeys(_GATE_DOC["verify_hint"], False)
+        breaks = {f"{sec}.{key}": {sec: {**_GATE_DOC[sec], key: False}}
+                  for sec in ("statusline", "verify_hint") for key in _GATE_DOC[sec]}
+        breaks.update({"platform": {"platform": "linux", "verify_hint": off},
+                       "check.rc==0": {"check": {"rc": 1}},
+                       "hook_carrier.exists": {"hook_carrier": {"exists": False}},
+                       "generated_at<=14d": {"generated_at": "2026-09-01T00:00:00+00:00"}})
         for cell, patch in breaks.items():
             got = self.led.q4_cells({**_GATE_DOC, **patch}, _Q4_NOW, True, 14)
             self.assertEqual([k for k, v in got.items() if v is not True], [cell], cell)
@@ -1756,6 +1748,14 @@ class TestTheProtocolStatusPrintsLedgerIntegrityAndQ4Evidence(unittest.TestCase)
             got = self.led.q4_cells(_GATE_DOC, _Q4_NOW, ancestor, 14)
             self.assertEqual([k for k, v in got.items() if v is not True],
                              ["repo_head_is_ancestor_of_HEAD"])
+        # verify_hint 兩格＝Windows 專屬提示字樣（Push-Location／LASTEXITCODE）是否出現在產出機簡報：
+        # win32 須在、darwin 須不在（簡報平台中立）。兩平台期望值相反——若對 darwin 也要求 True，
+        # Mac 產的 JSON 會恆 FAIL、「兩平台九格」結構上不可達（立案形態見 DEF-200-491）。
+        mac = {**_GATE_DOC, "platform": "darwin", "verify_hint": off}
+        self.assertEqual(set(self.led.q4_cells(mac, _Q4_NOW, True, 14).values()), {True})
+        got = self.led.q4_cells({**mac, "verify_hint": hints}, _Q4_NOW, True, 14)
+        self.assertEqual([k for k in got if got[k] is not True],
+                         [f"verify_hint.{h}" for h in hints], "darwin 不該出現 Windows 提示字樣")
         bare = self.led.q4_cells({"platform": "win32", "check": {"rc": None}}, _Q4_NOW, None, 14)
         self.assertEqual([k for k, v in bare.items() if v is True], ["platform"])
         self.assertIsNone(bare["check.rc==0"], "缺值＝量不到（None），不是 False 也不是 True")

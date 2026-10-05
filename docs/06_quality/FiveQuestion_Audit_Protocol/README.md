@@ -42,19 +42,30 @@ manifest＝本目錄每個檔的（相對路徑, sha256(內容；CRLF 先正規�
 `window_len`＝輪帳本尾端連續同 `protocol_sha256` 的列數（遇 `window_reset:true` 即止）。
 
 **收斂＝症狀閘達標**，每輪由主控親跑下列三項（兩條量測指令＋一條狀態指令）、逐字貼進證據檔（`--exclude-self`；
-基線＝`params.json` 的 `symptom_baseline_since`，值由該檔現查代入、不抄進本檔）：
+基線＝`params.json` 的 `symptom_baseline_since`，值由該檔現查、以**原字串**代入、不抄進本檔——PowerShell 的
+`ConvertFrom-Json` 會把 ISO 字串轉成 DateTime 而丟掉格式，`--record-since` 直接 traceback rc=1；用 Read／`Select-String` 取字串）：
 1. `python tools/probe/audit_session.py --five-question --exclude-self --record-since <symptom_baseline_since> --entrypoint cli,claude-vscode,sdk-cli`
    → Q1′a（修法後 MISBLOCK 0）、Q1′b（裸宣稱 0）、Q1′c（≤ `q1c_gate`）、Q3′（全對 ≤ `q3_tolerance_tokens`）四行皆 PASS
    （合併真實層與探針層：探針是真實 headless session，開窗行為同屬症狀面；NOT-EVALUABLE＝量不到、不算達標）。
 2. 同指令**不帶** `--entrypoint`（真實層 cli／claude-vscode）→ Q2′ 行 PASS（n ≥ `q2_min_n`、逾期 0；探針被告知先現查，
    不得混入分母）。
 3. `python tools/probe/audit_session.py --protocol-status`（`fivequestion_ledger.py` 是函式庫，直接執行無輸出、rc=0）
-   的 Q4′ 兩平台九格 ✓ 且 ≤ `q4_max_age_days`：它只讀本機 `trace_dir` 的丙案 JSON，另一台的
-   `session_gate_acceptance_*.json` 須先拷入本機 `trace_dir`（缺檔＝量不到＝不達標）；該指令印的「評估:」行是家族計數
-   資訊欄，不是收斂依據。
-三項同時成立＝一次評估達標；連續 `symptom_streak_required` 次評估（不同輪、後一次母體含 ≥1 支新真實窗）達標
-⇒ 宣告收斂，之後只在根 CLAUDE.md〈守衛面准入〉的觸發條件成立時再評。達標次數寫在輪帳本列 `symptom_streak` 欄
-（`--protocol-status` 照印；未達標寫 0）。獨立憑證：Q1′a 的 oracle 與 hook 同碼、
+   的 Q4′ **兩平台（win32 與 darwin 各一行）**九格 ✓ 且 ≤ `q4_max_age_days`：它只讀本機 `trace_dir` 的丙案 JSON，另一台的
+   `session_gate_acceptance_*.json` 須先拷入本機 `trace_dir`（缺檔＝量不到＝不達標；工具不會標出缺哪台，只印一行＝未達標）；
+   `verify_hint` 兩格量的是 Windows 專屬提示字樣是否出現在產出機簡報，win32 須在、darwin 須不在（兩平台期望值相反）；
+   該指令印的「評估:」行是家族計數資訊欄，不是收斂依據。
+機器範圍（跨機輪次）：三項的母體皆為**執行機本機**——逐字稿＝本機 `claude_home()/projects/<本機 repo 路徑 slug>`、Q3′ feed＝
+本機 `context_feed`、Q4′＝本機 `trace_dir`；他機的真實窗與 feed 都不在母體，三條指令除 `--exclude-self` 外不得加任何母體旗標。
+評估機＝掌舵者症狀回報機（現＝Windows；改指定須掌舵者明示並重置協定）。他機輪次照跑三項，結果以
+`[他機:<host>] PASS|FAIL|NOT-EVALUABLE（母體 N 支）` 寫入該列 `note`、不計次、`symptom_streak` 沿用上一列。
+計次只在評估機輪次：三項同時成立＝一次評估達標 ⇒ `symptom_streak`＝上值 +1；任一機任一輪任一行 FAIL ⇒ 寫 0；
+NOT-EVALUABLE ⇒ 沿用上值（不得用來蓋掉壞樣本：評估機母體數不得低於該機上次評估，保留期清理例外須證據檔明載）；
+相鄰兩次達標相距不得超過 `q4_max_age_days` 天。連續 `symptom_streak_required` 次評估（不同輪、後一次母體含 ≥1 支
+評估機新真實窗）達標 ⇒ 宣告收斂，宣告範圍＝評估機行為面＋兩平台 Q4′ 靜態九格、他機行為面標「未驗」；之後只在根
+CLAUDE.md〈守衛面准入〉的觸發條件成立時再評。達標次數寫在輪帳本列 `symptom_streak` 欄（`--protocol-status` 照印）。
+Q4′ 攜回：產出機把 `session_gate_acceptance_<host>.json` 原文逐字貼進當輪證據檔附錄（不得手改、JSON 為純 ASCII）；
+另一台以**同檔名**存入本機 `trace_dir`，且本機 HEAD 已含其 `repo_head`（先 pull）後再跑指令 3；效期自 `generated_at` 起
+`q4_max_age_days` 天。獨立憑證：Q1′a 的 oracle 與 hook 同碼、
 對修法後視窗是同義反覆（ARCH-195-06）⇒ 另附 Q1′b、掌舵者回報、答案表兩引擎重測；分類器拒絕
 （`automode-blocked`）不入分子但逐筆歸因。全史（不帶 `--record-since`）數字受 Claude Code 逐字稿保留期影響、隨時間
 縮水（同一指令同一 HEAD 7 分鐘內母體 38→36 曾實測發生），證據檔引用時必附量測時刻與母體數；收斂判定只用基線切片。

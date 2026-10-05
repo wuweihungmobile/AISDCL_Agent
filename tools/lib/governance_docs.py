@@ -598,6 +598,10 @@ _GOVERNANCE_DOCS = (
     # 配速三列 closed-by-decision、ONBOARDING 表③ 日曆鎖回填）：即刻登記。
     _REPO_ROOT / "docs" / "06_quality"
     / "CrossPlatform_R198_FiveQuestion_SymptomGate_FirstEval_Evidence.md",
+    # 五問第二十一次四方覆核（症狀閘第二次評估、Q4′ darwin 恆 FAIL 量測器碼修、協定跨機可執行性
+    # 修訂、鏡稽核上一輪證據檔、Windows Q4′ JSON 附錄供他機拷入）：即刻登記。
+    _REPO_ROOT / "docs" / "06_quality"
+    / "CrossPlatform_R199_FiveQuestion_CrossMachine_Gate_Evidence.md",
     # 護欄層行數棘輪史料歸檔的第二冊（第一冊逼近 Read 工具上限，淨減法搬遷改落本檔）：即刻登記。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_Guard_Line_History_2.md",
 )
