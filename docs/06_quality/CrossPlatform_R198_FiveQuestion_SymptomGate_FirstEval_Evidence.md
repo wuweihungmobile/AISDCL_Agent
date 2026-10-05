@@ -102,7 +102,10 @@
 - 根層全套、commit、push、雲端見〈七〉。
 
 ## 七、根層全套、push 與雲端驗收（主控親跑；本場 tool_result）
-（收尾回填）
+- 根層全套（`.venv\Scripts\python.exe tools/run_root_unittests.py`、`AUTOSDD_SENTINEL_OFF=1`，背景、log 落 scratchpad）：一跑即綠，`ROOT_RC=0`、「✅ unittest 數量下限釘選通過：發現 5176 個測試（下限 5101）」「[M6 id 集合] tools/tests@win32：✅ 集合關係成立（本次 skip 46 支）」「✅ 真實 TEMP 圍籬：…autosdd_pace*.json 零變動（前 4／後 4 份）」「✅ 孤兒 console 普查：零增長（前 1／後 1）」；無失敗明細。
+- commit `7ec6fa6`（15 檔 +178／−28；pre-commit：「✅ 未觸發歸檔強制門檻」「變更含根層基建 → bash -n 語法檢查」全過）。push：「[pre-push dispatcher] 雲端 CI 現況（DEF-101-733）：最新 run（root-infra-ci）= success」「✅ 本次 push 觸發的所有 leg 皆通過（rc=0）」「b5b093b..7ec6fa6 main -> main」`PUSH_RC=0`；`HEAD=7ec6fa60 origin/main=7ec6fa60`。
+- 雲端（`gh run watch --exit-status --interval 30` 四支皆 rc=0；`gh run list --commit 7ec6fa608ded…` 結論）：root-infra-ci 37255193723 success／AutoClaude CI 37255193743 success／windows-compat-ci 37255193722 success／macos-compat-ci 37255193747 success；aisdlc-sdd-ci／shellcheck-ci 依 paths 白名單未觸發（缺席＝未驗證、非通過）。
+- 本〈七〉回填 commit 的雲端 run 由 R199 開場對帳（同 R197 慣例；對帳項、非承接項）。
 
 ## 八、交棒／掌舵者側待辦
 ### Q5 評估（掌舵者原話：「是否修復已經收斂？給我評估說明；找出一直無法收斂的根因、徹底解決」）
