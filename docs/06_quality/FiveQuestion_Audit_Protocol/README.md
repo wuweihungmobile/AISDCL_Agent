@@ -41,23 +41,29 @@ manifest＝本目錄每個檔的（相對路徑, sha256(內容；CRLF 先正規�
 ## 窗口規則與收斂判定（R197 起＝評估式 v2：症狀閘為主、家族計數為資訊欄）
 `window_len`＝輪帳本尾端連續同 `protocol_sha256` 的列數（遇 `window_reset:true` 即止）。
 
-**收斂＝症狀閘達標**，每輪由主控親跑兩條指令、逐字貼進證據檔（`--exclude-self`；基線＝`symptom_baseline_since`）：
+**收斂＝症狀閘達標**，每輪由主控親跑下列三項（兩條量測指令＋一條狀態指令）、逐字貼進證據檔（`--exclude-self`；
+基線＝`params.json` 的 `symptom_baseline_since`，值由該檔現查代入、不抄進本檔）：
 1. `python tools/probe/audit_session.py --five-question --exclude-self --record-since <symptom_baseline_since> --entrypoint cli,claude-vscode,sdk-cli`
    → Q1′a（修法後 MISBLOCK 0）、Q1′b（裸宣稱 0）、Q1′c（≤ `q1c_gate`）、Q3′（全對 ≤ `q3_tolerance_tokens`）四行皆 PASS
    （合併真實層與探針層：探針是真實 headless session，開窗行為同屬症狀面；NOT-EVALUABLE＝量不到、不算達標）。
 2. 同指令**不帶** `--entrypoint`（真實層 cli／claude-vscode）→ Q2′ 行 PASS（n ≥ `q2_min_n`、逾期 0；探針被告知先現查，
    不得混入分母）。
-3. `--protocol-status` 的 Q4′ 兩平台九格 ✓ 且 ≤ `q4_max_age_days`。
+3. `python tools/probe/audit_session.py --protocol-status`（`fivequestion_ledger.py` 是函式庫，直接執行無輸出、rc=0）
+   的 Q4′ 兩平台九格 ✓ 且 ≤ `q4_max_age_days`：它只讀本機 `trace_dir` 的丙案 JSON，另一台的
+   `session_gate_acceptance_*.json` 須先拷入本機 `trace_dir`（缺檔＝量不到＝不達標）；該指令印的「評估:」行是家族計數
+   資訊欄，不是收斂依據。
 三項同時成立＝一次評估達標；連續 `symptom_streak_required` 次評估（不同輪、後一次母體含 ≥1 支新真實窗）達標
-⇒ 宣告收斂，之後只在根 CLAUDE.md〈守衛面准入〉的觸發條件成立時再評。獨立憑證：Q1′a 的 oracle 與 hook 同碼、
+⇒ 宣告收斂，之後只在根 CLAUDE.md〈守衛面准入〉的觸發條件成立時再評。達標次數寫在輪帳本列 `symptom_streak` 欄
+（`--protocol-status` 照印；未達標寫 0）。獨立憑證：Q1′a 的 oracle 與 hook 同碼、
 對修法後視窗是同義反覆（ARCH-195-06）⇒ 另附 Q1′b、掌舵者回報、答案表兩引擎重測；分類器拒絕
-（`automode-blocked`）不入分子但逐筆歸因。
+（`automode-blocked`）不入分子但逐筆歸因。全史（不帶 `--record-since`）數字受 Claude Code 逐字稿保留期影響、隨時間
+縮水（同一指令同一 HEAD 7 分鐘內母體 38→36 曾實測發生），證據檔引用時必附量測時刻與母體數；收斂判定只用基線切片。
 
 家族計數（舊評估式：window_len ≥ `rounds_required`、近 6 輪 `new_p_le2` 合計 ≤ 2、`p1` = 0、末輪 0；
 `--protocol-status` 照印 PASS／FAIL／NOT-EVALUABLE）**自 R197 起降為資訊欄，不再是收斂宣告的依據**。
 WHY：它的分子是審查對「每輪都在擴張的守衛面」做對抗搜尋的產出——無不動點、雙向可操作（多查漲、少查歸零）、
 與掌舵者症狀無量值對應；R179～R196 守衛面淨增 10,139 行、發現率約 0.8 P2／輪，連 4 輪零新的機率約 4%
-（R197 證據檔〈四〉）。量測器 rc 恆 0，不得接閘門。
+（R197 證據檔〈三〉Architect 列；〈四〉為根因敘述）。量測器 rc 恆 0，不得接閘門。
 
 ## 更動＝重置，不是紅燈
 改本目錄任一檔（含一個字）→ `--protocol-status` 印 `PROTOCOL-CHANGED`；須追加新列帶

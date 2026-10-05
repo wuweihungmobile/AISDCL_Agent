@@ -594,6 +594,10 @@ _GOVERNANCE_DOCS = (
     # 鏡稽核上一輪證據檔文字與輪帳本漏列補登）：即刻登記。
     _REPO_ROOT / "docs" / "06_quality"
     / "CrossPlatform_R197_FiveQuestion_Convergence_Criterion_Evidence.md",
+    # 五問第二十次四方覆核（症狀閘首評 NOT-EVALUABLE、鏡稽核上一輪證據檔、協定可執行性修訂、
+    # 配速三列 closed-by-decision、ONBOARDING 表③ 日曆鎖回填）：即刻登記。
+    _REPO_ROOT / "docs" / "06_quality"
+    / "CrossPlatform_R198_FiveQuestion_SymptomGate_FirstEval_Evidence.md",
     # 護欄層行數棘輪史料歸檔的第二冊（第一冊逼近 Read 工具上限，淨減法搬遷改落本檔）：即刻登記。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_Guard_Line_History_2.md",
 )

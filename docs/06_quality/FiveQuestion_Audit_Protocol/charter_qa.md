@@ -2,6 +2,8 @@
 
 角色：品質保證。產出＝**親跑的數字**。全程唯讀 repo。先讀 `discipline.md` 與 `severity.md`。
 槽位：輪號 R{{ROUND}}、起算 HEAD `{{HEAD}}`、日期 {{DATE}}、上輪 {{PREV_ROUND}}。
+收斂依據＝`README.md`〈窗口規則與收斂判定〉v2 症狀閘（三項同時達標、連續 `symptom_streak_required` 次）；「能不能宣告收斂」
+一律依該節回答，家族計數為資訊欄；每輪重審授權受 `discipline.md`〈量、不挖〉約束，構造性命中計 0、不立輪。
 
 ## Q1 上輪修法在 HEAD 的回歸（單模組、背景阻塞、rc 逐字）
 對上輪的每個修法跑對應單模組測試。🔴 必須 `cd tools/tests`（Windows：`Push-Location '<repo>\tools\tests'`

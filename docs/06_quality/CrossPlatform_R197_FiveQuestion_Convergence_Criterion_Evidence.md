@@ -3,7 +3,7 @@
 > 主控 Fable 5.1（session 24da9fe3-e7d2-4fe4-95b2-73c3d8e979aa，auto mode 新視窗；Claude Code 2.1.289＝與 R196 相同，T3 未觸發）；Architect／SA／SD／QA 四方＋官方文件查證包皆 Sonnet，**全程唯讀審查、零 Developer 棒**（本輪裁決為 docs-only：零守衛碼、零新測試）。起點 HEAD `28514cc`＝origin/main、工作樹乾淨。掌舵者原話三問：①「才開新視窗，就說他被擋不能寫檔案用工具了，然後也不去查真實的數據」②「模型都不用真實的 /context 或 API 去查真實數據」③「是否修復已經收斂？請務必找出一直無法收斂的根因，加以徹底解決」＋「確認 R196 以上都已經修好」。
 
 ## 〇、一句話結論
-症狀面：掌舵者「一開窗就說被擋」在本機有**兩個真實歷史來源、皆已修**——09-28 前 31/31 個視窗開窗當下就有 SessionStart hook error（官方文件：該事件的 exit 2 stderr 會顯示給使用者），加上 10-03 前 7/9 個視窗共 174 筆 lint 規則①過擋紅字（DEF-200-481）；修法後真實互動窗第一段文字「無阻斷卻宣稱被擋」全史 0/37、修法後開窗前 10 個呼叫零 hook 阻斷、13/13 窗都現查過真實數據。流程面：**R179～R196 無法收斂的根因＝收斂被定義成「審查自己的發現率」**——分子是四方對「每輪被修法擴張的守衛面」做對抗搜尋的產出（18 輪 17 輪守衛面淨增、合計 +10,139 行；74/80 筆缺陷同輪修），這個量沒有不動點、雙向可操作、與掌舵者症狀無量值對應；最近兩個 P2（483／484）在 9,646 筆真實 PowerShell 唯一指令上自然寫法命中 0，全靠探針種子續命。本輪徹底解法＝把收斂判準改成**症狀閘**（既有 Q1′～Q4′ 在修法基線後的真實視窗上量）、嚴重度加**暴露度軸**（構造性命中＝P4 理論洞）、守衛面**准入制**（量、不挖），協定重置一次。今日症狀閘：可評三項（Q1′a／b／c）全 PASS，Q2′／Q3′ 分母不足（再 3 支真實窗即可首評）。R196 的 8 項「已修好」宣稱全數重現、1 項漏做（輪帳本缺 R196 列）本輪補登。
+症狀面：掌舵者「一開窗就說被擋」在本機有**兩個真實歷史來源、皆已修**——09-28 前 31/31 個視窗開窗當下就有 SessionStart hook error（官方文件：該事件的 exit 2 stderr 會顯示給使用者），加上 09-28～10-03 間 7 個視窗共 174 筆使用者看得到的 hook error 附件（R198 鏡稽核訂正：原寫「lint 規則①過擋紅字（DEF-200-481）」不實，成分＝治理檔寫入提醒＋額度停止水位出聲，09-30 前已由 DEF-200-440 清，見〈四〉4.2）；修法後真實互動窗第一段文字「無阻斷卻宣稱被擋」全史 0/37、修法後開窗前 10 個呼叫零 hook 阻斷、13/13 窗都現查過真實數據。流程面：**R179～R196 無法收斂的根因＝收斂被定義成「審查自己的發現率」**——分子是四方對「每輪被修法擴張的守衛面」做對抗搜尋的產出（18 輪 17 輪守衛面淨增、合計 +10,139 行；74/80 筆缺陷同輪修），這個量沒有不動點、雙向可操作、與掌舵者症狀無量值對應；最近兩個 P2（483／484）在 9,646 筆真實 PowerShell 唯一指令上自然寫法命中 0，全靠探針種子續命。本輪徹底解法＝把收斂判準改成**症狀閘**（既有 Q1′～Q4′ 在修法基線後的真實視窗上量）、嚴重度加**暴露度軸**（構造性命中＝P4 理論洞）、守衛面**准入制**（量、不挖），協定重置一次。今日症狀閘：可評三項（Q1′a／b／c）全 PASS，Q2′／Q3′ 分母不足（再 3 支真實窗即可首評）。R196 的 8 項「已修好」宣稱全數重現、1 項漏做（輪帳本缺 R196 列）本輪補登。
 
 ## 一、三問第十九次判定（Windows 11）
 | 問 | 判定 | 依據（本場 tool_result 或 `[他包回報]`） |
@@ -17,7 +17,7 @@
 - **開場**：`python tools/session_resume_planner.py --check` ⇒ 「新視窗：逐字稿還沒有任何帶 message.usage 的 assistant 記錄…harness 回報 used=88,593（feed）」；`--pace` ⇒ 「現在可派 4 個 agent（硬上限 cap=不設限）…band=free｜最緊的一條＝weekly_scoped 45% 剩 7576 分鐘…量測於=2026-10-04T23:43:04+08:00」。兩條皆無權限詢問、無 hook 阻斷、無分類器拒絕。
 - **②′ 全母體（修協定前、剔除本窗）**：`--five-question --exclude-self` ⇒ 「母體 37 支…permissionMode：{'bypassPermissions': 3, 'auto': 34}」「Q1′a 誤擋 FAIL 74／hook 阻斷 101」「Q1′c 前10呼叫被擋 PASS 1／10（≤0.25）；首呼叫被擋 0／10」「Q2′ 首查序號 FAIL 逾期或從未 9／36…有簡報 21」「Q3′ feed 差 PASS 10 對；max|差|=0」「非 hook 阻斷：{'permission-rule': 7, 'automode-blocked': 2}」。逐筆：74 筆 MISBLOCK 全落 2026-09-04～10-03（lint 規則①過擋為主、block_destructive_git 次之），HEAD 判準重放已不擋＝DEF-200-481／R185 修法生效的史料；`block_bash_on_windows.py` 全母體僅 1 筆（6bc52642 #149，oracle correct）。
 - **協定狀態（修協定前）**：「輪帳本 4 列；window_len=2；評估: NOT-EVALUABLE(2/6)」「完整性閘 ✗ 漏列：DEF-200-484」「Q4′ session_gate_acceptance_Koala-MSI.json（win32） PASS …九格 ✓」。
-- **T1 義務（R196 裁決：本輪動過守衛面 ⇒ 答案表兩引擎重測）**：scratchpad `remeasure_rc_table.py` 對 `rc_after_pipe_real._RC_SELFTEST` 43 列各在 pwsh 7 與 powershell.exe 5.1 灌種子 7 後真跑讀 rc ⇒ 「TOTAL rows=43 diffs=0」rc=0（43 列 `after=a/b` 全數重現，含 37 列 `7/3` 兩引擎分歧列）。副作用：表內 `Out-File x.txt` 列以 repo 根為 cwd 寫出 `x.txt`（32,250 bytes、`git log --oneline -n 40` 輸出），SD 包發現後主控親刪，`git status --porcelain` 回空。
+- **T1 義務（R196 裁決：本輪動過守衛面 ⇒ 答案表兩引擎重測）**：scratchpad `remeasure_rc_table.py` 對 `rc_after_pipe_real._RC_SELFTEST` 43 列各在 pwsh 7 與 powershell.exe 5.1 灌種子 7 後真跑讀 rc ⇒ 「TOTAL rows=43 diffs=0」rc=0（43 列 `after=a/b` 全數重現；R198 鏡稽核訂正：原寫「含 37 列 `7/3` 兩引擎分歧列」不實——SD 隔離 cwd 重測分佈 `7/-1`×24、`0/0`×13、`3/3`×2、`0/-1`×1、`1/1`×1、`7/3`×1、`7/7`×1，兩引擎值不同的列 26/43）。副作用：表內 `Out-File x.txt` 列以 repo 根為 cwd 寫出 `x.txt`（32,250 bytes、`git log --oneline -n 40` 輸出），SD 包發現後主控親刪，`git status --porcelain` 回空。
 - **分母親查**：scratchpad `sessions_since.py` ⇒ 2026-10-03 起頂層逐字稿 63 支：`entry=cli pm=auto` 5 支（1 支 0 呼叫；其餘 13626e09 首查 #17、7d664c9d／b1ac224c／036ca691／本窗首查 #1），`sdk-cli` 57 支（default／dontAsk／acceptEdits／auto 探針，1～6 個呼叫）。`~/.claude/projects` 下 09-27 起有活動的 slug 只有一個（87 支），掌舵者本機視窗全在 ②′ 母體內。
 - **症狀閘（修協定後、新 claim_re）**：合併層 `--five-question --exclude-self --record-since 2026-10-03T23:26:09+08:00 --entrypoint cli,claude-vscode,sdk-cli` ⇒ 「母體 26 支…{'auto': 5, 'default': 16, 'dontAsk': 2, 'acceptEdits': 3}」「Q1′a 誤擋 PASS 0／hook 阻斷 5」「Q1′b 宣稱≠阻斷 PASS 0／6 []」「Q1′c 前10呼叫被擋 PASS 0／10（≤0.25）；首呼叫被擋 0／10」「Q2′ NOT-EVALUABLE(2/5) 逾期或從未 0／2」「Q3′ NOT-EVALUABLE(2/3) 2 對；max|差|=0」「非 hook 阻斷：{'automode-blocked': 1, 'user-rejected': 12, 'permission-rule': 2}」；5 筆 hook 阻斷 oracle 皆 correct（lint：b1ac224c #135、036ca691 #63／#64；Bash：sdk-cli default 探針 610d8e42／2f08177f 各 #2）。真實層（不帶 `--entrypoint`）⇒ 「母體 2 支…{'auto': 2}」「Q1′a PASS 0／hook 阻斷 3」其餘 NOT-EVALUABLE(2/5)／(2/10)／(2/5)／(2/3)。
 - **協定狀態（補列後）**：「protocol_sha256=c8cc8fac0bf67efdf198bdf7e3d6038994e5a8dc4705c28533df6764ac92c83f（manifest 11 檔）」「輪帳本 6 列；window_len=1；評估: NOT-EVALUABLE(1/6)」「窗口內登記 raw=0」「完整性閘 ✓」「Q4′ …（win32） PASS …repo_head_is_ancestor_of_HEAD✓」。
@@ -43,7 +43,7 @@
 4. **判準與症狀脫鉤**：README 明寫「評估式只含家族計數與 p1，不含 Q1′～Q4′」——掌舵者三症狀對應的恰是 Q1′a／b／c、Q2′、Q3′，從未進過收斂式。
 
 ### 4.2 掌舵者症狀的真實來源（SA 量測＋文件查證，主控 ②′ 親量佐證）
-- 09-28 前每個視窗開窗即 SessionStart hook error 31/31（R179～R181 修）；10-03 前 lint 規則①過擋 174 筆紅字於 7/9 窗（DEF-200-481，R194 修）；兩者都是「使用者看得到」的 hook error 通知（文件：exit 2 stderr 顯示給人）。修法後 0/15 與 0/4。
+- 09-28 前每個視窗開窗即 SessionStart hook error 31/31（R179～R181 修）；09-28～10-03 另有 7 窗共 174 筆使用者看得到的 hook error 附件。🔴 R198 鏡稽核訂正：本輪原寫「lint 規則①過擋 174 筆紅字（DEF-200-481，R194 修）」**不實**——SA／SD 親量成分＝`block_destructive_git` 治理檔寫入提醒（PreToolUse:Edit，exit 1 非阻斷）109～145 筆＋`context_budget_guard` 額度停止水位出聲（PostToolUse hook_blocking_error）22 筆、其餘 7、lint 僅 1 筆；最晚 2026-09-29T17:24Z，已由 DEF-200-440 改走 additionalContext＋rc=0 清除（修法後窗 0 筆）；lint 規則①的可見形態是 tool_result 的 MISBLOCK 74 筆那一族（481 修法後真實窗 0/638 呼叫）。結論方向不變（可見紅字已清），歸因表漏列兩個來源。修法後 0/15 與 0/4。
 - 殘餘可見通道（修法後）：auto 分類器 [Self-Modification] 對主控改 `.claude/` 的拒絕（2 筆、皆中段、模型如實續做）；harness 內建 `Remove-Item` 路徑保護把指令字串裡的 `'/'`／`'\n'` 誤當系統路徑（3 筆 permission-rule）；headless default 模式探針的 user-rejected（28/56 窗，無人可核准＝設計所致）。Mac：本機零樣本、未驗。
 - 「簡報本身就是掌舵者看到的被擋訊息」假說**被證偽**（官方文件：成功的 SessionStart 輸出不顯示給人）。
 
@@ -53,10 +53,10 @@
 | 1 | **收斂判準 v2＝症狀閘**：README〈窗口規則與收斂判定〉——合併層（cli／claude-vscode／sdk-cli）Q1′a／b／c／Q3′ 四行 PASS ＋ 真實層 Q2′ PASS ＋ Q4′ 兩平台 ✓；連續 `symptom_streak_required`=2 次評估（不同輪、後一次含 ≥1 支新真實窗）達標 ⇒ 宣告收斂；家族計數降為資訊欄照印 | `FiveQuestion_Audit_Protocol/README.md`；`params.json` 加 `symptom_baseline_since`=`2026-10-03T23:26:09+08:00`（commit 89dcb35 committer 時刻，`git log` 親查）、`symptom_streak_required`=2、`exposure_min_hits`=1 |
 | 2 | **暴露度定級**：P2 必要條件＝掌舵者真機回報／非構造性逐字稿實際發生／真實語料非探針種子 ≥1 命中；構造性命中＝P4 理論洞、不立輪、不同輪修；拆殘依暴露度不依血統 | `severity.md`〈暴露度〉 |
 | 3 | **守衛面准入（量、不挖）**：守衛面新增一行碼或鎖須附暴露證據；審查角色不構造變體；T1 反轉＝動守衛面 ⇒ 先附證據 | 根 `CLAUDE.md`〈守衛面准入〉；`discipline.md`〈量、不挖〉＋`NEW_P_LE_2` 口徑 |
-| 4 | **claim_re／claim_exc_re**：採 SA 候選 B（headless 正例 3→7/28、互動窗假陽 0）；exc 的裸「沒有／並未／未」收窄為「＋被／受／遭／阻／擋／拒／鎖／封／禁」（比 SA 診斷案 C 保守；C 實測假陽 0）；Q1′b 分母維持窗數（改宣稱句數在開窗期恆不可評，SA 實測） | `params.json`；修法後合併層 Q1′b 由 0/0 變 0/6（6 句宣稱皆有真實拒絕支撐） |
+| 4 | **claim_re／claim_exc_re**：採 SA 候選 B（headless 正例 3→7/28、互動窗假陽 0）；exc 的裸「沒有／並未／未」收窄為「＋被／受／遭／阻／擋／拒／鎖／封／禁」（比 SA 診斷案 C 保守；C 實測假陽 0）。R198 鏡稽核訂正：7/28 是候選 B 搭**舊** exc 的值；實際上線＝新 regex＋收窄 exc，SD 以 R197 同腳本重測正例 **14/28**（regex 命中 14、被 exc 排除 0）、互動窗假陽仍 0——方向保守（低報），本檔其餘「7/28」字樣同此訂正；Q1′b 分母維持窗數（改宣稱句數在開窗期恆不可評，SA 實測） | `params.json`；修法後合併層 Q1′b 由 0/0 變 0/6（6 句宣稱皆有真實拒絕支撐） |
 | 5 | **lint 規則①**：採 SD 案 A（維持阻斷＋凍結；不上 AST、不撤）；Architect「降級為提醒」列為決策卡交掌舵者（〈八〉） | 無碼變更 |
 | 6 | **DEF-200-485 closed-by-decision**（α 登記制）：未放行字面 7 種＝裸 `python tools/session_resume_planner.py`（寫任務書）、`--arm-sentinel`（註冊排程）、`python tools/install_statusline.py`（改使用者設定）、`python tools/lib/quota_meter.py --json`、`python tools/lib/quota_policy.py --print-env-example`、`python tools/probe/variate_contrast.py …`、`python tools/lib/sentinel_lifecycle.py --apply`；前三類寫檔／排程／設定**刻意不進 allow**，後四類唯讀或非模型面可選；611 檔逐字稿 147 次使用、權限類拒絕 0。重開＝非探針逐字稿出現「教學字面被權限層拒後放棄現查」，或新增任一模型面 `python tools/…` 字面（屆時上 β 全稱鎖，落 `test_session_brief.py::RepoSettingsReadOnlyAllowTest`） | 帳本列 |
-| 7 | **DEF-200-486 closed-by-decision**：P4；R195／R196 主控窗、SA 子窗、探針零誤導樣本；落地估 lib +20／hook +4（cbg 餘裕 0）／測試 +35、跨 3 持有面且新增首次 PostToolUse 出聲點。重開三條件＝(1) 掌舵者真機回報非 auto 窗被該句誤導；(2) Claude Code 在 SessionStart payload 加入 permission_mode；(3) 簡報字數預算要砍 | 帳本列 |
+| 7 | **DEF-200-486 closed-by-decision**：P4；R195／R196 主控窗、SA 子窗、探針零誤導樣本；落地估 lib +20／hook +4（cbg 餘裕 0）／測試 +35（合計 59；〈三〉與帳本列寫「+55」為 lib＋測試、hook 另計——R198 鏡稽核訂正）、跨 3 持有面且新增首次 PostToolUse 出聲點。重開三條件＝(1) 掌舵者真機回報非 auto 窗被該句誤導；(2) Claude Code 在 SessionStart payload 加入 permission_mode；(3) 簡報字數預算要砍 | 帳本列 |
 | 8 | **輪帳本**：先補 R196 列（date 10-04、new_p_le2=[484]、[R197 補登] 標記、不改寫歷史）再寫 R197 列（date 10-05、window_reset:true＋理由） | `FiveQuestion_Round_Ledger.jsonl` 4→6 列 |
 
 ### 4.4 理論洞清單（P4；構造性命中、暴露度 0；只登記）
@@ -72,7 +72,7 @@
 - Q1′a oracle 與 hook 同碼 ⇒ 對修法後視窗是同義反覆；`--parity` 對規則①亦是恆等式。獨立憑證只有：Q1′b（新 claim_re）、掌舵者回報、43 列答案表兩引擎重測（本輪親跑 diffs=0）。
 - Mac 全未驗（逐字稿不在本機；Q4′ Mac 證據 2026-10-17 前須重產）。額度帶 halt／prepare 零活體樣本。
 - 「使用者看到什麼」逐字稿只看得到 hook error 附件與 denial 結構欄，看不到 UI 層；SA 建議掌舵者下次看到「被擋」當下貼畫面字樣或 session id。
-- 本輪沒有 Developer 棒、沒有新測試：收斂判準 v2 的「症狀閘」判定目前是**文件化程序**（主控親跑兩條指令逐字貼），`fivequestion_ledger.protocol_status` 仍只印家族式。**機械化不排程**（主控裁決，依守衛面准入：無暴露證據不加碼；兩條指令手跑成本＝每輪 2 次呼叫）；重開條件＝(1) 任一輪手跑症狀閘出現抄錄錯誤或分層用錯，(2) 掌舵者要求，(3) 連續兩次評估達標、要寫宣告時需機械簽章。屆時立列、估 tools/probe 碼＋鎖行數。同理，新 claim_re 的正例靈敏度（7/28）目前只記在本檔，不加鎖。
+- 本輪沒有 Developer 棒、沒有新測試：收斂判準 v2 的「症狀閘」判定目前是**文件化程序**（主控親跑兩條指令逐字貼），`fivequestion_ledger.protocol_status` 仍只印家族式。**機械化不排程**（主控裁決，依守衛面准入：無暴露證據不加碼；兩條指令手跑成本＝每輪 2 次呼叫）；重開條件＝(1) 任一輪手跑症狀閘出現抄錄錯誤或分層用錯，(2) 掌舵者要求，(3) 連續兩次評估達標、要寫宣告時需機械簽章。屆時立列、估 tools/probe 碼＋鎖行數。同理，新 claim_re 的正例靈敏度（候選 B 搭舊 exc 7/28；上線組合由 R198 SD 重測為 14/28）目前只記在本檔，不加鎖。
 - 答案表重測腳本留下 `x.txt` 一次（已刪、工作樹乾淨）；SA 包誤呼叫 Bash 一次被 hook 正確擋下（零副作用）；QA 包前兩批測試未設 `AUTOSDD_SENTINEL_OFF`（任務書漏列，補送後遵守），三哨兵現查未被卸載。
 - 證據檔文字本輪未經鏡稽核（R198 第一件事）。
 
@@ -80,7 +80,7 @@
 - 帳本七列 UTF-8 bytes：193=621、242=636、246=693、465=697、484=684、485=689、486=659（皆 ≤700）。
 - `ruff check tools/lib/governance_docs.py` ⇒ `All checks passed!` rc=0。
 - `python -m unittest discover -s tools/tests -p test_claim_provenance_r86.py` ⇒ `Ran 121 tests` OK rc=0（含 README↔params 鍵鎖：三個新鍵已在 README 點名）；`-p test_doc_loc_baseline_freshness_r60.py` ⇒ `Ran 281 tests` OK rc=0（根 CLAUDE.md 新節與 2.1.284 註記未撞宣稱釘鎖）。
-- `tools/check_handoff_carriers.py` rc=0（「每一筆前瞻延後宣稱都有帳本承接載體」）；`tools/check_defect_log_crossref.py` 建檔前 rc=1 僅因「具名治理文件不存在：CrossPlatform_R197_…」，建檔後重跑見〈七〉回填。
+- `tools/check_handoff_carriers.py` rc=0（「每一筆前瞻延後宣稱都有帳本承接載體」）；`tools/check_defect_log_crossref.py` 建檔前 rc=1 僅因「具名治理文件不存在：CrossPlatform_R197_…」，建檔後重跑 rc=0（R198 鏡稽核訂正：〈七〉原漏回填此項；R198 QA 重跑 rc=0「具名治理文件 149 份皆已登記」）。
 - 輪帳本補列腳本 ⇒ `rows=6 last_rounds=[195, 196, 197] last_reset=True crlf=False`；`--protocol-status` ⇒ `window_len=1`、`完整性閘 ✓`、Q4′ PASS。
 - 根層全套第一跑 5176 支 1 紅＝`TestR71CodeRoundLabelsNeverExceedLedgerCurrentRound`（governance_docs.py 新登記註解寫了「R196」字面；改「上一輪」句式）⇒ 第二跑 rc=0、5176 支、無失敗明細；單模組 `test_check_defect_log_crossref.py` 268 OK。
 - 第一 commit `9fde0c0`（pre-commit 全過、11 檔）後 push 被 pre-push 的 strict 判準擋下：`TestDef200241GrandfatheringReadsLedgerClosureNotTheClock` 判本檔〈五〉原句（把症狀閘機械化延到下一輪、行內無 DEF-ID）為裸承接句（本段刻意不逐字重述該句——引文也會被鎖當承接句，R196 同型教訓）。第一反應＝新立 DEF 列當載體 ⇒ `check_defect_log_crossref.py` 以 HEAD 為基線判「本輪新增未結 1 > 結案 0」（485／486 的結案已在第一 commit 內）；主控欲以 `git commit --amend` 併回單一 commit，被 auto mode 分類器拒絕（`[Git Destructive]`）；再試工具指名出口②（`AUTOSDD_NET_RATCHET_OFF=1`＋commit 訊息寫理由）亦被分類器拒絕（`[Safety Bypass Flag]`）。兩次皆如實引原文、不繞道。最終出口＝**不承接、改裁決不排程**（上段）：撤回新列、刪去輪號目標 ⇒ 無裸承接句、帳本相對 HEAD 零變動，第二 commit 不帶任何旗標。教訓：「延後到下輪」在本 repo 是要付載體稅的動作，先問「真的要做嗎」。
@@ -94,9 +94,9 @@
 
 ## 八、交棒／掌舵者側待辦
 ### Q5 評估（掌舵者原話：「是否修復已經收斂？給我評估說明；找出一直無法收斂的根因、徹底解決」）
-- **症狀已修、尚未宣告收斂**：症狀 1／2 在本機修法後真實視窗未重現，歷史來源（SessionStart hook error 31/31；lint 過擋 174 筆）已修；症狀閘可評三項全 PASS，Q2′ 差 3 支真實窗、Q3′ 差 1 對靜止配對 ⇒ **再開 3 支真實互動窗（一般開發對話即可、不必四方）即可做第一次評估，第二次達標即宣告**。最早可宣告＝第二次評估通過之輪（預期 R198～R199），且不再取決於審查發現率。
+- **症狀已修、尚未宣告收斂**：症狀 1／2 在本機修法後真實視窗未重現，歷史來源（SessionStart hook error 31/31；lint 過擋 174 筆）已修；症狀閘可評三項全 PASS，Q2′ 差 3 支真實窗、Q3′ 差 1 對靜止配對 ⇒ **再開 3 支真實互動窗（一般開發對話即可、不必四方）即可做第一次評估，第二次達標即宣告**。最早可宣告＝第二次評估通過之輪（預期 R198～R199），且不再取決於審查發現率。R198 訂正：「再開 3 支真實窗」的前提未成立——真實窗每輪只 +1 且全為五問輪主控窗，實測最早 R200 首評／R201 宣告（掌舵者多開 ≥1 支一般開發窗各提早 1 輪）。
 - **根因已徹底處理**：收斂判準換成症狀閘（分子＝掌舵者症狀指標、母體＝真實視窗、基線凍結於雜湊）；嚴重度加暴露度軸（理論洞不再續命）；守衛面准入制切斷「修法擴面→審查挖新洞→再修」迴圈。三者皆為協定／治理文件變更，協定重置一次（window_reset:true）。
-- **為什麼仍不說「收斂」**：(a) 分母不足（真實窗 2～3 支）；(b) Q1′a／parity 對修法後窗是同義反覆；(c) Mac 零樣本；(d) 新 claim_re 正例靈敏度 7/28，仍有 14/28 措辭抓不到。
+- **為什麼仍不說「收斂」**：(a) 分母不足（真實窗 2～3 支）；(b) Q1′a／parity 對修法後窗是同義反覆；(c) Mac 零樣本；(d) 新 claim_re 正例靈敏度 7/28（R198 訂正：上線組合實測 14/28），仍有 14/28 措辭抓不到。
 
 ### 掌舵者決策卡（不急，無人看管時維持現狀）
 1. **lint 規則①是否降級為提醒**（Architect FIX 3）：現行阻斷在修法後真實窗 0 誤擋、真實語料真陽 4/9,646；降級可讓該族缺陷結構上從 P2 變 P3，但要動 `.claude/hooks/**`（acceptEdits 流程）與鐵律一語意、測試淨減。主控建議**維持阻斷**（SD 案 A），只在出現暴露證據的誤擋時再議。

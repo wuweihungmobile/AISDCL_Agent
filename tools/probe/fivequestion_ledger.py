@@ -20,7 +20,7 @@ from datetime import datetime
 from pathlib import Path
 
 #: 輪帳本列的選填欄（主控追加）：有就原樣印出，沒有不印（缺欄位不是錯）。
-OPTIONAL_FIELDS = ("q1a", "q1b", "q1c", "q2", "q3", "q4_win", "q4_mac")
+OPTIONAL_FIELDS = ("q1a", "q1b", "q1c", "q2", "q3", "q4_win", "q4_mac", "symptom_streak")
 _DEFECT_LOG = "AutoSDD_Defect_Log.md"
 _MARK = {True: "✓", False: "✗", None: "?"}
 

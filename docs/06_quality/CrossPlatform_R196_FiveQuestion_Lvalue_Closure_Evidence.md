@@ -40,18 +40,18 @@ Q1 我方 hook 層零誤擋（本窗＋SA 子視窗＋7 支 headless 探針皆�
 | DEF-200-479 第二段 | P3 | 持久穩定檔分不出真長 halt 與殘值 | 主控裁 **R3 reset 感知＋fail-open**：`StabilityState` 加 `reset_at`／`confirmed_at` 選配欄（舊檔相容）；量不到時 reset 已知未到 ⇒ 撐住；已過或盲 >6h ⇒ 放到 degraded cap 並 `emit_to_model` 一次；下次量到即收緊；quota_gate 兩尺帶 `reset_at=halt_resets_at(decision)` | `tools/lib/quota_stability.py` +17、`tools/lib/quota_gate.py` +2（495／500）、`tools/tests/test_quota_policy.py` +63（333→339） |
 | DEF-200-465 | P3 | 任務書位置三個家無鎖互釘 | 只加互釘測試（hook 餘裕 0 不做 SSOT 函式）：武裝端 `maybe_arm` 收到的 `plan_path`＝GC 預設 `gettempdir()` 同檔、`gc()` 判 reap=True；GC 側／武裝端改家兩變異皆紅 | `tools/tests/test_context_budget_guard.py` +25 |
 | SD-195-05（ARCH-196-08） | P3 | `block_message()` 第三份手寫收斂清單缺 Write、寫死 PowerShell | SSOT 化：`convergent_tools_clause(windows=None)` 以 `_is_windows()` 現查；hook 一行改呼叫 `quota_gate.quota_messages.convergent_tools_clause()`（import 失敗退空字串、阻斷不受影響）；鎖 `assertIn(clause)`＋`assertNotIn("仍然放行")` | `tools/lib/quota_messages.py`（淨 0）、hook +1（1088→1089＝預算上限、餘裕 0）、cbg 測試 +6 |
-| DEF-200-246 | P3 | PRD §6.2 兩半邊生產不可達 | 四方（Architect／SD／QA 附條件）同意 **closed-by-decision**：PRD §6.2 R-6.2-2 ③ 標註現交付＝桌面 loud＋自檢印 DRY_RUN、`integration_queue` 保留欄位零寫者、三條可偵測重開條件；反向存在鎖 `AutoClaude/tests/contract/test_def200246_integration_queue_tripwire.py`（6 passed，寫入變異皆紅） | PRD + AutoClaude 測試（非根層棘輪） |
+| DEF-200-246 | P3 | PRD §6.2 兩半邊生產不可達 | Architect 附條件同意 **closed-by-decision**（〈三〉僅 Architect 列有記錄，其餘角色無記錄；R198 鏡稽核訂正，原寫「四方同意」）：PRD §6.2 R-6.2-2 ③ 標註現交付＝桌面 loud＋自檢印 DRY_RUN、`integration_queue` 保留欄位零寫者、三條可偵測重開條件；反向存在鎖 `AutoClaude/tests/contract/test_def200246_integration_queue_tripwire.py`（6 passed，寫入變異皆紅） | PRD + AutoClaude 測試（非根層棘輪） |
 | DEF-200-459 | P4 | PRD §8 列 1 字面與施工圖不一致 | 增補列 1b（遙測端點自身 429＝量不到、永不 halt；列 1 不改寫＝R191 裁決）＋ Pacing 引文後指回句 | docs/01_requirements/AutoClaude_Token_監控與喚醒機制_PRD_v2.1.md、PRD_Amendment_R108_Pacing.md |
 | DEF-200-199 (i) | — | 施工圖 §6.1 加速臂例外註記 | 文件半邊落地（(4d) 註記 7 行，203／4096 照錄 R191〈四〉）；P16／舊律／L2／L3 承接 R198（與 242 同持有面、R197 須 ≤0） | PRD_Amendment_R108_Pacing.md |
 | ARCH-196-03／04 | P3 | 評估式門檻寫死在碼無邊界測試；raw P≤2 與公式可見數不同 | 合成輪帳本邊界測試（和＝2 PASS／和＝3 FAIL／末輪非零 FAIL／p1=1 FAIL／列數 5 NOT-EVALUABLE）＋ `--protocol-status` 加印 raw／可見；`fivequestion_ledger.py` 不在 manifest（11 檔），協定 sha 前後同為 `c62fa4355d14…` | `tools/tests/test_claim_provenance_r86.py` +35（120→121）、`tools/probe/fivequestion_ledger.py` +5 |
 | QA-196-01 | P2（文字） | R195 稱分類器樣本只有主控這一次；實為 2 筆（R194 窗 L820 seq129、R195 窗 L628 seq96），皆 `[Self-Modification]` | 套訂正（〈九〉） | R195 證據檔 |
 | ARCH-196-07 → **DEF-200-485** | P3 | 指引↔allow 字面對不齊、缺全稱鎖 | 立列 open，承接 R197 | 帳本 |
 | ARCH-196-09 → **DEF-200-486** | P4 | 簡報不知本窗 permission_mode；官方文件 SessionStart payload 無該欄、hook LOC 餘裕 0 ⇒ 須 PostToolUse 路徑由逐字稿導出 | 立列 open，承接 R197 | 帳本 |
-| SA-196-02／03（SD-196-03） | P4 | docker／node／claude 詞彙表外：截斷後讀 rc 放行、其後跑 node 再讀 rc 誤擋 | 設計決定（hook :205-207 刻意排除機器專屬安裝名），登記殘餘不修 | hook 誠實劃界 |
+| SA-196-02／03（SD-196-03） | P4 | docker／node／claude 詞彙表外：截斷後讀 rc 放行、其後跑 node 再讀 rc 誤擋 | 設計決定（hook :205-207 刻意排除機器專屬安裝名），登記殘餘不修 | 本節殘餘段（R197 證據檔〈四〉4.4 另列；hook 檔頭〈誠實劃界〉只列授權規則邊界、不含本清單——R198 鏡稽核訂正） |
 | SA-196-07 | P3（harness） | auto mode 系統文字「優先用 Bash」在子視窗存在（n=1），Windows 與鐵律一衝突 | repo 對策已在（Bash 停用 hook＋簡報首句）；NOT-A-DEFECT（repo 側） | — |
 | ARCH-196-02 | P2（提案層） | 照字面降頻會拿掉找到 483／484 的 SA 變體矩陣 | 採納：降頻附 T1～T7 觸發條件（〈八〉裁決 4） | 〈八〉 |
 
-殘餘（本輪刻意不修，登記在 hook 檔頭〈誠實劃界〉與本節）：K1 字串內插 `"…$(git … ｜ select -First 1)"`（`mask_regions` 遮蔽字串內容，修法牽動遮罩層）、K8 反引號續行、K12 `iex '…'`（靜態不可判）、`{ }` 區塊內裸 git 仍假紅（納入會讓 `$sb = { … }` 漏擋）、連鎖賦值 `$x = $y = git …`、帶引號的 `gv 'LASTEXITCODE'`。
+殘餘（本輪刻意不修，登記在本節；R198 鏡稽核訂正：hook 檔頭〈誠實劃界〉只列授權規則邊界、不含本清單，另見 R197 證據檔〈四〉4.4）：K1 字串內插 `"…$(git … ｜ select -First 1)"`（`mask_regions` 遮蔽字串內容，修法牽動遮罩層）、K8 反引號續行、K12 `iex '…'`（靜態不可判）、`{ }` 區塊內裸 git 仍假紅（納入會讓 `$sb = { … }` 漏擋）、連鎖賦值 `$x = $y = git …`、帶引號的 `gv 'LASTEXITCODE'`。
 
 ## 五、誠實劃界與未驗
 - **Q1 母體仍小**：修法後真實互動視窗 n=2（R195 主控窗、本窗）皆為依 SOP 開場的主控；SA 子視窗與 12 支 headless 探針是 `sdk-cli`／子代理形態。分類器拒絕的真實樣本累計 2 筆（R194／R195 窗），本窗 0 筆——本窗兩次 `.claude/` 寫入（Edit hook 一行、Copy-Item 安裝 lint hook）皆放行，判定依據仍不可觀測。

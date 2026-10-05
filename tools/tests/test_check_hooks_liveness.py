@@ -1854,7 +1854,7 @@ class TestHookAndProbeShareOneCriterion(unittest.TestCase):
             "_rc_real_gate", _REPO_ROOT / "tools" / "lib" / "rc_after_pipe_real.py")
         table = real._RC_SELFTEST
         self.assertEqual({row[1] for row in table}, {True, False}, "答案表只剩單一極性")
-        self.assertGreaterEqual(len(table), 29)
+        self.assertGreaterEqual(len(table), 43)
         self.assertEqual(real.selftest(_load_module("_lint_hook_gate", _LINT_HOOK)), [])
 
 

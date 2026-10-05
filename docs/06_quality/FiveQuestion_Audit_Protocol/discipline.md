@@ -2,7 +2,9 @@
 
 違反即 REJECT 你自己的交件。槽位：輪號 R{{ROUND}}、起算 HEAD `{{HEAD}}`、日期 {{DATE}}、上輪 {{PREV_ROUND}}。
 
-- 模型：角色一律 Sonnet。工具呼叫上限 **50 次**；禁跑根層全套（`tools/run_root_unittests.py`，約 14 分鐘）、
+- 模型：角色一律 Sonnet。工具呼叫預算 **50 次**（超過者不自動 REJECT，但須在交件〈收工自陳〉逐字寫明實際次數
+  與原因，供主控評估 token 效率；此前條文寫「上限、違反即 REJECT」而四方實況 50～180 次無人標註，條文已失真）；
+  禁跑根層全套（`tools/run_root_unittests.py`，約 14 分鐘）、
   禁跑 AutoClaude 全套；單模組測試可以。
 - **唯讀 repo**（Developer 角色另有白名單，以當輪任務書為準）：不得改任何 tracked 檔；只能寫 scratchpad。
   禁止 `git stash`／`checkout -- `／`restore`／`reset --hard`／`clean`／`commit`／`push`／`worktree`。

@@ -76,7 +76,7 @@ monorepo 根目錄（`AISDCL_Agent/`，各機器 checkout 路徑不同）＝**�
 
 ### 守衛面准入（R197 裁決：量、不挖）
 
-- 守衛面＝`.claude/hooks/**`、`.claude/settings*.json`（含 permissions.allow）、`tools/lib/{session_brief,quota_messages,harness_feed,quota_gate,quota_policy,quota_stability,sentinel_lifecycle}.py`、`tools/session_resume_planner.py`。**新增任何一行守衛碼或鎖的前提＝暴露證據**（`docs/06_quality/FiveQuestion_Audit_Protocol/severity.md`〈暴露度〉三取一：掌舵者真機回報 sid＋seq／非構造性逐字稿實際發生／真實語料非探針種子 ≥1 命中）；沒有就登記證據檔〈理論洞清單〉（P4）、不立輪、不同輪修。
+- 守衛面＝`.claude/hooks/**`、`.claude/settings*.json`（含 permissions.allow）、`tools/lib/{session_brief,quota_messages,harness_feed,quota_gate,quota_policy,quota_stability,sentinel_lifecycle}.py`、`tools/session_resume_planner.py`。**新增任何一行守衛碼或鎖的前提＝暴露證據**（`docs/06_quality/FiveQuestion_Audit_Protocol/severity.md`〈暴露度〉三取一：掌舵者真機回報 sid＋seq 或畫面字樣／非構造性逐字稿實際發生／真實語料非探針種子 ≥1 命中）；沒有就登記證據檔〈理論洞清單〉（P4）、不立輪、不同輪修。
 - 審查角色「量、不挖」：跑既有指標與重測（Q1′～Q4′、答案表兩引擎、語料重放），不構造變體去找新缺陷；構造性命中 NEW_P_LE_2 計 0。WHY：R179～R196 十八輪有 17 輪守衛面淨增（合計 +10,139 行）、74/80 筆缺陷同輪修，審查對擴張中的面做對抗搜尋 ⇒ 發現率約 0.8 P2／輪、結構上無不動點（DEF-200-481→483→484 連三輪即此型：後兩者在 9,646 筆真實指令自然寫法命中 0）。
 - 收斂宣告看症狀閘、不看發現率：判定式與指令住 `docs/06_quality/FiveQuestion_Audit_Protocol/README.md`〈窗口規則與收斂判定〉；家族計數降為資訊欄。再開四方的觸發條件沿用 R196 T1～T7（R196 證據檔〈八〉），但 T1 反轉：動到守衛面 ⇒ 先附暴露證據，而不是擴大搜尋。
 
