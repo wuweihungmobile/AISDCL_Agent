@@ -114,7 +114,9 @@ Mac 這一步做完了：兩台機器的 Q4′ 證據第一次同時新鮮（`--
 
 ## 七、根層全套、push 與雲端驗收（主控親跑；本場 tool_result）
 - 根層全套（`.venv/bin/python tools/run_root_unittests.py`、`AUTOSDD_SENTINEL_OFF=1`，背景阻塞、log 落 scratchpad、rc 寫檔不接管線）：一跑即綠，`ROOT_RC=0`、「✅ unittest 數量下限釘選通過：發現 5176 個測試（下限 5101）」「[M6 id 集合] tools/tests@darwin：✅ 集合關係成立（本次 skip 47 支）」「✅ 真實 TEMP 圍籬：全套期間真實契約目錄（與 autosdd_quota.json 同目錄）下 autosdd_pace*.json 零變動（前 3／後 3 份；目錄 /Users/wuweihong）；隔離根已建立並清除」；無 FAIL／ERROR 行。
-- commit／push／雲端：由本檔〈七〉回填 commit 補記（同 R197～R200 慣例）。<!-- R201-PUSH-CLOUD -->
+- commit `0798eb97`（7 檔 +197／−10；pre-commit：「✅ 未觸發歸檔強制門檻」「變更含根層基建 → bash -n 語法檢查」全過）；push（背景、`AUTOSDD_SENTINEL_OFF=1`）：「[pre-push dispatcher] push 範圍含根層檔 → 執行 root-infra 閘門（快層守門 + 慢層 py_compile/unittest）」「All checks passed!」「✅ 本次 push 觸發的所有 leg 皆通過（rc=0）」「d2b16c6d..0798eb97 main -> main」`PUSH_RC=0`；`HEAD=0798eb97 origin/main=0798eb97`。第一次 push 即過——commit 前已於 `git add` 後跑 `check_handoff_carriers.py` 並修掉一處（〈六〉：490 bytes 行補 DEF-ID）。
+- 雲端（`gh run watch --exit-status --interval 30` 四支皆 `WATCH_RC=0`；`gh run list --commit 0798eb977ef68b1ca2527abf999d959b76b0e615` 結論，查核時刻 2026-10-05T22:40:06+08:00）：root-infra-ci 37324723946 success／AutoClaude CI 37324724122 success／windows-compat-ci 37324724011 success／macos-compat-ci 37324724438 success；aisdlc-sdd-ci／shellcheck-ci 依 paths 白名單未觸發（缺席＝未驗證、非通過）。同時段另有 schedule 觸發的 windows-compat-ci 37324659627（nightly-full、`continue-on-error`），不屬本 commit 對帳。
+- 本〈七〉回填 commit 的雲端 run 由 R202 開場對帳（同 R197～R200 慣例；對帳項、非承接項）。
 
 ## 八、交棒／掌舵者側待辦
 ### Q5 評估（掌舵者原話：「是否修復已經收斂，不用再進行？請詳細回覆是否已經收斂？給我評估說明！」）
