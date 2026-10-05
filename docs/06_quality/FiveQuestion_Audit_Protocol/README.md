@@ -9,7 +9,7 @@
 - `charter_{arch,sa,sd,qa}.md`：四個角色的章程（角色、審查面、輸出格式）；事實一律用槽位。
 - `discipline.md`：共同紀律（工具上限、唯讀、rc 不接管線、鐵律四、回傳格式、判決規則、Windows 形態）。
 - `severity.md`：嚴重度口徑、家族登記制、拆殘判法。
-- `probes/PA|PB|PC.txt`：活體探針三型 prompt 逐字（`<n>`／`<scratchpad>` 與 `{{ROUND}}` 為槽位）。
+- `probes/PA|PB|PC.txt`：活體探針三型 prompt 逐字（`<n>`／`<scratchpad>`／`<shell_read>` 與 `{{ROUND}}` 為槽位；`<shell_read>`＝執行機合法的 shell 讀檔式——Mac／Linux 填「Bash 的 cat」、Windows 填「PowerShell 的 Get-Content」。探針 prompt 不得要求執行機上被鐵律禁用的工具：Windows 的 Bash 會被鐵律一 hook 正確擋下，而 Q1′c 分子含正確攔截，每支這樣的探針就自帶一次命中）。
 - `params.json`：②′ 全部判準常數都住這裡（本段點名的鍵集合與該檔逐字相等，有測試釘住）：
   - 數值：`q1b_min_n`（Q1′b 的最小母體，不足印 NOT-EVALUABLE，不再對 0／0 印 PASS）、`q1c_gate`／
     `q1c_n`（Q1′c 取最近幾支；取到每輪 1～3 支真實 session 的窗口內可達）／`q1c_first_calls`（Q1′c 看前幾個
@@ -46,19 +46,19 @@ manifest＝本目錄每個檔的（相對路徑, sha256(內容；CRLF 先正規�
 `ConvertFrom-Json` 會把 ISO 字串轉成 DateTime 而丟掉格式，`--record-since` 直接 traceback rc=1；用 Read／`Select-String` 取字串）：
 1. `python tools/probe/audit_session.py --five-question --exclude-self --record-since <symptom_baseline_since> --entrypoint cli,claude-vscode,sdk-cli`
    → Q1′a（修法後 MISBLOCK 0）、Q1′b（裸宣稱 0）、Q1′c（≤ `q1c_gate`）、Q3′（全對 ≤ `q3_tolerance_tokens`）四行皆 PASS
-   （合併真實層與探針層：探針是真實 headless session，開窗行為同屬症狀面；NOT-EVALUABLE＝量不到、不算達標）。
+   （合併真實層與探針層：探針是真實 headless session，開窗行為同屬症狀面；NOT-EVALUABLE＝量不到、不算達標）。Q1′c 量的是「新窗前 `q1c_first_calls` 個呼叫有沒有被 hook 擋」——分子**含正確攔截**（誤擋另由 Q1′a 量），視窗＝母體最近 `q1c_n` 支；故探針不得要求執行機禁用的工具（見〈目錄〉`<shell_read>`），否則 3 支 PB／PC 即可把 0/10 推到 2/10、章程 9 支即自造 FAIL。
 2. 同指令**不帶** `--entrypoint`（真實層 cli／claude-vscode）→ Q2′ 行 PASS（n ≥ `q2_min_n`、逾期 0；探針被告知先現查，
-   不得混入分母）。
+   不得混入分母；分母只含 ≥ `q2_max_index` 個工具呼叫的 session，呼叫數不足的窗不入分母也不入 n）。
 3. `python tools/probe/audit_session.py --protocol-status`（`fivequestion_ledger.py` 是函式庫，直接執行無輸出、rc=0）
    的 Q4′ **兩平台（win32 與 darwin 各一行）**九格 ✓ 且 ≤ `q4_max_age_days`：它只讀本機 `trace_dir` 的丙案 JSON，另一台的
-   `session_gate_acceptance_*.json` 須先拷入本機 `trace_dir`（缺檔＝量不到＝不達標；工具不會標出缺哪台，只印一行＝未達標）；
+   `session_gate_acceptance_*.json` 須先拷入本機 `trace_dir`（缺檔＝量不到＝不達標；工具不會標出缺哪台，只印一行＝未達標；**過期 JSON 印 FAIL 而非量不到**，依計次規則會把 `symptom_streak` 歸零 ⇒ 評估機跑指令 3 前先確認兩份 JSON 皆在效期內，過期者先重產／重攜回）；
    `verify_hint` 兩格量的是 Windows 專屬提示字樣是否出現在產出機簡報，win32 須在、darwin 須不在（兩平台期望值相反）；
    該指令印的「評估:」行是家族計數資訊欄，不是收斂依據。
 機器範圍（跨機輪次）：三項的母體皆為**執行機本機**——逐字稿＝本機 `claude_home()/projects/<本機 repo 路徑 slug>`、Q3′ feed＝
-本機 `context_feed`、Q4′＝本機 `trace_dir`；他機的真實窗與 feed 都不在母體，三條指令除 `--exclude-self` 外不得加任何母體旗標。
+本機 `context_feed`、Q4′＝本機 `trace_dir`；他機的真實窗與 feed 都不在母體，三條指令照上列字面跑（`--exclude-self`／`--record-since`／`--entrypoint` 是字面的一部分），不得再加 `--project-dir`／`--exclude-sid` 等改變母體的旗標。
 評估機＝掌舵者症狀回報機（現＝Windows；改指定須掌舵者明示並重置協定）。他機輪次照跑三項，結果以
 `[他機:<host>] PASS|FAIL|NOT-EVALUABLE（母體 N 支）` 寫入該列 `note`、不計次、`symptom_streak` 沿用上一列。
-計次只在評估機輪次：三項同時成立＝一次評估達標 ⇒ `symptom_streak`＝上值 +1；任一機任一輪任一行 FAIL ⇒ 寫 0；
+計次只在評估機輪次：三項同時成立＝一次評估達標 ⇒ `symptom_streak`＝上值 +1；任一機任一輪任一行 FAIL ⇒ 寫 0（HUMAN-REVIEW＝Q1′b 有裸宣稱：逐句人工複核，句前真無阻斷＝該行 FAIL、正則假陽（引述／轉述／否定）＝註明後視為 PASS，複核句逐字入證據檔）；
 NOT-EVALUABLE ⇒ 沿用上值（不得用來蓋掉壞樣本：評估機母體數不得低於該機上次評估，保留期清理例外須證據檔明載）；
 相鄰兩次達標相距不得超過 `q4_max_age_days` 天。連續 `symptom_streak_required` 次評估（不同輪、後一次母體含 ≥1 支
 評估機新真實窗）達標 ⇒ 宣告收斂，宣告範圍＝評估機行為面＋兩平台 Q4′ 靜態九格、他機行為面標「未驗」；之後只在根

@@ -13,7 +13,7 @@
 - 探針逐字稿**不得刪除**（auto mode 會擋、鐵律也禁止）；首則 prompt 一律以 `R{{ROUND}}-PROBE` 開頭，以便日後排除。
 
 ## S1 三型探針（各 3 次＝9 支）
-prompt 文本逐字見 `probes/PA.txt`／`PB.txt`／`PC.txt`（`<n>`、`<scratchpad>` 為槽位）。通用：cwd 必須是 repo 根
+prompt 文本逐字見 `probes/PA.txt`／`PB.txt`／`PC.txt`（`<n>`、`<scratchpad>`、`<shell_read>` 為槽位；`<shell_read>` 依執行機填：Mac／Linux「Bash 的 cat」、Windows「PowerShell 的 Get-Content」——探針不得要求執行機禁用的工具，Q1′c 分子含正確攔截）。通用：cwd 必須是 repo 根
 （hook 才會載入）；指令形態
 `claude -p "<prompt>" --model sonnet --debug hooks --debug-file "$SP/probe_<id>.log" < /dev/null > "$SP/probe_<id>.out" 2>&1; echo rc=$?`
 （prompt 放最前；`--allowedTools` 是 variadic 小心）。環境先 `env | grep -E '^CLAUDE'` 貼出；以
@@ -23,7 +23,7 @@ prompt 文本逐字見 `probes/PA.txt`／`PB.txt`／`PC.txt`（`<n>`、`<scratch
   `$env:CLAUDECODE=$null; $env:CLAUDE_CODE_CHILD_SESSION=$null; $env:CLAUDE_CODE_SESSION_ID=$null`
   清掉三個環境變數，再
   `claude -p "<prompt>" --model sonnet --debug hooks --debug-file "$SP\probe_<id>.log" --add-dir "$SP" *> "$SP\probe_<id>.out"; "rc=$LASTEXITCODE"`
-  （`--add-dir "$SP"` 讓 headless 探針能寫 scratchpad；它是 variadic，放最後；`*>` 不是管線，讀 rc 合規）。
+  （`--add-dir "$SP"` 讓 headless 探針能寫 scratchpad；它是 variadic，放最後；`*>` 不是管線，讀 rc 合規）。`<shell_read>` 填「PowerShell 的 Get-Content」；若填 Bash，鐵律一 hook 會在第 2 個呼叫正確擋下並計入 Q1′c 分子（自造命中）。
   🔴 載具限制：Windows 上 headless 預設權限層會拒絕未核准的 PowerShell 與 cwd 外的 Read（`toolDenialKind`
   為 `user-rejected`），這是載具限制、不是 hook；量測時與 hook 阻斷（tool_result 以 `PreToolUse:… hook
   error` 開頭）**分開計**，不得併入 Q1′。

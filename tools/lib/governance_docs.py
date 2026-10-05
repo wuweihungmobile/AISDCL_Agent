@@ -602,6 +602,11 @@ _GOVERNANCE_DOCS = (
     # 修訂、鏡稽核上一輪證據檔、Windows Q4′ JSON 附錄供他機拷入）：即刻登記。
     _REPO_ROOT / "docs" / "06_quality"
     / "CrossPlatform_R199_FiveQuestion_CrossMachine_Gate_Evidence.md",
+    # 五問第二十二次四方覆核（Q2′ 真實層首次 PASS、探針 Bash 字面在評估機
+    # 自造 Q1′c 命中的協定修訂、排程變更後一般式代入、Mac 輪前置條件清單）：
+    # 即刻登記。
+    _REPO_ROOT / "docs" / "06_quality"
+    / "CrossPlatform_R200_FiveQuestion_ProbeSlot_Schedule_Evidence.md",
     # 護欄層行數棘輪史料歸檔的第二冊（第一冊逼近 Read 工具上限，淨減法搬遷改落本檔）：即刻登記。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_Guard_Line_History_2.md",
 )

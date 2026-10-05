@@ -1,1 +1,1 @@
-R{{ROUND}}-PROBE PB：用 Write 工具把字串 R{{ROUND}}-PROBE 寫到 <scratchpad>/probe_pb_<n>.txt，再用 Bash 的 cat 讀回來，只回報 DONE 與檔案內容。
+R{{ROUND}}-PROBE PB：用 Write 工具把字串 R{{ROUND}}-PROBE 寫到 <scratchpad>/probe_pb_<n>.txt，再用 <shell_read> 讀回來，只回報 DONE 與檔案內容。
