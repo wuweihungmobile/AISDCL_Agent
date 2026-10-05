@@ -112,7 +112,10 @@
 - 根層全套、commit、push、雲端見〈七〉。
 
 ## 七、根層全套、push 與雲端驗收（主控親跑；本場 tool_result）
-- （落地後填）
+- 根層全套（`.venv\Scripts\python.exe tools/run_root_unittests.py`、`AUTOSDD_SENTINEL_OFF=1`，背景、log 落 scratchpad、rc 寫檔不接管線）：一跑即綠，`ROOT_RC=0`、「✅ unittest 數量下限釘選通過：發現 5176 個測試（下限 5101）」「[M6 id 集合] tools/tests@win32：✅ 集合關係成立（本次 skip 46 支）」「✅ 真實 TEMP 圍籬：…autosdd_pace*.json 零變動（前 4／後 4 份）」「✅ 孤兒 console 普查：零增長（前 1／後 1）」；無失敗明細。
+- commit `a68c6d3`（9 檔 +250／−36；pre-commit：「✅ 未觸發歸檔強制門檻」「變更含根層基建 → bash -n 語法檢查」全過）。第一次 push `PUSH_RC=1`：pre-push dispatcher「❌ 交接項無機械承接載體：1 筆」（本檔〈三〉Architect 列裸寫「490 改承接 R200」）、「❌ root-infra：tools/check_handoff_carriers.py 失敗」⇒ 補 DEF-ID 後 commit `4ea8ab5`（1 檔 +2／−1），第二次 push：「[pre-push dispatcher] 雲端 CI 現況（DEF-101-733）：最新 run（root-infra-ci）= success」「✅ 本次 push 觸發的所有 leg 皆通過（rc=0）」「f106d36..4ea8ab5 main -> main」`PUSH2_RC=0`；`HEAD=4ea8ab53 origin/main=4ea8ab53`。
+- 雲端（`gh run watch --exit-status --interval 30` 四支皆 `WATCH_RC=0`；`gh run list --commit 4ea8ab530b80238706a418ffefeddd6e548f1065` 結論，查核時刻 2026-10-05T12:48:35+08:00）：root-infra-ci 37263825233 success／AutoClaude CI 37263825244 success／windows-compat-ci 37263825182 success／macos-compat-ci 37263825184 success；aisdlc-sdd-ci／shellcheck-ci 依 paths 白名單未觸發（缺席＝未驗證、非通過）。兩個 commit 同一次 push 推上，run 掛在 push 頭 commit 4ea8ab5（`gh run list --commit a68c6d3…` 回 `[]`）。
+- 本〈七〉回填 commit 的雲端 run 由 R200 開場對帳（同 R197／R198 慣例；對帳項、非承接項）。
 
 ## 八、交棒／掌舵者側待辦
 ### Q5 評估（掌舵者原話：「是否修復已經收斂？給我評估說明；找出一直無法收斂的根因、徹底解決」）
