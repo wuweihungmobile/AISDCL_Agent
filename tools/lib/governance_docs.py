@@ -607,6 +607,11 @@ _GOVERNANCE_DOCS = (
     # 即刻登記。
     _REPO_ROOT / "docs" / "06_quality"
     / "CrossPlatform_R200_FiveQuestion_ProbeSlot_Schedule_Evidence.md",
+    # 五問第二十三次四方覆核（Mac 輪、他機不計次；Q4′ darwin 九格真機 PASS、
+    # 兩平台 JSON 同機並存、Mac 探針零 hook 阻斷、鏡稽核上一輪證據檔、
+    # 掌舵者舊版 SOP 副本致首查逾期的已知成因真陽性登記）：即刻登記。
+    _REPO_ROOT / "docs" / "06_quality"
+    / "CrossPlatform_R201_FiveQuestion_MacRound_Q4Darwin_Evidence.md",
     # 護欄層行數棘輪史料歸檔的第二冊（第一冊逼近 Read 工具上限，淨減法搬遷改落本檔）：即刻登記。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_Guard_Line_History_2.md",
 )
