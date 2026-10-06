@@ -81,10 +81,7 @@ def _hook_env_reads() -> set[str]:
 
 
 # 🔴 **刻意不在本檔驗「hook 檔存在」與「Stop 兩個載具都在」**（本批以雙向注入實測後移除）。
-# 兩者都已有既有鎖在守，重寫一份就是同一份知識住兩個家、而只有一個家會被改：
-# 實測紀錄見 R86 護欄重釘證據檔 §D。
-# 那兩道鎖的分母是**現查磁碟的註冊集合**，本檔新增的條目自動落進它們的射程，
-# 所以本檔只需守「判準本體」與「程序層契約」——註冊面不是本檔的職責。
+# 實測紀錄搬至 CrossPlatform_R204_StopHook_Negation_FalsePositive_Fix_Evidence.md〈附錄 B〉§1。
 
 
 class TestItCatchesTheRelayedNumber(unittest.TestCase):
@@ -288,8 +285,7 @@ _INCIDENT = ("R87 的真實形狀是：主池被 13 個並發衝爆，而衝爆�
 class TestTheR89ErrorLiteralMechanismJudgement(unittest.TestCase):
     """`DEF-200-123`：把**錯誤訊息的字面**當成機制結論。
 
-    守的是什麼：那句假前提被寫進交棒書、多個 commit，還當成前提餵給 Architect ⇒ 整段
-    分析建立在假前提上；而真相是那個量**連續 15 列都是 100.0＝常數**，不可能是變因。
+    事故敘事搬至 CrossPlatform_R204_StopHook_Negation_FalsePositive_Fix_Evidence.md〈附錄 B〉§2。
     本判準治**形態**，內容那一半治在 `tools/probe/variate_contrast.py`。
     """
 
@@ -520,13 +516,7 @@ class TestTheTriggerCoversTheMeasuredBypasses(unittest.TestCase):
 
 class TestAPercentBindsToItsOwnAxisNotToOneAcrossAnotherAxis(unittest.TestCase):
     """軸名與百分比之間夾著**另一個軸名**時，那個百分比屬於後者（跨軸誤綁定）。
-
-    成因：原判準是「軸名＋至多 40 個任意字元＋百分比」，軸名會綁到其後**第一個**百分比，
-    不管中間隔了誰——`（seven_day，剩 988 分鐘；session 是 13%）` 被綁成 `seven_day=13`，找不到
-    錨點，對**正確引述**誤報「找不到任何錨點」並逼模型多跑一回合（離線重現：探針 3 支中 2 支；
-    本機 28 筆軸綁定讀數中 4 筆跨度含另一軸名）。測意圖：被處罰的是照實引述，而且同一個
-    綁定錯誤還會讓**真的過期**的讀數被當成 unanchored 漏掉（第四格）。
-    """
+    敘事搬至 CrossPlatform_R204_StopHook_Negation_FalsePositive_Fix_Evidence.md〈附錄 B〉§3。"""
 
     _CROSSED = "binding 軸是（`seven_day`，剩 988 分鐘；`session` 是 13%）"
     _OUTPUT = "kind=session 13% 剩 128 分鐘 band=free\nkind=seven_day 95% 剩 988 分鐘 band=halt"
@@ -613,11 +603,7 @@ class TestTheUnanchoredBlindSpotIsCountedNotHidden(unittest.TestCase):
 
 class TestTheModelChannelIsClampedOnStopHookActive(unittest.TestCase):
     """M1：這個夾具**不是優化**——沒有它，守衛會在額度吃緊的那一刻自己燒額度。
-
-    複審實測：不夾 ⇒ 一個 prompt 9 次 Stop、9 則零內容 assistant 訊息；夾了 ⇒ 2 次 Stop、
-    1 次發射、恰好 1 個額外回合。而 stderr 那條**送不到模型**（`DEF-200-135`：exit 0 的
-    stderr 不進 context，實測 1h49m／45 turns 零訊號）⇒ 唯一有效通道就是會迴圈的那一條。
-    """
+    敘事搬至 CrossPlatform_R204_StopHook_Negation_FalsePositive_Fix_Evidence.md〈附錄 B〉§4。"""
 
     def setUp(self) -> None:
         self._dir = tempfile.TemporaryDirectory()
@@ -804,12 +790,7 @@ _BACKED_WRAP_UPS = (
 
 class TestTheNakedVerdictWithNoEvidenceIsFlagged(unittest.TestCase):
     """規則 8 的破洞本體：**不帶值**的完工判決 ＋ 本場一次工具輸出都沒有。
-
-    守的是什麼（Rule 9）：前三個判準全部收在「值」上 ⇒ 這一型結構上看不見，而
-    `commit b1ef81f` 的誇大宣稱正是走這個盲區溜過去的。判準與第一個的異同：第一個問
-    「這個**數字**的出處在哪」（值域比對）；本判準的宣稱不帶值，改問「本場**有沒有任何
-    工具輸出**」＋「這句話是不是**堆疊**了判決詞」——兩者都是字串比對，不理解語意。
-    """
+    敘事搬至 CrossPlatform_R204_StopHook_Negation_FalsePositive_Fix_Evidence.md〈附錄 B〉§5。"""
 
     def test_the_incident_sentence_with_zero_tool_output_is_flagged(self) -> None:
         """缺陷復發即紅。沒有這一條，整支判準可以恆回 `[]` 而 rc 一模一樣。"""
@@ -1002,6 +983,23 @@ class TestTheUnbackedBlockClaimJudgement(unittest.TestCase):
     def test_a_clean_claim_with_no_block_phrase_is_silent(self) -> None:
         self.assertEqual(G.unbacked_block_claim_hits("已完成三個檔案的修改。", ""), [])
 
+    def test_a_negated_block_phrase_is_not_a_claim(self) -> None:
+        """DEF-200-501（探針 PC1「兩步都沒被擋」被唸成被擋）：否定句不是宣稱。
+        正控制＝肯定句「工具被擋了」仍命中，否則否定處理等於把判準關掉。"""
+        for sentence in ("能。兩步都沒被擋。", "這一步未被擋。", "工具沒有被擋。",
+                         "The call was not blocked."):
+            with self.subTest(sentence=sentence):
+                self.assertEqual(G.unbacked_block_claim_hits(sentence, ""), [])
+        hits = G.unbacked_block_claim_hits("沒有人回應，工具被擋了。", "")
+        self.assertEqual([h["phrase"] for h in hits], ["被擋"], "否定處理把真宣稱滅掉了")
+
+    def test_the_negation_semantics_are_params_json_s_not_a_second_vocabulary(self) -> None:
+        """否定語意以量測端的 params.json 為準：字面住兩個家，唯一條件是有東西逐字對帳。"""
+        prm = json.loads(_PARAMS_PATH.read_text(encoding="utf-8"))
+        head = re.match(r"\(\?<!\[[^\]]+\]\)", prm["claim_re"]).group(0)
+        self.assertEqual(G.BLOCK_NEGATION_LOOKBEHIND, head + r"(?<!not\s)")
+        self.assertTrue(prm["claim_exc_re"].startswith(G.BLOCK_NEGATION_EXC_RE.pattern))
+
 
 class TestTheUnbackedBlockClaimHookWiring(unittest.TestCase):
     """程序層：D15 判準真的接進 Stop 分支，證據面真的讀得到 attachment 型佐證，
@@ -1071,6 +1069,12 @@ class TestTheUnbackedBlockClaimHookWiring(unittest.TestCase):
                         "AUTOSDD_CAUSAL_GUARD_OFF", "AUTOSDD_PACE_GUARD_OFF"):
             self.assertIn(foreign, read_names,
                           f"{foreign} 消失了 ⇒ 那個判準被順手併進別人的開關")
+
+    def test_the_pc1_negated_sentence_is_silent_end_to_end(self) -> None:
+        """DEF-200-501：探針 PC1 的逐字回覆走真實子行程，stderr 也不得唸「被擋／水位」。"""
+        done = self._run("能。兩步都沒被擋。", self._write_transcript([]))
+        self.assertEqual(done.returncode, 0, "本守衛永不阻斷")
+        self.assertNotIn("被擋／水位", done.stderr, "否定句被當成被擋宣稱")
 
 
 class TestTheBlockClaimEvidenceWindowIsRecentTurnsOnly(unittest.TestCase):
@@ -1165,11 +1169,7 @@ _PEER = {"origin": {"kind": "peer"}, "isMeta": True, "promptSource": "system",
 
 class TestTheTurnBoundaryIgnoresHarnessGeneratedUserRecords(unittest.TestCase):
     """DEF-200-423：回合邊界只認操作者輸入（數字與判準全文見 `_is_genuine_user_turn`）。
-
-    背景 agent 收工通知、peer 訊息、slash／skill 展開也以 role=user 落盤；把它們當『回合』，
-    邊界就滑到最近一則通知，兩則真人訊息之間的 hook 阻斷被擠出窗口 ⇒ 收尾摘要一提
-    『被擋』就假紅。另守：本 hook 自己的 Stop 警報不得當佐證（否則自己洗白自己）。
-    """
+    敘事搬至 CrossPlatform_R204_StopHook_Negation_FalsePositive_Fix_Evidence.md〈附錄 B〉§6。"""
 
     def setUp(self) -> None:
         self._dir = tempfile.TemporaryDirectory()

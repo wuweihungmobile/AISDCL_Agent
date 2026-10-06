@@ -622,6 +622,11 @@ _GOVERNANCE_DOCS = (
     # 即刻登記。
     _REPO_ROOT / "docs" / "06_quality"
     / "CrossPlatform_R203_FiveQuestion_WinEval_Streak2_Converged_Evidence.md",
+    # 宣告收斂後首個守衛面輪（修 DEF-200-501／SA-201-01 Stop hook 否定句誤報：套 params.json
+    # 既有否定語意、r86 四句紅→綠且行數不變、hook 史料搬附錄；Developer＋QA 皆 Sonnet）：
+    # 即刻登記。
+    _REPO_ROOT / "docs" / "06_quality"
+    / "CrossPlatform_R204_StopHook_Negation_FalsePositive_Fix_Evidence.md",
     # 護欄層行數棘輪史料歸檔的第二冊（第一冊逼近 Read 工具上限，淨減法搬遷改落本檔）：即刻登記。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_Guard_Line_History_2.md",
 )

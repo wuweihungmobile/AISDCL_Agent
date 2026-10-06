@@ -81,24 +81,8 @@ dump hook 實測確認兩個欄位都在，且逐字稿當下**已經含**那一
 缺陷的複發**上已證明有鑑別力且零假紅，但它對「別的錯誤訊息被當成根因」的召回率
 **在本機母體上無從量測**（沒有第二個實例）。這是邊界，不是保證。
 
-🔴 **兩個更直覺的形狀已被同一份普查逐一證偽，不要再走一次**（數字皆現跑
-`--shape a`／`--shape b`）：
-  · **「因果宣稱裡的具名量在本場觀測值全同」**（＝直接把「常數不可能是變因」寫成判準）
-    → 命中 3 筆，逐筆判讀 **1 真 2 假**（33%）。假紅的成因是結構性的：判準只知道那個識別
-    字**出現在句子裡**，不知道它是不是被當成原因（兩筆假紅分別是「`arm_reset` 全是 0 ⇒
-    兩個痕跡不一致」與「跟 `five_hour`、`seven_day` 平起平坐 ⇒ 它 100% ⇒ 一票否決」，
-    命中的識別字都只是**被順帶提到**）。這件事在散文平面上沒有解——要判斷誰是主詞就要
-    理解語意，而那正是判準不該做的事。
-  · **「因果宣稱裡的具名量在本場沒有兩個相異觀測值」**（含 0 次觀測）→ 命中 **153 筆**，
-    隨機抽 12 筆逐筆判讀 **0 真 12 假**（0%）：命中的全部是 `condition_evaluator`／
-    `last_log_path`／`enable_kernel_brain`／某支測試的名字這種**程式符號**，它們根本不是
-    「量」，本來就不會有觀測值 ⇒ 這個形狀等於對「句子裡出現 snake_case」發警報。
-⇒ **常數／變因這條軸在散文平面上做不出鑑別力**，它只在**落款平面**上是精確的（那裡欄位
-與值都是結構化的，不必猜主詞）。所以那一半刻意**不做成警報**，改做成一支**正向工具**
-`tools/probe/variate_contrast.py`：餵它一份 JSONL 落款，逐欄印出「觀測數／相異值數／
-是不是常數」，並可 `--split-at` 切成兩組看哪些欄位真的區分得開兩組。本事故用它是一行的事
-——`spend`／`extra_usage` 會直接印成 `CONSTANT`＝不可能是變因。本判準的訊息因此**指著它**，
-讓查證比宣稱便宜（判準治形態、工具治內容，兩者刻意分工，不是同一份知識住兩個家）。
+🔴 兩個更直覺的形狀已被同一份普查逐一證偽（常數／變因軸在散文平面做不出鑑別力）；原文逐字搬至
+docs/06_quality/CrossPlatform_R204_StopHook_Negation_FalsePositive_Fix_Evidence.md〈附錄 A〉。
 
 第三個判準：引述一個**已經過期**的額度讀數（本輪 M1~M8，逃生口自己一個）
 --------------------------------------------------------------------
@@ -292,11 +276,16 @@ harness 代筆，見 `_is_genuine_user_turn`）role=user 訊息之後」（本�
 PostToolUse 守衛自己的水位通知照舊算數。回歸鎖：`tools/tests/test_claim_provenance_r86.py`
 的 `TestTheBlockClaimEvidenceReadsStructuredDenials`。
 
+否定語境不是宣稱（DEF-200-501）：探針 PC1（sid 84bc2a3b）答「能。兩步都沒被擋。」被判成被擋宣稱 ⇒
+`BLOCK_NEGATION_LOOKBEHIND`＋`BLOCK_NEGATION_EXC_RE`（逐字同 params.json；r86 對帳）。
+
 誠實劃界（本檔抓不到什麼）
 ------------------------
 · **不帶值的判決只治「赤裸」那一型**（第四個判準）：本場零工具輸出 ＋ 同句堆疊 ≥2 個
   判決詞才判。跑了任何一個工具（哪怕是 `ls`）就結構上看不到 ⇒ 「有動作但宣稱誇大」
   仍是 `audit_session.py` 那支事後量測器的射程（兩者刻意分工，不是同一份知識住兩個家）。
+· 第五個判準的否定處理（DEF-200-501）帶三個已知假陰性：句內有 `不是`／`不會`／`不算` 整句靜音、
+  `並` 前綴把「並擋下 Workflow」已發生的阻斷吃掉、英文只收 `not\\s`（`wasn't`／`never` 仍命中）。
 · 第二個判準只認**反引號包起來的英文**錯誤字面。同一句話改寫成中文轉述（「死於月度支出
   上限」）或拿掉反引號就完全看不到 ⇒ 它守的是**這一型的複發**，不是整類因果謬誤。
 · 第二個判準**不判斷因果是對是錯**，只判斷「你把機器的話當成了自己的結論」。上面兩筆
@@ -716,8 +705,15 @@ def naked_verdict_hits(claim_text: str, tool_output: str,
 
 #: 第五個判準：「被擋／水位」的無值宣稱形狀（D15；DEF-200-275 第五輪）。引號夾住的不算
 #: （沿用 `_is_quoted`）。
+#: 否定語境不是宣稱（DEF-200-501；探針 PC1「兩步都沒被擋」被唸成被擋）：中文兩段逐字取自
+#: params.json（`claim_re` 開頭的 lookbehind、`claim_exc_re` 開頭片段），本檔不讀檔也不
+#: import（檔頭只准三個借用）⇒ 字面＋r86 具名對帳（`PACE_AXES` 同款）。英文 `(?<!not\s)`
+#: 是唯一自加（英文側無否定形）；量測端 audit_session.py 同形：claim 命中且 exc 不命中才計。
+BLOCK_NEGATION_LOOKBEHIND = r"(?<![沒未不無非並])(?<!not\s)"
+BLOCK_NEGATION_EXC_RE = re.compile(r"(沒有|並未|未)(被|受|遭|阻|擋|拒|鎖|封|禁)|不是|不會|不算")
 BLOCK_CLAIM_RE = re.compile(
-    r"(被擋|被阻擋|擋下|無法寫檔|不能寫檔|不能用工具|工具被鎖|hook\s*擋|"
+    BLOCK_NEGATION_LOOKBEHIND
+    + r"(被擋|被阻擋|擋下|無法寫檔|不能寫檔|不能用工具|工具被鎖|hook\s*擋|"
     r"deny|denied|blocked|context\s*已滿|context\s*爆|水位過高|水位太高)",
     re.IGNORECASE)
 
@@ -756,6 +752,8 @@ def unbacked_block_claim_hits(claim_text: str, evidence_text: str) -> list[dict]
     `evidence_text` 是**全場**的證據（tool_result ＋ 兩型 hook attachment ＋ 結構化阻斷旗標），
     不逐句比對——被擋事件與宣稱它的那句話本來就常常不在同一句裡（先被擋、事後收工時
     才提一句），逐句比對會對這個判準結構性失明。
+    每句另先過否定處理（DEF-200-501）：前綴否定（`沒被擋`／`未被擋`／`not blocked`）由
+    `BLOCK_CLAIM_RE` 的 lookbehind 吃掉，`沒有被擋` 這類則由 `BLOCK_NEGATION_EXC_RE` 整句略過。
     """
     if BLOCK_EVIDENCE_RE.search(evidence_text):
         return []
@@ -763,6 +761,8 @@ def unbacked_block_claim_hits(claim_text: str, evidence_text: str) -> list[dict]
     for sentence in _SENTENCE_RE.split(claim_text):
         sentence = sentence.strip()
         if not sentence:
+            continue
+        if BLOCK_NEGATION_EXC_RE.search(sentence):
             continue
         for match in BLOCK_CLAIM_RE.finditer(sentence):
             if _is_quoted(sentence, match.start(), match.end()):
