@@ -632,6 +632,11 @@ _GOVERNANCE_DOCS = (
     # 零 Developer、零守衛碼）：即刻登記。
     _REPO_ROOT / "docs" / "06_quality"
     / "CrossPlatform_R205_FiveQuestion_WinEval_T3_Recheck_Evidence.md",
+    # 五問他機輪次（Mac 窗、不計次：darwin 九格 Q4′ JSON 重產、真實層 Q2′ 已知成因 FAIL ⇒
+    # 計次歸零；carriers 判準① 引號轉述濾網落地＝DEF-200-505 當輪結案；Developer＋QA
+    # 皆 Sonnet）：即刻登記。
+    _REPO_ROOT / "docs" / "06_quality"
+    / "CrossPlatform_R206_FiveQuestion_MacRound_Q4Regen_CarriersQuoteFilter_Evidence.md",
     # 護欄層行數棘輪史料歸檔的第二冊（第一冊逼近 Read 工具上限，淨減法搬遷改落本檔）：即刻登記。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_Guard_Line_History_2.md",
 )

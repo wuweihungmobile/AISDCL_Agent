@@ -57,9 +57,7 @@ def _ledger_text(rows: str, prose: str | None = _STATUS_PROSE_LINE) -> str:
     🔴 為何 fixture 非得帶那句散文：`status_first_word_problems()` 與該句**雙向綁定**，
     抽不到時是 fail-loud——回一筆「抽不到權威散文」問題並讓 `main()` rc=1，**而不是**
     靜默放行全部列（見主檔 `_prose_status_first_words()` docstring）。所以「只有表頭的
-    合成帳本」在這道鎖下不是中性輸入而是**必紅輸入**：R60 加鎖後既有 4 支 `TestMain`
-    就是這樣紅的，紅因（抽不到散文）與各自要驗的行為（含糊列分開計數／輪替預警帶）
-    毫無關係，屬 fixture 沒跟上主檔演化，不是被驗行為退化。
+    合成帳本」在這道鎖下不是中性輸入而是**必紅輸入**（紅因與各測試要驗的行為無關）。
 
     `prose=None` 只給「刻意驗證抽不到散文會 fail-loud」那一支測試用。
     """
@@ -1455,8 +1453,7 @@ class TestDef200129SelfRowExitAwaitsWiring(unittest.TestCase):
 class TestDef200212StrictIsWiredIntoMain(unittest.TestCase):
     """DEF-200-212：`tools/check_handoff_carriers.py` 的 `main()` 必須走 strict 路徑
     （`ledger_def_ids(ledger, arch, unresolved_only=True)`）——這是判準②「已結列不算
-    承接載體」真的接進閘門輸出的唯一憑證，不是函式存在就算數（`ledger_def_ids()` 落地
-    後、本包接線前的歷史窗口是「函式已落、`main()` 沒接線」的假接線狀態）。
+    承接載體」真的接進閘門輸出的唯一憑證，不是函式存在就算數。
     """
 
     def _main_source(self) -> str:
@@ -1487,11 +1484,9 @@ class TestDef200212StrictIsWiredIntoMain(unittest.TestCase):
             "main() 呼叫 ledger_def_ids() 的敘述（含後續兩行）沒有帶 unresolved_only=True")
 
 
-#: DEF-200-241 治本前，具名豁免面承載的五筆真實假陽性座標（DEF-200-212 D4／D8）。
-#: 治本後生產表為空，這五筆改由 `done_ids`（帳本已結事實）自然出局；本表在此只當
-#: 回歸鎖的**注入母體**：拿掉 done_ids 時它們必須逐筆復發，證明新判準真的在承重。
+#: DEF-200-241 治本前具名豁免面承載的真實假陽性座標（DEF-200-212 D4／D8）；治本後改由
+#: `done_ids` 自然出局，本表只當注入母體：拿掉 done_ids 時必須逐筆復發（引號內轉述那筆已移出）。
 _DEF_200_241_FORMER_FALSE_POSITIVES: tuple[tuple[str, str], ...] = (
-    ("docs/04_planning/R102_HANDOFF.md", "DEF-200-204"),
     ("docs/06_quality/CrossPlatform_R100_Scan_Findings.md", "DEF-200-208"),
     ("docs/06_quality/CrossPlatform_R107_Ledger_Closure.md", "DEF-101-559"),
     ("docs/04_planning/R113_HANDOFF.md", "DEF-200-212"),
@@ -1500,15 +1495,10 @@ _DEF_200_241_FORMER_FALSE_POSITIVES: tuple[tuple[str, str], ...] = (
 
 
 class TestDef200241GrandfatheringReadsLedgerClosureNotTheClock(unittest.TestCase):
-    """DEF-200-241 方向 B（R121 裁決卡；R126 四方設計複審 4×APPROVE 後動碼 round-label-ok）：
-    受測＝`tools/check_handoff_carriers.py` 判準② 的祖父化改讀**帳本結案事實**——前瞻行指名的
-    DEF-ID 一旦在帳本家族內結案（狀態欄首詞分類 ∉ `_UNRESOLVED_CLASSES`）即出局，
-    不比輪號、不依賴凍結的時鐘；DEF-200-212 時期的具名豁免面（5 筆，天花板 5）隨之
-    清空、天花板降 0。本類鎖住：①真倉庫 strict＋done_ids 零假陽性；②拿掉 done_ids
-    時五筆舊假陽性逐筆復發（新判準真的在承重，不是恰好沒用到）；③豁免表清空且天花板 0
-    （shrink-only 方向）；④合成：已結出局／未結仍承接／查無列仍紅／版面解析不到不猜；
-    ⑤豁免**機制**三性質以合成表驗（精確命中、不整檔放行、理由太短不算登記）——生產表
-    為空不代表機制可以退化。
+    """DEF-200-241：`tools/check_handoff_carriers.py` 判準② 的祖父化讀**帳本結案事實**（前瞻行
+    指名的 DEF-ID 已結 ⇒ 出局），不比輪號、不依賴凍結的時鐘；具名豁免面清空、天花板 0。
+    本類鎖住：①真倉庫 strict＋done_ids 零假陽性；②拿掉 done_ids 時表內舊假陽性逐筆復發；
+    ③豁免表清空且天花板 0；④合成語意；⑤豁免機制三性質；⑥引述濾網（判準①②共用）。
     """
 
     def setUp(self) -> None:
@@ -1533,7 +1523,7 @@ class TestDef200241GrandfatheringReadsLedgerClosureNotTheClock(unittest.TestCase
         self.assertEqual(problems, [], f"改讀結案事實後真倉庫理應零假陽性，實得：{problems}")
 
     def test_without_closure_facts_every_former_false_positive_comes_back(self) -> None:
-        """🔴 紅綠自證的主牙：拿掉 done_ids（傳空集合）⇒ 五筆舊假陽性座標必須逐筆復發。
+        """🔴 紅綠自證的主牙：拿掉 done_ids（傳空集合）⇒ 表內舊假陽性座標必須逐筆復發。
         任一筆不復發＝該筆從來不是被 done_ids 救的（那就得回頭查是誰在放行）。"""
         problems = hc.carrier_doc_problems(self.paths, self.cur, self.known, done_ids=set())
         for rel, def_id in _DEF_200_241_FORMER_FALSE_POSITIVES:
@@ -1582,9 +1572,8 @@ class TestDef200241GrandfatheringReadsLedgerClosureNotTheClock(unittest.TestCase
 
     def test_commit_criterion_also_reads_closure_facts_per_paragraph(self) -> None:
         """判準①（commit 訊息 → 帳本承接輪）同一原則：宣告所在段落指名已結 DEF-ID ⇒ 出局。
-        立案實例＝commit `0398226`（「已列 R118 交棒書呈報裁決」段落指名 212） round-label-ok
-        212／241 結案後帳本再無承接輪 ≥ R118 的未結列 ⇒ 沒這條，做完事讓判準① 轉紅 round-label-ok
-        """
+        立案實例＝commit `0398226`（段落指名 212）：212／241 結案後帳本再無更後的承接輪，沒這條
+        做完事反讓判準① 轉紅。"""
         real = [m for m in hc.commit_messages() if m[0].startswith("0398226")]
         self.assertEqual(len(real), 1, "真倉庫找不到立案 commit ⇒ 本測試失去對象（淺 clone？）")
         self.assertIn("DEF-200-212", self.done, "DEF-200-212 不是已結列 ⇒ 前提失效")
@@ -1599,6 +1588,17 @@ class TestDef200241GrandfatheringReadsLedgerClosureNotTheClock(unittest.TestCase
         m = [("s", f"x\n\n- {syn_id} 列 R{self.cur + 1}。\n\n- 另件皆留 R{self.cur + 1}。\n")]
         self.assertEqual(len(hc.commit_carrier_problems(m, self.cur, set(), done_ids={syn_id})), 1,
                          "粒度必須是段落：無關段落不得被同一則訊息裡的已結 ID 背書")
+
+    def test_a_quoted_narrative_is_not_a_deferral_claim(self) -> None:
+        """⑥ 「」內的命中是逐字轉述、不是交派（立案：commit `db4a542`）；引號外／未閉合仍紅。"""
+        real = [x for x in hc.commit_messages() if x[0].startswith("db4a542")]
+        self.assertEqual(len(real), 1, "真倉庫找不到立案 commit ⇒ 本測試失去對象（淺 clone？）")
+        self.assertEqual(hc.commit_carrier_problems(real, self.cur, set(), done_ids=set()), [],
+                         "引號內的轉述句仍被當成延後宣告 ⇒ 帳本又得永遠留一列未結承接")
+        c = self.cur + 1
+        for body, want in ((f"- 見「承接 R{c}」字樣\n", 0), (f"- 「B8」皆留 R{c}。\n", 1),
+                           (f"- 「未閉合 承接 R{c}。\n", 1)):
+            self.assertEqual(len(self._synthetic(body)), want, f"引述濾網判錯：{body!r}")
 
     def test_exemption_mechanism_keeps_its_three_properties_via_synthetic_table(self) -> None:
         """⑤ 生產表為空，機制本身仍須有牙：精確命中才豁免、不整檔放行、理由太短不算登記。"""

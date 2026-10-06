@@ -94,6 +94,7 @@ import git_paths  # noqa: E402  # git 路徑列舉 SSOT（quotepath 安全；DEF
 import _cli_flags  # noqa: E402
 import _stdio_utf8  # noqa: E402,F401  # 非 UTF-8 終端 print(✅/❌) 防崩潰
 import check_defect_log_crossref as gate  # noqa: E402
+from lib import defect_ledger_index as _ledger_index  # noqa: E402  # 角引號 SSOT（同 gate）
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -164,16 +165,27 @@ def _exemption_covers(rel: str, def_id: str,
 _KNOWN_ARGV: tuple[str, ...] = ("--census", "--self-test")
 
 
+# 第二條敘事濾網：命中落在成對 「」／『』 內＝逐字轉述別處的句子，不是本處在交派工作。
+# 立案實測＝歷史 commit `db4a542` 的訊息在引號內轉述一句被修掉的承接句；commit 訊息不可改，
+# 該句卻命中帳本 SSOT 的 `承接 R<N>` 樣式 ⇒ 帳本得永遠留一列未結承接（結案前一列就得同
+# commit 補後繼列）。全史普查（732 則 commit、193 份載體）落在引號內的命中共 38 筆，逐筆
+# 判讀全是敘事轉述、零真交派。遮罩基元＝`defect_ledger_index.CORNER_QUOTE_RE`（與
+# `CODE_SPAN_RE` 同屬「看得見的刻意標記」；`archive_defect_log._in_corner_quotes` 同一個
+# 消費法），不另造第二份。誠實劃界：只認成對角引號（未閉合不遮＝保守）；引號外的同型句照判。
 def _narrative_hit(text: str, start: int) -> bool:
     """`text[start:]` 這個命中是否落在敘事引述上（True＝不算交派工作）。
 
-    只判一件事：命中位置之前緊接著「量詞／數字 ＋ 列」。WHY 見 `_QUANTIFIED_ROW_RE`。
+    兩個條件任一成立即是敘事引述：① 命中位置之前緊接著「量詞／數字 ＋ 列」（WHY 見
+    `_QUANTIFIED_ROW_RE`）；② 命中落在成對 「」／『』 之內（WHY 見本函式上方註解）。
 
     🔴 視窗刻意含 `start` 這一格（`start + 1`）：`列 R…` 那一族的**命中本身以「列」開頭**
     （`(?<![本該此上前系])列` 是 match 的第一個字元，不是 lookbehind），只看 `[:start]`
     會拿到「兩」而拿不到「兩列」⇒ 濾網對它恆假。落地當回合的 self-test 就是這樣紅的。
     """
-    return bool(_QUANTIFIED_ROW_RE.search(text[max(0, start - 10):start + 1]))
+    if _QUANTIFIED_ROW_RE.search(text[max(0, start - 10):start + 1]):
+        return True
+    return any(m.start() <= start < m.end()
+               for m in _ledger_index.CORNER_QUOTE_RE.finditer(text))
 
 
 def defer_rounds(text: str) -> list[tuple[str, int, str]]:
@@ -491,6 +503,9 @@ def _self_test() -> int:
            "承接輪號比宣告目標小一輪 ⇒ 不足以接手 ⇒ 紅")
     expect(commit_carrier_problems([("c", f"交給 R{_SYN_PAST} 的待辦")], _SYN_CUR, set()) == [],
            "歷史宣告的目標輪 < 當前輪 ⇒ 自動出局（無需豁免名單）")
+    quoted = [("q", f"fix: z\n\n判「193／199／242 承接 R{_SYN_FUTURE}」一行延後到未來輪。\n")]
+    expect(commit_carrier_problems(quoted, _SYN_CUR, set()) == [],
+           "訊息在「」內轉述承接句、帳本零承接 ⇒ 綠（轉述不是交派，不需後繼列）")
     para_msg = [("d", f"feat: y\n\n- {_SYN_ID} 結案受阻，已列 R{_SYN_FUTURE} 交棒書。\n\n"
                       f"- 另一件事皆留 R{_SYN_FUTURE}。\n")]
     expect(len(commit_carrier_problems(para_msg, _SYN_CUR, set(), done_ids={_SYN_ID})) == 1,
@@ -505,6 +520,12 @@ def _self_test() -> int:
     expect(defer_rounds(_SYN_QUOTE) == [], "「兩列 ＋ 輪號」＝敘事引述 ⇒ 不命中（實測假紅）")
     expect(defer_rounds("本列 R14 快照所稱") == [], "「本列 R14」＝帳本 SSOT 負向回顧仍生效")
     expect(defer_rounds(f"見 `皆留 R{_SYN_FUTURE}`") == [], "code span 內逐字引述 ⇒ 不命中")
+    expect(defer_rounds(f"判「193／199／242 承接 R{_SYN_FUTURE}」一行") == [],
+           "成對「」內轉述的承接句 ⇒ 不命中（歷史 commit 訊息的實測形態）")
+    expect(len(defer_rounds(f"「B8」皆留 R{_SYN_FUTURE}。")) == 1,
+           "引號在命中之外（命中後面才有引號）⇒ 仍命中（防吞整句）")
+    expect(len(defer_rounds(f"「未閉合的引號 承接 R{_SYN_FUTURE}。")) == 1,
+           "引號未閉合 ⇒ 不遮（保守：多攔不誤放）")
 
     print("[self-test] 判準② 交接載體 → 帳本 DEF-ID")
     import tempfile
