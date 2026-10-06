@@ -627,6 +627,11 @@ _GOVERNANCE_DOCS = (
     # 即刻登記。
     _REPO_ROOT / "docs" / "06_quality"
     / "CrossPlatform_R204_StopHook_Negation_FalsePositive_Fix_Evidence.md",
+    # 宣告收斂後首次再評（觸發＝T3 Claude Code 2.1.290→2.1.291；另重量上一輪 Stop hook 否定句
+    # 修法 607e804 後的母體：評估機第三次達標＝streak 3、DEF-200-503 結案；只量不審＋子代理複跑，
+    # 零 Developer、零守衛碼）：即刻登記。
+    _REPO_ROOT / "docs" / "06_quality"
+    / "CrossPlatform_R205_FiveQuestion_WinEval_T3_Recheck_Evidence.md",
     # 護欄層行數棘輪史料歸檔的第二冊（第一冊逼近 Read 工具上限，淨減法搬遷改落本檔）：即刻登記。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_Guard_Line_History_2.md",
 )
