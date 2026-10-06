@@ -66,7 +66,9 @@ Stop hook 第五個判準此前把「沒被擋」這類否定句當成「被擋�
 
 ## 七、根層全套、push 與雲端驗收（主控親跑；本場 tool_result）
 - 根層全套（〈六〉補記後、commit 前；`tools/run_root_unittests.py`、`AUTOSDD_SENTINEL_OFF=1`，背景阻塞、log 落 scratchpad、rc 寫檔不接管線；14:03:48～14:05:58）：一跑即綠 `ROOT_RC=0`「✅ unittest 數量下限釘選通過：發現 5179 個測試（下限 5101）」（＝R203 的 5176 ＋ 本輪 3 支）「[M6 id 集合] tools/tests@win32：✅ 集合關係成立（本次 skip 46 支）」「✅ 真實 TEMP 圍籬 … 零變動（前 4／後 4 份）」「✅ 孤兒 console 普查：零增長（前 0／後 0）」；log 內 `^(FAIL|ERROR):` 行 0。
-- commit／push／雲端 run：以 docs-only 回填 commit 補記本節（同 R197～R203 慣例）。
+- commit `607e804`（5 檔 +256／−49；pre-commit「✅ 未觸發歸檔強制門檻」「變更含根層基建 → bash -n 語法檢查」全過；commit 指令帶「訊息檔含 TODO 即拒絕」自鎖，未觸發）；push（背景、`AUTOSDD_SENTINEL_OFF=1`、14:08:03～14:10:05）：「[pre-push dispatcher] push 範圍含根層檔 → 執行 root-infra 閘門（快層守門 + 慢層 py_compile/unittest）」慢層再跑一次全套「✅ unittest 數量下限釘選通過：發現 5179 個測試（下限 5101）」、symlink 類測試 4 筆 `[ENV-DISABLED]` 本機無 symlink 權限（既有已登記 skip）、「All checks passed!」「[pre-push dispatcher] ✅ 本次 push 觸發的所有 leg 皆通過（rc=0）」（push 範圍無 AutoClaude/ 檔 ⇒ 未觸發 AutoClaude leg）「835ac5b..607e804 main -> main」`PUSH_RC=0`；`git rev-parse HEAD origin/main` 兩行皆 607e804783f87d33b68c8289eded0f647c837d27。
+- 雲端（`gh run watch --exit-status --interval 30` 四支皆 `WATCH_RC=0`；`gh run list --commit 607e804783f87d33b68c8289eded0f647c837d27` 結論，查核時刻 2026-10-06T14:25:56+08:00）：root-infra-ci 37422266571 success／AutoClaude CI 37422266473 success／windows-compat-ci 37422266462 success／macos-compat-ci 37422266530 success（四支皆 event=push、createdAt 2026-10-06T06:10:09Z）；aisdlc-sdd-ci／shellcheck-ci 依 paths 白名單未觸發（缺席＝未驗證、非通過）。macos-compat-ci 與 windows-compat-ci 的 paths 含 `tools/tests/**` 與 `.claude/**` ⇒ r86 三支新測試（含 PC1 子行程重放）已在兩平台雲端跑過。
+- 本〈七〉回填 commit 的雲端 run 由下一個 R 輪開場對帳（對帳項、非承接項；帳本載體＝DEF-200-503、承接輪次 R205）。
 
 ## 八、交棒／掌舵者側待辦
 ### 掌舵者提問「下輪是否需要交棒到 Mac 執行？」——主控答：**不需要**
