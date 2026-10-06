@@ -68,7 +68,7 @@
 - **本窗 T5 的 Q1′c 分母 1、Q3′ 在途**：R203 入母體後的實際值以 R203 指令 2 為準。
 - **Mac 行為面未驗**（DEF-200-499）：修法後 Mac 真實窗 0 支；本輪未碰 Mac。
 - **QA token 數取自 harness 完成通知**（284,114／50 呼叫／950,330 ms），主控未另算。
-- **本檔文字未經鏡稽核**（由 R203 QA 單方）。
+- **本檔文字未經鏡稽核**（由 R203 QA 單方）。［R203 訂正：已由 R203 QA 單方鏡稽核，B1～B11 全吻合、兩處 P4 行內註記（QA-203-01／02）、QA-203-03 讀法點明載於 R203 證據檔〈四〉4.1；DEF-200-502］
 - **〈六〉〈七〉回填**：收尾親驗、根層全套、commit、push、雲端見下方回填段。
 
 ## 六、收尾親驗（主控親跑；本場 tool_result）
@@ -76,7 +76,7 @@
 - `--protocol-status`（append 後）⇒ 「protocol_sha256=5c9aadf258efbc64f7236c8b4862152c1238edeb99b8fc960c58347acdf90750（manifest 11 檔）」「輪帳本 11 列；window_len=3；評估: NOT-EVALUABLE(3/6)」（資訊欄）、R202 列選填欄照印（含 `"symptom_streak": 1`）、「完整性閘 ✓」、Q4′ win32 PASS 九格 ✓、darwin PASS 九格 ✓。rc=0。
 - `ruff check tools/lib/governance_docs.py`（新證據檔登記 +5 行）⇒ `All checks passed!` rc=0。
 - `check_defect_log_crossref.py` ⇒ rc=0「✅ 缺陷帳本跨文件狀態一致：帳本 201 筆有效狀態紀錄、19 份掃描目標皆無矛盾…具名治理文件 154 份皆已登記且未逾體積上限…未結存量 29 列」（490 結案、499 新開 ⇒ 存量不變）；warning：兩份治理文件逼近 262144 上限（`CrossPlatform_Guard_Line_History.md` 250457、`CrossPlatform_DEF200274_Parallel_Tests_Evidence.md` 255168）、外部阻塞軌 3 筆與結構性長債軌 7 筆複查逾 14 天、已結列殘留待辦 2 筆（皆同前輪）、「AutoSDD_Defect_Log.md 相對 git HEAD 有未 commit 的修改」（commit 前預期）——這組 warning 正是 QA-202-04 訂正的實況。
-- `check_handoff_carriers.py`（**`git add -A` 之後**跑）⇒ 第一次即 rc=0「✅ 每一筆前瞻延後宣稱都有帳本承接載體」（tracked 交接載體 190 份、前瞻延後行 93 筆；commit 723 則、含前瞻延後宣告 33 筆）。
+- `check_handoff_carriers.py`（**`git add -A` 之後**跑）⇒ 第一次即 rc=0「✅ 每一筆前瞻延後宣稱都有帳本承接載體」（tracked 交接載體 190 份、前瞻延後行 93 筆；commit 723 則、含前瞻延後宣告 33 筆）。［R203 訂正：此組為 commit 前量測值；HEAD 234eebe 現跑為 94 筆／725 則／34 筆、載體 190 份不變，QA-203-01］
 - `AutoClaude/tools/check_loc_budget.py --json` ⇒ rc=0。
 - 守衛面量具：`git diff --cached --numstat -- .claude/hooks .claude/settings.json .claude/settings.local.json tools/lib/{session_brief,quota_messages,harness_feed,quota_gate,quota_policy,quota_stability,sentinel_lifecycle}.py tools/session_resume_planner.py` ⇒ 輸出 0 行（守衛面淨增 0、零守衛碼、tools/tests 零改動）；全部 `git diff --cached --numstat` ⇒ 3 1 docs/06_quality/AutoSDD_Defect_Log.md／5 5 docs/06_quality/CrossPlatform_R201_FiveQuestion_MacRound_Q4Darwin_Evidence.md／97 0 本檔／1 0 docs/06_quality/FiveQuestion_Round_Ledger.jsonl／5 0 tools/lib/governance_docs.py（本檔行數隨〈六〉〈七〉回填再變）。
 - 根層全套第二次（暫存改動後、〈六〉回填前）：`ROOT_RC=0`「發現 5176 個測試（下限 5101）」「[M6 id 集合] tools/tests@win32：✅ 集合關係成立（本次 skip 46 支）」「✅ 真實 TEMP 圍籬 … 零變動（前 4／後 4 份）」「✅ 孤兒 console 普查：零增長（前 0／後 0）」。〈六〉回填後最後一次全套、commit、push、雲端見〈七〉。
@@ -104,4 +104,4 @@
 - 三項達標 ⇒ 輪帳本 R203 列 `symptom_streak: 2` ⇒ **宣告收斂**：範圍＝評估機（Windows）行為面＋兩平台 Q4′ 靜態九格；Mac 行為面標「未驗」（DEF-200-499 依掌舵者裁決維持 open 或改 closed-by-decision）；之後只在根 CLAUDE.md〈守衛面准入〉觸發條件成立時再評。
 - 任一行 FAIL ⇒ `symptom_streak` 寫 0、兩次重來；NOT-EVALUABLE ⇒ 沿用 1（母體不得低於 6）。
 - QA 單方鏡稽核本檔（10 項機械宣稱＋三條指令獨立複跑 sha 比對），零 Developer、零守衛碼、tools/tests 零改動。
-- 日曆鎖：Mac JSON 效期 2026-10-19T21:38:15+08:00（最緊）；Windows JSON 效期 2026-10-17T22:16:53+08:00；ONBOARDING nightly 錨首個紅燈 2026-10-20T09:57:51+08:00 `[QA 本輪重算，他包回報]`；ruff E501 豁免 11-03 起紅 `[前輪]`；棘輪 `live_repin_round()`＝196、款(12) due 198、Phase 2 due 200（零重釘輪不觸發）`[前輪]`。
+- 日曆鎖：Mac JSON 效期 2026-10-19T21:38:15+08:00（最緊［R203 訂正：字面上 Windows 的 10-17 更早，「最緊」指 Mac JSON 只能在 Mac 重產、Windows JSON 可於評估機就地重產，QA-203-02］）；Windows JSON 效期 2026-10-17T22:16:53+08:00；ONBOARDING nightly 錨首個紅燈 2026-10-20T09:57:51+08:00 `[QA 本輪重算，他包回報]`；ruff E501 豁免 11-03 起紅 `[前輪]`；棘輪 `live_repin_round()`＝196、款(12) due 198、Phase 2 due 200（零重釘輪不觸發）`[前輪]`。

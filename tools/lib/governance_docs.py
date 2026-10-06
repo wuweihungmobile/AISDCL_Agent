@@ -617,6 +617,11 @@ _GOVERNANCE_DOCS = (
     # 即刻登記。
     _REPO_ROOT / "docs" / "06_quality"
     / "CrossPlatform_R202_FiveQuestion_WinEval_Streak1_Evidence.md",
+    # 五問第二十五次評估輪（Windows 評估機第二次達標＝streak 2、宣告收斂：範圍＝評估機
+    # 行為面＋兩平台 Q4′ 九格、Mac 行為面標未驗；SA-201-01 入帳本；只量不審＋QA 單方）：
+    # 即刻登記。
+    _REPO_ROOT / "docs" / "06_quality"
+    / "CrossPlatform_R203_FiveQuestion_WinEval_Streak2_Converged_Evidence.md",
     # 護欄層行數棘輪史料歸檔的第二冊（第一冊逼近 Read 工具上限，淨減法搬遷改落本檔）：即刻登記。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_Guard_Line_History_2.md",
 )
