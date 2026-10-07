@@ -637,6 +637,10 @@ _GOVERNANCE_DOCS = (
     # 皆 Sonnet）：即刻登記。
     _REPO_ROOT / "docs" / "06_quality"
     / "CrossPlatform_R206_FiveQuestion_MacRound_Q4Regen_CarriersQuoteFilter_Evidence.md",
+    # 五問再評觸發修憲（時間型觸發＝T3／T7／兜底退役、改症狀驅動；Q4′ 重產改為再評輪開場步驟；
+    # 他機輪次 FAIL 只入 note；決策檔、零守衛碼）：即刻登記。
+    _REPO_ROOT / "docs" / "06_quality"
+    / "CrossPlatform_R207_FiveQuestion_Retire_Time_Triggers_Decision.md",
     # 護欄層行數棘輪史料歸檔的第二冊（第一冊逼近 Read 工具上限，淨減法搬遷改落本檔）：即刻登記。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_Guard_Line_History_2.md",
 )

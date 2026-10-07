@@ -57,15 +57,27 @@ manifest＝本目錄每個檔的（相對路徑, sha256(內容；CRLF 先正規�
 機器範圍（跨機輪次）：三項的母體皆為**執行機本機**——逐字稿＝本機 `claude_home()/projects/<本機 repo 路徑 slug>`、Q3′ feed＝
 本機 `context_feed`、Q4′＝本機 `trace_dir`；他機的真實窗與 feed 都不在母體，三條指令照上列字面跑（`--exclude-self`／`--record-since`／`--entrypoint` 是字面的一部分），不得再加 `--project-dir`／`--exclude-sid` 等改變母體的旗標。
 評估機＝掌舵者症狀回報機（現＝Windows；改指定須掌舵者明示並重置協定）。他機輪次照跑三項，結果以
-`[他機:<host>] PASS|FAIL|NOT-EVALUABLE（母體 N 支）` 寫入該列 `note`、不計次、`symptom_streak` 沿用上一列。
-計次只在評估機輪次：三項同時成立＝一次評估達標 ⇒ `symptom_streak`＝上值 +1；任一機任一輪任一行 FAIL ⇒ 寫 0（HUMAN-REVIEW＝Q1′b 有裸宣稱：逐句人工複核，句前真無阻斷＝該行 FAIL、正則假陽（引述／轉述／否定）＝註明後視為 PASS，複核句逐字入證據檔）；
+`[他機:<host>] PASS|FAIL|NOT-EVALUABLE（母體 N 支）` 寫入該列 `note`、不計次、`symptom_streak` 沿用上一列——含 FAIL：他機輪次的 FAIL 只入 `note`、不歸零。
+計次只在評估機輪次：三項同時成立＝一次評估達標 ⇒ `symptom_streak`＝上值 +1；評估機輪次任一行 FAIL ⇒ 寫 0（HUMAN-REVIEW＝Q1′b 有裸宣稱：逐句人工複核，句前真無阻斷＝該行 FAIL、正則假陽（引述／轉述／否定）＝註明後視為 PASS，複核句逐字入證據檔）；
 NOT-EVALUABLE ⇒ 沿用上值（不得用來蓋掉壞樣本：評估機母體數不得低於該機上次評估，保留期清理例外須證據檔明載）；
-相鄰兩次達標相距不得超過 `q4_max_age_days` 天。連續 `symptom_streak_required` 次評估（不同輪、後一次母體含 ≥1 支
-評估機新真實窗）達標 ⇒ 宣告收斂，宣告範圍＝評估機行為面＋兩平台 Q4′ 靜態九格、他機行為面標「未驗」；之後只在根
-CLAUDE.md〈守衛面准入〉的觸發條件成立時再評。達標次數寫在輪帳本列 `symptom_streak` 欄（`--protocol-status` 照印）。
+相鄰兩次達標相距不得超過 `q4_max_age_days` 天（宣告前的計次連續性規則；宣告後不再數 streak）。連續 `symptom_streak_required` 次評估（不同輪、後一次母體含 ≥1 支
+評估機新真實窗）達標 ⇒ 宣告收斂，宣告範圍＝評估機行為面＋兩平台 Q4′ 靜態九格、他機行為面標「未驗」；之後只在下列
+再評觸發 S1～S6 成立時再評。達標次數寫在輪帳本列 `symptom_streak` 欄（`--protocol-status` 照印）。
+
+**收斂宣告後的再評觸發（唯一真相源＝本節；根 CLAUDE.md〈守衛面准入〉只引用、不複寫）**：只由症狀、或守衛面／權限姿態的實際變更驅動：下列任一成立才開一輪再評；沒有任何日曆、版本號或證據效期觸發，退役後也沒有任何自動排程的再評（S1～S6 由掌舵者或主控看到時啟動）。
+- S1 掌舵者真機回報症狀（附 session id 或畫面原文（`severity.md`〈暴露度〉(a)））。
+- S2（原 T2）評估機上任一量測器紅：指令 1～3 任一行 FAIL（含 HUMAN-REVIEW 複核後判 FAIL）（NOT-EVALUABLE 不算；Q4′ 僅因 `generated_at` 過期而 ✗ 不算——過期是再評輪的開場步驟、不是症狀；他機輪次的 FAIL 只入 `note`，其中 Q4′ 兩平台行非因過期的 ✗ 由主控在 `note` 裁定是否視同本條）。
+- S3（原 T5）主控視窗的前 `q1c_first_calls` 個呼叫內出現誤擋（oracle 判 misblock）、分類器拒絕或權限詢問；hook 正確攔截不算。
+- S4（原 T4）任何一輪出現 P≤2，或「宣稱被擋而前面沒有真阻斷」。
+- S5（原 T1 反轉）守衛面有變動，且該變動附有暴露證據（暴露證據的定義在根 CLAUDE.md〈守衛面准入〉）。
+- S6（原 T6）權限姿態或 `permissions` 內容變更。
+明文退役（原 R196 證據檔〈八〉的 T3／T7／兜底，不得再當觸發）：Claude Code 版本變更、Q4′ 證據逼近 `q4_max_age_days` 天、「連續 3 個降頻輪或距上次完整四方 14 天必開一輪」。
+宣告一經作成，`symptom_streak` 歸零或協定重置（`window_reset`）皆不撤回；撤回須掌舵者明示並記入輪帳本 `note`。
+WHY：時間型觸發在沒有任何症狀時也會開輪，是再評永遠做不完的永動機——R205 因 Claude Code 2.1.290→2.1.291 再評、三項量測全 PASS、無退化，而 2026-10-07 實測已是 2.1.292，同一條件又成立；版本變更若真改了權限姿態由 S6 接住、若真造成症狀由 S1／S3 接住，不必拿版本號當代理指標（決策檔 `docs/06_quality/CrossPlatform_R207_FiveQuestion_Retire_Time_Triggers_Decision.md`）。
+
 Q4′ 攜回：產出機把 `session_gate_acceptance_<host>.json` 原文逐字貼進當輪證據檔附錄（不得手改、JSON 為純 ASCII）；
 另一台以**同檔名**存入本機 `trace_dir`，且本機 HEAD 已含其 `repo_head`（先 pull）後再跑指令 3；效期自 `generated_at` 起
-`q4_max_age_days` 天。獨立憑證：Q1′a 的 oracle 與 hook 同碼、
+`q4_max_age_days` 天；過期**不構成日曆義務**，只在再評輪開場檢查，過期者該輪開場先重產／攜回。獨立憑證：Q1′a 的 oracle 與 hook 同碼、
 對修法後視窗是同義反覆（ARCH-195-06）⇒ 另附 Q1′b、掌舵者回報、答案表兩引擎重測；分類器拒絕
 （`automode-blocked`）不入分子但逐筆歸因。全史（不帶 `--record-since`）數字受 Claude Code 逐字稿保留期影響、隨時間
 縮水（同一指令同一 HEAD 7 分鐘內母體 38→36 曾實測發生），證據檔引用時必附量測時刻與母體數；收斂判定只用基線切片。
