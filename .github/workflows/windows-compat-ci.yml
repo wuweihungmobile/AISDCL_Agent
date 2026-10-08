@@ -295,6 +295,11 @@ on:
       # （DEF-101-042 同構，與上一則 R103 同款；本輪由雲端
       # test_ci_paths_cover_root_consumers.py 實測揪出，根層全套的收集面不含該判準）。
       - "tools/check_handoff_carriers.py"
+      # DEF-200-506：新增 tools/refresh_nightly_anchor.py（ONBOARDING 表③ nightly 錨機械回填）——
+      # tools/tests/test_refresh_nightly_anchor.py 與 test_doc_loc_baseline_freshness_r60.py
+      # 以 `import refresh_nightly_anchor as RNA` 消費，只改該檔時其回歸鎖不會跑
+      # （DEF-101-042 同構，由 test_ci_paths_cover_root_consumers.py 實測揪出）。
+      - "tools/refresh_nightly_anchor.py"
       - "AutoClaude/tools/check_loc_budget.py"
       - "AutoClaude/.loc_baseline"
       - "tools/_script_scan_surface.py"
@@ -737,6 +742,11 @@ on:
       # （DEF-101-042 同構，與上一則 R103 同款；本輪由雲端
       # test_ci_paths_cover_root_consumers.py 實測揪出，根層全套的收集面不含該判準）。
       - "tools/check_handoff_carriers.py"
+      # DEF-200-506：新增 tools/refresh_nightly_anchor.py（ONBOARDING 表③ nightly 錨機械回填）——
+      # tools/tests/test_refresh_nightly_anchor.py 與 test_doc_loc_baseline_freshness_r60.py
+      # 以 `import refresh_nightly_anchor as RNA` 消費，只改該檔時其回歸鎖不會跑
+      # （DEF-101-042 同構，由 test_ci_paths_cover_root_consumers.py 實測揪出）。
+      - "tools/refresh_nightly_anchor.py"
       - "AutoClaude/tools/check_loc_budget.py"
       - "AutoClaude/.loc_baseline"
       - "tools/_script_scan_surface.py"

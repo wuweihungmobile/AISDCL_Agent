@@ -67,6 +67,7 @@ sys.path.insert(0, str(_TESTS_DIR))
 # 底下的歸 first-party，順序寫反即 I001（實測）。
 import test_subprocess_encoding_hygiene as _HYGIENE  # noqa: E402
 
+import refresh_nightly_anchor as RNA  # noqa: E402  # nightly 錨回填工具（常數 SSOT）
 import sync_onboarding_baselines as SYNC  # noqa: E402
 from lib import baseline_origin as BO  # noqa: E402  # nightly 探針的解析契約（DEF-101-763）
 from lib import ci_liveness as _CI_LIVENESS  # noqa: E402  # job 層 fail-open 正則 SSOT
@@ -4921,15 +4922,11 @@ def push_triggered_workflows(workflows_dir: Path) -> list[str]:
     return out
 
 
-#: `jobs:` 區塊內的 job 名（恰 2 空白縮排）與 **job 層** `continue-on-error: true`
-#: （恰 4 空白縮排）。step 層（`steps:` 的 `- ` 條目底下，縮排更深）刻意不收：step 紅
-#: 仍會讓 job 紅、run 層看得到；job 層才是「job 紅而 run 仍 conclusion=success」的那種。
-_JOB_NAME_RE = re.compile(r"^  ([A-Za-z0-9_-]+):\s*$")
 #: 🔴 **不在此另寫一份**（R76 複審 SA-02）：本判準與 `tools/lib/ci_liveness.py` 原本各有
 #: 一份逐字相同的正則，兩份同時把「值後面有行尾註解」漏掉，而磁碟上就有一個活體
 #: （`autoclaude-pg-e2e-on-label.yml:35`）⇒ 判準⑧ 的「掃描面現查而非寫死」在落地當天
 #: 就有一個現查不到的東西。改為共用該檔的 SSOT，任一邊修好兩邊同時得利。
-_JOB_FAIL_OPEN_RE = _CI_LIVENESS.JOB_FAIL_OPEN_RE
+_JOB_FAIL_OPEN_RE = RNA.JOB_FAIL_OPEN_RE
 #: `nightly-red=` 的項目分隔（值內不得有空白——錨是單獨一行、空白即欄位邊界）。
 _NIGHTLY_RED_SEP = ","
 #: 全綠時的合法值。刻意**不**提供「還沒查」的值：R76-03 的缺陷本體就是這一層從來
@@ -4943,8 +4940,8 @@ _NIGHTLY_RED_CLEAN = "none"
 #: 修法＝讓這一欄自帶時點，並給它一個**本機算得出來**的過期界線：
 #:   · `nightly-run=<run-id>`：查的是哪一次 run。必須逐字出現在表③-b（錨 ↔ 表格綁定，
 #:     形同 `red=` ↔ 表格那條），「改了表格忘了改錨」就會紅。
-#:   · `nightly-checked-at=<ISO8601 帶時間>`：什麼時候查的。超過 `_NIGHTLY_MAX_AGE_DAYS`
-#:     即紅，訊息直接印回填 SOP 第 6 步那段 gh 指令。
+#:   · `nightly-checked-at=<ISO8601 帶時間>`：取樣 run 的建立時刻。超過 `_NIGHTLY_MAX_AGE_DAYS`
+#:     即紅，訊息直接指路回填工具（`tools/refresh_nightly_anchor.py --write`）。
 #: 🔴 比較對象是**時鐘**與**本 commit 的檔案內容**，不是 `origin/main`——任何 commit
 #: 上照 SOP 查一次就綠，不會落入 R75 那個自我指涉陷阱
 #: （見 `TestR75CloudCriteriaAreSatisfiableAtAnyCommit`）。
@@ -4952,38 +4949,11 @@ _NIGHTLY_RED_CLEAN = "none"
 _NIGHTLY_RUN_FIELD = "nightly-run"
 _NIGHTLY_CHECKED_FIELD = "nightly-checked-at"
 _NIGHTLY_RUN_RE = re.compile(r"^\d{6,}$")
-#: 排程軌是**週頻**（兩支 compat-CI 的 cron）⇒ 14 天＝最多兩個週期沒人回來看。
-#: 取更大就等於容許「一個月前查的」還算新鮮，那正是本判準要治的病；取更小會在正常
-#: 輪距內製造噪音。過期時的處置成本＝跑一次 SOP 第 6 步的 gh 指令（秒級）。
-_NIGHTLY_MAX_AGE_DAYS = 14
+#: 數值與立案理由的單一居所＝tools/refresh_nightly_anchor.py（本檔只 import，不複寫）。
+_NIGHTLY_MAX_AGE_DAYS = RNA.NIGHTLY_MAX_AGE_DAYS
 
 
-def cloud_fail_open_jobs(workflows_dir: Path) -> list[str]:
-    """`<workflow>.yml:<job>` — 帶 **job 層** `continue-on-error: true` 的 job（現查）。
-
-    立案沿革（R76-03）搬至 Guard_Line_History_2.md〈R194 淨減法搬遷〉§91。  round-label-ok
-
-    掃描面現查而非寫死：寫死清單在「某支 workflow 新增一個 fail-open job」那天靜默縮面
-    （同 `push_triggered_workflows` 的紀律）。
-    """
-    found: list[str] = []
-    for f in sorted(workflows_dir.glob("*.yml")):
-        in_jobs, job = False, None
-        for line in f.read_text(encoding="utf-8", errors="replace").splitlines():
-            if line.startswith("jobs:"):
-                in_jobs, job = True, None
-                continue
-            if line and not line[0].isspace():
-                in_jobs, job = False, None
-                continue
-            if not in_jobs:
-                continue
-            m = _JOB_NAME_RE.match(line)
-            if m:
-                job = m.group(1)
-            elif job and _JOB_FAIL_OPEN_RE.match(line):
-                found.append(f"{f.name}:{job}")
-    return sorted(set(found))
+cloud_fail_open_jobs = RNA.cloud_fail_open_jobs  # 搬家：判準與回填工具共用同一份掃描
 
 
 def _nightly_provenance_problems(
@@ -4996,9 +4966,9 @@ def _nightly_provenance_problems(
     problems: list[str] = []
     run_id = fields.get(_NIGHTLY_RUN_FIELD, "")
     checked = fields.get(_NIGHTLY_CHECKED_FIELD, "")
-    sop = ("處置＝跑一次 §7 回填 SOP 第 6 步那段 `gh run list --event schedule` ＋ "
-           "`gh run view <id> --json jobs`，把結果填進表③-b，並把 "
-           f"`{_NIGHTLY_RUN_FIELD}=`／`{_NIGHTLY_CHECKED_FIELD}=` 一併更新")
+    sop = ("處置＝跑 `python tools/refresh_nightly_anchor.py --write` 機械回填表③-b 與 "
+           f"`{_NIGHTLY_RUN_FIELD}=`／`{_NIGHTLY_CHECKED_FIELD}=` 兩欄（排程通道停擺時先 "
+           "`gh workflow run <workflow>` 補跑）")
     if not _NIGHTLY_RUN_RE.match(run_id):
         problems.append(
             f"表③ 錨的 `{_NIGHTLY_RUN_FIELD}=` 缺席或形態不合法（實得 {run_id!r}，"
@@ -6205,7 +6175,7 @@ class TestR71SmokeTripwireIsInViewWithTheHonestReading(unittest.TestCase):
         self.assertEqual(sorted(BO.SMOKE_HEARTBEATS), sorted(BO.SMOKE_SUMMARY_SPECS),
                          "smoke 兩張表必須同鍵，否則會出現有檔名沒解析契約的半條通道")
         line = BO.smoke_evidence(_REPO_ROOT, "darwin")
-        self.assertIn("stage [1/4]", line, "未說明它是 nightly 子階段 ⇒ 會被當成第二條證據")
+        self.assertIn("stage [1/5]", line, "未說明它是 nightly 子階段 ⇒ 會被當成第二條證據")
 
     def test_the_windows_log_landing_premise_matches_reality(self) -> None:
         """🔴 R73 重寫（DEF-101-786）——**本鎖原本的射程漏掉了真正的機制，導致它

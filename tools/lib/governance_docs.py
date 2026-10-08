@@ -641,6 +641,10 @@ _GOVERNANCE_DOCS = (
     # 他機輪次 FAIL 只入 note；決策檔、零守衛碼）：即刻登記。
     _REPO_ROOT / "docs" / "06_quality"
     / "CrossPlatform_R207_FiveQuestion_Retire_Time_Triggers_Decision.md",
+    # nightly 錨機械回填（DEF-200-506 結案：新 CLI 現查 GitHub 兩支排程通道，mac stage 5／
+    # Windows 自成 stage，pre-push 與 CI 加 --check-head；零守衛面）：即刻登記。
+    _REPO_ROOT / "docs" / "06_quality"
+    / "CrossPlatform_R208_NightlyAnchor_Mechanical_Backfill_Evidence.md",
     # 護欄層行數棘輪史料歸檔的第二冊（第一冊逼近 Read 工具上限，淨減法搬遷改落本檔）：即刻登記。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_Guard_Line_History_2.md",
 )

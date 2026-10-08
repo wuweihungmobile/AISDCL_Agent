@@ -136,7 +136,7 @@ def _has_stale_lock_liveness_check(code: str) -> bool:
 
 def test_stale_lock_uses_liveness_check_not_fixed_timeout(sh_content: str) -> None:
     """陳舊鎖清除必須依「鎖檔內 PID 是否仍存活」（kill -0）判斷，而非固定逾時秒數
-    ——4-stage gate 執行時間會變動，固定逾時容易誤殺仍在跑的合法行程（同 dev_start.py
+    ——整套 stage gate 執行時間會變動，固定逾時容易誤殺仍在跑的合法行程（同 dev_start.py
     `_acquire_bootstrap_lock()` 慣例）。"""
     code = _code_only(sh_content)
     assert _has_stale_lock_liveness_check(code), (
@@ -345,7 +345,7 @@ def test_help_prints_usage_rc_zero_and_starts_no_stage(tmp_path: Path) -> None:
     proc = _run_sh(script, "--help")
     assert proc.returncode == 0, f"`--help` 必須 rc=0，實得 {proc.returncode}：{proc.stderr}"
     assert "用法：" in proc.stdout, f"`--help` 必須印出用法，實得 stdout={proc.stdout!r}"
-    for token in ("--force", "macos_smoke", "nightly_mac_latest.log"):
+    for token in ("--force", "macos_smoke", "nightly_anchor", "nightly_mac_latest.log"):
         assert token in proc.stdout, f"usage 應說明 {token}（旗標語意／stage 名／log 落點）"
     logs = tmp_path / "AutoClaude" / "logs"
     assert not logs.exists() or not list(logs.glob("nightly_mac_*.log")), (
@@ -644,7 +644,7 @@ def test_tree_identity_never_enters_the_heartbeat_function(sh_content: str) -> N
 
 
 # 功能面：把真的 .sh 放進一棵「真 git repo ＋ 假 .venv」的沙箱，實跑到 stage 失敗為止
-# （沙箱內 stage 腳本全不存在 ⇒ 四個 stage 立刻失敗、整趟不到兩秒），再讀 RunId log。
+# （沙箱內 stage 腳本全不存在 ⇒ 全部 stage 立刻失敗、整趟不到兩秒），再讀 RunId log。
 # 不改用「把函式抽進探針腳本」：位置（直譯器橫幅之後、stage 之前）與 `exec` 改道後的
 # 落點正是要驗的東西，抽出來就驗不到了。
 
@@ -746,7 +746,7 @@ def test_tree_identity_names_the_real_head_and_how_far_behind_origin_it_is(
         log, re.M,
     ), f"乾淨樹的樣本效度行不對：{log!r}"
     assert "⚠️ SAMPLE VALIDITY" not in log, "乾淨且新鮮的樹不該出任何樣本效度警告"
-    marks = ("python 直譯器：", "git context:", "SAMPLE VALIDITY: tree_state=", "--- [1/4]")
+    marks = ("python 直譯器：", "git context:", "SAMPLE VALIDITY: tree_state=", "--- [1/5]")
     positions = [log.index(m) for m in marks]
     assert positions == sorted(positions), f"樹身分不在直譯器橫幅與第一個 stage 之間：{marks}"
 
@@ -814,7 +814,7 @@ def test_tree_identity_degrades_to_unknown_outside_a_git_repo_without_aborting(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """取樣失敗必須攤開成 unknown，且絕不拖垮 nightly：非 git 樹印 unknown＋樣本效度未知
-    警告，之後四個 stage 照跑完、彙總行照印、exit 1 仍反映 stage 失敗。"""
+    警告，之後全部 stage 照跑完、彙總行照印、exit 1 仍反映 stage 失敗。"""
     # 禁止 git 往上找到外層 repo（tmp_path 若恰好位於某個 repo 內，會讓本測試假紅）。
     monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path.resolve().parent))
     proc = _run_sh(_tree_sandbox(tmp_path, git_repo=False))
@@ -829,8 +829,9 @@ def test_tree_identity_degrades_to_unknown_outside_a_git_repo_without_aborting(
     ) in log
     assert "樣本效度**未知**，不得當成乾淨" in log
     assert "小時未更新" not in log, "取不到 commit 時間不得憑空判陳舊"
-    assert "--- [4/4] sdd_ci_gate FAIL" in log, "樣本取失敗後，stage 必須照跑完"
-    assert "===== nightly 彙總：PASS=0 FAIL=4 =====" in log
+    assert "--- [4/5] sdd_ci_gate FAIL" in log, "樣本取失敗後，stage 必須照跑完"
+    assert "--- [5/5] nightly_anchor FAIL" in log, "最後一個 stage 也必須照跑（沙箱內腳本不存在）"
+    assert "===== nightly 彙總：PASS=0 FAIL=5 =====" in log
     assert proc.returncode == 1, f"stage 失敗的 exit 語意被取樣失敗改掉了：rc={proc.returncode}"
 
 
@@ -857,7 +858,7 @@ def _stub_fingerprint_python(root: Path, on_hashlib: str) -> None:
 def test_a_fingerprint_that_is_not_a_hash_degrades_to_unknown_without_aborting(
     tmp_path: Path, on_hashlib: str
 ) -> None:
-    """指紋子行程印垃圾或直接失敗 ⇒ `tree_fingerprint=unknown`，四個 stage 照跑、exit 語意不變。
+    """指紋子行程印垃圾或直接失敗 ⇒ `tree_fingerprint=unknown`，全部 stage 照跑、exit 語意不變。
 
     WHY：指紋是「這份 log 跑的是哪棵樹」的身分欄。舊版只判空字串，子行程往 stdout 印的任何
     東西（sitecustomize 橫幅、警告、被包裝過的 python）都會被照單全收成「指紋」——垃圾值比
@@ -874,8 +875,8 @@ def test_a_fingerprint_that_is_not_a_hash_degrades_to_unknown_without_aborting(
         log, re.M,
     ), f"垃圾指紋沒被降級成 unknown：{log!r}"
     assert "NOT-A-HASH" not in log
-    assert "--- [4/4] sdd_ci_gate FAIL" in log, "指紋取樣失敗後，stage 必須照跑完"
-    assert "===== nightly 彙總：PASS=0 FAIL=4 =====" in log
+    assert "--- [4/5] sdd_ci_gate FAIL" in log, "指紋取樣失敗後，stage 必須照跑完"
+    assert "===== nightly 彙總：PASS=0 FAIL=5 =====" in log
     assert proc.returncode == 1, f"stage 失敗的 exit 語意被取樣失敗改掉了：rc={proc.returncode}"
 
 
@@ -948,3 +949,17 @@ def test_tree_identity_is_read_only_the_git_index_stays_byte_identical(tmp_path:
     assert index.read_bytes() == before, "樹身分取樣改寫了 git index——它不是唯讀的"
     _git(tmp_path, "status", "--porcelain")
     assert index.read_bytes() != before, "控制組失敗：裸 git status 沒改寫 index，構造無效"
+
+
+def test_nightly_anchor_is_the_fifth_stage_and_runs_after_sdd_ci_gate(sh_content: str) -> None:
+    """寫回 ONBOARDING 的 stage 必須排最後：樣本效度戳記在所有 stage 之前取完，寫回才不會
+    汙染本輪樣本；直譯器用 `$PY` 絕對路徑、不得退回裸 python（DEF-200-506）。"""
+    code = _code_only(sh_content)
+    assert re.search(r"^STAGE_TOTAL=5\b", code, re.M), "stage 分母單一定義點必須是 5"
+    i4 = code.index("run_stage 4 sdd_ci_gate")
+    m5 = re.search(
+        r'run_stage 5 nightly_anchor\s+"\$PY" "\$ROOT/tools/refresh_nightly_anchor\.py" --write',
+        code)
+    assert m5 and m5.start() > i4, "第 5 個 stage 必須存在且排在 sdd_ci_gate 之後"
+    call = re.search(r"^print_tree_identity$", code, re.M)
+    assert call and call.start() < i4, "樣本效度取樣必須先於所有 stage"

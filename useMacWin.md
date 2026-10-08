@@ -104,7 +104,7 @@ gh run list --limit 10 --json workflowName,conclusion,event,createdAt,headSha   
 | mac 迴圈跑「指令 + 參數」字串全報 rc=2 | zsh 不對未引號變數分詞，整串當單一檔名 → 需要分詞就包 `bash -c '…'` 或用陣列 |
 | push 被 pre-push 擋、印「找不到 ruff」 | root-infra 快層跑 `ruff check tools/`，ruff 缺席刻意 fail-loud → 先啟用根層 .venv 並裝好開發相依 |
 | `git push` 非零但看不到 `remote:` 行、尾段卻像全綠 | 沒送到伺服器，是 pre-push 自己紅；尾段樂觀字樣屬某一段 leg → 只看 `main -> main` 那行；真因搜 `[pre-push` 的 ❌ 行，在中段 |
-| push 被擋，FAIL 全在 `test_doc_loc_baseline_freshness_r60`、訊息含「`nightly-checked-at` … 已是 N 天前」 | ONBOARDING §7 表③ 錨的排程軌查核有 14 天過期帶，是計時炸彈、與你的改動無關（久未開發後第一次 push 最常撞到） → 照 ONBOARDING §7 回填 SOP 第 6 步：`gh run list --event schedule` ＋ `gh run view <id> --json jobs` 現查，更新表③-b 兩列與錨的 `nightly-run`／`nightly-checked-at` |
+| push 被擋（pre-push 印 `refresh_nightly_anchor.py --check-head` 失敗，或 FAIL 在 `test_doc_loc_baseline_freshness_r60`），訊息含「`nightly-checked-at` … 已是 N 天前」 | ONBOARDING §7 表③ 錨的排程軌 14 天過期帶；本機 nightly 每日會把它寫回工作樹，**多半只是沒被 commit 帶走** → 照訊息末行處置：`git add ONBOARDING.md` 併入 commit；工作樹也舊時先 `python tools/refresh_nightly_anchor.py --write`（需 `gh auth login`；排程通道停擺時先 `gh workflow run windows-compat-ci.yml`／`macos-compat-ci.yml` 補跑）。細節見 ONBOARDING §7 SOP 第 6 步 |
 
 ### D. 跑全套測試前：拉起 CI 對等 PG 容器（兩平台共通）
 

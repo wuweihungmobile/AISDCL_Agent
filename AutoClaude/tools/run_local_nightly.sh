@@ -16,13 +16,18 @@
 # R11 教訓：smoke 全綠 ≠ unittest 全綠，故 [1] 與 [2]~[4] 都必跑。
 #
 # stage（任一失敗記名後續跑，結尾彙總；任一 FAIL → exit 1，對齊 .ps1 R9 ③ exit 語意）：
-#   [1/4] macos_smoke     — /bin/bash 強制系統 bash 3.2（平台相容性聚合驗證）
-#   [2/4] root_unittests  — 根層 tools/tests unittest 全套（含測試數量下限釘選）
-#   [3/4] autoclaude_gate — AutoClaude tools/local_ci_gate.sh（鏡像 CI push gating；
+#   [1/5] macos_smoke     — /bin/bash 強制系統 bash 3.2（平台相容性聚合驗證）
+#   [2/5] root_unittests  — 根層 tools/tests unittest 全套（含測試數量下限釘選）
+#   [3/5] autoclaude_gate — AutoClaude tools/local_ci_gate.sh（鏡像 CI push gating；
 #                           顯式帶 --unattended——GitHub Actions 靠 GITHUB_ACTIONS
 #                           環境變數自動判定 unattended，本檔排程執行無此變數，
 #                           須顯式帶旗標才是真鏡像，DEF-200-314）
-#   [4/4] sdd_ci_gate     — AISDLC_SDD scripts/ci-gate.sh（凍結基線 + LATEST 雙軌）
+#   [4/5] sdd_ci_gate     — AISDLC_SDD scripts/ci-gate.sh（凍結基線 + LATEST 雙軌）
+#   [5/5] nightly_anchor  — tools/refresh_nightly_anchor.py --write：gh 現查兩支排程通道
+#                           最近一次 completed run 的 job 層結論，機械回填 ONBOARDING §7
+#                           表③-b 與錨的 nightly 三欄（寫回工作樹、須隨下一個 commit 收；
+#                           DEF-200-506）。排最後：樣本效度戳記在所有 stage 之前取完，
+#                           寫回不汙染本輪樣本。
 #
 # log（R15 DEF-101-201②）：RunId log——開頭將輸出 exec 改道
 # AutoClaude/logs/nightly_mac_<時間戳>.log（BEGIN 首行帶 run_id，鏡射 .ps1 RunId 語意；
@@ -40,7 +45,7 @@
 # 相容性：bash 3.2（macOS /bin/bash；禁 declare -A / mapfile / ${var,,}）。
 set -u
 
-STAGE_TOTAL=4  # stage 分母單一定義點（R11 P4：原 /4 硬編三處，增刪 stage 易漏改）
+STAGE_TOTAL=5  # stage 分母單一定義點（R11 P4：原 /4 硬編三處，增刪 stage 易漏改）
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 # WHY：launchd/cron 環境的 PATH 極簡（通常僅 /usr/bin:/bin:/usr/sbin:/sbin），
@@ -86,7 +91,7 @@ print_usage() {
   --force      手動重跑：繞過當日去重
   -h, --help   印本說明後結束，不執行任何 stage
 
-stage：[1/${STAGE_TOTAL}] macos_smoke ／ [2/${STAGE_TOTAL}] root_unittests ／ [3/${STAGE_TOTAL}] autoclaude_gate ／ [4/${STAGE_TOTAL}] sdd_ci_gate
+stage：[1/${STAGE_TOTAL}] macos_smoke ／ [2/${STAGE_TOTAL}] root_unittests ／ [3/${STAGE_TOTAL}] autoclaude_gate ／ [4/${STAGE_TOTAL}] sdd_ci_gate ／ [5/${STAGE_TOTAL}] nightly_anchor
 log：AutoClaude/logs/nightly_mac_<時間戳>.log（保留 14 天）
 心跳：AutoClaude/logs/nightly_mac_latest.log
 EOF
@@ -134,11 +139,11 @@ fi
 # 去重鎖（R16 SCAN-C-2）：下面的心跳 mtime 判斷本身是 check-then-act，若 launchd
 # 的 RunAtLoad 與 StartCalendarInterval(02:00) 兩個觸發源、或手動重跑與排程觸發
 # 時間點重疊，兩個行程可能同時通過「今日尚未有心跳」的檢查，導致重複跑一整套
-# 4-stage gate。本機查無 `flock`（GNU 專屬，macOS 無此指令）；`shlock` 雖存在
+# 整套 stage gate。本機查無 `flock`（GNU 專屬，macOS 無此指令）；`shlock` 雖存在
 # 但非所有 macOS 版本保證都有，改用最保險的 POSIX `mkdir` atomic lock pattern
 # （同一路徑下 mkdir 建立目錄具原子性，兩個行程不可能同時成功）。陳舊鎖清除
 # 比照 tools/dev_start.py `_acquire_bootstrap_lock()` 慣例：以鎖檔內 PID 是否
-# 仍存活判斷（而非固定逾時秒數）——4-stage gate 本身執行時間會變動，固定逾時
+# 仍存活判斷（而非固定逾時秒數）——整套 stage gate 本身執行時間會變動，固定逾時
 # 容易誤殺仍在跑的合法行程。
 NIGHTLY_LOCK_DIR="${ROOT}/AutoClaude/logs/.nightly_mac.lock"
 _nightly_lock_release() {
@@ -335,6 +340,7 @@ run_stage 1 macos_smoke     /bin/bash "$ROOT/tools/macos_smoke_local.sh"
 run_stage 2 root_unittests  env AUTOSDD_PARALLEL_TESTS=1 "$PY" "$ROOT/tools/run_root_unittests.py"
 run_stage 3 autoclaude_gate bash "$ROOT/AutoClaude/tools/local_ci_gate.sh" --unattended
 run_stage 4 sdd_ci_gate     sdd_gate
+run_stage 5 nightly_anchor  "$PY" "$ROOT/tools/refresh_nightly_anchor.py" --write
 
 printf '\n===== nightly 彙總：PASS=%s FAIL=%s =====\n' "$PASS" "$FAIL"
 write_heartbeat

@@ -174,7 +174,7 @@ NIGHTLY_HEARTBEATS: dict[str, str] = {
 #             `SMOKE_SUMMARY_SPECS`）：`daily_evidence()` 的 smoke 那行自此是**量測值**，
 #             不是寫死的指路。
 #   darwin ── `macos_smoke_local.sh` 的 `===== 彙總：PASS=n FAIL=n SKIP=n =====` 是
-#             `run_local_nightly.sh` 的 stage [1/4] 印的 ⇒ 它**不是**第二條獨立證據，
+#             `run_local_nightly.sh` 的 stage [1/5] 印的 ⇒ 它**不是**第二條獨立證據，
 #             而是同一輪 nightly 的子階段：nightly 心跳在，smoke 就跑過了。故 darwin 側
 #             刻意**不**接探針——接了會憑空多出一條看似獨立的通道，而它量的是同一件事，
 #             那是「造假資料通道」而不是補齊覆蓋。
@@ -202,7 +202,7 @@ SMOKE_EVIDENCE: dict[str, str] = {
         "**不得**讀成「Windows smoke 沒在跑」（DEF-101-756 換載體）"
     ),
     "darwin": (
-        "macos_smoke_local.sh 是 run_local_nightly.sh 的 stage [1/4] ⇒ **不是**第二條獨立"
+        "macos_smoke_local.sh 是 run_local_nightly.sh 的 stage [1/5] ⇒ **不是**第二條獨立"
         "證據，其 `===== 彙總：PASS=n FAIL=n SKIP=n =====` 已含在同一輪 nightly 的 RunId "
         "log 內；上一行的 nightly 心跳綠即代表該輪 smoke 也跑過"
     ),

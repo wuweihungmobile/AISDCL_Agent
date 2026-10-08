@@ -233,6 +233,13 @@ class TestPrePushDispatcher(unittest.TestCase):
             "import sys\n"
             'raise SystemExit(0 if "--check-snapshot" in sys.argv else 4)\n',
         )
+        # leg ③ 第 11 支＝`refresh_nightly_anchor.py --check-head`（ONBOARDING 表③ nightly 錨的
+        # HEAD 判準，離線）。同上以 argv 檢查當 stub，讓「子指令被吃掉」不可能靜默通過。
+        self._write(
+            "tools/refresh_nightly_anchor.py",
+            "import sys\n"
+            'raise SystemExit(0 if "--check-head" in sys.argv else 6)\n',
+        )
         # R79：leg ③ 第 9 支＝`_script_scan_surface.py --list --suffix .ps1
         # --with-latest --check-floors`（`.ps1` 掃描面 SSOT 的 per-tree 檔數下限，
         # 對齊 root-infra-ci.yml 第 2 道——該道自 R79 起改向本 SSOT 取掃描面）。

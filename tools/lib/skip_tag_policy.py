@@ -403,7 +403,9 @@ _TREE_FILE_FLOORS: dict[str, int] = {
     # 照填，零加減推算）。
     # 🔴 2026-09-27 重釘 67→68（DEF-200-340 新增 test_recovery_hint_passes_ps_lint.py，
     # 實測 85 支，67 只剩實測的 79%，掃描器逐字指示重釘為 68 ⇒ 照填，零加減推算）。
-    "tools/tests": 68,
+    # 🔴 2026-10-08 重釘 68→69（DEF-200-506 新增 test_refresh_nightly_anchor.py，實測 87 支，
+    # 68 只剩實測的 78%，掃描器逐字指示重釘為 69 ⇒ 照填，零加減推算）。
+    "tools/tests": 69,
     # 🔴 R82 包 A2（DEBT-01）：204 → 205。新增 `AutoClaude/tests/contract/test_w6_deletion.py`
     # （AC2-2 的真斷言落點）後掃描面變 257，下限只剩實測的 79% ⇒ 依 `TREE_FLOOR_RATIO` 的
     # 防腐那一向轉紅。這正是它的設計意圖：下限不跟著長就會愈來愈鬆而沒有任何東西說話。

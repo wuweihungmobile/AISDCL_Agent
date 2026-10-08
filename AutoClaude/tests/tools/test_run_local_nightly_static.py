@@ -2480,7 +2480,7 @@ def test_stage_l_also_runs_root_unittests(ps1_content: str) -> None:
 
     WHY：本 stage 的 local_ci_gate.ps1 範圍全在 AutoClaude scope（pytest +
     check_loc_budget + lint-imports），不含根層 tools/tests——那裡住著全部跨平台靜態
-    掃描器。mac 側 run_local_nightly.sh 的 [2/4] 每日跑它，Windows 側先前一次都不跑，
+    掃描器。mac 側 run_local_nightly.sh 的 [2/5] 每日跑它，Windows 側先前一次都不跑，
     於是這台機器上那批掃描器的唯一執行機會是「push 剛好動到根層檔」。
     """
     block = _extract_stage_block(
@@ -2636,3 +2636,26 @@ def test_pg_contract_alembic_floor_is_neither_fail_open_nor_permanently_red() ->
         f"下限 {floor} 不合法（磁碟實況 {actual}）：0 ＝ fail-open，> 實況 ＝ 每晚結構性必紅"
     )
     assert "$contractRcRef.Value = 1" in ps1, "低於下限時必須把 stage 標記為失敗，不得只印訊息"
+
+
+def test_nightly_anchor_stage_is_wired_into_summary_json_and_exit_decision(
+    ps1_content: str,
+) -> None:
+    """nightly-anchor-refresh 自成 stage，失敗必須進 summary 與 exit 決策（DEF-200-506）。
+
+    WHY：四處同步點（標籤／summary 行／summary JSON／exit 決策 pairs）少一處，失敗就隱形；
+    工具 rc=2（用法錯誤、python 找不到檔也回 2）會被 Invoke-Stage 讀成 WARN，必須先正規化。
+    """
+    block = _extract_stage_block(
+        ps1_content, "Invoke-Stage 'nightly-anchor-refresh", "# ----- Cleanup"
+    )
+    assert "& $script:PyExe $anchorPy --write" in block, "必須以 $script:PyExe 呼叫、不得裸 python"
+    assert "$anchorRc -eq 2" in block, "rc=2 必須在 stage 內正規化成失敗（否則被當 WARN）"
+    assert "nightly_anchor=$rcAnchorLabel" in ps1_content, "summary 行必須含 nightly_anchor 欄位"
+    assert "nightly_anchor = [int]$rcAnchor" in ps1_content, "summary JSON 必須含 nightly_anchor"
+    assert re.search(r"@\('nightly_anchor', \$rcAnchor\)", ps1_content), (
+        "nightly_anchor 必須列入終端 exit 決策 pairs（失敗要翻紅 Last Result）"
+    )
+    assert not re.search(r"^\$null = Invoke-Stage 'nightly-anchor", ps1_content, re.M), (
+        "不得以 `$null =` 吞掉 stage 的 rc（失敗會隱形）"
+    )

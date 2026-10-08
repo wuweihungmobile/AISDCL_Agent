@@ -1,7 +1,7 @@
 # 根層基建 CI（四方複審 B4，2026-07-10；防禦縱深補洞 2026-07-11）：workflows / hooks /
 # 工具腳本上移 monorepo 根層後，根層 tools/（bootstrap / integration_gate / git-hooks
 # dispatcher）與 .gitattributes、.editorconfig、dependabot 等基建原本零 CI 覆蓋——壞掉
-# 只會在開發者本機爆。本 workflow 做十六道輕量守門（只用 GitHub 第一方 actions，不引
+# 只會在開發者本機爆。本 workflow 做十七道輕量守門（只用 GitHub 第一方 actions，不引
 # 任何第三方 action，避免供應鏈風險）：
 # 🔴 R68 訂正（本段原文寫「僅 actions/checkout，不引其他外部 action」，且第 8 道原文
 # 寫「純 stdlib unittest，零依賴安裝」）：這兩句自 2026-07-14 起就是**假宣稱**，而代價
@@ -10,7 +10,7 @@
 # 失敗、被 unittest 收集成佔位測試，122 支迴歸鎖一支都沒跑。故本 job 現在改為
 # setup-python + 一次 pip install（清單 SSOT＝tools/run_root_unittests.py 的
 # `_THIRD_PARTY_PREREQS`，並由 tools/tests/ 的 CI 安裝步驟鎖機械綁定本檔）。
-# 其餘十四道仍是純 stdlib、零安裝——「輕量」原則只在第 8 道與第 16 道（R69 新增，需
+# 其餘十五道仍是純 stdlib、零安裝——「輕量」原則只在第 8 道與第 16 道（R69 新增，需
 # `pip install ruff`）讓步，兩次都是為了讓那道守門真的跑得動而非 skip/假綠。
 #   1. bash -n       — active *.sh（R56 起，原僅根層 tools/：AISDLC_SDD LATEST 版納入、
 #                      凍結版 v0.01~v0.(N-1) 依紀律不回改 → 排除，政策與第 2 道一致）
@@ -180,6 +180,16 @@
 #                      ⚠️ 誠實劃界：射程＝根層 `tools/` 樹＋`.claude/hooks/`；
 #                      `AISDLC_SDD/` 今日仍是零 ruff 設定、零 ruff 閘門（納管它是
 #                      另一個授權面的決定，見 tools/ruff.toml 檔頭）。
+#   17. ONBOARDING §7 表③ nightly 錨 HEAD 判準 — tools/refresh_nightly_anchor.py
+#                      --check-head：離線讀 `git show HEAD:ONBOARDING.md`，驗錨的三個 nightly 欄位——
+#                      run id 對得上表③-b 的資料列、時間帶時區且在 14 天過期帶內、紅集合是 job 層
+#                      fail-open 的子集。本機 nightly 每日把錨機械寫回工作樹，本道守的是「回填後沒被
+#                      commit 帶走」那條縫（工作樹新、HEAD 舊）：pre-push 快層同跑並分兩型指路；雲端
+#                      的 HEAD 就是工作樹，故本道在雲端是冗餘的，存在只為讓兩端守門清單對等
+#                      （test_root_infra_parity 鎖雙向）。
+#                      ⚠️ 誠實劃界：不打 gh、不去雲端對帳——保證的是 HEAD 內容自洽且夠新，不是「此刻
+#                      雲端的 job 結論就是錨上寫的那樣」；最近一次 completed run 之後才發生的事，要等
+#                      下一輪回填。
 #
 # 注：上列編號為清單序，與 job 內實際執行順序無關（如第 7 道 py_compile 實體 step
 # 緊接第 1 道 bash -n 之後執行）——R11 文件掃描[關注-3]澄清。
@@ -517,6 +527,9 @@ jobs:
         run: python3 tools/archive_defect_log.py --check
       - name: ONBOARDING §7 表② presumed-stale 觸發器（tools/sync_onboarding_baselines.py --check-snapshot：測試樹指紋）
         run: python3 tools/sync_onboarding_baselines.py --check-snapshot
+
+      - name: ONBOARDING §7 表③ nightly 錨 HEAD 判準（tools/refresh_nightly_anchor.py --check-head：離線讀 HEAD，不打 gh）
+        run: python3 tools/refresh_nightly_anchor.py --check-head
 
       - name: nightly-full 排程陳舊度哨兵（唯讀 gh API；設計理由與誠實劃界見檔頭第 15 道）
         # 本 step 只做唯讀 `gh run list` 查詢（不觸發、不重跑任何 workflow），

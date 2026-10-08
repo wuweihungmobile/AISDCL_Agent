@@ -30,7 +30,7 @@ R60 新增 ②，收斂 DEF-101-517 的 backlog（該列明文交棒「下一輪
 DEF-101-139 為「雲端 CI 帳務停擺（DEF-101-081）」而建的 Windows 側**執行級補償
 控制**，而 R59 逐項實測確認 run_local_nightly.ps1 對它零呼叫、它只能手動觸發——
 補償控制自己沒有心跳（這也解釋了它為何會腐化到讓 R59 踩到 DEF-101-511）。對照 mac
-側：`run_local_nightly.sh` 的 [1/4] 每日自動跑 `macos_smoke_local.sh`，故「smoke 每天
+側：`run_local_nightly.sh` 的 [1/5] 每日自動跑 `macos_smoke_local.sh`，故「smoke 每天
 自動跑一次」在 mac 早已成立，Windows 缺的就是這個。
 刻意**不**把 smoke 塞成 run_local_nightly.ps1 的第 8 個 stage：那需同動 summary 行／
 summary JSON／exit-decision 清單／Format-Rc 標籤共四處，而 summary 行被

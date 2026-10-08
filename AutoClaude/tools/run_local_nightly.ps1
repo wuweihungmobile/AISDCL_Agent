@@ -13,13 +13,14 @@
   - drift_log 被動掃描                     — 觀察期 #3
   - observability-snapshot                 — D-16 30 天取證
   - sdd-fsm-chaos                          — R10：Rule 9.9.4 本地補償（CI 停擺期間）
+  - nightly-anchor-refresh                 — DEF-200-506：ONBOARDING §7 表③ 機械回填，寫回工作樹、須隨 commit 收
 
 反向去向帳目（R59 DEF-101-517 補齊 — 本檔此前只列自己有什麼，從不記自己缺什麼）：
   mac 側 run_local_nightly.sh 的四 stage 早在 R11 就補了「七軌去向帳目」，逐軌交代
   哪幾軌它刻意不跑、由誰承載。**反方向從來沒有對應帳目**，而 ONBOARDING.md §8 又把
   兩平台框成「Windows 深度版完整可用／macOS 刻意非對等的薄聚合器」——在下列三項上
   方向其實是**相反**的（R59 逐項實測確認本檔對三者皆零呼叫）：
-  1. **平台 smoke**：mac 的 [1/4] 每日自動跑 tools/macos_smoke_local.sh；Windows 對等物
+  1. **平台 smoke**：mac 的 [1/5] 每日自動跑 tools/macos_smoke_local.sh；Windows 對等物
      tools/windows_smoke_local.ps1 存在（PASS=12），**本檔對它零呼叫**（下述刻意解耦）。
      這是三項中最要緊的一項——該腳本正是 DEF-101-139 為「雲端 CI 帳務停擺」而生的
      Windows 側執行級補償控制。
@@ -39,14 +40,14 @@
      **「本檔零呼叫」這半句仍為真且刻意保留**：兩者解耦，smoke 的心跳由它自己的
      排程任務負責，不寄生在本檔上——理由見下方第 3 項後那段「為何補的是既有 stage
      內的第二道檢查」（動 stage 會連帶動到 summary 契約與 dev_start.py 的跨檔字面鎖）。
-  2. **根層 unittest**：mac 的 [2/4] 每日跑 tools/run_root_unittests.py。
+  2. **根層 unittest**：mac 的 [2/5] 每日跑 tools/run_root_unittests.py。
      ✅ **本輪起本檔亦跑**（R77-04）：掛在 Stage L 內（見該 stage 上方註解），與
      local_ci_gate.ps1 並列為該 stage 的第二道檢查，兩道 rc 各自留證、合併時真失敗
      優先於 WARN。本項自此**不再是缺口**。
      本檔的 local-ci-gate stage 另跑 AutoClaude/tools/local_ci_gate.ps1，範圍是
      pytest + check_loc_budget + lint-imports（**皆 AutoClaude scope**），不含根層 tools/tests
      ——這正是為什麼根層那批跨平台靜態掃描器需要第二道呼叫、而不是靠 gate 順帶。
-  3. **SDD 完整閘門**：mac 的 [4/4] 每日跑 AISDLC_SDD/scripts/ci-gate.sh 雙軌全套；
+  3. **SDD 完整閘門**：mac 的 [4/5] 每日跑 AISDLC_SDD/scripts/ci-gate.sh 雙軌全套；
      本檔只有 sdd-fsm-chaos（chaos 子集），不含 v0.01/LATEST 雙軌 pytest 與 10 道 lint 硬閘。
      ❌ 仍是缺口，本輪未補（第 1 項的 smoke 解耦亦刻意維持）。
   **為何補的是「既有 stage 內的第二道檢查」而不是第 8 個 stage**（DEF-101-517 的處置
@@ -54,6 +55,8 @@
   清單與 Format-Rc 標籤共四處，而其中 summary 行被 tools/dev_start.py 的心跳哨兵以
   **跨檔字面正則**解析（見 DEF-101-263②／R25 的跨檔字面鎖）；掛進 Stage L 則四處全部
   不動。代價已明說：兩道檢查共用一個 summary 欄位，故 stage 內必須逐道印 rc。
+  （DEF-200-506 起的 nightly-anchor 例外自成 stage：它寫回工作樹、失敗原因與回歸無關；
+  四處同步點已照做，dev_start 的 END exit decision 正則對新標籤免改。）
   🔴 **R73 補記**（此段當初被列 backlog 的第二個前提，其失效紀錄保留供追溯）：
   「要等到半夜才知道排程結果」已不成立——`Start-ScheduledTask` 可隨選觸發並取得
   排程環境下的真實結果（R73 實測 smoke 88 秒完成、rc=0）。
@@ -133,7 +136,7 @@ $NIGHTLY_USAGE = @'
 用法：powershell.exe -NoProfile -ExecutionPolicy Bypass -File AutoClaude\tools\run_local_nightly.ps1 [-Help]
 
   （無參數）   排程／正常模式：依序跑 7 stage
-               local_ci_gate（含根層 unittest）／mutation／pg-e2e／perf／drift／obs／sdd-fsm-chaos
+               local_ci_gate（含根層 unittest）／mutation／pg-e2e／perf／drift／obs／sdd-fsm-chaos／nightly-anchor
   -Help        印本說明後結束，不執行任何 stage（--help、-h 亦可）
 
 本腳本不接受其他任何引數（打錯的旗標一律 rc=2，不會被靜默丟棄後照跑）。
@@ -1045,7 +1048,7 @@ Log ("BEGIN observation pre-snapshot: mutation={0} ac4={1} obs={2} drift={3} (js
 #   ② 根層 tools/tests unittest 全套：<monorepo>/tools/run_root_unittests.py
 #      ——含測試數量下限釘選，是全部跨平台靜態掃描器（路徑分隔符／子行程編碼／
 #      PS 5.1 相容／行尾）在本機的唯一執行載體。
-# WHY ② 必須在這裡：mac 側 run_local_nightly.sh 的 [2/4] 每日就跑它，Windows 側先前
+# WHY ② 必須在這裡：mac 側 run_local_nightly.sh 的 [2/5] 每日就跑它，Windows 側先前
 # 完全不跑（本 stage 的 local_ci_gate 範圍全在 AutoClaude scope 內，不含根層 tools/tests）
 # ⇒ 這台機器上那批掃描器的唯一執行機會是「push 剛好動到根層檔」。純子專案 push 不觸發
 # pre-push 慢層，於是 Windows 開發時的跨平台落差要等 mac 那台或雲端才看得見，而雲端
@@ -1873,6 +1876,35 @@ $rcChaosLatest = Invoke-Stage 'sdd-fsm-chaos-latest（DEF-200-379 觀察期）' 
   }
 }
 
+# ----- nightly-anchor-refresh：ONBOARDING §7 表③ nightly 錨機械回填（DEF-200-506）-----
+# 為何自成 stage、不掛進 Stage L：它是本檔唯一寫回工作樹的驗證外 stage（先例：perf-baseline 寫
+# .perf_baseline.toml），失敗原因（gh 缺席／未登入／網路）與回歸無關；掛進 Stage L 會讓 local_ci_gate
+# 欄位混入「gh 查詢失敗」。四個同步點（Format-Rc 標籤／summary 行／summary JSON／exit 決策）照
+# sdd_chaos_latest 的先例補齊；tools/dev_start.py 只解析 `END exit decision`，新標籤落在 failed
+# stages 清單內，正則免改。
+# rc 語意：Invoke-Stage 把 rc=2 當 WARN，而本工具 rc=2＝用法錯誤、python 找不到檔也回 2
+# ⇒ 本 stage 一律把 2 正規化成 1，工具缺席／用法錯誤不得被讀成 WARN。
+$rcAnchor = Invoke-Stage 'nightly-anchor-refresh (ONBOARDING §7 表③ 機械回填)' {
+  $anchorPy = Join-Path $MonorepoRoot 'tools\refresh_nightly_anchor.py'
+  if (-not $script:PyExe) {
+    Log '[NIGHTLY-ANCHOR] python 不可用（見腳本開頭的可用性驗證）——量不出來，計入本 stage 失敗' 'ERROR'
+    $global:LASTEXITCODE = 1
+    return
+  }
+  if (-not (Test-Path $anchorPy)) {
+    Log ('[NIGHTLY-ANCHOR] 回填工具缺席（{0}）——改名／搬走／RepoRoot 上一層不是 monorepo 根；計入本 stage 失敗' -f $anchorPy) 'ERROR'
+    $global:LASTEXITCODE = 1
+    return
+  }
+  Invoke-Native { & $script:PyExe $anchorPy --write }
+  $anchorRc = [int]$LASTEXITCODE
+  if ($anchorRc -eq 2) {
+    Log '[NIGHTLY-ANCHOR] 工具回 rc=2（用法錯誤；Invoke-Stage 會把 2 當 WARN）——本 stage 不容許 WARN，改記 1' 'ERROR'
+    $anchorRc = 1
+  }
+  $global:LASTEXITCODE = $anchorRc
+}
+
 # ----- Cleanup（僅清掉本次新建的臨時 container；既有的不動）-----
 # SD_09 W3 Round 21 audit QA P1-R21-2 修復（紀律 #1 真實 rc）：
 #   舊版 `$global:LASTEXITCODE = 0` 強制清零會吞掉 docker rm 失敗的真實 rc，
@@ -1903,12 +1935,13 @@ $rc5Label = Format-Rc $rc5
 $rcGateLabel = Format-Rc $rcGate
 $rcChaosLabel = Format-Rc $rcChaos
 $rcChaosLatestLabel = Format-Rc $rcChaosLatest
+$rcAnchorLabel = Format-Rc $rcAnchor
 # R9 複審 (b)：local_ci_gate 欄位附加於既有五欄之後（不動既有欄位順序，下游以
 # 具名欄位解析不受影響）；R10 QA-6：sdd_chaos 依同慣例再附加於其後。
 # DEF-200-379：sdd_chaos_latest 依同慣例再附加於 sdd_chaos 之後——與凍結基線軌
 # 分開列名，讀者不必猜「紅的是哪一軌」（LATEST 軌無 Rule 9.9.4 鎖 main 對應，
 # 但本機 nightly 沒有鎖 main 機制，兩欄在本檔語意上對等，皆計入一般 stage 失敗）。
-Log "END nightly summary: mutation=$rc1Label pg-e2e=$rc2Label perf=$rc3Label drift=$rc4Label obs=$rc5Label local_ci_gate=$rcGateLabel sdd_chaos=$rcChaosLabel sdd_chaos_latest=$rcChaosLatestLabel"
+Log "END nightly summary: mutation=$rc1Label pg-e2e=$rc2Label perf=$rc3Label drift=$rc4Label obs=$rc5Label local_ci_gate=$rcGateLabel sdd_chaos=$rcChaosLabel sdd_chaos_latest=$rcChaosLatestLabel nightly_anchor=$rcAnchorLabel"
 $summaryJson = ConvertTo-Json -Compress -InputObject @{
   mutation = [int]$rc1
   'pg-e2e' = [int]$rc2
@@ -1918,6 +1951,7 @@ $summaryJson = ConvertTo-Json -Compress -InputObject @{
   local_ci_gate = [int]$rcGate
   sdd_chaos = [int]$rcChaos
   sdd_chaos_latest = [int]$rcChaosLatest
+  nightly_anchor = [int]$rcAnchor
   skip_sentinel = $SKIP_RC
 }
 Log "END nightly summary json: $summaryJson"
@@ -2277,7 +2311,7 @@ $finalFailures = @()
 foreach ($pair in @(
     @('local_ci_gate', $rcGate), @('mutation', $rc1), @('pg-e2e', $rc2),
     @('perf', $rc3), @('drift', $rc4), @('obs', $rc5), @('sdd_chaos', $rcChaos),
-    @('sdd_chaos_latest', $rcChaosLatest))) {
+    @('sdd_chaos_latest', $rcChaosLatest), @('nightly_anchor', $rcAnchor))) {
   $stageRc = [int]$pair[1]
   if ($stageRc -ne $SKIP_RC -and $stageRc -ne 0 -and $stageRc -ne 2) {
     $finalFailures += ('{0}={1}' -f $pair[0], $stageRc)
