@@ -459,9 +459,7 @@ def _receipt_rounds(status_cell: str) -> list[int]:
     """狀態欄裡的輪號，排除 `@R<n>` 時點標籤（`fixed@R100` 的 `@R100` 是時點不是承接者）。
 
     DEF-200-195：跨列回執新鮮度曾以 `_ROUND_RE` 對整欄取 max ⇒ 首詞 `fixed@R<當輪>`
-    自我滿足；本函式補齊取數面。DEF-200-129 自列出口共用本函式，輪號下限**暫未接線**
-    ——當前輪滯後 R100 時實測轉紅 14 筆（DEF-101-018/060/398/796/856/863/867/887/938/
-    951/960/974/980/981），接線＝結案輪重量轉紅=0 後的動作（載體＝DEF-200-129 回執）。
+    自我滿足；本函式補齊取數面。自列出口（DEF-200-129）與跨列出口共用本函式。
     """
     return [int(m.group(1)) for m in _ROUND_RE.finditer(status_cell)
             if not (m.start() > 0 and status_cell[m.start() - 1] == "@")]
@@ -524,8 +522,8 @@ def orphan_backlog_problems(ledger_text: str) -> list[str]:
         `closed-by-decision` 的歷史列一律不判（歷史檔逐字保全，見上方第一個坑）。
       · 該列**狀態欄**（或更後面提及本列 ID 的那一列的狀態欄）載明「改派」／「回執」
         即放行；判定走 `_reassign_hit()`（R74 起只判狀態欄、遮 code span、擋否定語意）。
-        🔴 R84（`DEF-200-088`）：**跨列**那一半此後同樣要比輪號——該回執列的狀態欄必須
-        指名一個 ≥ 當前輪的 `R\\d+`，否則不算出口（回執一寫就永久有效＝同一個洞的另一半）。
+        🔴 R84（`DEF-200-088` 跨列）／`DEF-200-129`（自列）：兩個出口同一把尺——該狀態欄必須
+        指名一個 ≥ 當前輪的 `R\\d+`（或字面「未指派」），否則不算出口（一寫就永久有效＝洞）。
 
     **已實測不涵蓋**（逐項跑過，並釘成常駐斷言）：
       · **跨列**：更後面那一列的認定條件只是「該列提及本列 ID」這個弱條件；「哪一列才算
@@ -549,6 +547,7 @@ def orphan_backlog_problems(ledger_text: str) -> list[str]:
         rows.append((lineno, cells, line))
 
     cur = current_round(ledger_text)
+    floor = cur if cur is not None else -1
     problems: list[str] = []
     for i, (lineno, cells, line) in enumerate(rows):
         if _classify(cells[status_idx]) not in _UNRESOLVED_CLASSES:
@@ -556,14 +555,15 @@ def orphan_backlog_problems(ledger_text: str) -> list[str]:
         handovers = _handover_rounds(line)
         if not handovers:
             continue
-        if _reassign_hit(cells[status_idx]):
+        if _reassign_hit(cells[status_idx]) and (  # 自列出口＝跨列同一把尺（DEF-200-129）
+                _UNASSIGNED_LITERAL in cells[status_idx]
+                or max(_receipt_rounds(cells[status_idx]), default=-1) >= floor):
             continue
         def_id = cells[id_idx]
         # 🔴 R84（`DEF-200-088`）：跨列出口先前只取布林 ⇒ 回執一寫就永久免比輪號。輪號以
         # `_receipt_rounds()` 粗抓取最大值（偏寬＝漏抓而非假紅，同本檔既有方向；`@R<n>`
         # 時點排除＝DEF-200-195，落地當回合以真帳本重量、轉紅 0 筆）。
         # 回執寫字面「未指派」者照放——硬規則② 後半句自己給的二擇一，判它等於關掉出口。
-        floor = cur if cur is not None else -1
         if any(def_id in ln and _reassign_hit(c[status_idx])
                and (_UNASSIGNED_LITERAL in c[status_idx]
                     or max(_receipt_rounds(c[status_idx]), default=-1) >= floor)
@@ -588,8 +588,8 @@ def orphan_backlog_problems(ledger_text: str) -> list[str]:
             f"早於當前輪 R{cur} ⇒ 孤兒 backlog（硬規則②，見 "
             f"CrossPlatform_Scan_Dimensions.md〈使用方式〉）。命中片段＝{detail}。"
             f"兩條合法出口（擇一，**不要改寫歷史原文**）："
-            f"① 就地於狀態欄追加一筆載明「改派」的附記（體例比照 DEF-101-333／336／338 "
-            f"的『改派為：未指派 backlog』＋解鎖條件）；"
+            f"① 就地於狀態欄追加一筆載明「改派」並（指名 ≥ R{cur} 或字面「未指派」）的附記"
+            f"（體例比照 DEF-101-333／336／338 的『改派為：未指派 backlog』＋解鎖條件）；"
             f"② 若該輪已交出成果，就地追加「回執」並把狀態改為已結案的首詞"
         )
     return problems
@@ -1454,7 +1454,7 @@ def main() -> int:
           "全部表格列的欄數皆等於表頭欄數、狀態欄由表頭定位（非 cells[-1] 位置猜測）；"
           f"具名治理文件 {len(_GOVERNANCE_DOCS)} 份皆已登記且未逾體積上限"
           f"（登記面對 {'／'.join(_GOVERNANCE_DOC_GLOBS)} 發現面雙向核對）；"
-          f"全部未結案列的承接輪次皆 ≥ 當前輪 R{current_round(ledger_text)} 或已載明改派"
+          f"全部未結案列的承接輪次皆 ≥ 當前輪 R{current_round(ledger_text)} 或改派至≥當前輪／未指派"
           "（硬規則②；已實測不涵蓋的形態見 orphan_backlog_problems docstring）；"
           f"未結存量 {len(_ledger_index.unresolved_ids(ledger))} 列（唯一量測入口＝"
           f"`--unresolved-count`；warn {_ledger_index.UNRESOLVED_ROWS_WARN}／fail "

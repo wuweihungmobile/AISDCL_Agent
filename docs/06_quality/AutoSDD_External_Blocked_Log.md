@@ -38,6 +38,8 @@
 | DEF-101-693 | Windows 實機 | 2026-08-21 | 下一個 Windows 真機輪逐列覆核 windows-smoke 22 步（`tools/tests/test_smoke_ci_sync.py::test_registered_smoke_groups_exist_in_that_script` 先行，另需真機執行紀錄） | 2026-08-31 |
 | DEF-200-075 | 其他-macOS實機（darwin執行面量測值，Windows結構上量不到也修不了） | 2026-08-27 | 回 mac 真機後第一動作＝重量 AutoClaude 樹 skip census（量測入口見主帳本該列配方）；macos-compat-ci 長期紅不可依賴 | 2026-09-17 |
 | DEF-200-313 | Windows 實機 | 2026-09-15 | 回 Windows 真機、人在互動終端機：`python tools/run_root_unittests.py` 跑到一半按 Ctrl-C，再以 `Get-CimInstance Win32_Process` 過濾 CommandLine 含 `run_root_unittests` 或 `unittest` 者須為空；結果寫進 `CrossPlatform_DEF200274_Parallel_Tests_Evidence.md`〈第十一輪〉③ 後移出本表 | 2026-09-15 |
+| DEF-200-253 | Windows 實機 | 2026-10-09 | Windows 機、Docker 停、巢狀 Claude Code session 內跑 `python AutoClaude/tools/local_ci_gate.py`，取其 `[skip census] AutoClaude/tests@win32+nopg+nested` 六格實測值，同 commit 重釘 `tools/lib/skip_group_policy.py` 的 `_RUNTIME_SKIP_CEILING` 與 `_RUNTIME_SKIP_CEILING_MAX` 同鍵（含 skip_id_ledger.json M6 共變）；重釘後 `python tools/run_root_unittests.py` 綠即移出本表 | 2026-10-09 |
+| DEF-101-856 | Windows 實機 | 2026-10-09 | 備妥 PG17+pgvector staging（≥1000 列真實 BGE-M3 1024 維＋HNSW、SD07_REAL_PG_E2E_ENABLED=true、AUTOCLAUDE_TEST_PG_DSN 指向它）的 Windows 機上單跑 `AutoClaude/tests/test_conftest_windows_native_skip_report.py`：PGVECTOR_BGE_M3_STAGING 探針判可還債而 T1／T2 仍掛 [DEBT] skip 即轉紅 ⇒ 把 3 支 stub 換成真斷言（或由 PM 顯式廢止並在帳本留紀錄）後移出本表 | 2026-10-09 |
 
 ## 複查記錄
 

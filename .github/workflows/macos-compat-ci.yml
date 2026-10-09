@@ -143,7 +143,7 @@ on:
       - ".github/workflows/autoclaude-ci.yml"
       # DEF-200-379：test_workflow_permission_concurrency_lock.py 的
       # TestFsmChaosNightlyStreakReadsJobLayer 消費此 yml（連敗計數讀 job 層、chaos-latest
-      # 觀察期語意）——只改該 yml 時本 workflow 也須重跑該鎖（DEF-101-042 同構）
+      # 納入 gating 的語意）——只改該 yml 時本 workflow 也須重跑該鎖（DEF-101-042 同構）
       - ".github/workflows/aisdlc-sdd-fsm-chaos-nightly.yml"
       - "tools/check_script_parity.py"
       - "tools/check_ntfs_paths.py"
@@ -598,7 +598,7 @@ on:
       - ".github/workflows/autoclaude-ci.yml"
       # DEF-200-379：test_workflow_permission_concurrency_lock.py 的
       # TestFsmChaosNightlyStreakReadsJobLayer 消費此 yml（連敗計數讀 job 層、chaos-latest
-      # 觀察期語意）——只改該 yml 時本 workflow 也須重跑該鎖（DEF-101-042 同構）
+      # 納入 gating 的語意）——只改該 yml 時本 workflow 也須重跑該鎖（DEF-101-042 同構）
       - ".github/workflows/aisdlc-sdd-fsm-chaos-nightly.yml"
       - "tools/check_script_parity.py"
       - "tools/check_ntfs_paths.py"
@@ -1074,15 +1074,25 @@ jobs:
         # 「VIRTUAL_ENV 已設定」的核心斷言將無從驗起。此處刻意保留 --no-sync。）
         # 斷言兩道：source 後 rc=0，且 VIRTUAL_ENV 已被 activate 設定（證明 zsh 分支
         # 的 sourced 偵測 + 自動啟用 .venv 真的走通，而非 fallback 到 bash 分支或未啟用）。
+        # DEF-101-675：斷言不得住在 zsh -c 引號內。dev_start.sh 的 sourced 偵測若失效會直落
+        # 檔尾 `exit`、殺掉該 zsh 行程，引號內 source 之後的每一行都不執行，外層仍 rc=0
+        # ＝step 綠燈卻一條斷言都沒跑（失明）。故 zsh 內只把 RC／VENV 寫進行程外側證物檔
+        # （$EV），三道斷言（證物檔存在／RC=0／VENV 非空）全在 zsh 行程外側做；證物檔不存在
+        # 即代表 source 之後的程式碼根本沒跑到。結構鎖＝tools/tests/test_smoke_ci_sync.py。
         run: |
           zsh --version
-          zsh -c '
+          ev="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/zsh_source_evidence.$$"
+          rm -f "$ev"
+          EV="$ev" zsh -c '
             source tools/dev_start.sh --no-sync
             rc=$?
-            [ "$rc" -eq 0 ] || { echo "::error::zsh source dev_start.sh 失敗（rc=$rc）"; exit "$rc"; }
-            [ -n "$VIRTUAL_ENV" ] || { echo "::error::zsh source 後 VIRTUAL_ENV 未設定——.venv 未被自動啟用（zsh sourced 偵測失效）"; exit 1; }
+            { printf "RC=%s\n" "$rc"; printf "VENV=%s\n" "${VIRTUAL_ENV-}"; } > "$EV"
             echo "zsh 下 python → $(command -v python)"
           '
+          test -f "$ev" || { echo "::error::證物檔不存在——source 之後的程式碼一行都沒跑到（zsh sourced 偵測失效、落到檔尾 exit；DEF-101-675）"; exit 1; }
+          grep -qx 'RC=0' "$ev" || { echo "::error::zsh source dev_start.sh 失敗（$(grep '^RC=' "$ev")）"; exit 1; }
+          grep -q '^VENV=.' "$ev" || { echo "::error::zsh source 後 VIRTUAL_ENV 未設定——.venv 未被自動啟用（zsh sourced 偵測失效）"; exit 1; }
+          rm -f "$ev"
           echo "zsh source dev_start.sh 驗證通過（sourced 偵測 + .venv 自動啟用）"
 
       - name: AutoClaude/tools/install_git_hooks.sh 安裝／解除往返驗證（一般 checkout）
@@ -1097,19 +1107,26 @@ jobs:
           echo "install_git_hooks.sh 安裝／解除往返驗證通過"
 
       - name: AutoClaude/tools/install_git_hooks.sh 於 linked worktree 下應正確拒絕（fail-loud）
+        # DEF-200-361：只比 rc=1 分不出「worktree 守衛擋的」與「別的前置守衛先擋的」（空洞通過），
+        # 故捕捉輸出並以 rc 與 LINKED-WORKTREE-REJECTED 標記雙斷言；比照 tools/macos_smoke_local.sh
+        # 3b／3d（逃生口 AUTOSDD_ALLOW_PATH_PYTHON=1 的理由同該處）。結構鎖＝tools/tests/test_smoke_ci_sync.py。
         run: |
           wt="$RUNNER_TEMP/wt-install-git-hooks-reject"
+          out="$RUNNER_TEMP/wt-install-git-hooks-reject.out"
           git worktree add --detach "$wt" HEAD
           set +e
-          ( cd "$wt" && bash AutoClaude/tools/install_git_hooks.sh )
+          ( cd "$wt" || exit 9; export AUTOSDD_ALLOW_PATH_PYTHON=1; bash AutoClaude/tools/install_git_hooks.sh ) > "$out" 2>&1
           rc=$?
           set -e
+          cat "$out"
           git worktree remove --force "$wt"
           if [ "$rc" -ne 1 ]; then
             echo "::error::預期在 linked worktree 下 install_git_hooks.sh 應 exit 1，實際 rc=$rc"
             exit 1
           fi
-          echo "install_git_hooks.sh worktree 拒絕驗證通過（rc=1 as expected）"
+          # 標記字面＝tools/git_hooks_install_common.py::LINKED_WORKTREE_REJECT_MARKER 的複本，勿手改、由 test_smoke_ci_sync.py 機械對齊
+          grep -qF -- 'LINKED-WORKTREE-REJECTED' "$out" || { echo "::error::install_git_hooks.sh rc=1 但輸出未含拒絕標記——非 worktree 守衛所擋（空洞通過；DEF-200-361）"; exit 1; }
+          echo "install_git_hooks.sh worktree 拒絕驗證通過（rc=1 且拒絕標記命中）"
 
       - name: AISDLC_SDD/scripts/install-hooks.sh 安裝／解除往返驗證（一般 checkout）
         run: |
@@ -1120,19 +1137,26 @@ jobs:
           git config --unset core.hooksPath || true
 
       - name: AISDLC_SDD/scripts/install-hooks.sh 於 linked worktree 下應正確拒絕（fail-loud）
+        # DEF-200-361：只比 rc=1 分不出「worktree 守衛擋的」與「別的前置守衛先擋的」（空洞通過），
+        # 故捕捉輸出並以 rc 與 LINKED-WORKTREE-REJECTED 標記雙斷言；比照 tools/macos_smoke_local.sh
+        # 3b／3d（逃生口 AUTOSDD_ALLOW_PATH_PYTHON=1 的理由同該處）。結構鎖＝tools/tests/test_smoke_ci_sync.py。
         run: |
           wt="$RUNNER_TEMP/wt-install-hooks-reject"
+          out="$RUNNER_TEMP/wt-install-hooks-reject.out"
           git worktree add --detach "$wt" HEAD
           set +e
-          ( cd "$wt" && bash AISDLC_SDD/scripts/install-hooks.sh )
+          ( cd "$wt" || exit 9; export AUTOSDD_ALLOW_PATH_PYTHON=1; bash AISDLC_SDD/scripts/install-hooks.sh ) > "$out" 2>&1
           rc=$?
           set -e
+          cat "$out"
           git worktree remove --force "$wt"
           if [ "$rc" -ne 1 ]; then
             echo "::error::預期在 linked worktree 下 install-hooks.sh 應 exit 1，實際 rc=$rc"
             exit 1
           fi
-          echo "install-hooks.sh worktree 拒絕驗證通過（rc=1 as expected）"
+          # 標記字面＝tools/git_hooks_install_common.py::LINKED_WORKTREE_REJECT_MARKER 的複本，勿手改、由 test_smoke_ci_sync.py 機械對齊
+          grep -qF -- 'LINKED-WORKTREE-REJECTED' "$out" || { echo "::error::install-hooks.sh rc=1 但輸出未含拒絕標記——非 worktree 守衛所擋（空洞通過；DEF-200-361）"; exit 1; }
+          echo "install-hooks.sh worktree 拒絕驗證通過（rc=1 且拒絕標記命中）"
 
       - name: 根層 dispatcher hooks：安裝 + 真實 git commit 觸發 pre-commit（經 core.hooksPath）
         # R56 修正（SA finding，鏡射 windows-compat-ci.yml 同名 step 的三道可觀測

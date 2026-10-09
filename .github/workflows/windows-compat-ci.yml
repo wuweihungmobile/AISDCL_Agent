@@ -277,7 +277,7 @@ on:
       - ".github/workflows/autoclaude-ci.yml"
       # DEF-200-379：test_workflow_permission_concurrency_lock.py 的
       # TestFsmChaosNightlyStreakReadsJobLayer 消費此 yml（連敗計數讀 job 層、chaos-latest
-      # 觀察期語意）——只改該 yml 時本 workflow 也須重跑該鎖（DEF-101-042 同構）
+      # 納入 gating 的語意）——只改該 yml 時本 workflow 也須重跑該鎖（DEF-101-042 同構）
       - ".github/workflows/aisdlc-sdd-fsm-chaos-nightly.yml"
       - "tools/check_script_parity.py"
       - "tools/check_ntfs_paths.py"
@@ -724,7 +724,7 @@ on:
       - ".github/workflows/autoclaude-ci.yml"
       # DEF-200-379：test_workflow_permission_concurrency_lock.py 的
       # TestFsmChaosNightlyStreakReadsJobLayer 消費此 yml（連敗計數讀 job 層、chaos-latest
-      # 觀察期語意）——只改該 yml 時本 workflow 也須重跑該鎖（DEF-101-042 同構）
+      # 納入 gating 的語意）——只改該 yml 時本 workflow 也須重跑該鎖（DEF-101-042 同構）
       - ".github/workflows/aisdlc-sdd-fsm-chaos-nightly.yml"
       - "tools/check_script_parity.py"
       - "tools/check_ntfs_paths.py"
@@ -1497,17 +1497,29 @@ jobs:
         # `exit N` 只會結束該腳本自身、不會終止呼叫端 run block 的其餘敘述，但會
         # 正確設定 $LASTEXITCODE 供呼叫端讀取——故用 $LASTEXITCODE 斷言、不依賴
         # 整個 step 因 exit 而提前結束。
+        # DEF-200-361（改前沿革：上段「同行程呼叫」的描述已不適用本 step）：只比 rc=1 分不出
+        # 「worktree 守衛擋的」與「別的前置守衛先擋的」（空洞通過），故改走獨立子行程
+        # （pwsh -File；比照 tools/windows_smoke_local.ps1 Test-WorktreeReject）、以
+        # 2>&1 | Out-String 捕捉輸出，並以 rc 與 LINKED-WORKTREE-REJECTED 標記雙斷言。
+        # 子行程 stderr 併入輸出時，為免任何引擎版本把它升成終止錯誤，捕捉前先把本 step 的
+        # $ErrorActionPreference 改 Continue（各 step 是獨立行程，不外溢）。
+        # 結構鎖＝tools/tests/test_smoke_ci_sync.py。
         shell: pwsh
         run: |
           $wt = Join-Path $env:RUNNER_TEMP "wt-install-git-hooks-reject"
           git worktree add --detach $wt HEAD
           Push-Location $wt
-          ./AutoClaude/tools/install_git_hooks.ps1
+          $installer = Join-Path $wt "AutoClaude/tools/install_git_hooks.ps1"
+          $ErrorActionPreference = 'Continue'
+          $out = & pwsh -NoProfile -ExecutionPolicy Bypass -File $installer 2>&1 | Out-String -Width 4096
           $rc = $LASTEXITCODE
           Pop-Location
           git worktree remove --force $wt
+          Write-Host $out
           if ($rc -ne 1) { throw "預期在 linked worktree 下 install_git_hooks.ps1 應 exit 1，實際 rc=$rc" }
-          Write-Host "install_git_hooks.ps1 worktree 拒絕驗證通過（rc=1 as expected）"
+          # 標記字面＝tools/git_hooks_install_common.py::LINKED_WORKTREE_REJECT_MARKER 的複本，勿手改、由 test_smoke_ci_sync.py 機械對齊
+          if ($out -notmatch [regex]::Escape('LINKED-WORKTREE-REJECTED')) { throw "install_git_hooks.ps1 rc=1 但輸出未含拒絕標記——非 worktree 守衛所擋（空洞通過；DEF-200-361）" }
+          Write-Host "install_git_hooks.ps1 worktree 拒絕驗證通過（rc=1 且拒絕標記命中）"
           exit 0
 
       - name: AISDLC_SDD/scripts/install-hooks.ps1 驗證（R1 SA 發現：第二入口從未被測到）
@@ -1521,17 +1533,28 @@ jobs:
           git config --unset core.hooksPath
 
       - name: AISDLC_SDD/scripts/install-hooks.ps1 於 linked worktree 下應正確拒絕（fail-loud；同上，第二入口同樣零覆蓋）
+        # DEF-200-361：只比 rc=1 分不出「worktree 守衛擋的」與「別的前置守衛先擋的」（空洞通過），
+        # 故改走獨立子行程（pwsh -File；比照 tools/windows_smoke_local.ps1 Test-WorktreeReject）、
+        # 以 2>&1 | Out-String 捕捉輸出，並以 rc 與 LINKED-WORKTREE-REJECTED 標記雙斷言。
+        # 子行程 stderr 併入輸出時，為免任何引擎版本把它升成終止錯誤，捕捉前先把本 step 的
+        # $ErrorActionPreference 改 Continue（各 step 是獨立行程，不外溢）。
+        # 結構鎖＝tools/tests/test_smoke_ci_sync.py。
         shell: pwsh
         run: |
           $wt = Join-Path $env:RUNNER_TEMP "wt-install-hooks-reject"
           git worktree add --detach $wt HEAD
           Push-Location $wt
-          ./AISDLC_SDD/scripts/install-hooks.ps1
+          $installer = Join-Path $wt "AISDLC_SDD/scripts/install-hooks.ps1"
+          $ErrorActionPreference = 'Continue'
+          $out = & pwsh -NoProfile -ExecutionPolicy Bypass -File $installer 2>&1 | Out-String -Width 4096
           $rc = $LASTEXITCODE
           Pop-Location
           git worktree remove --force $wt
+          Write-Host $out
           if ($rc -ne 1) { throw "預期在 linked worktree 下 install-hooks.ps1 應 exit 1，實際 rc=$rc" }
-          Write-Host "install-hooks.ps1 worktree 拒絕驗證通過（rc=1 as expected）"
+          # 標記字面＝tools/git_hooks_install_common.py::LINKED_WORKTREE_REJECT_MARKER 的複本，勿手改、由 test_smoke_ci_sync.py 機械對齊
+          if ($out -notmatch [regex]::Escape('LINKED-WORKTREE-REJECTED')) { throw "install-hooks.ps1 rc=1 但輸出未含拒絕標記——非 worktree 守衛所擋（空洞通過；DEF-200-361）" }
+          Write-Host "install-hooks.ps1 worktree 拒絕驗證通過（rc=1 且拒絕標記命中）"
           exit 0
 
       - name: 根層 dispatcher hooks：安裝 + 真實 git commit 經 core.hooksPath 觸發 dispatcher（R9 ARCH-F3）

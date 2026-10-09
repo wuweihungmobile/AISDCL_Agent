@@ -645,6 +645,10 @@ _GOVERNANCE_DOCS = (
     # Windows 自成 stage，pre-push 與 CI 加 --check-head；零守衛面）：即刻登記。
     _REPO_ROOT / "docs" / "06_quality"
     / "CrossPlatform_R208_NightlyAnchor_Mechanical_Backfill_Evidence.md",
+    # 技術債結案輪（28 筆未結列的唯讀分診與 Architect 裁決：23 筆以決策／現況結案、2 筆
+    # 移外部阻塞軌、4 筆修復；理論洞清單只登記不修；零守衛面）：即刻登記。
+    _REPO_ROOT / "docs" / "06_quality"
+    / "CrossPlatform_R209_Debt_Closure_Evidence.md",
     # 護欄層行數棘輪史料歸檔的第二冊（第一冊逼近 Read 工具上限，淨減法搬遷改落本檔）：即刻登記。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_Guard_Line_History_2.md",
 )

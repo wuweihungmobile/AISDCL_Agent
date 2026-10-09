@@ -142,23 +142,18 @@ jobs:
   # `-n auto --dist worksteal`（本機 2026-09-24 連續 10 次實測全綠，rc=0、
   # 34 passed、wall 16.3~17.6s，見 DEF-200-379 回報）。
   #
-  # 🔴 觀察期（DEF-200-379）：本 job 失敗**不計入** Rule 9.9.4「連 3 日 nightly
-  # 失敗鎖定 main」——雙重機制保證，不是只靠 `needs`：
-  #   (a) 下方 `track-streak-and-lock` 的 `needs: chaos` 未變，天然只綁上方
-  #       凍結基線軌，本 job 不在其依賴圖內；
-  #   (b) 更根本的一層——`track-streak-and-lock` 的連敗查詢邏輯本身已改讀
-  #       **job 層**（見該 job 的 `GATING_JOB_NAMES` 環境變數，現值＝上方
-  #       `chaos` job 的顯示名）：即使同一個 workflow run 內本 job 紅導致
-  #       run 層 `conclusion=failure`，只要 `GATING_JOB_NAMES` 不含本 job 的
-  #       顯示名，連敗計數就不會把這種夜晚算進去（三位複審一致命中：修復前
-  #       只讀 run 層 conclusion，觀察期形同虛設）。
-  # 觀察期＝**首次排程 run 起連續 7 次排程 run**（`workflow_dispatch` 手動
-  # 觸發不計入觀察期計數），最早 **2026-10-03**（下一個排程 02:03 UTC）起算
-  # 七次；出口條件與升級動作（觀察期滿後是否／如何把本 job 的顯示名
-  # `fsm-runtime chaos suite (LATEST track — observation period, DEF-200-379)`
-  # 加入 `GATING_JOB_NAMES`、進而併入 Rule 9.9.4 鎖 main 判定）由掌舵者於
-  # 觀察期滿後裁決——本段註解與 `GATING_JOB_NAMES`／`track-streak-and-lock`
-  # 的 `needs` 屆時再訂正（見缺陷帳本 DEF-200-379 後續列）。
+  # 🔴 已納入 Rule 9.9.4（DEF-200-381；DEF-200-379 的觀察期已結束）：本 job 與上方
+  # `chaos` 並列為「連 3 日 nightly 失敗鎖定 main」的 gating job——任一顆在某夜紅，
+  # 該夜即計入連敗。納入由三處同步構成（`TestFsmChaosNightlyStreakReadsJobLayer`
+  # 機械互鎖，任一處漏改即紅）：
+  #   (a) 下方 `track-streak-and-lock` 的 `needs: [chaos, chaos-latest]`——兩顆任一
+  #       紅都會觸發連敗判定 job；
+  #   (b) 該 job 的 `GATING_JOB_NAMES`（`|` 分隔）列出兩顆 job 的顯示名；
+  #   (c) 連敗查詢讀 **job 層**：某次 run 的任一 gating job 結論為 failure／
+  #       timed_out 即計入（run 層 `conclusion` 分不出是哪一顆紅，不得作判準）。
+  # 本 job 顯示名內的「observation period」是歷史標籤、刻意不改：顯示名沒有共用
+  # 來源（`jobs.<id>.name` 不支援 `env` context），改名須同時改 `GATING_JOB_NAMES`
+  # 與鎖檔內的顯示名常數。
   chaos-latest:
     name: fsm-runtime chaos suite (LATEST track — observation period, DEF-200-379)
     runs-on: ubuntu-latest
@@ -254,16 +249,17 @@ jobs:
           retention-days: 7
 
   # QA Round-3 P1-02 — enforce Rule 9.9.4「連 3 日 nightly 失敗鎖定 main」.
-  # Runs only when the chaos job failed. Queries the most recent completed
-  # nightly runs; if ≥3 consecutive failures are confirmed, opens a P0 issue
-  # and attempts to tighten branch protection on `main`. Both side-effects
-  # are best-effort (`continue-on-error: true`) — the workflow never masks a
-  # chaos failure because the post-fail automation threw.
+  # Runs only when a gating job (`chaos` or `chaos-latest`; DEF-200-381)
+  # failed. Queries the most recent completed nightly runs; if ≥3 consecutive
+  # failures are confirmed, opens a P0 issue and attempts to tighten branch
+  # protection on `main`. Both side-effects are best-effort
+  # (`continue-on-error: true`) — the workflow never masks a chaos failure
+  # because the post-fail automation threw.
   track-streak-and-lock:
     name: enforce 3-day streak lockdown
     runs-on: ubuntu-latest
     timeout-minutes: 10   # R14 QA-R14-RR-1：輕量 streak 判定 job，補 timeout 防卡死燒滿 360 分鐘
-    needs: chaos
+    needs: [chaos, chaos-latest]
     if: failure()
     permissions:
       actions: read
@@ -290,48 +286,46 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           WORKFLOW_FILE: aisdlc-sdd-fsm-chaos-nightly.yml
-          # 🔴 DEF-200-379（三位複審一致命中）：本值必須與 `chaos` job 的顯示名
-          # （上方 `jobs.chaos.name`）逐字一致——job 顯示名沒有共用來源（GitHub
+          # 🔴 DEF-200-379／DEF-200-381：以 `|` 分隔的 gating job 顯示名清單，須恰為
+          # `chaos` 與 `chaos-latest` 兩顆 job 的顯示名（上方 `jobs.chaos.name`、
+          # `jobs.chaos-latest.name`）逐字一致——job 顯示名沒有共用來源（GitHub
           # Actions 的 `jobs.<id>.name` 不支援 `env` context），只能靠機械鎖
           # 互鎖（同型先例：test_workflow_permission_concurrency_lock.py 的
           # `TestNightlyJobNameSelectorInterlock`；本檔對等鎖見
-          # `TestFsmChaosNightlyStreakReadsJobLayer`）。觀察期滿、掌舵者裁決
-          # 升級後，才把 `chaos-latest` job 的顯示名也加進本值（見上方
-          # `chaos-latest` job 頂部的觀察期註解）。
-          GATING_JOB_NAMES: "fsm-runtime chaos suite"
+          # `TestFsmChaosNightlyStreakReadsJobLayer`）。顯示名不得含 `|`、`"`、`\`
+          # （下方 jq 濾器以 bash 雙引號展開代入本值）。
+          GATING_JOB_NAMES: "fsm-runtime chaos suite|fsm-runtime chaos suite (LATEST track — observation period, DEF-200-379)"
         run: |
           # Fetch the last 5 completed runs of THIS workflow, ordered newest first.
           # We treat the failing run that triggered this job as the newest entry.
           #
-          # 🔴 DEF-200-379：本 workflow 自本輪起有兩顆平行、互不相依的 job
-          # （`chaos` 凍結基線／`chaos-latest` LATEST 觀察軌，見上方註解）——任一
-          # 顆紅都會讓 run 層 `conclusion` 報 failure，run 層結構上無法分辨
-          # 「凍結基線真的紅」與「只有觀察軌紅」。Rule 9.9.4「連 3 日鎖 main」
-          # 只認凍結基線（`chaos` job），沿用 run 層會讓觀察期內只因
-          # `chaos-latest` 紅的夜晚被誤計入連敗，違反掌舵者「觀察期內只出聲、
-          # 不計入」的裁決。修法：對每一筆 run 逐一查 job 層
-          # （`/actions/runs/<id>/jobs`），只取顯示名等於 `${GATING_JOB_NAMES}`
-          # 的那個 job 的 conclusion，run 層 conclusion 不再是判準輸入。
+          # 🔴 DEF-200-379／DEF-200-381：本 workflow 有兩顆平行、互不相依的 gating
+          # job（`chaos` 凍結基線／`chaos-latest` LATEST 軌，見上方註解）。run 層
+          # `conclusion` 同時混入非 gating job（例如本 job 自身出錯）的結果，不得
+          # 作判準。故對每一筆 run 逐一查 job 層（`/actions/runs/<id>/jobs`），只看
+          # 顯示名屬於 `${GATING_JOB_NAMES}`（`|` 分隔）的那些 job：其中**任一**顆
+          # 結論為 failure／timed_out，該 run 即計入連敗。
           set -eu
           run_ids=$(gh api \
             "/repos/${REPO}/actions/workflows/${WORKFLOW_FILE}/runs?status=completed&per_page=5" \
             --jq '.workflow_runs[].id')
           echo "Recent run ids: ${run_ids}"
-          # Count consecutive job-layer failures from newest end. `failure` and
-          # `timed_out` count toward the streak; anything else (success /
-          # cancelled / skipped / the gating job never ran / gh api error)
-          # breaks it — fail-closed toward "don't count", matching Rule 9.9.4's
-          # intent that only a *confirmed* chaos failure should ratchet the
-          # streak.
+          # Count consecutive job-layer failures from newest end. A run counts
+          # when ANY gating job's conclusion is `failure` or `timed_out` (the jq
+          # filter below prints every gating job's conclusion, comma-joined; the
+          # `case` matches whole tokens); anything else (success / cancelled /
+          # skipped / no gating job found / gh api error) breaks the streak —
+          # fail-closed toward "don't count", matching Rule 9.9.4's intent that
+          # only a *confirmed* chaos failure should ratchet the streak.
           streak=0
           for run_id in ${run_ids}; do
-            job_conclusion=$(gh api "/repos/${REPO}/actions/runs/${run_id}/jobs" \
-              --jq ".jobs[] | select(.name == \"${GATING_JOB_NAMES}\") | .conclusion" \
+            job_conclusions=$(gh api "/repos/${REPO}/actions/runs/${run_id}/jobs" \
+              --jq "[.jobs[] | select(.name as \$n | \"${GATING_JOB_NAMES}\" | split(\"|\") | any(. == \$n)) | .conclusion] | join(\",\")" \
               2>/dev/null || echo "api-error")
-            job_conclusion="${job_conclusion:-missing}"
-            echo "run ${run_id}: job=\"${GATING_JOB_NAMES}\" conclusion=${job_conclusion}"
-            case "${job_conclusion}" in
-              failure|timed_out)
+            job_conclusions="${job_conclusions:-missing}"
+            echo "run ${run_id}: gating jobs=\"${GATING_JOB_NAMES}\" conclusions=${job_conclusions}"
+            case ",${job_conclusions}," in
+              *,failure,*|*,timed_out,*)
                 streak=$((streak + 1))
                 ;;
               *)
@@ -341,9 +335,9 @@ jobs:
           done
           # The current run is in-progress (conclusion=null) and not yet in
           # the list — add 1 to include the failure we're responding to. This
-          # job (`track-streak-and-lock`) only runs when `chaos` itself failed
-          # (`needs: chaos` + `if: failure()`), so the "+1" always refers to a
-          # real `chaos` job failure, never `chaos-latest`.
+          # job (`track-streak-and-lock`) only runs when a gating job failed
+          # (`needs: [chaos, chaos-latest]` + `if: failure()`), so the "+1"
+          # always refers to a real `chaos` or `chaos-latest` job failure.
           actual=$((streak + 1))
           echo "streak=${actual}" >> "$GITHUB_OUTPUT"
           echo "Consecutive job-layer failures including current (gating=${GATING_JOB_NAMES}): ${actual}"

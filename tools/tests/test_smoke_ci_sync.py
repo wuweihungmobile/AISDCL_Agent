@@ -1490,3 +1490,81 @@ class TestWorktreeRejectProbesAreNotHollow(unittest.TestCase):
             problems, [], "helper 對合成舊版（同行程 & $installer、無逃生口/標記）判綠"
             "——鑑別力已失效"
         )
+
+
+# --- DEF-200-361／DEF-101-675：compat-CI step 的 run 本體結構鎖 ---------------------
+# WHY：兩種「綠燈卻沒驗到」。①worktree 拒絕 step 只比 rc=1，前置守衛以同款 rc 頂替即空洞
+# 通過；②zsh source step 的斷言住在 `zsh -c '…'` 引號內，dev_start.sh 的 sourced 偵測失效
+# 而直落檔尾 `exit` 時整段不執行、外層仍 rc=0。本鎖驗 yml 的 run 本體（剝整行註解後）。
+
+
+def _ci_runs(path: Path, name_part: str) -> list[str]:
+    """step 名含 `name_part` 的所有 step 的 run 本體（剝整行註解）。"""
+    jobs = (yaml.safe_load(_read(path)) or {}).get("jobs") or {}
+    steps = [s for job in jobs.values() for s in job.get("steps") or [] if isinstance(s, dict)]
+    return [_code_only(s.get("run") or "") for s in steps if name_part in str(s.get("name"))]
+
+
+def _reject_step_problems(run: str, *, windows: bool) -> list[str]:
+    """DEF-200-361 判準：輸出捕捉＋標記斷言（標記字面逐字等於 Python SSOT）；回缺失清單。"""
+    mk = re.escape(_ghic.LINKED_WORKTREE_REJECT_MARKER)
+    if windows:
+        needs = ((r"2>&1\s*\|\s*Out-String", "輸出捕捉"),
+                 (rf"-notmatch\s+\[regex\]::Escape\('{mk}'\)", "標記斷言"))
+    else:
+        needs = ((r'>\s*"\$out"\s+2>&1', "輸出導檔"), (rf"grep\s+-qF\s+--\s+'{mk}'", "標記斷言"))
+    return [f"缺{what}（{pat}）" for pat, what in needs if not re.search(pat, run)]
+
+
+def _zsh_source_problems(run: str) -> list[str]:
+    """DEF-101-675 判準：`zsh -c` 引號本體只准把證物寫進行程外側的 "$EV"，斷言全在引號外。"""
+    m = re.search(r"zsh\s+-c\s+'(.*?)'", run, re.DOTALL)
+    if m is None:
+        return ["找不到 zsh -c '…' 引號本體"]
+    body, outside = m.group(1), run[: m.start()] + run[m.end():]
+    problems = [] if '> "$EV"' in body else ['引號本體缺 > "$EV" 證物寫入']
+    if re.search(r"\bexit\b|\|\||::error::", body):
+        problems.append("引號本體內仍有斷言／退出（source 殺掉殼時整段不跑＝失明）")
+    for pat in (r'test\s+-f\s+"\$', r"RC=0", r"\^VENV=\."):
+        if not re.search(pat, outside):
+            problems.append(f"引號本體外缺斷言 {pat}")
+    return problems
+
+
+class TestCiWorktreeRejectStepsAssertMarker(unittest.TestCase):
+    """DEF-200-361：兩份 compat-CI 的四個 linked worktree 拒絕 step 須捕捉輸出，並以 rc 與
+    LINKED-WORKTREE-REJECTED 標記雙斷言；標記字面與 Python SSOT 逐字對齊。"""
+
+    _PART = "於 linked worktree 下應正確拒絕"
+
+    def test_each_reject_step_asserts_the_marker(self) -> None:
+        for path, windows in ((_MAC_CI, False), (_WIN_CI, True)):
+            runs = _ci_runs(path, self._PART)
+            self.assertEqual(len(runs), 2, f"{path.name} 拒絕 step 應恰 2 個，實際 {len(runs)}")
+            for run in runs:
+                self.assertEqual(_reject_step_problems(run, windows=windows), [], path.name)
+
+    def test_helper_flags_rc_only_and_stale_marker_steps(self) -> None:
+        """紅綠自證：只比 rc 的舊 step、標記字面陳舊的真實 step，兩平台 helper 皆須判紅。"""
+        rc_only = {False: '( cd "$wt" && bash x.sh )\nrc=$?\n[ "$rc" -ne 1 ] && exit 1\n',
+                   True: "./x.ps1\n$rc = $LASTEXITCODE\nif ($rc -ne 1) { throw 'rc' }\n"}
+        for path, windows in ((_MAC_CI, False), (_WIN_CI, True)):
+            real = _ci_runs(path, self._PART)[0]
+            stale = real.replace(_ghic.LINKED_WORKTREE_REJECT_MARKER, "OLD-MARKER")
+            for label, run in (("只比 rc", rc_only[windows]), ("標記陳舊", stale)):
+                self.assertTrue(_reject_step_problems(run, windows=windows), f"{label}判綠")
+
+
+class TestMacZshSourceStepAssertsOutOfProcess(unittest.TestCase):
+    """DEF-101-675：macOS zsh source step 的斷言須住在 zsh 行程外側（見上方 WHY）。"""
+
+    def test_assertions_live_outside_the_zsh_process(self) -> None:
+        runs = _ci_runs(_MAC_CI, "zsh source tools/dev_start.sh")
+        self.assertEqual(len(runs), 1, f"zsh source step 應恰 1 個，實際 {len(runs)}")
+        self.assertEqual(_zsh_source_problems(runs[0]), [])
+
+    def test_helper_flags_in_process_assertions(self) -> None:
+        """紅綠自證：合成舊形狀（斷言在 zsh -c 引號內）→ helper 必須回非空。"""
+        old = ("zsh -c '\n  source tools/dev_start.sh --no-sync\n  rc=$?\n"
+               '  [ -n "$VIRTUAL_ENV" ] || { echo "::error::x"; exit 1; }\n' "'\necho done\n")
+        self.assertTrue(_zsh_source_problems(old), "helper 對斷言在引號內的舊形狀判綠")

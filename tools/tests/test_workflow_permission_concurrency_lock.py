@@ -30,9 +30,15 @@ Guard_Line_History_2.md〈R186 淨減法搬遷〉§79。  round-label-ok
 from __future__ import annotations
 
 import datetime
+import fnmatch
+import json
+import os
 import re
+import shutil
 import subprocess
+import sys
 import unittest
+import warnings
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -1589,11 +1595,9 @@ class TestTrackedScriptsScanSurfaceCoversUntracked(unittest.TestCase):
         )
 
 
-# DEF-200-379：`chaos-latest`（LATEST 觀察軌）的顯示名——升級判準 (c) 用來確認
-# 觀察期語意沒有被無意破壞。**不是** GATING_JOB_NAMES 目前的合法值（那正是本鎖要
-# 擋的事）；觀察期滿、掌舵者裁決升級後，GATING_JOB_NAMES 才會（且應該）納入它，
-# 屆時要同步改 `TestFsmChaosNightlyStreakReadsJobLayer.
-# test_gating_job_names_does_not_yet_include_chaos_latest`（見該測試 docstring）。
+# DEF-200-381：`chaos-latest`（LATEST 軌）的顯示名字面常數。已納入 Rule 9.9.4，
+# GATING_JOB_NAMES 必含它，(c) 以本常數釘住「必含」；顯示名內的 observation period
+# 是歷史標籤，改名須連 yml 的 GATING_JOB_NAMES 與本常數一併改。
 _CHAOS_LATEST_JOB_DISPLAY_NAME = (
     "fsm-runtime chaos suite (LATEST track — observation period, DEF-200-379)"
 )
@@ -1604,12 +1608,12 @@ class TestFsmChaosNightlyStreakReadsJobLayer(unittest.TestCase):
     `track-streak-and-lock` 連敗計數必須讀 **job 層** conclusion，不得直接消費
     run 層 `workflow_runs[].conclusion`。
 
-    立案：本 workflow 自 DEF-200-379 起有兩顆平行、互不相依的 job（`chaos` 凍結
-    基線／`chaos-latest` LATEST 觀察軌，無 `needs` 互相依賴）。任一顆紅都會讓
-    run 層 `conclusion` 報 failure，run 層結構上分不出「凍結基線真的紅」與
-    「只有觀察軌紅」。Rule 9.9.4「連 3 日鎖 main」只認凍結基線；若連敗計數沿用
-    run 層，觀察期內只因 `chaos-latest` 紅的夜晚會被誤計入連敗，違反掌舵者
-    「觀察期內只出聲、不計入」的裁決——形同觀察期從未存在。
+    立案：本 workflow 有兩顆平行、互不相依的 job（`chaos` 凍結基線／`chaos-latest`
+    LATEST 軌，無 `needs` 互相依賴），run 層 `conclusion` 分不出是哪一顆紅。
+    DEF-200-379 觀察期內只有 `chaos` 計入 Rule 9.9.4「連 3 日鎖 main」，沿用 run
+    層會讓只因 `chaos-latest` 紅的夜晚被誤計入；DEF-200-381 納入後兩顆都是 gating
+    job，job 層仍是唯一準確的輸入（run 層另混入非 gating job 的結果）。gating 集合
+    與觸發條件由 (b)(c)(d) 與行為鎖釘住。
 
     同型先例：`TestNightlyJobNameSelectorInterlock`（本檔上方）鎖住 alert 的
     jq 選擇子與 nightly-full 的 `name:` 互鎖；本類別是同一種「job 顯示名沒有
@@ -1653,61 +1657,122 @@ class TestFsmChaosNightlyStreakReadsJobLayer(unittest.TestCase):
             "（DEF-200-379）",
         )
 
-    def test_gating_job_names_matches_the_chaos_job_display_name_exactly(self):
-        """(b) `GATING_JOB_NAMES` 的值必須與 `jobs.chaos.name` 逐字一致。
+    def _gating_raw(self) -> str:
+        m = re.search(r'GATING_JOB_NAMES:\s*"([^"]*)"', self._streak_step())
+        self.assertIsNotNone(m, "streak step 找不到 `GATING_JOB_NAMES:` 環境變數宣告")
+        return m.group(1)
 
-        兩者是兩份手寫字面值，中間沒有共用來源（GitHub Actions 的
-        `jobs.<id>.name` 不支援 `env` context，抽成變數這條路不通，同
-        `TestNightlyJobNameSelectorInterlock` docstring 的論證）——改了 `chaos`
-        job 的顯示名卻忘了同步 `GATING_JOB_NAMES`，選擇子會靜默落空、job 層
-        查詢查不到任何 job，連敗計數永遠只等於 1。
+    def test_gating_job_names_matches_the_chaos_job_display_name_exactly(self):
+        """(b) `GATING_JOB_NAMES`（以 `|` 分隔）的集合必須恰為 `jobs.chaos.name` 與
+        `jobs.chaos-latest.name` 兩個 gating job 的顯示名，逐字一致。
+
+        顯示名是兩份手寫字面值，中間沒有共用來源（GitHub Actions 的
+        `jobs.<id>.name` 不支援 `env` context，同 `TestNightlyJobNameSelectorInterlock`
+        docstring 的論證）——改了任一 job 的顯示名卻忘了同步 `GATING_JOB_NAMES`，
+        選擇子會靜默落空，該 job 的失敗永遠進不了連敗計數。
         """
         text = _FSM_CHAOS_NIGHTLY.read_text(encoding="utf-8")
-        chaos_name = _job_display_name(_job_block(text, "chaos"))
-        m = re.search(r'GATING_JOB_NAMES:\s*"([^"]*)"', self._streak_step())
-        self.assertIsNotNone(
-            m, "streak step 找不到 `GATING_JOB_NAMES:` 環境變數宣告",
-        )
+        expected = {_job_display_name(_job_block(text, j)) for j in ("chaos", "chaos-latest")}
+        names = self._gating_raw().split("|")
+        self.assertEqual(len(names), len(set(names)), f"GATING_JOB_NAMES 含重複項：{names!r}")
         self.assertEqual(
-            m.group(1), chaos_name,
-            f"GATING_JOB_NAMES={m.group(1)!r} 與 `chaos` job 的顯示名 "
-            f"{chaos_name!r} 不一致",
+            set(names), expected,
+            f"GATING_JOB_NAMES 拆出 {names!r}，與 `chaos`／`chaos-latest` 的顯示名 "
+            f"{sorted(expected)!r} 不一致",
         )
 
-    def test_gating_job_names_does_not_yet_include_chaos_latest(self):
-        """(c) 觀察期未滿：`GATING_JOB_NAMES` 現在不得含 `chaos-latest` 的顯示名。
-
-        🔴 升級時要改這支鎖：觀察期滿（DEF-200-379：首次排程 run 起連續 7 次
-        排程 run，最早 2026-10-03 起）、掌舵者裁決把 `chaos-latest` 併入
-        Rule 9.9.4 鎖 main 判定後，`GATING_JOB_NAMES` 才會（且應該）含
-        `chaos-latest` 的顯示名——屆時本測試要跟著改寫或刪除，不是永久斷言。
+    def test_gating_job_names_includes_chaos_latest(self):
+        """(c) 已納入 Rule 9.9.4（DEF-200-381）：`GATING_JOB_NAMES` 必含 `chaos-latest`
+        的顯示名（字面常數釘住；(b) 管集合相等，本測試管「必含」）。拿掉它 ⇒ LATEST 軌
+        單獨紅的夜晚不再計入連敗，Rule 9.9.4 對 LATEST 軌靜默失效。
         """
-        m = re.search(r'GATING_JOB_NAMES:\s*"([^"]*)"', self._streak_step())
-        self.assertIsNotNone(
-            m, "streak step 找不到 `GATING_JOB_NAMES:` 環境變數宣告",
-        )
-        self.assertNotIn(
-            _CHAOS_LATEST_JOB_DISPLAY_NAME, m.group(1),
-            "觀察期未滿（DEF-200-379），GATING_JOB_NAMES 卻已含 chaos-latest 的"
-            "顯示名——這會讓觀察軌提早計入 Rule 9.9.4 連敗判定，違反掌舵者裁決",
+        self.assertIn(
+            _CHAOS_LATEST_JOB_DISPLAY_NAME, self._gating_raw().split("|"),
+            "GATING_JOB_NAMES 不含 chaos-latest 的顯示名——LATEST 軌的失敗不會計入 "
+            "Rule 9.9.4 連敗判定（DEF-200-381 已納入）",
         )
 
-    def test_chaos_latest_is_not_in_the_streak_jobs_needs(self):
-        """(d) `chaos-latest` 不得出現在 `track-streak-and-lock` 的 `needs:`。
+    def test_chaos_latest_is_in_the_streak_jobs_needs(self):
+        """(d) `chaos-latest` 必須在 `track-streak-and-lock` 的 `needs:` 內（連同
+        `chaos`），且 `if: failure()` 保留。
 
-        該 job 只應依賴凍結基線軌 `chaos`；依賴到觀察軌會讓 `chaos-latest` 單獨
-        失敗就直接觸發連敗判定 job 執行，繞過 job 層 gating（(a)(b)(c) 三支鎖）
-        提供的間接保護——`needs` 決定「這個 job 何時被觸發」，與「觸發後怎麼算
-        連敗」是兩層獨立防線，缺一不可。
+        `needs` 決定「這個 job 何時被觸發」，與「觸發後怎麼算連敗」((b)(c) 與行為鎖)
+        是兩層獨立防線：漏掉它，`chaos-latest` 單獨失敗時連敗判定 job 根本不會跑；
+        少了 `if: failure()`，該 job 只會在全綠夜晚跑、失敗夜晚反而被跳過。
         """
         text = _FSM_CHAOS_NIGHTLY.read_text(encoding="utf-8")
         block = _job_block(text, "track-streak-and-lock")
         m = re.search(r"^    needs:\s*(.+)\s*$", block, re.MULTILINE)
         self.assertIsNotNone(m, "track-streak-and-lock 找不到 `needs:` 宣告")
-        self.assertNotIn(
-            "chaos-latest", m.group(1),
-            f"track-streak-and-lock 的 needs（{m.group(1)!r}）含 chaos-latest",
+        self.assertLessEqual(
+            {"chaos", "chaos-latest"}, set(re.findall(r"[\w-]+", m.group(1))),
+            f"track-streak-and-lock 的 needs（{m.group(1)!r}）缺 chaos 或 chaos-latest",
         )
+        self.assertRegex(block, r"(?m)^    if: failure\(\)\s*$", "`if: failure()` 被移除")
+
+    def test_streak_filter_does_not_compare_the_whole_name_list_for_equality(self):
+        """`GATING_JOB_NAMES` 是 `|` 分隔的名單；jq 濾器若仍把整串當單一名字做 `==`
+        （單名形態），兩顆 job 的名字都比不中、連敗計數靜默歸零。本測試不依賴 jq。
+        """
+        self.assertNotRegex(
+            _strip_comment_lines(self._streak_step()),
+            r'\.name == \\"\$\{GATING_JOB_NAMES\}\\"',
+            "streak 濾器把整串 GATING_JOB_NAMES 當單一名字比對（單名形態）",
+        )
+
+    def test_streak_filter_counts_a_run_when_any_gating_job_failed(self):
+        """行為鎖（DEF-200-381）：`track-streak-and-lock` 只在真失敗的夜晚才跑，雲端
+        綠燈驗不到它的計數邏輯。取出 yml 內真正的 jq 濾器與 `case` 比對式，餵合成的
+        jobs JSON：任一 gating job 紅（failure／timed_out）⇒ 該 run 計入；皆綠／被取消／
+        仍在跑／只有非 gating job 紅 ⇒ 不計入。需要 PATH 上有 jq（不在根層測試的外部
+        工具前置清單內）；本機缺席時發警告、不 skip、不假裝已驗，結構鎖 (b)(c)(d) 仍生效；
+        真 ubuntu runner 上缺席則直接 fail（預裝 jq，缺席＝環境壞了）；act 本機映像除外。
+        """
+        jq = shutil.which("jq")
+        if jq is None:
+            on_real_ubuntu_ci = (os.environ.get("GITHUB_ACTIONS") and not os.environ.get("ACT")
+                                 and sys.platform.startswith("linux"))
+            if on_real_ubuntu_ci:  # act 映像（tools/act/Dockerfile）未裝 jq，只在真 runner 上 fail
+                self.fail("ubuntu CI 的 PATH 上沒有 jq：streak 濾器行為鎖無法執行（不得靜默略過）")
+            warnings.warn("PATH 上沒有 jq：streak 濾器行為鎖未執行", RuntimeWarning, stacklevel=1)
+            return
+        step = _strip_comment_lines(self._streak_step())
+        raw = re.search(r'--jq "((?:[^"\\]|\\.)*)"', step)
+        arm = re.search(r'case ",\$\{job_conclusions\}," in\s+(\S+?)\)', step)
+        self.assertTrue(raw and arm, "streak step 找不到 job 層 `--jq` 或 `case` 比對式")
+        # 還原 bash 雙引號展開後 jq 實際收到的程式：代入名單、解 `\"`／`\$` 跳脫
+        prog = (raw.group(1).replace("${GATING_JOB_NAMES}", self._gating_raw())
+                .replace('\\"', '"').replace("\\$", "$"))
+        text = _FSM_CHAOS_NIGHTLY.read_text(encoding="utf-8")
+        chaos, latest, streak = (_job_display_name(_job_block(text, j))
+                                 for j in ("chaos", "chaos-latest", "track-streak-and-lock"))
+
+        def counted(c, lt, s="skipped", program=prog) -> bool:
+            jobs = [{"name": chaos, "conclusion": c}, {"name": latest, "conclusion": lt},
+                    {"name": streak, "conclusion": s}]
+            # 非 ASCII 以 \uXXXX 傳：Windows 上 jq 的 argv 編碼不可靠
+            argv = [jq, "-r", program.encode("ascii", "backslashreplace").decode("ascii")]
+            p = subprocess.run(argv, input=json.dumps({"jobs": jobs}), capture_output=True,
+                               text=True, encoding="utf-8")
+            self.assertEqual(p.returncode, 0, f"jq 執行失敗：{p.stderr}")
+            out = p.stdout.strip() or "missing"
+            return any(fnmatch.fnmatchcase(f",{out},", pat) for pat in arm.group(1).split("|"))
+
+        for label, c, lt, s, want in (
+            ("只有 chaos 紅", "failure", "success", "skipped", True),
+            ("只有 chaos-latest 紅", "success", "failure", "skipped", True),
+            ("chaos-latest timed_out", "success", "timed_out", "skipped", True),
+            ("兩顆皆綠", "success", "success", "skipped", False),
+            ("chaos-latest 被取消", "success", "cancelled", "skipped", False),
+            ("chaos-latest 仍在跑", "success", None, "skipped", False),
+            ("只有非 gating 的連敗判定 job 紅", "success", "success", "failure", False),
+        ):
+            with self.subTest(label):
+                self.assertIs(counted(c, lt, s), want, label)
+        # 鑑別力自證：修復前的單名濾器看不見「只有 chaos-latest 紅」的夜晚
+        old = f'[.jobs[] | select(.name == "{chaos}") | .conclusion] | join(",")'
+        self.assertIs(counted("success", "failure", program=old), False,
+                      "單名濾器竟判成計入——上面的資料組分不出新舊濾器，行為鎖失去鑑別力")
 
     _HARDCODED_VERSION_RE = re.compile(r"AISDLC_SDD_v0\.\d+")
 

@@ -1305,7 +1305,7 @@ class TestOrphanBacklogProblems(unittest.TestCase):
         problems = m.orphan_backlog_problems(_ledger_text(self._CONTEXT + negated))
         self.assertEqual(len(problems), 1, f"否定形態必須仍被判孤兒：{problems}")
         affirmed = (self._INJECTED_ORPHAN.rstrip("\n|\r ")
-                    + " 該輪已交出成果，此處追記回執 |\n")
+                    + " 該輪已交出成果，此處追記回執（**R67**） |\n")
         self.assertEqual(
             m.orphan_backlog_problems(_ledger_text(self._CONTEXT + affirmed)), [],
             "真正的『回執』必須照樣放行 —— 否則本鎖變成恆紅、合法出口被關掉",
@@ -1433,21 +1433,37 @@ class TestDef200195CrossRowReceiptFreshnessIsNotSelfSatisfied(unittest.TestCase)
             "首詞 fixed@R66 的 @R66 是時點不是承接者，不得滿足「回執輪號 ≥ 當前輪」")
 
 
-class TestDef200129SelfRowExitAwaitsWiring(unittest.TestCase):
-    """DEF-200-129：自列「改派」出口的輪號下限**尚未接線**——本測試把債釘成可見。
+class TestDef200129SelfRowExitNamesAFreshRound(unittest.TestCase):
+    """DEF-200-129：自列「改派」出口與跨列出口同一把尺（合成當前輪＝R66）——須指名
+    ≥ 當前輪的輪號或字面「未指派」；舊行為＝狀態欄寫過一次改派即永久免驗（純布林）。"""
 
-    `_receipt_rounds()` 已落地並由跨列出口消費；自列出口仍是純布林。當前輪滯後在
-    R100 的窗口以真帳本重量：上鎖即轉紅 14 筆（逐筆 ID 見主檔 `_receipt_rounds()`
-    docstring），依「大量假紅的閘門會被整個關掉」紀律，接線排在結案輪帳本收斂、
-    重量轉紅=0 之後（載體＝DEF-200-129 回執）。接線落地時本測試必須翻紅並改寫——
-    那正是它存在的目的（現狀被誰改變都不得無聲）。
-    """
+    def _scan(self, status: str, donor: str = "") -> list[str]:
+        rows = (_row4("DEF-01-998", "R66 Review round 2", "去向", "fixed")
+                + _row4("DEF-01-999", "R60 r3 Pkg-X", "去向", f"open（承接輪次：**R2**）{status}")
+                + donor)
+        return m.orphan_backlog_problems(_ledger_text(rows))
 
-    def test_a_stale_self_row_reassignment_still_exits_today(self) -> None:
-        row = _row4("DEF-01-999", "R60 r3 Pkg-X", "去向",
-                    "open（承接輪次：**R2**）🔴 **改派為：R3 backlog**（過期輪號）")
-        context = _row4("DEF-01-998", "R66 Review round 2", "去向", "fixed")
-        self.assertEqual(m.orphan_backlog_problems(_ledger_text(context + row)), [])
+    def test_a_stale_self_row_reassignment_no_longer_exits(self) -> None:
+        """紅：承接 R2 ＋ 自列改派 R3（< R66）⇒ 仍是孤兒（舊行為＝放行）。"""
+        problems = self._scan("🔴 **改派為：R3 backlog**")
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("DEF-01-999", problems[0])
+
+    def test_a_self_row_reassignment_to_the_current_round_exits(self) -> None:
+        """綠（邊界＝`>=`）：同一列改派 R66 ⇒ 放行；證明不是恆紅。"""
+        self.assertEqual(self._scan("🔴 **改派為：R66 backlog**"), [])
+
+    def test_a_self_row_reassignment_to_unassigned_exits(self) -> None:
+        """綠：字面「未指派」＝硬規則② 後半句自己給的二擇一，照放。"""
+        self.assertEqual(self._scan("🔴 **改派為：未指派 backlog**"), [])
+
+    def test_the_cross_row_receipt_path_is_unchanged(self) -> None:
+        """跨列回執仍同一把尺：陳舊 R3 ⇒ 紅、R66 ⇒ 綠（另見 DEF-200-088／195 兩組）。"""
+        def donor(n: int) -> str:
+            return _row4("DEF-01-1000", "R66 收尾", "去向",
+                         f"closed-by-decision（**改派** DEF-01-999：改派 **R{n}**）")
+        self.assertEqual(len(self._scan("", donor(3))), 1)
+        self.assertEqual(self._scan("", donor(66)), [])
 
 
 class TestDef200212StrictIsWiredIntoMain(unittest.TestCase):
@@ -1614,60 +1630,10 @@ class TestDef200241GrandfatheringReadsLedgerClosureNotTheClock(unittest.TestCase
 
 
 class TestOrphanBacklogAgainstTheRealLedger(unittest.TestCase):
-    """對真實帳本的 live 斷言——構造輸入證明「有牙」，這裡證明「不亂咬」。"""
+    """對真實帳本的 live 斷言（naive 對照用合成帳本）——構造輸入證明「有牙」，這裡證明「不亂咬」。"""
 
     def setUp(self) -> None:
         self.text = m._DEFECT_LOG.read_text(encoding="utf-8-sig")
-        layout = m._table_layout(self.text)
-        assert layout is not None
-        self.ncols, self.id_idx, self.status_idx = layout
-        self.rows = []
-        for lineno, line in enumerate(self.text.splitlines(), 1):
-            if not m._ROW_RE.match(line):
-                continue
-            cells = m._row_cells(line)
-            if len(cells) != self.ncols or not m._ID_RE.fullmatch(cells[self.id_idx]):
-                continue
-            self.rows.append((lineno, cells, line))
-
-    def test_rows_that_carry_a_reassignment_record_are_never_flagged(self) -> None:
-        """🔴 本鎖不得誤殺歷史檔——由**實際帳本內容**現查出「已改派的舊列」再驗。
-
-        取值全程 live（不寫死任何 DEF-ID）：凡「未結案 ＋ 指名了早於當前輪的承接者 ＋
-        該列載明改派／回執」的列，都必須通過。這正是規格文件拿 `DEF-101-500`（因 `521`
-        改派而合法）舉例的那一類。
-        """
-        cur = m.current_round(self.text)
-        self.assertIsNotNone(cur)
-        legal = []
-        for _lineno, cells, line in self.rows:
-            if m._classify(cells[self.status_idx]) not in m._UNRESOLVED_CLASSES:
-                continue
-            handovers = m._handover_rounds(line)
-            if not handovers or max(n for _, n, _ in handovers) >= cur:
-                continue
-            # 🔴 R74：判定面必須與 production 一致（狀態欄、遮 code span、擋否定），否則本
-            # 測試會拿一組「整列比對才算合法」的列去要求 production 放行 ⇒ 假紅。
-            if m._reassign_hit(cells[self.status_idx]):
-                legal.append(cells[self.id_idx])
-        self.assertTrue(
-            legal,
-            "帳本內找不到任何「舊承接輪次 ＋ 已改派」的列 ⇒ 本測試會空過（vacuous pass）。"
-            "若真的一列都不剩，請改以構造輸入驗證出口①，不要讓斷言變成恆真",
-        )
-        # 🔴 刻意解析出「被判的那一列的 ID」而非對整段訊息做子字串比對：問題訊息裡帶有
-        # 「體例比照 DEF-101-333／336／338」這類**建議用的** ID，子字串比對會把它們誤判
-        # 成被點名者（落地時實際踩到，本註解即該次的留痕）。
-        flagged = {
-            mm.group(1)
-            for p in m.orphan_backlog_problems(self.text)
-            if (mm := re.search(r"帳本 :\d+ (DEF-\d+-\d+)：", p))
-        }
-        for def_id in legal:
-            self.assertNotIn(
-                def_id, flagged,
-                f"{def_id} 已載明改派卻仍被判孤兒 ⇒ 閘門正在誤殺逐字保全的歷史列",
-            )
 
     def test_the_naive_whole_row_rule_would_have_burned_most_of_the_ledger(self) -> None:
         """量化「為何只認承接語境」：拿『列內任一 R\\d+』當稻草人跑一次（數字現查，Scan-H #3）。
@@ -1677,17 +1643,25 @@ class TestOrphanBacklogAgainstTheRealLedger(unittest.TestCase):
         退化成「真規則等於自己」的恆真式。反向（`narrow` 也獨立寫）是本列的原始缺陷：只
         重寫了 production 的一半、漏掉「狀態欄載明改派即放行」那兩個出口，於是合法改派的
         歷史列全被算進 narrow 且只增不減，帳本時鐘一前進就撞線（實測半套版 20 筆全屬此類）。
+        🔴 DEF-200-129：母體改用**合成帳本**——真帳本未結列在償債後趨近 0，live 對照結構上
+        失去鑑別力（naive=0；production 退回稻草人也量不出差異），合成母體由本測試自己控制。
         """
-        cur = m.current_round(self.text)
-        self.assertIsInstance(cur, int, "推不出當前輪 ⇒ 兩側都沒有比較基準，本測試無意義")
-        naive = 0
-        for _lineno, cells, line in self.rows:
-            if m._classify(cells[self.status_idx]) not in m._UNRESOLVED_CLASSES:
-                continue
-            rounds = [int(x) for x in re.findall(r"R(\d+)", line)]
-            if rounds and max(rounds) < cur:
-                naive += 1
-        narrow = len(m.orphan_backlog_problems(self.text))
+        stale = (("去向", "open（R80 實測仍成立）"), ("詳見 R83 證據檔", "open"),
+                 ("去向", "open（R25 複核；R60 曾回讀）"))
+        text = _ledger_text(
+            _row4("DEF-01-900", "R90 收尾", "去向", "fixed")  # 當前輪＝R90
+            + "".join(_row4(f"DEF-01-{901 + i}", "R70 Scan-A", *stale[i % 3])
+                      for i in range(6))  # 舊輪號只是佐證／引述，不是承接者
+            + _row4("DEF-01-907", "R70 Scan-A", "去向", "open（承接輪次：**R91**）")  # 合法
+            + _row4("DEF-01-908", "R70 Scan-A", "去向", "open（未指派 backlog，解鎖條件：…）"))
+        cur = m.current_round(text)
+        self.assertEqual(cur, 90, "合成帳本推不出預期的當前輪 ⇒ 兩側都沒有比較基準")
+        naive = sum(
+            1 for line in text.splitlines()
+            if m._ROW_RE.match(line)
+            and m._classify(m._row_cells(line)[-1]) in m._UNRESOLVED_CLASSES
+            and max((int(x) for x in re.findall(r"R(\d+)", line)), default=cur) < cur)
+        narrow = len(m.orphan_backlog_problems(text))
         self.assertGreater(naive, 0, "對照組零命中 ⇒ 本測試失去對照意義")
         self.assertLess(narrow * 5, naive,
                         f"承接語境窄化沒有收斂效果（naive={naive}／narrow={narrow}）——"
