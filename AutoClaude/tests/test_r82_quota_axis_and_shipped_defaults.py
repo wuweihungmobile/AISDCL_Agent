@@ -786,9 +786,10 @@ class TestAutoResumeServiceHonoursTheQuotaAxis:
         )
         with patch("autoclaude.core.services.auto_resume.time.sleep") as slept:
             svc.run(str(pb))
-        assert slept.call_count == 1
+        # improving_113：等待改為分片休眠 ⇒ 看加總，不看單次呼叫的引數。
+        total = sum(c.args[0] for c in slept.call_args_list)
         # 依觀測到的 resets_at ≈ 6 分鐘；修前這裡永遠是 0（seconds_until_resume(None)）。
-        assert 5 * 60 < slept.call_args.args[0] <= 6 * 60 + 5
+        assert 5 * 60 < total <= 6 * 60 + 5
 
 
 # ─────────────────────────────────────────────────────────────

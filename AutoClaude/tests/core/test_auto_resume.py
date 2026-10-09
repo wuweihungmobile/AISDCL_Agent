@@ -134,7 +134,8 @@ class TestRunWithScheduledResume:
         assert kernel.calls == [1], "Kernel 應以 start_idx=1 被呼叫一次"
 
     def test_run_with_future_resume_waits(self):
-        """checkpoint scheduled_resume_at 未過期 → time.sleep 被呼叫一次。"""
+        """checkpoint scheduled_resume_at 未過期 → 以分片休眠等待（improving_113：不再是單次
+        `time.sleep(wait)`，故看每片上限與加總，不看呼叫次數）。"""
         cfg = AppConfig()
         repo = InMemoryStateRepository()
         future = (datetime.now() + timedelta(minutes=5)).isoformat(timespec="seconds")
@@ -147,9 +148,12 @@ class TestRunWithScheduledResume:
             result = svc.run(SIMPLE_PB, fresh=False)
 
         assert result.success is True
-        assert mock_sleep.call_count == 1
-        # 至少 sleep 了大半分鐘以上（5 分鐘扣除執行 latency 餘裕）
-        assert mock_sleep.call_args[0][0] > 60
+        slices = [c.args[0] for c in mock_sleep.call_args_list]
+        assert slices, "排程時刻未過期卻沒有任何 sleep ⇒ 沒有等待"
+        assert max(slices) <= cfg.token_guard.sleep_slice_seconds, "沒有分片"
+        # 加總＝這段等待本身：下界「大半分鐘以上」（5 分鐘扣除執行 latency 餘裕）；上界擋住
+        # 「等了兩次／睡過頭」——舊斷言 call_count == 1 的另一半，分片後以加總表達
+        assert 60 < sum(slices) <= 305
 
 
 class TestCheckpointIdentityGuard:

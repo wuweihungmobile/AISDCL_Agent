@@ -9639,7 +9639,9 @@ class QuotaEnvFileIsActuallyLoadedTest(unittest.TestCase):
         consumers = "".join(p.read_text(encoding="utf-8") for p in (
             _QUOTA_GATE, _HOOK, _REPO_ROOT / "tools" / "session_resume_planner.py",
             # v2.1.13 G3：新逃生口二枚（AUTOSDD_RELAY_*）的消費端住這裡，不在上面三支裡。
-            _REPO_ROOT / "tools" / "lib" / "relay_machine.py"))
+            _REPO_ROOT / "tools" / "lib" / "relay_machine.py",
+            # improving_113 W1：三個模型角色鍵（AUTOSDD_MODEL_*）由 model_roles.py 讀。
+            _REPO_ROOT / "tools" / "lib" / "model_roles.py"))
         fields = set(quota_policy.Policy.__dataclass_fields__)
         for spec in quota_policy.ENV_SPEC:
             with self.subTest(key=spec.name):

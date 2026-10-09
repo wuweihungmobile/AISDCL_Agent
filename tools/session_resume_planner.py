@@ -458,6 +458,8 @@ def append_log(path: Path, event: str, **fields: object) -> None:
 
 # 🔴 探針必須真的花額度才有鑑別力（[[驗證載具要能觸發 bug]]）：不吃額度的探針對
 # 「額度回來了沒」這個問題零判別力。成本以 `--model haiku` ＋ 空 cwd 壓到最低——
+# （improving_113 W1：模型現由降級角色 `AUTOSDD_MODEL_DOWNGRADE` 決定、出廠仍是 haiku，
+# argv 組裝搬到 `resume_route.probe_argv`；以下實測數字是出廠預設下量的。）
 # 本檔實測一次 31,847 tokens／$0.0176，而主 session 醒來一次是它的六倍以上
 # （成本正比於自己的 context，且會隨 session 長大；探針是常數）。
 # 🔴 這也是**哨兵為什麼不用探測就能知道「撞了沒」**的對照組：探測回答的是「額度回來
@@ -473,7 +475,7 @@ def append_log(path: Path, event: str, **fields: object) -> None:
 # `tools/session_endurance.py` 抽離（R79_HANDOFF §4.3）＝獨立包。且它改的是**無人看管**
 # 的續航決策，判錯的代價是白燒一次主 session。⇒ 已登記交由下一輪承接（承接輪號寫在帳本
 # 那一列，不寫進程式碼檔——程式碼裡的輪號會超前帳本時鐘）。
-def probe_quota(claude: str = "claude", model: str = "haiku") -> dict:
+def probe_quota(claude: str = "claude", model: str | None = None) -> dict:
     """問「額度回來了沒」：L0 零成本端點先答（正向才算）；否則花**一次**最便宜的呼叫。
     回 `{open, kind, rc, text, source}`。"""
     # 🔴 DEF-200-266／ADR-XPLAT-005 §3.3（上方 DEF-101-990(b) 那段「至今未做」自此結清）：
@@ -499,7 +501,7 @@ def probe_quota(claude: str = "claude", model: str = "haiku") -> dict:
     workdir = Path(tempfile.mkdtemp(prefix="autosdd_probe_"))
     try:
         proc = subprocess.run(
-            [claude, "-p", "ok", "--model", model, "--output-format", "json"],
+            resume_route.probe_argv(claude, model),
             cwd=str(workdir), capture_output=True, encoding="utf-8",
             # 🔴 R80：這一站此前漏帶旗標。它由哨兵那一跑（pythonw ⇒ 無 console）呼叫，
             # 而 `claude.exe` 是 console 子系統應用 ⇒ 每一次真撞線後的探測都會彈一個視窗。
@@ -1222,7 +1224,7 @@ def _run_resume(args, state: dict, log: Path) -> int | None:
     # 整支行程消失，而呼叫端此前已經把狀態塊寫成 `"resumed"`、排程也刪了（謊稱成功、
     # 無法重試）。同 `probe_quota()` 既有的 except 寫法。
     try:
-        before = relay_machine.git_status_snapshot(_REPO_ROOT); append_log(log, "relay_snapshot_before", **relay_machine.snapshot_log_fields(before)); proc = subprocess.run(route["argv"], capture_output=True, encoding="utf-8", errors="replace", timeout=3600, check=False, creationflags=guard.NO_WINDOW, cwd=str(_REPO_ROOT), env={**os.environ, UNATTENDED_ENV: "1"})  # noqa: E501,E702 — v2.1.13 G3：spawn 前快照（判準④ files_changed 差集）；R115 修復 F3：前快照落 resume log（V-c3 半格，不灌 porcelain 全文） round-label-ok
+        before = relay_machine.git_status_snapshot(_REPO_ROOT); append_log(log, "relay_snapshot_before", **relay_machine.snapshot_log_fields(before)); proc = subprocess.run(route["argv"], capture_output=True, encoding="utf-8", errors="replace", timeout=3600, check=False, creationflags=guard.NO_WINDOW, cwd=str(_REPO_ROOT), env={**os.environ, UNATTENDED_ENV: "1", **resume_route.role_env()})  # noqa: E501,E702 — v2.1.13 G3：spawn 前快照（判準④ files_changed 差集）；R115 修復 F3：前快照落 resume log（V-c3 半格，不灌 porcelain 全文） round-label-ok
     except (OSError, subprocess.SubprocessError) as exc:
         append_log(log, "resume_spawn_failed", strategy=route["strategy"], error=str(exc))
         print(f"❌ 續跑呼叫本身失敗：{exc}", file=sys.stderr); return None  # noqa: E702

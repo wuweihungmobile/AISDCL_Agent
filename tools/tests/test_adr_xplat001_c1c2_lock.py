@@ -619,7 +619,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 393,
     "_ps_engine.py": 83,
     "test_act_local_runner_image.py": 307,
-    "test_adr_xplat001_c1c2_lock.py": 8712,
+    "test_adr_xplat001_c1c2_lock.py": 8727,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 4074,
@@ -639,7 +639,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_claim_provenance_r86.py": 2001,
     "test_clean_venv_carrier.py": 281,
     "test_component_sanitizer_shared_layer_lock.py": 274,
-    "test_context_budget_guard.py": 14684,
+    "test_context_budget_guard.py": 14686,
     "test_context_window_parity.py": 325,
     "test_cpu_budget.py": 428,
     "test_defect_id_reference_integrity.py": 276,
@@ -661,6 +661,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_mac_readiness_r82.py": 626,
     "test_macos_smoke_skip_honesty.py": 221,
     "test_maturity_criteria_r79.py": 412,
+    "test_model_roles.py": 573,
     "test_negative_existence_claims_r82.py": 362,
     "test_nightly_interpreter_determinism.py": 749,
     "test_no_invalid_escape_sequences.py": 308,
@@ -678,6 +679,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_quota_reconcile_gap.py": 145,
     "test_recovery_hint_passes_ps_lint.py": 103,
     "test_refresh_nightly_anchor.py": 305,
+    "test_resume_cost.py": 197,
     "test_root_guard_known_model_r145.py": 240,
     "test_root_infra_parity.py": 437,
     "test_run_root_unittests.py": 5372,
@@ -2618,6 +2620,14 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "判準與五支測試；史料搬 Guard_Line_History_2.md）；加本表自身漂移（重釘列、回歸鎖軌同輪列、"
      "到期兌現列 (210, 517) 並重新武裝 212／516、接鏈列）。主軌 0 ≤ 0（款(11) 連升維持歸零）。"
      "逐檔清單見 CrossPlatform_R210_Debt_Closure_Final_Evidence.md〈二〉〈七〉。"),
+    ("R211", 114811, 115598, +787,  # round-label-ok
+     "[非淨減法輪][回歸鎖軌申報 309（＝軌上限），主軌 478 ≤ 517（款(11) 連升第 1 輪）] impro"
+     "ving_113（軌道①）PRD 剩餘收斂輪：test_model_roles.py 573（W1 模型角色參數化：三鍵值域"
+     "／argv 位置鎖／child_env／inherit 出口／降級建議字面／round-trip）＋ test_resume_cost."
+     "py 197（W2 喚醒成本落帳：量不到不寫 0／spawn 錨／settle_window 接線／AST 防成環）＋ te"
+     "st_context_budget_guard.py +2（attr=None 讀者鎖加 model_roles）；加本表自身漂移（重釘"
+     "列、回歸鎖軌同輪列、接鏈列）。逐檔清單見 CrossPlatform_R211_ZeroTrust_Audit_113.md〈二"
+     "〉〈五〉。"),
 )
 
 
@@ -3107,6 +3117,10 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "DEF-200-207／DEF-101-887 結案回歸鎖：test_check_defect_log_crossref.py 時鐘改源鎖 ＋ "
      "test_archive_defect_log.py 未結歸 0 終態鎖 ＋ 本檔自身稽核列（U9 退役的 −80 為同批淨減）。"
      "見 CrossPlatform_R210_Debt_Closure_Final_Evidence.md〈二〉〈七〉。"),
+    ("R211", 309,  # round-label-ok
+     "DEF-200-507／DEF-200-508 回歸鎖：test_model_roles.py（角色鍵值域、argv 位置、child_env"
+     "、inherit 出口）＋ test_resume_cost.py（量不到不寫 0、spawn 錨、AST 防成環、settle_win"
+     "dow 接線）。見 CrossPlatform_R211_ZeroTrust_Audit_113.md〈二〉〈五〉。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -3289,10 +3303,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 330
+_REPIN_LOG_FROZEN_PREFIX_LEN = 331
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "bcdb57dd180d9a51f450ecdbc2c24890ea373b7bada6356cf3fdca016d8d05cf")
+    "d034314bdd87baa7c93602b6ae4ef2ada0ae4a8ccbbd50ad3894b55e104a517e")
 
 
 def repin_log_history_digest(
@@ -3653,6 +3667,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R208", "7c1d18c28c25", "1e22b76a4c99", "DEF-200-506"),  # round-label-ok
     ("R209", "1e22b76a4c99", "715cab768f05", "DEF-200-129"),  # round-label-ok
     ("R210", "715cab768f05", "bcdb57dd180d", "DEF-200-207"),  # round-label-ok
+    ("R211", "bcdb57dd180d", "d034314bdd87", "DEF-200-507"),  # round-label-ok
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

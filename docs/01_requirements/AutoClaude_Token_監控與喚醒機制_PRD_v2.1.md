@@ -17,6 +17,7 @@
 | **v2.1.12（usage 水位喚醒閉環）** | 2026-09-01 | **R111 設計波四職能（Architect／SA／SD／Developer）合成產出；獨立四方複審紀錄＝零（`docs/06_quality/` 對本案零命中，落款當日現查）；掌舵者 2026-09-01 技術債總清償循環令 D2 裁決直接落款生效**。批次序＝v2.1.10→v2.1.11→本批（R110 裁決鏈） | 撞線→喚醒閉環的 usage 水位監控機制化：施工圖＝`docs/04_planning/PRD_Amendment_R112_WakeChain.md`（§3-4 持久 notify_queue＋巡邏重投＋TTL＋delivered 憑證＝`DEF-200-236` 載體），本表不重抄 |
 | **v2.1.14（§4.2.2-b (4c) gate 聚合面切換為設計內例外）** | 2026-09-04 | **掌舵者 2026-09-02 採 R121 呈報單 `DEF-200-244` 方向 B；R126 四方設計複審 4×APPROVE（Architect／SA／SD／QA，紀錄＝`docs/06_quality/CrossPlatform_R126_Debt_Closure.md` §D）；程式面同批落地並過定點複審** | 新增 (4c)：排除 `FALLBACK_KINDS`／未命中 `MODEL_SCOPED_KINDS` 屬取數層裁決（R89／R98），不受 (4) 多軸單調律約束；`gate = gate_list or readings` fail-safe 保留；實作義務＝`Decision.reason` 帶 `gate_excluded=<kinds>` 可觀測。施工圖＝`docs/04_planning/PRD_Amendment_R126_GateExclusion.md`（本表不重抄）。依 R110 判例不疊層：只加條文與痕跡，不改 v2.1.10 既有條文 |
 | **v2.1.15（DEF-200-206：§6 三鍵前綴對齊＋CONFLICT_POLICY 三值行為補述）** | 2026-09-04 | **掌舵者 2026-09-02 採 R121 呈報單 `DEF-200-206` 方向 A（③②修實作、①修憲）；R127 三方設計複審（Architect／SA／SD，`model: sonnet`）Q1 出廠值定案採 PRD 的 5、Q2 前綴、Q3 ABORT 語意；程式面同批落地並過定點複審** | §6 區塊 11／12 三鍵改為 `AUTOCLAUDE_CONFLICT_POLICY`／`AUTOCLAUDE_STATE_RETAIN_VERSIONS`／`AUTOCLAUDE_DIRTY_SAVE_RETRIES`（跟隨全庫 `AUTOCLAUDE_*` 慣例；此前 PRD 同區塊有無前綴混用、且後兩鍵在實作零讀取路徑）；R-6.2-1 補述三值各一種行為（`ABORT`＝拒絕啟動）並在 G1 驗收表加控制組 (iii)(iv)；§8 列 4／列 11 同步。實作：`execution/boot_self_check.py`（枚舉對齊＋`conflict_policy_from_env`）、`infra/adapters/dirty_worktree_rescue.py`（`dirty_save_retries_from_env`）、`core/wiring.py`／`main.py` 接線、`file_state_repository.py` 出廠值 2→5。施工圖＝`docs/04_planning/PRD_Amendment_R127_EnvKeyAlignment.md`（本表不重抄）。依 R110 判例不疊層：只改鍵名字面、補述與痕跡，不改既有條文語意 |
+| **v2.1.16（模型角色參數化：§6 新區塊 4c 三鍵＋§4.2.3 致動器設定面落款；§4.5.2／§4.5.5 引擎分片休眠旋鈕校準落款；§11.3 喚醒成本落帳落款）** | 2026-10-10 | **掌舵者 2026-10-09 直接立案（原文：「讓主控與子代理，可以依照本系統參數檔依照參數進行設定不同模型版本」）；improving_113 四方複審（W1：SD／Architect 鏡＋QA 鏡、W2：SD＋QA 合一鏡、W3：SD／Architect 鏡＋QA 鏡，皆 Sonnet 唯讀鏡，主控 Fable 5.1 為提案者不投票）CONDITIONAL／APPROVE→修復→最終 QA 複審 REJECT（FQ-01：W2 spawn 錨未接線 `log=log`）→一字接線＋QA 提供之鎖測試落地、主控親驗閉環，紀錄＝`docs/06_quality/CrossPlatform_R211_ZeroTrust_Audit_113.md`〈二〉；程式面同批落地** | **W1**：§6 新增區塊 4c「模型角色」（與 §4.2.2-b 的 (4c) 無關）：`AUTOSDD_MODEL_HELMSMAN`（出廠空＝不帶 `--model`、沿用存檔／設定鏈；非空時 RESUME 路由由「沿用存檔模型」變為「`--model` 覆寫」，真機探針實證）、`AUTOSDD_MODEL_SUBAGENT`（出廠 sonnet：**每個**無人喚醒窗口子行程皆注入 `CLAUDE_CODE_SUBAGENT_MODEL`，注入值蓋過行程既有的同名原生變數；值 `inherit`＝不注入；Claude Code ≥ 2.1.251 下此變數只是預設、呼叫時明寫 model 與子代理定義仍優先——更舊版本此變數蓋過呼叫時 model；本機 2.1.295；刻意不設 `_FORCE`）、`AUTOSDD_MODEL_DOWNGRADE`（出廠 haiku；降級建議第二階＋付費探針模型；與區塊 4 的 `MODEL_DOWNGRADE_PERCENT`（何時降）互補，本鍵只給「降到誰」）。§4.2.3 致動器表「模型層級降級」格落款：本版只落地**設定面**（角色→模型映射）；**自動觸發面**（依 `U7d_model`／THROTTLING 自動改模型）仍未做；致動器表下方 `[需核對]` 註記的「具體旗標」半句已由附錄 B-11 核實、「訂閱制是否內建自動降級」半句仍未核實。互動主視窗自己的模型不在本鍵射程（由使用者層 settings `model`／`--model`／`/model` 決定）；`--pace` 與 SessionStart 簡報只印三鍵設定值並註明此限，不印互動視窗實際模型。**W3**：§4.5.2／§4.5.5 落款（引擎等待改分片休眠；三旋鈕出廠 30／5／18000，其中容忍值與行程內上限刻意偏離 §6 區塊 9 的 120 與 §4.5.5 的 2h，理由見落款）。**W2**：§11.3 落款（每個無人續跑窗落一行喚醒成本 jsonl，含實際採用模型；量不到寫 null 不寫 0）。施工圖＝`docs/04_planning/AutoSDD_improving_113.md` §3.1～§3.3（本表不重抄）。依 R110 判例不疊層：只加區塊、落款與痕跡，不改既有條文 |
 | **v2.1.13（R113/R114 喚醒鏈最後一哩）** | 2026-08-31 | **經 R114 四方複審收斂後，掌舵者 2026-08-31 落款生效**（一輪 Architect/QA REJECT＋SA/SD AWC＝去重 13 blocking；修訂三批；二輪 4×AWC；SD 定點複核 APPROVE；紀錄＝`docs/06_quality/CrossPlatform_R114_WakeChain_Review.md` §2） | 喚醒鏈最後一哩四缺口閉合：G1 無頭窗口權限姿態（三層白名單＋雙平台孿生 allow/deny）／G2 handback 交接可見性（雙載體＋SessionStart 偵測）／G3 配額內接力狀態機（判定序 ③→④→②→①、煞車一出廠 1、失敗態全重掛）／G4 哨兵 fire 後重掛＋patrol 自檢。設計全文與驗收 V-a1~V-e2e＝`docs/04_planning/PRD_Amendment_R113_WakeChain_LastMile.md`（本表不重抄，該檔為 v2.1.13 唯一施工圖）。依 R110 判例不疊層：v2.1.10~12 仍 Proposed、未隨本批生效，與本批的前置關係見該檔 §0。2026-08-31 實戰佐證（本 repo 當日 session）：偵測撞線→武裝→reset 後準時醒→探測 rc=0 全通，斷點＝`quota_back_no_resume`（`AUTOSDD_RESUME_OFF` User 層）＋G1~G4，見同檔 §7 |
 
 > **v2.1 的變更**：附錄 B 的事實核對清單已**實際核實完成**（方法見附錄 B 開頭）。核實結果顯示 Claude Code v2.1.x **已內建**本 PRD 原本打算自建的多項能力（原生 worktree 隔離、任務 DAG、排程喚醒、零 Token 用量遙測、併發上限、官方配速門檻）。因此新增 [§15 執行方法論](#15-執行方法論與注意事項v21-新增)，並將建議架構從「大型自建 Daemon」縮減為「薄治理層 + 採用原生能力」。**§15 是實際動工時應遵循的章節**（含動工前置檢查、採用 vs 自建決策矩陣、P0–P5 分階段步驟、12 條紅線注意事項、參數校準方法與交付目錄結構）。
@@ -489,6 +490,14 @@ C_target   = clamp(C_raw, C_min, C_cap(state))              # ← v1 缺少狀�
 | **Agent 硬性預算** | 單一 Step 的 turn 數／時間／估計 token 上限，防止單一 Agent 在 `DRAINING` 期間衝破 `HALT` | 全程，`DRAINING` 期間收緊 |
 
 > `[需核對]` 模型降級的具體旗標，以及訂閱制方案是否已內建自動降級行為（若已內建，本模組應以「不牴觸」為原則，僅在更早的水位主動降級）。【v2.1.4 指針：前半「具體旗標」已於附錄 B-11 核實（`--model`／`Agent` 工具 `model` 欄／`CLAUDE_CODE_SUBAGENT_MODEL`），模型分軌額度見 B-02；後半「訂閱制方案是否已內建自動降級行為」仍未核實，保留待核對】
+
+> 🔴 **【v2.1.16 落款｜improving_113 W1】** 致動器表「模型層級降級」格的**設定面**已落地：角色→模型映射由 §6 區塊 4c 三鍵決定
+> （喚醒續跑 argv `--model`、喚醒窗口子代理預設 `CLAUDE_CODE_SUBAGENT_MODEL`、降級建議行兩階＝子代理角色／降級角色、付費探針模型；
+> 實作＝`tools/lib/model_roles.py` 純函式＋`tools/lib/resume_route.py` 接線，守衛面只留接線行、hook 零改動）。**自動觸發面**（依 `U7d_model`／THROTTLING
+> 把建議變成實際改模型）仍未做：建議行照舊「只建議不自動改模型」。上面 `[需核對]` 的後半「訂閱制方案是否已內建自動降級行為」本版仍未核實。
+> 誠實劃界：①守衛（PreToolUse）對未帶 `model` 的 Agent 仍以視窗模型判額度軸（hook 零改動），注入後 general-purpose 子代理實際跑子代理預設模型，
+> 典型配置下偏保守（多擋不少擋）、反向配置會少擋，登記證據檔理論洞；②improving_113 期間僅 macOS 開發機實測，Windows 側未驗證；
+> ③降級建議行兩階語意由使用者設定自負。
 
 #### 4.2.4 平穩性機制（v1 完全缺漏，是實務上最會出事的部分）
 
@@ -1670,6 +1679,14 @@ distinct = ['arm_reset', 'disarm', 'escalate', 'patrol', 'probe']   count = 5
 | E4 | 兩個常數的方向鎖仍在：巡邏間隔只准調小、自我解除門檻大於一個完整額度視窗 | 後設斷言：那兩支既有測試的**名字**必須仍存在於檔內（本節新增了一條依賴它們的路徑 ⇒ 它們被刪掉時必須有人知道） |
 | E5 | 三種結局事件名互異，**且新事件名與 `sentinel_decide()` 的五個既有 action 皆不同**；零觸發 ⇒ 痕跡檔位元組數不變 | 單元測試：互斥集合是**五元素**（`arm_reset`／`disarm`／`escalate`／`patrol`／`probe`）＋ 新名，共 6 個相異字串。🔴 **五元素那一半必須由 AST 從 `sentinel_decide()` 現查取得，不得在測試裡手抄常數清單**——手抄就是把同一份清單放進第二個家，而本列立案的成因正是一份手抄清單漏了 `probe`。**紅綠自證**：把新事件名改成 `probe` 必須轉紅 ＋ 整合測試（不觸發後 `stat` 位元組數相等） |
 
+> 🔴 **【v2.1.16 落款｜improving_113 W3】** 引擎路徑的等待改走分片休眠（`AutoClaude/autoclaude/utils/sliced_sleep.py`；`AutoResumeService` 兩處不再單次 `time.sleep`）。
+> 三旋鈕住 `TokenGuardConfig`：`sleep_slice_seconds` 出廠 30（對齊 §6 區塊 9 `SLEEP_SLICE_SECONDS`）；`clock_jump_tolerance_seconds` 出廠 **5**，
+> **刻意偏離** §6 區塊 9 的 120——增量帳演算法（逐片比較牆鐘與單調鐘增量差）的容忍值只需蓋過正常抖動，120 秒會讓每片 <120s 的差被忽略而無界累積
+> （四方複審實測最壞晚醒約 4 小時）；`max_inprocess_wait_seconds` 出廠 **18000**（一個五小時額度視窗），**刻意偏離** §4.5.5 的 2h——該值無資料依據
+> （§15.7 要求以資料校準），本機 3 個真實等待 episode 54.5／189.6／224.2 分，且本版**無任何根層元件承接被拒絕的等待**：剩餘 > 上限時引擎以 rc=1 退出並於
+> log 的 ERROR 行明示需外部重啟、checkpoint 帶真實續跑時刻；自動承接者列為後續候選。牆鐘倒退一律忽略、以單調鐘續睡（多一次 halt 的有界代價）。
+> `VERIFIED_CLI_VERSIONS` 補 2.1.295（三條零 token 實測事實；`--max-turns` 不在 help，不得寫成存在）。
+
 ### 4.6 跨平台防休眠（修正 v1 的技術細節）
 
 | 平台 | 實作 | v1 的問題與修正 |
@@ -1798,6 +1815,24 @@ OVERAGE_POLICY=FREEZE                       # FREEZE（預設，絕不動用超�
 OVERAGE_HARD_CAP_USD=                       # OVERAGE_POLICY=ALLOW_WITH_CAP 時必填，無預設
 OVERAGE_ALERT_ON_FIRST_USE=true             # 一旦偵測到 overage 類額度被動用即告警
 OVERAGE_MONTHLY_UTILIZATION_HALT=80         # 月度超額利用率達此值 → 強制 FREEZE
+
+# ------------------------------------------------------------------------------
+# 4c. 模型角色（v2.1.16 新增；improving_113 W1，掌舵者 2026-10-09 立案；與 §4.2.2-b 的 (4c) 無關）
+#     實作面鍵名即規範鍵名（不另造 PRD 面命名；SSOT＝tools/lib/quota_policy_env.py 的 ENV_SPEC，生成物 .env.example）。
+#     三鍵不經額度門檻的整組退回語意——一個拼錯的模型名不得重設整套額度門檻。值域：模型別名
+#     （sonnet／opus／haiku／fable）或含家族字的完整 id（claude-sonnet-5-5、sonnet[1m]）；壞值 → 退該鍵出廠值；
+#     --pace／SessionStart 簡報顯示時帶 ⚠️ 說明；無人喚醒窗口只退出廠值、不另出聲（實際採用的模型事後以該窗口
+#     轉錄檔每筆 assistant 訊息的 message.model 為真相源）。
+#     與區塊 4 的 MODEL_DOWNGRADE_PERCENT（何時降）互補：本區塊只給「降到誰」「主控／子代理各用誰」。
+# ------------------------------------------------------------------------------
+AUTOSDD_MODEL_HELMSMAN=                     # 無人喚醒／FRESH 窗口的主控模型；空＝不帶 --model（沿用存檔／設定鏈）
+                                            # 非空 ⇒ 續跑 argv 追加 --model <值>：RESUME 路由由「沿用存檔模型」變「覆寫」
+                                            #（官方：--model 優先於轉錄還原的模型；真機探針實證）
+AUTOSDD_MODEL_SUBAGENT=sonnet               # 子代理預設模型：每個無人喚醒窗口子行程注入 CLAUDE_CODE_SUBAGENT_MODEL，
+                                            # 注入值蓋過行程既有的同名原生變數；值 inherit＝不注入；
+                                            # Claude Code ≥ 2.1.251：呼叫時 model 參數 > 子代理定義 > 本鍵 > 主對話模型
+                                            #（更舊版本本鍵蓋過呼叫時 model）；刻意不設 _FORCE
+AUTOSDD_MODEL_DOWNGRADE=haiku               # 降級建議第二階（§4.2.3 致動器建議行字面）＋ 額度付費探針模型
 
 # ------------------------------------------------------------------------------
 # 5. 上下文管理（與額度水位「無關」，v1 混用是錯誤的）
@@ -2268,6 +2303,13 @@ API_AUTO_CONTINUE_NEXT_PERIOD=false          # 【新增】
 - 在 state.json 寫入過程中 `kill -9` → 重啟後能以 checksum 偵測損壞並回退到上一有效版本。
 - 喚醒後斷言：接續的是正確的 `interrupted_step`，且**記錄本次喚醒的實際額度成本**（`autoclaude_resume_cost_pp`）。此為 v1 未驗證的關鍵成本項。
 - `SESSION_RESUME` 不可用時（刪除 session 記錄）能自動降級為 `FRESH_SESSION_WITH_STATE` 並完成任務。
+
+> 🔴 **【v2.1.16 落款｜improving_113 W2】** 「記錄本次喚醒的實際額度成本」自本版起有資料面：每個無人續跑窗（state=resumed）於 settle_window 入口（resolve 之前）由
+> `tools/lib/resume_cost.py`（純函式；只讀本機逐字稿、零 token、零網路）落一行 jsonl 到持久痕跡目錄（`endurance_env.trace_dir()`，原子 append）：
+> 首筆 assistant 的 `input_tokens`／`cache_creation_input_tokens`／`cache_read_input_tokens`、該筆 `message.model`（實際採用模型的真相源）、
+> `measured`／`reason`／`recorded_at`。量不到一律 `measured:false` 且數值欄為 `null`，**不得寫 0**。v1 誠實劃界：`pct_before`／`pct_after` 恆 `null`
+> （spawn 前讀數無持久來源，守衛面不動）；接力窗（relay_seq ≥ 1）以本窗 spawn 時刻（planner 於 subprocess.run 前落的 `relay_snapshot_before` 事件）錨定；沒有 spawn 痕跡時才標 `measured:false`（reason＝relay-chain-anchor）；
+> 被 3600s timeout 砍掉的窗（state=resume_failed）不落帳。§9 的 `autoclaude_resume_cost_pp` 指標仍未接（Prometheus 面依設計未做）。
 
 ### 11.4 週上限與長休眠
 - 注入 `U7d = 92%` → 斷言進入 `LONG_HIBERNATE`、成功註冊 OS 排程任務、Daemon 退出、排程時間到能自行重啟並恢復。

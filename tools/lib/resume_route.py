@@ -17,13 +17,19 @@ WHY 住這裡而不是 `tools/session_resume_planner.py`：planner 的 `guardrai
 
 旗標存在性非憑印象：`--permission-mode`（acceptEdits 為合法 choice）與 `--settings`
 皆已以本機 `claude --help` 正面核對（複審二輪 SD 實查，施工圖 §3(a) 落點段）。
+
+improving_113 W1（模型角色參數化）：喚醒窗口用哪個模型也由本檔組裝——主控模型旗標（`_posture_argv`
+尾端）、子代理預設模型的子行程環境（`role_env`）、額度付費探針的 argv（`probe_argv`）。三者讀的
+都是 `tools/lib/model_roles.py` 的同一份三角色；planner 只留接線（它的 LOC 餘裕近乎 0）。
 """
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path, PureWindowsPath
 
 import endurance_env
+import model_roles
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -105,13 +111,32 @@ def handback_postcheck(route: dict, spawn_at: float, state: dict,
     return verdict
 
 
+def _roles() -> model_roles.ModelRoles:
+    """喚醒窗口的三角色（improving_113 W1）：讀行程環境——`.env` 的值已由 planner `main()` 的
+    `apply_env_defaults` 填進來。壞值在這裡只退該鍵預設（無人窗口沒人看 stderr）；出聲在
+    `--pace`／SessionStart 簡報，那兩處有人在場。"""
+    return model_roles.load_model_roles(os.environ)[0]
+
+
+def role_env() -> dict[str, str]:
+    """併進喚醒窗口子行程環境的鍵（子代理預設模型）；planner `_run_resume` 的唯一接線點。"""
+    return model_roles.child_env(_roles())
+
+
+def probe_argv(claude: str, model: str | None = None) -> list[str]:
+    """額度付費探針的 argv（搬自 planner）；`model` 缺席＝降級角色（`AUTOSDD_MODEL_DOWNGRADE`）。"""
+    return [claude, "-p", "ok", "--model", model or _roles().downgrade, "--output-format", "json"]
+
+
 def _posture_argv() -> list[str]:
     # 🔴 順序約束：這一段必須排在 prompt 之後、`--add-dir` 之**前**——
     # `--add-dir <directories...>` 是變長參數，其後只准剩目錄值（姊妹鎖
     # test_the_variadic_add_dir_does_not_swallow_the_prompt 釘住整條 argv 的尾端形狀）。
     # 2026-09-07：不再選檔（見 `UNATTENDED_SETTINGS` 上方裁決），兩路同一份姿態檔 ⇒
     # A-PRE 預檢（`preflight_problem()` 預設值）與 argv 實際指到的檔結構上必然同一份。
-    return ["--permission-mode", "acceptEdits", "--settings", str(UNATTENDED_SETTINGS)]
+    # improving_113 W1：主控模型旗標接在姿態檔之後（仍在 `--add-dir` 之前）；空＝不帶旗標。
+    return ["--permission-mode", "acceptEdits", "--settings", str(UNATTENDED_SETTINGS),
+            *model_roles.model_argv(_roles())]
 
 
 # v2.1.13 C5：settings 檔 `additionalDirectories` 的 `~` 展開 [需核對]（施工圖 §3(a)

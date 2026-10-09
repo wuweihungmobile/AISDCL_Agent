@@ -614,6 +614,12 @@ on:
       #      relay_machine.py＝配額內接力狀態機＋fire 後重掛（v2.1.13 §3(c)(d)）。
       - "tools/lib/resume_route.py"
       - "tools/lib/relay_machine.py"
+      # improving_113：本輪新建的兩支 tools/lib/ 根層 SSOT（model_roles.py＝模型角色三鍵的
+      #      純函式讀取／驗證，由 test_model_roles.py 與 test_context_budget_guard.py 消費；
+      #      resume_cost.py＝喚醒成本落帳，由 test_resume_cost.py 消費）。漏列的代價同前：
+      #      只改該檔時其回歸鎖不會跑（同一支判準 test_ci_paths_cover_root_consumers）。
+      - "tools/lib/model_roles.py"
+      - "tools/lib/resume_cost.py"
       # R100/R102 收尾：本輪新建的四支根層 SSOT（動態配速可得性軸遲滯狀態機／R16 啟動
       #      自檢不變式／死區與變化率限制平穩性機制／額度對帳，其中 quota_reconcile.py
       #      為 R100 加入、此前漏列）。漏列的代價逐字同 DEF-101-042：只改該檔時其回歸鎖
@@ -1004,6 +1010,12 @@ on:
       #      relay_machine.py＝配額內接力狀態機＋fire 後重掛（v2.1.13 §3(c)(d)）。
       - "tools/lib/resume_route.py"
       - "tools/lib/relay_machine.py"
+      # improving_113：本輪新建的兩支 tools/lib/ 根層 SSOT（model_roles.py＝模型角色三鍵的
+      #      純函式讀取／驗證，由 test_model_roles.py 與 test_context_budget_guard.py 消費；
+      #      resume_cost.py＝喚醒成本落帳，由 test_resume_cost.py 消費）。漏列的代價同前：
+      #      只改該檔時其回歸鎖不會跑（同一支判準 test_ci_paths_cover_root_consumers）。
+      - "tools/lib/model_roles.py"
+      - "tools/lib/resume_cost.py"
       # R100/R102 收尾：本輪新建的四支根層 SSOT（動態配速可得性軸遲滯狀態機／R16 啟動
       #      自檢不變式／死區與變化率限制平穩性機制／額度對帳，其中 quota_reconcile.py
       #      為 R100 加入、此前漏列）。漏列的代價逐字同 DEF-101-042：只改該檔時其回歸鎖

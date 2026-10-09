@@ -258,6 +258,25 @@ def test_g6_every_entry_says_what_was_verified_not_just_a_version():
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# improving_113：本機 claude 2.1.295 納入已驗證清單（R-6.2-2）
+# ══════════════════════════════════════════════════════════════════════════════
+def test_improving_113_the_local_cli_2_1_295_is_on_the_verified_list():
+    """立案：本機 claude 2.1.295 不在清單 ⇒ 每次 `python -m autoclaude` 啟動都 loud＋DRY_RUN；
+    loud 天天響就失去鑑別力（真的遇到未驗證新版時沒人會看）。"""
+    dry_run, line = B.cli_version_verdict("2.1.295")
+    assert dry_run is False and "2.1.295" in line
+    assert B.DRY_RUN_TEXT not in line
+
+
+def test_improving_113_the_verified_text_never_claims_the_flag_the_cli_help_lacks():
+    """`--max-turns` 不在 2.1.295 的 `claude --help`（零 token 實測 `grep -c` 回 0）。PRD §4.5.4 的
+    喚醒指令範例含該旗標並註明 [需核對]；清單只准寫「核實過什麼」，不得被讀成已核實。"""
+    lines = B.VERIFIED_CLI_VERSIONS["2.1.295"]["verified"]
+    assert lines, "空清單會讓下一行斷言恆真"
+    assert not [ln for ln in lines if "--max-turns" in ln]
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # G7：空間檢查發生在寫 patch 之前（本體判準住 rescue 那一側，此處驗自檢那一次）
 # ══════════════════════════════════════════════════════════════════════════════
 def test_g7_the_boot_check_runs_the_space_gate_before_reporting_ok(tmp_path):

@@ -242,9 +242,14 @@ def main() -> int:
     # 而不是寫死的 resume_delay_minutes（實測額度視窗 min 0.5 分／max 253 分，30 分沒有一段對）。
     # DEF-200-205：注入 IWorktreeRescue（PRD §4.5.9）——halt 後轉入等待前，先把髒污工作樹
     # 存成 patch；救援失敗（DIRTY_UNSAVED）時 AutoResumeService 就地返回、不排自動喚醒。
+    # improving_113：等待改為分片休眠，片與片之間會檢查 is_interrupted；中斷事件由呼叫端注入，
+    # 這裡把 hotkey.triggered 接進去。🔴 注入點已接，但本入口目前沒有呼叫 hotkey.register()
+    # （autoclaude/ 內唯一的 register() 呼叫住在舊 PlaybookRunner，而它已無建構點）⇒ 全域熱鍵
+    # 尚未註冊，triggered 實際不會被設定；註冊屬既存缺口，不在這次改動範圍。
     service = AutoResumeService(kernel, cfg, state_repository=state_repo,
                                 quota_meter=quota_meter,
-                                worktree_rescue=build_worktree_rescue(cfg))
+                                worktree_rescue=build_worktree_rescue(cfg),
+                                is_interrupted=lambda: hotkey.triggered)
     result = service.run(args.playbook, fresh=args.fresh)
 
     logger.info("Playbook 結束 | %s", result)

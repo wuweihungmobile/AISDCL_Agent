@@ -253,6 +253,21 @@ class TokenGuardConfig(BaseModel):
     auto_resume: bool = True
     # 單次 playbook 執行中最多允許多少次自動恢復（防止無限迴圈）
     max_auto_resumes: int = Field(default=10, ge=1, le=100)
+    # improving_113（PRD §4.5.2／§4.5.5；對照 PRD §6 設定檔區塊 9「重置、休眠與喚醒」）：引擎的等待
+    # 不再是單次 time.sleep。每片最長睡幾秒（片與片之間才有機會檢查中斷、修正時鐘跳躍）／牆鐘與
+    # 單調鐘的增量差超過幾秒即視為時鐘跳躍（系統睡眠、NTP 校時）／>幾秒的等待不在行程內硬等
+    # （拒絕並要求外部續跑）。出廠值與 PRD §6 區塊 9 逐項對照（偏離者各附理由，改之前先讀）：
+    #   · sleep_slice_seconds=30：同 PRD（SLEEP_SLICE_SECONDS=30）；
+    #   · clock_jump_tolerance_seconds=5：PRD 寫 120，實作出廠 5。理由＝增量帳演算法的容忍值只需蓋過
+    #     正常抖動：容忍內的每片差不入帳，累積晚醒上界＝每片差×片數，120 會把它放大到數小時
+    #     （每片多走 119s、3600s 等待最壞晚醒約 4 小時；5 則約 10 分鐘）；
+    #   · max_inprocess_wait_seconds=18000：PRD 寫 7200，實作出廠 18000＝一個五小時額度視窗。依本機
+    #     3 個真實額度等待 episode（54.5／189.6／224.2 分鐘）校準（PRD §15.7 要求以資料校準，7200
+    #     沒有資料依據）；且本版沒有任何元件自動承接被拒絕的等待——拒絕＝引擎 rc=1 退出，
+    #     上限壓得越低，無人值守的 run 越常停在那裡等人。
+    sleep_slice_seconds: int = Field(default=30, ge=1, le=600)
+    clock_jump_tolerance_seconds: int = Field(default=5, ge=1, le=3600)
+    max_inprocess_wait_seconds: int = Field(default=18000, ge=60, le=86400)
     # 從 Claude Code 輸出中偵測 context 使用率的 regex patterns
     # T7（SD_04 §3 / M-4）：補強 Claude Code 實際輸出格式涵蓋率
     #   - 原 4 個：%context、context%、N/M tokens、[CONTEXT_USAGE: N%]

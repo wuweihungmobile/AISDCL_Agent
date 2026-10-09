@@ -7,6 +7,8 @@
   - 呼叫 PlaybookKernel.run(playbook, start_idx)
   - 處理 evolution restart（切換至演化版 Playbook）
   - 處理 Token HALT → 等待排程時間後自動恢復（auto_resume 迴圈）
+  - 等待一律走分片休眠（utils/sliced_sleep，PRD §4.5.2）；>max_inprocess_wait_seconds 的等待
+    拒絕行程內長睡、回非零結果要求外部續跑（PRD §4.5.5；improving_113）
   - W2-T9（SD_04）：從 checkpoint 解析 start_idx（_resolve_start 實裝）
 
 設計原則：
@@ -19,8 +21,11 @@
 from __future__ import annotations
 
 import logging
+import math
 import os
 import time
+from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -28,6 +33,7 @@ import yaml
 
 from ...models.playbook import Playbook
 from ...utils.resume_clock import seconds_until as resume_clock_seconds_until
+from ...utils.sliced_sleep import sliced_sleep
 from ..kernel_state import KernelResult
 from ..ports.worktree_rescue import UNSAFE_TO_FREEZE
 from ._auto_resume_metrics import AutoResumeMetrics, record_wake_and_emit
@@ -71,6 +77,7 @@ class AutoResumeService:
         state_repository: Any | None = None,
         quota_meter: Any | None = None,
         worktree_rescue: Any | None = None,
+        is_interrupted: Callable[[], bool] | None = None,
     ):
         """初始化 AutoResumeService。
 
@@ -82,6 +89,9 @@ class AutoResumeService:
                               以維持向後相容（舊測試 / dry-run）
             worktree_rescue: 可選的 IWorktreeRescue（DEF-200-205）；未注入時
                               `_freeze_is_safe` 恆回 True，行為與修前位元級相同
+            is_interrupted: 可選的「是否被中斷」判斷（improving_113）。等待在片與片之間檢查它；
+                              中斷事件由呼叫端注入（main 傳入 hotkey 的 `triggered`，但入口目前
+                              未呼叫 hotkey.register()，故該事件實際不會被設定）；未注入＝永不中斷
         """
         self._kernel = kernel
         self._cfg = config
@@ -90,6 +100,7 @@ class AutoResumeService:
         self._quota = quota_meter
         # DEF-200-205：IWorktreeRescue（可選）。None＝救援那一軸不存在，行為與修前相同。
         self._rescue = worktree_rescue
+        self._is_interrupted = is_interrupted or (lambda: False)
         # SD_05 W5 批3-C / M-9：metrics observability
         self._metrics = AutoResumeMetrics()
 
@@ -204,24 +215,30 @@ class AutoResumeService:
                 _current_path, _fresh
             )
 
+            # improving_113：playbook 提前到等待之前載入——壞檔／缺檔不必先睡完才報錯，
+            # 拒絕長睡／被中斷而就地返回時，結果也才帶得出 total_steps。
+            playbook = load_playbook(_current_path)
+
             # W2-T10 邊界 3：若 checkpoint 帶有 scheduled_resume_at，
-            # 計算剩餘秒數；過期或 ≤ 0 立即執行，未過期則 sleep 後繼續
+            # 計算剩餘秒數；過期或 ≤ 0 立即執行，未過期則分片休眠後繼續
             if has_ck and sched:
                 wait_secs = seconds_until_resume(sched)
-                # SD_05 W5 / M-9：checkpoint resume 也記錄一筆 metrics
-                self._emit_auto_resume_wake(sched, "checkpoint_resume", wait_secs)
                 if wait_secs > 0:
                     logger.info(
                         "AutoResumeService | checkpoint scheduled_resume_at "
-                        "等待 %.0fs", wait_secs,
+                        "距今 %.0fs", wait_secs,
                     )
-                    time.sleep(wait_secs)
                 else:
                     logger.info(
                         "AutoResumeService | checkpoint scheduled_resume_at 已過期，立即繼續"
                     )
+                # SD_05 W5 / M-9：checkpoint resume 也記錄一筆 metrics（在 _wait 內）
+                stop = self._wait("checkpoint_resume", sched, wait_secs, _current_path)
+                if stop:
+                    stalled = KernelResult.halted_(start_idx, len(playbook.tasks), _step_log, [])
+                    return replace(stalled, reason=stop[0], scheduled_resume_at=stop[1],
+                                   halt_step_idx=start_idx)
 
-            playbook = load_playbook(_current_path)
             result = self._kernel.run(playbook, start_idx=start_idx)
 
             # 演化後自動重載演化版 Playbook
@@ -274,17 +291,66 @@ class AutoResumeService:
                 sched = result.scheduled_resume_at or halt_sched
                 wait_secs = self._halt_wait_seconds(sched)
                 logger.info(
-                    "AutoResumeService | AUTO_RESUME #%d/%d | 等待 %.0fs 後繼續",
+                    "AutoResumeService | AUTO_RESUME #%d/%d | 排定等待 %.0fs",
                     auto_resume_count, max_resumes, wait_secs,
                 )
-                # SD_05 W5 / M-9：halt resume metrics + ON_AUTO_RESUME_WAKE
-                self._emit_auto_resume_wake(sched, "halt", wait_secs)
-                if wait_secs > 0:
-                    time.sleep(wait_secs)
+                # SD_05 W5 / M-9：halt resume metrics + ON_AUTO_RESUME_WAKE（在 _wait 內）
+                stop = self._wait("halt", sched, wait_secs, _current_path)
+                if stop:
+                    return replace(result, reason=stop[0], scheduled_resume_at=stop[1])
                 # halt 後不重設 _fresh；下輪 _resolve_start 會讀新 checkpoint
                 continue
 
             return result
+
+    # improving_113（PRD §4.5.2／§4.5.5）：兩處等待的唯一出口。回傳非 None ＝ 本次不再等，
+    # 內容為 (reason, 續跑時刻)，呼叫端就地返回 success=False 的結果（main 據此回非零 rc）：
+    #   · external_resume_required：等待 > max_inprocess_wait_seconds ⇒ 拒絕行程內長睡。此時
+    #     checkpoint 已由上游落地（halt 路徑＝_persist_halt_checkpoint；續跑路徑＝剛讀到的那份）；
+    #     這裡再讀回一次確認，讀不回來就在訊息裡說「未確認落地」而不是謊報。🔴 本版沒有任何元件
+    #     自動承接被拒絕的等待（本層也刻意不自己蓋排程器，免得同一份知識住兩個家）：
+    #     引擎以 rc=1 退出，須由外部（人工／自備排程器）在續跑時刻後重啟。
+    #   · interrupted_during_wait：等待中被中斷（呼叫端注入的 is_interrupted）；發生在等待之中，
+    #     故 emit 已記錄。
+    # 拒絕在 emit 之前判：根本沒開始的等待不得記成一次喚醒。
+    def _wait(self, kind: str, sched: str | None, wait_secs: float,
+              path: str) -> tuple[str, str | None] | None:
+        tg = self._cfg.token_guard
+        if wait_secs > tg.max_inprocess_wait_seconds:
+            saved = self._state_repo is not None and self._resolve_start(path, False)[2]
+            # halt 路徑的 checkpoint 時刻是 resume_delay 推算的，額度軸上與要等的 wait_secs 無關
+            # ⇒ 外部續跑者若以它為準會早醒重啟：拒絕時改寫成真實的等待終點（失敗＝None，不充數）。
+            at = sched
+            if kind == "halt":
+                at = self._pin_resume_time(path, wait_secs) if saved else None
+            logger.error(
+                "AutoResumeService | 需外部續跑：需等 %.0fs（續跑時刻 %s）> "
+                "max_inprocess_wait_seconds=%ds ⇒ 拒絕行程內長睡（checkpoint %s）；"
+                "請於該時刻後由外部（OS 排程器／人工）重啟",
+                wait_secs, at or "未排定", tg.max_inprocess_wait_seconds,
+                "已落地" if saved else "未確認落地",
+            )
+            return "external_resume_required", at
+        self._emit_auto_resume_wake(sched, kind, wait_secs)
+        out = sliced_sleep(
+            wait_secs, tg.sleep_slice_seconds, tg.clock_jump_tolerance_seconds,
+            wall=time.time, mono=time.monotonic, sleep=time.sleep, stop=self._is_interrupted,
+        )
+        return ("interrupted_during_wait", sched) if out.interrupted else None
+
+    # 把既有 checkpoint 的 scheduled_resume_at 改寫成 now + wait_secs（沿用 _persist_halt_checkpoint
+    # 同一支 schedule_resume；向上取整到分鐘，寧晚勿早）。尚存的拒絕結果比崩潰有用 ⇒ 任何失敗都
+    # 只出聲、回 None。
+    def _pin_resume_time(self, path: str, wait_secs: float) -> str | None:
+        from ...infra.repositories.factory import canonical_playbook_id
+        try:
+            at = self._state_repo.schedule_resume(
+                canonical_playbook_id(path, mode=self._cfg.storage.mode), math.ceil(wait_secs / 60),
+            )
+        except Exception as exc:                     # noqa: BLE001 — 見上方註解
+            logger.warning("AutoResumeService | 改寫 checkpoint 續跑時刻失敗: %s", exc)
+            return None
+        return at.isoformat(timespec="seconds")
 
     # 🔴 DEF-200-205：「敢不敢睡」這個判斷。回 False ＝ 工作沒保全 ⇒ 呼叫端必須就地返回，
     # 不得轉入 WAITING_RESET／LONG_HIBERNATE（R-4.5.9-4 逐字：絕不 fail-open）。
@@ -332,9 +398,8 @@ class AutoResumeService:
     #                         那類「沒有 reset 可等」，排程是錯的動作（見下方 WARNING）
     #   量不到               → 同上，行為與修前位元級相同
     # 🔴 誠實劃界：這一段只在**行程還活著**時成立。行程一死（Ctrl+C／關機／額度撞線把
-    # subagent 全殺）就沒有人會回來——那一半屬於 OS 級喚醒，由 monorepo 根層的哨兵
-    # （tools/session_resume_planner.py --arm-sentinel）負責，AutoClaude 刻意不自己再蓋
-    # 一支排程器（兩支排程器＝同一份知識住兩個家）。
+    # subagent 全殺）就沒有人會回來——那一半屬於 OS 級喚醒：
+    # 本版無自動承接者；拒絕長睡時以 rc=1 退出並明示需外部重啟（improving_113）。
     # 🔴 水位低於 quota_throttle_pct 時**完全不碰**額度那一軸：這一支同時服務 context halt，
     # 而 context halt 與額度無關——不設這道門的話，每一次 context halt 都會印一行
     # 「額度 kind=weekly_all 沒有等得到的 reset」，那是與本次 halt 無關的假訊號。

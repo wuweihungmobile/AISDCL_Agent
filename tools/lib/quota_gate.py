@@ -133,7 +133,6 @@ from quota_messages import (  # noqa: E402,F401
     halt_verdict,  # noqa: F401  # DEF-200-278／INV-H2：re-export，見 quota_messages 檔頭慣例
     halted_band_line,  # D23（SD-07）：re-export，同上一行慣例
     halted_pace_text,
-    model_hint_line,
     pace_line,
     posture_line,
     quota_prepare_message,
@@ -999,7 +998,7 @@ def pace_report(now: datetime | None = None, model: str | None = None,
             f"  {quota_pace.explain(decision.amort, policy.converge_pct)}\n"
             f"  {posture_line(quota_cache_path())}\n"
             f"{fanout_window_line(window, live, FANOUT_WINDOW_SECONDS)}"
-            f"{horizon}{model_hint_line(decision)}"
+            f"{horizon}{quota_messages.model_lines(decision, policy_env())}"
             f"  來源={state.source} 量測於={state.measured_at or '(無)'}{tail}\n{plan_note}")
 
 

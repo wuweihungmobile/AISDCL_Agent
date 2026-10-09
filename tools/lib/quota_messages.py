@@ -39,6 +39,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from collections.abc import Mapping
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -53,6 +54,9 @@ try:
     import platform_utils  # type: ignore[import-not-found]  # 同目錄 SSOT：is_windows()
 except Exception:  # noqa: BLE001 — 見上方 fail-open 紀律；不可達就回 POSIX 版澄清句
     platform_utils = None  # type: ignore[assignment]
+
+# improving_113 W1：三角色（純函式；依賴方向 quota_messages → model_roles → quota_policy，不成環）。
+import model_roles  # noqa: E402
 
 # `quota_pace` 是本族的葉子（它一支同層模組都不 import）⇒ 相依方向仍是單向的，
 # 且 `quota_policy` 早就 import 它（`as W`）：本行沒有新增任何一條相依邊的方向。
@@ -811,12 +815,31 @@ def fanout_window_line(left: tuple | None, live: int, window: int) -> str:
 # decide()`（converge 帶起、或模型分軌 kind 進 notice 帶起），這裡只渲染。空 hint ⇒
 # 空字串——free 帶印一行降級建議就是一句假話（「訊息裡混一句假話比少一欄更難看見」）。
 # 方向鎖：cap／rec 在 `decide()` 內先算完才產生 `model_hint`，本行結構上改不動任何節流。
-def model_hint_line(decision: quota_policy.Decision) -> str:
-    """`--pace` 的降級建議行。收緊帶才出現；只建議、不自動改任何模型設定。"""
+def model_hint_line(decision: quota_policy.Decision,
+                    roles: model_roles.ModelRoles | None = None) -> str:
+    """`--pace` 的降級建議行。收緊帶才出現；只建議、不自動改任何模型設定。
+
+    improving_113 W1：建議的模型對由角色決定（子代理／降級）；`roles=None`＝出廠預設，輸出與
+    改動前逐字相同（`tools/tests/test_quota_policy.py` 的三支字面鎖原封不動）。
+    """
     if not decision.model_hint:
         return ""
+    roles = roles or model_roles.DEFAULT_ROLES
     return (f"   🔻 降級建議：kind={decision.model_hint} 已進收緊帶 ⇒ 建議派工帶 "
-            "model: sonnet/haiku 續跑（只建議不自動改模型；cap 不受本行影響）。\n")
+            f"model: {roles.hint_first}{roles.downgrade} "
+            "續跑（只建議不自動改模型；cap 不受本行影響）。\n")
+
+
+def model_roles_line(roles: model_roles.ModelRoles, problems: list[str]) -> str:
+    """`--pace` 的三角色設定行（縮排＋換行）；字面單一導出自 `model_roles.roles_line`。"""
+    return f"   🤖 {model_roles.roles_line(roles, problems)}\n"
+
+
+def model_lines(decision: quota_policy.Decision, env: Mapping[str, str]) -> str:
+    """`--pace` 的模型兩行：降級建議（收緊帶才有）＋三角色設定行（恆印，供派工明寫 model:）。
+    `env` 由呼叫端注入（`quota_gate.policy_env()`）；壞值的 problems 隨角色行出聲。"""
+    roles, problems = model_roles.load_model_roles(env)
+    return model_hint_line(decision, roles) + model_roles_line(roles, problems)
 
 
 # 🔴 R93／DEF-200-122：Plan B 的「出聲」半邊（SA 裁決保留，不做狀態檔輪替）。純渲染，

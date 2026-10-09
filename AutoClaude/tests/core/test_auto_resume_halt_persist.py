@@ -171,11 +171,19 @@ def test_auto_resume_loop_waits_instead_of_burning_every_retry_at_once():
     repo = InMemoryStateRepository()
     svc = AutoResumeService(_HaltOnceKernel(_halted_result()), cfg, state_repository=repo)
 
+    from autoclaude.utils.sliced_sleep import sliced_sleep
+
     slept: list[float] = []
-    with patch("autoclaude.core.services.auto_resume.time.sleep", slept.append):
+    # improving_113：等待改為分片休眠 ⇒ 單次 sleep 的引數只是「一片」；「每一次恢復都真的等」
+    # 改以 sliced_sleep 的每次呼叫（＝一次完整等待）為單位判斷，再以片的加總對帳實際睡的量。
+    with patch("autoclaude.core.services.auto_resume.time.sleep", slept.append), \
+            patch("autoclaude.core.services.auto_resume.sliced_sleep",
+                  wraps=sliced_sleep) as sliced:
         svc.run(SIMPLE_PB, fresh=True)
 
-    assert len(slept) >= 3, f"只睡了 {len(slept)} 次，恢復次數卻用掉 3 次"
-    assert all(s > 1000 for s in slept), (
-        f"有恢復未等待即重試（0s＝立刻重燒一次額度）：{slept}"
+    waits = [c.args[0] for c in sliced.call_args_list]
+    assert len(waits) >= 3, f"只等了 {len(waits)} 次，恢復次數卻用掉 3 次"
+    assert all(w > 1000 for w in waits), (
+        f"有恢復未等待即重試（0s＝立刻重燒一次額度）：{waits}"
     )
+    assert sum(slept) > 1000 * len(waits), "分片加總不足 ⇒ 等待被縮短或被跳過"

@@ -70,6 +70,11 @@ except Exception:  # noqa: BLE001 — 見檔頭 fail-open 紀律；不可達就�
     harness_feed = None  # type: ignore[assignment]
 
 try:
+    import model_roles  # type: ignore[import-not-found]  # 同目錄 SSOT：三角色解析＋人話行
+except Exception:  # noqa: BLE001 — 見檔頭 fail-open 紀律；不可達就不印角色行，不擋簡報
+    model_roles = None  # type: ignore[assignment]
+
+try:
     import platform_utils  # type: ignore[import-not-found]  # 同目錄 SSOT：is_windows()
 except Exception:  # noqa: BLE001 — 見檔頭 fail-open 紀律；不可達就回 POSIX 版澄清句
     platform_utils = None  # type: ignore[assignment]
@@ -540,6 +545,17 @@ def _unattended_note() -> str:
         return ""
 
 
+def _models_note(quota_gate: object) -> str:
+    """improving_113 W1：三個模型角色的設定行（`.env` 管不到互動視窗自己的模型，簡報只印設定值，
+    供主控派工時明寫 `model:`）。env 取呼叫端注入的 `quota_gate.policy_env()`（與額度行同一個
+    環境來源）；任何一路失敗＝不印，不得反過來擋 SessionStart。"""
+    try:
+        roles, problems = model_roles.load_model_roles(quota_gate.policy_env())
+        return model_roles.roles_line(roles, problems) + "。"
+    except Exception:  # noqa: BLE001 — 見檔頭 fail-open 紀律
+        return ""
+
+
 def sessionstart_brief(
     payload: dict,
     quota_gate: object,
@@ -578,5 +594,5 @@ def sessionstart_brief(
         statusline = statusline_line(check_statusline)
     lead = windows_lead()  # 僅 Windows 非空；緊接標記、先於一切（POSIX 簡報逐字不變）
     return (f"[SDD-CTX-GUARD]{lead} 本 session 啟動時真實水位——context：{ctx}；額度：{quota}；"
-           f"{statusline}。"
+           f"{statusline}。{_models_note(quota_gate)}"
            f"{verify_hint(feed=feed, quota=quota_file)}{rc2_clarify()}{_unattended_note()}")

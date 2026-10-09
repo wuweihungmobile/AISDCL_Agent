@@ -132,6 +132,18 @@ ENV_SPEC: tuple[EnvVar, ...] = (
            "接力：每個 reset 視窗最多自動續跑幾次（出廠 2）", "policy"),
     EnvVar("AUTOSDD_RELAY_NO_PROGRESS_LIMIT", None, 1, "int", 1.0, None,
            "接力：連續幾窗零新進度即停止（出廠 1＝零推進即停，對齊 R112 語意）", "policy"),
+    # improving_113／W1：模型角色三鍵，消費端＝`tools/lib/model_roles.py`（`attr=None`：不進
+    # `Policy`——字串壞值若走 `load_policy()` 的整組退回語意，會把整套額度門檻一起重設）。
+    # 位置必須排在逃生口之前：渲染分區跟著本表的順序走。
+    EnvVar("AUTOSDD_MODEL_HELMSMAN", None, "", "model", None, None,
+           "無人喚醒窗口（續跑）的主控模型，別名或完整 id；留空＝不帶 --model、沿用存檔／設定鏈",
+           "policy"),
+    EnvVar("AUTOSDD_MODEL_SUBAGENT", None, "sonnet", "model", None, None,
+           "子代理預設模型：喚醒窗口注入 CLAUDE_CODE_SUBAGENT_MODEL；--pace／SessionStart 簡報印出"
+           "供派工明寫 model:（呼叫時明寫的 model 仍優先）。填 inherit＝不注入（行程既有的 "
+           "CLAUDE_CODE_SUBAGENT_MODEL 原樣保留）", "policy"),
+    EnvVar("AUTOSDD_MODEL_DOWNGRADE", None, "haiku", "model", None, None,
+           "降級建議的第二階模型，同時是額度付費探針（--probe-quota）用的模型", "policy"),
     EnvVar("AUTOSDD_QUOTA_GUARD_OFF", None, "", "flag", None, None, "1 ⇒ 額度節流全關", "escape"),
     EnvVar("AUTOSDD_SENTINEL_OFF", None, "", "flag", None, None, "1 ⇒ 額度續航哨兵關掉", "escape"),
     EnvVar("AUTOSDD_CONTEXT_GUARD_OFF", None, "", "flag", None, None, "1 ⇒ context 阻斷關掉（**與上一個不同的東西**）", "escape"),  # noqa: E501

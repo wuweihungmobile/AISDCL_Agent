@@ -55,6 +55,15 @@ token_guard:
   resume_delay_minutes: 30           # 0 = 立即繼續
   auto_resume: true
   max_auto_resumes: 10
+  # improving_113（PRD §4.5.2／§4.5.5）：分片休眠。以下三項不寫即用程式碼預設（TokenGuardConfig）；
+  # 要覆寫時取消註解。等待 > max_inprocess_wait_seconds 時引擎拒絕行程內硬等、以 rc=1 退出，
+  # 並在 log 的 ERROR 行明示需外部重啟（含續跑時刻；checkpoint 是否已落地也在同一行）。
+  # 🔴 本版無自動承接者：沒有任何元件會替你重啟 python -m autoclaude，須人工或自備的外部排程器；
+  # 自動承接列為後續候選。出廠值中 tolerance（PRD 120→5）與 max_inprocess（PRD 7200→18000）
+  # 偏離 PRD §6 區塊 9，理由見 autoclaude/utils/config.py 該欄註解。
+  # sleep_slice_seconds: 30            # 每片最長睡幾秒（1~600）；片與片之間才檢查中斷與時鐘跳躍
+  # clock_jump_tolerance_seconds: 5    # 牆鐘與單調鐘增量差超過幾秒即視為時鐘跳躍（1~3600）
+  # max_inprocess_wait_seconds: 18000  # 行程內最長等待秒數（60~86400）
   # context 偵測 regex（任一命中即視為偵測成功，validator 會檢查 regex 合法性）
   context_patterns:
     - "(\\d+(?:\\.\\d+)?)\\s*%\\s*(?:context|token)"

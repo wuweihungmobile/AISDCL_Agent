@@ -37,6 +37,7 @@ SessionStart 的武裝評估重新來過，不留一個「宣稱已重掛」的�
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import os
 import subprocess
@@ -48,6 +49,7 @@ import endurance_env  # FIX3：無人續跑結局的持久記錄居所（stdlib-
 import git_paths
 import quota_gate
 import quota_policy
+import resume_cost  # improving_113 W2：喚醒成本落帳（純函式模組；本檔是唯一接線點）
 import unattended_authz  # INV1/INV4：無人看管旗標名的 SSOT（不在本檔開第三個字面家）
 
 #: 每 reset 視窗 spawn 上限；出廠 2（施工圖 §3(c) 常數表）。
@@ -460,6 +462,11 @@ def settle_window(args, state: dict, plan: Path, log: Path, resume_rc: int | Non
     planner = _planner()
     try:
         now = datetime.now().astimezone()
+        # improving_113 W2：claude 真的跑過（state 為 resumed）才落帳，零喚醒＝痕跡不長；
+        # 必須先於 resolve（relay_seq 仍是本窗自己的序號）；record_window 永不拋。
+        if state.get("state") == "resumed":
+            with contextlib.suppress(Exception):
+                resume_cost.record_window(state, log=log)
         band = current_band(now)
         outcome = resolve(state, band, max_spawns=max_spawns(),
                           no_progress_limit=no_progress_limit())

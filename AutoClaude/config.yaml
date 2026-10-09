@@ -71,6 +71,10 @@ token_guard:
   auto_resume: true
   # 單次 Playbook 執行最多允許幾次自動恢復（防止無限迴圈）
   max_auto_resumes: 10
+  # improving_113（PRD §4.5.2／§4.5.5）：等待改為分片休眠；三個旋鈕（sleep_slice_seconds／
+  #    clock_jump_tolerance_seconds／max_inprocess_wait_seconds）**刻意不寫值在這裡**——預設只住
+  #    autoclaude/utils/config.py::TokenGuardConfig（單一 SSOT，理由同下方 context_patterns 那段）。
+  #    等待 > max_inprocess_wait_seconds 時引擎拒絕行程內硬等、以非零 rc 結束並要求外部續跑。
   # 🔴 R82（ACC-02）：`context_patterns` 刻意**不寫在這裡**。
   #    此處原本列 4 條，而 autoclaude/utils/config.py::TokenGuardConfig 的預設是 7 條——
   #    出廠 config 一提供這個鍵就整份覆蓋掉程式碼預設，於是 `[STATS: usage 92%]` 與

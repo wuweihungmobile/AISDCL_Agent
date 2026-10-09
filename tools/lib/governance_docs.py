@@ -655,6 +655,16 @@ _GOVERNANCE_DOCS = (
     / "CrossPlatform_R210_Debt_Closure_Final_Evidence.md",
     # 護欄層行數棘輪史料歸檔的第二冊（第一冊逼近 Read 工具上限，淨減法搬遷改落本檔）：即刻登記。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_Guard_Line_History_2.md",
+    # improving_113（R211）零信任審計證據檔：PRD 剩餘收斂輪（模型角色參數化／喚醒成本落帳／
+    # 引擎分片休眠）；四方複審 findings 逐條原文、裁決、理論洞、結案帳皆在此（複審者要重驗
+    # 就得讀完它 ⇒ 體積守門；逐筆寫出 DEF-ID 居所與當回合實測值 ⇒ 指針稽核）：即刻登記。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R211_ZeroTrust_Audit_113.md",
+    # 同輪姊妹檔：PRD v2.1 覆蓋度矩陣（盤點交件原文；逐筆寫出條文與實作座標 ⇒ 指針稽核；
+    # 下一輪重盤要讀完 ⇒ 體積守門）：即刻登記。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R211_PRD_Coverage_Matrix_113.md",
+    # 同輪姊妹檔：六面審查鏡逐字稿（逐條 findings 的座標與重現法 ⇒ 指針稽核；複審者要重驗就得
+    # 讀完 ⇒ 體積守門）：即刻登記。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R211_Review_Transcripts_113.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/{CrossPlatform,Quota}_*.md`。這**不是**把具名
