@@ -107,7 +107,16 @@
 | 13 | SD1-04：`--pace` 角色行只有 `inspect.getsource` 子字串鎖；行為面由三面鏡真跑逐字驗、簡報面有 4 支行為測試；`pace_report` 住守衛面 hub 零餘裕 | FQ-05 | `--pace` 角色行真實消失而無鎖出聲 |
 
 
-## 〈四〉雲端驗收（push 後回填 run id 與 conclusion）
+## 〈四〉雲端驗收（commit cbc9581b push 後現查 `gh run list --commit <完整 sha>`，2026-10-09T20:37Z 四支皆 completed）
+| workflow | run id | conclusion | gating job（job 層現查 `gh run view --json jobs`） | nightly 類 job |
+|---|---|---|---|---|
+| root-infra-ci | 37986240919 | success | root infra guard＝success | — |
+| AutoClaude CI | 37986240825 | success | Tests + LOC Budget＝success；CLAUDE.md Budget + Snapshot Freshness＝success | Mutation／Perf／PG E2E 依 push 規則 skipped |
+| macos-compat-ci | 37986240800 | success | macOS smoke＝success | nightly full／失敗提醒 skipped |
+| windows-compat-ci | 37986241034 | success | Windows smoke（windows-latest 實跑關鍵腳本）＝success | nightly full／失敗提醒 skipped |
+- pre-push 全 leg 通過、push rc=0、origin/main＝cbc9581b。shellcheck-ci／aisdlc-sdd-ci 依 paths 未觸發（缺席＝未驗證）。🔴 不以本機全綠代替雲端；本回填 commit 自身的雲端 run 由下一個開場視窗對帳（R210 體例）。
+- 本機 mac launchd nightly 於 2026-10-10 02:03（本機時間）跑在**本輪中段的髒工作樹**上，彙總 PASS=4 FAIL=1（失敗 stage＝root_unittests：當時新測試檔尚未重釘棘輪、新檔未入索引）；屬進行中工作樹的暫態，不是缺陷；下一次 nightly 跑在已 commit 的樹上，以其 log 為準。
+
 ## 〈五〉結案帳（收尾單人窗口，2026-10-10）
 - 帳本：新立 DEF-200-507（模型角色零參數化）、DEF-200-508（喚醒成本零資料），同 commit fixed；`--unresolved-count` 逐字「未結列數＝0／全部 209 列｜warn=86 fail=98」；外部阻塞軌 5、結構性長債軌 6 不變。
 - 時鐘：本檔建檔即推進 `current_round()` 210→211；ADR-XPLAT-002 §6 R211 列、governance_docs 登記三檔（本檔、PRD 覆蓋矩陣、審查逐字稿）。
