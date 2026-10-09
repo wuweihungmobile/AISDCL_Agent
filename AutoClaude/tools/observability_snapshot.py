@@ -7,6 +7,7 @@
     - observability_emit_count（IObservabilityPort emit_counter/emit_gauge/emit_histogram 累計）
     - trace_id_continuity（同 process 內 trace_id 一致性 bool）
     - kb_metric_snapshot（KnowledgeBaseMetrics.snapshot() 4 keys）
+    - tree（DEF-101-887：採樣當下工作樹狀態 `tools/tree_state.capture()`；中間態樣本由判準端剔除）
 
 設計原則：
   - LOC ≤ 150（data tier）
@@ -22,9 +23,19 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+# 🔴 兩種載入方式各走一條路、同一個 process 內只會走到其中一條（理由見姊妹檔
+# `tools/drift_log_ga_check.py` 同位置那段）：`from tools.observability_snapshot import …`
+# （pytest）AutoClaude 在 path 上 ⇒ 走 `tools` 套件；`python tools/observability_snapshot.py`
+# （nightly 載具）時只有 tools/ 在 path 上 ⇒ ImportError ⇒ 走裸 import。
+try:
+    from tools import tree_state as _tree_state
+except ImportError:  # pragma: no cover - 以腳本形態執行時才會走到
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import tree_state as _tree_state  # noqa: E402
 
 DEFAULT_HISTORY = Path(".observability_history.jsonl")
 
@@ -34,8 +45,8 @@ def _utc_date(ts_iso: str) -> str:
     try:
         dt = datetime.fromisoformat(ts_iso.replace("Z", "+00:00"))
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt.astimezone(timezone.utc).strftime("%Y-%m-%d")
+            dt = dt.replace(tzinfo=UTC)
+        return dt.astimezone(UTC).strftime("%Y-%m-%d")
     except ValueError:
         return ""
 
@@ -117,7 +128,7 @@ def collect_snapshot() -> dict[str, Any]:
 
     修復來源：SD_09 W0 G0 zero-trust audit 第 4 輪 P0-X1（設計閉環斷裂）。
     """
-    ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    ts = datetime.now(UTC).isoformat(timespec="seconds")
 
     # observability_emit_count：實際 emit heartbeat 再計數（非寫死 0；L1 修復）
     # F1 修復（SD_09 W3 zero-trust audit 2026-05-24）：tuple return 區分真實 emit vs fallback
@@ -127,10 +138,12 @@ def collect_snapshot() -> dict[str, Any]:
     # 同 process ContextVar 連續性，跨 thread / subprocess 由各自工具驗證
     trace_continuity = _measure_trace_continuity()
 
-    # KB metric snapshot：4 keys（含 `_count` 後綴，對齊 KnowledgeBaseMetrics.snapshot() SSOT；L2 修復）
+    # KB metric snapshot：4 keys（含 `_count` 後綴，對齊 KnowledgeBaseMetrics.snapshot() SSOT；
+    # L2 修復）
     #
     # SD_09 W0 P0-AUDIT-34 設計語意澄清（不算 bug）：
-    #   `KnowledgeBaseMetrics()` 為 fresh in-process instance；nightly run 一次性執行不會帶入歷史 → 值預期為 0。
+    #   `KnowledgeBaseMetrics()` 為 fresh in-process instance；nightly run 一次性執行
+    #   不會帶入歷史 → 值預期為 0。
     #   `observability_ga_check.py:KB_METRIC_REQUIRED_KEYS` 僅驗 key 存在性（schema），非驗值非零 —
     #   兩端對齊「nightly 採集 = port + schema 連通性證明」，非「KB runtime metric 30 天統計」。
     #   若 SD_09 §6 #5 議題 G PM 拍板 (a) 走 PG 持久化路徑 → 此處 `KnowledgeBaseMetrics()`
@@ -156,6 +169,9 @@ def collect_snapshot() -> dict[str, Any]:
         "observability_emit_real": emit_real,
         "trace_id_continuity": trace_continuity,
         "kb_metric_snapshot": kb_snapshot,
+        # DEF-101-887：採樣當下的工作樹狀態。判準端（ga_window.evaluate）算 streak 前剔除
+        # `tree.valid is False` 的中間態樣本；缺此欄的舊樣本視為有效、不追溯作廢。
+        "tree": _tree_state.capture(),
     }
 
 

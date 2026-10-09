@@ -3419,6 +3419,9 @@ class TestOpenBacklogArchiveIsRejected(unittest.TestCase):
                       "孤兒偵測必須吃主檔全文；改吃別的來源前請先讀本測試 docstring")
 
     def test_main_ledger_still_carries_the_unclosed_rows(self):
+        """(甲) 的兩個合法終態：主檔仍有未結列 ⇒ 它們必須零孤兒；主檔未結列為 0（技術債結案
+        終輪起的合法狀態）⇒ 改以合成未結列證明「主檔上的未結列孤兒偵測看得到」——未結歸 0
+        不得讓本鎖變成「主檔必須永遠留一筆未結列」的反向義務。"""
         text = ADL.gate._DEFECT_LOG.read_text(encoding="utf-8-sig")
         layout = ADL.gate._table_layout(text)
         self.assertIsNotNone(layout)
@@ -3426,11 +3429,15 @@ class TestOpenBacklogArchiveIsRejected(unittest.TestCase):
         claimed = ADL._status_claimed_ids()
         unclosed = [r for r in rows
                     if ADL.classify_row(r, claimed, layout)["cls"] not in ADL.CLOSED_CLASSES]
-        self.assertGreater(
-            len(unclosed), 0,
-            "主檔已無任何未結列 ⇒ 未結列很可能被搬進 open-backlog archive。"
-            "那會讓硬規則②（孤兒承接輪次）對它們零檢查，見本類 docstring (甲)",
-        )
+        if not unclosed:
+            probe = (text.rstrip("\n") + "\n| DEF-99-999 | 2026-01-01 | 合成 | 合成 | P4 | 去向 |"
+                     " open（承接輪次：**R1**） |\n")
+            self.assertNotEqual(
+                ADL.gate.orphan_backlog_problems(probe), [],
+                "主檔未結列為 0 時，附在主檔文字上的合成未結列竟然不被孤兒偵測看見 ⇒ "
+                "偵測面已不是主檔全文，見本類 docstring (甲)",
+            )
+            return
         # 孤兒偵測確實看得到它們（不是只是「檔案裡有」而閘門讀不到）
         self.assertEqual(ADL.gate.orphan_backlog_problems(text), [],
                          "主檔未結列存在孤兒承接輪次問題")

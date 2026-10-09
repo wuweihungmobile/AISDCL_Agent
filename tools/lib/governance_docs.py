@@ -473,7 +473,7 @@ _GOVERNANCE_DOCS = (
     _REPO_ROOT / "docs" / "06_quality"
     / "CrossPlatform_DEF200277_Sysconfig_Platform_Sim_Evidence.md",
     # R135 收尾：DEF-200-274 第四輪四方複審收尾＋護欄層對帳＋到期義務兌現與展延 round-label-ok
-    # （_REPIN_NET_CAP_SCHEDULE／_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND／_PHASE2_REVIEW_LOG）。
+    # （_REPIN_NET_CAP_SCHEDULE／U9 到期輪常數〔R210 退役〕／_PHASE2_REVIEW_LOG）。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R135_Scan_Findings.md",
     # R136 收尾：DEF-200-274 第四輪第二次對抗式複審收斂（BaseException 型別缺口＋計時 round-label-ok
     # 脆弱性＋MIN_TESTS／docstring／缺陷帳本文件同步）＋護欄層對帳。即刻登記。
@@ -649,6 +649,10 @@ _GOVERNANCE_DOCS = (
     # 移外部阻塞軌、4 筆修復；理論洞清單只登記不修；零守衛面）：即刻登記。
     _REPO_ROOT / "docs" / "06_quality"
     / "CrossPlatform_R209_Debt_Closure_Evidence.md",
+    # 技術債結案終輪（最後 2 筆結案 → 未結 0；帳本時鐘改讀 R 系列證據檔／交棒書檔名最大號、
+    # ADR-XPLAT-013 翻 Accepted、DEF-101-887 修法、循環令 §7 總結帳；零守衛面）：即刻登記。
+    _REPO_ROOT / "docs" / "06_quality"
+    / "CrossPlatform_R210_Debt_Closure_Final_Evidence.md",
     # 護欄層行數棘輪史料歸檔的第二冊（第一冊逼近 Read 工具上限，淨減法搬遷改落本檔）：即刻登記。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_Guard_Line_History_2.md",
 )

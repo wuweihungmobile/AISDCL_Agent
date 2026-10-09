@@ -140,7 +140,7 @@ def _current_round() -> int | None:
     )
     if not ledger.is_file():
         return None
-    return crossref.current_round(ledger.read_text(encoding="utf-8"))
+    return crossref.current_round()  # R210 起時鐘改讀 R 系列文件檔名最大號 round-label-ok
 
 
 def _is_skip_reason_site(node: ast.Call) -> bool:

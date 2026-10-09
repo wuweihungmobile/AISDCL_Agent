@@ -22,6 +22,8 @@ import datetime as _dt
 import json
 from pathlib import Path
 
+import pytest
+
 from tools.drift_log_ga_check import (
     STALENESS_MAX_DAYS,
     WINDOW_SPAN_MAX_FACTOR,
@@ -331,3 +333,111 @@ def test_evaluate_still_injects_each_tools_own_green_criterion() -> None:
     # 同一筆紀錄：drift 判綠，obs 因缺 KB metric 判紅 ⇒ 綠判準確實仍各自獨立。
     assert drift.evaluate(rec, window=1, now=_NOW)["green_streak"] == 1
     assert obs.evaluate(rec, window=1, now=_NOW)["green_streak"] == 0
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 🔴 DEF-101-887：`tools/ga_window.evaluate` 在算任何判準前先剔除中間態樣本
+# ══════════════════════════════════════════════════════════════════════════════
+# 與 ac4 那支同一件事、同一組意圖（見 test_ac4_progress_check.py 檔尾同編號段）：
+# `tree.valid is False`（非乾淨工作樹所採）的樣本不得影響 streak／staleness／sparse
+# 三個判準；缺 `tree` 的舊樣本與 `valid=None` 保留；剔除如實回報，全部被剔除時明說
+# 「證據不足」而不是被讀成 stale（採集器壞掉）。共用層住 ga_window，這裡以 drift 的綠
+# 判準注入驗證；obs 那條注入路徑見 test_observability_ga_check.py 檔尾。
+
+
+def _dirty(rec: dict) -> dict:
+    return {**rec, "tree": {"valid": False, "state": "dirty"}}
+
+
+def _unmark(rec: dict) -> dict:
+    return {k: v for k, v in rec.items() if k != "tree"}
+
+
+def _thirty_consecutive_days() -> list[dict]:
+    """最舊→最新、每天一筆的 30 筆綠紀錄（最新一筆＝_NOW 當天）。"""
+    return [_green_record(_ts_before(d)) for d in range(29, -1, -1)]
+
+
+def test_a_red_sample_from_a_dirty_tree_does_not_break_the_ga_streak() -> None:
+    records = _thirty_consecutive_days()
+    red = _missing_table_record(_ts_before(10).replace("T12", "T18"))
+    records.insert(20, _dirty(red))  # 夾在第 20、21 筆之間（時間上也在 10 天前那一格）
+
+    result = evaluate(records, window=30, now=_NOW)
+
+    assert result["excluded_dirty"] == 1
+    assert result["total_records"] == 30, "total_records 是剔除後的筆數"
+    assert result["green_streak"] == 30 and result["status"] == "ready"
+
+    # 對照組：同一筆紅燈沒有髒樹標記 ⇒ 真紅，streak 從它之後重新數
+    control = evaluate([_unmark(r) for r in records], window=30, now=_NOW)
+    assert control["excluded_dirty"] == 0
+    assert control["green_streak"] == 10 and control["status"] == "observing"
+
+
+def test_a_green_sample_from_a_dirty_tree_does_not_count_toward_the_ga_streak() -> None:
+    records = _thirty_consecutive_days()
+    records = records[:25] + [_dirty(r) for r in records[25:]]  # 最近 5 晚都是髒樹
+
+    result = evaluate(records, window=30, now=_NOW)
+
+    assert result["excluded_dirty"] == 5
+    assert result["green_streak"] == 25
+    assert result["status"] == "observing"
+
+    control = evaluate([_unmark(r) for r in records], window=30, now=_NOW)
+    assert control["green_streak"] == 30 and control["status"] == "ready"
+
+
+def test_a_dirty_sample_does_not_keep_ga_evidence_looking_fresh() -> None:
+    """最後一筆有效樣本已是 50 天前；昨天那筆髒樹樣本不得替它續命。"""
+    old = [_green_record(_ts_before(d)) for d in range(79, 49, -1)]  # 79..50 天前，30 筆
+    latest = _green_record(_ts_before(1))
+
+    result = evaluate([*old, _dirty(latest)], window=30, now=_NOW)
+
+    assert result["status"] == "stale"
+    assert result["staleness_days"] == 50, "新鮮度要從最後一筆**有效**樣本起算"
+
+    control = evaluate([*old, latest], window=30, now=_NOW)
+    assert control["staleness_days"] == 1 and control["status"] != "stale"
+
+
+def test_all_samples_dirty_is_insufficient_evidence_not_stale_and_never_ready() -> None:
+    records = [_dirty(_green_record(_ts_before(d))) for d in (2, 1, 0)]
+
+    result = evaluate(records, window=3, now=_NOW)
+
+    assert result["excluded_dirty"] == 3 and result["total_records"] == 0
+    assert result["status"] == "observing", "採集器活著、只是樣本無效，不是 stale"
+    assert result["green_streak"] == 0
+    assert "證據不足" in result["last_failure_reason"]
+    assert "excluded_dirty=3" in result["last_failure_reason"]
+    assert result["window_span_days"] is None and result["staleness_days"] is None
+    # fail-closed：就算 window 被設成 0（`streak >= window` 恆真），沒有有效證據也不得 ready
+    assert evaluate(records, window=0, now=_NOW)["status"] != "ready"
+
+
+def test_ga_history_without_tree_is_untouched_by_exclusion() -> None:
+    result = evaluate(_thirty_consecutive_days(), window=30, now=_NOW)
+
+    assert result["excluded_dirty"] == 0
+    assert result["total_records"] == 30 and result["status"] == "ready"
+
+
+def test_ga_cli_json_carries_excluded_dirty_and_all_dirty_does_not_crash(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """全部被剔除時 `window_span_days`／`staleness_days` 都是 None——兩種輸出都不得炸。"""
+    history = tmp_path / ".drift.jsonl"
+    _write_jsonl(history, [_dirty(_green_record(_recent_ts(d))) for d in (2, 1, 0)])
+
+    rc_json = main(["--window", "3", "--history", str(history), "--json"])
+    payload = json.loads(capsys.readouterr().out)
+    assert rc_json == 1
+    assert payload["excluded_dirty"] == 3 and payload["status"] == "observing"
+
+    rc_human = main(["--window", "3", "--history", str(history)])
+    err = capsys.readouterr().err
+    assert rc_human == 1
+    assert "status=observing" in err and "證據不足" in err

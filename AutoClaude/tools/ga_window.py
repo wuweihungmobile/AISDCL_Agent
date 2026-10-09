@@ -25,9 +25,21 @@ obs 直接 `TypeError: can't compare offset-naive and offset-aware datetimes`。
 from __future__ import annotations
 
 import datetime as _dt
+import sys
 from collections.abc import Callable
 from fractions import Fraction
+from pathlib import Path
 from typing import Any
+
+# 🔴 兩種載入方式各走一條路、同一個 process 內只會走到其中一條（理由見姊妹檔
+# `tools/drift_log_ga_check.py` 同位置那段）：`from tools import ga_window`（pytest／
+# ga_check 的套件形態）AutoClaude 在 path 上 ⇒ 走 `tools` 套件；兩支 ga_check 以腳本形態
+# 執行時，它們已把 tools/ 插進 sys.path 才裸 import 本檔 ⇒ `tools` 套件 ImportError ⇒ 走裸 import。
+try:
+    from tools import tree_state as _tree_state
+except ImportError:  # pragma: no cover - 以腳本形態執行時才會走到
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import tree_state as _tree_state  # noqa: E402
 
 # ── 兩個「時間」面的門檻（語意與值皆抄 ac4_progress_check.py，不另發明第三套）────────
 #
@@ -122,20 +134,34 @@ def evaluate(
     狀態優先序 stale > sparse > observing：採集停擺時「窗內稀疏」只是它的症狀，
     先報停擺才指得到正確的修法（修排程／修載具，而不是再等幾天）。
 
+    🔴 DEF-101-887：進來後**第一件事**先剔除 `tree.valid is False` 的中間態樣本（非乾淨
+    工作樹所採；缺 `tree` 的舊樣本與 `valid=None` 一律保留），三個判準都只看剩下的證據，
+    剔除數回報在 `excluded_dirty`（`total_records` 是剔除後的筆數）。剔除後它們就是日曆
+    上的缺口，staleness／sparse 兩個判準本來就負責抓缺口。**全部**樣本都被剔除時（證據
+    不足）不報 stale——採集器活著、只是樣本無效，修法是等乾淨工作樹上的 nightly 進帳，
+    不是修載具——且 passed 恆 False。
+
     `streak_fn` 由呼叫端注入＝兩支 checker 唯一真正不同的那一塊（見模組 docstring）。
     """
     now = now or _dt.datetime.now(tz=_dt.UTC)
+    records, excluded_dirty = _tree_state.exclude_invalid(records)
+    all_dirty = excluded_dirty > 0 and not records
     streak, judgements = streak_fn(records)
 
     stale_days = staleness_days(records, now)
     clock_anomaly = stale_days is not None and stale_days < 0
     # 有紀錄卻連一筆可解析時間戳都沒有＝採集端壞掉，fail-closed 當 stale（同 ac4）。
-    is_stale = stale_days is None or stale_days > STALENESS_MAX_DAYS or clock_anomaly
+    # 例外：全部樣本都被剔除（all_dirty）時 stale_days 也是 None，但那不是採集端壞掉。
+    is_stale = (
+        (stale_days is None and not all_dirty)
+        or (stale_days is not None and stale_days > STALENESS_MAX_DAYS)
+        or clock_anomaly
+    )
     span_days, max_gap_days = window_calendar_span(records, window)
     span_max_days = int(window * WINDOW_SPAN_MAX_FACTOR)
     is_sparse = span_days is not None and span_days > span_max_days
 
-    passed = streak >= window and not is_stale and not is_sparse
+    passed = streak >= window and not is_stale and not is_sparse and not all_dirty
     if is_stale:
         status = "stale"
     elif is_sparse:
@@ -162,12 +188,19 @@ def evaluate(
             f"{span_max_days}（window×{WINDOW_SPAN_MAX_FACTOR}），最大 gap {max_gap_days} 天"
             "——筆數夠不代表天數夠"
         )
+    elif all_dirty:
+        last_failure_reason = (
+            f"全部 {excluded_dirty} 筆樣本為 dirty／變動中工作樹所採"
+            f"（excluded_dirty={excluded_dirty}）⇒ 證據不足"
+        )
 
     return {
         "status": status,
         "green_streak": streak,
         "window": window,
         "total_records": len(records),
+        # DEF-101-887：被剔除的中間態樣本數；total_records 是剔除後的筆數。
+        "excluded_dirty": excluded_dirty,
         "last_failure_reason": last_failure_reason,
         "staleness_days": stale_days,
         "staleness_max_days": STALENESS_MAX_DAYS,

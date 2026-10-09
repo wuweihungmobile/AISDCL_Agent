@@ -75,6 +75,12 @@ DEF-200-212 時期的過渡解＝**具名豁免面**（掌舵者裁決 D4／D8�
 （機制與注入口保留，供 self-test 與回歸鎖以合成表驗證；生產表為空＝不再核准新的歷史
 假陽性豁免）。存量普查實數見 `--census`。
 
+**時鐘改源（R210 起，round-label-ok）**：上文「時鐘凍結在 R100」自本輪起不再成立——
+`gate.current_round()` 改讀 R 系列證據檔／交棒書的**檔名**最大輪號（WHY 見該函式 docstring），
+時鐘隨新一輪證據檔的建立而前進。判準① 的「N ≥ 當前輪」因此對 R100／R109 那幾個舊 commit
+宣告自然祖父化（目標輪早已過去），帳本不再需要刻意留一列未結列當承接載體。判準② 的
+`done_ids` 祖父化照舊（結案事實與時鐘並存、互不取代；上兩節是史料，不刪）。
+
 使用：
   python3 tools/check_handoff_carriers.py            # 不合規印清單並 exit 1
   python3 tools/check_handoff_carriers.py --census    # 只印普查（永遠 rc=0）
@@ -423,8 +429,8 @@ def carrier_doc_problems(paths: list[Path], cur: int | None,
                 f"{rel}:{lineno} 這一行把工作延後到未來輪（{detail}），卻沒有帳本承接列"
                 f"{extra} ⇒ 交接項無機械承接載體。出口：補一列帳本並在本行指名該 DEF-ID"
                 f"（射程判準＝目標輪 ≥ 當前輪 R{cur}）；該列日後結案時本行自動出局"
-                f"（DEF-200-241：祖父化讀帳本結案事實，不讀時鐘——帳本『發現情境』欄輪次"
-                f"時鐘已凍結，見模組 docstring〈自動祖父化的射程邊界〉）。🔴 引用一個帳本"
+                f"（DEF-200-241：祖父化讀帳本結案事實；當前輪取自 R 系列文件檔名最大號，"
+                f"見模組 docstring〈自動祖父化的射程邊界〉）。🔴 引用一個帳本"
                 f"家族內查無列的 DEF-ID 不算承接（引用 ≠ 有列）")
     return problems
 
@@ -443,7 +449,7 @@ def census_notes(msgs: list[tuple[str, str]], paths: list[Path],
         for _lb, n, _sn in defer_rounds(body) if cur is not None and n >= cur
     )
     notes = [
-        f"當前輪＝R{cur}（帳本「{gate._CONTEXT_HEADER}」欄現查；"
+        f"當前輪＝R{cur}（R 系列證據檔／交棒書檔名最大號現查；"
         f"未結承接輪號＝{sorted(carriers) or '空'}）",
         f"tracked 交接載體＝{len(paths)} 份（glob {list(_CARRIER_GLOBS)}）；"
         f"其中前瞻延後行 {fwd_docs} 筆",
@@ -645,7 +651,7 @@ def main(argv: list[str] | None = None) -> int:
     if "--self-test" in args:
         return _self_test()
     ledger, arch = _load()
-    cur = gate.current_round(ledger)
+    cur = gate.current_round()
     carriers = ledger_carrier_rounds(ledger)
     msgs = commit_messages()
     paths, glob_fallback = carrier_files()

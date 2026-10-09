@@ -474,7 +474,10 @@ _TREE_FILE_FLOORS: dict[str, int] = {
     # 🔴 DEF-200-246 結案收尾單人窗口重釘 221 → 222：新增該列的反向存在鎖
     # `tests/contract/test_def200246_integration_queue_tripwire.py` 後該樹實測 **278** 支，
     # 221 只剩實測的 79%（低於 80%），第三向逐字指示重釘為 222 ⇒ 本行照填、零加減推算。
-    "AutoClaude/tests": 222,
+    # 🔴 R210 收尾單人窗口重釘 222 → 223：新增 `tests/tools/test_tree_state.py`  round-label-ok
+    # 後該樹實測 **279** 支，222 只剩實測的 79%（低於 `TREE_FLOOR_RATIO` 的 80%），第三向
+    # 逐字指示重釘為 223 ⇒ 本行照填、零加減推算。方向是**上修＝判準更嚴**，不是放寬。
+    "AutoClaude/tests": 223,
     # 🔴 R84 包 W5：23 → 24。**非本包造成**——`AISDLC_SDD/scripts/tests` 由 29 支長到 30
     # （並行包新增鎖檔），下限只剩實測的 77%、低於 `TREE_FLOOR_RATIO` 的 80% ⇒
     # `tree_floor_problems()` 的第三向（下限已過期）當場判紅並**逐字**指示重釘為 24，本行

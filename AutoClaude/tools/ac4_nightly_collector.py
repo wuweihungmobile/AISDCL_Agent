@@ -16,7 +16,11 @@
     --run-id STR        GitHub Actions run_id（CI 自動帶入；本地 fallback 為 "local"）
 
 輸出：附加一筆 JSON 至 .ac4_history.jsonl，每筆欄位固定：
-    timestamp / run_id / recall_at_10 / p95_ms / circuit_breaker_open_count / status
+    timestamp / run_id / recall_at_10 / p95_ms / circuit_breaker_open_count / status / tree
+
+`tree`（DEF-101-887）＝採樣當下的工作樹狀態（tools/tree_state.capture()）；判準端
+（ac4_progress_check.evaluate）算 streak 前剔除 `tree.valid is False` 的中間態樣本。
+缺 `tree` 的舊紀錄視為有效、不追溯作廢。
 
 JSONL schema 鎖定 — tests/contract/test_ac4_progress_check.py 依賴。
 """
@@ -30,6 +34,16 @@ import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
+
+# 🔴 兩種載入方式各走一條路、同一個 process 內只會走到其中一條（理由見姊妹檔
+# `tools/drift_log_ga_check.py` 同位置那段）：測試以 `from tools import …` 或把 tools/
+# 插進 sys.path 的裸 import 載入本檔；`python tools/ac4_nightly_collector.py`（nightly
+# 載具）時只有 tools/ 在 path 上 ⇒ `tools` 套件 ImportError ⇒ 走裸 import。
+try:
+    from tools import tree_state as _tree_state
+except ImportError:  # pragma: no cover - 以腳本形態執行時才會走到
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import tree_state as _tree_state  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _DEFAULT_HISTORY = _REPO_ROOT / ".ac4_history.jsonl"
@@ -151,7 +165,7 @@ def _parse_junit_xml(path: Path) -> dict[str, Any]:
 
 
 def _build_record(args: argparse.Namespace, parsed: dict[str, Any]) -> dict[str, Any]:
-    timestamp = _dt.datetime.now(tz=_dt.timezone.utc).isoformat(timespec="seconds")
+    timestamp = _dt.datetime.now(tz=_dt.UTC).isoformat(timespec="seconds")
     run_id = args.run_id or os.environ.get("GITHUB_RUN_ID") or "local"
 
     record = {
@@ -163,6 +177,8 @@ def _build_record(args: argparse.Namespace, parsed: dict[str, Any]) -> dict[str,
             args.cb_open if args.cb_open is not None else parsed.get("cb_open_count", 0)
         ),
         "status": args.status or parsed.get("status", "skip"),
+        # DEF-101-887：採樣當下的工作樹狀態；判準端剔除 `tree.valid is False` 的中間態樣本。
+        "tree": _tree_state.capture(),
     }
     return record
 
@@ -174,7 +190,7 @@ def _utc_date_of(record: dict[str, Any]) -> str | None:
         return None
     try:
         dt = _dt.datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
-        return dt.astimezone(_dt.timezone.utc).date().isoformat()
+        return dt.astimezone(_dt.UTC).date().isoformat()
     except (TypeError, ValueError):
         return None
 

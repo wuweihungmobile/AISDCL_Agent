@@ -529,7 +529,9 @@ def test_observability_ts_field_isomorphic_with_snapshot_tool(ps1_content: str) 
 
     比照 F2 分支 ↔ ac4_nightly_alert_parser.py 的 SSOT 同構樣板（紀律 #4 延伸）：
     ps1 端讀 `$lastRecord.ts` 並轉 UTC 日期；py 端必須同時存在
-    `.observability_history.jsonl` 檔名、"ts" 欄位字串與 UTC 語意（timezone.utc）。
+    `.observability_history.jsonl` 檔名、"ts" 欄位字串與 UTC 語意（`datetime.now(UTC)`；
+    與舊拼法 `timezone.utc` 是同一個物件——DEF-101-887 觸碰該檔時 ruff UP017 逼著換拼法，
+    錨點因此改成不挑拼法、但仍錨在「ts 由 `datetime.now(<UTC>)` 產生」這個程式碼用法上）。
     任一端改檔名 / 欄位名 / 時區語意而未同步另一端 = silent drift → 本 case fail。
     """
     assert _OBS_SNAPSHOT_PY.exists(), f"snapshot 工具缺失：{_OBS_SNAPSHOT_PY}"
@@ -546,8 +548,11 @@ def test_observability_ts_field_isomorphic_with_snapshot_tool(ps1_content: str) 
         "observability_snapshot.py 必須含 .observability_history.jsonl（檔名同構）"
     )
     assert '"ts"' in py_src, 'observability_snapshot.py 必須含 "ts" 欄位字串（欄位名同構）'
-    assert "timezone.utc" in py_src, (
-        "observability_snapshot.py 必須以 timezone.utc 寫入 ts（UTC 語意同構）"
+    # 錨在程式碼用法（`datetime.now(<UTC 拼法>)`）而不是任何出現「UTC」字樣的位置——
+    # 模組 docstring 就寫著「UTC date」，字面比對會讓 ts 改用 naive `datetime.now()` 也過。
+    assert re.search(r"datetime\.now\(\s*(?:timezone\.utc|UTC)\s*\)", py_src), (
+        "observability_snapshot.py 必須以 UTC（datetime.now(UTC) 或 datetime.now(timezone.utc)）"
+        "寫入 ts（UTC 語意同構）"
     )
 
 
@@ -2659,3 +2664,96 @@ def test_nightly_anchor_stage_is_wired_into_summary_json_and_exit_decision(
     assert not re.search(r"^\$null = Invoke-Stage 'nightly-anchor", ps1_content, re.M), (
         "不得以 `$null =` 吞掉 stage 的 rc（失敗會隱形）"
     )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# DEF-101-887：起跑態匯出給 collector，判準端剔除數印在 G0 區塊
+# ══════════════════════════════════════════════════════════════════════════════
+# ps1 只負責兩件事：起跑時把「`<head>|<state>`」匯成 $env:AUTOCLAUDE_NIGHTLY_TREE_START
+# （collector 採樣當下經 tools/tree_state.capture() 讀它），以及把 ac4 判準回報的
+# excluded_dirty 印出來。行為層（python 側）由 test_tree_state.py 守；這裡守 ps1 這一側的
+# 形狀與兩端詞彙同構——任一端改名／改格式而沒同步另一端，起跑態會被 python 側當垃圾丟掉，
+# 而那是**靜默**的（樣本照寫、只是永遠沒有 start_*），不會有人發現。
+
+
+def _non_comment_lines(ps1_content: str) -> list[tuple[int, str]]:
+    return [
+        (i, ln) for i, ln in enumerate(ps1_content.splitlines())
+        if not ln.strip().startswith("#")
+    ]
+
+
+def test_nightly_exports_the_start_tree_state_for_the_collectors(ps1_content: str) -> None:
+    """匯出必須恰一處、在起跑態已知之後、在任何 stage 之前，且格式與 python 側同構。"""
+    from tools import tree_state
+
+    code = _non_comment_lines(ps1_content)
+    exports = [
+        (i, ln) for i, ln in code
+        if re.match(rf"\s*\$env:{tree_state.START_ENV}\s*=", ln)
+    ]
+    assert len(exports) == 1, (
+        f"$env:{tree_state.START_ENV} 必須恰有一處賦值（起跑態不隨 stage 推進而變，"
+        f"多處＝後面那處可能在 stage 之間悄悄改寫它），實得 {len(exports)}"
+    )
+    at, line = exports[0]
+
+    validity = [i for i, ln in code if "SAMPLE VALIDITY: tree_state=" in ln]
+    assert len(validity) == 1 and validity[0] < at, "必須在 SAMPLE VALIDITY 起跑態區塊之後匯出"
+    first_stage = next(i for i, ln in code if re.search(r"Invoke-Stage\s+'", ln))
+    assert at < first_stage, "必須在第一個 stage 之前匯出——任何 collector 都在 stage 裡跑"
+
+    # R210 QA P2-1／P3-14：起跑態由 tools/tree_state.py --start-token 產出（與 capture()
+    # 同一套 dirty 判定、含 nightly 自寫檔排除），不再用 SAMPLE VALIDITY 的 $script:TreeState
+    # （那一格刻意連自寫檔一起算，給人讀）。
+    assert re.search(r"tools/tree_state\.py\s+--start-token", line), (
+        f"起跑態必須由 tools/tree_state.py --start-token 產出：{line.strip()!r}")
+    assert "$script:TreeState" not in line, (
+        "起跑態不得再用 $script:TreeState（週末未回收 baseline 時整晚被剔除）")
+    assert "$script:PyExe" in line, "必須用釘死的 venv 直譯器跑它（紀律 #14 1b）"
+    # 兩端同構：CLI 印的 `<head>|<state>` 必須是 python 側讀得懂的形狀
+    assert tree_state._parse_start(tree_state.start_token.__doc__ and "abc1234|dirty") == (
+        "abc1234", "dirty")
+
+
+def test_ps1_tree_state_vocabulary_matches_what_python_accepts(ps1_content: str) -> None:
+    """ps1 的 $script:TreeState 只能產出 python 側認得的三個值，否則整串起跑態被靜默丟掉。"""
+    from tools import tree_state
+
+    line = next(
+        ln for _, ln in _non_comment_lines(ps1_content)
+        if ln.strip().startswith("$script:TreeState = ")
+    )
+    assert set(re.findall(r"'([a-z]+)'", line)) == set(tree_state._STATES), line
+
+
+def test_ac4_gate_reads_excluded_dirty_in_a_strictmode_safe_way(ps1_content: str) -> None:
+    """Get-Ac4Gate 取 excluded_dirty 不得用 `$parsed.excluded_dirty` 直讀。
+
+    本檔是 StrictMode 3.0：讀 JSON 物件上不存在的屬性會當場拋 PropertyNotFoundException，
+    進 catch 後整支 helper 回 Ok=$false，G0 判定變成 TOOL-ERROR——也就是「舊版工具少一個
+    欄位」會被讀成「工具壞掉」。預設必須是 $null（缺鍵印 n/a，不是 0）。
+    """
+    body = re.search(r"(?ms)^function\s+Get-Ac4Gate\s*\{.*?^\}", ps1_content).group(0)
+    # 只看程式碼行：說明這條規則的註解本身會寫出被禁止的字面
+    code = "\n".join(ln for ln in body.splitlines() if not ln.strip().startswith("#"))
+    assert re.search(r"ExcludedDirty\s*=\s*\$null", code)
+    assert "PSObject.Properties['excluded_dirty']" in code
+    assert "$parsed.excluded_dirty" not in code
+
+
+def test_ac4_excluded_dirty_has_its_own_log_line_outside_the_progress_contract(
+    ps1_content: str,
+) -> None:
+    """剔除數另起一行印，不併進 END observation progress（那一條有契約鎖：恰一處＋固定欄位）。"""
+    code = _non_comment_lines(ps1_content)
+    lines = [(i, ln) for i, ln in code if "AC4 SAMPLE VALIDITY: excluded_dirty=" in ln]
+    assert len(lines) == 1, f"必須恰有一處印 excluded_dirty，實得 {len(lines)}"
+    at, stmt = lines[0]
+    assert "$ac4Gate.Ok" in stmt and "$ac4Gate.ExcludedDirty" in stmt
+    assert "'n/a'" in stmt, "取不到值必須印 n/a——印 0 會把「量不出來」讀成「沒有被剔除」"
+
+    end = [i for i, ln in code if "END observation progress:" in ln]
+    assert len(end) == 1, "END observation progress 必須維持恰一處（既有契約鎖）"
+    assert "AC4 SAMPLE VALIDITY" not in ps1_content.splitlines()[end[0]]
+    assert at > end[0], "剔除數行必須在進度行之後（同一個 G0 收尾區塊、$ac4Gate 已取得）"

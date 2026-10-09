@@ -510,6 +510,18 @@ Log ("SAMPLE VALIDITY: tree_state={0} dirty_entries={1} tree_fingerprint={2} hea
 if ($script:TreeState -ne 'clean') {
   Log ("SAMPLE VALIDITY: 本輪在**非乾淨**工作樹上採集（{0} 筆未提交變更）⇒ 本輪任何紅燈都可能是「量到半成品」而非真缺陷，任何綠燈也不代表 HEAD 為綠；判讀本輪 log 前先確認上列指紋對應的是誰的作業" -f $treeDirtyCount) 'WARN'
 }
+# DEF-101-887：上面這份起跑態只活在本輪 log，三本觀察期帳本一個欄位都沒記。把它匯給子行程
+# （原生子行程繼承 $env:）：三個 collector（ac4_nightly_collector／
+# drift_log_snapshot／observability_snapshot）採樣當下經 tools/tree_state.capture() 讀
+# 這個變數，連同當下的工作樹狀態一起寫進 record 的 `tree` 欄；判準端（ac4_progress_check／
+# ga_window）算 streak 前據此剔除中間態樣本。格式 `<head>|<clean|dirty|unknown>`，由
+# tools/tree_state.py --start-token 產出：與 capture() 同一套 dirty 判定（含 nightly 自寫檔
+# AutoClaude/.perf_baseline.toml 的排除——perf-baseline stage 幾乎每晚回寫它、drift／obs
+# collector 排在它後面；QA 以真實語料重現）。刻意不用上方 SAMPLE VALIDITY 的 $script:TreeState：
+# 那一格看整棵樹、連自寫檔一起算，是給人讀的 WARN。python 取不到＝空字串＝無起跑態。
+# 必須放在任何 stage 之前、且只在這裡設一次（起跑態不隨 stage 推進而變）。
+$env:AUTOCLAUDE_NIGHTLY_TREE_START = $(if ($script:PyExe) { ((& $script:PyExe tools/tree_state.py --start-token 2>$null) | Out-String).Trim() } else { '' })
+$global:LASTEXITCODE = 0
 
 # SD_09 W3 Round 19 audit P1-AUDIT-R18-2 修復（紀律 #13 觀察期 jsonl 進度可見 + delta 取證）：
 # 跑前 snapshot 各 jsonl 行數；跑後比對 delta，明示「本次 run 是否進帳」。
@@ -713,6 +725,9 @@ function Get-Ac4Gate {
     # 落在未來 ⇒ 新鮮度不可採信。兩者都只活在 JSON 深處的話，log 讀者會把 ready=True
     # 讀成「毫無保留達標」——那正是本檔 G0 段一直在防的假達標讀法。
     Caveats = @(); ClockAnomaly = $false
+    # DEF-101-887：判準剔除的「非乾淨工作樹所採」樣本數（ac4_progress_check 的 excluded_dirty）。
+    # 預設 $null＝沒讀到（舊版工具／helper 取不到值），印 n/a 而不是 0。
+    ExcludedDirty = $null
   }
   if (-not $script:PyExe) { $result.Error = 'python unavailable'; return $result }
   if (-not (Test-Path $HistoryPath)) { $result.Error = 'history missing'; return $result }
@@ -752,6 +767,11 @@ function Get-Ac4Gate {
     # 不因為多讀了新欄位而讓整支 helper 回 Ok=$false（那會把 G0 判定變成 TOOL-ERROR）。
     if ($null -ne $parsed.caveats) { $result.Caveats = @($parsed.caveats) }
     if ($null -ne $parsed.clock_anomaly) { $result.ClockAnomaly = [bool]$parsed.clock_anomaly }
+    # DEF-101-887：excluded_dirty 改以 PSObject.Properties 取值，不寫 `$parsed.excluded_dirty`：
+    # 本檔是 StrictMode 3.0，讀不存在的屬性會直接拋 PropertyNotFoundException、進 catch 就讓整支
+    # helper 回 Ok=$false（G0 判定變 TOOL-ERROR）。舊版工具沒有這個欄位時必須維持 $null。
+    $exDirty = $parsed.PSObject.Properties['excluded_dirty']
+    if ($null -ne $exDirty -and $null -ne $exDirty.Value) { $result.ExcludedDirty = [int]$exDirty.Value }
     $result.Ok = $true
   } catch {
     $result.Error = "$_"
@@ -2021,6 +2041,11 @@ Log ("END observation progress: mutation={0} (should_lock 權威判定; tail uni
   $obsNumerator, $obsWindow, $obsCount, $obsDelta, $rc5Label, `
   $driftNumerator, $driftWindow, $driftCount, $driftDelta, $rc4Label, `
   $ac4GateStreak, $ac4GateRequired)
+# DEF-101-887：AC4 判準剔除了幾筆「非乾淨工作樹所採」的中間態樣本。刻意另起一行、不併進上面
+# 那條進度行（它有契約鎖：恰一處＋固定欄位，見 Nightly_Forensic_Discipline 紀律 #13）。
+# 0 是常態；非 0 代表有幾筆樣本因 dirty／變動中的工作樹而不計入 streak。取不到值（舊版工具、
+# helper 回 Ok=$false）印 n/a——不印 0，免得把「量不出來」讀成「沒有被剔除」。
+Log ("AC4 SAMPLE VALIDITY: excluded_dirty={0}" -f $(if ($ac4Gate.Ok -and $null -ne $ac4Gate.ExcludedDirty) { [string]$ac4Gate.ExcludedDirty } else { 'n/a' }))
 
 # R71（額外項）：桶位漂移可見化——本輪起跑時刻 vs 排定時刻（理由見
 # Get-NightlyScheduleTiming 上方註解）。純取證，不影響 rc / exit code。

@@ -24,7 +24,7 @@
 4. **護欄層散文搬遷抵銷**：八支鎖檔的歷史沿革段落逐塊逐字保全搬至
    `docs/06_quality/CrossPlatform_R122_Guard_Prose_Migration.md`，換出款(10)(11) 所需額度。
 5. **三筆同輪到期義務兌現**：`_REPIN_NET_CAP_SCHEDULE` 追加 `(122, 559)`／
-   `_PHASE2_REVIEW_LOG` 追加 `[維持觀察]` 列／`_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND`
+   `_PHASE2_REVIEW_LOG` 追加 `[維持觀察]` 列／_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND
    具名展延（理由逐字寫在該常數旁，判準明令不得靜默沿用）。
 
 ## 已驗證

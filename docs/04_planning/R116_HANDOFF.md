@@ -115,8 +115,8 @@ python d:\CursorProject\AISDCL_Agent\tools\run_root_unittests.py
 ## 四、禁止事項
 
 - 不准調高 `_REGRESSION_LANE_ROUND_CAP`／`_REPIN_ROUND_NET_CAP`（cap 類＝只准調小）。
-- `_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND` 展延只准走具名複審且不得超過
-  「現查輪＋`_ROOT_TOOLS_DEBT_DUE_MAX_LOOKAHEAD`」界（A-2 後設鎖），不得靜默推遠。
+- _ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND 展延只准走具名複審且不得超過
+  「現查輪＋_ROOT_TOOLS_DEBT_DUE_MAX_LOOKAHEAD」界（A-2 後設鎖），不得靜默推遠。
 - 不准把 `_REGRESSION_LANE_SINCE` 調小（追溯放寬，見 `[減免軌被追溯]`）。
-- 不准為了讓 U9 的到期輪判準轉綠而把 `_ROOT_TOOLS_OLD_SCALE_DEBT_RESOLVED`
+- 不准為了讓 U9 的到期輪判準轉綠而把 _ROOT_TOOLS_OLD_SCALE_DEBT_RESOLVED
   改 True，除非四支 `[ROOT-TOOLS]` 檔已真的拆到舊尺不破線。

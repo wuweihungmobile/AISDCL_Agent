@@ -36,6 +36,16 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+# 🔴 兩種載入方式各走一條路、同一個 process 內只會走到其中一條（理由見姊妹檔
+# `tools/drift_log_ga_check.py` 同位置那段）：`from tools.drift_log_snapshot import …`
+# （pytest）AutoClaude 在 path 上 ⇒ 走 `tools` 套件；`python tools/drift_log_snapshot.py`
+# （nightly 載具）時只有 tools/ 在 path 上 ⇒ ImportError ⇒ 走裸 import。
+try:
+    from tools import tree_state as _tree_state
+except ImportError:  # pragma: no cover - 以腳本形態執行時才會走到
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import tree_state as _tree_state  # noqa: E402
+
 DEFAULT_HISTORY = Path(".drift_log_history.jsonl")
 
 
@@ -53,6 +63,7 @@ def build_record(
     severity_non_info_count: int,
     table_exists: bool = True,
     ts: str | None = None,
+    tree: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """組裝 drift_log 當日 snapshot record。
 
@@ -61,12 +72,15 @@ def build_record(
             的數值；ps1 在 PG 連得上時填入；連不上 → 由 caller 決定是否寫入。
         table_exists: drift_log 表是否存在（False 表 alembic 落後）。
         ts: ISO timestamp；None 時用 now。
+        tree: 採樣當下的工作樹狀態（DEF-101-887；`tree_state.capture()` 的回傳）；
+            None 時現場 capture。判準端（ga_window.evaluate）據此剔除中間態樣本。
     """
     return {
         "ts": ts or datetime.now(UTC).isoformat(timespec="seconds"),
         "drift_log_table_exists": bool(table_exists),
         "severity_non_info_count": int(severity_non_info_count),
         "passed": (bool(table_exists) and int(severity_non_info_count) == 0),
+        "tree": tree if tree is not None else _tree_state.capture(),
     }
 
 

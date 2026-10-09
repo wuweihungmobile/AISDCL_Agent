@@ -434,10 +434,10 @@ def test_the_debt_handover_round_is_still_in_the_future() -> None:
     ledger = _AC_ROOT.parent / "docs" / "06_quality" / "AutoSDD_Defect_Log.md"
     if not ledger.is_file():
         pytest.skip(f"[TOOL-ABSENCE] 缺陷帳本不存在：{ledger}——當前輪次量不到")
-    now = crossref.current_round(ledger.read_text(encoding="utf-8"))
+    now = crossref.current_round()  # R210 起時鐘改讀 R 系列文件檔名最大號 round-label-ok
     if now is None:
         pytest.skip(
-            "[TOOL-ABSENCE] 從缺陷帳本推不出當前輪次（「發現情境」欄格式已變？）"
+            "[TOOL-ABSENCE] 推不出當前輪次（R 系列證據檔／交棒書檔名零命中？）"
             "——量不到 ≠ 量到合格，本支不在此情形下放行"
         )
     assert _AC_DEBT_HANDOVER_ROUND is not None, (

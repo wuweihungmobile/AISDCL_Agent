@@ -619,17 +619,17 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 393,
     "_ps_engine.py": 83,
     "test_act_local_runner_image.py": 307,
-    "test_adr_xplat001_c1c2_lock.py": 8776,
+    "test_adr_xplat001_c1c2_lock.py": 8712,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
-    "test_archive_defect_log.py": 4067,
+    "test_archive_defect_log.py": 4074,
     "test_bash32_compat.py": 979,
     "test_bash_probe_spec_contract.py": 859,
     "test_block_destructive_git_r83.py": 3422,
     "test_bootstrap_core.py": 436,
     "test_bootstrap_ps1.py": 160,
     "test_check_archive_required.py": 160,
-    "test_check_defect_log_crossref.py": 3878,
+    "test_check_defect_log_crossref.py": 3956,
     "test_check_gha_action_versions.py": 295,
     "test_check_hooks_liveness.py": 3823,
     "test_check_pytest_baseline_sites.py": 301,
@@ -1399,7 +1399,7 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "皆因該段落是別的機械物的逐字比對面）與保全檢查見該搬遷檔檔頭。"),
     ("R122", 91649, 91668, 19,
      "[非淨減法輪][同輪追加] 本檔自身編修：兩筆到期義務就地兌現（`_PHASE2_REVIEW_LOG` "
-     "追加 `[維持觀察]` 列／`_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND` 具名展延並把理由逐字"
+     "追加 `[維持觀察]` 列／_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND 具名展延並把理由逐字"
      "寫在該常數旁）＋凍結表值同步＋prefix_len 與指紋鏈同步＋本列自身＋裸計數措辭訂正"
      "（本檔自訂紀律「散文不得寫死可機械算出的計數」在上一列落地的當回合把作者抓到一次，"
      "照實記）。逐項見 CrossPlatform_R122_Debt_Closure.md。"),
@@ -1841,7 +1841,7 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "CrossPlatform_R145_Scan_Findings.md〈續2〉。"),
     ("R147", 98873, 98886, 13,
      "[非淨減法輪][同輪追加] 收斂列：_PHASE2_REVIEW_LOG 新列＋"
-     "`_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND` 具名展延 147→152 造成的十三行漂移。"
+     "_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND 具名展延 147→152 造成的十三行漂移。"
      "逐檔清單沿用 CrossPlatform_R145_Scan_Findings.md〈R147 沿用〉。"),
     ("R147", 98886, 98890, 4,
      "[非淨減法輪][同輪追加] 收斂列，"
@@ -1974,7 +1974,7 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "CrossPlatform_R145_Scan_Findings.md〈R152 沿用〉節。"),
     ("R152", 100057, 100088, 31,  # round-label-ok：本表自身重釘漂移（單一收斂列，含本列自身）
      "[非淨減法輪][同輪追加] 收斂列：本表（test_adr_xplat001_c1c2_lock.py 自身）新增上兩列、"
-     "`_FROZEN_PREFIX_REWRITE_LEDGER` 接鏈列與 `_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND` 具名"
+     "`_FROZEN_PREFIX_REWRITE_LEDGER` 接鏈列與 _ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND 具名"
      "展延 152→157 所造成的行數漂移（含本列自身收斂），全額歸回歸鎖軌（同既有體例）。"
      "逐檔清單見 CrossPlatform_R145_Scan_Findings.md〈R152 沿用〉。"),
     ("R152", 100088, 100098, 10,  # round-label-ok：DEF-200-312 首晚 nightly 真跑抓到的測試修正
@@ -2609,6 +2609,15 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "（DEF-200-129 自列改派出口接線鎖改寫、對照組改合成帳本）；加本表自身漂移（重釘列、回歸鎖軌"
      "同輪列、接鏈列）。主軌 0 ≤ 0（款(11) 連升維持歸零）。逐檔清單見 "
      "CrossPlatform_R209_Debt_Closure_Evidence.md〈四〉〈六〉。"),
+    ("R210", 114790, 114811, +21,  # round-label-ok
+     "[非淨減法輪][回歸鎖軌申報 21（＝主表淨額，≤ 軌上限 309），見 _REGRESSION_LANE_LOG 同輪列] "
+     "技術債結案終輪（未結 2→0）：test_check_defect_log_crossref.py +78（DEF-200-207 帳本時鐘改讀 "
+     "R 系列文件檔名最大號的結案回歸鎖：純函式／兩 glob／數字序／注入式時鐘）＋ "
+     "test_archive_defect_log.py +7（未結歸 0 的合法終態改以合成列證明孤兒偵測面）＋ "
+     "本檔 −80（ADR-XPLAT-013 §9.5 四方決議退役 U9 到期輪機制：常數、旗標、lookahead 雙生子、"
+     "判準與五支測試；史料搬 Guard_Line_History_2.md）；加本表自身漂移（重釘列、回歸鎖軌同輪列、"
+     "到期兌現列 (210, 517) 並重新武裝 212／516、接鏈列）。主軌 0 ≤ 0（款(11) 連升維持歸零）。"
+     "逐檔清單見 CrossPlatform_R210_Debt_Closure_Final_Evidence.md〈二〉〈七〉。"),
 )
 
 
@@ -2636,6 +2645,7 @@ _REPIN_NET_CAP_SCHEDULE: tuple[tuple[int, int], ...] = (
     (157, 537), (159, 536), (163, 535), (165, 534), (167, 533), (169, 532), (171, 531),
     (173, 530), (175, 529), (177, 528), (180, 527), (182, 526), (184, 525), (186, 524),
     (188, 523), (190, 522), (192, 521), (194, 520), (196, 519), (208, 518),
+    (210, 517),
 )
 #: 生效點＝首列輪號、現行上限＝末列上限，**皆由表導出不另立常數**（R73 判例：一份知識一個家）。
 _REPIN_ROUND_CAP_SINCE = _REPIN_NET_CAP_SCHEDULE[0][0]
@@ -2849,7 +2859,7 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "全額歸本軌（記帳誠實度分類）：test_nightly_interpreter_determinism.py +72＋"
      "test_dev_start.py +109＋test_clean_venv_carrier.py +63＋DEF-200-312（首晚 nightly 真跑："
      "_real_shim 在 Windows 一律 shebang 包裝）test_find_git_bash_parity.py +4＋本檔自身逐檔"
-     "漂移收斂（含 `_FROZEN_PREFIX_REWRITE_LEDGER` 接鏈列、`_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND` "
+     "漂移收斂（含 `_FROZEN_PREFIX_REWRITE_LEDGER` 接鏈列、_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND "
      "具名展延與同輪追加列造成的漂移）合計 37。DEF-200-310（test_windowsapps_guard_cross_consistency.py "
      "過期字面訂正折行 +1）性質非回歸鎖、不計入本軌淨額——已在主表另立一列全額歸功能軌，"
      "排除於本列淨額之外。見 docs/06_quality/CrossPlatform_R145_Scan_Findings.md〈R152 沿用〉。"),
@@ -3093,6 +3103,10 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "＋ test_workflow_permission_concurrency_lock.py 納入鎖與 jq 行為鎖 ＋ "
      "test_check_defect_log_crossref.py 接線鎖 ＋ 本檔自身稽核列。"
      "見 CrossPlatform_R209_Debt_Closure_Evidence.md〈四〉〈六〉。"),
+    ("R210", 21,  # round-label-ok
+     "DEF-200-207／DEF-101-887 結案回歸鎖：test_check_defect_log_crossref.py 時鐘改源鎖 ＋ "
+     "test_archive_defect_log.py 未結歸 0 終態鎖 ＋ 本檔自身稽核列（U9 退役的 −80 為同批淨減）。"
+     "見 CrossPlatform_R210_Debt_Closure_Final_Evidence.md〈二〉〈七〉。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -3150,52 +3164,6 @@ def _regression_lane_cap_basis() -> tuple[str, int]:
     return row[0], row[3]
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# ADR-XPLAT-013 §9.3／U9（D-5 裁決，R116 round-label-ok）：四支 `[ROOT-TOOLS]` 檔舊尺債到期輪。
-# 本批只落地「到期輪常數＋機械保底」半格；真拆未做、over_by 現查 187（逐檔數字、判準
-# 出處與惡化態勢＝`CrossPlatform_R116_Scan_Findings.md` §D-5，本檔不重抄史料）。
-# 🔴 R121～R183 具名展延全文見 Guard_Line_History.md〈U9 具名展延沿革〉（R184 搬遷） round-label-ok
-# 🔴 R188 具名展延（鐵律七，不得靜默沿用）round-label-ok：DEF-200-447／449 AutoClaude hook 出聲
-# 修復收尾單人窗口（護欄層記帳），非 root-tools 重構持有面；真拆待獨立窗口，
-# 188 → 193（在 lookahead=5 內，已達上界；前次具名展延 183 → 188）。
-# 🔴 R193 具名展延（鐵律七，不得靜默沿用）round-label-ok：五問首次 Windows 執行輪，持有面全在
-# hook／量測器／協定與結案回歸鎖（護欄層記帳），非 root-tools 重構；真拆仍待獨立窗口，
-# 193 → 198（在 lookahead=5 內，已達上界；前次具名展延 188 → 193）。
-# 🔴 R208 具名展延（鐵律七，不得靜默沿用）round-label-ok：nightly 錨機械回填輪，持有面全在
-# 新工具／佈線／結案回歸鎖（護欄層記帳），非 root-tools 重構；真拆仍待獨立窗口，
-# 198 → 213（在 lookahead=5 內，已達上界；前次具名展延 193 → 198）。
-_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND = 213
-#: 清償旗標——真拆完成後改 True。刻意用布林而非重建舊尺計數器（ADR §9.3「舊尺已廢」）。
-_ROOT_TOOLS_OLD_SCALE_DEBT_RESOLVED = False
-#: A-2 後設鎖：到期輪只准落在「現查輪＋lookahead」內，推遠（如 9999）當場紅；shrink-only
-#: 凍結雙生子（同 `_REPIN_DUE_ROUND_MAX_LOOKAHEAD`／DEF-200-121 同族）。
-_ROOT_TOOLS_DEBT_DUE_MAX_LOOKAHEAD = 5
-_FROZEN_ROOT_TOOLS_DEBT_DUE_MAX_LOOKAHEAD = 5
-
-
-def root_tools_debt_due_problems(
-    resolved: bool = _ROOT_TOOLS_OLD_SCALE_DEBT_RESOLVED,
-    due_round: int = _ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND,
-    latest_round: int | None = None,
-) -> list[str]:
-    """空＝通過。純函式，紅綠由合成注入自證。機械保底不是「已真拆」的證明——只保證
-    「到了到期輪還沒清償」不被靜默遺忘（紀律同 `_REPIN_NET_CAP_DUE_ROUND`：可延期的
-    到期日不是到期日，出口只有清償或由複審具名展延且仍受 lookahead 界約束）。"""
-    live = live_repin_round() if latest_round is None else latest_round
-    bound = live + _ROOT_TOOLS_DEBT_DUE_MAX_LOOKAHEAD
-    if due_round > bound:
-        return [f"[到期輪超界] U9 到期輪 R{due_round} > 現查輪＋lookahead（R{bound}）——"
-                "展延必須具名寫理由且仍受本界約束，不得把常數推遠"]
-    if not resolved and live >= due_round:
-        return [
-            f"[技術債逾期] ADR-XPLAT-013 §9.3／U9 的四支 [ROOT-TOOLS] 檔舊尺技術債"
-            f"到期輪已是 R{due_round}（現查 R{live}）而尚未清償——出口二擇一："
-            "①真拆到舊尺不破線後把 `_ROOT_TOOLS_OLD_SCALE_DEBT_RESOLVED` 改 True"
-            "（同批訂正現查 over_by 為 0）；②由下一次複審具名展延"
-            "（追加更大的 `_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND` 並寫明理由，"
-            "不得靜默沿用）"
-        ]
-    return []
 
 
 def net_cap_for_round(no: int, schedule: Sequence[tuple[int, int]] | None = None) -> int:
@@ -3252,8 +3220,9 @@ def net_cap_schedule_problems(
 #: R192 兌現 521；R194 兌現：cap 降至目標 520，重新武裝 519 round-label-ok
 #: R196 兌現：cap 降至目標 519，重新武裝 518 round-label-ok
 #: R208 兌現：cap 降至目標 518，重新武裝 517 round-label-ok
-_REPIN_NET_CAP_DUE_ROUND = 210  # round-label-ok：到期輪＝兌現輪+2（lookahead 判準的活體對照）
-_REPIN_NET_CAP_DUE_TARGET = 517  # 步伐 1，嚴格低於 cap 518（本輪重新武裝） round-label-ok
+#: R210 兌現：cap 降至目標 517，重新武裝 516 round-label-ok
+_REPIN_NET_CAP_DUE_ROUND = 212  # round-label-ok：到期輪＝兌現輪+2（lookahead 判準的活體對照）
+_REPIN_NET_CAP_DUE_TARGET = 516  # 步伐 1，嚴格低於 cap 517（本輪重新武裝） round-label-ok
 
 #: DEF-200-121：到期輪自身的後設鎖——`_REPIN_NET_CAP_DUE_ROUND` 只准落在「最近稽核輪
 #: ＋ lookahead」以內（歷史母體 85..113 的到期輪一律＝上一次兌現輪 +2）。可延期的到期日
@@ -3320,10 +3289,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 329
+_REPIN_LOG_FROZEN_PREFIX_LEN = 330
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "715cab768f05dbf593c073536e82f984a83cd1551c872bdff665bc5c208a0d20")
+    "bcdb57dd180d9a51f450ecdbc2c24890ea373b7bada6356cf3fdca016d8d05cf")
 
 
 def repin_log_history_digest(
@@ -3683,6 +3652,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R196", "8f82574a3243", "7c1d18c28c25", "DEF-200-484"),  # round-label-ok
     ("R208", "7c1d18c28c25", "1e22b76a4c99", "DEF-200-506"),  # round-label-ok
     ("R209", "1e22b76a4c99", "715cab768f05", "DEF-200-129"),  # round-label-ok
+    ("R210", "715cab768f05", "bcdb57dd180d", "DEF-200-207"),  # round-label-ok
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。
@@ -6651,7 +6621,7 @@ def sc8_no_dead_letter_waiver_marker(c: Corpus) -> list[str]:
 # 🔴 R74（本輪 P0 的一半）：§6 邊界 1 的 R70 段落逐字寫著「逐輪補列是收輪必做項（缺列比
 # 欄位寫錯更難發現：缺列不會有任何東西轉紅）」，而該診斷接下來就在 R73 上再度成立——
 # R74 開輪時該表停在 R72。SC-1~SC-9 全是「壞形態不得出現」，對「該出現的沒出現」零覆蓋。
-# 輪號**現查**（帳本「發現情境」欄最大 `R\d+`），寫死就是下一輪的 stale 站點。
+# 輪號**現查**（R 系列文件檔名最大號，見 `current_round()`），寫死就是下一輪的 stale 站點。
 _SC10_ROW_RE = re.compile(r"^\s*\|\s*R(\d+)", re.M)
 #: 🔴 DEF-200-171：當前輪那一列的**內容**禁詞（缺席型判準的另一半）。R96 實例逐字掛著
 #: 「本列為進行中輪次、收輪時必須複驗本列」直到四方複審才被指出；R85／R90／R91 三列同形。
@@ -6679,9 +6649,9 @@ def sc10_coverage_table_has_a_row_for_the_current_round(c: Corpus) -> list[str]:
     rounds = _coverage_table_rounds(c.adr2)
     if not rounds:
         return ["SC-10：§6 抽不到任何 `| R<n>` 覆蓋表列 — 掃描面已崩塌（表被改名／改格式？）"]
-    current = _current_round_from_ledger(c)
+    current = _current_round_live()
     if current is None:
-        return []  # 帳本推不出輪次時不猜（無訊號 ≠ 壞訊號），與 ci_liveness 同紀律
+        return []  # 時鐘推不出輪次時不猜（無訊號 ≠ 壞訊號），與 ci_liveness 同紀律
     if current in rounds:
         row_re = re.compile(rf"^\s*\|\s*R{current}\b")
         return [
@@ -6696,18 +6666,15 @@ def sc10_coverage_table_has_a_row_for_the_current_round(c: Corpus) -> list[str]:
         f"SC-10：§6 邊界 1 逐輪覆蓋表缺 R{current} 那一列（現有最大 R{max(rounds)}）。"
         f"該表自陳「逐輪補列是收輪必做項」，而缺列此前不會讓任何東西轉紅 ⇒ R73 就是這樣"
         f"漏掉的（連帶漏查雲端 CI，該輪收官 commit 的 windows-compat-ci 為紅）。"
-        f"輪次權威源＝tools/check_defect_log_crossref.py::current_round（帳本「發現情境」欄）"
+        f"輪次權威源＝tools/check_defect_log_crossref.py::current_round（R 系列證據檔／交棒書檔名）"
     ]
 
 
-def _current_round_from_ledger(c: Corpus) -> int | None:
-    """從語料裡的帳本主檔推當前輪次；權威源是既有函式，本檔不自寫第二份判準。"""
+def _current_round_live() -> int | None:
+    """現查當前輪次；權威源是既有函式（讀 R 系列文件檔名，非語料帳本），本檔不自寫第二份判準。"""
     import check_defect_log_crossref as CDX  # noqa: PLC0415  # 延後 import：避開 stdio 手術
 
-    for name, body in c.family:
-        if name.endswith(MAIN_LEDGER_NAME):
-            return CDX.current_round(body)
-    return None
+    return CDX.current_round()
 
 
 class Check(NamedTuple):
@@ -6914,8 +6881,8 @@ _SECTION_91_INJECTIONS: tuple[Injection, ...] = (
 
 def _drop_current_round_row(c: Corpus) -> Corpus:
     """把當前輪那一列從 §6 覆蓋表刪掉＝R74 開輪時的實況（表停在 R72、缺 R73）。"""
-    current = _current_round_from_ledger(c)
-    assert current is not None, "SC-10 注入需要帳本能推出輪次"
+    current = _current_round_live()
+    assert current is not None, "SC-10 注入需要時鐘能推出輪次"
     kept = [ln for ln in c.adr2.splitlines()
             if not re.match(rf"^\s*\|\s*R{current}\b", ln)]
     assert len(kept) < len(c.adr2.splitlines()), f"注入未刪到任何 R{current} 列"
@@ -6924,8 +6891,8 @@ def _drop_current_round_row(c: Corpus) -> Corpus:
 
 def _taint_current_round_row(c: Corpus) -> Corpus:
     """往當前輪那一列**行內**補上 R96 逐字警語＝DEF-200-171 立案的修復前實況。"""
-    current = _current_round_from_ledger(c)
-    assert current is not None, "SC-10 注入需要帳本能推出輪次"
+    current = _current_round_live()
+    assert current is not None, "SC-10 注入需要時鐘能推出輪次"
     lines = c.adr2.splitlines()
     idx = next((i for i, ln in enumerate(lines)
                 if re.match(rf"^\s*\|\s*R{current}\b", ln)), None)
@@ -8458,37 +8425,6 @@ class TestObservationColumnsAreDisplayOnly(unittest.TestCase):
                           f"這些判準函式引用了觀測欄：{offenders} ⇒ (c) 不再是「只印不擋」")
 
 
-class TestRootToolsOldScaleDebtDueRound(unittest.TestCase):
-    """ADR-XPLAT-013 §9.3／U9（D-5）：技術債到期輪的機械保底（不是「已真拆」的證明）。"""
-
-    def test_the_real_state_is_not_yet_due(self) -> None:
-        """生產閘門：R116 現查未清償，但到期輪 R121 尚未到，故現在必須是綠的。round-label-ok"""
-        problems = root_tools_debt_due_problems()
-        self.assertEqual(problems, [], "\n  ".join(problems))
-
-    def test_unresolved_past_due_is_red(self) -> None:
-        problems = root_tools_debt_due_problems(resolved=False, due_round=121,
-                                                 latest_round=121)
-        self.assertTrue(any("[技術債逾期]" in p for p in problems), problems)
-
-    def test_resolved_past_due_is_green(self) -> None:
-        problems = root_tools_debt_due_problems(resolved=True, due_round=121,
-                                                 latest_round=121)
-        self.assertEqual(problems, [])
-
-    def test_unresolved_before_due_is_green(self) -> None:
-        problems = root_tools_debt_due_problems(resolved=False, due_round=121,
-                                                 latest_round=116)
-        self.assertEqual(problems, [])
-
-    def test_the_due_round_cannot_be_silently_pushed_out(self) -> None:
-        """A-2 後設鎖紅綠自證：到期輪推到 9999 必紅；真實模組常數必須在界內。"""
-        hits = root_tools_debt_due_problems(due_round=9999, latest_round=116)
-        self.assertTrue(any("[到期輪超界]" in h for h in hits), hits)
-        real = [h for h in root_tools_debt_due_problems() if "[到期輪超界]" in h]
-        self.assertEqual(real, [], real)
-        self.assertLessEqual(_ROOT_TOOLS_DEBT_DUE_MAX_LOOKAHEAD,
-                             _FROZEN_ROOT_TOOLS_DEBT_DUE_MAX_LOOKAHEAD)
 
 
 class TestRepinCommandIsReal(unittest.TestCase):

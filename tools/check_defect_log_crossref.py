@@ -68,6 +68,7 @@ from __future__ import annotations
 
 import re
 import sys
+from collections.abc import Iterable
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -149,7 +150,7 @@ def _header_cells(ledger_text: str) -> list[str] | None:
     """回傳帳本**第一個**合格表頭的全部切片；找不到回 `None`。
 
     抽成獨立函式是為了讓「用欄名定位」這件事有唯一實作：`_table_layout()` 取
-    `ID`／`狀態` 三元組，`current_round()` 另需 `發現情境` 欄，兩者若各自重寫一次
+    `ID`／`狀態` 三元組，`residual_todo_notes()` 另需 `分流去向` 欄，兩者若各自重寫一次
     表頭掃描，就是本 repo 反覆在治的複本型缺陷（見 R57「靜態掃描錨為何從三份複本
     收斂為 SSOT」判例：觀測同一對象的複本不產生鑑別力）。
     """
@@ -465,38 +466,29 @@ def _receipt_rounds(status_cell: str) -> list[int]:
             if not (m.start() > 0 and status_cell[m.start() - 1] == "@")]
 
 
-def current_round(ledger_text: str) -> int | None:
-    """從帳本「發現情境」欄推得**當前輪次**；推不出回 `None`。
+#: 當前輪時鐘的來源（WHY 見 `current_round()`）：只比對檔名 basename，glob 只是前置濾網。
+_ROUND_DOC_GLOBS = ("docs/06_quality/CrossPlatform_R*_*.md", "docs/04_planning/R*_HANDOFF.md")
+_ROUND_DOC_NAME_RE = re.compile(r"^(?:CrossPlatform_)?R(\d+)_")
 
-    🔴 為何是這個取值方式（三個候選都試過，這是唯一不會 stale 也不會取錯的）：
-      · **不寫死常數**——下一輪就過期，正是本 repo 反覆在治的病（`Scan_Dimensions.md`
-        開頭那句「本檔刻意不寫死輪號」即為同一個教訓）。
-      · **不用 `docs/04_planning/` 現存最大號 `AutoSDD_improving_NN`**（掃描員的建議）：
-        兩套編號**不是同一個東西**——實查該目錄最大號已達三位數，而跨平台複審輪號還在
-        兩位數。拿它當「當前輪」會讓每一列的承接輪號都遠小於它 ⇒ 整本帳本瞬間全紅。
-      · **用「發現情境」欄的最大 `R\\d+`**：`Scan_Dimensions.md` 開頭已明文宣告
-        「最新輪次見 `AutoSDD_Defect_Log.md` 最末列」，本函式即該宣告的機械化；取
-        **最大值**而非「最末列」是因為 append 順序不保證輪號單調，取最大值只會讓判準
-        **更寬**（承接輪號更容易 ≥ 當前輪），只會漏抓、不會假紅。
-      · 邊界：帳本輪替（已結列搬 archive）若把最新一輪的列全搬走，本值會**變小**⇒ 判準
-        變寬。這是刻意選的失效方向（漏抓而非假紅），且活躍列依政策一律留主檔。
+
+def round_from_doc_names(names: Iterable[str]) -> int | None:
+    """檔名（basename）裡最大的輪號；**數字排序**而非字串序；無命中回 `None`（純函式）。"""
+    found = [int(mm.group(1)) for n in names if (mm := _ROUND_DOC_NAME_RE.match(n))]
+    return max(found, default=None)
+
+
+def current_round(repo_root: Path | None = None) -> int | None:
+    """當前輪次＝R 系列證據檔／交棒書的**檔名**最大輪號（現查檔案系統，不走 git）；推不出回 `None`。
+
+    🔴 為何改源（R210 起；此前取帳本「發現情境」欄最大 `R\\d+`）：  round-label-ok
+      R100 起帳本列刻意不再寫輪號，時鐘自 R100 凍結到 R209 共 109 輪，  round-label-ok
+      下游「承接輪次 ≥ 當前輪」判準對舊承接者失真（R209 證據檔〈三〉理論洞 #1）。  round-label-ok
+    🔴 不用 `docs/04_planning/` 的 `AutoSDD_improving_NN` 最大號：兩套編號各自累積、數字不同。
+    🔴 失效方向：兩個 glob 皆零命中 ⇒ `None` ⇒ 各消費端 fail-open 略過；多出一個未追蹤的
+      「未來輪」檔案會讓時鐘前進——刻意接受（`git status` 看得見）。不寫死常數。
     """
-    cells = _header_cells(ledger_text)
-    if cells is None or _CONTEXT_HEADER not in cells:
-        return None
-    ncols, ctx_idx = len(cells), cells.index(_CONTEXT_HEADER)
-    best: int | None = None
-    for line in ledger_text.splitlines():
-        if not _ROW_RE.match(line):
-            continue
-        row = _row_cells(line)
-        if len(row) != ncols:
-            continue
-        for m in _ROUND_RE.finditer(row[ctx_idx]):
-            n = int(m.group(1))
-            if best is None or n > best:
-                best = n
-    return best
+    root = repo_root or _REPO_ROOT
+    return round_from_doc_names(p.name for g in _ROUND_DOC_GLOBS for p in root.glob(g))
 
 
 def _handover_rounds(line: str) -> list[tuple[str, int, str]]:
@@ -509,11 +501,12 @@ def _handover_rounds(line: str) -> list[tuple[str, int, str]]:
     return found
 
 
-def orphan_backlog_problems(ledger_text: str) -> list[str]:
+def orphan_backlog_problems(ledger_text: str, *, cur: int | None = None) -> list[str]:
     """硬規則②的機械化：未結案列指名的承接輪次不得早於當前輪（純函式）。
 
     回傳問題清單（空＝無孤兒）。純函式化的理由同 `status_first_word_problems()`：
-    可直接以構造輸入證明它有牙，不必真的弄壞一份帳本。
+    可直接以構造輸入證明它有牙，不必真的弄壞一份帳本。`cur` 注入當前輪（缺省＝
+    `current_round()` 現查；合成帳本的測試一律注入，時鐘不再取自帳本文字）。
 
     **已實測涵蓋**（每一項都以構造輸入跑過，見 `TestOrphanBacklogProblems`）：
       · `open（承接輪次：**R2**…）`／`承接者＝R2`／`仍待 R2+ 承接者處理`
@@ -546,7 +539,7 @@ def orphan_backlog_problems(ledger_text: str) -> list[str]:
             continue
         rows.append((lineno, cells, line))
 
-    cur = current_round(ledger_text)
+    cur = current_round() if cur is None else cur
     floor = cur if cur is not None else -1
     problems: list[str] = []
     for i, (lineno, cells, line) in enumerate(rows):
@@ -573,10 +566,9 @@ def orphan_backlog_problems(ledger_text: str) -> list[str]:
             problems.append(
                 f"帳本 :{lineno} {def_id}：本列指名了承接輪次"
                 f"（{'；'.join(f'[{lb}] R{n}' for lb, n, _ in handovers)}），"
-                f"但無法從「{_CONTEXT_HEADER}」欄推得當前輪次 ⇒ 硬規則②「該輪號必須 ≥ "
-                f"當前輪」失去比較基準。請確認主檔表頭含「{_CONTEXT_HEADER}」欄、"
-                f"且至少一列的該欄寫有 `R<數字>`（權威宣告見 "
-                f"CrossPlatform_Scan_Dimensions.md 開頭「最新輪次見帳本最末列」）"
+                f"但無法從 R 系列證據檔／交棒書檔名（{'、'.join(_ROUND_DOC_GLOBS)}）推得當前輪次 "
+                f"⇒ 硬規則②「該輪號必須 ≥ 當前輪」失去比較基準。請確認至少存在一份 "
+                f"`CrossPlatform_R<數字>_*.md` 或 `R<數字>_HANDOFF.md`"
             )
             continue
         newest = max(n for _, n, _ in handovers)
@@ -779,22 +771,23 @@ def ratchet_direction_problems() -> list[str]:
     return _rotation.ratchet_direction_problems(_UNPINNED_HANDOVER_CEILING)
 
 
-def lagging_clock_notes(ledger_text: str) -> list[str]:
+def lagging_clock_notes(ledger_text: str, *, cur: int | None = None) -> list[str]:
     """`current_round()` 的 fail-open 窗口——把它印出來，而不是留在 docstring 裡。
 
-    🔴 缺陷（R68 Scan-G）：`current_round()` 取自帳本自身「發現情境」欄，所以在新一輪
-    **寫入第一列之前**，這個時鐘仍停在**上一輪**。於是「交棒給剛結束的那一輪」在整個
+    🔴 缺陷（R68 Scan-G）：新一輪的證據檔／交棒書**建立之前**，這個時鐘仍停在**上一輪**
+    （R210 起取自檔名，此前取帳本欄）。於是「交棒給剛結束的那一輪」在整個  round-label-ok
     新輪工作期都合法通過 `newest >= cur`。
     🔴 為何不引入第二個輪次時鐘：那會新造一個 stale 站點（成本高於收益，且第二個時鐘
     同樣要有人記得更新）。取而代之的最小處置是**讓失效方向對讀者可見**：凡未結列把承接
     者指向「恰等於推得值」的那一輪，逐列印出提醒——這正是窗口被利用時會出現的形狀。
     刻意回 note（warning）而非 problem：真交棒給當前輪是**合法**的，硬擋會製造假紅。
+    `cur` 的注入語意同 `orphan_backlog_problems()`。
     """
     layout = _table_layout(ledger_text)
     if layout is None:
         return []
     ncols, id_idx, status_idx = layout
-    cur = current_round(ledger_text)
+    cur = current_round() if cur is None else cur
     if cur is None:
         return []
     notes: list[str] = []
@@ -809,10 +802,10 @@ def lagging_clock_notes(ledger_text: str) -> list[str]:
         rounds = [n for _, n, _ in _handover_rounds(line)]
         if rounds and max(rounds) == cur and not _reassign_hit(cells[status_idx]):
             notes.append(
-                f"帳本 :{lineno} {cells[id_idx]}：承接輪次 R{cur} **恰等於**由「"
-                f"{_CONTEXT_HEADER}」欄推得的當前輪 —— 若本輪尚未寫入任何帳本列，"
+                f"帳本 :{lineno} {cells[id_idx]}：承接輪次 R{cur} **恰等於**由 R 系列證據檔／"
+                f"交棒書檔名推得的當前輪 —— 若本輪的證據檔／交棒書尚未建立，"
                 f"這個推得值仍停在上一輪，本列實為「交棒給剛結束的那一輪」而硬規則② "
-                f"抓不到（fail-open 窗口，於本輪第一列落地時自動關閉）。請確認該輪真的"
+                f"抓不到（fail-open 窗口，於本輪證據檔／交棒書落地時自動關閉）。請確認該輪真的"
                 f"還沒結束，或就地追加「回執」／「改派」"
             )
     return notes
@@ -1454,7 +1447,7 @@ def main() -> int:
           "全部表格列的欄數皆等於表頭欄數、狀態欄由表頭定位（非 cells[-1] 位置猜測）；"
           f"具名治理文件 {len(_GOVERNANCE_DOCS)} 份皆已登記且未逾體積上限"
           f"（登記面對 {'／'.join(_GOVERNANCE_DOC_GLOBS)} 發現面雙向核對）；"
-          f"全部未結案列的承接輪次皆 ≥ 當前輪 R{current_round(ledger_text)} 或改派至≥當前輪／未指派"
+          f"全部未結案列的承接輪次皆 ≥ 當前輪 R{current_round()} 或改派至≥當前輪／未指派"
           "（硬規則②；已實測不涵蓋的形態見 orphan_backlog_problems docstring）；"
           f"未結存量 {len(_ledger_index.unresolved_ids(ledger))} 列（唯一量測入口＝"
           f"`--unresolved-count`；warn {_ledger_index.UNRESOLVED_ROWS_WARN}／fail "
@@ -1462,10 +1455,10 @@ def main() -> int:
           f"「{_UNASSIGNED_LITERAL}」，存量豁免 {len(_UNPINNED_HANDOVER_GRANDFATHERED)}"
           f" 筆／棘輪上限 {_UNPINNED_HANDOVER_CEILING}，只准變小）"
           f"{f'；另 {len(residual)} 筆已結列殘留待辦，見 warning' if residual else ''}。"
-          f"\n🔴 當前輪 R{current_round(ledger_text)} 係由帳本「{_CONTEXT_HEADER}」欄"
-          "**現查**推得（不寫死）——本輪若尚未寫入任何帳本列，此值仍停在上一輪，"
+          f"\n🔴 當前輪 R{current_round()} 係由 R 系列證據檔／交棒書檔名最大號"
+          "**現查**推得（不寫死）——本輪的證據檔／交棒書尚未建立時，此值仍停在上一輪，"
           "屆時「交棒給剛結束的那一輪」會合法通過（刻意選的 fail-open 方向：漏抓而非"
-          "假紅，窗口於本輪第一列落地時自動關閉，見 lagging_clock_notes()）")
+          "假紅，窗口於本輪證據檔／交棒書落地時自動關閉，見 lagging_clock_notes()）")
     # 無參數 main() 併印外部阻塞軌筆數（先前僅 --unresolved-count 看得到）。
     return _closing.print_external_blocked_count(_DEFECT_LOG.parent) or 0
 

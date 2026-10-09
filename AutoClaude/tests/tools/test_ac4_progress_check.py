@@ -706,3 +706,155 @@ def test_green_streak_gate_breaks_on_single_red_at_tail() -> None:
     assert rpt["green_streak"] == 0
     assert rpt["ready_for_labeled_pr"] is False
     assert any("連續全綠不足" in r for r in rpt["reasons"])
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 🔴 DEF-101-887：非乾淨工作樹所採的中間態樣本，必須在算任何判準之前剔除
+# ══════════════════════════════════════════════════════════════════════════════
+# 缺陷本體：收輪作業進行中被排程打到的樣本，量到的是一棵從未存在於版本史上的半成品樹，
+# 而 `.ac4_history.jsonl` 原本不記任何工作樹狀態，事後無從剔除。collector 現在寫 `tree`
+# 欄（tools/tree_state.py），本段鎖的是判準端的三件事：
+#   ① `tree.valid is False` 的樣本不得影響任何判準——紅的不得打斷 streak（量到半成品
+#      不是缺陷）、綠的也不得被計入 streak（髒樹上的綠不代表 HEAD 為綠）、也不得讓證據
+#      看起來還很新鮮；
+#   ② 缺 `tree` 欄的舊樣本與 `valid=None` 一律保留（不追溯、不冤枉）；
+#   ③ 剔除如實回報（excluded_dirty），全部被剔除時明說「證據不足」而不是靜默 0 筆。
+# 每個案例都附「同一份資料拿掉 tree 標記」的對照組：對照組結論相反，才證明受測資料真的
+# 踩到剔除這條路，而不是剛好不管剔不剔都過。
+
+
+def _dirty(rec: dict) -> dict:
+    return {**rec, "tree": {"valid": False, "state": "dirty"}}
+
+
+def _unmark(rec: dict) -> dict:
+    return {k: v for k, v in rec.items() if k != "tree"}
+
+
+def test_a_red_sample_from_a_dirty_tree_does_not_break_the_streak() -> None:
+    """量到半成品樹的紅燈不是缺陷：剔除後 streak 不被它打斷。"""
+    records = _fourteen_green()
+    red = _rec(p95=63.0, ts=(_STALE_BASE - _dt.timedelta(days=6, hours=12)).isoformat())
+    records.insert(7, _dirty(red))  # 夾在第 7、8 個綠之間
+
+    rpt = evaluate(records, now=_STALE_BASE + _dt.timedelta(days=1))
+
+    assert rpt["excluded_dirty"] == 1
+    assert rpt["total_records"] == 14, "total_records 是剔除後的筆數"
+    assert rpt["green_streak"] == 14
+    assert rpt["ready_for_labeled_pr"] is True
+
+    # 對照組：同一筆紅燈沒有髒樹標記 ⇒ 它是真紅，streak 在它那裡斷掉（只剩尾端 7 筆）
+    control = evaluate(
+        [_unmark(r) for r in records], now=_STALE_BASE + _dt.timedelta(days=1)
+    )
+    assert control["excluded_dirty"] == 0
+    assert control["green_streak"] == 7
+    assert control["ready_for_labeled_pr"] is False
+
+
+def test_a_green_sample_from_a_dirty_tree_does_not_count_toward_the_streak() -> None:
+    """髒樹上的綠燈不代表 HEAD 為綠：最近 7 晚都是髒樹 ⇒ 只剩 7 筆可計。"""
+    records = _fourteen_green()
+    records = records[:7] + [_dirty(r) for r in records[7:]]
+
+    rpt = evaluate(records, now=_STALE_BASE + _dt.timedelta(days=8))
+
+    assert rpt["excluded_dirty"] == 7
+    assert rpt["green_streak"] == 7
+    assert rpt["ready_for_labeled_pr"] is False
+    assert any("連續全綠不足" in r for r in rpt["reasons"]), rpt["reasons"]
+
+    control = evaluate(
+        [_unmark(r) for r in records], now=_STALE_BASE + _dt.timedelta(days=8)
+    )
+    assert control["green_streak"] == 14 and control["ready_for_labeled_pr"] is True
+
+
+def test_a_dirty_sample_does_not_keep_stale_evidence_looking_fresh() -> None:
+    """採集器每晚都在寫、但寫的全是髒樹樣本 ⇒ 證據仍然過期，不得被「很新的髒列」續命。"""
+    records = _fourteen_green()  # 最新一筆 = _STALE_BASE
+    late = _rec(p95=45.5, ts=(_STALE_BASE + _dt.timedelta(days=40)).isoformat())
+    now = _STALE_BASE + _dt.timedelta(days=41)
+
+    rpt = evaluate([*records, _dirty(late)], now=now)
+
+    assert rpt["status"] == "stale"
+    assert rpt["ready_for_labeled_pr"] is False
+    assert rpt["staleness_days"] == 41, "新鮮度要從最後一筆**有效**樣本起算"
+
+    control = evaluate([*records, _unmark(_dirty(late))], now=now)
+    assert control["staleness_days"] == 1 and control["status"] == "ready"
+
+
+def test_all_samples_dirty_is_insufficient_evidence_not_ready() -> None:
+    """全部樣本都被剔除：不得 ready、不得謊稱 stale，而且要把原因印在人看得到的 caveats。"""
+    records = [
+        _dirty(_rec(p95=45.0 + d * 0.01, ts=(_STALE_BASE - _dt.timedelta(days=d)).isoformat()))
+        for d in range(5, -1, -1)
+    ]
+
+    rpt = evaluate(records, now=_STALE_BASE + _dt.timedelta(days=1))
+
+    assert rpt["excluded_dirty"] == 6 and rpt["total_records"] == 0
+    assert rpt["ready_for_labeled_pr"] is False
+    assert rpt["status"] == "observing", "採集器活著、只是樣本無效，不是 stale"
+    assert any(
+        "全部 6 筆樣本為 dirty" in c and "excluded_dirty=6" in c and "證據不足" in c
+        for c in rpt["caveats"]
+    ), rpt["caveats"]
+
+
+def test_empty_history_is_not_reported_as_all_dirty() -> None:
+    """反向：本來就沒有紀錄 ≠ 全部被剔除；不得憑空長出「全部 0 筆為 dirty」的 caveat。"""
+    rpt = evaluate([], now=_STALE_BASE)
+
+    assert rpt["excluded_dirty"] == 0 and rpt["total_records"] == 0
+    assert not any("dirty" in c for c in rpt["caveats"]), rpt["caveats"]
+
+
+def test_old_samples_and_unknown_validity_are_retained() -> None:
+    """缺 tree 欄的舊樣本、valid=None、valid=True 一律保留——只剔除「有證據是髒的」。"""
+    base = _fourteen_green()
+    records = [
+        base[0],                                        # 舊樣本：沒有 tree 欄
+        {**base[1], "tree": {"valid": None}},           # 量不出來
+        {**base[2], "tree": {"valid": True}},
+        *base[3:],
+    ]
+
+    rpt = evaluate(records, now=_STALE_BASE + _dt.timedelta(days=1))
+
+    assert rpt["excluded_dirty"] == 0
+    assert rpt["total_records"] == 14
+    assert rpt["green_streak"] == 14
+
+
+def test_excluded_dirty_is_always_present_and_zero_on_history_without_tree() -> None:
+    rpt = evaluate(_fourteen_green(), now=_STALE_BASE + _dt.timedelta(days=1))
+    assert rpt["excluded_dirty"] == 0
+    assert rpt["status"] == "ready"
+
+
+def test_cli_reports_excluded_dirty_in_json_and_human_output(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """人與機器兩條輸出路徑都要帶出剔除數（ps1 的 G0 區塊讀的是 --json 的同一個鍵）。"""
+    now = _dt.datetime.now(tz=_dt.UTC)
+    recs = [
+        _rec(p95=45.0 + d * 0.01, ts=(now - _dt.timedelta(days=d)).isoformat())
+        for d in range(13, -1, -1)
+    ]
+    recs.append(_dirty(_rec(p95=70.0, ts=(now - _dt.timedelta(hours=1)).isoformat())))
+    recs.append(_dirty(_rec(p95=71.0, ts=(now - _dt.timedelta(minutes=5)).isoformat())))
+    history = tmp_path / ".ac4_history.jsonl"
+    history.write_text("\n".join(json.dumps(r) for r in recs) + "\n", encoding="utf-8")
+
+    rc_json = main(["--history", str(history), "--json"])
+    payload = json.loads(capsys.readouterr().out)
+    assert rc_json == 0
+    assert payload["excluded_dirty"] == 2 and payload["total_records"] == 14
+    assert payload["ready_for_labeled_pr"] is True
+
+    main(["--history", str(history)])
+    assert "excluded_dirty=2" in capsys.readouterr().out

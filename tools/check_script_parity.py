@@ -621,21 +621,19 @@ _UNPINNED_EXIT_RE = re.compile(r"退場：(未指派|R\d+(?![\d+＋]))")
 # 每次 push 都跑，因另一份文件的可讀性擋下所有人代價過高（捏造輪號另有 `_UNPINNED_CEILING`
 # 與人審兩層）。窗口由該判準的 `test_missing_ledger_is_skipped_not_red` 明寫。
 _EXIT_ANCHOR_ROUND_RE = re.compile(r"退場：R(\d+)")
-_DEFECT_LOG_REL = "docs/06_quality/AutoSDD_Defect_Log.md"
 
 
 def _current_round() -> int | None:
     """當前跨平台複審輪號（委派 `check_defect_log_crossref.current_round()` 唯一實作）。
 
-    刻意不在本檔重寫「怎麼從帳本推當前輪」——那段判準有三個候選取值方式、兩個是錯的
-    （見該函式 docstring 逐條論證），複製一份等於把那三個候選重新打開一次。
+    刻意不在本檔重寫「怎麼推當前輪」——取值方式的取捨與失效方向都記在該函式 docstring，
+    複製一份等於把那些取捨重新打開一次。時鐘來源已不是帳本，故本函式不再讀帳本檔。
     """
     try:
         import check_defect_log_crossref as _crossref
-        text = (_REPO_ROOT / _DEFECT_LOG_REL).read_text(encoding="utf-8")
+        return _crossref.current_round()
     except (OSError, ImportError):
         return None
-    return _crossref.current_round(text)
 
 
 def _exit_anchor_round_problems(

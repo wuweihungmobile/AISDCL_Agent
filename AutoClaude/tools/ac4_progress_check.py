@@ -48,6 +48,16 @@ import sys
 from pathlib import Path
 from typing import Any
 
+# 🔴 兩種載入方式各走一條路、同一個 process 內只會走到其中一條（理由見姊妹檔
+# `tools/drift_log_ga_check.py` 同位置那段）：`from tools.ac4_progress_check import …`
+# （pytest）AutoClaude 在 path 上 ⇒ 走 `tools` 套件；`python tools/ac4_progress_check.py`
+# （nightly 載具）時只有 tools/ 在 path 上 ⇒ ImportError ⇒ 走裸 import。
+try:
+    from tools import tree_state as _tree_state
+except ImportError:  # pragma: no cover - 以腳本形態執行時才會走到
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import tree_state as _tree_state  # noqa: E402
+
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _DEFAULT_HISTORY = _REPO_ROOT / ".ac4_history.jsonl"
 
@@ -370,6 +380,9 @@ def evaluate(
     Args:
         records: **全史**紀錄（ADR-SD09-012 L-1；不再是「滾動 14 天窗內的紀錄」）。
             仍可傳入已過濾的子集（舊呼叫站行為不會炸），但那樣會少算 green_streak。
+            🔴 DEF-101-887：進來後**第一件事**先剔除 `tree.valid is False` 的中間態樣本
+            （非乾淨工作樹所採；缺 `tree` 的舊樣本與 `valid=None` 一律保留），之後所有
+            判準只看剩下的證據，剔除數如實回報在 `excluded_dirty`。
         tolerant_p95_ms: 向下相容參數；若提供，額外計算 tolerant_streak。
             ADR v0.4 ACCEPTED 後 tolerant 軌已成為升級主軌（預設 60ms），
             本參數保留兼容舊呼叫站；新呼叫可不傳。
@@ -382,7 +395,9 @@ def evaluate(
             語意凍結——它**不是**閘門值，閘門值是 green_streak）
         gate_basis: 'green_streak'（明示閘門依據，供下游不必猜哪個欄位是判準）
         green_streak_required: 達標所需連續綠筆數（= OBSERVATION_REQUIRED_RUNS）
-        total_records: 全史筆數
+        total_records: 全史筆數（**已剔除** excluded_dirty 筆；原始筆數＝兩者相加）
+        excluded_dirty: 因 `tree.valid is False`（非乾淨工作樹所採的中間態）而被剔除的筆數
+            （DEF-101-887）；全部樣本都被剔除時 ready 恆 False，並在 caveats 明示「證據不足」
         staleness_days: **最後一筆真量測**距今天數（R75；None＝有量測但無可解析 timestamp
             ⇒ fail-closed 判 stale。史上零量測時亦為 None，但那格走 all_true_skip 豁免）
         staleness_max_days: 上限（超過即 status='stale'）
@@ -399,13 +414,21 @@ def evaluate(
         recall_sigma: 14 天 recall σ
         ready_for_labeled_pr: 是否可升級（由升級門檻 60ms 決定，ADR v0.4 ACCEPTED）
         reasons: list[str] 不可升級的原因
-        caveats: list[str] ready **成立但有保留**的事項（R75 / QA-R74-03；與 reasons
-            互斥使用：有 reasons 就不 ready，有 caveats 是 ready 但別把它讀成毫無保留）
+        caveats: list[str] 保留事項。通常是 ready **成立但有保留**的事項（R75 / QA-R74-03；
+            與 reasons 互斥使用：有 reasons 就不 ready，有 caveats 是 ready 但別把它讀成
+            毫無保留）；唯一例外是 DEF-101-887 的「全部樣本皆被剔除」說明——它在 ready=False
+            時也會出現，因為 nightly log 只把 caveats 印進 END／G0 那一行（reasons 不印）
         clock_anomaly: 最後一筆真量測的時間戳落在未來（R75 / QA-R74-07；fail-closed 判 stale）
         recall_distinct_values / p95_distinct_values / metric_variance_observed /
         recall_sigma_discriminating: σ 這把尺的輸入有沒有在動（R75 / QA-R74-03）
     """
     now = now or _dt.datetime.now(tz=_dt.UTC)
+    # 🔴 DEF-101-887：先剔除中間態樣本（`tree.valid is False`＝收輪作業進行中被排程打到、
+    # 量到的是一棵從未存在於版本史上的半成品樹），再算任何 streak／staleness／σ／變異——
+    # 剔除放在最前面，所有判準才會在同一份證據上互相一致。剔除後它們就是「缺口」，而本判準
+    # 對缺口本來就寬容（gap-tolerant green_streak）；不確定的（valid=None）與舊樣本不剔除。
+    records, excluded_dirty = _tree_state.exclude_invalid(records)
+    all_dirty = excluded_dirty > 0 and not records
     n = len(records)
     consecutive_failures = _consecutive_failures_from_tail(records)
 
@@ -591,6 +614,18 @@ def evaluate(
                 f"{effective_tolerant_p95:.0f}ms 升級門檻成立（ADR-SD09-008 v0.4 ACCEPTED）"
             )
 
+    # 🔴 DEF-101-887：全部樣本都被剔除＝證據不足（既不是「採集器死了」也不是「零筆」）。
+    # 上面的流程已因 green_streak=0 判成未達標；這裡補的是**原因**，並放進 caveats——
+    # nightly log 的 END／G0 那一行只印 caveats、不印 reasons，不補這句，讀者只會看到一個
+    # 看似普通的「連續全綠不足（0/14 筆）」而找不到真因。`ready = False` 是 fail-closed 的
+    # 明示：證據不足時任何後續改動都不得讓 ready 翻 True。
+    if all_dirty:
+        ready = False
+        caveats.append(
+            f"全部 {excluded_dirty} 筆樣本為 dirty／變動中工作樹所採"
+            f"（excluded_dirty={excluded_dirty}）⇒ 證據不足"
+        )
+
     # ADR-SD09-012 L-4 (a)【落地輪拍板採 (a)】：`observation_days` **語意凍結**＝滾動
     # 14 日曆天窗計數，維持原義不漂移；閘門值改由新欄 `green_streak` + `gate_basis`
     # 明示。理由：該欄有三個下游消費者（run_local_nightly 的 Get-Ac4Gate、END 進度行、
@@ -602,6 +637,8 @@ def evaluate(
         "status": status,
         "observation_days": rolling_window_count,
         "total_records": n,
+        # DEF-101-887：被剔除的中間態樣本數；total_records 是剔除後的筆數。
+        "excluded_dirty": excluded_dirty,
         "gate_basis": "green_streak",
         "green_streak_required": OBSERVATION_REQUIRED_RUNS,
         "staleness_days": staleness_days,
@@ -690,6 +727,11 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(f"  total_records={report['total_records']}")
         print(
+            f"  excluded_dirty={report['excluded_dirty']} "
+            "(DEF-101-887：非乾淨工作樹所採的中間態樣本，已自所有判準剔除；"
+            "total_records 是剔除後的筆數)"
+        )
+        print(
             f"  tolerant_streak={report['tolerant_streak']} "
             f"(p95 < {report['tolerant_p95_ms']:.0f}ms; ADR-SD09-008 v0.4 ACCEPTED 升級門檻)"
         )
@@ -712,7 +754,7 @@ def main(argv: list[str] | None = None) -> int:
             for r in report["reasons"]:
                 print(f"    - {r}")
         if report["caveats"]:
-            print("  caveats（ready 成立但有保留）:")
+            print("  caveats（保留事項；ready 成立但有保留，或證據不足）:")
             for c in report["caveats"]:
                 print(f"    - {c}")
 

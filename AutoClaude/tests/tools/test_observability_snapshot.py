@@ -18,6 +18,26 @@ from tools.observability_snapshot import (
     main,
 )
 
+_CLEAN_TREE = {
+    "head": "a" * 40, "state": "clean", "dirty_entries": 0, "start_head": None,
+    "start_state": None, "changed_during_run": None, "valid": True,
+}
+_DIRTY_TREE = {**_CLEAN_TREE, "state": "dirty", "dirty_entries": 2, "valid": False}
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_tree_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    """DEF-101-887：collect_snapshot() 會呼叫 tree_state.capture()；不替換的話，本檔每個
+    case 的結果都取決於「現在這棵 repo 髒不髒」。最糟的是 closure 那條（snapshot →
+    ga_check --window 1 必須 exit 0）：它會在任何髒樹（開發中、pre-commit 的暫存區、
+    nightly 起跑時就髒）上變紅，而那種紅跟受測邏輯完全無關。本檔受測的是 snapshot 的
+    schema 與去重，不是 git。tree 欄自己的接線與剔除行為見檔尾 DEF-101-887 段（它們各自
+    顯式指定 capture 的回傳）；對真 git 的接線驗證見 test_tree_state.py。
+    """
+    from tools import observability_snapshot as obs
+
+    monkeypatch.setattr(obs._tree_state, "capture", lambda *_a, **_k: dict(_CLEAN_TREE))
+
 
 def test_basic_append(tmp_path: Path) -> None:
     """首次寫入：jsonl 從無到有 → 1 筆 record。"""
@@ -81,7 +101,7 @@ def test_same_day_deduplication(tmp_path: Path) -> None:
     ]
     assert len(lines) == 2
     # 同日去重後保留最後一筆 record2
-    same_day = [l for l in lines if l["ts"].startswith("2026-05-21")]
+    same_day = [ln for ln in lines if ln["ts"].startswith("2026-05-21")]
     assert len(same_day) == 1
     assert same_day[0]["observability_emit_count"] == 99
 
@@ -290,3 +310,53 @@ def test_snapshot_to_ga_check_closure(tmp_path: Path) -> None:
         f"設計閉環斷裂：snapshot 寫入後 ga_check --window 1 仍 exit {rc}；"
         f"應 exit 0（green_streak=1 >= 1）"
     )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 🔴 DEF-101-887：snapshot 必須記下採樣當下的工作樹狀態，且髒樹樣本不得計入 GA
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def test_collect_snapshot_records_the_tree_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tools import observability_snapshot as obs
+
+    monkeypatch.setattr(obs._tree_state, "capture", lambda *_a, **_k: dict(_DIRTY_TREE))
+
+    record = collect_snapshot()
+
+    assert record["tree"] == _DIRTY_TREE
+    # 既有欄位零改動（下游 ga_check 與歷史 jsonl 都依賴它們）
+    assert {"ts", "observability_emit_count", "observability_emit_real",
+            "trace_id_continuity", "kb_metric_snapshot"} <= set(record)
+
+
+def test_tree_field_survives_the_jsonl_roundtrip(tmp_path: Path) -> None:
+    history = tmp_path / ".observability_history.jsonl"
+
+    append_snapshot(history, collect_snapshot())
+
+    persisted = json.loads(history.read_text(encoding="utf-8").splitlines()[0])
+    assert persisted["tree"] == _CLEAN_TREE
+
+
+def test_a_snapshot_taken_on_a_dirty_tree_does_not_count_toward_ga(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """closure 的反面：同一個 snapshot→ga_check 流程，髒樹上採的那筆不得讓 GA 通過。
+
+    意圖（Rule 9）：上面的 closure 案例證明「乾淨樣本能累計出綠」，本案例證明「同一個
+    樣本只因為採在半成品樹上就不再算數」——兩者合起來才是 DEF-101-887 的完整行為。
+    """
+    from tools import observability_snapshot as obs
+    from tools.observability_ga_check import main as ga_main
+
+    history = tmp_path / ".dirty.jsonl"
+    monkeypatch.setattr(obs._tree_state, "capture", lambda *_a, **_k: dict(_DIRTY_TREE))
+    append_snapshot(history, collect_snapshot())
+
+    rc = ga_main(["--window", "1", "--history", str(history), "--json"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert rc == 1, "髒樹樣本被剔除後沒有任何有效證據，不得 exit 0"
+    assert payload["excluded_dirty"] == 1 and payload["green_streak"] == 0
+

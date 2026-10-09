@@ -315,3 +315,49 @@ def test_load_history_skips_blank_lines(tmp_path: Path) -> None:
     records = _load_history(history)
     assert len(records) == 3  # 1 good + 1 invalid + 1 good
     assert records[1].get("_invalid") is True
+
+
+# ----- DEF-101-887：中間態樣本在 obs 這條注入路徑上同樣被剔除 ----- #
+# 共用層 `tools/ga_window.evaluate` 的完整雙向案例住 test_drift_log_ga_check.py 檔尾；
+# 這裡只釘 obs 自己的綠判準（KB／emit_real／ts cutoff）注入進去後，剔除仍在 streak 之前。
+
+
+def _dirty(rec: dict) -> dict:
+    return {**rec, "tree": {"valid": False, "state": "dirty"}}
+
+
+def test_a_red_sample_from_a_dirty_tree_does_not_break_the_obs_streak() -> None:
+    """量到半成品樹的紅（emit_real=False）不是缺陷；剔除後 30 天連續綠仍成立。"""
+    records = [_make_record(ts=_ts_before(d)) for d in range(29, -1, -1)]
+    red = _make_record(ts=_ts_before(10).replace("T12", "T18"), emit_real=False)
+    records.insert(20, _dirty(red))
+
+    report = evaluate(records, window=30, now=_NOW)
+
+    assert report["excluded_dirty"] == 1 and report["total_records"] == 30
+    assert report["green_streak"] == 30 and report["status"] == "ready"
+
+    # 對照組：同一筆紅沒有髒樹標記 ⇒ 真紅，streak 從它之後重數
+    control = evaluate(
+        [{k: v for k, v in r.items() if k != "tree"} for r in records], window=30, now=_NOW
+    )
+    assert control["excluded_dirty"] == 0
+    assert control["green_streak"] == 10 and control["status"] == "observing"
+
+
+def test_obs_all_samples_dirty_is_insufficient_evidence_and_cli_does_not_crash(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    history = tmp_path / "history.jsonl"
+    records = [_dirty(_make_record(ts=_recent_ts(d))) for d in (2, 1, 0)]
+    history.write_text("\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8")
+
+    rc_json = main(["--window", "3", "--history", str(history), "--json"])
+    payload = json.loads(capsys.readouterr().out)
+    assert rc_json == 1
+    assert payload["excluded_dirty"] == 3 and payload["status"] == "observing"
+    assert "證據不足" in payload["last_failure_reason"]
+
+    rc_human = main(["--window", "3", "--history", str(history)])
+    assert rc_human == 1
+    assert "status=observing" in capsys.readouterr().err

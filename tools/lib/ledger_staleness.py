@@ -1,6 +1,7 @@
 """帳本主檔相對 git HEAD 是否有未 commit 修改的偵測（DEF-200-163）。
 
-WHY：`current_round()`（`tools/check_defect_log_crossref.py`）現查帳本「發現情境」欄，
+WHY：`current_round()`（`tools/check_defect_log_crossref.py`；此前現查帳本「發現情境」欄，
+R210 起改讀 R 系列文件檔名），  round-label-ok
 而自然工作順序「修 code → 跑閘門全綠 → 寫帳本 → commit」會在寫帳本這一步之後才把輪號
 推到當前值——若收尾者在寫帳本後沒有**再跑一次**閘門就 commit，上一次的全綠結論其實是
 對著修改前的帳本算的，可能已經過期（`current_round()` 本身、`orphan_backlog_problems()`、

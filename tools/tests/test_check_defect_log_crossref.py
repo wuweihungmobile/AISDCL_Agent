@@ -1126,46 +1126,93 @@ def _row4(def_id: str, ctx: str, routing: str, status: str) -> str:
     """組一列帳本表格列，四個**有語意**的欄位都可指定（硬規則② 的判定同時吃這四欄）。
 
     既有的 `_row()` 把「發現情境」「分流去向」寫死成佔位字串，對本節測試不夠用：
-    當前輪由「發現情境」欄推得、承接者可寫在「分流去向」或「狀態」欄。
+    承接者可寫在「分流去向」或「狀態」欄。（「發現情境」欄的輪號只是合成帳本的敘事——
+    當前輪一律由測試注入 `cur=`，時鐘自 R210 起不再讀帳本，見 `_orphans()`。）  round-label-ok
     """
     return f"| {def_id} | 2026-07-31 | {ctx} | 現象 | P2 | {routing} | {status} |\n"
 
 
-class TestCurrentRoundIsReadofFromTheLedgerNotHardcoded(unittest.TestCase):
-    """當前輪次的取值必須是**現查**——寫死常數下一輪就 stale，那正是本鎖要治的病。"""
+def _orphans(text: str, cur: int = 66) -> list[str]:
+    """對合成帳本跑硬規則②，**注入**當前輪（預設 66＝本節各類 `_CONTEXT` 列慣用的合成輪號）。"""
+    return m.orphan_backlog_problems(text, cur=cur)
 
-    def test_current_round_is_the_max_round_in_the_discovery_context_column(self) -> None:
-        text = _ledger_text(
-            _row4("DEF-01-001", "R7 Scan-A", "去向", "fixed")
-            + _row4("DEF-01-002", "R12 Scan-D", "去向", "fixed")
-            + _row4("DEF-01-003", "改良會議", "去向", "fixed")
-        )
-        self.assertEqual(m.current_round(text), 12)
 
-    def test_editing_the_context_column_moves_the_current_round(self) -> None:
+class TestCurrentRoundIsReadFromRoundDocNamesNotHardcoded(unittest.TestCase):
+    """當前輪次的取值必須是**現查**——寫死常數下一輪就 stale，那正是本鎖要治的病。
+
+    R210 起時鐘取自 R 系列證據檔／交棒書的**檔名**最大號；此前取帳本「發現情境」欄，  round-label-ok
+    而 R100 起該欄零輪號、時鐘凍結 109 輪（R209 證據檔〈三〉理論洞 #1）。  round-label-ok
+    本類以純函式 `round_from_doc_names` 與暫存目錄行為級證明「資料動、判準就動」。
+    """
+
+    @staticmethod
+    def _touch(root: Path, rel: str) -> None:
+        p = root / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("x\n", encoding="utf-8")
+
+    def test_the_maximum_is_numeric_not_lexicographic(self) -> None:
+        names = ["CrossPlatform_R9_a.md", "CrossPlatform_R10_b.md", "CrossPlatform_R100_c.md"]
+        self.assertEqual(max(names), "CrossPlatform_R9_a.md", "前提：字串序的最大者會是 R9")
+        for order in (names, names[::-1], [names[1], names[2], names[0]]):
+            with self.subTest(order=order):
+                self.assertEqual(m.round_from_doc_names(order), 100)
+
+    def test_both_globs_count(self) -> None:
+        for rel, want in (("docs/06_quality/CrossPlatform_R7_x.md", 7),
+                          ("docs/04_planning/R12_HANDOFF.md", 12)):
+            with self.subTest(rel=rel), tempfile.TemporaryDirectory() as td:
+                self._touch(Path(td), rel)
+                self.assertEqual(m.current_round(Path(td)), want)
+
+    def test_names_that_are_not_round_documents_are_ignored(self) -> None:
+        """三個反例：DEF 編號檔、`Quota_R90_*`（別的命名族）、`R<n>_RESUME`（只收 HANDOFF 檔）。"""
+        with tempfile.TemporaryDirectory() as td:
+            for rel in ("docs/06_quality/CrossPlatform_DEF200274_x.md",
+                        "docs/06_quality/Quota_R90_y.md", "docs/04_planning/R108_RESUME.md"):
+                self._touch(Path(td), rel)
+            self.assertIsNone(m.current_round(Path(td)))
+        self.assertIsNone(m.round_from_doc_names(
+            ["CrossPlatform_DEF200274_x.md", "Quota_R90_y.md", "CrossPlatform_Review_x.md"]))
+
+    def test_no_documents_returns_none_instead_of_guessing(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            self.assertIsNone(m.current_round(Path(td)))
+        self.assertIsNone(m.round_from_doc_names([]))
+
+    def test_adding_a_document_moves_the_current_round(self) -> None:
         """行為級證明「不是常數」：只改資料、不改程式，判定基準就跟著動。"""
-        before = _ledger_text(_row4("DEF-01-001", "R7 Scan-A", "去向", "fixed"))
-        after = _ledger_text(_row4("DEF-01-001", "R90 Scan-A", "去向", "fixed"))
-        self.assertEqual(m.current_round(before), 7)
-        self.assertEqual(m.current_round(after), 90)
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._touch(root, "docs/06_quality/CrossPlatform_R7_x.md")
+            self._touch(root, "docs/04_planning/R12_HANDOFF.md")
+            self.assertEqual(m.current_round(root), 12)
+            self._touch(root, "docs/06_quality/CrossPlatform_R90_y.md")
+            self.assertEqual(m.current_round(root), 90)
 
-    def test_only_the_context_column_counts_not_the_whole_row(self) -> None:
-        """「現象」「分流去向」「狀態」欄裡的輪號是佐證/承接語境，不是當前輪。"""
-        text = _ledger_text(_row4("DEF-01-001", "R7 Scan-A", "列 R55 backlog", "open（R80 實測）"))
-        self.assertEqual(m.current_round(text), 7)
+    def test_the_real_repo_clock_equals_an_independent_recount(self) -> None:
+        """真 repo：與本測試自己（不經 `_ROUND_DOC_NAME_RE`、改以底線分段）重數的最大值相等。"""
+        def seg(name: str, i: int) -> int | None:
+            parts = name.split("_")
+            hit = re.fullmatch(r"R(\d+)", parts[i]) if len(parts) > i else None
+            return int(hit.group(1)) if hit else None
 
-    def test_no_round_anywhere_returns_none_instead_of_guessing(self) -> None:
-        self.assertIsNone(m.current_round(_ledger_text(_row("DEF-01-001", "open"))))
+        quality = (m._REPO_ROOT / "docs" / "06_quality").glob("CrossPlatform_R*_*.md")
+        planning = (m._REPO_ROOT / "docs" / "04_planning").glob("R*_HANDOFF.md")
+        nums = [seg(p.name, 1) for p in quality] + [seg(p.name, 0) for p in planning]
+        nums = [n for n in nums if n is not None]
+        self.assertTrue(nums, "真 repo 數不到任何 R 系列文件 ⇒ 兩邊同為空的相等沒有鑑別力")
+        self.assertEqual(m.current_round(), max(nums))
 
-    def test_real_ledger_current_round_is_two_digit_and_not_the_planning_dir_max(self) -> None:
-        """🔴 明文否決掃描員建議的取值來源（`docs/04_planning/AutoSDD_improving_NN` 最大號）。
+    def test_real_repo_clock_is_not_the_planning_dir_improving_max(self) -> None:
+        """🔴 明文否決掃描員建議的取值來源（`docs/04_planning/` 的 `AutoSDD_improving_NN` 最大號）。
 
-        兩套編號**不是同一個東西**：整合迭代輪與跨平台複審輪各自獨立累積，拿前者當
-        「當前輪」會讓整本帳本瞬間全紅（推導＝R89 收尾證據檔）。本測試就地實查兩者並
-        斷言**不相等**，讓「哪天有人改回去」當場翻紅（數字一律現查，不寫死）。
+        兩套編號**不是同一個東西**：整合迭代輪與跨平台複審輪各自獨立累積，拿前者當「當前輪」
+        會讓整本帳本的承接輪號全部失準。本測試就地實查兩者並斷言**不相等**，讓「哪天有人改回去」
+        當場翻紅（數字一律現查，不寫死）。
         """
-        cur = m.current_round(m._DEFECT_LOG.read_text(encoding="utf-8-sig"))
-        self.assertIsNotNone(cur, "真實帳本推不出當前輪 ⇒ 硬規則② 失去比較基準")
+        cur = m.current_round()
+        self.assertIsNotNone(cur, "真實 repo 推不出當前輪 ⇒ 硬規則② 失去比較基準")
         planning = m._REPO_ROOT / "docs" / "04_planning"
         improving = [
             int(mm.group(1))
@@ -1177,6 +1224,30 @@ class TestCurrentRoundIsReadofFromTheLedgerNotHardcoded(unittest.TestCase):
             cur, max(improving),
             "跨平台複審輪號與整合迭代輪號被當成同一個編號了——見 current_round() docstring",
         )
+
+
+class TestInjectedClockDecidesNotTheLiveRepo(unittest.TestCase):
+    """合成帳本一律注入 `cur`：同一份帳本文字，判定只隨注入值而動，與真 repo 的時鐘無關。"""
+
+    _TEXT = _ledger_text(_row4("DEF-01-999", "R60 r3", "去向", "open（承接輪次：**R50**）"))
+
+    def test_the_same_ledger_flips_with_the_injected_clock(self) -> None:
+        self.assertEqual(len(m.orphan_backlog_problems(self._TEXT, cur=51)), 1)
+        self.assertEqual(m.orphan_backlog_problems(self._TEXT, cur=50), [])
+
+    def test_without_injection_the_live_clock_is_used(self) -> None:
+        live = m.current_round()
+        self.assertIsNotNone(live)
+        self.assertEqual(m.orphan_backlog_problems(self._TEXT),
+                         m.orphan_backlog_problems(self._TEXT, cur=live))
+        self.assertEqual(len(m.orphan_backlog_problems(self._TEXT)), 1, "R50 早於真 repo 的當前輪")
+
+    def test_the_lagging_clock_note_fires_only_when_the_handover_equals_the_clock(self) -> None:
+        text = _ledger_text(_row4("DEF-01-999", "R60 r3", "去向", "open（承接輪次：**R66**）"))
+        self.assertEqual(len(m.lagging_clock_notes(text, cur=66)), 1)
+        self.assertEqual(m.lagging_clock_notes(text, cur=65), [])
+        self.assertEqual(m.lagging_clock_notes(text, cur=67), [],
+                         "R66 < 67 是孤兒、不是 lagging 窗口")
 
 
 class TestOrphanBacklogProblems(unittest.TestCase):
@@ -1199,7 +1270,7 @@ class TestOrphanBacklogProblems(unittest.TestCase):
     _CONTEXT = _row4("DEF-01-998", "R66 Review round 2", "去向", "fixed")
 
     def test_the_injected_orphan_that_used_to_pass_silently_is_now_flagged(self) -> None:
-        problems = m.orphan_backlog_problems(_ledger_text(self._CONTEXT + self._INJECTED_ORPHAN))
+        problems = _orphans(_ledger_text(self._CONTEXT + self._INJECTED_ORPHAN))
         self.assertEqual(len(problems), 1, problems)
         self.assertIn("DEF-01-999", problems[0])
         self.assertIn("R2", problems[0])
@@ -1207,17 +1278,17 @@ class TestOrphanBacklogProblems(unittest.TestCase):
 
     def test_a_row_handing_to_the_current_round_is_legitimate(self) -> None:
         row = self._INJECTED_ORPHAN.replace("**R2**", "**R66**").replace("R2 早已", "R66 尚未")
-        self.assertEqual(m.orphan_backlog_problems(_ledger_text(self._CONTEXT + row)), [])
+        self.assertEqual(_orphans(_ledger_text(self._CONTEXT + row)), [])
 
     def test_a_row_handing_to_a_future_round_is_legitimate(self) -> None:
         row = self._INJECTED_ORPHAN.replace("**R2**", "**R99**").replace("R2 早已", "R99 尚未")
-        self.assertEqual(m.orphan_backlog_problems(_ledger_text(self._CONTEXT + row)), [])
+        self.assertEqual(_orphans(_ledger_text(self._CONTEXT + row)), [])
 
     def test_a_reassignment_note_on_the_same_row_clears_it(self) -> None:
         """出口①：就地附記改派（DEF-101-333／336／338 的體例），不改寫歷史原文。"""
         row = self._INJECTED_ORPHAN.rstrip("\n|\r ")
         row = row + " 🔴 R67 **改派為：未指派 backlog**（解鎖條件：…） |\n"
-        self.assertEqual(m.orphan_backlog_problems(_ledger_text(self._CONTEXT + row)), [])
+        self.assertEqual(_orphans(_ledger_text(self._CONTEXT + row)), [])
 
     def test_a_newer_row_naming_the_id_with_a_reassignment_clears_it(self) -> None:
         """出口②：`DEF-101-521` 對 `DEF-101-500` 的改派形狀——新條目、不動舊列。"""
@@ -1226,7 +1297,7 @@ class TestOrphanBacklogProblems(unittest.TestCase):
             "fixed（本列**改派** DEF-01-999：原承接者 R2 已不存在，轉未指派 backlog）",
         )
         self.assertEqual(
-            m.orphan_backlog_problems(_ledger_text(self._CONTEXT + self._INJECTED_ORPHAN + newer)),
+            _orphans(_ledger_text(self._CONTEXT + self._INJECTED_ORPHAN + newer)),
             [],
         )
 
@@ -1237,7 +1308,7 @@ class TestOrphanBacklogProblems(unittest.TestCase):
             "DEF-01-100", "R10 Scan-G", "根層治理",
             "fixed（本列**改派** DEF-01-999：…）",
         )
-        problems = m.orphan_backlog_problems(
+        problems = _orphans(
             _ledger_text(self._CONTEXT + older + self._INJECTED_ORPHAN)
         )
         self.assertEqual(len(problems), 1, problems)
@@ -1251,7 +1322,7 @@ class TestOrphanBacklogProblems(unittest.TestCase):
         for closed in ("fixed@R57 round 3", "wontfix（…）", "closed-by-decision", "no_action_needed"):
             with self.subTest(closed=closed):
                 row = _row4("DEF-101-500", "R57 Scan-E", "①②④⑥ 本輪修復；③⑤ 列 R58 backlog", closed)
-                self.assertEqual(m.orphan_backlog_problems(_ledger_text(self._CONTEXT + row)), [])
+                self.assertEqual(_orphans(_ledger_text(self._CONTEXT + row)), [])
 
     def test_discovery_and_evidence_round_mentions_are_not_handovers(self) -> None:
         """🔴 掃描員 proposed_fix 的取值方式（列內任一 `R\\d+`）在此被明文否決。
@@ -1264,7 +1335,7 @@ class TestOrphanBacklogProblems(unittest.TestCase):
             "DEF-101-268", "R25 Scan-A", "本輪修復",
             "open（R25 Scan-A 複核；R60 實測仍成立；R30 曾回讀一次）",
         )
-        self.assertEqual(m.orphan_backlog_problems(_ledger_text(self._CONTEXT + row)), [])
+        self.assertEqual(_orphans(_ledger_text(self._CONTEXT + row)), [])
 
     def test_status_at_round_is_a_timestamp_not_an_assignee(self) -> None:
         """`deferred@R59`＝在 R59 這一輪被 defer（同族 `fixed@R57`），不是被指派給 R59。
@@ -1276,7 +1347,7 @@ class TestOrphanBacklogProblems(unittest.TestCase):
             "DEF-101-518", "R59 Scan-C", "本輪只就地記錄不對稱與解鎖條件",
             "**routed（deferred@R59，附解鎖條件）**：解鎖條件三項…",
         )
-        self.assertEqual(m.orphan_backlog_problems(_ledger_text(self._CONTEXT + row)), [])
+        self.assertEqual(_orphans(_ledger_text(self._CONTEXT + row)), [])
 
     def test_quoting_an_old_snapshot_with_本列_is_not_a_handover(self) -> None:
         """真實實例 `DEF-101-068`：「本列 R14 快照所稱…」是引述舊快照。
@@ -1287,7 +1358,7 @@ class TestOrphanBacklogProblems(unittest.TestCase):
             "DEF-101-068", "S11", "記事存證",
             "open（其餘子項 **R14 補記**：本列 R14 快照所稱「仍雙原生實作」已不成立）",
         )
-        self.assertEqual(m.orphan_backlog_problems(_ledger_text(self._CONTEXT + row)), [])
+        self.assertEqual(_orphans(_ledger_text(self._CONTEXT + row)), [])
 
     def test_negated_reassignment_no_longer_buys_the_exemption(self) -> None:
         """🔴 R74（`DEF-101-674` 結案）：否定語意的出口字樣**不再**買到豁免。
@@ -1302,12 +1373,12 @@ class TestOrphanBacklogProblems(unittest.TestCase):
         """
         negated = (self._INJECTED_ORPHAN.rstrip("\n|\r ")
                    + " 交棒給一個輪內已消滅的實體、無輪次無回執 |\n")
-        problems = m.orphan_backlog_problems(_ledger_text(self._CONTEXT + negated))
+        problems = _orphans(_ledger_text(self._CONTEXT + negated))
         self.assertEqual(len(problems), 1, f"否定形態必須仍被判孤兒：{problems}")
         affirmed = (self._INJECTED_ORPHAN.rstrip("\n|\r ")
                     + " 該輪已交出成果，此處追記回執（**R67**） |\n")
         self.assertEqual(
-            m.orphan_backlog_problems(_ledger_text(self._CONTEXT + affirmed)), [],
+            _orphans(_ledger_text(self._CONTEXT + affirmed)), [],
             "真正的『回執』必須照樣放行 —— 否則本鎖變成恆紅、合法出口被關掉",
         )
 
@@ -1324,12 +1395,12 @@ class TestOrphanBacklogProblems(unittest.TestCase):
             if "| 現象 |" in base else base
         self.assertNotEqual(in_evidence, base, "fixture 未命中證據欄，測試會空過")
         self.assertEqual(
-            len(m.orphan_backlog_problems(_ledger_text(self._CONTEXT + in_evidence))), 1,
+            len(_orphans(_ledger_text(self._CONTEXT + in_evidence))), 1,
             "出口字樣落在證據欄卻買到豁免 ⇒ 跨欄白拿又開了",
         )
         in_status = base.replace("**R2**）", "**R2**）；本輪改派為：未指派")
         self.assertEqual(
-            m.orphan_backlog_problems(_ledger_text(self._CONTEXT + in_status)), [],
+            _orphans(_ledger_text(self._CONTEXT + in_status)), [],
             "寫在狀態欄的改派必須放行 —— 否則合法出口被關掉",
         )
 
@@ -1338,19 +1409,19 @@ class TestOrphanBacklogProblems(unittest.TestCase):
         base = _row4("DEF-01-995", "R60 r3 Pkg-X", "去向", "open（承接輪次：**R2**）")
         quoted = base.replace("**R2**）", "**R2**）；原欄文為 `改派為：未指派`（已被推翻）")
         self.assertEqual(
-            len(m.orphan_backlog_problems(_ledger_text(self._CONTEXT + quoted))), 1,
+            len(_orphans(_ledger_text(self._CONTEXT + quoted))), 1,
             "code span 內的引述買到豁免 ⇒ 引述白拿又開了",
         )
 
     def test_a_row_without_any_handover_round_is_not_judged(self) -> None:
         """散文式指派（「留給下一輪某人」）不含 `R\\d+` ⇒ 無從比較，不判。"""
         row = _row4("DEF-01-777", "R66 Scan-G", "留給下一輪某人", "open（未指派 backlog）")
-        self.assertEqual(m.orphan_backlog_problems(_ledger_text(self._CONTEXT + row)), [])
+        self.assertEqual(_orphans(_ledger_text(self._CONTEXT + row)), [])
 
     def test_handover_without_a_derivable_current_round_fails_loud(self) -> None:
-        """推不出當前輪 ＋ 有承接者 ⇒ 明說失去比較基準，**不**靜默放行。"""
-        problems = m.orphan_backlog_problems(_ledger_text(self._INJECTED_ORPHAN.replace(
-            "R60 r3 Pkg-X", "四方複審")))
+        """推不出當前輪（兩個 glob 皆零命中）＋ 有承接者 ⇒ 明說失去比較基準，**不**靜默放行。"""
+        with tempfile.TemporaryDirectory() as td, mock.patch.object(m, "_REPO_ROOT", Path(td)):
+            problems = m.orphan_backlog_problems(_ledger_text(self._INJECTED_ORPHAN))
         self.assertEqual(len(problems), 1, problems)
         self.assertIn("無法從", problems[0])
 
@@ -1366,14 +1437,14 @@ class TestOrphanBacklogProblems(unittest.TestCase):
         for name, status in cases.items():
             with self.subTest(phrasing=name):
                 row = _row4("DEF-01-999", "R60 r3", "去向", status)
-                problems = m.orphan_backlog_problems(_ledger_text(self._CONTEXT + row))
+                problems = _orphans(_ledger_text(self._CONTEXT + row))
                 self.assertEqual(len(problems), 1, f"{name} 未被認出為承接語境：{problems}")
         with self.subTest(phrasing="交棒給 R…"):
             row = _row4("DEF-01-999", "R60 r3", "交棒給 R2 處理", "open（見分流去向）")
-            self.assertEqual(len(m.orphan_backlog_problems(_ledger_text(self._CONTEXT + row))), 1)
+            self.assertEqual(len(_orphans(_ledger_text(self._CONTEXT + row))), 1)
 
     def test_missing_header_fails_loud(self) -> None:
-        problems = m.orphan_backlog_problems("| 編號 | 狀態 |\n|---|---|\n")
+        problems = _orphans("| 編號 | 狀態 |\n|---|---|\n")
         self.assertEqual(len(problems), 1)
         self.assertIn("找不到合格表頭", problems[0])
 
@@ -1396,7 +1467,7 @@ class TestDef200195CrossRowReceiptFreshnessIsNotSelfSatisfied(unittest.TestCase)
     """DEF-200-195 的 2×2：跨列回執新鮮度不得被首詞 `fixed@R<當輪>` 自我滿足。
 
     帳本立案那把注入（`check_defect_log_crossref.py` 跨列出口的 2×2）在此釘成常駐：
-    合成當前輪＝R66（「發現情境」欄現查推得，與本節其他測試同一慣例）。
+    合成當前輪＝R66（測試注入 `cur`，與本節其他測試同一慣例）。
     """
 
     _CONTEXT = _row4("DEF-01-998", "R66 Review round 2", "去向", "fixed")
@@ -1411,23 +1482,23 @@ class TestDef200195CrossRowReceiptFreshnessIsNotSelfSatisfied(unittest.TestCase)
     def test_a_current_round_receipt_clears_the_orphan(self) -> None:
         """(a) 改派 **R<cur>** ⇒ 綠（新鮮回執仍是合法出口）。"""
         text = self._with_receipt("fixed（本列**改派** DEF-01-999：一律改派 **R66**）")
-        self.assertEqual(m.orphan_backlog_problems(text), [])
+        self.assertEqual(_orphans(text), [])
 
     def test_a_stale_receipt_round_does_not_clear_it(self) -> None:
         """(b) 改派 R<cur-2> ⇒ 紅（對照組：不靠 @R 也過不了新鮮度）。"""
         text = self._with_receipt("fixed（本列**改派** DEF-01-999：一律改派 **R64**）")
-        self.assertEqual(len(m.orphan_backlog_problems(text)), 1)
+        self.assertEqual(len(_orphans(text)), 1)
 
     def test_an_unassigned_receipt_clears_it(self) -> None:
         """(c) 改派＋未指派 ⇒ 綠（硬規則② 後半句自己給的二擇一）。"""
         text = self._with_receipt(
             "fixed（本列**改派** DEF-01-999：轉**未指派** backlog＋解鎖條件）")
-        self.assertEqual(m.orphan_backlog_problems(text), [])
+        self.assertEqual(_orphans(text), [])
 
     def test_the_first_word_timepoint_no_longer_self_satisfies(self) -> None:
         """(d) `fixed@R<cur>` 首詞＋改派 R<cur-2> ⇒ 紅（修復前本注入為綠＝假綠重演）。"""
         text = self._with_receipt("fixed@R66（本列**改派** DEF-01-999：一律改派 **R64**）")
-        problems = m.orphan_backlog_problems(text)
+        problems = _orphans(text)
         self.assertEqual(
             len(problems), 1,
             "首詞 fixed@R66 的 @R66 是時點不是承接者，不得滿足「回執輪號 ≥ 當前輪」")
@@ -1441,7 +1512,7 @@ class TestDef200129SelfRowExitNamesAFreshRound(unittest.TestCase):
         rows = (_row4("DEF-01-998", "R66 Review round 2", "去向", "fixed")
                 + _row4("DEF-01-999", "R60 r3 Pkg-X", "去向", f"open（承接輪次：**R2**）{status}")
                 + donor)
-        return m.orphan_backlog_problems(_ledger_text(rows))
+        return _orphans(_ledger_text(rows))
 
     def test_a_stale_self_row_reassignment_no_longer_exits(self) -> None:
         """紅：承接 R2 ＋ 自列改派 R3（< R66）⇒ 仍是孤兒（舊行為＝放行）。"""
@@ -1508,6 +1579,9 @@ _DEF_200_241_FORMER_FALSE_POSITIVES: tuple[tuple[str, str], ...] = (
     ("docs/04_planning/R113_HANDOFF.md", "DEF-200-212"),
     ("docs/06_quality/CrossPlatform_R113_Ledger_Closure.md", "DEF-200-212"),
 )
+#: 上表四筆假陽性是在時鐘凍結於 R100 時量到的；時鐘改讀 R 系列文件檔名後已前進，那幾行的目標輪
+#: （R101／R108／R113）早已過去、被時鐘自然祖父化。要證明 `done_ids` 本身仍承重，只能注入當年的值。
+_DEF_200_241_FROZEN_CLOCK = 100
 
 
 class TestDef200241GrandfatheringReadsLedgerClosureNotTheClock(unittest.TestCase):
@@ -1519,16 +1593,19 @@ class TestDef200241GrandfatheringReadsLedgerClosureNotTheClock(unittest.TestCase
 
     def setUp(self) -> None:
         self.ledger, self.arch = hc._load()
-        self.cur = m.current_round(self.ledger)
-        self.assertIsNotNone(self.cur, "真帳本抽不到當前輪 ⇒ 下游斷言失去依據")
+        self.cur = m.current_round()
+        self.assertIsNotNone(self.cur, "真 repo 推不出當前輪 ⇒ 下游斷言失去依據")
         self.known = hc.ledger_def_ids(self.ledger, self.arch, unresolved_only=True)
         self.done = hc.ledger_def_ids(self.ledger, self.arch, resolved_only=True)
         self.paths, fallback = hc.carrier_files()
         self.assertFalse(fallback, "真倉庫的 tracked 取數退化 ⇒ 本類的真倉庫斷言失去依據")
 
     def test_the_two_id_sets_partition_the_ledger_family(self) -> None:
-        """known（未結）與 done（已結）互斥且皆非空——任一邊空掉，下面的斷言就是在測空氣。"""
-        self.assertTrue(self.known and self.done)
+        """known（未結）與 done（已結）互斥、done 非空——done 空掉，下面的斷言就是在測空氣。
+
+        known 允許為空：帳本未結列清零後，家族內的未結 ID 可以一個都不剩。
+        """
+        self.assertTrue(self.done)
         self.assertEqual(self.known & self.done, set(), "同一個 ID 同時算未結又算已結")
         with self.assertRaises(ValueError):
             hc.ledger_def_ids(self.ledger, self.arch, unresolved_only=True, resolved_only=True)
@@ -1541,7 +1618,8 @@ class TestDef200241GrandfatheringReadsLedgerClosureNotTheClock(unittest.TestCase
     def test_without_closure_facts_every_former_false_positive_comes_back(self) -> None:
         """🔴 紅綠自證的主牙：拿掉 done_ids（傳空集合）⇒ 表內舊假陽性座標必須逐筆復發。
         任一筆不復發＝該筆從來不是被 done_ids 救的（那就得回頭查是誰在放行）。"""
-        problems = hc.carrier_doc_problems(self.paths, self.cur, self.known, done_ids=set())
+        problems = hc.carrier_doc_problems(
+            self.paths, _DEF_200_241_FROZEN_CLOCK, self.known, done_ids=set())
         for rel, def_id in _DEF_200_241_FORMER_FALSE_POSITIVES:
             with self.subTest(rel=rel, def_id=def_id):
                 self.assertIn(def_id, self.done, f"{def_id} 在帳本家族內不是已結列 ⇒ 前提失效")
@@ -1593,12 +1671,13 @@ class TestDef200241GrandfatheringReadsLedgerClosureNotTheClock(unittest.TestCase
         real = [m for m in hc.commit_messages() if m[0].startswith("0398226")]
         self.assertEqual(len(real), 1, "真倉庫找不到立案 commit ⇒ 本測試失去對象（淺 clone？）")
         self.assertIn("DEF-200-212", self.done, "DEF-200-212 不是已結列 ⇒ 前提失效")
+        clock = _DEF_200_241_FROZEN_CLOCK  # 活時鐘已前進、該 commit 的目標輪早已過去，見常數處
         self.assertEqual(
-            hc.commit_carrier_problems(real, self.cur, hc.ledger_carrier_rounds(self.ledger),
+            hc.commit_carrier_problems(real, clock, hc.ledger_carrier_rounds(self.ledger),
                                        done_ids=self.done), [],
             "指名已結 ID 的段落仍被判紅 ⇒ 判準① 沒有讀結案事實")
         self.assertTrue(
-            hc.commit_carrier_problems(real, self.cur, set(), done_ids=set()),
+            hc.commit_carrier_problems(real, clock, set(), done_ids=set()),
             "拿掉 done_ids 與承接輪後仍綠 ⇒ 該 commit 已無前瞻宣告，本測試在測空氣")
         syn_id = "DEF-200-" + "999"
         m = [("s", f"x\n\n- {syn_id} 列 R{self.cur + 1}。\n\n- 另件皆留 R{self.cur + 1}。\n")]
@@ -1654,14 +1733,13 @@ class TestOrphanBacklogAgainstTheRealLedger(unittest.TestCase):
                       for i in range(6))  # 舊輪號只是佐證／引述，不是承接者
             + _row4("DEF-01-907", "R70 Scan-A", "去向", "open（承接輪次：**R91**）")  # 合法
             + _row4("DEF-01-908", "R70 Scan-A", "去向", "open（未指派 backlog，解鎖條件：…）"))
-        cur = m.current_round(text)
-        self.assertEqual(cur, 90, "合成帳本推不出預期的當前輪 ⇒ 兩側都沒有比較基準")
+        cur = 90  # 合成帳本的當前輪＝上面 `R90 收尾` 那列的慣用值；時鐘不再取自帳本，故注入
         naive = sum(
             1 for line in text.splitlines()
             if m._ROW_RE.match(line)
             and m._classify(m._row_cells(line)[-1]) in m._UNRESOLVED_CLASSES
             and max((int(x) for x in re.findall(r"R(\d+)", line)), default=cur) < cur)
-        narrow = len(m.orphan_backlog_problems(text))
+        narrow = len(m.orphan_backlog_problems(text, cur=cur))
         self.assertGreater(naive, 0, "對照組零命中 ⇒ 本測試失去對照意義")
         self.assertLess(narrow * 5, naive,
                         f"承接語境窄化沒有收斂效果（naive={naive}／narrow={narrow}）——"
@@ -2120,7 +2198,7 @@ class TestR71CodeRoundLabelsNeverExceedLedgerCurrentRound(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.current = m.current_round(m._DEFAULT_DEFECT_LOG.read_text(encoding="utf-8"))
+        cls.current = m.current_round()
 
     def test_current_round_is_derivable(self) -> None:
         """前提自檢：推不出當前輪時本組鎖整組失去意義，必須 fail-loud 而非靜默放行。"""
@@ -3290,7 +3368,7 @@ class TestRealLedgerReassignEscapes(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.text = m._DEFAULT_DEFECT_LOG.read_text(encoding="utf-8-sig")
-        cls.cur = m.current_round(cls.text)
+        cls.cur = m.current_round()
         cls.in_scope, cls.legacy, cls.unparse = _reassign_escape_rows(
             cls.text, cls.cur, _REASSIGN_FRESHNESS_FROM)
 
@@ -3336,7 +3414,7 @@ class TestCrossRowReassignMustAlsoNameAFreshRound(unittest.TestCase):
         )
 
     def _scan(self, donor_status: str) -> list[str]:
-        return m.orphan_backlog_problems(_ledger_text(self._rows(donor_status)))
+        return m.orphan_backlog_problems(_ledger_text(self._rows(donor_status)), cur=84)
 
     def test_a_stale_cross_row_receipt_no_longer_launders_an_expired_round(self) -> None:
         """合成注入（紅）：回執列自己指向 R83 < 當前輪 R84 ⇒ 不再算出口。"""

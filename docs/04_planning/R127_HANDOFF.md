@@ -62,7 +62,7 @@
   實際 159（主表 ≤ 0 時「子項不得大於母項」不判）；款(11) streak 歸零。
 - **U9（四支 `[ROOT-TOOLS]` 檔舊尺債）到期輪 127 → 130 具名展延**：本輪舊尺親量 over_by＝quota_gate 90／
   quota_meter 67／hook_wiring 28／planner 0；勘查證實 `hook_wiring.py` 零段 docstring 敘事，搬遷手法對它
-  零效益，28 行只能靠真拆。理由逐字寫在 `_ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND` 旁；勘查座標＝
+  零效益，28 行只能靠真拆。理由逐字寫在 _ROOT_TOOLS_OLD_SCALE_DEBT_DUE_ROUND 旁；勘查座標＝
   Scan_Findings §3（真拆窗口可直接消費）。
 
 ## 還沒做（不塗綠；每筆帶現查指令）

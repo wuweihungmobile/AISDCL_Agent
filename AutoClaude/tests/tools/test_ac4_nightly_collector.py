@@ -19,6 +19,7 @@ collector 採集寬鬆門檻獨立 env `AUTOCLAUDE_COLLECTOR_P95_THRESHOLD_MS`�
 """
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -30,6 +31,23 @@ if str(_TOOLS_DIR) not in sys.path:
 
 import ac4_nightly_collector  # noqa: E402
 from ac4_nightly_collector import _parse_junit_xml  # noqa: E402
+
+_CLEAN_TREE = {
+    "head": "a" * 40, "state": "clean", "dirty_entries": 0, "start_head": None,
+    "start_state": None, "changed_during_run": None, "valid": True,
+}
+_DIRTY_TREE = {**_CLEAN_TREE, "state": "dirty", "dirty_entries": 2, "valid": False}
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_tree_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    """DEF-101-887：`_build_record()` 會呼叫 tree_state.capture()；不替換的話 record 內容取決於
+    「現在這棵 repo 髒不髒」，且每次都對真 repo 跑 git。本檔受測的是門檻判定與 record 欄位，
+    不是 git；tree 欄的行為見檔尾 DEF-101-887 段，對真 git 的接線驗證見 test_tree_state.py。
+    """
+    monkeypatch.setattr(
+        ac4_nightly_collector._tree_state, "capture", lambda *_a, **_k: dict(_CLEAN_TREE)
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -189,3 +207,53 @@ def test_resolve_p95_threshold_env_priority(monkeypatch: pytest.MonkeyPatch) -> 
 
     monkeypatch.setenv("AUTOCLAUDE_COLLECTOR_P95_THRESHOLD_MS", "90")
     assert _resolve_p95_threshold() == 90.0
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 🔴 DEF-101-887：collector 必須記下採樣當下的工作樹狀態，且髒樹樣本不得計入 AC4 判準
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def _run_collector(history: Path) -> dict:
+    rc = ac4_nightly_collector.main(
+        ["--status", "pass", "--recall", "0.99", "--p95", "40.0", "--cb-open", "0",
+         "--history", str(history)]
+    )
+    assert rc == 0
+    return json.loads(history.read_text(encoding="utf-8").splitlines()[-1])
+
+
+def test_record_carries_the_tree_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        ac4_nightly_collector._tree_state, "capture", lambda *_a, **_k: dict(_DIRTY_TREE)
+    )
+
+    record = _run_collector(tmp_path / ".ac4_history.jsonl")
+
+    assert record["tree"] == _DIRTY_TREE
+    # 既有欄位零改動：髒樹不改 status——「這筆可不可信」是判準端的事，不是 record 的事
+    assert record["status"] == "pass" and record["recall_at_10"] == pytest.approx(0.99)
+    assert {"timestamp", "run_id", "p95_ms", "circuit_breaker_open_count"} <= set(record)
+
+
+def test_a_sample_taken_on_a_dirty_tree_is_excluded_by_the_judge(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """collector → progress_check 的真實流程：同樣的指標值，只因為採在半成品樹上就不再算數。"""
+    from tools.ac4_progress_check import evaluate, load_history
+
+    clean_history = tmp_path / ".clean.jsonl"
+    dirty_history = tmp_path / ".dirty.jsonl"
+    _run_collector(clean_history)
+    monkeypatch.setattr(
+        ac4_nightly_collector._tree_state, "capture", lambda *_a, **_k: dict(_DIRTY_TREE)
+    )
+    _run_collector(dirty_history)
+
+    clean = evaluate(load_history(clean_history))
+    dirty = evaluate(load_history(dirty_history))
+
+    assert (clean["excluded_dirty"], clean["total_records"], clean["green_streak"]) == (0, 1, 1)
+    assert (dirty["excluded_dirty"], dirty["total_records"], dirty["green_streak"]) == (1, 0, 0)
+    assert any("證據不足" in c for c in dirty["caveats"]), dirty["caveats"]
+

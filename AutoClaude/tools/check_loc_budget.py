@@ -141,7 +141,7 @@ TOTAL_WARN_MARGIN = 10
 TIER_WARN_MARGIN = 6
 
 # SPECIAL_FILES raw-line 棘輪的預警帶門檻（R76-16，非阻塞，不改 rc）。與
-# TIER_WARN_MARGIN 分開立數：tier 量 `count_loc`（排除空行與純註解），SPECIAL_FILES
+# TIER_WARN_MARGIN 分開立數：tier 量 `count_loc`（只算斷言行），SPECIAL_FILES
 # 量 raw line（空行、註解、Markdown 全算），兩者度量面不同。「為什麼是 5」的實測
 # 依據（R76-00 死結實例）搬至
 # docs/06_quality/LOC_Budget_Ratchet_History.md〈SPECIAL_WARN_MARGIN 沿革〉節。
