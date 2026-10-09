@@ -75,7 +75,7 @@
 
 未驗證（只能在該環境驗）：Windows nightly 首筆 `tree` 樣本與 `AC4 SAMPLE VALIDITY` 行、PS 5.1 實跑、Windows 機表② 欄、三支 workflow 的雲端實跑（push 後對帳，run id 於下方補記）。
 
-雲端對帳（push 後補記）：〔R210-CLOUD〕
+雲端對帳（commit 824330d0 push 後現查 `gh run list --branch main --commit <sha>` 與 `gh run view <id> --json jobs`）：四支 run 全部 `completed success`——AutoClaude CI 37942783417（Tests + LOC Budget／CLAUDE.md Budget + Snapshot Freshness／PG Contract Tests／Equivalence Snapshot 皆 success；nightly 類與 workflow_dispatch 類 job 依 push 規則 skipped）、root-infra-ci 37942783512（root infra guard success）、macos-compat-ci 37942783446（macOS smoke success；nightly-full 與失敗提醒 job 依 push 規則 skipped）、windows-compat-ci 37942783398（Windows smoke success；同上 skipped）。shellcheck-ci／aisdlc-sdd-ci 依 paths 未觸發（缺席＝未驗證）。本回填 commit 自身的雲端 run 由下一個開場視窗對帳。
 
 ## 五、循環令 §7 總結帳（起點 49@R125 → 終點 0；逐輪淨減歸因）
 
