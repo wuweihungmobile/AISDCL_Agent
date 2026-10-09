@@ -96,8 +96,8 @@
 | DEF-200-252 親跑 | 附錄 A 腳本 | script_rc=0；六腿 rc=0（輸出見附錄 A） |
 | 其餘結案列親跑 | 265／311／395／736／796／938／188／124／418／165 的 verify（見〈一〉） | 皆 rc=0（265：6 passed；311：1 passed；395：45 passed, 5 skipped；736：OK (skipped=3)；796：Win2mac=8/12 mac2Win=5/10；938：與基線一致；188：rc=0＋self-test rc=0；124：census rc=0、prose 4261；418：glob 23；165：170 支 w/crlf 0） |
 | QA 零信任複審 | Sonnet 鏡（一審 REJECT：P2 ×1＝887 改判前提不實；P3 ×6＝側軌列位置、252 算術、134 措辭、311 時間界、〈五〉標題、待填與 pwsh 敘述；P4 ×7）→ 主控全數採納修正（887 改留 open；jq 缺席改真 ubuntu runner 上 fail-loud）→ 複審 CONDITIONAL（P2 已消除；餘 P3 ×4＝本檔與帳本文字未同步、P4 ×4 含 act 映像缺 jq）→ 主控逐條修正（本表數字與帳本同步、jq 分支排除 ACT、251／981 統一 git grep 口徑） | 一審 REJECT → 複審 CONDITIONAL → 修正後主控自核；QA 報告住 session scratchpad |
-| pre-push 全 leg | `git push`（背景） | 〔待填〕 |
-| 雲端 CI | `gh run list --commit <sha>` | 〔待填：逐支 conclusion〕 |
+| pre-push 全 leg | `git push`（背景） | push_rc=0；「[pre-push dispatcher] ✅ 本次 push 觸發的所有 leg 皆通過（rc=0）」「999c53f3..eca7b386  main -> main」；origin/main＝eca7b386 |
+| 雲端 CI | `gh run list --commit eca7b3869a41f3b17fc58ff7403e177a138cd097` | 四支皆 completed success：root-infra-ci 37872657602、AutoClaude CI 37872657621（Tests＋LOC／PG Contract／Equivalence 三 job success，nightly 類 job 依 push 規則 skipped）、windows-compat-ci 37872657625（Windows smoke job success）、macos-compat-ci 37872657642（macOS smoke job success）；shellcheck-ci／aisdlc-sdd-ci 依 paths 未觸發（缺席＝未驗證、非通過）。修法在雲端實際生效的字樣（`gh run view --log`）：mac「zsh source dev_start.sh 驗證通過（sourced 偵測 + .venv 自動啟用）」、「install_git_hooks.sh worktree 拒絕驗證通過（rc=1 且拒絕標記命中）」「install-hooks.sh worktree 拒絕驗證通過（rc=1 且拒絕標記命中）」；win「install_git_hooks.ps1 worktree 拒絕驗證通過（rc=1 且拒絕標記命中）」「install-hooks.ps1 worktree 拒絕驗證通過（rc=1 且拒絕標記命中）」（pwsh -File 子行程捕捉形態在 windows-latest 實跑成立）。本回填 commit 自身的雲端 run 由下一個收尾窗口開場對帳（對帳項、非承接項）。 |
 
 未驗證（只能在該環境驗）：三支 workflow 改動的雲端實跑（本輪 push 後的 run 寫在上表）；Windows yml 的 run 本體在 PowerShell 5.1／windows-latest 的實跑（QA 鏡已在本機 pwsh 7 以 GitHub `shell: pwsh` 包裝對跑新舊版本體與真安裝腳本，新版正確；主控未親跑）；Windows 機表② 欄回填（該機才量得到）；DEF-200-381 的 streak job 只在真失敗時才跑，雲端綠燈驗不到計數邏輯（憑證＝本機真 jq 行為鎖與真 gh＋bash 端到端）。
 
