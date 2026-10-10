@@ -47,6 +47,8 @@
 
 **機械執行者**：CI `root-infra-ci.yml` 第 16 道 `ruff check tools/`；本地 `tools/git-hooks/pre-push` root-infra 快層第 ④ 段；對齊性由 `tools/tests/test_subprocess_encoding_hygiene.py::TestRootToolsLintPolicy` 鎖住（規則集逐字相等、`.loc_baseline`-style 存量債棘輪只准縮小、豁免到期日機械核對）。
 
+> 🔴 【2026-10-10 增補】上段「豁免到期日機械核對」已退役（`docs/04_planning/AutoSDD_improving_114.md` §3 F5；先例＝R207 退役時間型觸發）：E501 存量債豁免不再帶日曆到期，`TestRootToolsLintPolicy` 改以 shrink-only 棘輪＋反向鎖（不得偷偷加回日期、不得刪掉退役記載）守住；本段其餘兩項不變。
+
 ## 3. 誠實劃界
 
 - **本 ADR 不新增任何機械鎖**，兩項機制本身已各自有完整的測試覆蓋（見上方「機械執行者」段）；本 ADR 純粹是**追認式決策紀錄**，把散落在 docstring／toml 註解裡的理由收斂成一份可被回指的文件。

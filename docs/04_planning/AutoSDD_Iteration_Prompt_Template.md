@@ -1,6 +1,6 @@
 # AutoSDD 迭代精進 Prompt 範本
 
-> **用法**：每輪迭代複製下方範本，替換 `{{N}}`（本輪編號，01/02/03…）與 `{{上輪遺留}}`，貼入新 session。
+> **用法**：每輪迭代複製下方範本，替換 `{{N}}`（本輪編號，01/02/03…）與 `{{上輪遺留}}`，貼入新 session。**系列休眠時不複製本範本**；先看〈🏁 終止條件・休眠・再開〉的 T1～T4 有無成立。
 > **配套**：上輪產出 `docs/04_planning/AutoSDD_improving_{{N-1}}.md`、`docs/06_quality/AutoSDD_ZeroTrust_Audit_{{N-1}}.md` 與**累積缺陷帳本** `docs/06_quality/AutoSDD_Defect_Log.md` 是本輪的輸入。
 > **雙軌標的**：每輪迭代同時推進兩軌——**A 軌（整合）**：AISDLC-SDD × AutoClaude 深度整合 W 項；**B 軌（自我迭代 / Dogfooding）**：以 v0.0X 自身流程開發本輪工作，行進中記錄框架缺點/Bug 並回流改進。
 
@@ -38,7 +38,7 @@
 > 各輪 W 項由該圖長期 roadmap 衍生，**三軌結構與四階段紀律不變**。
 
 ## 🎯 核心任務（第 {{N}} 輪迭代）
-在「零退化 (Zero-Regression)」絕對前提下，推進**三軌迭代**（對齊北極星三點：指揮官 AutoClaude × 手腳 AISLDC_SDD × 雙向協作；每輪須明確標示本輪在哪一柱（A/B/C）推進、下一份檔名，防跨軌誤指）：
+在「零退化 (Zero-Regression)」絕對前提下，推進**三軌迭代**（對齊北極星三點：指揮官 AutoClaude × 手腳 AISLDC_SDD × 雙向協作；每輪須明確標示本輪在哪一柱（A/B/C）推進，防跨軌誤指；「下一份檔名」義務已由〈🏁〉節退役）：
 - **A 軌（整合）**：推進 AISDLC-SDD 框架與 AutoClaude 多步驟 Playbook 引擎的深度整合。
   基線：AutoClaude 全套 pytest 以「本輪實測」為準（上輪為 2,732 passed / 122 skipped；
   新測試只增不減、0 failed）。禁止引用文件宣稱數字，必須重新實測。
@@ -170,7 +170,7 @@ Graph)**」開發**人類視覺化儀表板／拓樸結構輸出工具**：把�
 | 框架程式/模板/hook 缺陷 | RFC：`build/planning/active/SDD_improving_Automation_{N}.md`
   記錄提案 → 決策後 archive → 修改落 `v0.0(X+1)/` + `EVOLUTION_LOG.md` +
   `releases/CHANGELOG.md` |
-| 整合層（AutoClaude 側）缺陷 | 列入下輪 A 軌 W 項（AutoSDD_improving_{{N+1}}.md） |
+| 整合層（AutoClaude 側）缺陷 | 入帳 docs/06_quality/AutoSDD_Defect_Log.md（未結列即〈🏁〉T2 再開觸發的載體）；不預開下一輪、不寫「列入下輪」 |
 
 ### 每輪 B 軌結案條件
 - 本輪新發現缺陷全部入帳且完成分流（無「發現了但沒記」）。
@@ -181,7 +181,7 @@ Graph)**」開發**人類視覺化儀表板／拓樸結構輸出工具**：把�
 1. 讀取 `docs/04_planning/AutoSDD_improving_{{N-1}}.md` 的「實作順序」與 RTM，列出：
    已完成 W 項 / 未完成 W 項 / 上輪審計遺留問題。
 2. 讀取 `docs/06_quality/AutoSDD_Defect_Log.md`，列出 open / routed 缺陷與本輪處置計畫。
-3. {{上輪遺留：貼上 QA 複審報告中標記為「延後」或「下輪」的條目}}
+3. {{上輪遺留：只貼有承接載體的條目——帳本 DEF-ID 或 PRD 結案帳 ⏸ 列；沒有載體的「延後／下輪」字樣不得作為本輪輸入（與 tools/check_handoff_carriers.py 判準②同型）}}
 
 ## 🔒 架構紅線（每輪不變）
 - 微核心：`core/ports/` 介面、`infra/adapters/` 實作、`plugins/` 橫切；
@@ -289,7 +289,7 @@ SDD_CONTRACT_VIOLATION 次數、token 峰值）。
 3. 安全防護網：CONDITIONAL 白名單能否攔截本輪新增路徑的鏈式攻擊向量？
 4. 對外 I/O 安全：本輪是否新增 `ToolInvocationPort` 外呼路徑？若有，allowlist 預設 deny 是否生效？是否有 SSRF／任意 URL 攻防測試？
 
-## 🔍 多專家 Zero-Trust 審查閉環（強制，全 PASS 才准結案）
+## 🔍 多專家 Zero-Trust 審查閉環（強制，無 P≤2 才准結案；終止口徑見〈🏁〉〈審查閉環的終止〉）
 > 🔴 **四方複審產出一律先落檔，才可進入收斂**（DEF-200-090 教訓）：曾有一輪四方複審
 > 交出 9 筆 blocking＋數十筆 findings，卻**從未成為 repo 內的檔案**——收斂窗口 `git status`
 > 實查工作樹零份複審文件，收斂端只拿得到派工書轉述的**條目標題**，沒有各條的證據、
@@ -321,10 +321,85 @@ SDD_CONTRACT_VIOLATION 次數、token 峰值）。
    > .pyc、未跑 dry-run，漏審 227 個 build/reports + arch-fitness.json → 誤判 OVERALL PASS，
    > 複審以 `git add -A -n` 1013 檔當場揭露）。與階段一 (f)、DEF-05-002/DEF-07-001
    > 「實作後回掃」同屬潔淨度/誠實性紀律家族。
-2. 任何發現（文件問題 + 技術問題）→ 派全能修復 agent **徹底修完**，不留 partial。
+2. P≤2 發現（文件問題 + 技術問題）→ 派全能修復 agent **徹底修完**，不留 partial；P3 當輪改文字或退役、P4 只登記（口徑見〈🏁〉〈審查閉環的終止〉）。
 3. QA 專家複審：是否符合原設計功能？是否破壞收斂（基線退化/契約 broken/TLC violation）？
-   不通過 → 回步驟 2 再修，循環直到 PASS。
+   不通過 → 回步驟 2 再修；複審至多二審（一審全查、二審驗修復），PASS＝無 P≤2，不是零發現。
 4. PASS 後輸出本輪結案四件套。
+
+## 🏁 終止條件・休眠・再開（每輪不變；improving_114 起生效）
+> 本節是軌道① 的**終點定義**。範本原本只有「編號遞增」、沒有「停止」：審查鏡每輪必產 P3／P4，
+> 而它們會被〈本輪輸入〉自動收進後續輪次，於是系列沒有任何狀態可以叫做「做完了」。寫法對照：
+> `docs/04_planning/TechDebt_Paydown_Cycle_Prompt.md` 的〈7. 終止條件〉（有終點的循環令）、
+> `docs/06_quality/FiveQuestion_Audit_Protocol/README.md` 的〈窗口規則與收斂判定〉（S1～S6 症狀驅動再評）。
+> **效力**：本節與上方既有段落衝突時以本節為準——例如〈核心任務〉要求標示「下一份檔名」那一句，
+> 在本節生效後不再是義務。
+
+### 系列三態
+- **進行中**：尚未宣告休眠。
+- **休眠（範圍結案；北極星不因此視為達成）**：〈休眠判準〉三條在宣告當下**同時**成立（只評估一次），且已寫在該系列最後一份 `AutoSDD_improving_NN.md` 的末節。
+  休眠＝不開輪、不產四件套、不複製本範本。宣告後的狀態只由 T1～T4 改變；時間流逝、版本升級、覆蓋度數字、未結列數事後 >0（T2 只認 P≤2）都不會把休眠變回進行中。
+- **再開**：〈再開觸發〉T1～T4 任一事件成立。再開後新一份計畫書的編號＝現存最大號＋1（動工前以 `ls` 實查）
+  ——這只是命名規則，不是開輪義務。
+
+### 休眠判準（三條**同時**成立；寫在該系列最後一份 `AutoSDD_improving_NN.md` 末節即宣告）
+1. 驅動本次系列工作的 PRD／規格已「範圍凍結」且逐列歸入四格、結案帳沒有任何未分類列（本系列＝Token 治理 PRD v2.1.17 §16；再開後若由別的規格驅動，該規格的立案書自帶同體例的結案帳）。
+2. `python tools/check_defect_log_crossref.py --unresolved-count` 印「未結列數＝0」。
+3. 本輪產出**沒有**「下一輪候選」——所有未做項目只准三分類：**立案**（帳本 DEF 列）／
+   **延後**（PRD 結案帳 ⏸ 列，或本輪證據檔〈理論洞清單〉列——限 P4——各附一句**可觀測**的再開症狀）／**退役**（➖＋依據座標）。
+   三類之外的「之後再看」不是載體，不得存在。「立案」要與判準 2 並存，該 DEF 列須在同輪 fixed／closed-by-decision，
+   或落側軌（外部阻塞軌／結構性長債軌）；否則判準 2 不成立、系列不得宣告休眠。
+
+### 再開觸發（唯一真相源＝本節；**只由事件驅動**）
+- **T1** 掌舵者直接立案新需求（附原文）。
+- **T2** 缺陷帳本新立 P≤2 未結列（走軌道① 還是 R 系列由根因所在面決定：產品面→軌道①；守衛面／跨平台護欄→R 系列）。
+- **T3** CI／nightly 轉紅：先入帳（DEF 列），入帳後依 T2 判——紅本身不是觸發；事件源＝`gh run list` 現查或 GitHub 失敗通知（平台行為，未驗證）；nightly 錨／陳舊度哨兵／側軌 warn 的機器產物不算 T3（見〈休眠期間開新視窗的第一動作〉）。
+- **T4** PRD 結案帳某 ⏸ 列的再開症狀實際發生（附 sid／log 座標）。⏸ 沒有掃描器：觀察者＝掌舵者回報，或任一視窗在新立 DEF／寫證據檔時對照 PRD §16.2「再開症狀」欄（命中者在該 DEF 列「分流去向」標 §16.2 座標）。證據檔〈理論洞清單〉列的再開症狀實際發生＝依 `docs/06_quality/FiveQuestion_Audit_Protocol/severity.md`〈暴露度〉升 P2 並入帳，依 T2 判。
+- 守衛面另受五問協定 `docs/06_quality/FiveQuestion_Audit_Protocol/README.md` 的 S1～S6 管轄——本節只引用、不複寫。
+- 🔴 **明文沒有**：日曆觸發、版本號觸發、覆蓋度百分比門檻、成熟度層級落差、「下一份檔名」義務、「候選清單」。
+- **T1 的最小響應＝直接做事＋commit（訊息引掌舵者原文）**；只有碰 PRD 修憲／守衛面／需跨軌設計時，才開一份 `AutoSDD_improving_N`。
+
+### 休眠期間開新視窗的第一動作
+查 T1～T4 有無成立。**都沒有 ⇒ 不開輪、不產四件套**，直接做產品工作——北極星 A 柱：
+AutoClaude 驅動 AISDLC_SDD 做真實開發。
+休眠期間仍會走的機器時鐘（預期產物，不是待辦、不是 T3）：① nightly 錨 14 天（`tools/refresh_nightly_anchor.py`；
+本機 nightly 每晚把新錨寫回工作樹的 `ONBOARDING.md` 但不 commit；HEAD 的錨過期會擋 push）——閒置 ≥14 天後開工前先跑
+`python tools/refresh_nightly_anchor.py --check-head`，照訊息末行處置（通常＝`git add ONBOARDING.md` 併入 commit；本機 nightly 沒跑時依 ADVICE_WRITE）；
+② root-infra-ci 的 nightly-full 排程陳舊度哨兵 10 天（排程通道活性，線上）；③ 側軌帳本複查日 14 天 warn（只出聲；已登記為退役項，
+見本輪證據檔〈理論洞清單〉）。該機專屬待驗清單（如 Windows 真機項）＝非再開事件：不開輪，只在該機做該機的事。
+
+### 審查閉環的終止（輪內迴圈的停止條件）
+- PASS＝**無 P≤2**。P3 當輪改文字或退役；P4 只登記（口徑引 `docs/06_quality/FiveQuestion_Audit_Protocol/severity.md`）。
+  複審至多二審：一審全查、二審驗修復（同 `docs/04_planning/TechDebt_Paydown_Cycle_Prompt.md`〈品質與驗證〉）。
+- P≤2 的口徑分兩套、不得混用：產品／文件輪＝結案不成立、不誠實、終點設計有結構漏洞；守衛面行為缺陷＝severity.md 的暴露度口徑。
+- 對擴張中的面做對抗搜尋沒有不動點（根 CLAUDE.md〈守衛面准入〉記 R179～R196 實測）；「零發現」不是 PASS 的定義。
+
+### 產品輪的固定成本瘦身（再開後適用）
+- 階段一只重跑**本輪會碰到的**子專案全套＋守門工具（取代上方階段一的全量預設；階段一的硬閘照舊）。
+- 覆蓋度：不重盤（PRD §16.3 為凍結日快照、§16.5 不當開輪理由）；三軸成熟度只在掌舵者要求時量，且層級落差不是開輪理由。
+- 審查＝1 面設計鏡（SA／SD）＋1 面 QA 零信任鏡（取代上方審查閉環步驟 1 的預設）；**碰守衛面／安全／PRD 修憲才四方**。
+
+### 證據檔命名與護欄棘輪（兩個鐘，不要搞混）
+產品輪的審計證據檔用本範本原名 `docs/06_quality/AutoSDD_ZeroTrust_Audit_{{N}}.md`（improving_114 起首次實證；該檔不在
+`tools/check_handoff_carriers.py` 的掃描面，前瞻延後字樣仍一律不准寫）。
+🔴 **不得冠 `CrossPlatform_R<N>_` 前綴**：檔名鐘 `tools/check_defect_log_crossref.py::current_round()` 讀該前綴檔名的最大號，
+前進時喚醒的是 SC-10（ADR-XPLAT-002 §6 要有當前輪一列）、承接輪次判準與 parity 錨點上界。
+護欄棘輪的輪號到期義務（`_REPIN_NET_CAP_DUE_ROUND`／`_PHASE2_DUE_ROUND`，見 `tools/tests/test_adr_xplat001_c1c2_lock.py`）
+用的是**另一個鐘**＝重釘日誌的最大輪標籤（`live_repin_round()`）；只有追加標籤 ≥ 下一輪的重釘列才會喚醒它們。
+產品輪動到根層 `tools/tests/` 時有三條路：(a) 不碰（首選；守衛面依 R197「量、不挖」）；(b) **重釘列沿用最新標籤**
+（同輪第二列：淨額 ≤0 免逐檔 R 檔；>0 須依款(9) 指名一份既有 `CrossPlatform_R*_*.md` 當逐檔清單的家）——餘裕現查
+`repin_growth_problems`（該標籤 cap 減主軌、回歸鎖軌 cap），本節不寫數字；(c) 餘裕用盡才換新標籤＝開 R 輪並承擔其義務
+（兌現到期列＋Phase-2 列＋ADR-XPLAT-002 §6 一列＋governance_docs 登記）。
+
+### 雲端對帳（做一次，不遞迴）
+push 後現查 `gh run list --commit <完整 sha>`，結論寫入本輪證據檔；終輪或系列最後一個 commit 以 GitHub run 紀錄為憑、不回填。
+🔴 **回填 commit 本身不再回填**：只改不在任何 workflow `paths` 白名單內的檔（多數 `docs/06_quality` 證據檔）的 commit 只觸發 root-infra-ci，
+其結果由下一個實質 commit 的對帳一併帶過；不得再寫「由下一個開場視窗對帳」——那句話自我指涉，永遠多一個待辦。
+
+### WHY（為何把終點寫進範本）
+到 R211（improving_113）為止已迭代 113 輪；掌舵者 2026-10-07 明示「除非必要不要有特定日期的義務；再評只由症狀驅動」，
+2026-10-10 明示「這樣一直執行的浪費，好像不是很有效率」並要求找到收斂不了的根因。
+成因是結構性的：範本只有「遞增」沒有「停止」，審查鏡每輪必產 P3／P4，又被〈本輪輸入〉自動收進後續輪次。
+先例：R207 退役五問協定的時間型觸發、R210 循環令 §7 終止條件達成。
 
 ## 📤 本輪輸出（檔名遞增，放入 docs/ 編號目錄）
 1. `docs/04_planning/AutoSDD_improving_{{N}}.md` — 本輪計畫/設計/RTM（含 <Architecture_Design_Review>）
@@ -351,4 +426,5 @@ SDD_CONTRACT_VIOLATION 次數、token 峰值）。
 | 北極星目標置入範本頂部 | 三點終極目標（AutoClaude 驅動 SDD／AI SDD 圖靈完備閉環→L10／兩者完美協調成自動化開發 Agent）每輪不變，置頂使每輪局部優化都向同一 L10 終局對齊，避免迭代發散；原陳述的 9 Ports/13 Plugin 與 L5↔L10 張力一律交由階段一實測收斂 |
 | XAI 可解釋性轉向設為「條件式疊加」而非常駐段落 | 僅高階 meta／形式化終止／互遞迴圖／具身接地的輪次才需首席架構師視角；條件式疊加避免低階輪被無關紀律拖累，又確保高階輪不漏「人類可審批＝架構不失控」紅線（driver instance 以 `{{本輪 driver instance}}` 佔位，當前範例＝ACT-159/R-9.37） |
 | 成熟度判準落地為正式 L0–10 rubric SSOT（`AutoSDD_Maturity_Rubric.md`） | 2026-06-15：原 DOC-01 只說「以 active planning maturity ladder 為準」，但該 ladder **實際未被定義**（潛在缺口）。業界無 L0–10 自治標準（公認皆 0~5：SAE/CMMI/AGI），故起草 **bespoke 但錨定** 的量表：**同一把 L0–10 尺量三軸**（C 引擎/B 流程/A 協作），上捲 `L_合體=min(A,B,C)`——數學上保證「三軸一起升」才達北極星。誠實標 non-industry-standard + zero-trust 須實測，並揭露目前實測位粗估 L3–L4 而非宣稱 L5 |
-| 核心任務由「雙軌」升為「三軌」（新增 C 軌＝指揮官 AutoClaude） | 2026-06-15 釐清範本定位＝精進 **AutoClaude（指揮官）＋ AISLDC_SDD（手腳）＋ 兩方協作**，三者一一對應北極星三點。原雙軌只驅動「協作（A）＋手腳 dogfooding（B）」，把 AutoClaude 自身開發（SD_09 W1~W6／Improving_NN）排除在外，與定位牴觸；故新增 **C 軌全收 AutoClaude 開發（含 ops/infra）**，並同步鬆綁根 `CLAUDE.md` 軌道③「與整合無關」。防混淆機制不變：每輪標示在哪一柱（A/B/C）、下一份檔名 |
+| 核心任務由「雙軌」升為「三軌」（新增 C 軌＝指揮官 AutoClaude） | 2026-06-15 釐清範本定位＝精進 **AutoClaude（指揮官）＋ AISLDC_SDD（手腳）＋ 兩方協作**，三者一一對應北極星三點。原雙軌只驅動「協作（A）＋手腳 dogfooding（B）」，把 AutoClaude 自身開發（SD_09 W1~W6／Improving_NN）排除在外，與定位牴觸；故新增 **C 軌全收 AutoClaude 開發（含 ops/infra）**，並同步鬆綁根 `CLAUDE.md` 軌道③「與整合無關」。防混淆機制不變：每輪標示在哪一柱（A/B/C）；「下一份檔名」自〈🏁〉節起不再是義務 |
+| 終止條件寫進範本（🏁 節） | 2026-10-10：原設計「{{N}} 遞增形成演化鏈」沒有終點，審查鏡每輪必產 P3／P4 ⇒ 自動成為下一輪輸入；改為症狀／事件驅動再開（先例 R207 退役時間型觸發、R210 循環令 §7 DONE） |

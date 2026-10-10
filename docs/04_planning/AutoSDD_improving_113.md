@@ -221,7 +221,7 @@ AutoClaude/tests/test_r100_boot_self_check.py +2：`cli_version_verdict('2.1.295
 - `inherit`／`CLAUDE_CODE_SUBAGENT_MODEL` 在真實喚醒窗口內的子代理行為層只有官方文件＋二進位字串證據；`claude -p -r <sid> --model` 真機探針 1 次（拋棄式 session）。
 - W2 v1：pct 欄恆 null；timeout 砍掉的窗不落帳；§9 Prometheus 指標未接。W3：PG／Dual 後端 pin 路徑未實跑；機器睡眠下單調鐘行為只依文件；拒絕長睡無自動承接者。
 - 三軸成熟度本輪未重量測；B 柱 dogfooding 只維持最小面（既有 FSM 狀態、缺陷紀律）；C 軌工作流帳本未另立 `AutoClaude/docs/04_planning/` 新檔，W3 以本檔 §3.3／§4 為載體（AutoClaude 自身 G0~G6 以 pytest／lint-imports／LOC／snapshot 四閘門實跑代替）。
-- 護欄層本輪淨增 +787（回歸鎖軌 309、主軌 478，款(11) 連升第 1 輪）；下一輪若主軌仍為正即連升第 2 輪，第三輪必須 ≤0。
-- PRD 覆蓋度：按「缺規範性機制即 ⚠️」逐列計 60.3%（⚠️=0.5），掌舵者口述的「剩 25～30%」對應 ⚠️≈0.72 權重；下一輪重盤請沿用 R211 姊妹檔矩陣的同一算法。
+- 護欄層本輪淨增 +787（回歸鎖軌 309、主軌 478，款(11) 連升第 1 輪）；下一輪若主軌仍為正即連升第 2 輪，第三輪必須 ≤0。（史料：improving_114 終輪以 R211 同輪第二列 −9 併計，系列隨後休眠，見該檔 §6。）
+- PRD 覆蓋度：按「缺規範性機制即 ⚠️」逐列計 60.3%（⚠️=0.5），掌舵者口述的「剩 25～30%」對應 ⚠️≈0.72 權重；下一輪重盤請沿用 R211 姊妹檔矩陣的同一算法。（史料：已由 PRD v2.1.17 §16.3／§16.5 取代——之後不重盤、不當門檻。）
 
-<!-- guard-total:R211 --> R211 護欄層累積淨額＝ 114811 → 115598（+787，回歸鎖軌申報 309、主軌 478 ≤ 517，款(11) 連升第 1 輪）——improving_113 收尾單人窗口：test_model_roles.py 573、test_resume_cost.py 197、attr=None 讀者鎖 +2，加本表自身漂移（重釘列、回歸鎖軌同輪列、接鏈列 DEF-200-507）。逐檔清單見 CrossPlatform_R211_ZeroTrust_Audit_113.md〈二〉〈五〉。
+<!-- guard-total:R211 --> R211 護欄層累積淨額＝ 114811 → 115589（+778，回歸鎖軌申報 309、主軌 469 ≤ 517，款(11) 連升第 1 輪；improving_114 終輪同輪第二列 −9 併計）——improving_113 收尾單人窗口：test_model_roles.py 573、test_resume_cost.py 197、attr=None 讀者鎖 +2，加本表自身漂移（重釘列、回歸鎖軌同輪列、接鏈列 DEF-200-507）。逐檔清單見 CrossPlatform_R211_ZeroTrust_Audit_113.md〈二〉〈五〉。

@@ -619,7 +619,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 393,
     "_ps_engine.py": 83,
     "test_act_local_runner_image.py": 307,
-    "test_adr_xplat001_c1c2_lock.py": 8727,
+    "test_adr_xplat001_c1c2_lock.py": 8735,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 4074,
@@ -695,7 +695,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_smoke_ci_sync.py": 1570,
     "test_statusline_context_feed.py": 221,
     "test_stdio_utf8.py": 76,
-    "test_subprocess_encoding_hygiene.py": 1559,
+    "test_subprocess_encoding_hygiene.py": 1542,
     "test_tlc_runner_timeout.py": 292,
     "test_wake_chain_halt_r278.py": 1065,
     "test_windows_forbidden_filename_parity.py": 941,
@@ -2628,6 +2628,13 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "st_context_budget_guard.py +2（attr=None 讀者鎖加 model_roles）；加本表自身漂移（重釘"
      "列、回歸鎖軌同輪列、接鏈列）。逐檔清單見 CrossPlatform_R211_ZeroTrust_Audit_113.md〈二"
      "〉〈五〉。"),
+    ("R211", 115598, 115589, -9,  # round-label-ok
+     "improving_114（軌道① 終輪；同輪第二列，帳本時鐘維持 211 不推進）：E501 存量債豁免的"
+     "日期型到期退役——test_subprocess_encoding_hygiene.py −17（刪 e501_waiver_verdict 與兩支"
+     "比日期的測試、改為兩支無日曆反向鎖；掌舵者 2026-10-07 裁決不製造日期義務，先例 R207）"
+     "＋本表自身漂移 +8（同輪列、接鏈列）。淨額為負：回歸鎖軌不申報；R211 合併淨額 +778、"
+     "主軌 469 ≤ 517、款(11) 連升仍第 1 輪。逐檔清單見 CrossPlatform_R211_ZeroTrust_Audit_"
+     "113.md〈八〉；五個永動源的拆除帳見 AutoSDD_improving_114.md §3／§4。"),
 )
 
 
@@ -3303,10 +3310,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 331
+_REPIN_LOG_FROZEN_PREFIX_LEN = 332
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "d034314bdd87baa7c93602b6ae4ef2ada0ae4a8ccbbd50ad3894b55e104a517e")
+    "8fea64d22cb14c95456c136ba8eab578d5dbf7ae9a2112a3dc1434b42f98589d")
 
 
 def repin_log_history_digest(
@@ -3668,6 +3675,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R209", "1e22b76a4c99", "715cab768f05", "DEF-200-129"),  # round-label-ok
     ("R210", "715cab768f05", "bcdb57dd180d", "DEF-200-207"),  # round-label-ok
     ("R211", "bcdb57dd180d", "d034314bdd87", "DEF-200-507"),  # round-label-ok
+    ("R211", "d034314bdd87", "8fea64d22cb1", "DEF-200-504"),  # round-label-ok
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

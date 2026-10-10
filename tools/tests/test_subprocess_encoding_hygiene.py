@@ -48,7 +48,6 @@ import tokenize
 import tomllib
 import unicodedata
 import unittest
-from datetime import date
 from pathlib import Path
 
 _TESTS_DIR = Path(__file__).resolve().parent
@@ -1376,34 +1375,24 @@ def _ruff_config() -> dict:
     return tomllib.loads(_RUFF_TOML.read_text(encoding="utf-8"))
 
 
-_E501_EXPIRY_RE = re.compile(r"到期日：(\d{4})-(\d{2})-(\d{2})")
-
-#: 一次續期的最長視窗（天）。原始視窗是三個月，留一點餘裕到約四個月；上限存在的
-#: 唯一理由與 `root-infra-ci.yml` 的 `MAX_WAIVER_DAYS` 相同——杜絕「填 2099」把
-#: 帶到期日的豁免變成變相永久停用。
-_E501_WAIVER_MAX_DAYS = 120
+_E501_CALENDAR_EXPIRY_RE = re.compile(r"到期日：\d{4}-\d{2}-\d{2}")
 
 
-def e501_waiver_verdict(text: str, today: date) -> str | None:
-    """`None`＝豁免仍有效；回字串＝失效理由（純函式，日期由呼叫端注入）。"""
-    found = _E501_EXPIRY_RE.search(text)
-    if not found:
-        return ("tools/ruff.toml 的 E501 存量債豁免沒有到期日 —— "
-                "無到期日的豁免＝永久豁免")
-    try:
-        deadline = date(int(found[1]), int(found[2]), int(found[3]))
-    except ValueError as exc:
-        return (f"到期日 {found[0]!r} 無法解析為合法日期（{exc}）—— "
-                "豁免設定壞掉時一律 fail-loud，不得靜默當成「沒有豁免」或「永久豁免」")
-    if deadline < today:
-        return (f"tools/ruff.toml 的 E501 存量債豁免已到期（{deadline}，今日 {today}）"
-                " —— 二擇一：清完 tools/tests/ 的過長行並刪掉 "
-                "[lint.per-file-ignores] 的 `tests/*.py`，或在缺陷帳本具名續期"
-                "（附當時實際筆數趨勢）後把本檔的到期日往後改。不得靜默沿用")
-    if (deadline - today).days > _E501_WAIVER_MAX_DAYS:
-        return (f"到期日 {deadline} 距今 {(deadline - today).days} 天，超過"
-                f"單次續期上限 {_E501_WAIVER_MAX_DAYS} 天 —— 上限存在的唯一理由"
-                "就是杜絕「填一個很遠的日期」把帶到期日的豁免變成永久停用")
+def e501_no_calendar_verdict(text: str) -> str | None:
+    """`None`＝豁免維持「無日曆到期」；回字串＝失效理由（純函式，不讀時鐘）。
+
+    與被退役的舊判準刻意不對稱：舊的要日期、拿今天比日期；本判準**禁**日期、不比日期，
+    所以沒有 `today` 參數——判決不隨哪一天跑它而翻面（會隨日曆翻面，正是被退役的病）。
+    誠實劃界：只認舊寫法的同形（全形冒號＋ISO 日期）；換一種寫法的日期它看不見。
+    """
+    found = _E501_CALENDAR_EXPIRY_RE.search(text)
+    if found:
+        return (f"tools/ruff.toml 的 E501 存量債豁免又出現日曆到期 {found[0]!r} —— "
+                "掌舵者 2026-10-07 裁決不製造特定日期的義務；這道豁免唯一的機械物是 "
+                "shrink-only 棘輪 `_E501_DEBT_CEILING`，不要把日期加回來")
+    if "退役到期日" not in text:
+        return ("tools/ruff.toml 的 E501 存量債豁免不再記載「退役到期日」—— "
+                "那段記載是「為什麼沒有日期」的唯一答案，刪掉會讓下一個人把日期補回去")
     return None
 
 
@@ -1468,41 +1457,35 @@ class TestRootToolsLintPolicy(unittest.TestCase):
         self.assertLessEqual(
             actual, _E501_DEBT_CEILING,
             f"tools/tests/ 的過長行由 {_E501_DEBT_CEILING} 增至 {actual} —— "
-            f"本棘輪只准往下改。新寫的行請自行折行（既有債另有到期日，見 tools/ruff.toml）",
+            f"本棘輪只准往下改。新寫的行請自行折行（既有債沒有日期義務，見 tools/ruff.toml）",
         )
 
-    def test_the_e501_waiver_expiry_is_actually_enforced(self) -> None:
-        """到期日必須**真的會到期**（R74 訂正）。
+    def test_the_e501_waiver_has_no_calendar_expiry_by_decision(self) -> None:
+        """E501 存量債豁免**不得**再帶日曆到期日（反向鎖；2026-10-10 退役日期型到期）。
 
-        原版只用 regex 驗「有沒有 `到期日：YYYY-MM-DD` 這串字樣」，於是那個日期
-        永遠不會生效——而 `tools/ruff.toml` 逐字宣告「到期時二擇一…不得靜默沿用」、
-        本測試的 docstring 又宣稱與會比日期的 `WAIVER_UNTIL` 同體例。**宣稱與實作
-        不符的鎖比沒有鎖更糟**（同一個類別裡已經有過一次同型訂正：另一道的斷言曾是
-        恆真式子而 docstring 宣稱以 ruff 實跑驗證）。現在改成真的比日期。
+        WHY：掌舵者 2026-10-07 裁定「不製造特定日期的義務，再評／維護只由症狀驅動」，
+        先例＝R207 退役五問協定的時間型觸發。原豁免寫死一個日期、由測試拿今天比對：
+        日期一到，根層全套在零症狀下必紅、逼出一輪——那是永動源，不是護欄。這道豁免唯一
+        該留的機械物是 shrink-only 棘輪（`_E501_DEBT_CEILING`＋`test_e501_debt_only_shrinks`）：
+        它只在「過長行變多」這個**症狀**出現時才紅。本鎖守的是反方向——日期不准被偷偷
+        加回去，也不准連「為什麼沒有日期」的記載一起刪掉。
+
+        退場條件：`tests/*.py` 豁免清零並自 `tools/ruff.toml` 刪除時，本鎖與
+        `_E501_DEBT_CEILING` 一併拆（同一個回歸面）。判準自身的紅綠由
+        `test_the_no_calendar_criterion_is_red_when_it_should_be` 證明。
         """
-        verdict = e501_waiver_verdict(_RUFF_TOML.read_text(encoding="utf-8"),
-                                      date.today())
+        verdict = e501_no_calendar_verdict(_RUFF_TOML.read_text(encoding="utf-8"))
         self.assertIsNone(verdict, verdict or "")
 
-    def test_the_expiry_criterion_is_red_when_it_should_be(self) -> None:
-        """判準自證：四種輸入的紅綠（不靠 repo 現況剛好是哪一天）。"""
-        ok = "# 到期日：2026-11-02（自 R69 P3 落地日起三個月）\n"
-        today = date(2026, 8, 4)
-        self.assertIsNone(e501_waiver_verdict(ok, today))
-        # 已過期 → 阻斷自動恢復
-        self.assertIn("已到期", e501_waiver_verdict(ok, date(2026, 11, 3)) or "")
-        # 沒有到期日 → 永久豁免
-        self.assertIn("沒有到期日", e501_waiver_verdict("# 條 2：E501\n", today) or "")
-        # 「填一個很遠的日期」＝變相永久停用
-        self.assertIn(
-            "上限",
-            e501_waiver_verdict("# 到期日：2099-01-01\n", today) or "",
-        )
-        # 日期字樣在但不是合法日期 → fail-loud，不得靜默當成「沒有豁免」
-        self.assertIn(
-            "無法解析",
-            e501_waiver_verdict("# 到期日：2026-02-30\n", today) or "",
-        )
+    def test_the_no_calendar_criterion_is_red_when_it_should_be(self) -> None:
+        """判準自證：合成輸入的紅綠（不靠 repo 現況剛好長怎樣）；綠一個、紅兩個。"""
+        retired = "# 退役到期日（掌舵者裁決）：本條只受棘輪約束，沒有日期\n"
+        self.assertIsNone(e501_no_calendar_verdict(retired))
+        # 日期被加回（舊寫法同形；刻意拼接，本檔不留一串會被 repo 搜尋撈到的日期義務字面）
+        revived = retired + "# 到期日" + "：2026-11-02\n"
+        self.assertIn("日曆到期", e501_no_calendar_verdict(revived) or "")
+        # 「為什麼沒有日期」的記載被刪 → 下一個人會把日期補回去
+        self.assertIn("退役到期日", e501_no_calendar_verdict("# 條 2：E501\n") or "")
 
     def test_the_config_actually_covers_the_root_tools_tree(self) -> None:
         """反空轉：設定檔必須真的**罩得住**根層 tools/ 樹（不是放在某個沒人走到的角落）。
