@@ -8,7 +8,11 @@
 """
 from __future__ import annotations
 
+import os
 import re
+import subprocess
+import sys
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -933,3 +937,111 @@ class TestSpecFormatVersionGate:
         evt = [c.args[1] for c in obs.record_event.call_args_list
                if c.args[0] == "sdd.spec_format_version"][-1]
         assert evt == {"version": "1.0", "declared": True, "accepted": True}
+
+
+# ── F-SBR-001：prompt 的「驗收閘」段（D-SBR-01／02／03／08）─────────────────────────
+# 規格是入庫 fixture（scripts/bridge_e2e/wordcount）：三個 AT 剛好涵蓋三型輸出契約
+# （引號正向／正負併存／weak 後備），且 evaluator 的 -k token 是底線形式。
+_WORDCOUNT_DIR = Path(__file__).resolve().parents[2] / "scripts" / "bridge_e2e" / "wordcount"
+_WORDCOUNT_TCS = (
+    _WORDCOUNT_DIR / "docs" / "03_testing" / "contracts" / "TEST-CONTRACT-SPEC-WordCount.md"
+)
+_K_TOKEN = re.compile(r'-k "(AT_[0-9_]+)"')
+
+
+def _naming_tokens(task):
+    """評估指令那一行**之外**，prompt 明說要放進測試名稱的 -k token（底線形式）。
+
+    只看評估指令不夠：AI 得被明說「測試名要含這個 token」，而不是自己從 -k 引號裡推論。
+    """
+    return re.findall(r"AT_\d+(?:_\d+)*", task.prompt.replace(task.evaluator_command, ""))
+
+
+def _compile_wordcount(tmp_path, **adapter_kwargs):
+    """fixture → 補凍結狀態 → load_spec → compile_tasks；回 (spec, tasks)。"""
+    spec_dir = _write_spec(
+        tmp_path, text=_WORDCOUNT_TCS.read_text(encoding="utf-8"), name=_WORDCOUNT_TCS.name)
+    _write_fsm_state(tmp_path)
+    adapter = SddToPlaybookAdapter(**adapter_kwargs)
+    spec = adapter.load_spec(str(spec_dir))
+    return spec, adapter.compile_tasks(spec)
+
+
+class TestPromptCarriesTheAcceptanceGate:
+    """引擎驗收閘要的資訊必須在 prompt 裡（F-SBR-001 AC-SBR-001～005）。
+
+    WHY：evaluator 在引擎的工作目錄以**裸** pytest 跑 `-k "<底線 token>"`，而 regex 比對的對象
+    是 AI 的最後回覆。prompt 原本只有 Gherkin 與規格路徑，AI 只能碰運氣——探針實測：自然命名
+    的測試被 -k 選到 0 個（rc=5）、工作目錄沒有 tests/（rc=4）、模組在工作目錄根而無 conftest
+    時裸 pytest 匯入失敗（rc=2）、輸出契約只靠子字串偶然命中。
+    """
+
+    @pytest.fixture()
+    def compiled(self, tmp_path):
+        return _compile_wordcount(tmp_path)
+
+    def test_evaluator_command_and_k_token_are_in_the_prompt(self, compiled):
+        _, tasks = compiled
+        assert len(tasks) == 3
+        for t in tasks:
+            assert t.evaluator_command in t.prompt, t.step_id
+            tok = t.name.replace("-", "_")
+            assert _K_TOKEN.search(t.prompt).group(1) == tok, t.step_id
+            # 函式名不能含連字號：命名指示給連字號形的 ID，照抄命名反而被 -k 選到 0 個
+            assert set(_naming_tokens(t)) == {tok}, t.step_id
+
+    def test_a_literal_reader_of_the_prompt_passes_the_evaluator(self, compiled, tmp_path):
+        """「字面讀者」：只照 prompt 的命名指示命名一個空測試，評估指令就必須 rc=0。
+
+        釘在**真的跑 pytest** 上而不是比字串：命名指示的 token 與 `_build_evaluator_cmd` 的
+        底線化若分岔，-k 會選到 0 個測試（rc=5）；prompt 沒交付命名指示則擷取失敗＝紅。
+        """
+        _, tasks = compiled
+        # 讓 `pytest` 解析到執行本測試的同一個環境（沒 activate venv 的 CI 也成立）
+        path = str(Path(sys.executable).parent) + os.pathsep + os.environ.get("PATH", "")
+        env = {**os.environ, "PATH": path}
+        for t in tasks:
+            tokens = _naming_tokens(t)
+            assert tokens, f"{t.step_id}: prompt 沒有命名指示（字面讀者無從命名測試）"
+            work = tmp_path / f"reader_{t.step_id}"
+            (work / "tests").mkdir(parents=True)
+            (work / "tests" / "test_reader.py").write_text(
+                f"def test_{tokens[0]}_basic():\n    assert True\n",
+                encoding="utf-8", newline="\n")
+            r = subprocess.run(
+                t.evaluator_command, shell=True, cwd=work, env=env, capture_output=True,
+                text=True, encoding="utf-8", errors="replace")
+            assert r.returncode == 0, (t.step_id, r.returncode, r.stdout[-300:], r.stderr[-300:])
+
+    def test_output_contract_regex_is_in_the_prompt_for_all_three_shapes(self, compiled):
+        """regex 比對的是 AI 的最後回覆：不交付它，引號正向靠碰巧提到、負向會被敘述文字誤殺、
+        weak 後備（區分大小寫的 PASS）更是猜不到。"""
+        _, tasks = compiled
+        assert [t.weak_regex for t in tasks] == [False, False, True]
+        for t in tasks:
+            assert t.expected_output_regex in t.prompt, t.step_id
+
+    def test_prompt_pins_cwd_and_contrasts_bare_pytest_with_python_m_pytest(self, compiled):
+        """工作目錄＝引擎執行評估指令的地方；裸 pytest 不會把 cwd 放進 sys.path，`python -m
+        pytest` 會——AI 若用後者自驗成功，引擎那側仍會因匯入失敗而紅（措辭綁定的輕量斷言）。"""
+        _, tasks = compiled
+        for t in tasks:
+            # D-SBR-08：檔案寫進規格所在的樹，引擎 cwd 內評估 rc=4——這句不能被第 2 條的字樣蒙混
+            assert "一律建立在「目前工作目錄」之下" in t.prompt, t.step_id
+            assert "不是 python -m pytest" in t.prompt, t.step_id
+
+    def test_the_original_prompt_is_kept_in_front_of_the_gate(self, compiled):
+        spec, tasks = compiled
+        digest8 = spec.digest.split(":")[-1][:8]
+        for c, t in zip(spec.contracts, tasks):
+            assert t.prompt.startswith("依下列契約實作並使測試通過：\n"), t.step_id
+            assert c.gherkin in t.prompt, t.step_id
+            ref = t.prompt.index(f"規格出處：{spec.spec_path}（digest {digest8}）")
+            assert ref < t.prompt.index("驗收閘"), t.step_id
+
+    def test_gate_and_evaluator_agree_on_a_custom_test_path(self, tmp_path):
+        """告訴 AI 的測試目錄必須就是引擎實際執行的那個，否則測試放對了仍被評估指令找不到。"""
+        _, tasks = _compile_wordcount(tmp_path, test_path="spec_tests")
+        for t in tasks:
+            assert t.evaluator_command.startswith("pytest spec_tests "), t.step_id
+            assert "spec_tests/" in t.prompt, t.step_id

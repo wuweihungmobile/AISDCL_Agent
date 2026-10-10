@@ -10,24 +10,25 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from autoclaude.core.event_bus import EventBus
-from autoclaude.core.hookspec import HookContext, KernelPhase
+from autoclaude.core.hookspec import KernelPhase
 from autoclaude.core.kernel import PlaybookKernel
 from autoclaude.core.ports.executor import (
     ExecutionEvent,
     ExecutionEventKind,
     ExecutionOutput,
 )
+from autoclaude.core.ports.quota_meter import QuotaReading
 from autoclaude.models.playbook import GlobalInvariants, Playbook, PlaybookTask
 from autoclaude.plugins.token_guard.policy import TokenGuardPlugin
+from autoclaude.utils.config import TokenGuardConfig
 
 
 class TokenEmittingExecutor:
     """測試用 IExecutor：execute 時經 on_event 發一筆 TOKEN_PCT 事件（模擬真實後端觀測）。"""
 
-    def __init__(self, pct: Optional[float], text: str = "OK"):
+    def __init__(self, pct: float | None, text: str = "OK"):
         self._pct = pct
         self._text = text
         self.calls: list[str] = []
@@ -151,3 +152,46 @@ def test_success_run_no_token_signal_peak_stays_zero():
     result = kernel.run(_pb())
     assert result.success is True
     assert result.peak_token_pct == 0.0
+
+
+class _QuotaMeter:
+    """只實作 read_worst_pct 的額度量測替身（無 read_pace ＝ 配速帶 unmeasured，同外部注入者）。"""
+
+    def __init__(self, reading):
+        self._reading = reading
+
+    def read_worst_pct(self):
+        return self._reading
+
+
+def _run_with_quota_meter(meter, context_pct):
+    bus = EventBus()
+    # 門檻明寫：出廠預設由 AUTOSDD_QUOTA_* 環境變數與 .env 驅動，本機 .env 可能把 halt 調到 95 以上
+    cfg = TokenGuardConfig(quota_throttle_pct=70.0, quota_halt_pct=95.0)
+    bus.register(TokenGuardPlugin(token_guard_cfg=cfg, quota_meter=meter))
+    kernel = PlaybookKernel(TokenEmittingExecutor(pct=context_pct), _PassEvaluator(), bus=bus)
+    return kernel.run(_pb())
+
+
+def test_quota_driven_halt_names_the_quota_axis_not_just_context(caplog):
+    """D-SBR-09：額度軸 96% ＋ executor 回報 context 18% ⇒ 仍 HALT（本來就對），log 須點名真因。
+
+    修前 Kernel 只印固定的「context 18% >= halt 門檻」，而 merge 只保留 request_halt 布林、
+    reason 從未被記錄——操作者去查 context 水位，什麼也查不到。TOKEN_HALT marker 前綴不動：
+    A/B 載具以該前綴計數（tools/ab_compare_backends.py）。
+    """
+    meter = _QuotaMeter(QuotaReading(96.0, "weekly_all", None))
+    with caplog.at_level(logging.WARNING):
+        result = _run_with_quota_meter(meter, context_pct=18.0)
+    assert result.halted is True
+    assert "=== STATE: TOKEN_HALT" in caplog.text
+    assert "quota_pct=96" in caplog.text and "weekly_all" in caplog.text
+
+
+def test_context_driven_halt_does_not_claim_the_quota_axis(caplog):
+    """對照組：額度軸 12%（遠低於門檻）而 context 92% ⇒ 真因是 context，log 不得宣稱額度軸。"""
+    meter = _QuotaMeter(QuotaReading(12.0, "weekly_all", None))
+    with caplog.at_level(logging.WARNING):
+        result = _run_with_quota_meter(meter, context_pct=92.0)
+    assert result.halted is True and "=== STATE: TOKEN_HALT" in caplog.text
+    assert "quota_pct" not in caplog.text

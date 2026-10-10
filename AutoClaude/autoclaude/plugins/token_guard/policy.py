@@ -22,6 +22,7 @@
 #   - resolve_per_step_cfg
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from ...core.hookspec import HookContext, KernelPhase, ResourceRequest
@@ -40,6 +41,8 @@ from .thresholds import get_dynamic_compact_threshold as _get_dynamic_compact_th
 from .thresholds import should_compact_decision, should_halt_decision
 from .watcher import observe_token_line as _observe_token_line
 from .watcher import resolve_per_step_cfg as _resolve_per_step_cfg
+
+logger = logging.getLogger("autoclaude.plugins.token_guard")
 
 
 class TokenGuardPlugin:
@@ -197,11 +200,12 @@ class TokenGuardPlugin:
                 or band == BAND_PREPARE)
         if not (hard or limit_hit or (soft and payload.get("in_correction_loop"))):
             return None
-        return ResourceRequest(
-            contributor=self.name(), request_halt=True,
-            reason=f"quota_pct={pct} kind={getattr(reading, 'kind', None)} band={band} "
-                   f"limit_text={limit_hit} resets_at={getattr(reading, 'resets_at', None)}",
-        )
+        reason = (f"quota_pct={pct} kind={getattr(reading, 'kind', None)} band={band} "
+                  f"limit_text={limit_hit} resets_at={getattr(reading, 'resets_at', None)}")
+        # D-SBR-09：merge 只留 request_halt 布林、reason 從未被記錄，而 Kernel 的 TOKEN_HALT marker
+        # 固定印「context N%」——額度軸 halt 在此點名真因。marker 文字不動（A/B 載具依它計數）。
+        logger.warning("TokenGuard 額度軸 halt：%s", reason)
+        return ResourceRequest(contributor=self.name(), request_halt=True, reason=reason)
 
     def _evaluate_resources(self, ctx: HookContext) -> ResourceRequest | None:
         payload = ctx.payload or {}

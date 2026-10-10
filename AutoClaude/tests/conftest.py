@@ -761,6 +761,26 @@ def _hermetic_quota_cache(monkeypatch, tmp_path_factory):
 
 
 # ──────────────────────────────────────────────────────────────
+# 測試不密封（同 `_hermetic_quota_cache` 家族）：「出廠預設」測試被本機 `.env` 決定
+# ──────────────────────────────────────────────────────────────
+# `autoclaude/utils/config.py::_quota_env` 在環境變數缺席時讀 `<repo 根>/.env` 與
+# `AutoClaude/.env`（兩份皆不入庫）。上方 `pytest_configure` 只 pop 了 `AUTOSDD_QUOTA_*`
+# 的**環境變數**，沒擋住這條**檔案**路徑：開發機的 `.env` 把 `AUTOSDD_QUOTA_HALT_PCT` 調成
+# 98 之後，驗「出廠預設 95」與「引擎↔harness 對同一份快取同一個判定」的測試就因機器而紅，
+# 沒有 `.env` 的 CI 卻綠；失敗訊息只會說 `98.0 != 95.0`，一個字都不會提到 `.env`。
+# 引擎唯一的 `.env` 讀取點是 `_ENV_FILES`；harness 側的 `policy_env()` 在本測試樹沒有呼叫點
+# （parity 比的是 harness 的 `DEFAULT_POLICY` 字面預設），故只需導向這一個讀取點。
+# 需要驗「`.env` 真的生效」的測試自己 `monkeypatch.setattr(cfgmod, "_ENV_FILES", ...)`，
+# 它們在本 fixture 之後才施作，照舊生效。
+# 鎖：`tests/test_conftest_quota_env_isolation.py::TestEnvFilesAreNotReadInTests`。
+@pytest.fixture(autouse=True)
+def _hermetic_env_files(monkeypatch):
+    from autoclaude.utils import config
+
+    monkeypatch.setattr(config, "_ENV_FILES", ())
+
+
+# ──────────────────────────────────────────────────────────────
 # B1（DEF-200-274 系列後續）：接 根層 tools/lib/cpu_budget.py 的實體核心預算
 # ──────────────────────────────────────────────────────────────
 # 立案：本檔 `pyproject.toml` 的 `addopts` 對任何呼叫端都帶 `-n auto`，而 xdist 內建的

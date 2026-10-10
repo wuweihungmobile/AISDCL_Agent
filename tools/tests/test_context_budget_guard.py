@@ -102,15 +102,24 @@ _SENTINEL_PIN_CAPTURED = False
 _ENV_SPEC_PIN_ORIGINALS: dict[str, str | None] = {}
 
 
+def _factory_policy_env() -> dict[str, str]:
+    """出廠額度政策的 env 表達：`.env.example` 生成物裡有 `attr` 且出廠非空的政策鍵（不手抄）。
+    旗標寫空字串≠缺席（`RESUME_OFF_ENV` 以 `is None` 判），故不在此釘。同族：DEF-200-517。"""
+    factory = quota_policy.parse_env_text(quota_policy.render_env_example())
+    return {s.name: factory[s.name] for s in quota_policy.ENV_SPEC if s.attr and factory[s.name]}
+
+
 def _pin_sentinel_off() -> None:
     """釘上「不准武裝真排程器」，並拔掉洩漏的**全部** `ENV_SPEC` 鍵——任一政策鍵洩漏
-    都會讓本模組 in-process 呼叫（`_gate()`／`pace_report()`）拿到被覆寫的值（F-QA-01）。
+    都會讓本模組 in-process 呼叫（`_gate()`／`pace_report()`）拿到被覆寫的值（F-QA-01）；
+    再把出廠政策明寫回去：env 勝 `.env`，開發機上人調過的停機線 98 才動不了門檻斷言。
 
     冪等 ⇒ 補釘幾次都不會改變語意。
     """
     os.environ[guard.SENTINEL_OFF_ENV] = "1"
     for name in {spec.name for spec in quota_policy.ENV_SPEC} - {guard.SENTINEL_OFF_ENV}:
         os.environ.pop(name, None)
+    os.environ.update(_factory_policy_env())
 
 
 def _unpin_sentinel_off() -> None:
@@ -9641,6 +9650,17 @@ class QuotaEnvFileIsActuallyLoadedTest(unittest.TestCase):
     def test_a_missing_dotenv_is_not_a_failure(self) -> None:
         """額度守衛不得因為缺一個**選配**檔就變成故障源（fail-open 是 P0）。"""
         self.assertEqual(qg.policy_env().get("PATH"), os.environ.get("PATH"))
+
+    def test_the_module_pins_hold_the_factory_policy_over_a_raised_dotenv(self) -> None:
+        """CI 沒有 `.env`、只在有檔案的機器才紅的假設在 CI 結構上看不見：造一份把停機線抬到 98 的
+        `.env`，兩個測試模組（本檔＋喚醒鏈）的模組級 pin 之後，行程內與子行程環境仍是出廠值。"""
+        import test_wake_chain_halt_r278 as wake  # noqa: PLC0415 — 喚醒鏈沿用同一個出廠政策 pin
+        for pin in (_pin_sentinel_off, wake._pin_env_spec_off):
+            pin()
+            seen = quota_policy.load_policy(self._with_dotenv("AUTOSDD_QUOTA_HALT_PCT=98\n"))
+            child = _isolated_env(self.tmp).get("AUTOSDD_QUOTA_HALT_PCT")
+            self.assertEqual(seen, (quota_policy.DEFAULT_POLICY, []), pin.__module__)
+            self.assertEqual(child and float(child), quota_policy.DEFAULT_POLICY.halt_pct)
 
     def test_a_bad_value_is_loud_not_silent(self) -> None:
         """設錯必須出聲一次：`load_policy` 退回預設，而退回本身是完全看不見的。"""

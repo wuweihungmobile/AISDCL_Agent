@@ -155,6 +155,7 @@ class SddToPlaybookAdapter:
                 prompt=(
                     f"依下列契約實作並使測試通過：\n{c.gherkin}\n"
                     f"規格出處：{spec.spec_path}（digest {digest8}）"
+                    f"{self._acceptance_gate(c)}"
                 ),
                 expected_output_regex=c.expected_regex,
                 evaluator_command=c.evaluator_cmd,
@@ -170,6 +171,26 @@ class SddToPlaybookAdapter:
             ))
             prev_ac = c.ac_id
         return tasks
+
+    # F-SBR-001（D-SBR-01／02／03／08）：引擎的兩層驗收——regex 比對 AI 的最後回覆、evaluator
+    # 在引擎工作目錄以裸 pytest 執行——所需的資訊原本一樣都不在 prompt 裡，AI 只能碰運氣
+    # （真 claude 探針：自然命名的測試被 -k 選到 0 個、工作目錄沒有 tests/、模組在工作目錄根
+    # 而無 conftest 時裸 pytest 匯入失敗、輸出契約只靠子字串偶然命中、檔案被寫進規格所在的樹）。
+    # evaluator 模板與 regex 推導規則皆不動，只讓 AI 知道既有契約；工作目錄是執行期才知道的量，
+    # 編譯期寫不進 playbook，只能在 prompt 裡告知。
+    def _acceptance_gate(self, c: SpecContract) -> str:
+        tok = c.at_id.replace("-", "_")  # 與 _build_evaluator_cmd 同一個底線化（-k 的 token）
+        return (
+            "\n驗收閘（由引擎親自執行，AI 自稱完成不算）：\n"
+            "1. 程式與測試一律建立在「目前工作目錄」之下；規格出處只供閱讀，"
+            "不要因它的路徑而把檔案寫到別處。\n"
+            "2. 完成前請在目前工作目錄親自執行評估指令，須通過"
+            f"（以裸 pytest 執行，不是 python -m pytest）：{c.evaluator_cmd}\n"
+            f"   測試檔須放在 {self._test_path}/ 下，且測試函式、類別或檔名須含 {tok}"
+            f"（例：def test_{tok}_basic），否則 -k 篩選會選到 0 個測試而失敗。\n"
+            "3. 你的最後一則回覆須符合此 regex（Python re.search；(?=.*X) 表示須含 X、"
+            f"(?!.*X) 表示全文不得含 X，引述也算）：{c.expected_regex}"
+        )
 
     # ──────────────────────────────────────────────
     # 凍結偵測（§2.2 docstring 機制）

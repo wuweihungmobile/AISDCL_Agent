@@ -16,6 +16,8 @@
       一次且不被第二次呼叫抹掉。
   (d) subprocess 行為鎖：DEF-200-355 本體回歸——單一 `AUTOSDD_QUOTA_HALT_PCT`
       洩入呼叫端環境時，`tests/test_gap009.py` 子行程仍全數通過。
+  (e) `.env` **檔案**那條洩漏路徑：`_hermetic_env_files` 讓引擎的 `.env` 讀取在每個測試
+      內都是「無檔」（上面四條只管環境變數）。
 """
 from __future__ import annotations
 
@@ -135,3 +137,17 @@ class TestGap009SubprocessQuotaEnvLeak:
         )
         assert result.returncode == 0, result.stdout + result.stderr
         assert "50 passed" in result.stdout, result.stdout
+
+
+class TestEnvFilesAreNotReadInTests:
+    """(e) 「出廠預設」測試不得由機器狀態決定：`.env` 檔案路徑也要隔離。
+
+    `_quota_env` 在環境變數缺席時讀 `<repo 根>/.env` 與 `AutoClaude/.env`（皆不入庫）。開發機的
+    `.env` 把 `AUTOSDD_QUOTA_HALT_PCT` 調到 95 以上時，驗出廠預設與「引擎↔harness 同一份快取
+    同一個判定」的測試會無聲轉紅，而沒有 `.env` 的 CI 對 fixture 被刪掉完全無感——這一條讓
+    CI 也看得見那個 fixture。
+    """
+
+    def test_the_engine_reads_no_env_file_during_a_test(self):
+        from autoclaude.utils import config as cfgmod
+        assert cfgmod._ENV_FILES == ()

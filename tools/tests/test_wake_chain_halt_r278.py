@@ -41,6 +41,7 @@ import quota_policy  # noqa: E402
 import schedule_backend as sb  # noqa: E402
 import sentinel_lifecycle  # noqa: E402  # DEF-200-446：模組級圍籬原語
 import session_brief  # noqa: E402  # DEF-200-231：觸發時刻解析／`--check` FSM 行
+import test_context_budget_guard as _cbg  # noqa: E402  # 出廠政策 pin 的唯一的家
 
 import session_resume_planner as planner  # noqa: E402
 
@@ -62,7 +63,7 @@ _MODULE_FENCES: list[dict] = []  # DEF-200-446：模組級圍籬 handle 堆疊�
 
 
 def _pin_env_spec_off() -> None:
-    """摘掉 `quota_policy.ENV_SPEC` 除 `guard.SENTINEL_OFF_ENV` 外的每一鍵（冪等）。
+    """摘掉 `quota_policy.ENV_SPEC` 除 `guard.SENTINEL_OFF_ENV` 外的每一鍵，再明寫出廠政策（冪等）。
 
     DEF-200-354：ENV_SPEC 洩漏會讓 `quota_gate()` 提前 `return 0`，四支 HaltLatch／
     PrepareLatch 斷言落空；同模式見 `test_context_budget_guard.py._pin_sentinel_off`
@@ -71,6 +72,7 @@ def _pin_env_spec_off() -> None:
     for spec in quota_policy.ENV_SPEC:
         if spec.name != guard.SENTINEL_OFF_ENV:
             os.environ.pop(spec.name, None)
+    os.environ.update(_cbg._factory_policy_env())  # env 勝 `.env`：停機線 98 會讓 96% 不擋
 
 
 def _unpin_env_spec_off() -> None:
@@ -754,11 +756,11 @@ class EnvSpecLeakIsolationTest(unittest.TestCase):
 
     def test_pin_leaves_no_env_spec_key_leaked(self) -> None:
         """兩種鍵型各注入一次：旗標鍵（`QUOTA_OFF_ENV`）與數值鍵
-        （`AUTOSDD_QUOTA_HALT_PCT`）洩漏時都要被 pin 拔掉。"""
+        （`AUTOSDD_QUOTA_HALT_PCT`）洩漏時都要被 pin 洗掉（數值鍵換回出廠值）。"""
         for name, leaked in ((qg.QUOTA_OFF_ENV, "1"), ("AUTOSDD_QUOTA_HALT_PCT", "1")):
             with self.subTest(name=name), unittest.mock.patch.dict(os.environ, {name: leaked}):
                 _pin_env_spec_off()
-                self.assertNotIn(name, os.environ, f"pin 沒有拔掉洩漏進來的 {name}")
+                self.assertNotEqual(os.environ.get(name), leaked, f"pin 沒有洗掉洩漏進來的 {name}")
 
     def test_pin_set_is_derived_from_env_spec_not_copied(self) -> None:
         """pin 集合須涵蓋 `ENV_SPEC` 全名稱集合——手抄清單在新增鍵時不會自動跟長。"""

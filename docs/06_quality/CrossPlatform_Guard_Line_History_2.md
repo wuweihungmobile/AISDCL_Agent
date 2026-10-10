@@ -3253,3 +3253,36 @@ DEF-200-482：Q3′ 量的是「兩個來源是否一致」，不是「逐字稿
 #: A-2 後設鎖：到期輪只准落在「現查輪＋lookahead」內，推遠（如 9999）當場紅；shrink-only
 #: 凍結雙生子（同 `_REPIN_DUE_ROUND_MAX_LOOKAHEAD`／DEF-200-121 同族）。
 ```
+
+## R211 淨減法搬遷：DEF-200-517 同輪抵銷（原址史料逐字保全）
+
+> 來源＝`tools/tests/test_adr_xplat001_c1c2_lock.py` 的 `_FROZEN_PREFIX_REWRITE_LEDGER` 內，R101～R103 七列接鏈列（`DEF-200-208`／`204`／`218`／`207`／`219`／`220`／`221`）各自上方的旁註，共 23 行；元組本身一字未動，鏈路與 DEF-ID 照舊由 `frozen_prefix_rewrite_problems()` 判。
+> 搬遷理由＝R211 同輪第五列（DEF-200-517 同族：根層測試讀本機 `.env`）使護欄層新增 +28 行（測試模組 +22、本檔記帳 +6），R211 主軌淨額 507 → 535，超過該輪上限 517（`repin_growth_problems()` 款(10)）；其合法出口之一＝同輪把史料搬進帳本。本節搬走 23 行、原址換 1 行指標（−22），主軌淨額 513。
+
+### §1 R101～R103 七列接鏈列旁註（逐字，含縮排與註解前綴）
+
+```text
+    # DEF-200-208：本輪把凍結前綴延伸到涵蓋新追加的 R101 那一列本身（依既有體例 round-label-ok
+    # 「追加後立即自我凍結」——見 `_REPIN_LOG_FROZEN_PREFIX_LEN` 旁註），此前既有
+    # 前綴內容逐字未動，但 `prefix_len` 本身改變即讓 `repin_log_history_digest()`
+    # 算出不同指紋，故仍須在此留痕（判準不分辨「延伸」與「改寫」，兩者都是指紋變動）。
+    # DEF-200-204：R102 收尾重釘，同 R101 體例「追加後立即自我凍結」——本輪追加兩列 round-label-ok
+    # （功能成長 +572 ＋ 本檔自身編修 +11），prefix_len 47→49 涵蓋兩列本身。
+    # DEF-200-218：R102 收尾修復 push 被擋下的三項既存缺陷，同體例「追加後立即自我 round-label-ok
+    # 凍結」——本輪追加一列（納管漏檔 +2 ＋ 本檔自身編修 +10），prefix_len 49→50 涵蓋該列本身。
+    # DEF-200-207：R102 收尾（四方核准並執行 --repin-cap／--update 後）訂正 round-label-ok
+    # test_the_next_round_cannot_reuse_the_exemption 的合成注入前提，同體例「追加後
+    # 立即自我凍結」——本輪追加多列（測試訂正＋本檔自身逐檔漂移收斂），
+    # prefix_len 50→56 涵蓋全部新列本身。
+    # DEF-200-219：R71 全樹掃描抓到漏帶 round-label-ok 的既存缺陷，同體例「追加後立即
+    # 自我凍結」——本輪追加一列（補標＋E501拆行＋本表自身編修合計 +5），
+    # prefix_len 56→57 涵蓋該列本身。
+    # DEF-200-220：帳本收斂輪（archive_67）修復兩支相鄰封印值失明的既有測試， round-label-ok
+    # 同體例「追加後立即自我凍結」——本輪追加兩列（crossref 檔 +4 ＋ 本檔自身編修
+    # +12），prefix_len 57→59 涵蓋兩列本身。
+    # DEF-200-221：R102 收尾後的四方複審發現護欄層行數棘輪未隨 ArchiveGate 對 round-label-ok
+    # test_check_defect_log_crossref.py 的新增測試類別同步重釘（同 CLAUDE.md 鐵律七：
+    # 鎖檔持有面被切給不同並行包）；R102 已收尾交棒，本批改標 R103（不追溯改寫 round-label-ok
+    # R102 既有列），同體例「追加後立即自我凍結」——本輪追加兩列（crossref 檔 round-label-ok
+    # +103 ＋ 本檔自身編修 +18），prefix_len 59→61 涵蓋兩列本身。
+```

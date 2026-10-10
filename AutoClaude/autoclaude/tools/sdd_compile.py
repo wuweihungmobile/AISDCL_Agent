@@ -81,7 +81,8 @@ def main(argv: list[str] | None = None) -> int:
         "--workflow-type", default="aisdlc_sdd", choices=("aisdlc", "aisdlc_sdd")
     )
     parser.add_argument("--fsm-state-path", default=None,
-                        help="顯式 FSM 狀態檔（預設自 spec-dir 向上搜尋）")
+                        help="顯式 FSM 狀態檔（預設自 spec-dir 向上搜尋）；執行期仍自 spec-dir "
+                             "向上搜尋，狀態檔不在祖先鏈上時 rc=2")
     parser.add_argument("--test-path", default="tests",
                         help="evaluator 白名單模板的 pytest 目標路徑")
     args = parser.parse_args(argv)
@@ -109,6 +110,18 @@ def main(argv: list[str] | None = None) -> int:
     except (FileNotFoundError, ValueError) as exc:
         print(f"[sdd_compile] {exc}", file=sys.stderr)
         return 4
+
+    if args.fsm_state_path:
+        # D-SBR-04：--fsm-state-path 只作用於編譯期。執行期 PRE_RUN 以 workflow_path 向上搜尋
+        # 狀態檔（playbook 沒有欄位帶它），所以狀態檔在祖先鏈之外時編譯會綠、執行卻在 PRE_RUN
+        # 被 SPEC_NOT_FROZEN 否決。以執行期等價呼叫（不帶 fsm_state_path）預檢，提前到編譯期失敗。
+        try:
+            SddToPlaybookAdapter().load_spec(args.spec_dir)
+        except SpecNotFrozenError as exc:
+            print("[sdd_compile] 執行期 PRE_RUN 找不到凍結的 FSM 狀態檔，會以 SPEC_NOT_FROZEN "
+                  "否決此 playbook（--fsm-state-path 不隨 playbook 帶到執行期；請把狀態檔放在 "
+                  f"spec-dir 祖先鏈的 build/reports/fsm/）：{exc}", file=sys.stderr)
+            return 2
 
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)

@@ -1,0 +1,21 @@
+# F-SBR-001 真跑用 config 範本（SDD 橋接鏈：TEST-CONTRACT-SPEC → sdd_compile → python -m autoclaude）。
+# 用法：把 __RUN_DIR__ 換成本次 run 的絕對路徑（建議＝與專案根同層的獨立目錄），再以 --config 傳入。
+# 刻意不列任何額度／context 門檻（*_pct）：守衛的訊息就是答案，真跑一律沿用出廠預設，不為了跑而調門檻。
+claude:
+  command: claude
+  extra_args: ["--permission-mode", "bypassPermissions", "--model", "haiku"]  # 非互動寫檔必須 bypassPermissions；模型一律 haiku
+minimax:
+  enable_kernel_brain: false   # Brain 關閉 ⇒ 無 CORRECTION，重試重送同一 prompt；也不設 api_key
+executor:
+  backend: pty                 # macOS 無 wexpect ⇒ 自動 subprocess 模式
+storage:
+  mode: yaml_only              # 純檔案 backend，零 PG
+playbook:
+  goal_synthesis_enabled: false  # 不呼叫 Brain 合成目標
+token_guard:
+  enabled: true
+  auto_resume: false           # 證據跑：halt 時直接退出，不在行程內空等
+notification:
+  enabled: false               # 不彈桌面通知
+log_dir: __RUN_DIR__/logs
+checkpoint_dir: __RUN_DIR__/checkpoints

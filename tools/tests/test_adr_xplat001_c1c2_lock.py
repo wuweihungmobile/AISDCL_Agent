@@ -619,7 +619,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 393,
     "_ps_engine.py": 83,
     "test_act_local_runner_image.py": 307,
-    "test_adr_xplat001_c1c2_lock.py": 8745,
+    "test_adr_xplat001_c1c2_lock.py": 8729,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 4074,
@@ -639,7 +639,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_claim_provenance_r86.py": 2001,
     "test_clean_venv_carrier.py": 281,
     "test_component_sanitizer_shared_layer_lock.py": 274,
-    "test_context_budget_guard.py": 14716,
+    "test_context_budget_guard.py": 14736,
     "test_context_window_parity.py": 325,
     "test_cpu_budget.py": 428,
     "test_defect_id_reference_integrity.py": 276,
@@ -697,7 +697,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_stdio_utf8.py": 76,
     "test_subprocess_encoding_hygiene.py": 1542,
     "test_tlc_runner_timeout.py": 292,
-    "test_wake_chain_halt_r278.py": 1065,
+    "test_wake_chain_halt_r278.py": 1067,
     "test_windows_forbidden_filename_parity.py": 941,
     "test_windows_nightly_anchor_parity.py": 119,
     "test_windows_smoke_heartbeat_doc_sync.py": 197,
@@ -2643,6 +2643,11 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "[非淨減法輪] DEF-200-509（windows-compat-ci 牆鐘斷言假紅；同輪第四列）：test_context_budget_"
      "guard.py +30（RefreshSlotLoserWaitsTest 四支改量 sleep 間諜）＋本表自身漂移（本列、接鏈列）；"
      "回歸鎖軌不申報；逐檔清單見 CrossPlatform_R211_ZeroTrust_Audit_113.md〈八〉。"),
+    ("R211", 115627, 115633, +6,  # round-label-ok
+     "[非淨減法輪] DEF-200-517 同族（根層測試讀本機 .env 的停機線 98；同輪第五列）：test_context_"
+     "budget_guard.py +20（模組 pin 補出廠政策＋鎖）＋test_wake_chain_halt_r278.py +2＋本檔旁註"
+     "搬遷 −22（接鏈列 R101～R103 七段原文）＋本表自身漂移；回歸鎖軌不申報；逐檔清單見 "
+     "CrossPlatform_R211_ZeroTrust_Audit_113.md〈八〉。"),
 )
 
 
@@ -3318,10 +3323,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 334
+_REPIN_LOG_FROZEN_PREFIX_LEN = 335
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "ba458f1260a8dbe2b248005b13a1d28e2e5b908db555f10de21824c99eaf6b20")
+    "f5cb9e3fe7d6735062925b7b2e8f014280c0c086da3788f46ae9fb18a0663f18")
 
 
 def repin_log_history_digest(
@@ -3345,35 +3350,13 @@ def repin_log_history_digest(
 _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R99", "9106b9c01f1c", "23c0e49b2c63", "DEF-101-561"),
     ("R100", "23c0e49b2c63", "423d63fddc0a", "DEF-200-042"),
-    # DEF-200-208：本輪把凍結前綴延伸到涵蓋新追加的 R101 那一列本身（依既有體例 round-label-ok
-    # 「追加後立即自我凍結」——見 `_REPIN_LOG_FROZEN_PREFIX_LEN` 旁註），此前既有
-    # 前綴內容逐字未動，但 `prefix_len` 本身改變即讓 `repin_log_history_digest()`
-    # 算出不同指紋，故仍須在此留痕（判準不分辨「延伸」與「改寫」，兩者都是指紋變動）。
+    # R101～R103 七列接鏈列旁註（逐列沿革）搬至 Guard_Line_History_2.md〈R211 淨減法搬遷〉§1。
     ("R101", "423d63fddc0a", "44008855c9e8", "DEF-200-208"),
-    # DEF-200-204：R102 收尾重釘，同 R101 體例「追加後立即自我凍結」——本輪追加兩列 round-label-ok
-    # （功能成長 +572 ＋ 本檔自身編修 +11），prefix_len 47→49 涵蓋兩列本身。
     ("R102", "44008855c9e8", "c44b6a066da8", "DEF-200-204"),
-    # DEF-200-218：R102 收尾修復 push 被擋下的三項既存缺陷，同體例「追加後立即自我 round-label-ok
-    # 凍結」——本輪追加一列（納管漏檔 +2 ＋ 本檔自身編修 +10），prefix_len 49→50 涵蓋該列本身。
     ("R102", "c44b6a066da8", "605806a0d4aa", "DEF-200-218"),
-    # DEF-200-207：R102 收尾（四方核准並執行 --repin-cap／--update 後）訂正 round-label-ok
-    # test_the_next_round_cannot_reuse_the_exemption 的合成注入前提，同體例「追加後
-    # 立即自我凍結」——本輪追加多列（測試訂正＋本檔自身逐檔漂移收斂），
-    # prefix_len 50→56 涵蓋全部新列本身。
     ("R102", "605806a0d4aa", "23b5b6fcc0a2", "DEF-200-207"),
-    # DEF-200-219：R71 全樹掃描抓到漏帶 round-label-ok 的既存缺陷，同體例「追加後立即
-    # 自我凍結」——本輪追加一列（補標＋E501拆行＋本表自身編修合計 +5），
-    # prefix_len 56→57 涵蓋該列本身。
     ("R102", "23b5b6fcc0a2", "cb643af00b7a", "DEF-200-219"),
-    # DEF-200-220：帳本收斂輪（archive_67）修復兩支相鄰封印值失明的既有測試， round-label-ok
-    # 同體例「追加後立即自我凍結」——本輪追加兩列（crossref 檔 +4 ＋ 本檔自身編修
-    # +12），prefix_len 57→59 涵蓋兩列本身。
     ("R102", "cb643af00b7a", "bc7080dcd3f2", "DEF-200-220"),
-    # DEF-200-221：R102 收尾後的四方複審發現護欄層行數棘輪未隨 ArchiveGate 對 round-label-ok
-    # test_check_defect_log_crossref.py 的新增測試類別同步重釘（同 CLAUDE.md 鐵律七：
-    # 鎖檔持有面被切給不同並行包）；R102 已收尾交棒，本批改標 R103（不追溯改寫 round-label-ok
-    # R102 既有列），同體例「追加後立即自我凍結」——本輪追加兩列（crossref 檔 round-label-ok
-    # +103 ＋ 本檔自身編修 +18），prefix_len 59→61 涵蓋兩列本身。
     ("R103", "bc7080dcd3f2", "b698a52087af", "DEF-200-221"),
     # DEF-200-223：R104 PRD §4.2.5／§4.2.1 BURSTING/EWMA 落地，同體例「追加後立即  round-label-ok
     # 自我凍結」——本輪淨額 -18：測試 +62 與搬遷散文 -91 相抵後，本檔自身兩列
@@ -3686,6 +3669,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R211", "d034314bdd87", "8fea64d22cb1", "DEF-200-504"),  # round-label-ok
     ("R211", "8fea64d22cb1", "c5585ef96d1a", "DEF-200-504"),  # round-label-ok
     ("R211", "c5585ef96d1a", "ba458f1260a8", "DEF-200-509"),  # round-label-ok
+    ("R211", "ba458f1260a8", "f5cb9e3fe7d6", "DEF-200-519"),  # round-label-ok
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。
