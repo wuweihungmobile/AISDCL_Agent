@@ -26,6 +26,8 @@ from __future__ import annotations
 import ast
 import contextlib
 import email.message
+import functools
+import inspect
 import io
 import json
 import os
@@ -8879,7 +8881,8 @@ class RefreshSlotConcurrencyTest(unittest.TestCase):
 class RefreshSlotLoserWaitsTest(unittest.TestCase):
     """DEF-200-451：同行程版——贏家以執行緒模擬（名額戳記先佔、快取稍後落地），輸家走**真的**
     `claim_once`（不 swap `claim_refresh_slot`）。取數器換成「被呼叫即失敗」的替身：輸家若越權去
-    補量，測試會紅而不是去打真端點。"""
+    補量，測試會紅而不是去打真端點。「有沒有等」一律量 sleep 呼叫（`_spy_on_sleeps`）、不量牆鐘：
+    牆鐘量的是機器快慢不是被測行為（DEF-200-509，windows-compat-ci run 38028353084 量到 2.9s）。"""
 
     def setUp(self) -> None:
         self.tmp = _tmpdir(self, "loser-wait-")
@@ -8921,6 +8924,29 @@ class RefreshSlotLoserWaitsTest(unittest.TestCase):
             qg.flush_to_model()   # 排空 emit_to_model 的累積，不留給 atexit／後面的測試
         return rc, err.getvalue()
 
+    def _spy_on_sleeps(self) -> list[float]:
+        """兩個等待原語（`claim_once_within`／`await_winner`）的 `sleep` 換成「記下秒數、照睡」，
+        回記錄串列——行為不變。`sleep` 在兩者都是 keyword-only、`quota_gate` 也從不傳它，覆寫不吃
+        呼叫端設定。"""
+        naps: list[float] = []
+
+        def nap(seconds: float) -> None:
+            naps.append(seconds)
+            time.sleep(seconds)
+
+        def spying(real):
+            @functools.wraps(real)   # `__wrapped__` ⇒ inspect.signature 仍讀得到原簽章
+            def wrapper(*args, **kwargs):
+                return real(*args, **{**kwargs, "sleep": nap})
+
+            return wrapper
+
+        for name in ("claim_once_within", "await_winner"):
+            real = getattr(qg.quota_ledger, name)
+            setattr(qg.quota_ledger, name, spying(real))
+            self.addCleanup(setattr, qg.quota_ledger, name, real)
+        return naps
+
     def test_a_loser_inside_the_winners_flight_judges_on_the_fresh_reading(self) -> None:
         """連打 4 次：修前全落在贏家落地之前 ⇒ 全當量不到，第 3、4 次 rc=2；修後第一次等到
         新讀數，之後都是新鮮快取。"""
@@ -8940,10 +8966,10 @@ class RefreshSlotLoserWaitsTest(unittest.TestCase):
     def test_a_loser_after_the_flight_window_is_not_kept_waiting(self) -> None:
         """對照：贏家早已不在飛（戳記 30 秒、仍在 TTL 內所以輸家照樣輸）⇒ 立刻判量不到，且仍
         要說出口——等待是有條件的，不是把量不到的通知一併吃掉。"""
+        sleeps = self._spy_on_sleeps()
         os.utime(qg.refresh_stamp_path(), (time.time() - 30, time.time() - 30))
-        began = time.monotonic()
         _, err = self._gate()
-        self.assertLess(time.monotonic() - began, 3.5, "贏家不在飛卻等了（預算 4 秒）")
+        self.assertEqual(sleeps, [], "贏家不在飛卻等了（預算 4 秒）")
         self.assertIn("量不到", err, "真的量不到時不得靜默")
 
     def test_a_winner_whose_refresh_failed_is_never_kept_waiting(self) -> None:
@@ -8952,21 +8978,25 @@ class RefreshSlotLoserWaitsTest(unittest.TestCase):
         old = qg.claim_refresh_slot
         qg.claim_refresh_slot = lambda: True
         self.addCleanup(setattr, qg, "claim_refresh_slot", old)
-        began = time.monotonic()
+        sleeps = self._spy_on_sleeps()
         _, err = self._gate()
-        self.assertLess(time.monotonic() - began, 3.0, "贏家補量失敗後還在等自己（預算 4 秒）")
+        self.assertEqual(sleeps, [], "贏家補量失敗後還在等自己（預算 4 秒）")
         self.assertIn("取數失敗", err, "真失敗路徑必須說取數失敗")
 
     def test_the_wait_is_bounded_when_the_winner_never_lands(self) -> None:
-        """贏家的取數逾時就是沒有讀數：輸家至多等到預算用完，然後老實說量不到。"""
+        """贏家的取數逾時就是沒有讀數：輸家至多等到預算用完，然後老實說量不到。「有等」＝間諜記到
+        sleep；「有界」＝sleep 總和 ≤ 預算＋兩格 step（先判期限、睡完才見過期＝一格；Windows 單調鐘
+        約 15.6ms 粒度讓判斷再晚一拍＝一格）。總和只當上界：慢機讓它變小，當下界就是量機器快慢。"""
         old = qg.QUOTA_SYNC_TIMEOUT_SECONDS
         qg.QUOTA_SYNC_TIMEOUT_SECONDS = 1.5
         self.addCleanup(setattr, qg, "QUOTA_SYNC_TIMEOUT_SECONDS", old)
+        sleeps = self._spy_on_sleeps()
         os.utime(qg.refresh_stamp_path(), None)       # 戳記重蓋成「剛佔」：剩餘預算≈1.5s
-        began = time.monotonic()
         _, err = self._gate()
-        waited = time.monotonic() - began
-        self.assertTrue(0.7 <= waited < 3.5, f"等待時間 {waited:.2f}s 不在有界區間（0.7~3.5）")
+        step = inspect.signature(qg.quota_ledger.await_winner).parameters["step"].default
+        bound = qg.QUOTA_SYNC_TIMEOUT_SECONDS + 2 * step
+        self.assertTrue(sleeps, "輸家沒有等（預算內一次 sleep 都沒有）")
+        self.assertLessEqual(sum(sleeps), bound, f"等待總和 {sum(sleeps):.2f}s > 上界 {bound:.2f}s")
         self.assertIn("量不到", err)
 
     def test_pace_state_loser_also_waits_and_never_fetches(self) -> None:
@@ -9028,10 +9058,10 @@ class RefreshSlotLoserWaitsTest(unittest.TestCase):
         """對照：戳記離到期還遠（100 秒前的持有者早已不在飛）不是次秒視窗——不等、不補
         量，照舊老實說量不到。沒有這一格，上面那條可以靠「一律補量」或「一律等」通過。"""
         urlopens = self._real_meter_counting_urlopen()
+        sleeps = self._spy_on_sleeps()
         os.utime(qg.refresh_stamp_path(), (time.time() - 100, time.time() - 100))
-        began = time.monotonic()
         _, err = self._gate()
-        self.assertLess(time.monotonic() - began, 1.0, "離到期還遠卻等了")
+        self.assertEqual(sleeps, [], "離到期還遠卻等了")
         self.assertEqual(urlopens, [], "離到期還遠卻補量了（每個 TTL 一次補量被破壞）")
         self.assertIn("量不到", err, "真的量不到時不得靜默")
 

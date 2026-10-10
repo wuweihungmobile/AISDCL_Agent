@@ -3,9 +3,11 @@ AutoClaude 入口點。
 
 用法：
   python -m autoclaude <playbook.yaml> [--config config.yaml] [--fresh]
+  python -m autoclaude --last-run-summary [--config config.yaml]
 
   --fresh：忽略現有 checkpoint，從第一個步驟重新開始
   --config：指定設定檔（預設 config.yaml；個人化路徑建議用 config.local.yaml）
+  --last-run-summary：唯讀；印出最近一次執行摘要後結束（不可與 playbook／--fresh 並用）
 
 僅支援 Playbook 模式（YAML 須包含 `tasks:` 陣列）。
 """
@@ -33,6 +35,7 @@ from .execution.boot_self_check import (
     estimate_freeze_bytes,
     read_cli_version,
 )
+from .execution.run_summary import RunSummaryRecorder, show_last_run_summary
 from .infra.adapters.minimax_brain import MinimaxBrainAdapter
 from .infra.adapters.pty_executor import PtyExecutor
 from .infra.adapters.shell_evaluator import ShellEvaluator
@@ -159,7 +162,8 @@ def run_boot_self_check(cfg, *, state_repo, playbook_path: str, quota_meter,
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="AutoClaude — Claude Code Playbook 自動執行引擎")
-    parser.add_argument("playbook", help="Playbook YAML 路徑（須含 tasks: 陣列）")
+    parser.add_argument(
+        "playbook", nargs="?", default=None, help="Playbook YAML 路徑（須含 tasks: 陣列）")
     parser.add_argument("--config", default="config.yaml", help="設定檔路徑 (預設: config.yaml)")
     parser.add_argument(
         "--fresh",
@@ -167,7 +171,23 @@ def main() -> int:
         default=False,
         help="忽略現有 checkpoint，從頭開始執行 Playbook",
     )
+    parser.add_argument(
+        "--last-run-summary",
+        action="store_true",
+        default=False,
+        help="唯讀：印出最近一次執行摘要後結束（不可與 playbook／--fresh 並用）",
+    )
     args = parser.parse_args()
+
+    # F-LRS-001：查詢模式在任何執行路徑之前分派（不驗 playbook、不建 logger、不建目錄）。
+    # 拒絕並用而非忽略 playbook：靜默忽略會把「想跑」讀成「只是看」，且查詢絕不能啟動真實 claude。
+    if args.last_run_summary:
+        if args.playbook is not None or args.fresh:
+            parser.error("--last-run-summary 為唯讀查詢，不可與 playbook 位置參數或 --fresh 並用")
+        return show_last_run_summary(args.config)
+    # playbook 改為 nargs="?" 後 argparse 不再自己擋缺引數；訊息與 rc=2 逐字沿用修前行為。
+    if args.playbook is None:
+        parser.error("the following arguments are required: playbook")
 
     _validate_playbook_format(args.playbook)
 
@@ -250,9 +270,15 @@ def main() -> int:
                                 quota_meter=quota_meter,
                                 worktree_rescue=build_worktree_rescue(cfg),
                                 is_interrupted=lambda: hotkey.triggered)
+    # F-LRS-001：兩階段落檔。開始標記緊貼 service.run——上面的提前 return（啟動前失敗）因此
+    # 不碰既有記錄；崩潰／Ctrl+C／kill 時 finish 沒機會執行，檔案停在 running。best-effort：
+    # recorder 的寫入失敗只記 WARNING，永不改變 rc 與例外傳遞。
+    recorder = RunSummaryRecorder(cfg.log_dir, args.playbook)
+    recorder.start()
     result = service.run(args.playbook, fresh=args.fresh)
 
     logger.info("Playbook 結束 | %s", result)
+    recorder.finish(result)
     return 0 if result.success else 1
 
 

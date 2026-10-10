@@ -483,7 +483,7 @@ _TREE_FILE_FLOORS: dict[str, int] = {
     # 🔴 2026-10-10 重釘 223→224（improving_113 W3 新增 `AutoClaude/tests/utils/
     # test_sliced_sleep.py`，收尾實測 280 支，223 低於實測的 80%，前置掃描逐字指示重釘為
     # 224 ⇒ 照填，零加減推算）。
-    "AutoClaude/tests": 224,
+    "AutoClaude/tests": 226,
     # 🔴 R84 包 W5：23 → 24。**非本包造成**——`AISDLC_SDD/scripts/tests` 由 29 支長到 30
     # （並行包新增鎖檔），下限只剩實測的 77%、低於 `TREE_FLOOR_RATIO` 的 80% ⇒
     # `tree_floor_problems()` 的第三向（下限已過期）當場判紅並**逐字**指示重釘為 24，本行

@@ -10,6 +10,7 @@
   - 等待一律走分片休眠（utils/sliced_sleep，PRD §4.5.2）；>max_inprocess_wait_seconds 的等待
     拒絕行程內長睡、回非零結果要求外部續跑（PRD §4.5.5；improving_113）
   - W2-T9（SD_04）：從 checkpoint 解析 start_idx（_resolve_start 實裝）
+  - 成功完整跑完後清除該 playbook 的 checkpoint（DEF-200-510；非成功收尾一律保留）
 
 設計原則：
   - 不持有步驟級業務邏輯（全在 Kernel + Plugin）
@@ -203,6 +204,8 @@ class AutoResumeService:
     def run(self, playbook_path: str, fresh: bool = False) -> KernelResult:
         """執行含自動恢復的完整 Playbook 生命週期。"""
         _current_path = playbook_path
+        # DEF-200-510：本次 run 經手過的 playbook 路徑（演化重載會換路徑），成功收尾時一併清
+        _visited = [playbook_path]
         _evolution_count = 0
         _max_evolutions = self._cfg.playbook.max_evolutions
         auto_resume_count = 0
@@ -214,6 +217,12 @@ class AutoResumeService:
             start_idx, _step_log, has_ck, sched = self._resolve_start(
                 _current_path, _fresh
             )
+            # DEF-200-511：--fresh 只管「這一輪不採信啟動前就存在的 checkpoint」，解析完即歸
+            # False，halt 後的續跑輪才讀得到剛存的 checkpoint（修前一路帶著 True ⇒ 續跑輪
+            # 無視它、從 0 重來）。演化重載分支稍後會把它設成 evolution_fresh_required（那一輪
+            # 照該值），下一輪經這裡再歸 False。舊 PlaybookRunner 在 _resolve_start 之後同樣
+            # `fresh = False`，service 移植時漏了。
+            _fresh = False
 
             # improving_113：playbook 提前到等待之前載入——壞檔／缺檔不必先睡完才報錯，
             # 拒絕長睡／被中斷而就地返回時，結果也才帶得出 total_steps。
@@ -256,6 +265,7 @@ class AutoResumeService:
                     result.scheduled_resume_at, "evolution", evo_wait,
                 )
                 _current_path = result.evolved_playbook_path
+                _visited.append(_current_path)
                 _fresh = result.evolution_fresh_required
                 auto_resume_count = 0
                 continue
@@ -298,9 +308,15 @@ class AutoResumeService:
                 stop = self._wait("halt", sched, wait_secs, _current_path)
                 if stop:
                     return replace(result, reason=stop[0], scheduled_resume_at=stop[1])
-                # halt 後不重設 _fresh；下輪 _resolve_start 會讀新 checkpoint
+                # halt 後下輪 _resolve_start 讀剛存的 checkpoint（_fresh 已於上方歸 False，
+                # DEF-200-511）
                 continue
 
+            # DEF-200-510：只有整條 run 真的走完才清 checkpoint（HALT／ESCALATION／中斷／
+            # 演化重載留下的都是續跑點）。success 與 halted／escalated 由工廠方法保證互斥，
+            # 這裡仍雙重確認旗標——清除使用者的進度不可逆，不能只信單一旗標。
+            if result.success and not (result.halted or result.escalated):
+                self._clear_finished_checkpoints(_visited)
             return result
 
     # improving_113（PRD §4.5.2／§4.5.5）：兩處等待的唯一出口。回傳非 None ＝ 本次不再等，
@@ -462,6 +478,11 @@ class AutoResumeService:
                 "AutoResumeService | 已存 token HALT checkpoint（step_idx=%d, peak=%.0f%%）",
                 step_idx, result.peak_token_pct,
             )
+        # 誠實劃界（QA-03，2026-10-10）：File／Pg 後端把 OSError 包成 StateRepositoryError
+        # （file_state_repository.py／pg_state_repository.py），不在下面的攔截集合內 ⇒
+        # 真實後端存檔失敗會往外傳（fail-loud）；本分支只攔原生 OSError／ValueError
+        # （InMemory／自訂 repo）。刻意不擴攔：存不下 HALT checkpoint 卻繼續等待續跑，
+        # 醒來會從 0 或舊斷點重跑——崩潰比靜默重跑好。
         except (OSError, ValueError) as exc:
             logger.warning("AutoResumeService | 存 HALT checkpoint 失敗: %s", exc)
             return None
@@ -485,6 +506,38 @@ class AutoResumeService:
             logger.warning("AutoResumeService | 排程 HALT 恢復時間失敗: %s", exc)
             return None
         return resume_at.isoformat(timespec="seconds")
+
+    # DEF-200-510：checkpoint 生命週期的「清」。讀（_resolve_start）、寫
+    # （_persist_halt_checkpoint）、清三件事住同一層（握 path 的協調層）。清的這一件原本在
+    # 生產路徑零呼叫——`clear_checkpoint` 契約寫「步驟完成或 --fresh 時呼叫」，唯一呼叫者在
+    # 已無建構點的舊 PlaybookRunner——於是 HALT 留下的 checkpoint 在續跑成功後原封不動，
+    # 下一次不加 --fresh 的執行從舊斷點重跑（T01 被靜默跳過）。
+    # 為什麼不放 CheckpointPlugin 訂閱 POST_RUN：Kernel 是純 DAG、不持有 path，POST_RUN
+    # payload 只有 completed_step_ids／total_steps，plugin 算不出 playbook_id
+    # （CheckpointManager 要 path 才算得出 id）；硬塞 path 要改 Kernel 簽名，而演化重載鏈上
+    # 經手的多個路徑、下方的撞名判準，也都只有握 path 的本層看得到。
+    # 🔴 只清「屬於本 playbook」的那一份（沿用 `_resolve_start` 的 R69 判準）：id 撞名時那份
+    # 是別支 playbook 的續跑點，本次執行本來就不採信它，成功收尾更不能順手刪掉。
+    # 🔴 清不掉是降級、不是失敗：此刻 playbook 已經成功，rc 不得因善後失敗而變——任何例外
+    # 只出聲（與 _pin_resume_time 同款理由；DualStateRepository strict 會重拋任意型別，
+    # 故不縮窄）。
+    def _clear_finished_checkpoints(self, paths: list[str]) -> None:
+        if self._state_repo is None:
+            return
+        from ...infra.repositories.factory import canonical_playbook_id
+        for path in dict.fromkeys(paths):
+            try:
+                playbook_id = canonical_playbook_id(path, mode=self._cfg.storage.mode)
+                ck = self._state_repo.load_checkpoint(playbook_id)
+                if ck is not None and _checkpoint_matches_playbook(ck, path):
+                    self._state_repo.clear_checkpoint(playbook_id)
+                    logger.info(
+                        "AutoResumeService | playbook 成功完成，已清除 checkpoint: %s", playbook_id,
+                    )
+            except Exception as exc:                     # noqa: BLE001 — 見上方「降級不是失敗」
+                logger.warning(
+                    "AutoResumeService | 成功收尾後清除 checkpoint 失敗（降級，結果不變）: %s", exc,
+                )
 
 
 def load_playbook(path: str) -> Playbook:

@@ -199,6 +199,25 @@ class TestSlicedSleepPure:
 # ══════════════════════════════════════════════════════════════════════════════
 # 二、服務層：兩處等待真的走分片，且 >max_inprocess 拒絕行程內長睡
 # ══════════════════════════════════════════════════════════════════════════════
+def _time_passes(elapsed):
+    """讓測試裡的「睡了」等於「時間過了」：倒數用的時鐘＝真實 now ＋ elapsed()。
+
+    DEF-200-511：`--fresh` 修前會一路漏進續跑輪，續跑輪因此不讀 halt 剛存的 checkpoint；
+    下面幾支測試靠這個漏洞才沒碰到「sleep 被替身換掉 ⇒ 排程時刻仍在未來 ⇒ 續跑輪的
+    checkpoint_resume 又等一次」。真實執行裡睡完那一刻排程已過期、續跑輪的等待為 0；
+    本 helper（patch resume_clock.datetime）把測試環境拉回與真實一致，各測試對「第一次
+    （halt）等待」的斷言因此原封不動。
+    """
+    real = datetime
+
+    class _Advanced(real):
+        @classmethod
+        def now(cls, tz=None):
+            return real.now(tz) + timedelta(seconds=elapsed())
+
+    return patch("autoclaude.utils.resume_clock.datetime", _Advanced)
+
+
 class _HaltingKernel:
     """每次都回 halted（halt_step_idx=1 ⇒ AutoResumeService 會先存 checkpoint）。"""
 
@@ -253,7 +272,8 @@ class TestTheHaltWaitIsSliced:
         cfg = _cfg(delay_minutes=1, sleep_slice_seconds=10)
         svc = AutoResumeService(_HaltingKernel(), cfg, state_repository=InMemoryStateRepository())
         slept: list[float] = []
-        with patch("autoclaude.core.services.auto_resume.time.sleep", slept.append):
+        with patch("autoclaude.core.services.auto_resume.time.sleep", slept.append), \
+                _time_passes(lambda: sum(slept)):
             svc.run(SIMPLE_PB, fresh=True)
         assert slept and max(slept) <= 10, f"沒有吃 sleep_slice_seconds：{slept}"
         assert 55 < sum(slept) <= 61, "1 分鐘的 resume_delay 該睡滿（排程時刻取到秒，截斷 <1s）"
@@ -272,7 +292,9 @@ class TestTheHaltWaitIsSliced:
         with patch("autoclaude.core.services.auto_resume.time.sleep"), \
                 patch("autoclaude.core.services.auto_resume.sliced_sleep", spy):
             svc.run(SIMPLE_PB, fresh=True)
-        assert seen == [(7, 3)]
+        # DEF-200-511：--fresh 只管第一輪，續跑輪會讀 halt 剛存的 checkpoint 而多一次
+        # checkpoint_resume 等待（也走分片）。接線鎖的意圖是「每一次等待都吃設定值」。
+        assert seen and set(seen) == {(7, 3)}
 
     def test_a_wall_clock_jump_during_the_wait_resumes_early_and_says_so(self, caplog):
         """服務層端到端：機器在等待中睡著 ⇒ 醒來後不再硬睡完 1 小時，直接續跑。"""
@@ -286,8 +308,10 @@ class TestTheHaltWaitIsSliced:
             return real(wait, slice_s, tol, wall=clock.wall, mono=clock.mono,
                         sleep=clock.sleep, stop=kw["stop"])
 
+        wall0 = clock.w
         with caplog.at_level(logging.WARNING, logger="autoclaude"), \
-                patch("autoclaude.core.services.auto_resume.sliced_sleep", with_fake_clocks):
+                patch("autoclaude.core.services.auto_resume.sliced_sleep", with_fake_clocks), \
+                _time_passes(lambda: clock.w - wall0):
             svc.run(SIMPLE_PB, fresh=True)
         assert clock.calls == [60, 60], "跳躍後仍照睡剩下的片 ⇒ 時鐘跳躍沒有被修正"
         assert kernel.calls == 2, "提早醒來後必須續跑（max_auto_resumes=1 ⇒ 共 2 輪）"
@@ -369,7 +393,8 @@ class TestALongWaitIsRefusedInProcess:
         kernel = _HaltingKernel()
         svc = AutoResumeService(kernel, cfg, state_repository=InMemoryStateRepository())
         slept: list[float] = []
-        with patch("autoclaude.core.services.auto_resume.time.sleep", slept.append):
+        with patch("autoclaude.core.services.auto_resume.time.sleep", slept.append), \
+                _time_passes(lambda: sum(slept)):
             result = svc.run(SIMPLE_PB, fresh=True)
         assert 295 < sum(slept) <= 301 and kernel.calls == 2
         assert result.reason != "external_resume_required"
