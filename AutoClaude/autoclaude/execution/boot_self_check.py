@@ -20,7 +20,7 @@ from pathlib import Path
 from ..core.ports.quota_meter import BAND_HALT, BAND_PREPARE
 from ..core.ports.state_repository import CheckpointCorruptError
 from ..utils.disk_space import DEFAULT_MARGIN_BYTES, SpaceVerdict, check_space
-from ..utils.verified_cli_versions import VERIFIED_CLI_VERSIONS
+from ..utils.verified_cli_versions import VERIFIED_CLI_VERSIONS, family_verdict
 
 logger = logging.getLogger("autoclaude.execution.boot_self_check")
 
@@ -182,16 +182,24 @@ def cli_version_verdict(version: str | None) -> tuple[bool, str]:
     """回 (dry_run, 自檢輸出一行)。未知版本 → DRY_RUN，但**不阻止啟動**。
 
     🔴 阻止啟動＝CLI 一升版就整套停擺，那種守衛會被整個關掉，比沒有守衛更糟。
+    🔴 家族級（major.minor）只豁免 patch 差異（判定住 `family_verdict`）：Claude Code 每週自動
+    升 patch，逐版精確比對會讓每次升版都 loud＋DRY_RUN，loud 天天響就失去鑑別力；讀不到版本、
+    新 minor、新 major 照舊 DRY_RUN＋loud（掌舵者 2026-10-10 T1 立案）。
     """
     if version is None:
         return True, (f"CLI 版本未知（`claude --version` 讀不到）⇒ {DRY_RUN_TEXT}；"
                       "確認方式：人工核實介面後把版號與『核實過什麼』寫入 "
                       "autoclaude/utils/verified_cli_versions.py")
-    entry = VERIFIED_CLI_VERSIONS.get(version)
-    if entry is None:
-        return True, (f"CLI 版本 {version} 不在已驗證清單內 ⇒ {DRY_RUN_TEXT}；"
-                      "確認方式同上（清單須帶『這一版核實過什麼』）")
-    return False, f"CLI 版本 {version} 在已驗證清單內（核實項 {len(entry['verified'])} 條）"
+    kind, ref = family_verdict(version)
+    if kind == "exact":
+        entry = VERIFIED_CLI_VERSIONS[version]
+        return False, f"CLI 版本 {version} 在已驗證清單內（核實項 {len(entry['verified'])} 條）"
+    if kind == "family":
+        return False, (f"CLI {version} 不在逐版清單、同家族 {ref.rsplit('.', 1)[0]}.x 已驗證至 "
+                       f"{ref} ⇒ 視為已驗證（patch 級差異不進 DRY_RUN）；要更新逐版事實請補 "
+                       "autoclaude/utils/verified_cli_versions.py")
+    return True, (f"CLI 版本 {version} 不在已驗證清單內 ⇒ {DRY_RUN_TEXT}；"
+                  "確認方式同上（清單須帶『這一版核實過什麼』）")
 
 
 # ══════════════════════════════════════════════════════════════════════════════

@@ -200,7 +200,8 @@ run_root_unittests.py 759/759），鎖面跨三持有面，只能收尾單人窗
   （`GitHub Actions 帳務`／`Windows 實機`／`上游套件`／`其他-<具體理由>`）、長債軌
   `結構性長債-<具體理由>`（`STRUCTURAL_DEBT_SOURCE_RE`＝`結構性長債-\S+`），兩軌枚舉互斥；
   ②解鎖條件可機械查；③同 ID 不得雙帳並存（主帳本原列收斂為指向該軌的索引）。
-  複查逾 14 天 warn；成長棘輪（`_STRUCTURAL_DEBT_MAX_ROWS`）只管長債軌。
+  「最近複查日」只作資料欄（原「複查逾 14 天 warn」已退役：2026-10-10 掌舵者 T1 立案
+  改事件驅動）；成長棘輪（`_STRUCTURAL_DEBT_MAX_ROWS`）只管長債軌。
 
 ### 4.7 真結案 vs 假綠：否決清單
 

@@ -19,7 +19,7 @@
 - **DEF-200-211（ADR-XPLAT-013 Phase 2 (b)(c)）尚未動工**：[提案] 已入 `_PHASE2_REVIEW_LOG`（113 列），四方批（與 207 同場）過了才動；載體＝`DEF-200-211` 帳本列；現查 `python AutoClaude/tools/check_loc_budget.py --json`（policy_version 仍為 v3-assertion-only+sd08-special＝(b)(c) 還沒落）。
 - **Windows 實機取證批仍未排上**：實機族 6 筆（playbook 附錄 B ②）＋外部軌 3 筆複查（693/063/147，複查日 2026-08-30）需 Windows 真機合批；載體＝外部軌該三列；現查 `python tools/check_defect_log_crossref.py --unresolved-count`（外部軌 8 筆行逐字列 ID）。
 - **MIN_TESTS=3735 屬中途值**：Windows 輪若增測試而仍未同行重釘＋回填即紅；現查 `git grep -n "MIN_TESTS = " tools/run_root_unittests.py` 與 `python tools/sync_onboarding_baselines.py --check`。
-- **長債軌 14 天複查時鐘**：2026-09-13 前須複查一次（DEF-101-886 為 P1 建議優先）；逾期自動出聲現查 `python tools/check_defect_log_crossref.py`（warn 級）。
+- **長債軌 14 天複查時鐘（已退役）**：2026-09-13 前須複查一次（DEF-101-886 為 P1 建議優先）；逾期自動出聲現查 `python tools/check_defect_log_crossref.py`（warn 級）。
 
 ## 三、下一步確切指令（Windows 11 輪開場）
 

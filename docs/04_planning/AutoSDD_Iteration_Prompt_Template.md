@@ -352,7 +352,7 @@ SDD_CONTRACT_VIOLATION 次數、token 峰值）。
 ### 再開觸發（唯一真相源＝本節；**只由事件驅動**）
 - **T1** 掌舵者直接立案新需求（附原文）。
 - **T2** 缺陷帳本新立 P≤2 未結列（走軌道① 還是 R 系列由根因所在面決定：產品面→軌道①；守衛面／跨平台護欄→R 系列）。
-- **T3** CI／nightly 轉紅：先入帳（DEF 列），入帳後依 T2 判——紅本身不是觸發；事件源＝`gh run list` 現查或 GitHub 失敗通知（平台行為，未驗證）；nightly 錨／陳舊度哨兵／側軌 warn 的機器產物不算 T3（見〈休眠期間開新視窗的第一動作〉）。
+- **T3** CI／nightly 轉紅：先入帳（DEF 列），入帳後依 T2 判——紅本身不是觸發；事件源＝`gh run list` 現查或 GitHub 失敗通知（平台行為，未驗證）；nightly 錨／陳舊度哨兵的機器產物不算 T3（見〈休眠期間開新視窗的第一動作〉）。
 - **T4** PRD 結案帳某 ⏸ 列的再開症狀實際發生（附 sid／log 座標）。⏸ 沒有掃描器：觀察者＝掌舵者回報，或任一視窗在新立 DEF／寫證據檔時對照 PRD §16.2「再開症狀」欄（命中者在該 DEF 列「分流去向」標 §16.2 座標）。證據檔〈理論洞清單〉列的再開症狀實際發生＝依 `docs/06_quality/FiveQuestion_Audit_Protocol/severity.md`〈暴露度〉升 P2 並入帳，依 T2 判。
 - 守衛面另受五問協定 `docs/06_quality/FiveQuestion_Audit_Protocol/README.md` 的 S1～S6 管轄——本節只引用、不複寫。
 - 🔴 **明文沒有**：日曆觸發、版本號觸發、覆蓋度百分比門檻、成熟度層級落差、「下一份檔名」義務、「候選清單」。
@@ -364,8 +364,9 @@ AutoClaude 驅動 AISDLC_SDD 做真實開發。
 休眠期間仍會走的機器時鐘（預期產物，不是待辦、不是 T3）：① nightly 錨 14 天（`tools/refresh_nightly_anchor.py`；
 本機 nightly 每晚把新錨寫回工作樹的 `ONBOARDING.md` 但不 commit；HEAD 的錨過期會擋 push）——閒置 ≥14 天後開工前先跑
 `python tools/refresh_nightly_anchor.py --check-head`，照訊息末行處置（通常＝`git add ONBOARDING.md` 併入 commit；本機 nightly 沒跑時依 ADVICE_WRITE）；
-② root-infra-ci 的 nightly-full 排程陳舊度哨兵 10 天（排程通道活性，線上）；③ 側軌帳本複查日 14 天 warn（只出聲；已登記為退役項，
-見本輪證據檔〈理論洞清單〉）。該機專屬待驗清單（如 Windows 真機項）＝非再開事件：不開輪，只在該機做該機的事。
+② root-infra-ci 的 nightly-full 排程陳舊度哨兵 10 天（排程通道活性，線上）。側軌帳本複查日的 14 天 warn 已於 2026-10-10 退役
+（掌舵者 T1 立案，不再是機器時鐘）：側軌列由各自的解鎖事件喚醒，或任一視窗新立 DEF／寫證據檔時對照（觀察者機制同 T4）。
+該機專屬待驗清單（如 Windows 真機項）＝非再開事件：不開輪，只在該機做該機的事。
 
 ### 審查閉環的終止（輪內迴圈的停止條件）
 - PASS＝**無 P≤2**。P3 當輪改文字或退役；P4 只登記（口徑引 `docs/06_quality/FiveQuestion_Audit_Protocol/severity.md`）。

@@ -2009,7 +2009,7 @@ $ git status --short   （結束前最後一次重跑；與開場快照 `diff` �
 
 | # | 洞 | 來源 | 再開症狀 |
 |---|---|---|---|
-| 1 | 側軌帳本複查日 14 天 warn（`tools/lib/ledger_closing_guards.py` 的 `STALE_REVIEW_DAYS`）是純日曆催辦，與掌舵者 2026-10-07 原則相衝；建議退役為事件驅動（刪該分支與常數、「最近複查日」欄保留為資料；改碼走同標籤第二列、不開 R 輪） | ARCH-09③／QA F-03 | 下一次有人進入 `ledger_closing_guards.py`，或掌舵者對 crossref 的側軌 warn 表示噪音（附畫面） |
+| 1 | 側軌帳本複查日 14 天 warn（`tools/lib/ledger_closing_guards.py` 的 `STALE_REVIEW_DAYS`）是純日曆催辦，與掌舵者 2026-10-07 原則相衝；建議退役為事件驅動（刪該分支與常數、「最近複查日」欄保留為資料；改碼走同標籤第二列、不開 R 輪） | ARCH-09③／QA F-03 | **已於 2026-10-10 同日落地**（掌舵者 T1 立案、同批 commit；見 improving_114 §6 表第三列） |
 | 2 | 休眠宣告沒有機械載體（無測試點名〈🏁〉或 T1～T4；R197「量、不挖」刻意不立鎖） | ARCH-11 | 一個視窗（附 sid）因找不到〈🏁〉或 T1～T4 而照舊開輪 |
 | 3 | PRD §16.2 現況欄與程式座標是凍結日快照；PRD 不在幽靈符號掃描面（已於 §16.2 前言揭露） | ARCH-12 | T4 事件發生時以現查為準 |
 | 4 | 「休眠」撞詞：PRD 的「分片休眠／休眠喚醒」＝等 reset 的睡眠 | ARCH-15 | 一個視窗把「休眠期間」誤讀成等 reset 的睡眠（附 sid） |
@@ -2022,6 +2022,6 @@ $ git status --short   （結束前最後一次重跑；與開場快照 `diff` �
 | 11 | 治理檔逼近體積上限（`CrossPlatform_Guard_Line_History.md` 250457、`CrossPlatform_DEF200274_Parallel_Tests_Evidence.md` 255168 bytes，上限 262144；活動驅動非日曆） | QA P4-07 | 下一次 append 時 crossref 轉紅 |
 | 12 | ⏸ 列再開症狀所依的痕跡多住系統暫存（重開機即蒸發），觀察者需事發當場附檔 | SD-08 | — |
 | 13 | ⏸ 列現況措辭不精確處（feed 另含 `exceeds_200k_tokens`／`version`、三 AND 的「間隔」缺、Retry-After 通道未界定、逾時→ESCALATION 非專屬映射、`autoclaude_*` 通配字面、桌面通知 opt-in） | SD-07 | T4 事件發生時以現查為準 |
-| 14 | CLI 已驗證清單＝版本號型永動源（本機 2.1.296 vs 清單 2.1.295；每次升版即 boot loud＋略過合併 worktree 清理；設計變更屬 AutoClaude，依 PRD §16.5 (i) 由掌舵者立案） | QA P3-05／SA-13 | 一次真實的 CLI 介面變動因 boot 通知被忽略而漏接（附通知逐字與 sid），或掌舵者立案 |
+| 14 | CLI 已驗證清單＝版本號型永動源（本機 2.1.296 vs 清單 2.1.295；每次升版即 boot loud＋略過合併 worktree 清理；設計變更屬 AutoClaude，依 PRD §16.5 (i) 由掌舵者立案） | QA P3-05／SA-13 | **已於 2026-10-10 同日落地**（掌舵者 T1 立案：家族級判定 `family_verdict`，patch 升版不再 DRY_RUN；新 minor／major 仍 DRY_RUN＋loud；見 PRD §16.6 第 1 列） |
 | 15 | `ANTHROPIC_API_KEY` 存在時 `claude -p` 的認證優先序未查證 | SA-12 | 一次喚醒窗以非預期憑證啟動（附 sid） |
 

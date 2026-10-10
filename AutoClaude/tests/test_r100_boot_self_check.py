@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import copy
 import re
 import subprocess
 from pathlib import Path
@@ -12,6 +13,7 @@ import pytest
 
 from autoclaude.execution import boot_self_check as B
 from autoclaude.infra.repositories.file_state_repository import FileStateRepository
+from autoclaude.utils import verified_cli_versions as V
 from autoclaude.utils.checkpoint_manager import PlaybookCheckpoint
 from tests.helpers.static_vocab import command_string_literals, forbidden_hits
 
@@ -274,6 +276,117 @@ def test_improving_113_the_verified_text_never_claims_the_flag_the_cli_help_lack
     lines = B.VERIFIED_CLI_VERSIONS["2.1.295"]["verified"]
     assert lines, "空清單會讓下一行斷言恆真"
     assert not [ln for ln in lines if "--max-turns" in ln]
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# improving_114：CLI 已驗證版本改家族級（major.minor）判定
+# ══════════════════════════════════════════════════════════════════════════════
+# 立案（掌舵者 2026-10-10 T1：「CLI 版本清單不再比精確版號」）：Claude Code 每週自動升 patch，
+# 逐版精確比對 ⇒ 每次升版 AutoClaude 啟動都 loud＋DRY_RUN（版本號型永動源）。本節只豁免
+# **patch 差異**；讀不到版本、新 minor、新 major 照舊 DRY_RUN＋loud。
+#
+# 🔴 本節測試跑在**合成清單**上（fixture 換掉兩個模組各自綁定的那張表）：真清單每補一筆逐版
+#    條目就變，把斷言綁在真清單的具體版號上，等於「補一筆 2.1.296」這個正常維護動作會把本節
+#    弄紅——那是把維護成本推回給人，與本節要消除的永動源同型。真清單的接線另由一支「版號由
+#    清單自己導出」的測試鎖（test_the_real_list_accepts_...）。
+_INCIDENT_LIST = ("2.1.223", "2.1.233", "2.1.295")   # 立案當下真清單的形狀（本機 CLI 已是 2.1.296）
+_SYNTH_ENTRY = {"verified": ["合成核實項（只供家族級判定的測試使用）"], "source": "合成"}
+
+
+@pytest.fixture
+def incident_list(monkeypatch):
+    table = dict.fromkeys(_INCIDENT_LIST, _SYNTH_ENTRY)
+    monkeypatch.setattr(V, "VERIFIED_CLI_VERSIONS", table)    # `family_verdict` 讀的那張
+    monkeypatch.setattr(B, "VERIFIED_CLI_VERSIONS", table)    # exact 命中時印核實項數的那張
+    return table
+
+
+def test_a_patch_bump_in_a_verified_family_does_not_force_dry_run(incident_list):
+    """立案當下的實況：本機 claude＝2.1.296、清單最高 2.1.295。同家族且 patch 不低於該家族最低
+    已驗證 patch ⇒ 視為已驗證：不 DRY_RUN、不發桌面通知，自檢輸出用人話說出『家族』與參照版。"""
+    dry_run, line = B.cli_version_verdict("2.1.296")
+    assert dry_run is False
+    assert "家族" in line and "2.1.295" in line, line
+    assert B.DRY_RUN_TEXT not in line
+    seen: list[str] = []
+    report = B.boot_self_check(cli_runner=lambda _a: (0, "2.1.296 (Claude Code)"),
+                               notifier=seen.append)           # 真實 `--version` 輸出形態
+    assert report.dry_run is False and report.cli_version == "2.1.296"
+    assert seen == [] and report.notified == 0                 # 家族級已驗證 ⇒ 零桌面通知
+    assert any("家族" in ln for ln in report.lines)            # 但自檢輸出必須留下那一行人話
+
+
+def test_a_patch_below_the_family_floor_still_forces_dry_run(incident_list):
+    """家族下限＝該家族最低已驗證 patch（這裡 223）：低於它的版本，其下方沒有任何已驗證版本，
+    不得被家族級放行。邊界逐格釘：222 ⇒ DRY_RUN（差一格也不放行）；223 ⇒ 逐版命中；224 ⇒ 家族。"""
+    for low in ("2.1.100", "2.1.222"):
+        dry_run, line = B.cli_version_verdict(low)
+        assert dry_run is True and B.DRY_RUN_TEXT in line and "不在已驗證清單內" in line, low
+    assert V.family_verdict("2.1.223") == ("exact", "2.1.223")
+    assert V.family_verdict("2.1.224") == ("family", "2.1.295")
+
+
+@pytest.mark.parametrize("version", ["2.2.0", "3.0.0", "2.0.999", "1.1.295"])
+def test_a_new_minor_or_major_family_still_forces_dry_run(incident_list, version):
+    """家族級只豁免 patch：minor／major 不同＝介面可能變了，照舊 DRY_RUN＋loud（桌面通知恰好
+    一次）。含比清單低的 2.0.999：『家族相同』是等號判準，不是『不高於』。"""
+    dry_run, line = B.cli_version_verdict(version)
+    assert dry_run is True and B.DRY_RUN_TEXT in line
+    seen: list[str] = []
+    report = B.boot_self_check(cli_runner=lambda _a: (0, f"{version} (Claude Code)"),
+                               notifier=seen.append)
+    assert report.dry_run is True and len(seen) == 1 and report.notified == 1
+
+
+def test_family_verdict_is_pure_and_red_green(monkeypatch):
+    """純函式三種回傳＋紅綠自證（體例同 G4：把錯誤實作寫出來，證明斷言有鑑別力）。"""
+    without = {"2.0.5": _SYNTH_ENTRY}                                    # 沒有 2.1 家族
+    with_family = {"2.1.233": _SYNTH_ENTRY, "2.1.295": _SYNTH_ENTRY,     # 插入順序刻意打亂：
+                   "2.1.223": _SYNTH_ENTRY}                              # 不得靠 dict 順序取最高
+    monkeypatch.setattr(V, "VERIFIED_CLI_VERSIONS", without)
+    assert V.family_verdict("2.1.296") == ("unknown", None)              # 紅：清單沒有該家族
+    monkeypatch.setattr(V, "VERIFIED_CLI_VERSIONS", with_family)
+    before = copy.deepcopy(with_family)
+    assert V.family_verdict("2.1.296") == ("family", "2.1.295")          # 綠：同一輸入，只換清單
+    assert V.family_verdict("2.1.250") == ("family", "2.1.295")          # 參照版＝家族最高，非最近
+    assert V.family_verdict("2.1.233") == ("exact", "2.1.233")           # 逐版命中：參照版即自己
+    for unknown in ("2.1.222", "2.2.0", "3.0.0"):
+        assert V.family_verdict(unknown) == ("unknown", None), unknown
+    assert V.family_verdict("2.1.296") == V.family_verdict("2.1.296")    # 同輸入同輸出
+    assert with_family == before                                         # 不改動清單
+    # 數值比較、不是字串比較：字串序下 "2.1.100" < "2.1.9"
+    by_number = {"2.1.9": _SYNTH_ENTRY, "2.1.100": _SYNTH_ENTRY}
+    monkeypatch.setattr(V, "VERIFIED_CLI_VERSIONS", by_number)
+    assert V.family_verdict("2.1.50") == ("family", "2.1.100")
+
+    def major_only(version):                  # 錯誤實作：把「家族級」讀成 major 相容
+        return any(k.split(".")[0] == version.split(".")[0] for k in with_family)
+    assert major_only("2.2.0") is True        # ← 錯誤實作會放行新 minor
+    monkeypatch.setattr(V, "VERIFIED_CLI_VERSIONS", with_family)
+    assert V.family_verdict("2.2.0")[0] == "unknown"   # ← 正解不放行
+
+
+@pytest.mark.parametrize("bad", [
+    "", "2.1", "v2.1.296", "2.1.296-beta.1", "2.1.296.1", "2.01.296", "latest",
+    "２.１.２９６",       # 全形數字（Unicode 十進位數字）
+])
+def test_an_unparseable_version_is_unknown_never_a_family_member(incident_list, bad):
+    """解析失敗＝未知（同今）。判準刻意嚴格（ASCII 數字、無前導零）：寬鬆的數字判準會把
+    2.01.296 或全形數字讀成 2.1.296 ⇒ 靜默放行；預發版與四段版號不在 patch 豁免的射程內。"""
+    assert V.family_verdict(bad) == ("unknown", None)
+    assert B.cli_version_verdict(bad)[0] is True
+
+
+def test_the_real_list_accepts_the_next_patch_of_its_newest_family_not_the_next_minor():
+    """真清單的接線鎖（版號由清單自己導出，補一筆逐版條目不會讓它變紅）：最新版的下一個
+    patch ⇒ 家族級放行且參照版就是最新版；下一個 minor ⇒ 照舊 DRY_RUN。"""
+    newest = max(B.VERIFIED_CLI_VERSIONS, key=lambda v: tuple(map(int, v.split("."))))
+    major, minor, patch = map(int, newest.split("."))
+    bumped = f"{major}.{minor}.{patch + 1}"
+    assert bumped not in B.VERIFIED_CLI_VERSIONS
+    dry_run, line = B.cli_version_verdict(bumped)
+    assert dry_run is False and "家族" in line and newest in line, line
+    assert B.cli_version_verdict(f"{major}.{minor + 1}.0")[0] is True
 
 
 # ══════════════════════════════════════════════════════════════════════════════

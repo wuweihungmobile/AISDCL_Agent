@@ -57,7 +57,7 @@
 - **DEF-101-693「22 步逐列覆核」尚未完成**：bootstrap 往返／dev_start／AutoClaude 子集／SDD
   ci-gate 雙軌仍未取得獨立 Windows 實跑紀錄；載體＝外部軌該列（複查日 2026-08-31）；現查
   `python tools/check_defect_log_crossref.py`（外部軌逐字列出 693）。
-- **長債軌 14 天複查本輪尚未做**：2026-09-13 前須複查一次（DEF-101-886 P1 優先）；現查
+- **長債軌 14 天複查本輪尚未做**（已退役）：2026-09-13 前須複查一次（DEF-101-886 P1 優先）；現查
   `python tools/check_defect_log_crossref.py`（逾期 warn 級自動出聲）。
 - **v2.1.10／v2.1.11／v2.1.12 三批修憲仍未落款**（Proposed；PRD 修訂表現查有 v2.1.9 與
   v2.1.13、無此三批）；現查

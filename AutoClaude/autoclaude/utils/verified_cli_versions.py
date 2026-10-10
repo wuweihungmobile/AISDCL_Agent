@@ -11,7 +11,16 @@
 #
 # 🔴 誠實劃界：`verified` 欄位列的是**本 repo 真的跑過並記錄下來的那幾件事**，不是
 #    「這一版的介面全部相容」。沒有人核實過整個 CLI 介面，本檔不得被讀成那個意思。
+#
+# 🔴 家族級判定只豁免 patch 差異（掌舵者 2026-10-10 T1 立案：「CLI 版本清單不再比精確版號」）：
+#    Claude Code 每週自動升 patch，逐版精確比對會讓每次升版都進 DRY_RUN＋跳桌面通知，loud
+#    天天響就失去鑑別力。故逐版未命中時，`major.minor` 與清單內某版相同、且 patch 不低於該
+#    家族最低已驗證 patch ⇒ 視為「家族級已驗證」（見 `family_verdict`）。**不得**被讀成 minor／
+#    major 相容：2.2.0、3.0.0 照舊 DRY_RUN＋loud；逐版 `verified` 事實仍只對**該版**成立，家族級
+#    不繼承它——要記下某個新 patch 版真的核實過什麼，照舊補一筆逐版條目。
 from __future__ import annotations
+
+import re
 
 VERIFIED_CLI_VERSIONS: dict[str, dict] = {
     "2.1.223": {
@@ -57,3 +66,35 @@ VERIFIED_CLI_VERSIONS: dict[str, dict] = {
                   "`claude --help`／`claude --permission-mode <值> --version`）",
     },
 }
+
+
+# 嚴格三段版號（ASCII 數字、無前導零）：寬鬆判準會把 `2.01.296`、全形數字讀成 2.1.296 ⇒ 靜默
+# 放行；預發版（`-beta`）與四段版號不在 patch 豁免的射程內，一律不匹配＝未知。
+_SEMVER = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
+
+
+def _parse(version: str) -> tuple[int, int, int] | None:
+    m = _SEMVER.fullmatch(version)
+    return None if m is None else (int(m[1]), int(m[2]), int(m[3]))
+
+
+def family_verdict(version: str) -> tuple[str, str | None]:
+    """回 (kind, 參照版)。純函式：只讀 `VERIFIED_CLI_VERSIONS`，無 I/O、不改清單。
+
+    - `exact`：逐版命中（參照版＝它自己）。
+    - `family`：逐版未命中，但 major.minor 與清單內某版相同、且 patch 不低於該家族**最低**
+      已驗證 patch（參照版＝該家族已驗證的**最高**版）。
+    - `unknown`：其餘——minor／major 不同、patch 低於家族下限、字串解析失敗（參照版＝None）。
+
+    🔴 家族級只豁免 patch 差異：不繼承參照版的 `verified` 事實，也不得被讀成 minor／major 相容。
+    """
+    if version in VERIFIED_CLI_VERSIONS:
+        return "exact", version
+    got = _parse(version)
+    if got is None:
+        return "unknown", None
+    patches = sorted(p[2] for key in VERIFIED_CLI_VERSIONS
+                     if (p := _parse(key)) is not None and p[:2] == got[:2])
+    if patches and got[2] >= patches[0]:
+        return "family", f"{got[0]}.{got[1]}.{patches[-1]}"
+    return "unknown", None

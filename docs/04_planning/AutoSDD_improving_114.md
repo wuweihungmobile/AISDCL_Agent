@@ -37,7 +37,7 @@
 | **F5** E501 到期日退役：刪比日期的判決函式與兩支測試、改為兩支無日曆反向鎖；`tools/ruff.toml` 條 2 改寫為「退役到期日」記載；ADR-XPLAT-010 增補註記（該 ADR 原文「豁免到期日機械核對」已成假句） | `tools/ruff.toml`、`tools/tests/test_subprocess_encoding_hygiene.py`（1559→1542）、`docs/04_planning/ADR/ADR-XPLAT-010-root-subproject-boundary.md` | Developer／主控 |
 | **F6** 根 CLAUDE.md〈三條改進軌道〉：標題與 ① 列「下一份」欄註明休眠時無義務、鐵律補「系列可休眠（掌舵者授權主控代決）」、(附) R 系列列改以檔名鐘現查且註明「不是休眠的後門」；帳本 `AutoSDD_Defect_Log.md` 格式說明「整合層缺陷 → 下輪 A 軌 W 項」改為「入帳、不預開下一輪」 | `CLAUDE.md`、`docs/06_quality/AutoSDD_Defect_Log.md` | 主控 |
 | **F7** R210 呈報兩件結案：① DEF-200-075 **維持外部阻塞軌**（與 R210 建議「改長債軌」相反：其解除判準＝mac 真機 skip census 環境量測值，正是該軌定義；兩軌行為相同、改軌只增編修不增價值；登記於證據檔〈三〉#10，掌舵者可以 T1 推翻）；② E501 到期日＝F5 退役 | 本檔 | 主控 |
-| 棘輪重釘（只准收尾單人窗口做） | `test_adr_xplat001_c1c2_lock.py`：R211 同輪第二列（115598→115589，−9）、`_FROZEN_GUARD_LINES` 兩檔值、`_REPIN_LOG_FROZEN_PREFIX_LEN` 331→332、`_REPIN_LOG_HISTORY_SHA256` d034314bdd87→8fea64d22cb1、接鏈列（R211, d034314bdd87→8fea64d22cb1, DEF-200-504＝「宣告收斂後有期限的維護義務」同源帳列）；guard-total:R211 三站（improving_112／improving_113／R145_Scan_Findings）同步 115589；本檔刻意不帶 guard-total 標記（三站已滿足 `_GUARD_TOTAL_DOC_MIN_SITES`，多一站只是多一個重釘稅） | 主控 |
+| 棘輪重釘（只准收尾單人窗口做） | `test_adr_xplat001_c1c2_lock.py`：R211 同輪第二列（115598→115589，−9）、`_FROZEN_GUARD_LINES` 兩檔值、`_REPIN_LOG_FROZEN_PREFIX_LEN` 331→332、`_REPIN_LOG_HISTORY_SHA256` d034314bdd87→8fea64d22cb1、接鏈列（R211, d034314bdd87→8fea64d22cb1, DEF-200-504＝「宣告收斂後有期限的維護義務」同源帳列）；guard-total:R211 三站（improving_112／improving_113／R145_Scan_Findings）同步；掌舵者 T1 立案兩件退役落地後再追加同輪第三列（115589→115592，+3：`test_check_defect_log_crossref.py` −2＋本表自身 +5；`[非淨減法輪]`；前綴 332→333、sha 8fea64d22cb1→c5585ef96d1a、接鏈列 DEF-200-504；三站同步 115592；R211 合併 +781、主軌 472 ≤ 517）；本檔刻意不帶 guard-total 標記（三站已滿足 `_GUARD_TOTAL_DOC_MIN_SITES`，多一站只是多一個重釘稅） | 主控 |
 
 **設計期誠實劃界**：(1) §16 的四格分類由 SA agent 判讀＋主控裁決，再經四方唯讀鏡（Architect／SA／SD／QA）覆核：SA 鏡逐列核 ➖ 33 列與 📎 8 列全部站得住（11 條 P3 文字精度已處置）、SD 鏡逐列核 ⏸ 31 列現況與 19 處註記全部對 HEAD 成立（6 條 P3 已處置）；`[SA 判讀]` 標記保留，以示該列為判斷而非事實；(2) F4 刻意不動棘輪的到期義務常數——它們在重釘標籤不前進時休眠，改碼才是擴張守衛面；(3) 本輪不重量三軸成熟度、不重盤覆蓋度（母體未變，§16.3 三個數字取自 R211 矩陣並以 SA 鏡腳本重算吻合）；(4) 主控曾被 auto mode 分類器擋下一次「Bash 改棘輪常數」（[Self-Modification]），改以 Edit 工具逐筆做同一程序——同檔、同改法、同守衛測試；QA 鏡獨立重算確認淨額 +0、187 支鎖 OK；掌舵者授權代決已涵蓋此重釘，若掌舵者另有意見以其為準；(5) 本輪是終輪＋PRD 修憲，依範本〈🏁〉自己的規則走四方（非瘦身規則的 1＋1）。
 
@@ -45,7 +45,7 @@
 
 | 檢查 | 命令 | 本輪實測 | 通過條件 |
 |---|---|---|---|
-| 護欄棘輪 | `python tools/tests/test_adr_xplat001_c1c2_lock.py --print-guard-lines` | `# 淨額 115589→115589 (+0)`、`# 逐檔漂移 0 支`；棘輪鎖模組 `Ran 187 tests … OK`（四方修訂後重跑同值） | +0 且模組 OK |
+| 護欄棘輪 | `python tools/tests/test_adr_xplat001_c1c2_lock.py --print-guard-lines` | `# 淨額 115592→115592 (+0)`、`# 逐檔漂移 0 支`（T1 兩件退役落地、第三列 +3 之後）；棘輪鎖模組 `Ran 187 tests … OK` | +0 且模組 OK |
 | E501 相關鎖 | `python -m unittest test_subprocess_encoding_hygiene`（tools/tests 下） | `Ran 39 tests … OK`（含兩支新反向鎖：日期加回必紅、退役記載被刪必紅；QA／SD 鏡各自變異自證） | OK |
 | 文件鎖（CLAUDE.md／guard-total 標記／幽靈符號／E501 存量債） | `python -m unittest test_doc_loc_baseline_freshness_r60` | rc=0（四方修訂＋新證據檔＋CLAUDE.md 三處改動後重跑） | OK |
 | PRD 直讀鎖 | `python -m unittest test_context_budget_guard -k Prd`；`pytest tests/test_r100_boot_self_check.py -q`（AutoClaude/） | `Ran 5 tests … OK`；`42 passed`（四方修訂後重跑同值） | OK |
@@ -75,8 +75,8 @@
 |---|---|---|---|
 | nightly 錨 14 天 | `tools/refresh_nightly_anchor.py`（`NIGHTLY_MAX_AGE_DAYS`）；pre-push 與 root-infra-ci 跑 `--check-head` | 閒置 ≥14 天後第一次 push 被擋；本機 nightly 每晚把新錨寫回工作樹的 `ONBOARDING.md` 但不 commit | 保留（排程通道活性感測器）；開工前先跑 `--check-head`，照訊息末行處置（通常 `git add ONBOARDING.md`） |
 | root-infra-ci nightly-full 陳舊度哨兵 10 天 | `.github/workflows/root-infra-ci.yml`（`MAX_AGE_DAYS`、`WAIVER_UNTIL` 現為空） | 近 10 天無成功 schedule／dispatch run 時 push／PR 轉紅 | 保留（線上版活性感測器；GitHub 對公開 repo 長期無活動停用排程屬平台行為，未驗證） |
-| 側軌帳本複查日 14 天 warn | `tools/lib/ledger_closing_guards.py`（`STALE_REVIEW_DAYS`） | 2026-10-24 起每次 crossref／pre-push 印 11 條 ⚠️（rc 不變） | 建議退役為事件驅動；登記證據檔〈三〉#1，掌舵者一句話即可立案 |
-| CLI 已驗證清單 | `AutoClaude/autoclaude/utils/verified_cli_versions.py` | 每次 Claude Code 升版（本機已 2.1.296、清單 2.1.295）AutoClaude 啟動 loud＋略過合併 worktree 清理 | 版本號型永動源；設計變更（能力探針或降為單行 log）屬 AutoClaude，依 PRD §16.5 (i) 由掌舵者立案；登記證據檔〈三〉#14 |
+| 側軌帳本複查日 14 天 warn | `tools/lib/ledger_closing_guards.py`（原 `STALE_REVIEW_DAYS`） | （已退役）原本 2026-10-24 起每次 crossref／pre-push 會印 11 條 ⚠️ | **已於同日退役**：掌舵者 T1 立案後同批落地——刪常數與逾期分支、兩支測試改為「舊日期不再 warn」、兩本帳檔頭與循環令同步；「最近複查日」欄保留為資料（格式不合仍 fail） |
+| CLI 已驗證清單 | `AutoClaude/autoclaude/utils/verified_cli_versions.py` | （已治好 patch 升版那一半）原本每次 Claude Code 升 patch 就 DRY_RUN＋通知 | **已於同日落地**：掌舵者 T1 立案後同批改為家族級判定（純函式 `family_verdict`：major.minor 相同且 patch ≥ 該家族最低已驗證版 ⇒ 視為已驗證、不 DRY_RUN 不通知；新 minor／major 或讀不到版本仍 DRY_RUN＋loud）；本機 2.1.296 親驗不再 DRY_RUN；PRD §16.6 第 1 列 |
 
 - Windows 側本輪零專屬改動；雲端 windows-compat-ci 的 `paths` 含 `tools/tests/**`、PRD、CLAUDE.md，push 後會跑；Windows 真機待驗清單（R211 證據檔〈六〉、R210〈八〉）＝**非載體、無義務**，只在該機做該機的事（範本〈休眠期間〉已明寫；證據檔〈三〉#6）。
 - 範本既有段落（〈核心任務〉、設計說明表「{{N}} 遞增」）保留為史料，由〈🏁〉效力句宣告以新節為準；improving_113 §8 末兩句以史料註記對齊。
@@ -85,8 +85,8 @@
 
 ## §7 下一步（不是下一輪）
 - **可以開始新產品工作**：由掌舵者以 T1 立案（一句話即可）；T1 的最小響應＝直接做事＋commit，只有碰 PRD 修憲／守衛面／跨軌設計才開一份 `AutoSDD_improving_N`。主控建議北極星 **A 柱**（AutoClaude 驅動 AISDLC_SDD 做一個小而真實的功能、端到端跑通），因為三點北極星中只有它尚未被真實使用驗證過。
-- **兩件建議掌舵者一句話立案的退役**（都不是輪，都是一次小改）：① 側軌複查日 14 天 warn 改事件驅動（§6 表第三列）；② AutoClaude 的 CLI 版本清單改為不靠精確 patch 版號（§6 表第四列）。
-- 在上述立案之前，本 repo 沒有任何**需要人判斷的待辦**會自動長出來；會自動出現的只有 §6 表列的機器產物：錨與陳舊度哨兵的處置是一兩條指令；側軌 warn 與 CLI 清單兩列需掌舵者立案才會消失，不立案只是持續出聲（rc 不變、不影響執行）。
+- **兩件退役已由掌舵者以 T1 立案並同日落地**（範本〈🏁〉「T1 最小響應＝直接做事＋commit」的首次實證；兩個 Sonnet Developer 分屬根層與 AutoClaude 兩個鎖持有面並行，主控收尾）：① 側軌複查日 14 天 warn 改事件驅動（§6 表第三列）；② CLI 版本清單改家族級判定（§6 表第四列；PRD §16.6 第 1 列）。
+- 本 repo 沒有任何**需要人判斷的待辦**會自動長出來；會自動出現的只有 §6 表前兩列的機器產物（nightly 錨與陳舊度哨兵），處置是一兩條指令。
 
 ## §8 休眠宣告（範本〈🏁〉休眠判準三條；本節為本檔末節）
 1. 驅動本系列的 PRD 已範圍凍結（v2.1.17），§16 結案帳 101 列全部歸格（✅29／➖33／⏸31／📎8）、無未分類列（➖／📎 41 列經 SA 鏡、⏸ 31 列經 SD 鏡逐列核依據與現況；✅ 29 列沿用矩陣原判；歸格判斷仍為作者判讀＋主控代決）✓

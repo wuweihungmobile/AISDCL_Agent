@@ -3612,12 +3612,12 @@ class TestExternalBlockedLog(unittest.TestCase):
         self.assertEqual(len(fails), 1)
         self.assertIn("同時出現", fails[0])
 
-    def test_stale_review_is_warn_not_fail(self) -> None:
+    def test_an_old_review_date_no_longer_warns(self) -> None:
+        """日曆型催辦已退役（2026-10-10 掌舵者 T1 立案；原則＝不製造日期義務）：複查日
+        再舊也不 warn；只剩日期格式不合會 fail（見 test_unparseable_review_date_fails）。"""
         text = self.HEAD + self._row("DEF-9-001", "上游套件", "2026-01-01")
-        fails, warns = lcg.external_blocked_log_problems(text, set(), date(2026, 8, 21))
-        self.assertEqual(fails, [])
-        self.assertEqual(len(warns), 1)
-        self.assertIn("距今", warns[0])
+        self.assertEqual(
+            lcg.external_blocked_log_problems(text, set(), date(2026, 8, 21)), ([], []))
 
     def test_fresh_review_has_no_warn(self) -> None:
         text = self.HEAD + self._row("DEF-9-001", "上游套件", "2026-08-20")
@@ -3664,9 +3664,9 @@ class TestExternalBlockedLog(unittest.TestCase):
 
         WHY（結構性長債分軌輪拆彈，2026-08-30）：本測試原以 `date.today()` 斷言
         `([], [])`，等於把 warn 升級成 fail 且帶時間引信——外部軌任一列複查日停更
-        14 天後（純粹時間流逝、零程式改動）本測試在 pre-push 與 CI 同時轉紅。
-        warn 行為本身的鑑別力由上方注入固定日期的 `test_stale_review_is_warn_not_fail`
-        守著，拆彈不減鑑別力。
+        14 天後（純粹時間流逝、零程式改動）本測試在 pre-push 與 CI 同時轉紅（該 14 天
+        warn 已於 2026-10-10 退役）。「舊複查日不再出聲」的鑑別力由上方注入固定日期的
+        `test_an_old_review_date_no_longer_warns` 守著，拆彈不減鑑別力。
         """
         path = m._REPO_ROOT / "docs" / "06_quality" / lcg.EXTERNAL_BLOCKED_LOG_NAME
         self.assertTrue(path.exists(), f"找不到 {path}")
@@ -3678,9 +3678,9 @@ class TestExternalBlockedLog(unittest.TestCase):
 class TestStructuralDebtLog(unittest.TestCase):
     """結構性長債軌（掌舵者 2026-08-30 分軌裁決；判準共用外部軌、注入 scoped source_re）。
 
-    🔴 本組**全部注入固定日期** `date(2026, 8, 30)`：14 天複查 warn 是日期的函式，走
-    `date.today()` 的斷言會變成時間引信（上一支真檔測試拆彈的正是這個形態），故本組
-    一支都不走系統時鐘。
+    🔴 本組**全部注入固定日期** `date(2026, 8, 30)`：原 14 天複查 warn（已退役）是日期的
+    函式，走 `date.today()` 的斷言會變成時間引信（上一支真檔測試拆彈的正是這個形態），
+    故本組一支都不走系統時鐘。
     """
 
     HEAD = TestExternalBlockedLog.HEAD
@@ -3731,13 +3731,11 @@ class TestStructuralDebtLog(unittest.TestCase):
         self.assertEqual(len(fails), 1)
         self.assertIn("同時出現", fails[0])
 
-    def test_stale_review_is_warn_not_fail(self) -> None:
-        """14 天複查逾期 ⇒ warn 不 fail（注入日期：2026-08-01 → 2026-08-30 為 29 天）。"""
+    def test_an_old_review_date_no_longer_warns(self) -> None:
+        """日曆型催辦已退役（2026-10-10 掌舵者 T1 立案）：2026-08-01（距 TODAY 29 天）
+        不 warn 也不 fail——只剩日期格式不合會 fail。"""
         text = self.HEAD + self._row("DEF-9-001", "結構性長債-x", review="2026-08-01")
-        fails, warns = self._problems(text)
-        self.assertEqual(fails, [])
-        self.assertEqual(len(warns), 1)
-        self.assertIn("距今", warns[0])
+        self.assertEqual(self._problems(text), ([], []))
 
     def test_growth_ratchet_red_green(self) -> None:
         """成長棘輪：count > ceiling 紅（訊息要求具名裁決後才准重釘）、= ceiling 綠。"""

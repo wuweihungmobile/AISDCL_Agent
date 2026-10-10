@@ -2667,7 +2667,7 @@ P0 收完資料後，依序推導、不要憑感覺設定：
 | §6 區塊 10～15：防休眠／Git／狀態／安全／可觀測／API | ⚠️(M) | ➖ | 依據＝同上；功能面歸屬：`INTEGRATION_*`→§4.4.2、`ALLOW_PERMISSION_BYPASS`→§12 權限旗標列、`METRICS_EXPORT`／`ALERT_WEBHOOK_URL`→§9 各列、`DRY_RUN`→§6.2 R-6.2-2 列、`API_*`→§5。 |
 | §6.1 啟動自檢不變式 1～13 | ⚠️(M) | ⏸ | [SA 判讀] 現況＝不變式 1、4、6、11、12、13 已有機械物（1 僅機械化嚴格遞增與值域，「HALT−DRAIN≥5」子句未機械化），2、3、7c 矩陣判 ➖，7 隨 §5 判 ➖；部分＝5（H7 中位牆鐘為占位值 60s）、10（啟動自檢無遙測來源／防休眠可用檢查）；未做＝7b／8／9（`ALLOW_WITH_CAP` 上限值／bypass 容器偵測／`.autoclaude/` gitignore 檢查），且 `load_policy` 越界為整組退回預設並出聲、而非條文的拒絕啟動（見 §16.4 C11）；再開症狀＝啟動自檢缺席的不變式所防之事實際發生（`bypassPermissions` 於非容器環境啟動、`.autoclaude/` 進了 commit；附 sid 或 commit 座標）。 |
 | §6.2 R-6.2-1 殘留整合佇列：開機掃描重排 | ⚠️(L) | ➖ | 依據＝DEF-200-246 closed-by-decision：開機掃描已接電、輸入恆空（`integration_queue` 零生產寫者；§6.2 載「依設計未實作」與重開條件，tripwire 測試釘住）。 |
-| §6.2 R-6.2-2 CLI 版本相容＋DRY_RUN | ⚠️(S) | 📎 | [HEAD 現查] 殘留＝機制已落地（`AutoClaude/autoclaude/execution/boot_self_check.py` 的 `read_cli_version`／`cli_version_verdict`：版本讀取＋未知版本 loud＋DRY_RUN 提示；已驗證清單已補 2.1.295，見 v2.1.16 W3 落款），餘下的是隨 CLI 升版漂移的清單資料——寫本列當下本機 `claude --version`＝2.1.296、清單最新 2.1.295，啟動仍 loud 一次、不阻止啟動；補清單屬程式碼維護、不開修憲；DRY_RUN 判決未接執行器依設計（DEF-200-246 closed-by-decision）。**誠實揭露**：此殘留每次 CLI 升版即重現、無終點（版本號型永動源）；未驗證版本的後果＝每次啟動一則桌面通知＋略過已合併 worktree 清理，不影響執行；把「不在清單」從 loud 降為單行 log、或改以能力探針取代精確版本比對，屬 AutoClaude 設計變更，依 §16.5 (i) 由掌舵者立案。 |
+| §6.2 R-6.2-2 CLI 版本相容＋DRY_RUN | ⚠️(S) | 📎 | [HEAD 現查] 殘留＝機制已落地（`AutoClaude/autoclaude/execution/boot_self_check.py` 的 `read_cli_version`／`cli_version_verdict`：版本讀取＋未知版本 loud＋DRY_RUN 提示；已驗證清單已補 2.1.295，見 v2.1.16 W3 落款），餘下的是隨 CLI 升版漂移的清單資料——寫本列當下本機 `claude --version`＝2.1.296、清單最新 2.1.295，啟動仍 loud 一次、不阻止啟動；補清單屬程式碼維護、不開修憲；DRY_RUN 判決未接執行器依設計（DEF-200-246 closed-by-decision）。**誠實揭露**：此殘留每次 CLI 升版即重現、無終點（版本號型永動源）；未驗證版本的後果＝每次啟動一則桌面通知＋略過已合併 worktree 清理，不影響執行；把「不在清單」從 loud 降為單行 log、或改以能力探針取代精確版本比對，屬 AutoClaude 設計變更，依 §16.5 (i) 由掌舵者立案。【2026-10-10 同日落款】掌舵者已立案、家族級判定已落地（§16.6 第 1 列）：patch 升版不再重現；新 minor／major 仍需補清單、仍 DRY_RUN＋loud。 |
 | §7 state.json schema v2 | ⚠️(M) | ➖ | 依據＝§15.2 必建模組以功能等價物承接＋v2.1.17 決策式收斂：`agents[]`／`quota_snapshot`／結構化 `resume_plan` 屬多 Agent 並行形態，本 repo 刻意不做（矩陣 §6.1 #14；與 DEF-200-246 重開條件②同源）；實際持久化＝`PlaybookCheckpoint`（含 `integration_queue` 欄位、checksum、原子寫入）＋RELAY 狀態塊。 |
 | §8 列 1 非預期 429（推論端） | ⚠️(M) | ⏸ | 現況＝limit 字樣→halt（`AutoClaude/autoclaude/plugins/token_guard/policy.py`、`AutoClaude/autoclaude/core/kernel.py`）與地板讀數已有，無 `Retry-After` 遵循／full-jitter／5 次重試；再開症狀＝一次推論端非預期 429（帶 `Retry-After` 且短於一個 halt 週期）使引擎直接 halt 或升級、而本可由退避重試化解（附 run log 與 `Retry-After` 值）。 |
 | §8 列 2 重置時間漂移 | ⚠️(S) | ⏸ | 現況＝同 §4.5.10（觀測優先、不猜時刻、掛回零成本巡邏）；再開症狀＝一次真實 reset 晚到（reset 時刻已過而遙測仍 ≥100%）使喚醒窗連續多次探測仍判未恢復、耗掉可觀額度（附 sid＋planner 痕跡列）。 |
@@ -2677,7 +2677,7 @@ P0 收完資料後，依序推導、不要憑感覺設定：
 | §8 列 9 Agent 卡死／NEEDS_HUMAN | ⚠️(S) | ⏸ | 現況＝step timeout→ESCALATION（`AutoClaude/autoclaude/core/kernel.py`）與無進度即停（`tools/lib/relay_machine.py`）已有，`NEEDS_HUMAN` 狀態字面零命中；再開症狀＝一次需人介入的卡死而桌面通知與 ESCALATION 皆未觸發（附 sid＋log 座標）。 |
 | §8 列 11 整合驗證失敗 | ⚠️(L) | ➖ | 依據＝同 §6.2 R-6.2-1（DEF-200-246 closed-by-decision；整合佇列零生產寫者）。 |
 | §8 列 12 Prompt injection | ⚠️(S) | ⏸ | 現況＝allowlist（`AutoClaude/autoclaude/infra/adapters/sdk_executor_adapter.py`）＋`.claude/settings.unattended.json` 已有，無對應「禁止未經確認的網路存取」的獨立層；再開症狀＝無人窗口逐字稿中出現經已放行指令（如 `python -m pytest*`）發出的對外 URL 呼叫（curl／wget／requests 等字樣與目的網址可逐字引用；附 sid＋逐字稿座標）。 |
-| §8 列 13 CLI 版本升級 | ⚠️(S) | 📎 | 殘留＝同 §6.2 R-6.2-2（機制已落地、清單為隨 CLI 升版漂移的資料；每次升版即重現、無終點，見該列誠實揭露）。 |
+| §8 列 13 CLI 版本升級 | ⚠️(S) | 📎 | 殘留＝同 §6.2 R-6.2-2（機制已落地、清單為隨 CLI 升版漂移的資料；patch 升版即重現的那一半已由 §16.6 第 1 列的家族級判定治好，新 minor／major 仍需補清單，見該列誠實揭露）。 |
 | §9 12 個 Prometheus 指標 | ❌ | ⏸ | 現況＝`prometheus`／`otlp`／`autoclaude_*` 零命中，等價痕跡＝JSONL 家族（如 `quota_burn.jsonl`）；再開症狀＝出現真實下游要讀這 12 項指標之一（Grafana 面板或告警規則引用 `autoclaude_*`）而 JSONL 痕跡無法替代（附需求原文）。 |
 | §9 結構化決策日誌 | ⚠️(S) | ⏸ | 現況＝JSONL 痕跡家族（`quota_burn.jsonl`、`tools/lib/quota_gate.py` 與 `tools/lib/quota_escalation.py` 的痕跡）非逐決策全量；再開症狀＝一次需事後重建的決策（某次派工為何被擋或放行）在痕跡中查無對應列（附 sid＋seq）。 |
 | §9 告警（DRAINING 以上／DIRTY_UNSAVED／NEEDS_HUMAN／429 突增） | ⚠️(S) | ⏸ | 現況＝halt／prepare 桌面通知與 DIRTY_UNSAVED（notifier）已有，`NEEDS_HUMAN`／429 突增零命中；再開症狀＝一次 429 突增或需人介入事件無人被告警而擱置（附 sid＋時間）。 |
@@ -2768,7 +2768,7 @@ v2.1 自 v2.1.17 起**凍結**。修憲只由下列三種觸發之一開啟：
 
 | 立案日期 | 需求（掌舵者原文摘要） | 結案格 | 依據／再開症狀 |
 | :---- | :---- | :----: | :---- |
-| — | （無） | — | — |
+| 2026-10-10 | CLI 已驗證版本清單不再比精確 patch 版號（掌舵者原文選項：「CLI 版本清單不再比精確版號」；對應 §16.2 §6.2 R-6.2-2 列揭露的版本號型永動源） | ✅ | 依據＝`AutoClaude/autoclaude/utils/verified_cli_versions.py` 新增純函式 `family_verdict`（major.minor 相同且 patch ≥ 該家族最低已驗證版 ⇒ 家族級已驗證：不 DRY_RUN、不通知；新 minor／major 或讀不到版本仍 DRY_RUN＋loud），`boot_self_check.cli_version_verdict` 只消費它；R-6.2-2 三條意圖不變（版本讀自 `claude --version`、清單 git-tracked 帶核實事實、未知不阻止啟動但 DRY_RUN＋loud）；本機 2.1.296 親驗不再 DRY_RUN；紅綠測試住 `AutoClaude/tests/test_r100_boot_self_check.py` |
 
 守衛面相關者另受 `docs/06_quality/FiveQuestion_Audit_Protocol/README.md`〈窗口規則與收斂判定〉S1～S6 約束（只引用、不複寫）；動到守衛面前先附暴露證據（根 CLAUDE.md〈守衛面准入〉）。
 

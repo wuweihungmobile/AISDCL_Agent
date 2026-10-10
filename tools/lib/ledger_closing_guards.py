@@ -197,13 +197,6 @@ _DEF_ID_RE = re.compile(r"DEF-\d+-\d+")
 _COL_ID, _COL_SOURCE, _COL_START, _COL_UNLOCK, _COL_REVIEW = 1, 2, 3, 4, 5
 _EXPECTED_CELLS = 7  # 首尾空片段 + 5 個資料欄
 
-#: 「最近複查日」逾期未更新的警戒天數（**warn，非 fail**——見任務書「防止外部軌變成永久
-#: 垃圾桶」，但外部阻塞源本來就是我們不控制的東西，硬擋只會逼人把日期改成今天而不解決
-#: 真正的問題）。取 14 天：`git log` 對主帳本的 commit 密度顯示本 repo 幾乎每天都有一輪
-#: 整合／收斂動作（見本任務執行當回合實測：近 60 天內僅 4 天無 commit），14 天已是
-#: 「連續兩三輪都沒人回頭看一眼」的保守上界，而不是「一週忘了看一次」就緊張兮兮地報警。
-STALE_REVIEW_DAYS = 14
-
 
 def _ext_rows(text: str) -> list[tuple[int, list[str]]]:
     """外部阻塞軌表格的資料列：`(1-based 行號, 全部切片含首尾空片段)`。"""
@@ -226,11 +219,14 @@ def external_blocked_log_problems(
        `NAMED_BLOCKER_SOURCE_RE`（預設），長債軌＝`STRUCTURAL_DEBT_SOURCE_RE`，兩軌互斥。
     ② 交叉鎖——同一 DEF-ID 不得同時出現在主帳本未結列與本表（出現即 fail：那代表這筆
        缺陷「既算我們欠的債、又宣稱不算」，兩本帳各說各話）。
-    ③ 「最近複查日」逾期（`STALE_REVIEW_DAYS`）——warn，不 fail（見上）。
+    ③ 「最近複查日」欄只作資料、不再有逾期提醒——2026-10-10 掌舵者 T1 立案退役日曆型催辦
+       （原則＝2026-10-07 不製造日期義務；先例 R207／improving_114）；側軌列改由各自的
+       解鎖事件喚醒，或任一視窗新立 DEF／寫證據檔時對照（範本〈🏁〉T4）。故 warn 清單
+       目前恆空（二元組形狀保留供呼叫端相容）；`today` 參數保留供日期解析相容，
+       不再用於逾期判定。
     欄數不合（`_EXPECTED_CELLS`）或日期格式無法解析視為資料本身壞掉，一律 fail：
-    壞掉的資料沒有「這一列到底過期了沒」的答案，強行判讀等同瞎猜。
+    壞掉的資料沒有可信的答案可讀，強行判讀等同瞎猜。
     """
-    today = today or date.today()
     fails: list[str] = []
     warns: list[str] = []
     for lineno, cells in _ext_rows(text):
@@ -254,17 +250,11 @@ def external_blocked_log_problems(
                 f"未結列與本表（{log_name}）——兩本帳對同一筆缺陷各說各話。"
                 "若已分軌，主帳本該列應收斂為指向本表的索引，不應仍以未結狀態留在主帳本")
         try:
-            days = (today - date.fromisoformat(review)).days
+            date.fromisoformat(review)
         except ValueError:
             fails.append(
                 f"{log_name}:{lineno} {def_id}：「最近複查日」"
                 f"{review!r} 不是可解析的 ISO 日期（YYYY-MM-DD）")
-            continue
-        if days > STALE_REVIEW_DAYS:
-            warns.append(
-                f"{log_name}:{lineno} {def_id}：最近複查日 {review} "
-                f"距今 {days} 天 > {STALE_REVIEW_DAYS} 天，請確認阻塞是否仍成立"
-                "（分軌帳本若沒人回頭看，會變成永久垃圾桶）")
     return fails, warns
 
 
@@ -273,7 +263,7 @@ def structural_debt_growth_problems(
 ) -> list[str]:
     """長債軌成長棘輪（純函式；`count > ceiling` 即 fail，回空＝合規）。
 
-    防的形態＝長債軌變成「比外部軌更好用的後門」：外部軌有 14 天複查與枚舉互斥擋著，
+    防的形態＝長債軌變成「比外部軌更好用的後門」：外部軌有枚舉互斥與交叉鎖擋著，
     長債軌若可無聲加列，未結列警戒線就多了一個免裁決的洩壓口。
     """
     if count <= ceiling:
@@ -321,7 +311,7 @@ def closing_round_problems(
 ) -> list[str]:
     """機械物①②的單一呼叫入口（caller 只需一次 import＋一次呼叫，見模組 docstring）。
 
-    ③（外部阻塞軌 warn）在此**直接印出**而不是回傳給 caller 再印：caller
+    ③（外部阻塞軌 warn；目前恆空）在此**直接印出**而不是回傳給 caller 再印：caller
     （`check_defect_log_crossref.py`）的 raw-line 棘輪餘裕已耗盡，多印一個 for 迴圈都嫌貴；
     本函式改為自己 side-effect 印 warning，只把 fail 級問題回傳——這是為了配合 caller 的
     LOC 限制刻意偏離「回傳、由 caller 印」的既有慣例，故在此明講不是隨手為之。
