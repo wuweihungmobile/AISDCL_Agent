@@ -78,6 +78,8 @@ cp .env.example .env
 # MINIMAX_API_KEY=your_key_here
 ```
 
+> ⚠️ 複製後（在 `AutoClaude/` 下）執行 `python ../tools/lib/quota_policy.py --env-doctor --fix`，把與 env.shared／出廠相同的多餘行刪掉，否則本機 `.env` 會遮住跨機共用值（repo 根的 `env.shared`；詳見根層 ONBOARDING.md §2.2）。
+
 ### 3.3 個人化路徑（可選）
 
 ```bash

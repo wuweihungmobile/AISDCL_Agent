@@ -3,10 +3,11 @@
 對應 AutoSDD_improving_01.md §4（W6）。PRIORITY=45：token_guard(30)/anchor(35)/
 persistence(40) 之後、PRE_ATTEMPT tie-breaker 群(50) 之前——閘門先於快速路徑。
 
-phase 對應（zero-trust 實測修正）：計畫 §4.1 引用之 POST_EVALUATE / ON_ESCALATION
-為合法 KernelPhase 枚舉但 kernel 現況**不派發**（kernel.py 實際派發
-PRE_RUN/PRE_STEP/PRE_ATTEMPT/POST_ATTEMPT/ON_SUCCESS/ON_FAILURE/POST_STEP/POST_RUN）。
-本 plugin 同時訂閱兩組：計畫指定 phase（向前相容、未來 kernel 派發即生效）+
+phase 對應（zero-trust 實測修正）：計畫 §4.1 引用之 POST_EVALUATE 為合法 KernelPhase
+枚舉但 kernel 現況**不派發**；ON_ESCALATION 自 DEF-200-518 起由 kernel 於兩條失敗型
+升級（收斂判 escalate／重試耗盡）派發。kernel.py 其餘實際派發
+PRE_RUN/PRE_STEP/PRE_ATTEMPT/POST_ATTEMPT/ON_SUCCESS/ON_FAILURE/POST_STEP/POST_RUN。
+本 plugin 同時訂閱兩組：計畫指定 phase（POST_EVALUATE 向前相容、未來 kernel 派發即生效）+
 實際派發 phase（真實行為載體）。偏差已記入 AutoSDD_Defect_Log（DEF-01-006）。
 
 相依（constructor 注入 ports，禁 import infra）：
@@ -83,7 +84,7 @@ class SddGovernancePlugin:
             KernelPhase.ON_SUCCESS,              # 實際派發：違反清除 + drift 巡檢
             KernelPhase.ON_FAILURE,              # 實際派發：步驟竭盡 → 升級諮詢
             KernelPhase.POST_EVALUATE,           # 計畫指定（kernel 現況不派發）
-            KernelPhase.ON_ESCALATION,           # 計畫指定（kernel 現況不派發）
+            KernelPhase.ON_ESCALATION,           # 實際派發（DEF-200-518；耗盡型於 on_event 去重）
             KernelPhase.ON_CHECKPOINT_SAVE_REQUEST,
             KernelPhase.ON_CHECKPOINT_RESTORE,
         ]
@@ -100,6 +101,9 @@ class SddGovernancePlugin:
             return self._on_post_attempt(ctx)
         if phase == KernelPhase.ON_SUCCESS:
             return self._on_success(ctx)
+        if (phase == KernelPhase.ON_ESCALATION
+                and (ctx.payload or {}).get("trigger") == "max_retries_exhausted"):
+            return None  # DEF-200-518：同一次耗盡已於 ON_FAILURE 諮詢過，不重複
         if phase in (KernelPhase.ON_FAILURE, KernelPhase.ON_ESCALATION):
             return self._on_failure(ctx)
         if phase == KernelPhase.ON_CHECKPOINT_SAVE_REQUEST:
@@ -122,11 +126,13 @@ class SddGovernancePlugin:
         }
 
     def pending_topology_dashboard(self) -> str:
-        """W-14-2：回傳已載入的 meta⁸ 拓樸審批儀表板 Markdown（供 escalation dump 嵌入）；無則 ""。"""
+        """W-14-2：回傳已載入的 meta⁸ 拓樸審批儀表板 Markdown（供 escalation dump 嵌入）；
+        無則 ""。"""
         return self._state.get("topology_dashboard") or ""
 
     def load_signoff_dashboard(self, artifact_path: str) -> str:
-        """W-14-2：經 port 載入儀表板 Markdown（fail-closed advisory；邏輯抽於 _sdd_topology_signoff）。"""
+        """W-14-2：經 port 載入儀表板 Markdown
+        （fail-closed advisory；邏輯抽於 _sdd_topology_signoff）。"""
         return _sig.load_dashboard_markdown(self._dashboard_source, self._obs, artifact_path)
 
     def _maybe_load_dashboard(self, ctx: HookContext) -> None:

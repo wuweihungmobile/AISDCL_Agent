@@ -118,7 +118,7 @@ def _scan_roots() -> list[tuple[Path, bool, int]]:
         (_REPO_ROOT / ".claude" / "hooks", True, 2),
         (_REPO_ROOT / "AISDLC_SDD" / "scripts", True, 13),
         # 沿革已搬至 CrossPlatform_R151_Guard_Prose_Migration.md〈_scan_roots tools/lib 重釘〉節。
-        (_REPO_ROOT / "tools" / "lib", True, 59),
+        (_REPO_ROOT / "tools" / "lib", True, 70),
         (latest / "tools" / "arch_fitness", True, 2),
         (latest / ".claude" / "hooks", True, 5),
     ]

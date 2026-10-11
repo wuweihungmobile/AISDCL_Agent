@@ -198,6 +198,9 @@ class EscalationDumpedResult:
     """EvolutionPlugin / CheckpointPlugin 完成 escalation dump 後回傳路徑。"""
     contributor: str
     dump_path: str
+    # DEF-200-518：dump 物件隨路徑一併回給發布者（Kernel），由它轉交 ON_ESCALATION 的下游
+    # 訂閱者（EvolutionPlugin 要的是物件、不是檔）。預設 None＝既有建構點與測試位元級不變。
+    dump: Any = None
 
 
 # ──────────────────────────────────────────────────────────────

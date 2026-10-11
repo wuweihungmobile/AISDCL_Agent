@@ -147,6 +147,12 @@ class CheckpointManager:
             from ..infra.repositories.factory import canonical_playbook_id  # noqa: PLC0415
             self._id_resolver = lambda p: canonical_playbook_id(p, "yaml_only")
 
+    @property
+    def checkpoint_dir(self) -> str:
+        """落檔目錄（唯讀）。DEF-200-518：dump 請求的 payload 未帶目錄時，plugin 取它而不是 ""
+        （空字串會讓 EscalationDump.save 把檔寫進 cwd）。"""
+        return str(self._dir)
+
     def _to_id(self, playbook_path: str) -> str:
         """T8：改為 instance method 以支援注入式 id_resolver。"""
         return self._id_resolver(playbook_path)

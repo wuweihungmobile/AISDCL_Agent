@@ -19,8 +19,9 @@ from ..core.ports.quota_meter import DEGRADED_CAP
 # 比對（同 SCHEMA 那條既有鎖的體例）。這不是第二份常數表，是同一份宣告的鏡像，鏡子破了會紅。
 #
 # 🔴 兩份 `.env` 的關係（掌舵者點名要講清楚，判準守住）＝**繼承 ＋ 覆寫**：
-#   os.environ  >  AutoClaude/.env  >  <repo 根>/.env  >  出廠預設
-#   · 根 `.env` 是兩側共用的基底（harness 的 hook 也讀它）⇒ 只寫一次就兩邊一致；
+#   os.environ  >  AutoClaude/.env  >  <repo 根>/.env  >  <repo 根>/env.shared  >  出廠預設
+#   · 根 `.env`（本機）與 `env.shared`（git 追蹤、跨機同步）是兩側共用的基底（harness 的 hook
+#     也讀）⇒ 只寫一次就兩邊一致；
 #   · `AutoClaude/.env` 只在「引擎要與 harness 不同」時才寫，它贏。
 # 為什麼是就地讀檔而不是引入 python-dotenv：本專案明文沒有 dotenv 載入器
 # （`.env.example` 檔頭逐字），而 `.env` 裡放的是機密（MINIMAX_API_KEY／DB DSN）——
@@ -28,7 +29,8 @@ from ..core.ports.quota_meter import DEGRADED_CAP
 # 這裡只替**這一族鍵**查檔，白名單就是呼叫點寫死的那兩個名字。
 # 行內註解一律剝掉：`.env.example` 的手寫版會帶 ` # 說明`，不剝就等於把說明餵給 float()。
 _ENV_FILES = (Path(__file__).resolve().parents[2] / ".env",
-              Path(__file__).resolve().parents[3] / ".env")
+              Path(__file__).resolve().parents[3] / ".env",
+              Path(__file__).resolve().parents[3] / "env.shared")
 
 _LOG = logging.getLogger(__name__)
 # 明示覆寫的標記。形狀刻意沿用 repo 既有的「行尾 `<name>-ok:` ＋ WHY」豁免慣例
@@ -64,16 +66,18 @@ def _env_file_value(path: Path, name: str) -> str:
 # **結構上**到不了這裡，不需要遮罩也不可能外洩。誠實劃界：代價是非配額鍵的分歧不會被偵測。
 def _quota_env(name: str, fallback: float) -> float:
     raw = os.environ.get(name, "").split("#")[0].strip()
-    hits = [(p, v) for p in _ENV_FILES if (v := _env_file_value(p, name))]
-    if len({v.split("#")[0].strip() for _, v in hits}) > 1 \
-            and _OVERRIDE_MARK not in hits[0][1]:
+    hits = [(p, v) for p in _ENV_FILES if (v := _env_file_value(p, name)).split("#")[0].strip()]
+    vals = [v.split("#")[0].strip() for _, v in hits]
+    # harness hook 只讀 `_ENV_FILES[1:]`（根 .env > env.shared）：它吃的是第一個非引擎層的命中。
+    hx = next((i for i, (p, _) in enumerate(hits) if p != _ENV_FILES[0]), 0)
+    if vals and vals[0] != vals[hx] and _OVERRIDE_MARK not in hits[0][1]:
         _LOG.warning(
-            "[env 分歧] %s 在兩份 .env 值不同：%s ⇒ 引擎吃 %s、harness hook 吃 %s，"
+            "[env 分歧] %s 引擎層與 harness 層值不同：%s ⇒ 引擎吃 %s、harness hook 吃 %s，"
             "對同一個額度池做不同決策。刻意的話在贏的那一行行尾加 `# %s <WHY>`。",
-            name, [v.split("#")[0].strip() for _, v in hits],
-            hits[0][0].as_posix(), hits[-1][0].as_posix(), _OVERRIDE_MARK)
+            name, [vals[0], vals[hx]], hits[0][0].as_posix(), hits[hx][0].as_posix(),
+            _OVERRIDE_MARK)
     if not raw and hits:
-        raw = hits[0][1].split("#")[0].strip()
+        raw = vals[0]
     try:
         return min(100.0, max(0.0, float(raw)))
     except ValueError:

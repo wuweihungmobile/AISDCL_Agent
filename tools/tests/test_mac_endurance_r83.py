@@ -950,6 +950,7 @@ class SelfDisarmTest(unittest.TestCase):
             lambda argv, **kw: self.spawned.append(list(argv)))
         self._real_xpc = os.environ.get("XPC_SERVICE_NAME")
         self.addCleanup(self._restore_xpc)
+        self.addCleanup(sb._SELF_DISARMED.clear)  # `list_jobs` 讀它：各案不得互留幽靈 label
 
     def _restore_xpc(self) -> None:
         os.environ.pop("XPC_SERVICE_NAME", None)
@@ -1001,13 +1002,9 @@ class SelfDisarmTest(unittest.TestCase):
 
     def test_disarm_then_arm_of_the_same_label_inside_the_job_relaunches_instead_of_killing(
             self) -> None:
-        """DEF-200-267 F2-②（2026-09-05 18:12:09→18:12:10 實跡）：`_resume_tick` 的
-        PATROL_HANDBACK 對哨兵自己 `disarm()`（延後純 bootout）再 `_arm_sentinel()`
-        （回讀相符 ⇒ 冪等 no-op）⇒ 父退場 1s 後 bootout 拆掉剛認證 `state = running` 的
-        job；bootout log 只有一行、無 bootstrap。載具層修法：**plist 存在即為「應該活著」
-        的 SSOT**——自我 disarm 的延後腳本改成 `bootout; [ -f plist ] && bootstrap×3 + print`
-        （`disarm` 已同步 unlink；之後有人 `arm()` 會重寫 plist ⇒ 父退場那一刻「plist 在」
-        ＝有接班者）。同一支腳本改做 relaunch ⇒ **不會有兩支腳本競態**。"""
+        """DEF-200-267 F2-②：自我 disarm（延後純 bootout）後同名 arm ⇒ 延後腳本須改做 relaunch
+        （plist 存在即為「應該活著」的 SSOT），且不得排第二支腳本。實跡史料搬至
+        CrossPlatform_R212_WakeChain_EnvLayer_Evidence.md〈史料〉。"""
         rc, cred = self._self_disarm_then_arm("AutoSDD_Sentinel_self")
         self.assertEqual(rc, 0, cred)
         scripts = [argv[-1] for argv in self.spawned]
@@ -1061,6 +1058,91 @@ class SelfDisarmTest(unittest.TestCase):
                                 "print": (0, _print_output(900, [], "/a"))}, self.seen)
         self.assertEqual(sb.LaunchdBackend().disarm("AutoSDD_Sentinel_other"), 1)
 
+    def test_list_jobs_hides_a_job_this_process_already_disarmed_inside_itself(self) -> None:
+        """DEF-200-516（7-C）：自拆＝延後 bootout，list 仍列它；它不會再響，不是 INV5 擁有者。"""
+        mine, other = "AutoSDD_SessionResume_self", "AutoSDD_Sentinel_other"
+        os.environ["XPC_SERVICE_NAME"] = mine
+        listing = f"PID\tStatus\tLabel\n-\t0\t{mine}\n-\t0\t{other}\n"
+        sb._run = _fake_runner({"list": (0, listing)}, self.seen)
+        backend = sb.LaunchdBackend()
+        self.assertEqual(backend.disarm(mine), 0)
+        self.assertEqual(backend.list_jobs("AutoSDD_"), [other], "自拆中的不該列；別支活 job 照列")
+        backend.plist_path(mine).write_text("", encoding="utf-8")  # 接班者重寫 plist ⇒ 會重新載入
+        self.assertIn(mine, backend.list_jobs("AutoSDD_"))
+
+
+class ResumeJobSelfDisarmThenSentinelArmTest(unittest.TestCase):
+    """DEF-200-516（7-C）：續航 job 自拆是延後 bootout、`launchctl list` 仍列它 ⇒ INV5 讓位 ⇒
+    尾段後零哨兵（真機 sid 5535e815：53 分鐘）。launchctl 只回固定清單，`arm()` 只記錄。"""
+
+    def setUp(self) -> None:
+        self.tmp, self.armed = Path(tempfile.mkdtemp(prefix="def516_c_")), []
+        self.addCleanup(__import__("shutil").rmtree, self.tmp, ignore_errors=True)
+        self.addCleanup(setattr, sb, "_run", sb._run)
+        sb._SELF_DISARMED.clear()
+        self.addCleanup(sb._SELF_DISARMED.clear)
+        for patcher in (mock.patch.dict(os.environ, {"AUTOSDD_UNATTENDED": "1"}),
+                        mock.patch.object(sb, "LAUNCH_AGENTS_DIR", self.tmp),
+                        mock.patch.object(sb, "select", lambda *_a, **_k: sb.LaunchdBackend()),
+                        mock.patch.object(sb.subprocess, "Popen", lambda *_a, **_k: None),
+                        mock.patch.object(sb.LaunchdBackend, "arm", lambda _s, _plan, task, *_a: (
+                            self.armed.append(task), (0, "cred"))[1]),
+                        mock.patch.object(escalation, "alert", lambda *_a, **_k: {}),
+                        mock.patch.object(escalation, "probe_unclassified", lambda *_a, **_k: {})):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def _job(self, sid: str) -> tuple[Path, object, dict]:
+        """tick 正跑在 launchctl 仍列著的 `AutoSDD_SessionResume_<sid>` 裡。"""
+        task, plan = f"AutoSDD_SessionResume_{sid}", self.tmp / f"{sid}.md"
+        listing = f"PID\tStatus\tLabel\n-\t0\t{task}\n"
+        sb._run, self.armed[:] = _fake_runner({"list": (0, listing)}, []), []
+        plan.write_text("# plan\n", encoding="utf-8")
+        args = planner.build_parser().parse_args(
+            ["--resume-tick", "--plan", str(plan), "--task-name", task])
+        state = planner._base_state(sid, plan, args, "manual", task)
+        state.update(transcript=str(self.tmp / f"{sid}.jsonl"), **{sb.CRED_KEY_LAUNCHD: "cred"})
+        planner.write_relay(plan, state)
+        os.environ["XPC_SERVICE_NAME"] = task
+        return plan, args, state
+
+    def _events(self, plan: Path) -> list[str]:
+        log = planner.endurance_log_path(plan).read_text(encoding="utf-8")
+        return [json.loads(line)["event"] for line in log.splitlines()]
+
+    def test_every_stop_tail_inside_a_resume_job_leaves_the_sentinel_armed(self) -> None:
+        for sid, next_step, changed, band in (
+                ("DONE", "", 0, "free"), ("NO_PROGRESS", "go", 0, "free"),
+                ("QUOTA_STOP", "go", 3, "halt")):
+            with self.subTest(sid):
+                plan, args, state = self._job(sid)
+                body = "## 做了什麼\nx\n## 驗了什麼\ny\n## 卡在哪\nz\n## 下一步指令\n" + next_step
+                (self.tmp / "hb.md").write_text(body, encoding="utf-8")
+                state.update(state="resumed", handback_verdict="written", files_changed=changed,
+                             handback_path=str(self.tmp / "hb.md"), relay_seq=0,
+                             relay_no_progress_streak=0)
+                with mock.patch.object(planner.relay_machine, "current_band",
+                                       lambda *_a, **_k: band), \
+                        contextlib.redirect_stdout(io.StringIO()):
+                    planner.relay_machine.settle_window(
+                        args, state, plan, Path(state["log_path"]), 0)
+                self.assertEqual(self.armed, [planner.sentinel_task_name(sid)], self._events(plan))
+        with self.subTest("對照：沒被本行程拆的別支活 job 照舊讓位（INV5 本意不變）"):
+            plan, args, state = self._job("FOREIGN")
+            args.task_name = planner.DEFAULT_TASK_NAME  # 哨兵名 ≠ 這支續航 job
+            with contextlib.redirect_stdout(io.StringIO()):
+                planner._arm_sentinel(args, Path(state["transcript"]), plan)
+            deferred = "sentinel_single_owner_deferred" in self._events(plan)
+            self.assertEqual((self.armed, deferred), ([], True))
+
+    def test_patrol_handback_inside_a_resume_job_arms_the_sentinel(self) -> None:
+        plan, args, _state = self._job("PATROL")
+        unknown = {"open": False, "kind": guard.LIMIT_UNKNOWN, "rc": 0, "text": "x", "source": "x"}
+        with mock.patch.object(planner, "probe_quota", lambda *_a, **_k: unknown), \
+                contextlib.redirect_stdout(io.StringIO()):
+            planner._resume_tick(args)
+        self.assertEqual(self.armed, [planner.sentinel_task_name("PATROL")], self._events(plan))
+
 
 class CalendarMomentReachesThePlistTest(unittest.TestCase):
     """🔴 R83-B ⑤：`arm_reset` 要求的**時刻**必須真的到得了 launchd，而憑證必須說實話。
@@ -1079,19 +1161,19 @@ class CalendarMomentReachesThePlistTest(unittest.TestCase):
         self.task = "AutoSDD_Sentinel_cal"
         self.now = datetime.now().astimezone()
 
-    def _argv(self) -> list[str]:
-        return sb.LaunchdBackend()._argv(planner, str(self.plan), self.task,
-                                        planner.SENTINEL_TICK)
+    def _argv(self, tick: str = planner.SENTINEL_TICK) -> list[str]:
+        return sb.LaunchdBackend()._argv(planner, str(self.plan), self.task, tick)
 
-    def _arm(self, at, readback_cal: dict | None, *, print_rc: int = 0):
+    def _arm(self, at, readback_cal: dict | None, *, print_rc: int = 0,
+             tick: str = planner.SENTINEL_TICK):
         """武裝一次。`readback_cal` ＝**launchd 假裝回讀到**的 calendar（注入縫）。"""
-        out = _print_output(planner.SENTINEL_INTERVAL_SECONDS, self._argv(),
+        out = _print_output(planner.SENTINEL_INTERVAL_SECONDS, self._argv(tick),
                             str(sb.LaunchdBackend().plist_path(self.task)),
                             calendar=readback_cal)
         sb._run = _fake_runner({"-lint": (0, ""), "print": (print_rc, out),
                                 "bootstrap": (0, ""), "bootout": (0, "")}, self.seen)
         return sb.LaunchdBackend().arm(str(self.plan), self.task,
-                                       "(Get-Date).AddHours(5)", planner.SENTINEL_TICK, at)
+                                       "(Get-Date).AddHours(5)", tick, at)
 
     def _plist(self) -> dict:
         return plistlib.loads((sb.LAUNCH_AGENTS_DIR / f"{self.task}.plist").read_bytes())
@@ -1109,6 +1191,22 @@ class CalendarMomentReachesThePlistTest(unittest.TestCase):
         # 憑證必須把 launchd 自報的那個 descriptor 講出來，而不是含糊帶過。
         self.assertIn("StartCalendarInterval", cred)
         self.assertIn("launchd 自報", cred)
+
+    def test_a_resume_job_carries_both_triggers_which_is_why_the_tick_must_gate(self) -> None:
+        """DEF-200-516：續航 plist 同時帶 interval 與 calendar ⇒ interval 先叫醒 tick，須有閘。"""
+        self.task = "AutoSDD_SessionResume_cal"
+        at = self.now + timedelta(minutes=56)
+        want = sb._calendar_of(at, planner.SENTINEL_INTERVAL_SECONDS)
+        rc, cred = self._arm(at, want, tick=planner.RESUME_TICK)
+        self.assertEqual(rc, 0, cred)
+        body = self._plist()
+        self.assertEqual(body["StartInterval"], planner.SENTINEL_INTERVAL_SECONDS)
+        self.assertEqual(body["StartCalendarInterval"], want)
+        self.assertEqual([a for a in self.seen if "bootout" in a or "bootstrap" in a], [],
+                         "重掛同一時刻必須走冪等路徑（tick 就跑在這支 job 裡，bootout 會殺自己）")
+        self.assertTrue(hasattr(planner.relay_machine, "reset_not_reached"),
+                        "續航 plist 同時有 interval 與 calendar ⇒ tick 必須有時間閘；"
+                        "要拿掉底盤請先重審 DEF-200-516")
 
     def test_two_different_deadlines_no_longer_produce_the_same_plist(self) -> None:
         """🔴 這一條是修前那次逐位元組實測的**反向鎖**：相異指紋數必須是 2，不是 1。"""
@@ -1153,12 +1251,9 @@ class CalendarMomentReachesThePlistTest(unittest.TestCase):
                          "巡邏走到了非冪等路徑 ⇒ 每一次 tick 都會動排程器")
 
     def test_a_live_calendar_inside_the_last_interval_is_not_torn_down(self) -> None:
-        """DEF-200-268 F5（2026-09-05 17:57:03 實跡）：`arm_reset` 連續七個 tick 把 18:02
-        排進 calendar（launchd 六次自報 descriptor），截止前最後一格 `_calendar_of` 因
-        `(at-now) ≤ interval` 回 None ⇒ 「要求無、回讀有」判不符 ⇒ bootout+bootstrap 把
-        18:02 拆掉、`StartInterval` 重計 ⇒ 18:12:04 才醒（死等 12 分 4 秒，檔頭「≤60 秒」
-        在此格為假）。修法：live calendar 仍在未來且距今 ≤ interval ⇒ 視為相符、保留、
-        不 relaunch；plist 重寫時也要把它帶著（重開機後仍是同一份）。"""
+        """DEF-200-268 F5：截止前最後一格 `_calendar_of` 回 None，不得把仍在未來的 live calendar
+        判成不符而拆掉（`StartInterval` 重計）；須保留、不 relaunch、plist 重寫也帶著。實跡史料搬至
+        CrossPlatform_R212_WakeChain_EnvLayer_Evidence.md〈史料〉。"""
         popen = subprocess.Popen
         spawned: list = []
         subprocess.Popen = lambda argv, **kw: spawned.append(argv)  # type: ignore[assignment]

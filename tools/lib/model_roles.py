@@ -1,4 +1,5 @@
-"""模型角色（improving_113 W1）：主控／子代理／降級三個角色的模型，由 `.env` 的三個鍵設定。
+"""模型角色（improving_113 W1）：主控／子代理／降級三個角色的模型，由 `env.shared`／`.env`
+的三個鍵設定（`env.shared` 跨機同步、本機 `.env` 放例外；載入鏈見 `quota_env_layers`）。
 
 純函式、零 I/O：env 由呼叫端注入（`quota_gate.policy_env()` 或行程的 `os.environ`），本檔
 不讀環境、不碰檔案——hook 鏈上的人話面（`quota_messages`／`session_brief`）與喚醒 argv 組裝
@@ -12,7 +13,7 @@
 三個角色與消費端：
   · 主控 `AUTOSDD_MODEL_HELMSMAN`：喚醒 argv 的 `--model`（`model_argv`）。空＝不帶旗標，沿用
     存檔／設定鏈（現況行為；非空預設會讓沒有該模型存取的機器喚醒靜默失敗）。互動主視窗自己
-    的模型 `.env` 管不到，本檔只管「本 repo 程式自己 spawn 的窗口」。
+    的模型 `env.shared`／`.env` 管不到，本檔只管「本 repo 程式自己 spawn 的窗口」。
   · 子代理 `AUTOSDD_MODEL_SUBAGENT`：喚醒窗口環境的 `CLAUDE_CODE_SUBAGENT_MODEL`（`child_env`）。
     官方序位＝呼叫時的 model 參數 ＞ 子代理定義的 frontmatter ＞ 本變數 ＞ 主對話模型，所以
     它只是預設；刻意不設 `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`（設了 Agent 工具就沒有 model 參數，
@@ -113,9 +114,9 @@ def roles_line(roles: ModelRoles, problems: Sequence[str] = ()) -> str:
     """三角色設定行（一行人話，無縮排無換行；`--pace` 與 SessionStart 簡報共用這一份字面）。"""
     helm = roles.helmsman or "（空＝沿用存檔／設定鏈）"
     sub = f"{INHERIT}（不注入，沿用視窗模型）" if roles.subagent == INHERIT else roles.subagent
-    line = (f"模型角色（.env AUTOSDD_MODEL_*）：主控={helm}｜子代理={sub}"
-            f"｜降級={roles.downgrade}（主控值只管無人喚醒窗口；互動視窗自己的模型 .env 管不到，"
-            "派工請明寫 model:）")
+    line = (f"模型角色（env.shared／.env AUTOSDD_MODEL_*）：主控={helm}｜子代理={sub}"
+            f"｜降級={roles.downgrade}（主控值只管無人喚醒窗口；互動視窗自己的模型"
+            " env.shared／.env 管不到，派工請明寫 model:）")
     if problems:
         line += f" ⚠️ 有 {len(problems)} 個設定值不合法、已退回預設：{'；'.join(problems)}"
     return line

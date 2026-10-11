@@ -841,6 +841,11 @@ if __name__ == "__main__":  # pragma: no cover
     init_utf8_streams()
     if "--print-env-example" in sys.argv[1:]:
         sys.stdout.write(render_env_example())
+    elif sys.argv[1:2] == ["--env-doctor"]:
+        import quota_env_layers
+
+        raise SystemExit(quota_env_layers.doctor_cli(sys.argv[2:]))
     else:
-        sys.stderr.write("用法：python tools/lib/quota_policy.py --print-env-example\n")
+        sys.stderr.write("用法：python tools/lib/quota_policy.py --print-env-example"
+                         "｜--env-doctor [--fix]\n")
         raise SystemExit(2)

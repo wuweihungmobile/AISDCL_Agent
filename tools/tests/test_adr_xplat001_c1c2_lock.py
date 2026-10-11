@@ -619,13 +619,13 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 393,
     "_ps_engine.py": 83,
     "test_act_local_runner_image.py": 307,
-    "test_adr_xplat001_c1c2_lock.py": 8729,
+    "test_adr_xplat001_c1c2_lock.py": 8744,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 4074,
     "test_bash32_compat.py": 979,
     "test_bash_probe_spec_contract.py": 859,
-    "test_block_destructive_git_r83.py": 3422,
+    "test_block_destructive_git_r83.py": 3424,
     "test_bootstrap_core.py": 436,
     "test_bootstrap_ps1.py": 160,
     "test_check_archive_required.py": 160,
@@ -639,7 +639,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_claim_provenance_r86.py": 2001,
     "test_clean_venv_carrier.py": 281,
     "test_component_sanitizer_shared_layer_lock.py": 274,
-    "test_context_budget_guard.py": 14736,
+    "test_context_budget_guard.py": 14923,
     "test_context_window_parity.py": 325,
     "test_cpu_budget.py": 428,
     "test_defect_id_reference_integrity.py": 276,
@@ -657,7 +657,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_hook_carrier_symlink.py": 153,
     "test_install_statusline.py": 446,
     "test_install_windows_nightly.py": 1352,
-    "test_mac_endurance_r83.py": 2210,
+    "test_mac_endurance_r83.py": 2305,
     "test_mac_readiness_r82.py": 626,
     "test_macos_smoke_skip_honesty.py": 221,
     "test_maturity_criteria_r79.py": 412,
@@ -675,6 +675,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_ps51_compat.py": 599,
     "test_ps_engine_ssot.py": 899,
     "test_python_c_percent_shim.py": 113,
+    "test_quota_env_layers.py": 328,
     "test_quota_policy.py": 4526,
     "test_quota_reconcile_gap.py": 145,
     "test_recovery_hint_passes_ps_lint.py": 103,
@@ -687,7 +688,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_schedule_capability_parity.py": 596,
     "test_script_scan_surface_ssot.py": 376,
     "test_sdd_hook_router_r158.py": 189,
-    "test_sentinel_tick_e2e_r145.py": 308,
+    "test_sentinel_tick_e2e_r145.py": 408,
     "test_session_brief.py": 1321,
     "test_single_venv_identity.py": 162,
     "test_skip_ceiling_ratchet_direction.py": 719,
@@ -697,7 +698,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_stdio_utf8.py": 76,
     "test_subprocess_encoding_hygiene.py": 1542,
     "test_tlc_runner_timeout.py": 292,
-    "test_wake_chain_halt_r278.py": 1067,
+    "test_wake_chain_halt_r278.py": 1079,
     "test_windows_forbidden_filename_parity.py": 941,
     "test_windows_nightly_anchor_parity.py": 119,
     "test_windows_smoke_heartbeat_doc_sync.py": 197,
@@ -2648,6 +2649,14 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "budget_guard.py +20（模組 pin 補出廠政策＋鎖）＋test_wake_chain_halt_r278.py +2＋本檔旁註"
      "搬遷 −22（接鏈列 R101～R103 七段原文）＋本表自身漂移；回歸鎖軌不申報；逐檔清單見 "
      "CrossPlatform_R211_ZeroTrust_Audit_113.md〈八〉。"),
+    ("R212", 115633, 116372, +739,  # round-label-ok
+     "[非淨減法輪][回歸鎖軌申報 309（＝軌上限），主軌 430 ≤ 516（款(11) 連升第 2 輪；R211 "
+     "為第 1 輪，R213 起主−軌必須 ≤ 0）] DEF-200-516 家族五缺陷（A-1 時間閘／7-A／7-B／7-C／"
+     "7-E）與 DEF-200-520 env.shared 額度參數檔分層：test_quota_env_layers.py 新鎖檔＋ test_"
+     "context_budget_guard.py／test_mac_endurance_r83.py／test_sentinel_tick_e2e_r145.py／te"
+     "st_wake_chain_halt_r278.py 回歸鎖擴充＋ test_block_destructive_git_r83.py +2（D-1 測試"
+     "半）＋本表自身漂移（重釘列、回歸鎖軌同輪列、到期兌現列 (212, 516) 並重新武裝 214／515"
+     "、接鏈列）。逐檔清單住 CrossPlatform_R212_WakeChain_EnvLayer_Evidence.md〈二〉。"),
 )
 
 
@@ -2675,7 +2684,7 @@ _REPIN_NET_CAP_SCHEDULE: tuple[tuple[int, int], ...] = (
     (157, 537), (159, 536), (163, 535), (165, 534), (167, 533), (169, 532), (171, 531),
     (173, 530), (175, 529), (177, 528), (180, 527), (182, 526), (184, 525), (186, 524),
     (188, 523), (190, 522), (192, 521), (194, 520), (196, 519), (208, 518),
-    (210, 517),
+    (210, 517), (212, 516),
 )
 #: 生效點＝首列輪號、現行上限＝末列上限，**皆由表導出不另立常數**（R73 判例：一份知識一個家）。
 _REPIN_ROUND_CAP_SINCE = _REPIN_NET_CAP_SCHEDULE[0][0]
@@ -3141,6 +3150,10 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "DEF-200-507／DEF-200-508 回歸鎖：test_model_roles.py（角色鍵值域、argv 位置、child_env"
      "、inherit 出口）＋ test_resume_cost.py（量不到不寫 0、spawn 錨、AST 防成環、settle_win"
      "dow 接線）。見 CrossPlatform_R211_ZeroTrust_Audit_113.md〈二〉〈五〉。"),
+    ("R212", 309,  # round-label-ok
+     "DEF-200-516 家族五缺陷（A-1 時間閘、7-A／7-B／7-C／7-E）與 DEF-200-520（env.shared "
+     "載入鏈、--env-doctor）回歸鎖：test_quota_env_layers.py 新鎖檔＋既有鎖檔擴充。見 Cros"
+     "sPlatform_R212_WakeChain_EnvLayer_Evidence.md〈二〉。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -3255,8 +3268,9 @@ def net_cap_schedule_problems(
 #: R196 兌現：cap 降至目標 519，重新武裝 518 round-label-ok
 #: R208 兌現：cap 降至目標 518，重新武裝 517 round-label-ok
 #: R210 兌現：cap 降至目標 517，重新武裝 516 round-label-ok
-_REPIN_NET_CAP_DUE_ROUND = 212  # round-label-ok：到期輪＝兌現輪+2（lookahead 判準的活體對照）
-_REPIN_NET_CAP_DUE_TARGET = 516  # 步伐 1，嚴格低於 cap 517（本輪重新武裝） round-label-ok
+#: R212 兌現：cap 降至目標 516，重新武裝 515 round-label-ok
+_REPIN_NET_CAP_DUE_ROUND = 214  # round-label-ok：到期輪＝兌現輪+2（lookahead 判準的活體對照）
+_REPIN_NET_CAP_DUE_TARGET = 515  # 步伐 1，嚴格低於 cap 516（本輪重新武裝） round-label-ok
 
 #: DEF-200-121：到期輪自身的後設鎖——`_REPIN_NET_CAP_DUE_ROUND` 只准落在「最近稽核輪
 #: ＋ lookahead」以內（歷史母體 85..113 的到期輪一律＝上一次兌現輪 +2）。可延期的到期日
@@ -3323,10 +3337,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 335
+_REPIN_LOG_FROZEN_PREFIX_LEN = 336
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "f5cb9e3fe7d6735062925b7b2e8f014280c0c086da3788f46ae9fb18a0663f18")
+    "e62c2eaa57e5efd6b0be7e5cd418cf992c1696f4a472507238a3f84a93784f2a")
 
 
 def repin_log_history_digest(
@@ -3670,6 +3684,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R211", "8fea64d22cb1", "c5585ef96d1a", "DEF-200-504"),  # round-label-ok
     ("R211", "c5585ef96d1a", "ba458f1260a8", "DEF-200-509"),  # round-label-ok
     ("R211", "ba458f1260a8", "f5cb9e3fe7d6", "DEF-200-519"),  # round-label-ok
+    ("R212", "f5cb9e3fe7d6", "e62c2eaa57e5", "DEF-200-516"),  # round-label-ok
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

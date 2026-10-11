@@ -469,6 +469,7 @@ on:
       # 消費 ⇒ 只改它時本 workflow 的 unittest step 也必須跑（同一支判準）。
       - "tools/lib/skip_profile_key.py"
       - ".env.example"
+      - "env.shared"
       - "tools/_cli_flags.py"
       - "tools/check_scheduled_task_drift.py"
       - "tools/scheduled_task_expectations.json"
@@ -597,6 +598,7 @@ on:
       - "tools/lib/failure_log_rotation.py"
       - "tools/lib/ledger_staleness.py"
       - "tools/lib/quota_policy_env.py"
+      - "tools/lib/quota_env_layers.py"
       - "tools/lib/schedule_backend_calendar.py"
       - "tools/lib/sentinel_lifecycle_arm.py"
       - "tools/lib/worktree_paths.py"
@@ -914,6 +916,7 @@ on:
       # 消費 ⇒ 只改它時本 workflow 的 unittest step 也必須跑（同一支判準）。
       - "tools/lib/skip_profile_key.py"
       - ".env.example"
+      - "env.shared"
       - "tools/_cli_flags.py"
       - "tools/check_scheduled_task_drift.py"
       - "tools/scheduled_task_expectations.json"
@@ -993,6 +996,7 @@ on:
       - "tools/lib/failure_log_rotation.py"
       - "tools/lib/ledger_staleness.py"
       - "tools/lib/quota_policy_env.py"
+      - "tools/lib/quota_env_layers.py"
       - "tools/lib/schedule_backend_calendar.py"
       - "tools/lib/sentinel_lifecycle_arm.py"
       - "tools/lib/worktree_paths.py"

@@ -122,7 +122,8 @@ def halt_resets_at(decision: quota_policy.Decision) -> object:
 
 #: DEF-200-278／INV-H2：必須與 `tools/session_resume_planner.py::RESET_SKEW_SECONDS`
 #: 同值——兩檔不能互相 import（單向規則，見本檔與 `quota_gate.py` 檔頭），故各自具名
-#: ＋parity 測試守同值（先例：`test_find_git_bash_parity.py` 對 `_extract_py_candidates`）。
+#: ＋parity 測試守同值（`test_wake_chain_halt_r278.py` 的
+#: `test_the_halt_reset_skew_is_the_planner_reset_skew`；先例：`test_find_git_bash_parity.py`）。
 HALT_RESET_SKEW_SECONDS = 120
 
 
@@ -172,12 +173,17 @@ def halted_pace_text(halted: str, state: quota_policy.QuotaState, now: datetime,
 # 的時刻 ⇒ mtime 天生可能晚於 `at` 幾十毫秒到幾秒。反駁者實測：mtime 晚 20ms ⇒ 誤判
 # 過期、回 `None`（哨兵因此喪失 arm_reset 快路徑、落回 900s 巡邏）；commit c4a7e00 當時
 # 只把測試治具的 mtime 撥早 5 秒規避現象，生產碼本身未動——本常數才是那一輪缺的另一半。
-# 本容忍窗判的是「session 是否真的自行續跑」：真續跑會持續產生活動、遠超這個量級，
-# 10 秒只吃時序雜訊，不吃真實續跑。
+# 🔴 DEF-200-516（7-E）：現只用於**沒有 reset** 的標記（無兌現時刻可比）；有 reset 的標記改看
+# 兌現時刻之後的活動，見 `halt_verdict`——halt 通知自己說收斂型工具照常可用，標記後 10 秒外必有
+# 收斂活動，真機 5/5 標記在 14.5～430 s 內被判過期。這裡的 10 秒只吃時序雜訊。
 # 🔴 與另外兩個名字相近的容忍窗語意不同、不得混用：`HALT_RESET_SKEW_SECONDS`
 # （120s，reset 排程延遲的容忍）、`HALT_MARKER_MAX_CLOCK_SKEW_SECONDS`
 # （600s，自檢牆鐘漂移的容忍）——三者各守不同的時脈落差，彼此不可互相取代。
 HALT_MARKER_ACTIVITY_SKEW_SECONDS = 10
+
+#: 必須與 `session_resume_planner.SENTINEL_INTERVAL_SECONDS` 同值（兩檔不能互相 import，同
+#: `HALT_RESET_SKEW_SECONDS` 的 parity 手法）：PRD §4.5.7 R-4.5.7-1「主控閒置」門檻＝巡邏間隔。
+HALT_QUIESCE_SECONDS = 900
 
 
 def halt_verdict(halt_marker: dict | None, idle_seconds: float | None,
@@ -185,28 +191,33 @@ def halt_verdict(halt_marker: dict | None, idle_seconds: float | None,
     """halt 標記 → 既有 `arm_reset`／`probe`／`escalate` 判決（純函式，同本檔通篇紀律）。
 
     `None`＝標記不適用，呼叫端（`sentinel_decide`）落回既有的 idle-based 判定。
-    「最新活動晚於標記**超過** `HALT_MARKER_ACTIVITY_SKEW_SECONDS` 容忍窗」代表 session
-    已自行續跑過，此時標記過期——不判定，否則哨兵會永遠卡在 `probe`（那是本輪要修的
-    無做工空轉的鏡像新形態）；容忍窗只吃 hook 落盤與逐字稿 append 之間的先天時序雜訊，
-    不放大成「已續跑」的誤判空間（見上方常數定義的 SA-04 立案）。
+    標記失效＝**兌現時刻**（`reset_at + HALT_RESET_SKEW_SECONDS`）之後逐字稿仍有新活動 ⇒ session
+    已自行續跑（人或前一次喚醒），不判定，否則哨兵會永遠卡在 `probe`；兌現時刻之前的活動（halt 後
+    的收斂工作）不算。時刻已到而 session 在一個巡邏間隔內仍有活動 ⇒ 不叫醒（防雙窗），明說理由續巡。
     """
     if not halt_marker:
         return None
-    marker_at = _aware(halt_marker.get("at"))
-    if (marker_at is not None and idle_seconds is not None
-            and (now.timestamp() - idle_seconds)
-                > marker_at.timestamp() + HALT_MARKER_ACTIVITY_SKEW_SECONDS):
-        return None
+    last = None if idle_seconds is None else now.timestamp() - idle_seconds  # 最新逐字稿活動
     reset_at = _aware(halt_marker.get("reset_at"))
     if reset_at is None:
+        marker_at = _aware(halt_marker.get("at"))
+        if (marker_at is not None and last is not None
+                and last > marker_at.timestamp() + HALT_MARKER_ACTIVITY_SKEW_SECONDS):
+            return None  # 無 reset 就沒有兌現時刻可比：沿用「標記後仍有活動 ⇒ 主控在場」舊判準
         return {"action": "escalate", "at": None,
                 "reason": f"halt 標記存在但解不出 reset 時刻 ⇒ 拒絕用猜的重排：{halt_marker!r}"}
     fire_at = reset_at + timedelta(seconds=HALT_RESET_SKEW_SECONDS)
+    if last is not None and last > fire_at.timestamp():
+        return None
     if fire_at > now:
         return {"action": "arm_reset", "at": fire_at, "reset_at": reset_at,
                 "reset_source": "halt-marker",
                 "reason": f"偵測到自願 halt 標記；觀測 reset={reset_at} 尚未到 ⇒ "
                           "要求排程器改在那個時刻醒（本次零 token）"}
+    if idle_seconds is not None and idle_seconds < HALT_QUIESCE_SECONDS:
+        return {"action": "patrol", "at": now + timedelta(seconds=HALT_QUIESCE_SECONDS),
+                "reason": f"自願 halt 標記的兌現時刻已到，但逐字稿 {idle_seconds:.0f}s 前仍有更新"
+                          " ⇒ 不叫醒（防雙窗），續巡、下一輪再判（本次零 token）"}
     return {"action": "probe", "at": None,
             "reason": f"偵測到自願 halt 標記；觀測 reset={reset_at} 已過 ⇒ 花一次探測確認額度回來了沒"}  # noqa: E501
 
@@ -534,8 +545,8 @@ def throttle_horizon_line(decision: quota_policy.Decision, now: datetime,
     if decision.cap is not None and own is not None and decision.cap < own:
         dwell = int(quota_policy.DEFAULT_POLICY.min_dwell_seconds)
         return (f"   ⏳ 目前 cap={decision.cap} 由遲滯維持（這條軸自己的 cap 是 {own}）：各軸水位"
-                f"不變的話，每個最小停留時間（出廠 {dwell} 秒，可由 .env 調）最多放寬 1 階，"
-                "不是要等到那條軸的 reset。\n")
+                f"不變的話，每個最小停留時間（出廠 {dwell} 秒，可由 env.shared 或 .env 調）"
+                "最多放寬 1 階，不是要等到那條軸的 reset。\n")
     # 修4：halt 帶改讀多軸選擇——撞牆期間人唯一持續看得到的就是這一則（R89 判例），
     # binding 無 reset 時印「不會自己解除」而喚醒其實已武裝＝訊息說假話。
     resets_at = (halt_resets_at(decision) if decision.band == quota_policy.BAND_HALT

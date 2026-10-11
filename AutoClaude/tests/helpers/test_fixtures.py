@@ -5,17 +5,16 @@
 """
 from __future__ import annotations
 
-import pytest
 import yaml
 
 from autoclaude.core.kernel import PlaybookKernel
 from autoclaude.core.ports.brain import CorrectionResult
 from autoclaude.core.services.auto_resume import AutoResumeService
 from autoclaude.models.playbook import PlaybookTask
+from autoclaude.utils.config import AppConfig
 
 from .fake_ports import FakeBrain, FakeEvaluator, FakeExecutor
 from .kernel_fixtures import make_kernel, make_service
-
 
 # ──────────────────────────────────────────────
 # FakeExecutor
@@ -219,7 +218,12 @@ class TestMakeService:
         pb_path = tmp_path / "test.yaml"
         pb_path.write_text(yaml.dump(pb, allow_unicode=True), encoding="utf-8")
 
-        service, _ = make_service(eval_pass=False)
+        # DEF-200-518：Kernel 的失敗型升級現在會把 EscalationDump 落到 checkpoint_dir；
+        # 預設值是相對 cwd 的 "checkpoints"，不隔離就會把 dump 灑進開發者真實的
+        # AutoClaude/checkpoints/（git-ignored 但每跑一次全套就多一份）。
+        cfg = AppConfig()
+        cfg.checkpoint_dir = str(tmp_path / "checkpoints")
+        service, _ = make_service(eval_pass=False, config=cfg)
         result = service.run(str(pb_path))
 
         assert not result.success

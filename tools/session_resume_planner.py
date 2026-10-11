@@ -618,8 +618,8 @@ def sentinel_decide(event: dict | None, handled_through: object,
     ——五個裡唯一**會花錢**的分支 ⇒ 照 docstring 去數的人會把新事件命名成 `probe`
     而撞名，正好摧毀「掛回巡邏 vs 終止在痕跡上一眼可辨」這件事。
     DEF-200-278／INV-H2：`halt`＝自願停機標記（見 `quota_gate.read_halt_marker`）。
-    真的撞線事件（上面那支）優先於它；它自己又優先於下面的 idle-based patrol/disarm
-    ——自願停機不會讓逐字稿繼續更新，沿用 patrol 分支等於永遠等到 6 小時後靜默解除。
+    真的撞線事件（上面那支）優先於它；它自己又優先於下面的 idle-based patrol/disarm。
+    標記在兌現時刻（reset＋skew）後仍有活動才過期；到點須靜止≥HALT_QUIESCE_SECONDS 才 probe。
     """
     if event and str(event.get("timestamp") or "") > str(handled_through or ""):
         if event["kind"] == guard.LIMIT_SPEND:
@@ -1281,6 +1281,14 @@ def _resume_tick(args) -> int:
     problems = relay_problems(state)
     if problems:
         return _abort_and_unregister(log, args.task_name, "；".join(problems), "aborted", "❌ 狀態塊體檢不過：\n  - " + "\n  - ".join(problems))  # noqa: E501
+
+    # DEF-200-516：被叫醒 ≠ 時刻已到（launchd 的 `StartInterval` 會早於 calendar 叫醒本 tick）。
+    # reset 還沒到 ⇒ 不探測、不 spawn、不動計數，依 reset 重掛等待（PRD §4.5.10「去等一個事件」）。
+    # 閘須在開場留痕之後、探測之前；不得純早退（每條 return 都要處置排程，見 `_TICK_DISPOSALS`）。
+    if (early := relay_machine.reset_not_reached(state, datetime.now().astimezone(), RESET_SKEW_SECONDS)) is not None:  # noqa: E501
+        due = early.pop("due"); rc, moment = _register_and_record(plan, state, due, RESUME_TICK)  # noqa: E702
+        append_log(log, "resume_tick_early", due_at=due.isoformat(), rc=rc, credential=moment, **early)  # noqa: E501
+        _alert_on_rearm_failure(state, plan, rc, "等待 reset 重掛失敗"); return rc  # noqa: E702
 
     verdict = probe_quota(args.probe_command)
     # DEF-200-266 L4：`text`／`source` 必記（此前只記 rc/kind/open ⇒ 假陰性那次「哪個子字串命中」

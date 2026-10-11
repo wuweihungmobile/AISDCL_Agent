@@ -592,9 +592,17 @@ class LaunchdBackend:
     # 兩家至少在**用哪一個原語列舉**這件事上同源（劃界：那一家仍自持 legacy load/unload
     # 與自己的存在性判準，見檔頭〈射程〉第二點）。複審當回合實測 `launchctl list` 對現存
     # 哨兵**查得到**（不是假陰性），所以這一側的 `None` 只會來自 launchctl 真的失敗。
+    # 🔴 DEF-200-516（7-C）回「邏輯現況」而非 launchctl 此刻現況：本行程已對自己排了延後
+    # bootout（`_SELF_DISARMED`）且 plist 沒被接班者重寫的 label，父行程一退場就會被拆 ⇒ 它不是
+    # INV5 該讓位的「另一個擁有者」（真機 sid 5535e815：讓位後 53 分鐘零 job）。Windows 的
+    # `disarm` 本來就立即生效，這裡只是把 mac 的列舉語意對齊它；隱藏條件不得放寬（別行程的、
+    # plist 仍在的、別名的一律照列）。
     def list_jobs(self, prefix: str) -> list[str] | None:
         rc, out = _run(["launchctl", "list"])
-        return None if rc != 0 else _labels_with_prefix(out, prefix)
+        if rc != 0:
+            return None
+        return [job for job in _labels_with_prefix(out, prefix)
+                if not (job in _SELF_DISARMED and not self.plist_path(job).exists())]
 
     def evidence_hint(self) -> str:
         return ("憑證是 `launchctl print` 的 rc（0＝在、"

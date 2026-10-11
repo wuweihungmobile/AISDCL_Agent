@@ -13,7 +13,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from ...core.hookspec import (
     EscalationDumpedResult,
@@ -22,7 +21,6 @@ from ...core.hookspec import (
     PersistenceResult,
 )
 from ...models.counter_snapshot import CounterSnapshot
-
 from ._builder import build_checkpoint_from_ctx
 
 logger = logging.getLogger("autoclaude.plugins.checkpoint")
@@ -54,7 +52,7 @@ def on_pre_run(plugin, ctx: HookContext) -> None:
         ))
 
 
-def save_interrupt(plugin, ctx: HookContext) -> Optional[PersistenceResult]:
+def save_interrupt(plugin, ctx: HookContext) -> PersistenceResult | None:
     payload = ctx.payload or {}
     cp = build_checkpoint_from_ctx(plugin, ctx, payload)
     if cp is None:
@@ -74,7 +72,7 @@ def save_interrupt(plugin, ctx: HookContext) -> Optional[PersistenceResult]:
         )
 
 
-def save_token_halt(plugin, ctx: HookContext) -> Optional[PersistenceResult]:
+def save_token_halt(plugin, ctx: HookContext) -> PersistenceResult | None:
     payload = ctx.payload or {}
     if not payload.get("request_halt", False):
         return None
@@ -99,7 +97,7 @@ def save_token_halt(plugin, ctx: HookContext) -> Optional[PersistenceResult]:
         )
 
 
-def save_evolution(plugin, ctx: HookContext) -> Optional[PersistenceResult]:
+def save_evolution(plugin, ctx: HookContext) -> PersistenceResult | None:
     payload = ctx.payload or {}
     cp = build_checkpoint_from_ctx(plugin, ctx, payload)
     if cp is None:
@@ -119,7 +117,7 @@ def save_evolution(plugin, ctx: HookContext) -> Optional[PersistenceResult]:
         )
 
 
-def on_persistence_request(plugin, ctx: HookContext) -> Optional[PersistenceResult]:
+def on_persistence_request(plugin, ctx: HookContext) -> PersistenceResult | None:
     """W3：通用持久化請求入口（替代 imperative 方法的 EventBus 路徑）。
 
     payload schema:
@@ -167,7 +165,7 @@ def on_persistence_request(plugin, ctx: HookContext) -> Optional[PersistenceResu
 
 def on_escalation_dump_request(
     plugin, ctx: HookContext,
-) -> Optional[EscalationDumpedResult]:
+) -> EscalationDumpedResult | None:
     """W3：ESCALATION dump 持久化請求入口。
 
     SD_05 W3 三方審查 Arch-C1 / SD-C1 修：dump_path 改為從 plugin._last_dump_path
@@ -175,6 +173,18 @@ def on_escalation_dump_request(
     """
     payload = ctx.payload or {}
     tracker = payload.get("tracker")
+    history = payload.get("failure_history")
+    if tracker is None and history and ctx.task is not None:
+        # DEF-200-518：Kernel（core/）不得 import execution/，只送 failure_history（list[dict]）；
+        # 這裡 plugin 層重建 tracker（同 ConvergencePlugin 模式 C）。🔴 必須函式內 lazy import：
+        # plugins.checkpoint → execution/__init__ → playbook_runner → plugins.checkpoint 成環。
+        from ...execution.failure_tracker import FailureTracker
+        tracker = FailureTracker(ctx.task.step_id)
+        for rec in history:
+            tracker.record(
+                attempt=rec.get("attempt", 0), failure_reason=rec.get("failure_reason", ""),
+                eval_output=rec.get("eval_output", ""), exit_code=rec.get("exit_code", 0),
+            )
     if tracker is None or ctx.task is None:
         logger.warning(
             "ON_ESCALATION_DUMP_REQUEST 缺 tracker/task，已忽略"
@@ -182,12 +192,13 @@ def on_escalation_dump_request(
             ctx.task.step_id if ctx.task else "<no-task>",
         )
         return None
-    plugin.save_escalation_dump(
+    dump = plugin.save_escalation_dump(
         tracker=tracker,
         task=ctx.task,
         playbook_path=payload.get("playbook_path", ""),
         final_eval_output=str(payload.get("final_eval_output", "")),
-        checkpoint_dir=str(payload.get("checkpoint_dir", "")),
+        # 🔴 不可沿用 `payload.get("checkpoint_dir", "")`：Kernel 不帶目錄，"" 會把 dump 寫進 cwd
+        checkpoint_dir=str(payload.get("checkpoint_dir") or plugin._mgr.checkpoint_dir),
         log_dir=str(payload.get("log_dir", "")),
         human_hint=str(payload.get("human_hint", "")),
         notify_callback=payload.get("notify_callback"),
@@ -195,4 +206,5 @@ def on_escalation_dump_request(
     return EscalationDumpedResult(
         contributor=plugin.name(),
         dump_path=plugin._last_dump_path,
+        dump=dump,
     )

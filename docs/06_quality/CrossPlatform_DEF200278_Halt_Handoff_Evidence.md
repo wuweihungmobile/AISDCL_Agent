@@ -72,7 +72,7 @@ transcript.is_file() else ""`——只要 `plan` 是空字串，不論是「沒�
 | INV-H1a | `tools/lib/quota_gate.py::resolve_halt_transcript()` | payload 缺 `transcript_path`（或給的路徑讀不到檔）時，以 `CLAUDE_CODE_SESSION_ID`＋`probe.audit_session.project_transcript_dir()`（唯一實作，複用不新抄）還原路徑；仍失敗回 `(None, "unavailable")` |
 | INV-H1c | `quota_gate.py::halt_marker_path/write_halt_marker/read_halt_marker` | 落一份持久標記 `~/.autosdd/traces/halt_<sid>.json`（`endurance_env.trace_dir()` SSOT），內容＝`{sid, band, binding, reset_at, at, transcript, resolved_source}` |
 | INV-H1e | `quota_gate.py::quota_halt_actions()` | `not_armed_reason` 依實際成因分流（逐字稿不可得／`plan_writer` 失敗／spawn 失敗三選一），不再永遠印同一句話；`quota_messages.py::quota_halt_message()` 改讀這個新欄位（缺席時仍保留舊文案，向下相容既有測試字面斷言） |
-| INV-H2 | `tools/lib/quota_messages.py::halt_verdict()` | 純函式：halt 標記 → `arm_reset`／`probe`／`escalate`（與既有 429 分支重用完全相同的 3 個 action 字面，不新增第 6 個）。「最新活動晚於標記」（`now - idle_seconds > marker_at`）⇒ 回 `None`＝標記過期，避免哨兵永遠卡在 `probe` |
+| INV-H2 | `tools/lib/quota_messages.py::halt_verdict()` | 純函式：halt 標記 → `arm_reset`／`probe`／`escalate`（與既有 429 分支重用完全相同的 3 個 action 字面，不新增第 6 個）。「最新活動晚於標記」（`now - idle_seconds > marker_at`）⇒ 回 `None`＝標記過期，避免哨兵永遠卡在 `probe`。🔴 2026-10-11 修訂：「標記之後有活動＝已自行續跑」此前提已被 sid 5535e815 痕跡證偽，現行判準見 `quota_messages.halt_verdict`（失效改看兌現時刻之後的活動） |
 | INV-H2 接線 | `tools/session_resume_planner.py::sentinel_decide()` | 新增可選參數 `halt`；429 事件分支優先，其次是 `quota_gate.halt_verdict(halt, idle_seconds, now)`，最後才落回既有 idle patrol/disarm；`_sentinel_tick()` 讀 `state["session_id"]` 對應的標記並傳入 |
 | INV-H4 | `.claude/hooks/check_claim_provenance.py::NAKED_VERDICT_RE` | 詞表加入「自動續跑」「會自動繼續」，沿用既有 `NAKED_MIN_TOKENS=2` 疊字機制與零佐證（`tool_output` 全空）判準 |
 
@@ -250,6 +250,8 @@ now=2026-09-11T09:17:21+08:00 idle=270.8  -> halt_verdict=None
 三筆皆 `None`（因 `now - idle_seconds` 遠晚於 08-09 的 `marker_at`）⇒ 落回 idle-patrol，逐字對應觀測到的
 `"action":"patrol","reason":"...session 還活著，續巡"`。**結論**：`halt_verdict()` 的過期判準本身無誤，
 是被 RC-1 污染的輸入（一個月前的 `at`）觸發了它——這正是它「該」判過期的資料，只是這份資料不該存在。
+
+> 🔴 2026-10-11 修訂（本節為當日史料，原文不改）：上段「規則本身正確」所依的前提——標記之後的活動＝session 已自行續跑——已被 sid 5535e815 痕跡證偽（halt 後的收斂活動照常產生）；現行判準見 `quota_messages.halt_verdict`。
 
 #### RC-3：停機當下為何沒排出一次性喚醒——latch 抑制＋RC-1 污染疊加
 

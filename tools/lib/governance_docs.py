@@ -665,6 +665,11 @@ _GOVERNANCE_DOCS = (
     # 同輪姊妹檔：六面審查鏡逐字稿（逐條 findings 的座標與重現法 ⇒ 指針稽核；複審者要重驗就得
     # 讀完 ⇒ 體積守門）：即刻登記。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R211_Review_Transcripts_113.md",
+    # 喚醒鏈五缺陷（DEF-200-516 家族）與額度參數檔分層（DEF-200-520）證據檔：真機痕跡逐字、
+    # 暴露證據座標、理論洞清單、史料（tools/tests 六處指標指向本檔〈史料〉）、Windows 待辦；
+    # 逐筆寫出 DEF-ID 與當回合實測值 ⇒ 指針稽核；複審者要重驗就得讀完它 ⇒ 體積守門：即刻登記。
+    _REPO_ROOT / "docs" / "06_quality"
+    / "CrossPlatform_R212_WakeChain_EnvLayer_Evidence.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/{CrossPlatform,Quota}_*.md`。這**不是**把具名

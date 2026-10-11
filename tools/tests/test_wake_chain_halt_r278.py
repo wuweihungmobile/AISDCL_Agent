@@ -250,9 +250,9 @@ class HaltVerdictTest(unittest.TestCase):
         仍落在未來，那是 `arm_reset` 的合法轄區，不是本測試要驗的分支。"""
         now = self._now()
         reset_at = now - timedelta(seconds=qg.HALT_RESET_SKEW_SECONDS + 60)
-        marker = {"at": (now - timedelta(seconds=700)).isoformat(),
+        marker = {"at": (now - timedelta(seconds=1000)).isoformat(),
                   "reset_at": reset_at.isoformat()}
-        verdict = qg.halt_verdict(marker, 700.0, now)
+        verdict = qg.halt_verdict(marker, 1000.0, now)  # 須靜止 ≥ HALT_QUIESCE_SECONDS 才 probe
         self.assertEqual(verdict["action"], "probe")
 
     def test_unparseable_reset_escalates_rather_than_guessing(self) -> None:
@@ -262,7 +262,7 @@ class HaltVerdictTest(unittest.TestCase):
         self.assertEqual(verdict["action"], "escalate")
 
     def test_activity_after_the_marker_means_it_is_stale(self) -> None:
-        """關鍵防呆：session 自己續跑過（最新活動晚於標記時刻）⇒ 標記過期，
+        """關鍵防呆：session 自己續跑過（最新活動晚於兌現時刻 reset＋skew）⇒ 標記過期，
         不得讓哨兵永遠卡在 probe（那是本輪要修的無做工空轉的鏡像新形態）。"""
         now = self._now()
         marker_at = now - timedelta(seconds=1000)
@@ -271,41 +271,53 @@ class HaltVerdictTest(unittest.TestCase):
         idle_seconds = 5.0  # 最新活動＝now-5s，遠晚於 marker_at
         self.assertIsNone(qg.halt_verdict(marker, idle_seconds, now))
 
-    def test_activity_within_the_skew_tolerance_still_arms(self) -> None:
-        """DEF-200-274 第十輪／SA-04 回歸鎖：改前必紅（零容忍嚴格比較會把這個
-        20ms 的時序雜訊誤判成「已續跑」而回 `None`），改後必綠。活動只比標記晚
-        0.02 秒——遠小於 `HALT_MARKER_ACTIVITY_SKEW_SECONDS`——是 hook 落盤與
-        逐字稿 append 之間天生會有的落差，不是真的續跑過。"""
-        now = self._now()
-        marker_at = now - timedelta(seconds=600)
-        reset_at = now + timedelta(seconds=600)
-        marker = {"at": marker_at.isoformat(), "reset_at": reset_at.isoformat()}
-        idle_seconds = 600 - 0.02  # 最新活動＝marker_at 之後 0.02s
-        verdict = qg.halt_verdict(marker, idle_seconds, now)
-        self.assertIsNotNone(verdict, "20ms 時序雜訊不得被判成已續跑")
-        self.assertEqual(verdict["action"], "arm_reset")
+    def test_activity_inside_the_skew_tolerance_still_arms(self) -> None:
+        """SA-04 回歸鎖（原兩支併成一張表）：活動只晚標記 20 ms（hook 落盤與逐字稿 append 之間天生的
+        落差），或恰晚 `HALT_MARKER_ACTIVITY_SKEW_SECONDS`（嚴格 `>`），都不是續跑；照常 arm。"""
+        now, skew = self._now(), qg.HALT_MARKER_ACTIVITY_SKEW_SECONDS
+        for label, reset_in, late in (("活動只晚 20 ms 不算已續跑", 600, 0.02),
+                                      ("恰等於容忍窗不算已續跑", 100, skew)):
+            with self.subTest(label):
+                marker = {"at": (now - timedelta(seconds=600)).isoformat(),
+                          "reset_at": (now + timedelta(seconds=reset_in)).isoformat()}
+                verdict = qg.halt_verdict(marker, 600 - late, now)  # 最新活動＝標記之後 `late` 秒
+                self.assertEqual((verdict or {}).get("action"), "arm_reset", label)
 
-    def test_activity_beyond_the_skew_tolerance_is_still_stale(self) -> None:
-        """容忍窗不是無限放大：活動晚於標記超過
-        `HALT_MARKER_ACTIVITY_SKEW_SECONDS` 一秒，仍要判過期。"""
+    def test_activity_beyond_the_skew_tolerance_no_longer_expires_a_future_wake(self) -> None:
+        """DEF-200-516（7-E）語意修正（非放寬）：失效改看兌現時刻之後的活動；halt 後的收斂活動
+        （halt 通知說收斂型工具照常可用）不再讓標記過期；已續跑不叫醒由 stale 鎖與下一支承接。"""
         now = self._now()
         marker_at = now - timedelta(seconds=600)
         marker = {"at": marker_at.isoformat(),
                   "reset_at": (marker_at + timedelta(seconds=700)).isoformat()}
         idle_seconds = 600 - (qg.HALT_MARKER_ACTIVITY_SKEW_SECONDS + 1)
-        self.assertIsNone(qg.halt_verdict(marker, idle_seconds, now))
-
-    def test_activity_exactly_at_the_skew_boundary_still_arms(self) -> None:
-        """邊界值：活動恰好晚於標記 `HALT_MARKER_ACTIVITY_SKEW_SECONDS` 秒——比較符號
-        用嚴格 `>`，故恰好等於容忍窗仍不算過期（與 `HALT_RESET_SKEW_SECONDS` 的既有
-        `fire_at > now` 用法同一方向）。"""
-        now = self._now()
-        marker_at = now - timedelta(seconds=600)
-        marker = {"at": marker_at.isoformat(),
-                  "reset_at": (marker_at + timedelta(seconds=700)).isoformat()}
-        idle_seconds = 600 - qg.HALT_MARKER_ACTIVITY_SKEW_SECONDS
         verdict = qg.halt_verdict(marker, idle_seconds, now)
-        self.assertIsNotNone(verdict, "恰好等於容忍窗不應被判成已續跑")
+        self.assertEqual((verdict or {}).get("action"), "arm_reset")
+        old = {"at": marker_at.isoformat(), "reset_at": ""}  # 對照：沒有兌現時刻可比 ⇒ 沿用舊規則
+        self.assertIsNone(qg.halt_verdict(old, idle_seconds, now))
+        self.assertEqual(qg.halt_verdict(old, idle_seconds + 1, now)["action"], "escalate")
+
+    def test_after_the_wake_moment_activity_means_resumed_and_only_quiet_is_probed(self) -> None:
+        """DEF-200-516（7-E）：兌現時刻（reset＋skew）後仍有活動＝已自行續跑；到點須靜止 ≥ 巡邏間隔
+        才 probe，否則延後防雙窗（真機 sid 5535e815：到點閒置 495 s、1 分 44 秒後就有新訊息）。"""
+        now = self._now()
+        for label, reset_ago, idle, want in (
+                ("兌現後仍有活動", 1000, 879.0, None), ("兌現前活動、已靜止", 1000, 901.0, "probe"),
+                ("到點但仍在動", 500, 899.0, "patrol"), ("恰靜止一巡邏間隔", 500, 900.0, "probe"),
+                ("量不到逐字稿", 500, None, "probe")):
+            with self.subTest(label):
+                marker = {"at": (now - timedelta(seconds=5000)).isoformat(),
+                          "reset_at": (now - timedelta(seconds=reset_ago)).isoformat()}
+                verdict = qg.halt_verdict(marker, idle, now)
+                self.assertEqual((verdict or {}).get("action"), want)
+                if want == "patrol":
+                    self.assertIn("halt", verdict["reason"], "延後須在痕跡上說得出理由")
+
+    def test_the_quiesce_window_is_the_patrol_interval(self) -> None:
+        self.assertEqual(quota_messages.HALT_QUIESCE_SECONDS, planner.SENTINEL_INTERVAL_SECONDS)
+
+    def test_the_halt_reset_skew_is_the_planner_reset_skew(self) -> None:
+        self.assertEqual(quota_messages.HALT_RESET_SKEW_SECONDS, planner.RESET_SKEW_SECONDS)
 
 
 class HaltMarkerProbePathDoesNotCreateDirectoriesTest(unittest.TestCase):

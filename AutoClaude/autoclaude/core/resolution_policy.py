@@ -1,4 +1,5 @@
-"""DefaultResolutionPolicy + MergedResult — 從 event_bus.py 抽出（SD_Improving_05 W0 SD-C2 / Arch-C1）。
+"""DefaultResolutionPolicy + MergedResult — 從 event_bus.py 抽出
+（SD_Improving_05 W0 SD-C2 / Arch-C1）。
 
 對應 SD_Improving_01.md v1.1 §3.4.2，DIP 抽出。
 
@@ -13,7 +14,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 from .hookspec import (
     CounterSnapshotResult,
@@ -39,16 +40,17 @@ class MergedResult:
     request_compact: bool = False
     request_halt: bool = False
     request_escalation: bool = False
-    request_mutation: Optional[Any] = None
+    request_mutation: Any | None = None
     contributors: list[str] = field(default_factory=list)
     # SD_Improving_05 W0 T0-1：擴 7 欄支撐 W3/W4 下沉
-    scheduled_resume_at: Optional[str] = None
-    evolved_playbook_path: Optional[str] = None
+    scheduled_resume_at: str | None = None
+    evolved_playbook_path: str | None = None
     evolution_metadata: dict = field(default_factory=dict)
     counter_diff: dict = field(default_factory=dict)
     persistence_paths: list[str] = field(default_factory=list)
-    goal_achieved: Optional[bool] = None
-    escalation_dump_path: Optional[str] = None
+    goal_achieved: bool | None = None
+    escalation_dump_path: str | None = None
+    escalation_dump: Any | None = None   # DEF-200-518：EscalationDumpedResult.dump
 
 
 class DefaultResolutionPolicy:
@@ -69,14 +71,15 @@ class DefaultResolutionPolicy:
         request_compact = False
         request_halt = False
         request_escalation = False
-        request_mutation: Optional[Any] = None
+        request_mutation: Any | None = None
         contributors: list[str] = []
-        scheduled_resume_at: Optional[str] = None
+        scheduled_resume_at: str | None = None
         counter_diff: dict = {}
         persistence_paths: list[str] = []
-        goal_achieved: Optional[bool] = None
-        escalation_dump_path: Optional[str] = None
-        evolved_playbook_path: Optional[str] = None
+        goal_achieved: bool | None = None
+        escalation_dump_path: str | None = None
+        escalation_dump: Any | None = None
+        evolved_playbook_path: str | None = None
         evolution_metadata: dict = {}
 
         for r in results:
@@ -102,7 +105,8 @@ class DefaultResolutionPolicy:
                     if k in counter_diff and counter_diff[k] != v:
                         raise HookContractViolation(
                             f"CounterSnapshotResult key '{k}' 由 multi plugin emit 且值不一致："
-                            f"existing={counter_diff[k]!r}, new={v!r}（contributor={r.contributor}）"
+                            f"existing={counter_diff[k]!r}, new={v!r}"
+                            f"（contributor={r.contributor}）"
                         )
                     counter_diff[k] = v
             elif isinstance(r, PersistenceResult):
@@ -123,6 +127,8 @@ class DefaultResolutionPolicy:
             elif isinstance(r, EscalationDumpedResult):
                 if escalation_dump_path is None:
                     escalation_dump_path = r.dump_path
+                if escalation_dump is None:
+                    escalation_dump = r.dump
 
         return MergedResult(
             veto=veto,
@@ -140,4 +146,5 @@ class DefaultResolutionPolicy:
             persistence_paths=persistence_paths,
             goal_achieved=goal_achieved,
             escalation_dump_path=escalation_dump_path,
+            escalation_dump=escalation_dump,
         )

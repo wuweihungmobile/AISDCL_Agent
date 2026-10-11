@@ -95,6 +95,7 @@ import harness_feed  # noqa: E402
 # fallback stub 等於讓同一份字面有第二個家，而且會用錯的答案靜默通過。
 import pace_contract  # noqa: E402  # R86：配速檔案契約的寫入端（引擎側唯一的傳遞方式）
 import quota_availability  # noqa: E402  # R102／PRD §4.2.4(a)：可得性軸遲滯（內部已 fail-soft）  round-label-ok
+import quota_env_layers  # noqa: E402  # 檔案層載入鏈（env.shared → .env）的 SSOT
 import quota_messages  # noqa: E402  # DEF-200-435：新 helper 走模組屬性（from-import 每名佔一行，tier 餘裕僅 1 行）
 import quota_pace  # noqa: E402  # R86：窗長／燃燒率／跨窗攤提（同樣是判讀原語）
 import quota_policy  # noqa: E402
@@ -240,13 +241,9 @@ BURN_LEDGER_NAME = "quota_burn.jsonl"
 # `root` 是**注入點**（預設 repo 根）：沒有它就只能靠改真實 `.env` 來驗，而那件事
 # 不可重入也留痕跡。
 def policy_env(root: Path | None = None) -> dict:
-    """門檻的環境來源：repo 根 `.env` 當**預設**、`os.environ` 覆寫（訴求 6c）。"""
-    try:
-        base = root or Path(__file__).resolve().parents[2]
-        text = (base / ".env").read_text(encoding="utf-8")
-    except OSError:
-        return dict(os.environ)
-    return {**quota_policy.parse_env_text(text), **os.environ}
+    """門檻的環境來源：檔案層（env.shared → .env）當**預設**、`os.environ` 覆寫（訴求 6c）。"""
+    base = root or Path(__file__).resolve().parents[2]
+    return {**quota_env_layers.merged_file_env(base), **os.environ}
 
 
 # 🔴 R82／C2：**逃生口也必須吃 `.env`**，否則 `.env.example` 印出來的那四個開關是假話。
@@ -981,7 +978,7 @@ def pace_report(now: datetime | None = None, model: str | None = None,
     # `no-harness-import`）⇒ 唯一的傳遞方式是檔案契約。fail-soft 在 `pace_contract.write`
     # 內（寫不進去只在 stderr 說一次，`--pace` 的 rc 與那一行輸出都不受影響）。
     pace_contract.write(decision, state, policy.max_fanout, policy.halt_pct, model=model)
-    tail = f"\n⚠️ .env 有設錯：{'；'.join(problems)}" if problems else ""
+    tail = f"\n⚠️ env.shared（跨機）或本機 .env 有設錯：{'；'.join(problems)}" if problems else ""
     # 🔴 R89／`DEF-200-112`：這一行此前**只有撞牆時才說得出來**。`--pace` 是舵手派工前
     # 查的那個出口，而它對 cap=0 只印「reset 距離不明」——「等 20 分鐘就好」與「只能等
     # 人去提額」在畫面上完全相同，於是 R88 整輪都在等一個結構上不會來的 reset。
@@ -1018,7 +1015,8 @@ def quota_throttle_message(decision: quota_policy.Decision, tool: str, live: int
             "   等一下再派，或改做不需要扇出的收斂工作（讀檔／寫檔／跑測試都沒有被擋）。\n"
             + throttle_horizon_line(decision, now)
             + f"   逃生口：設 {QUOTA_OFF_ENV}=1（關掉整條額度節流）；門檻與 cap 一律改 "
-            "`.env`（清單＝`python tools/lib/quota_policy.py --print-env-example`）。\n")
+            "`env.shared`（跨機）或本機 `.env`"
+            "（清單＝`python tools/lib/quota_policy.py --print-env-example`）。\n")
 
 
 # 🔴 R83：`event` 是本函式**唯一**的接線參數，它決定兩件不同的事——

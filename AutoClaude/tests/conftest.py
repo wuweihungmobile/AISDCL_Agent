@@ -763,14 +763,15 @@ def _hermetic_quota_cache(monkeypatch, tmp_path_factory):
 # ──────────────────────────────────────────────────────────────
 # 測試不密封（同 `_hermetic_quota_cache` 家族）：「出廠預設」測試被本機 `.env` 決定
 # ──────────────────────────────────────────────────────────────
-# `autoclaude/utils/config.py::_quota_env` 在環境變數缺席時讀 `<repo 根>/.env` 與
-# `AutoClaude/.env`（兩份皆不入庫）。上方 `pytest_configure` 只 pop 了 `AUTOSDD_QUOTA_*`
-# 的**環境變數**，沒擋住這條**檔案**路徑：開發機的 `.env` 把 `AUTOSDD_QUOTA_HALT_PCT` 調成
-# 98 之後，驗「出廠預設 95」與「引擎↔harness 對同一份快取同一個判定」的測試就因機器而紅，
-# 沒有 `.env` 的 CI 卻綠；失敗訊息只會說 `98.0 != 95.0`，一個字都不會提到 `.env`。
-# 引擎唯一的 `.env` 讀取點是 `_ENV_FILES`；harness 側的 `policy_env()` 在本測試樹沒有呼叫點
-# （parity 比的是 harness 的 `DEFAULT_POLICY` 字面預設），故只需導向這一個讀取點。
-# 需要驗「`.env` 真的生效」的測試自己 `monkeypatch.setattr(cfgmod, "_ENV_FILES", ...)`，
+# `autoclaude/utils/config.py::_quota_env` 在環境變數缺席時依序讀三份檔（四層鏈的檔案層）：
+# `AutoClaude/.env`、`<repo 根>/.env`（兩份皆不入庫）、`<repo 根>/env.shared`（入庫、跨機共用）。
+# 上方 `pytest_configure` 只 pop 了 `AUTOSDD_QUOTA_*` 的**環境變數**，沒擋住這條**檔案**路徑：
+# 開發機的 `.env`（或 `env.shared` 的共享決策）把 `AUTOSDD_QUOTA_HALT_PCT` 調離出廠 95 之後，
+# 驗「出廠預設 95」與「引擎↔harness 對同一份快取同一個判定」的測試就因機器而紅；
+# 沒有 `.env` 的 CI 在 `.env` 那條路徑上仍綠，失敗訊息也只會說 `98.0 != 95.0`、不提任何檔案。
+# 引擎唯一的檔案讀取點是 `_ENV_FILES`（三個檔一併導向 `()`）；harness 側的 `policy_env()`
+# 在本測試樹沒有呼叫點（parity 比的是 harness 的 `DEFAULT_POLICY` 字面預設），故只需導向這一個。
+# 需要驗「檔案真的生效」的測試自己 `monkeypatch.setattr(cfgmod, "_ENV_FILES", ...)`，
 # 它們在本 fixture 之後才施作，照舊生效。
 # 鎖：`tests/test_conftest_quota_env_isolation.py::TestEnvFilesAreNotReadInTests`。
 @pytest.fixture(autouse=True)

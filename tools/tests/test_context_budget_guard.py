@@ -2121,6 +2121,36 @@ class EnduranceWiringTest(unittest.TestCase):
         self.assertNotIn("parse_relay", tick[:first],
                          "開場留痕之前就去讀狀態塊 ⇒ 讀不出來時那一行永遠不會被寫")
 
+    def test_the_time_gate_runs_after_the_first_trace_line_and_before_the_probe(self) -> None:
+        """DEF-200-516：時間閘在開場留痕之後、探測之前，且只住在續航 tick（不入哨兵 tick）。"""
+        source = _PLANNER.read_text(encoding="utf-8")
+        funcs = {n.name: n for n in ast.walk(ast.parse(source)) if isinstance(n, ast.FunctionDef)}
+
+        def first_call_line(fn: ast.FunctionDef, name: str, *, first_arg: str | None = None) -> int:
+            hits = [c.lineno for c in ast.walk(fn) if isinstance(c, ast.Call)
+                    and name in (getattr(c.func, "id", None), getattr(c.func, "attr", None))
+                    and (first_arg is None or any(
+                        isinstance(a, ast.Constant) and a.value == first_arg for a in c.args))]
+            self.assertTrue(hits, f"{fn.name} 裡找不到對 {name}({first_arg or ''}…) 的呼叫")
+            return min(hits)
+
+        tick = funcs["_resume_tick"]
+        woken = first_call_line(tick, "append_log", first_arg="woken")
+        gate = first_call_line(tick, "reset_not_reached")
+        probe = first_call_line(tick, "probe_quota")
+        self.assertLess(woken, gate, "時間閘跑在開場留痕之前 ⇒ 早醒的那一跑沒有任何痕跡")
+        self.assertLess(gate, probe, "時間閘跑在探測之後 ⇒ 早醒仍會探測（探測有網路補量的副作用）")
+        sentinel_calls = {getattr(c.func, "attr", getattr(c.func, "id", None))
+                          for c in ast.walk(funcs["_sentinel_tick"]) if isinstance(c, ast.Call)}
+        self.assertNotIn("reset_not_reached", sentinel_calls,
+                         "哨兵 tick 也呼叫了時間閘 ⇒ 時間判斷有了第二個家（sentinel_decide 已判）")
+
+    def test_the_schtasks_script_has_a_single_once_trigger_and_no_repetition(self) -> None:
+        """前提釘（修前後皆綠）：Windows 續航排程只有單一 `-Once` 觸發器；加 Repetition 要重審。"""
+        script = planner.endurance_schtasks_script(_A_PLAN, "T", "'09:00'")
+        self.assertIn("New-ScheduledTaskTrigger -Once -At", script)
+        self.assertNotIn("Repetition", script, "Windows 續航排程有了重複觸發 ⇒ 請重審 DEF-200-516")
+
     def test_quota_is_not_wired_into_the_context_blocking_path(self) -> None:
         """🔴 額度 ≠ context 水位。額度耗盡時水位可能只有 ~18%（本輪實測），
         阻斷模式的四道放行條件會全數放行——把額度掛進那支守衛就是讓一個東西
@@ -3342,6 +3372,14 @@ class HandbackSessionStartAnnounceTest(unittest.TestCase):
         self.assertEqual(sentinel_lifecycle.announce_handbacks(
             lambda m: True, base=self.tmp), "", ".ack 落地後重跑仍出聲＝已讀憑證沒被讀")
 
+    def test_vb3_a_suffixed_next_step_heading_still_speaks_its_section(self) -> None:
+        """DEF-200-516（7-A 同型）：真 handback 標題帶後綴（本機 2／2 份），精確比對印節空白。"""
+        (self.tmp / "sid-x.md").write_text(
+            "## 做了什麼\n修好 Y\n## 驗了什麼（附實測 rc）\nrc=0\n## 卡在哪\n無\n"
+            "## 下一步指令（互動視窗）\n先重驗第 3 步\n", encoding="utf-8")
+        text = sentinel_lifecycle.announce_handbacks(lambda m: True, base=self.tmp)
+        self.assertIn("先重驗第 3 步", text, "帶後綴的「下一步指令」被判成節空白")
+
     def test_vb3_a_rejected_emit_keeps_the_report_unread(self) -> None:
         text = sentinel_lifecycle.announce_handbacks(lambda m: False, base=self.tmp)
         self.assertEqual(text, "")
@@ -3797,6 +3835,53 @@ class RelayProgressAndCapTest(unittest.TestCase):
         self.assertEqual(outcome["relay_seq"], 2, "被擋下時 seq 不得繼續累加")
 
 
+class HandbackHeadingIsOneRuleTest(unittest.TestCase):
+    """DEF-200-516（7-A）：handback 標題比對只有一個家（`resume_route.heading_hit`）；真窗的
+    「## 下一步指令（…）」曾被當成沒有這節 ⇒ `resolve()` 誤判 DONE（本機 2／2 份帶後綴）。"""
+
+    #: 真 handback 的形狀：二、四節標題帶後綴；下一步節有未完項。
+    _OPEN = ("# handback — session x（無人值守續航視窗）\n\n## 做了什麼\n- 讀任務書\n\n"
+             "## 驗了什麼（附實測 rc）\n- rc=0\n\n## 卡在哪\n無\n\n"
+             "## 下一步指令（互動視窗，`claude -r x`）\n1. 先重驗第 3 步\n")
+    #: 同一個形狀，但下一步節被模型顯式清空（其後還接著別的 `## ` 節）。
+    _CLEARED = _OPEN.replace("1. 先重驗第 3 步\n", "\n## 附註\n與下一步無關\n")
+
+    def _handback(self, text: str) -> Path:
+        path = _tmpdir(self, "hb-heading-") / "hb.md"
+        path.write_text(text, encoding="utf-8", newline="\n")
+        return path
+
+    def _resolve(self, text: str) -> dict:
+        hb = self._handback(text)
+        self.assertEqual(resume_route.handback_verdict(str(hb), 0.0), "written", "前提：四節齊備")
+        return relay_machine.resolve(
+            {"handback_verdict": "written", "handback_path": str(hb), "files_changed": 1,
+             "relay_seq": 0, "relay_no_progress_streak": 0},
+            quota_policy.BAND_FREE, max_spawns=2, no_progress_limit=1)
+
+    def test_a_suffixed_next_step_heading_is_read_as_the_next_step_section(self) -> None:
+        self.assertEqual(self._resolve(self._OPEN)["next_state"], relay_machine.STATE_RELAY_NEXT,
+                         "帶後綴的「## 下一步指令（…）」被判成沒有這節 ⇒ 有未完項卻判 DONE")
+        self.assertNotEqual(self._CLEARED, self._OPEN, "fixture 的 replace 沒生效")
+        self.assertEqual(self._resolve(self._CLEARED)["next_state"], relay_machine.STATE_DONE,
+                         "對照：標題帶後綴、節內真的是空 ⇒ 仍是 DONE（不得變成「找不到就當未完」）")
+        mention = self._OPEN.replace("## 卡在哪\n無\n", "## 卡在哪\n見「## 下一步指令」\n")
+        self.assertNotEqual(mention, self._OPEN, "fixture 的 replace 沒生效")
+        self.assertEqual(self._resolve(mention)["next_state"], relay_machine.STATE_RELAY_NEXT,
+                         "前文某行只「提到」標題字樣 ⇒ 不得當取節起點（讀到空節＝誤判 DONE）")
+
+    def test_the_verdict_and_the_section_extractor_share_one_heading_rule(self) -> None:
+        """單一家的行為鎖：把唯一規則換成「整行相等」，兩個消費者必須**同時**改判——任何一邊
+        自己內嵌一份規則，換掉共用規則時它不會跟著變（那就是 7-A 的病）。"""
+        hb = self._handback(self._OPEN)
+        with unittest.mock.patch.object(resume_route, "heading_hit",
+                                        lambda line, marker: line.strip() == marker):
+            self.assertEqual(resume_route.handback_verdict(str(hb), 0.0), "stale")
+            self.assertFalse(relay_machine.plan_has_remaining_work("written", self._OPEN))
+        self.assertEqual(resume_route.handback_verdict(str(hb), 0.0), "written")
+        self.assertTrue(relay_machine.plan_has_remaining_work("written", self._OPEN))
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # 🔴 無人喚醒鏈零浪費重設計（掌舵者 2026-09-05 事故訂正）：INV1~INV5
 # ═══════════════════════════════════════════════════════════════════════════
@@ -3841,14 +3926,9 @@ class Inv1UnattendedZeroPaidProbeTest(unittest.TestCase):
                 self.assertIn("unattended", verdict["source"], f"[{label}] {verdict}")
 
     def test_empty_string_unattended_env_is_still_treated_as_unattended(self) -> None:
-        """R11X（本輪對抗式稽核破洞）邊界值：`AUTOSDD_UNATTENDED=""`（鍵存在但值為空
-        ——上游 wrapper script 誤寫／殘留 shell profile 都可能造成這個狀態）。修復前
-        `probe_quota` 用 Python 真值測試 `if os.environ.get(...):`，空字串判定為假 ⇒
-        誤判成『非無人模式』⇒ INV1 這道付費探測煞車失效（`main()` 分派 tick 前的
-        `setdefault` 也救不了它：鍵已存在，`setdefault` 不覆寫）。讀取端改成鍵存在性
-        判準（`UNATTENDED_ENV in os.environ`）後，這個邊界值必須仍然被視為無人模式——
-        這是縱深防禦：即使某個呼叫路徑忘了先強制覆寫成 `"1"`，讀取端自己也不會被這個
-        空字串誤判成攻擊者／殘留值想要的『非無人模式』。
+        """邊界值：`AUTOSDD_UNATTENDED=""`（鍵存在、值為空）必須仍被視為無人模式——讀取端用鍵存在性
+        判準，不被空字串誤判成「非無人模式」而讓 INV1 付費探測煞車失效（縱深防禦）。
+        史料搬至 CrossPlatform_R212_WakeChain_EnvLayer_Evidence.md〈史料〉。
         """
         spawned: list = []
 
@@ -4038,10 +4118,8 @@ class Inv4UnattendedStopsOnFirstNoProgressTest(unittest.TestCase):
 
     def test_empty_string_unattended_env_still_clamps_no_progress_limit_to_one(
             self) -> None:
-        """同一破洞（R11X）打穿 INV4：修復前 `AUTOSDD_UNATTENDED=""` 這個邊界值會讓
-        `no_progress_limit()` 的真值測試誤判成『非無人模式』，於是
-        `AUTOSDD_RELAY_NO_PROGRESS_LIMIT=5` 真的放行連燒 5 窗而非夾在 1。讀取端改成
-        鍵存在性判準後，這個邊界值必須仍然夾到 1。"""
+        """空字串旗標同樣夾住 INV4（`AUTOSDD_RELAY_NO_PROGRESS_LIMIT=5` 仍夾到 1）。
+        史料搬至 CrossPlatform_R212_WakeChain_EnvLayer_Evidence.md〈史料〉。"""
         with unittest.mock.patch.dict(
                 os.environ,
                 {planner.UNATTENDED_ENV: "",
@@ -4069,24 +4147,27 @@ class Inv4UnattendedStopsOnFirstNoProgressTest(unittest.TestCase):
         self.assertEqual(outcome["relay_seq"], 0, "停止時不得推進 seq（不會再 spawn）")
 
     def _run(self, *, run_resume_result: dict, band: str,
-             task_name: str = "T-relay-inv4") -> tuple:
+             task_name: str = "T-relay-inv4", state_extra: dict | None = None,
+             probe: dict | None = None) -> tuple:
         """跑一次 `_resume_tick()`（同 `RelaySettleWindowTest._run` 骨架，獨立一份因為要
         注入的環境變數不同，且刻意不與該類別建立跨測試類別的隱性依賴）。回
         `(written_state, events, registered)`——`registered` 空代表沒有真的又排下一窗。
-        """
+        DEF-200-516 擴充：`state_extra`／`probe` 覆寫狀態塊／探針；另記探測與 spawn 的次數。"""
         tmp = _tmpdir(self, "inv4-tick-")
         plan = tmp / "plan.md"
         state = {**RelayStateTest.GOOD, "plan_path": str(plan), "session_id": "sid-inv4",
                  "allow_resume": True, "task_name": task_name,
-                 "transcript": str(tmp / "sid-inv4.jsonl")}
+                 "transcript": str(tmp / "sid-inv4.jsonl"), **(state_extra or {})}
         plan.write_text("# 任務書\n\n" + planner.render_relay(state),
                         encoding="utf-8", newline="\n")
         args = planner.build_parser().parse_args(
             ["--resume-tick", "--plan", str(plan), "--task-name", task_name])
         events: list[dict] = []
         registered: list = []
+        self.probe_calls, self.resume_calls = [], []
 
         def _fake_run_resume(a, st, lg):
+            self.resume_calls.append(lg)
             st.update(run_resume_result)
             return run_resume_result.get("_rc", 0)
 
@@ -4097,8 +4178,8 @@ class Inv4UnattendedStopsOnFirstNoProgressTest(unittest.TestCase):
         with contextlib.ExitStack() as stack:
             _isolate_trace_dir(self, stack)
             stack.enter_context(unittest.mock.patch.object(
-                planner, "probe_quota", lambda *_a, **_k: {
-                    "open": True, "kind": guard.LIMIT_NONE, "rc": 0, "text": "ok"}))
+                planner, "probe_quota", lambda *_a, **_k: (self.probe_calls.append(1), probe or {
+                    "open": True, "kind": guard.LIMIT_NONE, "rc": 0, "text": "ok"})[1]))
             stack.enter_context(unittest.mock.patch.object(
                 planner, "_run_resume", side_effect=_fake_run_resume))
             stack.enter_context(unittest.mock.patch.object(
@@ -4153,6 +4234,94 @@ class Inv4UnattendedStopsOnFirstNoProgressTest(unittest.TestCase):
             any(e["event"] == "relay_stopped" and e.get("why") == "no_progress"
                 for e in events), events)
         self.assertEqual(len(registered), 1, "streak 1 < limit 5 應繼續續排下一窗")
+
+    def test_a_tick_before_reset_neither_spawns_nor_spends_the_no_progress_window(self) -> None:
+        """DEF-200-516：interval 先於 calendar 叫醒 tick（實跡：距 reset 2h16m 即探測＋spawn）；
+        早醒須不探測、不 spawn、不推進零進度窗，依 reset 重掛並留 `resume_tick_early`。"""
+        reset_at = datetime.now().astimezone() + timedelta(hours=2, minutes=16)
+        written, events, registered = self._run(
+            run_resume_result={"_rc": None}, band=quota_policy.BAND_FREE,
+            state_extra={"kind": "manual", "reset_at": reset_at.isoformat()})
+        self.assertEqual([e["event"] for e in events], ["woken", "resume_tick_early"], events)
+        self.assertEqual((self.probe_calls, self.resume_calls), ([], []),
+                         "reset 之前的 tick 探測或 spawn 了")
+        self.assertEqual(written["state"], "armed", "早醒不得改狀態塊的 state")
+        self.assertNotIn("relay_no_progress_streak", written, "早醒推進了零進度窗")
+        self.assertEqual(registered, [(None, planner.RESUME_TICK)],
+                         "早醒必須恰一次依 reset 重掛續航 tick（不重掛＝吃掉唯一一次觸發）")
+        due = reset_at + timedelta(seconds=planner.RESET_SKEW_SECONDS)
+        self.assertEqual(datetime.fromisoformat(events[-1]["due_at"]), due,
+                         "重掛的目標不是 reset＋skew")
+        self.assertAlmostEqual(events[-1]["remaining_seconds"],
+                               (due - datetime.now().astimezone()).total_seconds(), delta=5,
+                               msg="痕跡上看不出還差多久")
+
+    def test_the_first_tick_after_reset_still_spawns_and_the_boundary_is_the_skew(self) -> None:
+        """控制組＋邊界：reset 後 skew 窗內仍早醒（伺服器可能未翻頁），窗外放行走原判準。"""
+        now = datetime.now().astimezone()
+        for label, age, early in (("skew 窗內（reset 後 60 s）", 60, True),
+                                  ("skew 窗外（reset 後 121 s）", 121, False)):
+            with self.subTest(label):
+                _, events, _ = self._run(
+                    run_resume_result={"_rc": 0}, band=quota_policy.BAND_FREE,
+                    state_extra={"kind": "manual",
+                                 "reset_at": (now - timedelta(seconds=age)).isoformat()})
+                names = [e["event"] for e in events]
+                self.assertEqual("resume_tick_early" in names, early, names)
+                self.assertEqual((len(self.probe_calls), len(self.resume_calls)),
+                                 (0, 0) if early else (1, 1), names)
+
+    def test_not_yet_and_not_recovered_leave_different_traces(self) -> None:
+        """「時間還沒到」與「探測說還沒恢復」在痕跡上分得開（R-4.5.10-4：不得同事件名加布林）。"""
+        now = datetime.now().astimezone()
+        _, not_yet, _ = self._run(
+            run_resume_result={"_rc": 0}, band=quota_policy.BAND_FREE,
+            state_extra={"kind": "manual", "reset_at": (now + timedelta(hours=2)).isoformat()})
+        still_limited = {"open": False, "kind": guard.LIMIT_SESSION, "rc": 0,
+                         "text": "You've hit your session limit · resets 3am (Asia/Taipei)"}
+        _, not_back, _ = self._run(
+            run_resume_result={"_rc": 0}, band=quota_policy.BAND_FREE, probe=still_limited,
+            state_extra={"kind": "manual", "reset_at": (now - timedelta(hours=1)).isoformat()})
+        names_early, names_late = ({e["event"] for e in rows} for rows in (not_yet, not_back))
+        self.assertEqual(names_early, {"woken", "resume_tick_early"})
+        self.assertLessEqual({"probed", "rearmed"}, names_late)
+        self.assertNotIn("resume_tick_early", names_late)
+        self.assertEqual(names_early & names_late, {"woken"}, "兩條路徑在痕跡上混在一起了")
+
+
+class ResetNotReachedGateTest(unittest.TestCase):
+    """DEF-200-516：時間述詞 `reset_not_reached`（只答「何時問」，不動 `quota_open`）。"""
+
+    _SKEW = planner.RESET_SKEW_SECONDS
+
+    def test_the_gate_is_inapplicable_for_empty_garbage_sentinel_and_past_inputs(self) -> None:
+        now = datetime(2026, 10, 11, 12, 0, 0).astimezone()
+        future = (now + timedelta(hours=2)).isoformat()
+        inapplicable = {
+            "缺鍵": {}, "空字串": {"reset_at": ""}, "None": {"reset_at": None},
+            "垃圾字串": {"reset_at": "not-a-time"},
+            "naive 過去值（GOOD 那個）": {"reset_at": RelayStateTest.GOOD["reset_at"]},
+            "哨兵＋未來 reset（時間判斷已由 sentinel_decide 做過）":
+                {"kind": "sentinel", "reset_at": future},
+        }
+        for label, state in inapplicable.items():
+            with self.subTest(label):
+                self.assertIsNone(relay_machine.reset_not_reached(state, now, self._SKEW))
+        applicable = {"kind": "manual", "reset_at": future}
+        self.assertIsNotNone(relay_machine.reset_not_reached(applicable, now, self._SKEW),
+                             "控制組：同一個未來值、非哨兵 ⇒ 閘必須適用（否則上面的 None 是恆真）")
+
+    def test_the_gate_compares_whole_seconds(self) -> None:
+        """`strftime` 截掉小數秒，Windows `-Once` 可能早 1 秒內觸發——須整秒比較（本輪 .799）。"""
+        reset_at = datetime(2026, 10, 11, 1, 59, 59, 799057, tzinfo=UTC)
+        state = {"kind": "manual", "reset_at": reset_at.isoformat()}
+        at_truncated_due = datetime(2026, 10, 11, 2, 1, 59, tzinfo=UTC)  # due＝02:01:59.799 截到秒
+        self.assertIsNone(relay_machine.reset_not_reached(state, at_truncated_due, self._SKEW))
+        early = relay_machine.reset_not_reached(
+            state, at_truncated_due - timedelta(seconds=1), self._SKEW)
+        self.assertIsNotNone(early, "整秒內早 1 秒必須算早醒")
+        self.assertEqual(early["remaining_seconds"], 1)
+        self.assertIsNotNone(early["due"].tzinfo, "due 必須帶 tzinfo（要交給排程後端重掛）")
 
 
 class Inv5SingleOwnerTest(unittest.TestCase):
@@ -5211,6 +5380,32 @@ class RearmAndSentinelRearmedBranchesAlsoAlertLoudOnFailureTest(unittest.TestCas
         loud = [c for c in alert_calls if c["loud"] and "哨兵重掛失敗" in c["reason"]]
         self.assertTrue(loud, f"尾段失敗卻沒有 loud alert：{alert_calls}")
 
+    def test_resume_tick_early_wake_branch_alerts_loud_when_the_rearm_fails(self) -> None:
+        """DEF-200-516（A-1）：早醒重掛失敗＝唯一一次觸發被吃掉；同款要 rc=1、清 latch、loud。"""
+        tmp = _tmpdir(self, "early-rearm-fail-")
+        plan = tmp / "plan.md"
+        reset_at = datetime.now().astimezone() + timedelta(hours=2)
+        state = {**RelayStateTest.GOOD, "plan_path": str(plan), "session_id": "sid-early-fail",
+                 "task_name": "T-early-fail", "kind": "manual", "reset_at": reset_at.isoformat(),
+                 "log_path": str(tmp / "log.jsonl")}
+        plan.write_text("# 任務書\n\n" + planner.render_relay(state), "utf-8", newline="\n")
+        args = planner.build_parser().parse_args(
+            ["--resume-tick", "--plan", str(plan), "--task-name", "T-early-fail"])
+        alerts, clears, patch = [], [], unittest.mock.patch.object
+        # 排程接縫要寫全名：`SchedulerHygieneTest` 以 AST 認 `unittest.mock.patch.object(` 這個形狀
+        with patch(planner, "probe_quota", side_effect=AssertionError("早醒不得探測")), \
+                unittest.mock.patch.object(planner, "_register_and_record", return_value=(1, "")), \
+                patch(planner.escalation, "alert",
+                      side_effect=lambda r, s, *, loud=True, **_: alerts.append((r, loud)) or {}), \
+                patch(sentinel_lifecycle_arm, "clear_arm_latch",
+                      side_effect=lambda sid, *a, **k: clears.append(sid) or True), \
+                contextlib.redirect_stdout(io.StringIO()):
+            rc = planner._resume_tick(args)
+        self.assertEqual(rc, 1, "重掛失敗卻回報成功")
+        self.assertEqual(clears, ["sid-early-fail"], "早醒分支重掛失敗也要清 arm latch")
+        self.assertTrue([1 for r, loud in alerts if loud and "等待 reset 重掛失敗" in r],
+                        f"早醒重掛失敗卻沒有 loud alert：{alerts}")
+
 
 class DisarmClearsTheArmedStampTest(unittest.TestCase):
     """ADR-XPLAT-014 C5'／C10'（DEF-200-269 併修）：拆掉一支哨兵**必須同步清 armed stamp**。
@@ -6172,15 +6367,8 @@ out, combos = Path(sys.argv[1]), json.loads(sys.argv[2])
 # 開視窗」的載具，也就是唯一驗得出旗標效果的被測對象）。
 exe = sys.argv[3] if len(sys.argv) > 3 else str(Path(sys.executable).with_name("python.exe"))
 res = {"parent_has_no_console": ctypes.windll.kernel32.GetConsoleWindow() == 0, "cases": {}}
-# 🔴 本輪修（console_qa 事故）：`STARTUPINFO(STARTF_USESHOWWINDOW, wShowWindow=SW_HIDE)`
-# 對本探針要量的東西（`GetConsoleWindow()` 有沒有 handle）零影響——那是 API 層的存在性，
-# 不是視窗可見性；但它能讓「none」這個負對照（flags=0，本來就是刻意不帶 NO_WINDOW 才會
-# 真的開視窗的那一格）不再把 Windows 升級交給 Windows Terminal 的
-# OpenConsole.exe／WindowsTerminal.exe 承載。實測（建立事件監看器，隔離重跑）：不帶本
-# STARTUPINFO 時 flags=0 每次都觸發 OpenConsole.exe+WindowsTerminal.exe 建立事件；帶了
-# 之後三次隔離重跑 0/3 次觸發（其中一次仍會生出一個會自行收尾的 conhost.exe，非本輪
-# 判準射程——task 5 只守 OpenConsole.exe／WindowsTerminal.exe）。全案例統一套用：「shipped」
-# 這類已帶 CREATE_NO_WINDOW 的案例本來就沒有視窗，套用零風險。
+# 🔴 STARTUPINFO(SW_HIDE) 不影響本探針量的 `GetConsoleWindow()`，但讓負對照 flags=0 不升級給
+# Windows Terminal 承載。史料搬至 CrossPlatform_R212_WakeChain_EnvLayer_Evidence.md〈史料〉。
 si = subprocess.STARTUPINFO()
 si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
 si.wShowWindow = 0  # SW_HIDE
@@ -6342,12 +6530,9 @@ try {
     os.name == "nt",
     "[WINDOWS-NATIVE-ONLY] console 配置是 Windows 專屬概念——鐵律三：單平台判準不外推")
 class PlannerCheckIsConsoleFreeTest(unittest.TestCase):
-    """行為鎖（console_qa 事故輪）：`pythonw.exe` 起 `tools/session_resume_planner.py
-    --check`（唯讀；QA 實測會在 1 秒內觸發 OpenConsole.exe＋WindowsTerminal.exe 建立的
-    那條路——`measure()` → `harness_feed.measure()` → `guard.window_evidence(session_id=
-    None)` → `known_model_windows_path()` → `sdd_latest.resolve_latest_root_fast()` →
-    importlib 動態載入 `sdd_version.py` → `tracked_version_dirs()` 內那個裸
-    `subprocess.run(["git", ...])`）不得讓 Windows 新開一個可見 terminal。
+    """行為鎖（console_qa 事故輪）：`pythonw.exe` 起 `tools/session_resume_planner.py --check`
+    （唯讀）不得讓 Windows 新開一個可見 terminal。事故呼叫鏈搬至
+    CrossPlatform_R212_WakeChain_EnvLayer_Evidence.md〈史料〉。
 
     🔴 誠實劃界（歸因方式）：用即時 WMI 事件訂閱（見 `_LIVE_CONSOLE_WATCH_PS1`），不是
     嚴格的行程樹祖系比對——同一秒若剛好有人自己開一支新 Windows Terminal 分頁，會被
@@ -9622,13 +9807,15 @@ class QuotaEnvFileIsActuallyLoadedTest(unittest.TestCase):
             os.environ.pop(spec.name, None)
 
     def _with_dotenv(self, body: str) -> dict:
-        """把 `policy_env()` 指到沙箱裡的一份 `.env`，回它讀出來的 mapping。"""
+        """把 `policy_env()` 的 `.env`、`env.shared` 指到沙箱（共享層留空），回讀出的 mapping。"""
         env_file = self.tmp / ".env"
         env_file.write_text(body, encoding="utf-8", newline="\n")
+        (self.tmp / "env.shared").touch()  # 共享層也導向沙箱空檔：不讀真的 env.shared 內容
         real_open = Path.read_text
 
         def fake(this: Path, *a, **kw):
-            return real_open(env_file if this.name == ".env" else this, *a, **kw)
+            sandboxed = this.name in (".env", "env.shared")
+            return real_open(self.tmp / this.name if sandboxed else this, *a, **kw)
 
         with unittest.mock.patch.object(Path, "read_text", fake):
             return qg.policy_env()

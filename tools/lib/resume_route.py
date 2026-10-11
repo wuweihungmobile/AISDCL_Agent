@@ -73,6 +73,18 @@ def handback_report(session_id: str) -> Path:
     return handback_dir() / f"{session_id}.md"
 
 
+def heading_hit(line: str, marker: str) -> bool:
+    """handback 標題比對的**唯一**規則：該行去掉行首空白後以 `marker` 開頭即算（允許帶後綴的標題）。
+
+    `handback_verdict`（驗四節齊備）與 `relay_machine._section_text`（取節看未完項）共用；各自內嵌
+    就會對同一份檔得出「四節齊備」與「沒有這節」兩個結論（DEF-200-516 順帶發現 7-A：真 handback
+    的 `## 下一步指令（…）` 被 `resolve()` 誤判 DONE）。要求行首：子字串規則會讓前文某行只是「提到」
+    標題字樣的那一行成為取節起點，讀到空節而有未完項卻判 DONE。誠實劃界：標題字樣之後不查邊界，
+    共用前綴的另一個標題（如 `## 下一步指令集`）仍會命中；真 handback 2／2 零此形態，未擴大規則。
+    """
+    return line.lstrip().startswith(marker)
+
+
 def handback_verdict(report: str, spawn_at: float) -> str:
     """planner 側後檢三值（§3(b)4）：`written`／`missing`／`stale`。
 
@@ -88,7 +100,8 @@ def handback_verdict(report: str, spawn_at: float) -> str:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return "missing"
-    ok = fresh and all(marker in text for marker in HANDBACK_MARKERS)
+    lines = text.splitlines()
+    ok = fresh and all(any(heading_hit(ln, marker) for ln in lines) for marker in HANDBACK_MARKERS)
     return "written" if ok else "stale"
 
 

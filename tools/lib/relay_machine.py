@@ -50,6 +50,7 @@ import git_paths
 import quota_gate
 import quota_policy
 import resume_cost  # improving_113 W2：喚醒成本落帳（純函式模組；本檔是唯一接線點）
+import resume_route  # DEF-200-516 7-A：handback 標題比對規則的唯一家（`heading_hit`）
 import unattended_authz  # INV1/INV4：無人看管旗標名的 SSOT（不在本檔開第三個字面家）
 
 #: 每 reset 視窗 spawn 上限；出廠 2（施工圖 §3(c) 常數表）。
@@ -86,8 +87,8 @@ _STOP_REASON = {
     STATE_RELAY_EXHAUSTED: "接力已達每視窗 spawn 上限，停止自動續跑，留任務書給人",
 }
 #: 恰兩個停止次態需要「叫人」（loud）：無新進度（故障訊號）與達 spawn 上限（人工決策）。
-#: DONE（正常結束）與 QUOTA_STOP（交回既有哨兵巡邏）不吵——同 `_resume_tick` 既有
-#: `disarm` 分支 `loud=False` 仍呼叫 `escalation.alert()` 收殘骸的紀律。
+#: DONE（正常結束）與 QUOTA_STOP（交回既有哨兵巡邏）不吵：仍呼叫 `escalation.alert()` 收超齡殘骸，
+#: 但不點名本窗任務書（`settle_window` 隨後要寫它、哨兵要站在它上面；DEF-200-516 7-B）。
 _LOUD_STATES = frozenset({STATE_NO_PROGRESS_STOP, STATE_RELAY_EXHAUSTED})
 #: FIX3(a)：持久結局檔記的 reason 字面（恰對應 _LOUD_STATES 兩個「需要人知道」的停止次態）。
 #: 刻意與 `_STOP_WHY` 分開（後者 exhausted＝"cap"；本檔結局檔對外語意用 "exhausted"）。
@@ -183,12 +184,13 @@ def snapshot_log_fields(snapshot: frozenset[str] | None) -> dict:
 def _section_text(text: str, heading: str) -> str:
     """取 `heading` 之後、下一個 `## ` 之前的內容（不含標題行；找不到標題回空字串）。
 
-    與 `sentinel_lifecycle._section()` 同一種切法（同一份 handback 文件的段落格式），
-    本檔獨立一份是因為那一支是私有名稱且射程鎖在 handback 四個標記的摘要輸出，不宜
-    跨模組借用私有名稱做另一種用途；此處是通用 markdown 段落擷取，非核心業務判準。
+    切法同 `sentinel_lifecycle._section()`（同一份 handback 文件的段落格式），本檔獨立一份是因為
+    那一支是私有名稱且射程鎖在 handback 四個標記的摘要輸出，不宜跨模組借用私有名稱做另一種用途。
+    🔴 標題比對走 `resume_route.heading_hit`（與 `handback_verdict` 共用的唯一規則）：此前整行
+    相等，帶後綴的「## 下一步指令（…）」被當成沒有這節 ⇒ 誤判 DONE（DEF-200-516 順帶發現 7-A）。
     """
     lines = text.splitlines()
-    starts = [i for i, ln in enumerate(lines) if ln.strip() == heading]
+    starts = [i for i, ln in enumerate(lines) if resume_route.heading_hit(ln, heading)]
     if not starts:
         return ""
     start = starts[0] + 1
@@ -359,6 +361,29 @@ def apply_reset_at(state: dict, new_reset_at: str) -> None:
     state["reset_at"] = new_reset_at
 
 
+def reset_not_reached(state: dict, now: datetime, skew_seconds: int) -> dict | None:
+    """DEF-200-516：PRD §4.5.2「早醒」判準——`now < reset_at＋skew` ⇒ 回 `{reset_at, due,
+    remaining_seconds}`，否則 `None`（呼叫端照修前走）。「何時問」的唯一述詞；「答案是什麼」
+    （`quota_open`）一個字不動。立案：launchd 續航 plist 同時掛 `StartInterval`（自我修復底盤）與
+    `StartCalendarInterval`，interval 在 calendar 前 2h16m 叫醒 tick，而 tick 此前不看時間就探測、
+    spawn、收尾拆掉一次性排程（reset 時刻零續跑）。
+
+    `None`＝閘不適用或已到時間：`reset_at` 空／解不出（fail-open，行為同修前）；`kind=="sentinel"`
+    （時間判斷已由 `sentinel_decide` 做過，且該狀態塊的 reset_at 可能是更早一次 arm_reset 的殘留）。
+    整秒比較：`register_endurance` 的 `strftime` 截掉小數秒，Windows `-Once` 可能早 1 秒內觸發。
+    """
+    if state.get("kind") == "sentinel":
+        return None
+    try:
+        reset_at = datetime.fromisoformat(str(state.get("reset_at") or "")).astimezone()
+        due = reset_at + timedelta(seconds=skew_seconds)
+        remaining = int(due.timestamp()) - now.timestamp()
+    except (ValueError, OverflowError, OSError):  # 壞值＝閘不適用：不得讓新增的判準成為崩潰源
+        return None
+    return None if remaining <= 0 else {"reset_at": reset_at.isoformat(), "due": due,
+                                       "remaining_seconds": round(remaining)}
+
+
 #: `reset_source` 白名單：觀測值，或被誠實標示的宣稱；猜出來的 reset 不在內。消費端＝planner
 #: 的 `relay_problems`。後兩個字面各自獨立（ADR-XPLAT-014 約束 2／3）：L0 不借 `operator`、
 #: L1 不借 `transcript-verbatim`。史料見本輪證據檔〈九〉。
@@ -494,8 +519,11 @@ def settle_window(args, state: dict, plan: Path, log: Path, resume_rc: int | Non
                                rc=rearm_rc, unregister_rc=unregister_rc, next_state=next_st,
                                rearmed_inplace=unregister_rc is None)
             return rc  # 沿用排程 rc；rearm rc 不得覆蓋（docstring 既有契約）
+        # DEF-200-516 順帶發現 7-B：不點名 `plan`——非 loud 的 `alert` 會 GC 點名的任務書，
+        # 而本函式緊接著 `write_relay(plan)`，且重掛的哨兵要站在同一份任務書上（`arm` 拒絕
+        # 註冊不存在的任務書）。這裡的非 loud `alert` 只收超齡殘骸，`gc_plans` 不再含本窗任務書。
         told = planner.escalation.alert(_STOP_REASON[next_st], state,
-                                        loud=next_st in _LOUD_STATES, plan=plan)
+                                        loud=next_st in _LOUD_STATES)
         planner.append_log(log, _STOP_EVENT[next_st], why=_STOP_WHY.get(next_st, ""),
                            band=band, **told)
         if next_st in _LOUD_STATES:

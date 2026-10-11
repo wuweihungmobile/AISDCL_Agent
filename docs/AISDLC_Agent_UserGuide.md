@@ -104,6 +104,8 @@ cp config.yaml.example config.local.yaml
 # 編輯 config.local.yaml，依需要調整 loop / playbook / token_guard / storage 等區段
 ```
 
+> ⚠️ 複製後（在 `AutoClaude/` 下）執行 `python ../tools/lib/quota_policy.py --env-doctor --fix`，把與 env.shared／出廠相同的多餘行刪掉，否則本機 `.env` 會遮住跨機共用值（repo 根的 `env.shared`；詳見根層 ONBOARDING.md §2.2）。
+
 **儲存模式（`config.local.yaml` 的 `storage` 區段）** — 預設 `yaml_only` 即可，零部署成本：
 
 ```yaml

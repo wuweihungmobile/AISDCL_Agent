@@ -110,6 +110,8 @@ class PlaybookKernel:
             elif outcome.action == StepAction.GOTO and outcome.goto_idx is not None:
                 step_idx = max(0, min(outcome.goto_idx, len(playbook.tasks) - 1))
             elif outcome.action == StepAction.ESCALATE:
+                logger.error("=== STATE: ESCALATION | step=%s | %s ===",
+                             playbook.tasks[step_idx].step_id, outcome.failure_reason)
                 return KernelResult.escalated_(
                     completed_steps=len(completed_ids),
                     total_steps=len(playbook.tasks),
@@ -287,6 +289,8 @@ class PlaybookKernel:
             ))
             contributors.extend(post_attempt.contributors)
             if post_attempt.request_escalation:
+                self._announce_escalation(playbook, task, step_idx, "request_escalation",
+                                          failure_reason, attempt + 1, failure_history)
                 return StepOutcome(action=StepAction.ESCALATE,
                                    failure_reason=f"[{task.step_id}] {failure_reason}",
                                    attempts_used=attempt + 1)
@@ -299,9 +303,51 @@ class PlaybookKernel:
         self._bus.emit(HookContext(phase=KernelPhase.ON_FAILURE, playbook=playbook, task=task,
                                    step_idx=step_idx,
                                    payload={"failure_reason": last_failure_reason}))
+        self._announce_escalation(playbook, task, step_idx, "max_retries_exhausted",
+                                  last_failure_reason, attempt, failure_history)
         return StepOutcome(action=StepAction.ESCALATE,
                            failure_reason=f"max_retries_exhausted: {last_failure_reason}",
                            attempts_used=attempt)
+
+    def _announce_escalation(self, playbook, task, step_idx, trigger, reason, attempts_used,
+                             failure_history) -> None:
+        """DEF-200-518：失敗型 ESCALATION 的善後——先請求 dump（取回路徑與物件），再廣播
+        ON_ESCALATION（通知／KB／演化提案各訂閱者自取）。與舊 steps_orchestrator 同語意：
+        只有「收斂判 escalate」與「重試耗盡」兩條走這裡；veto／Brain 故障不走（舊路徑亦無 dump）。
+
+        🔴 fail-soft：善後任何例外只出聲，**不得**改變 escalated 結果——EventBus.emit 會把
+        plugin 例外原樣往外拋，不攔就會把「乾淨的 ESCALATION」變成未捕捉例外（無 KernelResult）。
+        兩段 emit 各自攔：DUMP 段失敗時仍以 dump_path="" 廣播 ON_ESCALATION（dump 檔只是附帶
+        證據），不連坐通知與演化提案。
+        """
+        facts = {"trigger": trigger, "step_id": task.step_id, "failure_reason": reason,
+                 "attempts_used": attempts_used, "failure_history": list(failure_history)}
+        dump_path, dump = "", None
+        try:
+            dumped = self._bus.emit(HookContext(
+                phase=KernelPhase.ON_ESCALATION_DUMP_REQUEST, playbook=playbook, task=task,
+                step_idx=step_idx,
+                payload={**facts, "human_hint": f"[{trigger}] {reason}",
+                         "final_eval_output": (failure_history[-1]["eval_output"]
+                                               if failure_history else "")},
+            ))
+            dump_path, dump = dumped.escalation_dump_path or "", dumped.escalation_dump
+        except Exception:  # noqa: BLE001 — DUMP 段失敗不得連坐跳過通知與演化提案
+            logger.exception("=== ESCALATION 善後失敗（DUMP 請求；仍廣播 ON_ESCALATION）===")
+        try:
+            esc = self._bus.emit(HookContext(
+                phase=KernelPhase.ON_ESCALATION, playbook=playbook, task=task, step_idx=step_idx,
+                payload={**facts, "dump_path": dump_path, "escalation_dump": dump,
+                         "escalation_history": [],
+                         "title": f"AutoClaude — ESCALATION [{task.step_id}]",
+                         "message": f"[{task.step_id}] {reason}"},
+            ))
+            if esc.request_mutation is not None:
+                logger.info("=== EVOLUTION PROPOSAL | [%s] type=%s | %s ===", task.step_id,
+                            esc.request_mutation.mutation_type.value,
+                            (esc.request_mutation.reasoning or "")[:200])
+        except Exception:  # noqa: BLE001 — 善後失敗不得吞掉真正的失敗結果
+            logger.exception("=== ESCALATION 善後失敗（結果仍為 escalated）===")
 
     @staticmethod
     def _preserve_output_contract(task: PlaybookTask, correction_prompt: str) -> str:

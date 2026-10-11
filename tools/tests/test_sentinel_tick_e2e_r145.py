@@ -26,6 +26,7 @@ sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
 
 import context_budget_guard as guard  # noqa: E402
 import quota_gate as qg  # noqa: E402
+import quota_policy  # noqa: E402
 import sentinel_lifecycle as SL  # noqa: E402
 
 import session_resume_planner as planner  # noqa: E402
@@ -91,25 +92,8 @@ class SentinelTickConsumesHaltMarkerE2ETest(unittest.TestCase):
     def test_unexpired_halt_marker_drives_arm_reset_and_reaches_register(self) -> None:
         """reset_at 尚未到 ⇒ decision=arm_reset ⇒ 必須真的走到 `_register_and_record()`。"""
         sid = "sid-d23-e2e-armreset"
-        transcript = self._transcript(sid, mtime=datetime.now(UTC).timestamp() - 5)  # 活動早於 at
-        plan = self._write_plan(sid, transcript, "T-r145-armreset")
-        now = datetime.now(UTC).astimezone()
-        reset_at = now + timedelta(seconds=600)
-        qg.write_halt_marker(sid, {"sid": sid, "band": "halt", "binding": "session",
-                                   "reset_at": reset_at.isoformat(),
-                                   "at": now.isoformat(), "transcript": str(transcript),
-                                   "resolved_source": "payload"})
-        self.assertIsNotNone(qg.read_halt_marker(sid), "fixture 本身必須先確認標記寫得進去")
-
-        calls: list[tuple] = []
-
-        def _fake_register(plan_arg, state_arg, at_arg, tick_arg):
-            calls.append((plan_arg, state_arg.get("session_id"), at_arg, tick_arg))
-            return 0, "cred-e2e-stub"
-
-        with unittest.mock.patch.object(planner, "_register_and_record", _fake_register):
-            rc = planner._sentinel_tick(self._args(plan, "T-r145-armreset"))
-
+        # 活動（5 秒前）早於標記 at（現在）：標記未過期
+        rc, calls, _resumes, now, plan = self._tick(sid, marker_age=0, reset_in=600, idle=5)
         self.assertEqual(rc, 0, "patch 過的 register 回 0，rc 必須原樣傳回")
         self.assertEqual(len(calls), 1,
                          "halt 標記被讀到但沒有真的走到 _register_and_record ⇒ 標記沒被消費")
@@ -119,36 +103,53 @@ class SentinelTickConsumesHaltMarkerE2ETest(unittest.TestCase):
         self.assertEqual(called_tick, planner.SENTINEL_TICK)
         # fire_at = reset_at + HALT_RESET_SKEW_SECONDS（quota_messages 與 planner 兩檔
         # 各自具名同值，DEF-200-278／INV-H2 parity）。
+        reset_at = now + timedelta(seconds=600)
         self.assertAlmostEqual(
             (called_at - reset_at).total_seconds(), qg.HALT_RESET_SKEW_SECONDS, delta=1)
 
     def test_expired_halt_marker_drives_probe_and_delegates_to_resume_tick(self) -> None:
         """reset_at 已過 ⇒ decision=probe ⇒ 必須交棒給既有的 `_resume_tick()`。"""
-        sid = "sid-d23-e2e-probe"
-        now = datetime.now(UTC).astimezone()
-        marker_at = now - timedelta(seconds=700)
-        # 活動落在 marker_at 之前＝halt 後未續跑過，否則會判成已自行續跑。
-        transcript = self._transcript(sid, mtime=(marker_at - timedelta(seconds=60)).timestamp())
-        plan = self._write_plan(sid, transcript, "T-r145-probe")
-        reset_at = now - timedelta(seconds=qg.HALT_RESET_SKEW_SECONDS + 60)
-        qg.write_halt_marker(sid, {"sid": sid, "band": "halt", "binding": "session",
-                                   "reset_at": reset_at.isoformat(),
-                                   "at": marker_at.isoformat(),
-                                   "transcript": str(transcript),
-                                   "resolved_source": "payload"})
-
-        calls: list = []
-
-        def _fake_resume_tick(args_arg):
-            calls.append(args_arg)
-            return 7  # 一個既有分支都不會回的哨兵值，證明真的是這支被叫到
-
-        with unittest.mock.patch.object(planner, "_resume_tick", _fake_resume_tick):
-            rc = planner._sentinel_tick(self._args(plan, "T-r145-probe"))
-
+        # 活動早於兌現時刻、且已靜止 ≥ 一個巡邏間隔（HALT_QUIESCE_SECONDS）⇒ 才 probe。
+        rc, _registers, calls, _now, _plan = self._tick(
+            "sid-d23-e2e-probe", marker_age=1000, idle=1060,
+            reset_in=-(qg.HALT_RESET_SKEW_SECONDS + 60))
         self.assertEqual(rc, 7, "decision=probe 必須交棒給 _resume_tick 且原樣回傳其 rc")
         self.assertEqual(len(calls), 1,
                          "halt 標記已過期卻沒有交棒給 _resume_tick ⇒ 標記沒被消費")
+
+    def _tick(self, sid: str, *, marker_age: int, reset_in: int, idle: int):
+        """真 `_sentinel_tick`（只替身 `_register_and_record`／`_resume_tick`）；單位秒。
+        回 `(rc, register 呼叫, resume 呼叫, now, plan)`。"""
+        now = datetime.now(UTC).astimezone()
+        transcript = self._transcript(sid, mtime=now.timestamp() - idle)
+        plan = self._write_plan(sid, transcript, f"T-{sid}")
+        qg.write_halt_marker(sid, {"sid": sid, "band": "halt", "binding": "session",
+                                   "reset_at": (now + timedelta(seconds=reset_in)).isoformat(),
+                                   "at": (now - timedelta(seconds=marker_age)).isoformat(),
+                                   "transcript": str(transcript), "resolved_source": "payload"})
+        self.assertIsNotNone(qg.read_halt_marker(sid), "fixture 本身必須先確認標記寫得進去")
+        registers, resumes = [], []
+        mock_patch = unittest.mock.patch.object
+        with mock_patch(planner, "_register_and_record", lambda p, s, at, tick: (
+                registers.append((p, s.get("session_id"), at, tick)), (0, "cred-e2e-stub"))[1]), \
+                mock_patch(planner, "_resume_tick", lambda a: resumes.append(a) or 7):
+            rc = planner._sentinel_tick(self._args(plan, f"T-{sid}"))
+        return rc, registers, resumes, now, plan
+
+    def test_halt_marker_semantics_hold_through_the_real_tick(self) -> None:
+        """DEF-200-516（7-E）端到端：收斂活動不讓標記過期；兌現後已續跑或到點仍在動 ⇒ 不叫醒。"""
+        interval = planner.SENTINEL_INTERVAL_SECONDS
+        for sid, marker_age, reset_in, idle, want_after in (
+                ("converged", 600, 600, 585, 600 + qg.HALT_RESET_SKEW_SECONDS),  # ⇒ arm_reset
+                ("resumed", 5000, -1000, 100, interval),  # 兌現後仍有活動 ⇒ 照常巡邏
+                ("busy", 5000, -500, 600, interval)):  # 到點但 10 分鐘前才動過 ⇒ 延後
+            with self.subTest(sid):
+                _rc, registers, resumes, now, _plan = self._tick(
+                    f"sid-e-{sid}", marker_age=marker_age, reset_in=reset_in, idle=idle)
+                self.assertEqual(resumes, [], "不該叫醒（spawn 第二個續跑窗）")
+                (_plan, _sid, at, tick), = registers
+                self.assertEqual(tick, planner.SENTINEL_TICK)
+                self.assertAlmostEqual((at - now).total_seconds(), want_after, delta=2)
 
 
 _AT = "'2099-01-01 00:00:00'"  # 顯式 --at：避開額度快取（全程不碰網路）
@@ -262,6 +263,105 @@ class ManualRegisterThenWakeE2ETest(unittest.TestCase):
         self.assertIn("probed", events)
         self.assertIn("quota_back_no_resume", events)
         self.assertNotIn("沒有狀態塊", woke_err.getvalue())
+
+    def _events(self) -> list[dict]:
+        log = planner.endurance_log_path(self.plan)  # 第一筆痕跡之前檔案還不存在
+        text = log.read_text(encoding="utf-8") if log.is_file() else ""
+        return [json.loads(line) for line in text.splitlines()]
+
+    def _wake(self, *, band: str, handback: Path | None = None, files_changed: int = 0,
+              early_bombs: bool = False) -> tuple[int, str]:
+        """真 `_resume_tick`（探針／spawn／band 為替身，其餘收尾與重掛皆真碼；任務書目錄入沙箱）；
+        `early_bombs`：探針與 spawn 換成炸彈（早醒不得碰它們）。"""
+        args = planner.build_parser().parse_args(
+            ["--resume-tick", "--plan", str(self.plan), "--task-name", self.task])
+        verdict = {"open": True, "kind": guard.LIMIT_NONE, "rc": 0, "text": "", "source": "stub"}
+        bomb = AssertionError("早醒不得探測、不得 spawn")
+
+        def _spawn(_args, state, _log):
+            state.update(handback_verdict="written", handback_path=str(handback),
+                         files_changed=files_changed, route_strategy=planner.STRATEGY_RESUME)
+            return 0
+
+        err = io.StringIO()
+        with unittest.mock.patch.dict(os.environ, {"AUTOSDD_PLAN_DIR": str(self.tmp / "plans")}), \
+                unittest.mock.patch.object(
+                    planner, "probe_quota", side_effect=bomb if early_bombs else None,
+                    return_value=verdict), \
+                unittest.mock.patch.object(
+                    planner, "_run_resume", side_effect=bomb if early_bombs else _spawn), \
+                unittest.mock.patch.object(planner.relay_machine, "current_band",
+                                           lambda *_a, **_k: band), \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+            self.assertTrue(planner.endurance_env.plan_dir().is_relative_to(self.tmp),
+                            "任務書目錄沒有隔離 ⇒ 真 gc_plans 會掃到真家目錄")
+            return planner._resume_tick(args), err.getvalue()
+
+    def test_an_early_wake_waits_for_the_reset_instead_of_probing_or_spawning(self) -> None:
+        """DEF-200-516 端到端：真註冊後立刻醒（reset 在 2 小時後）：不得探測／spawn，須重掛。"""
+        fire = datetime.now(UTC).astimezone() + timedelta(hours=2)
+        with unittest.mock.patch.object(
+                planner.session_brief, "schtasks_trigger",
+                return_value=(f"'{fire:%Y-%m-%d %H:%M:%S}'", fire, "")):
+            rc, _out, err = self._run("--register-schtasks")
+        self.assertEqual(rc, 0, err)
+        registered = self._block()
+        seen = len(self._events())
+        woke_rc, woke_err = self._wake(band=quota_policy.BAND_FREE, early_bombs=True)
+        self.assertEqual(woke_rc, 0, woke_err)
+        self.assertEqual([e["event"] for e in self._events()[seen:]],
+                         ["woken", "resume_tick_early"])
+        armed = self.backend.armed()
+        self.assertEqual(len(armed), 2, f"早醒沒有恰一次重掛：{armed}")
+        _, task, at_expr, at = armed[1]
+        self.assertEqual(task, self.task)
+        self.assertEqual(at_expr, f"'{fire:%Y-%m-%d %H:%M:%S}'")
+        self.assertLess(abs((at - fire).total_seconds()), 1, "重掛的時刻不是原本的 reset＋skew")
+        after = self._block()
+        self.assertEqual((after["state"], after["reset_at"]), ("armed", registered["reset_at"]))
+
+    def _settle_stop(self, *, next_step: str, files_changed: int, band: str) -> list[dict]:
+        """DEF-200-516 順帶發現 7-B 的共同前置：真註冊 → 真醒 → 真收尾（含真 alert 與真重掛）。"""
+        rc, _out, err = self._run("--register-schtasks", "--at", _AT)
+        self.assertEqual(rc, 0, err)
+        hb = self.tmp / "handback.md"
+        hb.write_text("## 做了什麼\n測試\n\n## 驗了什麼（附實測 rc）\nrc=0\n\n## 卡在哪\n無\n\n"
+                      f"## 下一步指令\n{next_step}\n", encoding="utf-8", newline="\n")
+        woke_rc, woke_err = self._wake(band=band, handback=hb, files_changed=files_changed)
+        self.assertEqual(woke_rc, 0, woke_err)
+        return self._events()
+
+    def _assert_settled_cleanly(self, events: list[dict], stop_event: str) -> None:
+        names = [e["event"] for e in events]
+        self.assertNotIn("relay_settle_crashed", names, f"收尾假崩潰：{events}")
+        self.assertIn(stop_event, names)
+        self.assertFalse(planner.escalation.note_path().exists(),
+                         "正常收尾竟然寫了『需要你動手』的紙條（假崩潰叫人）")
+        self.assertTrue(self.plan.is_file(),
+                        "任務書在重掛哨兵前就被收掉 ⇒ 哨兵沒有地板（`arm` 拒絕註冊不存在的任務書）")
+        self.assertEqual([c[1] for c in self.backend.armed()],
+                         [self.task, planner.sentinel_task_name(self.sid)],
+                         "收尾後沒有把哨兵重掛起來")
+        self.assertEqual(
+            [e["rc"] for e in events if e["event"] == "relay_rearmed"], [0])
+        state = self._block()
+        self.assertEqual((state["kind"], planner.relay_problems(state)), ("sentinel", []))
+
+    def test_a_done_window_settles_without_crashing_and_keeps_the_plan_for_the_sentinel(
+            self) -> None:
+        """DEF-200-516 順帶發現 7-B（DONE 路）：非 loud 的 `alert(plan=plan)` 會 GC 任務書，隨後的
+        `write_relay` ⇒ FileNotFoundError ⇒ 假崩潰叫人，哨兵也註冊不了。既有測試把 `alert` 換成
+        不 GC 的替身所以看不見；這裡 alert 是真的。"""
+        events = self._settle_stop(next_step="", files_changed=0, band=quota_policy.BAND_FREE)
+        self._assert_settled_cleanly(events, "relay_done")
+
+    def test_a_quota_stop_window_settles_without_crashing_and_keeps_the_plan_for_the_sentinel(
+            self) -> None:
+        """同上（QUOTA_STOP 路）：有未完項、有進度、band 收緊 ⇒ 交回哨兵巡邏——非 loud，同一個病。"""
+        events = self._settle_stop(next_step="1. 還有第 4 步", files_changed=2,
+                                   band=quota_policy.BAND_HALT)
+        self._assert_settled_cleanly(events, "relay_stopped")
+        self.assertEqual([e["why"] for e in events if e["event"] == "relay_stopped"], ["band"])
 
     def test_explicit_and_observed_at_write_distinct_honest_sources(self) -> None:
         """L0（操作者宣稱）與 L1（端點實測）各用自己的字面，不借 `operator`／

@@ -2656,6 +2656,8 @@ class TestGovernanceFilesAreReadOnlyWhenUnattended(unittest.TestCase):
     #: 這裡刻意逐字重抄一份當**期望值**——期望值引用 SSOT 本身會讓測試恆真）。
     PROTECTED = (
         ".env",
+        "env.shared",
+        "tools/lib/quota_env_layers.py",
         ".claude/settings.json",
         ".claude/settings.local.json",
         ".claude/hooks/block_destructive_git.py",

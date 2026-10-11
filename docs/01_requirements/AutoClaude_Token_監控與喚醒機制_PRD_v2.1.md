@@ -2769,6 +2769,7 @@ v2.1 自 v2.1.17 起**凍結**。修憲只由下列三種觸發之一開啟：
 | 立案日期 | 需求（掌舵者原文摘要） | 結案格 | 依據／再開症狀 |
 | :---- | :---- | :----: | :---- |
 | 2026-10-10 | CLI 已驗證版本清單不再比精確 patch 版號（掌舵者原文選項：「CLI 版本清單不再比精確版號」；對應 §16.2 §6.2 R-6.2-2 列揭露的版本號型永動源） | ✅ | 依據＝`AutoClaude/autoclaude/utils/verified_cli_versions.py` 新增純函式 `family_verdict`（major.minor 相同且 patch ≥ 該家族最低已驗證版 ⇒ 家族級已驗證：不 DRY_RUN、不通知；新 minor／major 或讀不到版本仍 DRY_RUN＋loud），`boot_self_check.cli_version_verdict` 只消費它；R-6.2-2 三條意圖不變（版本讀自 `claude --version`、清單 git-tracked 帶核實事實、未知不阻止啟動但 DRY_RUN＋loud）；本機 2.1.296 親驗不再 DRY_RUN；紅綠測試住 `AutoClaude/tests/test_r100_boot_self_check.py` |
+| 2026-10-11 | 額度／模型參數檔跨機同步與維護（掌舵者原文：「如何將兩邊的 .env 同步，哪邊才是正確完整的？這個參數檔該如何維護？」；對應 §6 設定面，本項不改 §6 任何既有鍵或出廠值） | ✅ | 依據＝新增追蹤檔 `env.shared`＋四層載入鏈（行程 env ＞ `AutoClaude/.env`〔引擎 3 鍵〕＞ 根 `.env` ＞ `env.shared` ＞ 出廠 `ENV_SPEC`）＋ `python tools/lib/quota_policy.py --env-doctor [--fix]`；實作座標 `tools/lib/quota_env_layers.py`（harness 與引擎同一條鏈，引擎側 `AutoClaude/autoclaude/utils/config.py::_ENV_FILES`）；PRD §6 只規範 `.env.example` 的鍵集合與出廠值（出廠值不動），對「哪些檔、什麼順序」零規範，故本項不改任何既有條文；治理面保護＝`.claude/hooks/block_destructive_git.py` 的 `_GOV_EXACT` 納管 `env.shared` 與 `tools/lib/quota_env_layers.py`（PRD §12 禁寫 `.env` 的對應面）；測試住 `tools/tests/test_quota_env_layers.py`；詳 `docs/06_quality/CrossPlatform_R212_WakeChain_EnvLayer_Evidence.md`〈二〉-6 |
 
 守衛面相關者另受 `docs/06_quality/FiveQuestion_Audit_Protocol/README.md`〈窗口規則與收斂判定〉S1～S6 約束（只引用、不複寫）；動到守衛面前先附暴露證據（根 CLAUDE.md〈守衛面准入〉）。
 

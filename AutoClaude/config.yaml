@@ -82,7 +82,7 @@ token_guard:
   #    Token Guard 的 compact/halt 兩道門在那些行上永遠不觸發（實測 shipped=None／default=92.0）。
   #    同一份知識住兩個家、只有一個家會被改 ⇒ 直接刪掉這個鍵，讓 pydantic 用程式碼預設（單一 SSOT）。
   #    真的要自訂時：這裡列的集合必須是程式碼那 7 條的**超集**，否則
-  #    tests/test_config_shipped_yaml_ssot.py 會紅。
+  #    tests/test_r82_quota_axis_and_shipped_defaults.py 會紅。
 
 alert_ladder:
   # F-B1 / ADR-AGT-004：漸進式告警階梯（WARNING→HINT→ESCALATE）。
@@ -93,7 +93,7 @@ notification:
   # 🔴 R82（ACC-01）：預設 false＝**不彈**桌面通知。原預設 true 會在 POST_RUN（＝跑完之後）
   #    才冒出彈窗，並把行程多吊住 duration 秒（plyer 的非 daemon 執行緒 sleep）。
   #    臨時想看通知：設 true，或 env AUTOCLAUDE_DESKTOP_NOTIFY=1（不必改本入庫檔）。
-  #    ⚠️ 關掉的只有「彈窗」——ESCALATION 仍永遠寫 checkpoints/escalation_alert.log（刻意）。
+  #    ⚠️ 本開關關掉「彈窗」與 escalation_alert.log；失敗型 ESCALATION 的持久痕跡＝checkpoints/escalation_<step>_<時間>.md（EscalationDump，不受本開關影響）。
   # 🔴 R84（AC-(c)）：即使設 true 也不再拖住行程結束——通知後端改由 daemon 執行緒呼叫，
   #    後端自己 spawn 的內層執行緒因而繼承 daemon（實測 3.049s → 0.247s）。
   enabled: false

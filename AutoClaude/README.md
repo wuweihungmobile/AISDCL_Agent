@@ -97,6 +97,8 @@ cp config.local.yaml.example config.local.yaml
 # 編輯 config.local.yaml，填入個人化設定（gitignored）
 ```
 
+> ⚠️ 複製後（在 `AutoClaude/` 下）執行 `python ../tools/lib/quota_policy.py --env-doctor --fix`，把與 env.shared／出廠相同的多餘行刪掉，否則本機 `.env` 會遮住跨機共用值（repo 根的 `env.shared`；詳見根層 ONBOARDING.md §2.2）。
+
 **Storage 模式設定（config.yaml）**：
 
 ```yaml

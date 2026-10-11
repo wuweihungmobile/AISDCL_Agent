@@ -139,9 +139,15 @@ def _handback_note(path: Path) -> str:
 
 
 def _section(text: str, heading: str) -> str:
-    """取 `heading` 之後、下一個 `## ` 之前的內容（不含標題行；找不到標題回 ``""``）。"""
+    """取 `heading` 之後、下一個 `## ` 之前的內容（不含標題行；找不到標題回 ``""``）。
+
+    標題比對走 `resume_route.heading_hit`（唯一規則，允許帶後綴；DEF-200-516 7-A 同型：本機
+    2／2 份真 handback 的「## 下一步指令（…）」曾被精確比對判成節空白）；lazy import 同
+    `announce_handbacks`。
+    """
+    import resume_route  # noqa: PLC0415 — hook import 鏈刻意 lazy，壞掉由呼叫端退安靜
     lines = text.splitlines()
-    starts = [i for i, ln in enumerate(lines) if ln.strip() == heading]
+    starts = [i for i, ln in enumerate(lines) if resume_route.heading_hit(ln, heading)]
     if not starts:
         return ""
     start = starts[0] + 1

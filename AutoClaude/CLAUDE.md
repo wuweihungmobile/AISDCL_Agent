@@ -196,7 +196,7 @@ DSN 解析優先級：`AUTOCLAUDE_DB_DSN` > `AUTOCLAUDE_PG_DSN`（deprecated）>
 
 - **`dry_run=True`**：跳過 Claude Code 執行，以 regex keyword 合成輸出
 - **ANSI strip**：regex 比對前自動 `strip_ansi()`
-- **ESCALATION**：超過 `max_retries` 後桌面通知 + `EscalationDump`（含 shell 行動清單）+ `PlaybookEvolver` 嘗試自動演化
+- **ESCALATION**（Kernel 正式路徑；DEF-200-518）：「收斂判 escalate」與「重試耗盡」兩型失敗升級先發 `ON_ESCALATION_DUMP_REQUEST` 落 `<checkpoint_dir>/escalation_<step>_<時間>.md`（`EscalationDump`，含 shell 行動清單；不受通知開關影響；🔴 Kernel 路徑 dump 已知四處不精確：Playbook 欄空白、重啟指令 `autoclaude ""` 不可照抄、最後 log 檔名與實際不符、「從 checkpoint 繼續」措辭不準），再發 `ON_ESCALATION`：桌面通知（`notification.enabled=true` 才發並寫 `escalation_alert.log`）＋演化**提案**（只寫 log，不套用、不重載；有 `MINIMAX_API_KEY` 時會同步打 Minimax——`_call_with_retry` 逾時 30s×最多 3 次＋退避，最壞約 96s）。veto／Brain 故障型升級只留 log marker 與 `KernelResult.reason`；舊 `PlaybookRunner` 的「自動演化重載」無生產建構點（`main.py:239`）
 - **Token Guard**：≥ 80% `/compact`、≥ 90% 儲存 checkpoint 並排程恢復
 - **Checkpoint 續跑**：原子寫入；`--fresh` 忽略 checkpoint 重跑
 - **Hotkey 中斷**：ESC+F12 全域安全停止
