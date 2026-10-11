@@ -118,7 +118,9 @@ dev_start 七步驟（邏輯集中於 `tools/dev_start.py` 跨平台單一核心
 現況值直接讀 `env.shared`（每個鍵上方有一行 WHY；本段不複寫數字）。
 
 維護（兩平台同一支；rc=0 乾淨、rc=1 逐行點名多餘／遮蔽共享／打錯字／壞值／重複鍵）：
-`python tools/lib/quota_policy.py --env-doctor`；確認後 `python tools/lib/quota_policy.py --env-doctor --fix`（先備份成 `.env.bak.<UTC 時間戳>`、只刪 ENV_SPEC 鍵的多餘／遮蔽行並印 diff，機密行與其餘內容位元組不動）。新機器什麼都不用建；舊機器 pull 後跑一次即可。
+`python tools/lib/quota_policy.py --env-doctor`；確認後 `python tools/lib/quota_policy.py --env-doctor --fix`（先備份成 `.env.bak.<UTC 時間戳>`、只刪 ENV_SPEC 鍵的多餘／遮蔽行並印 diff，機密行與其餘內容位元組不動）。新機器什麼都不用建；舊機器 pull 後會自動跑（見下段），自動沒觸發時手動跑一次即可。
+
+自動同步（`git pull`／`git merge` 成功後，`tools/git-hooks/post-merge`；含 `dev_start` [2/7] 的 ff-only pull，hook 檔與參數檔同一次 pull 才帶進來也會在該次生效）：自動跑一次 `--env-doctor`。乾淨就只印一行；問題行**全是**可自動修的（`[redundant]`／`[shadows-shared]`／`[engine≠harness]`／`[dead]`）就跑 `--fix`（備份成 `.env.bak.<UTC 時間戳>`，與被修的檔同目錄）再體檢一次，三段輸出都印出來；`--fix` 的射程含 `AutoClaude/.env`（引擎專屬檔、內有機密），但只刪 ENV_SPEC 鍵的多餘／遮蔽行，機密行與其餘內容位元組不動、diff 也不印鄰行（上表「不同步、不碰機密」指的是不把它納入共享，不是 pull 後的自動修復碰不到它）；只要含需要人判斷的旗標（`[unknown]`／`[bad-value]`／`[duplicate]`／`[unreadable]`／`[missing-shared]`／`[bom]`）就**一個檔案都不動**，印出體檢全文與指引，人處理完再跑一次。這支 hook 永遠 exit 0（不會讓 pull 失敗）；找不到 repo 根 `.venv` 直譯器就略過並出聲；`AUTOCLAUDE_SKIP_HOOKS=1` 可跳過；`AUTOSDD_UNATTENDED` 有設（無人值守回合）時只體檢、不 `--fix`（`.env` 唯讀）。**不會觸發**：真的需要 rebase 的 `git pull --rebase`／`git rebase`（本地沒有領先 commit 時 `pull --rebase` 會退化成 fast-forward，那種會觸發）、已是最新（Already up to date）、reset／checkout 手動換樹——這些情形請手動跑上面的 `--env-doctor [--fix]`。
 
 編碼：`env.shared` 與 `.env` 兩個檔（`AutoClaude/.env` 亦同）一律存 **UTF-8（無 BOM）**——BOM 會讓首行的鍵讀不到（doctor 標 `[bom]`、rc=1）；Windows 用 PowerShell 寫入請 `-Encoding utf8NoBOM`（僅 PowerShell 7 有此值；5.1 的 `-Encoding UTF8` 會寫入 BOM）。
 

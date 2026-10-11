@@ -88,6 +88,7 @@ _CALLER_FILES = [
     _REPO_ROOT / "tools" / "git-hooks" / "pre-commit",
     # 2026-09-22 新增（DEF-200-358）：根層 prepare-commit-msg 以 pick_repo_python 解析直譯器
     _REPO_ROOT / "tools" / "git-hooks" / "prepare-commit-msg",
+    _REPO_ROOT / "tools" / "git-hooks" / "post-merge",  # pull 後自動同步 env.shared
     _REPO_ROOT / "tools" / "lib" / "git_hooks_install_common.sh",
     _REPO_ROOT / "tools" / "dev_start.sh",
     _REPO_ROOT / "tools" / "bootstrap.sh",

@@ -619,7 +619,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 393,
     "_ps_engine.py": 83,
     "test_act_local_runner_image.py": 307,
-    "test_adr_xplat001_c1c2_lock.py": 8744,
+    "test_adr_xplat001_c1c2_lock.py": 8598,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 4074,
@@ -675,7 +675,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_ps51_compat.py": 599,
     "test_ps_engine_ssot.py": 899,
     "test_python_c_percent_shim.py": 113,
-    "test_quota_env_layers.py": 328,
+    "test_quota_env_layers.py": 449,
     "test_quota_policy.py": 4526,
     "test_quota_reconcile_gap.py": 145,
     "test_recovery_hint_passes_ps_lint.py": 103,
@@ -702,7 +702,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_windows_forbidden_filename_parity.py": 941,
     "test_windows_nightly_anchor_parity.py": 119,
     "test_windows_smoke_heartbeat_doc_sync.py": 197,
-    "test_windowsapps_guard_bash_parity.py": 1015,
+    "test_windowsapps_guard_bash_parity.py": 1016,
     "test_windowsapps_guard_cross_consistency.py": 2089,
     "test_workflow_permission_concurrency_lock.py": 1808,
     "test_workflow_schedule_sync.py": 305,
@@ -2657,6 +2657,14 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "st_wake_chain_halt_r278.py 回歸鎖擴充＋ test_block_destructive_git_r83.py +2（D-1 測試"
      "半）＋本表自身漂移（重釘列、回歸鎖軌同輪列、到期兌現列 (212, 516) 並重新武裝 214／515"
      "、接鏈列）。逐檔清單住 CrossPlatform_R212_WakeChain_EnvLayer_Evidence.md〈二〉。"),
+    ("R212", 116372, 116348, -24,  # round-label-ok
+     "同輪第二列（env.shared 額度參數檔 pull 後自動同步，掌舵者 T1「幫我自動同步」；DEF-200-520 "
+     "同族；QA 複審補鎖）：test_quota_env_layers.py +121（TestPostMergeHook 七支＝四支行為鎖＋"
+     "三支靜態鎖：旗標清單分割、逐旗標分類對 diagnose().fixable、hook 索引 100755／shebang／LF／"
+     "exit 皆 0）＋ test_windowsapps_guard_bash_parity.py +1（呼叫端登記）＋本檔旁註搬遷 "
+     "−155（接鏈列 R104～R165 旁註 156 行搬至證據檔〈九〉L7／L8，留 1 行指標）＋"
+     "本表自身漂移（本列、接鏈列）。淨額為負：回歸鎖軌不申報；逐檔清單見 "
+     "CrossPlatform_R212_WakeChain_EnvLayer_Evidence.md〈二〉。"),
 )
 
 
@@ -3337,10 +3345,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 336
+_REPIN_LOG_FROZEN_PREFIX_LEN = 337
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "e62c2eaa57e5efd6b0be7e5cd418cf992c1696f4a472507238a3f84a93784f2a")
+    "73b11f3028938d713910cf49c946490f64dab6e6ec80224a66e8474263d1e1cf")
 
 
 def repin_log_history_digest(
@@ -3372,240 +3380,85 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R102", "23b5b6fcc0a2", "cb643af00b7a", "DEF-200-219"),
     ("R102", "cb643af00b7a", "bc7080dcd3f2", "DEF-200-220"),
     ("R103", "bc7080dcd3f2", "b698a52087af", "DEF-200-221"),
-    # DEF-200-223：R104 PRD §4.2.5／§4.2.1 BURSTING/EWMA 落地，同體例「追加後立即  round-label-ok
-    # 自我凍結」——本輪淨額 -18：測試 +62 與搬遷散文 -91 相抵後，本檔自身兩列
-    # （稽核列＋本凍結前綴延伸列）+11，prefix_len 61→62 涵蓋兩列本身。
+    # R104～R165 旁註：史料見 CrossPlatform_R212_WakeChain_EnvLayer_Evidence.md〈九〉L7／L8。
     ("R104", "b698a52087af", "967b8b322da4", "DEF-200-223"),
-    # DEF-200-224：R105 淨額 34-43+9=0，prefix_len 62→63 涵蓋本列本身，逐項見 _GUARD_LINES_REPIN_LOG 同輪列。round-label-ok
     ("R105", "967b8b322da4", "cae90354814a", "DEF-200-224"),
-    # DEF-200-202：四方複審 REJECT 修復（quota_gate.py 補 active_model 接線＋  round-label-ok
-    # 回歸測試），同體例「追加後立即自我凍結」——本輪追加兩列（功能淨額 +49 ＋
-    # 本檔自身編修 +12），prefix_len 63→65 一次涵蓋兩列本身。
     ("R105", "cae90354814a", "763624f17dde", "DEF-200-202"),
-    # DEF-200-202：四方複審修復續（`_platform_helpers.py` 折長行＋  round-label-ok
-    # `test_defect_id_reference_integrity.py` DEF-200-015 姊妹帳本擴面），同體例
-    # 「追加後立即自我凍結」——本輪追加一列，prefix_len 65→66 涵蓋本列本身。
     ("R105", "763624f17dde", "a520bdcef8b7", "DEF-200-202"),
-    # DEF-200-202：帳本狀態欄回填 fixed@R105 觸發 dirent-primitive 債表 round-label-ok
-    # 微幅上升，同體例「追加後立即自我凍結」——本輪追加一列，prefix_len 66→67
-    # 涵蓋本列本身。
     ("R105", "a520bdcef8b7", "a64463e662c1", "DEF-200-202"),
     ("R106", "a64463e662c1", "76bb05948f27", "DEF-101-561"),
-    # DEF-101-752：R82 收斂殘餘承接站點，同體例「追加後立即自我凍結」——本輪追加一列
-    # （多支 tools/tests/ 掃描面站點改為 tracked ∪ untracked-not-ignored，含本檔自身
-    # 逐檔漂移，逐筆重釘過程已收斂合併為單列），prefix_len 71→72 涵蓋該列本身。
     ("R106", "76bb05948f27", "026523f64c92", "DEF-101-752"),
-    # DEF-101-752 問題 3 收斂（帳本結案輪修復包重釘漏補）：8 站點永久回歸測試類別 round-label-ok
-    # 落地時未重釘本表（ARCH-01 同型復發），本輪補一列（含本檔自身逐檔漂移的兩列
-    # 追加），prefix_len 73→75 涵蓋全部新列本身。
     ("R106", "026523f64c92", "6d3be18839b6", "DEF-101-752"),
-    # 帳本結案包 #3（DEF-200-166 窗口）：追加本輪稽核列並把它納入前綴（prefix_len 75→76）。
     ("R107", "6d3be18839b6", "b42d19e1db20", "DEF-200-166"),
     ("R107", "b42d19e1db20", "abd0dc217e2b", "DEF-200-141"),  # B2/B3 措辭與指針訂正（2026-08-28）
-    # DEF-200-230 回歸鎖窗口：追加本輪稽核列並把它納入前綴（prefix_len 76→77），同體例
-    # 「追加後立即自我凍結」——延伸本身即讓指紋改變，故仍須在此留痕。
     ("R108", "abd0dc217e2b", "21c85dff06f9", "DEF-200-230"),
-    # DEF-200-233 修復窗口（macos-compat-ci）：追加本輪稽核列並把它納入前綴 round-label-ok
-    # （prefix_len 77→78），同體例「追加後立即自我凍結」——延伸本身即讓指紋改變，故留痕。
     ("R108", "21c85dff06f9", "4e0397833463", "DEF-200-233"),
-    # DEF-101-747 換載體（Gap C：表② 指紋 stale 的發現時點提前到 dev_start [6/7]）：
-    # 追加本輪稽核列並把它納入前綴（prefix_len 78→79），同體例「追加後立即自我凍結」。
     ("R109", "4e0397833463", "dc62ee5d1822", "DEF-101-747"),
-    # F2 修復窗口（quota 測試活體態滲入；載體＝DEF-200-232）：R109 追加本輪稽核列 round-label-ok
-    # 並把它納入前綴（prefix_len 79→80），同體例「追加後立即自我凍結」。
     ("R109", "dc62ee5d1822", "42b28e14a0b8", "DEF-200-232"),
-    # DEF-200-121 修復窗口（護欄層判準修補輪）：追加本輪稽核列並把它納入前綴
-    # （prefix_len 80→81），同體例「追加後立即自我凍結」——延伸本身即讓指紋改變，故留痕。
     ("R111", "42b28e14a0b8", "db3448c59433", "DEF-200-121"),
-    # 結構性長債分軌輪（2026-08-30）：追加本輪稽核列並依「追加後立即自我凍結」判例
-    # 延伸前綴涵蓋該列本身（81→82）；Phase2 到期義務同窗記入 [提案]，載體＝該 DEF。
     ("R113", "db3448c59433", "369320d0f7f9", "DEF-200-211"),
-    # v2.1.13 G1 實作批 (a)（喚醒鏈最後一哩）：追加本輪稽核列並依「追加後立即自我凍結」
-    # 判例延伸前綴涵蓋該列本身（82→83）；載體＝DEF-200-231②（headless 窗口許可層）。
     ("R113", "369320d0f7f9", "7301deef344e", "DEF-200-231"),
-    # v2.1.13 G2 實作批 (b)（handback 交接可見性）：追加本輪稽核列並依「追加後立即
-    # 自我凍結」判例延伸前綴涵蓋該列本身（83→84）；載體＝DEF-200-236（交接可見面）。
     ("R113", "7301deef344e", "4b6d79935d12", "DEF-200-236"),
-    # v2.1.13 G3+G4 實作批 (c)+(d)（接力狀態機＋哨兵自癒）：追加本輪稽核列並依「追加
-    # 後立即自我凍結」判例延伸前綴涵蓋該列本身（84→85）；標號改用 R114（理由見 round-label-ok
-    # `_GUARD_LINES_REPIN_LOG` 該列）；載體＝DEF-200-234（受統籌自循環，PRD §3(c)）。
     ("R114", "4b6d79935d12", "ea038ea6ff4e", "DEF-200-234"),
-    # R115 收斂棒 round-label-ok（三個修復棒＋治理批累積漂移一次性合法收束）：追加本輪稽核列並依
-    # 「追加後立即自我凍結」判例延伸前綴涵蓋該列本身（85→86）；載體＝DEF-200-239
-    # （排程孤兒回歸鎖，本輪 test_context_budget_guard.py 內容主要新增項之一）。
     ("R115", "ea038ea6ff4e", "4e5f11565d23", "DEF-200-239"),
     ("R115", "4e5f11565d23", "0c0aa4967799", "DEF-200-239"),
     ("R115", "0c0aa4967799", "9316ce4e91ed", "DEF-200-239"),
-    # ADR-XPLAT-013 Phase2 (b)(c) 分軌計價落地：追加本輪稽核列並依「追加後立即自我
-    # 凍結」判例延伸前綴涵蓋該列本身（88→89）；載體＝DEF-200-211。
     ("R116", "9316ce4e91ed", "1bd8f0d4e396", "DEF-200-211"),
-    # Architect 鏡一審承接補釘，同體例「追加後立即自我凍結」（prefix_len 89→90 涵蓋 round-label-ok
-    # 該列本身；A-1/A-2/N-1 詳 CrossPlatform_R116_Scan_Findings.md）。
     ("R116", "1bd8f0d4e396", "a08e0c7043be", "DEF-200-211"),
-    # P1-2/P1-3 批追加 R117 稽核紀錄＋分軌首次申報，同體例「追加後立即自我凍結」。round-label-ok
     ("R117", "a08e0c7043be", "d16dc6498956", "DEF-200-234"),
-    # P1-4 檢查表規則鎖批追加稽核紀錄，同體例「追加後立即自我凍結」（91→92）。round-label-ok
     ("R117", "d16dc6498956", "f37361174a7f", "DEF-101-886"),
-    # DEF-200-212 P1-5 收尾批：追加五列（落地＋自身編修＋三批史料搬遷）並依「追加後 round-label-ok
-    # 立即自我凍結」判例延伸前綴涵蓋全部新列本身（92→97）。
     ("R118", "f37361174a7f", "862ff00ae26d", "DEF-200-212"),
-    # P1-6 批：skip 天花板①②③與 M6 落款④共同變更鎖落地，追加本輪稽核紀錄（落地＋
-    # 本表自身編修二列）並依「追加後立即自我凍結」判例延伸前綴涵蓋全部新列本身
-    # （99→101）；載體＝DEF-200-240。
     ("R119", "862ff00ae26d", "7f11c682ae08", "DEF-200-240"),
-    # P1-6 批續（round-label-ok）：全套背景跑揪出兩項真違規（R119_HANDOFF.md 零 stale
-    # 宣稱、subprocess text=True 缺 encoding）修復後追加稽核列，依「追加後立即自我
-    # 凍結」判例延伸前綴涵蓋本列本身（101→102）；載體＝DEF-200-240（同批延續）。
     ("R119", "7f11c682ae08", "21bdbf9b9595", "DEF-200-240"),
-    # P1-6 批修復包（DEF-200-240 同批延續）：F1 共同變更鎖判準粒度由檔案級改為剖面
-    # 鍵值級，F2 governance_docs.py E501 拆行，同體例「追加後立即自我凍結」——
-    # 本輪追加三列（落地列＋本表自身編修二列）並延伸前綴涵蓋全部新列本身（103→107）。
     ("R119", "21bdbf9b9595", "4554dbed8bf5", "DEF-200-240"),
-    # R120 收尾：212 結案批＋P1-7 SD-4/SD-8＋SA-4 的守衛線重釘使 round-label-ok
-    # `_REPIN_LOG_HISTORY_SHA256` 前進，同體例「追加後立即自我凍結」——本輪追加
-    # 本列＋一個 repin 稽核列，prefix_len 109→110 涵蓋新 repin 列本身。
     ("R120", "4554dbed8bf5", "dc94d1a10d4f", "DEF-200-241"),
-    # 精準修復輪收尾：三筆缺陷落地＋散文搬遷抵銷的守衛線重釘使 round-label-ok
-    # `_REPIN_LOG_HISTORY_SHA256` 前進，同體例「追加後立即自我凍結」——本輪追加三個
-    # repin 稽核列＋本列，prefix_len 110→113 涵蓋全部新列本身。
     ("R122", "dc94d1a10d4f", "7d9eb06de5a7", "DEF-200-222"),
-    # 精準修復輪第二棒收尾：三筆落地的守衛線重釘使指紋前進，同體例 round-label-ok
-    # 「追加後立即自我凍結」——本棒追加一個 repin 稽核列＋本列，prefix_len 114→115。
     ("R123", "7d9eb06de5a7", "4ec1e958f341", "DEF-200-205"),
-    # 落地輪收尾：結案批回歸鎖＋到期義務兌現的守衛線重釘使指紋前進，同體例 round-label-ok
-    # 「追加後立即自我凍結」——本輪追加一個 repin 稽核列＋本列，prefix_len 115→116。
     ("R126", "4ec1e958f341", "faddc843e042", "DEF-200-241"),
     ("R127", "faddc843e042", "a4b92fe15365", "DEF-200-133"),
-    # R129 喚醒鏈零浪費收尾：4 包 +1300 行回歸鎖的守衛線重釘使指紋前進， round-label-ok
-    # 同體例「追加後立即自我凍結」——本輪追加一個 repin 稽核列＋本列，
-    # prefix_len 117→118 涵蓋新 repin 列本身。
     ("R129", "a4b92fe15365", "1bff7d5bf52e", "DEF-200-266"),
-    # R130 M-01/M-05 喚醒鏈死碼修復：cbg +112 回歸鎖的守衛線重釘 round-label-ok
-    # 重釘使指紋前進，同體例「追加後立即自我凍結」——本輪追加一個 repin 稽核列＋本列，
-    # prefix_len 118→119 涵蓋新 repin 列本身；載體＝DEF-200-266（喚醒鏈同家族）。
     ("R130", "1bff7d5bf52e", "79ab4a9a386e", "DEF-200-266"),  # round-label-ok
-    # R131 喚醒鏈四方審計對抗查證與確認破洞修復：cbg／run_root_unittests round-label-ok
-    # 回歸鎖的守衛線重釘。重釘使指紋前進，同體例「追加後立即自我凍結」——本輪追加一個
-    # repin 稽核列＋本列＋本檔自身編修，prefix_len 119→120 涵蓋新 repin 列本身；
-    # 載體＝DEF-200-272（四方審計撿回同家族）。
     ("R131", "79ab4a9a386e", "3a6d5d17cd32", "DEF-200-272"),  # round-label-ok
-    # R131 收尾：喚醒鏈規則6崩潰根因修復（write_relay 任務書消失未捕捉例外）回歸鎖 round-label-ok
-    # ＋本檔自身編修（cost-envelope 測試補 regression_lane 參數）使指紋再前進；
-    # 同輪追加一個 repin 稽核列＋一個回歸鎖軌列＋本列，prefix_len 120→121 涵蓋新列本身；
-    # 載體＝DEF-200-272（同家族）。
     ("R131", "3a6d5d17cd32", "1d5bb6d4bec1", "DEF-200-272"),  # round-label-ok
-    # R131 二度收尾：對抗式複審發現的收尾修復回歸鎖＋本檔自身編修，prefix_len round-label-ok
-    # 121→122 涵蓋新列本身；載體＝DEF-200-272（同家族）。
     ("R131", "1d5bb6d4bec1", "2b2619269538", "DEF-200-272"),  # round-label-ok
-    # R132 三度收尾：規則2/3拆除／規則7 leak_fence／規則8無值宣稱／規則5 macOS round-label-ok
-    # 串接測試四項回歸鎖＋本檔自身兩筆稽核列，prefix_len 122→124 涵蓋新列本身；
-    # 載體＝DEF-200-272（同家族）。
     ("R132", "2b2619269538", "60a3d5bf721b", "DEF-200-272"),  # round-label-ok
-    # R133：DEF-200-274 落地——凍結前綴延伸 124→126 涵蓋新兩列本身，同既有體例。round-label-ok
     ("R133", "60a3d5bf721b", "b7448766903c", "DEF-200-274"),
     ("R134", "b7448766903c", "e069a86b7750", "DEF-200-274"),
-    # R134 續：DEF-200-274 第三輪對抗式複審收斂批——新增真實 subprocess round-label-ok
-    # 回歸測試使護欄層行數重釘，凍結前綴延伸涵蓋新增列本身。
     ("R134", "e069a86b7750", "5f040dde89da", "DEF-200-274"),
-    # R135：DEF-200-274 第四輪四方複審收尾——work-stealing 動態派工重構回歸測試＋ round-label-ok
-    # TOCTOU 緩解＋回歸鎖軌／到期義務三處新增，凍結前綴延伸涵蓋新增列本身。
     ("R135", "5f040dde89da", "1e3073cee390", "DEF-200-274"),
-    # R136：DEF-200-274 第四輪第二次對抗式複審收斂——BaseException 型別缺口回歸 round-label-ok
-    # 測試＋回歸鎖軌新列＋本檔自身逐檔漂移，凍結前綴延伸涵蓋新增列本身。
     ("R136", "1e3073cee390", "08ffdc430461", "DEF-200-274"),
-    # R137：DEF-200-274 第五輪四方獨立複審收尾——全庫 TOCTOU 病灶排查修復＋回歸 round-label-ok
-    # 淨額上限到期義務兌現列＋本檔自身逐檔漂移，凍結前綴延伸涵蓋新增列本身。
     ("R137", "08ffdc430461", "6843feaf786c", "DEF-200-274"),
-    # R138：DEF-200-274 第六輪——test_platform_utils_dedup.py 補 _zzz_ 排除（前五輪 round-label-ok
-    # 排查未涵蓋此檔）＋本檔自身逐檔漂移，凍結前綴延伸涵蓋新增列本身。
     ("R138", "6843feaf786c", "7b88d4c61478", "DEF-200-274"),
-    # R139：DEF-200-274 第六輪四方獨立複審收斂——補齊 dispatch_granularity.py round-label-ok
-    # 零測試覆蓋缺口，凍結前綴延伸涵蓋新增列本身。
     ("R139", "7b88d4c61478", "7f78df45354f", "DEF-200-274"),
-    # R140：DEF-200-274 第七輪——新增負載不均自動偵測（dispatch_imbalance.py）＋ round-label-ok
-    # 四方獨立複審共同點名的 fair_share 分母真缺陷回歸鎖，凍結前綴延伸涵蓋新增列本身。
     ("R140", "7f78df45354f", "d27ba8c13f10", "DEF-200-274"),
-    # R141：DEF-200-274 第八輪——四方獨立複審修復收尾（worker_count 公式測試／CI round-label-ok
-    # wiring 回歸鎖／GitHub Actions annotation 測試），凍結前綴延伸涵蓋新增列本身。
     ("R141", "d27ba8c13f10", "6f595278360c", "DEF-200-274"),
-    # R142：DEF-200-275／DEF-200-277 收尾——兩個獨立缺陷收斂附帶的 guard-line round-label-ok
-    # 記帳延伸，凍結前綴延伸涵蓋新增列本身。
     ("R142", "6f595278360c", "b97e86a790f0", "DEF-200-277"),
-    # R143：DEF-200-275 第四輪——分子改讀逐字稿 API usage＋parity 鎖新增，凍結 round-label-ok
-    # 前綴延伸涵蓋新增列本身（prefix_len 由 --print-guard-lines 印出）。
     ("R143", "b97e86a790f0", "7bd3af08e2e2", "DEF-200-275"),
-    # R143 同輪追加：第 1 輪審查修復（SA-R4-03 候選鏈測試）再延伸凍結前綴一列。 round-label-ok
     ("R143", "7bd3af08e2e2", "3d5c464c7535", "DEF-200-275"),
-    # R144：DEF-200-278 喚醒鏈缺口收尾——新增 test_wake_chain_halt_r278.py，凍結 round-label-ok
-    # 前綴延伸涵蓋新增主表列與本軌新列本身（prefix_len 152→153）。
     ("R143", "3d5c464c7535", "39ac03acd0f7", "DEF-200-278"),  # 同輪三度追加
-    # R144：DEF-200-275 第五輪 D15——check_claim_provenance.py 新增第五個判準 round-label-ok
-    # unbacked_block_claim_hits()，凍結前綴延伸涵蓋新增主表列與本軌新列本身。
     ("R144", "39ac03acd0f7", "19e2a68ac40e", "DEF-200-275"),
-    # R144：DEF-200-281 喚醒鏈鑑識收尾——halt 標記寫入自檢＋test_quota_policy.py round-label-ok
-    # 測試污染止血，凍結前綴延伸涵蓋新增主表列與本軌新列本身。
     ("R144", "19e2a68ac40e", "55ce75c14334", "DEF-200-281"),
-    # R144 第二輪：DEF-200-281 RC-3（halt 閂鎖鍵補 sid）＋naive-now 防呆兩項修復， round-label-ok
-    # 凍結前綴延伸涵蓋新增主表列與本軌新列本身。
     ("R144", "55ce75c14334", "846054db5d7e", "DEF-200-281"),
-    # DEF-200-275 第六輪：四方複審 REJECT→D17～D25 修復→修後複審全 APPROVE；凍結前綴延伸
-    # 涵蓋新增主表列（自含式，含本軌新列本身），起點接 R144 終點 846054db5d7e。 round-label-ok
     ("R145", "846054db5d7e", "67af3c96e763", "DEF-200-275"),
-    # R146：DEF-200-275 第七輪收尾單人窗口——package A／B 合法新增＋Dev-Trim7 散文搬遷 round-label-ok
-    # 抵銷造成的逐檔漂移收斂（自含式：本檔自身編修亦計入），凍結前綴延伸涵蓋新增
-    # 主表列與本軌新列本身，起點接 R145 終點 67af3c96e763。 round-label-ok
     ("R146", "67af3c96e763", "a4aa9940f730", "DEF-200-275"),
-    # R146 續：DEF-200-275 第七輪收尾單人窗口（Dev-D8）—DEF-200-287（Windows 稽核帳本 round-label-ok
-    # 檔案鎖競態三棒修復）／DEF-200-288（status line harness 進料兩棒）收尾：功能軌新增
-    # test_statusline_context_feed.py 等鎖檔、回歸鎖軌 TestConversationLedgerChildTimeoutParity、
-    # Dev-Trim8 十五支散文搬遷抵銷造成的逐檔漂移收斂（自含式：本檔自身編修亦計入），
-    # 起點接上一列終點 a4aa9940f730。
     ("R146", "a4aa9940f730", "054135e143d6", "DEF-200-287"),
-    # R147：DEF-200-274 第九輪收尾單人窗口——P1/P0 zshrc 假紅根治＋LPT 快取／自動 round-label-ok
-    # 細分／不均偵測 v2 新判準能力鎖檔＋既有缺陷修復回歸鎖，凍結前綴延伸涵蓋新增
-    # 主表列與本軌新列本身，起點接 R146 終點 054135e143d6。 round-label-ok
     ("R147", "054135e143d6", "f436d6837308", "DEF-200-274"),
-    # R148：DEF-200-274 第十輪收尾單人窗口——四方獨立審查第九輪產出後 5 包並行修復 round-label-ok
-    # （xdist 開關調整／ci-gate 允許清單／halt_verdict 活動容忍窗／139.9s 測試拆三平台
-    # 具名子類別／staleness advisory 對稱化）造成的新增主表列與本軌新列自身漂移，
-    # 凍結前綴延伸涵蓋新增列本身，起點接 R147 終點 f436d6837308。 round-label-ok
     ("R148", "f436d6837308", "ca5dd474ef16", "DEF-200-274"),
-    # R149：DEF-200-293/294/295 root-infra 三筆缺陷收尾——新增主表列與本軌新列自身 round-label-ok
-    # 漂移，凍結前綴延伸涵蓋新增列本身，起點接 R148 終點 ca5dd474ef16。 round-label-ok
     ("R149", "ca5dd474ef16", "d7d2f8f98dc8", "DEF-200-293"),
-    # R150：DEF-200-297／299 單一 .venv 收斂＋DEF-200-296 鑑別力補強——新增主表列與 round-label-ok
-    # 本軌新列自身漂移，凍結前綴延伸涵蓋新增列本身，起點接 R149 終點 d7d2f8f98dc8。 round-label-ok
     ("R150", "d7d2f8f98dc8", "7c1770cb38ca", "DEF-200-297"),
-    # R151：DEF-200-301～306 單一 .venv 收斂收尾——新增主表列與本軌新列自身漂移， round-label-ok
-    # 凍結前綴延伸涵蓋新增列本身，起點接 R150 終點 7c1770cb38ca。 round-label-ok
     ("R151", "7c1770cb38ca", "0618d2c4affc", "DEF-200-301"),
-    # R152：DEF-200-307～310 單一 .venv 四方審查殘餘收尾——新增主表列與本軌新列自身 round-label-ok
-    # 漂移，凍結前綴延伸涵蓋新增列本身，起點接 R151 終點 0618d2c4affc。 round-label-ok
     ("R152", "0618d2c4affc", "8b034cee4c63", "DEF-200-307"),
-    # R152 沿用：DEF-200-314 mac launchd nightly 三症狀修復——新增主表列與本軌新列 round-label-ok
-    # 自身漂移，凍結前綴延伸涵蓋新增列本身，起點接 R152 終點 8b034cee4c63。 round-label-ok
     ("R152", "8b034cee4c63", "038461e50767", "DEF-200-314"),
-    # R152 沿用：DEF-200-314 四方複審四項非阻斷修正——新增主表列與本軌新列 round-label-ok
-    # 自身漂移，凍結前綴延伸涵蓋新增列本身，起點接 R152 終點 038461e50767。 round-label-ok
     ("R152", "038461e50767", "70959d5b8295", "DEF-200-314"),
     ("R153", "70959d5b8295", "ea0a3bfec58f", "DEF-200-289"),
     ("R154", "ea0a3bfec58f", "f62eab34f224", "DEF-200-320"),
-    # R155：新增主表兩列（內容＋收斂）與本軌新列自身漂移，凍結前綴延伸涵蓋新增列本身。round-label-ok
     ("R155", "f62eab34f224", "96325f09b5d5", "DEF-200-315"),
-    # R156：DEF-200-324 pre-push 整合閘門修復——新增主表兩列與本軌新列自身 round-label-ok
-    # 漂移，凍結前綴延伸涵蓋新增列本身，起點接上一列終點 96325f09b5d5。round-label-ok
     ("R156", "96325f09b5d5", "d1780bab5946", "DEF-200-324"),
-    # R157：多 CPU 第十四輪＋DEF-200-325 對話框根治——新增主表兩列與本軌新列自身 round-label-ok
-    # 漂移，凍結前綴延伸涵蓋新增列本身，起點接上一列終點 d1780bab5946。round-label-ok
     ("R157", "d1780bab5946", "b55177a84c3b", "DEF-200-325"),
     ("R158", "b55177a84c3b", "e402247cc758", "DEF-200-333"),  # round-label-ok
     ("R159", "e402247cc758", "3765b9dedf5d", "DEF-200-345"),  # round-label-ok
     ("R163", "3765b9dedf5d", "0bf86e99a2d2", "DEF-200-354"),  # round-label-ok
-    # DEF-200-358：dev_start [1/7] git 平台 provenance 修復窗口——追加本輪稽核列並依
-    # 「追加後立即自我凍結」判例延伸前綴涵蓋該列本身（240→241）。
     ("R164", "0bf86e99a2d2", "8595fde4cf0b", "DEF-200-358"),  # round-label-ok
-    # DEF-200-359：WindowsSmoke 逃生口缺失根治窗口——追加本輪稽核列並依「追加後立即
-    # 自我凍結」判例延伸前綴涵蓋該列本身（241→242）。
     ("R165", "8595fde4cf0b", "c4350df6e968", "DEF-200-359"),  # round-label-ok
     # DEF-200-360：dev_start [1/7] fetch-aware 前沿判定窗口——追加本輪稽核列並依「追加後立即
     # 自我凍結」判例延伸前綴涵蓋該列本身（242→243）。
@@ -3685,6 +3538,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R211", "c5585ef96d1a", "ba458f1260a8", "DEF-200-509"),  # round-label-ok
     ("R211", "ba458f1260a8", "f5cb9e3fe7d6", "DEF-200-519"),  # round-label-ok
     ("R212", "f5cb9e3fe7d6", "e62c2eaa57e5", "DEF-200-516"),  # round-label-ok
+    ("R212", "e62c2eaa57e5", "73b11f302893", "DEF-200-520"),  # round-label-ok
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

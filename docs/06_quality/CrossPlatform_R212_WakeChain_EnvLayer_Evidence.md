@@ -126,7 +126,15 @@
 - 構成（逐檔）：`test_quota_env_layers.py` 新鎖檔 328、`test_context_budget_guard.py` 14736→14923（+187）、`test_mac_endurance_r83.py` 2210→2305（+95）、`test_sentinel_tick_e2e_r145.py` 308→408（+100）、`test_wake_chain_halt_r278.py` 1067→1079（+12）、`test_block_destructive_git_r83.py` 3422→3424（+2，D-1 測試半）、本檔 `test_adr_xplat001_c1c2_lock.py` 8729→8744（+15：重釘列、回歸鎖軌同輪列、到期兌現註解列、接鏈列、`_FROZEN_GUARD_LINES` 新列）；合計 328＋187＋95＋100＋12＋2＋15＝739。
 - 到期義務：`_REPIN_NET_CAP_DUE_ROUND` 212 到期——兌現 `(212, 516)` 並重新武裝 214／515。
 - 凍結前綴：`_REPIN_LOG_FROZEN_PREFIX_LEN` 335→336、`_REPIN_LOG_HISTORY_SHA256` 重釘、`_FROZEN_PREFIX_REWRITE_LEDGER` 接鏈列（f5cb9e3fe7d6 → e62c2eaa57e5，DEF-200-516）；`<!-- guard-total:R212 -->` 兩站：`docs/04_planning/AutoSDD_improving_112.md`、`docs/06_quality/CrossPlatform_R145_Scan_Findings.md`。
+- **同輪第二列（env.shared pull 後自動同步 `tools/git-hooks/post-merge`；掌舵者 T1「幫我設計自動同步機制」；DEF-200-520 同族；含 QA 複審補鎖）**：淨額 116372→116348（−24）；回歸鎖軌不申報，主軌隨之 430→406 ≤ 516（款(11) 連升仍為第 2 輪、R213 起主軌必須 ≤ 0 不變）。構成：`test_quota_env_layers.py` 328→449（+121：`TestPostMergeHook` 七支＝四支行為鎖＋三支靜態鎖，見〈二〉-11）、`test_windowsapps_guard_bash_parity.py` 1015→1016（+1，`_CALLER_FILES` 登記 post-merge）、本檔 `test_adr_xplat001_c1c2_lock.py` 8744→8598（−146：接鏈列 R104～R165 的旁註 156 行搬至本證據檔〈九〉L7／L8、留 1 行指標；新列 8 行＋接鏈列 1 行）；`_REPIN_LOG_FROZEN_PREFIX_LEN` 336→337、`_REPIN_LOG_HISTORY_SHA256` e62c2eaa57e5…→73b11f302893…、`_FROZEN_PREFIX_REWRITE_LEDGER` 接鏈列（e62c2eaa57e5 → 73b11f302893，DEF-200-520）；`<!-- guard-total:R212 -->` 兩站同步改為 115633→116348（+715，主軌 406）〔Developer 包回報、收尾親跑 `--print-guard-lines`：`# 淨額 116348→116348 (+0)`／`# 逐檔漂移 0 支`、印出 sha 與檔內相同〕。
 - 其他數字釘：skip 樹檔數下限 `tools/tests` 71→72、`AutoClaude/tests` 226→230（照 `run_root_unittests.py` 前置掃描逐字指示）；`MIN_TESTS` 5273→5326（discovery 實測）；ONBOARDING §7 表① `loc-baseline-live` 17797→17857（`sync_onboarding_baselines.py --write`）。表② macOS 欄以乾淨 venv 載具（`python tools/lib/clean_venv_carrier.py`：建→裝→探針→跑→必刪）回填：乾淨 venv 通過 5059 支、skip 222 支（出廠環境值；開發 venv 值不可與它相減）；ci-gate 三軌 1475／1979／362；指紋 v001=8ffe3c3dabbd、v030=6d46814f9084、scripts=ec35ee2838d0、autoclaude=35e0a0326ae2；載具 rc=0、乾淨 venv 必刪完成。
+
+### 二-11 同輪第二列：env.shared 自動同步（git `post-merge` hook；掌舵者原文「幫我設計自動同步機制！==> 下次在 Windows 執行時，幫我自動同步！」；DEF-200-520 同族，不另立缺陷列）
+
+- **設計（SD／Developer 包，Sonnet）**：掛點＝git `post-merge`（`core.hooksPath` 兩台皆指根層 `tools/git-hooks/`，新檔隨 pull 自動生效；`git pull --ff-only`／dev_start [2/7] 的 ff-only pull／真合併皆觸發，**同一次 pull 才帶進來的 hook 也會在該次執行**〔Developer 包以 git 2.54 在暫存 repo 實測〕；真的需要 rebase 的 `pull --rebase`／`git rebase`／「Already up to date」不觸發 ⇒ 手動跑 doctor）。行為＝委派 `python tools/lib/quota_policy.py --env-doctor`：rc=0 印一行；問題行**全是**可自動修的旗標（以 `diagnose().fixable` 為準＝`redundant`／`shadows-shared`／`engine≠harness`／`dead`）才跑 `--fix`（先備份 `.env.bak.<UTC>`）再體檢一次、三段輸出全印；含需人判斷的旗標（`unknown`／`bad-value`／`duplicate`／`unreadable`／`missing-shared`／`bom`）則一個檔不動只出聲；rc≠0 卻零旗標行（doctor 自己壞）不 `--fix`；`AUTOSDD_UNATTENDED` 鍵存在（無人值守）只體檢不修（與 `block_destructive_git.py` 紅線 10「`.env` 唯讀」同語意）；永遠 `exit 0`（merge 不受影響）；找不到 repo 根 `.venv` 直譯器略過並出聲；`AUTOCLAUDE_SKIP_HOOKS=1` 跳過；兩處 grep 前綴 `LC_ALL=C`（非 UTF-8 多位元組 locale 下 `≠` 的位元組會讓 `[^]]*` 走不過）；刻意不納入 `HOOK_FILENAMES`（名冊只管「安裝時必須存在」）。bash 3.2＋BSD 相容由 `test_bash32_compat.py` 掃；該測試當場抓到一個真缺陷：`$rc2、` 緊接全形字會被 bash 3.2 併進變數名、`set -u` 下 unbound 中止整支 hook（改 `${rc2}`；〈十一〉-2 的假 claude 也踩到同型）。
+- **鎖**：`tools/tests/test_quota_env_layers.py::TestPostMergeHook` 七支——四支行為鎖（temp 目錄 `git init`＋假 `windowsapps_guard.sh`＋替身 python 記 argv：可修⇒三次呼叫、人類旗標⇒一次且不動檔、`AUTOCLAUDE_SKIP_HOOKS=1`⇒零呼叫、直譯器缺⇒rc=0 出聲；locale 一格 darwin 用 `zh_TW.Big5`；無人值守一格 `AUTOSDD_UNATTENDED=""` 驗「鍵存在」語意）＋三支靜態鎖（hook 兩份旗標清單對 `ERROR_FLAGS` 的分割、逐旗標分類對 `diagnose().fixable`、hook 索引 100755／shebang／無 CR／非註解 exit 皆 0；索引模式查詢走 `tools/lib/git_paths.py::ls_files`——第一版裸 `git ls-files` 被 `TestGitPathEnumerationIsQuotepathSafe` 抓到）；`test_windowsapps_guard_bash_parity.py` `_CALLER_FILES` 登記 post-merge。**絕不**對真 repo 根跑 `--fix`（沙盒子行程環境剝掉 `GIT_*`／`AUTOCLAUDE_SKIP_HOOKS`／`AUTOSDD_UNATTENDED`）。
+- **QA 零信任鏡（Sonnet，唯讀，隔離複本突變）**：`VERDICT: CONDITIONAL`——零 P1；P2 兩條皆「鎖缺非碼錯」（旗標分類無行為鎖：M8／M9 互換類別測試仍綠；hook 存活無鎖：沙盒把它提交成 100644 再 pull ⇒ git 印 `hook was ignored because it's not set as executable`、`.env` 靜默未動）；P3＝`HOOK_FILENAMES` 未納（另案）、三個測試鬆口（M5 備份名 regex／M6 錨點／M15 乾淨路徑）、文件三處；P4＝非 UTF-8 locale（Big5／eucJP）grep 盲區、`AUTOSDD_UNATTENDED` 下仍會改 `.env`、前綴比對、doctor 檔缺席訊息、輸出噪音、`_fix_one` 非原子寫。QA 自然語料重放：`.env.example` 13 個歷史版本＋本機真實舊備份當舊複本 14/14 自動修復、機密行逐位元組保留、CRLF 複本修後仍全 CRLF、cp950 複本 `--fix` 解碼失敗不動檔。**處置**：P2 兩條＋P3 測試鬆口＋P4 locale／unattended 同輪修（Developer 包第二棒）；突變 18/18 殺（含 QA 指定 M8／M9／M11）；P3 `HOOK_FILENAMES` 與 P4 前綴比對／輸出噪音／非原子寫維持登記、不修（既有行為或另案）；構造性命中依〈守衛面准入〉計 0、不入帳。
+- **Windows 實機未驗**（本輪只有 mac）：Git for Windows 的 sh 實跑、`pick_repo_python` 解析 `.venv\Scripts\python.exe`、cp950 主控台顯示、Windows Python 輸出帶 `\r` 的旗標行計數（讀碼判無害）、`AUTOSDD_UNATTENDED=""` 經 subprocess 傳給 Git Bash 是否保留；列〈八-4〉第 6 項，驗收＝該機 `git pull` 畫面末行。
 
 ---
 
@@ -162,7 +170,7 @@
 
 **這兩段不能證明什麼（誠實劃界）**
 
-1. 「早醒不 spawn」：本次註冊帶 `--no-allow-resume`，即使沒有閘也不可能 spawn；證據只剩「沒有 `probed`」。修前反事實（10:12:27 若無閘會 `probed`→`quota_back_no_resume` 自拆、10:22 不會響）推得通，但痕跡裡沒有對照組。
+1. 「早醒不 spawn」：本次註冊帶 `--no-allow-resume`，即使沒有閘也不可能 spawn；證據只剩「沒有 `probed`」。修前反事實（10:12:27 若無閘會 `probed`→`quota_back_no_resume` 自拆、10:22 不會響）推得通，但痕跡裡沒有對照組。〔R212 第二列補證（〈十一〉①P1.3）：`allow_resume=true` 的手動 job 以手改 `reset_at`（構造性）早醒 kickstart ⇒ `woken→resume_tick_early remaining_seconds=281`、無 `probed`、假 claude 日誌不存在；缺的這半已有真 launchd 證據〕
 2. **到點後的「spawn→收尾→哨兵重掛」整段未真機實跑**；7-C（C-A 修法）與 7-E（E-A 修法）修後行為同樣**未真機實跑**：兩次 tick（10:12／10:22）用的是 Dev-A 版生產碼（含 A-1／7-A／7-B，不含 7-C／7-E，後兩者 10:26:27 才套用）。
 3. **L0 讀數來源未確證**：`probed` 的 `text` 為 `endpoint@2026-10-11T10:20:04+08:00`，比 tick（10:22:03）早 119 秒——很可能是主控 10:20 的 `--pace` 補量留下的快取，而不是 launchd 行程自己取得憑證、發 HTTP 刷新；launchd 無互動環境能否自取憑證，本痕跡沒有任何一筆證據。
 4. 邊界：到點恰好（整秒相等）的 tick 沒有真機樣本；Windows 在本輪全無量測。
@@ -233,21 +241,22 @@ bootout rc=0
 |---|---|---|---|
 | 1 | 睡著／闔蓋的 Mac 不會被喚醒（`pmset repeat` 需 sudo，本專案刻意不碰；已知邊界，非待修 bug） | 邊界，未量 | 一次 reset 時刻 Mac 處於睡眠，醒來後 `woken` 事件的 `at` 比 `due_at` 晚逾一個巡邏間隔（附 sid＋痕跡列＋`pmset -g log` 對應段） |
 | 2 | reset 時刻解不出 ⇒ 拒絕武裝／`escalate`（PRD C10：不猜、不退回「假設 5 小時」） | 設計 | 一次真撞線的 limit 訊息被判 `escalate`（理由含「拒絕用猜的」），而事後可由同一訊息解出 reset 時刻（附 sid＋逐字稿 seq） |
-| 3 | L0 端點憑證在 launchd 無互動環境能否自取未驗；拿不到＝`kind=unknown` ⇒ PATROL_HANDBACK（延後非遺失） | 真機 1 筆：10:22:03 `probed` 的 `endpoint@10:20:04` 早 tick 119 秒，分不出自取或沿用快取（〈三〉）；sid 5535e815 J012 的 `measured_at` 與 tick 同秒（可能自取，未確證） | 一次 launchd 觸發的 tick 其 `probed` 事件 `kind=unknown`，或 `text` 內 `endpoint@<時刻>` 早於 tick 逾快取 TTL 且 `source` 非 endpoint，致 `patrol_handback` 而同窗額度其實已恢復（附 sid＋痕跡列） |
-| 4 | 到點後尾段（spawn→settle→哨兵重掛）在真 launchd 未實跑；含「job 行程內對另一 label `bootstrap`」是否被允許（C-A 唯一無法隔離證明的格子）；二層結論見〈二〉-0 | 隔離重現＋`LaunchdBackend`＋假 launchctl 整合測試；真機零筆（修後） | 一次續航 job 走完尾段後痕跡出現 `arm_failed`／`relay_rearm_failed`（或 `sentinel_armed` 缺席），且 `launchctl list` 無 `AutoSDD_Sentinel_<sid>`（附 sid＋痕跡＋launchctl 輸出） |
+| 3 | L0 端點憑證在 launchd 無互動環境能否自取未驗；拿不到＝`kind=unknown` ⇒ PATROL_HANDBACK（延後非遺失） | 真機 1 筆：10:22:03 `probed` 的 `endpoint@10:20:04` 早 tick 119 秒，分不出自取或沿用快取（〈三〉）；sid 5535e815 J012 的 `measured_at` 與 tick 同秒（可能自取，未確證）。〔R212 第二列真機 E2E（〈十一〉）：①到點 tick 與③真 claude 的 `probed.text` 皆為 `endpoint@<tick 同秒>`（21:33:13／22:01:38）且額度快取 `measured_at` 同步更新 ⇒ launchd 無互動行程**可以**自取 L0 讀數（2 筆）；②到點 tick 沿用 77 秒前的快取（TTL 內，1 筆）〕 | 一次 launchd 觸發的 tick 其 `probed` 事件 `kind=unknown`，或 `text` 內 `endpoint@<時刻>` 早於 tick 逾快取 TTL 且 `source` 非 endpoint，致 `patrol_handback` 而同窗額度其實已恢復（附 sid＋痕跡列） |
+| 4 | 到點後尾段（spawn→settle→哨兵重掛）在真 launchd 未實跑；含「job 行程內對另一 label `bootstrap`」是否被允許（C-A 唯一無法隔離證明的格子）；二層結論見〈二〉-0 | 隔離重現＋`LaunchdBackend`＋假 launchctl 整合測試；真機零筆（修後）。〔R212 第二列真機 E2E（〈十一〉）：三段皆走通——①②假 claude（0 token）、③真 `claude -p -r`（fable）；unload 帳逐字 `op=bootstrap label=AutoSDD_Sentinel_<sid> xpc=AutoSDD_SessionResume_<sid>`＝job 行程內 bootstrap 另一 label 被 launchd 允許（C-A 格已驗，①③各 1 筆）；`relay_done→sentinel_armed→relay_rearmed rc=0`、無 `sentinel_single_owner_deferred`〕⇒ 本條降為已驗，再開症狀照舊 | 一次續航 job 走完尾段後痕跡出現 `arm_failed`／`relay_rearm_failed`（或 `sentinel_armed` 缺席），且 `launchctl list` 無 `AutoSDD_Sentinel_<sid>`（附 sid＋痕跡＋launchctl 輸出） |
 | 5 | `--no-allow-resume` 一次性 job 觸發後（`quota_back_no_resume`）只拆自己、不掛回哨兵：`tools/session_resume_planner.py` 該分支只 `_schtasks_remove`；R113 施工圖 §3(d) 判準 1 只列 relay 次態；推論〔讀碼，未驗〕：relatch 的 `claim_once`（`RELATCH_INTERVAL_SECONDS`＝900）在 claim 當下即消耗節流窗，自動復原最早要等上次 claim＋900 秒 | 真機 1 筆（sid 46b55125，10:22:03→10:23:04，由主控手動 `--arm-sentinel`，間隔 61 秒；驗收探針屬構造性）；planner 750／750，修它要先搬行 | 一次 `quota_back_no_resume` 之後、主 session 下一次工具呼叫之前，逐字稿出現 limit 事件而無人叫醒（附 sid＋seq；痕跡無 `sentinel_armed`） |
 | 6 | INV5 讓位期間（一次性排程整段等待）哨兵不巡邏；`reset_at` 若比真實可用時刻晚則靜默多等；閘與觸發器用同一把本機鐘，本機鐘與伺服器鐘的偏差只靠 `RESET_SKEW_SECONDS`＝120 秒吸收，超過即回到「到點但伺服器尚未翻頁 ⇒ 探測說未恢復 ⇒ 重掛」的既有路徑 | 設計取捨，無痕跡 | 一次續航 job 等待期間逐字稿出現 limit 事件，而 job 到點前痕跡零動作（附 sid＋seq） |
-| 7 | 顯式 `--at`（`reset_at==""`）在 mac 結構化 `at=None` ⇒ plist 只有 interval、無 calendar；A-1 閘對它不適用（SA-1 §7-D） | 無真機痕跡 | 一次 mac 上 `--register-schtasks --at <時刻>` 後 15 分鐘內出現 `probed`／`resumed`（附 sid＋`woken` 列） |
+| 7 | 顯式 `--at`（`reset_at==""`）在 mac 結構化 `at=None` ⇒ plist 只有 interval、無 calendar；A-1 閘對它不適用（SA-1 §7-D） | 無真機痕跡。〔R212 第二列真機 E2E：①③以顯式 `--at` 註冊，`launchctl print` 確為只有 `run interval = 900`、無 calendarinterval、狀態塊 `reset_at` 空（`reset_source=operator-asserted`）；kickstart 當第一個 tick 即探測＋spawn（設計行為）〕 | 一次 mac 上 `--register-schtasks --at <時刻>` 後 15 分鐘內出現 `probed`／`resumed`（附 sid＋`woken` 列） |
 | 8 | 多軸殘餘：reset 後另一軸仍在 halt 帶卻 <100% ⇒ L0 判 open ⇒ 多燒一個續跑窗（續跑窗自己先 `--pace`、`settle_window` 判準②擋第二道） | 無真機痕跡 | 一次續跑窗起跑當下 `--pace` 仍顯示某軸 ≥ halt 帶（<100%）卻已 spawn（附 sid＋`probed`／`route_chosen` 列） |
-| 9 | 手動 job（`kind=manual`）到點沒有「主 session 是否仍在動」檢查＝雙窗風險（`_resume_tick` 內第二個「該不該問」述詞的候選） | 真實時間線（反事實）：sid 5535e815 兌現時刻前最後一筆逐字稿距兌現 494.6 秒、兌現後首筆在 +104.1 秒〔SA 鏡自算〕 | 一次手動續航 job 到點 spawn 時，主 session 逐字稿在前一個巡邏間隔內仍有活動（附 sid＋seq） |
+| 9 | 手動 job（`kind=manual`）到點沒有「主 session 是否仍在動」檢查＝雙窗風險（`_resume_tick` 內第二個「該不該問」述詞的候選） | 真實時間線（反事實）：sid 5535e815 兌現時刻前最後一筆逐字稿距兌現 494.6 秒、兌現後首筆在 +104.1 秒〔SA 鏡自算〕。〔R212 第二列真機 E2E ③：手動 job 到點時小 session 逐字稿已 2062 秒無活動仍 spawn；真雙窗未發生（小 session 無人在用）〕 | 一次手動續航 job 到點 spawn 時，主 session 逐字稿在前一個巡邏間隔內仍有活動（附 sid＋seq） |
 | 10 | Windows：E-A 讓標記存在期間 `arm_reset`（`-Once`）取代 15 分鐘巡邏 ⇒ 該段無閒置提醒／漂移自癒／新撞線偵測（mac 因 `StartInterval` 底盤不受影響） | Windows 未實機驗證 | 一次 Windows 自願 halt 標記存在期間，主控水位進 prepare 帶或另一軸撞線，而至兌現時刻前哨兵痕跡零列（附 sid＋痕跡） |
 | 11 | Windows：`Unregister-ScheduledTask` 失敗（`STILL-PRESENT`、rc=1）時 INV5 仍把殘留 `-Once` 當擁有者讓位、對外 rc=0（R130 M-14）；7-C 的 Windows 對等（`disarm` 同步並驗證 REMOVED）只有註解與報告文字、沒有機械鎖 | 該機專屬，未驗 | 一次 Windows `disarm` 印 `STILL-PRESENT` 之後哨兵未掛上，或續航 job 收尾後哨兵讓位且零排程（附 sid＋痕跡） |
-| 12 | E-A 的「兌現後有活動 ⇒ 標記視為過期」回 `None`，`sentinel_decided` 只剩 idle patrol 字樣，標記存在過這件事在痕跡上不可見；延後與 idle patrol 共用 `action=patrol`，只靠 `reason` 字面可辨；靜止守門的代價＝兌現時刻前後 900 秒內主控動過 ⇒ 叫醒最多延後一個巡邏間隔（為防雙窗付的價） | 構造性；靜止守門另有真時間線（兌現時刻時已閒置 8 分 15 秒、1 分 44 秒後又有新訊息）〔SA-4〕 | 一次需事後解釋「halt 標記存在、時刻已過、為何沒叫醒」，而 `sentinel_decided` 只有 idle patrol 字樣、以 `action` 欄 grep 重建不出（附 sid＋seq＋標記檔）；或兌現時刻已過、主控早已閒置，續跑卻延後逾一個巡邏間隔（附 sid＋連續 `sentinel_decided` 的「不叫醒（防雙窗）」reason） |
+| 12 | E-A 的「兌現後有活動 ⇒ 標記視為過期」回 `None`，`sentinel_decided` 只剩 idle patrol 字樣，標記存在過這件事在痕跡上不可見；延後與 idle patrol 共用 `action=patrol`，只靠 `reason` 字面可辨；靜止守門的代價＝兌現時刻前後 900 秒內主控動過 ⇒ 叫醒最多延後一個巡邏間隔（為防雙窗付的價） | 構造性；靜止守門另有真時間線（兌現時刻時已閒置 8 分 15 秒、1 分 44 秒後又有新訊息）〔SA-4〕。〔R212 第二列真機 E2E ②：`arm_reset` 分支真機兩次（21:35:30 kickstart、21:50:31 interval tick；後者保留 calendar 不重載＝F5 格，bootout log 行數不增）、到點 `probe` 分支一次（22:00:05）；「靜止守門（不叫醒防雙窗）」分支未觀察〕 | 一次需事後解釋「halt 標記存在、時刻已過、為何沒叫醒」，而 `sentinel_decided` 只有 idle patrol 字樣、以 `action` 欄 grep 重建不出（附 sid＋seq＋標記檔）；或兌現時刻已過、主控早已閒置，續跑卻延後逾一個巡邏間隔（附 sid＋連續 `sentinel_decided` 的「不叫醒（防雙窗）」reason） |
 | 13 | 合法 INV5 讓位時 `relay_rearmed rc=0` 不帶排程器憑證（R-4.5.6-6 張力；讓位≠失敗是既有語意） | 設計 | 一次 `relay_rearmed rc=0` 同窗有 `sentinel_single_owner_deferred`，而其後 `launchctl list` 無該 sid 任何 job（附 sid＋痕跡） |
 | 14 | 7-B 修法殘餘：非 loud `alert` 仍會 GC `plan_dir()` 內 mtime ≥7 天的任務書，本窗任務書若本身 ≥7 天未被重寫也會被收（要等 ≥7 天且期間無人重寫，實際不可達）；且「非 loud 收尾的 `escalation.alert` 收超齡殘骸」這一行可被拿掉而無測試紅（QA 突變 MB1 存活） | 設計取捨，無痕跡 | 一次 relay 窗收尾後任務書消失且該窗 `relay_done`／`relay_stopped` 的 `gc_plans` 計入該檔；或 `~/.autosdd/plans/` 內 ≥7 天殘骸不減（附 sid＋痕跡） |
-| 15 | 殭屍／鬼 job（plist 不在、launchd 仍載入、不在本行程集合；非哨兵前綴無 GC；延後 bootout 沒執行時＝痕跡 `defer_failed` 或父行程不退場，C-A 修後會與哨兵短暫並存）；`rearm` 可把哨兵同名 job 掛成未設閘的 `--resume-tick`（需付費探測，INV1 於無人模式禁止 ⇒ 生產不可達） | 無 | `launchctl list` 出現 `AutoSDD_SessionResume_*` label 而其 plist 檔已不在且無活痕跡；或哨兵同名 job 的 argv 含未設閘的 `--resume-tick`（附 `launchctl print` 輸出） |
+| 15 | 殭屍／鬼 job（plist 不在、launchd 仍載入、不在本行程集合；非哨兵前綴無 GC；延後 bootout 沒執行時＝痕跡 `defer_failed` 或父行程不退場，C-A 修後會與哨兵短暫並存）；`rearm` 可把哨兵同名 job 掛成未設閘的 `--resume-tick`（需付費探測，INV1 於無人模式禁止 ⇒ 生產不可達） | 無。〔R212 第二列真機 E2E ②：同名原地重掛 `relay_rearmed rc=0 unregister_rc=null rearmed_inplace=true`、延後 relaunch 四行 ×2（`bootstrap rc=0 tries=1`／`print rc=0`）；殭屍 job 未出現，`launchctl list` 收尾與基線相同〕 | `launchctl list` 出現 `AutoSDD_SessionResume_*` label 而其 plist 檔已不在且無活痕跡；或哨兵同名 job 的 argv 含未設閘的 `--resume-tick`（附 `launchctl print` 輸出） |
 | 16 | 三個「900」鏡像（`RELATCH_INTERVAL_SECONDS` 無 parity）；`ERROR_FLAGS` 完備性無鎖；`--print-env-example` 與 `--env-doctor` 不互斥；`_NEXT_STEP_HEADING` 與 `HANDBACK_MARKERS[3]` 現同字串但無綁定；取節邏輯兩份（`_section_text`／`_section`） | 無漂移、無症狀 | 真實痕跡中 relatch 間隔與巡邏間隔數值不同；或新增 doctor 旗標漏進 `ERROR_FLAGS` 卻 rc=0；或兩個標題常數字面分家（附輸出） |
 | 17 | planner 750／750 零餘裕（`# noqa: E702` 3→5、`# noqa: E501` 100→102；早醒閘用同行多語句擠進去）。預先設計好的下沉路徑＝SA-1 §3.2 A-2（`relay_machine.wait_for_reset`）；本輪不做：只買 2 行、需新增鎖並重寫 T6、無獨立暴露證據（違反〈守衛面准入〉「量、不挖」） | 結構債；`check_loc_budget.py --json` planner `loc=750`、`headroom=0`〔收尾親跑〕 | 任一缺陷修復需要在 planner 加 ≥1 條斷言行（`check_loc_budget` 回 `over_by>0`），或需在 `_resume_tick` 內加第二個述詞，或 `_TICK_DISPOSALS` 需新增名字，或再出現一行 `;` 並列擠行——先做 A-2 再做該缺陷 |
+| 35 | 無人喚醒窗口內，模型照 `_RESUME_RULES`「附實測 rc」把 `git log --oneline -1; echo "rc=$?"` 寫成複合 Bash，`.claude/settings.unattended.json` 的 allow 只認 `Bash(git log*)` 單一指令形態 ⇒ harness 權限層要求核准、無人可核准，模型自行改成單一指令再跑（多耗 1 回合；handback 逐字自述此事） | 真機 1 筆：R212 第二列 ③（sid 70371a13，handback「附帶 `; echo "rc=$?"` 的複合形態被 harness 權限層要求核准，無人值守下改以單一指令執行」；〈十一〉） | 一次無人窗口因允許清單不認複合指令而整窗零產出（`resumed.out` 無 handback、`handback_missing`），或同一窗被擋 ≥3 次（附 sid＋逐字稿座標） |
 
 ### 五-B handback 標題規則
 
@@ -317,6 +326,8 @@ bootout rc=0
 
 PRD §4.5.2／§4.5.5／§4.5.6／§4.5.8／§4.5.10 在 mac 路徑上被真機暴露的 5 個缺陷已修（各有紅綠測試），入口時間閘已在真 launchd 驗過；PRD §16.3 的 ⏸31／📎8 本輪未動、仍由症狀驅動再開；「完成實作」依 §16.1 的定義＝101 列恰落四格，v2.1.17 已成立，本輪沒有新增 ✅。不對外宣稱 PRD 全面完成、喚醒鏈閉環，或自願 halt 之後無條件自動續跑（邊界逐條在〈五〉）；§16.1 對 ✅ 的定義是「機制在、有測試或鎖」而不是「真機走通」，§4.5.5／§4.5.6／§4.5.8 三條 ✅ 在 2026-10-10 的真機上實際斷在五個點，本輪修了這五點。
 
+【R212 第二列（2026-10-11 晚）追記】到點後尾段已在本機真 launchd 整段走通三次（〈十一〉：①②假 claude 零 token、③真 `claude -p -r` 一次，含 7-C／7-E 修後行為與 C-A 格）；可以宣稱「mac 上一次完整的『停機標記→哨兵→到點→探測→續跑→handback→收尾→哨兵掛回』閉環已真機實跑」，仍**不**宣稱 24h／≥4 次 reset 連續、Windows、睡眠喚醒，亦不宣稱 7-E 生產端（標記由真撞線寫出）。
+
 ---
 
 ## 〈七〉四方審查結論（修復前的五面鏡；不抄全文，逐條 P3 的處置如下）
@@ -370,6 +381,8 @@ PRD §4.5.2／§4.5.5／§4.5.6／§4.5.8／§4.5.10 在 mac 路徑上被真機�
 ---
 
 ## 〈八〉Windows 機待辦（事實驅動，無輪號義務；本輪 mac 開發，Windows 側零量測）
+
+> 【R212 第二列追記（2026-10-11 晚）】`tools/git-hooks/post-merge` 已落地：步驟 1 的 `git pull --ff-only` 成功後會**自動**跑步驟 2 的體檢；問題全是可自動修的旗標時會自動做步驟 3（先備份 `.env.bak.<UTC>`）並再體檢一次，三段輸出都印在 pull 的畫面上。所以 Windows 機現在只要做步驟 1，然後**看 pull 畫面末幾行**：`env.shared 同步：0 個問題`＝完成；`已自動修復，備份＝…`＝完成（備份檔驗收後手動刪）；`🔴 … 需要人處理`＝才做步驟 2／3。hook 在 Windows 實機（Git for Windows 的 sh、cp950 主控台、`.venv\Scripts\python.exe` 解析）**未驗**，列入〈八-4〉第 6 項。
 
 ### 八-1 國小版三步（在 repo 資料夾內開 PowerShell；指令皆已過 `lint_powershell_command`，路徑由 `git rev-parse --show-toplevel` 現查、不寫死）
 
@@ -426,6 +439,7 @@ PRD §4.5.2／§4.5.5／§4.5.6／§4.5.8／§4.5.10 在 mac 路徑上被真機�
 3. E-A 在 Windows 的取捨（〈五〉#10）與 M-14（〈五〉#11）：零量測。
 4. D-1：hook 的 `_fold_gov_path` 比對前 `normcase`，Windows 大小寫變體（`ENV.SHARED`）理應同樣命中新項（讀碼，未驗）。
 5. ONBOARDING §7 表② Windows 欄與 Windows nightly 首筆樣本：沿用 `CrossPlatform_R210_Debt_Closure_Final_Evidence.md`〈八〉；本輪 `AutoClaude/tests` 指紋已變，Windows 欄回填指令 `python tools\lib\clean_venv_carrier.py`，驗收 `python tools\sync_onboarding_baselines.py --check-snapshot`。
+6. `tools/git-hooks/post-merge`（env.shared 自動同步）在 Windows 的首次 `git pull` 實跑：hook 由 Git for Windows 的 sh 執行、`pick_repo_python` 解析到 `.venv\Scripts\python.exe`、cp950 主控台下中文與 `≠` 的顯示、Windows Python 輸出帶 `\r` 時旗標行計數（讀碼判無害）、舊 `.env` 若為 PowerShell 5.1 BOM 或 cp950 存檔時的實際 UX（hook 刻意不修、只出聲）；mac 已以 `.env.example` 13 個歷史版本＋本機真實舊備份當舊複本重放 14/14 自動修復〔QA 鏡回報〕。驗收＝pull 畫面末行與 `python tools\lib\quota_policy.py --env-doctor` 的 `結論：0 個問題 ⇒ rc=0`。
 
 ---
 
@@ -504,6 +518,258 @@ PRD §4.5.2／§4.5.5／§4.5.6／§4.5.8／§4.5.10 在 mac 路徑上被真機�
         不 relaunch；plist 重寫時也要把它帶著（重開機後仍是同一份）。"""
 ```
 
+### L7 重釘接鏈列旁註（R104～R142；`_FROZEN_PREFIX_REWRITE_LEDGER`）｜來源 `tools/tests/test_adr_xplat001_c1c2_lock.py:3368`＠HEAD 035746ba（166 行，其中旁註 107 行；資料列原樣仍在原處）
+
+```text
+    ("R101", "423d63fddc0a", "44008855c9e8", "DEF-200-208"),
+    ("R102", "44008855c9e8", "c44b6a066da8", "DEF-200-204"),
+    ("R102", "c44b6a066da8", "605806a0d4aa", "DEF-200-218"),
+    ("R102", "605806a0d4aa", "23b5b6fcc0a2", "DEF-200-207"),
+    ("R102", "23b5b6fcc0a2", "cb643af00b7a", "DEF-200-219"),
+    ("R102", "cb643af00b7a", "bc7080dcd3f2", "DEF-200-220"),
+    ("R103", "bc7080dcd3f2", "b698a52087af", "DEF-200-221"),
+    # DEF-200-223：R104 PRD §4.2.5／§4.2.1 BURSTING/EWMA 落地，同體例「追加後立即  round-label-ok
+    # 自我凍結」——本輪淨額 -18：測試 +62 與搬遷散文 -91 相抵後，本檔自身兩列
+    # （稽核列＋本凍結前綴延伸列）+11，prefix_len 61→62 涵蓋兩列本身。
+    ("R104", "b698a52087af", "967b8b322da4", "DEF-200-223"),
+    # DEF-200-224：R105 淨額 34-43+9=0，prefix_len 62→63 涵蓋本列本身，逐項見 _GUARD_LINES_REPIN_LOG 同輪列。round-label-ok
+    ("R105", "967b8b322da4", "cae90354814a", "DEF-200-224"),
+    # DEF-200-202：四方複審 REJECT 修復（quota_gate.py 補 active_model 接線＋  round-label-ok
+    # 回歸測試），同體例「追加後立即自我凍結」——本輪追加兩列（功能淨額 +49 ＋
+    # 本檔自身編修 +12），prefix_len 63→65 一次涵蓋兩列本身。
+    ("R105", "cae90354814a", "763624f17dde", "DEF-200-202"),
+    # DEF-200-202：四方複審修復續（`_platform_helpers.py` 折長行＋  round-label-ok
+    # `test_defect_id_reference_integrity.py` DEF-200-015 姊妹帳本擴面），同體例
+    # 「追加後立即自我凍結」——本輪追加一列，prefix_len 65→66 涵蓋本列本身。
+    ("R105", "763624f17dde", "a520bdcef8b7", "DEF-200-202"),
+    # DEF-200-202：帳本狀態欄回填 fixed@R105 觸發 dirent-primitive 債表 round-label-ok
+    # 微幅上升，同體例「追加後立即自我凍結」——本輪追加一列，prefix_len 66→67
+    # 涵蓋本列本身。
+    ("R105", "a520bdcef8b7", "a64463e662c1", "DEF-200-202"),
+    ("R106", "a64463e662c1", "76bb05948f27", "DEF-101-561"),
+    # DEF-101-752：R82 收斂殘餘承接站點，同體例「追加後立即自我凍結」——本輪追加一列
+    # （多支 tools/tests/ 掃描面站點改為 tracked ∪ untracked-not-ignored，含本檔自身
+    # 逐檔漂移，逐筆重釘過程已收斂合併為單列），prefix_len 71→72 涵蓋該列本身。
+    ("R106", "76bb05948f27", "026523f64c92", "DEF-101-752"),
+    # DEF-101-752 問題 3 收斂（帳本結案輪修復包重釘漏補）：8 站點永久回歸測試類別 round-label-ok
+    # 落地時未重釘本表（ARCH-01 同型復發），本輪補一列（含本檔自身逐檔漂移的兩列
+    # 追加），prefix_len 73→75 涵蓋全部新列本身。
+    ("R106", "026523f64c92", "6d3be18839b6", "DEF-101-752"),
+    # 帳本結案包 #3（DEF-200-166 窗口）：追加本輪稽核列並把它納入前綴（prefix_len 75→76）。
+    ("R107", "6d3be18839b6", "b42d19e1db20", "DEF-200-166"),
+    ("R107", "b42d19e1db20", "abd0dc217e2b", "DEF-200-141"),  # B2/B3 措辭與指針訂正（2026-08-28）
+    # DEF-200-230 回歸鎖窗口：追加本輪稽核列並把它納入前綴（prefix_len 76→77），同體例
+    # 「追加後立即自我凍結」——延伸本身即讓指紋改變，故仍須在此留痕。
+    ("R108", "abd0dc217e2b", "21c85dff06f9", "DEF-200-230"),
+    # DEF-200-233 修復窗口（macos-compat-ci）：追加本輪稽核列並把它納入前綴 round-label-ok
+    # （prefix_len 77→78），同體例「追加後立即自我凍結」——延伸本身即讓指紋改變，故留痕。
+    ("R108", "21c85dff06f9", "4e0397833463", "DEF-200-233"),
+    # DEF-101-747 換載體（Gap C：表② 指紋 stale 的發現時點提前到 dev_start [6/7]）：
+    # 追加本輪稽核列並把它納入前綴（prefix_len 78→79），同體例「追加後立即自我凍結」。
+    ("R109", "4e0397833463", "dc62ee5d1822", "DEF-101-747"),
+    # F2 修復窗口（quota 測試活體態滲入；載體＝DEF-200-232）：R109 追加本輪稽核列 round-label-ok
+    # 並把它納入前綴（prefix_len 79→80），同體例「追加後立即自我凍結」。
+    ("R109", "dc62ee5d1822", "42b28e14a0b8", "DEF-200-232"),
+    # DEF-200-121 修復窗口（護欄層判準修補輪）：追加本輪稽核列並把它納入前綴
+    # （prefix_len 80→81），同體例「追加後立即自我凍結」——延伸本身即讓指紋改變，故留痕。
+    ("R111", "42b28e14a0b8", "db3448c59433", "DEF-200-121"),
+    # 結構性長債分軌輪（2026-08-30）：追加本輪稽核列並依「追加後立即自我凍結」判例
+    # 延伸前綴涵蓋該列本身（81→82）；Phase2 到期義務同窗記入 [提案]，載體＝該 DEF。
+    ("R113", "db3448c59433", "369320d0f7f9", "DEF-200-211"),
+    # v2.1.13 G1 實作批 (a)（喚醒鏈最後一哩）：追加本輪稽核列並依「追加後立即自我凍結」
+    # 判例延伸前綴涵蓋該列本身（82→83）；載體＝DEF-200-231②（headless 窗口許可層）。
+    ("R113", "369320d0f7f9", "7301deef344e", "DEF-200-231"),
+    # v2.1.13 G2 實作批 (b)（handback 交接可見性）：追加本輪稽核列並依「追加後立即
+    # 自我凍結」判例延伸前綴涵蓋該列本身（83→84）；載體＝DEF-200-236（交接可見面）。
+    ("R113", "7301deef344e", "4b6d79935d12", "DEF-200-236"),
+    # v2.1.13 G3+G4 實作批 (c)+(d)（接力狀態機＋哨兵自癒）：追加本輪稽核列並依「追加
+    # 後立即自我凍結」判例延伸前綴涵蓋該列本身（84→85）；標號改用 R114（理由見 round-label-ok
+    # `_GUARD_LINES_REPIN_LOG` 該列）；載體＝DEF-200-234（受統籌自循環，PRD §3(c)）。
+    ("R114", "4b6d79935d12", "ea038ea6ff4e", "DEF-200-234"),
+    # R115 收斂棒 round-label-ok（三個修復棒＋治理批累積漂移一次性合法收束）：追加本輪稽核列並依
+    # 「追加後立即自我凍結」判例延伸前綴涵蓋該列本身（85→86）；載體＝DEF-200-239
+    # （排程孤兒回歸鎖，本輪 test_context_budget_guard.py 內容主要新增項之一）。
+    ("R115", "ea038ea6ff4e", "4e5f11565d23", "DEF-200-239"),
+    ("R115", "4e5f11565d23", "0c0aa4967799", "DEF-200-239"),
+    ("R115", "0c0aa4967799", "9316ce4e91ed", "DEF-200-239"),
+    # ADR-XPLAT-013 Phase2 (b)(c) 分軌計價落地：追加本輪稽核列並依「追加後立即自我
+    # 凍結」判例延伸前綴涵蓋該列本身（88→89）；載體＝DEF-200-211。
+    ("R116", "9316ce4e91ed", "1bd8f0d4e396", "DEF-200-211"),
+    # Architect 鏡一審承接補釘，同體例「追加後立即自我凍結」（prefix_len 89→90 涵蓋 round-label-ok
+    # 該列本身；A-1/A-2/N-1 詳 CrossPlatform_R116_Scan_Findings.md）。
+    ("R116", "1bd8f0d4e396", "a08e0c7043be", "DEF-200-211"),
+    # P1-2/P1-3 批追加 R117 稽核紀錄＋分軌首次申報，同體例「追加後立即自我凍結」。round-label-ok
+    ("R117", "a08e0c7043be", "d16dc6498956", "DEF-200-234"),
+    # P1-4 檢查表規則鎖批追加稽核紀錄，同體例「追加後立即自我凍結」（91→92）。round-label-ok
+    ("R117", "d16dc6498956", "f37361174a7f", "DEF-101-886"),
+    # DEF-200-212 P1-5 收尾批：追加五列（落地＋自身編修＋三批史料搬遷）並依「追加後 round-label-ok
+    # 立即自我凍結」判例延伸前綴涵蓋全部新列本身（92→97）。
+    ("R118", "f37361174a7f", "862ff00ae26d", "DEF-200-212"),
+    # P1-6 批：skip 天花板①②③與 M6 落款④共同變更鎖落地，追加本輪稽核紀錄（落地＋
+    # 本表自身編修二列）並依「追加後立即自我凍結」判例延伸前綴涵蓋全部新列本身
+    # （99→101）；載體＝DEF-200-240。
+    ("R119", "862ff00ae26d", "7f11c682ae08", "DEF-200-240"),
+    # P1-6 批續（round-label-ok）：全套背景跑揪出兩項真違規（R119_HANDOFF.md 零 stale
+    # 宣稱、subprocess text=True 缺 encoding）修復後追加稽核列，依「追加後立即自我
+    # 凍結」判例延伸前綴涵蓋本列本身（101→102）；載體＝DEF-200-240（同批延續）。
+    ("R119", "7f11c682ae08", "21bdbf9b9595", "DEF-200-240"),
+    # P1-6 批修復包（DEF-200-240 同批延續）：F1 共同變更鎖判準粒度由檔案級改為剖面
+    # 鍵值級，F2 governance_docs.py E501 拆行，同體例「追加後立即自我凍結」——
+    # 本輪追加三列（落地列＋本表自身編修二列）並延伸前綴涵蓋全部新列本身（103→107）。
+    ("R119", "21bdbf9b9595", "4554dbed8bf5", "DEF-200-240"),
+    # R120 收尾：212 結案批＋P1-7 SD-4/SD-8＋SA-4 的守衛線重釘使 round-label-ok
+    # `_REPIN_LOG_HISTORY_SHA256` 前進，同體例「追加後立即自我凍結」——本輪追加
+    # 本列＋一個 repin 稽核列，prefix_len 109→110 涵蓋新 repin 列本身。
+    ("R120", "4554dbed8bf5", "dc94d1a10d4f", "DEF-200-241"),
+    # 精準修復輪收尾：三筆缺陷落地＋散文搬遷抵銷的守衛線重釘使 round-label-ok
+    # `_REPIN_LOG_HISTORY_SHA256` 前進，同體例「追加後立即自我凍結」——本輪追加三個
+    # repin 稽核列＋本列，prefix_len 110→113 涵蓋全部新列本身。
+    ("R122", "dc94d1a10d4f", "7d9eb06de5a7", "DEF-200-222"),
+    # 精準修復輪第二棒收尾：三筆落地的守衛線重釘使指紋前進，同體例 round-label-ok
+    # 「追加後立即自我凍結」——本棒追加一個 repin 稽核列＋本列，prefix_len 114→115。
+    ("R123", "7d9eb06de5a7", "4ec1e958f341", "DEF-200-205"),
+    # 落地輪收尾：結案批回歸鎖＋到期義務兌現的守衛線重釘使指紋前進，同體例 round-label-ok
+    # 「追加後立即自我凍結」——本輪追加一個 repin 稽核列＋本列，prefix_len 115→116。
+    ("R126", "4ec1e958f341", "faddc843e042", "DEF-200-241"),
+    ("R127", "faddc843e042", "a4b92fe15365", "DEF-200-133"),
+    # R129 喚醒鏈零浪費收尾：4 包 +1300 行回歸鎖的守衛線重釘使指紋前進， round-label-ok
+    # 同體例「追加後立即自我凍結」——本輪追加一個 repin 稽核列＋本列，
+    # prefix_len 117→118 涵蓋新 repin 列本身。
+    ("R129", "a4b92fe15365", "1bff7d5bf52e", "DEF-200-266"),
+    # R130 M-01/M-05 喚醒鏈死碼修復：cbg +112 回歸鎖的守衛線重釘 round-label-ok
+    # 重釘使指紋前進，同體例「追加後立即自我凍結」——本輪追加一個 repin 稽核列＋本列，
+    # prefix_len 118→119 涵蓋新 repin 列本身；載體＝DEF-200-266（喚醒鏈同家族）。
+    ("R130", "1bff7d5bf52e", "79ab4a9a386e", "DEF-200-266"),  # round-label-ok
+    # R131 喚醒鏈四方審計對抗查證與確認破洞修復：cbg／run_root_unittests round-label-ok
+    # 回歸鎖的守衛線重釘。重釘使指紋前進，同體例「追加後立即自我凍結」——本輪追加一個
+    # repin 稽核列＋本列＋本檔自身編修，prefix_len 119→120 涵蓋新 repin 列本身；
+    # 載體＝DEF-200-272（四方審計撿回同家族）。
+    ("R131", "79ab4a9a386e", "3a6d5d17cd32", "DEF-200-272"),  # round-label-ok
+    # R131 收尾：喚醒鏈規則6崩潰根因修復（write_relay 任務書消失未捕捉例外）回歸鎖 round-label-ok
+    # ＋本檔自身編修（cost-envelope 測試補 regression_lane 參數）使指紋再前進；
+    # 同輪追加一個 repin 稽核列＋一個回歸鎖軌列＋本列，prefix_len 120→121 涵蓋新列本身；
+    # 載體＝DEF-200-272（同家族）。
+    ("R131", "3a6d5d17cd32", "1d5bb6d4bec1", "DEF-200-272"),  # round-label-ok
+    # R131 二度收尾：對抗式複審發現的收尾修復回歸鎖＋本檔自身編修，prefix_len round-label-ok
+    # 121→122 涵蓋新列本身；載體＝DEF-200-272（同家族）。
+    ("R131", "1d5bb6d4bec1", "2b2619269538", "DEF-200-272"),  # round-label-ok
+    # R132 三度收尾：規則2/3拆除／規則7 leak_fence／規則8無值宣稱／規則5 macOS round-label-ok
+    # 串接測試四項回歸鎖＋本檔自身兩筆稽核列，prefix_len 122→124 涵蓋新列本身；
+    # 載體＝DEF-200-272（同家族）。
+    ("R132", "2b2619269538", "60a3d5bf721b", "DEF-200-272"),  # round-label-ok
+    # R133：DEF-200-274 落地——凍結前綴延伸 124→126 涵蓋新兩列本身，同既有體例。round-label-ok
+    ("R133", "60a3d5bf721b", "b7448766903c", "DEF-200-274"),
+    ("R134", "b7448766903c", "e069a86b7750", "DEF-200-274"),
+    # R134 續：DEF-200-274 第三輪對抗式複審收斂批——新增真實 subprocess round-label-ok
+    # 回歸測試使護欄層行數重釘，凍結前綴延伸涵蓋新增列本身。
+    ("R134", "e069a86b7750", "5f040dde89da", "DEF-200-274"),
+    # R135：DEF-200-274 第四輪四方複審收尾——work-stealing 動態派工重構回歸測試＋ round-label-ok
+    # TOCTOU 緩解＋回歸鎖軌／到期義務三處新增，凍結前綴延伸涵蓋新增列本身。
+    ("R135", "5f040dde89da", "1e3073cee390", "DEF-200-274"),
+    # R136：DEF-200-274 第四輪第二次對抗式複審收斂——BaseException 型別缺口回歸 round-label-ok
+    # 測試＋回歸鎖軌新列＋本檔自身逐檔漂移，凍結前綴延伸涵蓋新增列本身。
+    ("R136", "1e3073cee390", "08ffdc430461", "DEF-200-274"),
+    # R137：DEF-200-274 第五輪四方獨立複審收尾——全庫 TOCTOU 病灶排查修復＋回歸 round-label-ok
+    # 淨額上限到期義務兌現列＋本檔自身逐檔漂移，凍結前綴延伸涵蓋新增列本身。
+    ("R137", "08ffdc430461", "6843feaf786c", "DEF-200-274"),
+    # R138：DEF-200-274 第六輪——test_platform_utils_dedup.py 補 _zzz_ 排除（前五輪 round-label-ok
+    # 排查未涵蓋此檔）＋本檔自身逐檔漂移，凍結前綴延伸涵蓋新增列本身。
+    ("R138", "6843feaf786c", "7b88d4c61478", "DEF-200-274"),
+    # R139：DEF-200-274 第六輪四方獨立複審收斂——補齊 dispatch_granularity.py round-label-ok
+    # 零測試覆蓋缺口，凍結前綴延伸涵蓋新增列本身。
+    ("R139", "7b88d4c61478", "7f78df45354f", "DEF-200-274"),
+    # R140：DEF-200-274 第七輪——新增負載不均自動偵測（dispatch_imbalance.py）＋ round-label-ok
+    # 四方獨立複審共同點名的 fair_share 分母真缺陷回歸鎖，凍結前綴延伸涵蓋新增列本身。
+    ("R140", "7f78df45354f", "d27ba8c13f10", "DEF-200-274"),
+    # R141：DEF-200-274 第八輪——四方獨立複審修復收尾（worker_count 公式測試／CI round-label-ok
+    # wiring 回歸鎖／GitHub Actions annotation 測試），凍結前綴延伸涵蓋新增列本身。
+    ("R141", "d27ba8c13f10", "6f595278360c", "DEF-200-274"),
+    # R142：DEF-200-275／DEF-200-277 收尾——兩個獨立缺陷收斂附帶的 guard-line round-label-ok
+    # 記帳延伸，凍結前綴延伸涵蓋新增列本身。
+    ("R142", "6f595278360c", "b97e86a790f0", "DEF-200-277"),
+```
+
+### L8 重釘接鏈列旁註（R143～R165；`_FROZEN_PREFIX_REWRITE_LEDGER`）｜來源 `tools/tests/test_adr_xplat001_c1c2_lock.py:3534`＠HEAD 035746ba（76 行，其中旁註 49 行；資料列原樣仍在原處）
+
+```text
+    # R143：DEF-200-275 第四輪——分子改讀逐字稿 API usage＋parity 鎖新增，凍結 round-label-ok
+    # 前綴延伸涵蓋新增列本身（prefix_len 由 --print-guard-lines 印出）。
+    ("R143", "b97e86a790f0", "7bd3af08e2e2", "DEF-200-275"),
+    # R143 同輪追加：第 1 輪審查修復（SA-R4-03 候選鏈測試）再延伸凍結前綴一列。 round-label-ok
+    ("R143", "7bd3af08e2e2", "3d5c464c7535", "DEF-200-275"),
+    # R144：DEF-200-278 喚醒鏈缺口收尾——新增 test_wake_chain_halt_r278.py，凍結 round-label-ok
+    # 前綴延伸涵蓋新增主表列與本軌新列本身（prefix_len 152→153）。
+    ("R143", "3d5c464c7535", "39ac03acd0f7", "DEF-200-278"),  # 同輪三度追加
+    # R144：DEF-200-275 第五輪 D15——check_claim_provenance.py 新增第五個判準 round-label-ok
+    # unbacked_block_claim_hits()，凍結前綴延伸涵蓋新增主表列與本軌新列本身。
+    ("R144", "39ac03acd0f7", "19e2a68ac40e", "DEF-200-275"),
+    # R144：DEF-200-281 喚醒鏈鑑識收尾——halt 標記寫入自檢＋test_quota_policy.py round-label-ok
+    # 測試污染止血，凍結前綴延伸涵蓋新增主表列與本軌新列本身。
+    ("R144", "19e2a68ac40e", "55ce75c14334", "DEF-200-281"),
+    # R144 第二輪：DEF-200-281 RC-3（halt 閂鎖鍵補 sid）＋naive-now 防呆兩項修復， round-label-ok
+    # 凍結前綴延伸涵蓋新增主表列與本軌新列本身。
+    ("R144", "55ce75c14334", "846054db5d7e", "DEF-200-281"),
+    # DEF-200-275 第六輪：四方複審 REJECT→D17～D25 修復→修後複審全 APPROVE；凍結前綴延伸
+    # 涵蓋新增主表列（自含式，含本軌新列本身），起點接 R144 終點 846054db5d7e。 round-label-ok
+    ("R145", "846054db5d7e", "67af3c96e763", "DEF-200-275"),
+    # R146：DEF-200-275 第七輪收尾單人窗口——package A／B 合法新增＋Dev-Trim7 散文搬遷 round-label-ok
+    # 抵銷造成的逐檔漂移收斂（自含式：本檔自身編修亦計入），凍結前綴延伸涵蓋新增
+    # 主表列與本軌新列本身，起點接 R145 終點 67af3c96e763。 round-label-ok
+    ("R146", "67af3c96e763", "a4aa9940f730", "DEF-200-275"),
+    # R146 續：DEF-200-275 第七輪收尾單人窗口（Dev-D8）—DEF-200-287（Windows 稽核帳本 round-label-ok
+    # 檔案鎖競態三棒修復）／DEF-200-288（status line harness 進料兩棒）收尾：功能軌新增
+    # test_statusline_context_feed.py 等鎖檔、回歸鎖軌 TestConversationLedgerChildTimeoutParity、
+    # Dev-Trim8 十五支散文搬遷抵銷造成的逐檔漂移收斂（自含式：本檔自身編修亦計入），
+    # 起點接上一列終點 a4aa9940f730。
+    ("R146", "a4aa9940f730", "054135e143d6", "DEF-200-287"),
+    # R147：DEF-200-274 第九輪收尾單人窗口——P1/P0 zshrc 假紅根治＋LPT 快取／自動 round-label-ok
+    # 細分／不均偵測 v2 新判準能力鎖檔＋既有缺陷修復回歸鎖，凍結前綴延伸涵蓋新增
+    # 主表列與本軌新列本身，起點接 R146 終點 054135e143d6。 round-label-ok
+    ("R147", "054135e143d6", "f436d6837308", "DEF-200-274"),
+    # R148：DEF-200-274 第十輪收尾單人窗口——四方獨立審查第九輪產出後 5 包並行修復 round-label-ok
+    # （xdist 開關調整／ci-gate 允許清單／halt_verdict 活動容忍窗／139.9s 測試拆三平台
+    # 具名子類別／staleness advisory 對稱化）造成的新增主表列與本軌新列自身漂移，
+    # 凍結前綴延伸涵蓋新增列本身，起點接 R147 終點 f436d6837308。 round-label-ok
+    ("R148", "f436d6837308", "ca5dd474ef16", "DEF-200-274"),
+    # R149：DEF-200-293/294/295 root-infra 三筆缺陷收尾——新增主表列與本軌新列自身 round-label-ok
+    # 漂移，凍結前綴延伸涵蓋新增列本身，起點接 R148 終點 ca5dd474ef16。 round-label-ok
+    ("R149", "ca5dd474ef16", "d7d2f8f98dc8", "DEF-200-293"),
+    # R150：DEF-200-297／299 單一 .venv 收斂＋DEF-200-296 鑑別力補強——新增主表列與 round-label-ok
+    # 本軌新列自身漂移，凍結前綴延伸涵蓋新增列本身，起點接 R149 終點 d7d2f8f98dc8。 round-label-ok
+    ("R150", "d7d2f8f98dc8", "7c1770cb38ca", "DEF-200-297"),
+    # R151：DEF-200-301～306 單一 .venv 收斂收尾——新增主表列與本軌新列自身漂移， round-label-ok
+    # 凍結前綴延伸涵蓋新增列本身，起點接 R150 終點 7c1770cb38ca。 round-label-ok
+    ("R151", "7c1770cb38ca", "0618d2c4affc", "DEF-200-301"),
+    # R152：DEF-200-307～310 單一 .venv 四方審查殘餘收尾——新增主表列與本軌新列自身 round-label-ok
+    # 漂移，凍結前綴延伸涵蓋新增列本身，起點接 R151 終點 0618d2c4affc。 round-label-ok
+    ("R152", "0618d2c4affc", "8b034cee4c63", "DEF-200-307"),
+    # R152 沿用：DEF-200-314 mac launchd nightly 三症狀修復——新增主表列與本軌新列 round-label-ok
+    # 自身漂移，凍結前綴延伸涵蓋新增列本身，起點接 R152 終點 8b034cee4c63。 round-label-ok
+    ("R152", "8b034cee4c63", "038461e50767", "DEF-200-314"),
+    # R152 沿用：DEF-200-314 四方複審四項非阻斷修正——新增主表列與本軌新列 round-label-ok
+    # 自身漂移，凍結前綴延伸涵蓋新增列本身，起點接 R152 終點 038461e50767。 round-label-ok
+    ("R152", "038461e50767", "70959d5b8295", "DEF-200-314"),
+    ("R153", "70959d5b8295", "ea0a3bfec58f", "DEF-200-289"),
+    ("R154", "ea0a3bfec58f", "f62eab34f224", "DEF-200-320"),
+    # R155：新增主表兩列（內容＋收斂）與本軌新列自身漂移，凍結前綴延伸涵蓋新增列本身。round-label-ok
+    ("R155", "f62eab34f224", "96325f09b5d5", "DEF-200-315"),
+    # R156：DEF-200-324 pre-push 整合閘門修復——新增主表兩列與本軌新列自身 round-label-ok
+    # 漂移，凍結前綴延伸涵蓋新增列本身，起點接上一列終點 96325f09b5d5。round-label-ok
+    ("R156", "96325f09b5d5", "d1780bab5946", "DEF-200-324"),
+    # R157：多 CPU 第十四輪＋DEF-200-325 對話框根治——新增主表兩列與本軌新列自身 round-label-ok
+    # 漂移，凍結前綴延伸涵蓋新增列本身，起點接上一列終點 d1780bab5946。round-label-ok
+    ("R157", "d1780bab5946", "b55177a84c3b", "DEF-200-325"),
+    ("R158", "b55177a84c3b", "e402247cc758", "DEF-200-333"),  # round-label-ok
+    ("R159", "e402247cc758", "3765b9dedf5d", "DEF-200-345"),  # round-label-ok
+    ("R163", "3765b9dedf5d", "0bf86e99a2d2", "DEF-200-354"),  # round-label-ok
+    # DEF-200-358：dev_start [1/7] git 平台 provenance 修復窗口——追加本輪稽核列並依
+    # 「追加後立即自我凍結」判例延伸前綴涵蓋該列本身（240→241）。
+    ("R164", "0bf86e99a2d2", "8595fde4cf0b", "DEF-200-358"),  # round-label-ok
+    # DEF-200-359：WindowsSmoke 逃生口缺失根治窗口——追加本輪稽核列並依「追加後立即
+    # 自我凍結」判例延伸前綴涵蓋該列本身（241→242）。
+    ("R165", "8595fde4cf0b", "c4350df6e968", "DEF-200-359"),  # round-label-ok
+```
+
 ---
 
 ## 〈十〉開了→收了
@@ -519,3 +785,58 @@ PRD §4.5.2／§4.5.5／§4.5.6／§4.5.8／§4.5.10 在 mac 路徑上被真機�
 | `git add` 的新檔（`env.shared`、`tools/lib/quota_env_layers.py`、`tools/tests/test_quota_env_layers.py`、AutoClaude 5 支 518 測試、本證據檔） | 已 stage、未 commit | `git status --short` |
 | `runner` 自寫的失敗明細 `tools/.last_failure_*.log`（gitignored，既有行為） | 收尾期間每次全套實跑各留 4 份（3 份來自 runner 自測的合成失敗、1 份是真失敗）；先前各輪留下的同類檔仍在；未刪 | `git check-ignore -v` |
 | scratchpad 工作檔（`closer_*`） | 不入庫 | — |
+
+---
+
+## 〈十一〉R212 第二列：mac 真機端到端驗收——到點後尾段三段全通（2026-10-11 21:26～22:03；主控親跑；專用小 session sid `70371a13-b1b5-4fdb-b30c-196638812517`）
+
+**為什麼要跑**：〈二〉-0 的二層結論＝「這條鏈的接縫從未在真後端端到端跑過」；〈三〉只走到「到點探測」。掌舵者 T1「想盡所有辦法完成收斂」⇒ 本列把到點後尾段（spawn→handback 後檢→settle→拆一次性排程／同名不拆→哨兵重掛）在真 launchd 上走通，含 7-C／7-E 修後行為與 C-A 格。設計書＝SA 鏡（Sonnet）的 runbook（scratchpad `e2e_runbook.md`，1506 行，不入庫；主控裁決三處修訂：不寫本機 `.env` 覆寫、③用生產模型 fable、不做 B+）。執行者原擬派 Sonnet，被 auto 分類器以 `[Create Unsafe Agents]` 擋下 ⇒ 主控親跑（分類器對 `launchctl kickstart`／`claude -p`／PATH 前置假 claude 皆未擋）。
+
+**證據措辭（runbook §6.3）**：①②＝「真 launchd × 真 planner／relay_machine／schedule_backend × 假 claude（PATH 前置殼層腳本，0 token）」，①的早醒閘用手改 `reset_at`（構造性）；②的 halt 標記為**手寫**（schema 同生產端、真寫入器 `quota_gate.write_halt_marker`），證明消費端、不證明生產端；**只有③**是真 `claude -p -r`（生產模型 fable，一次）。
+
+### 十一-1 開場基線（Stage 0，全部唯讀）
+
+`launchctl list` 基線＝`AutoSDD_Sentinel_46b55125-…`、`AutoSDD_Sentinel_0aeb6d2a-…`（全程不動，收尾相同）；GC 乾跑兩支皆 `✅ 留`；未讀 handback「（無）」；`--env-doctor` rc=0、`AUTOSDD_MODEL_HELMSMAN = fable〔env.shared〕`；`pmset` 各電源段 `sleep 0`；L0：`quota_meter --refresh rc=0`、六軸 <100%（session 29%／weekly_all 37%）。小 session：`claude -p --model haiku --session-id <SID> --output-format json`，`create rc=0`、`is_error=False`、`total_cost_usd=0.01047896`、usage `input=2 cache_create=51811 cache_read=11456 output=4`。
+
+### 十一-2 跑法①（0 token；手動續航 job＋假 claude＋kickstart）——全 PASS
+
+- 註冊：`--transcript <小 session> --register-schtasks --allow-resume --at '<現在>'`（PATH 前置 `fakebin`）⇒ `register rc=0`；`launchctl print`：`run interval = 900 seconds`、`--resume-tick`、無 calendarinterval、`PATH => …/e2e_run/fakebin:…`（〈五〉#7 的實況）。手改狀態塊 `reset_at=現在+3 分`（`reset_source=endpoint-authoritative`、`relay_problems=[]`）。
+- 早醒 kickstart（P1.3，距到點 282 s）痕跡逐字：`21:28:09 woken` → `21:28:09 resume_tick_early due_at=2026-10-11T21:32:50.934937+08:00 rc=0 credential=…[**無** calendar … / state = running] reset_at=2026-10-11T21:30:50.934937+08:00 remaining_seconds=281`；forbid `probed`／`route_chosen`／`relay_snapshot_before`／`resumed` 全 PASS；假 claude 日誌 `No such file`（＝沒 spawn）。
+- 到點 kickstart（P1.4，先 `quota_meter --refresh`）痕跡逐字：`21:33:13 woken` → `21:33:13 probed rc=0 kind=none quota_open=true text=endpoint@2026-10-11T21:33:13+08:00: 6 軸皆 <100%（最高 weekly_all=37.0% …） source=endpoint` → `21:33:13 route_chosen strategy=SESSION_RESUME why=逐字稿可用（307,612B ≤ 上限 33,554,432B）` → `21:33:14 relay_snapshot_before lines=10 digest=bdfc3ddd…` → `21:33:35 resumed rc=0 strategy=SESSION_RESUME handback_written=true out=E2E-STUB-OK mode=ok` → `21:33:35 relay_done why= band=free gc_plans=0` → `21:33:35 sentinel_armed task=AutoSDD_Sentinel_<SID> credential=launchd gui/501/…[**無** calendar … / state = not running]` → `21:33:35 relay_rearmed rc=0 unregister_rc=0 next_state=DONE rearmed_inplace=false`。判決器 `P1 verdict rc=0`（10 expect＋13 forbid＋9 assert 全 PASS）。
+- 尾段現況：`RES job 消失用了 0s`、`print(RES) rc=113`、plist 已不在、`print(SEN) rc=0`（`run interval = 900`、`--sentinel-tick`）；bootout log `parent-gone waited=1s at 2026-10-11T13:33:36Z`／`bootout rc=0`；**unload 帳逐字**：`ours 21:33:35 op=deferred-bootout label=AutoSDD_SessionResume_<SID> xpc=AutoSDD_SessionResume_<SID>`、`ours 21:33:35 op=bootstrap label=AutoSDD_Sentinel_<SID> xpc=AutoSDD_SessionResume_<SID> … caller=_register_at_expr:767<-register_endurance:780<-_register_and_record:1036`（＝**C-A 格：job 行程內對另一 label `bootstrap` 被 launchd 允許**）。假 claude argv 逐字：`-p -r <SID> "<任務書 prompt>" --permission-mode acceptEdits --settings …/.claude/settings.unattended.json --model fable --add-dir ~/.autosdd/plans ~/.autosdd/handback`，env `AUTOSDD_UNATTENDED=1 CLAUDE_CODE_SUBAGENT_MODEL=sonnet XPC_SERVICE_NAME=AutoSDD_SessionResume_<SID>`，`cwd=` repo 根（`--model fable`＝tick 行程現讀 `env.shared` 層的證據）。成本帳列 `measured=false reason=no-assistant-usage`（假 claude 不寫逐字稿）。額度快取 `measured_at=2026-10-11T21:33:13+08:00`＝tick 同秒 ⇒ 〈五〉#3 launchd 行程自取成立。
+- 工具缺陷（非產品）：假 claude 第一版以 `"$MODE；rc=0"` 組字串，launchd 的 bash 3.2 把全形「；」的首位元組併進變數名 ⇒ handback 出現非 UTF-8 位元組（`xxd`：`3d bc9b 7263`）；planner 以 `errors="replace"` 讀仍判 `written`、`relay_done`（產品容錯正確）。②前改 `${MODE}`（與 Dev 包在 `post-merge` 抓到的 `${rc2}` 同型）。
+
+### 十一-3 跑法②（0 token；手寫 halt 標記 → 哨兵 `arm_reset` → calendar 到點 → `probe` → 尾段同名原地重掛）——全 PASS
+
+- `halt_marker.py write <SID> 22`：`reset_at=2026-10-11T21:57:30.339463+08:00`、`fire_at=21:59:30`、預期 descriptor `Month=10-Day=11-Hour=22-Minute=0`；kickstart 哨兵。痕跡逐字：`21:35:30 sentinel_woken` → `21:35:30 sentinel_decided action=arm_reset reason=偵測到自願 halt 標記；觀測 reset=2026-10-11 21:57:30.339463+08:00 尚未到 ⇒ 要求排程器改在那個時刻醒（本次零 token） controller_idle_seconds=493.7` → `21:35:30 sentinel_rearmed action=arm_reset fire_at=2026-10-11T21:59:30.339463+08:00 credential=…[plist 已落地並帶 StartCalendarInterval = Month=10-Day=11-Hour=22-…`。延後重載 bootout log：`parent-gone waited=1s at 2026-10-11T13:35:31Z`／`bootout rc=0`／`bootstrap rc=0 tries=1`／`print rc=0`；`LaunchdBackend._readback` 自報 `calendar = {'Minute': 0, 'Hour': 22, 'Day': 11, 'Month': 10} ｜state = not running ｜interval = 900` → `✅ 相符`。
+- F5 格（interval tick 不得重載）：`21:50:31 sentinel_woken` → `sentinel_decided action=arm_reset …` → `sentinel_rearmed … credential=…[StartCalendarInterval = Month=10-Day=11-Hour=22-Minute=0〔launchd 回讀〕…`；bootout log 行數維持 4（未 relaunch）。
+- 到點：`22:00:05 sentinel_woken` → `22:00:05 sentinel_decided action=probe reason=偵測到自願 halt 標記；觀測 reset=… 已過 ⇒ 花一次探測確認額度回來了沒 controller_idle_seconds=1968.5` → `22:00:05 woken` → `22:00:05 probed rc=0 kind=none quota_open=true text=endpoint@2026-10-11T21:58:48+08:00: … source=endpoint`（沿用 77 秒前快取，TTL 內）→ `route_chosen SESSION_RESUME` → `relay_snapshot_before` → `22:00:26 resumed rc=0 … handback_written=true out=E2E-STUB-OK mode=ok` → `22:00:26 relay_done` → `22:00:26 sentinel_armed … credential=…[plist 已落地並帶 StartCalendarInterval = (無)（plutil -lint 通過）]` → `22:00:26 relay_rearmed rc=0 unregister_rc=null next_state=DONE rearmed_inplace=true`。判決器 `P2 verdict rc=0`（13 expect＋12 forbid＋6 assert 全 PASS）。尾段後：`print(SEN) rc=0`、`run interval = 900`、無 calendarinterval；bootout log 再四行（`parent-gone waited=1s at 2026-10-11T14:00:27Z` … `print rc=0`）；unload 帳只有兩筆同 label 的 `deferred-bootout`（無別 label、無殭屍）；標記於終態後立即刪除。
+
+### 十一-4 跑法③（真 `claude -p -r`，生產模型 fable，一次）——全 PASS
+
+- P3.1 清掉①②殘留後 `launchctl list` 與基線相同；P3.2 乾淨 PATH 註冊（`fakebin` 次數 0）、`plan_sec3.py`：`✅ 第 3 節已換成 E2E 內容；狀態塊完好：state=armed kind=manual allow_resume=True reset_source=operator-asserted`；P3.4 GC 乾跑兩支 `✅ 留`、`quota_meter --refresh rc=0`、小 session 逐字稿已 2062 秒未寫、`kickstart rc=0`（22:01:38）。
+- 痕跡逐字：`22:01:38 woken` → `22:01:38 probed rc=0 kind=none quota_open=true text=endpoint@2026-10-11T22:01:38+08:00: 6 軸皆 <100%（最高 session=38.0% …） source=endpoint`（tick 同秒自取，#3 第 2 筆）→ `22:01:38 route_chosen strategy=SESSION_RESUME` → `22:01:38 relay_snapshot_before lines=10 digest=bdfc3ddd…` → `22:02:00 resumed rc=0 strategy=SESSION_RESUME handback_path=~/.autosdd/handback/<SID>.md handback_written=true err= out=E2E-OK` → `22:02:00 relay_done why= band=free gc_plans=0` → `22:02:00 sentinel_armed task=AutoSDD_Sentinel_<SID> … handled_through=2026-10-11T14:01:59.459Z` → `22:02:00 relay_rearmed rc=0 unregister_rc=0 next_state=DONE rearmed_inplace=false`。判決器 `P3 verdict rc=0`（22 項全 PASS）；假 claude 日誌維持 2 次（③沒叫到假的）。
+- handback 由真模型寫成（四節齊、「## 下一步指令」節為 `''`、`handback_verdict = written`）；內容逐字自述：唯讀跑了 `git log --oneline -1`（印出 HEAD 035746ba 的訊息）、「附帶 `; echo "rc=$?"` 的複合形態被 harness 權限層要求核准，無人值守下改以單一指令執行」（登〈五〉#35）。
+- 成本：`autosdd_resume_cost.jsonl` 該 SID 列逐字 `{"measured": true, "first_assistant_ts": "2026-10-11T14:01:41.236Z", "model": "claude-fable-5-1", "input_tokens": 2, "cache_creation_input_tokens": 54138, "cache_read_input_tokens": 11456, "pct_before": null, "pct_after": null, …}`（`pct_*` 恆 null＝DEF-200-508 v1 既知限制）；`sum_usage.py` 窗內 `model=claude-fable-5-1 requests=10 input=230 cache_create=174618 cache_read=519230 output=2811 ⇒ 輸入面合計 694,078`（10 個請求、絕大多數是 cache 讀取；對照 R212 首列的 fable 窗首請求 309,407）。
+- 尾段現況：`RES job 消失用了 0s`；bootout log `parent-gone waited=1s at 2026-10-11T14:02:01Z`／`bootout rc=0`；unload 帳 `ours 22:02:00 op=deferred-bootout label=<RES> xpc=<RES>`、`ours 22:02:00 op=bootstrap label=<SEN> xpc=<RES>`（C-A 格第 2 筆）；額度快取 `measured_at=2026-10-11T22:01:38+08:00`。
+
+### 十一-5 接縫覆蓋表（S1～S16 依 runbook §2；「真」＝真 launchd 行程內實跑）
+
+| 接縫 | 覆蓋 | 證據 |
+|---|---|---|
+| S1 `woken` 留痕／S2 早醒閘（`allow_resume=true`）／S3 `probed`（L0 自取與沿用快取兩型）／S4 `route_chosen`／S5 spawn argv 與 env／S6 handback 後檢（7-A）／S7 settle→DONE（7-B：`gc_plans=0`，任務書未被 GC）／S8 一次性 job 自拆（deferred-bootout）與同名不拆（`rearmed_inplace=true`）／S9 哨兵重掛含 C-A（job 內 bootstrap 另一 label）／S10 `launchctl list` 基線差集／S11 halt 標記→`arm_reset`（7-E 消費端）／S12 calendar 寫入＋延後重載＋F5 保留／S13 到點 `probe` 重入 `_resume_tick`／S15 檔案層模型→`--model`（env.shared 層）／S16 成本帳（③ `measured=true`） | 真（①②③） | 十一-2～十一-4 逐字 |
+| S14 無人窗口的 hook×INV5（`sentinel_single_owner_deferred`） | 未發生（預期：小 session 回合數未達 `MIN_TURNS=24`；未做 B+） | — |
+| settle 的 `no_progress`／`quota_stop`／`relay_exhausted`／`RELAY_NEXT` 真機、7-E 生產端（真撞線寫標記）、〈五〉#1 睡眠、#2、#5、#6、#8、#10／#11 Windows、#12「靜止守門」分支 | 未驗（本列不宣稱） | — |
+
+### 十一-6 開了→收了（本列）
+
+| 開了 | 收了／現況 | 憑證 |
+|---|---|---|
+| haiku 小 session `70371a13-…`（1 請求）＋③的 fable 喚醒窗（10 請求） | 逐字稿**保留**（不刪；394,447 B）；任務書／handback 已刪 | `ls`、Z.1 `rm -f` |
+| `AutoSDD_SessionResume_<SID>`（①③各一次） | 各自 deferred-bootout 自拆；Z.1 `--remove-schtasks` rc=0 保險 | `launchctl list` 終驗 |
+| `AutoSDD_Sentinel_<SID>`（①尾段掛、②原地重掛、③尾段掛） | Z.1 `--remove-schtasks` rc=0；`~/Library/LaunchAgents/` 無本 SID plist | 同上 |
+| `halt_<SID>.json` | ②終態後立即刪；Z.1 再刪一次（存在＝False） | `halt_marker.py remove` |
+| 本機 `.env` | **從未改**（主控裁決不覆寫）；開場／收尾 sha256 皆 `6868f80b39824749…`；`--env-doctor` 與基線 diff rc=0 | Z.2 |
+| scratchpad `e2e_run/`（含 `evidence/` 21 檔、`fakebin/claude`） | 留在 scratchpad，不入庫、不入全域 PATH | — |
+| `~/.autosdd/traces/` 的 launchd／bootout／unload／cost 痕跡、`$TMPDIR` 的 resume log | 刻意保留（證據；cost 帳只增：本 SID 3 列） | `ls` |
+| 基線兩支哨兵 | 全程未動；終驗「基線有、現在沒有：[]｜現在多出：[]」 | Z.2 |

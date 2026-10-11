@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import ast
 import os
+import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -19,15 +21,19 @@ from unittest import mock
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
 sys.path.insert(0, str(_REPO_ROOT / "AutoClaude"))
+import git_paths  # noqa: E402
 import model_roles  # noqa: E402
 import quota_env_layers as L  # noqa: E402
 import quota_gate as qg  # noqa: E402
 import quota_policy as Q  # noqa: E402
 import secret_scan  # noqa: E402
+from _platform_helpers import usable_bash_for_fixture  # noqa: E402
 
 _HALT = "AUTOSDD_QUOTA_HALT_PCT"
 _HELM = "AUTOSDD_MODEL_HELMSMAN"
 _CONFIG_SRC = _REPO_ROOT / "AutoClaude" / "autoclaude" / "utils" / "config.py"
+_HOOK = _REPO_ROOT / "tools" / "git-hooks" / "post-merge"
+_BASH = usable_bash_for_fixture()
 
 
 def _root(files: dict[str, str | bytes]) -> Path:
@@ -322,6 +328,121 @@ class TestEnvDoctor(_CleanEnvCase):
     def test_unknown_cli_args_are_rejected_with_rc_2(self) -> None:
         with mock.patch("sys.stderr"):
             self.assertEqual(L.doctor_cli(["--bogus"]), 2)
+
+
+class TestPostMergeHook(unittest.TestCase):
+    """pull 後自動同步（post-merge hook）：merge 永不被擋，且只在「全是可自動修的問題」時才動檔案。
+
+    WHY 替身 python：真 doctor 的 --fix 會改這台機器的 .env；本鎖只驗控制流（呼叫序列與 rc），
+    備份與最小刪除由 TestEnvDoctor 守。FAKE_FLAGS＝要報的旗標（空＝乾淨、crash＝rc=1 無旗標、
+    none＝沙盒找不到直譯器）；替身每次都印 REPORT 與一行縮排的表列 [engine≠harness]，
+    用來證明乾淨路徑不重印體檢全文、且 hook 的 grep 只數行首的問題行。
+    """
+
+    _FAKE = (
+        '#!/usr/bin/env bash\necho "$*" >> "$FAKE_LOG"\necho REPORT\n'
+        '[ -e "$FAKE_LOG.fixed" ] && exit 0\n'
+        'case " $* " in *" --fix "*) : > "$FAKE_LOG.fixed"\n'
+        '  echo ".env（修復前；備份＝.env.bak.20261011T000000Z）"; exit 0;; esac\n'
+        '[ "$FAKE_FLAGS" = crash ] && { echo Traceback; exit 1; }\n'
+        'echo "      引擎側 = 1  [engine≠harness]"\n'
+        'for f in $FAKE_FLAGS; do echo "  [$f] 問題行"; done\n[ -z "$FAKE_FLAGS" ] || exit 1\n')
+
+    def _run(self, flags: str, **extra: str) -> tuple[subprocess.CompletedProcess, list[str]]:
+        """回 (hook 結果, 替身收到的參數列)；沙盒自帶 git init 與 guard 替身。"""
+        guard = 'pick_repo_python() { [ "$FAKE_FLAGS" != none ] && echo "$1/fakepy"; }\n'
+        root = _root({"tools/git-hooks/post-merge": _HOOK.read_bytes(), "fakepy": self._FAKE,
+                      "tools/lib/quota_policy.py": "", "tools/lib/windowsapps_guard.sh": guard})
+        (root / "fakepy").chmod(0o755)
+        subprocess.run(["git", "init", "-q", str(root)], check=True, timeout=60)
+        drop = ("AUTOCLAUDE_SKIP_HOOKS", "AUTOSDD_UNATTENDED")  # 繼承來的旗標會污染行為鎖
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_") and k not in drop}
+        env.update(FAKE_LOG=str(root / "calls.log"), FAKE_FLAGS=flags, **extra)
+        self.assertIsNotNone(_BASH, "找不到可用 bash")
+        res = subprocess.run([_BASH, "tools/git-hooks/post-merge"], cwd=root, env=env, timeout=60,
+                             capture_output=True, text=True, encoding="utf-8", errors="replace")
+        log = root / "calls.log"
+        lines = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+        return res, [ln.split("quota_policy.py ")[-1] for ln in lines]
+
+    def test_a_clean_tree_says_so_in_one_line_and_never_fixes(self) -> None:
+        res, calls = self._run("")
+        self.assertEqual((res.returncode, calls), (0, ["--env-doctor"]))
+        self.assertIn("env.shared 同步：0 個問題", res.stderr)
+        self.assertNotIn("REPORT", res.stderr)                    # 乾淨時不重印體檢全文
+
+    def test_only_auto_fixable_flags_are_fixed_then_reverified(self) -> None:
+        # 第二格＝非 UTF-8 多位元組 locale（僅 mac，他平台為 C）：grep 不逐位元組就認不出 ≠、備份名
+        big5 = "zh_TW.Big5" if sys.platform == "darwin" else "C"
+        for flags, loc in (("redundant shadows-shared", "C"), ("engine≠harness", big5)):
+            with self.subTest(flags, loc=loc):
+                res, calls = self._run(flags, LC_ALL=loc)
+                self.assertEqual(calls, ["--env-doctor", "--env-doctor --fix", "--env-doctor"])
+                self.assertEqual(res.returncode, 0)
+                self.assertIn("已自動修復，備份＝.env.bak.20261011T000000Z（", res.stderr)
+
+    def test_nothing_is_fixed_unless_it_is_all_auto_fixable_and_attended(self) -> None:
+        """人類旗標（含混合）不動檔案；rc≠0 卻零旗標行＝doctor 自己壞了；無人值守回合 .env 唯讀。"""
+        for flags, said, env in (("bom", "需要人處理", {}), ("bom redundant", "需要人處理", {}),
+                                 ("crash", "略過自動修復", {}),
+                                 ("redundant", "無人值守", {"AUTOSDD_UNATTENDED": ""})):
+            with self.subTest(flags, **env):
+                res, calls = self._run(flags, **env)
+                self.assertEqual((res.returncode, calls), (0, ["--env-doctor"]))
+                self.assertIn(said, res.stderr)
+                self.assertEqual("另有" in res.stderr, flags == "bom redundant")  # 表列旗標不計入
+
+    def test_the_escape_hatch_and_a_missing_interpreter_never_block_the_merge(self) -> None:
+        self.assertEqual(self._run("redundant", AUTOCLAUDE_SKIP_HOOKS="1")[1], [])
+        res, calls = self._run("none")
+        self.assertEqual((res.returncode, calls), (0, []))
+        self.assertIn("找不到 .venv python", res.stderr)
+
+    def test_the_hooks_flag_lists_partition_the_doctors_error_flags(self) -> None:
+        """旗標清單在 hook 內是第二份：doctor 新增／改名旗標、或改問題行格式而 hook 沒跟上 ⇒ 紅。"""
+        text = _HOOK.read_text(encoding="utf-8")
+        names = [n for var in ("_HUMAN", "_FIXABLE")
+                 for n in re.search(rf"^{var}='([^']*)'", text, re.M).group(1).split("|")]
+        covered = [f for f in L.ERROR_FLAGS if any(f.startswith(n) for n in names)]  # engine＝前綴
+        self.assertEqual((sorted(covered), len(names)), (sorted(L.ERROR_FLAGS), len(L.ERROR_FLAGS)))
+        rep = L.diagnose(_root({"env.shared": f"# why\n{_HALT}=98\n", ".env": f"{_HALT}=95\n"}), {})
+        self.assertIn("  [shadows-shared] .env:1", "\n".join(rep.out))  # hook 的 grep 錨點
+
+    def test_each_error_flag_is_filed_under_the_class_the_doctor_really_has(self) -> None:
+        """分類（可修 vs 要人判斷）必須等於 diagnose() 真的填進 fixable 的旗標，不只是名單互斥。"""
+        ok, shared = "# x\n", f"# why\n{_HALT}=98\n"
+        bom = b"\xef\xbb\xbf" + f"{_HALT}=91\n".encode()
+        cases = {
+            "unknown": {"env.shared": ok, ".env": "AUTOSDD_NOPE=1\n"},
+            "bad-value": {"env.shared": ok, ".env": f"{_HALT}=abc\n"},
+            "duplicate": {"env.shared": ok, ".env": f"{_HALT}=91\n{_HALT}=92\n"},
+            "dead": {"env.shared": ok, "AutoClaude/.env": "AUTOSDD_QUOTA_NOTICE_PCT=55\n"},
+            "redundant": {"env.shared": ok, ".env": "AUTOSDD_QUOTA_NOTICE_PCT=50\n"},
+            "shadows-shared": {"env.shared": shared, ".env": f"{_HALT}=95\n"},
+            "engine≠harness": {"env.shared": shared, "AutoClaude/.env": f"{_HALT}=90\n"},
+            "missing-shared": {".env": ok},
+            "bom": {"env.shared": ok, ".env": bom},
+        }
+        reps = {flag: L.diagnose(_root(files), {}) for flag, files in cases.items()}
+        with mock.patch.object(L, "_read", return_value=(None, "unreadable")):  # 每一層都讀不出來
+            reps["unreadable"] = L.diagnose(_root({}), {})
+        text = _HOOK.read_text(encoding="utf-8")
+        fx = re.search(r"^_FIXABLE='([^']*)'", text, re.M).group(1).split("|")
+        for flag, rep in reps.items():
+            with self.subTest(flag):
+                self.assertIn(f"  [{flag}]", "\n".join(rep.out))
+                self.assertEqual(any(rep.fixable.values()), any(flag.startswith(n) for n in fx))
+
+    def test_the_hook_is_tracked_executable_lf_and_only_ever_exits_zero(self) -> None:
+        """100644 會被 git 略過（只印 hint）⇒ .env 靜默不同步；非零 exit 讓 pull 看起來失敗。"""
+        mode = git_paths.ls_files(_REPO_ROOT, "-s", "tools/git-hooks/post-merge")
+        self.assertTrue(mode and mode[0].startswith("100755"), mode)
+        text = _HOOK.read_bytes().decode("utf-8")
+        self.assertTrue(text.startswith("#!/usr/bin/env bash\n"))
+        self.assertNotIn("\r", text)
+        for line in text.splitlines():
+            for hit in re.finditer(r"\bexit\s+(\S+)", line.split("#", 1)[0]):
+                self.assertEqual(hit.group(1), "0", line)  # advisory：任何路徑都不得非零
 
 
 if __name__ == "__main__":

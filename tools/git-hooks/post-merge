@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+# 根層 dispatcher post-merge hook — git pull／merge 成功後自動體檢本機 .env 對 env.shared 的遮蔽，
+# 並修掉可自動修的項目（advisory）。
+#
+# 設計說明：
+#   WHY：額度／模型參數的真相在 repo 的 env.shared（一台 push、另一台 pull 即同步）；本機 .env 只該放
+#   機器專屬例外。舊機器的 .env 若是 .env.example 的完整複本，每一行都會遮住 env.shared ⇒ pull 進來的
+#   共享值被靜默蓋掉、兩台機器吃不同門檻（掌舵者 2026-10-11 要求：下次在 Windows 執行時自動同步）。
+#   過去靠人記得跑 `python tools/lib/quota_policy.py --env-doctor --fix`；本檔把它變成 pull 的一部分。
+#   判準與修復全部委派 quota_policy.py --env-doctor（本檔只讀它的旗標行與 rc，不複寫判準）：
+#     ① rc=0 ⇒ 印一行「0 個問題」；
+#     ② rc≠0 且問題行只有可自動修的旗標（redundant／shadows-shared／engine≠harness／dead）⇒ 跑 --fix
+#        （先備份成 .env.bak.<UTC 時間戳>、只刪 ENV_SPEC 鍵的多餘／遮蔽行並印 diff）再體檢一次，三次輸出全印；
+#        AUTOSDD_UNATTENDED 有設（鍵存在即算，空字串也是）＝無人值守回合 ⇒ 只體檢不修、印一行說明
+#        （對齊 block_destructive_git.py 的治理檔紅線：無人值守下 .env 唯讀）；
+#     ③ 含需要人判斷的旗標（unknown／bad-value／duplicate／unreadable／missing-shared／bom）⇒ 一個檔案都
+#        不動，印出體檢全文與一行指引（混合情境同樣不動：人處理完再跑一次即可）。
+#   語意為 advisory：無論結果如何一律 exit 0（post-merge 本就不能影響 merge 的結果；hook 自己壞了也不讓
+#   pull 看起來失敗）。兩份旗標清單對齊 tools/lib/quota_env_layers.py 的 ERROR_FLAGS，漂移鎖在
+#   tools/tests/test_quota_env_layers.py。
+#   緊急跳過：AUTOCLAUDE_SKIP_HOOKS=1 git pull ...
+#
+# 誠實劃界（git 2.54 實測）：
+#   · 會觸發：git pull／git merge 的 fast-forward 與真合併（含 tools/dev_start 的 [2/7] ff-only pull）；
+#     同一次 pull 才帶進來的本檔也會在該次跑（git 於 merge 完成後才解析 hook），新機器第一次 pull 即生效。
+#     索引模式必須是 100755：100644 的 hook 會被 git 略過（只印 hint）。
+#   · 不會觸發：真的需要 rebase 的 git pull --rebase／git rebase（本地沒有領先 commit 時 pull --rebase
+#     會退化成 fast-forward，那種才會觸發）、「Already up to date」、reset／checkout 手動換樹。這些情形
+#     請手動跑 `python tools/lib/quota_policy.py --env-doctor [--fix]`。
+#   · 只管 repo 根的 .env 與 AutoClaude/.env（--fix 的射程）；行程環境變數永遠最高、不在射程內。
+#   · 找不到 repo 根 .venv 直譯器（新機器、dev_start 第④步之前、linked worktree）⇒ 略過並出聲，不擋。
+#   · 本 hook 只在 core.hooksPath 指向 tools/git-hooks/ 時生效（install_git_hooks 設定、dev_start 檢查）。
+#   · 刻意不納入 HOOK_FILENAMES（git_hooks_install_common／check_hooks_liveness 的名冊只管「安裝時必須存在」
+#     的 hook）：post-merge 由 core.hooksPath 自動被 git 找到；納入屬另案（連動兩份 tuple 與名冊對照測試）。
+#   · 兩處 grep 前綴 LC_ALL=C：非 UTF-8 的多位元組 locale（zh_TW.Big5／ja_JP.eucJP，BSD grep 實測）下
+#     `[^]]*` 走不過 engine≠harness 的 ≠，旗標認不出、備份名擷取為空；改逐位元組比對即與 locale 無關。
+#   · 存活鎖（索引模式 100755／shebang／無 CR／非註解的 exit 皆 0）與旗標分類鎖在
+#     tools/tests/test_quota_env_layers.py：100644 的 hook 會被 git 略過，.env 靜默不同步。
+# ---------------------------------------------------------------------------
+set -u
+
+if [ "${AUTOCLAUDE_SKIP_HOOKS:-0}" = "1" ]; then
+  exit 0
+fi
+
+TOPLEVEL="$(git rev-parse --show-toplevel 2>/dev/null)"
+if [ -z "${TOPLEVEL:-}" ]; then
+  TOPLEVEL="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+fi
+
+TAG="[post-merge dispatcher]"
+PY=""
+if [ -f "$TOPLEVEL/tools/lib/windowsapps_guard.sh" ]; then
+  # shellcheck disable=SC1091
+  . "$TOPLEVEL/tools/lib/windowsapps_guard.sh"
+  PY="$(pick_repo_python "$TOPLEVEL" 2>/dev/null)" || PY=""
+fi
+DOCTOR="$TOPLEVEL/tools/lib/quota_policy.py"
+if [ -z "$PY" ] || [ ! -f "$DOCTOR" ]; then
+  echo "$TAG 找不到 .venv python，略過 env.shared 同步，請跑 dev_start" >&2
+  exit 0
+fi
+
+# 旗標分類（對齊 quota_env_layers.ERROR_FLAGS；行為鎖逐旗標比對 diagnose().fixable）；engine 是
+# engine≠harness 的 ASCII 前綴，兩處 grep 另加 LC_ALL=C（見檔頭〈誠實劃界〉）。
+_HUMAN='unknown|bad-value|duplicate|unreadable|missing-shared|bom'
+_FIXABLE='redundant|shadows-shared|dead|engine'
+
+# PYTHONUTF8／PYTHONIOENCODING：Windows cp950 console 下 doctor 的中文與 ≠ 才不會炸。
+_doctor() { PYTHONUTF8=1 PYTHONIOENCODING=utf-8 "$PY" "$DOCTOR" --env-doctor "$@" 2>&1; }
+# 體檢輸出裡「  [旗標] 說明」行（行首兩個空白）的數量；per-key 表內的 [engine≠harness] 不在行首，不計。
+_count() { printf '%s\n' "$1" | LC_ALL=C grep -cE "^  \[($2)[^]]*\]"; }
+
+out1="$(_doctor)"; rc1=$?
+if [ "$rc1" -eq 0 ]; then
+  echo "$TAG env.shared 同步：0 個問題" >&2
+  exit 0
+fi
+printf '%s\n' "$out1" >&2
+n_human="$(_count "$out1" "$_HUMAN")"
+n_fix="$(_count "$out1" "$_FIXABLE")"
+
+if [ "$n_human" -gt 0 ]; then
+  echo "🔴 env.shared 同步：有 $n_human 個問題需要人處理：python tools/lib/quota_policy.py --env-doctor" >&2
+  if [ "$n_fix" -gt 0 ]; then
+    echo "   另有 $n_fix 個可自動修復，處理完後跑：python tools/lib/quota_policy.py --env-doctor --fix" >&2
+  fi
+  exit 0
+fi
+if [ "$n_fix" -eq 0 ]; then
+  # rc≠0 卻一行旗標都沒有＝doctor 自己壞了（traceback）；「沒有人類旗標」不等於「全是可修旗標」。
+  echo "$TAG ⚠ env-doctor rc=$rc1 但讀不出可判斷的旗標，略過自動修復；請手動跑：python tools/lib/quota_policy.py --env-doctor" >&2
+  exit 0
+fi
+
+if [ -n "${AUTOSDD_UNATTENDED+x}" ]; then
+  echo "$TAG env.shared 同步：AUTOSDD_UNATTENDED 有設（無人值守，.env 唯讀）⇒ 只體檢不修，有 $n_fix 個可自動修復；人在場時跑：python tools/lib/quota_policy.py --env-doctor --fix" >&2
+  exit 0
+fi
+
+out2="$(_doctor --fix)"; rc2=$?
+printf '%s\n' "$out2" >&2
+out3="$(_doctor)"; rc3=$?
+printf '%s\n' "$out3" >&2
+if [ "$rc3" -eq 0 ]; then
+  baks="$(printf '%s\n' "$out2" | LC_ALL=C grep -o '\.env\.bak\.[0-9A-Za-z]*' | sort -u | tr '\n' ' ')"
+  echo "$TAG env.shared 同步：已自動修復，備份＝${baks% }（各在被修檔的同一目錄，路徑見上方 --fix 行）" >&2
+else
+  echo "🔴 env.shared 同步：自動修復後仍有問題（--fix rc=${rc2}、再體檢 rc=${rc3}）：python tools/lib/quota_policy.py --env-doctor" >&2
+fi
+exit 0
