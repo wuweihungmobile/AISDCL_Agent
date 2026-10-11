@@ -1443,7 +1443,8 @@ GOV_TOOLS = frozenset({"Write", "Edit", "NotebookEdit"})
 _GOV_HOOK_PREFIX = ".claude/hooks/"
 _GOV_DIR_PREFIX = ".autoclaude/"
 _GOV_EXACT = frozenset({
-    ".env", ".claude/settings.json", ".claude/settings.local.json",
+    ".env", "env.shared", "tools/lib/quota_env_layers.py",
+    ".claude/settings.json", ".claude/settings.local.json",
     "tools/lib/quota_meter.py", "tools/lib/quota_gate.py", "tools/lib/quota_policy.py",
     "tools/lib/quota_pace.py", "tools/lib/quota_limits.py", "tools/lib/pace_contract.py",
     "tools/lib/sentinel_lifecycle.py", "tools/lib/schedule_backend.py",
