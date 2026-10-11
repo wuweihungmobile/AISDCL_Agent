@@ -308,4 +308,10 @@ def _main(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
+    # DEF-200-525（windows-compat-ci run 38153121596）：本檔 --help 是中文，cp1252 主控台下
+    # argparse 印 help 即 UnicodeEncodeError。保護只掛 `__main__`（本檔同時是 parallel_shard／
+    # 測試 import 的函式庫，import 期換串流會污染 pytest 擷取），走 tools/lib 慣例的 SSOT 委派。
+    from platform_utils import init_utf8_streams
+
+    init_utf8_streams()
     sys.exit(_main(sys.argv[1:]))

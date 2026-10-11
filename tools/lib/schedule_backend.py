@@ -436,6 +436,27 @@ class LaunchdBackend:
         want_cal = _calendar_of(at, interval)
         want_path = str(self.plist_path(task_name))
         live = self._readback(task_name)
+        # 🔴 DEF-200-526：該 job 正在跑（launchd 自報 pid）而呼叫者不是 job 本體（pid 非我、也沒有
+        # XPC_SERVICE_NAME=<label>）⇒ 不碰排程器：子孫一律拿到 0，hook 生的 planner 還會被孤兒化
+        # （ppid=1）且自成行程群組 ⇒ 認不出「我是子孫」；同步 bootout 會殺掉在跑的 tick 與續跑視窗。
+        # 重掛由 job 本體尾段走 XPC 分歧；痕跡帶 ppid 供事後判拓撲（1＝孤兒、＝job pid＝直屬）。
+        if (live is not None and live.get("pid") not in (None, os.getpid())
+                and os.environ.get("XPC_SERVICE_NAME") != task_name):
+            _append_trace(endurance_env.trace_dir() / f"autosdd_sentinel_bootout_{task_name}.log",
+                          {"event": "arm_skipped_inside_job", "label": task_name,
+                           "job_pid": live["pid"], "pid": os.getpid(), "ppid": os.getppid(),
+                           "xpc": os.environ.get("XPC_SERVICE_NAME", "")})
+            # 憑證不套 `_credential`：它的「與請求相符」「planner 本體在列」「最壞 N 秒」在本路徑
+            # 沒被比對過（早退在 `_descriptor_problems` 之前；B+ 實測 interval=None 仍印「相符」）
+            # ⇒ 只陳述 launchd 自報並明寫未比對、對「是否重掛」這種未來動作也不宣稱（憑證每一句
+            # 都要對應這一次真的做過的事）；`credential_line()` 見該自述時，頁尾那句改成不替它
+            # 宣稱「參數就是我要的那組」。
+            return 0, (f"launchd {self.domain()}/{task_name}｜launchctl print rc=0"
+                       f"｜state = {live['state'] or '(未報)'}｜plist = {live['path']}"
+                       "〔launchd 自報；本路徑未與請求比對〕"
+                       f"｜🔴 該 job 正在跑（pid={live['pid']}）：本行程若是其子孫，同步 bootout "
+                       "會殺掉在跑的 tick 與續跑視窗（launchd 不給子孫 XPC_SERVICE_NAME）⇒ 不碰排程"
+                       "器、不改 plist；是否重掛交 job 本體尾段（本路徑不證明）")
         # 🔴 DEF-200-268 F5：截止前最後一格。`_calendar_of` 在 `(at-now) ≤ interval` 回 None
         # （省 relaunch 的捷徑），而 live 裡還排著前幾個 tick 寫進去的那個時刻 ⇒ 照舊判「要求
         # 無、回讀有」不符會把它拆掉並讓 `StartInterval` 重計（實跡：18:02 被拆、18:12 才醒）。
@@ -611,10 +632,13 @@ class LaunchdBackend:
                 f"      launchctl print {self.domain()}/<label>")
 
     def credential_line(self, moment: str) -> str:
+        proves = ("上面陳述的是「此刻存在」（launchd 自報）；是否已持久化、參數是否就是"
+                  "我要的那組，本路徑皆未比對；" if "本路徑未與請求比對" in moment else
+                  "上面三件證明的是「此刻存在、參數就是我要的那組、且已持久化」，")
         return ("✅ 排程憑證：" + moment
                 + "\n   🔴 這**不是** NextRunTime：launchd 從不報「下次幾點跑」"
-                  "（print 輸出裡 next／fire／due 皆不存在）。上面三件證明的是"
-                  "「此刻存在、參數就是我要的那組、且已持久化」，**不**證明下次觸發時刻、"
+                  "（print 輸出裡 next／fire／due 皆不存在）。" + proves
+                + "**不**證明下次觸發時刻、"
                   "也**不**證明睡著的 Mac 會醒來（那要 `pmset repeat`，需 sudo）。")
 
     # ── 以下是 launchd 專屬細節，外面不必知道 ──────────────────────────────
@@ -717,6 +741,8 @@ class LaunchdBackend:
                     found["path"] = text.partition("=")[2].strip()
                 elif text.startswith("state = "):
                     found["state"] = text.partition("=")[2].strip()
+                elif text.startswith("pid = "):
+                    found["pid"] = _first_int(text)
             # 🔴 calendar 的回讀刻意**不看 depth**：它住在 `event triggers` → `<label>.<n>`
             # → `descriptor` 裡（真機 depth 4），而那條路徑上有一個 launchd 自己編的數字
             # 鍵 ⇒ 用 depth／鍵名定位都會綁死在一個會漂移的形狀上。改以「看到

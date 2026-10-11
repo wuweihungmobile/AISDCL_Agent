@@ -343,7 +343,8 @@ class TestPostMergeHook(unittest.TestCase):
         '#!/usr/bin/env bash\necho "$*" >> "$FAKE_LOG"\necho REPORT\n'
         '[ -e "$FAKE_LOG.fixed" ] && exit 0\n'
         'case " $* " in *" --fix "*) : > "$FAKE_LOG.fixed"\n'
-        '  echo ".env（修復前；備份＝.env.bak.20261011T000000Z）"; exit 0;; esac\n'
+        '  echo ".env（修復前；備份＝.env.bak.20261011T000000Z）"; echo "-X=1"; echo "-Y=2"\n'
+        '  exit 0;; esac\n'
         '[ "$FAKE_FLAGS" = crash ] && { echo Traceback; exit 1; }\n'
         'echo "      引擎側 = 1  [engine≠harness]"\n'
         'for f in $FAKE_FLAGS; do echo "  [$f] 問題行"; done\n[ -z "$FAKE_FLAGS" ] || exit 1\n')
@@ -380,6 +381,7 @@ class TestPostMergeHook(unittest.TestCase):
                 self.assertEqual(calls, ["--env-doctor", "--env-doctor --fix", "--env-doctor"])
                 self.assertEqual(res.returncode, 0)
                 self.assertIn("已自動修復，備份＝.env.bak.20261011T000000Z（", res.stderr)
+                self.assertIn("刪除 2 行", res.stderr)             # 替身 --fix 印的 -X=／-Y=
 
     def test_nothing_is_fixed_unless_it_is_all_auto_fixable_and_attended(self) -> None:
         """人類旗標（含混合）不動檔案；rc≠0 卻零旗標行＝doctor 自己壞了；無人值守回合 .env 唯讀。"""
@@ -393,7 +395,9 @@ class TestPostMergeHook(unittest.TestCase):
                 self.assertEqual("另有" in res.stderr, flags == "bom redundant")  # 表列旗標不計入
 
     def test_the_escape_hatch_and_a_missing_interpreter_never_block_the_merge(self) -> None:
-        self.assertEqual(self._run("redundant", AUTOCLAUDE_SKIP_HOOKS="1")[1], [])
+        res, calls = self._run("redundant", AUTOCLAUDE_SKIP_HOOKS="1")
+        self.assertEqual((res.returncode, calls), (0, []))
+        self.assertIn("跳過", res.stderr)            # 出聲；`TAG` 在 `set -u` 後，未定義即 rc=1
         res, calls = self._run("none")
         self.assertEqual((res.returncode, calls), (0, []))
         self.assertIn("找不到 .venv python", res.stderr)

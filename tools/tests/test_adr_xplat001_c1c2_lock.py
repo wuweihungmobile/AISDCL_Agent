@@ -40,10 +40,7 @@ discover**，pytest 函式風格的測試檔會被**整檔零收集**（R60 Scan
     `wontfix` 是**允許搬遷**的 ⇒ 只掃主檔時，「新增一筆違規列＋同輪把它歸檔」可以完整繞過
     硬擋。把掃描面擴到家族全檔後這條路關掉。
   · **ADR 落地前的舊列**：在主檔者要嘛合規、要嘛具名登記（＝上面那張表）；已歸檔者不在射程。
-  · SA 劃界誠實記錄：這個繞道面**在被發現時尚未被利用**——本包獨立以家族全檔重驗，落地後
-    新列中落入 §4.3.1 者只有 `DEF-101-534` 且 C1／C2 皆已滿足；archive 側落入 §4.3.1 而條件
-    未滿足者只有 `DEF-43-011`（archive_01）與 `DEF-101-357`（archive_22），兩者都遠早於 ADR
-    落地、屬設計上不追溯範圍 ⇒ 擴面後零假紅。
+  · SA 劃界誠實記錄：史料搬至 CrossPlatform_R212_WakeChain_EnvLayer_Evidence.md〈九〉L12。
 
 判準邊界（誠實劃界，勿超譯——同 `test_defect_id_reference_integrity.py` 已劃的同型邊界）：
   ✅ C1 保證「該 `DEF-ID` 出現在 `ONBOARDING.md` §9 區段內」＝追溯鏈存在。§9 的表列與其
@@ -619,7 +616,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 393,
     "_ps_engine.py": 83,
     "test_act_local_runner_image.py": 307,
-    "test_adr_xplat001_c1c2_lock.py": 8598,
+    "test_adr_xplat001_c1c2_lock.py": 8579,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 4074,
@@ -647,7 +644,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_dev_start.py": 6798,
     "test_dev_start_ps1_lastexitcode.py": 497,
     "test_doc_env_prefix_platform_parity_r60.py": 331,
-    "test_doc_loc_baseline_freshness_r60.py": 7085,
+    "test_doc_loc_baseline_freshness_r60.py": 7099,
     "test_extras_quoting_zsh_safety.py": 319,
     "test_failure_log_rotation.py": 80,
     "test_find_git_bash_parity.py": 1310,
@@ -657,7 +654,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_hook_carrier_symlink.py": 153,
     "test_install_statusline.py": 446,
     "test_install_windows_nightly.py": 1352,
-    "test_mac_endurance_r83.py": 2305,
+    "test_mac_endurance_r83.py": 2387,
     "test_mac_readiness_r82.py": 626,
     "test_macos_smoke_skip_honesty.py": 221,
     "test_maturity_criteria_r79.py": 412,
@@ -675,7 +672,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_ps51_compat.py": 599,
     "test_ps_engine_ssot.py": 899,
     "test_python_c_percent_shim.py": 113,
-    "test_quota_env_layers.py": 449,
+    "test_quota_env_layers.py": 453,
     "test_quota_policy.py": 4526,
     "test_quota_reconcile_gap.py": 145,
     "test_recovery_hint_passes_ps_lint.py": 103,
@@ -2665,6 +2662,11 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "−155（接鏈列 R104～R165 旁註 156 行搬至證據檔〈九〉L7／L8，留 1 行指標）＋"
      "本表自身漂移（本列、接鏈列）。淨額為負：回歸鎖軌不申報；逐檔清單見 "
      "CrossPlatform_R212_WakeChain_EnvLayer_Evidence.md〈二〉。"),
+    ("R212", 116348, 116429, +81,  # round-label-ok
+     "[非淨減法輪] 同輪第三列（DEF-200-525／526）：doc_loc +14（已扣搬走史料 −7）；本檔 −19（史料搬"
+     "走 25 行至證據檔〈九〉L9／L10／L12，新列與接鏈列 +6）；test_mac_endurance_r83.py +82（526 回"
+     "歸鎖五支＋pid fixture）；test_quota_env_layers.py +4（hook 鎖）。主軌 406→487 ≤ 516（款(11) "
+     "連升仍第 2 輪）。逐檔清單見 CrossPlatform_R212_WakeChain_EnvLayer_Evidence.md〈二-10〉。"),
 )
 
 
@@ -3270,13 +3272,7 @@ def net_cap_schedule_problems(
 #: CrossPlatform_R97_Scan_Findings.md〈到期義務與重新武裝 WHY〉節；R101 起歷次兌現的 round-label-ok
 #: 逐段沿革搬至 CrossPlatform_Guard_Line_History.md〈到期義務兌現沿革〉節。
 #: R113～R182 兌現沿革見 Guard_Line_History.md〈到期義務兌現沿革〉R184 搬遷追加小節 round-label-ok
-#: R184 兌現 (184, 525)；R186 兌現 524；R188 兌現：cap 降至目標 523，重新武裝 522 round-label-ok
-#: R190 兌現：cap 降至目標 522，重新武裝 521 round-label-ok
-#: R192 兌現 521；R194 兌現：cap 降至目標 520，重新武裝 519 round-label-ok
-#: R196 兌現：cap 降至目標 519，重新武裝 518 round-label-ok
-#: R208 兌現：cap 降至目標 518，重新武裝 517 round-label-ok
-#: R210 兌現：cap 降至目標 517，重新武裝 516 round-label-ok
-#: R212 兌現：cap 降至目標 516，重新武裝 515 round-label-ok
+#: R184～R212 兌現沿革：史料見 CrossPlatform_R212_WakeChain_EnvLayer_Evidence.md〈九〉L10。
 _REPIN_NET_CAP_DUE_ROUND = 214  # round-label-ok：到期輪＝兌現輪+2（lookahead 判準的活體對照）
 _REPIN_NET_CAP_DUE_TARGET = 515  # 步伐 1，嚴格低於 cap 516（本輪重新武裝） round-label-ok
 
@@ -3345,10 +3341,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 337
+_REPIN_LOG_FROZEN_PREFIX_LEN = 338
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "73b11f3028938d713910cf49c946490f64dab6e6ec80224a66e8474263d1e1cf")
+    "cff55af4647dcfe8d36d82795ca0050faeaf7700a2ea62deddbea4cfd284f712")
 
 
 def repin_log_history_digest(
@@ -3380,7 +3376,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R102", "23b5b6fcc0a2", "cb643af00b7a", "DEF-200-219"),
     ("R102", "cb643af00b7a", "bc7080dcd3f2", "DEF-200-220"),
     ("R103", "bc7080dcd3f2", "b698a52087af", "DEF-200-221"),
-    # R104～R165 旁註：史料見 CrossPlatform_R212_WakeChain_EnvLayer_Evidence.md〈九〉L7／L8。
+    # R104～R173 旁註：史料見 CrossPlatform_R212_WakeChain_EnvLayer_Evidence.md〈九〉L7／L8／L9。
     ("R104", "b698a52087af", "967b8b322da4", "DEF-200-223"),
     ("R105", "967b8b322da4", "cae90354814a", "DEF-200-224"),
     ("R105", "cae90354814a", "763624f17dde", "DEF-200-202"),
@@ -3460,22 +3456,10 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R163", "3765b9dedf5d", "0bf86e99a2d2", "DEF-200-354"),  # round-label-ok
     ("R164", "0bf86e99a2d2", "8595fde4cf0b", "DEF-200-358"),  # round-label-ok
     ("R165", "8595fde4cf0b", "c4350df6e968", "DEF-200-359"),  # round-label-ok
-    # DEF-200-360：dev_start [1/7] fetch-aware 前沿判定窗口——追加本輪稽核列並依「追加後立即
-    # 自我凍結」判例延伸前綴涵蓋該列本身（242→243）。
     ("R166", "c4350df6e968", "cf1dc5dab8c1", "DEF-200-360"),  # round-label-ok
-    # DEF-200-362：跨機切換摘要句漏套 _note_unfetched 修復窗口——追加本輪稽核列並依
-    # 「追加後立即自我凍結」判例延伸前綴涵蓋該列本身（243→244）。
     ("R167", "cf1dc5dab8c1", "c570fe4d14e3", "DEF-200-362"),  # round-label-ok
-    # DEF-200-363：多 CPU 第二十輪計時快取隔輪震盪修復窗口——追加本輪稽核列並依
-    # 「追加後立即自我凍結」判例延伸前綴涵蓋該列本身（244→245）。
     ("R168", "c570fe4d14e3", "62ff202f16a2", "DEF-200-363"),  # round-label-ok
-    # DEF-200-368：多 CPU 第二十一輪計時快取父鍵回填修復窗口——追加本輪稽核列並依
-    # 「追加後立即自我凍結」判例延伸前綴涵蓋該列本身（245→246）。
     ("R169", "62ff202f16a2", "5b81821b1c27", "DEF-200-368"),  # round-label-ok
-    # 多 CPU 第二十二輪（W 公式改 logical−ceil(logical/physical)／CAP 18／pytest 站點
-    # 普查鎖／TMPDIR flake 修法／pre-push 三 leg 並行鎖）：接鏈錨點＝本輪帳本首列
-    # DEF-200-373（W 公式在 SMT 機器低估），由收尾單人窗口於記帳員補登後回填
-    # （落地時曾暫以 DEF-200-372 佔位，帳本補登同輪即回填，非跨輪殘留）。
     ("R170", "5b81821b1c27", "c2bb8b8b1774", "DEF-200-373"),  # round-label-ok
     ("R170", "c2bb8b8b1774", "8ce188aa65a5", "DEF-200-373"),  # round-label-ok：同輪自身收斂再延伸
     ("R170", "8ce188aa65a5", "4db111b08259", "DEF-200-373"),  # round-label-ok：同輪收斂第三次延伸
@@ -3487,8 +3471,6 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R170", "49c85ffd5794", "ee5d6d876535", "DEF-200-373"),  # round-label-ok：QA-2 收斂延伸四
     ("R171", "ee5d6d876535", "f3c556f6b43f", "DEF-200-382"),  # round-label-ok：本輪收尾
     ("R171", "f3c556f6b43f", "ecf46fb27335", "DEF-200-382"),  # round-label-ok：前綴延伸涵蓋全部列
-    # R172：console_qa 事故輪收尾單人窗口重釘——修復棒 F 行為鎖新增（三道鎖）使護欄層 round-label-ok
-    # 行數重釘，追加後依「追加後立即自我凍結」判例延伸前綴涵蓋全部新列本身（275→279）。
     ("R172", "ecf46fb27335", "efc968920451", "DEF-200-389"),  # round-label-ok
     ("R172", "efc968920451", "0b2e73a520bb", "DEF-200-390"),  # round-label-ok：接鏈列自身漂移延伸
     ("R172", "0b2e73a520bb", "2bf9d536b2bd", "DEF-200-391"),  # round-label-ok：回歸鎖軌新列延伸
@@ -3496,8 +3478,6 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R172", "3e14b8e6687d", "8fe3e9b2b142", "DEF-200-393"),  # round-label-ok：接鏈列造成二次重釘
     ("R173", "8fe3e9b2b142", "da9eafaf2c1c", "DEF-200-386"),  # round-label-ok
     ("R173", "da9eafaf2c1c", "40175f7507e8", "DEF-200-394"),  # round-label-ok：修復棒覆審
-    # 收尾單人窗口重釘（F1 缺陷編號訂正 DEF-200-394／395／396 ＋ F2 WMI 監看 deadline 與量測
-    # 解耦 ＋ F3 BFS 補解相對 import／UnicodeDecodeError 兜底），就地更新不開新輪。
     ("R173", "40175f7507e8", "2948983719d7", "DEF-200-394"),  # round-label-ok：自身漂移列接鏈
     ("R173", "2948983719d7", "c4b8a80ea59c", "DEF-200-394"),  # round-label-ok：接鏈列自身收斂
     ("R173", "c4b8a80ea59c", "b76488c60116", "DEF-200-394"),  # round-label-ok：理由欄縮短
@@ -3539,6 +3519,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R211", "ba458f1260a8", "f5cb9e3fe7d6", "DEF-200-519"),  # round-label-ok
     ("R212", "f5cb9e3fe7d6", "e62c2eaa57e5", "DEF-200-516"),  # round-label-ok
     ("R212", "e62c2eaa57e5", "73b11f302893", "DEF-200-520"),  # round-label-ok
+    ("R212", "73b11f302893", "cff55af4647d", "DEF-200-525"),  # round-label-ok
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

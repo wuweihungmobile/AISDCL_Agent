@@ -725,7 +725,7 @@ class MacCredentialTest(unittest.TestCase):
 
     def test_the_credential_line_says_out_loud_what_it_cannot_prove(self) -> None:
         line = sb.LaunchdBackend().credential_line("cred")
-        for piece in ("不是** NextRunTime", "pmset"):
+        for piece in ("不是** NextRunTime", "pmset", "參數就是我要的那組"):
             self.assertIn(piece, line)
 
     def test_armed_without_any_credential_is_still_refused(self) -> None:
@@ -752,20 +752,22 @@ def _fake_runner(table: dict[str, tuple[int, str]], seen: list[list[str]]):
 
 
 def _print_output(interval: int, argv: list[str], path: str,
-                  calendar: dict | None = None) -> str:
+                  calendar: dict | None = None, pid: int | None = None) -> str:
     """合成一份 `launchctl print` 輸出（欄位與真機實測逐字同形）。
 
     R83／QA 訂正史料搬遷（fixture 從扁平改巢狀），原文＝Guard_Repin 證據檔 §E-6。
     子區塊刻意放在 `arguments` 之後、`run interval` 之前，與真機的欄位順序一致。
     """
-    lines = ["gui/501/L = {", f"\tpath = {path}", "\tstate = not running",
-             "\targuments = {"]
+    lines = ["gui/501/L = {", f"\tpath = {path}",
+             "\tstate = running" if pid else "\tstate = not running", "\targuments = {"]
     lines += [f"\t\t{a}" for a in argv]
     lines += ["\t}"]
     for kind in ("resource", "jetsam"):
         lines += [f"\t{kind} coalition = {{", "\t\tID = 2027", f"\t\ttype = {kind}",
                   "\t\tstate = active", "\t}"]
     lines += [f"\trun interval = {interval} seconds"]
+    if pid:  # 在跑才有（真機 Finder／progressd 的 print 逐字同形）；`pid-local endpoints` 是誘餌
+        lines += [f"\tpid = {pid}", "\tpid-local endpoints = {", "\t}"]
     # 史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§60。
     if calendar:
         lines += ["\tevent triggers = {", "\t\tcom.example.job.268435470 => {",
@@ -1142,6 +1144,86 @@ class ResumeJobSelfDisarmThenSentinelArmTest(unittest.TestCase):
                 contextlib.redirect_stdout(io.StringIO()):
             planner._resume_tick(args)
         self.assertEqual(self.armed, [planner.sentinel_task_name("PATROL")], self._events(plan))
+
+
+class ArmNeverBootsOutAJobThatIsRunningTest(unittest.TestCase):
+    """DEF-200-526：該 job 正在跑而呼叫者不是它 ⇒ `arm()` 不得同步 bootout（殺掉在跑的 tick 與
+    它承載的續跑視窗）。真機：launchd 只給 job 本體 XPC_SERVICE_NAME，子孫一律 0。"""
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="def526_"))
+        self.TASK = f"AutoSDD_Sentinel_{self.tmp.name}"  # 各案獨立 label：痕跡檔跨案不互汙
+        self.addCleanup(__import__("shutil").rmtree, self.tmp, ignore_errors=True)
+        self.plan = self.tmp / "plan.md"
+        self.plan.write_text("# plan\n", encoding="utf-8", newline="\n")
+        self.seen: list[list[str]] = []
+        self.spawned: list = []
+        self.enterContext(mock.patch.object(sb, "LAUNCH_AGENTS_DIR", self.tmp / "LA"))
+        self.enterContext(mock.patch.object(sb.subprocess, "Popen",
+                                            lambda argv, **kw: self.spawned.append(argv)))
+
+    def _arm(self, pid: int | None, xpc: str = "0", ppid: int | None = None) -> tuple[int, str]:
+        """回讀＝帶**已過去的 calendar** 的 job（與巡邏請求不符＝會走 bootout 的那一格）。"""
+        backend = sb.LaunchdBackend()
+        argv = backend._argv(planner, str(self.plan), self.TASK, planner.SENTINEL_TICK)
+        out = _print_output(planner.SENTINEL_INTERVAL_SECONDS, argv,
+                            str(backend.plist_path(self.TASK)), pid=pid,
+                            calendar={"Month": 1, "Day": 1, "Hour": 3, "Minute": 0})
+        fake = _fake_runner({"-lint": (0, ""), "print": (0, out),
+                             "bootstrap": (0, ""), "bootout": (0, "")}, self.seen)
+        with mock.patch.object(sb, "_run", fake), \
+                mock.patch.dict(os.environ, {"XPC_SERVICE_NAME": xpc}), \
+                mock.patch.object(os, "getppid", return_value=ppid or os.getppid()):
+            return backend.arm(str(self.plan), self.TASK, "", planner.SENTINEL_TICK)
+
+    def _verbs(self) -> list[str]:
+        return [a[1] for a in self.seen if a[0] == "launchctl" and a[1] in ("bootout", "bootstrap")]
+
+    def _skips(self) -> list[dict]:
+        trace = endurance_env.trace_dir() / f"autosdd_sentinel_bootout_{self.TASK}.log"
+        return [e for e in _read_jsonl(trace) if e["event"] == "arm_skipped_inside_job"]
+
+    def test_the_readback_takes_pid_only_from_the_jobs_own_line(self) -> None:
+        for pid in (4242, None):
+            out = _print_output(900, [], "/p", pid=pid)
+            with self.subTest(pid=pid), mock.patch.object(
+                    sb, "_run", _fake_runner({"print": (0, out)}, self.seen)):
+                self.assertEqual("pid-local endpoints" in out, pid is not None, "少了誘餌行")
+                self.assertEqual(sb.LaunchdBackend()._readback(self.TASK).get("pid"), pid)
+
+    def test_a_caller_that_is_not_the_job_body_never_touches_the_scheduler(self) -> None:
+        """真機鏈：hook 生出的 planner 被孤兒化（ppid=1）、XPC_SERVICE_NAME=0 ⇒ 祖先鏈／環境變數都
+        認不出它是子孫；判準只看「launchd 說該 job 正在跑、而 pid 不是我」。"""
+        plist = sb.LaunchdBackend().plist_path(self.TASK)
+        plist.parent.mkdir(parents=True)
+        plist.write_bytes(b"UNTOUCHED")
+        rc, cred = self._arm(pid=os.getpid() + 1, ppid=1)
+        self.assertEqual(rc, 0, cred)
+        self.assertEqual((self._verbs(), self.spawned), ([], []), "動了排程器＝殺掉承載自己的 job")
+        self.assertEqual(plist.read_bytes(), b"UNTOUCHED", "改了 plist（重掛歸 job 本體尾段）")
+        self.assertTrue("子孫" in cred and "與請求相符" not in cred, "沒比對過不得寫相符：" + cred)
+        self.assertNotIn("參數就是我要的那組", sb.LaunchdBackend().credential_line(cred))
+        self.assertEqual([(e["job_pid"], e["ppid"]) for e in self._skips()], [(os.getpid() + 1, 1)])
+
+    def test_the_job_body_itself_still_takes_the_deferred_reload_path(self) -> None:
+        """對照組：live pid＝本行程（我是 job 本體）⇒ 照舊延後重載；誤判成別人＝尾段不重掛。"""
+        rc, cred = self._arm(pid=os.getpid(), xpc=self.TASK)
+        self.assertEqual(rc, 0, cred)
+        self.assertEqual((self._verbs(), len(self.spawned)), ([], 1), "job 本體沒排延後重載")
+        self.assertIn("不宣稱重載已完成", cred)
+        self.assertEqual(self._skips(), [])
+
+    def test_either_signal_alone_is_enough_to_recognise_the_job_body(self) -> None:
+        """pid 是我但環境沒給（0）／環境給了 label 但 pid 對不上 ⇒ 都不得被當成「別人」而略過。"""
+        for pid, xpc in ((os.getpid(), "0"), (os.getpid() + 1, self.TASK)):
+            with self.subTest(pid=pid, xpc=xpc):
+                self._arm(pid=pid, xpc=xpc)
+                self.assertEqual(self._skips(), [])
+
+    def test_a_job_that_is_not_running_is_still_reloaded_by_an_outside_caller(self) -> None:
+        """對照組：沒有 pid（沒在跑）⇒ 照舊 bootout＋bootstrap；本修法只擋「殺在跑的 job」。"""
+        self._arm(pid=None)
+        self.assertEqual((self._verbs(), self._skips()), (["bootout", "bootstrap"], []))
 
 
 class CalendarMomentReachesThePlistTest(unittest.TestCase):

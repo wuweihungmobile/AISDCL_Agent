@@ -102,12 +102,12 @@ dev_start 七步驟（邏輯集中於 `tools/dev_start.py` 跨平台單一核心
 
 ### 2.2 額度／模型參數檔（`env.shared` ＋ `.env`）：兩台機器怎麼同步
 
-> 【重要】 一句話：**參數的真相在 repo，不在任何一台機器的 `.env`**。要兩邊一致＝改 `env.shared`、`git push`，另一台 `git pull`（開工跑 `dev_start` 時其 [2/7] GitHub 同步步驟會代做 ff-only pull；工作樹髒、分叉或 nightly 執行中不會自動 pull）；喚醒排程每次 tick 都重新啟動 planner、現讀檔，**不必重新武裝**。
+> 【重要】 一句話：**參數的真相在 repo，不在任何一台機器的 `.env`**。要兩邊一致＝改 `env.shared`、commit 並 `git push`（沒 push 的那台與另一台會靜默吃不同值），另一台 `git pull`（開工跑 `dev_start` 時其 [2/7] GitHub 同步步驟會代做 ff-only pull；工作樹髒、分叉或 nightly 執行中不會自動 pull）；喚醒排程每次 tick 都重新啟動 planner、現讀檔，**不必重新武裝**。
 
 | 檔案 | 入庫？ | 放什麼 | 誰讀 |
 |---|---|---|---|
 | `env.shared` | 是（追蹤） | 「刻意偏離出廠值」的決策（每個鍵上方一行 WHY：誰、哪天裁決） | harness hook／planner（`quota_gate.policy_env`）＋引擎（`config._ENV_FILES`） |
-| `.env` | 否（gitignored） | **本機專屬**覆寫：可空可缺，只寫要偏離共享的那幾行，行尾加 `# override-ok: <WHY>` | 同上 |
+| `.env` | 否（gitignored） | **本機專屬**覆寫：可空可缺，只寫要偏離共享的那幾行，行尾加 `# override-ok: <WHY>`。**沒有這個標記的行，下一次 pull 後 post-merge 會把它當成遮住共享值的多餘行自動刪掉**（備份在同目錄、diff 印在 pull 畫面） | 同上 |
 | `AutoClaude/.env` | 否 | 引擎專屬覆寫＋機密（`MINIMAX_*`／DB DSN）；額度鍵只認 3 個，**不同步、不碰機密** | 引擎（harness 完全不讀） |
 | `.env.example` | 是 | 全鍵＋出廠值的**生成物**（`python tools/lib/quota_policy.py --print-env-example`）；**不是**要複製的範本 | 人 |
 
@@ -120,9 +120,9 @@ dev_start 七步驟（邏輯集中於 `tools/dev_start.py` 跨平台單一核心
 維護（兩平台同一支；rc=0 乾淨、rc=1 逐行點名多餘／遮蔽共享／打錯字／壞值／重複鍵）：
 `python tools/lib/quota_policy.py --env-doctor`；確認後 `python tools/lib/quota_policy.py --env-doctor --fix`（先備份成 `.env.bak.<UTC 時間戳>`、只刪 ENV_SPEC 鍵的多餘／遮蔽行並印 diff，機密行與其餘內容位元組不動）。新機器什麼都不用建；舊機器 pull 後會自動跑（見下段），自動沒觸發時手動跑一次即可。
 
-自動同步（`git pull`／`git merge` 成功後，`tools/git-hooks/post-merge`；含 `dev_start` [2/7] 的 ff-only pull，hook 檔與參數檔同一次 pull 才帶進來也會在該次生效）：自動跑一次 `--env-doctor`。乾淨就只印一行；問題行**全是**可自動修的（`[redundant]`／`[shadows-shared]`／`[engine≠harness]`／`[dead]`）就跑 `--fix`（備份成 `.env.bak.<UTC 時間戳>`，與被修的檔同目錄）再體檢一次，三段輸出都印出來；`--fix` 的射程含 `AutoClaude/.env`（引擎專屬檔、內有機密），但只刪 ENV_SPEC 鍵的多餘／遮蔽行，機密行與其餘內容位元組不動、diff 也不印鄰行（上表「不同步、不碰機密」指的是不把它納入共享，不是 pull 後的自動修復碰不到它）；只要含需要人判斷的旗標（`[unknown]`／`[bad-value]`／`[duplicate]`／`[unreadable]`／`[missing-shared]`／`[bom]`）就**一個檔案都不動**，印出體檢全文與指引，人處理完再跑一次。這支 hook 永遠 exit 0（不會讓 pull 失敗）；找不到 repo 根 `.venv` 直譯器就略過並出聲；`AUTOCLAUDE_SKIP_HOOKS=1` 可跳過；`AUTOSDD_UNATTENDED` 有設（無人值守回合）時只體檢、不 `--fix`（`.env` 唯讀）。**不會觸發**：真的需要 rebase 的 `git pull --rebase`／`git rebase`（本地沒有領先 commit 時 `pull --rebase` 會退化成 fast-forward，那種會觸發）、已是最新（Already up to date）、reset／checkout 手動換樹——這些情形請手動跑上面的 `--env-doctor [--fix]`。
+自動同步（`git pull`／`git merge` 成功後，`tools/git-hooks/post-merge`；含 `dev_start` [2/7] 的 ff-only pull，hook 檔與參數檔同一次 pull 才帶進來也會在該次生效；前提是 `core.hooksPath` 已指向本 clone 的 `tools/git-hooks/`——全新 clone 第一次 `dev_start` 的 [2/7] 早於 [5/7] 設 `core.hooksPath`，那一次沒有 hook，之後的 pull 才有）：自動跑一次 `--env-doctor`。乾淨就只印一行；問題行**全是**可自動修的（`[redundant]`／`[shadows-shared]`／`[engine≠harness]`／`[dead]`）就跑 `--fix`（備份成 `.env.bak.<UTC 時間戳>`，與被修的檔同目錄）再體檢一次，三段輸出都印出來；`--fix` 的射程含 `AutoClaude/.env`（引擎專屬檔、內有機密），但只刪 ENV_SPEC 鍵的多餘／遮蔽行，機密行與其餘內容位元組不動、diff 也不印鄰行（上表「不同步、不碰機密」指的是不把它納入共享，不是 pull 後的自動修復碰不到它）；只要含需要人判斷的旗標（`[unknown]`／`[bad-value]`／`[duplicate]`／`[unreadable]`／`[missing-shared]`／`[bom]`）就**一個檔案都不動**，印出體檢全文與指引，人處理完再跑一次。這支 hook 永遠 exit 0（不會讓 pull 失敗）；找不到 repo 根 `.venv` 直譯器就略過並出聲；`AUTOCLAUDE_SKIP_HOOKS=1` 可跳過；`AUTOSDD_UNATTENDED` 有設（無人值守回合）時只體檢、不 `--fix`（`.env` 唯讀）。**不會觸發**：真的需要 rebase 的 `git pull --rebase`／`git rebase`（本地沒有領先 commit 時 `pull --rebase` 會退化成 fast-forward，那種會觸發）、已是最新（Already up to date）、reset／checkout 手動換樹——這些情形請手動跑上面的 `--env-doctor [--fix]`；pull 畫面沒有任何 `[post-merge dispatcher]`／`🔴 env.shared 同步` 行＝hook 沒跑，同樣手動跑。注意 `dev_start` 分叉時建議的 `git pull --rebase origin <分支>`（見其 [2/7] 的分叉警告）正是不會觸發的那一種。
 
-編碼：`env.shared` 與 `.env` 兩個檔（`AutoClaude/.env` 亦同）一律存 **UTF-8（無 BOM）**——BOM 會讓首行的鍵讀不到（doctor 標 `[bom]`、rc=1）；Windows 用 PowerShell 寫入請 `-Encoding utf8NoBOM`（僅 PowerShell 7 有此值；5.1 的 `-Encoding UTF8` 會寫入 BOM）。
+編碼：`env.shared` 與 `.env` 兩個檔（`AutoClaude/.env` 亦同）一律存 **UTF-8（無 BOM）**——BOM 會讓首行的鍵讀不到（doctor 標 `[bom]`、rc=1）；Windows 用 PowerShell 寫入請 `-Encoding utf8NoBOM`（僅 PowerShell 7 有此值；5.1 的 `-Encoding UTF8` 會寫入 BOM）；5.1 的 `>`／`>>`／`Out-File` 預設寫 UTF-16LE，doctor 讀成亂碼鍵、只印 `[foreign]` 並回報「0 個問題」，值也讀不到——請用編輯器（UTF-8 無 BOM）或 pwsh 7。
 
 ---
 
@@ -383,7 +383,7 @@ powershell -ExecutionPolicy Bypass -File scripts\ci-gate.ps1   # 偵測到 Git B
 >   `AISDLC_SDD/scripts/tests/`、`AutoClaude/tests/`）的 `*.py` 內容。理論上「生產碼變動改變
 >   `parametrize` 來源」也能改變計數，該面**不在指紋內**；docker daemon 可用性、平台差異亦然
 >   （見下方容差訂正段）。故它是 stale 的**充分觸發器、非必要條件**——會漏、不會冤。
-> <!-- snapshot-fingerprints-darwin: v001=8ffe3c3dabbd v030=6d46814f9084 scripts=ec35ee2838d0 autoclaude=35e0a0326ae2 measured-at=2026-10-11 host=Darwin-25.6.0-arm64 docker=down pgextras=absent interpreter=autoclaude_cleanvenv_20261011T052645Z/bin@3.11.15 sdk-extra=present baseline-origin=self-recorded ／ 由 `python tools/sync_onboarding_baselines.py --write --with-slow` 在 macOS 上維護，勿手改；刪除本標記會讓 --check-snapshot fail-loud -->
+> <!-- snapshot-fingerprints-darwin: v001=8ffe3c3dabbd v030=6d46814f9084 scripts=04108ae4b139 autoclaude=35e0a0326ae2 measured-at=2026-10-12 host=Darwin-25.6.0-arm64 docker=down pgextras=absent interpreter=autoclaude_cleanvenv_20261011T215901Z/bin@3.11.15 sdk-extra=present baseline-origin=self-recorded ／ 由 `python tools/sync_onboarding_baselines.py --write --with-slow` 在 macOS 上維護，勿手改；刪除本標記會讓 --check-snapshot fail-loud -->
 > <!-- snapshot-fingerprints-win32: v001=8ffe3c3dabbd v030=6d46814f9084 scripts=ec35ee2838d0 autoclaude=69fdad8c334d measured-at=2026-10-04 host=Windows-10-AMD64 docker=up pgextras=absent interpreter=autoclaude_cleanvenv_20261004T134404Z/Scripts@3.11.9 sdk-extra=present baseline-origin=self-recorded ／ 同上，由 Windows 側維護。🔴 該 origin 值的語意以 `tools/lib/baseline_origin.py::ORIGIN_SELF` 為準（本行不另寫一份定義）＝**本欄四格是在同一台 Windows 真機上一次量完、env 欄位在當時的定義下齊全**。🔴 兩條錨的後兩欄現值是 `tools/lib/baseline_origin.py::PRE_FIELD`＝**本錨早於那一欄**（不是「不可考」，也**不得**手填一個猜的值——那會把今天的環境寫在昨天的數字旁邊）；下一次在該平台跑 `--write --with-slow` 就會自動被真值取代 -->
 >
 > 🔴 **Windows 欄 provenance 沿革（史料段，非現況；R74 訂正）**：本段標題與內文自 R67 起逐字寫著

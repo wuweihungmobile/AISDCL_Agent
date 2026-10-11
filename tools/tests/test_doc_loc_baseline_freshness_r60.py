@@ -3248,9 +3248,7 @@ def iron_law3_ratchet_problems(
 
     🔴 為何非參數化不可（落地當回合就被自己抓到）：注入測試如果拿模組常數當地板，
     它們就只在「真表剛好貼著常數」時才有鑑別力——而本判準解開的正是「分母允許長大」。
-    第一版正是那樣寫的：把第 5 類危害誠實登記進表之後，`test_taking_a_scanner_away_is_red`
-    與 `test_deleting_a_known_hazard_row_is_red` 兩支**注入測試**當場轉紅，也就是說
-    「解開棘輪」這個動作被我自己新寫的兩道鎖擋住了——與本判準要治的病同型、同一回合復發。
+    （第一版的踩坑經過：史料搬至 CrossPlatform_R212_WakeChain_EnvLayer_Evidence.md〈史料〉L11。）
     現行形態：注入測試拿**現況**當地板（相對比較），活體判準拿釘住的常數當地板。
     """
     covered, known = iron_law3_coverage(text)
@@ -4106,10 +4104,8 @@ def _run_check_ignore(
 
     🔴 **刻意不加 `--no-index`**（這不是省略，是判準的一部分）：預設行為會把 **tracked**
     的路徑一律回報為「未忽略」，而那正是本判準要的語意——tracked ＝ repo 的事實，結構上
-    不可能是機器本地生成物。落地當回合實測：把全庫 27,600 條 tracked 路徑餵進去，預設命中
-    **0** 條、加上 `--no-index` 命中 **341** 條（多為 `AISDLC_SDD/**/build/reports/**` 這類
-    被凍結面 ignore 規則涵蓋、卻確實 tracked 的檔）。也就是說加了那個旗標會讓 341 個**真的
-    在 repo 裡**的檔被誤判成第三態 ⇒ 指向它們的錯字從此永遠不會紅，而且是靜默的。
+    不可能是機器本地生成物；加了那個旗標會讓**真的在 repo 裡**的檔被誤判成第三態 ⇒ 指向
+    它們的錯字從此永遠不會紅，而且是靜默的（落地當回合實測數字：史料見 R212 證據檔〈九〉L13）。
 
     argv 走既有 SSOT `tools/lib/git_paths.git_argv()`。輸出用 `-z`（欄位以 NUL 分隔、
     四欄一組：出處／行號／pattern／路徑）而非預設的 `<出處>:<行號>:<pattern>\\t<路徑>`：
@@ -4174,17 +4170,15 @@ def repo_known_paths(repo_root: Path) -> frozenset[str]:
 def prime_machine_local_cache(rels: Iterable[str], repo_root: Path) -> None:
     """批次預熱：一次 subprocess 問完整批宣稱，而不是每條各問一次。
 
-    落地當回合實測（macOS）：269 條相異宣稱**逐條**問 = 4.62s，**批次**一次 = 0.50s。
-    快取是模組級、平台中立性鎖的 3 次重跑只付一次；但逐條問連第一次都太貴。
+    快取是模組級、平台中立性鎖的 3 次重跑只付一次；但逐條問連第一次都太貴
+    （落地當回合實測數字：史料見 R212 證據檔〈九〉L13）。
 
     🔴 判準是**合取**，兩款缺一不可（第二款是本函式的自證測試當場逼出來的，不是預想）：
       ① 至少一個解析基準下的候選被 ignore 規則命中，且
       ② **沒有**任何一個候選是 repo 已知路徑（tracked 檔或其祖先目錄）。
     只有 ① 會過寬到危險：宣稱要逐一套上每個解析基準，而錯誤的基準會把一條真實路徑
-    前綴成一條**不存在**的路徑，那條路徑很容易命中某個廣義規則。落地當回合實測，
-    `AISDLC_SDD/AISDLC_SDD_v0.02/build/reports/…` 在基準 `.` 下 tracked、未被 ignore，
-    套上基準 `AutoClaude/` 之後卻命中 `AutoClaude/.gitignore:9: build/` ⇒ 只有 ① 時
-    這一族（實測 200+ 條）全被誤判成第三態，指向它們的錯字從此永遠不會紅。
+    前綴成一條**不存在**的路徑，那條路徑很容易命中某個廣義規則，於是這一族 tracked 的
+    檔全被誤判成第三態，指向它們的錯字從此永遠不會紅（實測數字同上史料）。
     ② 把它們擋掉的理由是語意的：**tracked ＝ repo 的事實，結構上不可能是機器本地生成物**。
     """
     pending = sorted({rel for rel in rels if rel not in _MACHINE_LOCAL_CACHE})
@@ -4221,7 +4215,6 @@ def tracked_paths_matching_an_ignore_rule(repo_root: Path) -> list[str]:
     """**tracked 卻同時命中 ignore 規則**的路徑（＝`--no-index` 會誤判的那一族）。
 
     這批路徑是本判準最重要的對照組：它們真的在 repo 裡，所以指向它們的錯字必須照樣紅。
-    落地當回合實測 341 條（多在 `AISDLC_SDD/**/build/reports/**` 凍結面）。
     """
     if not _NO_INDEX_TRAP_CACHE:
         tracked = _GIT_PATHS.ls_files(repo_root)
@@ -6640,6 +6633,13 @@ def live_check_entries(text: str) -> list[str]:
                    for m in [_LIVE_ENTRY_RE.search(span)] if m})
 
 
+#: 模擬非 UTF-8 主控台（Windows 的 cp1252／cp950）。DEF-200-525：windows-compat-ci run
+#: 38153121596 真紅——現查入口的中文 `--help` 在該主控台 UnicodeEncodeError，mac 預設
+#: UTF-8 看不見。`PYTHONIOENCODING` 連 UTF-8 mode 也蓋過，故任何平台都模擬得出；入口
+#: 自帶的 `_stdio_utf8` 會蓋回 UTF-8，修法與判準同軸。
+_LEGACY_STDIO_ENV = {"PYTHONIOENCODING": "cp1252"}
+
+
 class TestR85DocNamedLiveCheckEntriesActuallyRun(unittest.TestCase):
     """射程含 `tools/probe/reset_window_distribution.py`。WHY 全文搬至
     CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
@@ -6662,27 +6662,41 @@ class TestR85DocNamedLiveCheckEntriesActuallyRun(unittest.TestCase):
         missing = [rel for rel in self._entries() if not (_REPO_ROOT / rel).is_file()]
         self.assertEqual(missing, [], "根 CLAUDE.md 指名的現查入口在磁碟上不存在")
 
-    def test_no_named_entry_dies_before_it_can_do_anything(self) -> None:
-        """每一支入口都必須至少能走到 argparse；rc 不判（見類 docstring 的假紅普查）。"""
-        broken = []
-        for rel in self._entries():
+    def _knock(self, script: str | Path, base: dict[str, str] | None = None) -> list[str]:
+        """敲一支腳本兩輪（現行環境／`_LEGACY_STDIO_ENV`），回傳爆掉的那幾輪的訊息。"""
+        out = []
+        for label, extra in (("", {}), (" [cp1252]", _LEGACY_STDIO_ENV)):
             proc = subprocess.run(  # noqa: S603
-                [sys.executable, str(_REPO_ROOT / rel), "--help"],
+                [sys.executable, str(_REPO_ROOT / script), "--help"],
                 capture_output=True, text=True, encoding="utf-8", errors="replace",
-                cwd=str(_REPO_ROOT), timeout=180)
+                cwd=str(_REPO_ROOT), timeout=180, env={**(base or os.environ), **extra})
             if "Traceback (most recent call last)" in (proc.stderr or ""):
-                broken.append(f"{rel}: {(proc.stderr or '').strip().splitlines()[-1]}")
+                out.append(f"{script}{label}: {(proc.stderr or '').strip().splitlines()[-1]}")
+        return out
+
+    def test_no_named_entry_dies_before_it_can_do_anything(self) -> None:
+        """每一支入口都必須至少能走到 argparse；rc 不判（見類 docstring 的假紅普查）。
+        每支敲兩次（`_knock`）：現行環境一次、`_LEGACY_STDIO_ENV` 模擬非 UTF-8 主控台一次。"""
+        broken = [msg for rel in self._entries() for msg in self._knock(rel)]
         self.assertEqual(broken, [], "根 CLAUDE.md 指名的現查入口一啟動就爆掉")
 
     def test_the_traceback_criterion_has_teeth(self) -> None:
-        """合成注入：判準必須真的抓得到一支 import 期就爆掉的腳本（取數管道自證）。"""
+        """合成注入：判準必須真的抓得到一支 import 期就爆掉的腳本（取數管道自證）。
+        另一格：只印一個中文字的腳本交給**同一個** `_knock`（基線強制 UTF-8，免得 Windows
+        預設 cp1252 讓兩輪都爆），必須恰在 cp1252 那一輪被抓——`_knock` 的 env 接線因此有
+        自證：敲擊迴圈丟掉 env，這一格就紅。"""
         with tempfile.TemporaryDirectory() as tmp:
             bad = Path(tmp) / "rotten.py"
             bad.write_text("import definitely_not_a_module_r85\n", encoding="utf-8")
             proc = subprocess.run(  # noqa: S603
                 [sys.executable, str(bad), "--help"], capture_output=True, text=True,
                 encoding="utf-8", errors="replace", timeout=60)
+            zh = Path(tmp) / "zh_only.py"
+            zh.write_text("print(chr(0x4E2D))\n", encoding="utf-8")
+            hit = self._knock(zh, {**os.environ, "PYTHONIOENCODING": "utf-8"})
         self.assertIn("Traceback (most recent call last)", proc.stderr)
+        self.assertEqual(len(hit), 1, f"只該在 cp1252 那一輪爆：{hit}")
+        self.assertIn(" [cp1252]: ", hit[0])
 
     def test_the_reset_window_probe_survives_real_input(self) -> None:
         """C5 的那一條：`--help` 過得去、掃到真語料才爆 ⇒ 端到端才是會轉紅的那一支。"""

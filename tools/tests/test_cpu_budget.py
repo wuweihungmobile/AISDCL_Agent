@@ -377,7 +377,7 @@ class CliContractTest(unittest.TestCase):
     """CLI：`--legs N` 只印一個整數到 stdout、rc=0；未知參數 rc≠0。"""
 
     def _run(self, *args: str) -> subprocess.CompletedProcess:
-        return subprocess.run(  # child-encoding-ok: 只印 ASCII 整數或 argparse 英文訊息
+        return subprocess.run(
             [sys.executable, str(_REPO_ROOT / "tools" / "lib" / "cpu_budget.py"), *args],
             capture_output=True, text=True, encoding="utf-8",
         )

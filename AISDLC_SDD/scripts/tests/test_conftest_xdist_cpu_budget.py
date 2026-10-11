@@ -243,7 +243,7 @@ def test_no_override_falls_back_to_cpu_budget_script() -> None:
     assert match, f"未見 source=cpu_budget 行，實得：\n{proc.stdout}"
     observed = int(match.group(1))
 
-    expected_proc = subprocess.run(  # child-encoding-ok: cpu_budget.py 只印一個 ASCII 整數，無 CJK 輸出風險
+    expected_proc = subprocess.run(
         [sys.executable, str(CPU_BUDGET_SCRIPT), "--legs", "1"],
         capture_output=True,
         text=True,

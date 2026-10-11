@@ -1,9 +1,9 @@
 # CrossPlatform R212 額度喚醒鏈五缺陷（DEF-200-516 家族）與額度參數檔分層（DEF-200-520）證據檔
 
-- **輪籤**：R212（2026-10-11，macOS 真機；主控 Fable 5.1 兼 Architect；SA 設計備忘錄 4 份、Developer 與修復包 7 包、審查鏡 5 面、收尾單人窗口，子代理皆 Sonnet）
+- **輪籤**：R212（2026-10-11，macOS 真機；主控 Fable 5.1 兼 Architect；SA 設計備忘錄 4 份、Developer 與修復包 7 包、審查鏡 5 面、收尾單人窗口，子代理皆 Sonnet）；**第三列（DEF-200-525／526）落款於 2026-10-12**（同輪第三列，日期跨過日界；段落見〈二-12〉〈二-13〉〈七-2〉）
 - **輪型**：R 系列（守衛面／跨平台護欄層）。依範本〈🏁〉T2「走軌道① 還是 R 系列由根因所在面決定」：DEF-200-516 家族與 DEF-200-520 在守衛面 ⇒ 走本檔；DEF-200-518 在產品面 ⇒ 走軌道① T1 最小響應（直接修＋測試＋帳本，不產四件套），其修法與證據同寫在本檔〈二〉，便於同一個 commit 對帳。
 - **起點**：HEAD＝9032bebf；`python tools/check_defect_log_crossref.py --unresolved-count` 開場實跑〔收尾親跑〕＝「未結列數＝2」（DEF-200-516、DEF-200-518）；外部阻塞軌 5、結構性長債軌 6。
-- **體例**：不使用前瞻輪號的「延後／交給」句型；數字標〔收尾親跑〕＝本場收尾單人窗口自己跑的輸出，〔他包回報：包名〕＝只讀報告、沒重驗；不抄寫 pytest 通過數字的字面（以「通過 N 支」代稱）。痕跡座標中的 J 編號＝痕跡 jsonl 的行號（`$TMPDIR/autosdd_resume_log_autosdd_resume_plan_<sid>.jsonl`）。
+- **體例**：不使用前瞻輪號的「延後／交給」句型；數字標〔收尾親跑〕＝本場收尾單人窗口自己跑的輸出，〔他包回報：包名〕＝只讀報告、沒重驗；不抄寫 pytest 通過數字的字面（以「通過 N 支」代稱）。第三列起另用〔Docs 包親跑〕（文件修復包〔Sonnet〕自己跑的輸出）與〔主控親跑〕（主控在真機自己跑的輸出）。痕跡座標中的 J 編號＝痕跡 jsonl 的行號（`$TMPDIR/autosdd_resume_log_autosdd_resume_plan_<sid>.jsonl`）。
 
 ---
 
@@ -84,7 +84,7 @@
 
 - **缺陷**：額度參數檔無跨機同步面。`.env` 不入庫，舊機器的複本每一行都遮住共享決策；引擎與 harness hook 各讀一條鏈；本機 `.env` 複本落後生成物 11 鍵（`--env-doctor` 真機輸出：16 筆 `[redundant]`＋資訊 `[stale-copy]`，結論行逐字「結論：16 個問題 ⇒ rc=1　修復：python tools/lib/quota_policy.py --env-doctor --fix」〔收尾親跑〕）。
 - **三個問題的答案**：①「兩邊哪個 `.env` 才正確完整？」都不是——完整鍵清單是 `.env.example`（程式印出的生成物，不是要複製的範本），該用的值是 `env.shared`（決策）＋出廠值；②怎麼同步：改 `env.shared`、`git push`，另一台 `git pull`（喚醒排程每次 tick 都重新啟動 planner 現讀檔，不必重新武裝）；③怎麼維護：`python tools/lib/quota_policy.py --env-doctor`（rc=0 乾淨；rc=1 逐行點名多餘／遮蔽共享／壞值／重複鍵／BOM），確認後加 `--fix`（先備份成 `.env.bak.<UTC 時間戳>`、只刪該刪的行）。本機專屬例外只寫在 `.env`，行尾加 `# override-ok: <WHY>`。
-- **修法**：追蹤檔 `env.shared`（15 行；`AUTOSDD_QUOTA_HALT_PCT=98`、`AUTOSDD_MODEL_HELMSMAN=fable`、`AUTOSDD_MODEL_SUBAGENT=sonnet`、`AUTOSDD_MODEL_DOWNGRADE=haiku`，每鍵上方一行 WHY）；載入鏈（高→低）：行程 env ＞ `AutoClaude/.env`（引擎 3 鍵）＞ 根 `.env` ＞ `env.shared` ＞ 出廠 `ENV_SPEC`；`tools/lib/quota_env_layers.py`（`merged_file_env`＝鏈的 SSOT；`diagnose`／`_fix_one`／`doctor_cli`）；`tools/lib/quota_gate.py::policy_env` 改讀 `merged_file_env`；引擎 `AutoClaude/autoclaude/utils/config.py::_ENV_FILES` 三元組＋`_quota_env` 命中判定（空白值不遮蔽下層，兩側同語意）；`tools/lib/quota_policy.py` `__main__` 加 `--env-doctor` 分支；`.env.example`（`--print-env-example` 生成物）檔頭；`ONBOARDING.md` §2.2 與 §5 一列；兩支 compat-ci workflow 的 `paths` 加 `env.shared`、`tools/lib/quota_env_layers.py`。審查後 Fix-R 補：harness `_read` 與引擎同為 `errors="replace"`（cp950 存檔不再整層丟棄）、doctor 加 `[bom]` 旗標（rc=1）、`env.shared` 重複鍵／BOM／未宣告鍵鎖、三份使用者指南在 `cp .env.example .env` 之後補一句（在 `AutoClaude/` 下執行 `python ../tools/lib/quota_policy.py --env-doctor --fix`）、使用者可見字串「.env 有設錯」改「env.shared（跨機）或本機 .env」。
+- **修法**：追蹤檔 `env.shared`（16 行〔Docs 包親跑：`git show HEAD:env.shared` 轉 `wc -l` 印 16、rc=0；第一列落地時是 15 行〔`git show 035746ba:env.shared` 同法印 15〕，同輪第二列〈二-11〉在檔頭多加一行〕；`AUTOSDD_QUOTA_HALT_PCT=98`、`AUTOSDD_MODEL_HELMSMAN=fable`、`AUTOSDD_MODEL_SUBAGENT=sonnet`、`AUTOSDD_MODEL_DOWNGRADE=haiku`，每鍵上方一行 WHY）；載入鏈（高→低）：行程 env ＞ `AutoClaude/.env`（引擎 3 鍵）＞ 根 `.env` ＞ `env.shared` ＞ 出廠 `ENV_SPEC`；`tools/lib/quota_env_layers.py`（`merged_file_env`＝鏈的 SSOT；`diagnose`／`_fix_one`／`doctor_cli`）；`tools/lib/quota_gate.py::policy_env` 改讀 `merged_file_env`；引擎 `AutoClaude/autoclaude/utils/config.py::_ENV_FILES` 三元組＋`_quota_env` 命中判定（空白值不遮蔽下層，兩側同語意）；`tools/lib/quota_policy.py` `__main__` 加 `--env-doctor` 分支；`.env.example`（`--print-env-example` 生成物）檔頭；`ONBOARDING.md` §2.2 與 §5 一列；兩支 compat-ci workflow 的 `paths` 加 `env.shared`、`tools/lib/quota_env_layers.py`。審查後 Fix-R 補：harness `_read` 與引擎同為 `errors="replace"`（cp950 存檔不再整層丟棄）、doctor 加 `[bom]` 旗標（rc=1）、`env.shared` 重複鍵／BOM／未宣告鍵鎖、三份使用者指南在 `cp .env.example .env` 之後補一句（在 `AutoClaude/` 下執行 `python ../tools/lib/quota_policy.py --env-doctor --fix`）、使用者可見字串「.env 有設錯」改「env.shared（跨機）或本機 .env」。
 - **D-1（治理面保護，兩半缺一不可）**：`.claude/hooks/block_destructive_git.py` 的 `_GOV_EXACT` 追加 `env.shared`、`tools/lib/quota_env_layers.py` 兩項（hook 740→741／750；hook 半由掌舵者親手套用補丁——auto 分類器對 `.claude/**` 的 Self-Modification 拒絕，依權限姿態不繞）；測試半 `tools/tests/test_block_destructive_git_r83.py` 的 `PROTECTED` +2 已在位。驗證指令：`cd tools/tests && python -m unittest test_block_destructive_git_r83 -q` 須印 238 OK；只有測試半時 2 紅（`test_every_protected_file_is_blocked_when_unattended` 的 `rel='env.shared'`／`rel='tools/lib/quota_env_layers.py'`：`AssertionError: 0 != 2`），只有 hook 半則 238 OK 但新項沒有牙〔Architect 鏡副本實測〕。**本列結案以兩半同一個 commit 為前提**：若 hook 半未落地，本列「保護面」一句不成立，須改寫為「已知缺口：無人窗口可改 `env.shared`」並登〈五〉。
 - **紅→綠**：`test_quota_env_layers` 31 支（新鎖檔；新模組沒有「修前紅」，改以突變證明鑑別力：Dev-C N1～N4 全被殺；Fix-R 的 cp950 案修前 `Tuples differ: (91.0, 98.0) != (91.0, 91.0)`、BOM subTest 修前 `(0, False) != (1, True)`〔他包回報：Dev-C／Fix-R〕）。
 - **暴露證據**：掌舵者 T1 第 3 句（原文見〈一〉）。D-1 的暴露證據＝本變更自造的回歸：把停機線的有效來源從受保護的 `.env` 搬進不受保護的 `env.shared`、並把「讀哪些檔」的邏輯從受保護的 `quota_gate.py` 搬進不受保護的新檔——無人值守 `Write` payload 餵 hook：`env.shared` rc=0、`tools/lib/quota_env_layers.py` rc=0、`.env` rc=2（Dev-C 與 Architect 鏡各量一次）；PRD §12／§15.5 紅線 10 字面把 `.env` 列為禁寫，R87（改取數層繞過 halt ⇒ 13 agent 全滅）是同類真事件。
@@ -127,14 +127,266 @@
 - 到期義務：`_REPIN_NET_CAP_DUE_ROUND` 212 到期——兌現 `(212, 516)` 並重新武裝 214／515。
 - 凍結前綴：`_REPIN_LOG_FROZEN_PREFIX_LEN` 335→336、`_REPIN_LOG_HISTORY_SHA256` 重釘、`_FROZEN_PREFIX_REWRITE_LEDGER` 接鏈列（f5cb9e3fe7d6 → e62c2eaa57e5，DEF-200-516）；`<!-- guard-total:R212 -->` 兩站：`docs/04_planning/AutoSDD_improving_112.md`、`docs/06_quality/CrossPlatform_R145_Scan_Findings.md`。
 - **同輪第二列（env.shared pull 後自動同步 `tools/git-hooks/post-merge`；掌舵者 T1「幫我設計自動同步機制」；DEF-200-520 同族；含 QA 複審補鎖）**：淨額 116372→116348（−24）；回歸鎖軌不申報，主軌隨之 430→406 ≤ 516（款(11) 連升仍為第 2 輪、R213 起主軌必須 ≤ 0 不變）。構成：`test_quota_env_layers.py` 328→449（+121：`TestPostMergeHook` 七支＝四支行為鎖＋三支靜態鎖，見〈二〉-11）、`test_windowsapps_guard_bash_parity.py` 1015→1016（+1，`_CALLER_FILES` 登記 post-merge）、本檔 `test_adr_xplat001_c1c2_lock.py` 8744→8598（−146：接鏈列 R104～R165 的旁註 156 行搬至本證據檔〈九〉L7／L8、留 1 行指標；新列 8 行＋接鏈列 1 行）；`_REPIN_LOG_FROZEN_PREFIX_LEN` 336→337、`_REPIN_LOG_HISTORY_SHA256` e62c2eaa57e5…→73b11f302893…、`_FROZEN_PREFIX_REWRITE_LEDGER` 接鏈列（e62c2eaa57e5 → 73b11f302893，DEF-200-520）；`<!-- guard-total:R212 -->` 兩站同步改為 115633→116348（+715，主軌 406）〔Developer 包回報、收尾親跑 `--print-guard-lines`：`# 淨額 116348→116348 (+0)`／`# 逐檔漂移 0 支`、印出 sha 與檔內相同〕。
+- **同輪第三列（DEF-200-525：`tools/lib/cpu_budget.py` 的中文 `--help` 在 cp1252 主控台崩潰＝windows-compat-ci run 38153121596；含第二棒複審後修復＝敲擊 helper 接線自證；第三棒＝DEF-200-526：`LaunchdBackend.arm()` 對正在跑的 job 不再同步 bootout）**：淨額 116348→116429（+81）；全額歸主軌（本列是 `[非淨減法輪]`，回歸鎖軌 309 已達軌上限、不再加報），主軌 R212 合併 +796−309＝487 ≤ 516（款(11) 連升仍為第 2 輪、R213 起主軌必須 ≤ 0 不變）。構成：`test_doc_loc_baseline_freshness_r60.py` 7085→7099（+14：模組層 `_LEGACY_STDIO_ENV`＋`TestR85…` 的 `_knock` 敲擊 helper 與有牙自證改寫；已扣搬走史料 −7＝`iron_law3_ratchet_problems` 踩坑經過 −2、`_check_ignore` 家族三處落地實測數字 −5，見〈九〉L11／L13）、本檔 `test_adr_xplat001_c1c2_lock.py` 8598→8579（−19：史料搬走 25 行至〈九〉L9／L10／L12＝接鏈列 R166～R173 旁註 16 行、到期義務兌現沿革 R184～R212 的 7 行換 1 行指標、檔頭 SA 劃界記錄 4 行換 1 行指標；新列 5 行＋接鏈列 1 行）、`test_mac_endurance_r83.py` 2305→2387（+82：新類 `ArmNeverBootsOutAJobThatIsRunningTest` 五支＋`_print_output` 的 `pid` 參數）、`test_quota_env_layers.py` 449→453（+4：`TestPostMergeHook` 兩支既有測試補斷言——skip 分支出聲＋rc＝0〔同時釘住 `TAG` 在 `set -u` 之後定義〕、修復總結行「刪除 2 行」〔替身 `--fix` 多印兩行 `-X=`／`-Y=`〕；最終零信任複審鏡 P3-7，隔離副本四個突變皆咬住）、`test_cpu_budget.py` 428→428（只拿掉一處 stale 的 `child-encoding-ok:` 行尾標記；`AISDLC_SDD/scripts/tests/test_conftest_xdist_cpu_budget.py` 同拿一處——該檔在 scripts 指紋樹內，指紋 ec35ee2838d0→04108ae4b139，表② 待回填）；`_REPIN_LOG_FROZEN_PREFIX_LEN` 337→338、`_REPIN_LOG_HISTORY_SHA256` 73b11f302893…→cff55af4647d…、`_FROZEN_PREFIX_REWRITE_LEDGER` 接鏈列（73b11f302893 → cff55af4647d，DEF-200-525）；最終零信任複審鏡 P3-6／P3-7 後第三列原地重釘（不新增列）：理由字串起點「主軌 401→483」訂正為 406（HEAD 兩列後＝739−24−309），並隨 +4 改為 406→487；`<!-- guard-total:R212 -->` 兩站同步改為 115633→116429（+796，主軌 487）〔Developer 包回報；收尾包重釘後 `--print-guard-lines`：`# 淨額 116429→116429 (+0)`／`# 逐檔漂移 0 支`、印出 sha 與檔內相同〕。
 - 其他數字釘：skip 樹檔數下限 `tools/tests` 71→72、`AutoClaude/tests` 226→230（照 `run_root_unittests.py` 前置掃描逐字指示）；`MIN_TESTS` 5273→5326（discovery 實測）；ONBOARDING §7 表① `loc-baseline-live` 17797→17857（`sync_onboarding_baselines.py --write`）。表② macOS 欄以乾淨 venv 載具（`python tools/lib/clean_venv_carrier.py`：建→裝→探針→跑→必刪）回填：乾淨 venv 通過 5059 支、skip 222 支（出廠環境值；開發 venv 值不可與它相減）；ci-gate 三軌 1475／1979／362；指紋 v001=8ffe3c3dabbd、v030=6d46814f9084、scripts=ec35ee2838d0、autoclaude=35e0a0326ae2；載具 rc=0、乾淨 venv 必刪完成。
 
 ### 二-11 同輪第二列：env.shared 自動同步（git `post-merge` hook；掌舵者原文「幫我設計自動同步機制！==> 下次在 Windows 執行時，幫我自動同步！」；DEF-200-520 同族，不另立缺陷列）
 
-- **設計（SD／Developer 包，Sonnet）**：掛點＝git `post-merge`（`core.hooksPath` 兩台皆指根層 `tools/git-hooks/`，新檔隨 pull 自動生效；`git pull --ff-only`／dev_start [2/7] 的 ff-only pull／真合併皆觸發，**同一次 pull 才帶進來的 hook 也會在該次執行**〔Developer 包以 git 2.54 在暫存 repo 實測〕；真的需要 rebase 的 `pull --rebase`／`git rebase`／「Already up to date」不觸發 ⇒ 手動跑 doctor）。行為＝委派 `python tools/lib/quota_policy.py --env-doctor`：rc=0 印一行；問題行**全是**可自動修的旗標（以 `diagnose().fixable` 為準＝`redundant`／`shadows-shared`／`engine≠harness`／`dead`）才跑 `--fix`（先備份 `.env.bak.<UTC>`）再體檢一次、三段輸出全印；含需人判斷的旗標（`unknown`／`bad-value`／`duplicate`／`unreadable`／`missing-shared`／`bom`）則一個檔不動只出聲；rc≠0 卻零旗標行（doctor 自己壞）不 `--fix`；`AUTOSDD_UNATTENDED` 鍵存在（無人值守）只體檢不修（與 `block_destructive_git.py` 紅線 10「`.env` 唯讀」同語意）；永遠 `exit 0`（merge 不受影響）；找不到 repo 根 `.venv` 直譯器略過並出聲；`AUTOCLAUDE_SKIP_HOOKS=1` 跳過；兩處 grep 前綴 `LC_ALL=C`（非 UTF-8 多位元組 locale 下 `≠` 的位元組會讓 `[^]]*` 走不過）；刻意不納入 `HOOK_FILENAMES`（名冊只管「安裝時必須存在」）。bash 3.2＋BSD 相容由 `test_bash32_compat.py` 掃；該測試當場抓到一個真缺陷：`$rc2、` 緊接全形字會被 bash 3.2 併進變數名、`set -u` 下 unbound 中止整支 hook（改 `${rc2}`；〈十一〉-2 的假 claude 也踩到同型）。
+- **設計（SD／Developer 包，Sonnet）**：掛點＝git `post-merge`（mac 現查：`core.hooksPath` 指向本 clone 的 `tools/git-hooks/`（絕對路徑）；Windows 機未量，絕對路徑可能漂移（ONBOARDING §6：搬移後不報錯、直接失效），見〈八-1b〉；hook 檔隨 pull 帶進來即在該次生效；`git pull --ff-only`／dev_start [2/7] 的 ff-only pull／真合併皆觸發，**同一次 pull 才帶進來的 hook 也會在該次執行**〔Developer 包以 git 2.54 在暫存 repo 實測〕——前提是 `core.hooksPath` 已設好：全新 clone 第一次 dev_start 的 [2/7] pull 早於 [5/7] 設 hooksPath，那一次沒有 hook（〈五〉#49）；真的需要 rebase 的 `pull --rebase`／`git rebase`／「Already up to date」不觸發 ⇒ 手動跑 doctor）。行為＝委派 `python tools/lib/quota_policy.py --env-doctor`：rc=0 印一行；問題行**全是**可自動修的旗標（以 `diagnose().fixable` 為準＝`redundant`／`shadows-shared`／`engine≠harness`／`dead`）才跑 `--fix`（先備份 `.env.bak.<UTC>`）再體檢一次、三段輸出全印；含需人判斷的旗標（`unknown`／`bad-value`／`duplicate`／`unreadable`／`missing-shared`／`bom`）則一個檔不動只出聲；rc≠0 卻零旗標行（doctor 自己壞）不 `--fix`；`AUTOSDD_UNATTENDED` 鍵存在（無人值守）只體檢不修（與 `block_destructive_git.py` 紅線 10「`.env` 唯讀」同語意）；永遠 `exit 0`（merge 不受影響）；找不到 repo 根 `.venv` 直譯器略過並出聲；`AUTOCLAUDE_SKIP_HOOKS=1` 跳過；兩處 grep 前綴 `LC_ALL=C`（非 UTF-8 多位元組 locale 下 `≠` 的位元組會讓 `[^]]*` 走不過）；刻意不納入 `HOOK_FILENAMES`（名冊只管「安裝時必須存在」）。bash 3.2＋BSD 相容由 `test_bash32_compat.py` 掃；該測試當場抓到一個真缺陷：`$rc2、` 緊接全形字會被 bash 3.2 併進變數名、`set -u` 下 unbound 中止整支 hook（改 `${rc2}`；〈十一〉-2 的假 claude 也踩到同型）。
 - **鎖**：`tools/tests/test_quota_env_layers.py::TestPostMergeHook` 七支——四支行為鎖（temp 目錄 `git init`＋假 `windowsapps_guard.sh`＋替身 python 記 argv：可修⇒三次呼叫、人類旗標⇒一次且不動檔、`AUTOCLAUDE_SKIP_HOOKS=1`⇒零呼叫、直譯器缺⇒rc=0 出聲；locale 一格 darwin 用 `zh_TW.Big5`；無人值守一格 `AUTOSDD_UNATTENDED=""` 驗「鍵存在」語意）＋三支靜態鎖（hook 兩份旗標清單對 `ERROR_FLAGS` 的分割、逐旗標分類對 `diagnose().fixable`、hook 索引 100755／shebang／無 CR／非註解 exit 皆 0；索引模式查詢走 `tools/lib/git_paths.py::ls_files`——第一版裸 `git ls-files` 被 `TestGitPathEnumerationIsQuotepathSafe` 抓到）；`test_windowsapps_guard_bash_parity.py` `_CALLER_FILES` 登記 post-merge。**絕不**對真 repo 根跑 `--fix`（沙盒子行程環境剝掉 `GIT_*`／`AUTOCLAUDE_SKIP_HOOKS`／`AUTOSDD_UNATTENDED`）。
 - **QA 零信任鏡（Sonnet，唯讀，隔離複本突變）**：`VERDICT: CONDITIONAL`——零 P1；P2 兩條皆「鎖缺非碼錯」（旗標分類無行為鎖：M8／M9 互換類別測試仍綠；hook 存活無鎖：沙盒把它提交成 100644 再 pull ⇒ git 印 `hook was ignored because it's not set as executable`、`.env` 靜默未動）；P3＝`HOOK_FILENAMES` 未納（另案）、三個測試鬆口（M5 備份名 regex／M6 錨點／M15 乾淨路徑）、文件三處；P4＝非 UTF-8 locale（Big5／eucJP）grep 盲區、`AUTOSDD_UNATTENDED` 下仍會改 `.env`、前綴比對、doctor 檔缺席訊息、輸出噪音、`_fix_one` 非原子寫。QA 自然語料重放：`.env.example` 13 個歷史版本＋本機真實舊備份當舊複本 14/14 自動修復、機密行逐位元組保留、CRLF 複本修後仍全 CRLF、cp950 複本 `--fix` 解碼失敗不動檔。**處置**：P2 兩條＋P3 測試鬆口＋P4 locale／unattended 同輪修（Developer 包第二棒）；突變 18/18 殺（含 QA 指定 M8／M9／M11）；P3 `HOOK_FILENAMES` 與 P4 前綴比對／輸出噪音／非原子寫維持登記、不修（既有行為或另案）；構造性命中依〈守衛面准入〉計 0、不入帳。
-- **Windows 實機未驗**（本輪只有 mac）：Git for Windows 的 sh 實跑、`pick_repo_python` 解析 `.venv\Scripts\python.exe`、cp950 主控台顯示、Windows Python 輸出帶 `\r` 的旗標行計數（讀碼判無害）、`AUTOSDD_UNATTENDED=""` 經 subprocess 傳給 Git Bash 是否保留；列〈八-4〉第 6 項，驗收＝該機 `git pull` 畫面末行。
+- **Windows 覆蓋現況**：控制流已在 windows-latest（Git for Windows 的 bash、替身 python／替身 guard）由 `TestPostMergeHook` 七支實跑通過——**推論，未見逐測試通過列**：windows-compat-ci run 38150026658（#334，8807f3bb，conclusion=success）的 `tools/tests/` 步驟（步驟 7，15:09:13Z→15:20:00Z）success，該步 log 印「✅ unittest 數量下限釘選通過：發現 5333 個測試（下限 5326）」＝下限 5326＋`TestPostMergeHook` 七支，log 內無本模組名稱；run 38153121596（#335，a7b20b7e）同步驟的失敗清單 4 筆皆非本模組、log 內亦無本模組名稱，skip 普查 43 筆無一屬於本模組〔Docs 包親跑：兩個 run 的 `gh run view <id> --json jobs` 與 `--log`，唯讀；skip 普查 43 筆＝他包回報：SD 鏡〕。該兩個 run 內的 hook 是第二棒修改之前的版本。Windows Python 輸出帶 `\r` 的旗標行計數＝SD 鏡於 mac 以 `.venv/Scripts/python.exe` 形態的 CRLF 包裝器、路徑含空白與括號實跑（23 個可修旗標數對、`--fix` 後 `.env` 仍全 CRLF、機密行保留）〔他包回報：SD 鏡〕；`pick_repo_python` 解析 `.venv\Scripts\python.exe`＝pre-commit／pre-push 同一函式，每次 commit／push 都在跑（讀碼）；`AUTOSDD_UNATTENDED=""` 經 subprocess 傳給 Git Bash 保留與否＝同上七支涵蓋（同為推論）。**仍未驗（只能在掌舵者那台 Windows）**：`core.hooksPath` 是否指對、該機 `.venv\Scripts\python.exe` 實解、cp950 主控台顯示、PowerShell 5.1 寫出的 BOM／UTF-16 `.env`。驗收＝〈八-1〉步驟 2 的驗收一行（`doctor rc=0`），不看 pull 畫面。
+- **同輪第三列的第二棒對 hook 本身的改動**（隨第三列一併進 commit；Windows 尚未驗）：`AUTOCLAUDE_SKIP_HOOKS=1` 分支現在會出聲（原為零輸出，與「hook 沒被叫到」同畫面；`TAG=` 因此前移到 `set -u` 之後）；修復總結行多帶「刪除 N 行（內容見上方 diff；還原＝把備份檔複製回原檔）」（還原法在 mac 以暫存 repo 實證：`cp .env.bak.* .env` 後與 `.env.example` `cmp` rc=0）；檔頭「新機器第一次 pull 即生效」訂正為「已設好 `core.hooksPath` 的機器第一次 pull 即生效（全新 clone 要等 dev_start 第⑤步設好 hooksPath，之後的 pull 才有）」。Windows 上這幾處的新字樣（`LC_ALL=C grep -c '^-[^-]'`、`${ndel:-0}`）未驗，只驗了 mac `/bin/bash` 3.2.57＋BSD grep 與 shellcheck〔他包回報：Developer 第二棒〕。
+
+### 二-12 同輪第三列：DEF-200-525（windows-compat-ci #335／run 38153121596 紅燈；掌舵者回報；落款 2026-10-12）
+
+- **缺陷**：`tools/lib/cpu_budget.py --help` 的中文 help 在 cp1252 stdout 下 `UnicodeEncodeError`（CI 逐字：`tools/lib/cpu_budget.py: UnicodeEncodeError: 'charmap' codec can't encode characters in position 41-43: character maps to <undefined>`）。e6f0be65 把 `cpu_budget.py --legs 1` 寫進根 CLAUDE.md 現查表，使它進入 `TestR85DocNamedLiveCheckEntriesActuallyRun` 的射程；該測試與三支下游平台中立鎖（`TestR67R3NoUnstatedPlatformAssumption{Linux,Darwin,Win32}.test_holds_under_simulated_platform`，是同一支 R85 測試的平台模擬包裝）同根因紅 4 項〔他包回報：QA／SA／Architect 鏡各自讀 `--log-failed`〕；mac 預設 UTF-8，看不見。run 38153121596＝push 觸發（#335、headSha a7b20b7e）；失敗步驟＝步驟 7，步驟 9～28 共 20 步被 skipped〔Docs 包親跑：`gh run view 38153121596 --json …`，唯讀〕。
+- **cp950 事實（為何掌舵者的 zh-TW 真機看不到）**：HEAD 版 `cpu_budget.py --help` 在 `PYTHONIOENCODING=cp950` 下 rc=0（中文 help 在 Big5 內可編碼）；cp1252／ascii／latin-1 才 rc=1，utf-8 rc=0；修後版在這五種編碼下 `--help` 全部 rc=0。只有非 CJK 碼頁（GitHub runner＝cp1252）會爆。`PYTHONIOENCODING` 連 UTF-8 mode 也蓋過（`PYTHONUTF8=1 PYTHONIOENCODING=cp1252 python -c "print(chr(0x4E2D))"` rc=1 `UnicodeEncodeError`），所以在 mac 以它模擬非 UTF-8 主控台有效〔他包回報：Architect 鏡附錄 #4；QA 鏡 A 與 SD 鏡矩陣同向〕。
+- **為何現查表加一行就只在 Windows 現形**：R85 的 `--help` 敲擊原本只在**主機預設編碼**下跑——Mac／Linux 預設 UTF-8，永遠看不到非 UTF-8 主控台；同一條敲擊 R85 早就存在，是 e6f0be65 把 cpu_budget 加進現查表才第一次踩到。現查表 11 組真參數在 `PYTHONIOENCODING=cp1252` 下親跑全部 `traceback=False`，沒有「`--help` 綠、真參數路徑爆」的入口；唯一 rc≠0 的是 `reset_window_distribution.py`（rc=1），與預設編碼環境逐位元組相同（內容＝「一個 episode 都沒有 ⇒ 這台機器沒有撞線史」的正常判決）。CI 觸發面不動：windows-compat-ci（182 條）與 macos-compat-ci（183 條）的 push `paths:` 都含 `CLAUDE.md`，正是為了讓這類 docs 變更被 Windows 驗到，收窄只會藏起缺陷；對 a7b20b7e 的完整 sha 現查回 3 個 run（windows failure／root-infra success／macos success），Windows job 在 11 分 47 秒內給出紅燈〔他包回報：Architect 鏡 F-1／F-2〕。
+- **原有的鎖為何沒擋住（Architect 鏡 C 訂正）**：Developer 第一棒回報曾寫「此缺陷本來有專門的鎖（判準四），被兩處不實的豁免標記壓掉」——該敘事不成立：①檔內自編號：child 保護是**判準二**（`test_subprocess_encoding_hygiene.py` 的 child 目標 UTF-8 保護判準），判準四是已註冊 hook 腳本；②兩處 `child-encoding-ok:` 標記對其**實際呼叫形態為真**——HEAD 版 cpu_budget 在 cp1252 下 `--legs 1`／`--legs 2`／`--bogus`／無參數的 stdout＋stderr 全 ASCII 且無 Traceback，只有 `--help` 是中文、會爆（逐字：`--help rc=1 stdout+stderr ASCII-only=True traceback=True`），所以不是標記壓住了鎖；③真正的缺口：R85 的 `--help` 敲擊以迴圈變數組路徑（`[sys.executable, str(_REPO_ROOT / rel), "--help"]`），判準二的靜態路徑解析解不出來（HEAD 版判準二在 doc_loc 的納管站點只有一處，R85 的兩處敲擊行不在射程內）；判準三（`nonascii_console_lines`）只看 `print`／`sys.std*.write`，argparse 的 `description=`／`help=` 在其偵測面外（HEAD 版 cpu_budget：`is_entry_point=True`、`has_utf8_stdio_protection=False`、`nonascii_console_lines==[]`、`scan_entry_points` offenders==[]）；④兩處標記是**修好之後才 stale**（目標已具保護 ⇒ 標記壓不到違規 ⇒ 依 stale 規則必須移除），不是它們擋住了鎖。可寫的最強說法是「兩處行尾豁免因目標已具保護而 stale，依 stale 規則移除」。同型剩餘面：repo 現存 `child-encoding-ok:` 標記 7 個，宣稱「只印 ASCII」的僅 1 個（`tools/tests/test_check_hooks_liveness.py` 的合成目標，成立）〔他包回報：Architect 鏡 C、QA 鏡〕。
+- **修法**：`tools/lib/cpu_budget.py` 的 `if __name__ == "__main__":` 內、`sys.exit(_main(...))` 前加 `from platform_utils import init_utf8_streams` 與 `init_utf8_streams()`（`tools/lib` 的多數派形態，取不到 SSOT 時靜默不動＝fail-open）。位置只在 `__main__`：行程內 import `cpu_budget` 的只有 `tools/lib/parallel_shard.py` 與 `tools/tests/test_cpu_budget.py`，其餘消費端（AutoClaude／AISDLC_SDD conftest、ci-gate、pre-push、nightly 腳本）全走 CLI subprocess；放模組層會在 import 期換掉 pytest／unittest 行程的 stdout（`_stdio_utf8.py` 檔頭明訂只應在 `__main__` 進入點生效）〔他包回報：Architect 鏡 A、QA 鏡〕。Developer 第一棒是 `sys.path.insert(0, tools/)`＋`import _stdio_utf8`（與 `quota_reconcile.py` 同形）；Architect 鏡 P3-2／SD 鏡 P4-1 指出 `tools/lib` 的 CLI 8 支走 `init_utf8_streams()`、只有 1 支走前者，且前者取不到 SSOT 即 `ModuleNotFoundError`（隔離複製：新版單檔 `new_isolated_rc=1`、HEAD 版 `old_isolated_rc=0` 印 `9`），第二棒改成現形態（註：兩種形態把 cpu_budget.py 單檔複製到沙箱都會 ModuleNotFoundError，複審鏡實測現形態 rc=1；現存消費端零複製，不構成缺陷）。被否決的替代案：把 argparse 字串改成 ASCII 英文（鎖不區分兩案，但下一個中文訊息即復發，且違反使用者可見字串用中文的慣例）、在 workflow 層設 `PYTHONUTF8=1`／`PYTHONIOENCODING=utf-8`（會把整個非 UTF-8 主控台類別從 CI 視野抹掉）〔他包回報：Architect 鏡 A〕。
+- **順拿掉兩處 stale 標記**：`tools/tests/test_cpu_budget.py` 與 `AISDLC_SDD/scripts/tests/test_conftest_xdist_cpu_budget.py` 的 `# child-encoding-ok:` 行尾標記各一處。判準二在修法落地後報「標記 stale」逼出（QA 鏡於隔離切片把兩個標記還原成 HEAD 版、修法在：`TestChildEncodingHygiene` rc=1，兩處皆報 stale）；後者在 scripts 指紋樹內 ⇒ ONBOARDING §7 表② scripts 指紋 `ec35ee2838d0→04108ae4b139`，`sync_onboarding_baselines.py --check-snapshot` 目前 rc=1，待乾淨 venv 載具回填（commit 前最後一步）〔他包回報：Developer／Architect／QA 鏡各自獨立證實〕。
+- **鎖**：`TestR85DocNamedLiveCheckEntriesActuallyRun` 對根 CLAUDE.md 指名的每支現查入口，`_knock(script, base=None)` 敲兩輪——現行環境一輪、`PYTHONIOENCODING=cp1252`（模組層 `_LEGACY_STDIO_ENV`）一輪，只判 Traceback、rc 不判；有牙格（`test_the_traceback_criterion_has_teeth`）＝合成一支只印 `中` 的腳本，以 `PYTHONIOENCODING=utf-8` 當基線（免得 Windows 預設 cp1252 讓兩輪都爆）交給**同一個** `_knock`，斷言恰在 ` [cp1252]` 那一輪被抓——`_knock` 的 env 接線因此有自證。第一棒版本只自證常數、沒有自證接線（Architect 鏡 P3-1 的突變：把迴圈裡的 `_LEGACY_STDIO_ENV` 換成 `{}`、仍用 HEAD 版未保護的 cpu_budget ⇒ `mutated_knock_vs_HEAD_cpu_budget_rc=0`、有牙測試同樣綠），第二棒補上。另一道靜態鎖：修後 cpu_budget 具保護，判準二對它生效；第二棒以判準本體（`scan_child_encoding`／`has_utf8_stdio_protection`）在迷你樹隔離再證：
+
+  ```text
+  [現行（有保護：platform_utils.init_utf8_streams）] has_utf8_stdio_protection=True offenders=0 stale=0 in_scope=1
+  [突變（拿掉保護兩行）] has_utf8_stdio_protection=False offenders=1 stale=0 in_scope=1
+     offender: tools/tests/test_cpu_budget.py:380: 起 Python child `tools/lib/cpu_budget.py`，但該檔無 UTF-8 stdio 保護…
+  ```
+
+  Architect 鏡對第一棒形態的同型突變（拿掉 `import _stdio_utf8`）亦得 `offenders=1`，`AISDLC_SDD/scripts/tests/test_conftest_xdist_cpu_budget.py` 站點同理〔他包回報：Architect 鏡〕。
+- **突變實驗（隔離副本，真檔未動；逐字，省略每行的 `Ran … in …s` 段）**：第二棒形態（`_knock` 接線；M0 為未突變對照）〔他包回報：Developer 第二棒〕：
+
+  ```text
+  M0 對照（未突變）            rc=0 OK
+  M1 Architect 突變（迴圈 env 換成 {}） rc=1 FAILED (failures=1) 只紅 test_the_traceback_criterion_has_teeth：`AssertionError: 0 != 1 : 只該在 cp1252 那一輪爆：[]`
+  M2 subprocess.run 不傳 env    rc=1 FAILED (failures=1) 只紅 test_the_traceback_criterion_has_teeth
+  M3 `_LEGACY_STDIO_ENV = {}`   rc=1 FAILED (failures=1) 只紅 test_the_traceback_criterion_has_teeth
+  M4 第二輪標籤改名 ` [legacy]` rc=1 FAILED (failures=1) 只紅 test_the_traceback_criterion_has_teeth
+  ```
+
+  （第一棒版本在 M1 下有牙測試仍綠，是 Architect 抓到的洞。）QA 鏡的突變針對**第一棒形態**（隔離切片＝`git archive HEAD` 解開後套 Developer 的 diff，九檔與真樹逐位元相同）〔他包回報：QA 鏡〕：
+
+  ```text
+  基準（未突變）R85 類別：rc=0，OK
+  M1（移除 sys.path.insert(...) 與 import _stdio_utf8 兩行）：rc=1；只一支入口被抓，標籤 ` [cp1252]`
+     失敗標頭：AssertionError: Lists differ: ["tools/lib/cpu_budget.py [cp1252]: Unicod[99 chars]ed>"] != []
+     FAILED (failures=1)（預設環境那一輪不報＝舊鎖在 mac 是盲的）
+  M2（_LEGACY_STDIO_ENV 改 {"PYTHONIOENCODING": "utf-8"}）：rc=1，test_the_traceback_criterion_has_teeth 紅
+     AssertionError: 'Traceback (most recent call last)' not found in '' : 模擬主控台沒讓非 ASCII 輸出爆 ⇒ cp1252 那一輪沒有鑑別力
+     FAILED (failures=1)
+  [構造] M3a：根 CLAUDE.md 切片加一行 python tools/lib/zz_fake_cjk.py --help、假入口中文 help 且無 _stdio_utf8
+     ⇒ rc=1，tools/lib/zz_fake_cjk.py [cp1252]: UnicodeEncodeError…position 28-33（只被 cp1252 輪抓到）
+  [構造] M3b：同一支加上 _stdio_utf8 ⇒ rc=0 OK（新鎖能泛化到未來新入口、且無假紅）
+  ```
+- **紅→綠（mac 以 cp1252 模擬）**：HEAD 版（`git show HEAD:tools/lib/cpu_budget.py` 複本）`PYTHONIOENCODING=cp1252 python <複本> --help` rc=1，末行 `UnicodeEncodeError: 'charmap' codec can't encode characters in position 39-41: character maps to <undefined>`；工作樹版 rc=0（印出中文 usage／description／options）、`--legs 1` rc=0 印 `9`。CI 位置 41-43 與本機 39-41 的差 2 是推論：Windows 文字模式寫入先把 `\n` 翻成 `\r\n`（argparse 描述前兩個換行）〔QA 鏡，未在 Windows 實測〕。Architect 鏡隔離實驗：`git archive HEAD` 切片＋工作樹版鎖＋HEAD 版 cpu_budget，在**預設環境**跑 R85 類 ⇒ `FAILED (failures=1)`，且**只有** `tools/lib/cpu_budget.py [cp1252]` 一筆（另 8 支入口兩輪皆綠）；換成工作樹版 cpu_budget ⇒ OK。QA 鏡 CI 同形重現：舊 cpu_budget.py＋新鎖，跑 R85＋三個 `TestR67R3NoUnstatedPlatformAssumption{Linux,Darwin,Win32}` ⇒ rc=1、恰四個 FAIL（R85 `test_no_named_entry_dies_before_it_can_do_anything`＋三個 `test_holds_under_simulated_platform`）、`FAILED (failures=4)`＝與 windows-compat-ci 那組四紅同形：舊鎖在 mac 看不見、新鎖在 mac 就看得見〔他包回報：Architect／QA 鏡〕。
+- **四方審查判決（修復後的完整對照見〈七-2〉）**：
+
+  | 鏡 | 判決（首行逐字） | 與本列相關的處置 |
+  |---|---|---|
+  | QA | `VERDICT: APPROVE` | 無 P1／P2；P3 三條（落款缺→本節；〈九〉導言過期→已改；帳本狀態欄缺 Windows CI 註記→已加「CI 實跑待對帳」） |
+  | Architect | `VERDICT: APPROVE` | 零 P1／P2；P3 兩條（接線自證、多數派形態）第二棒已修；P4 五條登〈五〉 |
+  | SA | `VERDICT: CONDITIONAL` | 5 條 P2 皆為轉述句或文件（無碼錯）；P2-4（本列落款缺）＝本節；P2-5（不可宣稱「已修好」）＝帳本加「CI 實跑待對帳」＋〈四-3〉 |
+  | SD | `VERDICT: CONDITIONAL` | 1 條 P2（S14）⇒ DEF-200-526，見〈二-13〉 |
+- **Windows CI 實跑待對帳**：修法與鎖在工作樹、未 commit／push；#335 在步驟 7 失敗後，步驟 9～28 共 20 步被略過（含 ci-gate.ps1 雙軌、dispatcher hooks 真 commit、dev_start、install_git_hooks 往返），綠燈＝push 後 windows-compat-ci 整個 job 步驟 1～28 都 success。push 後以 `gh run list --commit <完整 sha>`（短 sha 會靜默回空）現查，回填於〈四-3〉；預期 R85 兩輪皆綠。
+- **護欄層**：行數、棘輪與兩站點數字只引〈二-10〉第三列 bullet，本節不另抄。
+- **准入與輪號**：DEF-200-525 在非守衛面（`tools/lib/cpu_budget.py` 與 `tools/tests` 鎖）：`git diff --name-only` 對根 CLAUDE.md〈守衛面准入〉清單的比對在終態樹（15 個修改檔，含第四、五棒與收尾補鎖）唯一命中 `tools/session_resume_planner.py`——第五棒只加 3 行註解（`git diff --numstat`＝`3	0`、零程式行、planner assertion 750 不變），不是新增守衛碼或鎖；其餘 14 檔無命中〔最終零信任複審鏡（14 檔時）與收尾包（終態 15 檔）各親跑：`grep` rc=0〕。記成同輪第三列而不是新的一輪：成因是 R212 視窗內的 commit（e6f0be65）造成的回歸，同輪修同輪結；缺陷在同一工作樹內立案並 fixed、未結維持 0；沒有未結列也沒有承接輪號，R 系列沒有開輪事件（數字見〈六-1〉末條）〔他包回報：Architect 鏡 E〕。
+
+### 二-13 同輪第三列（續）：DEF-200-526（續跑視窗內 `--arm-sentinel` 同步 bootout 自己的哨兵 job）
+
+- **來源**：SD 鏡 P2-1（讀碼＋合成逐字稿＋假 `_run` 模擬；構造性、無真機）。主張：每個有歷史的真實續跑窗，第一次 PostToolUse 就會從 job 內由 hook 派生 `--arm-sentinel`（續跑窗 SessionStart 清閂鎖後，以整份逐字稿評估 `should_arm`：`sentinel_lifecycle_arm.py:93,147,241`；hook 端 `context_budget_guard.py:794-808,829-840`）；經哨兵 `probe` 分支觸發的 mac 續跑窗跑在哨兵 job 內；`LaunchdBackend.arm()` 在 live descriptor 與請求不符時（例：`arm_reset` 留下、已過期的 calendar）走 bootout，把承載自己的 job 連根拔掉。〈十一-5〉S14 列的「未發生」只因第二列用 1 請求小 session、回合數沒達 `MIN_TURNS=24`。SD 鏡逐字證據〔他包回報：SD 鏡〕——可達性（真函式＋合成逐字稿 40 回合／7020 秒＋注入 spawn；真實 session 最小量測值 38 回合／853 秒）：
+
+  ```text
+  transcript evidence: (40, 7020.0) (turns, span_seconds)
+  original session first PostToolUse -> armed
+  resumed window SessionStart clear_arm_latch -> True
+  resumed window FIRST PostToolUse           -> armed
+  spawns total (detached --arm-sentinel launched from inside the resumed window): 2
+  ```
+
+  與真 `LaunchdBackend.arm()`＋假 `_run`／`Popen`（`XPC_SERVICE_NAME`＝哨兵 label）的模擬：
+
+  ```text
+  == A. live descriptor still carries the (now past) arm_reset calendar
+  arm rc = 0 | launchctl calls: ['print']
+  deferred script spawned = YES | starts with: p=16499; n=0; while kill -0 $p 2>/dev/nu | contains bootout: True
+  -> wait target pid p = p=16499 (this process pid = 16499 )
+  == B. control: live descriptor has no calendar
+  deferred script spawned = no (idempotent no-op: scheduler untouched)
+  ```
+
+  SD 鏡的建議：先跑 B+（0 token、真 launchd）當暴露證據，再決定修法（`.claude/hooks/` 屬守衛面，依根 CLAUDE.md〈守衛面准入〉須先附真機輸出）。SD 鏡的模擬假設子孫繼承 `XPC_SERVICE_NAME`（走延後 bootout 分支）；下面 (a) 量到子孫拿到的是 `0`，真實落點是同步 bootout 分支——危害方向相同、機制不同。
+- **真機量測 (a)：`XPC_SERVICE_NAME` 的繼承**（主控親跑，0 token；一次性 launchd job `AutoSDD_XpcProbe_175600`，約 2026-10-12 01:56 +0800，跑完即 bootout）：job 內以 `/bin/bash` 依序印自己與各層子孫看到的 `XPC_SERVICE_NAME`。輸出逐字（原始檔在 scratchpad，不入庫；前三行是觀測腳本的註冊訊息，`bash:` 起的七行是量測，其後一行 `ls` 查 venv python 的符號連結身分，最後兩行是清理）：
+
+  ```text
+  written /Users/wuweihong/Library/LaunchAgents/AutoSDD_XpcProbe_175600.plist
+  bootstrap rc=0
+  waited=1
+  bash: XPC_SERVICE_NAME=AutoSDD_XpcProbe_175600 pid=21335 ppid=1
+  env: XPC_FLAGS=0x0
+  env: XPC_SERVICE_NAME=0
+  sh child: XPC_SERVICE_NAME=0
+  sys python3 child: 0
+  venv python child: 0 /Users/wuweihong/Antigravity/AISDCL_Agent/.venv/bin/python
+  venv python grandchild: 0
+  lrwxr-xr-x@ 1 wuweihong  staff  10 Jul  9 21:45 /Users/wuweihong/Antigravity/AISDCL_Agent/.venv/bin/python -> python3.11
+  === cleanup ===
+  bootout rc=0
+  ```
+
+  讀法：只有 launchd 直接起的那個行程（`bash`，`ppid=1`）看得到自己的 label；連 `/usr/bin/env` 這種最淺的子行程都拿到 `0`，`sh`、系統 python3、venv python 與孫行程也是。⇒ `XPC_SERVICE_NAME == label` 只能認出 job **本體**，認不出任何子孫（推論含 hook 派生的 `--arm-sentinel`；本輪未量 Python 本體→claude→hook→planner 這條真鏈，見誠實劃界(1)）。venv 的 `python` 只是指向 `python3.11` 的符號連結（`ls` 那行），而連 `/usr/bin/env` 都是 `0`，所以這不是 python 啟動器造成的。
+- **真機量測 (b)：B+ 修前紅**（主控親跑，0 token，真 launchd＋真 `LaunchdBackend.arm()`；拋棄式 label `AutoSDD_BplusProbe_20261011T175115Z`，2026-10-12 01:51:15 +0800；修法尚未套用）：殼 `job.sh`（job 本體）先寫一行「job start」，再起 `.venv/bin/python child_arm.py <label> <plan>` 當子行程呼叫 `LaunchdBackend().arm(plan, label, "", "--check", None)`；arm 回來後 `job.sh` 才寫「arm_done」、每 2 秒寫一次心跳（共 45 次）、最後寫「job end normally」；`AUTOSDD_TRACE_DIR` 指向 scratchpad（job 的 `environment` 帶它，`launchctl print` 逐字；真 `~/.autosdd/traces` 不受污染）。等 130 秒後觀測，逐字（`run1_observed.txt`；`<scratchpad>` 代表 scratchpad 絕對路徑前綴）：
+
+  ```text
+  waited=130s
+  === job.log ===
+  job start pid=20218 ppid=1 xpc=AutoSDD_BplusProbe_20261011T175115Z at 17:51:15
+  child pid=20221 ppid=20218 XPC_SERVICE_NAME=0
+  === bootout trace ===
+  cat: <scratchpad>/bplus/traces/autosdd_sentinel_bootout_AutoSDD_BplusProbe_20261011T175115Z.log: No such file or directory
+  === launchctl print (summary) ===
+  print rc=113
+  === ps for job.sh ===
+  (no job.sh process)
+  === launchd_stderr tail ===
+  ```
+
+  `print_after.txt` 逐字：`Bad request.`／`Could not find service "AutoSDD_BplusProbe_20261011T175115Z" in domain for user gui: 501`。unload 帳的那一列（`run1_unloads.jsonl`；`argv`／`home`／`tmpdir` 的路徑值以 `…` 略）：
+
+  ```json
+  {"ts": "2026-10-12T01:51:15+0800", "op": "bootout", "reason": "", "label": "AutoSDD_BplusProbe_20261011T175115Z", "caller": "child_arm.py:<module>:6", "argv": ["…/bplus/child_arm.py", "AutoSDD_BplusProbe_20261011T175115Z", "…/bplus/plan.md"], "pid": 20221, "ppid": 20218, "home": "…", "tmpdir": "…", "session_id": "", "xpc": "0"}
+  ```
+
+  讀法：子行程拿到 `XPC_SERVICE_NAME=0` ⇒ `arm()` 判它不是 job 本體 ⇒ 走**同步** `launchctl bootout`（unload 帳 `op=bootout`、`caller=child_arm.py:<module>:6`、`pid=20221`、`ppid=20218`）⇒ 承載自己的 job 被殺，連 `arm()` 的呼叫者（子行程）與 `job.sh` 一起消失：`job.log` 停在「child pid=…」那行、沒有 `arm rc`／`arm_done`／任何心跳，`launchctl print` rc=113（不存在），`ps` 查無 `job.sh`；沒有 `autosdd_sentinel_bootout_<label>.log`＝延後 bootout 路徑**沒有**被走。依 `arm()` 的順序（回讀之後每次先重寫 plist，再同步 bootout，最後才 bootstrap），plist 已被改寫、卻沒有被載回 launchd〔讀碼推得；修前那一輪未留 plist 位元組〕。⇒ 真機暴露證據成立：這不是理論洞。
+
+  探針腳本（逐字；路徑以當時 scratchpad 為準）：`job.sh`（job 本體；`BPLUS_DIR`／`BPLUS_LABEL` 由 plist 的 `EnvironmentVariables` 帶入）與 `child_arm.py`（子行程）。
+
+  ```bash
+  #!/bin/bash
+  LOG="$BPLUS_DIR/job.log"
+  echo "job start pid=$$ ppid=$PPID xpc=${XPC_SERVICE_NAME:-} at $(date -u +%H:%M:%S)" >> "$LOG"
+  /Users/wuweihong/Antigravity/AISDCL_Agent/.venv/bin/python "$BPLUS_DIR/child_arm.py" "$BPLUS_LABEL" "$BPLUS_DIR/plan.md" >> "$LOG" 2>&1
+  echo "arm_done rc=$? at $(date -u +%H:%M:%S)" >> "$LOG"
+  for i in $(seq 1 45); do echo "hb $i $(date -u +%H:%M:%S)" >> "$LOG"; sleep 2; done
+  echo "job end normally at $(date -u +%H:%M:%S)" >> "$LOG"
+  ```
+
+  ```python
+  import os, sys
+  sys.path.insert(0, "/Users/wuweihong/Antigravity/AISDCL_Agent/tools/lib")
+  import schedule_backend
+  label, plan = sys.argv[1], sys.argv[2]
+  print(f"child pid={os.getpid()} ppid={os.getppid()} XPC_SERVICE_NAME={os.environ.get('XPC_SERVICE_NAME')}", flush=True)
+  rc, cred = schedule_backend.LaunchdBackend().arm(plan, label, "", "--check", None)
+  print(f"arm rc={rc}", flush=True)
+  print(cred, flush=True)
+  ```
+- **修法**（`tools/lib/schedule_backend.py`，`LaunchdBackend`，+26 行〔第三棒 +16，第四棒 +5，第五棒 +5；numstat 累計 28 增 2 減〕）：①`_readback` 在 depth-1 補一支 `elif text.startswith("pid = "): found["pid"] = _first_int(text)`——`launchctl print` 只在 job 在跑時才有該行；子區塊內的 `pid =` 不取，`pid-local endpoints = {` 這種誘餌行不會被 `startswith("pid = ")` 吃到；②`arm()` 緊接 `live = self._readback(task_name)` 之後加早退：`live is not None` 且 `live["pid"]` 不是 `None`、也不等於 `os.getpid()`，且 `XPC_SERVICE_NAME != task_name`（＝launchd 說該 job 在跑、而我不是 job 本體）⇒ 寫痕跡事件 `arm_skipped_inside_job`（欄位 `label`／`job_pid`／`pid`／`ppid`／`xpc`／`at`；落 `autosdd_sentinel_bootout_<label>.log`）、**不碰排程器、不改 plist**、回 `(0, <憑證> + "｜🔴 該 job 正在跑（pid=…）：本行程若是其子孫，同步 bootout會殺掉在跑的 tick 與續跑視窗（launchd 不給子孫 XPC_SERVICE_NAME）⇒ 不碰排程器、不改 plist，重掛由 job 本體尾段執行（settle→哨兵重掛）")`。憑證用語刻意說「若是其子孫」——判準不管譜系，呼叫者可能不是子孫，但同樣不被允許同步殺掉在跑的 job；痕跡多記 `ppid` 與 `xpc` 供事後判拓撲（`ppid=1`＝孤兒化、`ppid＝job_pid`＝直屬子行程）。第四棒（Docs 包讀 B+ 修後輸出發現，登〈五〉#40）：早退路徑的憑證改為自組短憑證——`launchd <domain>/<label>｜launchctl print rc=0｜state｜plist 路徑〔launchd 自報；本路徑未與請求比對〕｜🔴 該 job 正在跑…`，不再套 `_credential` 模板（其「與請求相符」「planner 本體在列」「最壞 N 秒」三句在本路徑都沒比對過；上方 (c) 逐字輸出是修正前的樣子）；鎖＝非本體那支加斷言「憑證不含『與請求相符』」，M1（還原成模板）／M2（塞回該字樣）皆紅，測試檔行數不變。第五棒（主控採納 Developer 第四棒第五節三個觀察）：①`credential_line()` 頁尾——憑證含「本路徑未與請求比對」時，把「上面三件證明的是『此刻存在、參數就是我要的那組、且已持久化』」換成「上面陳述的是『此刻存在』（launchd 自報）；是否已持久化、參數是否就是我要的那組，本路徑皆未比對」，其他路徑的頁尾逐字不動；②早退憑證末句由「重掛由 job 本體尾段執行（settle→哨兵重掛）」改為「不碰排程器、不改 plist；是否重掛交 job 本體尾段（本路徑不證明）」（本 bullet 上文引的是改前末句），對未來動作不做宣稱；③planner 註解（`tools/session_resume_planner.py:398-410` 那段）補三行，指明這條早退路徑是「回讀相符才發憑證」之外的又一個例外（另兩條是 `_deferred_credential` 出口）（只改註解，planner 斷言行數 750 不變）；鎖＝非本體那支補頁尾斷言（對該憑證呼叫 `credential_line` 後不含「參數就是我要的那組」），一般頁尾那支補一個必含片語，把「其他路徑的頁尾不動」釘成機械物；突變：頁尾條件拿掉 ⇒ 非本體那支紅，頁尾條件對所有路徑生效 ⇒ 一般頁尾那支紅，測試檔行數不變。
+- **Developer 對主控「祖先鏈」設計的駁回**（第三棒偏離，Developer 回報要求主控確認）：主控派工原擬 `_pid_is_ancestor`（沿 ppid 鏈找 job pid）。Developer 以取樣駁回：Claude Code 生出的 hook 行程自成行程群組——取樣檔例 `43718 84650 43718 …Python … .claude/hook…`（欄位依序 pid、ppid、pgid；ppid＝`claude` 行程 84650、pgid＝自己），共 74 列取樣（另 1 列結束標記），其中 41 列 `pid==pgid`（hook 行程本身）、33 列 `pid≠pgid`（hook 的子行程，例：`43726 43718 43718`＝ppid 與 pgid 都是 hook 的 43718）；hook 裡的 `spawn_sentinel` 用 `Popen` 起 planner 後不等待，hook 一退出 planner 就被孤兒化到 launchd（`ppid=1`），所以真實鏈上 planner 的祖先鏈常常已斷、行程群組也是自己的 ⇒ 祖先鏈法在最需要它的真鏈上會「認不出我是子孫」而照殺（與當初 `XPC_SERVICE_NAME` 法同型失敗）。改用「launchd 說該 job 在跑、且該 pid 不是我、且我沒有拿到自己的 label」＝不管譜系的判準，鏈完整或斷掉時都成立；Developer 的立場：祖先鏈若仍要，只能當**額外**規則而非替代（不會改變真鏈結果）〔他包回報：Developer 第三棒第四節〕。工作樹現行形態＝不管譜系判準，並由下面的 B+ 修後真機驗證。
+- **鎖**：`tools/tests/test_mac_endurance_r83.py::ArmNeverBootsOutAJobThatIsRunningTest` 五支——`test_the_readback_takes_pid_only_from_the_jobs_own_line`（只取 depth-1 自己那行；fixture 的 `pid-local endpoints = {` 誘餌行不被吃）、`test_a_caller_that_is_not_the_job_body_never_touches_the_scheduler`（非本體呼叫者、孤兒化 `ppid=1`、`XPC_SERVICE_NAME=0` ⇒ 完全不碰排程器、plist 位元組不變、憑證含「子孫」且不含「與請求相符」、有痕跡）、`test_the_job_body_itself_still_takes_the_deferred_reload_path`（對照組：live pid＝本行程 ⇒ 照舊延後重載）、`test_either_signal_alone_is_enough_to_recognise_the_job_body`（pid 是我但環境沒給、或環境給了 label 但 pid 對不上 ⇒ 都不得被當別人而略過）、`test_a_job_that_is_not_running_is_still_reloaded_by_an_outside_caller`（對照組：沒有 pid＝沒在跑 ⇒ 照舊 bootout＋bootstrap，本修法只擋「殺在跑的 job」）。突變（隔離副本，真檔未動；M1＝把早退守衛換成 `if False:`；M2＝`not in (None, os.getpid())` 改 `not in (None,)`；M3＝拿掉 `XPC_SERVICE_NAME != task_name` 條件；M4＝`_readback` 不取 pid；M5＝連沒在跑〔無 pid〕的 job 也跳過；逐字，省略每行的 `Ran … in …s` 段）〔他包回報：Developer 第三棒附錄 D〕：
+
+  ```text
+  M0_control rc=0 | OK |
+  M1_guard_never_skips rc=1 | FAILED (failures=1) | FAIL: test_a_caller_that_is_not_the_job_body_never_touches_the_scheduler
+  M2_pid_exclusion_dropped rc=1 | FAILED (failures=2) | FAIL: test_either_signal_alone_is_enough_to_recognise_the_job_body
+  M3_xpc_exclusion_dropped rc=1 | FAILED (failures=1) | FAIL: test_either_signal_alone_is_enough_to_recognise_the_job_body
+  M4_readback_drops_pid rc=1 | FAILED (failures=2) | FAIL: test_a_caller_that_is_not_the_job_body_never_touches_the_scheduler, FAIL: test_the_readback_takes_pid_only_from_the_jobs_own_line
+  M5_idle_job_also_skipped rc=1 | FAILED (failures=2, errors=1) | ERROR: test_a_job_that_is_not_running_is_still_reloaded_by_an_outside_caller, FAIL: test_either_signal_alone_is_enough_to_recognise_the_job_body
+  ```
+
+  Developer 第三棒另報：最終批第一輪抓到 1 個紅（`test_platform_neutral_paths` 的 `TestNoPosixAbsPathLiteralInAsserts`：自己新增的測試把 `/p` 路徑佔位值放進 `assertIn(...)` 引數），已改成不含路徑字面值的斷言並整批重跑〔他包回報：Developer 第三棒第二節〕。
+- **真機量測 (c)：B+ 修後綠（第三棒形態；下方憑證字樣是第四、五棒修正前的樣子）**（主控親跑，0 token，真 launchd；拋棄式 label `AutoSDD_BplusProbe_20261011T190135Z`，2026-10-12 03:01:35 +0800；工作樹含修法）：同一組殼與子行程。窗內觀測（`run2_during_observed.txt`；首行是觀測腳本的 zsh glob 無命中訊息，略；輸出中的縮排 tab 在本檔一律以四個空白代）：
+
+  ```text
+  plist written: /Users/wuweihong/Library/LaunchAgents/AutoSDD_BplusProbe_20261011T190135Z.plist
+  bootstrap rc=0
+  label=AutoSDD_BplusProbe_20261011T190135Z
+  arm seen after 1s
+  === launchctl print DURING (summary) ===
+  print rc=0
+      state = running
+      pid = 55502
+  ```
+
+  `run2_job.log`（19:01 起的一段；其前兩行是修前殘留，略；`hb 2`～`hb 44` 略，`hb lines=45` 見下方 `run2_observed.txt`）：
+
+  ```text
+  job start pid=55502 ppid=1 xpc=AutoSDD_BplusProbe_20261011T190135Z at 19:01:35
+  child pid=55507 ppid=55502 XPC_SERVICE_NAME=0
+  arm rc=0
+  launchd gui/501/AutoSDD_BplusProbe_20261011T190135Z｜launchctl print rc=0（不存在時是 113）｜run interval = None seconds〔launchd 回讀，與請求相符〕｜argv 回讀 2 項、planner 本體在列〔未逐項比對：verify 這一側拿不到當初的任務書路徑〕｜plist = /Users/wuweihong/Library/LaunchAgents/AutoSDD_BplusProbe_20261011T190135Z.plist〔launchd 自報，證明已持久化〕｜**無** calendar ⇒ 只有巡邏觸發，最壞 None 秒後才有人動作｜電源姿態＝各電源段 `sleep` 皆為 0（pmset 現查；**這台機器的現況**，不是本專案的保證）｜state = running｜🔴 該 job 正在跑（pid=55502）：本行程若是其子孫，同步 bootout會殺掉在跑的 tick 與續跑視窗（launchd 不給子孫 XPC_SERVICE_NAME）⇒ 不碰排程器、不改 plist，重掛由 job 本體尾段執行（settle→哨兵重掛）
+  arm_done rc=0 at 19:01:36
+  hb 1 19:01:36
+  hb 45 19:03:09
+  job end normally at 19:03:12
+  ```
+
+  痕跡 `autosdd_sentinel_bootout_<label>.log`（`run2_bootout_trace.log`，唯一一列，逐字）：
+
+  ```json
+  {"event": "arm_skipped_inside_job", "label": "AutoSDD_BplusProbe_20261011T190135Z", "job_pid": 55502, "pid": 55507, "ppid": 55502, "xpc": "0", "at": "2026-10-12T03:01:36+0800"}
+  ```
+
+  `run2_observed.txt` 摘錄（略去重複的 job.log 與 bootout trace 段，其餘逐字；`<scratchpad>` 同上）：
+
+  ```text
+  waited=79s
+  hb lines=45
+  === unloads.jsonl new lines (label) ===
+  0
+  0
+  === plist still mine? ===
+      0 => "/bin/bash"
+      1 => "<scratchpad>/bplus/job.sh"
+    "RunAtLoad" => true
+  === launchctl print AFTER ===
+  print rc=0
+      state = not running
+      last exit code = 0
+  === cleanup ===
+  bootout rc=0
+  0
+  ```
+
+  判讀（逐項對上方逐字輸出）：①`arm rc=0`；②憑證帶「不碰排程器、不改 plist」；③痕跡 `arm_skipped_inside_job`：`job_pid=55502`＝窗內 `launchctl print` 的 `pid = 55502`、`pid=55507`／`ppid=55502`＝直屬子行程、`xpc="0"`；④job 活滿全程：45 次心跳加「job end normally」（修前 job 在子行程呼叫 arm 時即被殺，0 次心跳）；⑤unload 帳對本 label 零新列（`autosdd_sentinel_unloads.jsonl` 仍只有修前那一列；〔Docs 包親跑：檔仍 1 行、本 label 出現 0 次、mtime 01:51:15〕）；⑥plist 未被改寫（`ProgramArguments` 仍是 `/bin/bash`＋`job.sh`、`RunAtLoad => true`，沒有被換成 planner argv）；⑦job 自然結束後 `state = not running`、`last exit code = 0`；⑧清理 `bootout rc=0`（`unloads.jsonl new lines` 下的兩個 `0` 與 `cleanup` 末行的 `0` 是觀測腳本未加標籤的計數／rc 輸出，本包不對其語意作推斷，判讀以⑤的獨立現查為準）；收尾時 `~/Library/LaunchAgents/` 無本 label、`AutoSDD_XpcProbe_175600`、修前那顆 label 的 plist，`launchctl list` 無三者〔Docs 包親跑，唯讀〕。
+- **真機量測 (d)：B+ 最終碼一輪**（主控親跑，0 token，真 launchd；拋棄式 label `AutoSDD_BplusProbe_20261011T202849Z`，2026-10-12 04:28:49 +0800；工作樹＝第五棒最終碼；`job.log` 內的時刻是 `date -u` 的 UTC）：同一組殼與子行程。`run3_job.log` 自 `job start pid=78091` 起的四行（含完整憑證行，逐字；其後的 `arm_done`、`hb 1`～`hb 44` 略）：
+
+  ```text
+  job start pid=78091 ppid=1 xpc=AutoSDD_BplusProbe_20261011T202849Z at 20:28:49
+  child pid=78095 ppid=78091 XPC_SERVICE_NAME=0
+  arm rc=0
+  launchd gui/501/AutoSDD_BplusProbe_20261011T202849Z｜launchctl print rc=0｜state = running｜plist = /Users/wuweihong/Library/LaunchAgents/AutoSDD_BplusProbe_20261011T202849Z.plist〔launchd 自報；本路徑未與請求比對〕｜🔴 該 job 正在跑（pid=78091）：本行程若是其子孫，同步 bootout 會殺掉在跑的 tick 與續跑視窗（launchd 不給子孫 XPC_SERVICE_NAME）⇒ 不碰排程器、不改 plist；是否重掛交 job 本體尾段（本路徑不證明）
+  ```
+
+  痕跡 `autosdd_sentinel_bootout_<label>.log`（`run3_bootout_trace.log`，唯一一列，逐字）：
+
+  ```json
+  {"event": "arm_skipped_inside_job", "label": "AutoSDD_BplusProbe_20261011T202849Z", "job_pid": 78091, "pid": 78095, "ppid": 78091, "xpc": "0", "at": "2026-10-12T04:28:49+0800"}
+  ```
+
+  `run3_observed.txt` 末段（自 `hb 45` 起；略去上方已逐字貼出的 bootout trace 段，其餘逐字；輸出中的縮排 tab 在本檔一律以四個空白代）：
+
+  ```text
+  hb 45 20:30:23
+  job end normally at 20:30:25
+  hb lines=45
+  === unloads for label ===
+  0
+  === launchctl print AFTER ===
+  print rc=0
+      state = not running
+      last exit code = 0
+  === cleanup ===
+  bootout rc=0
+  leftover=0
+  ```
+
+  判讀（只逐項對上方逐字輸出）：`arm rc=0`；憑證是第四、五棒之後的現行字樣（不含「與請求相符」「最壞 N 秒」，末句＝「是否重掛交 job 本體尾段（本路徑不證明）」，與 (c) 的第三棒形態不同）；痕跡 `job_pid=78091`＝`job start pid=78091`、`pid=78095`／`ppid=78091`＝直屬子行程、`xpc="0"`；job 活滿 45 次心跳並自然結束（`job end normally`）；窗後 `state = not running`、`last exit code = 0`；清理 `bootout rc=0`、`leftover=0`（`=== unloads for label ===` 下的 `0` 同 (c)，收尾包不對其語意作推斷）。
+
+  時序：run1＝修前 2026-10-12 01:51、run2＝第三棒後 03:01、run3＝第五棒後 04:28（+0800）；三次皆主控親跑、0 token、拋棄式 label 已清。〔最終零信任複審鏡核對檔案 mtime：`schedule_backend.py` 04:18:01、`session_resume_planner.py` 04:19:10、測試 04:18:48、本證據檔 04:19:48，皆早於本次開跑 04:28:49；其後收尾包只動 `credential_line()` 早退版頁尾字串與 planner 註解一個詞，run3 的輸出（`child_arm.py` 直接印 `arm()` 回傳的憑證）不經過 `credential_line()`〕
+- **行為代價**：job 在跑期間，任何不是本體的呼叫者要求的重新註冊都會被略過（憑證如實說「沒做」、不改 plist、也不執行 F5「保留未到期 calendar」的重寫）；若呼叫者其實不是子孫，這次重掛要等下一次觸發（PostToolUse 自動武裝／job 尾段重掛）。該情境的實際頻率未量測。
+- **誠實劃界**：(1) B+ 是構造情境：探針 job 是 `/bin/bash job.sh`（不是真哨兵），子行程是 `child_arm.py`（直屬子行程、`ppid`＝job pid）；真實鏈（真 `claude -p` 視窗內 hook 派生 `--arm-sentinel`，planner 被孤兒化到 `ppid=1`）**未實跑**——孤兒化那一格靠 Developer 的行程樹取樣與 launchd 行為推得，判準本身不管譜系，故預期成立，但本輪沒有真機樣本；(2) Windows schtasks 對應面未量測；(3) `disarm()` 同型未處理，登〈五〉#39；(4) 略過路徑的憑證前半沿用 `_credential` 模板：上方修後輸出裡 `run interval = None seconds〔launchd 回讀，與請求相符〕` 這句在本路徑沒有被比對過（探針 job 本無 interval），登〈五〉#40（第四棒已修，見上方修法要點末句）；(5) job 本體的 `os.getpid()` 等於 launchd 報的 pid，僅靠讀碼與 `autosdd_sentinel_unloads.jsonl` 第 53 列（`--sentinel-tick` 行程 `ppid=1`、`xpc`＝該 job 自己的 label）推得；即使此等號不成立，XPC 訊號仍單獨保本體（M2／M3 與 `test_either_signal_alone_is_enough_to_recognise_the_job_body` 釘住）〔他包回報：Developer 第三棒第五節〕（最終零信任複審鏡補：上述「僅靠讀碼」已不全，另有三條直接證據：①B+ 的 bash 本體 `job start pid=55502`＝窗內 `launchctl print` 的 `pid = 55502`（run3 為 78091，痕跡的 `job_pid`＝`job start pid=78091`）；②`exec` 經 `.venv/Scripts/pythonw.exe` 符號連結鏈保留 pid（複審鏡實測 `shell pid=83330`／`os.getpid()= 83330`）；③真哨兵 `launchctl print` 的 `program = …/.venv/Scripts/pythonw.exe`＝直接 exec、無包裝層）；(6) hook 在無人續跑窗仍派生 `--arm-sentinel` 的組合不在 INV1～5 內，登〈五〉#38；(7) 第五棒的頁尾替換由憑證內的字面標記「本路徑未與請求比對」觸發，該標記在 `arm()` 與 `credential_line()` 各寫一份字面（未抽常數：`schedule_backend.py` 斷言行 397／400，抽常數要多一行），漂移由非本體那支的頁尾斷言咬住；第五棒比預期的「+2 斷言行以內」多 1 行（+3，394→397），最小可讀寫法需要這三行；(8) 〈十一〉三段真機 E2E 在第三～五棒之前跑，`arm()` 早退改動後未重跑整條到點後尾段，故「真機驗過」對最終碼只覆蓋 B+ 構造路徑（run2／run3）；影響推論：早退只影響「launchd 說該 job 在跑、且呼叫者不是本體」的呼叫，〈十一〉的同名原地重掛（本體呼叫，pid 或 XPC 放行）與 C-A（SessionResume 本體對另一個 Sentinel label bootstrap，當時沒有該 label 在跑的證據）都不屬此型（推論，未重跑）；再開症狀同〈五〉#38。
+- **准入說明**：`schedule_backend.py` 不在根 CLAUDE.md〈守衛面准入〉列舉的守衛面；暴露證據仍照辦——B+ 修前真機紅（`arm()` 殺掉在跑的 job）是本缺陷的暴露證據（真後端、構造情境），不是理論洞。SD 鏡建議的另一種修法（hook 端在 `XPC_SERVICE_NAME` 以 `AutoSDD_` 開頭時略過；`.claude/hooks/context_budget_guard.py` 屬守衛面）**沒有採用**；守衛面清單內只有 `tools/session_resume_planner.py` 被動到——第五棒 3 行註解、零程式行（見上方修法要點③與〈二-12〉）。帳本列 DEF-200-526（P2，fixed）的狀態欄寫「構造 B+ 修後真機綠」；其「發現情境」欄依本 repo 慣例零輪號。
 
 ---
 
@@ -198,7 +450,7 @@ bootout rc=0
 
 ## 〈四〉本機閘門與雲端對帳
 
-### 四-1 本機閘門（收尾單人窗口親跑；rc 與尾行逐字）
+### 四-1 本機閘門（收尾單人窗口親跑；rc 與尾行逐字）（第一列收尾時值；第三列後現值見〈四-3〉與〈六-1〉）
 
 | 閘門 | 指令（repo 根） | rc／關鍵輸出（逐字或逐項摘錄） |
 |---|---|---|
@@ -211,7 +463,7 @@ bootout rc=0
 | 缺陷帳本 | `python tools/check_defect_log_crossref.py`；`--unresolved-count` | rc=0；「帳本 225 筆有效狀態紀錄」「具名治理文件 166 份皆已登記」「當前輪 R212」；「未結列數＝0／全部 225 列｜warn=86 fail=98」 |
 | 帳本保全 | `python tools/archive_defect_log.py --check` | rc=0；「✅ 帳本保全稽核通過（70 檔／1634 個 ID…」 |
 | 交接載體 | `python tools/check_handoff_carriers.py` | rc=0；「[census] 當前輪＝R212…」「前瞻延後行 0 筆」「✅ 每一筆前瞻延後宣稱都有帳本承接載體」 |
-| 護欄棘輪 | `python tools/tests/test_adr_xplat001_c1c2_lock.py --print-guard-lines`；`python -m unittest test_adr_xplat001_c1c2_lock`（於 tools/tests） | 首行「# 淨額 116372→116372 (+0)」且「逐檔漂移 0 支」；鎖模組 `Ran 187 tests`／`OK` |
+| 護欄棘輪 | `python tools/tests/test_adr_xplat001_c1c2_lock.py --print-guard-lines`；`python -m unittest test_adr_xplat001_c1c2_lock`（於 tools/tests） | 首行「# 淨額 116372→116372 (+0)」（第一列當時值；第二、三列後現值見〈二-10〉）且「逐檔漂移 0 支」；鎖模組 `Ran 187 tests`／`OK` |
 | hook 活性／NTFS／nightly 錨 | `python tools/check_hooks_liveness.py`；`python tools/check_ntfs_paths.py`；`python tools/refresh_nightly_anchor.py --check-head` | 皆 rc=0；「✅ NTFS 檔名檢查通過（27991 個 tracked 路徑，0 違規…」；「✅ nightly 錨判準通過（HEAD）…」 |
 | `.env.example` 生成物 | `python tools/lib/quota_policy.py --print-env-example` 與 `.env.example` 逐字 `diff` | 兩步 rc=0、無差異 |
 | whitespace | `git diff --check` | rc=0 |
@@ -228,6 +480,19 @@ bootout rc=0
 | windows-compat-ci | 38150026658 | success | Windows smoke：success | nightly full suite／失敗提醒：skipped（排程專屬） |
 
 - 【2026-10-11 23:08 CST 回填】本列與第二列、useMacWin 精簡、D-1 守衛檔四個 commit（035746ba／8d1646f0／be3fcfc2／8807f3bb）由掌舵者在對話中明文授權後一次 push（`9032bebf..8807f3bb  main -> main`，pre-push 全套 `All checks passed!`）；上表以 `gh run list --commit 8807f3bbea01155c22101bdce70ad3d339f2ca4a` 與 `gh run view <id> --json jobs` 現查填入：五支觸發皆 success（另 shellcheck-ci 38150026565 success），job 層 gating 全 success、nightly 類 job 皆 skipped（排程專屬，push 不觸發＝未驗證、不是通過）；aisdlc-sdd-ci 依 paths 未觸發，缺席＝未驗證；不以本機全綠代替雲端。
+
+### 四-3 第三列雲端對帳（push 後回填）
+
+| workflow | run id | conclusion | gating job（`gh run view <id> --json jobs`） | nightly 類 job |
+|---|---|---|---|---|
+| root-infra-ci | push 後現查 | push 後現查 | push 後現查 | — |
+| AutoClaude CI | push 後現查 | push 後現查 | push 後現查 | push 後現查（排程或 dispatch 專屬，push 不觸發） |
+| macos-compat-ci | push 後現查 | push 後現查 | push 後現查 | push 後現查（排程專屬） |
+| windows-compat-ci | push 後現查 | push 後現查 | push 後現查：整個 job 步驟 1～28 皆須 success（修前 #335 在步驟 7 失敗、步驟 9～28 共 20 步被略過） | push 後現查（排程專屬） |
+
+- 取數指令：`gh run list --commit <完整 sha>`（**完整 40 碼**；短 sha 會靜默回 `[]`）與 `gh run view <id> --json jobs`；回填時另對 aisdlc-sdd-ci 與 shellcheck-ci（`paths:` 含 `tools/git-hooks/**`，第二棒動了 `tools/git-hooks/post-merge`）依是否觸發逐一標明（缺席＝未驗證，不是通過）。
+- 回填前的狀態：第三列（DEF-200-525／526）的修法與鎖在工作樹、未 commit／push；Windows CI 實跑結果、各 workflow 是否觸發皆未知，不以本機全綠代替雲端。
+- ONBOARDING §7 表② 的 scripts 指紋：〈二-10〉第一列的 `ec35ee2838d0` 是當時值；第三列拿掉 `AISDLC_SDD/scripts/tests/test_conftest_xdist_cpu_budget.py` 的標記後 live 值為 `04108ae4b139`（`sync_onboarding_baselines.py --check-snapshot` 回報 rc=1，待乾淨 venv 載具回填），回填後以載具輸出為準〔他包回報：Architect／QA 鏡、Developer 三棒各自量得〕。
 
 ---
 
@@ -257,6 +522,12 @@ bootout rc=0
 | 16 | 三個「900」鏡像（`RELATCH_INTERVAL_SECONDS` 無 parity）；`ERROR_FLAGS` 完備性無鎖；`--print-env-example` 與 `--env-doctor` 不互斥；`_NEXT_STEP_HEADING` 與 `HANDBACK_MARKERS[3]` 現同字串但無綁定；取節邏輯兩份（`_section_text`／`_section`） | 無漂移、無症狀 | 真實痕跡中 relatch 間隔與巡邏間隔數值不同；或新增 doctor 旗標漏進 `ERROR_FLAGS` 卻 rc=0；或兩個標題常數字面分家（附輸出） |
 | 17 | planner 750／750 零餘裕（`# noqa: E702` 3→5、`# noqa: E501` 100→102；早醒閘用同行多語句擠進去）。預先設計好的下沉路徑＝SA-1 §3.2 A-2（`relay_machine.wait_for_reset`）；本輪不做：只買 2 行、需新增鎖並重寫 T6、無獨立暴露證據（違反〈守衛面准入〉「量、不挖」） | 結構債；`check_loc_budget.py --json` planner `loc=750`、`headroom=0`〔收尾親跑〕 | 任一缺陷修復需要在 planner 加 ≥1 條斷言行（`check_loc_budget` 回 `over_by>0`），或需在 `_resume_tick` 內加第二個述詞，或 `_TICK_DISPOSALS` 需新增名字，或再出現一行 `;` 並列擠行——先做 A-2 再做該缺陷 |
 | 35 | 無人喚醒窗口內，模型照 `_RESUME_RULES`「附實測 rc」把 `git log --oneline -1; echo "rc=$?"` 寫成複合 Bash，`.claude/settings.unattended.json` 的 allow 只認 `Bash(git log*)` 單一指令形態 ⇒ harness 權限層要求核准、無人可核准，模型自行改成單一指令再跑（多耗 1 回合；handback 逐字自述此事） | 真機 1 筆：R212 第二列 ③（sid 70371a13，handback「附帶 `; echo "rc=$?"` 的複合形態被 harness 權限層要求核准，無人值守下改以單一指令執行」；〈十一〉） | 一次無人窗口因允許清單不認複合指令而整窗零產出（`resumed.out` 無 handback、`handback_missing`），或同一窗被擋 ≥3 次（附 sid＋逐字稿座標） |
+| 36 | `settle` 的停止次態 `no_progress`／`quota_stop`／`relay_exhausted` 與 `RELAY_NEXT` 在真 launchd 未實跑，但它們是預設路徑上的分支（＝DONE 的補集：續跑窗 handback「## 下一步指令」非空即走到；`relay_machine.py:209-215` `plan_has_remaining_work`、`:307-321` `next_state`）。尾段與已在真 launchd 驗過的 DONE 尾段是同一段碼（`relay_machine.py:525-544`）；獨有差異＝`escalation.alert(loud=True)`（`quota_escalation.py:770-805`；`dead_agents=0` 時 `notify` 不呼叫，只寫紙＋`queue_notify`）與 `endurance_env.record_unattended_outcome`（`relay_machine.py:533-536`）＝純檔案 I/O；`RELAY_NEXT`（`relay_machine.py:500-521`）需要的真機原語＝「job 主行程在 job 內同名原地重掛」，正是〈十一-3〉② 驗過的 `rearmed_inplace=true` | 單元層：`test_mac_endurance_r83.py:1113-1137` 在假 job 內跑 DONE／NO_PROGRESS／QUOTA_STOP 三條尾段、`test_context_budget_guard.py:3703-3724` 十六格真值表；真機零筆（B+ 沒有順便走 `RELAY_NEXT`）〔SD 鏡 P3-4 讀碼，座標讀於 2026-10-12 工作樹〕 | 一次真實續跑窗走到上述任一停止次態或 `RELAY_NEXT`，而痕跡缺 `relay_stopped`／`relay_rearmed`，或收尾後 `launchctl list` 無 `AutoSDD_Sentinel_<sid>`（附 sid＋痕跡列＋launchctl 輸出） |
+| 37 | 進度量法對「窗前已髒的檔」與「把工作 commit 掉」量成 0（`relay_machine.py:159-168` `files_changed`、`:218-222` `made_progress`、`:112-126` `no_progress_limit` 無人回合夾到 1）：量法 `len(after - before)` 只數「新出現的 porcelain 行」；續跑窗繼續改窗前就已髒的檔、或把工作 commit 掉，都量成 0 ⇒ 第一個窗就 `NO_PROGRESS_STOP`（loud）。方向是 fail-safe（停下並叫人），代價是接力在最常見的開發情境（撞額度時工作樹本來就髒）退化成單窗，且訊息「接力已連續無新進度」不實 | 構造性重現〔SD 鏡 P3-5；真 `relay_machine` 函式、暫存 git repo、`AUTOSDD_UNATTENDED=1`、handback 有下一步、band=free、seq=0；原輸出的 ASCII 直線以全形 `｜` 代〕逐字：`before: [' M a.py']`／`(a) edit already-dirty file   -> files_changed = 0 ｜ made_progress = False`／`(b) commit the work           -> files_changed = 0 ｜ made_progress = False ｜ after: []`／`(c) create a new file         -> files_changed = 1`／`(a) resolve -> NO_PROGRESS_STOP (no_progress_limit = 1 )`／`(b) resolve -> NO_PROGRESS_STOP`／`(c) resolve -> RELAY_NEXT`；無真實暴露 | 一次 relay 窗的 handback 自述有實質進度，而痕跡 `files_changed=0` 且判 `NO_PROGRESS_STOP`（附 sid＋痕跡）；便宜修法備忘＝另計 `git rev-parse HEAD` 是否變動與 `git diff` 內容雜湊是否變動（約 8 行；`relay_machine.py` 屬護欄層，需先搬等量史料） |
+| 38 | 續跑窗（無人）內 hook 仍會派生 `--arm-sentinel`，而 INV1～5 鐵律未涵蓋這個組合：續跑窗 SessionStart 清閂鎖後，第一次 PostToolUse 即以整份逐字稿評估 `should_arm`（`sentinel_lifecycle_arm.py:93,147,241`），有歷史的續跑窗必走到 `spawn_sentinel`（`context_budget_guard.py:774-791`，`Popen` 不帶 `start_new_session`）。DEF-200-526 修後＝呼叫者非 job 本體即被 `arm()` 略過（無害）；但每個續跑窗仍多派生一個短命 planner，且真實鏈上它被孤兒化（`ppid=1`）的拓撲只靠 Developer 的行程樹取樣與 launchd 行為推得 | 構造＋真後端：SD 鏡以真函式＋合成逐字稿（40 回合／7020 秒）確認可達（`spawns total … 2`）；主控 B+（〈二-13〉）以真 launchd 重現殺 job（修前）並驗證修後略過；真實 hook 鏈（真 claude 視窗內派生）**未實跑** | 哨兵承載的續跑窗內出現 `arm_skipped_inside_job` 痕跡（`autosdd_sentinel_bootout_<label>.log`），其 `ppid` 既非 1 也非 `job_pid`（拓撲不在預期內），且當窗無 `resumed` 事件；或同窗該 log 出現 `parent-gone waited≤3s` 而當窗無 `resumed`／`relay_done`（附 sid＋痕跡） |
+| 39 | `LaunchdBackend.disarm()` 的非自我路徑（`XPC_SERVICE_NAME` 不等於該 label）先 `plist.unlink()` 再同步 `launchctl bootout`——與 DEF-200-526 同型：子孫在 job 內呼叫它，會殺掉承載自己的 job；本輪只修 `arm()`。Windows schtasks 的對應面（子孫在 job 內註冊／移除）未量測：Windows 走 INV5 讓位路徑（SD 鏡讀碼：`_arm_sentinel` 見另一支 `SessionResume` job 即 deferred，屬良性），不在 526 修法射程 | 讀碼＋對稱推論（`disarm` 的非自我路徑是同步 bootout）；無真機痕跡；Windows 零量測 | 一次續跑窗內由子孫呼叫的 `disarm`／`--remove-schtasks` 之後，承載它的 job 消失且該窗無 `resumed`／`relay_done`（附 `autosdd_sentinel_unloads.jsonl` 該列的 `caller`／`ppid`／`xpc` 與 sid）；或 Windows 上續跑窗內的子孫呼叫使該窗的 `-Once` 工作被取消（附 `Get-ScheduledTask` 輸出） |
+| 40 | 526 略過路徑回的憑證沿用 `_credential` 全套模板，前半在該路徑上**沒有被比對過**：`run interval = N seconds〔launchd 回讀，與請求相符〕` 與 `StartCalendarInterval = …〔…證明那個時刻真的排進去了〕` 是模板固定文字，而略過路徑的早退在 `_descriptor_problems` 比對**之前**；憑證末尾附加的「🔴 該 job 正在跑…不碰排程器、不改 plist」才是這條路徑的真話。⇒ 憑證前半句可能與請求不符卻寫「相符」（例：live 帶已過去的 `arm_reset` calendar，請求要改成別的時刻）；`schedule_backend.py` 的註解載明憑證字串會被 `append_log(..., credential=…)` 原封記下 | 真機 1 筆〔Docs 包由主控 B+ 修後輸出讀出；構造情境，未經四鏡審〕：探針 job 本無 interval，憑證卻印「`run interval = None seconds〔launchd 回讀，與請求相符〕`」與「最壞 None 秒後才有人動作」（〈二-13〉(c) 逐字） | 已於同列修正（第四棒）：早退路徑憑證改為自組短憑證——只陳述 launchd 自報的 `state`／plist 路徑並明寫「本路徑未與請求比對」，不再含「與請求相符」「planner 本體在列」「最壞 N 秒」；鎖＝`ArmNeverBootsOutAJobThatIsRunningTest` 的非本體那支（憑證不含「與請求相符」；突變 M1 還原成模板、M2 塞回該字樣，皆紅）；第五棒補頁尾與末句 |
+| 50 | `ArmNeverBootsOutAJobThatIsRunningTest` 兩個存活突變（最終複審鏡 M10／M11）：早退憑證末句措辭無斷言；`_readback` 的 `pid =` 任意深度亦收（真機 print 只有 depth-1 有該行：Finder／Dock.agent／cloudphotod 唯讀樣本） | 構造，計 0 | 真機 print 出現巢狀 `pid =` 行或憑證末句回到未來宣稱 |
 
 ### 五-B handback 標題規則
 
@@ -276,6 +547,9 @@ bootout rc=0
 | 24 | 同一收錄判準（「改它可直接改變 cap／band」）下，`quota_policy_env.py`（出廠值與解析器；本輪起 `merged_file_env` 也依賴它）、`relay_machine.py`、`resume_route.py`、`model_roles.py`、`AutoClaude/.env`（引擎 3 鍵覆寫層）仍不在 `_GOV_EXACT`；既有狀態、非本輪造成；D-1 只收 `env.shared` 與 `quota_env_layers.py`；〈守衛面准入〉之下不擴 | 無暴露（無人窗口改這些檔的實錄 0 筆）；Architect／QA 鏡各自實測無人值守 Write `quota_policy_env.py` rc=0 | 無人值守 session 的 Write／Edit 動到上述任一檔而 hook 零阻擋（附 sid＋seq） |
 | 25 | `.env.example` 在 Windows 以 PowerShell 5.1 的 `>` 重生會寫成 UTF-16，`env_example_problems` 逐字比對紅（loud）；ONBOARDING §2.2 的編碼句只談 `.env`／`env.shared`，沒有針對重生 `.env.example` 的警語 | 構造性 | Windows 重生 `.env.example` 後生成物比對紅而讀者不知道原因（附畫面） |
 | 26 | PRD R-4.5.7-1 指路「現查 `quota_policy.py --print-env-example` 找閒置門檻」已過期（輸出 82 行、`idle` 與「閒置」命中 0 筆）；現行單一來源＝planner `SENTINEL_INTERVAL_SECONDS`，`HALT_QUIESCE_SECONDS` 與之 parity；PRD 範圍凍結不改字 | SA 鏡實測〔他包回報：SA 鏡〕 | 一次有人依 R-4.5.7-1 的指路現查閒置門檻而查無（附畫面） |
+| 41 | UTF-16LE 存檔的 `.env`（Windows PowerShell 5.1 的 `>`／`>>`／`Out-File` 預設）被讀成 NUL 間隔的亂碼鍵：doctor 與 post-merge hook 都回報「0 個問題」，使用者寫的覆寫實際讀不到；`quota_env_layers.py` 的 `bom` 偵測只認 `﻿`（座標 `quota_env_layers.py:136`），UTF-16LE 以 `errors="replace"` 讀成 U+FFFD＋NUL 間隔，不觸發 `bom`／`unreadable`。與 #34 同一個洞，此列補 hook 版證據；ONBOARDING §2.2 已加警語（改用編輯器〔UTF-8 無 BOM〕或 pwsh 7） | 構造實測〔SD 鏡 P3-2／P4-5；mac 暫存 Windows 式 repo，`.env` 內 `AUTOSDD_QUOTA_HALT_PCT=90` 與 `AUTOSDD_MODEL_HELMSMAN=sonnet` 兩行完全沒生效〕逐字：`doctor rc=0`／`.env             存在，2 鍵`／`[foreign] 另有 2 行非 AUTOSDD_ 鍵（機密／他用）：不檢查、不印值`／`結論：0 個問題 ⇒ rc=0`；hook 同樣印 `env.shared 同步：0 個問題`；無真實語料 | 同 #34：一次本機 `.env` 以 UTF-16 存檔致其中的鍵未生效，而 doctor 或 hook 印 0 個問題（附檔頭位元組 `ff fe` 與 doctor／pull 輸出） |
+| 42 | post-merge 成功路徑（`rc=0` 分支）只印一行，doctor 表內的 `〔process-env〕`（Windows 使用者層環境變數常見）被收尾行吞掉；`useMacWin.md` 卻要求看到它 ⇒ 同步「成功」時若有 `AUTOSDD_*` 行程環境變數蓋住檔案層，仍印 0 個問題 | 構造性〔SD 鏡 P4-2：讀碼＋S1 輸出，表內 `AUTOSDD_SENTINEL_OFF = 1〔process-env〕` 被 hook 的收尾行吞掉〕；無真實暴露 | 一次 pull 後 hook 印「0 個問題」，而 `--env-doctor` 的表內有 `〔process-env〕` 蓋住 `env.shared` 的鍵、致 `--pace`／`--check` 顯示的門檻與 `env.shared` 不同（附 pull 畫面＋doctor 輸出）；便宜修法備忘＝rc=0 分支對 `〔process-env〕` 計數、非零時多印一行（約 2 行） |
+| 43 | linked worktree（`.claude/worktrees/*`）內 merge 時 post-merge 印「請跑 dev_start」，與單一 .venv 原則（ONBOARDING §2.1：全樹只有根層 `.venv`，第二顆會被擋下）矛盾；`pick_repo_python` 的 stderr 補救指令被 hook 內的 `2>/dev/null` 吞掉；無害但誤導 | 讀碼〔SD 鏡 P4-4〕；無真實暴露 | 一次在 linked worktree 內 merge，hook 印「請跑 dev_start」而使用者照做、反被單一 `.venv` 掃描擋下（附畫面）；便宜修法備忘＝訊息改為「找不到 repo 根 .venv（若在 linked worktree 內可忽略）」 |
 
 ### 五-D Kernel ESCALATION 善後（DEF-200-518；QA 鏡 B 理論洞）
 
@@ -294,6 +568,12 @@ bootout rc=0
 | 32 | 兩支 SA-04 容忍窗鎖（`test_wake_chain_halt_r278.py`）已併成一支表格鎖，但對**現行**判準下有 reset 的標記本就盲（無 reset 邊界由反轉鎖的對照守著）；`AutoClaude/tests/test_r86_pace_contract.py`、`test_r82_quota_axis_and_shipped_defaults.py` 仍寫「兩份 `.env`／根層當基底、AutoClaude 那份覆寫它」（概念上仍對，只是現在是四層鏈的上兩層；動它們會讓 `autoclaude` 指紋樹再變） | 無 | 兩鎖之一被改壞卻無測試紅；或讀者照註解以為 `env.shared` 不會被引擎讀（附 diff） |
 | 33 | AutoClaude 全套 pytest 每跑一次就在 `$TMPDIR` 頂層留 `escalation_fallback_*.md`／`playbook_fallback_*.log`（既存行為，非本輪引入：收尾開場時現查累積 137 個 `escalation_fallback_*.md`、最早 2026-09-19） | 收尾現查：`$TMPDIR` 內該前綴檔數與 mtime 分佈〔收尾親跑〕 | `$TMPDIR` 內這兩個前綴的檔數持續成長，且根層全套的「真實 TEMP 圍籬」因它轉紅（附圍籬訊息） |
 | 34 | 已修的兩種編碼形態（UTF-8 BOM ⇒ `[bom]`、rc=1；cp950 存檔 ⇒ 兩側同 `errors="replace"`、ASCII 鍵值存活）不含 **UTF-16**（PowerShell 5.1 的 `>`／`Out-File` 預設）存檔的 `.env`：被當 UTF-8 以替換字元讀、鍵名全毀 ⇒ 該檔所有鍵被靜默忽略，doctor 仍印「0 個問題 ⇒ rc=0」（只多一則 `[foreign] 另有 N 行非 AUTOSDD_ 鍵`）；HEAD 的單檔讀法同樣忽略它，非退步 | 構造實測 1 筆（收尾以 UTF-16 LE＋BOM 的 `.env` 在 scratch 根實跑：表中 `AUTOSDD_QUOTA_HALT_PCT` 仍為 98〔env.shared〕、結論 0 個問題；同批 cp950 案生效為 90〔.env〕、UTF-8 BOM 案 rc=1）〔收尾親跑〕；無真語料 | 一次本機 `.env` 以 UTF-16 存檔致其中的鍵未生效，而 doctor 印 0 個問題（附檔頭位元組與 doctor 輸出） |
+| 44 | 判準三對 argparse 說明文字全盲（`tools/tests/test_subprocess_encoding_hygiene.py` 的 `nonascii_console_lines` 只看 `print`／`sys.std*.write`）；同族存量：非豁免 8 支（`AutoClaude/autoclaude/artifact_check.py`、`AutoClaude/tools/` 下 `ac4_nightly_collector.py`／`c6_staging_validator.py`／`drift_log_snapshot.py`／`mutmut_cache_counts.py`／`mutmut_exit_code.py`／`tree_state.py`、`tools/lib/dev_platform_provenance.py`）＋豁免 3 支（`_ENTRY_WAIVERS` 內：`_backfill_emit_real`／`mutation_baseline_lock`／`perf_baseline_lock`）在 `PYTHONIOENCODING=cp1252` 下 `--help` 全部 `rc=1` 加 `UnicodeEncodeError: 'charmap' codec can't encode characters …`；主產品 CLI `python -m autoclaude --help` 同樣 cp1252 rc=1（cp950 與 utf-8 皆 rc=0） | 構造·普查〔Architect 鏡 P4-1，依「量、不挖」計 0〕：AST 普查（掃描根同判準三，1045 檔）`entry points w/o protection whose argparse text has non-ASCII: 17`；其中可當腳本跑的非豁免 8 支與豁免 3 支共 11 支親跑如上；`anonymizer.py`／`slv_generator.py` 兩支被靜態述詞列為無保護但動態 rc=0；`pii_scanner.py`／`main.py`／`chaos_runner.py`／`render_topology_dashboard.py` 以腳本形態跑會 ImportError，非本類，未判；`dev_platform_provenance.py` 雖被 `prepare-commit-msg` 每次 commit 叫起，但其 `nonascii_console_lines==[]`、非 `--help` 路徑無非 ASCII 輸出，無暴露；無 CI 或使用者回報 | 一次 CI 或使用者回報上述任一入口（含 `python -m autoclaude --help`）在非 UTF-8 主控台 `UnicodeEncodeError`（附 run id 或畫面）；若要一併收：`nonascii_console_lines` 擴到 argparse 文字（約 +8 行）＋逐支加保護或縮 `_ENTRY_WAIVERS`，需獨立一包。注意登進缺陷帳本會讓未結列由 0 變正而構成 R 系列開輪事件，故走本表登記 |
+| 45 | R85 取數只吃 `python <repo 相對路徑>.py`（`_LIVE_ENTRY_RE`）：`python -m …` 與無 `python` 前綴的入口不在射程；另鐵律三表「console 編碼」列的機械物欄尚未登記 R85 敲擊 | 構造〔Architect 鏡 P4-2〕：親跑取數＝9 支（`AISDLC_SDD/scripts/sdd_version.py`、`AutoClaude/tools/check_loc_budget.py`、`tools/check_handoff_carriers.py`、`tools/lib/cpu_budget.py`、`tools/lib/quota_policy.py`、`tools/probe/misstep_attribution.py`／`reset_window_distribution.py`／`shell_command_corpus.py`、`tools/session_resume_planner.py`）；根 CLAUDE.md 另出現 31 個存在於磁碟、不在 R85 集合的 `.py` 路徑，其中人用入口 `tools/probe/audit_session.py`、`tools/check_hooks_liveness.py`、`tools/check_ntfs_paths.py`、`tools/probe/xplat_hazard_census.py`、`AutoClaude/tools/local_ci_gate.py` 皆有保護（`hook_wiring.py`／`endurance_env.py` 無 `__main__`）⇒ 無暴露；不建議為補鐵律三表而改根 CLAUDE.md（被 9 族鎖直讀、且正是本事件的觸發面） | 根 CLAUDE.md 新增一個非 `python <路徑>.py` 形態的現查入口而其 `--help` 在非 UTF-8 主控台爆（附 CI run 或畫面）；補強選項＝R85 對 `live_check_entries()` 的每支入口再斷言 `has_utf8_stdio_protection(源碼)`（路徑無關，約 +8 行；Architect 鏡親跑該述詞對 9 支入口現況逐支皆 `True`，HEAD 版 cpu_budget 為 `False`） |
+| 46 | `_ENTRY_WAIVERS`（`_ENTRY_WAIVER_CEILING=9`）的 `ruff-debt` 理由 4 筆中 2 筆已過期 | 構造〔Architect 鏡 P4-3；在 `AutoClaude/` 下親跑 `ruff check`〕：`tools/_backfill_emit_real.py ruff_rc=1`（`Found 2 errors.`）、`tools/mutation_baseline_lock.py ruff_rc=1`、`tools/perf_baseline_lock.py ruff_rc=0`（`All checks passed!`）、`tools/setup_pg_runtime_role.py ruff_rc=0`（`All checks passed!`）；另 `carrier-protected` 兩筆：`tools/run_root_unittests.py` 的 `import _stdio_utf8` 為真，`AutoClaude/tests/fixtures/dummy_cli.py` 的載具宣稱未能驗證 | 一次要縮 `_ENTRY_WAIVERS` 或查其理由時發現 `ruff-debt` 理由與 `ruff check` 現況不符（附 `ruff` 輸出）；建議另案就地為 `perf_baseline_lock.py` 與 `setup_pg_runtime_role.py` 加保護、移出表並把 `_ENTRY_WAIVER_CEILING` 9→7（方向＝只准縮；檔案在 AutoClaude 樹） |
+| 47 | `tools/tests/test_check_hooks_liveness.py` 殘存 `child-encoding-ok` 標記的 WHY 與類 docstring 寫「六支」註冊 hook 腳本，數字已漂移（現 8 支）；舊債、非第三列造成 | 構造〔Architect 鏡 P4-4〕：`hook_command_scripts(.claude/settings.json)` 去重 `registered hook scripts (distinct): 8`（`block_bash_on_windows`／`block_destructive_git`／`check_claim_provenance`／`context_budget_guard`／`lint_powershell_command`／`sdd_hook_router`／`AutoClaude/tools/hooks/check_ps1_encoding`／`check_sh_eol`） | 一次有人依該 docstring 的「六支」判斷哪幾支 hook 被判準釘住而判錯（附畫面）；順手修法備忘＝改成不寫數字（淨 0 行） |
+| 48 | `aisdlc-sdd-ci`／`aisdlc-sdd-fsm-chaos-nightly` 的 `paths:` 看不見新依賴邊 `tools/lib/cpu_budget.py → tools/lib/platform_utils.py`（惰性載入 `tools/_stdio_utf8.py`）：兩者只列 `tools/lib/cpu_budget.py`；兩支的消費端皆 fail-open 的 CLI subprocess，root-infra／windows／macos 已覆蓋該改動 | 構造〔QA 鏡 P4-2／Architect 鏡 P4-5 以第一棒形態量；Docs 包以第二棒形態 `git grep -c` 重量〕：`tools/lib/cpu_budget.py` 在 windows-compat-ci 4 條、macos-compat-ci 4、aisdlc-sdd-ci 2、aisdlc-sdd-fsm-chaos-nightly 2、root-infra-ci 1（無 paths 篩選，恆跑）；`tools/lib/platform_utils.py` 與 `tools/_stdio_utf8.py` 在 windows／macos 各 2 條、aisdlc-sdd-ci 與 fsm-chaos-nightly 皆 0 條；`test_ci_paths_cover_root_consumers.py` 不模型化遞移依賴（Architect 鏡親跑 rc=0）；無暴露 | 只改 `platform_utils.py`／`_stdio_utf8.py` 的 push 沒有觸發 aisdlc-sdd-ci 或 fsm-chaos-nightly，而該 CI 消費 cpu_budget 的 worker 數因而退化成預設（附 run 列表與 `[cpu_budget]` 廣播行） |
+| 49 | dev_start 的 [2/7] GitHub 同步（`git pull --ff-only`）早於 [4/7] venv 與 [5/7] git hooks 檢核（會重設 `core.hooksPath`）：hook 在 dev_start 內觸發時 `.venv`／`core.hooksPath` 可能尚未就緒；hook 的略過訊息「請跑 dev_start」在 dev_start 內是循環的，且 dev_start 不在尾段補跑 doctor；全新 clone 第一次 dev_start 的 [2/7] pull 沒有 hook。人工補救＝〈八-1〉驗收一行（pull 後一律再跑 doctor） | 構造〔SA 鏡 P4-1；步驟順序 Docs 包親跑 `grep` `tools/dev_start.py` 的步驟標題：[2/7] GitHub 同步→[3/7] 平台切換→[4/7] venv／依賴整備→[5/7] git hooks 檢核〕：三個 dev_start 入口檔（`.py`／`.ps1`／`.sh`）對 `env-doctor`／`env.shared`／`quota_env` 零命中〔SA 鏡〕；無暴露 | 一次全新 clone 的第一次 dev_start 之後，`.env` 仍遮住 `env.shared` 而無任何一處出聲（附 `--env-doctor` 輸出與 dev_start 全文）；便宜修法備忘＝dev_start 尾段補跑一次唯讀 doctor（屬 `tools/`，非守衛面清單） |
 
 ---
 
@@ -305,6 +585,7 @@ bootout rc=0
 - **S5 成立**：守衛面有變動（planner、`quota_messages`、`sentinel_lifecycle`、`quota_gate`、`quota_policy`，及 D-1 的 hook `_GOV_EXACT`），且每一處附暴露證據或掌舵者原文（〈二〉-8）。
 - **本輪做了什麼**：①P2 全數同輪 fixed（未結 2→0，〈四〉）；②每處守衛面新增逐項附暴露證據或掌舵者原文，沒有「無證據新增」（〈二〉-8）；③審查口徑「量、不挖」：五面鏡的構造性命中（SD 的 heading 形態探針、BOM／cp950／UTF-16 構造實測、QA 突變實驗）一律只登 P3／P4 或〈五〉、不計 P≤2、不另立缺陷列——本輪新立的 521～524 皆有真機痕跡或真實語料，不是構造所得（〈七〉）；④五問協定目錄零改動（不觸發 `PROTOCOL-CHANGED`、不重置窗口）。
 - **本輪不做什麼**：不開五問再評輪——不跑評估機（Windows）的 `audit_session.py` 三項症狀閘指令、不寫輪帳本 `symptom_streak`、不重產 Q4′ 的 `session_gate_acceptance_*.json`。理由：S4／S5 只是「有資格再評」的條件（README 原文「才開一輪再評」），再評量的是評估機主控視窗的誤擋、裸宣稱與 Q2′ 逾期，與本輪缺陷（喚醒鏈與參數檔）沒有量值對應；本輪守衛面變動沒有碰任何五問判準函式。掌舵者若要正式再評，指令與基線取法逐字在 README。
+- **第三列（DEF-200-525／526）不改變 S4／S5 處置、不開五問再評**：DEF-200-525（P2）在非守衛面（`tools/lib/cpu_budget.py` 與 `tools/tests` 鎖，〈二-12〉）；DEF-200-526（P2）在喚醒鏈後端 `schedule_backend.py`（不在根 CLAUDE.md〈守衛面准入〉列舉的守衛面；以真後端的構造情境量測，〈二-13〉）；兩者皆同輪發現、同輪 fixed，未結維持 0。S4 字面成立（又出現 P≤2），處置與本節「本輪不做什麼」一條相同——與五問量值（收斂型工具誤擋／漏攔、裸宣稱、Q2′ 逾期）沒有對應，只是「有資格再評」、不開；S5 字面成立但只是註解：終態樹 15 個修改檔與守衛面清單比對唯一命中 `tools/session_resume_planner.py`（第五棒 3 行註解、零程式行）〔最終零信任複審鏡（14 檔時）與收尾包（終態 15 檔）各親跑：`grep` rc=0〕；處置同本節第一列：不新增守衛碼或鎖、不開五問再評。事件驅動面：`check_defect_log_crossref.py --unresolved-count`＝「未結列數＝0／全部 227 列」、`check_handoff_carriers.py` 首行「[census] 當前輪＝R212（…未結承接輪號＝空）」〔Docs 包親跑〕——沒有未結列、沒有承接輪號，R 系列沒有開輪事件。
 
 ### 六-2 PRD §16.2 T4 對照（範本〈🏁〉T4：觀察者義務＝新立 DEF／寫證據檔時對照 §16.2「再開症狀」欄，命中者在該 DEF 列「分流去向」標座標）
 
@@ -324,9 +605,9 @@ bootout rc=0
 
 ### 六-3 對「完成實作 PRD v2.1」的誠實限定句（證據檔、commit 訊息、回覆皆以此為準）
 
-PRD §4.5.2／§4.5.5／§4.5.6／§4.5.8／§4.5.10 在 mac 路徑上被真機暴露的 5 個缺陷已修（各有紅綠測試），入口時間閘已在真 launchd 驗過；PRD §16.3 的 ⏸31／📎8 本輪未動、仍由症狀驅動再開；「完成實作」依 §16.1 的定義＝101 列恰落四格，v2.1.17 已成立，本輪沒有新增 ✅。不對外宣稱 PRD 全面完成、喚醒鏈閉環，或自願 halt 之後無條件自動續跑（邊界逐條在〈五〉）；§16.1 對 ✅ 的定義是「機制在、有測試或鎖」而不是「真機走通」，§4.5.5／§4.5.6／§4.5.8 三條 ✅ 在 2026-10-10 的真機上實際斷在五個點，本輪修了這五點。
+PRD §4.5.2／§4.5.5／§4.5.6／§4.5.8／§4.5.10 在 mac 路徑上被真機暴露的 5 個缺陷已修（各有紅綠測試），入口時間閘已在真 launchd 驗過；PRD §16.3 的 ⏸31／📎8 本輪未動、仍由症狀驅動再開；「完成實作」依 §16.1 的定義＝101 列恰落四格，v2.1.17 已成立，本輪沒有新增 ✅。不對外宣稱 PRD 全面完成（31 列功能延後等症狀、8 列只欠驗收紀錄）、24h／至少 4 次 reset 連續閉環，或自願 halt 之後無條件自動續跑（邊界逐條在〈五〉）；§16.1 對 ✅ 的定義是「機制在、有測試或鎖」而不是「真機走通」，§4.5.5／§4.5.6／§4.5.8 三條 ✅ 在 2026-10-10 的真機上實際斷在五個點，本輪修了這五點。
 
-【R212 第二列（2026-10-11 晚）追記】到點後尾段已在本機真 launchd 整段走通三次（〈十一〉：①②假 claude 零 token、③真 `claude -p -r` 一次，含 7-C／7-E 修後行為與 C-A 格）；可以宣稱「mac 上一次完整的『停機標記→哨兵→到點→探測→續跑→handback→收尾→哨兵掛回』閉環已真機實跑」，仍**不**宣稱 24h／≥4 次 reset 連續、Windows、睡眠喚醒，亦不宣稱 7-E 生產端（標記由真撞線寫出）。
+【R212 第二列（2026-10-11 晚）追記】到點之後的尾段（探測→續跑→handback→收尾→哨兵掛回）的每個接縫，已在本機真 launchd 上各走過（〈十一〉；含 7-C／7-E 修後行為與 C-A 格）；共三次：①②用假 claude（0 token；②由**手寫**的 halt 標記經哨兵 arm_reset→calendar 到點叫醒）、③用真 `claude -p -r`（fable）一次但由手動排程起頭（無標記、無 calendar）。**沒有任何一次同時是「標記起頭」＋「真 claude」**。仍**不**宣稱：真撞線寫出標記（7-E 生產端）、24h／至少 4 次 reset 連續、Windows、睡眠喚醒。
 
 ---
 
@@ -378,11 +659,78 @@ PRD §4.5.2／§4.5.5／§4.5.6／§4.5.8／§4.5.10 在 mac 路徑上被真機�
 
 - 設計與實作的偏離（Rule 7，已逐條記在各包報告）：事件欄位用 `due_at` 而非備忘錄草稿的 `fire_at`（既有鎖釘 `fire_at` 恰 2 個站點）；7-B 採「非 loud alert 不遞 plan」而非「先寫再 GC」或「GC 後不再寫」（兩者都讓重掛的哨兵沒有任務書）；7-E 的三支既有測試期望值改動屬語意修正（〈二〉-5）。
 
+### 七-2 第三列四方審查（修復後對照；DEF-200-525／526；2026-10-12）
+
+> 時序與範圍（依各鏡判決檔的時間戳與其所引內容推得）：四鏡審的是 Developer **第一棒**落地後的工作樹——各鏡判決檔都載「9 個修改檔」（與第一棒回報的 9 檔相同），引的 repin 值為 116348→116347、sha `f44d4f15bce6…`，cpu_budget 為 `sys.path.insert`＋`import _stdio_utf8` 形態。第二棒（吸收四鏡 P3／文件訂正的程式面）、第三棒（DEF-200-526，由 SD 鏡 P2-1 逼出）、第四棒（早退路徑憑證自組）、第五棒（頁尾／末句／planner 註解）、文件修復包編修與第三次真 launchd B+（最終碼）都發生在判決**之後**；四鏡**沒有**審過它們。它們由 2026-10-12 的最終零信任複審鏡（Sonnet，唯讀，另出判決）獨立重跑覆核。角色全程唯讀、零信任；突變實驗一律在 scratchpad 隔離副本。
+
+| 鏡 | 判決（首行逐字） | 概況（各鏡自述） |
+|---|---|---|
+| QA 鏡 | `VERDICT: APPROVE` | 無 P1／P2；P3 ×3、P4 ×3；Developer 與主控宣稱的每個數字皆親跑重量、無一對不上（只有耗時秒數略有不同） |
+| Architect 鏡 | `VERDICT: APPROVE` | 零 P1、零 P2；P3 兩條（便宜就修，不阻擋 commit）、P4 五條（只登記） |
+| SA 鏡 | `VERDICT: CONDITIONAL` | 0 個 P1；5 個 P2（3 個是「對掌舵者的轉述句」、2 個是 commit 前要補的文件）；P3 ×6、P4 ×3；沒有發現程式碼或鎖層面的錯，要修的幾乎都在「說法」 |
+| SD 鏡 | `VERDICT: CONDITIONAL` | 零 P1；1 條 P2（S14 在預設路徑上未驗）；其餘 P3／P4；cpu_budget 修法的設計可 commit，post-merge 在 Windows 上沒有找到「靜默什麼都不做」或「做壞事」的會擋 commit 的路徑 |
+
+**P2 清單與處置**
+
+| 發現 | 性質 | 處置 |
+|---|---|---|
+| SA P2-1 | 對掌舵者的轉述句：「喚醒鏈……整段走通三次」過度宣稱——三次是同一條「到點後尾段」的三個切片，沒有任何一次同時是「標記起頭」＋「真 claude」 | 〈六-3〉追記改句（下方〈轉述句型〉第 1 句）；〈十一〉本身的限定一直誠實，被壓縮掉的是「到點後尾段／兩次假 claude／手寫標記」這幾個限定詞 |
+| SA P2-2 | 對掌舵者的轉述句：「PRD 落款完成」＋「還沒做的仍只等症狀（例如 24 小時連續多次 reset、Windows 真機）」——功能沒做的有 31 列，且舉的兩個例子都不是延後格 | 〈六-3〉第一段改句；〈轉述句型〉第 3 句 |
+| SA P2-3 | 〈八〉驗收條件寫成「看 pull 畫面」，但「畫面完全沒有 hook 字樣」是真實、靜默的分支（失效的表徵與成功相同） | 〈八〉header 與〈八-1〉改為「pull 後一律再跑唯讀驗收一行」；新增〈八-1b〉診斷 hook 為何沒出聲 |
+| SA P2-4 | 本列在證據檔沒有落款；兩個 guard-total 站與鎖檔 repin 列都寫「逐檔清單見…〈二〉」而〈二〉沒有第三列段落；〈二-10〉舊數字、〈九〉「共六處」過期 | 〈二-12〉與〈二-13〉＋〈二-10〉第三列 bullet（Developer 第三棒已寫）＋〈九〉導言改寫 |
+| SA P2-5 | 對掌舵者的轉述句：不可宣稱「windows-compat-ci 已修好」（修法在工作樹、未 push；#335 步驟 9～28 共 20 步被略過）；帳本 525 狀態格缺「Windows CI 實跑待驗」註記 | 帳本 525 狀態欄已加「CI 實跑待對帳」（690 bytes）；〈四-3〉預留雲端對帳；〈轉述句型〉第 4 句 |
+| SD P2-1 | S14：每個有歷史的真實續跑窗，hook 都會派生 `--arm-sentinel`；哨兵承載的續跑窗內 `arm()` 同步 bootout 會殺掉在跑的 job | **DEF-200-526**：主控以 B+ 真機量測確認（修前紅、修後綠），修法與鎖見〈二-13〉；〈十一-5〉S14 列同步改寫 |
+
+**P3／P4 去向**（已修＝本輪文件或第二棒程式面已處理；登〈五〉＝只登記、不修）
+
+| 發現 | 一句 | 去向 |
+|---|---|---|
+| SA P3-1 | 〈六-3〉同節內部矛盾（先寫「不對外宣稱…閉環」，追記又寫「可以宣稱…閉環已真機實跑」） | 已修：〈六-3〉兩段改寫 |
+| SA P3-2 | 帳本 516／523 狀態欄仍寫「到點 spawn 後尾段未真機實跑」「C-A 修後未真機實跑」（方向保守、與〈十一〉相反） | 已修：Developer 第二棒改為「到點後尾段已真機驗（〈十一〉）」「C-A 已真機驗（〈十一〉）」（695／696 bytes，≤700） |
+| SA P3-3 | 〈二-11〉「`core.hooksPath` 兩台皆指根層」對 Windows 是未量測的斷言；「Windows 實機未驗」低報了已有的間接證據 | 已修：〈二-11〉兩處改寫 |
+| SA P3-4 | 〈十一-5〉少列一項：三次 `route_chosen` 全是 SESSION_RESUME，另兩條路由真機零筆 | 已修：〈十一-5〉末列 |
+| SA P3-5 | 轉述句「看到 0 個問題或已自動修復就代表兩台一致」過寬；〈八-1〉步驟 3 把「98〔env.shared〕」寫死 | 已修：〈八-1〉步驟 3；〈轉述句型〉第 5 句 |
+| SA P3-6 | `.venv\Scripts\python.exe` 不存在時 `"doctor rc=$LASTEXITCODE"` 會沿用上一個指令的 0，印出假的 `doctor rc=0` | 已修：〈八-1〉各指令加 `$LASTEXITCODE = $null;` |
+| SA P4-1 | dev_start 的 [2/7] pull 早於 [4/7] .venv 與 [5/7] hooksPath | 登〈五〉#49 |
+| SA P4-2 | Mac nightly 最近一次彙總「PASS=3 FAIL=2」（SA 寫於 2026-10-12 01:40；失敗簽名與兩列已修缺陷吻合） | 不立項。其後 2026-10-12 02:00 的排程樣本：`AutoClaude/logs/nightly_mac_latest.log` 尾段「===== nightly 彙總：PASS=5 FAIL=0 =====」、heartbeat 2026-10-11T18:04:10Z〔Docs 包親跑，讀檔〕；該次排程跑的是當時的工作樹（並行編修期間），不保證等同乾淨 HEAD |
+| SA P4-3 | Windows 待驗沒有外部阻塞軌載體 | 不登帳（〈八-4〉自稱非再開事件；符合「不製造日期義務」）；〈八〉header 已明講要在 Windows 親跑驗收一行並回報 |
+| SD P3-1 | `AUTOCLAUDE_SKIP_HOOKS=1` 時 post-merge 零輸出，與「hook 沒被叫到」同畫面 | 已修：Developer 第二棒補一行出聲 |
+| SD P3-2 | 使用者面缺五件（hook 沒跑的畫面、無標記行會被刪、UTF-16LE、改了 env.shared 沒 push、dev_start 建議的 `git pull --rebase` 不觸發 hook） | 已修：ONBOARDING §2.2 與〈八〉header／〈八-4〉；UTF-16LE 的程式面偵測登〈五〉#41 |
+| SD P3-3 | 自動修復總結行沒說刪了什麼、怎麼還原（`AutoClaude/.env` 內刻意更嚴的引擎停機線會被靜默放寬） | 已修：Developer 第二棒總結行帶「刪除 N 行（內容見上方 diff；還原＝把備份檔複製回原檔）」；ONBOARDING 補「無標記行會被刪」 |
+| SD P3-4／P3-5 | settle 停止次態未真機；進度量法對窗前已髒的檔量成 0 | 登〈五〉#36／#37 |
+| SD P4-1 | cpu_budget 慣用法（`init_utf8_streams()` 為多數派） | 已修：Developer 第二棒（〈二-12〉） |
+| SD P4-2／P4-4／P4-5 | 成功路徑不印 `〔process-env〕`；linked worktree 訊息誤導；`bom` 偵測不認 UTF-16 | 登〈五〉#42／#43／#41 |
+| SD P4-3 | post-merge 檔頭「新機器第一次 pull 即生效」自相矛盾 | 已修：Developer 第二棒訂正檔頭 |
+| SD P4-6 | 真 repo 根殘留 `.env.bak.20261011T055059Z` | 〈十〉：待掌舵者驗收後手動刪 |
+| Architect P3-1 | R85 鎖的敲擊接線沒有自證 | 已修：Developer 第二棒 `_knock`＋有牙格（〈二-12〉） |
+| Architect P3-2 | cpu_budget 用了少數派形態且失去 fail-open | 已修：Developer 第二棒改 `platform_utils`（〈二-12〉） |
+| Architect P4-1～P4-5 | 判準三對 argparse 文字全盲；R85 取數射程；`_ENTRY_WAIVERS` 過期理由；「六支」數字漂移；workflow paths 遞移依賴 | 登〈五〉#44～#48 |
+| Architect 文件訂正 5a～5e、6 | 〈二-12〉缺／〈四-1〉首行過期／〈九〉導言過期／輪籤跨日／〈六-1〉補句；`test_check_hooks_liveness.py` 的「六支」 | 已修：〈二-12〉、〈四-1〉、〈九〉導言、輪籤、〈六-1〉末條；「六支」登〈五〉#47 |
+| QA P3 ×3 | 〈二-10〉指標懸空；〈九〉導言過期；帳本 525 狀態欄缺 Windows CI 註記 | 已修：〈二-12〉與〈二-10〉第三列 bullet；〈九〉導言；帳本「CI 實跑待對帳」 |
+| QA P4 ×3 | cp950 不是更好的模擬（資訊性）；aisdlc-sdd-ci 的 paths；更深一層根因只在 Developer 回報 | cp950 事實入〈二-12〉；paths 登〈五〉#48；根因敘事入〈二-12〉〈原有的鎖為何沒擋住〉 |
+
+**轉述句型**（SA 鏡〈四〉「不能說的句子」；對掌舵者轉述時以右欄為準；數字出自 SA 鏡親跑與 PRD §16.3，未經 Docs 包重驗，帳本列數除外）
+
+| # | 不能說 | 改說 |
+|---|---|---|
+| 1 | 「喚醒鏈在 Mac 上整段走通三次。」 | 「到點之後的尾段，在 Mac 的真排程器上走過三次：兩次用假 claude、一次用真 claude；停機標記是手寫的；沒有一次是『標記起頭＋真 claude』。」 |
+| 2 | 「根因徹底解決」「不會再有下一個缺陷」「收斂完成」 | 「兩層根因已找到；五個已知缺陷已修、接縫已在 Mac 真後端走過；下一次真的撞額度，才是修完之後第一次真實全鏈驗證；之後仍由症狀驅動。」 |
+| 3 | 「PRD 所有功能都已完成」「PRD 落款完成」 | 「PRD 101 列各有歸宿：29 已落地、33 依設計不做、31 功能延後等症狀（沒做）、8 只欠驗收紀錄；歸格是我代決，你可推翻。」 |
+| 4 | 「windows-compat-ci 已修好」「下次會綠」 | 「Mac 上以 cp1252 模擬，紅→綠已驗；修復尚未 push；要等 push 後該 workflow 整個 job 步驟 1～28 都 success 才算。」 |
+| 5 | 「Windows 那台一 pull 就自動同步好了」「看到 0 個問題就代表兩台一致」 | 「pull 通常會觸發 hook，但以 pull 後再跑一行 doctor 的 `doctor rc=0` 為準；它代表這台的檔案層沒有遮蔽 env.shared，行程環境變數、帳號有沒有 fable 權限不在比對內。」 |
+| 6 | 「.env 同步已在 Windows 驗證 OK」 | 「流程控制在 GitHub Windows runner 通過（間接，替身 python）；你那台真機未驗。」 |
+| 7 | 「撞線→停機標記→自動續跑已真機驗過」 | 「消費端（標記→哨兵→到點→探測→續跑）在 Mac 真排程器驗過；標記由真撞線寫出的那一頭沒驗。」 |
+| 8 | 「帳本清零／沒有未結」 | 「P≤2 未結 0（全部 227 列〔Docs 包親跑 `--unresolved-count`〕）；另有外部阻塞 5、結構性長債 6 不計入；〈五〉理論洞（#1～#50）只登記。」 |
+
+最終零信任複審鏡（2026-10-12）判決 `VERDICT: CONDITIONAL`（P2×1＝守衛面零改動句不實、P3×8、P4×8），全部於同列處置（P4-4／P4-5 兩條判為不改），見本檔各節；複核判決另記於下方。
+
+複核判決：最終零信任複審鏡對收尾包套用結果的唯讀複核（2026-10-12）＝`VERDICT: APPROVE`：P2-1 與 P3-1～P3-8、P4-1／2／3／6／7／8 皆如實處置（改句命中 1／原句命中 0；程式與數字對終態 15 檔樹相符；21 個測試模組 rc=0；P3-7 四突變與 schedule_backend 八突變皆咬住）；殘餘＝R1 懸空指標與 R3 先行詞（收尾單人窗口已就地改）、R4／R5 措辭與鎖缺口 P4（登記），不阻擋 commit〔他包回報：最終零信任複審鏡；收尾單人窗口照單套用〕。
+
 ---
 
 ## 〈八〉Windows 機待辦（事實驅動，無輪號義務；本輪 mac 開發，Windows 側零量測）
 
-> 【R212 第二列追記（2026-10-11 晚）】`tools/git-hooks/post-merge` 已落地：步驟 1 的 `git pull --ff-only` 成功後會**自動**跑步驟 2 的體檢；問題全是可自動修的旗標時會自動做步驟 3（先備份 `.env.bak.<UTC>`）並再體檢一次，三段輸出都印在 pull 的畫面上。所以 Windows 機現在只要做步驟 1，然後**看 pull 畫面末幾行**：`env.shared 同步：0 個問題`＝完成；`已自動修復，備份＝…`＝完成（備份檔驗收後手動刪）；`🔴 … 需要人處理`＝才做步驟 2／3。hook 在 Windows 實機（Git for Windows 的 sh、cp950 主控台、`.venv\Scripts\python.exe` 解析）**未驗**，列入〈八-4〉第 6 項。
+> 【R212 第二列追記（2026-10-11 晚；2026-10-12 第三列訂正）】`tools/git-hooks/post-merge` 已落地：步驟 1 的 `git pull --ff-only` 成功後會**自動**跑步驟 2 的體檢；問題全是可自動修的旗標時會自動做步驟 3（先備份 `.env.bak.<UTC>`）並再體檢一次，三段輸出都印在 pull 的畫面上。所以 Windows 機做完步驟 1 之後，**一律再跑一次步驟 2 的「驗收」一行**（唯讀）；驗收看它印出的 `doctor rc=0`——這行由 PowerShell 自己印、是 ASCII，不受主控台編碼影響——不要靠 pull 畫面判斷。pull 畫面只當加分：出現 `env.shared 同步：0 個問題`／`已自動修復，備份＝…` 是好消息；**畫面完全沒有 `env.shared 同步` 字樣，不代表成功**：hook 在「Already up to date.」、`core.hooksPath` 漂移或未設（ONBOARDING §6：搬移後不報錯、直接失效）、走了 rebase、或在 IDE 的 Git 面板按 Pull（輸出不一定出現在終端機，未驗）時都不會留下任何字；cp950 主控台上 hook 的中文行也可能亂碼（未驗）。`AUTOCLAUDE_SKIP_HOOKS=1` 殘留時，修後的 hook 會印一行「跳過」（修前零輸出）。看到 `需要人處理` 字樣才做步驟 3；看到 `找不到 .venv python，略過 env.shared 同步` 先跑 `. tools\dev_start.ps1` 再做驗收。hook 的控制流已在 windows-latest（Git for Windows 的 bash、替身 python）由 `TestPostMergeHook` 七支實跑通過（推論，細節見〈二-11〉）；這台 Windows 機器上仍未驗的只有 `core.hooksPath` 是否指對（見〈八-1b〉）、cp950 主控台顯示、`.venv\Scripts\python.exe` 實解（後者與 pre-commit／pre-push 同函式 `pick_repo_python`，每次 commit／push 都在跑），列入〈八-4〉第 6 項。**pull 畫面沒有任何 `[post-merge dispatcher]`／`🔴 env.shared 同步` 行＝這支 hook 沒跑** ⇒ 直接做驗收。
 
 ### 八-1 國小版三步（在 repo 資料夾內開 PowerShell；指令皆已過 `lint_powershell_command`，路徑由 `git rev-parse --show-toplevel` 現查、不寫死）
 
@@ -393,20 +741,50 @@ PRD §4.5.2／§4.5.5／§4.5.6／§4.5.8／§4.5.10 在 mac 路徑上被真機�
    ```
 
    要看到 `pull rc=0`。不是 0：先看〈八-2〉；不要 stash、不要 reset。
-2. **檢查**（唯讀）：
+2. **驗收**（唯讀；**每次 pull 後都做**，不論 pull 畫面印了什麼）：
 
    ```powershell
-   Push-Location (git rev-parse --show-toplevel); & .\.venv\Scripts\python.exe tools/lib/quota_policy.py --env-doctor; "doctor rc=$LASTEXITCODE"; Pop-Location
+   Push-Location (git rev-parse --show-toplevel); $LASTEXITCODE = $null; $o = & .\.venv\Scripts\python.exe tools/lib/quota_policy.py --env-doctor; "doctor rc=$LASTEXITCODE"; $o | Select-String "AUTOSDD_QUOTA_HALT_PCT|AUTOSDD_MODEL_HELMSMAN"; Pop-Location
    ```
 
-   `doctor rc=0`＝什麼都不用做；`rc=1`＝它會逐行說哪裡多餘、遮住共享設定、壞值或重複。出現 `[unknown]`／`[bad-value]`／`[duplicate]`／`[bom]`／`[unreadable]`／`[missing-shared]` 時停手回報（`--fix` 不處理它們）。表中出現 `〔process-env〕`＝這個 shell 或 Windows 使用者層環境變數有 `AUTOSDD_*`，它贏過所有檔案層，先弄清楚是誰設的。
+   通過＝印出 `doctor rc=0`，且兩行的來源欄都是〔env.shared〕（值＝repo 根 `env.shared` 檔內同名那行的值；不要拿本檔的數字當標準）。`doctor rc=` 後面空白＝直譯器沒跑起來（`.venv\Scripts\python.exe` 不存在：先跑 `. tools\dev_start.ps1`）；`rc=1`＝要看全文，改跑下面的展開版。（`$LASTEXITCODE = $null` 是刻意的：不重設的話，直譯器找不到時會沿用上一個指令的 0，印出假的 `doctor rc=0`；pwsh 7 於 mac 實測，5.1 同理為推論〔他包回報：SA 鏡〕。）`doctor rc=0` 只代表**這台的檔案層**沒有遮蔽 `env.shared`：行程環境變數另以〔process-env〕標出，被注入 hook 行程的 `.claude/settings*.json` 的 `env` 區塊 doctor 看不到（〈五〉#20），帳號有沒有 fable 權限也不在比對內（〈五〉#23）。
+
+   含 pull 的一行版（最累的情況用；`pull rc` 不是 0 先看〈八-2〉）：
+
+   ```powershell
+   Push-Location (git rev-parse --show-toplevel); git pull --ff-only; "pull rc=$LASTEXITCODE"; $LASTEXITCODE = $null; $o = & .\.venv\Scripts\python.exe tools/lib/quota_policy.py --env-doctor; "doctor rc=$LASTEXITCODE"; $o | Select-String "AUTOSDD_QUOTA_HALT_PCT|AUTOSDD_MODEL_HELMSMAN"; Pop-Location
+   ```
+
+   `pull rc=0` 只代表 pull 成功，不代表同步成功；同步成功只看 `doctor rc=0` 加兩行來源欄。mac 上以 pwsh 7 對同形狀（把直譯器路徑換成 `.\.venv\bin\python`）實跑的輸出〔他包回報：SA 鏡；`Select-String` 輸出前多一個空行，已省略〕：
+
+   ```text
+   doctor rc=0
+     AUTOSDD_QUOTA_HALT_PCT                       = 98〔env.shared〕
+     AUTOSDD_MODEL_HELMSMAN                       = fable〔env.shared〕
+   ```
+
+   展開版（`rc=1` 時看全文；唯讀）：
+
+   ```powershell
+   Push-Location (git rev-parse --show-toplevel); $LASTEXITCODE = $null; & .\.venv\Scripts\python.exe tools/lib/quota_policy.py --env-doctor; "doctor rc=$LASTEXITCODE"; Pop-Location
+   ```
+
+   `rc=1`＝它會逐行說哪裡多餘、遮住共享設定、壞值或重複。出現 `[unknown]`／`[bad-value]`／`[duplicate]`／`[bom]`／`[unreadable]`／`[missing-shared]` 時停手回報（`--fix` 不處理它們）。表中出現 `〔process-env〕`＝這個 shell 或 Windows 使用者層環境變數有 `AUTOSDD_*`，它贏過所有檔案層，先弄清楚是誰設的。
 3. **有問題才修**（只在步驟 2 的旗標都屬 `redundant`／`shadows-shared`／`engine≠harness`／`dead` 時）：
 
    ```powershell
-   Push-Location (git rev-parse --show-toplevel); & .\.venv\Scripts\python.exe tools/lib/quota_policy.py --env-doctor --fix; "fix rc=$LASTEXITCODE"; Pop-Location
+   Push-Location (git rev-parse --show-toplevel); $LASTEXITCODE = $null; & .\.venv\Scripts\python.exe tools/lib/quota_policy.py --env-doctor --fix; "fix rc=$LASTEXITCODE"; Pop-Location
    ```
 
-   然後再跑一次步驟 2，**必須**看到末行「結論：0 個問題 ⇒ rc=0」，且表中 `AUTOSDD_QUOTA_HALT_PCT` 後面是「98〔env.shared〕」（乾淨根目錄的實跑形狀：`AUTOSDD_QUOTA_HALT_PCT                       = 98〔env.shared〕`〔收尾親跑，Mac〕）；備份檔 `.env.bak.*` 驗收後手動刪。
+   然後再跑一次步驟 2 的驗收，**必須**看到 `doctor rc=0`（＝doctor 末行「結論：0 個問題 ⇒ rc=0」），且表中 `AUTOSDD_QUOTA_HALT_PCT` 與 `AUTOSDD_MODEL_HELMSMAN` 兩行的來源欄是〔env.shared〕、值等於 `env.shared` 檔內該行（乾淨根目錄的實跑形狀：`AUTOSDD_QUOTA_HALT_PCT                       = 98〔env.shared〕`〔收尾親跑，Mac〕；數字會隨 `env.shared` 改值而變，以該檔為準）；備份檔 `.env.bak.*` 驗收後手動刪。
+
+### 八-1b 想知道 hook 為什麼沒出聲（只在 pull 畫面沒有 `env.shared 同步` 字樣時看）
+
+```powershell
+Push-Location (git rev-parse --show-toplevel); git config --get core.hooksPath; "hooksPath rc=$LASTEXITCODE"; Test-Path tools/git-hooks/post-merge; Pop-Location
+```
+
+正常：第一行是**這個 clone** 的 `…/tools/git-hooks`、`hooksPath rc=0`、最後一行 `True`（mac 同形狀實跑逐字：`/Users/wuweihong/Antigravity/AISDCL_Agent/tools/git-hooks`、`hooksPath rc=0`、`True`〔他包回報：SA 鏡〕）。第一行空白（rc=1）或指到別的資料夾＝hook 不會跑 ⇒ 跑 `. tools\dev_start.ps1`（其 [5/7] git hooks 檢核會重設 `core.hooksPath`）。畫面只有 `Already up to date.`＝沒有新 commit 可合併，hook 本來就不會跑。兩種情形都靠步驟 2 的驗收一行把關。
 
 ### 八-2 `git pull --ff-only` 被髒檔擋下的分支（〔以下 Windows 未驗證〕）
 
@@ -439,13 +817,13 @@ PRD §4.5.2／§4.5.5／§4.5.6／§4.5.8／§4.5.10 在 mac 路徑上被真機�
 3. E-A 在 Windows 的取捨（〈五〉#10）與 M-14（〈五〉#11）：零量測。
 4. D-1：hook 的 `_fold_gov_path` 比對前 `normcase`，Windows 大小寫變體（`ENV.SHARED`）理應同樣命中新項（讀碼，未驗）。
 5. ONBOARDING §7 表② Windows 欄與 Windows nightly 首筆樣本：沿用 `CrossPlatform_R210_Debt_Closure_Final_Evidence.md`〈八〉；本輪 `AutoClaude/tests` 指紋已變，Windows 欄回填指令 `python tools\lib\clean_venv_carrier.py`，驗收 `python tools\sync_onboarding_baselines.py --check-snapshot`。
-6. `tools/git-hooks/post-merge`（env.shared 自動同步）在 Windows 的首次 `git pull` 實跑：hook 由 Git for Windows 的 sh 執行、`pick_repo_python` 解析到 `.venv\Scripts\python.exe`、cp950 主控台下中文與 `≠` 的顯示、Windows Python 輸出帶 `\r` 時旗標行計數（讀碼判無害）、舊 `.env` 若為 PowerShell 5.1 BOM 或 cp950 存檔時的實際 UX（hook 刻意不修、只出聲）；mac 已以 `.env.example` 13 個歷史版本＋本機真實舊備份當舊複本重放 14/14 自動修復〔QA 鏡回報〕。驗收＝pull 畫面末行與 `python tools\lib\quota_policy.py --env-doctor` 的 `結論：0 個問題 ⇒ rc=0`。
+6. `tools/git-hooks/post-merge`（env.shared 自動同步）在 Windows 的首次 `git pull` 實跑：hook 由 Git for Windows 的 bash 執行（控制流已有 windows-latest 的間接證據，見〈二-11〉；推論，未見逐測試通過列）、`pick_repo_python` 解析到 `.venv\Scripts\python.exe`（與 pre-commit／pre-push 同函式，每次 commit／push 都在跑）、`core.hooksPath` 是否指對（〈八-1b〉）、cp950 主控台下中文與 `≠` 的顯示、Windows Python 輸出帶 `\r` 時旗標行計數（SD 鏡於 mac 以 CRLF 包裝器實測無害：`_count` 錨在行首、不吃行尾）、舊 `.env` 若為 PowerShell 5.1 的 BOM／UTF-16LE 或 cp950 存檔時的實際 UX（BOM 與 cp950：hook 刻意不修、只出聲；UTF-16LE：doctor 讀成亂碼鍵、回報 0 個問題，hook 同樣印 0 個問題，登〈五〉#41）；第二棒新增的 hook 字樣（skip 分支、刪除行數與還原法）在 Windows 的 `grep -c`／`${ndel:-0}` 行為未驗；mac 已以 `.env.example` 13 個歷史版本＋本機真實舊備份當舊複本重放 14/14 自動修復〔QA 鏡回報〕。驗收＝〈八-1〉步驟 2 的驗收一行（`doctor rc=0` 與兩行〔env.shared〕來源欄）；pull 畫面只當加分。
 
 ---
 
-## 〈九〉〈史料〉——搬出 `tools/tests` 的沿革原文（逐字；來源座標＝`file:line`＠HEAD 9032bebf）
+## 〈九〉〈史料〉——搬出 `tools/tests` 的沿革原文（逐字；來源座標＝`file:line`＠HEAD 見各小節標題）
 
-> 這六段原本是 `tools/tests` 內的 docstring／註解（沿革與事故史料，不是「本檔守什麼」的規格敘述）。本輪為抵銷護欄層行數成長，把它們逐字搬到這裡；原處各留一句仍在約束今日行為的 WHY 與指標「史料搬至 `CrossPlatform_R212_WakeChain_EnvLayer_Evidence.md`〈史料〉」（共六處：`test_context_budget_guard.py` 四處、`test_mac_endurance_r83.py` 兩處）。逐段已核對：每段全文在 HEAD 對應檔案的該行起原樣存在〔收尾親跑 `git show HEAD:<檔>` 子字串比對〕。
+> 這 13 段（L1～L13）原本是 `tools/tests` 內的 docstring／註解（沿革與事故史料，不是「本檔守什麼」的規格敘述）。本輪為抵銷護欄層行數成長，把它們逐字搬到這裡；原處各留一句仍在約束今日行為的 WHY 與指標「史料搬至 `CrossPlatform_R212_WakeChain_EnvLayer_Evidence.md`〈史料〉」（或指名 L 編號）。來源座標與 HEAD 見各小節標題（L1～L6＠9032bebf、L7／L8＠035746ba、L9～L13＠a7b20b7e）。逐段核對：L1～L8 全文在標題所述 HEAD 對應檔案的該行起原樣存在〔收尾親跑 `git show HEAD:<檔>` 子字串比對〕；L9～L11 另經 Architect 鏡與 QA 鏡各自獨立比對為逐字相同，L12／L13 為 Developer 第二棒自行逐行比對（`verbatim=True`）〔他包回報〕。
 
 ### L1 R11X 空字串無人旗標（INV1）｜來源 `tools/tests/test_context_budget_guard.py:3844`＠HEAD 9032bebf（9 行）
 
@@ -770,6 +1148,122 @@ PRD §4.5.2／§4.5.5／§4.5.6／§4.5.8／§4.5.10 在 mac 路徑上被真機�
     ("R165", "8595fde4cf0b", "c4350df6e968", "DEF-200-359"),  # round-label-ok
 ```
 
+### L9 重釘接鏈列旁註（R166～R173；`_FROZEN_PREFIX_REWRITE_LEDGER`）｜來源 `tools/tests/test_adr_xplat001_c1c2_lock.py:3463`＠HEAD a7b20b7e（39 行，其中旁註 16 行；資料列原樣仍在原處）
+
+```text
+    # DEF-200-360：dev_start [1/7] fetch-aware 前沿判定窗口——追加本輪稽核列並依「追加後立即
+    # 自我凍結」判例延伸前綴涵蓋該列本身（242→243）。
+    ("R166", "c4350df6e968", "cf1dc5dab8c1", "DEF-200-360"),  # round-label-ok
+    # DEF-200-362：跨機切換摘要句漏套 _note_unfetched 修復窗口——追加本輪稽核列並依
+    # 「追加後立即自我凍結」判例延伸前綴涵蓋該列本身（243→244）。
+    ("R167", "cf1dc5dab8c1", "c570fe4d14e3", "DEF-200-362"),  # round-label-ok
+    # DEF-200-363：多 CPU 第二十輪計時快取隔輪震盪修復窗口——追加本輪稽核列並依
+    # 「追加後立即自我凍結」判例延伸前綴涵蓋該列本身（244→245）。
+    ("R168", "c570fe4d14e3", "62ff202f16a2", "DEF-200-363"),  # round-label-ok
+    # DEF-200-368：多 CPU 第二十一輪計時快取父鍵回填修復窗口——追加本輪稽核列並依
+    # 「追加後立即自我凍結」判例延伸前綴涵蓋該列本身（245→246）。
+    ("R169", "62ff202f16a2", "5b81821b1c27", "DEF-200-368"),  # round-label-ok
+    # 多 CPU 第二十二輪（W 公式改 logical−ceil(logical/physical)／CAP 18／pytest 站點
+    # 普查鎖／TMPDIR flake 修法／pre-push 三 leg 並行鎖）：接鏈錨點＝本輪帳本首列
+    # DEF-200-373（W 公式在 SMT 機器低估），由收尾單人窗口於記帳員補登後回填
+    # （落地時曾暫以 DEF-200-372 佔位，帳本補登同輪即回填，非跨輪殘留）。
+    ("R170", "5b81821b1c27", "c2bb8b8b1774", "DEF-200-373"),  # round-label-ok
+    ("R170", "c2bb8b8b1774", "8ce188aa65a5", "DEF-200-373"),  # round-label-ok：同輪自身收斂再延伸
+    ("R170", "8ce188aa65a5", "4db111b08259", "DEF-200-373"),  # round-label-ok：同輪收斂第三次延伸
+    ("R170", "4db111b08259", "c20fa98dbe84", "DEF-200-373"),  # round-label-ok：同輪收斂第四次延伸
+    ("R170", "c20fa98dbe84", "3e871dac4bef", "DEF-200-373"),  # round-label-ok：QA-2 修復批同輪延伸
+    ("R170", "3e871dac4bef", "803652092c91", "DEF-200-373"),  # round-label-ok：QA-2 修復批收斂延伸
+    ("R170", "803652092c91", "2615e5bdae9a", "DEF-200-373"),  # round-label-ok：QA-2 收斂延伸二
+    ("R170", "2615e5bdae9a", "49c85ffd5794", "DEF-200-373"),  # round-label-ok：QA-2 收斂延伸三
+    ("R170", "49c85ffd5794", "ee5d6d876535", "DEF-200-373"),  # round-label-ok：QA-2 收斂延伸四
+    ("R171", "ee5d6d876535", "f3c556f6b43f", "DEF-200-382"),  # round-label-ok：本輪收尾
+    ("R171", "f3c556f6b43f", "ecf46fb27335", "DEF-200-382"),  # round-label-ok：前綴延伸涵蓋全部列
+    # R172：console_qa 事故輪收尾單人窗口重釘——修復棒 F 行為鎖新增（三道鎖）使護欄層 round-label-ok
+    # 行數重釘，追加後依「追加後立即自我凍結」判例延伸前綴涵蓋全部新列本身（275→279）。
+    ("R172", "ecf46fb27335", "efc968920451", "DEF-200-389"),  # round-label-ok
+    ("R172", "efc968920451", "0b2e73a520bb", "DEF-200-390"),  # round-label-ok：接鏈列自身漂移延伸
+    ("R172", "0b2e73a520bb", "2bf9d536b2bd", "DEF-200-391"),  # round-label-ok：回歸鎖軌新列延伸
+    ("R172", "2bf9d536b2bd", "3e14b8e6687d", "DEF-200-393"),  # round-label-ok：修復棒 H 收尾重釘
+    ("R172", "3e14b8e6687d", "8fe3e9b2b142", "DEF-200-393"),  # round-label-ok：接鏈列造成二次重釘
+    ("R173", "8fe3e9b2b142", "da9eafaf2c1c", "DEF-200-386"),  # round-label-ok
+    ("R173", "da9eafaf2c1c", "40175f7507e8", "DEF-200-394"),  # round-label-ok：修復棒覆審
+    # 收尾單人窗口重釘（F1 缺陷編號訂正 DEF-200-394／395／396 ＋ F2 WMI 監看 deadline 與量測
+    # 解耦 ＋ F3 BFS 補解相對 import／UnicodeDecodeError 兜底），就地更新不開新輪。
+    ("R173", "40175f7507e8", "2948983719d7", "DEF-200-394"),  # round-label-ok：自身漂移列接鏈
+```
+
+### L10 到期義務兌現沿革旁註（R184～R212；`_REPIN_NET_CAP_DUE_ROUND` 上方）｜來源 `tools/tests/test_adr_xplat001_c1c2_lock.py:3273`＠HEAD a7b20b7e（7 行）
+
+```text
+#: R184 兌現 (184, 525)；R186 兌現 524；R188 兌現：cap 降至目標 523，重新武裝 522 round-label-ok
+#: R190 兌現：cap 降至目標 522，重新武裝 521 round-label-ok
+#: R192 兌現 521；R194 兌現：cap 降至目標 520，重新武裝 519 round-label-ok
+#: R196 兌現：cap 降至目標 519，重新武裝 518 round-label-ok
+#: R208 兌現：cap 降至目標 518，重新武裝 517 round-label-ok
+#: R210 兌現：cap 降至目標 517，重新武裝 516 round-label-ok
+#: R212 兌現：cap 降至目標 516，重新武裝 515 round-label-ok
+```
+
+### L11 覆蓋率棘輪地板參數化的踩坑經過（`iron_law3_ratchet_problems` docstring）｜來源 `tools/tests/test_doc_loc_baseline_freshness_r60.py:3251`＠HEAD a7b20b7e（3 行）
+
+```text
+    第一版正是那樣寫的：把第 5 類危害誠實登記進表之後，`test_taking_a_scanner_away_is_red`
+    與 `test_deleting_a_known_hazard_row_is_red` 兩支**注入測試**當場轉紅，也就是說
+    「解開棘輪」這個動作被我自己新寫的兩道鎖擋住了——與本判準要治的病同型、同一回合復發。
+```
+
+### L12 鎖檔檔頭〈射程〉SA 劃界誠實記錄｜來源 `tools/tests/test_adr_xplat001_c1c2_lock.py:43`＠HEAD a7b20b7e（4 行）
+
+```text
+  · SA 劃界誠實記錄：這個繞道面**在被發現時尚未被利用**——本包獨立以家族全檔重驗，落地後
+    新列中落入 §4.3.1 者只有 `DEF-101-534` 且 C1／C2 皆已滿足；archive 側落入 §4.3.1 而條件
+    未滿足者只有 `DEF-43-011`（archive_01）與 `DEF-101-357`（archive_22），兩者都遠早於 ADR
+    落地、屬設計上不追溯範圍 ⇒ 擴面後零假紅。
+```
+
+### L13 `_check_ignore` 家族「落地當回合實測」數字（三處 docstring；原處改寫成不帶數字的判準句，另留指標）｜來源 `tools/tests/test_doc_loc_baseline_freshness_r60.py` `:4107`／`:4175`／`:4221`＠HEAD a7b20b7e（共 26 行）
+
+（a）`_run_check_ignore` docstring（`--no-index` 的實測：全庫 tracked 路徑餵入的命中數）｜`tools/tests/test_doc_loc_baseline_freshness_r60.py:4107`（6 行；改寫前整段 docstring／段落原文）
+
+```text
+    🔴 **刻意不加 `--no-index`**（這不是省略，是判準的一部分）：預設行為會把 **tracked**
+    的路徑一律回報為「未忽略」，而那正是本判準要的語意——tracked ＝ repo 的事實，結構上
+    不可能是機器本地生成物。落地當回合實測：把全庫 27,600 條 tracked 路徑餵進去，預設命中
+    **0** 條、加上 `--no-index` 命中 **341** 條（多為 `AISDLC_SDD/**/build/reports/**` 這類
+    被凍結面 ignore 規則涵蓋、卻確實 tracked 的檔）。也就是說加了那個旗標會讓 341 個**真的
+    在 repo 裡**的檔被誤判成第三態 ⇒ 指向它們的錯字從此永遠不會紅，而且是靜默的。
+```
+
+（b）`prime_machine_local_cache` docstring（批次 vs 逐條計時；基準誤套的命中數）｜`tools/tests/test_doc_loc_baseline_freshness_r60.py:4175`（15 行；改寫前整段 docstring／段落原文）
+
+```text
+    """批次預熱：一次 subprocess 問完整批宣稱，而不是每條各問一次。
+
+    落地當回合實測（macOS）：269 條相異宣稱**逐條**問 = 4.62s，**批次**一次 = 0.50s。
+    快取是模組級、平台中立性鎖的 3 次重跑只付一次；但逐條問連第一次都太貴。
+
+    🔴 判準是**合取**，兩款缺一不可（第二款是本函式的自證測試當場逼出來的，不是預想）：
+      ① 至少一個解析基準下的候選被 ignore 規則命中，且
+      ② **沒有**任何一個候選是 repo 已知路徑（tracked 檔或其祖先目錄）。
+    只有 ① 會過寬到危險：宣稱要逐一套上每個解析基準，而錯誤的基準會把一條真實路徑
+    前綴成一條**不存在**的路徑，那條路徑很容易命中某個廣義規則。落地當回合實測，
+    `AISDLC_SDD/AISDLC_SDD_v0.02/build/reports/…` 在基準 `.` 下 tracked、未被 ignore，
+    套上基準 `AutoClaude/` 之後卻命中 `AutoClaude/.gitignore:9: build/` ⇒ 只有 ① 時
+    這一族（實測 200+ 條）全被誤判成第三態，指向它們的錯字從此永遠不會紅。
+    ② 把它們擋掉的理由是語意的：**tracked ＝ repo 的事實，結構上不可能是機器本地生成物**。
+    """
+```
+
+（c）`tracked_paths_matching_an_ignore_rule` docstring（`--no-index` 會誤判的那一族數量）｜`tools/tests/test_doc_loc_baseline_freshness_r60.py:4221`（5 行；改寫前整段 docstring／段落原文）
+
+```text
+    """**tracked 卻同時命中 ignore 規則**的路徑（＝`--no-index` 會誤判的那一族）。
+
+    這批路徑是本判準最重要的對照組：它們真的在 repo 裡，所以指向它們的錯字必須照樣紅。
+    落地當回合實測 341 條（多在 `AISDLC_SDD/**/build/reports/**` 凍結面）。
+    """
+```
+
 ---
 
 ## 〈十〉開了→收了
@@ -785,6 +1279,10 @@ PRD §4.5.2／§4.5.5／§4.5.6／§4.5.8／§4.5.10 在 mac 路徑上被真機�
 | `git add` 的新檔（`env.shared`、`tools/lib/quota_env_layers.py`、`tools/tests/test_quota_env_layers.py`、AutoClaude 5 支 518 測試、本證據檔） | 已 stage、未 commit | `git status --short` |
 | `runner` 自寫的失敗明細 `tools/.last_failure_*.log`（gitignored，既有行為） | 收尾期間每次全套實跑各留 4 份（3 份來自 runner 自測的合成失敗、1 份是真失敗）；先前各輪留下的同類檔仍在；未刪 | `git check-ignore -v` |
 | scratchpad 工作檔（`closer_*`） | 不入庫 | — |
+| 第三列的 B+／XPC 探針 launchd job（`AutoSDD_XpcProbe_175600`、`AutoSDD_BplusProbe_20261011T175115Z`、`AutoSDD_BplusProbe_20261011T190135Z`、`AutoSDD_BplusProbe_20261011T202849Z`（run3，第五棒最終碼）；皆拋棄式，主控親跑，〈二-13〉） | 已收：XPC 探針與 B+ 修後一輪各自 `bootout rc=0`（逐字在 `xpcprobe/observed.txt` 與 `run2_observed.txt`）；第四顆 B+ 最終碼一輪（run3）清理 `bootout rc=0`、`leftover=0`（逐字在 `run3_observed.txt`）；B+ 修前一輪的 job 已被 `arm()` 自己殺掉（`launchctl print` rc=113，`run1_observed.txt`），其殘留 plist 已刪（該輪的清理 rc 未留在 `run1_observed.txt`）；痕跡只落 scratchpad（job 的 `environment` 帶 `AUTOSDD_TRACE_DIR`，`launchctl print` 逐字；unload 帳與 bootout 痕跡都在 scratchpad 的 `bplus/traces/`）；原始檔留 scratchpad、不入庫 | 收尾現查：`ls ~/Library/LaunchAgents/` 無四者的 plist、`launchctl list` 無四者 label〔前三者由 Docs 包親跑，第四者由最終零信任複審鏡現查（`~/Library/LaunchAgents/` 無 Bplus／XpcProbe plist、`launchctl list` 無該 label），皆唯讀〕 |
+| 真 repo 根殘留 `.env.bak.20261011T055059Z`（54 行；前一列 `--fix` 的備份；gitignored） | **未收**：待掌舵者驗收後手動刪（SD 鏡 P4-6 回報；不是第三列產生） | `ls` 與 `git check-ignore -v`＝`.gitignore:36 .env.*` 命中〔Docs 包親跑〕 |
+| 哨兵 `AutoSDD_Sentinel_46b55125-…`（〈三〉暫卸後掛回的本 session 哨兵） | **已不在**：2026-10-12 02:23:53 自我解除（閒置 6 小時的設計行為，非本輪造成；上方各列的「現查在位」是當時快照）。審計檔第 53 列逐字：`ts=2026-10-12T02:23:53+0800 op=deferred-bootout label=AutoSDD_Sentinel_46b55125-… caller=_schtasks_remove<-_sentinel_tick<-main argv=[…session_resume_planner.py, --sentinel-tick, --plan] pid=45069 ppid=1 xpc=AutoSDD_Sentinel_46b55125-…`（哨兵自己的 tick 卸載自己）；該 session 逐字稿最後修改 10/11 20:11:48，到 02:23:53 靜止 6 小時 12 分，對得上 `SENTINEL_IDLE_SECONDS = 6 * 3600` 的閒置自我解除設計〔他包回報：Developer 第三棒第六節〕 | `launchctl list`（唯讀）現為 `com.autoclaude.nightly`、`AutoSDD_Sentinel_c785cd2b-…`、`AutoSDD_Sentinel_0aeb6d2a-…`〔Docs 包親跑〕 |
+| 文件修復包（Docs 包，Sonnet）的唯讀查詢 | `gh run view`（二個 run 的 json 與 log，不改任何遠端狀態）、`launchctl list`、`ls ~/Library/LaunchAgents/`、`git show`／`git diff`／`git check-ignore`；落檔只在 scratchpad；未起背景行程、未註冊排程、未 commit | — |
 
 ---
 
@@ -825,8 +1323,8 @@ PRD §4.5.2／§4.5.5／§4.5.6／§4.5.8／§4.5.10 在 mac 路徑上被真機�
 | 接縫 | 覆蓋 | 證據 |
 |---|---|---|
 | S1 `woken` 留痕／S2 早醒閘（`allow_resume=true`）／S3 `probed`（L0 自取與沿用快取兩型）／S4 `route_chosen`／S5 spawn argv 與 env／S6 handback 後檢（7-A）／S7 settle→DONE（7-B：`gc_plans=0`，任務書未被 GC）／S8 一次性 job 自拆（deferred-bootout）與同名不拆（`rearmed_inplace=true`）／S9 哨兵重掛含 C-A（job 內 bootstrap 另一 label）／S10 `launchctl list` 基線差集／S11 halt 標記→`arm_reset`（7-E 消費端）／S12 calendar 寫入＋延後重載＋F5 保留／S13 到點 `probe` 重入 `_resume_tick`／S15 檔案層模型→`--model`（env.shared 層）／S16 成本帳（③ `measured=true`） | 真（①②③） | 十一-2～十一-4 逐字 |
-| S14 無人窗口的 hook×INV5（`sentinel_single_owner_deferred`） | 未發生（預期：小 session 回合數未達 `MIN_TURNS=24`；未做 B+） | — |
-| settle 的 `no_progress`／`quota_stop`／`relay_exhausted`／`RELAY_NEXT` 真機、7-E 生產端（真撞線寫標記）、〈五〉#1 睡眠、#2、#5、#6、#8、#10／#11 Windows、#12「靜止守門」分支 | 未驗（本列不宣稱） | — |
+| S14 無人窗口的 hook×INV5（`sentinel_single_owner_deferred`）與 hook 派生的 `--arm-sentinel` 在哨兵承載的續跑窗內重掛 | 未發生，**但在預設路徑上**：續跑窗 SessionStart 清閂鎖後第一次 PostToolUse 即以整份逐字稿評估 `should_arm`（`sentinel_lifecycle_arm.py:93,147,241`），任何有歷史的真實 session 的續跑窗都會走到 `spawn_sentinel`；本列只因用 1 請求小 session 才沒走到。`schedule_backend._defer` 的等待對象是呼叫 arm 的行程自己的 pid，hook 派生者不是 job 主行程；B+（真 launchd、構造情境）後由主控補跑：修前紅（`arm()` 同步 bootout 殺掉在跑的 job）、修後綠 ⇒ **真機量測與修法見〈二-13〉**；真實鏈（真 claude 視窗內 hook 派生）仍未實跑，登〈五〉#38 | 〈二-13〉 |
+| settle 的 `no_progress`／`quota_stop`／`relay_exhausted`／`RELAY_NEXT` 真機（登〈五〉#36）、7-E 生產端（真撞線寫標記）、〈五〉#1 睡眠、#2、#5、#6、#8、#10／#11 Windows、#12「靜止守門」分支；S4 `route_chosen` 僅 SESSION_RESUME 一型（FRESH_SESSION_WITH_STATE／PATROL_HANDBACK 兩條路由真機零筆；三次 `route_chosen` 皆為 SESSION_RESUME，逐字稿 307,612B〔他包回報：SA 鏡 P3-4〕） | 未驗（本列不宣稱） | — |
 
 ### 十一-6 開了→收了（本列）
 
