@@ -222,12 +222,12 @@ bootout rc=0
 
 | workflow | run id | conclusion | gating job（`gh run view <id> --json jobs`） | nightly 類 job |
 |---|---|---|---|---|
-| root-infra-ci | | | | |
-| AutoClaude CI | | | | |
-| macos-compat-ci | | | | |
-| windows-compat-ci | | | | |
+| root-infra-ci | 38150026499 | success | root infra guard：success | — |
+| AutoClaude CI | 38150026544 | success | CLAUDE.md Budget + Snapshot Freshness／Tests + LOC Budget／Equivalence Snapshot／PG Contract Tests：皆 success | Mutation ×3／PG E2E／Perf Baseline：skipped（排程或 dispatch 專屬，push 不觸發） |
+| macos-compat-ci | 38150026559 | success | macOS smoke：success | nightly full suite／失敗提醒：skipped（排程專屬） |
+| windows-compat-ci | 38150026658 | success | Windows smoke：success | nightly full suite／失敗提醒：skipped（排程專屬） |
 
-- 本檔寫成時 commit 尚未 push，上表欄位為空；push 後由主控以上述指令現查填入（commit sha、每支 run 的 conclusion；job 層另查，workflow 綠不等於 job 綠）。shellcheck-ci／aisdlc-sdd-ci 依 paths 未觸發者，缺席＝未驗證；不以本機全綠代替雲端。
+- 【2026-10-11 23:08 CST 回填】本列與第二列、useMacWin 精簡、D-1 守衛檔四個 commit（035746ba／8d1646f0／be3fcfc2／8807f3bb）由掌舵者在對話中明文授權後一次 push（`9032bebf..8807f3bb  main -> main`，pre-push 全套 `All checks passed!`）；上表以 `gh run list --commit 8807f3bbea01155c22101bdce70ad3d339f2ca4a` 與 `gh run view <id> --json jobs` 現查填入：五支觸發皆 success（另 shellcheck-ci 38150026565 success），job 層 gating 全 success、nightly 類 job 皆 skipped（排程專屬，push 不觸發＝未驗證、不是通過）；aisdlc-sdd-ci 依 paths 未觸發，缺席＝未驗證；不以本機全綠代替雲端。
 
 ---
 
