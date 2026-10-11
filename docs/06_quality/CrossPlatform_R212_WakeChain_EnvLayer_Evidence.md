@@ -188,7 +188,7 @@
   | Architect | `VERDICT: APPROVE` | 零 P1／P2；P3 兩條（接線自證、多數派形態）第二棒已修；P4 五條登〈五〉 |
   | SA | `VERDICT: CONDITIONAL` | 5 條 P2 皆為轉述句或文件（無碼錯）；P2-4（本列落款缺）＝本節；P2-5（不可宣稱「已修好」）＝帳本加「CI 實跑待對帳」＋〈四-3〉 |
   | SD | `VERDICT: CONDITIONAL` | 1 條 P2（S14）⇒ DEF-200-526，見〈二-13〉 |
-- **Windows CI 實跑待對帳**：修法與鎖在工作樹、未 commit／push；#335 在步驟 7 失敗後，步驟 9～28 共 20 步被略過（含 ci-gate.ps1 雙軌、dispatcher hooks 真 commit、dev_start、install_git_hooks 往返），綠燈＝push 後 windows-compat-ci 整個 job 步驟 1～28 都 success。push 後以 `gh run list --commit <完整 sha>`（短 sha 會靜默回空）現查，回填於〈四-3〉；預期 R85 兩輪皆綠。
+- **Windows CI 實跑**：【已對帳】push `2403f9fd` 後 windows-compat-ci #336（run 38178905961）`Windows smoke` job 非 skipped 步驟全 success（30/31，1 步 skipped），六支 workflow 全綠，逐 job 見〈四-3〉。以下為回填前原文——修法與鎖在工作樹、未 commit／push；#335 在步驟 7 失敗後，步驟 9～28 共 20 步被略過（含 ci-gate.ps1 雙軌、dispatcher hooks 真 commit、dev_start、install_git_hooks 往返），綠燈＝push 後 windows-compat-ci 整個 job 步驟 1～28 都 success。push 後以 `gh run list --commit <完整 sha>`（短 sha 會靜默回空）現查，回填於〈四-3〉；預期 R85 兩輪皆綠。
 - **護欄層**：行數、棘輪與兩站點數字只引〈二-10〉第三列 bullet，本節不另抄。
 - **准入與輪號**：DEF-200-525 在非守衛面（`tools/lib/cpu_budget.py` 與 `tools/tests` 鎖）：`git diff --name-only` 對根 CLAUDE.md〈守衛面准入〉清單的比對在終態樹（15 個修改檔，含第四、五棒與收尾補鎖）唯一命中 `tools/session_resume_planner.py`——第五棒只加 3 行註解（`git diff --numstat`＝`3	0`、零程式行、planner assertion 750 不變），不是新增守衛碼或鎖；其餘 14 檔無命中〔最終零信任複審鏡（14 檔時）與收尾包（終態 15 檔）各親跑：`grep` rc=0〕。記成同輪第三列而不是新的一輪：成因是 R212 視窗內的 commit（e6f0be65）造成的回歸，同輪修同輪結；缺陷在同一工作樹內立案並 fixed、未結維持 0；沒有未結列也沒有承接輪號，R 系列沒有開輪事件（數字見〈六-1〉末條）〔他包回報：Architect 鏡 E〕。
 
@@ -485,10 +485,14 @@ bootout rc=0
 
 | workflow | run id | conclusion | gating job（`gh run view <id> --json jobs`） | nightly 類 job |
 |---|---|---|---|---|
-| root-infra-ci | push 後現查 | push 後現查 | push 後現查 | — |
-| AutoClaude CI | push 後現查 | push 後現查 | push 後現查 | push 後現查（排程或 dispatch 專屬，push 不觸發） |
-| macos-compat-ci | push 後現查 | push 後現查 | push 後現查 | push 後現查（排程專屬） |
-| windows-compat-ci | push 後現查 | push 後現查 | push 後現查：整個 job 步驟 1～28 皆須 success（修前 #335 在步驟 7 失敗、步驟 9～28 共 20 步被略過） | push 後現查（排程專屬） |
+| root-infra-ci | 38178905958（#392） | success | `root infra guard (bash -n + pwsh parse/BOM + EOL(.sh) + EOL(.ps1) + NTFS + parity + py_compile + ...`＝success（步驟 25/26 success） | — |
+| AutoClaude CI | 38178905954（#286） | success | `CLAUDE.md Budget + Snapshot Freshness`＝success（步驟 10/10 success）；`Tests + LOC Budget`＝success（步驟 10/10 success）；`PG Contract Tests`＝success（步驟 11/11 success）；`Equivalence Snapshot`＝success（步驟 8/8 success） | `PG E2E (pgvector recall + p95) - nightly`＝skipped；`Mutation Test - GoalSynthesisPlugin (dormant W1, workflow_dispatch only)`＝skipped；`Mutation Test - TokenGuardPlugin (active pilot) - 03:07 UTC`＝skipped；`Perf Baseline (CPU-bound scenarios) - nightly`＝skipped；`Mutation Test - OrchestrationCoordinator (dormant W2, workflow_dispatch only)`＝skipped |
+| macos-compat-ci | 38178905970（#321） | success | `macOS smoke（實際執行關鍵腳本，非僅語法解析）`＝success（步驟 29/30 success） | `macOS nightly full suite（深度回歸，非阻斷）`＝skipped；`macOS nightly 失敗提醒（best-effort，不影響 nightly-full 本身的 continue-on-error）`＝skipped |
+| windows-compat-ci | 38178905961（#336） | success | `Windows smoke（實際執行關鍵腳本，非僅語法解析）`＝success（步驟 30/31 success） | `Windows nightly 失敗提醒（best-effort，不影響 nightly-full 本身的 continue-on-error）`＝skipped；`Windows nightly full suite（深度回歸，非阻斷）`＝skipped |
+| aisdlc-sdd-ci | 38178905965（#141） | success | `offline gate (pytest + arch-fitness)`＝success（步驟 9/9 success） | — |
+| shellcheck-ci | 38178905929（#37） | success | `shellcheck (active shell scripts, two-way baseline ratchet)`＝success（步驟 6/6 success） | — |
+
+- **回填（2026-10-12，收尾單人窗口親跑）**：commit `2403f9fd` push 後 `gh run list --commit 2403f9fdf8051618179090ee86d8e62f9f48a3f0` 回 6 個 run（上表），workflow 層全 success；`gh run view <id> --json jobs` 逐 job：gating job 全 success（windows-compat-ci 的 `Windows smoke` job 非 skipped 步驟全 success（30/31，1 步 skipped），修前 #335 失敗的步驟 7 與被略過的步驟 9～28 本次皆跑過），nightly 類 job skipped（排程／dispatch 專屬）。aisdlc-sdd-ci 與 shellcheck-ci 皆被觸發且 success（第二棒動了 `tools/git-hooks/post-merge`）。
 
 - 取數指令：`gh run list --commit <完整 sha>`（**完整 40 碼**；短 sha 會靜默回 `[]`）與 `gh run view <id> --json jobs`；回填時另對 aisdlc-sdd-ci 與 shellcheck-ci（`paths:` 含 `tools/git-hooks/**`，第二棒動了 `tools/git-hooks/post-merge`）依是否觸發逐一標明（缺席＝未驗證，不是通過）。
 - 回填前的狀態：第三列（DEF-200-525／526）的修法與鎖在工作樹、未 commit／push；Windows CI 實跑結果、各 workflow 是否觸發皆未知，不以本機全綠代替雲端。
