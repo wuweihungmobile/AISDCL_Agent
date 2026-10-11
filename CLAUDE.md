@@ -305,6 +305,13 @@ python -m alembic upgrade head                                         # 🔴 �
 - macOS/Linux 對等腳本已存在（`tools/local_ci_gate.sh` 等；完整雙平台對照見 [ONBOARDING.md](ONBOARDING.md) §6）。CI workflows 全數住根層 `.github/workflows/`（對照見 ONBOARDING.md §6.1）；`claude-md-budget` 閘**僅指 `AutoClaude/CLAUDE.md`**（≤400 行＋snapshot 新鮮度），根層與 AISDLC_SDD 兩份不受此閘。
 - 🔴 **容器 healthy ≠ DB 已 migrate**：容器是 tmpfs，每次重建都要再 migrate，漏了時 PG 測試整批 skip、表徵近似「沒起 PG」。**憑證＝`local_ci_gate.pg_autodetect()` 回出 DSN，不是 `docker ps` healthy**；失效會在 pytest 摘要印醒目段（SSOT＝`AutoClaude/tools/local_ci_gate.py` 的 `PG_UNMIGRATED_HINT`）。
 
+### 🔴 GitHub CI/CD 一律多 CPU 模式（掌舵者 2026-10-11 直接指令：「github CI/CD 都要使用多 CPU 模式」）
+
+- **規則**：根層 `.github/workflows/` 每一支 workflow 的測試步驟都走平行（pytest xdist／`tools/run_root_unittests.py` 的 `parallel_shard`），**不得退回序列**；worker 數的唯一算法來源＝`tools/lib/cpu_budget.py`（headless 公式取 CI runner 核數；數字一律現查 `python tools/lib/cpu_budget.py --legs 1`，本檔不複寫），各 leg 以 `[cpu_budget] broadcast workers=N`／`[cpu_budget] xdist workers=N` 字面可稽核。本機閘門（`AISDLC_SDD/scripts/ci-gate.sh`／`.ps1`、`tools/git-hooks/pre-push`、`local_ci_gate`、nightly、`run_root_unittests.py`）吃同一份 SSOT，CI 與本機不得各算各的（DEF-200-274／289 系列）。
+- **接線現況（改 workflow 前現查）**：`autoclaude-ci` 吃 `AutoClaude/pyproject.toml` 全域 addopts `-n auto --dist worksteal`＋conftest 的 `pytest_xdist_auto_num_workers`；`root-infra-ci` 以 `AUTOSDD_PARALLEL_TESTS=1` 跑 `run_root_unittests.py`；`aisdlc-sdd-ci` 經 `ci-gate.sh` 匯出 `AUTOSDD_PARALLEL_TESTS_WORKERS`；`aisdlc-sdd-fsm-chaos-nightly` 先廣播 cpu_budget 再 `-n auto --dist worksteal`（同一 step 內設 env）；compat 兩支經 `local_ci_gate`／nightly 腳本同源。
+- **唯一允許的序列例外**（各自在 workflow 內寫明 WHY，帶 `-p no:xdist -o addopts=`）：真 PG 單一資料庫的 `pg_real`、mutmut 突變（hash 衝突）、perf 量測、凍結基線 snapshot（`ci-gate.sh` xdist 允許清單只開 LATEST）。PG 在場的平行跑一律 `--dist loadgroup`（DEF-200-274 X1）。新增 job 若要序列：先在 workflow 註解寫 WHY、再登缺陷帳本，不得默默拿掉 `-n`。
+- 機械物：`tools/tests/test_cpu_budget.py`（SSOT 算法＋GAP-E：pyproject 的 `-n auto --dist worksteal` 必須存在）、`tools/tests/test_ci_gate_xdist_allowlist.py`（ci-gate 允許清單＋三處 orchestrator 的 cpu_budget 匯出段接線）。
+
 ### 架構大圖（約束）
 
 **Hexagonal／微核心**：`core/`（Kernel + EventBus + HookSpec + `ports/`）只依賴 ports；`infra/adapters/` 具體實作；`infra/repositories/`＝DAL 三後端（File／InMemory／Pg + Dual）；`plugins/` 彼此**不可互 import**（協作走 EventBus）；`execution/playbook_runner.py` 是無業務邏輯 thin facade。Plugin／Port 清單與計數一律見 AutoClaude/CLAUDE.md 的機械生成 `[Architecture Snapshot]`（本檔不重複數字）。
@@ -367,6 +374,7 @@ bash tools/fsm_runtime/formal/run_tlc.sh                      # TLA+/TLC（自�
 | mac 睡眠姿態 | `pmset -g custom`（不隨 clone 走，不得寫成常數） |
 | AISDLC_SDD 版本／資產計數 | [AISDLC_SDD/FRAMEWORK_STATUS.md](AISDLC_SDD/FRAMEWORK_STATUS.md) |
 | AutoClaude Plugin／Port 計數 | AutoClaude/CLAUDE.md 的 `[Architecture Snapshot]` |
+| CI／本機 xdist worker 數（多 CPU 預算） | `python tools/lib/cpu_budget.py --legs 1`（SSOT＝`tools/lib/cpu_budget.py`；見〈GitHub CI/CD 一律多 CPU 模式〉） |
 
 ---
 
