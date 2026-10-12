@@ -152,6 +152,10 @@ def run_boot_self_check(cfg, *, state_repo, playbook_path: str, quota_meter,
         cleanup=lambda: cleanup_merged_worktrees(Path.cwd(), dry_run=dry_run),
         notifier=lambda msg: notify(
             "AutoClaude — 開機自檢", msg, enabled=cfg.notification.enabled),
+        # PRD §6.1 不變式 8：bypass 權限只准「容器＋ALLOW_PERMISSION_BYPASS=true」，違反即拒絕啟動。
+        # 設定面兩條路（SDK 後端的 permission_mode、PTY 後端的 extra_args）都要餵，漏一條就是缺口。
+        permission_mode=cfg.executor.permission_mode,
+        extra_args=cfg.claude.extra_args,
     )
     if report.ok:
         return 0

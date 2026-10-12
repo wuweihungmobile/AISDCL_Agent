@@ -18,6 +18,9 @@
       洩入呼叫端環境時，`tests/test_gap009.py` 子行程仍全數通過。
   (e) 檔案那條洩漏路徑（`AutoClaude/.env`、根 `.env`、入庫的 `env.shared`）：`_hermetic_env_files`
       讓引擎的檔案讀取在每個測試內都是「無檔」（上面四條只管環境變數）。
+  (f) `ALLOW_PERMISSION_BYPASS`（PRD §12／§6.1 不變式 8 的顯式旗標）同屬「洩入的環境變數決定
+      測試結果」：`_hermetic_permission_bypass_flag` 讓每個測試都看不到它（subprocess 行為鎖
+      ＋對照組）。
 """
 from __future__ import annotations
 
@@ -152,3 +155,38 @@ class TestEnvFilesAreNotReadInTests:
     def test_the_engine_reads_no_env_file_during_a_test(self):
         from autoclaude.utils import config as cfgmod
         assert cfgmod._ENV_FILES == ()
+
+
+class TestPermissionBypassFlagIsNotLeakedIntoTests:
+    """(f) 呼叫端殼層 export 的 `ALLOW_PERMISSION_BYPASS` 不得影響測試結果。
+
+    探針＝本類第一支（只斷言旗標不在 `os.environ`）；下面兩支以**子行程**帶旗標各跑它一次：
+    有 conftest 必須綠；`--noconftest` 對照組必須紅——否則探針對旗標失去敏感度，有 conftest
+    那次的綠就是空洞的。探針不碰容器偵測，所以在任何主機（含容器內的 Linux）結果都確定。
+    真實症狀（修前 `test_r100_boot_self_check.py::test_g10_*` 在旗標為 true 的主機上 2 項紅）
+    記於 DEF-200-527 同輪證據檔〈四〉。
+    """
+
+    _PROBE = ("tests/test_conftest_quota_env_isolation.py::"
+              "TestPermissionBypassFlagIsNotLeakedIntoTests::test_probe_the_flag_is_not_visible")
+
+    def test_probe_the_flag_is_not_visible(self):
+        assert "ALLOW_PERMISSION_BYPASS" not in os.environ
+
+    def _run_probe(self, *extra):
+        return subprocess.run(
+            [sys.executable, "-m", "pytest", self._PROBE, "-q", "-p", "no:xdist",
+             "-o", "addopts=", "-p", "no:cacheprovider", *extra],
+            cwd=_AUTOCLAUDE_DIR, env={**os.environ, "ALLOW_PERMISSION_BYPASS": "true"},
+            capture_output=True, text=True, encoding="utf-8", timeout=60,
+        )
+
+    def test_the_flag_exported_by_the_caller_is_invisible_to_tests(self):
+        result = self._run_probe()
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    def test_control_without_conftest_the_flag_is_visible(self):
+        result = self._run_probe("--noconftest")
+        assert result.returncode != 0 and "ALLOW_PERMISSION_BYPASS" in result.stdout, (
+            "探針對旗標不再敏感（或因別的原因紅）：上一條綠是空洞的\n"
+            + result.stdout + result.stderr)

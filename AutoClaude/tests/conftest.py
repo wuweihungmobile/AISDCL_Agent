@@ -782,6 +782,21 @@ def _hermetic_env_files(monkeypatch):
 
 
 # ──────────────────────────────────────────────────────────────
+# 同家族（DEF-200-355／517）：呼叫端殼層的 `ALLOW_PERMISSION_BYPASS` 決定測試結果
+# ──────────────────────────────────────────────────────────────
+# PRD §6.1 不變式 8（`boot_self_check.permission_bypass_verdict`）讀**行程環境**的該旗標：
+# 旗標為 true 而偵測不到容器即拒絕啟動。開發者殼層若 export 它，只驗磁碟空間的
+# `test_r100_boot_self_check.py::test_g10_*` 會多出一條問題而紅（實測 2 failed）。要驗旗標行為的
+# 測試在測試內自己 setenv／傳 environ，它們在本 fixture 之後才施作，照舊生效。
+# 鎖：`tests/test_conftest_quota_env_isolation.py::TestPermissionBypassFlagIsNotLeakedIntoTests`。
+@pytest.fixture(autouse=True)
+def _hermetic_permission_bypass_flag(monkeypatch):
+    from autoclaude.execution.boot_self_check import ALLOW_BYPASS_ENV
+
+    monkeypatch.delenv(ALLOW_BYPASS_ENV, raising=False)
+
+
+# ──────────────────────────────────────────────────────────────
 # B1（DEF-200-274 系列後續）：接 根層 tools/lib/cpu_budget.py 的實體核心預算
 # ──────────────────────────────────────────────────────────────
 # 立案：本檔 `pyproject.toml` 的 `addopts` 對任何呼叫端都帶 `-n auto`，而 xdist 內建的

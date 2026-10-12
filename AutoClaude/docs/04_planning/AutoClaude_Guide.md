@@ -197,6 +197,7 @@ claude:
   extra_args: []                  # 預設不多送旗標（R82 ACB-01：`--yes` 不是 Claude Code 旗標，
                                   # 實測 rc=1 `error: unknown option '--yes'`；需免權限提示時改
                                   # ["--permission-mode", "bypassPermissions"]）
+                                  # 【2026-10-12 註記】bypass 需 ALLOW_PERMISSION_BYPASS=true＋容器偵測，見 PRD §12
   continue_flag: "--continue"     # 維持對話脈絡
   encoding: utf-8
 

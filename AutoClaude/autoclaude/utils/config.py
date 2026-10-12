@@ -138,9 +138,10 @@ class ClaudeConfig(BaseModel):
     # （pty_executor.py / prompt_dispatcher.py）都會把它原樣送出 ⇒ 出廠設定下
     # 每一個步驟都在第一秒失敗。它能活這麼久是因為「用 --version 驗過了」是假綠：
     # `claude --definitelynotaflag --version` 也回 rc=0（--version 短路旗標檢查）。
-    # 預設改空清單＝不多送任何旗標。若需要非互動免權限提示，用實測存在的
-    # `--permission-mode bypassPermissions` 或 `--dangerously-skip-permissions`
-    # （見 scripts/ab_configs/*.yaml 既有用法）——那是安全決策，故不設為出廠預設。
+    # 預設改空清單＝不多送任何旗標。若需要非互動免權限提示，用 `--permission-mode acceptEdits`
+    # 加 `--allowedTools` 白名單（範例：scripts/bridge_e2e/wordcount/config.template.yaml）。
+    # `--permission-mode bypassPermissions`／`--dangerously-skip-permissions` 只准容器內＋
+    # ALLOW_PERMISSION_BYPASS=true，否則開機自檢拒絕啟動（PRD §12；boot_self_check 不變式 8）。
     # 機械物：tests/test_claude_cli_flags.py（拿 `claude --help` 當 fixture 逐旗標比對）。
     extra_args: list[str] = Field(default_factory=list)
     continue_flag: str = "--continue"   # 傳遞給 claude 以維持對話脈絡

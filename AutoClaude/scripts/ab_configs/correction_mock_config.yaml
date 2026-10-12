@@ -5,7 +5,10 @@
 #   - base_url 指向本機 mock_brain_server（localhost:9100，OpenAI-compatible）→ 確定性、零憑證、零成本。
 #     ⚠️ autoclaude 不自動載入 .env，但 env var 優先於本 config（main.py:106）；故 carrier 真跑時
 #        會顯式 export MINIMAX_BASE_URL=localhost mock 覆蓋環境，確保即使環境殘留真 key 也走 mock。
-#   - executor.backend: pty + bypassPermissions → 真 Claude CLI 能非互動寫檔（同 ab_pty_config）。
+#   - executor.backend: pty + acceptEdits＋白名單 → 真 Claude CLI 能非互動寫檔（PRD §12 正道，不用
+#     bypassPermissions）。與 ab_pty_config 的差異：白名單只有 Read,Edit,Write、不給 pytest——本載具
+#     要 S02 attempt 0 的 stub 必失敗才會觸發 CORRECTION，AI 不能自跑 pytest 才不會自己先修好；
+#     驗收由引擎的 evaluator 親跑。2026-10-12 由 bypassPermissions 改，尚待真跑驗證。
 #   - storage.mode: yaml_only → 零 PG 依賴，臨時工作目錄即可跑。
 minimax:
   api_key: "mock"
@@ -17,7 +20,7 @@ executor:
 
 claude:
   command: "claude"
-  extra_args: ["--permission-mode", "bypassPermissions"]
+  extra_args: ["--permission-mode", "acceptEdits", "--allowedTools", "Read,Edit,Write"]
 
 storage:
   mode: "yaml_only"

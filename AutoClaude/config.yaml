@@ -4,8 +4,10 @@ claude:
   #    （實測 `claude --yes mcp list` → rc=1 `error: unknown option '--yes'`）⇒ 出廠設定下
   #    每個步驟都在第一秒失敗。空清單＝不多送旗標。
   #    要讓 `claude -p` 非互動模式能真的寫檔（loop.auth_patterns 在 -p 下沒有提示可答），
-  #    請自行改成實測存在的旗標，例如：extra_args: ["--permission-mode", "bypassPermissions"]
-  #    （安全決策，故不設為出廠預設；既有範例見 scripts/ab_configs/ab_pty_config.yaml）
+  #    請自行改成實測存在的旗標，例如：extra_args: ["--permission-mode", "acceptEdits",
+  #    "--allowedTools", "Read,Edit,Write,Bash(pytest:*)"]（PRD §12：bypassPermissions 只准
+  #    容器內＋ALLOW_PERMISSION_BYPASS=true，否則開機自檢拒絕啟動；範例見
+  #    scripts/bridge_e2e/wordcount/config.template.yaml）
   extra_args: []
   continue_flag: "--continue"       # 傳遞給 claude 以維持多步驟對話脈絡
   encoding: utf-8

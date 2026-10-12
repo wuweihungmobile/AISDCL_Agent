@@ -2,9 +2,13 @@
 #
 # 用途：讓 scripts/sdd_bridge_smoke.yaml 在 pty 後端「真的跑通兩步」，供完整統計 A/B。
 #   - executor.backend=pty（既有 PtyExecutor，claude -p print 模式）。
-#   - claude.extra_args 加 --permission-mode bypassPermissions：讓 claude -p 非互動模式
-#     能真正寫檔（建 smoke_add_test.py / smoke_add.py），否則 S01 無法完成、keyword 不出。
-#     （improving_71 真跑揭露 pty S01 [TEST_READY] 未擷取＝預設無寫檔權限所致。）
+#   - claude.extra_args 走 PRD §12 正道：`--permission-mode acceptEdits` ＋ `--allowedTools` 白名單，
+#     不用完全跳過權限的 bypassPermissions（引擎開機自檢不變式 8 在非容器環境會拒絕啟動）。
+#     claude -p 非互動模式要能真正寫檔（建 smoke_add_test.py / smoke_add.py）靠 acceptEdits 免提示放行
+#     Edit／Write，否則 S01 無法完成、keyword 不出（improving_71 真跑揭露 pty S01 [TEST_READY]
+#     未擷取＝預設無寫檔權限所致）。白名單只多開 `Bash(pytest:*)`：本 config 的消費者
+#     （ab_long_playbook S07、bridge_e2e/strutils_* 的實作步）會叫 AI 親跑裸 pytest；白名單外的動作
+#     在 headless 下沒有人可按同意、會被自動拒絕。2026-10-12 由 bypassPermissions 改，尚待真跑驗證。
 #   - minimax.api_key 給 dummy：MinimaxClient.__init__ 要求非空（config.py:102）否則 main
 #     return 1；enable_kernel_brain=false → brain=None → 此 key 永不被真呼叫（盲重試、無 correction）。
 #   - storage.mode=yaml_only：零 PG 依賴，臨時工作目錄即可跑。
@@ -17,7 +21,7 @@ executor:
 
 claude:
   command: "claude"
-  extra_args: ["--permission-mode", "bypassPermissions"]
+  extra_args: ["--permission-mode", "acceptEdits", "--allowedTools", "Read,Edit,Write,Bash(pytest:*)"]
 
 storage:
   mode: "yaml_only"

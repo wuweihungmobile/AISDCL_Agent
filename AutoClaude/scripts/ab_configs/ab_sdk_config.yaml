@@ -2,11 +2,15 @@
 #
 # 用途：讓 scripts/sdd_bridge_smoke.yaml 在 sdk 後端「真的跑通兩步」，供完整統計 A/B。
 #   - executor.backend=sdk（SdkExecutorAdapter，Claude Agent SDK，JSON-over-stdio；需 [sdk] extra）。
-#   - executor.permission_mode=bypassPermissions：讓 SDK 能真正執行 Write/Edit 工具寫檔，
-#     否則 improving_71 真跑現象重演（S01 keyword [TEST_READY] 命中但 permission=default
-#     未核准 → 檔案實際未建 → S02 evaluator 親跑 pytest 抓到檔不存在 → escalated）。
-#   - sdk_tool_allowlist 不設（None）→ 不注入 predicate，交由 permission_mode 守門
-#     （對齊 improving_68/69 零行為變更設計；bypassPermissions 下放行寫檔）。
+#   - executor.permission_mode=acceptEdits（PRD §12 正道；不用 bypassPermissions，引擎開機自檢不變式 8
+#     在非容器環境會拒絕啟動）：讓 SDK 免提示放行 Write/Edit 工具寫檔，否則 improving_71 真跑現象
+#     重演（S01 keyword [TEST_READY] 命中但 permission=default 未核准 → 檔案實際未建 → S02 evaluator
+#     親跑 pytest 抓到檔不存在 → escalated）。
+#   - sdk_tool_allowlist=[Read, Edit, Write, Bash]：明示工具白名單（deny-by-default，網路／MCP 等其餘工具
+#     一律拒）。🔴 SDK 後端的白名單只到**工具名**粒度（build_tool_allowlist_predicate），放不出 pty 側
+#     那條 `Bash(pytest:*)` 指令級規則：這裡 Bash 名放行＝任意指令，比 pty 側寬。放它是因為消費者
+#     ab_long_playbook S07 會叫 AI 親跑 pytest，不放則 SDK 側在 S07 與 pty 側失去對稱；要收窄須擴充
+#     adapter 轉送 SDK 的 allowed_tools 規則（未做）。2026-10-12 由 bypassPermissions 改，尚待真跑驗證。
 #   - minimax.api_key 給 dummy + enable_kernel_brain=false：同 ab_pty_config 理由（建構非空檢查）。
 minimax:
   api_key: "ab-smoke-dummy-sdk"
@@ -14,7 +18,8 @@ minimax:
 
 executor:
   backend: "sdk"
-  permission_mode: "bypassPermissions"
+  permission_mode: "acceptEdits"
+  sdk_tool_allowlist: ["Read", "Edit", "Write", "Bash"]
 
 storage:
   mode: "yaml_only"

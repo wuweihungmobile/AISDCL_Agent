@@ -13,7 +13,9 @@ executor:
 
 claude:
   command: "claude"
-  extra_args: ["--permission-mode", "bypassPermissions"]
+  # PRD §12 正道（不用 bypassPermissions；理由與白名單為何不給 pytest 見 correction_mock_config.yaml）。
+  # 2026-10-12 由 bypassPermissions 改，尚待真跑驗證。
+  extra_args: ["--permission-mode", "acceptEdits", "--allowedTools", "Read,Edit,Write"]
 
 storage:
   mode: "yaml_only"

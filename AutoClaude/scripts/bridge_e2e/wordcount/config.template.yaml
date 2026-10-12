@@ -3,7 +3,15 @@
 # 刻意不列任何額度／context 門檻（*_pct）：守衛的訊息就是答案，真跑一律沿用出廠預設，不為了跑而調門檻。
 claude:
   command: claude
-  extra_args: ["--permission-mode", "bypassPermissions", "--model", "haiku"]  # 非互動寫檔必須 bypassPermissions；模型一律 haiku
+  # PRD §12：不用「完全跳過權限」——引擎開機自檢（不變式 8）在非容器環境會拒絕 bypassPermissions。
+  # 改走 acceptEdits＋工具白名單：Edit／Write 在 acceptEdits 下免提示、唯讀工具本來就放行，
+  # 白名單只多開一條 pytest（prompt 的驗收閘與 evaluator 都叫它）；白名單外的動作在 headless
+  # 下沒有人可按同意、會被自動拒絕。2026-10-11 的 C1～C4 真跑用的是 bypassPermissions；本組旗標
+  # 已由 2026-10-12 的 r5 真跑驗過一次（n=1：rc=0、3/3 步通過；巢狀 claude 用 Write／Edit／Bash，
+  # 逐字稿唯一帶拒絕字樣的是 `echo "exit=$?"`，模型自行改寫重試）——單次樣本，不宣稱失敗率。
+  # 僅 macOS 取證，Windows 的 shell 工具是 PowerShell，白名單規則名需另寫 PowerShell(...)（未驗證）。
+  # 模型一律 haiku（測試鎖 extra_args 末兩項）。
+  extra_args: ["--permission-mode", "acceptEdits", "--allowedTools", "Read,Edit,Write,Bash(pytest:*)", "--model", "haiku"]
 minimax:
   enable_kernel_brain: false   # Brain 關閉 ⇒ 無 CORRECTION，重試重送同一 prompt；也不設 api_key
 executor:

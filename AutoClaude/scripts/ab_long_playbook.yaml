@@ -10,7 +10,7 @@
 #   - 每步「先測後實作至綠」TDD：evaluator_command 親跑 pytest，AI 自稱完成不算數。
 #   - 步驟刻意遞增（add→sub→mul→divide→power→整合），讓逐步驟 token% 有分佈、不全為單點。
 #
-# 執行（於 AutoClaude/ 目錄，配 ab_pty_config / ab_sdk_config 之 bypassPermissions + brain off）：
+# 執行（於 AutoClaude/ 目錄，配 ab_pty_config / ab_sdk_config 之 acceptEdits＋工具白名單 + brain off）：
 #   python tools/ab_compare_backends.py --run scripts/ab_long_playbook.yaml \
 #     --workdir <tmp> --pty-config scripts/ab_configs/ab_pty_config.yaml \
 #     --sdk-config scripts/ab_configs/ab_sdk_config.yaml --n 3 --out evidence.json

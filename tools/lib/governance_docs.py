@@ -670,6 +670,11 @@ _GOVERNANCE_DOCS = (
     # 逐筆寫出 DEF-ID 與當回合實測值 ⇒ 指針稽核；複審者要重驗就得讀完它 ⇒ 體積守門：即刻登記。
     _REPO_ROOT / "docs" / "06_quality"
     / "CrossPlatform_R212_WakeChain_EnvLayer_Evidence.md",
+    # 同輪第四列證據檔（跑法④ mac 真機逐字：手寫 halt 標記起頭 × 真 claude × 窗內 hook 派生；
+    # PRD §12 權限旗標 T4 座標與落款；.env 同步答覆；理論洞 #51 起）：逐筆寫出真機痕跡座標與
+    # 當回合實測值 ⇒ 指針稽核；複審者要重驗就得讀完它 ⇒ 體積守門：即刻登記。
+    _REPO_ROOT / "docs" / "06_quality"
+    / "CrossPlatform_R212_E2E_Run4_Evidence.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/{CrossPlatform,Quota}_*.md`。這**不是**把具名

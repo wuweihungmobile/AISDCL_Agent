@@ -35,6 +35,12 @@ def is_macos() -> bool:
     return sys.platform == "darwin"
 
 
+def is_linux() -> bool:
+    # 目前直譯器是否跑在 Linux。唯一消費者是 execution/boot_self_check.detect_isolation_env：
+    # 容器訊號（.dockerenv／cgroup／container=）都是 Linux 的慣例，其他平台上不具意義。
+    return sys.platform.startswith("linux")
+
+
 def platform_key() -> str:
     # 量測 provenance 用的平台識別字串（`sys.platform` 原值：win32／darwin／linux）。
     # 讀取點收在本模組：`tests/test_evaluator_kill_tree.py` 的架構鎖要求 autoclaude/

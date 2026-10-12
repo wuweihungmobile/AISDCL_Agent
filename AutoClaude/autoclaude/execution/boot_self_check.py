@@ -20,6 +20,7 @@ from pathlib import Path
 from ..core.ports.quota_meter import BAND_HALT, BAND_PREPARE
 from ..core.ports.state_repository import CheckpointCorruptError
 from ..utils.disk_space import DEFAULT_MARGIN_BYTES, SpaceVerdict, check_space
+from ..utils.platform_caps import is_linux
 from ..utils.verified_cli_versions import VERIFIED_CLI_VERSIONS, family_verdict
 
 logger = logging.getLogger("autoclaude.execution.boot_self_check")
@@ -261,6 +262,145 @@ def cleanup_merged_worktrees(repo: str | Path, integration_ref: str = "integrati
     return removed
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# §6.1 不變式 8（PRD §12 權限旗標／§4.5.4）：完全跳過權限只准「容器＋使用者明確開旗標」
+# ══════════════════════════════════════════════════════════════════════════════
+# 立案（T4，PRD §16.2 該列的再開症狀）：F-SBR-001 真跑在 macOS 主機以
+# `--permission-mode bypassPermissions` 跑了巢狀 claude；兩條設定路徑（SDK 後端的
+# `executor.permission_mode`、PTY 後端的 `claude.extra_args`）此前都沒有任何守門。
+# 🔴 只判**引擎設定面**：`--settings` 檔或使用者層 settings 內的 `defaultMode:
+#    bypassPermissions` 引擎看不到（誠實劃界，不是「已涵蓋」）。
+# 🔴 隔離偵測防的是「誤開」不是惡意：能設旗標的人也能偽造 env，檔案類訊號（.dockerenv／
+#    cgroup）才是較硬的證據。只認 Linux——macOS 行程不可能在 Linux 容器內（Docker Desktop 的
+#    容器跑在它自己的 Linux VM 裡），darwin 上的 `container=`／KUBERNETES_* 只會是雜訊或偽造，
+#    不得因此放行。VM 沒有行程內的可靠標記，不偵測：VM 內要 bypass 目前須進容器（PRD 條文寫
+#    「容器／VM」，缺口登記在這裡，不假裝已涵蓋）。
+ALLOW_BYPASS_ENV = "ALLOW_PERMISSION_BYPASS"  # PRD §6 區塊 13 原名（憲法字面，不加前綴）
+BYPASS_MODE = "bypassPermissions"
+SKIP_PERMISSIONS_FLAG = "--dangerously-skip-permissions"
+_TRUTHY = frozenset({"1", "true", "yes", "on"})  # 與 AUTOCLAUDE_DESKTOP_NOTIFY 同一組真值字面
+_CGROUP_MARKERS = ("docker", "containerd", "kubepods", "lxc")
+_BYPASS_HOW = (
+    "改用 `--permission-mode acceptEdits` 加 `--allowedTools` 工具白名單（範例："
+    "scripts/bridge_e2e/wordcount/config.template.yaml）；確實需要 bypass 時，"
+    f"在容器內執行並設 {ALLOW_BYPASS_ENV}=true")
+
+
+@dataclass(frozen=True)
+class IsolationEvidence:
+    sources: tuple[str, ...] = field(default_factory=tuple)
+
+    @property
+    def detected(self) -> bool:
+        return bool(self.sources)
+
+
+@dataclass(frozen=True)
+class BypassOutcome:
+    lines: tuple[str, ...] = field(default_factory=tuple)
+    problems: tuple[str, ...] = field(default_factory=tuple)
+
+
+def _exists(path: Path) -> bool:
+    try:
+        return path.exists()
+    except OSError:                       # 權限／I/O 讀不到＝沒有證據，不是例外
+        return False
+
+
+def detect_isolation_env(*, environ: Mapping[str, str] | None = None,
+                         on_linux: bool | None = None,
+                         dockerenv: Path = Path("/.dockerenv"),
+                         cgroup: Path = Path("/proc/1/cgroup")) -> IsolationEvidence:
+    """行程是否在容器內（唯讀、零 token）。路徑／env／平台皆可注入，測試不碰真實 `/proc`。"""
+    env = os.environ if environ is None else environ
+    if not (is_linux() if on_linux is None else on_linux):
+        return IsolationEvidence()
+    found: list[str] = []
+    if _exists(dockerenv):
+        found.append("dockerenv")
+    try:
+        cg = cgroup.read_text(encoding="utf-8", errors="replace").lower()
+    except OSError:
+        cg = ""
+    found += [f"cgroup:{m}" for m in _CGROUP_MARKERS if m in cg]
+    if kind := (env.get("container") or "").strip():
+        found.append(f"env:container={kind}")
+    if (env.get("KUBERNETES_SERVICE_HOST") or "").strip():
+        found.append("env:KUBERNETES_SERVICE_HOST")
+    return IsolationEvidence(sources=tuple(found))
+
+
+def permission_bypass_requests(permission_mode: str | None,
+                               extra_args: Sequence[str] = ()) -> tuple[str, ...]:
+    """設定面有哪幾處要求「完全跳過權限」（空＝不相干）。純函式。
+
+    兩條路各自獨立生效所以都要看：SDK 後端讀 `executor.permission_mode`，PTY／subprocess
+    後端（出廠預設，F-SBR-001 實際走的那條）讀 `claude.extra_args`——只守前者會整條漏掉。
+    只判**真的把 bypass 打開**的字面；`--allow-dangerously-skip-permissions` 只是「允許日後
+    切過去」的選項、本身不跳過任何檢查，不在此列。
+    """
+    found: list[str] = []
+    if (permission_mode or "").strip().lower() == BYPASS_MODE.lower():
+        found.append(f"executor.permission_mode={BYPASS_MODE}")
+    args = [str(a) for a in extra_args]
+    for i, arg in enumerate(args):
+        if arg == "--permission-mode" and i + 1 < len(args):
+            value = args[i + 1]
+        elif arg.startswith("--permission-mode="):
+            value = arg.split("=", 1)[1]
+        else:
+            value = ""
+        if value.strip().lower() == BYPASS_MODE.lower():
+            found.append(f"claude.extra_args 的 --permission-mode {BYPASS_MODE}")
+        if arg == SKIP_PERMISSIONS_FLAG:
+            found.append(f"claude.extra_args 的 {SKIP_PERMISSIONS_FLAG}")
+    return tuple(dict.fromkeys(found))
+
+
+def permission_bypass_allowed_from_env(environ: Mapping[str, str] | None = None,
+                                       ) -> tuple[bool, str]:
+    """回 (旗標是否為真, 原始字面)。只讀行程環境（同 `conflict_policy_from_env`）；
+    不讀 `.env` 檔：這是安全閘，要由啟動方式（如 `docker run -e`）明確注入。
+
+    🔴 fail-closed：只有明確的真值才算開；打錯字（`treu`）算關，原始字面回給呼叫端放進訊息，
+    讓「設了卻沒生效」看得見，而不是靜默。
+    """
+    env = os.environ if environ is None else environ
+    raw = (env.get(ALLOW_BYPASS_ENV) or "").strip()
+    return raw.lower() in _TRUTHY, raw
+
+
+def permission_bypass_verdict(requested_by: Sequence[str], *, allow_flag: bool,
+                              flag_raw: str = "",
+                              isolation: IsolationEvidence) -> BypassOutcome:
+    """§6.1 不變式 8 的判決（純函式）。兩個要件缺一不可：旗標明確為真、且偵測到容器。
+
+    · 設定要求 bypass ＋ 旗標非真 ⇒ 拒絕（容器內也一樣：PRD 要「使用者明確設定」）；
+    · 旗標為真 ＋ 未偵測到容器 ⇒ 拒絕（不論設定有沒有要求 bypass：旗標字面條文如此）；
+    · 設定要求 bypass ＋ 旗標為真 ＋ 容器 ⇒ 放行並留一行含隔離證據的 log；
+    · 其餘（沒人要 bypass、旗標也沒開）⇒ 不相干，無輸出。
+    """
+    asked = "、".join(requested_by)
+    problems: list[str] = []
+    lines: list[str] = []
+    if requested_by and not allow_flag:
+        problems.append(
+            f"設定要求完全跳過權限（{asked}），但 {ALLOW_BYPASS_ENV} 不是 true"
+            f"（目前＝{flag_raw or '未設'}）⇒ 拒絕啟動（PRD §12／§4.5.4）。{_BYPASS_HOW}")
+    elif allow_flag and not isolation.detected:
+        head = (f"設定要求完全跳過權限（{asked}）、{ALLOW_BYPASS_ENV}=true 也已設"
+                if requested_by else f"{ALLOW_BYPASS_ENV}=true")
+        fix = _BYPASS_HOW if requested_by else f"請取消 {ALLOW_BYPASS_ENV}，或改在容器內執行"
+        problems.append(
+            f"{head}，但未偵測到容器環境（偵測項：/.dockerenv、/proc/1/cgroup、"
+            "env container／KUBERNETES_SERVICE_HOST；macOS 一律視為主機）"
+            f" ⇒ 拒絕啟動（PRD §6.1 不變式 8）。{fix}")
+    elif requested_by:
+        lines.append(f"bypass 已顯式允許（{asked}），隔離證據＝{'、'.join(isolation.sources)}")
+    return BypassOutcome(lines=tuple(lines), problems=tuple(problems))
+
+
 @dataclass(frozen=True)
 class BootReport:
     problems: tuple[str, ...] = field(default_factory=tuple)
@@ -289,11 +429,25 @@ def boot_self_check(
     margin_bytes: int = DEFAULT_MARGIN_BYTES,
     cleanup: Callable[[], list[str]] | None = None,
     notifier: Callable[[str], None] | None = None,
+    permission_mode: str | None = None,
+    extra_args: Sequence[str] = (),
+    environ: Mapping[str, str] | None = None,
+    isolation: IsolationEvidence | None = None,
 ) -> BootReport:
-    """§6.1 不變式 11~13 的一次性自檢。違反 → problems 非空（呼叫端須非零退出碼）。"""
+    """§6.1 不變式 8、11~13 的一次性自檢。違反 → problems 非空（呼叫端須非零退出碼）。"""
     lines: list[str] = []
     problems: list[str] = []
     notified = 0
+    # 不變式 8（權限旗標）：安全閘先判。偵測是惰性的——沒人要 bypass、旗標也沒開時完全不碰
+    # `/proc`（每次啟動多讀一個檔、跨平台多一個變因，卻換不到任何判決）。
+    requested = permission_bypass_requests(permission_mode, extra_args)
+    allow_flag, flag_raw = permission_bypass_allowed_from_env(environ)
+    if requested or allow_flag:
+        evidence = isolation if isolation is not None else detect_isolation_env(environ=environ)
+        bypass = permission_bypass_verdict(requested, allow_flag=allow_flag,
+                                           flag_raw=flag_raw, isolation=evidence)
+        lines.extend(bypass.lines)
+        problems.extend(bypass.problems)
     # 不變式 12（CLI 版本）先跑：它決定 dry_run，而 dry_run 決定 11 敢不敢重排。
     version = read_cli_version(cli_command, cli_runner)
     dry_run, line = cli_version_verdict(version)

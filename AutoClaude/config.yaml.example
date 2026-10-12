@@ -11,7 +11,8 @@
 claude:
   command: "claude"
   # R82 ACB-01：`--yes` 不是 Claude Code 旗標（實測 rc=1 unknown option），已移除。
-  # 需免權限提示時改：["--permission-mode", "bypassPermissions"]
+  # 需免權限提示時改：["--permission-mode", "acceptEdits", "--allowedTools", "Read,Edit,Write"]
+  # （PRD §12：bypassPermissions 只准容器內＋ALLOW_PERMISSION_BYPASS=true，否則開機自檢拒絕啟動）
   extra_args: []
   continue_flag: "--continue"   # 維持對話脈絡
   encoding: "utf-8"

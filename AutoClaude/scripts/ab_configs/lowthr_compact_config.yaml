@@ -25,7 +25,10 @@ executor:
 
 claude:
   command: "claude"
-  extra_args: ["--permission-mode", "bypassPermissions"]
+  # PRD §12 正道（不用 bypassPermissions，引擎開機自檢不變式 8 會拒絕）：消費者 sdd_bridge_smoke 只需
+  # 寫檔，故白名單只有 Read,Edit,Write、不給 pytest（與 ab_pty_config 的差異；驗收由引擎 evaluator 親跑）。
+  # 2026-10-12 由 bypassPermissions 改，尚待真跑驗證。
+  extra_args: ["--permission-mode", "acceptEdits", "--allowedTools", "Read,Edit,Write"]
 
 storage:
   mode: "yaml_only"

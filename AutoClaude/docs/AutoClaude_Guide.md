@@ -98,7 +98,8 @@ claude:
   command: claude               # CLI 名稱
   extra_args: []                # 預設不多送旗標（R82 ACB-01：`--yes` 不是 Claude Code 旗標，
                                 # 實測 rc=1 `error: unknown option '--yes'`；需免權限提示時改
-                                # ["--permission-mode", "bypassPermissions"]）
+                                # ["--permission-mode", "acceptEdits", "--allowedTools", "Read,Edit,Write,Bash(pytest:*)"]；
+                                # bypassPermissions 只准容器內＋ALLOW_PERMISSION_BYPASS=true，否則拒絕啟動）
   continue_flag: "--continue"   # 維持對話脈絡
   encoding: utf-8
 
