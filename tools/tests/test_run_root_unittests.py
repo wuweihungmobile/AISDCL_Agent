@@ -727,7 +727,7 @@ class TestWriterModulesDeclareTheModuleFence(unittest.TestCase):
                 self.assertIs(_calls_pace_writer(source), is_writer)
 
     def test_every_writer_module_on_disk_declares_the_fence(self) -> None:
-        """現況：全部 `tools/tests` 模組。寫端清單另釘＝已知五支（不多不少）：認不出任何寫端
+        """現況：全部 `tools/tests` 模組。寫端清單另釘＝已知六支（不多不少）：認不出任何寫端
         （分母 0）時不得以「零問題」假綠，多認出的也要被看見而不是默默多一支。"""
         problems, writers = [], set()
         for path in sorted(Path(__file__).resolve().parent.glob("test_*.py")):
@@ -741,8 +741,8 @@ class TestWriterModulesDeclareTheModuleFence(unittest.TestCase):
                          "（範本見 test_quota_policy.py）")
         self.assertEqual(writers, {"test_context_budget_guard.py", "test_quota_policy.py",
                                    "test_wake_chain_halt_r278.py", "test_quota_reconcile_gap.py",
-                                   "test_sentinel_tick_e2e_r145.py"},
-                         "偵測器認出的寫端不是已知五支（認不出＝分母 0 假綠；多認出＝先看是不是"
+                                   "test_sentinel_tick_e2e_r145.py", "test_quota_burndown.py"},
+                         "偵測器認出的寫端不是已知六支（認不出＝分母 0 假綠；多認出＝先看是不是"
                          "誤判，真的新寫端接好圍籬後把檔名加進本集合）")
 
 

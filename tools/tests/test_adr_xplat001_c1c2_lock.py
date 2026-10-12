@@ -616,7 +616,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 393,
     "_ps_engine.py": 83,
     "test_act_local_runner_image.py": 307,
-    "test_adr_xplat001_c1c2_lock.py": 8579,
+    "test_adr_xplat001_c1c2_lock.py": 8589,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 4074,
@@ -636,7 +636,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_claim_provenance_r86.py": 2001,
     "test_clean_venv_carrier.py": 281,
     "test_component_sanitizer_shared_layer_lock.py": 274,
-    "test_context_budget_guard.py": 14923,
+    "test_context_budget_guard.py": 14924,
     "test_context_window_parity.py": 325,
     "test_cpu_budget.py": 428,
     "test_defect_id_reference_integrity.py": 276,
@@ -672,6 +672,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_ps51_compat.py": 599,
     "test_ps_engine_ssot.py": 899,
     "test_python_c_percent_shim.py": 113,
+    "test_quota_burndown.py": 297,
     "test_quota_env_layers.py": 453,
     "test_quota_policy.py": 4526,
     "test_quota_reconcile_gap.py": 145,
@@ -2667,6 +2668,11 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "走 25 行至證據檔〈九〉L9／L10／L12，新列與接鏈列 +6）；test_mac_endurance_r83.py +82（526 回"
      "歸鎖五支＋pid fixture）；test_quota_env_layers.py +4（hook 鎖）。主軌 406→487 ≤ 516（款(11) "
      "連升仍第 2 輪）。逐檔清單見 CrossPlatform_R212_WakeChain_EnvLayer_Evidence.md〈二-10〉。"),
+    ("R213", 116429, 116737, +308,  # round-label-ok
+     "[非淨減法輪][回歸鎖軌申報 308（＝主表淨額，≤ 軌上限 309），見 _REGRESSION_LANE_LOG 同輪列] "
+     "DEF-200-528 清倉模式回歸鎖：test_quota_burndown.py 新鎖檔 +297＋test_context_budget_guard.py "
+     "+1＋本檔 +10（本列、同輪列、接鏈列）；以 R213 標籤記帳（兩鐘關係見證據檔〈三-2〉），R212 "
+     "主軌餘裕 29。逐檔清單見 CrossPlatform_R212_BurnDown_FourParty_Evidence.md。"),
 )
 
 
@@ -3164,6 +3170,9 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "DEF-200-516 家族五缺陷（A-1 時間閘、7-A／7-B／7-C／7-E）與 DEF-200-520（env.shared "
      "載入鏈、--env-doctor）回歸鎖：test_quota_env_layers.py 新鎖檔＋既有鎖檔擴充。見 Cros"
      "sPlatform_R212_WakeChain_EnvLayer_Evidence.md〈二〉。"),
+    ("R213", 308,  # round-label-ok
+     "DEF-200-528 清倉模式回歸鎖：test_quota_burndown.py 全檔＋幽靈鍵鎖補一行＋本檔自身。見 "
+     "CrossPlatform_R212_BurnDown_FourParty_Evidence.md。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -3341,10 +3350,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 338
+_REPIN_LOG_FROZEN_PREFIX_LEN = 339
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "cff55af4647dcfe8d36d82795ca0050faeaf7700a2ea62deddbea4cfd284f712")
+    "c72c9866f0248b7f5b08ff50037ec38cbfcfb7a3856c970708d2f6406ae63850")
 
 
 def repin_log_history_digest(
@@ -3520,6 +3529,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R212", "f5cb9e3fe7d6", "e62c2eaa57e5", "DEF-200-516"),  # round-label-ok
     ("R212", "e62c2eaa57e5", "73b11f302893", "DEF-200-520"),  # round-label-ok
     ("R212", "73b11f302893", "cff55af4647d", "DEF-200-525"),  # round-label-ok
+    ("R213", "cff55af4647d", "c72c9866f024", "DEF-200-528"),  # round-label-ok
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

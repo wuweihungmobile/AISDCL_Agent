@@ -675,6 +675,19 @@ _GOVERNANCE_DOCS = (
     # 當回合實測值 ⇒ 指針稽核；複審者要重驗就得讀完它 ⇒ 體積守門：即刻登記。
     _REPO_ROOT / "docs" / "06_quality"
     / "CrossPlatform_R212_E2E_Run4_Evidence.md",
+    # 同輪第五列證據檔（清倉模式 DEF-200-528 的暴露證據逐字、主控 BD-2′ 設計裁決、Dev 與
+    # 四面鏡逐字判決、`--issue` 前後 `--pace` 對照）：逐筆寫出 DEF-ID 與當回合實測值 ⇒
+    # 指針稽核；複審者要重驗就得讀完它 ⇒ 體積守門：即刻登記。
+    _REPO_ROOT / "docs" / "06_quality"
+    / "CrossPlatform_R212_BurnDown_FourParty_Evidence.md",
+    # 同輪第五列四方審查 findings（Architect／SD／QA／SA 各一份，Sonnet 唯讀鏡落檔；範本〈審查閉環〉
+    # 要求 findings 必須成為 repo 內具名檔案）：逐條 P3／P4 帶座標、重現法與 rc ⇒ 指針稽核；複審者
+    # 要重驗判級就得讀完它 ⇒ 體積守門：即刻登記。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R212_Row5_Findings_Architect.md",
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R212_Row5_Findings_SD.md",
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R212_Row5_Findings_QA.md",
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R212_Row5_Findings_SA.md",
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R212_Row5_Findings_QA2.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/{CrossPlatform,Quota}_*.md`。這**不是**把具名

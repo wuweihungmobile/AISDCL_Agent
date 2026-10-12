@@ -58,6 +58,10 @@ except Exception:  # noqa: BLE001 — 見上方 fail-open 紀律；不可達就�
 # improving_113 W1：三角色（純函式；依賴方向 quota_messages → model_roles → quota_policy，不成環）。
 import model_roles  # noqa: E402
 
+# DEF-200-528：清倉生效時兩句建議性文字的替代句（只讀 `quota_burndown` 的常數；它 import 期只依賴
+# `quota_pace`／`quota_policy`／`endurance_env`，`quota_gate` 只在函式內延後 import ⇒ 不成環）。
+import quota_burndown  # noqa: E402
+
 # `quota_pace` 是本族的葉子（它一支同層模組都不 import）⇒ 相依方向仍是單向的，
 # 且 `quota_policy` 早就 import 它（`as W`）：本行沒有新增任何一條相依邊的方向。
 import quota_pace  # noqa: E402
@@ -570,8 +574,11 @@ def throttle_horizon_line(decision: quota_policy.Decision, now: datetime,
         halted = decision.band == quota_policy.BAND_HALT
         eases = ("要等到 reset 才解除，停止帶不隨時間放寬" if halted
                  else "水位不變時，隨 reset 逼近才逐步放寬")
-        return (f"   ⏳ 這一條的 {horizon} ⇒ 這個 cap 會**連續套用好幾天**（{eases}）。"
-                "改做不吃額度的工作，或降扇出／切小模型。\n")
+        advice = "改做不吃額度的工作，或降扇出／切小模型。"
+        bd = decision.burndown  # DEF-200-528：只對被放寬的 binding 軸替換兩句（清倉＝要「用完」）
+        if bd and not halted and decision.binding and decision.binding.kind in bd.relaxed:
+            eases, advice = quota_burndown.NOTE_HORIZON, ""
+        return f"   ⏳ 這一條的 {horizon} ⇒ 這個 cap 會**連續套用好幾天**（{eases}）。{advice}\n"
     return f"   ⏳ 這一條的 {horizon} ⇒ 這道節流很快就會自己解除。\n"
 
 
@@ -769,7 +776,11 @@ def pace_line(decision: quota_policy.Decision, live: int, max_fanout: int) -> st
         return head + "｜**量不到任何一軸**（這不是「額度很寬鬆」）"
     when = next((f"剩 {int(r.minutes)} 分鐘" for r in decision.per_axis
                  if r.axis is axis and r.minutes is not None), "reset 距離不明")
-    return head + f"｜最緊的一條＝{axis.kind} {axis.pct:g}% {when}"
+    # 🔴 DEF-200-528：清倉授權在場時標題行只追加短標記（落款 id＋放寬／未放寬軸數）；全文另起一行
+    # （`quota_burndown.full_line`，只印一次，渲染住 `quota_burndown`）。過期／撤銷後
+    # `decision.burndown` 為 `()`，這一段整個消失。
+    tail = decision.burndown.mark if decision.burndown else ""
+    return head + f"｜最緊的一條＝{axis.kind} {axis.pct:g}% {when}" + tail
 
 
 def posture_line(path: Path) -> str:
@@ -836,9 +847,10 @@ def model_hint_line(decision: quota_policy.Decision,
     if not decision.model_hint:
         return ""
     roles = roles or model_roles.DEFAULT_ROLES
+    note = quota_burndown.NOTE_HINT if getattr(decision, "burndown", None) else ""  # DEF-200-528
     return (f"   🔻 降級建議：kind={decision.model_hint} 已進收緊帶 ⇒ 建議派工帶 "
             f"model: {roles.hint_first}{roles.downgrade} "
-            "續跑（只建議不自動改模型；cap 不受本行影響）。\n")
+            f"續跑（只建議不自動改模型；cap 不受本行影響）。{note}\n")
 
 
 def model_roles_line(roles: model_roles.ModelRoles, problems: list[str]) -> str:

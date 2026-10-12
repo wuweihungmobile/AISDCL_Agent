@@ -27,6 +27,20 @@
 字面本日現查僅命中本檔與裁決記錄本身；主控將另立帳本列追蹤，本注僅載事實）。
 本檔無任何條款達「已由實作超越」。原文保留。】
 
+【2026-10-12 落地訂正注（DEF-200-528；PRD 修訂表 v2.1.19；證據＝`docs/06_quality/CrossPlatform_R212_BurnDown_FourParty_Evidence.md`）：
+① 本檔條款已落地於 `tools/lib/quota_burndown.py`（載體依 §3／QB3：落款檔六欄住 `trace_dir()`、CLI `--issue`／`--status`／`--revoke` 唯一寫入口、
+`AUTOSDD_QUOTA_BURNDOWN_OFF` 只准關；生效判準＝§3.3 全合取、fail-closed；BD-1；夾層 `ceil=Policy.cap_notice`（QB1）；
+四條底線以 qualifying 合取項與建構順序落地）；§7.2 草案鍵 `BURNDOWN_CAP_CEILING` **未做**（上限直接取 `cap_notice`，不另設旋鈕）。
+② **BD-2′ 跨窗攤提暫停（主控代決，補 QB6 尾句要求的「跨窗點名（含短窗軸）」增補；掌舵者可隨時以 PRD §16.5 (i) 推翻）**：
+§4.1 原文的 Q-same 不動；新增 Q-cross＝「進 cap gate 的短窗軸，且本次攤提 `Amort.total_kind` 的軸是 Q-same（被點名軸本身 Q-same 成立）⇒
+該短窗軸餵給 `pct_band` 的水位改用原始 pct；不享 BD-1；底線①②③同樣合取」。WHY：攤提存在的唯一目的是保護長窗軸，掌舵者點名該軸清倉＝明示解除該保護。
+故 §4.1「`five_hour`／`session` 今天不是 qualifying 軸」與 §9-1「本條文對立案情境今天治不到」兩句，自本注起**時效終止**（真機親驗：下令後決策 cap 1→`cap_converge`、
+`--pace` 標題 cap 1→2 由 `quota_stability` 遲滯逐階放寬）。
+③ 建構順序＝**逐軸放寬 → 既有 min 聚合 → must-finish 收斂 → model_hint**；§5 ④「cap/rec 聚合 → 清倉放寬 → …」的字面作廢，承重性質（must-finish 最後求值）不變。
+④ §3.1 (ii)／§7.3「以 `resets_at` 字串為鍵、結構性不匹配」的前提與真實語料不符（週軸 205 列讀數 205 個相異字串、亞秒抖動；另有改錨 2 次——1 次提前 20 小時、1 次後移 20 小時：提前者會讓落款活過視窗（新視窗水位低、放寬幾乎無作用，仍登 P4）、後移者讓落款提早失效＝保守〔Architect 鏡真實語料統計；SA 鏡以 `quota_burn.jsonl` 重算方向〕）：
+實作綁的是 `until_resets_at` **時刻**（`now < until`），不綁視窗身分；同窗鄰軸判準（QB6 字串全等）在真實語料對 `weekly_all`＝`seven_day`、`session`＝`five_hour` 成立、對分軌軸不成立（保守側）。
+⑤ 出聲：§6.1 三要求落地於 `pace_line` 短標記＋全文一行＋`describe()`；§6.3 兩個計數器以 `<trace_dir>/autosdd_burndown_events.jsonl`（`effect=relaxed|inert`）承載，`row_of()` 加 `bd` 欄。原文保留。】
+
 ---
 
 ## 0. 本文件是什麼／不是什麼，以及每個數字怎麼來的

@@ -95,6 +95,7 @@ import harness_feed  # noqa: E402
 # fallback stub 等於讓同一份字面有第二個家，而且會用錯的答案靜默通過。
 import pace_contract  # noqa: E402  # R86：配速檔案契約的寫入端（引擎側唯一的傳遞方式）
 import quota_availability  # noqa: E402  # R102／PRD §4.2.4(a)：可得性軸遲滯（內部已 fail-soft）  round-label-ok
+import quota_burndown  # noqa: E402  # DEF-200-528：清倉授權疊層（操作者落款；只改逐軸輸入）
 import quota_env_layers  # noqa: E402  # 檔案層載入鏈（env.shared → .env）的 SSOT
 import quota_messages  # noqa: E402  # DEF-200-435：新 helper 走模組屬性（from-import 每名佔一行，tier 餘裕僅 1 行）
 import quota_pace  # noqa: E402  # R86：窗長／燃燒率／跨窗攤提（同樣是判讀原語）
@@ -354,8 +355,8 @@ def core_signature(state: quota_policy.QuotaState) -> tuple:
 # 給出 r 的量級 6~15，而它們全部只活在對話裡——這一支就是把那種觀測變成可累積的資料。
 # 同一個 `measured_at` 只寫一次：`--pace` 可能在同一份快取上被連呼數次。
 # 失敗一律吞掉：落款是**取數的副產品**，不得讓 `--pace` 掛掉（同 `note_degraded` 的紀律）。
-def record_burn(state: quota_policy.QuotaState, live: int = 0) -> bool:
-    """把這一次的逐軸讀數 append 一列。回傳「有沒有真的寫」。"""
+def record_burn(state: quota_policy.QuotaState, live: int = 0, bd: str | None = None) -> bool:
+    """把這一次的逐軸讀數 append 一列（`bd`＝生效中的清倉落款 id）。回「有沒有真的寫」。"""
     if not state.usable() or not state.measured_at:
         return False
     try:
@@ -368,7 +369,7 @@ def record_burn(state: quota_policy.QuotaState, live: int = 0) -> bool:
             handle.write(quota_pace.row_of(
                 state.measured_at, [(a.kind, a.pct) for a in state.axes], live,
                 fp=core_signature(state),
-                resets=[(a.kind, a.resets_at) for a in state.axes]))
+                resets=[(a.kind, a.resets_at) for a in state.axes], bd=bd))
     except OSError:
         return False
     return True
@@ -942,6 +943,7 @@ def pace_report(now: datetime | None = None, model: str | None = None,
     if (halted := halted_band_line(read_halt_marker(sid or ""), now)):
         return halted_pace_text(halted, read_quota(now), now, policy, model)
     state = pace_state(now)
+    bd = quota_burndown.active(state, now, policy_env(), core_signature)  # DEF-200-528
     # 🔴 `live` 落款進去是為了**下一輪**：per-agent 燃燒率＝Δpct ÷（Δ分鐘 × 併發數），
     # 而併發數不記下來就永遠算不出來（本輪的 r 只到「每 pp 換幾 pp」這一層）。
     # 🔴 R96／B-2：同一個 `live` 現在**還要餵給 `pace_line()`**——舵手派工前問的那個數字
@@ -949,13 +951,15 @@ def pace_report(now: datetime | None = None, model: str | None = None,
     # ⇒ 實測「`--pace` 印可派 2 個」與「`Agent` 被擋、本視窗已用 2 次」同一刻並存。
     # 用 walrus 留值：取數次數與時點逐字不變（同一次呼叫、同一個 `now`），只是給第二個消費者。
     root = fanout_ledger_path()
-    record_burn(state, live := live_dispatches(root, now))
+    record_burn(state, live := live_dispatches(root, now), bd and bd.id)
     # 🔴 `DEF-200-169`：**先** `live_dispatches()`（它會 prune 掉滾出視窗的目錄項）**再**問
     # 最舊那一筆，兩者吃同一個 `now`／同一把 `floor` ⇒ 「帳上 N 筆」與「最舊 M 秒前」在同
     # 一行裡結構上不可能互相矛盾（先問最舊再數也對，但兩次取數之間會多一個競態窗）。
     window = fanout_window_left(root, now)
     ratio, ratio_note, plan_note = burn_ratio(state)
-    decision = quota_policy.decide(state, now, policy, ratio, ratio_note, active_model=model)
+    decision = quota_policy.decide(state, now, policy, ratio, ratio_note, active_model=model,
+                                   burndown=bd)
+    quota_burndown.log_decision(decision, now)  # 增補檔 §6.3：relaxed／inert 計數的 JSONL 等價物
     # 🔴 R102：把 cap 寫進契約檔這一步，是引擎唯一真的會讀到 cap 的地方（`quota_gate()` 的  round-label-ok  # noqa: E501
     # 派發帳只擋 hook 觸發的扇出型工具呼叫，引擎自己的併發排程走這份檔案契約）——平穩性
     # 機制若只接進 `quota_gate()`，引擎那一側仍然看得到原始的、會抖動的 cap。可得性狀態
@@ -991,7 +995,9 @@ def pace_report(now: datetime | None = None, model: str | None = None,
     horizon = ("" if decision.cap is None
                else throttle_horizon_line(decision, now, state.measured_at))
     # R95：攤提行帶 converge 錨點（出聲不收緊時說出口）；hint 行空字串＝不印（見渲染端）。
-    return (f"{pace_line(decision, live, policy.max_fanout)}\n  {quota_policy.describe(decision)}\n"
+    return (f"{pace_line(decision, live, policy.max_fanout)}\n"
+            f"  {quota_policy.describe(decision, burndown=False)}\n"
+            f"{quota_burndown.full_line(decision)}"  # DEF-200-528：清倉全文段，整份輸出只這一處
             f"  {quota_pace.explain(decision.amort, policy.converge_pct)}\n"
             f"  {posture_line(quota_cache_path())}\n"
             f"{fanout_window_line(window, live, FANOUT_WINDOW_SECONDS)}"
@@ -1092,7 +1098,10 @@ def quota_gate(payload: dict, *, blocking, latch_read, latch_write,
     # 🔴 **整支 hook 唯一的判讀入口，恰好呼叫一次**（M10：「函式對了但沒人叫它」是本 repo
     # 反覆記載的『機制蓋好沒接電』）。量不到時 `decide()` 回 `degraded_cap`（不是不設限、
     # 也永不 halt）：R81 複審探針實測「快取過期 600s ＋ 額度 99%」時 42 次派發放行 42。
-    decision = quota_policy.decide(state, now, policy, active_model=active_model)
+    # DEF-200-528：清倉授權（操作者落款檔；無落款＝None，與今天逐字相同）。`env` 傳進去是給它
+    # 判斷 kill-switch 用的；生效判準與讀取點全住 `quota_burndown.active()`。
+    bd = quota_burndown.active(state, now, env, core_signature)
+    decision = quota_policy.decide(state, now, policy, active_model=active_model, burndown=bd)
     # 🔴 R102／PRD §4.2.4：平穩性機制接線。`unmeasured` 這裡已經是「這次讀完（含 L3 地板  round-label-ok  # noqa: E501
     # 替補之後）到底讀不讀得到」的最終結論——`quota_availability.evaluate()` 要的正是
     # 這個訊號（不是取代它，是替它加上遲滯：單次瞬斷不足以判定「已進入不可得」，見該檔

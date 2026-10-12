@@ -9878,7 +9878,8 @@ class QuotaEnvFileIsActuallyLoadedTest(unittest.TestCase):
             # v2.1.13 G3：新逃生口二枚（AUTOSDD_RELAY_*）的消費端住這裡，不在上面三支裡。
             _REPO_ROOT / "tools" / "lib" / "relay_machine.py",
             # improving_113 W1：三個模型角色鍵（AUTOSDD_MODEL_*）由 model_roles.py 讀。
-            _REPO_ROOT / "tools" / "lib" / "model_roles.py"))
+            _REPO_ROOT / "tools" / "lib" / "model_roles.py",
+            _REPO_ROOT / "tools" / "lib" / "quota_burndown.py"))  # DEF-200-528：清倉 kill-switch
         fields = set(quota_policy.Policy.__dataclass_fields__)
         for spec in quota_policy.ENV_SPEC:
             with self.subTest(key=spec.name):

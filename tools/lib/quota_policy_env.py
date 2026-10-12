@@ -156,6 +156,11 @@ ENV_SPEC: tuple[EnvVar, ...] = (
     # `os.environ`，`.env` 設了也關不掉（同 R82／C2 那個病）：非要 Windows 登錄檔＋整個
     # 重啟 Claude Code 才生效。`attr=None`：不進 Policy，消費端住該檔自己。
     EnvVar("AUTOSDD_RESUME_OFF", None, "", "flag", None, None, "1 ⇒ 醒來只探測＋留痕，不自動續跑（session_resume_planner.py 專屬）", "escape"),  # noqa: E501
+    # 🔴 DEF-200-528：清倉授權的 kill-switch，**只准關、不准開**（授權只由持久落款承載，見
+    # `tools/lib/quota_burndown.py`）：一個能用 env 打開的放寬旗標，生效範圍是「所有軸、所有時刻」，
+    # 而清倉是「一次、一個視窗、一組軸」的事。`attr=None`：不進 Policy，消費端住 `quota_burndown`。
+    EnvVar("AUTOSDD_QUOTA_BURNDOWN_OFF", None, "", "flag", None, None,
+           "1 ⇒ 清倉授權（操作者落款）全部失效；只准關不准開（quota_burndown.py 專屬）", "escape"),
 )
 
 _ENV_HEADER = (

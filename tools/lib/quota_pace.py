@@ -363,8 +363,12 @@ def amort_relaxed(amort, converge_pct) -> bool:
 #   · 下界是原始 pct：已經在 halt 帶的軸不會被這一格**放寬**回 prepare。
 #   R95 的免除分支不破這條不變式：它回的是原始 pct 本身（`shown == raw` 仍滿足
 #   `shown >= raw`），且只在長窗自軸 free/notice 帶成立——收緊面一格都沒鬆。
+# 🔴 DEF-200-528（清倉 BD-2′，見 `quota_burndown`）：`hold`＝與 `named_pcts` 同序的布林遮罩，
+#   為真的軸**維持原始 pct**（攤提上調對它暫停）。這是上面免除分支（長窗自軸未達 converge 錨點）的
+#   第二個分支，不是第二條路：`amortize()` 一個字沒動（`Amort` 照算照回、`explain()` 照印），
+#   只決定「要不要施加」；`shown >= raw` 對遮罩軸同樣成立（回的就是 raw），方向鎖仍是「永不調低」。
 def band_inputs(named_pcts, minutes, wins, ratio, halt_pct: float,
-                ratio_note: str = "", converge_pct: float | None = None) -> tuple:
+                ratio_note: str = "", converge_pct: float | None = None, hold=()) -> tuple:
     """`(逐軸餵給 pct_band 的水位, Amort|None)`。"""
     amort = amortize(named_pcts, minutes, wins, ratio, ratio_note)
     if amort is None:
@@ -373,8 +377,8 @@ def band_inputs(named_pcts, minutes, wins, ratio, halt_pct: float,
         return tuple(float(p) for _k, p in named_pcts), amort
     ceiling = float(halt_pct) - _HALT_GUARD_PP
     shown = []
-    for (_kind, pct), win in zip(named_pcts, wins):
-        if win is None or float(win) != amort.rate_window:
+    for i, ((_kind, pct), win) in enumerate(zip(named_pcts, wins)):
+        if win is None or float(win) != amort.rate_window or (hold and hold[i]):
             shown.append(float(pct))
         elif amort.allowance_pp <= 0:
             shown.append(max(float(pct), ceiling))
@@ -402,16 +406,20 @@ def mask_windows(wins, skip) -> tuple:
 
 def resolve(rows, deltas, ratio, ratio_note: str, accel_abs: float, far_abs: float,
             halt_pct: float, pace_ceiling: float = 1.0,
-            converge_pct: float | None = None, skip=()) -> tuple:
-    """`[(餵給 pct_band 的水位, 視野檔位, 夾 0 的剩餘分鐘|None, 合併後的 note)]`。"""
+            converge_pct: float | None = None, skip=(), floor=(), hold=()) -> tuple:
+    """`[(餵給 pct_band 的水位, 視野檔位, 夾 0 的剩餘分鐘|None, 合併後的 note)]`。
+
+    `floor`／`hold`＝清倉授權（DEF-200-528）的兩個逐軸布林遮罩，預設空＝逐字不變：`floor` 為真的軸
+    視野檔位夾在 mid（BD-1 乘數地板 1.0，near 不動）；`hold` 見 `band_inputs`（BD-2′）。
+    """
     wins = windows(tuple((kind, at) for kind, _pct, at, _n in rows))
     grammar = tuple(window_minutes(kind) for kind, _pct, _at, _n in rows)
     shown = band_inputs(tuple((kind, pct) for kind, pct, _at, _n in rows),
                         tuple(d[0] for d in deltas), mask_windows(wins, skip), ratio,
-                        halt_pct, ratio_note, converge_pct)[0]
+                        halt_pct, ratio_note, converge_pct, hold)[0]
     out = []
-    for (_kind, pct, _at, pct_note), (raw, note), win, gwin, feed in zip(
-            rows, deltas, wins, grammar, shown):
+    for (_kind, pct, _at, pct_note), (raw, note), win, gwin, feed, lift in zip(
+            rows, deltas, wins, grammar, shown, tuple(floor) or (False,) * len(rows)):
         horizon, burn = effective_horizon(pct, raw, win, accel_abs, far_abs, pace_ceiling)
         # 🔴 DEF-200-243（方向 B；R126 四方修正 round-label-ok：「與絕對門檻取較緊」，非純絕對）：
         # 自身文法解不出窗長的軸，鄰軸繼承來的窗長**只准讓它更緊**——與 window=None 的完整
@@ -423,6 +431,8 @@ def resolve(rows, deltas, ratio, ratio_note: str, accel_abs: float, far_abs: flo
                                                     pace_ceiling)
             if tightest(horizon, floor_h) != horizon:
                 horizon, burn = floor_h, floor_burn  # note 跟最終分類走，不留 far＋thrifty 矛盾
+        if lift and horizon == AXIS_FAR:
+            horizon = AXIS_MID  # BD-1：夾在 label 而不是 cap（見 `effective_horizon` 上方判詞）
         joined = "+".join(x for x in (pct_note, note, burn,
                                       NOTE_AMORT if feed > pct else "") if x)
         out.append((feed, horizon, None if raw is None else max(0.0, raw), joined))
@@ -622,8 +632,9 @@ def rows_from_jsonl(text: str) -> list:
 # 偏移兩者事後都無從分辨（`quota_reconcile.py` 檔頭已把這點記成硬結論）。
 # 🔴 伺服器原字串**原封不動**寫下（不轉本地、不重新格式化）：naive 本地時間戳跨 DST 相減
 # 實測差 3600 秒且完全靜默，本 repo 有具名機械物禁止持久化它（`TestNaiveLocal...`）。
-def row_of(measured_at: str, pcts, live: int = 0, fp: tuple = (), resets=()) -> str:
-    """一列落款（含尾端換行）。`live`＝當時的併發派發數；`fp`＝寫入時的**核心方案指紋**
+def row_of(measured_at: str, pcts, live: int = 0, fp: tuple = (), resets=(), bd=None) -> str:
+    """一列落款（含尾端換行）。`bd`＝生效中的清倉落款 id（無授權＝null，DEF-200-528）。
+    `live`＝當時的併發派發數；`fp`＝寫入時的**核心方案指紋**
     （R93／DEF-200-122：見 `quota_gate.core_signature`。預設 `()` 給既有呼叫端相容，
     真正的生產呼叫端 `quota_gate.record_burn` 一律顯式帶入）；`resets`＝`[(kind,
     resets_at)]`，預設 `()` ⇒ 寫出空 dict（與「這一列沒有記」語意一致，不憑空補時刻）。
@@ -632,7 +643,7 @@ def row_of(measured_at: str, pcts, live: int = 0, fp: tuple = (), resets=()) -> 
                        "pct": {str(k): float(v) for k, v in pcts},
                        "live": int(live), "fp": list(fp),
                        "resets_at": {str(k): (None if v is None else str(v))
-                                     for k, v in resets}},
+                                     for k, v in resets}, "bd": bd},
                       ensure_ascii=False, sort_keys=True) + "\n"
 
 

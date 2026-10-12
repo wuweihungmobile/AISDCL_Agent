@@ -323,6 +323,10 @@ class Decision:
     model_hint: str = ""
     # 🔴 DEF-200-197：量不到時原樣帶 `QuotaState.retry_after`（遙測限流的恢復時刻）；只給人話面用。
     retry_after: str | None = None
+    # 🔴 DEF-200-528：清倉授權（操作者落款，見 `quota_burndown`）這一次決策的落地結果
+    # （`quota_burndown.Applied`＝id／effect／text）；`()`＝沒有授權在場，所有既有呼叫端逐字不變。
+    # 與 `amort` 同理走 `object`：本檔不 import `quota_burndown`（它單向依賴本檔）。
+    burndown: object = ()
 
 
 # ── 時間：只把伺服器給的瞬時字串轉成「現在還剩幾分鐘」，不持久化任何時長 ──────────
@@ -547,13 +551,18 @@ def axis_recommended(pct: float, minutes: float | None, p: Policy) -> int:
 #   `axis.pct` 仍是伺服器給的原值（事實不得被改寫）；被攤提調高過的軸在 note 裡具名。
 def axes_of(state: QuotaState, now: datetime, p: Policy,
             ratio: float | None = None, ratio_note: str = "",
-            active_model: str | None = None) -> tuple[AxisReading, ...]:
-    """逐軸解析的**唯一正規路徑**：`minutes` 只能從 `axis.resets_at` 導出。"""
+            active_model: str | None = None,
+            relax: tuple | None = None) -> tuple[AxisReading, ...]:
+    """逐軸解析的**唯一正規路徑**：`minutes` 只能從 `axis.resets_at` 導出。
+
+    `relax`＝清倉授權的 `(floor, hold)` 兩個逐軸遮罩（DEF-200-528，由 `quota_burndown` 產生）；
+    `None`＝無授權，逐字不變。
+    """
     resolved = W.resolve(  # 🔴 帶號分鐘進去：負值的 mid 強制在 `horizon()`，不在這裡
         _rows(state), tuple(_delta_minutes(a.resets_at, now, state.measured_at)
                             for a in state.axes),
         ratio, ratio_note, p.accel_window_minutes, p.far_horizon_minutes, p.halt_pct,
-        p.pace_ceiling, p.converge_pct, _amort_skip(state, active_model))
+        p.pace_ceiling, p.converge_pct, _amort_skip(state, active_model), *(relax or ((), ())))
     readings = []
     for axis, (pct, horizon, minutes, note) in zip(state.axes, resolved):
         band = pct_band(pct, p)
@@ -681,7 +690,10 @@ def _amort_skip(state: QuotaState, active_model: str | None) -> tuple[bool, ...]
 # 實測「快取過期 600s ＋ 額度 99%」時 42 次派發放行 42。同時**永不 halt**。
 def decide(state: QuotaState, now: datetime, p: Policy,
            ratio: float | None = None, ratio_note: str = "",
-           active_model: str | None = None) -> Decision:
+           active_model: str | None = None, burndown=None) -> Decision:
+    # 🔴 `burndown`（DEF-200-528）＝已驗證生效的清倉授權（`quota_burndown.Burn`），`None`＝無授權、
+    # 既有呼叫端逐字不變。它**只改逐軸輸入**（見下方 `burndown.apply`），聚合律、must-finish、
+    # model_hint 一字不改；建構順序＝逐軸 cap/rec（含放寬）→ min 聚合 → must-finish → model_hint。
     # 🔴 `ratio`＝短窗 pp／長窗 pp 的換算比（R86／缺陷 C）。它是**觀測值不是門檻**，所以
     # 刻意不進 `Policy`（那裡是「全部門檻的唯一的家」）：由呼叫端從落款推估後注入，
     # 缺席 ⇒ 攤提整段不套用（不偽造一個 r）。
@@ -702,6 +714,9 @@ def decide(state: QuotaState, now: datetime, p: Policy,
             cap=floor, recommended_fanout=floor,
             band=BAND_UNMEASURED, binding=None, per_axis=(),
             reason=state.reason or "unmeasurable", retry_after=state.retry_after)
+    applied = ()
+    if burndown is not None:
+        readings, applied = burndown.apply(state, now, p, ratio, ratio_note, active_model, readings)
     # 🔴 R89／憲法裁決：**保險池不得一票否決主力**。掌舵者原話「付費額度是一個保險，
     # 你把它當成主要，本末倒置」；官方 UI 逐字「Turn on usage credits to keep using
     # Claude **if you hit a plan limit**」；PRD §6 4b 的預設是 `OVERAGE_POLICY=FREEZE`
@@ -790,7 +805,7 @@ def decide(state: QuotaState, now: datetime, p: Policy,
                           tuple(_delta_minutes(a.resets_at, now, state.measured_at)
                                 for a in state.axes), ratio, ratio_note,
                           _amort_skip(state, active_model)),
-        model_hint=hint)
+        model_hint=hint, burndown=applied)
 
 
 # M7：每一段只帶**一個** %，且同段必有 `kind=` 與剩餘分鐘（或明文不明）。
@@ -803,13 +818,17 @@ def _axis_phrase(r: AxisReading) -> str:
             f"band={r.band} horizon={r.horizon} cap={r.cap}{model}{note}")
 
 
-def describe(d: Decision) -> str:
-    """渲染成人看的一則訊息。🔴 裸的「額度 54%」正是掌舵者當場誤讀的**那個**形狀。"""
+def describe(d: Decision, *, burndown: bool = True) -> str:
+    """渲染成人看的一則訊息。🔴 裸的「額度 54%」正是掌舵者當場誤讀的**那個**形狀。
+
+    `burndown`＝是否附清倉全文：預設附（hook 阻斷訊息只有這一行可看）；`--pace` 另行印、傳 False。
+    """
     tail = (f"⇒ cap={d.cap} recommended={d.recommended_fanout} band={d.band} "
             f"binding={d.binding.kind if d.binding else '-'} reason={d.reason}")
     if not d.per_axis:
         return f"額度量不到（reason={d.reason}）{tail}"
-    return "；".join(_axis_phrase(r) for r in d.per_axis) + "　" + tail
+    text = "；".join(_axis_phrase(r) for r in d.per_axis) + "　" + tail
+    return text + (d.burndown.text if burndown and d.burndown else "")
 
 
 # ── env：門檻的唯一的家，`.env.example` 由它生成（不手寫＝不製造第二個家）─────────
