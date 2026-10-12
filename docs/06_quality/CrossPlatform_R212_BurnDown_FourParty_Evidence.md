@@ -238,7 +238,7 @@ session 來源＝環境變數 CLAUDE_CODE_SESSION_ID（sid=ed1c9022-22cc-4974-a8
 ### 八-2 commit／push／雲端對帳
 
 - 根層全套（最終樹；主控親跑 `unset AUTOSDD_PARALLEL_TESTS; AUTOSDD_SENTINEL_OFF=1 python tools/run_root_unittests.py`）：`ROOT_RC=0`；skip census `tools/tests@darwin 共 47 支：platform=47／…／untagged=0`；`真實 TEMP 圍籬：…零變動`；跑後 `tools/.last_failure_*.log` 3 份（runner 自測落檔）已 rm；哨兵 2→2。
-- commit／push／CI：本列 commit 由 push 觸發 workflow，對帳結果以回填 commit 追記於本節（回填 commit 本身不再回填）。
+- commit `1ddc7d25`（24 檔；pre-push 全套通過、`8395affa..1ddc7d25 main -> main`）push 觸發四支 workflow（`gh run list --commit 1ddc7d25552dfe1a5528ba0692b92f959d1a0f10`）：root-infra-ci success（38260860900）、AutoClaude CI success（38260860406）、**macos-compat-ci failure（38260860708）**、**windows-compat-ci failure（38260860511）**。兩紅同一根因（T3 → 入帳 DEF-200-529，同批 fixed）：步驟「執行（非僅解析）ci-gate」內 `AISDLC_SDD/scripts/tests/test_ci_paths_cover_root_consumers.py:1233` 兩項 `AssertionError: 根層消費檔未列入 {macos,windows}-compat-ci.yml paths（只改該檔時其回歸鎖不會跑，DEF-101-042 同構）：['tools/lib/quota_burndown.py']`（macOS：`2 failed, 360 passed, 2 skipped`；Windows：`2 failed, 361 passed, 1 skipped`）；本機 pre-push 全套未涵蓋 `scripts/tests` 這支鎖（push.log 零命中），故本機綠、雲端紅。修法＝兩支 workflow `paths` 各補 `tools/lib/quota_burndown.py` 一行（本機 `cd AISDLC_SDD && python -m pytest scripts/tests/test_ci_paths_cover_root_consumers.py -q` 綠，逐字見下）；回填 commit（本 commit）同時帶此修法，其自身觸發的 workflow 以 GitHub run 紀錄為憑、不再回填（範本〈雲端對帳〉）。Windows smoke 另有三處 `❌ ONBOARDING.md §7 表② presumed stale` 字樣（dev_start 步驟，非失敗步驟；Windows 欄待該機 `clean_venv_carrier.py` 回填＝主檔〈八-4〉第 5 項，非本列新增）。
 
 ## 〈九〉開了→收了（本列）
 
