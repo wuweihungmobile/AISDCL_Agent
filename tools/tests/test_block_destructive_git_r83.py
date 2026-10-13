@@ -1,24 +1,9 @@
 #!/usr/bin/env python
-"""`.claude/hooks/block_destructive_git.py` 的回歸鎖（R83）。
+"""`.claude/hooks/block_destructive_git.py` 的回歸鎖（R83）。  round-label-ok
 
-WHY 這支鎖存在：六包並行工作樹上的 `git stash` 真實事故——「禁令沒涵蓋到的那個
-動詞，就是被踩的那個」。事故敘事原文＝CrossPlatform_R95_GovWrite_Evidence.md §6.1。
-
-而這道守衛的價值**完全等於它判準的精準度**：repo 已判過「擋到讓人無法工作的守衛
-會被整個關掉，而被關掉的守衛比沒有守衛更糟」。所以本檔的分量刻意壓在**放行面**：
-`git stash create`（根 CLAUDE.md〈可重啟點四條件〉指定的保全手法）、
-`git reset --soft`、純切分支、所有唯讀查詢——任何一條被擋到，這支鎖就要紅。
-
-六個方向（交付要求逐條對應，缺一即不算紅綠自證）
-------------------------------------------------
-  ① 該擋的擋（`TestDestructiveFormsAreBlocked`）
-  ② 不該擋的放行（`TestSafeFormsAreNotBlocked`／`TestQuotingAndHeredocAreInert`）
-  ③ 退化 payload（`TestDegradedPayloadIsLoudButNotBlocking`）
-  ④ 例外 fail-open（`TestUnexpectedExceptionFailsOpen`）
-  ⑤ 逃生口（`TestEscapeHatches`）
-  ⑥ 工具名在射程外就放行（`TestScopeIsNotWidened`）
-另加註冊面（`TestHookIsActuallyRegistered`）——R80 的教訓：阻斷臂蓋好了卻圈到一組
-這個 harness 不會發出的工具名，等於永遠不觸發，而所有單元測試照樣全綠。
+WHY：六包並行工作樹上的 `git stash` 真實事故（敘事＝CrossPlatform_R95_GovWrite_Evidence.md
+§6.1）；守衛的價值等於判準精準度，分量刻意壓在放行面。六個方向（擋／放行／退化 payload／
+例外 fail-open／逃生口／射程外放行）＋註冊面各有具名類別；沿革搬至 R213 證據檔〈附錄 C〉。
 """
 
 from __future__ import annotations
@@ -2676,6 +2661,8 @@ class TestGovernanceFilesAreReadOnlyWhenUnattended(unittest.TestCase):
         # 見 `test_the_r115_l3_additions_are_protected_when_unattended` 的專屬紅綠自證。
         ".claude/settings.unattended.json",
         "tools/tests/test_adr_xplat001_c1c2_lock.py",
+        # R213／PRD §12 寫入範圍（掌舵者 2026-10-13 核准）：喚醒路由與模型角色。  round-label-ok
+        "tools/lib/resume_route.py", "tools/lib/model_roles.py",
     )
     #: 誤擋是守衛被整個關掉的路徑——放行面與擋下面同等重要。
     NOT_PROTECTED = (
@@ -2692,6 +2679,25 @@ class TestGovernanceFilesAreReadOnlyWhenUnattended(unittest.TestCase):
     def _payload(self, path: str, tool: str = "Write") -> dict:
         key = "notebook_path" if tool == "NotebookEdit" else "file_path"
         return {"tool_name": tool, "tool_input": {key: path}}
+
+    def test_git_dir_and_home_ssh_are_governance_when_unattended(self) -> None:
+        """R213／PRD §12：專案根內 `.git/` 與家目錄 `~/.ssh/` 在無人值守下唯讀  round-label-ok
+        （rc=2）、有人值守只提醒（rc=0）；`~` 以注入的 HOME／USERPROFILE 解析，
+        不碰真家目錄；家目錄其餘路徑維持放行（誤擋＝守衛被整個關掉的路徑）。"""
+        home = Path(tempfile.mkdtemp(prefix="w-gov-home-"))
+        self.addCleanup(shutil.rmtree, home, ignore_errors=True)
+        fake_home = {"HOME": str(home), "USERPROFILE": str(home)}
+        for rel in (".git/HEAD", str(home / ".ssh" / "config")):
+            with self.subTest(rel=rel, unattended=True):
+                proc = run_hook(self._payload(rel),
+                                env=self._env(**fake_home, **{G.UNATTENDED_ENV: "1"}))
+                self.assertEqual(proc.returncode, 2, proc.stderr)
+            with self.subTest(rel=rel, unattended=False):
+                proc = run_hook(self._payload(rel), env=self._env(**fake_home))
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+        proc = run_hook(self._payload(str(home / "notes" / "x.md")),
+                        env=self._env(**fake_home, **{G.UNATTENDED_ENV: "1"}))
+        self.assertEqual(proc.returncode, 0, proc.stderr)
 
     def test_every_protected_file_is_blocked_when_unattended(self) -> None:
         for rel in self.PROTECTED:
@@ -3084,16 +3090,10 @@ class TestHookExitCodesAreZeroOrTwoExceptDegradedPayload(unittest.TestCase):
 
 
 class TestResultDoesNotDriftWithCallerCwd(unittest.TestCase):
-    """🔴 回歸鎖（本輪缺陷修復）：獨立驗證輪從非 repo 目錄（例如以
-    `tools/run_root_unittests.py` 或 `Start-Job` 驅動、呼叫者 cwd 落在 repo 外）單獨
-    跑本模組時，字面固定 9 支測試同時變紅——本檔多支測試直接呼叫
-    `G.destructive_git_hits()`，而 `is_foreign_tree()` 對 `CLAUDE_PROJECT_DIR` 的
-    fallback 是 `os.getcwd()`，呼叫者 cwd 一旦漂移出 repo，root 就解析錯，讓已知必須
-    命中的形態靜默變成放行（詳見本檔 `setUpModule` 上方註記）。
-
-    本鎖刻意**不**在測試本體內重新 patch `CLAUDE_PROJECT_DIR`：它要釘住的是模組級
-    `setUpModule` 這道釘子本身有沒有在生效——若日後那道釘子被誤刪，本鎖必須是第一個
-    重新變紅的測試，而不是靜默地跟著另外 9 支一起消失在「刻意分散」的假象裡。
+    """🔴 回歸鎖：從 repo 外 cwd 單跑本模組時 9 支測試同時變紅——`is_foreign_tree()` 對
+    `CLAUDE_PROJECT_DIR` 的 fallback 是 `os.getcwd()`，root 解析錯讓必中形態靜默放行。
+    本鎖刻意不在測試本體 patch `CLAUDE_PROJECT_DIR`：它釘的是模組級 `setUpModule` 那道
+    釘子有沒有生效（沿革搬至 R213 證據檔〈附錄 C〉）。
     """
 
     def test_a_known_hit_survives_the_process_cwd_moving_outside_the_repo(self) -> None:

@@ -165,8 +165,8 @@ auto mode 分類器對 `.claude/**` 的寫入一律 [Self-Modification] 拒絕�
 
 - 成品＝`<scratchpad>/guard_face/apply_guard_face_three.py`（一鍵套用 7 支檔：hook `_GOV_EXACT` 增二檔＋`.git/` 前綴＋`~/.ssh/` 根外例外、回歸鎖加二檔與新測試、unattended deny 增 22 條、新 hook `precompact_restart_point.py`、settings 新事件 PreCompact、根 CLAUDE.md 總表一列、活性鎖註冊面基準一列與新測試類；兩支 tools/tests 鎖檔以同檔史料精簡抵銷、逐檔行數不變；套完自跑五支鎖模組＋棘輪＋LOC＋ruff，任一紅即自動還原）＋`precompact_restart_point.py`（主控以本 session 真逐字稿試跑：rc=0 任務書骨架寫出、第二次「壓縮過密」出聲、`AUTOSDD_PRECOMPACT_OFF` 不落事件）。掌舵者第一次執行在寫檔前被腳本自己的寬度檢查擋下（一行 103 欄），已縮短；第二次待跑。
 - scratchpad 隨 session 蒸發，腳本複製到持久目錄亦被分類器擋；若本窗關閉前未套用，下一窗依本節與〈五〉重生成（設計與座標已齊）。
-- 掌舵者 2026-10-13 親跑紀錄：第 1 次在寫檔前被腳本自己的寬度檢查擋下（一行 103 欄）；第 2 次套用 7 檔後驗證紅——治理面鎖 OK、hook 活性 192 項 OK、守衛／姿態檔 823 項 OK、平台中立 177 項 OK、LOC OK（hook 747/750），但 (a) 文件鎖模組 6 紅＝ONBOARDING LOC 基線因並行包改碼而再度過期（非本腳本）、(b) ruff 新 hook 兩行 E501（本腳本）、(c) 棘輪淨額 −4／漂移 2 支＝DEV-F 進行中（非本腳本）⇒ 自動還原成功（`git status` 無 `.claude` 項）。修正：hook 兩行折行＋`datetime.UTC`；驗證改為只跑 CLAUDE.md 宣稱↔註冊兩個類、棘輪改「套用前後逐字相同」。掌舵者口頭授權「若我不在可自行執行」後主控再試仍被分類器擋（第 8 次）⇒ 第 3 次執行待掌舵者。
-- PRD 該三列格維持 ⏸、各補一行 v2.1.21 落款（掌舵者已核准、成品待親跑；SA C4）；套用 PASS 後再轉 ✅。
+- 掌舵者 2026-10-13 親跑紀錄：第 1 次在寫檔前被腳本自己的寬度檢查擋下（一行 103 欄）；第 2 次套用 7 檔後驗證紅——治理面鎖 OK、hook 活性 192 項 OK、守衛／姿態檔 823 項 OK、平台中立 177 項 OK、LOC OK（hook 747/750），但 (a) 文件鎖模組 6 紅＝ONBOARDING LOC 基線因並行包改碼而再度過期（非本腳本）、(b) ruff 新 hook 兩行 E501（本腳本）、(c) 棘輪淨額 −4／漂移 2 支＝DEV-F 進行中（非本腳本）⇒ 自動還原成功（`git status` 無 `.claude` 項）。修正：hook 兩行折行＋`datetime.UTC`；驗證改為只跑 CLAUDE.md 宣稱↔註冊兩個類、棘輪改「套用前後逐字相同」。掌舵者口頭授權「若我不在可自行執行」後主控再試仍被分類器擋（第 8 次）⇒ **第 3 次親跑（21:0x）PASS**：7 檔套用、五支鎖模組＋棘輪（套用前後逐字相同）＋LOC＋ruff 全綠；PRD §4.3／§8 列 12／§12 寫入範圍三列 ⏸→✅（活躍 54＝✅52／⏸2／📎0，⏸ 只剩 §13 法務與 A7）。
+- PRD 該三列已轉 ✅（第 3 次親跑 PASS 後主控回填落款）。
 
 
 ### 十-6 PRD §11.1／§11.8 模擬驗收的「模擬 vs 實機」差異清單與順帶發現（逐字自 DEV-E 報告〈七〉〈九〉；PRD v2.1.21 兩列落款指向本節）
@@ -240,14 +240,14 @@ auto mode 分類器對 `.claude/**` 的寫入一律 [Self-Modification] 拒絕�
 | 外部阻塞軌 | 5 | 4 | DEF-200-075 改判為內部工程（mac nightly 無 PG 剖面）移入結構性長債軌；DEF-101-693 補雲端 run 38265136704 步驟級證據（仍欠真機）；其餘 DEF-101-856／DEF-200-253／DEF-200-313 原樣 |
 | 結構性長債軌 | 4 | **2** | DEF-101-018（ruff 全庫歸零＋根 ruff.toml＋執行者進 pre-push／CI）、DEF-101-398（dev_start 拆分）、DEF-101-702（R68 29 列結案）移出；**保留 DEF-101-960**（SDD 樹 win32 skip census 結構上無閘門會印：①接線②Windows 執行者跑出六格③登記，linux 半邊已量到登記）與 **DEF-200-075**（mac nightly 接 docker PG 後 `darwin+pg` 剖面 census，或掌舵者裁決改掛 `[ENV-DISABLED]`）——兩筆皆為誠實保留的內部工程，不是外部阻塞 |
 
-掌舵者「做完＝沒有積欠 BUG 與技術債」的現況：缺陷 0；外部阻塞 4（需 Windows 真機／PG staging）；結構性長債 2（上列；各附三步可機械查的解鎖條件）。PRD 活躍結案表 54 列＝✅49／⏸5／📎0（⏸＝§13 法務、A7 無人 commit／push、守衛面三列＝§4.3／§8 列 12／§12 寫入範圍待掌舵者親跑套用腳本）；§16.7 退役索引 47 列。
+掌舵者「做完＝沒有積欠 BUG 與技術債」的現況：缺陷 0；外部阻塞 4（需 Windows 真機／PG staging）；結構性長債 2（上列；各附三步可機械查的解鎖條件）。PRD 活躍結案表 54 列＝✅52／⏸2／📎0（⏸＝§13 法務、A7 無人 commit／push；守衛面三列已於掌舵者第 3 次親跑 PASS 後轉 ✅）；§16.7 退役索引 47 列。
 
 ### 十-9 閘門現況與 Windows 親驗清單（收尾時以實跑回填）
 
 - 收尾順序：`git add -A`（新檔 14 支）→ `sync_onboarding_baselines.py --write` → 根層全套（M6 census 真值）→ `skip_id_ledger.json` 落款 → `clean_venv_carrier.py`（表②指紋）→ 根層全套 rc=0 → commit／push → `gh run list` 對帳（本節回填）。
 - 雲端對帳（commit 41d9b4ef，push 2026-10-13 19:5x）：shellcheck-ci／aisdlc-sdd-ci／root-infra-ci／macos-compat-ci／windows-compat-ci／Mutation On-Change（token_guard）6 支 success；**AutoClaude CI failure**（run 38373658567：`tests/core/test_kernel_limit_retry_prd8_1.py::test_the_backoff_sleeps_in_slices_so_esc_f12_can_cut_it_short` 斷言 `slept.call_count == 1` 得 230——Linux runner 上另有以 `time.sleep(0.x)` 輪詢的等待把 mock 計數灌滿，mac 本機含 CI env／TZ=UTC 皆綠＝CI 專屬假紅家族）⇒ 後續 commit 把斷言改為只數 ≥1 秒的退避切片（意圖不變）。同一 run 印出 `[skip census] AutoClaude/tests@linux+nopg+solo+nopgext 共 224 支…untagged=164` 與 DEV-H 容器登記值逐格相同＝linux 剖面雲端首跑驗收通過。
 - Windows 真機親驗（沿上一輪未變＋本輪新增）：(1) `git pull --ff-only` 後 `python tools/lib/quota_policy.py --env-doctor` 看 `RESULT: PASS`；(2) `powershell -NoProfile -ExecutionPolicy Bypass -File tools\windows_smoke_local.ps1` 預期 `PASS=13 FAIL=0` 且含 PASS 行「AISDLC_SDD LATEST 四支 .sh 可啟動性」（DEV-F 新 step 未在 Windows 實跑）；(3) dev_start 拆分後的 Windows bootstrap 路徑（`python tools/dev_start.py`）；(4) `tools/lib/engine_resume_job.py` schtasks 分支（DEV-I 全未實跑）；(5) `tools/lib/quota_burndown.py --status` 預期 rc=1。
-- 守衛面三件：掌舵者第 3 次親跑 `apply_guard_face_three.py` 待做；PASS 後 PRD 三列 ⏸→✅、根 CLAUDE.md 總表一列、證據檔附錄 C 已預備。
+- 守衛面三件：掌舵者第 3 次親跑 `apply_guard_face_three.py` PASS（21:0x）；PRD 三列 ⏸→✅、根 CLAUDE.md 總表一列、附錄 C 為套用時精簡的 7 段 docstring 原文。
 
 ### 十-10 開了→收了（第二窗）
 

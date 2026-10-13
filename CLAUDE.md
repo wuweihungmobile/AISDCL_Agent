@@ -65,6 +65,7 @@ monorepo 根目錄（`AISDCL_Agent/`，各機器 checkout 路徑不同）＝**�
 | `check_claim_provenance.py` | Stop | 鐵律四的機械物：量化判決宣稱（`N passed`／`rc=N`…）必須在本場自己的 tool_result 出現過；**只出聲、永不阻斷**；轉述別包交件標 `[他包回報]` | `AUTOSDD_CLAIM_GUARD_OFF`；`AUTOSDD_UNATTENDED` 有設時詞表縮到只認方括號標記 |
 | `check_ps1_encoding.py` | PostToolUse／Write、Edit | `.ps1` 寫入當下就地補回 CRLF（橋接自 AutoClaude tools/hooks） | 無 |
 | `check_sh_eol.py` | PostToolUse／Write、Edit | `.sh`／`.bash` 行尾守門（非 `.sh`／`.bash` → exit 0；橋接自 AutoClaude tools/hooks） | 無 |
+| `precompact_restart_point.py` | PreCompact | 壓縮前把可重啟點任務書骨架寫到磁碟（PRD §4.3；零 token、只讀逐字稿）＋持久痕跡目錄落一行壓縮事件；同 session 距上次壓縮 < 600s 只出聲不阻止；恆 exit 0 | `AUTOSDD_PRECOMPACT_OFF` |
 
 文件宣稱 ↔ 註冊實況由 `tools/tests/test_doc_loc_baseline_freshness_r60.py::TestR74RootClaudeMdHookClaimsMatchRegistration` 與 `tools/tests/test_doc_loc_baseline_freshness_r60.py::TestR79EveryRegisteredHookIsNamedInClaudeMd` 雙向＋第三向機械釘住（已註冊未點名、未註冊卻寫成會跑，皆紅）。
 

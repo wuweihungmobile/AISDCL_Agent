@@ -1,7 +1,9 @@
 {
   "permissions": {
     "defaultMode": "acceptEdits",
-    "additionalDirectories": ["~/.autosdd/handback"],
+    "additionalDirectories": [
+      "~/.autosdd/handback"
+    ],
     "allow": [
       "Bash(python tools/session_resume_planner.py --pace*)",
       "Bash(python tools/session_resume_planner.py --check*)",
@@ -29,7 +31,29 @@
       "PowerShell(git rebase*)",
       "Edit(./tools/tests/test_adr_xplat001_c1c2_lock.py)",
       "Edit(./.claude/settings.json)",
-      "Edit(./.claude/settings.unattended.json)"
+      "Edit(./.claude/settings.unattended.json)",
+      "Bash(curl*)",
+      "Bash(wget*)",
+      "Bash(nc *)",
+      "Bash(ssh *)",
+      "Bash(scp *)",
+      "Bash(pip install*)",
+      "Bash(python -m pip install*)",
+      "Bash(uv pip install*)",
+      "Bash(uv add*)",
+      "Bash(npm install*)",
+      "Bash(npx *)",
+      "Bash(brew install*)",
+      "PowerShell(curl*)",
+      "PowerShell(wget*)",
+      "PowerShell(Invoke-WebRequest*)",
+      "PowerShell(Invoke-RestMethod*)",
+      "PowerShell(pip install*)",
+      "PowerShell(python -m pip install*)",
+      "PowerShell(uv pip install*)",
+      "PowerShell(npm install*)",
+      "WebFetch",
+      "WebSearch"
     ]
   }
 }

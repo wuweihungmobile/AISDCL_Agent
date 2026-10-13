@@ -520,16 +520,9 @@ class TestBlockBashHookGuidanceContent(unittest.TestCase):
         )
 
     def test_teaches_write_edit_for_file_changes(self) -> None:
-        """DEF-200-412：既有四格全是負向斷言（不得教錯什麼），沒有一格鎖住
-        「必須含寫檔指引」這件事——而這正是本輪要補的缺口。
-
-        WHY：harness 的 auto-mode 系統提示逐字教「用 sed／heredoc 改檔、少用
-        Read／Edit／Write」，與 Windows 側鐵律一（Bash 工具整支被停用）疊在一起時，
-        模型會把「Bash 被擋」誤讀成「寫檔這件事被擋」（掌舵者 Q1 原話：「才開新視窗，
-        就說他被擋不能寫檔案用工具了」）。指引裡必須明講 Write／Edit 不受影響，
-        且要點破「被擋≠不能寫檔」這個誤讀本身，否則模型只會照 auto-mode 那句話
-        繼續嘗試 Bash、一路撞牆。
-        """
+        """DEF-200-412：既有四格全是負向斷言，沒有一格鎖住「必須含寫檔指引」。WHY（auto-mode
+        教「少用 Write／Edit」疊上鐵律一時，模型把「Bash 被擋」誤讀成「不能寫檔」；掌舵者 Q1
+        原話）沿革全文搬至 R213 證據檔〈附錄 C〉。"""
         self.assertIn(
             "Write／Edit", self.text,
             "指引缺少『寫檔／改檔用 Write／Edit』這一列——DEF-200-412 的缺口",
@@ -1934,6 +1927,7 @@ _REGISTRATION_BASELINE: dict[tuple[str, str], frozenset[str]] = {
     # 刻意不與其他守衛共用／`AUTOSDD_UNATTENDED` 有設時抑制詞表縮到只認方括號標記／
     # payload 退化與任何例外 fail-open（截斷證據面偏向假紅，故超 byte cap 一律放行）。
     ("Stop", ".claude/hooks/check_claim_provenance.py"): frozenset({"*"}),
+    ("PreCompact", ".claude/hooks/precompact_restart_point.py"): frozenset({"*"}),
 }
 
 
@@ -2916,20 +2910,10 @@ def _console_spawn_offenders(hook_dir: Path | None = None) -> list[str]:
 
 
 def _imported_local_module_names(path: Path, root: Path | None = None) -> set[str]:
-    """`path` 的 import 目標之絕對 dotted 名稱集合（AST **全樹**掃描，不限模組層級
-    ——`session_start.py` 把 `hub_sync` 的 import 包在 `if`/`try` 裡，只掃頂層會漏）。
-
-    誠實劃界（DEF-200-394 訂正）：此前整段跳過相對 import（`node.level` 非 0），
-    理由是「LATEST hook 樹用的都是絕對 dotted path」——這個前提不成立：
-    `hub_sync.py` 自己的 `from .anonymizer import ...`／`from .pii_scanner
-    import ...` 都是相對 import，經 `session_start.py → hub_sync.py` 真實可達
-    卻完全不在掃描面內。現在依 `node.level` 從 `path` 所在目錄往上
-    `node.level - 1` 層當解析基準，換算回相對 `root` 的絕對 dotted 名稱（沿用既有
-    `_local_module_path(mod_name, root)` 的解析慣例）；呼叫方沒給 `root`，或解析基準
-    跑出 `root` 之外，一律跳過（與舊行為相同，不製造假紅）。`from a.b import c` 的
-    `c` 也一併登記為候選 `a.b.c`：`rule_loader` 這類形態本身就是一支子模組檔案，
-    不是套件屬性。
-    """
+    """`path` 的 import 目標之絕對 dotted 名稱集合（AST **全樹**掃描，不限模組層級）。
+    DEF-200-394 訂正：相對 import 依 `node.level` 從 `path` 所在目錄往上換算回相對 `root`
+    的絕對 dotted 名稱（沿用 `_local_module_path`）；沒給 `root` 或跑出 `root` 之外一律跳過；
+    `from a.b import c` 的 `c` 也登記為候選 `a.b.c`。沿革全文搬至 R213 證據檔〈附錄 C〉。"""
     names: set[str] = set()
     for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
         if isinstance(node, ast.Import):
@@ -3036,21 +3020,11 @@ class TestAutoClaudeHookSpawnsAreConsoleFree(unittest.TestCase):
         self.assertTrue(found, "這棵樹一個 subprocess spawn 站點都掃不到 ⇒ 判準空轉")
 
     def test_the_sdd_latest_hook_tree_is_covered_too(self) -> None:
-        """🔴 R88／DEF-200-104／DEF-200-394：**第三個掃描面**＝SDD LATEST 的
-        `.claude/hooks/*.py` **＋它們 import 可達的本地模組**（`_sdd_latest_hook_
-        reachable_modules()`）。
-
-        立案沿革全文搬至 CrossPlatform_R151_Guard_Prose_Migration.md
-        〈test_the_sdd_latest_hook_tree_is_covered_too〉節。DEF-200-394：此前只
-        掃 `.claude/hooks/*.py` 本身，漏掉 `session_start.py` 條件式 import 的
-        `tools.fsm_runtime.hub_sync`——`hub_sync._mirror_git()` 的三處
-        `subprocess.run(['git', ...])` 因此完全不在任何掃描面內，直到
-        `knowledge/hub-registry.yaml` 的 `allowed_endpoints` 非空時才會真的觸發
-        （目前預設安裝為空，故休眠）。
-
-        🔴 LATEST 走 SSOT 現查（`tools/lib/sdd_latest.resolve_latest_root`），**不寫版號**：
-        寫死版號會在下一次 Copy-on-Evolve 時靜默指向凍結面，而那正是本列要防的失明。
-        """
+        """🔴 R88／DEF-200-104／DEF-200-394：第三個掃描面＝SDD LATEST 的 `.claude/hooks/*.py`
+        ＋它們 import 可達的本地模組（`_sdd_latest_hook_reachable_modules()`）；此前只掃 hooks
+        本身，漏掉 `session_start.py` 條件式 import 的 `hub_sync._mirror_git()` 三處 git 子行程。
+        🔴 LATEST 走 SSOT 現查（`tools/lib/sdd_latest.resolve_latest_root`），**不寫版號**。
+        沿革全文搬至 R213 證據檔〈附錄 C〉。"""
         sdd_hooks = _sdd_latest_hook_dir()
         if sdd_hooks is None or not list(sdd_hooks.glob("*.py")):
             self.skipTest("[TOOL-ABSENCE] 解不出 SDD LATEST 或該樹無 hook ⇒ 量不到 ≠ 量到合格")
@@ -3212,15 +3186,10 @@ def _extract_ledger_hook_child_timeout(source: str) -> float:
 
 
 class TestConversationLedgerChildTimeoutParity(unittest.TestCase):
-    """D31c-2（解複審 W-3，總架構師裁決 D31c）：`conversation_ledger.HOOK_CHILD_TIMEOUT_SEC`
-    是**手寫鏡射** `.claude/hooks/sdd_hook_router.py` 的 `_CHILD_TIMEOUT["PostToolUse"]`。
-
-    立案沿革（全庫此前零跨層 parity 測試）全文搬至
-    CrossPlatform_R151_Guard_Prose_Migration.md〈TestConversationLedgerChildTimeoutParity〉節。
-
-    讀原始碼字面（`ast.literal_eval`），刻意不 import 任一模組——兩子專案不跨 import；
-    SDD LATEST 走 SSOT 現查 `tools/lib/sdd_latest.resolve_latest_root`，不寫死版號。
-    """
+    """D31c-2：`conversation_ledger.HOOK_CHILD_TIMEOUT_SEC` 是**手寫鏡射** `.claude/hooks/
+    sdd_hook_router.py` 的 `_CHILD_TIMEOUT["PostToolUse"]`。讀原始碼字面（`ast.literal_eval`），
+    刻意不 import 任一模組（兩子專案不跨 import）；SDD LATEST 走 SSOT 現查、不寫版號。
+    沿革搬至 R213 證據檔〈附錄 C〉。"""
 
     @staticmethod
     def _ledger_source() -> str | None:
@@ -3462,12 +3431,8 @@ def _action_scan_sources() -> dict[str, str]:
 
 class TestNightlyTaskActionsAreWindowless(unittest.TestCase):
     """🔴 R84 訴求 7／B1-B2：schtasks 的兩支 Action 是 console 的 `powershell.exe`。
-
-    LogonType=S4U 漂移沿革全文搬至
-    CrossPlatform_R151_Guard_Prose_Migration.md〈TestNightlyTaskActionsAreWindowless〉節。
-
     🔴 誠實劃界：本輪**無 Windows 真機** ⇒ 本類守的是「這兩行寫進去了、而且不准有人拿
-    掉」，**不是**「彈窗真的消失了」。後者要真機才驗得到。
+    掉」，**不是**「彈窗真的消失了」。LogonType=S4U 漂移沿革搬至 R213 證據檔〈附錄 C〉。
     """
 
     def setUp(self) -> None:
@@ -3817,6 +3782,41 @@ class TestTheStopGuardIsTheAutomaticReaderOfThatEvidence(unittest.TestCase):
         self.assertEqual(done.returncode, 0)
         self.assertNotIn(self._SPEAKS_TARGET, done.stderr,
                          "同一顆載具之後已成功，讀者仍在喊舊失敗 ⇒ 治癒規則沒接上")
+
+
+class TestPreCompactRestartPointHook(unittest.TestCase):
+    """R213／PRD §4.3：PreCompact hook 子行程真跑三格——寫任務書骨架＋落壓縮事件、  round-label-ok
+    同 session 過密只出聲（rc 仍 0）、逃生口不落事件。逐字稿用一行合成 usage。"""
+
+    _HOOK = _REPO_ROOT / ".claude" / "hooks" / "precompact_restart_point.py"
+
+    def _run(self, tmp: Path, extra: dict[str, str] | None = None) -> tuple[int, str, Path]:
+        payload = json.dumps({"session_id": "sid-precompact", "trigger": "auto",
+                              "transcript_path": str(tmp / "sid-precompact.jsonl")})
+        env = _child_env({"CLAUDE_PROJECT_DIR": str(_REPO_ROOT), "AUTOSDD_SENTINEL_OFF": "1",
+                          "AUTOSDD_TRACE_DIR": str(tmp / "tr"), "AUTOSDD_PLAN_DIR": str(tmp / "pl"),
+                          **(extra or {})})
+        proc = subprocess.run([sys.executable, str(self._HOOK)], input=payload, capture_output=True,
+                              text=True, encoding="utf-8", errors="replace", timeout=60, env=env)
+        return proc.returncode, proc.stderr, tmp / "tr" / "autosdd_compact_events.jsonl"
+
+    def test_writes_plan_and_event_then_only_warns_when_too_soon(self) -> None:
+        tmp = Path(tempfile.mkdtemp(prefix="w-precompact-"))
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        (tmp / "sid-precompact.jsonl").write_text(
+            '{"type":"assistant","message":{"usage":{"input_tokens":10,"output_tokens":5}}}\n',
+            encoding="utf-8")
+        rc, err, events = self._run(tmp)
+        self.assertEqual(rc, 0, err)
+        rows = [json.loads(line) for line in events.read_text(encoding="utf-8").splitlines()]
+        self.assertEqual([(r["too_soon"], r["plan_rc"]) for r in rows], [(False, 0)], rows)
+        self.assertTrue(list((tmp / "pl").glob("*.md")), "任務書骨架沒寫出來")
+        rc, err, events = self._run(tmp)
+        self.assertEqual(rc, 0, err)
+        self.assertIn("壓縮過密", err)
+        rc, _err, events = self._run(tmp, {"AUTOSDD_PRECOMPACT_OFF": "1"})
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(events.read_text(encoding="utf-8").splitlines()), 2, "逃生口不落事件")
 
 
 if __name__ == "__main__":

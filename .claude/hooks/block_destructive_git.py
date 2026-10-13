@@ -1457,7 +1457,19 @@ _GOV_EXACT = frozenset({
     # 檔＝治理面，故本次納管由收尾單人窗口執行（PRD 原文明列此二檔須同批入 `_GOV_EXACT`）。
     ".claude/settings.unattended.json",
     "tools/tests/test_adr_xplat001_c1c2_lock.py",
+    # R213／PRD §12 寫入範圍（掌舵者 2026-10-13 核准）：前者決定無人窗口走 RESUME  round-label-ok
+    # 還是 FRESH 與 spawn 的 argv／姿態旗標，後者決定主控／子代理／降級用哪個模型——
+    # 改任一個都直接改變「無人值守下的喚醒行為」，符合本清單既有收錄判準。
+    "tools/lib/resume_route.py", "tools/lib/model_roles.py",
 })
+#: R213／PRD §12：專案根內的 `.git/` 整目錄（HEAD／config／hooks／index…）一律治理面  round-label-ok
+#: ——無人窗口改它＝改變下一次 commit／push 的身分或 hook 行為；`git` 指令面已由上方毀滅性
+#: 形態判準守著，檔案工具直寫 `.git/` 此前是零觀測面。
+_GOV_GIT_PREFIX = ".git/"
+#: R213／PRD §12：家目錄 `~/.ssh/` 是專案根之外唯一的治理面（憑證載體）；  round-label-ok
+#: 其餘根外路徑維持放行（scratchpad／合成樹）。比對用 realpath＋normcase，`~` 由
+#: HOME／USERPROFILE 解析。
+_GOV_HOME_SSH = "~/.ssh"
 
 def _fold_gov_path(rel: str) -> str:
     """R115／DEF-200-238 比對摺疊：`os.path.normcase` 在 Windows 上把 `/` 併成  round-label-ok
@@ -1505,15 +1517,18 @@ def govwrite_hit(tool_input: object) -> str | None:
         root = os.path.realpath(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
         target = os.path.realpath(raw if os.path.isabs(raw)
                                   else os.path.join(root, raw))
+        ssh = os.path.realpath(os.path.expanduser(_GOV_HOME_SSH))
+        if os.path.normcase(target).startswith(os.path.normcase(_dir_prefix(ssh))):
+            return _GOV_HOME_SSH + "/" + target[len(_dir_prefix(ssh)):].replace(os.sep, "/")
         if not target.startswith(_dir_prefix(root)):
             return None  # 專案根之外的同名檔不是治理檔（沙盒樹照常可寫）
         rel = target[len(_dir_prefix(root)):].replace(os.sep, "/")
         # R115／DEF-200-238：比對前摺大小寫（見 `_fold_gov_path` docstring）——  round-label-ok
         # `rel` 本身（回傳值／訊息用字面）維持 realpath 解出的原始大小寫不變，
-        # 只有下面這一格三個判準改比對 `folded`。
+        # 只有下面這一格四個判準改比對 `folded`。
         folded = _fold_gov_path(rel)
         if folded in {_fold_gov_path(p) for p in _GOV_EXACT} or \
-                folded.startswith(_GOV_DIR_PREFIX) or (
+                folded.startswith((_GOV_DIR_PREFIX, _GOV_GIT_PREFIX)) or (
                 folded.startswith(_GOV_HOOK_PREFIX) and folded.endswith(".py")):
             return rel
         return None
