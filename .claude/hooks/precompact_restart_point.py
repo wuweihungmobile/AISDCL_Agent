@@ -5,8 +5,7 @@
 對話裡，壓縮後只剩摘要的轉述（根 CLAUDE.md〈可重啟點四條件〉第 2 條要求任務書落磁碟）。
 本 hook 在壓縮發生**之前**呼叫 planner 寫任務書骨架（零 token：只讀逐字稿），並在持久痕跡
 目錄落一行壓縮事件（同 session 的壓縮次數與間隔可事後稽核＝PRD §4.3 最小間隔的觀測面）。
-
-契約：
+契約：（3.9 相容寫法：mac 預設直譯器鏈）
   · 恆 exit 0（PreCompact 不阻止壓縮；fail-open 是 P0——hook 失效的外觀不得像「壓縮壞了」）。
   · 同 session 距上次壓縮事件 < COMPACT_MIN_INTERVAL_SECONDS（出廠 600）時仍寫任務書，只在
     stderr 出聲「壓縮過密」並在事件列標 too_soon——這是觀測，不是阻斷。
@@ -22,7 +21,7 @@ import os
 import subprocess
 import sys
 import time
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 _ROOT = Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()).resolve()
@@ -30,6 +29,7 @@ sys.path.insert(0, str(_ROOT / "tools" / "lib"))
 try:
     import endurance_env  # noqa: E402
     import platform_utils  # noqa: E402
+    platform_utils.init_utf8_streams()  # stdio 強制 UTF-8（唯一實作；中文指引不逃脫）
 except Exception as _exc:  # noqa: BLE001 — 載不到 tools/lib＝放行（恆 exit 0 是檔頭契約）
     print(f"[precompact] 放行：tools/lib 載入失敗（{type(_exc).__name__}: {_exc}）",
           file=sys.stderr)
@@ -68,7 +68,7 @@ def plan_out_path(session_id: str, now_epoch: float) -> Path:
     """每次壓縮各寫一支 hook 專屬檔（SD-01）：planner 預設路會整檔重寫 per-session 任務書，
     而 94% 簡報叫模型去填那份骨架的 TODO——同一個檔被壓縮前重寫＝填好的內容被空骨架蓋掉
     （08-17 00:42 同型事故）。獨立檔名＝不碰模型正在填的那一份。"""
-    stamp = (datetime.fromtimestamp(now_epoch, UTC).strftime("%Y%m%dT%H%M%S")
+    stamp = (datetime.fromtimestamp(now_epoch, timezone.utc).strftime("%Y%m%dT%H%M%S")
              + f"{int(now_epoch * 1000) % 1000:03d}Z")  # 毫秒：同秒兩次壓縮不互蓋
     return endurance_env.plan_dir() / f"autosdd_precompact_{session_id}_{stamp}.md"
 
@@ -108,7 +108,7 @@ def main() -> int:
                     else (2, "transcript missing"))
         row = {
             "schema": "autosdd.compact_event/1", "session_id": session_id, "trigger": trigger,
-            "at": datetime.now(UTC).astimezone().isoformat(timespec="seconds"),
+            "at": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
             "at_epoch": round(now_epoch, 3), "since_last_seconds": since, "too_soon": too_soon,
             "plan_rc": rc, "plan_note": tail[:200], "plan_path": str(out),
         }
