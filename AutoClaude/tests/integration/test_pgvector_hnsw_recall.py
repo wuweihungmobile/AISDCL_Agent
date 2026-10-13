@@ -4,24 +4,34 @@
   - SD_Improving_06.md §6.5 AC4-5：recall@10 ≥ 0.95 + p95 < 50ms
   - SD_Improving_06.md §11 黃線：dual-read fallback（< 0.90 才阻塞）
 
-驗證項目：
-  T1 [PG 整合] recall@10 ≥ 0.95（須真實 PG + pgvector + HNSW index）
-  T2 [PG 整合] p95 latency < 50ms（單機 1k 列基線）
+驗證項目（本檔現在只剩純單元，不連任何 DB）：
   T3 [純單元] PgVectorSearchAdapter 在 fake SQL 下能正確序列化 VectorHit
   T4 [純單元] preferred_source='legacy' 時走 legacy 路徑
   T5 [純單元] new 路徑失敗時自動 fallback legacy（KB 表）
   T6 [純單元] new 路徑連續慢呼叫 → breaker open
+  T7 [純單元] 未支援 namespace 必須 raise
 
-PG 整合測試 (T1/T2) 需要：
-  - AUTOCLAUDE_TEST_PG_DSN 環境變數（含 pgvector / halfvec extension）
-  - alembic upgrade head（0007 + 0008 + 0009 ready）
-  - 預先 seed 1,000 列 KB 含真實 BGE-M3 embedding
-無上述條件 → skip（與 W3 階段 A 既有 PG-skip pattern 一致）。
+【廢止】T1／T2 已於 2026-10-13 依 PM 層級決定廢止（DEF-101-856；主控依掌舵者授權代決——那就是
+SD_06 W3 G3「保留或顯式廢止」那道 PM 門檻的書面決定）：
+  T1 [PG 整合] recall@10 ≥ 0.95
+  T2 [PG 整合] p95 latency < 50ms（單機 1k 列基線）
+兩支要的是「≥1k 列真實 BGE-M3 向量 ＋ HNSW index」的 staging 語料。任何 CI 執行者與本機都沒有
+BGE-M3 權重與該語料，repo 內也沒有任何機械取得路徑；它們的函式體第一句就是無條件 skip，
+從來沒有斷言過。掌舵者 2026-08-14 曾選「保留並建自動通道」，通道建了（`run_local_nightly.ps1` 的
+pg-e2e stage 獨立呼叫本檔），缺的卻一直是受測資產而不是通道，所以這次改判廢止，不再續期。
+  - 同門檻、**真的會斷言**的檢查由姊妹檔 `test_pgvector_real_recall.py` 的 `TestRecallAt10`／
+    `TestP95Latency` 承接（就地 seed 100 列 mock-1024 語料；`run_local_nightly.ps1` 的
+    pg-e2e stage 與 `autoclaude-ci.yml`／`autoclaude-pg-e2e-on-label.yml` 的 pg-e2e job 都跑它）。
+    誠實劃界：那是 100 列 mock 語料，不是 1k 列真實 BGE-M3——這個差距是被廢止的內容，
+    不是被遮起來的。
+  - 「Production 上線紅線」（人類 DBA 於 staging ≥ 1M 真實列重跑 ＋ 人類 PM 親簽 release
+    approval；見 `AutoClaude/CLAUDE.md` 同名段，現於第 153 行）本來就不是測試套件債，維持為
+    人工 release gate，不因本次廢止而改變。
+  - 被廢止段落的原文（含逐輪訂正史）不另存檔，取回方式：
+    `git show b3caf68a:AutoClaude/tests/integration/test_pgvector_hnsw_recall.py`。
 """
 from __future__ import annotations
 
-import os
-import re
 import time
 
 import pytest
@@ -29,10 +39,6 @@ import pytest
 from autoclaude.core.ports.vector_search import VectorHit, VectorSearchError
 from autoclaude.infra.adapters.circuit_breaker import CircuitBreaker
 from autoclaude.infra.adapters.pg_vector_search import PgVectorSearchAdapter
-
-_DSN_RAW = os.environ.get("AUTOCLAUDE_TEST_PG_DSN") or os.environ.get("AUTOCLAUDE_DB_DSN")
-_DSN = re.sub(r"\+asyncpg", "", _DSN_RAW) if _DSN_RAW else None
-
 
 # ── 純單元：fake SQL executor ─────────────────────────────────
 
@@ -145,151 +151,3 @@ def test_pgvector_adapter_namespaces_unknown_raises():
             query_vector=[0.0] * 1024,
             model_id="bge-m3",
         )
-
-
-# ── PG 整合（須真實 DB）─────────────────────────────────────
-
-pg_required = pytest.mark.skipif(
-    _DSN is None,
-    reason="【未啟用，非缺件】設 AUTOCLAUDE_DB_DSN 或 AUTOCLAUDE_TEST_PG_DSN "
-           "＋ `alembic upgrade head` ＋ seed 1k KB rows 即可啟用",
-)
-
-# ── 🔴 本輪訂正：reason 指向一個磁碟上不存在的通道 ────────────────────────────────
-# 下面兩支的 skip reason 此前結尾都掛著一句「這個通道會跑它」的宣稱，而當回合實查
-# `.github/workflows/**` 對 `hnsw`／本檔檔名**零命中**——也就是說 reason 告訴讀者
-# 有人在跑，磁碟上沒有任何 job 在跑，而兩份說法從未對帳。
-#
-# 這比「沒寫」更糟：它讓複審者不再追查（同 `skip_static_scan._predicate_value_on_
-# windows` docstring 記載的那次「宣稱有人承接、實際無人承接」）。純形式的可操作性
-# 判準（`DEF-101-863` 原本的解鎖條件）放行這種假指路——它形式上指名了一個通道，
-# 只是那個通道不存在。**指涉必須被解析**，這是本輪補上的第二半。
-#
-# 現況（寫現在為真的事）：本檔 T1/T2 需要一組本 repo 尚未建置的 staging 資料
-# （1k 列真實 BGE-M3 向量 ＋ HNSW index），**任何自動通道都不跑它**。在該資料集
-# 與對應 job 落地之前，這兩支是誠實的零覆蓋，不是「等 nightly」。
-# 🔴 R82 包 A2 訂正：本段原本具名的機械物 `SkipReasonChannelClaimTest` **全 repo 不存在**
-# （當回合以 Grep 全庫搜該符號，唯一命中就是這一行自己）——那是一筆幽靈機械物，比沒有
-# 機械物更難看見：它讓下一個人以為「有人在守通道宣稱」而不再追查。實際存在的是
-# `AutoClaude/tests/test_conftest_windows_native_skip_report.py::
-# test_every_debt_handover_round_is_still_in_the_future`（R82 落地），它守的是**承接輪次
-# 不得過期**，不是通道宣稱。⇒ 「通道宣稱必須可解析」這一面**目前仍無機械物**（誠實劃界）。
-# 🔴 R88 訂正：本常數的前一版逐字寫「本 repo 目前沒有任何自動通道會跑這兩支」，而 R88
-# 就是建通道的那一輪 ⇒ 那句話在寫下它的同一個 commit 內變成假話，且**沒有任何鎖會抓到**
-# （既有鎖只讀「承接輪次 R<n>」那個字面，不讀這一段散文）。同型判例：本 repo 對
-# `Find-GitBash`／`FROZEN_SETTINGS_PREFIX` 下過的判決——假的安心與修好長得一模一樣。
-_NO_AUTOMATED_CHANNEL = (
-    "自動通道**已存在**（R88 建）：`AutoClaude/tools/run_local_nightly.ps1` 的 pg-e2e stage，"
-    "對本檔獨立呼叫 pytest（不帶 -m pg_real、不寫 .ac4_junit.xml），rc 計入 stage fail。"
-    "接線憑證（R88 當回合實測）：不帶 marker ⇒ `5 passed, 2 skipped`；"
-    "照舊併入 `-m pg_real` ⇒ `7 deselected`（零執行）——後者就是「假接線」的長相。"
-    "🔴 **剩餘阻塞是平台綁定的，不是時間綁定的**（掌舵者 2026-08-14 告知）："
-    "PG17+pgvector staging（≥1k 列真實 BGE-M3 1024 維向量 ＋ HNSW index）"
-    "**只有 Windows 11 那台環境有**，macOS 本機結構上備不出來。"
-    "⇒ 本列只可能在 **Windows 11 輪**轉綠；mac 輪跑到它一律是 skip，那是正確結果不是欠工。"
-    "解除步驟（在 Windows 11 上）：設 SD07_REAL_PG_E2E_ENABLED=true、"
-    "AUTOCLAUDE_TEST_PG_DSN 指向該 staging DB，再把本行的 skip 拿掉。"
-)
-
-
-@pg_required
-def test_pgvector_recall_at_10_ge_095():
-    """T1 真實 pgvector HNSW recall@10 ≥ 0.95（AC4-5 上線基線）。"""
-    # 🔴 R82 包 A2（DEBT-01）：承接輪次往後推了一輪——修前它逐字寫著**本輪**，而本輪
-    # 到來時沒有任何東西會說話，輪號因此可以永遠停在原地。實際輪號只寫在下面那句
-    # reason 裡（本註解刻意不複述數字：程式碼註解不得自稱超前帳本的輪號，
-    # `test_check_defect_log_crossref.py::TestR71CodeRoundLabelsNeverExceedLedgerCurrentRound`
-    # 會當場紅）。全樹逐筆比對見 `test_conftest_windows_native_skip_report.py::
-    # test_every_debt_handover_round_is_still_in_the_future`。
-    # 🔴 本輪（承接輪次到期的那一輪）：走出口②再推一輪，理由與**可執行的解除條件**
-    # 逐字寫在下面那句 reason 裡（不是「下輪處理」）。同輪 AC3-4／AC5-4／AC6-3 三筆走的
-    # 是出口①（target 檔已建），本筆之所以不同：它缺的不是斷言，是受測對象本身。
-    # 🔴 R90 訂正上面那一整段的**形態**（不是它的事實）：出口②（再推一輪）本身就是這一列
-    # 反覆復發的病灶——它把一個平台條件記成時間條件，於是每一輪都要重推一次、而在沒有
-    # staging 的機器上永遠不可能走到出口①。掌舵者本輪裁決改判準：平台綁定的欠債改用
-    # **平台條件**記，開火條件換成「跑在備妥 staging 的機器上卻沒還」。⇒ 本列自本輪起
-    # **既不接受再推一輪、也不再有輪號可推**；合法出口只剩兩條（還掉／PM 顯式廢止），
-    # 上一段第 3、4 點所述的到期條款原封不動繼續成立。
-    pytest.skip(
-        # 🔴 R85 推遲的理由（第 3 次順延，本輪**不是**「下輪處理」那種空話，理由是可查證的
-        # 持有面事實）：本輪 R85 是六包並行波，本包（P3）的持有面只有 `AutoClaude/**`；
-        # 而本列的兩個解除條件**各自落在別人的持有面**——
-        #   ① 「建自動通道」＝改 `.github/workflows/*.yml` 或 `tools/run_local_nightly.*`
-        #      （monorepo 根層，本包唯讀）；
-        #   ② 「保留或顯式廢止」＝ SD_06 W3 G3 的 PM 層級門檻決定，本 reason 自己第 4 段
-        #      就寫著「修復者不得自行拍板」。
-        # ⇒ 這正是根 CLAUDE.md〈鐵律七〉點名的形態：一道鎖的常數／史料／消費端被切給不同
-        #   的包，於是它在**任何**單包手上都結不掉，該包唯一能回報的只有 not_done。
-        # 🔴 讓這次順延**付出代價**（否則它與前兩次沒有差別）：R85 起本列不接受「再推一輪」
-        #   這個出口——承接者只有兩個選擇：把 PM 決定拿到手（保留＋同輪建自動通道／顯式廢止），
-        #   或把這兩支測試連同 reason 一起刪除並在帳本留下廢止紀錄。掌舵者未拍板前不得再改
-        #   輪號，因為那會第 4 次把「有人負責」的假象續期。
-        f"[DEBT] 需 W3 G3 staging 資料集：1k seed + BGE-M3 真實向量。"
-        f"承接平台條件：PGVECTOR_BGE_M3_STAGING"
-        f"（平台綁定登記於 R90；掌舵者本輪裁決「不再用輪次記平台綁定的欠債」）。"
-        f"🔴 R90 為什麼**不再寫承接輪次**（這一段是本列改動的全部理由，讀者請先讀它）："
-        f"本列的阻塞從 R88 起就已被查明是**平台綁定**——要的是一台備妥 PG17+pgvector "
-        f"staging（≥1k 列真實 BGE-M3 向量）的機器，而那台是 Windows 11。用輪號記平台條件的"
-        f"代價是量得到的：這個檢查點被推了四次（R84／R85／R88／R89），"
-        f"四次的阻塞條件都是同一個——那份 staging 不在這台機器上；"
-        f"而每一次在 mac 上都得為它付一次全域紅（該處的紅講的是「輪號到了」，"
-        f"不是「債還得了」——它對後者零鑑別力）。"
-        f"⇒ 改記成條件之後，開火條件從「日曆到了」換成「**這台機器真的備妥了 staging "
-        f"卻還掛著 skip**」：由 tests/test_conftest_windows_native_skip_report.py::"
-        f"test_platform_bound_debt_is_red_on_a_machine_that_can_pay_it 現場探測"
-        f"（查 knowledge_entries 內 embedding_model_id 命中 bge-m3 的列數是否 ≥1000，"
-        f"`mock-1024` 的 seed 語料不算）。"
-        f"🔴 這**不是**把鎖放寬：mac 上綠是因為探針真的量了並量到還不了"
-        f"（R90 實測：帶向量 100 列全為 mock-1024、真實 BGE-M3 列 0 筆）；"
-        f"在 Windows 11 那台把 staging 接上的那一刻，本列會**當場轉紅**——舊形態在那一刻"
-        f"反而是綠的（只要輪號還沒追平）。量不到（宣告啟用卻連不上）一律紅，不退回綠。"
-        f"🔴 R88：**PM 拍板已到手，且『保留』附帶的義務已在同一輪履行**——"
-        f"掌舵者 2026-08-14 於 R88 選定「保留並本輪建自動通道」（對照選項為顯式廢止）。"
-        f"自動通道＝`AutoClaude/tools/run_local_nightly.ps1` 的 pg-e2e stage："
-        f"該 stage 此前只跑姊妹檔 test_pgvector_real_recall.py（`-m pg_real`），"
-        f"本檔在 tools/ 與 .github/ **零命中**；R88 補上獨立呼叫（**刻意不帶 -m pg_real**"
-        f"——本檔一個 pg_real marker 都沒有，併入會被整檔 deselect＝假接線；"
-        f"**也不寫 .ac4_junit.xml**，避免污染 AC4 觀察期取證），rc 以 [ref] 捕捉並計入 stage fail。"
-        f"⇒ 前四次順延所依附的「PM 未拍板 ⇒ 不得改輪號」封鎖已解除，本次改輪號是"
-        f"**履行拍板後的正常承接**，不是第 5 次續期。"
-        f"🔴 通道存在 ≠ 斷言達標：解除條件三項中的①②（staging 資料集與 DSN）仍未備妥，"
-        f"⇒ 通道跑起來的預期結果是 skip。本輪讓「有沒有被跑到」變成可觀測，"
-        f"「跑起來綠不綠」仍等資產到位。"
-        f"🔴 本輪再推一輪的理由（非「下輪處理」）：本輪是 macOS 本機輪，缺件是**受測對象**"
-        f"而非斷言——BGE-M3 權重與 1k 列 staging 資料集在本機都不存在，"
-        f"而在沒有自動通道的前提下把斷言先寫出來，只會把同一筆欠債換成"
-        f"「寫好了但永遠不會跑」的另一種假象（那正是本 case 已經付過的學費）。"
-        f"🔴 承接輪到期的那一輪（R84）逐項實查後仍推一輪，理由是**解除條件三項全未滿足**、"
-        f"且該輪是收斂輪（把跨包干擾造成的紅收掉，不開新戰場）："
-        f"①本機無 BGE-M3（1024 維）權重與 ≥1k 列 staging 語料，PG 容器是 CI 對等的空庫；"
-        f"②`.github/workflows` 對本檔仍零命中（自動通道未建）；"
-        f"③「保留或廢止」是 SD_06 W3 G3 的 PM 層級門檻決定，收斂輪不得代為拍板。"
-        f"⇒ 走出口②：顯式推到下一輪，而不是把斷言寫成量不到東西的假綠。"
-        f"🔴 解除條件（三項全滿足才做得到，缺一即不得動工）："
-        f"①備妥 PG17+pgvector staging，內含 ≥1k 列真實 BGE-M3（1024 維）向量與"
-        f"per-table HNSW index（AC3-5 的三個 index）；"
-        f"②該環境上 SD07_REAL_PG_E2E_ENABLED=true 且 AUTOCLAUDE_TEST_PG_DSN 指向它；"
-        f"③同一個變更內落地會跑本檔的自動通道（CI job 或 nightly stage），"
-        f"並在 PR 貼出該通道真的跑過本檔的 log 行。"
-        f"🔴 「保留或廢止」是 SD_06 W3 G3 的門檻決定，屬 PM 層級，修復者不得自行拍板。"
-        f"{_NO_AUTOMATED_CHANNEL}")
-
-
-@pg_required
-def test_pgvector_p95_latency_under_50ms():
-    """T2 真實 pgvector HNSW p95 latency < 50ms。"""
-    pytest.skip(
-        # 🔴 R85：與 T1 同一筆決定、同一份順延理由（見上方 T1 那段：持有面被切開＋PM 拍板
-        # 未到手），故同步推到 R85，並同樣適用「R85 起不接受再推一輪」的到期條款。
-        f"[DEBT] 需 W3 G3 staging 資料集（同 T1）。"
-        f"承接平台條件：PGVECTOR_BGE_M3_STAGING（與 T1 同一個條件、同一支探針；"
-        f"平台綁定登記於 R90）。"
-        f"（保留或顯式廢止的決定與 T1 同一筆：掌舵者 2026-08-14 於 R88 拍板"
-        f"「保留並本輪建自動通道」，通道與 T1 共用同一次 pg-e2e stage 呼叫）。"
-        f"🔴 R90 改記形態的理由與 T1 逐字同一份（見 test_pgvector_recall_at_10_ge_095 "
-        f"的 reason 第 2 段）：兩支共用同一份 staging，任一項缺件都同時擋住兩支，"
-        f"故刻意共用同一個平台條件 KEY——條件成立那一刻兩支會被同一則訊息一起點名。"
-        f"🔴 本輪再推一輪的理由與解除條件與 T1 逐字同一份（見 "
-        f"test_pgvector_recall_at_10_ge_095 的 reason）：兩者共用同一個 staging 資料集與"
-        f"同一個自動通道，任一項缺件都同時擋住兩支，故刻意不分開推。"
-        f"{_NO_AUTOMATED_CHANNEL}")

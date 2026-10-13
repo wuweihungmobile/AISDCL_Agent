@@ -80,10 +80,12 @@ CB_OPEN_MAX = 0
 def _parse_junit_xml(path: Path) -> dict[str, Any]:
     """從 pytest --junitxml 萃取 AC4 指標。
 
-    test_pgvector_real_recall.py 三個 test class 透過 pytest <property> 上報 metric：
+    test_pgvector_real_recall.py 兩個 pg_real test class 透過 pytest <property> 上報 metric：
       - test_recall_at_10 → property name="recall_at_10"
       - test_p95_latency_under_50ms → property name="p95_ms"
-      - test_bge_failure_minimax_fallback_under_60s → property name="cb_open_count"
+    `cb_open_count` 已無發射點：原本上報它的 test_bge_failure_minimax_fallback_under_60s 於
+    2026-10-13 退役（DEF-101-856），此欄恆為預設 0——那個 0 不是量測值（解析分支保留，
+    日後若有新的故障注入測試改上報此名即可沿用）。
 
     本檔尚未啟用真實 PG（W2 觀察期初期 nightly 仍 skip），萃取結果為 None；
     當未來 real PG 環境就位後，properties 自動帶入實測值。

@@ -25,6 +25,7 @@ import shutil
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path, PureWindowsPath
 
 import pytest
@@ -963,3 +964,222 @@ def test_nightly_anchor_is_the_fifth_stage_and_runs_after_sdd_ci_gate(sh_content
     assert m5 and m5.start() > i4, "第 5 個 stage 必須存在且排在 sdd_ci_gate 之後"
     call = re.search(r"^print_tree_identity$", code, re.M)
     assert call and call.start() < i4, "樣本效度取樣必須先於所有 stage"
+
+
+# --- D2（掌舵者裁決，2026-10-13）：半夜 `open -a Docker` 的護欄 ---------------------------------
+#
+# WHY 這組鎖長這樣：D2 的風險不在「會不會開」而在「開了之後收不收得對」——收掉一個**不是自己開的**
+# Docker Desktop，會殃及使用者當時在用的其他容器；而該失效沒有任何即時訊號（nightly 照樣 PASS）。
+# 所以這裡鎖的是**護欄的相對位置與歸屬**（純文字、不起 Docker、不依賴平台，故不引入 skip 站點）：
+# 行為面（open／quit 真的發生、各分支印哪一行）由 nightly 沙箱實跑取證，不在單測內重現。
+# 每條判準都附真突變（對真實 sh_content 做替換後重跑同一判準，必須翻成 False），避免恆真。
+
+def _docker_open_is_guarded(code: str) -> bool:
+    """`open -g -a` 只有一個站點，且 app 存在檢查與「行程已在」檢查都排在它之前、記帳排在它之後。"""
+    if len(re.findall(r"\bopen\s+-g\s+-a\b", code)) != 1:
+        return False
+    body = _function_body(code, "nightly_docker_up")
+    needles = ('[ ! -d "${NIGHTLY_DOCKER_APP}" ]', "pgrep -f 'Docker[.]app'",
+               "open -g -a", "NIGHTLY_DOCKER_STARTED=1")
+    if any(n not in body for n in needles):
+        return False
+    i_app, i_running, i_open, i_started = (body.index(n) for n in needles)
+    return i_app < i_open and i_running < i_open < i_started
+
+
+def _docker_up_runs_only_when_daemon_is_unreachable(code: str) -> bool:
+    """`nightly_docker_up` 只掛在 `docker info` 可達判斷的 elif 分支（可達＝沿用、不開）。"""
+    pg_up = _function_body(code, "nightly_pg_up")
+    return bool(re.search(
+        r"if _nightly_bounded 20 docker info >/dev/null 2>&1; then.*?elif nightly_docker_up; then",
+        pg_up, re.DOTALL,
+    )) and len(re.findall(r"\bnightly_docker_up\s*;", code)) == 1
+
+
+def test_docker_is_opened_only_behind_every_guard(sh_content: str) -> None:
+    """護欄 ①⑤⑦：app 不存在／行程已在／daemon 已可達，三種情況都不得走到 `open -a`。"""
+    code = _code_only(sh_content)
+    assert _docker_open_is_guarded(code), "open -a 缺護欄、順序不對，或站點不只一個"
+    assert _docker_up_runs_only_when_daemon_is_unreachable(code), (
+        "nightly_docker_up 必須只掛在『docker info 不可達』分支（可達＝使用者原本就開著，沿用不開）"
+    )
+    # 真突變 1：拿掉「app 存在」檢查 ⇒ 判準必須翻轉
+    no_app_check = code.replace('[ ! -d "${NIGHTLY_DOCKER_APP}" ]', "false")
+    assert no_app_check != code and not _docker_open_is_guarded(no_app_check)
+    # 真突變 2：把「行程已在」檢查換成恆假 ⇒ 判準必須翻轉
+    no_running_check = code.replace(
+        "if pgrep -f 'Docker[.]app' >/dev/null 2>&1; then", "if false; then")
+    assert no_running_check != code and not _docker_open_is_guarded(no_running_check)
+    # 真突變 3：無條件呼叫（拿掉 elif 判斷）⇒ 判準必須翻轉
+    always = code.replace("elif nightly_docker_up; then", "elif true; then")
+    assert always != code and not _docker_up_runs_only_when_daemon_is_unreachable(always)
+
+
+def test_docker_teardown_rides_the_existing_exit_trap_after_pg_down(sh_content: str) -> None:
+    """護欄 ④：不新增 trap；`nightly_docker_down` 接在 `nightly_pg_down` 之後、鎖釋放之前。"""
+    code = _code_only(sh_content)
+    traps = re.findall(r"^\s*trap\b.*$", code, re.MULTILINE)
+    assert traps == ["trap _nightly_lock_release EXIT"], f"trap 只准有既有那一個，實得 {traps!r}"
+    body = _function_body(code, "_nightly_lock_release")
+    order = [body.index(k) for k in ("nightly_pg_down", "nightly_docker_down", "rm -f")]
+    assert order == sorted(order), "EXIT trap 內順序必須是：收容器 → 收自己開的 Docker → 釋放去重鎖"
+
+
+_DOCKER_DOWN_OWN_FLAG = '[ "${NIGHTLY_DOCKER_STARTED}" = "1" ] || return 0'
+
+
+def _docker_down_guard_problems(body: str) -> list[str]:
+    """`nightly_docker_down` 本體的護欄判準；回違反清單（空＝成立）。
+
+    缺任一必要字面時回「缺字面」而**不拋例外**：真突變要對**同一個判準**重跑並看它轉紅
+    （SD-03：舊版末段只證明字串被換掉，判準根本沒重跑——而且拿掉歸屬旗標時，舊版死在上面的
+    `body.index(own)` 的 ValueError，不是死在那段「真突變」上，所以那段恆真）。"""
+    marks = {"own": _DOCKER_DOWN_OWN_FLAG, "ps": "docker ps --format", "quit": "osascript",
+             "q1": "quit app \"Docker\"'", "q2": "quit app \"Docker Desktop\"'"}
+    at = {k: body.find(v) for k, v in marks.items()}
+    missing = [marks[k] for k, i in at.items() if i < 0]
+    if missing:
+        return [f"函式本體缺字面：{missing}"]
+    problems = []
+    if not at["own"] < at["quit"]:
+        problems.append("歸屬旗標檢查必須排在任何 quit 動作之前")
+    if not at["ps"] < at["quit"]:
+        problems.append("收之前先看別人的容器")
+    if not at["q1"] < at["q2"]:
+        problems.append("兩個 app 名都要送，且先 Docker 後 Docker Desktop")
+    if "pgrep -f 'Docker[.]app'" not in body or "-ge 120" not in body:
+        problems.append("收完＝pgrep 為空且有 120s 上限")
+    return problems
+
+
+def test_docker_down_only_closes_what_it_opened_and_quits_both_app_names(sh_content: str) -> None:
+    """護欄 ③：歸屬旗標先擋、有非本腳本的容器不收；`Docker` 與 `Docker Desktop` 兩個 app 名都送
+    （只送前者 rc=0 但沒關，2026-09-19 實測）；收完以 pgrep 為空為準且有逾時上限。"""
+    code = _code_only(sh_content)
+    body = _function_body(code, "nightly_docker_down")
+    assert _docker_down_guard_problems(body) == []
+    # 真突變：拿掉歸屬旗標檢查 ⇒ **同一個判準**重跑必須轉紅（不是只確認字串被換掉）
+    mutated = body.replace(_DOCKER_DOWN_OWN_FLAG, ":")
+    assert mutated != body and _docker_down_guard_problems(mutated), (
+        "拿掉歸屬旗標檢查後判準仍成立＝這條鎖對它最在乎的那件事沒有牙")
+
+
+def test_docker_is_closed_right_after_stage_3_not_after_stage_4(sh_content: str) -> None:
+    """護欄 ③：不等 stage 4——SDD ci-gate 的 docker 後端測試會因 Docker 還開著而改走真容器。"""
+    code = _code_only(sh_content)
+    marks = ("\nnightly_pg_up ", "\nrun_stage 3 autoclaude_gate", "\nnightly_pg_down ",
+             "\nnightly_docker_down ", "\nrun_stage 4 sdd_ci_gate")
+    positions = [code.find(m) for m in marks]
+    assert all(p >= 0 for p in positions), f"stage 區缺呼叫：{dict(zip(marks, positions))}"
+    assert positions == sorted(positions), "順序須為：起 PG → stage 3 → 收 PG → 收 Docker → stage 4"
+
+
+# --- 補牙（R213 四方審查 QA G3／SD-07）：DEV-PG2 六類「存活突變」的字面層鎖 ---------------------
+#
+# WHY：QA 的 D1／D2／D3／D5／D6／D11 與 SD 的 N7／N10／N11／N12 在隔離複本上對腳本做突變——
+# 上面那組鎖只釘「順序與歸屬」，下列六類改動做下去它們全綠。這六件的**行為面**由 nightly
+# 沙箱實跑取證（不在 CI 內），所以這裡補的是**字面層**：純文字、不起 Docker（不新增 skip
+# 站點）。每條判準都附真突變——對真實 code 做一次替換後重跑**同一個**判準，必須翻成 False；
+# 先確認突變目標字面恰出現一次，避免它漂移後悄悄變恆真。
+
+def _dsn_reaches_alembic_only_via_env_prefix(code: str) -> bool:
+    """DSN 只以 `env AUTOCLAUDE_DB_DSN=…` 前綴交給 alembic 那兩個行程（upgrade／current），
+    全檔不 export（export 之後 stage 3 的 autodetect 會走「顯式優先」剎車，
+    `[PG autodetect] 已注入` 這條路就驗不到）。"""
+    if re.search(r"\bexport\b[^\n]*\bAUTOCLAUDE_DB_DSN\b", code):
+        return False
+    prefixed = re.findall(
+        r'env AUTOCLAUDE_DB_DSN="\$\{NIGHTLY_PG_DSN\}" "\$\{PY\}" -m alembic ', code)
+    return len(prefixed) == 2
+
+
+def _stale_pg_container_is_removed_before_compose_up(code: str) -> bool:
+    """起 PG 之前先清「殘留的非運行中同名容器」：`ps -aq` 查殘殼 → `rm -f -v` → 才
+    `up -d --wait`（不清的話，Docker Desktop 重啟後復活的壞殼會讓 compose 沿用它而 up 失敗；
+    2026-10-13 實測）。"""
+    body = _function_body(code, "nightly_pg_up")
+    keys = ("docker ps -aq --filter", 'docker rm -f -v "${NIGHTLY_PG_CONTAINER}"', "up -d --wait")
+    at = [body.find(k) for k in keys]
+    return min(at) >= 0 and at == sorted(at)
+
+
+def _vm_sync_runs_before_the_app_is_quit(code: str) -> bool:
+    """收 Docker Desktop 之前先在 VM 內 `docker run --rm --entrypoint sync <映像>`：剛
+    `down -v` 完立刻 quit，移除動作可能沒落盤，下次啟動容器會復活成壞殼；`--entrypoint sync`
+    缺了＝容器會照映像預設入口真起 PG。"""
+    body = _function_body(code, "nightly_docker_down")
+    keys = ('docker compose -f "${NIGHTLY_PG_COMPOSE}" config --images',
+            'docker run --rm --entrypoint sync "${_dk_img}"', "osascript")
+    at = [body.find(k) for k in keys]
+    return min(at) >= 0 and at == sorted(at)
+
+
+def _foreign_running_containers_veto_the_quit(code: str) -> bool:
+    """要收 Docker Desktop 前若還有「非本腳本的」運行中容器 ⇒ 整個不收（`return 0` 且排在任何
+    quit 之前）；清單要排除本腳本自己的 PG 容器（`grep -v -x`），否則自己的容器會永遠否決自己。"""
+    body = _function_body(code, "nightly_docker_down")
+    if 'grep -v -x "${NIGHTLY_PG_CONTAINER}"' not in body:
+        return False
+    veto = re.search(r'if \[ -n "\$\{_dk_others\}" \]; then.*?return 0', body, re.DOTALL)
+    return bool(veto) and veto.end() < body.find("osascript")
+
+
+def _docker_wait_and_quit_caps_hold(code: str) -> bool:
+    """兩個逾時上限常數：開 Docker 後輪詢 `docker info` 最長 150s、收完輪詢 `pgrep` 最長 120s。
+    上限被改大＝無人看管的 nightly 在卡死的 Docker 上空等更久（連同去重鎖，之後每一晚都被跳過）；
+    `-ge 120` 的子字串比對擋不住 `-ge 1200`，這裡連右括號一起比。"""
+    up = _function_body(code, "nightly_docker_up")
+    down = _function_body(code, "nightly_docker_down")
+    return bool(re.search(r"\b_nightly_docker_wait_ready 150;", up)
+                and re.search(r"-ge 120 \]", down))
+
+
+def _running_pg_container_is_reused_not_owned(code: str) -> bool:
+    """已在跑的 `autoclaude_ci_pg`（使用者手動起的／前一輪沒收乾淨的）⇒ 沿用且**不記帳**
+    （不收別人起的東西）；只有 else 分支（本腳本自己 up）才 `NIGHTLY_PG_STARTED=1`。
+    偵測來源（`docker ps -q --filter name=^…$`）與分支條件兩處都釘：只釘分支，把偵測換成
+    空字串（沿用分支變成恆假）時這條鎖會是綠的。"""
+    body = _function_body(code, "nightly_pg_up")
+    query = re.search(r'^\s*_pg_running="\$\((.*)\)"$', body, re.MULTILINE)
+    probe = 'docker ps -q --filter "name=^${NIGHTLY_PG_CONTAINER}\\$"'
+    if not query or probe not in query.group(1):
+        return False
+    m = re.search(r'if \[ -n "\$\{_pg_running\}" \]; then\n(.*?)\n\s*else\n(.*)', body, re.DOTALL)
+    if not m:
+        return False
+    reuse, started = m.group(1), m.group(2)
+    return ("已在跑（非本腳本所起）⇒ 沿用，stage 結束不收" in reuse
+            and "NIGHTLY_PG_STARTED=1" not in reuse and "NIGHTLY_PG_STARTED=1" in started)
+
+
+#: (id, 判準, 突變目標字面, 突變後字面)。id 與審查編號對應：dsn＝SD N10；preclean＝QA D2／SD N11；
+#: vm-sync＝QA D1／SD N12；foreign＝QA D3；wait-cap／quit-cap＝QA D5／D6＋SD N7；pg-reuse＝QA D11。
+_SURVIVOR_LOCKS = (
+    ("dsn-env-prefix", _dsn_reaches_alembic_only_via_env_prefix,
+     'env AUTOCLAUDE_DB_DSN="${NIGHTLY_PG_DSN}" "${PY}" -m alembic upgrade head',
+     'export AUTOCLAUDE_DB_DSN="${NIGHTLY_PG_DSN}"; "${PY}" -m alembic upgrade head'),
+    ("preclean", _stale_pg_container_is_removed_before_compose_up,
+     'docker rm -f -v "${NIGHTLY_PG_CONTAINER}"', "true"),
+    ("vm-sync", _vm_sync_runs_before_the_app_is_quit, "--entrypoint sync", "--entrypoint true"),
+    ("foreign-veto", _foreign_running_containers_veto_the_quit,
+     'if [ -n "${_dk_others}" ]; then', "if false; then"),
+    ("wait-cap", _docker_wait_and_quit_caps_hold,
+     "_nightly_docker_wait_ready 150;", "_nightly_docker_wait_ready 15000;"),
+    ("quit-cap", _docker_wait_and_quit_caps_hold, "-ge 120 ]", "-ge 1200 ]"),
+    ("pg-reuse", _running_pg_container_is_reused_not_owned,
+     'if [ -n "${_pg_running}" ]; then', "if false; then"),
+)
+
+
+@pytest.mark.parametrize(("name", "judge", "old", "new"), _SURVIVOR_LOCKS,
+                         ids=[row[0] for row in _SURVIVOR_LOCKS])
+def test_survivor_mutations_of_the_docker_pg_wiring_are_caught(
+    sh_content: str, name: str, judge: Callable[[str], bool], old: str, new: str,
+) -> None:
+    """六類存活突變各有一條字面鎖：真實腳本成立、對它做一次突變後**同一個判準**必須轉紅。"""
+    code = _code_only(sh_content)
+    assert judge(code), f"{name}：真實腳本不符合這條字面鎖"
+    assert code.count(old) == 1, (
+        f"{name}：突變目標字面 {old!r} 在腳本內出現 {code.count(old)} 次（應恰 1 次）⇒ 與實作漂移，"
+        "先更新本鎖——否則它會悄悄變成恆真")
+    assert not judge(code.replace(old, new)), f"{name}：突變後判準仍成立＝這條鎖沒有牙"

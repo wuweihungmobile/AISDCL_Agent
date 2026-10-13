@@ -78,6 +78,16 @@ on:
       # 只改它時該批鎖必須跟著跑。同上，由 test_ci_paths_cover_root_consumers.py 攔下。
       - "tools/lib/sdd_latest.py"
       - "tools/lib/cpu_budget.py"  # DEF-200-289：ci-gate.sh／pre-push 消費的跨 leg CPU 預算 SSOT
+      # DEF-101-960：ci-gate.sh 在 LATEST 軌 pytest 之後把 `-rs` 輸出檔交給本檔做 skip 分群普查
+      # （比照上一行 cpu_budget.py 的先例：被 ci-gate.sh 消費的根層檔，只改它時本 workflow 也必須跑）。
+      - "tools/lib/pytest_skip_census.py"
+      # DEF-101-960（R213 QA F4）：上面那支的遞移 import（AST 實算，只列真的被 import 的）；
+      # 只改其中任一支時 census 行為會變而本 workflow 不跑＝DEF-101-042 同構假綠
+      # （後續要重釘的 skip_group_policy.py 就在其中）。每行一句 WHY：
+      - "tools/lib/skip_group_policy.py"  # census 直接 import：天花板與執行者登記表 SSOT
+      - "tools/lib/skip_profile_key.py"  # census 直接 import：剖面鍵文法 SSOT
+      - "tools/lib/skip_tag_policy.py"  # skip_group_policy 的 import：skip 分群標籤政策
+      - "tools/lib/platform_utils.py"  # census 入口 __main__ 的 init_utf8_streams（stdio UTF-8 唯一實作）
       # R84／C3：test_hook_wiring_cwd_safety.py 現在會**複製**這支啟動器來構造
       # 「載具在、目標腳本缺」那個情境（exec form 之後那才是本鎖真正要測的形態）⇒
       # 只改啟動器時該鎖必須跟著跑。同上，由 test_ci_paths_cover_root_consumers.py 攔下。
@@ -117,6 +127,16 @@ on:
       # 只改它時該批鎖必須跟著跑。同上，由 test_ci_paths_cover_root_consumers.py 攔下。
       - "tools/lib/sdd_latest.py"
       - "tools/lib/cpu_budget.py"  # DEF-200-289：ci-gate.sh／pre-push 消費的跨 leg CPU 預算 SSOT
+      # DEF-101-960：ci-gate.sh 在 LATEST 軌 pytest 之後把 `-rs` 輸出檔交給本檔做 skip 分群普查
+      # （比照上一行 cpu_budget.py 的先例：被 ci-gate.sh 消費的根層檔，只改它時本 workflow 也必須跑）。
+      - "tools/lib/pytest_skip_census.py"
+      # DEF-101-960（R213 QA F4）：上面那支的遞移 import（AST 實算，只列真的被 import 的）；
+      # 只改其中任一支時 census 行為會變而本 workflow 不跑＝DEF-101-042 同構假綠
+      # （後續要重釘的 skip_group_policy.py 就在其中）。每行一句 WHY：
+      - "tools/lib/skip_group_policy.py"  # census 直接 import：天花板與執行者登記表 SSOT
+      - "tools/lib/skip_profile_key.py"  # census 直接 import：剖面鍵文法 SSOT
+      - "tools/lib/skip_tag_policy.py"  # skip_group_policy 的 import：skip 分群標籤政策
+      - "tools/lib/platform_utils.py"  # census 入口 __main__ 的 init_utf8_streams（stdio UTF-8 唯一實作）
       # R84／C3：test_hook_wiring_cwd_safety.py 現在會**複製**這支啟動器來構造
       # 「載具在、目標腳本缺」那個情境（exec form 之後那才是本鎖真正要測的形態）⇒
       # 只改啟動器時該鎖必須跟著跑。同上，由 test_ci_paths_cover_root_consumers.py 攔下。

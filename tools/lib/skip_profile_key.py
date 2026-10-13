@@ -51,9 +51,10 @@ _AXIS_TOKENS: dict[str, tuple[str, ...]] = {
 #: 任何已知能力軸改變，那是**實查後的宣告**、不是還沒想過：
 #: · `tools/tests`：全樹搜 `CLAUDECODE` 命中 0（`run_root_unittests.skip_census_profile`
 #:   的 docstring 已逐字記載這條誠實劃界）；pg extras 亦零相依。
-#: · `AISDLC_SDD/fsm_runtime`：census 尚未接上它的閘門（見
-#:   `skip_group_policy._UNMEASURED_RUNNER_PROFILES` 同鍵那一列），故先宣告零軸；
-#:   接上閘門那一輪必須回來重新問「這棵樹有哪些軸」。
+#: · `AISDLC_SDD/fsm_runtime`：本輪（DEF-101-960）已接上閘門（`ci-gate.sh` LATEST 軌 →
+#:   `pytest_skip_census.py`），回來重問「這棵樹有哪些軸」的答案：docker 可用性是疑似軸，
+#:   但本輪維持 `()`——未實測、編碼它還需要獨立的產生端探針（探針不得從 census 倒推）；
+#:   本機因此只出聲不阻斷（D5），理由與誠實劃界見 DEF-101-960。
 _TREE_REQUIRED_AXES: dict[str, tuple[str, ...]] = {
     "AutoClaude/tests": (AXIS_PG, AXIS_NESTED, AXIS_PGEXTRAS),
     "tools/tests": (),

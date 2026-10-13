@@ -3,7 +3,8 @@
 對應 AC4-1 / AC4-2（[docs/03_testing/SD07_AC_Matrix.md](../../docs/03_testing/SD07_AC_Matrix.md)）：
   AC4-1 recall@10 ≥ 0.95（100 query × BGE-M3 真實 embedding）
   AC4-2 p95 latency < 50ms（HNSW m=16, ef_construction=64）
-  補：雙 adapter fallback < 60s RTO（BGE 故障 → Minimax 切換）
+  補：雙 adapter fallback < 60s RTO（BGE 故障 → Minimax 切換）——該 case 已於 2026-10-13
+      退役，見 `TestDualAdapterFallback` 的 docstring
 
 PM #2 拍板（2026-05-18）：W2 啟用真實 PG 整合測試（不再 skip）。
 本檔以 marker `pg_real` 標記；當下列條件皆滿足時執行，否則 skip：
@@ -13,7 +14,7 @@ PM #2 拍板（2026-05-18）：W2 啟用真實 PG 整合測試（不再 skip）�
   - 預先 seed ≥ 100 列 KB 含 BGE-M3 真實 1024-dim embedding
 
 本地預設 skip — 由 nightly CI matrix 自動執行（T2-6 GitHub Actions 設定）。
-真實 PG 啟用驗收：本檔 3 case 全綠 + recall ≥ 0.95 + p95 < 50ms。
+真實 PG 啟用驗收：本檔 2 個 pg_real case 全綠 + recall ≥ 0.95 + p95 < 50ms。
 """
 from __future__ import annotations
 
@@ -248,72 +249,20 @@ class TestP95Latency:
 
 
 # ──────────────────────────────────────────────────────────────
-# 雙 adapter fallback < 60s RTO
+# 雙 adapter fallback（RTO case 已退役，見下方類別 docstring）
 # ──────────────────────────────────────────────────────────────
 class TestDualAdapterFallback:
-    @pytest.mark.pg_real
-    def test_bge_failure_minimax_fallback_under_60s(self):
-        """BGE-M3 故障 → Minimax adapter 自動切換 < 60s RTO。
+    """雙 adapter fallback。
 
-        SD_09 Pre-W0 audit B-01 修復（2026-05-20）：移除硬編碼 pytest.skip；
-        改由 fixture 條件式驗證雙 adapter 切換 RTO。
-        """
-        _require_real_pg()
-        from pathlib import Path
-        if not Path("tests/fixtures/dual_adapter_failover.json").exists():
-            pytest.skip(
-                # 🔴 R82 包 A2（DEBT-01）：承接輪次往後推了一輪——修前它逐字寫著**本輪**，
-                # 而本輪什麼都沒發生。輪號到了卻沒有任何東西會說話，是這句話能掛著不動的
-                # 原因；本檔起由 `test_conftest_windows_native_skip_report.py::
-                # test_every_debt_handover_round_is_still_in_the_future` 對全樹 `[DEBT]`
-                # 的字面承接輪號逐筆比對當前輪次。（本註解刻意不複述輪號數字——註解不得
-                # 自稱超前帳本的輪號，那由 check_defect_log_crossref 的輪號鎖守。）
-                "[DEBT] 雙 adapter failover fixture 缺失；由 SD_09 W2 議題 C 完整實作。"
-                # 🔴 R85（第 3 次順延，理由是可查證的持有面事實而非「下輪處理」）：本輪是
-                # 六包並行波，本包（P3）持有面只有 `AutoClaude/**`。本列解除條件②要求把下面
-                # 那句 `assert True` 換成 <60s RTO 的**真實量測**，而量測需要一個能被故障注入
-                # 的雙 adapter 環境——BGE-M3 權重／真實 PG staging／Minimax 憑證三者在本機
-                # 皆不存在（當回合實測：PG 容器是 CI 對等空庫、`MINIMAX_API_KEY` 未設定）。
-                # 只建 fixture 而讓 `assert True` 留著，正是本 reason 自己點名的假綠形態。
-                # ⇒ 同 test_pgvector_hnsw_recall.py 的兩列：R85 起不接受「再推一輪」，
-                #   承接者必須拿到 PM 決定（保留＋同輪建自動通道／顯式廢止）二擇一。
-                # 🔴 R88：掌舵者 2026-08-14 拍板「保留並本輪建自動通道」（對照選項為顯式
-                #   廢止）⇒「PM 未拍板 ⇒ 不得改輪號」的封鎖解除，本次改輪號是履行拍板後的
-                #   正常承接。**本檔早已在自動通道內**（`run_local_nightly.ps1` pg-e2e stage
-                #   的 `-m pg_real` 那次呼叫），所以「保留」附帶的建通道義務對本列不適用；
-                #   本列的阻塞從頭到尾就只有解除條件①②那兩項受測資產，與通道無關。
-                # 🔴 **剩餘阻塞是平台綁定的，不是時間綁定的**（掌舵者 2026-08-14 告知）：
-                #   PG17+pgvector staging（≥1k 列真實 BGE-M3 向量）**只有 Windows 11 那台
-                #   環境有** ⇒ 本列只可能在 Windows 11 輪轉綠；mac 輪跑到它一律 skip，
-                #   那是正確結果不是欠工。承接輪號因此是「複審檢查點」而非交付承諾。
-                # 🔴 R90（掌舵者本輪裁決「平台綁定的欠債改用平台條件記」）：本列自本輪起
-                #   不再寫承接輪號——這個檢查點被推了四次（R84／R85／R88／R89），四次的阻塞
-                #   條件都是同一個：輪號量的是日曆，而阻塞在環境。改記成條件之後，開火條件是
-                #   「跑在**同時**備妥 staging 與 Minimax 憑證的那台機器上卻沒還」。
-                "承接平台條件：DUAL_ADAPTER_FAILOVER_RIG（平台綁定登記於 R90；"
-                "探針＝tests/test_conftest_windows_native_skip_report.py::"
-                "probe_dual_adapter_failover_rig，量 staging 列數 ＋ MINIMAX_API_KEY，"
-                "兩半都到位才判「還得了」並當場轉紅；量不到一律紅，不退回綠）："
-                "要建的是 AutoClaude/tests/fixtures/dual_adapter_failover.json"
-                "（BGE-M3 故障注入腳本 ＋ Minimax adapter 切換的量測欄位），"
-                "🔴 但**只建 fixture 會把這支從 skip 變成假綠**——本 case 在 fixture 存在時"
-                "落到的是下面那句 `assert True`，那是一個恆真斷言，量不到任何 RTO。"
-                "⇒ 解除條件（兩項必須在同一個變更內完成）："
-                "①建出上述 fixture（含可重跑的故障注入步驟與 RTO 量測欄位）；"
-                "②同時把下面那句 `assert True` 改成對 <60s RTO 的真實量測斷言。"
-                "🔴 本輪再推一輪的理由（非「下輪處理」）：本輪是 macOS 本機輪，"
-                "BGE-M3 權重、真實 PG staging、Minimax 憑證三者皆不在本機 ⇒ 故障注入無法"
-                "重現，寫出來的量測只會是編造的數字（那比 skip 更糟）。"
-                "🔴 承接輪到期的那一輪（R84）逐項實查後仍推一輪：解除條件②要求把下面那句 "
-                "`assert True` 換成對 <60s RTO 的**真實量測**斷言，而量測需要一個能被故障"
-                "注入的雙 adapter 環境——本機的 PG 容器是 CI 對等空庫、無 Minimax 憑證、"
-                "無 BGE-M3 權重，三者缺一即量不到。收斂輪（只收跨包干擾造成的紅）不建新環境；"
-                "只建 fixture 而讓 `assert True` 留著，正是本 reason 自己點名的假綠形態。"
-                "🔴 這一支只在開啟 SD07_REAL_PG_E2E_ENABLED 後才"
-                "現形（否則被 _require_real_pg 那一層 skip 蓋住）⇒ 盤點欠債一律在最大環境"
-                "剖面下跑"
-            )
-        assert True, "雙 adapter failover RTO 驗證依賴 W2 fixture 補完"
+    【退役】`test_bge_failure_minimax_fallback_under_60s`（BGE-M3 故障 → Minimax 切換
+    < 60s RTO）已於 2026-10-13 退役，與 `test_pgvector_hnsw_recall.py` 檔頭記載的 T1／T2
+    廢止是同一個決定（DEF-101-856 題 5 方案 B；主控依掌舵者授權代決）。退役理由：該 case 在
+    failover fixture 存在時落到恆真斷言 `assert True`、量不到任何 RTO，是一支不可能失敗的
+    測試；要量 RTO 得有 BGE-M3 權重、真實 PG staging、Minimax 憑證三者才做得了故障注入，
+    repo 內沒有任何機械取得路徑。
+    誠實劃界：退役之後沒有任何測試宣稱覆蓋「切換 RTO < 60s」這一層；下面那支只守
+    CircuitBreaker 慢呼叫開路的純單元行為。
+    """
 
     def test_circuit_breaker_opens_on_high_latency(self):
         """純單元：CircuitBreaker 連續慢呼叫後 open（不需真實 PG）。"""

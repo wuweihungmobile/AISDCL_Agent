@@ -45,7 +45,6 @@
 | DEF-ID | 具名阻塞源 | 阻塞起始日 | 解鎖條件（可機械查） | 最近複查日 |
 |---|---|---|---|---|
 | DEF-101-960 | 結構性長債-SDD樹win32-skip剖面未接census | 2026-08-30 | ①（任何平台可做）`AISDLC_SDD/scripts/ci-gate.sh`／`.ps1` 把 SDD fsm_runtime 的 pytest `-rs` 輸出接進 census（現況：全 repo 只有 `AutoClaude/tools/local_ci_gate.py` 與 `tools/run_root_unittests.py` 會印 `[skip census]`，`ci-gate.sh:215-220` tee 後只取通過數；DEV-K 2026-10-13 現查三份 Windows CI log 零命中）；②Windows 執行者（實體機或 `windows-compat-ci`）跑出 `[skip census] AISDLC_SDD/fsm_runtime@win32` 六格；③同 commit 逐格照抄進 `_RUNTIME_SKIP_CEILING`／`_RUNTIME_SKIP_CEILING_MAX` 並自 `_UNMEASURED_RUNNER_PROFILES` 刪該鍵（`python tools/lib/skip_group_policy.py` 現查）。linux 半邊（`AutoClaude/tests@linux+nopg+solo+nopgext`）已於 2026-10-13 以 Docker 容器量到並登記（R213 證據檔〈十-3〉DEV-H）。 | 2026-10-13 |
-| DEF-200-075 | 結構性長債-mac-nightly無PG剖面 | 2026-10-13 | mac nightly（`tools/run_local_nightly.sh`）以 docker compose（`docker-compose.ci.yml`）起 PG17 並 `alembic upgrade head` 後，`[skip census] AutoClaude/tests@darwin+pg+…` 剖面登記且欠債型 ≤ 10（對照 win32+pg 剖面 5）；或掌舵者裁決 mac 側不接 PG 並把該 103 支的 PG 契約測試改掛 `[ENV-DISABLED]` 標籤納入天花板（原外部軌列文見 AutoSDD_External_Blocked_Log.md〈複查記錄〉DEF-200-075 節） | 2026-10-13 |
 
 ## 登記備注
 
@@ -63,6 +62,20 @@
 ## 複查記錄
 
 > 「最近複查日」欄僅存放純 ISO 日期；解鎖條件達成而移出本表的列，其複查敘事逐字搬遷至本節（體例同外部阻塞軌）。
+
+### DEF-200-075（複查 2026-10-14＝解鎖條件路徑①達成，列已移出本表）
+
+複查（R213 第三窗）：mac nightly `AutoClaude/tools/run_local_nightly.sh` 接 PG（`nightly_pg_up`／`nightly_pg_down`；主控裁決 D2：daemon 不可達且
+`/Applications/Docker.app` 存在則 `open -g -a`、≤150s 等就緒、只收自己開的、stage 3 後 `compose down -v`→VM 內 sync→quit `Docker`／`Docker Desktop`→
+`pgrep -f Docker.app` 為空；任一步不成即大聲退回 `+nopg`、不計 FAIL）。真 launchd nightly RunId `20261014_000025`（`launchctl kickstart gui/501/com.autoclaude.nightly`；
+`AutoClaude/logs/nightly_mac_20261014_000025.log`）：:335-336 `daemon 不可達 ⇒ 已 open -a`／`daemon 已可達（約 3s）`、:346 `alembic current: 0018_version_kind_discriminator (head)`、
+:351 `[PG autodetect] 已注入`、:619 `[skip census] AutoClaude/tests@darwin+pg+solo+pgext 共 57 支：platform=53／tool-absence=0／env-disabled=2／structural-pair=1／debt=0／untagged=1／欠債型 3 支（目標 0）`
+（≤10；原 `+nopg` 剖面欠債型 103）、:641-644 `已收容器`／`已在 VM 內 sync`／`已收 Docker Desktop（pgrep -f Docker.app 為空；osascript rc=0/0；約 15s）`；
+`tools/lib/skip_group_policy.py` 兩表登記同鍵 53／0／2／1／0／1，`_FULL_SUITE_RUNNERS` 加列。**但書**：該次彙總 `PASS=4 FAIL=1`（stage 2 根層全套 3 項失敗／2 模組＝
+本窗未提交編修自造、同窗已修），樣本為髒樹（18 筆未提交），本列不宣稱「nightly 全綠」；`+pg` 為機會性覆蓋（函式恆回 0、不計 stage、降級夜晚不報警、只在 RunId log 的
+`[nightly][docker]`／`[nightly][pg]` 行可見）；睡著的 Mac 不被喚醒、無 GUI session 時 `open -a` 失敗⇒退回 nopg（`darwin+nopg` 剖面天花板保留）；launchd 脈絡下 TCC 未擋
+osascript 為 N=1；`compose down -v` 後立刻 quit 會使容器下次復活成壞殼（`RWLayer … is unexpectedly nil`、`Exited (128)`）已以 VM 內 sync＋起 PG 前 `docker rm -f -v`
+pre-clean 處置（sync 因果為 N=1 推論、pre-clean 為與成因無關的保底）〔他包回報：DEV-PG／DEV-PG2；主控親驗 launchd 真跑〕。本表筆數 2→1。
 
 ### DEF-101-702（複查 2026-10-13＝解鎖條件達成，列已移出本表）
 

@@ -257,6 +257,563 @@ auto mode 分類器對 `.claude/**` 的寫入一律 [Self-Modification] 拒絕�
 - scratchpad：上一位 QA 鏡遺留 1.3 GB 隔離副本與 DEV-H 454 MB tar 已清（1.8G→104M）；報告、任務書、lore 檔保留（任務書已入附錄 B-2）。
 - 哨兵 launchd：設計行為，保留。
 
+## 〈十一〉第三窗（2026-10-13，sid `7c51b538-5625-45f6-86e6-c47912d6a93f`；主控＝Fable 5.1、執行者＝Sonnet；掌舵者 T1 第八次響應）
+
+### 十一-1 掌舵者原文（逐字）與本窗範圍
+
+> 1.請徹底完成以上任務，找到沒法完成收斂的根因，徹底解決？請想盡所有辦法完成收斂任務！ ==> 我的完成的定義是沒有積欠技術債與解決已知的所有ＢＵＧ！
+> 2.完成實作AutoClaude_Token_監控與喚醒機制_PRD_v2.1.md裡面所有功能！==> 請檢視驗證每個功能都已經完成 E to E 全功能驗證！
+> 3.如何將兩邊的 .env同步，哪邊才是正確完整的？這個參數檔該如何維護？ 幫我設計自動同步機制！==> 下次在Windows執行時，幫我自動同步！請進行驗證功能是否ＯＫ？
+> 以上若需要我決策，請依照最佳化, 最理想, 最適當的解決方案，我授權幫我決策…若需要請派出Architect / SA / SD / QA 四方專家獨立審查,請確認以上功能都已經完備！
+
+同窗另兩句：「因為Fable Token實在花太兇…請派Subagent時, 使用Sonnet 5！你當主控Agent還是使用Fable 5.1」「授權跑以下」。範本〈🏁〉判定：T1 成立（三項直接立案）、T2～T4 不成立 ⇒ 不開軌道① 輪、不產四件套，本窗接在 R213 證據檔作第三窗（R 系列事件源＝側軌帳本未結列）。`--pace`（量測於 2026-10-13T21:49:26+08:00）：可派 4、band=free、🔥清倉落款 45c49b8e35 生效中。
+
+### 十一-2 「沒法完成收斂」的根因（兩層；規劃鏡 P1 以程式碼座標驗證主控假設，見附錄 E）
+
+- **第一層（結構；SA-01／ARCH-04 訂正後）**：R213 收尾時三本帳＝缺陷 0／外部阻塞 4／結構性長債 2，分兩類：**四列**（693／313／253／856）的解鎖條件寫成「需要人坐在 Windows 實機」或「需要外部 PG staging」，歷輪當「誠實停車」，沒有人把條件改寫成**任何執行者都能機械跑的驗證**——而 GitHub Actions 的 `windows-latest` 本來就是一台真的 Windows 作業系統執行者；**兩列**（960／075）的條件在 41d9b4ef 已改寫成可機械做（960 條件② 明寫「或 `windows-compat-ci`」；075 寫明 docker compose 路徑），卡的不是機器、是沒人做。PRD §16.1 結案命題 (b) 要求三本帳未結 0，於是 (b) 結構上永遠不成立。
+- **第二層（逐列，P1 讀碼實查）**：DEF-101-693＝CI 從未真的執行 `tools/windows_smoke_local.ps1` 本身（workflow 內該檔名只出現在註解）；DEF-200-313＝機制在 `tools/lib/parallel_shard.py`（不在 `run_root_unittests.py`），缺口三個（`proc.kill()` 殺不到孫、父被硬殺時清理路徑不跑、Windows 側清理路徑從無真實執行證據），且原解鎖條件的 `CommandLine` 濾網對分片子行程幾乎空洞＝人工 Ctrl-C 檢查多半假通過；DEF-200-253＝`+nested` 軸在今日 `AutoClaude/tests` 鑑別力為 0（`skip_group_policy.py:245-263`），量值與真巢狀 session 逐格相同；DEF-101-856＝「真實 BGE-M3 ≥1k 列」沒有任何機械取得路徑＝裁決題，不是工程題；DEF-101-960＝census 生產者只有 `local_ci_gate.py` 與 `run_root_unittests.py` 兩支，SDD `ci-gate.sh` tee 後只取通過數；DEF-200-075＝nightly 從不起 PG，而 Docker Desktop 半夜通常是關的。
+- **修法（本窗）**：每列改成三種之一——(a) 由 `windows-latest` 機械做掉；(b) 在這台 mac 用 Docker 真的量到；(c) 掌舵者授權下的明示裁決（closed-by-decision，附書面理由）。三者皆不可才留列。
+
+### 十一-3 主控裁決（掌舵者授權「依最佳化代決」；可隨時以 T1 推翻；規劃鏡附推薦、主控全數採納）
+
+| 編號 | 題 | 裁決 |
+|---|---|---|
+| D1／D1′ | DEF-101-856 | 方案 B＝PM 層級顯式廢止三支 `[DEBT]` stub：T1／T2（@pg_required 後第一句即無條件 skip、從不斷言；姊妹檔 `test_pgvector_real_recall.py` 已有同門檻真斷言）與 `test_bge_failure_minimax_fallback_under_60s`（`assert True`；D1′＝P-PGSTUB 查證外部帳 :41 與 R128 原文即寫「3 支」，故**不新立 DEF 列**、併入 856 結案）；明寫推翻 2026-08-14 R88「保留並建自動通道」決定；理由＝≥1k 列真實 BGE-M3 語料與 staging DB 在任何執行者皆不可得（權重雖公開可建，語料與 staging 無人擁有＝裁決題）；「Production 上線紅線」維持人工 release gate |
+| D2 | DEF-200-075 | 有護欄的半夜 `open -a Docker`：僅 `/Applications/Docker.app` 存在且 daemon 不可達才開；輪詢 ≤150s 逾時退回 nopg；只收自己開的（quit `Docker` 再 quit `Docker Desktop`，`pgrep -f Docker.app` 空才算收）；stage 3 後即收；teardown 進既有 EXIT trap |
+| D3 | DEF-200-313 | win32 Job Object（`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`）＋ CI 硬殺探針（含不 adopt 的正控組）；介面釘死 `parallel_shard.adopt_kill_on_close_job() -> bool` |
+| D4 | DEF-200-253 | 接受 `+nested` 由 `CLAUDECODE=1` 指定（鑑別力 0，provenance 寫明座標）；不 re-key |
+| D5 | DEF-101-960 | census 在本機（無 `CI`／`GITHUB_ACTIONS`）只出聲不阻斷；雲端才阻斷；rc=3（剖面未登記）永遠只出聲；新檔名 `tools/lib/pytest_skip_census.py` |
+| D6 | DEF-101-693 | 帳本結案措辭明寫「雲端 windows-latest＝真 Windows 作業系統執行者，不是實體機」；保留 `AutoClaude_WindowsSmoke` 每日排程 |
+| D7 | 鎖分母 | `test_the_handover_scan_surface_is_not_silently_empty` 分母補第三種合法承接形態（常數形態；全樹唯一活站點＝`contract/test_ac_matrix_scaffolding.py` 休眠站點），docstring 明寫本支自此只證明「掃描面還掃得到 `[DEBT]` 宣告」（掃描器活性），不再是「repo 真有未還欠債」的憑證；欠債實數只看 runtime census。四鏡覆核：ARCH 判可接受（P4）、SD／QA 隔離突變 4／6 全殺 |
+
+派工（鐵律七／〈並行派工防互踩檢查表〉）：wave 1 四包（P1 規劃鏡／QA-A／QA-B／DEV-PG）；wave 2 四包（P-SDD／P-JOB／P-PGSTUB／P-CI，持有面兩兩不相交、workflow 檔只由 P-CI 動）＋DEV-PG2；P-PIN（題 1／2／6 釘值同住 `skip_group_policy.py`＋`skip_id_ledger.json`）與三本帳結案＝主控收尾單人窗口。
+
+### 十一-4 PRD v2.1 全功能 E2E 驗證矩陣（掌舵者第 2 句；QA-A／QA-B 兩鏡唯讀真跑；〔他包回報〕；逐座標矩陣、可重放指令與原始 log 在 scratchpad `qa_A_matrix.md`／`qa_B_matrix.md`，不入庫）
+
+- 母體＝§16.2 活躍 54 列（表內 25＋矩陣 ✅ ID 29）＋§16.6 凍結後立案 2 列＝56 座標（QA-A 18、QA-B 38，含兩包任務書都沒點名的 A8／A9 由 QA-B 補）。
+- 判定（SA-02／03 訂正後）：**功能座標 54＝PASS 51／JUDGED-ON-EXISTING-TRACE 3；⏸ 2 列（§13 法務、A7 無人 commit／push）＝再開症狀未發生、deny 規則仍在（QA 鏡原計入 PASS，此處拆出）；FAIL 0／UNVERIFIABLE 0／NOT-FOUND 0**。驗證座標本場全數真跑：tools/tests 單跑全綠（`test_context_budget_guard` 整檔 824 項 OK、skip 11 全為 `[WINDOWS-NATIVE-ONLY]`；`test_quota_policy` 整檔 339 項 OK）；AutoClaude 側 QA-B 15 檔合併 467 項通過、0 略過；QA-A 各列計數見其矩陣。
+- JUDGED 三列：§11.1（6h 零 token）＝回溯入口 `tools/probe/zero_token_telemetry_window.py` rc=1：21 段 ≥6h 無 usage 區間中讀數覆蓋成立者 0 段，與 PRD 落款相符；模擬法 6 斷言＋7 控制組全符。§11.3／§11.8＝`wakechain_e2e.py --judge` 對真機 run4（sid `14fb33dc-4ffc-40c9-b62b-9dcf801d02f4`，2026-10-12 13:37:54～13:55:17 +08:00）rc=0、S14-core 8/8、tail 7/7；`day_long_relay_sim.py --selftest` rc=0、工作佔比 0.875；引擎層 14 項通過。
+- 真機痕跡（QA-A）：§4.3 PreCompact hook 於 `~/.autosdd/traces/autosdd_compact_events.jsonl` 有一列＝Claude Code 20:45:44 自動壓縮前真的呼叫了 hook（plan_rc=0），該 session 逐字稿 compact_boundary 20:47:05，晚 81 秒，時序吻合。A4 清倉：真落款 45c49b8e35 `--status` rc=0、`autosdd_burndown_events.jsonl` 11 列真實放寬痕跡。
+- §16.6 第 2 列（.env 同步）mac 真 `git pull --ff-only` E2E（QA-A）：bare remote＋clone A／B，6 情境 42 項斷言 PASS／0 FAIL（SA 鏡獨立 sandbox 重跑 S0～S5＝6／10／10／5／6／5 同值，另補 S6 驗 `# override-ok:` 行保留——該保留由 `tools/tests/test_quota_env_layers.py` 單測鎖守，不在 QA-A 六情境內〔SA-05〕）——(i) `CI=true`＋PATH 含主樹 `.venv/bin`、(ii) `.venv` symlink 兩路皆自動修復（`.env.bak.<UTC>` 出現且等於原檔、遮蔽行與冗餘行被刪、事後 `--env-doctor` rc=0、生效 HALT 變 97〔env.shared〕）；無 venv 且非 CI ⇒ 略過出聲；`AUTOSDD_UNATTENDED` ⇒ 只體檢不修；含 `[unknown]` 旗標 ⇒ 一個檔不動；`core.hooksPath` 未設 ⇒ hook 完全不跑、`.env` 靜默不同步（hook 檔頭已寫的設計邊界，QA-A 第一次漏設時意外得到的對照組）。
+- 理論洞（P4；依根 CLAUDE.md〈守衛面准入〉「構造性命中計 0」只登記不修；再開＝症狀驅動）：(1) `.claude/settings.unattended.json` 的 deny 31 條（原 9＋R213 新增 22）全部在，但 `UnattendedPermissionPostureTest` 沒有任何測試釘 git commit／push／rebase 或 22 條網路／安裝 deny——QA-B 隔離複本 4 種突變（刪 `git push*`／刪 6 條 git 寫入／刪 WebFetch＋WebSearch／刪 22 條）跑 CBG＋GOV 1063 項新增失敗 0；對照同驅動器對 `.git/`、`~/.ssh`、`.autoclaude/`、牆鐘、週軸、鎖齡等 9 個突變全數被殺。有牙的是 hook 層（無人值守 git commit／push／`gh pr create` live-fire rc=2，另 30 項鎖）；裸的是設定檔 deny 這層與 `git rebase`（hook 側 rc=0）。PRD 寫的「823 項」是整個 CBG 模組測試數（本場 824），不是這些 deny 的鎖。(2) PRD 自陳邊界本場重現（不判 FAIL）：§6.1 不變式 1「HALT−DRAIN≥5」無機械物；§3.2「中斷後重啟續跑於被中斷步」引擎級測試仍〔待補〕；DRY_RUN 判決不接執行器；§8 列 1 無標頭 full-jitter 與 U5h 上修未做；§4.4.3 逐步 pp 成本上限無量測源；§12 不偵測 VM、`RawStreamLogger` 不在遮蔽射程；§15.5 紅線 3／4 只有文字層警語。
+- 本場未驗的子項（整列判定不變；SA-03 拆三類）：(a) **時間型**＝§11.1 真 6 小時牆鐘、§11.8 真 24h／≥4 次 reset（載體＝PRD §16.2 兩列落款「補件＝一次真實長跑」，無日曆義務）；(b) **本機可做而本窗未做**＝PG／Dual 後端逐座標（QA 鏡當時 daemon 未開；真 nightly stage 3 已在 `+pg` 剖面跑過整樹、`[pytest] PASS`）、設定檔 deny 的動態攔截（需真 `claude -p`，有 token 與真 commit 風險）、真 Linux 容器內 bypass 放行路徑（載體＝本節理論洞 (1) 與十一-11）；(c) **真的只有 Windows 機**＝Windows 專屬分支與 11 個 `[WINDOWS-NATIVE-ONLY]` skip、post-merge hook 的 Windows 首跑（CI 步驟 #13 補證）、A4 `--status` 在 Windows（CI 步驟 #14）、PreCompact 於 pythonw 載具下的真觸發、ESC+F12 實體按鍵（mac 非 root 驗不了）、§13 帳號端通知。
+- 兩鏡的自我訂正（留痕）：QA-A 一次打錯測試類別名（loader ERROR=1，已更正重跑）；QA-B 探針第一跑紅 3 次皆為自己斷言寫錯（非產品缺陷），原始 log 全留。
+
+### 十一-5 .env 同步（掌舵者第 3 句）：答案、維護規則、自動同步與驗證
+
+**哪邊才是正確完整的？**（以碼為據，P1 第 7 節）兩台機器的本機 `.env` 都不是「正確版」：它是機器私有、不進 git（`.gitignore:35`），本來就不該相同。唯一真相是 git 追蹤的 `env.shared`（現 4 鍵：停機線 98＋主控 fable／子代理 sonnet／降級 haiku）；出廠預設在程式碼 `ENV_SPEC`；本機 `.env` 只放「這台要偏離的那幾行」並帶 `# override-ok: <WHY>`。優先序（高→低）：行程環境變數 ＞ `AutoClaude/.env`（引擎 3 鍵）＞ 根 `.env` ＞ `env.shared` ＞ 出廠值。舊機器若 `.env` 是 `.env.example` 整份複本，每一行都會遮住 `env.shared`——這就是兩台吃不同門檻的來源。mac 本場 `python tools/lib/quota_policy.py --env-doctor` rc=0、`[empty-local] .env 已無任何有值的行 ⇒ 可直接刪除該檔`。
+**維護規則**：改門檻一律改 `env.shared`（一台 push、另一台 pull 即同步）；本機例外才寫 `.env`；體檢 `python tools/lib/quota_policy.py --env-doctor`，修復 `--fix`（先備份 `.env.bak.<UTC>`、只刪 ENV_SPEC 鍵的多餘／遮蔽行並印 diff）。
+**自動同步**：`tools/git-hooks/post-merge`（R212 第二列）在 `git pull`／merge 成功後自動體檢，問題全是可自動修旗標才 `--fix` 再體檢一次；含需人判斷旗標一個檔不動只出聲；`AUTOSDD_UNATTENDED` 只體檢不修；永不讓 merge 失敗。不會自動觸發：`pull --rebase`、「Already up to date」、reset／checkout 換樹 ⇒ 手動跑 doctor。
+**驗證**：mac 半邊＝十一-4 的 6 情境 42 斷言；Windows 半邊＝本窗 CI 步驟 D（nightly-full 真 `git pull --ff-only`，見十一-6；結果見十一-9）。掌舵者下次在 Windows 做的事只有一件：在 repo 根 `git pull --ff-only`（或 `. tools\dev_start.ps1`），看到 `env.shared 同步：已自動修復` 或 `結論：0 個問題`（SA-11：證據檔〈十-9〉(1) 原寫的 `RESULT: PASS` 字樣現碼不存在）即成功；看不到任何 `env.shared 同步` 字樣 ⇒ `core.hooksPath` 沒指到 `tools/git-hooks`（R212 證據檔〈八-1b〉）。
+
+### 十一-6 執行者座標（〔他包回報〕；每包報告全文在 scratchpad 不入庫；主控親驗項另標〔主控親驗〕）
+
+| 包（模型） | 持有面 | 做了什麼 | 本場驗證（執行者回報尾行） |
+|---|---|---|---|
+| P1 規劃鏡（Sonnet，唯讀） | — | 9 題設計判定（`plan_P1_design.md`）：6 列皆可機械收斂（題 5 為裁決題）；主控根因假設大致成立，訂正「DEF-200-313 機制在 `tools/lib/parallel_shard.py` 不在 `run_root_unittests.py`」 | `check_loc_budget --json` rc=0、`--env-doctor` rc=0、`gh run view` 38268535288／38401132448 |
+| QA-A／QA-B（Sonnet，唯讀） | — | PRD 56 座標 E2E 矩陣（十一-4） | QA-A 18 列：PASS 17／JUDGED 1；QA-B 38 列：PASS 36／JUDGED 2；FAIL 0 |
+| DEV-PG＋DEV-PG2（Sonnet） | `AutoClaude/tools/run_local_nightly.sh`（+215）、`AutoClaude/tests/tools/test_run_local_nightly_sh_static.py`（+86：4 支純文字靜態鎖） | 起 Docker 量 `darwin+pg+solo+pgext`；nightly 接 PG（`nightly_pg_up`／`nightly_pg_down`／`_nightly_bounded`；DSN 不 export 以保 autodetect 可驗；只收自己起的容器；EXIT trap）；D2：`nightly_docker_up`／`nightly_docker_down`（`open -g -a`、150s 輪詢、quit 兩個 app 名、pgrep 輪詢、只收自己開的；補兩條護欄：Docker.app 行程已在但 daemon 不可達＝不是自己開的、仍有外來運行中容器則不收）；實驗中發現並修一個真缺陷：`compose down -v` 後立刻 quit Docker 會讓容器下次復活成壞殼（`RWLayer … is unexpectedly nil`、`Exited (128)`）⇒ quit 前 VM 內 `docker run --rm --entrypoint sync`＋起 PG 前 `docker rm -f -v` 清殘容器 | 沙箱情境 (a)～(f) 皆 PASS；`test_run_local_nightly_sh_static` 45 通過；`test_bash32_compat` 32 OK；shellcheck 零新增；`tools/run_shellcheck.py` 11／11 |
+| P-SDD（Sonnet） | `AISDLC_SDD/scripts/ci-gate.sh`（接線）、`ci-gate.ps1`（2 行註解）、新檔 `tools/lib/pytest_skip_census.py`（71 LOC）、`tools/lib/skip_profile_key.py`（註解）、`AutoClaude/tests/tools/test_local_ci_gate.py`（(p) 節 11 支） | LATEST 軌 pytest `-rs` 落檔後交入口印 `[skip census] AISDLC_SDD/fsm_runtime@<platform>`；rc 0／1／3（＋2 接線錯）；D5 分層放在 CLI 邊界（`main()` 讀 `CI`／`GITHUB_ACTIONS`，`census_verdict` 純函式） | 整支 `bash scripts/ci-gate.sh` rc=0 含 darwin census 行；`test_local_ci_gate` 106 通過；根層鎖四批 261＋215＋230＋23 OK；`check_script_parity` rc=0；隔離複本 13 突變全被抓 |
+| P-JOB（Sonnet） | `tools/lib/parallel_shard.py`（+67）、`tools/tests/test_run_root_unittests.py`（numstat +172／−172，淨額 0） | `adopt_kill_on_close_job() -> bool`（win32 Job Object `KILL_ON_JOB_CLOSE`；非 win32 回 False；冪等；fail-open 一行）；`run_parallel` 入口恰呼叫一次；4 支平台中立單測；24 段史料精簡 179→77 行抵銷（原文＝附錄 E-2） | `test_run_root_unittests` 254 OK；`test_platform_neutral_paths`＋`test_subprocess_encoding_hygiene` 216 OK；`test_adr_xplat001_c1c2_lock` 187 OK；棘輪 `# 淨額 116735→116735 (+0)`；17 突變全被抓 |
+| P-PGSTUB（Sonnet） | `AutoClaude/tests/integration/test_pgvector_hnsw_recall.py`、`test_pgvector_real_recall.py`、`AutoClaude/tests/test_conftest_windows_native_skip_report.py` | 方案 B：刪 T1／T2 與 failover stub（連已刪常數 pg_required／_NO_AUTOMATED_CHANNEL）；`_PLATFORM_BOUND_DEBTS` 清空（兩 KEY 依 stale 規則必退；探針函式與注入測試保留）；D7：`test_the_handover_scan_surface_is_not_silently_empty` 分母補常數形態 | 三檔 29 通過／2 略過（原 5 略過）；pg 剖面假 DSN 下 debt 3→0；ruff／lint-imports（9 kept）／`git diff --check` rc=0；census 連動：nopg untagged −2、env-disabled −1；pg debt −3 |
+| P-CI（Sonnet） | `.github/workflows/windows-compat-ci.yml`（nightly-full 新增 6 個 pwsh 步 #9～#14）、`macos-compat-ci.yml`／`aisdlc-sdd-ci.yml`（paths 補 `pytest_skip_census.py`） | #9 census 腿（pgext＋`CLAUDECODE=1`，鍵不符即 throw）；#10 孤兒探針（正控組＋實驗組）；#11 重建根 `.venv`（既有 PS 5.1 bootstrap 步最後會 `Remove-Item .venv`，設計書前提不成立）；#12 `windows_smoke_local.ps1` 以 `powershell.exe` 5.1 實跑；#13 .env 同步 Windows E2E（bare remote＋clone＋Junction `.venv`＋真 `git pull --ff-only`＋負控）；#14 `engine_resume_job.py` schtasks 註冊／獨立複讀 `NextRunTime`／移除＋`quota_burndown --status` rc=1 且含「沒有有效落款」 | 三 yml 可解析；pyyaml 重算 `windows-nightly-full {'powershell': 2, 'pwsh': 9}`；mac pwsh 7.6.3 Parser 6 步 0 錯；鎖：`test_smoke_ci_sync` 42、permission_concurrency 62、gha_action_versions 22＋31、ps51_compat 10、timeout_coverage 3、schedule_sync 8、SDD paths 鎖 49 全 OK；mac 演練 A 9 fixture／C 8／B 4／E 8／D 真 pull 全綠 |
+| P-PIN-1（Sonnet） | `tools/lib/skip_group_policy.py`（+108／−70；LOC 399→383）、`tools/lib/skip_tag_policy.py`、`AutoClaude/tests/tools/test_local_ci_gate.py:1817` | 新鍵 `AutoClaude/tests@darwin+pg+solo+pgext`＝53／0／2／1／0／1、`AISDLC_SDD/fsm_runtime@darwin`＝4／0／4／0／0／3；`_FULL_SUITE_RUNNERS` +2；兩個下限 11→13／10→12；`_SITE_CLASS_CENSUS['AutoClaude/tests']` tool-absence 15→14；既有鍵一格不下修（slack 註解） | 三支指定鎖 91 OK；`test_local_ci_gate` 106 通過；加碼 880＋276＋136 OK；repo 根 `ruff check .` 全綠；LOC rc=0 |
+
+〔主控親驗〕本窗：(1) `docs/04_planning/R88_HANDOFF.md:64` 反引號引用已刪符號 _NO_AUTOMATED_CHANNEL ⇒ 改純文字史料，`test_doc_loc_baseline_freshness_r60` 281 項 OK；(2) launchd 觸發真 nightly（RunId `20261014_000025`；`launchctl kickstart gui/501/com.autoclaude.nightly`）：行 335-336 `daemon 不可達 ⇒ 已 open -a /Applications/Docker.app`／`daemon 已可達（約 3s）；Docker Desktop 是本腳本開的`、337-347 compose up＋`alembic current: 0018_version_kind_discriminator (head)`、351 `[PG autodetect] 已注入…`、619 `[skip census] AutoClaude/tests@darwin+pg+solo+pgext 共 57 支：platform=53／tool-absence=0／env-disabled=2／structural-pair=1／debt=0／untagged=1`、641-644 `已收容器`／`已在 VM 內 sync`／`已收 Docker Desktop（pgrep -f Docker.app 為空；osascript rc=0/0；約 15s）`、786 `[skip census] AISDLC_SDD/fsm_runtime@darwin 共 11 支：…untagged=3`、330-331 `[skip census] tools/tests@darwin 共 47 支…`／`[M6 id 集合] tools/tests@darwin：✅ 集合關係成立`；彙總 `PASS=4 FAIL=1`（檔頭另有 `SAMPLE VALIDITY dirty_entries=18`＝髒樹樣本警告）——FAIL＝stage 2 根層全套 3 項失敗／2 模組：`test_extras_quoting_zsh_safety`（workflow :2037 throw 訊息字串含未引號 `install -e .[…]`）與 `test_check_pytest_baseline_sites`（`skip_group_policy.py` provenance 兩行含 `NNNN passed` ⇒ 未納管站點 114→115）；皆主控親修（訊息改寫、數字改中文），三支鎖（`test_skip_ceiling_ratchet_direction`／`test_extras_quoting_zsh_safety`／`test_check_pytest_baseline_sites`）重跑 48 項 OK、`check_pytest_baseline_sites` rc=0（114）；(3) M6 落款：`skip_id_ledger.json` `tools/tests@darwin` 只重釘 measured-at／host（id 集合逐 id 相同）；ARCH-10／SA-09／SD-04 指出該 stage 當時 rc=1 且 measured-at 為寫入時刻 ⇒ 收尾以乾淨工作樹的根層全套 rc=0 那一次重釘（見十一-9）。TCC（macOS 自動化權限）在 launchd 脈絡下**沒有**擋 osascript（N=1）。
+
+### 十一-7 四方獨立審查（每鏡 Sonnet、唯讀、互不交談；主控不動工作樹；報告全文在 scratchpad 不入庫）
+
+| 鏡 | VERDICT | P1／P2／P3／P4 | 重驗（本場真跑） | P2 與處置 |
+|---|---|---|---|---|
+| Architect | CONDITIONAL | 0／1／9／6 | 棘輪 `+0`；LOC 無違規；根層鎖 67＋235 OK；AutoClaude 受影響 225 通過／2 略過；SDD paths 鎖 49；雲端 macOS run 38401132555 的 SDD 輸出餵新入口 `CI=true` rc=0 且六格＝登記值（首推 macos-smoke 不會因登記值而紅）；bash 3.2 SIGTERM 後 EXIT trap 約 1s 執行 | **ARCH-01**：census 腿天花板突破只 warning＋exit 0 且為該鍵雲端唯一執行者 ⇒ 改 throw（只留「剖面未登記」為 warning）＋更新執行者敘述，釘值後再 dispatch 證明收緊仍綠（FIX-DEV） |
+| SA | APPROVE | 0／0／11／5 | 抽查 14 列全數重現；CBG 824 OK（skip 11）、QP 339 OK；AutoClaude 15 檔 467 通過；`--env-doctor` rc=0；獨立 sandbox 重跑 .env 六情境 42 同值＋S6；56 座標母體自算無缺漏；PRD 零修憲 | 無 P2；P3 全為措辭訂正（SA-01～11），本節與十一-2／4／5 已套用 |
+| SD | CONDITIONAL | 0／0／5／11 | ctypes 佈局實算 144／64／`LimitFlags@16`／`ProcessMemoryLimit@112`＝MSDN x64；foreign-API 掃描 offenders=[]；8 突變全殺；ci-gate census 區塊 bash 3.2 harness rc 0／1／2／3／127 如設計；雲端 ubuntu run 38401132438 餵入口 linux rc=3、win32 rc=3（皆 advisory）；D7 分母 4 突變全殺；六步 pwsh Parser 全 OK | 無 P2；P3＝SD-01（`run_local_nightly.ps1:1396-1410` 過期註解）、SD-02（AC4-5 target 指向已無斷言檔）、SD-03（靜態鎖恆真句）、SD-04（M6 measured-at 非量測時刻且未揭露 FAIL）、SD-05（六步 dispatch 前皆未驗證＝結案只能條件句） |
+| QA | CONDITIONAL | 0／0／6／9 | 50 條宣稱 46 一致／4 部分無法重驗／0 不一致；AutoClaude 5 檔 180 通過／2 略過；tools/tests 8 支全 OK；`ppin1_verify_nightly.py` rc=0（兩條 census MATCH、tools/tests UNDER、M6 成立）；隔離複本突變：P-JOB 殺 6／存 2、P-SDD 殺 7／存 3（含 ci-gate `\|\| _census_rc=$?`→`\|\| true` 吞 rc 仍綠）、DEV-PG2 殺 6／存 6、D7 全殺；deny 無鎖發現屬實（刪 `git push*` 存活、只留 Edit 類 3 條存活、全清空才被殺） | 無 P2；條件 C1（693／313／253／.env Windows E2E 不得早於 nightly-full 真 dispatch 綠燈結案）、C2（960 結案文寫「接線完成、darwin 已釘、其餘剖面 advisory」）、C3（commit 前根層全套＋表② 回填＋`git add` 新檔） |
+
+修復波（FIX-DEV，Sonnet；成果見本節末行與 diff）：ARCH-01；F1／SD-02／ARCH-03（AC4-5 target→`test_pgvector_real_recall.py`、`run_local_nightly.ps1`／`ac4_nightly_collector.py` 過期註解）；F4（aisdlc-sdd-ci paths 補遞移 import）；F5／SD-03（靜態鎖恆真句改真突變）；G2／G3 補牙（主控裁決：AutoClaude 側一行靜態文字鎖，不動 tools/tests）；ARCH-09（provenance 改引真夜跑 :619／:786）。主控親改：十一-2／4／5／6 措辭（SA-01～11、ARCH-04、F3、F6）、三本帳（十一-8）、PRD §8 列 12 落款訂正註記（F2；不改條文、不加版本）、ONBOARDING §8 補 nightly 自動開收 Docker 一句（ARCH-09）。
+
+### 十一-8 三本帳處置（結案單線＝主控；雲端值未到者維持原列）
+
+| 列 | 處置 | 依據 |
+|---|---|---|
+| DEF-101-856（外部 :41） | **closed-by-decision｜退役**，移入〈複查記錄〉；外部軌 4→3 | 原條件括號內第二出口「PM 顯式廢止並留紀錄」；D1／D1′；推翻 2026-08-14 R88「保留」；三檔 29 通過／2 略過 |
+| DEF-200-075（長債 :48） | **fixed**（路徑①），移入〈複查記錄〉並帶但書；長債軌 2→1 | 真 launchd nightly :335-347／:619／:641-644；兩表登記 53／0／2／1／0／1；但書＝該次 FAIL=1、髒樹、機會性 +pg、TCC N=1、壞殼處置 |
+| DEF-101-693／DEF-200-313／DEF-200-253（外部 :38-40） | 原列不動；結案條件＝windows-nightly-full 真 dispatch 的步驟 #12／#10／#9 綠燈＋253 釘值後再 dispatch（ARCH-01）；結案文草稿＝SA 鏡報告〈三〉 | QA C1／SD-05：六步在 Windows 從未跑過，push 不觸發 nightly-full |
+| DEF-101-960（長債 :47） | 原列不動；接線完成、darwin 已釘、linux／win32 為 rc=3 advisory；結案條件＝push 後 windows-smoke 印出 `@win32` 六格並入表、刪 `_UNMEASURED_RUNNER_PROFILES` 該鍵 | QA C2；ARCH-05（linux 無條件入分母、win32 provenance 帶 `-k`） |
+
+結案命題現況（PRD §16.1 (b)）：主帳本未結 0／外部阻塞 3／結構性長債 1（`python tools/check_defect_log_crossref.py` rc=0）。SA 鏡回覆守則：雲端值未到前不得宣稱 0／0／0、不得宣稱 Windows 已驗、不得宣稱 nightly 全綠、不得宣稱 PRD「全功能 E2E 完備」。
+
+### 十一-9 閘門現況與雲端對帳（以實跑回填；數字皆本場）
+
+- 本機（審查後、FIX-DEV 修復前）：`check_defect_log_crossref` rc=0（未結 0／231 列）；`check_pytest_baseline_sites` rc=0（114 支未納管存量檔）；`check_handoff_carriers` rc=0；`test_doc_loc_baseline_freshness_r60` 281 OK；三支鎖 48 OK；護欄棘輪 `# 淨額 116735→116735 (+0)`、逐檔漂移 0。
+- FIX-DEV 落地後（本機；逐字）：`python tools/run_root_unittests.py` rc=0，印 `[skip census] tools/tests@darwin 共 47 支：platform=47／tool-absence=0／env-disabled=0／structural-pair=0／debt=0／untagged=0`、`[M6 id 集合] tools/tests@darwin：✅ 集合關係成立（本次 skip 47 支）`、`✅ 真實 TEMP 圍籬…零變動`（M6 落款改引此次、並揭露 nightly stage 2 當時 rc=1）；`python AutoClaude/tools/local_ci_gate.py` rc=0（editable sentinel／LOC／CLAUDE.md／snapshot／import-linter／pytest 皆 PASS；`[skip census] AutoClaude/tests@darwin+nopg+nested+pgext 共 153 支：platform=53／tool-absence=0／env-disabled=5／structural-pair=1／debt=0／untagged=94`——stub 刪除後在天花板內）；FIX-DEV 自驗：AutoClaude 三檔 191 通過、tools/tests 七支＋方向鎖 OK、棘輪 `+0`、三 yml 可解析、`check_pytest_baseline_sites`／`check_handoff_carriers` rc=0；census 腿改 throw 以 pwsh 7.6.3 八情境重放 mismatches=0（改前對天花板突破 rc=0＝缺陷重現）。
+- 收尾單人窗口順序：FIX-DEV 落地→根層全套 rc=0（M6 落款以此次重釘）→`AutoClaude/tools/local_ci_gate.py`→`clean_venv_carrier.py`（表②）→`sync_onboarding_baselines.py --check-snapshot`→commit→push→`gh run list --commit <完整 sha>`→`gh workflow run windows-compat-ci.yml`（nightly-full 六步 #9～#14；判準＝P-CI 報告〈三〉）；結果寫在本節下方。
+
+### 十一-10 開了→收了（第三窗）
+
+- Sonnet 子代理：wave 1 四支（P1／QA-A／QA-B／DEV-PG）、wave 2 四支（P-SDD／P-JOB／P-PGSTUB／P-CI）＋DEV-PG2（SendMessage 續作）＋P-PIN-1、四方審查四鏡、FIX-DEV，皆收工；額度守衛於五小時窗 99% 擋下一次 Agent 派發（FIX-DEV），等 reset 後重派——不繞過。
+- Docker Desktop：DEV-PG／DEV-PG2 沙箱與真 nightly 各開各收，結束時 `pgrep -f 'Docker[.]app'` rc=1、`docker info` 連不上 socket；事前既有的 act 容器／volume／映像未動。
+- 真 nightly 自開自收一次（launchd kickstart）；當日 02:00 排程因「當日心跳去重」預期跳過。
+- scratchpad 全部報告備份至 `~/.autosdd/r213_window3_scratch/`（80 份）；工作樹以 `git stash create`＋tag `r213-w3-wip-preserved` 保全過一次（撞額度前）；`docs/04_planning/R213_RESUME.md` 任務書隨本 commit 入庫作史料。
+
+### 十一-11 理論洞清單（P4；只登記、不修、不立輪；再開＝症狀驅動；暴露度口徑＝`FiveQuestion_Audit_Protocol/severity.md`）
+
+| # | 洞 | 暴露度（三取一） | 一句可觀測再開症狀 |
+|---|---|---|---|
+| 1 | `.claude/settings.unattended.json` deny 31 條無內容鎖（QA-B／QA 鏡突變存活；`git rebase` hook 側 rc=0） | 構造性（隔離複本突變）；真實語料 0 命中 | 無人窗口逐字稿出現經 settings 放行而 hook 未擋的 deny 清單內指令（附 sid） |
+| 2 | D2 TOCTOU：`docker info` 可達與「是否自己開的」之間約 80 秒窗；`docker ps` 失敗視同無外來容器 | 理論 | 某晚 RunId log 同時出現「沿用」與使用者容器被收的痕跡 |
+| 3 | SIGKILL／斷電殘容器不自癒（pre-clean 只處理非運行中殘殼） | 理論 | 連續兩晚 `[nightly][pg] 已在跑…沿用` 而使用者未開 |
+| 4 | nightly 逾時路徑與補跑時段無閒置閘（使用者 02:00 正在用機） | 理論 | 掌舵者回報 02:00 前後 Docker 被 nightly 關掉 |
+| 5 | D7 後 `[DEBT]` 掃描面只守休眠站點（掃描器活性 ≠ 欠債憑證） | 設計取捨 | `_AC_TARGET_PENDING` 非空而 census debt 群仍 0 |
+| 6 | 新鍵 darwin 三格 slack（既有剖面刪 stub 後偏寬 2～3 格，刻意不下修） | 設計取捨 | 某剖面 untagged 無聲回升到舊天花板內 |
+| 7 | 突變存活：P-JOB 2（`except` 收窄為 OSError、拿掉 `use_last_error`）、P-SDD 3（含 rc 吞沒——FIX-DEV 以靜態鎖補一條）、DEV-PG2 6（FIX-DEV 以靜態鎖補六條） | 構造性 | 同形改動進 HEAD 而鎖全綠 |
+| 8 | M6 `measured-at` 為寫入時刻（非 runner 印出的量測時刻） | 設計取捨 | 兩次落款時刻與 log 時刻互換後鎖仍綠 |
+| 9 | `tools/tests@darwin` 天花板 env-disabled 餘裕 1 格；`tools/tests` 主軌餘裕低 | 量測 | `--print-guard-lines` 淨額 >0 且無史料可搬 |
+| 10 | pre-clean（`docker rm -f -v`）無命中不印行＝不可觀測；census 讀不到 log 時本機 D5 降為 rc=0 與 ci-gate 註解「入口壞掉本機也擋」不一致 | 理論 | RunId log 連續多晚無 `[nightly][pg]` 任一行 |
+| 11 | `_nightly_bounded` 於 SIGTERM 時子行程成孤兒、雙重 fork 孫行程拖長 `$(…)` | 理論 | nightly 被 SIGTERM 後 `ps` 殘留 docker 子行程 |
+| 12 | 首次 dispatch 預期有紅（#9 舊天花板、#10 巢狀 Job、#12 [8/9] 首跑）⇒ `windows-nightly-alert` 會開 P1 issue 並影響 nightly 錨 | 設計內 | issue 開了而本窗未於取證後關單 |
+
+## 附錄 E 第三窗任務書要點與搬出的史料（逐字）
+
+### E-1 任務書要點（全文在 `~/.autosdd/r213_window3_scratch/brief_*.md` 與各 Agent prompt；共同規範 10 條＝絕對路徑／讀 rc 不接管線／禁改樹的 git／禁打真 usage 端點／tools/tests 單跑 `AUTOSDD_SENTINEL_OFF=1`／不跑全套／禁 nohup／報告 heredoc 寫 scratchpad／純文字首行 STATUS／突變只在隔離複本）
+- P1 規劃鏡：9 題固定欄位（判定／機制／動到的檔與鎖持有面／風險／驗證指令／次數／誰做）。QA-A／QA-B：PRD 56 座標逐列真跑矩陣（判定值域 PASS／FAIL／JUDGED-ON-EXISTING-TRACE／UNVERIFIABLE-ON-MAC／NOT-FOUND；禁 `wakechain_e2e.py --run`）。DEV-PG／DEV-PG2：量 `+pg+solo` 剖面、nightly 接 PG、D2 護欄①～⑥。P-SDD／P-JOB／P-PGSTUB／P-CI：持有面兩兩不相交（workflow 只由 P-CI 動）；P-JOB 棘輪淨額 ≤0 以搬史料抵銷。P-PIN-1：本機釘值不跑全套、M6 等真 nightly。四方審查：唯讀、口徑分兩套、禁「零發現即 PASS」。
+
+### E-2 `tools/tests/test_run_root_unittests.py` 搬出的 24 段史料（P-JOB；逐字；原座標＝`file:line`＠HEAD b3caf68a）
+
+# 本輪（DEF-200-313 P-JOB）從 `tools/tests/test_run_root_unittests.py` 搬出的史料型註解／docstring（逐字）
+
+座標＝`file:line`＠HEAD（b3caf68a）；每段後附『保留於原處的精簡版』供對照。判準／WHY 一句話留在原檔，
+此處只收沿革、輪號故事、已修缺陷的敘述（抵銷本輪新增的 ParallelShardKillOnCloseJobTest 行數）。
+
+合計：24 段；原文 179 行 → 原處保留精簡版 77 行，淨移出 102 行。
+對沖：本輪新增 `tools/tests/test_run_root_unittests.py` +102 行（`import ctypes` 1 行＋
+`ParallelShardKillOnCloseJobTest` 101 行）；該檔 5372→5372 行（淨額 0、逐檔漂移 0，
+`--print-guard-lines` 首行 `# 淨額 116735→116735 (+0)`）。
+
+## tools/tests/test_run_root_unittests.py:296-303@HEAD（8 行 → 精簡為 4 行）
+```text
+    """DEF-200-444／445：全套曾實測改寫**真實** %TEMP% 下的 autosdd_pace*.json。DEF-200-444
+    當時以為引擎 `file_quota_meter` 讀的就是那份；實際上引擎讀 quota 快取目錄（家目錄或
+    `AUTOSDD_QUOTA_CACHE_DIR`），寫入端改走 `quota_meter.cache_path()` 之後，全套寫的才是引擎
+    真的會讀的那份（TTL 內可能拿測試的假決策當派工上限）。家族級修法＝
+    `sentinel_lifecycle.temp_fence`：全套期間 TEMP／TMP／TMPDIR、快取目錄與
+    `tempfile.tempdir` 指向專屬隔離根（含 worker 與孫行程）、跑完清掉，並比對真實契約目錄下
+    配速契約檔的前後雜湊。本類只對**合成的假真實目錄**（`real_tmp=`／scratch 快取目錄）動手，
+    絕不碰這台機器真的 %TEMP% 與家目錄。"""
+```
+保留於原處的精簡版：
+```text
+    """DEF-200-444／445：全套曾實測改寫**真實** %TEMP% 與 quota 快取目錄下的 autosdd_pace*.json。
+    家族級修法＝`sentinel_lifecycle.temp_fence`：全套期間 TEMP／TMP／TMPDIR、快取目錄與
+    `tempfile.tempdir` 指向專屬隔離根（含 worker 與孫行程）、跑完清掉，並比對真實契約目錄下配速
+    契約檔的前後雜湊。本類只對**合成的假真實目錄**動手，絕不碰這台機器真的 %TEMP% 與家目錄。"""
+```
+
+## tools/tests/test_run_root_unittests.py:197-204@HEAD（8 行 → 精簡為 4 行）
+```text
+        """M-03（console_qa 事故輪擴充）：`main()` 的最終 `return` 必須是
+        `console_orphan_census.wrap(lambda: sentinel_lifecycle.leak_fence(...))`——
+        `wrap()` 是全套層孤兒 console 普查外層（零行數成本掛進來，見
+        `tools/lib/console_orphan_census.py` WHY：本檔 special tier 零餘裕棘輪，
+        新邏輯只能用「單行取代單行」的方式外掛），`leak_fence` 仍是原本的底線防護
+        （`AUTOSDD_SENTINEL_OFF` 補位＋可稽核暫存檔痕跡）——兩層都不得漏接。走 AST
+        而非字串比對：字串比對對格式重排（換行／空白）敏感，AST 只認呼叫形狀。
+        """
+```
+保留於原處的精簡版：
+```text
+        """M-03：`main()` 的最終 `return` 必須是
+        `console_orphan_census.wrap(lambda: sentinel_lifecycle.leak_fence(...))`——外層孤兒 console
+        普查與底線防護 `leak_fence` 兩層都不得漏接。走 AST 而非字串比對：字串比對對格式重排敏感。
+        """
+```
+
+## tools/tests/test_run_root_unittests.py:750-755@HEAD（6 行 → 精簡為 3 行）
+```text
+    """DEF-200-274 第七輪四方獨立複審（Architect／SD 各自命中）：`worker_count()`
+    算出 1（例如 `AUTOSDD_PARALLEL_TESTS_WORKERS=1`，或單核心環境的預設公式）時，
+    走 subprocess 架構零平行效益、純損耗——本測試鎖住『此時退回序列路徑、不呼叫
+    `parallel_shard.run_parallel()`』這條判斷式，不管 `parallel_mode()` 是什麼
+    （第九輪：`enabled()` 已刪除，改由 `should_run_parallel()` 判斷，見
+    `ShouldRunParallelDecisionTest`）。"""
+```
+保留於原處的精簡版：
+```text
+    """DEF-200-274：`worker_count()` 算出 1（如 `AUTOSDD_PARALLEL_TESTS_WORKERS=1` 或單核心預設）
+    時走 subprocess 架構零平行效益、純損耗——鎖住『此時退回序列路徑、不呼叫 `run_parallel()`』，
+    不管 `parallel_mode()` 是什麼（判斷式見 `ShouldRunParallelDecisionTest`）。"""
+```
+
+## tools/tests/test_run_root_unittests.py:1909-1914@HEAD（6 行 → 精簡為 3 行）
+```text
+        """DEF-200-274 CI 事故（commit 9478bda，root-infra-ci run 34358252409）：
+        平行模式此前只把明細落檔、從未印到 console——CI runner 的落檔目錄是 job
+        臨時工作目錄，job 結束即銷毀，三支 CI workflow 也都沒有 upload-artifact
+        步驟，主控台因而完全看不到任何 FAIL:/ERROR:/Traceback。本測試鎖住修法：
+        落檔內容必須同時印到 stderr，與序列模式 `TextTestRunner` 內建
+        `printErrors()` 的行為對等。"""
+```
+保留於原處的精簡版：
+```text
+        """DEF-200-274 CI 事故：平行模式曾只把明細落檔、從未印到 console（CI 落檔目錄隨 job 銷毀、
+        也無 upload-artifact），主控台看不到任何 FAIL:/ERROR:/Traceback。鎖住修法：落檔內容必須
+        同時印到 stderr，與序列模式 `TextTestRunner` 內建 `printErrors()` 的行為對等。"""
+```
+
+## tools/tests/test_run_root_unittests.py:3183-3188@HEAD（6 行 → 精簡為 4 行）
+```text
+    """DEF-200-274 收尾複審發現：shard 崩潰時 `run_parallel()` 曾 `raise
+    SystemExit(1)`，直接穿透 `sentinel_lifecycle.leak_fence()` 的 `rc = run()`
+    這一行（無 try/except），讓收尾快照／洩漏比對整段沒有執行。修法＝崩潰改記
+    一筆 `errors` 條目正常 return，`wasSuccessful()` 因此為 False，呼叫方讀到
+    的 rc 依然非零，但不再犧牲 `leak_fence()` 的收尾動作。
+    """
+```
+保留於原處的精簡版：
+```text
+    """DEF-200-274：shard 崩潰時 `run_parallel()` 不得 `raise SystemExit(1)`——它會穿透
+    `sentinel_lifecycle.leak_fence()` 的 `rc = run()`（無 try/except）而讓收尾快照／洩漏比對整段
+    不執行；改記一筆 `errors` 條目正常 return，`wasSuccessful()` 為 False、呼叫方 rc 仍非零。
+    """
+```
+
+## tools/tests/test_run_root_unittests.py:3444-3450@HEAD（7 行 → 精簡為 4 行）
+```text
+    """DEF-200-274 第三輪複審 Problem 2：`run_parallel()` 對 Popen／communicate／
+    `merge_results()` 整段缺 try/except；`merge_results()` 對缺鍵 payload 拋出的
+    `KeyError` 並非 `SystemExit`，一樣會穿透 `sentinel_lifecycle.leak_fence()` 的
+    `rc = run()`（該行無 try/except），讓收尾快照／洩漏比對整段不執行——與已修復的
+    `raise SystemExit` 繞過屬同一失效模式，只是觸發條件換成例外類型。修復後任何例外
+    都轉成一筆 `errors` 條目、正常 return。
+    """
+```
+保留於原處的精簡版：
+```text
+    """DEF-200-274：`merge_results()` 對缺鍵 payload 拋的 `KeyError` 不是 `SystemExit`，一樣會穿透
+    `sentinel_lifecycle.leak_fence()` 的 `rc = run()`（無 try/except）而讓收尾整段不執行；
+    `run_parallel()` 必須把任何例外都轉成一筆 `errors` 條目、正常 return。
+    """
+```
+
+## tools/tests/test_run_root_unittests.py:3570-3574@HEAD（5 行 → 精簡為 3 行）
+```text
+    """SD 複審 finding 2（順手處理，未獨立復現，收斂進同一批修復）：Popen() 迴圈若在
+    啟動到一半時失敗，已啟動的子行程不應被放生成孤兒——`run_parallel()` 必須
+    `kill()`＋`wait()` 已啟動的 procs 再把這次失敗併入統一的例外處理路徑（合成一筆
+    `errors` 條目、正常 return）。
+    """
+```
+保留於原處的精簡版：
+```text
+    """DEF-200-274：`Popen()` 啟動到一半失敗時，已啟動的子行程不得被放生成孤兒——`run_parallel()`
+    必須 `kill()`＋`wait()` 它們，再把失敗併入統一例外路徑（合成一筆 `errors`、正常 return）。
+    """
+```
+
+## tools/tests/test_run_root_unittests.py:3681-3688@HEAD（8 行 → 精簡為 4 行）
+```text
+    """DEF-200-274 第四輪第二次對抗式複審 Architect finding 1(a)：worker thread 內部若拋出非
+    `Exception` 子類的 `BaseException`（如 `SystemExit`），`run_parallel()` 不得
+    讓它穿透——`_crash_fallback()` 直接收尾，不依賴外層 `except Exception` 篩選
+    型別。刻意用 `SystemExit` 而非既有測試已覆蓋的 `OSError`：`OSError` 是
+    `Exception` 子類，舊版「合成後 `raise`、交外層 `except Exception` 接」的寫法
+    對它本來就成立，換不出這個型別缺口；`SystemExit` 才是舊版寫法會真的漏接的
+    具體反例。
+    """
+```
+保留於原處的精簡版：
+```text
+    """DEF-200-274 Architect finding 1(a)：worker thread 內拋出非 `Exception` 的 `BaseException`
+    （如 `SystemExit`）不得穿透 `run_parallel()`——`_crash_fallback()` 直接收尾、不靠外層
+    `except Exception` 篩型別。刻意用 `SystemExit` 而非 `OSError`：後者換不出這個型別缺口。
+    """
+```
+
+## tools/tests/test_run_root_unittests.py:4013-4020@HEAD（8 行 → 精簡為 4 行）
+```text
+        """端到端：模組鍵在被自動細分成 class 鍵的那一輪觀測後仍存活於活體
+        快取（不退回種子檔的舊數字），值回填為本輪 class 鍵的加總
+        （100.0+123.0=223.0，取代第 N 輪的舊值 150.0——追蹤真實現況，不凍結在
+        被拆分前的舊模組值），且下一輪 `auto_class_level_candidates()` 仍能
+        判定該模組需要細分——用本測試檔自身 `__name__` 當模組名（已知可
+        import、無 setUpModule/tearDownModule），效果等價於文字上的
+        `test_dev_start`，避免真的 import 那支重量級測試檔。
+        """
+```
+保留於原處的精簡版：
+```text
+        """端到端：模組鍵在被自動細分成 class 鍵的那一輪觀測後仍存活於活體快取（不退回種子檔的
+        舊數字），值回填為本輪 class 鍵加總（100.0+123.0=223.0，取代舊值 150.0），且下一輪
+        `auto_class_level_candidates()` 仍判定該模組需細分。模組名用本檔 `__name__`（已知可
+        import、無 setUpModule/tearDownModule），避免真的 import 重量級測試檔。"""
+```
+
+## tools/tests/test_run_root_unittests.py:4048-4056@HEAD（9 行 → 精簡為 3 行）
+```text
+        """D1：類別鍵（`module.Class`）被進一步自動細分成方法鍵
+        （`module.Class.method`）觀測的那一輪，類別鍵與模組鍵本身雖不在新的
+        `module_timings` 裡，但因為模組前綴（`key.split('.', 1)[0]`）仍在
+        `observed_modules` 集合中而繼續存活，且兩者的值都回填為本輪三個方法鍵
+        的加總（20.0+24.0+22.0=66.0，取代第 N 輪的舊值 150.0——見
+        `save_live_cache()` docstring〈WHY 父鍵需要每輪回填〉）——三層鍵
+        （模組／模組.類別／模組.類別.方法）同時存在時不會互相誤剪，且都追蹤
+        本輪的真實總和。
+        """
+```
+保留於原處的精簡版：
+```text
+        """D1：類別鍵被細分成方法鍵的那一輪，類別鍵與模組鍵雖不在 `module_timings` 裡，仍因模組前綴
+        在 `observed_modules` 而存活，且回填為本輪三個方法鍵加總（20.0+24.0+22.0=66.0，取代舊值
+        150.0；見 `save_live_cache()` docstring〈WHY 父鍵需要每輪回填〉），三層鍵不互相誤剪。"""
+```
+
+## tools/tests/test_run_root_unittests.py:4085-4093@HEAD（9 行 → 精簡為 3 行）
+```text
+        """D1 版：`test_module_key_survives_split_round_and_candidate_still_
+        flagged` 的類別級姊妹測試——鎖住「連續兩輪決策一致，不因快取結構
+        改變而震盪」：類別鍵在被自動細分成方法鍵的那一輪觀測後仍存活於活體
+        快取，值回填為本輪三個方法鍵的加總（20.0×3=60.0，本測試刻意讓總量
+        與第 N 輪的舊值相同，驗證『守恆時數字不變』；`test_save_live_cache_
+        merge_prune_survives_three_level_keys` 驗證『總量改變時數字也跟著
+        改變』的姊妹象限），且下一輪 `auto_method_level_candidates()` 讀到
+        這份回填後的 `class_hints` 仍能判定同一個類別為方法級候選。
+        """
+```
+保留於原處的精簡版：
+```text
+        """D1 版（`test_module_key_survives_split_round_and_candidate_still_flagged` 的類別級
+        姊妹）：連續兩輪決策一致、不因快取結構改變而震盪——方法鍵加總 20.0×3=60.0（刻意與舊值
+        相同，驗『守恆時數字不變』），下一輪 `auto_method_level_candidates()` 仍判同類別為候選。"""
+```
+
+## tools/tests/test_run_root_unittests.py:4149-4155@HEAD（7 行 → 精簡為 3 行）
+```text
+        """DEF-200-386（a）：`current_staleness_report()` 是單一入口，直接讀磁碟上
+        的 `SEED_PATH`／`LIVE_CACHE_PATH`——剛跑完 `refresh_parallel_timing_seed.py`
+        （把 live 原樣寫成 seed）那一刻，兩邊內容逐鍵相同，重疊率必為 100%，
+        不得回報過期。此前的臭蟲是呼叫端（`parallel_shard.py`）把「本輪原始
+        module_timings」（未合併）誤當 `live` 餵給 `staleness_report()`，導致剛
+        刷新也照樣過期——本測試鎖住「讀磁碟」這個修法本身的正確性。
+        """
+```
+保留於原處的精簡版：
+```text
+        """DEF-200-386（a）：`current_staleness_report()` 直接讀磁碟上的 `SEED_PATH`／
+        `LIVE_CACHE_PATH`——剛跑完 `refresh_parallel_timing_seed.py`（live 原樣寫成 seed）那一刻
+        兩邊逐鍵相同、重疊率必為 100%，不得回報過期；鎖住『讀磁碟』這個修法本身。"""
+```
+
+## tools/tests/test_run_root_unittests.py:4218-4225@HEAD（8 行 → 精簡為 2 行）
+```text
+    """DEF-200-274 第十輪 D2（SD-06 P2）：`dispatch_imbalance.
+    report_dispatch_imbalance()` 第八輪起在 CI 上（`GITHUB_ACTIONS=true`）額外印
+    `::warning::` annotation，但 `run_parallel()` 對
+    `parallel_timing_cache.staleness_report()` 的非 None 回傳值此前只有純
+    print——兩則 advisory 待遇不對稱，CI 摘要頁只曝光前者。本測試釘住兩者對稱
+    後的行為：CI 上種子過期 advisory 也要多印一行 `::warning::`，非 CI 維持純
+    文字不變。
+    """
+```
+保留於原處的精簡版：
+```text
+    """DEF-200-274 第十輪 D2：`run_parallel()` 的種子過期 advisory 與 `report_dispatch_imbalance()`
+    對稱——CI 上（`GITHUB_ACTIONS=true`）也多印一行 `::warning::`，非 CI 維持純文字不變。"""
+```
+
+## tools/tests/test_run_root_unittests.py:4290-4305@HEAD（16 行 → 精簡為 5 行）
+```text
+    """DEF-200-386（b）回歸鎖：`run_parallel()` 的過期 advisory 必須比對
+    `save_live_cache()` 合併寫回磁碟後的活體快取，不是本輪原始 `module_timings`
+    （未經 parent rollup／`kept_previous` 合併）。此前的臭蟲：呼叫端直接把
+    `module_timings` 當 `live` 餵給 `staleness_report()`；若種子檔反映的是
+    **歷史累積的合併圖像**（含這一輪不會被重新觀測、但因同模組前綴而被
+    `kept_previous` 保留下來的舊 class 鍵），比較面不對稱就會誤報過期。
+
+    場景：這一輪只派工 `pkgNN.Fresh`，活體快取預放同前綴但不會被重新觀測的舊 class 鍵 `pkgNN.Old`
+    （`save_live_cache()` 的 `kept_previous` 會保留）；種子檔＝本輪應合併出的完整圖像；用真實
+    `run_parallel()`（fake `Popen`＋執行緒區域假時鐘）讓兩邊排序同向。假時鐘取捨沿革搬至
+    Guard_Line_History_2.md〈R186 淨減法搬遷〉§54。  round-label-ok
+
+    若 `run_parallel()` 退回舊行為（直接拿 `module_timings` 比對），比較面會漏掉
+    `pkgNN.Old`／`pkgNN` 這兩層 40 個鍵，重疊率跌破門檻，本測試斷言的「不印
+    過期」就會失敗。
+    """
+```
+保留於原處的精簡版：
+```text
+    """DEF-200-386（b）回歸鎖：`run_parallel()` 的過期 advisory 必須比對 `save_live_cache()` 合併
+    寫回磁碟後的活體快取，不是本輪原始 `module_timings`（未經 `kept_previous` 合併）。場景：只派工
+    `pkgNN.Fresh`，活體快取預放不會被重新觀測的舊 class 鍵 `pkgNN.Old`，種子檔＝本輪應合併出的完整
+    圖像；退回舊行為則比較面漏掉 `pkgNN.Old`／`pkgNN` 兩層 40 個鍵、重疊率跌破門檻而誤印過期。
+    """
+```
+
+## tools/tests/test_run_root_unittests.py:4381-4393@HEAD（13 行 → 精簡為 5 行）
+```text
+    """DEF-200-274 第十輪 SA-01：`merge_results()` 產生的 `_MergedResult` 餵給
+    `report_skip_census()`（連帶 `report_windows_skip_tag_exemption_problems()`
+    共用的同一份 skip 明細）的語意，必須與序列 `unittest.TextTestRunner` 的原生
+    結果一致——此前全檔 `_MergedResult(` 零命中，只有真 `run_parallel()` 對
+    tools/tests 全樹的整合層級間接證據，`merge_results()` 自身若重建有缺陷不會
+    被單獨鎖住。
+
+    現場事實：`_worker_main()` 對 `start_dir` 有 `assert start_dir == tests_dir`，worker 只為真
+    tools/tests 設計，無法用真 subprocess 對合成暫存樹跑 `run_parallel()`；故手造 per-worker
+    payload——對同一批合成測試各自真跑一次 `unittest.TextTestRunner`，用與 `_worker_main` 同款的
+    `parallel_shard._entries()` 序列化再交 `merge_results()`（資料形狀保真，只是把子行程換成同行程
+    第二次真跑）。推導搬至 Guard_Line_History_2.md〈R186 淨減法搬遷〉§55。  round-label-ok
+    """
+```
+保留於原處的精簡版：
+```text
+    """DEF-200-274 第十輪 SA-01：`merge_results()` 的 `_MergedResult` 餵給 `report_skip_census()`
+    （連帶 `report_windows_skip_tag_exemption_problems()`）的語意，必須與序列
+    `unittest.TextTestRunner` 的原生結果一致。worker 只為真 tools/tests 設計（`start_dir` 斷言），
+    故手造 per-worker payload：同批合成測試真跑一次，以 `_entries()` 序列化再交 `merge_results()`。
+    """
+```
+
+## tools/tests/test_run_root_unittests.py:4417-4423@HEAD（7 行 → 精簡為 4 行）
+```text
+        # 用 discover(start_dir=top_level_dir=合成暫存目錄) 取代
+        # `sys.path.insert(self._tmpdir)` + `loadTestsFromName`：後者的執行期路徑對
+        # `AISDLC_SDD/scripts/tests/test_ci_paths_cover_root_consumers.py` 的
+        # `_eval_path_expr()` 靜態掃描器不可解析（`tempfile.mkdtemp()` 回傳值非字面
+        # 路徑常數）⇒ `test_no_unresolvable_sys_path_inserts` 真紅。discover() 本身也會
+        # 把 top_level_dir 插進 sys.path，但那是 stdlib 內部行為、不是本檔寫出的
+        # `sys.path.insert(...)` 陳述式，不落入該掃描器的射程。
+```
+保留於原處的精簡版：
+```text
+        # 用 discover(start_dir=top_level_dir=合成暫存目錄) 取代 `sys.path.insert(self._tmpdir)`：
+        # 後者的執行期路徑對 `test_ci_paths_cover_root_consumers.py` 的 `_eval_path_expr()` 靜態
+        # 掃描器不可解析（`test_no_unresolvable_sys_path_inserts` 真紅）；
+        # discover() 內部的插入不在射程。
+```
+
+## tools/tests/test_run_root_unittests.py:4630-4636@HEAD（7 行 → 精簡為 2 行）
+```text
+    """P0 邊界樣本：`setUpClass` 寫成 `@staticmethod`（而非 `unittest.TestCase`
+    預期的 `@classmethod`——stdlib 執行期不強制這件事，只要求 `cls.setUpClass()`
+    可被呼叫）。`cls.setUpClass` 解出的是一個**裸函式物件**，沒有 `.__func__`
+    （那是 bound method／classmethod 描述器才有的屬性），此前
+    `_class_has_only_base_fixtures()` 對它直接取 `.__func__` 會 `AttributeError`，
+    拖垮 `auto_method_level_candidates()` 整個候選評估迴圈。
+    """
+```
+保留於原處的精簡版：
+```text
+    """P0 邊界樣本：`setUpClass` 寫成 `@staticmethod`——`cls.setUpClass` 解出的是沒有 `.__func__`
+    的裸函式物件。"""
+```
+
+## tools/tests/test_run_root_unittests.py:4899-4905@HEAD（7 行 → 精簡為 4 行）
+```text
+        """天然樣本：`test_archive_defect_log.TestMoveSubsetSelectionIsNamed
+        AndTraceable`——7 支方法、無 `setUpClass`、每方法自帶獨立
+        `tempfile.TemporaryDirectory()` 沙箱（已於本輪落地前人工核實安全）。
+        `hints` 用真實磁碟活體快取記錄的 166.6s ＋ 20 個 filler 鍵湊出與
+        D0.3 實測相同的總量 `S=2381.0s`，讓 `worker_count=13`／`16` 兩個
+        交叉點兩側的 ratio 精確對齊設計稿算出的 0.91×／1.12×。
+        """
+```
+保留於原處的精簡版：
+```text
+        """天然樣本：`test_archive_defect_log` 的 `TestMoveSubsetSelectionIsNamedAndTraceable`——
+        7 支方法、無 `setUpClass`、每方法自帶獨立 `tempfile.TemporaryDirectory()` 沙箱。`hints` 用
+        真實活體快取記錄的 166.6s ＋ 20 個 filler 鍵湊出總量 `S=2381.0s`，讓 `worker_count=13`／`16`
+        兩個交叉點兩側的 ratio 精確對齊設計稿的 0.91×／1.12×。"""
+```
+
+## tools/tests/test_run_root_unittests.py:4925-4931@HEAD（7 行 → 精簡為 2 行）
+```text
+        """P0：`setUpClass` 寫成 `@staticmethod` 時，`cls.setUpClass` 解出的裸
+        函式沒有 `.__func__`——修復前 `_class_has_only_base_fixtures()` 對它
+        直接取 `.__func__` 會 `AttributeError`，讓 `auto_method_level_
+        candidates()` 對這一個候選的評估以例外中止、拖垮整個候選迴圈（此前
+        無 try/except 兜底）。本測試釘住：例外不再外洩，且該類別因『視同覆寫
+        了 setUpClass』被 fail-closed 排除在候選之外。
+        """
+```
+保留於原處的精簡版：
+```text
+        """P0：`setUpClass` 寫成 `@staticmethod` 時裸函式沒有 `.__func__`——例外不得外洩而拖垮整個
+        候選迴圈，且該類別因『視同覆寫了 setUpClass』被 fail-closed 排除在候選之外。"""
+```
+
+## tools/tests/test_run_root_unittests.py:5117-5123@HEAD（7 行 → 精簡為 2 行）
+```text
+        """第七輪四方獨立複審（Architect/SA/SD/QA）共同點名並經 QA 合成場景證實
+        的真缺陷：派工單位數 < worker_count 時，若分母誤用未經 cap 的名目
+        `worker_count`，即使所有單位耗時完全相同也會被全數誤判為不均（QA 實測：
+        3 個耗時皆 20.0 的單位、worker_count=8 時倍率恆 2.67、全部 3 個都被標記）。
+        本測試釘住修復後的正確行為：`min(worker_count, len(module_timings))`
+        當分母，完全均衡的資料在任何 worker_count 下都不該被標記。
+        """
+```
+保留於原處的精簡版：
+```text
+        """派工單位數 < worker_count 時分母須用 `min(worker_count, len(module_timings))`：完全均衡的
+        資料（QA 合成：3 個耗時皆 20.0、worker_count=8）在任何 worker_count 下都不該被標記。"""
+```
+
+## tools/tests/test_run_root_unittests.py:3588-3592@HEAD（5 行 → 精簡為 2 行）
+```text
+                # 本 mock 原本漏了 `returncode`（`_worker_thread_loop()` 對成功 Popen 的分支一定會
+                # 存取它）：舊版 `run_parallel()` 只取第一筆例外 raise，讓 mod.b 刻意的 OSError 蓋
+                # 過意外的 AttributeError，測試因此從未獨立驗證 mod.a 走得到 `results.put()`；修復
+                # 後兩條 worker 的例外都會被排空印出。第四輪複審發現的沿革搬至
+                # Guard_Line_History_2.md〈R186 淨減法搬遷〉§52。  round-label-ok
+```
+保留於原處的精簡版：
+```text
+                # 本 mock 原本漏了 `returncode`（成功 Popen 的分支一定會存取它）：舊版只取第一筆
+                # 例外 raise，讓 mod.b 的 OSError 蓋過意外的 AttributeError、mod.a 從未被獨立驗證。
+```
+
+## tools/tests/test_run_root_unittests.py:961-965@HEAD（5 行 → 精簡為 3 行）
+```text
+    # ── DEF-101-510（R59）：反方向的可見度 ───────────────────────────────────
+    # 上面三支鎖的是「標籤 skip 要被獨立點名」；R59 於真 Windows 11 實機量到
+    # `skipped=11` 而 **11 支全部無標籤**，其中兩支是真正的覆蓋損失（見
+    # `run_root_unittests.report_all_skips` docstring）。故補鎖「未標籤的 skip
+    # 也必須連理由一起被印出來」——否則只印一個 `skipped=N` 等於沒印。
+```
+保留於原處的精簡版：
+```text
+    # ── DEF-101-510：反方向的可見度 ───────────────────────────────────
+    # 上面三支鎖的是「標籤 skip 要被獨立點名」；真 Windows 11 實機量到 11 支 skip 全部無標籤，
+    # 其中兩支是真正的覆蓋損失——故補鎖「未標籤的 skip 也必須連理由一起被印出來」。
+```
+
+## tools/tests/test_run_root_unittests.py:3577-3581@HEAD（5 行 → 精簡為 2 行）
+```text
+        """DEF-200-274 第四輪：動態佇列下 Popen 由多條 worker thread 併發呼叫，
+        「誰先誰後」不再確定——原本靠呼叫次數（第一次成功、第二次失敗）判斷的假
+        Popen，改成依 argv 裡的模組名決定成敗（`mod.b` 恆失敗、`mod.a` 恆成功），
+        讓斷言不依賴 thread 排程的先後順序。
+        """
+```
+保留於原處的精簡版：
+```text
+        """DEF-200-274：動態佇列下 Popen 由多條 worker thread 併發呼叫、先後不確定——假 Popen 改依
+        argv 的模組名決定成敗（`mod.b` 恆失敗、`mod.a` 恆成功），斷言不依賴 thread 排程順序。"""
+```
+
+## tools/tests/test_run_root_unittests.py:5073-5077@HEAD（5 行 → 精簡為 2 行）
+```text
+    """DEF-200-274 第七輪：`tools/lib/dispatch_imbalance.py` 純函式的紅綠自證
+    （掌舵者要求「自動偵測未來新熱點，不再只能靠人眼」）。純函式邏輯測完後，
+    再驗 `report_dispatch_imbalance()` 的印出接線本身（見下方
+    `ReportDispatchImbalanceTest`）。
+    """
+```
+保留於原處的精簡版：
+```text
+    """DEF-200-274：`dispatch_imbalance.py` 純函式的紅綠自證（自動偵測新熱點，不再靠人眼）；
+    印出接線本身見下方 `ReportDispatchImbalanceTest`。"""
+```
+
 ## 附錄 A 搬出的史料（逐字）
 
 ### A-1 tools/run_root_unittests.py 檔頭（DEF-101-701）

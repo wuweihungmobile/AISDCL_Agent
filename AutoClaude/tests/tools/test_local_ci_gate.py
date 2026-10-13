@@ -1824,8 +1824,9 @@ def test_the_third_tree_is_inside_the_skip_governance_frame() -> None:
     可以無聲從 6 長到 60 而所有閘門全綠（R79 立這道棘輪時寫的原話，只是當時沒有人把
     第三棵樹算進來）。
 
-    誠實劃界：本輪只做到「進帳 ＋ 補標籤」，census **還沒有**接上它的閘門——所以它是
-    具名豁免而不是已量測；豁免理由必須寫出接線順序（先接閘門再入表）。
+    誠實劃界：win32 剖面的值還沒量到（待 windows-smoke 實跑印出）——所以它仍是具名豁免而不是
+    已量測；census 閘門已接（DEF-101-960：`ci-gate.sh` 呼叫 `tools/lib/pytest_skip_census.py`），
+    豁免理由必須寫出這條接法。darwin 剖面已量到入表（兩張天花板表＋分母），不在豁免表。
     """
     key = "AISDLC_SDD/fsm_runtime@win32"
     assert key in P._FULL_SUITE_RUNNERS, (
@@ -1834,7 +1835,7 @@ def test_the_third_tree_is_inside_the_skip_governance_frame() -> None:
     assert key in P._UNMEASURED_RUNNER_PROFILES
     exempt = P._UNMEASURED_RUNNER_PROFILES[key]
     assert "ci-gate.sh" in exempt, f"豁免理由沒寫出該改哪一支閘門：{exempt!r}"
-    assert "--census-only" in exempt, f"豁免理由沒寫出接法：{exempt!r}"
+    assert "pytest_skip_census" in exempt, f"豁免理由沒寫出接法：{exempt!r}"
 
 
 def test_profile_key_encodes_the_nested_session_dimension(
@@ -2186,3 +2187,228 @@ def test_a_counterpart_missing_ledger_is_skipped_for_the_multiway_intersection()
     assert blocked and _M6_COUNTERPART_B in blocked[0], (
         f"缺落款這件事必須誠實留痕，不能被交集算出來的違規訊息蓋過：{problems}"
     )
+
+
+# =====================================================================
+# (p) DEF-101-960 題 1：`tools/lib/pytest_skip_census.py`——SDD 樹（fsm_runtime）的 census 入口
+#     `AISDLC_SDD/scripts/ci-gate.sh` 在 LATEST 軌 pytest 之後呼叫它；判準仍全住
+#     `skip_group_policy`，本組只鎖「組裝層」：輸出形狀、三態離開碼、D5（本機只出聲／
+#     雲端才擋）、接線有沒有被拿掉。
+# =====================================================================
+
+import pytest_skip_census as C  # noqa: E402
+
+_SDD_TREE = "AISDLC_SDD/fsm_runtime"
+#: 合成平台：不是任何真實 `sys.platform`，不會隨「日後有人登記了某個真平台」而翻面。
+_SYN_PLATFORM = "synthetic-os"
+_SYN_PROFILE = f"{_SDD_TREE}@{_SYN_PLATFORM}"
+#: 六群各有代表（platform 2／其餘各 1）；`[DEBT]` 帶承接輪次、摘要行的 skipped 數與解析數相等。
+_SDD_RS_LOG = (
+    "SKIPPED [2] tools/fsm_runtime/tests/test_a.py:10: [POSIX-NATIVE-ONLY] 只在 POSIX 上有意義\n"
+    "SKIPPED [1] tools/fsm_runtime/tests/test_b.py:12: [TOOL-ABSENCE] 缺工具\n"
+    "SKIPPED [1] tools/fsm_runtime/tests/test_c.py: [ENV-DISABLED] 未啟用\n"
+    "SKIPPED [1] tools/fsm_runtime/tests/test_d.py:5: [STRUCTURAL-PAIR] present/absent 互斥對\n"
+    "SKIPPED [1] tools/fsm_runtime/tests/test_e.py:9: [DEBT] 斷言落點未建，承接於 R90\n"
+    "SKIPPED [1] tools/fsm_runtime/tests/test_f.py:3: 沒有標籤的理由\n"
+    "12 passed, 7 skipped in 3.21s\n"
+)
+
+
+def test_the_sdd_census_line_has_six_cells_in_the_same_shape_as_the_autoclaude_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """windows-smoke 印出的這一行，是掌舵者之後逐格釘值時**唯一**會讀的產物。
+
+    兩個意圖：① 六群一格不少、順序＝`SKIP_GROUPS`（少一格＝少一群沒人管）；② 與
+    AutoClaude 那條生產線（`local_ci_gate.census_verdict`）逐字同形，只有剖面鍵不同——
+    兩條線各長一種格式，讀的人（與日後的 grep）就得認兩套。
+    """
+    rc, lines = C.census_verdict(_SDD_TREE, _SDD_RS_LOG, _SYN_PLATFORM)
+    head = lines[0]
+    assert head.startswith(f"[skip census] {_SYN_PROFILE} 共 7 支：")
+    cells = head.split("支：", 1)[1].split("／欠債型")[0].split("／")
+    assert cells == [
+        "platform=2", "tool-absence=1", "env-disabled=1",
+        "structural-pair=1", "debt=1", "untagged=1",
+    ]
+    assert [c.split("=")[0] for c in cells] == list(P.SKIP_GROUPS)
+    assert head.endswith("／欠債型 4 支（目標 0）")
+    _pin_registered_profile(monkeypatch)
+    _rc, ac_lines = m.census_verdict(_SDD_RS_LOG, pg=False, nested=True)
+    assert ac_lines[0].split("共", 1)[1] == head.split("共", 1)[1], (
+        "SDD 與 AutoClaude 的 [skip census] 行在剖面鍵之後的格式漂移了"
+    )
+    assert rc == C.CENSUS_PROFILE_UNREGISTERED
+
+
+def test_the_exit_code_is_three_state_and_a_collapsed_measurement_outranks_unregistered(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """0 健康／1 真問題／3 剖面未登記。順序是判準的一部分：量測完整性先於登記判斷。
+
+    WHY 最後一項：未登記的剖面本來只出聲不擋；若「量不到」也被併進「未登記」的 3，
+    塌掉的量測（`-rs` 消失、pytest 沒跑完）就會以 advisory 之名放行——失效方向是
+    「看起來變乾淨」，正是整套分群普查要防的那一種。
+    """
+    rc, lines = C.census_verdict(_SDD_TREE, _SDD_RS_LOG, _SYN_PLATFORM)
+    assert rc == C.CENSUS_PROFILE_UNREGISTERED == 3
+    assert any("剖面未登記" in ln for ln in lines)
+    rc, lines = C.census_verdict(_SDD_TREE, "", _SYN_PLATFORM)
+    assert rc == C.CENSUS_FAIL, "同一個未登記剖面，量測塌掉必須是 1 而不是 3"
+    assert any("量測塌掉" in ln for ln in lines)
+    # 登記後（合成剖面，兩張表同鍵）：恰好在天花板上＝0；天花板少 1 支＝1。
+    census = P.skip_group_census(P.skipped_reasons(_SDD_RS_LOG))
+    for ceilings in (dict(census), dict(census, untagged=0)):
+        with monkeypatch.context() as mp:
+            mp.setitem(P._RUNTIME_SKIP_CEILING, _SYN_PROFILE, ceilings)
+            mp.setitem(P._RUNTIME_SKIP_CEILING_MAX, _SYN_PROFILE, ceilings)
+            rc, lines = C.census_verdict(_SDD_TREE, _SDD_RS_LOG, _SYN_PLATFORM)
+        if ceilings["untagged"] == census["untagged"]:
+            assert rc == C.CENSUS_OK, lines
+        else:
+            assert rc == C.CENSUS_FAIL, lines
+            assert any("天花板不合格" in ln for ln in lines)
+
+
+@pytest.mark.parametrize("cloud_env", ["CI", "GITHUB_ACTIONS"])
+@pytest.mark.parametrize(
+    ("verdict", "local_rc", "cloud_rc"),
+    [(C.CENSUS_OK, 0, 0), (C.CENSUS_PROFILE_UNREGISTERED, 3, 3), (C.CENSUS_FAIL, 0, 1)],
+)
+def test_d5_local_only_voices_while_the_cloud_runner_blocks(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+    verdict: int, local_rc: int, cloud_rc: int, cloud_env: str,
+) -> None:
+    """D5：本機（`CI`／`GITHUB_ACTIONS` 皆未設）rc=1 降為 0 且說出來；雲端 rc=1 才阻斷；
+    rc=3（剖面未登記）兩邊都不擋。
+
+    WHY 本機不擋：docker 可用性是疑似能力軸、尚未編碼進 SDD 樹的剖面鍵，開發機與雲端
+    執行者量到的 skip 數未必同母體——拿雲端量的天花板擋開發機是假紅。降級必須「說出來」：
+    只降 rc 不出聲，就是把真實的量測失敗悄悄吞掉。
+    """
+    monkeypatch.setattr(C, "census_verdict", lambda *_a, **_k: (verdict, ["stub"]))
+    log = tmp_path / "rs.log"
+    log.write_text("ignored", encoding="utf-8", newline="\n")
+    argv = ["--tree", _SDD_TREE, str(log)]
+    for key in ("CI", "GITHUB_ACTIONS"):
+        monkeypatch.delenv(key, raising=False)
+    assert C.main(argv) == local_rc
+    out = capsys.readouterr().out
+    assert ("只出聲不阻斷" in out) == (verdict == C.CENSUS_FAIL), out
+    monkeypatch.setenv(cloud_env, "true")
+    assert C.main(argv) == cloud_rc
+    assert "只出聲不阻斷" not in capsys.readouterr().out
+
+
+def test_d5_holds_end_to_end_with_a_really_collapsed_log(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """不 stub 判準：真的空 log（量測塌掉）走完整條 `main`——本機 0＋出聲、雲端 1；
+    `environ` 參數與真環境變數兩條讀取路徑一致；讀不到檔同樣依環境分岔。"""
+    for key in ("CI", "GITHUB_ACTIONS"):
+        monkeypatch.delenv(key, raising=False)
+    empty = tmp_path / "empty.log"
+    empty.write_text("", encoding="utf-8", newline="\n")
+    argv = ["--tree", _SDD_TREE, str(empty)]
+    assert C.main(argv) == 0
+    assert "量測塌掉" in capsys.readouterr().out
+    assert C.main(argv, environ={"GITHUB_ACTIONS": "true"}) == 1
+    assert C.main(argv, environ={"CI": "1"}) == 1
+    monkeypatch.setenv("CI", "1")
+    assert C.main(argv) == 1
+    capsys.readouterr()
+    assert C.main(["--tree", _SDD_TREE, str(tmp_path / "nope.log")]) == 1
+    assert "通道自己壞了" in capsys.readouterr().out
+
+
+def test_the_cli_script_survives_an_ascii_stdio_and_rejects_wiring_mistakes(
+    tmp_path: Path,
+) -> None:
+    """ci-gate.sh 呼叫的是**腳本本身**，不是 `main()`：真起子行程，以 ASCII stdio 模擬
+    非 UTF-8 locale（Windows cp950／cp1252 的同型）——輸出含中文與 emoji，缺
+    `init_utf8_streams()` 會在第一個 `print` 當場 UnicodeEncodeError；同時鎖「未知旗標／
+    不被剖面鍵文法接受的樹」一律 rc=2（接線錯不得被降級成放行）。
+
+    刻意不假設真平台未登記：本機（不設 CI）下 rc 只可能是 0 或 3，日後有人為這個平台
+    釘了值，本支仍成立。
+    """
+    import subprocess
+
+    script = _POLICY_ROOT / "pytest_skip_census.py"
+    log = tmp_path / "rs.log"
+    log.write_text(_SDD_RS_LOG, encoding="utf-8", newline="\n")
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("CI", "GITHUB_ACTIONS", "PYTHONUTF8")}
+    env["PYTHONIOENCODING"] = "ascii"
+
+    def run(*args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, str(script), *args], capture_output=True, text=True,
+            encoding="utf-8", errors="replace", env=env, cwd=str(tmp_path), timeout=120,
+        )
+
+    ok = run("--tree", _SDD_TREE, str(log))
+    assert ok.returncode in (C.CENSUS_OK, C.CENSUS_PROFILE_UNREGISTERED), ok.stderr
+    assert ok.stdout.startswith(f"[skip census] {_SDD_TREE}@{sys.platform} 共 7 支："), ok.stdout
+    assert "UnicodeEncodeError" not in ok.stderr
+    assert run("--tree", _SDD_TREE, "--bogus", str(log)).returncode == C.CENSUS_WIRING_ERROR
+    needs_axes = run("--tree", "AutoClaude/tests", str(log))
+    assert needs_axes.returncode == C.CENSUS_WIRING_ERROR, needs_axes.stderr
+
+
+def test_ci_gate_sh_wires_the_census_between_the_latest_pytest_and_the_log_removal() -> None:
+    """接線鎖（同 pre-push 那一支的文字判準與劃界）：R82 抓到的原形態是 `ci-gate.sh` 全檔對
+    census 零命中——這棵樹的 skip 可以無聲長而閘門全綠。接線被刪掉時要有東西轉紅。
+
+    誠實劃界：以文字判準認定，看不到「接線還在但被上游改成永遠不執行」；那一向由本檔上方的
+    行為鎖與整支閘門的真跑負責。`ci-gate.ps1` 的 fallback 刻意不接（該檔有註解說明）。
+    """
+    script = _REPO_ROOT / "AISDLC_SDD" / "scripts" / "ci-gate.sh"
+    code = _uncommented(script.read_text(encoding="utf-8"))
+    text = "\n".join(code)
+    calls = [i for i, ln in enumerate(code) if "--tree AISDLC_SDD/fsm_runtime" in ln]
+    assert len(calls) == 1, f"census 執行行應恰有一處（註解不算）：{calls}"
+    call = code[calls[0]]
+    assert "tools/lib/pytest_skip_census.py" in text and "$PY" in call, call
+    assert "<" not in call and "|" not in call.replace("||", ""), (
+        f"census 必須吃檔案路徑，不得退回 stdin／管線形態（DEF-200-293）：{call}"
+    )
+    assert "cygpath -w" in text and "_census_log" in call, (
+        "Windows 上 mktemp 回 POSIX 路徑、原生 python 要 `cygpath -w`（同 pre-push 慣用法）"
+    )
+    pytest_at = max(i for i, ln in enumerate(code[:calls[0]]) if "-m pytest" in ln)
+    remove_at = next(i for i, ln in enumerate(code[calls[0]:], calls[0]) if "rm -f" in ln)
+    assert "PYTEST_LOG" in code[remove_at], code[remove_at]
+    assert pytest_at < calls[0] < remove_at, "census 必須夾在 LATEST 軌 pytest 與 log 刪除之間"
+    indent = len(call) - len(call.lstrip())
+    guard = next(ln for ln in reversed(code[:calls[0]])
+                 if ln.lstrip().startswith("if ") and len(ln) - len(ln.lstrip()) < indent)
+    assert '"${VER}" == "${LATEST}"' in guard, f"census 只對 LATEST 軌跑：{guard}"
+    tail = "\n".join(code[calls[0]:remove_at])
+    assert "3)" in tail and "exit 1" in tail, "未登記（3）放行、其餘阻斷這兩支必須同在"
+
+
+def _census_rc_is_captured_then_dispatched(code: list[str]) -> bool:
+    """census 執行行必須以 `|| _census_rc=$?` 收尾（離開碼才進得了變數），且下一個非空行就是
+    `case "${_census_rc}" in`（捕捉後緊接 rc 分流）。"""
+    calls = [i for i, ln in enumerate(code) if "--tree AISDLC_SDD/fsm_runtime" in ln]
+    if len(calls) != 1 or not code[calls[0]].rstrip().endswith("|| _census_rc=$?"):
+        return False
+    nxt = next((ln.strip() for ln in code[calls[0] + 1:] if ln.strip()), "")
+    return nxt == 'case "${_census_rc}" in'
+
+
+def test_ci_gate_sh_captures_the_census_rc_and_dispatches_on_it_right_after() -> None:
+    """QA G2（突變 S2 存活）：上一支鎖釘了接線與 `3)`／`exit 1` 字面，卻看不到 rc 被吞——把
+    `|| _census_rc=$?` 改成 `|| true` 之後 `_census_rc` 恆為初值 0，`case` 永遠走 `0) ;;`，整條
+    CI 阻斷失效而全測試仍綠。本鎖釘「捕捉形態」與「捕捉後緊接 rc 分流」，並附真突變：對同一份原文
+    做突變後**同一個**判準必須轉紅。"""
+    script = _REPO_ROOT / "AISDLC_SDD" / "scripts" / "ci-gate.sh"
+    code = _uncommented(script.read_text(encoding="utf-8"))
+    assert _census_rc_is_captured_then_dispatched(code), (
+        "census 的離開碼必須以 `|| _census_rc=$?` 捕捉、且下一行就是 `case \"${_census_rc}\" in`"
+        "——否則 rc 被吞，雲端阻斷整條失效")
+    swallowed = [ln.replace("|| _census_rc=$?", "|| true") for ln in code]
+    assert swallowed != code and not _census_rc_is_captured_then_dispatched(swallowed)
+    reordered = [ln.replace('case "${_census_rc}" in', 'case "0" in') for ln in code]
+    assert reordered != code and not _census_rc_is_captured_then_dispatched(reordered)

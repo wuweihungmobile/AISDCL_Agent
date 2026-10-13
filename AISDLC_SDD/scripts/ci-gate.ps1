@@ -112,6 +112,8 @@ if ($latestRc -eq 0 -and $LATEST) {
       Set-Location $latestDir
       & $py -m pytest tools/fsm_runtime/tests/ -m "not chaos" -q -rs -n auto --dist worksteal
       if ($LASTEXITCODE -ne 0) { throw "pytest 失敗（LATEST 軌 $LATEST）" }
+      # DEF-101-960：skip 分群普查（tools/lib/pytest_skip_census.py）只接在 ci-gate.sh 的 LATEST 軌；本 fallback 刻意不接——
+      # 它不是任何 CI 執行者（Windows CI 一律經 Git Bash 委派 ci-gate.sh），且此處的 pytest 沒有 tee 出 -rs 輸出檔可餵。
       Set-Location $fw
       $LatestIncluded = $true
     } else {

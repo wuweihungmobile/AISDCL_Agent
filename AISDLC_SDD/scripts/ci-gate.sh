@@ -217,6 +217,34 @@ run_gate_for_version() {
   # DEF-06-001：擷取逐軌 `N passed` 收斂計數（取證友善性，純函式 helper 單獨可測）
   local PASSED
   PASSED="$(bash "${REPO_ROOT}/scripts/pytest_passed_count.sh" < "${PYTEST_LOG}")"
+  # DEF-101-960 題 1：skip 分群普查（census）接線——只對 LATEST 軌（凍結基線的 skip 集合不同，
+  # 剖面表也只登記 LATEST）。判準全住 tools/lib（skip_group_policy／skip_profile_key），本段只把
+  # `-rs` 輸出檔交給 pytest_skip_census.py 並讀三態 rc：0 健康、3 剖面未登記（只出聲）放行，
+  # 其餘一律阻斷。D5：本機（CI／GITHUB_ACTIONS 皆未設）的 rc=1 由入口自己降為 0——docker 可用性
+  # 軸尚未編碼進剖面鍵，開發機與雲端量到的 skip 數未必同母體；雲端 rc=1 才擋，入口自身壞掉
+  # （rc=2／崩潰）則本機也擋。傳**檔案路徑**、不靠 stdin 重導向（DEF-200-293：pyenv-win shim
+  # 會把 `< file` 整條吞掉）；Windows 上 mktemp 回 POSIX 路徑而 $PY 是原生 exe ⇒ `cygpath -w`
+  # （照抄 tools/git-hooks/pre-push 的慣用法）。ci-gate.ps1 的 fallback 刻意不接（見該檔註解）。
+  if [[ "${VER}" == "${LATEST}" && "${VER}" != "${FROZEN_BASELINE}" ]]; then
+    local _census_py _census_log _census_rc=0
+    _census_py="$(cd "${REPO_ROOT}/.." && pwd)/tools/lib/pytest_skip_census.py"
+    _census_log="${PYTEST_LOG}"
+    if command -v cygpath >/dev/null 2>&1; then
+      _census_log="$(cygpath -w "${PYTEST_LOG}" 2>/dev/null || true)"
+      [[ -n "${_census_log}" ]] || _census_log="${PYTEST_LOG}"
+    fi
+    "$PY" "${_census_py}" --tree AISDLC_SDD/fsm_runtime "${_census_log}" || _census_rc=$?
+    case "${_census_rc}" in
+      0) ;;
+      3)
+        echo "⚠️ ${VER} skip 分群普查：本平台剖面未登記（advisory，不擋；上面 [skip census] 那行的實測值即入表依據）"
+        ;;
+      *)
+        echo "::error:: ${VER} skip 分群普查不合格（rc=${_census_rc}；見上方 [skip census] 輸出——本機只出聲不阻斷、雲端才擋，D5）" >&2
+        exit 1
+        ;;
+    esac
+  fi
   rm -f "${PYTEST_LOG}"
   echo "==> [1/3] ${VER}: ${PASSED} passed（not chaos）"
   GATE_SUMMARY+=("${VER}:${PASSED}")

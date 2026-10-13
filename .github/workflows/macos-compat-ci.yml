@@ -344,6 +344,11 @@ on:
       # 🔴 DEF-200-183：skip 剖面鍵的文法 SSOT，由 skip_group_policy 與 run_root_unittests
       # 消費 ⇒ 只改它時本 workflow 的 unittest step 也必須跑（同一支判準）。
       - "tools/lib/skip_profile_key.py"
+      # 🔴 DEF-101-960：pytest `-rs` 輸出 → skip 分群普查的通用入口，由 AISDLC_SDD/scripts/ci-gate.sh
+      # 在 LATEST 軌 pytest 之後呼叫（本 workflow 的 macos-smoke 跑 ci-gate.sh 即實跑它）。
+      # 名含 skip ⇒ 命中 `*skip*.py` 鏡像鎖（test_smoke_ci_sync.py::TestSkipModuleListsMirrorToolsLib）：
+      # windows-／macos-compat-ci 的 push＋pull_request 四份複本必須同改，漏一份即紅。
+      - "tools/lib/pytest_skip_census.py"
       - ".env.example"
       - "env.shared"
       - "tools/_cli_flags.py"
@@ -797,6 +802,11 @@ on:
       # 🔴 DEF-200-183：skip 剖面鍵的文法 SSOT，由 skip_group_policy 與 run_root_unittests
       # 消費 ⇒ 只改它時本 workflow 的 unittest step 也必須跑（同一支判準）。
       - "tools/lib/skip_profile_key.py"
+      # 🔴 DEF-101-960：pytest `-rs` 輸出 → skip 分群普查的通用入口，由 AISDLC_SDD/scripts/ci-gate.sh
+      # 在 LATEST 軌 pytest 之後呼叫（本 workflow 的 macos-smoke 跑 ci-gate.sh 即實跑它）。
+      # 名含 skip ⇒ 命中 `*skip*.py` 鏡像鎖（test_smoke_ci_sync.py::TestSkipModuleListsMirrorToolsLib）：
+      # windows-／macos-compat-ci 的 push＋pull_request 四份複本必須同改，漏一份即紅。
+      - "tools/lib/pytest_skip_census.py"
       - ".env.example"
       - "env.shared"
       - "tools/_cli_flags.py"

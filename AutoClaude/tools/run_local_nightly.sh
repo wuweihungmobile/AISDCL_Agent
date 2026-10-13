@@ -22,6 +22,10 @@
 #                           顯式帶 --unattended——GitHub Actions 靠 GITHUB_ACTIONS
 #                           環境變數自動判定 unattended，本檔排程執行無此變數，
 #                           須顯式帶旗標才是真鏡像，DEF-200-314）
+#                           stage 前後另有 PG 子步驟（**不是** stage、不計入分母；DEF-200-075）：
+#                           docker daemon 可達 ⇒ 起 CI 對等 PG＋migrate、stage 後收容器（剖面＝+pg）；
+#                           不可達但 Docker.app 在 ⇒ 本腳本 `open -a` 開它、stage 後只收自己開的（D2 護欄）；
+#                           仍不可達 ⇒ 大聲退回 +nopg 剖面（見下方〈PG 接線〉段）
 #   [4/5] sdd_ci_gate     — AISDLC_SDD scripts/ci-gate.sh（凍結基線 + LATEST 雙軌）
 #   [5/5] nightly_anchor  — tools/refresh_nightly_anchor.py --write：gh 現查兩支排程通道
 #                           最近一次 completed run 的 job 層結論，機械回填 ONBOARDING §7
@@ -136,6 +140,212 @@ else
   TRIGGER_SRC="non-interactive-unknown"
 fi
 
+# ── PG 接線（DEF-200-075）：stage 3 的 AutoClaude 全套需要一顆**已 migrate** 的 CI 對等 PG ──
+#
+# WHY：mac nightly 此前一律落在 `+nopg` 剖面（census 的欠債型整批掛在 untagged）——沒人起容器，PG 那一族測試
+# 整批 skip，nightly 對 DAL 三後端／alembic 鏈的每日回歸訊號是空的。本段把「起 PG ＋ 等 healthy ＋
+# migrate」搬進 nightly 自己；stage 3 一結束就收容器（stage 4／5 不需要 PG）。
+# 🔴 憑證是 stage 3 輸出裡的 `[PG autodetect] 已注入…` 與 `[skip census] …@darwin+pg+…`，不是容器
+# healthy（容器是 tmpfs，healthy ≠ 已 migrate；根 CLAUDE.md〈容器 healthy ≠ DB 已 migrate〉）。
+# 🔴 半夜自動開 Docker Desktop＝掌舵者裁決 D2（2026-10-13，主控依授權代決，可隨時以 T1 推翻）。此前（DEV-PG）
+# 刻意不開：Docker Desktop 是使用者的桌面 app（~1GB 常駐；冷啟動可能彈授權／更新對話框；收掉它會殃及
+# 使用者自己的容器）——所以只在有護欄時才開，逐條對應 `nightly_docker_up`／`nightly_docker_down`：
+#   ① 僅 `${NIGHTLY_DOCKER_APP}`（預設 /Applications/Docker.app）存在、且 `docker info`（有界 20s）不可達
+#      才 `open -a`，並記 NIGHTLY_DOCKER_STARTED=1；
+#   ② 之後輪詢 `docker info` 最長 150s，逾時＝大聲退回 +nopg（不 kill、不收：卡在授權／更新對話框的 app
+#      留給人看，NIGHTLY_DOCKER_STARTED 歸零）；
+#   ③ **只收自己開的**，且 stage 3 結束就收（不等 stage 4——SDD ci-gate 的 docker 後端測試會因 Docker
+#      還開著而改走真容器）；收法＝先 `quit app "Docker"` 再 `quit app "Docker Desktop"`（只送前者 rc=0
+#      但沒關，2026-09-19 實測），再有界輪詢 `pgrep -f Docker.app` 為空才算收完（com.docker.build 約 40s
+#      自退，不必 kill）；
+#   ④ 收的動作掛在既有 EXIT trap（`_nightly_lock_release`，接在 `nightly_pg_down` 之後），不新增 trap；
+#   ⑤ 使用者原本就開著（`docker info` 可達）⇒ 沿用、不收；
+#   ⑥ `open -a` 失敗（launchd 沒有 GUI session 等）⇒ 同樣大聲退回 +nopg。
+#   ⑦（本檔補的兩條，同「只收自己開的」精神，主控可否決）：開之前 Docker.app 行程已存在而 daemon 不可達
+#      （使用者剛啟動／暫停／卡住；RunAtLoad 補跑撞上登入自啟尤其可能）⇒ 不算本腳本所開、不收；
+#      要收時若還有「非本腳本的」運行中容器 ⇒ 不收（使用者可能已在用）。
+# 任何分支都印一行 `[nightly][docker]`／`[nightly][pg]`，讓 RunId log 事後可判「哪一晚走了哪條路」；
+# 一律**不**判 FAIL（PG 是機會性覆蓋），不改 PASS+FAIL＝STAGE_TOTAL 不變式。
+# 🔴 DSN 刻意**不 export**：只以 `env VAR=…` 前綴交給 alembic 那一個行程。一旦 export，stage 3 的
+# `pg_autodetect()` 會走「顯式優先」剎車而印「跳過：…已由使用者顯式設定」——PG 照樣接得上，但
+# 「autodetect 這條路是通的」就驗不到了（ONBOARDING §7.1 第 ③ 步同一個理由）。
+# 🔴 容器若**已在跑**（使用者手動起的、或前一輪沒收乾淨的）一律沿用、不收：不收別人起的東西。
+# 🔴 `nightly_pg_down`、`nightly_docker_down` 同時掛在 EXIT trap（見 `_nightly_lock_release`）：行程被
+# SIGTERM／SIGHUP 殺掉也會走到（bash 3.2.57 實測 EXIT trap 在這兩個訊號下都會執行）。SIGKILL／斷電無解——
+# 容器會殘留，下一輪因「已在跑」而沿用、不收，手動收法：docker compose -f <本 compose 檔> down -v。
+NIGHTLY_PG_COMPOSE="${ROOT}/AutoClaude/docker-compose.ci.yml"
+NIGHTLY_PG_CONTAINER="autoclaude_ci_pg"  # 同 docker-compose.ci.yml 的 container_name
+# 同 ONBOARDING §7.1 第 ③ 步的 DSN；alembic/env.py 對 +asyncpg 形自動 strip，與 local_ci_gate 的
+# `_PG_DSN` 指的是同一顆 DB。
+NIGHTLY_PG_DSN="postgresql://autoclaude:autoclaude@localhost:5432/autoclaude"
+NIGHTLY_PG_STARTED=0  # 1＝容器是本腳本起的（才有權收）；沿用既有容器時維持 0
+# 可由環境覆寫（沙箱測試把它指到不存在的路徑）；launchd plist 沒有 EnvironmentVariables，正式排程恆為預設值。
+NIGHTLY_DOCKER_APP="${NIGHTLY_DOCKER_APP:-/Applications/Docker.app}"
+NIGHTLY_DOCKER_STARTED=0  # 1＝Docker Desktop 是本腳本 open -a 開的（才有權 quit）；使用者原本就開著時維持 0
+
+# 有界執行：$1=上限秒數 $2...=指令；超過上限即殺掉並回 124（比照 GNU 逾時指令的慣例碼）。
+# WHY 自刻：macOS 沒有那支指令，且 tools/tests/test_bash32_compat.py 把它列為禁用（BSD 紀律）。
+# 為什麼非有界不可：docker daemon 半死不活（Docker Desktop 啟動中／更新中）時 `docker info` 可以
+# 掛住不回——nightly 無人看管，一個卡死的行程連同去重鎖會讓之後每一晚都被「另一個 nightly 行程持有
+# 去重鎖」跳過（鎖的存活判斷看 pid，活著就不清）。
+_nightly_bounded() {
+  _nb_max="$1"; shift
+  "$@" &
+  _nb_pid=$!
+  _nb_t=0
+  while ps -p "${_nb_pid}" >/dev/null 2>&1; do
+    if [ "${_nb_t}" -ge "${_nb_max}" ]; then
+      pkill -P "${_nb_pid}" 2>/dev/null
+      kill "${_nb_pid}" 2>/dev/null
+      wait "${_nb_pid}" 2>/dev/null
+      return 124
+    fi
+    sleep 1
+    _nb_t=$((_nb_t + 1))
+  done
+  wait "${_nb_pid}"
+}
+
+nightly_pg_down() {  # 只收「本腳本起的」容器；冪等（EXIT trap 與正常路徑都會呼叫）
+  [ "${NIGHTLY_PG_STARTED}" = "1" ] || return 0
+  NIGHTLY_PG_STARTED=0
+  if _nightly_bounded 120 docker compose -f "${NIGHTLY_PG_COMPOSE}" down -v; then
+    echo "[nightly][pg] 已收容器（docker compose down -v）"
+  else
+    echo "[nightly][pg] ⚠️ docker compose down -v 失敗或逾時，容器可能殘留；手動收：docker compose -f ${NIGHTLY_PG_COMPOSE} down -v"
+  fi
+}
+
+# 輪詢 `docker info`（每次有界 10s、間隔 3s）直到可達，或牆鐘時間超過 $1 秒：可達回 0、逾時回 1。
+_nightly_docker_wait_ready() {
+  _dw_t0="$(date +%s)"
+  while [ $(( $(date +%s) - _dw_t0 )) -lt "$1" ]; do
+    if _nightly_bounded 10 docker info >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 3
+  done
+  return 1
+}
+
+# 開 Docker Desktop（D2 護欄 ①②⑥⑦）：呼叫端已確認 daemon 不可達。daemon 等到了回 0，其餘回 1（原因已大聲印出）。
+nightly_docker_up() {
+  if [ ! -d "${NIGHTLY_DOCKER_APP}" ]; then
+    echo "[nightly][docker] 找不到 ${NIGHTLY_DOCKER_APP} ⇒ 不嘗試 open -a"
+    return 1
+  fi
+  _dk_t0="$(date +%s)"
+  if pgrep -f 'Docker[.]app' >/dev/null 2>&1; then
+    # 護欄 ⑦：app 行程已在（使用者剛啟動／暫停／卡住）只是 daemon 還不可達 ⇒ 不是本腳本開的，只等、不開、不收。
+    echo "[nightly][docker] Docker.app 行程已存在但 daemon 不可達（啟動中／暫停／卡住）⇒ 不算本腳本所開、不收；只輪詢等 daemon（最長 150s）"
+  else
+    _nightly_bounded 30 open -g -a "${NIGHTLY_DOCKER_APP}"
+    _dk_rc=$?
+    if [ "${_dk_rc}" -ne 0 ]; then
+      echo "[nightly][docker] open -a ${NIGHTLY_DOCKER_APP} 失敗 rc=${_dk_rc}（launchd 沒有 GUI session？）⇒ 沒開成、不收"
+      return 1
+    fi
+    NIGHTLY_DOCKER_STARTED=1  # 先記帳再等：等待中被殺，EXIT trap 也要能把自己開的收掉
+    echo "[nightly][docker] daemon 不可達 ⇒ 已 open -a ${NIGHTLY_DOCKER_APP}；輪詢等 daemon（最長 150s）"
+  fi
+  if _nightly_docker_wait_ready 150; then
+    if [ "${NIGHTLY_DOCKER_STARTED}" = "1" ]; then
+      echo "[nightly][docker] daemon 已可達（約 $(( $(date +%s) - _dk_t0 ))s）；Docker Desktop 是本腳本開的 ⇒ stage 3 後由本腳本收"
+    else
+      echo "[nightly][docker] daemon 已可達（約 $(( $(date +%s) - _dk_t0 ))s）；Docker Desktop 非本腳本所開 ⇒ stage 3 後不收"
+    fi
+    return 0
+  fi
+  NIGHTLY_DOCKER_STARTED=0  # 逾時＝狀態不明（可能卡在授權／更新對話框）：不 kill、不收，留給人看
+  echo "[nightly][docker] 150s 內 docker info 仍不可達 ⇒ 不 kill、不收（請人工檢視 Docker Desktop 是否卡在對話框）"
+  return 1
+}
+
+# 收 Docker Desktop（D2 護欄 ③④⑦）：只收 NIGHTLY_DOCKER_STARTED=1 的；冪等（正常路徑與 EXIT trap 都會呼叫）。
+nightly_docker_down() {
+  [ "${NIGHTLY_DOCKER_STARTED}" = "1" ] || return 0
+  NIGHTLY_DOCKER_STARTED=0
+  _dk_others="$(_nightly_bounded 20 docker ps --format '{{.Names}}' 2>/dev/null | grep -v -x "${NIGHTLY_PG_CONTAINER}")"
+  if [ -n "${_dk_others}" ]; then
+    echo "[nightly][docker] 仍有非本腳本的運行中容器（$(printf '%s' "${_dk_others}" | tr '\n' ' ')）⇒ 不收 Docker Desktop（使用者可能已在用）"
+    return 0
+  fi
+  # 先讓 VM 內檔案系統落盤再 quit：剛 `down -v` 完立刻收 Docker，移除動作可能沒 commit 進虛擬磁碟，下次啟動容器
+  # 會復活成壞掉的殼。sync(2) 是全核心的（任一容器內呼叫即 flush 整個 VM）；用 compose 檔裡的那個映像（剛用過，必在本機）。
+  _dk_img="$(_nightly_bounded 20 docker compose -f "${NIGHTLY_PG_COMPOSE}" config --images 2>/dev/null | head -n 1)"
+  if [ -n "${_dk_img}" ]; then
+    if _nightly_bounded 60 docker run --rm --entrypoint sync "${_dk_img}" >/dev/null 2>&1; then
+      echo "[nightly][docker] 已在 VM 內 sync（讓 down -v 的移除落盤後再 quit）"
+    else
+      echo "[nightly][docker] ⚠️ VM 內 sync 失敗；下次啟動可能有復活的殘容器（nightly_pg_up 會先清）"
+    fi
+  fi
+  echo "[nightly][docker] 收 Docker Desktop：quit app \"Docker\" → quit app \"Docker Desktop\"（只送前者可能沒關）"
+  _nightly_bounded 30 osascript -e 'quit app "Docker"'
+  _dk_q1=$?
+  _nightly_bounded 30 osascript -e 'quit app "Docker Desktop"'
+  _dk_q2=$?
+  _dk_t0="$(date +%s)"
+  while pgrep -f 'Docker[.]app' >/dev/null 2>&1; do
+    if [ $(( $(date +%s) - _dk_t0 )) -ge 120 ]; then
+      echo "[nightly][docker] ⚠️ 120s 後 pgrep -f Docker.app 仍有行程（osascript rc=${_dk_q1}/${_dk_q2}）⇒ 沒收乾淨，請人工 quit Docker Desktop"
+      return 0
+    fi
+    sleep 2
+  done
+  echo "[nightly][docker] 已收 Docker Desktop（pgrep -f Docker.app 為空；osascript rc=${_dk_q1}/${_dk_q2}；約 $(( $(date +%s) - _dk_t0 ))s）"
+}
+
+# 起 PG ＋ migrate；任何一步不成都只是「大聲退回 +nopg」，函式恆回 0（PG 是機會性覆蓋，不是 stage）。
+nightly_pg_up() {
+  if [ ! -f "${NIGHTLY_PG_COMPOSE}" ]; then
+    echo "[nightly][pg] 找不到 ${NIGHTLY_PG_COMPOSE} ⇒ 本晚為 nopg 剖面（DEF-200-075）"
+    return 0
+  fi
+  if ! command -v docker >/dev/null 2>&1; then
+    echo "[nightly][pg] Docker 不可達（PATH 上沒有 docker）⇒ 本晚為 nopg 剖面（DEF-200-075）"
+    return 0
+  fi
+  if _nightly_bounded 20 docker info >/dev/null 2>&1; then
+    echo "[nightly][docker] daemon 已可達（非本腳本所開；多半是使用者原本就開著）⇒ 沿用，stage 3 後不收 Docker Desktop"
+  elif nightly_docker_up; then
+    :  # 開成功且 daemon 等到了（原因已由 nightly_docker_up 印出）
+  else
+    echo "[nightly][pg] Docker 不可達 ⇒ 本晚為 nopg 剖面（DEF-200-075）"
+    return 0
+  fi
+  _pg_running="$(_nightly_bounded 20 docker ps -q --filter "name=^${NIGHTLY_PG_CONTAINER}\$" 2>/dev/null)"
+  if [ -n "${_pg_running}" ]; then
+    echo "[nightly][pg] 容器 ${NIGHTLY_PG_CONTAINER} 已在跑（非本腳本所起）⇒ 沿用，stage 結束不收"
+  else
+    # 殘留的「非運行中」同名容器要先清：`down -v` 後 Docker Desktop 被立刻收掉時，已移除的容器可能於下次啟動
+    # 復活成壞掉的殼（Exited 128／RWLayer … is unexpectedly nil；2026-10-13 D2 實測），compose 會沿用它而 up 失敗。
+    # 本容器是 tmpfs 拋棄式，直接 rm -f（只動這個名字，不碰別人的容器）。
+    _pg_stale="$(_nightly_bounded 20 docker ps -aq --filter "name=^${NIGHTLY_PG_CONTAINER}\$" 2>/dev/null)"
+    if [ -n "${_pg_stale}" ]; then
+      echo "[nightly][pg] 發現殘留的非運行中容器 ${NIGHTLY_PG_CONTAINER}（上輪沒收乾淨或重啟復活）⇒ docker rm -f -v 後重起"
+      _nightly_bounded 60 docker rm -f -v "${NIGHTLY_PG_CONTAINER}" >/dev/null 2>&1
+    fi
+    echo "[nightly][pg] Docker 可達 ⇒ docker compose up -d --wait（CI 對等 PG17；stage 3 結束後收）"
+    NIGHTLY_PG_STARTED=1  # 先記帳再 up：up 中途失敗或被殺，nightly_pg_down 也要能收乾淨
+    if ! _nightly_bounded 240 docker compose -f "${NIGHTLY_PG_COMPOSE}" up -d --wait; then
+      echo "[nightly][pg] docker compose up --wait 失敗或逾時 ⇒ 本晚為 nopg 剖面（DEF-200-075）"
+      nightly_pg_down
+      return 0
+    fi
+  fi
+  # 容器是 tmpfs、每次新建都是空庫 ⇒ 必須 migrate，否則 stage 3 的 autodetect 剎車④ 會拒絕注入。
+  if ! ( cd "${ROOT}/AutoClaude" && _nightly_bounded 180 env AUTOCLAUDE_DB_DSN="${NIGHTLY_PG_DSN}" "${PY}" -m alembic upgrade head ); then
+    echo "[nightly][pg] alembic upgrade head 失敗或逾時 ⇒ 本晚為 nopg 剖面（DEF-200-075）"
+    nightly_pg_down
+    return 0
+  fi
+  # 取證：upgrade 成功時是靜默的，RunId log 上看不出它跑過——把 migrate 後的版本逐行寫進 log。
+  ( cd "${ROOT}/AutoClaude" && _nightly_bounded 60 env AUTOCLAUDE_DB_DSN="${NIGHTLY_PG_DSN}" "${PY}" -m alembic current ) 2>&1 \
+    | sed 's/^/[nightly][pg] alembic current: /'
+  echo "[nightly][pg] CI 對等 PG 已起且已 migrate ⇒ stage 3 預期為 +pg 剖面（憑證看 stage 3 的 [PG autodetect]／[skip census]）"
+}
+
 # 去重鎖（R16 SCAN-C-2）：下面的心跳 mtime 判斷本身是 check-then-act，若 launchd
 # 的 RunAtLoad 與 StartCalendarInterval(02:00) 兩個觸發源、或手動重跑與排程觸發
 # 時間點重疊，兩個行程可能同時通過「今日尚未有心跳」的檢查，導致重複跑一整套
@@ -147,6 +357,8 @@ fi
 # 容易誤殺仍在跑的合法行程。
 NIGHTLY_LOCK_DIR="${ROOT}/AutoClaude/logs/.nightly_mac.lock"
 _nightly_lock_release() {
+  nightly_pg_down  # DEF-200-075：本函式是 EXIT trap（正常結束／SIGTERM／SIGHUP 皆會走到），順手收 PG 容器
+  nightly_docker_down  # D2：容器收完才收「本腳本自己開的」Docker Desktop（沿用的不收）
   rm -f "${NIGHTLY_LOCK_DIR}/pid" 2>/dev/null
   rmdir "${NIGHTLY_LOCK_DIR}" 2>/dev/null
 }
@@ -338,7 +550,10 @@ write_heartbeat() {
 
 run_stage 1 macos_smoke     /bin/bash "$ROOT/tools/macos_smoke_local.sh"
 run_stage 2 root_unittests  env AUTOSDD_PARALLEL_TESTS=1 "$PY" "$ROOT/tools/run_root_unittests.py"
+nightly_pg_up    # DEF-200-075：stage 3 要有已 migrate 的 PG（docker 不可達 ⇒ 大聲退回 +nopg）
 run_stage 3 autoclaude_gate bash "$ROOT/AutoClaude/tools/local_ci_gate.sh" --unattended
+nightly_pg_down  # stage 3 無論成敗都收（run_stage 不中斷）；stage 4／5 不需要 PG
+nightly_docker_down  # D2：本腳本開的 Docker Desktop 也在 stage 3 後立刻收（不等 stage 4）；沿用的不收
 run_stage 4 sdd_ci_gate     sdd_gate
 run_stage 5 nightly_anchor  "$PY" "$ROOT/tools/refresh_nightly_anchor.py" --write
 

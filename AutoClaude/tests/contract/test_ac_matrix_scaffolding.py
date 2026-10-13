@@ -163,8 +163,9 @@ AC_MATRIX: dict[str, dict[str, str]] = {
     "AC4-5": {
         "topic": "recall@10 + p95",
         "wave": "W3",
-        "target_test_file": "tests/integration/test_pgvector_hnsw_recall.py",
-        "threshold": "recall@10 ≥ 0.95 + p95 < 50ms",
+        "target_test_file": "tests/integration/test_pgvector_real_recall.py",
+        "threshold": "recall@10 ≥ 0.95 + p95 < 50ms（100 列 mock-1024 語料；≥1k 列真實 "
+                     "BGE-M3 僅剩人工 release gate）",
     },
     "AC5-1": {
         "topic": "ExecutionContext round-trip",

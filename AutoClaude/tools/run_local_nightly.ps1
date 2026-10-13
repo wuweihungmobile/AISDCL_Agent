@@ -1393,16 +1393,16 @@ if ($script:DockerOK) {
         -v --tb=short -m pg_real --junitxml=.ac4_junit.xml -p no:xdist -o addopts=
     }
     $recallRcRef.Value = $LASTEXITCODE
-    # R88／掌舵者拍板「保留＋同輪建自動通道」：`test_pgvector_hnsw_recall.py` 此前在
-    # `tools/`、`.github/` 皆**零命中**＝沒有任何自動通道，於是它那三筆 `[DEBT]` 每一輪
-    # 都只能靠改輪號續期（已第 5 次到期）。本行就是那個通道。
-    # 🔴 **刻意不併入上面那次 `-m pg_real` 呼叫**：本檔一個 `pg_real` marker 都沒有
-    #    （只有 `@pg_required` skipif），併進去會被整檔 deselect ⇒ 通道看起來建好了、
-    #    實際上一支都沒跑（本 stage 已對 contract 測試踩過同一個坑，見下方 R9 複審那段）。
-    # 🔴 **也不寫 .ac4_junit.xml**：那份 junit 是 AC4 觀察期的取證，混入本檔的 skip
-    #    會讓 collector 誤降 status（同上，理由與 contract 那次逐字同一條）。
-    # 解除條件三項備齊前，本次呼叫的預期結果是 skip 而非 pass——通道存在與斷言達標是
-    # 兩件事，本行只負責讓「有沒有被跑到」這件事變成可觀測的。
+    # DEF-101-856（2026-10-13）廢止了 `test_pgvector_hnsw_recall.py` 的 T1／T2 `[DEBT]` stub，
+    # 推翻 R88 當年的「保留＋同輪建自動通道」：該檔現在只剩 5 個純單元 case（fake SQL、不連
+    # 任何 DB），本呼叫保留為窄範圍單檔回歸，預期結果＝全綠（5 通過），不再是 skip。
+    # 🔴 **刻意不併入上面那次 `-m pg_real` 呼叫**：本檔一個 `pg_real` marker 都沒有，
+    #    併進去會被整檔 deselect ⇒ 一支都不跑（本 stage 已對 contract 測試踩過同一個坑，
+    #    見下方 R9 複審那段）。
+    # 🔴 **也不寫 .ac4_junit.xml**：那份 junit 是 AC4 觀察期的取證，非 recall／p95 的結果
+    #    混入會讓 collector 誤降 status（同上，理由與 contract 那次逐字同一條）。
+    # recall@10／p95 的真斷言住上面那次呼叫的 `test_pgvector_real_recall.py`（100 列 mock-1024
+    # 語料；≥1k 列真實 BGE-M3 僅剩人工 release gate），本行只讓純單元 adapter 回歸被跑到。
     $hnswRcRef = [ref] 0
     Invoke-Native {
       & $script:PyExe -m pytest tests/integration/test_pgvector_hnsw_recall.py -v --tb=short -rs `

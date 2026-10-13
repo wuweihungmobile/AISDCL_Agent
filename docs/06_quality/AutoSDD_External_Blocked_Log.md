@@ -38,13 +38,25 @@
 | DEF-101-693 | Windows 實機 | 2026-08-21 | 下一個 Windows 真機輪逐列覆核 windows-compat-ci.yml 的 windows-smoke job 全部步驟（2026-10-09 現查 27 步；`tools/tests/test_smoke_ci_sync.py::test_registered_smoke_groups_exist_in_that_script` 先行，另需真機執行紀錄）（2026-10-09 複查：mac 不可查；先行測試仍在 test_smoke_ci_sync.py:863；原條件寫「22 步」已對不上步數，改寫為「全部步驟」）（2026-10-13 複查：雲端 windows-compat-ci push run 38265136704（9010feae）Windows smoke job＝31 步、30 success／1 skipped／0 failed〔SA 鏡 `gh run view` 現查〕；步驟級證據已有，仍欠真機執行紀錄） | 2026-10-09 |
 | DEF-200-313 | Windows 實機 | 2026-09-15 | 回 Windows 真機、人在互動終端機：`python tools/run_root_unittests.py` 跑到一半按 Ctrl-C，再以 `Get-CimInstance Win32_Process` 過濾 CommandLine 含 `run_root_unittests` 或 `unittest` 者須為空；結果寫進 `CrossPlatform_DEF200274_Parallel_Tests_Evidence.md`〈第十一輪〉③ 後移出本表（2026-10-09 複查：mac 不可查，條件原樣；引用的 `tools/run_root_unittests.py` 與 `CrossPlatform_DEF200274_Parallel_Tests_Evidence.md`〈第十一輪〉③ 仍在） | 2026-10-09 |
 | DEF-200-253 | Windows 實機 | 2026-10-09 | Windows 機、Docker 停、巢狀 Claude Code session 內跑 `python AutoClaude/tools/local_ci_gate.py`，取其 `[skip census] AutoClaude/tests@win32+nopg+nested` 六格實測值，同 commit 重釘 `tools/lib/skip_group_policy.py` 的 `_RUNTIME_SKIP_CEILING` 與 `_RUNTIME_SKIP_CEILING_MAX` 同鍵（含 skip_id_ledger.json M6 共變）；重釘後 `python tools/run_root_unittests.py` 綠即移出本表（2026-10-09 複查：mac 不可查，條件原樣；`local_ci_gate.py`／`_RUNTIME_SKIP_CEILING(_MAX)` 仍在，現鍵＝`AutoClaude/tests@win32+nopg+nested+pgext`（條件所寫鍵名略去 `+pgext`）） | 2026-10-09 |
-| DEF-101-856 | Windows 實機 | 2026-10-09 | 備妥 PG17+pgvector staging（≥1000 列真實 BGE-M3 1024 維＋HNSW、SD07_REAL_PG_E2E_ENABLED=true、AUTOCLAUDE_TEST_PG_DSN 指向它）的 Windows 機上單跑 `AutoClaude/tests/test_conftest_windows_native_skip_report.py`：PGVECTOR_BGE_M3_STAGING 探針判可還債而 T1／T2 仍掛 [DEBT] skip 即轉紅 ⇒ 把 3 支 stub 換成真斷言（或由 PM 顯式廢止並在帳本留紀錄）後移出本表（2026-10-09 複查：mac 不可查，條件原樣；`test_conftest_windows_native_skip_report.py` 與 `PGVECTOR_BGE_M3_STAGING` 登記（:367）仍在） | 2026-10-09 |
 
 ## 複查記錄
 
 > 「最近複查日」欄僅存放純 ISO 日期；完整複查敘事（機械取證細節）逐字搬遷至本節，
 > 依 DEF-ID 分節保全，不刪減任何已驗證內容，僅搬遷位置。
 
+
+### DEF-101-856（複查 2026-10-14＝依原解鎖條件括號內第二出口「由 PM 顯式廢止並在帳本留紀錄」，列已移出本表）
+
+複查（R213 第三窗；主控依掌舵者 2026-10-13 授權代決「若需要我決策，請依照最佳化, 最理想, 最適當的解決方案，我授權幫我決策」，可隨時以 T1 推翻）：
+T1／T2（`AutoClaude/tests/integration/test_pgvector_hnsw_recall.py`）與 `test_bge_failure_minimax_fallback_under_60s`（`test_pgvector_real_recall.py`；
+KEY `DUAL_ADAPTER_FAILOVER_RIG`；本表原列與 R128 原文即寫「3 支」）三支 `[DEBT]` 空殼（@pg_required 後第一句即無條件 skip、從不斷言）刪除，
+`_PLATFORM_BOUND_DEBTS` 清空（兩 KEY 依 stale 規則必退；探針函式與注入測試保留）；**此舉推翻 2026-08-14 R88「保留並建自動通道」的決定**，
+並使「真實 BGE-M3 ≥1k 列」自此不再有任何測試承接——理由：≥1k 列真實 BGE-M3 語料與 staging DB 在本 repo 任何執行者（mac／windows-latest／ubuntu）
+皆不可得（權重雖公開可建，但語料與 staging 無人擁有＝裁決題、非工程題；原列「staging 只有 Windows 11 那台環境有」亦非現況）。
+保留的真斷言（`TestRecallAt10` recall@10≥0.95、`TestP95Latency` 50ms／win32 80ms）跑在 seed 100 列 `mock-1024` 上，由 `autoclaude-ci.yml` 的
+pg-e2e-nightly 與 on-label workflow 執行；「Production 上線紅線」（DBA staging ≥1M 列＋PM 簽核）維持人工 release gate（`AutoClaude/CLAUDE.md:153`）；
+探針 `probe_pgvector_bge_m3_staging` 保留。本場驗證：三檔 hermetic 29 通過／2 略過（原 5 略過）、pg 剖面假 DSN 下 debt 3→0、ruff／lint-imports
+（9 kept）rc=0〔他包回報：P-PGSTUB；SA／QA 鏡重跑同值〕。本表筆數 4→3。
 
 ### DEF-200-075（複查 2026-10-13＝阻塞源改判為內部工程，列改入結構性長債軌）
 

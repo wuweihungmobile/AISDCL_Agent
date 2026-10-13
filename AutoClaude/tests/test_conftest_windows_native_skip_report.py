@@ -180,13 +180,28 @@ def test_the_handover_scan_surface_is_not_silently_empty():
     於是把三筆欠債改記成**平台條件**形態（見下一節）之後，它會以「掃不到輪號」轉紅——
     而那個紅講的是假話（欠債一筆都沒少）。分母改成「所有 `[DEBT]` 的承接聲明」＝
     輪次形態 ∪ 平台條件形態：兩種形態同時歸零才算欠債清光，那時本組才該整組拿掉。
+
+    【2026-10-13 再訂正一次】（DEF-101-856 題 5 方案 B；主控依掌舵者授權代決）：pgvector 的
+    T1／T2 與雙 adapter RTO stub 依 PM 層級決定廢止後，上面兩種形態的分母**同時歸零**——
+    字面上正是「整組拿掉」的訊號。這裡**沒有**整組拿掉，理由是 `debt_declaration_problems`
+    認的合法承接形態其實有**三種**（第三種＝常數形態，見 `_CONSTANT_HANDOVER_RE`），而它在全樹
+    仍有一個活站點（`contract/test_ac_matrix_scaffolding.py`：AC 的 target 檔缺失時才會真的
+    skip 的 `[DEBT]` 站點；現況 `_AC_TARGET_PENDING` 為空，站點休眠），整組拿掉會連它的指涉
+    解析（常數與具名 runtime 鎖必須存在）一併拿掉。分母因此補上第三種形態。
+    誠實劃界：從這一刻起，本支證明的是「還有 `[DEBT]` skip 站點宣告可被掃到」，**不再**是
+    「repo 現在真的有未還欠債」的憑證（休眠站點不計欠債）；欠債型 skip 的實數只看 runtime
+    census（`skip_group_policy`），不看這裡。那個休眠站點被移除的那天本支會再次轉紅，
+    屆時才是真正的「整組拿掉」。
     """
-    declarations = _handover_literals() + [
-        (rel, ln, key) for key, hits in _platform_bound_sites().items() for rel, ln in hits
-    ]
+    declarations = (
+        _handover_literals()
+        + [(rel, ln, key) for key, hits in _platform_bound_sites().items() for rel, ln in hits]
+        + _constant_form_sites()
+    )
     assert declarations, (
-        "全樹掃不到任何 `[DEBT]` 承接聲明（`承接輪次 R<n>` 與 `承接平台條件：<KEY>` 皆零）"
-        "——若欠債真的清光了，請連同本組鎖一起移除；若只是寫法又變了，請把本鎖的兩個 regex "
+        "全樹掃不到任何 `[DEBT]` 承接聲明（`承接輪次 R<n>`、`承接平台條件：<KEY>`、"
+        "「輪號由本檔常數 <NAME> 統一供給」三種形態皆零）"
+        "——若欠債真的清光了，請連同本組鎖一起移除；若只是寫法又變了，請把本鎖的三個 regex "
         "一併更新，否則它會在零分母上恆綠"
     )
 
@@ -245,8 +260,10 @@ def test_every_debt_handover_round_is_still_in_the_future():
 #     與 `bge-m3`，但分不出「這些 bge-m3 向量是不是真的由 BGE-M3 權重算出來的」。
 #     偽造一份 1000 列假 bge-m3 語料可以騙過它——代價是那台機器會被判「還得了」而
 #     持續轉紅，也就是**騙的方向是對自己不利的**，這是刻意選的方向。
-#   · 探針只覆蓋這兩個 KEY。第三種平台綁定欠債出現時要自己入表；未入表的 KEY 直接紅。
-#   · `DUAL_ADAPTER_FAILOVER_RIG` 只量兩半（staging 列數 ＋ `MINIMAX_API_KEY`），**沒有**
+#   · 探針只覆蓋登記表內的 KEY（2026-10-13 起表為空，見 `_PLATFORM_BOUND_DEBTS` 的註解）。
+#     下一筆平台綁定欠債出現時要自己入表；未入表的 KEY 直接紅。
+#   · （2026-10-13 已退役的 KEY；探針函式保留）`DUAL_ADAPTER_FAILOVER_RIG` 只量兩半
+#     （staging 列數 ＋ `MINIMAX_API_KEY`），**沒有**
 #     去探 BGE-M3 端點是否活著（`embedder.bge_m3_url` 那一側）。方向是刻意的：少量一個
 #     前提 ⇒ 條件成立時**偏向開火**，把「其實還差一件」變成一則會被讀到的紅，而不是靜默綠。
 
@@ -268,7 +285,8 @@ _PLATFORM_CONDITION_RE = re.compile(r"承接平台條件[：:]\s*([A-Z][A-Z0-9_]
 #: 這一族「不在靜態掃描射程內」，但那時它是一個**沒有人查**的例外；本輪把它升級成
 #: 「可以，但兩個指涉都必須解析得到」：常數要真的在那支檔裡、具名鎖也要真的在那支檔裡。
 #: ⇒ 這一面比原本的「略過」嚴格（原本連幽靈符號都放行，而 repo 對幽靈機械物已有判例：
-#: `test_pgvector_hnsw_recall.py` 檔頭記載的 `SkipReasonChannelClaimTest` 全庫不存在）。
+#: `test_pgvector_hnsw_recall.py` 的 T1／T2 區段註解曾記載 `SkipReasonChannelClaimTest`
+#: 全庫不存在——該段已於 2026-10-13 隨 T1／T2 廢止刪除，原文在 git 史）。
 _CONSTANT_HANDOVER_RE = re.compile(r"輪號由本檔常數\s*`?([A-Za-z_][A-Za-z0-9_]*)`?\s*統一供給")
 _NAMED_GUARD_RE = re.compile(r"\b(test_[a-z0-9_]{8,})\b")
 
@@ -363,22 +381,16 @@ def probe_dual_adapter_failover_rig(connect: Callable[[str], object] | None = No
 
 #: 平台綁定欠債的登記表。**只進不出會被抓**：登記了卻沒有任何站點在用 ⇒ 判紅（見
 #: `platform_debt_problems` 的 stale 面），所以它不會退化成一張永久豁免表。
-_PLATFORM_BOUND_DEBTS: dict[str, _PlatformDebt] = {
-    "PGVECTOR_BGE_M3_STAGING": _PlatformDebt(
-        what="PG17+pgvector staging，內含 ≥1000 列真實 BGE-M3（1024 維）向量與 HNSW index，"
-             "且 SD07_REAL_PG_E2E_ENABLED=true／DSN 指向它",
-        how_to_pay="①把 T1/T2 的 pytest.skip 拿掉，讓 recall@10 ≥ 0.95 與 p95 門檻真的被斷言；"
-                   "②或由 PM 顯式廢止這兩支並在缺陷帳本留下廢止紀錄。"
-                   "🔴 不接受的第三條：把承接條件換個寫法再掛一輪",
-        probe=probe_pgvector_bge_m3_staging,
-    ),
-    "DUAL_ADAPTER_FAILOVER_RIG": _PlatformDebt(
-        what="上面那份 staging ＋ 可對 BGE-M3 做故障注入的 Minimax 憑證（MINIMAX_API_KEY）",
-        how_to_pay="①建出 tests/fixtures/dual_adapter_failover.json 並把 `assert True` 換成"
-                   "<60s RTO 的真實量測；②或由 PM 顯式廢止該 case 並在帳本留紀錄",
-        probe=probe_dual_adapter_failover_rig,
-    ),
-}
+#:
+#: 【2026-10-13 起本表為**空**】（DEF-101-856 題 5 方案 B；PM 層級廢止，主控依掌舵者授權代決）：
+#: `PGVECTOR_BGE_M3_STAGING`（pgvector 的 T1／T2）與 `DUAL_ADAPTER_FAILOVER_RIG`（雙 adapter
+#: RTO 的恆真 stub）三個 `[DEBT]` 站點連同測試本體一併刪除，依上一段的 stale 規則兩個 KEY
+#: 必須同步退出（登記了卻沒有站點 ⇒ 紅）。機制整組留給下一筆平台綁定欠債：四向判準
+#: `platform_debt_problems`／`debt_declaration_problems`、合成注入自證，以及兩支探針函式
+#: （`probe_pgvector_bge_m3_staging`／`probe_dual_adapter_failover_rig`，下方注入測試仍釘著探針
+#: 本身的三態行為）都沒動；表空時 `test_platform_bound_debt_is_red_on_a_machine_that_can_pay_it`
+#: 在零分母上恆綠，那是已知狀態，不是鎖壞了。
+_PLATFORM_BOUND_DEBTS: dict[str, _PlatformDebt] = {}
 
 
 def _debt_reasons() -> list[tuple[str, int, str]]:
@@ -414,6 +426,15 @@ def _platform_bound_sites() -> dict[str, list[tuple[str, int]]]:
         for hit in _PLATFORM_CONDITION_RE.finditer(text):
             sites.setdefault(hit.group(1), []).append((rel, lineno))
     return sites
+
+
+def _constant_form_sites() -> list[tuple[str, int, str]]:
+    """第三種合法承接形態（常數形態）的站點：`(檔案相對路徑, 行號, 常數名)`（磁碟實測）。"""
+    return [
+        (rel, lineno, hit.group(1))
+        for rel, lineno, text in _debt_reasons()
+        if (hit := _CONSTANT_HANDOVER_RE.search(text))
+    ]
 
 
 def _module_symbols(rel: str) -> tuple[set[str], set[str]]:
@@ -546,6 +567,9 @@ def test_platform_bound_debt_is_red_on_a_machine_that_can_pay_it():
     WHY（Rule 9）：這條規則要守的不是「有沒有寫承接條件」，而是**承接條件成立的那一刻
     有沒有人會知道**。舊的輪次形態在 mac 上必紅（那裡結構上還不了）、在 Windows 上
     只在「輪號剛好追平」時紅（與 staging 備妥與否無關）——兩邊都量錯了東西。
+
+    2026-10-13 起登記表為空（見 `_PLATFORM_BOUND_DEBTS` 的註解），本支在零分母上恆綠；
+    判準會不會紅，改由下面那組合成注入逐向自證，不靠這一支。
     """
     assert platform_debt_problems(_platform_bound_sites(), _PLATFORM_BOUND_DEBTS) == []
 

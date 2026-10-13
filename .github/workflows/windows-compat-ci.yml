@@ -146,9 +146,11 @@
 #     「tools/tests 第三方相依」pwsh step 後由 19 → 20，R69 新增「tools/tests 外部
 #     工具相依」pwsh step 後由 20 → 21，R71 新增 windows-smoke 的 PS 5.1 核心驗證
 #     step 後該 job 多一格 `powershell: 1`，R76 新增「AutoClaude 平台敏感測試子集」
-#     pwsh step 後由 21 → 22，本表隨之更新）
+#     pwsh step 後由 21 → 22；windows-nightly-full 於 2026-10-13 新增 6 個 pwsh step（census
+#     腿／孤兒行程探針／根 .venv 重建／smoke 實跑／.env 同步 E2E／engine_resume）後 pwsh
+#     由 3 → 9，本表隨之更新）
 #   windows-smoke         windows-latest {'pwsh': 22, 'bash': 1, 'powershell': 1}
-#   windows-nightly-full  windows-latest {'powershell': 2, 'pwsh': 3}
+#   windows-nightly-full  windows-latest {'powershell': 2, 'pwsh': 9}
 #   windows-nightly-alert ubuntu-latest  {'<implicit>': 3}
 #   （全檔無 workflow 層／job 層 `defaults:` 區塊，故上表即實際生效的引擎分佈；
 #     `<implicit>` 在 ubuntu runner 上為 bash。）
@@ -468,6 +470,11 @@ on:
       # 🔴 DEF-200-183：skip 剖面鍵的文法 SSOT，由 skip_group_policy 與 run_root_unittests
       # 消費 ⇒ 只改它時本 workflow 的 unittest step 也必須跑（同一支判準）。
       - "tools/lib/skip_profile_key.py"
+      # 🔴 DEF-101-960：pytest `-rs` 輸出 → skip 分群普查的通用入口，由 AISDLC_SDD/scripts/ci-gate.sh
+      # 在 LATEST 軌 pytest 之後呼叫（本 workflow 的 windows-smoke 經 ci-gate.ps1 委派 Git Bash 實跑它）。
+      # 名含 skip ⇒ 命中 `*skip*.py` 鏡像鎖（test_smoke_ci_sync.py::TestSkipModuleListsMirrorToolsLib）：
+      # windows-／macos-compat-ci 的 push＋pull_request 四份複本必須同改，漏一份即紅。
+      - "tools/lib/pytest_skip_census.py"
       - ".env.example"
       - "env.shared"
       - "tools/_cli_flags.py"
@@ -922,6 +929,11 @@ on:
       # 🔴 DEF-200-183：skip 剖面鍵的文法 SSOT，由 skip_group_policy 與 run_root_unittests
       # 消費 ⇒ 只改它時本 workflow 的 unittest step 也必須跑（同一支判準）。
       - "tools/lib/skip_profile_key.py"
+      # 🔴 DEF-101-960：pytest `-rs` 輸出 → skip 分群普查的通用入口，由 AISDLC_SDD/scripts/ci-gate.sh
+      # 在 LATEST 軌 pytest 之後呼叫（本 workflow 的 windows-smoke 經 ci-gate.ps1 委派 Git Bash 實跑它）。
+      # 名含 skip ⇒ 命中 `*skip*.py` 鏡像鎖（test_smoke_ci_sync.py::TestSkipModuleListsMirrorToolsLib）：
+      # windows-／macos-compat-ci 的 push＋pull_request 四份複本必須同改，漏一份即紅。
+      - "tools/lib/pytest_skip_census.py"
       - ".env.example"
       - "env.shared"
       - "tools/_cli_flags.py"
@@ -1981,6 +1993,480 @@ jobs:
           } finally {
             Pop-Location
           }
+
+      # ═══════════════════════════════════════════════════════════════════════════
+      # 2026-10-13：以下 6 個 pwsh step 讓雲端 windows-latest（真 Windows 作業系統執行者，**不是**
+      # 掌舵者那台實體機）機械取證原本掛在「Windows 實機」的債——DEF-200-253（skip census 六格）／
+      # DEF-200-313（孤兒行程）／DEF-101-693（windows_smoke_local.ps1 自身實跑）／PRD §16.6 第 2 列
+      # （.env 同步 hook 在 Windows 的真 git pull）／證據檔〈十-9〉(4)(5)（engine_resume 的 schtasks
+      # 分支、quota_burndown --status 無落款）。共同設計：
+      #   · 排在既有 step 之後：前面那幾步量的是「沒裝 pg extras、沒有 .venv」的原樣環境，新 step
+      #     的 pip install 與 .venv 重建不得回頭改變它們量到的東西。
+      #   · 每步 `if: ${{ !cancelled() }}`（理由同上方既有 step：job 層 continue-on-error 不會讓
+      #     失敗 step 之後的 step 繼續跑）；彼此獨立，一步紅不遮蔽另一步的證據。
+      #   · 凡要斷言中文輸出者，一律 `cmd /c "… > 檔 2>&1"` 取**原始位元組**、再以 UTF-8 讀：以 OEM
+      #     碼頁解碼原生程式 stdout 會把中文變成 `?`，斷言就失去鑑別力。
+      #   · step 結尾顯式 `exit 0`：GitHub 的 pwsh 包裝以「最後一條原生指令的 exit code」當 step 結果，
+      #     `finally` 內容許失敗的清理指令（rmdir／--remove）不得蓋掉前面已驗過的結論。
+      #   · 🔴 這些都是 Windows 專屬行為，本機（mac）只能驗到 YAML 與 PowerShell 語法；真綠要等雲端 dispatch。
+      # ═══════════════════════════════════════════════════════════════════════════
+
+      - name: AutoClaude skip census 腿（DEF-200-253）：win32+nopg+nested+pgext 六格實測，天花板突破即紅
+        # DEF-200-253：帳本鍵 `AutoClaude/tests@win32+nopg+nested+pgext` 的天花板仍是 R79 舊樹量到的
+        # 值（untagged=118），從未在真 Windows 上以現行樹重量。本腿在 PATH python（setup-python）上裝
+        # postgres＋pgvector extras（⇒ `+pgext`；`pg_extras_state()` 探的是 sys.executable，所以直呼
+        # `python tools/local_ci_gate.py`、不走 .ps1 薄殼——薄殼的 Get-RepoPython 會改挑 .venv），以
+        # `CLAUDECODE=1` 指定 `+nested`（主控代決：這棵樹的 nested 述詞鑑別力為 0，唯一讀它的是產生
+        # 剖面鍵的 local_ci_gate.py；provenance 以本註解為座標），DSN 缺席 ⇒ `+nopg`。
+        # 本腿同時是**量值**與**守門**：印出的 `[skip census] <鍵> 共 N 支：…` 整行就是釘進
+        # skip_group_policy 的數字，所以先逐字比對鍵（防軸漂移靜默量到別格）。
+        # 🔴 ARCH-01（R213 四方審查，原設計「天花板被突破只印 ::warning::＋exit 0」是重量期的暫態
+        # 設計、卻寫成了永久形態）：本鍵在雲端的**唯一**執行者就是這一腿（step 7 的
+        # `local_ci_gate.ps1` 量的是另一個鍵 `win32+nopg+solo+nopgext`），天花板被突破若只出聲，
+        # 釘值之後帳上寫的「六格已重釘、持續有人守」就不成立。故只要 gate 失敗，一律 throw（step 紅）：
+        # 別的 gate 紅／pytest 真有失敗或錯誤／量不到鍵／**天花板被突破**／原因不明。
+        # 唯一維持 ::warning::＋繼續的是「剖面未登記」（`local_ci_gate.py` 的 census 回
+        # CENSUS_PROFILE_UNREGISTERED，訊息逐字含「剖面未登記」；`GITHUB_ACTIONS` 有值 ⇒ 無人值守 ⇒
+        # 該判定不併入 pytest gate 的 rc，所以它不會落在 gate 失敗分支，要靠訊息偵測）。
+        # 首次 dispatch 預期紅（天花板仍是 R79 舊值）＝設計內：把印出的六格釘進
+        # skip_group_policy 後再 dispatch，本腿須轉綠，那一次才是「收緊後仍綠」的證據。
+        # PASS 長相：log 有 `census-leg: key=… ok` 與同一整行的 ::notice::。
+        # 取證：gh run view <id> --log | grep -n "skip census\] AutoClaude/tests@win32+nopg+nested+pgext"
+        if: ${{ !cancelled() }}
+        working-directory: AutoClaude
+        shell: pwsh
+        env:
+          CLAUDECODE: "1"
+          PYTHONUTF8: "1"
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $key = 'AutoClaude/tests@win32+nopg+nested+pgext'
+          python -m pip install -e ".[dev,lint,postgres,pgvector]"
+          if ($LASTEXITCODE -ne 0) { throw "pip install of the dev/lint/postgres/pgvector extras failed (rc=$LASTEXITCODE)" }
+          $out = Join-Path $env:RUNNER_TEMP 'census_leg_local_ci_gate.out'
+          cmd /c "python tools\local_ci_gate.py > $out 2>&1"
+          $rc = $LASTEXITCODE
+          $text = [IO.File]::ReadAllText($out, [Text.UTF8Encoding]::new($false))
+          Write-Host $text
+          Write-Host "census-leg: local_ci_gate.py rc=$rc"
+          $lines = $text -split "\r?\n"
+          # 1) the profile key must be exactly the ledger key (an axis drift would measure another cell)
+          $hit = @($lines | Where-Object { $_.Contains("[skip census] $key") })
+          if ($hit.Count -eq 0) {
+            $seen = @($lines | Where-Object { $_.Contains('[skip census]') }) -join ' | '
+            throw "census leg did not measure profile $key; saw: $seen"
+          }
+          Write-Host "census-leg: key=$key ok"
+          Write-Host "::notice title=skip census win32+nopg+nested+pgext::$($hit[0].Trim())"
+          # 2) gate verdicts: only the pytest gate may be red, and only because of the stale ceiling
+          $gates = @{}
+          foreach ($m in [regex]::Matches($text, '(?m)^\[([^\]\r\n]+)\] (PASS|FAIL) \(rc=(\d+)\)')) {
+            $gates[$m.Groups[1].Value] = $m.Groups[2].Value
+          }
+          $expected = @('editable sentinel', 'LOC budget', 'CLAUDE.md <=400', 'CLAUDE.md line<=800', 'snapshot --check', 'import-linter', 'pytest')
+          $missing = @($expected | Where-Object { -not $gates.ContainsKey($_) })
+          if ($missing.Count -gt 0) { throw "gate result line missing for: $($missing -join ', ') (local_ci_gate.py crashed or its output changed)" }
+          $failed = @($expected | Where-Object { $gates[$_] -ne 'PASS' })
+          $others = @($failed | Where-Object { $_ -ne 'pytest' })
+          if ($others.Count -gt 0) { throw "gate(s) FAILED besides pytest: $($others -join ', ')" }
+          if ($failed.Count -gt 0) {
+            $tail = @($lines | Where-Object { $_ -match '^\W*\d+ \w+(, \d+ \w+)* in [0-9.]+s' })
+            if ($tail.Count -gt 0 -and $tail[-1] -match '\b[1-9]\d* (failed|errors?)\b') { throw "pytest reported failed/error tests: $($tail[-1])" }
+            # ARCH-01: a ceiling breach is RED - this leg is the only cloud executor of this key
+            if ($text.Contains('skip 分群天花板不合格')) { throw "census ceiling for $key was breached (see the [skip census] line above): fix the new skips, or pin the printed cells in skip_group_policy.py" }
+            throw "pytest gate FAILED without failed tests or a census-ceiling breach (rc=$rc): unknown cause"
+          }
+          # the only tolerated verdict: an unregistered profile (measurement ok, no ceiling to compare)
+          if ($text.Contains('剖面未登記')) {
+            Write-Host "::warning::census profile $key is not registered in skip_group_policy.py (no ceiling to compare): register the cells printed above"
+          }
+          Write-Host "census-leg: verdict ok (local_ci_gate.py rc=$rc; a ceiling breach throws, only an unregistered profile warns)"
+          exit 0
+
+      - name: Windows 孤兒行程探針（DEF-200-313）：Job Object KILL_ON_JOB_CLOSE，正控組＋實驗組
+        # DEF-200-313（主控代決做 Job Object）：Windows 上父行程被硬殺（Ctrl-C 後的清理路徑沒跑、
+        # Stop-Process -Force、關窗、OOM）時，測試自己 spawn 的孫行程（git／python／powershell）會變
+        # 孤兒。`parallel_shard.adopt_kill_on_close_job()` 把本行程放進 KILL_ON_JOB_CLOSE 的 Job Object，
+        # 核心在 handle 關閉時連孫一併收掉。本 step 是它的硬殺探針——**不得用 os.kill 自殺**（Windows 的
+        # os.kill(SIGTERM) 就是 TerminateProcess，R147 實測自殺會連 worker 一起帶走），改由外部
+        # `Stop-Process -Force` 殺「驅動器」（here-string 寫到 RUNNER_TEMP，不新增 repo 檔）：
+        #   · 正控組（`--no-adopt`）：驅動器被殺後孫必須在整個 15 秒觀察窗內**仍活著**
+        #     （`orphan-probe control survivors=1`），證明探針有鑑別力——「孫消失」不是這個環境本來就會
+        #     做的事，否則實驗組的 0 不代表任何東西；
+        #   · 實驗組（`--adopt`）：同法殺驅動器、同一個觀察窗，孫必須 ≤15 秒內消失
+        #     （`orphan-probe adopted survivors=0`）。
+        # adopt 回 False（hosted runner 不允許巢狀 Job Object）就是探針要揭露的事實：印 ::warning:: 並讓
+        # step 紅，不吞。兩組各自 try/catch，一組出錯不遮蔽另一組的證據；finally 無條件按 token 收掉殘留。
+        # 取證：gh run view <id> --log | grep -n "orphan-probe"
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $repo = (Get-Location).Path
+          $driver = Join-Path $env:RUNNER_TEMP 'orphan_driver.py'
+          $code = @'
+          import argparse
+          import os
+          import subprocess
+          import sys
+          import time
+
+          ap = argparse.ArgumentParser()
+          ap.add_argument("--adopt", action="store_true")
+          ap.add_argument("--no-adopt", action="store_true")
+          ap.add_argument("--token", required=True)
+          ap.add_argument("--repo", required=True)
+          ap.add_argument("--pidfile", required=True)
+          ns = ap.parse_args()
+          if ns.adopt == ns.no_adopt:
+              sys.exit("exactly one of --adopt / --no-adopt is required")
+          adopted = "n/a"
+          if ns.adopt:
+              sys.path.insert(0, os.path.join(ns.repo, "tools", "lib"))
+              import parallel_shard
+              adopted = str(parallel_shard.adopt_kill_on_close_job())
+          child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(300)", ns.token])
+          with open(ns.pidfile, "w") as fh:
+              fh.write("%d %d adopt=%s" % (os.getpid(), child.pid, adopted))
+          time.sleep(300)
+          '@
+          [IO.File]::WriteAllText($driver, $code, [Text.UTF8Encoding]::new($false))
+
+          function Get-OrphanProcs([string]$Token, [int]$ExceptPid) {
+            @(Get-CimInstance -ClassName Win32_Process |
+              Where-Object { $_.ProcessId -ne $ExceptPid -and $_.CommandLine -and $_.CommandLine.Contains($Token) })
+          }
+
+          function Invoke-OrphanProbe([string]$Mode) {
+            $token = 'orphanprobe_' + [Guid]::NewGuid().ToString('N').Substring(0, 12)
+            $pidFile = Join-Path $env:RUNNER_TEMP "$token.pid"
+            $outFile = Join-Path $env:RUNNER_TEMP "$token.out"
+            $errFile = Join-Path $env:RUNNER_TEMP "$token.err"
+            $flag = if ($Mode -eq 'adopt') { '--adopt' } else { '--no-adopt' }
+            $drv = $null
+            $adopted = 'n/a'
+            $left = @()
+            try {
+              $drv = Start-Process -FilePath 'python' -PassThru -NoNewWindow `
+                -ArgumentList @($driver, $flag, '--token', $token, '--repo', $repo, '--pidfile', $pidFile) `
+                -RedirectStandardOutput $outFile -RedirectStandardError $errFile
+              $info = $null
+              $deadline = (Get-Date).AddSeconds(30)
+              while (-not $info -and (Get-Date) -lt $deadline) {
+                if (Test-Path -LiteralPath $pidFile) {
+                  $m = [regex]::Match([IO.File]::ReadAllText($pidFile), '^(\d+) (\d+) adopt=(\S+)$')
+                  if ($m.Success) { $info = $m }
+                }
+                if (-not $info) {
+                  if ($drv.HasExited) { break }
+                  Start-Sleep -Milliseconds 250
+                }
+              }
+              if (-not $info) { throw "[$Mode] the driver never published its pid file (exited=$($drv.HasExited))" }
+              $adopted = $info.Groups[3].Value
+              $drvPid = [int]$info.Groups[1].Value
+              $before = @(Get-OrphanProcs $token $drvPid)
+              if ($before.Count -ne 1) { throw "[$Mode] setup invalid: expected exactly 1 grandchild before the kill, found $($before.Count)" }
+              Stop-Process -InputObject $drv -Force
+              [void]$drv.WaitForExit(10000)
+              # the same 15 s observation window for both groups: adopted -> the loop ends early at 0 survivors;
+              # control -> any early drop to 0 means the probe cannot discriminate, otherwise it runs the full window
+              $limit = (Get-Date).AddSeconds(15)
+              do {
+                $left = @(Get-OrphanProcs $token $drvPid)
+                if ($left.Count -eq 0) { break }
+                Start-Sleep -Milliseconds 500
+              } while ((Get-Date) -lt $limit)
+            }
+            finally {
+              foreach ($p in @(Get-OrphanProcs $token 0)) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }
+              if ($drv -and -not $drv.HasExited) { Stop-Process -InputObject $drv -Force -ErrorAction SilentlyContinue }
+              if (Test-Path -LiteralPath $errFile) {
+                Get-Content -LiteralPath $errFile | ForEach-Object { Write-Host "[$Mode driver stderr] $_" }
+              }
+            }
+            [pscustomobject]@{ Mode = $Mode; Adopted = $adopted; Survivors = $left.Count }
+          }
+
+          $problems = @()
+          $control = $null
+          $adopt = $null
+          try { $control = Invoke-OrphanProbe 'control' } catch { $problems += "control group error: $($_.Exception.Message)" }
+          try { $adopt = Invoke-OrphanProbe 'adopt' } catch { $problems += "adopt group error: $($_.Exception.Message)" }
+          if ($control) {
+            Write-Host "orphan-probe control survivors=$($control.Survivors)"
+            if ($control.Survivors -ne 1) { $problems += "positive control invalid: the grandchild must outlive its killed driver (survivors=1), got $($control.Survivors), so the probe cannot discriminate" }
+          }
+          if ($adopt) {
+            Write-Host "orphan-probe adopted survivors=$($adopt.Survivors) adopt=$($adopt.Adopted)"
+            if ($adopt.Adopted -ne 'True') {
+              Write-Host "::warning::adopt_kill_on_close_job() returned $($adopt.Adopted) on this runner (nested Job Object not allowed?): see the driver stderr above"
+              $problems += "adopt_kill_on_close_job() returned $($adopt.Adopted)"
+            } elseif ($adopt.Survivors -ne 0) {
+              $problems += "the grandchild survived the driver kill although the driver was in a KILL_ON_JOB_CLOSE job (survivors=$($adopt.Survivors))"
+            }
+          }
+          if ($problems.Count -gt 0) { throw ('orphan probe FAILED: ' + ($problems -join ' ; ')) }
+          Write-Host 'orphan-probe PASS: the control grandchild outlived its driver; the adopted grandchild died with it'
+          exit 0
+
+      - name: 重建根 .venv（下方 smoke／.env 同步／engine_resume 三步的前置；前面的 PS 5.1 bootstrap step 收尾時已把它刪掉）
+        # 前面「Windows PowerShell 5.1 驗證 bootstrap.ps1 + dev_start.ps1」那步最後一行是
+        # `Remove-Item -Recurse -Force .venv`（刻意：不讓 .venv 影響後面用全域 python/pip 的 step），
+        # 所以到這裡 repo 根沒有 .venv。windows_smoke_local.ps1 的守門要求根 .venv 的 python、.env 同步
+        # E2E 要把它以 Junction 掛進 clone、engine_resume 的 `_refusal` 要求該直譯器 import 得到
+        # autoclaude（bootstrap 會 editable 安裝兩專案）——三者都不能用 PATH python 代替，否則驗的就不是
+        # 生產路徑（`pick_repo_python` 先認 .venv）。這一步放在 census 腿與孤兒探針之後，確保它們量到的
+        # 環境不含 .venv，與前面既有 step 一致。
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          ./tools/bootstrap.ps1
+          if ($LASTEXITCODE -ne 0) { throw "bootstrap.ps1 failed (rc=$LASTEXITCODE)" }
+          if (-not (Test-Path -LiteralPath .venv\Scripts\python.exe)) { throw 'bootstrap.ps1 did not create .venv\Scripts\python.exe' }
+          Write-Host 'root .venv rebuilt for the steps below'
+          exit 0
+
+      - name: windows_smoke_local.ps1 於雲端 Windows 實跑（DEF-101-693；真 Windows 作業系統執行者，不是實體機；必須 PS 5.1）
+        # DEF-101-693：windows-smoke 的步驟級證據早已有（每次 push 都跑），但 `tools/windows_smoke_local.ps1`
+        # **自身**從未被任何 CI 執行過——它只被掌舵者機器的每日排程（AutoClaude_WindowsSmoke）跑。本 step
+        # 以原生 Windows PowerShell 5.1（`powershell.exe`；腳本對非 5.1 引擎 exit 1）實跑它，期望
+        # `PASS=<n> FAIL=0`，且 n 不低於腳本自己的下限（`$MinPass`，由本 step 現讀，不另抄一份數字）。
+        # 🔴 誠實劃界：雲端 runner 是 en-US 的真 Windows 作業系統，**不是**掌舵者那台機器——cp950、
+        # Defender、schtasks 帳號權限的特異性仍只有那台機器能取證（排程維持每日，不因本步驟退場）。
+        # 🔴 首跑可能真紅：腳本 [8/9] 的「LATEST 四支 .sh 可啟動性」自承從未在真 Windows 實跑過；紅＝缺陷
+        # 回流事件，不是 step 壞掉。輸出以 `cmd /c` 落檔、不接管線讀 rc；斷言只吃 ASCII 片段
+        # （`PASS=n FAIL=m`、`PASS: AISDLC_SDD LATEST`），不依賴 5.1 在 en-US 主控台下怎麼輸出中文。
+        # 前提：根 .venv（上一步重建）。取證：gh run view <id> --log | grep -n "smoke-local:\|PASS=1"
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $enc = [Text.UTF8Encoding]::new($false)
+          $scriptRel = 'tools\windows_smoke_local.ps1'
+          $pin = [regex]::Match([IO.File]::ReadAllText((Join-Path (Get-Location).Path $scriptRel), $enc), '(?m)^\$MinPass\s*=\s*(\d+)')
+          if (-not $pin.Success) { throw 'cannot read the MinPass pin from tools\windows_smoke_local.ps1' }
+          $minPass = [int]$pin.Groups[1].Value
+          $out = Join-Path $env:RUNNER_TEMP 'windows_smoke_local.out'
+          cmd /c "powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptRel > $out 2>&1"
+          $rc = $LASTEXITCODE
+          $text = [IO.File]::ReadAllText($out, $enc)
+          Write-Host $text
+          Write-Host "smoke-local: rc=$rc"
+          $problems = @()
+          if ($rc -ne 0) { $problems += "windows_smoke_local.ps1 exited rc=$rc" }
+          $sum = [regex]::Match($text, 'PASS=(\d+) FAIL=(\d+)')
+          if (-not $sum.Success) {
+            $problems += 'no PASS=n FAIL=m summary line (the script died before its summary)'
+          } else {
+            $passN = [int]$sum.Groups[1].Value
+            $failN = [int]$sum.Groups[2].Value
+            Write-Host "smoke-local: PASS=$passN FAIL=$failN (the script's own floor MinPass=$minPass)"
+            if ($failN -ne 0) { $problems += "FAIL=$failN" }
+            if ($passN -lt $minPass) { $problems += "PASS=$passN is below the script's own floor $minPass" }
+          }
+          if ($text -notmatch 'PASS: AISDLC_SDD LATEST') {
+            $problems += 'the AISDLC_SDD LATEST .sh launchability item did not report PASS (it had never run on a real Windows before)'
+          }
+          if ($problems.Count -gt 0) {
+            foreach ($l in ($text -split "\r?\n")) { if ($l -match 'FAIL:') { Write-Host "smoke-local failed item: $l" } }
+            throw ('windows_smoke_local.ps1 on the cloud runner: ' + ($problems -join '; '))
+          }
+          Write-Host 'smoke-local: PASS (the script ran on Windows PowerShell 5.1 and met its own floor)'
+          exit 0
+
+      - name: .env 同步 Windows E2E（PRD §16.6 第 2 列）：真 git pull --ff-only 觸發 post-merge hook 並自動修復遮蔽行
+        # PRD §16.6 第 2 列：git pull／merge 成功後 `tools/git-hooks/post-merge` 自動體檢本機 .env 對
+        # env.shared 的遮蔽並修掉可自動修的項目。mac 已有真 `git pull` E2E；Windows 側此前只有
+        # `TestPostMergeHook` 以替身 python 直呼 hook，**從沒有真 git pull**——缺的正是 Git for Windows 以
+        # 內建 sh 解析 `#!/usr/bin/env bash`、NTFS 無 x 位元、真 `.venv\Scripts\python.exe` 經
+        # `pick_repo_python` 解析、真 doctor `--fix` 在 NTFS 下的備份與刪行。流程（bare remote 的分支
+        # 固定為 e2e，不依賴 checkout 當下是分支還是 detached）：
+        #   bare remote ← clone（拉的那台，hooksPath＝tools/git-hooks，.venv 以 Junction 掛進去走生產
+        #   路徑）、pusher（推的那台）；clone 的 .env 帶遮蔽行 HALT=95 與機器專屬覆寫 NOTICE=55；pusher
+        #   改 env.shared 的 HALT 並 push；clone 真跑 `git pull --ff-only`。
+        # 斷言：hook 印 `[post-merge dispatcher] env.shared`、`.env.bak.<UTC 戳>`、「已自動修復」；備份檔等於
+        # 原 .env；遮蔽行被刪而覆寫保留（修復是選擇性的）；事後 `--env-doctor` rc=0 且「結論：0 個問題」；
+        # 負控＝再 pull 一次（已是最新）hook 不得出聲，證明上面的斷言不是恆真。
+        # 🔴 `AUTOSDD_UNATTENDED` 有設時 hook 只體檢不修，本 step 顯式清掉它。清理先 `rmdir` 移除 Junction
+        # （只拆連結、不碰目標），再遞迴刪 work 目錄——直接遞迴刪含 Junction 的樹有誤刪目標內容的風險。
+        # 🔴 runner 是 en-US，重現不了 zh-TW 的 cp950 主控台（hook 自帶 PYTHONUTF8 處理），那一半仍只有掌舵者
+        # 機器能取證。取證：gh run view <id> --log | grep -n "env-sync-e2e\|已自動修復\|\.env\.bak\."
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        env:
+          PYTHONUTF8: "1"
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $enc = [Text.UTF8Encoding]::new($false)
+          $repo = (Get-Location).Path
+          $venvReal = Join-Path $repo '.venv'
+          if (-not (Test-Path -LiteralPath (Join-Path $venvReal 'Scripts\python.exe'))) { throw 'prerequisite missing: root .venv (did the rebuild step fail?)' }
+          Remove-Item Env:AUTOSDD_UNATTENDED -ErrorAction SilentlyContinue
+          $work = Join-Path $env:RUNNER_TEMP ('pm_e2e_' + [Guid]::NewGuid().ToString('N').Substring(0, 8))
+          $remote = Join-Path $work 'remote.git'
+          $clone = Join-Path $work 'clone'
+          $pusher = Join-Path $work 'pusher'
+
+          function Invoke-GitChecked {
+            & git @args
+            if ($LASTEXITCODE -ne 0) { throw "git $($args -join ' ') failed (rc=$LASTEXITCODE)" }
+          }
+          function Invoke-RawUtf8([string]$CommandLine, [string]$Name) {
+            $f = Join-Path $work ($Name + '.out')
+            cmd /c "$CommandLine > $f 2>&1"
+            $rc = $LASTEXITCODE
+            [pscustomobject]@{ Rc = $rc; Text = [IO.File]::ReadAllText($f, $enc) }
+          }
+
+          try {
+            New-Item -ItemType Directory -Path $work | Out-Null
+            $sha = (& git -C $repo rev-parse HEAD)
+            if ($LASTEXITCODE -ne 0 -or -not $sha) { throw 'cannot resolve HEAD of the checkout' }
+            Invoke-GitChecked clone --quiet --bare $repo $remote
+            Invoke-GitChecked -C $remote update-ref refs/heads/e2e $sha
+            Invoke-GitChecked -C $remote symbolic-ref HEAD refs/heads/e2e
+            Invoke-GitChecked -c core.longpaths=true clone --quiet $remote $clone
+            Invoke-GitChecked -c core.longpaths=true clone --quiet $remote $pusher
+            Invoke-GitChecked -C $clone config core.hooksPath tools/git-hooks
+            foreach ($r in @($clone, $pusher)) {
+              Invoke-GitChecked -C $r config user.name 'env-sync-e2e'
+              Invoke-GitChecked -C $r config user.email 'env-sync-e2e@example.invalid'
+            }
+            Write-Host "env-sync-e2e: $(& git --version); core.hooksPath=$(& git -C $clone config core.hooksPath); autocrlf=$(& git -C $clone config core.autocrlf)"
+            # the production python resolution path: a .venv inside the clone (a Junction needs no admin rights)
+            New-Item -ItemType Junction -Path (Join-Path $clone '.venv') -Target $venvReal | Out-Null
+            $py = Join-Path $clone '.venv\Scripts\python.exe'
+            if (-not (Test-Path -LiteralPath $py)) { throw "the .venv Junction does not resolve to a python: $py" }
+            # a stale .env copy: HALT shadows env.shared (auto-fixable), NOTICE is a legitimate machine-local override
+            $dotenv = Join-Path $clone '.env'
+            $original = "# env-sync-e2e: stale copy, HALT shadows env.shared, NOTICE is a machine-local override`nAUTOSDD_QUOTA_HALT_PCT=95`nAUTOSDD_QUOTA_NOTICE_PCT=55`n"
+            [IO.File]::WriteAllText($dotenv, $original, $enc)
+            $before = Invoke-RawUtf8 "$py $clone\tools\lib\quota_policy.py --env-doctor" 'doctor_before'
+            Write-Host $before.Text
+            if ($before.Rc -ne 1 -or $before.Text -notmatch '\[shadows-shared\]') { throw "setup sanity: env-doctor must flag the shadowing line before the pull (rc=$($before.Rc))" }
+            # the pushing machine changes the shared halt percentage
+            $shared = Join-Path $pusher 'env.shared'
+            $txt = [IO.File]::ReadAllText($shared, $enc)
+            $cur = [regex]::Match($txt, '(?m)^AUTOSDD_QUOTA_HALT_PCT=(\d+)')
+            if (-not $cur.Success) { throw 'env.shared has no AUTOSDD_QUOTA_HALT_PCT line' }
+            $newPct = if ([int]$cur.Groups[1].Value -eq 97) { 96 } else { 97 }
+            $g = $cur.Groups[1]
+            [IO.File]::WriteAllText($shared, $txt.Substring(0, $g.Index) + $newPct + $txt.Substring($g.Index + $g.Length), $enc)
+            Invoke-GitChecked -C $pusher add env.shared
+            Invoke-GitChecked -C $pusher commit --quiet -m 'env-sync-e2e: shared halt percentage changes'
+            Invoke-GitChecked -C $pusher push --quiet origin HEAD:refs/heads/e2e
+            # the pulling machine: a REAL git pull; the post-merge hook speaks on stderr
+            $pull = Invoke-RawUtf8 "git -C $clone pull --ff-only" 'pull1'
+            Write-Host $pull.Text
+            Write-Host "env-sync-e2e: pull rc=$($pull.Rc)"
+            $problems = @()
+            if ($pull.Rc -ne 0) { $problems += "git pull --ff-only rc=$($pull.Rc)" }
+            if ($pull.Text -notmatch '\[post-merge dispatcher\] env\.shared') { $problems += 'the hook printed no "[post-merge dispatcher] env.shared" line (did it run at all?)' }
+            if ($pull.Text -notmatch '\.env\.bak\.\d{8}T\d{6}Z') { $problems += 'the hook output names no .env.bak.<UTC stamp> backup' }
+            if (-not $pull.Text.Contains('已自動修復')) { $problems += 'the hook did not report 已自動修復' }
+            $baks = @(Get-ChildItem -LiteralPath $clone -Force -File | Where-Object { $_.Name -like '.env.bak.*' })
+            if ($baks.Count -lt 1) {
+              $problems += 'no .env.bak.* backup file in the clone root'
+            } elseif ([IO.File]::ReadAllText($baks[0].FullName, $enc) -cne $original) {
+              $problems += 'the backup content differs from the original .env'
+            }
+            $after = [IO.File]::ReadAllText($dotenv, $enc)
+            if ($after -match '(?m)^AUTOSDD_QUOTA_HALT_PCT=95') { $problems += '.env still carries the shadowing HALT line' }
+            if ($after -notmatch '(?m)^AUTOSDD_QUOTA_NOTICE_PCT=55') { $problems += 'the machine-local NOTICE override was deleted (the fix must be selective)' }
+            $doc = Invoke-RawUtf8 "$py $clone\tools\lib\quota_policy.py --env-doctor" 'doctor_after'
+            Write-Host $doc.Text
+            if ($doc.Rc -ne 0) { $problems += "env-doctor after the pull rc=$($doc.Rc)" }
+            if (-not $doc.Text.Contains('結論：0 個問題')) { $problems += 'env-doctor conclusion is not 結論：0 個問題' }
+            # negative control: an up-to-date pull must stay silent (the assertions above are not constant-true)
+            $pull2 = Invoke-RawUtf8 "git -C $clone pull --ff-only" 'pull2'
+            Write-Host $pull2.Text
+            if ($pull2.Rc -ne 0) { $problems += "second git pull rc=$($pull2.Rc)" }
+            if ($pull2.Text -match 'post-merge dispatcher|\.env\.bak\.') { $problems += 'negative control failed: an up-to-date pull must not trigger the hook' }
+            if ($problems.Count -gt 0) { throw ('env-sync-e2e FAILED: ' + ($problems -join ' ; ')) }
+            Write-Host 'env-sync-e2e: PASS (real git pull fired the hook; backup + selective fix + doctor 0 problems; negative control silent)'
+          }
+          finally {
+            $junction = Join-Path $clone '.venv'
+            if (Test-Path -LiteralPath $junction) { cmd /c "rmdir $junction" | Out-Null }
+            if (Test-Path -LiteralPath $work) { Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue }
+          }
+          if (-not (Test-Path -LiteralPath (Join-Path $venvReal 'Scripts\python.exe'))) { throw 'cleanup destroyed the real .venv (the Junction removal went wrong)' }
+          exit 0
+
+      - name: engine_resume_job schtasks 分支＋quota_burndown --status 無落款（證據檔〈十-9〉(4)(5)）
+        # 證據檔〈十-9〉(4)：`tools/lib/engine_resume_job.py` 的 schtasks 分支（Register-ScheduledTask 一次性
+        # 工作）此前只驗到腳本內容與判準、未在 Windows 實跑。本 step 註冊一個 6 小時後的一次性工作，
+        # 以**獨立複讀**取證（憑證是 `NextRunTime` 這個「值」，不是指令的 rc；比值不比 rc）：
+        # `Get-ScheduledTask` 恰 1 筆 `AutoSDD_EngineResume_*` 且 `Get-ScheduledTaskInfo.NextRunTime` 非空且
+        # 晚於現在；`--remove` 後再列舉須為空；`finally` 無條件再 `--remove` 加
+        # `Unregister-ScheduledTask`，runner 不留殘。排程在 runner 上不會真的觸發（6 小時後 job 早已結束）。
+        # 證據檔〈十-9〉(5)：`quota_burndown.py --status` 在無落款檔的 runner 上必須 rc=1 **且**輸出含「沒有
+        # 有效落款」**且**不含 Traceback——光看 rc 不夠，Python 例外也是 rc=1（以原始位元組 UTF-8 讀）。
+        # 兩者都用根 .venv 的直譯器（`_refusal` 要求它 import 得到 autoclaude）；零網路、零額度。
+        # 取證：gh run view <id> --log | grep -n "NextRunTime\|engine-resume-e2e\|burndown-status-e2e\|沒有有效落款"
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        env:
+          PYTHONUTF8: "1"
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $enc = [Text.UTF8Encoding]::new($false)
+          $repo = (Get-Location).Path
+          $py = Join-Path $repo '.venv\Scripts\python.exe'
+          if (-not (Test-Path -LiteralPath $py)) { throw 'prerequisite missing: root .venv (did the rebuild step fail?)' }
+          $playbook = 'AutoClaude\scripts\example_playbook.yaml'
+          $tag = [Guid]::NewGuid().ToString('N').Substring(0, 8)
+
+          function Invoke-RawUtf8([string]$CommandLine, [string]$Name) {
+            $f = Join-Path $env:RUNNER_TEMP ($Name + '_' + $tag + '.out')
+            cmd /c "$CommandLine > $f 2>&1"
+            $rc = $LASTEXITCODE
+            [pscustomobject]@{ Rc = $rc; Text = [IO.File]::ReadAllText($f, $enc) }
+          }
+          function Get-EngineResumeTasks {
+            @(Get-ScheduledTask | Where-Object { $_.TaskName -like 'AutoSDD_EngineResume_*' })
+          }
+
+          $problems = @()
+          # (4) schtasks branch: arm -> independent re-read -> remove -> re-enumerate
+          try {
+            $at = (Get-Date).AddHours(6).ToString('yyyy-MM-ddTHH:mm:sszzz')
+            $arm = Invoke-RawUtf8 "$py tools\lib\engine_resume_job.py --playbook $playbook --at $at" 'engine_resume_arm'
+            Write-Host $arm.Text
+            if ($arm.Rc -ne 0) { throw "engine_resume_job.py (arm) rc=$($arm.Rc)" }
+            if ($arm.Text -notmatch 'NextRunTime =') { throw 'engine_resume_job.py printed no "NextRunTime =" evidence line' }
+            $tasks = @(Get-EngineResumeTasks)
+            if ($tasks.Count -ne 1) { throw "expected exactly 1 AutoSDD_EngineResume_* scheduled task, found $($tasks.Count)" }
+            $next = ($tasks[0] | Get-ScheduledTaskInfo).NextRunTime
+            Write-Host "engine-resume-e2e: task=$($tasks[0].TaskName) NextRunTime=$next now=$(Get-Date)"
+            if (-not $next -or $next -le (Get-Date)) { throw "independent re-read: NextRunTime is empty or not in the future ('$next')" }
+            $rm = Invoke-RawUtf8 "$py tools\lib\engine_resume_job.py --remove --playbook $playbook" 'engine_resume_remove'
+            Write-Host $rm.Text
+            if ($rm.Rc -ne 0) { throw "engine_resume_job.py --remove rc=$($rm.Rc)" }
+            $left = @(Get-EngineResumeTasks)
+            if ($left.Count -ne 0) { throw "tasks left after --remove: $(($left | ForEach-Object { $_.TaskName }) -join ', ')" }
+            Write-Host 'engine-resume-e2e: PASS (armed -> NextRunTime re-read independently -> removed -> none left)'
+          }
+          catch { $problems += "engine_resume: $($_.Exception.Message)" }
+          finally {
+            cmd /c "$py tools\lib\engine_resume_job.py --remove --playbook $playbook > NUL 2>&1"
+            Get-EngineResumeTasks | ForEach-Object { Unregister-ScheduledTask -TaskName $_.TaskName -Confirm:$false -ErrorAction SilentlyContinue }
+          }
+          # (5) quota_burndown --status on a runner with no directive file: rc=1 + the verdict text + no Traceback
+          try {
+            $b = Invoke-RawUtf8 "$py tools\lib\quota_burndown.py --status" 'quota_burndown_status'
+            Write-Host $b.Text
+            Write-Host "burndown-status-e2e: rc=$($b.Rc)"
+            if ($b.Rc -ne 1) { throw "quota_burndown.py --status expected rc=1 (no directive on a clean runner), got rc=$($b.Rc)" }
+            if (-not $b.Text.Contains('沒有有效落款')) { throw 'quota_burndown.py --status did not say 沒有有效落款' }
+            if ($b.Text.Contains('Traceback')) { throw 'quota_burndown.py --status printed a Traceback (rc=1 came from an exception, not from the verdict)' }
+            Write-Host 'burndown-status-e2e: PASS (rc=1, no-directive verdict, no Traceback)'
+          }
+          catch { $problems += "quota_burndown: $($_.Exception.Message)" }
+          if ($problems.Count -gt 0) { throw ($problems -join ' ; ') }
+          exit 0
 
   # QA 四方複審發現（P1）：windows-nightly-full 為 continue-on-error: true，失敗會
   # 永久靜默、無任何人工提醒機制（本 repo 已有 aisdlc-sdd-fsm-chaos-nightly.yml 的

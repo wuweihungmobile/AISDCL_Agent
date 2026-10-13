@@ -1,7 +1,7 @@
 {
   "_why": "M6（每一支測試都至少在某條軌上真的跑過一次）的落款：**每個剖面各自記下它 skip 掉的 test-id 集合**，判準＝skip(A) ⊆ run(B) ∪ 合法平台專屬集合（等價於 skip(A) ∩ skip(B) − 豁免 = ∅）。判準的家＝tools/lib/skip_runtime_report.py::m6_id_set_problems；本檔只是史料。缺任一剖面時判準回『不可求值』而不是回綠。落款取得＝在該剖面上跑 python tools/run_root_unittests.py，它會印出可直接貼進本檔的區塊；重釘＝把該剖面那一格換成新的可貼落款（逐 id 差異會出現在 diff 裡，這就是稽核痕跡）。刻意不記『跑過的 id 全集』：那是數千筆、每輪都在變，而 run(B) 由『B 的落款裡沒有它』推得即足以回答 M6（誠實劃界見判準檔）。",
   "tools/tests@darwin": {
-    "measured-at": "2026-10-13T08:48:47+00:00（R213 第二窗收尾根層全套 `tools/run_root_unittests.py` rc=0 於 mac 真機：`[M6 id 集合] tools/tests@darwin：✅ 集合關係成立（本次 skip 47 支）`；skip id 集合與 2026-09-25 落款逐 id 相同，本次只重釘量測時刻／host；ran 沿用 2026-09-25 值（runner 不印 testsRun、不推算）；共變鎖＝skip_group_policy.py 新登記 linux／win32+nopg 兩剖面須同 commit touch 本檔）",
+    "measured-at": "2026-10-13T17:29:32+00:00（寫入時刻；量測＝R213 第三窗收尾單人窗口、commit 前（本輪全部改動已落地）`python tools/run_root_unittests.py` rc=0，印 `[skip census] tools/tests@darwin 共 47 支：platform=47／tool-absence=0／env-disabled=0／structural-pair=0／debt=0／untagged=0`、`[M6 id 集合] tools/tests@darwin：✅ 集合關係成立（本次 skip 47 支）`；同日稍早的真 launchd nightly RunId 20261014_000025 stage 2 印同一行但該 stage rc=1（3 項失敗／2 模組＝本窗編修自造、已修），故不以它為基線；skip id 集合與前一落款逐 id 相同，只重釘量測時刻／host；ran 沿用前值（runner 不印 testsRun）；共變鎖＝skip_group_policy.py 兩張天花板表新增 AutoClaude/tests@darwin+pg+solo+pgext 與 AISDLC_SDD/fsm_runtime@darwin 兩鍵（DEF-200-075／DEF-101-960）須同 push 範圍 touch 本檔）",
     "host": "macOS-26.6.2-arm64-arm-64bit",
     "ran": 4310,
     "skipped": [

@@ -756,7 +756,8 @@ _SITE_CLASS_CENSUS: dict[str, dict[str, int]] = {
     "AutoClaude/tests": {
         "windows-only": 10,
         "posix-only": 5,
-        "tool-absence": 15,
+        # 2026-10-13 DEF-101-856 方案 B 刪 T1／T2／failover stub（pg_required 站點消失）重釘 15→14
+        "tool-absence": 14,
         "runtime-skipTest": 0,
         "unclassified": 0,
     },

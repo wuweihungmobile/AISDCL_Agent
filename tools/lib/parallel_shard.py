@@ -322,6 +322,72 @@ def _crash_fallback(started: list[subprocess.Popen], exc: BaseException) -> _Mer
 #: 天然讓所有既有單元測試不寫入快取檔，不需要額外 mock `save_live_cache`。
 _CACHE_PERSIST_MIN_UNITS = 20
 
+#: DEF-200-313：Job Object handle——模組全域、**永不關**（行程一死核心替它關 handle，整個
+#: job 連孫行程一併陪葬）；None＝尚未（或無法）採用。
+_kill_job_handle: int | None = None
+
+
+def adopt_kill_on_close_job() -> bool:
+    """win32：把**本行程**放進 `KILL_ON_JOB_CLOSE` 的 Job Object，使父行程**任何**死法
+    （Ctrl-C／`Stop-Process -Force`／關窗／OOM）其子孫必死。WHY（DEF-200-313）：
+    `proc.kill()` 只殺該 PID 不殺孫（測試自己 spawn 的 git／python／powershell），且父被硬殺時
+    `except KeyboardInterrupt` 的清理路徑根本不跑；job 由核心在 handle 關閉時收尾，不靠本行程活著。
+
+    非 win32 一律回 False、不 raise；冪等（已採用回 True、不重建）；失敗＝fail-open
+    （stderr 印一行、回 False；巢狀 job 需 Win8+，hosted runner 是否允許由 CI 探針揭露）。
+    只在主行程呼叫（`run_parallel` 進入時）；分片子行程走 `__main__`，天然不經過這裡。
+    """
+    global _kill_job_handle
+    if sys.platform != "win32":
+        return False
+    if _kill_job_handle is not None:
+        return True
+    try:
+        import ctypes
+
+        vp, u32 = ctypes.c_void_p, ctypes.c_uint32
+
+        # 欄位一律定寬型別（不用 wintypes／c_long：LLP64 與 LP64 的 long 寬度不同）。
+        class _Basic(ctypes.Structure):  # JOBOBJECT_BASIC_LIMIT_INFORMATION
+            _fields_ = [
+                ("PerProcessUserTimeLimit", ctypes.c_int64),
+                ("PerJobUserTimeLimit", ctypes.c_int64),
+                ("LimitFlags", u32), ("MinimumWorkingSetSize", ctypes.c_size_t),
+                ("MaximumWorkingSetSize", ctypes.c_size_t), ("ActiveProcessLimit", u32),
+                ("Affinity", ctypes.c_size_t), ("PriorityClass", u32), ("SchedulingClass", u32),
+            ]
+
+        class _Extended(ctypes.Structure):  # JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+            _fields_ = [
+                ("BasicLimitInformation", _Basic),
+                ("IoInfo", ctypes.c_uint64 * 6),  # IO_COUNTERS＝6 個 ULONGLONG
+                ("ProcessMemoryLimit", ctypes.c_size_t), ("JobMemoryLimit", ctypes.c_size_t),
+                ("PeakProcessMemoryUsed", ctypes.c_size_t), ("PeakJobMemoryUsed", ctypes.c_size_t),
+            ]
+
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        # HANDLE 在 x64 是 64 位：不宣告 restype／argtypes 會被截成 32 位 int。
+        k32.CreateJobObjectW.restype = k32.GetCurrentProcess.restype = vp
+        k32.CreateJobObjectW.argtypes = [vp, ctypes.c_wchar_p]
+        k32.SetInformationJobObject.argtypes = [vp, ctypes.c_int, vp, u32]
+        k32.AssignProcessToJobObject.argtypes = [vp, vp]
+        job = k32.CreateJobObjectW(None, None)
+        if not job:
+            raise OSError(f"CreateJobObjectW winerror={ctypes.get_last_error()}")
+        info = _Extended()
+        info.BasicLimitInformation.LimitFlags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        # 9＝JobObjectExtendedLimitInformation。失敗路徑不關 handle：空 job 無害，
+        # 且 fail-open 的錯誤路徑不該再多一條會拋的碼。
+        if not k32.SetInformationJobObject(job, 9, ctypes.byref(info), ctypes.sizeof(info)):
+            raise OSError(f"SetInformationJobObject winerror={ctypes.get_last_error()}")
+        if not k32.AssignProcessToJobObject(job, k32.GetCurrentProcess()):
+            raise OSError(f"AssignProcessToJobObject winerror={ctypes.get_last_error()}")
+    except Exception as exc:  # noqa: BLE001 — fail-open：採用失敗不得讓測試套件跑不起來
+        print(f"[parallel_shard] job-object adopt failed: {exc}", file=sys.stderr)
+        return False
+    _kill_job_handle = job
+    return True
+
 
 def run_parallel(
     suite: unittest.TestSuite, start_dir: Path, module_counts: dict[str, int]
@@ -440,6 +506,7 @@ def run_parallel(
     執行緒真正結束**（`t.join(timeout=...)` 迴圈，見下方清理區塊），已用原型驗證
     15/15 次全數清乾淨（修復前僅 ~1/10 次）。
     """
+    adopt_kill_on_close_job()  # DEF-200-313：win32 上父行程任何死法子孫必死；他平台回 False
     known_tests_by_id = {t.id(): t for t in _flatten(suite)}
     hints = parallel_timing_cache.load_hints(module_counts)
     modules_sorted = parallel_timing_cache.order_dispatch_units(module_counts, hints)

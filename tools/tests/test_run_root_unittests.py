@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import ast
 import contextlib
+import ctypes
 import fnmatch
 import functools
 import importlib
@@ -194,13 +195,9 @@ class RunRootUnittestsTest(unittest.TestCase):
         self.assertGreaterEqual(suite.countTestCases(), run_root_unittests.MIN_TESTS)
 
     def test_main_is_wrapped_by_the_leak_fence(self) -> None:
-        """M-03（console_qa 事故輪擴充）：`main()` 的最終 `return` 必須是
-        `console_orphan_census.wrap(lambda: sentinel_lifecycle.leak_fence(...))`——
-        `wrap()` 是全套層孤兒 console 普查外層（零行數成本掛進來，見
-        `tools/lib/console_orphan_census.py` WHY：本檔 special tier 零餘裕棘輪，
-        新邏輯只能用「單行取代單行」的方式外掛），`leak_fence` 仍是原本的底線防護
-        （`AUTOSDD_SENTINEL_OFF` 補位＋可稽核暫存檔痕跡）——兩層都不得漏接。走 AST
-        而非字串比對：字串比對對格式重排（換行／空白）敏感，AST 只認呼叫形狀。
+        """M-03：`main()` 的最終 `return` 必須是
+        `console_orphan_census.wrap(lambda: sentinel_lifecycle.leak_fence(...))`——外層孤兒 console
+        普查與底線防護 `leak_fence` 兩層都不得漏接。走 AST 而非字串比對：字串比對對格式重排敏感。
         """
         tree = ast.parse(Path(run_root_unittests.__file__).read_text(encoding="utf-8"))
         main_fn = next(
@@ -293,14 +290,10 @@ class ConsoleOrphanCensusTest(unittest.TestCase):
 
 
 class TempFenceTest(unittest.TestCase):
-    """DEF-200-444／445：全套曾實測改寫**真實** %TEMP% 下的 autosdd_pace*.json。DEF-200-444
-    當時以為引擎 `file_quota_meter` 讀的就是那份；實際上引擎讀 quota 快取目錄（家目錄或
-    `AUTOSDD_QUOTA_CACHE_DIR`），寫入端改走 `quota_meter.cache_path()` 之後，全套寫的才是引擎
-    真的會讀的那份（TTL 內可能拿測試的假決策當派工上限）。家族級修法＝
-    `sentinel_lifecycle.temp_fence`：全套期間 TEMP／TMP／TMPDIR、快取目錄與
-    `tempfile.tempdir` 指向專屬隔離根（含 worker 與孫行程）、跑完清掉，並比對真實契約目錄下
-    配速契約檔的前後雜湊。本類只對**合成的假真實目錄**（`real_tmp=`／scratch 快取目錄）動手，
-    絕不碰這台機器真的 %TEMP% 與家目錄。"""
+    """DEF-200-444／445：全套曾實測改寫**真實** %TEMP% 與 quota 快取目錄下的 autosdd_pace*.json。
+    家族級修法＝`sentinel_lifecycle.temp_fence`：全套期間 TEMP／TMP／TMPDIR、快取目錄與
+    `tempfile.tempdir` 指向專屬隔離根（含 worker 與孫行程）、跑完清掉，並比對真實契約目錄下配速
+    契約檔的前後雜湊。本類只對**合成的假真實目錄**動手，絕不碰這台機器真的 %TEMP% 與家目錄。"""
 
     def setUp(self) -> None:
         env = mock.patch.dict(os.environ)  # 圍籬若壞了，汙染不得帶進同行程的其他測試
@@ -747,12 +740,9 @@ class TestWriterModulesDeclareTheModuleFence(unittest.TestCase):
 
 
 class ParallelFallbackToSequentialTest(unittest.TestCase):
-    """DEF-200-274 第七輪四方獨立複審（Architect／SD 各自命中）：`worker_count()`
-    算出 1（例如 `AUTOSDD_PARALLEL_TESTS_WORKERS=1`，或單核心環境的預設公式）時，
-    走 subprocess 架構零平行效益、純損耗——本測試鎖住『此時退回序列路徑、不呼叫
-    `parallel_shard.run_parallel()`』這條判斷式，不管 `parallel_mode()` 是什麼
-    （第九輪：`enabled()` 已刪除，改由 `should_run_parallel()` 判斷，見
-    `ShouldRunParallelDecisionTest`）。"""
+    """DEF-200-274：`worker_count()` 算出 1（如 `AUTOSDD_PARALLEL_TESTS_WORKERS=1` 或單核心預設）
+    時走 subprocess 架構零平行效益、純損耗——鎖住『此時退回序列路徑、不呼叫 `run_parallel()`』，
+    不管 `parallel_mode()` 是什麼（判斷式見 `ShouldRunParallelDecisionTest`）。"""
 
     def test_worker_count_one_never_calls_run_parallel(self) -> None:
         mod_name = "test_fixture_parallel_fallback"
@@ -958,11 +948,9 @@ class ReportWindowsNativeSkipsTest(unittest.TestCase):
         tagged_ids = run_root_unittests.windows_native_skips(result)
         self.assertEqual(tagged_ids, [])
 
-    # ── DEF-101-510（R59）：反方向的可見度 ───────────────────────────────────
-    # 上面三支鎖的是「標籤 skip 要被獨立點名」；R59 於真 Windows 11 實機量到
-    # `skipped=11` 而 **11 支全部無標籤**，其中兩支是真正的覆蓋損失（見
-    # `run_root_unittests.report_all_skips` docstring）。故補鎖「未標籤的 skip
-    # 也必須連理由一起被印出來」——否則只印一個 `skipped=N` 等於沒印。
+    # ── DEF-101-510：反方向的可見度 ───────────────────────────────────
+    # 上面三支鎖的是「標籤 skip 要被獨立點名」；真 Windows 11 實機量到 11 支 skip 全部無標籤，
+    # 其中兩支是真正的覆蓋損失——故補鎖「未標籤的 skip 也必須連理由一起被印出來」。
 
     def test_reporters_are_actually_wired_into_run_with_floor(self):
         """QA-R59-02：單元測了但**沒接線**是本 repo 最常見的假綠形狀。
@@ -1906,12 +1894,9 @@ class DumpFailureDetailTest(unittest.TestCase):
             self.assertIn(expected, text, f"失敗明細未含 {expected!r}——落檔對診斷無用")
 
     def test_failure_detail_is_also_printed_to_stderr(self) -> None:
-        """DEF-200-274 CI 事故（commit 9478bda，root-infra-ci run 34358252409）：
-        平行模式此前只把明細落檔、從未印到 console——CI runner 的落檔目錄是 job
-        臨時工作目錄，job 結束即銷毀，三支 CI workflow 也都沒有 upload-artifact
-        步驟，主控台因而完全看不到任何 FAIL:/ERROR:/Traceback。本測試鎖住修法：
-        落檔內容必須同時印到 stderr，與序列模式 `TextTestRunner` 內建
-        `printErrors()` 的行為對等。"""
+        """DEF-200-274 CI 事故：平行模式曾只把明細落檔、從未印到 console（CI 落檔目錄隨 job 銷毀、
+        也無 upload-artifact），主控台看不到任何 FAIL:/ERROR:/Traceback。鎖住修法：落檔內容必須
+        同時印到 stderr，與序列模式 `TextTestRunner` 內建 `printErrors()` 的行為對等。"""
         with tempfile.TemporaryDirectory() as td:
             target = Path(td) / "f.log"
             stderr = io.StringIO()
@@ -3180,11 +3165,9 @@ def _fake_shard_procs(crash_shard: list[str], crash_stderr: str, ok_payload: str
 
 
 class ParallelShardCrashDoesNotRaiseTest(unittest.TestCase):
-    """DEF-200-274 收尾複審發現：shard 崩潰時 `run_parallel()` 曾 `raise
-    SystemExit(1)`，直接穿透 `sentinel_lifecycle.leak_fence()` 的 `rc = run()`
-    這一行（無 try/except），讓收尾快照／洩漏比對整段沒有執行。修法＝崩潰改記
-    一筆 `errors` 條目正常 return，`wasSuccessful()` 因此為 False，呼叫方讀到
-    的 rc 依然非零，但不再犧牲 `leak_fence()` 的收尾動作。
+    """DEF-200-274：shard 崩潰時 `run_parallel()` 不得 `raise SystemExit(1)`——它會穿透
+    `sentinel_lifecycle.leak_fence()` 的 `rc = run()`（無 try/except）而讓收尾快照／洩漏比對整段
+    不執行；改記一筆 `errors` 條目正常 return，`wasSuccessful()` 為 False、呼叫方 rc 仍非零。
     """
 
     def test_shard_crash_returns_failed_result_instead_of_raising(self) -> None:
@@ -3441,12 +3424,9 @@ class ParallelShardMergeResultsMissingKeyStillRaisesTest(unittest.TestCase):
 
 
 class ParallelShardRunParallelExceptionSafetyTest(unittest.TestCase):
-    """DEF-200-274 第三輪複審 Problem 2：`run_parallel()` 對 Popen／communicate／
-    `merge_results()` 整段缺 try/except；`merge_results()` 對缺鍵 payload 拋出的
-    `KeyError` 並非 `SystemExit`，一樣會穿透 `sentinel_lifecycle.leak_fence()` 的
-    `rc = run()`（該行無 try/except），讓收尾快照／洩漏比對整段不執行——與已修復的
-    `raise SystemExit` 繞過屬同一失效模式，只是觸發條件換成例外類型。修復後任何例外
-    都轉成一筆 `errors` 條目、正常 return。
+    """DEF-200-274：`merge_results()` 對缺鍵 payload 拋的 `KeyError` 不是 `SystemExit`，一樣會穿透
+    `sentinel_lifecycle.leak_fence()` 的 `rc = run()`（無 try/except）而讓收尾整段不執行；
+    `run_parallel()` 必須把任何例外都轉成一筆 `errors` 條目、正常 return。
     """
 
     def test_a_payload_missing_required_keys_does_not_raise_out_of_run_parallel(self) -> None:
@@ -3567,29 +3547,21 @@ class ParallelShardMergeExceptionLeakFenceIntegrationTest(unittest.TestCase):
 
 
 class ParallelShardPopenFailureKillsAlreadyStartedProcsTest(unittest.TestCase):
-    """SD 複審 finding 2（順手處理，未獨立復現，收斂進同一批修復）：Popen() 迴圈若在
-    啟動到一半時失敗，已啟動的子行程不應被放生成孤兒——`run_parallel()` 必須
-    `kill()`＋`wait()` 已啟動的 procs 再把這次失敗併入統一的例外處理路徑（合成一筆
-    `errors` 條目、正常 return）。
+    """DEF-200-274：`Popen()` 啟動到一半失敗時，已啟動的子行程不得被放生成孤兒——`run_parallel()`
+    必須 `kill()`＋`wait()` 它們，再把失敗併入統一例外路徑（合成一筆 `errors`、正常 return）。
     """
 
     def test_a_later_popen_failure_kills_already_started_procs(self) -> None:
-        """DEF-200-274 第四輪：動態佇列下 Popen 由多條 worker thread 併發呼叫，
-        「誰先誰後」不再確定——原本靠呼叫次數（第一次成功、第二次失敗）判斷的假
-        Popen，改成依 argv 裡的模組名決定成敗（`mod.b` 恆失敗、`mod.a` 恆成功），
-        讓斷言不依賴 thread 排程的先後順序。
-        """
+        """DEF-200-274：動態佇列下 Popen 由多條 worker thread 併發呼叫、先後不確定——假 Popen 改依
+        argv 的模組名決定成敗（`mod.b` 恆失敗、`mod.a` 恆成功），斷言不依賴 thread 排程順序。"""
         parallel_shard = run_root_unittests.parallel_shard
 
         class _FakeProc:
             def __init__(self) -> None:
                 self.killed = False
                 self.waited = False
-                # 本 mock 原本漏了 `returncode`（`_worker_thread_loop()` 對成功 Popen 的分支一定會
-                # 存取它）：舊版 `run_parallel()` 只取第一筆例外 raise，讓 mod.b 刻意的 OSError 蓋
-                # 過意外的 AttributeError，測試因此從未獨立驗證 mod.a 走得到 `results.put()`；修復
-                # 後兩條 worker 的例外都會被排空印出。第四輪複審發現的沿革搬至
-                # Guard_Line_History_2.md〈R186 淨減法搬遷〉§52。  round-label-ok
+                # 本 mock 原本漏了 `returncode`（成功 Popen 的分支一定會存取它）：舊版只取第一筆
+                # 例外 raise，讓 mod.b 的 OSError 蓋過意外的 AttributeError、mod.a 從未被獨立驗證。
                 self.returncode = 0
 
             def kill(self) -> None:
@@ -3678,13 +3650,9 @@ class ParallelShardMultipleThreadFailuresAreAllReportedTest(unittest.TestCase):
 
 
 class ParallelShardWorkerThreadBaseExceptionDoesNotEscapeTest(unittest.TestCase):
-    """DEF-200-274 第四輪第二次對抗式複審 Architect finding 1(a)：worker thread 內部若拋出非
-    `Exception` 子類的 `BaseException`（如 `SystemExit`），`run_parallel()` 不得
-    讓它穿透——`_crash_fallback()` 直接收尾，不依賴外層 `except Exception` 篩選
-    型別。刻意用 `SystemExit` 而非既有測試已覆蓋的 `OSError`：`OSError` 是
-    `Exception` 子類，舊版「合成後 `raise`、交外層 `except Exception` 接」的寫法
-    對它本來就成立，換不出這個型別缺口；`SystemExit` 才是舊版寫法會真的漏接的
-    具體反例。
+    """DEF-200-274 Architect finding 1(a)：worker thread 內拋出非 `Exception` 的 `BaseException`
+    （如 `SystemExit`）不得穿透 `run_parallel()`——`_crash_fallback()` 直接收尾、不靠外層
+    `except Exception` 篩型別。刻意用 `SystemExit` 而非 `OSError`：後者換不出這個型別缺口。
     """
 
     def test_worker_thread_system_exit_is_captured_not_propagated(self) -> None:
@@ -4010,14 +3978,10 @@ class ParallelTimingCacheSaveLiveCacheMergePruneTest(unittest.TestCase):
         self.assertEqual(readback["live_mod.C"], 1.0)
 
     def test_module_key_survives_split_round_and_candidate_still_flagged(self) -> None:
-        """端到端：模組鍵在被自動細分成 class 鍵的那一輪觀測後仍存活於活體
-        快取（不退回種子檔的舊數字），值回填為本輪 class 鍵的加總
-        （100.0+123.0=223.0，取代第 N 輪的舊值 150.0——追蹤真實現況，不凍結在
-        被拆分前的舊模組值），且下一輪 `auto_class_level_candidates()` 仍能
-        判定該模組需要細分——用本測試檔自身 `__name__` 當模組名（已知可
-        import、無 setUpModule/tearDownModule），效果等價於文字上的
-        `test_dev_start`，避免真的 import 那支重量級測試檔。
-        """
+        """端到端：模組鍵在被自動細分成 class 鍵的那一輪觀測後仍存活於活體快取（不退回種子檔的
+        舊數字），值回填為本輪 class 鍵加總（100.0+123.0=223.0，取代舊值 150.0），且下一輪
+        `auto_class_level_candidates()` 仍判定該模組需細分。模組名用本檔 `__name__`（已知可
+        import、無 setUpModule/tearDownModule），避免真的 import 重量級測試檔。"""
         ptc = self._ptc()
         target = __name__
         with tempfile.TemporaryDirectory(prefix="ptc_e2e_") as td:
@@ -4045,15 +4009,9 @@ class ParallelTimingCacheSaveLiveCacheMergePruneTest(unittest.TestCase):
         self.assertIn(target, candidates)
 
     def test_save_live_cache_merge_prune_survives_three_level_keys(self) -> None:
-        """D1：類別鍵（`module.Class`）被進一步自動細分成方法鍵
-        （`module.Class.method`）觀測的那一輪，類別鍵與模組鍵本身雖不在新的
-        `module_timings` 裡，但因為模組前綴（`key.split('.', 1)[0]`）仍在
-        `observed_modules` 集合中而繼續存活，且兩者的值都回填為本輪三個方法鍵
-        的加總（20.0+24.0+22.0=66.0，取代第 N 輪的舊值 150.0——見
-        `save_live_cache()` docstring〈WHY 父鍵需要每輪回填〉）——三層鍵
-        （模組／模組.類別／模組.類別.方法）同時存在時不會互相誤剪，且都追蹤
-        本輪的真實總和。
-        """
+        """D1：類別鍵被細分成方法鍵的那一輪，類別鍵與模組鍵雖不在 `module_timings` 裡，仍因模組前綴
+        在 `observed_modules` 而存活，且回填為本輪三個方法鍵加總（20.0+24.0+22.0=66.0，取代舊值
+        150.0；見 `save_live_cache()` docstring〈WHY 父鍵需要每輪回填〉），三層鍵不互相誤剪。"""
         ptc = self._ptc()
         target = __name__
         with tempfile.TemporaryDirectory(prefix="ptc_method_merge_") as td:
@@ -4082,15 +4040,9 @@ class ParallelTimingCacheSaveLiveCacheMergePruneTest(unittest.TestCase):
     def test_method_level_key_survives_split_round_and_candidate_still_flagged(
         self,
     ) -> None:
-        """D1 版：`test_module_key_survives_split_round_and_candidate_still_
-        flagged` 的類別級姊妹測試——鎖住「連續兩輪決策一致，不因快取結構
-        改變而震盪」：類別鍵在被自動細分成方法鍵的那一輪觀測後仍存活於活體
-        快取，值回填為本輪三個方法鍵的加總（20.0×3=60.0，本測試刻意讓總量
-        與第 N 輪的舊值相同，驗證『守恆時數字不變』；`test_save_live_cache_
-        merge_prune_survives_three_level_keys` 驗證『總量改變時數字也跟著
-        改變』的姊妹象限），且下一輪 `auto_method_level_candidates()` 讀到
-        這份回填後的 `class_hints` 仍能判定同一個類別為方法級候選。
-        """
+        """D1 版（`test_module_key_survives_split_round_and_candidate_still_flagged` 的類別級
+        姊妹）：連續兩輪決策一致、不因快取結構改變而震盪——方法鍵加總 20.0×3=60.0（刻意與舊值
+        相同，驗『守恆時數字不變』），下一輪 `auto_method_level_candidates()` 仍判同類別為候選。"""
         ptc = self._ptc()
         dg = run_root_unittests.dispatch_granularity
         cls = _TopLevelDispatchFixtureMultiMethod
@@ -4146,13 +4098,9 @@ class ParallelTimingCacheStalenessReportTest(unittest.TestCase):
         self.assertIsNone(ptc.staleness_report({"a": 1.0}, {}))
 
     def test_current_staleness_report_is_none_right_after_a_refresh(self) -> None:
-        """DEF-200-386（a）：`current_staleness_report()` 是單一入口，直接讀磁碟上
-        的 `SEED_PATH`／`LIVE_CACHE_PATH`——剛跑完 `refresh_parallel_timing_seed.py`
-        （把 live 原樣寫成 seed）那一刻，兩邊內容逐鍵相同，重疊率必為 100%，
-        不得回報過期。此前的臭蟲是呼叫端（`parallel_shard.py`）把「本輪原始
-        module_timings」（未合併）誤當 `live` 餵給 `staleness_report()`，導致剛
-        刷新也照樣過期——本測試鎖住「讀磁碟」這個修法本身的正確性。
-        """
+        """DEF-200-386（a）：`current_staleness_report()` 直接讀磁碟上的 `SEED_PATH`／
+        `LIVE_CACHE_PATH`——剛跑完 `refresh_parallel_timing_seed.py`（live 原樣寫成 seed）那一刻
+        兩邊逐鍵相同、重疊率必為 100%，不得回報過期；鎖住『讀磁碟』這個修法本身。"""
         ptc = self._ptc()
         with tempfile.TemporaryDirectory(prefix="ptc_current_report_") as td:
             seed = Path(td) / "seed.json"
@@ -4215,14 +4163,8 @@ class RunParallelPersistsLiveCacheOnlyForLargeRunsTest(unittest.TestCase):
 
 
 class RunParallelStalenessAdvisoryCiSymmetryTest(unittest.TestCase):
-    """DEF-200-274 第十輪 D2（SD-06 P2）：`dispatch_imbalance.
-    report_dispatch_imbalance()` 第八輪起在 CI 上（`GITHUB_ACTIONS=true`）額外印
-    `::warning::` annotation，但 `run_parallel()` 對
-    `parallel_timing_cache.staleness_report()` 的非 None 回傳值此前只有純
-    print——兩則 advisory 待遇不對稱，CI 摘要頁只曝光前者。本測試釘住兩者對稱
-    後的行為：CI 上種子過期 advisory 也要多印一行 `::warning::`，非 CI 維持純
-    文字不變。
-    """
+    """DEF-200-274 第十輪 D2：`run_parallel()` 的種子過期 advisory 與 `report_dispatch_imbalance()`
+    對稱——CI 上（`GITHUB_ACTIONS=true`）也多印一行 `::warning::`，非 CI 維持純文字不變。"""
 
     _STALE_MSG = (
         "⚠️ 平行派工計時種子檔可能已過期：種子與活體快取的 Top-8 熱點重疊率僅 "
@@ -4287,21 +4229,10 @@ class RunParallelStalenessAdvisoryCiSymmetryTest(unittest.TestCase):
 
 
 class RunParallelStalenessAdvisoryReadsMergedLiveCacheTest(unittest.TestCase):
-    """DEF-200-386（b）回歸鎖：`run_parallel()` 的過期 advisory 必須比對
-    `save_live_cache()` 合併寫回磁碟後的活體快取，不是本輪原始 `module_timings`
-    （未經 parent rollup／`kept_previous` 合併）。此前的臭蟲：呼叫端直接把
-    `module_timings` 當 `live` 餵給 `staleness_report()`；若種子檔反映的是
-    **歷史累積的合併圖像**（含這一輪不會被重新觀測、但因同模組前綴而被
-    `kept_previous` 保留下來的舊 class 鍵），比較面不對稱就會誤報過期。
-
-    場景：這一輪只派工 `pkgNN.Fresh`，活體快取預放同前綴但不會被重新觀測的舊 class 鍵 `pkgNN.Old`
-    （`save_live_cache()` 的 `kept_previous` 會保留）；種子檔＝本輪應合併出的完整圖像；用真實
-    `run_parallel()`（fake `Popen`＋執行緒區域假時鐘）讓兩邊排序同向。假時鐘取捨沿革搬至
-    Guard_Line_History_2.md〈R186 淨減法搬遷〉§54。  round-label-ok
-
-    若 `run_parallel()` 退回舊行為（直接拿 `module_timings` 比對），比較面會漏掉
-    `pkgNN.Old`／`pkgNN` 這兩層 40 個鍵，重疊率跌破門檻，本測試斷言的「不印
-    過期」就會失敗。
+    """DEF-200-386（b）回歸鎖：`run_parallel()` 的過期 advisory 必須比對 `save_live_cache()` 合併
+    寫回磁碟後的活體快取，不是本輪原始 `module_timings`（未經 `kept_previous` 合併）。場景：只派工
+    `pkgNN.Fresh`，活體快取預放不會被重新觀測的舊 class 鍵 `pkgNN.Old`，種子檔＝本輪應合併出的完整
+    圖像；退回舊行為則比較面漏掉 `pkgNN.Old`／`pkgNN` 兩層 40 個鍵、重疊率跌破門檻而誤印過期。
     """
 
     _N_GROUPS = 20
@@ -4378,18 +4309,10 @@ class RunParallelStalenessAdvisoryReadsMergedLiveCacheTest(unittest.TestCase):
 
 
 class ParallelMergeResultSkipCensusParityTest(unittest.TestCase):
-    """DEF-200-274 第十輪 SA-01：`merge_results()` 產生的 `_MergedResult` 餵給
-    `report_skip_census()`（連帶 `report_windows_skip_tag_exemption_problems()`
-    共用的同一份 skip 明細）的語意，必須與序列 `unittest.TextTestRunner` 的原生
-    結果一致——此前全檔 `_MergedResult(` 零命中，只有真 `run_parallel()` 對
-    tools/tests 全樹的整合層級間接證據，`merge_results()` 自身若重建有缺陷不會
-    被單獨鎖住。
-
-    現場事實：`_worker_main()` 對 `start_dir` 有 `assert start_dir == tests_dir`，worker 只為真
-    tools/tests 設計，無法用真 subprocess 對合成暫存樹跑 `run_parallel()`；故手造 per-worker
-    payload——對同一批合成測試各自真跑一次 `unittest.TextTestRunner`，用與 `_worker_main` 同款的
-    `parallel_shard._entries()` 序列化再交 `merge_results()`（資料形狀保真，只是把子行程換成同行程
-    第二次真跑）。推導搬至 Guard_Line_History_2.md〈R186 淨減法搬遷〉§55。  round-label-ok
+    """DEF-200-274 第十輪 SA-01：`merge_results()` 的 `_MergedResult` 餵給 `report_skip_census()`
+    （連帶 `report_windows_skip_tag_exemption_problems()`）的語意，必須與序列
+    `unittest.TextTestRunner` 的原生結果一致。worker 只為真 tools/tests 設計（`start_dir` 斷言），
+    故手造 per-worker payload：同批合成測試真跑一次，以 `_entries()` 序列化再交 `merge_results()`。
     """
 
     def setUp(self) -> None:
@@ -4414,13 +4337,10 @@ class ParallelMergeResultSkipCensusParityTest(unittest.TestCase):
         self.addCleanup(sys.modules.pop, "test_sample_module", None)
 
     def _load_suite(self) -> unittest.TestSuite:
-        # 用 discover(start_dir=top_level_dir=合成暫存目錄) 取代
-        # `sys.path.insert(self._tmpdir)` + `loadTestsFromName`：後者的執行期路徑對
-        # `AISDLC_SDD/scripts/tests/test_ci_paths_cover_root_consumers.py` 的
-        # `_eval_path_expr()` 靜態掃描器不可解析（`tempfile.mkdtemp()` 回傳值非字面
-        # 路徑常數）⇒ `test_no_unresolvable_sys_path_inserts` 真紅。discover() 本身也會
-        # 把 top_level_dir 插進 sys.path，但那是 stdlib 內部行為、不是本檔寫出的
-        # `sys.path.insert(...)` 陳述式，不落入該掃描器的射程。
+        # 用 discover(start_dir=top_level_dir=合成暫存目錄) 取代 `sys.path.insert(self._tmpdir)`：
+        # 後者的執行期路徑對 `test_ci_paths_cover_root_consumers.py` 的 `_eval_path_expr()` 靜態
+        # 掃描器不可解析（`test_no_unresolvable_sys_path_inserts` 真紅）；
+        # discover() 內部的插入不在射程。
         return unittest.TestLoader().discover(
             start_dir=self._tmpdir, top_level_dir=self._tmpdir)
 
@@ -4581,6 +4501,107 @@ class ParallelShardSigtermIgnoredOffMainThreadTest(unittest.TestCase):
         self.assertIn("result", result_holder, "非主執行緒呼叫不該因 ValueError 而整段沒完成")
 
 
+class ParallelShardKillOnCloseJobTest(unittest.TestCase):
+    """DEF-200-313：win32 Job Object（KILL_ON_JOB_CLOSE）＝父行程任何死法子孫必死。
+    非 win32 恆 no-op；win32 分支以假 `ctypes.WinDLL`（打樁 `sys.platform`）驗呼叫序／結構體
+    佈局／失敗不拋，刻意不寫 win32-only skip。真機證據＝windows-compat-ci 的 orphan-probe。"""
+
+    def setUp(self) -> None:
+        self.ps = run_root_unittests.parallel_shard
+        # 隔離冪等全域：Windows 上先前的 run_parallel 測試可能已真的採用過 job。
+        patcher = mock.patch.object(self.ps, "_kill_job_handle", None)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _adopt_as_win32(self, **dll_kwargs):
+        err = io.StringIO()
+        with mock.patch("sys.platform", "win32"), \
+                mock.patch("ctypes.WinDLL", create=True, **dll_kwargs), \
+                mock.patch("ctypes.get_last_error", create=True, return_value=5), \
+                contextlib.redirect_stderr(err):
+            return self.ps.adopt_kill_on_close_job(), err.getvalue()
+
+    @staticmethod
+    def _k32(fail: str | None = None) -> mock.Mock:
+        """假 kernel32：API 全回成功值；`fail` 指名者回 0（Win32 的失敗值）。"""
+        k32 = mock.Mock(**{
+            "CreateJobObjectW.return_value": 0x1234, "GetCurrentProcess.return_value": -1,
+            "SetInformationJobObject.return_value": 1, "AssignProcessToJobObject.return_value": 1,
+        })
+        if fail:
+            getattr(k32, fail).return_value = 0
+        return k32
+
+    def test_non_win32_is_a_silent_noop_returning_false(self) -> None:
+        for plat in ("darwin", "linux"):
+            with self.subTest(plat=plat):
+                err = io.StringIO()
+                with mock.patch("sys.platform", plat), \
+                        mock.patch("ctypes.WinDLL", create=True) as win_dll, \
+                        contextlib.redirect_stderr(err):
+                    self.assertIs(self.ps.adopt_kill_on_close_job(), False)
+                win_dll.assert_not_called()
+                self.assertEqual((err.getvalue(), self.ps._kill_job_handle), ("", None))
+
+    def test_run_parallel_adopts_exactly_once_before_any_worker_spawns(self) -> None:
+        events: list[str] = []
+        payload = {"testsRun": 1, "skipped": [], "errors": [], "failures": [],
+                   "unexpectedSuccesses": []}
+
+        def fake_popen(argv, **_kwargs):
+            events.append("popen")
+            out = {"communicate.return_value": (json.dumps(payload), "")}
+            return mock.Mock(returncode=0, **out)
+
+        with mock.patch.object(self.ps, "adopt_kill_on_close_job",
+                               side_effect=lambda: events.append("adopt") or False), \
+                mock.patch.object(self.ps, "worker_count", return_value=2), \
+                mock.patch.object(self.ps.subprocess, "Popen", side_effect=fake_popen):
+            self.ps.run_parallel(
+                unittest.TestSuite(), Path(__file__).resolve().parent, {"mod.a": 1, "mod.b": 1})
+        self.assertEqual(events, ["adopt", "popen", "popen"],
+                         "採用 Job 必須恰一次（不是每模組一次）且早於任何 worker 子行程")
+
+    def test_win32_builds_a_kill_on_close_job_and_adopts_self_once(self) -> None:
+        k32 = self._k32()
+        self.assertEqual(self._adopt_as_win32(return_value=k32), (True, ""))
+        calls = [c[0] for c in k32.method_calls if c[0] != "GetCurrentProcess"]
+        self.assertEqual(
+            calls, ["CreateJobObjectW", "SetInformationJobObject", "AssignProcessToJobObject"])
+        job, info_class, ref, size = k32.SetInformationJobObject.call_args.args
+        info = ref._obj  # byref() 包住的 JOBOBJECT_EXTENDED_LIMIT_INFORMATION 實例
+        self.assertEqual((job, info_class), (0x1234, 9), "9＝JobObjectExtendedLimitInformation")
+        self.assertEqual(info.BasicLimitInformation.LimitFlags, 0x2000, "KILL_ON_JOB_CLOSE")
+        k32.AssignProcessToJobObject.assert_called_once_with(0x1234, -1)  # -1＝GetCurrentProcess()
+        vp = ctypes.c_void_p  # HANDLE 在 x64 是 64 位：預設 restype／argtypes（c_int）會截斷
+        self.assertEqual((k32.CreateJobObjectW.restype, k32.GetCurrentProcess.restype), (vp, vp))
+        handles = [k32.SetInformationJobObject.argtypes[0], *k32.AssignProcessToJobObject.argtypes]
+        self.assertEqual(handles, [vp, vp, vp])
+        if sys.maxsize > 2**32:  # 型別層自檢＝MSDN 的 x64 佈局（32 位元直譯器不在支援面）
+            base = type(info.BasicLimitInformation)
+            self.assertEqual(
+                (size, type(info).IoInfo.offset, type(info).ProcessMemoryLimit.offset,
+                 base.LimitFlags.offset, base.Affinity.offset, base.SchedulingClass.offset),
+                (144, 64, 112, 16, 48, 60))
+        # 冪等：第二次回 True 不重建；handle 永不關（行程一死核心才替它關、子孫陪葬）
+        self.assertEqual(self._adopt_as_win32(return_value=k32), (True, ""))
+        self.assertEqual(k32.CreateJobObjectW.call_count, 1)
+        k32.CloseHandle.assert_not_called()
+        self.assertEqual(self.ps._kill_job_handle, 0x1234)
+
+    def test_win32_failures_are_fail_open_with_exactly_one_stderr_line(self) -> None:
+        for api in ("CreateJobObjectW", "SetInformationJobObject", "AssignProcessToJobObject"):
+            with self.subTest(api=api):
+                rc, err = self._adopt_as_win32(return_value=self._k32(fail=api))
+                self.assertIs(rc, False)
+                self.assertEqual(
+                    err, f"[parallel_shard] job-object adopt failed: {api} winerror=5\n")
+                self.assertIsNone(self.ps._kill_job_handle, "失敗不得留下『已採用』的半套狀態")
+        # kernel32 根本載不進來（例外）同樣 fail-open
+        self.assertEqual(self._adopt_as_win32(side_effect=OSError("no kernel32")),
+                         (False, "[parallel_shard] job-object adopt failed: no kernel32\n"))
+
+
 class _TopLevelDispatchFixtureA(unittest.TestCase):
     """DEF-200-274 第六輪：供 `DispatchGranularity*Test` 使用的頂層 fixture 類別。
     史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§103。"""
@@ -4627,13 +4648,8 @@ class _TopLevelDispatchFixtureSingleMethod(unittest.TestCase):
 
 
 class _TopLevelDispatchFixtureStaticmethodSetUpClass(unittest.TestCase):
-    """P0 邊界樣本：`setUpClass` 寫成 `@staticmethod`（而非 `unittest.TestCase`
-    預期的 `@classmethod`——stdlib 執行期不強制這件事，只要求 `cls.setUpClass()`
-    可被呼叫）。`cls.setUpClass` 解出的是一個**裸函式物件**，沒有 `.__func__`
-    （那是 bound method／classmethod 描述器才有的屬性），此前
-    `_class_has_only_base_fixtures()` 對它直接取 `.__func__` 會 `AttributeError`，
-    拖垮 `auto_method_level_candidates()` 整個候選評估迴圈。
-    """
+    """P0 邊界樣本：`setUpClass` 寫成 `@staticmethod`——`cls.setUpClass` 解出的是沒有 `.__func__`
+    的裸函式物件。"""
 
     @staticmethod
     def setUpClass() -> None:
@@ -4896,13 +4912,10 @@ class DispatchGranularityAutoMethodLevelCandidatesTest(unittest.TestCase):
 
     @staticmethod
     def _real_move_subset_fixture():
-        """天然樣本：`test_archive_defect_log.TestMoveSubsetSelectionIsNamed
-        AndTraceable`——7 支方法、無 `setUpClass`、每方法自帶獨立
-        `tempfile.TemporaryDirectory()` 沙箱（已於本輪落地前人工核實安全）。
-        `hints` 用真實磁碟活體快取記錄的 166.6s ＋ 20 個 filler 鍵湊出與
-        D0.3 實測相同的總量 `S=2381.0s`，讓 `worker_count=13`／`16` 兩個
-        交叉點兩側的 ratio 精確對齊設計稿算出的 0.91×／1.12×。
-        """
+        """天然樣本：`test_archive_defect_log` 的 `TestMoveSubsetSelectionIsNamedAndTraceable`——
+        7 支方法、無 `setUpClass`、每方法自帶獨立 `tempfile.TemporaryDirectory()` 沙箱。`hints` 用
+        真實活體快取記錄的 166.6s ＋ 20 個 filler 鍵湊出總量 `S=2381.0s`，讓 `worker_count=13`／`16`
+        兩個交叉點兩側的 ratio 精確對齊設計稿的 0.91×／1.12×。"""
         importlib.import_module("test_archive_defect_log")
         module = sys.modules["test_archive_defect_log"]
         cls = module.TestMoveSubsetSelectionIsNamedAndTraceable
@@ -4922,13 +4935,8 @@ class DispatchGranularityAutoMethodLevelCandidatesTest(unittest.TestCase):
             candidates, frozenset(), "覆寫 setUpClass 的類別永遠不該被拆成方法級")
 
     def test_staticmethod_setupclass_does_not_crash_and_is_excluded(self) -> None:
-        """P0：`setUpClass` 寫成 `@staticmethod` 時，`cls.setUpClass` 解出的裸
-        函式沒有 `.__func__`——修復前 `_class_has_only_base_fixtures()` 對它
-        直接取 `.__func__` 會 `AttributeError`，讓 `auto_method_level_
-        candidates()` 對這一個候選的評估以例外中止、拖垮整個候選迴圈（此前
-        無 try/except 兜底）。本測試釘住：例外不再外洩，且該類別因『視同覆寫
-        了 setUpClass』被 fail-closed 排除在候選之外。
-        """
+        """P0：`setUpClass` 寫成 `@staticmethod` 時裸函式沒有 `.__func__`——例外不得外洩而拖垮整個
+        候選迴圈，且該類別因『視同覆寫了 setUpClass』被 fail-closed 排除在候選之外。"""
         dg = self._dg()
         cls = _TopLevelDispatchFixtureStaticmethodSetUpClass
         tests = list(unittest.TestLoader().loadTestsFromTestCase(cls))
@@ -5070,11 +5078,8 @@ class DispatchGranularityAutoSuiteDispatchUnitsTest(unittest.TestCase):
 
 
 class DispatchImbalanceDetectionTest(unittest.TestCase):
-    """DEF-200-274 第七輪：`tools/lib/dispatch_imbalance.py` 純函式的紅綠自證
-    （掌舵者要求「自動偵測未來新熱點，不再只能靠人眼」）。純函式邏輯測完後，
-    再驗 `report_dispatch_imbalance()` 的印出接線本身（見下方
-    `ReportDispatchImbalanceTest`）。
-    """
+    """DEF-200-274：`dispatch_imbalance.py` 純函式的紅綠自證（自動偵測新熱點，不再靠人眼）；
+    印出接線本身見下方 `ReportDispatchImbalanceTest`。"""
 
     def test_balanced_timings_flag_nothing(self) -> None:
         dispatch_imbalance = run_root_unittests.dispatch_imbalance
@@ -5114,13 +5119,8 @@ class DispatchImbalanceDetectionTest(unittest.TestCase):
         self.assertEqual(dispatch_imbalance.detect_imbalance(timings, worker_count=-1), [])
 
     def test_fewer_units_than_workers_and_balanced_flags_nothing(self) -> None:
-        """第七輪四方獨立複審（Architect/SA/SD/QA）共同點名並經 QA 合成場景證實
-        的真缺陷：派工單位數 < worker_count 時，若分母誤用未經 cap 的名目
-        `worker_count`，即使所有單位耗時完全相同也會被全數誤判為不均（QA 實測：
-        3 個耗時皆 20.0 的單位、worker_count=8 時倍率恆 2.67、全部 3 個都被標記）。
-        本測試釘住修復後的正確行為：`min(worker_count, len(module_timings))`
-        當分母，完全均衡的資料在任何 worker_count 下都不該被標記。
-        """
+        """派工單位數 < worker_count 時分母須用 `min(worker_count, len(module_timings))`：完全均衡的
+        資料（QA 合成：3 個耗時皆 20.0、worker_count=8）在任何 worker_count 下都不該被標記。"""
         dispatch_imbalance = run_root_unittests.dispatch_imbalance
         timings = {"a": 20.0, "b": 20.0, "c": 20.0}
         for worker_count in (2, 3, 4, 8, 50):
