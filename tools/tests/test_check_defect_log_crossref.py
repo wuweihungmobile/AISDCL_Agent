@@ -2441,10 +2441,9 @@ class TestResidualTodoAndSupersessionNotesHaveTeeth(unittest.TestCase):
 class TestUnresolvedInventoryHasASingleMeasurementEntry(unittest.TestCase):
     """🔴 R74 PKG-2：未結存量的唯一量測入口 ＋ 列數棘輪。
 
-    立案理由：同一個問題「未結存量是多少」曾同時有三個互斥答案，而工作樹與上一輪收輪
-    commit 完全相同 ⇒ 差異全部出自量測法不一致。三條臨時路徑其實各自回答不同問題
-    （人工點數／`--plan` 的「不可搬」筆數〔六項判準聯集〕／逐列 `_classify`），只有最後
-    一個才是未結列數。本類鎖住「入口只有一個、且它有上限」。
+    立案理由：「未結存量是多少」曾同時有三個互斥答案（人工點數／`--plan` 不可搬筆數／逐列
+    `_classify`）而樹與上一輪收輪 commit 相同 ⇒ 差異全出自量測法；只有最後一個才是未結列數。
+    本類鎖住「入口只有一個、且它有上限」（原四行史料逐字見 R213 證據檔附錄 E-3）。
     """
 
     def test_unresolved_ids_counts_exactly_the_unresolved_classes(self) -> None:
@@ -2485,7 +2484,7 @@ class TestUnresolvedInventoryHasASingleMeasurementEntry(unittest.TestCase):
                          len(m._ledger_index.unresolved_ids(padded)))
 
     def test_the_cli_entry_point_exists_and_prints_the_ids(self) -> None:
-        """只印一個數字的載具無法被複驗（下一個人只能相信它）⇒ 必須連 ID 一起印。"""
+        """只印數字無法複驗 ⇒ 連 ID 一起印；ID 數＝未結列數（0 列就是 0 個，不是「至少一個」）。"""
         r = subprocess.run(
             [sys.executable, str(Path(m.__file__)), "--unresolved-count"],
             capture_output=True, text=True, encoding="utf-8",
@@ -2493,7 +2492,8 @@ class TestUnresolvedInventoryHasASingleMeasurementEntry(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr[-2000:])
         self.assertIn("未結列數＝", r.stdout)
         self.assertIn("未結列 ID：", r.stdout)
-        self.assertRegex(r.stdout, r"DEF-\d+-\d+")
+        n = int(re.search(r"未結列數＝(\d+)／", r.stdout).group(1))
+        self.assertEqual(len(re.findall(r"DEF-\d+-\d+", r.stdout.partition("未結列 ID：")[2])), n)
         self.assertIn("--unresolved-count", m._USAGE)
 
     def test_main_actually_enforces_the_ceiling(self) -> None:

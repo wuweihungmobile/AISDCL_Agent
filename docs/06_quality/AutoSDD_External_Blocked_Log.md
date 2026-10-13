@@ -35,13 +35,16 @@
 
 | DEF-ID | 具名阻塞源 | 阻塞起始日 | 解鎖條件（可機械查） | 最近複查日 |
 |---|---|---|---|---|
-| DEF-200-253 | Windows 實機 | 2026-10-09 | Windows 機、Docker 停、巢狀 Claude Code session 內跑 `python AutoClaude/tools/local_ci_gate.py`，取其 `[skip census] AutoClaude/tests@win32+nopg+nested` 六格實測值，同 commit 重釘 `tools/lib/skip_group_policy.py` 的 `_RUNTIME_SKIP_CEILING` 與 `_RUNTIME_SKIP_CEILING_MAX` 同鍵（含 skip_id_ledger.json M6 共變）；重釘後 `python tools/run_root_unittests.py` 綠即移出本表（2026-10-09 複查：mac 不可查，條件原樣；`local_ci_gate.py`／`_RUNTIME_SKIP_CEILING(_MAX)` 仍在，現鍵＝`AutoClaude/tests@win32+nopg+nested+pgext`（條件所寫鍵名略去 `+pgext`）） | 2026-10-09 |
 
 ## 複查記錄
 
 > 「最近複查日」欄僅存放純 ISO 日期；完整複查敘事（機械取證細節）逐字搬遷至本節，
 > 依 DEF-ID 分節保全，不刪減任何已驗證內容，僅搬遷位置。
 
+
+### DEF-200-253（複查 2026-10-14＝解鎖條件改寫達成：`+nested` 由 `CLAUDECODE=1` 指定、雲端 windows-latest 量測＋釘值＋收緊後再 dispatch 仍綠，列已移出本表）
+
+複查（R213 第三窗）：條件逐條——「Windows 機」＝雲端 windows-latest（真 Windows OS 執行者）；「Docker 停」＝runner 無 PG 可連＝`+nopg`；「巢狀 Claude Code session」＝**改寫**為 `CLAUDECODE=1`（全樹 runtime 唯一讀它的是產生剖面鍵的 `AutoClaude/tools/local_ci_gate.py:326`；`skip_group_policy.py` 自述 `+nested` 在今日 AutoClaude/tests 鑑別力為 0 ⇒ 量值＝真巢狀 session 的值；不 re-key，主控裁決 D4）；「取六格」＝windows-compat-ci nightly-full 步驟 #9（census 腿：`pip install -e '.[dev,lint,postgres,pgvector]'`＋`CLAUDECODE=1` 直呼 `local_ci_gate.py`）dispatch run 38440002419（commit 4ce2d1ff）逐字 `[skip census] AutoClaude/tests@win32+nopg+nested+pgext 共 107 支：platform=5／tool-absence=0／env-disabled=5／structural-pair=1／debt=0／untagged=96／欠債型 101 支（目標 0）`（鍵含 `+pgext`，舊條件寫法略去一軸）；「同 commit 重釘兩表同鍵＋M6 共變」＝commit 7fd45b8a（17／0／1／0／0／118→5／0／5／1／0／96；env-disabled 1→5＝untagged→env-disabled 補標籤位移、非 skip 變多；`tools/tests/test_skip_ceiling_ratchet_direction.py` 凍結快照同步＋行尾具名理由；`skip_id_ledger.json` 同 push 範圍 touch；**首次超線＝重釘，不是回歸**）；「重釘後 `run_root_unittests.py` 綠」＝commit 前根層全套 rc=0＋pre-push 全 leg rc=0。**牙**：舊天花板未判突破的原因＝`skip_group_census_problems` 的 `retag_budget` 借用（untagged 118−96=22 可被其他群借用，總量 107≤136），釘值後 budget=0、總量上限 107、任一格 +1 即紅（從雲端 log 重建 `-rs` 區塊餵 `census_verdict`：原文 rc=0、六群各 +1 皆 rc=1）；雲端腿自 commit 4ce2d1ff 起天花板突破即 throw（ARCH-01），釘值後再 dispatch run 38450031413（commit 7fd45b8a）步驟 #9 仍 success＝收緊後仍綠。殘留（誠實）＝開發機巢狀 pre-push 由 `local_ci_gate.py` 在 nested＋pgext 下以同鍵阻斷，開發機 skip 若高於雲端值即超線（首次超線＝重釘）；掌舵者實機未跑。本表筆數 1→0。
 
 ### DEF-101-693（複查 2026-10-14＝解鎖條件改寫達成：雲端 windows-latest＝真 Windows 作業系統執行者，列已移出本表）
 
