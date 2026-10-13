@@ -1263,11 +1263,15 @@ def test_retagging_is_not_punished_by_the_group_ceiling() -> None:
     等於它其實只接受一種改善方式（skip 憑空消失），而那正是本 repo 記過的
     「看起來變乾淨」那一種。
 
-    這裡的 census：118 支 untagged 全部補上 `[ENV-DISABLED]` 標籤，總量一支沒變。
+    這裡的 census：天花板上的 untagged 全部補上 `[ENV-DISABLED]` 標籤，總量一支沒變。
+    搬動的支數讀天花板自己的值（DEF-200-253 重釘前這格是 118、重釘後是 96）：寫死數字的版本
+    會在每一次合法重釘時假紅，而本支要守的是「補標籤不被罰」這個性質、不是某個數字。
     """
     retagged = _base_census()
+    moved = retagged[P.SKIP_GROUP_UNTAGGED]
+    assert moved > 0, "untagged 天花板已歸零、沒有可搬的額度——請改寫本支的注入基底"
     retagged[P.SKIP_GROUP_UNTAGGED] = 0
-    retagged[P.SKIP_GROUP_ENV_DISABLED] += 118
+    retagged[P.SKIP_GROUP_ENV_DISABLED] += moved
     assert sum(retagged.values()) == sum(_base_census().values())  # 總量真的沒變
     assert P.skip_group_census_problems(_PROF, retagged) == []
 
@@ -1621,11 +1625,13 @@ def test_ci_platform_coverage_is_accounted_for() -> None:
     豁免表另有 shrink-only 上限，加一個「跑得到卻沒人量」的平台必須顯式上修常數。
     """
     assert P.ci_platform_coverage_problems() == []
-    # DEF-101-960（linux 半邊）：linux 已量到並入表而畢業（完整性由
-    # `test_the_linux_ci_runner_graduated_with_a_container_measurement` 釘住）；剩下的缺口
-    # 是 win32 那棵 SDD 樹——它仍是**被登記**的，不是被消滅的
+    # DEF-101-960 兩半皆已畢業：linux（Docker 容器量到，完整性由
+    # `test_the_linux_ci_runner_graduated_with_a_container_measurement` 釘住）與 win32 那棵 SDD 樹
+    # （雲端 windows-smoke 量到，完整性由 `test_the_third_tree_is_inside_the_skip_governance_frame`
+    # 釘住）。刻意只斷言這兩個平台**不在**表裡、不斷言整張表為空：把缺口清空與誠實登記一個新缺口
+    # 都不得有代價（同 darwin 畢業那一支的同一條理由）
     assert "linux" not in P._UNMEASURED_CI_PLATFORMS
-    assert "win32" in P._UNMEASURED_CI_PLATFORMS
+    assert "win32" not in P._UNMEASURED_CI_PLATFORMS
 
 
 def test_ci_platform_coverage_is_red_when_a_platform_is_neither_measured_nor_named(
@@ -1814,8 +1820,10 @@ def test_the_darwin_runner_graduated_and_every_remaining_gap_still_has_a_recipe(
         assert any(darwin in b for b in _recipeless_exemptions()), _recipeless_exemptions()
 
 
-def test_the_third_tree_is_inside_the_skip_governance_frame() -> None:
-    """🔴 R82（SDD-01）：`AISDLC_SDD` 那一棵樹必須在分母裡。
+def test_the_third_tree_is_inside_the_skip_governance_frame(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """🔴 R82（SDD-01）立案、DEF-101-960 畢業：`AISDLC_SDD` 那一棵樹必須在分母裡，三個剖面皆有牙。
 
     WHY：本 repo 有三棵測試樹，而 skip 治理此前只看兩棵——`AISDLC_SDD/scripts/ci-gate.sh`
     全檔對 census 零命中，`_FULL_SUITE_RUNNERS` 五個鍵沒有一個屬於它。實測那棵樹的
@@ -1824,18 +1832,113 @@ def test_the_third_tree_is_inside_the_skip_governance_frame() -> None:
     可以無聲從 6 長到 60 而所有閘門全綠（R79 立這道棘輪時寫的原話，只是當時沒有人把
     第三棵樹算進來）。
 
-    誠實劃界：win32 剖面的值還沒量到（待 windows-smoke 實跑印出）——所以它仍是具名豁免而不是
-    已量測；census 閘門已接（DEF-101-960：`ci-gate.sh` 呼叫 `tools/lib/pytest_skip_census.py`），
-    豁免理由必須寫出這條接法。darwin 剖面已量到入表（兩張天花板表＋分母），不在豁免表。
+    🔴 為什麼要改寫（誠實劃界）：本支原版斷言 win32 剖面**在** `_UNMEASURED_RUNNER_PROFILES` 裡
+    （值待 windows-smoke 實跑印出）——那是**狀態**而非性質，量到了就必然為假（同
+    `test_the_darwin_runner_graduated_and_every_remaining_gap_still_has_a_recipe` 的改寫理由）。
+    census 閘門已接（DEF-101-960：`ci-gate.sh` 呼叫 `tools/lib/pytest_skip_census.py`），darwin／
+    win32／linux 三個執行者剖面皆已由雲端 run 量到並入兩張天花板表；逐格值與「任一格 +1 即紅」由
+    `test_pinned_profiles_graduated_with_teeth` 釘住。故本支改守「畢業是完整的、且被棘輪扣住」：
+      ① 三鍵都在分母、兩張天花板表都有、且已從豁免表移除（留著就是把有人守的寫成沒人守）；
+      ② 退步（拔表、半套拔 MAX、退回豁免表）必須當場被涵蓋帳抓到，不靠兩個下限常數被人記得改；
+      ③ darwin 的 `platform` 4 支（`[WINDOWS-NATIVE-ONLY]`）由已量測的 `@win32` 承接：互補宣告在、
+         目標報告不再有互補缺口行；拔掉宣告缺口行必須回來。
     """
-    key = "AISDLC_SDD/fsm_runtime@win32"
-    assert key in P._FULL_SUITE_RUNNERS, (
-        "第三棵樹又從分母裡消失了——它消失的時候不會有任何紅燈，那正是本支存在的理由"
-    )
-    assert key in P._UNMEASURED_RUNNER_PROFILES
-    exempt = P._UNMEASURED_RUNNER_PROFILES[key]
-    assert "ci-gate.sh" in exempt, f"豁免理由沒寫出該改哪一支閘門：{exempt!r}"
-    assert "pytest_skip_census" in exempt, f"豁免理由沒寫出接法：{exempt!r}"
+    win32, darwin, linux = (f"AISDLC_SDD/fsm_runtime@{p}" for p in ("win32", "darwin", "linux"))
+    # ① 畢業完整性
+    for key in (win32, darwin, linux):
+        assert key in P._FULL_SUITE_RUNNERS, (
+            f"第三棵樹的 {key} 又從分母裡消失了——它消失的時候不會有任何紅燈，那正是本支存在的理由"
+        )
+        assert key in P._RUNTIME_SKIP_CEILING, f"{key} 沒有基線天花板"
+        assert key in P._RUNTIME_SKIP_CEILING_MAX, f"{key} 只進了基線表、沒進 MAX 表"
+        assert P.profile_registered(key)
+        assert key not in P._UNMEASURED_RUNNER_PROFILES, (
+            f"{key} 已經量到天花板了，卻還掛在未量測豁免表裡——把有人守的寫成沒人守"
+        )
+    # ② 紅向自證：三種退步各自必須被涵蓋帳點名
+    with monkeypatch.context() as mp:  # 兩表都拔（＝退回 advisory）
+        mp.delitem(P._RUNTIME_SKIP_CEILING, win32)
+        mp.delitem(P._RUNTIME_SKIP_CEILING_MAX, win32)
+        assert not P.profile_registered(win32)
+        assert any(win32 in prob for prob in P.ci_platform_coverage_problems())
+    with monkeypatch.context() as mp:  # 只拔 MAX（最像沒事的半套降級）
+        mp.delitem(P._RUNTIME_SKIP_CEILING_MAX, linux)
+        assert any(linux in prob for prob in P.ci_platform_coverage_problems())
+    with monkeypatch.context() as mp:  # 已登記卻又掛回豁免表（第④向反向假事實）
+        mp.setitem(P._UNMEASURED_RUNNER_PROFILES, darwin,
+                   "取得＝ci-gate.sh 接 pytest_skip_census.py。DEF-101-960")
+        assert any(darwin in prob for prob in P.ci_platform_coverage_problems())
+    # ③ darwin 的互補承接者已量測 ⇒ 目標報告不再有互補缺口行；拔掉宣告缺口行必須回來
+    assert P.complementary_profiles(darwin) == (win32,)
+    census = dict(P._RUNTIME_SKIP_CEILING[darwin])
+    assert not any("互補剖面" in ln for ln in P.skip_target_report(darwin, census))
+    with monkeypatch.context() as mp:
+        mp.delitem(P._COMPLEMENTARY_PROFILE, darwin)
+        assert any("互補剖面" in ln for ln in P.skip_target_report(darwin, census))
+
+
+#: 釘值的第二個家：各剖面**被量到的那一行**逐字照抄（零加減）。政策檔裡的數字若被悄悄改大，這裡的
+#: 原文讓它當場轉紅；原文自洽（共 N 支＝六格之和、欠債型＝`open_debt`）由 `_parse_census_line` 當場
+#: 驗，防止照抄時漏格。座標：
+#:   · SDD win32：workflow_dispatch run 38440002419（commit 4ce2d1ff）的 windows-smoke job，
+#:     步驟「執行（非僅解析）ci-gate.ps1」；該步驟 env 帶 `PYTEST_ADDOPTS -k` 排除兩支 docker 測試
+#:   · SDD linux：push run 38439940761（aisdlc-sdd-ci，ubuntu-latest）
+#:   · SDD darwin：push run 38439940836（macos-compat-ci，macos-latest），與真 launchd nightly 同值
+#:   · AutoClaude win32 nested：同一 dispatch run 的 windows-nightly-full census 腿
+#:     （`CLAUDECODE=1`＝`+nested`）
+#:   · AutoClaude darwin+pg+solo：真 launchd nightly（本機 `logs/` 被 .gitignore，座標只作佐證）
+_PINNED_CENSUS_LINES = (
+    "[skip census] AISDLC_SDD/fsm_runtime@win32 共 12 支：platform=2／tool-absence=0／"
+    "env-disabled=4／structural-pair=0／debt=0／untagged=6／欠債型 10 支（目標 0）",
+    "[skip census] AISDLC_SDD/fsm_runtime@linux 共 8 支：platform=4／tool-absence=0／"
+    "env-disabled=4／structural-pair=0／debt=0／untagged=0／欠債型 4 支（目標 0）",
+    "[skip census] AISDLC_SDD/fsm_runtime@darwin 共 11 支：platform=4／tool-absence=0／"
+    "env-disabled=4／structural-pair=0／debt=0／untagged=3／欠債型 7 支（目標 0）",
+    "[skip census] AutoClaude/tests@win32+nopg+nested+pgext 共 107 支：platform=5／"
+    "tool-absence=0／env-disabled=5／structural-pair=1／debt=0／untagged=96／"
+    "欠債型 101 支（目標 0）",
+    "[skip census] AutoClaude/tests@darwin+pg+solo+pgext 共 57 支：platform=53／"
+    "tool-absence=0／env-disabled=2／structural-pair=1／debt=0／untagged=1／欠債型 3 支（目標 0）",
+)
+_CENSUS_LINE_RE = re.compile(
+    r"^\[skip census\] (?P<key>\S+) 共 (?P<n>\d+) 支：(?P<cells>.+?)／欠債型 (?P<debt>\d+) 支")
+
+
+def _parse_census_line(line: str) -> tuple[str, dict[str, int]]:
+    """純函式：`[skip census]` 整行 → `(剖面鍵, 六格)`；原文自己對不上（漏格、和不符）當場紅。"""
+    m = _CENSUS_LINE_RE.match(line)
+    assert m, f"不是 census 整行：{line!r}"
+    cells = {g: int(n) for g, n in (c.split("=") for c in m["cells"].split("／"))}
+    assert list(cells) == list(P.SKIP_GROUPS), f"六群順序／數量不符：{list(cells)}"
+    assert sum(cells.values()) == int(m["n"]), "「共 N 支」≠ 六格之和＝照抄時漏了或寫錯一格"
+    assert P.open_debt(cells) == int(m["debt"]), "「欠債型 N 支」≠ open_debt(六格)"
+    return m["key"], cells
+
+
+@pytest.mark.parametrize("line", _PINNED_CENSUS_LINES, ids=lambda s: s.split()[2])
+def test_pinned_profiles_graduated_with_teeth(line: str) -> None:
+    """🔴 DEF-101-960／DEF-200-253／DEF-200-075：新釘的剖面必須是**有牙**的，而不只是「有一格」。
+
+    WHY（Rule 9）：方向鎖（`_FROZEN_CEILING_MAX`）只管**既有**鍵、不管首次登記給多少，所以首次
+    登記的數字今天沒有任何東西釘它——有人把 `AISDLC_SDD/fsm_runtime@win32` 的 untagged 6 悄悄改成
+    60，整套測試仍綠，而那正是 S3 要防的「skip 可以無聲長大」。本支把**被量到的原文**當第二個家：
+      ① 值逐格＝原文（不是照政策檔反推）、MAX 表＝基線表（新登記不留餘裕）；
+      ② 剛好在天花板上＝零問題；任一群多 1 支＝有問題——重釘後本鍵 untagged 實測＝天花板，補標籤
+         額度為 0，所以任何一格 +1 都咬得到（`win32+nopg+nested+pgext` 重釘前 untagged 118 對實測
+         96，22 支額度可借給他群，同一個 +1 咬不到）；
+      ③ 畢業是完整的：在兩張表裡、`profile_registered`、不在豁免表。
+    """
+    key, cells = _parse_census_line(line)
+    assert P._RUNTIME_SKIP_CEILING.get(key) == cells, f"{key} 基線表與雲端／nightly 原文不符"
+    assert P._RUNTIME_SKIP_CEILING_MAX.get(key) == cells, f"{key} MAX 表與原文不符或留了餘裕"
+    assert P.profile_registered(key)
+    assert key not in P._UNMEASURED_RUNNER_PROFILES
+    assert P.skip_group_census_problems(key, cells) == [], "恰在天花板上必須零問題"
+    for group in P.SKIP_GROUPS:
+        worse = dict(cells)
+        worse[group] += 1
+        assert P.skip_group_census_problems(key, worse), (
+            f"{key}／{group} 多 1 支竟未被判紅 ⇒ 這一格沒有牙（天花板留了可借的餘裕）")
 
 
 def test_profile_key_encodes_the_nested_session_dimension(

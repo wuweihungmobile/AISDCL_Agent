@@ -35,8 +35,6 @@
 
 | DEF-ID | 具名阻塞源 | 阻塞起始日 | 解鎖條件（可機械查） | 最近複查日 |
 |---|---|---|---|---|
-| DEF-101-693 | Windows 實機 | 2026-08-21 | 下一個 Windows 真機輪逐列覆核 windows-compat-ci.yml 的 windows-smoke job 全部步驟（2026-10-09 現查 27 步；`tools/tests/test_smoke_ci_sync.py::test_registered_smoke_groups_exist_in_that_script` 先行，另需真機執行紀錄）（2026-10-09 複查：mac 不可查；先行測試仍在 test_smoke_ci_sync.py:863；原條件寫「22 步」已對不上步數，改寫為「全部步驟」）（2026-10-13 複查：雲端 windows-compat-ci push run 38265136704（9010feae）Windows smoke job＝31 步、30 success／1 skipped／0 failed〔SA 鏡 `gh run view` 現查〕；步驟級證據已有，仍欠真機執行紀錄） | 2026-10-09 |
-| DEF-200-313 | Windows 實機 | 2026-09-15 | 回 Windows 真機、人在互動終端機：`python tools/run_root_unittests.py` 跑到一半按 Ctrl-C，再以 `Get-CimInstance Win32_Process` 過濾 CommandLine 含 `run_root_unittests` 或 `unittest` 者須為空；結果寫進 `CrossPlatform_DEF200274_Parallel_Tests_Evidence.md`〈第十一輪〉③ 後移出本表（2026-10-09 複查：mac 不可查，條件原樣；引用的 `tools/run_root_unittests.py` 與 `CrossPlatform_DEF200274_Parallel_Tests_Evidence.md`〈第十一輪〉③ 仍在） | 2026-10-09 |
 | DEF-200-253 | Windows 實機 | 2026-10-09 | Windows 機、Docker 停、巢狀 Claude Code session 內跑 `python AutoClaude/tools/local_ci_gate.py`，取其 `[skip census] AutoClaude/tests@win32+nopg+nested` 六格實測值，同 commit 重釘 `tools/lib/skip_group_policy.py` 的 `_RUNTIME_SKIP_CEILING` 與 `_RUNTIME_SKIP_CEILING_MAX` 同鍵（含 skip_id_ledger.json M6 共變）；重釘後 `python tools/run_root_unittests.py` 綠即移出本表（2026-10-09 複查：mac 不可查，條件原樣；`local_ci_gate.py`／`_RUNTIME_SKIP_CEILING(_MAX)` 仍在，現鍵＝`AutoClaude/tests@win32+nopg+nested+pgext`（條件所寫鍵名略去 `+pgext`）） | 2026-10-09 |
 
 ## 複查記錄
@@ -44,6 +42,28 @@
 > 「最近複查日」欄僅存放純 ISO 日期；完整複查敘事（機械取證細節）逐字搬遷至本節，
 > 依 DEF-ID 分節保全，不刪減任何已驗證內容，僅搬遷位置。
 
+
+### DEF-101-693（複查 2026-10-14＝解鎖條件改寫達成：雲端 windows-latest＝真 Windows 作業系統執行者，列已移出本表）
+
+複查（R213 第三窗）：條件三條逐條——「逐列覆核 windows-smoke 全部步驟」＝**滿足**：windows-compat-ci dispatch run 38440002419（commit 4ce2d1ff）
+Windows smoke job 31 步全 success（`gh run view 38440002419 --json jobs` job＋step 層為憑）；「先行測試 `test_registered_smoke_groups_exist_in_that_script`」＝
+**滿足**（commit 前根層全套 rc=0 含之）；「另需真機執行紀錄」＝**改寫**為「真 Windows 作業系統執行者上 `tools/windows_smoke_local.ps1` 自身實跑」：
+同 run nightly-full 步驟 #12（`powershell.exe -NoProfile -ExecutionPolicy Bypass -File`，PS 5.1）success，逐字 `smoke-local: rc=0`、
+`smoke-local: PASS=13 FAIL=0 (the script's own floor MinPass=13)`（此前 CI 從未執行過該腳本本身：workflow 內該檔名只在註解）；前一筆實體機紀錄＝
+R114（2026-08-31）PASS=12 FAIL=0，故「不是實體機紀錄」只指本次。殘留（誠實）＝掌舵者機器專屬的 cp950 主控台／Defender／schtasks 帳號特異性，
+不由雲端覆蓋；`AutoClaude_WindowsSmoke` 每日排程維持（退場判準 E1 現不成立）；列入 R213 證據檔〈十一-4〉(c) 該機專屬待驗清單。本表筆數 3→2。
+
+### DEF-200-313（複查 2026-10-14＝機制改寫達成：win32 Job Object＋雲端硬殺探針，列已移出本表）
+
+複查（R213 第三窗）：原條件「人在互動終端機 Ctrl-C＋`Get-CimInstance` 過濾 CommandLine 含 `run_root_unittests`／`unittest` 者須為空」＝**改寫**：
+①機制＝`tools/lib/parallel_shard.py::adopt_kill_on_close_job()`（win32 Job Object `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`，`run_parallel` 入口恰呼叫一次、
+handle 永不關、非 win32 回 False、失敗 fail-open 印一行）＝父行程**任何**死法子孫必死（比 Ctrl-C 更苛刻：`Stop-Process -Force` 連 KeyboardInterrupt
+清理路徑都不跑）；②驗證＝windows-compat-ci dispatch run 38440002419 nightly-full 步驟 #10 逐字 `orphan-probe control survivors=1`（不 adopt 的正控組，
+證明探針有鑑別力）、`orphan-probe adopted survivors=0 adopt=True`、`orphan-probe PASS`；同 run windows-smoke 的根層全套（`AUTOSDD_PARALLEL_TESTS=1`
+真跑 `run_parallel`）log 內 `job-object adopt failed` 0 命中＝hosted runner 允許巢狀 Job Object；③原 CommandLine 濾網對分片子行程
+（`<python> …/parallel_shard.py <start_dir> <module>`）近乎空洞＝人工檢查多半假通過，不沿用；④`CrossPlatform_DEF200274_Parallel_Tests_Evidence.md`
+〈第十一輪〉③「`Stop-Process` 不可替代 Ctrl-C」判定逐字保留為史料並於同列追註「由 Job Object 改變問題形態」。殘留（誠實）＝真互動 Ctrl-C 的
+CTRL_C_EVENT 傳遞本身未驗（Job Object 使其不再承重）；採用成功無痕跡、只覆蓋並行路徑（ARCH-07）；掌舵者實機未跑。本表筆數 2→1。
 
 ### DEF-101-856（複查 2026-10-14＝依原解鎖條件括號內第二出口「由 PM 顯式廢止並在帳本留紀錄」，列已移出本表）
 

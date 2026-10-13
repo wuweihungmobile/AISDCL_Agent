@@ -44,7 +44,6 @@
 
 | DEF-ID | 具名阻塞源 | 阻塞起始日 | 解鎖條件（可機械查） | 最近複查日 |
 |---|---|---|---|---|
-| DEF-101-960 | 結構性長債-SDD樹win32-skip剖面未接census | 2026-08-30 | ①（任何平台可做）`AISDLC_SDD/scripts/ci-gate.sh`／`.ps1` 把 SDD fsm_runtime 的 pytest `-rs` 輸出接進 census（現況：全 repo 只有 `AutoClaude/tools/local_ci_gate.py` 與 `tools/run_root_unittests.py` 會印 `[skip census]`，`ci-gate.sh:215-220` tee 後只取通過數；DEV-K 2026-10-13 現查三份 Windows CI log 零命中）；②Windows 執行者（實體機或 `windows-compat-ci`）跑出 `[skip census] AISDLC_SDD/fsm_runtime@win32` 六格；③同 commit 逐格照抄進 `_RUNTIME_SKIP_CEILING`／`_RUNTIME_SKIP_CEILING_MAX` 並自 `_UNMEASURED_RUNNER_PROFILES` 刪該鍵（`python tools/lib/skip_group_policy.py` 現查）。linux 半邊（`AutoClaude/tests@linux+nopg+solo+nopgext`）已於 2026-10-13 以 Docker 容器量到並登記（R213 證據檔〈十-3〉DEV-H）。 | 2026-10-13 |
 
 ## 登記備注
 
@@ -62,6 +61,20 @@
 ## 複查記錄
 
 > 「最近複查日」欄僅存放純 ISO 日期；解鎖條件達成而移出本表的列，其複查敘事逐字搬遷至本節（體例同外部阻塞軌）。
+
+### DEF-101-960（複查 2026-10-14＝解鎖條件三步達成，列已移出本表）
+
+複查（R213 第三窗）：①「`ci-gate.sh`／`.ps1` 接 census」＝`AISDLC_SDD/scripts/ci-gate.sh` LATEST 軌 pytest `-rs` 落檔後呼叫新入口
+`tools/lib/pytest_skip_census.py --tree AISDLC_SDD/fsm_runtime <log>`（只組裝 `skip_group_policy` 既有純函式；rc 0 健康／1 真問題／3 剖面未登記／2 接線錯；
+主控裁決 D5：本機（無 `CI`／`GITHUB_ACTIONS`）只出聲不阻斷、雲端才擋，因 docker 可用性是疑似軸、尚未編碼進剖面鍵）；**`.ps1` 不接＝改寫**：它是 fallback，
+Windows CI 一律經 Git Bash 委派 `ci-gate.sh`（`ci-gate.ps1` 內兩行註解說明）。②「Windows 執行者跑出六格」＝windows-compat-ci dispatch run 38440002419
+（commit 4ce2d1ff）windows-smoke 的 ci-gate.ps1 步驟逐字 `[skip census] AISDLC_SDD/fsm_runtime@win32 共 12 支：platform=2／tool-absence=0／env-disabled=4／
+structural-pair=0／debt=0／untagged=6／欠債型 10 支（目標 0）`（provenance 帶該 job 的 `PYTEST_ADDOPTS -k` deselect 兩支 docker 測試）；同次 push 另得
+`@linux 共 8 支：platform=4／tool-absence=0／env-disabled=4／structural-pair=0／debt=0／untagged=0`（aisdlc-sdd-ci run 38439940761）與 `@darwin 共 11 支：
+…untagged=3`（macos-compat-ci run 38439940836；＝本機與真 launchd nightly 值）。③「逐格入兩表並刪 `_UNMEASURED_RUNNER_PROFILES` 該鍵」＝commit B
+（P-PIN-2：三剖面入 `_RUNTIME_SKIP_CEILING`／`_MAX`、`_FULL_SUITE_RUNNERS` 加 win32／linux 列、兩個下限同步升、豁免表清空、`test_local_ci_gate.py` :1628／:1817
+畢業版、`_COMPLEMENTARY_PROFILE` darwin→win32 承接；根層全套 rc=0 後 commit）。殘留（誠實）＝docker 軸未編碼（開發機 docker 可達時 darwin untagged 預期 0、
+不可達時 3，天花板取後者；win32 值取自 CI 的 `-k` deselect 環境，開發機可能高於它、本機不擋）。本表筆數 1→0。
 
 ### DEF-200-075（複查 2026-10-14＝解鎖條件路徑①達成，列已移出本表）
 

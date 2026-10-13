@@ -45,12 +45,12 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 #: 「有人在放寬」的可見痕跡。
 _FROZEN_CEILING_MAX: dict[str, dict[str, int]] = {
     "AutoClaude/tests@win32+nopg+nested": {
-        S.SKIP_GROUP_PLATFORM: 17,
+        S.SKIP_GROUP_PLATFORM: 5,  # 下修 17→5：與 win32+pg+nested 同一變化，見 policy 主表同鍵段
         S.SKIP_GROUP_TOOL_ABSENCE: 0,
-        S.SKIP_GROUP_ENV_DISABLED: 1,
-        S.SKIP_GROUP_STRUCTURAL: 0,
+        S.SKIP_GROUP_ENV_DISABLED: 5,  # 上修 1→5（DEF-200-253）：untagged→env-disabled 補標籤位移
+        S.SKIP_GROUP_STRUCTURAL: 1,  # 上修 0→1（DEF-200-253）：同上，pgvector absent 互斥對補標
         S.SKIP_GROUP_DEBT: 0,
-        S.SKIP_GROUP_UNTAGGED: 118,
+        S.SKIP_GROUP_UNTAGGED: 96,  # 下修 118→96（雲端首量；DEF-200-253，見 policy 主表同鍵段）
     },
     "AutoClaude/tests@win32+pg+nested": {
         S.SKIP_GROUP_PLATFORM: 5,
