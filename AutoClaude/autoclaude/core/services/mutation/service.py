@@ -9,19 +9,17 @@
 """
 from __future__ import annotations
 
-from typing import Optional
-
 from ....models.playbook import Playbook
 from ....models.step_mutation import StepMutation, StepMutationType
 from ...hookspec import IMutationStrategy
-from .revise_current import ReviseCurrentStrategy
+from .conditional import ConditionalStrategy
+from .delete_step import DeleteStepStrategy
+from .goto_step import GotoStepStrategy
 from .inject_after import InjectAfterStrategy
 from .inject_before import InjectBeforeStrategy
-from .goto_step import GotoStepStrategy
-from .skip_to import SkipToStrategy
-from .delete_step import DeleteStepStrategy
-from .conditional import ConditionalStrategy
 from .noop import NoOpStrategy
+from .revise_current import ReviseCurrentStrategy
+from .skip_to import SkipToStrategy
 
 
 class MutationApplyService:
@@ -31,7 +29,7 @@ class MutationApplyService:
     Counter 由 GotoCounterPlugin 透過訂閱 phase 統一管理（SD_05 W1）。
     """
 
-    def __init__(self, strategies: Optional[list[IMutationStrategy]] = None):
+    def __init__(self, strategies: list[IMutationStrategy] | None = None):
         if strategies is None:
             strategies = [
                 ReviseCurrentStrategy(),
@@ -67,7 +65,8 @@ class MutationApplyService:
         if not mutations:
             return True
         injected = {m.new_step_id for m in mutations
-                    if m.mutation_type in (StepMutationType.INJECT_AFTER, StepMutationType.INJECT_BEFORE)
+                    if m.mutation_type in (StepMutationType.INJECT_AFTER,
+                                           StepMutationType.INJECT_BEFORE)
                     and m.new_step_id}
         deleted = {m.delete_step_id for m in mutations
                    if m.mutation_type == StepMutationType.DELETE_STEP and m.delete_step_id}

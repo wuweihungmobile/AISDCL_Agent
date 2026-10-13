@@ -21,14 +21,11 @@ save_escalation_dump,save_evolution_resume_checkpoint}`` 公開 API +
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 from unittest.mock import MagicMock
-
-import pytest
 
 from autoclaude.models.playbook import GlobalInvariants, Playbook, PlaybookTask
 from autoclaude.plugins.checkpoint import CheckpointPlugin
-from autoclaude.utils.checkpoint_manager import CheckpointManager, PlaybookCheckpoint
+from autoclaude.utils.checkpoint_manager import CheckpointManager
 
 
 # ──────────────────────────────────────────────────────

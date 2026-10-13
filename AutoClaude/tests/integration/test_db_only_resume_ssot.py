@@ -18,7 +18,6 @@ SD_Improving_04 W2 三方審查 Dev-W2-Crit-1 / Arch-W2-Maj-1 修復驗證。
 """
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
@@ -65,7 +64,8 @@ class TestDbOnlyResumeSSOT:
         """db_only 模式下：
           - CheckpointManager 用注入的 id_resolver=canonical_playbook_id(p, "db_only")
           - AutoResumeService 用 canonical_playbook_id(p, cfg.storage.mode="db_only")
-          兩者 ID 必須一致，且 AutoResumeService._resolve_start 能讀到 CheckpointManager 寫入的資料。
+          兩者 ID 必須一致，且 AutoResumeService._resolve_start 能讀到 CheckpointManager
+          寫入的資料。
         """
         cfg = AppConfig()
         cfg.storage.mode = "db_only"

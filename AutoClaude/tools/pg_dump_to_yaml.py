@@ -30,6 +30,11 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools" / "lib"))
+from platform_utils import (  # noqa: E402
+    init_utf8_streams as _init_utf8_streams,  # type: ignore[import-not-found]
+)
+
 # 預設 dump 的表清單（與 _pg_models.py 對齊）
 DEFAULT_TABLES: tuple[str, ...] = (
     "playbook_runs",
@@ -101,11 +106,7 @@ def _connect(pg_dsn: str):
 def main(argv: list[str] | None = None) -> int:
     # DEF-82-001/DEF-101-070 家族慣例：訊息含中文/→ 等非 ASCII，Windows cp950 console
     # 直接 print 會 UnicodeEncodeError 中斷；stdout + stderr 皆強制 utf-8。
-    for _stream in (sys.stdout, sys.stderr):
-        try:
-            _stream.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
-        except (AttributeError, OSError):
-            pass
+    _init_utf8_streams()
     parser = argparse.ArgumentParser(
         description="SD_09 ADR-SD09-001 §5 — PG → YAML rollback dump"
     )

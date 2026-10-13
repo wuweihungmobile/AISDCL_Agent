@@ -15,17 +15,16 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from enum import Enum
-from uuid import UUID, uuid4
+from uuid import uuid4
 
-import pytest
-from hypothesis import HealthCheck, given, settings, strategies as st
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
 
 from autoclaude.execution.steps_orchestrator._context import ExecutionContext
 from autoclaude.infra.services.state_normalize import (
     diff_normalized,
-    normalize_dict,
     normalize_value,
 )
 
@@ -169,7 +168,7 @@ def test_normalize_set_to_sorted_list():
 
 
 def test_normalize_nested_dict_with_datetime_uuid_enum():
-    dt = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    dt = datetime(2026, 1, 1, tzinfo=UTC)
     u = uuid4()
     raw = {"t": dt, "id": u, "e": _SampleEnum.A, "list": [{"set": {"x", "y"}}]}
     out = normalize_value(raw)
@@ -224,7 +223,7 @@ def test_diff_normalized_datetime_drift_in_utc():
     from datetime import timedelta
     tz = timezone(timedelta(hours=8))
     a = {"saved_at": datetime(2026, 5, 17, 20, 30, tzinfo=tz)}
-    b = {"saved_at": datetime(2026, 5, 17, 12, 30, tzinfo=timezone.utc)}
+    b = {"saved_at": datetime(2026, 5, 17, 12, 30, tzinfo=UTC)}
     drift = diff_normalized(a, b)
     assert drift == {}, "同一 UTC 時刻不應視為 drift"
 

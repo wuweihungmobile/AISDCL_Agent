@@ -18,7 +18,6 @@ from ..error_classifier import ErrorClass
 if TYPE_CHECKING:
     from ...models.playbook import Playbook
     from ...utils.checkpoint_manager import PlaybookCheckpoint
-    from ..failure_tracker import FailureTracker
     from ..playbook_runner import PlaybookRunner
 
 logger = logging.getLogger("autoclaude.execution.playbook")
@@ -41,9 +40,9 @@ class LoopState:
 
 
 def initialize_loop_state(
-    runner: "PlaybookRunner",
-    playbook: "Playbook",
-    resume_checkpoint: "PlaybookCheckpoint | None",
+    runner: PlaybookRunner,
+    playbook: Playbook,
+    resume_checkpoint: PlaybookCheckpoint | None,
 ) -> LoopState:
     """SD_06 W2 G2 階段 B：counter restore + mutation_log 復原 + KB 預播種。
 

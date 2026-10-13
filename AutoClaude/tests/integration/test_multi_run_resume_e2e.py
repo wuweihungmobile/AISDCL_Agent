@@ -1,6 +1,7 @@
 """tests/integration/test_multi_run_resume_e2e.py — SD_07 W2 T2-4 議題 5 e2e。
 
-對應 AC5-1 / AC5-2 / AC5-3（[docs/03_testing/SD07_AC_Matrix.md](../../docs/03_testing/SD07_AC_Matrix.md)）：
+對應 AC5-1 / AC5-2 / AC5-3
+（[docs/03_testing/SD07_AC_Matrix.md](../../docs/03_testing/SD07_AC_Matrix.md)）：
   AC5-1 5 run × 同 GoalTask 並存；abort(run_id) 互不干擾；MAX_ACTIVE_RUNS_PER_GOAL guard
   AC5-2 SIGINT → checkpoint ≤ 2s → restart 從正確 step
   AC5-3 dual_state drift 全欄比對（datetime ISO UTC / UUID str / Enum value / set 排序 list）
@@ -12,14 +13,13 @@ from __future__ import annotations
 
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 
 import pytest
 
 from autoclaude.infra.repositories.dual_state_repository import (
     DualStateRepository,
-    DriftReport,
 )
 from autoclaude.infra.repositories.in_memory_state_repository import (
     InMemoryStateRepository,
@@ -119,7 +119,7 @@ class TestDualStateDriftNormalize:
     @pytest.mark.parametrize(
         "raw,expected",
         [
-            (datetime(2026, 5, 18, 12, 0, 0, tzinfo=timezone.utc),
+            (datetime(2026, 5, 18, 12, 0, 0, tzinfo=UTC),
              "2026-05-18T12:00:00.000000Z"),
             (uuid.UUID("00000000-0000-0000-0000-000000000001"),
              "00000000-0000-0000-0000-000000000001"),

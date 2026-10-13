@@ -59,7 +59,9 @@ def alembic_head(conn):
         cur.execute("SELECT version_num FROM alembic_version;")
         heads = {row[0] for row in cur.fetchall()}
     if _max_head_num(heads) < 12:
-        pytest.skip("alembic main chain 編號 < 12；請執行 `alembic upgrade 0012_yaml_import_staging`")
+        pytest.skip(
+            "alembic main chain 編號 < 12；請執行 `alembic upgrade 0012_yaml_import_staging`"
+        )
     return heads
 
 
@@ -222,7 +224,7 @@ class TestAdvisoryLock:
 
     def test_concurrent_lock_acquire_fails(self, conn, alembic_head):
         """T7：第一個 caller 成功取鎖；第二個 caller 取不到鎖。"""
-        psycopg2 = pytest.importorskip("psycopg2")
+        pytest.importorskip("psycopg2")
         c1 = _new_conn()
         c2 = _new_conn()
         try:

@@ -606,7 +606,13 @@ def test_unregistered_profile_is_advisory_for_the_cli_but_red_for_the_gate(
     平台（mac／Linux 的第一次 push），要嘛整條放行。而手動閘門要的是相反的答案：
     人就在現場，該當場把實測值入表。故 `census_verdict` 分三態、兩個入口各取所需。
     """
-    monkeypatch.setattr(m.sys, "platform", "linux")
+    # 🔴 DEF-101-960（linux 半邊）：注入平台由 linux 換成 freebsd。linux 已經**真的**量到並入表
+    # （`linux+nopg+solo+nopgext`），而本支呼叫 `census_verdict` 時沒有傳 `nested`，巢狀維度
+    # 取自真環境的 `CLAUDECODE`、pgextras 取自真直譯器——在 Linux runner 上恰好落進那一格 ⇒
+    # 本支會在雲端翻紅、Mac／Windows 本機全綠（Docker 容器端對端驗證當場重現）。同
+    # `test_ci_platform_coverage_is_red_when_a_platform_is_neither_measured_nor_named`
+    # 的「注入基底腐化」：拿一個會被登記的平台當「未登記」標的，遲早失效。
+    monkeypatch.setattr(m.sys, "platform", "freebsd")
     rc, lines = m.census_verdict(_HEALTHY_LOG, pg=False)
     assert rc == m.CENSUS_PROFILE_UNREGISTERED
     assert "剖面未登記" in "\n".join(lines)
@@ -623,7 +629,7 @@ def test_check_skip_census_unattended_semantics(monkeypatch: pytest.MonkeyPatch)
     `test_unregistered_profile_is_advisory_for_the_cli_but_red_for_the_gate` 在雲端翻紅、
     Windows 本機全綠——env 洩入測試行程的同型坑。本斷言讓那種迴歸在任何環境都當場紅。
     """
-    monkeypatch.setattr(m.sys, "platform", "linux")  # 確保剖面未登記
+    monkeypatch.setattr(m.sys, "platform", "freebsd")  # 確保剖面未登記（linux 已入表）
     monkeypatch.setenv("GITHUB_ACTIONS", "true")  # 模擬 runner 環境洩入
     assert m.check_skip_census(_HEALTHY_LOG, pg=False) == 1, (
         "有人值守（預設）：未登記剖面仍判紅，且純函式不得偷讀 GITHUB_ACTIONS"
@@ -1313,14 +1319,23 @@ def test_open_debt_is_the_zeroable_half_and_platform_is_not_in_it() -> None:
 def test_platform_skips_have_no_mechanical_proof_of_the_other_half_today() -> None:
     """S3-08：`platform` 群的正確目標是「互補剖面上真的有人跑到」，而今天沒有。
 
-    這一支**刻意斷言缺口存在**：互補剖面（linux）至今沒人量過，所以那些測試目前沒有
-    任何機械證據顯示它們在世界上任何一處跑過。等有人把 linux 剖面量出來入表，本支會
-    紅——那正是它該有的行為（提醒把這句話改掉），而不是靜默通過。
+    這一支**刻意斷言缺口存在**：那些測試目前沒有任何機械證據顯示它們在世界上任何一處
+    跑過。🔴 DEF-101-960（linux 半邊）：原先成因之一「互補剖面（linux）至今沒人量過」已為
+    假——linux 剖面已由 Docker 容器量到並入表，本支依上面那段自述轉紅、改寫成今天的事實。
+    缺口沒有被消滅、只換了成因：`[MAC-NATIVE-ONLY]` 的家是 darwin，而這一列只宣告了
+    linux ⇒ darwin 連候選都沒宣告（`homeless`），缺口行仍必須把它點名。
     """
     lines = P.skip_target_report(_PROF, _base_census())
     assert any("互補剖面" in line for line in lines), lines
     # 🔴 R82（MAC-01）：值已由單一字串改成 tuple——互補剖面是**多對一**。
-    assert not all(P.profile_registered(c) for c in P._COMPLEMENTARY_PROFILE[_PROF])
+    counterparts = P._COMPLEMENTARY_PROFILE[_PROF]
+    assert all(P.profile_registered(c) for c in counterparts), (
+        "linux 已畢業，這一列宣告的互補剖面應全數登記；有未登記者請依缺口行處置")
+    homeless = (P.required_home_platforms(P._platform_of(_PROF))
+                - {P._platform_of(c) for c in counterparts})
+    assert homeless, "這一列連 mac-only 的家都宣告齊了——缺口已消滅，請把本支改成相反斷言"
+    assert all(any(f"（平台 {pl} 未宣告承接剖面）" in line for line in lines)
+               for pl in homeless), lines
 
 
 def _structural_only_census() -> dict[str, int]:
@@ -1606,7 +1621,11 @@ def test_ci_platform_coverage_is_accounted_for() -> None:
     豁免表另有 shrink-only 上限，加一個「跑得到卻沒人量」的平台必須顯式上修常數。
     """
     assert P.ci_platform_coverage_problems() == []
-    assert "linux" in P._UNMEASURED_CI_PLATFORMS  # 缺口是**被登記**的，不是被消滅的
+    # DEF-101-960（linux 半邊）：linux 已量到並入表而畢業（完整性由
+    # `test_the_linux_ci_runner_graduated_with_a_container_measurement` 釘住）；剩下的缺口
+    # 是 win32 那棵 SDD 樹——它仍是**被登記**的，不是被消滅的
+    assert "linux" not in P._UNMEASURED_CI_PLATFORMS
+    assert "win32" in P._UNMEASURED_CI_PLATFORMS
 
 
 def test_ci_platform_coverage_is_red_when_a_platform_is_neither_measured_nor_named(
@@ -1657,6 +1676,49 @@ def test_the_nightly_runner_profile_is_the_one_that_can_actually_be_measured() -
         P.SKIP_GROUP_DEBT: 3,
         P.SKIP_GROUP_UNTAGGED: 0,
     }
+
+
+def test_the_linux_ci_runner_graduated_with_a_container_measurement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """🔴 DEF-101-960（linux 半邊）：`autoclaude-ci.yml` 的 test job 那一路畢業。
+
+    WHY（Rule 9）：它此前只掛在 `_FULL_SUITE_RUNNERS` 分母、靠 `_UNMEASURED_RUNNER_PROFILES`
+    具名豁免，雲端 job 的 census 因此永遠是 rc=3 的 advisory（workflow 對 rc=3 只印
+    warning）——ubuntu 上的 skip 可以無聲增長而閘門全綠。值取自 Mac 上 Docker 容器的真跑
+    （非 root、`--init`、`CI=true GITHUB_ACTIONS=true`、`pip install -e ".[dev,sdk]"`、無 PG、
+    無 `CLAUDECODE`）連三次同值，原始整行見 `skip_group_policy._RUNTIME_SKIP_CEILING` 同鍵
+    那一段。本支釘住「畢業是完整的」與逐格值；退步（拔表、退回豁免表）必須當場轉紅。
+    """
+    key = "AutoClaude/tests@linux+nopg+solo+nopgext"
+    assert key in P._FULL_SUITE_RUNNERS, "linux 又從分母裡消失了——消失時不會有任何紅燈"
+    assert key in P._RUNTIME_SKIP_CEILING, f"{key} 沒有基線天花板"
+    assert key in P._RUNTIME_SKIP_CEILING_MAX, f"{key} 只進了基線表、沒進 MAX 表"
+    assert P.profile_registered(key)
+    assert key not in P._UNMEASURED_RUNNER_PROFILES, (
+        "已經量到天花板了，卻還掛在未量測豁免表裡——把有人守的寫成沒人守"
+    )
+    assert "linux" not in P._UNMEASURED_CI_PLATFORMS
+    # 值逐字照抄容器內 `local_ci_gate.py --census-only` 當場印出的 `[skip census]` 行，零加減
+    measured = {
+        P.SKIP_GROUP_PLATFORM: 54,
+        P.SKIP_GROUP_TOOL_ABSENCE: 0,
+        P.SKIP_GROUP_ENV_DISABLED: 6,
+        P.SKIP_GROUP_STRUCTURAL: 0,
+        P.SKIP_GROUP_DEBT: 0,
+        P.SKIP_GROUP_UNTAGGED: 164,
+    }
+    assert P._RUNTIME_SKIP_CEILING[key] == measured
+    assert P._RUNTIME_SKIP_CEILING_MAX[key] == measured, "新登記剖面天花板不留餘裕"
+    # 紅向自證：只拔 MAX 表（最像沒事的半套降級）、與兩表都拔，涵蓋帳都必須點名它
+    with monkeypatch.context() as mp:
+        mp.delitem(P._RUNTIME_SKIP_CEILING_MAX, key)
+        assert any(key in prob for prob in P.ci_platform_coverage_problems())
+    with monkeypatch.context() as mp:
+        mp.delitem(P._RUNTIME_SKIP_CEILING, key)
+        mp.delitem(P._RUNTIME_SKIP_CEILING_MAX, key)
+        assert not P.profile_registered(key)
+        assert any(key in prob for prob in P.ci_platform_coverage_problems())
 
 
 #: 「可跑的配方」的機械形態：至少指名一支真的跑得起來的載具／可抄的產物。

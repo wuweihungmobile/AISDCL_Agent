@@ -23,6 +23,12 @@ import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+sys.path.insert(0, str(PROJECT_ROOT.parent / "tools" / "lib"))
+from platform_utils import (  # noqa: E402
+    init_utf8_streams as _init_utf8_streams,  # type: ignore[import-not-found]
+)
+
 RUNNER_PATH = PROJECT_ROOT / "autoclaude" / "execution" / "playbook_runner.py"
 
 # M1 shim 方法清單（SD_03 §2.2 表格 #1 / #2 / #3）
@@ -79,11 +85,7 @@ def _check_shim(method: ast.FunctionDef) -> list[str]:
 def main() -> int:
     # DEF-82-001/DEF-101-070 家族慣例：報表含中文/• 等非 ASCII，Windows cp950 console
     # 直接 print 會 UnicodeEncodeError 中斷；stdout + stderr 皆強制 utf-8。
-    for _stream in (sys.stdout, sys.stderr):
-        try:
-            _stream.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
-        except (AttributeError, OSError):
-            pass
+    _init_utf8_streams()
     src = RUNNER_PATH.read_text(encoding="utf-8")
     tree = ast.parse(src, filename=str(RUNNER_PATH))
 

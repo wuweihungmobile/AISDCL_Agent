@@ -17,7 +17,7 @@ core 純度：本檔僅 import stdlib（dataclasses / typing），不觸 executi
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional, Protocol
+from typing import Protocol
 
 
 @dataclass(frozen=True)

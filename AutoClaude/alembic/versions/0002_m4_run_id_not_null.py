@@ -16,8 +16,9 @@ branch_labels = None
 depends_on = None
 
 try:
-    from alembic import op
     import sqlalchemy as sa
+
+    from alembic import op
     _alembic_available = True
 except ImportError:
     _alembic_available = False

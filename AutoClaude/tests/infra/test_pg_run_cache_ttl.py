@@ -11,11 +11,10 @@ import time
 import pytest
 
 from autoclaude.infra.repositories.pg_state_repository import (
+    _TTLCACHE_AVAILABLE,
     _BoundedLRUCache,
     _make_run_cache,
-    _TTLCACHE_AVAILABLE,
 )
-
 
 # ══════════════════════════════════════════════
 # Fallback：_BoundedLRUCache

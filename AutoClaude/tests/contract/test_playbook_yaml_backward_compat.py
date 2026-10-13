@@ -21,7 +21,6 @@ from autoclaude.models.playbook import Playbook, PlaybookTask
 from autoclaude.plugins.token_guard_plugin import TokenGuardPlugin
 from autoclaude.utils.config import TokenGuardConfig
 
-
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 

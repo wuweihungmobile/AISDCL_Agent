@@ -103,7 +103,8 @@ def test_not_verified_fail_closed(tmp_path):
 
 
 def test_verified_absent_fail_closed(tmp_path):
-    """AT-14-1-5：verified 欄缺失（非 None 而是不存在）→ fail-closed（不得因省略而 false-green）。"""
+    """AT-14-1-5：verified 欄缺失（非 None 而是不存在）→ fail-closed
+    （不得因省略而 false-green）。"""
     sidecar = _well_formed_sidecar()
     del sidecar["consistency"]["verified"]
     path = _write_artifact(tmp_path, sidecar)

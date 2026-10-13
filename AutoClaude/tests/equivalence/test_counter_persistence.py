@@ -191,7 +191,8 @@ class TestGap049MaxGotoPerStepCap:
     def test_consecutive_4_gotos_with_cap_3_blocks_4th(self, tmp_path: Path) -> None:
         """連續 4 次 GOTO 觸發 max_goto_per_step=3 → 第 4 次應 over_limit（阻擋）。
 
-        對應稽核要求：『模擬連續 4 次 GOTO 觸發 max_goto_per_step=3 → 第 4 次應 raise / log warning』
+        對應稽核要求：『模擬連續 4 次 GOTO 觸發 max_goto_per_step=3 → 第 4 次應 raise / log
+        warning』
         本測試以 is_goto_over_limit() 表達「應被阻擋」的契約。
         """
         cfg = PlaybookConfig()

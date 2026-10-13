@@ -28,6 +28,10 @@ from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
+# stdio UTF-8 的唯一實作住 monorepo 根 `tools/lib/`；run_mutmut_in_docker.sh 把 AutoClaude
+# 當 /workspace 掛進 python:3.11-slim 跑本檔，容器內沒有那個根——在就用、不在就略過。
+_STDIO_LIB = _REPO_ROOT.parent / "tools" / "lib"
+
 # SD_09 W2 audit P2-AUDIT-24 修復：移除 dead code `_SURVIVED_ID_PATTERNS`（從未被使用）
 # ADR-SD09-009 v1.0 §5.3 紅線（紀律 #5 跨工具數字對齊）：本工具僅處理 survived 分類，
 # 不計算 kill_rate；對 suspicious 的處理為「不分類為 survived」（已對齊 mutmut log
@@ -266,11 +270,12 @@ def analyze(
 def main(argv: list[str] | None = None) -> int:
     # DEF-82-001/DEF-101-070 家族慣例：訊息含中文/→ 等非 ASCII，Windows cp950 console
     # 直接 print 會 UnicodeEncodeError 中斷；stdout + stderr 皆強制 utf-8。
-    for _stream in (sys.stdout, sys.stderr):
-        try:
-            _stream.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
-        except (AttributeError, OSError):
-            pass
+    if _STDIO_LIB.is_dir():  # 容器內沒有 monorepo 根：略過（Linux 容器的 stdio 本就是 UTF-8）
+        if str(_STDIO_LIB) not in sys.path:
+            sys.path.insert(0, str(_STDIO_LIB))
+        from platform_utils import init_utf8_streams
+
+        init_utf8_streams()
     parser = argparse.ArgumentParser(description="Mutation survived analysis (SD_08 W3 T3-D4)")
     parser.add_argument("module", help="模組代號（token_guard / goal_synthesis / coordinator）")
     parser.add_argument("--log", type=Path, required=True)

@@ -44,7 +44,7 @@ def execute_prompt_impl(
     from .playbook_runner import _pr
 
     cfg = runner._cfg
-    args = list(cfg.claude.extra_args)
+    args = cfg.claude.base_args()
     if maintain_context and cfg.claude.continue_flag:
         args.append(cfg.claude.continue_flag)
     args += ["-p", prompt]

@@ -216,7 +216,7 @@ class TestAPIUIAdapter:
         ui_tree = session_backend.extract_widget_tree(
             FIXTURE_DOCS / "99_media" / "ui" / "login-screen.html"
         )
-        rep = api_ui_adapter.validate_anchor(
+        api_ui_adapter.validate_anchor(
             method="POST", path="/auth/login",
             ui_widgets=ui_tree, api_root=api_root,
         )

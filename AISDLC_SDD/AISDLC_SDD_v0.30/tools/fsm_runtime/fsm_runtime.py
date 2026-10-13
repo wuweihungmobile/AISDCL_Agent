@@ -14,7 +14,6 @@ from .snapshot import save_abort_report, save_auto_snapshot
 from .state_loader import FSMState, load_state, project_from_env, save_state
 from .transition_rules import (
     _HAPPY_PATH,
-    IMPL_MAX_TEST_FAIL_WITHOUT_SPEC_CHANGE,
     MAX_AUTO_COMPACT_PER_STAGE,
     OBSERVATION_STATES,
     RETRY_LIMITS,

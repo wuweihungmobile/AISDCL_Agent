@@ -4,13 +4,10 @@
 """
 from __future__ import annotations
 
-import os
-
 import pytest
 from pydantic import ValidationError
 
-from autoclaude.utils.config import TokenGuardConfig, StorageConfig, AppConfig
-
+from autoclaude.utils.config import AppConfig, StorageConfig, TokenGuardConfig
 
 # ─────────────────────────────────────────────
 # TokenGuardConfig validators

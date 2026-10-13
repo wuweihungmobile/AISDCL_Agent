@@ -1,4 +1,5 @@
-"""SD_09 W1 軸 B 64 點位正式補測（compactor 24 / git_verifier 13 / policy 17 / watcher 3 / thresholds 7）。
+"""SD_09 W1 軸 B 64 點位正式補測（compactor 24 / git_verifier 13 / policy 17 / watcher 3 /
+thresholds 7）。
 
 對應 SD09_Execution_Guide.md §3.0.1 軸 B + §3.0.5 SP-1 同步點：W1 token_guard
 64 case 全集形式補測，作為觀察期 #1 mutation pilot kill_rate 持續穩定 ≥ 70% 的
@@ -28,7 +29,6 @@ import pytest
 from autoclaude.core.hookspec import (
     HookContext,
     KernelPhase,
-    ResourceRequest,
 )
 from autoclaude.models.playbook import (
     GlobalInvariants,
@@ -297,7 +297,9 @@ class TestGitVerifierW1VerifyCorrection:
 
     def test_g07_returncode_nonzero_returns_none(self):
         """returncode != 0 → 視為查詢失敗，返回 None（不警告）。"""
-        fake_result = subprocess.CompletedProcess(args=[], returncode=128, stdout="", stderr="not a git repo")
+        fake_result = subprocess.CompletedProcess(
+            args=[], returncode=128, stdout="", stderr="not a git repo"
+        )
         with patch("subprocess.run", return_value=fake_result):
             assert verify_correction_applied(1) is None
 
@@ -333,7 +335,8 @@ class TestGitVerifierW1VerifyCorrection:
         assert m.call_args.kwargs.get("shell") in (None, False)
 
     def test_g13_generic_oserror_propagates(self):
-        """未被 catch 的 OSError 應 raise 而非 silently None（除 FileNotFoundError / TimeoutExpired）。
+        """未被 catch 的 OSError 應 raise 而非 silently None（除 FileNotFoundError /
+        TimeoutExpired）。
 
         對齊 except (FileNotFoundError, subprocess.TimeoutExpired) — 其他例外不吞。
         """

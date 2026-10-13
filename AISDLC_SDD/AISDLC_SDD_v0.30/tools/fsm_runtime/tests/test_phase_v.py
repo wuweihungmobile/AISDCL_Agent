@@ -169,7 +169,8 @@ def test_depth_genesis_round_k_truncation():
     """Rule 9.34.4 反 big-bang：一輪至多 K_depth 個，其餘順延。"""
     cands = DG.enumerate_genesis_depth(budget=30)
     scores = {cands[0].name: 0.5, cands[1].name: 0.4, cands[2].name: 0.3}
-    ev = lambda e: scores.get(e.name, 0.0)
+    def ev(e):
+        return scores.get(e.name, 0.0)
     rnd = DG.depth_genesis_round(ev, candidates=cands, k=1)
     assert len(rnd.selected) == 1
     assert rnd.selected[0].operator.name == cands[0].name
@@ -410,7 +411,8 @@ def test_adopt_depth_happy_path(tmp_path):
 def _accepted_depth_round(k=1):
     cands = DG.enumerate_genesis_depth(budget=30)
     scores = {cands[0].name: 0.5, cands[1].name: 0.4, cands[2].name: 0.3}
-    ev = lambda e: scores.get(e.name, 0.0)
+    def ev(e):
+        return scores.get(e.name, 0.0)
     return DG.depth_genesis_round(ev, candidates=cands, k=k)
 
 

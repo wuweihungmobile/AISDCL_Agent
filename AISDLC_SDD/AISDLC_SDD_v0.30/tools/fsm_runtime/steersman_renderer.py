@@ -317,8 +317,8 @@ def render_unified_calibration_proposal(round_, *, joint_verdict=None) -> str:
             "",
             f"- 跨評分器**聯合**證據（攔接縫 Goodhart）：{joint_verdict.evidence_line()}",
             f"- 聯合語料指紋（凍結防竄改）：`{joint_verdict.corpus_fingerprint}`",
-            f"- ⚖️ 採納以**聯合** tier 為準：per-scorer 各自通過 **不**代表聯合通過"
-            f"（Rule 9.28.2）。",
+            "- ⚖️ 採納以**聯合** tier 為準：per-scorer 各自通過 **不**代表聯合通過"
+            "（Rule 9.28.2）。",
         ]
     lines += [
         "",
@@ -371,8 +371,8 @@ def render_ontology_expansion_proposal(round_, *, verdict=None) -> str:
             "",
             f"- 維度必要性**對抗**證據（攔自利噪音軸/冗餘軸）：{verdict.evidence_line()}",
             f"- 必要性語料指紋（凍結防竄改）：`{verdict.corpus_fingerprint}`",
-            f"- ⚖️ 採納以 **oracle** 判定為準：proposer 自評必要 **不**代表真必要"
-            f"（Rule 9.29.2）。",
+            "- ⚖️ 採納以 **oracle** 判定為準：proposer 自評必要 **不**代表真必要"
+            "（Rule 9.29.2）。",
         ]
     lines += [
         "",
@@ -427,7 +427,7 @@ def render_semantic_invention_proposal(round_, *, verdict=None) -> str:
             "",
             f"- 維度必要性**對抗**證據（feature-keyed，攔候選池外噪音軸/冗餘軸）：{verdict.evidence_line()}",
             f"- 必要性語料指紋（凍結防竄改）：`{verdict.corpus_fingerprint}`",
-            f"- ⚖️ 採納以 **oracle** 判定為準：synthesizer 自評必要 **不**代表真必要（Rule 9.30.2）。",
+            "- ⚖️ 採納以 **oracle** 判定為準：synthesizer 自評必要 **不**代表真必要（Rule 9.30.2）。",
         ]
     lines += [
         "",
@@ -525,7 +525,7 @@ def render_vocab_genesis_proposal(round_, *, verdict=None) -> str:
             "",
             f"- 詞彙必要性**對抗**證據（feature-grounded，攔 VOCAB 外噪音字/冗餘字）：{verdict.evidence_line()}",
             f"- 必要性語料指紋（凍結防竄改）：`{verdict.corpus_fingerprint}`",
-            f"- ⚖️ 採納以 **oracle** 判定為準：genesis 自評必要 **不**代表真必要（Rule 9.31.2）。",
+            "- ⚖️ 採納以 **oracle** 判定為準：genesis 自評必要 **不**代表真必要（Rule 9.31.2）。",
         ]
     lines += [
         "",
@@ -634,7 +634,7 @@ def render_operator_genesis_proposal(round_, *, verdict=None) -> str:
             "",
             f"- 算子必要性**對抗**證據（feature-grounded，攔 OPS 外噪音算子/冗餘算子）：{verdict.evidence_line()}",
             f"- 必要性語料指紋（凍結防竄改）：`{verdict.corpus_fingerprint}`",
-            f"- ⚖️ 採納以 **oracle** 判定為準：genesis 自評必要 **不**代表真必要（Rule 9.32.2）。",
+            "- ⚖️ 採納以 **oracle** 判定為準：genesis 自評必要 **不**代表真必要（Rule 9.32.2）。",
         ]
     lines += [
         "",
@@ -698,7 +698,7 @@ def render_alphabet_genesis_proposal(round_, *, verdict=None) -> str:
             "",
             f"- 字母必要性**對抗**證據（feature-grounded，攔字母表外噪音字母/冗餘字母）：{verdict.evidence_line()}",
             f"- 必要性語料指紋（凍結防竄改）：`{verdict.corpus_fingerprint}`",
-            f"- ⚖️ 採納以 **oracle** 判定為準：genesis 自評必要 **不**代表真必要（Rule 9.33.2）。",
+            "- ⚖️ 採納以 **oracle** 判定為準：genesis 自評必要 **不**代表真必要（Rule 9.33.2）。",
         ]
     lines += [
         "",
@@ -760,7 +760,7 @@ def render_depth_genesis_proposal(round_, *, verdict=None) -> str:
             "",
             f"- 深度必要性**對抗**證據（feature-grounded，攔深度外噪音算子/冗餘算子）：{verdict.evidence_line()}",
             f"- 必要性語料指紋（凍結防竄改）：`{verdict.corpus_fingerprint}`",
-            f"- ⚖️ 採納以 **oracle** 判定為準：genesis 自評必要 **不**代表真必要（Rule 9.34.2）。",
+            "- ⚖️ 採納以 **oracle** 判定為準：genesis 自評必要 **不**代表真必要（Rule 9.34.2）。",
         ]
     lines += [
         "",
@@ -825,7 +825,7 @@ def render_recursion_genesis_proposal(round_, *, verdict=None) -> str:
             "",
             f"- 互遞迴必要性**對抗**證據（feature-grounded，攔互遞迴外噪音算子/冗餘算子）：{verdict.evidence_line()}",
             f"- 必要性語料指紋（凍結防竄改）：`{verdict.corpus_fingerprint}`",
-            f"- ⚖️ 採納以 **oracle** 判定為準：genesis 自評必要 **不**代表真必要（Rule 9.35.2）。",
+            "- ⚖️ 採納以 **oracle** 判定為準：genesis 自評必要 **不**代表真必要（Rule 9.35.2）。",
         ]
     lines += [
         "",

@@ -11,7 +11,8 @@
   3. sprint_history.md §1.X 編號連續無 gap（防遺漏 sprint 紀錄）
 
 **R23 adversarial 補強（紀律 #4 驗證鏡子自身要被驗證）**：
-  4. 餵入缺 sprint_history.md link 的 CLAUDE.md fixture → 驗 test fail（assert fail mechanism 真實有效）
+  4. 餵入缺 sprint_history.md link 的 CLAUDE.md fixture → 驗 test fail（assert fail mechanism
+     真實有效）
   5. 餵入 NN 缺對應 history 段的 fixture → 驗 test fail
   6. CLAUDE.md 不可有重複 `### SD_Improving_NN` H3（R23 補：dedup 漏洞防護）
 """
@@ -34,8 +35,8 @@ def _h3_body(content: str, heading_line: str, h_level: str = "### ") -> str:
     """從 heading 行起，回傳到下個同 / 更高層 heading 之前的 body（含 heading）。"""
     lines = content.splitlines()
     start = None
-    for i, l in enumerate(lines):
-        if l == heading_line or l.startswith(heading_line.split(" — ")[0]):
+    for i, line in enumerate(lines):
+        if line == heading_line or line.startswith(heading_line.split(" — ")[0]):
             start = i
             break
     if start is None:
@@ -202,7 +203,8 @@ class TestSprintAnchorAdversarial:
         assert missing == ["10"], "adversarial fixture 應被偵測為缺對應段，但通過了"
 
     def test_h3_body_extracts_first_when_duplicates_present(self) -> None:
-        """`_h3_body` helper 在重複 H3 時抓第一個（已知限制；duplicates 由 test_no_duplicate_h3 擋）。"""
+        """`_h3_body` helper 在重複 H3 時抓第一個（已知限制；duplicates 由
+        test_no_duplicate_h3 擋）。"""
         content = (
             "# x\n\n### SD_Improving_10（first）\n\nfirst body without link\n\n"
             "### SD_Improving_10（dup）\n\nsecond body [sprint_history.md](x)\n"

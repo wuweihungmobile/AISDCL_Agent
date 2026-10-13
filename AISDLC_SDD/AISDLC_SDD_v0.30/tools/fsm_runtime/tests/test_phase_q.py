@@ -63,7 +63,8 @@ def test_dimension_fp_not_calibration():
 
 def test_propose_finds_necessary_dimension():
     """proposer 在注入必要性上找到真必要新維度（達 margin、送 signoff）。"""
-    ev = lambda d: 0.21 if d.name == "maintainability_cost" else 0.0
+    def ev(d):
+        return 0.21 if d.name == "maintainability_cost" else 0.0
     prop = VDR.propose(ev)
     assert prop.accepted
     assert prop.dimension.name == "maintainability_cost"
@@ -77,7 +78,8 @@ def test_propose_search_bounded():
 
 
 def test_propose_deterministic():
-    ev = lambda d: {"maintainability_cost": 0.3, "security_surface": 0.2}.get(d.name, 0.0)
+    def ev(d):
+        return {"maintainability_cost": 0.3, "security_surface": 0.2}.get(d.name, 0.0)
     p1 = VDR.propose(ev)
     p2 = VDR.propose(ev)
     assert p1.dimension == p2.dimension and p1.necessity == p2.necessity
@@ -101,8 +103,9 @@ def test_propose_only_uses_injected_evaluate():
 
 def test_propose_round_respects_bigbang_kdim():
     """一輪至多 K_dim 條新維度進 proposed（按 necessity 取前 K_dim），其餘順延（Rule 9.29.4）。"""
-    ev = lambda d: {"maintainability_cost": 0.5, "security_surface": 0.4,
-                    "operability_cost": 0.3}.get(d.name, 0.0)
+    def ev(d):
+        return {"maintainability_cost": 0.5, "security_surface": 0.4,
+                "operability_cost": 0.3}.get(d.name, 0.0)
     rnd = VDR.propose_expansion_round(ev, k=1)
     assert len(rnd.selected) == 1                       # 反 big-bang：預設 K_dim=1
     assert rnd.selected[0].dimension.name == "maintainability_cost"   # necessity 最高
@@ -167,7 +170,8 @@ def test_adopt_goes_through_meta_guard(tmp_path):
 
 
 def test_record_round_writes_pending_signoff(tmp_path):
-    ev = lambda d: 0.3 if d.name == "maintainability_cost" else 0.0
+    def ev(d):
+        return 0.3 if d.name == "maintainability_cost" else 0.0
     rnd = VDR.propose_expansion_round(ev, k=1)
     led = tmp_path / "value-dimension-ledger.yaml"
     entry = VDR.record_round(rnd, ledger_path=led, ts="2026-06-04T00:00:00+00:00")
@@ -341,7 +345,8 @@ def test_proposer_self_passes_but_oracle_rejects():
     """關鍵：proposer 樸素自評視噪音軸為必要，但 oracle 在 held-out 上否決 → 以 oracle 為準。"""
     noise_dim = ValueDimension.of("proposer_self_score", probe=("self",))
     # (a) proposer 樸素自評：對任何維度都「覺得必要」（盲於真實增量覆蓋）→ 若無 oracle 就中招
-    naive_self = lambda d: 0.9
+    def naive_self(d):
+        return 0.9
     per = VDR.propose(naive_self, pool=[noise_dim])
     assert per.accepted, "proposer 樸素自評視之為必要（接縫前提）"
     # (b) 但 oracle 在 held-out 上判不必要（噪音軸增量覆蓋 ≈ 0）→ 以 oracle 為準
@@ -450,8 +455,9 @@ def test_dim_acceptance_rates_meet_blueprint():
 # ---------------------------------------------------------------------------
 
 def _accepted_expansion_round(k=1):
-    ev = lambda d: {"maintainability_cost": 0.5, "security_surface": 0.4,
-                    "operability_cost": 0.3}.get(d.name, 0.0)
+    def ev(d):
+        return {"maintainability_cost": 0.5, "security_surface": 0.4,
+                "operability_cost": 0.3}.get(d.name, 0.0)
     return VDR.propose_expansion_round(ev, k=k)
 
 

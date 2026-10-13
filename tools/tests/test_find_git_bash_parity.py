@@ -67,9 +67,8 @@ class StripPsCommentsTest(unittest.TestCase):
     """`strip_ps_comments` 自身的鑑別力鎖（QA-R57-02 原坑：只剝整行註解，
     把呼叫改成內聯 `Get-Command bash` 並留 `# was: = Find-GitBash` 即全綠）。
 
-    R57 SA-R57R2-03 收斂後本類是**唯一**一份（原本 nightly parity 檔另有一份
-    複本，同函式被測兩遍只是把同一個盲點抄兩遍）；nightly 側錨點所依賴的行為由
-    本類與 `StripPsCommentsBoundaryTest` 一併守護。
+    R57 SA-R57R2-03 收斂後本類是**唯一**一份（原本 nightly parity 檔另有一份複本，同一盲點
+    抄兩遍）；nightly 側錨點所依賴的行為由本類與 `StripPsCommentsBoundaryTest` 一併守護。
     """
 
     def test_strips_trailing_inline_comment(self) -> None:
@@ -220,13 +219,7 @@ class StripPsCommentsBoundaryTest(unittest.TestCase):
 
 class TestPsCommentStripperSsotCallsiteLock(unittest.TestCase):
     """SSOT 呼叫端鎖（R57 SA-R57R2-03）。
-
-    教訓：SSOT 沒有呼叫端鎖等於沒有強制力——「同一個盲點抄 N 遍」曾發生兩次卻
-    都沒有機械訊號。故：(a) 除 SSOT 模組外任何檔案重新自帶同名函式定義即紅；
-    (b) 已知消費端必須真的 import 且真的呼叫。已知不涵蓋（未窮舉）：換名重寫、
-    `lambda`／賦值提供同名物件、複本放到其他目錄、`exec`／動態 import 迂迴。
-    史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
-    """
+    射程／已知不涵蓋：逐字見 R213 證據檔附錄 A-4（test_find_git_bash_parity.py:224-228）。"""
 
     _CONSUMERS = ("test_find_git_bash_parity.py", "test_windows_nightly_anchor_parity.py")
 
@@ -602,13 +595,6 @@ class TestFindGitBashBehavior(unittest.TestCase):
 )
 class TestSystem32VerdictParity(unittest.TestCase):
     """🔴 R60 P10-2 行為表 parity 鎖：兩側對同一組輸入必須逐筆同判。
-
-    WHY 靜態鎖不夠：它只比對兩邊拿哪個字面詞去比，對用什麼手法比完全盲目。
-    P10-2 實測：字面詞都是 `System32`，但 PS 側 regex 要求前後皆為反斜線，輸入
-    `C:/Windows/System32/bash.exe` 時 PS 側放行、Python 側排除——同一組輸入相反
-    裁決，且可觸達（`Source` 帶正斜線時修前 `Find-GitBash` 回傳了 WSL 的 bash）。
-    本類別真的起 PowerShell 執行，不是比對原始碼字面。史料見證據檔
-    〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
 
     _CASE_TABLE_PATH = _PS1_PATH
@@ -720,19 +706,14 @@ class TestSystem32VerdictParity(unittest.TestCase):
 
 class TestFindGitBashCallSites(unittest.TestCase):
     """R57 新增（A3）：呼叫端**真的有用**這個共用 helper。
-
-    WHY：既有 11 支測試全部只驗 `Find-GitBash.ps1` 自身行為，沒有任何一支驗證
-    呼叫端真的 dot-source 並呼叫它——呼叫端退回內聯偵測（`DEF-101-099` 原坑）
-    這 11 支依然全綠，helper 完好無損只是沒人用了。另：呼叫點計數反覆出現於
-    帳本卻無機械鎖，下方測試以 git 追蹤檔全掃比對登記表，增刪皆必紅。史料見
-    證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
 
-    # 三支已知呼叫端（S11 抽共用時的收斂範圍）。
+    # 已知呼叫端（S11 抽共用時三支；本機 smoke 因 LATEST .sh 可啟動性 step 加入）。
     _CALLERS = (
         "AutoClaude/tools/install_git_hooks.ps1",
         "AISDLC_SDD/scripts/ci-gate.ps1",
         "AISDLC_SDD/scripts/install-hooks.ps1",
+        "tools/windows_smoke_local.ps1",
     )
     _HELPER_REL = "tools/lib/Find-GitBash.ps1"
 

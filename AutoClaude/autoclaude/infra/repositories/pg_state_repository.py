@@ -23,7 +23,6 @@ P1 #4（tenacity retry）：_save / _load / _clear 加 OperationalError retry（
 from __future__ import annotations
 
 import logging
-import re
 import uuid
 from collections import OrderedDict  # Dev-3：移至模組頂部，避免每次 fallback 重複 import
 from datetime import UTC, datetime, timedelta
@@ -31,6 +30,7 @@ from typing import Any
 
 from ...core.ports.state_repository import StateRepositoryError
 from ...utils.checkpoint_manager import PlaybookCheckpoint
+from ...utils.redaction import redact_dsn, scrub_sensitive
 
 # P1 #8：asyncio running-event-loop 相容包裝（共用實作移至 pg_async_utils，C-4 修復）
 from ._deprecation import warn_load_checkpoint_deprecated
@@ -69,29 +69,10 @@ except ImportError:
 # 本檔不再直接使用，故移除原死碼 try/except block。
 
 
-_DSN_PASSWORD_RE = re.compile(r"(://[^:/@]+:)([^@]+)(@)")
-
-
-def _redact(msg: str) -> str:
-    """從訊息中移除 DSN 密碼欄位（Security review 要求）。"""
-    return _DSN_PASSWORD_RE.sub(r"\1***\3", msg)
-
-
-# P1 #7：last_correction_prompt 敏感資訊擦除（Security review 要求）
-_SENSITIVE_PATTERNS = [
-    re.compile(r"(?i)(bearer\s+)[A-Za-z0-9\-._~+/]+=*"),   # Bearer tokens
-    re.compile(r"sk-[A-Za-z0-9\-_]{20,}"),                   # Anthropic / OpenAI API keys
-    re.compile(r"(?i)authorization:\s*\S+"),                  # Authorization headers
-]
-
-
-def _scrub_sensitive(text: str) -> str:
-    """移除 last_correction_prompt 中的 Bearer token / API key 等敏感資訊。"""
-    if not text:
-        return text
-    for pat in _SENSITIVE_PATTERNS:
-        text = pat.sub("[REDACTED]", text)
-    return text
+# DSN 密碼段遮蔽（Security review 要求）與 P1 #7 last_correction_prompt 敏感資訊擦除：
+# 樣式表搬到 `utils/redaction.py`（PRD §12 日誌遮蔽與本檔共用同一份），此處只留舊名別名。
+_redact = redact_dsn
+_scrub_sensitive = scrub_sensitive
 
 
 # T6（SD_04 §3）：_run_cache TTL 防記憶體洩漏

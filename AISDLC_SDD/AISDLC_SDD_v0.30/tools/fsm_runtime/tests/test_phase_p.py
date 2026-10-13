@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 
 from tools.fsm_runtime import scorer_calibration_registry as CR
-from tools.fsm_runtime.scorer_calibration_registry import CalibrationProfile, ScorerSpec
+from tools.fsm_runtime.scorer_calibration_registry import CalibrationProfile
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -478,7 +478,8 @@ def test_per_scorer_passes_but_joint_fails():
     """關鍵：adversarial 弱化在 per-scorer 樸素評估上『通過』，但 pipeline 聯合 oracle 否決 → 以 joint 為準。"""
     # (a) per-scorer 樸素視角：攻擊越弱「看起來越好」（盲於接縫）→ propose 接受弱化
     spec = CR.get_spec("adversarial")
-    naive_ev = lambda p: round(1.0 - 0.2 * p.weight("attack_strength_w"), 6)
+    def naive_ev(p):
+        return round(1.0 - 0.2 * p.weight("attack_strength_w"), 6)
     per = CR.propose(spec, naive_ev)
     assert per.accepted and per.candidate.weight("attack_strength_w") == 0.0
     # (b) 但聯合 oracle 在 pipeline held-out 上否決同一弱化
@@ -621,7 +622,8 @@ def test_joint_seam_goodhart_intercepted(doc):
     tuned_dim = _SEAM_NAIVE_TUNED_DIM[scorer]
     cp = doc["candidate_profile"]
     weak = CalibrationProfile.of(cp["namespace"], {k: float(v) for k, v in cp["weights"].items()})
-    naive = lambda p: round(1.0 - 0.2 * p.weight(tuned_dim), 6)   # 越弱越「好看」（盲於接縫）
+    def naive(p):
+        return round(1.0 - 0.2 * p.weight(tuned_dim), 6)   # 越弱越「好看」（盲於接縫）
     assert naive(weak) >= naive(spec.incumbent()), \
         f"{doc['case_id']} per-scorer 樸素視角應視弱化為不劣（接縫前提）"
     # (b) 但聯合 oracle 在 pipeline held-out 上否決同一弱化向量 → 以 joint 為準

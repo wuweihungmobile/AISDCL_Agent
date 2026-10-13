@@ -19,9 +19,6 @@
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any
-
 import pytest
 
 from autoclaude.core.ports.embedder import EmbedderUnavailableError
@@ -37,7 +34,6 @@ from autoclaude.infra.services.pii_filter import (
     PIIFilter,
     PIIFilterViolation,
 )
-
 
 # ── 測試 fixtures ─────────────────────────────────────────
 

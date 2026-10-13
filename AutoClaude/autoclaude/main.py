@@ -34,7 +34,9 @@ from .execution.boot_self_check import (
     conflict_policy_from_env,
     estimate_freeze_bytes,
     read_cli_version,
+    state_dirs_to_guard,
 )
+from .execution.evaluator import _UNATTENDED_ENV
 from .execution.run_summary import RunSummaryRecorder, show_last_run_summary
 from .infra.adapters.minimax_brain import MinimaxBrainAdapter
 from .infra.adapters.pty_executor import PtyExecutor
@@ -97,6 +99,34 @@ def build_executor(cfg, hotkey=None, logger=None):
     return PtyExecutor(cfg.claude, cfg.loop, log_dir=cfg.log_dir, hotkey=hotkey)
 
 
+def _stdin_is_tty() -> bool:
+    try:
+        return bool(sys.stdin and sys.stdin.isatty())
+    except (ValueError, OSError):                  # stdin 被關掉／無效 fd＝沒有人在終端機前
+        return False
+
+
+# PRD §3.2：ESC+F12 全域中斷。此前入口只 `HotkeyHandler()` 卻從不 `register()` ⇒ 熱鍵從未生效、
+# `triggered` 永遠是 False。閘門：有 TTY（有人在終端機前）且非無人值守回合（`AUTOSDD_UNATTENDED`
+# 有設＝沒有人會按鍵；全域鍵盤 hook 的 suppress 在那種環境只有副作用）才註冊。註冊失敗（keyboard
+# 未裝／macOS listener 非 root）的細部判準住 `HotkeyHandler.register()`，這裡再包一層是因為
+# 註冊失敗只能 warning、不得讓引擎起不來。回 True＝呼叫了 register()。
+def register_global_hotkey(hotkey, logger: logging.Logger) -> bool:
+    if os.environ.get(_UNATTENDED_ENV):
+        logger.info("無人值守回合（%s 有設），略過全域熱鍵", _UNATTENDED_ENV)
+        return False
+    if not _stdin_is_tty():
+        logger.info("無 TTY，略過全域熱鍵")
+        return False
+    try:
+        hotkey.register()
+    except Exception as exc:                       # noqa: BLE001 — 見上方：註冊失敗不得中止
+        logger.warning("全域中斷熱鍵註冊拋例外（%s: %s），ESC+F12 中斷將無法使用",
+                       type(exc).__name__, exc)
+        return False
+    return True
+
+
 # 🔴 DEF-200-205：`execution/boot_self_check.py`（PRD §6.2／§6.1 不變式 11~13）修前**零生產
 # 呼叫端**——機制蓋好沒接電。接點選 `main()` 而不是 AutoResumeService，理由有兩層：
 #   ① 語意：§6.2 的三項（殘留整合佇列／CLI 版本／可用空間）逐字都寫「**啟動時**判一次」，
@@ -156,6 +186,9 @@ def run_boot_self_check(cfg, *, state_repo, playbook_path: str, quota_meter,
         # 設定面兩條路（SDK 後端的 permission_mode、PTY 後端的 extra_args）都要餵，漏一條就是缺口。
         permission_mode=cfg.executor.permission_mode,
         extra_args=cfg.claude.extra_args,
+        # PRD §6.1 不變式 9：引擎真的會寫的狀態目錄（＋已存在的 `.autoclaude/`）必須在 .gitignore。
+        repo_root=Path.cwd(),
+        ignored_dirs=state_dirs_to_guard(Path.cwd(), cfg.checkpoint_dir),
     )
     if report.ok:
         return 0
@@ -267,9 +300,8 @@ def main() -> int:
     # DEF-200-205：注入 IWorktreeRescue（PRD §4.5.9）——halt 後轉入等待前，先把髒污工作樹
     # 存成 patch；救援失敗（DIRTY_UNSAVED）時 AutoResumeService 就地返回、不排自動喚醒。
     # improving_113：等待改為分片休眠，片與片之間會檢查 is_interrupted；中斷事件由呼叫端注入，
-    # 這裡把 hotkey.triggered 接進去。🔴 注入點已接，但本入口目前沒有呼叫 hotkey.register()
-    # （autoclaude/ 內唯一的 register() 呼叫住在舊 PlaybookRunner，而它已無建構點）⇒ 全域熱鍵
-    # 尚未註冊，triggered 實際不會被設定；註冊屬既存缺口，不在這次改動範圍。
+    # 這裡把 hotkey.triggered 接進去。熱鍵在下方 service.run 之前由 register_global_hotkey 註冊
+    # （PRD §3.2；有 TTY 且非無人值守才註冊），結束時卸下。
     service = AutoResumeService(kernel, cfg, state_repository=state_repo,
                                 quota_meter=quota_meter,
                                 worktree_rescue=build_worktree_rescue(cfg),
@@ -279,7 +311,11 @@ def main() -> int:
     # recorder 的寫入失敗只記 WARNING，永不改變 rc 與例外傳遞。
     recorder = RunSummaryRecorder(cfg.log_dir, args.playbook)
     recorder.start()
-    result = service.run(args.playbook, fresh=args.fresh)
+    register_global_hotkey(hotkey, logger)
+    try:
+        result = service.run(args.playbook, fresh=args.fresh)
+    finally:
+        hotkey.unregister()
 
     logger.info("Playbook 結束 | %s", result)
     recorder.finish(result)

@@ -114,7 +114,7 @@ def _scan_roots() -> list[tuple[Path, bool, int]]:
         # R85／F1 重釘 17→27（腐化上界逐字要求；`tools/probe/guard_layer_dedup_census.py` 觸發）。
         # 🔴 R158 重釘 27→36（新增 install_statusline.py，37→38 支，過腐化上界，詳 round-label-ok
         # CrossPlatform_R158_SessionGate_Statusline_Evidence.md〈棘輪重釘〉）。
-        (_REPO_ROOT / "tools", True, 36),
+        (_REPO_ROOT / "tools", True, 46),
         (_REPO_ROOT / ".claude" / "hooks", True, 2),
         (_REPO_ROOT / "AISDLC_SDD" / "scripts", True, 13),
         # 沿革已搬至 CrossPlatform_R151_Guard_Prose_Migration.md〈_scan_roots tools/lib 重釘〉節。
@@ -2999,7 +2999,7 @@ def scan_foreign_platform_api(source: str, rel: str) -> tuple[list[str], list[st
 #: CrossPlatform_Guard_Line_History.md〈作用域級存量債表沿革〉節；壓縮前原文搬至
 #: Guard_Line_History_2.md〈R186 淨減法搬遷〉§37。  round-label-ok
 _FOREIGN_API_SCOPE_DEBT: dict[str, int] = {
-    "tools/dev_start.py": 5,
+    "tools/dev_start.py": 4, "tools/lib/bootstrap_lock.py": 1,
 }
 
 

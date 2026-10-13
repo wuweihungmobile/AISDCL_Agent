@@ -1,11 +1,12 @@
 """決策層單元測試（Playbook 修正模式）。"""
 import json
-import pytest
-import httpx
 from unittest.mock import MagicMock, patch
 
-from autoclaude.models.decision import CorrectionDecision
+import httpx
+import pytest
+
 from autoclaude.decision.minimax_client import MinimaxClient, MinimaxError
+from autoclaude.models.decision import CorrectionDecision
 
 
 def _make_client() -> MinimaxClient:
@@ -325,7 +326,8 @@ def test_decide_correction_retries_on_429_rate_limit():
 # ──────────────────────────────────────────────
 
 def test_decide_correction_environment_error_class_hint_in_prompt():
-    """eval_output 含 FileNotFoundError 時，error_class='environment' 提示應注入 Minimax user message。"""
+    """eval_output 含 FileNotFoundError 時，error_class='environment' 提示應注入 Minimax
+    user message。"""
     client = _make_client()
     captured_payload: dict = {}
 
@@ -489,7 +491,10 @@ def test_validate_correction_quality_high_similarity():
 def test_validate_correction_quality_passes_good_prompt():
     """包含具體引用且長度足夠、無重複的 prompt 應通過驗證。"""
     from autoclaude.decision.minimax_client import _validate_correction_quality
-    good = "請修正 test_foo.py:42 的 AssertionError：assert result == 10 失敗，實際值是 5。應修改 calculate() 函式的回傳邏輯。"
+    good = (
+        "請修正 test_foo.py:42 的 AssertionError：assert result == 10 失敗，"
+        "實際值是 5。應修改 calculate() 函式的回傳邏輯。"
+    )
     is_valid, reason = _validate_correction_quality(good, [])
     assert is_valid is True
     assert reason == "ok"
@@ -499,7 +504,9 @@ def test_decide_correction_uses_last_correction_prompt_for_similarity():
     """last_correction_prompt 應作為相似度比對依據（而非 history_summary）。"""
     client = _make_client()
     # 第一次呼叫：回傳一個高品質 prompt
-    first_prompt = "請修正 test_foo.py:42 的 AssertionError，assert result == 10 失敗，應修改 calculate()"
+    first_prompt = (
+        "請修正 test_foo.py:42 的 AssertionError，assert result == 10 失敗，應修改 calculate()"
+    )
 
     with patch("httpx.post") as mock_post:
         mock_post.return_value.json.return_value = _mock_response({

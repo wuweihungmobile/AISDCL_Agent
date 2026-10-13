@@ -34,6 +34,11 @@ import sys
 from collections.abc import Iterable
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools" / "lib"))
+from platform_utils import (  # noqa: E402
+    init_utf8_streams as _init_utf8_streams,  # type: ignore[import-not-found]
+)
+
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _DEFAULT_QUERIES_PATH = _REPO_ROOT / "tests" / "fixtures" / "pgvector_real_queries.json"
 _DEFAULT_GROUND_TRUTH_PATH = _REPO_ROOT / "tests" / "fixtures" / "pgvector_real_ground_truth.json"
@@ -254,11 +259,7 @@ def seed_pg_mock(
 def main(argv: list[str] | None = None) -> int:
     # DEF-82-001/DEF-101-070 家族慣例：進度訊息含中文/≥ 等非 ASCII（印到 stderr），
     # Windows cp950 console 直接 print 會 UnicodeEncodeError 中斷；stdout + stderr 皆強制 utf-8。
-    for _stream in (sys.stdout, sys.stderr):
-        try:
-            _stream.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
-        except (AttributeError, OSError):
-            pass
+    _init_utf8_streams()
     parser = argparse.ArgumentParser(
         description="SD_09 W0 議題 C 觀察期 #2 — pgvector real recall fixture 播種"
     )

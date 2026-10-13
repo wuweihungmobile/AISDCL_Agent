@@ -112,7 +112,7 @@ class PlaybookPersistencePlugin:
         mutated_path = self._mutated_path_for(playbook_path)
         try:
             mutated_path.parent.mkdir(parents=True, exist_ok=True)
-            with mutated_path.open("w", encoding="utf-8") as f:
+            with mutated_path.open("w", encoding="utf-8", newline="") as f:
                 yaml.dump(
                     playbook.model_dump(exclude_none=True),
                     f, allow_unicode=True, default_flow_style=False,

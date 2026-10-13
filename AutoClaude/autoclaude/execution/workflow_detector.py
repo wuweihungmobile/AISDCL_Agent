@@ -3,14 +3,16 @@
 偵測依據：目錄結構中的標記檔案/資料夾。
 """
 from __future__ import annotations
+
+import logging
 from enum import Enum
 from pathlib import Path
-import logging
 
 logger = logging.getLogger("autoclaude.execution.workflow_detector")
 
 
-class WorkflowType(str, Enum):
+# UP042 刻意保留 (str, Enum)：完成訊息以 f"{workflow}" 輸出「WorkflowType.X」，StrEnum 會改成值
+class WorkflowType(str, Enum):  # noqa: UP042
     AISDLC = "aisdlc"
     AISDLC_SDD = "aisdlc_sdd"
     UNKNOWN = "unknown"

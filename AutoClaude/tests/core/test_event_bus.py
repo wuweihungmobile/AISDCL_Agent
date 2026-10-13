@@ -10,11 +10,11 @@
 """
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 import pytest
 
-from autoclaude.core.event_bus import DefaultResolutionPolicy, EventBus, MergedResult
+from autoclaude.core.event_bus import EventBus, MergedResult
 from autoclaude.core.hookspec import (
     HookContext,
     HookContractViolation,
@@ -36,7 +36,7 @@ def _pb() -> Playbook:
 class _SpyHook:
     """簡單 spy plugin。"""
     def __init__(self, name: str, priority_v: int, phases: list[KernelPhase],
-                 result: Optional[Any] = None):
+                 result: Any | None = None):
         self._n = name
         self._p = priority_v
         self._ph = phases
@@ -46,7 +46,7 @@ class _SpyHook:
     def name(self) -> str: return self._n
     def priority(self) -> int: return self._p
     def subscribed_phases(self) -> list[KernelPhase]: return self._ph
-    def on_event(self, ctx: HookContext) -> Optional[Any]:
+    def on_event(self, ctx: HookContext) -> Any | None:
         self.calls.append(ctx.phase)
         return self._r
 

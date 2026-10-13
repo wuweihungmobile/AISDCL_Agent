@@ -15,7 +15,7 @@ BACKLOG_PRIORITIZED 人工 signoff。** deterministic、純離線、零 LLM。
 from __future__ import annotations
 
 import datetime as _dt
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
 

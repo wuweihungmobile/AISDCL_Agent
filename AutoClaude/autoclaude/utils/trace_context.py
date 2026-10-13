@@ -1,6 +1,9 @@
 """trace_context — trace_id 端對端傳遞（SD_Improving_08 W4 / ADR-SD08-004 §2.3）。
 
-設計原則（**LOC tier 實際適用**：trace_context.py 位於 `autoclaude/utils/` 不在任何 LOC tier patterns，`tools/check_loc_budget.py` 視為 unclassified → ABSOLUTE_LIMIT 750；當前 229 LOC（SD_09 W3 路徑 (b) W3C helper 已落地，仍遠低於 750；`.loc-budget.toml` 顯式 contract tier ≤ 400 雙簽核 override 列 W3 T3-F1b 收尾項）— 詳見 ADR-SD09-004 §3.0 R41 校正）：
+設計原則（**LOC tier 實際適用**：trace_context.py 位於 `autoclaude/utils/` 不在任何 LOC tier
+patterns，`tools/check_loc_budget.py` 視為 unclassified → ABSOLUTE_LIMIT 750；當前 229 LOC（SD_09
+W3 路徑 (b) W3C helper 已落地，仍遠低於 750；`.loc-budget.toml` 顯式 contract tier ≤ 400 雙簽核
+override 列 W3 T3-F1b 收尾項）— 詳見 ADR-SD09-004 §3.0 R41 校正）：
   - 使用 `contextvars.ContextVar`，預設值 None；不污染 IBrain / IExecutor Port 簽名
   - `with_trace_id()` context manager 自動還原（reset token），杜絕跨流程污染
   - `run_in_thread_with_context()` 顯式 `copy_context().run()` 包裝（R-SD08-F-1 緩解）
@@ -19,23 +22,24 @@ from __future__ import annotations
 import os
 import threading
 import uuid
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar, copy_context
-from typing import Callable, Iterator, Optional, TypeVar
+from typing import TypeVar
 
 # trace_id ContextVar — 預設 None；以 with_trace_id() 設定
-trace_id: ContextVar[Optional[str]] = ContextVar("trace_id", default=None)
+trace_id: ContextVar[str | None] = ContextVar("trace_id", default=None)
 
 _T = TypeVar("_T")
 
 
-def get_trace_id() -> Optional[str]:
+def get_trace_id() -> str | None:
     """取得當前 trace_id；未設定回 None。"""
     return trace_id.get()
 
 
 @contextmanager
-def with_trace_id(tid: Optional[str] = None) -> Iterator[str]:
+def with_trace_id(tid: str | None = None) -> Iterator[str]:
     """設定 trace_id 並在 context manager 結束時還原（reset token）。
 
     Args:
@@ -99,9 +103,9 @@ def start_thread_with_context(
     target: Callable[..., None],
     *,
     args: tuple = (),
-    kwargs: Optional[dict] = None,
+    kwargs: dict | None = None,
     daemon: bool = True,
-    name: Optional[str] = None,
+    name: str | None = None,
 ) -> threading.Thread:
     """建立並啟動帶 contextvars 拷貝的 Thread（R-SD08-F-1 一站式 API）。
 

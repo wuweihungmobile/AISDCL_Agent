@@ -490,7 +490,8 @@ def operator_genesis_round(
     cap_k = k if k is not None else dim_expand_k()
     cands = candidates if candidates is not None else enumerate_genesis_operators(budget=budget)
     mgn = margin if margin is not None else op_coverage_margin()
-    tfn = lambda q: int(round(q * 100))
+    def tfn(q):
+        return int(round(q * 100))
 
     proposals: List[OperatorProposal] = []
     for go in cands:

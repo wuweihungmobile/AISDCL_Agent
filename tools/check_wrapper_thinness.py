@@ -168,7 +168,7 @@ _PINNED_SHA256: dict[str, str] = {
     # （單一 .venv 設計，同 integration_gate.sh 上方理由），取代原 `is_real_python_candidate`
     # + 裸 `python`。仍屬「選直譯器 → 轉呼叫核心」薄殼職責，非降級。
     "AutoClaude/tools/local_ci_gate.sh": (
-        "91f3c4f3aa622bbfbc1aa80f289d2ace82bb91d869e94d1d536446d489ab2385"
+        "519336c04e4a6b02311d50229d32ed1c512ae96321ab3b5b9b97566b3312e43a"
     ),
     # R44：python 前置檢查改走 tools/lib/WindowsAppsGuard.ps1::Test-IsRealPython SSOT
     # R60（F-refuter-1）：$PytestArgs 預設值由寫死的 'tests/ -q --tb=short' 改為 ''
@@ -194,7 +194,7 @@ _PINNED_SHA256: dict[str, str] = {
     # R80 S5-05 刪除——空了 60 餘輪卻仍被三處寫成第一條納管途徑）
     # R43：補上 WindowsApps guard dot-source（同上 DEF-101-353）
     "tools/bootstrap.sh": (
-        "5d73047f1f81e81ed0b47a8147dbe69801640ee77f727ecc953c51d9eb865857"
+        "7c40e7f534439d32e4ad11dd5bec8480eda1c02cb497c83959fa97146c485c30"
     ),
     # R37：WindowsApps 空殼排除 guard 收斂為 dot-source tools/lib/WindowsAppsGuard.ps1
     # 共用函式（DEF-101-273/279/300/303 反覆復發後的架構收斂）
@@ -212,7 +212,7 @@ _PINNED_SHA256: dict[str, str] = {
     # 下互動式入口一律優先釘死 repo 根層 .venv，改呼叫 `pick_repo_python`（同檔 SSOT，
     # 只在 CI／逃生口才落回 PATH 候選）。`.ps1` 側本輪同步改用 `Get-RepoPython`（見下）。
     "tools/integration_gate.sh": (
-        "b6c3b000964660ccbb3d8e31a5d838a43a912d0093973de207d71cbc1c423554"
+        "9f49bc80d08f80668f543f518c00818deb668cbeda43c97aed13c411516b8207"
     ),
     # R44：python 前置檢查改走 tools/lib/WindowsAppsGuard.ps1::Test-IsRealPython SSOT
     # DEF-200-315（2026-09-19 掌舵者裁決）重釘：改用 `Get-RepoPython`（同上 .sh 側理由）。

@@ -14,7 +14,6 @@ import pytest
 
 from autoclaude.core.ports.brain import (
     BrainCapabilities,
-    CorrectionResult,
     EscalationDecision,
     IBrain,
     RetryPolicy,

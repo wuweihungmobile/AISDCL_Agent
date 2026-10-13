@@ -8,7 +8,6 @@
 from __future__ import annotations
 
 import re
-from typing import Optional
 
 from ...execution.evaluator import Evaluator
 from ...models.playbook import PlaybookTask
@@ -25,7 +24,7 @@ class ShellEvaluator:
 
     def evaluate(
         self, task: PlaybookTask, output: str
-    ) -> tuple[Optional[str], str, int]:
+    ) -> tuple[str | None, str, int]:
         # 1. regex 比對（先 strip ANSI）
         if task.expected_output_regex:
             if not re.search(task.expected_output_regex, strip_ansi(output)):

@@ -38,6 +38,7 @@ except ImportError:
     _alembic_available = False
 
 
+# SQL 內嵌的 COMMENT ON 文字不可斷行（已 apply 的遷移，不改 SQL 位元組）；E501 於字串結尾豁免
 _UPGRADE_SQL = r"""
 -- =============================================================================
 -- 0008: 新欄位 + per-partition partial HNSW per model_id（dual-read 模式）
@@ -91,7 +92,7 @@ CREATE INDEX IF NOT EXISTS idx_kb_embedding_status
 CREATE INDEX IF NOT EXISTS idx_kb_embedding_model_id
     ON knowledge_entries (embedding_model_id)
     WHERE embedding_model_id IS NOT NULL;
-"""
+"""  # noqa: E501
 
 
 _DOWNGRADE_SQL = r"""

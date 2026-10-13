@@ -9,7 +9,6 @@ extract_context_pct() 不誤判（precision 100%）。
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List
 
 import pytest
 
@@ -28,7 +27,7 @@ _REGEX_FIXTURES = {
 }
 
 
-def _read_lines(fname: str) -> List[str]:
+def _read_lines(fname: str) -> list[str]:
     p = _FIXTURE_DIR / fname
     assert p.exists(), f"sample file missing: {p}"
     return [ln.strip() for ln in p.read_text(encoding="utf-8").splitlines() if ln.strip()]

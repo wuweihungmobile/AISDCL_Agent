@@ -11,7 +11,8 @@ from typing import Any
 
 
 def resolve_artifact(source: Any, artifact_rel: str, workflow_path: str | None) -> str | None:
-    """``<workflow_path>/<artifact_rel>`` 存在則回絕對路徑字串，否則 None（無 source / 無 path 亦 None）。"""
+    """``<workflow_path>/<artifact_rel>`` 存在則回絕對路徑字串，否則 None（無 source / 無
+    path 亦 None）。"""
     if source is None or not workflow_path:
         return None
     path = Path(workflow_path) / artifact_rel

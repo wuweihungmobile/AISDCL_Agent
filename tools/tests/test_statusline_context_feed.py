@@ -79,6 +79,15 @@ class BuildFeedDocTest(unittest.TestCase):
         self.assertEqual(doc["version"], "2.1.13")
         self.assertIn("+", doc["ts"][-6:], "ts 必須帶 offset，不可是 naive 本地時間戳")
 
+    def test_rate_limits_are_forwarded_verbatim_and_absent_means_no_key(self) -> None:
+        """T3：官方 `rate_limits`（首次 API 回應後才有）鍵名不猜、原樣轉；沒有就不寫鍵。"""
+        limits = {"five_hour": {"used_percentage": 23.5, "resets_at": 1738425600},
+                  "weird_new_window": {"used_percentage": 1, "resets_at": 1}}
+        self.assertEqual(feed.build_feed_doc({**_SAMPLE, "rate_limits": limits})["rate_limits"],
+                         limits)
+        for absent in ({}, {"rate_limits": None}, {"rate_limits": "x"}):
+            self.assertNotIn("rate_limits", feed.build_feed_doc({**_SAMPLE, **absent}))
+
     def test_missing_session_id_raises(self) -> None:
         """注入：`session_id` 缺席時本函式必須 raise，讓呼叫端的 fail-open 分支接住——
         若靜默用某個佔位字串頂替，feed 檔就會寫到錯的 session。"""

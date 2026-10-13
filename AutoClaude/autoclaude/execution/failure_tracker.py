@@ -3,9 +3,9 @@
 用於 PlaybookRunner CORRECTION 迴圈，防止無效重試並提前識別根因。
 """
 from __future__ import annotations
+
 import re
 from dataclasses import dataclass
-from typing import Optional
 
 # Gap-008-A：失敗數提取 Pattern（與 ConvergenceMonitor 使用相同規則，但各自持有副本避免循環 import）
 _FAIL_COUNT_PATTERNS = [
@@ -27,9 +27,9 @@ _TEST_FILE_RE = re.compile(r'(?:test_\w+|\w+_test)\.py', re.IGNORECASE)
 
 # Gap-007-E：多模式實作檔錯誤偵測（原單模式要求 :行號，無行號格式會繞過）
 _IMPL_ERROR_PATTERNS = [
-    re.compile(r'\b(?!test_)[a-zA-Z]\w*\.py:\d+'),          # 帶行號（精確）
-    re.compile(r'\((?!test_)[a-zA-Z]\w*\.py\)'),             # 括號內的實作檔引用（ImportError 格式）
-    re.compile(r"from '(?!test)[^']*\.py'"),                  # from 'module.py' 格式
+    re.compile(r'\b(?!test_)[a-zA-Z]\w*\.py:\d+'),         # 帶行號（精確）
+    re.compile(r'\((?!test_)[a-zA-Z]\w*\.py\)'),            # 括號內的實作檔引用（ImportError 格式）
+    re.compile(r"from '(?!test)[^']*\.py'"),                 # from 'module.py' 格式
 ]
 
 
@@ -62,7 +62,8 @@ class AttemptRecord:
     minimax_reasoning: str
     correction_prompt_sent: str = ""  # Minimax 生成的完整修正指令（可審計性）
     error_class: str = "unknown"      # ErrorClassifier 語義分類（syntax/import/assertion/...）
-    mutation_applied: bool = False    # Gap-032：此次 correction 是否已觸發突變（防止 mutation_pressure 過計數）
+    # Gap-032：此次 correction 是否已觸發突變（防止 mutation_pressure 過計數）
+    mutation_applied: bool = False
 
 
 class FailureTracker:
@@ -94,7 +95,7 @@ class FailureTracker:
         ]
 
     @classmethod
-    def from_records(cls, step_id: str, records: list[dict]) -> "FailureTracker":
+    def from_records(cls, step_id: str, records: list[dict]) -> FailureTracker:
         """從 checkpoint 記錄重建 FailureTracker（恢復後的收斂偵測繼承歷史）。"""
         tracker = cls(step_id)
         for rec in records:
@@ -116,7 +117,7 @@ class FailureTracker:
 
     def next_strategy(
         self,
-        kb: "Optional[object]" = None,  # Optional[FailureKnowledgeBase]
+        kb: object | None = None,  # Optional[FailureKnowledgeBase]
         current_error_class: str = "unknown",
     ) -> str:
         """
@@ -261,7 +262,7 @@ class FailureTracker:
         return len(unique_sigs) >= 2
 
     @staticmethod
-    def _extract_fail_count_from_output(eval_output: str) -> Optional[int]:
+    def _extract_fail_count_from_output(eval_output: str) -> int | None:
         """Gap-008-A：從 eval_output 提取失敗測試數。"""
         for pattern in _FAIL_COUNT_PATTERNS:
             m = pattern.search(eval_output)

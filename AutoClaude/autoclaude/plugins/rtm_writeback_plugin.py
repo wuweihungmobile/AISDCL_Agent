@@ -53,7 +53,10 @@ class RtmWritebackPlugin:
         if self._adapter is None or self._sink is None:
             return None
         tasks = list(getattr(ctx.playbook, "tasks", []) or [])
-        sdd_tasks = [t for t in tasks if (getattr(t, "step_id", "") or "").startswith(_SDD_STEP_PREFIX)]
+        sdd_tasks = [
+            t for t in tasks
+            if (getattr(t, "step_id", "") or "").startswith(_SDD_STEP_PREFIX)
+        ]
         if not sdd_tasks:
             return None  # 非 SDD playbook → no-op（零退化）
         payload = ctx.payload or {}

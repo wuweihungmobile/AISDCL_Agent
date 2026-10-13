@@ -142,14 +142,31 @@ class ClaudeConfig(BaseModel):
     # 加 `--allowedTools` 白名單（範例：scripts/bridge_e2e/wordcount/config.template.yaml）。
     # `--permission-mode bypassPermissions`／`--dangerously-skip-permissions` 只准容器內＋
     # ALLOW_PERMISSION_BYPASS=true，否則開機自檢拒絕啟動（PRD §12；boot_self_check 不變式 8）。
-    # 機械物：tests/test_claude_cli_flags.py（拿 `claude --help` 當 fixture 逐旗標比對）。
+    # 機械物：tests/test_r82_quota_axis_and_shipped_defaults.py::TestClaudeCliFlagsAreReal
+    # （拿 `claude --help` 當 fixture 逐旗標比對；🔴 注意 help 不列的旗標會被它判成未知，見下方
+    # `max_turns_per_step`：`--max-turns` 存在卻不在 help，不要把它塞進 extra_args）。
     extra_args: list[str] = Field(default_factory=list)
     continue_flag: str = "--continue"   # 傳遞給 claude 以維持對話脈絡
+    # ARCH-03：每個步驟單次 `claude -p` 呼叫的回合數上限（回合數軸的 agent 預算；牆鐘軸＝
+    # `playbook.step_timeout_seconds`、額度軸＝撞線 halt，三軸各管各的）。None＝不送旗標＝出廠行為。
+    # `--max-turns` 是 CLI 的原生旗標、只是不列在 `--help`：判別法是 `claude -p --max-turns 3
+    # </dev/null`（零 token）回 `Input must be provided`＝旗標被接受，未知旗標則回 `unknown option`
+    # （紀錄見 utils/verified_cli_versions.py）。與 extra_args 內的 `--max-turns` 擇一，勿兩邊都設。
+    max_turns_per_step: int | None = Field(default=None, ge=1, le=1000)
     encoding: str = "utf-8"
     # W-82-1 / DEF-81-001 PTY 支根因修復：PtyExecutor 以 `--output-format <fmt>` 啟動 claude -p。
     # 預設 "json"＝啟用真接線（從結構化 usage 推算真實 context% → emit TOKEN_PCT，使 token-guard
     # 在真跑可被觸發）。設 "" 則退回純文字舊行為（不加參數、不 parse，向後相容開關）。
     output_format: str = "json"
+
+    def base_args(self) -> list[str]:
+        """每次 `claude -p` 呼叫共用的旗標前綴＝extra_args ＋（設了才有的）`--max-turns <N>`。
+
+        兩條 argv 組裝路徑（pty_executor／prompt_dispatcher）只准經由這裡取得——各自再寫一份
+        旗標邏輯就是同一份知識兩個家（`tests/test_max_turns_per_step.py` 以 AST 鎖住）。
+        """
+        extra = ["--max-turns", str(self.max_turns_per_step)] if self.max_turns_per_step else []
+        return [*self.extra_args, *extra]
 
 
 class LoopConfig(BaseModel):
@@ -273,6 +290,12 @@ class TokenGuardConfig(BaseModel):
     sleep_slice_seconds: int = Field(default=30, ge=1, le=600)
     clock_jump_tolerance_seconds: int = Field(default=5, ge=1, le=3600)
     max_inprocess_wait_seconds: int = Field(default=18000, ge=60, le=86400)
+    # PRD §8 列 1（推論端非預期 429）：失敗訊息帶 `Retry-After` 且 ≤ max_retry_after_seconds 時，
+    # kernel 原地退避後重跑同一個 attempt（full-jitter，不消耗 attempt、不問 Brain），每個 step
+    # 最多 max_limit_retries 次；Retry-After 缺席／過長／用盡／額度已撞硬線 ⇒ 既有 halt 路徑不變。
+    # max_limit_retries=0 ＝關閉整個機制。上界 3600／20 是防呆（等一小時以上是 halt，不是退避）。
+    max_retry_after_seconds: int = Field(default=300, ge=1, le=3600)
+    max_limit_retries: int = Field(default=5, ge=0, le=20)
     # 從 Claude Code 輸出中偵測 context 使用率的 regex patterns
     # T7（SD_04 §3 / M-4）：補強 Claude Code 實際輸出格式涵蓋率
     #   - 原 4 個：%context、context%、N/M tokens、[CONTEXT_USAGE: N%]

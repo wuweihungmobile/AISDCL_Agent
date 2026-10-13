@@ -18,7 +18,6 @@ from tools.fsm_runtime.state_loader import load_state, save_state
 from tools.fsm_runtime.transition_rules import (
     TransitionError,
     OBSERVATION_STATES,
-    _HAPPY_PATH,
 )
 
 

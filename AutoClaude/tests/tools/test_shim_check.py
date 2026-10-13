@@ -1,4 +1,5 @@
-"""tests/tools/test_shim_check.py — check_frozen_surface_shim.py 驗證工具測試（SD_03 §2.2, W5 更新）。
+"""tests/tools/test_shim_check.py — check_frozen_surface_shim.py 驗證工具測試（SD_03 §2.2,
+W5 更新）。
 
 驗證：
   1. 正常 shim 通過（含 W5 新模式：_evaluate 直接委派 _runner_compat）
@@ -13,14 +14,15 @@ import ast
 import sys
 from pathlib import Path
 
-import pytest
-
-# 加入 tools 目錄到 sys.path
+# 加入 tools 目錄到 sys.path（下方 import 必須排在 sys.path.insert 之後，故 noqa: E402）
 TOOLS_DIR = Path(__file__).resolve().parent.parent.parent / "tools"
 sys.path.insert(0, str(TOOLS_DIR))
 
-from check_frozen_surface_shim import (
-    _check_shim, SHIM_METHODS, REQUIRES_ORCHESTRATOR_CHECK, RUNNER_PATH
+from check_frozen_surface_shim import (  # noqa: E402
+    REQUIRES_ORCHESTRATOR_CHECK,
+    RUNNER_PATH,
+    SHIM_METHODS,
+    _check_shim,
 )
 
 
@@ -109,7 +111,8 @@ def _apply_single_mutation(self, mutation, playbook, *args, **kwargs):
         src = """
 def _apply_single_mutation(self, mutation, playbook, *args, **kwargs):
     if self._orchestrator:
-        return self._orchestrator.kernel.mutation_service.apply(mutation, playbook, args[2] if len(args) > 2 else 0)
+        return self._orchestrator.kernel.mutation_service.apply(
+            mutation, playbook, args[2] if len(args) > 2 else 0)
     return super()._apply_single_mutation(mutation, playbook, *args, **kwargs)
 """
         method = _parse_method(src)
@@ -117,7 +120,8 @@ def _apply_single_mutation(self, mutation, playbook, *args, **kwargs):
         assert errors == [], f"預期通過，但有錯誤: {errors}"
 
     def test_requires_orchestrator_check_contains_correct_methods(self):
-        """REQUIRES_ORCHESTRATOR_CHECK 應包含 _apply_single_mutation 和 _validate_batch_compatibility。"""
+        """REQUIRES_ORCHESTRATOR_CHECK 應包含 _apply_single_mutation 和
+        _validate_batch_compatibility。"""
         assert "_apply_single_mutation" in REQUIRES_ORCHESTRATOR_CHECK
         assert "_validate_batch_compatibility" in REQUIRES_ORCHESTRATOR_CHECK
         assert "_evaluate" not in REQUIRES_ORCHESTRATOR_CHECK
@@ -135,7 +139,8 @@ class TestShimCheckIntegration:
         src = RUNNER_PATH.read_text(encoding="utf-8")
         tree = ast.parse(src)
         runner_cls = next(
-            (n for n in ast.walk(tree) if isinstance(n, ast.ClassDef) and n.name == "PlaybookRunner"),
+            (n for n in ast.walk(tree)
+             if isinstance(n, ast.ClassDef) and n.name == "PlaybookRunner"),
             None,
         )
         assert runner_cls is not None, "找不到 PlaybookRunner 類別"
@@ -148,7 +153,8 @@ class TestShimCheckIntegration:
         src = RUNNER_PATH.read_text(encoding="utf-8")
         tree = ast.parse(src)
         runner_cls = next(
-            (n for n in ast.walk(tree) if isinstance(n, ast.ClassDef) and n.name == "PlaybookRunner"),
+            (n for n in ast.walk(tree)
+             if isinstance(n, ast.ClassDef) and n.name == "PlaybookRunner"),
             None,
         )
         assert runner_cls is not None

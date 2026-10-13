@@ -10,7 +10,6 @@ AmbiguityScorer（Rule 9.16）量化「輸入規格模糊度」；OQS 是它的�
 from __future__ import annotations
 
 from dataclasses import dataclass, asdict
-from typing import Optional
 
 SCORER_VERSION = "v1.0"
 

@@ -22,8 +22,9 @@ core-purity contract（.importlinter #2）：本檔 import 模式與 ISpecSource
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Mapping, Protocol, Sequence
+from typing import Any, Protocol
 
 
 class DashboardNotVerifiedError(RuntimeError):
@@ -37,7 +38,8 @@ class DashboardNotVerifiedError(RuntimeError):
 
 @dataclass(frozen=True)
 class TopologyDashboard:
-    """已渲染、已 PY-2 稽核的拓樸審批儀表板快照（消費 SDD ``render_recursion_topology_dashboard`` 產物）。"""
+    """已渲染、已 PY-2 稽核的拓樸審批儀表板快照（消費 SDD
+    ``render_recursion_topology_dashboard`` 產物）。"""
 
     markdown: str               # 人類可讀三視圖 Markdown（拓樸 / 終止 / 接地）
     operator_fingerprint: str   # 算子指紋（對齊 to_dict()["fingerprint"]）
@@ -85,7 +87,8 @@ class ITopologyDashboardSource(Protocol):
     def load_dashboard(self, artifact_path: str) -> TopologyDashboard:
         """讀取 SDD 端產出的儀表板產物（Markdown 本體 + JSON sidecar），fail-closed 稽核後回傳。
 
-        產物約定（**鏡像 ISpecSource 讀 build/reports/fsm/FSM-STATE**——消費資料產物，非 import 程式碼）：
+        產物約定（**鏡像 ISpecSource 讀 build/reports/fsm/FSM-STATE**——消費資料產物，非
+        import 程式碼）：
           - ``<artifact_path>``：``render_recursion_topology_dashboard`` 輸出之 Markdown。
           - ``<artifact_path>`` 去副檔名 + ``.json``：``render_json`` sidecar，須含
             ``consistency.verified``(bool，SDD 端 verify_topology_consistency 結果) +

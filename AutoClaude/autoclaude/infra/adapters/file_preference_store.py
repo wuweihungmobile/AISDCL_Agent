@@ -68,7 +68,7 @@ class FilePreferenceStore:
             if self._line_count >= _MAX_LINES_BEFORE_COMPACT:
                 self._rewrite()
             else:
-                with self._path.open("a", encoding="utf-8") as f:
+                with self._path.open("a", encoding="utf-8", newline="") as f:
                     f.write(json.dumps(row, ensure_ascii=False) + "\n")
                 self._line_count += 1
         except OSError as exc:
@@ -76,7 +76,7 @@ class FilePreferenceStore:
 
     def _rewrite(self) -> None:
         ts = datetime.now(UTC).isoformat()
-        with self._path.open("w", encoding="utf-8") as f:
+        with self._path.open("w", encoding="utf-8", newline="") as f:
             for (scope, key), value in self._cache.items():
                 f.write(json.dumps(
                     {"scope": scope, "key": key, "value": value, "ts": ts},

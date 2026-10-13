@@ -17,11 +17,11 @@
 """
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 from typing import Final
 
 
-class PIIClassification(str, Enum):
+class PIIClassification(StrEnum):
     """PII 三態分類（hybrid 策略：ENUM 結構 + W3 過濾器行為）。
 
     繼承 ``str`` 是為了 JSON / YAML 持久化時直接序列化為字串值，

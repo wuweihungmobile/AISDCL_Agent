@@ -14,6 +14,7 @@ from dataclasses import is_dataclass
 import pytest
 
 from autoclaude.core.hookspec import (
+    PHASE_RESULT_CONTRACT,
     CounterSnapshotResult,
     EscalationDumpedResult,
     GoalValidationResult,
@@ -22,14 +23,13 @@ from autoclaude.core.hookspec import (
     KernelPhase,
     MutationApplyResult,
     MutationProposal,
-    PHASE_RESULT_CONTRACT,
     PersistenceResult,
     PromptInjectionResult,
     ResourceRequest,
     ScheduleResumeResult,
     VetoResult,
 )
-from autoclaude.models.playbook import Playbook, GlobalInvariants
+from autoclaude.models.playbook import GlobalInvariants, Playbook
 
 
 def _make_playbook() -> Playbook:
@@ -164,11 +164,15 @@ class TestPhaseResultContract:
     def test_sd05_w0_new_phase_contracts(self):
         # SD_Improving_05 W0 T0-1：8 個新 phase 對應契約
         assert ScheduleResumeResult in PHASE_RESULT_CONTRACT[KernelPhase.ON_AUTO_RESUME_WAKE]
-        assert CounterSnapshotResult in PHASE_RESULT_CONTRACT[KernelPhase.ON_CHECKPOINT_SAVE_REQUEST]
+        assert CounterSnapshotResult in PHASE_RESULT_CONTRACT[
+            KernelPhase.ON_CHECKPOINT_SAVE_REQUEST
+        ]
         assert PersistenceResult in PHASE_RESULT_CONTRACT[KernelPhase.ON_PERSISTENCE_REQUEST]
         assert MutationApplyResult in PHASE_RESULT_CONTRACT[KernelPhase.ON_EVOLUTION_APPLY]
         assert MutationProposal in PHASE_RESULT_CONTRACT[KernelPhase.ON_EVOLUTION_PROPOSE]
-        assert EscalationDumpedResult in PHASE_RESULT_CONTRACT[KernelPhase.ON_ESCALATION_DUMP_REQUEST]
+        assert EscalationDumpedResult in PHASE_RESULT_CONTRACT[
+            KernelPhase.ON_ESCALATION_DUMP_REQUEST
+        ]
         assert GoalValidationResult in PHASE_RESULT_CONTRACT[KernelPhase.ON_SUCCESS]
 
 
@@ -197,7 +201,9 @@ class TestSD05NewResults:
         assert r.clear_goal_summary is False
 
     def test_goal_validation_result(self):
-        r = GoalValidationResult(contributor="goal_synthesis", achieved=True, reasoning="all tests pass")
+        r = GoalValidationResult(
+            contributor="goal_synthesis", achieved=True, reasoning="all tests pass"
+        )
         assert r.achieved is True
         assert r.reasoning == "all tests pass"
 

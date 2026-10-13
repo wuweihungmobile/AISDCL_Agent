@@ -131,7 +131,8 @@ def test_escalation_dump_without_topology_omits_section():
 
 
 def test_dump_escalation_resolver_pulls_from_plugin(tmp_path):
-    """AT-14-2-8：choke-point resolver 自 runner 上 sdd_governance plugin 取 pending 儀表板；缺則 ""。"""
+    """AT-14-2-8：choke-point resolver 自 runner 上 sdd_governance plugin 取 pending
+    儀表板；缺則 ""。"""
     from autoclaude.execution.escalation_dumper import _resolve_topology_dashboard
 
     _write_dashboard(tmp_path)

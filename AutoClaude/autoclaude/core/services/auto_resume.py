@@ -38,6 +38,7 @@ from ...utils.sliced_sleep import sliced_sleep
 from ..kernel_state import KernelResult
 from ..ports.worktree_rescue import UNSAFE_TO_FREEZE
 from ._auto_resume_metrics import AutoResumeMetrics, record_wake_and_emit
+from .external_resume import hand_off
 
 if TYPE_CHECKING:
     from ...utils.config import AppConfig
@@ -91,8 +92,8 @@ class AutoResumeService:
             worktree_rescue: 可選的 IWorktreeRescue（DEF-200-205）；未注入時
                               `_freeze_is_safe` 恆回 True，行為與修前位元級相同
             is_interrupted: 可選的「是否被中斷」判斷（improving_113）。等待在片與片之間檢查它；
-                              中斷事件由呼叫端注入（main 傳入 hotkey 的 `triggered`，但入口目前
-                              未呼叫 hotkey.register()，故該事件實際不會被設定）；未注入＝永不中斷
+                              中斷事件由呼叫端注入（main 傳入 hotkey 的 `triggered`；入口只在有 TTY
+                              且非無人值守時註冊全域熱鍵，其餘場合該事件不會被設定）；未注入＝永不中斷
         """
         self._kernel = kernel
         self._cfg = config
@@ -300,6 +301,13 @@ class AutoResumeService:
                 # _persist_halt_checkpoint 內的說明與實測），故以本輪剛排定的時刻兜底。
                 sched = result.scheduled_resume_at or halt_sched
                 wait_secs = self._halt_wait_seconds(sched)
+                # 🔴 額度路徑不讀 resume_delay_minutes（config.py 明文），但 halt 存的
+                # checkpoint 時刻正是它推算的：額度 reset 比它早時，睡完後續跑輪會把它
+                # 當下限再補睡（reset 後白等，最壞約 30 分／次）。釘成真實終點（同拒絕
+                # 路徑的 _pin_resume_time：向上取整到分鐘、寧晚勿早）；reset 晚於它時，
+                # 睡完它早已過期，不必動。
+                if self._state_repo is not None and wait_secs + 2.0 < seconds_until_resume(sched):
+                    self._pin_resume_time(_current_path, wait_secs)
                 logger.info(
                     "AutoResumeService | AUTO_RESUME #%d/%d | 排定等待 %.0fs",
                     auto_resume_count, max_resumes, wait_secs,
@@ -323,9 +331,10 @@ class AutoResumeService:
     # 內容為 (reason, 續跑時刻)，呼叫端就地返回 success=False 的結果（main 據此回非零 rc）：
     #   · external_resume_required：等待 > max_inprocess_wait_seconds ⇒ 拒絕行程內長睡。此時
     #     checkpoint 已由上游落地（halt 路徑＝_persist_halt_checkpoint；續跑路徑＝剛讀到的那份）；
-    #     這裡再讀回一次確認，讀不回來就在訊息裡說「未確認落地」而不是謊報。🔴 本版沒有任何元件
-    #     自動承接被拒絕的等待（本層也刻意不自己蓋排程器，免得同一份知識住兩個家）：
-    #     引擎以 rc=1 退出，須由外部（人工／自備排程器）在續跑時刻後重啟。
+    #     這裡再讀回一次確認，讀不回來就在訊息裡說「未確認落地」而不是謊報。🔴 引擎以 rc=1 退出，
+    #     本層刻意不自己蓋排程器（免得同一份知識住兩個家）：**預設**沒有任何元件承接，須由外部
+    #     （人工／自備排程器）在續跑時刻後重啟；操作者設了 AUTOCLAUDE_EXTERNAL_RESUME_CMD 才在
+    #     拒絕之後交棒一次給外部承接者（external_resume.py；checkpoint 已落地才交、失敗只出聲）。
     #   · interrupted_during_wait：等待中被中斷（呼叫端注入的 is_interrupted）；發生在等待之中，
     #     故 emit 已記錄。
     # 拒絕在 emit 之前判：根本沒開始的等待不得記成一次喚醒。
@@ -346,6 +355,7 @@ class AutoResumeService:
                 wait_secs, at or "未排定", tg.max_inprocess_wait_seconds,
                 "已落地" if saved else "未確認落地",
             )
+            hand_off(path, at, wait_secs, confirmed=bool(saved))   # ARCH-01：預設（變數未設）零動作
             return "external_resume_required", at
         self._emit_auto_resume_wake(sched, kind, wait_secs)
         out = sliced_sleep(
@@ -415,7 +425,8 @@ class AutoResumeService:
     #   量不到               → 同上，行為與修前位元級相同
     # 🔴 誠實劃界：這一段只在**行程還活著**時成立。行程一死（Ctrl+C／關機／額度撞線把
     # subagent 全殺）就沒有人會回來——那一半屬於 OS 級喚醒：
-    # 本版無自動承接者；拒絕長睡時以 rc=1 退出並明示需外部重啟（improving_113）。
+    # 預設無自動承接者；拒絕長睡時以 rc=1 退出並明示需外部重啟（improving_113）；操作者設了
+    # AUTOCLAUDE_EXTERNAL_RESUME_CMD 則另交棒一次（external_resume.py）。
     # 🔴 水位低於 quota_throttle_pct 時**完全不碰**額度那一軸：這一支同時服務 context halt，
     # 而 context halt 與額度無關——不設這道門的話，每一次 context halt 都會印一行
     # 「額度 kind=weekly_all 沒有等得到的 reset」，那是與本次 halt 無關的假訊號。

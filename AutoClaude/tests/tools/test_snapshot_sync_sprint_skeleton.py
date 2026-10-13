@@ -14,7 +14,6 @@ sys.path.insert(0, str(PROJECT_ROOT / "tools"))
 
 import snapshot_sync  # noqa: E402
 
-
 SAMPLE_CLAUDE_MD = """\
 # Doc
 

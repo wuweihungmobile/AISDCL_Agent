@@ -270,12 +270,35 @@ def test_improving_113_the_local_cli_2_1_295_is_on_the_verified_list():
     assert B.DRY_RUN_TEXT not in line
 
 
-def test_improving_113_the_verified_text_never_claims_the_flag_the_cli_help_lacks():
-    """`--max-turns` 不在 2.1.295 的 `claude --help`（零 token 實測 `grep -c` 回 0）。PRD §4.5.4 的
-    喚醒指令範例含該旗標並註明 [需核對]；清單只准寫「核實過什麼」，不得被讀成已核實。"""
-    lines = B.VERIFIED_CLI_VERSIONS["2.1.295"]["verified"]
-    assert lines, "空清單會讓下一行斷言恆真"
-    assert not [ln for ln in lines if "--max-turns" in ln]
+# ARCH-03：旗標存在與否的判別是 `claude -p <旗標> </dev/null` 的**錯誤類別**（零 token：輸入缺席先於
+# 任何 API 呼叫），不是 `claude --help` 有沒有列——`--max-turns` 隱藏於 help 卻被接受。兩段逐字輸出
+# ＝2.1.296 當回合實測（improving_113 當時拿 `grep -c` 回 0 推論「旗標不存在」是方法錯誤）。
+_FLAG_ACCEPTED = ("Error: Input must be provided either through stdin or as a prompt argument "
+                  "when using --print\n")
+_FLAG_UNKNOWN = "error: unknown option '--definitelynotaflag'\n"
+
+
+def _flag_verdict(stderr: str) -> bool | None:
+    """True＝旗標被接受；False＝未知旗標；None＝判別不出（不下結論，不當成「不存在」）。"""
+    if "unknown option" in stderr:
+        return False
+    return True if "Input must be provided" in stderr else None
+
+
+def test_the_flag_judge_separates_a_hidden_flag_from_a_nonexistent_one():
+    assert _flag_verdict(_FLAG_ACCEPTED) is True
+    assert _flag_verdict(_FLAG_UNKNOWN) is False
+    assert _flag_verdict("Segmentation fault\n") is None
+
+
+def test_a_verified_flag_claim_cites_the_error_class_with_a_negative_control():
+    """清單裡凡斷言 `--max-turns` 被接受的核實項，必須逐字引用「被接受」的錯誤類別，且同版另有
+    「未知旗標」對照組——沒有對照組＝無法證明判別本身有鑑別力。2.1.295 條目從未核實它，維持不補。"""
+    lines = B.VERIFIED_CLI_VERSIONS["2.1.296"]["verified"]
+    claims = [ln for ln in lines if "--max-turns" in ln]
+    assert claims and all("Input must be provided" in ln for ln in claims), lines
+    assert any("unknown option" in ln for ln in lines), "沒有未知旗標的對照組"
+    assert not [ln for ln in B.VERIFIED_CLI_VERSIONS["2.1.295"]["verified"] if "--max-turns" in ln]
 
 
 # ══════════════════════════════════════════════════════════════════════════════

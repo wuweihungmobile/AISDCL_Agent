@@ -30,6 +30,11 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
+sys.path.insert(0, str(PROJECT_ROOT.parent / "tools" / "lib"))
+from platform_utils import (  # noqa: E402
+    init_utf8_streams as _init_utf8_streams,  # type: ignore[import-not-found]
+)
+
 WARN_THRESHOLD = 0.10  # 10% — 觸發 ::warning::
 BLOCK_THRESHOLD = 0.15  # 15% — 觸發 ::error:: + block
 
@@ -315,11 +320,7 @@ def check(
 def main() -> int:
     # DEF-82-001/DEF-101-070 家族慣例：報表含中文/非 ASCII 符號，Windows cp950 console
     # 直接 print 會 UnicodeEncodeError 中斷；stdout + stderr 皆強制 utf-8。
-    for _stream in (sys.stdout, sys.stderr):
-        try:
-            _stream.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
-        except (AttributeError, OSError):
-            pass
+    _init_utf8_streams()
     parser = argparse.ArgumentParser(description="Perf regression checker (ADR-SD08-003)")
     parser.add_argument("results", type=Path, help="perf_results.json")
     parser.add_argument(

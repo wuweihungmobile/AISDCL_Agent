@@ -34,7 +34,11 @@ def _pb(tasks: list[PlaybookTask], project: str = "Demo") -> Playbook:
 
 def _sdd_pb() -> Playbook:
     return _pb([
-        PlaybookTask(step_id="sdd-greenfield-at-001-1-1", name="AT-001-1-1", prompt="x（digest abcdef12）"),
+        PlaybookTask(
+            step_id="sdd-greenfield-at-001-1-1",
+            name="AT-001-1-1",
+            prompt="x（digest abcdef12）",
+        ),
         PlaybookTask(step_id="sdd-greenfield-at-001-2-1", name="AT-001-2-1", prompt="x"),
     ])
 
@@ -139,7 +143,10 @@ class TestRtmWritebackPlugin:
         """prompt 無 digest 字樣 → spec_digest 留空（不報錯）。"""
         sink = _RecordingSink()
         plugin = RtmWritebackPlugin(adapter=PlaybookToRtmAdapter(), sink=sink)
-        pb = _pb([PlaybookTask(step_id="sdd-greenfield-at-002-1-1", name="AT-002-1-1", prompt="no fingerprint here")])
+        pb = _pb([
+            PlaybookTask(step_id="sdd-greenfield-at-002-1-1", name="AT-002-1-1",
+                         prompt="no fingerprint here"),
+        ])
         plugin.on_event(_post_run_ctx(pb, []))
         cov_doc = yaml.safe_load(sink.calls[0][1])
         assert cov_doc["spec_digest"] == ""

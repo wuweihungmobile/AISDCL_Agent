@@ -14,8 +14,6 @@
 """
 from __future__ import annotations
 
-from typing import Optional
-
 import pytest
 
 from autoclaude.infra.repositories.dual_state_repository import (
@@ -41,16 +39,16 @@ class _FakeRepo:
             raise RuntimeError("simulated save failure")
         self.store[playbook_id] = cp
 
-    def load_checkpoint(self, playbook_id: str) -> Optional[PlaybookCheckpoint]:
+    def load_checkpoint(self, playbook_id: str) -> PlaybookCheckpoint | None:
         return self.load_latest_by_playbook(playbook_id)
 
-    def load_latest_by_playbook(self, playbook_id: str) -> Optional[PlaybookCheckpoint]:
+    def load_latest_by_playbook(self, playbook_id: str) -> PlaybookCheckpoint | None:
         self.load_calls += 1
         if self.fail_load:
             raise RuntimeError("simulated load failure")
         return self.store.get(playbook_id)
 
-    def load_by_run_id(self, run_id: str) -> Optional[PlaybookCheckpoint]:
+    def load_by_run_id(self, run_id: str) -> PlaybookCheckpoint | None:
         for cp in self.store.values():
             if getattr(cp, "run_id", None) == run_id:
                 return cp
@@ -65,7 +63,7 @@ class _FakeRepo:
 
 
 def _cp(step_idx: int = 0, *, total_steps: int = 3,
-        completed: Optional[list[str]] = None,
+        completed: list[str] | None = None,
         peak: float = 0.0) -> PlaybookCheckpoint:
     return PlaybookCheckpoint(
         playbook_path="p",

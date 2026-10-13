@@ -41,6 +41,11 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools" / "lib"))
+from platform_utils import (  # noqa: E402
+    init_utf8_streams as _init_utf8_streams,  # type: ignore[import-not-found]
+)
+
 
 def _load_env_file(env_path: Path) -> dict[str, str]:
     """簡易 .env parser（不依賴 python-dotenv）。"""
@@ -140,11 +145,7 @@ def list_models(
 def main() -> int:
     # DEF-101-070 對照缺口（R5 複審發現）：報表含 ✅/❌/📋/⚠️ 等符號，Windows cp950
     # console 直接 print 會 UnicodeEncodeError 中斷；stdout + stderr 皆強制 utf-8。
-    for _stream in (sys.stdout, sys.stderr):
-        try:
-            _stream.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
-        except (AttributeError, OSError):
-            pass
+    _init_utf8_streams()
     parser = argparse.ArgumentParser(description="Minimax embo-01 API probe")
     parser.add_argument("--api-key", help="覆寫 MINIMAX_API_KEY")
     parser.add_argument("--group-id", help="覆寫 MINIMAX_GROUP_ID（必填）")

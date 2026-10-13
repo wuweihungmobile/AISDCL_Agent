@@ -317,7 +317,8 @@ def injection_hint_for_task(agent_name: str) -> Optional[str]:
 # ---------------------------------------------------------------- CLI helpers
 
 def _cli() -> int:
-    import argparse, json as _json
+    import argparse
+    import json as _json
     parser = argparse.ArgumentParser(description="SDD Subagent Contract CLI")
     sub = parser.add_subparsers(dest="cmd", required=True)
     p_enter = sub.add_parser("enter")

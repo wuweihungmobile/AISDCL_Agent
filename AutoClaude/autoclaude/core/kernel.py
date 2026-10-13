@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import logging
+import time
+from collections.abc import Callable
 
 from ..models.playbook import Playbook, PlaybookTask
 from ..models.step_mutation import StepMutationType
@@ -35,6 +37,8 @@ class PlaybookKernel:
         brain: IBrain | None = None,
         mutation_service: MutationApplyService | None = None,
         observability: IObservabilityPort | None = None,
+        limit_retry: Callable[[str, int], float | None] | None = None,
+        limit_sleep: Callable[[float], object] | None = None,
     ):
         self._exec = executor
         self._eval = evaluator
@@ -44,6 +48,11 @@ class PlaybookKernel:
         # SD_08 W4 / ADR-SD08-004 §2.1：IObservabilityPort 建構式注入
         # 未注入時 fallback NullObservability，避免 None check 散落
         self._observability: IObservabilityPort = observability or NullObservability()
+        # PRD §8 列 1：推論端非預期 429 的有界退避。limit_retry(failure_reason, 本 step 已退避次數)
+        # → 等待秒數＝原地退避後重跑同一個 attempt；None＝走既有路徑。決策住 plugin（wiring 接線），
+        # kernel 只管機制。未注入（None）＝既有行為位元級不變：不問、不睡、不重跑。
+        self._limit_retry = limit_retry
+        self._limit_sleep = limit_sleep or time.sleep
 
     @property
     def bus(self) -> EventBus:
@@ -167,6 +176,7 @@ class PlaybookKernel:
             else playbook.global_invariants.max_retries_per_step
         )
         attempt = 0
+        limit_retries = 0                      # PRD §8 列 1：本 step 已退避次數（每個 step 一份）
         last_failure_reason = ""
         failure_history: list = []
 
@@ -223,6 +233,22 @@ class PlaybookKernel:
                 failure_reason, _eval_out, _exit = refusal, output.text[-2000:], 1
             else:
                 failure_reason, _eval_out, _exit = self._eval.evaluate(task, output.text)
+
+            if failure_reason is not None and self._limit_retry is not None:
+                # PRD §8 列 1：429 帶短 Retry-After ⇒ 原地退避後重跑**同一個 attempt**——不消耗
+                # attempt、不問 Brain（429 不是這一步的錯，prompt 不該因此被改寫）、不記入
+                # failure_history。回 None（缺席／過長／預算用盡／額度已撞硬線）＝落回下方既有路徑，
+                # 其後 POST_ATTEMPT 的 evaluate_quota 照舊判 halt。
+                wait = self._limit_retry(failure_reason, limit_retries)
+                if wait is not None:
+                    limit_retries += 1
+                    logger.warning(
+                        "=== STATE: LIMIT_RETRY | [%s] 推論端 429（有 Retry-After）⇒ 退避 %.1fs 後"
+                        "重跑同一個 attempt（本 step 第 %d 次）===",
+                        task.step_id, wait, limit_retries,
+                    )
+                    self._limit_sleep(wait)
+                    continue
 
             if failure_reason is None:
                 completed_ids.append(task.step_id)

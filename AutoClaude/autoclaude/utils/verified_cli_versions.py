@@ -40,13 +40,16 @@ VERIFIED_CLI_VERSIONS: dict[str, dict] = {
         ],
         "source": "R100 P2-C 落地當回合實測（macOS/darwin）",
     },
-    # 🔴 improving_113 的誠實劃界（刻意寫在 `verified` 之外）：`--max-turns` **不在**本版
-    #    `claude --help`（`claude --help | grep -c -- '--max-turns'` 逐字輸出 `0`）。PRD §4.5.4 的
-    #    喚醒指令範例含該旗標並標 [需核對] ⇒ 本版**沒有**核實它存在；`verified` 只列核實成立的事，
-    #    不得為了「看起來完整」補一條它（鎖：tests/test_r100_boot_self_check.py 的
-    #    test_improving_113_the_verified_text_never_claims_the_flag_the_cli_help_lacks）。
-    #    另：本版沒有實跑任何會燒 token 的呼叫（`claude -p`），所以各旗標的執行期語意同樣未核實，
-    #    下面只證明版本字串、help 文字、`--permission-mode` 的選項值驗證。
+    # 🔴 ARCH-03 訂正 improving_113 的劃界（原文逐字：「`--max-turns` **不在**本版 `claude --help`
+    #    （`claude --help | grep -c -- '--max-turns'` 逐字輸出 `0`）」。那句**事實**為真，但據此推論
+    #    「旗標不存在」是**方法錯誤**，不留著當現行說法）：help 不列 ≠ 旗標不存在。判別法是
+    #    `claude -p <旗標> </dev/null` 的**錯誤類別**（零 token：輸入缺席先於任何 API 呼叫）：
+    #    `unknown option '<旗標>'` ＝不存在；`Input must be provided …` ＝旗標被接受。2.1.296 的
+    #    實測連同未知旗標對照組見該版條目。本版（2.1.295）當時沒做這個判別，故 `verified` 仍不列
+    #    `--max-turns`——清單只准寫「核實過什麼」（鎖：tests/test_r100_boot_self_check.py 的
+    #    test_a_verified_flag_claim_cites_the_error_class_with_a_negative_control）。
+    #    另：本版沒有實跑任何會燒 token 的呼叫（`claude -p` 帶輸入），所以各旗標的執行期語意同樣
+    #    未核實，下面只證明版本字串、help 文字、`--permission-mode` 的選項值驗證。
     "2.1.295": {
         "verified": [
             "`claude --version` 輸出逐字 `2.1.295 (Claude Code)`（rc=0）：格式仍是 "
@@ -64,6 +67,21 @@ VERIFIED_CLI_VERSIONS: dict[str, dict] = {
         ],
         "source": "improving_113 W3 落地當回合零 token 實測（macOS/darwin；`claude --version`／"
                   "`claude --help`／`claude --permission-mode <值> --version`）",
+    },
+    # ARCH-03：旗標存在性的判別法（見上方訂正）在本版當回合的零 token 實測。
+    "2.1.296": {
+        "verified": [
+            "`--max-turns` 被接受（隱藏於 `claude --help`：`claude --help | grep -c -- "
+            "'--max-turns'` 逐字輸出 `0`）：實測 `claude -p --max-turns 3 </dev/null` → rc=1、"
+            "逐字 `Error: Input must be provided either through stdin or as a prompt argument "
+            "when using --print`（錯誤類別＝缺輸入，不是未知旗標；輸入缺席先於任何 API 呼叫，"
+            "零 token）",
+            "未知旗標的對照組：實測 `claude -p --definitelynotaflag </dev/null` → rc=1、逐字 "
+            "`error: unknown option '--definitelynotaflag'` ⇒ 上一條的判別有鑑別力（只證明旗標"
+            "被 CLI 接受，不證明該旗標的執行期語意：沒有實跑任何帶輸入的 `claude -p`）",
+        ],
+        "source": "ARCH-03 落地當回合零 token 實測（macOS/darwin；claude 2.1.296；stdin 為 "
+                  "/dev/null）",
     },
 }
 

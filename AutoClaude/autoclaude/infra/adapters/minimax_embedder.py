@@ -3,7 +3,8 @@
 對應規格：
   - SD_Improving_06.md §9.1 PM #1 拍板：BGE-M3 預設 + Minimax 備援（雙 adapter）
   - SD_Improving_06.md §11 黃線：CircuitBreaker 連續 3 fail → 切備援 < 60s
-  - .env.example：MINIMAX_EMBED_BASE_URL / MINIMAX_EMBED_MODEL / MINIMAX_GROUP_ID / MINIMAX_EMBED_DIMENSIONS
+  - .env.example：MINIMAX_EMBED_BASE_URL / MINIMAX_EMBED_MODEL / MINIMAX_GROUP_ID /
+    MINIMAX_EMBED_DIMENSIONS
 
 設計重點：
   - dimension 經 .env / 建構參數注入（未實測 embo-01 維度時呼叫端必填）
@@ -14,7 +15,7 @@ from __future__ import annotations
 
 import os
 import time
-from typing import Any, Optional
+from typing import Any
 
 from ...core.ports.embedder import (
     EmbedderDimensionMismatchError,
@@ -33,25 +34,27 @@ class MinimaxEmbedderAdapter:
     def __init__(
         self,
         *,
-        api_key: Optional[str] = None,
-        group_id: Optional[str] = None,
-        base_url: Optional[str] = None,
-        model_id: Optional[str] = None,
-        dimension: Optional[int] = None,
-        timeout_seconds: Optional[float] = None,
-        config: Optional[EmbedderConfig] = None,
+        api_key: str | None = None,
+        group_id: str | None = None,
+        base_url: str | None = None,
+        model_id: str | None = None,
+        dimension: int | None = None,
+        timeout_seconds: float | None = None,
+        config: EmbedderConfig | None = None,
         http_client: Any = None,
-        breaker: Optional[CircuitBreaker] = None,
+        breaker: CircuitBreaker | None = None,
     ) -> None:
         # 設定來源優先序（improving_91 W-91-2，對齊 chat env>config 治理）：
-        #   建構參數 > env > config 兜底 > 硬編預設。config=None 時兜底鏈塌回原 or 鏈（byte-level 零退化）。
+        #   建構參數 > env > config 兜底 > 硬編預設。config=None 時兜底鏈塌回原 or
+        #   鏈（byte-level 零退化）。
         self._api_key = (
             api_key
             or os.environ.get("MINIMAX_API_KEY")
             or (config.api_key if config else None)
             or ""
         )
-        # group_id 為帳號識別（機密邊界，見 EmbedderConfig docstring）：維持只走參數 / env，不吃 config
+        # group_id 為帳號識別（機密邊界，見 EmbedderConfig docstring）：維持只走參數 /
+        # env，不吃 config
         self._group_id = group_id or os.environ.get("MINIMAX_GROUP_ID", "")
         self._base_url = (
             base_url
@@ -59,7 +62,8 @@ class MinimaxEmbedderAdapter:
             or (config.base_url if config else None)
             or "https://api.minimax.io/v1/embeddings"
         )
-        # model：DEF-91-002 修復——補 MINIMAX_EMBED_MODEL env 讀取 + config 兜底（先前簽章硬編 embo-01、env 從未生效）
+        # model：DEF-91-002 修復——補 MINIMAX_EMBED_MODEL env 讀取 + config 兜底（先前簽章硬編
+        # embo-01、env 從未生效）
         self.model_id = (
             model_id
             or os.environ.get("MINIMAX_EMBED_MODEL")
@@ -159,7 +163,8 @@ class MinimaxEmbedderAdapter:
             if not isinstance(vec, list) or len(vec) != self.dimension:
                 self.breaker.record_failure()
                 raise EmbedderDimensionMismatchError(
-                    f"Minimax vector[{i}] dim={len(vec) if isinstance(vec, list) else 'NA'} ≠ {self.dimension}"
+                    f"Minimax vector[{i}] dim={len(vec) if isinstance(vec, list) else 'NA'} "
+                    f"≠ {self.dimension}"
                 )
             out.append([float(x) for x in vec])
         self.breaker.record_success(latency_ms=latency_ms)

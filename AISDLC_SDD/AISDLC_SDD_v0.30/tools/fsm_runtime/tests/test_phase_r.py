@@ -110,7 +110,8 @@ def test_enumerate_never_emits_self_referential():
 def test_invent_finds_necessary_invention():
     """synthesizer 在注入必要性上找到真必要發明（達 margin、送 signoff）。"""
     target = InventedDimension.of("mean", ("rollback_steps", "blast_radius"))
-    ev = lambda d: 0.22 if d.name == target.name else 0.0
+    def ev(d):
+        return 0.22 if d.name == target.name else 0.0
     prop = S.invent(ev, candidates=S.enumerate_inventions(budget=64))
     assert prop.accepted
     assert prop.dimension.name == target.name
@@ -132,7 +133,8 @@ def test_invent_round_respects_bigbang_kdim():
     """一輪至多 K_dim 條發明進 proposed（按 necessity 取前 K_dim），其餘順延（Rule 9.30.4）。"""
     cands = S.enumerate_inventions(budget=8)
     scores = {cands[0].name: 0.5, cands[1].name: 0.4, cands[2].name: 0.3}
-    ev = lambda d: scores.get(d.name, 0.0)
+    def ev(d):
+        return scores.get(d.name, 0.0)
     rnd = S.invent_round(ev, candidates=cands, k=1)
     assert len(rnd.selected) == 1
     assert rnd.selected[0].dimension.name == cands[0].name   # necessity 最高
@@ -210,7 +212,8 @@ def test_adopt_invention_goes_through_meta_guard(tmp_path):
 
 def test_record_round_writes_pending_signoff(tmp_path):
     cands = S.enumerate_inventions(budget=8)
-    ev = lambda d: 0.3 if d.name == cands[0].name else 0.0
+    def ev(d):
+        return 0.3 if d.name == cands[0].name else 0.0
     rnd = S.invent_round(ev, candidates=cands, k=1)
     led = tmp_path / "value-dimension-ledger.yaml"
     entry = S.record_round(rnd, ledger_path=led, ts="2026-06-04T00:00:00+00:00")
@@ -506,7 +509,8 @@ def test_single_track_no_swap_leak():
 def _accepted_invent_round(k=1):
     cands = S.enumerate_inventions(budget=8)
     scores = {cands[0].name: 0.5, cands[1].name: 0.4, cands[2].name: 0.3}
-    ev = lambda d: scores.get(d.name, 0.0)
+    def ev(d):
+        return scores.get(d.name, 0.0)
     return S.invent_round(ev, candidates=cands, k=k)
 
 

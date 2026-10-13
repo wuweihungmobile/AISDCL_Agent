@@ -10,8 +10,6 @@
 """
 from __future__ import annotations
 
-from typing import Optional
-
 from autoclaude.core._compact_prompt import build_compact_prompt as core_build
 from autoclaude.core._token_compactor import perform_compact
 from autoclaude.core.event_bus import EventBus
@@ -54,7 +52,7 @@ class _CapturingExecutor:
 class _SequencedExecutor:
     """每次 execute 依序回放一筆 token% 事件並記錄 prompt（Kernel compact 整合用）。"""
 
-    def __init__(self, pcts: list[Optional[float]]):
+    def __init__(self, pcts: list[float | None]):
         self._pcts = pcts
         self._i = 0
         self.prompts: list[str] = []

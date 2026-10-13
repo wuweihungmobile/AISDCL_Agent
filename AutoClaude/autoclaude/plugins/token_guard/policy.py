@@ -23,6 +23,8 @@
 from __future__ import annotations
 
 import logging
+import random
+from collections.abc import Callable
 from typing import Any
 
 from ...core.hookspec import HookContext, KernelPhase, ResourceRequest
@@ -31,6 +33,7 @@ from ...core.ports.quota_meter import (
     BAND_PREPARE,
     BAND_UNMEASURED,
     is_quota_limit_text,
+    retry_after_seconds,
 )
 from ...utils.config import TokenGuardConfig
 from .compactor import CompactFailureState
@@ -38,7 +41,7 @@ from .compactor import build_compact_prompt as _build_compact_prompt
 from .compactor import process_compact_result as _process_compact_result
 from .git_verifier import verify_correction_applied as _verify_correction_applied
 from .thresholds import get_dynamic_compact_threshold as _get_dynamic_compact_threshold
-from .thresholds import should_compact_decision, should_halt_decision
+from .thresholds import limit_retry_wait_decision, should_compact_decision, should_halt_decision
 from .watcher import observe_token_line as _observe_token_line
 from .watcher import resolve_per_step_cfg as _resolve_per_step_cfg
 
@@ -51,11 +54,16 @@ class TokenGuardPlugin:
     PRIORITY = 30
 
     def __init__(self, token_guard_cfg: TokenGuardConfig | None = None,
-                 quota_meter: Any | None = None):
+                 quota_meter: Any | None = None,
+                 rand: Callable[[], float] | None = None):
         self._cfg = token_guard_cfg or TokenGuardConfig()
         self._compact_state = CompactFailureState()
         # R82（ACQ-01）：QuotaMeterPort（可選）。None＝這一軸不存在，行為與修前位元級相同。
         self._quota = quota_meter
+        # PRD §8 列 1：退避的 full-jitter 亂數源（回 [0,1)）。注入讓測試不靠真亂數。
+        self._rand = rand or random.random
+        # ARCH-02(a)：量不到額度的一次性出聲旗標（見 `_quota_view`）。
+        self._unmeasured_said = False
 
     def name(self) -> str:
         return "token_guard"
@@ -179,6 +187,7 @@ class TokenGuardPlugin:
     # （含 `axes4` 這一格：保險軸 99% ＋ 訂閱軸 12% ⇒ 兩側都**不得** halt）。
     # 🔴 誠實劃界：本判定掛在 POST_ATTEMPT，而 Kernel 先算 correction 才 emit POST_ATTEMPT
     # ⇒ 撞線那一輪仍會多一次 Brain 呼叫；擋掉的是**其後**所有重試，不是當次。
+    # （帶短 Retry-After 的 429 例外：Kernel 在問 Brain 之前就原地退避重跑，見 limit_retry_wait。）
     # 說明寫成 # 而非 docstring：docstring 會被 count_loc 計入（見 check_loc_budget 提示）。
     # 🔴 R86（第四個觸發條件）：`band` 來自**根層算好的配速契約**，不是引擎自己再算一次。
     # 為什麼需要它——上面 ①③ 兩條只看 `max(pct)` 對兩個門檻，對「距 reset 幾分鐘」這一軸
@@ -190,12 +199,8 @@ class TokenGuardPlugin:
     # `getattr` 而不是直接呼叫：既有測試與外部注入的 meter 只實作 read()/read_worst_pct()，
     # 直接呼叫會讓一個少一支方法的 port 把整條額度軸炸掉（fail-closed 到不能跑）。
     def evaluate_quota(self, payload: dict) -> ResourceRequest | None:
-        reading = self._quota.read_worst_pct() if self._quota is not None else None
-        pct = reading.pct if reading is not None else None
-        read_pace = getattr(self._quota, "read_pace", None)
-        band = read_pace().band if read_pace is not None else BAND_UNMEASURED
+        reading, pct, band, hard = self._quota_view()
         limit_hit = is_quota_limit_text(payload.get("failure_reason"))
-        hard = (pct is not None and pct >= self._cfg.quota_halt_pct) or band == BAND_HALT
         soft = ((pct is not None and pct >= self._cfg.quota_throttle_pct)
                 or band == BAND_PREPARE)
         if not (hard or limit_hit or (soft and payload.get("in_correction_loop"))):
@@ -206,6 +211,47 @@ class TokenGuardPlugin:
         # 固定印「context N%」——額度軸 halt 在此點名真因。marker 文字不動（A/B 載具依它計數）。
         logger.warning("TokenGuard 額度軸 halt：%s", reason)
         return ResourceRequest(contributor=self.name(), request_halt=True, reason=reason)
+
+    # `evaluate_quota` 與 `limit_retry_wait` 共用的額度視圖：(讀數, pct, band, 是否已撞硬線)。
+    # 「硬線」的判準只住這一處——退避那一側若自己再寫一次，就是同一份知識兩個家。
+    # 讀取順序與次數同修前。
+    # 🔴 ARCH-02(a)：有裝 meter 卻量不到（快取不在／過期／格式不符）＝引擎獨立執行、沒有人刷新快取
+    # （R82 決策：引擎側不養刷新者）⇒ 額度水位那一軸整條失效，而失效與「額度充足」在日誌上外觀相同。
+    # 一次性出聲讓它**可偵測**：講後果（只剩撞線訊息才 halt、撞線後靠輪詢承接）與補救；之後不重複。
+    # 沒裝 meter＝這一軸本就不存在（單元測試／內嵌用法），不是失效，不講。只出聲、不改任何判決。
+    def _quota_view(self) -> tuple[Any, float | None, str, bool]:
+        reading = self._quota.read_worst_pct() if self._quota is not None else None
+        if reading is None and self._quota is not None and not self._unmeasured_said:
+            self._unmeasured_said = True
+            logger.warning(
+                "TokenGuard | 額度遙測缺席（快取不在／已過期／格式不符）⇒ 本次獨立執行沒有額度"
+                "水位保護，僅撞線訊息會觸發 halt；撞線後以 resume_delay_minutes 輪詢續跑（上限 "
+                "max_auto_resumes 次）；要補量請在 monorepo 根執行 `python "
+                "tools/session_resume_planner.py --pace`（本訊息每個引擎行程只出一次）")
+        pct = reading.pct if reading is not None else None
+        read_pace = getattr(self._quota, "read_pace", None)
+        band = read_pace().band if read_pace is not None else BAND_UNMEASURED
+        hard = (pct is not None and pct >= self._cfg.quota_halt_pct) or band == BAND_HALT
+        return reading, pct, band, hard
+
+    # PRD §8 列 1：推論端非預期 429 的有界退避。由 Kernel 在**問 Brain 之前**呼叫（`limit_retry`
+    # 注入點，wiring 接線）：回等待秒數＝kernel 原地退避後重跑同一個 attempt；None＝走既有路徑
+    # （後續的 `evaluate_quota` 照舊判 halt）。決策住這裡（解析／上界／額度硬線／jitter），
+    # kernel 只管機制。
+    # 🔴 零附帶面：沒有 Retry-After ⇒ 在讀額度快取之前就回 None；既有的 limit 字樣 halt 逐位不變。
+    # 🔴 額度已撞硬線（pct ≥ quota_halt_pct 或 band=halt）不退避：429 是「遙測低估」的證據，
+    # 而遙測自己已說用完時，退避重打只是在撞同一面牆。量不到（None／unmeasured）≠ 用完，
+    # 仍遵循伺服器的建議。
+    def limit_retry_wait(self, failure_reason: str | None, retries_used: int) -> float | None:
+        if not self._cfg.enabled or not is_quota_limit_text(failure_reason):
+            return None
+        retry_after = retry_after_seconds(failure_reason)
+        if retry_after is None or self._quota_view()[3]:
+            return None
+        return limit_retry_wait_decision(
+            retry_after=retry_after, retries_used=retries_used,
+            max_retries=self._cfg.max_limit_retries,
+            max_retry_after=self._cfg.max_retry_after_seconds, rand=self._rand)
 
     def _evaluate_resources(self, ctx: HookContext) -> ResourceRequest | None:
         payload = ctx.payload or {}

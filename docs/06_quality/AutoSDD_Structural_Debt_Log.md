@@ -44,12 +44,8 @@
 
 | DEF-ID | 具名阻塞源 | 阻塞起始日 | 解鎖條件（可機械查） | 最近複查日 |
 |---|---|---|---|---|
-| DEF-101-018 | 結構性長債-ruff存量分批清 | 2026-08-30 | `.venv/bin/ruff check . 2>&1 \| tail -1` 回「Found 0 errors.」或殘量 shrink-only 棘輪進閘（掌舵者 2026-08-29 裁維持逐筆清，未來輪照撥額度批量清）（2026-10-09 複查：ruff 0.15.21 `check .` 根目錄＝Found 3566 errors（R76 同口徑 3,711）、cwd=AutoClaude＝681（R76 824）；縮小但非 0，且僅 tools/ruff.toml 的 E501 有棘輪、無全量 shrink-only 棘輪→仍成立） | 2026-10-09 |
-| DEF-101-398 | 結構性長債-dev_start拆分 | 2026-08-30 | `tools/lib/bootstrap_lock.py` 與 `tools/lib/nightly_heartbeat.py` 存在，且 `python AutoClaude/tools/check_loc_budget.py --json` 之 dev_start.py loc 低於拆分前現值 1951（2026-10-09 複查：兩支模組仍不存在；loc=1951／棘輪 1952 僅差 1 行、非拆分成果；原條件前半「loc<1952」字面成立卻無實質，故改寫為「低於 1951」→仍成立） | 2026-10-09 |
-| DEF-101-701 | 結構性長債-run_root_unittests行數死結 | 2026-08-30 | 同上指令之 run_root_unittests.py headroom>0 且 MIN_TESTS 重釘路徑存在指紋一致性斷言（後半 2026-09-01 複查已達成：`run_root_unittests.py` 之 `min_tests_note_stale_tokens()` 接 fail-fast；前半 headroom 現值 0 未達成，AND 整體未解鎖）（2026-10-09 複查：run_root_unittests.py loc=777／棘輪 777＝headroom 0，前半仍未達成；`min_tests_note_stale_tokens()` 仍在且 main() fail-fast 接線→仍未解鎖） | 2026-10-09 |
-| DEF-101-702 | 結構性長債-R68稽核波 | 2026-08-30 | CrossPlatform_R68_Scan_Findings.md「狀態@R69」欄 open/partial 計數＝0（2026-08-30 現值 28；2026-09-01 複查仍 28）（2026-10-09 複查：「狀態@R69」欄 open 23＋partial 5＝28，與 08-30／09-01 同口徑（另 1 筆 partial@R69）→仍成立） | 2026-10-09 |
-| DEF-101-960 | 結構性長債-skip剖面需Windows實機 | 2026-08-30 | `tools/lib/skip_group_policy.py` 的 `_UNMEASURED_RUNNER_PROFILES` 不再含標 DEF-101-960 的鍵（2026-10-09 現查 2 鍵：AutoClaude/tests@linux+nopg+solo+nopgext、AISDLC_SDD/fsm_runtime@win32）（2026-10-09 複查：原條件指向 skip_id_ledger.json 的 tools/tests 鍵，而該樹鍵文法零軸、結構上不可能長出 solo／ubuntu 剖面鍵，故改指真載體；仍成立） | 2026-10-09 |
-| DEF-101-980 | 結構性長債-ADR-XPLAT-005待裁決 | 2026-08-30 | docs/04_planning/ADR/ADR-XPLAT-005-quota-aware-throttling-and-fanout-resume.md 檔頭狀態行不再是 Proposed（2026-09-01 複查：仍 Proposed（R81））（2026-10-09 複查：ADR-XPLAT-005 檔頭仍為 `Proposed（R81）`，檔自 2026-08-16 未動→仍成立） | 2026-10-09 |
+| DEF-101-960 | 結構性長債-SDD樹win32-skip剖面未接census | 2026-08-30 | ①（任何平台可做）`AISDLC_SDD/scripts/ci-gate.sh`／`.ps1` 把 SDD fsm_runtime 的 pytest `-rs` 輸出接進 census（現況：全 repo 只有 `AutoClaude/tools/local_ci_gate.py` 與 `tools/run_root_unittests.py` 會印 `[skip census]`，`ci-gate.sh:215-220` tee 後只取通過數；DEV-K 2026-10-13 現查三份 Windows CI log 零命中）；②Windows 執行者（實體機或 `windows-compat-ci`）跑出 `[skip census] AISDLC_SDD/fsm_runtime@win32` 六格；③同 commit 逐格照抄進 `_RUNTIME_SKIP_CEILING`／`_RUNTIME_SKIP_CEILING_MAX` 並自 `_UNMEASURED_RUNNER_PROFILES` 刪該鍵（`python tools/lib/skip_group_policy.py` 現查）。linux 半邊（`AutoClaude/tests@linux+nopg+solo+nopgext`）已於 2026-10-13 以 Docker 容器量到並登記（R213 證據檔〈十-3〉DEV-H）。 | 2026-10-13 |
+| DEF-200-075 | 結構性長債-mac-nightly無PG剖面 | 2026-10-13 | mac nightly（`tools/run_local_nightly.sh`）以 docker compose（`docker-compose.ci.yml`）起 PG17 並 `alembic upgrade head` 後，`[skip census] AutoClaude/tests@darwin+pg+…` 剖面登記且欠債型 ≤ 10（對照 win32+pg 剖面 5）；或掌舵者裁決 mac 側不接 PG 並把該 103 支的 PG 契約測試改掛 `[ENV-DISABLED]` 標籤納入天花板（原外部軌列文見 AutoSDD_External_Blocked_Log.md〈複查記錄〉DEF-200-075 節） | 2026-10-13 |
 
 ## 登記備注
 
@@ -67,6 +63,43 @@
 ## 複查記錄
 
 > 「最近複查日」欄僅存放純 ISO 日期；解鎖條件達成而移出本表的列，其複查敘事逐字搬遷至本節（體例同外部阻塞軌）。
+
+### DEF-101-702（複查 2026-10-13＝解鎖條件達成，列已移出本表）
+
+複查：`docs/06_quality/CrossPlatform_R68_Scan_Findings.md`「狀態@R69」欄 open／partial 計數＝0（2026-10-13 主控以列首詞普查：
+原 open 23＋partial 5＋partial@R69 1＝29 列，逐列現判 fixed@HEAD 10／fixed@R213 8（DEV-C 2、DEV-D 1、DEV-F 3、主控 2）／
+closed-by-decision@R213 11；逐列座標與理由＝R213 證據檔附錄 D（DEV-C 提案表逐字）＋〈十-3〉；R68-04 的 Windows 側 smoke step
+已補但未在 Windows 實跑、R68-37 餘 3 處 AutoClaude 樹行內複本由 per-tree 棘輪凍結（3，只准往下）、另 13 支帶 `__main__` 的 CLI 由 `_UNPROTECTED_CLIS` shrink-only 凍結，皆如實登記）。本表筆數 2→1。
+
+### DEF-101-018（複查 2026-10-13＝解鎖條件達成，列已移出本表）
+
+複查：repo 根 `.venv/bin/ruff check . 2>&1 | tail -1` 於 2026-10-13 印 `All checks passed!`（ruff 0.15.21；解鎖條件字面
+「Found 0 errors.」是舊版輸出字樣，以實際輸出為準）——AutoClaude 657→0、`AISDLC_SDD_v0.30` 96→0、根 `tools/` 維持 0；
+凍結版 v0.01～v0.29 由新增 repo 根 `ruff.toml`（只做 `extend-exclude`、不選規則）排除——掌舵者裁決凍結版不可編輯，排除面
+只含凍結版由 `AISDLC_SDD/scripts/tests/test_ruff_root_config_excludes_only_frozen.py` 守（LATEST 前進未補清單即紅）；
+`ruff check AutoClaude／tools／AISDLC_SDD_v0.30 --statistics` 加根檔前後逐字相同；AutoClaude 全套 5451 通過／156 略過
+rc=0、lint-imports 9 kept、v0.30 pytest 1979 通過 rc=0、`ci-gate.sh` rc=0〔他包回報：R213 DEV-D，證據檔〈十〉〕。本表筆數 4→3。
+
+### DEF-101-398（複查 2026-10-13＝解鎖條件達成，列已移出本表）
+
+複查：2026-10-13 `tools/lib/bootstrap_lock.py`（370 行）與 `tools/lib/nightly_heartbeat.py`（308 行）已存在，
+`tools/dev_start.py` 1951→1411 行（`check_loc_budget.py --json` 現查），`SPECIAL_FILES` 門檻 1952→1411（只准往下）；
+`test_dev_start` 拆分前後皆 286 項 OK、HEAD 對現行差分比對 367 項 0 不一致、三種突變皆被抓到〔他包回報：R213 DEV-C，
+證據檔〈十〉〕；Windows bootstrap 路徑未在 Windows 實跑（本輪 mac）。本表筆數 3→2。
+
+### DEF-101-701（複查 2026-10-13＝解鎖條件達成，列已移出本表）
+
+複查：前半「headroom>0」於 2026-10-13 達成——`tools/run_root_unittests.py` 檔頭 15 行史料搬至
+`CrossPlatform_R213_DebtZero_FourParty_Evidence.md`〈附錄 A-1〉，loc 777→763；`AutoClaude/tools/check_loc_budget.py`
+`SPECIAL_FILES` 門檻 777→765（只准往下）⇒ `check_loc_budget` 現查 `[special<=765] ../tools/run_root_unittests.py: 763
+（餘裕 2 行）`、rc=0；後半（`min_tests_note_stale_tokens()` fail-fast）2026-09-01 已達成。AND 整體解鎖。本表筆數 6→5。
+
+### DEF-101-980（複查 2026-10-13＝解鎖條件達成，列已移出本表）
+
+複查：`docs/04_planning/ADR/ADR-XPLAT-005-quota-aware-throttling-and-fanout-resume.md` 檔頭狀態行 2026-10-13 由
+`Proposed（R81）` 改為 `Accepted（2026-10-13；…）`，依據＝§5 機械物 M1～M14 於 HEAD 逐列現查（M8 `relay_machine.py::
+SOURCE_AUTHORITATIVE`、M10 `config.py` `quota_throttle_pct`／`quota_halt_pct`、M11 `.importlinter` `root_packages` 含 `tools`
+＋Rule 9；其餘指名測試類各命中），見 R213 證據檔〈三-3〉。本表筆數 5→4。
 
 ### DEF-101-886（複查 2026-10-09＝解鎖條件達成，列已移出本表）
 

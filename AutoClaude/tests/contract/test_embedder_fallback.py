@@ -15,8 +15,6 @@
 """
 from __future__ import annotations
 
-from typing import Any
-
 import pytest
 
 from autoclaude.core.ports.embedder import EmbedderUnavailableError
@@ -25,7 +23,10 @@ from autoclaude.infra.adapters.minimax_embedder import DualEmbedderRouter
 
 
 class _FakeEmbedder:
-    def __init__(self, *, dim: int = 1024, model_id: str = "fake", responses: list = None, breaker: CircuitBreaker = None) -> None:
+    def __init__(
+        self, *, dim: int = 1024, model_id: str = "fake", responses: list = None,
+        breaker: CircuitBreaker = None,
+    ) -> None:
         self.dimension = dim
         self.model_id = model_id
         self._responses = responses or []
@@ -76,7 +77,8 @@ def test_breaker_recovery_half_open_closed():
         recovery_seconds=10.0,
         time_source=lambda: fake_clock["t"],
     )
-    b.record_failure(); b.record_failure()
+    b.record_failure()
+    b.record_failure()
     assert b.state == "open"
     fake_clock["t"] += 11
     assert b.allow_request() is True

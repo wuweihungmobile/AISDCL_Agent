@@ -12,7 +12,6 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Optional
 
 from autoclaude.core.ports.observability import ISpan
 from autoclaude.infra.observability import (
@@ -67,7 +66,7 @@ class _FakeConn:
         self._conns = conns
         self.closed = False
 
-    async def fetchval(self, query: str) -> Optional[float]:
+    async def fetchval(self, query: str) -> float | None:
         if "pg_last_xact_replay_timestamp" in query:
             return self._lag
         if "pg_stat_activity" in query:

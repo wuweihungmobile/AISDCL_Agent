@@ -525,11 +525,13 @@ def enumerate_genesis_alphabet(*, budget: Optional[int] = None,
     i = j = 0
     while len(out) < cap and (i < len(prim_stream) or j < len(comb_stream)):
         if i < len(prim_stream):
-            out.append(prim_stream[i]); i += 1
+            out.append(prim_stream[i])
+            i += 1
             if len(out) >= cap:
                 break
         if j < len(comb_stream):
-            out.append(comb_stream[j]); j += 1
+            out.append(comb_stream[j])
+            j += 1
     return alphabet_self_reference_guard(out)
 
 
@@ -659,7 +661,8 @@ def alphabet_genesis_round(
     cap_k = k if k is not None else dim_expand_k()
     cands = candidates if candidates is not None else enumerate_genesis_alphabet(budget=budget)
     mgn = margin if margin is not None else alphabet_coverage_margin()
-    tfn = lambda q: int(round(q * 100))
+    def tfn(q):
+        return int(round(q * 100))
 
     proposals: List[AlphabetProposal] = []
     for e in cands:

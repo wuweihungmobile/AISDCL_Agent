@@ -13,8 +13,6 @@ plugins_dict 供測試斷言 plugin 內部 state，例如：
 """
 from __future__ import annotations
 
-from typing import Optional
-
 from autoclaude.core.event_bus import EventBus
 from autoclaude.core.kernel import PlaybookKernel
 from autoclaude.core.services.auto_resume import AutoResumeService
@@ -25,10 +23,10 @@ from .fake_ports import FakeBrain, FakeEvaluator, FakeExecutor
 
 
 def make_kernel(
-    outputs: Optional[list[str]] = None,
+    outputs: list[str] | None = None,
     eval_pass: bool = True,
-    eval_results: Optional[list[bool]] = None,
-    config: Optional[AppConfig] = None,
+    eval_results: list[bool] | None = None,
+    config: AppConfig | None = None,
 ) -> tuple[PlaybookKernel, dict]:
     """建立帶 Fake ports 的 PlaybookKernel。
 
@@ -63,10 +61,10 @@ def make_kernel(
 
 
 def make_service(
-    outputs: Optional[list[str]] = None,
+    outputs: list[str] | None = None,
     eval_pass: bool = True,
-    eval_results: Optional[list[bool]] = None,
-    config: Optional[AppConfig] = None,
+    eval_results: list[bool] | None = None,
+    config: AppConfig | None = None,
 ) -> tuple[AutoResumeService, dict]:
     """建立帶 Fake ports 的 AutoResumeService（含 Kernel）。
 

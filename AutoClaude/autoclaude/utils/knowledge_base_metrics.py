@@ -17,7 +17,6 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Optional
 
 # 滑動窗口大小（最近 200 次 query latency 估算 p95）
 _LATENCY_WINDOW_SIZE = 200

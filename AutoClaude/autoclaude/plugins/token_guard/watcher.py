@@ -6,14 +6,14 @@
 """
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from ...utils.config import TokenGuardConfig
 
 
 def observe_token_line(
     *,
-    pct: Optional[float],
+    pct: float | None,
     peak_pct: float,
     triggered_compact: bool,
     triggered_halt: bool,
@@ -41,7 +41,7 @@ def observe_token_line(
 
 
 def resolve_per_step_cfg(
-    *, global_cfg: TokenGuardConfig, task: Optional[Any] = None,
+    *, global_cfg: TokenGuardConfig, task: Any | None = None,
 ) -> TokenGuardConfig:
     """SD_05 W2-4 (M-7)：per-step token_guard override 解析。
 

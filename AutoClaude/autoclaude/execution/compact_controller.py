@@ -12,7 +12,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..models.playbook import PlaybookTask
@@ -22,12 +22,12 @@ logger = logging.getLogger("autoclaude.execution.playbook")
 
 
 def send_compact_impl(
-    runner: "PlaybookRunner",
+    runner: PlaybookRunner,
     is_first: bool,
     failure_summary: str = "",
-    task: Optional["PlaybookTask"] = None,
+    task: PlaybookTask | None = None,
     attempt: int = 0,
-    global_goal: Optional[str] = None,
+    global_goal: str | None = None,
 ) -> bool:
     """SD_06 W2-T2-8：_send_compact 全文下沉（SD_05 W2-1d + M-2 雙寫拔除）。
 

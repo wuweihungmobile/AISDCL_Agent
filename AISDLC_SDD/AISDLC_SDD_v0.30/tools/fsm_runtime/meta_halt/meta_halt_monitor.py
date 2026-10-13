@@ -811,8 +811,8 @@ def guard_operator_computability(
     total = bool(operator.is_total())
     if not total:
         raise OperatorComputabilityExceeded(
-            f"算子非全函式（某輸入無定義/拋例外/NaN/inf）：被發明物對某輸入不可證停機，禁止採納，"
-            f"導 MFSM_ESCALATION（Rule 9.32.3 全函式保證）。"
+            "算子非全函式（某輸入無定義/拋例外/NaN/inf）：被發明物對某輸入不可證停機，禁止採納，"
+            "導 MFSM_ESCALATION（Rule 9.32.3 全函式保證）。"
         )
     return OperatorComputabilityResult(
         allowed=True, cost=cost, step_max=step_max, total=total,
@@ -907,8 +907,8 @@ def guard_computability_closure(
         )
     if not total:
         raise ComputabilityClosureViolation(
-            f"擴充字母表後 G(A') 整代數出現非全函式算子（某輸入無定義/拋例外/NaN/inf）：被發明字母破壞可計算性"
-            f"閉包，禁止採納，導 MFSM_ESCALATION（Rule 9.33.3 閉包全函式保證）。"
+            "擴充字母表後 G(A') 整代數出現非全函式算子（某輸入無定義/拋例外/NaN/inf）：被發明字母破壞可計算性"
+            "閉包，禁止採納，導 MFSM_ESCALATION（Rule 9.33.3 閉包全函式保證）。"
         )
     return ClosureGuardResult(
         allowed=True, total=total, max_cost=max_cost, step_max=step_max, n_operators=n_ops,
@@ -1006,8 +1006,8 @@ def guard_depth_closure(
         )
     if not total:
         raise DepthClosureViolation(
-            f"擴充深度後 G(A,depth) 整代數出現非全函式算子（某輸入無定義/拋例外/NaN/inf）：被自我擴充的深度算子破壞"
-            f"深度可計算性閉包，禁止採納，導 MFSM_ESCALATION（Rule 9.34.3 閉包全函式保證）。"
+            "擴充深度後 G(A,depth) 整代數出現非全函式算子（某輸入無定義/拋例外/NaN/inf）：被自我擴充的深度算子破壞"
+            "深度可計算性閉包，禁止採納，導 MFSM_ESCALATION（Rule 9.34.3 閉包全函式保證）。"
         )
     return DepthClosureGuardResult(
         allowed=True, total=total, max_cost=max_cost, step_max=step_max, depth=depth, n_operators=n_ops,
@@ -1104,9 +1104,9 @@ def guard_recursion_closure(
             f"互遞迴良基停機證書不可求值（{exc}）：被自我擴充的互遞迴圖結構不可證良基終止，禁止採納（Rule 9.35.3）")
     if not terminating:
         raise RecursionClosureViolation(
-            f"互遞迴算子呼叫圖含無證書環（環中無回邊嚴格遞減下有界 rank → 可能不停機）：判定任意含環圖停機 = "
-            f"停機問題（不可判定），「有界步數」device 失效；無良基測度證書，禁止採納，導 MFSM_ESCALATION"
-            f"（Rule 9.35.3 互遞迴良基停機證書——用全新 device「良基測度終止」取代失效的「有界步數」）。"
+            "互遞迴算子呼叫圖含無證書環（環中無回邊嚴格遞減下有界 rank → 可能不停機）：判定任意含環圖停機 = "
+            "停機問題（不可判定），「有界步數」device 失效；無良基測度證書，禁止採納，導 MFSM_ESCALATION"
+            "（Rule 9.35.3 互遞迴良基停機證書——用全新 device「良基測度終止」取代失效的「有界步數」）。"
         )
     if fuel > step_max or max_cost > step_max:
         raise RecursionClosureViolation(
@@ -1115,8 +1115,8 @@ def guard_recursion_closure(
         )
     if not total:
         raise RecursionClosureViolation(
-            f"互遞迴算子整代數出現非全函式算子（某輸入無定義/拋例外/NaN/inf）：被自我擴充的互遞迴算子破壞良基停機"
-            f"閉包全函式，禁止採納，導 MFSM_ESCALATION（Rule 9.35.3 閉包全函式保證）。"
+            "互遞迴算子整代數出現非全函式算子（某輸入無定義/拋例外/NaN/inf）：被自我擴充的互遞迴算子破壞良基停機"
+            "閉包全函式，禁止採納，導 MFSM_ESCALATION（Rule 9.35.3 閉包全函式保證）。"
         )
     return RecursionClosureGuardResult(
         allowed=True, total=total, terminating=terminating, fuel=fuel, max_cost=max_cost,

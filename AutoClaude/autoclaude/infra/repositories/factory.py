@@ -21,17 +21,14 @@ import re as _re
 from typing import Any
 
 from ...utils.config import StorageConfig
+from ...utils.redaction import redact_dsn
 from .dual_state_repository import DualStateRepository
 from .file_state_repository import FileStateRepository
 
 logger = logging.getLogger("autoclaude.infra.repositories.factory")
 
 _PG_DSN_ENV = "AUTOCLAUDE_DB_DSN"
-_DSN_PASSWORD_RE = _re.compile(r"(://[^:/@]+:)([^@]+)(@)")
-
-
-def _redact(msg: str) -> str:
-    return _DSN_PASSWORD_RE.sub(r"\1***\3", msg)
+_redact = redact_dsn          # 樣式表只有一個家：utils/redaction.py
 
 
 # T8（SD_04 §3 / M-2）：playbook_id 統一計算策略

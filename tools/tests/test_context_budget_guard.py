@@ -692,7 +692,6 @@ class PlannerCliTest(unittest.TestCase):
         self.transcript = _write_jsonl(self.tmp / "s.jsonl", [123_456])
         # 觀測面是整棵 `self.tmp`（HOME 搬進 `self.tmp/home` 後仍全樹快照，例外只准登記在
         # `_HOME_ARTIFACT_DIRS`）。
-        # 史料搬至 CrossPlatform_R189_SessionGate_Family_Lock_Audit_Evidence.md〈九-F〉§22。
         self.home = self.tmp / "home"
         self.home.mkdir()
 
@@ -1368,9 +1367,6 @@ class QuotaClassifierTest(unittest.TestCase):
         self.assertEqual(guard.classify_limit(_REAL_SPEND_LIMIT), guard.LIMIT_SPEND)
         self.assertEqual(guard.classify_limit("API Error: 529 Overloaded"),
                          guard.LIMIT_TRANSIENT)
-        # 🔴 R100：這一格此前斷言 `LIMIT_UNKNOWN`，而它的輸入是**完全沒有撞線訊號**的
-        # 一句話 ⇒ 那個斷言把「沒撞線」與「有撞線但認不出來」寫成同一個值。判為**鎖過時
-        # 該同步**：借用 fail-closed 常數去表達「額度是開的」正是止血 B 的立案本體。
         self.assertEqual(guard.classify_limit("something nobody has seen"),
                          guard.LIMIT_NONE)
 
@@ -1864,6 +1860,18 @@ class ProbeOpennessIsAPositiveVerdictTest(unittest.TestCase):
             self.assertTrue(verdict["open"])
             self.assertNotEqual(verdict.get("source"), "endpoint")
 
+    def test_the_paid_probe_wall_clock_is_the_prd_4_5_10_bound(self) -> None:
+        """R-4.5.10-1：付費探針牆鐘 ≤90s；每次醒來只探測一次（rearm 是下一次醒來）。"""
+        with unittest.mock.patch.object(planner.quota_gate, "endpoint_probe_verdict",
+                                        return_value=None), \
+             unittest.mock.patch.object(planner.subprocess, "run", side_effect=OSError) as run:
+            planner.probe_quota()
+        self.assertLessEqual(wall := run.call_args.kwargs["timeout"], 90, "行程內總時長上限")
+        self.assertEqual(wall, resume_route.PROBE_WALL_SECONDS)
+        kws = [k.value for n in ast.walk(ast.parse(inspect.getsource(planner.probe_quota)))
+               if isinstance(n, ast.Call) for k in n.keywords if k.arg == "timeout"]
+        self.assertEqual(list(map(ast.unparse, kws)), ["resume_route.PROBE_WALL_SECONDS"])
+
     def test_a_drifted_limit_wording_with_rc_zero_is_not_open(self) -> None:
         """**本項唯一的止血斷言**：rc=0 ＋ 分類器不認識的限流措辭 ⇒ 必須**不是** open。"""
         verdict = self._probe(0, "You've hit your weekly cap for this model")
@@ -2191,15 +2199,8 @@ class EnduranceWiringTest(unittest.TestCase):
                         "~18%，那一支一次都不會被執行（SA-B1 判過的死碼）")
 
     def test_the_quota_module_boundary_is_one_way_and_fail_open(self) -> None:
-        """🔴 R82／Q2-02 的兩個**安全條件**，逐條釘住（拆分做錯時它們是靜默失效的）。
-
-        ①**單向**：`tools/lib/quota_gate.py` 不得 import 這支 hook。反向 import 會在
-          `runpy` 以 `__main__` 起 hook 時把它整支再載入一次（兩個模組物件、兩份模組層
-          副作用），而症狀是「偶爾怪怪的」而不是當場爆掉。
-        ②**fail-open**：hook 對它的 import 必須是 `try/except`，缺席時符號為 `None`。
-          hard import 會讓「額度模組不見了」把 **context 阻斷也一起帶走**——那道守衛的
-          爆炸半徑是所有工具，而失效的表徵（不再有人出聲）與「修好了」相同。
-        """
+        """🔴 R82／Q2-02：①單向——quota_gate 不得 import 本 hook（runpy 起 hook 會二度載入）；
+        ②fail-open——hook 對它的 import 走 try/except、缺席為 None。沿革＝R213 證據檔附錄 A-5。"""
         gate_src = _QUOTA_GATE.read_text(encoding="utf-8")
         code = "\n".join(ln for ln in gate_src.splitlines()
                          if not ln.lstrip().startswith("#"))
@@ -2935,6 +2936,18 @@ class ResumeSpawnCarriesTheUnattendedSignalTest(unittest.TestCase):
         missing = [k for k in os.environ if k not in env]
         self.assertEqual(missing, [], f"spawn 環境掉了 {missing[:5]} 等鍵")
 
+    def test_a_high_weekly_axis_makes_the_spawn_a_fresh_session(self) -> None:
+        with unittest.mock.patch.object(resume_route, "weekly_why", return_value="週軸 x"):
+            self.assertNotIn("-r", self._run()["argv"])
+
+    def test_the_index_lock_check_runs_before_the_snapshot_and_is_logged(self) -> None:
+        seen = {"path": "x/.git/index.lock", "action": "removed"}
+        with unittest.mock.patch.object(relay_machine, "stale_index_lock", return_value=seen):
+            self._run()
+        rows = [json.loads(ln) for ln in (self.tmp / "log.jsonl").read_text("utf-8").splitlines()]
+        before = next(r for r in rows if r["event"] == "relay_snapshot_before")
+        self.assertEqual(before["index_lock"], seen)
+
     def test_it_still_resumes_the_right_session(self) -> None:
         argv = self._run()["argv"]
         self.assertEqual(argv[:4], ["claude", "-p", "-r", "sid-1"],
@@ -2974,9 +2987,7 @@ class ResumeSpawnCarriesTheUnattendedSignalTest(unittest.TestCase):
         self.assertLess(
             prompt_at[0], idx,
             "prompt 排在 --add-dir 後面 ⇒ 會被那個變長參數吃掉，那一跑會拿不到 prompt")
-        # v2.1.13 C5：`--add-dir` 之後現在是**兩個**目錄值（任務書目錄＋現解後的
-        # handback 目錄），但仍是同一個旗標吃掉之後的全部剩餘值——尾端形狀不變，只是
-        # 值的個數從 1 變 2；姊妹鎖 test_fresh_keeps_the_prompt_before_add_dir 同型更新。
+        # `--add-dir` 之後是兩個目錄值（任務書目錄＋現解後的 handback 目錄），尾端形狀不變。
         self.assertEqual(
             len(argv) - idx, 3,
             f"--add-dir 後面必須剛好兩個目錄值（任務書＋handback），否則多出來的東西"
@@ -3011,6 +3022,16 @@ class ResumeRouteDegradesOneWayTest(unittest.TestCase):
                          f"逐字稿可用卻不走 RESUME：{route}")
         self.assertEqual(route["argv"][:4], ["claude", "-p", "-r", "sid-9"],
                          f"RESUME 的指令形狀被改掉了：{route['argv'][:4]}")
+
+    def test_a_high_weekly_axis_degrades_a_usable_transcript_to_fresh(self) -> None:
+        """PRD §4.5.4：週軸達 converge 帶 ⇒ 一律 FRESH（省額度）；方向鎖不變，仍只准降級。"""
+        route = self._route(self.transcript, weekly="週軸 weekly_all=72%")
+        self.assertEqual(route["strategy"], planner.STRATEGY_FRESH)
+        self.assertNotIn("-r", route["argv"], "週軸高卻續接長對話 ⇒ 喚醒第一請求全額重讀歷史")
+        self.assertIn("週軸 weekly_all=72%", route["reason"])
+        self.assertEqual(self._route(self.transcript, weekly="")["strategy"],
+                         planner.STRATEGY_RESUME)
+        self.assertIn("缺檔", self._route(self.tmp / "ghost.jsonl", weekly="x")["reason"])
 
     def test_a_missing_transcript_degrades_to_fresh_without_r(self) -> None:
         route = self._route(self.tmp / "ghost.jsonl")
@@ -3089,6 +3110,32 @@ class ResumeRouteDegradesOneWayTest(unittest.TestCase):
         for rule in ("第一件事是重驗", "禁止 commit／push"):
             self.assertIn(rule, fresh)
             self.assertIn(rule, resume)
+
+
+class WeeklyAxisForcesFreshTest(unittest.TestCase):
+    """PRD §4.5.4：週窗軸（窗長由桶名文法解、不寫清單）pct ≥ converge ⇒ 理由字串，否則 None。"""
+
+    @staticmethod
+    def _hit(kind: str, pct: float, converge: float) -> str | None:
+        axis = quota_policy.Axis(kind, pct, "2026-10-20T00:00:00+00:00")
+        return resume_route.weekly_forces_fresh([axis], converge)
+
+    def test_only_weekly_window_axes_at_or_above_converge_force_fresh(self) -> None:
+        c = quota_policy.DEFAULT_POLICY.converge_pct
+        for kind in ("weekly_all", "seven_day", "weekly_scoped", "seven_day_opus"):
+            self.assertIn(kind, self._hit(kind, c, c), "邊界含等號")
+            self.assertIsNone(self._hit(kind, c - 0.1, c))
+        for kind in ("five_hour", "session", "spend", "seven_day_overage_included"):
+            self.assertIsNone(self._hit(kind, 99.0, c), kind)
+        self.assertTrue(self._hit("weekly_all", 55.0, 50.0))
+        self.assertIsNone(self._hit("weekly_all", 55.0, 60.0), "門檻讀政策值，不寫死")
+
+    def test_the_cache_glue_reads_a_fresh_cache_and_ignores_a_stale_or_low_one(self) -> None:
+        tmp = _tmpdir(self)
+        with unittest.mock.patch.dict(os.environ, {"AUTOSDD_QUOTA_CACHE_DIR": str(tmp)}):
+            for pct, age, hit in ((99.0, 0.0, True), (99.0, 10_000.0, False), (1.0, 0.0, False)):
+                _quota_cache(tmp, pct, "weekly_all", 5 * 86400.0, age=age)
+                self.assertEqual(bool(resume_route.weekly_why()), hit, (pct, age))
 
 
 class UnattendedPermissionPostureTest(unittest.TestCase):
@@ -3408,9 +3455,7 @@ class HandbackSessionStartAnnounceTest(unittest.TestCase):
         self.addCleanup(setattr, guard, "emit_to_model", guard.emit_to_model)
         guard.emit_to_model = lambda event, msg, *_: seen.append((event, msg)) is None
         self.assertEqual(guard.main(), 0)
-        # R158／P6：SessionStart 現在還會無條件多送一行真實數字簡報（見下方新測試）， round-label-ok
-        # 「恰好 1 次」不再成立——這裡改判「handback 訊息在呼叫清單中」，意圖不變：
-        # 佈線真的到達 lib，而不只是驗 lib 純函式。
+        # SessionStart 另送一行數字簡報，故判「handback 訊息在呼叫清單中」：佈線真的到達 lib。
         handback_seen = [(e, m) for e, m in seen if "## 下一步指令" in m]
         self.assertEqual(len(handback_seen), 1,
                          "SessionStart 分支沒把未讀 handback 送進 additionalContext")
@@ -3794,6 +3839,39 @@ class RelayProgressAndCapTest(unittest.TestCase):
         """對真實 repo 跑一次快照（唯讀、零副作用）：量得到就必須是 `frozenset`。"""
         snap = relay_machine.git_status_snapshot(_REPO_ROOT)
         self.assertIsInstance(snap, frozenset)
+
+    def test_a_stale_index_lock_is_renamed_aside_only_when_old_and_no_git_runs(self) -> None:
+        """PRD §8-3：鎖齡 >600s 且無 git 行程 ⇒ 改名保留（可逆，不 unlink）；其餘不動。"""
+        tmp, now = _tmpdir(self, "idx-lock-"), datetime.now(UTC).astimezone()
+        lock = tmp / ".git" / "index.lock"
+        lock.parent.mkdir()
+        self.assertIsNone(relay_machine.stale_index_lock(tmp, now, pgrep=lambda: False), "無鎖")
+        for age, running, action in ((60.0, False, None), (3600.0, True, "kept"),
+                                     (3600.0, None, "kept"), (3600.0, False, "removed")):
+            with self.subTest(age=age, running=running):
+                lock.write_text("", encoding="utf-8")
+                os.utime(lock, (now.timestamp() - age,) * 2)
+                got = relay_machine.stale_index_lock(tmp, now, pgrep=lambda r=running: r)
+                self.assertEqual(got and got["action"], action)
+                self.assertEqual(lock.exists(), action != "removed")
+        aside = [p for p in lock.parent.iterdir() if p.name.startswith("index.lock.stale-")]
+        self.assertEqual([str(p) for p in aside], [got["moved_to"]], "改名而非刪除")
+        self.assertEqual((got["path"], got["age_seconds"] > 600), (str(lock), True))
+        self.assertEqual(relay_machine.snapshot_log_fields(frozenset(), got)["index_lock"], got)
+        self.assertNotIn("index_lock", relay_machine.snapshot_log_fields(None))
+
+    def test_git_running_maps_each_probe_outcome_to_true_false_or_none(self) -> None:
+        """`_git_running()` 三格各自成立（`subprocess.run` 替身餵探測結果，不開真行程）：有＝
+        True、無＝False、查不出（rc 非預期／spawn 失敗）＝None——後者若退成 False，
+        `stale_index_lock` 就會在量不到時改名一把可能仍有主的鎖。"""
+        nt = os.name == "nt"  # Windows 看 tasklist 輸出有無 git.exe；POSIX 看 pgrep 的 rc（0／1）
+        for want, rc, out in ((True, 0, "git.exe"), (False, 0 if nt else 1, ""), (None, 5, "")):
+            with self.subTest(want=want), unittest.mock.patch.object(
+                    relay_machine.subprocess, "run",
+                    return_value=unittest.mock.MagicMock(returncode=rc, stdout=out)):
+                self.assertIs(relay_machine._git_running(), want)
+        with unittest.mock.patch.object(relay_machine.subprocess, "run", side_effect=OSError):
+            self.assertIsNone(relay_machine._git_running(), "spawn 失敗＝查不出，不是『無』")
 
     def test_made_progress_requires_both_written_and_nonzero_files(self) -> None:
         self.assertTrue(relay_machine.made_progress("written", 1))
@@ -4397,9 +4475,8 @@ class Inv5SingleOwnerTest(unittest.TestCase):
             _jobs = ["AutoSDD_SessionResume_" + sid]
 
             def list_jobs(self, prefix):
-                # M-07：真的尊重 `prefix`——若 `_arm_sentinel` 呼叫時的前綴字串被改壞
-                # （如誤縮成 `AutoSDD_Sentinel_`，看不到 `AutoSDD_SessionResume_` 族），
-                # 本測試才會真的抓到（此前不論傳什麼 prefix 都照樣回同一份寫死清單）。
+                # M-07：真的尊重 `prefix`——若 `_arm_sentinel` 呼叫時的前綴字串被改壞（如誤縮成
+                # `AutoSDD_Sentinel_`，看不到 `AutoSDD_SessionResume_` 族），本測試才會真的抓到。
                 return [j for j in self._jobs if j.startswith(prefix)]
 
         args = planner.build_parser().parse_args(
@@ -6149,15 +6226,11 @@ class ConsoleFreeSpawnTest(unittest.TestCase):
         # 🔴 R82／HELM-02：這一支是本輪實測漏掉的那一個。具名斷言而不是只靠 glob——
         # 有人把 glob 改窄時，「射程縮小」必須指名道姓地紅，而不是只讓總數少一。
         self.assertIn("tools/lib/quota_meter.py", sources)
-        # 🔴 console_qa 事故輪：這三支是本次事故真正的站點（`sdd_latest.py` 動態載入
-        # `sdd_version.py` 起彈窗；`git_paths.py` 是同一批盤點揪出的鄰居）。具名斷言，
-        # 理由同上——不靠 glob 記得，靠這裡指名道姓。
+        # 動態載入目標與其鄰居三支：具名斷言，理由同上——不靠 glob 記得，靠這裡指名道姓。
         self.assertIn("AISDLC_SDD/scripts/sdd_version.py", sources)
         self.assertIn("tools/lib/sdd_latest.py", sources)
         self.assertIn("tools/lib/git_paths.py", sources)
-        # 🔴 DEF-200-418：`tools/probe/` 四支具名站點——射程不可靜默縮回只剩三支新站點
-        # 而把既有合規的 `console_spawn_watch.py` 漏掉（它此前根本不在掃描面，只是恰好
-        # 自己合規；具名斷言讓「有人以為它一直都被守著」這件事被戳破）。
+        # 🔴 DEF-200-418：`tools/probe/` 具名站點——射程不可靜默縮回而漏掉 `console_spawn_watch.py`。
         self.assertIn("tools/probe/console_spawn_watch.py", sources)
         self.assertIn("tools/probe/shell_command_corpus.py", sources)
         self.assertIn("tools/probe/xplat_hazard_census.py", sources)
@@ -7645,9 +7718,8 @@ class OrphanModeWatchTest(unittest.TestCase):
 
 
 # ═══ P1-3／DEF-200-236：halt 期通知投遞失敗補投佇列（R116 round-label-ok）═══
-# 施工圖＝PRD_Amendment_R112_WakeChain.md §3-4。重現形狀逐字＝
-# CrossPlatform_R115_Debt_Closure.md §4 開閥實彈演練：
-# `relay_stopped {why:no_progress, note_written:true, notify_rc:-2}`。
+# 施工圖＝PRD_Amendment_R112_WakeChain.md §3-4。
+# 重現形狀（relay_stopped 樣本）見 CrossPlatform_R115_Debt_Closure.md §4 開閥實彈演練。
 class NotifyQueueRedeliveryTest(unittest.TestCase):
     """`alert()` 對『沒有東西要救』的 loud 情境刻意不呼叫 `notify()`，此前那個
     `NOTIFY_NO_RESCUE_RC` 因此永遠沒有第二次機會送達。本類別釘住：入列、下一次
@@ -7662,9 +7734,8 @@ class NotifyQueueRedeliveryTest(unittest.TestCase):
             os.environ, {endurance_env.TRACE_DIR_ENV: str(self.tmp / "traces")})
         trace_env.start()
         self.addCleanup(trace_env.stop)
-        # 佇列本身只在使用者**已開啟**桌面通知時才有意義（`queue_notify()` 對
-        # `NOTIFY_ENV` 未設一律短路，避免每一支從未設過這個變數的既有測試都把
-        # 記錄寫進真的 `endurance_env.trace_dir()`——本輪落地當回合真的撞見過）。
+        # 佇列本身只在使用者**已開啟**桌面通知時才有意義（`queue_notify()` 對 `NOTIFY_ENV`
+        # 未設一律短路，免得既有測試把記錄寫進真的 `endurance_env.trace_dir()`）。
         notify_env = unittest.mock.patch.dict(os.environ, {escalation.NOTIFY_ENV: "1"})
         notify_env.start()
         self.addCleanup(notify_env.stop)  # DEF-200-464：還原原值而非 pop
@@ -7854,9 +7925,6 @@ class SchedulerBackendNeverTouchesRealSchtasksTest(unittest.TestCase):
 
 
 # ════════════════════ R80：時區框架（act 在 Linux 容器抓到、Windows 本機看不見的兩個紅）
-# 缺陷本體：`resets 9am` 是牆上時刻，舊實作拿機器本地時區去解 ⇒ 同一份語料有兩個框架。
-# 修法是把框架收成**一個**，且優先採用**訊息自報**的時區（`… (Asia/Taipei)`）——那是
-# 資料自己回答的，與機器無關。act 實跑逐字原文＝Resume 證據檔 §L-3.9。
 class ResetFrameIsNotTheMachineClockTest(unittest.TestCase):
     """同一份語料 ＋ 同一個**絕對時刻** ⇒ 判定必須一致，不論它被表示成哪個時區。"""
 
@@ -8054,6 +8122,75 @@ class QuotaUnitNormalizationTest(unittest.TestCase):
         for raw in (None, "56", True, float("nan"), -1.0, {}):
             with self.subTest(raw=raw):
                 self.assertIsNone(meter.normalize_pct(raw, meter.SCALE_PERCENT))
+
+
+class StatuslineRateLimitsFallbackTest(unittest.TestCase):
+    """PRD §4.1.1 T3：端點（T5）失效時的零 token 後備＝status line 回寫的 `rate_limits`。"""
+
+    _SOON = (datetime.now(UTC) + timedelta(hours=3)).timestamp()  # 官方契約：resets_at＝epoch 秒
+
+    def _settled(self, windows: dict, age: float = 0.0, cache_pct: float | None = None):
+        """feed 與快取各住隔離目錄；`settled_quota(True)`＝補量那一步之後的重讀（後備的接點）。"""
+        tmp = _tmpdir(self)
+        feed, cache = tmp / "feed", tmp / "q"
+        feed.mkdir()
+        cache.mkdir()
+        ts = (datetime.now(UTC).astimezone() - timedelta(seconds=age)).isoformat()
+        (feed / "sid-1.json").write_text(json.dumps({"ts": ts, "rate_limits": windows}),
+                                         encoding="utf-8")
+        if cache_pct is not None:
+            _quota_cache(cache, cache_pct, "five_hour", 600.0)
+        env = {"AUTOSDD_CONTEXT_FEED_DIR": str(feed), "AUTOSDD_QUOTA_CACHE_DIR": str(cache)}
+        with unittest.mock.patch.dict(os.environ, env):
+            return qg.settled_quota(True)
+
+    def test_a_fresh_feed_replaces_unmeasured_and_a_stale_one_does_not(self) -> None:
+        win = {"five_hour": {"used_percentage": 56, "resets_at": self._SOON}}
+        now, policy = datetime.now(UTC).astimezone(), quota_policy.DEFAULT_POLICY
+        state, stale = self._settled(win), self._settled(win, age=qg.QUOTA_CACHE_TTL_SECONDS + 60)
+        self.assertEqual((state.source, state.reason), ("statusline", "statusline-fallback"))
+        self.assertNotEqual(quota_policy.decide(state, now, policy).band, "unmeasured")
+        self.assertEqual(stale.axes, (), "過期的 feed 被採信")
+        self.assertEqual(quota_policy.decide(stale, now, policy).band, "unmeasured")
+
+    def test_a_fresh_endpoint_cache_is_never_overridden_by_the_feed(self) -> None:
+        win = {"five_hour": {"used_percentage": 99, "resets_at": self._SOON}}
+        state = self._settled(win, cache_pct=10.0)
+        self.assertEqual((state.source, state.axes[0].pct), ("cache", 10.0), "T3 看不到 spend 軸")
+
+    def test_units_kinds_and_reset_times_are_normalized_without_guessing_keys(self) -> None:
+        now = datetime.now(UTC).astimezone()
+        for key, raw in (("used_percentage", 56), ("utilization", 0.56)):
+            doc = {"ts": now.isoformat(), "rate_limits": {
+                "seven_day": {key: raw, "resets_at": self._SOON}, "brand_new": {key: raw}, "x": 5}}
+            got = harness_feed.rate_limits_reading(doc, now, qg.QUOTA_CACHE_TTL_SECONDS)
+            with self.subTest(key=key):
+                self.assertEqual([a["kind"] for a in got["axes"]], ["seven_day", "brand_new"])
+                self.assertAlmostEqual(got["axes"][0]["pct"], 56.0, places=6)
+                self.assertEqual(got["axes"][0]["resets_at"],
+                                 datetime.fromtimestamp(self._SOON, UTC).isoformat())
+
+    def test_a_fallback_reading_is_not_recorded_nor_flagged_for_a_missing_account_key(self) -> None:
+        axes = (quota_policy.Axis("five_hour", 5.0, None),)
+        states = {src: quota_policy.QuotaState(axes, "2026-10-13T00:00:00+08:00", src)
+                  for src in ("statusline", "cache")}
+        for source, flagged in (("statusline", False), ("cache", True)):
+            with unittest.mock.patch.object(qg, "note_degraded") as note:
+                qg.core_signature(states[source])
+            self.assertEqual(note.called, flagged, source)
+        self.assertFalse(qg.record_burn(states["statusline"]), "後備讀數不落款")
+
+    def test_the_feed_dir_follows_the_sandbox_and_matches_the_writer(self) -> None:
+        import statusline_context_feed as writer  # noqa: PLC0415 — tools/ 已在 sys.path
+        with unittest.mock.patch.dict(os.environ):
+            for name in ("AUTOSDD_CONTEXT_FEED_DIR", "AUTOSDD_QUOTA_CACHE_DIR"):
+                os.environ.pop(name, None)
+            want = writer.context_feed_path("x").parent
+            self.assertEqual(harness_feed.feed_dir(os.environ), want)
+        tmp = _tmpdir(self)
+        self.assertEqual(harness_feed.feed_dir({"AUTOSDD_CONTEXT_FEED_DIR": str(tmp)}), tmp)
+        sandbox = harness_feed.feed_dir({"AUTOSDD_QUOTA_CACHE_DIR": str(tmp)})
+        self.assertIsNone(sandbox, "快取目錄被改道（沙箱）⇒ 真實家目錄的 feed 不得漏進來")
 
 
 class QuotaUnmeasurableTest(unittest.TestCase):
@@ -8450,9 +8587,6 @@ class QuotaCacheContractHomeTest(unittest.TestCase):
 # ═══════════════════════════════════════════════════════════════════════════
 # R83／F2-①：跑測試不得寫進**生產的**降級觀測面
 # ═══════════════════════════════════════════════════════════════════════════
-# 成因：兩個類別把 cache／ledger／latch 換成沙箱，卻沒換 `quota_trace_path`／
-# `degraded_stamp_path` ⇒ `note_degraded()` 寫的是真的那兩個檔。立案實測全文
-# （17 列 no-cache、二分定位逐字、兩層嚴重性）＝Resume 證據檔 §L-3.14。
 def _TRACE_ISOLATION(test: unittest.TestCase) -> tuple:  # noqa: N802 — 與同檔 setUp 表對齊
     """要接在 `setUp` 那張 swap 表後面的兩格：把降級痕跡與閂鎖也關進沙箱。
 
@@ -9383,9 +9517,7 @@ class QuotaGateIsIndependentOfContextTest(unittest.TestCase):
         """
         source = _HOOK.read_text(encoding="utf-8")
         body = source[source.index("def main()"):source.index("def block_verdict")]
-        # 🔴 先剝掉註解行再找位置。第一版沒剝，於是**我自己寫在那一行上方解釋這件事的
-        # 註解**（裡面逐字提到 `tier_of()`）就成了第一個命中點，判準當場誤紅。
-        # 這正是本 repo 反覆判過的「掃描器把說明文字當程式碼」——只是這次它抓到的是我。
+        # 🔴 先剝掉註解行再找位置：掃描器不得把說明文字（例如註解裡的 `tier_of()`）當程式碼。
         body = "\n".join(ln for ln in body.splitlines() if not ln.lstrip().startswith("#"))
         # 🔴 DEF-200-202：`transcript_path` 這個字面此前只出現在五道早退那一段，改當
         # 錨點用；接電模型分軌軸之後，`quota_gate()` 呼叫**之前**多了一次合法的
@@ -11730,10 +11862,7 @@ class EnvFileReachesEveryEscapeHatchTest(unittest.TestCase):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# R97：`AUTOSDD_RESUME_OFF` 併入 `.env` 逃生口白名單——`session_resume_planner.py` round-label-ok
-# 自己的 `main()` 也要跑同一份前置填充（不能只靠 hook 那一份，hook 只在
-# `spawn_sentinel()` 那條 subprocess 繼承路徑上生效；直接手動呼叫 planner CLI 時
-# 沒有任何一個 hook 行程替它先讀 `.env`）。
+# R97：`AUTOSDD_RESUME_OFF` 併入 `.env` 逃生口白名單（planner main() 同樣前置填充） round-label-ok
 # ═══════════════════════════════════════════════════════════════════════════
 class PlannerMainAlsoPrefillsFromDotEnvTest(unittest.TestCase):
     """🔴 接線鎖（同型 `test_the_hook_main_really_calls_the_prefill`）：`--allow-resume`
@@ -14910,6 +15039,27 @@ class ActiveModelFallsBackToFeedInTheGuardTest(unittest.TestCase):
                 feed.write_text(raw, encoding="utf-8")
                 self.assertIsNone(self._active(ts))
                 self.assertIsNone(harness_feed.active_model_of(ts, guard))
+
+
+class SimulationProbeSelftestTest(unittest.TestCase):
+    """PRD §11 驗收探針（§11.1／§11.2／§11.7／§11.8）自證必須 rc=0（ARCH-13：此前只鎖兩支）。"""
+
+    _PROBES = (("zero_token_patrol_sim.py", ["--selftest"], "全數符合"),
+               ("day_long_relay_sim.py", ["--selftest"], "全數符合"),
+               ("pacing_simulator.py", ["--selftest"], "FAIL 0"),
+               ("zero_token_telemetry_window.py", ["--selftest"], "自證：6/6"),
+               ("two_project_fanout_probe.py", [], None),
+               ("engine_resume_job_sim.py", ["--selftest"], "自證：13/13"))
+
+    def test_each_simulation_probe_selftest_passes(self) -> None:
+        for probe, flags, phrase in self._PROBES:
+            argv = [sys.executable, str(_REPO_ROOT / "tools" / "probe" / probe), *flags]
+            done = subprocess.run(
+                argv, capture_output=True, encoding="utf-8", errors="replace", timeout=300,
+                check=False, env={**os.environ, "AUTOSDD_SENTINEL_OFF": "1"})
+            self.assertEqual(done.returncode, 0, probe + done.stdout[-1500:] + done.stderr[-500:])
+            if phrase:
+                self.assertIn(phrase, done.stdout, probe)
 
 
 def tearDownModule() -> None:

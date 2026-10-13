@@ -18,7 +18,7 @@ import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 from tools.fsm_runtime import pattern_matcher
 from tools.fsm_runtime.file_lock import file_lock

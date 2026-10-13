@@ -5,7 +5,7 @@
 
 # ADR-XPLAT-005：額度感知節流與扇出級續跑（quota-aware throttling & fan-out resume）
 
-- **狀態**：Proposed（R81）
+- **狀態**：**Accepted（2026-10-13；掌舵者「做完＝無積欠 BUG 與技術債」指令下由主控裁決、四方審查於 R213 證據檔覆核）**。追認依據＝§5 機械物 M1～M14 於 HEAD 逐列現查：M1～M7、M9、M12～M14 指名的測試類／鎖皆存在（`tools/tests/test_context_budget_guard.py`、`test_doc_loc_baseline_freshness_r60.py`）；三個落檔時「未落地」的半邊其後皆已落地——M8 `endpoint-authoritative` 住 `tools/lib/relay_machine.py::SOURCE_AUTHORITATIVE`（L1）、M10 `AutoClaude/autoclaude/utils/config.py` 的 `quota_throttle_pct`／`quota_halt_pct` 含 halt > throttle 驗證器、M11 `AutoClaude/.importlinter` 的 `root_packages` 含 `tools` 且 Rule 9 禁止反向依賴（R82 ACQ-02）。§8 已知限制與 §9 待拍板維持史料字面：其中 §8-5 跨 session 扇出重派由 relay／哨兵鏈（ADR-XPLAT-014、PRD §4.5）承接、§9-3 refresh token 本 repo 刻意不持有（純 OAuth、端點唯讀）。結構性長債 DEF-101-980 據此結案。（原字面：Proposed（R81））
 - **日期**：2026-08-08
 - **取代／被取代**：不取代任何 ADR。**修正 ADR-XPLAT-004 的三處**：§2.1「reset 只能觀測不能算」的射程、§2.7「五小時怎麼度過」的答案、以及整支協定「救 session」這個單位選擇。ADR-004 的其餘部分（S1/S2 分流、憑證＝`NextRunTime`、狀態只有一個家、預防性武裝）**全部維持**。
 - **回答的訴求**（🔴 **R81 收輪訂正過一次，見下方**）：a（額度水位一律用 %）／b（80% 少派 agent、95% 停止並準備喚醒）／**c（Token 盡量不要用盡，就要停止進行任務，記錄所有狀態）**／d（Token 若用盡時，下一輪 Reset 時要能喚起任務繼續執行）／e（同 session 同 token 池、單次上限 1 小時、reset 五小時，要如何度過；是否每 50 分鐘喚醒一次）／f（搜尋最新前沿 AI Agent 如何設計來參考）

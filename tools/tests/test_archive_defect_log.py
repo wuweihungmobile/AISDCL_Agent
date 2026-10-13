@@ -222,12 +222,6 @@ def _row_from(path: Path, def_id: str) -> str:
 
 def _generated_header_of(archive: Path) -> str:
     """該 archive 檔內「由 `apply()` **生成**的標頭」區段原文（不含逐字搬入的表格列）。
-
-    本函式存在的理由是 Pkg-P12 那個假紅：寫死 `[:4000]` 切片既假設標頭長度不變、又會
-    切進已結列逐字搬入的表格區，讓帳本合法引用的缺陷字樣（如「共七項」）誤觸斷言。
-    改法＝邊界由結構認定：走生產側同一份 SSOT `gate._table_layout()`／`ADL._row_id()`
-    找出第一列可解析的表格列，找不到即 fail-loud，不退回整檔。史料見證據檔
-    〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
     text = archive.read_text(encoding="utf-8-sig")
     layout = ADL.gate._table_layout(text)

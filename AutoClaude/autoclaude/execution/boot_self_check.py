@@ -401,6 +401,73 @@ def permission_bypass_verdict(requested_by: Sequence[str], *, allow_flag: bool,
     return BypassOutcome(lines=tuple(lines), problems=tuple(problems))
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# §6.1 不變式 9（PRD §4.5.9 R-4.5.9-1 末段）：引擎的狀態目錄必須在 .gitignore
+# ══════════════════════════════════════════════════════════════════════════════
+# 現查事實：引擎**實際**寫入的目錄是 `checkpoint_dir`（出廠值見 `utils/config.py`，本檔不複寫）；
+# PRD 字面的 `.autoclaude/` 只在使用者把 checkpoint_dir 指進去、或別的工具建出它時才存在。
+# ⇒ 判準問兩類目錄：設定的 checkpoint_dir（在 repo 內才問）與**已經存在**的 `.autoclaude/`。
+# 🔴 不是「每個 repo 都必須有這一行」：從不用 `.autoclaude/` 的專案會因此無端拒絕啟動，
+#    而被關掉的守衛比沒有守衛更糟。
+# 🔴 問法是 `git check-ignore -q <dir>/`（帶尾斜線）：實測 `.gitignore` 寫 `.autoclaude/` 時，
+#    不帶斜線的 `check-ignore .autoclaude` 在目錄尚不存在時回 rc=1（git 把不存在的路徑當檔案）
+#    ⇒ 對一棵已正確 ignore 的 repo 假紅；帶斜線則 rc=0。同型教訓：
+#    `infra/adapters/dirty_worktree_rescue.py::_selfrecursion_hazard`。
+DOT_AUTOCLAUDE = ".autoclaude"
+
+
+@dataclass(frozen=True)
+class GitignoreOutcome:
+    lines: tuple[str, ...] = field(default_factory=tuple)
+    problems: tuple[str, ...] = field(default_factory=tuple)
+
+
+def state_dirs_to_guard(repo_root: str | Path, checkpoint_dir: str | Path) -> tuple[str, ...]:
+    """不變式 9 要問的目錄（相對 repo_root 的 posix 路徑）。純路徑運算，不呼叫 git。"""
+    root = Path(repo_root)
+    dirs: list[str] = []
+    raw = str(checkpoint_dir).strip()
+    if raw:
+        ck = Path(raw)
+        try:
+            rel = (ck if ck.is_absolute() else root / ck).resolve().relative_to(root.resolve())
+        except ValueError:                    # repo 外的目錄結構上不可能被這個 repo commit
+            rel = None
+        if rel is not None and rel.parts:     # parts 為空＝repo 根本身，無從 ignore
+            dirs.append(rel.as_posix())
+    if (root / DOT_AUTOCLAUDE).is_dir() and DOT_AUTOCLAUDE not in dirs:
+        dirs.append(DOT_AUTOCLAUDE)
+    return tuple(dirs)
+
+
+def gitignore_verdict(repo_root: str | Path, dir_name: str,
+                      runner: Callable[[list[str]], tuple[int, str]] | None = None,
+                      ) -> GitignoreOutcome:
+    """§6.1 不變式 9 的判決。rc：0＝已忽略；1＝未忽略（problem）；128＝非 git repo（通過並 note）；
+    其餘＝沒量到（problem——量不到不得讀成「已忽略」）；runner 拋例外（無 git）＝note＋warning。"""
+    run = runner or _default_runner
+    target = dir_name.rstrip("/") + "/"
+    try:
+        rc, out = run(["git", "-C", str(repo_root), "check-ignore", "-q", target])
+    except Exception as exc:                  # 找不到 git／逾時：沒有 git 就沒有 commit，但不得靜默
+        logger.warning("§6.1 不變式 9：git 不可用（%s）⇒ 略過 %s 的 .gitignore 檢查", exc, target)
+        return GitignoreOutcome(lines=(f"不變式 9：git 不可用（{exc}）⇒ 略過 `{target}` 的檢查",))
+    if rc == 0:
+        return GitignoreOutcome(lines=(f"不變式 9：`{target}` 已在 .gitignore",))
+    if rc == 128:
+        return GitignoreOutcome(lines=(
+            f"不變式 9：{repo_root} 不是 git repo（git check-ignore rc=128）"
+            f"⇒ `{target}` 無從被 commit，視為通過",))
+    if rc == 1:
+        return GitignoreOutcome(problems=(
+            f"`{target}` 位於 {repo_root} 內但不在 .gitignore ⇒ 檢查點／patch／狀態檔可能被 "
+            "commit，且救援 patch 會把自己列舉進自己（PRD §6.1 不變式 9）。"
+            f"請先把 `{target}` 加入 .gitignore",))
+    return GitignoreOutcome(problems=(
+        f"不變式 9：`git check-ignore -q {target}` 回非預期 rc={rc}（{out.strip()[:200]}）"
+        f"⇒ 無法確認 `{target}` 已被忽略",))
+
+
 @dataclass(frozen=True)
 class BootReport:
     problems: tuple[str, ...] = field(default_factory=tuple)
@@ -433,8 +500,11 @@ def boot_self_check(
     extra_args: Sequence[str] = (),
     environ: Mapping[str, str] | None = None,
     isolation: IsolationEvidence | None = None,
+    repo_root: str | Path | None = None,
+    ignored_dirs: Sequence[str] = (),
+    git_runner: Callable[[list[str]], tuple[int, str]] | None = None,
 ) -> BootReport:
-    """§6.1 不變式 8、11~13 的一次性自檢。違反 → problems 非空（呼叫端須非零退出碼）。"""
+    """§6.1 不變式 8、9、11~13 的一次性自檢。違反 → problems 非空（呼叫端須非零退出碼）。"""
     lines: list[str] = []
     problems: list[str] = []
     notified = 0
@@ -448,6 +518,12 @@ def boot_self_check(
                                            flag_raw=flag_raw, isolation=evidence)
         lines.extend(bypass.lines)
         problems.extend(bypass.problems)
+    # 不變式 9（狀態目錄在 .gitignore）：沒傳 ignored_dirs＝不問 git，舊呼叫端零附帶面。
+    for dir_name in ignored_dirs:
+        ignored = gitignore_verdict(Path.cwd() if repo_root is None else repo_root,
+                                    dir_name, git_runner)
+        lines.extend(ignored.lines)
+        problems.extend(ignored.problems)
     # 不變式 12（CLI 版本）先跑：它決定 dry_run，而 dry_run 決定 11 敢不敢重排。
     version = read_cli_version(cli_command, cli_runner)
     dry_run, line = cli_version_verdict(version)

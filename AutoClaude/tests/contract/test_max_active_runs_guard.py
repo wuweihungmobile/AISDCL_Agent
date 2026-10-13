@@ -14,8 +14,6 @@ PM #8 契約：
 """
 from __future__ import annotations
 
-from typing import Optional
-
 import pytest
 
 from autoclaude.core.event_bus import EventBus
@@ -62,7 +60,7 @@ class _NopExecutor:
         return True
 
 
-def _make_coord(*, max_runs: Optional[int] = None) -> OrchestrationCoordinator:
+def _make_coord(*, max_runs: int | None = None) -> OrchestrationCoordinator:
     return OrchestrationCoordinator(
         bus=EventBus(),
         brain=_NopBrain(),

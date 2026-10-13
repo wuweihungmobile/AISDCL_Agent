@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 from autoclaude.core.event_bus import EventBus
+from autoclaude.core.hookspec import KernelPhase
 from autoclaude.core.kernel import PlaybookKernel
 from autoclaude.core.ports.brain import CorrectionResult
 from autoclaude.core.wiring import _build_plugin_set, build_kernel
@@ -30,7 +31,6 @@ from tests.plugins._template import (
     sample_playbook,
     sample_task,
 )
-from autoclaude.core.hookspec import KernelPhase
 
 
 def _cfg(tmp_path) -> AppConfig:

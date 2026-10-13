@@ -8,11 +8,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Optional
+from enum import StrEnum
 
 
-class StepAction(str, Enum):
+class StepAction(StrEnum):
     ADVANCE = "advance"
     GOTO = "goto"
     ESCALATE = "escalate"
@@ -23,7 +22,7 @@ class StepAction(str, Enum):
 class StepOutcome:
     """單一步驟 attempt loop 結束後的決策。"""
     action: StepAction
-    goto_idx: Optional[int] = None     # action == GOTO 時的目標
+    goto_idx: int | None = None     # action == GOTO 時的目標
     failure_reason: str = ""
     attempts_used: int = 1
     # improving_78 W-78-1（DEF-78-001）：HALT on token 時帶回觀測到的 token 峰值，
@@ -65,12 +64,12 @@ class KernelResult:
     contributors: list[str] = field(default_factory=list)
     # W0b（SD_03 §2.6）：PlaybookResult 映射缺漏欄位補入；詳見類別 docstring
     workflow: str = ""
-    scheduled_resume_at: Optional[str] = None
-    evolved_playbook_path: Optional[str] = None
+    scheduled_resume_at: str | None = None
+    evolved_playbook_path: str | None = None
     evolution_fresh_required: bool = False
     # improving_78 W-78-1（DEF-78-001）：token halt 時帶回 halt 發生的步驟索引與觀測峰值，
     # 供 AutoResumeService 以 path-aware 方式存 halt checkpoint（resume 點 = halt_step_idx）。
-    halt_step_idx: Optional[int] = None
+    halt_step_idx: int | None = None
     peak_token_pct: float = 0.0
 
     @property
@@ -86,7 +85,7 @@ class KernelResult:
         step_log: list[str], completed_step_ids: list[str],
         contributors: list[str],
         peak_token_pct: float = 0.0,
-    ) -> "KernelResult":
+    ) -> KernelResult:
         # W-82-4（DEF-81-001 端到端閉合）：成功 run（未觸 halt/compact 門檻）亦帶回
         # 全程觀測到的 token% 峰值，使載具讀 KernelResult.peak_token_pct 能見真值（非恆 0）。
         # peak<=0（無 token 訊號，dry-run / 既有 fake）維持 0.0 → 與接線前完全一致（零退化）。
@@ -102,7 +101,7 @@ class KernelResult:
         )
 
     @classmethod
-    def vetoed(cls, total_steps: int, reasons: list[str]) -> "KernelResult":
+    def vetoed(cls, total_steps: int, reasons: list[str]) -> KernelResult:
         return cls(
             success=False,
             completed_steps=0,
@@ -116,7 +115,7 @@ class KernelResult:
         cls, completed_steps: int, total_steps: int,
         step_log: list[str], completed_step_ids: list[str],
         reason: str,
-    ) -> "KernelResult":
+    ) -> KernelResult:
         return cls(
             success=False,
             completed_steps=completed_steps,
@@ -131,9 +130,9 @@ class KernelResult:
     def halted_(
         cls, completed_steps: int, total_steps: int,
         step_log: list[str], completed_step_ids: list[str],
-        halt_step_idx: Optional[int] = None,
+        halt_step_idx: int | None = None,
         peak_token_pct: float = 0.0,
-    ) -> "KernelResult":
+    ) -> KernelResult:
         return cls(
             success=False,
             completed_steps=completed_steps,

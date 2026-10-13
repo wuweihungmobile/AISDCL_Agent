@@ -183,17 +183,9 @@ _QUOTA_CTX: dict[str, str | None] = {"model": None}
 #: 舊版把它當乘法的 base，於是 `=8` 在 near 檔實得 16——一個名字叫 CAP 的旋鈕給出比使用者
 #: 要求還鬆的值）。本檔留一個同名常數就是同一份字面兩個家，故連常數一起刪。
 
-#: 🔴 **量到的失明面，寫成政策而不是寫成藉口**（SD-B1）。R81 實測：
-#:  · `Workflow` 的 tool_result **47/47** 是「launched in background」⇒ 那次工具呼叫在
-#:    內部 agent 生出來**之前**就結束了；
-#:  · `%TEMP%` 的 `autosdd_sentinel_boot_*.log` 19 支，**沒有一支**的 sid 長得像 subagent
-#:    ⇒ SessionStart hook 對 workflow 內部 agent **一次都沒有觸發過**；
-#:  · 但 subagent 逐字稿裡 `PreToolUse:` 命中 136 次（Bash 105／PowerShell 25／Read 6）
-#:    ⇒ 那些 agent **自己的每一次工具呼叫**都會跑本閘。
-#: 合起來的結論：我們攔得到「派發」與「被派出去的人再往下派」，但攔不到「一個已經啟動的
-#: workflow 在內部生出 42 個 agent」那一刻——**那一刻沒有任何 hook 會被叫到**。
-#: ⇒ 既然一次 `Workflow` 啟動是一個**事後無法界住**的扇出，節流帶唯一誠實的處置就是
-#: 不讓它啟動。這不是「擋不到所以放棄」，是把量到的失明面換成一條擋得住的政策。
+#: 🔴 **量到的失明面，寫成政策而不是寫成藉口**（SD-B1）：一次 `Workflow` 啟動是**事後無法界住**的
+#: 扇出（它在內部生出 agent 的那一刻沒有任何 hook 會被叫到；R81 實測數字見
+#: `docs/06_quality/CrossPlatform_R81_Quota_Review.md`）⇒ 節流帶唯一誠實的處置就是不讓它啟動。
 UNBOUNDED_FANOUT_TOOLS = ("Workflow",)
 
 #: 派發帳。🔴 **刻意不帶 session id**（SA-B5／SD-B1）：額度是 per-account 的單一池，而
@@ -342,7 +334,7 @@ def core_signature(state: quota_policy.QuotaState) -> tuple:
     kinds = tuple(sorted({a.kind for a in state.axes if a.kind in quota_policy.KNOWN_KINDS}))
     if state.account_key:
         return (f"{_ACCOUNT_KEY_TAG}{state.account_key}",) + kinds
-    if state.usable():
+    if state.usable() and state.source != "statusline":  # statusLine 後備本就沒有 account_key
         note_degraded(
             "no-account-key",
             "帳號指紋量不到（account_key 缺席，量測本身成功）⇒ 逐字退回裸桶名指紋，"
@@ -357,7 +349,7 @@ def core_signature(state: quota_policy.QuotaState) -> tuple:
 # 失敗一律吞掉：落款是**取數的副產品**，不得讓 `--pace` 掛掉（同 `note_degraded` 的紀律）。
 def record_burn(state: quota_policy.QuotaState, live: int = 0, bd: str | None = None) -> bool:
     """把這一次的逐軸讀數 append 一列（`bd`＝生效中的清倉落款 id）。回「有沒有真的寫」。"""
-    if not state.usable() or not state.measured_at:
+    if not state.usable() or not state.measured_at or state.source == "statusline":  # 後備不落款
         return False
     try:
         path = burn_ledger_path()   # `trace_dir()` 自己 mkdir 過了，這裡不重複一份
@@ -454,10 +446,7 @@ def read_quota(now: datetime, path: Path | None = None) -> quota_policy.QuotaSta
     # ⇒ 跨窗的讀數與 `stale-cache` 同一種處置（降級到「量不到」，走 `degraded_cap`；那個
     # 量非單調、翻頁會驟降，「上調一個安全邊際」同樣是猜）。**兩者的 reason 必須分得開**：
     # stale＝重量一次；expired-window＝視窗翻頁／鐘不一致，述詞由 `expiry_of` 分流。
-    expired = [(a.kind, a.resets_at, note) for a in axes
-               for note in (quota_pace.expiry_of(a.resets_at, now,
-                                                 data.get("measured_at"))[1],)
-               if quota_pace.expired(note)]
+    expired = quota_pace.expired_axes(axes, now, data.get("measured_at"))
     if expired:
         return _blank("expired-window", "expired-window（資料在且未過 TTL，但 "
                       + "；".join(f"kind={k} 的 reset {at} 已過去（{n}）"
@@ -615,7 +604,11 @@ def settled_quota(won: bool) -> quota_policy.QuotaState:
     if not won and quota_ledger is not None:
         quota_ledger.await_winner(refresh_stamp_path(), QUOTA_SYNC_TIMEOUT_SECONDS,
                                   lambda: read_quota(datetime.now().astimezone()).usable())
-    return read_quota(datetime.now().astimezone())
+    state = read_quota(now := datetime.now().astimezone())
+    # T3（PRD §4.1.1）：端點補量後仍無讀數 ⇒ 才問 statusLine 回寫的 `rate_limits`（零 token 後備）。
+    # 🔴 絕不可前移到 `read_quota()`：T3 看不到 spend／extra_usage 軸，端點讀得到時不得被它蓋過。
+    return state if state.usable() else harness_feed.statusline_state(
+        state, now, QUOTA_CACHE_TTL_SECONDS)
 
 
 # 🔴 R84：這一格從 `claim_refresh_slot()` 內的寫死路徑抽成一支可 swap 的函式，理由與

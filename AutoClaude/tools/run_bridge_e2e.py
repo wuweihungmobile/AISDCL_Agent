@@ -47,6 +47,10 @@ for _p in (str(_REPO_ROOT), str(_TOOLS_DIR)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
+sys.path.insert(0, str(_REPO_ROOT.parent / "tools" / "lib"))
+from platform_utils import (  # noqa: E402
+    init_utf8_streams as _init_utf8_streams,  # type: ignore[import-not-found]
+)
 from three_tier_to_playbook import compile_to_playbook, playbook_to_yaml  # noqa: E402
 
 from autoclaude.models.playbook import Playbook  # noqa: E402
@@ -226,11 +230,8 @@ def cli(source, config, workdir, out, project_id, workflow_type, compile_only, t
     """W-95-2：PRD→playbook 橋接端到端 harness。"""
     # R46（DEF-101-380）：省略 --out 時走 stdout 印出的 YAML/JSON 含中文
     # （allow_unicode=True／ensure_ascii=False），Windows 非 UTF-8 console 直接印會
-    # UnicodeEncodeError；比照 ab_compare_backends.py DEF-82-001 同款保護。
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
-    except (AttributeError, OSError):
-        pass
+    # UnicodeEncodeError；比照 ab_compare_backends.py DEF-82-001 同款保護（唯一實作）。
+    _init_utf8_streams()
     try:
         pb, pb_yaml = compile_plan(source, project_id=project_id, workflow_type=workflow_type)
     except Exception as exc:  # noqa: BLE001

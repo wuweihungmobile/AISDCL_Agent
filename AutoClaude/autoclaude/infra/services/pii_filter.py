@@ -21,7 +21,6 @@ import logging
 import os
 import re
 from dataclasses import dataclass, field
-from typing import Optional
 
 from ...models.pii_classification import PIIClassification, PIIFilterAction
 
@@ -83,9 +82,9 @@ class PIIFilter:
     """執行 PIIClassification 對應動作的中介層。"""
 
     registry: FieldRegistry = field(default_factory=FieldRegistry)
-    enabled: Optional[bool] = None  # None → 讀環境變數
+    enabled: bool | None = None  # None → 讀環境變數
     scrub_tokens_for_normal: bool = True
-    audit_observer: Optional[callable] = None  # 寫入 audit log 的 hook
+    audit_observer: callable | None = None  # 寫入 audit log 的 hook
 
     def __post_init__(self) -> None:
         if self.enabled is None:
@@ -149,6 +148,8 @@ class PIIFilter:
     def _audit(self, field_path: str, cls: PIIClassification, action: str) -> None:
         if self.audit_observer:
             try:
-                self.audit_observer({"field_path": field_path, "class": cls.value, "action": action})
+                self.audit_observer(
+                    {"field_path": field_path, "class": cls.value, "action": action}
+                )
             except Exception as exc:  # pragma: no cover
                 logger.warning("audit_observer 失敗：%s", exc)

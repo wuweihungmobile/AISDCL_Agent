@@ -11,13 +11,11 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import pytest
 import yaml
 
-from autoclaude.evolution.playbook_evolver import PlaybookEvolver, PlaybookEvolutionProposal
+from autoclaude.evolution.playbook_evolver import PlaybookEvolver
 from autoclaude.models.escalation import EscalationDump
-from autoclaude.models.playbook import Playbook, PlaybookTask, GlobalInvariants
-
+from autoclaude.models.playbook import GlobalInvariants, Playbook, PlaybookTask
 
 # ──────────────────────────────────────────────────────────
 # 工廠函式
@@ -60,9 +58,12 @@ def _make_dump(step_id="T02", suspect_test_file=True) -> EscalationDump:
         final_eval_output="",
         human_hint="測試檔有 ImportError",
         failure_chain=[
-            {"attempt": 1, "error_class": "import", "error_signature": "ImportError", "minimax_reasoning": "retry", "exit_code": 1},
-            {"attempt": 2, "error_class": "import", "error_signature": "ImportError", "minimax_reasoning": "env_setup", "exit_code": 1},
-            {"attempt": 3, "error_class": "import", "error_signature": "ImportError", "minimax_reasoning": "reinstall", "exit_code": 1},
+            {"attempt": 1, "error_class": "import", "error_signature": "ImportError",
+             "minimax_reasoning": "retry", "exit_code": 1},
+            {"attempt": 2, "error_class": "import", "error_signature": "ImportError",
+             "minimax_reasoning": "env_setup", "exit_code": 1},
+            {"attempt": 3, "error_class": "import", "error_signature": "ImportError",
+             "minimax_reasoning": "reinstall", "exit_code": 1},
         ],
     )
 

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import dataclasses
 from pathlib import Path
-from typing import Iterable, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 try:
     import yaml

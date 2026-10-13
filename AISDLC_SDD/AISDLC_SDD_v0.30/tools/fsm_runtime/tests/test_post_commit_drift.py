@@ -8,7 +8,6 @@ Acceptance:
 from __future__ import annotations
 
 import importlib.util
-import sys
 import time
 from pathlib import Path
 from unittest.mock import patch

@@ -214,7 +214,7 @@ SMOKE_EVIDENCE: dict[str, str] = {
 # 找 `"PASS="`——於是 win32 欄**結構上永遠**落到 fallback，而 fallback 文案
 # 「（心跳無彙總行）」讀起來像「那支 log 確實沒寫彙總」，把解析失敗偽裝成資料現況。
 # 一道剛落地、用來讓平台覆蓋不再靠人記憶的機械守，自己一天都沒有真的量到過東西。
-# 諷刺的是這個差異**早就寫在本 repo 裡**：`tools/dev_start.py::_windows_heartbeat_fail_note`
+# 諷刺的是這個差異**早就寫在本 repo 裡**：`nightly_heartbeat.py::windows_heartbeat_fail_note`
 # 檔頭逐字記著「nightly_latest.log 是全量 log（可能數 MB）…故不能沿用讀前 3 行的作法」。
 #
 #   win32  = `AutoClaude/tools/run_local_nightly.ps1` 的**全量 log 複本**（實測 494 行；
@@ -223,9 +223,9 @@ SMOKE_EVIDENCE: dict[str, str] = {
 #            （實測落在第 491 行；其後還有 `… summary json:` 與 `END exit decision:`）
 #   darwin = `AutoClaude/tools/run_local_nightly.sh::write_heartbeat()` 寫的**固定 4 行
 #            心跳**，第 2 行恆為 `===== nightly 彙總：PASS=n FAIL=n =====`（三站點契約，
-#            見 `tools/dev_start.py::_heartbeat_fail_count` 與 `tools/install_mac_nightly.sh`）
+#            見 `nightly_heartbeat.py::heartbeat_fail_count` 與 `tools/install_mac_nightly.sh`）
 #
-# 取捨（與 `_windows_heartbeat_fail_note` 同款、刻意不再論證一次）：`\s+` ＋ `IGNORECASE`
+# 取捨（與 `windows_heartbeat_fail_note` 同款、刻意不再論證一次）：`\s+` ＋ `IGNORECASE`
 # 容忍空白／大小寫微幅漂移；`(?<![\w-])` 擋掉 `append`／`front-end` 這類尾綴誤觸發。
 _NIGHTLY_TAIL_BYTES = 16384
 

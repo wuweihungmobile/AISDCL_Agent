@@ -21,7 +21,8 @@
 #   [4] AISDLC_SDD LATEST install_post_commit.sh 於 worktree 實跑 + 移除後路徑斷言
 #       （比照 CI 對應 step，含 2026-07-16 P1 回歸鎖）
 #   [5] python tools/check_ntfs_paths.py + tools/check_script_parity.py（唯讀，
-#       直接對本 repo 跑）
+#       直接對本 repo 跑）＋ LATEST 四支 .sh 的可啟動性（R68-04：run_tlc／init_project／
+#       run_self_evolution 的 --help、verify_traceability 對空 docs 乾跑；rc=0 且 stderr 空）
 #   [6] install_mac_nightly.sh --render-only 產 plist 至 temp + plutil -lint
 #       （R13 ARCH-R13-3 隨安裝器新增；只驗 render，不做 launchctl 實載；
 #       CI 對應 step 已補於 macos-compat-ci.yml macos-smoke job〔QA-R13-3〕，
@@ -496,6 +497,44 @@ else
   fail "tools/check_script_parity.py"
 fi
 
+# 5c. LATEST 四支 .sh 的「可啟動性」（R68-04）。這四支此前只被 [1/7] 的 bash -n 與 bash32
+# 相容靜態鎖看過、從未被**執行**——能 parse 不等於能啟動。--help 在三支內都先於任何副作用
+# （python／java 偵測、下載、mkdir）就 exit 0；verify_traceability.sh 沒有 --help，改對空 docs
+# 目錄乾跑（唯讀掃描）。判準＝rc=0 且 stderr 空；以系統 bash（$SYS_BASH，3.2）執行；刻意不跑
+# 真 TLC（需 Java）。本地專屬防線：無 macos-compat-ci.yml 對應 CI step（同 [7/7] 的慣例）。
+# LATEST 沿用 [1/7] 以 sdd_version.py SSOT 解出的 $sdd_latest，不內嵌版號。
+launch_bad=0
+if [ -z "$sdd_latest" ]; then
+  fail "LATEST 解析失敗（[1/7] 已記錄）——四支 .sh 可啟動性未能執行"
+  launch_bad=1
+else
+  empty_docs="$WORK/empty_docs"
+  mkdir -p "$empty_docs"
+  for spec in \
+    "tools/fsm_runtime/formal/run_tlc.sh|--help" \
+    "tools/init_project.sh|--help" \
+    "tools/arch_fitness/run_self_evolution.sh|--help" \
+    "tools/verify_traceability.sh|$empty_docs"; do
+    rel="${spec%%|*}"
+    arg="${spec#*|}"
+    script="$REPO_ROOT/AISDLC_SDD/${sdd_latest}/$rel"
+    if [ ! -f "$script" ]; then
+      fail "LATEST 缺 ${rel}——可啟動性未能驗證"
+      launch_bad=1
+      continue
+    fi
+    launch_err="$("$SYS_BASH" "$script" "$arg" 2>&1 >/dev/null)"
+    launch_rc=$?
+    if [ "$launch_rc" -ne 0 ] || [ -n "$launch_err" ]; then
+      fail "${rel} 可啟動性失敗（rc=${launch_rc}；stderr 首行：$(printf '%s\n' "$launch_err" | head -1)）"
+      launch_bad=1
+    fi
+  done
+fi
+if [ "$launch_bad" -eq 0 ]; then
+  pass "AISDLC_SDD LATEST 四支 .sh 可啟動性（run_tlc／init_project／run_self_evolution --help；verify_traceability 空 docs；rc=0 且 stderr 空）"
+fi
+
 # ── [6/7] install_mac_nightly.sh --render-only plist 產出＋plutil -lint ────────
 echo ""
 echo "--- [6/7] install_mac_nightly.sh --render-only plist 產出＋plutil -lint ---"
@@ -555,10 +594,10 @@ fi
 # ── 彙總 ─────────────────────────────────────────────────────────────────────
 # R10 二審 QA 觀察項：PASS 下限釘選（比照 run_root_unittests MIN_TESTS 精神）——
 # 只斷言 FAIL==0 時，驗證段落被整段刪除仍 exit 0（靜默縮面）；PASS 低於下限即紅。
-# 刻意刪減驗證項時同步下修本值（現況滿版 PASS=13——R13 [6] plist render 步、
-# R15 [7] RunId log／RunAtLoad 靜態錨點兩步入列；含非 macOS 平台 NTFS／plist
-# 兩子測試的 SKIP-計-PASS 分支）。
-MIN_PASS=13
+# 刻意刪減驗證項時同步下修本值（現況滿版 PASS=14——R13 [6] plist render 步、
+# R15 [7] RunId log／RunAtLoad 靜態錨點兩步入列；R68-04 [5] 四支 LATEST .sh 可啟動性一步
+# 入列；含非 macOS 平台 NTFS／plist 兩子測試的 SKIP-計-PASS 分支）。
+MIN_PASS=14
 if [ "$PASS" -lt "$MIN_PASS" ]; then
   fail "PASS 總數 ${PASS} 低於下限 ${MIN_PASS}——驗證段落疑似被刪減（靜默縮面）"
 fi

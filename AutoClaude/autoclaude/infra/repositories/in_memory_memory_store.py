@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from typing import Optional
 
 
 class InMemoryMemoryStore:
@@ -13,7 +12,7 @@ class InMemoryMemoryStore:
         self._escalations: list[dict] = []
         self._strategy_success: dict[str, Counter] = defaultdict(Counter)
 
-    def query(self, error_signature: str) -> Optional[dict]:
+    def query(self, error_signature: str) -> dict | None:
         return self._success.get(error_signature)
 
     def query_strategy_priority(self, error_class: str) -> list[str]:

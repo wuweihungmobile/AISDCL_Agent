@@ -749,11 +749,6 @@ _STDIO_DELEGATE_IMPORT_RE = re.compile(r"^\s*from\s+platform_utils\s+import\b", 
 _FROZEN_INLINE_STDIO_SITES: dict[str, int] = {
     "AISDLC_SDD/scripts/agent_template_lint.py": 1,
     "AutoClaude/tests/fixtures/dummy_cli.py": 2,
-    "AutoClaude/tools/ab_compare_backends.py": 1,
-    "AutoClaude/tools/ac4_progress_check.py": 1,
-    "AutoClaude/tools/migrate_yaml_to_db.py": 1,
-    "AutoClaude/tools/run_bridge_e2e.py": 1,
-    "AutoClaude/tools/three_tier_to_playbook.py": 1,
     "tools/tests/test_subprocess_encoding_hygiene.py": 1,
 }
 
@@ -899,7 +894,12 @@ _FROZEN_STDIO_FORCE_TREES: dict[str, int] = {
     # R75 收輪下修 26→24：`AutoClaude/tmp_lint_check.py` 是 tracked 的一次性除錯腳本
     # （內容＝重跑 `lint-imports` CLI 已有的行為），本輪依「暫存檔直接刪」慣例 `git rm`，
     # 連帶少掉它自帶的 2 處行內複本。棘輪只准變少，故同步下修而非留餘裕。
-    "AutoClaude": 23,  # DEF-200-247：刪 verify_token_guard_e2e.py（1 處 stderr reconfigure）24→23
+    # R213／DEF-101-702：`AutoClaude/tools` 20 檔行內 reconfigure 改走唯一實作  round-label-ok
+    # （18 檔硬 import；兩支容器腳本改「根在就用」守衛，硬 import 會 ModuleNotFoundError）
+    # ＋`c6_staging_validator.py`；鎖＝`AutoClaude/tests/tools/test_stdio_ssot_consumers.py`。
+    # per-tree 23→3，餘 3 處＝`alembic/env.py`／`autoclaude/tools/sdd_compile.py`／
+    # `scripts/migrate_file_to_pg.py`（後兩者有結構性理由）；只准往下、不留餘裕。
+    "AutoClaude": 3,
     "tools": 6,
 }
 

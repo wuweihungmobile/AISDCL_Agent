@@ -18,8 +18,8 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Optional
 
 from ...core.ports.embedder import EmbedderError
 from .embedding_writer import SLOAlert
@@ -55,7 +55,7 @@ class ReEmbedBatchJob:
         sla_days: int = 7,
         batch_size: int = 200,
         alert_after_attempts: int = 5,
-        alert_observer: Optional[Callable[[SLOAlert], None]] = None,
+        alert_observer: Callable[[SLOAlert], None] | None = None,
     ) -> None:
         self.embedder = embedder
         self.sql = sql_executor

@@ -194,10 +194,8 @@ class SelectIsTheOnlyPlatformQuestionTest(unittest.TestCase):
 # ═══════════════════════════════════════════════════════════════════════════
 # 🔴 R83 複審 A-02／F-6：「唯一提問點」這句宣稱原本**只有一支檔在守**
 # ═══════════════════════════════════════════════════════════════════════════
-# 史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§55。
 _SCHED_CMDLET = "-ScheduledTask"
 _SCHED_ARGV0 = ("launchctl", "schtasks", "schtasks.exe")
-#: 史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§56。
 _RUNNERS = frozenset({"run", "Popen", "call", "check_call", "check_output",
                       "run_powershell", "_powershell", "_run"})
 #: 排程器原語**宣告過的家**。每一項附理由；空理由不算宣告（見下方判準）。
@@ -211,10 +209,13 @@ _CARRIER_HOMES = {
 #: 具名豁免＝**不在「續航哨兵」這條軸上**的排程器消費者。理由必須寫得出「為什麼它不該
 #: 被收斂進 `schedule_backend`」，而不只是「它今天在這裡」。
 _CARRIER_EXEMPT = {
-    "tools/dev_start.py":
+    "tools/lib/nightly_heartbeat.py":
         "查的是 nightly 軌（`com.autoclaude.nightly`）有沒有載入，純 advisory、與續航哨兵"
         "不同軌；launchd 原語今天仍有第二個家（`tools/install_mac_nightly.sh`），"
         "兩家合流是複審 A-05 已登記的交棒項，不在本輪射程內",
+    "tools/lib/engine_resume_job.py":
+        "引擎續跑軸：一次性工作、動作是 `python -m autoclaude` 而非 planner tick（`arm()` 寫死 "
+        "planner tick＋StartInterval，收進去要動守衛面且該檔 LOC 貼頂）；平台經 `select()`",
 }
 
 
@@ -1855,7 +1856,6 @@ class HookWiringReachesThisPlatformTest(unittest.TestCase):
 # ═══════════════════════════════════════════════════════════════════════════
 # 🔴 R84／SA-05：訴求 6e 的**誠實化**——「睡著的 Mac 不會醒」不得只活在一行註解裡
 # ═══════════════════════════════════════════════════════════════════════════
-# 複審當回合實測的立案史料搬遷，原文＝Guard_Repin 證據檔 §E-9。
 # 🔴 本組鎖**不驗「Mac 會醒」**（那件事本專案不做：需 sudo 改動掌舵者機器的電源行為，已被
 # 否決）。它驗的是「失效變成可偵測的」：非 0 就出聲、量不到也出聲、而且不對非 mac 發言。
 _SLEEPY = "AC Power:\n displaysleep 10\n sleep 25\n disksleep 0\n"

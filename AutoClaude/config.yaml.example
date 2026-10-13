@@ -16,6 +16,10 @@ claude:
   extra_args: []
   continue_flag: "--continue"   # 維持對話脈絡
   encoding: "utf-8"
+  # ARCH-03：每個步驟單次 claude -p 的回合數上限（CLI 原生旗標 --max-turns，不列在 --help 但存在）。
+  # 不寫＝不送旗標（出廠行為）；牆鐘上限另見 playbook.step_timeout_seconds。1~1000。
+  # 與 extra_args 內的 --max-turns 擇一，不要兩邊都設。
+  # max_turns_per_step: 30
 
 # ── Minimax LLM API 設定（修正決策用） ────────────────────────────
 minimax:
@@ -65,6 +69,11 @@ token_guard:
   # sleep_slice_seconds: 30            # 每片最長睡幾秒（1~600）；片與片之間才檢查中斷與時鐘跳躍
   # clock_jump_tolerance_seconds: 5    # 牆鐘與單調鐘增量差超過幾秒即視為時鐘跳躍（1~3600）
   # max_inprocess_wait_seconds: 18000  # 行程內最長等待秒數（60~86400）
+  # PRD §8 列 1（推論端非預期 429）：失敗訊息帶 Retry-After 且 ≤ max_retry_after_seconds 時，引擎
+  # 原地退避後重跑同一個 attempt（full-jitter，不消耗 attempt、不問 Brain），每個 step 最多
+  # max_limit_retries 次；缺席／過長／用盡／額度已撞硬線 ⇒ 照舊 halt。以下兩項不寫即用預設。
+  # max_retry_after_seconds: 300       # 可接受的 Retry-After 上限秒數（1~3600）
+  # max_limit_retries: 5               # 每個 step 最多退避重試次數（0~20；0＝關閉退避）
   # context 偵測 regex（任一命中即視為偵測成功，validator 會檢查 regex 合法性）
   context_patterns:
     - "(\\d+(?:\\.\\d+)?)\\s*%\\s*(?:context|token)"

@@ -11,12 +11,9 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-import pytest
-
 from autoclaude.infra.repositories import canonical_playbook_id
 from autoclaude.infra.repositories.factory import canonical_playbook_id as factory_id
 from autoclaude.utils.checkpoint_manager import CheckpointManager, PlaybookCheckpoint
-
 
 # ══════════════════════════════════════════════
 # canonical_playbook_id：依模式切換策略

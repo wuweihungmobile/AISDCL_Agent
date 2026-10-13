@@ -13,8 +13,6 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 from autoclaude.core.kernel_state import KernelResult
 from autoclaude.core.services.auto_resume import AutoResumeService
 from autoclaude.infra.repositories.in_memory_state_repository import (

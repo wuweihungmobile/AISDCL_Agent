@@ -18,8 +18,8 @@ from __future__ import annotations
 import logging
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Literal, Optional
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Literal
 
 from ...models.playbook import GlobalInvariants, Playbook
 from ..hookspec import HookContext, HookContractViolation, KernelPhase
@@ -73,8 +73,8 @@ class AutoResumeMetrics:
     manual_resumes: int = 0
     failed_emits: int = 0  # M-SA1: emit 失敗計數（observability）
     total_wait_seconds: float = 0.0
-    last_wake_at: Optional[str] = None
-    last_scheduled_resume_at: Optional[str] = None
+    last_wake_at: str | None = None
+    last_scheduled_resume_at: str | None = None
     wake_kinds: deque = field(
         default_factory=lambda: deque(maxlen=_WAKE_KINDS_MAXLEN),
     )
@@ -99,10 +99,10 @@ class AutoResumeMetrics:
 
 def record_wake_and_emit(
     metrics: AutoResumeMetrics,
-    bus: Optional["EventBus"],
+    bus: EventBus | None,
     *,
     kind: WakeKind,
-    scheduled_at: Optional[str],
+    scheduled_at: str | None,
     wait_secs: float,
 ) -> None:
     """每次喚醒記錄 metrics + emit ON_AUTO_RESUME_WAKE。
@@ -123,7 +123,7 @@ def record_wake_and_emit(
             f"必須是 {sorted(_VALID_KINDS)}"
         )
 
-    now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    now_iso = datetime.now(UTC).isoformat(timespec="seconds")
     metrics.total_wakes += 1
     metrics.total_wait_seconds += max(0.0, wait_secs)
     metrics.last_wake_at = now_iso

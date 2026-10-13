@@ -42,7 +42,8 @@ TARGETS: dict[str, float] = {
 }
 TOLERANCE = 0.05  # 目標 -5% 容忍
 # ADR-SD09-009 v1.0 ACCEPTED 2026-05-25 §5.5：±2pp tolerance 緩衝 suspicious bounce flake。
-# effective threshold = target - TOLERANCE - EXTRA_TOLERANCE（token_guard: 0.75 - 0.05 - 0.02 = 0.68）
+# effective threshold = target - TOLERANCE - EXTRA_TOLERANCE（token_guard: 0.75 - 0.05 -
+# 0.02 = 0.68）
 EXTRA_TOLERANCE = 0.02
 CONSECUTIVE_RUNS = 7
 # SD_09 W3 Round 21 audit Architect P1 #2 修復（紀律 #12 強化）：
@@ -168,7 +169,7 @@ def _utc_date_of_record(record: dict[str, Any]) -> str | None:
         return None
     try:
         dt = _dt.datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
-        return dt.astimezone(_dt.timezone.utc).date().isoformat()
+        return dt.astimezone(_dt.UTC).date().isoformat()
     except (TypeError, ValueError):
         return None
 
@@ -329,16 +330,21 @@ def compute_consistency_warning(
     module: str,
     threshold: float = 0.03,
 ) -> tuple[bool, str]:
-    """SD_09 W3 Round 31 audit P1-R31-2：multi-run kill_rate variance consistency check（紀律 #12 強化）。
+    """SD_09 W3 Round 31 audit P1-R31-2：multi-run kill_rate variance consistency
+    check（紀律 #12 強化）。
 
-    篩選 module 對應 record → 按 source_sha256 分組 → 對任一 sha 出現 ≥ 2 次的群組計算 kill_rate stddev。
-    若任一 sha stddev > threshold（預設 3pp = 0.03）→ return (True, warning_message)；否則 (False, "")。
+    篩選 module 對應 record → 按 source_sha256 分組 → 對任一 sha 出現 ≥ 2 次的群組計算
+    kill_rate stddev。
+    若任一 sha stddev > threshold（預設 3pp = 0.03）→ return (True, warning_message)；
+    否則 (False, "")。
 
     目的：偵測 mutmut suspicious 非確定性導致同 sha 多 run kill_rate 大幅震盪（如 R30 85.57% vs
     同 sha 復跑 R31 74.83% 差 10.74pp）。避免單次 outlier 被誤判為 baseline 真實水位。
 
-    本 function 為 **附加告警通道**：不改 should_lock return value 邏輯，僅供 main() 印 stderr WARN。
-    對應 [Nightly_Forensic_Discipline.md §紀律 #12](../docs/06_quality/Nightly_Forensic_Discipline.md)。
+    本 function 為 **附加告警通道**：不改 should_lock return value 邏輯，僅供 main() 印
+    stderr WARN。
+    對應 [Nightly_Forensic_Discipline.md
+    §紀律 #12](../docs/06_quality/Nightly_Forensic_Discipline.md)。
     """
     # 篩選 module 對應 record（含 sha 且 kill_rate 存在）
     module_records = [
@@ -424,7 +430,8 @@ def should_lock(history: list[dict[str, Any]], module: str) -> tuple[bool, float
             )
             return False, None
     else:
-        # 含舊紀錄缺欄位：(1) non-None 部分必須全 unique；(2) 至少要 ≥ N - MAX_BACKWARD_COMPAT_MISSING 筆
+        # 含舊紀錄缺欄位：(1) non-None 部分必須全 unique；(2) 至少要 ≥ N -
+        # MAX_BACKWARD_COMPAT_MISSING 筆
         # SD_09 W3 Round 21 Architect P1 #2 強化：原 ceil(N/2)=4 過寬，收緊為 7-2=5。
         # 只允許 R2 P0-5 修復前 2 筆 legacy（5/20-5/21）缺欄位；其餘必須全 unique sha。
         min_non_none = CONSECUTIVE_RUNS - MAX_BACKWARD_COMPAT_MISSING  # 7 - 2 = 5
@@ -495,7 +502,7 @@ def run(
     src_path = source_path or _MODULE_PATHS.get(module)
     source_sha = compute_source_sha256(src_path) if src_path else "unknown"
     record = {
-        "timestamp": _dt.datetime.now(tz=_dt.timezone.utc).isoformat(),
+        "timestamp": _dt.datetime.now(tz=_dt.UTC).isoformat(),
         "module": module,
         "kill_rate": kill_rate,
         "counts": counts,
@@ -548,7 +555,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--migrate-compact-sha",
         action="store_true",
-        help="ADR-SD09-010 方案 A：一次性按 source_sha256 壓縮既有 history（每組留最新 + 備份）後退出",
+        help="ADR-SD09-010 方案 A：一次性按 source_sha256 壓縮既有 history"
+             "（每組留最新 + 備份）後退出",
     )
     parser.add_argument(
         "--require-log-mtime-within-seconds",

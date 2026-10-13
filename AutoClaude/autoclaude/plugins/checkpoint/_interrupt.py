@@ -9,7 +9,6 @@ counter dict 直接傳入；無需透過 EventBus。SD_05 W6 後 PlaybookRunner 
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from ...utils.checkpoint_manager import PlaybookCheckpoint
 
@@ -26,12 +25,12 @@ def save_interrupt_checkpoint_impl(
     total: int,
     tracker=None,
     attempt: int = 0,
-    goto_counter: Optional[dict] = None,
-    inject_before_counter: Optional[dict] = None,
-    skip_to_counter: Optional[dict] = None,
-    completed_step_ids: Optional[list] = None,
-    step_evolution_counter: Optional[dict] = None,
-    alert_ladder: Optional[dict] = None,
+    goto_counter: dict | None = None,
+    inject_before_counter: dict | None = None,
+    skip_to_counter: dict | None = None,
+    completed_step_ids: list | None = None,
+    step_evolution_counter: dict | None = None,
+    alert_ladder: dict | None = None,
 ) -> None:
     """W3-1c：ESC+F12 中斷時持久化 checkpoint（含 5 個 counter snapshot）。"""
     cp = PlaybookCheckpoint(

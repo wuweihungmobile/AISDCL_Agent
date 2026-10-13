@@ -24,7 +24,7 @@ from __future__ import annotations
 import datetime as _dt
 import hashlib
 import re
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 from .diagnostic import DiagnosticResult, diagnose

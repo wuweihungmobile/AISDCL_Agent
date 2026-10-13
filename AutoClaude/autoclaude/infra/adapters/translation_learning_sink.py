@@ -51,7 +51,7 @@ class FileTranslationLearningSink(ITranslationLearningSink):
                 },
                 ensure_ascii=False,
             )
-            with target.open("a", encoding="utf-8") as f:
+            with target.open("a", encoding="utf-8", newline="") as f:
                 f.write(line + "\n")
         except Exception as exc:  # noqa: BLE001 — fail-soft（諮詢功能不得阻斷）
             logger.warning("record_proposal fail-soft for %s: %s", project, exc)

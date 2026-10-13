@@ -86,7 +86,6 @@ _CALLER_FILES = [
     # 去跑 tools/lib/secret_scan.py，故它也成了本 SSOT 的呼叫端。此前根層 pre-commit
     # 完全不碰 python（純 bash），是本輪才長出來的呼叫點。
     _REPO_ROOT / "tools" / "git-hooks" / "pre-commit",
-    # 2026-09-22 新增（DEF-200-358）：根層 prepare-commit-msg 以 pick_repo_python 解析直譯器
     _REPO_ROOT / "tools" / "git-hooks" / "prepare-commit-msg",
     _REPO_ROOT / "tools" / "git-hooks" / "post-merge",  # pull 後自動同步 env.shared
     _REPO_ROOT / "tools" / "lib" / "git_hooks_install_common.sh",
@@ -111,9 +110,6 @@ _CALLER_FILES = [
     _REPO_ROOT / "AISDLC_SDD" / "scripts" / "copy_on_evolve.sh",
     _LATEST_SDD_ROOT / "tools" / "arch_fitness" / "run_self_evolution.sh",
     _LATEST_SDD_ROOT / "tools" / "install_hooks" / "install_post_commit.sh",
-    # R65（ADR-XPLAT-002 §5 Phase 2-A）：run_tlc.sh 由委派 java/TLC 呼叫的實作
-    # 改寫為委派 tools.fsm_runtime.tlc_runner 的薄殼，新增裸 python 探測，已改用
-    # 共用 guard（`is_real_python_candidate`）而非獨立重寫。
     _LATEST_SDD_ROOT / "tools" / "fsm_runtime" / "formal" / "run_tlc.sh",
 ]
 
@@ -137,8 +133,7 @@ _EXEMPT_SH_FILES = {
     # macOS 專屬 nightly 薄聚合器（docstring 明文「bash 3.2（macOS /bin/bash）」+
     # Windows 對等品是完全獨立的 run_local_nightly.ps1）→ 結構性只在 macOS 執行，
     # Windows Store App Execution Alias 空殼是 Windows 原生 PATH 專屬機制，不會
-    # 出現在 macOS PATH 上。（R56 訂正：原寫「同上理由豁免」，但 R55 已把被指涉
-    # 的前一筆 macos_smoke_local.sh 移出本集合，理由句成為懸空引用。）
+    # 出現在 macOS PATH 上。
     "AutoClaude/tools/run_local_nightly.sh",
     # `run_mutmut_in_docker.sh` 豁免：唯一呼叫端是 `run_local_nightly.ps1` 的 `docker run
     # python:3.11-slim`，腳本本體只在 Linux container 內跑（PATH 不可能有 WindowsApps 空殼），且無
@@ -692,7 +687,7 @@ class TestHasSsotGuardBypassResistance(unittest.TestCase):
     def test_trailing_comment_after_real_code_is_not_recognized(self) -> None:
         """R46 QA 二審繞過②：一般尾隨註解——真正執行的程式碼是裸
         `command -v python`（未收斂），關鍵字只出現在該行的尾隨註解裡。"""
-        text = 'command -v python >/dev/null 2>&1  # windowsapps_guard.sh is_real_python_candidate (disabled)\n'
+        text = 'command -v python >/dev/null 2>&1 # windowsapps_guard.sh is_real_python_candidate\n'
         self.assertFalse(_has_ssot_guard(text))
 
     def test_echo_pure_mention_is_not_recognized(self) -> None:
@@ -793,6 +788,17 @@ class TestHookDirRosterIntegrity(unittest.TestCase):
                 self.assertTrue(
                     (_REPO_ROOT / rel).is_dir(), f"`_KNOWN_HOOK_DIRS` 條目不存在：{rel}"
                 )
+
+    def test_exempt_sh_files_exist_and_each_still_needs_its_exemption(self) -> None:
+        """R68-28：豁免條目須在盤上，且移除豁免後兩道前瞻掃描至少一道仍判未收斂（否則是死條目）。"""
+        for rel in sorted(_EXEMPT_SH_FILES):
+            with self.subTest(exempt=rel):
+                path = _REPO_ROOT / rel
+                self.assertTrue(path.is_file(), f"`_EXEMPT_SH_FILES` 條目不存在：{rel}")
+                text = path.read_text(encoding="utf-8")
+                self.assertTrue(
+                    _has_unmigrated_raw_check(text) or _has_zero_guard_python_call(text),
+                    f"{rel} 移除豁免後兩道掃描都判它已收斂——死豁免，請刪條目")
 
 
 class TestBashCallersEnrollment(unittest.TestCase):
@@ -932,12 +938,6 @@ class TestBashCallersEnrollment(unittest.TestCase):
         AISDLC_SDD 凍結版本目錄 AISDLC_SDD_v0.01~v0.29，只掃 LATEST 演化版與
         其餘 monorepo 檔案——凍結版依 Copy-on-Evolve 鐵律不回改），找出符合
         此形狀的檔案。
-
-        已知真實命中（本輪稍後步驟修復，本測試只建立/驗證掃描鎖本身）：
-        `AISDLC_SDD/AISDLC_SDD_v0.30/tools/arch_fitness/run_self_evolution.sh`
-        （只檢查 `command -v claude`，從未檢查 python 本身）與
-        `AISDLC_SDD/scripts/copy_on_evolve.sh`（透過 `${PYTHON:-python}` 預設值
-        間接呼叫，全程零檢查）。
         """
         latest_name = _latest_sdd_version_name()
         known_relpaths = {str(f.relative_to(_REPO_ROOT)).replace("\\", "/") for f in _CALLER_FILES}

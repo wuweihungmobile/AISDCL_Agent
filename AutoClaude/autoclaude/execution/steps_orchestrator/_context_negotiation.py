@@ -12,7 +12,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from ...perception.pty_wrapper import strip_ansi
 from ..types import PlaybookResult
@@ -26,14 +26,14 @@ logger = logging.getLogger("autoclaude.execution.playbook")
 
 
 def handle_context_negotiation(
-    runner: "PlaybookRunner",
-    playbook: "Playbook",
+    runner: PlaybookRunner,
+    playbook: Playbook,
     playbook_path: str,
     is_first_prompt: bool,
     start_idx: int,
-    workflow: "WorkflowType",
+    workflow: WorkflowType,
     total: int,
-) -> tuple[bool, Optional[PlaybookResult]]:
+) -> tuple[bool, PlaybookResult | None]:
     """處理 CONTEXT_NEGOTIATION 階段。
 
     Returns:

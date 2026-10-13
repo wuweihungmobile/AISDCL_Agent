@@ -490,7 +490,7 @@ _TREE_FILE_FLOORS: dict[str, int] = {
     # 🔴 2026-10-12 重釘 230→231（R212 第四列新增 `AutoClaude/tests/execution/
     # test_prd12_permission_bypass_invariant8.py`，收尾實測 289 支，230 低於實測的 80%，
     # 前置掃描逐字指示重釘為 231 ⇒ 照填，零加減推算）。
-    "AutoClaude/tests": 231,
+    "AutoClaude/tests": 240,  # R213：236→240（DEV-F／DEV-I 增鎖檔；只准往上）  round-label-ok
     # 🔴 R84 包 W5：23 → 24。**非本包造成**——`AISDLC_SDD/scripts/tests` 由 29 支長到 30
     # （並行包新增鎖檔），下限只剩實測的 77%、低於 `TREE_FLOOR_RATIO` 的 80% ⇒
     # `tree_floor_problems()` 的第三向（下限已過期）當場判紅並**逐字**指示重釘為 24，本行
@@ -500,7 +500,11 @@ _TREE_FILE_FLOORS: dict[str, int] = {
     # 區間，理由同上方兩列：本輪尚有並行包在跑，不讓「別的包有沒有再新增一支測試檔」決定
     # 本閘門的顏色。合計再新增 ≥2 支就會再次過期 ⇒
     # 🔴 收輪者請在所有包停工後的單人窗口重量一次再定案。
-    "AISDLC_SDD/scripts/tests": 24,
+    # 🔴 DEF-101-018 重釘 24 → 25：新增 `AISDLC_SDD/scripts/tests/
+    # test_ruff_root_config_excludes_only_frozen.py` 後該樹實測 **32** 支，24 只剩實測的 75%，
+    # 前置掃描逐字指示重釘為 25 ⇒ 照填、零加減推算（上修＝判準更嚴；25 只對 32 支成立，
+    # 再新增 1 支即過期——收輪者請在所有包停工後重量一次）。
+    "AISDLC_SDD/scripts/tests": 25,
     # 🔴 DEF-200-275 第四輪重釘 60 → 62：該樹由 76 支長到 **78**（本包新增
     # `test_context_window.py`／`test_recovery_hint.py`），60 只剩實測的 77%，第三向逐字
     # 指示「重釘為 62」⇒ 照填、零加減推算。

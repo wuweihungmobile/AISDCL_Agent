@@ -20,13 +20,9 @@
 """
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
-import pytest
-
 from autoclaude.core.hookspec import HookContext, KernelPhase, ResourceRequest
 from autoclaude.execution.failure_tracker import FailureTracker
-from autoclaude.models.playbook import Playbook, PlaybookTask, GlobalInvariants
+from autoclaude.models.playbook import GlobalInvariants, Playbook, PlaybookTask
 from autoclaude.plugins.token_guard_plugin import TokenGuardPlugin
 from autoclaude.utils.config import TokenGuardConfig
 

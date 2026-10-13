@@ -48,7 +48,10 @@ def main(argv: list[str] | None = None) -> int:
             invalid.append(line)
 
     missing_count = sum(1 for r in lines if "observability_emit_real" not in r)
-    print(f"[backfill] total_records={len(lines)} missing_emit_real={missing_count} invalid={len(invalid)}")
+    print(
+        f"[backfill] total_records={len(lines)} missing_emit_real={missing_count} "
+        f"invalid={len(invalid)}"
+    )
 
     if missing_count == 0:
         print("[backfill] nothing to do")
@@ -71,7 +74,10 @@ def main(argv: list[str] | None = None) -> int:
         "\n".join(json.dumps(r, ensure_ascii=False) for r in lines) + "\n",
         encoding="utf-8",
     )
-    print(f"[backfill] APPLIED — {missing_count} records updated; invalid lines preserved=NO (purged)")
+    print(
+        f"[backfill] APPLIED — {missing_count} records updated; "
+        "invalid lines preserved=NO (purged)"
+    )
     return 0
 
 

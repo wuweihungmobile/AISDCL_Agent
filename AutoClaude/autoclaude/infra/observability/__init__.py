@@ -6,7 +6,8 @@
 注意：
   - 與 `autoclaude/core/ports/observability.py`（IObservabilityPort）為「實作 vs 介面」分層；
     本模組為 health-check adapter，會 emit metric 給 IObservabilityPort 但不實作 Port。
-  - 與 `autoclaude/infra/adapters/observability/local_logger.py`（IObservabilityPort 實作）為「資料來源 vs metric sink」分層。
+  - 與 `autoclaude/infra/adapters/observability/local_logger.py`（IObservabilityPort 實作）
+    為「資料來源 vs metric sink」分層。
 """
 from __future__ import annotations
 

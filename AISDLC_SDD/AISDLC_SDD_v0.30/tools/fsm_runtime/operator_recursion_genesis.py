@@ -721,7 +721,8 @@ def recursion_genesis_round(
     cap_k = k if k is not None else dim_expand_k()
     cands = candidates if candidates is not None else enumerate_genesis_recursion(budget=budget, nodes=nodes)
     mgn = margin if margin is not None else recur_coverage_margin()
-    tfn = lambda q: int(round(q * 100))
+    def tfn(q):
+        return int(round(q * 100))
 
     proposals: List[RecursionProposal] = []
     for op in cands:

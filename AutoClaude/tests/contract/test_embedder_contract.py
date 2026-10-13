@@ -6,7 +6,8 @@
   - 雙 adapter 對齊：BGE-M3 預設 + Minimax 備援
 
 驗證項目（≥ 6 case）：
-  T1 IEmbedder Protocol runtime_checkable 結構（dimension / model_id / embed / embed_one / health_check）
+  T1 IEmbedder Protocol runtime_checkable 結構（dimension / model_id / embed / embed_one /
+  health_check）
   T2 BGEM3LocalAdapter.dimension == 1024 預設
   T3 BGEM3LocalAdapter 注入 fake httpx → 回傳 list[list[float]] 順序保留
   T4 BGEM3LocalAdapter 維度不符 → EmbedderDimensionMismatchError
@@ -18,7 +19,6 @@
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -47,7 +47,9 @@ class _FakeResp:
 
 
 class _FakeHttpClient:
-    def __init__(self, post_payload: Any = None, get_payload: Any = None, raise_on_post: bool = False) -> None:
+    def __init__(
+        self, post_payload: Any = None, get_payload: Any = None, raise_on_post: bool = False
+    ) -> None:
         self.post_payload = post_payload
         self.get_payload = get_payload
         self.raise_on_post = raise_on_post

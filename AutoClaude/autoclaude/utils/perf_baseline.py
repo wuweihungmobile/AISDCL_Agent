@@ -190,7 +190,9 @@ def write_perf_results(path: Path, baselines: list[PerfBaseline]) -> None:
     """
     import json
     payload = {b.scenario: b.to_dict() for b in baselines}
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8", newline="\n",
+    )
 
 
 __all__ = ["PerfBaseline", "measure", "perf_environment", "write_baseline", "write_perf_results"]

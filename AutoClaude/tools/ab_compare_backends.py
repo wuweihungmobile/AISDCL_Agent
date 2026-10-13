@@ -36,6 +36,11 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools" / "lib"))
+from platform_utils import (  # noqa: E402
+    init_utf8_streams as _init_utf8_streams,  # type: ignore[import-not-found]
+)
+
 
 def _percentile(values: list[float], q: float) -> float:
     """nearest-rank 百分位（純函式）：空→0.0；n=1→該值；對小樣本誠實不內插。
@@ -669,11 +674,8 @@ def _write_out_json(out_path: str, pty: AggregateMetrics, sdk: AggregateMetrics)
 def main(argv: list[str] | None = None) -> int:
     # DEF-82-001（improving_82 dogfooding 真跑揭露）：報表含 fail-loud「⚠」（W-81-1）/中文，
     # Windows cp950 console 直接 print 會 UnicodeEncodeError 中斷（真跑兩 backend 已跑完卻在
-    # print 階段炸）。強制 stdout 走 utf-8（best-effort；非 TextIOWrapper / 不支援時靜默略過）。
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
-    except (AttributeError, OSError):
-        pass
+    # print 階段炸）。強制 stdout/stderr 走 utf-8（唯一實作；best-effort，不支援時靜默略過）。
+    _init_utf8_streams()
     args = _build_argparser().parse_args(argv)
     # W-93-2：--out 證據檔需雙後端聚合；各分支結束時填好 pty_agg/sdk_agg 再統一輸出。
     pty_agg: AggregateMetrics | None = None

@@ -14,7 +14,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from tools.fsm_runtime.diagnostic import (  # noqa: E402
     diagnose,
     is_auto_recoverable,
-    DiagnosticResult,
     SUB_TYPES,
 )
 

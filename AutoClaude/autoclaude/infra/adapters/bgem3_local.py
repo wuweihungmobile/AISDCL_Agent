@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import os
 import time
-from typing import Any, Optional
+from typing import Any
 
 from ...core.ports.embedder import (
     EmbedderDimensionMismatchError,
@@ -34,16 +34,17 @@ class BGEM3LocalAdapter:
     def __init__(
         self,
         *,
-        base_url: Optional[str] = None,
-        model_id: Optional[str] = None,
-        dimension: Optional[int] = None,
-        timeout_seconds: Optional[float] = None,
-        config: Optional[EmbedderConfig] = None,
+        base_url: str | None = None,
+        model_id: str | None = None,
+        dimension: int | None = None,
+        timeout_seconds: float | None = None,
+        config: EmbedderConfig | None = None,
         http_client: Any = None,
     ) -> None:
         # 設定來源優先序（improving_92 W-92-2，對齊 improving_91 minimax_embedder 治理）：
         #   建構參數 > env > config 兜底 > 硬編預設。config=None + 無 env 時兜底鏈塌回硬編
-        #   （byte-level 零退化：model_id=BAAI/bge-m3、dimension=1024、base_url 硬編、timeout=30.0）。
+        #   （byte-level 零退化：model_id=BAAI/bge-m3、dimension=1024、base_url 硬編、
+        #   timeout=30.0）。
         # model：DEF-92-001 修復——補 TEI_MODEL_ID env 讀取（先前簽章硬編、env 從未生效）
         self.model_id = (
             model_id

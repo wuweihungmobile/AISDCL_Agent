@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 import re
-from typing import Iterable, Optional
+from collections.abc import Iterable
 
 import yaml
 
@@ -34,7 +34,7 @@ _AT_ID_RE = re.compile(r"^AT-(\d+)-(\d+)-(\d+)$", re.IGNORECASE)
 class PlaybookToRtmAdapter:
     """逆向：PlaybookTask 序列 × 執行結果 → RtmCoverageReport（純函式 + 序列化）。"""
 
-    def __init__(self, observability: Optional[IObservabilityPort] = None) -> None:
+    def __init__(self, observability: IObservabilityPort | None = None) -> None:
         self._obs = observability or NullObservability()
 
     # ──────────────────────────────────────────────────────────
@@ -97,7 +97,7 @@ class PlaybookToRtmAdapter:
     # render：RtmCoverageReport → 序列化文字
     # ──────────────────────────────────────────────────────────
     def render_yaml(
-        self, report: RtmCoverageReport, *, generated_at: Optional[str] = None
+        self, report: RtmCoverageReport, *, generated_at: str | None = None
     ) -> str:
         """機器可讀 coverage 報告（YAML）。供 CI / SCG-5 自動化消費。"""
         doc: dict[str, object] = {
@@ -131,7 +131,8 @@ class PlaybookToRtmAdapter:
             "",
             f"- AT 覆蓋率：{report.passed_at}/{report.total_at}（{report.coverage_pct}%）",
             f"- AC 覆蓋率：{report.ac_covered}/{report.ac_total}（{report.ac_coverage_pct}%）",
-            f"- SCG-5 RTM 閘門：{'✅ 通過（100% AC 覆蓋）' if report.is_fully_covered else '❌ 未達 100% AC 覆蓋'}",
+            "- SCG-5 RTM 閘門："
+            f"{'✅ 通過（100% AC 覆蓋）' if report.is_fully_covered else '❌ 未達 100% AC 覆蓋'}",
             "",
         ]
         uncovered_acs = [
@@ -167,7 +168,7 @@ class PlaybookToRtmAdapter:
         return body[:marker]
 
     @staticmethod
-    def _at_id_of(task: PlaybookTask, step_id: str) -> Optional[str]:
+    def _at_id_of(task: PlaybookTask, step_id: str) -> str | None:
         """優先用 task.name（forward adapter 設為 c.at_id）；否則反解 step_id。"""
         name = (getattr(task, "name", "") or "").strip()
         if _AT_ID_RE.match(name):

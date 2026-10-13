@@ -23,7 +23,7 @@ core 純度：本檔僅 import stdlib + 同層 rtm_sink 的 dataclass，不觸 e
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional, Protocol
+from typing import Any, Protocol
 
 from .rtm_sink import RtmCoverageReport
 
@@ -96,7 +96,7 @@ class CoverageTrend:
 
     rounds: int  # 納入趨勢的輪數（history 長度）
     latest_pct: float  # 最新一輪 AC 覆蓋率
-    previous_pct: Optional[float]  # 上一輪 AC 覆蓋率（rounds<2 時 None）
+    previous_pct: float | None  # 上一輪 AC 覆蓋率（rounds<2 時 None）
     delta_pct: float  # latest - previous（rounds<2 時 0.0）
     consecutive_declines: int  # 從最新往回連續嚴格下降的輪數
     direction: str  # "improving" | "declining" | "flat" | "single"
@@ -104,7 +104,7 @@ class CoverageTrend:
 
 def coverage_trend(
     history: tuple[RtmCoverageReport, ...]
-) -> Optional[CoverageTrend]:
+) -> CoverageTrend | None:
     """從跨輪覆蓋快照（最舊→最新）計算 AC 覆蓋率趨勢摘要（純函式、無副作用）。
 
     以 ac_coverage_pct 為趨勢指標（對齊 SCG-5 100% AC 判準）。history 空回 None；
@@ -144,7 +144,7 @@ class IRtmFeedbackSource(Protocol):
             self._feedback = feedback or NullRtmFeedbackSource()  # 未注入時 no-op
     """
 
-    def read_report(self, project: str) -> Optional[RtmCoverageReport]:
+    def read_report(self, project: str) -> RtmCoverageReport | None:
         """讀回 project 最近一次的 coverage 報告；不存在 / 解析失敗回 None（fail-soft）。"""
         ...
 
@@ -161,7 +161,7 @@ class IRtmFeedbackSource(Protocol):
 class NullRtmFeedbackSource:
     """No-op IRtmFeedbackSource 實作；未注入 source 時 fallback（符合 Protocol）。"""
 
-    def read_report(self, project: str) -> Optional[RtmCoverageReport]:
+    def read_report(self, project: str) -> RtmCoverageReport | None:
         return None
 
     def read_history(

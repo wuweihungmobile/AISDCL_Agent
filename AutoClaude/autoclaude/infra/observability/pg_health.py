@@ -14,8 +14,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
-from typing import Optional, Protocol
+from enum import StrEnum
+from typing import Protocol
 
 from ...core.ports.observability import IObservabilityPort, NullObservability
 
@@ -27,7 +27,7 @@ WAL_LAG_CRITICAL_SECONDS = 10.0
 # ──────────────────────────────────────────────────────────────
 # 告警等級 / Health sample
 # ──────────────────────────────────────────────────────────────
-class PgLagLevel(str, Enum):
+class PgLagLevel(StrEnum):
     """WAL lag 三閾值（ADR-SD08-005 §2.4）。"""
 
     NORMAL = "normal"      # lag < 2s
@@ -126,8 +126,8 @@ class DefaultPgHealthMonitor:
     def __init__(
         self,
         *,
-        observability: Optional[IObservabilityPort] = None,
-        dsn: Optional[str] = None,
+        observability: IObservabilityPort | None = None,
+        dsn: str | None = None,
         connection_factory=None,
     ):
         """
@@ -173,7 +173,8 @@ class DefaultPgHealthMonitor:
         Metric 行為（ADR-SD08-005 §2.4）：
           - 永遠 emit_histogram("pg_wal_lag_seconds", lag, tags={"level": ...})
           - warn 等級：emit_counter("pg_wal_lag_warn")
-          - critical 等級：emit_counter("pg_wal_lag_critical") + record_event("pg_degrade_yaml_only")
+          - critical 等級：emit_counter("pg_wal_lag_critical") +
+            record_event("pg_degrade_yaml_only")
           - 永遠 emit_histogram("pg_active_connections", conns)
         """
         lag = await self.get_wal_lag_seconds()

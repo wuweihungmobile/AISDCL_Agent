@@ -82,6 +82,10 @@ on:
       # 「載具在、目標腳本缺」那個情境（exec form 之後那才是本鎖真正要測的形態）⇒
       # 只改啟動器時該鎖必須跟著跑。同上，由 test_ci_paths_cover_root_consumers.py 攔下。
       - ".claude/hooks/_hook_launcher.py"
+      # DEF-101-018：test_ruff_root_config_excludes_only_frozen.py 讀根層 ruff.toml 並斷言它
+      # 只排除凍結版 ⇒ 只改本檔時該鎖必須跟著跑，否則 DEF-101-042 同構假綠。由
+      # test_ci_paths_cover_root_consumers.py 當場攔下並要求補列。
+      - "ruff.toml"
   pull_request:
     paths:
       - "AISDLC_SDD/**"
@@ -117,6 +121,10 @@ on:
       # 「載具在、目標腳本缺」那個情境（exec form 之後那才是本鎖真正要測的形態）⇒
       # 只改啟動器時該鎖必須跟著跑。同上，由 test_ci_paths_cover_root_consumers.py 攔下。
       - ".claude/hooks/_hook_launcher.py"
+      # DEF-101-018：test_ruff_root_config_excludes_only_frozen.py 讀根層 ruff.toml 並斷言它
+      # 只排除凍結版 ⇒ 只改本檔時該鎖必須跟著跑，否則 DEF-101-042 同構假綠。由
+      # test_ci_paths_cover_root_consumers.py 當場攔下並要求補列。
+      - "ruff.toml"
   workflow_dispatch:
 
 # 🔴 group 必須含 `github.event_name`（本輪 R77-55）：本 workflow 由 push(main)＋

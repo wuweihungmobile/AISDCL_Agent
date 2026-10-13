@@ -1,13 +1,13 @@
 """IMemoryStore — 跨 Session 失敗知識庫的 Port（SD_Improving_02.md v1.1 §1.2.2）。"""
 from __future__ import annotations
 
-from typing import Optional, Protocol
+from typing import Protocol
 
 
 class IMemoryStore(Protocol):
     """跨 Session 失敗知識庫的契約（取代 FailureKnowledgeBase 直接使用）。"""
 
-    def query(self, error_signature: str) -> Optional[dict]:
+    def query(self, error_signature: str) -> dict | None:
         """查詢已知錯誤模式（精確匹配）。"""
         ...
 
@@ -30,7 +30,7 @@ class IMemoryStore(Protocol):
         strategy: str,
         step_id: str,
         error_class: str = "unknown",
-        embedding: Optional[list[float]] = None,
+        embedding: list[float] | None = None,
     ) -> None:
         """記錄成功修正；embedding 非 None 時同步寫入向量欄位。"""
         ...

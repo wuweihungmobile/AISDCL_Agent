@@ -189,7 +189,7 @@ class TestSummaryTailRealRun(unittest.TestCase):
         script = (
             "set -u\n"
             'fail() { FAIL=$((FAIL + 1)); FAIL_LIST="${FAIL_LIST}\n  - $1"; }\n'
-            "PASS=13\nFAIL=0\nFAIL_LIST=''\n"
+            "PASS=14\nFAIL=0\nFAIL_LIST=''\n"
             f"SKIPPED_AS_PASS={skipped}\n"
             f"{self.tail}"
         )

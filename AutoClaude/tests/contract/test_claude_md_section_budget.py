@@ -48,8 +48,8 @@ def _section_line_count(content: str, heading: str, h_level: str = "## ") -> int
     """從 heading 行起算到下個同 / 更高層 heading 之前的行數（含 heading 本身）。"""
     lines = content.splitlines()
     start = None
-    for i, l in enumerate(lines):
-        if l.startswith(heading):
+    for i, line in enumerate(lines):
+        if line.startswith(heading):
             start = i
             break
     if start is None:
@@ -99,7 +99,8 @@ class TestClaudeMdSectionBudget:
                 if n is not None and n > SPRINT_H3_MAX_LINES:
                     violations.append((heading, n))
         assert not violations, (
-            f"CLAUDE.md 有 {len(violations)} 個 SD_Improving_NN H3 段超過 {SPRINT_H3_MAX_LINES} 行上限：\n"
+            f"CLAUDE.md 有 {len(violations)} 個 SD_Improving_NN H3 段超過 "
+            f"{SPRINT_H3_MAX_LINES} 行上限：\n"
             + "\n".join(f"  {h}: {n} lines" for h, n in violations)
             + "\n單 sprint H3 累積敘事請下沉至 sprint_history.md §1.x（W 期間骨架先行 SOP）。"
         )
@@ -123,7 +124,7 @@ class TestClaudeMdSectionBudget:
         防止白名單寫錯（如多空格 `## [Architecture Snapshot ]`）靜默失效。
         """
         lines = claude_md_content.splitlines()
-        h2_lines = [l for l in lines if H2_HEADING_PATTERN.match(l)]
+        h2_lines = [line for line in lines if H2_HEADING_PATTERN.match(line)]
         missing: list[str] = []
         for w in H2_BUDGET_WHITELIST:
             if not any(line.startswith(w) for line in h2_lines):
@@ -156,7 +157,9 @@ class TestClaudeMdSectionBudget:
             if n is not None and n > DEFAULT_H2_BUDGET:
                 violations.append((heading_key, n, DEFAULT_H2_BUDGET))
         assert not violations, (
-            f"CLAUDE.md 有 {len(violations)} 個未顯式設定 budget 的 H2 段超過 default {DEFAULT_H2_BUDGET} 行：\n"
+            f"CLAUDE.md 有 {len(violations)} 個未顯式設定 budget 的 H2 段超過 default "
+            f"{DEFAULT_H2_BUDGET} 行：\n"
             + "\n".join(f"  '{h}': {n} 行 > {b}" for h, n, b in violations)
-            + "\n請在 SECTION_BUDGETS 顯式加 budget 或下沉細節至 docs/05_development/sprint_history.md。"
+            + "\n請在 SECTION_BUDGETS 顯式加 budget 或下沉細節至 "
+            "docs/05_development/sprint_history.md。"
         )

@@ -24,7 +24,7 @@ compact 子路徑——production 唯一正式路徑（Kernel）原本零消費 
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from ._compact_prompt import build_compact_prompt
 from ._token_observer import TokenObserver
@@ -35,8 +35,8 @@ logger = logging.getLogger("autoclaude.core.kernel")
 
 def perform_compact(
     executor: IExecutor, *, step_id: str, peak_pct: float,
-    task: Optional[Any] = None, attempt: int = 0,
-    global_goal: Optional[str] = None, failure_summary: str = "",
+    task: Any | None = None, attempt: int = 0,
+    global_goal: str | None = None, failure_summary: str = "",
     timeout: int = 60,
 ) -> float:
     """送 /compact 並印真誠 TOKEN_COMPACT marker；回傳 compact 後觀測到的 token% 峰值。

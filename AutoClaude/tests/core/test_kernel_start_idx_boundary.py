@@ -8,8 +8,6 @@ SD_Improving_04 W2 三方審查 Dev-W2-Min-2~4：補強 Kernel.run(start_idx=...
 """
 from __future__ import annotations
 
-import pytest
-
 from autoclaude.core.event_bus import EventBus
 from autoclaude.core.kernel import PlaybookKernel
 from autoclaude.core.ports.executor import ExecutionOutput

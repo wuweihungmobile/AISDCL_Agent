@@ -12,7 +12,6 @@
 from __future__ import annotations
 
 from autoclaude.core.event_bus import EventBus
-from autoclaude.core.hookspec import KernelPhase
 from autoclaude.core.wiring import (
     _REGISTER_ORDER,
     _build_plugin_set,
@@ -21,7 +20,6 @@ from autoclaude.core.wiring import (
     wire_plugins_with_registry,
 )
 from autoclaude.utils.config import AppConfig
-from autoclaude.infra.adapters.shell_evaluator import ShellEvaluator
 
 
 class _DummyExecutor:

@@ -58,6 +58,11 @@ except ImportError:  # pragma: no cover - 以腳本形態執行時才會走到
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     import tree_state as _tree_state  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools" / "lib"))
+from platform_utils import (  # noqa: E402
+    init_utf8_streams as _init_utf8_streams,  # type: ignore[import-not-found]
+)
+
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _DEFAULT_HISTORY = _REPO_ROOT / ".ac4_history.jsonl"
 
@@ -668,11 +673,7 @@ def evaluate(
 
 
 def main(argv: list[str] | None = None) -> int:
-    if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
-        try:
-            sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
-        except (AttributeError, OSError):
-            pass
+    _init_utf8_streams()
     parser = argparse.ArgumentParser(description="AC4 14 天 nightly 進度檢查 (SD_08 W2 T2-C3).")
     parser.add_argument(
         "--history",

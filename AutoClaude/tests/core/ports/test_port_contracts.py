@@ -10,11 +10,11 @@ from __future__ import annotations
 from dataclasses import is_dataclass
 
 from autoclaude.core.ports import (
+    CorrectionResult,
+    ExecutionOutput,
     IBrain,
     IEvaluator,
     IExecutor,
-    ExecutionOutput,
-    CorrectionResult,
 )
 
 

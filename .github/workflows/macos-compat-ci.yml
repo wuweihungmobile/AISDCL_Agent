@@ -476,9 +476,15 @@ on:
       - "tools/lib/quota_policy_env.py"
       - "tools/lib/quota_env_layers.py"
       - "tools/lib/quota_burndown.py"
+      - "tools/lib/engine_resume_job.py"
       - "tools/lib/schedule_backend_calendar.py"
       - "tools/lib/sentinel_lifecycle_arm.py"
       - "tools/lib/worktree_paths.py"
+      # DEF-101-398：dev_start.py 拆出的兩支本體（由 tools/dev_start.py 與
+      #      tools/tests/test_dev_start.py 消費）。漏列的代價同 DEF-101-042：只改
+      #      該檔時其回歸鎖不會跑。
+      - "tools/lib/bootstrap_lock.py"
+      - "tools/lib/nightly_heartbeat.py"
       # R99：本輪新建的四支根層 SSOT（CI 逐軌活性狀態／護欄層行數分類法／帳本收尾
       #      共用判準／帳本逐列超標三常數 shrink-only 自動重釘）。漏列的代價逐字同
       #      DEF-101-042：只改該檔時其回歸鎖不會跑（與 R80／R81／R86／R98 同一形態、
@@ -873,9 +879,15 @@ on:
       - "tools/lib/quota_policy_env.py"
       - "tools/lib/quota_env_layers.py"
       - "tools/lib/quota_burndown.py"
+      - "tools/lib/engine_resume_job.py"
       - "tools/lib/schedule_backend_calendar.py"
       - "tools/lib/sentinel_lifecycle_arm.py"
       - "tools/lib/worktree_paths.py"
+      # DEF-101-398：dev_start.py 拆出的兩支本體（由 tools/dev_start.py 與
+      #      tools/tests/test_dev_start.py 消費）。漏列的代價同 DEF-101-042：只改
+      #      該檔時其回歸鎖不會跑。
+      - "tools/lib/bootstrap_lock.py"
+      - "tools/lib/nightly_heartbeat.py"
       # R99：本輪新建的四支根層 SSOT（CI 逐軌活性狀態／護欄層行數分類法／帳本收尾
       #      共用判準／帳本逐列超標三常數 shrink-only 自動重釘）。漏列的代價逐字同
       #      DEF-101-042：只改該檔時其回歸鎖不會跑（與 R80／R81／R86／R98 同一形態、

@@ -518,10 +518,12 @@ def test_spec_patch_limit_escalates(tmp_path):
     rt = _runtime_at(tmp_path, "SPEC_AUDIT")
     rt.enter_spec_patch_proposal(ac_id="AC-9")          # 1
     rt.exit_spec_patch_proposal("drafted")
-    rt.state.current = "SPEC_AUDIT"; save_state(rt.state)
+    rt.state.current = "SPEC_AUDIT"
+    save_state(rt.state)
     rt.enter_spec_patch_proposal(ac_id="AC-9")          # 2
     rt.exit_spec_patch_proposal("drafted")
-    rt.state.current = "SPEC_AUDIT"; save_state(rt.state)
+    rt.state.current = "SPEC_AUDIT"
+    save_state(rt.state)
     res = rt.enter_spec_patch_proposal(ac_id="AC-9")    # 3 → ESCALATION
     assert res.get("escalated") is True
     assert rt.state.current == "ESCALATION"

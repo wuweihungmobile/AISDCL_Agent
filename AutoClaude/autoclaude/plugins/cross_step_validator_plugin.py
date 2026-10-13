@@ -14,7 +14,7 @@
 """
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from ..core.hookspec import HookContext, KernelPhase, PromptInjectionResult
 from ..execution.cross_step_validator import CrossStepStateValidator
@@ -27,15 +27,15 @@ class CrossStepValidatorPlugin:
 
     def __init__(
         self,
-        validator: Optional[CrossStepStateValidator] = None,
+        validator: CrossStepStateValidator | None = None,
         working_dir: str = ".",
         modified_threshold: int = 5,
     ):
         self._validator = validator or CrossStepStateValidator()
         self._working_dir = working_dir
         self._modified_threshold = modified_threshold
-        self._cached_warning: Optional[str] = None
-        self._cached_for_step_idx: Optional[int] = None
+        self._cached_warning: str | None = None
+        self._cached_for_step_idx: int | None = None
 
     def name(self) -> str:
         return "cross_step_validator"
@@ -46,7 +46,7 @@ class CrossStepValidatorPlugin:
     def subscribed_phases(self) -> list[KernelPhase]:
         return [KernelPhase.PRE_STEP, KernelPhase.PRE_ATTEMPT]
 
-    def on_event(self, ctx: HookContext) -> Optional[Any]:
+    def on_event(self, ctx: HookContext) -> Any | None:
         if ctx.phase == KernelPhase.PRE_STEP:
             self._on_pre_step(ctx)
             return None  # PRE_STEP 不回傳（避免 VetoResult-only contract 問題）
@@ -73,7 +73,7 @@ class CrossStepValidatorPlugin:
         self._cached_warning = warning
         self._cached_for_step_idx = ctx.step_idx
 
-    def _on_pre_attempt(self, ctx: HookContext) -> Optional[PromptInjectionResult]:
+    def _on_pre_attempt(self, ctx: HookContext) -> PromptInjectionResult | None:
         # 僅在 attempt=0 且 step_idx 對應 cache 時注入
         if ctx.attempt is not None and ctx.attempt > 0:
             return None

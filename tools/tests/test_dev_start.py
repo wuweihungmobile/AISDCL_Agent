@@ -1168,6 +1168,15 @@ class TestAcquireBootstrapLockMalformedContent(DevStartTestCase):
             self.assertTrue(lock_file.is_file(), "無法辨識的鎖檔內容不應被清除")
             self.assertTrue(any("無法辨識" in w for w in dev_start.WARNINGS))
 
+    def test_json_bool_literals_are_never_read_as_pids(self):
+        """JSON 的 `true`／`false` 是 int 子類別：漏了 bool 排除時 `true` 會被讀成 PID 1
+        （常駐存活）⇒ 鎖永遠忙碌。直打解析函式，不經 acquire（免得被別的分支遮蔽）。"""
+        parse = dev_start.bootstrap_lock.parse_lock_pids
+        for text in ("true", "false", "[true]", "[1, false]"):
+            with self.subTest(text=text):
+                self.assertIsNone(parse(text))
+        self.assertEqual(parse("[1, 2]"), [1, 2], "控制組：合法 PID 清單照常解析")
+
 
 class TestRecordLockPids(DevStartTestCase):
     """本輪核心修法之一：_record_lock_pids() 把鎖檔內容從 orchestrator PID
@@ -1918,9 +1927,8 @@ class TestStepVenvPrevNoneHealthCheck(DevStartTestCase):
             root = Path(td)
             venv_python = root / ".venv" / "bin" / "python"
             venv_python.parent.mkdir(parents=True)
-            # R3 QA 發現：shebang 腳本在 Windows 上非合法 PE、_venv_healthy() 會撞
-            # WinError 193，改複製當前真正在跑的直譯器本體（含 pyvenv.cfg，見
-            # _copy_functional_interpreter），三平台皆可真實執行。
+            # R3 QA 發現：shebang 腳本在 Windows 上非合法 PE（_venv_healthy() 撞 WinError 193），
+            # 故複製真直譯器本體（原文＝Guard_Repin 證據檔 §D-5）；三平台皆可真實執行。
             _copy_functional_interpreter(venv_python)
             venv_python.chmod(0o755)
             bootstrap_calls = []
@@ -1980,9 +1988,7 @@ class TestBootstrapIncompleteMarker(DevStartTestCase):
                 # 邏輯寫在 _run_bootstrap() 內部，故這裡改 mock 更底層的
                 # _stream()，讓真正的 _run_bootstrap() 執行（含哨兵讀寫）。
                 venv_python.parent.mkdir(parents=True, exist_ok=True)
-                # R3 QA 發現：shebang 腳本在 Windows 上非合法 PE、_venv_healthy()
-                # 會撞 WinError 193，改複製當前真正在跑的直譯器本體（含 pyvenv.cfg，
-                # 見 _copy_functional_interpreter）。
+                # 複製真直譯器本體（shebang 腳本在 Windows 非合法 PE；見 Guard_Repin 證據檔 §D-5）
                 _copy_functional_interpreter(venv_python)
                 venv_python.chmod(0o755)
                 return 1
@@ -2035,9 +2041,7 @@ class TestBootstrapIncompleteMarker(DevStartTestCase):
             root = Path(td)
             venv_python = root / ".venv" / "bin" / "python"
             venv_python.parent.mkdir(parents=True)
-            # R3 QA 發現：shebang 腳本在 Windows 上非合法 PE、_venv_healthy() 會撞
-            # WinError 193，改複製當前真正在跑的直譯器本體（含 pyvenv.cfg，見
-            # _copy_functional_interpreter），三平台皆可真實執行。
+            # 複製真直譯器本體（shebang 腳本在 Windows 非合法 PE；見 Guard_Repin 證據檔 §D-5）
             _copy_functional_interpreter(venv_python)
             venv_python.chmod(0o755)
             bootstrap_calls = []
@@ -2074,9 +2078,7 @@ class TestRootLevelBootstrapIncompleteMarker(DevStartTestCase):
                 # 但本體已死，不會再執行到任何後續程式碼。
                 venv_python = root / ".venv" / "bin" / "python"
                 venv_python.parent.mkdir(parents=True)
-                # R3 QA 發現：shebang 腳本在 Windows 上非合法 PE、_venv_healthy()
-                # 會撞 WinError 193，改複製當前真正在跑的直譯器本體（含 pyvenv.cfg，
-                # 見 _copy_functional_interpreter）。
+                # 複製真直譯器本體（shebang 腳本在 Windows 非合法 PE；見 Guard_Repin 證據檔 §D-5）
                 _copy_functional_interpreter(venv_python)
                 venv_python.chmod(0o755)
 
@@ -2119,9 +2121,7 @@ class TestRootLevelBootstrapIncompleteMarker(DevStartTestCase):
             root = Path(td)
             venv_python = root / ".venv" / "bin" / "python"
             venv_python.parent.mkdir(parents=True)
-            # R3 QA 發現：shebang 腳本在 Windows 上非合法 PE、_venv_healthy() 會撞
-            # WinError 193，改複製當前真正在跑的直譯器本體（含 pyvenv.cfg，見
-            # _copy_functional_interpreter），三平台皆可真實執行。
+            # 複製真直譯器本體（shebang 腳本在 Windows 非合法 PE；見 Guard_Repin 證據檔 §D-5）
             _copy_functional_interpreter(venv_python)
             venv_python.chmod(0o755)
             bootstrap_calls = []
@@ -2706,7 +2706,7 @@ class TestNightlyHeartbeatFilenameContract(unittest.TestCase):
     """心跳檔名契約寫讀兩端機械繫結（R12 QA 一審 QA-5／SD 一審 SD-4）。
 
     WHY：`nightly_mac_latest.log` 硬編於 writer（run_local_nightly.sh）與 reader
-    （dev_start.py）兩處字面值——單側改名後 dev_start 永遠報「未偵測」且該態刻意
+    （nightly_heartbeat.py）兩處字面值——單側改名後 dev_start 永遠報「未偵測」且該態刻意
     不入 WARNINGS，靜默退化零訊號。本測試以靜態錨點鎖住：兩端檔名一致＋writer
     呼叫位置在最終彙總之後、exit 判定之前（成功/失敗皆寫的語意錨點）。Windows 側
     （nightly_latest.log ↔ run_local_nightly.ps1）同構加鎖。"""
@@ -2716,7 +2716,7 @@ class TestNightlyHeartbeatFilenameContract(unittest.TestCase):
     def test_mac_writer_reader_filename_and_call_position(self) -> None:
         sh = (self._REPO / "AutoClaude" / "tools" / "run_local_nightly.sh").read_text(
             encoding="utf-8")
-        src = Path(dev_start.__file__).read_text(encoding="utf-8")
+        src = Path(dev_start.nightly_heartbeat.__file__).read_text(encoding="utf-8")
         self.assertIn("nightly_mac_latest.log", sh, "writer 檔名錨點消失")
         self.assertIn("nightly_mac_latest.log", src, "reader 檔名錨點消失")
         pos_summary = sh.rfind("nightly 彙總：PASS=")  # 最終彙總（def 內另有一處故 rfind）
@@ -2732,7 +2732,7 @@ class TestNightlyHeartbeatFilenameContract(unittest.TestCase):
     def test_windows_reader_filename_matches_ps1_writer(self) -> None:
         ps1 = (self._REPO / "AutoClaude" / "tools" / "run_local_nightly.ps1").read_text(
             encoding="utf-8-sig")
-        src = Path(dev_start.__file__).read_text(encoding="utf-8")
+        src = Path(dev_start.nightly_heartbeat.__file__).read_text(encoding="utf-8")
         self.assertIn("nightly_latest.log", ps1, "Windows writer 檔名錨點消失")
         self.assertIn('"nightly_latest.log"', src, "Windows reader 檔名錨點消失")
 

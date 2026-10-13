@@ -20,10 +20,10 @@ if TYPE_CHECKING:
 @dataclass
 class MutationCtx:
     """打包 mutation 套用所需的所有 runtime 上下文（避免 16 參數列表反覆傳遞）。"""
-    runner: "PlaybookRunner"
-    playbook: "Playbook"
+    runner: PlaybookRunner
+    playbook: Playbook
     playbook_path: str
-    task: "PlaybookTask"
+    task: PlaybookTask
     step_idx: int
     step_log: list
     mutation_log: list
@@ -38,11 +38,11 @@ class MutationCtx:
 
 
 def apply_single_mutation_full_impl(
-    runner: "PlaybookRunner",
-    mutation: "StepMutation",
-    playbook: "Playbook",
+    runner: PlaybookRunner,
+    mutation: StepMutation,
+    playbook: Playbook,
     playbook_path: str,
-    task: "PlaybookTask",
+    task: PlaybookTask,
     step_idx: int,
     step_log: list,
     _mutation_log: list,

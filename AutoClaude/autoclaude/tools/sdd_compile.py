@@ -132,6 +132,7 @@ def main(argv: list[str] | None = None) -> int:
             sort_keys=False,
         ),
         encoding="utf-8",
+        newline="\n",
     )
     print(f"[sdd_compile] 已輸出 {len(playbook.tasks)} 步驟 → {out}")
     print("[sdd_compile] 請人工 review 後以 `python -m autoclaude` 執行（兩段式）")

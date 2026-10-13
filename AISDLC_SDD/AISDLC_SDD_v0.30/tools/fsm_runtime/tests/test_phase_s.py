@@ -100,7 +100,8 @@ def test_enumerate_never_emits_self_referential():
 
 def test_genesis_finds_necessary():
     target = GenesisFeature.of("secret", "window")
-    ev = lambda g: 0.22 if g.name == target.name else 0.0
+    def ev(g):
+        return 0.22 if g.name == target.name else 0.0
     prop = VG.genesis(ev, candidates=VG.enumerate_genesis_features(budget=999))
     assert prop.accepted
     assert prop.feature.name == target.name
@@ -122,7 +123,8 @@ def test_genesis_round_respects_bigbang_kvocab():
     """一輪至多 K_vocab 個詞彙發明進 proposed（按 necessity 取前 K_vocab），其餘順延（Rule 9.31.4）。"""
     cands = VG.enumerate_genesis_features(budget=999)
     scores = {cands[0].name: 0.5, cands[1].name: 0.4, cands[2].name: 0.3}
-    ev = lambda g: scores.get(g.name, 0.0)
+    def ev(g):
+        return scores.get(g.name, 0.0)
     rnd = VG.genesis_round(ev, candidates=cands, k=1)
     assert len(rnd.selected) == 1
     assert rnd.selected[0].feature.name == cands[0].name   # necessity 最高
@@ -199,7 +201,8 @@ def test_adopt_genesis_goes_through_meta_guard(tmp_path):
 
 def test_record_genesis_round_writes_pending_signoff(tmp_path):
     cands = VG.enumerate_genesis_features(budget=999)
-    ev = lambda g: 0.3 if g.name == cands[0].name else 0.0
+    def ev(g):
+        return 0.3 if g.name == cands[0].name else 0.0
     rnd = VG.genesis_round(ev, candidates=cands, k=1)
     led = tmp_path / "value-dimension-ledger.yaml"
     entry = VG.record_round(rnd, ledger_path=led, ts="2026-06-04T00:00:00+00:00")
@@ -574,7 +577,8 @@ def test_single_track_no_vocab_batch_leak():
 def _accepted_genesis_round(k=1):
     cands = VG.enumerate_genesis_features(budget=999)
     scores = {cands[0].name: 0.5, cands[1].name: 0.4, cands[2].name: 0.3}
-    ev = lambda g: scores.get(g.name, 0.0)
+    def ev(g):
+        return scores.get(g.name, 0.0)
     return VG.genesis_round(ev, candidates=cands, k=k)
 
 

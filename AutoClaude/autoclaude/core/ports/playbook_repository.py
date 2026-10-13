@@ -1,7 +1,7 @@
 """IPlaybookRepository — Playbook 與演化版本的 Port（SD_Improving_02.md v1.1 §1.2.3）。"""
 from __future__ import annotations
 
-from typing import Optional, Protocol
+from typing import Protocol
 
 from ...models.playbook import Playbook
 

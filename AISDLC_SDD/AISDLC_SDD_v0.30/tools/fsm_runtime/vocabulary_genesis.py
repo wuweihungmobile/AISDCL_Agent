@@ -45,7 +45,7 @@ from .state_loader import REPO_ROOT
 # 沿用 synthesizer 的保留自指信號集 + 既有 VOCAB（synthesizer 結構性不 import oracle，故
 # 透過它取得 VOCAB/RESERVED_SELF_REF 不會把 oracle 牽連進來，對抗分離不破）。
 from .dimension_semantics_synthesizer import RESERVED_SELF_REF, VOCAB as _BASE_VOCAB
-from .value_dimension_registry import DIMENSION_NAMESPACE, dim_expand_k
+from .value_dimension_registry import dim_expand_k
 
 # vocab-genesis 共用命名空間（meta-loop-ledger 指紋前綴；不以 `-profile:` 結尾、亦非
 # `value-dimension:`，故與 calibration 聚合速率、維度 stock 天花板互不干涉，Rule 9.31.3）。
@@ -313,7 +313,8 @@ def genesis_round(
     cap_k = k if k is not None else dim_expand_k()
     cands = candidates if candidates is not None else enumerate_genesis_features(budget=budget)
     mgn = margin if margin is not None else vocab_coverage_margin()
-    tfn = lambda q: int(round(q * 100))
+    def tfn(q):
+        return int(round(q * 100))
 
     proposals: List[GenesisProposal] = []
     for gf in cands:

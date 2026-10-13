@@ -35,6 +35,11 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools" / "lib"))
+from platform_utils import (  # noqa: E402
+    init_utf8_streams as _init_utf8_streams,  # type: ignore[import-not-found]
+)
+
 # Summary 行格式：mutmut 2.4.3 實際輸出帶 emoji（`Survived 🙁 (64)` / `Killed 🎉 (12)` /
 # `Timeout ⏰ (0)` / `Suspicious 🤔 (1)` / `Skipped 🔇 (3)`），label 與 `(N)` 之間可能
 # 隔著 emoji + 空白；以 `[^\n]{0,8}` 允許中介字元但限長，避免誤吃 legend 句子。
@@ -101,11 +106,7 @@ def main(argv: list[str] | None = None) -> int:
     # errors='backslashreplace' 會把它印成 \uXXXX 逃脫字面（stdout 更是
     # errors='strict' 直接崩潰）——本工具的整個用途就是「說清楚為什麼不算 pass」，
     # 理由讀不到等於退化成一個沒有訊息的 exit code。同 tools/mutation_analysis.py 慣例。
-    for _stream in (sys.stdout, sys.stderr):
-        try:
-            _stream.reconfigure(encoding="utf-8", errors="replace")
-        except (AttributeError, ValueError, OSError):
-            pass
+    _init_utf8_streams()
     args = sys.argv[1:] if argv is None else argv
     require_version_marker = "--require-version-marker" in args
     args = [a for a in args if a != "--require-version-marker"]

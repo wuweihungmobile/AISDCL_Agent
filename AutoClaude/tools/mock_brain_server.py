@@ -39,6 +39,11 @@ import itertools
 import json
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+# stdio UTF-8 的唯一實作住 monorepo 根 `tools/lib/`；docker-compose.llm.yml 只把 ./tools 掛進
+# python:3.11-slim 跑本檔，容器內沒有那個根——在就用、不在就略過。
+_STDIO_LIB = Path(__file__).resolve().parent.parent.parent / "tools" / "lib"
 
 # 請求序號 → 讓 correction_prompt 每次不同，繞過相似度幻覺防護
 _COUNTER = itertools.count(1)
@@ -169,11 +174,12 @@ class _Handler(BaseHTTPRequestHandler):
 def main() -> None:
     # DEF-82-001/DEF-101-070 家族慣例：訊息含中文，Windows cp950 console
     # 直接 print 會 UnicodeEncodeError 中斷；stdout + stderr 皆強制 utf-8。
-    for _stream in (sys.stdout, sys.stderr):
-        try:
-            _stream.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
-        except (AttributeError, OSError):
-            pass
+    if _STDIO_LIB.is_dir():  # 容器內沒有 monorepo 根：略過（Linux 容器的 stdio 本就是 UTF-8）
+        if str(_STDIO_LIB) not in sys.path:
+            sys.path.insert(0, str(_STDIO_LIB))
+        from platform_utils import init_utf8_streams
+
+        init_utf8_streams()
     parser = argparse.ArgumentParser(description="AutoClaude 本地 Brain Mock 伺服器")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=9100)

@@ -3,7 +3,8 @@
 職責：同步 dispatcher，依 priority 排序呼叫 plugin；合併 result 由 IResolutionPolicy 決定（DIP）。
 PHASE_RESULT_CONTRACT 違反時 fail-fast；連續 3 次相同 phase 失敗加入 escalated_phases。
 
-刻意設計：同步、無 async、無 threading（保持狀態機可預測）；register 順序為同 priority 的 tie-breaker。
+刻意設計：同步、無 async、無 threading（保持狀態機可預測）；register 順序為同 priority 的
+tie-breaker。
 
 MergedResult / DefaultResolutionPolicy 已抽至 `resolution_policy.py`（SD_05 W0 SD-C2 / Arch-C1）；
 本檔自 resolution_policy re-export 以保 backward compat。
@@ -13,15 +14,15 @@ from __future__ import annotations
 import logging
 import uuid
 from collections import defaultdict
-from typing import Any, Optional
+from typing import Any
 
 from .hookspec import (
+    PHASE_RESULT_CONTRACT,
     HookContext,
     HookContractViolation,
     IHook,
     IResolutionPolicy,
     KernelPhase,
-    PHASE_RESULT_CONTRACT,
 )
 from .resolution_policy import DefaultResolutionPolicy, MergedResult
 
@@ -42,13 +43,13 @@ class EventBus:
     # SD_05 W0 SA-C2：QA Q-M1 escalate 門檻
     FAILURE_ESCALATE_THRESHOLD = 3
 
-    def __init__(self, policy: Optional[IResolutionPolicy] = None):
+    def __init__(self, policy: IResolutionPolicy | None = None):
         self._subscribers: dict[KernelPhase, list[IHook]] = defaultdict(list)
         self._policy: IResolutionPolicy = policy or DefaultResolutionPolicy()
         self._register_seq = 0
         self._phase_failure_counts: dict[KernelPhase, int] = defaultdict(int)
         self._phase_traces: dict[KernelPhase, str] = {}
-        self._last_trace_id: Optional[str] = None
+        self._last_trace_id: str | None = None
         self._escalated_phases: set[KernelPhase] = set()
 
     def register(self, hook: IHook) -> None:
@@ -63,7 +64,7 @@ class EventBus:
                 hook.name(), phase, hook._priority, seq,  # type: ignore[attr-defined]
             )
 
-    def get_plugin(self, name: str) -> Optional[IHook]:
+    def get_plugin(self, name: str) -> IHook | None:
         """依 name 取得已註冊的 Plugin（供 Facade 期 backward compat 使用）。"""
         for hooks in self._subscribers.values():
             for h in hooks:
@@ -117,7 +118,8 @@ class EventBus:
                 if allowed and type(r) not in allowed:
                     dispatch_failed = True
                     raise HookContractViolation(
-                        f"Plugin {hook.name()} 在 {ctx.phase.value} 回傳不合法型別 {type(r).__name__}；"
+                        f"Plugin {hook.name()} 在 {ctx.phase.value} "
+                        f"回傳不合法型別 {type(r).__name__}；"
                         f"允許的型別: {{{', '.join(t.__name__ for t in allowed)}}}；"
                         f"trace_id={trace_id}"
                     )
@@ -135,7 +137,8 @@ class EventBus:
                 if self._phase_failure_counts[ctx.phase] >= self.FAILURE_ESCALATE_THRESHOLD:
                     self._escalated_phases.add(ctx.phase)
                     logger.error(
-                        "Phase %s 已連續失敗 %d 次（threshold=%d），加入 escalated_phases；trace_id=%s",
+                        "Phase %s 已連續失敗 %d 次（threshold=%d），"
+                        "加入 escalated_phases；trace_id=%s",
                         ctx.phase.value, self._phase_failure_counts[ctx.phase],
                         self.FAILURE_ESCALATE_THRESHOLD, trace_id,
                     )
@@ -152,10 +155,10 @@ class EventBus:
         """SD_05 W0 SA-C2：phase 是否已達 escalate 門檻。"""
         return phase in self._escalated_phases
 
-    def get_phase_trace_id(self, phase: KernelPhase) -> Optional[str]:
+    def get_phase_trace_id(self, phase: KernelPhase) -> str | None:
         """SD_05 W0 SD-M5：取得指定 phase 的最近 trace_id。"""
         return self._phase_traces.get(phase)
 
-    def last_trace_id(self) -> Optional[str]:
+    def last_trace_id(self) -> str | None:
         """SD_05 W0 T0-4：最近一次 dispatch 的 trace_id（debug 用）。"""
         return self._last_trace_id

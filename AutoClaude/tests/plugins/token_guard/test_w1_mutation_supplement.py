@@ -19,18 +19,14 @@ from __future__ import annotations
 
 from autoclaude.plugins.token_guard import TokenGuardPlugin
 from autoclaude.plugins.token_guard.compactor import (
-    CompactFailureState,
     build_compact_prompt,
-    process_compact_result,
 )
 from autoclaude.plugins.token_guard.git_verifier import _WARNING_TEMPLATE
 from autoclaude.plugins.token_guard.thresholds import (
     should_compact_decision,
-    should_halt_decision,
 )
 from autoclaude.plugins.token_guard.watcher import observe_token_line
 from autoclaude.utils.config import TokenGuardConfig
-
 
 # ─────────────────────────────────────────────────────────────────
 # policy.py — 8 case（殺 sig default values + kwarg propagation）
@@ -91,7 +87,8 @@ class TestPolicyPublicApiDefaults:
         assert "[ATTEMPT] 2" not in prompt
 
     def test_build_compact_prompt_default_failure_summary_is_empty(self):
-        """policy.py:134 build_compact_prompt default failure_summary="" → 殺 default 非空 mutation。
+        """policy.py:134 build_compact_prompt default failure_summary="" → 殺 default 非空
+        mutation。
 
         無 failure_summary 時，prompt 不應含「重要：壓縮後必須記住」字樣
         """
@@ -147,7 +144,9 @@ class TestCompactorMutations:
     def test_compactor_prompt_starts_with_slash_compact(self):
         """compactor.py:66-67 prompt 必須以 `/compact\\n` 起頭 → 殺字面值 mutation。"""
         prompt = build_compact_prompt()
-        assert prompt.startswith("/compact\n"), f"prompt must start with /compact\\n: {prompt[:30]!r}"
+        assert prompt.startswith("/compact\n"), (
+            f"prompt must start with /compact\\n: {prompt[:30]!r}"
+        )
 
     def test_compactor_failure_summary_appended_at_end(self):
         """compactor.py:75-76 failure_summary 非空時 append 至 prompt 末段。

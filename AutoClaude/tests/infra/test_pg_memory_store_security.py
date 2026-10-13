@@ -10,10 +10,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-# 測試需 sqlalchemy；若未安裝整體 skip
+# 測試需 sqlalchemy；若未安裝整體 skip（下方 import 必須排在 importorskip 之後，故 noqa: E402）
 sqlalchemy = pytest.importorskip("sqlalchemy")
 
-from autoclaude.infra.repositories.pg_memory_store import PgMemoryStore
+from autoclaude.infra.repositories.pg_memory_store import PgMemoryStore  # noqa: E402
 
 
 class _FakeEngine:

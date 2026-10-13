@@ -31,11 +31,15 @@ class TestSD09P1YellowLinesClosed:
         helper = PROJECT_ROOT / "tools" / "mutmut_counts_parser.py"
         assert helper.is_file(), "P1-1 SSOT helper tools/mutmut_counts_parser.py 缺失"
         content = helper.read_text(encoding="utf-8")
-        assert "def parse" in content or "def _parse" in content, "P1-1 SSOT helper 無 parse function"
+        assert "def parse" in content or "def _parse" in content, (
+            "P1-1 SSOT helper 無 parse function"
+        )
 
     def test_p1_1_mutmut_regex_ssot_test_exists(self) -> None:
         test_file = PROJECT_ROOT / "tests" / "tools" / "test_mutmut_counts_parser.py"
-        assert test_file.is_file(), "P1-1 SSOT 單元測試 tests/tools/test_mutmut_counts_parser.py 缺失"
+        assert test_file.is_file(), (
+            "P1-1 SSOT 單元測試 tests/tools/test_mutmut_counts_parser.py 缺失"
+        )
 
     def test_p1_2_ac4_alert_parser_helper_exists(self) -> None:
         helper = PROJECT_ROOT / "tools" / "ac4_nightly_alert_parser.py"
@@ -56,14 +60,18 @@ class TestSD09P1YellowLinesClosed:
         helper = PROJECT_ROOT / "tools" / "ac4_progress_check.py"
         assert helper.is_file(), "P1-4 ac4_progress_check.py 缺失"
         content = helper.read_text(encoding="utf-8")
-        assert "_resolve_strict_p95_threshold" in content, "P1-4 _resolve_strict_p95_threshold legacy fallback function 缺失"
+        assert "_resolve_strict_p95_threshold" in content, (
+            "P1-4 _resolve_strict_p95_threshold legacy fallback function 缺失"
+        )
         assert "AUTOCLAUDE_TEST_P95_THRESHOLD_MS" in content, "P1-4 legacy env 名稱回退邏輯缺失"
 
     def test_p1_5_append_history_m05_dedup_test_exists(self) -> None:
         test_file = PROJECT_ROOT / "tests" / "tools" / "test_mutation_baseline_lock.py"
         assert test_file.is_file()
         content = test_file.read_text(encoding="utf-8")
-        assert "test_append_history_same_date_overwrites" in content, "P1-5 append_history M-05 dedup 測試 case 缺失"
+        assert "test_append_history_same_date_overwrites" in content, (
+            "P1-5 append_history M-05 dedup 測試 case 缺失"
+        )
 
     @pytest.mark.parametrize(
         "p1_id,description",
@@ -80,6 +88,8 @@ class TestSD09P1YellowLinesClosed:
     ) -> None:
         """R29 後：CLAUDE.md 或 sprint_history.md 必須提及這 5 P1 已 CLOSED。"""
         claude_md = (PROJECT_ROOT / "CLAUDE.md").read_text(encoding="utf-8")
-        sprint_history = (PROJECT_ROOT / "docs" / "05_development" / "sprint_history.md").read_text(encoding="utf-8")
+        sprint_history = (
+            PROJECT_ROOT / "docs" / "05_development" / "sprint_history.md"
+        ).read_text(encoding="utf-8")
         combined = claude_md + sprint_history
         assert "5 P1" in combined, f"{p1_id} closure 聲稱未在 CLAUDE.md / sprint_history.md 出現"

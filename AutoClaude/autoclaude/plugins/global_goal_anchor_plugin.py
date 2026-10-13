@@ -1,4 +1,5 @@
-"""GlobalGoalAnchorPlugin — 取代 PlaybookRunner 的 _prepend_global_goal* + _send_compact 中 anchor 注入。
+"""GlobalGoalAnchorPlugin — 取代 PlaybookRunner 的 _prepend_global_goal* + _send_compact 中
+anchor 注入。
 
 對應：
   - SD_Improving_01.md v1.1 §3.5 表格第 11 列（priority=35）
@@ -16,7 +17,7 @@
 """
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from ..core.hookspec import HookContext, KernelPhase, PromptInjectionResult
 from ..utils.config import PlaybookConfig
@@ -27,7 +28,7 @@ class GlobalGoalAnchorPlugin:
 
     PRIORITY = 35
 
-    def __init__(self, playbook_cfg: Optional[PlaybookConfig] = None):
+    def __init__(self, playbook_cfg: PlaybookConfig | None = None):
         self._cfg = playbook_cfg or PlaybookConfig()
         self._is_first_step = True   # 第一個步驟使用完整版 header
 
@@ -40,14 +41,14 @@ class GlobalGoalAnchorPlugin:
     def subscribed_phases(self) -> list[KernelPhase]:
         return [KernelPhase.PRE_ATTEMPT, KernelPhase.ON_TOKEN_USAGE]
 
-    def on_event(self, ctx: HookContext) -> Optional[Any]:
+    def on_event(self, ctx: HookContext) -> Any | None:
         if ctx.phase == KernelPhase.PRE_ATTEMPT:
             return self._on_pre_attempt(ctx)
         # ON_TOKEN_USAGE 純觀察者；anchor 內容由公開方法 build_compact_anchor() 提供
         return None
 
     # ──────────────────────────────────────────────
-    def _on_pre_attempt(self, ctx: HookContext) -> Optional[PromptInjectionResult]:
+    def _on_pre_attempt(self, ctx: HookContext) -> PromptInjectionResult | None:
         global_goal = ctx.playbook.global_goal
         if not global_goal:
             return None
@@ -86,7 +87,7 @@ class GlobalGoalAnchorPlugin:
     # ──────────────────────────────────────────────
     def build_compact_anchor(
         self,
-        global_goal: Optional[str],
+        global_goal: str | None,
         task,
         attempt: int,
         failure_summary: str = "",

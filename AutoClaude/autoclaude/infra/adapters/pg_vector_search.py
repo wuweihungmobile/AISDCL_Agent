@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Optional
+from typing import Any
 
 from ...core.ports.vector_search import (
     IVectorSearch,
@@ -90,9 +90,9 @@ class PgVectorSearchAdapter:
         self,
         *,
         sql_executor,
-        breaker: Optional[CircuitBreaker] = None,
+        breaker: CircuitBreaker | None = None,
         latency_alert_ms: float = 200.0,
-        preferred_source: Optional[str] = None,
+        preferred_source: str | None = None,
     ) -> None:
         self.sql = sql_executor
         self.breaker = breaker or CircuitBreaker(
@@ -104,7 +104,7 @@ class PgVectorSearchAdapter:
         self.preferred_source = preferred_source  # "new" / "legacy" / None=auto
 
     @classmethod
-    def from_dsn(cls, dsn: str, **kwargs) -> "PgVectorSearchAdapter":
+    def from_dsn(cls, dsn: str, **kwargs) -> PgVectorSearchAdapter:
         """整合測試便利工廠：從 psycopg2 格式 DSN 建立 adapter。
 
         dsn 必須是同步格式（不含 +asyncpg）。
@@ -150,8 +150,8 @@ class PgVectorSearchAdapter:
         query_vector: list[float],
         model_id: str,
         top_k: int = 10,
-        ef_search: Optional[int] = None,
-        extra_filters: Optional[dict[str, Any]] = None,
+        ef_search: int | None = None,
+        extra_filters: dict[str, Any] | None = None,
     ) -> tuple[list[VectorHit], SearchStats]:
         if namespace not in _NEW_INDEX_SQL:
             raise VectorSearchError(f"unsupported namespace: {namespace}")

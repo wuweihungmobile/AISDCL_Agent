@@ -7,7 +7,7 @@
   2. 服務層：兩處等待真的走分片（吃設定值）、>max_inprocess 拒絕且 checkpoint 已落（續跑時刻
      是真實的等待終點）、中斷優雅返回；
   3. 接線鎖：auto_resume.py 不得再直接呼叫 `time.sleep`；main.py 把 hotkey.triggered 注入服務
-     （注入點已接；入口目前未呼叫 hotkey.register()，事件源是否被設定不在本檔射程）；
+     （注入點已接；事件源的註冊由 tests/execution/test_prd32_global_hotkey_registration.py 守）；
      TokenGuardConfig 三欄的預設值（與 PRD 對齊／刻意偏離各自釘死）與邊界。
 """
 from __future__ import annotations
@@ -454,6 +454,44 @@ class TestAnInterruptDuringTheWaitExitsGracefully:
         assert kernel.calls == 2
 
 
+class _QuotaResetsIn:
+    """額度軸量到 session 視窗、`minutes` 分鐘後 reset。"""
+
+    def __init__(self, minutes: int):
+        self._minutes = minutes
+
+    def read(self):
+        reset = datetime.now(UTC) + timedelta(minutes=self._minutes)
+        return QuotaReading(96.0, "session", reset.isoformat())
+
+
+class TestAQuotaWaitEndsAtTheResetNotAtTheResumeDelay:
+    """config.py 明文「額度路徑不讀 resume_delay_minutes」。修前 halt 時存下的 checkpoint 時刻是
+    它推算的（30 分後）：reset 在 15 分後時，額度等待睡完、續跑輪讀到該時刻又補睡 15 分，實際
+    喚醒＝max(reset, 撞線＋30 分)，reset 後白等（最壞約 30 分／次）。"""
+
+    @staticmethod
+    def _slept_in_one_halt_resume(reset_in_minutes: int) -> float:
+        cfg = _cfg(delay_minutes=30, sleep_slice_seconds=30)
+        svc = AutoResumeService(_HaltingKernel(), cfg, state_repository=InMemoryStateRepository(),
+                                quota_meter=_QuotaResetsIn(reset_in_minutes))
+        slept: list[float] = []
+        with patch("autoclaude.core.services.auto_resume.time.sleep", slept.append), \
+                _time_passes(lambda: sum(slept)):
+            svc.run(SIMPLE_PB, fresh=True)
+        return sum(slept)
+
+    def test_a_reset_earlier_than_the_delay_wakes_at_the_reset(self):
+        total = self._slept_in_one_halt_resume(15)
+        # 不早於 reset（早醒會再撞一次）；不晚於 reset＋存檔時刻向上取整到分鐘（<60s）＋一片休眠
+        assert 15 * 60 - 1 <= total <= 15 * 60 + 60 + 30, f"睡了 {total:.0f}s（reset 在 900s 後）"
+
+    def test_control_a_reset_later_than_the_delay_is_unchanged(self):
+        """控制組：reset 比 resume_delay 晚時，等待睡完該時刻已過期，不得多等也不得早醒。"""
+        total = self._slept_in_one_halt_resume(50)
+        assert 50 * 60 - 1 <= total <= 50 * 60 + 30, f"實際睡了 {total:.0f}s（reset 在 3000s 後）"
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # 三、接線鎖與設定邊界
 # ══════════════════════════════════════════════════════════════════════════════
@@ -490,8 +528,8 @@ class TestWiringLocks:
 
     def test_main_wires_the_hotkey_into_the_service(self):
         """機制蓋好沒接電：服務有中斷注入點，入口就必須把 hotkey.triggered 接上去（本鎖只守接線）。
-        🔴 接線≠事件源有效：main() 目前沒有呼叫 hotkey.register()，全域熱鍵尚未註冊、triggered
-        實際不會被設定——那是既存缺口，不在本鎖射程；本綠燈不得被讀成「按 ESC+F12 會中斷」。"""
+        🔴 接線≠事件源有效：本鎖只守接線；全域熱鍵真的被註冊（有 TTY 且非無人值守）由
+        tests/execution/test_prd32_global_hotkey_registration.py 守，兩者缺一不可。"""
         tree = ast.parse((PKG_DIR / "main.py").read_text(encoding="utf-8"))
         calls = [c for c in ast.walk(tree)
                  if isinstance(c, ast.Call) and _dotted(c.func) == "AutoResumeService"]

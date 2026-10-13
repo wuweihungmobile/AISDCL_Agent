@@ -572,6 +572,13 @@ if [ "$run_rootinfra" -eq 1 ] || [ "$run_rootinfra_guards" -eq 1 ]; then
           cat "$_ruff_err" >&2
           echo "[pre-push dispatcher] ❌ root-infra：ruff check tools/ .claude/hooks/ 失敗（設定＝tools/ruff.toml＋.claude/ruff.toml）" >&2
           leg_rc=1
+        # R213／DEF-101-018 結案的本地執行者：repo 根 `ruff check .`（根 ruff.toml 只排除凍結版；
+        #   AutoClaude 走其 pyproject、tools/ 與 .claude/ 走各自設定、SDD LATEST 走出廠預設）。
+        #   stderr 追加到同一個暫存檔，讓下方的 warning 判準一併涵蓋本道。
+        elif ! ruff check . --no-cache 2>>"$_ruff_err"; then
+          cat "$_ruff_err" >&2
+          echo "[pre-push dispatcher] ❌ root-infra：ruff check .（repo 根）失敗——DEF-101-018 已結案，存量不得回升" >&2
+          leg_rc=1
         elif grep -q '^warning:' "$_ruff_err"; then
           cat "$_ruff_err" >&2
           echo "[pre-push dispatcher] ❌ root-infra：ruff 印出 warning（rc=0 但 warning 不得靜默吞掉；最常見是壞掉的 noqa 指令＝該行根本沒被豁免）" >&2

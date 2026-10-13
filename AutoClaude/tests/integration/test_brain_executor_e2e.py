@@ -1,6 +1,7 @@
 """tests/integration/test_brain_executor_e2e.py — SD_07 W2 T2-1 議題 0 e2e。
 
-對應 AC0-1 / AC0-2 / AC0-3（[docs/03_testing/SD07_AC_Matrix.md](../../docs/03_testing/SD07_AC_Matrix.md)）：
+對應 AC0-1 / AC0-2 / AC0-3
+（[docs/03_testing/SD07_AC_Matrix.md](../../docs/03_testing/SD07_AC_Matrix.md)）：
   AC0-1 Token Halt → Coordinator → CheckpointPlugin → AutoResumeService 完整往返
   AC0-2 decide_correction → ExecutorPort.execute(on_event) → ON_EVENT phase 廣播
   AC0-2 decide_escalation → EvolutionPlugin → ON_ESCALATION_DUMP_REQUEST
@@ -11,7 +12,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import pytest
 import yaml
@@ -56,8 +57,8 @@ class _CountingBrain:
         self,
         *,
         model_id: str = "MiniMax-Text-01",
-        correction: Optional[CorrectionResult] = None,
-        escalation: Optional[EscalationDecision] = None,
+        correction: CorrectionResult | None = None,
+        escalation: EscalationDecision | None = None,
     ):
         self._model_id = model_id
         self._correction = correction
@@ -78,7 +79,7 @@ class _CountingBrain:
             dimension=1024,
         )
 
-    def decide_correction(self, **_kwargs) -> Optional[CorrectionResult]:
+    def decide_correction(self, **_kwargs) -> CorrectionResult | None:
         self.correction_calls += 1
         return self._correction
 
@@ -93,7 +94,7 @@ class _CountingExecutor:
     def __init__(
         self,
         *,
-        events: Optional[list[ExecutionEvent]] = None,
+        events: list[ExecutionEvent] | None = None,
         text: str = "[OK]",
         completed: bool = True,
     ):
@@ -103,7 +104,7 @@ class _CountingExecutor:
         self.execute_calls = 0
         self.interrupts: list[tuple[int, str]] = []
         self._interrupt_seq = 0
-        self.last_callback: Optional[Any] = None
+        self.last_callback: Any | None = None
         self.subprocess_invocations = 0  # 紅線：dry_run 必 0
 
     def execute(
@@ -194,9 +195,9 @@ def _make_playbook_from_fixture(fixture: dict) -> tuple[Playbook, list[PlaybookT
 def _make_coord(
     brain: _CountingBrain,
     executor: _CountingExecutor,
-    plugins: Optional[list[IHook]] = None,
+    plugins: list[IHook] | None = None,
     *,
-    max_runs: Optional[int] = None,
+    max_runs: int | None = None,
 ) -> tuple[OrchestrationCoordinator, EventBus]:
     bus = EventBus()
     for p in plugins or []:
@@ -499,7 +500,8 @@ class TestMaxActiveRunsGuardE2E:
 # ──────────────────────────────────────────────────────────────
 class TestAutoResumeWakeMetrics:
     def test_token_halt_wake_kind_emitted(self):
-        """token_halt 觸發後，AutoResumeService emit ON_AUTO_RESUME_WAKE，plugin 收到 'token_halt' kind。"""
+        """token_halt 觸發後，AutoResumeService emit ON_AUTO_RESUME_WAKE，plugin 收到
+        'token_halt' kind。"""
         wake_spy = _PhaseSpy("wake_spy", (KernelPhase.ON_AUTO_RESUME_WAKE,),
                              responder=lambda _ctx: ScheduleResumeResult(
                                  contributor="notif", scheduled_at="2026-05-18T12:00:00Z"))

@@ -150,7 +150,7 @@ class FlagOnClosedLoopTests(_Base):
         rt = self._rt()
         _drive_gate_to_escalation(rt, "SCG_VALIDATION", 3, "CI runner timeout 30s")
         self.assertEqual(rt.state.current, "AUTO_RECOVERY_ATTEMPT")
-        out = rt.exit_auto_recovery("fail")
+        rt.exit_auto_recovery("fail")
         self.assertEqual(rt.state.current, "ESCALATION_FINAL")
         stats = rt.auto_recovery_stats()
         self.assertEqual(stats["failures"], 1)

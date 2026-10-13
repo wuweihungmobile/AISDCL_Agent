@@ -55,13 +55,17 @@ class TestAdversarialMaxChars:
     def test_adversarial_long_line_is_detected(self) -> None:
         """餵入含 > 800 字元的 fixture → 必須被偵測。"""
         bad_lines = ["short", "a" * 801, "ok"]
-        violations = [(i, len(l)) for i, l in enumerate(bad_lines, 1) if len(l) > MAX_LINE_CHARS]
+        violations = [
+            (i, len(line)) for i, line in enumerate(bad_lines, 1) if len(line) > MAX_LINE_CHARS
+        ]
         assert violations == [(2, 801)], "adversarial 801-char fixture 應被偵測，但漏判"
 
     def test_adversarial_short_line_passes(self) -> None:
         """合法 fixture（含 800 字元行）必須通過。"""
         ok_lines = ["a" * 800, "b" * 799]
-        violations = [(i, len(l)) for i, l in enumerate(ok_lines, 1) if len(l) > MAX_LINE_CHARS]
+        violations = [
+            (i, len(line)) for i, line in enumerate(ok_lines, 1) if len(line) > MAX_LINE_CHARS
+        ]
         assert violations == [], "800-char 邊界 fixture 應通過但被誤判"
 
     def test_chinese_chars_count_as_codepoints_not_bytes(self) -> None:

@@ -579,12 +579,6 @@ _FULLWIDTH_GLUED_VAR_RE = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*)([^\x00-\x7f])"
 
 def fullwidth_glued_var_problems(code: str, rel: str) -> list[str]:
     """回傳「`$VAR` 緊接非 ASCII 字元」的違規清單（純函式，可構造輸入測鑑別力）。
-
-    WHY（R69 終審 P3，`DEF-101-742`）：一支真實 hook 的 echo 訊息在 macOS 系統
-    bash 3.2.57 ＋ `set -u` 下，全形左括號的位元組被併進變數名，導致 unbound
-    variable、整支 hook 當場中止；CI 的 bash 5.x 與 `bash -n` 皆攔不到。安全形態＝
-    `${VAR}（`。判準不限於 `set -u` 檔：即使沒有它，該寫法也會靜默展開成空字串、
-    訊息失真。史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
     problems: list[str] = []
     for match in _FULLWIDTH_GLUED_VAR_RE.finditer(code):

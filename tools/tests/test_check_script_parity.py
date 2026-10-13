@@ -408,11 +408,6 @@ class TestRunTlcInvocationParityLock(unittest.TestCase):
 
 class TestR69ExitCodeContract(unittest.TestCase):
     """R69：`run_self_evolution.{sh,ps1}` 退出碼契約三方鎖（SSOT ↔ .sh ↔ .ps1）。
-
-    WHY（Rule 9）：兩側檔頭曾聲稱規格側有節可查，但該節當時不存在且零機械 parity
-    ⇒ 契約落地即孤兒。fixture 注入自證鑑別力：單側改壞必紅、實作新增未登記碼必紅、
-    抽不到即紅（空集合逐筆相等恆真會靜默失守）。史料見證據檔
-    〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
 
     _SPEC = (
@@ -1205,11 +1200,6 @@ class TestR64TierShrinkOnlyRatchet(unittest.TestCase):
 
 class TestR67BaselineRatchet(unittest.TestCase):
     """R67-H14 回歸鎖：棘輪的比對基準必須是**凍結常數**，不得是 git 導出的量。
-
-    WHY（Rule 9）：舊棘輪拿 `git show HEAD:<本檔>` 當基準，在每個真正消費 rc 的
-    閘門裡都跑在 commit 之後，HEAD 逐字等於工作樹 ⇒ 比較退化恆真（R67 沙箱實測：
-    降級並 commit 後 rc 仍全 0）。根因是「基準會自己對齊」，故本類鎖的是那個結構性質
-    本身，不只是鎖某幾筆 tier 值。史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
 
     def test_ratchet_is_independent_of_git_state(self) -> None:
@@ -1685,11 +1675,6 @@ class TestR67AcCoverage(unittest.TestCase):
 
     def test_ac_value_is_pinned(self) -> None:
         """AC 活體值釘選（比照 UEP 的等值釘選）。
-
-        §4.2 判定規則 2：AC 每一筆上升必須在同一 commit 內具名對應一筆 UEP 下降。
-        R67 前 AC 完全無值鎖（實測 48→49 全綠）；現在上升即紅、下降亦紅。R76 現值
-        47（真孤兒 `reschedule_g0_gatecheck.ps1` 整支刪除造成的下降，非規則 2 所管
-        方向，不需具名對應 UEP 下降）。史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
         """
         ac = sum(len(reg) for reg in m.ac_registries().values())
         self.assertEqual(
@@ -1712,11 +1697,6 @@ class TestR67AcCoverage(unittest.TestCase):
 
 class TestRedOutputGoesThroughTheSingleExit(unittest.TestCase):
     """本輪 F-09／R77-54③：紅燈不得被綠燈淹沒——所有 stderr 輸出走 `_fail()` 唯一出口。
-
-    病灶（注入實測）：綠燈走 stdout（塊緩衝）、紅燈走 stderr（不是），合流檢視
-    （`2>&1`）時整批紅燈先出現、後面跟著一長串綠燈——「跑指令看尾巴」的記錄法在
-    真紅時尾巴是綠的。鎖「唯一出口」而非「最後一行是紅的」：後者只驗表象，下一個
-    新增的紅燈站點照樣繞過去。史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
 
     @staticmethod

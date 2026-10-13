@@ -301,7 +301,7 @@ class PlaybookEvolver:
 
         evolved_path = Path(playbook_path).parent / f"evolved_{Path(playbook_path).name}"
         try:
-            with evolved_path.open("w", encoding="utf-8") as f:
+            with evolved_path.open("w", encoding="utf-8", newline="") as f:
                 yaml.dump(
                     evolved_playbook.model_dump(exclude_none=True),
                     f,

@@ -107,7 +107,6 @@ class TestNotificationPluginOnPostRun:
 class TestNotificationPluginObserverContract:
     def test_returns_none_for_observer_phases(self):
         """純觀察者 phase（ON_ESCALATION/ON_EVOLUTION/POST_RUN）不回傳 IHookResult。"""
-        from autoclaude.core.hookspec import ScheduleResumeResult
         plugin = NotificationPlugin(enabled=True)
         observer_phases = [
             KernelPhase.ON_ESCALATION,
@@ -120,7 +119,8 @@ class TestNotificationPluginObserverContract:
                 assert plugin.on_event(ctx) is None
 
     def test_returns_schedule_resume_result_for_auto_resume_wake(self):
-        """W5 / M-9 / SA-M3：ON_AUTO_RESUME_WAKE 回傳 ScheduleResumeResult 符合 PHASE_RESULT_CONTRACT。"""
+        """W5 / M-9 / SA-M3：ON_AUTO_RESUME_WAKE 回傳 ScheduleResumeResult 符合
+        PHASE_RESULT_CONTRACT。"""
         from autoclaude.core.hookspec import ScheduleResumeResult
         plugin = NotificationPlugin(enabled=True)
         with patch("autoclaude.plugins.notification_plugin.notify"):

@@ -22,12 +22,11 @@
 from __future__ import annotations
 
 import warnings
-from dataclasses import dataclass, field
-from typing import Any, Callable, Optional, Literal
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any, Literal
 
-from pydantic import BaseModel
-
-from .config import AppConfig, TokenGuardConfig
+from .config import AppConfig
 
 ConfigLayer = Literal["global", "workflow", "step", "runtime"]
 _LAYER_ORDER: tuple[ConfigLayer, ...] = ("global", "workflow", "step", "runtime")
@@ -62,9 +61,9 @@ class ConfigAuditRecord:
     old_value: Any = None
     new_value: Any = None
     action: str = "update"  # insert / update / delete / reject
-    reason: Optional[str] = None
+    reason: str | None = None
 
-    def apply_pii_filter(self, pii_filter) -> "ConfigAuditRecord":
+    def apply_pii_filter(self, pii_filter) -> ConfigAuditRecord:
         """SD_06 W5-T5-20：將 old_value / new_value 經 PIIFilter 過濾。
 
         - SECRET 欄位（minimax.api_key 等）→ filter 內部 raise PIIFilterViolation
@@ -165,10 +164,10 @@ class ConfigResolver:
         self,
         global_cfg: AppConfig,
         *,
-        workflow_overrides: Optional[dict] = None,
-        step_overrides: Optional[dict] = None,
-        runtime_overrides: Optional[dict] = None,
-        audit_observer: Optional[Callable[[ConfigAuditRecord], None]] = None,
+        workflow_overrides: dict | None = None,
+        step_overrides: dict | None = None,
+        runtime_overrides: dict | None = None,
+        audit_observer: Callable[[ConfigAuditRecord], None] | None = None,
     ):
         self._global_cfg = global_cfg
         self._layers: dict[ConfigLayer, dict] = {

@@ -464,7 +464,8 @@ def test_format_step_comparison_no_truncation_when_within_limit():
 
 
 def test_format_step_comparison_max_steps_zero_all_elided():
-    """W-76-3（audit_76 SA-SD P2）：max_steps=0 → 0 步列出 + 全進省略行，不崩潰（守 `max(0,..)` 負索引契約）。"""
+    """W-76-3（audit_76 SA-SD P2）：max_steps=0 → 0 步列出 + 全進省略行，不崩潰（守 `max(0,..)`
+    負索引契約）。"""
     pty = parse_run_metrics(_long_log(3), "pty")
     sdk = parse_run_metrics(_long_log(3), "sdk")
     out = format_step_comparison(pty, sdk, max_steps=0)
@@ -485,7 +486,8 @@ def test_format_step_comparison_both_empty_header_only():
 
 
 # ── W-76-2 / DEF-76-001：載具納入 production token marker（TOKEN_HALT）─────────
-# 🔴 production 唯一正式路徑＝Kernel（main.py:123），**不印 TOKEN_COMPACT**（只棄用 _impl.py:233 印）；
+# 🔴 production 唯一正式路徑＝Kernel（main.py:123），**不印 TOKEN_COMPACT**（只棄用
+# _impl.py:233 印）；
 # Kernel 端 token 壓力以 TOKEN_HALT（≥90%，_token_halt.py:46，帶 [Sxx] context NN%）表達。
 # 載具原僅認 TOKEN_COMPACT → production peak/compact 恆 0（DEF-76-001）。本輪納入 TOKEN_HALT。
 _HALT_MARKER_LOG = (
@@ -520,8 +522,10 @@ def test_token_halt_marker_feeds_peak_and_per_step():
 
 def test_per_step_correction_is_lower_bound_for_untagged():
     """W-76-1（audit_76 SA-SD P1）：CORRECTION 有兩 emit site——Kernel 帶 step=、已棄用
-    _impl.py:437 不帶。per-step correction 對不帶 step= 者不歸因 → sum(per_step) ≤ 整輪（**下界**），
-    等號僅在 log 全為 Kernel 路徑（production 真跑）時成立。誠實固化此邊界，防把「皆帶 step=」當全稱真理。"""
+    _impl.py:437 不帶。per-step correction 對不帶 step= 者不歸因 → sum(per_step) ≤
+    整輪（**下界**），
+    等號僅在 log 全為 Kernel 路徑（production 真跑）時成立。誠實固化此邊界，防把「皆帶 step=」
+    當全稱真理。"""
     m = parse_run_metrics(_MIXED_CORRECTION_LOG, "sdk")
     assert m.correction_count == 2  # _RE_CORRECTION 中兩行（含「諮詢 Minimax」）
     assert sum(s.correction_count for s in m.per_step.values()) == 1  # 僅 step=S01 歸因（下界）
@@ -572,7 +576,8 @@ def test_load_log_missing_raises_fail_loud(tmp_path):
 
 
 def test_load_log_existing_returns_content_unchanged(tmp_path):
-    """RTM-77-3：log 存在時照常回內容、語意與舊版完全一致（含 escalated 輪本就有 log，不誤 raise）。"""
+    """RTM-77-3：log 存在時照常回內容、語意與舊版完全一致（含 escalated 輪本就有 log，不誤
+    raise）。"""
     log_file = tmp_path / "logs" / "autoclaude.log"
     log_file.parent.mkdir(parents=True, exist_ok=True)
     log_file.write_text(_ESCALATED, encoding="utf-8")
@@ -690,7 +695,8 @@ def test_main_parse_mode_renders_failloud_on_cp950_stdout(tmp_path, monkeypatch)
 
     驗證意圖（Rule 9）：守的是「真跑兩 backend 跑完卻在 print 階段炸」這個觀測缺陷的修復——
     fake stdout 用 cp950 編碼（⚠ 不可編碼）；若移除 main 開頭 reconfigure，print ⚠ 即
-    UnicodeEncodeError 紅。peak_token_pct=0.0 + 無 marker → token_signal_observed False → 渲染 ⚠。"""
+    UnicodeEncodeError 紅。peak_token_pct=0.0 + 無 marker → token_signal_observed
+    False → 渲染 ⚠。"""
     import io
 
     kr = ("Playbook 結束 | KernelResult(success=True, completed_steps=2, total_steps=2, "
@@ -793,7 +799,8 @@ def test_def_83_001_aggregate_effective_peak():
 
 
 # ── improving_86 W-86-2：STEP_TOKEN_PEAK 解析 + per-step 多輪聚合（RTM-86-3/4/5）──
-# 真實 Kernel 輸出格式（取自 W-86-1 emit；kernel.py:`=== STEP_TOKEN_PEAK | step=Sxx pct=NN.NNNN ===`）
+# 真實 Kernel 輸出格式（取自 W-86-1 emit；kernel.py:
+# `=== STEP_TOKEN_PEAK | step=Sxx pct=NN.NNNN ===`）
 _STEP_TOKEN_PEAK_LOG = (
     "=== STEP_TOKEN_PEAK | step=S01 pct=3.2000 ===\n"
     "=== STEP_TOKEN_PEAK | step=S02 pct=6.1566 ===\n"

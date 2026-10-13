@@ -58,7 +58,7 @@ def notify_escalation(title: str, message: str, dump_path: str, cfg: AppConfig) 
     alert_log = Path(cfg.checkpoint_dir) / "escalation_alert.log"
     try:
         alert_log.parent.mkdir(parents=True, exist_ok=True)
-        with alert_log.open("a", encoding="utf-8") as f:
+        with alert_log.open("a", encoding="utf-8", newline="") as f:
             f.write(f"{datetime.now().isoformat()} | {title} | {message} | dump={dump_path}\n")
         logger.info("ESCALATION 已記錄至 %s", alert_log)
     except Exception as exc:

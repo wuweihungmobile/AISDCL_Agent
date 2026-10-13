@@ -58,7 +58,9 @@ def alembic_head(conn):
         cur.execute("SELECT version_num FROM alembic_version;")
         heads = {row[0] for row in cur.fetchall()}
     if _max_head_num(heads) < 8:
-        pytest.skip("alembic main chain 編號 < 8；請執行 `alembic upgrade 0008_embedding_variable_dim`")
+        pytest.skip(
+            "alembic main chain 編號 < 8；請執行 `alembic upgrade 0008_embedding_variable_dim`"
+        )
     return heads
 
 
@@ -182,7 +184,7 @@ class TestAlembic0008DualRead:
                         "(error_class, error_signature, step_id, outcome, "
                         " embedding_v, embedding_model_id) "
                         "VALUES ('DIM_TEST', 'sig_dim_001', 'step_test', 'success', "
-                        f"        %s::halfvec, 'fake_model');",
+                        "        %s::halfvec, 'fake_model');",
                         (fake_vec,),
                     )
         finally:

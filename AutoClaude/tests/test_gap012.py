@@ -11,16 +11,14 @@ Gap-012 實作驗證測試（Gap-012-A~F）。
 """
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch, call
-import pytest
+from unittest.mock import MagicMock, patch
 
+from autoclaude.execution.error_classifier import ErrorClass
 from autoclaude.execution.playbook_runner import PlaybookResult, PlaybookRunner, _StepOutput
 from autoclaude.models.playbook import GlobalInvariants, Playbook, PlaybookTask
 from autoclaude.models.step_mutation import StepMutation, StepMutationType
-from autoclaude.execution.error_classifier import ErrorClass
 from autoclaude.utils.config import AppConfig
 from tests.helpers.kernel_fixtures import make_kernel
-
 
 # ──────────────────────────────────────────────
 # 共用輔助
@@ -83,7 +81,7 @@ class TestInjectBefore:
 
     def test_inject_before_counter_prevents_infinite_recursion(self):
         """INJECT_BEFORE 同一步驟超過 3 次 → 忽略（防遞迴）。"""
-        runner = _make_runner(dry_run=False)
+        _runner = _make_runner(dry_run=False)
         playbook = _make_playbook("T01")
         task = playbook.tasks[0]
 
@@ -442,8 +440,12 @@ class TestPrerequisiteErrorEarlyMutation:
 
     def test_assertion_error_not_prerequisite_needs_attempt_2(self):
         """ASSERTION 錯誤不是前提條件錯誤，不受 Gap-012-F 加速。"""
-        assert self._check_allow_mutation(ErrorClass.ASSERTION, attempt=1, trend="oscillating") is False
-        assert self._check_allow_mutation(ErrorClass.ASSERTION, attempt=2, trend="oscillating") is True
+        assert self._check_allow_mutation(
+            ErrorClass.ASSERTION, attempt=1, trend="oscillating"
+        ) is False
+        assert self._check_allow_mutation(
+            ErrorClass.ASSERTION, attempt=2, trend="oscillating"
+        ) is True
 
 
 # ──────────────────────────────────────────────
@@ -470,7 +472,9 @@ class TestPromptBuilderMutationSchema:
         """allow_step_mutation=True 時，system prompt 包含所有 5 種 mutation 類型。"""
         from autoclaude.decision.prompt_builder import build_correction_system_prompt
         prompt = build_correction_system_prompt(allow_step_mutation=True)
-        for mutation_type in ["REVISE_CURRENT", "INJECT_AFTER", "INJECT_BEFORE", "GOTO_STEP", "DELETE_STEP"]:
+        for mutation_type in [
+            "REVISE_CURRENT", "INJECT_AFTER", "INJECT_BEFORE", "GOTO_STEP", "DELETE_STEP"
+        ]:
             assert mutation_type in prompt, f"{mutation_type} 不在 system prompt 中"
 
     def test_build_correction_system_prompt_without_mutation_no_new_types(self):

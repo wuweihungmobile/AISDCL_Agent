@@ -98,9 +98,7 @@ class TestCheckWrapperThinness(unittest.TestCase):
         ps1_line_problems = [p for p in problems if "dev_start.ps1" in p and "超過薄殼上限" in p]
         self.assertEqual(ps1_line_problems, [])
 
-    #: 10 支史料回歸鎖的**單一判準表**（R85／訴求 2）。立案事實：同一個判準原本被寫了
-    #: 10 遍，每一遍只有「注入什麼」與「期望診斷裡出現哪個 token」不同，其餘 12 行鷹架
-    #: （tempfile → _make_fake_root → mock ROOT → check_wrapper_thinness）逐字相同。
+    #: 10 支史料回歸鎖的**單一判準表**（R85／訴求 2）。
     #: 🔴 **被拿掉的是那 10 份一模一樣的鷹架，不是覆蓋**：10 個注入樣本一個不少、期望
     #: token 一個不變，案例名與立案史料改由 subTest 的 case／why 逐案報出（哪一列紅的
     #: 在失敗訊息裡看得到）。判準本身（注入 → 必須被診斷命中）一個字都沒動。
@@ -431,11 +429,6 @@ class TestBomIsNotContent(unittest.TestCase):
 
 class TestNoHardcodedLineCounts(unittest.TestCase):
     """R60 round-2（SD-R60-08）：guard 本體不得再寫死各薄殼的行數快照。
-
-    WHY（Rule 9）：`MAX_LINES` 上方原列 8 支殼的行數快照，複審逐檔實測 8 支全部過期
-    ——行數是機器隨時算得出的量，寫進原始碼註解就是製造必然腐化的第二真相源。只改對
-    數字治不了病，根治＝刪快照、由 `--print-lines` 現查、本鎖守著不准寫回。史料見
-    證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
 
     # 兩種「行數快照」形狀。第一條對應原註解的 `<檔名>=<數字>`／`.ps1=<數字>` 寫法；
@@ -533,13 +526,7 @@ class TestNoHardcodedLineCounts(unittest.TestCase):
 
 class TestR67ShebangIsNotAComment(unittest.TestCase):
     """R67（Scan-H R67-H35）回歸鎖：首行 shebang 必須進入 hash 輸入。
-
-    WHY（Rule 9）：`_normalize()` 原本一律剝除註解行，連 shebang 一起吃掉——釘選
-    `.sh` 的 shebang 可被改成 `#!/bin/sh` 而 hash 紋風不動，對「殼被改成用錯直譯器」
-    天生零訊號（`tools/dev_start.sh` 用了 dash 不支援的語法會直接失敗）。邊界：本鎖
-    只保證 shebang 變動一律紅，不保證其內容本身正確。史料見證據檔
-    〈第七輪 史料搬遷（Dev-Trim8）〉。
-    """
+    射程／已知不涵蓋：逐字見 R213 證據檔附錄 A-4（test_check_wrapper_thinness.py:537-541）。"""
 
     def _fake_root(self, tmp_dir: Path, sh_text: str) -> Path:
         tools_dir = tmp_dir / "tools"
@@ -632,11 +619,6 @@ class TestR67ShebangIsNotAComment(unittest.TestCase):
 
 class TestConvergenceTargetsArePerShell(unittest.TestCase):
     """本輪 E-05b：違規訊息的「該收斂到哪」必須逐殼查表，且那個目的地要真的在。
-
-    病灶：修前行數上限與 hash 不符兩條訊息一律指路 `tools/dev_start.py`，不看
-    `rel` 屬於哪一棵樹——語意錯（其他殼各有各的契約檔）且可能撞 LOC violation
-    （被指路的檔本身是餘裕個位數的棘輪）。從未被觸發過，修前沒有人會發現。史料見
-    證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
 
     def test_every_pinned_key_has_a_registered_core(self) -> None:
@@ -806,15 +788,6 @@ _CLI_ENTRY_RE = re.compile(
 
 #: 本輪**未持有所有權**、因此仍是舊行為的工具：shrink-only 豁免，只准變少。
 #: 逐支寫 WHY 與承接者，不寫「TODO」——無主詞的交棒正是缺陷跨輪蒸發的原因。
-#:
-#: 🔴 **R74 射程擴張後的實查結論（誠實記錄，免得下一輪把它當成擴張引入的新缺口）**：
-#: 擴張新納入 9 支 CLI 入口（`run_root_unittests` / `sync_onboarding_baselines` /
-#: `dev_start` / `bootstrap_core` / `integration_gate_core` / `archive_defect_log` /
-#: `check_defect_log_crossref` / `check_scheduled_task_drift` / `git_hooks_install_common`），
-#: 逐一實測後 8 支**早就已經拒收**（argparse 或自寫分派，rc=2、≤0.1s），唯一不拒收的是
-#: `run_root_unittests.py`，已於同一包修好。⇒ **擴張暴露的新違規數＝0**，本字典維持兩筆、
-#: 內容未動。那兩支對射程修復包同樣是所有權界外（本包只持有 `run_root_unittests.py`／
-#: `_cli_flags.py`／本檔），承接者仍見各筆自己的 WHY。
 _UNKNOWN_ARGV_WAIVED: dict[str, str] = {
     "check_ntfs_paths.py": (
         "R74 PKG-5 檔案所有權界外（本包只持有 wrapper_thinness／script_parity／"
@@ -988,12 +961,6 @@ class TestRootGateToolsRejectUnknownFlags(unittest.TestCase):
     @staticmethod
     def _layering_offenders(tools: list[Path]) -> list[str]:
         """回傳違反 `cli`/`main` 分層的工具（純函式 ⇒ 鑑別力可被合成注入證明）。
-
-        以 AST 讀原始碼而刻意不 import 目標模組：這層工具在 import 期會做 stdio
-        手術等副作用，讀原始碼觸發它們是「載具汙染被驗證對象」的另一種形態。判準看
-        AST 節點而非原始碼字串（R75 假陽性：字串比對曾把「本層絕不讀 sys.argv」這句
-        註解判成違規——懲罰了把紀律寫下來的人）。史料見證據檔
-        〈第七輪 史料搬遷（Dev-Trim8）〉。
         """
         import ast  # noqa: PLC0415
 
@@ -1169,6 +1136,17 @@ class TestRootGateToolsRejectUnknownFlags(unittest.TestCase):
             _cli_flags.UNKNOWN_FLAG_RC,
             "前綴縮寫不得被「好心地」補全成合法旗標——那正是 --check-snapsho 那個洞",
         )
+
+
+class TestBashWrappersGuardAgainstZsh(unittest.TestCase):
+    def test_bash_version_guard_precedes_the_first_bash_source_use(self) -> None:
+        """DEF-101-702：zsh 下 `${BASH_SOURCE[0]}` 未定義——守衛須先於它的首次使用。"""
+        root = Path(__file__).resolve().parents[2]
+        for rel in ("tools/bootstrap.sh", "tools/integration_gate.sh",
+                    "AutoClaude/tools/local_ci_gate.sh", "tools/macos_smoke_local.sh"):
+            text = (root / rel).read_text(encoding="utf-8")
+            guard, use = text.find('-z "${BASH_VERSION:-}"'), text.find('"${BASH_SOURCE')
+            self.assertTrue(0 <= guard < use, f"{rel}：缺 BASH_VERSION 守衛或晚於 BASH_SOURCE")
 
 
 if __name__ == "__main__":

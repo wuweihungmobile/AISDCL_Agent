@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import re
-from typing import Optional
 
 from ...core.ports.executor import (
     ExecutionEvent,
@@ -27,13 +26,13 @@ class DryRunExecutor:
     若該 step_id 無對應 keyword，預設回傳 "dry-run-pass"。
     """
 
-    def __init__(self, step_outputs: Optional[dict[str, str]] = None):
+    def __init__(self, step_outputs: dict[str, str] | None = None):
         self._outputs: dict[str, str] = step_outputs or {}
         # SD_Improving_06 W1 T1-2：interrupt 旗標
         self._interrupt_requested: bool = False
 
     @staticmethod
-    def keyword_from_regex(regex: Optional[str]) -> str:
+    def keyword_from_regex(regex: str | None) -> str:
         """從 expected_output_regex 提取可匹配的文字（去除 regex escape）。"""
         if not regex:
             return "dry-run-pass"
@@ -51,7 +50,7 @@ class DryRunExecutor:
         maintain_context: bool = True,
         timeout: int = 600,
         label: str = "",
-        on_event: Optional[ExecutionEventCallback] = None,
+        on_event: ExecutionEventCallback | None = None,
     ) -> ExecutionOutput:
         # SD_Improving_06 W1 T1-2：interrupt 短路
         if self._interrupt_requested:

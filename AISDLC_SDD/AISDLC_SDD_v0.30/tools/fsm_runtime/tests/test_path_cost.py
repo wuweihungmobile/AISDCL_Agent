@@ -12,7 +12,6 @@ Acceptance:
 from __future__ import annotations
 
 import statistics
-from pathlib import Path
 
 import pytest
 import yaml

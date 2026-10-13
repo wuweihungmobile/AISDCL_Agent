@@ -56,6 +56,7 @@ def test_no_direct_internal_alias_access():
             for f, ln, pat in violations
         )
         raise AssertionError(
-            f"W1a DoD 違反：測試程式碼直接存取 internal alias（{len(violations)} 處）：\n{details}\n\n"
+            f"W1a DoD 違反：測試程式碼直接存取 internal alias（{len(violations)} 處）：\n"
+            f"{details}\n\n"
             "修復方式：改用 constructor injection（checkpoint_mgr= / knowledge_base= 參數）。"
         )

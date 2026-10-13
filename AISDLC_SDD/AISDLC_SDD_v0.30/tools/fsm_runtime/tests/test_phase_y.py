@@ -181,15 +181,19 @@ def test_verify_rejects_forged_budget_cursor_window_shrink():
 
     # BYPASS-1：偽造 cursor=99 + 空渲染（自報窗格 range(2376,4)=∅）。
     b1 = copy.deepcopy(rj)
-    b1["nodes"] = []; b1["edges"] = []; b1["page"]["cursor"] = 99
+    b1["nodes"] = []
+    b1["edges"] = []
+    b1["page"]["cursor"] = 99
     b1["consistency"]["audit_digest"] = None
     with pytest.raises(V.TopologyConsistencyError):
         V.verify_topology_consistency(b1, od)
 
     # BYPASS-2：偽造 node_budget=4 + cursor=2（自報窗格 range(8,4)=∅）+ 空渲染。
     b2 = copy.deepcopy(rj)
-    b2["nodes"] = []; b2["edges"] = []
-    b2["render_budget"]["node_budget"] = 4; b2["page"]["cursor"] = 2
+    b2["nodes"] = []
+    b2["edges"] = []
+    b2["render_budget"]["node_budget"] = 4
+    b2["page"]["cursor"] = 2
     b2["consistency"]["audit_digest"] = None
     with pytest.raises(V.TopologyConsistencyError):
         V.verify_topology_consistency(b2, od)
@@ -199,8 +203,10 @@ def test_verify_rejects_forged_budget_cursor_window_shrink():
     b3 = copy.deepcopy(rj)
     b3["nodes"] = [n for n in b3["nodes"] if n["id"] in (0, 1)]
     b3["edges"] = [e for e in b3["edges"] if e["dst"] in (0, 1)]
-    b3["render_budget"]["node_budget"] = 2; b3["page"]["cursor"] = 0
-    b3["n_total_nodes"] = 2; b3["truncated"] = False
+    b3["render_budget"]["node_budget"] = 2
+    b3["page"]["cursor"] = 0
+    b3["n_total_nodes"] = 2
+    b3["truncated"] = False
     b3["consistency"]["audit_digest"] = None
     with pytest.raises(V.TopologyConsistencyError):
         V.verify_topology_consistency(b3, od)

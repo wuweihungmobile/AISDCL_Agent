@@ -431,7 +431,7 @@ def test_section6_e2e_flaky_malicious_drifted_judge(tmp_path):
       3. OQS 校準鏈偵測漂移判官 → 進 EVALUATOR_AUDIT（PI-2）
     """
     from tools.fsm_runtime.sandbox_runner import (
-        evaluate_hermetic, SandboxSpec, ExecutionObservation, image_allowed)
+        evaluate_hermetic, SandboxSpec, ExecutionObservation)
     from tools.fsm_runtime.loop_threat_model import evaluate_hardening
     from tools.fsm_runtime import oqs_calibration as oc
 

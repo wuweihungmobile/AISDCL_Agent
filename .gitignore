@@ -71,6 +71,8 @@ desktop.ini
 /checkpoints/
 /logs/
 /perf_results.json
+# PRD §6.1 不變式 9：引擎狀態目錄的字面名（不錨定：AutoClaude 可在根或任一子目錄為 cwd 執行）。
+.autoclaude/
 
 # R57 ARCH-R57R3-03：run_root_unittests 失敗明細落檔（診斷用，不入庫）
 # DEF-200-162：檔名改帶時間戳／HEAD 短碼並輪替最近 N 份，pattern 需跟著改

@@ -31,14 +31,13 @@ import io
 import os
 import subprocess
 import sys
-from contextlib import redirect_stdout, redirect_stderr
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 import pytest
 import yaml
 
 from autoclaude import main as main_module
-
 
 # ──────────────────────────────────────────────
 # 共用：subprocess 執行 `python -m autoclaude`

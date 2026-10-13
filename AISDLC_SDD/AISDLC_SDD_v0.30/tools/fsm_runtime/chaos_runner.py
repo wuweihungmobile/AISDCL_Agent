@@ -57,7 +57,7 @@ from pathlib import Path
 from typing import Callable, List, Optional
 
 from .fsm_runtime import FSMRuntime, telemetry_writeback_disabled
-from .state_loader import FSMState, load_state, save_state
+from .state_loader import load_state, save_state
 from .timeout_checker import evaluate_human_pending, mark_entered_now
 from .transition_rules import (
     MAX_AUTO_COMPACT_PER_STAGE,
@@ -944,7 +944,7 @@ def _operator_computability_flap_is_bounded() -> bool:
     bounded-step + recursion/loop-free, pinning the halting problem into the self-expansion artefact
     itself (Rule 9.32.3). Deterministic + offline (own env override)."""
     import os
-    from .operator_genesis import GenesisOperator, adopt_genesis_operator
+    from .operator_genesis import GenesisOperator
     from .meta_halt import meta_halt_monitor as MM
 
     # (1) 有界步數：把 step_max 壓到 1，一個正常二元算子 cost=3 > 1 → guard_operator_computability 攔。

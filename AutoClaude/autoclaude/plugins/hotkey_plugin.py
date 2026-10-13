@@ -11,7 +11,7 @@
 """
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from ..core.hookspec import HookContext, KernelPhase, VetoResult
 
@@ -38,7 +38,7 @@ class HotkeyPlugin:
     def subscribed_phases(self) -> list[KernelPhase]:
         return [KernelPhase.PRE_STEP, KernelPhase.PRE_ATTEMPT]
 
-    def on_event(self, ctx: HookContext) -> Optional[Any]:
+    def on_event(self, ctx: HookContext) -> Any | None:
         if not getattr(self._hotkey, "triggered", False):
             return None
 

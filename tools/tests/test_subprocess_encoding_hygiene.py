@@ -113,12 +113,7 @@ def tree_count_verdict(label: str, actual: int, floor: int) -> str | None:
 
 def _scan_roots() -> list[tuple[Path, int]]:
     """（掃描根, 該樹檔數下限）清單；根缺席或**離開下限帶**由測試 fail-loud。
-
-    per-tree 下限：逐樹釘選使任一樹縮面必紅、不被他樹總量掩蓋。樹清單本體由
-    `TestScanRootsConfigPinning` 釘選，防「刪清單一列」整樹靜默出界。下限值＝
-    R75 當回合實測 × 0.95（`suggested_floor()`），不是打八折的化石；上界機制見
-    `tree_count_verdict()`——下限與實測拉開太遠時它自己會紅。史料見證據檔
-    〈第七輪 史料搬遷（Dev-Trim8）〉。"""
+    沿革見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。"""
     latest = _latest_root()
     return [
         # per-tree 下限＝`tree_count_verdict()` 腐化上界逐字給出的數字（實測 × 0.95，方向＝收緊，
@@ -1067,12 +1062,6 @@ _SETTINGS_JSON = _REPO_ROOT / ".claude" / "settings.json"
 
 def hook_command_scripts(settings: dict) -> list[tuple[str, str]]:
     """`settings` 內每個 hook 條目**實際會跑到**的腳本 → [(事件名, repo 相對 posix 路徑)]。
-
-    R80：本函式此前只讀 `command` 字串，而 exec form（腳本路徑結構性地搬到
-    `args`）轉換後實測掃出的腳本集合由 6 支變成 1 支——後果不是「這道鎖會紅」，
-    是分母掃出 0 支使它恆綠、與「正確地全部通過」在 rc 上無法區分。解析邏輯已
-    收進唯一真相源 `tools/lib/hook_wiring.py`，兩種形態都認得。史料見證據檔
-    〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
     sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
     import hook_wiring  # noqa: PLC0415
@@ -1163,12 +1152,6 @@ class TestRegisteredHookScriptsAreInChildEncodingScope(unittest.TestCase):
 
     def test_the_scan_survives_the_exec_form_conversion(self) -> None:
         """🔴 R80 注入自證：**在轉換後的 settings 上**，這道鎖必須仍然抓得到違規。
-
-        WHY：exec form 轉換後失明的表徵是恆綠（分母掃出 0 支），與「正確地全部
-        通過」在 rc 上無法區分，故轉換後 rc=0 證明不了任何事，必須證明「拿掉註冊
-        會轉紅」。注入在記憶體裡動真實檔案內容（不寫磁碟）：真改磁碟上的
-        settings.json 會影響同棵樹上其他 agent 的每次工具呼叫。史料見證據檔
-        〈第七輪 史料搬遷（Dev-Trim8）〉。
         """
         real = self._real_settings()
         self.assertIn(
@@ -1352,7 +1335,7 @@ _AUTOCLAUDE_PYPROJECT = _REPO_ROOT / "AutoClaude" / "pyproject.toml"
 #: 精確複本**：ruff 對「超限段落拆不開」的行（長 URL／單一 token）另有豁免，本量法沒有，
 #: 因此本值是 ruff E501 筆數的**超集**（實測 ruff 側較小）。債務天花板取超集是安全方向
 #: ——它只會把「多寫一行過長的行」更早攔下，不會放行。
-_E501_DEBT_CEILING = 139
+_E501_DEBT_CEILING = 136
 
 
 def _overlong_line_count(root: Path) -> int:
@@ -1489,12 +1472,6 @@ class TestRootToolsLintPolicy(unittest.TestCase):
 
     def test_the_config_actually_covers_the_root_tools_tree(self) -> None:
         """反空轉：設定檔必須真的**罩得住**根層 tools/ 樹（不是放在某個沒人走到的角落）。
-
-        以 ruff 自己的解析結果為準（`--show-settings` 的 Settings path／E501／
-        line_length），不能靠讀 toml 自我確認：這類缺陷的形狀是「檔案內容正確，但
-        ruff 向上尋找走不到它」，讀 toml 對此恆真。R69 訂正（SA 實測）：本測試原本
-        的斷言是恆真式子，而 docstring 宣稱已驗證——宣稱與實作不符的鎖比沒有鎖更糟。
-        史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
         """
         ruff = shutil.which("ruff")
         if ruff is None:

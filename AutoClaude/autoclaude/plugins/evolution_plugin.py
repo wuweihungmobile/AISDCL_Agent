@@ -34,7 +34,7 @@ audit log 等級由 debug 改為 info（dispatch 時可被 monitoring 系統觀�
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from ..core.hookspec import HookContext, KernelPhase, MutationProposal
 from ..core.ports.rtm_feedback import coverage_trend
@@ -52,17 +52,17 @@ class EvolutionPlugin:
 
     def __init__(
         self,
-        rule_evolver: Optional[PlaybookEvolver] = None,
-        ai_evolver: Optional[MinimaxEvolver] = None,
-        minimax_client: Optional[Any] = None,
+        rule_evolver: PlaybookEvolver | None = None,
+        ai_evolver: MinimaxEvolver | None = None,
+        minimax_client: Any | None = None,
         *,
-        rtm_feedback: Optional[Any] = None,
+        rtm_feedback: Any | None = None,
         enable_rtm_feedback: bool = False,
     ):
         self._rule_evolver = rule_evolver or PlaybookEvolver()
         self._ai_evolver = ai_evolver or MinimaxEvolver()
         self._minimax_client = minimax_client
-        self._latest_proposal: Optional[PlaybookEvolutionProposal] = None
+        self._latest_proposal: PlaybookEvolutionProposal | None = None
         # AutoSDD_improving_27 W1：A 軌 RTM 反饋讀回（flag-gated，預設 OFF）。
         # 啟用後 ON_ESCALATION 時讀回上次 RTM coverage，把 gap 摘要附 proposal.rationale
         # 作為**諮詢**輸入（不改 mutation 決策、不自動套用 RTM/SPEC）。對齊紅線：
@@ -85,7 +85,7 @@ class EvolutionPlugin:
             KernelPhase.ON_ESCALATION_DUMP_REQUEST,
         ]
 
-    def on_event(self, ctx: HookContext) -> Optional[Any]:
+    def on_event(self, ctx: HookContext) -> Any | None:
         phase = ctx.phase
         # ON_ESCALATION 與 ON_EVOLUTION_PROPOSE 共用 propose 路徑
         if phase in (KernelPhase.ON_ESCALATION, KernelPhase.ON_EVOLUTION_PROPOSE):
@@ -110,7 +110,7 @@ class EvolutionPlugin:
             return None
         return None
 
-    def _handle_propose(self, ctx: HookContext) -> Optional[MutationProposal]:
+    def _handle_propose(self, ctx: HookContext) -> MutationProposal | None:
         payload = ctx.payload or {}
         proposal = self._propose(ctx, payload)
         if proposal is None:
@@ -198,7 +198,7 @@ class EvolutionPlugin:
     # ──────────────────────────────────────────────
     # 公開 API
     # ──────────────────────────────────────────────
-    def latest_proposal(self) -> Optional[PlaybookEvolutionProposal]:
+    def latest_proposal(self) -> PlaybookEvolutionProposal | None:
         return self._latest_proposal
 
     def propose(
@@ -206,8 +206,8 @@ class EvolutionPlugin:
         playbook,
         failed_step_idx: int,
         escalation_dump,
-        escalation_history: Optional[list] = None,
-    ) -> Optional[PlaybookEvolutionProposal]:
+        escalation_history: list | None = None,
+    ) -> PlaybookEvolutionProposal | None:
         """供 Kernel / 呼叫端直接觸發 evolution 鏈。"""
         # 優先 AI
         if self._minimax_client is not None:
@@ -235,7 +235,7 @@ class EvolutionPlugin:
     # ──────────────────────────────────────────────
     def _propose(
         self, ctx: HookContext, payload: dict,
-    ) -> Optional[PlaybookEvolutionProposal]:
+    ) -> PlaybookEvolutionProposal | None:
         escalation_dump = payload.get("escalation_dump")
         if escalation_dump is None:
             return None
@@ -252,7 +252,7 @@ class EvolutionPlugin:
     @staticmethod
     def _proposal_to_mutation(
         proposal: PlaybookEvolutionProposal,
-    ) -> Optional[StepMutation]:
+    ) -> StepMutation | None:
         """將 PlaybookEvolutionProposal 轉換為 StepMutation。
 
         - INJECT_STEP   → INJECT_BEFORE

@@ -69,7 +69,7 @@ class PtyExecutor:
         label: str = "",
         on_event: ExecutionEventCallback | None = None,
     ) -> ExecutionOutput:
-        args = list(self._claude.extra_args)
+        args = self._claude.base_args()
         if maintain_context and self._claude.continue_flag:
             args.append(self._claude.continue_flag)
         # W-82-1 / DEF-81-001：以 --output-format json 啟動，使結束後可從結構化 usage

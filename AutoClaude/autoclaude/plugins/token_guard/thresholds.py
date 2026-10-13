@@ -6,14 +6,18 @@
   - get_dynamic_compact_threshold (Gap-009-F)
   - should_compact_decision (對齊 _should_compact_now)
   - should_halt_decision
+  - limit_retry_wait_decision（PRD §8 列 1：推論端非預期 429 的有界退避）
 
 SD_09 W3 SP-1 引用點：本模組為 mutation pilot 觀察期 #1 baseline 目標
 之一（`.mutation_baseline.toml` token_guard.kill_rate ≥ 70%）。
 """
 from __future__ import annotations
 
+from collections.abc import Callable
+
 __all__ = [
     "get_dynamic_compact_threshold",
+    "limit_retry_wait_decision",
     "should_compact_decision",
     "should_halt_decision",
     "verify_act_first_ordering",
@@ -63,6 +67,23 @@ def should_compact_decision(
 
 def should_halt_decision(*, token_pct: float, halt_threshold: float) -> bool:
     return token_pct >= halt_threshold
+
+
+def limit_retry_wait_decision(
+    *, retry_after: int | None, retries_used: int, max_retries: int,
+    max_retry_after: int, rand: Callable[[], float],
+) -> float | None:
+    """PRD §8 列 1：推論端非預期 429 的有界退避決策。回等待秒數＝原地重試；None＝走既有 halt。
+
+    遵循伺服器的重試建議（不早於 Retry-After），其上加 full-jitter——上限 min(cap, 10·2^n)、n＝
+    已重試次數、cap＝max_retry_after——以打散多個 Agent 同時撞牆的同步重試（雷群）。
+    Retry-After 缺席、超過 max_retry_after（等於則放行）、或重試預算用盡（max_retries=0＝關閉）
+    ⇒ None。
+    `rand` 注入（回 [0,1)）：測試不靠真亂數。
+    """
+    if retry_after is None or retry_after > max_retry_after or retries_used >= max_retries:
+        return None
+    return retry_after + rand() * min(max_retry_after, 10 * 2 ** retries_used)
 
 
 def verify_act_first_ordering(

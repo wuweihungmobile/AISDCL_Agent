@@ -46,7 +46,8 @@ except ImportError as exc:  # pragma: no cover
 # 幾乎逐字重複的 Windows 禁用字元/保留裝置名/截斷淨化邏輯（同一 package 內第三次
 # 分岔風險，且已經發生）。state_loader.py 未 import 本檔，無循環 import 風險，故
 # 比照 spec_patch_proposer.py 已示範的做法直接重用（見下方 `_sanitize_nfr_id()`）。
-from .state_loader import _MAX_COMPONENT_LEN as _NFR_ID_MAX_LEN
+# 重匯出別名：test_production_monitor 以 `pm._NFR_ID_MAX_LEN` 取用（本檔自身不用，故 noqa）。
+from .state_loader import _MAX_COMPONENT_LEN as _NFR_ID_MAX_LEN  # noqa: F401
 from .state_loader import _sanitize_component
 
 
@@ -433,7 +434,7 @@ def generate_drift_report(
     lines.append(f"- **Window**: last {DEFAULT_WINDOW_HOURS}h")
     lines.append(f"- **Events observed**: {len(entries)}")
     lines.append(f"- **Generated at**: {_now().isoformat(timespec='seconds')}")
-    lines.append(f"- **Source**: ACT-027 Production Feedback Layer (HMAC-verified)")
+    lines.append("- **Source**: ACT-027 Production Feedback Layer (HMAC-verified)")
     lines.append("")
     lines.append("## Observed Violations")
     lines.append("")
@@ -454,7 +455,6 @@ def generate_drift_report(
     lines.append("")
     # ACT-086 因果定位（advisory）：有 RTM 時自動附 suspect 節點 + 證據
     if localization is not None and localization.suspects:
-        from tools.fsm_runtime import spec_localizer as SL
         top = localization.suspects[0].node_id
         lines.append("## 因果定位（Causal Spec Localization — ACT-086 advisory）")
         lines.append("")

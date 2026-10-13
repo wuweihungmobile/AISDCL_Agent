@@ -18,7 +18,8 @@ from __future__ import annotations
 import warnings
 
 import pytest
-from hypothesis import HealthCheck, given, settings, strategies as st
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
 
 from autoclaude.utils.config import AppConfig
 from autoclaude.utils.config_resolver import (
@@ -129,7 +130,8 @@ def test_runtime_cannot_override_storage_db_dsn():
 
 
 def test_runtime_cannot_override_protected_embedder_api_key():
-    """RTM-91-2：runtime 層注入 embedder.api_key 機密必須被 RBAC 擋下（與 minimax.api_key 同級防洩漏）。
+    """RTM-91-2：runtime 層注入 embedder.api_key 機密必須被 RBAC 擋下（與 minimax.api_key
+    同級防洩漏）。
 
     WHY：set_runtime_overrides 純靠 _PROTECTED_FIELDS（含 'embedder.api_key'）字串比對攔截，
     本鎖確保該保護鍵存在且生效、不被誤刪。

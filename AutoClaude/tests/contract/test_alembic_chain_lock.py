@@ -18,8 +18,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import pytest
-
 ALEMBIC_VERSIONS_DIR = Path(__file__).resolve().parents[2] / "alembic" / "versions"
 
 # Frozen head set（W0 起點，2026-05-17 確認）
@@ -33,7 +31,9 @@ FROZEN_REVISIONS: dict[str, tuple[str, str | None]] = {
     "0003_optional_jsonb_gin_index": ("0003_jsonb_gin_index", "0002_m4_run_id_not_null"),
     "0004_pgvector": ("0004_pgvector", "0002_m4_run_id_not_null"),
     "0005_fix_checkpoint_unique_run_id": ("0005_fix_checkpoint_unique_run_id", "0004_pgvector"),
-    "0006_checkpoint_saved_at_tz": ("0006_checkpoint_saved_at_tz", "0005_fix_checkpoint_unique_run_id"),
+    "0006_checkpoint_saved_at_tz": (
+        "0006_checkpoint_saved_at_tz", "0005_fix_checkpoint_unique_run_id"
+    ),
 }
 
 # 主鏈順序（用於 head 推導 + 新 migration 接續驗證）

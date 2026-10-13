@@ -6,12 +6,12 @@ Token / Context 使用率追蹤器。
   2. TokenUsageLogger       — 以 JSONL 格式持續記錄每個步驟的 token 狀態
 """
 from __future__ import annotations
+
 import json
 import logging
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger("autoclaude.utils.token_tracker")
 
@@ -49,13 +49,13 @@ def build_patterns(pattern_strings: list[str]) -> list[re.Pattern]:
 def extract_context_pct(
     line: str,
     patterns: list[re.Pattern] | None = None,
-) -> Optional[float]:
+) -> float | None:
     """
     從一行輸出中萃取 context 使用百分比（範圍 0-100）。
     找不到返回 None；若同一行有多個 match，取最高值。
     """
     active = patterns if patterns is not None else _DEFAULT_PATTERNS
-    best: Optional[float] = None
+    best: float | None = None
     for pat in active:
         for m in pat.finditer(line):
             try:
@@ -87,7 +87,7 @@ _CONTEXT_USAGE_KEYS = (
 )
 
 
-def context_pct_from_claude_json(parsed: dict) -> Optional[float]:
+def context_pct_from_claude_json(parsed: dict) -> float | None:
     """從 ``claude -p --output-format json`` 結果推算 context 使用率（範圍 0-100）。
 
     DEF-81-001 PTY 支根因修復（W-82-1）：``claude -p`` 純文字輸出不含 context%，故
@@ -161,7 +161,7 @@ class TokenUsageLogger:
             "step_result": step_result,
         }
         try:
-            with self._log_path.open("a", encoding="utf-8") as f:
+            with self._log_path.open("a", encoding="utf-8", newline="") as f:
                 f.write(json.dumps(entry, ensure_ascii=False) + "\n")
         except OSError as exc:
             logger.warning("Token log 寫入失敗: %s", exc)

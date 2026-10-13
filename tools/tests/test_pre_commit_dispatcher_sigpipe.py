@@ -262,12 +262,6 @@ def _load_hook_path_scope():
 
 class TestHookPathScopeFlavourParity(unittest.TestCase):
     """R77-50：兩支 exit-2 阻斷級 hook 的路徑正規化，兩種 flavour 必須同判決。
-
-    WHY（Rule 9）：兩支 hook 此前各自靠 `Path.resolve().relative_to()` 取相對路徑，
-    而其大小寫語意由 flavour 決定，同一份判準在兩個平台壞向相反：一支對大小寫
-    變體假陽性硬擋，另一支拋 ValueError 後靜默 fail-open——單一平台實測抓不到這
-    種「壞的方向依平台而反轉」。判準因此必須是純字面對拍，不問檔案系統。史料見
-    證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
 
     def setUp(self) -> None:
@@ -390,12 +384,6 @@ def _path_scope_consumers() -> list[str]:
 
 class TestBlockingHooksShareOnePathNormalizer(unittest.TestCase):
     """R77-50 的**單一實作**約束：hook 不得再各自長出一份路徑正規化。
-
-    WHY：本缺陷的成因是同一份知識住兩個家而只有一個家被想過（`DEF-101-778` 同型），
-    只修兩行不釘「別再分家」，分歧會再度只在對面平台顯形。R78／ARCH-06：本鎖此前
-    是寫死兩項的白名單，第三支同寫法的檔與任何未來新增者都在射程外——白名單型的
-    鎖對未來新增者失明。改成「列舉整個目錄 − 具名排除表」後，掃描面隨磁碟走，漏掉
-    一支就是紅。史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
 
     @property

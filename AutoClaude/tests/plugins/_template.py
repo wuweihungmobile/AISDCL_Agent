@@ -29,7 +29,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 from autoclaude.core.event_bus import EventBus
 from autoclaude.core.hookspec import HookContext, KernelPhase
@@ -50,7 +50,7 @@ def sample_task(step_id: str = "T01", name: str = "sample step",
 
 
 def sample_playbook(*, project: str = "TEST", n_tasks: int = 3,
-                    global_goal: Optional[str] = None) -> Playbook:
+                    global_goal: str | None = None) -> Playbook:
     tasks = [sample_task(f"T{i:02d}", f"step {i}", f"prompt {i}")
              for i in range(1, n_tasks + 1)]
     return Playbook(
@@ -62,10 +62,10 @@ def sample_playbook(*, project: str = "TEST", n_tasks: int = 3,
     )
 
 
-def make_ctx(*, phase: KernelPhase, playbook: Optional[Playbook] = None,
-             task: Optional[PlaybookTask] = None,
-             step_idx: Optional[int] = None, attempt: Optional[int] = None,
-             payload: Optional[dict] = None) -> HookContext:
+def make_ctx(*, phase: KernelPhase, playbook: Playbook | None = None,
+             task: PlaybookTask | None = None,
+             step_idx: int | None = None, attempt: int | None = None,
+             payload: dict | None = None) -> HookContext:
     """HookContext 工廠，提供 sensible defaults。"""
     return HookContext(
         phase=phase,
@@ -119,7 +119,8 @@ class FakeEvaluator:
 
 @dataclass
 class FakeExecutor:
-    """IExecutor fake — 對齊 execute(prompt, *, maintain_context, timeout, label) -> ExecutionOutput。
+    """IExecutor fake — 對齊 execute(prompt, *, maintain_context, timeout, label) ->
+    ExecutionOutput。
 
     SD_05 W0 SD-M8：回傳 ExecutionOutput dataclass 而非裸字串。
     """
@@ -238,7 +239,7 @@ class FakeEventBus(EventBus):
 def sample_kernel_result(
     *, success: bool = True, completed_steps: int = 3,
     total_steps: int = 3, halted: bool = False,
-    scheduled_resume_at: Optional[str] = None,
+    scheduled_resume_at: str | None = None,
 ) -> KernelResult:
     return KernelResult(
         success=success,

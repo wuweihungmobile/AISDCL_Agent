@@ -1,5 +1,4 @@
 import pytest
-
 from strutils import slugify, truncate
 
 

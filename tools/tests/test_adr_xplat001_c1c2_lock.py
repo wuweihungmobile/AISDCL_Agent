@@ -472,7 +472,7 @@ def read_adr() -> str:
     return _ADR.read_text(encoding="utf-8-sig")
 
 
-# ---------------------------------------------------------------- shrink-only 棘輪（對凍結基準比對）
+# --------------------------------------------------------------- shrink-only 棘輪（對凍結基準比對）
 _SELF_REL = f"tools/tests/{_HERE.name}"  # git 路徑一律 posix，不用 os.sep
 _RATCHET_MAX_RE = re.compile(r"^_MAX_BASELINE_ENTRIES\s*=\s*(\d+)", re.M)
 _RATCHET_CEILING_RE = re.compile(r"^_BASELINE_ID_CEILING\s*=\s*\"(DEF-\d+-\d+)\"", re.M)
@@ -619,8 +619,8 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_adr_xplat001_c1c2_lock.py": 8589,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
-    "test_archive_defect_log.py": 4074,
-    "test_bash32_compat.py": 979,
+    "test_archive_defect_log.py": 4068,
+    "test_bash32_compat.py": 973,
     "test_bash_probe_spec_contract.py": 859,
     "test_block_destructive_git_r83.py": 3424,
     "test_bootstrap_core.py": 436,
@@ -630,13 +630,13 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_check_gha_action_versions.py": 295,
     "test_check_hooks_liveness.py": 3823,
     "test_check_pytest_baseline_sites.py": 301,
-    "test_check_script_parity.py": 2023,
-    "test_check_wrapper_thinness.py": 1175,
+    "test_check_script_parity.py": 2003,
+    "test_check_wrapper_thinness.py": 1153,
     "test_ci_gate_xdist_allowlist.py": 395,
     "test_claim_provenance_r86.py": 2001,
     "test_clean_venv_carrier.py": 281,
     "test_component_sanitizer_shared_layer_lock.py": 274,
-    "test_context_budget_guard.py": 14924,
+    "test_context_budget_guard.py": 15074,
     "test_context_window_parity.py": 325,
     "test_cpu_budget.py": 428,
     "test_defect_id_reference_integrity.py": 276,
@@ -647,13 +647,13 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_doc_loc_baseline_freshness_r60.py": 7099,
     "test_extras_quoting_zsh_safety.py": 319,
     "test_failure_log_rotation.py": 80,
-    "test_find_git_bash_parity.py": 1310,
+    "test_find_git_bash_parity.py": 1291,
     "test_gha_action_versions.py": 676,
     "test_git_hooks_install_common.py": 485,
     "test_guard_line_taxonomy_r99.py": 148,
     "test_hook_carrier_symlink.py": 153,
     "test_install_statusline.py": 446,
-    "test_install_windows_nightly.py": 1352,
+    "test_install_windows_nightly.py": 1335,
     "test_mac_endurance_r83.py": 2387,
     "test_mac_readiness_r82.py": 626,
     "test_macos_smoke_skip_honesty.py": 221,
@@ -666,7 +666,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_onboarding_parity_interlock.py": 233,
     "test_platform_neutral_paths.py": 5744,
     "test_platform_utils_dedup.py": 1168,
-    "test_pre_commit_dispatcher_sigpipe.py": 966,
+    "test_pre_commit_dispatcher_sigpipe.py": 954,
     "test_pre_push_dispatcher.py": 1205,
     "test_ps1_bom.py": 248,
     "test_ps51_compat.py": 599,
@@ -692,16 +692,16 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_skip_ceiling_ratchet_direction.py": 719,
     "test_skip_discoverability_r83.py": 731,
     "test_smoke_ci_sync.py": 1570,
-    "test_statusline_context_feed.py": 221,
+    "test_statusline_context_feed.py": 230,
     "test_stdio_utf8.py": 76,
-    "test_subprocess_encoding_hygiene.py": 1542,
+    "test_subprocess_encoding_hygiene.py": 1519,
     "test_tlc_runner_timeout.py": 292,
     "test_wake_chain_halt_r278.py": 1079,
-    "test_windows_forbidden_filename_parity.py": 941,
+    "test_windows_forbidden_filename_parity.py": 928,
     "test_windows_nightly_anchor_parity.py": 119,
     "test_windows_smoke_heartbeat_doc_sync.py": 197,
     "test_windowsapps_guard_bash_parity.py": 1016,
-    "test_windowsapps_guard_cross_consistency.py": 2089,
+    "test_windowsapps_guard_cross_consistency.py": 2066,
     "test_workflow_permission_concurrency_lock.py": 1808,
     "test_workflow_schedule_sync.py": 305,
     "test_workflow_timeout_coverage.py": 158,
@@ -2673,6 +2673,9 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "DEF-200-528 清倉模式回歸鎖：test_quota_burndown.py 新鎖檔 +297＋test_context_budget_guard.py "
      "+1＋本檔 +10（本列、同輪列、接鏈列）；以 R213 標籤記帳（兩鐘關係見證據檔〈三-2〉），R212 "
      "主軌餘裕 29。逐檔清單見 CrossPlatform_R212_BurnDown_FourParty_Evidence.md。"),
+    ("R213", 116737, 116735, -2,  # round-label-ok
+     "同標籤第二列（掌舵者「做完＝無積欠 BUG 與技術債」；PRD §16.2 ⏸ 列落地）：新鎖以史料搬遷抵銷"
+     "至淨減（含本檔本列＋接鏈列＋本檔史料 −3）；逐檔清單＝CrossPlatform_R213_DebtZero_FourParty_Evidence.md〈三-5〉。"),
 )
 
 
@@ -3170,9 +3173,8 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "DEF-200-516 家族五缺陷（A-1 時間閘、7-A／7-B／7-C／7-E）與 DEF-200-520（env.shared "
      "載入鏈、--env-doctor）回歸鎖：test_quota_env_layers.py 新鎖檔＋既有鎖檔擴充。見 Cros"
      "sPlatform_R212_WakeChain_EnvLayer_Evidence.md〈二〉。"),
-    ("R213", 308,  # round-label-ok
-     "DEF-200-528 清倉模式回歸鎖：test_quota_burndown.py 全檔＋幽靈鍵鎖補一行＋本檔自身。見 "
-     "CrossPlatform_R212_BurnDown_FourParty_Evidence.md。"),
+    ("R213", 306,  # round-label-ok
+     "DEF-200-528 清倉回歸鎖（test_quota_burndown.py＋幽靈鍵鎖＋本檔）；R213 第二列 −2 併入⇒306。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -3182,10 +3184,7 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
 _REGRESSION_LANE_SINCE = 117
 _FROZEN_REGRESSION_LANE_SINCE = 117
 
-#: D-6：回歸鎖軌單輪上限，取值紀律＝「落地時實測直接填入、零加減推算、不留成長緩衝」
-#: （ADR-XPLAT-012 條文五 §3；**禁止沿用** R108 提案的舊快照 287）。基準＝ round-label-ok
-#: `_regression_lane_cap_basis()` 現查得到的 R97 那一列（見該函式 docstring 的
-#: 逐項算術驗證）。只准往下改（同 `_REPIN_ROUND_NET_CAP` 款式）。
+#: D-6 回歸鎖軌單輪上限：落地時實測填入、只准往下改（取值史料見 R213 證據檔附錄 A）。 round-label-ok
 _REGRESSION_LANE_ROUND_CAP = 309
 _FROZEN_REGRESSION_LANE_ROUND_CAP = 309
 
@@ -3350,10 +3349,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 339
+_REPIN_LOG_FROZEN_PREFIX_LEN = 340
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "c72c9866f0248b7f5b08ff50037ec38cbfcfb7a3856c970708d2f6406ae63850")
+    "2b7836038cadf2d82e9d9221e03077303034de7203271469a0f0fc725578e50d")
 
 
 def repin_log_history_digest(
@@ -3530,6 +3529,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R212", "e62c2eaa57e5", "73b11f302893", "DEF-200-520"),  # round-label-ok
     ("R212", "73b11f302893", "cff55af4647d", "DEF-200-525"),  # round-label-ok
     ("R213", "cff55af4647d", "c72c9866f024", "DEF-200-528"),  # round-label-ok
+    ("R213", "c72c9866f024", "2b7836038cad", "DEF-200-530"),  # round-label-ok
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。
@@ -6013,7 +6013,7 @@ class TestGuardLayerRatchet(unittest.TestCase):
         )
 
 
-# ================================================================ ADR §9.1／掃描維度 常設自檢（SC-*）
+# ============================================================== ADR §9.1／掃描維度 常設自檢（SC-*）
 # SA-R67-03 立案（grep 指令零可執行消費者＝非活體守門）、宿主選擇（DEF-101-561③ 棘輪）
 # 與 shell 規格搬 Python 時刻意改掉的三處語意，全文搬至
 # docs/06_quality/CrossPlatform_Guard_Line_History.md〈ADR §9.1 常設自檢落地沿革〉節。

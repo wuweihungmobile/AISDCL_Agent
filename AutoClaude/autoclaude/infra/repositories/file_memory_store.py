@@ -1,8 +1,6 @@
 """FileMemoryStore — IMemoryStore 的 File 後端（薄包裝 FailureKnowledgeBase）。"""
 from __future__ import annotations
 
-from typing import Optional
-
 from ...utils.knowledge_base import FailureKnowledgeBase
 
 
@@ -12,7 +10,7 @@ class FileMemoryStore:
     def __init__(self, jsonl_path: str):
         self._kb = FailureKnowledgeBase(jsonl_path)
 
-    def query(self, error_signature: str) -> Optional[dict]:
+    def query(self, error_signature: str) -> dict | None:
         return self._kb.query(error_signature)
 
     def query_strategy_priority(self, error_class: str) -> list[str]:

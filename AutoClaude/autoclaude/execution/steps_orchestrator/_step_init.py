@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from ..failure_tracker import FailureTracker
 from ..types import PlaybookResult
@@ -26,16 +26,16 @@ logger = logging.getLogger("autoclaude.execution.playbook")
 
 
 def build_cross_step_hint(
-    runner: "PlaybookRunner",
-    playbook: "Playbook",
-    task: "PlaybookTask",
+    runner: PlaybookRunner,
+    playbook: Playbook,
+    task: PlaybookTask,
     step_idx: int,
     prev_step_idx: int,
-) -> Optional[str]:
+) -> str | None:
     """合併跨步驟污染警告 + GOTO 重訪 hint（line 82-101 抽出）。"""
     from ..playbook_runner import _pr
 
-    cross_hint: Optional[str] = None
+    cross_hint: str | None = None
     if not runner._dry_run and step_idx > 0:
         prev_task = playbook.tasks[step_idx - 1]
         cross_hint = _pr().CrossStepStateValidator().validate_before_step(task, prev_task)
@@ -57,11 +57,11 @@ def build_cross_step_hint(
 
 
 def init_step_tracker(
-    task: "PlaybookTask",
+    task: PlaybookTask,
     step_trackers: dict,
-    resume_checkpoint: Optional["PlaybookCheckpoint"],
-    playbook: "Playbook",
-) -> tuple[FailureTracker, int, Optional["PlaybookCheckpoint"]]:
+    resume_checkpoint: PlaybookCheckpoint | None,
+    playbook: Playbook,
+) -> tuple[FailureTracker, int, PlaybookCheckpoint | None]:
     """FailureTracker 建立（line 103-130 抽出）。
 
     Returns:
@@ -94,7 +94,8 @@ def init_step_tracker(
              else playbook.global_invariants.max_retries_per_step),
         )
         logger.info(
-            "=== Gap-007-A | [%s] 從 checkpoint 重建 FailureTracker: %d 筆歷史,attempt_offset=%d ===",
+            "=== Gap-007-A | [%s] 從 checkpoint 重建 FailureTracker: "
+            "%d 筆歷史,attempt_offset=%d ===",
             task.step_id, len(tracker.history), attempt_offset,
         )
         resume_checkpoint = None
@@ -103,10 +104,10 @@ def init_step_tracker(
 
 
 def check_hotkey_and_save(
-    runner: "PlaybookRunner",
-    playbook: "Playbook",
+    runner: PlaybookRunner,
+    playbook: Playbook,
     playbook_path: str,
-    task: "PlaybookTask",
+    task: PlaybookTask,
     step_idx: int,
     step_log: list,
     total: int,
@@ -117,9 +118,9 @@ def check_hotkey_and_save(
     skip_to_counter: dict,
     completed_step_ids: set,
     step_evolution_counter: dict,
-    workflow: "WorkflowType",
-    alert_ladder: Optional[dict] = None,
-) -> Optional[PlaybookResult]:
+    workflow: WorkflowType,
+    alert_ladder: dict | None = None,
+) -> PlaybookResult | None:
     """ESC+F12 中斷檢查（line 132-145 抽出）。觸發則 save_interrupt + 回 PlaybookResult。"""
     if not runner._hotkey.triggered:
         return None

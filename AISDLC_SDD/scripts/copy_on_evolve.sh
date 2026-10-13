@@ -184,3 +184,30 @@ if [ -f "${_SCRIPT_DIR}/framework_status_snapshot.py" ]; then
 else
   echo "⚠️ 同層無 framework_status_snapshot.py（隔離環境）；略過 SSOT 重生" >&2
 fi
+
+# ── DEF-101-018（R213）：建版後自動把「舊 LATEST」補進 repo 根 ruff.toml 的 extend-exclude ──
+# WHY：根 ruff.toml 只排除凍結版、LATEST 留在 ruff 掃描面；新版一建立，來源版（舊 LATEST）即成
+#   凍結版，scripts/tests/test_ruff_root_config_excludes_only_frozen.py 會因「有凍結版沒被排除」
+#   轉紅——與上方三個 block 同根因家族（人去記得改＝從流程消失）。樣式以 FROM_REL（repo 相對
+#   路徑）逐字追加；已被既有 glob 涵蓋或已存在即略過（idempotent）；找不到根檔（隔離環境）只 warn。
+_RUFF_ROOT_TOML="${TOP}/ruff.toml"
+if [ -f "${_RUFF_ROOT_TOML}" ]; then
+  echo "==> 補舊 LATEST（${FROM_REL}）進 repo 根 ruff.toml extend-exclude（DEF-101-018 凍結版排除面）"
+  "${_PY}" - "${_RUFF_ROOT_TOML}" "${FROM_REL}" <<'PY'
+import fnmatch, re, sys
+path, rel = sys.argv[1], sys.argv[2]
+text = open(path, encoding="utf-8").read()
+m = re.search(r"extend-exclude\s*=\s*\[(.*?)\]", text, re.S)
+if m is None:
+    sys.exit("❌ 根 ruff.toml 找不到 extend-exclude 區塊")
+pats = re.findall(r'"([^"]+)"', m.group(1))
+if any(rel == p or fnmatch.fnmatch(rel, p) for p in pats):
+    print(f"   已涵蓋：{rel}")
+else:
+    new = m.group(0)[:-1].rstrip() + f'\n    "{rel}",\n]'
+    open(path, "w", encoding="utf-8", newline="\n").write(text.replace(m.group(0), new))
+    print(f"✅ 已追加 {rel}")
+PY
+else
+  echo "⚠️ 找不到 ${_RUFF_ROOT_TOML}（隔離環境）；略過 ruff 排除面自動補" >&2
+fi

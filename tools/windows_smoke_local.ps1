@@ -12,7 +12,7 @@
 # （install 共用層 tools/git_hooks_install_common.py 與 LATEST 解析 SSOT 都要用）。
 # Windows PowerShell 5.1 相容（禁 &&/|| 鏈接、三元、??、?.；$LASTEXITCODE 顯式檢查）。
 #
-# 涵蓋（對照 windows-compat-ci.yml windows-smoke 各 step；預期 PASS 總數 = 12）：
+# 涵蓋（對照 windows-compat-ci.yml windows-smoke 各 step；預期 PASS 總數 = 13）：
 #   [1] PowerShell parse 檢查：active .ps1 **四棵樹**（根層 tools/ + AutoClaude/tools/
 #       + AISDLC_SDD/scripts/ + AISDLC_SDD LATEST 版，皆遞迴）以
 #       [System.Management.Automation.Language.Parser]::ParseFile 驗 0 error
@@ -51,7 +51,9 @@
 #   [8] check_ntfs_paths.py + check_script_parity.py（唯讀，直接對本 repo；R18 全面
 #       掃描補齊——這兩支純 Python、平台無關的檢查先前僅由 macos_smoke_local.sh [5]
 #       覆蓋，Windows 本機 smoke 從未在 Windows 環境下實際跑過，消除兩平台 smoke
-#       覆蓋不對稱）
+#       覆蓋不對稱）＋ LATEST 四支 .sh 的可啟動性（R68-04，Git Bash 載體：run_tlc／
+#       init_project／run_self_evolution 的 --help、verify_traceability 對空 docs 乾跑；
+#       rc=0 且 stderr 空。🔴 本項尚未在真 Windows 實跑，mac 側同構項已實跑）
 #   [9] tools\install_windows_nightly.ps1 -WhatIf 預覽（R20 全面掃描補齊——R19 新增
 #       此安裝器後從未被任何 smoke 涵蓋，鏡射 macos_smoke_local.sh [6/7] 對
 #       install_mac_nightly.sh --render-only 的精神；-WhatIf 不需 elevation、不真的
@@ -304,6 +306,8 @@ if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
 }
 # WindowsApps 空殼排除比照 tools/bootstrap.ps1／tools/dev_start.ps1 既有 SSOT（R44 收斂）
 . "$PSScriptRoot/lib/WindowsAppsGuard.ps1"
+# R68-04：[8/9] LATEST 四支 .sh 可啟動性要用 Git Bash——一律走 repo SSOT，不自行偵測。
+. "$PSScriptRoot/lib/Find-GitBash.ps1"
 # DEF-200-302（掌舵者 2026-09-15 裁決 B 案，同批修法同一段 WHY 見
 # AutoClaude/tools/run_local_nightly.ps1）：不再現場解析 PATH 上的裸字面值
 # 'python'，直接釘死根層 .venv 絕對路徑——本腳本 $RepoRoot 已是 monorepo 根
@@ -838,6 +842,55 @@ try {
     Fail-Item "tools\check_script_parity.py（rc=$LASTEXITCODE）"
   }
 
+  # [8/9] 續：LATEST 四支 .sh 的「可啟動性」（R68-04；鏡射 macos_smoke_local.sh [5/7] 5c）。
+  # 這四支此前只被 bash -n 與 bash32 相容靜態鎖看過、從未被執行——能 parse 不等於能啟動。
+  # --help 在三支內都先於任何副作用（python／java 偵測、下載、mkdir）就 exit 0；
+  # verify_traceability.sh 沒有 --help，改對空 docs 目錄乾跑（唯讀）。判準＝rc=0 且 stderr
+  # 空；以 Git Bash 執行（repo SSOT Find-GitBash＋正斜線路徑）；刻意不跑真 TLC（需 Java）。
+  # 本地專屬防線：無 windows-compat-ci.yml 對應 step。LATEST 一律由 sdd_version.py SSOT 解析。
+  # 🔴 本段尚未在真 Windows 實跑（mac 側 5c 已實跑；此處僅以 pwsh 做語法與 parity 驗證）。
+  # rc 一律接到變數再讀（禁接管線）；stderr 導向檔案而不是 2>&1（PS 5.1 會把它包成 ErrorRecord）。
+  $gitBash = Find-GitBash
+  $latestRaw = @(& $script:PyExe (Join-Path $RepoRoot 'AISDLC_SDD\scripts\sdd_version.py') `
+      --sdd-root (Join-Path $RepoRoot 'AISDLC_SDD'))
+  $latestRc = $LASTEXITCODE
+  $latestShName = if ($latestRaw.Count -gt 0) { ([string]$latestRaw[$latestRaw.Count - 1]).Trim() } else { '' }
+  if (-not $gitBash) {
+    Fail-Item '[8] Git Bash 缺席（Find-GitBash 回 $null）——LATEST 四支 .sh 可啟動性未能執行'
+  } elseif ($latestRc -ne 0 -or [string]::IsNullOrEmpty($latestShName)) {
+    Fail-Item "[8] LATEST 解析失敗（sdd_version.py rc=${latestRc}）——LATEST 四支 .sh 可啟動性未能執行"
+  } else {
+    $emptyDocs = Join-Path $Work 'empty_docs'
+    New-Item -ItemType Directory -Path $emptyDocs -ErrorAction SilentlyContinue | Out-Null
+    $launchErrFile = Join-Path $Work 'launch_stderr.txt'
+    $latestRoot = (Join-Path $RepoRoot ('AISDLC_SDD\' + $latestShName)) -replace '\\', '/'
+    $launchBad = 0
+    foreach ($spec in @(
+        @('tools/fsm_runtime/formal/run_tlc.sh', '--help'),
+        @('tools/init_project.sh', '--help'),
+        @('tools/arch_fitness/run_self_evolution.sh', '--help'),
+        @('tools/verify_traceability.sh', ($emptyDocs -replace '\\', '/')))) {
+      $shRel = $spec[0]
+      $shArg = $spec[1]
+      $shPath = "${latestRoot}/${shRel}"
+      if (-not (Test-Path -LiteralPath $shPath)) {
+        Fail-Item "[8] LATEST 缺 ${shRel}——可啟動性未能驗證"
+        $launchBad += 1
+        continue
+      }
+      & $gitBash $shPath $shArg 1>$null 2>$launchErrFile
+      $shRc = $LASTEXITCODE
+      $shErrBytes = (Get-Item -LiteralPath $launchErrFile).Length
+      if ($shRc -ne 0 -or $shErrBytes -gt 0) {
+        Fail-Item "[8] ${shRel} 可啟動性失敗（rc=${shRc}；stderr ${shErrBytes} bytes）"
+        $launchBad += 1
+      }
+    }
+    if ($launchBad -eq 0) {
+      Pass-Item 'AISDLC_SDD LATEST 四支 .sh 可啟動性（Git Bash；run_tlc／init_project／run_self_evolution --help；verify_traceability 空 docs）'
+    }
+  }
+
   # ── [9/9] install_windows_nightly.ps1 -WhatIf 預覽（本 repo，唯讀）───────────
   # R20 全面掃描補齊：R19 新增此安裝器後從未被任何 smoke 涵蓋（鏡射
   # macos_smoke_local.sh [6/7] 對 install_mac_nightly.sh --render-only 的精神）。
@@ -873,11 +926,12 @@ try {
 # ── 彙總 ─────────────────────────────────────────────────────────────────────
 # R10 二審 QA 觀察項：PASS 下限釘選（比照 run_root_unittests MIN_TESTS 精神）——
 # 只斷言 FAIL==0 時，驗證段落被整段刪除仍 exit 0（靜默縮面）；PASS 低於下限即紅。
-# 刻意刪減驗證項時同步下修本值（現況滿版 PASS=12——R18 新增 [8/9] check_ntfs_paths.py
+# 刻意刪減驗證項時同步下修本值（現況滿版 PASS=13——R68-04 新增 [8/9] LATEST 四支 .sh 可啟動性
+# 一項計點；R18 新增 [8/9] check_ntfs_paths.py
 # + check_script_parity.py 兩項計點；R20 新增 [9/9] install_windows_nightly.ps1 -WhatIf 一項計點；
 # R27 新增 [7/9] linked worktree 拒絕於「-Command 非典型呼叫鏈」下仍生效一項計點，
 # 修復 DEF-101-263④ 訂正——原判定「全庫零命中、純理論性」經本輪實測推翻，見該列訂正）。
-$MinPass = 12
+$MinPass = 13
 if ($script:Pass -lt $MinPass) {
   Fail-Item "PASS 總數 $($script:Pass) 低於下限 ${MinPass}——驗證段落疑似被刪減（靜默縮面）"
 }

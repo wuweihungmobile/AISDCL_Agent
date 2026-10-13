@@ -175,11 +175,6 @@ class TestWindowsAppsGuardEnrollment(unittest.TestCase):
 
     def test_dev_start_ps1_delegates_candidate_selection_to_ssot(self) -> None:
         """🔴 R69 P2 改寫（鎖**遷移**，非放寬）：舊鎖要求恰一處
-        `Test-IsRealPython -CandidateName 'python'`（命中裸 python 即用、不看
-        版本），macOS 真機重現的姊妹缺陷迫使候選鏈上移到 SSOT `Get-PythonGeMin`
-        （>= 3.11 才算數）。新鎖強度不減：①委派給 SSOT ②不得再出現自行判斷候選的
-        `Test-IsRealPython -CandidateName '<裸名>'`。史料見證據檔
-        〈第七輪 史料搬遷（Dev-Trim8）〉。
         """
         selector_calls = re.findall(r"\bGet-PythonGeMin\b", _ps_code_only(self.dev_start_text))
         self.assertEqual(
@@ -626,11 +621,6 @@ _STUB_PREDICATE_RE = re.compile(r"""["']windowsapps["']""", re.I)
 
 def _matches_stub_anchor(text: str) -> bool:
     """兩錨的**聯集**——只要任一錨命中即視為「疑似第二份 stub 判斷式實作」。
-
-    R56 round 6 修正：原本內聯寫在掃描迴圈裡的 `or` 曾被實測改成 `and`（3 字元）
-    仍全綠、變體 L 完整逃逸——`TestStubAnchorDiscriminatingPower` 當時只鎖住兩錨
-    各自的屬性，沒鎖住接起來的運算子。抽成純函式後由該測試的兩支單錨樣本鎖住
-    （`∩` 語意下必死）。史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
     return bool(_STUB_NAME_RE.search(text) or _STUB_PREDICATE_RE.search(text))
 
@@ -1097,14 +1087,7 @@ class TestNoOrphanWindowsAppsImplementation(unittest.TestCase):
         註解偽裝騙過）後改為 `_has_real_dot_source_of_ssot` /
         `_has_real_test_is_real_python_call`：要求陳述式開頭的 dot-source
         語法與非註解非字串常值的實際函式呼叫，並濾掉行尾裝飾性註解。
-
-        已知殘留限制（如實記載，R41 backlog，Rule 2 比例原則暫不修）：本測試是
-        逐行靜態正則掃描，非真正 AST 解析，仍可被 (a) 真實但從未被呼叫的死碼
-        dot-source／`Test-IsRealPython` 提及、(b) 跨行 here-string 包裝魔法
-        字串兩種手法繞過（R40 四方複審各自構造驗證成立）。徹底封閉需要真正
-        AST 解析與 here-string 狀態機，構造細節與投入評估史料見證據檔
-        〈第七輪 史料搬遷（Dev-Trim8）〉。
-        """
+        射程／已知不涵蓋：逐字見 R213 證據檔附錄 A-4。"""
         latest_name = _latest_sdd_root().name
         scoped_ps1 = _exclude_frozen_sdd_versions(_tracked_files("*.ps1"), latest_name)
 
@@ -1659,12 +1642,6 @@ def _case_inputs() -> tuple[str, ...]:
 
 def _write_verdict_samples(td: str) -> Path:
     """把樣本表寫成一個 ASCII 檔案，PS 與 bash 兩側**讀同一個檔**。
-
-    刻意不用命令列參數傳樣本：轉義陷阱一旦歪掉會讓測試假綠。一律走 bytes 層寫入、
-    行尾硬編碼 LF——`write_text(encoding="ascii")` 的預設 `newline=None` 在 Windows
-    會翻成 CRLF，讓 bash 側 `read -r` 斷行後字串尾帶 `\\r`（R68 windows-compat-ci
-    首度在真 Windows 炸出的病灶），PS 側 `Get-Content` 因吃掉行終止符而免疫。
-    史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
     path = Path(td) / "verdict_cases.txt"
     path.write_bytes(("\n".join(_case_inputs()) + "\n").encode("ascii"))

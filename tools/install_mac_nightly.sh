@@ -26,8 +26,8 @@
 # ＝鎖實際比對的維度數」，防 R67-E21 重演（該次是 dev_start 於 R15 新增 FAIL 維度、
 # 本檔沒跟上，而等價鎖被寫死在 R12 的「三態」語意上，契約破裂零訊號）：
 #   三態      — 缺席→提示（排程可能未啟用）；mtime > 8 天→過期警告；否則新鮮
-#   FAIL 計數 — 心跳檔前 3 行的 `FAIL=N`，N>0 多印一行 ⚠️（語意對齊 dev_start
-#               _heartbeat_fail_count／ARCH-R15-1：mtime 只證明「在跑」不證明「在綠」）
+#   FAIL 計數 — 心跳檔前 3 行的 `FAIL=N`，N>0 多印一行 ⚠️（語意對齊 nightly_heartbeat
+#               heartbeat_fail_count／ARCH-R15-1：mtime 只證明「在跑」不證明「在綠」）
 #   年齡顯示  — 「距今 N.N 天」這個**顯示值**本身（R68-M32）。判定早已對齊到秒
 #               （R67-M40），顯示卻沿用整數十分位截斷，與 dev_start 的
 #               `{age_days:.1f}` 在 age_s=74304 秒分別印 0.8／0.9——同一台機器
@@ -152,7 +152,7 @@ report_heartbeat() {
   # FAIL 維度（R67-E21）：心跳 mtime 只證明「排程在跑」，不證明「驗證全綠」——
   # nightly 連續全紅時本工具過去隻字未提，而同一顆心跳檔在 dev_start 會出 ⚠️。
   # 讀前 3 行即涵蓋兩態（第 2 行恆為 `===== nightly 彙總：PASS=n FAIL=n =====`，
-  # 第 3 行僅 FAIL>0 才存在），與 dev_start._heartbeat_fail_count 同契約。
+  # 第 3 行僅 FAIL>0 才存在），與 nightly_heartbeat.heartbeat_fail_count 同契約。
   # 無命中時 grep 回 rc=1、head -1 提前關管線會讓上游收 SIGPIPE——本段全屬
   # advisory，以 `|| true` 收斂，絕不可讓 set -e 中斷 --status。
   _fail_n="$(head -3 "${HEARTBEAT}" 2>/dev/null | grep -oE 'FAIL=[0-9]+' | head -1 | cut -d= -f2 || true)"

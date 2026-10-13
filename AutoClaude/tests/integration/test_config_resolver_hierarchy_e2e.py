@@ -1,6 +1,7 @@
 """tests/integration/test_config_resolver_hierarchy_e2e.py — SD_07 W2 T2-5 議題 6 e2e。
 
-對應 AC6-1 / AC6-2 / AC6-3（[docs/03_testing/SD07_AC_Matrix.md](../../docs/03_testing/SD07_AC_Matrix.md)）：
+對應 AC6-1 / AC6-2 / AC6-3
+（[docs/03_testing/SD07_AC_Matrix.md](../../docs/03_testing/SD07_AC_Matrix.md)）：
   AC6-1 4 層 merge（global → workflow → step → runtime）property-based；Hypothesis ≥ 50 example
   AC6-2 flat → nested promote + DeprecationWarning
   AC6-3 RBAC 保護欄位（minimax.api_key / embedder.api_key / storage.db_dsn）
@@ -13,7 +14,8 @@ from __future__ import annotations
 import warnings
 
 import pytest
-from hypothesis import given, settings, strategies as st
+from hypothesis import given, settings
+from hypothesis import strategies as st
 from pydantic import ValidationError
 
 from autoclaude.utils.config import AppConfig, TokenGuardConfig

@@ -155,7 +155,8 @@ class TestConfig:
         """feature flag 預設 on（2026-06-13 SCG-6 人工 waiver：koalawu 拍板提前轉正）。
 
         原預設 off（凍結計畫 §4 soak）已由人工 waiver 轉正；設 enabled=False 仍可
-        還原與既有行為 byte-level 一致之控制流（見 TestBuildFromConfig.test_restore_state_applied）。
+        還原與既有行為 byte-level 一致之控制流（見
+        TestBuildFromConfig.test_restore_state_applied）。
         """
         from autoclaude.utils.config import AlertLadderConfig, AppConfig
         cfg = AlertLadderConfig()

@@ -15,10 +15,10 @@
 """
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from ..core.hookspec import HookContext, KernelPhase, ResourceRequest
-from ..execution.convergence_monitor import ConvergenceMonitor
+from ..execution.convergence_monitor import ConvergenceMonitor, ConvergenceReport
 
 
 class ConvergencePlugin:
@@ -26,7 +26,7 @@ class ConvergencePlugin:
 
     PRIORITY = 65
 
-    def __init__(self, monitor: Optional[ConvergenceMonitor] = None):
+    def __init__(self, monitor: ConvergenceMonitor | None = None):
         self._monitor = monitor or ConvergenceMonitor()
 
     def name(self) -> str:
@@ -38,7 +38,7 @@ class ConvergencePlugin:
     def subscribed_phases(self) -> list[KernelPhase]:
         return [KernelPhase.POST_ATTEMPT]
 
-    def on_event(self, ctx: HookContext) -> Optional[Any]:
+    def on_event(self, ctx: HookContext) -> Any | None:
         payload = ctx.payload or {}
 
         # 模式 A：呼叫端已執行 evaluate，僅注入 recommendation 字串
@@ -83,6 +83,6 @@ class ConvergencePlugin:
     # ──────────────────────────────────────────────
     # 公開 API
     # ──────────────────────────────────────────────
-    def evaluate(self, tracker) -> "ConvergenceReport":  # type: ignore[name-defined]
+    def evaluate(self, tracker) -> ConvergenceReport:
         """供 Kernel / 呼叫端直接執行收斂評估。"""
         return self._monitor.evaluate(tracker)

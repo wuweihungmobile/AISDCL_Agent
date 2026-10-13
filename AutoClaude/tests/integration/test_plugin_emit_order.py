@@ -7,13 +7,10 @@
 """
 from __future__ import annotations
 
-from typing import Any, Optional
-from unittest.mock import MagicMock
-
-import pytest
+from typing import Any
 
 from autoclaude.core.event_bus import EventBus
-from autoclaude.core.hookspec import HookContext, KernelPhase, ResourceRequest
+from autoclaude.core.hookspec import HookContext, KernelPhase
 from autoclaude.core.wiring import build_kernel
 from autoclaude.infra.adapters.dry_run_executor import DryRunExecutor
 from autoclaude.infra.adapters.shell_evaluator import ShellEvaluator
@@ -41,7 +38,7 @@ class SpyPlugin:
     def subscribed_phases(self) -> list[KernelPhase]:
         return self._phases
 
-    def on_event(self, ctx: HookContext) -> Optional[Any]:
+    def on_event(self, ctx: HookContext) -> Any | None:
         self.call_order.append((self._name, ctx.phase))
         return None
 
@@ -53,7 +50,7 @@ class TestPluginEmitOrder:
     """EventBus 依 priority 排序觸發驗證。"""
 
     def _make_ctx(self, phase: KernelPhase) -> HookContext:
-        from autoclaude.models.playbook import Playbook, PlaybookTask, GlobalInvariants
+        from autoclaude.models.playbook import GlobalInvariants, Playbook, PlaybookTask
         playbook = Playbook(
             project="emit-order-test",
             tasks=[PlaybookTask(step_id="T01", name="test", prompt="p")],
@@ -64,15 +61,12 @@ class TestPluginEmitOrder:
     def test_lower_priority_fires_first(self):
         """priority 30 應在 70 之前觸發。"""
         bus = EventBus()
-        order: list[str] = []
         p30 = SpyPlugin("low30", 30, [KernelPhase.POST_ATTEMPT])
         p70 = SpyPlugin("high70", 70, [KernelPhase.POST_ATTEMPT])
         bus.register(p70)  # 刻意先 register 高 priority
         bus.register(p30)
         ctx = self._make_ctx(KernelPhase.POST_ATTEMPT)
         bus.emit(ctx)
-        fire_names = [e[0] for e in p30.call_order + p70.call_order
-                      if e[1] == KernelPhase.POST_ATTEMPT]
         # 收集觸發順序（利用 SpyPlugin.call_order）
         all_calls: list[str] = []
         for name, phase in p30.call_order + p70.call_order:

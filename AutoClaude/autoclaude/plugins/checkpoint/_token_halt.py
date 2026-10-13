@@ -9,7 +9,7 @@ plugin 不直接 import 避免分層違規），plugin 回傳 (checkpoint, sched
 from __future__ import annotations
 
 import logging
-from typing import Callable, Optional
+from collections.abc import Callable
 
 from ...utils.checkpoint_manager import PlaybookCheckpoint
 
@@ -29,14 +29,14 @@ def handle_token_halt_impl(
     resume_delay_minutes: int,
     tracker=None,
     attempt: int = 0,
-    goto_counter: Optional[dict] = None,
-    inject_before_counter: Optional[dict] = None,
-    skip_to_counter: Optional[dict] = None,
-    completed_step_ids: Optional[set] = None,
-    step_evolution_counter: Optional[dict] = None,
-    alert_ladder: Optional[dict] = None,
-    notify_callback: Optional[Callable[[str, str], None]] = None,
-    token_logger_callback: Optional[Callable[[str, str, float, str, str], None]] = None,
+    goto_counter: dict | None = None,
+    inject_before_counter: dict | None = None,
+    skip_to_counter: dict | None = None,
+    completed_step_ids: set | None = None,
+    step_evolution_counter: dict | None = None,
+    alert_ladder: dict | None = None,
+    notify_callback: Callable[[str, str], None] | None = None,
+    token_logger_callback: Callable[[str, str, float, str, str], None] | None = None,
 ) -> PlaybookCheckpoint:
     """W3-1b：TOKEN_HALT 儲存 checkpoint + 排程恢復 + notify；回傳 checkpoint。
 

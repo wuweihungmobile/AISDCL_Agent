@@ -18,7 +18,7 @@
 """
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from ..core.hookspec import CounterSnapshotResult, HookContext, KernelPhase
 from ..models.counter_snapshot import CounterSnapshot  # noqa: F401 (re-exported)
@@ -30,7 +30,7 @@ class GotoCounterPlugin:
 
     PRIORITY = 85
 
-    def __init__(self, playbook_cfg: Optional[PlaybookConfig] = None):
+    def __init__(self, playbook_cfg: PlaybookConfig | None = None):
         self._cfg = playbook_cfg or PlaybookConfig()
         self._snapshot = CounterSnapshot()
 
@@ -51,7 +51,7 @@ class GotoCounterPlugin:
             KernelPhase.ON_CHECKPOINT_SAVE_REQUEST,  # 訂閱 checkpoint 取 snapshot 事件
         ]
 
-    def on_event(self, ctx: HookContext) -> Optional[Any]:
+    def on_event(self, ctx: HookContext) -> Any | None:
         if ctx.phase == KernelPhase.PRE_RUN:
             self._on_pre_run(ctx)
         elif ctx.phase == KernelPhase.POST_ATTEMPT:

@@ -98,7 +98,7 @@ def test_local_logger_start_span_is_context_manager_with_duration(caplog):
 def test_local_logger_record_event_injects_trace_id_from_contextvar(caplog):
     obs = LocalLogger()
     with caplog.at_level(logging.INFO, logger="autoclaude.observability"):
-        with with_trace_id("fixed-trace-001") as tid:
+        with with_trace_id("fixed-trace-001"):
             obs.record_event("token_halt", attributes={"pct": 95})
     matched = [r for r in caplog.records if r.__dict__.get("event") == "record_event"]
     assert len(matched) == 1
@@ -114,7 +114,7 @@ def test_local_logger_record_event_injects_trace_id_from_contextvar(caplog):
 def test_emit_counter_inside_with_trace_id_carries_trace(caplog):
     obs = LocalLogger()
     with caplog.at_level(logging.INFO, logger="autoclaude.observability"):
-        with with_trace_id("trace-xyz") as tid:
+        with with_trace_id("trace-xyz"):
             obs.emit_counter("kb_hit_total", value=1)
         # 出 with 區塊 trace_id 應還原 None
         obs.emit_counter("outside_counter", value=1)

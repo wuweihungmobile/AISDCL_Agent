@@ -16,22 +16,22 @@ from __future__ import annotations
 import json
 import logging
 import time
-from typing import Mapping, Optional
+from collections.abc import Mapping
 
-from ....core.ports.observability import IObservabilityPort, ISpan
+from ....core.ports.observability import ISpan
 
 # 內部 logger（structured event 全部統一從此 logger 發出，便於 filter）
 _logger = logging.getLogger("autoclaude.observability")
 
 
-def _safe_tags(tags: Optional[Mapping[str, str]]) -> dict:
+def _safe_tags(tags: Mapping[str, str] | None) -> dict:
     """安全轉換 tags（None → {}，過濾不可序列化值）。"""
     if not tags:
         return {}
     return {str(k): str(v) for k, v in tags.items()}
 
 
-def _safe_attributes(attrs: Optional[Mapping[str, object]]) -> dict:
+def _safe_attributes(attrs: Mapping[str, object] | None) -> dict:
     """安全轉換 attributes；不可序列化值轉 str。"""
     if not attrs:
         return {}
@@ -45,7 +45,7 @@ def _safe_attributes(attrs: Optional[Mapping[str, object]]) -> dict:
     return out
 
 
-def _current_trace_id() -> Optional[str]:
+def _current_trace_id() -> str | None:
     """從 ContextVar 取得當前 trace_id（lazy import 避免 utils → core 循環）。"""
     # lazy import 避免測試夾具尚未初始化 ContextVar 時的 ImportError
     try:
@@ -65,14 +65,14 @@ class LocalLoggerSpan:
                   若收到 exc，先 record_exception 再讓例外傳播
     """
 
-    def __init__(self, name: str, tags: Optional[Mapping[str, str]] = None):
+    def __init__(self, name: str, tags: Mapping[str, str] | None = None):
         self._name = name
         self._tags = _safe_tags(tags)
         self._attributes: dict = {}
         self._start_ns: int = 0
-        self._exception: Optional[BaseException] = None
+        self._exception: BaseException | None = None
 
-    def __enter__(self) -> "LocalLoggerSpan":
+    def __enter__(self) -> LocalLoggerSpan:
         self._start_ns = time.monotonic_ns()
         _logger.info(
             "observability_span_start",
@@ -85,7 +85,7 @@ class LocalLoggerSpan:
         )
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb) -> Optional[bool]:
+    def __exit__(self, exc_type, exc_val, exc_tb) -> bool | None:
         duration_ms = (time.monotonic_ns() - self._start_ns) / 1_000_000.0
         if exc_val is not None and self._exception is None:
             self.record_exception(exc_val)
@@ -141,7 +141,7 @@ class LocalLogger:
     """
 
     def emit_counter(
-        self, name: str, value: int = 1, tags: Optional[Mapping[str, str]] = None
+        self, name: str, value: int = 1, tags: Mapping[str, str] | None = None
     ) -> None:
         # 注意：LogRecord 保留 "name" / "message" / "asctime" 等 key，
         # 使用 "metric_name" 避免 KeyError "Attempt to overwrite 'name' in LogRecord"
@@ -157,7 +157,7 @@ class LocalLogger:
         )
 
     def emit_histogram(
-        self, name: str, value: float, tags: Optional[Mapping[str, str]] = None
+        self, name: str, value: float, tags: Mapping[str, str] | None = None
     ) -> None:
         _logger.info(
             "observability_histogram",
@@ -171,12 +171,12 @@ class LocalLogger:
         )
 
     def start_span(
-        self, name: str, tags: Optional[Mapping[str, str]] = None
+        self, name: str, tags: Mapping[str, str] | None = None
     ) -> ISpan:
         return LocalLoggerSpan(name, tags)  # type: ignore[return-value]
 
     def record_event(
-        self, name: str, attributes: Optional[Mapping[str, object]] = None
+        self, name: str, attributes: Mapping[str, object] | None = None
     ) -> None:
         _logger.info(
             "observability_event",

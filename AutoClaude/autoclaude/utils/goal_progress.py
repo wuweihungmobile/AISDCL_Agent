@@ -46,7 +46,7 @@ class GoalProgressLedger:
         }
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
-            with self._path.open("a", encoding="utf-8") as f:
+            with self._path.open("a", encoding="utf-8", newline="") as f:
                 f.write(json.dumps(row, ensure_ascii=False) + "\n")
         except OSError as exc:
             logger.warning("goal progress 寫入失敗（warning，繼續主流程）: %s", exc)

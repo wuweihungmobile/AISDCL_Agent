@@ -13,22 +13,20 @@ Gap-013 實作驗證測試（Gap-013-A~H）。
 """
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 import yaml
 
 from autoclaude.decision.prompt_builder import build_correction_message
-from autoclaude.evolution.playbook_evolver import PlaybookEvolver, PlaybookEvolutionProposal
-from autoclaude.execution.playbook_runner import PlaybookRunner, _StepOutput
+from autoclaude.evolution.playbook_evolver import PlaybookEvolutionProposal, PlaybookEvolver
 from autoclaude.execution.failure_tracker import FailureTracker
+from autoclaude.execution.playbook_runner import PlaybookRunner, _StepOutput
 from autoclaude.models.escalation import EscalationDump
 from autoclaude.models.playbook import GlobalInvariants, Playbook, PlaybookTask
 from autoclaude.utils.config import AppConfig, PlaybookConfig
 from tests.helpers.kernel_fixtures import make_service
-
 
 # ──────────────────────────────────────────────
 # 共用輔助
@@ -97,7 +95,7 @@ def _make_escalation_dump(
 class TestGotoTrackerWarmStart:
     def test_warm_start_inherits_tried_strategies(self):
         """GOTO 後重訪同一步驟，tracker 繼承 _tried_strategies。"""
-        runner = _make_runner(dry_run=True)
+        _runner = _make_runner(dry_run=True)
         step_trackers: dict[str, FailureTracker] = {}
 
         # 模擬第一次訪問：tracker 嘗試了 REWRITE 策略
@@ -558,7 +556,7 @@ class TestGotoLoopEvolution:
         )
         playbook = _make_playbook([task_t01, task_t02], max_retries=20)
 
-        import tempfile, yaml
+        import yaml
         pb_path = tmp_path / "play_goto.yaml"
         with open(pb_path, "w", encoding="utf-8") as f:
             yaml.dump(playbook.model_dump(exclude_none=True), f, allow_unicode=True)

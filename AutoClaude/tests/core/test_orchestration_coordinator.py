@@ -11,9 +11,7 @@
 """
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
-from typing import Optional
 
 import pytest
 
@@ -155,8 +153,8 @@ def _make_playbook_and_task():
     return pb, task
 
 
-def _make_coord(*, max_runs: Optional[int] = None, executor_completed: bool = True,
-                executor_events: int = 2, plugins: Optional[list] = None,
+def _make_coord(*, max_runs: int | None = None, executor_completed: bool = True,
+                executor_events: int = 2, plugins: list | None = None,
                 ) -> tuple[OrchestrationCoordinator, EventBus, _FakeBrain, _FakeExecutor]:
     bus = EventBus()
     if plugins:

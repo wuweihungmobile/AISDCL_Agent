@@ -18,7 +18,8 @@
 """
 from __future__ import annotations
 
-from typing import Mapping, Optional, Protocol, runtime_checkable
+from collections.abc import Mapping
+from typing import Protocol, runtime_checkable
 
 
 # ──────────────────────────────────────────────────────────────
@@ -34,10 +35,10 @@ class ISpan(Protocol):
             ...
     """
 
-    def __enter__(self) -> "ISpan":
+    def __enter__(self) -> ISpan:
         ...
 
-    def __exit__(self, exc_type, exc_val, exc_tb) -> Optional[bool]:
+    def __exit__(self, exc_type, exc_val, exc_tb) -> bool | None:
         ...
 
     def set_attribute(self, key: str, value: object) -> None:
@@ -65,7 +66,7 @@ class IObservabilityPort(Protocol):
     """
 
     def emit_counter(
-        self, name: str, value: int = 1, tags: Optional[Mapping[str, str]] = None
+        self, name: str, value: int = 1, tags: Mapping[str, str] | None = None
     ) -> None:
         """累計型 metric（如 kb_hit_total / autoresume_wake_total）。
 
@@ -76,7 +77,7 @@ class IObservabilityPort(Protocol):
         """
 
     def emit_histogram(
-        self, name: str, value: float, tags: Optional[Mapping[str, str]] = None
+        self, name: str, value: float, tags: Mapping[str, str] | None = None
     ) -> None:
         """分布型 metric（如 kb_query_latency_ms / dry_run_duration_ms）。
 
@@ -87,7 +88,7 @@ class IObservabilityPort(Protocol):
         """
 
     def start_span(
-        self, name: str, tags: Optional[Mapping[str, str]] = None
+        self, name: str, tags: Mapping[str, str] | None = None
     ) -> ISpan:
         """span 生命週期管理（context manager）；trace_id 由 ContextVar 自動注入。
 
@@ -100,7 +101,7 @@ class IObservabilityPort(Protocol):
         """
 
     def record_event(
-        self, name: str, attributes: Optional[Mapping[str, object]] = None
+        self, name: str, attributes: Mapping[str, object] | None = None
     ) -> None:
         """事件記錄（如 token_halt / esc_f12_interrupt）。
 
@@ -116,10 +117,10 @@ class IObservabilityPort(Protocol):
 class _NullSpan:
     """No-op Span；測試 / 未注入 Adapter 時 fallback。"""
 
-    def __enter__(self) -> "_NullSpan":
+    def __enter__(self) -> _NullSpan:
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb) -> Optional[bool]:
+    def __exit__(self, exc_type, exc_val, exc_tb) -> bool | None:
         return None
 
     def set_attribute(self, key: str, value: object) -> None:
@@ -140,22 +141,22 @@ class NullObservability:
     """
 
     def emit_counter(
-        self, name: str, value: int = 1, tags: Optional[Mapping[str, str]] = None
+        self, name: str, value: int = 1, tags: Mapping[str, str] | None = None
     ) -> None:
         pass
 
     def emit_histogram(
-        self, name: str, value: float, tags: Optional[Mapping[str, str]] = None
+        self, name: str, value: float, tags: Mapping[str, str] | None = None
     ) -> None:
         pass
 
     def start_span(
-        self, name: str, tags: Optional[Mapping[str, str]] = None
+        self, name: str, tags: Mapping[str, str] | None = None
     ) -> ISpan:
         return _NullSpan()  # type: ignore[return-value]
 
     def record_event(
-        self, name: str, attributes: Optional[Mapping[str, object]] = None
+        self, name: str, attributes: Mapping[str, object] | None = None
     ) -> None:
         pass
 

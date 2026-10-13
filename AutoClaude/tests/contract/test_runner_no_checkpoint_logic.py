@@ -1,7 +1,8 @@
 """tests/contract/test_runner_no_checkpoint_logic.py — AC2-1 / SD_06 W2-T2-14 契約。
 
 對應：
-  - SD_Improving_06.md v1.2 §6.5 AC2-1（`grep -c "_save_.*_checkpoint" autoclaude/execution/_runner_internals.py == 0`）
+  - SD_Improving_06.md v1.2 §6.5 AC2-1
+    （`grep -c "_save_.*_checkpoint" autoclaude/execution/_runner_internals.py == 0`）
   - SD_Improving_06.md v1.2 §7 ❌13（mixin/plugin 雙寫法絕對禁止）
   - SD06_Execution_Guide.md W2 T2-14（importlinter 新增 runner-no-checkpoint-logic）
 
@@ -23,10 +24,9 @@ import os
 import re
 from pathlib import Path
 
-import pytest
-
-
-_RUNNER_INTERNALS = Path(__file__).resolve().parents[2] / "autoclaude" / "execution" / "_runner_internals.py"
+_RUNNER_INTERNALS = (
+    Path(__file__).resolve().parents[2] / "autoclaude" / "execution" / "_runner_internals.py"
+)
 _PATTERN = re.compile(r"_save_.*_checkpoint")
 
 
@@ -50,7 +50,8 @@ class TestRunnerNoCheckpointLogicContract:
         達成方式（SD_06 W2 T2-9~T2-11）：
           - mixin `_save_evolution_resume_checkpoint` def 物理刪除（測試改呼叫 plugin 公開 API）
           - mixin `_save_interrupt_checkpoint` def 物理刪除（測試改呼叫 plugin 公開 API）
-          - mixin `_save_escalation_dump` 改名/下沉至 escalation_dumper（保留 shim 但無 _checkpoint 後綴）
+          - mixin `_save_escalation_dump` 改名/下沉至 escalation_dumper（保留 shim 但無
+            _checkpoint 後綴）
           - docstring 與 MIGRATED 注解清理
         """
         count = _count_matches()

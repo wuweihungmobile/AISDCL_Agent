@@ -40,6 +40,7 @@
 # 本模組刻意只放**純資料 ＋ 純函式**（data tier ≤150），零 I/O、零平台判斷。
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -154,6 +155,32 @@ def quota_refusal(text: object) -> str:
     if not is_quota_limit_text(text):
         return ""
     return f"{QUOTA_REFUSAL_PREFIX}｜輸出末段：{str(text)[-400:]}"
+
+
+# PRD §8 列 1：伺服器的重試建議（`Retry-After: N`／`retry after N seconds`／帶引號的 JSON 形態）。
+# 只認「有數字」的形態；HTTP-date 形態與任何認不準的字面一律回 None（⇒ 呼叫端走既有 halt）——
+# 解析錯成「很短」會讓引擎在伺服器要求久等時提早重打。缺省單位秒；也認 ms／分／時／日：認得大單位
+# 是為了讓呼叫端的上界判準擋得掉它（`retry after 3 days` 若被讀成 3 秒就會被退避重打）。
+# `\b` 擋掉 `60 more` 這種「碰巧以單位字母開頭的下一個字」。向上取整：寧晚勿早。
+_RETRY_AFTER_RE = re.compile(
+    r"retry[-_ ]?after[\"']?\s*(?:[:=]|\s)\s*[\"']?(\d+(?:\.\d+)?)"
+    r"(?:[ \t]*(ms|milliseconds?|secs?|seconds?|mins?|minutes?|hrs?|hours?|days?|[smhd])\b)?",
+    re.I)
+
+
+def retry_after_seconds(text: object) -> int | None:
+    if not isinstance(text, str):
+        return None
+    m = _RETRY_AFTER_RE.search(text)
+    if m is None:
+        return None
+    unit = (m.group(2) or "s").lower()
+    scale = 0.001 if unit.startswith(("ms", "milli")) else {"s": 1, "m": 60, "h": 3600,
+                                                              "d": 86400}[unit[0]]
+    try:
+        return math.ceil(float(m.group(1)) * scale)
+    except OverflowError:                       # 天文數字：不是一個可以等的值
+        return None
 
 
 def reset_instant(resets_at: object) -> datetime | None:

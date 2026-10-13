@@ -556,6 +556,12 @@ def expired(note: str) -> bool:
     return note in (EXPIRY_ELAPSED, EXPIRY_SKEW)
 
 
+def expired_axes(axes, now: datetime, measured_at: object = None) -> list:
+    """`[(kind, resets_at, 述詞)]`：`axes` 中 `resets_at` 已過去的軸（兩義皆算，見 `expired`）。"""
+    return [(a.kind, a.resets_at, note) for a in axes
+            for note in (expiry_of(a.resets_at, now, measured_at)[1],) if expired(note)]
+
+
 def segments(rows) -> list:
     """把 `(ts, short, long)` 切成「沒有翻頁」的區段。任一軸下降＝視窗翻頁＝斷點。
 

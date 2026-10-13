@@ -14,7 +14,6 @@ import pytest
 
 from autoclaude.infra.repositories.pg_async_utils import _run_async
 
-
 # ─────────────────────────────────────────────
 # 測試情境 1：無 running loop（同步 pytest 環境）
 # ─────────────────────────────────────────────

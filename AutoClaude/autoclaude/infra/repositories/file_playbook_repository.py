@@ -29,7 +29,7 @@ class FilePlaybookRepository:
 
     def persist_mutation(self, playbook_id: str, playbook: Playbook) -> None:
         path = Path(playbook_id)
-        with path.open("w", encoding="utf-8") as f:
+        with path.open("w", encoding="utf-8", newline="") as f:
             yaml.safe_dump(
                 playbook.model_dump(exclude_none=True),
                 f, allow_unicode=True, sort_keys=False,
@@ -41,7 +41,7 @@ class FilePlaybookRepository:
     ) -> str:
         original = Path(original_id)
         evolved_path = original.parent / f"evolved_{generation}_{original.name}"
-        with evolved_path.open("w", encoding="utf-8") as f:
+        with evolved_path.open("w", encoding="utf-8", newline="") as f:
             yaml.safe_dump(
                 evolved.model_dump(exclude_none=True),
                 f, allow_unicode=True, sort_keys=False,

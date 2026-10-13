@@ -19,6 +19,11 @@ from pathlib import Path
 
 import pytest
 
+from tools.mutation_analysis import (
+    analyze,
+    classify_diff,
+    extract_survived_ids,
+)
 from tools.mutation_baseline_lock import (
     CONSECUTIVE_RUNS,
     TARGETS,
@@ -30,15 +35,10 @@ from tools.mutation_baseline_lock import (
     should_lock,
     write_baseline,
 )
-from tools.mutation_analysis import (
-    analyze,
-    classify_diff,
-    extract_survived_ids,
-)
 
 
-def _write_mutmut_log(path: Path, killed: int = 75, survived: int = 20, timeout: int = 3, suspicious: int = 2,
-                     skipped: int = 0) -> None:
+def _write_mutmut_log(path: Path, killed: int = 75, survived: int = 20, timeout: int = 3,
+                      suspicious: int = 2, skipped: int = 0) -> None:
     """模擬 mutmut results 輸出（涵蓋 emoji 與純文字兩種格式）。"""
     path.write_text(
         f"""Legend for output:
@@ -67,7 +67,7 @@ def _append_history(history_path: Path, module: str, kill_rates: list[float]) ->
     SD_09 W3 Round 4 audit P0-AUDIT-R3-2 修復：每筆預灌紀錄附 unique sha，
     滿足新增的紀律 #12 強制 unique 檢查，且不破壞 contract 既有測試意圖。
     """
-    today = _dt.datetime.now(tz=_dt.timezone.utc).date()
+    today = _dt.datetime.now(tz=_dt.UTC).date()
     n = len(kill_rates)
     with history_path.open("w", encoding="utf-8") as f:
         for i, rate in enumerate(kill_rates):
@@ -149,7 +149,7 @@ def test_lock_upgrade_only_if_higher(tmp_path: Path) -> None:
     write_baseline(baseline, "token_guard", 0.75)
     assert read_baseline(baseline)["token_guard"] == pytest.approx(0.75)
 
-    threshold = TARGETS["token_guard"] - TOLERANCE  # 0.70
+    # 達標門檻 = TARGETS["token_guard"] - TOLERANCE（0.70）
     # 連續 7 次都剛好達 0.71 → 達標但低於舊 0.75 → 不升級
     _append_history(history, "token_guard", [0.71] * 6)
     log = tmp_path / "mutation_token_guard.log"

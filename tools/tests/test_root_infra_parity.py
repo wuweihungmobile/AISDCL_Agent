@@ -120,7 +120,7 @@ def _runs_ruff_over_root_tools(text: str) -> bool:
 # 這正是本檔自陳的復發形狀（下限落後實數 2 以上＝可靜默刪兩道）能被機械攔下的判準。
 _FLOOR_CI_PYTHON_TOOLS = 12  # 本輪重釘（現查 12；+refresh_nightly_anchor.py）
 _FLOOR_HEADER_ITEMS = 17  # 本輪重釘（現查 17；+第 17 道檔頭項）
-_FLOOR_SDD_CONSUMERS = 12  # R84 重釘（現查 12；上修＝更嚴）
+_FLOOR_SDD_CONSUMERS = 14  # 重釘（現查 14；DEF-101-018 +ruff.toml；上修＝更嚴）
 _FLOOR_SLACK_MAX = 2
 
 

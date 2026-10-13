@@ -44,6 +44,11 @@ _REPO_ROOT = _THIS.parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+sys.path.insert(0, str(_REPO_ROOT.parent / "tools" / "lib"))
+from platform_utils import (  # noqa: E402
+    init_utf8_streams as _init_utf8_streams,  # type: ignore[import-not-found]
+)
+
 from autoclaude.models.playbook import Playbook, PlaybookTask  # noqa: E402
 from autoclaude.models.three_tier_schema import (  # noqa: E402
     ExecutionItem,
@@ -201,11 +206,8 @@ def cli(source: Path, out: Path | None, project_id: str | None, workflow_type: s
     """SD_improving_94 W-94-2：three_tier → 可執行 Playbook 攤平工具。"""
     # R46（DEF-101-380）：省略 --out 時走 stdout 印出的 YAML 含中文（allow_unicode=True），
     # Windows 非 UTF-8 console 直接印會 UnicodeEncodeError；比照 ab_compare_backends.py
-    # DEF-82-001 同款保護（best-effort，非 TextIOWrapper / 不支援時靜默略過）。
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
-    except (AttributeError, OSError):
-        pass
+    # DEF-82-001 同款保護（唯一實作；best-effort，不支援時靜默略過）。
+    _init_utf8_streams()
     yaml_text = Path(source).read_text(encoding="utf-8")
     try:
         pb = compile_to_playbook(yaml_text, project_id=project_id, workflow_type=workflow_type)

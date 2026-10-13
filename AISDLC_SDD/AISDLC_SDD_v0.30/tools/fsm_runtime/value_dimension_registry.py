@@ -29,7 +29,7 @@ import hashlib
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 
 import yaml
 
@@ -283,7 +283,8 @@ def propose_expansion_round(
     cap_k = k if k is not None else dim_expand_k()
     cands = pool if pool is not None else candidate_pool(budget=budget)
     mgn = margin if margin is not None else dim_coverage_margin()
-    tfn = lambda q: int(round(q * 100))
+    def tfn(q):
+        return int(round(q * 100))
 
     proposals: List[DimensionProposal] = []
     for dim in cands:

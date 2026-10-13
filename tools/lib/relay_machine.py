@@ -141,6 +141,67 @@ def band_ok(band: str) -> bool:
     return band in _BAND_OK
 
 
+def _git_running() -> bool | None:
+    """有沒有 git 行程在跑（可能持有 index.lock）：`True`／`False`；`None`＝查不出來。
+
+    POSIX 走 `pgrep -x git`（rc 0＝有、1＝無、其餘＝查不出）；Windows 走 `tasklist`（查不到
+    映像名即「無」）。**行程名精確比對**：`git-remote-https` 之類的幫手行程不算持鎖者。
+    """
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)  # POSIX 上取 0＝不加旗標（鐵律三）
+    try:
+        if os.name == "nt":
+            proc = subprocess.run(
+                ["tasklist", "/FI", "IMAGENAME eq git.exe", "/NH", "/FO", "CSV"],
+                capture_output=True, encoding="utf-8", errors="replace", timeout=10,
+                check=False, creationflags=flags)
+            return "git.exe" in proc.stdout.lower() if proc.returncode == 0 else None
+        proc = subprocess.run(["pgrep", "-x", "git"], capture_output=True, encoding="utf-8",
+                              errors="replace", timeout=10, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return {0: True, 1: False}.get(proc.returncode)
+
+
+def _git_dir(repo_root: Path) -> Path:
+    """`.git` 目錄本體；worktree／submodule 的 `.git` 是檔（`gitdir: <路徑>`）⇒ 解出它指的目錄。"""
+    dot = Path(repo_root) / ".git"
+    text = _read_text(dot).strip() if dot.is_file() else ""
+    if not text.startswith("gitdir:"):
+        return dot
+    return Path(repo_root) / text.removeprefix("gitdir:").strip()
+
+
+def stale_index_lock(repo_root: Path, now: datetime, *, max_age_seconds: float = 600,
+                     pgrep=None) -> dict | None:
+    """PRD §8-3：`.git/index.lock` 陳舊檢查。無鎖、或鎖齡 ≤ `max_age_seconds` ⇒ `None`；否則回
+    `{path, age_seconds, action, reason, moved_to}`。
+
+    `action="removed"` 只在**確認無 git 行程**時發生，而且是**改名**成 `index.lock.stale-<時間戳>`
+    （可逆，不 unlink）；有 git 行程、或查不出來（`pgrep()` 回 `None`）、或改名失敗 ⇒ `"kept"`
+    ——量不到 ≠ 沒人持鎖。`pgrep` 是注入縫：零參數可呼叫，回 `True`／`False`／`None`
+    （同 `_git_running()`）。本函式不拋例外（呼叫端是無人看管的續跑窗）。
+    """
+    lock = _git_dir(repo_root) / "index.lock"
+    try:
+        age = now.timestamp() - lock.stat().st_mtime
+    except OSError:  # 沒有鎖（最常見）或讀不到：都沒有東西可處置
+        return None
+    if age <= max_age_seconds:
+        return None
+    info = {"path": str(lock), "age_seconds": round(age, 1), "moved_to": None}
+    running = (pgrep or _git_running)()
+    if running is not False:
+        return {**info, "action": "kept", "reason": (
+            "有 git 行程在跑，鎖可能仍有主" if running else "查不出 git 行程是否在跑（不動手）")}
+    aside = lock.with_name(f"index.lock.stale-{now.strftime('%Y%m%dT%H%M%S%z')}")
+    try:
+        lock.rename(aside)
+    except OSError as exc:
+        return {**info, "action": "kept", "reason": f"改名失敗：{exc}"}
+    return {**info, "moved_to": str(aside), "action": "removed",
+            "reason": f"鎖齡 {age:.0f}s > {max_age_seconds:.0f}s 且無 git 行程 ⇒ 改名保留（可逆）"}
+
+
 def git_status_snapshot(repo_root: Path) -> frozenset[str] | None:
     """`git status --porcelain` 一次快照（quotepath-safe，SSOT＝`git_paths`）。
 
@@ -168,16 +229,18 @@ def files_changed(before: frozenset[str] | None, after: frozenset[str] | None) -
     return len(after - before)
 
 
-def snapshot_log_fields(snapshot: frozenset[str] | None) -> dict:
+def snapshot_log_fields(snapshot: frozenset[str] | None, lock: dict | None = None) -> dict:
     """R115 修復 F3：把一次 porcelain 快照壓成稽核痕跡可負擔欄位（施工圖§3(c)判準④ round-label-ok
     「前快照落 resume log 痕跡」，此前只活在 `_run_resume()` 的行程記憶體，差集數字
     事後不可稽核）。回行數＋內容雜湊，**不灌 porcelain 全文**進 log——全文可能含使用者
     路徑／檔名且無上限成長，同誠實劃界第 8 條「量不到 ≠ 有改動」的保守紀律：`snapshot`
     為 `None`（量不到）時兩鍵誠實回 `None`，不得偽裝成「0 筆改動」。
+    `lock`＝`stale_index_lock()` 的處置結果（PRD §8-3）：有才多帶 `index_lock` 欄，沒有就不帶鍵。
     """
+    extra = {"index_lock": lock} if lock else {}
     if snapshot is None:
-        return {"lines": None, "digest": None}
-    return {"lines": len(snapshot),
+        return {"lines": None, "digest": None, **extra}
+    return {"lines": len(snapshot), **extra,
             "digest": hashlib.sha256("\n".join(sorted(snapshot)).encode("utf-8")).hexdigest()}
 
 
@@ -234,7 +297,10 @@ def made_progress(handback_verdict: str, files_changed_count: int) -> bool:
 # ─────────────── INV5（掌舵者 2026-09-05）：單一擁有者——同 session 不得雙 job 各自探測
 #: 續航兩族排程的工作名前綴（哨兵＝`AutoSDD_Sentinel_<sid>`；續跑＝`AutoSDD_SessionResume_<sid>`，
 #: 見 `session_resume_planner.sentinel_task_name`／`resume_task_name`）。兩者皆 per-session。
-_JOB_PREFIXES = ("AutoSDD_Sentinel_", "AutoSDD_SessionResume_")
+#: 第三個 `AutoSDD_EngineResume_`＝引擎續跑族（`engine_resume_job.py`），**不是** per-session：
+#: 尾段是 `<playbook 雜湊>_<觸發分鐘>`，這裡只登記家族前綴；抽出來的「id」不會與任何真 session
+#: id 相等。
+_JOB_PREFIXES = ("AutoSDD_Sentinel_", "AutoSDD_SessionResume_", "AutoSDD_EngineResume_")
 
 
 def job_session(task_name: str) -> str:

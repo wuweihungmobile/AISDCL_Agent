@@ -629,11 +629,6 @@ class TestStatusExitCodeRuntime(unittest.TestCase):
 
     def test_uninstall_whatif_succeeds_when_carrier_scripts_are_unreachable(self) -> None:
         """DEF-101-619 回歸鎖：`-Uninstall` 不得依賴 nightly／smoke 載體腳本存在。
-
-        沿用改名複本（其載體絕對路徑必然不存在，R60 實測 install 模式 `-WhatIf`
-        在此會於存在性檢查就 `exit 1`）：修復前若同一道守門也擋 `-Uninstall`，
-        本測試會以 rc=1 重現 DEF-101-619；修復後應正常預覽並以 rc=0 結束——
-        解除安裝理應比安裝更寬容。史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
         """
         with tempfile.TemporaryDirectory() as tmpdir:
             script = self._script_with_absent_task_names(tmpdir)
@@ -695,12 +690,6 @@ class TestStatusExitCodeRuntime(unittest.TestCase):
 
 class TestUnattendedExecutionHardening(unittest.TestCase):
     """R69（S-5）：讓「重跑 installer」不再是回歸源。
-
-    真機事故的三個直接成因，全都能被「有人跑一次 installer」重新種回去（install
-    路徑是「存在就 Unregister 再 Register」）：不帶 `-Principal` 套預設 Interactive
-    使未登入就整輪不跑、不帶 `-ExecutionTimeLimit` 預設 PT72H 使睡眠凍住的實例
-    仍在額度內存活、`MultipleInstances` 預設 IgnoreNew 使新觸發被丟棄。史料見
-    證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
 
     def setUp(self) -> None:
@@ -1301,12 +1290,6 @@ class TestWindowsSmokeTaskHasWrittenExitCriteria(unittest.TestCase):
 
     def test_e3_measures_only_what_survives_its_own_action(self) -> None:
         """🔴 R76：E3 的量測對象不得隨「被它所判的動作」而改變（R75 頭號教訓第三次復發）。
-
-        缺陷本體：E3 原文要求移除後某工具回 rc=0，而該工具的期望值 SSOT 同時列
-        兩支任務 ⇒ 執行 E3 自己授權的移除動作必然讓它回 rc=1，判準結構上不可滿足。
-        意圖（Rule 9）：不可滿足的判準不得再被寫回去。三方向：①E3 必須點名真正
-        關心的那一支；②不得把授權移除的那一支算進量測對象；③必須逐任務讀法。
-        史料見證據檔〈第七輪 史料搬遷（Dev-Trim8）〉。
         """
         e3 = self._e3_paragraph()
         self.assertIn(

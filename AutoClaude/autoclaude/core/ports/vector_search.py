@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal, Optional, Protocol, runtime_checkable
+from typing import Any, Literal, Protocol, runtime_checkable
 
 Namespace = Literal[
     "knowledge_entries",
@@ -68,8 +68,8 @@ class IVectorSearch(Protocol):
         query_vector: list[float],
         model_id: str,
         top_k: int = 10,
-        ef_search: Optional[int] = None,
-        extra_filters: Optional[dict[str, Any]] = None,
+        ef_search: int | None = None,
+        extra_filters: dict[str, Any] | None = None,
     ) -> tuple[list[VectorHit], SearchStats]:
         """執行 HNSW 查詢。
 

@@ -10,7 +10,6 @@ from pathlib import Path
 
 from tools.mutmut_counts_parser import main, parse_mutmut_counts
 
-
 # ----- 分支 1: section_found=True + emitted=5 → 正常 OK -----
 
 
@@ -28,7 +27,9 @@ def test_parse_full_marker_section_with_five_counts() -> None:
     result = parse_mutmut_counts(text)
     assert result.section_found is True
     assert result.emitted == 5
-    assert result.counts == {"killed": 111, "survived": 38, "timeout": 0, "suspicious": 0, "skipped": 0}
+    assert result.counts == {
+        "killed": 111, "survived": 38, "timeout": 0, "suspicious": 0, "skipped": 0
+    }
     assert result.warning is None
     assert result.formatted_lines == (
         "[mutation counts] Killed (111)",

@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from .playbook_runner import PlaybookRunner
 
 
-def _resolve_topology_dashboard(runner: "PlaybookRunner") -> str:
+def _resolve_topology_dashboard(runner: PlaybookRunner) -> str:
     """AutoSDD_improving_14 A 軌（W-14-2）：從 runner 上可選的 SddGovernancePlugin 取已載入的
     meta⁸ 拓樸審批儀表板（kernel 路徑 PRE_RUN fail-closed 載入後寫入 plugin 狀態）。
 
@@ -37,14 +37,14 @@ def _resolve_topology_dashboard(runner: "PlaybookRunner") -> str:
 
 
 def dump_escalation_impl(
-    runner: "PlaybookRunner",
-    tracker: "FailureTracker",
-    task: "PlaybookTask",
+    runner: PlaybookRunner,
+    tracker: FailureTracker,
+    task: PlaybookTask,
     playbook_path: str,
     final_eval_output: str,
     human_hint: str = "",
     topology_dashboard: str = "",
-) -> "EscalationDump":
+) -> EscalationDump:
     """SD_06 W2-T2-12：_save_escalation_dump 全文下沉。
 
     含 cfg snapshot + _notify_cb closure；委派至 CheckpointPlugin.save_escalation_dump。

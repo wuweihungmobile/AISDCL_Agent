@@ -470,18 +470,11 @@ def append_log(path: Path, event: str, **fields: object) -> None:
 # 失敗方向刻意 fail-closed：rc 非零而又分類不出來時回 `LIMIT_UNKNOWN` 且 `open=False`
 # ——「不確定額度回來了沒」時當成沒回來，只會多等一輪；反過來會在沒額度時去跑續跑，
 # 白燒一次主 session 的成本。
-# 🔴 R81 收斂／`DEF-101-990`：**ADR-XPLAT-005 §3.3 要求「先讀零成本快取、讀不到才付費
-# 探測」，這一項至今未做**，而在 SD 複審點出來之前，repo 內沒有任何一處標注它未做（對照
-# ADR 的 M10／M11 都誠實標了「🔴 待建」）。現況：本檔全檔零 `quota_meter` 引用。
-# 不做的理由是量出來的，不是忘了：本檔實測 **749／750**（`guardrail_cli` tier），而那個
-# 改動要落地一個「快取命中就 return」的分支，一行塞不下；ADR 自己開的解鎖程序是先做
-# `tools/session_endurance.py` 抽離（R79_HANDOFF §4.3）＝獨立包。且它改的是**無人看管**
-# 的續航決策，判錯的代價是白燒一次主 session。⇒ 已登記交由下一輪承接（承接輪號寫在帳本
-# 那一列，不寫進程式碼檔——程式碼裡的輪號會超前帳本時鐘）。
 def probe_quota(claude: str = "claude", model: str | None = None) -> dict:
     """問「額度回來了沒」：L0 零成本端點先答（正向才算）；否則花**一次**最便宜的呼叫。
-    回 `{open, kind, rc, text, source}`。"""
-    # 🔴 DEF-200-266／ADR-XPLAT-005 §3.3（上方 DEF-101-990(b) 那段「至今未做」自此結清）：
+    回 `{open, kind, rc, text, source}`。R-4.5.10-1：牆鐘 ≤`PROBE_WALL_SECONDS`；每次醒來只探測
+    一次（`tick_plan` 的 rearm 是下一次醒來），故次數上限 1 ≤ 3。"""
+    # 🔴 DEF-200-266／ADR-XPLAT-005 §3.3（DEF-101-990(b)「至今未做」標注自此結清）：
     # 端點快取新鮮且每一軸 <100% ⇒ open、零 token；給不出正向結論才付費探測。
     if (l0 := quota_gate.endpoint_probe_verdict()) is not None:
         return l0
@@ -504,11 +497,11 @@ def probe_quota(claude: str = "claude", model: str | None = None) -> dict:
     workdir = Path(tempfile.mkdtemp(prefix="autosdd_probe_"))
     try:
         proc = subprocess.run(
-            resume_route.probe_argv(claude, model),
-            cwd=str(workdir), capture_output=True, encoding="utf-8",
+            resume_route.probe_argv(claude, model), cwd=str(workdir),
+            capture_output=True, encoding="utf-8", errors="replace", check=False,
             # 🔴 R80：這一站此前漏帶旗標。它由哨兵那一跑（pythonw ⇒ 無 console）呼叫，
             # 而 `claude.exe` 是 console 子系統應用 ⇒ 每一次真撞線後的探測都會彈一個視窗。
-            errors="replace", timeout=180, check=False, creationflags=guard.NO_WINDOW)
+            timeout=resume_route.PROBE_WALL_SECONDS, creationflags=guard.NO_WINDOW)
         # 🔴 判讀三層（成功信封 ⇒ open／錯誤信封 ⇒ 字樣層／非 JSON ⇒ 字邊界字樣層，fail-closed）
         # 住 `quota_limits.classify_probe_output`：R100 止血 B 的「正向條件用專屬常數」原封保留，
         # 修的是正向憑證從字樣改成結構（成功信封裡 `duration_ms=3429` 的 `429` 曾判成未恢復）。
@@ -1132,20 +1125,22 @@ def _transcript_cap() -> tuple[int, str]:
 # 🔴 選路近乎純函式（stat 一次逐字稿，不 spawn；m5 起病態 ENV 會印一行 stderr，那是出聲
 # 不是副作用升級；G2 起另有一次**冪等 mkdir**——handback 目錄解析經 resume_route→
 # endurance_env，「不寫檔」的舊宣稱已據實訂正）：四種輸入態都要能在測試裡注入。
-# 方向鎖：降級只准 RESUME→FRESH 單向——逐字稿可用時**必須**回 SESSION_RESUME（把可用
-# 的 session context 丟掉＝資訊損失），且 FRESH 的 argv 不得帶 `-r`。任務書缺席＝REFUSE：
+# 方向鎖：降級只准 RESUME→FRESH 單向——逐字稿可用且 `weekly` 為空時**必須**回 SESSION_RESUME
+# （把可用的 session context 丟掉＝資訊損失），且 FRESH 的 argv 不得帶 `-r`。任務書缺席＝REFUSE：
 # 兩條路的 prompt 都指向任務書，它缺席時派出去的是一個空承諾（R59 事故同形），呼叫端
 # 必須 fail-loud，不得靜默派空 prompt。argv 順序（prompt 必在 `--add-dir` 之前，且
 # --add-dir 後只能有一個值）的立案見 `_run_resume` 上方 R80 段與姊妹鎖
 # test_the_variadic_add_dir_does_not_swallow_the_prompt。
 def choose_resume_route(claude: str, session_id: str, transcript: Path | None,
-                        plan_path: str, max_bytes: int | None = None) -> dict:
+                        plan_path: str, max_bytes: int | None = None, weekly: str = "") -> dict:
     """喚醒選路：回 `{strategy, reason, argv}`；REFUSE 時 argv=None（呼叫端 fail-loud）。
 
     🔴 2026-09-07 掌舵者裁決（SA＋SD 兩位獨立審查通過）：此前有一個 `followup_ok` 參數
     （＝INV3「前一窗確實起來」的判準結果，往下傳成 `resume_argv(allow_followup=…)`），
     連同 INV2 一併移除——無人續跑一旦確認 spawn 成功即與互動 session 同等信任，不分窗次。
     兩路的 argv 因此只差 `-r <session_id>`，權限姿態逐字相同。
+    `weekly`＝週軸已達 converge 帶的理由（PRD §4.5.4；`resume_route.weekly_why()` 取數、呼叫端
+    注入）：非空 ⇒ 逐字稿可用也降級 FRESH（省額度優先），空＝不強制。
     """
     plan = Path(str(plan_path or ""))
     if not plan.is_file():
@@ -1159,14 +1154,13 @@ def choose_resume_route(claude: str, session_id: str, transcript: Path | None,
     # session id 缺席（FRESH 降級因之一）時退 plan.stem——任務書檔名本就以 sid 命名。
     hb = resume_route.handback_report(str(session_id or "") or plan.stem)
     size = transcript.stat().st_size if (transcript and transcript.is_file()) else None
-    if session_id and size and size <= limit:
+    if session_id and size and size <= limit and not weekly:
         return {"strategy": STRATEGY_RESUME, "handback": str(hb),
                 "reason": f"逐字稿可用（{size:,}B ≤ 上限 {limit:,}B）⇒ 帶完整 context 續跑{suffix}",  # noqa: E501
                 # v2.1.13 G1：argv 組裝（含 --permission-mode/--settings 權限姿態旗標）
                 # 下沉 tools/lib/resume_route.py——兩路同一份真相，旗標不可能只補到一路。
                 "argv": resume_route.resume_argv(claude, str(session_id), f"讀 {plan}，照它第 3 節做。{_RESUME_RULES}🔴 handback 檔路徑＝{hb}", plan.parent)}  # noqa: E501
-    why = ("session id 缺席" if not session_id else "逐字稿缺檔" if size is None else
-           "逐字稿為空" if size == 0 else f"逐字稿 {size:,}B 超上限 {limit:,}B")
+    why = resume_route.fresh_why(session_id, size, limit, weekly)
     return {"strategy": STRATEGY_FRESH, "handback": str(hb),
             "reason": f"{why} ⇒ 降級開全新 session，state 由磁碟任務書交棒{suffix}",
             "argv": resume_route.fresh_argv(claude, f"按磁碟任務書繼續：讀 {plan}，照它第 3 節做。{_RESUME_RULES}🔴 handback 檔路徑＝{hb}", plan.parent)}  # noqa: E501
@@ -1187,7 +1181,7 @@ def _run_resume(args, state: dict, log: Path) -> int | None:
     transcript = (Path(str(state["transcript"])) if state.get("transcript")
                   else resolve_transcript(sid) if sid else None)
     route = choose_resume_route(args.probe_command, sid, transcript,
-                                str(state.get("plan_path") or ""))
+                                str(state.get("plan_path") or ""), weekly=resume_route.weekly_why())
     # 痕跡必記策略與原因：降級是靜默失效的高風險點，「走了哪條路」必須事後可稽核。
     append_log(log, "route_chosen", strategy=route["strategy"], why=route["reason"]); state["route_strategy"] = route["strategy"]; state["handback_path"] = str(route.get("handback") or "")  # noqa: E501,E702 — v2.1.13 G3：REFUSE 需可辨（見 _resume_tick）；R115 修復 F1：settle_window() 讀 state["handback_path"] 判準③，此前恆未寫入 state ⇒ 讀空文本 round-label-ok
     if route["argv"] is None:
@@ -1227,7 +1221,7 @@ def _run_resume(args, state: dict, log: Path) -> int | None:
     # 整支行程消失，而呼叫端此前已經把狀態塊寫成 `"resumed"`、排程也刪了（謊稱成功、
     # 無法重試）。同 `probe_quota()` 既有的 except 寫法。
     try:
-        before = relay_machine.git_status_snapshot(_REPO_ROOT); append_log(log, "relay_snapshot_before", **relay_machine.snapshot_log_fields(before)); proc = subprocess.run(route["argv"], capture_output=True, encoding="utf-8", errors="replace", timeout=3600, check=False, creationflags=guard.NO_WINDOW, cwd=str(_REPO_ROOT), env={**os.environ, UNATTENDED_ENV: "1", **resume_route.role_env()})  # noqa: E501,E702 — v2.1.13 G3：spawn 前快照（判準④ files_changed 差集）；R115 修復 F3：前快照落 resume log（V-c3 半格，不灌 porcelain 全文） round-label-ok
+        lock = relay_machine.stale_index_lock(_REPO_ROOT, datetime.now().astimezone()); before = relay_machine.git_status_snapshot(_REPO_ROOT); append_log(log, "relay_snapshot_before", **relay_machine.snapshot_log_fields(before, lock)); proc = subprocess.run(route["argv"], capture_output=True, encoding="utf-8", errors="replace", timeout=3600, check=False, creationflags=guard.NO_WINDOW, cwd=str(_REPO_ROOT), env={**os.environ, UNATTENDED_ENV: "1", **resume_route.role_env()})  # noqa: E501,E702 — v2.1.13 G3：spawn 前快照（判準④ files_changed 差集）；R115 修復 F3：前快照落 resume log（V-c3 半格，不灌 porcelain 全文）；§8-3：快照前先處置陳舊 index.lock（改名可逆）並留痕 round-label-ok
     except (OSError, subprocess.SubprocessError) as exc:
         append_log(log, "resume_spawn_failed", strategy=route["strategy"], error=str(exc))
         print(f"❌ 續跑呼叫本身失敗：{exc}", file=sys.stderr); return None  # noqa: E702

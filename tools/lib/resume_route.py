@@ -26,10 +26,13 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime
 from pathlib import Path, PureWindowsPath
 
 import endurance_env
 import model_roles
+import quota_pace  # §4.5.4：週窗長度的桶名文法（純函式、零 I/O）
+import quota_policy  # 保險軸清單 `FALLBACK_KINDS`（零 I/O 判讀層）
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -134,6 +137,44 @@ def _roles() -> model_roles.ModelRoles:
 def role_env() -> dict[str, str]:
     """併進喚醒窗口子行程環境的鍵（子代理預設模型）；planner `_run_resume` 的唯一接線點。"""
     return model_roles.child_env(_roles())
+
+
+def weekly_forces_fresh(axes, converge_pct: float) -> str | None:
+    """PRD §4.5.4「週軸已高 ⇒ 一律 FRESH」：任一週窗軸 `pct ≥ converge_pct` ⇒ 理由字串，否則 None。
+
+    週軸＝窗長 ≥ 一週；窗長由 `quota_pace.windows()` 的桶名文法（含同 reset 鄰軸繼承）解，
+    不寫桶名清單（同 `quota_policy` 檔頭紀律）；保險軸（`FALLBACK_KINDS`）不算——保險池不得一票
+    否決主力。門檻是呼叫端傳入的載入後 `Policy.converge_pct`，本函式不持數字。量不到（`axes`
+    空）⇒ `None`＝維持 RESUME：沒量到不等於「已高」。
+    """
+    axes, week = tuple(axes), quota_pace.window_minutes("weekly")
+    wins = quota_pace.windows(tuple((a.kind, a.resets_at) for a in axes))
+    hit = [a for a, win in zip(axes, wins) if win is not None and win >= week
+           and a.pct >= converge_pct and a.kind not in quota_policy.FALLBACK_KINDS]
+    if not hit:
+        return None
+    return (f"週軸 {'、'.join(f'{a.kind}={a.pct:g}%' for a in hit)} 已達 converge 帶"
+            f"（≥{converge_pct:g}%）⇒ 省額度優先，不續接長對話")
+
+
+def weekly_why() -> str:
+    """§4.5.4 的取數接線：讀額度快取（零 token、不打網路）＋載入後政策值；`""`＝不強制 FRESH。"""
+    import quota_gate  # noqa: PLC0415 — lazy：本檔被 hook 鏈 lazy import，模組層拖 quota_gate 會擴大 import 面
+
+    policy = quota_gate.quota_policy.load_policy(quota_gate.policy_env())[0]
+    state = quota_gate.read_quota(datetime.now().astimezone())
+    return weekly_forces_fresh(state.axes, policy.converge_pct) or ""
+
+
+def fresh_why(session_id: str, size: int | None, limit: int, weekly: str = "") -> str:
+    """降級開全新 session 的原因（RESUME 條件不成立才會被問）：逐字稿三態優先，其後才是週軸理由。"""
+    return ("session id 缺席" if not session_id else "逐字稿缺檔" if size is None else
+            "逐字稿為空" if size == 0 else f"逐字稿 {size:,}B 超上限 {limit:,}B" if size > limit
+            else weekly)
+
+
+#: PRD R-4.5.10-1：付費探針單次牆鐘上限（秒）。次數上限 3 由結構保證：每次醒來只探測一次。
+PROBE_WALL_SECONDS = 90
 
 
 def probe_argv(claude: str, model: str | None = None) -> list[str]:

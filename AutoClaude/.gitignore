@@ -27,6 +27,10 @@ logs/
 backups/
 checkpoints/
 *.log
+# PRD §6.1 不變式 9 的字面目錄（引擎狀態／救援 patch 的家）。開機自檢以
+# `git check-ignore -q <dir>/` 逐目錄驗證；拿掉這行，tests/execution/
+# test_prd61_gitignore_invariant9.py 的「兩份 .gitignore 各自涵蓋」那一格轉紅。
+.autoclaude/
 
 # 測試覆蓋率快取（pytest-cov 每次測試重新產生）
 .coverage

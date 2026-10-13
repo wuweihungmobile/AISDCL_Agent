@@ -7,11 +7,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from autoclaude.core.event_bus import EventBus
 from autoclaude.core.hookspec import HookContext, KernelPhase
-from autoclaude.models.counter_snapshot import CounterSnapshot
 from autoclaude.models.playbook import GlobalInvariants, Playbook, PlaybookTask
 from autoclaude.plugins import CheckpointPlugin, GotoCounterPlugin
 from autoclaude.utils.checkpoint_manager import CheckpointManager, PlaybookCheckpoint
@@ -26,7 +23,9 @@ def _pb() -> Playbook:
     )
 
 
-def _build_wired(tmp_path: Path) -> tuple[EventBus, CheckpointPlugin, GotoCounterPlugin, CheckpointManager]:
+def _build_wired(
+    tmp_path: Path,
+) -> tuple[EventBus, CheckpointPlugin, GotoCounterPlugin, CheckpointManager]:
     bus = EventBus()
     mgr = CheckpointManager(checkpoint_dir=str(tmp_path))
     cp_plugin = CheckpointPlugin(checkpoint_manager=mgr)  # 不傳 goto_counter
@@ -79,7 +78,8 @@ class TestCheckpointGotoDecoupling:
         assert "counter_snapshot" in restore_emissions[0].payload
         assert "checkpoint" in restore_emissions[0].payload
         # W4 三方審查 Dev-W4-Maj-3：驗證真正路由生效
-        # （spy_emit 保留呼叫 original_emit，故 GotoCounterPlugin 應已透過 EventBus 收到事件並更新狀態）
+        # （spy_emit 保留呼叫 original_emit，故 GotoCounterPlugin 應已透過 EventBus
+        # 收到事件並更新狀態）
         assert goto.snapshot().goto_counter == {"T02": 3}, "EventBus 路由未生效"
 
     def test_goto_counter_receives_restore_event_and_updates_state(self, tmp_path: Path) -> None:

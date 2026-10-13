@@ -8,7 +8,6 @@ Gap-041：演化後重啟 checkpoint — 已完成步驟可跳過、step_evoluti
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from ...utils.checkpoint_manager import PlaybookCheckpoint
 
@@ -21,8 +20,8 @@ def save_evolution_resume_checkpoint_impl(
     playbook,
     step_log: list,
     completed_step_ids,
-    step_evolution_counter: Optional[dict] = None,
-    alert_ladder: Optional[dict] = None,
+    step_evolution_counter: dict | None = None,
+    alert_ladder: dict | None = None,
 ) -> bool:
     """W3-1a：Gap-041 演化後儲存 checkpoint；回傳是否成功。"""
     try:

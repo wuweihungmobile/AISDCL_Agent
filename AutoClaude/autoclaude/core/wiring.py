@@ -16,6 +16,8 @@
 #   - 整合 GotoCounterPlugin + CheckpointPlugin（Gap-042/048/049 計數器持久化）
 from __future__ import annotations
 
+import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -43,6 +45,7 @@ from ..plugins import (
 from ..utils.checkpoint_manager import CheckpointManager
 from ..utils.config import AppConfig
 from ..utils.knowledge_base import FailureKnowledgeBase
+from ..utils.sliced_sleep import sliced_sleep
 from .event_bus import EventBus
 from .kernel import PlaybookKernel
 from .ports.brain import IBrain
@@ -389,6 +392,20 @@ def wire_plugins_with_registry(
     return plugins
 
 
+# PRD §8 列 1：429 退避的睡法＝分片休眠（同 AutoResumeService._wait）：片與片之間檢查 ESC+F12，
+# 中斷時提早返回，其後 PRE_ATTEMPT 的 HotkeyPlugin 會 veto，而不是把整段等待睡完再重打一次。
+# `time.sleep` 在呼叫當下才取屬性（測試靠 patch 它攔截）。
+def _backoff_sleeper(cfg: AppConfig, hotkey: Any | None) -> Callable[[float], None]:
+    tg = cfg.token_guard
+
+    def _sleep(seconds: float) -> None:
+        sliced_sleep(
+            seconds, tg.sleep_slice_seconds, tg.clock_jump_tolerance_seconds,
+            wall=time.time, mono=time.monotonic, sleep=time.sleep,
+            stop=lambda: bool(getattr(hotkey, "triggered", False)))
+    return _sleep
+
+
 def build_kernel(
     cfg: AppConfig,
     *,
@@ -447,6 +464,8 @@ def build_kernel(
         brain=brain,
         mutation_service=plugins["mutation_service"],
         observability=observability,
+        limit_retry=plugins["token_guard"].limit_retry_wait,
+        limit_sleep=_backoff_sleeper(cfg, hotkey),
     )
 
 

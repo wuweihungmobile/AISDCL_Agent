@@ -14,8 +14,9 @@ testing 友善：時間源透過 ``time_source`` 注入。
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Literal
+from typing import Literal
 
 CircuitState = Literal["closed", "open", "half_open"]
 

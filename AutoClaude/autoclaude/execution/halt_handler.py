@@ -10,7 +10,7 @@
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from .types import PlaybookResult, _StepOutput
 
@@ -22,23 +22,23 @@ if TYPE_CHECKING:
 
 
 def handle_token_halt_impl(
-    runner: "PlaybookRunner",
-    playbook: "Playbook",
+    runner: PlaybookRunner,
+    playbook: Playbook,
     playbook_path: str,
-    task: "PlaybookTask",
+    task: PlaybookTask,
     step_idx: int,
     step_out: _StepOutput,
     step_log: list[str],
-    workflow: "WorkflowType",
+    workflow: WorkflowType,
     total: int,
-    tracker: Optional["FailureTracker"] = None,
+    tracker: FailureTracker | None = None,
     attempt: int = 0,
-    goto_counter: Optional[dict] = None,
-    inject_before_counter: Optional[dict] = None,
-    skip_to_counter: Optional[dict] = None,
-    completed_step_ids: Optional[set] = None,
-    step_evolution_counter: Optional[dict] = None,
-    alert_ladder: Optional[dict] = None,
+    goto_counter: dict | None = None,
+    inject_before_counter: dict | None = None,
+    skip_to_counter: dict | None = None,
+    completed_step_ids: set | None = None,
+    step_evolution_counter: dict | None = None,
+    alert_ladder: dict | None = None,
 ) -> PlaybookResult:
     """SD_06 W2-T2-8：_handle_token_halt 全文下沉。
 

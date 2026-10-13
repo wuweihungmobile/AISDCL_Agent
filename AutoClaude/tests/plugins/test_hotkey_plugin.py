@@ -20,15 +20,18 @@ def _task() -> PlaybookTask:
 
 class TestHotkeyPluginBasics:
     def test_name(self):
-        hk = MagicMock(); hk.triggered = False
+        hk = MagicMock()
+        hk.triggered = False
         assert HotkeyPlugin(hk).name() == "hotkey"
 
     def test_priority_is_10(self):
-        hk = MagicMock(); hk.triggered = False
+        hk = MagicMock()
+        hk.triggered = False
         assert HotkeyPlugin(hk).priority() == 10
 
     def test_subscribed_phases(self):
-        hk = MagicMock(); hk.triggered = False
+        hk = MagicMock()
+        hk.triggered = False
         phases = HotkeyPlugin(hk).subscribed_phases()
         assert KernelPhase.PRE_STEP in phases
         assert KernelPhase.PRE_ATTEMPT in phases
@@ -37,13 +40,15 @@ class TestHotkeyPluginBasics:
 
 class TestHotkeyPluginNotTriggered:
     def test_returns_none_when_not_triggered(self):
-        hk = MagicMock(); hk.triggered = False
+        hk = MagicMock()
+        hk.triggered = False
         plugin = HotkeyPlugin(hk)
         ctx = HookContext(phase=KernelPhase.PRE_STEP, playbook=_pb(), task=_task())
         assert plugin.on_event(ctx) is None
 
     def test_returns_none_on_pre_attempt_when_not_triggered(self):
-        hk = MagicMock(); hk.triggered = False
+        hk = MagicMock()
+        hk.triggered = False
         plugin = HotkeyPlugin(hk)
         ctx = HookContext(phase=KernelPhase.PRE_ATTEMPT, playbook=_pb(),
                           task=_task(), attempt=0)
@@ -52,7 +57,8 @@ class TestHotkeyPluginNotTriggered:
 
 class TestHotkeyPluginTriggered:
     def test_returns_veto_when_triggered_pre_step(self):
-        hk = MagicMock(); hk.triggered = True
+        hk = MagicMock()
+        hk.triggered = True
         plugin = HotkeyPlugin(hk)
         ctx = HookContext(phase=KernelPhase.PRE_STEP, playbook=_pb(), task=_task())
         result = plugin.on_event(ctx)
@@ -61,7 +67,8 @@ class TestHotkeyPluginTriggered:
         assert "ESC+F12" in result.reason
 
     def test_returns_veto_when_triggered_pre_attempt(self):
-        hk = MagicMock(); hk.triggered = True
+        hk = MagicMock()
+        hk.triggered = True
         plugin = HotkeyPlugin(hk)
         ctx = HookContext(phase=KernelPhase.PRE_ATTEMPT, playbook=_pb(),
                           task=_task(), attempt=2)
@@ -70,7 +77,8 @@ class TestHotkeyPluginTriggered:
         assert "T01" in result.reason
 
     def test_veto_reason_includes_step_id(self):
-        hk = MagicMock(); hk.triggered = True
+        hk = MagicMock()
+        hk.triggered = True
         plugin = HotkeyPlugin(hk)
         task = PlaybookTask(step_id="T_CUSTOM", name="n", prompt="p")
         ctx = HookContext(phase=KernelPhase.PRE_STEP, playbook=_pb(), task=task)
@@ -80,7 +88,8 @@ class TestHotkeyPluginTriggered:
 
 class TestHotkeyPluginEventBusIntegration:
     def test_via_event_bus_pre_step_vetos(self):
-        hk = MagicMock(); hk.triggered = True
+        hk = MagicMock()
+        hk.triggered = True
         bus = EventBus()
         bus.register(HotkeyPlugin(hk))
         merged = bus.emit(HookContext(
@@ -90,7 +99,8 @@ class TestHotkeyPluginEventBusIntegration:
         assert any("hotkey" in r for r in merged.veto_reasons)
 
     def test_via_event_bus_pre_attempt_vetos(self):
-        hk = MagicMock(); hk.triggered = True
+        hk = MagicMock()
+        hk.triggered = True
         bus = EventBus()
         bus.register(HotkeyPlugin(hk))
         merged = bus.emit(HookContext(
@@ -101,7 +111,8 @@ class TestHotkeyPluginEventBusIntegration:
 
 class TestHotkeyPluginContextWithoutTask:
     def test_no_task_still_returns_veto(self):
-        hk = MagicMock(); hk.triggered = True
+        hk = MagicMock()
+        hk.triggered = True
         plugin = HotkeyPlugin(hk)
         ctx = HookContext(phase=KernelPhase.PRE_STEP, playbook=_pb(), task=None)
         result = plugin.on_event(ctx)

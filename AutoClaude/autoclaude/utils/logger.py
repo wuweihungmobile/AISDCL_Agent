@@ -7,6 +7,41 @@ import unicodedata
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
+from .redaction import redact_secrets, secrets_redaction_enabled
+
+
+class RedactSecretsFilter(logging.Filter):
+    """PRD §12「日誌」：對每一筆 log 套用 `utils/redaction.py` 那一份樣式表（開關＝
+    `REDACT_SECRETS_IN_LOGS`，出廠 on，每筆讀一次）。只在真的有東西要遮時才改寫 record
+    （保住無秘密 record 的結構化 `args`）；traceback 一併遮——`logger.exception()` 繞過
+    `getMessage()`，是最常見的洩漏面。永不丟棄 record、永不拋例外。"""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if not secrets_redaction_enabled():
+            return True
+        try:
+            original = record.getMessage()
+        except Exception:                      # 壞的 %-args：交給 handler 照常 handleError
+            return True
+        redacted = redact_secrets(original)
+        if redacted != original:
+            record.msg, record.args = redacted, None
+        if record.exc_info and not record.exc_text:
+            try:
+                record.exc_text = logging.Formatter().formatException(record.exc_info)
+            except Exception:                  # 格式化不了：留給 handler 自己（失敗則 handleError）
+                return True
+        if record.exc_text:
+            record.exc_text = redact_secrets(record.exc_text)
+        return True
+
+
+def _attach_redaction(root: logging.Logger) -> None:
+    """把過濾器掛到 root logger 的**每個** handler（含既有的）；已掛過不重複。"""
+    for handler in root.handlers:
+        if not any(isinstance(f, RedactSecretsFilter) for f in handler.filters):
+            handler.addFilter(RedactSecretsFilter())
+
 
 class _EncodingSafeStreamHandler(logging.StreamHandler):
     """console handler：依目標 stream 編碼 sanitize，杜絕 Windows cp950 對非 ASCII
@@ -54,6 +89,7 @@ def setup_logger(log_dir: str = "logs", level: int = logging.DEBUG) -> logging.L
         # 留下未關閉的舊檔柄，且讓多次匯入的呼叫端拿到不同 handler），但改成 fail-loud：
         # 以 WARNING 具名說出新舊目錄，「換了目錄卻沒生效」不再是靜默事件。
         _warn_if_log_dir_diverges(root, log_dir)
+        _attach_redaction(root)
         return root
 
     log_path = Path(log_dir)
@@ -79,6 +115,7 @@ def setup_logger(log_dir: str = "logs", level: int = logging.DEBUG) -> logging.L
 
     root.addHandler(file_handler)
     root.addHandler(console_handler)
+    _attach_redaction(root)
     return root
 
 
@@ -185,7 +222,7 @@ def write_text_with_fallback(path: Path, content: str, fallback_prefix: str) -> 
     fallback 精神，供其他一次性寫入的呼叫端共用，不再各自重寫一份）。"""
     tmp = path.with_suffix(".tmp")
     try:
-        tmp.write_text(content, encoding="utf-8")
+        tmp.write_text(content, encoding="utf-8", newline="\n")
         tmp.replace(path)
         return path
     except OSError as exc:
@@ -195,7 +232,7 @@ def write_text_with_fallback(path: Path, content: str, fallback_prefix: str) -> 
             "write_text_with_fallback: 寫入 %s 失敗（%s），改用安全檔名 %s",
             path, exc, fallback,
         )
-        fallback.write_text(content, encoding="utf-8")
+        fallback.write_text(content, encoding="utf-8", newline="\n")
         return fallback
 
 

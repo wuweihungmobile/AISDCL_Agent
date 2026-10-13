@@ -159,7 +159,8 @@ def test_alphabet_genesis_round_k_truncation():
     """Rule 9.33.4 反 big-bang：一輪至多 K_alpha 個，其餘順延。"""
     cands = AG.enumerate_genesis_alphabet(budget=30)
     scores = {cands[0].name: 0.5, cands[1].name: 0.4, cands[2].name: 0.3}
-    ev = lambda e: scores.get(e.name, 0.0)
+    def ev(e):
+        return scores.get(e.name, 0.0)
     rnd = AG.alphabet_genesis_round(ev, candidates=cands, k=1)
     assert len(rnd.selected) == 1
     assert rnd.selected[0].element.name == cands[0].name
@@ -403,7 +404,8 @@ def test_adopt_alphabet_happy_path(tmp_path):
 def _accepted_alphabet_round(k=1):
     cands = AG.enumerate_genesis_alphabet(budget=30)
     scores = {cands[0].name: 0.5, cands[1].name: 0.4, cands[2].name: 0.3}
-    ev = lambda e: scores.get(e.name, 0.0)
+    def ev(e):
+        return scores.get(e.name, 0.0)
     return AG.alphabet_genesis_round(ev, candidates=cands, k=k)
 
 

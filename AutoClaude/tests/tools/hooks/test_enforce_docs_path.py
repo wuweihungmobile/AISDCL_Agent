@@ -23,7 +23,9 @@ def _run(payload: dict) -> subprocess.CompletedProcess:
 
 def test_docs_subdir_md_allowed():
     """Write 到 docs/05_development/foo.md → exit 0。"""
-    payload = {"tool_input": {"file_path": str(PROJECT_ROOT / "docs" / "05_development" / "foo.md")}}
+    payload = {
+        "tool_input": {"file_path": str(PROJECT_ROOT / "docs" / "05_development" / "foo.md")}
+    }
     result = _run(payload)
     assert result.returncode == 0, f"stderr={result.stderr}"
 

@@ -148,7 +148,8 @@ def test_sandbox_track_namespacing():
 def test_track_registry():
     from tools.fsm_runtime.fleet_orchestrator import TrackRegistry
     reg = TrackRegistry("proj")
-    reg.register("a"); reg.register("b")
+    reg.register("a")
+    reg.register("b")
     assert len(reg.active()) == 2
     reg._tracks["a"].status = "merged"
     assert len(reg.active()) == 1
@@ -218,7 +219,8 @@ def test_classify_conflict_paths():
 def test_parallel_track_join():
     from tools.fsm_runtime.fleet_orchestrator import TrackRegistry, all_joined
     reg = TrackRegistry("proj")
-    reg.register("a"); reg.register("b")
+    reg.register("a")
+    reg.register("b")
     assert not all_joined(reg)
     reg._tracks["a"].status = "joined"
     reg._tracks["b"].status = "merged"

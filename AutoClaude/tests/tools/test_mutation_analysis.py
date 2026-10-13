@@ -26,7 +26,6 @@ from tools.mutation_analysis import (
     render_backlog,
 )
 
-
 # ----- _expand_id_tokens -----
 
 
@@ -235,6 +234,8 @@ def test_render_backlog_includes_all_categories() -> None:
 
 
 def test_render_backlog_zero_survived() -> None:
-    classified = {"boundary": [], "constant": [], "dead_branch": [], "string_literal": [], "other": []}
+    classified = {
+        "boundary": [], "constant": [], "dead_branch": [], "string_literal": [], "other": []
+    }
     md = render_backlog("token_guard", classified)
     assert "0 个" in md or "共 0 " in md or "共 0" in md

@@ -11,7 +11,7 @@
 """
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from ..core.hookspec import HookContext, KernelPhase, VetoResult
 from ..execution.pre_run_validator import PreRunValidator
@@ -22,7 +22,7 @@ class PreRunValidatorPlugin:
 
     PRIORITY = 5  # 系統級 veto（最早執行）
 
-    def __init__(self, validator: Optional[PreRunValidator] = None):
+    def __init__(self, validator: PreRunValidator | None = None):
         self._validator = validator or PreRunValidator()
 
     def name(self) -> str:
@@ -34,7 +34,7 @@ class PreRunValidatorPlugin:
     def subscribed_phases(self) -> list[KernelPhase]:
         return [KernelPhase.PRE_RUN, KernelPhase.PRE_ATTEMPT]
 
-    def on_event(self, ctx: HookContext) -> Optional[Any]:
+    def on_event(self, ctx: HookContext) -> Any | None:
         # PRE_RUN：目前僅作為觀察者，未來可掃描整個 playbook
         if ctx.phase == KernelPhase.PRE_RUN:
             return None

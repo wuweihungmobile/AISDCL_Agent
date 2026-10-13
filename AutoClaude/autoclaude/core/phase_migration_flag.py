@@ -19,10 +19,8 @@ W6 G6 通過後 ≥ 3 個自然日無 production rollback 才可拔除此 flag�
 from __future__ import annotations
 
 import os
-from typing import Optional
 
 from .hookspec import KernelPhase
-
 
 # SD_05 §7 (2a)：8 個合法 phase 名稱
 LEGAL_PHASES: frozenset[str] = frozenset({
@@ -37,7 +35,7 @@ LEGAL_PHASES: frozenset[str] = frozenset({
 })
 
 _ENV_VAR = "AUTOCLAUDE_T18_P2_PHASES_MIGRATED"
-_override: Optional[frozenset[str]] = None
+_override: frozenset[str] | None = None
 
 
 def get_migrated_phases() -> frozenset[str]:
@@ -65,7 +63,7 @@ def is_phase_migrated(phase: KernelPhase) -> bool:
     return phase.name in get_migrated_phases()
 
 
-def set_migrated_phases(phases: Optional[set[str]]) -> None:
+def set_migrated_phases(phases: set[str] | None) -> None:
     """測試用：override 環境變數設定。傳 None 還原為讀環境變數。"""
     global _override
     if phases is None:

@@ -179,7 +179,8 @@ class TestTrendAnnotation:
 
 class TestEndToEndRationale:
     def test_flag_on_rationale_includes_feedback(self):
-        """AT-27-4-2 端到端：on_event(ON_ESCALATION) 回 MutationProposal.rationale 含原因+RTM 反饋。"""
+        """AT-27-4-2 端到端：on_event(ON_ESCALATION) 回 MutationProposal.rationale
+        含原因+RTM 反饋。"""
         p = _plugin(feedback=_FakeFeedback(_gap_report()), enabled=True)
         result = p.on_event(_ctx())
         assert result is not None

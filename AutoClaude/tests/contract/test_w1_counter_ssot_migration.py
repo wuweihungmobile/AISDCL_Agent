@@ -15,8 +15,6 @@
 """
 from __future__ import annotations
 
-import pytest
-
 from autoclaude.models.counter_snapshot import CounterSnapshot
 from autoclaude.plugins.goto_counter_plugin import GotoCounterPlugin
 from autoclaude.utils.config import PlaybookConfig
@@ -92,10 +90,10 @@ class TestPlaybookRunnerHoldsPlugin:
     """PlaybookRunner 持有 GotoCounterPlugin，作為 SSOT 入口。"""
 
     def test_runner_has_goto_counter_plugin_attribute(self, tmp_path):
-        from autoclaude.execution.playbook_runner import PlaybookRunner
-        from autoclaude.utils.config import AppConfig
         from autoclaude.decision.minimax_client import MinimaxClient
+        from autoclaude.execution.playbook_runner import PlaybookRunner
         from autoclaude.perception.hotkey_handler import HotkeyHandler
+        from autoclaude.utils.config import AppConfig
         cfg = AppConfig()
         cfg.checkpoint_dir = str(tmp_path)
         runner = PlaybookRunner(
@@ -113,10 +111,10 @@ class TestPlaybookRunnerHoldsPlugin:
         SD-m3 修正：使用公開 API（plugin.goto_counter property）兩次取得 reference
         驗證 identity，而非直接存取 plugin._snapshot 私有屬性。
         """
-        from autoclaude.execution.playbook_runner import PlaybookRunner
-        from autoclaude.utils.config import AppConfig
         from autoclaude.decision.minimax_client import MinimaxClient
+        from autoclaude.execution.playbook_runner import PlaybookRunner
         from autoclaude.perception.hotkey_handler import HotkeyHandler
+        from autoclaude.utils.config import AppConfig
         cfg = AppConfig()
         cfg.checkpoint_dir = str(tmp_path)
         runner = PlaybookRunner(
@@ -252,7 +250,9 @@ class TestCheckpointRoundTripSSOT:
 
     def test_save_request_returns_counter_snapshot_result(self):
         from autoclaude.core.hookspec import (
-            CounterSnapshotResult, HookContext, KernelPhase,
+            CounterSnapshotResult,
+            HookContext,
+            KernelPhase,
         )
         from autoclaude.models.playbook import GlobalInvariants, Playbook
         plugin = GotoCounterPlugin()

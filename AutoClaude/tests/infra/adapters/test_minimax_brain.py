@@ -38,7 +38,9 @@ def _make_decision(prompt="fix it", reasoning="r", task_goal_summary=None, step_
 class TestMinimaxBrainAdapterSuccess:
     def test_returns_correction_result_on_success(self):
         client = MagicMock()
-        client.decide_correction.return_value = _make_decision(prompt="please retry", reasoning="r1")
+        client.decide_correction.return_value = _make_decision(
+            prompt="please retry", reasoning="r1"
+        )
         adapter = MinimaxBrainAdapter(client)
 
         result = adapter.decide_correction(

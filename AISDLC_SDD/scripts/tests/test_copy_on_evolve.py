@@ -33,6 +33,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -398,6 +399,73 @@ def test_auto_regens_framework_status_on_evolve_def_96_001(repo: Path):
     # idempotent 兼證：腳本輸出確有重生步驟（非靜默略過）
     assert "framework_status_snapshot" in proc.stdout or "FRAMEWORK_STATUS" in proc.stdout, \
         f"建版輸出應含 SSOT 重生步驟\n{proc.stdout}"
+
+
+# ── DEF-101-018（R213）：建版後把舊 LATEST 補進根 ruff.toml 的 extend-exclude ────────────
+# 隔離 harness 的暫存 repo 根＝BASE，所以樣式寫成 `AISDLC_SDD_v0.01`
+# （生產佈局＝`AISDLC_SDD/AISDLC_SDD_v0.NN`）。
+_RUFF_TOML = '# 最小根設定\nextend-exclude = [\n    "AISDLC_SDD_v0.00",\n]\n'
+
+
+def _evolve(bash: str, repo: Path) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [bash, "scripts/copy_on_evolve.sh", "AISDLC_SDD_v0.01", "AISDLC_SDD_v0.02"],
+        cwd=str(repo), capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=60, env=_clean_git_env(),
+    )
+
+
+def _evolve_with_root_ruff(repo: Path, toml: str | None) -> tuple[str, subprocess.CompletedProcess]:
+    """佈署 scripts／v0.01、（可選）放一份根 ruff.toml 後建 v0.02；回 (bash, 結果)。"""
+    bash = _bash_with_python()
+    if bash is None:
+        pytest.skip("找不到 PATH 內含 python 的 bash（WSL bash 無 Windows python）")
+    _setup_version_repo_with_scripts(repo)
+    if toml is not None:
+        (repo / "ruff.toml").write_text(toml, encoding="utf-8", newline="\n")
+    proc = _evolve(bash, repo)
+    assert proc.returncode == 0, f"建版應 exit 0\nstdout:{proc.stdout}\nstderr:{proc.stderr}"
+    return bash, proc
+
+
+def test_ruff_block_skips_a_version_the_root_globs_already_cover_def_101_018(repo: Path):
+    """已有 glob 涵蓋舊 LATEST ⇒ 不動根 ruff.toml（多追加一條只會讓排除清單無謂變長）。"""
+    toml = '# 根設定\nextend-exclude = [\n    "AISDLC_SDD_v0.0*",\n]\n'
+    _, proc = _evolve_with_root_ruff(repo, toml)
+    assert "已涵蓋：AISDLC_SDD_v0.01" in proc.stdout, proc.stdout
+    assert (repo / "ruff.toml").read_text(encoding="utf-8") == toml, "已涵蓋卻改了根檔"
+
+
+def test_ruff_block_appends_the_old_latest_def_101_018(repo: Path):
+    """舊 LATEST 不在清單 ⇒ 逐字追加進 extend-exclude：既有條目保留、結果仍是合法 TOML。
+
+    WHY：不補，新版一建立舊 LATEST 即成凍結版而仍在 ruff 掃描面，
+    `test_ruff_root_config_excludes_only_frozen` 要到下一次 LATEST 前進才事後轉紅。
+    """
+    _, proc = _evolve_with_root_ruff(repo, _RUFF_TOML)
+    assert "已追加 AISDLC_SDD_v0.01" in proc.stdout, proc.stdout
+    got = tomllib.loads((repo / "ruff.toml").read_text(encoding="utf-8"))
+    assert got["extend-exclude"] == ["AISDLC_SDD_v0.00", "AISDLC_SDD_v0.01"], got
+
+
+def test_ruff_block_is_idempotent_on_rerun_def_101_018(repo: Path):
+    """同一版再建一次 ⇒ 根檔位元組不變、樣式只出現一次（重跑安全）。"""
+    bash, first = _evolve_with_root_ruff(repo, _RUFF_TOML)
+    assert "已追加 AISDLC_SDD_v0.01" in first.stdout, first.stdout
+    after_first = (repo / "ruff.toml").read_bytes()
+    shutil.rmtree(repo / "AISDLC_SDD_v0.02")  # helper 拒絕覆蓋既有目標，重跑前先移除新版
+    second = _evolve(bash, repo)
+    assert second.returncode == 0, f"stdout:{second.stdout}\nstderr:{second.stderr}"
+    assert "已涵蓋：AISDLC_SDD_v0.01" in second.stdout, second.stdout
+    assert (repo / "ruff.toml").read_bytes() == after_first, "第二次又改了根檔（非 idempotent）"
+    assert after_first.decode("utf-8").count('"AISDLC_SDD_v0.01"') == 1
+
+
+def test_ruff_block_only_warns_without_a_root_ruff_toml_def_101_018(repo: Path):
+    """隔離環境沒有根 ruff.toml ⇒ 只 warn 並略過（exit 0、不憑空建檔）。"""
+    _, proc = _evolve_with_root_ruff(repo, None)
+    assert "略過 ruff 排除面自動補" in proc.stderr, proc.stderr
+    assert not (repo / "ruff.toml").exists(), "根檔不存在時不得憑空建立"
 
 
 # ── R56（跨平台複審 Architect）：行尾政策由「版本子樹自帶 .gitattributes」達成 ────────

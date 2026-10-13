@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from math import ceil
-from typing import Dict, FrozenSet, List, Optional, Set
+from typing import Dict, FrozenSet, List, Set
 
 # === 凍結評分強度（Rule 9.26.4：調整須 bump version）===
 OBJECTIVE_PROFILE_VERSION = "v1.0"

@@ -5,15 +5,12 @@
 """
 from __future__ import annotations
 
-import pytest
-
+from autoclaude.utils.config import TokenGuardConfig
 from autoclaude.utils.token_tracker import (
     build_patterns,
     context_pct_from_claude_json,
     extract_context_pct,
 )
-from autoclaude.utils.config import TokenGuardConfig
-
 
 # ══════════════════════════════════════════════
 # 既有 4 種格式回歸測試（避免 T7 補強引入回歸）

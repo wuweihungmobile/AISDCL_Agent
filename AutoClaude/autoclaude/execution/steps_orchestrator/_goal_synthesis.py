@@ -21,8 +21,8 @@ logger = logging.getLogger("autoclaude.execution.playbook")
 
 
 def maybe_inject_goal_synthesis(
-    runner: "PlaybookRunner",
-    playbook: "Playbook",
+    runner: PlaybookRunner,
+    playbook: Playbook,
     step_idx: int,
     step_log: list,
     goal_synthesis_injected: bool,

@@ -48,6 +48,11 @@ except ImportError:  # pragma: no cover - 以腳本形態執行時才會走到
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     import ga_window as _ga_window  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools" / "lib"))
+from platform_utils import (  # noqa: E402
+    init_utf8_streams as _init_utf8_streams,  # type: ignore[import-not-found]
+)
+
 # ── R76：兩個「時間」面的門檻。🔴 **值與 WHY 的唯一的家是 `tools/ga_window.py`**
 # （R76 四方複審 SD-04：原本兩支 checker 各存一份，實測單邊改一個常數、兩支公然不一致
 # 而三支測試檔仍 108 passed rc=0——沒有任何東西會叫）。此處只做 re-export 讓既有
@@ -147,11 +152,7 @@ def evaluate(
 def main(argv: list[str] | None = None) -> int:
     # DEF-82-001/DEF-101-070 家族慣例：報表含中文/非 ASCII 符號，Windows cp950 console
     # 直接 print 會 UnicodeEncodeError 中斷；stdout + stderr 皆強制 utf-8。
-    for _stream in (sys.stdout, sys.stderr):
-        try:
-            _stream.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
-        except (AttributeError, OSError):
-            pass
+    _init_utf8_streams()
     parser = argparse.ArgumentParser(
         description="SD_09 W3 Round 2 audit P0-3 — drift_log 30 天零事件 GA 取證工具"
     )

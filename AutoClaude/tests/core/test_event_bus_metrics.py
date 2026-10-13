@@ -19,11 +19,8 @@ from autoclaude.core.event_bus import EventBus
 from autoclaude.core.hookspec import (
     HookContext,
     HookContractViolation,
-    IHook,
     KernelPhase,
-    PHASE_RESULT_CONTRACT,
     PromptInjectionResult,
-    VetoResult,
 )
 from autoclaude.models.playbook import GlobalInvariants, Playbook
 
@@ -195,14 +192,16 @@ class TestPhaseMigrationFlag:
     def test_default_empty_when_env_not_set(self, monkeypatch):
         monkeypatch.delenv("AUTOCLAUDE_T18_P2_PHASES_MIGRATED", raising=False)
         from autoclaude.core.phase_migration_flag import (
-            get_migrated_phases, set_migrated_phases,
+            get_migrated_phases,
+            set_migrated_phases,
         )
         set_migrated_phases(None)  # 還原為環境變數
         assert get_migrated_phases() == frozenset()
 
     def test_env_var_parsed_into_set(self, monkeypatch):
         from autoclaude.core.phase_migration_flag import (
-            get_migrated_phases, set_migrated_phases,
+            get_migrated_phases,
+            set_migrated_phases,
         )
         set_migrated_phases(None)
         monkeypatch.setenv(
@@ -214,7 +213,8 @@ class TestPhaseMigrationFlag:
 
     def test_illegal_phase_name_raises(self, monkeypatch):
         from autoclaude.core.phase_migration_flag import (
-            get_migrated_phases, set_migrated_phases,
+            get_migrated_phases,
+            set_migrated_phases,
         )
         set_migrated_phases(None)
         monkeypatch.setenv("AUTOCLAUDE_T18_P2_PHASES_MIGRATED", "BOGUS_PHASE")
@@ -223,7 +223,8 @@ class TestPhaseMigrationFlag:
 
     def test_is_phase_migrated(self, monkeypatch):
         from autoclaude.core.phase_migration_flag import (
-            is_phase_migrated, set_migrated_phases,
+            is_phase_migrated,
+            set_migrated_phases,
         )
         set_migrated_phases({"PRE_COMPACT"})
         assert is_phase_migrated(KernelPhase.PRE_COMPACT) is True

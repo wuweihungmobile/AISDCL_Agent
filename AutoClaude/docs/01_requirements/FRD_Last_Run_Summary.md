@@ -446,7 +446,7 @@ console script `autoclaude`（`pyproject.toml:153`，`autoclaude.main:main`）�
 
 | # | 鎖 | 何時紅 | Developer 要做的事 |
 |---|----|--------|-------------------|
-| 1 | `tests/infra/adapters/test_rtm_file_sink_newline.py::test_no_new_text_write_sites_without_explicit_newline`（AST 掃整個 `autoclaude/`） | 新檔任一文字模式寫入（`open("w")`／`Path.open("w")`／`write_text`）缺 `newline=` | 一律 `encoding="utf-8", newline="\n"`；**不得**把新檔加進 shrink-only 的 `_KNOWN_MISSING_NEWLINE`（`:30-45`） |
+| 1 | `tests/infra/adapters/test_rtm_file_sink_newline.py::test_no_new_text_write_sites_without_explicit_newline`（AST 掃整個 `autoclaude/`） | 新檔任一文字模式寫入（`open("w")`／`Path.open("w")`／`write_text`）缺 `newline=` | 一律 `encoding="utf-8", newline="\n"`；**不得**把新檔加進 shrink-only 的 舊欠債表 _KNOWN_MISSING_NEWLINE（R213 DEF-101-702 清零後已自鎖移除）（`:30-45`） |
 | 2 | 根層 `tools/tests/test_platform_neutral_paths.py::TestDirEntryPrimitivesAreAccountedFor::test_unguarded_site_census_matches_the_ledger`（雙向精確比對 `_DIRENT_UNGUARDED_DEBT = {"live": 37}`，`:3697`） | `os.replace`／`Path.replace`／`rename` 站點**未被** `try/except OSError`（或 `PermissionError`） 包住 ⇒ 多 1 筆即紅 | 把 `os.replace` 包在 `try … except OSError`（本設計「寫檔失敗不得影響 rc」本來就要求）；已用該檔的 `dirent_primitive_sites()`、`scan_naive_timestamp_persist()`、`scan_missing_encoding()` 對設計寫法的合成片段做紅綠驗證：有包 `try/except OSError`＝handled、沒包＝未處置；`datetime.now(UTC)` 零命中而 `datetime.now()` 命中 1 筆；有 `encoding=` 零命中、缺漏命中 1 筆 |
 | 3 | 同檔 `TestNaiveLocalTimestampsAreNotPersisted`（`:4994` 起） | 持久化 naive 本地時間戳 | 一律 `datetime.now(UTC)`（`from datetime import UTC`；先例 `utils/goal_progress.py:17,45`）；ruff `UP017` 也不准 `timezone.utc`（已實測會報） |
 | 4 | 同檔 `TestTextIoDeclaresEncoding`（`:2135` 起，shrink-only 棘輪） | 文字讀寫未指名 `encoding` | 全部 `encoding="utf-8"`（**含測試檔**） |
@@ -606,7 +606,7 @@ PowerShell 形態（Windows 沒有 `VAR=value` 前綴語法，也禁用裸 `cd`�
 | 4 | **全面驗證**：§4.3 全部指令；`python -m pytest tests/ -q` 全套 | 全綠；回報格式見下 |
 | 5 | **收尾（主控／單人窗口，不屬 Developer）**：`python tools/sync_onboarding_baselines.py --write`（表①，LOC total）→ `--check`；commit 前最後一步 `--write --with-slow`（表②，乾淨 venv）；再跑 pre-push 全套閘門 | 見 §3.4.4 第 7、8 列 |
 
-**禁止事項**：不改 `autoclaude/core/**`、不改任何既有測試、不改 `AutoClaude/CLAUDE.md`、不新增 Port／Plugin／EventBus phase、不 import `tools.*`、不改棘輪常數與欠債表（`_KNOWN_MISSING_NEWLINE`、`_DIRENT_UNGUARDED_DEBT`、`_ENCODING_DEBT_RATCHET`）、不用 `--no-verify`／`AUTOCLAUDE_SKIP_HOOKS=1`、**不做任何 git 寫入**（commit／stash／checkout／reset 一律由主控處理）。若實作中發現本文與現場不符，先回報再改，不得悄悄偏離。
+**禁止事項**：不改 `autoclaude/core/**`、不改任何既有測試、不改 `AutoClaude/CLAUDE.md`、不新增 Port／Plugin／EventBus phase、不 import `tools.*`、不改棘輪常數與欠債表（舊欠債表 _KNOWN_MISSING_NEWLINE（R213 DEF-101-702 清零後已自鎖移除）、`_DIRENT_UNGUARDED_DEBT`、`_ENCODING_DEBT_RATCHET`）、不用 `--no-verify`／`AUTOCLAUDE_SKIP_HOOKS=1`、**不做任何 git 寫入**（commit／stash／checkout／reset 一律由主控處理）。若實作中發現本文與現場不符，先回報再改，不得悄悄偏離。
 
 **Developer 回報格式**：(1) 改動檔清單（新增 2、修改 1，多出來的要說明）；(2) §4.3 每條指令的 rc 與關鍵輸出**逐字貼上**（不轉述）；(3) 各 AC 對應測試的綠燈輸出；(4) 任何偏離本文的地方與理由；(5) `main.py`、`run_summary.py` 的實測計價行（`check_loc_budget` 的 `count_loc`）。
 

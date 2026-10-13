@@ -180,6 +180,8 @@
 #                      ⚠️ 誠實劃界：射程＝根層 `tools/` 樹＋`.claude/hooks/`；
 #                      `AISDLC_SDD/` 今日仍是零 ruff 設定、零 ruff 閘門（納管它是
 #                      另一個授權面的決定，見 tools/ruff.toml 檔頭）。
+#                      R213：本道另跑 repo 根 `ruff check .`（根 ruff.toml 只排除凍結版，
+#                      LATEST 自此在掃描面；DEF-101-018 結案的執行者）。
 #   17. ONBOARDING §7 表③ nightly 錨 HEAD 判準 — tools/refresh_nightly_anchor.py
 #                      --check-head：離線讀 `git show HEAD:ONBOARDING.md`，驗錨的三個 nightly 欄位——
 #                      run id 對得上表③-b 的資料列、時間帶時區且在 14 天過期帶內、紅集合是 job 層
@@ -483,6 +485,12 @@ jobs:
           set +e
           ruff check tools/ .claude/hooks/ --no-cache 2>/tmp/ruff_stderr.txt
           rc=$?
+          if [ "$rc" -eq 0 ]; then
+            # R213／DEF-101-018 結案的執行者：repo 根 `ruff check .`（根 ruff.toml 只排除凍結版；
+            # SDD LATEST 走出廠預設、AutoClaude 走其 pyproject）。stderr 追加到同一檔，warning 判準一併涵蓋。
+            ruff check . --no-cache 2>>/tmp/ruff_stderr.txt
+            rc=$?
+          fi
           set -e
           cat /tmp/ruff_stderr.txt >&2
           if [ "$rc" -ne 0 ]; then exit "$rc"; fi

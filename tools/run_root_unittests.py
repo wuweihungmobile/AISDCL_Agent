@@ -12,21 +12,7 @@
 （測試根本不跑——數量崩塌本身就是失敗）。刻意刪減測試時須同步下修 MIN_TESTS
 （比照 check_script_parity._MIN_EXTRACT_COUNTS 的紅燈指路慣例）。
 
-R60 Pkg-P8 補三層——因為「下限」語意只擋得住「掉太多」，擋不住「悄悄少幾支而總數
-仍在下限之上」（實測當時 916 支 vs 下限 845 ⇒ 可靜默蒸發 71 支仍印 ✅）：
-  ① `inventory_fingerprint`：把「這個數字是哪一份磁碟狀態產生的」一起印出來，
-     讓兩次數字不同時能當場分辨「樹變了」還是「同一棵樹量到不同數字」。
-  ② `collection_gaps`：斷言磁碟上每支 test_*.py 都至少貢獻一支測試（集合比對，
-     不是總數比大小），並把 discovery 佔位測試（`_FailedTest`／`ModuleSkipped`）
-     點名成硬失敗——後者原本 rc 仍為 0，是真的 fail-open。
-  ③ `report_execution_gap`：比較**收集數**與**實際執行數**。`setUpClass` 拋
-     SkipTest 會讓整個類別一支都不跑而 `countTestCases()` 完全不變，下限守門
-     結構性看不到（實測：收集 11／執行 2／rc=0）。
-
-R68 補第四層 `_THIRD_PARTY_PREREQS`——前三層都預設「環境是完整的」，而三個 CI 平台
-上的實況正是環境**不**完整：缺第三方相依 ⇒ 模組 import 失敗 ⇒ 整份覆蓋塌成一支
-`_FailedTest` 佔位測試 ⇒ 收集數低於下限，而下限失敗訊息卻只會說「測試疑似大規模
-靜默消失（目錄改名/pattern 不符/路徑錯）」，把讀者指往三條全錯的路。詳見該常數。
+史料（R60 Pkg-P8 三層與 R68 第四層的立案過程）已搬至 docs/06_quality/CrossPlatform_R213_DebtZero_FourParty_Evidence.md〈附錄 A〉。
 
 呼叫端（取代裸 `python -m unittest discover -s tools/tests`）：
   tools/git-hooks/pre-push（root-infra leg ②）、.github/workflows/root-infra-ci.yml

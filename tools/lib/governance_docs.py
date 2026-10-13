@@ -688,6 +688,8 @@ _GOVERNANCE_DOCS = (
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R212_Row5_Findings_QA.md",
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R212_Row5_Findings_SA.md",
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R212_Row5_Findings_QA2.md",
+    # R213：掌舵者「做完＝無積欠 BUG 與技術債」輪證據檔（PRD §16.2 清倉、長債結案）  round-label-ok
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R213_DebtZero_FourParty_Evidence.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/{CrossPlatform,Quota}_*.md`。這**不是**把具名

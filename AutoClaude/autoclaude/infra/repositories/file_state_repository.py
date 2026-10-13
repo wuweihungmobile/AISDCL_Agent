@@ -200,7 +200,7 @@ class FileStateRepository:
                 with suppress(OSError):       # 第一次存（檔還不存在）也走這條
                     prev = p.read_bytes()
             try:
-                with tmp_p.open("w", encoding="utf-8") as f:
+                with tmp_p.open("w", encoding="utf-8", newline="") as f:
                     json.dump(payload, f, ensure_ascii=False, indent=2)
                     # 🔴 R100 P2-C（PRD §8-4 ①）：`flush()` 只把資料交到 OS page cache。
                     # 斷電（正是本項要防的情境）時 rename 的目錄項可能先落地而內容沒有

@@ -51,7 +51,7 @@ def test_daemon_thread_preserves_trace_id_with_copy_context():
         # daemon thread 內讀取 trace_id 必須與 caller 一致
         captured["trace_id"] = get_trace_id()
 
-    with with_trace_id("daemon-trace-001") as tid:
+    with with_trace_id("daemon-trace-001"):
         # ❌ 不包 copy_context() 的 thread 會讀到 None
         # ✅ 改用 start_thread_with_context（內部 copy_context）
         thread = start_thread_with_context(_target, daemon=True)
@@ -67,7 +67,7 @@ def test_naked_thread_does_not_propagate_trace_id():
     def _target():
         captured["trace_id"] = get_trace_id()
 
-    with with_trace_id("naked-trace") as tid:
+    with with_trace_id("naked-trace"):
         thread = threading.Thread(target=_target, daemon=True)
         thread.start()
         thread.join(timeout=2.0)

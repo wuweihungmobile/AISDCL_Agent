@@ -9,7 +9,6 @@ W-86-1 讓每 attempt 觀測到的真實 token%（peak>0 才印）逐步驟可�
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from autoclaude.core.event_bus import EventBus
 from autoclaude.core.kernel import PlaybookKernel
@@ -24,7 +23,7 @@ from autoclaude.models.playbook import GlobalInvariants, Playbook, PlaybookTask
 class _TokenEmittingExecutor:
     """測試用 IExecutor：每次 execute 依序回放一筆 token% 事件（pct=None → 不發事件）。"""
 
-    def __init__(self, pcts: list[Optional[float]]):
+    def __init__(self, pcts: list[float | None]):
         self._pcts = pcts
         self._i = 0
 

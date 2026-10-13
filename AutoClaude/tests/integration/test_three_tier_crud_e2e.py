@@ -12,7 +12,6 @@ from __future__ import annotations
 import copy
 import uuid
 from dataclasses import dataclass, field
-from typing import Optional
 
 import pytest
 from pydantic import ValidationError
@@ -24,7 +23,6 @@ from autoclaude.models.three_tier_schema import (
     Project,
     ThreeTierFixture,
 )
-
 
 # ──────────────────────────────────────────────────────────────
 # In-memory RBAC engine（對齊 alembic 0011 三角色 seed）

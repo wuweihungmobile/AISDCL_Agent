@@ -12,7 +12,7 @@
 """
 from __future__ import annotations
 
-from typing import Optional, Protocol
+from typing import Protocol
 
 from ...models.playbook import PlaybookTask
 
@@ -22,7 +22,7 @@ class IEvaluator(Protocol):
 
     def evaluate(
         self, task: PlaybookTask, output: str
-    ) -> tuple[Optional[str], str, int]:
+    ) -> tuple[str | None, str, int]:
         """評估步驟輸出是否成功。
 
         Args:

@@ -828,11 +828,7 @@ def run_gate(name: str, fn: Callable[[], int], results: list[tuple[str, str]]) -
 def main(argv: list[str] | None = None) -> int:
     # 自身 stdout/stderr best-effort UTF-8（✅/❌ 於非 UTF-8 終端不崩潰）；
     # 子行程統一 PYTHONUTF8=1（薄殼已先設，此處兜底 direct 呼叫路徑）
-    for stream in (sys.stdout, sys.stderr):
-        try:
-            stream.reconfigure(encoding="utf-8", errors="replace")
-        except (AttributeError, OSError, ValueError):
-            pass
+    platform_utils.init_utf8_streams()
     os.environ["PYTHONUTF8"] = "1"
 
     # 🔴 R69（DEF-101-702／R68-19）：`-h/--help` 原本會被 parse_args 當成「首個非旗標參數」

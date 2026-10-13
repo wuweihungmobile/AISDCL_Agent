@@ -12,8 +12,6 @@
 """
 from __future__ import annotations
 
-import pytest
-
 from autoclaude.utils.knowledge_base_metrics import KnowledgeBaseMetrics
 
 

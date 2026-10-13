@@ -328,7 +328,8 @@ def invent_round(
     cap_k = k if k is not None else dim_expand_k()
     cands = candidates if candidates is not None else enumerate_inventions(budget=budget, arity=arity)
     mgn = margin if margin is not None else invent_coverage_margin()
-    tfn = lambda q: int(round(q * 100))
+    def tfn(q):
+        return int(round(q * 100))
 
     proposals: List[InventionProposal] = []
     for dim in cands:

@@ -739,9 +739,10 @@ def main(argv: list[str] | None = None) -> int:
     # 自身 stdout/stderr best-effort UTF-8 + 行緩衝：非 TTY（管線/log 擷取）下 Python 預設
     # 對 stdout 做 full buffering，會讓 stdout 進度訊息與 stderr 錯誤訊息交錯錯亂
     # （對齊 tools/local_ci_gate.py main() 同款收斂）。
+    platform_utils.init_utf8_streams()
     for stream in (sys.stdout, sys.stderr):
         try:
-            stream.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
+            stream.reconfigure(line_buffering=True)
         except (AttributeError, OSError, ValueError):
             pass
 

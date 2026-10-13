@@ -22,6 +22,8 @@
 | **v2.1.17（範圍凍結與結案帳）** | 2026-10-10 | **範圍凍結（Scope Frozen）**。**掌舵者 2026-10-10 直接立案（原文：「找到沒法完成收斂的根因，徹底解決」「這樣一直執行的浪費，好像不是很有效率」）；軌道① 整合迭代之終輪落款（施工圖＝`docs/04_planning/AutoSDD_improving_114.md`）；四面 Sonnet 唯讀鏡（Architect／SA／SD／QA）複審＝已生效（2026-10-10；紀錄＝`docs/06_quality/AutoSDD_ZeroTrust_Audit_114.md`；QA 與 Architect 的 CONDITIONAL P2 同批處置後經 QA 二審 APPROVE、SA／SD APPROVE；主控為提案者不投票；各列歸格＝主控代決）** | 新增 §16「v2.1 範圍結案帳」：以 R211 覆蓋度矩陣 §2.1＋§2.2 共 101 列為凍結母體，每列落在 ✅／➖／⏸／📎 四格之一，**無未分類列即為 v2.1 結案**（§16.1）；§16.2 逐列結案表（矩陣非 ✅ 的 72 列）；§16.3 三個誠實數字——R211 原算法覆蓋度 60.3% 原樣保留、分類後 ✅29／➖33／⏸31／📎8、退役後母體落地率 54.4%（不是追逐目標）；§16.4 修憲項 C1～C12 依 R110 判例**不改既有條文一字**，各於其 PRD 座標處就地追加『🔴 【v2.1.17 註記】』（§6 區塊 3／4 與區塊 9 的註記只加在獨立註解行、未動任何 `KEY=value` 行）；N1 四列（v2.1.5／v2.1.6／v2.1.8／v2.1.9）狀態字面保留為史料，實際落地紀錄見 R100／R102／R107 複審（矩陣 §5 N1）；§16.5 修憲改為三種觸發之一才開（掌舵者新需求／缺陷帳本新立 P≤2 且根因在本 PRD 機制／某 ⏸ 列的再開症狀實際發生），無日曆觸發、無輪號觸發、無逐輪遞延清單、無覆蓋度門檻。施工圖＝`docs/04_planning/AutoSDD_improving_114.md`（結案帳的證據母體＝`docs/06_quality/CrossPlatform_R211_PRD_Coverage_Matrix_113.md`）；各列歸格＝主控代決（掌舵者授權「依最佳理想化代為決策」，非逐列明示追認；掌舵者可隨時以 §16.5 (i) 推翻任一格）。依 R110 判例不疊層：只加章節、就地註記、修訂表一列與目錄一列 |
 | **v2.1.18（§16.5 (iii)：§16.2「§12 權限旗標」由 ⏸ 轉 ✅）** | 2026-10-12 | **主控裁決轉格；Architect 鏡初審建議僅揭露、複審撤回異議同意轉格（兩讀並陳於證據檔）。觸發＝§16.5 (iii)（⏸ 列的再開症狀實際發生）：F-SBR-001 乾淨真跑 C1～C4 以 `--permission-mode bypassPermissions` 於非容器環境跑巢狀 claude（`AutoClaude/docs/03_testing/SddBridge_RealRun_Evidence_20261011.md` 第 13／80～84／391 行；性質構造性：主控自造的驗證跑，無實損）；入口＝缺陷帳本 `DEF-200-527`（「分流去向」標 §16.2 座標）；掌舵者 2026-10-12 T1（第六次貼同一份；原文摘要：「完成實作AutoClaude_Token_監控與喚醒機制_PRD_v2.1.md裡面所有功能！」）下，主控代決，掌舵者可隨時以 §16.5 (i) 推翻；程式面同批落地** | §16.5 (iii) 觸發；動 §12 一格（⏸→✅）＋§6.1 列同一事件的事實追記（格不變）；§16.3 不重算、不重排母體；入口＝`DEF-200-527`。§16.2「§12 權限旗標」列結案格 ⏸→✅，依據欄就地追加落款（症狀座標、實作座標 `boot_self_check.permission_bypass_verdict`、測試檔、F-SBR-001 範本改 `acceptEdits`＋白名單後 r5 真跑 3／3 步成功〔n=1，haiku，僅 macOS〕、劃界）；§16.2「§6.1 啟動自檢不變式 1～13」列（仍 ⏸）依據欄追記「不變式 8 已落地、未做剩 7b／9」。PRD 其餘條文一字不動。證據與落款依據＝`docs/06_quality/CrossPlatform_R212_E2E_Run4_Evidence.md`〈四〉（本版不另立施工圖）。 |
 | **v2.1.19（§16.5 (iii)：§16.2「施工圖 A4 清倉模式」由 ⏸ 轉 ✅）** | 2026-10-12 | **主控裁決轉格（掌舵者 2026-10-12 T1 第七次貼同一份＋同窗兩則新增指令「這次請儘量使用，我還有一次Token reset的用量」「我還有一次週Token reset用量，所以儘量使用！」下代決；掌舵者可隨時以 §16.5 (i) 推翻）。觸發＝§16.5 (iii)：A4 列再開症狀實際發生——同窗 `--pace` 逐字 `cap=1 … binding=five_hour … note=amortized`（sid `ed1c9022-22cc-4974-a8b3-9d4ebfa5f6bd`；暴露度＝真實互動窗的掌舵者指令＋sid，`--pace` 畫面為主控同窗自跑、先於指令約 3 分鐘）；入口＝缺陷帳本 `DEF-200-528`（「分流去向」標 §16.2 座標）；守衛面准入＝附暴露證據（根 CLAUDE.md〈守衛面准入〉）；四方（Architect／SA／SD／QA，Sonnet 唯讀鏡）複審＝4×APPROVE、無 P≤2、P3 全數於同批處置（紀錄＝證據檔〈四〉〈五〉與四份 `CrossPlatform_R212_Row5_Findings_*.md`）；程式面同批落地** | §16.5 (iii) 觸發；動 A4 一格（⏸→✅）；§16.3 不重算、不重排母體；本文不新增 §4.2.9（規範文本＝`docs/04_planning/PRD_Amendment_R108_BurnDown_Addendum.md` §3～§6、§8 ＋ R110 裁決 QB1～QB6 ＋ 主控增補「BD-2′ 跨窗攤提暫停」〔證據檔〈二-2〉；QB6 尾句要求的「跨窗點名（含短窗軸）」增補之代決〕）；實作座標 `tools/lib/quota_burndown.py`（落款檔住 `trace_dir()`、CLI `--issue`／`--status`／`--revoke` 唯一寫入口、`AUTOSDD_QUOTA_BURNDOWN_OFF` 只准關）＋共 8 處預設不生效的簽章／欄位（`decide(burndown)`、`axes_of(relax)`、`resolve(floor, hold)`、`band_inputs(hold)`、`row_of(bd)`、`record_burn(bd)`、`Decision.burndown`，加 `pace_line`／`describe` 的追加渲染；不下令時 `decide`／`describe`／`pace_line`／`axes_of` 的輸出逐位元不變〔SD 鏡 6000 組隨機狀態；QA 二審 800 組＋真實燃燒帳 443 列×6 變體〕，燃燒帳 `row_of()` 每列多一欄 `"bd": null`）；鎖 `tools/tests/test_quota_burndown.py`（BD-1～BD-9＋BD-2′）；PRD 其餘條文一字不動。證據與落款依據＝`docs/06_quality/CrossPlatform_R212_BurnDown_FourParty_Evidence.md`。 |
+| **v2.1.20（§16.5 (i)：「做完」定義擴為三件合取；§16.2 29 列 ⏸ 三分處置、📎 補件）** | 2026-10-13 | **掌舵者 2026-10-12 原文：「我的完成的定義是沒有積欠ＢＵＧ與技術債！」「為何33 項依設計不做，請評估合理性，若不合理請全部完成。另外以下29 項等症狀、8 項只欠驗收紀錄，請確實完成測試驗收！」「這輪授權可以把週Token用完」；主控代決（可隨時以 (i) 推翻）；四方獨立審查已於 2026-10-13 第二窗執行（紀錄＝證據檔〈十-7〉）** | §16.1 追加註記（三件合取）；§16.2：16 列 ⏸→➖（功能等價物已在或前提不存在，逐列附依據）、7 列 ⏸→✅（§3.2／§4.1.1 T3／§4.5.4／§4.5.10／§8 列 1／§8 列 3／§12 日誌遮蔽）、6 列 📎→✅（§11.2／§11.3／§11.7／§6.2 R-6.2-2／§8 列 13／§15.5）、4 列格不變附落款（§4.3／§8 列 12／§12 寫入範圍＝守衛面待掌舵者核准；§6.1 不變式 9 已落地只剩 7b 隨 P4 退役）、2 列 📎 保留（§11.1 回溯不出、§11.8 需 24h）、2 列 ⏸ 保留（§13 法務、A7 掌舵者安全裁決）；四格現況 ✅44／➖49／⏸6／📎2＝101；§16.3 不重算、母體不動；原 33 列 ➖ 的合理性由 Architect 鏡逐列覆核。實作座標見各列落款；證據＝`docs/06_quality/CrossPlatform_R213_DebtZero_FourParty_Evidence.md` |
+| **v2.1.21（§16.5 (i)：§16.2 ➖ 47 列依設計退役、整列搬出結案表；📎 兩列模擬補件轉 ✅）** | 2026-10-13 | **掌舵者 2026-10-13 原文：「33 項依設計不做 ==> 若合理，請依照修憲的程序拿掉」「3 項卡在 .claude/ ==> 核准同意」「2 項做不到（6 小時零 token／24 小時連續）==> 請模擬出測試情境！」「請以ＡＵＴＯ模式自動執行…我授權幫我決策」；主控代決（可隨時以 (i) 推翻）；49 列的合理性已由 Architect 鏡逐列覆核：46 列合理、3 列判不合理（§4.1.1 引擎獨立執行、§4.4.3、§4.5.2）已於同窗實作（紀錄＝證據檔〈十-7〉）；覆核若再推翻個別列，由主控回填** | §16.1 追加註記（活躍結案表＝101−47＝54 列；結案命題 (a) 改讀「活躍 54 列無未分類」，(b)(c) 不變）；§16.2：結案格為 ➖ 的 49 列（v2.1.17 當日 33 列＋v2.1.20 自 ⏸ 轉入 16 列）（其中 §4.4.3 與 §4.5.2 兩列經 Architect 鏡覆核判「不合理」、同窗實作後依 §16.5「➖ 列被推翻」移回 §16.2 轉 ✅，§16.7 現為 47 列）整列搬至新增的 §16.7「依設計退役列索引」（除列內標示【v2.1.21 訂正／註】者外，搬移前後逐字相同；條文本文留在 PRD 作史料、不構成 v2.1 需求、不入任何結案計數，再開只走 §16.5 (i)），導言追加現況計數；§11.1／§11.8 兩列 📎→✅（模擬補件，模擬時鐘不是真牆鐘：`tools/probe/zero_token_patrol_sim.py`、`tools/probe/day_long_relay_sim.py`、`AutoClaude/tests/integration/test_day_long_resume_prd11_8.py`；兩列落款附差異清單指針）；§4.3／§8 列 12／§12 寫入範圍三列於各列補落款（守衛面三件；掌舵者「核准同意」已收，格不變 ⏸，成品待掌舵者親跑套用，套用 PASS 後轉 ✅）；§16.3 表後追加註記（數字不動、(b)(c) 不重算）；目錄補 §16.7 一列；各退役章節本體各追加一行就地註記（純追加、不改既有條文一字；Architect 鏡 ARCH-08）；§16.5 (iii) 孤兒理論洞名單補 #1／#3／#4／#8／#9（ARCH-09）；§16.2 §6.1 啟動自檢不變式列 ⏸→✅（Architect 鏡 ARCH-10／SA 鏡訂正句 C9，劃界見該列落款）；活躍結案表現況 ✅49／⏸5／📎0＝52（另 ➖ 47 列退役，不入計數）；PRD 其餘條文一字不動。證據＝`docs/06_quality/CrossPlatform_R213_DebtZero_FourParty_Evidence.md` |
 
 > **v2.1 的變更**：附錄 B 的事實核對清單已**實際核實完成**（方法見附錄 B 開頭）。核實結果顯示 Claude Code v2.1.x **已內建**本 PRD 原本打算自建的多項能力（原生 worktree 隔離、任務 DAG、排程喚醒、零 Token 用量遙測、併發上限、官方配速門檻）。因此新增 [§15 執行方法論](#15-執行方法論與注意事項v21-新增)，並將建議架構從「大型自建 Daemon」縮減為「薄治理層 + 採用原生能力」。**§15 是實際動工時應遵循的章節**（含動工前置檢查、採用 vs 自建決策矩陣、P0–P5 分階段步驟、12 條紅線注意事項、參數校準方法與交付目錄結構）。
 
@@ -56,6 +58,7 @@
 | [14. 路線圖（已被 §15.4 取代）](#14-實作路線圖建議v1-無此章) | v2.0 舊版規劃，僅供對照 | — |
 | **[15. 執行方法論與注意事項](#15-執行方法論與注意事項v21-新增)** | **前置檢查、決策矩陣、最小架構、P0–P5、紅線、校準、目錄結構** | **動工前必讀** |
 | [16. v2.1 範圍結案帳](#16-v21-範圍結案帳scope-closure-ledgerv2117) | 結案判準、逐列結案表、三個誠實數字、修憲項處置、再開規則 | 決策者、審查者 |
+| [16.7 依設計退役列索引](#167-依設計退役列索引v2121-自結案表拿掉) | 自 §16.2 搬出的 ➖ 47 列（史料、不入結案計數） | 決策者、審查者 |
 | [附錄 A：問題清冊](#附錄-av1--v2-問題清冊issue-register) | 43 項 v1 問題逐條對應修正 | 審查者 |
 | [附錄 B：事實核對結果](#附錄-b事實核對結果v21-已核實) | 核實方法、12 項已確認、8 項新發現、5 項待人工確認 | 開發（**動工前必讀**） |
 
@@ -173,6 +176,8 @@
 
 ### 3.1 架構圖
 
+> 🔴 【v2.1.21 註記】本節已列入 §16.7 退役索引、不構成 v2.1 需求：§16.7 列名＝「§3.1 架構圖：單一 Daemon＋7 模組」；條文本文留作史料，現況以該列依據為準。
+
 ```
 ┌───────────────────────────────────────────────────────────────────────┐
 │                  AutoClaude Daemon (單一實例，檔案鎖保護)              │
@@ -237,6 +242,8 @@
 ## 4. 模組規格
 
 ### 4.1 遙測引擎（Telemetry Engine）
+
+> 🔴 【v2.1.21 註記】本章下列小節已列入 §16.7 退役索引、不構成 v2.1 需求：§4.1.1 的 T1（OTel 本機遙測）、T2（逐字稿本機加總）、T4（/usage 程式化解析）、引擎獨立執行時的額度遙測、本機推估安全邊際 15pp；§4.1.2 新鮮度三段式（180／600／1200s）。§4.1.1 的 T3、T5 與 §4.1.3～§4.1.5 不在此列，現況見 §16.2；條文本文留作史料，現況以 §16.7 各列依據為準。
 
 #### 4.1.1 資料來源分層（v1 的重大缺漏：只寫了未公開端點）
 
@@ -446,6 +453,8 @@ PrdDrainPercentMapsToTheBandsTest::test_the_three_state_answer_never_folds_unmea
 ### 4.2 配速控制器（Pacing Controller）— 修正後的數學模型
 
 #### 4.2.1 燃燒率估計（加入 EWMA 與統一下限）
+
+> 🔴 【v2.1.21 註記】本節與其後 §4.2.2、§4.2.3 的致動器表已列入 §16.7 退役索引、不構成 v2.1 需求：§4.2.1 EWMA 燃燒率、§4.2.2 安全燃燒率／目標併發公式、§4.2.3 致動器表（併發／模型降級／任務類別／硬預算）；§4.2.4 與 §4.2.8 不在此列；條文本文留作史料，現況以 §16.7 各列依據為準。
 
 ```
 Δ          = MONITOR_POLL_INTERVAL_SECONDS / 60           # 取樣間隔（分鐘）
@@ -707,6 +716,8 @@ FANOUT_WINDOW_SECONDS ≥ QUOTA_CACHE_TTL_SECONDS      # 控制不得比量測�
 
 #### 4.2.5 突刺（BURSTING）判準 — v1 未定義且有觀念錯誤
 
+> 🔴 【v2.1.21 註記】本節與其後 §4.2.6 已列入 §16.7 退役索引、不構成 v2.1 需求：§4.2.5 BURSTING 六條件、§4.2.6 參考實作（dataclass 控制器）；條文本文留作史料，現況以 §16.7 各列依據為準。
+
 v1 的「額度即將過期，全力拉滿」隱含「未用完的 5 小時額度會浪費」的假設。但**週上限是更長期的約束**：在 5 小時視窗末端暴衝，等於提前燒掉週額度，可能換來數天停權。因此突刺必須被週額度否決：
 
 ```
@@ -939,6 +950,8 @@ def decide(tel: Telemetry | None, cs: ControllerState, cfg: Config,
 
 #### 4.2.7 情境試算驗證表（修正版）
 
+> 🔴 【v2.1.21 註記】本節已列入 §16.7 退役索引、不構成 v2.1 需求：§16.7 列名＝「§4.2.7 情境試算表」；條文本文留作史料，現況以該列依據為準。
+
 v1 的四個情境算術正確，但**未反映狀態上限與變化率限制**，故第 3 列與驗收標準第 3 條矛盾。以下為修正後（假設 `C_current` 已達穩態、停留時間已滿足）：
 
 | # | 情境 | `U5h` | `U7d` | `T_rem` | `U_rem` | `V_safe` | `V_eff` | `C_raw` | 狀態 | `C_cap` | **最終 C** | 決策說明 |
@@ -1010,6 +1023,8 @@ pace_index   = utilization / max(ε, elapsed_frac)
 
 ### 4.4 多 Agent 隔離與整合（v1 過於簡略）
 
+> 🔴 【v2.1.21 註記】本章下列小節已列入 §16.7 退役索引、不構成 v2.1 需求：§4.4.1 Worktree 建立、§4.4.2 序列化整合佇列、§4.4.3 Agent 硬性預算；條文本文留作史料，現況以 §16.7 各列依據為準。
+
 #### 4.4.1 Worktree 建立（修正實務問題）
 
 ```bash
@@ -1058,6 +1073,8 @@ DRAINING 狀態下上述值乘以 DRAIN_BUDGET_FACTOR (0.5)
 > 🔴 【v2.1.17 註記】C3｜上方 `MAX_STEP_TURNS` 所稱「CLI 的最大回合數旗標」於本機 CLI 的 `claude --help` 查無（全文見 §4.5.4 同項註記）；本節 turns 軸與 quota_pp 軸仍無致動器，見 §16.2 §4.4.3 列。
 
 ### 4.5 狀態保全與喚醒（Lossless Resume）— 修正成本假設
+
+> 🔴 【v2.1.21 註記】本章下列小節已列入 §16.7 退役索引、不構成 v2.1 需求：§4.5.1 凍結流程 7 步、§4.5.2 分片休眠＋時鐘跳躍偵測、§4.5.3 重置驗證與喚醒（RESET_CONFIRM／full-jitter／C=1 起步）；§4.5.4 以後各小節不在此列；條文本文留作史料，現況以 §16.7 各列依據為準。
 
 #### 4.5.1 凍結流程
 
@@ -1718,6 +1735,8 @@ distinct = ['arm_reset', 'disarm', 'escalate', 'patrol', 'probe']   count = 5
 
 ### 4.6 跨平台防休眠（修正 v1 的技術細節）
 
+> 🔴 【v2.1.21 註記】本節已列入 §16.7 退役索引、不構成 v2.1 需求：§16.7 列名＝「§4.6 跨平台防休眠」；條文本文留作史料，現況以該列依據為準。
+
 | 平台 | 實作 | v1 的問題與修正 |
 | :---- | :---- | :---- |
 | **macOS** | `caffeinate -i -m -w <DAEMON_PID>` | v1 用 `-s`：**`-s` 僅在接電源時有效，電池模式下機器仍會睡**。改用 `-i`（防閒置睡眠）+ `-m`（防硬碟睡眠），並以 `-w <PID>` 綁定 Daemon 生命週期，避免 Daemon 崩潰後 caffeinate 變孤兒程序永久阻止睡眠。不使用 `-d`（依需求允許螢幕關閉；v1 註解列出 `-d` 與其宣稱目標矛盾） |
@@ -1728,6 +1747,8 @@ distinct = ['arm_reset', 'disarm', 'escalate', 'patrol', 'probe']   count = 5
 補充：防休眠**只用於短等待**（`< MAX_INPROCESS_WAIT_SECONDS`）；長等待改用 §4.5.5 的排程器交棒。另需處理「防休眠失效、機器仍睡著」的情況：醒來後偵測時鐘跳躍 → 重新輪詢遙測 → 若已過重置點則直接進入 `RESUMING`。
 
 ### 4.7 帳號配額仲裁（v1 缺漏的多實例問題）
+
+> 🔴 【v2.1.21 註記】本節已列入 §16.7 退役索引、不構成 v2.1 需求：§16.7 列名＝「§4.7 帳號配額仲裁」；條文本文留作史料，現況以該列依據為準。
 
 額度是**帳號層級**資源，但 Daemon 是**專案層級**行程。同帳號同時跑兩個專案時，兩個 Daemon 各自看到「還有 60% 可用」，合起來就會超燒。
 
@@ -1750,6 +1771,8 @@ distinct = ['arm_reset', 'disarm', 'escalate', 'patrol', 'probe']   count = 5
 
 ## 5. API Key 模式（v1 只提一句，實際無法運作）
 
+> 🔴 【v2.1.21 註記】本章已列入 §16.7 退役索引、不構成 v2.1 需求：§16.7 列名＝「§5 API_KEY 模式」；條文本文留作史料，現況以該列依據為準。
+
 v1 的配速演算法完全建立在「百分比 + 重置時間」之上，但 API Key 模式沒有這兩者。必須有正規化層：
 
 | 項目 | OAUTH 模式 | API_KEY 模式 |
@@ -1765,6 +1788,8 @@ v1 的配速演算法完全建立在「百分比 + 重置時間」之上，但 A
 ---
 
 ## 6. 設定檔規範（.env.example，修訂版）
+
+> 🔴 【v2.1.21 註記】本章下列小節已列入 §16.7 退役索引、不構成 v2.1 需求：區塊 1～4b（帳號／遙測／水位／週額度／超額）、區塊 5～9（上下文／併發／突刺／硬預算／休眠喚醒）、區塊 10～15（防休眠／Git／狀態／安全／可觀測／API）；區塊 4c、§6.1 與 §6.2 其餘小節不在此列（§6.2 R-6.2-1 另見該小節註記）；實作鍵名以 `tools/lib/quota_policy_env.py` 的 `ENV_SPEC` 為準；條文本文留作史料，現況以 §16.7 各列依據為準。
 
 ```dotenv
 # ==============================================================================
@@ -2040,6 +2065,8 @@ API_AUTO_CONTINUE_NEXT_PERIOD=false          # 【新增】
 
 #### R-6.2-1（§8-11 意圖保留：沒做完的整合，醒來時掃一次並重排）
 
+> 🔴 【v2.1.21 註記】本節已列入 §16.7 退役索引、不構成 v2.1 需求：§16.7 列名＝「§6.2 R-6.2-1 殘留整合佇列：開機掃描重排」；條文本文留作史料，現況以該列依據為準。
+
 - **原意圖**：整合驗證失敗 → 退回佇列並記錄；`CONFLICT_POLICY` 決定是否派 Agent 修復
   （並計入額度預算）。
 - **原實現前提**：有一個 Daemon 持有整合鎖、序列化跑佇列（§4.4.2）。
@@ -2145,6 +2172,8 @@ API_AUTO_CONTINUE_NEXT_PERIOD=false          # 【新增】
 | G10 | 清理後仍不足 ⇒ 桌面通知恰好一次 | 單元測試（mock 通知器） |
 
 ## 7. 狀態資料結構規格（state.json schema v2）
+
+> 🔴 【v2.1.21 註記】本章已列入 §16.7 退役索引、不構成 v2.1 需求：§16.7 列名＝「§7 state.json schema v2」；條文本文留作史料，現況以該列依據為準。
 
 修正 v1 的問題：單一 worktree/session 欄位（與多 Agent 矛盾）、非法 SHA 長度、`reset_timestamp` 與 `saved_at` 相距 24 小時（5 小時視窗不可能）、缺少校驗與續作指令的安全問題。
 
@@ -2254,6 +2283,8 @@ API_AUTO_CONTINUE_NEXT_PERIOD=false          # 【新增】
 
 ## 8. 例外與邊界條件（擴充）
 
+> 🔴 【v2.1.21 註記】本章表中下列列已列入 §16.7 退役索引、不構成 v2.1 需求：列 2（重置時間漂移）、列 5（等待中睡著）、列 7（同帳號多 Daemon 超燒）、列 9（Agent 卡死／NEEDS_HUMAN）、列 11（整合驗證失敗）；其餘列不在此列，現況見 §16.2；條文本文留作史料，現況以 §16.7 各列依據為準。
+
 | # | 異常事件 | 觸發情境 | 防禦機制 |
 | :-- | :---- | :---- | :---- |
 | 1 | **非預期 429** | 遙測落後於真實用量，或其他裝置同時消耗 | 優先**遵循回應中的重試建議標頭**；無標頭時採 full jitter 退避：`sleep = rand(0, min(300, 10·2^n))`，最多 5 次。v1 的固定 10/30/90s 無 jitter，多 Agent 同時撞牆會同步重試造成雷群。重試耗盡 → `FREEZING`。**且必須把 429 視為遙測低估的證據**，將 `U5h` 推估值上修 |
@@ -2275,6 +2306,8 @@ API_AUTO_CONTINUE_NEXT_PERIOD=false          # 【新增】
 ---
 
 ## 9. 可觀測性（v1 完全缺漏）
+
+> 🔴 【v2.1.21 註記】本章下列各項已列入 §16.7 退役索引、不構成 v2.1 需求：12 個 Prometheus 指標、結構化決策日誌、告警（§16.7 同名三列）；條文本文留作史料，現況以 §16.7 各列依據為準。
 
 **必要指標**（供事後調參與事故分析）
 
@@ -2301,6 +2334,8 @@ API_AUTO_CONTINUE_NEXT_PERIOD=false          # 【新增】
 ---
 
 ## 10. v1 → v2 設定遷移對照
+
+> 🔴 【v2.1.21 註記】本章已列入 §16.7 退役索引、不構成 v2.1 需求：§16.7 列名＝「§10 v1→v2 設定遷移」；條文本文留作史料，現況以該列依據為準。
 
 | v1 設定 | v2 處置 | 說明 |
 | :---- | :---- | :---- |
@@ -2351,10 +2386,16 @@ API_AUTO_CONTINUE_NEXT_PERIOD=false          # 【新增】
 - 斷言：週上限觸發時**不會**只休眠到 5 小時重置（v1 的缺陷）。
 
 ### 11.5 防休眠
+
+> 🔴 【v2.1.21 註記】本節已列入 §16.7 退役索引、不構成 v2.1 需求：§16.7 列名＝「§11.5 防休眠驗收」；條文本文留作史料，現況以該列依據為準。
+
 - macOS（電池與接電源**兩種**情境）、Windows 11（含 Modern Standby 機型）、Linux：5 小時無操作掛機。
 - 判準：`pmset -g assertions` / `powercfg /requests` / `systemd-inhibit --list` 顯示預期的 assertion；主機未進入睡眠；螢幕依設定關閉；Daemon 計時誤差 < 60 秒；Daemon 被 kill 後 assertion 在 10 秒內自動解除（無孤兒 caffeinate）。
 
 ### 11.6 多 Agent 隔離與整合
+
+> 🔴 【v2.1.21 註記】本節已列入 §16.7 退役索引、不構成 v2.1 需求：§16.7 列名＝「§11.6 多 Agent 隔離與整合」；條文本文留作史料，現況以該列依據為準。
+
 - 3 個 Agent 同時修改**有重疊 import 的相鄰模組**，斷言：無檔案互相覆蓋；整合佇列序列化執行；至少一次衝突能正確走 `CONFLICT_POLICY`；所有 worktree 最終被清理（`git worktree list` 無殘留）。
 
 ### 11.7 多實例配額
@@ -2366,6 +2407,8 @@ API_AUTO_CONTINUE_NEXT_PERIOD=false          # 【新增】
 ---
 
 ## 12. 安全性（v1 完全缺漏）
+
+> 🔴 【v2.1.21 註記】本章下列面向已列入 §16.7 退役索引、不構成 v2.1 需求：Prompt injection 面向中的「狀態回報 schema 驗證」子句（§16.7 列名＝「§12 prompt injection／狀態回報 schema」）、供應鏈面向（§16.7 列名＝「§12 供應鏈」）；其餘面向現況見 §16.2；條文本文留作史料，現況以 §16.7 各列依據為準。
 
 | 面向 | 要求 |
 | :---- | :---- |
@@ -2484,6 +2527,8 @@ Q3. 是否真的需要一個常駐 Daemon？
 **關鍵洞察**：v2.0 假設治理層必須「管理多個 CLI 行程」。但用 `PreToolUse` hook 在 `Agent` 工具層攔截，加上調整 `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`，就能達到同樣的併發控制，**且不需要行程池、不需要 worktree 管理、不需要訊號處理**。這是本次核實帶來最大的簡化。
 
 ### 15.4 分階段執行步驟
+
+> 🔴 【v2.1.21 註記】本節 P0～P5 六個階段已列入 §16.7 退役索引、不構成 v2.1 需求（§16.7 同名六列）：它們是施工順序、不是第二份需求，各階段出場題所指的功能列已在 §16.2／§16.7 各自結案；條文本文留作史料，現況以 §16.7 各列依據為準。
 
 每階段都是**可獨立交付、可獨立回滾**的，且順序不可調換。
 
@@ -2623,6 +2668,10 @@ P0 收完資料後，依序推導、不要憑感覺設定：
 
 **結案命題**：母體 101 列中，每一列恰落在四格之一，**沒有任何「未分類」列**＝v2.1 結案。判準是這個命題，不是百分比（見 §16.3）。
 
+> 🔴 【v2.1.20 註記｜掌舵者 (i) 2026-10-12 原文「我的完成的定義是沒有積欠ＢＵＧ與技術債！」】結案命題自本版起擴為三件合取：(a) 101 列無未分類；(b) 三本帳（`docs/06_quality/AutoSDD_Defect_Log.md`／`AutoSDD_External_Blocked_Log.md`／`AutoSDD_Structural_Debt_Log.md`）未結 0；(c) ⏸ 只准留給「再開症狀在本 repo 製造不出來」的列（法務人工檢核、無人 commit／push 的掌舵者安全裁決），其餘 ⏸ 一律落地轉 ✅ 或以功能等價物／前提不存在為據轉 ➖。(b) 現況（2026-10-13）：缺陷主帳本未結 0；外部阻塞軌 4 列；結構性長債軌 2 列（DEF-101-960、DEF-200-075）；DEF-101-018、DEF-101-398、DEF-101-701、DEF-101-702、DEF-101-980 已於 2026-10-13 結案，逐列見 `docs/06_quality/CrossPlatform_R213_DebtZero_FourParty_Evidence.md`〈十〉。
+
+> 🔴 【v2.1.21 註記｜掌舵者 (i) 2026-10-13 原文「若合理，請依照修憲的程序拿掉」】母體 101 列為 v2.1.17 當日史料；活躍結案表自本版起＝101−47＝54 列（§16.2），結案格為 ➖ 的 49 列（v2.1.17 當日 33 列＋v2.1.20 自 ⏸ 轉入 16 列）退役、整列搬至 §16.7；結案命題 (a) 改讀「活躍 54 列無未分類」，(b)(c) 不變。
+
 🔴 **⏸ 的寫法紀律**：再開症狀必須是一句具體、可觀測的事件（有 sid、log、痕跡列或畫面可附）；**禁止**寫輪號、日期、「待排程」字樣——那是把一件沒發生的事排進日曆，正是本章要拆掉的東西。
 
 **邊界**：
@@ -2635,80 +2684,35 @@ P0 收完資料後，依序推導、不要憑感覺設定：
 
 只列矩陣判定**非 ✅** 的 72 列（⚠️51／❌11／➖10）；✅ 的 29 列不重列內容，僅列矩陣 ID 供對帳：§4.1.1-T5、§4.1.3、§4.1.4、§4.1.5、§4.2.3a、§4.2.4、§4.2.8、§4.5.5、§4.5.6、§4.5.7、§4.5.8、§4.5.9、§6.2-3、§8-1b、§8-4、§8-6、§8-8、§8-10、§8-14、§12-憑證、§12-命令執行、§13-禁令、§11.4、A1、A2、A5a、A6、A8、A9。PRD 座標一律寫章節號、不寫行號（行號會漂移）；「R211 矩陣判定」欄是矩陣原判，不重寫。標記：`[SA 判讀]`＝四選一有判斷空間的列（撰寫本表時自標，供複審逐列覆核；覆核後仍保留標記，以示該列是判斷而非事實）；`[HEAD 現查]`＝矩陣撰寫之後的落地已改變該列，本欄依 HEAD 現況改判並附座標；〈三〉#n＝`docs/06_quality/CrossPlatform_R211_ZeroTrust_Audit_113.md`〈三〉理論洞表第 n 條（該列再開症狀沿用其「再開症狀」欄）。「現況」欄與其程式座標為 2026-10-10 凍結日快照（本 PRD 不在幽靈符號掃描面），之後一律以現查為準。
 
+> 🔴 【v2.1.21 註記】本表自本版起只剩 25 列（結案格非 ➖ 者；含 §4.4.3／§4.5.2 兩列自 §16.7 移回轉 ✅）：原結案格 ➖ 的 49 列已整列搬至 §16.7，不再入本表與任何結案計數；上段「72 列（⚠️51／❌11／➖10）」與「✅ 的 29 列」是 v2.1.17 當日快照，不重寫。活躍結案表現況（本表 23 列＋上列 29 個矩陣 ✅ ID＝52 列）：✅49／⏸5／📎0（§11.1／§11.8 兩列於本版由 📎 轉 ✅、§6.1 啟動自檢不變式列由 ⏸ 轉 ✅，見各列落款）。
+
 | PRD 座標 | R211 矩陣判定 | 結案格 | 依據／再開症狀 |
 | :---- | :----: | :----: | :---- |
-| §3.1 架構圖：單一 Daemon＋7 模組 | ➖ | ➖ | 依據＝PRD〈v2.1 的變更〉段與 §15.3 把建議架構從「大型自建 Daemon」縮減為「薄治理層 + 採用原生能力」；實際載具＝hook（`.claude/hooks/context_budget_guard.py`）＋哨兵（`tools/session_resume_planner.py`），`tools/lib/quota_boot_check.py` 檔頭明載本 repo 沒有常駐 daemon；架構性替代，非缺漏。 |
-| §3.2 10 態 FSM＋單向鎖存＋轉移圖 | ⚠️(M) | ⏸ | [SA 判讀] 現況＝10 態 FSM 以無狀態 `decide()`＋band 帶別＋halt 閂鎖取代（v2.1.8 §4.2.4 改 cap 語意）；`HALTED_MANUAL`（人工 pause／resume）無生產對應——ESC+F12 全域中斷（`AutoClaude/autoclaude/plugins/hotkey_plugin.py`）只中止、無 pause／resume，且 `python -m autoclaude` 入口目前不呼叫 `HotkeyHandler.register()`（`AutoClaude/autoclaude/main.py` 註解自陳；〈三〉#2）；再開症狀＝掌舵者真機要用中斷鍵，或要求「暫停後恢復」（附畫面原文或 sid）。 |
-| §4.1.1 T1（OTel 本機遙測） | ❌ | ⏸ | [SA 判讀] 現況＝`CLAUDE_CODE_ENABLE_TELEMETRY`／`OTEL_` 在 `tools/`、`.claude/`、`AutoClaude/autoclaude/` 零命中，T5 已升格認可主源（v2.1.4），T1 與其量測軸不同、並行而不互替；再開症狀＝`autosdd_quota_degraded.jsonl` 出現 `state` 為 unmeasured 的列（住系統暫存，事發當場附檔）或 `quota_burn.jsonl` 相鄰列出現超過 5 小時的空洞，且同一窗內有人明示需要逐 token／逐請求的成本明細才能決策，而 T5／T3 皆給不出（附該列座標與該次需求原文或 sid）。 |
-| §4.1.1 T2（逐字稿本機加總） | ⚠️(S) | ⏸ | 現況＝只有撞線地板（`tools/lib/quota_gate.py` 的 `quota_floor_reading`←`tools/lib/quota_limits.py` 的 `unhandled_limit_event`），無 token 加總；T5 為主源、加總只是後備；再開症狀＝T5 連續 unmeasured 滿一個 5h 窗，而該窗內需要比撞線地板更細的本機用量估計（附 `autosdd_quota_degraded.jsonl` 的 unmeasured 列，或 `quota_burn.jsonl` 空洞前後兩列座標）。 |
-| §4.1.1 T3（statusLine 回寫） | ⚠️(M) | ⏸ | 現況＝讀端（`.claude/hooks/context_budget_guard.py` 的 `read_context_feed`）、安裝器（`tools/install_statusline.py`）、producer（`tools/statusline_context_feed.py`）俱在，但回寫的 feed 只含 model 與 context_window、無 `rate_limits.*`（只服務 K_ctx，不服務 U5h／U7d）；再開症狀＝T5 不可用期間 statusLine 輸入已帶 `rate_limits.*`，而守衛因 feed 未回寫額度欄量不到（附 feed 樣本與 `autosdd_quota_degraded.jsonl` 列或 `quota_burn.jsonl` 空洞前後兩列座標）。 |
-| §4.1.1 T4（/usage 程式化解析） | ❌ | ➖ | [SA 判讀] 依據＝PRD 自排最後（附錄 B-06 自註「可用但格式非契約；優先用 B-05」），T5 認可主源（v2.1.4）已覆蓋其用途；v2.1.17 決策式收斂為不做。 |
-| §4.1.1 引擎獨立執行（無 Claude Code session）時的額度遙測 | ⚠️(L) | ⏸ | 現況＝`FileQuotaMeterAdapter`（`AutoClaude/autoclaude/infra/adapters/file_quota_meter.py`）只讀快取、過期回 None（引擎側不擋），缺第三方寫入者（`AutoClaude/autoclaude/core/ports/quota_meter.py` 檔頭自陳；〈三〉#4）；再開症狀＝引擎無 Claude Code session 獨立跑時的一次真實撞線（附 run log 與 checkpoint 座標）。 |
-| §4.1.1 本機推估安全邊際 15pp | ➖ | ➖ | 依據＝（沿用矩陣）無本機加總路徑（T5 為帳號級讀數），全庫零命中；架構性替代。 |
-| §4.1.2 新鮮度三段式（180／600／1200s） | ⚠️(S) | ➖ | [SA 判讀] 依據＝v2.1.8 §4.1.5 逐字把原條文（§8-6／§4.1.2：`age > TELEMETRY_TIMEOUT (600s)` → 強制 `DRAINING`）改寫為遙測不可得⇒cap ≤ cap_prepare（DRAINING 是狀態機的字、本實作無該狀態物件，`draining()` 對 unmeasured 明文回 unknown），1200s→FREEZING 同理無狀態物件可落；180s 一段已落地（`QUOTA_CACHE_TTL_SECONDS`）；1200s→FREEZING 同受 §4.1.5「不是 cap=0」約束：全失效姿態＝cap≤cap_prepare、不隨時間升級，機械上能把它升成 halt 的只有逐字稿撞線地板。 |
-| §4.2.1 EWMA 燃燒率 | ⚠️(S) | ➖ | [SA 判讀] 依據＝PRD §4.2.8 自陳 `pace_index` 完全免除 EWMA 調參並取代燃燒率為主控訊號；`ewma_burn_rate` 庫在、生產呼叫端零（僅診斷）。 |
-| §4.2.2 安全燃燒率／目標併發公式 | ➖ | ➖ | 依據＝（沿用矩陣）被 §4.2.8 `pace_index` 取代（PRD 自身指定替代路線）；R108 廢 `T_MIN`→`wrap_minutes`。 |
-| §4.2.3 致動器表：併發／模型降級／任務類別／硬預算 | ⚠️(M) | ⏸ | [HEAD 現查] 現況＝併發 cap 已落地；模型降級的設定面由 v2.1.16 W1 落款（`tools/lib/model_roles.py`＋§6 區塊 4c），自動觸發面（依 `U7d_model`／THROTTLING 自動改模型）與任務類別過濾仍無致動器；再開症狀＝一次「sonnet 週軸比視窗軸緊」配置下的真實漏擋（sid＋seq；〈三〉#1：hook 對未帶 `model` 的 Agent 以視窗模型判額度軸），或一次 THROTTLING 期間高階模型週軸（如 `seven_day_opus`）已逼近而派工仍用該模型、建議行被忽略後撞線（附 `--pace` 畫面）。 |
-| §4.2.5 BURSTING 六條件 | ⚠️(S) | ➖ | 依據＝DEF-200-458 closed-by-decision（`bursting_ok` 六條件函式俱在、無生產呼叫端、查無實損；症狀端 DEF-200-198 已 fixed）；該列自載重開條件＝某窗 reset 時剩餘 ≥20pp 且 near 帶 cap 曾限制待派工作（附 `--pace` 畫面）。 |
-| §4.2.6 參考實作（dataclass 控制器） | ➖ | ➖ | 依據＝（沿用矩陣）PRD §4.2.8 自陳可被 `pace_index` 完全取代。 |
-| §4.2.7 情境試算表 | ➖ | ➖ | 依據＝（沿用矩陣）範例表，且七情境以已退役運算元（§4.2.1／§4.2.2／§3.2）寫成、#6 與 §4.1.5 F3 相反；實作側等價斷言＝`TestDecisionTable`（`tools/tests/test_quota_policy.py`）。 |
-| §4.3 上下文壓縮策略（三 AND） | ⚠️(S) | ⏸ | 現況＝K_ctx 84%、成本邊際、機械 autocompact 三 AND 已落地；缺 `COMPACT_MIN_INTERVAL_SECONDS` 與 PreCompact hook（`.claude/settings.json` 無條目）；再開症狀＝同一 session 於短時間內連續壓縮、額度被壓縮成本吃掉，或壓縮後可重啟點任務書遺失（附 sid＋逐字稿座標）。 |
-| §4.4.1 Worktree 建立 | ➖ | ➖ | 依據＝（沿用矩陣）PRD §0.6／附錄 B-20 自指定採原生 `isolation: worktree`；`.autoclaude/worktrees` 零命中。 |
-| §4.4.2 序列化整合佇列（rebase→驗證→ff-only） | ❌ | ➖ | 依據＝v2.1.17 決策式收斂：本 repo 刻意不做 Daemon／多 agent worktree 整合（見修訂表 v2.1.8 列 (B) 段與矩陣 §6.1 #14）；DEF-200-246 closed-by-decision，`integration_queue` 零生產寫者並由 tripwire 測試釘住（`AutoClaude/tests/contract/test_def200246_integration_queue_tripwire.py`），重開條件載於 §6.2 R-6.2-2 ③ 註記。 |
-| §4.4.3 Agent 硬性預算（turns／wall／quota_pp／×0.5） | ⚠️(M) | ⏸ | 現況＝只有牆鐘一軸（`step_timeout_seconds`，出廠 600）；`MAX_STEP_TURNS`／`MAX_STEP_QUOTA_PP`／`DRAIN_BUDGET_FACTOR` 零命中，且 `--max-turns` 於本機 CLI help 查無（見 §16.4 C3）；再開症狀＝一次單一 Step 失控（回合數或額度燒掉遠超預期，附 sid＋step_id）而牆鐘 timeout 未能攔住。 |
-| §4.5.1 凍結流程 7 步 | ⚠️(M) | ⏸ | [SA 判讀] 現況＝halt→checkpoint、救援前置（`_freeze_is_safe`）、RELAY 任務書已落地，髒污工作樹由 §4.5.9 patch 救援承接；缺「每個 worktree 各自 commit」（無人窗口不得 commit，與施工圖 A7 同源）與 5 秒內落盤的計時驗收；再開症狀＝同施工圖 A7（一次有 sid＋seq 的「喚醒窗改完檔卻因不能 commit，隔日才由人收尾」實錄）。 |
-| §4.5.2 分片休眠＋時鐘跳躍偵測 | ⚠️(M) | ⏸ | [HEAD 現查] 現況＝引擎等待已由 v2.1.16 W3 改走分片休眠（`AutoClaude/autoclaude/utils/sliced_sleep.py`；時鐘跳躍容忍與行程內等待上限進 `TokenGuardConfig`）；殘留＝剩餘 > `max_inprocess_wait_seconds`（出廠 18000）的長睡被拒後，無任何根層元件自動承接，引擎只以 rc=1 退出並於 log 明示需外部重啟（〈三〉#3）；PG／Dual 後端的拒絕路徑未實跑、機器睡眠下單調鐘行為只依文件（〈三〉#9）；再開症狀＝一次真實 >18000s 等待被拒後無人續跑（附 sid），或 PG 後端真跑拒絕路徑。 |
-| §4.5.3 重置驗證與喚醒（RESET_CONFIRM／full-jitter／C=1 起步） | ⚠️(M) | ➖ | [SA 判讀] 依據＝步驟 2 的固定級距階梯已由 §4.5.10（v2.1.8）重寫為行程內重試加解不出掛回零成本巡邏（重寫版的殘留見 §4.5.10 列）；步驟 1 的 `RESET_CONFIRM_PERCENT` 門檻在實作面不存在，v2.1.17 決策式收斂以實作為準（`endpoint_probe_verdict`，`tools/lib/quota_gate.py`：端點新鮮且每軸 <100% 即 open），文字落差以 §16.4 C2 註記對齊；步驟 4「C=1 起步」＝同 §16.4 C1／DEF-200-242（free 帶直通為設計、暴露 0），§15.6「以 C_min 起步爬升」讀作歷史字面。 |
-| §4.5.4 喚醒策略 AUTO／RESUME／FRESH | ⚠️(M) | ⏸ | 現況＝AUTO 路由與位元組上限（`AUTOSDD_RESUME_MAX_TRANSCRIPT_BYTES`，出廠 32MiB）已落地，單位與 `--max-turns`／`--allowed-tools` 的文字落差以 §16.4 C3／C4／C6 註記對齊；缺「若 U7d 已高於 weekly_warn，一律採 FRESH_SESSION_WITH_STATE」規則；再開症狀＝一次週軸（weekly_all／seven_day）讀數已達實作的 converge 帶（門檻鍵與出廠值現查 `python tools/lib/quota_policy.py --print-env-example`；條文的 `weekly_warn` 在實作面零命中）仍選了 SESSION_RESUME、喚醒成本推高週額度（附 sid＋`quota_burn.jsonl` 前後列）。 |
-| §4.5.10 醒來確認額度 E1～E5 | ⚠️(S) | ⏸ | 現況＝`PATROL_HANDBACK`／`tick_plan` 掛回巡邏與 E5 已落地；R-4.5.10-1 的行程內重量上限（≤3 次、總時長 ≤90s）零命中（暴露 0）；再開症狀＝一次真實醒來的探測在單次醒來內耗時超過 90 秒或付費探針呼叫超過 3 次（附 sid＋planner 痕跡列）。 |
-| §4.6 跨平台防休眠 | ➖ | ➖ | 依據＝PRD §4.6 自身替代路線（防休眠只用於短等待、長等待交排程器）＋DEF-200-020（`pmset repeat` 經掌舵者否決）；keep-awake（`caffeinate` 等）並非「刻意不做」而是**從未採用亦未否決**（ADR-XPLAT-007 §3.6 形狀 A 仍 Proposed）；替代＝OS 排程喚醒＋睡眠姿態出聲（`tools/lib/endurance_env.py`，現查 `pmset -g custom`）＋引擎路徑時鐘跳躍偵測；睡著的 Mac 不被喚醒屬已知邊界（根 CLAUDE.md〈mac 已知邊界〉，不是待修 bug）。 |
-| §4.7 帳號配額仲裁 | ⚠️(S) | ➖ | [SA 判讀] 依據＝§15.2 必建模組以功能等價物承接：lease TTL／`daemon_id`／`daemon.lock` 是多 Daemon 形態的機制，本 repo 刻意不做 Daemon；功能等價物＝目錄項派發帳（`tools/lib/quota_ledger.py` 的 `claim_dispatch`／`count_dispatches`＋`tools/lib/quota_gate.py` 的 `FANOUT_WINDOW_SECONDS`），一帳一帳本；失效姿態＝PRD「鎖搶不到→fail-safe」在本實作為派發帳寫不進／讀不到時**不節流**（fail-open，unreadable 目錄項出聲），halt 帶不受影響。 |
-| §5 API_KEY 模式 | ❌ | ➖ | 依據＝v2.1.17 決策式收斂：本 repo 純 OAuth（R98 差距分析記「全未實作，本 repo 純 OAuth」；`AUTH_MODE`／`API_BUDGET_*`／`API_AUTO_CONTINUE` 全庫零命中），API_KEY 模式刻意不做（矩陣 §6.1 #14）；§1.3 非目標「API 模式必須有使用者自訂的硬性預算上限」保留為日後若做時的前提紀律。 |
-| §6 區塊 1～4b：帳號／遙測／水位／週額度／超額 | ⚠️(L) | ➖ | 依據＝PRD §6 以 Daemon 形態寫成，換形態後鍵無對映（矩陣 §7 逐鍵普查：78 鍵 ✅14／⚠️21／❌28／➖15，鍵級落地率 38.9% 原樣留在矩陣）；週額度獨立門檻等落差以 §16.4 C8 註記對齊，實作鍵名以 `tools/lib/quota_policy_env.py` 的 `ENV_SPEC` 為準；超額政策（`ALLOW_WITH_CAP`／首次動用告警）另列於 §15.4 P4 列。 |
-| §6 區塊 5～9：上下文／併發／突刺／硬預算／休眠喚醒 | ⚠️(M) | ➖ | 依據＝同上（鍵級普查見矩陣 §7）；本區塊各鍵的功能面各有歸屬列：`MAX_STEP_*`→§4.4.3、`RESET_CONFIRM_PERCENT`→§4.5.3（C2）、`COMPACT_MIN_INTERVAL_SECONDS`→§4.3、BURSTING 鍵→§4.2.5；`SLEEP_SLICE_SECONDS`／`CLOCK_JUMP_TOLERANCE_SECONDS`／`MAX_INPROCESS_WAIT_SECONDS` 已由 v2.1.16 W3 以 `TokenGuardConfig` 三旋鈕落款（出廠 30／5／18000，偏離值與理由見該落款）。 |
-| §6 區塊 10～15：防休眠／Git／狀態／安全／可觀測／API | ⚠️(M) | ➖ | 依據＝同上；功能面歸屬：`INTEGRATION_*`→§4.4.2、`ALLOW_PERMISSION_BYPASS`→§12 權限旗標列、`METRICS_EXPORT`／`ALERT_WEBHOOK_URL`→§9 各列、`DRY_RUN`→§6.2 R-6.2-2 列、`API_*`→§5。 |
-| §6.1 啟動自檢不變式 1～13 | ⚠️(M) | ⏸ | [SA 判讀] 現況＝不變式 1、4、6、11、12、13 已有機械物（1 僅機械化嚴格遞增與值域，「HALT−DRAIN≥5」子句未機械化），2、3、7c 矩陣判 ➖，7 隨 §5 判 ➖；部分＝5（H7 中位牆鐘為占位值 60s）、10（啟動自檢無遙測來源／防休眠可用檢查）；未做＝7b／8／9（`ALLOW_WITH_CAP` 上限值／bypass 容器偵測／`.autoclaude/` gitignore 檢查），且 `load_policy` 越界為整組退回預設並出聲、而非條文的拒絕啟動（見 §16.4 C11）；再開症狀＝啟動自檢缺席的不變式所防之事實際發生（`bypassPermissions` 於非容器環境啟動、`.autoclaude/` 進了 commit；附 sid 或 commit 座標）。 【2026-10-12】不變式 8 已落地（`AutoClaude/autoclaude/execution/boot_self_check.py` 的 `permission_bypass_verdict`；鎖＝`AutoClaude/tests/execution/test_prd12_permission_bypass_invariant8.py`），未做剩 7b／9；再開症狀前半（`bypassPermissions` 於非容器環境啟動）與 §12 權限旗標列同一事件、已被觸發並落地，後半（`.autoclaude/` 進 commit）無樣本；格不變。【2026-10-12 第五列訂正】殘存再開症狀改寫為一句：7b／9 所防之事實際發生（`ALLOW_WITH_CAP` 上限值缺席而超額被用、或 `.autoclaude/` 進了 commit；附 sid 或 commit 座標）。 |
-| §6.2 R-6.2-1 殘留整合佇列：開機掃描重排 | ⚠️(L) | ➖ | 依據＝DEF-200-246 closed-by-decision：開機掃描已接電、輸入恆空（`integration_queue` 零生產寫者；§6.2 載「依設計未實作」與重開條件，tripwire 測試釘住）。 |
-| §6.2 R-6.2-2 CLI 版本相容＋DRY_RUN | ⚠️(S) | 📎 | [HEAD 現查] 殘留＝機制已落地（`AutoClaude/autoclaude/execution/boot_self_check.py` 的 `read_cli_version`／`cli_version_verdict`：版本讀取＋未知版本 loud＋DRY_RUN 提示；已驗證清單已補 2.1.295，見 v2.1.16 W3 落款），餘下的是隨 CLI 升版漂移的清單資料——寫本列當下本機 `claude --version`＝2.1.296、清單最新 2.1.295，啟動仍 loud 一次、不阻止啟動；補清單屬程式碼維護、不開修憲；DRY_RUN 判決未接執行器依設計（DEF-200-246 closed-by-decision）。**誠實揭露**：此殘留每次 CLI 升版即重現、無終點（版本號型永動源）；未驗證版本的後果＝每次啟動一則桌面通知＋略過已合併 worktree 清理，不影響執行；把「不在清單」從 loud 降為單行 log、或改以能力探針取代精確版本比對，屬 AutoClaude 設計變更，依 §16.5 (i) 由掌舵者立案。【2026-10-10 同日落款】掌舵者已立案、家族級判定已落地（§16.6 第 1 列）：patch 升版不再重現；新 minor／major 仍需補清單、仍 DRY_RUN＋loud。 |
-| §7 state.json schema v2 | ⚠️(M) | ➖ | 依據＝§15.2 必建模組以功能等價物承接＋v2.1.17 決策式收斂：`agents[]`／`quota_snapshot`／結構化 `resume_plan` 屬多 Agent 並行形態，本 repo 刻意不做（矩陣 §6.1 #14；與 DEF-200-246 重開條件②同源）；實際持久化＝`PlaybookCheckpoint`（含 `integration_queue` 欄位、checksum、原子寫入）＋RELAY 狀態塊。 |
-| §8 列 1 非預期 429（推論端） | ⚠️(M) | ⏸ | 現況＝limit 字樣→halt（`AutoClaude/autoclaude/plugins/token_guard/policy.py`、`AutoClaude/autoclaude/core/kernel.py`）與地板讀數已有，無 `Retry-After` 遵循／full-jitter／5 次重試；再開症狀＝一次推論端非預期 429（帶 `Retry-After` 且短於一個 halt 週期）使引擎直接 halt 或升級、而本可由退避重試化解（附 run log 與 `Retry-After` 值）。 |
-| §8 列 2 重置時間漂移 | ⚠️(S) | ⏸ | 現況＝同 §4.5.10（觀測優先、不猜時刻、掛回零成本巡邏）；再開症狀＝一次真實 reset 晚到（reset 時刻已過而遙測仍 ≥100%）使喚醒窗連續多次探測仍判未恢復、耗掉可觀額度（附 sid＋planner 痕跡列）。 |
-| §8 列 3 git index.lock 陳舊檢查 | ❌ | ⏸ | 現況＝零命中；唯一現象是一次瞬時鎖 rc=128、數秒自解（R206 證據檔，非陳舊鎖）；再開症狀＝一次真實殘留的 `index.lock`（非瞬時自解）使喚醒窗或救援序列卡住（附 sid＋git stderr）。 |
-| §8 列 5 等待中睡著 | ⚠️(M) | ➖ | [HEAD 現查] 依據＝同 §4.6（keep-awake 從未採用亦未否決；替代路線＝PRD §4.6 自身），替代＝OS 排程 `StartWhenAvailable`／`WakeToRun`（Windows 註冊設定＝`tools/session_resume_planner.py` 的 `_SCHTASKS_SETTINGS`）＋睡眠姿態出聲（`tools/lib/endurance_env.py`）；睡著的 Mac 不被喚醒屬已知邊界（根 CLAUDE.md〈mac 已知邊界〉，交付＝失效可偵測）；引擎路徑的時鐘跳躍偵測已由 v2.1.16 W3 補上。 |
-| §8 列 7 同帳號多 Daemon 超燒 | ⚠️(S) | ➖ | 依據＝同 §4.7（多 Daemon 形態；功能等價物＝目錄項派發帳）。 |
-| §8 列 9 Agent 卡死／NEEDS_HUMAN | ⚠️(S) | ⏸ | 現況＝step timeout→ESCALATION（`AutoClaude/autoclaude/core/kernel.py`）與無進度即停（`tools/lib/relay_machine.py`）已有，`NEEDS_HUMAN` 狀態字面零命中；再開症狀＝一次需人介入的卡死而桌面通知與 ESCALATION 皆未觸發（附 sid＋log 座標）。 |
-| §8 列 11 整合驗證失敗 | ⚠️(L) | ➖ | 依據＝同 §6.2 R-6.2-1（DEF-200-246 closed-by-decision；整合佇列零生產寫者）。 |
-| §8 列 12 Prompt injection | ⚠️(S) | ⏸ | 現況＝allowlist（`AutoClaude/autoclaude/infra/adapters/sdk_executor_adapter.py`）＋`.claude/settings.unattended.json` 已有，無對應「禁止未經確認的網路存取」的獨立層；再開症狀＝無人窗口逐字稿中出現經已放行指令（如 `python -m pytest*`）發出的對外 URL 呼叫（curl／wget／requests 等字樣與目的網址可逐字引用；附 sid＋逐字稿座標）。 |
-| §8 列 13 CLI 版本升級 | ⚠️(S) | 📎 | 殘留＝同 §6.2 R-6.2-2（機制已落地、清單為隨 CLI 升版漂移的資料；patch 升版即重現的那一半已由 §16.6 第 1 列的家族級判定治好，新 minor／major 仍需補清單，見該列誠實揭露）。 |
-| §9 12 個 Prometheus 指標 | ❌ | ⏸ | 現況＝`prometheus`／`otlp`／`autoclaude_*` 零命中，等價痕跡＝JSONL 家族（如 `quota_burn.jsonl`）；再開症狀＝出現真實下游要讀這 12 項指標之一（Grafana 面板或告警規則引用 `autoclaude_*`）而 JSONL 痕跡無法替代（附需求原文）。 |
-| §9 結構化決策日誌 | ⚠️(S) | ⏸ | 現況＝JSONL 痕跡家族（`quota_burn.jsonl`、`tools/lib/quota_gate.py` 與 `tools/lib/quota_escalation.py` 的痕跡）非逐決策全量；再開症狀＝一次需事後重建的決策（某次派工為何被擋或放行）在痕跡中查無對應列（附 sid＋seq）。 |
-| §9 告警（DRAINING 以上／DIRTY_UNSAVED／NEEDS_HUMAN／429 突增） | ⚠️(S) | ⏸ | 現況＝halt／prepare 桌面通知與 DIRTY_UNSAVED（notifier）已有，`NEEDS_HUMAN`／429 突增零命中；再開症狀＝一次 429 突增或需人介入事件無人被告警而擱置（附 sid＋時間）。 |
+| §3.2 10 態 FSM＋單向鎖存＋轉移圖 | ⚠️(M) | ✅ | [SA 判讀] 現況＝10 態 FSM 以無狀態 `decide()`＋band 帶別＋halt 閂鎖取代（v2.1.8 §4.2.4 改 cap 語意）；`HALTED_MANUAL`（人工 pause／resume）無生產對應——ESC+F12 全域中斷（`AutoClaude/autoclaude/plugins/hotkey_plugin.py`）只中止、無 pause／resume，且 `python -m autoclaude` 入口目前不呼叫 `HotkeyHandler.register()`（`AutoClaude/autoclaude/main.py` 註解自陳；〈三〉#2）；再開症狀＝掌舵者真機要用中斷鍵，或要求「暫停後恢復」（附畫面原文或 sid）。 【2026-10-13 落款｜v2.1.20】⏸→✅。實作＝`AutoClaude/autoclaude/main.py::register_global_hotkey`（有 TTY 且非 `AUTOSDD_UNATTENDED` 才 `hotkey.register()`；失敗只 warning；結束 unregister）；鎖＝`AutoClaude/tests/execution/test_prd32_global_hotkey_registration.py`（18 項）。10 態 FSM 以 `decide()`＋band＋halt 閂鎖等價承接（§4.2.4 既有裁決；以上實作與鎖不變）。**劃界**：本列證據只涵蓋『入口註冊閘門』（18 項）；`HALTED_MANUAL` 的 pause／resume 無獨立狀態與 `autoclaude pause`／`resume` 指令，等價物＝人工中斷（ESC+F12：僅 Windows 或 root、且需 `.[hotkey]` extra，mac 非 root 必失敗；mac 改用 Ctrl+C，見 ONBOARDING §9）寫 checkpoint 後退出，再執行 `python -m autoclaude` 由 `AutoResumeService` 自 checkpoint 續跑（`AutoClaude/tests/integration/test_sigint_checkpoint.py` 證 checkpoint 可由新行程讀回；『中斷後重啟續跑於被中斷步』另補測試〔待補〕）。 |
+| §4.1.1 T3（statusLine 回寫） | ⚠️(M) | ✅ | 現況＝讀端（`.claude/hooks/context_budget_guard.py` 的 `read_context_feed`）、安裝器（`tools/install_statusline.py`）、producer（`tools/statusline_context_feed.py`）俱在，但回寫的 feed 只含 model 與 context_window、無 `rate_limits.*`（只服務 K_ctx，不服務 U5h／U7d）；再開症狀＝T5 不可用期間 statusLine 輸入已帶 `rate_limits.*`，而守衛因 feed 未回寫額度欄量不到（附 feed 樣本與 `autosdd_quota_degraded.jsonl` 列或 `quota_burn.jsonl` 空洞前後兩列座標）。 【2026-10-13 落款｜v2.1.20】⏸→✅。實作＝producer `tools/statusline_context_feed.py::build_feed_doc` 原樣轉 `rate_limits`；讀端 `tools/lib/harness_feed.py::rate_limits_reading`（feed `ts` 逾 TTL 回 None；窗鍵動態列舉；單位走既有正規化）；接線 `tools/lib/quota_gate.py::settled_quota`（端點新鮮 > statusLine 新鮮 > unmeasured；`reason=statusline-fallback`）；鎖＝`tools/tests/test_context_budget_guard.py::StatuslineRateLimitsFallbackTest`＋`tools/tests/test_statusline_context_feed.py`。真機：本 session feed 已含 `rate_limits`（five_hour／seven_day 兩窗）。 |
+| §4.3 上下文壓縮策略（三 AND） | ⚠️(S) | ⏸ | 現況＝K_ctx 84%、成本邊際、機械 autocompact 三 AND 已落地；缺 `COMPACT_MIN_INTERVAL_SECONDS` 與 PreCompact hook（`.claude/settings.json` 無條目）；再開症狀＝同一 session 於短時間內連續壓縮、額度被壓縮成本吃掉，或壓縮後可重啟點任務書遺失（附 sid＋逐字稿座標）。 【2026-10-13 落款｜v2.1.20】格不變（⏸）。守衛面實作已設計完成但本窗未套用：PreCompact hook `precompact_restart_point.py`（壓縮前走 planner 寫可重啟點任務書、落 `autosdd_compact_events.jsonl`、`COMPACT_MIN_INTERVAL_SECONDS` 出廠 600 只出聲不阻止、恆 exit 0）＋ `.claude/settings.json` 註冊＋根 CLAUDE.md 一列；auto mode 分類器以 [Self-Modification] 擋下主控對 `.claude/**` 的寫入，待掌舵者核准後套用（證據檔〈五〉）。 【2026-10-13 落款｜v2.1.21】格不變（⏸）。掌舵者 2026-10-13「核准同意」已收；成品＝`apply_guard_face_three.py`（7 檔；本列對應件＝PreCompact hook 與其 `.claude/settings.json` 註冊）＋`precompact_restart_point.py`，待掌舵者親跑（分類器擋下主控對 `.claude/**` 的寫入）；套用 PASS 後轉 ✅。 |
+| §4.5.4 喚醒策略 AUTO／RESUME／FRESH | ⚠️(M) | ✅ | 現況＝AUTO 路由與位元組上限（`AUTOSDD_RESUME_MAX_TRANSCRIPT_BYTES`，出廠 32MiB）已落地，單位與 `--max-turns`／`--allowed-tools` 的文字落差以 §16.4 C3／C4／C6 註記對齊；缺「若 U7d 已高於 weekly_warn，一律採 FRESH_SESSION_WITH_STATE」規則；再開症狀＝一次週軸（weekly_all／seven_day）讀數已達實作的 converge 帶（門檻鍵與出廠值現查 `python tools/lib/quota_policy.py --print-env-example`；條文的 `weekly_warn` 在實作面零命中）仍選了 SESSION_RESUME、喚醒成本推高週額度（附 sid＋`quota_burn.jsonl` 前後列）。 【2026-10-13 落款｜v2.1.20】⏸→✅。實作＝`tools/lib/resume_route.py::weekly_forces_fresh`（週軸＝`quota_pace.windows()` 窗長 ≥ weekly；門檻＝載入後 `Policy.converge_pct`；排除保險軸）＋`weekly_why`／`fresh_why`；`tools/session_resume_planner.py::choose_resume_route(weekly=)`；方向鎖不變（只准 RESUME→FRESH）；鎖＝`tools/tests/test_context_budget_guard.py::WeeklyAxisForcesFreshTest`。行為轉折：週軸 ≥ converge 時無人醒來一律 FRESH（本機落款當下週軸 94～95% 即屬此況）。 |
+| §4.5.10 醒來確認額度 E1～E5 | ⚠️(S) | ✅ | 現況＝`PATROL_HANDBACK`／`tick_plan` 掛回巡邏與 E5 已落地；R-4.5.10-1 的行程內重量上限（≤3 次、總時長 ≤90s）零命中（暴露 0）；再開症狀＝一次真實醒來的探測在單次醒來內耗時超過 90 秒或付費探針呼叫超過 3 次（附 sid＋planner 痕跡列）。 【2026-10-13 落款｜v2.1.20】⏸→✅。實作＝`tools/lib/resume_route.py::PROBE_WALL_SECONDS = 90`、`probe_quota` 的 subprocess `timeout` 引用之；每次醒來只探測一次（`tick_plan` 的 rearm 是下一次醒來）⇒ 次數 1 ≤ 3；鎖＝`tools/tests/test_context_budget_guard.py::ProbeOpennessIsAPositiveVerdictTest.test_the_paid_probe_wall_clock_is_the_prd_4_5_10_bound`（AST 查 timeout 引用常數且 ≤90）。 |
+| §6.1 啟動自檢不變式 1～13 | ⚠️(M) | ✅ | [SA 判讀] 現況＝不變式 1、4、6、11、12、13 已有機械物（1 僅機械化嚴格遞增與值域，「HALT−DRAIN≥5」子句未機械化），2、3、7c 矩陣判 ➖，7 隨 §5 判 ➖；部分＝5（H7 中位牆鐘為占位值 60s）、10（啟動自檢無遙測來源／防休眠可用檢查）；未做＝7b／8／9（`ALLOW_WITH_CAP` 上限值／bypass 容器偵測／`.autoclaude/` gitignore 檢查），且 `load_policy` 越界為整組退回預設並出聲、而非條文的拒絕啟動（見 §16.4 C11）；再開症狀＝啟動自檢缺席的不變式所防之事實際發生（`bypassPermissions` 於非容器環境啟動、`.autoclaude/` 進了 commit；附 sid 或 commit 座標）。 【2026-10-12】不變式 8 已落地（`AutoClaude/autoclaude/execution/boot_self_check.py` 的 `permission_bypass_verdict`；鎖＝`AutoClaude/tests/execution/test_prd12_permission_bypass_invariant8.py`），未做剩 7b／9；再開症狀前半（`bypassPermissions` 於非容器環境啟動）與 §12 權限旗標列同一事件、已被觸發並落地，後半（`.autoclaude/` 進 commit）無樣本；格不變。【2026-10-12 第五列訂正】殘存再開症狀改寫為一句：7b／9 所防之事實際發生（`ALLOW_WITH_CAP` 上限值缺席而超額被用、或 `.autoclaude/` 進了 commit；附 sid 或 commit 座標）。 【2026-10-13 落款｜v2.1.20】格不變（⏸→本列只剩 7b）。不變式 9 第 3 子句（`.autoclaude/` 入 `.gitignore`）已落地（『Git repo 存在』子句刻意不拒絕非 git 目錄〔通過並 note〕、『工作區乾淨或已確認』子句未機械化）：`AutoClaude/autoclaude/execution/boot_self_check.py::gitignore_verdict`＋`state_dirs_to_guard`（`git check-ignore -q`，未忽略＝problem；非 git repo 通過並 note），兩份 .gitignore 補 `.autoclaude/`，鎖 `AutoClaude/tests/execution/test_prd61_gitignore_invariant9.py`（29 項），入口 DEF-200-530；7b（`ALLOW_WITH_CAP` 上限值）隨 §15.4 P4 列退役（帳號無超額池）⇒ 本列殘存再開症狀僅剩「.autoclaude/ 進 commit」，而它已有機械物。 【2026-10-13 落款｜v2.1.21】⏸→✅。依據＝Architect 鏡 ARCH-10／SA 鏡訂正句 C9（證據檔〈十-7〉）：該症狀已被不變式 9 的 `git check-ignore` 啟動自檢擋在源頭＝結構上不會再被觀測，轉格不排給未來事件（§16.1 (c)）；上列 v2.1.20 落款已依 C9 訂正為只落第 3 子句；不變式 5（H7 占位值 60s）／10（啟動自檢無遙測來源與防休眠可用檢查）的部分項維持上列現況所述，記為已知邊界。 |
+| §6.2 R-6.2-2 CLI 版本相容＋DRY_RUN | ⚠️(S) | ✅ | [HEAD 現查] 殘留＝機制已落地（`AutoClaude/autoclaude/execution/boot_self_check.py` 的 `read_cli_version`／`cli_version_verdict`：版本讀取＋未知版本 loud＋DRY_RUN 提示；已驗證清單已補 2.1.295，見 v2.1.16 W3 落款），餘下的是隨 CLI 升版漂移的清單資料——寫本列當下本機 `claude --version`＝2.1.296、清單最新 2.1.295，啟動仍 loud 一次、不阻止啟動；補清單屬程式碼維護、不開修憲；DRY_RUN 判決未接執行器依設計（DEF-200-246 closed-by-decision）。**誠實揭露**：此殘留每次 CLI 升版即重現、無終點（版本號型永動源）；未驗證版本的後果＝每次啟動一則桌面通知＋略過已合併 worktree 清理，不影響執行；把「不在清單」從 loud 降為單行 log、或改以能力探針取代精確版本比對，屬 AutoClaude 設計變更，依 §16.5 (i) 由掌舵者立案。【2026-10-10 同日落款】掌舵者已立案、家族級判定已落地（§16.6 第 1 列）：patch 升版不再重現；新 minor／major 仍需補清單、仍 DRY_RUN＋loud。 【2026-10-13 落款｜v2.1.20】📎→✅。依據＝§16.6 第 1 列家族判定已把「每次 patch 升版即重現」的殘留治好；新 minor／major 是新事實、不是本列殘留（出現時補清單＝程式碼維護）。本機 2.1.296 親驗不 DRY_RUN。 |
+| §8 列 1 非預期 429（推論端） | ⚠️(M) | ✅ | 現況＝limit 字樣→halt（`AutoClaude/autoclaude/plugins/token_guard/policy.py`、`AutoClaude/autoclaude/core/kernel.py`）與地板讀數已有，無 `Retry-After` 遵循／full-jitter／5 次重試；再開症狀＝一次推論端非預期 429（帶 `Retry-After` 且短於一個 halt 週期）使引擎直接 halt 或升級、而本可由退避重試化解（附 run log 與 `Retry-After` 值）。 【2026-10-13 落款｜v2.1.20】⏸→✅。實作＝`AutoClaude/autoclaude/plugins/token_guard/thresholds.py::limit_retry_wait_decision`（`Retry-After`＋full-jitter；cap＝`max_retry_after_seconds` 出廠 300；最多 `max_limit_retries` 出廠 5 次；缺席／過長／額度硬線 ⇒ 既有 halt 路徑逐位元不變）＋ kernel 原地重跑同一 attempt（`core/kernel.py`、`core/wiring.py::_backoff_sleeper` 分片休眠可中斷）；鎖＝`AutoClaude/tests/core/test_kernel_limit_retry_prd8_1.py`＋`tests/plugins/token_guard/test_limit_retry_prd8_1.py`（77 項）。劃界：無標頭的 full-jitter 分支與「U5h 上修」不做（無標頭＝無伺服器建議，退避只是猜）。 |
+| §8 列 3 git index.lock 陳舊檢查 | ❌ | ✅ | 現況＝零命中；唯一現象是一次瞬時鎖 rc=128、數秒自解（R206 證據檔，非陳舊鎖）；再開症狀＝一次真實殘留的 `index.lock`（非瞬時自解）使喚醒窗或救援序列卡住（附 sid＋git stderr）。 【2026-10-13 落款｜v2.1.20】⏸→✅。實作＝`tools/lib/relay_machine.py::stale_index_lock`（鎖齡 >600s 且確認無 git 行程 ⇒ 改名 `index.lock.stale-<時戳>` 可逆；有行程或查不出 ⇒ kept；POSIX `pgrep -x git`／Windows `tasklist` 平台守衛）＋`_git_dir`（worktree／submodule 的 gitdir 解析）；接線於 `session_resume_planner.py` 續跑窗快照前；鎖＝`tools/tests/test_context_budget_guard.py`（臨時 repo 造鎖＋mtime 回撥＋pgrep 注入）。Windows `tasklist` 分支未實跑。 |
+| §8 列 12 Prompt injection | ⚠️(S) | ⏸ | 現況＝allowlist（`AutoClaude/autoclaude/infra/adapters/sdk_executor_adapter.py`）＋`.claude/settings.unattended.json` 已有，無對應「禁止未經確認的網路存取」的獨立層；再開症狀＝無人窗口逐字稿中出現經已放行指令（如 `python -m pytest*`）發出的對外 URL 呼叫（curl／wget／requests 等字樣與目的網址可逐字引用；附 sid＋逐字稿座標）。 【2026-10-13 落款｜v2.1.20】格不變（⏸）。無人窗 allowlist 預設拒絕已是第一層；顯式 deny（curl／wget／nc／ssh／scp／Invoke-WebRequest／WebFetch／WebSearch）屬守衛面 `.claude/settings.unattended.json`，同上待掌舵者核准後套用（證據檔〈五〉）。 【2026-10-13 落款｜v2.1.21】格不變（⏸）。掌舵者 2026-10-13「核准同意」已收；成品＝`apply_guard_face_three.py`（7 檔；本列對應件＝`.claude/settings.unattended.json` 顯式 deny 22 條）＋`precompact_restart_point.py`，待掌舵者親跑（分類器擋下主控對 `.claude/**` 的寫入）；套用 PASS 後轉 ✅。 |
+| §8 列 13 CLI 版本升級 | ⚠️(S) | ✅ | 殘留＝同 §6.2 R-6.2-2（機制已落地、清單為隨 CLI 升版漂移的資料；patch 升版即重現的那一半已由 §16.6 第 1 列的家族級判定治好，新 minor／major 仍需補清單，見該列誠實揭露）。 【2026-10-13 落款｜v2.1.20】📎→✅。同 §6.2 R-6.2-2 列。 |
 | §12 權限旗標（不預設 skip-permissions／bypass 需容器偵測） | ⚠️(S) | ✅ |（凍結日現況）現況＝預設與喚醒窗皆不用 bypass（`tools/lib/resume_route.py` 走 acceptEdits＋settings），但引擎 `ExecutorConfig.permission_mode` 允許 `bypassPermissions` 且 `ALLOW_PERMISSION_BYPASS` 容器偵測零命中；再開症狀＝引擎於非容器環境以 `bypassPermissions` 跑了一次（附 config 與 sid）。 【2026-10-12 落款】症狀＝F-SBR-001 C1～C4 以 `bypassPermissions` 跑巢狀 claude（`AutoClaude/docs/03_testing/SddBridge_RealRun_Evidence_20261011.md` 第 13／80～84／391 行）；實作＝`AutoClaude/autoclaude/execution/boot_self_check.py` 的 `permission_bypass_verdict`（§6.1 不變式 8：旗標＋容器雙閘），測試＝`AutoClaude/tests/execution/test_prd12_permission_bypass_invariant8.py`；範本改 acceptEdits＋白名單，r5 真跑 3／3 步成功（n=1，haiku，僅 macOS）。劃界：VM 不偵測；只判引擎設定面（`--settings`／使用者層 `defaultMode` 不在射程）。詳修訂表 v2.1.18 所指證據檔〈四〉。 |
-| §12 寫入範圍／治理檔禁寫 | ⚠️(S) | ⏸ | 現況＝治理面禁寫已機械化（`.claude/hooks/block_destructive_git.py` 的 `_GOV_EXACT`＋`.autoclaude/` 前綴，含 `.env`），但 PRD 要求的 `.git/` 與 `~/.ssh` 未列入（專案根之外一律放行），「每個 Agent 只能寫入自己的 worktree」靠原生 isolation；且 `_GOV_EXACT` 不含 `tools/lib/resume_route.py`／`tools/lib/model_roles.py`（〈三〉#7）；再開症狀＝一次無人窗口寫入 `.git/`、`~/.ssh` 或其他治理面之外的路徑，或改動 `resume_route.py`／`model_roles.py`（自己的模型角色邏輯）的實錄（附 hook 痕跡或逐字稿座標）。 |
-| §12 prompt injection／狀態回報 schema | ⚠️(S) | ⏸ | 現況＝狀態回報為一般型別化 dataclass、非針對偽造設計（allowlist 見 §8 列 12）；再開症狀＝一次工具輸出內的偽造「狀態回報」被引擎當真並改變決策（附 sid＋step 痕跡）。 |
-| §12 日誌遮蔽 | ⚠️(S) | ⏸ | 現況＝token 不落痕跡為設計（`tools/lib/quota_meter.py`），PG 狀態庫有 `_redact`（`AutoClaude/autoclaude/infra/repositories/pg_state_repository.py`），無全域 `REDACT_SECRETS_IN_LOGS` 開關；再開症狀＝一次日誌或痕跡檔中發現憑證字串（附檔案座標，並先行輪替憑證）。 |
-| §12 供應鏈（不得無人確認新增依賴／postinstall） | ⚠️(S) | ⏸ | 現況＝無人喚醒窗 allowlist 預設拒絕（`.claude/settings.unattended.json`），無顯式 install／postinstall 規則、引擎路徑未覆蓋；再開症狀＝一次無人窗口（引擎路徑）未經確認新增依賴或執行 postinstall（附 sid＋diff）。 |
+| §12 寫入範圍／治理檔禁寫 | ⚠️(S) | ⏸ | 現況＝治理面禁寫已機械化（`.claude/hooks/block_destructive_git.py` 的 `_GOV_EXACT`＋`.autoclaude/` 前綴，含 `.env`），但 PRD 要求的 `.git/` 與 `~/.ssh` 未列入（專案根之外一律放行），「每個 Agent 只能寫入自己的 worktree」靠原生 isolation；且 `_GOV_EXACT` 不含 `tools/lib/resume_route.py`／`tools/lib/model_roles.py`（〈三〉#7）；再開症狀＝一次無人窗口寫入 `.git/`、`~/.ssh` 或其他治理面之外的路徑，或改動 `resume_route.py`／`model_roles.py`（自己的模型角色邏輯）的實錄（附 hook 痕跡或逐字稿座標）。 【2026-10-13 落款｜v2.1.20】格不變（⏸）。`_GOV_EXACT` 擴 `tools/lib/resume_route.py`／`tools/lib/model_roles.py`、根內 `.git/` 與 `~/.ssh/` 一律治理面——住 `.claude/hooks/block_destructive_git.py`，同上待掌舵者核准後套用（證據檔〈五〉）。 【2026-10-13 落款｜v2.1.21】格不變（⏸）。掌舵者 2026-10-13「核准同意」已收；成品＝`apply_guard_face_three.py`（7 檔；本列對應件＝`_GOV_EXACT` 增二檔＋`.git/`＋`~/.ssh/`）＋`precompact_restart_point.py`，待掌舵者親跑（分類器擋下主控對 `.claude/**` 的寫入）；套用 PASS 後轉 ✅。 |
+| §12 日誌遮蔽 | ⚠️(S) | ✅ | 現況＝token 不落痕跡為設計（`tools/lib/quota_meter.py`），PG 狀態庫有 `_redact`（`AutoClaude/autoclaude/infra/repositories/pg_state_repository.py`），無全域 `REDACT_SECRETS_IN_LOGS` 開關；再開症狀＝一次日誌或痕跡檔中發現憑證字串（附檔案座標，並先行輪替憑證）。 【2026-10-13 落款｜v2.1.20】⏸→✅。實作＝`AutoClaude/autoclaude/utils/redaction.py`（單一樣式表；`pg_state_repository`／`factory` 改 import）＋`utils/logger.py::RedactSecretsFilter` 掛每個 handler；開關 `REDACT_SECRETS_IN_LOGS`（出廠 on，`0/false/off` 關）；鎖＝`AutoClaude/tests/utils/test_redaction_prd12_log_masking.py`（56 項；真實 log 33 檔重放零誤傷）。劃界：`RawStreamLogger`（PTY 原始串流）不在射程。 |
 | §13 使用條款人工檢核 | ❌ | ⏸ | 現況＝人工（法務）檢核從未發生：附錄 B-16 自註「無法核實」「仍為上線前必要檢核項」，B.3 #1 稱「這是唯一可能讓專案作廢的風險項」；docs 除 PRD 與 R98 外零記錄；非程式碼缺口，不以 📎 計入落地；再開症狀＝收到 Anthropic 使用條款變更通知、帳號警告或任何對自動化用量的官方詢問（附原文），或掌舵者決定上線前親自檢核（附落款）。 |
-| §15.4 P0 觀測 | ⚠️(M) | ➖ | [SA 判讀] 依據＝§15.4 P0～P5 是施工順序（§14 舊路線圖已被它取代）而非第二份需求，其出場題所指的功能列已在本表各自結案——P0 對應 §4.1.1 T1／T3、§9 指標列（含 `autoclaude_step_quota_cost_pp` 單 Step 額度成本資料）；本列只收順序，退役以免雙重計算。 |
-| §15.4 P1 保全 | ⚠️(M) | ➖ | [SA 判讀] 依據＝同 P0；P1 出場題所指功能列＝§4.3（PreCompact／最小間隔）、§4.5.1（逐 worktree commit）、§11.3（5 秒落盤計時，📎）。 |
-| §15.4 P2 配速 | ⚠️(M) | ➖ | [SA 判讀] 依據＝同 P0；P2 出場題所指功能列＝§4.2.8（pace_index，✅）、§11.2（離線模擬器／DRY_RUN 一週，📎）。 |
-| §15.4 P3 閘門 | ⚠️(S) | ➖ | [SA 判讀] 依據＝同 P0；P3 出場題所指功能列＝§4.2.3 致動器表（模型降級致動器），動態 `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` 以 hook 直接 deny（PreToolUse 攔 Agent／Workflow）取代，屬設計替代。 |
-| §15.4 P4 韌性 | ⚠️(M) | ⏸ | [SA 判讀] 現況＝P4 出場題中防休眠（§4.6）與仲裁（§4.7）已各自判 ➖、週額度長休眠 ✅；獨有的殘留是超額政策（`OVERAGE_POLICY=ALLOW_WITH_CAP`／`OVERAGE_ALERT_ON_FIRST_USE`／月度超額利用率 halt）零落地，現況事實上 FREEZE（`tools/lib/quota_policy.py`、`tools/lib/quota_meter.py`），R87 當回合 payload 曾 `extra_usage.is_enabled=false` 而 `used_credits 610 > monthly_limit 500`（`tools/lib/quota_meter.py` R87 墓碑：撞頂後果，不是「超額池關著」的證據，不構成暴露 0）；現況以 `--pace`「派工前置」行現查（本輪逐字「此帳號**沒有** usage credits ⇒ 訂閱窗本身即硬牆」）；再開症狀＝`--pace` 派工前置行由「沒有 usage credits」變為有 credits（附該行畫面），或帳號啟用付費超額後出現一次真實的超額軸被動用／超額計費而無人被告警（附 `quota_burn.jsonl` 列或帳單座標）。 |
-| §15.4 P5 硬化 | ⚠️(M) | ➖ | [SA 判讀] 依據＝同 P0；P5 出場題所指功能列＝§12 各列、§6.1、§6.2 R-6.2-2（📎）、§11.8（24h 端到端，📎）。 |
-| §10 v1→v2 設定遷移 | ➖ | ➖ | 依據＝v1 四鍵全庫零命中（grep＋`git log -S`），PRD §10「Daemon 讀到 schema_version 1.0.0」的前提隨 Daemon 形態退役 ⇒ 無遷移對象（矩陣原引「R98 §1.11」指錯章，以本句為準）。 |
-| §11.1 零 Token 遙測 6h 驗證 | ❌ | 📎 | 殘留＝驗收證據：機制（T5 唯讀端點＋快取＋TTL 節流，§4.1.1 T5 ✅）已在，缺一次 6 小時純遙測的零 token 驗證紀錄（docs 無此記錄）；非程式碼缺口，補件＝有人長跑一次並落款，無日曆義務。 |
-| §11.2 離線模擬器＋性質測試 | ⚠️(M) | 📎 | [SA 判讀] 殘留＝機制（`decide()`＋單調／穩定性質測試）已在；缺獨立離線模擬器與 §4.2.7 七情境斷言（§4.2.7 已判 ➖）、DRY_RUN 一週，以及 H1 fixture（37 符號／19 翻動＋時間戳，零命中，且不得以合成序列頂替——原始痕跡 `autosdd_quota_degraded.jsonl` 住系統暫存、重開機即蒸發）；「重置後不暴衝」以 §16.4 C1 註記對齊 DEF-200-242；另登記 (a) §11.2 內被實況推翻而未入 C1～C12 的子句以本列登記、不改條文，(b) 離線模擬器是交付物、不是驗收資料（📎 定義下，交付物那一半由 `decide()`＋單調／穩定性質測試承接，本列不改判 ⏸），(c) H1 母體（37 符號／19 翻動）在本機已不可重建（痕跡住系統暫存）。 |
-| §11.3 凍結與喚醒（5s／kill -9／喚醒成本／FRESH） | ⚠️(M) | 📎 | [HEAD 現查] 殘留＝喚醒成本落帳已由 v2.1.16 W2 落地（`tools/lib/resume_cost.py`，每個 resumed 窗一行 jsonl，DEF-200-508 fixed），kill -9 回退（`AutoClaude/tests/test_r100_power_loss_protection.py`）與 FRESH 降級俱在；餘下為「注入 95% → 整段凍結」的 5 秒計時斷言（既有 `AutoClaude/tests/integration/test_sigint_checkpoint.py` 已量真實落盤路徑 ≤2 秒 SLA，殘留只剩整段凍結的計時）與落帳的 `pct_before`／`pct_after`（v1 恆 null）；「各 worktree `git status` 皆 clean」子句以 §4.5.1 ⏸ 列為前提（無人窗口不得 commit、救援為 patch 不動工作樹），視為歷史字面。 |
-| §11.5 防休眠驗收 | ➖ | ➖ | 依據＝（沿用矩陣）同 §4.6。 |
-| §11.6 多 Agent 隔離與整合 | ❌ | ➖ | 依據＝v2.1.17 決策式收斂：同 §4.4.2（本 repo 刻意不做 Daemon／多 agent worktree 整合；矩陣 §6.1 #14）。 |
-| §11.7 多實例配額 | ⚠️(S) | 📎 | 殘留＝機制（目錄項派發帳，§4.7）已在，單測僅在 `tools/tests/test_context_budget_guard.py`；缺「同帳號同時啟動兩個專案」的整合驗證（`U5h` 燃燒率不超過 `V_safe` 的 1.2 倍；PRD 原文以 Daemon 為單位，本 repo 對應目錄項派發帳）。 |
-| §11.8 24h 端到端 | ⚠️(M) | 📎 | 殘留＝驗收證據：修訂表 v2.1.13 列記 2026-08-31 單次 reset 喚醒實戰全通，缺 24 小時／≥4 次 reset 的連續紀錄；補件＝一次真實長跑落款，無日曆義務。【2026-10-11 落款】mac 真機到點後尾段三段全通一次（真 launchd：手寫停機標記→哨兵 `arm_reset`→calendar 到點→`probe`→探測→真 `claude -p -r`（fable）→handback→`relay_done`→哨兵掛回；含 7-C／7-E 修後行為與 job 內 bootstrap 另一 label），證據＝`docs/06_quality/CrossPlatform_R212_WakeChain_EnvLayer_Evidence.md`〈十一〉；仍缺 24 小時／≥4 次 reset 連續紀錄與 Windows，殘留照舊、不改格。 |
-| §15.5 紅線 1～12 | ⚠️(S) | 📎 | [SA 判讀] 唯一資料殘留＝紅線 11 的 CLI 已驗證版本清單（範圍已因 §16.6 第 1 列家族判定縮小為新 minor／major）。狀態清單（非殘留）：紅線 1、3、4、6、8、9、10、12 各有機械物，5、7 矩陣判 ➖；紅線 2 以預設 FREEZE、無 ALLOW_WITH_CAP 路徑滿足（opt-in 路徑不存在＝無法誤開，超額政策殘留見 P4 列）。 |
-| 施工圖 A3：R108 配速批 W4／W6（bursting_ok 接線＋must-finish 升 30 分） | ➖ | ➖ | 依據＝（沿用矩陣）DEF-200-458 closed-by-decision（功能願望、查無實損；症狀端 DEF-200-198 已 fixed）。 |
+| §11.1 零 Token 遙測 6h 驗證 | ❌ | ✅ | 殘留＝驗收證據：機制（T5 唯讀端點＋快取＋TTL 節流，§4.1.1 T5 ✅）已在，缺一次 6 小時純遙測的零 token 驗證紀錄（docs 無此記錄）；非程式碼缺口，補件＝有人長跑一次並落款，無日曆義務。 【2026-10-13 落款｜v2.1.20】格不變（📎）。回溯法已試：`tools/probe/zero_token_telemetry_window.py` 掃本機 `quota_burn.jsonl` 與逐字稿，21 段 ≥6h 無 usage 區間中 0 段有哨兵讀數（巡邏只讀逐字稿、不寫燃燒帳）⇒ 本機結構上回溯不出。補件配方＝一個 6 小時無任何 session 的區間內由 launchd 每 15 分鐘跑一次 `--pace`（零 token 端點讀數）並比對首尾 pct，誰看到機器閒置 6 小時就能補。 【2026-10-13 落款｜v2.1.21】📎→✅。模擬驗收＝`tools/probe/zero_token_patrol_sim.py`（真 `_sentinel_tick` 連跑 24 拍、假端點 200→404→逾時→恢復、6 條斷言＋7 組控制組（DEV-M 補 late-probe／jitter-tick 兩格），`--selftest` rc=0）；模擬時鐘，不是真牆鐘；模擬與實機差異清單見 `docs/06_quality/CrossPlatform_R213_DebtZero_FourParty_Evidence.md`〈十〉；真機 6 小時牆鐘驗證**未做**（本 repo 無此紀錄）；本落款只證明『本 repo 巡邏／取數路徑在該輸入下零 token、關端點可降級』：權威讀數＝假端點自帳（非獨立來源）、本 repo 無「純遙測模式」的 `DRY_RUN=true` 旗標（對應物＝哨兵巡邏＋取數路徑；`dry_run` 僅為測試用執行器替身與開機自檢的版本裁決）、哨兵於 6h 整依設計 disarm。 |
+| §11.2 離線模擬器＋性質測試 | ⚠️(M) | ✅ | [SA 判讀] 殘留＝機制（`decide()`＋單調／穩定性質測試）已在；缺獨立離線模擬器與 §4.2.7 七情境斷言（§4.2.7 已判 ➖）、DRY_RUN 一週，以及 H1 fixture（37 符號／19 翻動＋時間戳，零命中，且不得以合成序列頂替——原始痕跡 `autosdd_quota_degraded.jsonl` 住系統暫存、重開機即蒸發）；「重置後不暴衝」以 §16.4 C1 註記對齊 DEF-200-242；另登記 (a) §11.2 內被實況推翻而未入 C1～C12 的子句以本列登記、不改條文，(b) 離線模擬器是交付物、不是驗收資料（📎 定義下，交付物那一半由 `decide()`＋單調／穩定性質測試承接，本列不改判 ⏸），(c) H1 母體（37 符號／19 翻動）在本機已不可重建（痕跡住系統暫存）。 【2026-10-13 落款｜v2.1.20】📎→✅。補件＝`tools/probe/pacing_simulator.py --selftest`（餵合成 U5h/U7d/T_rem 進 `decide()`＋`quota_stability`：10 週期收斂、放寬不跳級、75% 由 band 常數保證、遙測中斷 11 分鐘退到 cap_prepare 以下；H1 以本機 `quota_burn.jsonl`＋`autosdd_quota_degraded.jsonl` 重建實測形態序列，關遲滯 90 次／開遲滯 81 次 cap 變動，開 < 關 成立）；rc=0（〔他包回報〕，見證據檔〈三-1〉A5；SA 鏡 2026-10-13 重跑：A5 PASS 6／FAIL 0 rc=0）。H1 不滿足 §4.2.4 fixture 自帶不變式（len==37／flips==19）：改以本機現存痕跡重建（196 符號／67 翻動，2026-09-20～10-12），不可跨機重現；『DRY_RUN 一週』本 repo 無「純遙測模式」旗標、不做；『§4.2.7 七情境』已退役（§16.7）。 |
+| §11.3 凍結與喚醒（5s／kill -9／喚醒成本／FRESH） | ⚠️(M) | ✅ | [HEAD 現查] 殘留＝喚醒成本落帳已由 v2.1.16 W2 落地（`tools/lib/resume_cost.py`，每個 resumed 窗一行 jsonl，DEF-200-508 fixed），kill -9 回退（`AutoClaude/tests/test_r100_power_loss_protection.py`）與 FRESH 降級俱在；餘下為「注入 95% → 整段凍結」的 5 秒計時斷言（既有 `AutoClaude/tests/integration/test_sigint_checkpoint.py` 已量真實落盤路徑 ≤2 秒 SLA，殘留只剩整段凍結的計時）與落帳的 `pct_before`／`pct_after`（v1 恆 null）；「各 worktree `git status` 皆 clean」子句以 §4.5.1 ⏸ 列為前提（無人窗口不得 commit、救援為 patch 不動工作樹），視為歷史字面。 【2026-10-13 落款｜v2.1.20】📎→✅。補件＝`AutoClaude/tests/integration/test_freeze_timing_prd11_3.py`（注入 95% ⇒ halt→checkpoint 原子寫入→state 落盤整段計時：file 後端 0.0035s／in_memory 0.0005s ≤ 5s；真子行程 `os._exit` 死在寫入三階段皆回上一份有效版；9 項）。`pct_before`／`pct_after` 維持 null（A5c 列）。 |
+| §11.7 多實例配額 | ⚠️(S) | ✅ | 殘留＝機制（目錄項派發帳，§4.7）已在，單測僅在 `tools/tests/test_context_budget_guard.py`；缺「同帳號同時啟動兩個專案」的整合驗證（`U5h` 燃燒率不超過 `V_safe` 的 1.2 倍；PRD 原文以 Daemon 為單位，本 repo 對應目錄項派發帳）。 【2026-10-13 落款｜v2.1.20】📎→✅。補件＝`tools/probe/two_project_fanout_probe.py`（兩個行程對同一派發帳連續搶 30 回合，每回合成功總和恆 ≤ cap；rc=0〔他包回報〕，見證據檔〈三-1〉A7；SA 鏡 2026-10-13 重跑：A7 rc=0）。探針複製 `quota_gate()` 三步形狀（順序鎖＋對照組自證），『燃燒率≤1.2×V_safe』子句不涵蓋（V_safe 已退役）。 |
+| §11.8 24h 端到端 | ⚠️(M) | ✅ | 殘留＝驗收證據：修訂表 v2.1.13 列記 2026-08-31 單次 reset 喚醒實戰全通，缺 24 小時／≥4 次 reset 的連續紀錄；補件＝一次真實長跑落款，無日曆義務。【2026-10-11 落款】mac 真機到點後尾段三段全通一次（真 launchd：手寫停機標記→哨兵 `arm_reset`→calendar 到點→`probe`→探測→真 `claude -p -r`（fable）→handback→`relay_done`→哨兵掛回；含 7-C／7-E 修後行為與 job 內 bootstrap 另一 label），證據＝`docs/06_quality/CrossPlatform_R212_WakeChain_EnvLayer_Evidence.md`〈十一〉；仍缺 24 小時／≥4 次 reset 連續紀錄與 Windows，殘留照舊、不改格。 【2026-10-13 落款｜v2.1.20】格不變（📎）。需 24 小時牆鐘與 ≥4 次 reset；本窗週軸已 95%，起跑屬下一次額度視窗的事。 【2026-10-13 落款｜v2.1.21】📎→✅。模擬驗收兩層＝`tools/probe/day_long_relay_sim.py`（1440 拍、翻頁 4 次、7 條斷言＋5 組控制組，rc=0；有效工作佔比 0.875（根層模型）／0.906（引擎層非等待佔比；F4 修前 0.895）；目標 0.80 為執行者自訂、由該次實測導出（PRD 無數字）；根層模型未計單次 spawn 3600s 逾時與每窗 `max_spawns`（出廠 2），真機佔比上限遠低於此；『`U7d` 未觸 `WEEKLY_HALT`』為合成輸入（40%→55%）的性質）＋`AutoClaude/tests/integration/test_day_long_resume_prd11_8.py`（真 kernel＋`AutoResumeService`、模擬 24.00 小時（F4 修前 24.67）、4 次撞線、14 項 rc=0）；模擬時鐘，不是真牆鐘；「翻頁後首拍 cap ≤ cap_notice」依 §11.2 註記 C1 只印不擋；差異清單同上。 |
+| §15.5 紅線 1～12 | ⚠️(S) | ✅ | [SA 判讀] 唯一資料殘留＝紅線 11 的 CLI 已驗證版本清單（範圍已因 §16.6 第 1 列家族判定縮小為新 minor／major）。狀態清單（非殘留）：紅線 1、3、4、6、8、9、10、12 各有機械物，5、7 矩陣判 ➖；紅線 2 以預設 FREEZE、無 ALLOW_WITH_CAP 路徑滿足（opt-in 路徑不存在＝無法誤開，超額政策殘留見 P4 列）。 【2026-10-13 落款｜v2.1.20】📎→✅。紅線 11 的清單殘留同 §6.2 R-6.2-2 列結案；其餘紅線機械物不變。 |
 | 施工圖 A4：R108 BurnDown 增補（擬 §4.2.9 清倉模式） | ❌ | ✅ | [SA 判讀]（凍結日現況）現況＝Adopted（修訂表 v2.1.10 列）但零落地（`AUTOSDD_QUOTA_BURNDOWN`／`burn_down` 於 `tools/`、`.claude/`、`AutoClaude/autoclaude/` 零命中，PRD 本文無 §4.2.9，帳本無開帳列），落地須碰守衛面 `quota_policy.decide()`，依根 CLAUDE.md〈守衛面准入〉須先附暴露證據；再開症狀＝掌舵者下清倉指令（明示要用掉將作廢的額度）而 `--pace` 仍把派工壓在 cap≤2（附 `--pace` 畫面與 sid）。 【2026-10-12 落款】症狀＝同窗掌舵者指令（逐字見證據檔〈一〉）＋`--pace` cap=1（sid `ed1c9022-22cc-4974-a8b3-9d4ebfa5f6bd`；暴露度＝真實互動窗的掌舵者指令＋sid，畫面為主控同窗自跑、先於指令約 3 分鐘）；實作＝`tools/lib/quota_burndown.py`（載體依 QB3 三收：落款檔六欄＋CLI 唯一寫入口＋`AUTOSDD_QUOTA_BURNDOWN_OFF` 只准關；生效判準＝附錄 §3.3 全合取、fail-closed；BD-1 乘數地板、夾層 `ceil=cap_notice`（QB1）、BD-2′ 跨窗攤提暫停＝主控增補裁決〔證據檔〈二-2〉〕）＋`decide()`／`band_inputs()` 各一個預設不生效參數；測試＝`tools/tests/test_quota_burndown.py`（附錄 §8 BD-1～BD-9＋BD-2′）；親驗＝同窗 `--issue weekly_all` 後：決策 cap 1→`cap_converge`（=4）；`--pace` 標題 cap 1→2（`quota_stability` 遲滯，每 ≥300 秒 +1 至軸值）、現在可派 1→2（rec 封頂 `cap_prepare`，不是放到 8）；同讀數反事實由兩鏡以落款檔 `readings_at_issue` 重算（逐字見證據檔〈三-3〉）。效果帶＝被點名軸低於 prepare 錨點（出廠 85%）；≥ 錨點時授權只把該軸 cap 1→2、現在可派維持 1（附錄 §4.4 prepare×far 格；要放寬 prepare 帶屬另一次修憲）。操作入口＝`python tools/lib/quota_burndown.py --issue <kind> --directive "<逐字>"`／`--status`（rc=0 生效）／`--revoke`；kill-switch `AUTOSDD_QUOTA_BURNDOWN_OFF=1`。劃界：載體不具防偽（附錄 §3.4）、落款綁 `until_resets_at` 時刻、不綁視窗身分（同窗 `resets_at` 每次讀數皆不同字串；週軸另有改錨 2 次：1 次提前、1 次後移——提前者使落款活過視窗、後移者使落款提早失效，登 P4）；Q-cross 只暫停攤提、不送 BD-1；model-scoped／fallback 軸逐格不動；must-finish 仍在最後；附錄 §7（併入本文的草案文字：`BURNDOWN_CAP_CEILING`、§8 例外表第 10 列、§9 指標名）不在本版射程，§6.3 兩計數器以 `autosdd_burndown_events.jsonl`（僅 `--pace` 路徑寫）為等價物；接力 band 判準②／`draining()`／簡報的 `decide()` 呼叫端不帶授權（附錄 §1.3）；落款為單槽（同窗第二則指令覆寫前一份）；Windows 未驗（新增面＝`quota_gate.py` 無 try 直接 import `quota_burndown`、CLI 在 cp950 主控台的輸出；該機驗收可加一行 `& .\.venv\Scripts\python.exe tools/lib/quota_burndown.py --status`，預期 rc=1、首行「清倉授權：沒有有效落款」）。詳修訂表 v2.1.19 所指證據檔。 |
-| 施工圖 A5b：R112 REQ-W2 無主模式 | ⚠️(S) | ➖ | 依據＝DEF-200-234 closed-by-decision（偵測面 `_orphan_watch` 已落地、處置面無暴露證據）；該列自載重開條件＝主控 429 退場後背景 agent 仍燒 token（附 sid）。 |
-| 施工圖 A5c：R112 REQ-W6 喚醒成本治理 | ⚠️(M) | ⏸ | [HEAD 現查] 現況＝(a) spawn 前授權 fail-fast 與 (c) 喚醒成本落帳（v2.1.16 W2，DEF-200-508 fixed）已落地，落帳 v1 限制＝`pct_before`／`pct_after` 恆 null、被 timeout 砍掉的窗不落帳、FRESH 路由窗與 RESUME 量不到列同形（〈三〉#8）；殘留＝(b) 成本閘導出式（成本閘仍是 32MiB 常數）；再開症狀＝`autosdd_resume_cost.jsonl` 某列三個 usage 欄合計的實數（附列座標）、且同 `session_id` 在 planner 痕跡的 `route_chosen`＝`SESSION_RESUME`（痕跡住系統暫存，事發當場附檔），並附掌舵者認定該成本不可接受的原話或帳單座標。 |
 | 施工圖 A7：R121 無人續跑受控 commit／push（擬 §4.5.11） | ❌ | ⏸ | 現況＝施工圖 Status＝Proposed（`docs/04_planning/PRD_Amendment_R121_UnattendedCommitPush.md`），`AUTOSDD_UNATTENDED_PUSH_OFF` 零命中，`.claude/settings.unattended.json` deny `git commit*`／`git push*`；碼面落點碰守衛面，依〈守衛面准入〉須先附暴露證據；再開症狀＝一次有 sid＋seq 的「喚醒窗改完檔卻因不能 commit，隔日才由人收尾」實錄。 |
+| §4.4.3 Agent 硬性預算（turns／wall／quota_pp／×0.5） | ⚠️(M) | ✅ | 現況＝只有牆鐘一軸（`step_timeout_seconds`，出廠 600）；`MAX_STEP_TURNS`／`MAX_STEP_QUOTA_PP`／`DRAIN_BUDGET_FACTOR` 零命中，且 `--max-turns` 於本機 CLI help 查無（見 §16.4 C3）；再開症狀＝一次單一 Step 失控（回合數或額度燒掉遠超預期，附 sid＋step_id）而牆鐘 timeout 未能攔住。 【2026-10-13 落款｜v2.1.20 掌舵者 (i)「做完＝無積欠 BUG 與技術債」】⏸→➖。依據＝牆鐘軸 `step_timeout_seconds` ✅；回合數軸 CLI 無 `--max-turns`（§16.4 C3，本機 help 現查）；額度軸由 kernel `is_quota_limit_text`→halt 與 TokenGuard `quota_halt_pct` 承接（本版 §8 列 1 再加有界退避）。 【2026-10-13 落款｜v2.1.21｜Architect 鏡判「不合理」→DEV-I 同窗實作，依 §16.5「➖ 列被推翻」自 §16.7 移回本表】➖→✅。依據＝三軸各有承接：①回合數軸有原生旗標且已可設——`claude.max_turns_per_step`（`AutoClaude/autoclaude/utils/config.py` `ClaudeConfig`，預設 None＝不送旗標＝出廠行為；設定時經 `ClaudeConfig.base_args()` 於 `pty_executor.py`／`prompt_dispatcher.py` 兩條 argv 組裝路徑追加 `--max-turns <N>`；測試＝`AutoClaude/tests/test_max_turns_per_step.py`）；②牆鐘軸預設有界——`playbook.step_timeout_seconds`（出廠 600）；③額度軸由撞線 halt 承接（`TokenGuardPlugin.evaluate_quota`）。誠實劃界：逐步 pp 成本上限（`MAX_STEP_QUOTA_PP`）仍無量測源，以全域 `quota_halt_pct` 承接，不虛構逐步量測。 |
+| §4.5.2 分片休眠＋時鐘跳躍偵測 | ⚠️(M) | ✅ | [HEAD 現查] 現況＝引擎等待已由 v2.1.16 W3 改走分片休眠（`AutoClaude/autoclaude/utils/sliced_sleep.py`；時鐘跳躍容忍與行程內等待上限進 `TokenGuardConfig`）；殘留＝剩餘 > `max_inprocess_wait_seconds`（出廠 18000）的長睡被拒後，無任何根層元件自動承接，引擎只以 rc=1 退出並於 log 明示需外部重啟（〈三〉#3）；PG／Dual 後端的拒絕路徑未實跑、機器睡眠下單調鐘行為只依文件（〈三〉#9）；再開症狀＝一次真實 >18000s 等待被拒後無人續跑（附 sid），或 PG 後端真跑拒絕路徑。 【2026-10-13 落款｜v2.1.20 掌舵者 (i)「做完＝無積欠 BUG 與技術債」】⏸→➖。依據＝分片休眠＋時鐘跳躍 ✅（v2.1.16 W3）；>`max_inprocess_wait_seconds` 的長睡拒絕＝PRD §4.6 自身替代路線（長等待交排程器）：引擎把真實續跑時刻寫進 checkpoint（`AutoClaude/autoclaude/core/services/auto_resume.py::_pin_resume_time`）並 rc=1 退出，由**外部**（人工或自備排程器）在續跑時刻後重啟 `python -m autoclaude` 即由 `AutoResumeService` 自動續跑【v2.1.21 訂正：本 repo 不自備引擎排程器、launchd nightly 跑的是測試不是引擎，`auto_resume.py` 註解自陳須外部重啟；退役依據＝§4.6 自身替代路線「長等待交外部排程」，不是「已有排程器承接」】；再蓋一個根層承接元件＝同一份知識住兩個家（該檔註解自陳）。 【2026-10-13 落款｜v2.1.21｜Architect 鏡判「不合理」（原依據「交排程器」在引擎路徑無元件承接）→DEV-I 同窗實作，依 §16.5「➖ 列被推翻」自 §16.7 移回本表】➖→✅（待真機驗證）。依據＝`AutoResumeService._wait` 拒絕長睡且 checkpoint 已確認落地時，環境變數 `AUTOCLAUDE_EXTERNAL_RESUME_CMD` 非空即呼叫一次外部續跑指令（`AutoClaude/autoclaude/core/services/external_resume.py`；預設空＝行為逐位元不變）；承接者＝`tools/lib/engine_resume_job.py`（`AutoSDD_EngineResume_<playbook 雜湊>_<觸發分鐘>` 一次性 launchd／schtasks 工作、時刻＝續跑時刻＋`RESET_SKEW_SECONDS`、`--run` 跑完自拆且擋 >30 日過期誤觸發、取證＝launchd 回讀逐項比對／`NextRunTime` 非空否則 rc=1）。測試＝`AutoClaude/tests/core/test_auto_resume_external_resume_cmd.py`（17）與 `tools/probe/engine_resume_job_sim.py --selftest`（13，由 `SimulationProbeSelftestTest` 閘門化）。誠實劃界：真機掛／拆未驗證（Windows schtasks 全分支未實跑）；排程工作只帶白名單環境，續跑引擎看不到殼層機密（需 Brain 的 playbook 把金鑰放 config.yaml）；驗收＝以 `sleep` 型 playbook 註冊→`launchctl print`→到點→`launchctl list | grep EngineResume` 為空。 |
 
 ### 16.3 三個誠實數字（不把結案包裝成 100%）
 
@@ -2730,6 +2734,8 @@ P0 收完資料後，依序推導、不要憑感覺設定：
 
 **讀法**：📎 的 8 列中，§11.1（6h 零 token 驗證）與 §11.8（24h 端到端）是尚未發生的長跑證據，仍計入 (c) 分子——這是 (c) 偏高的方向；§13 條款檢核因從未發生、且 PRD 自稱最高風險項，列 ⏸ 不計入落地。(c) 不是給人追的目標。它低於 (a)，是因為 (a) 給 ⚠️ 半分、(c) 對 ⏸ 列一律 0 分、不給部分得分；它的作用只是誠實揭露——退役之後仍有 31 列是「有意延後、等症狀」而不是「做完了」。**結案判準是 §16.1 的「無未分類列」，不是任何百分比。** (a)(b)(c) 皆為 v2.1.17 當日快照：之後不重算、不當門檻、不當開輪理由（§16.5）。矩陣 §1.2 (c) 的 §6 設定面鍵級落地率 38.9% 原樣留在矩陣、本章不重算：§6 三列已以 ➖ 退役（Daemon 形態寫成、換形態後鍵無對映），各鍵的功能面歸屬列見 §16.2 該三列。
 
+> 🔴 【v2.1.21 註記】上列 (a)(b)(c) 與交叉表仍是 v2.1.17 當日快照，數字不動，其後轉格（v2.1.18～v2.1.21）見修訂表；v2.1.21 起 ➖ 47 列移出結案表（§16.7），(b)(c) 不重算。上段讀法所稱「見 §16.2 該三列」的 §6 三個 ➖ 列，自本版起改見 §16.7 同名列。
+
 ### 16.4 條文落差修憲項 C1～C12 與程序債 N1 的處置
 
 矩陣 §5（標題「PRD 條文已被程式實況推翻」）列出 12 筆落差（判準＝實作沒照 PRD 做者修實作、PRD 與實測不符者才修憲；本 12 筆皆屬後者或 PRD 內部自相矛盾）與 1 筆程序債。依 R110 判例不疊層：**不改既有條文一字**；每筆在其 PRD 座標處就地追加一行 `🔴 【v2.1.17 註記】`（實況一句＋實作座標＋處置）。實作座標一律於撰寫當下以 HEAD 現查（符號、檔案存在，零命中者以 grep 重驗）；矩陣的行號只當線索、不引用。下表為索引：
@@ -2738,7 +2744,7 @@ P0 收完資料後，依序推導、不要憑感覺設定：
 | :---- | :---- | :---- |
 | C1 | §11.2「重置後不暴衝」（另 §4.2.4 (c) 的括號論據） | 以 DEF-200-242 為準：free 帶直通為設計，本條視為未承重的目標句；(c) 以它為「已經有既有守衛」的論據同步失效 |
 | C2 | §4.5.3 步驟 1（另 §4.5.10 R-4.5.10-1、§6 區塊 9） | 以實作為準（端點新鮮且每軸 <100%），不補 `RESET_CONFIRM_PERCENT`＜10% 門檻 |
-| C3 | §4.5.4 喚醒指令範例（另 §4.4.3、附錄 B-10） | `--max-turns` 於本機 CLI help 查無：範例旗標視為歷史字面，B-10 降讀為「未核實」 |
+| C3 | §4.5.4 喚醒指令範例（另 §4.4.3、附錄 B-10） | `--max-turns` 於本機 CLI help 查無：範例旗標視為歷史字面，B-10 降讀為「未核實」【v2.1.21 訂正｜DEV-I 零 token 實測】help 查無為真（`claude --help | grep -c -- '--max-turns'`＝0），但據此推論「旗標不存在」是方法錯誤：判別法＝`claude -p <旗標> </dev/null` 的錯誤類別（輸入缺席先於任何 API 呼叫）——`--max-turns 3` 回 Input must be provided（旗標被接受）、`--definitelynotaflag` 回 unknown option（對照組）；claude 2.1.296 實測，記載見 `AutoClaude/autoclaude/utils/verified_cli_versions.py`；B-10 原記載恢復為真。 |
 | C4 | §4.5.4 喚醒指令範例 | `--allowed-tools` 視為歷史形態；白名單由 unattended settings 承接 |
 | C5 | §4.5.2（另 §6 區塊 9） | `RESET_BUFFER_SECONDS`＝實作的 `RESET_SKEW_SECONDS`（120）；一個語意一個名字、不合併數值 |
 | C6 | §4.5.4 AUTO 判準（另 §6 區塊 9） | 單位以位元組為準（出廠 32MiB）；weekly→FRESH 規則維持未實作，由 §16.2 §4.5.4 列承接 |
@@ -2758,7 +2764,7 @@ v2.1 自 v2.1.17 起**凍結**。修憲只由下列三種觸發之一開啟：
 
 1. **(i) 掌舵者直接立案的新需求**——附掌舵者原文（同修訂表既有體例）。
 2. **(ii) 缺陷帳本新立 P≤2 未結列，且根因落在本 PRD 範圍內的機制**——附缺陷 ID（CI／nightly 轉紅、經入帳而根因在本 PRD 機制者亦屬本款）。
-3. **(iii) §16.2 某個 ⏸ 列登記的再開症狀實際發生**——附 sid、log 或痕跡列座標（該列「再開症狀」欄要求附什麼，就附什麼）。`docs/06_quality/CrossPlatform_R211_ZeroTrust_Audit_113.md`〈三〉理論洞表中**沒有**對應 §16.2 列的條目（#5／#6／#10／#12／#13）以其「再開症狀」欄為同款觸發源——它們是實作面或流程面 P4、不入本 PRD 母體，但再開語意相同。⏸ 沒有掃描器——它是症狀索引，不是待辦清單；觀察者＝掌舵者回報，或任一視窗在新立 DEF 列／寫證據檔時對照 §16.2「再開症狀」欄，命中者在該 DEF 列「分流去向」標 §16.2 座標（本款的唯一入口）。
+3. **(iii) §16.2 某個 ⏸ 列登記的再開症狀實際發生**——附 sid、log 或痕跡列座標（該列「再開症狀」欄要求附什麼，就附什麼）。`docs/06_quality/CrossPlatform_R211_ZeroTrust_Audit_113.md`〈三〉理論洞表中**沒有**對應 §16.2 列的條目（#5／#6／#10／#12／#13；另 #1／#3／#4／#8／#9 自 v2.1.21 起因其對應列退出 §16.2〔移至 §16.7〕而併入）以其「再開症狀」欄為同款觸發源——它們是實作面或流程面 P4、不入本 PRD 母體，但再開語意相同。⏸ 沒有掃描器——它是症狀索引，不是待辦清單；觀察者＝掌舵者回報，或任一視窗在新立 DEF 列／寫證據檔時對照 §16.2「再開症狀」欄，命中者在該 DEF 列「分流去向」標 §16.2 座標（本款的唯一入口）。
 
 明文：**沒有**日曆觸發、**沒有**輪號觸發、**沒有**逐輪遞延的待辦清單、**沒有**覆蓋度百分比門檻。覆蓋度（§16.3）是 v2.1.17 當日的快照，不是開輪的理由；整合迭代（軌道①）對本 PRD 的唯一義務，是檢查上列三觸發是否成立——不成立即本 PRD 零工作。
 
@@ -2774,6 +2780,62 @@ v2.1 自 v2.1.17 起**凍結**。修憲只由下列三種觸發之一開啟：
 | 2026-10-11 | 額度／模型參數檔跨機同步與維護（掌舵者原文：「如何將兩邊的 .env 同步，哪邊才是正確完整的？這個參數檔該如何維護？」；對應 §6 設定面，本項不改 §6 任何既有鍵或出廠值） | ✅ | 依據＝新增追蹤檔 `env.shared`＋四層載入鏈（行程 env ＞ `AutoClaude/.env`〔引擎 3 鍵〕＞ 根 `.env` ＞ `env.shared` ＞ 出廠 `ENV_SPEC`）＋ `python tools/lib/quota_policy.py --env-doctor [--fix]`；實作座標 `tools/lib/quota_env_layers.py`（harness 與引擎同一條鏈，引擎側 `AutoClaude/autoclaude/utils/config.py::_ENV_FILES`）；PRD §6 只規範 `.env.example` 的鍵集合與出廠值（出廠值不動），對「哪些檔、什麼順序」零規範，故本項不改任何既有條文；治理面保護＝`.claude/hooks/block_destructive_git.py` 的 `_GOV_EXACT` 納管 `env.shared` 與 `tools/lib/quota_env_layers.py`（PRD §12 禁寫 `.env` 的對應面）；測試住 `tools/tests/test_quota_env_layers.py`；詳 `docs/06_quality/CrossPlatform_R212_WakeChain_EnvLayer_Evidence.md`〈二〉-6。【2026-10-11 同日追記】掌舵者原文「幫我設計自動同步機制！==> 下次在 Windows 執行時，幫我自動同步！」⇒ 新增 git `post-merge` hook `tools/git-hooks/post-merge`：`git pull`／merge 成功後自動體檢，問題全是可自動修的旗標才 `--fix`（先備份）再體檢一次，含需人判斷的旗標則一個檔不動只出聲，永不讓 merge 失敗；兩平台同一支（Windows 實機未驗）；鎖＝同測試檔 `TestPostMergeHook`；詳同證據檔〈二〉-11 |
 
 守衛面相關者另受 `docs/06_quality/FiveQuestion_Audit_Protocol/README.md`〈窗口規則與收斂判定〉S1～S6 約束（只引用、不複寫）；動到守衛面前先附暴露證據（根 CLAUDE.md〈守衛面准入〉）。
+
+### 16.7 依設計退役列索引（v2.1.21 自結案表拿掉）
+
+掌舵者 2026-10-13 原文「33 項依設計不做 ==> 若合理，請依照修憲的程序拿掉」（§16.5 (i)；主控依授權代決，可隨時以 (i) 推翻）。依此，原 §16.2 結案格為 ➖（依設計退役）的 49 列（v2.1.17 當日 33 列＋v2.1.20 自 ⏸ 轉入 16 列，各列落款可查）（其中 §4.4.3 與 §4.5.2 兩列經 Architect 鏡覆核判「不合理」、同窗實作後依 §16.5「➖ 列被推翻」移回 §16.2 轉 ✅，§16.7 現為 47 列）自 v2.1.21 起**整列搬到本表**（欄位照舊：PRD 座標｜R211 矩陣判定｜結案格｜依據），§16.2 不再保留它們。這些列對應的**條文本文仍留在 PRD 作史料**——R110「未生效修憲不疊層」判例，加上缺陷帳本、ADR、證據檔大量引用其章節號，物理刪除會讓既有引用變成死連結——但自 v2.1.21 起**不構成 v2.1 需求、不入任何結案計數**（§16.1 結案命題、§16.2 現況計數、§16.5 (iii) 的 ⏸ 症狀索引皆不含本表；§16.3 是 v2.1.17 當日快照、原樣不動）；**再開只走 §16.5 (i)**，由掌舵者重新立案並附原文，自帶結案格落 §16.6。
+
+讀法：①列內既有的「再開症狀」字樣是退役前的史料，不再是 §16.5 (iii) 的觸發源；②既有條文、帳本、ADR 與證據檔對 §16.2 ➖ 列的引用（例：§4.4.3 的「見 §16.2 §4.4.3 列」、§16.3 讀法的「見 §16.2 該三列」）自本版起改讀本表同名列，座標欄不變；③各列原樣照錄；除列內標示【v2.1.21 訂正／註】者外，搬移前後逐字相同（標示者以其訂正為準），列內對其他列結案格的括註（例：§15.4 P1／P2／P5 列內的 (📎)）與「本版」「本輪」等時間指稱，是各列撰寫當日（v2.1.17 或 v2.1.20）的史料，現況一律以 §16.2 為準。
+
+| PRD 座標 | R211 矩陣判定 | 結案格 | 依據／再開症狀 |
+| :---- | :----: | :----: | :---- |
+| §3.1 架構圖：單一 Daemon＋7 模組 | ➖ | ➖ | 依據＝PRD〈v2.1 的變更〉段與 §15.3 把建議架構從「大型自建 Daemon」縮減為「薄治理層 + 採用原生能力」；實際載具＝hook（`.claude/hooks/context_budget_guard.py`）＋哨兵（`tools/session_resume_planner.py`），`tools/lib/quota_boot_check.py` 檔頭明載本 repo 沒有常駐 daemon；架構性替代，非缺漏。 |
+| §4.1.1 T1（OTel 本機遙測） | ❌ | ➖ | [SA 判讀] 現況＝`CLAUDE_CODE_ENABLE_TELEMETRY`／`OTEL_` 在 `tools/`、`.claude/`、`AutoClaude/autoclaude/` 零命中，T5 已升格認可主源（v2.1.4），T1 與其量測軸不同、並行而不互替；再開症狀＝`autosdd_quota_degraded.jsonl` 出現 `state` 為 unmeasured 的列（住系統暫存，事發當場附檔）或 `quota_burn.jsonl` 相鄰列出現超過 5 小時的空洞，且同一窗內有人明示需要逐 token／逐請求的成本明細才能決策，而 T5／T3 皆給不出（附該列座標與該次需求原文或 sid）。 【2026-10-13 落款｜v2.1.20 掌舵者 (i)「做完＝無積欠 BUG 與技術債」】⏸→➖。依據＝T5 認可主源已 ✅（§4.1.1-T5）；OTel 推送管道在本 repo 零消費端（無 collector／Grafana／告警規則），建了即無人讀的成長面；逐請求成本明細由 `tools/lib/resume_cost.py`（喚醒窗落帳）與逐字稿 usage（`tools/session_resume_planner.py --check`）承接。 |
+| §4.1.1 T2（逐字稿本機加總） | ⚠️(S) | ➖ | 現況＝只有撞線地板（`tools/lib/quota_gate.py` 的 `quota_floor_reading`←`tools/lib/quota_limits.py` 的 `unhandled_limit_event`），無 token 加總；T5 為主源、加總只是後備；再開症狀＝T5 連續 unmeasured 滿一個 5h 窗，而該窗內需要比撞線地板更細的本機用量估計（附 `autosdd_quota_degraded.jsonl` 的 unmeasured 列，或 `quota_burn.jsonl` 空洞前後兩列座標）。 【2026-10-13 落款｜v2.1.20 掌舵者 (i)「做完＝無積欠 BUG 與技術債」】⏸→➖。依據＝context 面的逐字稿加總已由 `tools/session_resume_planner.py --check` 落地（分子＝逐字稿 API usage）；額度面以 T5 帳號級讀數為主源＋撞線地板（`tools/lib/quota_limits.py::unhandled_limit_event`）——本機加總結構上不會比帳號級讀數更準，列為後備只是第二個家。 |
+| §4.1.1 T4（/usage 程式化解析） | ❌ | ➖ | [SA 判讀] 依據＝PRD 自排最後（附錄 B-06 自註「可用但格式非契約；優先用 B-05」），T5 認可主源（v2.1.4）已覆蓋其用途；v2.1.17 決策式收斂為不做。 |
+| §4.1.1 引擎獨立執行（無 Claude Code session）時的額度遙測 | ⚠️(L) | ➖ | 現況＝`FileQuotaMeterAdapter`（`AutoClaude/autoclaude/infra/adapters/file_quota_meter.py`）只讀快取、過期回 None（引擎側不擋），缺第三方寫入者（`AutoClaude/autoclaude/core/ports/quota_meter.py` 檔頭自陳；〈三〉#4）；再開症狀＝引擎無 Claude Code session 獨立跑時的一次真實撞線（附 run log 與 checkpoint 座標）。 【2026-10-13 落款｜v2.1.20 掌舵者 (i)「做完＝無積欠 BUG 與技術債」】⏸→➖。依據＝第三方寫入者已存在：哨兵巡邏（`--arm-sentinel`→`_sentinel_tick`）與 `--pace` 寫的是同一份快取檔（`tools/lib/quota_meter.py::read_cache` 的家），引擎 `FileQuotaMeterAdapter` 讀它；無 Claude Code session 時只要哨兵仍武裝（launchd／schtasks），快取就持續新鮮。缺的從來不是寫入者，是「哨兵沒武裝」這個運維狀態，而它有自己的出聲（`--pace`／SessionStart 簡報）。【v2.1.21 訂正｜DEV-G 靜態查證＋主控現查】上一句依據**不成立**：哨兵巡邏 `_sentinel_tick`（`tools/session_resume_planner.py`）只讀撞線標記（`quota_gate.read_halt_marker`），不呼叫 `settled_quota`／端點、不寫快取；快取寫入者只有 CC session 內的 hook 補量（`tools/lib/quota_gate.py`）與 `--pace`（`tools/lib/pace_contract.py`）。改寫依據＝引擎獨立跑時**依設計不做主動遙測**（importlinter 規則 9：引擎不 import `tools`；遙測住 harness 層），等價物＝反應式撞線處理（§8 列 1 有界退避＋halt checkpoint＋`resume_wait_seconds` 讀 `resets_at`）＋外部 `python tools/session_resume_planner.py --pace` 可隨時補量同一份快取。Architect 鏡 A1 覆核：判「不合理」即走引擎側被動刷新實作。 【v2.1.21 訂正二｜DEV-I】依據＝引擎獨立跑時額度遙測**依設計不由引擎刷新**（R82 決策鎖：`AutoClaude/tests/test_r82_quota_axis_and_shipped_defaults.py::TestTheQuotaAxisHasNoEngineSideRefresher`；importlinter 規則 9 禁引擎 import `tools`），失效改為**可偵測**：有裝 meter 卻量不到時，`TokenGuardPlugin._quota_view`（`AutoClaude/autoclaude/plugins/token_guard/policy.py`）於引擎行程第一次評估出聲一次（WARNING；測試＝`AutoClaude/tests/plugins/token_guard/test_unmeasured_quota_warns_once.py`）。撞線後等待：有讀數走 `resets_at`（`resume_wait_seconds`），無讀數（獨立跑快取過期）回落 `resume_delay_minutes`（出廠 30）固定輪詢、上限 `max_auto_resumes`（出廠 10）；單次等待超過 `max_inprocess_wait_seconds` 時拒絕行程內長睡，交由 `AUTOCLAUDE_EXTERNAL_RESUME_CMD`（§16.2 §4.5.2 列）承接。誠實劃界：獨立跑期間水位保護（≥`quota_halt_pct`）不存在、只有撞線訊息才 halt；補量＝外部 `python tools/session_resume_planner.py --pace`。 |
+| §4.1.1 本機推估安全邊際 15pp | ➖ | ➖ | 依據＝（沿用矩陣）無本機加總路徑（T5 為帳號級讀數），全庫零命中；架構性替代。 |
+| §4.1.2 新鮮度三段式（180／600／1200s） | ⚠️(S) | ➖ | [SA 判讀] 依據＝v2.1.8 §4.1.5 逐字把原條文（§8-6／§4.1.2：`age > TELEMETRY_TIMEOUT (600s)` → 強制 `DRAINING`）改寫為遙測不可得⇒cap ≤ cap_prepare（DRAINING 是狀態機的字、本實作無該狀態物件，`draining()` 對 unmeasured 明文回 unknown），1200s→FREEZING 同理無狀態物件可落；180s 一段已落地（`QUOTA_CACHE_TTL_SECONDS`）；1200s→FREEZING 同受 §4.1.5「不是 cap=0」約束：全失效姿態＝cap≤cap_prepare、不隨時間升級，機械上能把它升成 halt 的只有逐字稿撞線地板。 |
+| §4.2.1 EWMA 燃燒率 | ⚠️(S) | ➖ | [SA 判讀] 依據＝PRD §4.2.8 自陳 `pace_index` 完全免除 EWMA 調參並取代燃燒率為主控訊號；`ewma_burn_rate` 庫在、生產呼叫端零（僅診斷）。 |
+| §4.2.2 安全燃燒率／目標併發公式 | ➖ | ➖ | 依據＝（沿用矩陣）被 §4.2.8 `pace_index` 取代（PRD 自身指定替代路線）；R108 廢 `T_MIN`→`wrap_minutes`。 |
+| §4.2.3 致動器表：併發／模型降級／任務類別／硬預算 | ⚠️(M) | ➖ | [HEAD 現查] 現況＝併發 cap 已落地；模型降級的設定面由 v2.1.16 W1 落款（`tools/lib/model_roles.py`＋§6 區塊 4c），自動觸發面（依 `U7d_model`／THROTTLING 自動改模型）與任務類別過濾仍無致動器；再開症狀＝一次「sonnet 週軸比視窗軸緊」配置下的真實漏擋（sid＋seq；〈三〉#1：hook 對未帶 `model` 的 Agent 以視窗模型判額度軸），或一次 THROTTLING 期間高階模型週軸（如 `seven_day_opus`）已逼近而派工仍用該模型、建議行被忽略後撞線（附 `--pace` 畫面）。 【2026-10-13 落款｜v2.1.20 掌舵者 (i)「做完＝無積欠 BUG 與技術債」】⏸→➖。依據＝併發 cap ✅；模型降級設定面 `tools/lib/model_roles.py`（v2.1.16 W1）＋`--pace` 的 🔻降級建議行；互動視窗的模型無法由程式切換（harness 限制、模型只能由人選），無人窗模型由 model_roles 固定 ⇒「自動觸發面」沒有載體可落；任務類別過濾：全庫沒有任何 playbook 使用該欄位（零需求）。 |
+| §4.2.5 BURSTING 六條件 | ⚠️(S) | ➖ | 依據＝DEF-200-458 closed-by-decision（`bursting_ok` 六條件函式俱在、無生產呼叫端、查無實損；症狀端 DEF-200-198 已 fixed）；該列自載重開條件＝某窗 reset 時剩餘 ≥20pp 且 near 帶 cap 曾限制待派工作（附 `--pace` 畫面）。 |
+| §4.2.6 參考實作（dataclass 控制器） | ➖ | ➖ | 依據＝（沿用矩陣）PRD §4.2.8 自陳可被 `pace_index` 完全取代。 |
+| §4.2.7 情境試算表 | ➖ | ➖ | 依據＝（沿用矩陣）範例表，且七情境以已退役運算元（§4.2.1／§4.2.2／§3.2）寫成、#6 與 §4.1.5 F3 相反；實作側等價斷言＝`TestDecisionTable`（`tools/tests/test_quota_policy.py`）。 |
+| §4.4.1 Worktree 建立 | ➖ | ➖ | 依據＝（沿用矩陣）PRD §0.6／附錄 B-20 自指定採原生 `isolation: worktree`；`.autoclaude/worktrees` 零命中。 |
+| §4.4.2 序列化整合佇列（rebase→驗證→ff-only） | ❌ | ➖ | 依據＝v2.1.17 決策式收斂：本 repo 刻意不做 Daemon／多 agent worktree 整合（見修訂表 v2.1.8 列 (B) 段與矩陣 §6.1 #14）；DEF-200-246 closed-by-decision，`integration_queue` 零生產寫者並由 tripwire 測試釘住（`AutoClaude/tests/contract/test_def200246_integration_queue_tripwire.py`），重開條件載於 §6.2 R-6.2-2 ③ 註記。 |
+| §4.5.1 凍結流程 7 步 | ⚠️(M) | ➖ | [SA 判讀] 現況＝halt→checkpoint、救援前置（`_freeze_is_safe`）、RELAY 任務書已落地，髒污工作樹由 §4.5.9 patch 救援承接；缺「每個 worktree 各自 commit」（無人窗口不得 commit，與施工圖 A7 同源）與 5 秒內落盤的計時驗收；再開症狀＝同施工圖 A7（一次有 sid＋seq 的「喚醒窗改完檔卻因不能 commit，隔日才由人收尾」實錄）。 【2026-10-13 落款｜v2.1.20 掌舵者 (i)「做完＝無積欠 BUG 與技術債」】⏸→➖。依據＝halt→checkpoint→patch 救援→RELAY 任務書已 ✅；「每個 worktree 各自 commit」與 §4.5.9（救援序列不得出現會改動工作樹或索引的 git 動詞，含 `commit`）及 `.claude/settings.unattended.json` 的 deny `git commit*`（無人窗不得 commit）自相矛盾，以後者為準（A7 另案）【v2.1.21 訂正：原寫「§13 紅線」為引文錯置（§13 是合規聲明），曾改引的 §15.5 十二條亦無 commit 條目；現只引 §4.5.9 與 unattended settings（Architect 鏡 ARCH-05，證據檔〈十-7〉）】；5 秒落盤計時由本版 §11.3 列補件。 |
+| §4.5.3 重置驗證與喚醒（RESET_CONFIRM／full-jitter／C=1 起步） | ⚠️(M) | ➖ | [SA 判讀] 依據＝步驟 2 的固定級距階梯已由 §4.5.10（v2.1.8）重寫為行程內重試加解不出掛回零成本巡邏（重寫版的殘留見 §4.5.10 列）；步驟 1 的 `RESET_CONFIRM_PERCENT` 門檻在實作面不存在，v2.1.17 決策式收斂以實作為準（`endpoint_probe_verdict`，`tools/lib/quota_gate.py`：端點新鮮且每軸 <100% 即 open），文字落差以 §16.4 C2 註記對齊；步驟 4「C=1 起步」＝同 §16.4 C1／DEF-200-242（free 帶直通為設計、暴露 0），§15.6「以 C_min 起步爬升」讀作歷史字面。 |
+| §4.6 跨平台防休眠 | ➖ | ➖ | 依據＝已知邊界＋晚醒非損失：睡著的 Mac 不被喚醒屬已知邊界（根 CLAUDE.md〈mac 已知邊界〉，不是待修 bug；`pmset repeat` 經掌舵者否決＝DEF-200-020），而睡著只造成晚醒、不造成損失（launchd 對錯過的 `StartCalendarInterval` 於醒來後補跑一次，見 ADR-XPLAT-007 §3.6 形狀 B；引擎路徑有時鐘跳躍偵測，`AutoClaude/autoclaude/utils/sliced_sleep.py`）；keep-awake（`caffeinate` 等）已由 R213 掌舵者授權主控裁決為 Rejected（範圍外：短等待不採 keep-awake、睡著＝晚醒非損失、DEF-200-020 同向；紀錄＝ADR-XPLAT-007 §3.6 形狀 A）；替代＝OS 排程喚醒＋睡眠姿態出聲（`tools/lib/endurance_env.py`，現查 `pmset -g custom`）＋引擎路徑時鐘跳躍偵測。【v2.1.21 訂正｜Architect 鏡 ARCH-06，證據檔〈十-7〉】原依據稱本列退役於「PRD §4.6 自身替代路線」且 keep-awake 未被裁決；前者不足（§4.6 補充句是短等待用 keep-awake、長等待用排程器，二者並存），後者已由上述裁決取代，故改以已知邊界＋晚醒非損失為據。 |
+| §4.7 帳號配額仲裁 | ⚠️(S) | ➖ | [SA 判讀] 依據＝§15.2 必建模組以功能等價物承接：lease TTL／`daemon_id`／`daemon.lock` 是多 Daemon 形態的機制，本 repo 刻意不做 Daemon；功能等價物＝目錄項派發帳（`tools/lib/quota_ledger.py` 的 `claim_dispatch`／`count_dispatches`＋`tools/lib/quota_gate.py` 的 `FANOUT_WINDOW_SECONDS`），一帳一帳本；失效姿態＝PRD「鎖搶不到→fail-safe」在本實作為派發帳寫不進／讀不到時**不節流**（fail-open，unreadable 目錄項出聲），halt 帶不受影響。 |
+| §5 API_KEY 模式 | ❌ | ➖ | 依據＝v2.1.17 決策式收斂：本 repo 純 OAuth（R98 差距分析記「全未實作，本 repo 純 OAuth」；`AUTH_MODE`／`API_BUDGET_*`／`API_AUTO_CONTINUE` 全庫零命中），API_KEY 模式刻意不做（矩陣 §6.1 #14）；§1.3 非目標「API 模式必須有使用者自訂的硬性預算上限」保留為日後若做時的前提紀律。 |
+| §6 區塊 1～4b：帳號／遙測／水位／週額度／超額 | ⚠️(L) | ➖ | 依據＝PRD §6 以 Daemon 形態寫成，換形態後鍵無對映（矩陣 §7 逐鍵普查：78 鍵 ✅14／⚠️21／❌28／➖15，鍵級落地率 38.9% 原樣留在矩陣）；週額度獨立門檻等落差以 §16.4 C8 註記對齊，實作鍵名以 `tools/lib/quota_policy_env.py` 的 `ENV_SPEC` 為準；超額政策（`ALLOW_WITH_CAP`／首次動用告警）另列於 §15.4 P4 列。 |
+| §6 區塊 5～9：上下文／併發／突刺／硬預算／休眠喚醒 | ⚠️(M) | ➖ | 依據＝同上（鍵級普查見矩陣 §7）；本區塊各鍵的功能面各有歸屬列：`MAX_STEP_*`→§4.4.3、`RESET_CONFIRM_PERCENT`→§4.5.3（C2）、`COMPACT_MIN_INTERVAL_SECONDS`→§4.3、BURSTING 鍵→§4.2.5；`SLEEP_SLICE_SECONDS`／`CLOCK_JUMP_TOLERANCE_SECONDS`／`MAX_INPROCESS_WAIT_SECONDS` 已由 v2.1.16 W3 以 `TokenGuardConfig` 三旋鈕落款（出廠 30／5／18000，偏離值與理由見該落款）。 |
+| §6 區塊 10～15：防休眠／Git／狀態／安全／可觀測／API | ⚠️(M) | ➖ | 依據＝同上；功能面歸屬：`INTEGRATION_*`→§4.4.2、`ALLOW_PERMISSION_BYPASS`→§12 權限旗標列、`METRICS_EXPORT`／`ALERT_WEBHOOK_URL`→§9 各列、`DRY_RUN`→§6.2 R-6.2-2 列、`API_*`→§5。 |
+| §6.2 R-6.2-1 殘留整合佇列：開機掃描重排 | ⚠️(L) | ➖ | 依據＝DEF-200-246 closed-by-decision：開機掃描已接電、輸入恆空（`integration_queue` 零生產寫者；§6.2 載「依設計未實作」與重開條件，tripwire 測試釘住）。 |
+| §7 state.json schema v2 | ⚠️(M) | ➖ | 依據＝§15.2 必建模組以功能等價物承接＋v2.1.17 決策式收斂：`agents[]`／`quota_snapshot`／結構化 `resume_plan` 屬多 Agent 並行形態，本 repo 刻意不做（矩陣 §6.1 #14；與 DEF-200-246 重開條件②同源）；實際持久化＝`PlaybookCheckpoint`（含 `integration_queue` 欄位、checksum、原子寫入）＋RELAY 狀態塊。 |
+| §8 列 2 重置時間漂移 | ⚠️(S) | ➖ | 現況＝同 §4.5.10（觀測優先、不猜時刻、掛回零成本巡邏）；再開症狀＝一次真實 reset 晚到（reset 時刻已過而遙測仍 ≥100%）使喚醒窗連續多次探測仍判未恢復、耗掉可觀額度（附 sid＋planner 痕跡列）。 【2026-10-13 落款｜v2.1.20 掌舵者 (i)「做完＝無積欠 BUG 與技術債」】⏸→➖。依據＝§4.5.10 觀測優先＋`PATROL_HANDBACK` ✅＝同一機制：reset 晚到＝探測未恢復→掛回零成本巡邏→觀測到 reset 再排（`tick_plan`），不猜時刻、不重複付費。 |
+| §8 列 5 等待中睡著 | ⚠️(M) | ➖ | [HEAD 現查] 依據＝同 §4.6（已知邊界＋晚醒非損失；keep-awake 已由 R213 掌舵者授權主控裁決為 Rejected，紀錄＝ADR-XPLAT-007 §3.6 形狀 A），替代＝OS 排程 `StartWhenAvailable`／`WakeToRun`（Windows 註冊設定＝`tools/session_resume_planner.py` 的 `_SCHTASKS_SETTINGS`）＋睡眠姿態出聲（`tools/lib/endurance_env.py`）；睡著的 Mac 不被喚醒屬已知邊界（根 CLAUDE.md〈mac 已知邊界〉，交付＝失效可偵測）；引擎路徑的時鐘跳躍偵測已由 v2.1.16 W3 補上。【v2.1.21 訂正｜Architect 鏡 ARCH-06，證據檔〈十-7〉】依據原稱 keep-awake 未被裁決、替代路線為 §4.6 自身；已改為已知邊界＋晚醒非損失並引該裁決（細節同 §4.6 列）。 |
+| §8 列 7 同帳號多 Daemon 超燒 | ⚠️(S) | ➖ | 依據＝同 §4.7（多 Daemon 形態；功能等價物＝目錄項派發帳）。 |
+| §8 列 9 Agent 卡死／NEEDS_HUMAN | ⚠️(S) | ➖ | 現況＝step timeout→ESCALATION（`AutoClaude/autoclaude/core/kernel.py`）與無進度即停（`tools/lib/relay_machine.py`）已有，`NEEDS_HUMAN` 狀態字面零命中；再開症狀＝一次需人介入的卡死而桌面通知與 ESCALATION 皆未觸發（附 sid＋log 座標）。 【2026-10-13 落款｜v2.1.20 掌舵者 (i)「做完＝無積欠 BUG 與技術債」】⏸→➖。依據＝step timeout→ESCALATION＋桌面通知＋`EscalationDump`（DEF-200-518）＋ relay 無進度即停（`tools/lib/relay_machine.py`）＝功能等價物；`NEEDS_HUMAN` 只是狀態名，補一個同義詞不改變任何行為。 |
+| §8 列 11 整合驗證失敗 | ⚠️(L) | ➖ | 依據＝同 §6.2 R-6.2-1（DEF-200-246 closed-by-decision；整合佇列零生產寫者）。 |
+| §9 12 個 Prometheus 指標 | ❌ | ➖ | 現況＝`prometheus`／`otlp`／`autoclaude_*` 零命中，等價痕跡＝JSONL 家族（如 `quota_burn.jsonl`）；再開症狀＝出現真實下游要讀這 12 項指標之一（Grafana 面板或告警規則引用 `autoclaude_*`）而 JSONL 痕跡無法替代（附需求原文）。 【2026-10-13 落款｜v2.1.20 掌舵者 (i)「做完＝無積欠 BUG 與技術債」】⏸→➖。依據＝本 repo 零下游（無 Prometheus／Grafana／告警規則），同一資訊由 JSONL 痕跡家族承接（`quota_burn.jsonl`、`autosdd_resume_cost.jsonl`、`autosdd_burndown_events.jsonl`）；為不存在的讀者建指標＝技術債。 |
+| §9 結構化決策日誌 | ⚠️(S) | ➖ | 現況＝JSONL 痕跡家族（`quota_burn.jsonl`、`tools/lib/quota_gate.py` 與 `tools/lib/quota_escalation.py` 的痕跡）非逐決策全量；再開症狀＝一次需事後重建的決策（某次派工為何被擋或放行）在痕跡中查無對應列（附 sid＋seq）。 【2026-10-13 落款｜v2.1.20 掌舵者 (i)「做完＝無積欠 BUG 與技術債」】⏸→➖。依據＝每次 `--pace` 把輸入面（`ts`／`pct`／`live`／`fp`／`resets_at`／`bd`）落 `quota_burn.jsonl`、清倉事件落 `autosdd_burndown_events.jsonl`：輸入已落帳、決策由純函式 `decide()` 可重算＝逐決策可事後重建；逐決策全量日誌無消費端。【v2.1.21 訂正｜Architect 鏡 ARCH-04，證據檔〈十-7〉】原依據稱 `--pace` 每次落決策欄位並由 hook 阻斷落哨兵痕跡，與實作不符（`quota_pace.row_of` 只落輸入面；hook 閘門的放行／阻斷不另落結構化列），已改寫。 |
+| §9 告警（DRAINING 以上／DIRTY_UNSAVED／NEEDS_HUMAN／429 突增） | ⚠️(S) | ➖ | 現況＝halt／prepare 桌面通知與 DIRTY_UNSAVED（notifier）已有，`NEEDS_HUMAN`／429 突增零命中；再開症狀＝一次 429 突增或需人介入事件無人被告警而擱置（附 sid＋時間）。 【2026-10-13 落款｜v2.1.20 掌舵者 (i)「做完＝無積欠 BUG 與技術債」】⏸→➖。依據＝halt／prepare 桌面通知＋DIRTY_UNSAVED ✅；NEEDS_HUMAN 同 §8 列 9；推論端 429 由本版 §8 列 1 有界退避承接、額度端 429 走撞線地板→halt 通知。 |
+| §12 prompt injection／狀態回報 schema | ⚠️(S) | ➖ | 現況＝狀態回報為一般型別化 dataclass、非針對偽造設計（allowlist 見 §8 列 12）；再開症狀＝一次工具輸出內的偽造「狀態回報」被引擎當真並改變決策（附 sid＋step 痕跡）。 【2026-10-13 落款｜v2.1.20 掌舵者 (i)「做完＝無積欠 BUG 與技術債」】⏸→➖。依據＝前提不存在：agent 不寫控制狀態——續跑窗的 handback 以四 marker＋mtime 驗（`tools/lib/resume_route.py::handback_verdict`）、引擎以 `evaluator_command` 判步驟成敗；偽造「狀態回報」樣本 0、無威脅模型可針對設計；專門防偽 schema 在沒有攻擊面樣本下只是猜。誠實承認：`expected_output_regex` 對偽造輸出無防禦（理論洞，無暴露證據）。【v2.1.21 訂正｜Architect 鏡 ARCH-07，證據檔〈十-7〉】原依據「allowlist＋型別化 dataclass 已在」不是防偽論證（型別化只保結構、不保真偽），已改寫。 |
+| §12 供應鏈（不得無人確認新增依賴／postinstall） | ⚠️(S) | ➖ | 現況＝無人喚醒窗 allowlist 預設拒絕（`.claude/settings.unattended.json`），無顯式 install／postinstall 規則、引擎路徑未覆蓋；再開症狀＝一次無人窗口（引擎路徑）未經確認新增依賴或執行 postinstall（附 sid＋diff）。 【2026-10-13 落款｜v2.1.20 掌舵者 (i)「做完＝無積欠 BUG 與技術債」】⏸→➖。依據＝無人喚醒窗 default-deny：`.claude/settings.unattended.json` 的 16 條 allow 皆無 install 類指令，任何不在 allow 內的指令（含 pip／uv／npm install）在 headless 回合一律被拒；引擎路徑靠 operator 以 `claude.extra_args` 傳入的白名單旗標與 §6.1 不變式 8（權限旗標雙閘）。顯式 deny 條目（curl／wget／install 一族）屬縱深防禦、住守衛面，本版由掌舵者核准後套用（證據檔〈守衛面三件〉）。【v2.1.21 訂正｜Architect 鏡 ARCH-07，證據檔〈十-7〉】原句「引擎路徑 playbook 指令由 allowlist（`sdk_executor_adapter.py`）承接」只對 `backend="sdk"`＋`sdk_tool_allowlist` 成立（`ExecutorConfig` 預設 `"pty"`／`None`），已改寫。 |
+| §15.4 P0 觀測 | ⚠️(M) | ➖ | [SA 判讀] 依據＝§15.4 P0～P5 是施工順序（§14 舊路線圖已被它取代）而非第二份需求，其出場題所指的功能列已在本表各自結案——P0 對應 §4.1.1 T1／T3、§9 指標列（含 `autoclaude_step_quota_cost_pp` 單 Step 額度成本資料）；本列只收順序，退役以免雙重計算。 |
+| §15.4 P1 保全 | ⚠️(M) | ➖ | [SA 判讀] 依據＝同 P0；P1 出場題所指功能列＝§4.3（PreCompact／最小間隔）、§4.5.1（逐 worktree commit）、§11.3（5 秒落盤計時，📎）。 |
+| §15.4 P2 配速 | ⚠️(M) | ➖ | [SA 判讀] 依據＝同 P0；P2 出場題所指功能列＝§4.2.8（pace_index，✅）、§11.2（離線模擬器／DRY_RUN 一週，📎）。 |
+| §15.4 P3 閘門 | ⚠️(S) | ➖ | [SA 判讀] 依據＝同 P0；P3 出場題所指功能列＝§4.2.3 致動器表（模型降級致動器），動態 `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` 以 hook 直接 deny（PreToolUse 攔 Agent／Workflow）取代，屬設計替代。 |
+| §15.4 P4 韌性 | ⚠️(M) | ➖ | [SA 判讀] 現況＝P4 出場題中防休眠（§4.6）與仲裁（§4.7）已各自判 ➖、週額度長休眠 ✅；獨有的殘留是超額政策（`OVERAGE_POLICY=ALLOW_WITH_CAP`／`OVERAGE_ALERT_ON_FIRST_USE`／月度超額利用率 halt）零落地，現況事實上 FREEZE（`tools/lib/quota_policy.py`、`tools/lib/quota_meter.py`），R87 當回合 payload 曾 `extra_usage.is_enabled=false` 而 `used_credits 610 > monthly_limit 500`（`tools/lib/quota_meter.py` R87 墓碑：撞頂後果，不是「超額池關著」的證據，不構成暴露 0）；現況以 `--pace`「派工前置」行現查（本輪逐字「此帳號**沒有** usage credits ⇒ 訂閱窗本身即硬牆」）；再開症狀＝`--pace` 派工前置行由「沒有 usage credits」變為有 credits（附該行畫面），或帳號啟用付費超額後出現一次真實的超額軸被動用／超額計費而無人被告警（附 `quota_burn.jsonl` 列或帳單座標）。 【2026-10-13 落款｜v2.1.20 掌舵者 (i)「做完＝無積欠 BUG 與技術債」】⏸→➖。依據＝`--pace` 派工前置行逐字「此帳號**沒有** usage credits ⇒ 訂閱窗本身即硬牆」，超額政策的前提（付費超額池）不存在；現況 FREEZE 即正解。帳號若啟用超額＝§16.5 (i) 新需求。 |
+| §15.4 P5 硬化 | ⚠️(M) | ➖ | [SA 判讀] 依據＝同 P0；P5 出場題所指功能列＝§12 各列、§6.1、§6.2 R-6.2-2（📎）、§11.8（24h 端到端，📎）。 |
+| §10 v1→v2 設定遷移 | ➖ | ➖ | 依據＝v1 四鍵全庫零命中（grep＋`git log -S`），PRD §10「Daemon 讀到 schema_version 1.0.0」的前提隨 Daemon 形態退役 ⇒ 無遷移對象（矩陣原引「R98 §1.11」指錯章，以本句為準）。 |
+| §11.5 防休眠驗收 | ➖ | ➖ | 依據＝（沿用矩陣）同 §4.6（已知邊界＋晚醒非損失；keep-awake 已由 R213 掌舵者授權主控裁決為 Rejected，紀錄＝ADR-XPLAT-007 §3.6 形狀 A）。【v2.1.21 訂正｜Architect 鏡 ARCH-06，證據檔〈十-7〉】依據補上 §4.6 改寫後的實質理由。 |
+| §11.6 多 Agent 隔離與整合 | ❌ | ➖ | 依據＝v2.1.17 決策式收斂：同 §4.4.2（本 repo 刻意不做 Daemon／多 agent worktree 整合；矩陣 §6.1 #14）。 |
+| 施工圖 A3：R108 配速批 W4／W6（bursting_ok 接線＋must-finish 升 30 分） | ➖ | ➖ | 依據＝（沿用矩陣）DEF-200-458 closed-by-decision（功能願望、查無實損；症狀端 DEF-200-198 已 fixed）。 |
+| 施工圖 A5b：R112 REQ-W2 無主模式 | ⚠️(S) | ➖ | 依據＝DEF-200-234 closed-by-decision（偵測面 `_orphan_watch` 已落地、處置面無暴露證據）；該列自載重開條件＝主控 429 退場後背景 agent 仍燒 token（附 sid）。 |
+| 施工圖 A5c：R112 REQ-W6 喚醒成本治理 | ⚠️(M) | ➖ | [HEAD 現查] 現況＝(a) spawn 前授權 fail-fast 與 (c) 喚醒成本落帳（v2.1.16 W2，DEF-200-508 fixed）已落地，落帳 v1 限制＝`pct_before`／`pct_after` 恆 null、被 timeout 砍掉的窗不落帳、FRESH 路由窗與 RESUME 量不到列同形（〈三〉#8）；殘留＝(b) 成本閘導出式（成本閘仍是 32MiB 常數）；再開症狀＝`autosdd_resume_cost.jsonl` 某列三個 usage 欄合計的實數（附列座標）、且同 `session_id` 在 planner 痕跡的 `route_chosen`＝`SESSION_RESUME`（痕跡住系統暫存，事發當場附檔），並附掌舵者認定該成本不可接受的原話或帳單座標。 【2026-10-13 落款｜v2.1.20 掌舵者 (i)「做完＝無積欠 BUG 與技術債」】⏸→➖。依據＝(a)(c) ✅；(b) 成本閘導出式需要真實喚醒成本母體（`autosdd_resume_cost.jsonl`）才能導出，沒有母體的導出式就是拍腦袋常數——現行 32MiB 常數閘已可觀測且有落帳，導出屬日後有母體時的校準，不是缺功能。 |
 
 ---
 

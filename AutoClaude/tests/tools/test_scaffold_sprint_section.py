@@ -14,7 +14,6 @@ sys.path.insert(0, str(PROJECT_ROOT / "tools"))
 
 import scaffold_sprint_section as scaffold  # noqa: E402
 
-
 SAMPLE_HISTORY = """\
 # Sprint 歷史
 

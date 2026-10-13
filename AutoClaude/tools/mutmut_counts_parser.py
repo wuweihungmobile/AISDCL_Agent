@@ -34,7 +34,8 @@ class MutmutCountsResult:
     emitted: int = 0                                       # 實際命中的 counts line 數
     section_found: bool = False                            # 是否找到 marker section
     warning: str | None = None                             # 0 emit 時的 WARN 訊息
-    formatted_lines: tuple[str, ...] = field(default_factory=tuple)  # ps1 端 `[mutation counts] X` 行
+    # ps1 端 `[mutation counts] X` 行
+    formatted_lines: tuple[str, ...] = field(default_factory=tuple)
 
 
 def parse_mutmut_counts(log_text: str) -> MutmutCountsResult:
@@ -78,7 +79,9 @@ def parse_mutmut_counts(log_text: str) -> MutmutCountsResult:
 
 def main(argv: list[str] | None = None) -> int:
     """CLI 入口：解析 log → 印 ps1 等價 `[mutation counts] X` 行至 stdout；WARN 至 stderr。"""
-    parser = argparse.ArgumentParser(description="Parse mutmut counts marker section (ADR-SD09-010)")
+    parser = argparse.ArgumentParser(
+        description="Parse mutmut counts marker section (ADR-SD09-010)"
+    )
     parser.add_argument("log", type=Path, help="mutmut results log path")
     args = parser.parse_args(argv)
     if not args.log.exists():

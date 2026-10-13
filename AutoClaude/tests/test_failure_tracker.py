@@ -1,7 +1,5 @@
 """FailureTracker 單元測試：is_stuck / suspect_test_file_error 邊界案例。"""
-import pytest
-from autoclaude.execution.failure_tracker import FailureTracker, AttemptRecord
-
+from autoclaude.execution.failure_tracker import FailureTracker
 
 # ─────────────────────────────
 # 輔助函式
@@ -180,7 +178,8 @@ class TestSuspectTestFileError:
         assert tracker.suspect_test_file_error() is False
 
     def test_framework_path_not_treated_as_impl_error(self):
-        """_pytest/config.py:183 與 pluggy/manager.py:120 屬框架路徑，應被過濾，不阻止 suspect 觸發。"""
+        """_pytest/config.py:183 與 pluggy/manager.py:120 屬框架路徑，應被過濾，不阻止
+        suspect 觸發。"""
         tracker = _make_tracker()
         output = (
             "SyntaxError: invalid syntax\n"
@@ -206,7 +205,8 @@ class TestSuspectTestFileError:
         assert tracker.suspect_test_file_error() is False
 
     def test_pytest_collection_error_cross_line_suspect(self):
-        """Gap-006-C：pytest 集合錯誤跨行格式應觸發 suspect（test_foo.py 與 SyntaxError 在不同行）。"""
+        """Gap-006-C：pytest 集合錯誤跨行格式應觸發 suspect（test_foo.py 與 SyntaxError
+        在不同行）。"""
         tracker = _make_tracker()
         output = "ERROR collecting tests/test_foo.py\n  SyntaxError: invalid syntax"
         _record(tracker, 0, output)
@@ -417,7 +417,10 @@ class TestIsCycling:
         """不足 window=6 筆 → 不觸發"""
         tracker = _make_tracker()
         for i in range(5):
-            _record(tracker, i, ["TypeError: bad type", "AttributeError: no attr", "NameError: undef"][i % 3])
+            _record(
+                tracker, i,
+                ["TypeError: bad type", "AttributeError: no attr", "NameError: undef"][i % 3],
+            )
         assert tracker.is_cycling() is False
 
     def test_abcabc_cycling(self):
@@ -451,7 +454,10 @@ class TestIsCycling:
     def test_abcabc_custom_window(self):
         """使用自訂 window=4 驗證邊界"""
         tracker = _make_tracker()
-        errors = ["TypeError: op error", "AttributeError: no attr x", "NameError: undef y", "TypeError: op error"]
+        errors = [
+            "TypeError: op error", "AttributeError: no attr x",
+            "NameError: undef y", "TypeError: op error",
+        ]
         for i, e in enumerate(errors):
             _record(tracker, i, e)
         # 4 筆，window=4，unique=3（A,B,C,A → unique={A,B,C}），max_count=2，window//2=2 → True

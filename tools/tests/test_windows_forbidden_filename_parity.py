@@ -673,12 +673,6 @@ def _normalize_latest(rel: str, latest_name: str) -> str:
 def _ntfs_scan_candidates(latest_name: str) -> list[str]:
     """候選檔＝git（tracked ∪ untracked-not-ignored）∩（三種副檔名 ∪ 三處 hook 目錄），
     扣除凍結版與測試檔。
-
-    用 `git ls-files` 而非 `rglob`；rc≠0 一律 fail-loud，不可靜默回空。R82
-    （`DEF-101-752`）：本檔曾記載「尚未 `git add` 的新檔」為已知邊界，但姊妹鎖已
-    證明那是真 fail-open（R69 的 `platform_caps.py` 全程 untracked，躲過四輪
-    複審）。加 `-o --exclude-standard` 納入 untracked-not-ignored。史料見證據檔
-    〈第七輪 史料搬遷（Dev-Trim8）〉。
     """
     candidates: set[str] = set()
     for extra_args in ((), ("-o", "--exclude-standard")):
@@ -831,14 +825,7 @@ _SDD_FORBIDDEN_CHARS = '<>:"|?*\\'
 
 class TestSddSanitizeComponentVsLoggerSecurityParity(unittest.TestCase):
     """`component_sanitizer.sanitize_component` ↔ `_sanitize_log_filename` 等強度鎖。
-
-    自姊妹子專案的同型測試原地搬遷（R69）：原檔比對的符號自 R45 抽共享層後就是
-    `component_sanitizer.sanitize_component` 本身，故本檔直接比對共享層即行為
-    完全等價。兩側刻意不共用同一顆函式物件（兩個獨立可發布子專案不可跨專案
-    import 生產程式碼），本鎖只驗證安全性質對齊，不要求輸出逐字元相同。長度截斷
-    是其中一側獨有的額外防線，不在 parity 比較範圍內。史料見證據檔
-    〈第七輪 史料搬遷（Dev-Trim8）〉。
-    """
+    射程／已知不涵蓋：逐字見 R213 證據檔附錄 A-4。"""
 
     @classmethod
     def setUpClass(cls) -> None:

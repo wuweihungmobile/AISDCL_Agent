@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Optional
 
 from ...decision.minimax_client import _validate_correction_quality
 from ...decision.prompt_builder import STRATEGY_PROMPTS
@@ -25,9 +24,9 @@ logger = logging.getLogger("autoclaude.execution.playbook")
 @dataclass
 class _MutationApplyOutcome:
     """apply_step_mutations 回傳結果"""
-    early_return: Optional[PlaybookResult] = None
+    early_return: PlaybookResult | None = None
     inject_before_pending: bool = False
-    goto_target_idx: Optional[int] = None
+    goto_target_idx: int | None = None
     clear_goal_summary: bool = False
     should_break: bool = False
 
@@ -126,7 +125,7 @@ def validate_and_retry_correction(
     tracker,
     report,
     error_cls,
-    task_goal_summary: Optional[str],
+    task_goal_summary: str | None,
     playbook,
     mutation_log: list[str],
     mutation_pressure: int,

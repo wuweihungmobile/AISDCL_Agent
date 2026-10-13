@@ -1,5 +1,6 @@
 """感知層文字處理工具：ANSI 控制序列移除等。"""
 from __future__ import annotations
+
 import re
 
 _ANSI_ESCAPE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")

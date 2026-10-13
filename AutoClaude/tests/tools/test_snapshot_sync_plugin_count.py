@@ -25,7 +25,8 @@ sys.path.insert(0, str(PROJECT_ROOT / "tools"))
 import snapshot_sync  # noqa: E402
 
 # 單一 pin 點：新增/移除 plugin 時只改這兩個常數（與 wiring._REGISTER_ORDER 同步）
-_STATIC_COUNT = 19   # len(_REGISTER_ORDER)，含條件式 hotkey（AutoSDD_improving_60 +1：translation_learner）
+# len(_REGISTER_ORDER)，含條件式 hotkey（AutoSDD_improving_60 +1：translation_learner）
+_STATIC_COUNT = 19
 _ACTIVE_COUNT = 18   # 排除 _CONDITIONAL_PLUGINS（hotkey）
 
 

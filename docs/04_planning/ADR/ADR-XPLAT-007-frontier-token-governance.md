@@ -595,7 +595,7 @@ P8 的理由是「週額度是更稀缺的資源」。**那個理由不足**（�
 
 **三個候選形狀，逐個評估：**
 
-**形狀 A：`caffeinate` 有界斷言（建議採用）**
+**形狀 A：`caffeinate` 有界斷言（Rejected——範圍外；R213 掌舵者授權主控裁決：短等待不採 keep-awake、睡著＝晚醒非損失、DEF-200-020 同向）**
 `/usr/bin/caffeinate` **不需 sudo**（C12），且它**不改任何持久設定**——assertion 隨行程結束即消失。
 ⇒ 它完全不在「掌舵者已否決的改動電源設定」射程內：那條否決針對的是 `pmset repeat`（需 sudo、
 **持久**、會改變掌舵者機器的行為）；`caffeinate -t` 是**行程生命期內、且自帶逾時**的暫時斷言。
@@ -833,7 +833,7 @@ ENV_SPEC 結構分類：政策鍵 14（含 AUTOSDD_QUOTA_FANOUT_CAP，attr=fanou
 |---|---|---|---|
 | X-1 | **P2**（`tools/**`） | 修 `reset_window_distribution.py` rc=1（§1.5，建議案二＋probe smoke 測試） | **P0**——它擋住 R-4／R-5／§4.3 三項 |
 | X-2 | **P2** | 6d 載具級 e2e（§3.5，opt-in、含 5 條斷言與洩漏偵測） | **P1** |
-| X-3 | **P2** | `caffeinate` 有界斷言 ＋ tick 遲到量（§3.6 形狀 A/B） | P1（A 需排在 X-1 後） |
+| X-3 | **P2** | `caffeinate` 有界斷言 ＋ tick 遲到量（§3.6 形狀 A/B） | P1（A 需排在 X-1 後）；【R213 註】形狀 A 已裁 Rejected（§3.6），本列隨之作廢、不再要求實作 |
 | X-4 | **P2** | `quota_policy.py` 加速前提具名化 ＋ 影子語料紀錄（§3.4a／b） | P2 |
 | X-8 | **P2** | `describe()` 印出「本可派 N、被 <軸> 夾到 M」（§3.4a-2）——今天「加速到不了」在畫面上不可見 | **P1**（純輸出，零風險） |
 | X-5 | **P2** | 根層 `--print-env-example` ①優先序句補射程限定詞（§4.2）②逃生口分區改由 `attr is None` 導出（§4.4） | P3（2 處） |

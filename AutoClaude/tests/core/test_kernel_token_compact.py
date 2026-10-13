@@ -11,7 +11,6 @@ compact_count），且完整移植 Gap-008-E：連續 compact 失敗（壓不下
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from autoclaude.core.event_bus import EventBus
 from autoclaude.core.kernel import PlaybookKernel
@@ -31,7 +30,7 @@ class SequencedTokenExecutor:
     模擬 compact 成功（壓下來）或失敗（仍高）。pct=None → 不發事件（peak 0）。
     """
 
-    def __init__(self, pcts: list[Optional[float]]):
+    def __init__(self, pcts: list[float | None]):
         self._pcts = pcts
         self._i = 0
         self.calls: list[dict] = []

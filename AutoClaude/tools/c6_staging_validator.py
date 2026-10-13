@@ -33,6 +33,10 @@ os.environ.setdefault("AUTOCLAUDE_ALLOW_INSECURE_DB", "1")
 
 _REPO_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
+sys.path.insert(0, str(_REPO_ROOT.parent / "tools" / "lib"))
+from platform_utils import (  # noqa: E402
+    init_utf8_streams as _init_utf8_streams,  # type: ignore[import-not-found]
+)
 
 #: 🔴 DSN 一律由 `--dsn` 或 `AUTOCLAUDE_DB_DSN` 提供，**檔內不留 baked-in 憑證**（R82）。
 #: 原版把 `autoclaude_runtime` 的密碼寫死在這裡，且刻意拆成兩段字串——於是
@@ -403,6 +407,8 @@ class C6Validator:
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def main():
+    # logger 輸出含 ✅/❌：Windows cp950 主控台會 UnicodeEncodeError（logging 吞掉並丟行）。
+    _init_utf8_streams()
     ap = argparse.ArgumentParser(description="C6 Staging Validator — 24h dual-write 自動驗證")
     ap.add_argument("--duration", type=float, default=24.0, help="執行時長（小時，預設 24）")
     ap.add_argument("--quick", action="store_true", help="快速模式（~5 分鐘，用於功能驗證）")

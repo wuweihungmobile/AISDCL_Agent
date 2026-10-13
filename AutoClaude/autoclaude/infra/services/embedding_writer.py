@@ -21,8 +21,8 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
 
 from ...core.ports.embedder import (
     EmbedderDimensionMismatchError,
@@ -46,7 +46,7 @@ class EmbeddingWriteResult:
     row_id: str
     namespace: str  # goal_tasks / execution_items / knowledge_entries
     embedding_status: str
-    embedding_model_id: Optional[str]
+    embedding_model_id: str | None
     embedding_attempts: int = 0
     alerted: bool = False
     detail: str = ""
@@ -57,7 +57,7 @@ class SLOAlert:
     """retry 連續失敗達門檻時的告警事件（供 PM #9 告警通道訂閱）。"""
     row_id: str
     namespace: str
-    model_id: Optional[str]
+    model_id: str | None
     attempts: int
     last_error: str
     timestamp: float = field(default_factory=lambda: __import__("time").time())
@@ -80,9 +80,9 @@ class EmbeddingWriter:
         *,
         embedder,
         sql_executor,
-        pii_filter: Optional[PIIFilter] = None,
+        pii_filter: PIIFilter | None = None,
         alert_after_attempts: int = 5,
-        alert_observer: Optional[Callable[[SLOAlert], None]] = None,
+        alert_observer: Callable[[SLOAlert], None] | None = None,
         clock: Callable[[], float] = None,
     ) -> None:
         self.embedder = embedder
@@ -99,16 +99,18 @@ class EmbeddingWriter:
         *,
         goal_task_id: str,
         project_id: str,
-        parent_id: Optional[str],
+        parent_id: str | None,
         title: str,
         description: str = "",
         depth: int = 1,
         priority: int = 3,
-        config_snapshot: Optional[dict] = None,
+        config_snapshot: dict | None = None,
     ) -> EmbeddingWriteResult:
         """寫入 goal_tasks + 同步 embedding（AC4-3 寫入觸發點 1/3）。"""
         clean_title = self._filter_text("goal_tasks.title", title, PIIClassification.NORMAL)
-        clean_desc = self._filter_text("goal_tasks.description", description, PIIClassification.NORMAL)
+        clean_desc = self._filter_text(
+            "goal_tasks.description", description, PIIClassification.NORMAL
+        )
         text_to_embed = f"{clean_title}\n{clean_desc}".strip()
         # 1. 先寫業務列（status=pending）
         self.sql.execute(
@@ -144,8 +146,8 @@ class EmbeddingWriter:
         self,
         *,
         goal_task_id: str,
-        new_title: Optional[str] = None,
-        new_description: Optional[str] = None,
+        new_title: str | None = None,
+        new_description: str | None = None,
     ) -> EmbeddingWriteResult:
         """更新 goal_tasks 並重 embed（AC4-3 觸發點 2/3）。"""
         # 取當前文字 + 套用變更
@@ -190,10 +192,12 @@ class EmbeddingWriter:
         *,
         exec_id: str,
         result_summary: str,
-        actual_minutes: Optional[int] = None,
+        actual_minutes: int | None = None,
     ) -> EmbeddingWriteResult:
         """完成 execution_items + 寫 embedding（AC4-3 觸發點 3/3）。"""
-        clean = self._filter_text("execution_items.result", result_summary, PIIClassification.NORMAL)
+        clean = self._filter_text(
+            "execution_items.result", result_summary, PIIClassification.NORMAL
+        )
         self.sql.execute(
             "UPDATE execution_items SET status='ok', actual_minutes=%s, "
             "result=%s, embedding_status='pending' WHERE exec_id=%s",

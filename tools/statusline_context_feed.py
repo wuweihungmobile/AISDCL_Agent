@@ -88,7 +88,7 @@ def build_feed_doc(payload: dict) -> dict:
         raise ValueError("payload 缺 session_id")
     model = payload.get("model") if isinstance(payload.get("model"), dict) else {}
     cw = payload.get("context_window") if isinstance(payload.get("context_window"), dict) else {}
-    return {
+    doc = {
         "schema": 1,
         "session_id": sid.strip(),
         "ts": datetime.now().astimezone().isoformat(timespec="seconds"),
@@ -97,6 +97,12 @@ def build_feed_doc(payload: dict) -> dict:
         "exceeds_200k_tokens": payload.get("exceeds_200k_tokens"),
         "version": payload.get("version"),
     }
+    # T3（PRD §4.1.1）：訂閱帳號首次 API 回應後 payload 才帶 `rate_limits`（官方契約：每窗
+    # `used_percentage` 0..100＋`resets_at` epoch 秒）；鍵名不猜、原樣轉，沒有就不寫鍵。
+    # 讀端與單位／時刻正規化住 `tools/lib/harness_feed.py::rate_limits_reading()`。
+    if isinstance(payload.get("rate_limits"), dict):
+        doc["rate_limits"] = payload["rate_limits"]
+    return doc
 
 
 def _fmt_tokens(value: object) -> str:

@@ -7,8 +7,6 @@
 """
 from __future__ import annotations
 
-from typing import Optional
-
 from autoclaude.core.ports.brain import CorrectionResult
 from autoclaude.core.ports.executor import ExecutionOutput
 
@@ -54,7 +52,7 @@ class FakeEvaluator:
         self._idx = 0
         self._default = always_pass
 
-    def evaluate(self, task, output: str) -> tuple[Optional[str], str, int]:
+    def evaluate(self, task, output: str) -> tuple[str | None, str, int]:
         """回傳 (failure_reason, eval_output, exit_code)；None = 成功。"""
         if self._idx < len(self._results):
             passed = self._results[self._idx]
@@ -73,7 +71,7 @@ class FakeBrain:
     傳入 correction 可指定固定回傳值。
     """
 
-    def __init__(self, correction: Optional[CorrectionResult] = None):
+    def __init__(self, correction: CorrectionResult | None = None):
         self._correction = correction
 
     def decide_correction(
@@ -84,5 +82,5 @@ class FakeBrain:
         eval_output: str = "",
         attempt: int = 0,
         **kwargs,
-    ) -> Optional[CorrectionResult]:
+    ) -> CorrectionResult | None:
         return self._correction

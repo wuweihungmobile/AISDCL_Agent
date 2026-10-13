@@ -2,7 +2,8 @@
 
 對應 [SD09_Execution_Guide.md W1 T1-B8](../../docs/05_development/SD09_Execution_Guide.md)
 （GoalSynthesis mutation pilot 上 nightly 後，與既鎖 TokenGuard 並存的回歸保護）
-與 [ADR-SD08-002 §2.4 + ADR-SD09-009 §5.5](../../docs/04_planning/ADR/ADR-SD08-002-mutation-baseline.md)。
+與 [ADR-SD08-002 §2.4 +
+ADR-SD09-009 §5.5](../../docs/04_planning/ADR/ADR-SD08-002-mutation-baseline.md)。
 
 定位（與既有測試不重疊）：
   - tests/contract/test_mutation_baseline_lock.py / tests/tools/test_mutation_baseline_lock.py
@@ -74,7 +75,7 @@ def _write_mutmut_log(
 def _preload(history_path: Path, module: str, rates: list[float], sha_prefix: str) -> None:
     """以 append 模式預灌某模組歷史；日期由今日 UTC 倒推 len(rates) 天（避免 M-05 同日去重），
     每筆附 unique source_sha256（滿足紀律 #12）。多模組交錯呼叫不互相覆寫。"""
-    today = _dt.datetime.now(tz=_dt.timezone.utc).date()
+    today = _dt.datetime.now(tz=_dt.UTC).date()
     n = len(rates)
     with history_path.open("a", encoding="utf-8") as f:
         for i, rate in enumerate(rates):

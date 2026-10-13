@@ -7,11 +7,8 @@
 """
 from __future__ import annotations
 
-import pytest
-
 from autoclaude.infra.repositories.in_memory_state_repository import InMemoryStateRepository
 from autoclaude.utils.checkpoint_manager import PlaybookCheckpoint
-
 
 PLAYBOOK_PATH = "tests/fixtures/mock_playbook.yaml"
 

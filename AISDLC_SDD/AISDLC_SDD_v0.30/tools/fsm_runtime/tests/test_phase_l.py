@@ -17,7 +17,9 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from tools.fsm_runtime import counterfactual_replay as CR
+from tools.fsm_runtime import spec_fragility_scorer as FR
 from tools.fsm_runtime.fsm_runtime import FSMRuntime
+from tools.fsm_runtime.spec_localizer import RTMRow
 from tools.fsm_runtime.state_loader import load_state, save_state
 from tools.fsm_runtime.transition_rules import (
     OBSERVATION_STATES, _HAPPY_PATH, TransitionError, is_transition_allowed,
@@ -215,10 +217,6 @@ def test_experiment_replay_transition_allowed_as_observation():
 
 
 # ---------- ACT-093: Spec Fragility Scorer ----------
-
-from tools.fsm_runtime import spec_fragility_scorer as FR
-from tools.fsm_runtime.spec_localizer import RTMRow
-
 
 def _fragile_rtm():
     """6 脆弱 AC（共享 FRD 大 blast + 0 TC + drift + escalation）+ 12 穩健 AC。"""

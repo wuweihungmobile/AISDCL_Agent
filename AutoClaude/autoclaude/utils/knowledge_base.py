@@ -285,7 +285,7 @@ class FailureKnowledgeBase:
             if key in self._cache and len(self._cache) > 1:
                 self._rewrite()
             else:
-                with self._path.open("a", encoding="utf-8") as f:
+                with self._path.open("a", encoding="utf-8", newline="") as f:
                     f.write(json.dumps(entry, ensure_ascii=False) + "\n")
         except Exception as exc:
             logger.warning("知識庫寫入失敗: %s", exc)
@@ -293,7 +293,7 @@ class FailureKnowledgeBase:
     def _rewrite(self) -> None:
         """將整個 cache 重新寫入檔案，防止重複 key 的行累積。"""
         try:
-            with self._path.open("w", encoding="utf-8") as f:
+            with self._path.open("w", encoding="utf-8", newline="") as f:
                 for entry in self._cache.values():
                     f.write(json.dumps(entry, ensure_ascii=False) + "\n")
         except Exception as exc:

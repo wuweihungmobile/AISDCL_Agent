@@ -30,6 +30,12 @@ from pydantic import ValidationError
 # 無 click → 未安裝時整體 skip（對齊 test_pg_memory_store_security.py importorskip 慣例）
 pytest.importorskip("click")
 
+from autoclaude.infra.services.pii_filter import PIIFilter, PIIFilterViolation
+from autoclaude.models.three_tier_schema import (
+    GoalTask,
+    Project,
+    ThreeTierFixture,
+)
 from tools.migrate_yaml_to_db import (  # noqa: E402
     ImportReport,
     build_diffs,
@@ -40,13 +46,6 @@ from tools.migrate_yaml_to_db import (  # noqa: E402
     parse_yaml_to_fixture,
     process_single,
 )
-from autoclaude.infra.services.pii_filter import PIIFilter, PIIFilterViolation
-from autoclaude.models.three_tier_schema import (
-    GoalTask,
-    Project,
-    ThreeTierFixture,
-)
-
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 YAML_SOURCES = sorted([

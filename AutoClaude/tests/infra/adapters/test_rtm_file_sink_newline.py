@@ -8,93 +8,102 @@ Windows 上每個 "\\n" 被翻成 "\\r\\n"，該承諾在 Windows 是假的。�
 
 鎖的形態刻意選「原始碼結構」而非「執行期位元組」：POSIX 上 newline=None 不做
 任何轉換，位元組斷言在 mac/Linux CI 恆綠、零鑑別力（Scan-H 判準①）。
+
+舊債表（14 檔／18 站點）已清零，判準＝全樹零容忍、站點級回報：只要求「宣告」newline
+（要平台原生行尾就明寫 newline=os.linesep，不需任何豁免口）。mode 非字面量的站點無從
+判定，只計數印出、不判紅；射程＝builtin／io／Path 的 open 與 write_text（現況
+autoclaude/ 無 tempfile／os.fdopen 形態）。
 """
 from __future__ import annotations
 
 import ast
 from pathlib import Path
 
-import pytest
-
 from autoclaude.infra.adapters.rtm_file_sink import FileRtmSink
 
 _AUTOCLAUDE_ROOT = Path(__file__).resolve().parents[3] / "autoclaude"
 
-# 已修（必須維持零違規）的模組。
-_MUST_BE_CLEAN = {"infra/adapters/rtm_file_sink.py"}
 
-# 尚未償還的舊債（shrink-only：只准縮，不准新增）。本輪 Pkg-1 僅獨佔
-# rtm_file_sink.py，其餘檔案屬別包/後續輪次；此處登記為既有債務基線，
-# 別包修好後這裡自然變少（本鎖刻意不對「清單有殘留」下斷言，避免
-# 並行輪次中他包修好自己的檔反而把本鎖打紅）。
-_KNOWN_MISSING_NEWLINE = {
-    "evolution/playbook_evolver.py",
-    "infra/adapters/file_preference_store.py",
-    "infra/adapters/local_kb_metric_store.py",
-    "infra/adapters/translation_learning_sink.py",
-    "infra/repositories/file_playbook_repository.py",
-    "infra/repositories/file_state_repository.py",
-    "plugins/playbook_persistence_plugin.py",
-    "tools/sdd_compile.py",
-    "utils/goal_progress.py",
-    "utils/knowledge_base.py",
-    "utils/logger.py",
-    "utils/notifier.py",
-    "utils/perf_baseline.py",
-    "utils/token_tracker.py",
-}
+def _mode_node(node: ast.Call, func: ast.expr) -> ast.expr | None:
+    for kw in node.keywords:
+        if kw.arg == "mode":
+            return kw.value
+    # builtin open()／io.open() 的 mode 是第 2 個位置引數；Path.open() 是第 1 個。
+    by_path = isinstance(func, ast.Attribute) and not (
+        isinstance(func.value, ast.Name) and func.value.id == "io"
+    )
+    idx = 0 if by_path else 1
+    return node.args[idx] if len(node.args) > idx else None
 
 
-def _write_mode_sites_without_newline() -> set[str]:
-    """AST 掃描：文字模式的寫入型 open()/Path.open()/write_text() 未帶 newline=。"""
-    hits: set[str] = set()
-    for py in _AUTOCLAUDE_ROOT.rglob("*.py"):
+def _scan_source(src: str, rel: str) -> tuple[list[str], int]:
+    """回 (缺 newline= 的文字模式寫入站點「相對路徑:行號」, mode 非字面量而跳過的站點數)。"""
+    hits: list[str] = []
+    nonliteral = 0
+    for node in ast.walk(ast.parse(src)):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+        if name == "open":
+            mode = _mode_node(node, func)
+            if mode is None:  # 缺省 mode＝讀取
+                continue
+            if not (isinstance(mode, ast.Constant) and isinstance(mode.value, str)):
+                nonliteral += 1
+                continue
+            if "b" in mode.value or not any(c in mode.value for c in "wax+"):
+                continue
+        elif name != "write_text":
+            continue
+        if not any(kw.arg == "newline" for kw in node.keywords):
+            hits.append(f"{rel}:{node.lineno}")
+    return hits, nonliteral
+
+
+def _text_write_sites_without_newline() -> tuple[list[str], int]:
+    hits: list[str] = []
+    nonliteral = 0
+    for py in sorted(_AUTOCLAUDE_ROOT.rglob("*.py")):
         if "__pycache__" in py.parts:
             continue
-        tree = ast.parse(py.read_text(encoding="utf-8"), filename=str(py))
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
-                continue
-            func = node.func
-            name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
-            if name not in ("open", "write_text"):
-                continue
-            if any(kw.arg == "newline" for kw in node.keywords):
-                continue
-            if name == "open" and not _is_text_write_mode(node, func):
-                continue
-            hits.add(py.relative_to(_AUTOCLAUDE_ROOT).as_posix())
-    return hits
-
-
-def _is_text_write_mode(node: ast.Call, func: ast.expr) -> bool:
-    # builtin open() 的 mode 是第 2 個位置引數；Path.open() 是第 1 個。
-    idx = 1 if isinstance(func, ast.Name) else 0
-    mode = "r"
-    if len(node.args) > idx and isinstance(node.args[idx], ast.Constant):
-        mode = node.args[idx].value
-    for kw in node.keywords:
-        if kw.arg == "mode" and isinstance(kw.value, ast.Constant):
-            mode = kw.value.value
-    if not isinstance(mode, str) or "b" in mode:
-        return False
-    return any(c in mode for c in "wax+")
+        rel = py.relative_to(_AUTOCLAUDE_ROOT).as_posix()
+        h, n = _scan_source(py.read_text(encoding="utf-8"), rel)
+        hits += h
+        nonliteral += n
+    return hits, nonliteral
 
 
 def test_no_new_text_write_sites_without_explicit_newline():
-    found = _write_mode_sites_without_newline()
-    allowed = _KNOWN_MISSING_NEWLINE
-    assert found <= allowed, (
-        "新增未指定 newline= 的文字模式寫檔站點："
-        f"{sorted(found - allowed)}；Windows 上會靜默寫出 CRLF"
+    hits, nonliteral = _text_write_sites_without_newline()
+    print(f"[newline-lock] mode 非字面量而跳過的站點數＝{nonliteral}（只計數、不判紅）")
+    assert not hits, (
+        f"{len(hits)} 個文字模式寫檔站點未指定 newline=（Windows 上會靜默寫出 CRLF）："
+        f"{hits}；open 補 newline=\"\"、write_text 補 newline=\"\\n\""
     )
 
 
-@pytest.mark.parametrize("rel", sorted(_MUST_BE_CLEAN))
-def test_fixed_modules_stay_clean(rel):
-    assert rel not in _write_mode_sites_without_newline(), (
-        f"{rel} 的 newline= 被移除（R68 缺陷復發：docstring 承諾 LF、實作在 Windows 給 CRLF）"
+def test_scanner_has_teeth_on_synthetic_sources():
+    """鎖的自證：掃描器若瞎了（恆回空），上面那條就是恆綠的假鎖。"""
+    bad = (
+        "p.open('w', encoding='utf-8')\n"
+        "p.open(mode='a')\n"
+        "open(p, 'r+')\n"
+        "p.write_text('x')\n"
     )
+    ok = (
+        "p.open('w', encoding='utf-8', newline='')\n"
+        "p.write_text('x', newline='\\n')\n"
+        "p.open('wb')\n"
+        "open(p, 'rb')\n"
+        "open(p)\n"
+        "p.open(encoding='utf-8')\n"
+        "p.read_text()\n"
+    )
+    assert _scan_source(bad, "bad.py") == (["bad.py:1", "bad.py:2", "bad.py:3", "bad.py:4"], 0)
+    assert _scan_source(ok, "ok.py") == ([], 0)
+    assert _scan_source("m = 'w'\nopen(p, m)\np.open(m)\n", "nl.py") == ([], 2)
+    assert _scan_source("io.open(p, 'w')\n", "io.py") == (["io.py:1"], 0)
 
 
 def test_append_report_line_writes_lf_bytes(tmp_path):

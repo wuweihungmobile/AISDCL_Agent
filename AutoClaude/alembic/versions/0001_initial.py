@@ -18,8 +18,9 @@ depends_on = None
 
 # alembic 框架可選；若未安裝則 noop（提供降級路徑）
 try:
-    from alembic import op
     import sqlalchemy as sa
+
+    from alembic import op
     _alembic_available = True
 except ImportError:
     _alembic_available = False

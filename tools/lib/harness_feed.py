@@ -6,11 +6,22 @@ stdlib only（同 `tools/lib/endurance_env.py` 的既有慣例）：不 import
 `context_budget_guard`，一律由呼叫端注入（`guard` 參數）。理由同該檔既有的
 `_AUTOCOMPACT_KILL_ENVS` 說明——這裡只是「怎麼合併證據／怎麼印旁註」這個主題
 的家，不是第二個知道怎麼判定 window 的地方；也讓根層 hook 的零相依契約不必
-反過來 import 本檔。
+反過來 import 本檔。T3 後備（檔尾一節）另用同層 `quota_meter`／`quota_pace`／`quota_policy`
+（判讀原語，import 失敗時整節退化為「沒有後備」，不拖垮本檔其餘職責）。
 """
 from __future__ import annotations
 
+import json
+import os
+from datetime import datetime, timezone
 from pathlib import Path
+
+try:  # T3 後備用的判讀原語／取數器：不可達時後備只是缺席，不得成為 import 期故障源（同 quota_gate）
+    import quota_meter
+    import quota_pace
+    import quota_policy
+except Exception:  # noqa: BLE001
+    quota_meter = quota_pace = quota_policy = None  # type: ignore[assignment]
 
 #: DEF-200-408：差值非 0 最常見的成因是 feed 與逐字稿**各自獨立落盤**的時序差——status line
 #: 先把新一則的 usage 寫進 feed，逐字稿那一則 assistant 記錄還沒寫完，下一次呼叫即歸零
@@ -233,3 +244,105 @@ def start_model_of(payload: dict, transcript: Path | None, guard) -> str | None:
     if transcript.is_file():
         return active_model_of(transcript, guard)
     return _feed_model_family(transcript, guard)
+
+
+# ───────── T3（PRD §4.1.1）：statusLine 回寫的 `rate_limits` ＝ 端點（T5）失效時的零 token 後備
+#: feed 目錄環境變數：與寫入端 `tools/statusline_context_feed.FEED_DIR_ENV`、兩層守衛同名。
+FEED_DIR_ENV = "AUTOSDD_CONTEXT_FEED_DIR"
+#: mtime 篩候選時對 TTL 的寬容秒數（檔案 mtime 與 feed 內 `ts` 各自落盤，差次秒～數秒）。
+_MTIME_SLACK_SECONDS = 60
+
+
+def feed_dir(environ) -> Path | None:
+    """T3 後備讀 feed 的目錄；`None`＝此環境不讀 feed。明示 `AUTOSDD_CONTEXT_FEED_DIR` 優先；
+    否則 quota 快取目錄被改道（沙箱／測試）時回 `None`——真實家目錄的 feed 不屬於那個沙箱
+    （開發機上的真 session 會漏進測試）。預設同寫入端：`~/.autosdd/context_feed`。"""
+    if base := environ.get(FEED_DIR_ENV):
+        return Path(base)
+    if quota_meter is None or environ.get(quota_meter.CACHE_DIR_ENV):
+        return None
+    return Path(os.path.expanduser("~")) / ".autosdd" / "context_feed"
+
+
+def _reset_iso(value: object) -> str | None:
+    """`resets_at` → ISO 8601 字串：官方給 epoch 秒（數字）⇒ 轉 UTC aware；字串原樣；餘 None。"""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        try:
+            return datetime.fromtimestamp(value, timezone.utc).isoformat()  # noqa: UP017 — 3.9 可載入
+        except (OverflowError, OSError, ValueError):
+            return None
+    return value if isinstance(value, str) and value.strip() else None
+
+
+def rate_limits_reading(feed_doc: dict, now: datetime, ttl_seconds: float) -> dict | None:
+    """feed 的 `rate_limits` ⇒ 與 `quota_meter.read_cache()` 同形的 `{axes, measured_at, source}`。
+
+    `None`＝沒有可用後備：無 `rate_limits`、`ts` 解不出／無 offset／距 `now` 超過 `ttl_seconds`
+    （呼叫端傳 quota 快取 TTL，本檔不持數字），或沒有任何可用視窗。鍵名動態列舉、不猜（schema 在長，
+    同 `quota_meter` 紀律）：值是 dict 且帶 `used_percentage`（官方契約 0..100）或 `utilization`
+    （0..1，stream-json 通道形）的視窗成一軸、`kind`＝鍵名，單位一律走 `quota_meter.normalize_pct`。
+    `resets_at` 轉 ISO 字串（見 `_reset_iso`）；已過去的視窗（寫入後翻頁）整窗略過——它描述死視窗。
+    `now` 必須 aware。
+    """
+    rate = feed_doc.get("rate_limits") if isinstance(feed_doc, dict) else None
+    if quota_meter is None or quota_pace is None or not isinstance(rate, dict):
+        return None
+    try:
+        taken = datetime.fromisoformat(str(feed_doc.get("ts")))
+    except ValueError:
+        return None
+    if taken.tzinfo is None or (now - taken).total_seconds() > ttl_seconds:
+        return None
+    axes = []
+    for kind, win in rate.items():
+        win = win if isinstance(win, dict) else {}
+        pct = quota_meter.normalize_pct(win.get("used_percentage"), quota_meter.SCALE_PERCENT)
+        if pct is None:
+            pct = quota_meter.normalize_pct(win.get("utilization"), quota_meter.SCALE_FRACTION)
+        reset = _reset_iso(win.get("resets_at"))
+        dead = quota_pace.expired(quota_pace.expiry_of(reset, now, taken.isoformat())[1])
+        if pct is not None and not dead:
+            axes.append({"kind": str(kind), "pct": pct, "resets_at": reset, "group": None,
+                         "is_active": None, "severity": None, "via": "statusline"})
+    return ({"axes": axes, "measured_at": taken.isoformat(timespec="seconds"),
+             "source": "statusline"} if axes else None)
+
+
+def latest_rate_limits(now: datetime, ttl_seconds: float, environ=None) -> dict | None:
+    """feed 目錄下最新鮮的 `rate_limits` 讀數（帳號層級額度，與哪個 session 寫的無關）；無則 None。
+    先以檔案 mtime 篩出 TTL 內的候選（目錄每個 session 一檔、會累積，不逐檔解 JSON），
+    再以 `ts` 取最新。
+    """
+    root = feed_dir(os.environ if environ is None else environ)
+    readings = []
+    try:
+        for path in (root.glob("*.json") if root else ()):
+            if now.timestamp() - path.stat().st_mtime > ttl_seconds + _MTIME_SLACK_SECONDS:
+                continue
+            try:
+                readings.append(rate_limits_reading(
+                    json.loads(path.read_text(encoding="utf-8")), now, ttl_seconds))
+            except (OSError, ValueError):
+                continue
+    except OSError:
+        return None
+    return max((r for r in readings if r), default=None,
+               key=lambda r: datetime.fromisoformat(r["measured_at"]))
+
+
+def statusline_state(fallback, now: datetime, ttl_seconds: float, environ=None):
+    """端點（T5）給不出讀數時的零 token 後備：statusLine 回寫的 `rate_limits` ⇒ `QuotaState`
+    （`source="statusline"`、`reason="statusline-fallback"`）；沒有可用後備就原樣回 `fallback`。
+
+    🔴 只在端點**補量之後**仍無讀數才會被問（`quota_gate.settled_quota()`）：T3 只有 five_hour／
+    seven_day 兩軸，看不到 spend／extra_usage 與模型分軌軸（PRD §4.1.1 T5 升格依據 (2)），不得在端點
+    讀得到時蓋過它。
+    """
+    reading = latest_rate_limits(now, ttl_seconds, environ)
+    if reading is None or quota_policy is None:
+        return fallback
+    axes = tuple(quota_policy.Axis(a["kind"], a["pct"], a["resets_at"], a["group"],
+                                   a["is_active"], a["severity"], a["via"])
+                 for a in reading["axes"])
+    return quota_policy.QuotaState(axes, reading["measured_at"], reading["source"],
+                                   "statusline-fallback")

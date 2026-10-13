@@ -21,7 +21,9 @@ from tools.correction_loop_verify import parse_correction_evidence
 
 # --- 合成 log 片段（對齊 kernel.py:255-258 marker 與 main.py:140 結果行）---------------
 
-_CORRECTION_MARKER = "2026-06-27 10:00:01 [INFO] autoclaude: === STATE: CORRECTION | step=S02 attempt=2 ==="
+_CORRECTION_MARKER = (
+    "2026-06-27 10:00:01 [INFO] autoclaude: === STATE: CORRECTION | step=S02 attempt=2 ==="
+)
 _RESULT_SUCCESS = (
     "2026-06-27 10:00:09 [INFO] autoclaude: Playbook 結束 | "
     "KernelResult(success=True, completed_steps=2, total_steps=2, escalated=False)"
@@ -51,7 +53,8 @@ def test_parse_correction_evidence_counts_multiple_markers() -> None:
 
 
 def test_parse_correction_evidence_detects_escalation() -> None:
-    """RTM-87-3 誠實兩態：達 max_retries 誠實 escalate（success=False / escalated=True），不虛報成功。"""
+    """RTM-87-3 誠實兩態：達 max_retries 誠實 escalate（success=False / escalated=True），
+    不虛報成功。"""
     log = "\n".join([_CORRECTION_MARKER, _CORRECTION_MARKER, _RESULT_FAIL_ESCALATED])
     ev = parse_correction_evidence(log)
     assert ev["correction_count"] == 2
@@ -123,7 +126,8 @@ def _get_stats(port: int) -> dict:
 
 
 def test_mock_server_stats_counts_posts() -> None:
-    """RTM-87-2：/stats.post_count 隨 POST 累計，decision_types 記錄型別（Brain 端互動客觀觀測）。"""
+    """RTM-87-2：/stats.post_count 隨 POST 累計，decision_types 記錄型別
+    （Brain 端互動客觀觀測）。"""
     import tools.mock_brain_server as mbs
 
     # 重置模組級計數，避免與其他測試的同程序 POST 串擾（顯式隔離）。

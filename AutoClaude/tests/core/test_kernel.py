@@ -15,13 +15,10 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
-
-import pytest
+import re as _re
 
 from autoclaude.core.event_bus import EventBus
 from autoclaude.core.hookspec import (
-    HookContext,
     KernelPhase,
     PromptInjectionResult,
     ResourceRequest,
@@ -30,6 +27,7 @@ from autoclaude.core.hookspec import (
 from autoclaude.core.kernel import PlaybookKernel
 from autoclaude.core.kernel_state import KernelResult
 from autoclaude.core.ports.executor import ExecutionOutput
+from autoclaude.models.decision import CorrectionDecision
 from autoclaude.models.playbook import GlobalInvariants, Playbook, PlaybookTask
 
 
@@ -51,8 +49,8 @@ class FakeExecutor:
 
 
 class FakeEvaluator:
-    def __init__(self, fails_for_steps: Optional[list[str]] = None,
-                 fail_count_for: Optional[dict[str, int]] = None):
+    def __init__(self, fails_for_steps: list[str] | None = None,
+                 fail_count_for: dict[str, int] | None = None):
         # fail_count_for: {step_id: 連續失敗次數，達到後就成功}
         self._fails = set(fails_for_steps or [])
         self._fail_counts = dict(fail_count_for or {})
@@ -92,7 +90,7 @@ def _pb(*tasks: PlaybookTask, max_retries=2) -> Playbook:
     )
 
 
-def _t(step_id: str, regex: Optional[str] = None) -> PlaybookTask:
+def _t(step_id: str, regex: str | None = None) -> PlaybookTask:
     return PlaybookTask(
         step_id=step_id, name=f"step {step_id}", prompt=f"prompt-{step_id}",
         expected_output_regex=regex,
@@ -147,8 +145,10 @@ class TestKernelEscalation:
 class TestKernelPreRunVeto:
     def test_pre_run_veto_short_circuits(self):
         bus = EventBus()
-        spy = _SpyPlugin("blocker", 5, [KernelPhase.PRE_RUN],
-                        result_factory=lambda ctx: VetoResult(contributor="blocker", reason="forbid"))
+        spy = _SpyPlugin(
+            "blocker", 5, [KernelPhase.PRE_RUN],
+            result_factory=lambda ctx: VetoResult(contributor="blocker", reason="forbid"),
+        )
         bus.register(spy)
         kernel = PlaybookKernel(FakeExecutor(), FakeEvaluator(), bus=bus)
         result = kernel.run(_pb(_t("T01")))
@@ -276,13 +276,9 @@ class TestKernelEmptyPlaybook:
 # improving_88 W-88-1 / DEF-87-001：self-correction × expected_output_regex 閘交互
 # 掌舵者裁示選項 A——套用 Brain CORRECTION 時 Kernel 確定性保留 regex 輸出契約。
 # ──────────────────────────────────────────────
-import re as _re
-
-from autoclaude.models.decision import CorrectionDecision
-
-
 class _EchoExecutor:
-    """回傳收到的 full_prompt 本身（模擬 Claude 完全照 prompt 輸出，使 prompt 內容直達 evaluator）。"""
+    """回傳收到的 full_prompt 本身（模擬 Claude 完全照 prompt 輸出，使 prompt 內容直達
+    evaluator）。"""
     def __init__(self):
         self.calls: list[str] = []
 
@@ -294,7 +290,7 @@ class _EchoExecutor:
 class _RegexGateEvaluator:
     """模擬 shell_evaluator 雙閘：先讓 evaluator 初次失敗（觸發 correction），
     之後僅當 output 含 expected_output_regex 才算過（regex 閘）。"""
-    def __init__(self, fail_first_for: Optional[dict[str, int]] = None):
+    def __init__(self, fail_first_for: dict[str, int] | None = None):
         self._remaining = dict(fail_first_for or {})
 
     def evaluate(self, task, output):
@@ -324,7 +320,8 @@ class TestKernelCorrectionPreservesRegex:
         """RTM-88-1：同掛 regex+evaluator 的 step，Brain 丟 keyword 的修正下仍能收斂成功。"""
         brain = _DropKeywordBrain()
         ex = _EchoExecutor()
-        ev = _RegexGateEvaluator(fail_first_for={"T01": 1})  # 第 1 次 evaluator 失敗 → 觸發 correction
+        # 第 1 次 evaluator 失敗 → 觸發 correction
+        ev = _RegexGateEvaluator(fail_first_for={"T01": 1})
         kernel = PlaybookKernel(ex, ev, brain=brain)
         # regex 用純 keyword（字面即自我匹配）：echo executor 不解釋 regex，故以「pattern 字串
         # 回填進 prompt → echo 回 output → re.search 命中」模擬真 Claude 讀懂約束後產出匹配輸出。

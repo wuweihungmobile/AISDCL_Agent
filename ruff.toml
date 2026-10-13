@@ -1,0 +1,28 @@
+# monorepo **根**的 ruff 設定——只做 `extend-exclude`，**不選任何規則、不改 line-length**。
+#
+# 為何有這支檔（DEF-101-018 的解鎖條件）：在 repo 根跑 `ruff check .` 必須印
+# `All checks passed!`。凍結版 `AISDLC_SDD/AISDLC_SDD_v0.01`～v0.29 合計約 2800 筆
+# ruff 出廠預設規則（E4／E7／E9／F）的命中，而那些目錄**一個位元組都不能改**——掌舵者裁決：
+# AISDLC_SDD 只有 LATEST 可原地改；v0.01 是 ci-gate 凍結基線，其後到 LATEST 之間的
+# 中間歷史版皆為已凍結快照（見 AISDLC_SDD/CLAUDE.md〈版本狀態〉）。結構上修不了的存量
+# 只能移出掃描面。這是如實登記「凍結快照不是活碼」，**不是放水**：LATEST 與未來版留在
+# 掃描面，照出廠預設規則一筆不豁免。
+#
+# 🔴 與 `tools/ruff.toml` 檔頭〈為何不放在 repo 根而放在 tools/〉的關係（不違反那段理由）：
+# 那段理由是「放根層會讓 AISDLC_SDD 一夜之間被納管、產生大批既有債紅燈，那是另一個授權面
+# 的決定」。本檔 (a) 不 select 任何規則——AISDLC_SDD 仍走 ruff 出廠預設（E4／E7／E9／F，
+# 不含 E501），並沒有被換上 `E,F,I,UP,W` 規則集；(b) 只**縮小**掃描面（排除凍結版），
+# 不擴大它；(c) 不影響既有巢狀設定——ruff 由每個檔往上找**最近**的設定檔，`tools/`、
+# `.claude/`（extend tools）、`AutoClaude/pyproject.toml` 各自的設定照舊生效（加本檔前後，
+# 三組 `ruff check <目錄> --statistics` 逐字相同）。
+#
+# 🔴 LATEST 是哪一版**不寫死在這裡**——一律現查 `python AISDLC_SDD/scripts/sdd_version.py`。
+# 下列樣式必須恰好覆蓋「LATEST 以外的所有版本目錄」：LATEST 前進（Copy-on-Evolve 開新版）
+# 時，上一個 LATEST 變成凍結版，要把它補進這份清單。機械鎖：
+# `AISDLC_SDD/scripts/tests/test_ruff_root_config_excludes_only_frozen.py`
+# （LATEST 被排除、或任一凍結版沒被排除，皆紅）。
+extend-exclude = [
+    "AISDLC_SDD/AISDLC_SDD_v0.0*",
+    "AISDLC_SDD/AISDLC_SDD_v0.1*",
+    "AISDLC_SDD/AISDLC_SDD_v0.2*",
+]

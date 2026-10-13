@@ -28,6 +28,8 @@
 # 為何不放在 repo 根而放在 `tools/`：放根層會讓 `AISDLC_SDD/`（今日零 ruff 設定、零 ruff
 # 閘門）一夜之間被納管並產生大批既有債紅燈，那是另一個授權面的決定。本檔的射程刻意
 # 只到根層護欄層本身。
+#   R213 補記：repo 根另有一支 ruff.toml（只做 extend-exclude 排除凍結版、不選規則），LATEST 自此在
+#   `ruff check .` 掃描面（出廠預設規則）；本檔射程不變。執行者＝pre-push 第 ④ 段與 root-infra-ci 第 16 道。
 line-length = 100
 target-version = "py311"
 

@@ -168,7 +168,7 @@ SPECIAL_FILES: dict[str, int] = {
     # SD_09 Pre-W0 audit P0-06：補長文件預算（Migration SOP / Sprint history）
     "docs/08_deployment/Production_Migration_SOP.md": 800,
     "docs/05_development/sprint_history.md": 2000,
-    "../tools/dev_start.py": 1952,
+    "../tools/dev_start.py": 1411,
     "../tools/check_script_parity.py": 1618,
     "../tools/archive_defect_log.py": 1507,
     "../tools/check_defect_log_crossref.py": 1479,
@@ -191,7 +191,9 @@ SPECIAL_FILES: dict[str, int] = {
     # Evidence.md〈第八輪〉），①②各為 1 行不可再壓縮的真實邏輯（條件判斷／print
     # 呼叫本身），確認無法在不刪除已驗證功能或改動無關程式碼的前提下再省，
     # 淨增 +2 行（775→777）。
-    "../tools/run_root_unittests.py": 777,
+    # DEF-101-701：R213 史料搬遷後重釘 777→765  round-label-ok
+    # （只准往下；現值 763、留 2 行 headroom 解該債鎖）
+    "../tools/run_root_unittests.py": 765,
     "../.claude/hooks/context_budget_guard.py": 1089,
     # commit fab2d0e：runtime_carrier_verdict() 誤判修復。已抽出可抽的部分
     # （_SPAWN_FAILURE_RE／is_spawn_failure → tools/lib/spawn_failure.py，先例：

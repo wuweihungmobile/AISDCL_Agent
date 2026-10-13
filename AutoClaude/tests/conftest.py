@@ -797,6 +797,21 @@ def _hermetic_permission_bypass_flag(monkeypatch):
 
 
 # ──────────────────────────────────────────────────────────────
+# 同家族（ARCH-01）：操作者殼層 export 的 `AUTOCLAUDE_EXTERNAL_RESUME_CMD` 不得漏進測試
+# ──────────────────────────────────────────────────────────────
+# 引擎拒絕長睡（`external_resume_required`）時會呼叫該變數指的外部續跑指令；漏進測試＝每一支走到
+# 拒絕路徑的測試都會**真的掛一個排程**（不只結果被機器決定，還有副作用）。需要驗交棒的測試在測試內
+# 自己 patch.dict 設值，它們在本 fixture 之後才施作，照舊生效。
+# 鎖（含 `--noconftest` 對照組）：tests/core/test_auto_resume_external_resume_cmd.py::
+# TestTheOperatorsShellVariableNeverLeaksIntoTheTestRun。
+@pytest.fixture(autouse=True)
+def _hermetic_external_resume_cmd(monkeypatch):
+    from autoclaude.core.services.external_resume import EXTERNAL_RESUME_CMD_ENV
+
+    monkeypatch.delenv(EXTERNAL_RESUME_CMD_ENV, raising=False)
+
+
+# ──────────────────────────────────────────────────────────────
 # B1（DEF-200-274 系列後續）：接 根層 tools/lib/cpu_budget.py 的實體核心預算
 # ──────────────────────────────────────────────────────────────
 # 立案：本檔 `pyproject.toml` 的 `addopts` 對任何呼叫端都帶 `-n auto`，而 xdist 內建的

@@ -20,7 +20,6 @@ from autoclaude.core.event_bus import EventBus
 from autoclaude.core.hookspec import (
     HookContext,
     HookContractViolation,
-    IHook,
     KernelPhase,
     PromptInjectionResult,
     ScheduleResumeResult,
@@ -117,7 +116,9 @@ class TestRecordWakeAndEmit:
     def test_halt_kind_increments_halt_counter(self):
         m = AutoResumeMetrics()
         bus = EventBus()
-        record_wake_and_emit(m, bus, kind="halt", scheduled_at="2026-01-01T00:00:00", wait_secs=12.5)
+        record_wake_and_emit(
+            m, bus, kind="halt", scheduled_at="2026-01-01T00:00:00", wait_secs=12.5
+        )
         assert m.total_wakes == 1
         assert m.halt_resumes == 1
         assert m.evolution_restarts == 0

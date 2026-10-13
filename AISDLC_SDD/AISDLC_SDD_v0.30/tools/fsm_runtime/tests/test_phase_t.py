@@ -134,7 +134,8 @@ def test_operator_genesis_round_k_truncation():
     """Rule 9.32.4 反 big-bang：一輪至多 K_op 個，其餘順延。"""
     cands = OG.enumerate_genesis_operators(budget=30)
     scores = {cands[0].name: 0.5, cands[1].name: 0.4, cands[2].name: 0.3}
-    ev = lambda o: scores.get(o.name, 0.0)
+    def ev(o):
+        return scores.get(o.name, 0.0)
     rnd = OG.operator_genesis_round(ev, candidates=cands, k=1)
     assert len(rnd.selected) == 1
     assert rnd.selected[0].operator.name == cands[0].name   # 最高 necessity
@@ -381,7 +382,8 @@ def test_adopt_operator_happy_path(tmp_path):
 def _accepted_operator_round(k=1):
     cands = OG.enumerate_genesis_operators(budget=30)
     scores = {cands[0].name: 0.5, cands[1].name: 0.4, cands[2].name: 0.3}
-    ev = lambda o: scores.get(o.name, 0.0)
+    def ev(o):
+        return scores.get(o.name, 0.0)
     return OG.operator_genesis_round(ev, candidates=cands, k=k)
 
 

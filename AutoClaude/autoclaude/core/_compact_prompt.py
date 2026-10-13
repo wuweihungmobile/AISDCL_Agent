@@ -17,15 +17,15 @@ plugin→core 合法。``CompactFailureState``/``process_compact_result``（plug
 """
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 
 def build_compact_prompt(
     *,
-    task: Optional[Any] = None,
+    task: Any | None = None,
     attempt: int = 0,
     failure_summary: str = "",
-    global_goal: Optional[str] = None,
+    global_goal: str | None = None,
     global_goal_anchor_chars: int = 200,
 ) -> str:
     """SD_05 W2-1d（improving_80 上移至 core）：compact prompt 構造（純函式，無 IO）。

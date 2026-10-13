@@ -86,8 +86,10 @@ class TestAdvisoryLockConcurrent:
             # 第二 conn 嘗試取相同 lock_key → False
             assert try_acquire_import_lock(c2, "concurrent-test-A") is False
         finally:
-            c1.rollback(); c1.close()
-            c2.rollback(); c2.close()
+            c1.rollback()
+            c1.close()
+            c2.rollback()
+            c2.close()
 
     def test_lock_released_after_commit(self):
         c1 = _new_conn()
@@ -99,7 +101,8 @@ class TestAdvisoryLockConcurrent:
             assert try_acquire_import_lock(c2, "concurrent-test-B") is True
             c2.commit()
         finally:
-            c1.close(); c2.close()
+            c1.close()
+            c2.close()
 
     def test_different_playbook_ids_independent(self):
         c1 = _new_conn()
@@ -108,15 +111,18 @@ class TestAdvisoryLockConcurrent:
             assert try_acquire_import_lock(c1, "concurrent-test-C")
             assert try_acquire_import_lock(c2, "concurrent-test-D") is True
         finally:
-            c1.rollback(); c1.close()
-            c2.rollback(); c2.close()
+            c1.rollback()
+            c1.close()
+            c2.rollback()
+            c2.close()
 
     def test_has_active_import_for_no_job(self):
         c = _new_conn()
         try:
             assert has_active_import_for(c, "no-such-playbook-zzz") is False
         finally:
-            c.rollback(); c.close()
+            c.rollback()
+            c.close()
 
     def test_import_lock_scope_db(self):
         c = _new_conn()

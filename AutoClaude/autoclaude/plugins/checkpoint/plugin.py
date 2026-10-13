@@ -21,24 +21,24 @@ from __future__ import annotations
 
 import logging
 import warnings
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 from ...core.event_bus import EventBus
 from ...core.hookspec import HookContext, IHookResult, KernelPhase
 from ...utils.checkpoint_manager import CheckpointManager, PlaybookCheckpoint
-
+from ._escalation import save_escalation_dump_impl
 from ._evolution import save_evolution_resume_checkpoint_impl
 from ._interrupt import save_interrupt_checkpoint_impl
-from ._token_halt import handle_token_halt_impl
-from ._escalation import save_escalation_dump_impl
 from ._phase_handlers import (
+    on_escalation_dump_request,
+    on_persistence_request,
     on_pre_run,
+    save_evolution,
     save_interrupt,
     save_token_halt,
-    save_evolution,
-    on_persistence_request,
-    on_escalation_dump_request,
 )
+from ._token_halt import handle_token_halt_impl
 
 logger = logging.getLogger("autoclaude.plugins.checkpoint")
 
@@ -50,9 +50,9 @@ class CheckpointPlugin:
 
     def __init__(
         self,
-        checkpoint_manager: Optional[CheckpointManager] = None,
+        checkpoint_manager: CheckpointManager | None = None,
         checkpoint_dir: str = "checkpoints",
-        event_bus: Optional[EventBus] = None,
+        event_bus: EventBus | None = None,
         **deprecated_kwargs: Any,
     ):
         # SD_05 W6 三方審查 SD-M2 修：保留 deprecated alias 過渡期，避免下游 hard break。
@@ -73,7 +73,7 @@ class CheckpointPlugin:
                 f"{list(deprecated_kwargs.keys())}"
             )
         self._mgr = checkpoint_manager or CheckpointManager(checkpoint_dir)
-        self._bus: Optional[EventBus] = event_bus
+        self._bus: EventBus | None = event_bus
         # SD_05 W3 Arch-C1 / SD-C1：記錄最近一次 save_escalation_dump 真實路徑，
         # 供 on_escalation_dump_request 回傳 EscalationDumpedResult.dump_path 使用。
         self._last_dump_path: str = ""
@@ -99,7 +99,7 @@ class CheckpointPlugin:
             KernelPhase.ON_ESCALATION_DUMP_REQUEST,
         ]
 
-    def on_event(self, ctx: HookContext) -> Optional[IHookResult]:
+    def on_event(self, ctx: HookContext) -> IHookResult | None:
         phase = ctx.phase
         if phase == KernelPhase.PRE_RUN:
             on_pre_run(self, ctx)
@@ -139,7 +139,7 @@ class CheckpointPlugin:
     # ──────────────────────────────────────────────
     # 公開 API（W4-T17 既有 3 + W3 新增 4 = 7 個）
     # ──────────────────────────────────────────────
-    def load_checkpoint(self, playbook_path: str) -> Optional[PlaybookCheckpoint]:
+    def load_checkpoint(self, playbook_path: str) -> PlaybookCheckpoint | None:
         return self._mgr.load(playbook_path)
 
     def clear_checkpoint(self, playbook_path: str) -> None:
@@ -157,8 +157,8 @@ class CheckpointPlugin:
         playbook,
         step_log: list,
         completed_step_ids,
-        step_evolution_counter: Optional[dict] = None,
-        alert_ladder: Optional[dict] = None,
+        step_evolution_counter: dict | None = None,
+        alert_ladder: dict | None = None,
     ) -> bool:
         return save_evolution_resume_checkpoint_impl(
             self, evolved_path, playbook, step_log,
@@ -179,14 +179,14 @@ class CheckpointPlugin:
         resume_delay_minutes: int,
         tracker=None,
         attempt: int = 0,
-        goto_counter: Optional[dict] = None,
-        inject_before_counter: Optional[dict] = None,
-        skip_to_counter: Optional[dict] = None,
-        completed_step_ids: Optional[set] = None,
-        step_evolution_counter: Optional[dict] = None,
-        alert_ladder: Optional[dict] = None,
-        notify_callback: Optional[Callable[[str, str], None]] = None,
-        token_logger_callback: Optional[Callable[..., None]] = None,
+        goto_counter: dict | None = None,
+        inject_before_counter: dict | None = None,
+        skip_to_counter: dict | None = None,
+        completed_step_ids: set | None = None,
+        step_evolution_counter: dict | None = None,
+        alert_ladder: dict | None = None,
+        notify_callback: Callable[[str, str], None] | None = None,
+        token_logger_callback: Callable[..., None] | None = None,
     ) -> PlaybookCheckpoint:
         return handle_token_halt_impl(
             self, playbook, playbook_path, task, step_idx, peak_token_pct,
@@ -207,12 +207,12 @@ class CheckpointPlugin:
         total: int,
         tracker=None,
         attempt: int = 0,
-        goto_counter: Optional[dict] = None,
-        inject_before_counter: Optional[dict] = None,
-        skip_to_counter: Optional[dict] = None,
-        completed_step_ids: Optional[list] = None,
-        step_evolution_counter: Optional[dict] = None,
-        alert_ladder: Optional[dict] = None,
+        goto_counter: dict | None = None,
+        inject_before_counter: dict | None = None,
+        skip_to_counter: dict | None = None,
+        completed_step_ids: list | None = None,
+        step_evolution_counter: dict | None = None,
+        alert_ladder: dict | None = None,
     ) -> None:
         return save_interrupt_checkpoint_impl(
             self, playbook, playbook_path, task, step_idx, step_log, total,
@@ -231,7 +231,7 @@ class CheckpointPlugin:
         checkpoint_dir: str,
         log_dir: str,
         human_hint: str = "",
-        notify_callback: Optional[Callable[..., None]] = None,
+        notify_callback: Callable[..., None] | None = None,
         topology_dashboard: str = "",
     ):
         return save_escalation_dump_impl(

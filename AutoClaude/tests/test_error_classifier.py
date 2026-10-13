@@ -1,6 +1,7 @@
 """ErrorClassifier 單元測試。"""
 import pytest
-from autoclaude.execution.error_classifier import ErrorClassifier, ErrorClass
+
+from autoclaude.execution.error_classifier import ErrorClass, ErrorClassifier
 
 
 @pytest.fixture
@@ -38,16 +39,28 @@ class TestErrorClassifierPatterns:
         assert clf.classify("TypeError: foo() takes 1 argument but 2 were given") == ErrorClass.TYPE
 
     def test_attribute_error(self, clf):
-        assert clf.classify("AttributeError: 'NoneType' object has no attribute 'x'") == ErrorClass.TYPE
+        assert (
+            clf.classify("AttributeError: 'NoneType' object has no attribute 'x'")
+            == ErrorClass.TYPE
+        )
 
     def test_file_not_found(self, clf):
-        assert clf.classify("FileNotFoundError: [Errno 2] No such file or directory") == ErrorClass.ENVIRONMENT
+        assert (
+            clf.classify("FileNotFoundError: [Errno 2] No such file or directory")
+            == ErrorClass.ENVIRONMENT
+        )
 
     def test_permission_error(self, clf):
-        assert clf.classify("PermissionError: [Errno 13] Permission denied") == ErrorClass.ENVIRONMENT
+        assert (
+            clf.classify("PermissionError: [Errno 13] Permission denied")
+            == ErrorClass.ENVIRONMENT
+        )
 
     def test_no_such_file(self, clf):
-        assert clf.classify("Error: No such file or directory: 'config.yaml'") == ErrorClass.ENVIRONMENT
+        assert (
+            clf.classify("Error: No such file or directory: 'config.yaml'")
+            == ErrorClass.ENVIRONMENT
+        )
 
     def test_timeout(self, clf):
         assert clf.classify("Timeout: command timed out after 120s") == ErrorClass.TIMEOUT

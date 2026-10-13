@@ -8,6 +8,13 @@
 # 轉呼叫核心 → 傳遞 exit code。
 set -u
 
+# DEF-101-702：zsh／sh 下 `${BASH_SOURCE[0]}` 未定義 ⇒ SCRIPT_DIR 解到呼叫端 cwd，後續 source／
+# 直譯器選擇全部找錯路徑並印出與事實相反的訊息。fail-loud 擋在最前面（`$BASH_VERSION` 在 zsh／sh 下為空）。
+if [ -z "${BASH_VERSION:-}" ]; then
+  echo "❌ 本腳本需以 bash 執行：bash <本腳本路徑>（zsh／sh 沒有 BASH_SOURCE，會把腳本目錄解錯）" >&2
+  exit 2
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # R43 Scan-B（DEF-101-353）：WindowsApps 空殼排除 guard（純函式定義，無副作用）。
