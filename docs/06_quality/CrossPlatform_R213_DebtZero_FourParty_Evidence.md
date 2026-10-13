@@ -245,6 +245,7 @@ auto mode 分類器對 `.claude/**` 的寫入一律 [Self-Modification] 拒絕�
 ### 十-9 閘門現況與 Windows 親驗清單（收尾時以實跑回填）
 
 - 收尾順序：`git add -A`（新檔 14 支）→ `sync_onboarding_baselines.py --write` → 根層全套（M6 census 真值）→ `skip_id_ledger.json` 落款 → `clean_venv_carrier.py`（表②指紋）→ 根層全套 rc=0 → commit／push → `gh run list` 對帳（本節回填）。
+- 雲端對帳（commit 41d9b4ef，push 2026-10-13 19:5x）：shellcheck-ci／aisdlc-sdd-ci／root-infra-ci／macos-compat-ci／windows-compat-ci／Mutation On-Change（token_guard）6 支 success；**AutoClaude CI failure**（run 38373658567：`tests/core/test_kernel_limit_retry_prd8_1.py::test_the_backoff_sleeps_in_slices_so_esc_f12_can_cut_it_short` 斷言 `slept.call_count == 1` 得 230——Linux runner 上另有以 `time.sleep(0.x)` 輪詢的等待把 mock 計數灌滿，mac 本機含 CI env／TZ=UTC 皆綠＝CI 專屬假紅家族）⇒ 後續 commit 把斷言改為只數 ≥1 秒的退避切片（意圖不變）。同一 run 印出 `[skip census] AutoClaude/tests@linux+nopg+solo+nopgext 共 224 支…untagged=164` 與 DEV-H 容器登記值逐格相同＝linux 剖面雲端首跑驗收通過。
 - Windows 真機親驗（沿上一輪未變＋本輪新增）：(1) `git pull --ff-only` 後 `python tools/lib/quota_policy.py --env-doctor` 看 `RESULT: PASS`；(2) `powershell -NoProfile -ExecutionPolicy Bypass -File tools\windows_smoke_local.ps1` 預期 `PASS=13 FAIL=0` 且含 PASS 行「AISDLC_SDD LATEST 四支 .sh 可啟動性」（DEV-F 新 step 未在 Windows 實跑）；(3) dev_start 拆分後的 Windows bootstrap 路徑（`python tools/dev_start.py`）；(4) `tools/lib/engine_resume_job.py` schtasks 分支（DEV-I 全未實跑）；(5) `tools/lib/quota_burndown.py --status` 預期 rc=1。
 - 守衛面三件：掌舵者第 3 次親跑 `apply_guard_face_three.py` 待做；PASS 後 PRD 三列 ⏸→✅、根 CLAUDE.md 總表一列、證據檔附錄 C 已預備。
 

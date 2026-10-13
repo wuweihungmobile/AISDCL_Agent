@@ -247,7 +247,10 @@ def test_the_backoff_sleeps_in_slices_so_esc_f12_can_cut_it_short(tmp_path, monk
         hk.triggered = True
     with patch("time.sleep", side_effect=_press_during_the_first_slice) as slept:
         result = kernel.run(_playbook())
-    assert slept.call_count == 1, "按鍵之後不得再睡第二片"
+    # 只數退避切片（≥1 秒）：Linux CI 上另有子行程輪詢以 time.sleep(0.x) 等待，
+    # 會把 call_count 灌到 230（R213 雲端首跑實況），那不是第二片退避。
+    slices = [c for c in slept.call_args_list if c.args and float(c.args[0]) >= 1.0]
+    assert len(slices) == 1, f"按鍵之後不得再睡第二片：{[c.args[0] for c in slices]}"
     assert result.escalated is True and "ESC+F12" in result.reason
     assert len(ex.calls) == 1, "被中斷後不得再重打一次"
 
