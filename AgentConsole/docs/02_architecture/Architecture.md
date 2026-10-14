@@ -1050,6 +1050,7 @@ CREATE INDEX idx_alerts_project_ack ON console.alerts(project_id, acknowledged);
 | L-6 | Bridge 無認證 | 只准 backend-net 可達；對 host 發布 8081 視為缺陷 |
 | L-7 | 審核閘以 pause 近似實現 | 閘點精度受 SSE 延遲與步驟時長影響（極短步驟可能晚一步）；每個閘點＝一次 SIGTERM＋重新 spawn，引擎重啟成本與 `--continue` 對話延續性須實測（V-4） |
 | L-8 | Docker 全棧下 `executionPath` 是 Bridge **容器內**的路徑 | 預設落在 `engine_workspace` 卷（`/workspace/` 之下）；要讓 Agent 改主機上的專案目錄，須另行 bind mount 並把掛載點加入 `BRIDGE_ALLOWED_PATH_ROOTS`；本機開發模式則直接是主機路徑（Windows 為含磁碟機代號的路徑，Bridge 以 `normcase` 比對）。UI 需提示兩種模式的寫法不同 |
+| L-9 | **argv 長度上限（平台相依）**：引擎把每步 prompt 以命令列參數傳給 claude——Linux 單一參數上限 128KiB（`MAX_ARG_STRLEN`），Windows 整條命令列 32,767 字元，macOS 無單參數上限；超過即 spawn 失敗、run 判 FAILED（agentconsole-ci run 38621708871 以 50,000 個中文字實證） | 後端 Phase 4 編 Playbook 時對每步 prompt 設上限（建議 ≤ 20,000 字元）並回 422；Bridge 測試已改用 12,000 字 |
 
 ### 12.2 待驗證項（誰在哪一波負責驗；結論須回寫本表）
 

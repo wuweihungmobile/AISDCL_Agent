@@ -122,7 +122,11 @@ def test_huge_log_lines_are_truncated_in_events_but_still_parsed(bridge, run_bod
 
     playbook = mock_playbook()
     playbook["tasks"] = playbook["tasks"][:2]
-    playbook["tasks"][0]["prompt"] = "請完成第一步 [INIT_DONE] " + "長" * 50_000
+    # 12,000 字＝遠超 MAX_LOG_LINE_CHARS（8,000）足以觸發截斷，且落在三個平台的命令列上限內：
+    # 引擎把 prompt 當 argv 傳給 claude——Linux 單一參數上限 128KiB（MAX_ARG_STRLEN；50,000 個
+    # 三位元組中文字＝150KB 會讓 execve 直接失敗，CI run 38621708871 實證）、Windows 整條
+    # 命令列 32,767 字元、macOS 無單參數限制。超長 prompt 的拒絕屬後端編 Playbook 時的責任。
+    playbook["tasks"][0]["prompt"] = "請完成第一步 [INIT_DONE] " + "長" * 12_000
     rid = bridge.post_run(run_body(playbook=playbook, delay="0.1")).json()["run_id"]
     final = bridge.wait_status(rid, TERMINAL)
     assert final["status"] == "COMPLETED"
