@@ -191,13 +191,19 @@ HALT_QUIESCE_SECONDS = 900
 
 
 def halt_verdict(halt_marker: dict | None, idle_seconds: float | None,
-                 now: datetime) -> dict | None:
+                 now: datetime, superseded_by: dict | None = None) -> dict | None:
     """halt 標記 → 既有 `arm_reset`／`probe`／`escalate` 判決（純函式，同本檔通篇紀律）。
 
     `None`＝標記不適用，呼叫端（`sentinel_decide`）落回既有的 idle-based 判定。
     標記失效＝**兌現時刻**（`reset_at + HALT_RESET_SKEW_SECONDS`）之後逐字稿仍有新活動 ⇒ session
     已自行續跑（人或前一次喚醒），不判定，否則哨兵會永遠卡在 `probe`；兌現時刻之前的活動（halt 後
     的收斂工作）不算。時刻已到而 session 在一個巡邏間隔內仍有活動 ⇒ 不叫醒（防雙窗），明說理由續巡。
+    DEF-200-532：`superseded_by`（`sentinel_lifecycle_arm.superseding_session` 的回傳）＝同專案另一
+    session 在標記之後已累積足夠活動（人已接手）⇒ `disarm`＋`clear_halt`，優先於其後的 `arm_reset`／
+    `patrol`／`probe`：人在另一個視窗持續工作時任何自動喚醒都是雙窗。但本 session 已在兌現時刻後自行
+    續跑的標記先失效（回 `None` 走 idle 判定）；他 session 接手只對仍有效的標記成立（真機 7c51b538：
+    標記早被它自己兌現後的活動判失效，不得再以「接手」拆它）。沒有 `reset_at` 的標記維持舊判準、不看
+    `superseded_by`。預設 `None` 時五個既有分支逐位元組同行為。
     """
     if not halt_marker:
         return None
@@ -213,6 +219,12 @@ def halt_verdict(halt_marker: dict | None, idle_seconds: float | None,
     fire_at = reset_at + timedelta(seconds=HALT_RESET_SKEW_SECONDS)
     if last is not None and last > fire_at.timestamp():
         return None
+    if superseded_by:
+        who, turns, span = (superseded_by[k] for k in ("sid", "turns", "span_seconds"))
+        return {"action": "disarm", "at": None, "clear_halt": True, "superseded_by": who,
+                "reason": f"halt 標記存在，但同專案另一 session {who[:8]} 於標記後已累積 "
+                          f"{turns} 回合／{span:.0f}s 活動 ⇒ 人已接手（或已有續跑），本 session "
+                          "不自動喚醒（防雙窗）；清 halt 標記、靜默解除"}
     if fire_at > now:
         return {"action": "arm_reset", "at": fire_at, "reset_at": reset_at,
                 "reset_source": "halt-marker",

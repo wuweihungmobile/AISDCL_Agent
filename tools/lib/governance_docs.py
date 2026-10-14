@@ -693,6 +693,8 @@ _GOVERNANCE_DOCS = (
     # R213 第四窗姊妹檔（DEF-101-587 體例）：三問零信任重驗＋乾淨樹 nightly  round-label-ok
     # 真跑＋兩鏡判決＋理論洞 W4-*；主檔已越 warn 線，只留一行指針。即刻登記。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R213_DebtZero_FourParty_W4.md",
+    # R213 第五窗姊妹檔：三問再重驗＋DEF-200-532 修復證據（哨兵接手判定）  round-label-ok
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R213_DebtZero_FourParty_W5.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/{CrossPlatform,Quota}_*.md`。這**不是**把具名

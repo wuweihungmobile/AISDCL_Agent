@@ -5,13 +5,11 @@
 CrossPlatform_R151_Guard_Prose_Migration.md〈test_wake_chain_halt_r278.py 模組 docstring〉節。
 
 本檔釘住的兩件事（各自紅→綠）：
-  INV-H1：`quota_gate.resolve_halt_transcript()` 在 payload 缺席時以
-          `CLAUDE_CODE_SESSION_ID`＋`project_transcript_dir()` 還原；
-          `quota_gate.quota_halt_actions()` 落一份持久 halt 標記，且「未武裝」訊息
-          不再對所有成因都印同一句話。
+  INV-H1：`quota_gate.resolve_halt_transcript()` 在 payload 缺席時以 `CLAUDE_CODE_SESSION_ID`＋
+          `project_transcript_dir()` 還原；`quota_gate.quota_halt_actions()` 落一份持久 halt 標記，
+          且「未武裝」訊息不再對所有成因都印同一句話。
   INV-H2：`session_resume_planner.sentinel_decide()` 認得 halt 標記，未過期時
-          `arm_reset`／已過期時 `probe`；標記過期（session 已自行續跑）不再誤觸。
-"""
+          `arm_reset`／已過期時 `probe`；標記過期（session 已自行續跑）不再誤觸。"""
 from __future__ import annotations
 
 import contextlib
@@ -67,8 +65,7 @@ def _pin_env_spec_off() -> None:
 
     DEF-200-354：ENV_SPEC 洩漏會讓 `quota_gate()` 提前 `return 0`，四支 HaltLatch／
     PrepareLatch 斷言落空；同模式見 `test_context_budget_guard.py._pin_sentinel_off`
-    （pin 從 ENV_SPEC 導出，不手抄）。
-    """
+    （pin 從 ENV_SPEC 導出，不手抄）。"""
     for spec in quota_policy.ENV_SPEC:
         if spec.name != guard.SENTINEL_OFF_ENV:
             os.environ.pop(spec.name, None)
@@ -113,9 +110,7 @@ class ResolveHaltTranscriptTest(unittest.TestCase):
     """INV-H1a：payload 缺 `transcript_path` 時，用環境變數＋slug 還原。"""
 
     def setUp(self) -> None:
-        import tempfile
-        self.tmp = Path(tempfile.mkdtemp(prefix="def278_"))
-        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
+        self.tmp = _cbg._tmpdir(self, "def278_")
 
     def test_payload_present_and_readable_wins(self) -> None:
         ts = self.tmp / "a.jsonl"
@@ -129,13 +124,10 @@ class ResolveHaltTranscriptTest(unittest.TestCase):
         # root 只用來算 slug、不必存在；刻意取短——slug 取自 root 全路徑，若用 tmp 底下的路徑，
         # 目錄樹長度會是 TEMP 長度的兩倍，在長 TEMP 的 Windows 上撞 MAX_PATH。
         root = Path(os.sep) / "proj-def278"
-        import re
         slug = re.sub(r"[^A-Za-z0-9]", "-", str(root))
-        patcher = unittest.mock.patch.dict(os.environ, {
+        self.enterContext(unittest.mock.patch.dict(os.environ, {
             "CLAUDE_CONFIG_DIR": str(self.tmp / "cfg"),
-            "CLAUDE_CODE_SESSION_ID": "sid-def278", "CLAUDE_PROJECT_DIR": str(root)})
-        patcher.start()
-        self.addCleanup(patcher.stop)
+            "CLAUDE_CODE_SESSION_ID": "sid-def278", "CLAUDE_PROJECT_DIR": str(root)}))
         proj = platform_utils.claude_home() / "projects" / slug
         self.assertTrue(proj.is_relative_to(self.tmp), f"{proj} 不在暫存樹內＝碰到真實家目錄")
         proj.mkdir(parents=True)
@@ -156,13 +148,8 @@ class HaltMarkerRoundTripTest(unittest.TestCase):
     """INV-H1c：落盤標記走 `endurance_env.trace_dir()` 這個 SSOT，讀寫成對。"""
 
     def setUp(self) -> None:
-        import tempfile
-        self.tmp = Path(tempfile.mkdtemp(prefix="def278_trace_"))
-        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
-        old = os.environ.get("AUTOSDD_TRACE_DIR")
-        os.environ["AUTOSDD_TRACE_DIR"] = str(self.tmp)
-        self.addCleanup(lambda: (os.environ.__setitem__("AUTOSDD_TRACE_DIR", old)
-                                 if old is not None else os.environ.pop("AUTOSDD_TRACE_DIR", None)))
+        self.tmp = _cbg._tmpdir(self, "def278_trace_")
+        self.enterContext(unittest.mock.patch.dict(os.environ, AUTOSDD_TRACE_DIR=str(self.tmp)))
 
     def test_written_marker_reads_back_verbatim(self) -> None:
         qg.write_halt_marker("sid-x", {"sid": "sid-x", "band": "halt",
@@ -174,24 +161,26 @@ class HaltMarkerRoundTripTest(unittest.TestCase):
     def test_unknown_sid_reads_back_none(self) -> None:
         self.assertIsNone(qg.read_halt_marker("no-such-sid"))
 
+    def test_clearing_removes_only_the_named_marker(self) -> None:
+        """DEF-200-532：`clear_halt_marker` 只刪指名那份；再清一次、空 sid 都回 False 且不誤刪。"""
+        for sid in ("sid-a", "sid-b"):
+            qg.write_halt_marker(sid, {"sid": sid})
+        self.assertTrue(sentinel_lifecycle.clear_halt_marker("sid-a"))
+        self.assertEqual([*map(qg.read_halt_marker, ("sid-a", "sid-b"))], [None, {"sid": "sid-b"}])
+        self.assertFalse(any(map(sentinel_lifecycle.clear_halt_marker, ("sid-a", ""))))
+
 
 class QuotaHaltActionsWritesMarkerAndNamesTheRealReasonTest(unittest.TestCase):
     """INV-H1b/c/e：halt 副作用要真的留下標記，且「未武裝」訊息要區分成因。"""
 
     def setUp(self) -> None:
-        import tempfile
-        self.tmp = Path(tempfile.mkdtemp(prefix="def278_act_"))
-        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
-        old = os.environ.get("AUTOSDD_TRACE_DIR")
-        os.environ["AUTOSDD_TRACE_DIR"] = str(self.tmp)
-        self.addCleanup(lambda: (os.environ.__setitem__("AUTOSDD_TRACE_DIR", old)
-                                 if old is not None else os.environ.pop("AUTOSDD_TRACE_DIR", None)))
+        self.tmp = _cbg._tmpdir(self, "def278_act_")
+        self.enterContext(unittest.mock.patch.dict(os.environ, AUTOSDD_TRACE_DIR=str(self.tmp)))
 
     def test_no_transcript_anywhere_writes_marker_and_names_the_cause(self) -> None:
         """紅端＝本場在未修碼上實跑重現的那個現場（見 repro_rc1.py）：
         修前 `act["plan"]==""`、訊息硬印「拿不到逐字稿路徑」，且**沒有任何持久標記**。
-        修後：標記落盤，且 `not_armed_reason` 存在並提到「不可得」。
-        """
+        修後：標記落盤，且 `not_armed_reason` 存在並提到「不可得」。"""
         old_env = dict(os.environ)
         os.environ.pop("CLAUDE_CODE_SESSION_ID", None)
         self.addCleanup(lambda: (os.environ.clear(), os.environ.update(old_env)))
@@ -212,8 +201,7 @@ class QuotaHaltActionsWritesMarkerAndNamesTheRealReasonTest(unittest.TestCase):
 
     def test_plan_writer_failure_gets_its_own_reason_not_a_generic_one(self) -> None:
         """情境二（見 repro_rc1.py 的第二次重現）：逐字稿明明存在，是 `plan_writer`
-        本身失敗——修前這裡也印「拿不到逐字稿路徑」（假話），修後訊息要點名真因。
-        """
+        本身失敗——修前這裡也印「拿不到逐字稿路徑」（假話），修後訊息要點名真因。"""
         ts = self.tmp / "real.jsonl"
         ts.write_text('{"type":"assistant"}\n', encoding="utf-8")
         decision = _decision(96.0, 600.0)
@@ -319,6 +307,80 @@ class HaltVerdictTest(unittest.TestCase):
     def test_the_halt_reset_skew_is_the_planner_reset_skew(self) -> None:
         self.assertEqual(quota_messages.HALT_RESET_SKEW_SECONDS, planner.RESET_SKEW_SECONDS)
 
+    def test_a_superseding_session_disarms_instead_of_arming(self) -> None:
+        """DEF-200-532：同專案另一 session 在標記後已累積足夠活動（人已接手）⇒ disarm＋清標記，
+        優先於 arm_reset；沒有對手時同一標記照舊 arm_reset（對照）。"""
+        now, peer = self._now(), {"sid": "abcdef12-0000", "turns": 30, "span_seconds": 900.0}
+        marker = {"at": now.isoformat(), "reset_at": (now + timedelta(seconds=600)).isoformat()}
+        self.assertEqual(qg.halt_verdict(marker, 10.0, now)["action"], "arm_reset")
+        verdict = qg.halt_verdict(marker, 10.0, now, superseded_by=peer)
+        self.assertEqual((verdict["action"], verdict["clear_halt"]), ("disarm", True))
+        self.assertEqual((verdict["at"], verdict["superseded_by"]), (None, peer["sid"]))
+        self.assertTrue("接手" in verdict["reason"] and "abcdef12" in verdict["reason"], verdict)
+
+    def test_a_superseding_session_disarms_instead_of_probing(self) -> None:
+        """同上，但 reset 已過且已靜止（本來 probe＝花錢探測）：人已接手時一毛錢都不該花。"""
+        now, peer = self._now(), {"sid": "abcdef12-0000", "turns": 30, "span_seconds": 900.0}
+        reset = now - timedelta(seconds=qg.HALT_RESET_SKEW_SECONDS + 60)
+        marker = {"at": (now - timedelta(seconds=1000)).isoformat(), "reset_at": reset.isoformat()}
+        self.assertEqual(qg.halt_verdict(marker, 1000.0, now)["action"], "probe")
+        self.assertEqual(qg.halt_verdict(marker, 1000.0, now, peer)["action"], "disarm")
+
+    def test_a_marker_the_session_itself_outlived_is_not_a_takeover(self) -> None:
+        """DEF-200-532 真機 7c51b538：兌現時刻後自己仍在寫＝標記已失效，接手只對有效標記成立。"""
+        now, peer = self._now(), {"sid": "abcdef12-0000", "turns": 30, "span_seconds": 900.0}
+        at = now - timedelta(seconds=1000)
+        marker = {"at": at.isoformat(), "reset_at": (at + timedelta(seconds=60)).isoformat()}
+        self.assertIsNone(qg.halt_verdict(marker, 5.0, now, peer), "兌現後自己仍在寫")
+        self.assertEqual(qg.halt_verdict(marker, 1000.0, now, peer)["action"], "disarm", "對照")
+
+
+class SupersedingSessionEvidenceTest(unittest.TestCase):
+    """DEF-200-532：`superseding_session` 沿用武裝門檻、只算標記之後、量不到一律 `None`。"""
+
+    def setUp(self) -> None:
+        self.dir, self.since = _cbg._tmpdir(self, "def532_"), datetime(2026, 10, 13, 1, tzinfo=UTC)
+        self.marker = {"at": self.since.isoformat()}
+
+    def _peer(self, sid: str, turns: int, *, step: float = 30.0, first: float = 120.0,
+              model: str = "m", under: str = "", mtime: float = 3600.0) -> Path:
+        """標記後 `first` 秒起每 `step` 秒一筆、共 `turns` 筆；檔 mtime＝標記後 `mtime` 秒。"""
+        path = self.dir / under / f"{sid}.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        rows = [{"type": "assistant", "message": {"model": model}, "timestamp": (
+            self.since + timedelta(seconds=first + step * i)).isoformat()} for i in range(turns)]
+        path.write_text("\n".join(map(json.dumps, rows)), encoding="utf-8")
+        os.utime(path, (self.since.timestamp() + mtime,) * 2)
+        return path
+
+    def _found(self) -> dict | None:
+        return sentinel_lifecycle.superseding_session(self.dir, "own-sid", self.marker)
+
+    def test_only_the_activity_after_the_marker_counts(self) -> None:
+        path = self._peer("peer-a", 50, first=-600.0)  # 21 筆在標記之前（含恰等於者）不算
+        hit = self._found()
+        self.assertEqual((hit["sid"], hit["turns"], hit["span_seconds"]), ("peer-a", 29, 840.0))
+        self.assertEqual(sentinel_lifecycle.session_evidence(path), (50, 1470.0), "無 since 照舊")
+
+    def test_what_is_not_a_takeover(self) -> None:
+        for label, name, turns, kw in (
+                ("回合不足", "few", 5, {"step": 300.0}), ("跨度不足", "short", 30, {"step": 10.0}),
+                ("活動在標記前", "before", 30, {"first": -3000.0}), ("自己", "own-sid", 30, {}),
+                ("檔早於標記", "stale", 30, {"mtime": -60.0}),
+                ("合成回合", "synth", 30, {"model": guard.SYNTHETIC_MODEL}),
+                ("子代理檔", "child", 30, {"under": "own-sid/subagents"})):
+            with self.subTest(label):
+                self._peer(name, turns, **kw)
+                self.assertIsNone(self._found(), label)
+
+    def test_what_cannot_be_measured_is_never_a_takeover(self) -> None:
+        self._peer("peer-a", 30)
+        for label, marker, where in (
+                ("標記缺席", None, self.dir), ("標記沒有 `at`", {}, self.dir),
+                ("`at` 解不出", {"at": "?"}, self.dir), ("沒有目錄", self.marker, self.dir / "x")):
+            with self.subTest(label):
+                self.assertIsNone(sentinel_lifecycle.superseding_session(where, "own-sid", marker))
+
 
 class HaltMarkerProbePathDoesNotCreateDirectoriesTest(unittest.TestCase):
     """D23：`_halt_marker_probe_path()` 是 `--check` 唯讀探測入口，不得觸發
@@ -326,15 +388,10 @@ class HaltMarkerProbePathDoesNotCreateDirectoriesTest(unittest.TestCase):
     CrossPlatform_DEF200275_Context_Metering_Evidence.md〈第六輪〉。"""
 
     def setUp(self) -> None:
-        import tempfile
-        self.tmp = Path(tempfile.mkdtemp(prefix="d23_probe_nomkdir_"))
-        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
-        old = os.environ.get("AUTOSDD_TRACE_DIR")
+        self.tmp = _cbg._tmpdir(self, "d23_probe_nomkdir_")
         self.trace_root = self.tmp / "never-created" / "traces"
-        os.environ["AUTOSDD_TRACE_DIR"] = str(self.trace_root)
-        self.addCleanup(lambda: (os.environ.__setitem__("AUTOSDD_TRACE_DIR", old)
-                                 if old is not None
-                                 else os.environ.pop("AUTOSDD_TRACE_DIR", None)))
+        self.enterContext(unittest.mock.patch.dict(
+            os.environ, {"AUTOSDD_TRACE_DIR": str(self.trace_root)}))
 
     def test_probing_a_never_written_marker_creates_no_directory(self) -> None:
         path = planner._halt_marker_probe_path("sid-never-written-d23")
@@ -352,9 +409,8 @@ class HaltMarkerProbePathDoesNotCreateDirectoriesTest(unittest.TestCase):
 
 
 class HaltedBandLineTest(unittest.TestCase):
-    """D23（SD-07）：`halted_band_line()` 純函式——未過期印 halted 行，過期或無標記回
-    `None`。詳見 docs/06_quality/CrossPlatform_DEF200275_Context_Metering_Evidence.md
-    〈第六輪〉。"""
+    """D23（SD-07）：`halted_band_line()` 純函式——未過期印 halted 行，過期或無標記回 `None`。詳見
+    docs/06_quality/CrossPlatform_DEF200275_Context_Metering_Evidence.md 〈第六輪〉。"""
 
     def _now(self) -> datetime:
         return datetime.now(UTC).astimezone()
@@ -373,8 +429,7 @@ class HaltedBandLineTest(unittest.TestCase):
     def test_expired_marker_returns_none(self) -> None:
         now = self._now()
         reset_at = now - timedelta(seconds=1)
-        self.assertIsNone(
-            quota_messages.halted_band_line({"reset_at": reset_at.isoformat()}, now))
+        self.assertIsNone(quota_messages.halted_band_line({"reset_at": reset_at.isoformat()}, now))
 
     def test_unparseable_reset_at_still_yields_a_line_not_a_crash(self) -> None:
         """解不出 reset_at 時 `_aware()` 回 `None` ⇒ 視同「尚未到」（fail-safe：寧可多印
@@ -389,14 +444,9 @@ class PaceReportShortCircuitsDuringHaltTest(unittest.TestCase):
     CrossPlatform_DEF200275_Context_Metering_Evidence.md〈第六輪〉。"""
 
     def setUp(self) -> None:
-        import tempfile
-        self.tmp = Path(tempfile.mkdtemp(prefix="d23_pace_halt_"))
-        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
-        old_trace = os.environ.get("AUTOSDD_TRACE_DIR")
-        os.environ["AUTOSDD_TRACE_DIR"] = str(self.tmp / "traces")
-        self.addCleanup(lambda: (os.environ.__setitem__("AUTOSDD_TRACE_DIR", old_trace)
-                                 if old_trace is not None
-                                 else os.environ.pop("AUTOSDD_TRACE_DIR", None)))
+        self.tmp = _cbg._tmpdir(self, "d23_pace_halt_")
+        self.enterContext(unittest.mock.patch.dict(
+            os.environ, {"AUTOSDD_TRACE_DIR": str(self.tmp / "traces")}))
 
     def test_pace_state_is_never_called_while_halted(self) -> None:
         now = datetime.now(UTC).astimezone()
@@ -408,9 +458,7 @@ class PaceReportShortCircuitsDuringHaltTest(unittest.TestCase):
         def _boom(*_a, **_k):
             raise AssertionError("halt 期間不該呼叫 pace_state()——那條路可能補打一次 API")
 
-        old_pace_state = qg.pace_state
-        qg.pace_state = _boom
-        self.addCleanup(setattr, qg, "pace_state", old_pace_state)
+        self.enterContext(unittest.mock.patch.object(qg, "pace_state", _boom))
         report = qg.pace_report(now=now, sid=sid)
         self.assertIn("halted", report)
 
@@ -424,9 +472,7 @@ class PaceReportShortCircuitsDuringHaltTest(unittest.TestCase):
                       "resets_at": (now + timedelta(seconds=600)).isoformat()}],
             "source": "endpoint", "measured_at": now.isoformat(timespec="seconds"),
         }), encoding="utf-8")
-        old = qg.quota_cache_path
-        qg.quota_cache_path = lambda: cache
-        self.addCleanup(setattr, qg, "quota_cache_path", old)
+        self.enterContext(unittest.mock.patch.object(qg, "quota_cache_path", lambda: cache))
         report = qg.pace_report(now=now, sid="sid-never-halted-d23")
         self.assertNotIn("halted", report)
 
@@ -466,14 +512,12 @@ class SentinelDecideRecognizesHaltMarkerTest(unittest.TestCase):
     def test_halt_marker_beats_the_idle_patrol_branch(self) -> None:
         """RC-2 的直接迴歸鎖：修前『沒有未處理撞線』就一路落到 idle<6h → patrol，
         halt 標記完全不影響判決。修後：即使 idle 很小，halt 標記存在且 reset 未到
-        也要 `arm_reset`，不能繼續 patrol。
-        """
+        也要 `arm_reset`，不能繼續 patrol。"""
         now = self._now()
         reset_at = now + timedelta(seconds=600)
         marker = {"at": now.isoformat(), "reset_at": reset_at.isoformat()}
         decision = planner.sentinel_decide(None, "", 30.0, now, halt=marker)
-        self.assertEqual(decision["action"], "arm_reset",
-                         "自願 halt 標記被忽略 ⇒ RC-2 復發")
+        self.assertEqual(decision["action"], "arm_reset", "自願 halt 標記被忽略 ⇒ RC-2 復發")
 
     def test_real_unhandled_429_event_still_wins_over_halt_marker(self) -> None:
         """優先序：真的撞線事件（既有分支）必須贏過自願 halt 標記——兩者同時存在時
@@ -531,13 +575,8 @@ class HaltMarkerSelfCheckTest(unittest.TestCase):
     """
 
     def setUp(self) -> None:
-        import tempfile
-        self.tmp = Path(tempfile.mkdtemp(prefix="def281_selfcheck_"))
-        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
-        old = os.environ.get("AUTOSDD_TRACE_DIR")
-        os.environ["AUTOSDD_TRACE_DIR"] = str(self.tmp)
-        self.addCleanup(lambda: (os.environ.__setitem__("AUTOSDD_TRACE_DIR", old)
-                                 if old is not None else os.environ.pop("AUTOSDD_TRACE_DIR", None)))
+        self.tmp = _cbg._tmpdir(self, "def281_selfcheck_")
+        self.enterContext(unittest.mock.patch.dict(os.environ, AUTOSDD_TRACE_DIR=str(self.tmp)))
         ts = self.tmp / "real.jsonl"
         ts.write_text('{"type":"assistant"}\n', encoding="utf-8")
         self.transcript = ts
@@ -556,8 +595,7 @@ class HaltMarkerSelfCheckTest(unittest.TestCase):
 
     def test_frozen_now_a_month_stale_is_rejected_and_not_written(self) -> None:
         """紅端＝本場事故的逐位元組重現：拿 `test_quota_policy.py` 那個凍結常數當 `now`，
-        修前會落盤（且與現場三份標記逐位元組相同），修後必須拒寫、且訊息點名量級。
-        """
+        修前會落盤（且與現場三份標記逐位元組相同），修後必須拒寫、且訊息點名量級。"""
         frozen_now = datetime(2026, 8, 9, 5, 15, 3, tzinfo=UTC)
         decision = _decision(96.0, 188 * 60.0)
         act = qg.quota_halt_actions(
@@ -600,12 +638,10 @@ class HaltMarkerSelfCheckTest(unittest.TestCase):
         self.assertIsNotNone(reason)
 
     def test_naive_now_is_rejected_not_crashed(self) -> None:
-        """複審 naive-now 防呆（必修）：`now` 缺 tzinfo 時 `real_now - now` 會拋
-        `TypeError` 崩掉整條 halt 武裝路徑——這比拒寫更糟，連拒寫理由都印不出來，
-        呼叫端（`quota_halt_actions`）會整段連 `not_armed_reason` 都算不出來。
-        方向＝naive 視為不可信任的輸入，拒寫而非猜時區（猜錯時區會落一份看似合法、
-        實則 `at`/`reset_at` 全錯的標記，與 RC-1 同型：寧可漏一次武裝機會）。
-        """
+        """複審 naive-now 防呆（必修）：`now` 缺 tzinfo 時 `real_now - now` 會拋 `TypeError` 崩掉整
+        條 halt 武裝路徑——這比拒寫更糟，連拒寫理由都印不出來，呼叫端（`quota_halt_actions`）會整段連
+        `not_armed_reason` 都算不出來。方向＝naive 視為不可信任的輸入，拒寫而非猜時區（猜錯時區會落
+        一份看似合法、實則 `at`/`reset_at` 全錯的標記，與 RC-1 同型：寧可漏一次武裝機會）。"""
         decision = _decision(96.0, 600.0)
         naive_now = datetime(2026, 9, 11, 9, 0, 0)  # 蓄意缺 tzinfo
         marker, rejected = qg.halt_marker_or_rejection(
@@ -621,18 +657,12 @@ class HaltLatchIsSessionScopedTest(unittest.TestCase):
     同一個 reset 視窗內，第二個撞 halt 的 session 會被第一個 session 的閂鎖擋下
     （`key in latch_read(latch)`），於是永遠不呼叫 `quota_halt_actions()`——不寫自己的
     halt 標記，也不重新嘗試 spawn。原始觀測（立案當時本機同時掛兩支哨兵）搬至
-    CrossPlatform_R86_Guard_Repin_Evidence.md §G。
-    """
+    CrossPlatform_R86_Guard_Repin_Evidence.md §G。"""
 
     def setUp(self) -> None:
-        import tempfile
-        self.tmp = Path(tempfile.mkdtemp(prefix="def281_rc3_"))
-        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
-        old_trace = os.environ.get("AUTOSDD_TRACE_DIR")
-        os.environ["AUTOSDD_TRACE_DIR"] = str(self.tmp / "traces")
-        self.addCleanup(lambda: (os.environ.__setitem__("AUTOSDD_TRACE_DIR", old_trace)
-                                 if old_trace is not None
-                                 else os.environ.pop("AUTOSDD_TRACE_DIR", None)))
+        self.tmp = _cbg._tmpdir(self, "def281_rc3_")
+        self.enterContext(unittest.mock.patch.dict(
+            os.environ, {"AUTOSDD_TRACE_DIR": str(self.tmp / "traces")}))
         now = datetime.now(UTC).astimezone()
         cache = self.tmp / "autosdd_quota.json"
         body = {"schema": qg.quota_schema(),
@@ -646,9 +676,7 @@ class HaltLatchIsSessionScopedTest(unittest.TestCase):
         for name, value in (("quota_cache_path", lambda: cache),
                             ("fanout_ledger_path", lambda: self.tmp / "ledger.d"),
                             ("quota_latch_path", lambda: self.tmp / "latch.json")):
-            old = getattr(qg, name)
-            setattr(qg, name, value)
-            self.addCleanup(setattr, qg, name, old)
+            self.enterContext(unittest.mock.patch.object(qg, name, value))
         self.waker_calls: list[str] = []
         self.notices: list[bool] = []  # 每次 `_gate()` 有沒有向模型送出 halt 提醒
 
@@ -675,8 +703,7 @@ class HaltLatchIsSessionScopedTest(unittest.TestCase):
 
     def test_two_sessions_in_the_same_window_both_get_their_own_marker(self) -> None:
         """紅端＝修前第二個 sid 的 `_gate()` 會撞進「已閂鎖」分支：`waker` 只被叫一次、
-        `read_halt_marker("sidB-...")` 回 `None`——第二個 session 的喚醒鏈斷在這裡。
-        """
+        `read_halt_marker("sidB-...")` 回 `None`——第二個 session 的喚醒鏈斷在這裡。"""
         rc_a = self._gate("sidA-def281rc3")
         rc_b = self._gate("sidB-def281rc3")
         self.assertEqual((rc_a, rc_b), (0, 0), "PostToolUse 的 halt 只提醒、不是 hook 錯誤")
@@ -690,8 +717,7 @@ class HaltLatchIsSessionScopedTest(unittest.TestCase):
 
     def test_same_session_repeated_halt_does_not_rewrite_or_respawn(self) -> None:
         """同一 sid 在同一視窗連續撞 halt：既有 one-shot 語意必須保留——第二次不重新
-        spawn（`waker` 只叫一次），這是本輪唯一要**保留**而非改動的既有行為。
-        """
+        spawn（`waker` 只叫一次），這是本輪唯一要**保留**而非改動的既有行為。"""
         rc1 = self._gate("sidC-def281rc3")
         rc2 = self._gate("sidC-def281rc3")
         self.assertEqual((rc1, rc2), (0, 0))
@@ -707,14 +733,9 @@ class PrepareLatchIsSessionScopedTest(unittest.TestCase):
     docs/06_quality/CrossPlatform_DEF200275_Context_Metering_Evidence.md〈第六輪〉。"""
 
     def setUp(self) -> None:
-        import tempfile
-        self.tmp = Path(tempfile.mkdtemp(prefix="d22_prepare_"))
-        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
-        old_trace = os.environ.get("AUTOSDD_TRACE_DIR")
-        os.environ["AUTOSDD_TRACE_DIR"] = str(self.tmp / "traces")
-        self.addCleanup(lambda: (os.environ.__setitem__("AUTOSDD_TRACE_DIR", old_trace)
-                                 if old_trace is not None
-                                 else os.environ.pop("AUTOSDD_TRACE_DIR", None)))
+        self.tmp = _cbg._tmpdir(self, "d22_prepare_")
+        self.enterContext(unittest.mock.patch.dict(
+            os.environ, {"AUTOSDD_TRACE_DIR": str(self.tmp / "traces")}))
         now = datetime.now(UTC).astimezone()
         cache = self.tmp / "autosdd_quota.json"
         body = {"schema": qg.quota_schema(),
@@ -725,9 +746,7 @@ class PrepareLatchIsSessionScopedTest(unittest.TestCase):
         for name, value in (("quota_cache_path", lambda: cache),
                             ("fanout_ledger_path", lambda: self.tmp / "ledger.d"),
                             ("quota_latch_path", lambda: self.tmp / "latch.json")):
-            old = getattr(qg, name)
-            setattr(qg, name, value)
-            self.addCleanup(setattr, qg, name, old)
+            self.enterContext(unittest.mock.patch.object(qg, name, value))
         self.plan_calls: list[str] = []
 
     def _transcript(self, sid: str) -> Path:
@@ -783,8 +802,7 @@ class EnvSpecLeakIsolationTest(unittest.TestCase):
 class ClaimGuardCatchesAutoContinueWithoutCredentialTest(unittest.TestCase):
     """INV-H4：CLAUDE.md〈反事後諸葛取證規則〉要求「宣稱已排程／會自動繼續」必須
     附排程器回報的憑證——本輪的直接誘因（RC-3）正是主控寫下「重置後會自動續跑」
-    卻拿不出 `next_run_time`／launchd descriptor。詞表要收得到這兩句常見說法。
-    """
+    卻拿不出 `next_run_time`／launchd descriptor。詞表要收得到這兩句常見說法。"""
 
     def setUp(self) -> None:
         self.g = _load_claim_guard()
@@ -799,8 +817,7 @@ class ClaimGuardCatchesAutoContinueWithoutCredentialTest(unittest.TestCase):
         """兩個詞疊在同一句、且本場 tool_output 是空字串（沒有任何工具輸出＝零佐證）
         ⇒ 既有機制要出聲（同檔既有 `NAKED_MIN_TOKENS=2` 判準，未改判準本身，只驗
         新詞真的接上它）。"""
-        hits = self.g.naked_verdict_hits(
-            "重置後會自動繼續、已排程並自動續跑，不需要人介入。", "")
+        hits = self.g.naked_verdict_hits("重置後會自動繼續、已排程並自動續跑，不需要人介入。", "")
         self.assertTrue(hits, "自動續跑類宣稱疊加後沒有被判準抓到")
 
 
@@ -822,23 +839,18 @@ class RegisterSchtasksTimeIsObservedNotGuessedTest(unittest.TestCase):
     全程行程內＋假排程後端：不真註冊、不打 usage 端點（`read_quota` 零網路）。"""
 
     def setUp(self) -> None:
-        import tempfile
-        self.tmp = Path(tempfile.mkdtemp(prefix="def231_"))
-        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
+        self.tmp = _cbg._tmpdir(self, "def231_")
         env = {"AUTOSDD_QUOTA_CACHE_DIR": str(self.tmp),
                "AUTOSDD_TRACE_DIR": str(self.tmp / "trace")}
-        patcher = unittest.mock.patch.dict(os.environ, env)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        self.enterContext(unittest.mock.patch.dict(os.environ, env))
         self.transcript = _usage_transcript(self.tmp / "sidDef231.jsonl")
         self.plan = self.tmp / "plan.md"
 
     def _cache(self, *axes: tuple[str, float, float | None],
                age: float = 0.0, tz: timezone | None = None,
                zulu: bool = False) -> datetime:
-        """種一份合成快取，回傳它用的基準 now（期望值與快取共用同一個 now，
-        才不會因跨秒邊界偶發不等）：`axes`＝`(kind, pct, 距 reset 秒數；None＝無 reset
-        可等)`。"""
+        """種一份合成快取，回傳它用的基準 now（期望值與快取共用同一個 now，才不會因跨秒邊界偶發不
+        等）：`axes`＝`(kind, pct, 距 reset 秒數；None＝無 reset 可等)`。"""
         now = datetime.now(UTC).astimezone()
 
         def iso(seconds: float | None) -> str | None:
@@ -880,11 +892,9 @@ class RegisterSchtasksTimeIsObservedNotGuessedTest(unittest.TestCase):
             calls.append(args)
             return 0, "NEXT"
 
-        select = unittest.mock.patch.object(
-            planner.schedule_backend, "select", return_value=_Backend())
-        register = unittest.mock.patch.object(
-            planner, "_register_at_expr", side_effect=_fake_register)
-        with select, register:
+        mock_patch = unittest.mock.patch.object
+        with mock_patch(planner.schedule_backend, "select", return_value=_Backend()), \
+                mock_patch(planner, "_register_at_expr", side_effect=_fake_register):
             rc, _out, err = self._main("--register-schtasks", *argv)
         return rc, err, calls
 
@@ -910,12 +920,11 @@ class RegisterSchtasksTimeIsObservedNotGuessedTest(unittest.TestCase):
                                msg="觸發時刻不是『實測 reset ＋緩衝』")
 
     def test_a_utc_reset_prints_in_the_machine_local_timezone(self) -> None:
-        """時區收斂不下沉（`-At '<字串>'` 一律被當成**機器本地時區**）：真快取的
-        `resets_at` 是伺服器給的 UTC 字串；少了 `.astimezone()`，排程照樣成立、
-        NextRunTime 照樣拿得到，只是整個偏一個時區差，醒在錯的時刻而取證全綠。夾具刻意不
-        用本機 offset 字串（那樣拿掉 `.astimezone()` 也過），並加兩個固定的非 UTC offset
-        （+14／-12）：本機時區至多等於其中一個，所以不論跑在哪個時區（CI 多半是 UTC），
-        變異都至少有一格會紅。"""
+        """時區收斂不下沉（`-At '<字串>'` 一律被當成**機器本地時區**）：真快取的 `resets_at` 是伺服
+        器給的 UTC 字串；少了 `.astimezone()`，排程照樣成立、 NextRunTime 照樣拿得到，只是整個偏一個
+        時區差，醒在錯的時刻而取證全綠。夾具刻意不用本機 offset 字串（那樣拿掉 `.astimezone()` 也
+        過），並加兩個固定的非 UTC offset （+14／-12）：本機時區至多等於其中一個，所以不論跑在哪個時
+        區（CI 多半是 UTC），變異都至少有一格會紅。"""
         zones = (("+00:00", UTC, False), ("Z", UTC, True),
                  ("+14:00", timezone(timedelta(hours=14)), False),
                  ("-12:00", timezone(timedelta(hours=-12)), False))
@@ -935,17 +944,15 @@ class RegisterSchtasksTimeIsObservedNotGuessedTest(unittest.TestCase):
         reset」；顯式 `--at` 是操作者宣稱的時刻，印「省略 --at＝…」對它是假話。"""
         self._cache(("session", 90.0, 5400.0))
         _, observed, _ = self._main("--print-schtasks-command")
-        _, explicit, _ = self._main(
-            "--print-schtasks-command", "--at", "(Get-Date).AddMinutes(30)")
+        _, explicit, _ = self._main("--print-schtasks-command", "--at", "(Get-Date).AddMinutes(30)")
         self.assertIn("省略 --at＝額度快取", observed)
         self.assertNotIn("省略 --at", explicit)
         self.assertIn("--at 顯式指定", explicit)
 
     def test_the_halted_axis_reset_wins_over_a_far_binding_axis(self) -> None:
-        """沿用 `halt_resets_at`（≥halt 各軸中最早可解析者）而不是另造一套挑軸：session
-        96% 已停、一小時後 reset；weekly 99%（binding，最緊的一軸）兩天後才 reset ⇒
-        要等的是 session 那一個。若改取 binding 的 reset，
-        會排到兩天後（或被視界擋下而拒絕），而 5 小時窗一小時後就翻頁了。"""
+        """沿用 `halt_resets_at`（≥halt 各軸中最早可解析者）而不是另造一套挑軸：session 96% 已停、一
+        小時後 reset；weekly 99%（binding，最緊的一軸）兩天後才 reset ⇒ 要等的是 session 那一個。若
+        改取 binding 的 reset，會排到兩天後（或被視界擋下而拒絕），而 5 小時窗一小時後就翻頁了。"""
         now = self._cache(("session", 96.0, 3600.0), ("weekly_all", 99.0, 172800.0))
         rc, out, err = self._main("--print-schtasks-command")
         self.assertEqual(rc, 0, err)
@@ -976,8 +983,7 @@ class RegisterSchtasksTimeIsObservedNotGuessedTest(unittest.TestCase):
     def test_an_explicit_at_passes_through_untouched(self) -> None:
         """人顯式給的 `--at` 照舊（不讀快取、不拒絕）：操作者知道自己在宣稱什麼時刻——
         印出與真註冊兩條路都一樣，運算式原樣下傳、結構化 `at` 仍是 `None`。"""
-        rc, out, err = self._main(
-            "--print-schtasks-command", "--at", "(Get-Date).AddMinutes(30)")
+        rc, out, err = self._main("--print-schtasks-command", "--at", "(Get-Date).AddMinutes(30)")
         self.assertEqual(rc, 0, err)
         self.assertIn("-At (Get-Date).AddMinutes(30)", out)
         self.assertNotIn("AddHours(5)", out)
@@ -989,9 +995,8 @@ class RegisterSchtasksTimeIsObservedNotGuessedTest(unittest.TestCase):
                          ("'2099-01-01 00:00:00'", planner.RESUME_TICK, None))
 
     def test_register_hands_the_observed_moment_and_a_structured_at_over(self) -> None:
-        """真註冊那條路拿到的是同一份觀測值：字面給 schtasks、結構化的本機時區 `at` 給
-        launchd（`at=None` ⇒ mac 後端只寫重複觸發、不寫時刻——
-        印出來的與真註冊的會分岔）。"""
+        """真註冊那條路拿到的是同一份觀測值：字面給 schtasks、結構化的本機時區 `at` 給 launchd
+        （`at=None` ⇒ mac 後端只寫重複觸發、不寫時刻—— 印出來的與真註冊的會分岔）。"""
         now = self._cache(("session", 90.0, 5400.0))
         rc, err, calls = self._register()
         self.assertEqual(rc, 0, err)
@@ -1031,20 +1036,15 @@ class RegisterSchtasksTimeIsObservedNotGuessedTest(unittest.TestCase):
 
 
 class CheckPrintsTheSddFsmLineTest(unittest.TestCase):
-    """`--check` 末行補印 SDD FSM 現況：模型在 Q1 說「被擋」時，
-    要有一條可外驗的機器級證據。純展示——不判阻斷（判準在 SDD 側）、不寫檔（`--check`
-    的既有契約）。"""
+    """`--check` 末行補印 SDD FSM 現況：模型在 Q1 說「被擋」時，要有一條可外驗的機器級證據。純展示——
+    不判阻斷（判準在 SDD 側）、不寫檔（`--check` 的既有契約）。"""
 
     def setUp(self) -> None:
-        import tempfile
-        self.tmp = Path(tempfile.mkdtemp(prefix="def_fsm_check_"))
-        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
+        self.tmp = _cbg._tmpdir(self, "def_fsm_check_")
         env = {"AUTOSDD_TRACE_DIR": str(self.tmp / "trace"),
                "AUTOSDD_QUOTA_CACHE_DIR": str(self.tmp),
                "AUTOSDD_CONTEXT_FEED_DIR": str(self.tmp / "feed")}
-        patcher = unittest.mock.patch.dict(os.environ, env)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        self.enterContext(unittest.mock.patch.dict(os.environ, env))
         self.transcript = _usage_transcript(self.tmp / "sidFsm.jsonl")
 
     def _check_lines(self, version: str | None) -> list[str]:

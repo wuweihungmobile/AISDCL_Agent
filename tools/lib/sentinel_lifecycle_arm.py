@@ -90,7 +90,7 @@ ARM_MARKER_PREFIX = "autosdd_sentinel_armed_"
 RELATCH_INTERVAL_SECONDS = 900.0
 
 
-def session_evidence(transcript: Path) -> tuple[int, float]:
+def session_evidence(transcript: Path, since: float | None = None) -> tuple[int, float]:
     """單趟掃逐字稿，回 `(assistant 回合數, 首尾跨度秒)`。掃不動一律回 `(0, 0.0)`。
 
     三個與 `guard.scan_transcript` 一致的紀律（同一份逐字稿、同一種壞行處置）：
@@ -98,6 +98,8 @@ def session_evidence(transcript: Path) -> tuple[int, float]:
       ② 壞行跳過（逐字稿常有正在寫入的半截尾行），一行壞掉不得讓守衛崩潰；
       ③ `<synthetic>` 不算回合——那筆是 harness 在額度耗盡時寫進去的佔位，
          不是一次模型呼叫（`guard.scan_transcript` 對同一筆也是整筆退出）。
+    DEF-200-532：`since`（epoch 秒）給定時，只計 `timestamp > since` 的記錄（回合數與首尾跨度
+    皆然；時間戳缺席或解不出來＝無法證明在 `since` 之後 ⇒ 不計）。`None`＝與舊行為逐位元組相同。
     """
     turns = 0
     first = last = None
@@ -113,6 +115,8 @@ def session_evidence(transcript: Path) -> tuple[int, float]:
                 if not isinstance(record, dict):
                     continue
                 stamp = _epoch_of(record.get("timestamp"))
+                if since is not None and (stamp is None or stamp <= since):
+                    continue
                 if stamp is not None:
                     first = stamp if first is None or stamp < first else first
                     last = stamp if last is None or stamp > last else last
@@ -148,6 +152,56 @@ def should_arm(turns: int, span_seconds: float, *, min_turns: int = MIN_TURNS,
                min_span: float = MIN_SPAN_SECONDS) -> bool:
     """純判準（紅綠由注入自證）：這個 session 累積到值得一支排程了嗎。"""
     return turns >= min_turns and span_seconds >= min_span
+
+
+def superseding_session(project_dir: Path, own_sid: str, halt_marker: dict | None, *,
+                        min_turns: int = MIN_TURNS,
+                        min_span: float = MIN_SPAN_SECONDS) -> dict | None:
+    """DEF-200-532：同專案是否有**別的** session 在 halt 標記之後累積了夠多活動（＝人已接手）。
+
+    回 `{"sid", "turns", "span_seconds", "last_at"}`，否則 `None`。判準（全部成立才回非 `None`）：
+      ① `halt_marker["at"]` 解得出來 ⇒ `since`（標記缺席／解不出 ⇒ `None`）；
+      ② 只看 `project_dir` **直下**的 `*.jsonl`（`<sid>/subagents/` 是它的子代理、不是另一個
+         session）、`stem != own_sid`、`st_mtime > since`（成本閘：沒動過的檔不開）；
+      ③ 依 mtime 由新到舊逐支 `session_evidence(path, since=since)`，第一支過 `should_arm` 者即回；
+      ④ 目錄不在／任何 `OSError` ⇒ `None`。
+    🔴 量不到 ≠ 已接手：回非 `None` 的後果是拆哨兵＋清標記（不可逆），所以讀不動一律落回 `None`。
+    門檻刻意沿用武裝門檻（24 回合且 600s）——同一把「這算不算一段真的工作」的尺：單次
+    `claude -p "ok"` 這種 1 回合的無頭跑不會被當成接手。
+    """
+    since = _epoch_of(halt_marker.get("at")) if isinstance(halt_marker, dict) else None
+    if since is None:
+        return None
+    try:
+        found = sorted(((p.stat().st_mtime, p) for p in project_dir.glob("*.jsonl")
+                        if p.stem != own_sid), key=lambda row: row[0], reverse=True)
+    except OSError:
+        return None
+    for mtime, path in found:
+        if mtime <= since:
+            break  # 由新到舊排序：後面的只會更舊
+        turns, span = session_evidence(path, since=since)
+        if should_arm(turns, span, min_turns=min_turns, min_span=min_span):
+            return {"sid": path.stem, "turns": turns, "span_seconds": round(span, 1),
+                    "last_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(mtime))}
+    return None
+
+
+def clear_halt_marker(sid: str) -> bool:
+    """DEF-200-532：哨兵判定「人已接手」後，把本 session 的 halt 標記清掉。回「有沒有真的刪到檔」。
+
+    `sid` 空、檔不在、刪不掉一律回 `False`、不丟例外（同 `clear_arm_latch` 的紀律）。路徑唯一的家
+    ＝`quota_gate.halt_marker_path`；lazy import 是為了不把整支 `quota_gate` 拖進每次 PostToolUse。
+    """
+    if not sid:
+        return False
+    import quota_gate  # noqa: PLC0415 — 見 docstring
+
+    try:
+        quota_gate.halt_marker_path(sid).unlink()
+    except OSError:
+        return False
+    return True
 
 
 def arm_marker_path(session_id: str, tmp_dir: str | None = None) -> Path:

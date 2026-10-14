@@ -43,9 +43,11 @@ from sentinel_lifecycle_arm import (
     MIN_TURNS,  # noqa: F401  ← 再匯出
     arm_marker_path,
     clear_arm_latch,  # noqa: F401  ← 再匯出
+    clear_halt_marker,  # noqa: F401  ← 再匯出
     maybe_arm,  # noqa: F401  ← 再匯出
     session_evidence,  # noqa: F401  ← 再匯出
     should_arm,  # noqa: F401  ← 再匯出
+    superseding_session,  # noqa: F401  ← 再匯出
 )
 
 #: GC 判「這個 session 真的結束了」的閒置門檻。**刻意等於哨兵自己的自我解除門檻**

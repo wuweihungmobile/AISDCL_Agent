@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
-"""D23（DEF-200-275 第六輪，SD-08）：構造合法 relay 狀態塊＋halt marker fixture，只
-mock 排程/告警副作用（`_register_and_record`／`_resume_tick`），直接呼叫
-`_sentinel_tick(args)`，證明 halt 標記到 decision 這段是真的跑過的端到端程式碼，
-不是分別驗證兩段純函式後靠推論黏起來（既有測試皆止於純函式邊界，見 DEF200278
-證據檔第二輪 §8）。詳見 docs/06_quality/
-CrossPlatform_DEF200275_Context_Metering_Evidence.md〈第六輪〉。
-"""
+"""D23（DEF-200-275 第六輪，SD-08）：構造合法 relay 狀態塊＋halt marker fixture，只 mock 排程/告警
+副作用（`_register_and_record`／`_resume_tick`），直接呼叫 `_sentinel_tick(args)`，證明 halt 標記到
+decision 這段是真的跑過的端到端程式碼，不是分別驗證兩段純函式後靠推論黏起來（既有測試皆止於純函式
+邊界，見 DEF200278 證據檔第二輪 §8）。詳見
+docs/06_quality/CrossPlatform_DEF200275_Context_Metering_Evidence.md〈第六輪〉。"""
 from __future__ import annotations
 
 import contextlib
@@ -48,17 +46,13 @@ class SentinelTickConsumesHaltMarkerE2ETest(unittest.TestCase):
     """真的呼叫 `_sentinel_tick(args)`（不 mock 判定層），只 mock 排程/告警副作用。"""
 
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp(prefix="d23_sentinel_e2e_"))
-        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
-        old_trace = os.environ.get("AUTOSDD_TRACE_DIR")
-        os.environ["AUTOSDD_TRACE_DIR"] = str(self.tmp / "traces")
-        self.addCleanup(lambda: (os.environ.__setitem__("AUTOSDD_TRACE_DIR", old_trace)
-                                 if old_trace is not None
-                                 else os.environ.pop("AUTOSDD_TRACE_DIR", None)))
-        self.gettempdir_patch = unittest.mock.patch(
-            "tempfile.gettempdir", return_value=str(self.tmp))
-        self.gettempdir_patch.start()
-        self.addCleanup(self.gettempdir_patch.stop)
+        self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory(
+            prefix="d23_sentinel_e2e_", ignore_cleanup_errors=True)))
+        self.enterContext(unittest.mock.patch.dict(
+            os.environ, {"AUTOSDD_TRACE_DIR": str(self.tmp / "traces")}))
+        self.enterContext(unittest.mock.patch("tempfile.gettempdir", return_value=str(self.tmp)))
+        self.enterContext(unittest.mock.patch.object(  # DEF-200-532：slug 退路隔離、故意≠self.tmp
+            planner, "project_transcript_dir", lambda _root: self.tmp / "slug"))
 
     def _transcript(self, sid: str, mtime: float | None = None) -> Path:
         """`mtime`＝None 用現在；給定值模擬最後活動時刻，供 `halt_verdict()` 判過期。"""
@@ -114,8 +108,7 @@ class SentinelTickConsumesHaltMarkerE2ETest(unittest.TestCase):
             "sid-d23-e2e-probe", marker_age=1000, idle=1060,
             reset_in=-(qg.HALT_RESET_SKEW_SECONDS + 60))
         self.assertEqual(rc, 7, "decision=probe 必須交棒給 _resume_tick 且原樣回傳其 rc")
-        self.assertEqual(len(calls), 1,
-                         "halt 標記已過期卻沒有交棒給 _resume_tick ⇒ 標記沒被消費")
+        self.assertEqual(len(calls), 1, "halt 標記已過期卻沒有交棒給 _resume_tick ⇒ 標記沒被消費")
 
     def _tick(self, sid: str, *, marker_age: int, reset_in: int, idle: int):
         """真 `_sentinel_tick`（只替身 `_register_and_record`／`_resume_tick`）；單位秒。
@@ -150,6 +143,20 @@ class SentinelTickConsumesHaltMarkerE2ETest(unittest.TestCase):
                 (_plan, _sid, at, tick), = registers
                 self.assertEqual(tick, planner.SENTINEL_TICK)
                 self.assertAlmostEqual((at - now).total_seconds(), want_after, delta=2)
+
+    def test_a_superseding_session_disarms_the_real_tick_and_clears_the_marker(self) -> None:
+        """DEF-200-532：同專案他 session 標記後累積 ≥24 回合／≥600 s ⇒ 真 tick disarm＋清標記。"""
+        sid, t0 = "sid-d532-old", datetime.now(UTC) - timedelta(seconds=4880)
+        rows = [{"type": "assistant", "message": {"model": "m"},
+                 "timestamp": (t0 + timedelta(seconds=30 * i)).isoformat()} for i in range(30)]
+        (self.tmp / "peer-sid.jsonl").write_text("\n".join(map(json.dumps, rows)), encoding="utf-8")
+        with unittest.mock.patch.object(planner, "_schtasks_remove", return_value=0) as remove:
+            rc, regs, wakes, _now, plan = self._tick(sid, marker_age=5000, reset_in=600, idle=5)
+        self.assertEqual((rc, regs, wakes, remove.call_args.args), (0, [], [], (f"T-{sid}",)))
+        self.assertIsNone(qg.read_halt_marker(sid), "disarm 必須把 halt 標記一併清掉")
+        log = planner.endurance_log_path(plan).read_text(encoding="utf-8")
+        (done,) = [e for e in map(json.loads, log.splitlines()) if e["event"] == "sentinel_disarm"]
+        self.assertTrue(done["cleared_halt"] and "接手" in done["why"], done)
 
 
 _AT = "'2099-01-01 00:00:00'"  # 顯式 --at：避開額度快取（全程不碰網路）
@@ -187,30 +194,24 @@ class ManualRegisterThenWakeE2ETest(unittest.TestCase):
     使用者卻只看到「✅ 憑證」。只替身排程器（`select`）與付費探針，其餘全走真碼。"""
 
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp(prefix="def456_manual_e2e_"))
-        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
+        self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory(
+            prefix="def456_manual_e2e_", ignore_cleanup_errors=True)))
         env = {"AUTOSDD_TRACE_DIR": str(self.tmp / "traces"),
                "AUTOSDD_QUOTA_CACHE_DIR": str(self.tmp)}
-        for patcher in (unittest.mock.patch.dict(os.environ, env),
-                        unittest.mock.patch("tempfile.gettempdir", return_value=str(self.tmp))):
-            patcher.start()
-            self.addCleanup(patcher.stop)
+        self.enterContext(unittest.mock.patch.dict(os.environ, env))
+        self.enterContext(unittest.mock.patch("tempfile.gettempdir", return_value=str(self.tmp)))
         self.backend = _FakeBackend()
-        select = unittest.mock.patch.object(
-            planner.schedule_backend, "select", return_value=self.backend)
-        select.start()
-        self.addCleanup(select.stop)
+        self.enterContext(unittest.mock.patch.object(
+            planner.schedule_backend, "select", return_value=self.backend))
         # DEF-200-480：本 e2e 驗的是 `--allow-resume` 的**程式預設**（開）。`planner.main()`
         # 先把 repo 根 `.env` 的逃生口填進環境，機器本地若設 AUTOSDD_RESUME_OFF=1，預設就翻成
         # 關 ⇒ 把 `.env` 根指到沒有 `.env` 的臨時目錄，讓測試對機器設定密封（語意不變：真環境
         # 變數仍優先）。上面的 patch.dict 已快照環境，這裡順手清掉行程繼承的同名鍵。
         os.environ.pop(planner.RESUME_OFF_ENV, None)
         real_defaults = planner.quota_gate.apply_env_defaults
-        dotenv = unittest.mock.patch.object(
+        self.enterContext(unittest.mock.patch.object(
             planner.quota_gate, "apply_env_defaults",
-            lambda env, root=None: real_defaults(env, root=self.tmp))
-        dotenv.start()
-        self.addCleanup(dotenv.stop)
+            lambda env, root=None: real_defaults(env, root=self.tmp)))
         self.sid = "sidManualE2E"
         self.transcript = self.tmp / f"{self.sid}.jsonl"
         self.transcript.write_text('{"type":"assistant","message":{"model":"claude-opus-5",'
@@ -342,8 +343,7 @@ class ManualRegisterThenWakeE2ETest(unittest.TestCase):
         self.assertEqual([c[1] for c in self.backend.armed()],
                          [self.task, planner.sentinel_task_name(self.sid)],
                          "收尾後沒有把哨兵重掛起來")
-        self.assertEqual(
-            [e["rc"] for e in events if e["event"] == "relay_rearmed"], [0])
+        self.assertEqual([e["rc"] for e in events if e["event"] == "relay_rearmed"], [0])
         state = self._block()
         self.assertEqual((state["kind"], planner.relay_problems(state)), ("sentinel", []))
 
