@@ -2370,8 +2370,7 @@ class TestReassignHitJudgement(unittest.TestCase):
         """遮罩只遮反引號內：同欄另有一處**裸**的出口字樣時仍必須算數。
 
         沒有這一條，「把其中一處包進反引號」就會被誤讀成整欄豁免（收窄不得擴大成豁免口，
-        同 `archive_defect_log.active_status_hit()` 的鑑別力保留 (a)）。
-        """
+        同 `archive_defect_log.active_status_hit()` 的鑑別力保留 (a)）。"""
         self.assertTrue(m._reassign_hit("open（原欄文 `改派為：X`）；本輪實際改派為：未指派"))
 
     def test_the_hit_is_shared_with_the_regex_re_export(self) -> None:
@@ -2419,8 +2418,7 @@ class TestResidualTodoAndSupersessionNotesHaveTeeth(unittest.TestCase):
 
         這正是 R74 對 `DEF-101-432` 的處置形態（首詞改 `fixed`、原欄文包進 code span
         保留於後）：處置完成後本支必須安靜，否則「該把首詞改了」這個提示永遠不會消失，
-        而永不消失的提示會被讀者整批忽略。
-        """
+        而永不消失的提示會被讀者整批忽略。"""
         self.assertEqual(m.supersession_notes(_ledger_text(
             _row("DEF-01-905",
                  "fixed@R56（訂正首詞）：`open watch（R55）→ **fixed@R56**`：已修"))), [])
@@ -2443,8 +2441,7 @@ class TestUnresolvedInventoryHasASingleMeasurementEntry(unittest.TestCase):
 
     立案理由：「未結存量是多少」曾同時有三個互斥答案（人工點數／`--plan` 不可搬筆數／逐列
     `_classify`）而樹與上一輪收輪 commit 相同 ⇒ 差異全出自量測法；只有最後一個才是未結列數。
-    本類鎖住「入口只有一個、且它有上限」（原四行史料逐字見 R213 證據檔附錄 E-3）。
-    """
+    本類鎖住「入口只有一個、且它有上限」（原四行史料逐字見 R213 證據檔附錄 E-3）。"""
 
     def test_unresolved_ids_counts_exactly_the_unresolved_classes(self) -> None:
         ledger = {"A": "open", "B": "routed", "C": None,
@@ -2476,8 +2473,7 @@ class TestUnresolvedInventoryHasASingleMeasurementEntry(unittest.TestCase):
 
         bytes 會被歸檔動作攪動，於是「靠歸檔把數字壓下去」可以掩蓋未結存量持續累積；
         未結列在結構上不可歸檔，所以列數問的正是「還有幾筆缺陷沒人處理」。此處以構造
-        輸入證明：把任意多筆**已結**列加進帳本，未結列數一動也不動。
-        """
+        輸入證明：把任意多筆**已結**列加進帳本，未結列數一動也不動。"""
         base = {f"U-{i}": "open" for i in range(10)}
         padded = {**base, **{f"C-{i}": "fixed" for i in range(500)}}
         self.assertEqual(len(m._ledger_index.unresolved_ids(base)),
@@ -2494,6 +2490,13 @@ class TestUnresolvedInventoryHasASingleMeasurementEntry(unittest.TestCase):
         self.assertIn("未結列 ID：", r.stdout)
         n = int(re.search(r"未結列數＝(\d+)／", r.stdout).group(1))
         self.assertEqual(len(re.findall(r"DEF-\d+-\d+", r.stdout.partition("未結列 ID：")[2])), n)
+        # 真實帳本 0 列時上面是 0==0 恆真（不印 ID 的突變會存活）；合成帳本才證明 ID 真的被印出。
+        with contextlib.redirect_stdout(io.StringIO()) as buf:
+            m._ledger_index.report_unresolved({"DEF-1-1": "open", "DEF-1-2": "fixed"})
+        self.assertIn("未結列數＝1／", buf.getvalue())
+        ids = buf.getvalue().partition("未結列 ID：")[2]
+        self.assertIn("DEF-1-1", ids)
+        self.assertNotIn("DEF-1-2", ids)
         self.assertIn("--unresolved-count", m._USAGE)
 
     def test_main_actually_enforces_the_ceiling(self) -> None:
@@ -2527,8 +2530,7 @@ def _bail_headers_in_main_order() -> list[str]:
 
     刻意依 `lineno` 排序而不是 `ast.walk()` 的輸出序：後者是 BFS，巢在 `for`／`if` 裡
     的呼叫會被排到最後（實測「帳本歸檔體積」「掃描目標齊備」兩道就是這樣被排錯的），
-    那會讓本鎖對真正的順序錯置失去鑑別力，同時又對正確的程式碼假紅。
-    """
+    那會讓本鎖對真正的順序錯置失去鑑別力，同時又對正確的程式碼假紅。"""
     tree = ast.parse(_main_source())
     fn = next(n for n in ast.walk(tree)
               if isinstance(n, ast.FunctionDef) and n.name == "main")
@@ -2548,8 +2550,7 @@ class TestEarlyExitAnnouncesUnrunChecks(unittest.TestCase):
         """🔴 本組鎖的本體：`main()` 內不得有任何**不經 `_bail()`** 的 `return 1`。
 
         繞過 `_bail()` 就等於繞過「尚有 N 道未執行」那句話——而那句話正是這次事故裡
-        缺席的東西。以 AST 判（不是 grep），故 `return 1  # 註解` 之類也躲不掉。
-        """
+        缺席的東西。以 AST 判（不是 grep），故 `return 1  # 註解` 之類也躲不掉。"""
         tree = ast.parse(_main_source())
         fn = next(n for n in ast.walk(tree)
                   if isinstance(n, ast.FunctionDef) and n.name == "main")
@@ -2605,8 +2606,7 @@ class TestEarlyExitAnnouncesUnrunChecks(unittest.TestCase):
     def test_the_real_gate_still_reaches_the_late_checks(self) -> None:
         """端到端：真實 repo 上必須真的跑到**最後一道**，而不是在中途早退後顯綠。
 
-        沒有這一條，上面幾道都可能在「工具早退但 rc 恰為 0」的世界裡全綠。
-        """
+        沒有這一條，上面幾道都可能在「工具早退但 rc 恰為 0」的世界裡全綠。"""
         r = subprocess.run(
             [sys.executable, str(Path(m.__file__))],
             capture_output=True, text=True, encoding="utf-8",

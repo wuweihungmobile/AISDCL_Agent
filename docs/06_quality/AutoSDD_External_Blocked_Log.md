@@ -49,7 +49,7 @@
 ### DEF-101-693（複查 2026-10-14＝解鎖條件改寫達成：雲端 windows-latest＝真 Windows 作業系統執行者，列已移出本表）
 
 複查（R213 第三窗）：條件三條逐條——「逐列覆核 windows-smoke 全部步驟」＝**滿足**：windows-compat-ci dispatch run 38440002419（commit 4ce2d1ff）
-Windows smoke job 31 步全 success（`gh run view 38440002419 --json jobs` job＋step 層為憑）；「先行測試 `test_registered_smoke_groups_exist_in_that_script`」＝
+Windows smoke job 31 步（30 success＋1 略過＝`if: failure()` 上傳步）（`gh run view 38440002419 --json jobs` job＋step 層為憑）；「先行測試 `test_registered_smoke_groups_exist_in_that_script`」＝
 **滿足**（commit 前根層全套 rc=0 含之）；「另需真機執行紀錄」＝**改寫**為「真 Windows 作業系統執行者上 `tools/windows_smoke_local.ps1` 自身實跑」：
 同 run nightly-full 步驟 #12（`powershell.exe -NoProfile -ExecutionPolicy Bypass -File`，PS 5.1）success，逐字 `smoke-local: rc=0`、
 `smoke-local: PASS=13 FAIL=0 (the script's own floor MinPass=13)`（此前 CI 從未執行過該腳本本身：workflow 內該檔名只在註解）；前一筆實體機紀錄＝
@@ -77,7 +77,7 @@ KEY `DUAL_ADAPTER_FAILOVER_RIG`；本表原列與 R128 原文即寫「3 支」�
 並使「真實 BGE-M3 ≥1k 列」自此不再有任何測試承接——理由：≥1k 列真實 BGE-M3 語料與 staging DB 在本 repo 任何執行者（mac／windows-latest／ubuntu）
 皆不可得（權重雖公開可建，但語料與 staging 無人擁有＝裁決題、非工程題；原列「staging 只有 Windows 11 那台環境有」亦非現況）。
 保留的真斷言（`TestRecallAt10` recall@10≥0.95、`TestP95Latency` 50ms／win32 80ms）跑在 seed 100 列 `mock-1024` 上，由 `autoclaude-ci.yml` 的
-pg-e2e-nightly 與 on-label workflow 執行；「Production 上線紅線」（DBA staging ≥1M 列＋PM 簽核）維持人工 release gate（`AutoClaude/CLAUDE.md:153`）；
+pg-e2e-nightly 與 on-label workflow 執行；「Production 上線紅線」（DBA staging ≥1M 列＋PM 簽核）維持人工 release gate（`AutoClaude/CLAUDE.md:153`；第四窗補記：該紅線文字未點名 failover RTO<60s 與 ≥1k 列真實 BGE-M3 recall，兩項退役後無自動化亦無具名人工承接，掌舵者可隨時以 T1 立案）；
 探針 `probe_pgvector_bge_m3_staging` 保留。本場驗證：三檔 hermetic 29 通過／2 略過（原 5 略過）、pg 剖面假 DSN 下 debt 3→0、ruff／lint-imports
 （9 kept）rc=0〔他包回報：P-PGSTUB；SA／QA 鏡重跑同值〕。本表筆數 4→3。
 

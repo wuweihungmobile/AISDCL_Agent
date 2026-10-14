@@ -1,7 +1,9 @@
 # R213 第三窗 可重啟點任務書（2026-10-14 00:5x +08:00；sid `7c51b538-5625-45f6-86e6-c47912d6a93f`；額度五小時窗撞線前寫）
 
+> 〔第四窗 2026-10-14 標記：本檔為史料——下列「還沒做」四項已於 4ce2d1ff／7fd45b8a／39690c53／3bad16fe 完成；重啟者不採信本檔任何待辦語氣，現況見 `docs/06_quality/CrossPlatform_R213_DebtZero_FourParty_W4.md`〕
+
 > 重啟後第一件事＝重驗，不採信本檔任何「已通過」宣稱。重啟指令：`claude -r 7c51b538-5625-45f6-86e6-c47912d6a93f`。
-> 工作樹保全：`git stash create` ＋ tag `r213-w3-wip-preserved`（工作樹本身未動、18 M＋1 新檔 `tools/lib/pytest_skip_census.py` 已 `git add`）。scratchpad 全部報告備份在 `~/.autosdd/r213_window3_scratch/`（關鍵：`helmsman_decisions_wave2.md`、`evid_11_draft.md`、`plan_P1_design.md`、`review_{ARCH,SA,SD,QA}.md`、各包 `*_report.md`、`ppin1_verify_nightly.py`）。
+> 工作樹保全：`git stash create` ＋ tag `r213-w3-wip-preserved`〔第四窗訂正：tag 實際未建，stash commit 8430bf53〕（工作樹本身未動、18 M＋1 新檔 `tools/lib/pytest_skip_census.py` 已 `git add`）。scratchpad 全部報告備份在 `~/.autosdd/r213_window3_scratch/`（關鍵：`helmsman_decisions_wave2.md`、`evid_11_draft.md`、`plan_P1_design.md`、`review_{ARCH,SA,SD,QA}.md`、各包 `*_report.md`、`ppin1_verify_nightly.py`）。
 
 ## 已驗證（本窗本場實跑；數字附座標）
 - 真 launchd nightly RunId `20261014_000025`（`AutoClaude/logs/nightly_mac_20261014_000025.log`）：Docker 自開→PG→測試→收容器→關 Docker 全鏈成功（:335-347、:619、:641-644）；census 三條（:619／:786／:330-331）與 `tools/lib/skip_group_policy.py` 登記逐格相同；彙總 PASS=4 FAIL=1（stage 2 根層全套 3 項失敗／2 模組，皆為本窗編修自造、已修：workflow :2037 訊息字串、`skip_group_policy.py` provenance 兩行；修後 `test_skip_ceiling_ratchet_direction`＋`test_extras_quoting_zsh_safety`＋`test_check_pytest_baseline_sites` 48 項 OK、`check_pytest_baseline_sites` rc=0（114）、`test_doc_loc_baseline_freshness_r60` 281 OK）。

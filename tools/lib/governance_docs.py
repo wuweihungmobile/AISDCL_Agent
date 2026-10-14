@@ -690,6 +690,9 @@ _GOVERNANCE_DOCS = (
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R212_Row5_Findings_QA2.md",
     # R213：掌舵者「做完＝無積欠 BUG 與技術債」輪證據檔（PRD §16.2 清倉、長債結案）  round-label-ok
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R213_DebtZero_FourParty_Evidence.md",
+    # R213 第四窗姊妹檔（DEF-101-587 體例）：三問零信任重驗＋乾淨樹 nightly  round-label-ok
+    # 真跑＋兩鏡判決＋理論洞 W4-*；主檔已越 warn 線，只留一行指針。即刻登記。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R213_DebtZero_FourParty_W4.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/{CrossPlatform,Quota}_*.md`。這**不是**把具名
