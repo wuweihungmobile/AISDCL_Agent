@@ -707,10 +707,12 @@ def _used(usage: dict) -> int:
 
 
 def session_profile(path: Path, lookback: int = DEFAULT_WINDOW) -> dict:
-    """單趟掃描主執行緒（非 isSidechain）：tool_use 序列與阻斷、助理文字、簡報、最後 usage。
+    """單趟掃描主執行緒（非 isSidechain）：tool_use 序列與阻斷、助理文字、簡報、最後 usage、最後一次
+    壓縮時刻 `compact_ts`（`system`／`compact_boundary` 的 `timestamp`，沒有＝None；DEF-200-533）。
     `lookback`＝宣稱往回看幾個 tool_result 找阻斷（②′ 讀 params.json 的 `claim_lookback`）。"""
     prof: dict = {"sid": path.stem, "entry": "", "start": None, "cwd": "", "uses": [],
-                  "texts": [], "brief": False, "usage": None, "usage_ts": None, "pm": ""}
+                  "texts": [], "brief": False, "usage": None, "usage_ts": None, "pm": "",
+                  "compact_ts": None}
     by_id: dict[str, dict] = {}
     recent: deque[bool] = deque(maxlen=max(1, lookback))  # 最近 lookback 個 tool_result 是否為阻斷
     for rec in iter_records(path):
@@ -723,6 +725,8 @@ def session_profile(path: Path, lookback: int = DEFAULT_WINDOW) -> dict:
         att = rec.get("attachment") if isinstance(rec.get("attachment"), dict) else {}
         if not prof["uses"] and att.get("hookName") == "SessionStart:startup":
             prof["brief"] = prof["brief"] or "[SDD-CTX-GUARD]" in str(att)
+        if rec.get("type") == "system" and rec.get("subtype") == "compact_boundary":
+            prof["compact_ts"] = _record_time(rec) or prof["compact_ts"]
         role, blocks = _blocks(rec)
         if role == "assistant" and isinstance(rec["message"].get("usage"), dict):
             prof["usage"], prof["usage_ts"] = _used(rec["message"]["usage"]), _record_time(rec)
@@ -780,29 +784,38 @@ def judge_block(use: dict, cwd: str, bdg, prm: dict) -> str:
 
 
 def feed_diffs(pop: list[dict], limit: int, now: datetime,
-               quiescent_s: float) -> tuple[list[int], int]:
+               quiescent_s: float) -> tuple[list[int], int, int]:
     """最近 limit 支（feed 在、且不舊於逐字稿最後一筆 usage）的 feed used 減逐字稿 used。
 
     「不舊於」以秒為解析度（feed 的 `ts` 只到秒、逐字稿到毫秒）。只納入**靜止**配對：
     `now − max(feed.ts, 逐字稿最後 usage 時刻) ≥ quiescent_s`——在途視窗的逐字稿落盤落後 feed 一則
     （實測 3～19 秒），差值是一則訊息的增量、不是兩個來源不一致；不靜止者排除並計數。
-    回 `(差值, 因不靜止而排除的配對數)`。"""
+    回 `(差值, 因不靜止而排除的配對數, 壓縮後重設 feed 數)`。DEF-200-533：全零 feed＝compaction 後～
+    下一次回覆前 harness 刻意歸零的重設態（真實 context≈壓縮後 token；逐字稿最後 usage 為壓縮前），
+    不是兩源不一致，也不是閒置重畫。判準鍵是**壓縮證據**：feed used＝0、逐字稿 usage＞0、且最後
+    usage 之後有 `compact_boundary`（`session_profile` 的 `compact_ts`）⇒ 不入差值、單獨計數、與不
+    靜止者同佔最近 limit 支的窗位；沒有壓縮證據的全零、偏低的非零 feed 照常入差值（才偵測得到寫端
+    ／harness 真壞）。`current_usage` 為 null（首回覆前／`/compact` 後）＝量不到，不入 N。"""
     from statusline_context_feed import context_feed_path  # 唯一的 feed 路徑實作，不另拼
 
-    pairs: list[tuple[int, bool]] = []  # 新→舊：(差, 靜止嗎)
+    pairs: list[tuple[int | None, bool]] = []  # 新→舊：(差；None＝壓縮後重設 feed, 靜止嗎)
     for p in reversed(pop):
         try:
             doc = json.loads(context_feed_path(p["sid"]).read_text(encoding="utf-8"))
             ts = datetime.fromisoformat(doc["ts"])
             fresh = (p["usage_ts"] - ts).total_seconds() < 1  # feed ts 只到秒、逐字稿到毫秒
-            diff = _used(doc["context_window"]["current_usage"]) - p["usage"]
+            used = _used(doc["context_window"]["current_usage"])
+            diff = used - p["usage"]
             quiet = (now - max(ts, p["usage_ts"])).total_seconds() >= quiescent_s
-        except (OSError, ValueError, KeyError, TypeError):
-            continue  # 無 feed／壞 feed／無 usage＝量不到，不入 N
+            reset = (used == 0 and p["usage"] > 0 and p.get("compact_ts") is not None
+                     and p["compact_ts"] > p["usage_ts"])  # 最後 usage 之後有壓縮
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
+            continue  # 無 feed／壞 feed／current_usage 為 null／無 usage＝量不到，不入 N
         if fresh and doc.get("session_id") == p["sid"]:
-            pairs.append((diff, quiet))
+            pairs.append((None if reset else diff, quiet))
     pairs = pairs[:limit]
-    return [d for d, quiet in pairs if quiet], sum(not quiet for _, quiet in pairs)
+    real = [(d, quiet) for d, quiet in pairs if d is not None]
+    return [d for d, quiet in real if quiet], sum(not q for _, q in real), len(pairs) - len(real)
 
 
 def first_check_index(uses: list[dict], planner: re.Pattern, feed: re.Pattern) -> int | None:
@@ -845,8 +858,8 @@ def five_question(profs: list[dict], since: datetime | None, entries: set[str], 
     idx = [(p["sid"][:8], first_check_index(p["uses"], planner, feed), p["brief"])
            for p in pop if len(p["uses"]) >= prm["q2_max_index"]]
     late = [r[:2] for r in idx if r[1] is None or r[1] > prm["q2_max_index"]]
-    diffs, busy = feed_diffs(pop, prm["q3_n"], datetime.now().astimezone(),
-                             prm["q3_quiescent_seconds"])
+    diffs, busy, reset = feed_diffs(pop, prm["q3_n"], datetime.now().astimezone(),
+                                    prm["q3_quiescent_seconds"])
 
     def show(label: str, n: int, need: int, detail: str, bad: bool = False, human: bool = False):
         """FAIL 優先；其次需人工複核；樣本數不足就誠實說量不到，不寫 PASS。"""
@@ -870,7 +883,7 @@ def five_question(profs: list[dict], since: datetime | None, entries: set[str], 
          f"逾期或從未 {len(late)}／{len(idx)} {late}；有簡報 {sum(r[2] for r in idx)}", bool(late))
     show("Q3′ feed 差", len(diffs), prm["q3_min_pairs"],
          f"{len(diffs)} 對；max|差|={max(map(abs, diffs), default=0)} {diffs}；"
-         f"NOT-QUIESCENT {busy}",
+         f"NOT-QUIESCENT {busy}；壓縮後重設 feed {reset}（compaction 後尚無新回覆、不入 N）",
          any(abs(d) > prm["q3_tolerance_tokens"] for d in diffs))
     print("  Q4′ 本檔不量；九格見 --protocol-status（讀本機 trace_dir 的丙案 JSON；別台的先拷來）")
     print(f"  非 hook 阻斷（auto-mode／人拒絕，不入 Q1′）：{dict(other) or '無'}")

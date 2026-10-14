@@ -6,8 +6,7 @@
 變成 repo 裡的檔案 ⇒ 靜態掃描器結構上看不見它，所以本鎖每一條壞掉時都是**靜默的**。
 
 🔴 立案敘事已逐字搬至 `docs/06_quality/CrossPlatform_R86_Guard_Repin_Evidence.md`
-§C（棘輪自訂淨額 ≤0 出口）；per-assertion WHY 未搬，仍在各 class／method docstring 內。
-"""
+§C（棘輪自訂淨額 ≤0 出口）；per-assertion WHY 未搬，仍在各 class／method docstring 內。"""
 from __future__ import annotations
 
 import ast
@@ -87,8 +86,7 @@ def _hook_env_reads() -> set[str]:
 class TestItCatchesTheRelayedNumber(unittest.TestCase):
     """鑑別力：真實面普查 13 筆命中裡有 12 筆是這一型（把別包交件的數字當自己的話講）。
 
-    這些樣本是從本機逐字稿抽出後**去識別並改寫**過的形態樣本，不是原文。
-    """
+    這些樣本是從本機逐字稿抽出後**去識別並改寫**過的形態樣本，不是原文。"""
 
     RELAYED = (
         "修復包 2 完成，全套測試 1703 passed / 0 failed。",  # baseline-ok:語料
@@ -107,8 +105,7 @@ class TestItCatchesTheRelayedNumber(unittest.TestCase):
     def test_the_same_number_is_silent_once_it_really_is_in_my_output(self) -> None:
         """對照組：同一個判決、數字真的來自本場輸出 ⇒ 必須不命中。
 
-        沒有這一條，「判準永遠命中」與「判準有鑑別力」的 rc 一模一樣。
-        """
+        沒有這一條，「判準永遠命中」與「判準有鑑別力」的 rc 一模一樣。"""
         self.assertEqual(
             G.unsourced_verdict_hits("回歸 3748 passed。", _OWN_OUTPUT), [])  # baseline-ok:語料
 
@@ -120,8 +117,7 @@ class TestTheMeasuredFalsePositiveShapesStayGreen(unittest.TestCase):
         """`3,748 passed` 與輸出裡的 `3748` 必須對得上。  # baseline-ok:語料
 
         不做正規化時 `\\b(\\d+)` 只抓到 `748`，於是每一個上千的測試數都變成假紅——
-        而本 repo 的宣稱幾乎都是上千的測試數 ⇒ 這一條沒守住，判準等於全噪音。
-        """
+        而本 repo 的宣稱幾乎都是上千的測試數 ⇒ 這一條沒守住，判準等於全噪音。"""
         self.assertEqual(
             G.unsourced_verdict_hits("回歸 3,748 passed。", _OWN_OUTPUT), [])  # baseline-ok:語料
 
@@ -139,8 +135,7 @@ class TestThousandsNormalisationDoesNotFuseNeighbours(unittest.TestCase):
     """正規化只准吃**數字之間的半角逗號**。
 
     第一版連全角「，」一起吃 ⇒ `rc=0，44 skip` 被併成 `rc=044`，判準自己生出一筆假紅。
-    這一條守的是「修假紅的動作不要製造新假紅」。
-    """
+    這一條守的是「修假紅的動作不要製造新假紅」。"""
 
     def test_a_full_width_comma_is_not_a_thousands_separator(self) -> None:
         self.assertEqual(G.normalize_digits("rc=0，44 skip"), "rc=0，44 skip")
@@ -160,8 +155,7 @@ class TestUnattendedRunsGetTheNarrowMarkerSet(unittest.TestCase):
 
     立案：句子裡塞一個「宣稱」就能讓判準閉嘴，而無人看管的回合可以自己寫出那兩個字
     （同 `# git-guard-ok:` 的已知弱點與其 `AUTOSDD_UNATTENDED` 處置）。方括號那兩個
-    字面在 `docs/04_planning/` 有成文定義、亂標會在收輪對帳時被逐列核出來。
-    """
+    字面在 `docs/04_planning/` 有成文定義、亂標會在收輪對帳時被逐列核出來。"""
 
     def test_a_soft_marker_stops_suppressing_when_unattended(self) -> None:
         sentence = "QA 宣稱 9999 passed。"  # baseline-ok:語料
@@ -182,8 +176,7 @@ class TestTheProcessNeverBlocksAndAlwaysFailsOpen(unittest.TestCase):
     這是本檔最重要的一組。Stop hook 若回 exit 2 會把回合推回模型手上，而本判準治的是
     「話講得太滿」不是「工作沒做完」——推回去只會生出更多話；且阻斷迴圈的唯一煞車是
     `stop_hook_active`。再加上 `.claude/settings.json` description 記載過的 P0：
-    hook 誤觸 deny 會把所有工具硬鎖死。
-    """
+    hook 誤觸 deny 會把所有工具硬鎖死。"""
 
     def _run(self, payload: str, env_extra: dict | None = None):
         return subprocess.run([sys.executable, str(_HOOK)], input=payload,
@@ -194,8 +187,7 @@ class TestTheProcessNeverBlocksAndAlwaysFailsOpen(unittest.TestCase):
         """壞 JSON／空輸入／缺欄位三種退化 payload 一律靜默放行。
 
         刻意**不**採 fail-closed：Stop 是每一則回覆都會經過的路徑，對讀不出內容的
-        payload 出聲會變成「一個永遠在響的警報」。
-        """
+        payload 出聲會變成「一個永遠在響的警報」。"""
         for payload in ("", "not json", "{}", '{"last_assistant_message":"x"}'):
             with self.subTest(payload=payload):
                 done = self._run(payload)
@@ -232,8 +224,7 @@ class TestTheProcessNeverBlocksAndAlwaysFailsOpen(unittest.TestCase):
         `test_check_defect_log_crossref.py` 內
         `test_no_root_test_asserts_absence_against_a_whole_live_document`
         釘住這個反模式，且記載過它曾逼得帳本改寫自己的缺陷描述）——本檔的檔頭正是要
-        逐字說明「為何不與那幾個變數共用」，文字面判準會把那段說明本身判成違規。
-        """
+        逐字說明「為何不與那幾個變數共用」，文字面判準會把那段說明本身判成違規。"""
         read_names = _hook_env_reads()
         self.assertIn("AUTOSDD_CLAIM_GUARD_OFF", read_names,
                       "本守衛必須有自己的逃生口")
@@ -255,8 +246,7 @@ class TestTruncationBiasesTowardsSilenceNotFalseRed(unittest.TestCase):
     """證據面取不到時必須**放行**，不得判違規。
 
     方向性很關鍵：命中的定義是「值在證據面裡找不到」⇒ 證據面愈小、命中愈多。所以
-    截斷／讀不到一律偏向假紅，而假紅會讓這道鎖被整個關掉。
-    """
+    截斷／讀不到一律偏向假紅，而假紅會讓這道鎖被整個關掉。"""
 
     def test_an_oversized_transcript_makes_the_hook_stay_quiet(self) -> None:
         with self.assertRaises(ValueError):
@@ -286,8 +276,7 @@ class TestTheR89ErrorLiteralMechanismJudgement(unittest.TestCase):
     """`DEF-200-123`：把**錯誤訊息的字面**當成機制結論。
 
     事故敘事搬至 CrossPlatform_R204_StopHook_Negation_FalsePositive_Fix_Evidence.md〈附錄 B〉§2。
-    本判準治**形態**，內容那一半治在 `tools/probe/variate_contrast.py`。
-    """
+    本判準治**形態**，內容那一半治在 `tools/probe/variate_contrast.py`。"""
 
     def test_the_incident_sentence_is_flagged(self) -> None:
         """缺陷復發即紅——沒有這一條，整支判準可以恆回 `[]` 而 rc 一模一樣。"""
@@ -383,8 +372,7 @@ class TestTheEscapeHatchIsArithmeticNotPresence(unittest.TestCase):
 
     所以這裡的契約是：**時間戳自己過期 ⇒ 仍命中，且訊息要帶出它的 age**；只有「真的剛量」
     才靜音。第二條（真的剛量 → 靜音）是逃生口該有的紅綠自證，缺它就無法證明抑制器有
-    鑑別力而不是恆真。
-    """
+    鑑別力而不是恆真。"""
 
     def _hits(self, minutes_ago: float, *, axis: str = "session"):
         now = datetime(2026, 8, 23, 12, 0, tzinfo=UTC)
@@ -409,8 +397,7 @@ class TestTheEscapeHatchIsArithmeticNotPresence(unittest.TestCase):
     def test_a_stamp_that_really_is_fresh_is_the_silent_case(self) -> None:
         """逃生口該有的紅綠自證：真的剛量過 ⇒ 回空清單。
 
-        沒有這一條，上一條可以靠「抑制器恆假」通過——那不是逃生口，是把它拿掉。
-        """
+        沒有這一條，上一條可以靠「抑制器恆假」通過——那不是逃生口，是把它拿掉。"""
         self.assertEqual(self._hits(0.5), [],
                          "剛量到的讀數被判過期了 ⇒ 這個守衛會擋到讓人無法工作")
 
@@ -419,8 +406,7 @@ class TestTheEscapeHatchIsArithmeticNotPresence(unittest.TestCase):
 
         `session` 的 TTL 約兩分鐘、`seven_day` 約 23 分鐘 ⇒ 同一個 age（10 分鐘）在快軸上
         必須命中、在慢軸上必須靜音。單一門檻的代價是量出來的：複審實測 35% 的發火只由慢軸
-        貢獻，而慢軸的中位漂移比快軸低一個數量級。
-        """
+        貢獻，而慢軸的中位漂移比快軸低一個數量級。"""
         self.assertEqual([h["kind"] for h in self._hits(10, axis="session")], ["stale"])
         self.assertEqual(self._hits(10, axis="seven_day"), [],
                          "慢軸被快軸的門檻誤判 ⇒ 這就是單一門檻製造的那 35% 假紅")
@@ -446,8 +432,7 @@ class TestPerAxisThresholdsAreDerivedNotPicked(unittest.TestCase):
         """判準：`TTL == round(3600 / 該軸實測中位漂移)`。
 
         這一條會在「有人直接改秒數」時轉紅——那是本組存在的唯一理由：一個挑出來的門檻
-        沒有辦法被複審，而一個導出來的門檻只要重新量就能重新裁決。
-        """
+        沒有辦法被複審，而一個導出來的門檻只要重新量就能重新裁決。"""
         for axis, ttl in G.PACE_TTL_S.items():
             with self.subTest(axis=axis):
                 rate = G.PACE_DRIFT_MEDIAN_PP_PER_HOUR[axis]
@@ -458,8 +443,7 @@ class TestPerAxisThresholdsAreDerivedNotPicked(unittest.TestCase):
 
         複審給了兩條路：導出 per-axis TTL，或**照實登記已量測的假紅類別**。本檔走後者，
         而且刻意不採信「那個讀數在物理上不會過期」——同一份重跑實測 `weekly_scoped`
-        p90=9.375、max=31.034 pp/hr ⇒ 它會動。判它是假紅，宣稱它不會過期是假話。
-        """
+        p90=9.375、max=31.034 pp/hr ⇒ 它會動。判它是假紅，宣稱它不會過期是假話。"""
         zero = [a for a, r in G.PACE_DRIFT_MEDIAN_PP_PER_HOUR.items() if r == 0]
         self.assertTrue(zero, "沒有零漂移軸的話這一條就沒有守到東西")
         for axis in zero:
@@ -476,8 +460,7 @@ class TestPerAxisThresholdsAreDerivedNotPicked(unittest.TestCase):
         差集刻意**釘成具名集合而不是空集合**：`nimbus_quill` 是伺服器真的會吐、而 PRD 任何
         列舉都沒有的桶（`quota_policy.py` 的 `KNOWN_KINDS` 旁註逐字記載這件事，並指出它
         今天已經在參與 cap 聚合）⇒ hook 認得它是對的。把差集斷言成空集合會逼下一個人
-        「為了讓紅變綠」把那個軸從 hook 拿掉，而那是**縮小守衛的射程**去迎合一個鎖。
-        """
+        「為了讓紅變綠」把那個軸從 hook 拿掉，而那是**縮小守衛的射程**去迎合一個鎖。"""
         sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
         import quota_policy  # noqa: PLC0415
 
@@ -508,8 +491,7 @@ class TestTheTriggerCoversTheMeasuredBypasses(unittest.TestCase):
 
         量出來的理由：裸數字的母體是帶 `%` 的 **2.66 倍**（696 vs 418 次），而它的距離
         p50=29（帶 `%` 的是 2）⇒ 那個數字**通常根本不是這個軸的值**。判它會讓觸發面暴增
-        且多數是雜訊，而「一個永遠在響的警報等於沒有警報」本 repo 已有判例。
-        """
+        且多數是雜訊，而「一個永遠在響的警報等於沒有警報」本 repo 已有判例。"""
         self.assertEqual(G.stale_pace_hits("kind=session 16 剩 128 分鐘", [], _NOW), [],
                          "裸數字若開始命中，請先重跑普查再改這一條")
 
@@ -549,8 +531,7 @@ class TestTheUnanchoredBlindSpotIsCountedNotHidden(unittest.TestCase):
     """M7：「錨不到＝放行」製造反向誘因（照實引述舊數字被唸、憑空捏一個不會）。
 
     判準無法在散文平面上分辨「捏的」與「輸出被截斷」，所以這裡守的不是「抓到它」，
-    是**它有數字**——盲區可數才可能在下一輪被裁決。
-    """
+    是**它有數字**——盲區可數才可能在下一輪被裁決。"""
 
     def test_an_unanchorable_reading_is_its_own_class_not_silently_dropped(self) -> None:
         hits = G.stale_pace_hits(_pace_line("session", "77"), [], _NOW)
@@ -564,8 +545,7 @@ class TestTheUnanchoredBlindSpotIsCountedNotHidden(unittest.TestCase):
         本輪複審現查：全庫 trace 的唯一讀者是一支要人記得跑的手動 probe ⇒ 那個數字只在
         有人想起來時才存在。這一條釘的就是「寫進去的同一次執行就讀回來、並出現在送給模型
         的那則訊息裡」。誠實劃界：它只讀自己寫的那一份、只出聲，**沒有任何閘門會因為這個
-        數字轉紅**——那需要一個穩定的分母，本機母體不是。
-        """
+        數字轉紅**——那需要一個穩定的分母，本機母體不是。"""
         with tempfile.TemporaryDirectory() as tmp:
             old = os.environ.get("AUTOSDD_TRACE_DIR")
             os.environ["AUTOSDD_TRACE_DIR"] = tmp
@@ -665,8 +645,7 @@ class TestTheSessionStartBriefIsAnAnchorForTheStaleReadingJudgement(unittest.Tes
     WHY：新視窗第一回合的額度數字只在 SessionStart 簡報（hook attachment，非 tool_result）裡，
     第三判準的錨點此前只認 tool_result ⇒ 如實轉述也被唸「找不到任何錨點」並多跑一回合。反方向
     一起守，否則簡報當錨點就成了新的隨機靜音器：憑空數字、值不符、過期轉述、降級簡報、別的
-    hook 事件都仍要出聲；第五判準對簡報的排除（DEF-200-430）不動。
-    """
+    hook 事件都仍要出聲；第五判準對簡報的排除（DEF-200-430）不動。"""
 
     _CLAIM = "session 27%（band=free）"
 
@@ -806,16 +785,14 @@ class TestTheNakedVerdictWithNoEvidenceIsFlagged(unittest.TestCase):
 
         這一條是本組的生死線：把它判紅就是把本 repo 的常態當違規，而
         `audit_session.py` 自陳「不得接成閘門」的原因正是它那個判準會這樣做
-        （實測：往回看 3 個 tool_result 的證據面 ⇒ 28.4% 判無佐證）。
-        """
+        （實測：往回看 3 個 tool_result 的證據面 ⇒ 28.4% 判無佐證）。"""
         self.assertEqual(G.naked_verdict_hits(_NAKED, _OWN_OUTPUT), [],
                          "本場真的跑過工具卻被判赤裸宣稱 ⇒ 這道守衛會被整個關掉")
 
     def test_real_backed_wrap_ups_from_the_corpus_stay_silent(self) -> None:
         """全母體 57 句堆疊型宣稱**全部**發生在有工具輸出的場次 ⇒ 全部必須靜默。
 
-        那個 57 就是鑑別力的憑證：57 → 0 是**證據面**在抑制，不是詞表在挑。
-        """
+        那個 57 就是鑑別力的憑證：57 → 0 是**證據面**在抑制，不是詞表在挑。"""
         for sentence in _BACKED_WRAP_UPS:
             with self.subTest(sentence=sentence):
                 self.assertEqual(G.naked_verdict_hits(sentence, _OWN_OUTPUT), [],
@@ -827,8 +804,7 @@ class TestTheNakedVerdictWithNoEvidenceIsFlagged(unittest.TestCase):
 
         三筆的成因是結構性的（意圖動詞／引述任務書體例／談論那個詞本身），全部不是
         斷言。門檻改回 1 就是把它們收回來——而「一個永遠在響的警報等於沒有警報」
-        本 repo 已有判例。
-        """
+        本 repo 已有判例。"""
         self.assertEqual(G.NAKED_MIN_TOKENS, 2)
         for sentence in _SINGLE_WORD_FALSE_REDS:
             with self.subTest(sentence=sentence):
@@ -839,8 +815,7 @@ class TestTheNakedVerdictWithNoEvidenceIsFlagged(unittest.TestCase):
         """引號內的詞是**被談論的對象**：3 筆假紅有 1 筆正是這一型。
 
         紅綠自證的另一半在下一行——拿掉引號、湊足兩個詞就必須命中，否則這個抑制器
-        等於把判準關掉。
-        """
+        等於把判準關掉。"""
         self.assertEqual(
             G.naked_verdict_hits("任務書要求寫明「已驗證」與「全綠」兩個字樣。", ""),
             [], "引號內的詞被當成斷言了")
@@ -851,8 +826,7 @@ class TestTheNakedVerdictWithNoEvidenceIsFlagged(unittest.TestCase):
         """邊界：帶出處標記的轉述必須放行（與第一個判準同一個逃生口語意）。
 
         無人看管時抑制詞縮到只認方括號標記——句子裡塞一個「回報」就能靜音，而無人
-        看管的回合可以自己寫出那兩個字（同 `# git-guard-ok:` 的已知弱點與處置）。
-        """
+        看管的回合可以自己寫出那兩個字（同 `# git-guard-ok:` 的已知弱點與處置）。"""
         for sentence in (f"`[他包回報]` {_NAKED}", f"修復包 C 回報：{_NAKED}",
                          f"QA 宣稱{_NAKED}"):
             with self.subTest(sentence=sentence):
@@ -869,8 +843,7 @@ class TestTheNakedVerdictWithNoEvidenceIsFlagged(unittest.TestCase):
         """迴歸：新判準不得動到第一個判準的**任何**方向（含正反兩面）。
 
         兩個判準的證據面不同（值 vs 有無輸出），共用同一份 `PROVENANCE_RE` 與
-        `_SENTENCE_RE` ⇒ 動到抑制詞或斷句就會同時改壞兩邊，而只有一邊有人看。
-        """
+        `_SENTENCE_RE` ⇒ 動到抑制詞或斷句就會同時改壞兩邊，而只有一邊有人看。"""
         self.assertTrue(G.unsourced_verdict_hits("修復包 2 完成，1703 passed。",  # baseline-ok:語料
                                                  _OWN_OUTPUT))
         self.assertEqual(
@@ -1453,14 +1426,12 @@ def _row(rnd: int, day: str, sha: str = "x", new: tuple = (), excluded: tuple = 
             "window_reset": False, "new_p_le2": list(new), "excluded_p_le2": list(excluded),
             "p1": 0, **extra}
 
-
 class TestTheFiveQuestionMeasurerReadsItsCriteriaFromParams(unittest.TestCase):
     """`tools/probe/audit_session.py` 的②′ 判準常數住 `params.json`，碼裡不得再寫死。
 
     WHY：params.json 入協定 manifest（改它＝重置窗口），量測器碼不入——常數若寫死在碼裡，
     定義漂移不會觸發任何重置，窗口內幾輪的數字就悄悄不可比。每條斷言都是「改 params 值、
-    量測輸出跟著變」的雙向對照，不是檢查某個字串存在。
-    """
+    量測輸出跟著變」的雙向對照，不是檢查某個字串存在。"""
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -1527,13 +1498,15 @@ class TestTheFiveQuestionMeasurerReadsItsCriteriaFromParams(unittest.TestCase):
                       "最小母體沒有讀 params")
 
     def _feed_pair(self, directory: str, sid: str, usage: int, usage_ts: datetime,
-                   feed_ts: datetime, feed_used: int) -> dict:
+                   feed_ts: datetime, feed_used: int | None,  # None＝官方契約的 null
+                   compact_ts: datetime | None = None) -> dict:  # 逐字稿最後一次壓縮時刻
         """有 feed 檔的 session 輪廓：逐字稿尾端 (usage, usage_ts)、feed (feed_used, feed_ts)。"""
+        cu = None if feed_used is None else {"input_tokens": feed_used}
         doc = {"session_id": sid, "ts": feed_ts.isoformat(timespec="seconds"),
-               "context_window": {"current_usage": {"input_tokens": feed_used}}}
+               "context_window": {"current_usage": cu}}
         Path(directory, f"{sid}.json").write_text(json.dumps(doc), encoding="utf-8")
         return {**_profile(sid, [_use("Read", file_path="x")]),
-                "usage": usage, "usage_ts": usage_ts}
+                "usage": usage, "usage_ts": usage_ts, "compact_ts": compact_ts}
 
     def test_the_q3_quiescent_gate_excludes_pairs_from_an_in_flight_window(self) -> None:
         """DEF-200-482：Q3′ 只納入靜止配對（在途視窗的差值是一則訊息的增量，100 token 的容忍對它無
@@ -1554,14 +1527,44 @@ class TestTheFiveQuestionMeasurerReadsItsCriteriaFromParams(unittest.TestCase):
             behind = self._feed_pair(tmp, "behind", 50_000, now - timedelta(seconds=400),
                                      now - timedelta(seconds=405), 50_000)  # feed 比逐字稿舊
             pop = [behind, same, quiet, busy]  # `feed_diffs` 由新往舊取
-            self.assertEqual(self.audit.feed_diffs(pop, 10, now, 60), ([0, 0], 1))
-            self.assertEqual(self.audit.feed_diffs(pop, 10, now, 0), ([18_767, 0, 0], 0),
+            self.assertEqual(self.audit.feed_diffs(pop, 10, now, 60), ([0, 0], 1, 0))
+            self.assertEqual(self.audit.feed_diffs(pop, 10, now, 0), ([18_767, 0, 0], 0, 0),
                              "控制組：閘門關掉時在途窗的差值必須現形")
-            self.assertEqual(self.audit.feed_diffs(pop, 10, now, 10_000), ([], 3), "都不靜止")
+            self.assertEqual(self.audit.feed_diffs(pop, 10, now, 10_000), ([], 3, 0), "都不靜止")
             gated = self._five([quiet, busy], q3_min_pairs=1)
             opened = self._five([quiet, busy], q3_quiescent_seconds=0)
         self.assertIn("Q3′ feed 差  PASS  1 對；max|差|=0 [0]；NOT-QUIESCENT 1", gated)
         self.assertIn("Q3′ feed 差  FAIL  2 對；max|差|=18767 [18767, 0]；NOT-QUIESCENT 0", opened)
+
+    def test_an_all_zero_feed_after_compaction_is_a_reset_not_a_disagreement(self) -> None:
+        """DEF-200-533：compaction 後～下一次回覆前 harness 把 feed 歸零（逐字稿最後 usage＝壓縮前）
+        ＝重設態，不是兩源不一致：不入差值、單獨計數、佔最近 limit 支的窗位。判準鍵是壓縮證據（最後
+        usage 之後有 compact_boundary）而非「全零」症狀：無壓縮證據的全零、舊壓縮、有壓縮但非零偏低
+        都照常入差值；`current_usage` 為 null＝量不到，不崩、不入 N 也不計數。"""
+        import statusline_context_feed as scf  # noqa: PLC0415 — `tools/` 由載入量測器時進 sys.path
+        now = datetime.now().astimezone()
+        old, ts, mid, ancient = (now - timedelta(seconds=s) for s in (700, 600, 650, 800))
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.dict(os.environ, {scf.FEED_DIR_ENV: tmp}):
+            rows = (("real", 90_000, 90_000, None), ("bare", 50_000, 0, None),
+                    ("low", 80_000, 75_000, mid), ("null", 50_000, None, mid),
+                    ("stale", 325_376, 0, None), ("reset", 325_376, 0, None))
+            real, bare, low, null, _, _ = (
+                self._feed_pair(tmp, s, u, old, ts, f, c) for s, u, f, c in rows)
+            call = _call("t1", old.isoformat(), "Read", file_path="x")  # stale／reset：真逐字稿
+            call["message"]["usage"] = {"input_tokens": 325_376}
+            tail = {"type": "system", "subtype": "compact_boundary", "timestamp": mid.isoformat()}
+            old_tail = {**tail, "timestamp": ancient.isoformat()}  # 先前一次壓縮：在 usage 之前
+            noise = {**tail, "subtype": "turn_duration"}  # 別種 system 記錄不是壓縮證據
+            prof = self.audit.session_profile
+            stale = prof(_write_jsonl(Path(tmp, "stale.jsonl"), [old_tail, call, noise]))
+            reset = prof(_write_jsonl(Path(tmp, "reset.jsonl"), [old_tail, call, tail]))
+            diffs = self.audit.feed_diffs([real, null, low, stale, bare, reset], 10, now, 60)
+            self.assertEqual(diffs, ([-50_000, -325_376, -5_000, 0], 0, 1))
+            self.assertEqual(self.audit.feed_diffs([real, reset], 1, now, 60), ([], 0, 1), "佔窗位")
+            shown = self._five([real, reset], q3_min_pairs=1)
+        self.assertIn("Q3′ feed 差  PASS  1 對；max|差|=0 [0]；NOT-QUIESCENT 0；"
+                      "壓縮後重設 feed 1（compaction 後尚無新回覆、不入 N）", shown)
 
     def test_selftest_rc_is_zero_only_for_a_table_that_is_right_and_can_discriminate(self) -> None:
         """DEF-200-482：`--selftest` 此前有「舊判準」欄（＝同一支函式）與 `舊判準零錯 ⇒ rc=1`，兩欄
@@ -1637,14 +1640,12 @@ class TestTheFiveQuestionMeasurerReadsItsCriteriaFromParams(unittest.TestCase):
             self.assertIn("Q2′ 首查序號  PASS", q2(_use("Read", file_path=path)), path)
         self.assertIn("Q2′ 首查序號  FAIL", q2(_use("Read", file_path="notes/context_feed.md")))
 
-
 class TestTheFiveQuestionMeasurerCliContracts(unittest.TestCase):
     """`tools/probe/audit_session.py` 的 CLI 契約：切片旗標有效、`--parity` 在真實窗口不恆紅。
 
     WHY：`--five-question` 曾在讀 `--record-since` 之前就 return（旗標被靜默吞掉，help 卻要人
     分期比較一律用它）；`--parity` 曾把零 tool_use 的 session 算成崩塌（每驗一次載具就新增一支
-    ⇒ rc 在真實窗口恆為 1）。
-    """
+    ⇒ rc 在真實窗口恆為 1）。"""
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -1705,8 +1706,7 @@ class TestTheProtocolStatusPrintsLedgerIntegrityAndQ4Evidence(unittest.TestCase)
 
     WHY：severity.md 曾宣稱「完整性閘…機械紅」卻沒有任何實作，Q4′ 證據也只能人讀九格；現在
     兩者都由量測器印出（rc 恆 0、不接閘門）。🔴 量不到（缺鍵／缺檔／git 失敗）必須印成「量不到」
-    而不是通過——空洞的綠比紅更危險。
-    """
+    而不是通過——空洞的綠比紅更危險。"""
 
     @classmethod
     def setUpClass(cls) -> None:

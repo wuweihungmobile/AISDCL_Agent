@@ -45,7 +45,7 @@ manifest＝本目錄每個檔的（相對路徑, sha256(內容；CRLF 先正規�
 基線＝`params.json` 的 `symptom_baseline_since`，值由該檔現查、以**原字串**代入、不抄進本檔——PowerShell 的
 `ConvertFrom-Json` 會把 ISO 字串轉成 DateTime 而丟掉格式，`--record-since` 直接 traceback rc=1；用 Read／`Select-String` 取字串）：
 1. `python tools/probe/audit_session.py --five-question --exclude-self --record-since <symptom_baseline_since> --entrypoint cli,claude-vscode,sdk-cli`
-   → Q1′a（修法後 MISBLOCK 0）、Q1′b（裸宣稱 0）、Q1′c（≤ `q1c_gate`）、Q3′（全對 ≤ `q3_tolerance_tokens`）四行皆 PASS
+   → Q1′a（修法後 MISBLOCK 0）、Q1′b（裸宣稱 0）、Q1′c（≤ `q1c_gate`）、Q3′（全對 ≤ `q3_tolerance_tokens`；全零 feed 且逐字稿最後 usage 之後有 `compact_boundary`＝compaction 後～下一次回覆前 harness 刻意歸零的重設態（真實 context≈`compactMetadata.postTokens`），與逐字稿壓縮前最後 usage 不可比、不是兩源不一致，佔最近 `q3_n` 支窗位但不入 N、只計數印出；無壓縮證據的全零照常比對，DEF-200-533）四行皆 PASS
    （合併真實層與探針層：探針是真實 headless session，開窗行為同屬症狀面；NOT-EVALUABLE＝量不到、不算達標）。Q1′c 量的是「新窗前 `q1c_first_calls` 個呼叫有沒有被 hook 擋」——分子**含正確攔截**（誤擋另由 Q1′a 量），視窗＝母體最近 `q1c_n` 支；故探針不得要求執行機禁用的工具（見〈目錄〉`<shell_read>`），否則 3 支 PB／PC 即可把 0/10 推到 2/10、章程 9 支即自造 FAIL。
 2. 同指令**不帶** `--entrypoint`（真實層 cli／claude-vscode）→ Q2′ 行 PASS（n ≥ `q2_min_n`、逾期 0；探針被告知先現查，
    不得混入分母；分母只含 ≥ `q2_max_index` 個工具呼叫的 session，呼叫數不足的窗不入分母也不入 n）。
