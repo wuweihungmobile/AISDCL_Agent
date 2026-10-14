@@ -1,0 +1,27 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   styles/tokens.console.css — Console 延伸 token
+   設計稿 README〈Design Tokens〉表列出、但 _ds 的 tokens 目錄未定義的固定色票；
+   元件一律引用這些變數，不在元件內寫死色碼（styles/tokens.css 保持逐字，不在此檔改動）。
+   ════════════════════════════════════════════════════════════════════════ */
+:root {
+  /* 終端機（執行日誌）深色面板 */
+  --color-terminal-bg:   #1c241a;
+  --color-terminal-text: #d7e4cd;
+
+  /* 草案（signoff 硬閘）警示橫幅與「未審批」標籤底 */
+  --color-draft-bg:     #fdeee9;
+  --color-draft-border: #f3c7bb;
+
+  /* 監控告警列 */
+  --color-alert-bg:     #fef7ea;
+  --color-alert-border: #f5e2bd;
+
+  /* 公告列連線狀態點、Toast 勾號（深底上的亮綠） */
+  --color-online: #9fe08a;
+
+  /* 捲軸滑塊 */
+  --color-scrollbar: #cdd6c4;
+
+  /* 遮罩（Dialog） */
+  --color-overlay: rgba(42, 54, 38, 0.32);
+}

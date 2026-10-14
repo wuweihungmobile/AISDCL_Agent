@@ -1,0 +1,119 @@
+# AgentConsole 子專案 CI（2026-10-15 新增，與 Agent_ConsoleUI_PRD 落地同 commit）
+# ---------------------------------------------------------------------------
+# 三條 leg 各自守一個服務；路徑過濾只看 AgentConsole/** 與本檔（另含被 engine-bridge
+# 消費的 AutoClaude 套件與 cpu_budget SSOT）。多 CPU 規則（根 CLAUDE.md〈GitHub CI/CD
+# 一律多 CPU 模式〉）：
+#   · engine-bridge：pytest xdist，worker 數現查 tools/lib/cpu_budget.py（同 step 內取值
+#     並印 `[cpu_budget] xdist workers=N` 字面供稽核）；DB 整合測試以 service container
+#     （pgvector/pgvector:pg18，與 docker-compose.yml 同映像）供 BRIDGE_TEST_DSN。
+#   · backend：Gradle `maxParallelForks = 2`（build.gradle.kts；每 fork 各起一個
+#     Testcontainers PG）＋ `--parallel`。
+#   · frontend：vitest 預設多 worker。Playwright E2E 需前後端全棧，不在本 CI（本機與
+#     Windows 輪手動／nightly 跑；見 AgentConsole/frontend/tests/e2e/README.md）。
+# 版本鎖：actions/* 一律與根層其他 workflow 同世代（checkout@v5／setup-python@v6）。
+name: agentconsole-ci
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "AgentConsole/**"
+      - ".github/workflows/agentconsole-ci.yml"
+      - "AutoClaude/autoclaude/**"      # engine-bridge 以子行程執行 python -m autoclaude，引擎變動必跑
+      - "AutoClaude/pyproject.toml"
+      - "tools/lib/cpu_budget.py"       # 多 CPU worker 數 SSOT
+  pull_request:
+    branches: [main]
+    paths:
+      - "AgentConsole/**"
+      - ".github/workflows/agentconsole-ci.yml"
+      - "AutoClaude/autoclaude/**"      # engine-bridge 以子行程執行 python -m autoclaude，引擎變動必跑
+      - "AutoClaude/pyproject.toml"
+      - "tools/lib/cpu_budget.py"       # 多 CPU worker 數 SSOT
+  workflow_dispatch:
+
+concurrency:
+  group: agentconsole-ci-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  engine-bridge:
+    name: engine-bridge（ruff ＋ pytest xdist ＋ PG18 整合）
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: pgvector/pgvector:pg18
+        env:
+          POSTGRES_USER: bridge
+          POSTGRES_PASSWORD: bridge
+          POSTGRES_DB: bridge
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U bridge -d bridge"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: 安裝 engine-bridge 與 AutoClaude（editable）
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e AgentConsole/engine-bridge -e AutoClaude
+          aisdlc-mock-claude --version
+      - name: ruff（根 ruff.toml 視角）
+        run: ruff check AgentConsole/engine-bridge
+      - name: pytest（xdist；worker 數＝cpu_budget SSOT；含 DB 整合測試）
+        env:
+          BRIDGE_TEST_DSN: postgresql://bridge:bridge@127.0.0.1:5432/bridge
+          PYTHONUTF8: "1"
+        run: |
+          WORKERS="$(python tools/lib/cpu_budget.py --legs 1)"
+          echo "[cpu_budget] xdist workers=${WORKERS}"
+          cd AgentConsole/engine-bridge
+          python -m pytest -q -n "${WORKERS}" --dist worksteal -p no:cacheprovider
+
+  backend:
+    name: backend（Gradle clean build：單元＋Testcontainers 整合＋Checkstyle＋JaCoCo）
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Gradle clean build（maxParallelForks=2；Testcontainers 用 runner 內建 Docker）
+        working-directory: AgentConsole/backend
+        run: sh gradlew clean build --no-daemon --parallel
+
+  frontend:
+    name: frontend（lint ＋ tsc ＋ build ＋ vitest）
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: AgentConsole/frontend/package-lock.json
+      - name: npm ci
+        working-directory: AgentConsole/frontend
+        run: npm ci
+      - name: lint ＋ tsc ＋ build
+        working-directory: AgentConsole/frontend
+        run: |
+          npm run lint
+          npx tsc --noEmit
+          npm run build
+      - name: vitest
+        working-directory: AgentConsole/frontend
+        run: npx vitest run

@@ -1,0 +1,18 @@
+# Docker build context 排除：不把本機的相依與建置產物帶進映像（否則 COPY . . 會蓋掉 deps 階段在 Linux 上裝好的 node_modules）
+node_modules
+.next
+out
+coverage
+playwright-report
+test-results
+tests/e2e/__screenshots__
+.git
+.gitignore
+.dockerignore
+Dockerfile
+npm-debug.log*
+*.tsbuildinfo
+.env*
+!.env.example
+README.md
+AGENTS.md

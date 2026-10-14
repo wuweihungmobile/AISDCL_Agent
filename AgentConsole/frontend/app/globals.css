@@ -1,0 +1,172 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+/* ── 設計 token：逐字搬入（styles/tokens.css）＋ Console 延伸 token ＋ 字型覆寫 ──────────
+   放進 base 層：與 Tailwind preflight 同層、位於其後 → 設計稿 base.css 的元素預設值生效，
+   且 utilities 層（text-[30px] 之類）永遠能覆寫它（若不分層，unlayered 規則會壓過所有 utilities）。 */
+@import "../styles/tokens.css" layer(base);
+@import "../styles/tokens.console.css" layer(base);
+@import "../styles/fonts.css" layer(base);
+
+/* 設計系統只有淺色：dark: 變體永遠不觸發（沒有任何元素會帶 .dark） */
+@custom-variant dark (&:is(.dark *));
+
+/* ── Tailwind 色票別名：wg-* → 設計 token（inline：utility 直接內嵌 var(--token)，不重複輸出變數）
+   命名刻意加 wg- 前綴：shadcn 的 accent／muted 概念與設計系統的 --color-accent（警示橘紅）不同義，
+   Console 自己的元件一律用 wg-*，shadcn 語意名只留給 shadcn 原生元件（見下方 :root 別名）。 */
+@theme inline {
+  --color-wg-primary: var(--color-primary);
+  --color-wg-primary-strong: var(--color-primary-strong);
+  --color-wg-secondary: var(--color-secondary);
+  --color-wg-tertiary: var(--color-tertiary);
+  --color-wg-accent: var(--color-accent);
+  --color-wg-accent-strong: var(--color-accent-strong);
+  --color-wg-base: var(--color-bg-base);
+  --color-wg-surface: var(--color-bg-surface);
+  --color-wg-topbar: var(--color-topbar-bg);
+  --color-wg-header: var(--color-header-bg);
+  --color-wg-text: var(--color-text-main);
+  --color-wg-muted: var(--color-text-muted);
+  --color-wg-line: var(--color-border);
+  --color-wg-success: var(--color-success);
+  --color-wg-warning: var(--color-warning);
+  --color-wg-error: var(--color-error);
+  --color-wg-disabled-bg: var(--color-disabled-bg);
+  --color-wg-disabled-text: var(--color-disabled-text);
+  --color-wg-skeleton: var(--color-skeleton);
+  --color-wg-terminal: var(--color-terminal-bg);
+  --color-wg-terminal-text: var(--color-terminal-text);
+  --color-wg-draft-bg: var(--color-draft-bg);
+  --color-wg-draft-border: var(--color-draft-border);
+  --color-wg-alert-bg: var(--color-alert-bg);
+  --color-wg-alert-border: var(--color-alert-border);
+  --color-wg-online: var(--color-online);
+  --color-wg-overlay: var(--color-overlay);
+
+  /* shadcn 原生元件讀的語意色（值在下方 :root 別名，最終指向設計 token） */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+  --font-heading: var(--font-sans);
+
+  /* 圓角：直接用設計 token 的階（4／8／12／full），不用 shadcn 的 calc(--radius * n) */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 12px;
+  --radius-2xl: 12px;
+  --radius-3xl: 12px;
+  --radius-4xl: 9999px;
+}
+
+/* 動畫（設計稿 Motion：wg-blink 狀態點呼吸 1.4s、wg-spin 0.8s linear、wg-fade 入場位移） */
+@theme {
+  --animate-wg-blink: wg-blink 1.4s infinite;
+  --animate-wg-spin: wg-spin 0.8s linear infinite;
+  --animate-wg-pulse: wg-pulse 1.4s ease-in-out infinite;
+  --animate-wg-fade: wg-fade 0.2s ease-out;
+
+  @keyframes wg-blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
+  }
+  @keyframes wg-spin {
+    to { transform: rotate(360deg); }
+  }
+  @keyframes wg-fade {
+    from { transform: translateY(6px); }
+    to { transform: none; }
+  }
+}
+
+@layer base {
+  /* shadcn 語意別名 → 設計 token（淺色唯一；沒有 .dark 區塊） */
+  :root {
+    --background: var(--color-bg-base);
+    --foreground: var(--color-text-main);
+    --card: var(--color-bg-surface);
+    --card-foreground: var(--color-text-main);
+    --popover: var(--color-bg-surface);
+    --popover-foreground: var(--color-text-main);
+    --primary: var(--color-primary);
+    --primary-foreground: #ffffff;
+    --secondary: var(--color-tertiary);
+    --secondary-foreground: var(--color-text-main);
+    --muted: var(--color-bg-base);
+    --muted-foreground: var(--color-text-muted);
+    --accent: var(--color-tertiary);
+    --accent-foreground: var(--color-text-main);
+    --destructive: var(--color-error);
+    --border: var(--color-border);
+    --input: var(--color-border);
+    --ring: var(--color-primary);
+    --chart-1: var(--color-primary);
+    --chart-2: var(--color-secondary);
+    --chart-3: var(--color-disabled-text);
+    --chart-4: var(--color-error);
+    --chart-5: var(--color-warning);
+    --radius: 8px;
+  }
+
+  /* Tailwind 4 的預設邊框色是 currentColor；設計系統的 hairline 一律 --color-border */
+  *, ::after, ::before, ::backdrop, ::file-selector-button {
+    border-color: var(--color-border);
+  }
+
+  html, body {
+    height: 100%;
+  }
+
+  /* 設計稿的捲軸（10px、圓角滑塊、透明軌道） */
+  *::-webkit-scrollbar { width: 10px; height: 10px; }
+  *::-webkit-scrollbar-thumb { background: var(--color-scrollbar); border-radius: 8px; }
+  *::-webkit-scrollbar-track { background: transparent; }
+
+  /* 設計稿 .wg-sel：原生 select 去外觀、自訂下拉箭頭（箭頭色＝--color-text-muted 的 #7A8775，data-URI 無法引用變數） */
+  select.wg-sel {
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%237A8775' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    cursor: pointer;
+  }
+
+  /* Lucide 圖示規格：stroke-width 1.5（設計系統〈Iconography〉）；CSS 屬性蓋過 lucide-react 輸出的 stroke-width 屬性 */
+  svg.lucide {
+    stroke-width: 1.5;
+  }
+
+  /* 動效偏好：減少動態者關閉呼吸與旋轉以外的過場（設計系統只有 opacity／color 過場，影響本來就小） */
+  @media (prefers-reduced-motion: reduce) {
+    *, ::before, ::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}

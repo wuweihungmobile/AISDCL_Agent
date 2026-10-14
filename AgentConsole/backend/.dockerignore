@@ -1,0 +1,9 @@
+# build context＝AgentConsole/backend：只送建置需要的檔案進 Docker daemon。
+build/
+.gradle/
+.idea/
+*.iml
+out/
+bin/
+HELP.md
+*.log

@@ -1,0 +1,24 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "AISDLC Primary",
+      "Group": "AISDLC",
+      "Host": "postgres-primary",
+      "Port": 5432,
+      "MaintenanceDB": "aisdlc",
+      "Username": "aisdlc",
+      "SSLMode": "prefer",
+      "Comment": "可寫主節點（密碼＝.env 的 POSTGRES_PASSWORD；首次連線時輸入）"
+    },
+    "2": {
+      "Name": "AISDLC Replica (read-only)",
+      "Group": "AISDLC",
+      "Host": "postgres-replica",
+      "Port": 5432,
+      "MaintenanceDB": "aisdlc",
+      "Username": "aisdlc",
+      "SSLMode": "prefer",
+      "Comment": "唯讀串流複製副本（hot standby）"
+    }
+  }
+}

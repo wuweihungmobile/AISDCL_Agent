@@ -1,0 +1,53 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "aisdlc-engine-bridge"
+version = "0.1.0"
+description = "AgentConsole Engine Bridge：把 AutoClaude／AISDLC_SDD 兩個純 CLI 引擎包成 REST + SSE 的 FastAPI 旁車"
+requires-python = ">=3.11"
+# 鎖版理由同 AutoClaude/pyproject.toml（DEF-101-006）：未鎖版的 install 在 fresh bootstrap 會漂移，
+# 且「裝到的版本」不等於「測過的版本」。版號為 2026-10-14 在 Python 3.11.15 上解析並跑全套測試的值。
+# AutoClaude 本體以 `uv pip install -e ../../AutoClaude` 另裝（它只宣告 pydantic／pyyaml／httpx 的下限）。
+dependencies = [
+    "fastapi==0.143.1",
+    "uvicorn[standard]==0.54.0",
+    "pydantic==2.14.1",
+    "pyyaml==6.0.3",
+    "psycopg[binary,pool]==3.3.6",
+    "httpx==0.28.1",
+    # 子行程樹的列舉／終止／pid 身分比對（跨平台；Windows 不支援 os.kill(pid, 0) 與 killpg）。
+    "psutil==7.2.2",
+    # 測試／lint 工具刻意放在主依賴（而非 extras）：任務書與 AgentConsole/CLAUDE.md 的標準安裝指令是
+    # `uv pip install -e . -e ../../AutoClaude`，之後直接 `ruff check .`、`python -m pytest`。
+    # pytest／ruff 與 AutoClaude/pyproject.toml 的 dev extras 同版（單一工具鏈，不分叉）。
+    "pytest==9.1.1",
+    "pytest-asyncio==1.4.0",
+    "pytest-xdist==3.8.0",
+    "ruff==0.15.21",
+]
+
+[project.scripts]
+# E2E／測試用的確定性 claude 替身（理由見 app/mock_claude.py 檔頭）。
+aisdlc-mock-claude = "app.mock_claude:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+# 規則集逐字對齊 AutoClaude/pyproject.toml 與根層 tools/ruff.toml（不自創第二套標準）。
+select = ["E", "F", "I", "UP", "W", "S102"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+# 測試各自使用獨立的 tmp 工作區與臨時埠，可安全以 `-n auto` 平行（見 README）；預設序列。
+markers = [
+    "db: 需要 BRIDGE_TEST_DSN 指向一個可寫的 PostgreSQL（未設定時整組跳過）",
+]

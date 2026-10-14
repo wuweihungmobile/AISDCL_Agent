@@ -8,12 +8,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 雙專案 monorepo
 
-monorepo 根目錄（`AISDCL_Agent/`，各機器 checkout 路徑不同）＝**兩個獨立子專案 ＋ 一層根整合層**（根 `docs/`，承載兩者深度整合的迭代計畫，見〈三條改進軌道〉，勿與子專案內部的改進系列混淆）。
+monorepo 根目錄（`AISDCL_Agent/`，各機器 checkout 路徑不同）＝**三個獨立子專案（第三個 AgentConsole 自 2026-10-15 起）＋ 一層根整合層**（根 `docs/`，承載兩者深度整合的迭代計畫，見〈三條改進軌道〉，勿與子專案內部的改進系列混淆）。
 
 | 子目錄 | 性質 | 權威指引 |
 |--------|------|---------|
 | [AutoClaude/](AutoClaude/) | Python 3.11+ 應用程式 — Claude Code 多步驟 Playbook 自動執行引擎（微核心 + Plugin 體系 + DAL 三後端） | [AutoClaude/CLAUDE.md](AutoClaude/CLAUDE.md) |
 | [AISDLC_SDD/](AISDLC_SDD/) | 規格先行（Spec-First）SDLC 框架 — Markdown 模板／Agent／Workflow + FSM runtime（Python）+ TLA+ 形式化驗證 | [AISDLC_SDD/CLAUDE.md](AISDLC_SDD/CLAUDE.md) |
+| [AgentConsole/](AgentConsole/) | Agent Console UI（2026-10-15 起，落地 `docs/01_requirements/Agent_ConsoleUI_PRD.md`）— Next.js 16 前端 ＋ Spring Boot 4.1／Java 21 後端 ＋ FastAPI Engine Bridge（包 AutoClaude 與 AISDLC_SDD 兩引擎）＋ Docker 全棧（PG18 備援／pgBackRest） | [AgentConsole/CLAUDE.md](AgentConsole/CLAUDE.md) |
 
 🔴 **進入任一子專案前的第一動作＝先讀該子專案的 `CLAUDE.md`**。兩份皆宣告其指令 OVERRIDE Claude Code 預設行為，內含大量「違反即停機」禁令（尤其 AISDLC_SDD 的 Rule 9 自動化閉環防護）。本根檔只負責導航與跨專案鐵律，不重複子專案細則。
 
@@ -387,6 +388,7 @@ bash tools/fsm_runtime/formal/run_tlc.sh                      # TLA+/TLC（自�
 | AutoClaude Sprint 脈絡 / ADR / Nightly 取證紀律 | `AutoClaude/docs/05_development/sprint_history.md`、`AutoClaude/docs/04_planning/ADR/`、`AutoClaude/docs/06_quality/Nightly_Forensic_Discipline.md` |
 | AISDLC_SDD 框架入口 / 目錄規則 | [AISDLC_SDD/AISDLC_SDD_v0.01/AISDLC_SDD_INIT.md](AISDLC_SDD/AISDLC_SDD_v0.01/AISDLC_SDD_INIT.md)、`AISDLC_SDD/AISDLC_SDD_v0.01/FILE_DIRECTORY_RULES.md` |
 | AISDLC_SDD 治理規則總覽（條數見 FRAMEWORK_STATUS.md） | `AISDLC_SDD/AISDLC_SDD_v0.01/governance/RULES_INDEX.md` |
+| AgentConsole 架構／ADR／需求追溯矩陣／實作進度 | `AgentConsole/docs/02_architecture/Architecture.md`、`AgentConsole/docs/02_architecture/ADR-001-TechStack-Lock.md`、`AgentConsole/docs/06_quality/RTM.md`、`AgentConsole/docs/04_planning/Implementation_Plan.md` |
 
 ---
 

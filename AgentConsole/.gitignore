@@ -1,0 +1,24 @@
+# AgentConsole 子專案 .gitignore（安全網）
+# 根 .gitignore 已涵蓋 .venv/、.env、.env.*（保留 .env.example）、__pycache__/；各服務自帶的 .gitignore 仍生效。
+# 此處補根層沒有的前端／後端／驗證暫存，避免有人 git add -A 時把依賴與建置產物帶進 commit。
+
+# 前端（Next.js）
+node_modules/
+.next/
+out/
+coverage/
+playwright-report/
+test-results/
+*.tsbuildinfo
+
+# 後端（Gradle）
+.gradle/
+build/
+*.class
+
+# Engine Bridge
+.workspace/
+*.egg-info/
+
+# 本機驗證暫存（compose 驗證用的測試環境檔，用完即刪）
+.env.ci

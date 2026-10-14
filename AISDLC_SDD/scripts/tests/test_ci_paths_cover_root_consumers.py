@@ -1252,7 +1252,9 @@ _ROOT_INFRA_CI_PATH = os.path.join(_WORKFLOWS_DIR, "root-infra-ci.yml")
 # ……覆蓋其 .sh」已被 R56 實查證偽（兩子專案 hook 皆不含 bash -n，委派鏈是空的），
 # 勿再援引「子專案 hook 把關」作為 .sh 的豁免理由。
 # 其餘任何根層 .sh／.py 若不在 tools/ 之下即為無主腳本。
-_ROOT_INFRA_SCAN_EXEMPT_PREFIXES = ("AutoClaude/", "AISDLC_SDD/", ".claude/", "tools/")
+# AgentConsole/（2026-10-15 新增第三子專案）：.sh 走 root-infra-ci 第 1 道全庫 bash -n ＋ shellcheck-ci
+# `**/*.sh`；.py／.java／.ts 走 .github/workflows/agentconsole-ci.yml（ruff＋pytest／gradle build／lint＋build＋vitest）。
+_ROOT_INFRA_SCAN_EXEMPT_PREFIXES = ("AutoClaude/", "AISDLC_SDD/", ".claude/", "tools/", "AgentConsole/")
 
 
 def _git_ls_files(pathspec: str) -> list[str]:

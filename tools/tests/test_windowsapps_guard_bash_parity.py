@@ -215,7 +215,7 @@ _SHELL_SHEBANG_RE = re.compile(r"^#!.*\b(?:ba|z|da|k)?sh\b")
 _KNOWN_HOOK_DIRS: frozenset[str] = frozenset({
     "tools/git-hooks",
     "AutoClaude/tools/git-hooks",
-    "AISDLC_SDD/.githooks",
+    "AISDLC_SDD/.githooks", "AgentConsole/backend",  # gradlew: Gradle wrapper, not a hook
 })
 
 

@@ -1,0 +1,74 @@
+# AgentConsole console-api 主設定（所有環境相關值皆可由環境變數覆寫；PRD §9.4「配置外部化」）。
+# Spring Boot 寬鬆綁定：環境變數 SPRING_DATASOURCE_URL／_USERNAME／_PASSWORD 會直接覆寫下方 spring.datasource.*。
+spring:
+  application:
+    name: console
+  datasource:
+    url: jdbc:postgresql://localhost:5432/aisdlc
+    username: aisdlc
+    # password 刻意不給預設值：SPRING_DATASOURCE_PASSWORD 必填（缺則連線失敗，不是靜默用弱密碼）。
+  jpa:
+    open-in-view: false
+    hibernate:
+      # Flyway 擁有 DDL（ADR-001 D5）：實體與遷移不一致＝實體寫錯，啟動即失敗。
+      ddl-auto: validate
+    properties:
+      hibernate:
+        default_schema: console
+        jdbc:
+          time_zone: UTC
+  flyway:
+    # 啟動即遷移（PRD §11.7 第 6 步的手動 Flyway 指令作廢，ADR-001 D14-11）。
+    schemas: console
+    default-schema: console
+    locations: classpath:db/migration
+
+server:
+  port: 8080
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # /actuator/health 與 /actuator/prometheus 免認證（SecurityConfig）；nginx 對外擋 /actuator/。
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+  default-produces-media-type: application/json
+
+logging:
+  pattern:
+    # traceId 由 TraceIdFilter 寫入 MDC（NFR-9.4-04）；容器內以 LOGGING_STRUCTURED_FORMAT_CONSOLE=logstash 改輸出 JSON。
+    level: "%5p [traceId=%X{traceId:-}]"
+
+console:
+  auth:
+    # JWT_SECRET 必填且 ≥ 32 字元；缺或過短＝啟動失敗（ConsoleAuthProperties 驗證，ADR-001 D4）。
+    jwt-secret: ${JWT_SECRET:}
+    access-token-ttl: 30m
+    refresh-token-ttl: 7d
+    # 使用者清單（無使用者管理 UI；PRD 沒要）。密碼為 BCrypt 雜湊，開發預設明文寫在 backend/README.md；
+    # 正式環境必須以環境變數覆寫三個 *_PASSWORD_HASH。
+    users:
+      - username: admin
+        password-hash: ${CONSOLE_ADMIN_PASSWORD_HASH:$2a$10$myHfP0e/FauNBUk.mYAcBOOktgGreDNSxZNgg4WH/3KaM7efYk9eu}
+        role: ADMIN
+      - username: operator
+        password-hash: ${CONSOLE_OPERATOR_PASSWORD_HASH:$2a$10$nq.JZXFXxuHBaCUFBNz8/e6eGVtbvMsDXYFEqPO3wPEU8cbjXEeMC}
+        role: OPERATOR
+      - username: viewer
+        password-hash: ${CONSOLE_VIEWER_PASSWORD_HASH:$2a$10$7Pw3phmCccJUxs4O8rsCHee3Y.a0q7ZPkAn4smLwM1dW3Hxc2CRoq}
+        role: VIEWER
+  cors:
+    # 逗號分隔；全棧同源（經 nginx）時不會用到。NFR-9.2-05。
+    allowed-origins: ${CONSOLE_CORS_ALLOWED_ORIGINS:http://localhost:3000}

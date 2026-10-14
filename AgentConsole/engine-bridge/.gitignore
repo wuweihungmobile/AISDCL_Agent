@@ -1,0 +1,8 @@
+# Engine Bridge 本機產物（根 .gitignore 已涵蓋 .venv/、__pycache__/、.pytest_cache/、.ruff_cache/，
+# 這裡再列一次是因為子目錄可能被單獨抽出使用；.workspace/ 只有這裡擋——它是每個 run 的工作區）
+.venv/
+.workspace/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/

@@ -1,0 +1,217 @@
+"use client";
+
+import { CircleCheckBig, ClipboardCheck, Flame, ListChecks, Upload, type LucideIcon } from "lucide-react";
+import Link from "next/link";
+import { useState } from "react";
+
+import { ProjectStatusChart } from "@/components/charts/ProjectStatusChart";
+import { PageTitle } from "@/components/domain/PageHeader";
+import { SignoffDialog, type SignoffTarget } from "@/components/domain/SignoffDialog";
+import { CountBadge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardTitle } from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
+import { Skeleton } from "@/components/ui/skeleton";
+import { EmptyState, ErrorState } from "@/components/ui/states";
+import { StatusLabel } from "@/components/ui/status-dot";
+import { useAllProjects, useSignoffQueue } from "@/lib/api/queries";
+import { useAuth } from "@/lib/auth/AuthProvider";
+import { projectStatus } from "@/lib/domain/status";
+import { percent } from "@/lib/format";
+import { cn } from "@/lib/utils";
+
+function KpiCard({
+  label,
+  icon: Icon,
+  value,
+  delta,
+  tone = "muted",
+  testId,
+}: {
+  label: string;
+  icon: LucideIcon;
+  value: string;
+  delta: string;
+  tone?: "muted" | "primary" | "accent";
+  testId: string;
+}) {
+  return (
+    <Card className="p-5">
+      <div className="flex items-center justify-between">
+        <span className="text-sm text-wg-muted">{label}</span>
+        <span className="inline-flex size-[34px] items-center justify-center rounded-md bg-wg-tertiary">
+          <Icon size={18} className="text-wg-primary" aria-hidden />
+        </span>
+      </div>
+      <div data-testid={testId} className="mt-3 text-[32px] leading-none font-bold">
+        {value}
+      </div>
+      <div
+        className={cn(
+          "mt-2 text-[13px]",
+          tone === "muted" && "text-wg-muted",
+          tone === "primary" && "text-wg-primary",
+          tone === "accent" && "text-wg-accent",
+        )}
+      >
+        {delta}
+      </div>
+    </Card>
+  );
+}
+
+/**
+ * 總覽儀表板（設計稿 1）：四張 KPI 卡、進行中的執行、待人工審批。
+ * KPI：前兩張由專案／目標 API 算（活躍專案數、待審批草案數）；後兩張（本週完成任務、執行中 run）等 Phase 5 監控 API，先顯示「—」。
+ */
+export function DashboardView() {
+  const { canWrite } = useAuth();
+  const all = useAllProjects();
+  const queue = useSignoffQueue();
+  const [signoff, setSignoff] = useState<SignoffTarget | null>(null);
+
+  const projects = all.data?.content ?? [];
+  const live = projects.filter((p) => p.status === "EXECUTING");
+  const active = projects.filter((p) => !["COMPLETED", "FAILED", "ARCHIVED"].includes(p.status));
+  const loading = all.isLoading;
+
+  return (
+    <div>
+      <PageTitle
+        title="總覽儀表板"
+        subtitle="AISDLC 自治開發 Agent · 全局健康度與待辦"
+        actions={
+          <Button asChild iconLeft={Upload}>
+            <Link href="/import">匯入 BRD / PRD</Link>
+          </Button>
+        }
+      />
+
+      {all.isError ? (
+        <ErrorState error={all.error} onRetry={() => all.refetch()} title="無法載入儀表板資料" />
+      ) : (
+        <>
+          <div className="mb-6 grid grid-cols-4 gap-6 max-xl:grid-cols-2 max-md:grid-cols-1" data-testid="kpi-grid">
+            {loading ? (
+              [0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-[130px] rounded-lg" />)
+            ) : (
+              <>
+                <KpiCard
+                  testId="kpi-active"
+                  label="活躍專案數"
+                  icon={CircleCheckBig}
+                  value={String(active.length)}
+                  delta={`共 ${all.data?.totalElements ?? 0} 個專案 · 執行中 ${live.length}`}
+                />
+                <KpiCard
+                  testId="kpi-drafts"
+                  label="待審批草案數"
+                  icon={ClipboardCheck}
+                  value={String(queue.count)}
+                  delta={queue.count > 0 ? "需 signoff 才可執行" : "全部已審批"}
+                  tone={queue.count > 0 ? "accent" : "muted"}
+                />
+                <KpiCard
+                  testId="kpi-week-done"
+                  label="本週完成任務數"
+                  icon={ListChecks}
+                  value="—"
+                  delta="Phase 5 接監控 API"
+                />
+                <KpiCard
+                  testId="kpi-runs"
+                  label="執行中 run 數"
+                  icon={Flame}
+                  value="—"
+                  delta="Phase 5 接監控 API"
+                />
+              </>
+            )}
+          </div>
+
+          <div className="grid grid-cols-[1.6fr_1fr] gap-6 max-lg:grid-cols-1">
+            <Card className="px-[22px] py-5">
+              <div className="mb-3.5 flex items-center justify-between">
+                <CardTitle>進行中的執行</CardTitle>
+                <Link href="/projects" className="text-sm text-wg-primary transition-opacity hover:opacity-85">
+                  查看全部專案 →
+                </Link>
+              </div>
+              {loading ? (
+                <Skeleton className="h-24" />
+              ) : live.length === 0 ? (
+                <EmptyState title="目前沒有執行中的專案" description="專案進入「執行中」狀態後會顯示在這裡。" />
+              ) : (
+                live.map((p) => (
+                  <div key={p.id} data-testid="active-run" className="border-t border-wg-line py-3.5">
+                    <div className="mb-2 flex items-center justify-between gap-3">
+                      <Link
+                        href={`/projects/${p.id}`}
+                        className="truncate text-[15px] font-semibold text-wg-text transition-colors hover:text-wg-primary"
+                      >
+                        {p.name}
+                      </Link>
+                      <StatusLabel meta={projectStatus(p.status)} live className="shrink-0 text-[13px]" />
+                    </div>
+                    <Progress value={percent(p.tasksDone, p.tasksCount)} label={`${p.name} 任務完成度`} />
+                    <div className="mt-1.5 flex justify-between text-xs text-wg-muted">
+                      <span>
+                        {p.tasksDone} / {p.tasksCount} 任務完成
+                      </span>
+                      <span>{percent(p.tasksDone, p.tasksCount)}%</span>
+                    </div>
+                  </div>
+                ))
+              )}
+            </Card>
+
+            <Card id="pending-signoff" className="scroll-mt-4 px-[22px] py-5">
+              <div className="mb-3.5 flex items-center gap-2">
+                <CardTitle>待人工審批</CardTitle>
+                <CountBadge count={queue.count} data-testid="pending-count" />
+              </div>
+              <p className="mb-1.5 text-[13px] text-wg-muted">AI 草案 signoff 硬閘 — 未審批禁止執行</p>
+              {queue.isLoading ? (
+                <Skeleton className="mt-2 h-16" />
+              ) : queue.items.length === 0 ? (
+                <EmptyState title="沒有待審批的草案" />
+              ) : (
+                queue.items.map((d) => (
+                  <div
+                    key={`${d.kind}:${d.id}`}
+                    data-testid="pending-item"
+                    className="flex items-center justify-between gap-2 border-t border-wg-line py-3"
+                  >
+                    <div className="min-w-0">
+                      <Link
+                        href={d.kind === "project" ? `/projects/${d.id}` : `/projects/${d.projectId}/goals/${d.id}`}
+                        className="block max-w-[200px] truncate text-sm font-semibold text-wg-text transition-colors hover:text-wg-primary"
+                      >
+                        {d.name}
+                      </Link>
+                      <span className="text-xs text-wg-muted">{d.meta}</span>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={!canWrite}
+                      title={canWrite ? undefined : "權限不足（唯讀角色不可審批）"}
+                      aria-label={`審批：${d.name}`}
+                      onClick={() => setSignoff({ kind: d.kind, id: d.id, name: d.name })}
+                    >
+                      審批
+                    </Button>
+                  </div>
+                ))
+              )}
+            </Card>
+          </div>
+
+          {!loading ? <ProjectStatusChart projects={projects} /> : null}
+        </>
+      )}
+
+      <SignoffDialog target={signoff} onClose={() => setSignoff(null)} />
+    </div>
+  );
+}

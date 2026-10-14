@@ -1,0 +1,73 @@
+# AISDLC Agent Console — 本機開發用 Compose（疊加檔／獨立檔兩用；ADR-001 D14-10／G-02）
+#
+# 用法一（獨立）：只起 postgres-primary（發布 5432）＋ redis（發布 6379），給「本機直接跑 backend／Bridge／frontend」用：
+#   docker compose -f docker-compose.dev.yml up -d
+# 用法二（疊加在主檔上）：資料庫層（profile db）照常啟動，並把 PG／Redis 發布到主機：
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile db up -d --build
+#   此時 replica 發布到 ${POSTGRES_REPLICA_PORT}（5433）；pgAdmin 的 5050 主檔本來就發布（它另掛了 backend-net）。
+#
+# 為什麼需要它：主檔的 db-net 是 internal 網路——掛在 internal 網路上的容器，ports: 發布對主機無效
+# （已實測：主機連 5432／5433 皆被拒）。本檔把 PG／Redis 另外加掛「非 internal」的 dev-net 並在其上發布。
+# 預設只綁 127.0.0.1（DEV_BIND_ADDR 可改）：PG 靠密碼保護，Redis 沒有密碼，不要綁到對外位址。
+#
+# 實作：以 extends 重用主檔的服務定義（不複製一份），只在這裡加網路與埠，並對 postgres-primary／redis
+# 以 `profiles: !reset []` 去掉 profile，讓「不帶 --profile」就起得來。
+# 🔴 extends 會載入並展開整份主檔 ⇒ 主檔內所有 ${VAR:?...} 必填變數都必須有值：請先 cp .env.example .env。
+# 🔴 與 postgres-primary 同帶 archive_command 包裝腳本：沒有 stanza 時它直接略過歸檔（不會因為沒起 pgbackrest
+#    而讓 pg_wal 累積）；若在本檔模式下手動 stanza-create，歸檔就會真的開始（需要 minio／pgbackrest 一起在）。
+
+name: aisdlc
+
+services:
+  postgres-primary:
+    extends:
+      file: docker-compose.yml
+      service: postgres-primary
+    profiles: !reset []
+    ports:
+      - "${DEV_BIND_ADDR:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432"
+    networks:
+      - db-net
+      - dev-net
+
+  postgres-replica:
+    extends:
+      file: docker-compose.yml
+      service: postgres-replica
+    ports:
+      - "${DEV_BIND_ADDR:-127.0.0.1}:${POSTGRES_REPLICA_PORT:-5433}:5432"
+    networks:
+      - db-net
+      - dev-net
+
+  redis:
+    extends:
+      file: docker-compose.yml
+      service: redis
+    profiles: !reset []
+    ports:
+      - "${DEV_BIND_ADDR:-127.0.0.1}:${REDIS_PORT:-6379}:6379"
+    networks:
+      - db-net
+      - dev-net
+
+networks:
+  db-net:
+    driver: bridge
+    internal: true
+  dev-net:
+    driver: bridge
+
+volumes:
+  pg_data:
+    driver: local
+  pg_replica_data:
+    driver: local
+  pg_wal_archive:
+    driver: local
+  pg_backup:
+    driver: local
+  pg_socket:
+    driver: local
+  redis_data:
+    driver: local

@@ -215,6 +215,9 @@ on:
       - "AutoClaude/tests/**"
       - "AutoClaude/tools/install_git_hooks.ps1"
       - "AutoClaude/tools/install_git_hooks.sh"
+      # AgentConsole 子專案（含容器內 .sh、engine-bridge 的 pytest conftest）；compat-CI 觸發對稱鎖與
+      # AISDLC_SDD/scripts/tests/test_ci_paths_cover_root_consumers.py 要求兩側皆列
+      - "AgentConsole/**"
       - "AutoClaude/.claude/**"
       - "AISDLC_SDD/scripts/**"
       # R9 Fix-C：windows-smoke 實際安裝 v0.01 requirements-ci.txt（見下方「安裝
@@ -683,6 +686,9 @@ on:
       - "AutoClaude/tests/**"
       - "AutoClaude/tools/install_git_hooks.ps1"
       - "AutoClaude/tools/install_git_hooks.sh"
+      # AgentConsole 子專案（含容器內 .sh、engine-bridge 的 pytest conftest）；compat-CI 觸發對稱鎖與
+      # AISDLC_SDD/scripts/tests/test_ci_paths_cover_root_consumers.py 要求兩側皆列
+      - "AgentConsole/**"
       - "AutoClaude/.claude/**"
       - "AISDLC_SDD/scripts/**"
       # R9 Fix-C：同上（push 段說明），pull_request 段同步補齊

@@ -1,0 +1,20 @@
+# 整合測試用設定（profile=test）。以下 JWT 密鑰僅供測試，長度 ≥ 32 字元，非真實機密。
+console:
+  auth:
+    jwt-secret: integration-test-only-jwt-secret-0123456789-abcdef
+management:
+  prometheus:
+    metrics:
+      export:
+        # @SpringBootTest 預設會關掉所有指標匯出（Boot 的 MetricsExportContextCustomizer）；
+        # 明確開啟 Prometheus，才測得到 /actuator/prometheus（API-HLT-02）。
+        enabled: true
+spring:
+  datasource:
+    hikari:
+      maximum-pool-size: 5
+logging:
+  level:
+    org.testcontainers: WARN
+    com.github.dockerjava: WARN
+    org.hibernate.orm.deprecation: WARN

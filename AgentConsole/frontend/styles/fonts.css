@@ -1,0 +1,13 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   styles/fonts.css — 字型家族（自託管版）
+   設計稿 tokens/fonts.css 用 Google Fonts CDN；設計稿 README〈Assets〉明載「上線請自託管以離線」，
+   故改用 @fontsource-variable 套件（字型檔隨 npm 安裝、由 Next 打包進 .next/static/media；
+   @font-face 在 app/layout.tsx 以 JS 匯入，不依賴任何外部網路）。
+   fontsource 的家族名稱帶 "Variable" 後綴，與 tokens.css 的 'Inter'／'Noto Sans TC' 不同名，
+   因此在此覆寫 --font-sans／--font-base 並新增 --font-mono（tokens.css 保持逐字，不改）。
+   ════════════════════════════════════════════════════════════════════════ */
+:root {
+  --font-sans: 'Inter Variable', 'Noto Sans TC Variable', 'Inter', 'Noto Sans TC', system-ui, -apple-system, sans-serif;
+  --font-base: var(--font-sans);
+  --font-mono: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}

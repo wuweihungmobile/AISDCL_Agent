@@ -1,0 +1,17 @@
+# 與 Dockerfile 同目錄的 BuildKit 專屬忽略檔；規則相對於 build context（＝monorepo 根）。
+# 先全擋，再只放行 Dockerfile 要 COPY 的兩個目錄（根層沒有 .dockerignore，整個 repo 含 .git 會被送進 daemon）。
+*
+!AutoClaude
+!AgentConsole/engine-bridge
+**/__pycache__
+**/*.pyc
+**/.venv
+**/.pytest_cache
+**/.ruff_cache
+**/.workspace
+**/*.egg-info
+AutoClaude/logs
+AutoClaude/checkpoints
+AutoClaude/docs
+AutoClaude/tests
+AgentConsole/engine-bridge/tests

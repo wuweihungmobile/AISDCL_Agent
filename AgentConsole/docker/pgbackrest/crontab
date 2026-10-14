@@ -1,0 +1,21 @@
+# docker/pgbackrest/crontab — 備份排程（PRD §12.3.3）
+# 格式：busybox crond（與 PRD 的 Alpine crond 同一格式；檔名＝執行身分，映像內放在 /etc/crontabs/postgres）。
+# 時區由容器的 TZ 決定（compose：BACKUP_TZ，預設 Asia/Taipei）。
+
+# ── 完整備份：每週日 02:00 ──
+0 2 * * 0  /usr/local/bin/backup-full.sh >> /var/log/pgbackrest/cron.log 2>&1
+
+# ── 差異備份：每日 02:00（週一至週六）──
+0 2 * * 1-6  /usr/local/bin/backup-incr.sh >> /var/log/pgbackrest/cron.log 2>&1
+
+# ── pg_dump 邏輯離站備份：每日 02:30（防 pgBackRest 物理備份邏輯損壞單點）──
+30 2 * * *  /usr/local/bin/pg_dump-offsite.sh >> /var/log/pgbackrest/cron.log 2>&1
+
+# ── 備份驗證 + 真實 restore 演練：每週三 04:00 ──
+0 4 * * 3  /usr/local/bin/verify-backup.sh >> /var/log/pgbackrest/cron.log 2>&1
+
+# ── 清理過期備份：每日 03:00（本地 repo1 + 離站 repo2）──
+0 3 * * *  pgbackrest --stanza=aisdlc expire >> /var/log/pgbackrest/cron.log 2>&1
+
+# ── 清理本地 WAL 歸檔（PRD §12.1「WAL 7 天」；replica 的 restore_command 讀這個目錄的 *.gz）：每日 03:30 ──
+30 3 * * *  find /var/lib/postgresql/wal_archive -type f -mtime +7 -delete >> /var/log/pgbackrest/cron.log 2>&1

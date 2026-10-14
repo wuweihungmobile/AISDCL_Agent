@@ -1,0 +1,28 @@
+import { describe, expect, it } from "vitest";
+
+import { formatClock, formatDate, formatDateTime, formatNumber, percent, retryLabel } from "./format";
+
+describe("format", () => {
+  // 用本機時區建構時間，避免測試依賴執行機器的時區
+  const iso = new Date(2026, 5, 17, 14, 32, 5).toISOString();
+
+  it("把 ISO 時間格式化成本機的日期／時間", () => {
+    expect(formatDate(iso)).toBe("2026-06-17");
+    expect(formatClock(iso)).toBe("14:32:05");
+    expect(formatDateTime(iso)).toBe("2026-06-17 14:32");
+  });
+
+  it("缺值或壞值一律顯示「—」，不丟例外", () => {
+    expect(formatDate(null)).toBe("—");
+    expect(formatClock(undefined)).toBe("—");
+    expect(formatDateTime("not-a-date")).toBe("—");
+    expect(formatNumber(undefined)).toBe("—");
+  });
+
+  it("數字加千分位、百分比取整且分母為 0 時回 0", () => {
+    expect(formatNumber(12450)).toBe("12,450");
+    expect(percent(3, 8)).toBe(38);
+    expect(percent(0, 0)).toBe(0);
+    expect(retryLabel(1, 3)).toBe("1 / 3");
+  });
+});

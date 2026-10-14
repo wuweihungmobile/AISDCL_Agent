@@ -1,0 +1,222 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   styles/tokens.css — 意象若水 water_green 設計 token（逐字搬入，勿改）
+   來源：docs/01_requirements/01.UI_Design/Design_ConsoleUI/_ds/water-green-design-system-<id>/tokens/
+         colors.css → typography.css → spacing.css → radius.css → base.css（與設計稿 styles.css 的 @import 順序一致）
+   不含 fonts.css（Google Fonts CDN @import）：本專案改自託管，見 app/layout.tsx 與 styles/fonts.css（ADR-002 §字型）。
+   Console 專屬的延伸 token（終端機面板、草案警示、告警底色等）住 styles/tokens.console.css，不污染本檔。
+   以下各段落之間僅加註解分隔線，段落內容與來源檔位元組相同。
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* >>>>>>>>>> colors.css >>>>>>>>>> */
+/* ══════════════════════════════════════════════════════════════════════════
+   意象若水 water_green — COLOR TOKENS
+   Light Mode ONLY. Do not add prefers-color-scheme: dark or dark: variants.
+   Flat aesthetic: colors carry hierarchy — NO shadows anywhere.
+   ════════════════════════════════════════════════════════════════════════ */
+:root {
+  /* ── Brand core ──────────────────────────────────────────────────────── */
+  --color-primary:   #498428; /* core CTA / active blocks / price / focus ring */
+  --color-secondary: #80B155; /* secondary / hover-contrast / 2nd logistics tag */
+  /* tertiary — AUTO: analogous to primary, markedly lighter/airier.
+     Used for sidebar-active backing & lightweight logistics-tag backgrounds.   */
+  --color-tertiary:  #E4EFD9;
+  --color-accent:    #E55B3C; /* discount tags, cart badge, warnings/attention   */
+
+  /* ── Surfaces ────────────────────────────────────────────────────────── */
+  --color-bg-base:    #F5F7F2; /* page floor */
+  --color-bg-surface: #FFFFFF; /* cards, panels */
+
+  /* ── Commerce header (relative-value logic: topbar darker > header lighter) */
+  --color-topbar-bg:   #336A29; /* announcement bar — recedes */
+  --color-header-bg:   #498428; /* main nav — lighter, "steps forward" */
+  --color-topbar-text: #FFFFFF; /* highest legibility on topbar */
+  --color-header-text: #FFFFFF; /* text/icons on the green main nav */
+
+  /* ── Text & lines ────────────────────────────────────────────────────── */
+  --color-text-main:   #2A3626;
+  --color-text-muted:  #7A8775;
+  --color-border:      #DCE3D6;
+
+  /* ── System states ───────────────────────────────────────────────────── */
+  --color-disabled-bg:   #E8EBE5;
+  --color-disabled-text: #A6B0A1;
+
+  /* ── Semantic / feedback ─────────────────────────────────────────────── */
+  --color-success: #498428; /* brand green — "added to cart" / done */
+  --color-warning: #F5A623; /* low stock / attention; also star ratings */
+  --color-error:   #D35B58; /* validation / payment failure */
+
+  /* ── Utility ─────────────────────────────────────────────────────────── */
+  --color-skeleton: #F3F4F6; /* skeleton placeholder fill (pulse only) */
+  --color-primary-strong: #336A29; /* darkened primary for solid-button hover  */
+  --color-accent-strong:  #C9492B; /* darkened accent for hover                 */
+}
+
+/* >>>>>>>>>> typography.css >>>>>>>>>> */
+/* ══════════════════════════════════════════════════════════════════════════
+   意象若水 water_green — TYPOGRAPHY TOKENS
+   Inter + Noto Sans TC, tuned for Traditional Chinese square-character rhythm.
+   Headings 600/700 with tight 1.3–1.4 line-height (block compactness);
+   body 16px / 400 / 1.6–1.7 (vertical breathing room for CJK).
+   ════════════════════════════════════════════════════════════════════════ */
+:root {
+  /* ── Families ────────────────────────────────────────────────────────── */
+  --font-sans: 'Inter', 'Noto Sans TC', system-ui, -apple-system, sans-serif;
+  --font-base: var(--font-sans);
+
+  /* ── Weights ─────────────────────────────────────────────────────────── */
+  --fw-regular:  400; /* @kind font */
+  --fw-medium:   500; /* @kind font */ /* button & interface labels */
+  --fw-semibold: 600; /* @kind font */ /* headings, top-level categories */
+  --fw-bold:     700; /* @kind font */ /* price emphasis, strong headings */
+
+  /* ── Size scale (8pt-aligned) ────────────────────────────────────────── */
+  --fs-h1:      36px;
+  --fs-h2:      30px;
+  --fs-h3:      24px;
+  --fs-h4:      20px;
+  --fs-h5:      18px;
+  --fs-h6:      16px;
+  --fs-body:    16px; /* baseline body */
+  --fs-label:   14px; /* interface / button text */
+  --fs-caption: 12px; /* topbar, fine print, tags */
+  --fs-pagination: 22px; /* oversized, light-weight pagination digits */
+
+  /* ── Line heights ────────────────────────────────────────────────────── */
+  --lh-heading: 1.35; /* @kind font */ /* 1.3–1.4 compact block */
+  --lh-body:    1.65; /* @kind font */ /* 1.6–1.7 breathing room */
+  --lh-tight:   1.2;  /* @kind font */
+
+  /* ── Readable measure cap for prose blocks ───────────────────────────── */
+  --measure-prose: 800px;
+}
+
+
+/* >>>>>>>>>> spacing.css >>>>>>>>>> */
+/* ══════════════════════════════════════════════════════════════════════════
+   意象若水 water_green — SPACING & LAYOUT TOKENS
+   Strict 8pt grid. No odd values that aren't multiples of 4/8.
+   Anti-compounding rule: the listed values ARE final visual gaps — never
+   stack parent gap + child margin to double them.
+   ════════════════════════════════════════════════════════════════════════ */
+:root {
+  /* ── Micro (inside buttons, adjacent text) ───────────────────────────── */
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-4:  16px;
+  --space-6:  24px;
+
+  /* ── Component (between cards, inside modules) ───────────────────────── */
+  --space-8:  32px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* ── Macro whitespace (between sections — balances heavy CJK blocks) ──── */
+  --space-20: 80px;
+  --space-30: 120px;
+  --space-40: 160px;
+
+  /* ── Grid system ─────────────────────────────────────────────────────── */
+  --container-max: 1440px;
+  --footer-max:    1200px;
+  --grid-gap-desktop: 24px; /* 12 col */
+  --grid-gap-tablet:  20px; /* 8 col  */
+  --grid-gap-mobile:  16px; /* 4 col  */
+  --sidebar-width:    240px; /* fixed left category rail */
+  --sidebar-gap:      32px;  /* rail ↔ content (NOT 24px) */
+
+  /* ── Fixed module sizes ──────────────────────────────────────────────── */
+  --topbar-height:   32px;
+  --search-min-h:    48px;
+  --pagination-hit:  48px; /* w-12 h-12 click target */
+}
+
+
+/* >>>>>>>>>> radius.css >>>>>>>>>> */
+/* ══════════════════════════════════════════════════════════════════════════
+   意象若水 water_green — RADIUS, BORDERS & MOTION TOKENS
+   FLAT SYSTEM: no box-shadow anywhere. Depth comes from 1px solid borders,
+   bg-base vs bg-surface contrast, and 8pt whitespace only.
+   ════════════════════════════════════════════════════════════════════════ */
+:root {
+  /* ── Corner radius ───────────────────────────────────────────────────── */
+  --radius-sm:   4px;  /* tight active blocks / pagination chips */
+  --radius-md:   8px;  /* buttons, inputs, FAB, control bar */
+  --radius-lg:   12px; /* product cards & images */
+  --radius-full: 9999px; /* avatars, notification dots */
+
+  /* ── Borders (the ONLY elevation device) ─────────────────────────────── */
+  --border-hairline: 1px solid var(--color-border);
+  --border-width: 1px;
+  --sidebar-accent-width: 4px; /* left rail active anchor */
+
+  /* ── Focus ring (mandatory, replaces outline:none) ───────────────────── */
+  --focus-ring:   2px solid var(--color-primary);
+  --focus-offset: 2px;
+
+  /* ── Motion ──────────────────────────────────────────────────────────── */
+  --transition-base: all 0.2s ease-out; /* @kind other */
+  --hover-opacity: 0.85; /* @kind other */
+  --img-hover-scale: 1.05; /* @kind other */ /* product image zoom on card hover */
+
+  /* ── Iconography baseline ────────────────────────────────────────────── */
+  --icon-stroke: 1.5;
+}
+/* GLOBAL BAN (documented as tokens, enforced in lint):
+   no box-shadow / drop-shadow / shadow-* ; no gradients on overlays;
+   no translateY hover lifts; no rounded-full on buttons/cards. */
+
+
+/* >>>>>>>>>> base.css >>>>>>>>>> */
+/* ══════════════════════════════════════════════════════════════════════════
+   意象若水 water_green — GLOBAL BASE
+   Element defaults built on the tokens. Light mode only, flat, no shadows.
+   ════════════════════════════════════════════════════════════════════════ */
+*, *::before, *::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  font-family: var(--font-base);
+  font-size: var(--fs-body);
+  font-weight: var(--fw-regular);
+  line-height: var(--lh-body);
+  color: var(--color-text-main);
+  background: var(--color-bg-base);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  margin: 0;
+  font-weight: var(--fw-semibold);
+  line-height: var(--lh-heading);
+  color: var(--color-text-main);
+  text-wrap: balance;
+}
+h1 { font-size: var(--fs-h1); }
+h2 { font-size: var(--fs-h2); }
+h3 { font-size: var(--fs-h3); }
+h4 { font-size: var(--fs-h4); }
+h5 { font-size: var(--fs-h5); }
+h6 { font-size: var(--fs-h6); }
+
+p { margin: 0; max-width: var(--measure-prose); text-wrap: pretty; }
+
+a { color: inherit; text-decoration: none; transition: var(--transition-base); }
+
+button { font-family: inherit; }
+
+/* Mandatory keyboard focus — never outline:none without a replacement. */
+:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+/* Skeleton pulse — opacity breathing only, no shimmer / translate. */
+@keyframes wg-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.5; }
+}
+

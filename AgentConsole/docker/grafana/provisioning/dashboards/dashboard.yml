@@ -1,0 +1,14 @@
+# docker/grafana/provisioning/dashboards/dashboard.yml — dashboards 檔案載入器
+# compose 把 docker/grafana/dashboards 唯讀掛在 /var/lib/grafana/dashboards。
+apiVersion: 1
+
+providers:
+  - name: 'aisdlc'
+    orgId: 1
+    folder: ''
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards

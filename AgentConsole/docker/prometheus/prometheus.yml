@@ -1,0 +1,35 @@
+# docker/prometheus/prometheus.yml — 抓取設定（PRD §12.6.1）
+# 與 PRD 的差異：增 pgbackrest（備份指標，ADR-001 G-04）與 prometheus 自身兩個 job；增 rule_files（告警規則，見 alerts.yml）。
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+scrape_configs:
+  # backend 屬 profile app：只起資料庫層（profile db）時此目標為 down 屬預期
+  - job_name: 'spring-boot'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['backend:8080']
+
+  - job_name: 'postgres-primary'
+    static_configs:
+      - targets: ['postgres-exporter-primary:9187']
+
+  - job_name: 'postgres-replica'
+    static_configs:
+      - targets: ['postgres-exporter-replica:9187']
+
+  # pgBackRest 備份狀態／儲存用量（由 pgbackrest sidecar 的 pgbackrest-metrics.sh 產出，busybox httpd 提供）。
+  # busybox httpd 回的 Content-Type 是 application/octet-stream；Prometheus 3 對無法辨識的型別預設拒收，
+  # 所以明確指定後備協定為 Prometheus 純文字格式 0.0.4。
+  - job_name: 'pgbackrest'
+    fallback_scrape_protocol: PrometheusText0.0.4
+    static_configs:
+      - targets: ['pgbackrest:9854']
+
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']

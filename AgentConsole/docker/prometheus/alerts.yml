@@ -1,0 +1,118 @@
+# docker/prometheus/alerts.yml — 告警規則（PRD §12.6.2「關鍵監控指標」表的閾值欄）
+# 沒有 Alertmanager（PRD 未列）：規則只在 Prometheus UI 的 Alerts 頁與 Grafana 面板可見；要通知請另接 Alertmanager。
+# 指標名稱以實際 exporter 輸出為準（PRD 表內的名稱是示意）：
+#   pg_stat_bgwriter_buffers_alloc          → pg_stat_bgwriter_buffers_alloc_total
+#   pg_stat_statements_mean_time            → rate(pg_stat_statements_seconds_total) / rate(pg_stat_statements_calls_total)
+#   pgbackrest_backup_*                     → 由 sidecar 的 pgbackrest-metrics.sh 產出（docker/pgbackrest/scripts）
+groups:
+  - name: aisdlc-postgres
+    rules:
+      - alert: PostgresDown
+        expr: pg_up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "PostgreSQL 離線（{{ $labels.job }}）"
+          description: "postgres_exporter 連不到 {{ $labels.job }} 超過 1 分鐘（PRD §12.6.2：pg_up = 0）。"
+
+      - alert: PostgresReplicationLagHigh
+        expr: pg_replication_lag_seconds{job="postgres-replica"} > 30
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Replica 延遲過高"
+          description: "Replica 延遲 {{ $value | printf \"%.0f\" }} 秒（> 30 秒；PRD §12.6.2）。"
+
+      - alert: PostgresConnectionsHigh
+        expr: sum by (job) (pg_stat_activity_count) > 0.9 * max by (job) (pg_settings_max_connections)
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "活躍連線數超過上限的 90%（{{ $labels.job }}）"
+          description: "PRD §12.6.2：max_connections=200 時即 > 180。"
+
+      - alert: PostgresDiskUsageHigh
+        expr: aisdlc_storage_used_ratio{path="/var/lib/postgresql/data"} > 0.8
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "資料卷所在磁碟使用率超過 80%"
+          description: "目前 {{ $value | humanizePercentage }}（PRD §12.6.2：資料庫大小 > 磁碟容量 80%）。"
+
+      - alert: PostgresBufferAllocSpike
+        expr: rate(pg_stat_bgwriter_buffers_alloc_total[5m]) > 10 and rate(pg_stat_bgwriter_buffers_alloc_total[5m]) > 3 * rate(pg_stat_bgwriter_buffers_alloc_total[1h])
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "緩衝區分配率異常增長（{{ $labels.job }}）"
+          description: "最近 5 分鐘的分配率超過 1 小時平均的 3 倍（PRD §12.6.2：異常增長告警）。"
+
+      - alert: PostgresLocksHigh
+        expr: sum by (job) (pg_locks_count) > 50
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "鎖數量過多（{{ $labels.job }}）"
+          description: "目前 {{ $value }} 個鎖（> 50；PRD §12.6.2）。"
+
+      - alert: PostgresSlowQueries
+        expr: max by (job, datname, queryid) (rate(pg_stat_statements_seconds_total[10m]) / rate(pg_stat_statements_calls_total[10m])) > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "查詢平均執行時間超過 5 秒（{{ $labels.job }}）"
+          description: "queryid={{ $labels.queryid }} 平均 {{ $value | printf \"%.1f\" }} 秒（PRD §12.6.2）。"
+
+      - alert: PostgresWalArchiveFailing
+        expr: increase(pg_stat_archiver_failed_count{job="postgres-primary"}[15m]) > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "WAL 歸檔持續失敗"
+          description: "archive_command 失敗時 WAL 不會被回收，pg_wal 會持續增大直到磁碟滿；請檢查離站儲存（MinIO／S3）與 pgbackrest 設定。"
+
+  - name: aisdlc-backup
+    rules:
+      - alert: PgBackRestNoRecentFullBackup
+        expr: max by (stanza) (pgbackrest_backup_since_last_full_seconds) > 691200
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "距上次完整備份超過 8 天（stanza {{ $labels.stanza }}）"
+          description: "至少一個 repo 的最近完整備份已逾 8 天（691200 秒；PRD §12.6.2）。"
+
+      - alert: PgBackRestLastBackupFailed
+        expr: pgbackrest_backup_last_status != 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "最近一次備份失敗（{{ $labels.stanza }}／{{ $labels.type }}）"
+          description: "backup-full.sh／backup-incr.sh 最近一次執行以非零結束（PRD §12.6.2：最近備份狀態 ≠ 0）。"
+
+      - alert: PgBackRestStanzaError
+        expr: pgbackrest_stanza_status > 2
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "pgBackRest stanza 異常（狀態碼 {{ $value }}）"
+          description: "狀態碼 0=ok、2=尚無有效備份（新部署的正常現象）；其餘代表 stanza／repo 設定或資料有問題。"
+
+      - alert: PgBackRestMetricsStale
+        expr: time() - pgbackrest_exporter_scrape_timestamp_seconds > 300
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "pgBackRest 指標超過 5 分鐘沒更新"
+          description: "sidecar 的 pgbackrest-metrics.sh 迴圈可能卡住或 pgbackrest info 失敗（pgbackrest_exporter_info_ok）。"

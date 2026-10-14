@@ -1,0 +1,709 @@
+# AISDLC Agent Console — Docker Compose（PRD §11.3；與 PRD 的差異見 docker/README.md〈與 PRD 的差異〉）
+#
+# 🔴 Profile 分層（資料庫層可單獨驗證）：
+#   db   資料庫層：postgres-primary／replica、pgbackrest、minio（＋certs／init）、redis、
+#        postgres-exporter×2、prometheus、grafana、pgadmin   （.env 內 COMPOSE_PROFILES=db 即為預設）
+#   app  應用層：frontend、backend、engine-bridge
+#   full 入口層：nginx（depends_on frontend／backend healthy，需與 app 一起啟動）
+#   全棧：docker compose --profile db --profile app --profile full up -d --build
+#
+# 🔴 網路：db-net 為 internal（不可出站、主機也連不進來）。正式模式不對主機發布任何 PG 埠；
+#   本機開發要連 PG 請疊加 docker-compose.dev.yml（加掛非 internal 的 dev-net 並發布 5432／5433／5050）。
+#
+# 🔴 pgBackRest 的設定：pgbackrest.conf 只放靜態值（它不展開 ${...}）；金鑰、bucket、endpoint 等
+#   走 PGBACKREST_* 環境變數（x-pgbackrest-env），primary（archive-push）與 sidecar 共用同一組。
+
+name: aisdlc
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-pgbackrest-env: &pgbackrest-env
+  PGBACKREST_REPO1_CIPHER_PASS: ${PGBACKREST_CIPHER_PASS:-}
+  PGBACKREST_REPO2_CIPHER_PASS: ${PGBACKREST_CIPHER_PASS:-}
+  PGBACKREST_REPO2_S3_BUCKET: ${PGBACKREST_S3_BUCKET:-aisdlc-db-backup}
+  PGBACKREST_REPO2_S3_ENDPOINT: ${PGBACKREST_S3_ENDPOINT:-minio:9000}
+  PGBACKREST_REPO2_S3_REGION: ${PGBACKREST_S3_REGION:-us-east-1}
+  PGBACKREST_REPO2_S3_URI_STYLE: ${PGBACKREST_S3_URI_STYLE:-path}
+  PGBACKREST_REPO2_S3_KEY: ${AWS_ACCESS_KEY_ID:-}
+  PGBACKREST_REPO2_S3_KEY_SECRET: ${AWS_SECRET_ACCESS_KEY:-}
+  PGBACKREST_REPO2_STORAGE_VERIFY_TLS: ${PGBACKREST_S3_VERIFY_TLS:-n}
+  PGBACKREST_PG1_USER: ${POSTGRES_USER:-aisdlc}
+  PGBACKREST_PG1_DATABASE: ${POSTGRES_DB:-aisdlc}
+
+# pgbackrest sidecar 與 minio-certs 一次性 job 共用同一個映像
+x-pgbackrest-build: &pgbackrest-build
+  context: ./docker/pgbackrest
+  dockerfile: Dockerfile
+
+services:
+  # ========================================
+  # Reverse Proxy（profile full）
+  # ========================================
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: aisdlc-nginx
+    profiles: ["full"]
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./docker/nginx/conf.d:/etc/nginx/conf.d:ro
+      - nginx_certs:/etc/nginx/certs:ro
+    depends_on:
+      frontend:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    healthcheck:
+      # default.conf 的 /nginx-health 由 nginx 自己回 200（不經上游，避免上游短暫失效時 nginx 被判死）
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/nginx-health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+    restart: unless-stopped
+    logging: *default-logging
+    networks:
+      # 🔴 ADR-001 D14-9／G-01：nginx 必須同掛 backend-net，否則解析不到 backend
+      - frontend-net
+      - backend-net
+
+  # ========================================
+  # Frontend - Next.js 16（profile app）
+  # ========================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # 🔴 ADR-001 D14-12／G-07：語意＝後端 origin（不含 /api/v1）；全棧同源（經 nginx）時留空
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
+    image: aisdlc-frontend:dev
+    container_name: aisdlc-frontend
+    profiles: ["app"]
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
+    healthcheck:
+      # Node alpine 映像沒有 curl 但有 busybox wget；兩者擇一，不綁死映像怎麼做
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/api/health || curl -fsS -o /dev/null http://127.0.0.1:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+    restart: unless-stopped
+    logging: *default-logging
+    networks:
+      - frontend-net
+      - backend-net
+
+  # ========================================
+  # Backend - Spring Boot 4.1（profile app）
+  # ========================================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: aisdlc-backend:dev
+    container_name: aisdlc-backend
+    profiles: ["app"]
+    environment:
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-docker}
+      # POSTGRES_HOST 預設 postgres-primary；手動 failover 後改成 postgres-replica（docker/README.md〈手動 Failover〉）
+      SPRING_DATASOURCE_URL: jdbc:postgresql://${POSTGRES_HOST:-postgres-primary}:5432/${POSTGRES_DB:-aisdlc}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-aisdlc}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: "6379"
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      CONSOLE_ENCRYPTION_KEY: ${CONSOLE_ENCRYPTION_KEY:-}
+      # 單一 Engine Bridge 旁車（path 前綴 /autoclaude /sdd 區分兩引擎）
+      ENGINE_BRIDGE_URL: ${ENGINE_BRIDGE_URL:-http://engine-bridge:8081}
+      # 使用者密碼雜湊：未在 .env 設定時「不傳入」（用 application.yml 的開發預設）；正式環境必須覆寫
+      # （.env 內的 $ 要寫成 $$，見 .env.example）。
+      CONSOLE_ADMIN_PASSWORD_HASH:
+      CONSOLE_OPERATOR_PASSWORD_HASH:
+      CONSOLE_VIEWER_PASSWORD_HASH:
+    healthcheck:
+      # eclipse-temurin alpine 映像沒有 curl 但有 busybox wget；兩者擇一
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/actuator/health || curl -fsS -o /dev/null http://127.0.0.1:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    volumes:
+      - app_logs:/app/logs
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      engine-bridge:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1G
+    restart: unless-stopped
+    logging: *default-logging
+    networks:
+      - backend-net
+      - db-net
+
+  # ========================================
+  # Engine Bridge - FastAPI 旁車（profile app）
+  # 🔴 build context＝monorepo 根（映像要 COPY 兄弟目錄 AutoClaude/；ADR-001 D7）。
+  #    SDD 整個目錄唯讀掛成 /sdd（SDD_ROOT=/sdd，Bridge 自取數字最大的版本目錄）。
+  # ========================================
+  engine-bridge:
+    build:
+      context: ..
+      dockerfile: AgentConsole/engine-bridge/Dockerfile
+    image: aisdlc-engine-bridge:dev
+    container_name: aisdlc-engine-bridge
+    profiles: ["app"]
+    environment:
+      BRIDGE_PORT: "8081"
+      ENGINE_WORKSPACE: /workspace
+      SDD_ROOT: /sdd
+      BRIDGE_DB_DSN: postgresql://${POSTGRES_USER:-aisdlc}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@${POSTGRES_HOST:-postgres-primary}:5432/${POSTGRES_DB:-aisdlc}
+      BRIDGE_DB_SCHEMA: console
+      # 路徑 allowlist：映像內只有 /workspace 可寫；要讓引擎改主機專案目錄就 bind mount 並把掛載點加進來
+      BRIDGE_ALLOWED_PATH_ROOTS: /workspace
+      # 外呼預設 deny＋allowlist（NFR-SEC-04）；全棧不含 loopback
+      BRIDGE_OUTBOUND_ALLOWLIST: api.minimax.io,api.minimax.chat
+      MINIMAX_API_KEY: ${MINIMAX_API_KEY:?MINIMAX_API_KEY is required}
+      MINIMAX_BASE_URL: ${MINIMAX_BASE_URL:-https://api.minimax.chat}
+      MINIMAX_MODEL: ${MINIMAX_MODEL:-abab6.5-chat}
+    volumes:
+      - ../AISDLC_SDD:/sdd:ro
+      - engine_workspace:/workspace
+      - app_logs:/app/logs
+    healthcheck:
+      # 映像為 python:3.11-slim、沒有 curl：用 Python 標準庫探測（與映像內建 HEALTHCHECK 同形）
+      test: ["CMD", "python", "-c", "import sys,urllib.request as u; sys.exit(0 if u.urlopen('http://127.0.0.1:8081/health', timeout=5).status == 200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+    restart: unless-stopped
+    logging: *default-logging
+    networks:
+      - backend-net
+      - db-net
+
+  # ========================================
+  # PostgreSQL 18 - Primary（profile db）
+  # 自建映像：pgvector/pgvector:pg18 ＋ pgBackRest（archive-push 與 PITR restore 需要）
+  # ========================================
+  postgres-primary:
+    build:
+      context: ./docker/postgres/primary
+      dockerfile: Dockerfile
+    image: aisdlc-postgres-primary:pg18
+    container_name: aisdlc-pg-primary
+    profiles: ["db"]
+    environment:
+      <<: *pgbackrest-env
+      POSTGRES_DB: ${POSTGRES_DB:-aisdlc}
+      POSTGRES_USER: ${POSTGRES_USER:-aisdlc}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_INITDB_ARGS: --encoding=UTF-8 --lc-collate=C --lc-ctype=C
+      # PG18 映像預設 PGDATA 為 /var/lib/postgresql/18/docker；沿用 PRD 的路徑（pgBackRest／sidecar 皆以此為 pg1-path）
+      PGDATA: /var/lib/postgresql/data/pgdata
+      # 只在首次初始化時由 02-replication.sh 讀取（建 replicator 角色）
+      REPLICATION_PASSWORD: ${REPLICATION_PASSWORD:-}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - pg_wal_archive:/var/lib/postgresql/wal_archive
+      - pg_backup:/var/lib/pgbackrest
+      # 🔴 與 pgbackrest sidecar 共用 unix socket：sidecar 以本機模式（pg1-path＋pg1-socket-path）連線，不走 SSH／TLS
+      - pg_socket:/var/run/postgresql
+      - ./docker/postgres/primary/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./docker/postgres/primary/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+      - ./docker/pgbackrest/pgbackrest.conf:/etc/pgbackrest/pgbackrest.conf:ro
+      # failover 後把「原 primary 節點」重建成新 primary 的 standby 時用（docker/README.md〈手動 Failover〉）
+      - ./docker/pgbackrest/scripts/setup-replica.sh:/usr/local/bin/setup-replica.sh:ro
+    command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
+    shm_size: 256mb
+    stop_grace_period: 60s
+    healthcheck:
+      # 🔴 -h 127.0.0.1：初始化階段的暫時伺服器只聽 unix socket；走 TCP 才不會在 init 腳本還沒跑完時就被判 healthy
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ${POSTGRES_USER:-aisdlc} -d ${POSTGRES_DB:-aisdlc}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    # 🔴 正式模式不發布 5432：db-net 為 internal，發布也連不到（ADR-001 G-02，已實測）；
+    #    本機開發請疊加 docker-compose.dev.yml。
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+    restart: unless-stopped
+    logging: *default-logging
+    networks:
+      - db-net
+
+  # ========================================
+  # PostgreSQL 18 - Read Replica（串流複製；profile db）
+  # PGDATA 為空時由 entrypoint 自動 pg_basebackup -R -S replica_slot_1（偏離 PRD §12.2.6，見 README）
+  # ========================================
+  postgres-replica:
+    image: pgvector/pgvector:pg18
+    container_name: aisdlc-pg-replica
+    profiles: ["db"]
+    environment:
+      PGDATA: /var/lib/postgresql/data/pgdata
+      POSTGRES_USER: ${POSTGRES_USER:-aisdlc}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      REPLICATION_PASSWORD: ${REPLICATION_PASSWORD:?REPLICATION_PASSWORD is required}
+      PRIMARY_HOST: postgres-primary
+      PRIMARY_PORT: "5432"
+    volumes:
+      - pg_replica_data:/var/lib/postgresql/data
+      # replica 的 restore_command 讀 primary 的 cp 歸檔（唯讀）
+      - pg_wal_archive:/var/lib/postgresql/wal_archive:ro
+      - ./docker/postgres/replica/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      # 與 primary 同一份 pg_hba（replica 升格後的存取控制才一致）
+      - ./docker/postgres/primary/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+      - ./docker/postgres/replica/entrypoint.sh:/usr/local/bin/replica-entrypoint.sh:ro
+      - ./docker/pgbackrest/scripts/setup-replica.sh:/usr/local/bin/setup-replica.sh:ro
+    # 以 bash 呼叫（不依賴 git 的 exec 位元；Windows 檢出也能跑）
+    entrypoint: ["bash", "/usr/local/bin/replica-entrypoint.sh"]
+    command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
+    shm_size: 256mb
+    stop_grace_period: 60s
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ${POSTGRES_USER:-aisdlc}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+    restart: unless-stopped
+    logging: *default-logging
+    networks:
+      - db-net
+
+  # ========================================
+  # Redis - Cache & Session（profile db）
+  # ========================================
+  redis:
+    image: redis:7-alpine
+    container_name: aisdlc-redis
+    profiles: ["db"]
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
+    volumes:
+      - redis_data:/data
+      - ./docker/redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+    restart: unless-stopped
+    logging: *default-logging
+    networks:
+      - db-net
+
+  # ========================================
+  # MinIO - 離站備份物件儲存（pgBackRest repo2＋每日 pg_dump；profile db）
+  # 🔴 pgBackRest 的 S3 連線一律走 HTTPS（沒有明文模式）⇒ MinIO 必須有 TLS 憑證：
+  #    minio-certs 一次性 job 產生自簽憑證（只在檔案不存在時），pgBackRest 以 repo2-storage-verify-tls=n 連線。
+  #    官方 minio/minio 映像已自 Docker Hub／quay.io 下架 ⇒ 改用社群維護的 pgsty/minio（見 README）。
+  # ========================================
+  minio-certs:
+    build: *pgbackrest-build
+    image: aisdlc-pgbackrest:pg18
+    container_name: aisdlc-minio-certs
+    profiles: ["db"]
+    entrypoint: ["bash", "/opt/minio/gen-cert.sh"]
+    command: []
+    environment:
+      CERT_DIR: /certs
+    volumes:
+      - minio_certs:/certs
+      - ./docker/minio:/opt/minio:ro
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+    restart: "no"
+    logging: *default-logging
+    networks:
+      - db-net
+
+  minio:
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
+    container_name: aisdlc-minio
+    profiles: ["db"]
+    command: ["server", "/data", "--certs-dir", "/certs", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}
+    volumes:
+      - minio_data:/data
+      - minio_certs:/certs:ro
+    healthcheck:
+      # 映像內有 curl；自簽憑證 ⇒ -k
+      test: ["CMD-SHELL", "curl -fsSk -o /dev/null https://127.0.0.1:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    depends_on:
+      minio-certs:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+    restart: unless-stopped
+    logging: *default-logging
+    networks:
+      - db-net
+
+  minio-init:
+    image: pgsty/mc:RELEASE.2026-09-16T00-00-00Z
+    container_name: aisdlc-minio-init
+    profiles: ["db"]
+    entrypoint: ["bash", "/opt/minio/init-bucket.sh"]
+    environment:
+      MINIO_ENDPOINT: https://minio:9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}
+      S3_BUCKET: ${PGBACKREST_S3_BUCKET:-aisdlc-db-backup}
+      # pgBackRest／pg_dump 用的專用帳號（只能存取該 bucket），金鑰與 pgBackRest 的 repo2-s3-key 同一組
+      S3_ACCESS_KEY: ${AWS_ACCESS_KEY_ID:?AWS_ACCESS_KEY_ID is required}
+      S3_SECRET_KEY: ${AWS_SECRET_ACCESS_KEY:?AWS_SECRET_ACCESS_KEY is required}
+    volumes:
+      - ./docker/minio:/opt/minio:ro
+    depends_on:
+      minio:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+    restart: "no"
+    logging: *default-logging
+    networks:
+      - db-net
+
+  # ========================================
+  # pgBackRest - 備份 sidecar（profile db）
+  # 本機模式：與 primary 共用 pg_data／socket／repo1 卷；排程由 busybox crond 執行（PRD crontab 格式）。
+  # ========================================
+  pgbackrest:
+    build: *pgbackrest-build
+    image: aisdlc-pgbackrest:pg18
+    container_name: aisdlc-pgbackrest
+    profiles: ["db"]
+    init: true
+    environment:
+      <<: *pgbackrest-env
+      PGBACKREST_REPO1_CIPHER_PASS: ${PGBACKREST_CIPHER_PASS:?PGBACKREST_CIPHER_PASS is required}
+      PGBACKREST_REPO2_CIPHER_PASS: ${PGBACKREST_CIPHER_PASS:?PGBACKREST_CIPHER_PASS is required}
+      PGBACKREST_REPO2_S3_KEY: ${AWS_ACCESS_KEY_ID:?AWS_ACCESS_KEY_ID is required}
+      PGBACKREST_REPO2_S3_KEY_SECRET: ${AWS_SECRET_ACCESS_KEY:?AWS_SECRET_ACCESS_KEY is required}
+      # 給 pg_dump-offsite.sh（mc）與 verify-backup.sh 用。🔴 不可用 PGBACKREST_ 前綴：
+      # pgBackRest 會把所有 PGBACKREST_* 環境變數當成自己的選項解析（未知的會印 WARN，且污染 --output=json 的 stdout）。
+      OFFSITE_S3_BUCKET: ${PGBACKREST_S3_BUCKET:-aisdlc-db-backup}
+      OFFSITE_S3_ENDPOINT: ${PGBACKREST_S3_ENDPOINT:-minio:9000}
+      OFFSITE_S3_VERIFY_TLS: ${PGBACKREST_S3_VERIFY_TLS:-n}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:?AWS_ACCESS_KEY_ID is required}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:?AWS_SECRET_ACCESS_KEY is required}
+      LOGICAL_BACKUP_RETENTION_DAYS: ${LOGICAL_BACKUP_RETENTION_DAYS:-28}
+      POSTGRES_DB: ${POSTGRES_DB:-aisdlc}
+      POSTGRES_USER: ${POSTGRES_USER:-aisdlc}
+      # cron 排程以此時區解讀（PRD 的「週日 02:00」等）
+      TZ: ${BACKUP_TZ:-Asia/Taipei}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - pg_socket:/var/run/postgresql
+      - pg_backup:/var/lib/pgbackrest
+      - pg_wal_archive:/var/lib/postgresql/wal_archive
+      - ./docker/pgbackrest/pgbackrest.conf:/etc/pgbackrest/pgbackrest.conf:ro
+    healthcheck:
+      # crond 活著、stanza 已建立、指標端點有回應。busybox 的行程名是 busybox（applet 名不在 comm 裡），所以用 -f 比對
+      # 命令列；[c]rond 的括號寫法避免 sh -c 自己的命令列也被比對到。
+      test: ["CMD-SHELL", "busybox pgrep -f 'busybox [c]rond' > /dev/null && test -s /var/lib/pgbackrest/archive/aisdlc/archive.info && busybox wget -q -O /dev/null http://127.0.0.1:9854/metrics"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+    restart: unless-stopped
+    logging: *default-logging
+    networks:
+      - db-net
+
+  # ========================================
+  # pgAdmin - Database Management（profile db）
+  # ========================================
+  pgadmin:
+    image: dpage/pgadmin4:9.18.0
+    container_name: aisdlc-pgadmin
+    profiles: ["db"]
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@aisdlc.example.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:?PGADMIN_PASSWORD is required}
+      PGADMIN_LISTEN_PORT: "5050"
+      PGADMIN_DISABLE_POSTFIX: "true"
+    ports:
+      - "${PGADMIN_PORT:-5050}:5050"
+    volumes:
+      - ./docker/pgadmin/servers.json:/pgadmin4/servers.json:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:5050/misc/ping || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+    restart: unless-stopped
+    logging: *default-logging
+    networks:
+      # 🔴 ADR-001 D14-10：只掛 internal 的 db-net 時 5050 對主機不可達 ⇒ 另掛 backend-net
+      - db-net
+      - backend-net
+
+  # ========================================
+  # postgres_exporter ×2（PRD §12.6.1 引用但 §11.3 未列；profile db）
+  # ========================================
+  postgres-exporter-primary:
+    image: prometheuscommunity/postgres-exporter:v0.20.1
+    container_name: aisdlc-pg-exporter-primary
+    profiles: ["db"]
+    command:
+      - --collector.stat_statements
+      - --collector.stat_checkpointer
+      - --collector.long_running_transactions
+      - --collector.postmaster
+    environment:
+      DATA_SOURCE_URI: postgres-primary:5432/${POSTGRES_DB:-aisdlc}?sslmode=disable
+      DATA_SOURCE_USER: ${POSTGRES_USER:-aisdlc}
+      DATA_SOURCE_PASS: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    healthcheck:
+      # 打首頁（靜態）而不是 /metrics，避免每次健康檢查都真的去查資料庫
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:9187/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+    restart: unless-stopped
+    logging: *default-logging
+    networks:
+      - db-net
+
+  postgres-exporter-replica:
+    image: prometheuscommunity/postgres-exporter:v0.20.1
+    container_name: aisdlc-pg-exporter-replica
+    profiles: ["db"]
+    command:
+      - --collector.stat_statements
+      - --collector.stat_checkpointer
+      - --collector.long_running_transactions
+      - --collector.postmaster
+    environment:
+      DATA_SOURCE_URI: postgres-replica:5432/${POSTGRES_DB:-aisdlc}?sslmode=disable
+      DATA_SOURCE_USER: ${POSTGRES_USER:-aisdlc}
+      DATA_SOURCE_PASS: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:9187/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    depends_on:
+      postgres-replica:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+    restart: unless-stopped
+    logging: *default-logging
+    networks:
+      - db-net
+
+  # ========================================
+  # Prometheus - Metrics Collection（profile db）
+  # ========================================
+  prometheus:
+    image: prom/prometheus:v3.15.0
+    container_name: aisdlc-prometheus
+    profiles: ["db"]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./docker/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:9090/-/healthy || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    depends_on:
+      # PRD：backend healthy 才啟動。db profile 單獨啟動時 backend（profile app）不存在 ⇒ required: false
+      # 讓 compose 在該情況下略過而不是報錯；spring-boot 目標在 backend 沒起時為 down 屬預期。
+      backend:
+        condition: service_healthy
+        required: false
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+    restart: unless-stopped
+    logging: *default-logging
+    networks:
+      - db-net
+      - backend-net
+
+  # ========================================
+  # Grafana - Infrastructure Dashboard（profile db）
+  # ========================================
+  grafana:
+    image: grafana/grafana:12.4.13
+    container_name: aisdlc-grafana
+    profiles: ["db"]
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:?GRAFANA_PASSWORD is required}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    volumes:
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./docker/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "${GRAFANA_PORT:-3001}:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+    restart: unless-stopped
+    logging: *default-logging
+    networks:
+      - backend-net
+
+# ========================================
+# Networks
+# ========================================
+networks:
+  frontend-net:
+    driver: bridge
+  backend-net:
+    driver: bridge
+  db-net:
+    driver: bridge
+    internal: true    # 資料庫網路不對外暴露
+
+# ========================================
+# Volumes
+# ========================================
+volumes:
+  pg_data:
+    driver: local
+  pg_replica_data:
+    driver: local
+  pg_wal_archive:
+    driver: local
+  pg_backup:            # pgBackRest repo1（primary 與 sidecar 共用）
+    driver: local
+  pg_socket:            # primary 的 unix socket（sidecar 以本機模式連線用）
+    driver: local
+  redis_data:
+    driver: local
+  app_logs:
+    driver: local
+  nginx_certs:
+    driver: local
+  engine_workspace:     # Engine Bridge spawn 子程序的執行工作目錄
+    driver: local
+  minio_data:           # 離站備份物件
+    driver: local
+  minio_certs:          # MinIO 自簽 TLS 憑證（minio-certs job 產生）
+    driver: local
