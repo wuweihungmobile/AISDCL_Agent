@@ -12,11 +12,13 @@ import sys
 import threading
 import time
 import uuid
+import zlib
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
 import httpx
+import psycopg
 import pytest
 import uvicorn
 
@@ -105,6 +107,13 @@ class LiveBridge:
     def post_run(self, body: dict[str, Any]) -> httpx.Response:
         assert self.client is not None
         return self.client.post("/autoclaude/runs", json=body)
+
+    def post_on_fresh_connection(self, path: str, **kwargs: Any) -> httpx.Response:
+        """用一次性的連線送出請求。會讓伺服器拋出「未處理例外」的請求（回 500）之後，
+        uvicorn 會把那條連線關掉；共用的長連線若被拿去打下一個請求，就會撞上剛被關掉的
+        連線（Windows 上是 WinError 10053）。"""
+        with httpx.Client(base_url=self.base_url, timeout=30) as one_shot:
+            return one_shot.post(path, **kwargs)
 
     def get_run(self, run_id: str) -> dict[str, Any]:
         assert self.client is not None
@@ -220,3 +229,59 @@ def read_trace(path: Path) -> list[dict[str, Any]]:
     if not path.is_file():
         return []
     return [json.loads(x) for x in path.read_text(encoding="utf-8").splitlines() if x.strip()]
+
+
+# ── 假 PG（只模擬 AdvisoryLock 用到的那一小塊語意）──────────────────────────────────
+# 鎖的 bug 只在 DB 模式現形，而沒設 BRIDGE_TEST_DSN 時整組真 PG 測試都會跳過——預設的 `pytest -q`
+# 因此看不見它們。有了這個替身，同一條邏輯在沒有 PG 的環境也受守（真 PG 版見 test_db_integration）。
+class FakeConn:
+    def __init__(self, pg: FakePg) -> None:
+        self._pg = pg
+        self.closed = False
+        self._row: tuple[Any, ...] = ()
+
+    def execute(self, query: str, params: tuple[str, ...]) -> FakeConn:
+        key = params[0]
+        if "pg_try_advisory_lock" in query:
+            owner = self._pg.owners.setdefault(key, self)
+            self._row = (owner is self, zlib.crc32(key.encode("utf-8")) & 0x7FFFFFFF)
+        elif "pg_advisory_unlock" in query:
+            if self._pg.owners.get(key) is self:
+                del self._pg.owners[key]
+            self._row = (True,)
+        return self
+
+    def fetchone(self) -> tuple[Any, ...]:
+        return self._row
+
+    def close(self) -> None:
+        self.closed = True
+        for key in [k for k, owner in self._pg.owners.items() if owner is self]:
+            del self._pg.owners[key]
+
+
+class FakePg:
+    """session 級 advisory lock 屬於「連線」：同一條連線重取一定成功；別條連線在持有者還活著時
+    取不到（回 False）；連線關閉即釋放。`down=True`＝連不上（psycopg.OperationalError）。"""
+
+    def __init__(self) -> None:
+        self.owners: dict[str, FakeConn] = {}
+        self.connections: list[FakeConn] = []
+        self.down = False
+
+    def connect(self, dsn: str, **kwargs: Any) -> FakeConn:
+        if self.down:
+            raise psycopg.OperationalError("fake：連不上")
+        conn = FakeConn(self)
+        self.connections.append(conn)
+        return conn
+
+    def live_connections(self) -> int:
+        return sum(1 for conn in self.connections if not conn.closed)
+
+
+@pytest.fixture
+def fake_pg(monkeypatch: pytest.MonkeyPatch) -> FakePg:
+    pg = FakePg()
+    monkeypatch.setattr(psycopg, "connect", pg.connect)
+    return pg

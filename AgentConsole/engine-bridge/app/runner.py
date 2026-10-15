@@ -576,16 +576,25 @@ class RunHandle:
             if snap is None:
                 raise not_found("checkpoint_not_found", checkpoint_id=checkpoint_id)
             self._recheck_path()
-            self.mgr.reacquire_lock(self)                # 終態已放鎖：可能 409
-            self._adopt_env(env)
-            state = snap["state"]
-            write_engine_checkpoint(self.paths.checkpoints, self.paths.playbook, state)
-            self._rewind_to(list(state["completed_step_ids"]), list(state["completed_step_log"]))
-            self.rec.completed_at = None
-            self.rec.exit_code = None
-            self.mgr.mirror(self.rec.run_id, completed_at=None)
-            self.alert("info", "RESTORE", f"從 checkpoint「{snap['name']}」（step_idx="
-                       f"{snap['step_idx']}）還原並續跑", checkpoint_id=checkpoint_id)
+            self.mgr.reacquire_lock(self)                # PAUSED 持鎖＝略過；終態重取：可能 409
+            try:
+                self._adopt_env(env)
+                state = snap["state"]
+                write_engine_checkpoint(self.paths.checkpoints, self.paths.playbook, state)
+                self._rewind_to(list(state["completed_step_ids"]),
+                                list(state["completed_step_log"]))
+                self.rec.completed_at = None
+                self.rec.exit_code = None
+                self.mgr.mirror(self.rec.run_id, completed_at=None)
+                self.alert("info", "RESTORE", f"從 checkpoint「{snap['name']}」（step_idx="
+                           f"{snap['step_idx']}）還原並續跑", checkpoint_id=checkpoint_id)
+            except BaseException:
+                # 重取之後、spawn 之前失敗：終態 run 的鎖是剛重取的、run 仍是終態 ⇒ 放掉再丟，
+                # 否則終態 run 會一直持著它（同 project＋path 的新 run 全 409，直到 Bridge 重啟）。
+                # PAUSED run 的鎖本來就是它的、沒有重取：不動。spawn 本身的失敗由 _spawn 自己收尾。
+                if status in TERMINAL_STATUSES:
+                    self.mgr.release_lock(self)
+                raise
             self._spawn(fresh=False)
 
     def _adopt_env(self, env: dict[str, str] | None) -> None:
@@ -678,6 +687,12 @@ class RunManager:
             self.locks.release(handle.rec.lock_key, handle.rec.run_id)
 
     def reacquire_lock(self, handle: RunHandle) -> None:
+        """restore 前確保 run 持著鎖。已持鎖（PAUSED 期間本來就持著，resume 也不重搶）⇒ 直接略過，
+        不開新連線、不動登記（新連線只會撞上自己的舊連線而 409，失敗路徑還會讓舊連線洩漏，AR-01）；
+        沒持鎖（終態已放）才真的重取，可能 409；重取後 restore 若在 spawn 前失敗，
+        由 restore 放掉。"""
+        if handle.rec.lock_key and self.locks.holder(handle.rec.lock_key) == handle.rec.run_id:
+            return
         try:
             info = self.locks.acquire(handle.rec.project, handle.rec.execution_path,
                                       handle.rec.run_id)

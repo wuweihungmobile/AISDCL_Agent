@@ -16,8 +16,9 @@ import psycopg
 import pytest
 from psycopg import sql
 
+import app.runner as runner_module
 from app.db import BridgeDb
-from app.locks import AdvisoryLock, LockBusy
+from app.locks import AdvisoryLock, LockBusy, make_lock_key
 from tests.conftest import TERMINAL, mock_playbook
 
 DSN = os.environ.get("BRIDGE_TEST_DSN", "")
@@ -114,6 +115,24 @@ def _wait(pred: Callable[[], Any], timeout: float = 30.0) -> Any:
             return got
         time.sleep(0.1)
     raise AssertionError("等待逾時")
+
+
+def _advisory_holders(pg: Pg, key: str) -> list[int]:
+    """持有這把 advisory lock（hashtext(key)）的 PG 後端 pid；沒人持有＝空清單。session 級鎖綁連線：
+    pid 還在＝那條專用連線還活著、鎖還在；清單變空才代表鎖真的釋放。key 在 pg_locks 裡拆成
+    classid（高 32 位）＋objid（低 32 位）。"""
+    rows = pg.q("SELECT pid FROM pg_locks WHERE locktype = 'advisory' AND objsubid = 1 "
+                "AND ((classid::bigint << 32) | objid::bigint) = hashtext(%s)::bigint "
+                "ORDER BY pid", key)
+    return [r[0] for r in rows]
+
+
+def _backend_alive(pg: Pg, pid: int) -> bool:
+    return pg.q("SELECT count(*) FROM pg_stat_activity WHERE pid = %s", pid)[0][0] > 0
+
+
+def _disk_full(*args: Any, **kwargs: Any) -> None:
+    raise OSError("磁碟已滿（測試注入）")
 
 
 def _body(run_body, task_ids: list[str] | None, **kw):
@@ -230,9 +249,216 @@ def test_advisory_lock_connection_loss_releases_the_lock(pg) -> None:
     holder.close()
 
 
+# ── AR-01：PAUSED 的 run restore 不得撞上自己的 PG 鎖 ─────────────────────────────
+def test_in_db_mode_the_same_holder_reacquires_idempotently_without_a_second_connection(
+        pg, monkeypatch) -> None:
+    opened: list[str] = []
+    real_connect = psycopg.connect
+
+    def counting_connect(*args: Any, **kwargs: Any) -> psycopg.Connection:
+        opened.append("connect")
+        return real_connect(*args, **kwargs)
+
+    path = f"/work/{uuid.uuid4().hex}"                 # 每個測試各用一把鎖（xdist 互不干擾）
+    locks, successor = AdvisoryLock(DSN), AdvisoryLock(DSN)
+    monkeypatch.setattr(psycopg, "connect", counting_connect)
+    try:
+        first = locks.acquire("proj", path, "run-1")
+        holders = _advisory_holders(pg, first.key)
+        assert len(holders) == 1
+        before = len(opened)
+        again = locks.acquire("proj", path, "run-1")   # PAUSED 的 run 做 restore，走的就是這一步
+        assert len(opened) == before, "同 holder 重取不得新開連線（新連線只會被自己的舊連線擋下）"
+        assert again == first
+        assert _advisory_holders(pg, first.key) == holders, "仍是同一條連線持有、而且只有一條"
+
+        locks.release(first.key, "run-1")              # 放一次就乾淨：沒有殘留的第二條連線
+        assert _wait(lambda: not _advisory_holders(pg, first.key))
+        assert _wait(lambda: not _backend_alive(pg, holders[0])), "專用連線要關掉，不只是解鎖"
+        successor.acquire("proj", path, "run-2")
+    finally:
+        successor.close()
+        locks.close()
+
+
+def test_in_db_mode_a_different_run_is_still_excluded_after_the_holder_reacquired(pg) -> None:
+    path = f"/work/{uuid.uuid4().hex}"
+    locks, other_instance = AdvisoryLock(DSN), AdvisoryLock(DSN)
+    try:
+        first = locks.acquire("proj", path, "run-1")
+        locks.acquire("proj", path, "run-1")
+        holders = _advisory_holders(pg, first.key)
+        assert len(holders) == 1
+        with pytest.raises(LockBusy) as same_instance:
+            locks.acquire("proj", path, "run-2")
+        assert same_instance.value.holder_run_id == "run-1"
+        with pytest.raises(LockBusy):                  # 另一個 Bridge 實例：由 PG 擋下
+            other_instance.acquire("proj", path, "run-3")
+        assert locks.holder(first.key) == "run-1", "失敗的取鎖不得讓持有者脫離登記"
+        assert _advisory_holders(pg, first.key) == holders, "持有者的連線與鎖原封不動"
+
+        locks.release(first.key, "run-1")
+        assert _wait(lambda: not _advisory_holders(pg, first.key))
+        other_instance.acquire("proj", path, "run-3")  # 釋放後才換別人
+    finally:
+        other_instance.close()
+        locks.close()
+
+
+def test_restoring_a_paused_run_reuses_its_pg_lock_and_releases_it_at_the_terminal_state(
+        db_bridge, pg, run_body) -> None:
+    body = run_body(delay="0.8")
+    rid = body["run_id"]
+    pg.seed_run(rid)
+    live = db_bridge()
+    assert live.post_run(body).status_code == 201
+    assert live.client.post(f"/autoclaude/runs/{rid}:pause").status_code == 202
+    paused = live.wait_status(rid, {"PAUSED"})
+    key = make_lock_key(body["project"], paused["execution_path"])
+    holders = _advisory_holders(pg, key)
+    assert len(holders) == 1, f"PAUSED 期間持鎖（設計）：恰好一條專用連線；實得 {holders}"
+
+    checkpoint = live.client.get(f"/autoclaude/runs/{rid}/checkpoints").json()[0]
+    resp = live.client.post(f"/autoclaude/runs/{rid}/restore",
+                            json={"checkpoint_id": checkpoint["checkpoint_id"]})
+    assert resp.status_code == 202, resp.text          # 修復前：409（holder 是自己）
+    assert resp.json() == {"status": "RUNNING"}
+    assert _advisory_holders(pg, key) == holders, "restore 沿用原本那條連線：沒有第二條、也沒有換手"
+
+    final = live.wait_status(rid, TERMINAL)
+    assert (final["status"], final["completed_steps"]) == ("COMPLETED", 3)
+    assert _wait(lambda: not _advisory_holders(pg, key)), "終態：PG 鎖要放掉"
+    assert _wait(lambda: not _backend_alive(pg, holders[0])), "終態：專用連線要關掉，不只是解鎖"
+    assert _wait(lambda: pg.run_row(rid)["status"] == "COMPLETED")
+
+    again = run_body(delay="0.1")                      # 鎖沒有洩漏：同 project＋path 可再開
+    assert live.post_run(again).status_code == 201
+    live.wait_status(again["run_id"], TERMINAL)
+
+
+def test_restoring_a_finished_run_retakes_the_pg_lock_and_releases_it_again(
+        db_bridge, pg, run_body) -> None:
+    """另一個分支：終態的 run 已放鎖，restore 要真的重取（新連線），再跑到終態時放掉。"""
+    body = run_body(delay="0.4")
+    rid = body["run_id"]
+    pg.seed_run(rid)
+    live = db_bridge()
+    assert live.post_run(body).status_code == 201
+    done = live.wait_status(rid, TERMINAL)
+    assert done["status"] == "COMPLETED"
+    key = make_lock_key(body["project"], done["execution_path"])
+    assert _wait(lambda: not _advisory_holders(pg, key)), "終態：PG 鎖已放"
+
+    checkpoint = live.client.get(f"/autoclaude/runs/{rid}/checkpoints").json()[0]
+    resp = live.client.post(f"/autoclaude/runs/{rid}/restore",
+                            json={"checkpoint_id": checkpoint["checkpoint_id"]})
+    assert resp.status_code == 202, resp.text
+    holders = _advisory_holders(pg, key)
+    assert len(holders) == 1, f"終態 restore 重新取得 PG 鎖：恰好一條專用連線；實得 {holders}"
+
+    final = live.wait_status(rid, {"COMPLETED"})
+    assert final["completed_steps"] == 3
+    assert _wait(lambda: not _advisory_holders(pg, key)), "再度終態：PG 鎖要放掉"
+    assert _wait(lambda: not _backend_alive(pg, holders[0])), "再度終態：專用連線要關掉"
+
+
+def test_a_second_run_stays_excluded_while_the_first_is_paused_restored_and_until_it_stops(
+        db_bridge, pg, run_body) -> None:
+    body = run_body(delay="0.8")
+    rid = body["run_id"]
+    pg.seed_run(rid)
+    live = db_bridge()
+    assert live.post_run(body).status_code == 201
+    assert live.client.post(f"/autoclaude/runs/{rid}:pause").status_code == 202
+    paused = live.wait_status(rid, {"PAUSED"})
+    key = make_lock_key(body["project"], paused["execution_path"])
+    rival = run_body(delay="0.1")                      # 同 project＋同 execution_path
+    held = {"code": 409, "reason": "advisory_lock_held", "holder_run_id": rid}
+
+    clash = live.post_run(rival)
+    assert (clash.status_code, clash.json()) == (409, held), "PAUSED 期間持鎖"
+    checkpoint = live.client.get(f"/autoclaude/runs/{rid}/checkpoints").json()[0]
+    restored = live.client.post(f"/autoclaude/runs/{rid}/restore",
+                                json={"checkpoint_id": checkpoint["checkpoint_id"]})
+    assert restored.status_code == 202, restored.text
+    clash = live.post_run(rival)
+    assert (clash.status_code, clash.json()) == (409, held), "restore 之後仍持鎖"
+
+    assert live.client.post(f"/autoclaude/runs/{rid}:stop").status_code == 202
+    live.wait_status(rid, {"CANCELLED"})
+    assert _wait(lambda: not _advisory_holders(pg, key)), "stop：PG 鎖要放掉"
+    assert live.post_run(rival).status_code == 201, "鎖放掉之後同 project＋path 可再開"
+    live.wait_status(rival["run_id"], TERMINAL)
+
+
+def test_a_failed_restore_of_a_finished_run_releases_the_pg_lock_it_just_retook(
+        db_bridge, pg, run_body) -> None:
+    """終態 run 重取鎖之後、spawn 之前失敗：run 維持終態、鎖與連線都放掉，再 restore 一次可成功。"""
+    body = run_body(delay="0.4")
+    rid = body["run_id"]
+    pg.seed_run(rid)
+    live = db_bridge()
+    assert live.post_run(body).status_code == 201
+    done = live.wait_status(rid, TERMINAL)
+    assert done["status"] == "COMPLETED"
+    key = make_lock_key(body["project"], done["execution_path"])
+    assert _wait(lambda: not _advisory_holders(pg, key)), "終態：PG 鎖已放"
+    checkpoint = live.client.get(f"/autoclaude/runs/{rid}/checkpoints").json()[0]
+    request = {"checkpoint_id": checkpoint["checkpoint_id"]}
+
+    with pytest.MonkeyPatch.context() as patch:        # 只在這個區塊內讓寫 checkpoint 失敗
+        patch.setattr(runner_module, "write_engine_checkpoint", _disk_full)
+        failed = live.post_on_fresh_connection(f"/autoclaude/runs/{rid}/restore", json=request)
+    assert failed.status_code == 500, failed.text
+    assert live.get_run(rid)["status"] == "COMPLETED", "失敗的 restore 不改變終態"
+    assert _advisory_holders(pg, key) == [], "剛重取的 PG 鎖要在回 500 之前就放掉"
+    assert live.app.state.runs.locks.holder(key) is None, "登記表也要乾淨"
+
+    again = live.client.post(f"/autoclaude/runs/{rid}/restore", json=request)
+    assert again.status_code == 202, again.text
+    holders = _advisory_holders(pg, key)
+    assert len(holders) == 1, f"這次 restore 重新取得 PG 鎖：恰好一條專用連線；實得 {holders}"
+    final = live.wait_status(rid, {"COMPLETED"})
+    assert final["completed_steps"] == 3
+    assert _wait(lambda: not _advisory_holders(pg, key)), "再度終態：PG 鎖要放掉"
+    assert _wait(lambda: not _backend_alive(pg, holders[0])), "再度終態：專用連線要關掉"
+
+
+def test_a_failed_restore_of_a_paused_run_keeps_its_pg_lock(db_bridge, pg, run_body) -> None:
+    """PAUSED run 的鎖本來就是它的（restore 沒有重取）：restore 失敗不得放掉，PAUSED 語意不變。"""
+    body = run_body(delay="0.8")
+    rid = body["run_id"]
+    pg.seed_run(rid)
+    live = db_bridge()
+    assert live.post_run(body).status_code == 201
+    assert live.client.post(f"/autoclaude/runs/{rid}:pause").status_code == 202
+    paused = live.wait_status(rid, {"PAUSED"})
+    key = make_lock_key(body["project"], paused["execution_path"])
+    holders = _advisory_holders(pg, key)
+    assert len(holders) == 1, f"PAUSED 期間持鎖（設計）：恰好一條專用連線；實得 {holders}"
+    checkpoint = live.client.get(f"/autoclaude/runs/{rid}/checkpoints").json()[0]
+    request = {"checkpoint_id": checkpoint["checkpoint_id"]}
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(runner_module, "write_engine_checkpoint", _disk_full)
+        failed = live.post_on_fresh_connection(f"/autoclaude/runs/{rid}/restore", json=request)
+    assert failed.status_code == 500, failed.text
+    assert live.get_run(rid)["status"] == "PAUSED", "失敗的 restore 不改變 PAUSED"
+    assert _advisory_holders(pg, key) == holders, "仍是同一條專用連線持著同一把 PG 鎖"
+    assert live.app.state.runs.locks.holder(key) == rid
+    clash = live.post_run(run_body(delay="0.1"))       # 同 project＋同 execution_path
+    assert (clash.status_code, clash.json()["holder_run_id"]) == (409, rid), "依然擋得住別人"
+
+    again = live.client.post(f"/autoclaude/runs/{rid}/restore", json=request)
+    assert again.status_code == 202, again.text
+    assert _advisory_holders(pg, key) == holders
+    final = live.wait_status(rid, {"COMPLETED"})
+    assert final["completed_steps"] == 3
+    assert _wait(lambda: not _advisory_holders(pg, key)), "終態：PG 鎖要放掉"
+
+
 def test_reconcile_mirrors_an_orphan_into_the_database(
         make_bridge, settings, pg, project_dir) -> None:
-    from app.locks import make_lock_key
     from app.runstate import RunPaths, RunRecord, save_record
 
     run_id = str(uuid.uuid4())

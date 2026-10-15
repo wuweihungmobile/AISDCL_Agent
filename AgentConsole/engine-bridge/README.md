@@ -145,7 +145,7 @@ docker run --rm -p 8081:8081 aisdlc-engine-bridge:dev        # 另一個終端�
 - **pause**＝在「下一個步驟的啟動行」出現的瞬間（步驟 k 已完成）終止引擎**整棵行程樹**（引擎把 claude 放在自己的 session，只殺引擎會留下孤兒）；剛 spawn 的下一步會被一併終止、續跑時由引擎重做。
   一次續跑至少前進一步才允許再暫停（不會 pause／resume 空轉）；暫停請求來不及（已在最後一步）則 run 照常 COMPLETED。
 - **stop**＝終止整棵樹，逾 `BRIDGE_STOP_GRACE_SECONDS` 仍活著的升級強殺並發 `FORCE_KILL` alert；PAUSED 狀態下 stop 直接收尾。
-- **鎖**：`project:execution_path`（路徑 normcase＋NFC）；PAUSED 期間**持鎖**（resume 不用重搶），終態釋放；DB 模式再加 `pg_try_advisory_lock(hashtext(key))`（每把鎖一條專用連線）。
+- **鎖**：`project:execution_path`（路徑 normcase＋NFC）；PAUSED 期間**持鎖**（resume、restore 都不重搶；同一個 run 對同一把鎖重取＝冪等，不新開連線），終態釋放（終態 run 的 restore 才重取，可能 409；重取後、spawn 前失敗會立刻放掉，終態 run 不留鎖，PAUSED run 失敗仍持鎖）；DB 模式再加 `pg_try_advisory_lock(hashtext(key))`（每把鎖一條專用連線）。
 - **孤兒回收**（啟動時）：RUNNING／PAUSING／INITIALIZING 且 PID 不存活 → `FAILED`（reason 含 `orphaned`）、CANCELLING → `CANCELLED`、釋放鎖；PID 仍存活且身分（create_time）相符 → 先終止再標記；**身分對不上的 PID 絕不終止**；PAUSED 重新登記鎖。
 - **機密不落盤**：`config_overrides` 拒絕 `api_key`／`db_dsn`（走 `env`）；`run.json` 只記 env 的**名稱**；Bridge 重啟後遺失的請求層 env 會發 `ENV_LOST` alert，可在 `:resume`／`restore` 的 body 帶 `env` 重新提供。
 - **引擎狀態不污染專案目錄**：`checkpoint_dir`／`log_dir` 等一律在 run 工作區，`storage` 固定 `yaml_only`。

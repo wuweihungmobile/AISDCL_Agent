@@ -186,6 +186,41 @@ def test_restore_replays_from_a_chosen_checkpoint(bridge, run_body, tmp_path) ->
     assert len(bridge.client.get(f"/autoclaude/runs/{rid}/checkpoints").json()) > 3
 
 
+def test_a_paused_run_can_be_restored_to_the_first_checkpoint_and_runs_to_completion(
+        bridge, run_body, tmp_path) -> None:
+    """restore 收 PAUSED（Console 的 GOAL_COMPLETED→RETRY 依賴它；AR-01 的檔案模式對照）。
+    PAUSED 期間 run 仍持鎖：restore 前後同 project＋path 的新 run 都被擋，終態才放。"""
+    trace = tmp_path / "trace.jsonl"
+    rid = bridge.post_run(run_body(trace=trace, delay="0.8")).json()["run_id"]
+    assert bridge.client.post(f"/autoclaude/runs/{rid}:pause").status_code == 202
+    paused = bridge.wait_status(rid, {"PAUSED"})
+    assert paused["completed_steps"] == 1, "邊界＝第一步完成之後、第二步開始之前"
+    checkpoints = bridge.client.get(f"/autoclaude/runs/{rid}/checkpoints").json()
+    assert [c["name"] for c in checkpoints] == ["after-T01"]
+    first = checkpoints[0]
+
+    rival = run_body(delay="0.1")
+    clash = bridge.post_run(rival)
+    assert (clash.status_code, clash.json()["holder_run_id"]) == (409, rid), "PAUSED 期間持鎖"
+    resp = bridge.client.post(f"/autoclaude/runs/{rid}/restore",
+                              json={"checkpoint_id": first["checkpoint_id"]})
+    assert (resp.status_code, resp.json()) == (202, {"status": "RUNNING"})
+    clash = bridge.post_run(rival)
+    assert (clash.status_code, clash.json()["holder_run_id"]) == (409, rid), "restore 之後仍持鎖"
+
+    final = bridge.wait_status(rid, {"COMPLETED"})
+    assert (final["completed_steps"], final["exit_code"], final["pid"]) == (3, 0, None)
+    seen = _statuses(bridge.events(rid))
+    assert seen[seen.index("PAUSED"):] == ["PAUSED", "RUNNING", "COMPLETED"]
+    assert any(e["code"] == "RESTORE" for e in bridge.events(rid) if e["event"] == "alert")
+    assert _count(trace, "[INIT_DONE]") == 1, "T01 在還原點之前，不得重做"
+    assert _count(trace, "[TEST_CREATED]") >= 1
+    assert _count(trace, "[PONG]") == 1
+
+    assert bridge.post_run(rival).status_code == 201, "終態已放鎖：同 project＋path 可再開"
+    bridge.wait_status(rival["run_id"], TERMINAL)
+
+
 def test_second_run_on_the_same_project_and_path_is_409_until_the_first_ends(
         bridge, run_body) -> None:
     first = run_body(delay="1.0")
