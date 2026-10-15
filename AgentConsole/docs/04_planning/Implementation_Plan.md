@@ -439,7 +439,7 @@ Push-Location AgentConsole; docker compose --profile db --profile app --profile 
 | W3 | 🟡 W3-A 完成（主控親驗）；W3-B 未派 | 本 commit | W3-A：主控親跑 lint rc=0、tsc rc=0、build 成功（20 路由）、vitest 14 檔 104 案例全過、Playwright 對真後端＋PG 17 passed（資料零殘留）、版面唯一性 grep 為空 | 無 | W3-B（後端 Phase 3～6）任務書已備（`agent_briefs/W3_BACKEND_P3-6.md`），Windows 輪第一棒 |
 | W4 | ⬜ 未開始 | — | — | — | 前端 Phase 3～6 任務書待後端 Phase 3～6 的 OpenAPI 定案後撰寫；QA 全面 E2E 矩陣同輪 |
 | W5 | ⬜ 未開始 | — | — | — | 修復波 |
-| Windows 接續 | ⬜ 待該機 | — | 先跑 §4.2 各服務三條指令＋各交卷〈Windows 接續注意〉清單（engine-bridge／backend／frontend／docker 四份 README 皆有） | — | 掌舵者 2026-10-14 指示本輪（Mac）後切 Windows |
+| Windows 接續 | 🟡 首跑完成（主控親驗 2026-10-15）；Docker 全棧與 Playwright 留給 W4 QA 在 Windows 實跑 | 本 commit | Bridge：`uv pip install -e AgentConsole\engine-bridge --python .venv\Scripts\python.exe` rc=0；`python -m pytest -q` 第一次 1 failed／230 passed／13 skipped——`tests/test_procutil.py::test_terminate_takes_the_grandchild_too` 的等號斷言在 Windows 不成立（venv 的 `python.exe` 是啟動器，行程樹多出啟動器行程；主控以 psutil 探針實證），改為 win32 超集合斷言後該檔 7 passed、ruff 綠。backend：`.\gradlew.bat clean build`＝Test result SUCCESS（448 tests、0 failures）、BUILD SUCCESSFUL in 2m 12s（Java 21.0.10、Gradle 9.8.1、Testcontainers 走 Docker Desktop）。frontend：`npm ci` rc=0、`npm run build` rc=0（20 路由）；`npx vitest run` 在 Node 20.19.5 下 14 個測試檔全部起不來（jsdom 內的 undici 需要 Node 22 的 zlib zstd API），以 nvm-windows 切到 Node 22.23.3 後 14 檔 104 案例全過 | 無（兩個環境缺口當場修掉） | §4.1 的 Node 22 是硬性前置，不是建議；`nvm use` 在無人核准 UAC 時會刪掉舊 symlink 卻建不出新的（訊息仍印成功），主控以不需管理員的 junction 修復（`New-Item -ItemType Junction -Path C:\nvm4w\nodejs -Target <nvm>\v22.23.3`） |
 
 ### 5.2 RTM 快照（以 RTM §3.4 現查指令填）
 

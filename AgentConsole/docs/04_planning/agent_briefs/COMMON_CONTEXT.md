@@ -1,5 +1,14 @@
 # 共同背景（每位 agent 都必須先讀完本檔）
 
+## 🔴 本輪環境覆寫（Windows 輪，2026-10-15 起；與下文衝突處以本節為準）
+- monorepo 根：`D:\CursorProject\AISDCL_Agent`（Windows 11；**只有 PowerShell 7 工具，Bash 工具被 hook 停用**）。所有指令用 PowerShell 形態：不准裸 `cd`／`Set-Location`，換目錄用 `Push-Location <絕對路徑>; …; Pop-Location` 在**同一次呼叫**成對；不准 `VAR=value cmd` 前綴，改 `$env:VAR="value"; cmd`；讀 rc 不接管線——先把輸出導到檔案再讀 `$LASTEXITCODE`，要看內容用 `Get-Content <log> -Tail N`。
+- 工具鏈（主控已在本機親驗）：Python＝根層 `.venv`，一律寫完整路徑 `D:\CursorProject\AISDCL_Agent\.venv\Scripts\python.exe`（Bridge 已裝進去；`aisdlc-mock-claude.exe` 與 `uvicorn.exe` 在 `.venv\Scripts\`）；Java 21（`java -version`＝21.0.10）＋ `.\gradlew.bat`（`clean build` 已 BUILD SUCCESSFUL）；Node 22.23.3（nvm-windows；`node --version` 必須印 v22，不是就停下回報）；Docker Desktop 在線；`uv` 在 PATH。
+- 暫存目錄：`C:\Users\wuwei\AppData\Local\Temp\claude\D--CursorProject-AISDCL-Agent\6121f0db-8785-4286-9143-5c37c2fc9496\scratchpad\<你的角色>\`（自己 `New-Item -ItemType Directory -Force`）。下文第 8 條的 macOS 暫存路徑與「你在哪裡」的 macOS 路徑**作廢**。
+- 長輸出一律導檔再看尾端：`<cmd> > "<scratchpad>\x.log" 2>&1; $rc = $LASTEXITCODE; "rc=$rc"; Get-Content "<scratchpad>\x.log" -Tail 40`。
+- 背景服務（PG 容器／backend／Bridge／frontend dev）用 `run_in_background: true` 啟動，交卷前自己關掉（`Stop-Process -Id`／`docker rm -f`），不留孤兒；交卷附 `Get-Process java,node,python -ErrorAction SilentlyContinue | Select-Object Id,ProcessName,StartTime` 的輸出。
+- Windows 既有事實：Bridge 的 `BRIDGE_ALLOWED_PATH_ROOTS` 以 `;` 分隔；路徑比對 normcase；`terminate()` 是強殺（Architecture L-5）；venv 的 `python.exe` 是啟動器，會再 spawn 真正的直譯器（行程樹多一層，Bridge 測試已處理）；Windows 整條命令列上限 32,767 字元（Architecture L-9，prompt ≤ 20,000 字元）。
+- 不准改：`AutoClaude/`、`AISDLC_SDD/`、根層 `CLAUDE.md`、`.claude/`、`tools/`、`.github/`、根層 `ONBOARDING.md`、`AutoClaude/.perf_baseline.toml`。
+
 ## 你在哪裡
 - monorepo 根：`/Users/wuweihong/Antigravity/AISDCL_Agent`（macOS，zsh，Python 3.11 + uv，Java 21（Homebrew openjdk@21），Node 22.23.3 + npm 10.9（已在 PATH），Docker 29.6 已在跑）。
 - 既有兩個子專案（**一個位元組都不准改**）：

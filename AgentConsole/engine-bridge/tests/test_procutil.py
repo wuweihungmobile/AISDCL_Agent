@@ -44,7 +44,14 @@ def test_terminate_takes_the_grandchild_too() -> None:
     parent, child_pid = _spawn_tree(_SLEEPER)
     try:
         procs = procutil.begin_terminate(parent.pid)
-        assert {p.pid for p in procs} == {parent.pid, child_pid}
+        snapshot = {p.pid for p in procs}
+        if sys.platform == "win32":
+            # Windows 行為＝venv 的 python.exe 是啟動器（venvlauncher），會再 spawn 真正的
+            # 直譯器當子行程，所以樹裡除了 parent／child 還有啟動器子行程（Windows 實測
+            # 4 個 python.exe）；快照必須「涵蓋」parent 與 child，而不是恰好等於它們。
+            assert {parent.pid, child_pid} <= snapshot
+        else:
+            assert snapshot == {parent.pid, child_pid}
         parent.wait(timeout=10)
         assert _wait_until(lambda: not procutil.survivors(procs, exclude_pid=parent.pid))
         assert not procutil.pid_alive(child_pid)
