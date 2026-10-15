@@ -32,6 +32,12 @@ public interface TaskRepository {
     /** 軟刪除目標下全部任務；回傳受影響筆數。 */
     int softDeleteByGoalId(UUID goalId, Instant now);
 
-    /** 軟刪除專案下全部任務（經由其目標）；回傳受影響筆數。 */
+    /** 軟刪除專案下全部仍存活的任務（經由其目標；{@code deleted_at}＝{@code now}，與專案同值）；回傳受影響筆數。 */
     int softDeleteByProjectId(UUID projectId, Instant now);
+
+    /**
+     * 復原專案時還原「同一次刪除連帶軟刪」的任務：{@code deleted_at} 等於專案的 {@code deletedAt}（契約 §1.6.1）；單獨先刪除的任務
+     * 維持已刪除。{@code now} 寫進 {@code updated_at}；狀態、重試次數等欄位在刪除時就沒動過，原樣保留。回傳受影響筆數。
+     */
+    int restoreDeletedWithProject(UUID projectId, Instant deletedAt, Instant now);
 }

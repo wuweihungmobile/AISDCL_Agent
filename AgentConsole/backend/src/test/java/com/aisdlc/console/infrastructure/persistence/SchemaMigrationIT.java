@@ -59,13 +59,47 @@ class SchemaMigrationIT extends AbstractIntegrationTest {
     }
 
     @Test
-    void flywayAppliedVersionsOneToSevenSuccessfully() {
+    void flywayAppliedVersionsOneToNineSuccessfully() {
         List<Map<String, Object>> history = jdbc.queryForList(
                 "select version, success from console.flyway_schema_history where version is not null "
                         + "order by installed_rank");
         assertThat(history).extracting(row -> row.get("version"))
-                .containsExactly("1", "2", "3", "4", "5", "6", "7");
+                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9");
         assertThat(history).allSatisfy(row -> assertThat(row.get("success")).isEqualTo(true));
+    }
+
+    /** V9（契約 §0.5；C-3）：專案、目標、任務的軟刪除時間，加上專案軟刪除前的狀態；「已刪除」清單用的 partial index。 */
+    @Test
+    void v9AddsTheSoftDeleteTimestampsTheStatusBeforeDeleteAndThePartialIndexOnDeletedProjects() {
+        for (String table : List.of("projects", "goals", "tasks")) {
+            Map<String, Object> column = jdbc.queryForMap("select data_type, is_nullable from information_schema.columns "
+                    + "where table_schema = 'console' and table_name = ? and column_name = 'deleted_at'", table);
+            assertThat(column).as(table + ".deleted_at").containsEntry("data_type", "timestamp with time zone")
+                    .containsEntry("is_nullable", "YES");
+        }
+        Map<String, Object> before = jdbc.queryForMap("select data_type, is_nullable, character_maximum_length from "
+                + "information_schema.columns where table_schema = 'console' and table_name = 'projects' "
+                + "and column_name = 'status_before_delete'");
+        assertThat(before).containsEntry("data_type", "character varying").containsEntry("is_nullable", "YES")
+                .containsEntry("character_maximum_length", 20);
+        String index = jdbc.queryForObject("select indexdef from pg_indexes where schemaname = 'console' "
+                + "and indexname = 'idx_projects_deleted_at'", String.class);
+        assertThat(index).contains("deleted_at").containsIgnoringCase("WHERE").containsIgnoringCase("is_deleted");
+    }
+
+    /** V8（契約 §0.5；C-10）：匯入記錄補 warnings（NOT NULL、預設 []）與 parse_options（可 NULL）。 */
+    @Test
+    void v8AddsTheNonNullWarningsDefaultingToAnEmptyArrayAndTheNullableParseOptions() {
+        Map<String, Object> warnings = jdbc.queryForMap("select data_type, is_nullable, column_default from "
+                + "information_schema.columns where table_schema = 'console' and table_name = 'import_records' "
+                + "and column_name = 'warnings'");
+        assertThat(warnings).containsEntry("data_type", "jsonb").containsEntry("is_nullable", "NO");
+        assertThat((String) warnings.get("column_default")).startsWith("'[]'::jsonb");
+        Map<String, Object> options = jdbc.queryForMap("select data_type, is_nullable, column_default from "
+                + "information_schema.columns where table_schema = 'console' and table_name = 'import_records' "
+                + "and column_name = 'parse_options'");
+        assertThat(options).containsEntry("data_type", "jsonb").containsEntry("is_nullable", "YES")
+                .containsEntry("column_default", null);
     }
 
     /** V7（契約 §0.5）：重播錨點、console_last_seq、token 樣本表與「未確認不重複」的 partial unique index。 */

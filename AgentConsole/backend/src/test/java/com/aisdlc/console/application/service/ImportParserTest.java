@@ -1,6 +1,6 @@
 package com.aisdlc.console.application.service;
 
-import com.aisdlc.console.application.port.in.ImportUseCase.ParseOptions;
+import com.aisdlc.console.domain.model.imports.ParseOptions;
 import com.aisdlc.console.application.port.out.AgentBridge;
 import com.aisdlc.console.application.port.out.AgentBridge.BridgeRejectedException;
 import com.aisdlc.console.application.port.out.AgentBridge.DecomposeRequest;

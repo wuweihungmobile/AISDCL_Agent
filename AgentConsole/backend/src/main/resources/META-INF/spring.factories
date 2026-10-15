@@ -1,0 +1,3 @@
+# 檔案日誌（C-16）：LOG_DIR 有值時另寫 JSON 行的滾動檔 ${LOG_DIR}/console.log（見 FileLoggingEnvironmentPostProcessor）
+org.springframework.boot.EnvironmentPostProcessor=\
+com.aisdlc.console.infrastructure.logging.FileLoggingEnvironmentPostProcessor

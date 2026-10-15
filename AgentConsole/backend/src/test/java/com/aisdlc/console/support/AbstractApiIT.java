@@ -130,6 +130,24 @@ public abstract class AbstractApiIT extends AbstractIntegrationTest {
         jdbc.update("update console.projects set status = ? where id = ?", status, UUID.fromString(projectId));
     }
 
+    /**
+     * 把已軟刪除專案的刪除時間撥到「現在 − {@code interval}」（PostgreSQL interval 字面，例：{@code "31 days"}）——測保留期與清除
+     * 不必等 30 天。連帶軟刪的目標與任務一併撥成同一個值，維持「同一次刪除」；先前就單獨刪除的目標／任務（deleted_at 與專案不同）
+     * 的判定要靠它們原本不等於專案的值，所以這裡只改「目前 deleted_at 等於專案原值」的列。
+     */
+    protected void backdateSoftDeletion(String projectId, String interval) {
+        UUID id = UUID.fromString(projectId);
+        // 時間一律以 PostgreSQL 的文字形式往返（微秒精度、含時區偏移），不經 JDBC 的 Timestamp 轉換
+        String target = jdbc.queryForObject("select (now() - ?::interval)::text", String.class, interval);
+        String original = jdbc.queryForObject("select deleted_at::text from console.projects where id = ?",
+                String.class, id);
+        jdbc.update("update console.goals set deleted_at = ?::timestamptz where project_id = ? "
+                + "and deleted_at = ?::timestamptz", target, id, original);
+        jdbc.update("update console.tasks set deleted_at = ?::timestamptz where deleted_at = ?::timestamptz "
+                + "and goal_id in (select id from console.goals where project_id = ?)", target, original, id);
+        jdbc.update("update console.projects set deleted_at = ?::timestamptz where id = ?", target, id);
+    }
+
     protected List<String> uuids(String... ids) {
         return new ArrayList<>(List.of(ids));
     }

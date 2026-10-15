@@ -24,7 +24,8 @@ import java.util.Set;
  * 401＝所有端點（登入端點是帳密錯誤）；
  * 403＝需登入的寫入端點（VIEWER 唯讀）與可能帶 {@code reveal=true} 的設定讀取；404＝路徑含 id 或 reorder（專案不存在）；
  * 409＝有狀態規則的端點；429＝所有 {@code /api/**} 端點（限流，契約 §0.4 第 4 點）；
- * 413／415／422／502／504 各依端點的契約列出（{@link #EXTRA}）。
+ * 413／415／422／502／504 各依端點的契約列出（{@link #EXTRA}）。{@code GET /projects} 另有 403：{@code deleted=true}（已刪除專案清單）
+ * 只准 OPERATOR 以上（{@link #ROLE_GATED_READ_ENDPOINTS}，契約 §1.6.2）。
  */
 @Configuration(proxyBeanMethods = false)
 public class ErrorResponseDocumentation {
@@ -34,6 +35,8 @@ public class ErrorResponseDocumentation {
     /** 有狀態規則、會回 409 的端點（方法＋路徑）。 */
     private static final Set<String> CONFLICT_ENDPOINTS = Set.of(
             "PUT /api/v1/projects/{id}", "DELETE /api/v1/projects/{id}", "POST /api/v1/projects/{id}/signoff",
+            // v1.2（C-3）：復原只在專案已被軟刪除、且仍在保留期內才成立（project_not_deleted／restore_window_expired）
+            "POST /api/v1/projects/{id}/restore",
             "DELETE /api/v1/goals/{id}", "POST /api/v1/goals/{id}/signoff",
             "DELETE /api/v1/tasks/{id}", "POST /api/v1/tasks/{id}/retry", "POST /api/v1/tasks/{id}/signoff",
             // Phase 3 匯入：狀態不允許、已 signoff、草案失效、未 signoff 即 confirm…
@@ -88,13 +91,14 @@ public class ErrorResponseDocumentation {
             Map.entry("POST /api/v1/executions/{runId}/review/{stepId}", Map.of(
                     "422", "SKIP／RETRY 開後續批次或 restore 時 Bridge 拒絕（reason：引擎拒絕此請求）",
                     "502", "引擎橋接服務無法連線／回了非預期的錯誤（審核項維持 PENDING）",
-                    "504", "引擎橋接服務逾時（審核項維持 PENDING）")),
-            // Phase 5 監控：PDF 報表 W5 才提供
-            Map.entry("GET /api/v1/monitor/projects/{projectId}/report", Map.of(
-                    "501", "PDF 報表尚未提供（W5）；format=csv 為必做")));
+                    "504", "引擎橋接服務逾時（審核項維持 PENDING）")));
 
-    /** 讀取端點中，會因 {@code reveal=true} 而回 403 的路徑（GET 預設不列 403）。 */
-    private static final Set<String> REVEAL_ENDPOINTS = Set.of("GET /api/v1/settings", "GET /api/v1/settings/{category}");
+    /**
+     * 讀取端點中，會因查詢參數而有角色限制、回 403 的路徑（GET 預設不列 403）：{@code reveal=true}（僅 ADMIN）與
+     * {@code GET /projects?deleted=true}（OPERATOR 以上；v1.2）。
+     */
+    private static final Set<String> ROLE_GATED_READ_ENDPOINTS = Set.of("GET /api/v1/settings",
+            "GET /api/v1/settings/{category}", "GET /api/v1/projects");
 
     @Bean
     OpenApiCustomizer errorEnvelopeCustomizer() {
@@ -111,8 +115,9 @@ public class ErrorResponseDocumentation {
                     add(operation, "400", "請求格式或欄位驗證失敗（errors 列出每個欄位的問題）");
                 }
                 add(operation, "401", isPublic ? "帳號密碼錯誤，或 refresh token 無效／過期" : "未登入，或 access token 無效／過期");
-                if ((!isPublic && !isRead) || REVEAL_ENDPOINTS.contains(key)) {
-                    add(operation, "403", "角色不足（VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；系統參數寫入與 reveal 僅 ADMIN）");
+                if ((!isPublic && !isRead) || ROLE_GATED_READ_ENDPOINTS.contains(key)) {
+                    add(operation, "403", "角色不足（VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；系統參數寫入與 reveal 僅 ADMIN；"
+                            + "已刪除專案清單需 OPERATOR 以上）");
                 }
                 if (path.contains("{") || path.endsWith("/reorder")) {
                     add(operation, "404", "資源不存在或已軟刪除");

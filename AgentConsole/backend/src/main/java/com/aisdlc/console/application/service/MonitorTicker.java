@@ -46,13 +46,14 @@ public class MonitorTicker {
     private final BridgeHealthMonitor health;
     private final TimeRuleEvaluator timeRules;
     private final RunLauncher launcher;
+    private final RunRegistry registry;
     private final Clock clock;
     private ScheduledExecutorService scheduler;
 
     @SuppressWarnings("java:S107")
     public MonitorTicker(RuntimeSettings settings, ExecutionRunRepository runs, AgentBridge bridge,
                          RunConsumers consumers, BridgeHealthMonitor health, TimeRuleEvaluator timeRules,
-                         RunLauncher launcher, Clock clock) {
+                         RunLauncher launcher, RunRegistry registry, Clock clock) {
         this.settings = settings;
         this.runs = runs;
         this.bridge = bridge;
@@ -60,6 +61,7 @@ public class MonitorTicker {
         this.health = health;
         this.timeRules = timeRules;
         this.launcher = launcher;
+        this.registry = registry;
         this.clock = clock;
     }
 
@@ -127,7 +129,7 @@ public class MonitorTicker {
     private void reconcileOne(ExecutionRun run) {
         UUID id = run.id();
         try {
-            bridge.getRun(id);
+            queryBridge(id);
             consumers.start(id, run.consoleLastSeq());
         } catch (AgentBridge.BridgeRejectedException e) {
             if (e.status() == 404) {
@@ -141,9 +143,14 @@ public class MonitorTicker {
         }
     }
 
+    /** 對帳用的 {@code GET run}：背景執行緒沒有請求上下文，用該 run 的 traceId（之後它的消費者沿用同一個，契約 §0.4 第 6 點）。 */
+    private void queryBridge(UUID runId) {
+        TraceIds.within(registry.traceIdOf(runId), () -> bridge.getRun(runId));
+    }
+
     private void reconcileStaleInitializing(ExecutionRun run) {
         try {
-            bridge.getRun(run.id());
+            queryBridge(run.id());
             consumers.start(run.id(), run.consoleLastSeq());
         } catch (AgentBridge.BridgeRejectedException e) {
             if (e.status() == 404) {

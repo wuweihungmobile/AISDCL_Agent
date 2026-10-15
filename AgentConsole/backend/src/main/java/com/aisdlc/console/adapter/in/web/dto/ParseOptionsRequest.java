@@ -1,6 +1,6 @@
 package com.aisdlc.console.adapter.in.web.dto;
 
-import com.aisdlc.console.application.port.in.ImportUseCase.ParseOptions;
+import com.aisdlc.console.domain.model.imports.ParseOptions;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -20,5 +20,11 @@ public record ParseOptionsRequest(
 
     public ParseOptions toDomain() {
         return new ParseOptions(executionPath, autonomyLevel, additionalPrompt, specDir);
+    }
+
+    /** 回應用：匯入記錄詳情的 {@code parseOptions}（契約 §1.1.9，C-10）——最近一次 parse 請求的選項，形狀與請求相同。 */
+    public static ParseOptionsRequest from(ParseOptions options) {
+        return new ParseOptionsRequest(options.autonomyLevel(), options.executionPath(), options.additionalPrompt(),
+                options.specDir());
     }
 }

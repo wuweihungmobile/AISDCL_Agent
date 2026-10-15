@@ -39,4 +39,13 @@ public interface RuntimeSettings {
 
     /** 是否啟動背景工作（啟動對帳、探測、排程 tick）；整合測試預設關閉、需要時由測試明確開啟。 */
     boolean backgroundEnabled();
+
+    /** 軟刪除專案可復原的天數（{@code console.retention.soft-delete-days}，預設 30、≥ 1；契約 §1.6.5）。 */
+    int softDeleteRetentionDays();
+
+    /**
+     * 是否註冊每日清除排程（{@code console.retention.purge-enabled}，<b>預設 false</b>）：實體刪除不可逆，部署者必須明確開啟；
+     * 未開啟時軟刪除資料只會累積、不會消失。
+     */
+    boolean purgeEnabled();
 }

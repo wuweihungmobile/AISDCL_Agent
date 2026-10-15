@@ -644,4 +644,120 @@ class ImportParseGatesApiIT extends AbstractOutboundIT {
         assertThat(resp.<String>read("$.data.parsedResult.goals[0].tasks[0].passCriteria"))
                 .isEqualTo("（AI 解析未提供通過標準，請於 signoff 前補齊）");
     }
+
+    // ── 重開記錄：warnings 與 parseOptions（V8、C-10；契約 §1.1.9、E2E-13 第 10 列）──────────────
+
+    /** 專案、目標、任務的通過標準全空白的模型草稿：解析成功，但帶三個 passcriteria_placeholder 提示。 */
+    private static String bareTreeJson() {
+        Map<String, Object> bare = ImportFixtures.task("初始化", "請輸出 [T1_DONE]", "");
+        Map<String, Object> goal = ImportFixtures.goal("g1", "基礎", List.of(), List.of(bare));
+        goal.put("passCriteria", "");
+        return ImportFixtures.treeJson("無標準專案", List.of(goal))
+                .replace("\"passCriteria\":\"全部目標完成\"", "\"passCriteria\":\"\"");
+    }
+
+    private Resp parseWith(String id, Map<String, Object> options) {
+        return api.post(operator(), IMPORT + "/" + id + "/parse", options);
+    }
+
+    @Test
+    void reopeningARecordRestoresTheYellowWarningsAndTheParseOptionsOfTheLastSuccessfulParse() {
+        configureFakeModel();
+        OutboundFakes.LLM.on("POST", OutboundFakes.CHAT_PATH, ok(bareTreeJson()));
+        String id = createDocument(null);
+
+        Resp parsed = parseWith(id, Map.of("autonomyLevel", 5, "executionPath", "/work/proj-import",
+                "additionalPrompt", "少於 3 個任務"));
+
+        assertThat(parsed.status()).isEqualTo(200);
+        List<Map<String, Object>> parseWarnings = parsed.read("$.data.warnings");
+        assertThat(parseWarnings).extracting(w -> w.get("location"))
+                .containsExactlyInAnyOrder("project", "goals[0]", "goals[0].tasks[0]");
+
+        Resp reopened = api.get(viewer(), IMPORT + "/" + id);
+        assertThat(reopened.<List<Map<String, Object>>>read("$.data.warnings"))
+                .as("重開記錄所見與 parse 回應同形同序").isEqualTo(parseWarnings);
+        Map<String, Object> options = reopened.read("$.data.parseOptions");
+        assertThat(options).containsEntry("executionPath", "/work/proj-import").containsEntry("autonomyLevel", 5)
+                .containsEntry("additionalPrompt", "少於 3 個任務");
+        assertThat(options.get("specDir")).as("沒給的選項不憑空出現").isNull();
+    }
+
+    @Test
+    void editingTheResultOverwritesTheStoredWarningsWithTheRecomputedOnesAndLeavesTheParseOptionsAlone() {
+        configureFakeModel();
+        OutboundFakes.LLM.on("POST", OutboundFakes.CHAT_PATH, ok(bareTreeJson()));
+        String id = createDocument(null);
+        assertThat(parseWith(id, Map.of("autonomyLevel", 5, "executionPath", "/work/proj-import")).status())
+                .isEqualTo(200);
+        Map<String, Object> optionsBefore = api.get(viewer(), IMPORT + "/" + id).read("$.data.parseOptions");
+
+        Map<String, Object> tree = currentTree(id);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> project = (Map<String, Object>) tree.get("project");
+        project.put("passCriteria", "全部目標完成");
+        Resp edited = putTree(id, tree);
+
+        assertThat(edited.status()).isEqualTo(200);
+        assertThat(edited.<List<String>>read("$.data.warnings[*].location")).as("只含仍成立者")
+                .containsExactlyInAnyOrder("goals[0]", "goals[0].tasks[0]");
+        Resp reopened = api.get(viewer(), IMPORT + "/" + id);
+        assertThat(reopened.<List<Object>>read("$.data.warnings")).isEqualTo(edited.<List<Object>>read("$.data.warnings"));
+        assertThat(reopened.<Map<String, Object>>read("$.data.parseOptions")).isEqualTo(optionsBefore);
+        assertThat(reopened.<String>read("$.data.status")).isEqualTo("REVIEWING");
+    }
+
+    @Test
+    void aGateRejectedReparseStoresItsOwnOptionsButKeepsTheWarningsOfTheLastSuccessfulParse() {
+        configureFakeModel();
+        stubOnMarker("GATE_MAX", ok(treeWithTasks(25, -1)));
+        OutboundFakes.LLM.on("POST", OutboundFakes.CHAT_PATH, ok(bareTreeJson()));
+        String id = createDocument(null);
+        Resp first = parseWith(id, Map.of("autonomyLevel", 5, "executionPath", "/work/proj-import",
+                "additionalPrompt", "第一次"));
+        assertThat(first.status()).isEqualTo(200);
+        List<Object> warningsAfterSuccess = api.get(viewer(), IMPORT + "/" + id).read("$.data.warnings");
+        assertThat(warningsAfterSuccess).hasSize(3);
+
+        Resp rejected = parseWith(id, Map.of("autonomyLevel", 8, "executionPath", "/work/other",
+                "additionalPrompt", "GATE_MAX"));
+
+        assertThat(rejected.status()).isEqualTo(422);
+        Resp record = api.get(viewer(), IMPORT + "/" + id);
+        assertThat(record.<String>read("$.data.status")).isEqualTo("UPLOADED");
+        assertThat(record.<Map<String, Object>>read("$.data.parseOptions")).as("保存的是最近一次請求，不論成敗")
+                .containsEntry("executionPath", "/work/other").containsEntry("autonomyLevel", 8)
+                .containsEntry("additionalPrompt", "GATE_MAX");
+        assertThat(record.<List<Object>>read("$.data.warnings")).as("失敗的 parse 不動 warnings")
+                .isEqualTo(warningsAfterSuccess);
+        assertThat(record.<Object>read("$.data.parsedResult")).as("保留上一次成功的 parsedResult").isNotNull();
+    }
+
+    @Test
+    void anOmittedAutonomyLevelIsStoredAsTheDefaultThreeAndANeverParsedRecordHasNeitherWarningsNorOptions() {
+        configureFakeModel();
+        stubDefaultOk();
+        String id = createDocument(null);
+        Resp never = api.get(viewer(), IMPORT + "/" + id);
+        assertThat(never.<List<Object>>read("$.data.warnings")).as("永遠出現：沒有就是 []").isEmpty();
+        assertThat(never.<Object>read("$.data.parseOptions")).isNull();
+
+        assertThat(parseWith(id, Map.of("executionPath", "/work/proj-import")).status()).isEqualTo(200);
+
+        assertThat(api.get(viewer(), IMPORT + "/" + id).<Integer>read("$.data.parseOptions.autonomyLevel"))
+                .isEqualTo(3);
+    }
+
+    @Test
+    void theHistoryListCarriesNeitherWarningsNorParseOptions() {
+        configureFakeModel();
+        OutboundFakes.LLM.on("POST", OutboundFakes.CHAT_PATH, ok(bareTreeJson()));
+        String id = createDocument(null);
+        assertThat(parseWith(id, Map.of("executionPath", "/work/proj-import")).status()).isEqualTo(200);
+
+        Map<String, Object> item = api.get(viewer(), IMPORT).<List<Map<String, Object>>>read("$.data.content").get(0);
+
+        assertThat(item).containsEntry("id", id).doesNotContainKeys("warnings", "parseOptions", "sourceContent",
+                "parsedResult");
+    }
 }

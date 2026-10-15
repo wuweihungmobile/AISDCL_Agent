@@ -22,6 +22,8 @@ public final class ErrorReasons {
     // ── Phase 1+2 既有（逐字沿用）────────────────────────────────────────────
     public static final String ALREADY_SIGNED_OFF = "已 signoff";
     public static final String COMMAND_DENIED_CHARS = "命令含禁用字元";
+    /** 已認證但角色不足（403；安全層的 RBAC 與 controller 的角色檢查共用，附錄 B.1）。 */
+    public static final String ACCESS_DENIED = "ACCESS_DENIED";
 
     // ── 匯入（Phase 3）──────────────────────────────────────────────────────
     public static final String FILE_MISSING = "未提供檔案";
@@ -81,8 +83,19 @@ public final class ErrorReasons {
     public static final String REVIEW_ALREADY_DECIDED = "審核項已處理";
     public static final String REVIEW_DECISION_NOT_ALLOWED = "此審核項不允許該決定";
 
+    // ── 專案刪除與復原（W5，契約 v1.2；附錄 B.2）────────────────────────────────
+    // 🔴 這三個是英文識別字（契約 §0.3 第 5 點），與 Phase 3～6 的中文逐字常數並存；規則相同：逐字、前後端各一份、不得用 message 判斷。
+    /**
+     * 刪除目標／任務時專案有進行中批次（C-8，QA O-05；契約 §1.6.3）。🔴 與上面 {@link #PROJECT_EXECUTING}（{@code 專案正在執行中}：
+     * <b>啟動執行</b>被擋）是不同的 reason，不可混用。
+     */
+    public static final String PROJECT_RUN_IN_PROGRESS = "project_executing";
+    /** 復原一個沒被軟刪除的專案（C-3；契約 §1.6.1）。 */
+    public static final String PROJECT_NOT_DELETED = "project_not_deleted";
+    /** 軟刪除已超過保留期（{@code console.retention.soft-delete-days}），不可再經 API 復原（C-3；契約 §1.6.1）。 */
+    public static final String RESTORE_WINDOW_EXPIRED = "restore_window_expired";
+
     // ── 監控（Phase 5）──────────────────────────────────────────────────────
     public static final String TIME_RANGE_INVALID = "時間範圍不合法";
     public static final String REPORT_FORMAT_UNSUPPORTED = "不支援的報表格式";
-    public static final String PDF_NOT_AVAILABLE = "PDF 報表尚未提供（W5）";
 }

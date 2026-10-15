@@ -37,10 +37,12 @@ public final class Goal {
     private boolean deleted;
     private final Instant createdAt;
     private Instant updatedAt;
+    private Instant deletedAt;
 
+    @SuppressWarnings("java:S107")
     private Goal(UUID id, UUID projectId, String name, String description, String passCriteria, int sortOrder,
                  GoalStatus status, Set<UUID> dependsOn, boolean signedOff, String signedOffBy,
-                 Instant signedOffAt, boolean deleted, Instant createdAt, Instant updatedAt) {
+                 Instant signedOffAt, boolean deleted, Instant createdAt, Instant updatedAt, Instant deletedAt) {
         this.id = id;
         this.projectId = projectId;
         this.name = name;
@@ -55,6 +57,7 @@ public final class Goal {
         this.deleted = deleted;
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
+        this.deletedAt = deletedAt;
     }
 
     /** 建立新目標（狀態 PENDING；sortOrder 由 application 層算出「排末」後傳入）。 */
@@ -66,17 +69,18 @@ public final class Goal {
         UUID id = UUID.randomUUID();
         Set<UUID> deps = normalizeDependencies(id, spec.dependsOn());
         return new Goal(id, projectId, name, FieldRules.optionalMarkdown(spec.description()), passCriteria,
-                sortOrder, GoalStatus.PENDING, deps, !spec.draft(), null, null, false, now, now);
+                sortOrder, GoalStatus.PENDING, deps, !spec.draft(), null, null, false, now, now, null);
     }
 
     /** 由持久層資料還原。 */
+    @SuppressWarnings("java:S107")
     public static Goal restore(UUID id, UUID projectId, String name, String description, String passCriteria,
                                int sortOrder, GoalStatus status, Collection<UUID> dependsOn, boolean signedOff,
                                String signedOffBy, Instant signedOffAt, boolean deleted, Instant createdAt,
-                               Instant updatedAt) {
+                               Instant updatedAt, Instant deletedAt) {
         return new Goal(id, projectId, name, description, passCriteria, sortOrder, status,
                 new LinkedHashSet<>(dependsOn), signedOff, signedOffBy, signedOffAt, deleted, createdAt,
-                updatedAt);
+                updatedAt, deletedAt);
     }
 
     /** 套用更新（null 欄位不變）。 */
@@ -163,9 +167,10 @@ public final class Goal {
         signedOffAt = at;
     }
 
-    /** 軟刪除（deleted=true）；連帶任務由 application 層處理。 */
+    /** 軟刪除（deleted=true）並記下 {@code deletedAt}（V9）；連帶任務由 application 層處理。 */
     public void softDelete(Instant now) {
         deleted = true;
+        deletedAt = now;
         updatedAt = now;
     }
 
@@ -241,5 +246,10 @@ public final class Goal {
 
     public Instant updatedAt() {
         return updatedAt;
+    }
+
+    /** 軟刪除當下的時間（V9）；未被軟刪除為 null。 */
+    public Instant deletedAt() {
+        return deletedAt;
     }
 }

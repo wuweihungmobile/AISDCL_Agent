@@ -104,10 +104,10 @@ class AlertRulesTest {
 
     @Test
     void engineAlertsPersistUnderTheirOwnRuleNames() {
-        Candidate esc = AlertRules.engineEscalation("G1-T2", "重試耗盡");
+        Candidate esc = AlertRules.engineEscalation(runId, "G1-T2", "重試耗盡");
         assertThat(esc.rule()).isEqualTo(AlertRule.ENGINE_ESCALATION);
         assertThat(esc.severity()).isEqualTo(AlertSeverity.CRITICAL);
-        assertThat(esc.subject()).isEqualTo("step:G1-T2");
+        assertThat(esc.subject()).isEqualTo("step:" + runId + ":G1-T2");
         assertThat(esc.message()).isEqualTo("引擎升級（ESCALATION）：重試耗盡");
 
         Candidate halt = AlertRules.engineTokenHalt(runId, "G1-T1", "超過門檻");
@@ -116,5 +116,31 @@ class AlertRulesTest {
         assertThat(halt.subject()).isEqualTo("step:G1-T1");
         assertThat(AlertRules.engineTokenHalt(runId, null, "x").subject()).isEqualTo("run:" + runId);
         assertThat(halt.message()).isEqualTo("引擎因 Token／額度門檻停機：超過門檻");
+    }
+
+    /**
+     * C-7（QA O-14）：stepId 每個批次重新編號（G1-T1 在每一批都叫 G1-T1，甚至指向不同任務），去重對象若只有 stepId，
+     * 第二批的升級會被第一批未確認的舊告警吞掉——使用者只剩 SSE 轉發、沒有告警列可看。
+     */
+    @Test
+    void escalationsOfTwoRunsOnTheSameStepIdAreDifferentAlertSubjectsSoTheOldOneCannotSwallowTheNewOne() {
+        UUID otherRun = UUID.randomUUID();
+
+        Candidate first = AlertRules.engineEscalation(runId, "G1-T1", "第一批失敗");
+        Candidate second = AlertRules.engineEscalation(otherRun, "G1-T1", "第二批失敗");
+
+        assertThat(first.subject()).isEqualTo("step:" + runId + ":G1-T1");
+        assertThat(second.subject()).isEqualTo("step:" + otherRun + ":G1-T1");
+        assertThat(second.subject()).as("去重對象不同：兩批各自產生告警列").isNotEqualTo(first.subject());
+        assertThat(AlertRules.engineEscalation(runId, "G1-T1", "同一批次同一步驟再次升級").subject())
+                .as("同一批次的同一步驟仍是同一個去重對象").isEqualTo(first.subject());
+        assertThat(AlertRules.engineEscalation(runId, "G1-T2", "同一批次的另一步驟").subject())
+                .as("同一批次的不同步驟各自成立").isNotEqualTo(first.subject());
+    }
+
+    @Test
+    void anEscalationWithoutAStepFallsBackToTheRunAsItsSubjectLikeTheTokenHalt() {
+        assertThat(AlertRules.engineEscalation(runId, null, "x").subject()).isEqualTo("run:" + runId);
+        assertThat(AlertRules.engineEscalation(runId, "  ", "x").subject()).isEqualTo("run:" + runId);
     }
 }

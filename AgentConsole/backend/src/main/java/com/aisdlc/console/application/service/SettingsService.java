@@ -342,6 +342,12 @@ public class SettingsService implements SettingsUseCase {
                 errors.add(new ImportError(item.category(), item.key(), ErrorReasons.CONFIG_UPDATE_CONFIRM));
                 continue;
             }
+            // C-6（DEF-AC-002）：值與現值相同＝什麼都不會改，計 skipped 並跳過值規則與 allowlist 驗證——
+            // 匯出後原樣匯入因此恆為 errors=[]，即使現值的 model.apiUrl 主機不在這個環境的 allowlist。
+            if (value.equals(config.value())) {
+                skipped++;
+                continue;
+            }
             ConfigSpec spec = ConfigCatalog.find(config.category(), config.key()).orElse(null);
             if (ConfigValueRules.check(config, spec, value).isPresent()) {
                 errors.add(new ImportError(item.category(), item.key(), ErrorReasons.CONFIG_VALUE_INVALID));
@@ -351,16 +357,12 @@ public class SettingsService implements SettingsUseCase {
                 errors.add(new ImportError(item.category(), item.key(), ErrorReasons.OUTBOUND_REJECTED));
                 continue;
             }
-            candidates.put(config.fullKey(), new Candidate(config, value, !value.equals(config.value())));
+            candidates.put(config.fullKey(), new Candidate(config, value));
         }
         rejectTokenGuardViolation(candidates, errors);
 
         int applied = 0;
         for (Candidate candidate : candidates.values()) {
-            if (!candidate.changed()) {
-                skipped++;
-                continue;
-            }
             apply(candidate.config(), candidate.value(), actor);
             applied++;
         }
@@ -369,7 +371,7 @@ public class SettingsService implements SettingsUseCase {
         return new ImportResult(applied, skipped, errors);
     }
 
-    private record Candidate(SystemConfig config, String value, boolean changed) {
+    private record Candidate(SystemConfig config, String value) {
     }
 
     /** token_guard 兩鍵以合併後的最終值做 halt > compact 校驗：不滿足則兩鍵皆列入 errors 且都不套用。 */

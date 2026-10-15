@@ -30,6 +30,13 @@ public interface ExecutionRunRepository {
     /** 專案目前進行中（INITIALIZING／RUNNING）的批次 id（最新的一個）；沒有回 empty。 */
     Optional<UUID> findActiveRunId(UUID projectId);
 
+    /**
+     * 專案「進行中」的批次 id（最新的一個）；沒有回 empty。契約 §1.6.3（C-8）：進行中＝{@code INITIALIZING}／{@code RUNNING}／
+     * {@code PAUSED}，即 Bridge 的 RUNNING／PAUSING／PAUSED／CANCELLING（PAUSING 與 CANCELLING 折為 RUNNING）。與
+     * {@link #findActiveRunId} 不同：暫停中的批次還沒結束（可 resume），仍可能依原 playbook 繼續跑，所以也算。
+     */
+    Optional<UUID> findInProgressRunId(UUID projectId);
+
     /** 專案的批次分頁；{@code status} 為 null 不篩；排序鍵 {@code startedAt} 或 {@code runNumber}。 */
     PageResult<ExecutionRun> findPageByProject(UUID projectId, RunStatus status, boolean byRunNumber,
                                                boolean ascending, int page, int size);

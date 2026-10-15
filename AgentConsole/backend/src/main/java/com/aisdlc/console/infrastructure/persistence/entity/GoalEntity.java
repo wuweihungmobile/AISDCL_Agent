@@ -56,4 +56,8 @@ public class GoalEntity {
 
     @Column(name = "updated_at")
     public Instant updatedAt;
+
+    /** V9（C-3）：軟刪除當下的時間；隨專案一起軟刪者與專案的 deleted_at 相同（復原據此辨識）。未刪除為 NULL。 */
+    @Column(name = "deleted_at")
+    public Instant deletedAt;
 }

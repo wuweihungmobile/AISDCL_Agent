@@ -23,6 +23,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class ImportRecordTest {
 
     private static final Instant NOW = Instant.parse("2026-10-15T08:00:00Z");
+    private static final ParseOptions OPTIONS = new ParseOptions("/work/p", 3, "補充", "/spec");
+    private static final List<ParseWarning> WARNINGS = List.of(
+            new ParseWarning(ParseWarning.PASSCRITERIA_PLACEHOLDER, "任務沒有通過標準", "goals[0].tasks[0]"));
 
     private static ParsedResult tree(String name, ParsePath path) {
         ParsedTask task = new ParsedTask("任務", "做事", "做完", 0, null, null, null, null, null);
@@ -34,7 +37,8 @@ class ImportRecordTest {
     private static ImportRecord record(ImportStatus status, boolean signedOff) {
         return ImportRecord.restore(UUID.randomUUID(), ImportSourceType.MARKDOWN, "# 文件", "a.md",
                 status.hasDraft() ? tree("舊", ParsePath.LLM) : null, status.hasDraft() ? ParsePath.LLM : null, "m",
-                10L, status, signedOff, signedOff ? "boss" : null, signedOff ? NOW : null, null, NOW, null);
+                10L, status, signedOff, signedOff ? "boss" : null, signedOff ? NOW : null, null, NOW, null, WARNINGS,
+                status == ImportStatus.UPLOADED ? null : OPTIONS);
     }
 
     private static void assertConflict(Runnable action, String reason, String detailKey, Object detailValue) {
@@ -61,6 +65,16 @@ class ImportRecordTest {
         assertThat(r.parsePath()).isNull();
         assertThat(r.lastParseErrors()).isNull();
         assertThat(r.projectId()).isNull();
+        assertThat(r.warnings()).as("warnings 永遠不是 null：沒有就是空清單").isEmpty();
+        assertThat(r.parseOptions()).as("從未 parse 過").isNull();
+    }
+
+    @Test
+    void restoringWithoutWarningsMeansNoWarningsNotNull() {
+        ImportRecord r = ImportRecord.restore(UUID.randomUUID(), ImportSourceType.MARKDOWN, "x", null, null, null, null,
+                null, ImportStatus.UPLOADED, false, null, null, null, NOW, null, null, null);
+        assertThat(r.warnings()).isEmpty();
+        assertThat(r.parseOptions()).isNull();
     }
 
     // ── parse ────────────────────────────────────────────────────────────────
@@ -69,18 +83,18 @@ class ImportRecordTest {
     void parseIsAllowedFromUploadedAndFromUnsignedDraftsAndMovesToParsing() {
         for (ImportStatus status : List.of(ImportStatus.UPLOADED, ImportStatus.PARSED, ImportStatus.REVIEWING)) {
             ImportRecord r = record(status, false);
-            r.beginParse();
+            r.beginParse(OPTIONS);
             assertThat(r.status()).as(status.name()).isEqualTo(ImportStatus.PARSING);
         }
     }
 
     @Test
     void parseChecksRunInTheDocumentedOrderTerminalThenParsingThenSignedOff() {
-        notAllowed(ImportStatus.IMPORTED, false, "parse", ImportRecord::beginParse);
-        notAllowed(ImportStatus.REJECTED, false, "parse", ImportRecord::beginParse);
-        assertConflict(() -> record(ImportStatus.PARSING, false).beginParse(), ErrorReasons.IMPORT_PARSING, "status",
-                "PARSING");
-        assertConflict(() -> record(ImportStatus.PARSED, true).beginParse(),
+        notAllowed(ImportStatus.IMPORTED, false, "parse", r -> r.beginParse(OPTIONS));
+        notAllowed(ImportStatus.REJECTED, false, "parse", r -> r.beginParse(OPTIONS));
+        assertConflict(() -> record(ImportStatus.PARSING, false).beginParse(OPTIONS), ErrorReasons.IMPORT_PARSING,
+                "status", "PARSING");
+        assertConflict(() -> record(ImportStatus.PARSED, true).beginParse(OPTIONS),
                 ErrorReasons.IMPORT_SIGNED_OFF_NO_REPARSE, "signedOffBy", "boss");
     }
 
@@ -88,16 +102,16 @@ class ImportRecordTest {
     void beginParseClearsTheLastParseErrors() {
         ImportRecord r = ImportRecord.restore(UUID.randomUUID(), ImportSourceType.MARKDOWN, "x", null, null, null, null,
                 null, ImportStatus.UPLOADED, false, null, null, null, NOW,
-                List.of(new GateError("max_steps", "太多", "goals")));
-        r.beginParse();
+                List.of(new GateError("max_steps", "太多", "goals")), List.of(), null);
+        r.beginParse(OPTIONS);
         assertThat(r.lastParseErrors()).isNull();
     }
 
     @Test
     void aSuccessfulParseStoresTheTreeAndServerFieldsAndLeavesTheRecordUnsigned() {
         ImportRecord r = record(ImportStatus.UPLOADED, false);
-        r.beginParse();
-        r.completeParse(tree("新", ParsePath.DECOMPOSE));
+        r.beginParse(OPTIONS);
+        r.completeParse(tree("新", ParsePath.DECOMPOSE), List.of());
         assertThat(r.status()).isEqualTo(ImportStatus.PARSED);
         assertThat(r.signedOff()).isFalse();
         assertThat(r.parsePath()).isEqualTo(ParsePath.DECOMPOSE);
@@ -111,14 +125,14 @@ class ImportRecordTest {
     void aFailedParseReturnsToUploadedKeepsThePreviousTreeAndOnlyGateFailuresStoreErrors() {
         ImportRecord r = record(ImportStatus.PARSED, false);
         ParsedResult before = r.parsedResult();
-        r.beginParse();
+        r.beginParse(OPTIONS);
         r.failParse(List.of(new GateError("cycle", "成環", "goals[0].dependsOn")));
         assertThat(r.status()).isEqualTo(ImportStatus.UPLOADED);
         assertThat(r.parsedResult()).as("使用者的編輯不因一次失敗的重解析而消失").isSameAs(before);
         assertThat(r.parsePath()).isEqualTo(ParsePath.LLM);
         assertThat(r.lastParseErrors()).singleElement().extracting(GateError::gate).isEqualTo("cycle");
 
-        r.beginParse();
+        r.beginParse(OPTIONS);
         r.failParse(null);
         assertThat(r.status()).isEqualTo(ImportStatus.UPLOADED);
         assertThat(r.lastParseErrors()).as("非閘的失敗不寫").isNull();
@@ -126,8 +140,61 @@ class ImportRecordTest {
 
     @Test
     void completeAndFailParseRequireTheParsingState() {
-        notAllowed(ImportStatus.UPLOADED, false, "parse", r -> r.completeParse(tree("x", ParsePath.LLM)));
+        notAllowed(ImportStatus.UPLOADED, false, "parse", r -> r.completeParse(tree("x", ParsePath.LLM), List.of()));
         notAllowed(ImportStatus.PARSED, false, "parse", r -> r.failParse(null));
+    }
+
+    // ── warnings 與 parseOptions（V8、C-10）─────────────────────────────────────
+
+    @Test
+    void beginParseStoresTheRequestedOptionsVerbatimEvenWhenTheParseFailsAfterwards() {
+        ImportRecord r = record(ImportStatus.UPLOADED, false);
+        ParseOptions second = new ParseOptions("/work/q", 7, null, null);
+
+        r.beginParse(OPTIONS);
+        assertThat(r.parseOptions()).isEqualTo(OPTIONS);
+        r.failParse(null);
+        assertThat(r.parseOptions()).as("失敗後仍保留（重開記錄時選項還在）").isEqualTo(OPTIONS);
+
+        r.beginParse(second);
+        r.failParse(List.of(new GateError("cycle", "成環", "goals[0].dependsOn")));
+        assertThat(r.parseOptions()).as("保存的永遠是最近一次請求").isEqualTo(second);
+    }
+
+    @Test
+    void aRefusedBeginParseDoesNotTouchTheStoredOptions() {
+        ImportRecord r = record(ImportStatus.PARSED, true);
+        assertConflict(() -> r.beginParse(new ParseOptions("/work/zzz", 9, null, null)),
+                ErrorReasons.IMPORT_SIGNED_OFF_NO_REPARSE, "signedOffBy", "boss");
+        assertThat(r.parseOptions()).isEqualTo(OPTIONS);
+    }
+
+    @Test
+    void aSuccessfulParseOverwritesTheWarningsAndAFailedParseKeepsThePreviousOnes() {
+        ImportRecord r = record(ImportStatus.PARSED, false);
+        assertThat(r.warnings()).isEqualTo(WARNINGS);
+
+        r.beginParse(OPTIONS);
+        r.failParse(null);
+        assertThat(r.warnings()).as("失敗的 parse 不動 warnings（與保留上一次成功的 parsedResult 同一原則）")
+                .isEqualTo(WARNINGS);
+
+        r.beginParse(OPTIONS);
+        r.completeParse(tree("新", ParsePath.LLM), List.of());
+        assertThat(r.warnings()).as("成功的 parse 以該次的提示覆寫（這次沒有提示＝空）").isEmpty();
+    }
+
+    @Test
+    void editingOverwritesTheWarningsWithTheRecomputedOnes() {
+        ImportRecord r = record(ImportStatus.PARSED, false);
+        List<ParseWarning> recomputed = List.of(
+                new ParseWarning(ParseWarning.PASSCRITERIA_PLACEHOLDER, "專案的通過標準仍是佔位字串", "project"));
+
+        r.editResult(tree("x", null), recomputed);
+
+        assertThat(r.warnings()).isEqualTo(recomputed);
+        r.editResult(tree("x", null), List.of());
+        assertThat(r.warnings()).as("只含仍成立者").isEmpty();
     }
 
     // ── PUT result ───────────────────────────────────────────────────────────
@@ -137,7 +204,7 @@ class ImportRecordTest {
         ImportRecord r = record(ImportStatus.PARSED, true);
         ParsedResult edited = ParsedResult.tree(new ParsedProject("改名", "/work/q", "新標準", null, 5),
                 tree("x", null).goals());
-        r.editResult(edited);
+        r.editResult(edited, List.of());
         assertThat(r.status()).isEqualTo(ImportStatus.REVIEWING);
         assertThat(r.signedOff()).as("編輯撤銷 signoff").isFalse();
         assertThat(r.signedOffBy()).isNull();
@@ -152,7 +219,7 @@ class ImportRecordTest {
     void editingIsOnlyAllowedForDrafts() {
         for (ImportStatus status : List.of(ImportStatus.UPLOADED, ImportStatus.PARSING, ImportStatus.IMPORTED,
                 ImportStatus.REJECTED)) {
-            notAllowed(status, false, "editResult", r -> r.editResult(tree("x", null)));
+            notAllowed(status, false, "editResult", r -> r.editResult(tree("x", null), List.of()));
             notAllowed(status, false, "editResult", ImportRecord::requireEditAllowed);
         }
     }

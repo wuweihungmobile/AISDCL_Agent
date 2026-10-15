@@ -12,20 +12,23 @@ import java.util.stream.Collectors;
 
 /** {@link RuntimeSettings} 的實作：把 Spring 屬性（application 層不認得 {@code infrastructure}）轉成埠。 */
 @Component
-@EnableConfigurationProperties({ExecutionProperties.class, SseProperties.class, MonitorProperties.class})
+@EnableConfigurationProperties({ExecutionProperties.class, SseProperties.class, MonitorProperties.class,
+        RetentionProperties.class})
 class RuntimeSettingsAdapter implements RuntimeSettings {
 
     private final ConsoleSecurityProperties security;
     private final ExecutionProperties execution;
     private final SseProperties sse;
     private final MonitorProperties monitor;
+    private final RetentionProperties retention;
 
     RuntimeSettingsAdapter(ConsoleSecurityProperties security, ExecutionProperties execution, SseProperties sse,
-                           MonitorProperties monitor) {
+                           MonitorProperties monitor, RetentionProperties retention) {
         this.security = security;
         this.execution = execution;
         this.sse = sse;
         this.monitor = monitor;
+        this.retention = retention;
     }
 
     @Override
@@ -77,5 +80,15 @@ class RuntimeSettingsAdapter implements RuntimeSettings {
     @Override
     public boolean backgroundEnabled() {
         return monitor.backgroundEnabled();
+    }
+
+    @Override
+    public int softDeleteRetentionDays() {
+        return retention.softDeleteDays();
+    }
+
+    @Override
+    public boolean purgeEnabled() {
+        return retention.purgeEnabled();
     }
 }

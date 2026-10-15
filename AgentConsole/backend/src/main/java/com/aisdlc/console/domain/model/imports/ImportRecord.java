@@ -23,6 +23,9 @@ import java.util.UUID;
  * </pre>
  * 🔴 人工 signoff 硬閘：編輯會撤銷既有 signoff；confirm 要求已 signoff。
  * 失敗的 parse 不寫 {@code parsedResult}／{@code parsePath}（AR-07）；只有被有界閘拒絕時才寫 {@code lastParseErrors}。
+ *
+ * <p>V8（C-10）：{@code warnings}＝最近一次<b>成功</b>的 parse／PUT result 的黃色提示（失敗的 parse 不動它，與保留上一次成功的
+ * {@code parsedResult} 同一原則）；{@code parseOptions}＝最近一次 parse 請求的選項（進入 PARSING 時寫入，不論該次成敗）。
  */
 public final class ImportRecord {
 
@@ -47,12 +50,15 @@ public final class ImportRecord {
     private UUID projectId;
     private final Instant createdAt;
     private List<GateError> lastParseErrors;
+    private List<ParseWarning> warnings;
+    private ParseOptions parseOptions;
 
     @SuppressWarnings("java:S107")
     private ImportRecord(UUID id, ImportSourceType sourceType, String sourceContent, String sourceFileName,
                          ParsedResult parsedResult, ParsePath parsePath, String aiModel, Long tokenUsed,
                          ImportStatus status, boolean signedOff, String signedOffBy, Instant signedOffAt,
-                         UUID projectId, Instant createdAt, List<GateError> lastParseErrors) {
+                         UUID projectId, Instant createdAt, List<GateError> lastParseErrors,
+                         List<ParseWarning> warnings, ParseOptions parseOptions) {
         this.id = id;
         this.sourceType = sourceType;
         this.sourceContent = sourceContent;
@@ -68,33 +74,41 @@ public final class ImportRecord {
         this.projectId = projectId;
         this.createdAt = createdAt;
         this.lastParseErrors = lastParseErrors;
+        this.warnings = warnings;
+        this.parseOptions = parseOptions;
     }
 
     /** 建立新記錄：UPLOADED、未 signoff。內容與檔名的長度／空白檢查由呼叫端（用例）負責。 */
     public static ImportRecord create(ImportSourceType sourceType, String content, String fileName, Instant now) {
         return new ImportRecord(UUID.randomUUID(), sourceType, content, fileName, null, null, null, null,
-                ImportStatus.UPLOADED, false, null, null, null, now, null);
+                ImportStatus.UPLOADED, false, null, null, null, now, null, List.of(), null);
     }
 
-    /** 由持久層資料還原。 */
+    /**
+     * 由持久層資料還原。{@code warnings} 為 null 視為沒有提示（列表投影不載入它）；{@code parseOptions} 為 null＝從未 parse 過
+     * （或列表投影不載入）。
+     */
     @SuppressWarnings("java:S107")
     public static ImportRecord restore(UUID id, ImportSourceType sourceType, String sourceContent,
                                        String sourceFileName, ParsedResult parsedResult, ParsePath parsePath,
                                        String aiModel, Long tokenUsed, ImportStatus status, boolean signedOff,
                                        String signedOffBy, Instant signedOffAt, UUID projectId, Instant createdAt,
-                                       List<GateError> lastParseErrors) {
+                                       List<GateError> lastParseErrors, List<ParseWarning> warnings,
+                                       ParseOptions parseOptions) {
         return new ImportRecord(id, sourceType, sourceContent, sourceFileName, parsedResult, parsePath, aiModel,
                 tokenUsed, status, signedOff, signedOffBy, signedOffAt, projectId, createdAt,
-                lastParseErrors == null ? null : List.copyOf(lastParseErrors));
+                lastParseErrors == null ? null : List.copyOf(lastParseErrors),
+                warnings == null ? List.of() : List.copyOf(warnings), parseOptions);
     }
 
     // ── parse ────────────────────────────────────────────────────────────────
 
     /**
      * 前置檢查順序固定：IMPORTED／REJECTED → 狀態不允許；PARSING → 解析中；已 signoff → 不可重新解析。
-     * 通過後轉 PARSING 並清空 {@code lastParseErrors}（契約 §1.1.3）。
+     * 通過後轉 PARSING、清空 {@code lastParseErrors}，並把本次請求的選項原樣存進 {@code parseOptions}（契約 §1.1.3、§0.5 V8；
+     * 不論該次 parse 之後成敗）。{@code warnings} 此時不動：失敗的 parse 保留上一次成功的值。
      */
-    public void beginParse() {
+    public void beginParse(ParseOptions options) {
         if (status.terminal()) {
             throw stateNotAllowed(ACTION_PARSE);
         }
@@ -109,10 +123,11 @@ public final class ImportRecord {
         }
         status = ImportStatus.PARSING;
         lastParseErrors = null;
+        parseOptions = options;
     }
 
-    /** 解析成功：PARSED、未 signoff；寫入樹與伺服器欄位，清空最近一次閘違規。 */
-    public void completeParse(ParsedResult result) {
+    /** 解析成功：PARSED、未 signoff；寫入樹與伺服器欄位，清空最近一次閘違規，並以本次的提示覆寫 {@code warnings}。 */
+    public void completeParse(ParsedResult result, List<ParseWarning> parseWarnings) {
         requireStatus(ImportStatus.PARSING, ACTION_PARSE);
         parsedResult = result;
         parsePath = result.path();
@@ -123,6 +138,7 @@ public final class ImportRecord {
         signedOffBy = null;
         signedOffAt = null;
         lastParseErrors = null;
+        warnings = List.copyOf(parseWarnings);
     }
 
     /**
@@ -144,14 +160,18 @@ public final class ImportRecord {
         }
     }
 
-    /** 編輯：僅 PARSED／REVIEWING；成功後 REVIEWING，<b>撤銷既有 signoff</b>；伺服器欄位沿用庫內值。 */
-    public void editResult(ParsedResult edited) {
+    /**
+     * 編輯：僅 PARSED／REVIEWING；成功後 REVIEWING，<b>撤銷既有 signoff</b>；伺服器欄位沿用庫內值；{@code warnings} 以重算後的值覆寫
+     * （只含仍成立者，契約 §1.1.4）。
+     */
+    public void editResult(ParsedResult edited, List<ParseWarning> recomputedWarnings) {
         requireEditAllowed();
         parsedResult = parsedResult == null ? edited : edited.withServerFieldsOf(parsedResult);
         status = ImportStatus.REVIEWING;
         signedOff = false;
         signedOffBy = null;
         signedOffAt = null;
+        warnings = List.copyOf(recomputedWarnings);
     }
 
     // ── signoff ──────────────────────────────────────────────────────────────
@@ -288,5 +308,15 @@ public final class ImportRecord {
     /** 最近一次 parse 被有界閘拒絕的原因；沒有則為 null。 */
     public List<GateError> lastParseErrors() {
         return lastParseErrors;
+    }
+
+    /** 最近一次成功的 parse 或 PUT result 的非阻擋提示（V8）；沒有就是空清單，永遠不是 null。 */
+    public List<ParseWarning> warnings() {
+        return warnings;
+    }
+
+    /** 最近一次 parse 請求的選項（V8）；從未 parse 過為 null。 */
+    public ParseOptions parseOptions() {
+        return parseOptions;
     }
 }

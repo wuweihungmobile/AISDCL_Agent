@@ -399,11 +399,33 @@ class ExecutionGateApiIT extends AbstractExecutionIT {
         Resp alerts = api.get(viewer(), "/api/v1/monitor/projects/" + f.projectId() + "/alerts?runId=" + run);
         assertThat(alerts.<List<String>>read("$.data[*].rule")).containsExactly("ENGINE_ESCALATION");
         assertThat(alerts.<String>read("$.data[0].severity")).isEqualTo("CRITICAL");
-        assertThat(alerts.<String>read("$.data[0].subject")).isEqualTo("step:G1-T2");
+        assertThat(alerts.<String>read("$.data[0].subject")).isEqualTo("step:" + run + ":G1-T2");
         assertThat(alerts.<String>read("$.data[0].message")).startsWith("引擎升級（ESCALATION）：");
         assertThat(alerts.<Boolean>read("$.data[0].acknowledged")).isFalse();
         assertThat(jdbc.queryForObject("select event_sub from console.alerts where run_id = ?", Integer.class,
                 UUID.fromString(run))).as("Bridge 告警的持久化鏡像 event_sub＝0").isZero();
+    }
+
+    /** E2E-13 第 7 列（C-7）：不確認第一批的升級告警，第二批在同一步驟再次失敗，仍要有新的告警列。 */
+    @Test
+    void anEscalationOfALaterRunIsNotSwallowedByTheUnacknowledgedAlertOfAnEarlierRun() {
+        Fixture f = prjA("e2e13-esc", 4);
+        MINI.failStepIds.add("G1-T1");
+        String first = startRun(f.projectId());
+        assertThat(awaitProjected(first, "FAILED")).isTrue();
+        assertThat(consumers.awaitIdle(Duration.ofSeconds(5))).isTrue();
+
+        String second = startRun(f.projectId());        // 不確認第一批的告警，直接再跑一批
+        assertThat(awaitProjected(second, "FAILED")).isTrue();
+
+        Resp alerts = api.get(viewer(), "/api/v1/monitor/projects/" + f.projectId() + "/alerts");
+        assertThat(alerts.<List<String>>read("$.data[?(@.rule=='ENGINE_ESCALATION')].subject"))
+                .as("兩批各自一列：以前第二批的升級會被第一批未確認的舊告警吞掉，只剩 SSE 轉發")
+                .containsExactlyInAnyOrder("step:" + first + ":G1-T1", "step:" + second + ":G1-T1");
+        assertThat(alerts.<List<Boolean>>read("$.data[?(@.rule=='ENGINE_ESCALATION')].acknowledged"))
+                .containsOnly(false);
+        assertThat(jdbc.queryForObject("select count(*) from console.alerts where rule = 'ENGINE_ESCALATION'",
+                Long.class)).isEqualTo(2L);
     }
 
     @Test

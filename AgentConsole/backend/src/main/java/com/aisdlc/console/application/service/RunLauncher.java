@@ -103,6 +103,8 @@ public class RunLauncher {
                     clock.instant(), null, launch.plan().dag(), 0, null);
             return runs.insert(draft);
         });
+        // 契約 §0.4 第 6 點：背景消費者之後呼叫 Bridge 沿用「啟動這個 run 的請求」的 traceId（只存記憶體）
+        registry.bindTrace(created.id(), TraceIds.current());
         try {
             AgentBridge.RunStarted started = bridge.startRun(startRequest(launch, created));
             LOG.info("Bridge 已接受批次 {}（run #{}，狀態 {}）", created.id(), created.runNumber(), started.status());

@@ -19,7 +19,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * V5～V7 對「已經在跑的資料庫」的升級（契約 §0.5、AR-06／AR-09）。為什麼重要：新資料庫從零遷移很容易對，
+ * V5～V9 對「已經在跑的資料庫」的升級（契約 §0.5、AR-06／AR-09）。為什麼重要：新資料庫從零遷移很容易對，
  * 真正會出事的是升級——V5 的「預設值校正」只能在值仍等於舊預設時才改，絕不能蓋掉管理員改過的值；
  * 新增的欄位必須讓既有匯入記錄原封不動；新鍵不能與既有鍵重複。這裡在一個獨立資料庫上先遷到 V4、塞入「管理員改過的」資料，
  * 再遷到最新版，逐項核對。
@@ -116,11 +116,12 @@ class V5UpgradeMigrationIT {
         assertThat(jdbc.queryForObject("select count(*) from console.system_configs where impact_note is null",
                 Integer.class)).isZero();
 
-        // 既有匯入記錄不變；新欄位是 NULL
-        Map<String, Object> record = jdbc.queryForMap("select status, source_content, parse_path, last_parse_errors "
-                + "from console.import_records where id = ?", importId);
+        // 既有匯入記錄不變；新欄位是 NULL（V8 的 warnings 是 NOT NULL，既有列取預設 []，parse_options 為 NULL）
+        Map<String, Object> record = jdbc.queryForMap("select status, source_content, parse_path, last_parse_errors, "
+                + "warnings::text as warnings, parse_options from console.import_records where id = ?", importId);
         assertThat(record).containsEntry("status", "REVIEWING").containsEntry("source_content", "# 升級前的匯入")
-                .containsEntry("parse_path", null).containsEntry("last_parse_errors", null);
+                .containsEntry("parse_path", null).containsEntry("last_parse_errors", null)
+                .containsEntry("warnings", "[]").containsEntry("parse_options", null);
 
         // 歷史保留；V6 的審計表存在且是空的
         assertThat(jdbc.queryForObject("select count(*) from console.system_config_history where changed_by = "
@@ -129,8 +130,64 @@ class V5UpgradeMigrationIT {
 
         List<Map<String, Object>> history = jdbc.queryForList("select version, success from "
                 + "console.flyway_schema_history where version is not null order by installed_rank");
-        assertThat(history).extracting(row -> row.get("version")).containsExactly("1", "2", "3", "4", "5", "6", "7");
+        assertThat(history).extracting(row -> row.get("version"))
+                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9");
         assertThat(history).extracting(row -> row.get("success")).containsOnly(true);
+    }
+
+    /**
+     * V9（C-3）對「升級前就已軟刪」的資料：真正的刪除時間已不可考，以 updated_at 近似；專案刪除連帶軟刪的目標與任務與專案共用同一個
+     * now，所以近似值仍相等（復原靠它辨識）；單獨先刪除的目標則是另一個時間；存活的列不受影響；status_before_delete 一律 NULL。
+     */
+    @Test
+    void rowsSoftDeletedBeforeV9GetTheirUpdatedAtAsDeletedAtAndLiveRowsStayNull() {
+        String database = createDatabase();
+        flyway(database, "8").migrate();
+        JdbcTemplate jdbc = jdbcOf(database);
+        UUID liveProject = UUID.randomUUID();
+        UUID deletedProject = UUID.randomUUID();
+        UUID cascadedGoal = UUID.randomUUID();
+        UUID earlierGoal = UUID.randomUUID();
+        UUID cascadedTask = UUID.randomUUID();
+        UUID liveGoal = UUID.randomUUID();
+        UUID liveTask = UUID.randomUUID();
+        jdbc.update("insert into console.projects (id, name, execution_path, pass_criteria) values (?, '存活', '/a', 'c')",
+                liveProject);
+        jdbc.update("insert into console.goals (id, project_id, name, pass_criteria) values (?, ?, '存活目標', 'c')",
+                liveGoal, liveProject);
+        jdbc.update("insert into console.tasks (id, goal_id, name, pass_criteria) values (?, ?, '存活任務', 'c')",
+                liveTask, liveGoal);
+        jdbc.update("insert into console.projects (id, name, execution_path, pass_criteria, status, is_deleted, "
+                + "updated_at) values (?, '已刪', '/b', 'c', 'ARCHIVED', true, '2026-09-01T08:00:00Z')", deletedProject);
+        jdbc.update("insert into console.goals (id, project_id, name, pass_criteria, is_deleted, updated_at) values "
+                + "(?, ?, '連帶', 'c', true, '2026-09-01T08:00:00Z')", cascadedGoal, deletedProject);
+        jdbc.update("insert into console.goals (id, project_id, name, pass_criteria, is_deleted, updated_at) values "
+                + "(?, ?, '更早單獨刪除', 'c', true, '2026-08-20T08:00:00Z')", earlierGoal, deletedProject);
+        jdbc.update("insert into console.tasks (id, goal_id, name, pass_criteria, is_deleted, updated_at) values "
+                + "(?, ?, '連帶任務', 'c', true, '2026-09-01T08:00:00Z')", cascadedTask, cascadedGoal);
+
+        flyway(database, null).migrate();
+
+        assertThat(jdbc.queryForObject("select deleted_at = updated_at from console.projects where id = ?",
+                Boolean.class, deletedProject)).isTrue();
+        assertThat(jdbc.queryForObject("select deleted_at = updated_at from console.goals where id = ?", Boolean.class,
+                cascadedGoal)).isTrue();
+        assertThat(jdbc.queryForObject("select deleted_at = updated_at from console.tasks where id = ?", Boolean.class,
+                cascadedTask)).isTrue();
+        assertThat(jdbc.queryForObject("select (select deleted_at from console.projects where id = ?) = "
+                + "(select deleted_at from console.goals where id = ?)", Boolean.class, deletedProject, cascadedGoal))
+                .as("連帶軟刪的目標與專案的 deleted_at 相等：復原據此辨識").isTrue();
+        assertThat(jdbc.queryForObject("select (select deleted_at from console.projects where id = ?) = "
+                + "(select deleted_at from console.goals where id = ?)", Boolean.class, deletedProject, earlierGoal))
+                .as("更早單獨刪除的目標是另一個時間：復原時維持已刪除").isFalse();
+        assertThat(jdbc.queryForObject("select status_before_delete from console.projects where id = ?", String.class,
+                deletedProject)).isNull();
+        assertThat(jdbc.queryForObject("select count(*) from console.projects where deleted_at is not null "
+                + "and is_deleted = false", Integer.class)).as("存活的專案不受影響").isZero();
+        assertThat(jdbc.queryForObject("select count(*) from console.goals where id = ? and deleted_at is null",
+                Integer.class, liveGoal)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from console.tasks where id = ? and deleted_at is null",
+                Integer.class, liveTask)).isEqualTo(1);
     }
 
     @Test

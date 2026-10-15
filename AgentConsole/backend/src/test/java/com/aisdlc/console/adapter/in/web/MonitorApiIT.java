@@ -13,10 +13,15 @@ import com.aisdlc.console.domain.model.execution.RunScope;
 import com.aisdlc.console.domain.model.execution.RunStatus;
 import com.aisdlc.console.support.AbstractExecutionIT;
 import com.aisdlc.console.support.ApiClient.Resp;
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.text.PDFTextStripper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
@@ -661,13 +666,63 @@ class MonitorApiIT extends AbstractExecutionIT {
         assertThat(lines.subList(tasks + 2, lines.indexOf("#section,alerts") - 1)).hasSize(2);
     }
 
+    // ── §1.3.7 PDF 報表（v1.2，C-4）────────────────────────────────────────────────────
+
+    private static String pdfText(Resp resp) throws IOException {
+        try (PDDocument document = Loader.loadPDF(resp.bytes())) {
+            return new PDFTextStripper().getText(document);
+        }
+    }
+
     @Test
-    void pdfIs501WithTheW5ReasonAnUnknownFormatIs400AndEveryReportErrorIsAJsonApiError() {
+    void thePdfReportIsAnAttachmentWithTheSameFourSectionsAndTheTitleTheRangeAndTheGenerationTime() throws IOException {
         Seed s = seed();
-        Resp pdf = report(s, "format=pdf");
-        assertThat(pdf.status()).isEqualTo(501);
-        assertThat(pdf.<String>read("$.reason")).isEqualTo(ErrorReasons.PDF_NOT_AVAILABLE);
-        assertThat(pdf.<String>read("$.traceId")).isEqualTo(pdf.header("X-Trace-Id"));
+        Resp resp = api.send(viewer(), MockMvcRequestBuilders
+                .get("/api/v1/monitor/projects/" + s.f().projectId() + "/report?format=pdf&" + BOTH_DAYS)
+                .accept("application/pdf"));
+
+        assertThat(resp.status()).isEqualTo(200);
+        assertThat(resp.header("Content-Type")).isEqualTo("application/pdf");
+        String disposition = resp.header("Content-Disposition");
+        assertThat(disposition).startsWith("attachment;");
+        Matcher name = Pattern.compile("filename=\"monitor-report-([0-9a-f]{8})-(\\d{8}-\\d{4})\\.pdf\"")
+                .matcher(disposition);
+        assertThat(name.find()).as(disposition).isTrue();
+        assertThat(name.group(1)).isEqualTo(s.f().projectId().substring(0, 8));
+        assertThat(new String(resp.bytes(), 0, 5, StandardCharsets.US_ASCII)).isEqualTo("%PDF-");
+
+        String text = pdfText(resp);
+        assertThat(text).as("標題：專案名稱＋「監控報表」").contains("mon 監控報表");
+        assertThat(text).contains("時間範圍：2026-10-13T00:00:00Z ～ 2026-10-15T00:00:00Z").contains("範圍：全部批次")
+                .contains("產生時間（UTC）：");
+        assertThat(text).as("四個區段標題").contains("summary").contains("runs").contains("tasks").contains("alerts");
+        assertThat(text).as("E2E-13 #4：可以找到專案名稱、區段標題與 totalTokens").contains("totalTokens").contains("5720")
+                .contains("taskCompletionRate");
+        assertThat(text).as("兩個批次").contains(s.r1().toString()).contains(s.r2().toString());
+        assertThat(text).as("中文目標與任務名稱、告警訊息").contains("基礎").contains("初始化").contains("引擎升級");
+    }
+
+    @Test
+    void thePdfCanBeNarrowedToOneRunAndTheFormatDecidesTheOutputNotTheAcceptHeader() throws IOException {
+        Seed s = seed();
+        String url = "/api/v1/monitor/projects/" + s.f().projectId() + "/report?format=PDF&" + BOTH_DAYS + "&runId="
+                + s.r2();
+
+        Resp withCsvAccept = api.send(viewer(), MockMvcRequestBuilders.get(url).accept("text/csv"));
+        Resp withoutAccept = api.get(viewer(), url);
+
+        for (Resp resp : List.of(withCsvAccept, withoutAccept)) {
+            assertThat(resp.status()).as("後端以 format 為準，不因 Accept 不符回 406").isEqualTo(200);
+            assertThat(resp.header("Content-Type")).isEqualTo("application/pdf");
+            String text = pdfText(resp);
+            assertThat(text).contains("範圍：" + s.r2()).contains(s.r2().toString());
+            assertThat(text).as("只含該批次").doesNotContain(s.r1().toString());
+        }
+    }
+
+    @Test
+    void anUnknownFormatIs400AndEveryReportErrorIsAJsonApiError() {
+        Seed s = seed();
         Resp bad = report(s, "format=xml");
         assertThat(bad.status()).isEqualTo(400);
         assertThat(bad.<String>read("$.reason")).isEqualTo(ErrorReasons.REPORT_FORMAT_UNSUPPORTED);
@@ -677,5 +732,17 @@ class MonitorApiIT extends AbstractExecutionIT {
         assertThat(range.status()).isEqualTo(400);
         assertThat(range.<String>read("$.reason")).isEqualTo(ErrorReasons.TIME_RANGE_INVALID);
         assertThat(report(s, "format=CSV").status()).as("格式不分大小寫").isEqualTo(200);
+        assertThat(report(s, "format=pdf&from=2026-10-15T00:00:00Z&to=2026-10-14T00:00:00Z").<String>read("$.reason"))
+                .as("PDF 與 CSV 同一組驗證").isEqualTo(ErrorReasons.TIME_RANGE_INVALID);
+    }
+
+    @Test
+    void aPdfReportOfAnUnknownProjectIs404AndAnAnonymousCallerIs401() {
+        String unknown = "/api/v1/monitor/projects/" + UUID.randomUUID() + "/report?format=pdf";
+
+        Resp missing = api.get(viewer(), unknown);
+        assertThat(missing.status()).isEqualTo(404);
+        assertThat(missing.header("Content-Type")).as("錯誤一律是 JSON 封包，不是壞掉的 PDF").startsWith("application/json");
+        assertThat(api.get(null, unknown).status()).isEqualTo(401);
     }
 }

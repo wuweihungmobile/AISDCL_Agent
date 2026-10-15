@@ -34,6 +34,12 @@ public interface GoalRepository {
     /** 專案內下一個 sortOrder（現有最大值＋1；沒有目標為 0）。 */
     int nextSortOrder(UUID projectId);
 
-    /** 軟刪除專案下全部目標；回傳受影響筆數。 */
+    /** 軟刪除專案下全部仍存活的目標（{@code deleted_at}＝{@code now}，與專案同值）；回傳受影響筆數。 */
     int softDeleteByProjectId(UUID projectId, Instant now);
+
+    /**
+     * 復原專案時還原「同一次刪除連帶軟刪」的目標：{@code deleted_at} 等於專案的 {@code deletedAt}（契約 §1.6.1）；單獨先刪除的目標
+     * 維持已刪除。{@code now} 寫進 {@code updated_at}。回傳受影響筆數。
+     */
+    int restoreDeletedWithProject(UUID projectId, Instant deletedAt, Instant now);
 }

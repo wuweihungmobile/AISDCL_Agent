@@ -27,6 +27,8 @@ class RequestAuditTrail implements AuditTrail {
     static final String ATTR_ENTITY_TYPE = "console.audit.entityType";
     static final String ATTR_ENTITY_ID = "console.audit.entityId";
     static final String ATTR_EXTRA = "console.audit.extra";
+    /** 系統自己做的事（無使用者請求）的審計主體。 */
+    static final String SYSTEM_SUBJECT = "system";
 
     private static final Logger AUDIT = LoggerFactory.getLogger("audit");
     private static final JsonMapper JSON = JsonMapper.builder().build();
@@ -77,5 +79,21 @@ class RequestAuditTrail implements AuditTrail {
                     attributes.getRequest().getRequestURI(), action.substring(0, Math.max(0, action.indexOf('.'))),
                     null, 200, MDC.get("traceId")));
         }
+    }
+
+    /** 系統事件（清除排程等，沒有使用者請求）：主體 {@code system}，一律輸出日誌行並落庫。 */
+    @Override
+    public void system(String action, String entityType, String entityId, Map<String, Object> details) {
+        Map<String, Object> entry = new LinkedHashMap<>();
+        entry.put("event", "audit");
+        entry.put("action", action);
+        entry.put("subject", SYSTEM_SUBJECT);
+        entry.put("entity", entityId == null ? entityType : entityType + ":" + entityId);
+        if (details != null && !details.isEmpty()) {
+            entry.put("detail", details);
+        }
+        AUDIT.info(JSON.writeValueAsString(entry));
+        writer.write(new AuditLogWriter.Entry(SYSTEM_SUBJECT, null, "SYSTEM", "system:" + action, entityType, entityId,
+                200, MDC.get("traceId")));
     }
 }

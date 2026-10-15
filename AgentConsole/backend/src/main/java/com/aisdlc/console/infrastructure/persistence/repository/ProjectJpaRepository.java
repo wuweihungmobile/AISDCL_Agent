@@ -20,4 +20,9 @@ public interface ProjectJpaRepository extends JpaRepository<ProjectEntity, UUID>
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select p from ProjectEntity p where p.id = :id and p.deleted = false")
     Optional<ProjectEntity> findActiveByIdForUpdate(@Param("id") UUID id);
+
+    /** 含已軟刪除者並鎖列（復原用，契約 §1.6.1）：序列化「復原」與「再次刪除」，也讓並發的兩個 restore 只有一個成功。 */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select p from ProjectEntity p where p.id = :id")
+    Optional<ProjectEntity> findAnyByIdForUpdate(@Param("id") UUID id);
 }

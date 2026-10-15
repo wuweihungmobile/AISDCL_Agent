@@ -17,7 +17,8 @@ import java.util.UUID;
  * 專案聚合根（PRD §5.1.1；純 Java，不依賴 Spring／JPA）。
  *
  * <p>不變式：狀態轉移只能經由 {@link #transitionTo(ProjectStatus, Instant)}（附錄 B.1）；EXECUTING 時只准改
- * 名稱與說明；signoff 不可匿名且不可重複；軟刪除＝{@code deleted=true} 且 {@code status=ARCHIVED}。
+ * 名稱與說明；signoff 不可匿名且不可重複；軟刪除＝{@code deleted=true} 且 {@code status=ARCHIVED}，並記下
+ * {@code deletedAt} 與刪除前的狀態（{@code statusBeforeDelete}，V9／C-3），讓保留期內可以 {@link #recover 復原}。
  */
 public final class Project {
 
@@ -37,11 +38,14 @@ public final class Project {
     private final Instant createdAt;
     private Instant updatedAt;
     private final String createdBy;
+    private Instant deletedAt;
+    private ProjectStatus statusBeforeDelete;
 
+    @SuppressWarnings("java:S107")
     private Project(UUID id, String name, String executionPath, String passCriteria, String description,
                     ProjectStatus status, int autonomyLevel, boolean signedOff, String signedOffBy,
                     Instant signedOffAt, boolean deleted, Instant createdAt, Instant updatedAt,
-                    String createdBy) {
+                    String createdBy, Instant deletedAt, ProjectStatus statusBeforeDelete) {
         this.id = id;
         this.name = name;
         this.executionPath = executionPath;
@@ -56,6 +60,8 @@ public final class Project {
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
         this.createdBy = createdBy;
+        this.deletedAt = deletedAt;
+        this.statusBeforeDelete = statusBeforeDelete;
     }
 
     /** 建立新專案：狀態 DRAFT；手動建立（非草案）預設已 signoff，草案則 signedOff=false。 */
@@ -69,16 +75,19 @@ public final class Project {
         v.throwIfAny();
         return new Project(UUID.randomUUID(), name, path, passCriteria,
                 FieldRules.optionalMarkdown(spec.description()), ProjectStatus.DRAFT, autonomy,
-                !spec.draft(), null, null, false, now, now, createdBy);
+                !spec.draft(), null, null, false, now, now, createdBy, null, null);
     }
 
     /** 由持久層資料還原（不做驗證、不產生新 id）。 */
+    @SuppressWarnings("java:S107")
     public static Project restore(UUID id, String name, String executionPath, String passCriteria,
                                   String description, ProjectStatus status, int autonomyLevel,
                                   boolean signedOff, String signedOffBy, Instant signedOffAt,
-                                  boolean deleted, Instant createdAt, Instant updatedAt, String createdBy) {
+                                  boolean deleted, Instant createdAt, Instant updatedAt, String createdBy,
+                                  Instant deletedAt, ProjectStatus statusBeforeDelete) {
         return new Project(id, name, executionPath, passCriteria, description, status, autonomyLevel,
-                signedOff, signedOffBy, signedOffAt, deleted, createdAt, updatedAt, createdBy);
+                signedOff, signedOffBy, signedOffAt, deleted, createdAt, updatedAt, createdBy, deletedAt,
+                statusBeforeDelete);
     }
 
     /**
@@ -213,14 +222,35 @@ public final class Project {
         signedOffAt = at;
     }
 
-    /** 軟刪除：status=ARCHIVED 且 deleted=true；EXECUTING 不可刪除（409）。 */
+    /**
+     * 軟刪除：status=ARCHIVED 且 deleted=true；EXECUTING 不可刪除（409）。同時記下 {@code deletedAt}（保留期與復原的起點）
+     * 與刪除前的狀態（復原時還原；契約 §0.5 V9）。呼叫端須把<b>同一個</b> {@code now} 傳給連帶軟刪的目標與任務——
+     * 復原靠「目標／任務的 deleted_at 等於專案的」辨識同一次刪除連帶軟刪的列。
+     */
     public void softDelete(Instant now) {
         if (status == ProjectStatus.EXECUTING) {
             throw new ConflictException("專案執行中，不可刪除", "EXECUTING 狀態的專案不可刪除",
                     Map.of("status", status.name()));
         }
+        ProjectStatus before = status;
         transitionTo(ProjectStatus.ARCHIVED, now);
         deleted = true;
+        deletedAt = now;
+        statusBeforeDelete = before;
+    }
+
+    /**
+     * 復原軟刪除（契約 §1.6.1，C-3）：{@code deleted=false}、{@code deletedAt}／{@code statusBeforeDelete} 清空、狀態還原為刪除前的值；
+     * 升級前就已軟刪（沒有 {@code statusBeforeDelete}）者：未 signoff → DRAFT、已 signoff → READY。這是系統層的還原，直接設定狀態、
+     * 不經 {@link StateMachines}（附錄 B.1 的 ARCHIVED 是終點，沒有任何出邊；手動 API 仍完全遵守附錄 B）。
+     * 前置條件（確實被軟刪、仍在保留期內）由用例檢查。
+     */
+    public void recover(Instant now) {
+        status = statusBeforeDelete != null ? statusBeforeDelete : signedOff ? ProjectStatus.READY : ProjectStatus.DRAFT;
+        deleted = false;
+        deletedAt = null;
+        statusBeforeDelete = null;
+        updatedAt = now;
     }
 
     public UUID id() {
@@ -277,5 +307,15 @@ public final class Project {
 
     public String createdBy() {
         return createdBy;
+    }
+
+    /** 軟刪除當下的時間；未被軟刪除為 null。 */
+    public Instant deletedAt() {
+        return deletedAt;
+    }
+
+    /** 軟刪除前的狀態；未被軟刪除、或升級前就已軟刪者為 null。 */
+    public ProjectStatus statusBeforeDelete() {
+        return statusBeforeDelete;
     }
 }

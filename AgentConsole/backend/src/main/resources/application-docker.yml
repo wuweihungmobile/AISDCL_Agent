@@ -8,6 +8,14 @@
 # ============================================================================
 server:
   forward-headers-strategy: native
+  tomcat:
+    remoteip:
+      # 🔴 O-20（契約附錄 D.2；C-16）：Tomcat 的 RemoteIpValve 預設信任「所有私網位址」為可信代理——主機（Docker 閘道）或內網客戶端
+      # 進來的請求也是私網位址，其自填的 X-Forwarded-For 就會被採信、換掉未認證限流的桶。這裡縮小成「只信 compose 的 backend-net
+      # 子網的 .2～.254」（nginx 在其中；.1 是 Docker 閘道＝主機端進來的位址，刻意排除）。
+      # 環境變數 CONSOLE_INTERNAL_PROXIES 覆寫（Java 正規表示式，對 IP 字串整串比對）；子網改了（報 Pool overlaps）兩個要一起改：
+      # compose 的 BACKEND_NET_SUBNET 與這個值。預設值與 docker-compose.yml 的 CONSOLE_INTERNAL_PROXIES 預設相同，說明見 backend/README.md。
+      internal-proxies: ${CONSOLE_INTERNAL_PROXIES:172\.31\.250\.(?:[2-9]|[1-9]\d|1\d\d|2[0-4]\d|25[0-4])}
 console:
   security:
     rate-limit:

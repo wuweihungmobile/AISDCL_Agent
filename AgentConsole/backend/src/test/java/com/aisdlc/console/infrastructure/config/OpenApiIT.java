@@ -20,6 +20,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * <p>契約 §0.8 的既有測試同步：Phase 1+2 的 13 個路徑，加上 W3-B1 的 20 個路徑（匯入 9、通知摘要 1、設定 10；
  * 方法與路徑變數名逐字取自 {@code openapi-p3-6.yaml}）＝33。W3-B2 再加 20 個（執行 11、監控 7、SSE 2）＝53。
+ * W5（契約 v1.2）再加 {@code GET /monitor/task-totals}（C-1）＝54、{@code POST /projects/{id}/restore}（C-3）＝55。
  */
 class OpenApiIT extends AbstractApiIT {
 
@@ -82,7 +83,10 @@ class OpenApiIT extends AbstractApiIT {
             Map.entry("/api/v1/monitor/projects/{projectId}/report", List.of("get")),
             // ── W3-B2：前端 SSE 兩條端點 ──
             Map.entry("/api/v1/stream/executions/{runId}/logs", List.of("get")),
-            Map.entry("/api/v1/stream/executions/{runId}/metrics", List.of("get"))));
+            Map.entry("/api/v1/stream/executions/{runId}/metrics", List.of("get")),
+            // ── W5（契約 v1.2）：全域任務總計（C-1）、軟刪除專案復原（C-3）──
+            Map.entry("/api/v1/monitor/task-totals", List.of("get")),
+            Map.entry("/api/v1/projects/{id}/restore", List.of("post"))));
 
     private Resp docs() {
         Resp resp = api.get(null, "/v3/api-docs");
@@ -94,7 +98,7 @@ class OpenApiIT extends AbstractApiIT {
     void theDocumentListsExactlyTheEndpointsDeliveredSoFarPhaseOneTwoAndBothBackendBatons() {
         Resp docs = docs();
         Set<String> paths = new TreeSet<>(docs.<Map<String, Object>>read("$.paths").keySet());
-        assertThat(paths).hasSize(53).containsExactlyElementsOf(EXPECTED.keySet());
+        assertThat(paths).hasSize(55).containsExactlyElementsOf(EXPECTED.keySet());
         for (Map.Entry<String, List<String>> expected : EXPECTED.entrySet()) {
             Map<String, Object> operations = docs.read("$.paths['" + expected.getKey() + "']");
             assertThat(new TreeSet<>(operations.keySet())).as(expected.getKey())
@@ -220,7 +224,7 @@ class OpenApiIT extends AbstractApiIT {
 
     // ── W3-B2 與契約 openapi-p3-6.yaml 對帳的結論（逐端點比對由 Python 腳本做過；這裡釘住狀態碼集合與幾處易退化的形狀）─────
 
-    /** 契約 yaml 逐端點的狀態碼集合（W3-B2 的 20 個端點）。 */
+    /** 契約 yaml 逐端點的狀態碼集合（W3-B2 的 20 個端點；v1.2 起報表不再有 501，C-4）。 */
     private static final Map<String, Set<String>> W3B2_STATUS_CODES = Map.ofEntries(
             Map.entry("post /api/v1/projects/{projectId}/execute",
                     Set.of("201", "400", "401", "403", "404", "409", "422", "429", "502", "504")),
@@ -248,8 +252,7 @@ class OpenApiIT extends AbstractApiIT {
             Map.entry("post /api/v1/monitor/alerts/{alertId}/acknowledge",
                     Set.of("204", "400", "401", "403", "404", "429")),
             Map.entry("get /api/v1/monitor/projects/{projectId}/logs", Set.of("200", "400", "401", "404", "429")),
-            Map.entry("get /api/v1/monitor/projects/{projectId}/report",
-                    Set.of("200", "400", "401", "404", "429", "501")),
+            Map.entry("get /api/v1/monitor/projects/{projectId}/report", Set.of("200", "400", "401", "404", "429")),
             Map.entry("get /api/v1/stream/executions/{runId}/logs", Set.of("200", "204", "400", "401", "404", "429")),
             Map.entry("get /api/v1/stream/executions/{runId}/metrics",
                     Set.of("200", "204", "400", "401", "404", "429")));
@@ -264,6 +267,48 @@ class OpenApiIT extends AbstractApiIT {
             assertThat(docs.<Map<String, Object>>read("$.paths['" + path + "']." + method + ".responses").keySet())
                     .as(expected.getKey()).containsExactlyInAnyOrderElementsOf(expected.getValue());
         }
+    }
+
+    @Test
+    void theTaskTotalsEndpointDocumentsAMandatoryFromAnOptionalToAndTheTotalsSchema() {
+        Resp docs = docs();
+        String path = "$.paths['/api/v1/monitor/task-totals'].get";
+        assertThat(docs.<Map<String, Object>>read(path + ".responses").keySet())
+                .as("沒有路徑變數：不會有 404；全域資料：不需要 403").containsExactlyInAnyOrder("200", "400", "401", "429");
+        assertThat(docs.<List<Boolean>>read(path + ".parameters[?(@.name=='from')].required")).containsExactly(true);
+        assertThat(docs.<List<Boolean>>read(path + ".parameters[?(@.name=='to')].required")).containsExactly(false);
+        assertThat(docs.<List<String>>read("$.components.schemas.TaskTotalsResponse.required"))
+                .containsExactlyInAnyOrder("from", "to", "started", "completed", "failed", "retried", "projectsCounted");
+        assertThat(docs.<String>read("$.components.schemas.TaskTotalsResponse.properties.started.format"))
+                .isEqualTo("int64");
+        assertThat(docs.<String>read("$.components.schemas.TaskTotalsResponse.properties.projectsCounted.format"))
+                .isEqualTo("int32");
+    }
+
+    @Test
+    void theRestoreEndpointAndTheDeletedProjectListAreDocumentedWithTheirErrorsAndFields() {
+        Resp docs = docs();
+        assertThat(docs.<Map<String, Object>>read("$.paths['/api/v1/projects/{id}/restore'].post.responses").keySet())
+                .as("寫入端點：401／403；路徑變數：400／404；有狀態規則：409（project_not_deleted、restore_window_expired）")
+                .containsExactlyInAnyOrder("200", "400", "401", "403", "404", "409", "429");
+        assertThat(docs.<List<String>>read("$.paths['/api/v1/projects/{id}/restore'].post.responses['200']"
+                + ".content.*.schema['$ref']")).singleElement().asString().endsWith("/ApiResultProjectDetailResponse");
+
+        String list = "$.paths['/api/v1/projects'].get";
+        assertThat(docs.<Map<String, Object>>read(list + ".responses").keySet())
+                .as("deleted=true 對 VIEWER 回 403，所以列表端點也要文件化 403")
+                .containsExactlyInAnyOrder("200", "400", "401", "403", "429");
+        assertThat(docs.<List<String>>read(list + ".parameters[?(@.name=='deleted')].schema.type"))
+                .containsExactly("boolean");
+        assertThat(docs.<List<Boolean>>read(list + ".parameters[?(@.name=='deleted')].schema.default"))
+                .containsExactly(false);
+        assertThat(docs.<List<String>>read(list + ".parameters[*].name"))
+                .as("登入身分（Authentication）是執行期注入的，不是查詢參數").doesNotContain("authentication");
+
+        assertThat(docs.<Map<String, Object>>read("$.components.schemas.ProjectSummaryResponse.properties").keySet())
+                .contains("deletedAt");
+        assertThat(docs.<List<String>>read("$.components.schemas.ProjectSummaryResponse.required"))
+                .as("deletedAt 只在 deleted=true 的列表出現，不是必填").doesNotContain("deletedAt");
     }
 
     @Test

@@ -17,6 +17,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.stubbing.Answer;
+import org.slf4j.MDC;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import java.time.Clock;
@@ -322,6 +323,72 @@ class RunConsumersTest {
 
         verify(bridge, times(2)).streamEvents(eq(runId), anyInt(), any(), any());
         assertThat(front.frames).extracting(Frame::seq).containsExactly(1);
+    }
+
+    // ── traceId（契約 §0.4 第 6 點，C-12；NFR-9.4-04）────────────────────────────────
+
+    /** 讓每次 Bridge 呼叫把「呼叫當下的執行緒 MDC traceId」記進 {@code seen}。 */
+    private List<String> recordTraceOfEveryBridgeCall() {
+        List<String> seen = new CopyOnWriteArrayList<>();
+        stubStream(invocation -> {
+            seen.add(String.valueOf(MDC.get("traceId")));
+            return null;
+        }, invocation -> {
+            seen.add(String.valueOf(MDC.get("traceId")));
+            Consumer<BridgeEvent> handler = invocation.getArgument(3);
+            handler.accept(event(1));
+            handler.accept(event(2));
+            return null;
+        });
+        when(bridge.listEvents(eq(runId), anyInt(), anyInt())).thenAnswer(invocation -> {
+            seen.add(String.valueOf(MDC.get("traceId")));
+            return List.of();
+        });
+        when(bridge.pauseRun(runId)).thenAnswer(invocation -> {
+            seen.add(String.valueOf(MDC.get("traceId")));
+            return null;
+        });
+        when(runs.findById(runId)).thenReturn(Optional.of(run(RunStatus.RUNNING)));
+        when(processor.process(eq(runId), argThat(e -> e != null && e.seq() == 1))).thenReturn(pauseFor("gate"));
+        when(processor.process(eq(runId), argThat(e -> e != null && e.seq() == 2))).thenReturn(terminal());
+        return seen;
+    }
+
+    @Test
+    void everyBridgeCallOfTheConsumerThreadCarriesTheTraceIdOfTheRequestThatStartedTheRun() {
+        registry.bindTrace(runId, "trace-of-the-execute-request");
+        List<String> seen = recordTraceOfEveryBridgeCall();
+
+        runToTheEnd();
+
+        assertThat(seen).as("串流（斷線前）、回補、重連的串流、:pause——一個都不漏").hasSize(4)
+                .containsOnly("trace-of-the-execute-request");
+    }
+
+    @Test
+    void aRunWithoutAKnownTraceIdGetsOneGeneratedOnceAndEveryBackgroundCallReusesIt() {
+        List<String> seen = recordTraceOfEveryBridgeCall();
+
+        runToTheEnd();
+
+        String generated = registry.traceIdOf(runId);
+        assertThat(generated).as("格式是 UUID").hasSize(36);
+        assertThat(seen).hasSize(4).containsOnly(generated);
+    }
+
+    @Test
+    void theStartingThreadsOwnTraceIdNeitherLeaksIntoTheConsumerNorIsChangedByIt() {
+        registry.bindTrace(runId, "trace-of-the-execute-request");
+        List<String> seen = recordTraceOfEveryBridgeCall();
+        MDC.put("traceId", "trace-of-a-later-request");
+        try {
+            runToTheEnd();
+
+            assertThat(seen).as("消費者用 run 的 traceId，不是碰巧啟動它的那個請求的").containsOnly("trace-of-the-execute-request");
+            assertThat(MDC.get("traceId")).as("MDC 是每執行緒的：啟動者的值不受消費者影響").isEqualTo("trace-of-a-later-request");
+        } finally {
+            MDC.remove("traceId");
+        }
     }
 
     // ── 暫停動作 ────────────────────────────────────────────────────────────────

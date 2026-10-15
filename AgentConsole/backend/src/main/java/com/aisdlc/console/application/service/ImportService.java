@@ -28,6 +28,7 @@ import com.aisdlc.console.domain.model.goal.NewGoal;
 import com.aisdlc.console.domain.model.imports.GateError;
 import com.aisdlc.console.domain.model.imports.ImportRecord;
 import com.aisdlc.console.domain.model.imports.ImportSourceType;
+import com.aisdlc.console.domain.model.imports.ParseOptions;
 import com.aisdlc.console.domain.model.imports.ParseWarning;
 import com.aisdlc.console.domain.model.imports.ParsedResult;
 import com.aisdlc.console.domain.model.imports.ParsedResult.ParsedGoal;
@@ -219,7 +220,7 @@ public class ImportService implements ImportUseCase {
         ParseOptions checked = checkOptions(options);
         ImportRecord claimed = tx.execute(status -> {
             ImportRecord record = load(id, true);
-            record.beginParse();
+            record.beginParse(checked);      // 同一交易內把本次請求的選項原樣存下（C-10；不論之後成敗）
             return records.save(record);
         });
         audit.note("import.parse", "import", id.toString());
@@ -231,7 +232,7 @@ public class ImportService implements ImportUseCase {
             }
             ImportRecord done = tx.execute(status -> {
                 ImportRecord record = load(id, true);
-                record.completeParse(draft.result());
+                record.completeParse(draft.result(), draft.warnings());
                 return records.save(record);
             });
             return new ParseOutcome(done, draft.warnings());
@@ -285,10 +286,12 @@ public class ImportService implements ImportUseCase {
         if (!gates.isEmpty()) {
             throw ImportParser.gateRejected(record.parsePath(), gates);
         }
-        record.editResult(tree);
+        // 提示只取決於三層樹（伺服器欄位不影響），所以先算再存：重算後的值覆寫記錄的 warnings（C-10），回應與重開記錄所見一致
+        List<ParseWarning> warnings = placeholderWarnings(tree);
+        record.editResult(tree, warnings);
         records.save(record);
         audit.note("import.result", "import", id.toString());
-        return new ParseOutcome(record, placeholderWarnings(record.parsedResult()));
+        return new ParseOutcome(record, warnings);
     }
 
     /** 陣列順序即排序：目標與任務的 sortOrder 由伺服器重編為 0 起連續整數（請求帶的值忽略）。 */

@@ -2,6 +2,8 @@ package com.aisdlc.console.application.service;
 
 import com.aisdlc.console.application.port.in.SettingsUseCase.ConfigView;
 import com.aisdlc.console.application.port.in.SettingsUseCase.ConnectionTestResult;
+import com.aisdlc.console.application.port.in.SettingsUseCase.ExportedItem;
+import com.aisdlc.console.application.port.in.SettingsUseCase.ImportResult;
 import com.aisdlc.console.application.port.in.SettingsUseCase.TestConnectionCommand;
 import com.aisdlc.console.application.port.out.AuditTrail;
 import com.aisdlc.console.application.port.out.OutboundHttp;
@@ -304,5 +306,55 @@ class SettingsServiceTest {
                 .isInstanceOf(NotFoundException.class);
         assertThatThrownBy(() -> service.listCategory("nope", false)).isInstanceOf(NotFoundException.class);
         assertThatThrownBy(() -> service.resetCategory("nope", false, "admin")).isInstanceOf(NotFoundException.class);
+    }
+
+    // ── 匯入的判定順序（C-6、DEF-AC-002；契約 §1.5.10）──────────────────────────────
+
+    private static final String UNLISTED_URL = "https://not-listed.example/v1/chat";
+
+    @Test
+    void anImportedValueEqualToTheCurrentOneIsSkippedWithoutAnyValidationEvenWhenTheCurrentValueWouldBeRejected() {
+        // 現值的主機不在 allowlist（e2e 環境預設的 api.minimax.io 就不在白名單）：值規則與 SEC-04 對「沒有要改的值」沒有意義
+        repository.set("model", "apiUrl", UNLISTED_URL);
+
+        ImportResult result = service.importSettings(List.of(new ExportedItem("model", "apiUrl", UNLISTED_URL)),
+                "admin");
+
+        assertThat(result.applied()).isZero();
+        assertThat(result.skipped()).isEqualTo(1);
+        assertThat(result.errors()).isEmpty();
+        assertThat(repository.historyEntries()).isEmpty();
+    }
+
+    @Test
+    void aChangedValueIsStillValidatedSoAnUnlistedHostIsRejectedAndNothingIsWritten() {
+        ImportResult result = service.importSettings(List.of(new ExportedItem("model", "apiUrl", UNLISTED_URL)),
+                "admin");
+
+        assertThat(result.applied()).isZero();
+        assertThat(result.skipped()).isZero();
+        assertThat(result.errors()).singleElement().satisfies(e -> {
+            assertThat(e.category()).isEqualTo("model");
+            assertThat(e.key()).isEqualTo("apiUrl");
+            assertThat(e.reason()).isEqualTo(ErrorReasons.OUTBOUND_REJECTED);
+        });
+        assertThat(repository.find("model", "apiUrl").orElseThrow().value())
+                .isEqualTo("https://api.minimax.io/v1/text/chatcompletion_v2");
+        assertThat(repository.historyEntries()).isEmpty();
+    }
+
+    @Test
+    void thePlaceholderAndEncryptedPlaintextRulesComeBeforeTheUnchangedCheck() {
+        // 加密鍵現值為空字串；匯入的明文剛好也是空字串＝「值相同」，但加密鍵給非佔位值一律是 errors（匯入不能繞過二次確認）
+        ImportResult result = service.importSettings(List.of(
+                new ExportedItem("model", "apiKey", SettingsService.ENCRYPTED_PLACEHOLDER),
+                new ExportedItem("autoclaude", "dbDsn", "")), "admin");
+
+        assertThat(result.skipped()).as("佔位值略過").isEqualTo(1);
+        assertThat(result.applied()).isZero();
+        assertThat(result.errors()).singleElement().satisfies(e -> {
+            assertThat(e.key()).isEqualTo("dbDsn");
+            assertThat(e.reason()).isEqualTo(ErrorReasons.CONFIG_UPDATE_CONFIRM);
+        });
     }
 }

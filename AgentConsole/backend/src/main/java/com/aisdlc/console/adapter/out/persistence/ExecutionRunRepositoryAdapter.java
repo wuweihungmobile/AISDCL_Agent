@@ -76,6 +76,13 @@ class ExecutionRunRepositoryAdapter implements ExecutionRunRepository {
     }
 
     @Override
+    public Optional<UUID> findInProgressRunId(UUID projectId) {
+        return jdbc.query("select id from console.execution_runs where project_id = ? "
+                + "and status in ('INITIALIZING', 'RUNNING', 'PAUSED') order by run_number desc limit 1",
+                (rs, n) -> JdbcSupport.uuid(rs, "id"), projectId).stream().findFirst();
+    }
+
+    @Override
     public PageResult<ExecutionRun> findPageByProject(UUID projectId, RunStatus status, boolean byRunNumber,
                                                       boolean ascending, int page, int size) {
         List<Object> args = new ArrayList<>();

@@ -63,4 +63,13 @@ public class ProjectEntity {
 
     @Column(name = "created_by", length = 100)
     public String createdBy;
+
+    /** V9（C-3）：軟刪除當下的時間；刪除專案時與其連帶軟刪的目標、任務寫同一個值（復原據此辨識）。未刪除為 NULL。 */
+    @Column(name = "deleted_at")
+    public Instant deletedAt;
+
+    /** V9（C-3）：軟刪除前的專案狀態（軟刪除會把 status 改成 ARCHIVED，復原時還原）；升級前就已軟刪的列為 NULL。 */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status_before_delete", length = 20)
+    public ProjectStatus statusBeforeDelete;
 }

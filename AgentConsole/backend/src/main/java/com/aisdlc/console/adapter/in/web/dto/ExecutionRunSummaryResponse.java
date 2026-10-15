@@ -1,6 +1,7 @@
 package com.aisdlc.console.adapter.in.web.dto;
 
 import com.aisdlc.console.application.port.in.ExecutionQueryUseCase.RunSummaryView;
+import com.aisdlc.console.domain.model.execution.BridgeStatus;
 import com.aisdlc.console.domain.model.execution.RunStatus;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -17,6 +18,8 @@ public record ExecutionRunSummaryResponse(
         @NotNull UUID projectId,
         @NotNull int runNumber,
         @NotNull RunStatus status,
+        @Schema(description = "與詳情的 bridgeStatus 同義（PAUSING／CANCELLING 在此可見），但列表不逐批呼叫 Bridge：取 console-api 記憶體內"
+                + "最近一則 status 事件的值，沒有就以 DB status 同名值補；status=RUNNING 又沒有記憶體值時缺席") BridgeStatus bridgeStatus,
         @NotNull int autonomyLevel,
         @NotNull @Schema(allowableValues = {"ALL", "SELECTED"}) String scopeMode,
         @NotNull long totalTokensUsed,
@@ -32,8 +35,8 @@ public record ExecutionRunSummaryResponse(
         Double successRate) {
 
     public static ExecutionRunSummaryResponse from(RunSummaryView v) {
-        return new ExecutionRunSummaryResponse(v.id(), v.projectId(), v.runNumber(), v.status(), v.autonomyLevel(),
-                v.scopeMode(), v.totalTokensUsed(), v.tokenBudget(), v.startedAt(), v.completedAt(), v.durationSec(),
-                v.tasksTotal(), v.tasksCompleted(), v.tasksFailed(), v.successRate());
+        return new ExecutionRunSummaryResponse(v.id(), v.projectId(), v.runNumber(), v.status(), v.bridgeStatus(),
+                v.autonomyLevel(), v.scopeMode(), v.totalTokensUsed(), v.tokenBudget(), v.startedAt(), v.completedAt(),
+                v.durationSec(), v.tasksTotal(), v.tasksCompleted(), v.tasksFailed(), v.successRate());
     }
 }

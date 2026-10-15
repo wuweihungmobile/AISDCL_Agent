@@ -105,12 +105,14 @@ public final class ApiClient {
     public static final class Resp {
 
         private final MvcResult result;
+        private final byte[] bytes;
         private final String body;
         private DocumentContext json;
 
         Resp(MvcResult result) {
             this.result = result;
-            this.body = new String(result.getResponse().getContentAsByteArray(), StandardCharsets.UTF_8);
+            this.bytes = result.getResponse().getContentAsByteArray();
+            this.body = new String(bytes, StandardCharsets.UTF_8);
         }
 
         public int status() {
@@ -119,6 +121,11 @@ public final class ApiClient {
 
         public String body() {
             return body;
+        }
+
+        /** 原始位元組（二進位回應，例如 PDF 報表；{@link #body()} 只適合文字）。 */
+        public byte[] bytes() {
+            return bytes;
         }
 
         public String header(String name) {

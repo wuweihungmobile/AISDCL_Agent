@@ -32,9 +32,10 @@ public interface ManageProjectUseCase {
      *
      * @param nameQuery 名稱模糊比對（不分大小寫）；null／空白＝不篩
      * @param status    狀態篩選；null＝不篩
+     * @param deleted   true＝<b>只列軟刪除的專案</b>（契約 §1.6.2，C-3；角色限制由 web 層檢查），false＝只列未軟刪除者（原行為）
      */
-    record ListQuery(String nameQuery, ProjectStatus status, SortField sortField, boolean ascending, int page,
-                     int size) {
+    record ListQuery(String nameQuery, ProjectStatus status, boolean deleted, SortField sortField, boolean ascending,
+                     int page, int size) {
     }
 
     ProjectView create(NewProject spec, String createdBy);
@@ -46,6 +47,12 @@ public interface ManageProjectUseCase {
     ProjectView update(UUID projectId, ProjectUpdate update);
 
     void delete(UUID projectId);
+
+    /**
+     * 復原軟刪除的專案與「同一次刪除連帶軟刪」的目標、任務（契約 §1.6.1，C-3）。找不到（沒有這個 id 或已被清除）→ 404；
+     * 目前沒被軟刪除 → 409 {@code project_not_deleted}；軟刪除已超過保留期 → 409 {@code restore_window_expired}。
+     */
+    ProjectDetailView restore(UUID projectId);
 
     ProjectView signoff(UUID projectId, String approver);
 }

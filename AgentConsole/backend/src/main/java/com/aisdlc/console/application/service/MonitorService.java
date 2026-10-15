@@ -11,11 +11,11 @@ import com.aisdlc.console.application.port.out.MonitorQueries.ProjectCounts;
 import com.aisdlc.console.application.port.out.MonitorQueries.StepFact;
 import com.aisdlc.console.application.port.out.MonitorQueries.TokenFact;
 import com.aisdlc.console.application.port.out.ProjectRepository;
+import com.aisdlc.console.application.port.out.ReportPdfRenderer;
 import com.aisdlc.console.application.port.out.ReviewRequestRepository;
 import com.aisdlc.console.application.port.out.TaskRepository;
 import com.aisdlc.console.domain.exception.ErrorReasons;
 import com.aisdlc.console.domain.exception.NotFoundException;
-import com.aisdlc.console.domain.exception.NotImplementedYetException;
 import com.aisdlc.console.domain.exception.ValidationException;
 import com.aisdlc.console.domain.exception.Violations;
 import com.aisdlc.console.domain.model.execution.DagSnapshot.Node;
@@ -60,6 +60,8 @@ public class MonitorService implements MonitorUseCase {
 
     private static final Duration DEFAULT_WINDOW = Duration.ofHours(24);
     private static final Duration MAX_WINDOW = Duration.ofDays(366);
+    /** 全域任務總計的視窗上限（契約 §1.3.8：92 天）。 */
+    private static final int MAX_TOTALS_DAYS = 92;
     private static final Duration HOURLY_LIMIT = Duration.ofHours(48);
     private static final int MAX_BUCKETS = 1_000;
     private static final int MAX_ALERT_LIMIT = 200;
@@ -82,12 +84,14 @@ public class MonitorService implements MonitorUseCase {
     private final MonitorQueries queries;
     private final BridgeHealthMonitor health;
     private final AuditTrail audit;
+    private final ReportPdfRenderer pdfRenderer;
     private final Clock clock;
 
     @SuppressWarnings("java:S107")
     public MonitorService(ProjectRepository projects, GoalRepository goals, TaskRepository tasks,
                           ExecutionRunRepository runs, AlertRepository alerts, ReviewRequestRepository reviews,
-                          MonitorQueries queries, BridgeHealthMonitor health, AuditTrail audit, Clock clock) {
+                          MonitorQueries queries, BridgeHealthMonitor health, AuditTrail audit,
+                          ReportPdfRenderer pdfRenderer, Clock clock) {
         this.projects = projects;
         this.goals = goals;
         this.tasks = tasks;
@@ -97,6 +101,7 @@ public class MonitorService implements MonitorUseCase {
         this.queries = queries;
         this.health = health;
         this.audit = audit;
+        this.pdfRenderer = pdfRenderer;
         this.clock = clock;
     }
 
@@ -390,6 +395,30 @@ public class MonitorService implements MonitorUseCase {
                 e.getValue()[2], e.getValue()[3])).toList();
     }
 
+    /** 全域任務總計（契約 §1.3.8，C-1）：與 {@link #taskTrend} 同表同判準，只是不分桶、跨全部未封存且未軟刪除的專案。 */
+    @Override
+    public TaskTotalsView taskTotals(Instant from, Instant to) {
+        if (from == null) {
+            throw ValidationException.of("from", "from 為必填，須是帶 offset 的 ISO-8601 時間（例：2026-10-12T00:00:00Z）");
+        }
+        Instant end = to != null ? to : clock.instant();
+        if (!from.isBefore(end)) {
+            throw invalidTotalsRange(from, end, "from 必須早於 to");
+        }
+        if (Duration.between(from, end).compareTo(Duration.ofDays(MAX_TOTALS_DAYS)) > 0) {
+            throw invalidTotalsRange(from, end, "時間視窗不可超過 " + MAX_TOTALS_DAYS + " 天");
+        }
+        MonitorQueries.TaskTotalsFact fact = queries.taskTotals(from, end);
+        return new TaskTotalsView(from, end, fact.started(), fact.completed(), fact.failed(), fact.retried(),
+                fact.projectsCounted());
+    }
+
+    /** 違規欄位是 {@code to}（契約 §1.3.8：主控裁決 C-1 的 {@code errors[].field=to}），details 另帶 {@code maxDays}。 */
+    private static ValidationException invalidTotalsRange(Instant from, Instant to, String message) {
+        return ValidationException.of("to", message, ErrorReasons.TIME_RANGE_INVALID,
+                Map.of("from", from.toString(), "to", to.toString(), "maxDays", MAX_TOTALS_DAYS));
+    }
+
     // ── 告警 ───────────────────────────────────────────────────────────────────
 
     @Override
@@ -523,9 +552,6 @@ public class MonitorService implements MonitorUseCase {
             throw ValidationException.of("format", "不支援的報表格式：" + format, ErrorReasons.REPORT_FORMAT_UNSUPPORTED,
                     Map.of("format", format, "supported", List.of("csv", "pdf")));
         }
-        if (fmt.equals("pdf")) {
-            throw new NotImplementedYetException("PDF 報表尚未提供（W5 之前一律回 501）", ErrorReasons.PDF_NOT_AVAILABLE);
-        }
         Window w = window(query);
         MetricsView metrics = compute(s, w);
         Instant now = clock.instant();
@@ -564,10 +590,14 @@ public class MonitorService implements MonitorUseCase {
                 .sorted(Comparator.comparing(Alert::createdAt))
                 .map(a -> new ReportCsv.AlertRow(a.createdAt(), a.severity().name(), a.rule().name(), a.subject(),
                         a.message(), a.acknowledged(), a.acknowledgedBy(), a.acknowledgedAt())).toList();
+        String stem = "monitor-report-" + s.projectId().toString().substring(0, 8) + "-" + FILE_STAMP.format(now);
+        if (fmt.equals("pdf")) {
+            byte[] pdf = pdfRenderer.render(ReportPdfModel.of(s.project().name(), w.from(), w.to(), s.runId(), now,
+                    metrics, runRows, taskRows, alertRows));
+            return new Report(stem + ".pdf", "application/pdf", pdf);
+        }
         byte[] content = ReportCsv.build(s.project().name(), w.from(), w.to(), s.runId(), metrics, runRows, taskRows,
                 alertRows);
-        String filename = "monitor-report-" + s.projectId().toString().substring(0, 8) + "-"
-                + FILE_STAMP.format(now) + ".csv";
-        return new Report(filename, "text/csv; charset=UTF-8", content);
+        return new Report(stem + ".csv", "text/csv; charset=UTF-8", content);
     }
 }

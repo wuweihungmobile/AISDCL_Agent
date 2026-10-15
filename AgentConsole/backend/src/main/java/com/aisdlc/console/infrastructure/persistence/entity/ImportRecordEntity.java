@@ -12,7 +12,8 @@ import java.util.UUID;
 
 /**
  * import_records 表（PRD §6.2）的 JPA 映射（Phase 3 匯入）。{@code parse_path}／{@code last_parse_errors} 為 V5 增補
- * （契約 §0.5、AR-07）：{@code parsed_result} 在第一次成功解析前為 NULL，失敗的 parse 不寫它。
+ * （契約 §0.5、AR-07）：{@code parsed_result} 在第一次成功解析前為 NULL，失敗的 parse 不寫它；{@code warnings}／
+ * {@code parse_options} 為 V8 增補（C-10）。
  */
 @Entity
 @Table(name = "import_records")
@@ -67,4 +68,14 @@ public class ImportRecordEntity {
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "last_parse_errors", columnDefinition = "jsonb")
     public String lastParseErrors;
+
+    /** V8（C-10）：最近一次成功的 parse／PUT result 的 ParseWarning 陣列（JSON 文字）；沒有就是 {@code []}（NOT NULL）。 */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "warnings", nullable = false, columnDefinition = "jsonb")
+    public String warnings = "[]";
+
+    /** V8（C-10）：最近一次 parse 請求的 ParseOptions（JSON 文字）；從未 parse 過為 NULL。 */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "parse_options", columnDefinition = "jsonb")
+    public String parseOptions;
 }

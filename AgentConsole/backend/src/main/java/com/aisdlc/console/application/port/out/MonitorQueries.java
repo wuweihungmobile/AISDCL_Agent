@@ -28,6 +28,13 @@ public interface MonitorQueries {
     }
 
     /**
+     * 全域任務總計的事實列（契約 §1.3.8，C-1）：{@code execution_steps} 在視窗內 {@code STARTED}／{@code COMPLETED}／
+     * {@code FAILED}／{@code RETRYING} 的列數，與有貢獻列的專案數。
+     */
+    record TaskTotalsFact(long started, long completed, long failed, long retried, int projectsCounted) {
+    }
+
+    /**
      * 專案（可限單一批次）的步驟事件列，{@code timestamp ∈ [from, to)}（{@code from} 為 null＝不設下界），依
      * {@code (timestamp, id)} 升冪。
      */
@@ -37,4 +44,10 @@ public interface MonitorQueries {
     List<TokenFact> tokens(UUID projectId, UUID runIdOrNull, Instant fromInclusive, Instant toExclusive);
 
     ProjectCounts projectCounts();
+
+    /**
+     * 全域任務總計：跨全部<b>未封存且未軟刪除</b>的專案，步驟列 {@code timestamp ∈ [from, to)}。與 {@link #steps} 同一張表、
+     * 同一判準——只計所屬任務與目標未軟刪的列（{@code task-trend} 的範圍任務也是這個集合），只是不分桶、不分專案。
+     */
+    TaskTotalsFact taskTotals(Instant fromInclusive, Instant toExclusive);
 }

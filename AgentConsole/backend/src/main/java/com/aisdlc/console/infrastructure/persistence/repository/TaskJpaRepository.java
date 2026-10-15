@@ -45,11 +45,21 @@ public interface TaskJpaRepository extends JpaRepository<TaskEntity, UUID> {
     List<KeyedTaskCount> countByGoals(@Param("goalIds") Collection<UUID> goalIds, @Param("done") TaskStatus done);
 
     @Modifying(flushAutomatically = true, clearAutomatically = true)
-    @Query("update TaskEntity t set t.deleted = true, t.updatedAt = :now where t.goalId = :goalId and t.deleted = false")
+    @Query("update TaskEntity t set t.deleted = true, t.deletedAt = :now, t.updatedAt = :now "
+            + "where t.goalId = :goalId and t.deleted = false")
     int softDeleteByGoalId(@Param("goalId") UUID goalId, @Param("now") Instant now);
 
+    /** 軟刪除專案下全部仍存活的任務：{@code deleted_at} 與專案同值（V9；復原據此辨識「同一次刪除連帶軟刪」）。 */
     @Modifying(flushAutomatically = true, clearAutomatically = true)
-    @Query("update TaskEntity t set t.deleted = true, t.updatedAt = :now "
+    @Query("update TaskEntity t set t.deleted = true, t.deletedAt = :now, t.updatedAt = :now "
             + "where t.deleted = false and t.goalId in (select g.id from GoalEntity g where g.projectId = :projectId)")
     int softDeleteByProjectId(@Param("projectId") UUID projectId, @Param("now") Instant now);
+
+    /** 復原：只還原 {@code deleted_at} 等於專案刪除時間者；單獨先刪除的任務（deleted_at 不同）維持已刪除。 */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("update TaskEntity t set t.deleted = false, t.deletedAt = null, t.updatedAt = :now "
+            + "where t.deleted = true and t.deletedAt = :deletedAt "
+            + "and t.goalId in (select g.id from GoalEntity g where g.projectId = :projectId)")
+    int restoreDeletedWithProject(@Param("projectId") UUID projectId, @Param("deletedAt") Instant deletedAt,
+                                  @Param("now") Instant now);
 }

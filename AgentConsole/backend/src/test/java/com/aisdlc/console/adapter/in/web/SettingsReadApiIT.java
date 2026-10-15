@@ -180,9 +180,7 @@ class SettingsReadApiIT extends AbstractApiIT {
         int checked = 0;
         for (ConfigSpec spec : ConfigCatalog.all()) {
             boolean skipped = spec.min() == null || spec.max() == null
-                    || ConfigCatalog.isTokenGuardKey(spec.category(), spec.key())
-                    // 附錄 C.3 的上限 1000000000000 有 13 位，與同列規則 {0,11}（最多 12 位）矛盾：以規則為準，另測
-                    || spec.fullKey().equals("execution.globalTokenBudget");
+                    || ConfigCatalog.isTokenGuardKey(spec.category(), spec.key());
             if (skipped) {
                 continue;
             }
@@ -202,11 +200,16 @@ class SettingsReadApiIT extends AbstractApiIT {
                     .as(full + " = max + 1 格").isEqualTo(400);
             checked++;
         }
-        assertThat(checked).as("掃到的數值鍵數（model 5＋agent 7＋execution 4＋monitor 4）").isEqualTo(20);
+        assertThat(checked).as("掃到的數值鍵數（model 5＋agent 7＋execution 5（含 globalTokenBudget）＋monitor 4）").isEqualTo(21);
     }
 
     @Test
-    void globalTokenBudgetFollowsTheValidationRuleTwelveDigitsMax() {
+    void globalTokenBudgetsDocumentedMaxIsTheLargestValueItsValidationRuleAccepts() {
+        // B1-1（契約 v1.2）：目錄的 max 曾是 1000000000000（13 位），而 validation_rule {0,11} 最多容許 12 位——
+        // GET /settings 報的 max 比實際接受的大 1，依文件填 max 的客戶端會被 400 擋下
+        Resp listing = api.get(viewer(), BASE);
+        assertThat(((Number) config(listing, "execution", "globalTokenBudget").get("max")).longValue())
+                .isEqualTo(999_999_999_999L);
         assertThat(put("execution", "globalTokenBudget", "999999999999").status()).isEqualTo(200);
         assertThat(put("execution", "globalTokenBudget", "1").status()).isEqualTo(200);
         assertThat(put("execution", "globalTokenBudget", "0").status()).isEqualTo(400);

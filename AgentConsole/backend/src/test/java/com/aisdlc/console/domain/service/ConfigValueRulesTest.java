@@ -155,8 +155,8 @@ class ConfigValueRulesTest {
     void largeLongValuesAreComparedExactlyWithoutOverflow() {
         String rule = "^[1-9][0-9]{0,11}$";
         assertThat(check("execution", "globalTokenBudget", ConfigValueType.LONG, rule, "999999999999")).isEmpty();
-        // 契約附錄 C 的範圍上限是 1000000000000（13 位數），但同一列的規則 {0,11} 最多容許 12 位數：以規則為準
-        // （契約漂移，已在交卷〈契約漂移〉列出）。
+        // 範圍上限是 999999999999（12 位數）：與同一列的規則 {0,11} 一致（契約 v1.2 更正，B1-1；
+        // v1.1 寫的 1000000000000 有 13 位，與規則矛盾）。
         assertThat(check("execution", "globalTokenBudget", ConfigValueType.LONG, rule, "1000000000000"))
                 .as("13 位數被 validation_rule 擋下").isPresent();
         assertThat(check("execution", "globalTokenBudget", ConfigValueType.LONG, rule, "999999999999999"))

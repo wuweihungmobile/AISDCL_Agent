@@ -26,12 +26,13 @@ final class GoalMapper {
         e.deleted = g.deleted();
         e.createdAt = g.createdAt();
         e.updatedAt = g.updatedAt();
+        e.deletedAt = g.deletedAt();
         return e;
     }
 
     static Goal toDomain(GoalEntity e, Collection<java.util.UUID> dependsOn) {
         return Goal.restore(e.id, e.projectId, e.name, e.description, e.passCriteria,
                 e.sortOrder == null ? 0 : e.sortOrder, e.status, dependsOn, e.signedOff, e.signedOffBy,
-                e.signedOffAt, Boolean.TRUE.equals(e.deleted), e.createdAt, e.updatedAt);
+                e.signedOffAt, Boolean.TRUE.equals(e.deleted), e.createdAt, e.updatedAt, e.deletedAt);
     }
 }

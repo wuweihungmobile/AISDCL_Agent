@@ -73,7 +73,9 @@ public class TaskController {
 
     @DeleteMapping("/tasks/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    @Operation(summary = "刪除任務（軟刪除）", description = "RUNNING 狀態的任務回 409")
+    @Operation(summary = "刪除任務（軟刪除）",
+            description = "所屬專案有進行中批次（INITIALIZING／RUNNING／PAUSED）回 409 reason=project_executing"
+                    + "（details＝{projectId, runId}；v1.2，C-8）；其次，RUNNING 狀態的任務回 409")
     public void delete(@PathVariable UUID id) {
         tasks.delete(id);
     }

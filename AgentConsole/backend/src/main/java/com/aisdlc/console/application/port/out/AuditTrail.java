@@ -22,4 +22,10 @@ public interface AuditTrail {
      * 直接輸出一行審計日誌並落 {@code audit_log}；失敗不得影響主請求。
      */
     void event(String action, Map<String, Object> details);
+
+    /**
+     * 系統自己做的事（沒有使用者請求，例如軟刪除資料的清除排程，契約 §1.6.5 的 {@code project.purge}）：輸出一行審計日誌並落
+     * {@code audit_log}，主體固定為 {@code system}（{@code method=SYSTEM}、{@code path=system:<action>}）；失敗不得影響呼叫端。
+     */
+    void system(String action, String entityType, String entityId, Map<String, Object> details);
 }

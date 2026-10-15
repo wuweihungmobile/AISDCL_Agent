@@ -1,10 +1,13 @@
 package com.aisdlc.console.adapter.in.web;
 
+import com.aisdlc.console.application.service.RunRegistry;
 import com.aisdlc.console.domain.exception.ErrorReasons;
 import com.aisdlc.console.support.AbstractExecutionIT;
 import com.aisdlc.console.support.ApiClient.Resp;
+import com.aisdlc.minibridge.MiniBridge;
 import com.aisdlc.minibridge.MiniRun;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -221,6 +224,92 @@ class ExecutionLifecycleApiIT extends AbstractExecutionIT {
         assertThat(row.get("autonomyLevel")).isEqualTo(4);
     }
 
+    // ── 批次列表的 bridgeStatus（C-11；契約 §1.2.2、E2E-13 第 11 列）─────────────────────────
+
+    private Map<String, Object> listRow(String projectId, String runId) {
+        List<Map<String, Object>> rows = api.get(viewer(), "/api/v1/projects/" + projectId + "/executions")
+                .read("$.data.content");
+        return rows.stream().filter(r -> runId.equals(r.get("id"))).findFirst().orElseThrow();
+    }
+
+    /** 列表的 status 必須是 bridgeStatus 的六態折疊值（PAUSING／CANCELLING 折為 RUNNING）；沒有 bridgeStatus 的列不判。 */
+    private static void assertFoldsBack(Map<String, Object> row) {
+        Object bridge = row.get("bridgeStatus");
+        if (bridge != null) {
+            String folded = "PAUSING".equals(bridge) || "CANCELLING".equals(bridge) ? "RUNNING" : (String) bridge;
+            assertThat(row.get("status")).as("bridgeStatus=%s 折疊後應等於 status", bridge).isEqualTo(folded);
+        }
+    }
+
+    @Test
+    void theExecutionListShowsPausingWhileTheConsumerFollowsTheRunAndTheSameNameOnceTheRunSettles() {
+        Fixture f = prjA("list-bridge-status", 4);
+        MINI.manualSteps = true;
+        String run = startRun(f.projectId());
+        assertThat(awaitUntil(Duration.ofSeconds(10), () -> "RUNNING".equals(taskStatus(f.t1())))).isTrue();
+
+        assertThat(api.post(operator(), "/api/v1/executions/" + run + "/pause").<String>read("$.data.bridgeStatus"))
+                .isEqualTo("PAUSING");
+        assertThat(awaitUntil(Duration.ofSeconds(10),
+                () -> "PAUSING".equals(listRow(f.projectId(), run).get("bridgeStatus"))))
+                .as("事件消費者處理到 PAUSING 的 status 事件後，列表顯示過渡態").isTrue();
+        Map<String, Object> pausing = listRow(f.projectId(), run);
+        assertThat(pausing.get("status")).as("DB 仍是六態的 RUNNING").isEqualTo("RUNNING");
+        assertFoldsBack(pausing);
+
+        mini(run).release(1);
+        assertThat(awaitProjected(run, "PAUSED")).isTrue();
+        Map<String, Object> paused = listRow(f.projectId(), run);
+        assertThat(paused.get("status")).isEqualTo("PAUSED");
+        assertThat(paused.get("bridgeStatus")).isEqualTo("PAUSED");
+
+        assertThat(api.post(operator(), "/api/v1/executions/" + run + "/resume").status()).isEqualTo(200);
+        mini(run).release(5);
+        assertThat(awaitProjected(run, "COMPLETED")).isTrue();
+        Map<String, Object> completed = listRow(f.projectId(), run);
+        assertThat(completed.get("status")).isEqualTo("COMPLETED");
+        assertThat(completed.get("bridgeStatus")).as("終態批次的 bridgeStatus 等於 status").isEqualTo("COMPLETED");
+    }
+
+    @Test
+    void aCancelledRunIsListedAsCancelledAndEveryRowAlwaysFoldsBackToItsStatus() {
+        Fixture f = prjA("list-cancel", 4);
+        MINI.manualSteps = true;
+        String run = startRun(f.projectId());
+        assertThat(awaitUntil(Duration.ofSeconds(10), () -> "RUNNING".equals(taskStatus(f.t1())))).isTrue();
+
+        assertThat(api.post(operator(), "/api/v1/executions/" + run + "/cancel").status()).isEqualTo(200);
+        // 迷你 Bridge 的步驟在閘上等著、被 stop 後立刻收尾：CANCELLING 可能只出現一瞬間，所以不斷言它；
+        // 但無論哪一刻去看，列表的 status 都必須是 bridgeStatus 的折疊值。
+        assertFoldsBack(listRow(f.projectId(), run));
+        assertThat(awaitProjected(run, "CANCELLED")).isTrue();
+        Map<String, Object> cancelled = listRow(f.projectId(), run);
+        assertThat(cancelled.get("status")).isEqualTo("CANCELLED");
+        assertThat(cancelled.get("bridgeStatus")).isEqualTo("CANCELLED");
+    }
+
+    @Autowired
+    private RunRegistry registry;
+
+    @Test
+    void afterConsoleApiLosesItsMemoryTheListFallsBackToTheDatabaseStatusAndOmitsTheFieldForARunningRun() {
+        Fixture f = prjA("list-restart", 4);
+        MINI.manualSteps = true;
+        String run = startRun(f.projectId());
+        assertThat(awaitUntil(Duration.ofSeconds(10), () -> "RUNNING".equals(taskStatus(f.t1())))).isTrue();
+
+        registry.forget(UUID.fromString(run));          // console-api 重啟：記憶體內的執行期狀態全部消失
+
+        Map<String, Object> running = listRow(f.projectId(), run);
+        assertThat(running.get("status")).isEqualTo("RUNNING");
+        assertThat(running).as("RUNNING 又沒有記憶體值：無從判斷 RUNNING／PAUSING／CANCELLING → 缺席")
+                .doesNotContainKey("bridgeStatus");
+
+        mini(run).release(5);
+        assertThat(awaitProjected(run, "COMPLETED")).isTrue();
+        assertThat(listRow(f.projectId(), run).get("bridgeStatus")).isEqualTo("COMPLETED");
+    }
+
     @Test
     void theExecutionListFiltersByStatusSortsAndRejectsBadParameters() {
         Fixture f = prjA("list-sort", 4);
@@ -352,6 +441,48 @@ class ExecutionLifecycleApiIT extends AbstractExecutionIT {
         assertThat(mini(run).events().stream().filter(e -> "step".equals(e.get("event"))
                 && "STARTED".equals(e.get("status")) && "G1-T1".equals(e.get("step_id"))).count())
                 .as("續跑不重做已完成的步驟").isEqualTo(1);
+    }
+
+    // ── E2E-13 第 12 列（C-12）：traceId 貫穿 console-api → Bridge ──────────────────────────
+
+    private List<String> tracesOf(String request) {
+        return MINI.traced().stream().filter(t -> t.request().equals(request)).map(MiniBridge.Traced::traceId).toList();
+    }
+
+    @Test
+    void theTraceIdOfTheRequestThatStartedARunFollowsItToTheBridgeAndTheConsumerReusesItWhileLaterRequestsCarryTheirOwn() {
+        Fixture f = prjA("trace-e2e", 4);
+        MINI.manualSteps = true;
+
+        Resp execute = execute(f.projectId(), Map.of());
+
+        assertThat(execute.status()).isEqualTo(201);
+        String executeTrace = execute.header("X-Trace-Id");
+        String run = execute.id();
+        assertThat(executeTrace).isNotBlank();
+        assertThat(tracesOf("POST /autoclaude/runs")).as("使用者請求觸發的呼叫：取當前請求的 traceId").containsExactly(executeTrace);
+        assertThat(tracesOf("GET /health")).as("啟動後立即的健康探測也在同一個請求裡").containsExactly(executeTrace);
+        String streamRequest = "GET /autoclaude/runs/" + run + "/stream";
+        assertThat(awaitUntil(Duration.ofSeconds(10), () -> !tracesOf(streamRequest).isEmpty()))
+                .as("背景事件消費者連上了串流").isTrue();
+        assertThat(tracesOf(streamRequest)).as("背景消費者沒有請求上下文：用該 run 的 traceId＝啟動它的 execute 請求的")
+                .containsOnly(executeTrace);
+
+        assertThat(awaitUntil(Duration.ofSeconds(10), () -> "RUNNING".equals(taskStatus(f.t1())))).isTrue();
+        Resp pause = api.post(operator(), "/api/v1/executions/" + run + "/pause");
+        assertThat(pause.status()).isEqualTo(200);
+        String pauseTrace = pause.header("X-Trace-Id");
+        assertThat(pauseTrace).isNotBlank().isNotEqualTo(executeTrace);
+        assertThat(tracesOf("POST /autoclaude/runs/" + run + ":pause")).as("之後的使用者請求各帶自己的 traceId")
+                .containsExactly(pauseTrace);
+
+        mini(run).release(10);
+        assertThat(awaitProjected(run, "PAUSED")).isTrue();
+        mini(run).release(10);
+        assertThat(api.post(operator(), "/api/v1/executions/" + run + "/resume").status()).isEqualTo(200);
+        assertThat(awaitProjected(run, "COMPLETED")).isTrue();
+        assertThat(MINI.traced()).as("整個過程沒有任何一個請求漏帶標頭").extracting(MiniBridge.Traced::traceId)
+                .doesNotContainNull();
     }
 
     @Test

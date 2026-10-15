@@ -341,7 +341,7 @@ class RunEventProjectionIT extends AbstractExecutionIT {
         assertThat(data.severity()).as("error → CRITICAL").isEqualTo("CRITICAL");
         assertThat(data.rule()).isEqualTo("ENGINE_ESCALATION");
         assertThat(data.alertId()).as("新增了一列才帶 alertId").isNotNull();
-        assertThat(data.subject()).isEqualTo("step:G1-T2");
+        assertThat(data.subject()).as("C-7：去重對象帶 runId").isEqualTo("step:" + run.id + ":G1-T2");
         assertThat(ids(first, Kind.LOGS)).containsExactly("3:alert");
         assertThat(ids(first, Kind.METRICS)).as("alert 不進 /metrics").isEmpty();
 

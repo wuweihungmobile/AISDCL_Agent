@@ -21,11 +21,13 @@ public class TaskService implements ManageTaskUseCase {
 
     private final GoalRepository goals;
     private final TaskRepository tasks;
+    private final RunInProgressGuard runGuard;
     private final Clock clock;
 
-    public TaskService(GoalRepository goals, TaskRepository tasks, Clock clock) {
+    public TaskService(GoalRepository goals, TaskRepository tasks, RunInProgressGuard runGuard, Clock clock) {
         this.goals = goals;
         this.tasks = tasks;
+        this.runGuard = runGuard;
         this.clock = clock;
     }
 
@@ -59,6 +61,8 @@ public class TaskService implements ManageTaskUseCase {
     @Override
     public void delete(UUID taskId) {
         Task task = load(taskId);
+        // C-8：專案有進行中批次一律 409 project_executing；涵蓋比 Task.softDelete 內「任務本身 RUNNING」的檢查更廣，所以先檢查
+        goals.findById(task.goalId()).ifPresent(goal -> runGuard.requireNoRunInProgress(goal.projectId(), "任務"));
         task.softDelete(clock.instant());
         tasks.save(task);
     }

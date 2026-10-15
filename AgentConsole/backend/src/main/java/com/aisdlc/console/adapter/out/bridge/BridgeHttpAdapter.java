@@ -5,6 +5,7 @@ import com.aisdlc.console.domain.exception.UpstreamException;
 import com.aisdlc.console.domain.model.execution.BridgeStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.ClientHttpRequestFactory;
@@ -52,10 +53,16 @@ import java.util.stream.Stream;
  * <p>錯誤分流：連線失敗 → {@link UpstreamException.Unavailable}；讀取逾時 → {@link UpstreamException.TimedOut}；
  * 5xx → {@link UpstreamException.Failure}；4xx → {@link BridgeRejectedException}（Bridge 的
  * {@code {code,reason,gate?,detail?,violations?}} 封包原樣帶回，由用例依端點語意轉成 409／422…）。
+ *
+ * <p><b>traceId 貫穿</b>（契約 §0.4 第 6 點，C-12）：對 Bridge 的<b>每一個</b>請求（含 SSE 事件串流與健康探測）都帶標頭
+ * {@value #TRACE_HEADER}。值取自目前執行緒 MDC 的 {@code traceId}（使用者請求由 {@code TraceIdFilter} 寫入；事件消費者與啟動對帳
+ * 由用例層放入該 run 的 traceId）；執行緒上沒有時（探測環等背景工作）新產一個 UUID。同一次呼叫的重試沿用同一個值。
  */
 @Component
 class BridgeHttpAdapter implements AgentBridge {
 
+    static final String TRACE_HEADER = "X-Trace-Id";
+    private static final String TRACE_MDC_KEY = "traceId";
     private static final Logger LOG = LoggerFactory.getLogger(BridgeHttpAdapter.class);
     private static final JsonMapper JSON = JsonMapper.builder().build();
     private static final TypeReference<Map<String, Object>> OBJECT = new TypeReference<>() { };
@@ -139,7 +146,8 @@ class BridgeHttpAdapter implements AgentBridge {
     @Override
     public BridgeHealth health() {
         try {
-            int status = client(HEALTH_READ_TIMEOUT).get().uri(endpoints.autoclaudeBase() + endpoints.healthPath())
+            int status = client(HEALTH_READ_TIMEOUT, traceId()).get()
+                    .uri(endpoints.autoclaudeBase() + endpoints.healthPath())
                     .exchange((request, response) -> response.getStatusCode().value());
             return new BridgeHealth(status >= 200 && status < 300, status);
         } catch (RuntimeException e) {
@@ -237,7 +245,8 @@ class BridgeHttpAdapter implements AgentBridge {
         HttpClient http = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1)
                 .connectTimeout(STREAM_CONNECT_TIMEOUT).build();
         HttpRequest request = HttpRequest.newBuilder(URI.create(runsBase() + "/autoclaude/runs/" + runId
-                + "/stream?after=" + afterSeq)).header("Accept", "text/event-stream").GET().build();
+                + "/stream?after=" + afterSeq)).header("Accept", "text/event-stream").header(TRACE_HEADER, traceId())
+                .GET().build();
         IdleWatchdog watchdog = new IdleWatchdog(Thread.currentThread(), idleTimeout);
         try {
             watchdog.arm();
@@ -311,6 +320,7 @@ class BridgeHttpAdapter implements AgentBridge {
     /** GET＋JSON 解析（物件或陣列）；連線失敗與讀取逾時重試 2 次（200ms 退避，契約 §3.1），4xx／5xx 不重試。 */
     private Object getJson(String url, Duration readTimeout) {
         UpstreamException last = null;
+        String trace = traceId();
         for (int attempt = 0; attempt <= GET_RETRIES; attempt++) {
             if (attempt > 0) {
                 try {
@@ -321,7 +331,7 @@ class BridgeHttpAdapter implements AgentBridge {
                 }
             }
             try {
-                return client(readTimeout).get().uri(url).exchange((req, response) -> {
+                return client(readTimeout, trace).get().uri(url).exchange((req, response) -> {
                     HttpStatusCode status = response.getStatusCode();
                     String body = readBody(response.getBody());
                     if (status.is2xxSuccessful()) {
@@ -443,19 +453,26 @@ class BridgeHttpAdapter implements AgentBridge {
 
     // ── 內部 ──────────────────────────────────────────────────────────────────
 
-    private RestClient client(Duration readTimeout) {
+    /** 本次呼叫要帶的 traceId：目前執行緒 MDC 的值；沒有（背景工作）就新產一個 UUID。 */
+    private static String traceId() {
+        String current = MDC.get(TRACE_MDC_KEY);
+        return current == null || current.isBlank() ? UUID.randomUUID().toString() : current;
+    }
+
+    private RestClient client(Duration readTimeout, String traceId) {
         RestClient.Builder copy = builder.clone();
         ClientHttpRequestFactory factory = factories.create(CONNECT_TIMEOUT, readTimeout);
         if (factory != null) {
             copy.requestFactory(factory);
         }
+        copy.defaultHeader(TRACE_HEADER, traceId);
         return copy.build();
     }
 
     private Map<String, Object> postJson(String url, Object body, Duration readTimeout) {
         String payload = JSON.writeValueAsString(body);
         try {
-            return client(readTimeout).post().uri(url).contentType(MediaType.APPLICATION_JSON).body(payload)
+            return client(readTimeout, traceId()).post().uri(url).contentType(MediaType.APPLICATION_JSON).body(payload)
                     .exchange((request, response) -> handle(response.getStatusCode(), readBody(response.getBody())));
         } catch (ResourceAccessException e) {
             throw translate(e);

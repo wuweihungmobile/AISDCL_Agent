@@ -65,7 +65,9 @@ public class GoalController {
 
     @DeleteMapping("/goals/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    @Operation(summary = "刪除目標（軟刪除）", description = "連帶軟刪其下任務；含 RUNNING 任務回 409")
+    @Operation(summary = "刪除目標（軟刪除）",
+            description = "連帶軟刪其下任務；所屬專案有進行中批次（INITIALIZING／RUNNING／PAUSED）回 409 reason=project_executing"
+                    + "（details＝{projectId, runId}；v1.2，C-8）；其次，含 RUNNING 任務回 409")
     public void delete(@PathVariable UUID id) {
         goals.delete(id);
     }

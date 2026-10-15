@@ -8,23 +8,31 @@ import com.aisdlc.console.application.port.out.AgentBridge.SddCompileResult;
 import com.aisdlc.console.application.port.out.SettingValues;
 import com.aisdlc.console.domain.exception.UpstreamException;
 import com.aisdlc.console.infrastructure.config.BridgeProperties;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.MDC;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
+import org.springframework.test.web.client.ExpectedCount;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
 import java.net.ConnectException;
 import java.net.SocketTimeoutException;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
+import java.util.regex.Pattern;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
@@ -270,6 +278,88 @@ class BridgeHttpAdapterTest {
         server.expect(requestTo(BASE + "/autoclaude/health")).andRespond(withSuccess());
         assertThat(adapter.health().ok()).isTrue();
         server.verify();
+    }
+
+    // ── X-Trace-Id（契約 §0.4 第 6 點，C-12；NFR-9.4-04）──────────────────────────────
+    // 為什麼重要：同一次使用者操作在 console-api 日誌、Bridge 日誌與前端錯誤封包上的 traceId 要能用同一個值串起來；
+    // 任何一種呼叫（POST、GET、健康探測各走各的建構路徑）漏帶標頭，那一段就斷線了。
+
+    private static final Pattern UUID_FORMAT = Pattern.compile(
+            "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}");
+
+    @AfterEach
+    void clearTheMdc() {
+        MDC.remove("traceId");
+    }
+
+    @Test
+    void postGetAndHealthCallsAllCarryTheTraceIdOfTheCallingThread() {
+        MDC.put("traceId", "trace-from-the-request");
+        String runId = "4c6a2a58-4e1d-4b29-9d3e-6a1b5c8d9e02";
+        server.expect(requestTo(BASE + "/autoclaude/decompose")).andExpect(header("X-Trace-Id", "trace-from-the-request"))
+                .andRespond(withSuccess("{\"draft_id\":\"d\",\"playbook\":{\"tasks\":[]}}", MediaType.APPLICATION_JSON));
+        server.expect(requestTo(BASE + "/autoclaude/decompose/d:approve"))
+                .andExpect(header("X-Trace-Id", "trace-from-the-request"))
+                .andRespond(withSuccess("{\"signed_off\":true}", MediaType.APPLICATION_JSON));
+        server.expect(requestTo(BASE + "/sdd/compile")).andExpect(header("X-Trace-Id", "trace-from-the-request"))
+                .andRespond(withSuccess("{\"tasks\":[]}", MediaType.APPLICATION_JSON));
+        server.expect(requestTo(BASE + "/health")).andExpect(header("X-Trace-Id", "trace-from-the-request"))
+                .andRespond(withSuccess());
+        server.expect(requestTo(BASE + "/autoclaude/runs/" + runId))
+                .andExpect(header("X-Trace-Id", "trace-from-the-request"))
+                .andRespond(withSuccess("{\"run_id\":\"" + runId + "\",\"status\":\"RUNNING\"}",
+                        MediaType.APPLICATION_JSON));
+        server.expect(requestTo(BASE + "/autoclaude/runs/" + runId + "/checkpoints"))
+                .andExpect(header("X-Trace-Id", "trace-from-the-request"))
+                .andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
+
+        adapter.decompose(new DecomposeRequest("g", "", "p", 24, null), Duration.ofSeconds(30));
+        adapter.approveDraft("d", "Alice");
+        adapter.sddCompile("/spec");
+        adapter.health();
+        adapter.getRun(UUID.fromString(runId));
+        adapter.listCheckpoints(UUID.fromString(runId));
+
+        server.verify();
+    }
+
+    @Test
+    void withoutATraceContextEachCallGetsItsOwnFreshUuid() {
+        List<String> seen = new ArrayList<>();
+        server.expect(ExpectedCount.times(3), requestTo(BASE + "/health")).andExpect(request -> seen.add(
+                request.getHeaders().getFirst("X-Trace-Id"))).andRespond(withSuccess());
+
+        adapter.health();
+        adapter.health();
+        adapter.health();
+
+        assertThat(seen).hasSize(3).allSatisfy(id -> assertThat(id).matches(UUID_FORMAT));
+        assertThat(seen).as("背景工作（探測環）每次探測各自新產一個").doesNotHaveDuplicates();
+    }
+
+    @Test
+    void aBlankTraceIdInTheMdcIsTreatedAsMissing() {
+        MDC.put("traceId", "   ");
+        List<String> seen = new ArrayList<>();
+        server.expect(requestTo(BASE + "/health")).andExpect(request -> seen.add(
+                request.getHeaders().getFirst("X-Trace-Id"))).andRespond(withSuccess());
+
+        adapter.health();
+
+        assertThat(seen).singleElement().satisfies(id -> assertThat(id).matches(UUID_FORMAT));
+    }
+
+    @Test
+    void theRetriesOfOneGetCallAllCarryTheSameGeneratedTraceId() {
+        UUID runId = UUID.randomUUID();
+        List<String> seen = new ArrayList<>();
+        server.expect(ExpectedCount.times(3), requestTo(BASE + "/autoclaude/runs/" + runId)).andExpect(request -> seen.add(
+                request.getHeaders().getFirst("X-Trace-Id"))).andRespond(withException(new ConnectException("down")));
+
+        assertThatThrownBy(() -> adapter.getRun(runId)).isInstanceOf(UpstreamException.Unavailable.class);
+
+        assertThat(seen).as("連線失敗重試 2 次＝共 3 次嘗試").hasSize(3).containsOnly(seen.get(0));
+        assertThat(seen.get(0)).matches(UUID_FORMAT);
     }
 
     // ── 位址解析 ─────────────────────────────────────────────────────────────

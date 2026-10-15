@@ -10,6 +10,7 @@ import com.aisdlc.console.domain.model.execution.RunStatus;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.MDC;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -19,6 +20,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -49,11 +51,12 @@ class MonitorTickerTest {
     private final BridgeHealthMonitor health = mock(BridgeHealthMonitor.class);
     private final TimeRuleEvaluator timeRules = mock(TimeRuleEvaluator.class);
     private final RunLauncher launcher = mock(RunLauncher.class);
+    private final RunRegistry registry = new RunRegistry();
     private MonitorTicker ticker;
 
     @BeforeEach
     void setUp() {
-        ticker = new MonitorTicker(settings, runs, bridge, consumers, health, timeRules, launcher,
+        ticker = new MonitorTicker(settings, runs, bridge, consumers, health, timeRules, launcher, registry,
                 Clock.fixed(NOW, ZoneOffset.UTC));
         when(settings.backgroundEnabled()).thenReturn(true);
         when(settings.monitorTickInterval()).thenReturn(Duration.ofMillis(20));
@@ -182,6 +185,56 @@ class MonitorTickerTest {
         ticker.reconcile();
 
         verify(consumers).start(running.id(), 12);
+    }
+
+    // ── 對帳與 traceId（契約 §0.4 第 6 點，C-12）──────────────────────────────────────
+
+    @Test
+    void theReconcileQueryUsesTheRunsTraceIdWhichTheConsumerLaterReusesAndLeavesNoTraceOnTheCallingThread() {
+        ExecutionRun running = run(RunStatus.RUNNING, 41, NOW.minusSeconds(600));
+        listRunsWithStatus(RunStatus.RUNNING, running);
+        AtomicReference<String> seen = new AtomicReference<>();
+        when(bridge.getRun(running.id())).thenAnswer(invocation -> {
+            seen.set(MDC.get("traceId"));
+            return null;
+        });
+
+        ticker.reconcile();
+
+        assertThat(seen.get()).as("重啟後記憶體裡沒有：新產一個 UUID 並記住，消費者沿用同一個").hasSize(36)
+                .isEqualTo(registry.traceIdOf(running.id()));
+        assertThat(MDC.get("traceId")).isNull();
+    }
+
+    @Test
+    void aTraceIdAlreadyBoundByTheLaunchingRequestIsUsedByTheReconcileQuery() {
+        ExecutionRun running = run(RunStatus.PAUSED, 5, NOW.minusSeconds(600));
+        listRunsWithStatus(RunStatus.PAUSED, running);
+        registry.bindTrace(running.id(), "trace-of-the-execute-request");
+        AtomicReference<String> seen = new AtomicReference<>();
+        when(bridge.getRun(running.id())).thenAnswer(invocation -> {
+            seen.set(MDC.get("traceId"));
+            return null;
+        });
+
+        ticker.reconcile();
+
+        assertThat(seen.get()).isEqualTo("trace-of-the-execute-request");
+    }
+
+    @Test
+    void theStaleInitializingQueryAlsoCarriesTheRunsTraceId() {
+        ExecutionRun stale = run(RunStatus.INITIALIZING, 3, NOW.minusSeconds(120));
+        listRunsWithStatus(RunStatus.INITIALIZING, stale);
+        AtomicReference<String> seen = new AtomicReference<>();
+        when(bridge.getRun(stale.id())).thenAnswer(invocation -> {
+            seen.set(MDC.get("traceId"));
+            return null;
+        });
+
+        ticker.reconcile();
+
+        assertThat(seen.get()).isEqualTo(registry.traceIdOf(stale.id()));
     }
 
     // ── 對帳：停機期間跑完的批次 ───────────────────────────────────────────────────

@@ -70,4 +70,9 @@ class TaskRepositoryAdapter implements TaskRepository {
     public int softDeleteByProjectId(UUID projectId, Instant now) {
         return tasks.softDeleteByProjectId(projectId, now);
     }
+
+    @Override
+    public int restoreDeletedWithProject(UUID projectId, Instant deletedAt, Instant now) {
+        return tasks.restoreDeletedWithProject(projectId, deletedAt, now);
+    }
 }

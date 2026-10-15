@@ -27,7 +27,7 @@ class TaskTest {
 
     private static Task taskIn(TaskStatus status) {
         return Task.restore(UUID.randomUUID(), GOAL, "任務", null, "標準", null, null, null, 0, status, null, null,
-                1, 3, null, null, true, null, null, false, T0, T0, null, null);
+                1, 3, null, null, true, null, null, false, T0, T0, null, null, null);
     }
 
     private static TaskUpdate update(String name, String command, String regex, String spec, Integer maxRetries) {
@@ -175,6 +175,7 @@ class TaskTest {
         t.softDelete(T1);
         assertThat(t.deleted()).isTrue();
         assertThat(t.status()).isEqualTo(from);
+        assertThat(t.deletedAt()).as("V9：軟刪除記下刪除時間，復原與清除據此辨識").isEqualTo(T1);
     }
 
     // ---- signoff ----

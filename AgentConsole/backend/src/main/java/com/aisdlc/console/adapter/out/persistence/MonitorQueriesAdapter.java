@@ -74,4 +74,29 @@ class MonitorQueriesAdapter implements MonitorQueries {
                 + "where status <> 'ARCHIVED' and coalesce(is_deleted, false) = false",
                 (rs, rowNum) -> new ProjectCounts(rs.getLong("completed"), rs.getLong("countable")));
     }
+
+    /**
+     * 與 {@link #steps} 逐條對齊（所以「各專案 task-trend 各桶加總＝本查詢」恆成立）：步驟列屬於該專案的批次、任務屬於該專案
+     * 的目標、任務與目標皆未軟刪；再加上專案本身未封存、未軟刪（{@code projectCounts} 的分母同一判準）。
+     */
+    @Override
+    public TaskTotalsFact taskTotals(Instant fromInclusive, Instant toExclusive) {
+        return jdbc.queryForObject("select count(*) filter (where s.status = 'STARTED') as started, "
+                + "count(*) filter (where s.status = 'COMPLETED') as completed, "
+                + "count(*) filter (where s.status = 'FAILED') as failed, "
+                + "count(*) filter (where s.status = 'RETRYING') as retried, "
+                + "count(distinct r.project_id) as projects_counted "
+                + "from console.execution_steps s "
+                + "join console.execution_runs r on r.id = s.run_id "
+                + "join console.projects p on p.id = r.project_id "
+                + "join console.tasks t on t.id = s.task_id "
+                + "join console.goals g on g.id = t.goal_id and g.project_id = r.project_id "
+                + "where s.timestamp >= ? and s.timestamp < ? "
+                + "and s.status in ('STARTED', 'COMPLETED', 'FAILED', 'RETRYING') "
+                + "and p.status <> 'ARCHIVED' and coalesce(p.is_deleted, false) = false "
+                + "and coalesce(t.is_deleted, false) = false and coalesce(g.is_deleted, false) = false",
+                (rs, rowNum) -> new TaskTotalsFact(rs.getLong("started"), rs.getLong("completed"),
+                        rs.getLong("failed"), rs.getLong("retried"), rs.getInt("projects_counted")),
+                JdbcSupport.ts(fromInclusive), JdbcSupport.ts(toExclusive));
+    }
 }

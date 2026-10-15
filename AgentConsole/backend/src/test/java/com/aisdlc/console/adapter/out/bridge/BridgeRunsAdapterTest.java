@@ -16,6 +16,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.MDC;
 import org.springframework.web.client.RestClient;
 
 import java.time.Duration;
@@ -26,6 +27,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.regex.Pattern;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -304,5 +306,66 @@ class BridgeRunsAdapterTest {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
+    }
+
+    // ── X-Trace-Id（契約 §0.4 第 6 點、§3.1.1，C-12；NFR-9.4-04）────────────────────────────────
+    // 為什麼重要：同一次使用者操作的 console-api 日誌、Bridge 日誌與前端錯誤封包的 traceId 要能用同一個值串起來——
+    // 任何一種呼叫漏帶標頭（尤其是 SSE 串流與健康探測，它們走的是不同的 HTTP 客戶端），那一段日誌就斷線了。
+
+    private static final Pattern UUID_FORMAT = Pattern.compile(
+            "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}");
+
+    private List<String> tracedRequests() {
+        return mini.traced().stream().map(MiniBridge.Traced::request).toList();
+    }
+
+    /** 對迷你 Bridge 做「契約 §3.1 呼叫總表」裡每一種 runs／health 請求各一次（含 SSE 串流）。 */
+    private void callEveryRunsEndpointOnce(UUID id) {
+        adapter.health();
+        start(id, "/work/trace", "一", "二");
+        assertThat(mini.run(id).awaitStatus("COMPLETED", Duration.ofSeconds(10))).isTrue();
+        adapter.getRun(id);
+        adapter.listEvents(id, 0, 500);
+        adapter.listCheckpoints(id);
+        adapter.streamEvents(id, 0, Duration.ofSeconds(10), e -> { });
+        UUID first = UUID.fromString(adapter.listCheckpoints(id).get(0).checkpointId());
+        adapter.restoreRun(id, first, Map.of());
+        assertThat(mini.run(id).awaitStatus("COMPLETED", Duration.ofSeconds(10))).isTrue();
+        assertThatThrownBy(() -> adapter.pauseRun(id)).isInstanceOf(BridgeRejectedException.class);
+        assertThatThrownBy(() -> adapter.resumeRun(id, Map.of())).isInstanceOf(BridgeRejectedException.class);
+        assertThatThrownBy(() -> adapter.stopRun(id)).isInstanceOf(BridgeRejectedException.class);
+    }
+
+    @Test
+    void everyRequestOfEveryKindCarriesTheTraceIdOfTheCallingThread() {
+        UUID id = UUID.randomUUID();
+        MDC.put("traceId", "0f7c2a58-4e1d-4b29-9d3e-6a1b5c8d9e02");
+        try {
+            callEveryRunsEndpointOnce(id);
+        } finally {
+            MDC.remove("traceId");
+        }
+
+        assertThat(tracedRequests()).contains("GET /health", "POST /autoclaude/runs", "GET /autoclaude/runs/" + id,
+                "GET /autoclaude/runs/" + id + "/events", "GET /autoclaude/runs/" + id + "/checkpoints",
+                "GET /autoclaude/runs/" + id + "/stream", "POST /autoclaude/runs/" + id + "/restore",
+                "POST /autoclaude/runs/" + id + ":pause", "POST /autoclaude/runs/" + id + ":resume",
+                "POST /autoclaude/runs/" + id + ":stop");
+        assertThat(mini.traced()).as("沒有任何一個請求漏帶，也沒有被換成別的值")
+                .extracting(MiniBridge.Traced::traceId).containsOnly("0f7c2a58-4e1d-4b29-9d3e-6a1b5c8d9e02");
+    }
+
+    @Test
+    void aThreadWithoutAnyTraceContextStillSendsOneGeneratedPerCallNeverNothing() {
+        UUID id = UUID.randomUUID();
+
+        callEveryRunsEndpointOnce(id);
+
+        assertThat(mini.traced()).as("探測環等背景工作：每個請求都有一個新產的 UUID").isNotEmpty()
+                .allSatisfy(t -> assertThat(t.traceId()).matches(UUID_FORMAT));
+        assertThat(mini.traced().stream().filter(t -> t.request().equals("GET /health")).map(MiniBridge.Traced::traceId))
+                .isNotEmpty();
+        assertThat(mini.traced().stream().map(MiniBridge.Traced::traceId).distinct().count())
+                .as("沒有上下文時每次呼叫各自新產（不是共用一個全域值）").isGreaterThan(1);
     }
 }

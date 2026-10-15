@@ -115,9 +115,15 @@ public final class AlertRules {
                 "目標「" + goalName + "」重試率 " + percent(retriedTasks, startedTasks) + "%，超過 50%"));
     }
 
-    /** {@code ENGINE_ESCALATION}（Bridge {@code alert} 的 {@code code=ESCALATION}）；subject＝{@code step:<stepId>}。 */
-    public static Candidate engineEscalation(String stepId, String detail) {
-        return new Candidate(AlertRule.ENGINE_ESCALATION, AlertSeverity.CRITICAL, "step:" + stepId,
+    /**
+     * {@code ENGINE_ESCALATION}（Bridge {@code alert} 的 {@code code=ESCALATION}）；subject＝{@code step:<runId>:<stepId>}
+     * （C-7，QA O-14；契約 §3.7）。{@code stepId} 每個批次重新編號，所以去重對象必須帶 runId：{@code step:<stepId>} 會讓
+     * <b>不同批次</b>（也可能是不同任務）的升級被先前未確認的舊告警吞掉；現在只有「同一批次的同一步驟」在未確認前再次升級才被去重。
+     * 沒有步驟（理論上不會發生）時以 {@code run:<runId>} 為對象，同 {@link #engineTokenHalt}。
+     */
+    public static Candidate engineEscalation(UUID runId, String stepId, String detail) {
+        String subject = stepId == null || stepId.isBlank() ? "run:" + runId : "step:" + runId + ":" + stepId;
+        return new Candidate(AlertRule.ENGINE_ESCALATION, AlertSeverity.CRITICAL, subject,
                 "引擎升級（ESCALATION）：" + detail);
     }
 

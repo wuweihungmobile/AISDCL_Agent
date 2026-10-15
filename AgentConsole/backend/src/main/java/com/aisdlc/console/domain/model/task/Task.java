@@ -47,6 +47,7 @@ public final class Task {
     private Instant updatedAt;
     private Instant startedAt;
     private Instant completedAt;
+    private Instant deletedAt;
 
     @SuppressWarnings("java:S107")
     private Task(UUID id, UUID goalId, String name, String description, String passCriteria,
@@ -54,7 +55,7 @@ public final class Task {
                  TaskStatus status, Long estimatedTokens, Long actualTokens, int retryCount, int maxRetries,
                  String assignedAgent, String executionLog, boolean signedOff, String signedOffBy,
                  Instant signedOffAt, boolean deleted, Instant createdAt, Instant updatedAt, Instant startedAt,
-                 Instant completedAt) {
+                 Instant completedAt, Instant deletedAt) {
         this.id = id;
         this.goalId = goalId;
         this.name = name;
@@ -79,6 +80,7 @@ public final class Task {
         this.updatedAt = updatedAt;
         this.startedAt = startedAt;
         this.completedAt = completedAt;
+        this.deletedAt = deletedAt;
     }
 
     /** 建立新任務（狀態 PENDING、retryCount 0；sortOrder 由 application 層算出「排末」後傳入）。 */
@@ -102,7 +104,7 @@ public final class Task {
         return new Task(UUID.randomUUID(), goalId, name, FieldRules.optionalMarkdown(spec.description()),
                 passCriteria, command, regex, FieldRules.optionalMarkdown(spec.passCriteriaSpec()), sortOrder,
                 TaskStatus.PENDING, spec.estimatedTokens(), null, 0, maxRetries, null, null, !spec.draft(),
-                null, null, false, now, now, null, null);
+                null, null, false, now, now, null, null, null);
     }
 
     /** 由持久層資料還原。 */
@@ -112,11 +114,12 @@ public final class Task {
                                int sortOrder, TaskStatus status, Long estimatedTokens, Long actualTokens,
                                int retryCount, int maxRetries, String assignedAgent, String executionLog,
                                boolean signedOff, String signedOffBy, Instant signedOffAt, boolean deleted,
-                               Instant createdAt, Instant updatedAt, Instant startedAt, Instant completedAt) {
+                               Instant createdAt, Instant updatedAt, Instant startedAt, Instant completedAt,
+                               Instant deletedAt) {
         return new Task(id, goalId, name, description, passCriteria, evaluatorCommand, expectedOutputRegex,
                 passCriteriaSpec, sortOrder, status, estimatedTokens, actualTokens, retryCount, maxRetries,
                 assignedAgent, executionLog, signedOff, signedOffBy, signedOffAt, deleted, createdAt, updatedAt,
-                startedAt, completedAt);
+                startedAt, completedAt, deletedAt);
     }
 
     /** 套用更新（null 欄位不變；evaluator／regex／spec 給空白＝清除）；NFR-SEC-03 消毒同建立。 */
@@ -330,13 +333,14 @@ public final class Task {
         signedOffAt = at;
     }
 
-    /** 軟刪除：RUNNING 的任務不可直接刪除（US-T-04，409）。 */
+    /** 軟刪除：RUNNING 的任務不可直接刪除（US-T-04，409）；同時記下 {@code deletedAt}（V9）。 */
     public void softDelete(Instant now) {
         if (status == TaskStatus.RUNNING) {
             throw new ConflictException("執行中的任務不可刪除", "RUNNING 狀態的任務不可刪除",
                     Map.of("status", status.name()));
         }
         deleted = true;
+        deletedAt = now;
         updatedAt = now;
     }
 
@@ -434,5 +438,10 @@ public final class Task {
 
     public Instant completedAt() {
         return completedAt;
+    }
+
+    /** 軟刪除當下的時間（V9）；未被軟刪除為 null。 */
+    public Instant deletedAt() {
+        return deletedAt;
     }
 }

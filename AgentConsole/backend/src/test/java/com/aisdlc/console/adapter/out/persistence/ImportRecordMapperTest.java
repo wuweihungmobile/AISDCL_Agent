@@ -4,7 +4,9 @@ import com.aisdlc.console.domain.model.imports.GateError;
 import com.aisdlc.console.domain.model.imports.ImportRecord;
 import com.aisdlc.console.domain.model.imports.ImportSourceType;
 import com.aisdlc.console.domain.model.imports.ImportStatus;
+import com.aisdlc.console.domain.model.imports.ParseOptions;
 import com.aisdlc.console.domain.model.imports.ParsePath;
+import com.aisdlc.console.domain.model.imports.ParseWarning;
 import com.aisdlc.console.domain.model.imports.ParsedResult;
 import com.aisdlc.console.domain.model.imports.ParsedResult.ParsedGoal;
 import com.aisdlc.console.domain.model.imports.ParsedResult.ParsedProject;
@@ -40,7 +42,10 @@ class ImportRecordMapperTest {
         UUID project = UUID.randomUUID();
         ImportRecord original = ImportRecord.restore(UUID.randomUUID(), ImportSourceType.PLAIN_TEXT, "原文", "a.txt",
                 tree(), ParsePath.DECOMPOSE, "MiniMax-M2.7", 1152L, ImportStatus.IMPORTED, true, "Alice", NOW, project,
-                NOW, List.of(new GateError("max_steps", "太多", "goals[0].tasks"), new GateError("brain_failed", "壞", null)));
+                NOW, List.of(new GateError("max_steps", "太多", "goals[0].tasks"), new GateError("brain_failed", "壞", null)),
+                List.of(new ParseWarning(ParseWarning.PASSCRITERIA_PLACEHOLDER, "任務沒有通過標準", "goals[0].tasks[0]"),
+                        new ParseWarning(ParseWarning.REGEX_DROPPED, "regex 已清空", null)),
+                new ParseOptions("/work/p", 4, "補充說明", "/work/p/spec"));
 
         ImportRecordEntity entity = ImportRecordMapper.toEntity(original);
         assertThat(entity.status).isEqualTo("IMPORTED");
@@ -48,6 +53,9 @@ class ImportRecordMapperTest {
         assertThat(entity.parsePath).isEqualTo("DECOMPOSE");
         assertThat(entity.parsedResult).contains("\"project\"").contains("\"goals\"").contains("\"draftIds\"");
         assertThat(entity.lastParseErrors).startsWith("[").contains("max_steps");
+        assertThat(entity.warnings).startsWith("[").contains("passcriteria_placeholder").contains("regex_dropped");
+        assertThat(entity.parseOptions).contains("\"executionPath\":\"/work/p\"").contains("\"autonomyLevel\":4")
+                .contains("\"additionalPrompt\"").contains("\"specDir\":\"/work/p/spec\"");
 
         ImportRecord back = ImportRecordMapper.toDomain(entity);
         assertThat(back.id()).isEqualTo(original.id());
@@ -58,33 +66,45 @@ class ImportRecordMapperTest {
         assertThat(back.parsePath()).isEqualTo(ParsePath.DECOMPOSE);
         assertThat(back.parsedResult()).isEqualTo(original.parsedResult());
         assertThat(back.lastParseErrors()).isEqualTo(original.lastParseErrors());
+        assertThat(back.warnings()).isEqualTo(original.warnings());
+        assertThat(back.parseOptions()).isEqualTo(original.parseOptions());
         assertThat(back.parsedResult().goals().get(0).tasks().get(0).passCriteriaSpec())
                 .containsEntry("source", "decompose").containsEntry("weakRegex", false);
     }
 
     @Test
-    void aRecordWithoutParseResultStoresNullsNotEmptyJson() {
+    void aRecordWithoutParseResultStoresNullsNotEmptyJsonExceptTheNotNullWarningsWhichIsAnEmptyArray() {
         ImportRecord fresh = ImportRecord.create(ImportSourceType.MARKDOWN, "# 文件", null, NOW);
         ImportRecordEntity entity = ImportRecordMapper.toEntity(fresh);
         assertThat(entity.parsedResult).isNull();
         assertThat(entity.lastParseErrors).isNull();
         assertThat(entity.parsePath).isNull();
+        assertThat(entity.parseOptions).as("從未 parse 過").isNull();
+        assertThat(entity.warnings).as("V8：warnings 是 NOT NULL，沒有提示就存 []").isEqualTo("[]");
         ImportRecord back = ImportRecordMapper.toDomain(entity);
         assertThat(back.parsedResult()).isNull();
         assertThat(back.lastParseErrors()).isNull();
+        assertThat(back.warnings()).isEmpty();
+        assertThat(back.parseOptions()).isNull();
     }
 
     @Test
     void unknownJsonPropertiesInStoredDataAreIgnoredSoOlderOrNewerRowsStillLoad() {
         ImportRecordEntity entity = ImportRecordMapper.toEntity(
                 ImportRecord.restore(UUID.randomUUID(), ImportSourceType.MARKDOWN, "x", null, tree(),
-                        ParsePath.LLM, null, null, ImportStatus.PARSED, false, null, null, null, NOW, null));
+                        ParsePath.LLM, null, null, ImportStatus.PARSED, false, null, null, null, NOW, null,
+                        List.of(new ParseWarning("c", "d", null)), new ParseOptions("/work/p", 3, null, null)));
         entity.parsedResult = entity.parsedResult.replaceFirst("\\{", "{\"futureField\":123,");
-        assertThat(ImportRecordMapper.toDomain(entity).parsedResult().project().name()).isEqualTo("專案");
+        entity.warnings = entity.warnings.replaceFirst("\\{", "{\"futureField\":123,");
+        entity.parseOptions = entity.parseOptions.replaceFirst("\\{", "{\"futureField\":123,");
+        ImportRecord back = ImportRecordMapper.toDomain(entity);
+        assertThat(back.parsedResult().project().name()).isEqualTo("專案");
+        assertThat(back.warnings()).singleElement().extracting(ParseWarning::code).isEqualTo("c");
+        assertThat(back.parseOptions().executionPath()).isEqualTo("/work/p");
     }
 
     @Test
-    void theListProjectionCarriesNeitherTheSourceNorTheParseResult() {
+    void theListProjectionCarriesNeitherTheSourceNorTheParseResultNorTheWarningsAndOptions() {
         UUID id = UUID.randomUUID();
         Object[] row = {id, "MARKDOWN", "a.md", "PARSED", true, "Alice", NOW, null, NOW, "m", 10L, "LLM",
                 "[{\"gate\":\"cycle\",\"detail\":\"d\",\"location\":\"l\"}]"};
@@ -95,5 +115,7 @@ class ImportRecordMapperTest {
         assertThat(summary.status()).isEqualTo(ImportStatus.PARSED);
         assertThat(summary.parsePath()).isEqualTo(ParsePath.LLM);
         assertThat(summary.lastParseErrors()).singleElement().extracting(GateError::gate).isEqualTo("cycle");
+        assertThat(summary.warnings()).as("列表不載入").isEmpty();
+        assertThat(summary.parseOptions()).isNull();
     }
 }

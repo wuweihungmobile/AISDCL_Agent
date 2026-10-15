@@ -28,7 +28,7 @@ class ProjectTest {
 
     private static Project projectIn(ProjectStatus status) {
         return Project.restore(UUID.randomUUID(), "核心平台", "/work/core", "標準", null, status, 3, true,
-                null, null, false, T0, T0, "admin");
+                null, null, false, T0, T0, "admin", null, null);
     }
 
     private static ProjectUpdate update(String name, String path, String criteria, String description,
@@ -219,5 +219,64 @@ class ProjectTest {
         assertThatThrownBy(() -> p.softDelete(T1)).isInstanceOf(ConflictException.class);
         assertThat(p.deleted()).isFalse();
         assertThat(p.status()).isEqualTo(ProjectStatus.EXECUTING);
+        assertThat(p.deletedAt()).as("被擋下的刪除不留痕").isNull();
+        assertThat(p.statusBeforeDelete()).isNull();
+    }
+
+    // ---- 軟刪除時間與復原（V9、C-3）----
+
+    @ParameterizedTest(name = "{0} 的專案軟刪除時記下刪除時間與刪除前的狀態")
+    @EnumSource(value = ProjectStatus.class, names = {"DRAFT", "READY", "COMPLETED", "FAILED"})
+    void softDeleteRecordsTheDeletionTimeAndTheStatusItHadBefore(ProjectStatus from) {
+        Project p = projectIn(from);
+
+        p.softDelete(T1);
+
+        assertThat(p.deletedAt()).isEqualTo(T1);
+        assertThat(p.statusBeforeDelete()).as("軟刪除把 status 改成 ARCHIVED，復原才知道要回到哪").isEqualTo(from);
+    }
+
+    @ParameterizedTest(name = "{0} 的專案刪除後復原回到 {0}")
+    @EnumSource(value = ProjectStatus.class, names = {"DRAFT", "READY", "COMPLETED", "FAILED"})
+    void recoveringRestoresTheStatusBeforeTheDeletionAndClearsTheDeletionMarks(ProjectStatus from) {
+        Project p = projectIn(from);
+        p.softDelete(T1);
+        Instant later = T1.plus(Duration.ofDays(3));
+
+        p.recover(later);
+
+        assertThat(p.status()).isEqualTo(from);
+        assertThat(p.deleted()).isFalse();
+        assertThat(p.deletedAt()).isNull();
+        assertThat(p.statusBeforeDelete()).isNull();
+        assertThat(p.updatedAt()).isEqualTo(later);
+        assertThat(p.signedOff()).as("signoff 等其餘欄位原樣保留").isTrue();
+    }
+
+    @Test
+    void aProjectDeletedBeforeV9HasNoRecordedStatusSoItComesBackAsDraftWhenUnsignedAndReadyWhenSigned() {
+        Project unsigned = Project.restore(UUID.randomUUID(), "舊", "/x", "標準", null, ProjectStatus.ARCHIVED, 3, false,
+                null, null, true, T0, T0, "admin", T0, null);
+        Project signed = Project.restore(UUID.randomUUID(), "舊", "/x", "標準", null, ProjectStatus.ARCHIVED, 3, true,
+                "boss", T0, true, T0, T0, "admin", T0, null);
+
+        unsigned.recover(T1);
+        signed.recover(T1);
+
+        assertThat(unsigned.status()).isEqualTo(ProjectStatus.DRAFT);
+        assertThat(signed.status()).isEqualTo(ProjectStatus.READY);
+        assertThat(signed.signedOffBy()).isEqualTo("boss");
+    }
+
+    @Test
+    void recoverIsASystemRestoreSoItIsNotBlockedByArchivedBeingTerminalInTheManualStateMachine() {
+        Project p = projectIn(ProjectStatus.READY);
+        p.softDelete(T1);
+        assertThatThrownBy(() -> p.transitionTo(ProjectStatus.READY, T1)).as("手動 API 仍然遵守附錄 B：ARCHIVED 沒有出邊")
+                .isInstanceOf(IllegalStateTransitionException.class);
+
+        p.recover(T1);
+
+        assertThat(p.status()).isEqualTo(ProjectStatus.READY);
     }
 }

@@ -60,6 +60,7 @@ public final class MiniBridge implements AutoCloseable {
     private final Map<String, UUID> locks = new ConcurrentHashMap<>();
     private final Map<String, ConcurrentLinkedQueue<Injected>> injected = new ConcurrentHashMap<>();
     private final List<String> requestLog = new CopyOnWriteArrayList<>();
+    private final List<Traced> traced = new CopyOnWriteArrayList<>();
     private final AtomicInteger streamGeneration = new AtomicInteger();
     private final AtomicInteger openStreams = new AtomicInteger();
 
@@ -67,11 +68,18 @@ public final class MiniBridge implements AutoCloseable {
     record Injected(int status, Map<String, Object> body) {
     }
 
+    /** 迷你 Bridge 收到的一個請求（{@code METHOD /path}，不含查詢字串）與它帶的 {@code X-Trace-Id}（null＝沒帶；契約 §3.1.1）。 */
+    public record Traced(String request, String traceId) {
+    }
+
     private MiniBridge(JdbcTemplate jdbc) {
         this.jdbc = jdbc;
         SpringApplication app = new SpringApplication(MiniBridgeApp.class);
         app.setWebApplicationType(WebApplicationType.SERVLET);
-        app.setDefaultProperties(Map.of("spring.main.banner-mode", "off", "logging.level.root", "WARN",
+        // 🔴 不可設 logging.level.root：Logback 的狀態是整個 JVM 共用的，迷你 Bridge 的 SpringApplication 啟動時會把 root 壓成 WARN，
+        // 其後在同一個測試 JVM 裡跑的 Console 整合測試就一律看不到 INFO（例如 AuditLogIT 靠 INFO 的 audit 日誌行斷言）；
+        // 誰先在哪個 fork 啟動取決於測試排程，所以症狀是「新增一支測試類別就讓不相干的測試變紅」。只壓迷你 Bridge 自己的套件。
+        app.setDefaultProperties(Map.of("spring.main.banner-mode", "off", "logging.level.com.aisdlc.minibridge", "WARN",
                 "spring.main.lazy-initialization", "false", "server.tomcat.threads.max", "64"));
         app.addInitializers(ctx -> ctx.getBeanFactory().registerSingleton("miniBridge", this));
         // 🔴 命令列引數的優先序高於 classpath 上 application.yml 的 server.port: 8080；放在 default properties 會被 yml 蓋掉，
@@ -112,12 +120,18 @@ public final class MiniBridge implements AutoCloseable {
         return requestLog.stream().filter(r -> r.startsWith(prefix)).count();
     }
 
+    /** 每個收到的請求與它帶的 {@code X-Trace-Id}（依到達順序；SSE 串流請求在建立連線時就記下）。 */
+    public List<Traced> traced() {
+        return List.copyOf(traced);
+    }
+
     public void reset() {
         runs.values().forEach(MiniRun::shutdown);
         runs.clear();
         locks.clear();
         injected.clear();
         requestLog.clear();
+        traced.clear();
         failStepIds.clear();
         stepMillis = 40;
         tokensPerAttempt = 1240;
@@ -160,6 +174,10 @@ public final class MiniBridge implements AutoCloseable {
 
     void record(String line) {
         requestLog.add(line);
+    }
+
+    void recordTrace(String request, String traceId) {
+        traced.add(new Traced(request, traceId));
     }
 
     Injected takeInjected(String route) {

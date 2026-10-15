@@ -1,6 +1,5 @@
 package com.aisdlc.console.application.service;
 
-import com.aisdlc.console.application.port.in.ImportUseCase.ParseOptions;
 import com.aisdlc.console.application.port.out.AgentBridge;
 import com.aisdlc.console.application.port.out.AgentBridge.BridgeRejectedException;
 import com.aisdlc.console.application.port.out.AgentBridge.DecomposeRequest;
@@ -20,6 +19,7 @@ import com.aisdlc.console.domain.exception.Violation;
 import com.aisdlc.console.domain.model.imports.GateError;
 import com.aisdlc.console.domain.model.imports.ImportRecord;
 import com.aisdlc.console.domain.model.imports.ImportSourceType;
+import com.aisdlc.console.domain.model.imports.ParseOptions;
 import com.aisdlc.console.domain.model.imports.ParsePath;
 import com.aisdlc.console.domain.model.imports.ParseWarning;
 import com.aisdlc.console.domain.model.imports.ParsedResult;

@@ -1,6 +1,6 @@
 # backend（console-api）
 
-Spring Boot **4.1.1**／Java 21／Gradle 9.8.1（Kotlin DSL）／Clean Architecture。本目錄目前交付 PRD **Phase 1**（骨架、Flyway DB Schema、JWT 認證與 RBAC、統一回應封包）、**Phase 2**（專案／目標／任務 CRUD、reorder、目標依賴 Kahn 防環、retry、四條 signoff、NFR-SEC-03 輸入消毒、`draft` 旗標）、**Phase 3**（BRD/PRD 匯入：上傳／貼文字、三條解析路徑、有界閘、人工 signoff 硬閘、單一交易 confirm）、**Phase 6**（系統設定：50 個參數、敏感值 AES-256-GCM、Token Guard 成對校驗、測試連線、匯出入、歷史）與 PRD **§9.2 安全補完**（限流、審計落庫、SSRF allowlist、加密）；W3-B2 交付 PRD **Phase 4**（專案執行、自治等級審核閘、checkpoint 還原）、**Phase 5**（監控指標、告警六規則、結構化日誌、CSV 報表）與前端 **SSE** 兩條串流（Bridge 事件消費者把引擎事件投影成任務／目標／專案／批次的讀模型）。契約 SSOT：`docs/02_architecture/API_Contract_P3-6.md`＋`openapi-p3-6.yaml`。
+Spring Boot **4.1.1**／Java 21／Gradle 9.8.1（Kotlin DSL）／Clean Architecture。本目錄目前交付 PRD **Phase 1**（骨架、Flyway DB Schema、JWT 認證與 RBAC、統一回應封包）、**Phase 2**（專案／目標／任務 CRUD、reorder、目標依賴 Kahn 防環、retry、四條 signoff、NFR-SEC-03 輸入消毒、`draft` 旗標）、**Phase 3**（BRD/PRD 匯入：上傳／貼文字、三條解析路徑、有界閘、人工 signoff 硬閘、單一交易 confirm）、**Phase 6**（系統設定：50 個參數、敏感值 AES-256-GCM、Token Guard 成對校驗、測試連線、匯出入、歷史）與 PRD **§9.2 安全補完**（限流、審計落庫、SSRF allowlist、加密）；W3-B2 交付 PRD **Phase 4**（專案執行、自治等級審核閘、checkpoint 還原）、**Phase 5**（監控指標、告警六規則、結構化日誌、CSV 報表）與前端 **SSE** 兩條串流（Bridge 事件消費者把引擎事件投影成任務／目標／專案／批次的讀模型）；W5-BE（契約 v1.2）修復 QA 缺陷：軟刪除專案的復原與保留期、全域任務總計、PDF 報表、匯入記錄 `warnings`／`parseOptions`、`X-Trace-Id` 貫穿到 Bridge、檔案日誌與可信代理。契約 SSOT：`docs/02_architecture/API_Contract_P3-6.md`＋`openapi-p3-6.yaml`。
 
 > 指令的工作目錄一律假設在 **monorepo 根**；每段 bash 區塊都有 PowerShell 對等區塊。`gradlew` 一律以 `sh gradlew`（Windows 用 `gradlew.bat`）呼叫，不依賴可執行位元。整合測試與 `docker build` 需要 Docker daemon 在線（`docker info` 回 rc=0）。
 
@@ -90,6 +90,10 @@ docker run --rm -p 8080:8080 -e JWT_SECRET='<YOUR_JWT_SECRET_MIN_32_CHARS>' -e C
 | `CONSOLE_ADMIN_PASSWORD_HASH`／`CONSOLE_OPERATOR_PASSWORD_HASH`／`CONSOLE_VIEWER_PASSWORD_HASH` | 正式環境必填 | 覆寫三個帳號的 BCrypt 雜湊（見下節）；不設則用開發預設 |
 | `CONSOLE_CORS_ALLOWED_ORIGINS` | 否 | 逗號分隔，預設 `http://localhost:3000`（NFR-9.2-05） |
 | `LOGGING_STRUCTURED_FORMAT_CONSOLE` | 否 | 設 `logstash` 即輸出結構化 JSON 日誌（每行含 `traceId`）；Docker 映像已預設開啟 |
+| `LOG_DIR` | 否 | **檔案日誌**（C-16）：有值時，console 輸出照舊，另把日誌以 **JSON 行**（logstash 格式，MDC 的 `traceId` 成為欄位）寫到 `${LOG_DIR}/console.log`，**每日切檔、保留 7 天**（沒設或空白＝只輸出到 console，行為不變）。docker compose 設 `/app/logs`（與 Bridge 共用 `app_logs` 卷）。由 `FileLoggingEnvironmentPostProcessor` 在日誌系統初始化前補上 Boot 的 `logging.file.name`／`logging.structured.format.file`／`logging.logback.rollingpolicy.max-history`（放在最低優先序：部署者明確設的 `logging.*` 優先）；寫不進去只在日誌系統留錯誤狀態、不會讓服務起不來 |
+| `CONSOLE_INTERNAL_PROXIES` | 否（docker profile） | **可信代理**（O-20；對應 `server.tomcat.remoteip.internal-proxies`，只在 `docker` profile 載入）：Java 正規表示式，對來源 IP 字串**整串比對**；Tomcat 的 `RemoteIpValve` 只信任符合者轉送的 `X-Forwarded-For`。**預設** `172\.31\.250\.(?:[2-9]\|[1-9]\d\|1\d\d\|2[0-4]\d\|25[0-4])`＝compose 固定子網 `172.31.250.0/24` 的 `.2`～`.254`（nginx 在其中；`.1` 是 Docker 閘道＝主機端進來的位址，刻意排除），與 `docker-compose.yml` 的預設相同。預設的 Tomcat 行為是信任所有私網位址與 loopback，內網客戶端可偽造 `X-Forwarded-For` 換掉未認證限流的桶。子網改了（`Pool overlaps`）要與 compose 的 `BACKEND_NET_SUBNET` 一起改；e2e／本機 profile 刻意不縮小（測試 client 在 loopback）。`RemoteIpNarrowedProxiesIT`／`RemoteIpDefaultProxiesIT` 以真 Tomcat 驗兩種行為 |
+| `console.retention.soft-delete-days`（`CONSOLE_RETENTION_SOFT_DELETE_DAYS`） | 否 | 軟刪除專案可復原的天數，預設 **30**、≥ 1（NFR-9.3-04）；超過的專案 `POST /projects/{id}/restore` 回 409 `restore_window_expired`，與清除排程是否開啟無關 |
+| `console.retention.purge-enabled`（`CONSOLE_RETENTION_PURGE_ENABLED`） | 否 | 是否註冊**每日清除排程**（實體刪除逾保留期的軟刪除專案及其整棵子資料，**不可逆**），預設 **`false`**——部署者必須明確開啟；關閉時軟刪除資料只會累積。每個專案一個交易、單一專案失敗只記 WARN；每清一個落一筆 `project.purge` 審計（主體 `system`） |
 
 ## 開發預設帳號（⚠ 僅限本機開發；正式環境必須以環境變數覆寫雜湊）
 
@@ -107,20 +111,21 @@ docker run --rm httpd:2.4-alpine htpasswd -nbBC 10 x '<YOUR_NEW_PASSWORD>' | cut
 (docker run --rm httpd:2.4-alpine htpasswd -nbBC 10 x '<YOUR_NEW_PASSWORD>').Split(':', 2)[1]
 ```
 
-## 端點（53 個路徑、62 個操作：Phase 1＋2 的 13 個路徑／22 個操作，加 W3-B1 的 20 個路徑／20 個操作，加 W3-B2 的 20 個路徑／20 個操作；寫入＝OPERATOR／ADMIN，讀取＝任何已登入角色，系統設定的寫入與工具＝僅 ADMIN）
+## 端點（55 個路徑、64 個操作：Phase 1＋2 的 13 個路徑／22 個操作，加 W3-B1 的 20 個路徑／20 個操作，加 W3-B2 的 20 個路徑／20 個操作，加 W5 的 2 個路徑／2 個操作；寫入＝OPERATOR／ADMIN，讀取＝任何已登入角色，系統設定的寫入與工具＝僅 ADMIN）
 
 | 方法 | 路徑 | 說明 |
 |------|------|------|
 | POST | `/api/v1/auth/login`、`/api/v1/auth/refresh` | 免認證；回 `{accessToken,refreshToken,expiresIn,role}`（access 30 分鐘、refresh 7 天） |
-| POST／GET | `/api/v1/projects` | 建立（201）／列表（`page,size,q,status,sort`，預設 `0,10,updatedAt,desc`） |
-| GET／PUT／DELETE | `/api/v1/projects/{id}` | 詳情（含目標摘要）／更新（EXECUTING 只准改 name、description）／軟刪除（EXECUTING→409，連帶軟刪目標與任務） |
+| POST／GET | `/api/v1/projects` | 建立（201）／列表（`page,size,q,status,sort,deleted`，預設 `0,10,updatedAt,desc,false`）。`deleted=true`＝**只列軟刪除的專案**（OPERATOR 以上，VIEWER→403 `ACCESS_DENIED`；列表項帶 `deletedAt`；保留期已過的仍會列出，按復原才得到 409） |
+| GET／PUT／DELETE | `/api/v1/projects/{id}` | 詳情（含目標摘要）／更新（EXECUTING 只准改 name、description）／軟刪除（EXECUTING→409，連帶軟刪目標與任務；專案與連帶軟刪的目標／任務寫**同一個** `deleted_at`，並記下刪除前的狀態 `status_before_delete`） |
+| POST | `/api/v1/projects/{id}/restore` | **復原軟刪除的專案**（W5，C-3）：專案還原為刪除前的狀態（升級前就已軟刪者：未 signoff→DRAFT、已 signoff→READY），**同一次刪除連帶軟刪**的目標與任務一併回來（`deleted_at` 與專案的相同）、**單獨先刪除**的目標／任務不回來；單一交易、專案列先鎖（並發兩個 restore 只有一個成功）；找不到或已被清除→404 `專案不存在或已清除：<id>`；未被刪除→409 `project_not_deleted`；超過保留期→409 `restore_window_expired`（`details={projectId,deletedAt,retentionDays}`）；寫審計 `project.restore` |
 | POST | `/api/v1/projects/{id}/signoff` | `{approver}` 必填非空，缺→400；已 signoff→409 |
 | POST／GET | `/api/v1/projects/{projectId}/goals` | 建立（可帶 `dependsOn`）／列表（含任務數、完成比例） |
-| GET／PUT／DELETE | `/api/v1/goals/{id}` | 詳情（含任務標題與 `dependsOn`）／更新／軟刪除（連帶任務；含 RUNNING 任務→409） |
+| GET／PUT／DELETE | `/api/v1/goals/{id}` | 詳情（含任務標題與 `dependsOn`）／更新／軟刪除（連帶任務；所屬專案有進行中批次→409 `project_executing`，`details={projectId,runId}`（W5，C-8）；其次含 RUNNING 任務→409） |
 | PUT | `/api/v1/goals/reorder` | `{projectId, orderedGoalIds[]}` 須恰好是專案下全部目標；回 204 |
 | POST | `/api/v1/goals/{id}/signoff` | 同專案 signoff |
 | POST／GET | `/api/v1/goals/{goalId}/tasks` | 建立／列表 |
-| GET／PUT／DELETE | `/api/v1/tasks/{id}` | 詳情（含 `executionLog`、`executionHistory`＝由 `execution_steps` 依任務衍生、跨批次依時間升冪、最多最近 200 筆，`tokensUsed` 只在 COMPLETED／FAILED 列）／更新／軟刪除（RUNNING→409） |
+| GET／PUT／DELETE | `/api/v1/tasks/{id}` | 詳情（含 `executionLog`、`executionHistory`＝由 `execution_steps` 依任務衍生、跨批次依時間升冪、最多最近 200 筆，`tokensUsed` 只在 COMPLETED／FAILED 列）／更新／軟刪除（所屬專案有進行中批次→409 `project_executing`；RUNNING→409） |
 | POST | `/api/v1/tasks/{id}/retry` | 只允許 FAILED／ESCALATED：`retryCount+1`、轉 QUEUED；其他→409 |
 | POST | `/api/v1/tasks/{id}/signoff` | 同專案 signoff |
 
@@ -168,7 +173,8 @@ docker run --rm httpd:2.4-alpine htpasswd -nbBC 10 x '<YOUR_NEW_PASSWORD>' | cut
 |------|------|------|
 | GET | `/api/v1/monitor/projects/{projectId}/metrics`、`/token-trend`、`/task-trend` | 八項 KPI（含前一個等長視窗的 `previousValue`／`delta`）／Token 趨勢（含預算線）／任務趨勢；`runId`、`from`、`to`、`bucket` 選填（預設最近 24 小時；視窗 ≤ 48 小時用 `HOUR` 否則 `DAY`）；時間為 ISO-8601 帶 offset（未編碼的 `+` 被解成空白時會還原） |
 | GET | `/api/v1/monitor/projects/{projectId}/alerts`、`/logs` | 告警（新到舊，`limit` ≤ 200）／結構化日誌（來源 RUN／STEP／ALERT／REVIEW，由 `execution_runs`、`execution_steps`、`alerts`、`review_requests` 衍生；`level,taskId,q,order,page,size`） |
-| GET | `/api/v1/monitor/projects/{projectId}/report` | CSV 報表（UTF-8 BOM、CRLF、RFC 4180；`=`／`+`／`-`／`@` 開頭的文字欄位前補單引號防 CSV 注入）；`format=pdf` 回 501；`Content-Disposition` 已 expose |
+| GET | `/api/v1/monitor/task-totals` | **全域任務總計**（W5，C-1）：`from` 必填、`to` 預設現在、視窗 ≤ 92 天（違反→400「時間範圍不合法」，欄位 `to`）；`started`／`completed`／`failed`／`retried`＝跨全部未封存且未軟刪除專案的 `execution_steps` 列數，與各專案 `task-trend` 逐欄加總相等（儀表板「本週完成」只打這一支，取代每個專案各打一次） |
+| GET | `/api/v1/monitor/projects/{projectId}/report` | 報表下載，**`format=csv`（預設）或 `pdf`**（不分大小寫；後端以 `format` 為準，不因 `Accept` 不符回 406）。兩者同一組資料：四個區段 `summary`／`runs`／`tasks`／`alerts`（欄與序同源，`ReportCsv` 的欄名與指標清單是唯一定義）。CSV：UTF-8 BOM、CRLF、RFC 4180，`=`／`+`／`-`／`@` 開頭的文字欄位前補單引號防 CSV 注入。**PDF**（W5，C-4）：A4 橫向純文字表格（標題＝專案名稱＋「監控報表」、時間範圍、範圍、產生時間 UTC；null 顯示 `—`；不做 CSV 的引號）、長表格自動換頁並重複表頭；以 PDFBox 3 產生，內嵌 **Noto Sans TC Regular**（SIL OFL 1.1，`src/main/resources/fonts/`，子集嵌入所以檔案只有幾十 KB），字型沒有的字元（例如 emoji）與控制字元印成 `?`、不會讓整份報表失敗。檔名 `monitor-report-<專案 id 前 8 碼>-<yyyyMMdd-HHmm>.csv｜pdf`（UTC）；`Content-Disposition` 已 expose |
 | POST | `/api/v1/monitor/alerts/{alertId}/acknowledge` | 確認告警（冪等，204）；確認後同一規則＋對象可再產生新告警 |
 
 **前端 SSE（契約 §2）**
@@ -186,11 +192,11 @@ docker run --rm httpd:2.4-alpine htpasswd -nbBC 10 x '<YOUR_NEW_PASSWORD>' | cut
 | `domain.model.{project,goal,task,auth,imports,config,execution,monitor}`、`domain.service`、`domain.exception` | 純 Java（不依賴 Spring／JPA）：聚合與不變式、`StateMachines`（附錄 B）、`DagService`（Kahn）、`PassCriteriaSanitizer`（NFR-SEC-03）；W3-B2 新增 `ExecutionRun`／`DagSnapshot`／`RunScope`／`BridgeStatus`（八態折六態）、`ReviewRequest`、`Alert`，與 `ExecutionPlanner`（範圍→展平 DAG）、`PlaybookBuilder`（任務→playbook、評估指令白名單）、`ReviewGatePolicy`（自治等級審核閘）、`GoalDerivation`（R-goal）、`AlertRules`（告警六規則）；W3-B1 新增 `ImportRecord`（匯入狀態機）、`ParsedResult`（三層草案樹）、`ParsedResultValidator`（有界閘）、`OutboundUrlPolicy`（SEC-04 規則 1～6）、`ConfigCatalog`（50 鍵目錄）／`ConfigValueRules`、`ErrorReasons`（reason 常數） |
 | `application.port.in／out`、`application.service` | 用例介面、出站埠、用例實作（`@Service`、交易邊界）。W3-B1 的出站埠：`AgentBridge`（`decompose`／`approveDraft`／`sddCompile`／`health`；W3-B2 在同一介面補 runs 系列）、`LlmClient`、`OutboundHttp`、`SecretCipher`、`DocumentTextExtractor`、`AuditTrail`、`SettingValues`；`ImportService`（parse／signoff 以 `TransactionTemplate` 切短交易，失敗先提交再丟例外）、`ImportParser`（三條路徑）、`SettingsService`、`SettingsReader`（給其他用例讀設定的入口，加密值回解密後明文）、`ImportStartupRecovery`（啟動時把殘留的 PARSING 退回 UPLOADED）。W3-B2：`ExecuteProjectService`／`RunLauncher`（建 run 列→呼叫 Bridge→失敗補償刪除）、`ExecutionControlService`／`ReviewService`（暫停／恢復／取消／還原／審核）、`ExecutionQueryService`、`RunConsumers`（每個活躍 run 一條虛擬執行緒讀 Bridge 事件串流，位移存 DB，斷線指數退避重連）、`RunEventProcessor`（**每則事件一個交易**：投影任務／目標／專案狀態、審核項、告警與 `console_last_seq`，提交後才發 SSE 框架與執行 `:pause`）、`RunEventHub`／`StreamService`／`StreamConnection`（SSE 扇出、`Last-Event-ID` 重播、去重、有界送出佇列）、`MonitorService`／`TimeRuleEvaluator`／`MonitorTicker`／`BridgeHealthMonitor`、`ConfigMaterializer`（系統參數→Bridge 的 `config_overrides` 與 `env`；API Key 只進 `env`） |
 | `adapter.in.web`（`dto`） | Controller、Request／Response record、`GlobalExceptionHandler`（全後端唯一產生錯誤封包處）、`ErrorResponseDocumentation`（把錯誤封包與各端點實際會回的狀態碼寫進 OpenAPI） |
-| `adapter.out.{persistence,bridge,llm,http,document}` | `*RepositoryAdapter`（Entity↔Domain 轉換；W3-B2 的執行／步驟／checkpoint／Token 樣本／審核項／告警／監控聚合走 `JdbcTemplate`）、`BridgeHttpAdapter`（`RestClient`；4xx→`BridgeRejectedException`、5xx→502、連線失敗→502、讀取逾時→504；事件串流用 JDK `HttpClient` 讀 SSE，不加依賴）、`OpenAiCompatibleClient`、`PinnedOutboundHttp`（Apache HttpClient 5：自訂 `DnsResolver` 把連線釘死在已驗證 IP、Host／SNI 用原 host、不跟 redirect）、`DocumentTextExtractorAdapter`（PDFBox 3／POI） |
+| `adapter.out.{persistence,bridge,llm,http,document}` | `*RepositoryAdapter`（Entity↔Domain 轉換；W3-B2 的執行／步驟／checkpoint／Token 樣本／審核項／告警／監控聚合走 `JdbcTemplate`；W5 的 `ProjectPurgerAdapter` 依外鍵順序整棵清除）、`BridgeHttpAdapter`（`RestClient`；4xx→`BridgeRejectedException`、5xx→502、連線失敗→502、讀取逾時→504；事件串流用 JDK `HttpClient` 讀 SSE，不加依賴；每個請求帶 `X-Trace-Id`）、`OpenAiCompatibleClient`、`PinnedOutboundHttp`（Apache HttpClient 5：自訂 `DnsResolver` 把連線釘死在已驗證 IP、Host／SNI 用原 host、不跟 redirect）、`DocumentTextExtractorAdapter`（PDFBox 3／POI）、`PdfBoxReportRenderer`（W5：`ReportPdfRenderer` 埠的 PDFBox 實作，application 層只組「要印什麼」） |
 | `infrastructure.persistence.{entity,repository}` | 13 個 JPA 實體與 Spring Data 儲存庫（V1～V7 共 14 張表；`run_token_samples` 只走 JDBC） |
 | `infrastructure.security`、`infrastructure.config` | JWT、過濾器（traceId、限流、審計）、RBAC、CORS、OpenAPI、Bean 裝配；`AesGcmSecretCipher`（`v1:<iv>:<密文>`）、`RateLimiter`（Bucket4j，固定視窗）、`AuditLogWriter`（自己的新交易寫 `audit_log`，失敗只記 WARN） |
 
-**Flyway**（`src/main/resources/db/migration/`）：`V1` 為 PRD §6.2 DDL 逐字（前置 `CREATE SCHEMA console`）；`V2` 六類系統參數種子（`autoclaude.dalBackend` 預設 `FILE`，ADR-001 D13）；`V3` review_requests；`V4` alerts；`V5` 九個引擎對映鍵（合計 50 鍵）＋全 50 鍵的 `validation_rule` 與 `impact_note`（US-S-08）＋`import_records.parse_path／last_parse_errors`＋預設值校正（`model.apiUrl`／`model.name`／`monitor.refreshIntervalMs`，**只在值仍等於舊預設時才改**，不覆蓋管理員改過的值，由 `V5UpgradeMigrationIT` 釘住）；`V6` `audit_log`（寫入端點審計，不記請求本文與 query string）；`V7` 執行事件投影的基礎（W3-B2）：`review_requests`／`alerts` 加重播錨點 `event_seq`／`event_sub`、`execution_runs.console_last_seq`（console-api 已處理到的 Bridge 事件 seq）、`run_token_samples`（Token 趨勢與任務 Token 歸因的來源）、部分唯一索引 `uq_alerts_open_rule_subject`（同一規則＋對象在確認前不重複產生告警；升級行為由 `V5UpgradeMigrationIT` 釘住）。全部表在 `console` schema；`ddl-auto=validate`。`execution_runs` 的欄位所有權（Bridge 擁有 status 等欄位）由實體的 `insertable／updatable` 與 `ExecutionRunOwnershipIT` 保護。
+**Flyway**（`src/main/resources/db/migration/`）：`V1` 為 PRD §6.2 DDL 逐字（前置 `CREATE SCHEMA console`）；`V2` 六類系統參數種子（`autoclaude.dalBackend` 預設 `FILE`，ADR-001 D13）；`V3` review_requests；`V4` alerts；`V5` 九個引擎對映鍵（合計 50 鍵）＋全 50 鍵的 `validation_rule` 與 `impact_note`（US-S-08）＋`import_records.parse_path／last_parse_errors`＋預設值校正（`model.apiUrl`／`model.name`／`monitor.refreshIntervalMs`，**只在值仍等於舊預設時才改**，不覆蓋管理員改過的值，由 `V5UpgradeMigrationIT` 釘住）；`V6` `audit_log`（寫入端點審計，不記請求本文與 query string）；`V7` 執行事件投影的基礎（W3-B2）：`review_requests`／`alerts` 加重播錨點 `event_seq`／`event_sub`、`execution_runs.console_last_seq`（console-api 已處理到的 Bridge 事件 seq）、`run_token_samples`（Token 趨勢與任務 Token 歸因的來源）、部分唯一索引 `uq_alerts_open_rule_subject`（同一規則＋對象在確認前不重複產生告警；升級行為由 `V5UpgradeMigrationIT` 釘住）；`V8`（W5-BE）`import_records.warnings`（JSONB、`NOT NULL DEFAULT '[]'`；最近一次成功的 parse／PUT result 的 `ParseWarning[]`）與 `parse_options`（JSONB，可為 NULL；最近一次 parse 請求的選項，進入 PARSING 時寫入），讓重開匯入記錄時還原黃色提示；`V9`（W5-BE）軟刪除時間：`projects`／`goals`／`tasks.deleted_at`（既有已軟刪的列以 `updated_at` 回填）、`projects.status_before_delete`（升級前軟刪者為 NULL）、partial index `idx_projects_deleted_at`——**升級到 V8／V9 對既有資料庫是自動的**（啟動時 Flyway 遷移，不需手動步驟，既有資料原樣保留）。全部表在 `console` schema；`ddl-auto=validate`。`execution_runs` 的欄位所有權（Bridge 擁有 status 等欄位）由實體的 `insertable／updatable` 與 `ExecutionRunOwnershipIT` 保護。
 
 ## 行為備忘（實作時的裁量，QA 與 W3 後端請知悉）
 
@@ -208,6 +214,9 @@ docker run --rm httpd:2.4-alpine htpasswd -nbBC 10 x '<YOUR_NEW_PASSWORD>' | cut
 - **SSE 的順序與重連**：終態時先送 `status-change`（id＝S），再送它衍生的事件（審核項、告警；id＝`S.n`，n ≥ 1），之後才關閉連線——id 必須嚴格遞增，客戶端依 id 去重，順序顛倒會丟事件。重連用 `Last-Event-ID`（`<seq>` 或 `<seq>.<n>`；格式不合視為沒帶）；`/metrics` 每次連線先送三則最新快照（`<S>.1`～`<S>.3`）。建議的前端做法：優先用 fetch 串流帶 `Authorization`，收到 `retry:3000` 後斷線 3 秒重連並帶最後收到的 id；收到 204 表示不必再重連。串流在連線建立時只算限流的一次請求（連線結束的 ASYNC dispatch 不重複計），被限流的使用者已開著的串流不受影響。
 - **告警**：六條規則（`TOKEN_BUDGET_WARNING`／`TOKEN_BUDGET_EXCEEDED`／`CONSECUTIVE_FAILURES`／`AGENT_UNRESPONSIVE`／`TASK_DURATION_EXCEEDED`／`HIGH_RETRY_RATE`）加引擎升級（`ENGINE_ESCALATION`）與 Token 暫停（`ENGINE_TOKEN_HALT`）的持久化鏡像；同一規則＋對象在被確認前不重複產生（資料庫部分唯一索引兜底）；預算超出與連續失敗會連帶呼叫 `:pause`。其餘 Bridge 的 `alert` 事件（例：`RESTORE`）只轉發給 SSE，不落庫。
 - **啟動對帳**：console-api 啟動後對 `RUNNING`／`PAUSED` 的批次問 Bridge——404 只記 WARN、資料庫不動（狀態欄由 Bridge 擁有）；Bridge 不可達時仍啟動消費者（由連線層重試）。另補一條契約沒寫的：批次在資料庫已是終態、專案卻仍是 `EXECUTING`（停機期間 Bridge 把 run 跑完了），同樣依 `console_last_seq` 補處理。
+- **traceId 貫穿到 Bridge**（W5，C-12；NFR-9.4-04）：`TraceIdFilter` 為每個使用者請求自產一個 UUID（不採信入站標頭），寫進 MDC、回應標頭 `X-Trace-Id` 與封包 `traceId`；對 **Bridge 的每一個請求**（`/autoclaude/*`、`/sdd/*`、健康探測、**SSE 事件串流**——它走的是另一個 HTTP 客戶端）都帶標頭 `X-Trace-Id`：使用者請求觸發的呼叫取當前請求的值；沒有請求上下文的背景工作用「該 run 的 traceId」＝啟動它的 execute（或審核後續）請求的值，只存記憶體（`RunRegistry.Runtime.traceId`、不入庫），事件消費者整條執行緒的 MDC 與日誌都以它為脈絡，啟動對帳的 `GET run` 與之後的消費者沿用同一個（console-api 重啟後記憶體裡沒有就新產一個並記住）；探測環沒有 run，每次探測新產一個 UUID；同一次 GET 呼叫的重試沿用同一個值。`MiniBridge` 記錄每個請求帶的值（`traced()`）並回帶標頭，`ExecutionLifecycleApiIT` 以「execute→消費者串流→pause」驗整條鏈。
+- **軟刪除、保留期與清除**（W5，C-3；契約 §1.6）：軟刪除專案時，專案與它當時仍未刪除的目標／任務在同一交易內寫**同一個** `deleted_at`——復原靠「目標／任務的 `deleted_at` 等於專案的」辨識同一次刪除連帶軟刪的列（單獨先刪除的不回來）。保留期 `console.retention.soft-delete-days`（預設 30）決定能不能復原（與清除排程無關）；清除排程（`SoftDeletePurge`，**預設關閉**）每日清 `deleted_at` 逾保留期的**專案**及其整棵子資料（依外鍵順序：審核項→告警→checkpoint→Token 樣本→步驟→批次→任務→目標→`import_records.project_id` 置 NULL→專案），範圍只有專案層級——存活專案內單獨軟刪的目標／任務不清。`GET /projects?deleted=true` 的 `goalsCount`／`tasksCount` 是 0（子資料在刪除時就都軟刪了，列表只算未刪的）。
+- **檔案日誌**（W5，C-16）：見〈環境變數〉的 `LOG_DIR`。端到端驗證 `FileLoggingProcessTest` 在獨立 JVM 起真的 Spring Boot（日誌系統是整個 JVM 共用的，在測試 JVM 內重新初始化會污染其他測試）。
 
 ## 測試（本棒新增的基礎設施）
 
@@ -224,6 +233,8 @@ docker run --rm httpd:2.4-alpine htpasswd -nbBC 10 x '<YOUR_NEW_PASSWORD>' | cut
 | `Dockerfile` | runner 階段加 `apk add curl`、加 `LOGGING_STRUCTURED_FORMAT_CONSOLE` | `eclipse-temurin:21-jre-alpine` 沒有 curl，PRD 的 HEALTHCHECK 會永遠 unhealthy；容器內需 JSON 日誌（PRD §9.4） |
 | 資料表數 | V1 建 10 張（含 `goal_dependencies`），加 V3／V4 共 12 張 | 任務書寫「九張」，PRD §6.2 實為十張 |
 | 版本 | Spring Boot 4.1.1、springdoc 3.1.1、jjwt 0.12.7、ArchUnit 1.5.1、Checkstyle 13.11.0、JaCoCo 0.8.15 | PRD §3 授權鎖定時取當時 stable；jjwt 經 Jackson 2 與 Spring Boot 的 Jackson 3 並存，實測無衝突 |
+| 檔案日誌（W5，C-16） | 以 `FileLoggingEnvironmentPostProcessor`（`META-INF/spring.factories`）補 Boot 的檔案日誌屬性，**沒有** `logback-spring.xml` | 「`LOG_DIR` 有值才加 appender」在 Logback 1.5 只能用 `<if>`，那需要 Janino（不新增相依）；`application.yml` 又算不出「有值才加 `/console.log`」。行為與任務書相同（JSON 行、`${LOG_DIR}/console.log`、每日切檔保留 7 天、沒設＝不變），`FileLoggingProcessTest` 在獨立 JVM 端到端驗證 |
+| 可信代理（W5，C-16） | `server.tomcat.remoteip.internal-proxies` 只在 `application-docker.yml` 對應 `CONSOLE_INTERNAL_PROXIES`，base／e2e 不設 | e2e 的測試 client 在 loopback，縮小後 `X-Forwarded-For` 不被信任會讓 e2e 的限流情境失效；production 直連沒有 `RemoteIpValve`，這個值用不到 |
 
 ## Windows 接續：本塊尚未在 Windows 驗證的點
 

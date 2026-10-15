@@ -116,6 +116,13 @@ console:
     # 滿了就由伺服器主動關閉（客戶端以 Last-Event-ID 重連即補齊）。e2e／test profile 另覆寫 keep-alive-seconds＝2。
     keep-alive-seconds: 15
     queue-size: 1000
+  retention:
+    # 軟刪除專案可復原的天數（契約 §1.6.5、ADR-001 D19；PRD NFR-9.3-04）；≥ 1。超過的專案不可經 API 復原（409 restore_window_expired），
+    # 與清除排程是否開啟無關。環境變數：CONSOLE_RETENTION_SOFT_DELETE_DAYS。
+    soft-delete-days: ${CONSOLE_RETENTION_SOFT_DELETE_DAYS:30}
+    # 是否註冊每日清除排程（實體刪除逾期的軟刪除專案及其整棵子資料，不可逆）：🔴 預設關閉，部署者必須明確開啟；
+    # 未開啟時軟刪除資料只會累積、不會消失。環境變數：CONSOLE_RETENTION_PURGE_ENABLED。
+    purge-enabled: ${CONSOLE_RETENTION_PURGE_ENABLED:false}
   monitor:
     # 背景工作：啟動時 Bridge 探測與啟動對帳、每 tick-interval 一次的健康探測與純時間型告警（契約 §3.1、§3.7）；
     # 探測結果存記憶體環（probe-capacity 筆＝24 小時）。整合測試 profile 預設關閉，由測試自行驅動。

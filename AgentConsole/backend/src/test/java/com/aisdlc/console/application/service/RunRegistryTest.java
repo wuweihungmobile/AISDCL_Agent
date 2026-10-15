@@ -123,4 +123,64 @@ class RunRegistryTest {
         assertThat(fresh.gatePausedPositions).isEmpty();
         assertThat(registry.locked(run, () -> "lock still usable after forget")).isNotBlank();
     }
+
+    // ── traceId（契約 §0.4 第 6 點，C-12）：背景呼叫 Bridge 時沿用啟動該 run 的請求的 traceId ─────────────
+
+    @Test
+    void aBoundTraceIdIsReturnedAsIsAndABlankOrMissingOneBindsNothing() {
+        RunRegistry registry = new RunRegistry();
+        UUID run = UUID.randomUUID();
+
+        registry.bindTrace(run, "trace-from-execute");
+        assertThat(registry.traceIdOf(run)).isEqualTo("trace-from-execute");
+
+        UUID other = UUID.randomUUID();
+        registry.bindTrace(other, null);
+        registry.bindTrace(other, "  ");
+        assertThat(registry.runtime(other).traceId.get()).as("沒有請求上下文（null／空白）就什麼都不綁").isNull();
+    }
+
+    @Test
+    void anUnboundRunGetsOneGeneratedUuidThatIsThenRememberedForEveryLaterCall() {
+        RunRegistry registry = new RunRegistry();
+        UUID run = UUID.randomUUID();
+
+        String first = registry.traceIdOf(run);
+
+        assertThat(UUID.fromString(first)).isNotNull();
+        assertThat(registry.traceIdOf(run)).isEqualTo(first);
+        assertThat(registry.traceIdOf(UUID.randomUUID())).as("各 run 各自一個").isNotEqualTo(first);
+    }
+
+    @Test
+    void concurrentFirstCallsAgreeOnASingleGeneratedTraceId() throws Exception {
+        RunRegistry registry = new RunRegistry();
+        UUID run = UUID.randomUUID();
+        ExecutorService pool = Executors.newFixedThreadPool(8);
+        try {
+            List<Future<String>> futures = new ArrayList<>();
+            for (int i = 0; i < 8; i++) {
+                futures.add(pool.submit(() -> registry.traceIdOf(run)));
+            }
+            List<String> seen = new ArrayList<>();
+            for (Future<String> future : futures) {
+                seen.add(future.get(10, TimeUnit.SECONDS));
+            }
+
+            assertThat(seen).as("消費者與對帳同時第一次取用，也只會有一個值").containsOnly(seen.get(0));
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
+    void forgettingARunAlsoForgetsItsTraceId() {
+        RunRegistry registry = new RunRegistry();
+        UUID run = UUID.randomUUID();
+        registry.bindTrace(run, "trace-from-execute");
+
+        registry.forget(run);
+
+        assertThat(registry.traceIdOf(run)).isNotEqualTo("trace-from-execute");
+    }
 }

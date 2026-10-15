@@ -138,4 +138,14 @@ class GoalTest {
         assertThat(g.deleted()).isTrue();
         assertThat(g.status()).isEqualTo(GoalStatus.PENDING);
     }
+
+    @Test
+    void softDeleteRecordsTheDeletionTimeForTheProjectRestoreToMatchOn() {
+        Goal g = newGoal(false, null);
+        assertThat(g.deletedAt()).isNull();
+
+        g.softDelete(T1);
+
+        assertThat(g.deletedAt()).as("復原靠「目標的 deleted_at 等於專案的」辨識同一次刪除連帶軟刪").isEqualTo(T1);
+    }
 }

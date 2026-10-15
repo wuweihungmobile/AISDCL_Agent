@@ -114,7 +114,12 @@ public class RunConsumers {
             });
         }
 
+        /** 執行緒進入點：整條執行緒（串流、回補、{@code :pause}）與它的日誌都以「該 run 的 traceId」為脈絡（契約 §0.4 第 6 點）。 */
         void loop() {
+            TraceIds.within(registry.traceIdOf(runId), this::drain);
+        }
+
+        private void drain() {
             Duration backoff = settings.consumerBackoffInitial();
             boolean firstConnection = true;
             try {

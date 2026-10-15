@@ -46,6 +46,11 @@ public interface MonitorUseCase {
     record TaskTrendView(Instant bucketStart, int started, int completed, int failed, int retried) {
     }
 
+    /** 全域任務總計（契約 §1.3.8，C-1）；{@code from}／{@code to} 是實際採用的視窗（請求省略 {@code to} 時為處理當下）。 */
+    record TaskTotalsView(Instant from, Instant to, long started, long completed, long failed, long retried,
+                          int projectsCounted) {
+    }
+
     record AlertView(UUID id, UUID projectId, UUID runId, String rule, String severity, String subject, String message,
                      Instant createdAt, boolean acknowledged, String acknowledgedBy, Instant acknowledgedAt) {
     }
@@ -68,6 +73,12 @@ public interface MonitorUseCase {
 
     List<TaskTrendView> taskTrend(Query query);
 
+    /**
+     * 跨全部未封存且未軟刪除專案的任務步驟總計。{@code from} 必填（null → 400，欄位 {@code from}）；{@code to} 為 null＝現在；
+     * 須 {@code from < to} 且視窗 ≤ 92 天，否則 400「時間範圍不合法」（欄位 {@code to}）。
+     */
+    TaskTotalsView taskTotals(Instant from, Instant to);
+
     /** {@code limit}：1～200。{@code acknowledged}＝null 不篩。 */
     List<AlertView> alerts(UUID projectId, UUID runId, Boolean acknowledged, int limit);
 
@@ -76,6 +87,6 @@ public interface MonitorUseCase {
 
     PageResult<LogView> logs(LogQuery query);
 
-    /** {@code format}：{@code csv}（必做）｜{@code pdf}（W5 之前一律 501）。 */
+    /** {@code format}：{@code csv}｜{@code pdf}（v1.2 起兩者都產生檔案，內容同源：四個區段 summary／runs／tasks／alerts；不分大小寫，預設 csv）。 */
     Report report(Query query, String format);
 }

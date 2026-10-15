@@ -22,7 +22,7 @@ public final class DomainFixtures {
 
     public static Project project(String name) {
         return Project.restore(UUID.randomUUID(), name, "/work/" + name, "全部完成", "說明", ProjectStatus.DRAFT, 3,
-                true, null, null, false, T0, T0, "tester");
+                true, null, null, false, T0, T0, "tester", null, null);
     }
 
     public static Goal goal(UUID projectId, String name, int sortOrder, UUID... dependsOn) {
@@ -31,7 +31,7 @@ public final class DomainFixtures {
 
     public static Goal goal(UUID projectId, String name, int sortOrder, GoalStatus status, UUID... dependsOn) {
         return Goal.restore(UUID.randomUUID(), projectId, name, "", "完成 " + name, sortOrder, status,
-                List.of(dependsOn), true, null, null, false, T0.plusSeconds(sortOrder), T0);
+                List.of(dependsOn), true, null, null, false, T0.plusSeconds(sortOrder), T0, null);
     }
 
     public static Task task(UUID goalId, String name, int sortOrder) {
@@ -41,14 +41,14 @@ public final class DomainFixtures {
     public static Task task(UUID goalId, String name, int sortOrder, TaskStatus status) {
         return Task.restore(UUID.randomUUID(), goalId, name, "請輸出 [" + name + "_DONE]", "輸出含 [" + name + "_DONE]",
                 null, "\\[" + name + "_DONE\\]", null, sortOrder, status, null, null, 0, 1, null, null, true, null,
-                null, false, T0.plusSeconds(sortOrder), T0, null, null);
+                null, false, T0.plusSeconds(sortOrder), T0, null, null, null);
     }
 
     public static Task taskWith(UUID goalId, String name, int sortOrder, String description, String evaluator,
                                 String regex, int maxRetries, Long estimatedTokens) {
         return Task.restore(UUID.randomUUID(), goalId, name, description, "通過", evaluator, regex, null, sortOrder,
                 TaskStatus.PENDING, estimatedTokens, null, 0, maxRetries, null, null, true, null, null, false,
-                T0.plusSeconds(sortOrder), T0, null, null);
+                T0.plusSeconds(sortOrder), T0, null, null, null);
     }
 
     public static GoalWithTasks with(Goal goal, Task... tasks) {

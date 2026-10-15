@@ -549,7 +549,7 @@ public class RunEventProcessor {
         String stepId = e.text("step_id");
         String message = e.text("message") == null ? "" : e.text("message");
         Candidate candidate = switch (code) {
-            case "ESCALATION" -> AlertRules.engineEscalation(stepId == null ? c.run.id().toString() : stepId, message);
+            case "ESCALATION" -> AlertRules.engineEscalation(c.run.id(), stepId, message);
             case "TOKEN_HALT" -> AlertRules.engineTokenHalt(c.run.id(), stepId, message);
             default -> null;
         };

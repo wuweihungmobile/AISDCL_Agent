@@ -106,6 +106,45 @@ class SettingsExportImportApiIT extends AbstractApiIT {
         assertThat(historyCount()).isZero();
     }
 
+    @Test
+    void anUnchangedValueIsSkippedEvenWhenItsHostIsNotOnTheAllowlistButAChangedOneStillIsRejected() {
+        // DEF-AC-002（C-6）：e2e 的 allowlist 不含預設的 api.minimax.io——現值的主機不在白名單時，匯出再原樣匯入也不得出現 errors
+        jdbc.update("update console.system_configs set value = ? where category = 'model' and key = 'apiUrl'",
+                "https://not-listed.example/v1/chat");
+        List<Map<String, Object>> items = exportedItems();
+
+        Resp unchanged = importJson(documentOf(1, items));
+
+        assertThat(unchanged.status()).isEqualTo(200);
+        assertThat(unchanged.<Integer>read("$.data.applied")).isZero();
+        assertThat(unchanged.<Integer>read("$.data.skipped")).as("2 筆加密佔位＋48 筆值未變").isEqualTo(50);
+        assertThat(unchanged.<List<Object>>read("$.data.errors")).isEmpty();
+        assertThat(historyCount()).isZero();
+
+        items.stream().filter(i -> "apiUrl".equals(i.get("key"))).forEach(i -> i.put("value",
+                "https://other-unlisted.example/v1/chat"));
+        Resp changed = importJson(documentOf(1, items));
+
+        assertThat(changed.<List<String>>read("$.data.errors[*].key")).containsExactly("apiUrl");
+        assertThat(changed.<List<String>>read("$.data.errors[*].reason")).containsExactly(OUTBOUND);
+        assertThat(changed.<Integer>read("$.data.applied")).isZero();
+        assertThat(changed.<Integer>read("$.data.skipped")).isEqualTo(49);
+        assertThat(dbValue("model", "apiUrl")).isEqualTo("https://not-listed.example/v1/chat");
+        assertThat(historyCount()).isZero();
+    }
+
+    @Test
+    void anUnchangedButNowInvalidStoredValueIsSkippedNotReportedAsAnError() {
+        // 值規則只判「要寫入的新值」：現值本身即使不符規則（例：升級前的殘值），原樣匯入也只是略過
+        jdbc.update("update console.system_configs set value = 'abc' where category = 'agent' and key = 'maxRetries'");
+
+        Resp resp = importJson(documentOf(1, exportedItems()));
+
+        assertThat(resp.<List<Object>>read("$.data.errors")).isEmpty();
+        assertThat(resp.<Integer>read("$.data.applied")).isZero();
+        assertThat(resp.<Integer>read("$.data.skipped")).isEqualTo(50);
+    }
+
     // ── 匯入：逐筆驗證與套用 ────────────────────────────────────────────────────
 
     @Test

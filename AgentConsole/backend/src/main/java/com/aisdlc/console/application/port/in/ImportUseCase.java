@@ -4,6 +4,7 @@ import com.aisdlc.console.application.port.in.ManageProjectUseCase.ProjectView;
 import com.aisdlc.console.domain.model.imports.ImportRecord;
 import com.aisdlc.console.domain.model.imports.ImportSourceType;
 import com.aisdlc.console.domain.model.imports.ImportStatus;
+import com.aisdlc.console.domain.model.imports.ParseOptions;
 import com.aisdlc.console.domain.model.imports.ParseWarning;
 import com.aisdlc.console.domain.model.imports.ParsedResult;
 
@@ -27,15 +28,6 @@ public interface ImportUseCase {
      */
     record ListQuery(String fileNameQuery, ImportStatus status, SortField sortField, boolean ascending, int page,
                      int size) {
-    }
-
-    /**
-     * 解析選項（契約 §1.1.3）。
-     *
-     * @param autonomyLevel 1～10；null 取 3（也成為落庫專案的 autonomyLevel）
-     * @param specDir       明示的 SDD 規格目錄；null／空白＝以 executionPath 探測
-     */
-    record ParseOptions(String executionPath, Integer autonomyLevel, String additionalPrompt, String specDir) {
     }
 
     /** parse／editResult 成功的結果：記錄＋非阻擋提示。 */

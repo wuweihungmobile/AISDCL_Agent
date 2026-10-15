@@ -60,6 +60,11 @@ class ProjectRepositoryAdapter implements ProjectRepository {
     }
 
     @Override
+    public Optional<Project> findIncludingDeletedForUpdate(UUID id) {
+        return projects.findAnyByIdForUpdate(id).map(ProjectMapper::toDomain);
+    }
+
+    @Override
     public PageResult<Project> search(ListQuery query) {
         Sort.Direction direction = query.ascending() ? Sort.Direction.ASC : Sort.Direction.DESC;
         Sort sort = Sort.by(direction, sortProperty(query.sortField())).and(Sort.by(Sort.Direction.ASC, "id"));
@@ -103,7 +108,7 @@ class ProjectRepositoryAdapter implements ProjectRepository {
     private static Specification<ProjectEntity> specification(ListQuery query) {
         return (root, criteria, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
-            predicates.add(cb.isFalse(root.get("deleted")));
+            predicates.add(query.deleted() ? cb.isTrue(root.get("deleted")) : cb.isFalse(root.get("deleted")));
             if (query.nameQuery() != null && !query.nameQuery().isBlank()) {
                 String pattern = "%" + escapeLike(query.nameQuery().strip().toLowerCase(Locale.ROOT)) + "%";
                 predicates.add(cb.like(cb.lower(root.get("name")), pattern, '\\'));

@@ -35,6 +35,7 @@ final class TaskMapper {
         e.updatedAt = t.updatedAt();
         e.startedAt = t.startedAt();
         e.completedAt = t.completedAt();
+        e.deletedAt = t.deletedAt();
         return e;
     }
 
@@ -44,6 +45,6 @@ final class TaskMapper {
                 e.estimatedTokens, e.actualTokens, e.retryCount == null ? 0 : e.retryCount,
                 e.maxRetries == null ? Task.DEFAULT_MAX_RETRIES : e.maxRetries, e.assignedAgent,
                 e.executionLog, e.signedOff, e.signedOffBy, e.signedOffAt, Boolean.TRUE.equals(e.deleted),
-                e.createdAt, e.updatedAt, e.startedAt, e.completedAt);
+                e.createdAt, e.updatedAt, e.startedAt, e.completedAt, e.deletedAt);
     }
 }

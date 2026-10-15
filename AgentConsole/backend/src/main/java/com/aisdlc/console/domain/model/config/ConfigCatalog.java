@@ -88,7 +88,8 @@ public final class ConfigCatalog {
         specs.add(spec("agent", "enableAutoMutation", UNVERIFIED, null, null));
         specs.add(spec("agent", "enableSelfEvolution", UNVERIFIED, null, null));
         // C.3 execution（10）
-        specs.add(spec("execution", "globalTokenBudget", CONSOLE, "1", "1000000000000"));
+        // 上限 999999999999（12 位）：與 V5 的 validation_rule ^[1-9][0-9]{0,11}$ 一致（契約 v1.2 更正，B1-1；v1.1 寫的 13 位上限會讓 GET /settings 的 max 比規則多 1）
+        specs.add(spec("execution", "globalTokenBudget", CONSOLE, "1", "999999999999"));
         specs.add(spec("execution", "tokenBudgetWarningThreshold", CONSOLE, "0.01", "0.99"));
         specs.add(spec("execution", "maxParallelGoals", STORED_ONLY, "1", "16"));
         specs.add(spec("execution", "dagSchedulerStrategy", CONSOLE, null, null,

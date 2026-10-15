@@ -48,11 +48,14 @@ public interface ExecutionQueryUseCase {
                          BridgeInfoView bridge) {
     }
 
-    /** {@code ExecutionRunSummaryResponse}。 */
-    record RunSummaryView(UUID id, UUID projectId, int runNumber, RunStatus status, int autonomyLevel,
-                          String scopeMode, long totalTokensUsed, Long tokenBudget, Instant startedAt,
-                          Instant completedAt, long durationSec, int tasksTotal, int tasksCompleted, int tasksFailed,
-                          Double successRate) {
+    /**
+     * {@code ExecutionRunSummaryResponse}。{@code bridgeStatus}（v1.2，C-11）與 {@link RunView#bridgeStatus} 同義，但列表不為它
+     * 逐批呼叫 Bridge：取記憶體內最近一則 status 事件的值，沒有就以 DB 狀態同名值補；DB 為 {@code RUNNING} 又沒有記憶體值時為 null。
+     */
+    record RunSummaryView(UUID id, UUID projectId, int runNumber, RunStatus status, BridgeStatus bridgeStatus,
+                          int autonomyLevel, String scopeMode, long totalTokensUsed, Long tokenBudget,
+                          Instant startedAt, Instant completedAt, long durationSec, int tasksTotal, int tasksCompleted,
+                          int tasksFailed, Double successRate) {
     }
 
     /** {@code ExecutionStepResponse}：{@code stepNumber} 是該 step 事件的 Bridge seq，{@code stepId} 才是 playbook 的 step_id。 */

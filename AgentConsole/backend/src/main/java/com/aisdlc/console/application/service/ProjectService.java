@@ -3,11 +3,14 @@ package com.aisdlc.console.application.service;
 import com.aisdlc.console.application.port.in.ManageGoalUseCase.GoalWithCounts;
 import com.aisdlc.console.application.port.in.ManageProjectUseCase;
 import com.aisdlc.console.application.port.in.PageResult;
+import com.aisdlc.console.application.port.out.AuditTrail;
 import com.aisdlc.console.application.port.out.GoalRepository;
 import com.aisdlc.console.application.port.out.GoalRepository.TaskCounts;
 import com.aisdlc.console.application.port.out.ProjectRepository;
+import com.aisdlc.console.application.port.out.RuntimeSettings;
 import com.aisdlc.console.application.port.out.TaskRepository;
 import com.aisdlc.console.domain.exception.ConflictException;
+import com.aisdlc.console.domain.exception.ErrorReasons;
 import com.aisdlc.console.domain.exception.NotFoundException;
 import com.aisdlc.console.domain.exception.Violations;
 import com.aisdlc.console.domain.model.goal.Goal;
@@ -19,6 +22,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.EnumSet;
 import java.util.List;
@@ -40,12 +44,17 @@ public class ProjectService implements ManageProjectUseCase {
     private final ProjectRepository projects;
     private final GoalRepository goals;
     private final TaskRepository tasks;
+    private final RuntimeSettings settings;
+    private final AuditTrail audit;
     private final Clock clock;
 
-    public ProjectService(ProjectRepository projects, GoalRepository goals, TaskRepository tasks, Clock clock) {
+    public ProjectService(ProjectRepository projects, GoalRepository goals, TaskRepository tasks,
+                          RuntimeSettings settings, AuditTrail audit, Clock clock) {
         this.projects = projects;
         this.goals = goals;
         this.tasks = tasks;
+        this.settings = settings;
+        this.audit = audit;
         this.clock = clock;
     }
 
@@ -108,9 +117,39 @@ public class ProjectService implements ManageProjectUseCase {
         Instant now = clock.instant();
         project.softDelete(now);
         projects.save(project);
-        // 連帶軟刪目標與任務（US-G-05／US-P-05）；兩者都在同一個交易內。
+        // 連帶軟刪目標與任務（US-G-05／US-P-05）；兩者都在同一個交易內，且與專案寫同一個 deleted_at（V9）——
+        // 復原靠「目標／任務的 deleted_at 等於專案的」辨識同一次刪除連帶軟刪的列。
         tasks.softDeleteByProjectId(projectId, now);
         goals.softDeleteByProjectId(projectId, now);
+    }
+
+    /**
+     * 復原軟刪除的專案（契約 §1.6.1，C-3）：專案本身還原為刪除前的狀態、同一次刪除連帶軟刪的目標與任務一併回來；在存活專案內
+     * 單獨先刪除的目標／任務（{@code deleted_at} 與專案的不同）維持已刪除。單一交易，專案列先鎖住（兩個並發的 restore 只有一個成功，
+     * 另一個看到「未被刪除」的 409）。保留期與清除排程是否開啟無關：超過 {@code soft-delete-days} 的專案即使資料還在也不可復原。
+     */
+    @Override
+    public ProjectDetailView restore(UUID projectId) {
+        Project project = projects.findIncludingDeletedForUpdate(projectId).orElseThrow(
+                () -> new NotFoundException("專案不存在或已清除：" + projectId));
+        if (!project.deleted()) {
+            throw new ConflictException("專案未被刪除，不需復原", ErrorReasons.PROJECT_NOT_DELETED,
+                    Map.of("projectId", projectId.toString(), "status", project.status().name()));
+        }
+        Instant now = clock.instant();
+        int retentionDays = settings.softDeleteRetentionDays();
+        Instant deletedAt = project.deletedAt();
+        if (deletedAt.isBefore(now.minus(Duration.ofDays(retentionDays)))) {
+            throw new ConflictException("專案已刪除超過 " + retentionDays + " 天，不可復原", ErrorReasons.RESTORE_WINDOW_EXPIRED,
+                    Map.of("projectId", projectId.toString(), "deletedAt", deletedAt.toString(),
+                            "retentionDays", retentionDays));
+        }
+        project.recover(now);
+        projects.save(project);
+        goals.restoreDeletedWithProject(projectId, deletedAt, now);
+        tasks.restoreDeletedWithProject(projectId, deletedAt, now);
+        audit.note("project.restore", "project", projectId.toString());
+        return get(projectId);
     }
 
     @Override

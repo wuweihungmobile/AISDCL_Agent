@@ -101,6 +101,11 @@ class GoalRepositoryAdapter implements GoalRepository {
         return goals.softDeleteByProjectId(projectId, now);
     }
 
+    @Override
+    public int restoreDeletedWithProject(UUID projectId, Instant deletedAt, Instant now) {
+        return goals.restoreDeletedWithProject(projectId, deletedAt, now);
+    }
+
     /** 把 goal.dependsOn() 同步成資料表的邊：只刪「不再需要的」、只加「新的」，保留既有邊的建立時間。 */
     private void syncDependencies(Goal goal) {
         Map<UUID, GoalDependencyEntity> existing = new LinkedHashMap<>();

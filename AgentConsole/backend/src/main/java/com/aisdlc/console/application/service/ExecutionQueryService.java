@@ -23,6 +23,7 @@ import com.aisdlc.console.domain.model.execution.DagSnapshot.Node;
 import com.aisdlc.console.domain.model.execution.DagSnapshot.NodeKind;
 import com.aisdlc.console.domain.model.execution.ExecutionRun;
 import com.aisdlc.console.domain.model.execution.ReviewStatus;
+import com.aisdlc.console.domain.model.execution.RunStatus;
 import com.aisdlc.console.domain.model.goal.Goal;
 import com.aisdlc.console.domain.model.task.Task;
 import com.aisdlc.console.domain.model.task.TaskStatus;
@@ -67,6 +68,7 @@ public class ExecutionQueryService implements ExecutionQueryUseCase {
     private final ReviewRequestRepository reviews;
     private final CheckpointRepository checkpoints;
     private final AgentBridge bridge;
+    private final RunRegistry registry;
     private final TransactionTemplate readTx;
     private final Clock clock;
 
@@ -74,7 +76,7 @@ public class ExecutionQueryService implements ExecutionQueryUseCase {
     public ExecutionQueryService(ExecutionRunRepository runs, ProjectRepository projects, GoalRepository goals,
                                  TaskRepository tasks, ExecutionStepRepository steps, TokenSampleRepository samples,
                                  ReviewRequestRepository reviews, CheckpointRepository checkpoints, AgentBridge bridge,
-                                 PlatformTransactionManager transactions, Clock clock) {
+                                 RunRegistry registry, PlatformTransactionManager transactions, Clock clock) {
         this.runs = runs;
         this.projects = projects;
         this.goals = goals;
@@ -84,6 +86,7 @@ public class ExecutionQueryService implements ExecutionQueryUseCase {
         this.reviews = reviews;
         this.checkpoints = checkpoints;
         this.bridge = bridge;
+        this.registry = registry;
         this.readTx = new TransactionTemplate(transactions);
         this.readTx.setReadOnly(true);
         this.clock = clock;
@@ -204,9 +207,24 @@ public class ExecutionQueryService implements ExecutionQueryUseCase {
                 : StreamFrames.round1(completed * 100.0 / (completed + failed));
         Instant end = run.completedAt() != null ? run.completedAt() : now;
         long duration = run.startedAt() == null ? 0 : Math.max(0, Duration.between(run.startedAt(), end).getSeconds());
-        return new RunSummaryView(run.id(), run.projectId(), run.runNumber(), run.status(), run.autonomyLevel(),
+        return new RunSummaryView(run.id(), run.projectId(), run.runNumber(), run.status(),
+                listBridgeStatus(run.status(), registry.knownBridgeStatus(run.id())), run.autonomyLevel(),
                 run.scope().mode().name(), run.totalTokensUsed(), run.tokenBudget(), run.startedAt(),
                 run.completedAt(), duration, run.dag().totalSteps(), completed, failed, rate);
+    }
+
+    /**
+     * 列表項的 {@code bridgeStatus}（契約 §1.2.2，C-11）：不為它逐批呼叫 Bridge——取記憶體內最近一則 status 事件的值
+     * （{@code known}），所以 {@code PAUSING}／{@code CANCELLING} 只在 console-api 仍消費該批次時可見（這正是前端要顯示處理中
+     * 晶片的情境）；記憶體沒有時以 DB 狀態的同名值補（六態都在 Bridge 八態之內）；DB 為 {@code RUNNING} 又沒有記憶體值時無從判斷
+     * RUNNING／PAUSING／CANCELLING，回 null。記憶體值折疊後與 DB 狀態不一致（DB 已先一步寫了新狀態、事件還沒消費到）時以 DB 為準，
+     * 免得同一列出現「status=COMPLETED、bridgeStatus=RUNNING」這種互相矛盾的組合。
+     */
+    static BridgeStatus listBridgeStatus(RunStatus dbStatus, BridgeStatus known) {
+        if (known != null && known.fold() == dbStatus) {
+            return known;
+        }
+        return dbStatus == RunStatus.RUNNING ? null : BridgeStatus.valueOf(dbStatus.name());
     }
 
     // ── GET /executions/{runId}/steps ──────────────────────────────────────────

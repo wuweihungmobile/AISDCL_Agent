@@ -41,12 +41,15 @@ public class GoalService implements ManageGoalUseCase {
     private final ProjectRepository projects;
     private final GoalRepository goals;
     private final TaskRepository tasks;
+    private final RunInProgressGuard runGuard;
     private final Clock clock;
 
-    public GoalService(ProjectRepository projects, GoalRepository goals, TaskRepository tasks, Clock clock) {
+    public GoalService(ProjectRepository projects, GoalRepository goals, TaskRepository tasks,
+                       RunInProgressGuard runGuard, Clock clock) {
         this.projects = projects;
         this.goals = goals;
         this.tasks = tasks;
+        this.runGuard = runGuard;
         this.clock = clock;
     }
 
@@ -101,6 +104,7 @@ public class GoalService implements ManageGoalUseCase {
     @Override
     public void delete(UUID goalId) {
         Goal goal = load(goalId);
+        runGuard.requireNoRunInProgress(goal.projectId(), "目標");      // C-8：涵蓋比下面的 RUNNING 任務更廣，所以先檢查
         if (tasks.existsByGoalIdAndStatus(goalId, TaskStatus.RUNNING)) {
             throw new ConflictException("目標含執行中的任務，不可刪除", "RUNNING 狀態的任務不可刪除",
                     Map.of("goalId", goalId.toString()));

@@ -5,6 +5,7 @@ import com.aisdlc.console.adapter.in.web.dto.ApiResult;
 import com.aisdlc.console.adapter.in.web.dto.LogEntryResponse;
 import com.aisdlc.console.adapter.in.web.dto.PageData;
 import com.aisdlc.console.adapter.in.web.dto.ProjectMetricsResponse;
+import com.aisdlc.console.adapter.in.web.dto.TaskTotalsResponse;
 import com.aisdlc.console.adapter.in.web.dto.TaskTrendPoint;
 import com.aisdlc.console.adapter.in.web.dto.TokenTrendPoint;
 import com.aisdlc.console.application.port.in.MonitorUseCase;
@@ -108,6 +109,24 @@ public class MonitorController {
                 .map(TaskTrendPoint::from).toList());
     }
 
+    @GetMapping("/task-totals")
+    @Operation(summary = "全域任務總計（跨專案；v1.2 補充端點）",
+            description = "跨全部未封存且未軟刪除的專案，execution_steps 在 [from, to) 內 STARTED／COMPLETED／FAILED／RETRYING 的列數"
+                    + "（與 task-trend 同一張表、同一判準，只計所屬任務未軟刪的列；只是不分桶、不分專案）。取代前端對每個專案各打一次 task-trend "
+                    + "再加總的做法（DEF-AC-009）。from 必填；to 省略＝現在；from 必須早於 to 且視窗不可超過 92 天，違反 → 400"
+                    + "（reason「時間範圍不合法」，errors[].field=to，details={from,to,maxDays:92}）。不變量：同一視窗下，各專案 task-trend "
+                    + "各桶加總逐欄等於本端點（契約 §1.3.8）")
+    public ApiResult<TaskTotalsResponse> taskTotals(
+            @Parameter(description = "視窗起點（含；ISO-8601 帶 offset）；必填", required = true,
+                    schema = @Schema(type = "string", format = "date-time"))
+            @RequestParam(required = false) String from,
+            @Parameter(description = "視窗終點（不含；ISO-8601 帶 offset）；預設現在。to − from 不可超過 92 天",
+                    schema = @Schema(type = "string", format = "date-time"))
+            @RequestParam(required = false) String to) {
+        return ApiResult.ok(TaskTotalsResponse.from(monitor.taskTotals(TimeParams.parse("from", from),
+                TimeParams.parse("to", to))));
+    }
+
     @GetMapping("/projects/{projectId}/alerts")
     @Operation(summary = "查詢告警",
             description = "由新到舊；PRD 回傳 List<AlertResponse>（不分頁），以 limit（預設 50，上限 200）截斷")
@@ -167,15 +186,18 @@ public class MonitorController {
     @GetMapping("/projects/{projectId}/report")
     @ApiResponse(responseCode = "200", description = "報表檔案",
             headers = @Header(name = "Content-Disposition",
-                    description = "attachment; filename=\"monitor-report-<projectId 前 8 碼>-<yyyyMMdd-HHmm>.csv\"",
+                    description = "attachment; filename=\"monitor-report-<projectId 前 8 碼>-<yyyyMMdd-HHmm>.csv|pdf\"",
                     schema = @Schema(type = "string")),
             content = {
                     @Content(mediaType = "text/csv", schema = @Schema(type = "string")),
                     @Content(mediaType = "application/pdf", schema = @Schema(type = "string", format = "binary"))})
-    @Operation(summary = "匯出監控報表（CSV 必做；PDF 標 W5）",
-            description = "不包 ApiResult 封包，直接回檔案並帶 Content-Disposition: attachment。呼叫端須送 Accept: text/csv（或 */*）。"
+    @Operation(summary = "匯出監控報表（CSV／PDF）",
+            description = "不包 ApiResult 封包，直接回檔案並帶 Content-Disposition: attachment；後端以 format 為準、不因 Accept 不符回 406"
+                    + "（CSV 送 text/csv、PDF 送 application/pdf，皆可用 */*）。"
                     + "CSV：UTF-8 含 BOM、CRLF、RFC 4180 引號；多個區段以 #section,<名稱> 行分隔（summary／runs／tasks／alerts），"
-                    + "格式見 Markdown 契約 §1.3.7。format=pdf 在 W5 之前回 501（reason「PDF 報表尚未提供（W5）」）")
+                    + "格式見 Markdown 契約 §1.3.7。"
+                    + "PDF（v1.2，C-4）：與 CSV 相同的四個區段，另加標題（專案名稱＋「監控報表」）、時間範圍、範圍與產生時間（UTC）；"
+                    + "null 顯示「—」、純文字（不做 CSV 注入引號）；內嵌 CJK 字型，字型沒有的字元以 ? 取代")
     public ResponseEntity<byte[]> report(
             @PathVariable UUID projectId,
             @Parameter(schema = @Schema(type = "string", allowableValues = {"csv", "pdf"}, defaultValue = "csv"))
