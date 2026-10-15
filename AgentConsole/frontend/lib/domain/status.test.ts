@@ -2,17 +2,31 @@ import { describe, expect, it } from "vitest";
 
 import { resolveVar } from "@/tests/helpers/tokens";
 import {
+  ALERT_RULE_LABEL,
+  ALERT_SEVERITY,
   GOAL_STATUS,
   IMPORT_STATUS,
+  LOG_LEVEL_COLOR,
   PROJECT_STATUS,
   PROJECT_STATUS_TABS,
+  REVIEW_DECISION_LABEL,
+  REVIEW_DECISION_ORDER,
+  REVIEW_KIND,
+  RUN_STATUS,
+  RUN_TERMINAL,
+  STEP_STATUS,
   TASK_STATUS,
+  alertSeverity,
   goalStatus,
   importStatus,
   isImportReopenable,
   isLive,
   isRetryable,
+  isRunTerminal,
   projectStatus,
+  reviewKind,
+  runStatusMeta,
+  stepStatus,
   taskStatus,
 } from "./status";
 
@@ -90,6 +104,79 @@ describe("狀態 enum 對照表（lib/domain/status.ts 是唯一出處）", () =
   it("只有 FAILED／ESCALATED 的任務可重試（與後端 409 規則一致）", () => {
     const retryable = Object.keys(TASK_STATUS).filter(isRetryable);
     expect(retryable.sort()).toEqual(["ESCALATED", "FAILED"]);
+  });
+});
+
+describe("執行批次與審核項標籤（契約 §1.2、§3.6、附錄 A.1；RunStatus／ReviewKind）", () => {
+  it("RunStatus 六態都有中文標籤，鍵集合恰等於契約（後端新增狀態時這裡會紅），標籤互不重複", () => {
+    expect(Object.keys(RUN_STATUS).sort()).toEqual(["CANCELLED", "COMPLETED", "FAILED", "INITIALIZING", "PAUSED", "RUNNING"]);
+    expect(Object.fromEntries(Object.entries(RUN_STATUS).map(([k, v]) => [k, v.label]))).toEqual({
+      INITIALIZING: "啟動中",
+      RUNNING: "執行中",
+      PAUSED: "已暫停",
+      COMPLETED: "已完成",
+      FAILED: "失敗",
+      CANCELLED: "已取消",
+    });
+    const labels = Object.values(RUN_STATUS).map((m) => m.label);
+    expect(new Set(labels).size).toBe(labels.length);
+  });
+
+  it("終態＝COMPLETED／FAILED／CANCELLED（SSE 到此關閉、重連回 204）；PAUSED 不是終態", () => {
+    expect([...RUN_TERMINAL].sort()).toEqual(["CANCELLED", "COMPLETED", "FAILED"]);
+    for (const s of Object.keys(RUN_STATUS)) expect(isRunTerminal(s), s).toBe(RUN_TERMINAL.includes(s as never));
+    expect(isRunTerminal("PAUSED")).toBe(false);
+    expect(isRunTerminal(undefined)).toBe(false);
+  });
+
+  it("RUNNING＋Bridge 過渡態：PAUSING 顯示「暫停中」、CANCELLING 顯示「取消中」；其餘照 RunStatus", () => {
+    expect(runStatusMeta("RUNNING", "PAUSING").label).toBe("暫停中");
+    expect(runStatusMeta("RUNNING", "CANCELLING").label).toBe("取消中");
+    expect(runStatusMeta("RUNNING", "RUNNING").label).toBe("執行中");
+    expect(runStatusMeta("RUNNING").label).toBe("執行中");
+    // 過渡態只在 RUNNING 底下才成立（PAUSED 的 run 不會再有 PAUSING）
+    expect(runStatusMeta("PAUSED", "PAUSING").label).toBe("已暫停");
+    expect(runStatusMeta("NEW_STATE").label).toBe("NEW_STATE");
+  });
+
+  it("狀態點會呼吸的狀態含啟動中與執行中", () => {
+    expect(isLive("RUNNING")).toBe(true);
+    expect(isLive("INITIALIZING")).toBe(true);
+    expect(isLive("PAUSED")).toBe(false);
+  });
+
+  it("ReviewKind 四種都有中文標籤（V3 的 CHECK 不擴充）；未知種類不崩潰", () => {
+    expect(Object.fromEntries(Object.entries(REVIEW_KIND).map(([k, v]) => [k, v.label]))).toEqual({
+      TASK_CONFIRM: "確認任務",
+      GOAL_CONFIRM: "確認目標",
+      GOAL_COMPLETED: "目標完成審核",
+      ESCALATED: "需人工介入",
+    });
+    expect(reviewKind("FUTURE_KIND").label).toBe("FUTURE_KIND");
+  });
+
+  it("審核決定四顆按鈕的文字與順序＝設計稿（通過／重試／跳過／拒絕）", () => {
+    expect(REVIEW_DECISION_ORDER.map((d) => REVIEW_DECISION_LABEL[d])).toEqual(["通過", "重試", "跳過", "拒絕"]);
+    expect(Object.keys(REVIEW_DECISION_LABEL).sort()).toEqual(["APPROVE", "REJECT", "RETRY", "SKIP"]);
+  });
+
+  it("步驟事件四態、告警嚴重度與八條規則、日誌等級色：標籤齊全、顏色一律引用 token", () => {
+    expect(Object.keys(STEP_STATUS).sort()).toEqual(["COMPLETED", "FAILED", "RETRYING", "STARTED"]);
+    expect(stepStatus("RETRYING").label).toBe("重試");
+    expect(alertSeverity("CRITICAL").label).toBe("嚴重");
+    expect(alertSeverity("WARNING").label).toBe("警告");
+    expect(Object.keys(ALERT_RULE_LABEL)).toHaveLength(8);
+    for (const label of Object.values(ALERT_RULE_LABEL)) expect(label).toMatch(/\S/);
+    const tables: Array<Record<string, { color: string }>> = [RUN_STATUS, REVIEW_KIND, STEP_STATUS, ALERT_SEVERITY];
+    for (const table of tables) {
+      for (const [k, meta] of Object.entries(table)) {
+        expect(meta.color, `${k} 色碼應引用 token`).toMatch(/^var\(--color-[a-z-]+\)$/);
+        expect(resolveVar(meta.color), `${k} 色碼`).toMatch(/^#[0-9A-F]{6}$/);
+      }
+    }
+    for (const [level, color] of Object.entries(LOG_LEVEL_COLOR)) {
+      expect(resolveVar(color), `${level} 色碼`).toMatch(/^#[0-9A-F]{6}$/);
+    }
   });
 });
 

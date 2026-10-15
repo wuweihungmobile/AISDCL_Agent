@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatBytes, formatClock, formatDate, formatDateTime, formatNumber, percent, retryLabel } from "./format";
+import { formatBytes, formatClock, formatDate, formatDateTime, formatElapsed, formatNumber, percent, retryLabel } from "./format";
 
 describe("format", () => {
   // 用本機時區建構時間，避免測試依賴執行機器的時區
@@ -17,6 +17,17 @@ describe("format", () => {
     expect(formatClock(undefined)).toBe("—");
     expect(formatDateTime("not-a-date")).toBe("—");
     expect(formatNumber(undefined)).toBe("—");
+  });
+
+  it("執行耗時 HH:MM:SS（執行頁）；缺值、負值、NaN 顯示「—」", () => {
+    expect(formatElapsed(0)).toBe("00:00:00");
+    expect(formatElapsed(83)).toBe("00:01:23");
+    expect(formatElapsed(5025)).toBe("01:23:45");
+    expect(formatElapsed(360_000)).toBe("100:00:00");
+    expect(formatElapsed(7.9)).toBe("00:00:07");
+    expect(formatElapsed(null)).toBe("—");
+    expect(formatElapsed(-1)).toBe("—");
+    expect(formatElapsed(Number.NaN)).toBe("—");
   });
 
   it("檔案大小：B／KB／MB 三段，一位小數", () => {

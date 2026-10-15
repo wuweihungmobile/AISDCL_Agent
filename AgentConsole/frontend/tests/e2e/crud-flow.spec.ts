@@ -27,7 +27,8 @@ test("登入 → 專案／目標／任務完整流程 → 刪除", async ({ page
     await page.getByRole("navigation", { name: "主導覽" }).getByRole("link", { name: "儀表板" }).click();
     await expect(page.getByRole("heading", { name: "總覽儀表板" })).toBeVisible();
     await expect(page.getByTestId("kpi-grid")).toBeVisible();
-    await expect(page.getByTestId("kpi-week-done")).toHaveText("—");
+    // 「本週完成任務數」已接真值（W4-F2：各專案 task-trend 加總），載入完成後是一個整數
+    await expect(page.getByTestId("kpi-week-done")).toHaveText(/^\d+$/);
     await page.screenshot({ path: `${SHOTS}/01-dashboard.png` });
     await page.getByRole("navigation", { name: "主導覽" }).getByRole("link", { name: "專案管理" }).click();
     await expect(page.getByRole("heading", { name: "專案管理" })).toBeVisible();

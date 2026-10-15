@@ -101,6 +101,95 @@ export type SettingsExportDocument = S36["SettingsExportDocument"];
 export type ImportSettingsResult = S36["ImportSettingsResponse"];
 export type ImportSettingsError = S36["ImportSettingsError"];
 
+// ── Phase 4：專案執行（契約 §1.2）────────────────────────────────────────
+export type RunStatus = S36["RunStatus"];
+/** Bridge 的八態（PAUSING／CANCELLING 是過渡態，console-api 寫 PG 時折回 RUNNING，原值在 bridgeStatus） */
+export type BridgeRunStatus = S36["BridgeRunStatus"];
+export type ExecutionScope = S36["ExecutionScope"];
+export type ScopeMode = S36["ScopeMode"];
+export type StartExecutionRequest = S36["StartExecutionRequest"];
+export type ExecutionRun = S36["ExecutionRunResponse"];
+export type ExecutionRunSummary = S36["ExecutionRunSummaryResponse"];
+export type ExecutionRunDetail = S36["ExecutionRunDetailResponse"];
+export type CurrentStep = S36["CurrentStep"];
+export type BridgeInfo = S36["BridgeInfo"];
+export type ExecutionStep = S36["ExecutionStepResponse"];
+export type ExecutionStepStatus = S36["ExecutionStepStatus"];
+export type Dag = S36["DagResponse"];
+export type DagNode = S36["DagNode"];
+export type DagEdge = S36["DagEdge"];
+export type Checkpoint = S36["CheckpointResponse"];
+export type ReviewKind = S36["ReviewKind"];
+export type ReviewStatus = S36["ReviewStatus"];
+export type ReviewDecision = S36["ReviewDecision"];
+export type ReviewItem = S36["ReviewRequestResponse"];
+export type ReviewBody = S36["ReviewRequest"];
+
+/** 專案的執行批次列表查詢參數（契約 §1.2.2；sort 欄位限 startedAt／runNumber） */
+export type ListExecutionsParams = {
+  page?: number;
+  size?: number;
+  status?: RunStatus;
+  sort?: string;
+};
+
+/** 步驟分頁查詢參數（契約 §1.2.7；afterSeq 是「嚴格大於」的事件 seq） */
+export type ListStepsParams = {
+  page?: number;
+  size?: number;
+  afterSeq?: number;
+};
+
+// ── Phase 5：專案監控（契約 §1.3）────────────────────────────────────────
+export type ProjectMetrics = S36["ProjectMetricsResponse"];
+export type MetricValue = S36["MetricValue"];
+export type TaskDurationItem = S36["TaskDurationItem"];
+export type RetryBucket = S36["RetryBucket"];
+export type TokenTrendPoint = S36["TokenTrendPoint"];
+export type TaskTrendPoint = S36["TaskTrendPoint"];
+export type Alert = S36["AlertResponse"];
+export type AlertRule = S36["AlertRule"];
+export type AlertSeverity = S36["AlertSeverity"];
+export type LogEntry = S36["LogEntryResponse"];
+export type LogLevel = S36["LogLevel"];
+export type LogSource = S36["LogSource"];
+export type TrendBucket = "HOUR" | "DAY";
+
+/** 監控各端點共通的視窗參數（契約 §1.3；from／to 為帶 offset 的 ISO-8601，缺省＝to 之前 24 小時～現在） */
+export type MonitorRangeParams = {
+  runId?: string;
+  from?: string;
+  to?: string;
+};
+
+export type MonitorTrendParams = MonitorRangeParams & { bucket?: TrendBucket };
+
+export type ListAlertsParams = {
+  runId?: string;
+  acknowledged?: boolean;
+  limit?: number;
+};
+
+export type ListLogsParams = MonitorRangeParams & {
+  level?: "ALL" | "INFO" | "WARN" | "ERROR";
+  taskId?: string;
+  q?: string;
+  order?: "asc" | "desc";
+  page?: number;
+  size?: number;
+};
+
+export type ReportParams = MonitorRangeParams & { format?: "csv" | "pdf" };
+
+// ── SSE 事件資料（契約 §2；data 是單行 JSON）──────────────────────────────
+export type LogEventData = S36["LogEventData"];
+export type StatusChangeEventData = S36["StatusChangeEventData"];
+export type ReviewRequestEventData = S36["ReviewRequestEventData"];
+export type AlertEventData = S36["AlertEventData"];
+export type ProgressUpdateEventData = S36["ProgressUpdateEventData"];
+export type TokenUpdateEventData = S36["TokenUpdateEventData"];
+export type MetricUpdateEventData = S36["MetricUpdateEventData"];
+
 /** 六個設定分類（順序＝契約：model,agent,execution,monitor,autoclaude,sdd） */
 export const CONFIG_CATEGORIES: readonly ConfigCategory[] = [
   "model",

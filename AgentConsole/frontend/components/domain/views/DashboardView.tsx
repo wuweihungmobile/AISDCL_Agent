@@ -14,8 +14,15 @@ import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/states";
 import { StatusLabel } from "@/components/ui/status-dot";
-import { useAllProjects, useNotificationSummary, useSignoffQueue } from "@/lib/api/queries";
+import {
+  useAllProjects,
+  useLatestRuns,
+  useNotificationSummary,
+  useSignoffQueue,
+  useWeekCompletedTasks,
+} from "@/lib/api/queries";
 import { useAuth } from "@/lib/auth/AuthProvider";
+import { weekStart } from "@/lib/domain/metrics";
 import { projectStatus } from "@/lib/domain/status";
 import { percent } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -63,7 +70,10 @@ function KpiCard({
 /**
  * 總覽儀表板（設計稿 1）：四張 KPI 卡、進行中的執行、待人工審批。
  * KPI：活躍專案數由專案 API 算；待審批草案數取 GET /notifications/summary 的 pendingSignoffs（跨專案，含目標、任務與匯入草案，
- * 契約 §4.5 G-06，取代 Phase 2 前端只算專案與草案目標的近似值）；後兩張（本週完成任務、執行中 run）等 Phase 5 監控 API，先顯示「—」。
+ * 契約 §4.5 G-06，取代 Phase 2 前端只算專案與草案目標的近似值）；
+ * 本週完成任務數＝各專案 task-trend（from＝本週一 00:00、bucket=DAY）的 completed 加總（契約 §4.6 G-G3、主控裁決：沒有全域端點，
+ * 前端聚合；近似值，專案多時只取最近更新的前 30 個）；執行中 run 數＝各 EXECUTING 專案「最新批次」仍在跑的計數（契約 §4.5 G-07）。
+ * 「進行中的執行」卡列 EXECUTING 專案與其最新批次的進度（tasksCompleted／tasksTotal）。
  * 「待人工審批」卡的清單仍由專案／目標 API 組（可直接點「審批」的項目）。
  */
 export function DashboardView() {
@@ -73,11 +83,21 @@ export function DashboardView() {
   const summary = useNotificationSummary();
   const pendingSignoffs = summary.data?.pendingSignoffs;
   const [signoff, setSignoff] = useState<SignoffTarget | null>(null);
+  // 本週一 00:00：頁面開著期間固定（跨過週一午夜才要重開頁面，與其他輪詢型數字一樣不為此特別處理）
+  const [weekStartIso] = useState(() => weekStart().toISOString());
 
   const projects = all.data?.content ?? [];
   const live = projects.filter((p) => p.status === "EXECUTING");
   const active = projects.filter((p) => !["COMPLETED", "FAILED", "ARCHIVED"].includes(p.status));
   const loading = all.isLoading;
+
+  const weekly = useWeekCompletedTasks(projects, weekStartIso);
+  const latest = useLatestRuns(live.map((p) => p.id));
+  // 專案 EXECUTING 但最新批次已不在跑（例如剛結束、專案狀態還沒更新）不算；批次資料還沒回來時當作在跑
+  const liveRunCount = live.filter((p) => {
+    const run = latest.byProject[p.id];
+    return !run || run.status === "RUNNING" || run.status === "INITIALIZING";
+  }).length;
 
   return (
     <div>
@@ -125,15 +145,23 @@ export function DashboardView() {
                   testId="kpi-week-done"
                   label="本週完成任務數"
                   icon={ListChecks}
-                  value="—"
-                  delta="Phase 5 接監控 API"
+                  value={weekly.loading ? "—" : String(weekly.total)}
+                  delta={
+                    weekly.loading
+                      ? "統計中…"
+                      : weekly.partial
+                        ? "部分專案查詢失敗，數字可能偏低"
+                        : `本週一起 · 跨 ${weekly.projects} 個專案（近似值）`
+                  }
+                  tone={weekly.partial ? "accent" : "primary"}
                 />
                 <KpiCard
                   testId="kpi-runs"
                   label="執行中 run 數"
                   icon={Flame}
-                  value="—"
-                  delta="Phase 5 接監控 API"
+                  value={latest.loading ? "—" : String(liveRunCount)}
+                  delta={latest.loading ? "查詢中…" : liveRunCount > 0 ? "進行中的執行批次" : "目前沒有執行中的批次"}
+                  tone={liveRunCount > 0 ? "primary" : "muted"}
                 />
               </>
             )}
@@ -152,26 +180,33 @@ export function DashboardView() {
               ) : live.length === 0 ? (
                 <EmptyState title="目前沒有執行中的專案" description="專案進入「執行中」狀態後會顯示在這裡。" />
               ) : (
-                live.map((p) => (
-                  <div key={p.id} data-testid="active-run" className="border-t border-wg-line py-3.5">
-                    <div className="mb-2 flex items-center justify-between gap-3">
-                      <Link
-                        href={`/projects/${p.id}`}
-                        className="truncate text-[15px] font-semibold text-wg-text transition-colors hover:text-wg-primary"
-                      >
-                        {p.name}
-                      </Link>
-                      <StatusLabel meta={projectStatus(p.status)} live className="shrink-0 text-[13px]" />
+                live.map((p) => {
+                  // 進度取最新批次（契約 §4.5 G-07：tasksCompleted／tasksTotal）；批次資料還沒回來前退回專案本身的計數
+                  const run = latest.byProject[p.id];
+                  const done = run ? run.tasksCompleted : p.tasksDone;
+                  const total = run ? run.tasksTotal : p.tasksCount;
+                  return (
+                    <div key={p.id} data-testid="active-run" className="border-t border-wg-line py-3.5">
+                      <div className="mb-2 flex items-center justify-between gap-3">
+                        <Link
+                          href={`/projects/${p.id}/execute`}
+                          className="truncate text-[15px] font-semibold text-wg-text transition-colors hover:text-wg-primary"
+                        >
+                          {p.name}
+                        </Link>
+                        <StatusLabel meta={projectStatus(p.status)} live className="shrink-0 text-[13px]" />
+                      </div>
+                      <Progress value={percent(done, total)} label={`${p.name} 任務完成度`} />
+                      <div className="mt-1.5 flex justify-between text-xs text-wg-muted">
+                        <span data-testid="active-run-progress">
+                          {run ? `Run #${run.runNumber} · ` : ""}
+                          {done} / {total} 任務完成
+                        </span>
+                        <span>{percent(done, total)}%</span>
+                      </div>
                     </div>
-                    <Progress value={percent(p.tasksDone, p.tasksCount)} label={`${p.name} 任務完成度`} />
-                    <div className="mt-1.5 flex justify-between text-xs text-wg-muted">
-                      <span>
-                        {p.tasksDone} / {p.tasksCount} 任務完成
-                      </span>
-                      <span>{percent(p.tasksDone, p.tasksCount)}%</span>
-                    </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </Card>
 

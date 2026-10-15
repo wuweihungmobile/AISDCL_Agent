@@ -5,9 +5,13 @@ import {
   ApiError,
   apiDownload,
   apiRequest,
+  apiRequestWithHeaders,
   describeError,
   filenameFromDisposition,
+  getFreshAccessToken,
+  renewSession,
   setUnauthorizedHandler,
+  TOKEN_RENEW_MARGIN_MS,
 } from "./client";
 
 const SESSION: Session = {
@@ -179,6 +183,75 @@ describe("API client：檔案下載（apiDownload）", () => {
     [null, null],
   ])("filenameFromDisposition(%s) → %s", (header, expected) => {
     expect(filenameFromDisposition(header)).toBe(expected);
+  });
+});
+
+describe("API client：回應標頭（apiRequestWithHeaders）與自訂 Accept", () => {
+  it("連同回應標頭一併回傳（審核的 X-Follow-Up-Run-Id）；204 的 data 為 undefined", async () => {
+    saveSession(SESSION);
+    stubFetch(() => new Response(null, { status: 204, headers: { "X-Follow-Up-Run-Id": "run-2" } }));
+    const out = await apiRequestWithHeaders<void>("/api/v1/executions/r/review/v", { method: "POST", body: { decision: "SKIP" } });
+    expect(out.data).toBeUndefined();
+    expect(out.headers.get("X-Follow-Up-Run-Id")).toBe("run-2");
+  });
+
+  it("失敗照常丟 ApiError；accept 選項改寫 Accept 標頭", async () => {
+    const fetchMock = stubFetch(() => json({ code: 409, message: "審核項已處理", reason: "審核項已處理", errors: [] }, 409));
+    const e = (await apiRequestWithHeaders("/x", { accept: "text/csv" }).catch((x: unknown) => x)) as ApiError;
+    expect(e).toBeInstanceOf(ApiError);
+    expect(e.reason).toBe("審核項已處理");
+    expect((fetchMock.mock.calls[0][1]?.headers as Record<string, string>).Accept).toBe("text/csv");
+  });
+});
+
+describe("API client：給 SSE 用的 token 換新（EventSource 不能帶標頭、看不到 401）", () => {
+  const refreshReply = () => ok({ accessToken: "access-new", refreshToken: "refresh-new", expiresIn: 1800, role: "OPERATOR" });
+
+  it("token 還有效：getFreshAccessToken 直接回現值，不打換新端點", async () => {
+    saveSession({ ...SESSION, expiresAt: Date.now() + TOKEN_RENEW_MARGIN_MS * 10 });
+    const fetchMock = stubFetch(refreshReply);
+    await expect(getFreshAccessToken()).resolves.toBe("access-old");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("快到期（在換新餘裕內）：先換新再回新 token（網址上的 token 不能是快過期的）", async () => {
+    saveSession({ ...SESSION, expiresAt: Date.now() + TOKEN_RENEW_MARGIN_MS - 1_000 });
+    const fetchMock = stubFetch(refreshReply);
+    await expect(getFreshAccessToken()).resolves.toBe("access-new");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(loadSession()?.refreshToken).toBe("refresh-new");
+  });
+
+  it("force（連線被關、疑似 401）：不管到期時間一律換新", async () => {
+    saveSession({ ...SESSION, expiresAt: Date.now() + 3_600_000 });
+    stubFetch(refreshReply);
+    await expect(getFreshAccessToken({ force: true })).resolves.toBe("access-new");
+  });
+
+  it("沒有登入狀態回 null；換新失敗＝登入失效（清 session、呼叫處理器）並回 null", async () => {
+    stubFetch(refreshReply);
+    await expect(getFreshAccessToken()).resolves.toBeNull();
+
+    saveSession(SESSION);
+    const onUnauthorized = vi.fn();
+    setUnauthorizedHandler(onUnauthorized);
+    stubFetch(() => json({ code: 401, message: "x", errors: [] }, 401));
+    await expect(getFreshAccessToken({ force: true })).resolves.toBeNull();
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
+    expect(loadSession()).toBeNull();
+  });
+
+  it("renewSession：成功回 true 並寫回新 token；沒有 session 回 false 且觸發登入失效", async () => {
+    saveSession(SESSION);
+    stubFetch(refreshReply);
+    await expect(renewSession()).resolves.toBe(true);
+    expect(loadSession()?.accessToken).toBe("access-new");
+
+    clearSession();
+    const onUnauthorized = vi.fn();
+    setUnauthorizedHandler(onUnauthorized);
+    await expect(renewSession()).resolves.toBe(false);
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
   });
 });
 

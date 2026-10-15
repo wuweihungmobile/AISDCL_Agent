@@ -56,11 +56,32 @@ const EXPECTED: Array<[fn: keyof typeof api, call: () => Promise<unknown>, metho
   ["resetCategory", () => api.resetCategory("execution"), "POST", "/api/v1/settings/execution/reset"],
   ["testConnection", () => api.testConnection({ apiUrl: "https://api.minimax.io/v1/text/chatcompletion_v2" }), "POST", "/api/v1/settings/test-connection", { apiUrl: "https://api.minimax.io/v1/text/chatcompletion_v2" }],
   ["listSettingsHistory", () => api.listSettingsHistory({ category: "execution", page: 1, size: 20 }), "GET", "/api/v1/settings/history?category=execution&page=1&size=20"],
+
+  // ── Phase 4：專案執行（契約 §1.2）──
+  ["executeProject", () => api.executeProject("P", { autonomyLevel: 4, tokenBudget: 100000, scope: { mode: "ALL" } }), "POST", "/api/v1/projects/P/execute", { autonomyLevel: 4, tokenBudget: 100000, scope: { mode: "ALL" } }],
+  ["listProjectExecutions", () => api.listProjectExecutions("P", { page: 0, size: 1, sort: "startedAt,desc" }), "GET", "/api/v1/projects/P/executions?page=0&size=1&sort=startedAt%2Cdesc"],
+  ["getExecution", () => api.getExecution("R"), "GET", "/api/v1/executions/R"],
+  ["pauseExecution", () => api.pauseExecution("R"), "POST", "/api/v1/executions/R/pause"],
+  ["resumeExecution", () => api.resumeExecution("R"), "POST", "/api/v1/executions/R/resume"],
+  ["cancelExecution", () => api.cancelExecution("R"), "POST", "/api/v1/executions/R/cancel"],
+  ["listExecutionSteps", () => api.listExecutionSteps("R", { size: 200, afterSeq: 41 }), "GET", "/api/v1/executions/R/steps?size=200&afterSeq=41"],
+  ["getExecutionDag", () => api.getExecutionDag("R"), "GET", "/api/v1/executions/R/dag"],
+  ["listExecutionCheckpoints", () => api.listExecutionCheckpoints("R"), "GET", "/api/v1/executions/R/checkpoints"],
+  ["restoreExecution", () => api.restoreExecution("R", "C"), "POST", "/api/v1/executions/R/restore/C"],
+  ["reviewExecution", () => api.reviewExecution("R", "V", { decision: "RETRY", comment: "再試一次" }), "POST", "/api/v1/executions/R/review/V", { decision: "RETRY", comment: "再試一次" }],
+
+  // ── Phase 5：專案監控（契約 §1.3）──
+  ["getProjectMetrics", () => api.getProjectMetrics("P", { runId: "R", from: "2026-10-14T00:00:00Z" }), "GET", "/api/v1/monitor/projects/P/metrics?runId=R&from=2026-10-14T00%3A00%3A00Z"],
+  ["getTokenTrend", () => api.getTokenTrend("P", { bucket: "HOUR" }), "GET", "/api/v1/monitor/projects/P/token-trend?bucket=HOUR"],
+  ["getTaskTrend", () => api.getTaskTrend("P", { bucket: "DAY", runId: "R" }), "GET", "/api/v1/monitor/projects/P/task-trend?bucket=DAY&runId=R"],
+  ["listProjectAlerts", () => api.listProjectAlerts("P", { acknowledged: false, limit: 50 }), "GET", "/api/v1/monitor/projects/P/alerts?acknowledged=false&limit=50"],
+  ["acknowledgeAlert", () => api.acknowledgeAlert("A"), "POST", "/api/v1/monitor/alerts/A/acknowledge"],
+  ["listProjectLogs", () => api.listProjectLogs("P", { level: "ERROR", q: "失敗", order: "desc", page: 0, size: 50 }), "GET", "/api/v1/monitor/projects/P/logs?level=ERROR&q=%E5%A4%B1%E6%95%97&order=desc&page=0&size=50"],
 ];
 
 /** 不走 JSON 的端點：上傳（multipart）與下載（Blob）。 */
 const MULTIPART = ["uploadImport", "importSettings"];
-const DOWNLOAD = ["exportSettings"];
+const DOWNLOAD = ["exportSettings", "downloadProjectReport"];
 
 beforeEach(() => {
   vi.stubEnv("NEXT_PUBLIC_API_URL", "");
@@ -76,10 +97,10 @@ function okJson(data: unknown = {}): Response {
 }
 
 describe("endpoints：每個後端端點一個函式", () => {
-  it("匯出的函式恰好是 Phase 1～3＋6 對應的 42 個（Phase 1+2 共 22、匯入 9、通知 1、設定 10；不多不少）", () => {
+  it("匯出的函式恰好是 Phase 1～6 對應的 60 個（Phase 1+2 共 22、匯入 9、通知 1、設定 10、執行 11、監控 7；不多不少）", () => {
     const names = [...EXPECTED.map(([name]) => name), ...MULTIPART, ...DOWNLOAD];
     expect(Object.keys(api).sort()).toEqual(names.sort());
-    expect(names).toHaveLength(42);
+    expect(names).toHaveLength(60);
   });
 
   it.each(EXPECTED)("%s → %s %s", async (_name, call, method, path, body) => {
@@ -129,6 +150,57 @@ describe("endpoints：檔案上傳（multipart）與下載（Blob）", () => {
     expect(init.method).toBe("POST");
     expect(result.filename).toBe("aisdlc-settings-20261015.json");
     expect(JSON.parse(await result.blob.text())).toEqual({ version: 1, configs: [] });
+  });
+
+  it("downloadProjectReport：GET 取回 CSV Blob，檔名取自 Content-Disposition；Accept 帶 text/csv（契約 §1.3.7），錯誤封包仍可協商", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response("#report,AISDLC", {
+          status: 200,
+          headers: {
+            "content-type": "text/csv; charset=UTF-8",
+            "content-disposition": 'attachment; filename="monitor-report-0b8c5d1e-20261015-0840.csv"',
+          },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await api.downloadProjectReport("P", { format: "csv", runId: "R", from: "2026-10-14T00:00:00Z" });
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("/api/v1/monitor/projects/P/report?format=csv&runId=R&from=2026-10-14T00%3A00%3A00Z");
+    expect(init.method ?? "GET").toBe("GET");
+    const accept = (init.headers as Record<string, string>).Accept;
+    expect(accept.startsWith("text/csv")).toBe(true);
+    expect(accept).toContain("application/json");
+    expect(result.filename).toBe("monitor-report-0b8c5d1e-20261015-0840.csv");
+    expect(await result.blob.text()).toBe("#report,AISDLC");
+  });
+
+  it("downloadProjectReport：PDF 回 501 時照常解成 ApiError（reason 保留，前端據此顯示「尚未提供」）", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ code: 501, message: "尚未提供", reason: "PDF 報表尚未提供（W5）", errors: [], traceId: "tr-501" }), {
+            status: 501,
+            headers: { "content-type": "application/json" },
+          }),
+      ),
+    );
+    const e = (await api.downloadProjectReport("P", { format: "pdf" }).catch((x: unknown) => x)) as { status: number; reason: string };
+    expect(e.status).toBe(501);
+    expect(e.reason).toBe("PDF 報表尚未提供（W5）");
+  });
+
+  it("reviewExecution：204 無本文；SKIP／無還原點的 RETRY 以回應標頭 X-Follow-Up-Run-Id 回傳後續批次 id，其餘回 null", async () => {
+    const replies = [
+      new Response(null, { status: 204, headers: { "X-Follow-Up-Run-Id": "11111111-2222-4333-8444-555555555555" } }),
+      new Response(null, { status: 204 }),
+    ];
+    vi.stubGlobal("fetch", vi.fn(async () => replies.shift() as Response));
+    await expect(api.reviewExecution("R", "V", { decision: "SKIP" })).resolves.toEqual({
+      followUpRunId: "11111111-2222-4333-8444-555555555555",
+    });
+    await expect(api.reviewExecution("R", "V", { decision: "APPROVE", comment: "ok" })).resolves.toEqual({ followUpRunId: null });
   });
 
   it("加密鍵重置的 confirm 只在需要時才帶（沒帶＝不出現在網址）", async () => {

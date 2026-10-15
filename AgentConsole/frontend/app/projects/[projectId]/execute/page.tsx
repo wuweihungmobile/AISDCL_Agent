@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 
-import { ProjectShellPage } from "@/components/domain/ProjectShellPage";
+import { ExecuteView } from "@/components/domain/execute/ExecuteView";
 
 export const metadata: Metadata = { title: "專案執行" };
 
 export default function ExecutePage() {
-  return <ProjectShellPage kind="execute" />;
+  return <ExecuteView />;
 }

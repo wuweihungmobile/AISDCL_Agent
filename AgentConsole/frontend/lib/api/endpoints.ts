@@ -4,8 +4,10 @@
  * 這裡不做快取、不碰 React，快取與失效策略在 lib/api/queries.ts（TanStack Query）。
  * Phase 3～6 的函式名取契約 YAML 的 operationId。
  */
-import { apiDownload, apiRequest, type DownloadResult } from "./client";
+import { apiDownload, apiRequest, apiRequestWithHeaders, type DownloadResult } from "./client";
 import type {
+  Alert,
+  Checkpoint,
   Config,
   ConfigCategory,
   ConfigHistory,
@@ -13,30 +15,48 @@ import type {
   CreateGoalRequest,
   CreateProjectRequest,
   CreateTaskRequest,
+  Dag,
+  ExecutionRun,
+  ExecutionRunDetail,
+  ExecutionRunSummary,
+  ExecutionStep,
   GoalDetail,
   GoalResponse,
   GoalSummary,
   ImportRecord,
   ImportRecordDetail,
   ImportSettingsResult,
+  ListAlertsParams,
+  ListExecutionsParams,
   ListImportsParams,
+  ListLogsParams,
   ListProjectsParams,
   ListSettingsHistoryParams,
+  ListStepsParams,
+  LogEntry,
+  MonitorRangeParams,
+  MonitorTrendParams,
   NotificationSummary,
   PageData,
   ParseOptions,
   ParseResult,
   ParsedResult,
   ProjectDetail,
+  ProjectMetrics,
   ProjectResponse,
   ProjectSummary,
+  ReportParams,
+  ReviewBody,
+  StartExecutionRequest,
   TaskDetail,
   TaskResponse,
   TaskSummary,
+  TaskTrendPoint,
   TestConnectionRequest,
   TextImportRequest,
   TokenGuardRequest,
   TokenResponse,
+  TokenTrendPoint,
   UpdateConfigRequest,
   UpdateGoalRequest,
   UpdateProjectRequest,
@@ -292,4 +312,162 @@ export function importSettings(file: File): Promise<ImportSettingsResult> {
   const form = new FormData();
   form.append("file", file);
   return apiRequest<ImportSettingsResult>("/api/v1/settings/import", { method: "POST", body: form });
+}
+
+// ── 專案執行（Phase 4；契約 §1.2；API-EXE-01～14）──────────────────────────────
+/**
+ * 啟動執行（OPERATOR）。body 可為 `{}`（全部省略＝專案預設）。
+ * 驗證順序固定：404 → 400 → 409（執行中／狀態／未 signoff）→ 400 範圍 → 409 範圍 → 422 物化 → Bridge（409／422／502／504）。
+ */
+export function executeProject(projectId: string, body: StartExecutionRequest = {}): Promise<ExecutionRun> {
+  return apiRequest<ExecutionRun>(`/api/v1/projects/${projectId}/execute`, { method: "POST", body });
+}
+
+/** 專案的執行批次列表（預設 startedAt,desc；執行頁挑目前批次、監控頁「執行批次」下拉與批次比較用）。 */
+export function listProjectExecutions(
+  projectId: string,
+  params: ListExecutionsParams = {},
+  opts: Opts = {},
+): Promise<PageData<ExecutionRunSummary>> {
+  return apiRequest<PageData<ExecutionRunSummary>>(`/api/v1/projects/${projectId}/executions`, {
+    query: { ...params },
+    signal: opts.signal,
+  });
+}
+
+/** 執行狀態：Bridge 不可達時仍回 200（bridge.connected=false，進度為 DB 衍生值）。 */
+export function getExecution(runId: string, opts: Opts = {}): Promise<ExecutionRunDetail> {
+  return apiRequest<ExecutionRunDetail>(`/api/v1/executions/${runId}`, { signal: opts.signal });
+}
+
+/** 暫停（下一個步驟邊界生效）：回應 RUNNING＋bridgeStatus=PAUSING，PAUSED 由 SSE status-change 通知。 */
+export function pauseExecution(runId: string): Promise<ExecutionRun> {
+  return apiRequest<ExecutionRun>(`/api/v1/executions/${runId}/pause`, { method: "POST" });
+}
+
+/** 恢復（PAUSED 同進度接續）：後端會重驗範圍內 signoff。 */
+export function resumeExecution(runId: string): Promise<ExecutionRun> {
+  return apiRequest<ExecutionRun>(`/api/v1/executions/${runId}/resume`, { method: "POST" });
+}
+
+/** 取消：RUNNING／PAUSED 才可（其餘 409）；RUNNING 回 bridgeStatus=CANCELLING，PAUSED 即時 CANCELLED。 */
+export function cancelExecution(runId: string): Promise<ExecutionRun> {
+  return apiRequest<ExecutionRun>(`/api/v1/executions/${runId}/cancel`, { method: "POST" });
+}
+
+/** 步驟分頁（依 stepNumber 升冪；stepNumber 是事件 seq）：SSE 斷線回補用 afterSeq（嚴格大於）。 */
+export function listExecutionSteps(
+  runId: string,
+  params: ListStepsParams = {},
+  opts: Opts = {},
+): Promise<PageData<ExecutionStep>> {
+  return apiRequest<PageData<ExecutionStep>>(`/api/v1/executions/${runId}/steps`, {
+    query: { ...params },
+    signal: opts.signal,
+  });
+}
+
+export function getExecutionDag(runId: string, opts: Opts = {}): Promise<Dag> {
+  return apiRequest<Dag>(`/api/v1/executions/${runId}/dag`, { signal: opts.signal });
+}
+
+/** 斷點列表（舊→新；Bridge 於每個步驟完成時自動記錄）。 */
+export function listExecutionCheckpoints(runId: string, opts: Opts = {}): Promise<Checkpoint[]> {
+  return apiRequest<Checkpoint[]>(`/api/v1/executions/${runId}/checkpoints`, { signal: opts.signal });
+}
+
+/** 從歷史斷點還原（只限專案最新批次；PAUSED 與三個終態可）。終態 run 還原後原 SSE 已關閉，須重新連線。 */
+export function restoreExecution(runId: string, checkpointId: string): Promise<ExecutionRun> {
+  return apiRequest<ExecutionRun>(`/api/v1/executions/${runId}/restore/${checkpointId}`, { method: "POST" });
+}
+
+/**
+ * 審核（204）。路徑的 stepId 是 review_requests.id（不是 playbook 的 step_id；契約 §0.6）。
+ * SKIP 與「找不到還原點的 RETRY」會另開後續批次，其 id 在回應標頭 X-Follow-Up-Run-Id（否則為 null）。
+ */
+export async function reviewExecution(
+  runId: string,
+  reviewId: string,
+  body: ReviewBody,
+): Promise<{ followUpRunId: string | null }> {
+  const { headers } = await apiRequestWithHeaders<void>(`/api/v1/executions/${runId}/review/${reviewId}`, {
+    method: "POST",
+    body,
+  });
+  return { followUpRunId: headers.get("X-Follow-Up-Run-Id") };
+}
+
+// ── 專案監控（Phase 5；契約 §1.3；API-MON-01～07）──────────────────────────────
+export function getProjectMetrics(
+  projectId: string,
+  params: MonitorRangeParams = {},
+  opts: Opts = {},
+): Promise<ProjectMetrics> {
+  return apiRequest<ProjectMetrics>(`/api/v1/monitor/projects/${projectId}/metrics`, {
+    query: { ...params },
+    signal: opts.signal,
+  });
+}
+
+export function getTokenTrend(
+  projectId: string,
+  params: MonitorTrendParams = {},
+  opts: Opts = {},
+): Promise<TokenTrendPoint[]> {
+  return apiRequest<TokenTrendPoint[]>(`/api/v1/monitor/projects/${projectId}/token-trend`, {
+    query: { ...params },
+    signal: opts.signal,
+  });
+}
+
+export function getTaskTrend(
+  projectId: string,
+  params: MonitorTrendParams = {},
+  opts: Opts = {},
+): Promise<TaskTrendPoint[]> {
+  return apiRequest<TaskTrendPoint[]>(`/api/v1/monitor/projects/${projectId}/task-trend`, {
+    query: { ...params },
+    signal: opts.signal,
+  });
+}
+
+/** 告警（由新到舊）；acknowledged 省略＝全部。 */
+export function listProjectAlerts(
+  projectId: string,
+  params: ListAlertsParams = {},
+  opts: Opts = {},
+): Promise<Alert[]> {
+  return apiRequest<Alert[]>(`/api/v1/monitor/projects/${projectId}/alerts`, {
+    query: { ...params },
+    signal: opts.signal,
+  });
+}
+
+/** 確認告警（OPERATOR；204；冪等：已確認者再呼叫仍 204，不改寫第一次的確認者與時間）。 */
+export function acknowledgeAlert(alertId: string): Promise<void> {
+  return apiRequest<void>(`/api/v1/monitor/alerts/${alertId}/acknowledge`, { method: "POST" });
+}
+
+/** 日誌查詢（由既有資料衍生，不含引擎原始 stdout）：等級、關鍵字、任務、排序與分頁。 */
+export function listProjectLogs(
+  projectId: string,
+  params: ListLogsParams = {},
+  opts: Opts = {},
+): Promise<PageData<LogEntry>> {
+  return apiRequest<PageData<LogEntry>>(`/api/v1/monitor/projects/${projectId}/logs`, {
+    query: { ...params },
+    signal: opts.signal,
+  });
+}
+
+/**
+ * 匯出報表：不包封包的檔案下載（CSV 必做；PDF 在 W5 前一律回 501）。
+ * 契約要求呼叫端送 Accept: text/csv（或萬用型別）；補上 application/json 是為了讓錯誤封包（400／404／501）也能協商出來，
+ * 否則 Spring 對「只接受 text/csv」的請求會把 JSON 錯誤封包變成 406。
+ */
+export function downloadProjectReport(projectId: string, params: ReportParams = {}): Promise<DownloadResult> {
+  return apiDownload(`/api/v1/monitor/projects/${projectId}/report`, {
+    query: { ...params },
+    accept: "text/csv,application/json;q=0.9,*/*;q=0.8",
+  });
 }

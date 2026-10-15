@@ -5,8 +5,8 @@ import { SHOTS, apiDelete, apiPost, apiToken, loginViaStorage, uniq } from "./he
 /**
  * 九個路由都能點、各有標題列；四區塊每頁恰好一份（版面只住 app/layout.tsx）；
  * 響應式（PRD §8.3）：≥1280 完整側欄、768～1279 圖示側欄、<768 底部 Tab。
- * （/import 與 /settings 已由 W4-F1 換成實際頁面：它們的行為由 import.mock.spec.ts、settings.mock.spec.ts 驗證，
- *  這裡只留「導覽點得到、標題列在、四區塊各一份」；執行／監控仍是占位殼，等 W4-F2。）
+ * （/import、/settings 已由 W4-F1、/execute 與 /monitor 已由 W4-F2 換成實際頁面：它們的行為由 import／settings／execute／monitor 的 *.mock.spec.ts 驗證，
+ *  這裡只留「導覽點得到、標題列在、四區塊各一份」；這幾頁的截圖也改由各自的 mock spec 產出。）
  */
 type Created = { id: string };
 const name = uniq("E2E 版面專案");
@@ -45,12 +45,11 @@ test("導覽六項都能點到對應頁面，每頁四區塊各一份", async ({
   await nav.getByRole("link", { name: "執行中心" }).click();
   await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/execute$`));
   await expect(page.getByRole("heading", { name: new RegExp(`專案執行：${name}`) })).toBeVisible();
-  await expect(page.getByTestId("phase-placeholder")).toContainText("Phase 4");
-  await page.screenshot({ path: `${SHOTS}/07-execute-shell.png` });
+  await expect(page.getByTestId("execute-view")).toBeVisible();
   await nav.getByRole("link", { name: "監控中心" }).click();
   await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/monitor$`));
   await expect(page.getByRole("heading", { name: new RegExp(`專案監控：${name}`) })).toBeVisible();
-  await page.screenshot({ path: `${SHOTS}/08-monitor-shell.png` });
+  await expect(page.getByTestId("monitor-view")).toBeVisible();
   for (const r of REGIONS) await expect(page.locator(`[data-region="${r}"]`)).toHaveCount(1);
 });
 

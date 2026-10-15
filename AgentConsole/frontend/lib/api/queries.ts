@@ -16,7 +16,11 @@ import {
 } from "@tanstack/react-query";
 
 import { useAuth } from "@/lib/auth/AuthProvider";
+import { bucketFor, rangeParams, type RangeId } from "@/lib/domain/metrics";
+import { isRunTerminal } from "@/lib/domain/status";
 import {
+  acknowledgeAlert,
+  cancelExecution,
   confirmImport,
   createGoal,
   createProject,
@@ -24,28 +28,44 @@ import {
   deleteGoal,
   deleteProject,
   deleteTask,
+  downloadProjectReport,
   editImportResult,
+  executeProject,
   exportSettings,
+  getExecution,
+  getExecutionDag,
   getGoal,
   getImport,
   getNotificationSummary,
   getProject,
+  getProjectMetrics,
   getTask,
+  getTaskTrend,
+  getTokenTrend,
   importSettings,
   importText,
+  listExecutionCheckpoints,
+  listExecutionSteps,
   listGoals,
   listImports,
+  listProjectAlerts,
+  listProjectExecutions,
+  listProjectLogs,
   listProjects,
   listSettings,
   listSettingsByCategory,
   listSettingsHistory,
   listTasks,
   parseImport,
+  pauseExecution,
   rejectImport,
   reorderGoals,
   resetCategory,
   resetSetting,
+  restoreExecution,
+  resumeExecution,
   retryTask,
+  reviewExecution,
   signoffGoal,
   signoffImport,
   signoffProject,
@@ -59,19 +79,31 @@ import {
   uploadImport,
 } from "./endpoints";
 import type {
+  Alert,
   Config,
   ConfigCategory,
   CreateGoalRequest,
   CreateProjectRequest,
   CreateTaskRequest,
+  ExecutionRun,
+  ExecutionRunDetail,
+  ExecutionRunSummary,
+  ExecutionStep,
   ImportRecordDetail,
+  ListAlertsParams,
+  ListExecutionsParams,
   ListImportsParams,
+  ListLogsParams,
   ListProjectsParams,
   ListSettingsHistoryParams,
   ParseOptions,
   ParsedResult,
   ParseResult,
   ProjectDetail,
+  ProjectSummary,
+  ReportParams,
+  ReviewDecision,
+  StartExecutionRequest,
   TestConnectionRequest,
   TextImportRequest,
   TokenGuardRequest,
@@ -95,6 +127,17 @@ export const qk = {
   settings: ["settings", "all"] as const,
   settingsCategory: (category: ConfigCategory) => ["settings", "category", category] as const,
   settingsHistory: (params: ListSettingsHistoryParams) => ["settings", "history", params] as const,
+  executions: (projectId: string, params: ListExecutionsParams) => ["executions", "list", projectId, params] as const,
+  execution: (runId: string) => ["executions", "detail", runId] as const,
+  dag: (runId: string) => ["executions", "dag", runId] as const,
+  checkpoints: (runId: string) => ["executions", "checkpoints", runId] as const,
+  steps: (runId: string) => ["executions", "steps", runId] as const,
+  metrics: (projectId: string, q: MonitorQuery) => ["monitor", "metrics", projectId, q] as const,
+  tokenTrend: (projectId: string, q: MonitorQuery) => ["monitor", "token-trend", projectId, q] as const,
+  taskTrend: (projectId: string, q: MonitorQuery) => ["monitor", "task-trend", projectId, q] as const,
+  alerts: (projectId: string, params: ListAlertsParams) => ["monitor", "alerts", projectId, params] as const,
+  logs: (projectId: string, q: LogQuery) => ["monitor", "logs", projectId, q] as const,
+  weekCompleted: (projectId: string, weekStartIso: string) => ["dashboard", "week-completed", projectId, weekStartIso] as const,
 };
 
 const POLL_MS = 30_000;
@@ -549,4 +592,356 @@ export function useImportSettings() {
     mutationFn: (file: File) => importSettings(file),
     onSuccess: () => invalidateSettings(qc),
   });
+}
+
+// ══ 專案執行（契約 §1.2）═════════════════════════════════════════════════════
+/** 批次詳情的保險輪詢：SSE 才是即時來源，這條只在 SSE 斷線時兜底；終態不輪詢。遠高於契約的 10 秒地板。 */
+export const EXECUTION_POLL_MS = 15_000;
+export const DAG_POLL_MS = 20_000;
+export const STEPS_PAGE_SIZE = 200;
+/** 時間軸最多取幾頁步驟（每頁 200）：避免超長批次拖垮輪詢與限流額度。 */
+export const STEPS_MAX_PAGES = 5;
+
+/** 批次的狀態或專案狀態改變後要重抓的東西：批次列表／詳情／DAG／專案三層（專案會 EXECUTING⇄READY）／通知摘要。 */
+export function invalidateRuns(qc: QueryClient): Promise<unknown> {
+  return Promise.all([
+    qc.invalidateQueries({ queryKey: ["executions"] }),
+    invalidateTree(qc),
+    qc.invalidateQueries({ queryKey: ["notifications"] }),
+  ]);
+}
+
+/** 專案的執行批次列表（預設最新在前）；執行頁與監控頁的批次下拉、Dashboard 的最新批次進度共用。 */
+export function useProjectExecutions(
+  projectId: string | undefined,
+  params: ListExecutionsParams = { size: 20, sort: "startedAt,desc" },
+  opts: { pollMs?: number | false } = {},
+) {
+  const enabled = useEnabled(Boolean(projectId));
+  return useQuery({
+    queryKey: qk.executions(projectId ?? "", params),
+    queryFn: ({ signal }) => listProjectExecutions(projectId as string, params, { signal }),
+    enabled,
+    staleTime: 5_000,
+    refetchInterval: opts.pollMs ?? false,
+  });
+}
+
+/** 批次詳情（含待審核項與 Bridge 連線資訊）；SSE 事件會直接修補這份快取，這裡的輪詢只是兜底。 */
+export function useExecution(runId: string | undefined | null) {
+  const enabled = useEnabled(Boolean(runId));
+  return useQuery({
+    queryKey: qk.execution(runId ?? ""),
+    queryFn: ({ signal }) => getExecution(runId as string, { signal }),
+    enabled,
+    staleTime: 2_000,
+    refetchInterval: (query) => (isRunTerminal(query.state.data?.status) ? false : EXECUTION_POLL_MS),
+  });
+}
+
+/** DAG（節點狀態是讀取當下的現況）；批次進行中才輪詢，即時變化靠 SSE 疊加。 */
+export function useExecutionDag(runId: string | undefined | null, live: boolean) {
+  const enabled = useEnabled(Boolean(runId));
+  return useQuery({
+    queryKey: qk.dag(runId ?? ""),
+    queryFn: ({ signal }) => getExecutionDag(runId as string, { signal }),
+    enabled,
+    staleTime: 5_000,
+    refetchInterval: live ? DAG_POLL_MS : false,
+  });
+}
+
+/** 斷點列表：只在還原對話框開著時才查。 */
+export function useCheckpoints(runId: string | undefined | null, open: boolean) {
+  const enabled = useEnabled(Boolean(runId) && open);
+  return useQuery({
+    queryKey: qk.checkpoints(runId ?? ""),
+    queryFn: ({ signal }) => listExecutionCheckpoints(runId as string, { signal }),
+    enabled,
+    staleTime: 0,
+  });
+}
+
+/**
+ * 一個批次的全部步驟事件（依 stepNumber＝事件 seq 升冪；事件時間軸的來源，契約 §4.3 M-12）：
+ * 以 afterSeq 當游標逐頁取，最多 STEPS_MAX_PAGES 頁。
+ */
+export function useExecutionSteps(runId: string | undefined | null, pollMs: number | false = false) {
+  const enabled = useEnabled(Boolean(runId));
+  return useQuery({
+    queryKey: qk.steps(runId ?? ""),
+    queryFn: async ({ signal }): Promise<ExecutionStep[]> => {
+      const out: ExecutionStep[] = [];
+      let after = 0;
+      for (let i = 0; i < STEPS_MAX_PAGES; i++) {
+        const page = await listExecutionSteps(
+          runId as string,
+          { size: STEPS_PAGE_SIZE, afterSeq: after > 0 ? after : undefined },
+          { signal },
+        );
+        out.push(...page.content);
+        if (page.content.length < STEPS_PAGE_SIZE) break;
+        after = page.content[page.content.length - 1].stepNumber;
+      }
+      return out;
+    },
+    enabled,
+    staleTime: 5_000,
+    refetchInterval: pollMs,
+  });
+}
+
+/** 把控制端點回的快照（ExecutionRun）合併進批次詳情快取：按鈕立刻反映新狀態，不等重抓。 */
+function patchDetailFromRun(qc: QueryClient, run: ExecutionRun): void {
+  qc.setQueryData<ExecutionRunDetail>(qk.execution(run.id), (old) =>
+    old
+      ? {
+          ...old,
+          ...run,
+          bridge: { ...old.bridge, status: run.bridgeStatus ?? old.bridge.status },
+        }
+      : old,
+  );
+}
+
+/** 啟動執行：成功後批次列表、專案（EXECUTING）、通知摘要全部重抓；呼叫端拿回新批次就切過去。 */
+export function useStartExecution() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { projectId: string; body: StartExecutionRequest }) => executeProject(v.projectId, v.body),
+    onSuccess: () => invalidateRuns(qc),
+  });
+}
+
+function useRunControl(fn: (runId: string) => Promise<ExecutionRun>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: (run) => {
+      patchDetailFromRun(qc, run);
+      return invalidateRuns(qc);
+    },
+  });
+}
+
+export const usePauseExecution = () => useRunControl(pauseExecution);
+export const useResumeExecution = () => useRunControl(resumeExecution);
+export const useCancelExecution = () => useRunControl(cancelExecution);
+
+/** 從歷史斷點還原：成功後原 SSE（終態 run 早已關閉）須重新連線，由 useRunStream 依批次狀態自行重連。 */
+export function useRestoreExecution() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { runId: string; checkpointId: string }) => restoreExecution(v.runId, v.checkpointId),
+    onSuccess: (run) => {
+      patchDetailFromRun(qc, run);
+      return invalidateRuns(qc);
+    },
+  });
+}
+
+/**
+ * 審核：先樂觀把該審核項從待審核清單拿掉（失敗還原），成功後重抓。
+ * 回傳 followUpRunId（SKIP／無還原點的 RETRY 會另開後續批次，契約 §1.2.11）。
+ */
+export function useReviewExecution() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { runId: string; reviewId: string; decision: ReviewDecision; comment?: string }) =>
+      reviewExecution(v.runId, v.reviewId, { decision: v.decision, ...(v.comment ? { comment: v.comment } : {}) }),
+    onMutate: async (v) => {
+      await qc.cancelQueries({ queryKey: qk.execution(v.runId) });
+      const previous = qc.getQueryData<ExecutionRunDetail>(qk.execution(v.runId));
+      qc.setQueryData<ExecutionRunDetail>(qk.execution(v.runId), (old) =>
+        old ? { ...old, pendingReviews: old.pendingReviews.filter((r) => r.id !== v.reviewId) } : old,
+      );
+      return { previous };
+    },
+    onError: (_error, v, ctx) => {
+      if (ctx?.previous) qc.setQueryData(qk.execution(v.runId), ctx.previous);
+    },
+    onSettled: () => invalidateRuns(qc),
+  });
+}
+
+// ══ 專案監控（契約 §1.3）═════════════════════════════════════════════════════
+/**
+ * 監控頁的輪詢間隔：同一使用者所有頁面共用每分鐘 100 次（契約 §0.4 第 4 點），監控頁約 9 個端點一起輪詢，
+ * 所以取 max(系統參數 monitor.refreshIntervalMs，15 秒)——契約只規定「不得小於」該參數，取大是允許的；
+ * 參數讀不到（例如權限或尚未載入）時用 30 秒。頁面不可見時 TanStack Query 預設暫停輪詢。
+ */
+export const MONITOR_POLL_FLOOR_MS = 15_000;
+export const MONITOR_DEFAULT_POLL_MS = 30_000;
+
+export function useMonitorPollMs(): number {
+  const settings = useSettingsCategory("monitor");
+  const raw = settings.data?.find((c) => c.key === "refreshIntervalMs")?.value;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.max(MONITOR_POLL_FLOOR_MS, n) : MONITOR_DEFAULT_POLL_MS;
+}
+
+/**
+ * 監控查詢的「身分」：時間範圍用 id（1h／24h／7d／30d），不用 from／to 時間戳——
+ * 時間戳每次都不同，放進查詢鍵會讓每次輪詢都變成新查詢；from／to 在 queryFn 內才依當下時間計算（rangeParams），視窗因此隨時間滾動。
+ * runId 省略＝專案全部批次。
+ */
+export type MonitorQuery = { runId?: string; range: RangeId };
+export type LogQuery = MonitorQuery & Pick<ListLogsParams, "level" | "q" | "taskId" | "order" | "page" | "size">;
+
+export function useProjectMetrics(projectId: string | undefined, q: MonitorQuery, pollMs: number | false) {
+  const enabled = useEnabled(Boolean(projectId));
+  return useQuery({
+    queryKey: qk.metrics(projectId ?? "", q),
+    queryFn: ({ signal }) =>
+      getProjectMetrics(projectId as string, { runId: q.runId, ...rangeParams(q.range) }, { signal }),
+    enabled,
+    placeholderData: keepPreviousData,
+    refetchInterval: pollMs,
+  });
+}
+
+export function useTokenTrend(projectId: string | undefined, q: MonitorQuery, pollMs: number | false) {
+  const enabled = useEnabled(Boolean(projectId));
+  return useQuery({
+    queryKey: qk.tokenTrend(projectId ?? "", q),
+    queryFn: ({ signal }) =>
+      getTokenTrend(projectId as string, { runId: q.runId, ...rangeParams(q.range), bucket: bucketFor(q.range) }, { signal }),
+    enabled,
+    placeholderData: keepPreviousData,
+    refetchInterval: pollMs,
+  });
+}
+
+export function useTaskTrend(projectId: string | undefined, q: MonitorQuery, pollMs: number | false) {
+  const enabled = useEnabled(Boolean(projectId));
+  return useQuery({
+    queryKey: qk.taskTrend(projectId ?? "", q),
+    queryFn: ({ signal }) =>
+      getTaskTrend(projectId as string, { runId: q.runId, ...rangeParams(q.range), bucket: bucketFor(q.range) }, { signal }),
+    enabled,
+    placeholderData: keepPreviousData,
+    refetchInterval: pollMs,
+  });
+}
+
+export function useProjectAlerts(projectId: string | undefined, params: ListAlertsParams, pollMs: number | false) {
+  const enabled = useEnabled(Boolean(projectId));
+  return useQuery({
+    queryKey: qk.alerts(projectId ?? "", params),
+    queryFn: ({ signal }) => listProjectAlerts(projectId as string, params, { signal }),
+    enabled,
+    placeholderData: keepPreviousData,
+    refetchInterval: pollMs,
+  });
+}
+
+export function useProjectLogs(projectId: string | undefined, q: LogQuery, pollMs: number | false) {
+  const enabled = useEnabled(Boolean(projectId));
+  return useQuery({
+    queryKey: qk.logs(projectId ?? "", q),
+    queryFn: ({ signal }) => {
+      const { range, ...rest } = q;
+      return listProjectLogs(projectId as string, { ...rest, ...rangeParams(range) }, { signal });
+    },
+    enabled,
+    placeholderData: keepPreviousData,
+    refetchInterval: pollMs,
+  });
+}
+
+/**
+ * 確認告警：先樂觀把快取內所有該專案告警列表裡的這一筆標成「已確認」（畫面立刻變「已確認」），
+ * 失敗還原並由呼叫端 toast；結束後告警與通知摘要（未確認告警數）重抓。契約：冪等，已確認者再確認仍 204。
+ */
+export function useAcknowledgeAlert() {
+  const qc = useQueryClient();
+  const { username } = useAuth();
+  return useMutation({
+    mutationFn: (alertId: string) => acknowledgeAlert(alertId),
+    onMutate: async (alertId) => {
+      await qc.cancelQueries({ queryKey: ["monitor", "alerts"] });
+      const snapshots = qc.getQueriesData<Alert[]>({ queryKey: ["monitor", "alerts"] });
+      const now = new Date().toISOString();
+      qc.setQueriesData<Alert[]>({ queryKey: ["monitor", "alerts"] }, (old) =>
+        old?.map((a) =>
+          a.id === alertId && !a.acknowledged
+            ? { ...a, acknowledged: true, acknowledgedBy: username || undefined, acknowledgedAt: now }
+            : a,
+        ),
+      );
+      return { snapshots };
+    },
+    onError: (_error, _alertId, ctx) => {
+      for (const [key, data] of ctx?.snapshots ?? []) qc.setQueryData(key, data);
+    },
+    onSettled: () =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: ["monitor", "alerts"] }),
+        qc.invalidateQueries({ queryKey: ["notifications"] }),
+      ]),
+  });
+}
+
+/** 匯出報表：回 Blob＋檔名，由呼叫端觸發下載（apiDownload；不包封包）；PDF 在 W5 前回 501。 */
+export const useDownloadReport = () =>
+  useMutation({ mutationFn: (v: { projectId: string; params: ReportParams }) => downloadProjectReport(v.projectId, v.params) });
+
+// ══ Dashboard 的跨專案聚合（契約 §4.5 G-07、G-08；沒有全域端點，W5 再開）═══════════════════
+/** 「本週完成任務數」最多聚合幾個專案：每個專案 1 次請求，專案多時會吃限流額度，所以設上限（近似值，見 §4.6 G-G3）。 */
+export const WEEK_COMPLETED_MAX_PROJECTS = 30;
+export const DASHBOARD_AGG_POLL_MS = 60_000;
+
+/**
+ * 需要查「本週完成」的專案：非封存，且「有任務完成過」或正在執行（沒完成過任何任務又沒在跑的專案本週不可能有完成事件，省一次請求）；
+ * 取最近更新的前 WEEK_COMPLETED_MAX_PROJECTS 個（輸入已依更新時間新到舊）。
+ */
+export function projectsForWeeklyCompleted(projects: readonly ProjectSummary[]): ProjectSummary[] {
+  return projects
+    .filter((p) => p.status !== "ARCHIVED" && (p.tasksDone > 0 || p.status === "EXECUTING"))
+    .slice(0, WEEK_COMPLETED_MAX_PROJECTS);
+}
+
+/**
+ * 各專案 task-trend（from＝本週一 00:00、bucket=DAY）的 completed 加總。
+ * 同一任務被還原重跑會重複計（近似值，契約 §4.6 G-G3）；只要有一個專案查詢失敗就標 partial，畫面據此不假裝精確。
+ */
+export function useWeekCompletedTasks(projects: readonly ProjectSummary[], weekStartIso: string) {
+  const enabled = useEnabled();
+  const targets = projectsForWeeklyCompleted(projects);
+  const results = useQueries({
+    queries: targets.map((p) => ({
+      queryKey: qk.weekCompleted(p.id, weekStartIso),
+      queryFn: ({ signal }: { signal: AbortSignal }) =>
+        getTaskTrend(p.id, { from: weekStartIso, to: new Date().toISOString(), bucket: "DAY" }, { signal }),
+      enabled,
+      staleTime: 30_000,
+      refetchInterval: DASHBOARD_AGG_POLL_MS,
+    })),
+  });
+  const loading = enabled && results.some((r) => r.isPending);
+  const partial = results.some((r) => r.isError);
+  const total = results.reduce(
+    (sum, r) => sum + (r.data ?? []).reduce((s, point) => s + point.completed, 0),
+    0,
+  );
+  return { total, loading, partial, projects: targets.length };
+}
+
+/** 各「執行中」專案的最新批次（size=1）：Dashboard 的「執行中 run 數」與「進行中的執行」進度條。 */
+export function useLatestRuns(projectIds: readonly string[]) {
+  const enabled = useEnabled();
+  const results = useQueries({
+    queries: projectIds.map((id) => ({
+      queryKey: qk.executions(id, { size: 1 }),
+      queryFn: ({ signal }: { signal: AbortSignal }) => listProjectExecutions(id, { size: 1 }, { signal }),
+      enabled,
+      staleTime: 10_000,
+      refetchInterval: DASHBOARD_AGG_POLL_MS / 2,
+    })),
+  });
+  const byProject: Record<string, ExecutionRunSummary | undefined> = {};
+  projectIds.forEach((id, i) => {
+    byProject[id] = results[i]?.data?.content?.[0];
+  });
+  return { byProject, loading: enabled && results.some((r) => r.isPending) };
 }

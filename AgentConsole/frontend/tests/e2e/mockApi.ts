@@ -1,4 +1,4 @@
-import type { Locator, Page } from "@playwright/test";
+import type { Locator, Page, Route } from "@playwright/test";
 
 import { SHOTS } from "./helpers";
 
@@ -17,12 +17,16 @@ export type MockCall = {
   /** JSON body 已解析；multipart 為 { multipart: true, raw }（raw 是原始本文，檔案內容可在其中比對） */
   body: unknown;
   contentType: string;
+  /** 請求標頭（鍵一律小寫）：SSE 重連的 Last-Event-ID、Authorization 等 */
+  headers: Record<string, string>;
 };
 
 export type MockReply =
-  | { status?: number; data?: unknown; delayMs?: number }
+  | { status?: number; data?: unknown; delayMs?: number; headers?: Record<string, string> }
   | { status: number; error: { message?: string; reason?: string; errors?: unknown[]; details?: Record<string, unknown> }; delayMs?: number }
   | { status?: number; raw: string; headers?: Record<string, string>; delayMs?: number }
+  /** 不由 page.route 回應，改網址轉給另一台真的伺服器（SSE 這類要「連線一直開著」的串流用；回應由那台自己負責 CORS 標頭） */
+  | { proxyTo: string }
   | undefined;
 
 export type MockHandler = (call: MockCall) => MockReply | Promise<MockReply>;
@@ -31,7 +35,8 @@ const CORS = {
   "access-control-allow-origin": "*",
   "access-control-allow-headers": "*",
   "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
-  "access-control-expose-headers": "X-Trace-Id,Content-Disposition",
+  // 契約 §0.4 第 3 點：跨來源要讀到 X-Follow-Up-Run-Id、Retry-After、Content-Disposition 必須由伺服器暴露
+  "access-control-expose-headers": "X-Trace-Id,Content-Disposition,X-Follow-Up-Run-Id,Retry-After",
 };
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -63,6 +68,14 @@ export function compose(...handlers: MockHandler[]): MockHandler {
 export async function installApiMock(pw: Page, handler: MockHandler): Promise<{ calls: MockCall[] }> {
   const calls: MockCall[] = [];
   await pw.route("**/api/v1/**", async (route) => {
+    try {
+      await serve(route);
+    } catch (error) {
+      // 測試結束、頁面已關閉時，還在等待中的處理（例如拖住的 SSE 連線）才回應會丟例外：這是預期內的，不當成失敗
+      if (!/closed|disposed|already handled|Target|Invalid InterceptionId|Protocol error/i.test(String(error))) throw error;
+    }
+  });
+  const serve = async (route: Route): Promise<void> => {
     const req = route.request();
     if (req.method() === "OPTIONS") {
       await route.fulfill({ status: 204, headers: CORS });
@@ -80,7 +93,7 @@ export async function installApiMock(pw: Page, handler: MockHandler): Promise<{ 
     } else if (contentType.includes("multipart/form-data")) {
       body = { multipart: true, raw: req.postData() ?? "" };
     }
-    const call: MockCall = { method: req.method(), path: url.pathname, query: url.searchParams, body, contentType };
+    const call: MockCall = { method: req.method(), path: url.pathname, query: url.searchParams, body, contentType, headers: req.headers() };
     calls.push(call);
 
     const reply = await handler(call);
@@ -90,6 +103,10 @@ export async function installApiMock(pw: Page, handler: MockHandler): Promise<{ 
         headers: { ...CORS, "content-type": "application/json" },
         body: JSON.stringify({ code: 404, message: `mock 沒有處理 ${call.method} ${call.path}`, errors: [], timestamp: "t", traceId: "tr-mock-404" }),
       });
+      return;
+    }
+    if ("proxyTo" in reply) {
+      await route.continue({ url: reply.proxyTo });
       return;
     }
     if (reply.delayMs) await sleep(reply.delayMs);
@@ -111,7 +128,7 @@ export async function installApiMock(pw: Page, handler: MockHandler): Promise<{ 
         }),
       });
     } else if (status === 204) {
-      await route.fulfill({ status, headers: CORS });
+      await route.fulfill({ status, headers: { ...CORS, ...("headers" in reply ? reply.headers : {}) } });
     } else {
       await route.fulfill({
         status,
@@ -119,7 +136,7 @@ export async function installApiMock(pw: Page, handler: MockHandler): Promise<{ 
         body: JSON.stringify({ code: status, message: "success", data: reply.data, timestamp: "2026-10-15T16:30:12+08:00", traceId: "tr-mock-ok" }),
       });
     }
-  });
+  };
   return { calls };
 }
 
@@ -150,6 +167,9 @@ export function collectConsoleErrors(pw: Page): string[] {
     // 情境本來就會回 4xx／5xx（422 有界閘、400 驗證…）：Chrome 會為每個非 2xx 回應印一行「Failed to load resource」，
     // 那是預期內的雜訊；CORS 被擋、React 警告、其他錯誤仍然收進來
     if (/Failed to load resource: the server responded with a status of [45]\d\d/.test(msg.text())) return;
+    // SSE 的非 200 回應（終態批次的 204、token 過期的 401、後端暫時不可用的 503）：Chrome 對 EventSource 會各印一行，
+    // 這些都是契約規定、前端有對應處理的情境（契約 §2.1、§2.4），不是錯誤
+    if (/EventSource's response has a status \d{3} that is not 200/.test(msg.text())) return;
     errors.push(msg.text());
   });
   pw.on("pageerror", (err) => errors.push(`pageerror: ${err.message}`));

@@ -40,6 +40,13 @@ export function formatBytes(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
+/** 01:23:45（執行頁耗時；缺值或負值「—」）。 */
+export function formatElapsed(sec?: number | null): string {
+  if (typeof sec !== "number" || !Number.isFinite(sec) || sec < 0) return DASH;
+  const s = Math.floor(sec);
+  return `${pad(Math.floor(s / 3600))}:${pad(Math.floor((s % 3600) / 60))}:${pad(s % 60)}`;
+}
+
 /** 0～100 的整數百分比；total 為 0 時回 0 */
 export function percent(done: number, total: number): number {
   return total > 0 ? Math.round((done / total) * 100) : 0;

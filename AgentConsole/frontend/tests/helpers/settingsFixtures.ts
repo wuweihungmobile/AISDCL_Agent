@@ -44,6 +44,7 @@ export const FIXTURE = {
   maxConcurrentTasks: () => cfg("agent", "maxConcurrentTasks", { value: "3", defaultValue: "3", valueType: "INTEGER", min: 1, max: 32, effect: "STORED_ONLY" }),
   enableAutoMutation: () => cfg("agent", "enableAutoMutation", { value: "false", defaultValue: "false", valueType: "BOOLEAN", effect: "UNVERIFIED" }),
   globalTokenBudget: (value = "1000000") => cfg("execution", "globalTokenBudget", { value, defaultValue: "1000000", valueType: "LONG", min: 1, max: 1000000000000, effect: "CONSOLE", impactNote: "新批次的預設 Token 預算；不改動既有批次" }),
+  tokenBudgetWarningThreshold: (value = "0.8") => cfg("execution", "tokenBudgetWarningThreshold", { value, defaultValue: "0.8", valueType: "FLOAT", min: 0.01, max: 0.99, effect: "CONSOLE", impactNote: "即時生效於進行中的批次（告警每次評估時讀取）" }),
   compactThresholdPct: (value = "80") => cfg("execution", "compactThresholdPct", { value, defaultValue: "80", valueType: "INTEGER", min: 1, max: 99, impactNote: "Token Guard：context 達此百分比觸發 /compact" }),
   haltThresholdPct: (value = "90") => cfg("execution", "haltThresholdPct", { value, defaultValue: "90", valueType: "INTEGER", min: 2, max: 100, impactNote: "Token Guard：context 達此百分比儲存 checkpoint 並停機" }),
   dagSchedulerStrategy: () => cfg("execution", "dagSchedulerStrategy", { value: "TOPOLOGICAL", defaultValue: "TOPOLOGICAL", valueType: "ENUM", options: ["TOPOLOGICAL", "PRIORITY", "SHORTEST_FIRST"], effect: "CONSOLE" }),

@@ -7,10 +7,11 @@
 import { ToastHost } from "@/components/ui/toast";
 import {
   SERVICE_LABEL,
-  useBridgeStatus,
+  useBridgeInfo,
   useConsoleApiStatus,
   type ServiceState,
 } from "@/hooks/useServiceStatus";
+import { formatClock } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 const DOT: Record<ServiceState, string> = {
@@ -21,9 +22,9 @@ const DOT: Record<ServiceState, string> = {
   idle: "bg-wg-disabled-text",
 };
 
-function Status({ name, state }: { name: string; state: ServiceState }) {
+function Status({ name, state, title }: { name: string; state: ServiceState; title?: string }) {
   return (
-    <span className="inline-flex items-center gap-1.5" data-testid={`status-${name}`}>
+    <span className="inline-flex items-center gap-1.5" data-testid={`status-${name}`} data-state={state} title={title}>
       <span aria-hidden className={cn("inline-block size-2 rounded-full", DOT[state])} />
       {name} · {SERVICE_LABEL[state]}
     </span>
@@ -32,8 +33,14 @@ function Status({ name, state }: { name: string; state: ServiceState }) {
 
 export function BottomRegion() {
   const api = useConsoleApiStatus();
-  const bridge = useBridgeStatus();
+  const bridge = useBridgeInfo();
   const version = process.env.NEXT_PUBLIC_APP_VERSION ?? "dev";
+  // 連線點取自通知摘要的 bridgeConnected／bridgeCheckedAt（最近一次探測）；從未探測＝灰點「未知」
+  const bridgeTitle = bridge.checkedAt
+    ? `最近一次探測：${formatClock(bridge.checkedAt)}`
+    : bridge.state === "unknown"
+      ? "尚未探測過 Engine Bridge（console-api 剛啟動或探測環尚未運作）"
+      : undefined;
   return (
     <footer
       data-region="bottom"
@@ -41,7 +48,7 @@ export function BottomRegion() {
     >
       <div className="flex items-center gap-5 max-md:gap-3">
         <Status name="console-api" state={api} />
-        <Status name="Engine Bridge" state={bridge} />
+        <Status name="Engine Bridge" state={bridge.state} title={bridgeTitle} />
       </div>
       <span data-testid="app-version">Console v{version}</span>
       <ToastHost />

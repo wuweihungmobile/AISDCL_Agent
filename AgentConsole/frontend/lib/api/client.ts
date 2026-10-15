@@ -70,6 +70,8 @@ export type RequestOptions = {
   signal?: AbortSignal;
   /** false＝不帶 token、也不做 401 換新（登入／換新端點自己用） */
   auth?: boolean;
+  /** Accept 標頭；預設 application/json。報表下載要 text/csv（契約 §1.3.7）。 */
+  accept?: string;
 };
 
 type Unauthorized = () => void;
@@ -111,8 +113,8 @@ function isFormData(value: unknown): value is FormData {
 }
 
 async function send(path: string, opts: RequestOptions): Promise<Response> {
-  const { method = "GET", query, body, signal, auth = true } = opts;
-  const headers: Record<string, string> = { Accept: "application/json" };
+  const { method = "GET", query, body, signal, auth = true, accept = "application/json" } = opts;
+  const headers: Record<string, string> = { Accept: accept };
   const multipart = isFormData(body);
   // multipart 的 Content-Type 必須含瀏覽器產生的 boundary，手設就會讓後端解析不到檔案部件
   if (body !== undefined && !multipart) headers["Content-Type"] = "application/json";
@@ -230,6 +232,46 @@ async function sendWithRenewal(path: string, opts: RequestOptions): Promise<Resp
 
 export async function apiRequest<T = unknown>(path: string, opts: RequestOptions = {}): Promise<T> {
   return parse<T>(await sendWithRenewal(path, opts));
+}
+
+export type ApiResponse<T> = {
+  data: T;
+  /** 回應標頭（跨來源時瀏覽器只給「已暴露」的標頭；契約 §0.4 第 3 點：X-Follow-Up-Run-Id、Retry-After、Content-Disposition） */
+  headers: Headers;
+};
+
+/** 與 apiRequest 相同，但連同回應標頭一併回傳：審核（204）要讀 X-Follow-Up-Run-Id（契約 §1.2.11）。 */
+export async function apiRequestWithHeaders<T = unknown>(
+  path: string,
+  opts: RequestOptions = {},
+): Promise<ApiResponse<T>> {
+  const res = await sendWithRenewal(path, opts);
+  const data = await parse<T>(res);
+  return { data, headers: res.headers };
+}
+
+/**
+ * 換新 token；失敗＝登入已失效（清 session、導向登入，與 401 重送失敗同一條路）。
+ * SSE 用得到：EventSource 不能帶標頭、也看不到 HTTP 狀態碼，token 要放進網址，過期時只看得到「連線被關」。
+ */
+export async function renewSession(): Promise<boolean> {
+  const ok = await refreshTokens();
+  if (!ok) handleUnauthorized();
+  return ok;
+}
+
+/** access token 到期前多久就先換新（SSE 連線建立後不會再驗 token，但重連會；別拿快到期的 token 去連）。 */
+export const TOKEN_RENEW_MARGIN_MS = 30_000;
+
+/** 取得可用於網址的 access token：快到期或 force 時先換新；沒有登入狀態、或換新失敗回 null。 */
+export async function getFreshAccessToken(opts: { force?: boolean } = {}): Promise<string | null> {
+  const session = loadSession();
+  if (!session) return null;
+  const expiring = session.expiresAt > 0 && session.expiresAt - Date.now() < TOKEN_RENEW_MARGIN_MS;
+  if (opts.force || expiring) {
+    if (!(await renewSession())) return null;
+  }
+  return loadSession()?.accessToken ?? null;
 }
 
 export type DownloadResult = {

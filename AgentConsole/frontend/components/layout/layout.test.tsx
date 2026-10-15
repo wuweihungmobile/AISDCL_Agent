@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import type { ReactElement, ReactNode } from "react";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import RootLayout from "@/app/layout";
@@ -84,7 +84,7 @@ function layoutBody(children: ReactNode): ReactElement {
 /** 通知摘要（契約 §1.4）：數字故意取得和專案資料算出來的不同（草案專案只有 1 個），證明頂列徽章讀的是這支端點。 */
 const SUMMARY = { pendingSignoffs: 7, pendingReviews: 2, unacknowledgedAlerts: 3, bridgeConnected: null, bridgeCheckedAt: null };
 
-function stubApi() {
+function stubApi(summary: Record<string, unknown> = SUMMARY) {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string) => {
@@ -97,7 +97,7 @@ function stubApi() {
             page: 0, size: 100, totalElements: 2, totalPages: 1,
           }
         : url.includes("/api/v1/notifications/summary")
-          ? SUMMARY
+          ? summary
           : [];
       return new Response(JSON.stringify({ code: 200, message: "success", data }), {
         status: 200,
@@ -150,8 +150,59 @@ describe("RootLayout 渲染：四區塊各一份", () => {
 
     // 底部列：連線狀態與版本
     expect(screen.getByTestId("status-console-api")).toBeInTheDocument();
-    expect(screen.getByTestId("status-Engine Bridge")).toHaveTextContent("待接線");
+    // Bridge 連線點＝通知摘要的 bridgeConnected／bridgeCheckedAt；摘要兩欄為 null（從未探測）→ 灰點「未知」
+    expect(screen.getByTestId("status-Engine Bridge")).toHaveTextContent("未知");
     expect(screen.getByTestId("app-version")).toHaveTextContent(/^Console v/);
+  });
+
+  it("Engine Bridge 連線點（契約 §1.4.1、§4.5 G-03）：bridgeConnected true＝綠點「已連線」並在 title 帶最近探測時間；false＝紅點「未連線」；null＝灰點「未知」", async () => {
+    const dotOf = (el: HTMLElement) => el.querySelector("span[aria-hidden]")?.className ?? "";
+
+    stubApi({ ...SUMMARY, bridgeConnected: true, bridgeCheckedAt: new Date(2026, 9, 15, 16, 30, 12).toISOString() });
+    saveSession({ accessToken: "a", refreshToken: "r", expiresAt: Date.now() + 1e6, role: "OPERATOR", username: "operator" });
+    const online = render(layoutBody(<p>x</p>));
+    await waitFor(() => expect(screen.getByTestId("status-Engine Bridge")).toHaveTextContent("已連線"));
+    const up = screen.getByTestId("status-Engine Bridge");
+    expect(up).toHaveAttribute("data-state", "online");
+    expect(dotOf(up)).toContain("bg-wg-primary");
+    expect(up).toHaveAttribute("title", "最近一次探測：16:30:12");
+    // 頂列公告列是同一個來源（兩處都顯示同一個狀態）
+    expect(screen.getAllByText("Engine Bridge · 已連線")).toHaveLength(2);
+    online.unmount();
+
+    stubApi({ ...SUMMARY, bridgeConnected: false, bridgeCheckedAt: new Date(2026, 9, 15, 16, 31, 0).toISOString() });
+    resetSessionCache();
+    saveSession({ accessToken: "a", refreshToken: "r", expiresAt: Date.now() + 1e6, role: "OPERATOR", username: "operator" });
+    const offline = render(layoutBody(<p>x</p>));
+    await waitFor(() => expect(screen.getByTestId("status-Engine Bridge")).toHaveTextContent("未連線"));
+    const down = screen.getByTestId("status-Engine Bridge");
+    expect(down).toHaveAttribute("data-state", "offline");
+    expect(dotOf(down)).toContain("bg-wg-error");
+    offline.unmount();
+
+    stubApi({ ...SUMMARY, bridgeConnected: null, bridgeCheckedAt: null });
+    resetSessionCache();
+    saveSession({ accessToken: "a", refreshToken: "r", expiresAt: Date.now() + 1e6, role: "OPERATOR", username: "operator" });
+    render(layoutBody(<p>x</p>));
+    await waitFor(() => expect(screen.getByTestId("status-Engine Bridge")).toHaveTextContent("未知"));
+    const unknown = screen.getByTestId("status-Engine Bridge");
+    expect(unknown).toHaveAttribute("data-state", "unknown");
+    expect(dotOf(unknown)).toContain("bg-wg-disabled-text");
+    expect(unknown.getAttribute("title")).toContain("尚未探測過");
+  });
+
+  it("通知摘要查詢失敗（例如後端還沒提供）：Bridge 連線點是「未知」，不當成未連線也不假裝已連線", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) =>
+        url.includes("/api/v1/notifications/summary")
+          ? new Response(JSON.stringify({ code: 500, message: "伺服器錯誤", errors: [] }), { status: 500, headers: { "content-type": "application/json" } })
+          : new Response(JSON.stringify({ code: 200, message: "success", data: url.includes("/api/v1/projects?") ? { content: [], page: 0, size: 100, totalElements: 0, totalPages: 0 } : [] }), { status: 200, headers: { "content-type": "application/json" } }),
+      ),
+    );
+    saveSession({ accessToken: "a", refreshToken: "r", expiresAt: Date.now() + 1e6, role: "OPERATOR", username: "operator" });
+    render(layoutBody(<p>x</p>));
+    await waitFor(() => expect(screen.getByTestId("status-Engine Bridge")).toHaveAttribute("data-state", "unknown"), { timeout: 4000 });
   });
 
   it("在專案頁時，執行／監控導覽指向網址中的專案", async () => {

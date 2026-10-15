@@ -1,12 +1,25 @@
 /**
  * 專案 6／目標 5／任務 11／匯入記錄 6 個狀態的中文標籤與顏色——全站單一出處（設計稿 README〈狀態 enum〉；
  * 匯入記錄的六態在設計稿沒有定稿，標籤與顏色由本檔決定，契約 §1.1 只定義狀態值）。
+ * Phase 4～5 補：執行批次 RunStatus（含 Bridge 過渡態的顯示）、審核項 ReviewKind／決定、步驟事件、告警嚴重度與規則、日誌等級色。
  * 顏色一律引用設計 token（styles/tokens.css），不寫死色碼：
  *   #7A8775＝--color-text-muted　#80B155＝--color-secondary　#498428＝--color-primary
  *   #D35B58＝--color-error　#A6B0A1＝--color-disabled-text　#F5A623＝--color-warning　#E55B3C＝--color-accent
  * （lib/domain/status.test.ts 解析 tokens.css 後逐一核對成設計稿的色碼。）
  */
-import type { GoalStatus, ImportStatus, ProjectStatus, TaskStatus } from "@/lib/api/types";
+import type {
+  AlertRule,
+  AlertSeverity,
+  BridgeRunStatus,
+  ExecutionStepStatus,
+  GoalStatus,
+  ImportStatus,
+  ProjectStatus,
+  ReviewDecision,
+  ReviewKind,
+  RunStatus,
+  TaskStatus,
+} from "@/lib/api/types";
 
 export type StatusMeta = {
   /** 繁體中文標籤 */
@@ -67,6 +80,114 @@ export const IMPORT_STATUS: Record<ImportStatus, StatusMeta> = {
   REJECTED: { label: "已放棄", color: DISABLED },
 };
 
+/**
+ * 執行批次（契約附錄 A.1；PRD §5.3.5 的六態，寫入 PG 的值域）。
+ * PAUSING／CANCELLING 是 Bridge 的過渡態，console-api 折回 RUNNING、原值放 bridgeStatus（契約 §0.6）：
+ * 顯示請用 runStatusMeta(status, bridgeStatus)，它會把「RUNNING＋PAUSING」標成「暫停中」。
+ */
+export const RUN_STATUS: Record<RunStatus, StatusMeta> = {
+  INITIALIZING: { label: "啟動中", color: SECONDARY },
+  RUNNING: { label: "執行中", color: PRIMARY },
+  PAUSED: { label: "已暫停", color: WARNING },
+  COMPLETED: { label: "已完成", color: PRIMARY },
+  FAILED: { label: "失敗", color: ERROR },
+  CANCELLED: { label: "已取消", color: DISABLED },
+};
+
+/** Bridge 過渡態在 RUNNING 底下的顯示（契約 §1.2.4～1.2.6：pause 回 RUNNING＋PAUSING、cancel 回 RUNNING＋CANCELLING）。 */
+export const BRIDGE_TRANSITION: Partial<Record<BridgeRunStatus, StatusMeta>> = {
+  PAUSING: { label: "暫停中", color: WARNING },
+  CANCELLING: { label: "取消中", color: DISABLED },
+};
+
+/** 終態（SSE 送完該 status 之後伺服器關閉連線；重連已終態的 run 回 204；契約 §2.4）。 */
+export const RUN_TERMINAL: readonly RunStatus[] = ["COMPLETED", "FAILED", "CANCELLED"];
+
+export function isRunTerminal(status: string | undefined | null): boolean {
+  return status === "COMPLETED" || status === "FAILED" || status === "CANCELLED";
+}
+
+/** 審核項種類（契約 §3.6.2；V3 的四種 CHECK，不擴充）。 */
+export const REVIEW_KIND: Record<ReviewKind, StatusMeta> = {
+  TASK_CONFIRM: { label: "確認任務", color: WARNING },
+  GOAL_CONFIRM: { label: "確認目標", color: WARNING },
+  GOAL_COMPLETED: { label: "目標完成審核", color: WARNING },
+  ESCALATED: { label: "需人工介入", color: ACCENT },
+};
+
+/** 審核決定的按鈕文字（設計稿：通過／重試／跳過／拒絕）。 */
+export const REVIEW_DECISION_LABEL: Record<ReviewDecision, string> = {
+  APPROVE: "通過",
+  RETRY: "重試",
+  SKIP: "跳過",
+  REJECT: "拒絕",
+};
+
+/** 設計稿四顆按鈕的固定順序：通過(solid)／重試／跳過／拒絕。 */
+export const REVIEW_DECISION_ORDER: readonly ReviewDecision[] = ["APPROVE", "RETRY", "SKIP", "REJECT"];
+
+/** 步驟事件狀態（契約 §1.2.7：Bridge 實際寫入的四種，沒有 IN_PROGRESS）。 */
+export const STEP_STATUS: Record<ExecutionStepStatus, StatusMeta> = {
+  STARTED: { label: "開始", color: SECONDARY },
+  COMPLETED: { label: "完成", color: PRIMARY },
+  FAILED: { label: "失敗", color: ERROR },
+  RETRYING: { label: "重試", color: WARNING },
+};
+
+/** 告警嚴重度（持久化只用 WARNING／CRITICAL；SSE 另有 INFO，例如 RESTORE）。 */
+export const ALERT_SEVERITY: Record<AlertSeverity | "INFO", StatusMeta> = {
+  INFO: { label: "資訊", color: SECONDARY },
+  WARNING: { label: "警告", color: WARNING },
+  CRITICAL: { label: "嚴重", color: ERROR },
+};
+
+/** 告警規則名稱（PRD §5.4.4 六條＋引擎原生兩條；契約 §3.7）。 */
+export const ALERT_RULE_LABEL: Record<AlertRule, string> = {
+  TOKEN_BUDGET_WARNING: "Token 預算警告",
+  TOKEN_BUDGET_EXCEEDED: "Token 預算超限",
+  CONSECUTIVE_FAILURES: "連續任務失敗",
+  AGENT_UNRESPONSIVE: "Agent 無回應",
+  TASK_DURATION_EXCEEDED: "執行時間過長",
+  HIGH_RETRY_RATE: "高重試率",
+  ENGINE_ESCALATION: "引擎升級",
+  ENGINE_TOKEN_HALT: "引擎 Token 停機",
+};
+
+/** 自治等級（PRD §5.3.2；Level 6～10 是 Advanced Autonomy）。 */
+const AUTONOMY_NAMES: Record<number, string> = {
+  1: "Manual Confirm",
+  2: "Goal Confirm",
+  3: "Review & Approve",
+  4: "Exception Only",
+  5: "Full Autonomy",
+};
+
+export function autonomyLabel(level: number): string {
+  return `Level ${level} · ${AUTONOMY_NAMES[level] ?? "Advanced"}`;
+}
+
+const AUTONOMY_HINTS: Record<number, string> = {
+  1: "每個任務執行前需人類確認",
+  2: "每個目標開始前需人類確認",
+  3: "自動執行；目標完成與任務失敗時需人類審核",
+  4: "全自動執行，僅重試失敗後升級給人類",
+  5: "全自動執行；任何失敗都升級給人類",
+};
+
+/** 自治等級的一句說明；Level 6～10 另註明目前不傳給引擎（契約 §3.6.1：enableAutoMutation／enableSelfEvolution 為 UNVERIFIED）。 */
+export function autonomyHint(level: number): string {
+  return AUTONOMY_HINTS[level] ?? "進階自治：等級會記錄在批次上，但目前不另傳給引擎（對映尚未驗證），行為與 Level 5 相同";
+}
+
+/** 日誌等級顏色（設計稿監控頁：等級文字依等級著色、寬 48px）。 */
+export const LOG_LEVEL_COLOR: Record<string, string> = {
+  DEBUG: MUTED,
+  INFO: PRIMARY,
+  WARN: WARNING,
+  ERROR: ERROR,
+  CRITICAL: ERROR,
+};
+
 const FALLBACK: StatusMeta = { label: "未知", color: MUTED };
 
 /** 後端若新增狀態值，前端不至於崩潰：顯示原值、用灰點。 */
@@ -78,6 +199,17 @@ export const projectStatus = (status: string): StatusMeta => lookup(PROJECT_STAT
 export const goalStatus = (status: string): StatusMeta => lookup(GOAL_STATUS, status);
 export const taskStatus = (status: string): StatusMeta => lookup(TASK_STATUS, status);
 export const importStatus = (status: string): StatusMeta => lookup(IMPORT_STATUS, status);
+export const reviewKind = (kind: string): StatusMeta => lookup(REVIEW_KIND, kind);
+export const stepStatus = (status: string): StatusMeta => lookup(STEP_STATUS, status);
+export const alertSeverity = (severity: string): StatusMeta => lookup(ALERT_SEVERITY, severity);
+
+/** 執行批次的顯示狀態：RUNNING＋Bridge 過渡態（PAUSING／CANCELLING）要顯示成「暫停中」「取消中」。 */
+export function runStatusMeta(status: string, bridgeStatus?: string | null): StatusMeta {
+  if (status === "RUNNING" && bridgeStatus && bridgeStatus in BRIDGE_TRANSITION) {
+    return BRIDGE_TRANSITION[bridgeStatus as BridgeRunStatus] as StatusMeta;
+  }
+  return lookup(RUN_STATUS, status);
+}
 
 /** 專案列表的狀態 tab（設計稿：全部／草稿／就緒／執行中／完成／失敗；封存不列） */
 export const PROJECT_STATUS_TABS: ReadonlyArray<{ id: "ALL" | ProjectStatus; label: string }> = [
@@ -96,7 +228,13 @@ export function isRetryable(status: string): boolean {
 
 /** 狀態點需要「呼吸」動畫的狀態（進行中的工作） */
 export function isLive(status: string): boolean {
-  return status === "EXECUTING" || status === "IN_PROGRESS" || status === "RUNNING" || status === "PARSING";
+  return (
+    status === "EXECUTING" ||
+    status === "IN_PROGRESS" ||
+    status === "RUNNING" ||
+    status === "PARSING" ||
+    status === "INITIALIZING"
+  );
 }
 
 /**
