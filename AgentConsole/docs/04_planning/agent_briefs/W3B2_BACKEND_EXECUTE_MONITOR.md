@@ -42,3 +42,16 @@
 
 ## 交卷
 照 COMMON_CONTEXT〈交卷格式〉，另加〈契約漂移〉與〈給前端 W4-F2 的提醒〉（SSE 事件實際欄位、重連建議、DAG 回應形狀、review 動作後的狀態時序）。不准 commit／push、不派子 agent、不留背景行程。
+
+## 主控裁決補充（2026-10-15，依獨立 Architect 審查 AR-xx；與本檔上文衝突時以本節與契約 v1.1 為準）
+- **Flyway V7 必做**（契約 §0.5）：`run_token_samples`、`review_requests`／`alerts` 的事件錨點欄位、`execution_runs.console_last_seq`、告警未確認去重的 partial unique index（上文「不需新表」作廢）。
+- **照契約的字面**：`step_id=G<g>-T<t>`；mock 旗標＝`console.execution.mock-env`（map，只在 e2e／test profile 載入）；消費位移存 DB `console_last_seq`；探測環 2,880 筆（24 小時）；審核 `SKIP`＝開後續批次（回應標頭 `X-Follow-Up-Run-Id`），不是 `:resume`；Token halt 不判 ESCALATED（只有 ESCALATION 才判）；logs／SSE 重播來源依契約 §2；啟動對帳 Bridge 404 依契約（WARN，不發 alert）。
+- **Bridge P1（AR-01）**：Bridge 在 DB 模式對 PAUSED run 做 restore 會自撞 advisory lock——主控已另派 Bridge 修復者修 `reacquire_lock`／`acquire`；你依契約 E2E-07 實作「PAUSED 可 restore」；若你開工時 Bridge 修復尚未落地，冒煙改以終態 restore 代替並在交卷寫明。
+- **SSE（AR-02／AR-03）**：`/metrics` 收斂快照的事件 id 互異（`<S>.1` progress-update、`<S>.2` token-update），同一條串流 id 嚴格遞增無重複；框架用 Spring `SseEmitter` 即可（冒號後空白不保證，QA 以解析後欄位斷言）。
+- **nginx（AR-05）**：你的檔案範圍放寬到 `AgentConsole/docker/nginx/conf.d/default.conf` 的 `/api/v1/stream/` location（`proxy_buffering off`、`proxy_read_timeout 3600s`、`proxy_http_version 1.1`）與 `AgentConsole/docker/nginx/nginx.conf` 的 `log_format`（遮罩 `access_token`：改記 `$uri` 或 map 後的 query）；後端任何存取日誌不得輸出含 `access_token` 的 query string。
+- **通知摘要（AR-08）**：把探測環接到 `GET /notifications/summary` 的 `bridgeConnected`／`bridgeCheckedAt`（B1 先回 null，同一支 controller）。
+- **人工判定優先（AR-11）**：被 REJECT／SKIP 標過的目標不被 R-goal 重算覆蓋；順序＝先重算、再套人工判定。
+- **補償刪除（AR-15）**：守門改「該 run 尚無 `execution_steps`」，不看狀態（`spawn_failed` 時 Bridge 已把列標 FAILED，仍要刪）。
+- **冒煙三條的自治等級**：多目標專案在 Level 3 會於目標邊界 PAUSED（GOAL_COMPLETED 審核）——「一路跑到 COMPLETED」用 Level 4；Level 3 另驗一次「目標邊界 PAUSED → APPROVE → 跑完」；Level 1 驗第一步後 PAUSED。
+- **SSE 完成時的 ASYNC dispatch（TBC-1）**：`SseEmitter` 完成會走 ASYNC dispatch，`JwtAuthenticationFilter` 是 `OncePerRequestFilter`；設定 `dispatcherTypeMatchers(DispatcherType.ASYNC).permitAll()` 或覆寫 `shouldNotFilterAsyncDispatch`，交卷貼「無 AccessDenied 錯誤日誌」的證據。
+- **E2E／冒煙的 Bridge 啟動（AR-12、TBC-2）**：啟動前 `$env:PATH = 'D:\CursorProject\AISDCL_Agent\.venv\Scripts;' + $env:PATH`；settings `autoclaude.claudeCommand` 用絕對路徑 `D:\CursorProject\AISDCL_Agent\.venv\Scripts\aisdlc-mock-claude.exe`（V5 的 validation_rule 要允許 Windows 絕對路徑）；`$env:AUTOSDD_QUOTA_CACHE_DIR='<E2E_ROOT>\quota-cache'`；清掉 `AUTOSDD_*`／`AUTOCLAUDE_*`／`MINIMAX_*`；E2E 關閉演化（`agent.enableSelfEvolution=false` 對映到引擎 config 的對應鍵，現查 `AutoClaude/autoclaude/utils/config.py`，交卷寫明鍵名）。

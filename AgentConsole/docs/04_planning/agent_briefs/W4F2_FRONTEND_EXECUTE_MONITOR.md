@@ -30,3 +30,12 @@
 
 ## 交卷
 照 COMMON_CONTEXT〈交卷格式〉，另加〈契約漂移／缺口〉與〈給 QA 的提醒〉（哪些行為只在 mock 下驗過、真後端對接時最可能漂移的點）。不准 commit／push、不派子 agent、不留背景行程。
+
+## 主控裁決補充（2026-10-15，依獨立 Architect 審查；與本檔上文衝突時以本節與契約 v1.1 為準）
+- mock spec 裡「啟動後一路跑到 COMPLETED」用自治等級 4；等級 3 的多目標專案會在目標邊界 PAUSED 並出現 GOAL_COMPLETED 待審核項（另寫一條 spec 驗「通過 → 續跑」）。
+- 事件時間軸來源＝`GET /executions/{runId}/steps`（`task-trend` 沒有 `events[]`）。
+- `/metrics` 串流的事件 id 互異且嚴格遞增（`<S>.1`／`<S>.2` 子序號），去重用 id 即可；`/logs` 與 `/metrics` 各自獨立記 lastEventId。
+- SSE 框架的冒號後空白不保證（後端用 Spring SseEmitter），解析用 EventSource 即可，不要自己用字串比對框架。
+- 儀表板「本週完成任務數」＝各專案 `task-trend`（from＝本週一）的 completed 加總；「執行中 run 數」＝各 EXECUTING 專案最新 run 的計數。
+- BottomRegion 的 Engine Bridge 連線狀態點＝`GET /notifications/summary` 的 `bridgeConnected`／`bridgeCheckedAt`（B1 階段可能為 null → 顯示「未知」灰點）。
+- 自治等級 6～10 不傳引擎（契約標 UNVERIFIED），UI 照常可選、說明文字註明。

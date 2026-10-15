@@ -46,3 +46,15 @@ Select-String -Path D:\CursorProject\AISDCL_Agent\AgentConsole\backend\build\rep
 
 ## 交卷
 照 COMMON_CONTEXT〈交卷格式〉：`STATUS:` 首行；〈做了什麼〉；〈驗證證據〉每道閘門指令＋關鍵行；〈契約漂移〉；〈沒做／偏離〉；〈給 W3-B2 的提醒〉（AgentBridge 介面現況、ConfigMaterializer 需要的 settings 讀取 API、加密解密入口、測試 profile 的開關）。不准 commit／push、不派子 agent、不留背景行程。
+
+## 主控裁決補充（2026-10-15，依獨立 Architect 審查 AR-xx；與本檔上文衝突時以本節與契約 v1.1 為準）
+- **失敗存放（AR-07）**：V5 另加 `import_records.parse_path VARCHAR(20)` 與 `last_parse_errors JSONB`；有界閘違規回 422、`last_parse_errors` 存 `errors[]`、`status` 退回 UPLOADED；`parsed_result` 解析前為 null（上文的 `parsed_result.error` 作廢）。
+- **`model.apiUrl` 語意（AR-09）**：＝完整 chat-completions 端點 URL，Console 的 LLM 路徑直接 POST 它（不自動補 `/v1/chat/completions`），物化時原樣當引擎 `minimax.base_url`。V5 以 UPDATE 把 `model.apiUrl` 的 value／default_value 改成引擎預設的完整端點（現查 `AutoClaude/autoclaude/utils/config.py` 的 minimax base_url 預設字串）；Console outbound allowlist 預設對齊 Bridge：`api.minimax.io,api.minimax.chat`。
+- **SSRF 釘 IP（AR-10）**：允許新增 Apache HttpClient 5（`org.apache.httpcomponents.client5:httpclient5`，Spring Boot BOM 管版本）：自訂 `DnsResolver` 釘住已驗證 IP、Host 標頭與 TLS SNI 用原 host、不跟 redirect；test-connection 與 LLM client 都走它。allowlist 內的 host 解析到私網／loopback 仍拒（契約 D-47）；本機 E2E 的假 server 放行機制照契約 v1.1 §5.0 的 e2e 專用屬性（只在 e2e／test profile 載入）。
+- **限流（AR-06）**：鍵＝JWT subject（未認證才用 IP）；`console.security.rate-limit.trust-forwarded-for` 在 docker／e2e profile 為 true 且只信任 nginx；`monitor.refreshIntervalMs` 的 validation_rule 最小 10000。
+- **nginx（AR-04）**：你的檔案範圍放寬到 `AgentConsole/docker/nginx/conf.d/default.conf` 的 `/api/v1/import/` location：`client_max_body_size 11m`、`proxy_read_timeout 180s`。
+- **Phase 2 DTO（AR-14）**：`CreateTaskRequest`／`UpdateTaskRequest` 的 `maxRetries` 加 `@Max(20)`（Bridge 上限）。
+- **通知摘要（AR-08）**：`bridgeConnected`／`bridgeCheckedAt` 本棒回 null；B2 接探測環時改同一支 controller。
+- **既有測試須同步改（AR-16，不是刪）**：`OpenApiIT::theDocumentListsExactlyTheEndpointsOfPhaseOneAndTwo`（paths 數）、`SchemaMigrationIT::flywayAppliedVersionsOneToFourSuccessfully`、`::seedHasAllSixCategoriesWithTheDocumentedParameterCounts`、`::onlyTheApiKeyIsEncryptedAndItsValueIsEmpty`（V5 後 `dbDsn` 是第二把加密鍵）。
+- **reason 常數**：一律用契約附錄 B 的中文逐字常數（上文的英文蛇形只是示意）；後端集中在 `ErrorReasons`。
+- **路徑選擇**：除 `specDir` 外，也依契約探測 `executionPath` 下的凍結規格（§3.3）。

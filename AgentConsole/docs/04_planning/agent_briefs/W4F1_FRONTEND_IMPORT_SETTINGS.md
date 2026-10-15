@@ -35,3 +35,10 @@ Get-ChildItem D:\CursorProject\AISDCL_Agent\AgentConsole\frontend\app -Recurse -
 
 ## 交卷
 照 COMMON_CONTEXT〈交卷格式〉，另加〈契約漂移／缺口〉（你實作時發現契約欄位不夠用或矛盾的地方）與〈給 W4-F2 的提醒〉（共用元件、SSE 尚未碰、queries 慣例）。不准 commit／push、不派子 agent、不留背景行程。
+
+## 主控裁決補充（2026-10-15，依獨立 Architect 審查；與本檔上文衝突時以本節與契約 v1.1 為準）
+- `reason` 常數＝契約附錄 B 的中文逐字常數，集中在 `lib/api/reasons.ts`，不要自己造英文代碼。
+- 輪詢地板：通知摘要與任何輪詢間隔 ≥ 10 秒（限流鍵是 JWT subject，同一使用者所有頁面共用每分鐘 100 次）。
+- 設定頁「全部重置為預設值」＝逐鍵呼叫 reset（契約無批次端點）；`model.apiUrl` 的表單提示寫「完整的 chat-completions 端點 URL」；`monitor.refreshIntervalMs` 最小 10000。
+- 匯入詳情：`parsedResult` 解析前為 null、`parsePath`／`lastParseErrors` 來自契約 v1.1 的 `ImportRecordResponse`；有界閘錯誤顯示 `lastParseErrors[]`。
+- 事件時間軸不在你這棒；`task-trend` 沒有 `events[]`（F2 用 steps 端點）。
