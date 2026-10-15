@@ -30,7 +30,9 @@ G. 文件鎖：`D:\CursorProject\AISDCL_Agent\.venv\Scripts\python.exe D:\Cursor
 ## 主控裁決補充（2026-10-15，依獨立 Architect 審查；與本檔上文衝突時以本節與契約 v1.1 為準）
 - 情境 A 的「Level 3 啟動 → 跑到 COMPLETED」改為：一路跑完用 **Level 4**（契約 E2E-03）；Level 3 另驗「目標邊界 PAUSED → GOAL_COMPLETED 待審核 → 通過 → 跑完」；Level 1 驗第一步後 PAUSED。
 - 環境照契約 v1.1 §5.0：Bridge 啟動前 PATH 前置 `D:\CursorProject\AISDCL_Agent\.venv\Scripts`、`autoclaude.claudeCommand` 設為 `D:\CursorProject\AISDCL_Agent\.venv\Scripts\aisdlc-mock-claude.exe` 絕對路徑、`AUTOSDD_QUOTA_CACHE_DIR=<E2E_ROOT>\quota-cache`、清掉 `AUTOSDD_*`／`AUTOCLAUDE_*`／`MINIMAX_*`；E2E 專案每個 run 的任務數 ≤ 5。
-- SSE 斷言用解析後的欄位（事件名、id、data JSON），不比對框架位元組；`/metrics` 的 id 含子序號 `<S>.1`／`<S>.2`。
+- SSE 斷言用解析後的欄位（事件名、id、data JSON），不比對框架位元組；`/metrics` 的 id 含子序號 `<S>.1`／`<S>.2`／`<S>.3`。
+- 本機環境要以 e2e profile 啟動 backend（才有 `console.security.allow-loopback=true` 與 `console.execution.mock-env`，契約 §5.0.1）；Docker 全棧（矩陣 D）不載入 e2e profile，匯入步驟改走路徑 A（凍結規格）或 Phase 2 REST 建專案，10MB 上傳（nginx 11m）與 `access_token` 不入 nginx 日誌仍須驗。
+- Bridge P1（AR-01）已由主控派人修復並親驗（PAUSED 可 restore）；若 E2E-07 步驟 6 仍 409，登記為 Bridge 缺陷附 Bridge 日誌。
 - 經 nginx 的驗證要包含 10MB 上傳（nginx `client_max_body_size` 由 B1 補）與 `?access_token=` 不出現在 nginx access log（由 B2 補遮罩）。
 - 限流鍵是 JWT subject：驗 429 時用同一使用者打 101 次；不同情境用不同使用者或等 60 秒。
 - RTM 裁決（引用本節即可）：`API-AUT-06`（自治等級傳遞引擎）→ 🟡（契約標 UNVERIFIED，等級 6～10 不送引擎設定）；`US-M-10` 的「資源使用情況」→ 🟡（Bridge 無來源；連線狀態與當前任務有）；`US-I-05` 的「瀏覽按鈕」→ ⛔（Web 不瀏覽伺服器檔案系統，路徑輸入欄即為交付）。

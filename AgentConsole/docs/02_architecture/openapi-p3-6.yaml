@@ -1,10 +1,17 @@
 openapi: 3.1.0
 info:
   title: AISDLC Agent Console — console-api（Phase 3～6 契約）
-  version: v1-p3-6
+  version: v1.1-p3-6
   description: |
     契約先行文件：BRD/PRD 匯入（Phase 3）、專案執行（Phase 4）、專案監控（Phase 5）、系統參數（Phase 6）。
     本檔只含 Phase 3～6 的端點與 schema；Phase 1+2 的專案／目標／任務／認證端點不在此重複（schema 名稱與其一致）。
+
+    v1.1（2026-10-15）：套用主控對 11 項未決問題的裁決，並回應獨立 Architect 審查（AR-01～21、TBC-1～3）；
+    與 v1.0 的差異摘要見 Markdown 契約檔頭，逐條對照見其 §6.3（主控裁決）與 §6.4（審查回應表）。
+    本檔的主要變動：`ParsedResult` 在匯入詳情可為 null、`ExecutionRunResponse` 移除頂層 `followUpOfRunId`、
+    `ExecutionStepStatus` 移除 `IN_PROGRESS`、`NotificationSummaryResponse` 的 Bridge 欄位歸屬、
+    `model.apiUrl` 改為完整的 chat-completions 端點（`test-connection` 連帶改為 POST ping）、
+    pause／resume／cancel／dag／checkpoints／restore／兩條 stream 補 400。
 
     人類可讀的完整契約（逐端點錯誤 reason 常數、SSE 事件逐欄、Bridge 對映、E2E 情境）見同目錄的
     `API_Contract_P3-6.md`；兩份文件衝突時以 Markdown 為準，並回報主控修正本檔。
@@ -83,6 +90,8 @@ paths:
         副檔名限 `.md／.pdf／.docx`（不分大小寫）、大小 ≤ 10MB。後端擷取純文字存入 `sourceContent`
         （.md 須為 UTF-8；.pdf 用 PDFBox；.docx 用 POI 抽段落與表格文字），建立 `status=UPLOADED`、`signedOff=false` 的匯入記錄。
         錯誤 reason 常數見 Markdown 契約 §1.1.1（413／415／422 各有固定字串）。
+        **部署**：經 nginx 時 `/api/v1/import/` 須設 `client_max_body_size 11m`（nginx 預設 1m，10MB 上傳會先被 nginx 回 413 HTML，
+        不是 ApiError），見 Markdown 契約 §0.7（AR-04）。
       x-required-role: OPERATOR
       x-rtm: [API-IMP-01, API-IMP-07, US-I-01]
       requestBody:
@@ -145,7 +154,8 @@ paths:
       summary: 查詢匯入記錄詳情（補充端點）
       description: |
         含 `sourceContent` 與 `parsedResult`，供「歷史記錄」重新開啟審核與重新整理後還原預覽。PRD §7.1.4 未列，
-        為設計稿「歷史記錄」頁籤所需（Markdown 契約 §6 D-05）。
+        為設計稿「歷史記錄」頁籤所需（Markdown 契約 §6 D-05）。`parsedResult` 在第一次成功解析前為 null；
+        `parsePath`、`lastParseErrors` 來自 V5 新增的欄位（AR-07）。
       x-required-role: VIEWER
       x-rtm: [API-IMP-06, US-I-03, US-I-06]
       parameters:
@@ -167,16 +177,18 @@ paths:
       operationId: parseImport
       summary: 觸發 AI 解析（三條路徑擇一）
       description: |
-        同步呼叫（UI 顯示「解析中」）；路徑 B 的逾時為 `model.timeout` 秒，nginx 需放寬 read timeout。
+        同步呼叫（UI 顯示「解析中」）；路徑 B 的逾時為 `model.timeout` 秒，nginx 需放寬 read timeout（180 秒，Markdown 契約 §0.7）。
 
         路徑選擇（先到先得）：
-        1. A `SDD`：`specDir` 有值，或 `executionPath` 下有 Bridge `/sdd/compile` 接受的凍結規格 → 規格驅動。
-        2. C `DECOMPOSE`：`sourceType=PLAIN_TEXT` 且全文 < 2,000 字且無 Markdown 標題 → Bridge `/autoclaude/decompose`。
-        3. B `LLM`：其餘 → OpenAI 相容 chat completions（`model.apiUrl`／`model.apiKey`／`model.name`）。
+        1. A `SDD`：`specDir` 有值，或 `executionPath` 下有 Bridge `/sdd/compile` 接受的凍結規格 → 規格驅動
+           （依編譯順序每 24 個合約切成一個目標，AR-19）。
+        2. C `DECOMPOSE`：`sourceType=PLAIN_TEXT` 且全文 < 2,000 字且無 Markdown 標題行 → Bridge `/autoclaude/decompose`。
+        3. B `LLM`：其餘 → OpenAI 相容 chat completions（`model.apiUrl` 是完整端點、原樣 POST，後端不補路徑；AR-09）。
 
-        三道有界閘（每個 Goal 任務數 ≤ 24、目標依賴 Kahn 無環、每個 Task 描述非空）與 `prompt_too_long`、
+        三道有界閘（每個 Goal 任務數 ≤ 24、目標依賴 Kahn 無環、每個 Task 的 name／description 非空白）與 `prompt_too_long`、
         `brain_unsupported`、`brain_failed` 任一不過 → 422（`ParseGateErrorResponse`），不截斷、不修剪（US-I-10），
-        記錄狀態退回 `UPLOADED` 並把錯誤存入 `lastParseErrors`。
+        記錄狀態退回 `UPLOADED`；被有界閘拒絕時把錯誤存入 `lastParseErrors`，**失敗不寫 `parsedResult`／`parsePath`**（AR-07）。
+        狀態為 `PARSING` 時再 parse → 409「解析中，請稍候」（其餘狀態不允許 → 409「匯入記錄狀態不允許此操作」；AR-21）。
         規格被拒（凍結／污染／版本）→ 422（`ApiError`，reason＝「SDD 規格檢查未通過」）。
       x-required-role: OPERATOR
       x-rtm: [API-IMP-03, API-IMP-08, API-IMP-09, US-I-03, US-I-05, US-I-07, US-I-08, US-I-10, NFR-SEC-04]
@@ -237,7 +249,8 @@ paths:
         以整棵樹覆寫 `parsedResult.project` 與 `parsedResult.goals`（陣列順序即排序；`sortOrder` 由伺服器依陣列順序重編為 0 起連續整數）。
         伺服器擁有的欄位（`path`／`aiModel`／`tokenUsed`／`reasoning`／`draftIds`／`specDigest`）以庫內值為準，請求帶了也忽略。
         成功後 `status=REVIEWING`；**編輯會撤銷既有 signoff**（`signedOff` 回 false、`signedOffBy／At` 清空），須重新 signoff。
-        違反有界閘 → 422；命令含禁用字元或 regex 無法編譯 → 400（與 Phase 2 任務建立同規則）。
+        違反有界閘 → 422（任務 name／description 為**空白字串**也是閘 `empty_prompt`，欄位缺漏或 null 才是 400；AR-21）；
+        命令含禁用字元或 regex 無法編譯 → 400（與 Phase 2 任務建立同規則）。
       x-required-role: OPERATOR
       x-rtm: [API-IMP-04, US-I-04, US-I-10]
       parameters:
@@ -359,7 +372,9 @@ paths:
         後端二次硬校驗（前端按鈕禁用只是體驗）。驗證順序固定（QA 依序斷言）：
         404 專案 → 400 欄位驗證 → 409 專案正在執行中 → 409 專案狀態不允許執行 → 409 未經人工審批的草案不可執行
         → 400 範圍 id 不屬於此專案 → 409 範圍問題（已完成／缺前置目標／無可執行任務）→ 409 目標依賴成環
-        → 422 物化失敗（prompt 超過 20000 字元、評估指令消毒、regex 無法編譯）→ Bridge（409 鎖／422／502／504，並補償刪除剛建的 run 列）。
+        → 422 物化失敗（prompt 超過 20000 字元、評估指令消毒與白名單、regex 無法編譯、範圍任務數超過 500、
+        任務 `maxRetries` 超過 20〔第 9f 項，AR-14〕）→ Bridge（409 鎖／422／502／504，並補償刪除剛建的 run 列）。
+        補償刪除的守門只有「該 run 尚無 `execution_steps`」，不看列的狀態（`spawn_failed` 時列已被標成 FAILED，仍要刪；AR-15）。
 
         成功：建立 `execution_runs`（`run_number` 同專案遞增）→ Bridge `POST /autoclaude/runs` → 專案 `EXECUTING`、
         範圍內任務 `QUEUED`、啟動事件消費者。`autonomyLevel`／`tokenBudget`／`scope` 皆可省略（預設見 schema）。
@@ -407,7 +422,6 @@ paths:
                     reason: 未經人工審批的草案不可執行
                     errors: []
                     details:
-                      unsignedProjectId: null
                       unsignedGoalIds: [a1f4c2d3-5b6e-4c7d-8e9f-0a1b2c3d4e12]
                       unsignedTaskIds: [c7e2b1a0-3d4f-4a5b-9c6d-7e8f9a0b1c23]
                     timestamp: '2026-10-15T08:30:12Z'
@@ -506,6 +520,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiResultExecutionRunResponse'
+        '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
@@ -532,6 +547,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiResultExecutionRunResponse'
+        '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
@@ -558,6 +574,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiResultExecutionRunResponse'
+        '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
@@ -626,6 +643,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiResultDagResponse'
+        '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '404': {$ref: '#/components/responses/NotFound'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
@@ -648,6 +666,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiResultListCheckpointResponse'
+        '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '404': {$ref: '#/components/responses/NotFound'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
@@ -660,7 +679,11 @@ paths:
         Bridge `POST /autoclaude/runs/{id}/restore`（接受 PAUSED 與終態 COMPLETED／FAILED／CANCELLED；終態已放的鎖須重新取得，可能 409）。
         還原點之後的任務與目標由後端「系統重設」（見 Markdown 契約 §3.5.3）；專案回 `EXECUTING`。
         後端先重驗範圍內 signedOff（409「未經人工審批的草案不可執行」）。注意：restore 沿用該 run 建立時的 playbook，
-        之後修改任務內容不會生效（要用新內容請另開批次）。
+        之後修改任務內容不會生效（要用新內容請另開批次）。只允許對專案**最新**的批次 restore
+        （否則 409「只能還原專案最新的執行批次」）。
+        **依賴 Bridge 修復（AR-01）**：對 `PAUSED` 的 run 做 restore，Bridge 在 DB 模式目前會自撞 advisory lock
+        （回 `advisory_lock_held`，`holder_run_id` 是自己，且失敗路徑洩漏鎖）；主控已另派修復者修 Bridge。
+        修復落地前，`PAUSED` 的 restore 與 `GOAL_COMPLETED` 的 `RETRY` 在 DB 模式不可用；終態 run 的 restore 不受影響。
       x-required-role: OPERATOR
       x-rtm: [API-EXE-09, API-EXE-11, US-E-11]
       parameters:
@@ -673,6 +696,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiResultExecutionRunResponse'
+        '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
@@ -786,6 +810,7 @@ paths:
       summary: 任務執行趨勢（依步驟事件分桶）
       description: |
         資料來源 `console.execution_steps`（STARTED／COMPLETED／FAILED／RETRYING 各自計數）。成功／失敗比率由 `completed` 與 `failed` 推得。
+        只回 `List<TaskTrendPoint>`（PRD §7.1.6），**不含事件清單**：事件時間軸改用 `GET /api/v1/executions/{runId}/steps`（主控裁決）。
       x-required-role: VIEWER
       x-rtm: [API-MON-03, US-M-03]
       parameters:
@@ -979,6 +1004,9 @@ paths:
       description: |
         供頂列通知鈴與 signoff 佇列徽章。`pendingSignoffs`＝專案、目標、任務三表中未 signoff 且未軟刪的列數＋待審批的匯入記錄數（PARSED／REVIEWING 且未 signoff）；
         `pendingReviews`＝`review_requests.status=PENDING` 總數；`unacknowledgedAlerts`＝`alerts.acknowledged=false` 總數。皆跨專案。
+        `bridgeConnected`／`bridgeCheckedAt`＝console-api 對 Bridge 最近一次健康探測的結果與時間（頂列「Engine Bridge」連線燈）：
+        端點由 W3-B1 實作、兩欄先回 null；W3-B2 建好探測環後在同一支 controller 補實值（AR-08）。
+        輪詢間隔不得小於 `monitor.refreshIntervalMs`（預設與最小值皆 10 秒；限流鍵是 JWT subject，同一使用者所有頁面共用每分鐘 100 次，AR-06）。
       x-required-role: VIEWER
       x-rtm: [API-NTF-01, US-E-07]
       responses:
@@ -997,10 +1025,15 @@ paths:
       summary: 即時執行日誌（SSE）
       description: |
         事件：`log`、`status-change`、`review-request`、`alert`（`data` 形狀見各 `*EventData` schema 與 Markdown 契約 §2）。
-        認證：`Authorization: Bearer` 與 `?access_token=` 兩者皆收（EventSource 不能帶標頭）。
+        認證：`Authorization: Bearer` 與 `?access_token=` 兩者皆收（EventSource 不能帶標頭）；
+        **後端任何存取日誌不得輸出含 `access_token` 的 query string**，nginx 的 `log_format` 須遮罩（Markdown 契約 §0.7；AR-05）。
         `id:` 沿用 Bridge `seq`；後端自產的事件用 `<seq>.<n>`。`Last-Event-ID` 重播未送達事件。
-        每 15 秒無事件送 `: keep-alive` 註解。PAUSED 不結束串流；終態後送 `status-change` 並關閉；
+        每 15 秒無事件送 keep-alive 註解（內容為 `keep-alive`）。PAUSED 不結束串流；終態後送 `status-change` 並關閉；
         重連時若 run 已終態且無事件可重播 → **204**（EventSource 收到 204 不再重連）。
+        框架：冒號後的空白不保證（Spring `SseEmitter` 輸出 `id:41`、`:keep-alive`，不帶空白）；客戶端與 QA 一律以解析後的欄位
+        （事件名、id、data JSON）處理與斷言，不比對位元組字面（AR-03）。實作提醒：`SseEmitter` 完成時的 ASYNC dispatch 須放行授權
+        （`dispatcherTypeMatchers(DispatcherType.ASYNC).permitAll()` 或覆寫 `shouldNotFilterAsyncDispatch`），
+        串流正常結束後日誌不得出現 `AccessDeniedException`（TBC-1）。
       x-required-role: VIEWER
       x-rtm: [API-SSE-01, API-SSE-03, US-E-03, US-E-07]
       security:
@@ -1027,7 +1060,7 @@ paths:
             Cache-Control:
               schema:
                 type: string
-              description: no-cache
+              description: no-cache, no-store
             X-Accel-Buffering:
               schema:
                 type: string
@@ -1036,9 +1069,10 @@ paths:
             text/event-stream:
               schema:
                 type: string
-                description: SSE 文字框架；每個事件 `id:`／`event:`／`data:`（單行 JSON）。
+                description: SSE 文字框架；每個事件 `id`／`event`／`data` 三個欄位（單行 JSON；冒號後空白不保證）。
         '204':
           description: run 已終態且沒有可重播的事件（結束重連）
+        '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '404': {$ref: '#/components/responses/NotFound'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
@@ -1054,7 +1088,11 @@ paths:
       summary: 即時執行指標（SSE）
       description: |
         事件：`metric-update`、`token-update`、`progress-update`。三者都是**狀態快照（latest-wins）**：
-        重連時不重播歷史，伺服器先送各一則最新快照再接即時事件（收斂重播）。其餘認證／keep-alive／終態規則同 `/logs`。
+        重連時不重播歷史，伺服器先送各一則最新快照再接即時事件（收斂重播）。
+        **三則快照的 id 互異**：`<S>.1`＝`progress-update`、`<S>.2`＝`token-update`、`<S>.3`＝`metric-update`
+        （`S`＝目前最後處理的 Bridge seq）；之後的即時事件 id 嚴格大於 `<S>.3`。客戶端以「已處理的最大 id」去重，id 互異才不會丟掉第二、三則（AR-02）。
+        run 已終態時：`Last-Event-ID` 已 ≥ `<S>.3` → **204**，否則送終態快照後關閉。
+        其餘認證／keep-alive／框架（冒號後空白不保證）／終態規則同 `/logs`。
       x-required-role: VIEWER
       x-rtm: [API-SSE-02, API-SSE-03, US-E-03]
       security:
@@ -1072,7 +1110,8 @@ paths:
               schema:
                 type: string
         '204':
-          description: run 已終態且沒有可送的事件（結束重連）
+          description: run 已終態且沒有可送的事件（`Last-Event-ID` 已 ≥ `<S>.3`；結束重連）
+        '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '404': {$ref: '#/components/responses/NotFound'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
@@ -1177,6 +1216,7 @@ paths:
         multipart 欄位 `file`（≤ 1MB、`version=1` 的 `SettingsExportDocument`）。逐筆驗證（型別／規則／SEC-04 allowlist）；
         通過者在同一交易套用並寫歷史，失敗者列入 `errors`；`<encrypted>` 佔位值略過（算入 `skipped`）。
         token_guard 兩鍵以合併後的最終值做 `halt > compact` 跨鍵校驗，不滿足則兩鍵皆拒絕。
+        **部署**：經 nginx 時須有 `location = /api/v1/settings/import { client_max_body_size 2m; … }`（Markdown 契約 §0.7 第 2 項；AR-04）。
       x-required-role: ADMIN
       x-rtm: [API-SET-09, US-S-06, NFR-SEC-05]
       requestBody:
@@ -1211,8 +1251,12 @@ paths:
       summary: 測試模型連線（SEC-04）
       description: |
         預設測試已儲存的 `model.apiUrl`／`model.apiKey`；body（選填）可帶尚未儲存的 `apiUrl`／`apiKey`／`model`（金鑰不回顯、不寫日誌）。
+        `apiUrl` 是**完整的 chat-completions 端點 URL**（與系統參數 `model.apiUrl` 同義；後端不補路徑，AR-09）。
+        探測方式：對該 URL 原樣送一則 **1-token 的 POST ping**（`max_tokens:1`、`stream:false`，供應商端約消耗一個 token）；
+        連線釘死在已驗證的 IP（Apache HttpClient 5 的自訂 `DnsResolver`，不跟 redirect；AR-10）。
         SSRF／allowlist 檢查未過 → **422**（reason「目標位址未通過 SSRF／allowlist 檢查」，`details.violation` 為規則碼）；
-        通過檢查後的網路層結果（逾時、拒絕連線、HTTP 401、重新導向）→ **200** 且 `success=false`。
+        通過檢查後的網路層結果（逾時、拒絕連線、HTTP 401、404／405、重新導向）→ **200** 且 `success=false`。
+        loopback 預設拒絕，只有 e2e／test／本機 profile 的 `console.security.allow-loopback=true` 才放行；`link_local`／`private_ip` 任何 profile 都拒。
         檢查順序與規則碼見 Markdown 契約 §1.5.7。
       x-required-role: ADMIN
       x-rtm: [API-SET-06, US-S-05, NFR-SEC-04]
@@ -1356,8 +1400,9 @@ paths:
       operationId: updateSetting
       summary: 更新單一參數
       description: |
-        驗證順序：404 鍵不存在 → 400 型別／`validationRule`／範圍／SEC-04 allowlist（`model.apiUrl`）→ 400 token_guard 單鍵跨鍵校驗
-        （讀對端鍵的現值，reason 同群組端點）→ 409 敏感參數未帶 `confirm=true`。
+        驗證順序：404 鍵不存在 → 400 型別／`validationRule`／範圍（例：`monitor.refreshIntervalMs` 最小 10000）／SEC-04 allowlist
+        （`model.apiUrl`：須為完整的 chat-completions 端點 URL，只做格式、scheme、userinfo、IP 字面類別與 allowlist 檢查，不做 DNS）
+        → 400 token_guard 單鍵跨鍵校驗（讀對端鍵的現值，reason 同群組端點）→ 409 敏感參數未帶 `confirm=true`。
         `value` 一律是字串（BOOLEAN 為 `true`／`false`；FLOAT 用小數點）。成功寫歷史；加密值以 AES-256-GCM 儲存。
       x-required-role: ADMIN
       x-rtm: [API-SET-03, API-SET-10, US-S-02, US-S-08, NFR-SEC-05]
@@ -1430,7 +1475,8 @@ components:
       name: access_token
       description: |
         只有 `/api/v1/stream/**` 接受（EventSource 不能帶標頭）；必須是 access token（refresh token 一律 401）。
-        伺服器存取日誌須遮罩此參數，回應帶 `Cache-Control: no-store`。
+        後端任何存取日誌不得輸出含 `access_token` 的 query string，nginx 的 `log_format` 須遮罩此參數
+        （Markdown 契約 §0.7；AR-05）；回應帶 `Cache-Control: no-store`。
   parameters:
     PageQuery:
       name: page
@@ -1627,7 +1673,7 @@ components:
           schema:
             $ref: '#/components/schemas/ApiError'
     TooManyRequests:
-      description: 超過每分鐘 100 次請求上限（每 IP；reason「超過每分鐘 100 次請求上限」）
+      description: 超過每分鐘 100 次請求上限（每個使用者＝JWT subject，未認證請求才以客戶端 IP 計；限流在授權判定之前，超限者先得 429；reason「超過每分鐘 100 次請求上限」）
       headers:
         Retry-After:
           description: 建議等待秒數
@@ -1686,6 +1732,7 @@ components:
         details:
           type: object
           additionalProperties: true
+          description: 各端點固定的鍵（camelCase）。**不輸出值為 null 的鍵**（沒有值的鍵省略；「缺席」與 null 等價，AR-17）
         timestamp:
           type: string
           format: date-time
@@ -1828,9 +1875,10 @@ components:
         name:
           type: string
           maxLength: 200
+          description: 任務名稱；空白字串 → 422 gate=empty_prompt（欄位缺漏或 null → 400；AR-21）
         description:
           type: string
-          description: Markdown；不可為空白（空白→ 422 gate=empty_prompt）
+          description: Markdown；不可為空白（空白字串→ 422 gate=empty_prompt；缺漏或 null → 400）
         passCriteria:
           type: string
           description: Markdown；落庫時 NotBlank
@@ -1969,10 +2017,11 @@ components:
           type: integer
           format: int64
         parsePath:
+          description: 採用的解析路徑；第一次成功解析前為 null（缺席）。儲存於 V5 新增的 import_records.parse_path（AR-07）
           $ref: '#/components/schemas/ParsePath'
         lastParseErrors:
           type: array
-          description: 最近一次 parse 被有界閘拒絕的原因（成功解析後清空）
+          description: 最近一次 parse 被有界閘拒絕的原因（V5 新增的 JSONB 欄位 last_parse_errors）；成功解析後清空；非閘的失敗不寫（AR-07）
           items:
             $ref: '#/components/schemas/GateError'
       example:
@@ -1992,7 +2041,10 @@ components:
             sourceContent:
               type: string
             parsedResult:
-              $ref: '#/components/schemas/ParsedResult'
+              description: 第一次成功解析前為 null（或缺席）；失敗的 parse 不會寫入它（Markdown 契約 §0.5 V5、§1.1.3；AR-07）
+              oneOf:
+                - $ref: '#/components/schemas/ParsedResult'
+                - type: 'null'
     ParseResultResponse:
       type: object
       description: |
@@ -2109,7 +2161,7 @@ components:
       type: object
       description: |
         ALL＝全部「可執行」任務（排除 COMPLETED／SKIPPED）；SELECTED＝`goalIds` 的全部可執行任務 ∪ `taskIds`。
-        `followUpOfRunId` 只出現在後續批次（follow-up run）的回應。
+        `followUpOfRunId` 只出現在後續批次（follow-up run）的回應，且**只在這裡有**（`ExecutionRunResponse` 頂層沒有同名欄位；AR-20）。
         請求中 `mode` 可省略（預設 ALL）；回應一律帶 `mode`。
       properties:
         mode:
@@ -2182,9 +2234,6 @@ components:
         completedAt:
           type: string
           format: date-time
-        followUpOfRunId:
-          type: string
-          format: uuid
       example:
         id: e5a7c3b9-2f1d-4b6a-8c0e-1d2f3a4b5c31
         projectId: 0b8c5d1e-6a47-4d3f-8f2a-9c1e7b3a5d02
@@ -2263,7 +2312,7 @@ components:
         stepNumber:
           type: integer
           format: int32
-          description: 該步驟在 playbook 內的位置（1 起算，Bridge 的 current_step_number）
+          description: 該步驟在 playbook 內的位置（1 起算，Bridge 的 current_step_number）；與 ExecutionStepResponse.stepNumber（事件 seq）不同義，見 Markdown 契約 §0.6
         taskId:
           type: string
           format: uuid
@@ -2323,7 +2372,7 @@ components:
         stepId:
           type: string
           format: uuid
-          description: 佐證步驟列 execution_steps.id（TASK_CONFIRM／GOAL_*＝剛完成的步驟；ESCALATED＝失敗步驟）
+          description: 佐證步驟列 execution_steps.id（UUID，不是 playbook 的 step_id；TASK_CONFIRM／GOAL_*＝剛完成的步驟；ESCALATED＝失敗步驟；Markdown 契約 §0.6）
         taskId:
           type: string
           format: uuid
@@ -2336,7 +2385,7 @@ components:
           type: string
         reason:
           type: string
-          description: 給人看的原因（樣板見 Markdown 契約 §3.6.4）
+          description: 給人看的原因（樣板見 Markdown 契約 §3.6.2）
         requestedAt:
           type: string
           format: date-time
@@ -2405,7 +2454,8 @@ components:
               $ref: '#/components/schemas/BridgeInfo'
     ExecutionStepStatus:
       type: string
-      enum: [STARTED, IN_PROGRESS, COMPLETED, FAILED, RETRYING]
+      description: Bridge 實際寫入的四種步驟狀態（沒有 IN_PROGRESS；AR-20）
+      enum: [STARTED, COMPLETED, FAILED, RETRYING]
     ExecutionStepResponse:
       type: object
       required: [id, runId, taskId, stepNumber, action, status, timestamp]
@@ -2427,7 +2477,7 @@ components:
         stepNumber:
           type: integer
           format: int32
-          description: ＝該 step 事件的 Bridge seq（與 SSE id 同序號空間）
+          description: ＝該 step 事件的 Bridge seq（與 SSE id 同序號空間）；不是步驟位置，位置請以 stepId 對 dag 的 sequence（Markdown 契約 §0.6）
         stepId:
           type: string
           description: playbook step_id（取自 input.step_id）
@@ -2782,12 +2832,13 @@ components:
           type:
             - boolean
             - 'null'
-          description: 最近一次 Bridge 健康探測的結果（頂列「Engine Bridge · 已連線」）；尚未探測過為 null
+          description: 最近一次 Bridge 健康探測的結果（頂列「Engine Bridge · 已連線」）；尚未探測過為 null。W3-B1 階段恆為 null（探測環由 W3-B2 建立，B2 在同一支 controller 補實值；AR-08）
         bridgeCheckedAt:
           type:
             - string
             - 'null'
           format: date-time
+          description: 最近一次 Bridge 健康探測的時間；尚未探測過（含 W3-B1 階段）為 null
     LogEventData:
       type: object
       description: "SSE `event: log` 的 data（單行 JSON）"
@@ -2905,7 +2956,7 @@ components:
           type: string
     ProgressUpdateEventData:
       type: object
-      description: "SSE `event: progress-update` 的 data（狀態快照）"
+      description: "SSE `event: progress-update` 的 data（狀態快照）；即時事件 id＝`<seq>`，收斂快照 id＝`<S>.1`"
       required: [seq, ts, runStatus, bridgeStatus, completedSteps, totalSteps, progressPct]
       properties:
         seq:
@@ -2932,7 +2983,7 @@ components:
           $ref: '#/components/schemas/CurrentStep'
     TokenUpdateEventData:
       type: object
-      description: "SSE `event: token-update` 的 data（狀態快照）"
+      description: "SSE `event: token-update` 的 data（狀態快照）；即時事件 id＝`<seq>`，收斂快照 id＝`<S>.2`"
       required: [seq, ts, tokensUsed, delta, contextPct]
       properties:
         seq:
@@ -2969,7 +3020,7 @@ components:
           description: 本次增量歸因的任務（目前 RUNNING 的步驟）
     MetricUpdateEventData:
       type: object
-      description: "SSE `event: metric-update` 的 data（狀態快照；id＝`<seq>.1`，隨 token-update 之後）"
+      description: "SSE `event: metric-update` 的 data（狀態快照）；即時事件 id＝`<seq>.1`（隨 token-update、COMPLETED／FAILED 的 progress-update、終態 progress-update 之後），收斂快照 id＝`<S>.3`"
       required: [seq, sub, ts, completedTasks, failedTasks, totalTasks, retriedTasks, averageRetryCount, totalTokensUsed, elapsedSec]
       properties:
         seq:
@@ -2978,6 +3029,7 @@ components:
         sub:
           type: integer
           format: int32
+          description: 即時事件為 1；收斂快照為 3（與 id 的小數部分相同）
         ts:
           type: string
           format: date-time
@@ -3120,6 +3172,7 @@ components:
         apiUrl:
           type: string
           maxLength: 500
+          description: 完整的 chat-completions 端點 URL（與系統參數 model.apiUrl 同義；後端不補路徑，AR-09）
         apiKey:
           type: string
           maxLength: 512
@@ -3141,7 +3194,7 @@ components:
           format: int64
         message:
           type: string
-          description: 給人看的結果（例：連線成功、認證失敗（HTTP 401）、連線逾時）
+          description: 給人看的結果（例：連線成功、認證失敗（HTTP 401）、端點路徑不存在或不接受 POST（HTTP 404）、連線逾時）
         resolvedHost:
           type: string
           description: 實際連線的主機（DNS 解析並通過檢查後）
@@ -3154,7 +3207,7 @@ components:
         success: true
         latencyMs: 230
         message: 連線成功
-        resolvedHost: api.anthropic.com
+        resolvedHost: api.minimax.io
         httpStatus: 200
     ConfigHistoryResponse:
       type: object
