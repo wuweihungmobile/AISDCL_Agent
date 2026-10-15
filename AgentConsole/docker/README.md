@@ -15,7 +15,7 @@ AgentConsole/
 ├── docker-compose.dev.yml        本機開發：只起 PG＋Redis；或疊加在主檔上把 PG／Redis 發布到主機
 ├── .env.example                  環境變數模板（只放 <YOUR_...> 佔位符）
 └── docker/
-    ├── nginx/                    nginx.conf、conf.d/default.conf
+    ├── nginx/                    nginx.conf、conf.d/{default.conf,console-locations.inc,https-redirect.inc,https.conf.example}
     ├── postgres/primary/         Dockerfile、postgresql.conf、pg_hba.conf、pgbackrest-archive-wal.sh、init/{01-init-db.sql,02-replication.sh}
     ├── postgres/replica/         postgresql.conf、entrypoint.sh
     ├── pgbackrest/               Dockerfile、pgbackrest.conf、crontab、scripts/{backup-full,backup-incr,pg_dump-offsite,restore,verify-backup,setup-replica,pgbackrest-entrypoint,pgbackrest-metrics,pgbackrest-as-postgres}.sh
@@ -33,7 +33,7 @@ AgentConsole/
 | 1 | nginx | `nginx:1.27-alpine` | full | frontend-net、**backend-net** | 80、443 | 0.5／256M | `wget /nginx-health`（nginx 自己回 200） |
 | 2 | frontend | 自建 `aisdlc-frontend:dev` | app | frontend-net、backend-net | — | 1.0／512M | `wget`／`curl` `:3000/api/health` |
 | 3 | backend | 自建 `aisdlc-backend:dev` | app | backend-net、db-net | — | 2.0／1G | `wget`／`curl` `:8080/actuator/health` |
-| 4 | engine-bridge | 自建 `aisdlc-engine-bridge:dev` | app | backend-net、db-net | — | 1.0／1G | python 探測 `:8081/health` |
+| 4 | engine-bridge | 自建 `aisdlc-engine-bridge:dev` | app | backend-net、db-net | — | 1.0／1G | python 探測 `:8081/health/deep`（深度探針：git／autoclaude／工作區可寫／DB，見〈9〉#28） |
 | 5 | postgres-primary | 自建 `aisdlc-postgres-primary:pg18`（`pgvector/pgvector:pg18` ＋ pgBackRest） | db | db-net | 正式模式不發布 | 2.0／2G | `pg_isready -h 127.0.0.1` |
 | 6 | postgres-replica | `pgvector/pgvector:pg18` | db | db-net | 正式模式不發布 | 1.0／1G | `pg_isready -h 127.0.0.1` |
 | 7 | redis | `redis:7-alpine` | db | db-net | — | 0.5／256M | `redis-cli ping` |
@@ -54,7 +54,7 @@ AgentConsole/
 | 網路 | internal | 成員 |
 |------|----------|------|
 | frontend-net | 否 | nginx、frontend |
-| backend-net | 否 | nginx、frontend、backend、engine-bridge、pgadmin、prometheus、grafana |
+| backend-net | 否（**固定子網** `172.31.250.0/24`，可由 `BACKEND_NET_SUBNET` 改；見〈13〉） | nginx、frontend、backend、engine-bridge、pgadmin、prometheus、grafana |
 | db-net | **是**（不可出站；**對主機也不通**） | backend、engine-bridge、primary、replica、redis、pgbackrest、pgadmin、prometheus、exporters、minio（＋兩個一次性 job） |
 
 | 卷 | 用途 |
@@ -64,7 +64,8 @@ AgentConsole/
 | pg_backup | pgBackRest repo1（本地備份；primary 與 sidecar 共用）；另放 `.last_backup_status` |
 | pg_socket | primary 的 unix socket，與 sidecar 共用（pgBackRest 本機模式，不走 SSH／TLS） |
 | minio_data／minio_certs | 離站備份物件／MinIO 自簽憑證 |
-| redis_data、app_logs、nginx_certs、engine_workspace | PRD §11.3 原有 |
+| redis_data、nginx_certs、engine_workspace | PRD §11.3 原有 |
+| app_logs | PRD §11.3 原有；backend（`console.log`）與 engine-bridge（`bridge.log`）各自把滾動檔案日誌寫在這裡（〈15〉） |
 
 ## 2. 啟動與停止
 
@@ -77,6 +78,18 @@ cp AgentConsole/.env.example AgentConsole/.env
 ```powershell
 Copy-Item AgentConsole\.env.example AgentConsole\.env
 ```
+
+🔴 **`CONSOLE_ENCRYPTION_KEY` 必填**（QA DEF-AC-006）：敏感系統參數的 AES-256 金鑰，base64 編碼的 32 bytes。compose 在 `config`／`up` 階段就檢查，**未設或留空即失敗**，訊息逐字是 `required variable CONSOLE_ENCRYPTION_KEY is missing a value: CONSOLE_ENCRYPTION_KEY 必填，openssl rand -base64 32`（此前預設空值，要等 backend 啟動失敗並無限重啟約 155 秒才看得到原因）。因為 `docker-compose.dev.yml` 以 `extends` 載入整份主檔，**dev 模式也要有值**（`.env.example` 的佔位符不是空值所以 compose 放行，但 backend 啟動時會因為它不是合法的 base64 而拒絕——一定要換成真的值）。產生方式：
+
+```bash
+openssl rand -base64 32
+```
+
+```powershell
+$b = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); [Convert]::ToBase64String($b)
+```
+
+金鑰遺失＝已加密的系統參數無法解密；請與資料庫備份分開保管。
 
 | 目的 | bash | PowerShell |
 |------|------|------------|
@@ -252,6 +265,19 @@ Push-Location AgentConsole; docker compose exec postgres-primary psql -U aisdlc 
 - `restore.sh` 在 primary 仍接受連線時會**拒絕執行**（不會清掉執行中的資料目錄）。
 - 還原後 PG 會依 `restore_command` 從 pgBackRest 重播 WAL 到目標點再升格（新時間軸）。🔴 **replica 的時間軸會與新 primary 分岔，必須重建（〈5〉）**；primary 的 `postgresql.auto.conf` 會留下 pgBackRest 寫入的 `restore_command`／`recovery_target_*`（無害，只在復原時用）。
 - 還原完成後做一次 `pgbackrest check`＋新的全備。
+- **全新空卷**（QA DEF-AC-010）：換新磁碟、`pg_data` 卷被刪掉重建時，資料目錄 `…/data/pgdata` 根本不存在，而卷的根目錄屬 `root:root 0755`，postgres 無權在其下建立它。`restore.sh` 現在在 root 階段（`gosu` 之前）自己建立資料目錄、交給 `postgres`、設 `0700`，然後才進 Step 1，所以「目錄不存在」不再是失敗；此前 `find` 會在 Step 1 因 `No such file or directory` 中止。直接以 postgres 身分啟動（沒經過 root 階段）而目錄又不存在時，會印出明確原因並以 rc=1 結束。
+- 🔴 **「還原後核對資料列數」是必做步驟，不可用 healthy 代替**：`restore.sh` 若中途失敗（或有人略過它）而你仍執行了 `docker compose start postgres-primary`，PG 映像的入口程序見到**空的資料目錄就 `initdb` 出一個全新的空叢集**，約 10 秒後 `docker compose ps` 照樣顯示 healthy——只看 healthy 的人會以為還原成功，其實資料全無。還原後一定要做這三項核對（都在 primary 上執行；PowerShell 形態＝`Push-Location AgentConsole; <同一段 docker compose …>; Pop-Location`）：
+
+  ```bash
+  # 1. 各表的「精確」列數（不要用 pg_stat 的估計值 n_live_tup：還原後統計是空的）；與災難前記下的數字比對
+  (cd AgentConsole && docker compose exec postgres-primary psql -U aisdlc -d aisdlc -c "SELECT table_name, (xpath('/row/c/text()', query_to_xml(format('SELECT count(*) AS c FROM %I.%I', table_schema, table_name), false, true, '')))[1]::text::int AS row_count FROM information_schema.tables WHERE table_schema = 'console' AND table_type = 'BASE TABLE' ORDER BY 1;")
+  # 2. 時間軸：成功還原會升格出新時間軸（≥ 2）；全新的空叢集恆為 1
+  (cd AgentConsole && docker compose exec postgres-primary psql -U aisdlc -d aisdlc -c "SELECT timeline_id FROM pg_control_checkpoint();")
+  # 3. 備份鏈健康
+  (cd AgentConsole && docker compose exec pgbackrest pgbackrest --stanza=aisdlc check)
+  ```
+
+  判準：`console` schema 的表都在（空叢集的 `console` schema 是存在的——初始化腳本會建它——但沒有任何表，第 1 項會是 `(0 rows)`；W5 演練實測：整個 `pgdata` 刪掉直接 start，約 10 秒 healthy、第 1 項 0 列、`timeline_id`＝1）、關鍵表（例如 `projects`）的列數與災難前一致或符合 PITR 目標點、`timeline_id` ≥ 2、`check` 成功。災難前就該習慣把第 1 項的輸出存起來當基準（〈8〉每日／每週檢查可順手做）。
 
 ### 4.4 邏輯備份還原（`pg_dump` 離站檔）
 
@@ -409,6 +435,12 @@ Push-Location AgentConsole; docker compose exec pgbackrest bash /usr/local/bin/b
 | 25 | §12.5.2 failover＝主機側 bash 腳本；§12.3.4 `restore.sh`＝主機側腳本 | 改為 `docker compose …` 指令序列（〈4.3〉〈6〉）；容器內只保留 `restore.sh` 的清資料＋還原兩步；backend／Bridge 的 DB 主機改由 `POSTGRES_HOST` 參數化 | NFR-XPL-03：Windows 主機沒有 bash。PRD 手動改 compose 內的連線字串，改參數易錯 |
 | 26 | — | 增 `name: aisdlc`、`json-file` 日誌輪替（10m×3）、primary／replica `shm_size: 256mb` 與 `stop_grace_period: 60s`、sidecar `init: true`、`BACKUP_TZ`、卷 `pg_socket`／`minio_data`／`minio_certs`、`alerts.yml`、每日清 WAL 歸檔的 cron | 可重現的卷名；日誌不撐爆磁碟；PG 預設 `/dev/shm` 64MB 對平行查詢太小；cron 時區；PRD 的 WAL 7 天保留沒有任何清理機制 |
 | 27 | 卷名 `pg_backup`（PRD、Architecture、RTM） | 沿用 `pg_backup` 作為 pgBackRest repo1（任務書提到的 `pgbackrest_repo` 是同一個東西） | 與 RTM `INF-VOL-04`、Architecture §2.5 一致 |
+| 28 | §11.3 Bridge 沿用淺層 healthcheck；映像基底 `python:3.11-slim` | Bridge 映像安裝 `git`＋`ca-certificates`；映像與 compose 的 healthcheck 改打 `GET /health/deep`（深度探針，逐項實測 git／autoclaude／工作區可寫／DB，任一失敗回 503）；console-api 的探測環仍打 `/health` | W4-QA **DEF-AC-003（P1）**：slim 映像沒有 git，引擎內共 11 處 subprocess 呼叫 git，Docker 全棧下任何批次一律 `FAILED`（`FileNotFoundError: 'git'`），而 `/health` 永遠 200、容器永遠 healthy——本機（有 git）、mock、pytest 全綠，只有全棧真跑才現形。深度探針不適合每 30 秒給探測環打（會 spawn 子行程、寫檔），所以只給容器編排用 |
+| 29 | §11.5 nginx `error_log` 預設 `notice`；`/api/` 一律反代到 backend；靜態資源的 `Cache-Control` 由 nginx `add_header` 加 | `error_log … crit`；`location = /api/health` 導向 frontend；`/_next/static/` 以 `proxy_hide_header` 丟掉上游那份、只留 nginx 的一份；全部 location 抽成 `console-locations.inc`（80 與 443 共用） | **DEF-AC-008**：上游被切斷時 `error_log` 印出含 `?access_token=<JWT>` 的完整請求行（81 行 `[error]` 有 16 行含 token 值）；`log_format` 管不到它。代價見〈10〉。**O-08**：前端的 `/api/health` 被反代到 backend 而回 401。**O-09**：`Cache-Control` 出現兩次（nginx 與 Next 各一）。抽 include 的理由：HTTP 與 HTTPS 兩個 server 的路由必須一致（〈14〉） |
+| 30 | §11.6 `CONSOLE_ENCRYPTION_KEY=<…>`（compose 預設空字串） | compose 改 `${CONSOLE_ENCRYPTION_KEY:?…}` 必填；`.env.example` 寫明產生方式 | **DEF-AC-006**：compose 層放行空值，backend 啟動失敗後無限重啟、約 155 秒才看得到「container is unhealthy」；改後與 `POSTGRES_PASSWORD` 一樣在 `config` 階段就失敗（〈2〉） |
+| 31 | 網路不指定子網（Docker 動態分配） | `backend-net` 固定子網（預設 `172.31.250.0/24`）；backend 的 `CONSOLE_INTERNAL_PROXIES` 預設只信該子網的 `.2`～`.254` | **O-20**：Tomcat `RemoteIpValve` 預設信任所有私網位址，主機（Docker 閘道）或內網客戶端進來的請求可偽造 `X-Forwarded-For` 換掉限流的桶（〈13〉）。沒有固定子網就無法在 compose 層給出「只信 nginx 所在網段」的值 |
+| 32 | §11.3 `app_logs` 卷掛在 backend／Bridge，但沒有任何東西寫進去 | backend 設 `LOG_DIR=/app/logs`（`console.log`）、Bridge 設 `BRIDGE_LOG_DIR=/app/logs`（`bridge.log`），各自每日切檔、保留 7 份；Bridge 映像把 `/app/logs` 設為 `1777`（兩個容器用不同 uid 寫同一個卷），且 backend 掛載該卷時加 `:nocopy` | **INF-VOL-06／C-16**：此前「掛載成功但卷內為空」；每行日誌帶 trace_id 的規格見〈15〉。🔴 實測陷阱：具名卷「還空著」時，Docker 在**每個**容器 create 時都把映像內該目錄的擁有者與權限複製進卷根，compose 先 create engine-bridge、後 create backend，最後一個 create 的 backend（`spring:spring 0755`）蓋掉 Bridge 映像的 `1777`，Bridge 寫 `bridge.log` 得 `Permission denied`（日誌只在 stderr 留警告）。backend 加 `:nocopy` 後卷根只由 Bridge 映像決定，與 create 順序無關（實測：`drwxrwxrwt`、uid 10001 與 1001 皆可寫） |
+| 33 | §11.5 只留 443 區塊的註解範例 | 提供 `https.conf.example`（443、憑證取自 `nginx_certs` 卷）與 `https-redirect.inc`（80 轉址到 443、保留 `/nginx-health`）；預設不啟用，步驟見〈14〉 | **INF-VOL-07**：此前「憑證實際放入與 HTTPS 區塊」缺 |
 
 ## 10. 已知限制
 
@@ -424,7 +456,10 @@ Push-Location AgentConsole; docker compose exec pgbackrest bash /usr/local/bin/b
 - 回歸驗證範圍：`db`、`app`、`full` 三個 profile 都以真實映像實跑過（frontend／backend 使用其負責人建好的 `aisdlc-frontend:dev`／`aisdlc-backend:dev`，以 `up -d --no-build --wait` 啟動；**compose 的 `build:` 區段本輪沒有實際執行**，避免與他們的建置互踩）。實測內容：14 個長駐服務皆 healthy、經 nginx 登入並建立專案／目標／任務、Flyway 建出 13 張表並串流到 replica、對含應用資料的資料庫做全備與還原演練、failover 與切回（6.1～6.3）含真實 backend。尚未驗：Windows（〈11〉）、真實 TLS 443、`frontend`／`backend` 由 compose `build:` 重建的路徑。
 - 告警盲區（沿用 PRD「值 > 閾值」的寫法）：序列不存在時規則不會觸發。從未做成任何完整備份時，`pgbackrest_backup_since_last_full_seconds` 缺席，`PgBackRestNoRecentFullBackup` 不會亮（`pgbackrest_backup_count{type="full"}` 為 0、儀表板「距上次完整備份」顯示 No data）；exporter 或 sidecar 整個停掉時，`PostgresDown`（`pg_up == 0`）與 `PgBackRestMetricsStale` 同樣沒有序列可比。`Application Overview` 第一列四個 `up` 面板（`DOWN` 紅色）是目前唯一會亮的地方；要補 `absent()`／`up == 0` 類規則，應連同 Alertmanager 一起規劃。
 - nginx 的 `upstream` 在 nginx 啟動時解析一次主機名稱：backend／frontend 容器若換了 IP，nginx 會繼續打舊位址（502）直到重新載入。實測 `stop`／`start` 反序、`up -d --no-deps` 重建都拿回同一個 IP，未能重現；理論上別的容器佔走該位址才會發生。補救：`docker compose exec nginx nginx -s reload`。
-- `app_logs` 卷：backend 日誌只走 stdout 的結構化 JSON（`LOGGING_STRUCTURED_FORMAT_CONSOLE`），掛載成功但卷內為空；保留此卷是為了與 PRD §11.3 一致，要檔案日誌需後端另設 file appender。
+- `app_logs` 卷：backend（`LOG_DIR=/app/logs` → `console.log`）與 engine-bridge（`BRIDGE_LOG_DIR=/app/logs` → `bridge.log`）各自寫滾動檔案日誌，stdout 的日誌（`docker compose logs`）照舊。檔案日誌的寫入失敗（舊卷權限不對、卷唯讀）不會讓服務起不來，只在該服務自己的日誌留一則警告；**既有的舊 `app_logs` 卷**（W5 之前建立）的擁有者與權限由當初第一個掛載它的映像決定（Bridge 映像當時沒有 `/app/logs` 目錄＝`root:root 0755`，或 backend 的 `spring` 0755），另一個服務因此寫不進去——`docker compose down -v` 重建，或 `docker run --rm -v aisdlc_app_logs:/l busybox chmod 1777 /l` 就地修（〈15〉）。
+- **資源上限貼近實用量（QA O-19，僅記錄、本輪不調）**：全棧實跑時 backend 實用 928MiB／1GiB、pgAdmin 242MiB／256MiB（`docker stats`）。JVM 以 `MaxRAMPercentage=75` 依容器上限自行調整堆積，短期不會因此失敗；若 `docker compose ps` 看到服務反覆重啟、`docker inspect <容器> --format '{{.State.OOMKilled}}'` 為 `true`，把該服務在 `docker-compose.yml` 的 `deploy.resources.limits.memory` 調高（backend 建議 2G、pgAdmin 512M）。
+- **nginx `error_log` 降到 `crit` 的代價**：nginx 平常的 error／warn 訊息（`upstream timed out`、`connect() failed`、`client intended to send too large body`…）都不再出現在 `docker compose logs nginx`，上游失敗的細節看不到（原因：`[error]` 級會把含 `?access_token=` 的完整請求行寫進日誌，DEF-AC-008）。要除錯時暫時把 `docker/nginx/nginx.conf` 最上方的 `crit` 改回 `error`、`docker compose restart nginx`，重現後**立刻改回 `crit`**，並用 `docker compose up -d --force-recreate nginx` 讓已累積含 token 的日誌隨舊容器消失（只 restart 清不掉）。治本是前端改用 fetch 串流帶 `Authorization` 標頭（契約 §2.8），不再把 token 放進網址。
+- **`backend-net` 固定子網可能與本機其他網段重疊**：預設 `172.31.250.0/24`；`docker compose up` 報 `Pool overlaps with other one on this address space` 時，在 `.env` 同時改 `BACKEND_NET_SUBNET` 與 `CONSOLE_INTERNAL_PROXIES`（〈13〉）。從舊版（動態子網）升級時不必先 `down`：實測 compose 會自動停掉掛在舊 `backend-net` 上的專案容器、換成固定子網的新網路、再把容器起回來（rc=0；升級後第一次 `up -d` 這些容器會被重啟一次）。若有人用 `docker network connect` 把**非 compose 管理**的容器手動接在該網路上，換網路可能因「有作用中的端點」失敗（Docker 不會移除仍有端點的網路；此情形未實測），需先自行卸除。
 
 ## 11. Windows 接續注意
 
@@ -442,3 +477,119 @@ Push-Location AgentConsole; docker compose exec pgbackrest bash /usr/local/bin/b
 | 8 | 時區：`BACKUP_TZ`（預設 `Asia/Taipei`）只影響 sidecar 的 cron；PG 容器為 UTC | `docker compose exec pgbackrest date`、PITR 的 `--target-time` 要帶 `+00` |
 | 9 | 根層 shellcheck 閘門可在 Windows 以 docker 載具跑（PATH 上沒有 shellcheck 時） | `python tools\run_shellcheck.py` |
 | 10 | 真實 frontend／backend／nginx 一起跑（`full`；第一次在 Windows 走 compose 的 `build:` 路徑） | `Push-Location AgentConsole; docker compose --profile db --profile app --profile full up -d --build --wait; Pop-Location`；`curl.exe -s -o NUL -w "%{http_code}\n" http://localhost/`（200）、`…/api/v1/projects`（401）、`…/actuator/health`（403）；80／443 被占用時 nginx 起不來 |
+
+## 12. 正式部署前必做（預設帳號、內部端點）
+
+### 12.1 預設帳號與密碼必須更換（QA O-06）
+
+- Docker 全棧在 `.env` **沒有**設 `CONSOLE_ADMIN_PASSWORD_HASH`／`CONSOLE_OPERATOR_PASSWORD_HASH`／`CONSOLE_VIEWER_PASSWORD_HASH` 時，backend 使用**開發預設**的三個帳號（`admin`／`operator`／`viewer`）與寫在 `backend/README.md` 的預設密碼——那些密碼是公開文件的一部分，等於沒有密碼。任何對外、多人共用或存放真實資料的部署，**必須**在第一次啟動前於 `.env` 覆寫三個 BCrypt 雜湊（雜湊產生法見 `backend/README.md`；`.env` 內雜湊的 `$` 要寫成 `$$`，範例在 `.env.example`），並確認用舊的預設密碼登入回 401。
+- 其餘服務沒有預設密碼：Grafana、pgAdmin、MinIO root、`POSTGRES_PASSWORD`、`REPLICATION_PASSWORD`、`PGBACKREST_CIPHER_PASS`、`CONSOLE_ENCRYPTION_KEY`、`JWT_SECRET` 都是必填，沒填 compose 就在 `config` 階段失敗。
+
+### 12.2 `/actuator/prometheus` 與 `/actuator/health` 免 token，防護全靠網路隔離（QA O-16）
+
+backend 的 `GET /actuator/prometheus`、`GET /actuator/health` **不需要 token**（`ActuatorIT` 明載；Prometheus 抓取與容器 healthcheck 需要它）：直連 backend 埠時任何人都讀得到指標。Docker 全棧靠三層隔離擋住，**缺一不可**：
+
+1. backend 容器**不對主機發布任何埠**（compose 的 backend 沒有 `ports:`）；
+2. nginx 的 `location /actuator/ { deny all; }` 擋掉經入口的存取（回 403，實測）；
+3. Prometheus 在 `backend-net` 內以服務名 `backend:8080` 直接抓取，不經 nginx。
+
+因此：不要替 backend 加 `ports:`、不要把不受信任的容器接進 `backend-net`、不要在 nginx 為 `/actuator/` 加放行。一旦 backend 埠被發布到主機或叢集外，這兩個端點就等於公開（指標含路徑、延遲、JVM 與連線池資訊）。
+
+## 13. 反向代理與 X-Forwarded-For 信任（QA O-20）
+
+**背景**：backend 以 `X-Forwarded-For` 還原客戶端位址（`server.forward-headers-strategy=native`，由 Tomcat `RemoteIpValve` 處理），**未認證**請求的限流以此位址分桶（登入後以 JWT subject 分桶，不受影響）。`RemoteIpValve` 預設信任**所有私網位址**作為「可信代理」——從主機進來的請求在 Docker 下以閘道的私網位址抵達 nginx，內網客戶端也是私網位址，兩者都被當成可信代理，於是其後由客戶端自填的 `X-Forwarded-For` 被採信：QA 實測連打 101 次後改 `X-Forwarded-For: 203.0.113.77`、`203.0.113.78` 即各換一個新桶，**不會 429**，未認證限流可被繞過。
+
+**對策（compose 預設已套用）**：
+
+- `backend-net` 固定子網；backend 的 `CONSOLE_INTERNAL_PROXIES`（對應 `server.tomcat.remoteip.internal-proxies`）預設**只信任該子網的 `.2`～`.254`**——nginx 在其中；`.1` 是 Docker 閘道（＝主機端進來的請求位址），刻意排除；其餘私網位址一律不信。客戶端偽造的 `X-Forwarded-For` 因此不會被採信。
+
+| 設定（`.env`） | 預設 | 說明 |
+|----------------|------|------|
+| `BACKEND_NET_SUBNET` | `172.31.250.0/24` | `backend-net` 的子網 |
+| `CONSOLE_INTERNAL_PROXIES` | `172\.31\.250\.(?:[2-9]\|[1-9]\d\|1\d\d\|2[0-4]\d\|25[0-4])` | Java 正規表示式，對 IP 字串**整串比對**；預設＝上列子網的 `.2`～`.254` |
+
+**什麼時候要改**：`docker compose up` 報 `Pool overlaps with other one on this address space`（本機其他 Docker／VPN 網段與預設子網重疊）。**兩個要一起改**，且值在 `.env` 裡不加引號、照字面寫（例：子網改 `10.77.5.0/24`，則 `CONSOLE_INTERNAL_PROXIES=10\.77\.5\.(?:[2-9]|[1-9]\d|1\d\d|2[0-4]\d|25[0-4])`）。查實際值：
+
+```bash
+(cd AgentConsole && docker network inspect aisdlc_backend-net --format '{{(index .IPAM.Config 0).Subnet}}')
+(cd AgentConsole && docker inspect aisdlc-nginx --format '{{(index .NetworkSettings.Networks "aisdlc_backend-net").IPAddress}}')
+```
+
+```powershell
+Push-Location AgentConsole; docker network inspect aisdlc_backend-net --format '{{(index .IPAM.Config 0).Subnet}}'; Pop-Location
+Push-Location AgentConsole; docker inspect aisdlc-nginx --format '{{(index .NetworkSettings.Networks "aisdlc_backend-net").IPAddress}}'; Pop-Location
+```
+
+**驗證偽造無效**（預期恰好 100 個 401、第 101 個 429，與 `X-Forwarded-For` 填什麼無關；先等限流視窗回滿，約 1 分鐘）：
+
+```bash
+for i in $(seq 1 101); do curl -s -o /dev/null -w '%{http_code}\n' -H "X-Forwarded-For: 203.0.113.$i" http://localhost/api/v1/projects; done | sort | uniq -c
+```
+
+```powershell
+1..101 | ForEach-Object { curl.exe -s -o NUL -w "%{http_code}`n" -H "X-Forwarded-For: 203.0.113.$_" http://localhost/api/v1/projects } | Group-Object | Select-Object Count, Name
+```
+
+**前提與限制**：只有 nginx 是**唯一入口**時成立。前面若再加負載平衡器或 CDN，它們的位址也要納入 `CONSOLE_INTERNAL_PROXIES`，否則限流會以它們的位址分桶（所有人共用一個桶）。直連 backend（沒有 nginx）時維持 `server.forward-headers-strategy=none`，此時偽造的標頭本來就不被採信（契約 §0.4 第 4 點）。
+
+## 14. 啟用 HTTPS（預設不啟用；INF-VOL-07）
+
+compose 本來就發布 `443` 並以唯讀掛載 `nginx_certs` 卷（`/etc/nginx/certs`）；`docker/nginx/conf.d/https.conf.example` 是對應的 443 server 區塊範例（TLS 1.2／1.3、憑證取自該卷），路由與 80 埠共用同一份 `console-locations.inc`。檔名不是 `*.conf`，所以預設**不會**被載入。
+
+1. **憑證放進 `nginx_certs` 卷**（檔名 `fullchain.pem`＝含中繼憑證的完整鏈、`privkey.pem`）。卷名是 `aisdlc_nginx_certs`（compose 專案名 `aisdlc`）；以暫時容器複製進去（先在目前目錄備好 `certs/` 資料夾）。要先用自簽憑證試：`openssl req -x509 -newkey rsa:2048 -nodes -keyout certs/privkey.pem -out certs/fullchain.pem -days 30 -subj "/CN=localhost"`。
+
+   ```bash
+   docker run --rm -v aisdlc_nginx_certs:/certs -v "$PWD/certs:/src:ro" busybox sh -c 'cp /src/fullchain.pem /src/privkey.pem /certs/ && chmod 600 /certs/privkey.pem'
+   ```
+
+   ```powershell
+   docker run --rm -v aisdlc_nginx_certs:/certs -v "${PWD}\certs:/src:ro" busybox sh -c "cp /src/fullchain.pem /src/privkey.pem /certs/ && chmod 600 /certs/privkey.pem"
+   ```
+
+2. **複製範例並改網域**：把 `docker/nginx/conf.d/https.conf.example` 複製成同目錄的 `https.conf`，把 `server_name localhost;` 改成你的網域。
+
+   ```bash
+   cp AgentConsole/docker/nginx/conf.d/https.conf.example AgentConsole/docker/nginx/conf.d/https.conf
+   ```
+
+   ```powershell
+   Copy-Item AgentConsole\docker\nginx\conf.d\https.conf.example AgentConsole\docker\nginx\conf.d\https.conf
+   ```
+
+3. **（選用）80→443 轉址**：編輯 `docker/nginx/conf.d/default.conf`，把 80 埠 server 內的 `include /etc/nginx/conf.d/console-locations.inc;` 換成 `include /etc/nginx/conf.d/https-redirect.inc;`。轉址檔保留 `/nginx-health` 回 200（compose 的 nginx healthcheck 打 `http://127.0.0.1/nginx-health`，不能被轉址）、其餘一律 `301` 到 `https://$host$request_uri`；公開的 HTTPS 埠不是 443 時請自行改檔內的目標網址。
+4. **檢查並重啟**：
+
+   ```bash
+   (cd AgentConsole && docker compose exec nginx nginx -t && docker compose restart nginx)
+   ```
+
+   ```powershell
+   Push-Location AgentConsole; docker compose exec nginx nginx -t; docker compose restart nginx; Pop-Location
+   ```
+
+5. **驗證**：`curl.exe -k -s -o NUL -w "%{http_code}\n" https://localhost/nginx-health` 回 `200`；啟用轉址時 `curl.exe -s -o NUL -w "%{http_code} %{redirect_url}\n" http://localhost/x` 回 `301 https://localhost/x`；`docker compose ps nginx` 仍是 healthy。
+
+回到只有 HTTP：刪掉 `https.conf`、把 `default.conf` 的 include 改回 `console-locations.inc`、重啟 nginx。其他注意：HSTS 在範例內是註解（瀏覽器會記住一年，確認 HTTPS 穩定再開，且 nginx 的 `add_header` 不會繼承到自己有 `add_header` 的 `/_next/static/`）；`X-Forwarded-Proto` 因 `$scheme` 自動變 `https`；憑證申請與續期（例如 Let's Encrypt）不在本專案範圍。
+
+## 15. 日誌與追蹤碼（trace_id）
+
+- **stdout**：`docker compose logs backend｜engine-bridge｜nginx`（`json-file` 輪替 10m×3）。backend 是 JSON 行（含 `traceId`），engine-bridge 自 W5 起每一行都是 `<UTC 時間>Z <等級> [<logger>] trace_id=<值> <訊息>`（含 uvicorn 的啟動／存取日誌；沒有請求上下文的行是 `trace_id=-`；一筆日誌恆為一行，traceback 內的換行寫成字面 `\n`）。
+- **檔案日誌（`app_logs` 卷）**：backend `LOG_DIR=/app/logs` → `console.log`（JSON 行）；engine-bridge `BRIDGE_LOG_DIR=/app/logs` → `bridge.log`（同上的文字行）。兩者每日（UTC 午夜）切檔、保留 7 份；兩個容器以不同 uid 寫同一個卷，所以 Bridge 映像把 `/app/logs` 設成 `1777`，並且 backend 掛載該卷時加 `:nocopy`（為什麼：〈9〉#32——沒有它，最後 create 的 backend 會把卷根改成 `spring:spring 0755`、Bridge 寫不進去）。寫不進去不會讓服務起不來，只在 stderr 留一則警告。
+
+  ```bash
+  (cd AgentConsole && docker compose exec engine-bridge tail -n 20 /app/logs/bridge.log)
+  ```
+
+  ```powershell
+  Push-Location AgentConsole; docker compose exec engine-bridge tail -n 20 /app/logs/bridge.log; Pop-Location
+  ```
+
+- **跟著一次操作查**（契約 §0.4 第 6 點、§3.1.1）：console-api 為每個請求產生 `traceId`（回應標頭 `X-Trace-Id`、錯誤封包的 `traceId`），並對 Bridge 的**每個請求**帶同名標頭；Bridge 把它原樣放進回應標頭與當次請求內每一行日誌的 `trace_id=`（缺漏或格式不合時 Bridge 自產 uuid4；run 的監督執行緒沿用啟動它的請求的值）。所以同一次使用者操作在 backend 與 Bridge 的日誌可用同一個值串起來：
+
+  ```bash
+  (cd AgentConsole && docker compose logs engine-bridge | grep 'trace_id=<值>')
+  ```
+
+  ```powershell
+  Push-Location AgentConsole; docker compose logs engine-bridge | Select-String 'trace_id=<值>'; Pop-Location
+  ```

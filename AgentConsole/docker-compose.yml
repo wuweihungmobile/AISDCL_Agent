@@ -131,7 +131,15 @@ services:
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: "6379"
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
-      CONSOLE_ENCRYPTION_KEY: ${CONSOLE_ENCRYPTION_KEY:-}
+      # 🔴 必填（QA DEF-AC-006）：敏感系統參數的 AES-256 金鑰（base64 的 32 bytes）。以前預設空值，compose 層放行、
+      # 要等 backend 啟動失敗＋無限重啟（約 155 秒）才看得到原因；現在與 POSTGRES_PASSWORD 一樣在 config／up 階段就失敗。
+      CONSOLE_ENCRYPTION_KEY: ${CONSOLE_ENCRYPTION_KEY:?CONSOLE_ENCRYPTION_KEY 必填，openssl rand -base64 32}
+      # 檔案日誌（C-16）：有值時 backend 另寫 JSON 行的滾動檔 ${LOG_DIR}/console.log（每日切檔保留 7 天）到 app_logs 卷
+      LOG_DIR: /app/logs
+      # 🔴 Tomcat RemoteIpValve 信任的代理位址（Java 正規表示式；QA O-20）。預設只信任 backend-net 固定子網的 .2～.254
+      # （nginx 在其中；不含閘道 .1＝Docker 主機端進來的請求位址），所以客戶端偽造的 X-Forwarded-For 不會被採信。
+      # 子網與本值要一起改，說明見 docker/README.md〈反向代理與 X-Forwarded-For 信任〉。
+      CONSOLE_INTERNAL_PROXIES: ${CONSOLE_INTERNAL_PROXIES:-172\.31\.250\.(?:[2-9]|[1-9]\d|1\d\d|2[0-4]\d|25[0-4])}
       # 單一 Engine Bridge 旁車（path 前綴 /autoclaude /sdd 區分兩引擎）
       ENGINE_BRIDGE_URL: ${ENGINE_BRIDGE_URL:-http://engine-bridge:8081}
       # 使用者密碼雜湊：未在 .env 設定時「不傳入」（用 application.yml 的開發預設）；正式環境必須覆寫
@@ -147,7 +155,11 @@ services:
       retries: 5
       start_period: 60s
     volumes:
-      - app_logs:/app/logs
+      # 🔴 nocopy：具名卷「還空著」時，Docker 在**每個**容器 create 時都把映像內該目錄的擁有者／權限複製進卷根；compose 先 create
+      # engine-bridge、後 create backend，最後一個 create 的 backend（spring:spring 0755）會蓋掉 Bridge 映像設好的 1777，
+      # Bridge 就寫不進 /app/logs（實測：Permission denied，bridge.log 沒有檔）。backend 這邊關掉複製，卷根的擁有者與權限
+      # 就只由 Bridge 映像決定（1777：兩個 uid 都能寫）。順序不再有影響——backend 從不參與複製。
+      - app_logs:/app/logs:nocopy
     depends_on:
       postgres-primary:
         condition: service_healthy
@@ -181,6 +193,9 @@ services:
     environment:
       BRIDGE_PORT: "8081"
       ENGINE_WORKSPACE: /workspace
+      # 檔案日誌（C-16）：有值時另寫滾動檔 ${BRIDGE_LOG_DIR}/bridge.log（每日切檔保留 7 份）到 app_logs 卷；
+      # 每一行都帶 trace_id（契約 §3.1.1）。stdout 的日誌（docker compose logs）不受影響。
+      BRIDGE_LOG_DIR: /app/logs
       SDD_ROOT: /sdd
       BRIDGE_DB_DSN: postgresql://${POSTGRES_USER:-aisdlc}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@${POSTGRES_HOST:-postgres-primary}:5432/${POSTGRES_DB:-aisdlc}
       BRIDGE_DB_SCHEMA: console
@@ -196,8 +211,11 @@ services:
       - engine_workspace:/workspace
       - app_logs:/app/logs
     healthcheck:
-      # 映像為 python:3.11-slim、沒有 curl：用 Python 標準庫探測（與映像內建 HEALTHCHECK 同形）
-      test: ["CMD", "python", "-c", "import sys,urllib.request as u; sys.exit(0 if u.urlopen('http://127.0.0.1:8081/health', timeout=5).status == 200 else 1)"]
+      # 映像為 python:3.11-slim、沒有 curl：用 Python 標準庫探測（與映像內建 HEALTHCHECK 同形）。
+      # 🔴 探 /health/deep（git／autoclaude／工作區可寫／DB 逐項實測，契約 §3.1.1）而不是 /health：
+      #    Bridge 映像曾缺 git（DEF-AC-003），/health 永遠 200、容器永遠 healthy，任何批次卻一律 FAILED。
+      #    503 時 urlopen 拋 HTTPError ⇒ 非零離開碼。backend 的探測環仍打 /health（深度探針會 spawn 子行程、寫檔）。
+      test: ["CMD", "python", "-c", "import sys,urllib.request as u; sys.exit(0 if u.urlopen('http://127.0.0.1:8081/health/deep', timeout=9).status == 200 else 1)"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -677,6 +695,12 @@ networks:
     driver: bridge
   backend-net:
     driver: bridge
+    # 🔴 固定子網（QA O-20）：backend 只信任這個子網內的代理（CONSOLE_INTERNAL_PROXIES 的預設即此子網的 .2～.254），
+    # 沒有固定子網就無法在 compose 層給出「只信 nginx 所在網段」的值。與機器上其他 Docker／VPN 網段撞到
+    # （建網路時報 Pool overlaps）時，在 .env 同時改 BACKEND_NET_SUBNET 與 CONSOLE_INTERNAL_PROXIES。
+    ipam:
+      config:
+        - subnet: ${BACKEND_NET_SUBNET:-172.31.250.0/24}
   db-net:
     driver: bridge
     internal: true    # 資料庫網路不對外暴露

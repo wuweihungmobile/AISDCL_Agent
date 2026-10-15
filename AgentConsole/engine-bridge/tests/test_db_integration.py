@@ -107,6 +107,15 @@ def db_bridge(make_bridge, settings, pg) -> Callable[..., Any]:
     return lambda **kw: make_bridge(cfg, **kw)
 
 
+def test_deep_health_pings_the_real_database(db_bridge, pg: Pg) -> None:
+    """契約 §3.1.1：設了 BRIDGE_DB_DSN 才 ping，通過時 `db.ok` 為 true
+    （沒設時是 null，見 test_health_deep）。"""
+    live = db_bridge()
+    body = live.client.get("/health/deep").json()      # git 是否在這台機器上不是本測試的主題
+    assert body["checks"]["db"] == {"ok": True}
+    assert body["checks"]["workspace"] == {"ok": True}
+
+
 def _wait(pred: Callable[[], Any], timeout: float = 30.0) -> Any:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:

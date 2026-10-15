@@ -14,6 +14,7 @@
 """
 from __future__ import annotations
 
+import contextvars
 import copy
 import json
 import logging
@@ -229,8 +230,11 @@ class RunHandle:
         self.mgr.mirror(rec.run_id, subprocess_pid=proc.pid,
                         bridge_instance=rec.bridge_instance, advisory_lock_key=rec.db_lock_key)
         self.set_status(RunStatus.RUNNING, f"引擎已啟動（pid={proc.pid}，第 {index} 次 spawn）")
+        # 監督執行緒沿用「觸發這次 spawn 的請求」的 trace id：contextvars 不會自動傳進新執行緒，
+        # 所以在這裡複製當下的 context 讓它在其中執行（契約 §3.1.1；日誌行的 trace_id 由此而來）。
+        ctx = contextvars.copy_context()
         self.supervisor = threading.Thread(
-            target=self._supervise, args=(proc, log_path), daemon=True,
+            target=ctx.run, args=(self._supervise, proc, log_path), daemon=True,
             name=f"bridge-run-{rec.run_id[:8]}-{index}")
         self.supervisor.start()
 

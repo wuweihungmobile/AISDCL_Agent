@@ -1,0 +1,28 @@
+# docker/nginx/conf.d/https.conf.example — HTTPS（443）server 區塊範例；🔴 預設不啟用
+# 檔名不是 *.conf，所以 nginx.conf 的 `include conf.d/*.conf` 不會載入它。完整步驟見 docker/README.md〈啟用 HTTPS〉：
+#   1. 把憑證放進 nginx_certs 卷（容器內唯讀掛載在 /etc/nginx/certs）：fullchain.pem（含中繼憑證的完整鏈）、privkey.pem
+#   2. 複製本檔成同目錄的 https.conf，把下面的 server_name 改成你的網域
+#   3. （選用）80→443 轉址：把 default.conf 內 80 埠 server 的 `include …/console-locations.inc;` 換成
+#      `include /etc/nginx/conf.d/https-redirect.inc;`（保留 /nginx-health，其餘 301 到 https）
+#   4. docker compose exec nginx nginx -t，通過再 docker compose restart nginx
+# 路由與 80 埠完全相同（同一份 console-locations.inc）；X-Forwarded-Proto 會因 $scheme 自動變成 https。
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name localhost;
+
+    ssl_certificate     /etc/nginx/certs/fullchain.pem;
+    ssl_certificate_key /etc/nginx/certs/privkey.pem;
+
+    # Mozilla「intermediate」建議：TLS 1.2／1.3；不開 session ticket（金鑰輪替需另行管理）
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
+
+    # HSTS（選用、不可逆性高：瀏覽器會記住一年，確認 HTTPS 穩定後再開）。注意 nginx 的 add_header 不會繼承到有自己
+    # add_header 的 location（/_next/static/）；要全站一致需另行處理。
+    # add_header Strict-Transport-Security "max-age=31536000" always;
+
+    include /etc/nginx/conf.d/console-locations.inc;
+}

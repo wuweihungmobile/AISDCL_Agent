@@ -3,7 +3,7 @@
 # 用法（容器內）：restore.sh [--target-time "YYYY-MM-DD HH:MM:SS"] [--repo N] [--yes]
 #
 # 🔴 與 PRD 的差異：PRD 的 restore.sh 是「主機側」腳本（內部呼叫 docker compose stop／start），
-#   Windows 主機沒有 bash。改成只做「容器內」該做的中間兩步（清資料目錄＋還原），
+#   Windows 主機沒有 bash。改成只做「容器內」該做的中間兩步（準備／清空資料目錄＋還原），
 #   前後的 stop／start／驗證由 docker/README.md 的 `docker compose …` 指令負責（bash／PowerShell 雙形態）：
 #
 #     docker compose stop postgres-primary                                   # 1. 停 primary
@@ -15,14 +15,25 @@
 #   還原後 replica 的時間軸與新 primary 分岔，必須重建 replica（README〈重建 Replica〉）。
 set -euo pipefail
 
+PGDATA_DIR="/var/lib/postgresql/data/pgdata"
+
 if [ "$(id -u)" = "0" ]; then
+  # 🔴 資料目錄可能根本不存在（換新磁碟、pg_data 卷被刪掉重建＝「全新空卷」，QA DEF-AC-010）。卷的根目錄
+  # /var/lib/postgresql/data 屬 root:root 0755，postgres 無權在其下建立 pgdata（實測 mkdir: Permission denied）：
+  # 「建立並交給 postgres」只有 root 做得到，所以放在 gosu 之前；沒有它，Step 1 的 find 會因目錄不存在而中止，
+  # 更危險的是照 README 直接 start primary——PG 映像的入口程序見到空目錄就 initdb 出全新的空叢集、約 10 秒後顯示
+  # healthy，只看 healthy 的人會誤以為還原成功（所以 README〈4.3〉要求還原後核對資料列數）。
+  # 這裡只「建立（若不存在）＋校正擁有者與權限」、不刪任何東西；真正清空仍在確認之後的 Step 1。
+  # 0700 是 PG 的硬性要求（否則啟動即 FATAL：data directory has invalid permissions）。
+  mkdir -p "$PGDATA_DIR"
+  chown postgres:postgres "$PGDATA_DIR"
+  chmod 0700 "$PGDATA_DIR"
   exec gosu postgres "$0" "$@"
 fi
 
 TARGET_TIME=""
 REPO=""
 ASSUME_YES=0
-PGDATA_DIR="/var/lib/postgresql/data/pgdata"
 STANZA="aisdlc"
 
 while [[ $# -gt 0 ]]; do
@@ -66,7 +77,13 @@ if [ "$ASSUME_YES" != "1" ]; then
 fi
 
 # Step 1: 清理資料目錄
+# 目錄的存在與權限已在檔案開頭（root 階段）處理好；直接以 postgres 啟動本腳本（沒有經過上面的 root 階段）而目錄又不存在時，
+# postgres 沒有權限建立它——明確報錯，比讓 find 丟出「No such file or directory」好找原因。
 echo "[Step 1/2] Cleaning data directory..."
+if [ ! -d "$PGDATA_DIR" ]; then
+    echo "ERROR: ${PGDATA_DIR} 不存在，而目前不是 root、無權建立它。請以 root 啟動本腳本（compose run 預設即 root）。" >&2
+    exit 1
+fi
 find "$PGDATA_DIR" -mindepth 1 -delete
 
 # Step 2: 執行還原

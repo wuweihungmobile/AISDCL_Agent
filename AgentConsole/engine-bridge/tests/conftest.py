@@ -22,6 +22,7 @@ import psycopg
 import pytest
 import uvicorn
 
+from app.logsetup import teardown_logging
 from app.main import create_app
 from app.settings import Settings, load_settings
 
@@ -54,6 +55,15 @@ def isolated_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("AUTOSDD_QUOTA_CACHE_DIR", str(quota))
 
 
+@pytest.fixture(autouse=True)
+def clean_logging() -> Iterator[None]:
+    """Bridge 的 lifespan 啟動時會裝日誌 handler（可能含 BRIDGE_LOG_DIR 的檔案 handler）；
+    每個測試結束後拆掉，免得跨測試殘留，也免得 Windows 上仍開著的 bridge.log 擋住 tmp 目錄清理。
+    autouse 夾具最先建立、最後拆除，所以拆除時各個 LiveBridge 都已停止。"""
+    yield
+    teardown_logging()
+
+
 @pytest.fixture
 def project_dir(tmp_path: Path) -> Path:
     path = tmp_path / "projects" / "demo"
@@ -75,10 +85,10 @@ def settings(tmp_path: Path, project_dir: Path) -> Settings:
 class LiveBridge:
     """跑在背景執行緒的真 uvicorn；`client` 是指向它的 httpx.Client。"""
 
-    def __init__(self, app: Any, settings: Settings):
+    def __init__(self, app: Any, settings: Settings, *, log_level: str = "warning"):
         self.app = app
         self.settings = settings
-        config = uvicorn.Config(app, host="127.0.0.1", port=0, log_level="warning",
+        config = uvicorn.Config(app, host="127.0.0.1", port=0, log_level=log_level,
                                 timeout_graceful_shutdown=2)
         self.server = uvicorn.Server(config)
         self.thread = threading.Thread(target=self.server.run, daemon=True, name="test-bridge")

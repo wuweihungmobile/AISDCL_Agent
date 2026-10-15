@@ -18,6 +18,9 @@
                               預設＝工作區＋monorepo 根
   BRIDGE_OUTBOUND_ALLOWLIST   外呼 host 白名單（逗號分隔）；
                               預設 api.minimax.io,api.minimax.chat,localhost,127.0.0.1
+  BRIDGE_LOG_DIR              有值時，另把日誌寫成滾動檔 <dir>/bridge.log
+                              （UTC 午夜切檔、保留 7 份）；未設＝只輸出到 stderr。
+                              docker compose 設 /app/logs（與 backend 共用 app_logs 卷）
 """
 from __future__ import annotations
 
@@ -56,6 +59,7 @@ class Settings:
     stop_grace_seconds: float
     allowed_path_roots: tuple[Path, ...]
     outbound_allowlist: tuple[str, ...]
+    log_dir: Path | None = None
 
 
 def _looks_like_monorepo(root: Path) -> bool:
@@ -150,6 +154,8 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     allowlist = tuple(h.strip().lower().rstrip(".") for h in raw_allow.split(",") if h.strip()) \
         if raw_allow else DEFAULT_OUTBOUND_ALLOWLIST
 
+    raw_log_dir = e.get("BRIDGE_LOG_DIR", "").strip()
+
     return Settings(
         host=e.get("BRIDGE_HOST", "").strip() or "127.0.0.1",
         port=port,
@@ -162,4 +168,5 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         stop_grace_seconds=_parse_float(e, "BRIDGE_STOP_GRACE_SECONDS", 30.0),
         allowed_path_roots=roots,
         outbound_allowlist=allowlist,
+        log_dir=Path(raw_log_dir).resolve() if raw_log_dir else None,
     )

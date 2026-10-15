@@ -1,16 +1,18 @@
 # Engine Bridge（FastAPI 旁車）
 
 把兩個**純 CLI** 引擎（`AutoClaude/`、`AISDLC_SDD/`）包成 REST + SSE，給 Spring Boot 後端呼叫（PRD §0.2）。
-單一服務、單一埠 `8081`，以路徑前綴區分：`/autoclaude/*`、`/sdd/*`、`/health`。**零侵入**：不改 `AutoClaude/`、`AISDLC_SDD/` 任何檔。
+單一服務、單一埠 `8081`，以路徑前綴區分：`/autoclaude/*`、`/sdd/*`、`/health`、`/health/deep`。**零侵入**：不改 `AutoClaude/`、`AISDLC_SDD/` 任何檔。
 
 ```
-app/main.py        FastAPI app／lifespan（啟動做孤兒回收）／/health
+app/main.py        FastAPI app／lifespan（啟動做孤兒回收）／/health／/health/deep
 app/settings.py    環境變數 → Settings        app/models.py    請求／回應模型（照 API 契約）
 app/security.py    NFR-SEC-03/04 消毒鏈       app/runner.py    spawn `python -m autoclaude`、監督、pause/resume/stop/restore
 app/events.py      events.jsonl + 記憶體環    app/logparse.py  引擎 stdout 步驟訊號解析 + 步驟狀態機
 app/checkpoints.py 歷史快照 + 引擎格式寫入    app/locks.py     並發互斥（行程內 + PG advisory lock）
 app/db.py          DB 模式狀態鏡射            app/decompose.py 目標拆解（GoalDecomposer）+ 草稿存檔
 app/procutil.py    行程樹治理（psutil）       app/mock_claude.py E2E 用的確定性 claude 替身（console script）
+app/health.py      /health/deep 深度探針      app/tracing.py   X-Trace-Id 中介層＋contextvar（traceId 貫穿）
+app/logsetup.py    日誌格式（每行 trace_id）＋BRIDGE_LOG_DIR 滾動檔
 app/routers/       autoclaude.py、sdd.py
 ```
 
@@ -49,6 +51,8 @@ Invoke-RestMethod http://localhost:8081/health
 `/health` 回 `{"status":"ok","bridge_instance":…,"engines":{"autoclaude":{"ok","version"},"sdd":{"ok","latest"}},"db":{…}}`。
 `status` 只代表 Bridge 自己活著；引擎／DB 的狀況看 `engines.*.ok`、`db.ok`。**必須單一 worker**（run 登記表與行程監督在記憶體內）。
 
+`GET /health/deep`（免認證，契約 v1.2 §3.1.1；QA DEF-AC-003）是**深度探針**：把「引擎真正依賴的外部條件」逐項實測——① `git --version`（subprocess，逾時 5 秒）、② `import autoclaude`、③ 在 `ENGINE_WORKSPACE` 建立並刪除暫存檔（可寫）、④ DB ping（只有設了 `BRIDGE_DB_DSN` 才做，否則 `ok:null`）。全部通過回 **200** `{"status":"ok","checks":{"git":{"ok":true,"version":"git version 2.47.3"},"autoclaude":{"ok":true,"version":"…"},"workspace":{"ok":true},"db":{"ok":null}}}`；任一失敗回 **503** `{"status":"degraded","reason":"git: 找不到 git 執行檔","checks":{…}}`（失敗項 `ok:false` 並各附 `reason`，頂層 `reason` 以「；」連接各項）。為什麼有 `/health` 還要它：Docker 映像曾缺 `git`，`/health` 永遠 200、容器永遠 healthy，任何批次卻一律 `FAILED`。docker compose 與映像內建的 healthcheck 打 `/health/deep`；**console-api 的探測環仍打 `/health`**（深度探針會 spawn 子行程與寫檔，不適合每 30 秒打）。
+
 ## 環境變數
 
 | 變數 | 預設 | 說明 |
@@ -64,14 +68,39 @@ Invoke-RestMethod http://localhost:8081/health
 | `BRIDGE_STOP_GRACE_SECONDS` | `30` | stop／pause 送終止訊號後，等多久才升級強殺 |
 | `BRIDGE_ALLOWED_PATH_ROOTS` | 工作區 + monorepo 根 | `execution_path`／`spec_dir` 必須落在其下；以 **`os.pathsep`** 分隔（POSIX `:`、Windows `;`）；不接受檔案系統根 |
 | `BRIDGE_OUTBOUND_ALLOWLIST` | `api.minimax.io,api.minimax.chat,localhost,127.0.0.1` | 外呼 host 白名單（逗號分隔，精確比對） |
+| `BRIDGE_LOG_DIR` | （未設＝不寫檔） | 有值時，日誌另寫成滾動檔 `<dir>/bridge.log`（UTC 午夜切檔、保留 7 份）；stderr 的日誌照舊。目錄建不出來或不可寫只在 stderr 留一則警告，Bridge 照常啟動。docker compose 設 `/app/logs`（與 backend 共用 `app_logs` 卷）。見〈追蹤碼與日誌〉 |
 | `BRIDGE_TEST_DSN` | （測試用） | 設了才跑 `tests/test_db_integration.py` |
 
 ## API（契約逐字；補充與落地差異見 `AgentConsole/docs/02_architecture/Architecture.md` §10）
 
 `POST /autoclaude/runs`（201／409 `advisory_lock_held`＋`holder_run_id`／422）、`POST /autoclaude/runs/{id}:pause|:resume|:stop`（202）、
 `GET /autoclaude/runs/{id}`、`GET …/stream?after=`（SSE，亦認 `Last-Event-ID`）、`GET …/events?after=&limit=`、`GET …/checkpoints`、`POST …/restore`、
-`POST /autoclaude/decompose`、`POST /autoclaude/decompose/{draft_id}:approve`、`GET /sdd/version`、`GET /sdd/fsm/{project}`、`POST /sdd/compile`。
+`POST /autoclaude/decompose`、`POST /autoclaude/decompose/{draft_id}:approve`、`GET /sdd/version`、`GET /sdd/fsm/{project}`、`POST /sdd/compile`、`GET /health`、`GET /health/deep`。
 錯誤封包一律 `{"code":<狀態>,"reason":"…",…}`；422 另帶 `violations`（逐項列出違規欄位與字元）。互動式文件：`http://localhost:8081/docs`。
+
+## 追蹤碼與日誌（契約 v1.2 §3.1.1；NFR-9.4-04）
+
+console-api 對 Bridge 的**每個請求**都帶標頭 `X-Trace-Id`（UUID）。Bridge 的 HTTP 中介層（`app/tracing.py`，純 ASGI、包在最外層，所以 SSE 串流與 500 的回應也一樣）：
+
+1. 讀取該標頭；**缺漏或格式不合**（1～64 個字元、只含英數與 `.`、`_`、`-`、首字元為英數；值會原樣進日誌，空白與控制字元一律拒收）時自產 uuid4；
+2. **回應回帶同名標頭**；
+3. 把值放進 `contextvars`，**每一行**日誌都帶 `trace_id=<值>`（`app/logsetup.py`）。沒有請求上下文的行（啟動、關閉、與請求無關的背景執行緒）是 `trace_id=-`；run 的監督執行緒沿用「觸發那次 spawn 的請求」的值。
+
+日誌格式（stderr 與 `BRIDGE_LOG_DIR/bridge.log` 相同）：`<UTC 時間>Z <等級> [<logger>] trace_id=<值> <訊息>`，一筆日誌恆為一行（訊息與 traceback 內的換行寫成字面 `\n`）；uvicorn 的啟動與存取日誌同格式（`POST /autoclaude/runs HTTP/1.1" 201` 那一行帶發起請求的 trace_id）。範例：
+
+```
+2026-10-15T16:57:01.132Z INFO  [uvicorn.access] trace_id=96c90695-e4fe-480b-8eb4-3e457de0aed6 172.17.0.1:38270 - "GET /health HTTP/1.1" 200
+```
+
+```bash
+grep 'trace_id=<值>' "$BRIDGE_LOG_DIR/bridge.log"               # 本機設了 BRIDGE_LOG_DIR 時
+(cd AgentConsole && docker compose logs engine-bridge | grep 'trace_id=<值>')    # Docker 全棧
+```
+
+```powershell
+Select-String -Path "$env:BRIDGE_LOG_DIR\bridge.log" -Pattern 'trace_id=<值>'
+Push-Location AgentConsole; docker compose logs engine-bridge | Select-String 'trace_id=<值>'; Pop-Location
+```
 
 ## E2E 不靠真 Claude：`aisdlc-mock-claude`
 
@@ -103,6 +132,7 @@ Push-Location AgentConsole\engine-bridge; ..\..\.venv\Scripts\Activate.ps1; ruff
 ```
 
 不需 DB、不需真 Claude：真引擎（`python -m autoclaude`）＋ mock claude，經真 HTTP／SSE（背景執行緒起 uvicorn）。
+另有兩支與 Docker 部署相關的測試：`tests/test_health_deep.py`（`/health/deep` 的 200／503 與四項檢查的失敗路徑）、`tests/test_trace_logging.py`（`X-Trace-Id` 回帶、每行日誌的 `trace_id`、`BRIDGE_LOG_DIR`）；以及 `tests/test_deploy_config.py`——**靜態**讀檔，把 W5 的部署缺陷修法（映像裝 git、healthcheck 打 `/health/deep`、compose 必填金鑰、日誌卷 `nocopy`、信任代理預設值、nginx `error_log crit`、`restore.sh` 的 root 階段建目錄…）各釘成一條斷言，因為這類缺陷只在 Docker 全棧真跑才現形，而 docker／nginx 設定沒有自己的 pytest 家。
 DB 整合測試（寫入 `console` schema、advisory lock 跨實例互斥）需要一個可寫的 PostgreSQL：
 
 ```bash
@@ -131,9 +161,9 @@ docker build -f AgentConsole/engine-bridge/Dockerfile -t aisdlc-engine-bridge:de
 docker run --rm -p 8081:8081 aisdlc-engine-bridge:dev        # 另一個終端機：Invoke-RestMethod http://localhost:8081/health
 ```
 
-映像為非 root（uid 10001）、`ENGINE_WORKSPACE=/workspace`（VOLUME）、有 HEALTHCHECK。**映像不含 `claude` CLI 與 AISDLC_SDD**：
+映像為非 root（uid 10001）、`ENGINE_WORKSPACE=/workspace`（VOLUME）、有 HEALTHCHECK（打 `/health/deep`）。映像安裝 **`git` 與 `ca-certificates`**（`apt-get install --no-install-recommends`，build 時以 `RUN git --version` 冒煙）：引擎內共 11 處 subprocess 呼叫 git，`python:3.11-slim` 沒有它——QA DEF-AC-003（P1）曾使 Docker 全棧下任何批次一律 `FAILED`。`/app/logs` 預設存在、權限 `1777`：compose 把 `app_logs` 卷掛在這裡讓 `BRIDGE_LOG_DIR=/app/logs`，backend 以另一個 uid（1001）寫同一個卷；具名卷還空著時 Docker 會把「最後 create 的容器」映像內該目錄的擁有者與權限複製進卷根，所以 compose 讓 backend 以 `:nocopy` 掛載，卷根只由本映像的 `1777` 決定（細節：`docker/README.md`〈9〉#32）。**映像不含 `claude` CLI 與 AISDLC_SDD**：
 全棧 Docker 的 E2E 用內建替身（`claude.command=aisdlc-mock-claude`）；`/sdd/*` 需由 compose 以唯讀 volume 掛入 `AISDLC_SDD`（整個或單一版本目錄）並設 `SDD_ROOT`；
-要跑真 Claude 請用本機模式。基底映像可用 `--build-arg PYTHON_IMAGE=…` 覆寫（離線機器用快取映像驗建置步驟）。
+要跑真 Claude 請用本機模式。基底映像可用 `--build-arg PYTHON_IMAGE=…` 覆寫；但建置時的 `apt-get`（裝 git）需要連到 Debian 套件庫，所以不再能在完全離線的機器上建置。
 
 ## 設計重點（皆為對真引擎的實證，不是假設）
 
