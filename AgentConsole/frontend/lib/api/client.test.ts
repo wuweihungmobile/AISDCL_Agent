@@ -1,7 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { clearSession, loadSession, resetSessionCache, saveSession, type Session } from "@/lib/auth/store";
-import { ApiError, apiRequest, describeError, setUnauthorizedHandler } from "./client";
+import {
+  ApiError,
+  apiDownload,
+  apiRequest,
+  describeError,
+  filenameFromDisposition,
+  setUnauthorizedHandler,
+} from "./client";
 
 const SESSION: Session = {
   accessToken: "access-old",
@@ -65,6 +72,34 @@ describe("API client：封包解析（PRD §7.2）", () => {
     await expect(apiRequest("/api/v1/tasks/x", { method: "DELETE" })).resolves.toBeUndefined();
   });
 
+  it("FormData body 原樣送出（不 JSON 序列化、不設 Content-Type），Bearer 照帶", async () => {
+    saveSession(SESSION);
+    const fetchMock = stubFetch(() => ok({ id: "i1" }));
+    const form = new FormData();
+    form.append("file", new File(["x"], "a.md"));
+    await apiRequest("/api/v1/import/upload", { method: "POST", body: form });
+    const init = fetchMock.mock.calls[0][1]!;
+    expect(init.body).toBe(form);
+    expect((init.headers as Record<string, string>)["Content-Type"]).toBeUndefined();
+    expect(authHeader(init)).toBe("Bearer access-old");
+  });
+
+  it("FormData 上傳遇到 401：換新 token 後以同一份 FormData 重送一次", async () => {
+    saveSession(SESSION);
+    const bodies: unknown[] = [];
+    stubFetch((url, init) => {
+      if (url.endsWith("/api/v1/auth/refresh")) {
+        return ok({ accessToken: "access-new", refreshToken: "refresh-new", expiresIn: 1800, role: "OPERATOR" });
+      }
+      bodies.push(init.body);
+      return authHeader(init) === "Bearer access-new" ? ok({ id: "i1" }) : json({ code: 401, message: "x", errors: [] }, 401);
+    });
+    const form = new FormData();
+    form.append("file", new File(["x"], "a.md"));
+    await expect(apiRequest("/api/v1/import/upload", { method: "POST", body: form })).resolves.toEqual({ id: "i1" });
+    expect(bodies).toEqual([form, form]);
+  });
+
   it("錯誤封包 → ApiError（欄位錯誤、reason、details、traceId 都保留）", async () => {
     stubFetch(() =>
       json(
@@ -107,6 +142,43 @@ describe("API client：封包解析（PRD §7.2）", () => {
     expect(e).toBeInstanceOf(ApiError);
     expect(e.isNetworkError).toBe(true);
     expect(e.message).toContain("無法連線");
+  });
+});
+
+describe("API client：檔案下載（apiDownload）", () => {
+  it("成功：回 Blob 與 Content-Disposition 的檔名，帶 Bearer，不解封包", async () => {
+    saveSession(SESSION);
+    const fetchMock = stubFetch(
+      () =>
+        new Response("{\"version\":1}", {
+          status: 200,
+          headers: { "content-type": "application/json", "content-disposition": "attachment; filename=\"a.json\"" },
+        }),
+    );
+    const out = await apiDownload("/api/v1/settings/export", { method: "POST" });
+    expect(out.filename).toBe("a.json");
+    expect(await out.blob.text()).toBe("{\"version\":1}");
+    expect(authHeader(fetchMock.mock.calls[0][1])).toBe("Bearer access-old");
+  });
+
+  it("失敗（403）：照常解成 ApiError（reason 與 traceId 保留），不回 Blob", async () => {
+    saveSession(SESSION);
+    stubFetch(() => json({ code: 403, message: "權限不足", reason: "ACCESS_DENIED", errors: [], traceId: "tr-403" }, 403));
+    const e = (await apiDownload("/api/v1/settings/export", { method: "POST" }).catch((x: unknown) => x)) as ApiError;
+    expect(e).toBeInstanceOf(ApiError);
+    expect(e.status).toBe(403);
+    expect(e.reason).toBe("ACCESS_DENIED");
+    expect(e.traceId).toBe("tr-403");
+  });
+
+  it.each([
+    ["attachment; filename=\"aisdlc-settings-20261015.json\"", "aisdlc-settings-20261015.json"],
+    ["attachment; filename=plain.json", "plain.json"],
+    ["attachment; filename*=UTF-8''%E8%A8%AD%E5%AE%9A.json", "設定.json"],
+    ["attachment", null],
+    [null, null],
+  ])("filenameFromDisposition(%s) → %s", (header, expected) => {
+    expect(filenameFromDisposition(header)).toBe(expected);
   });
 });
 

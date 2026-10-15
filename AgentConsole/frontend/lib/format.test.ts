@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatClock, formatDate, formatDateTime, formatNumber, percent, retryLabel } from "./format";
+import { formatBytes, formatClock, formatDate, formatDateTime, formatNumber, percent, retryLabel } from "./format";
 
 describe("format", () => {
   // 用本機時區建構時間，避免測試依賴執行機器的時區
@@ -17,6 +17,12 @@ describe("format", () => {
     expect(formatClock(undefined)).toBe("—");
     expect(formatDateTime("not-a-date")).toBe("—");
     expect(formatNumber(undefined)).toBe("—");
+  });
+
+  it("檔案大小：B／KB／MB 三段，一位小數", () => {
+    expect(formatBytes(512)).toBe("512 B");
+    expect(formatBytes(2048)).toBe("2.0 KB");
+    expect(formatBytes(5 * 1024 * 1024)).toBe("5.0 MB");
   });
 
   it("數字加千分位、百分比取整且分母為 0 時回 0", () => {

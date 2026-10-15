@@ -4,7 +4,8 @@
  *  - 401 → 以 refresh token 換新（同時多個 401 只換一次）後重送一次；換不到 → 清登入狀態並導向 /login；
  *  - 解 PRD §7.2 封包：成功 {code,message,data,timestamp,traceId} 回 data；
  *    錯誤 {code,message,errors[],reason?,details?,traceId} 一律丟 ApiError；
- *  - traceId 取封包欄位，缺席時退回回應標頭 X-Trace-Id，帶進錯誤訊息方便對照後端日誌。
+ *  - traceId 取封包欄位，缺席時退回回應標頭 X-Trace-Id，帶進錯誤訊息方便對照後端日誌；
+ *  - FormData（檔案上傳）原樣送出、不設 Content-Type；apiDownload 回 Blob（設定匯出、監控報表，不包封包）。
  * 這支檔不依賴 React；頁面一律經 lib/api/endpoints.ts／queries.ts 使用，不直接呼叫 fetch。
  */
 import { clearSession, loadSession, saveSession } from "@/lib/auth/store";
@@ -64,6 +65,7 @@ export type QueryValue = string | number | boolean | null | undefined;
 export type RequestOptions = {
   method?: "GET" | "POST" | "PUT" | "DELETE";
   query?: Record<string, QueryValue>;
+  /** 一般物件以 JSON 送出；FormData（檔案上傳）原樣送出，由瀏覽器自己帶 multipart boundary（絕不手設 Content-Type） */
   body?: unknown;
   signal?: AbortSignal;
   /** false＝不帶 token、也不做 401 換新（登入／換新端點自己用） */
@@ -104,10 +106,16 @@ function buildUrl(path: string, query?: Record<string, QueryValue>): string {
   return qs ? `${url}?${qs}` : url;
 }
 
+function isFormData(value: unknown): value is FormData {
+  return typeof FormData !== "undefined" && value instanceof FormData;
+}
+
 async function send(path: string, opts: RequestOptions): Promise<Response> {
   const { method = "GET", query, body, signal, auth = true } = opts;
   const headers: Record<string, string> = { Accept: "application/json" };
-  if (body !== undefined) headers["Content-Type"] = "application/json";
+  const multipart = isFormData(body);
+  // multipart 的 Content-Type 必須含瀏覽器產生的 boundary，手設就會讓後端解析不到檔案部件
+  if (body !== undefined && !multipart) headers["Content-Type"] = "application/json";
   if (auth) {
     const token = loadSession()?.accessToken;
     if (token) headers.Authorization = `Bearer ${token}`;
@@ -116,7 +124,7 @@ async function send(path: string, opts: RequestOptions): Promise<Response> {
     return await fetch(buildUrl(path, query), {
       method,
       headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: body === undefined ? undefined : multipart ? body : JSON.stringify(body),
       signal,
     });
   } catch (cause) {
@@ -201,7 +209,8 @@ async function doRefresh(): Promise<boolean> {
   }
 }
 
-export async function apiRequest<T = unknown>(path: string, opts: RequestOptions = {}): Promise<T> {
+/** 送出請求並處理 401 換新（apiRequest 與 apiDownload 共用）。 */
+async function sendWithRenewal(path: string, opts: RequestOptions): Promise<Response> {
   const auth = opts.auth ?? true;
   let res = await send(path, opts);
   if (res.status === 401 && auth) {
@@ -216,5 +225,53 @@ export async function apiRequest<T = unknown>(path: string, opts: RequestOptions
       });
     }
   }
-  return parse<T>(res);
+  return res;
+}
+
+export async function apiRequest<T = unknown>(path: string, opts: RequestOptions = {}): Promise<T> {
+  return parse<T>(await sendWithRenewal(path, opts));
+}
+
+export type DownloadResult = {
+  blob: Blob;
+  /** 取自 Content-Disposition；跨來源時瀏覽器要求後端 CORS 暴露該標頭，缺席為 null，由呼叫端給預設檔名 */
+  filename: string | null;
+};
+
+/** 從 Content-Disposition 取檔名（支援 filename*=UTF-8''… 與 filename="…"）；取不到回 null。 */
+export function filenameFromDisposition(header: string | null): string | null {
+  if (!header) return null;
+  const star = /filename\*\s*=\s*(?:UTF-8|utf-8)''([^;]+)/.exec(header);
+  if (star) {
+    try {
+      return decodeURIComponent(star[1].trim());
+    } catch {
+      // 編碼損毀：退回一般 filename
+    }
+  }
+  const plain = /filename\s*=\s*"?([^";]+)"?/.exec(header);
+  return plain ? plain[1].trim() : null;
+}
+
+/**
+ * 檔案下載（設定匯出、監控報表）：同樣帶 Bearer、同樣處理 401 換新；
+ * 成功回 Blob＋檔名；失敗（401／403／429…）照常解 ApiError 封包丟出。
+ */
+export async function apiDownload(path: string, opts: RequestOptions = {}): Promise<DownloadResult> {
+  const res = await sendWithRenewal(path, opts);
+  if (!res.ok) await parse<never>(res); // 非 2xx：parse 會丟 ApiError
+  return { blob: await res.blob(), filename: filenameFromDisposition(res.headers.get("Content-Disposition")) };
+}
+
+/** 觸發瀏覽器下載（錨點 download）；檔名只留安全字元。 */
+export function saveBlob(blob: Blob, filename: string): void {
+  const safe = filename.replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_").trim() || "download";
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = safe;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }

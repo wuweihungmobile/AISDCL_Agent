@@ -31,5 +31,7 @@ class ResizeObserverStub {
   disconnect() {}
 }
 if (!("ResizeObserver" in globalThis)) {
-  vi.stubGlobal("ResizeObserver", ResizeObserverStub);
+  // 直接定義而不用 vi.stubGlobal：上面的 afterEach 會 unstubAllGlobals，stub 版只有第一個測試看得到，
+  // 後面的測試遇到 Radix 的 Checkbox／Popover（use-size）就會丟「ResizeObserver is not defined」
+  Object.defineProperty(globalThis, "ResizeObserver", { value: ResizeObserverStub, writable: true, configurable: true });
 }

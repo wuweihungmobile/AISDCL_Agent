@@ -14,7 +14,7 @@ import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/states";
 import { StatusLabel } from "@/components/ui/status-dot";
-import { useAllProjects, useSignoffQueue } from "@/lib/api/queries";
+import { useAllProjects, useNotificationSummary, useSignoffQueue } from "@/lib/api/queries";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { projectStatus } from "@/lib/domain/status";
 import { percent } from "@/lib/format";
@@ -62,12 +62,16 @@ function KpiCard({
 
 /**
  * 總覽儀表板（設計稿 1）：四張 KPI 卡、進行中的執行、待人工審批。
- * KPI：前兩張由專案／目標 API 算（活躍專案數、待審批草案數）；後兩張（本週完成任務、執行中 run）等 Phase 5 監控 API，先顯示「—」。
+ * KPI：活躍專案數由專案 API 算；待審批草案數取 GET /notifications/summary 的 pendingSignoffs（跨專案，含目標、任務與匯入草案，
+ * 契約 §4.5 G-06，取代 Phase 2 前端只算專案與草案目標的近似值）；後兩張（本週完成任務、執行中 run）等 Phase 5 監控 API，先顯示「—」。
+ * 「待人工審批」卡的清單仍由專案／目標 API 組（可直接點「審批」的項目）。
  */
 export function DashboardView() {
   const { canWrite } = useAuth();
   const all = useAllProjects();
   const queue = useSignoffQueue();
+  const summary = useNotificationSummary();
+  const pendingSignoffs = summary.data?.pendingSignoffs;
   const [signoff, setSignoff] = useState<SignoffTarget | null>(null);
 
   const projects = all.data?.content ?? [];
@@ -107,9 +111,15 @@ export function DashboardView() {
                   testId="kpi-drafts"
                   label="待審批草案數"
                   icon={ClipboardCheck}
-                  value={String(queue.count)}
-                  delta={queue.count > 0 ? "需 signoff 才可執行" : "全部已審批"}
-                  tone={queue.count > 0 ? "accent" : "muted"}
+                  value={pendingSignoffs === undefined ? "—" : String(pendingSignoffs)}
+                  delta={
+                    pendingSignoffs === undefined
+                      ? "待通知摘要載入"
+                      : pendingSignoffs > 0
+                        ? "需 signoff 才可執行"
+                        : "全部已審批"
+                  }
+                  tone={pendingSignoffs ? "accent" : "muted"}
                 />
                 <KpiCard
                   testId="kpi-week-done"

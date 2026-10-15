@@ -12,6 +12,7 @@
     "test": "vitest run",
     "test:cov": "vitest run --coverage",
     "gen:api": "node scripts/gen-api.mjs",
+    "gen:api-p36": "openapi-typescript ../docs/02_architecture/openapi-p3-6.yaml -o lib/api/schema-p3-6.d.ts",
     "e2e": "playwright test"
   },
   "dependencies": {

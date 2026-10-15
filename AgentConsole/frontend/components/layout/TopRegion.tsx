@@ -4,7 +4,9 @@
  * Top 區（UI-LAY-01）＝設計稿 Topbar 公告列＋Masthead 主導覽列。
  * 全站唯一一份：由 app/layout.tsx 組裝，任何頁面不得自帶（Architecture §5.2 硬規則）。
  *  - 公告列：說明文件／下載 CLI／GitHub／Engine Bridge 狀態；通知總覽／幫助中心／語言／使用者（含登出）。
- *  - Masthead：logo、搜尋列（Enter 或按鈕 → /projects?q=）、最近專案 chips、通知鈴、signoff 佇列鈕（draftCount）。
+ *  - Masthead：logo、搜尋列（Enter 或按鈕 → /projects?q=）、最近專案 chips、通知鈴、signoff 佇列鈕。
+ *    鈴與 signoff 鈕的徽章都來自 GET /notifications/summary（每 30 秒輪詢）：
+ *    pendingSignoffs → signoff 鈕；pendingReviews＋unacknowledgedAlerts → 鈴（點開看三個數字，見 NotificationBell）。
  *  - 未登入（/login）只顯示品牌列，不顯示搜尋與動作。
  */
 import {
@@ -20,10 +22,10 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 
+import { NotificationBell } from "@/components/domain/notifications/NotificationBell";
 import { CountBadge } from "@/components/ui/badge";
-import { useToast } from "@/components/ui/toast";
 import { SERVICE_LABEL, useBridgeStatus } from "@/hooks/useServiceStatus";
-import { useAllProjects, useSignoffQueue } from "@/lib/api/queries";
+import { useAllProjects, useNotificationSummary } from "@/lib/api/queries";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { cn } from "@/lib/utils";
 
@@ -32,10 +34,10 @@ const SEP = <span className="opacity-35 max-md:hidden">|</span>;
 export function TopRegion() {
   const pathname = usePathname();
   const router = useRouter();
-  const toast = useToast();
   const { status, username, logout } = useAuth();
   const all = useAllProjects();
-  const queue = useSignoffQueue();
+  const summary = useNotificationSummary();
+  const pendingSignoffs = summary.data?.pendingSignoffs ?? 0;
   const bridge = useBridgeStatus();
   const [query, setQuery] = useState("");
 
@@ -171,25 +173,17 @@ export function TopRegion() {
               </div>
 
               <div className="flex shrink-0 items-center gap-2.5">
-                <button
-                  type="button"
-                  aria-label="通知"
-                  title="通知"
-                  onClick={() => toast.info("通知中心將於 Phase 5（監控）提供")}
-                  className="relative inline-flex size-11 cursor-pointer items-center justify-center rounded-full border-none bg-transparent text-white transition-opacity hover:opacity-85"
-                >
-                  <Bell size={24} aria-hidden />
-                </button>
+                <NotificationBell summary={summary.data} />
                 <Link
                   href="/#pending-signoff"
-                  aria-label={`待審批佇列（${queue.count} 筆）`}
+                  aria-label={`待審批佇列（${pendingSignoffs} 筆）`}
                   title="待審批佇列"
                   className="relative inline-flex size-[52px] items-center justify-center rounded-full bg-white/[0.14] text-white transition-opacity hover:opacity-85"
                 >
                   <ClipboardCheck size={26} aria-hidden />
-                  {queue.count > 0 ? (
+                  {pendingSignoffs > 0 ? (
                     <CountBadge
-                      count={queue.count}
+                      count={pendingSignoffs}
                       size="lg"
                       floating
                       className="-top-0.5 -right-1"

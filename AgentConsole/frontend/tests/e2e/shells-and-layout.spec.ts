@@ -3,8 +3,10 @@ import { expect, test } from "@playwright/test";
 import { SHOTS, apiDelete, apiPost, apiToken, loginViaStorage, uniq } from "./helpers";
 
 /**
- * 九個路由殼都能點、各有標題列；四區塊每頁恰好一份（版面只住 app/layout.tsx）；
+ * 九個路由都能點、各有標題列；四區塊每頁恰好一份（版面只住 app/layout.tsx）；
  * 響應式（PRD §8.3）：≥1280 完整側欄、768～1279 圖示側欄、<768 底部 Tab。
+ * （/import 與 /settings 已由 W4-F1 換成實際頁面：它們的行為由 import.mock.spec.ts、settings.mock.spec.ts 驗證，
+ *  這裡只留「導覽點得到、標題列在、四區塊各一份」；執行／監控仍是占位殼，等 W4-F2。）
  */
 type Created = { id: string };
 const name = uniq("E2E 版面專案");
@@ -25,21 +27,17 @@ test("導覽六項都能點到對應頁面，每頁四區塊各一份", async ({
   await loginViaStorage(page, request);
   await page.goto("/");
   const nav = page.getByRole("navigation", { name: "主導覽" });
-  const cases: Array<[link: string, url: RegExp, heading: RegExp, shot?: string]> = [
-    ["BRD/PRD 匯入", /\/import$/, /BRD \/ PRD 智能匯入/, "06-import-shell.png"],
-    ["系統設定", /\/settings$/, /系統參數設定/, "09-settings-shell.png"],
+  const cases: Array<[link: string, url: RegExp, heading: RegExp]> = [
+    ["BRD/PRD 匯入", /\/import$/, /BRD \/ PRD 智能匯入/],
+    ["系統設定", /\/settings$/, /系統參數設定/],
     ["專案管理", /\/projects$/, /專案管理/],
     ["儀表板", /\/$/, /總覽儀表板/],
   ];
-  for (const [link, url, heading, shot] of cases) {
+  for (const [link, url, heading] of cases) {
     await nav.getByRole("link", { name: link }).click();
     await expect(page).toHaveURL(url);
     await expect(page.getByRole("heading", { name: heading })).toBeVisible();
     for (const r of REGIONS) await expect(page.locator(`[data-region="${r}"]`)).toHaveCount(1);
-    if (shot) {
-      await expect(page.getByTestId("phase-placeholder")).toBeVisible();
-      await page.screenshot({ path: `${SHOTS}/${shot}` });
-    }
   }
 
   // 執行中心／監控中心從「目前專案」進入（進專案頁後記住該專案）

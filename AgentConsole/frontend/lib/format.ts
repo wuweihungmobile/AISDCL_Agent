@@ -33,6 +33,13 @@ export function formatNumber(n?: number | null): string {
   return typeof n === "number" && Number.isFinite(n) ? n.toLocaleString("en-US") : DASH;
 }
 
+/** 512 B／12.3 KB／4.0 MB（檔案大小顯示） */
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
 /** 0～100 的整數百分比；total 為 0 時回 0 */
 export function percent(done: number, total: number): number {
   return total > 0 ? Math.round((done / total) * 100) : 0;

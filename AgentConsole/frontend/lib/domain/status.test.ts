@@ -3,10 +3,14 @@ import { describe, expect, it } from "vitest";
 import { resolveVar } from "@/tests/helpers/tokens";
 import {
   GOAL_STATUS,
+  IMPORT_STATUS,
   PROJECT_STATUS,
   PROJECT_STATUS_TABS,
   TASK_STATUS,
   goalStatus,
+  importStatus,
+  isImportReopenable,
+  isLive,
   isRetryable,
   projectStatus,
   taskStatus,
@@ -86,5 +90,43 @@ describe("狀態 enum 對照表（lib/domain/status.ts 是唯一出處）", () =
   it("只有 FAILED／ESCALATED 的任務可重試（與後端 409 規則一致）", () => {
     const retryable = Object.keys(TASK_STATUS).filter(isRetryable);
     expect(retryable.sort()).toEqual(["ESCALATED", "FAILED"]);
+  });
+});
+
+describe("匯入記錄狀態表（契約 §1.1；ImportStatus 六態，lib/domain/status.ts 是唯一出處）", () => {
+  const CONTRACT_STATES = ["UPLOADED", "PARSING", "PARSED", "REVIEWING", "IMPORTED", "REJECTED"];
+
+  it("六個狀態都有中文標籤，鍵集合恰等於契約（後端新增狀態時這裡會紅）", () => {
+    expect(Object.keys(IMPORT_STATUS).sort()).toEqual([...CONTRACT_STATES].sort());
+    for (const meta of Object.values(IMPORT_STATUS)) expect(meta.label).toMatch(/\S/);
+    // 標籤互不重複：同一個畫面上兩個狀態不能看起來一樣
+    const labels = Object.values(IMPORT_STATUS).map((m) => m.label);
+    expect(new Set(labels).size).toBe(labels.length);
+  });
+
+  it("顏色一律引用設計 token，且 token 解析得到色碼（不寫死色碼）", () => {
+    for (const [status, meta] of Object.entries(IMPORT_STATUS)) {
+      expect(meta.color, `${status} 色碼應引用 token`).toMatch(/^var\(--color-[a-z-]+\)$/);
+      expect(resolveVar(meta.color), `${status} 色碼`).toMatch(/^#[0-9A-F]{6}$/);
+    }
+  });
+
+  it("標籤逐項對映（歷史列表與步驟 2 卡直接顯示這些字）", () => {
+    expect(Object.fromEntries(Object.entries(IMPORT_STATUS).map(([k, v]) => [k, v.label]))).toEqual({
+      UPLOADED: "已上傳",
+      PARSING: "解析中",
+      PARSED: "已解析",
+      REVIEWING: "審核中",
+      IMPORTED: "已匯入",
+      REJECTED: "已放棄",
+    });
+  });
+
+  it("未知狀態不崩潰；PARSING 的狀態點會呼吸；只有 UPLOADED／PARSED／REVIEWING 可從歷史重新開啟", () => {
+    expect(importStatus("FUTURE_STATE").label).toBe("FUTURE_STATE");
+    expect(isLive("PARSING")).toBe(true);
+    expect(isLive("PARSED")).toBe(false);
+    const reopenable = CONTRACT_STATES.filter(isImportReopenable);
+    expect(reopenable.sort()).toEqual(["PARSED", "REVIEWING", "UPLOADED"]);
   });
 });

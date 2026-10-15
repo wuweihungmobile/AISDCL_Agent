@@ -81,6 +81,9 @@ function layoutBody(children: ReactNode): ReactElement {
   return html.props.children.props.children;
 }
 
+/** 通知摘要（契約 §1.4）：數字故意取得和專案資料算出來的不同（草案專案只有 1 個），證明頂列徽章讀的是這支端點。 */
+const SUMMARY = { pendingSignoffs: 7, pendingReviews: 2, unacknowledgedAlerts: 3, bridgeConnected: null, bridgeCheckedAt: null };
+
 function stubApi() {
   vi.stubGlobal(
     "fetch",
@@ -93,7 +96,9 @@ function stubApi() {
             ],
             page: 0, size: 100, totalElements: 2, totalPages: 1,
           }
-        : [];
+        : url.includes("/api/v1/notifications/summary")
+          ? SUMMARY
+          : [];
       return new Response(JSON.stringify({ code: 200, message: "success", data }), {
         status: 200,
         headers: { "content-type": "application/json" },
@@ -133,8 +138,10 @@ describe("RootLayout 渲染：四區塊各一份", () => {
     expect(nav.getByRole("link", { name: "BRD/PRD 匯入" })).toHaveAttribute("href", "/import");
     expect(nav.getByRole("link", { name: "系統設定" })).toHaveAttribute("href", "/settings");
 
-    // 專案資料到齊後：「我的專案」rail、頂列 chips、signoff 佇列徽章（草案 1 筆）
-    expect(await screen.findByTestId("signoff-badge")).toHaveTextContent("1");
+    // 專案資料到齊後：「我的專案」rail、頂列 chips；徽章取自通知摘要——
+    // signoff 佇列鈕＝pendingSignoffs（7，不是專案算出的 1），通知鈴＝pendingReviews＋unacknowledgedAlerts（2＋3）
+    expect(await screen.findByTestId("signoff-badge")).toHaveTextContent("7");
+    expect(screen.getByTestId("bell-badge")).toHaveTextContent("5");
     const rail = within(screen.getByTestId("project-rail"));
     expect(rail.getByRole("link", { name: "專案甲" })).toHaveAttribute("href", "/projects/p1");
     // 「執行中心」「監控中心」從目前專案（列表第一筆）進入

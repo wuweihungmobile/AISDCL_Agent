@@ -4,7 +4,26 @@
 另含響應式（1440／1024／390px）、路由殼、圖表回歸守衛，以及 FAILED 任務重試（該情境後端目前無入口，用 route mock）。
 每個重點畫面存一張截圖到 `tests/e2e/__screenshots__/`。測試資料一律帶每次執行唯一的後綴，並在結束時刪除；`workers: 1` 序列執行。
 
-## 前置條件
+## route mock 版（`*.mock.spec.ts`；不需要後端、不需要資料庫）
+
+匯入頁（畫面 6）、設定頁（畫面 9）與通知徽章（Phase 3／6）的 specs 以 `page.route` 攔 `**/api/v1/**`，回契約 v1.1（`docs/02_architecture/API_Contract_P3-6.md`）形狀的假資料，
+驗「前端對契約形狀的行為」；真後端對接與契約漂移由 QA 波另驗。共用工具與夾具：
+
+- `mockApi.ts`：`installApiMock`（攔截、CORS 放行、記錄每次請求供斷言）、`signInAs`（直接寫 sessionStorage，不需要 login 端點）、`snap`（截圖）。
+- `settingsFixture.ts`：附錄 C 的 50 個鍵與記憶體內的設定假後端（ADMIN 專屬寫入、加密參數須 confirm、token_guard 跨鍵校驗、歷史）。
+
+```bash
+(cd AgentConsole/frontend && npx playwright test tests/e2e/import.mock.spec.ts tests/e2e/settings.mock.spec.ts tests/e2e/notifications.mock.spec.ts)
+```
+
+```powershell
+Push-Location AgentConsole\frontend; npx playwright test tests/e2e/import.mock.spec.ts tests/e2e/settings.mock.spec.ts tests/e2e/notifications.mock.spec.ts; Pop-Location
+```
+
+寫 mock spec 的兩個陷阱：Playwright 的 `getByLabel` 預設是**子字串**比對，而每列參數另有「重置：○○」「顯示：○○」按鈕，查輸入框要加 `{ exact: true }`；
+文字區的 accessible name 會含它自己的內容，測試資料不要寫出和其他欄位標籤相同的詞（例如需求文字裡寫「補充說明」）。
+
+## 前置條件（真後端 specs）
 
 1. PostgreSQL 與後端在線（`/actuator/health` 回 UP），且後端的 `CONSOLE_CORS_ALLOWED_ORIGINS` 包含前端來源（預設 `http://localhost:3000`）。
    啟動方式見 [backend/README.md](../../../backend/README.md)；開發預設帳號 operator／viewer 也在該檔。

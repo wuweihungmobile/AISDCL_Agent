@@ -9,12 +9,13 @@ import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { ApiError, describeError } from "@/lib/api/client";
-import { useSignoffGoal, useSignoffProject, useSignoffTask } from "@/lib/api/queries";
+import { useSignoffGoal, useSignoffImport, useSignoffProject, useSignoffTask } from "@/lib/api/queries";
 import { useAuth } from "@/lib/auth/AuthProvider";
 
-export type SignoffTarget = { kind: "project" | "goal" | "task"; id: string; name: string };
+/** kind="import"＝BRD/PRD 匯入草案（POST /import/{id}/signoff，契約 §1.1.5）；其餘為 Phase 2 的專案／目標／任務。 */
+export type SignoffTarget = { kind: "project" | "goal" | "task" | "import"; id: string; name: string };
 
-const LABEL = { project: "專案", goal: "目標", task: "任務" } as const;
+const LABEL = { project: "專案", goal: "目標", task: "任務", import: "匯入草案" } as const;
 
 /** Signoff 對話框：approver 預設帶目前使用者名稱（不可匿名、不可空白）；確認 → POST signoff → toast「已 signoff」。 */
 export function SignoffDialog({ target, onClose }: { target: SignoffTarget | null; onClose: () => void }) {
@@ -38,6 +39,7 @@ function SignoffBody({ target, onClose }: { target: SignoffTarget; onClose: () =
   const project = useSignoffProject();
   const goal = useSignoffGoal();
   const task = useSignoffTask();
+  const importRecord = useSignoffImport();
   const [approver, setApprover] = useState(username);
   const [error, setError] = useState<string | null>(null);
   const [fieldError, setFieldError] = useState<string | undefined>();
@@ -57,6 +59,7 @@ function SignoffBody({ target, onClose }: { target: SignoffTarget; onClose: () =
       const vars = { id: target.id, approver: name };
       if (target.kind === "project") await project.mutateAsync(vars);
       else if (target.kind === "goal") await goal.mutateAsync(vars);
+      else if (target.kind === "import") await importRecord.mutateAsync(vars);
       else await task.mutateAsync(vars);
       toast.success(`已 signoff：${target.name}`);
       onClose();
@@ -73,7 +76,7 @@ function SignoffBody({ target, onClose }: { target: SignoffTarget; onClose: () =
     <form onSubmit={submit} noValidate>
       <DialogBody>
         <p className="text-[15px] leading-[1.7]">
-          確認審批{LABEL[target.kind]}「<b>{target.name}</b>」？審批後才可執行；審批動作會記錄審批者與時間。
+          確認審批{LABEL[target.kind]}「<b>{target.name}</b>」？審批後才可{target.kind === "import" ? "確認匯入並執行" : "執行"}；審批動作會記錄審批者與時間。
         </p>
         <Field label="審批者" error={fieldError}>
           <Input
