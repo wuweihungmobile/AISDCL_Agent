@@ -54,7 +54,10 @@ def test_terminate_takes_the_grandchild_too() -> None:
             assert snapshot == {parent.pid, child_pid}
         parent.wait(timeout=10)
         assert _wait_until(lambda: not procutil.survivors(procs, exclude_pid=parent.pid))
-        assert not procutil.pid_alive(child_pid)
+        # POSIX 行為＝parent 一死，child 被 init／subreaper 收養；SIGTERM 後到被收養者 wait() 回收
+        # 之前是殭屍：survivors() 已不算它（status 判殭屍），pid_exists() 仍回 True。這個回收
+        # 時刻不在 procutil 手上（雲端 CI 實測在此處間歇性失敗），所以等它消失而不是立即斷言。
+        assert _wait_until(lambda: not procutil.pid_alive(child_pid))
     finally:
         parent.kill()
         parent.wait()
