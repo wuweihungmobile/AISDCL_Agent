@@ -911,7 +911,7 @@ Bridge 執行狀態：INITIALIZING／RUNNING／PAUSING／PAUSED／CANCELLING／C
 | retryCount／maxRetries | Integer | —／● | —／● | ● | ● | ● | maxRetries 預設 3 |
 | assignedAgent | String | — | — | ● | — | ● | 執行時填 |
 | executionLog | Text | — | — | — | — | ● | 最近一次執行日誌 |
-| executionHistory | List<ExecutionStepBrief> | — | — | — | — | ● | 由 `execution_steps` 依 `task_id` 衍生（US-T-02「執行歷史」）；Phase 2 為空清單 |
+| executionHistory | List<ExecutionStepBrief> | — | — | — | — | ● | 由 `execution_steps` 依 `task_id` 衍生（US-T-02「執行歷史」）；Phase 2 為空清單，Phase 4（W3-B2）起為真資料：跨批次、時間升冪、最多最近 200 筆，`tokensUsed` 只在 COMPLETED／FAILED 列 |
 | draft | Boolean | ● | — | — | — | — | 同 Project |
 | signedOff／signedOffBy／signedOffAt | Boolean／String／Instant | — | — | ● | signedOff | ● | |
 | createdAt／updatedAt／startedAt／completedAt | Instant | — | — | ● | updatedAt | ● | |

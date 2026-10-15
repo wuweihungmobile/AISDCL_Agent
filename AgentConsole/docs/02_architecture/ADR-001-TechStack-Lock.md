@@ -234,7 +234,7 @@
 | G-16 | §7.1.5／§5.4.5 | 缺「列出專案執行批次」端點，但設計稿監控頁有「執行批次」下拉、US-M-06 要批次比較；監控端點也沒有 `runId`／時間範圍參數 | 補 `GET /api/v1/projects/{projectId}/executions`（`API-EXE-14`）與監控端點的 `runId`／`from`／`to` 查詢參數 |
 | G-17 | 設計稿頂列 | 通知鈴與 signoff 佇列徽章需要跨專案計數，PRD 無端點 | 補 `GET /api/v1/notifications/summary`（`API-NTF-01`） |
 | G-18 | §5.4.3 US-M-08／M-10 | 自訂儀表板版面無後端欄位；「資源使用情況」在 Bridge 契約中沒有 CPU／記憶體欄位 | 版面存前端 `localStorage`；Agent 狀態以連線、當前任務、Token 與步驟進度呈現 |
-| G-19 | §5.1.3 US-T-02 | 驗收要「執行歷史」，Task DTO 無對應欄位 | 補 `executionHistory`（由 `execution_steps` 依 `task_id` 衍生；Phase 2 為空清單） |
+| G-19 | §5.1.3 US-T-02 | 驗收要「執行歷史」，Task DTO 無對應欄位 | 補 `executionHistory`（由 `execution_steps` 依 `task_id` 衍生；Phase 2 為空清單，Phase 4 起為真資料，契約 E2E-03 步驟 8 驗兩筆） |
 
 ## 6. 證據欄（待回填；貼逐字輸出，不得寫「應該」）
 
