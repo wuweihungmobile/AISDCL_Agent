@@ -211,6 +211,7 @@
 | import signoff 回傳型別 | §7.1.4.1 | D12 |
 | `autoclaude.dalBackend` 預設值 | §5.5.1.5 | D13 |
 | US-I-05 驗收字樣「支援瀏覽按鈕」不提供（以路徑輸入＋allowlist 驗證取代） | §5.2.3 | G-15 |
+| KPI「專案完成率」「目標達成率」的「環形進度圖（Tremor DonutChart）」→ 設計稿畫面 8 的數值卡＋delta（W5 主控裁決 C-13，2026-10-15） | §5.4.2 | D11；G-20 |
 
 ## 5. PRD 缺口與矛盾登記
 
@@ -235,6 +236,7 @@
 | G-17 | 設計稿頂列 | 通知鈴與 signoff 佇列徽章需要跨專案計數，PRD 無端點 | 補 `GET /api/v1/notifications/summary`（`API-NTF-01`） |
 | G-18 | §5.4.3 US-M-08／M-10 | 自訂儀表板版面無後端欄位；「資源使用情況」在 Bridge 契約中沒有 CPU／記憶體欄位 | 版面存前端 `localStorage`；Agent 狀態以連線、當前任務、Token 與步驟進度呈現 |
 | G-19 | §5.1.3 US-T-02 | 驗收要「執行歷史」，Task DTO 無對應欄位 | 補 `executionHistory`（由 `execution_steps` 依 `task_id` 衍生；Phase 2 為空清單，Phase 4 起為真資料，契約 E2E-03 步驟 8 驗兩筆） |
+| G-20 | §5.4.2 UI-KPI-01／02 | KPI「專案完成率」「目標達成率」PRD 寫「環形進度圖」（Tremor `DonutChart`），設計稿畫面 8 只有數值卡與 delta；W4 實作依設計稿畫數值卡，QA 因 PRD 字樣把兩列留在 🟡 | **以設計稿畫面 8 的數值卡為準**（依據 D11「視覺以設計稿為準」；本列把它落到 KPI 這兩列，並同步登記於 §4 偏離清單）：兩張卡以數值＋delta 呈現，資料來源 `projectCompletionRate`／`goalAchievementRate`（契約 §1.3.1）；RTM `UI-KPI-01`／`UI-KPI-02` 改 `✅ 已驗證`（W5-QA，主控裁決 C-13，2026-10-15）；PRD §5.4.2 對這兩列的「環形」不再作為驗收依據（D3 的「元件欄改以圖表型別為驗收依據」對其他圖表照舊；這兩列是主控以 D11 明確裁決的例外） |
 
 ## 6. 證據欄（待回填；貼逐字輸出，不得寫「應該」）
 
@@ -264,6 +266,15 @@
 - **Decision（草案）**：(a) `executionPath` 下有凍結 SDD 規格 → Bridge `/sdd/compile`；(b) 自由文件 → 後端呼叫 OpenAI 相容 chat completions（PRD §5.2.4 prompt）產三層 JSON，三道有界閘（≤24／Kahn／非空）在後端重現並回結構化 422（US-I-10）；(c) 短句高階目標（貼上文字 < 2,000 字且無標題結構）→ Bridge `/autoclaude/decompose`＋`:approve`。
 - **Alternatives**：全部走 GoalDecomposer（只產單層 steps，無法產生多個 Goal）；全部走後端 LLM（違反 PRD §0.4 的引擎映射）。
 - **Status**：待 W3-B 實作時確認；見 `docs/04_planning/agent_briefs/W3_BACKEND_P3-6.md`。
+
+### D19　軟刪除保留期與清除排程預設關閉（W5 主控裁決 C-3，2026-10-15；NFR-9.3-04）
+- **Context**：PRD NFR-9.3-04 要求「所有刪除操作皆為軟刪除，支援 30 天內復原」。Phase 2 只做了 `is_deleted` 旗標：沒有刪除時間、沒有復原端點、沒有保留期；專案軟刪除還會把 `status` 改成 `ARCHIVED`（附錄 B.1 的終態，手動 API 離不開它）。W4 QA 把 NFR-9.3-04 列為未滿足。
+- **Decision**：
+  1. **保留期＝30 天**（`console.retention.soft-delete-days`，預設 30）。復原 `POST /api/v1/projects/{id}/restore`（OPERATOR 以上）只在期內可用，逾期回 409 `restore_window_expired`；`GET /api/v1/projects?deleted=true` 列出已刪除的專案（OPERATOR 以上）。
+  2. **清除排程預設關閉**（`console.retention.purge-enabled=false`）：實體刪除不可逆，沒有人明確開啟就不會有任何資料被主動刪除；開啟時每日清除逾期的軟刪除專案（連同整棵子資料，以專案為單位一個交易）。保留期與清除是兩件事：期過了、排程沒開 → 資料仍在，只是不能經 API 復原。
+  3. **資料面**：Flyway V9 加 `projects.deleted_at`、`projects.status_before_delete`、`goals.deleted_at`、`tasks.deleted_at`；刪除專案時專案與連帶軟刪的目標、任務寫**同一個** `deleted_at`，復原以它辨識「同一次刪除連帶軟刪」的列（刪除專案前就單獨刪除的目標／任務不回來）；復原專案時還原 `status_before_delete`。升級前已軟刪的列以 `updated_at` 近似 `deleted_at`。
+- **Alternatives**：預設開啟清除（不可逆，部署者可能不知情就失去資料，否決）；既不提供保留期也永遠不清除（資料無限成長，且違反 NFR-9.3-04，否決）；只提供 DB 手動復原腳本（不是產品功能，否決）；復原一律回 `READY`／`DRAFT`（`COMPLETED`／`FAILED` 專案復原後失去狀態，否決）。
+- **Consequences**：`ProjectSummaryResponse` 加 `deletedAt`（只在 `deleted=true` 列表帶值）；契約新增 `project_not_deleted`、`restore_window_expired` 兩個 reason（契約 §0.3 第 5 點、附錄 B.2）；審計新增 `project.restore`／`project.purge`；清除排程的範圍是專案層級，單獨軟刪除的目標／任務不被清除（隨其專案被清除時才一併實體刪除）；預設關閉意味著長期運行的部署必須自行決定是否開啟，並與 pgBackRest 的備份保留期（28 天）一併評估。契約落點：`API_Contract_P3-6.md` §0.5 V9、§1.6；RTM 新列 `API-PRJ-06`。
 
 ### 主控親驗紀錄（2026-10-15）
 - Bridge：`ruff` 全過；`pytest -n 4` 235 passed／9 skipped（無 DB）；slim 映像字面指令 build rc=0、容器 `/health` 兩引擎 ok。

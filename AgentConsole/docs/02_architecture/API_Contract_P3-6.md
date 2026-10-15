@@ -1,12 +1,19 @@
 # API 契約 — Phase 3～6（BRD/PRD 匯入、專案執行、專案監控、系統設定）
 
-**版本**：v1.1（契約先行；v1.0 已提交為 6df940c，本版套用主控對 11 項未決問題的裁決，並回應獨立 Architect 審查的缺陷）｜**日期**：2026-10-15｜**作者角色**：SA／SD
+**版本**：v1.2（W5 修復波：W4 獨立 QA 缺陷修復的 22 項主控裁決〔C-1～C-22〕與契約漂移一次回寫；v1.1 為 v1.0〔6df940c〕之後套用 11 項未決問題裁決並回應獨立 Architect 審查的版本）｜**日期**：2026-10-15｜**作者角色**：SA／SD
 **讀者**：後端開發者（Spring Boot 4.1／Java 21）、前端開發者（Next.js 16）、QA（依本契約驗收）
 **機器可讀版**：[openapi-p3-6.yaml](openapi-p3-6.yaml)（OpenAPI 3.1；schema 名稱、欄位與本文一致；兩者衝突以本文為準並回報修正）
-**對應需求**：PRD §5.2～§5.5、§7.1.4～§7.1.8、附錄 B；RTM `API-IMP／SGN／EXE／MON／NTF／SSE／SET／ALR／AUT／DAG`、`US-I／E／M／S`、`NFR-SEC-03／04／05`、`NFR-OBS-01`
+**對應需求**：PRD §5.2～§5.5、§7.1.4～§7.1.8、附錄 B；RTM `API-IMP／SGN／EXE／MON／NTF／SSE／SET／ALR／AUT／DAG`（v1.2 增 `API-MON-08`、`API-PRJ-06`、`BR-26`）、`US-I／E／M／S`、`NFR-SEC-03／04／05`、`NFR-OBS-01`（v1.2 增 `NFR-9.3-04`、`NFR-9.4-04`）
 
 > **本文的使用方式**：開發者照 §1（端點）、§2（SSE）、§3（Bridge 與讀模型）施工；QA 照 §5（E2E 情境）與附錄 B（reason 常數）驗收；§4 讓前端確認「設計稿每個元素有沒有資料來源」；§6 列出本文與其他文件不一致處的裁決。
-> v1.1 起沒有待裁決的規格點：v1.0 的 11 項未決問題已由主控裁決（§6.3），審查缺陷已逐條回應（§6.4），其餘章節都是可直接施工的定案。
+> v1.1 起沒有待裁決的規格點：v1.0 的 11 項未決問題已由主控裁決（§6.3），審查缺陷已逐條回應（§6.4），其餘章節都是可直接施工的定案。v1.2 的 22 項變動（C-1～C-22）同樣全是主控已定的裁決（§6.5），沒有待裁決的規格點。
+
+> **v1.2 變更摘要**（逐條對照見 §6.5；W4 獨立 QA 報告 `docs/06_quality/QA_P3-6_E2E_Verification.md` 的 10 筆缺陷與 21 筆觀察由 W5 修復，契約先行）：
+> 1. **新端點與新欄位**：`GET /monitor/task-totals`（C-1，§1.3.8）、`POST /projects/{id}/restore` 與 `GET /projects?deleted=true`（C-3，§1.6）、Bridge `GET /health/deep`（C-2，§3.1.1）；匯入詳情的 `warnings[]`／`parseOptions`（C-10，§1.1.9）；批次列表的 `bridgeStatus`（C-11，§1.2.2）。
+> 2. **語意改動**：PDF 報表改回 200（C-4，§1.3.7；501 與 `PDF 報表尚未提供（W5）` 退役）；設定匯入「值未變」先於驗證計 `skipped`（C-6，§1.5.10）；`ENGINE_ESCALATION` 去重鍵帶 `runId`（C-7，§3.7）；執行中刪除目標／任務回 409 `project_executing`（C-8，§1.6.3）；手動重試不受 `maxRetries` 限制（C-9，§1.6.4）；`X-Trace-Id` 貫穿 console-api→Bridge（C-12，§0.4 第 6 點、§3.1.1）。
+> 3. **客戶端流程**：`POST /auth/refresh` 失敗分 `renewed`／`invalid`／`unavailable` 三類，只有 `invalid` 登出，SSE 以 1→30 秒退避重連（C-5，§2.8）。
+> 4. **漂移回寫**（C-21、C-22）：W4 補充節〈契約漂移裁決〉的 B1-1～B1-9、F1-3～F1-6、F2-1／F2-2／F2-5／F2-6 與 B2 交卷的六條，以實作為準寫進對應正文（逐條附程式位置，§6.5.2）；§3.7 補 `CONSECUTIVE_FAILURES` 觸發路徑說明。
+> 5. **其他文件**：ADR-001 加 D19（軟刪除保留期）與 G-20（KPI「環形」→數值卡）（C-3、C-13）；§4.3 M-12 補追蹤鏈視圖裁決（C-14）；Architecture.md 的端點、資料所有權與 Bridge 契約同步。
 
 > **v1.1 變更摘要**（逐條對照見 §6.3 主控裁決與 §6.4 審查回應表）：
 > 1. **Bridge 修復相依**：PAUSED 的 run 做 restore 依賴 Bridge 修復 DB 模式的 advisory lock 自撞（AR-01；§1.2.10、§3.6.3、E2E-07）。
@@ -59,15 +66,17 @@
 
 | 碼 | 語意 |
 |----|------|
-| 400 | Bean Validation／格式；`approver` 缺漏；token_guard 跨鍵違規；命令含禁用字元；時間範圍不合法；加密值要求 |
+| 400 | Bean Validation／格式；`approver` 缺漏；token_guard 跨鍵違規；命令含禁用字元；時間範圍不合法（含 `task-totals` 視窗超過 92 天）；加密值要求；查詢參數型別不符（例：`reveal=abc`，B1-4） |
 | 401／403 | 未認證（`UNAUTHENTICATED`／`TOKEN_EXPIRED`／`TOKEN_INVALID`）／角色不足（`ACCESS_DENIED`；`reveal=true` 非 ADMIN 另有專屬 reason） |
 | 404 | 資源不存在或已軟刪除；`runId`／`checkpointId`／審核項不屬於所述父資源也是 404 |
-| 409 | 草案未 signoff 即執行／resume／restore；匯入或執行狀態不允許該操作；並發互斥；審核項已處理；敏感參數未帶 `confirm=true`；Bridge 草案失效 |
+| 409 | 草案未 signoff 即執行／resume／restore；匯入或執行狀態不允許該操作；並發互斥；審核項已處理；敏感參數未帶 `confirm=true`；Bridge 草案失效；專案有進行中批次時刪除其目標／任務（`project_executing`）；專案復原前提不符（`project_not_deleted`、`restore_window_expired`） |
 | 413／415 | 上傳超過 10MB（匯入）或 1MB（設定檔）／副檔名或類型不支援 |
 | 422 | 有界閘與消毒拒絕（含 Bridge 的 422 原因逐字帶出）；SSRF／allowlist 檢查未通過；上傳檔案內容無法讀取 |
 | 429 | 超過每分鐘 100 次（見 §0.4） |
-| 501 | PDF 報表（W5 前） |
 | 502／504 | Bridge 無法連線／逾時（建立執行已補償刪除 run 列） |
+
+5. **W5（v1.2）新增的四個 reason 是英文識別字**（主控裁決 C-3、C-5、C-8）：`project_executing`、`project_not_deleted`、`restore_window_expired` 由後端回；`upstream_unavailable` **只由前端合成**（`POST /auth/refresh` 暫時失敗時的 `ApiError`，後端永不回它，§2.8）。它們與 Phase 1+2 既有的 `UNAUTHENTICATED` 等英文識別字同風格，與 Phase 3～6 的中文逐字常數並存；規則與其他 reason 相同（逐字、前後端各一份常數、不得用 `message` 判斷），全部列在附錄 B.2。注意 `project_executing`（刪除目標／任務被擋，§1.6.3）與 execute 的 `專案正在執行中`（啟動執行被擋，§1.2.1 第 3 項）是**不同**的 reason，不要混用。
+6. **501 已退役**（C-4）：PDF 報表自 v1.2 起回 200（§1.3.7）；`PDF 報表尚未提供（W5）` 常數與後端的 `NotImplementedYetException` 一併移除，附錄 B.2 不再列它。
 
 ### 0.4 認證、角色、CORS 與限流
 
@@ -79,8 +88,9 @@
 | 匯入寫入（upload／text／parse／result／signoff／confirm／reject） | — | ✅ | ✅ |
 | 執行讀取（`GET` run／steps／dag／checkpoints／executions）、兩條 SSE | ✅ | ✅ | ✅ |
 | 執行寫入（execute／pause／resume／cancel／restore／review） | — | ✅ | ✅ |
-| 監控讀取（metrics／趨勢／alerts／logs／report／notifications） | ✅ | ✅ | ✅ |
+| 監控讀取（metrics／趨勢／`task-totals`／alerts／logs／report／notifications） | ✅ | ✅ | ✅ |
 | 告警確認 | — | ✅ | ✅ |
+| 專案復原（`POST /projects/{id}/restore`）、檢視已刪除專案（`GET /projects?deleted=true`；VIEWER → 403 `ACCESS_DENIED`，由 controller 檢查，與 `reveal` 同型） | — | ✅ | ✅ |
 | 設定讀取（`GET /settings*`、`history`；加密值遮罩） | ✅ | ✅ | ✅ |
 | `reveal=true` 揭露加密明文 | — | — | ✅ |
 | 設定寫入與工具（PUT／reset／import／export／test-connection） | — | — | ✅ |
@@ -89,19 +99,20 @@
 
 1. `/api/v1/settings/**` 的**非 GET** 一律要求 ADMIN（含 `POST /settings/export`、`/settings/import`、`/settings/test-connection`，它們是 POST 但屬 ADMIN 專用）；`GET …?reveal=true` 由 Controller 檢查角色，非 ADMIN 回 403（reason `僅 ADMIN 可揭露敏感參數`）。
 2. **SSE 認證**（兩種都收，主控裁決）：`/api/v1/stream/**` 先看 `Authorization: Bearer`，沒有才看查詢參數 `access_token`。只收 access token；refresh token 一律 401（`TOKEN_INVALID`）；此查詢參數**僅限 `/api/v1/stream/**`**（其他路徑出現一律忽略）。補強：**後端任何存取日誌不得輸出含 `access_token` 的 query string**（`AuditLoggingFilter` 只審寫入方法且記 `getRequestURI()`，本來就不含 query；若另外啟用 Tomcat access log 或 `CommonsRequestLoggingFilter`，須遮罩）；nginx 的 `log_format` 遮罩見 §0.7；SSE 回應帶 `Cache-Control: no-store`；`SseEmitter` 完成時的 ASYNC dispatch 授權見 §2.1 的實作提醒。
-3. **CORS**：`allowedHeaders` 補 `Last-Event-ID`；`exposedHeaders` 補 `X-Follow-Up-Run-Id`、`Retry-After`、`Content-Disposition`。
-4. **限流**（NFR-9.2-06；AR-06）：每個**使用者**每 60 秒 100 次（Bucket4j 記憶體實作；Redis 為選配）。
+3. **CORS**：`allowedHeaders` 補 `Last-Event-ID`；`exposedHeaders` 補 `X-Follow-Up-Run-Id`、`Retry-After`、`Content-Disposition`；實作另暴露 `X-Trace-Id`（`SecurityConfig.corsConfigurationSource`）。`X-RateLimit-Limit`／`X-RateLimit-Remaining` **刻意不暴露**（QA O-01 維持觀察）：瀏覽器端的 JS 只讀 `Retry-After`。
+4. **限流**（NFR-9.2-06；AR-06）：每個**使用者**每 60 秒 100 次（Bucket4j 記憶體實作；Redis 為選配）。**計數方式是固定視窗**（B1-9；`infrastructure/security/RateLimiter`）：每個鍵的視窗從該鍵「視窗期滿後的第一個請求」起算、長 60 秒，視窗內計到 100 次，期滿換一個全新的桶；`Retry-After`＝距視窗結束的秒數（無條件進位、不小於 1）。不採貪婪補充的 token bucket（每 0.6 秒補 1 個）：連續 100 次請求跑超過 0.6 秒時第 101 次仍會成功，E2E-11 的「第 101 次回 429」就變成取決於機器速度。
    - **限流鍵**＝已認證請求的 JWT subject；**未認證**的請求（登入端點、帶無效 token 而回 401 的請求）才以客戶端 IP 為鍵。理由：Docker 全棧下所有使用者都經 nginx 進來，若以連線位址為鍵，整個系統會共用同一個桶。限流 filter 排在 `JwtAuthenticationFilter` 之後（取得 subject 後才算桶：現行 `JwtAuthenticationFilter` 遇到無效或過期 token 不自行回應、只記錄原因並以匿名身分往下走，所以這類請求在限流 filter 看到的就是「未認證」）、**授權判定之前**（即 `addFilterAfter(rateLimitFilter, JwtAuthenticationFilter.class)`，早於 Spring Security 最後的授權步驟）；因此超限的請求**先得 429，而不是 401／403**（E2E-11 步驟 7 驗這個順序）。
    - 對象＝`/api/**`；不計入：`/actuator/**`、`/v3/api-docs`、SSE 連線建立之後的串流本身（建立請求算 1 次）。
    - 超限回 **429**：`reason`＝`超過每分鐘 100 次請求上限`、`details={limit:100, windowSeconds:60, retryAfterSeconds:N}`，並帶標頭 `Retry-After`（秒）、`X-RateLimit-Limit: 100`、`X-RateLimit-Remaining: 0`；成功回應也帶後兩個標頭。
    - **客戶端 IP**（只有未認證請求用得到）：docker／e2e profile 設 `console.security.rate-limit.trust-forwarded-for=true`，並以 `server.forward-headers-strategy=native` 啟動（Tomcat 的 RemoteIpValve 只信任內網代理位址，預設即涵蓋 nginx 容器與本機測試 client）；限流取處理後的 `getRemoteAddr()`，**不自行解析 `X-Forwarded-For`**。production 直連（沒有代理）維持 `false`，此時偽造的 `X-Forwarded-For` 不會被採信。
    - 開關：`console.security.rate-limit.enabled`（預設 `true`；單元／整合測試 profile 預設 `false`，但必須有一支測試開著它打 101 次、驗第 101 次回 429；e2e profile 為 `true`）。
    - **輪詢地板**：同一個使用者的所有頁面共用同一個桶，所以通知摘要與任何輪詢間隔都**不得小於 10 秒**（`monitor.refreshIntervalMs` 的預設值與最小值皆為 `10000`，附錄 C）；監控頁約 8 個端點、每 10 秒各一次≈每分鐘 48 次，仍在 100 以內；頁面不可見時應停止輪詢。
-5. 審計（NFR-9.2-07）：沿用 `AuditLoggingFilter` 的結構化 JSON 日誌；Phase 3～6 追加兩個欄位 `action`（例：`import.signoff`、`execution.review.APPROVE`、`settings.reveal`）與 `entity`（`<type>:<id>`）。另依任務書把寫入端點（POST／PUT／PATCH／DELETE）落一列到 `console.audit_log`（V6；**內部實作**，寫入失敗不得影響主請求；契約沒有任何端點讀它，見 §6 D-13）。
+5. 審計（NFR-9.2-07）：沿用 `AuditLoggingFilter` 的結構化 JSON 日誌；Phase 3～6 追加兩個欄位 `action`（例：`import.signoff`、`execution.review.APPROVE`、`settings.reveal`、`project.restore`）與 `entity`（`<type>:<id>`）。另依任務書把寫入端點（POST／PUT／PATCH／DELETE）落一列到 `console.audit_log`（V6；**內部實作**，寫入失敗不得影響主請求；契約沒有任何端點讀它，見 §6 D-13）。
+6. **traceId 貫穿 console-api→Bridge（C-12；NFR-9.4-04；QA O-11）**：console-api 的 `TraceIdFilter` 對每個請求自產一個 UUID（**不採信**入站的 `X-Trace-Id`，避免日誌注入），寫進 MDC（日誌樣板的 `%X{traceId}`）、回應標頭 `X-Trace-Id` 與封包的 `traceId`。console-api 對 **Bridge 的每一個請求**（`/autoclaude/*`、`/sdd/*`、健康探測，含 SSE 事件串流）都帶標頭 `X-Trace-Id`：由使用者請求觸發的呼叫取當前請求的 traceId；沒有請求上下文的背景消費者（`RunEventConsumer`、探測環、啟動對帳）用該 run 的 traceId（啟動該 run 的 execute 請求的 traceId，只存在記憶體、不入庫），取不到就新產一個 UUID。Bridge 端（§3.1.1）：中介層讀取該標頭（缺則自產 `uuid4`）、回應回帶同名標頭、**每一行**應用日誌都帶 `trace_id`。如此同一次使用者操作的 console-api 日誌、Bridge 日誌與前端錯誤封包的 `traceId` 可用同一個值串起來。
 
 ### 0.5 資料庫增補（Flyway；契約所需）
 
-現況：V1～V4 已套用（`V3__review_requests`、`V4__monitor_alerts` 在 Phase 1+2 已建表）。本契約涉及 **V5～V7**；版號依任務書分工：V5、V6 屬後端第一棒（W3-B1），V7 屬後端第二棒（W3-B2，在 B1 交卷後的同一棵樹上接續，所以版號不會撞）；V1～V4 **不得修改**。
+現況：V1～V4 已套用（`V3__review_requests`、`V4__monitor_alerts` 在 Phase 1+2 已建表）。本契約涉及 **V5～V9**；版號依任務書分工：V5、V6 屬後端第一棒（W3-B1），V7 屬後端第二棒（W3-B2，在 B1 交卷後的同一棵樹上接續，所以版號不會撞），**V8、V9 屬 W5-BE（v1.2，在 V7 之後接續）**；已套用的 V1～V7 **不得修改**。
 
 **V5 `V5__seed_engine_configs.sql`**（W3-B1；Architecture §11.4 的 V5 補充鍵，加上審查回應的欄位與預設值校正）：①新增下列九個鍵；②補全部鍵的 `validation_rule`；③新增欄位 `system_configs.impact_note VARCHAR(500)`（US-S-08）；④新增 `import_records.parse_path`、`import_records.last_parse_errors`（AR-07，見下方 SQL）；⑤預設值校正（AR-06、AR-09，見下方 SQL）。
 
@@ -176,6 +187,34 @@ CREATE UNIQUE INDEX uq_alerts_open_rule_subject
 
 實作注意：(a) `execution_runs` 的 `status／subprocess_pid／bridge_instance／advisory_lock_key／total_tokens_used／completed_at` 由 Bridge 寫，`ExecutionRunEntity` 對它們一律唯讀（`updatable=false` 或只用目標明確的 `UPDATE … SET console_last_seq=?`），避免 JPA 整列回寫蓋掉 Bridge 的更新（PRD §0.2.2）；(b) `alerts.subject` 對規則型告警永遠非 null（否則 partial unique index 對 NULL 失效）；(c) `review_requests.kind` 的 CHECK（V3）**不擴充**，四種 kind 足夠（§3.6）。
 
+**V8 `V8__import_record_warnings_and_options.sql`**（W5-BE；C-10；QA 的 F1-1／F1-2）：
+
+```sql
+-- 匯入記錄補兩欄：重開記錄（歷史列表、重新整理）時還原黃色解析提示與解析選項
+ALTER TABLE console.import_records
+    ADD COLUMN warnings JSONB NOT NULL DEFAULT '[]'::jsonb,   -- ParseWarning[]；最近一次成功的 parse／PUT result 的結果
+    ADD COLUMN parse_options JSONB;                           -- ParseOptions；最近一次 parse 請求的選項；從未 parse 過為 NULL
+```
+
+寫入規則：`parse` 通過欄位驗證、進入 `PARSING` 時把請求的 `ParseOptions` 原樣寫進 `parse_options`（`autonomyLevel` 省略者存預設 3；**不論該次 parse 成敗**，保存的都是最近一次請求）；`parse` 成功時以該次的 `warnings` 覆寫 `warnings`；`PUT /import/{id}/result` 成功時以重算後的 `warnings` 覆寫；`parse` 失敗（退回 `UPLOADED`）不動 `warnings`（與「保留上一次成功的 `parsed_result`」同一原則，§1.1.3）。既有記錄升級後 `warnings=[]`、`parse_options=NULL`。`ImportRecordEntity` 同步加兩欄（`ddl-auto=validate`）。
+
+**V9 `V9__soft_delete_timestamps.sql`**（W5-BE；C-3；NFR-9.3-04）：
+
+```sql
+-- 軟刪除時間：保留期與復原都需要知道「何時刪的」與「同一次刪除連帶軟刪了哪些」
+ALTER TABLE console.projects ADD COLUMN deleted_at TIMESTAMP WITH TIME ZONE,
+                             ADD COLUMN status_before_delete VARCHAR(20);   -- 軟刪除前的專案狀態（復原時還原；軟刪除會把 status 改成 ARCHIVED）
+ALTER TABLE console.goals    ADD COLUMN deleted_at TIMESTAMP WITH TIME ZONE;
+ALTER TABLE console.tasks    ADD COLUMN deleted_at TIMESTAMP WITH TIME ZONE;
+-- 升級前已軟刪的列：真正的刪除時間已不可考，以 updated_at 近似（軟刪除當下會更新它）；status_before_delete 留 NULL
+UPDATE console.projects SET deleted_at = updated_at WHERE is_deleted = TRUE AND deleted_at IS NULL;
+UPDATE console.goals    SET deleted_at = updated_at WHERE is_deleted = TRUE AND deleted_at IS NULL;
+UPDATE console.tasks    SET deleted_at = updated_at WHERE is_deleted = TRUE AND deleted_at IS NULL;
+CREATE INDEX idx_projects_deleted_at ON console.projects(deleted_at) WHERE is_deleted = TRUE;
+```
+
+寫入規則（`ProjectService.delete`、`GoalService.delete`、`TaskService.delete` 與各自的 `softDeleteBy…` 查詢）：任何軟刪除都同時寫 `deleted_at`；**刪除專案時，專案與它當時仍未刪除的目標、任務在同一交易內寫入同一個 `deleted_at` 值**（既有程式已把同一個 `now` 傳給三者）——復原靠「目標／任務的 `deleted_at` 等於專案的 `deleted_at`」辨識「同一次刪除連帶軟刪」的列（§1.6.1）；刪除專案時把刪除前的 `status` 存進 `status_before_delete`，再轉 `ARCHIVED`。`ProjectEntity`、`GoalEntity`、`TaskEntity` 同步加欄位。
+
 ### 0.6 名詞對照
 
 | Bridge | Console | 說明 |
@@ -199,6 +238,8 @@ CREATE UNIQUE INDEX uq_alerts_open_rule_subject
 | 2 | 設定檔匯入（≤1MB 的 JSON 加 multipart 封裝） | `location = /api/v1/settings/import { client_max_body_size 2m; … }`（任務書只列了匯入位置，這一項由本契約補列） | W3-B1 |
 | 3 | SSE（含 EventSource 的 `?access_token=`） | `location /api/v1/stream/ { proxy_buffering off; proxy_http_version 1.1; proxy_read_timeout 3600s; … }`（現有 `/api/` 區塊已有 `proxy_buffering off` 與 `86400s`；獨立區塊是讓需求明文，並把串流的逾時與一般 API 分開） | W3-B2 |
 | 4 | access log 不得出現 `access_token` 的值 | `nginx.conf` 的 `log_format` 不記含 query 的 `$request`，二選一：改記 `$uri`；或用 `map $request_uri $masked_uri { default $request_uri; ~^(?<tokpre>[^?]*\?(?:.*&)?access_token=)[^&]*(?<toksuf>.*)$ "${tokpre}***${toksuf}"; }` 後記 `"$request_method $masked_uri $server_protocol"` | W3-B2 |
+| 5 | **`error_log` 也不得洩漏 `access_token`**（v1.2，QA 全棧實測 DEF-AC-008）：上游被切斷（例：backend 重啟）時 nginx 會把完整的原始請求行（含 `?access_token=<JWT>`）印進 `error_log`，`log_format` 管不到它 | `error_log … crit;`（降到 `crit` 以上；要除錯時暫時調回 `error` 並在事後清檔，檔頭〈誠實劃界〉須如實說明）；前端改 fetch 串流帶標頭是另一條治本路（§2.8 第 2 點的優先做法），不在 v1.2 範圍 | W5-INFRA（C-15） |
+| 6 | **前端健康路由與快取標頭**（v1.2，QA O-08／O-09）：`/api/health` 是前端自己的健康路由，不得被 `/api/` 區塊反代到 backend 而回 401；靜態資源的 `Cache-Control` 只能出現一份 | `location = /api/health { proxy_pass http://frontend…; }` 放在 `/api/` 區塊之前；靜態資源 location 只留一個 `Cache-Control` 來源 | W5-INFRA（C-15） |
 
 通則：
 
@@ -234,10 +275,20 @@ Phase 3～6 落地時，下列 Phase 1+2 的既有內容必然受影響；任務
 
 不會紅、不必動的：`StateMachinesTest`、`TaskTest`、`GoalTest`、`ProjectTest`（契約的「系統重設」走專用方法，不改 `StateMachines` 的轉移表，§3.5.3）；`AuditLogIT`、`RbacIT`、`ResponseEnvelopeIT`（以 contains 與筆數斷言）。
 
+**v1.2 追加（W5-BE 同步；同樣是改，不是刪）**
+
+| 測試／程式 | 改動 |
+|-----------|------|
+| `OpenApiIT` 的 `EXPECTED` 路徑表 | 再加 2 個路徑——`GET /api/v1/monitor/task-totals`、`POST /api/v1/projects/{id}/restore`（`GET /api/v1/projects` 只多一個 `deleted` 查詢參數，不是新路徑）；路徑 53→55、操作 62→64；`DELETE /api/v1/goals/{id}`、`DELETE /api/v1/tasks/{id}` 的 409 文件化；`GET /api/v1/monitor/projects/{projectId}/report` 的 501 文件化移除 |
+| `SchemaMigrationIT` | Flyway 版本改 `containsExactly("1",…,"9")`；`import_records` 多 `warnings`、`parse_options`；`projects` 多 `deleted_at`、`status_before_delete`；`goals`／`tasks` 多 `deleted_at`；`V5UpgradeMigrationIT` 的升級帶資料測試補 V8、V9 |
+| `ErrorResponseDocumentation` | `CONFLICT_ENDPOINTS` 補 restore 與兩個 DELETE；`NotImplementedYetException` 與 `ErrorReasons.PDF_NOT_AVAILABLE` 一併移除（C-4） |
+| `ProjectController`／`SecurityConfig` | `GET /api/v1/projects?deleted=true` 由 controller 檢查角色（VIEWER → 403 `ACCESS_DENIED`），不必動 matcher；`POST /api/v1/projects/{id}/restore` 落在既有的「GET 之外一律 OPERATOR 以上」規則 |
+| `ConfigCatalog` | `execution.globalTokenBudget` 的 `max` 常數由 `1000000000000` 改 `999999999999`（與 V5 的 `validation_rule` 一致，附錄 C.3；B1-1） |
+
 ---
 ## 1. 端點總表與逐端點契約
 
-### 1.0 總表（40 個端點；SSE 兩條詳見 §2）
+### 1.0 總表（42 個端點；SSE 兩條詳見 §2；#41～#42 為 v1.2 新增）
 
 「補」＝PRD 未列、為設計稿或 Architecture 所需的補充端點（§6 D-05、D-10…）。Phase 2 已實作的 `POST /projects|goals|tasks/{id}/signoff`（`API-SGN-02～04`）不重複定義。
 
@@ -283,6 +334,10 @@ Phase 3～6 落地時，下列 Phase 1+2 的既有內容必然受影響；任務
 | 38 | `GET /api/v1/settings/history` | VIEWER | 篩選＋分頁 → `Page<ConfigHistoryResponse>`（200） | API-SET-07／US-S-07 |
 | 39 | `POST /api/v1/settings/export` | ADMIN | — → `SettingsExportDocument`（200，檔案） | API-SET-08／US-S-06 |
 | 40 | `POST /api/v1/settings/import` | ADMIN | multipart `file` → `ImportSettingsResponse`（200） | API-SET-09／US-S-06 |
+| 41 | `GET /api/v1/monitor/task-totals`（v1.2 補，C-1） | VIEWER | `from,to` → `TaskTotalsResponse`（200） | API-MON-08／US-M-03 |
+| 42 | `POST /api/v1/projects/{id}/restore`（v1.2 補，C-3；Phase 2 資源） | OPERATOR | — → `ProjectDetailResponse`（200） | API-PRJ-06／NFR-9.3-04 |
+
+v1.2 另有三處是改動 Phase 2 既有端點（不編號，詳見 §1.6）：`GET /api/v1/projects` 新增查詢參數 `deleted`（§1.6.2）；`DELETE /api/v1/goals/{id}`、`DELETE /api/v1/tasks/{id}` 新增 409 `project_executing`（§1.6.3）；`POST /api/v1/tasks/{id}/retry` 的「不受 `maxRetries` 限制」明文（§1.6.4）。
 
 ---
 
@@ -360,9 +415,9 @@ UPLOADED ──parse──▶ PARSING ──成功──▶ PARSED ──PUT res
 | `additionalPrompt` | string | — | ≤ 4,000 |
 | `specDir` | string | — | ≤ 500；明示的 SDD 規格目錄（絕對路徑）。省略＝以 `executionPath` 探測 |
 
-- **處理**：狀態 `PARSING`（同時清空 `last_parse_errors`）→ 依 §3.3 選路徑與轉換 → 套三道有界閘與 `prompt_too_long`。
-  - **成功**：存 `parsed_result`、`parse_path`、`ai_model`、`token_used`，狀態 `PARSED`、`signedOff=false`。
-  - **失敗**（有界閘 422、SDD 規格被拒 422、Bridge 不可達 502／504、模型端失敗 `brain_*`）：狀態一律退回 `UPLOADED`。僅「被有界閘拒絕」時把 `errors[]` 存進 `last_parse_errors`（V5 新增的 JSONB 欄位，AR-07）；非閘的失敗不寫（錯誤只在該次回應裡）。**失敗不寫 `parsed_result` 與 `parse_path`**：兩者在第一次成功解析前一律為 NULL（任務書的 `parsed_result.error` 作廢）。
+- **處理**：狀態 `PARSING`（同時清空 `last_parse_errors`，並把本次請求的 `ParseOptions` 原樣存進 `parse_options`，V8，§0.5）→ 依 §3.3 選路徑與轉換 → 套三道有界閘與 `prompt_too_long`。
+  - **成功**：存 `parsed_result`、`parse_path`、`ai_model`、`token_used`、`warnings`（V8），狀態 `PARSED`、`signedOff=false`。
+  - **失敗**（有界閘 422、SDD 規格被拒 422、Bridge 不可達 502／504、模型端失敗 `brain_*`）：狀態一律退回 `UPLOADED`。僅「被有界閘拒絕」時把 `errors[]` 存進 `last_parse_errors`（V5 新增的 JSONB 欄位，AR-07）；非閘的失敗不寫（錯誤只在該次回應裡）。**失敗不寫 `parsed_result` 與 `parse_path`**：兩者在第一次成功解析前一律為 NULL（任務書的 `parsed_result.error` 作廢）；`warnings` 同樣不動（保留上一次成功的值）；`parse_options` 已在進入 `PARSING` 時寫入，失敗後仍保留（讓使用者重開記錄時選項還在）。
   - 先前成功解析過的記錄再次 parse（僅未 signoff 者可以）：失敗時狀態同樣退回 `UPLOADED`，但**保留**上一次成功的 `parsed_result`（使用者的編輯內容不因一次失敗的重解析而消失）；`GET /import/{id}` 仍可讀到它；但記錄已回到 `UPLOADED`，要繼續編輯或 signoff 須再成功解析一次。
 - **成功 200**：`ParseResultResponse`（欄位逐一說明見 §3.3.6）：
 
@@ -389,7 +444,7 @@ UPLOADED ──parse──▶ PARSING ──成功──▶ PARSED ──PUT res
 | 409 | `解析中，請稍候` | `{status:"PARSING"}` | 狀態為 PARSING 時再 parse（含同一筆的並發呼叫） |
 | 409 | `已 signoff，不可重新解析` | `{signedOffBy,signedOffAt}` | |
 | 409 | `匯入記錄狀態不允許此操作` | `{action:"parse",status}` | IMPORTED／REJECTED |
-| 422 | `解析結果未通過有界閘` | `errors[]` 每項 `{field,message,gate,detail,location?}`（**列出全部違規**）；`details={path}` | §3.3.5 |
+| 422 | `解析結果未通過有界閘` | `errors[]` 每項 `{field,message,gate,detail,location?}`（**列出全部違規**）；`field`＝`location`（沒有 location 的閘退回**閘名**，例：`brain_failed`、`brain_unsupported`），`message`＝`detail`（B1-3；`ApiError.FieldError.ofGate`）；`details={path}` | §3.3.5 |
 | 422 | `SDD 規格檢查未通過` | `details={bridgeReason,detail}`；`errors=[{field:"specDir",message}]` | 規格存在但被 Bridge 拒（`spec_not_frozen`／`spec_tainted`／`spec_format_version_unsupported`／`spec_ambiguous`；明示 `specDir` 時 `spec_not_found` 與路徑消毒失敗亦同） |
 | 502／504 | `引擎橋接服務無法連線`／`引擎橋接服務逾時` | | 路徑 A（明示 specDir）或 C 的 Bridge 不可達 |
 | 401／403／429 | 通用 | | |
@@ -400,7 +455,7 @@ UPLOADED ──parse──▶ PARSING ──成功──▶ PARSED ──PUT res
 - **Request**（`EditParsedResultRequest`）：`{ "parsedResult": ParsedResult }`。`project` 與 `goals` 必填；`path`／`aiModel`／`tokenUsed`／`reasoning`／`draftIds`／`specDigest` 為伺服器擁有，**請求帶了也忽略**。
 - **整樹覆寫規則**：陣列順序即排序，`sortOrder` 由伺服器重編為 0 起連續整數；每個目標的 `key` 在整棵樹內唯一（前端新增目標時自行產生，例如 `g-<短 uuid>`）；`dependsOn` 引用其他目標的 `key`。
 - **驗證順序**：① 400 結構（缺必填欄位或型別錯誤——含任務的 `name`／`description` 為 null 或缺欄位、長度、`goals` 為空、某目標 `tasks` 為空、目標的 `name` 空白、目標與任務的 `passCriteria` 空白）→ ② 400 消毒（`evaluatorCommand` 含禁用字元 `` !`><~$&; `` → reason `命令含禁用字元`＋`details.violations`；`expectedOutputRegex` 無法編譯；與 Phase 2 任務建立同規則）→ ③ 422 有界閘（§3.3.5，列出全部違規）。**任務的 `name` 或 `description` 為空白字串不在 ① 擋**，一律交給 ③ 的 `empty_prompt` 閘（與 parse 路徑同一套，位置 `goals[i].tasks[j].name`／`.description`；AR-21）。
-- **效果**：狀態 `REVIEWING`；**撤銷既有 signoff**（`signedOff=false`、`signedOffBy／At` 清空）；回 `ParseResultResponse`（`errors=[]`）。
+- **效果**：狀態 `REVIEWING`；**撤銷既有 signoff**（`signedOff=false`、`signedOffBy／At` 清空）；記錄的 `warnings` 以重算後的值覆寫（只含仍成立者，V8，§0.5）；回 `ParseResultResponse`（`errors=[]`）。
 - **錯誤**：404；409 `匯入記錄狀態不允許此操作`（`action:"editResult"`，僅 PARSED／REVIEWING 可編輯）；400；422 `解析結果未通過有界閘`；401／403／429。
 
 #### 1.1.5 `POST /api/v1/import/{id}/signoff`　🔴 人工 signoff　〔API-SGN-01／US-I-09〕
@@ -447,7 +502,7 @@ UPLOADED ──parse──▶ PARSING ──成功──▶ PARSED ──PUT res
 
 #### 1.1.9 `GET /api/v1/import/{id}`　查詢詳情（補）　〔API-IMP-06／US-I-03〕
 
-- **角色**：VIEWER。**成功 200**：`ImportRecordDetailResponse`＝`ImportRecordResponse`（含 `parsePath`、`lastParseErrors`，儲存位置見 §0.5 V5）＋ `sourceContent` ＋ `parsedResult`（第一次成功解析前為 null）。錯誤：400（id 格式）、404、401／429。
+- **角色**：VIEWER。**成功 200**：`ImportRecordDetailResponse`＝`ImportRecordResponse`（含 `parsePath`、`lastParseErrors`，儲存位置見 §0.5 V5）＋ `sourceContent` ＋ `parsedResult`（第一次成功解析前為 null）＋ **`warnings[]`**（`ParseWarning[]`，與 `ParseResultResponse.warnings` 同形；最近一次成功的 parse 或 `PUT result` 的結果，沒有就是 `[]`，**永遠出現**）＋ **`parseOptions`**（`ParseOptions`，最近一次 parse 請求的選項；從未 parse 過為 null）。後兩者為 v1.2（C-10；儲存位置見 §0.5 V8）：前端重開記錄時據此還原黃色解析提示與解析選項（§4.1 I-12、I-18；取代 v1.1 的已知限制 F1-1／F1-2）。列表 `GET /import` 的項目不含這兩者。錯誤：400（id 格式）、404、401／429。
 
 ---
 ### 1.2 專案執行（Phase 4）
@@ -479,10 +534,10 @@ UPLOADED ──parse──▶ PARSING ──成功──▶ PARSED ──PUT res
 | 2 | Bean Validation（等級／預算／mode／ids 格式） | 400 | （無） | `errors[]` |
 | 3 | 專案狀態為 `EXECUTING` | 409 | `專案正在執行中` | `{projectId, runId}` |
 | 4 | 專案狀態為 `ARCHIVED`（`DRAFT`／`READY`／`FAILED`／`COMPLETED` 皆可進入後續檢查） | 409 | `專案狀態不允許執行` | `{status}` |
-| 5 | 專案、所選目標、所選任務皆 `signedOff=true` | 409 | `未經人工審批的草案不可執行`（message：`草案未經人工審批，禁止執行`） | `{unsignedProjectId?, unsignedGoalIds[], unsignedTaskIds[]}`（專案本身已 signoff 時省略 `unsignedProjectId`，`details` 不輸出 null，§0.2） |
+| 5 | 專案、**全部**未刪目標、**全部**未刪任務皆 `signedOff=true`（**整案**檢查，不是只看所選範圍：`SELECTED` 時範圍外的未簽任務也會擋；這樣才能同時滿足 E2E-02 步驟 5「無效範圍＋仍有未簽 → 409 先於範圍檢查」；B2-1，`ExecuteProjectService.requireSignedOff`） | 409 | `未經人工審批的草案不可執行`（message：`草案未經人工審批，禁止執行`） | `{unsignedProjectId?, unsignedGoalIds[], unsignedTaskIds[]}`（專案本身已 signoff 時省略 `unsignedProjectId`，`details` 不輸出 null，§0.2） |
 | 6 | `goalIds`／`taskIds` 皆屬於該專案 | 400 | `所選範圍不合法` | `{invalidGoalIds[], invalidTaskIds[]}` |
 | 7a | `SELECTED` 內有已 `COMPLETED`／`SKIPPED` 的目標或任務 | 409 | `所選任務或目標已完成` | `{goalIds[], taskIds[]}` |
-| 7b | 所選目標依賴了「未選且未完成」的目標 | 409 | `所選目標依賴未完成的前置目標` | `{missingGoalIds[]}` |
+| 7b | 所選目標依賴了「未選且未完成」的目標（**`COMPLETED` 與 `SKIPPED` 的前置目標都算已滿足**；審核 `SKIP`／`RETRY` 開的後續批次不做 7b；B2-2，`ExecutionPlanner.requireDependenciesAreSelectedOrDone`） | 409 | `所選目標依賴未完成的前置目標` | `{missingGoalIds[]}` |
 | 7c | 解析後沒有任何可執行任務 | 409 | `沒有可執行的任務` | — |
 | 8 | 目標依賴成環（防禦；Phase 2 已擋） | 409 | `依賴成環` | `{cycle[]}` |
 | 9a | 任一步驟 prompt（§3.4.3 樣板組好後）超過 20,000 字元 | 422 | `步驟 prompt 超過 20000 字元上限` | `{taskId, stepId, length, limit:20000}` |
@@ -512,7 +567,7 @@ UPLOADED ──parse──▶ PARSING ──成功──▶ PARSED ──PUT res
 #### 1.2.2 `GET /api/v1/projects/{projectId}/executions`　列出執行批次（補）　〔API-EXE-14／US-M-06〕
 
 - **角色**：VIEWER。查詢參數：`page,size`、`status`（`RunStatus`）、`sort`（`startedAt|runNumber`，預設 `startedAt,desc`）。
-- **成功 200**：`Page<ExecutionRunSummaryResponse>`。`tasksTotal`＝該批次 `dag` 的 TASK 節點數；`tasksCompleted`／`tasksFailed`＝該批次 `execution_steps` 中有 `COMPLETED`／`FAILED` 列的**相異任務數**；`successRate`＝`tasksCompleted ÷ (tasksCompleted+tasksFailed) × 100`（兩者皆 0 為 null）；`durationSec` 見 schema。
+- **成功 200**：`Page<ExecutionRunSummaryResponse>`。`tasksTotal`＝該批次 `dag` 的 TASK 節點數；`tasksCompleted`／`tasksFailed`＝該批次 `execution_steps` 中有 `COMPLETED`／`FAILED` 列的**相異任務數**；`successRate`＝`tasksCompleted ÷ (tasksCompleted+tasksFailed) × 100`（兩者皆 0 為 null）；`durationSec` 見 schema。**`bridgeStatus`**（`BridgeRunStatus`，可 null；v1.2，C-11，QA F2-4；與 `ExecutionRunDetailResponse.bridgeStatus` 同義）：列表**不為此欄位逐批呼叫 Bridge**——取 console-api 記憶體中該批次最近一則 `status` 事件的 Bridge 狀態（`RunRegistry.Runtime.bridgeStatus`，所以 `PAUSING`／`CANCELLING` 只在 console-api 仍消費該批次時可見，正是前端要顯示處理中晶片的情境）；記憶體沒有（批次已終態、console-api 重啟後尚未收到事件）時以 DB `status` 同名值補（六態都在 Bridge 八態之內）；僅 `status=RUNNING` 且記憶體也沒有時為 null（缺席）。前端的批次下拉與批次比較據此顯示 `PAUSING`／`CANCELLING` 晶片（取代 v1.1 只有詳情看得到的限制）。
 - **錯誤**：400（未知 status／sort）、404 專案、401／429。
 
 #### 1.2.3 `GET /api/v1/executions/{runId}`　查詢執行狀態　〔API-EXE-05／US-E-07、M-10〕
@@ -599,6 +654,7 @@ UPLOADED ──parse──▶ PARSING ──成功──▶ PARSED ──PUT res
 - **Request**（`ReviewRequest`）：`{ "decision": "APPROVE|REJECT|RETRY|SKIP", "comment": "≤2000 字元（選填）" }`。
 - **成功 204**（無本文）。`SKIP`，以及找不到還原點而改開後續批次的 `RETRY`，會另建後續批次（follow-up run），其 id 放在回應標頭 **`X-Follow-Up-Run-Id`**；其餘決定不出現該標頭。審核項狀態對映：`APPROVE→APPROVED`、`REJECT→REJECTED`、`RETRY→RETRIED`、`SKIP→SKIPPED`，寫入 `decided_by／decided_at／comment`。
 - **每個 `kind` 允許的決定與動作**見 §3.6.3（`ReviewRequestResponse.allowedDecisions` 即該表的資料化）。
+- 審核 `RETRY` 讓失敗任務 `retry_count+1`，與手動重試（§1.6.4）一樣**不受 `maxRetries` 限制**：`maxRetries` 是引擎自動重試的上限，人工介入不算。
 
 | HTTP | reason | details | 觸發 |
 |------|--------|---------|------|
@@ -624,9 +680,11 @@ UPLOADED ──parse──▶ PARSING ──成功──▶ PARSED ──PUT res
 | `runId` | uuid | 省略＝專案全部批次 | 必須屬於該專案，否則 404（訊息 `執行批次不存在或不屬於此專案：<id>`） |
 | `from` | date-time（帶 offset） | `to` 之前 24 小時 | 必須早於 `to`，否則 400 `時間範圍不合法`（`details={from,to}`） |
 | `to` | date-time（帶 offset） | 現在 | 視窗上限 366 天，超過同為 400 `時間範圍不合法` |
-| `bucket`（僅趨勢） | `HOUR`｜`DAY` | 視窗 ≤ 48 小時用 `HOUR`，否則 `DAY` | 桶以 UTC 為界；視窗內桶數超過 1,000 回 400 `時間範圍不合法`（請改用 `DAY`） |
+| `bucket`（僅趨勢） | `HOUR`｜`DAY` | 視窗 ≤ 48 小時用 `HOUR`，否則 `DAY` | 桶以 UTC 為界；視窗內桶數超過 1,000 回 400 `時間範圍不合法`（請改用 `DAY`）。**前端圖表以瀏覽器本機時區顯示桶標籤**（桶起點仍是 UTC，跨日界附近的 `DAY` 標籤可能與伺服器的日界差一天；F2-1，`lib/domain/metrics.ts` 的 `formatBucketLabel`；不登缺陷） |
 
 **Bridge**：監控端點不呼叫 Bridge（資料全來自 DB），唯一例外是 `agentAvailability`（取自 console-api 對 Bridge 的健康探測環，§3.1）。
+
+**時間參數的容錯（B2-6）**：查詢字串裡**未編碼**的 `+`（例：`from=2026-10-15T16:40:00+08:00`）會被解碼成空白；後端把結尾的「空白＋`HH:mm`」還原成 `+HH:mm`（`adapter/in/web/TimeParams.parse`），而不是回令人困惑的 400。正式呼叫端仍應把 `+` 編成 `%2B`；`task-totals`（§1.3.8）的 `from`／`to` 套用同一規則。
 
 所有監控端點共通錯誤：404 專案不存在、404 `runId` 不屬於該專案、400（參數格式）、401／429。聚合公式、前一視窗比較與日誌衍生規則統一見 **§3.8**。
 
@@ -684,7 +742,7 @@ UPLOADED ──parse──▶ PARSING ──成功──▶ PARSED ──PUT res
 
 #### 1.3.7 `GET …/report?format=csv|pdf`　〔API-MON-07／US-M-07〕
 
-- **角色**：VIEWER。查詢參數：`format`（`csv|pdf`，預設 `csv`）、`runId`、`from`、`to`。**不包 ApiResult 封包**。呼叫端須送 `Accept: text/csv`（或 `*/*`）。
+- **角色**：VIEWER。查詢參數：`format`（`csv|pdf`，預設 `csv`）、`runId`、`from`、`to`。**不包 ApiResult 封包**。呼叫端 CSV 送 `Accept: text/csv`（或 `*/*`）；PDF 的 `Accept` 見下方 PDF 條。
 - **CSV（必做）**：`Content-Type: text/csv; charset=UTF-8`；`Content-Disposition: attachment; filename="monitor-report-<projectId 前 8 碼>-<yyyyMMdd-HHmm>.csv"`（時間為 UTC）；UTF-8 含 BOM、行尾 CRLF、欄位依 RFC 4180 引號跳脫；**CSV 注入防護**：任何以 `=`、`+`、`-`、`@` 開頭的文字欄位在前面補一個單引號 `'`。內容為連續的區段，每段以 `#section,<名稱>` 行起頭、下一行是欄名、之後是資料列、段與段之間空一行：
 
 ```
@@ -704,8 +762,40 @@ goalName,taskName,status,retryCount,maxRetries,actualTokens,startedAt,completedA
 createdAt,severity,rule,subject,message,acknowledged,acknowledgedBy,acknowledgedAt
 ```
 
-- **PDF**：目標格式為同樣四段內容的 `application/pdf`（openhtmltopdf），**W5 之前一律回 501**，reason `PDF 報表尚未提供（W5）`。
-- 錯誤：400 `不支援的報表格式`（`details={format,supported:["csv","pdf"]}`）、400 `時間範圍不合法`、404、501、401／429。
+- **區段取數規則（B2-6；`MonitorService.report`）**：`runs` 含**所有 `started_at < to` 的批次**（不論是否在視窗內結束；有帶 `runId` 時只有該批次）；`tasks` 是範圍內未軟刪任務的現況；`alerts` 只含**視窗內**（`created_at ∈ [from,to)`）的告警。
+- **PDF（v1.2，C-4；US-M-07／API-MON-07）**：`Content-Type: application/pdf`；`Content-Disposition: attachment; filename="monitor-report-<projectId 前 8 碼>-<yyyyMMdd-HHmm>.pdf"`（規則同 CSV，時間為 UTC）。內容是**與 CSV 相同的四個區段**（`summary`／`runs`／`tasks`／`alerts`，欄位與順序同上方 CSV，null 顯示 `—`；取數規則同上），另加標題（專案名稱＋「監控報表」）、時間範圍（`from`～`to`）、範圍（`runId` 或「全部批次」）與產生時間（UTC）；PDF 是純文字呈現，不做 CSV 的注入防護引號。以既有相依 **Apache PDFBox 3** 產生（附錄 D.4；**不新增相依**，v1.1 寫的 openhtmltopdf 作廢）。中文需內嵌 OFL 授權的 CJK 字型（建議 Noto Sans TC 靜態 Regular，字型檔與授權文字放 `backend/src/main/resources/fonts/`，以 `PDType0Font.load` 載入）；字型沒有的字元一律以 `?` 取代，**不得讓整份報表失敗**；實作環境確實取不到 CJK 字型時，允許退回英文欄位標籤（須在交卷〈沒做／偏離〉註明）。呼叫端 CSV 送 `Accept: text/csv`、PDF 送 `application/pdf`（皆可用 `*/*`），後端以 `format` 為準、**不因 Accept 不符回 406**。原 `501`／`PDF 報表尚未提供（W5）` 退役（§0.3 第 6 點）。
+- 錯誤：400 `不支援的報表格式`（`details={format,supported:["csv","pdf"]}`）、400 `時間範圍不合法`、404、401／429。
+
+#### 1.3.8 `GET /api/v1/monitor/task-totals`　全域任務總計（v1.2，C-1）　〔API-MON-08／US-M-03；QA DEF-AC-009〕
+
+- **角色**：VIEWER 以上。**Bridge**：無（資料全來自 DB）。取代 v1.1 §4.6 G-G3 的做法（前端對每個專案各打一次 `task-trend` 再加總：單一總覽分頁穩態每分鐘約 31 次請求，用掉三成限流額度，專案數 ≥ 30 後一次快速導覽就會撞 429）：儀表板「本週完成」改打這一支，每 60 秒 1 次。
+- **查詢參數**：
+
+| 參數 | 型別 | 必填 | 規則 |
+|------|------|:----:|------|
+| `from` | date-time（帶 offset） | ✅ | 視窗起點（含）。缺漏或格式不合 → 400（`errors[].field=from`）；未編碼 `+` 的容錯同 §1.3 |
+| `to` | date-time（帶 offset） | — | 視窗終點（不含）；預設現在 |
+
+- **視窗規則**：`from` 必須早於 `to`，且 `to − from` **不可超過 92 天**；違反 → **400**，`errors=[{field:"to", message:…}]`，`reason=時間範圍不合法`（沿用 §1.3 既有的時間範圍 reason，不另立常數；主控裁決 C-1 的「400 `validation_error`（`errors[].field=to`）」即此形態，見 §6.5.1），`details={from,to,maxDays:92}`。
+- **成功 200**：`ApiResult<TaskTotalsResponse>`，`data`＝`{ from, to, started, completed, failed, retried, projectsCounted }`：
+  - `from`／`to`：實際採用的視窗（`to` 省略時為伺服器處理當下的時間）。
+  - `started`／`completed`／`failed`／`retried`：`console.execution_steps` 中 `timestamp ∈ [from, to)` 且 `status` 為 `STARTED`／`COMPLETED`／`FAILED`／`RETRYING` 的**列數**——與 §1.3.3 `task-trend` **同一張表、同一判準**（只計所屬任務未軟刪的列），只是不分桶、跨全部**未封存且未軟刪除**的專案（`projects.status<>'ARCHIVED'` 且未軟刪，與 `projectCompletionRate` 的分母同一判準，§3.8.1）。
+  - `projectsCounted`：上述專案中，在視窗內至少有一列被計入四個計數之一的專案數。
+- **不變量（BE 以整合測試釘住）**：同一個視窗，對每個「未封存且未軟刪除」的專案各呼叫一次 `task-trend`（不帶 `runId`；`bucket=DAY`，免得 92 天視窗的 `HOUR` 桶數超過 1,000 而被 400）、把所有桶的 `started`／`completed`／`failed`／`retried` 各自加總，**逐欄等於**本端點的同名欄位。
+- **說明**：`completed` 是步驟事件的列數，同一任務被還原重跑會重複計（與 `task-trend` 同）。儀表板「本週完成」顯示 `completed`：`from`＝本週一 00:00（瀏覽器本機時區）轉成 ISO-8601、`to` 省略。
+
+```json
+{ "code":200, "message":"success", "data":{
+    "from":"2026-10-12T00:00:00Z", "to":"2026-10-15T08:40:00Z",
+    "started":42, "completed":40, "failed":2, "retried":3, "projectsCounted":5 },
+  "timestamp":"2026-10-15T16:40:00+08:00", "traceId":"…" }
+```
+
+| HTTP | reason | details／errors | 觸發 |
+|------|--------|-----------------|------|
+| 400 | （Bean Validation，reason 省略） | `errors=[{field:"from",message}]` | `from` 缺漏或格式不合；`to` 格式不合時 `field=to` |
+| 400 | `時間範圍不合法` | `errors=[{field:"to",message}]`；`details={from,to,maxDays:92}` | `from` 不早於 `to`，或視窗超過 92 天 |
+| 401／429 | 通用 | | |
 
 ### 1.4 通知
 
@@ -728,12 +818,12 @@ createdAt,severity,rule,subject,message,acknowledged,acknowledgedBy,acknowledged
 
 #### 1.5.1 `GET /api/v1/settings`　〔API-SET-01／US-S-01、04、08〕
 
-- **角色**：VIEWER；`reveal=true` 需 ADMIN（其他角色 403，reason `僅 ADMIN 可揭露敏感參數`）。成功 200：`Map<category, List<ConfigResponse>>`，分類順序 `model,agent,execution,monitor,autoclaude,sdd`，分類內依附錄 C 順序。
+- **角色**：VIEWER；`reveal=true` 需 ADMIN（其他角色 403，reason `僅 ADMIN 可揭露敏感參數`）。成功 200：`Map<category, List<ConfigResponse>>`，分類順序 `model,agent,execution,monitor,autoclaude,sdd`，分類內依附錄 C 順序。`reveal` 不是布林值（例：`reveal=abc`）→ **400**：`message=參數 reveal 的值格式不正確`、`errors=[{field:"reveal",…}]`、reason 省略（B1-4；Spring 的型別不符統一走 `GlobalExceptionHandler.handleTypeMismatch`，與其他端點的路徑／查詢參數格式錯誤同一格式）。`reveal=true` 以**分類**為單位（沒有單鍵揭露端點），每次揭露寫一筆審計（F1-5，§4.4 S-05）。
 - `ConfigResponse`：`id, category, key, value, valueType, defaultValue, description, isEncrypted, hasValue, validationRule, options, min, max, impactNote, effect, updatedAt, updatedBy`（`options`／`min`／`max`／`effect` 來自附錄 C 的 `ConfigCatalog`，`impactNote` 讀 `system_configs.impact_note`（V5 依附錄 C 寫入，§0.5）；`effect∈ENGINE|CONSOLE|STORED_ONLY|UNVERIFIED`，誠實標示該參數是否真的影響引擎）。
 
 #### 1.5.2 `GET /api/v1/settings/{category}`　〔API-SET-02〕
 
-- 同 1.5.1，只回一個分類（`List<ConfigResponse>`）；分類不在六個之內 → 404（訊息 `設定分類不存在：<category>`）。
+- 同 1.5.1，只回一個分類（`List<ConfigResponse>`）；分類不在六個之內 → 404（訊息 `設定分類不存在：<category>`）；`reveal` 非布林同樣 **400**（B1-4）。
 
 #### 1.5.3 `PUT /api/v1/settings/{category}/{key}`　〔API-SET-03、10／US-S-02、08〕
 
@@ -745,7 +835,7 @@ createdAt,severity,rule,subject,message,acknowledged,acknowledgedBy,acknowledged
 | 1 | 鍵存在 | 404 | （訊息）`設定鍵不存在：<category>.<key>` | — |
 | 2 | 型別、`validationRule`、`min`／`max`、`options` | 400 | `參數值不符合型別或驗證規則` | `errors=[{field:"value",message:"需為整數（1～10）"}]`；`details={valueType,validationRule,min,max,options}` |
 | 3 | `model.apiUrl`：SEC-04 規則 1～5（§1.5.7：格式、scheme、userinfo、IP 字面類別、allowlist；**不做 DNS**；loopback 字面只有 `allow-loopback=true` 且在 allowlist 內才放行）。值必須是「完整的 chat-completions 端點 URL」，後端不替它補路徑 | 400 | `目標位址未通過 SSRF／allowlist 檢查` | `{host,violation}` |
-| 4 | token_guard 單鍵：讀對端鍵現值，`halt > compact` 且各自在範圍內 | 400 | `halt_threshold_pct 必須大於 compact_threshold_pct` | `{compactThresholdPct,haltThresholdPct}`（以更新後的值為準） |
+| 4 | token_guard 單鍵：讀對端鍵現值，`halt > compact` 且各自在範圍內 | 400 | `halt_threshold_pct 必須大於 compact_threshold_pct` | `{compactThresholdPct,haltThresholdPct}`（以更新後的值為準）；`errors=[{field:"value",message:"必須大於 compactThresholdPct"}]`——**單鍵端點一律 `field=value`**（B1-6；`SettingsService.update` 的 `requireTokenGuardOrder(…, "value")`；單鍵重置與分類重置同），群組端點 §1.5.4 才是 `haltThresholdPct` |
 | 5 | 加密鍵未帶 `confirm=true` | 409 | `敏感參數更新需二次確認（confirm=true）` | `{category,key}` |
 
 - **成功 200**：`ConfigResponse`（加密值遮罩）。值未變更（與現值相同）仍回 200，但**不寫歷史**。
@@ -776,10 +866,10 @@ createdAt,severity,rule,subject,message,acknowledged,acknowledgedBy,acknowledged
 
 | # | 規則 | `details.violation` |
 |---|------|---------------------|
-| 1 | URL 可解析；無空白／控制字元／反斜線；連接埠合法；host 只能是 ASCII（含非 ASCII 的 IDN 一律拒絕）；**IP 字面必須是標準寫法**（IPv4 點分十進位四段、IPv6 標準寫法）——十進位整數、十六進位、八進位、縮寫（如 `127.1`）一律拒絕 | `malformed_url` |
+| 1 | URL 可解析；無空白／控制字元／反斜線；連接埠合法；host 只能是 ASCII（含非 ASCII 的 IDN 一律拒絕）；**IP 字面必須是標準寫法**（IPv4 點分十進位四段、IPv6 標準寫法）——十進位整數、十六進位、八進位、縮寫（如 `127.1`）一律拒絕；**host 不可為空**（`file:///x`、`http:///x` 這類空 host 一律 `malformed_url`——規則 1 先於規則 2，所以不會得到 `scheme`；B1-2，`OutboundUrlPolicy.checkStatic`） | `malformed_url` |
 | 2 | scheme 只能 `http`／`https` | `scheme` |
 | 3 | 不得含 userinfo（`user:your_password_here@host` 這種寫法一律拒絕） | `userinfo` |
-| 4 | host 為 **IP 字面**（已過 1 的標準寫法）時分類：`127.0.0.0/8`、`::1`→`loopback`；`169.254.0.0/16`（含 `169.254.169.254`）、`fe80::/10`→`link_local`；`10/8`、`172.16/12`、`192.168/16`、`fc00::/7`、`100.64/10`、`0.0.0.0/8` 等→`private_ip`。`link_local`、`private_ip` **任何 profile 都拒絕，即使該字面列在 allowlist**；`loopback` 預設拒絕，只有「`console.security.allow-loopback=true`（僅 e2e／test／本機 profile）**且**該字面完全等於 allowlist 某項」才放行 | `loopback`／`link_local`／`private_ip` |
+| 4 | host 先小寫、去尾端 `.`（IP 字面 `127.0.0.1.` 視同 `127.0.0.1`，**仍套分類與 allowlist**；B1-2）；host 為 **IP 字面**（已過 1 的標準寫法）時分類：`127.0.0.0/8`、`::1`→`loopback`；`169.254.0.0/16`（含 `169.254.169.254`）、`fe80::/10`→`link_local`；`10/8`、`172.16/12`、`192.168/16`、`fc00::/7`、`100.64/10`、`0.0.0.0/8` 等→`private_ip`。`link_local`、`private_ip` **任何 profile 都拒絕，即使該字面列在 allowlist**；`loopback` 預設拒絕，只有「`console.security.allow-loopback=true`（僅 e2e／test／本機 profile）**且**該字面完全等於 allowlist 某項」才放行 | `loopback`／`link_local`／`private_ip` |
 | 5 | host（小寫、去尾端 `.`）必須與 `console.security.outbound-allowlist` 的某項**完全相等** | `not_in_allowlist` |
 | 6 | 僅限名稱 host：DNS 解析所有 A／AAAA，**任一**位址落在 `link_local`／`private_ip` 類 → 拒絕（名稱解析到內網＝DNS rebinding 型態，**即使該名稱在 allowlist 內**）；落在 `loopback` 類同樣拒絕，除非 `console.security.allow-loopback=true`（已過 5，即該名稱在 allowlist 內）。測試環境以 `console.security.test-dns-overrides` 讓解析結果可決定地重現 | `dns_rebinding` |
 
@@ -830,15 +920,76 @@ createdAt,severity,rule,subject,message,acknowledged,acknowledgedBy,acknowledged
 #### 1.5.10 `POST /api/v1/settings/import`　〔API-SET-09／US-S-06／NFR-SEC-05〕
 
 - **角色**：ADMIN。`multipart/form-data`，欄位 `file`（≤ 1 MB；內容為 `version=1` 的 `SettingsExportDocument`）。
-- **處理**：逐筆驗證（型別／規則／範圍／選項／SEC-04 allowlist，同 1.5.3 的 2、3）；值為 `<encrypted>` 的項目**略過**（計入 `skipped`）；值與現值相同者亦計 `skipped`；未知的 `category.key` 計入 `errors`（`reason:"設定鍵不存在"`）。通過者在**同一交易**套用並各寫歷史。token_guard 兩鍵以**合併後的最終值**做 `halt > compact` 跨鍵校驗，不滿足則兩鍵皆列入 `errors`（`reason:"halt_threshold_pct 必須大於 compact_threshold_pct"`）且都不套用。
+- **處理**（v1.2，C-6；QA DEF-AC-002、B1-7；實作＝`SettingsService.importSettings`）：同一個鍵在檔內出現多次以最後一筆為準；對每一項**依下列固定順序**判定，先成立者勝：
+  1. 未知的 `category.key` → `errors`（`reason:"設定鍵不存在"`）；
+  2. 值為 `<encrypted>` 佔位 → **略過**（計 `skipped`）；
+  3. 該鍵是加密鍵、但給的是非佔位值（明文）→ 列入 `errors`、**不套用**（`reason` 同 1.5.3 第 5 項：`敏感參數更新需二次確認（confirm=true）`；匯入不能繞過二次確認）；
+  4. **值與現值相同 → 計 `skipped`，不做任何值規則與 allowlist 驗證**。匯出後原樣匯入因此一定 `errors=[]`，即使現值的 `model.apiUrl` 主機不在 allowlist（v1.1 的實作先驗證、後比值，是 DEF-AC-002 的根因：e2e 的 allowlist 不含預設的 `api.minimax.io`，匯出再匯入就出現 `model.apiUrl` 的 errors）；
+  5. 驗證（型別／規則／範圍／選項／SEC-04 allowlist，同 1.5.3 的 2、3）不過 → `errors`；
+  6. 通過者成為候選。
+  token_guard 兩鍵以**「候選＋現值」合併後的最終值**做 `halt > compact` 跨鍵校驗，不滿足則兩鍵皆列入 `errors`（`reason:"halt_threshold_pct 必須大於 compact_threshold_pct"`）且都不套用。候選在**同一交易**套用並各寫歷史（計 `applied`）。
 - **成功 200**：`ImportSettingsResponse{applied,skipped,errors:[{category,key,reason}]}`（部分失敗仍是 200）。
 
 | HTTP | reason | details | 觸發 |
 |------|--------|---------|------|
-| 400 | `設定檔格式錯誤` | `{problem:"invalid_json\|missing_configs\|unsupported_version"}` | 不是 JSON／缺 `configs`／`version≠1` |
+| 400 | `設定檔格式錯誤` | `{problem:"invalid_json\|missing_configs\|unsupported_version"}` | 不是 JSON（`invalid_json`）／`version≠1`（`unsupported_version`）／缺 `configs` 陣列，**或其中某一項的結構不合法**（不是 `{category,key,value}`、`value` 缺漏或為物件／陣列；一律 `missing_configs`；B1-7，`SettingsFileReader.read`） |
 | 413 | `設定檔超過 1MB 上限` | `{limitBytes:1048576}` | |
-| 415 | `只接受 JSON 設定檔` | | 非 `.json` 或非 JSON 內容型別 |
+| 415 | `只接受 JSON 設定檔` | | 副檔名不是 `.json`，**或**內容型別不含 `json`／`octet-stream`（內容型別為空放行；B1-7，同一支 `SettingsFileReader.read`） |
 | 401／403／429 | 通用 | | |
+
+### 1.6 專案復原與 Phase 2 補充（v1.2）
+
+本節的端點都屬 Phase 1+2 的資源（專案／目標／任務），其基本契約在 PRD §7.1.1～§7.1.3 與 Phase 2 實作；v1.2 只列**新增或改變**的部分。
+
+#### 1.6.1 `POST /api/v1/projects/{id}/restore`　復原軟刪除的專案（v1.2，C-3）　〔API-PRJ-06／NFR-9.3-04〕
+
+- **角色**：OPERATOR 以上（VIEWER → 403 `ACCESS_DENIED`）。無 body。**Bridge**：無。
+- **前置**：專案存在、`is_deleted=true`，且 `deleted_at` 在保留期內（`deleted_at ≥ 現在 − console.retention.soft-delete-days`，預設 30 天，§1.6.5、附錄 D.2）。保留期**與清除排程是否開啟無關**：期外的專案即使還留在資料庫，也不可經 API 復原。
+- **處理**（單一交易）：
+  1. 專案：`is_deleted=false`、`deleted_at=NULL`、`status` 還原為 `status_before_delete`（升級前就已軟刪、該欄為 NULL 者：未 signoff → `DRAFT`，已 signoff → `READY`）、`status_before_delete=NULL`、`updated_at=now`；`signedOff` 等其餘欄位原樣保留。
+  2. **同一次刪除連帶軟刪的目標與任務**：`is_deleted=false`、`deleted_at=NULL`——辨識方式＝其 `deleted_at` **等於**專案的 `deleted_at`（§0.5 V9：刪除專案時三者寫同一個時間值）。**單獨先刪除的目標／任務**（`deleted_at` 與專案的不同）維持已刪除，不隨專案回來。
+  3. `goal_dependencies`、`execution_runs` 與其步驟／檢查點／審核項／告警等不曾被刪除，原樣可見；目標／任務的 `status`、`retry_count` 等欄位在刪除時就沒動過，原樣保留。
+  4. 審計：`audit_log`（`action=project.restore`、`entity=project:<id>`）。
+- **成功 200**：`ApiResult<ProjectDetailResponse>`（Phase 2 同名 schema：專案全部欄位＋目標摘要清單，只含復原後未刪的目標）。
+
+| HTTP | reason | details | 觸發 |
+|------|--------|---------|------|
+| 400 | （訊息）`參數 id 的值格式不正確` | | 路徑參數不是 UUID |
+| 403 | `ACCESS_DENIED` | | VIEWER |
+| 404 | （訊息）`專案不存在或已清除：<id>` | | 沒有這個 id，或已被清除排程實體刪除 |
+| 409 | `project_not_deleted` | `{projectId, status}` | 專案目前沒有被軟刪除 |
+| 409 | `restore_window_expired` | `{projectId, deletedAt, retentionDays}` | `deleted_at` 早於「現在 − 保留期」 |
+| 401／429 | 通用 | | |
+
+#### 1.6.2 `GET /api/v1/projects?deleted=true`　列出已軟刪除的專案（v1.2，C-3）
+
+- Phase 2 既有的 `GET /api/v1/projects` 新增查詢參數 `deleted`（布林，預設 `false`）：`true`＝**只列軟刪除的專案**（`is_deleted=true`）；`false`／省略＝只列未軟刪除者（原行為不變）。其餘參數（`page,size,q,status,sort`）照常；`sort` 白名單不變、預設 `updatedAt,desc`——軟刪除當下會更新 `updated_at`，所以「已刪除」清單預設即「最近刪除的在前」。
+- **角色**：`deleted=true` 需 OPERATOR 以上，VIEWER → **403** `ACCESS_DENIED`（由 controller 檢查；`deleted=false` 仍是 VIEWER 以上）。`deleted` 不是布林值 → 400（格式同 B1-4）。
+- 列表項 `ProjectSummaryResponse` 新增 **`deletedAt`**（date-time；只有 `deleted=true` 的列表帶值，其餘缺席）。保留期已過（`restore_window_expired`）的專案**仍會列出**（資料還在，清除排程預設又是關的）；前端可在按「復原」得到 409 後提示，是否過期也可由 `deletedAt` 與保留期推算，列表不另帶欄位。
+
+#### 1.6.3 `DELETE /api/v1/goals/{id}`、`DELETE /api/v1/tasks/{id}`　執行中刪除（v1.2，C-8；QA O-05）
+
+- Phase 2 既有端點（204；目標含 `RUNNING` 任務、任務本身 `RUNNING` 時 409 `RUNNING 狀態的任務不可刪除`，不變）。v1.2 新增：**所屬專案有進行中批次時，刪除目標或任務一律 409**，`reason=project_executing`，`details={projectId, runId}`（任一進行中批次的 id）。
+- 「進行中批次」＝該專案存在 `execution_runs.status ∈ {INITIALIZING, RUNNING, PAUSED}` 的批次——即 Bridge 的 `RUNNING`／`PAUSING`／`PAUSED`／`CANCELLING`（`PAUSING`／`CANCELLING` 折為 `RUNNING`，§0.6）。理由：批次進行中刪除「尚未開始」的目標／任務，批次仍照原 playbook 跑完，結果與畫面對不上（O-05）。
+- 檢查順序：404 → **`project_executing`** → 既有的 `RUNNING 狀態的任務不可刪除`（兩者並存時先回前者，因為它涵蓋更廣）。
+- 專案本身的刪除（`DELETE /api/v1/projects/{id}`）維持 Phase 2 規則（`EXECUTING` → 409 `EXECUTING 狀態的專案不可刪除`），不變。
+- 前端：顯示原因（附錄 B 的 `project_executing`）；批次結束後即可再刪。
+
+#### 1.6.4 `POST /api/v1/tasks/{id}/retry`　手動重試明文（v1.2，C-9；QA O-04）
+
+- Phase 2 既有端點（OPERATOR；D-34）。行為不變：只允許 `FAILED`／`ESCALATED`（否則 409 `目前狀態不可重試`）；`retryCount+1`、狀態轉 `QUEUED`；**不啟動 run**。
+- **v1.2 明文：手動重試不受 `maxRetries` 限制。** `maxRetries` 是引擎對「自動重試」的上限；人工介入的重試不算自動重試，所以 `retryCount` 可大於 `maxRetries`（例：ESCALATED 任務按「重試」後 `retryCount=3`、`maxRetries=1`）。審核 `RETRY` 同理（§1.2.11）。
+- 前端文案（主控裁決）：toast 由「重試 N / M」改為 **「手動重試第 N 次（不計入自動重試上限 M）」**，`N`＝回應的 `retryCount`、`M`＝`maxRetries`。
+
+#### 1.6.5 軟刪除保留期與清除排程（v1.2，C-3；ADR-001 D19）
+
+| 屬性 | 預設 | 說明 |
+|------|------|------|
+| `console.retention.soft-delete-days` | `30` | 軟刪除專案可復原的天數（≥ 1）；PRD NFR-9.3-04「所有刪除操作皆為軟刪除，支援 30 天內復原」 |
+| `console.retention.purge-enabled` | **`false`** | 是否註冊每日清除排程。**預設關閉**：實體刪除不可逆，部署者必須明確開啟；未開啟時軟刪除資料只會累積、不會消失 |
+
+- **清除排程**（`purge-enabled=true` 時才註冊；每日一次，時間由實作決定）：實體刪除 `deleted_at < 現在 − soft-delete-days` 的**專案及其整棵子資料**（目標、任務、目標依賴、執行批次與其步驟／檢查點／審核項／告警／token 樣本；`import_records.project_id` 置 NULL），每個專案一個交易，單一專案失敗只記 WARN、不影響其他專案；audit 記 `project.purge`（subject `system`）。**範圍只有專案層級**：在存活專案內單獨軟刪除的目標／任務不被清除（它們隨其專案被清除時才一併實體刪除）。
+- 有單元測試（排程邏輯可注入時鐘；`purge-enabled=false` 時不註冊排程）。
 
 ---
 ## 2. SSE 契約（`API-SSE-01～03`／`US-E-03、07`）
@@ -854,7 +1005,7 @@ createdAt,severity,rule,subject,message,acknowledged,acknowledgedBy,acknowledged
 | 查無 run | 404 JSON（訊息 `執行批次不存在或已刪除：<id>`） |
 | 回應標頭 | `Content-Type: text/event-stream;charset=UTF-8`、`Cache-Control: no-cache, no-store`、`X-Accel-Buffering: no` |
 | 框架 | 第一個框架是 `retry`（3000）加空行；之後每個事件由 `id`、`event`、`data` 三個欄位加空行組成；`data` 為 UTF-8、不含換行的單行 JSON（`ensure_ascii=false` 的緊湊 JSON）。**欄位名後面的冒號之後是否跟一個空白不拘**（SSE 規格允許；Spring `SseEmitter` 實際輸出不帶空白：`retry:3000`、`id:41`、`event:log`、`data:{…}`、`:keep-alive`）。本文範例為了易讀寫成帶空白的形式；**QA 與前端一律以解析後的欄位（事件名、id、data JSON）斷言，不比對位元組字面**（AR-03）。後端用 `SseEmitter` 即可，不必為了湊字面去繞過它改寫原始框架 |
-| keep-alive | 連續 **15 秒**沒有任何事件就送一行註解（內容為 `keep-alive`）加空行（任何事件都重置計時）；註解行的冒號後空白同樣不拘 |
+| keep-alive | 連續 **15 秒**沒有任何事件就送一行註解（內容為 `keep-alive`）加空行（任何事件都重置計時）；註解行的冒號後空白同樣不拘。**註解行對瀏覽器原生 `EventSource` 不可見**（它不觸發任何 JS 事件；F2-6），前端因此不能用它判斷「連線還活著」，改以批次詳情（`GET /executions/{runId}`）每 15 秒的保險輪詢兜底（`lib/api/queries.ts` 的 `EXECUTION_POLL_MS`；終態不輪詢）；keep-alive 的用途只是避免代理與瀏覽器因閒置切線 |
 | 順序 | 依 `(seq, sub)` 升冪送出；Bridge 事件的 `sub` 視為 0 |
 | 慢速訂閱者 | 每個連線有 1,000 個框架的送出佇列；佇列滿＝伺服器主動關閉該連線，客戶端以 `Last-Event-ID` 重連即補齊（不丟事件） |
 | 代理 | nginx 的設定見 §0.7：`/api/v1/stream/` 須 `proxy_buffering off`、`proxy_http_version 1.1`、`proxy_read_timeout 3600s`，且 access log 要遮罩 `access_token`（owner＝W3-B2） |
@@ -901,6 +1052,8 @@ createdAt,severity,rule,subject,message,acknowledged,acknowledgedBy,acknowledged
 | `message`（STEP） | `STARTED` `開始：<任務名>（<stepId>，第 <attempt> 次）`；`RETRYING` `重試：<任務名>（<stepId>，第 <attempt> 次）`；`COMPLETED` `完成：<任務名>（<stepId>）`＋（有值時）` Token: <n>`；`FAILED` `失敗：<任務名>（<stepId>，第 <attempt> 次）：<errorMessage>` |
 | `stepId`／`stepNumber`／`taskId`／`taskName`／`goalId`／`attempt`／`stepStatus` | STEP 一律帶（`stepNumber`＝步驟位置，1 起）；ENGINE 行若消費者已知目前步驟則帶 `stepId`／`taskId`，否則省略 |
 | `tokensUsed` | 只有 STEP 的 `COMPLETED` 帶：該任務在本批次累計的 Token（歸因規則 §3.5.2） |
+
+`FAILED` 的 `<errorMessage>` 取自 DB `execution_steps` 的 `FAILED` 列（由 Bridge 寫）：若該列比 `step` 事件晚到，**即時**框架可能暫缺錯誤文字（真 Bridge 實測未發生）；`/logs` 的重播與 `GET …/logs` 一定補得上（B2-5；`RunEventProcessor` 以 `steps.findLatest(runId, stepId, "FAILED")` 取值、`StreamService` 重播同一路徑）。
 
 ```
 id: 17
@@ -1006,6 +1159,17 @@ Bridge 的 SSE `data` 是扁平封包 `{seq, ts, …}`（事件名在 `event:` �
 4. 斷線：自動重連並帶 `Last-Event-ID`；連續失敗兩次以上，退回 REST 回補（2.3 第 6 點）後再連。
 5. 收到 `status-change` 且 `runStatus` 為終態：不再重連；若收到 204 同樣停止。restore 後主動重新連線。
 6. 前端「SSE 串流」狀態點＝客戶端連線狀態（不是伺服器欄位）。
+7. **換新（`POST /auth/refresh`）的失敗分三類**（v1.2；C-5，QA DEF-AC-007）：REST 的 401 換新（`sendWithRenewal`）與 SSE 取 token（`getFreshAccessToken`）共用同一個判斷（`lib/api/client.ts` 的 `doRefresh`／`renewSession`）：
+
+   | 類別 | 判準 | 客戶端動作 |
+   |------|------|-----------|
+   | `renewed` | 2xx 且帶新 token | 存新 token，重送原請求／重建連線 |
+   | `invalid` | HTTP **400／401／403**（refresh token 無效、過期或被撤銷） | **清 session、導向登入**——這是唯一會登出的情形 |
+   | `unavailable` | 網路錯誤（`fetch` 丟例外）、HTTP **5xx**（含 nginx 在 backend 重啟時立即回的 502／503／504）、HTTP **429**；其餘未列狀態碼同樣保守視為 `unavailable`（寧可保留 session，也不誤登出） | **保留 session、不登出、不導向登入**；REST 路徑丟 `ApiError{ status:503, reason:"upstream_unavailable", message:"伺服器暫時無法連線，請稍後再試" }`（客戶端合成，附錄 B）；SSE 路徑見第 8 點 |
+
+   為什麼要分：經 nginx 部署時，backend 重啟的那幾秒 `POST /auth/refresh` 會立即得到 502；v1.1 的客戶端把任何失敗都當成登入失效而登出，backend 恢復後仍停在登入頁（QA 全棧實測；mock 伺服器永遠不回 502、本機直連時 EventSource 的重連先成功，所以都看不到）。
+8. **SSE 取 token 與退避**（v1.2）：`getFreshAccessToken({force})` 在換新為 `unavailable` 時，**現有 access token 尚未過期就沿用它**繼續連線；已過期則回 `null` 且**不登出**。串流層遇到 `null` 或連線失敗，以 **1→2→4→…→30 秒**（上限 30 秒）指數退避重連，狀態點維持「重新連線中」（不是「已斷線」），並沿用第 4 點的 `Last-Event-ID` 重播與「連續失敗兩次以上才退回 REST 回補」。只有 `invalid` 才清 session。
+9. REST 呼叫端收到 `ApiError{status:503, reason:"upstream_unavailable"}` 時：顯示其 `message`、保留畫面狀態，由使用者或下一次輪詢重試；不要導向登入頁。
 
 ---
 ## 3. Bridge 對映、匯入路徑與讀模型
@@ -1016,7 +1180,7 @@ Bridge 的 SSE `data` 是扁平封包 `{seq, ts, …}`（事件名在 `event:` �
 
 ### 3.1 呼叫總表
 
-Bridge 基底位址＝系統參數 `autoclaude.engineUrl`（`/autoclaude/*`）與 `sdd.engineUrl`（`/sdd/*`），預設 `http://engine-bridge:8081`；健康探測路徑＝`autoclaude.healthCheckPath`（預設 `/health`）。
+Bridge 基底位址：**管理員在設定頁改過的** `autoclaude.engineUrl`（`/autoclaude/*`）／`sdd.engineUrl`（`/sdd/*`）優先；沒改過（仍是種子預設 `http://engine-bridge:8081`）就取環境變數 `ENGINE_BRIDGE_URL`（程式預設 `http://localhost:8081`；docker compose 設 `http://engine-bridge:8081`）。每次呼叫都重新解析，設定改了下一個呼叫就走新位址（B1-5；`adapter/out/bridge/BridgeEndpoints.base`、`infrastructure/config/BridgeProperties`）。健康探測路徑＝`autoclaude.healthCheckPath`（預設 `/health`）；console-api 的探測環**維持打 `/health`**，`/health/deep` 只供容器編排的 healthcheck（§3.1.1）。
 
 `AgentBridge`（application 層的 out port）建議的方法名列在最後一欄：後端第一棒先放 `sddCompile`、`decompose`、`approveDraft`、`health`，第二棒在同一介面補其餘（runs 系列）。健康探測的排程與記憶體環由第二棒建立（第一棒的 `notifications/summary` 在此之前把 `bridgeConnected`／`bridgeCheckedAt` 回 null，AR-08，§1.4.1）。
 
@@ -1036,7 +1200,23 @@ Bridge 基底位址＝系統參數 `autoclaude.engineUrl`（`/autoclaude/*`）�
 | 健康探測 | `GET {healthCheckPath}` | 200 | 2s／3s | 無；每 30 秒一次，**console-api 啟動時與每個 run 開始時各立即探測一次**，結果存記憶體環（2,880 筆＝24 小時） | `health` |
 | 斷點列表 | `GET /autoclaude/runs/{id}/checkpoints`（`checkpoint_id,name,created_at,step_idx,step_id,is_automatic`；與 `console.checkpoints` 等價但沒有 `completedSteps`，契約的 `GET /executions/{runId}/checkpoints` 以 DB 為準，這條供審核 `RETRY` 找 `step_idx` 快照時使用） | 200 | 2s／5s | 2 次 | `listCheckpoints` |
 
-`:resume` 與 `restore` 的 body 可帶 `env`（Bridge 重啟後請求層 env 會遺失，見其 `ENV_LOST` 告警）：console-api 一律重新物化並帶上 §3.4.2 的 `env`。**機密只能走 `env`**（Bridge 的 `config_overrides` 拒絕 `api_key`／`db_dsn`，且 `run.json` 只記 env 的名稱）。
+`:resume` 與 `restore` 的 body 可帶 `env`（Bridge 重啟後請求層 env 會遺失，見其 `ENV_LOST` 告警）：console-api 一律重新物化並帶上 §3.4.2 的 `env`。**機密只能走 `env`**（Bridge 的 `config_overrides` 拒絕 `api_key`／`db_dsn`，且 `run.json` 只記 env 的名稱）。console-api 對上表**每個請求**（含事件串流與健康探測）都帶標頭 `X-Trace-Id`（v1.2，C-12；取值規則 §0.4 第 6 點，Bridge 端見 §3.1.1）。
+
+#### 3.1.1 Bridge 深度探針 `GET /health/deep` 與 `X-Trace-Id`（v1.2；C-2、C-12）
+
+> 本小節是 **Bridge 自己的端點與標頭**，不是 console-api 的：`openapi-p3-6.yaml` 為了紀錄也列出 `GET /health/deep`（tag「Engine Bridge（內部端點）」，路徑層級的 `servers` 覆寫為 Bridge；schema `BridgeDeepHealthResponse`），但 Bridge 的完整契約以它自己的 `/openapi.json` 與 `engine-bridge/README.md` 為準。原 `GET /health` 條目**不動**。
+
+**為什麼要有深度探針（QA DEF-AC-003，P1）**：`/health` 只證明「Bridge 行程活著、引擎可匯入」；Docker 全棧下 Bridge 映像沒有 `git`（引擎內共 11 處 subprocess 呼叫 git，開機自檢 `boot_self_check` 是其中之一），容器永遠 healthy、任何批次卻一律 FAILED（`FileNotFoundError: 'git'`）——本機、mock、Bridge 的 pytest 全綠，只有全棧真跑才現形。對策兩條：映像安裝 `git` 與 `ca-certificates`（`apt-get install -y --no-install-recommends git ca-certificates`，build 後 `RUN git --version` 冒煙）；healthcheck 改打深度探針。
+
+| 項目 | 契約 |
+|------|------|
+| 路徑／認證 | `GET /health/deep`；**免認證**（與 `/health` 同；Bridge 本來就只在內網） |
+| 檢查（任一失敗＝整體 degraded） | ① `git`：以 subprocess 執行 `git --version`，**逾時 5 秒**；② `autoclaude`：`import autoclaude`；③ `workspace`：在 `ENGINE_WORKSPACE` 內建立並刪除一個暫存檔（可寫）；④ `db`：只有設了 `BRIDGE_DB_DSN` 才做，ping 一次；沒設 DSN 時 `ok` 為 `null`（不算失敗） |
+| 全部通過 | **200**：`{"status":"ok","checks":{"git":{"ok":true,"version":"git version 2.39.5"},"autoclaude":{"ok":true,"version":"…"},"workspace":{"ok":true},"db":{"ok":true}}}`（無 DSN 時 `"db":{"ok":null}`） |
+| 任一失敗 | **503**：`{"status":"degraded","reason":"<失敗項的簡短原因，多項以「；」連接>","checks":{…}}`；失敗的項目 `ok:false` 並各附 `reason`（例：`"git":{"ok":false,"reason":"找不到 git 執行檔"}`），其餘項目照常回報 |
+| 使用者 | docker compose 的 bridge healthcheck 改打 `/health/deep`；**console-api 的探測環維持打 `/health`**（深度探針會 spawn 子行程與寫檔，不適合每 30 秒打；`agentAvailability` 的語意不變） |
+
+**`X-Trace-Id`（NFR-9.4-04；C-12；QA O-11）**：console-api 對 Bridge 的**每個請求**都帶標頭 `X-Trace-Id`（取值規則見 §0.4 第 6 點）。Bridge 的 HTTP 中介層：① 讀取該標頭（缺漏或格式不合時自產 `uuid4`）；② **回應回帶同名標頭**（SSE 事件串流的回應同樣帶）；③ 把它放進 `contextvars`，使 Bridge 的**每一行**應用日誌都帶 `trace_id` 欄位——沒有請求上下文的行（啟動、關閉、與請求無關的背景執行緒）`trace_id` 為 `-`；Bridge 為某個請求啟動的背景工作（run 監督執行緒）是否沿用該請求的 trace id 由實作決定（建議沿用，例如 `contextvars.copy_context()`）。Bridge 另可設 `BRIDGE_LOG_DIR` 把日誌寫成滾動檔案（compose 掛 `app_logs` 卷，C-16；與 console-api 的 `LOG_DIR` 同義）。驗收見 E2E-13。
 
 ### 3.2 錯誤轉譯（Bridge → Console）
 
@@ -1369,7 +1549,7 @@ Bridge 對 `config_overrides` 的規則：頂層鍵限 `claude, minimax, embedde
 #### 3.5.4 消費者生命週期（`RunEventConsumer`）
 
 - **啟動時機**：① execute 成功（`after=0`）；② restore 被 Bridge 接受（終態 run 被 restore 後，原消費者已結束，須重啟；`PAUSED` 的 resume 沿用現有消費者）；③ **console-api 啟動時**，對每個 DB 狀態非終態的批次（`RUNNING`、`PAUSED`；`INITIALIZING` 見 §3.4.5 第 6 點）各啟一條，`after=console_last_seq`。
-- **啟動掃描的對帳**：③ 先問 Bridge `GET /autoclaude/runs/{id}`：回 404 `run_not_found` → 不啟動消費者、DB 不動（狀態欄由 Bridge 擁有）、寫 WARN 日誌；`GET /executions/{runId}` 以 `bridge.runKnown=false` 表達，SSE 依 §2.3 第 5 點處理。Bridge 不可達 → 仍啟動消費者（由連線層重試，§3.1）。
+- **啟動掃描的對帳**：③ 先問 Bridge `GET /autoclaude/runs/{id}`：回 404 `run_not_found` → 不啟動消費者、DB 不動（狀態欄由 Bridge 擁有）、寫 WARN 日誌；`GET /executions/{runId}` 以 `bridge.runKnown=false` 表達，SSE 依 §2.3 第 5 點處理。Bridge 不可達 → 仍啟動消費者（由連線層重試，§3.1）。**另補一種情形（B2-3；`MonitorTicker.reconcile`）**：批次在 DB 已是終態（Bridge 已把 `execution_runs.status` 寫成 `COMPLETED`／`FAILED`／`CANCELLED`），但**專案仍是 `EXECUTING`**——console-api 停機期間漏掉了終態事件。此時同樣啟一條消費者，依 `console_last_seq` 從其後補處理（終態 `status` 事件連帶的專案／任務／審核項更新照常發生），處理完即結束。
 - **重連**：連線失敗或閒置逾 45 秒視為斷線，指數退避 1→30 秒，以最後已處理的 Bridge seq 作 `after`（Bridge 的 stream 會先重播 `after` 之後的事件再接即時，毋須另外回補；缺口很大時可改以 `GET …/events?after=&limit=` 分頁取回）。
 - **冪等與順序**：每則事件依 `seq` 處理，`seq ≤ console_last_seq` 一律略過（§3.5.2）；同一 run 的事件處理與控制操作以 per-run 互斥鎖序列化（§1.2）。
 - **結束**：處理完終態 `status` 事件（含其衍生的審核項、告警、專案與任務狀態）後結束消費者，並依 §2.4 關閉該 run 的 SSE 訂閱連線；之後若 restore，由第 ② 點重啟。
@@ -1397,6 +1577,7 @@ AutoClaude 沒有審核鉤子，也不改它：閘點由 `ReviewGatePolicy` 依�
 - 最後一個步驟（`i = N`）完成時 run 直接 `COMPLETED`，不暫停、不建審核項。
 - **精度（Architecture §12 L-7）**：極短的步驟可能在 `:pause` 抵達前就越過邊界，暫停會晚一步生效。此時 `status PAUSED` 的位置不在預期的目標邊界；建審核項時以**實際位置**為準（`completedSteps=k`）：等級 1 照常 `TASK_CONFIRM`；等級 2／3 若 `k` 不是目標邊界則降級為 `TASK_CONFIRM`，`reason` 加註「（暫停點比預期晚一步）」。
 - 使用者手動 `pause`、`TOKEN_BUDGET_EXCEEDED` 自動暫停造成的 `PAUSED` **不建審核項**（沒有待決的閘）。
+- **閘點暫停旗標存記憶體（B2-4；`RunRegistry.Runtime.gatePauseRequested`／`gatePausedPositions`）**：「這次暫停是由審核閘造成」只記在 console-api 的記憶體，不入庫（它是由事件即可重建、遺失只會退回保守值的狀態）。若 console-api 在「已對 Bridge 呼叫 `:pause`」與「收到 `status PAUSED`」之間重啟，旗標遺失：該次 `PAUSED` **不建審核項**，須由使用者手動 `resume`（run 不會卡死，只是沒有待決項）。此視窗只有秒級，不另設持久化。
 
 #### 3.6.2 審核項建立（`review_requests`；`kind` 的 CHECK 沿用 V3 的四種）
 
@@ -1423,13 +1604,14 @@ AutoClaude 沒有審核鉤子，也不改它：閘點由 `ReviewGatePolicy` 依�
 - 前置：gate 類的 `APPROVE`／`REJECT` 需 run 為 `PAUSED`；`ESCALATED` 類的 `RETRY`／`SKIP` 需 run 為終態（`FAILED`）。不符 → 409 `目前執行狀態不允許此操作`。
 - 所有決定都寫 `decided_by`（JWT subject）、`decided_at`、`comment`；`REJECT` 於 ESCALATED 類不改變 run 狀態。審計日誌 `action=execution.review.<DECISION>`。
 - 審核以外的操作（手動 resume／restore、cancel、run 進入終態、新批次建立）如何自動關閉待決審核項，見 §3.5.3 表的最後三列。
+- **審核 `RETRY` 內部的 restore 也發 `RESTORE` 告警（F2-2）**：`GOAL_COMPLETED`／`ESCALATED` 的 `RETRY` 在 Bridge 端以 `restore` 實現，Bridge 與手動 restore 一樣會發 `alert`（`origin=ENGINE`、`code=RESTORE`、`severity=INFO`，id 為 Bridge seq，無 `alertId`、不持久化）；Console 一律轉發（SSE `alert`）。前端靠它清掉即時 DAG 疊加的舊狀態（`lib/domain/runLive.ts` 的 `isRestoreAlert`）；後端以 `ExecutionGateApiIT` 斷言該告警**恰 1 次**（真 Bridge 實測 seq=23 `alert RESTORE`）。找不到還原點而改開後續批次的那條路沒有 restore，也就沒有這則告警。
 - 🔴 `GOAL_COMPLETED` 的 `RETRY` 在 run 為 `PAUSED`（gate 類審核項建立時 run 就是 `PAUSED`）時以 Bridge `restore` 實現，**依賴 AR-01 的 Bridge 修復**（§1.2.10）：修復前在 DB 模式會回 409 `同專案同路徑已有執行中的批次`（`holderRunId` 是自己）。找不到 `step_idx=p−1` 快照而改開後續批次的那條路（首個目標）不受影響，所以 E2E-04 的 RETRY 變體恰好不碰到這個缺陷。
 
 ---
 
 ### 3.7 告警規則（`API-ALR-01～06`；由消費者在每則事件後與 30 秒排程 tick 評估）
 
-閾值**每次評估時**讀系統參數（快取不超過 5 秒）。去重：同一 `(project, rule, subject)` 在**未確認**前不重複產生（DB partial unique index 兜底；`INSERT … ON CONFLICT DO NOTHING`，Console 規則告警只有真的新增才發 SSE）。`ENGINE_ESCALATION`／`ENGINE_TOKEN_HALT` 同受此去重（同一步驟在未確認前再次升級不新增列），但 Bridge 的 `alert` 事件本身一律照常轉發 SSE。持久化欄位：`project_id`、`run_id`、`rule`、`severity`、`subject`、`message`、`event_seq`／`event_sub`。
+閾值**每次評估時**讀系統參數（快取不超過 5 秒）。去重：同一 `(project, rule, subject)` 在**未確認**前不重複產生（DB partial unique index 兜底；`INSERT … ON CONFLICT DO NOTHING`，Console 規則告警只有真的新增才發 SSE）。`ENGINE_ESCALATION`／`ENGINE_TOKEN_HALT` 同受此去重，但 Bridge 的 `alert` 事件本身一律照常轉發 SSE。**`ENGINE_ESCALATION` 的去重對象是 `step:<runId>:<stepId>`**（v1.2，C-7，QA O-14；`domain/service/AlertRules`）：`stepId` 每批次重新編號（§3.4.4），v1.1 的 `step:<stepId>` 會讓**不同批次**（也可能是不同任務）的升級被先前未確認的舊告警吞掉——逐批失敗的情境第 2、3 批沒有新告警列、只剩 SSE 轉發，使用者漏看；現在只有**同一批次的同一步驟**在未確認前再次升級才被去重（E2E-05 步驟 5），不同批次各自產生告警列。`ENGINE_TOKEN_HALT` 的 subject 維持 `step:<stepId>`（無則 `run:<runId>`）：同型缺口本版**未改**（主控裁決只列 `ENGINE_ESCALATION`），列為後續候選。持久化欄位：`project_id`、`run_id`、`rule`、`severity`、`subject`、`message`、`event_seq`／`event_sub`。
 
 | 規則（`rule`） | 嚴重度 | 輸入 | 閾值來源 | 判定 | `subject` | 動作 | 訊息樣板 |
 |----------------|--------|------|----------|------|-----------|------|----------|
@@ -1439,10 +1621,12 @@ AutoClaude 沒有審核鉤子，也不改它：閘點由 `ReviewGatePolicy` 依�
 | `AGENT_UNRESPONSIVE` | CRITICAL | 最後一則 Bridge 事件時間、`/health` 探測環 | `monitor.alertAgentTimeoutSec`（300） | run 為 `RUNNING／PAUSING／CANCELLING`，且 `現在−最後事件時間 > 閾值`，**且**最近一次探測失敗（或 Bridge 不可達）；單純長步驟（探測正常）不告警 | `run:<runId>` | 持久化＋SSE（不自動動作） | `Agent 已超過 <sec> 秒無回應` |
 | `TASK_DURATION_EXCEEDED` | WARNING | `RUNNING` 任務的已執行時間（現在−`started_at`）；亦在 `COMPLETED` 時以實際耗時再評估一次 | `agent.taskTimeout` × `monitor.alertTaskDurationMultiplier`（600 × 2.0＝1,200 秒） | `耗時 > 閾值` | `task:<taskId>` | 持久化＋SSE | `任務「<名>」已執行 <sec> 秒，超過門檻 <threshold> 秒（<倍數> 倍）` |
 | `HIGH_RETRY_RATE` | WARNING | 該目標在本批次已開始的任務與其中發生過 `RETRYING` 的任務 | 固定 50%（PRD；最小樣本 2 個已開始的任務） | `有重試的任務數 ÷ 已開始的任務數 > 0.5` | `goal:<goalId>` | 持久化＋SSE | `目標「<名>」重試率 <pct>%，超過 50%` |
-| `ENGINE_ESCALATION` | CRITICAL | Bridge `alert`（`code=ESCALATION`） | — | 每則 | `step:<stepId>` | 持久化（`event_sub=0`）＋轉發 | `引擎升級（ESCALATION）：<detail>` |
+| `ENGINE_ESCALATION` | CRITICAL | Bridge `alert`（`code=ESCALATION`） | — | 每則 | `step:<runId>:<stepId>`（v1.2；原 `step:<stepId>`） | 持久化（`event_sub=0`）＋轉發 | `引擎升級（ESCALATION）：<detail>` |
 | `ENGINE_TOKEN_HALT` | WARNING | Bridge `alert`（`code=TOKEN_HALT`） | — | 每則 | `step:<stepId>`（無則 `run:<runId>`） | 持久化＋轉發 | `引擎因 Token／額度門檻停機：<detail>` |
 
 其餘 Bridge `alert`（`LIMIT_RETRY`、`RESTORE`、`FORCE_KILL`、`CONFIG_OVERRIDE_IGNORED`、`STEP_TRACKING_GAP`、`ENV_LOST`、`BRIDGE_INTERNAL`）只轉發 SSE、**不持久化**。百分比一律四捨五入到整數。
+
+**`CONSECUTIVE_FAILURES` 的觸發路徑說明（v1.2，C-22；QA O-15；只補說明，不改規則）**：規則本身照上表（同一目標最近 N 個終局結果全是失敗）。但在 UI 操作路徑下它**幾乎不可達**，原因都在 Bridge／引擎的行為與審核動作：① 引擎遇到第一個升級（ESCALATION）就結束整個批次，一個批次最多只貢獻一個失敗終局；② 審核 `SKIP` 把失敗任務標成 `SKIPPED`，而 `SKIPPED` 不計入終局序列（「略過」），原本會連續的失敗序列因此被切斷；③ 審核 `REJECT` 之後重跑 `ALL`，會在**同一個**任務再次失敗，序列不會累積到不同的任務；④ 只有用 `scope.mode=SELECTED` 加 `taskIds`，逐批各選一個（不同的）任務、且每批都失敗，才會在同一目標下累計出連續 N 個失敗終局。所以 QA 驗證此規則請用單元測試（`AlertRulesTest` 的假事件序列）或上述 `SELECTED` 逐批腳本，不要期待在一般的 ESCALATED→審核流程裡看到它。
 
 ---
 
@@ -1497,19 +1681,20 @@ AutoClaude 沒有審核鉤子，也不改它：閘點由 `ReviewGatePolicy` 依�
 | I-02 | 拖放區（.md／.pdf／.docx，10MB） | `POST /import/upload`（multipart `file`）→ `ImportRecordResponse.id/status` | 413／415／422 的 `reason` 顯示在拖放區下方（附錄 B） |
 | I-03 | 貼上文字的文字區 | `POST /import/text`（`content`、`sourceType`）→ `ImportRecordResponse` | |
 | I-04 | 自治等級下拉（Level 1～10） | `ParseOptions.autonomyLevel`；預設值 ← `GET /settings/agent`→`defaultAutonomyLevel` | |
-| I-05 | 執行路徑輸入 | `ParseOptions.executionPath` | 無瀏覽按鈕（ADR-001 G-15）；絕對路徑格式驗證錯誤見 `errors[]` |
+| I-05 | 執行路徑輸入 | `ParseOptions.executionPath` | 無瀏覽按鈕（ADR-001 G-15）；絕對路徑格式驗證錯誤見 `errors[]`。`ParseOptions.specDir` **沒有 UI 欄位**（F1-3；設計稿與任務書都沒畫，契約 D-03：路徑 A 以 `executionPath` 探測即可，明示 `specDir` 只留給 API 呼叫端；前端 `components/domain/import/SourceCard.tsx` 無此欄位） |
 | I-06 | 補充說明文字區 | `ParseOptions.additionalPrompt`（≤4,000） | |
 | I-07 | 「開始解析」按鈕與「解析中」畫面 | `POST /import/{id}/parse`（同步，最長約 `model.timeout` 秒；經 nginx 時上限 180 秒，§0.7） | 設計稿說明文字「套用有界閘：步驟 ≤24／Kahn 無環／prompt 非空」為靜態字串 |
 | I-08 | 有界閘違規顯示（US-I-10） | parse／result 的 **422** → `errors[].gate／detail／location`（全部列出，不截斷）；重新整理或從歷史重開後以 `GET /import/{id}` → `lastParseErrors` 還原同一份清單 | 設計稿沒有這個錯誤區塊；須補一個清單元件（§4.6 G-I3） |
 | I-09 | 規格被拒顯示 | 422 `SDD 規格檢查未通過` → `details.bridgeReason／detail` | 同上 |
 | I-10 | 步驟 2 樹狀預覽（專案→目標→任務） | `ParseResultResponse.parsedResult`；重新整理後以 `GET /import/{id}` → `parsedResult` 還原 | `parsedResult` 在第一次成功解析前為 null，`parsePath` 同（V5，AR-07）；歷史列表重開 `UPLOADED` 的記錄時據此判斷「還沒有樹」 |
 | I-11 | 節點編輯（✏️）／刪除（🗑️）／新增目標／新增任務／拖曳排序 | 前端先改本地樹，儲存時 `PUT /import/{id}/result`（整樹覆寫） | 新增目標須自行產生 `key`；拖曳後 `dependsOn` 仍用 `key` 引用，不受順序影響；**編輯會撤銷 signoff**，UI 應提示 |
-| I-12 | 解析提示（evaluator 被清空、通過標準為佔位） | `ParseResultResponse.warnings[]` | 設計稿沒有；建議用黃色提示列 |
+| I-12 | 解析提示（evaluator 被清空、通過標準為佔位） | `ParseResultResponse.warnings[]`；重新整理或從歷史重開後以 `GET /import/{id}` → `warnings[]` 還原（v1.2，C-10） | 設計稿沒有；建議用黃色提示列 |
 | I-13 | 「signed_off=false」警示橫幅與「signoff 審批」按鈕 | `ParseResultResponse.signedOff`；按鈕 → `POST /import/{id}/signoff {approver}` | **approver 由前端以目前登入者帶入**（登入回應 `TokenResponse` 無 username：從 access token 的 `sub` 取，Phase 1+2 已如此） |
 | I-14 | 已 signoff 綠勾 | `ImportRecordResponse.signedOff／signedOffBy／signedOffAt` | |
 | I-15 | 「放棄」 | `POST /import/{id}/reject`（補充端點） | |
 | I-16 | 「確認匯入」（未 signoff 時禁用） | `POST /import/{id}/confirm` → 201 `ProjectResponse`；成功後導向 `/projects/{id}` | 後端對未 signoff 回 409 `草案尚未 signoff，不可確認匯入`（前端禁用只是體驗） |
 | I-17 | 歷史記錄列表：匯入時間、來源檔名、狀態、專案連結 | `GET /import?page&size&status&q` → `createdAt／sourceFileName／status／projectId` | 點一筆 → `GET /import/{id}` 重新開啟審核 |
+| I-18 | 解析選項還原（自治等級、執行路徑、補充說明、`specDir`） | `GET /import/{id}` → `parseOptions`（v1.2，C-10；從未 parse 過為 null） | 重開 `UPLOADED`／`PARSED`／`REVIEWING` 記錄時把選項填回表單（取代 v1.1 的「要重填」限制，F1-2）；解析失敗後重開也保有該次的選項 |
 
 ### 4.2 執行頁 `/projects/[projectId]/execute`（畫面 7）
 
@@ -1532,7 +1717,7 @@ AutoClaude 沒有審核鉤子，也不改它：閘點由 `ReviewGatePolicy` 依�
 | E-15 | 自動捲動、日誌搜尋 | 純前端（對已收到的行過濾） | |
 | E-16 | 待審核項目卡：計數 badge、列標題 | `ExecutionRunDetailResponse.pendingReviews[]`（`reason`、`goalName`、`taskName`）；badge 計數與即時新增 ← SSE `review-request` | |
 | E-17 | 每列按鈕：通過／重試／跳過／拒絕 | `POST /executions/{runId}/review/{review.id}`，`decision` ← 按鈕；**按鈕是否可按＝`review.allowedDecisions`** | 設計稿四顆按鈕對所有項目顯示；`ESCALATED` 無「通過」、gate 類無「跳過」→ 以 `allowedDecisions` 禁用 |
-| E-18 | 「查看結果／查看日誌」「修改任務」（PRD） | 導向：任務詳情 `/projects/…/tasks/{taskId}`（Phase 2）＝`review.taskId` | |
+| E-18 | 「查看結果／查看日誌」「修改任務」（PRD） | 導向：任務詳情 `/projects/…/tasks/{taskId}`（Phase 2）＝`review.taskId` | **F2-5**：前端只做「查看任務」連結（`components/domain/execute/ReviewCard.tsx`）——沒有獨立的「查看結果」「查看日誌」目的地：日誌以監控頁的日誌查詢涵蓋（§4.3 M-13），結果在任務詳情 |
 | E-19 | 空狀態文字（無待審核項目） | `pendingReviews=[]` | |
 | E-20 | 後續批次切換 | 審核 `SKIP`／`RETRY` 回 `X-Follow-Up-Run-Id`；或 `GET /projects/{id}/executions` 取最新一筆 | 前端收到標頭後改看該 run 並重連 SSE |
 
@@ -1541,21 +1726,21 @@ AutoClaude 沒有審核鉤子，也不改它：閘點由 `ReviewGatePolicy` 依�
 | # | UI 元素 | 資料來源 | 備註 |
 |---|---------|----------|------|
 | M-01 | 時間範圍下拉（預設 24 小時） | 前端換算成 `from`／`to` 帶給每個監控端點 | |
-| M-02 | 執行批次下拉（PRD §5.4.5 有、設計稿未畫） | `GET /projects/{id}/executions` → `runNumber／status` → `runId` 參數 | §4.6 G-M1 |
+| M-02 | 執行批次下拉（PRD §5.4.5 有、設計稿未畫） | `GET /projects/{id}/executions` → `runNumber／status／bridgeStatus` → `runId` 參數 | §4.6 G-M1。`bridgeStatus` 為 v1.2 新增（C-11）：`PAUSING`／`CANCELLING` 顯示處理中晶片（§1.2.2） |
 | M-03 | 指標卡「完成率」 | `GET …/metrics` → `taskCompletionRate.value／delta` | 設計稿「完成率 34.8%」＝專案內任務完成進度，**不是** PRD 的「專案完成率」（全域，`projectCompletionRate`） |
 | M-04 | 指標卡「任務成功率」 | `taskSuccessRate.value／delta` | ↑／↓ 與顏色由前端依語意決定（成功率升＝好） |
 | M-05 | 指標卡「重試率」 | `retryRate.value／delta` | 升＝壞；顏色由前端決定 |
 | M-06 | 指標卡「Token 消耗」 | `totalTokens.value／delta` | |
-| M-07 | PRD 另外六項 KPI（專案完成率、目標達成率、平均重試次數、Token 預算使用率、平均任務執行時間、Agent 可用率） | 同一個 `metrics` 回應的其餘 `MetricValue` | 設計稿只畫四張卡；其餘供 Dashboard 或日後版面（ADR-001 G-13） |
-| M-08 | Token 使用趨勢（折線＋虛線預算線＋面積） | `GET …/token-trend` → `bucketStart／tokens／cumulativeTokens／budget`（折線畫 `cumulativeTokens`；預算線畫 `budget`） | 圖例「預算線／Token 使用」靜態 |
+| M-07 | PRD 另外六項 KPI（專案完成率、目標達成率、平均重試次數、Token 預算使用率、平均任務執行時間、Agent 可用率） | 同一個 `metrics` 回應的其餘 `MetricValue` | 設計稿只畫四張卡；其餘供 Dashboard 或日後版面（ADR-001 G-13）。PRD §5.4.2 對「專案完成率」「目標達成率」寫的「環形」，**以設計稿畫面 8 的數值卡為準**（主控裁決 C-13；ADR-001 D11 已定視覺以設計稿為準，G-20 登記） |
+| M-08 | Token 使用趨勢（折線＋虛線預算線＋面積） | `GET …/token-trend` → `bucketStart／tokens／cumulativeTokens／budget`（折線畫 `cumulativeTokens`；預算線畫 `budget`） | 圖例「預算線／Token 使用」靜態。`DAY` 桶的 X 軸標籤用瀏覽器本機時區（桶起點仍是 UTC；F2-1，§1.3 的 `bucket` 說明） |
 | M-09 | 任務狀態分佈（完成／執行中／失敗／待處理 四條） | `metrics.taskStatusDistribution`（前端分組：完成＝`COMPLETED`；執行中＝`RUNNING＋VALIDATING＋QUEUED`；失敗＝`FAILED＋ESCALATED`；待處理＝其餘） | |
 | M-10 | 執行時間分佈（垂直柱） | `metrics.taskDurations[]` → `taskName／durationSec` | |
 | M-11 | 任務執行趨勢、成功／失敗比率、重試次數分佈（PRD §5.4.2 趨勢圖表，設計稿未畫） | `GET …/task-trend`、`metrics.retryDistribution` | §4.6 G-M2 |
-| M-12 | 事件時間軸（PRD，設計稿未畫） | `GET /executions/{runId}/steps`（`timestamp／status／taskName`；一個批次的步驟事件，`size` 最大 200，以 `afterSeq` 續頁） | §4.6 G-M2。`task-trend` 依 PRD §7.1.6 只回 `List<TaskTrendPoint>`（不含事件清單）；M-02 選「全部批次」時，時間軸取最新一筆批次（`executions` 列表第一筆）當來源 |
+| M-12 | 事件時間軸（PRD，設計稿未畫） | `GET /executions/{runId}/steps`（`timestamp／status／taskName`；一個批次的步驟事件，`size` 最大 200，以 `afterSeq` 續頁） | §4.6 G-M2。`task-trend` 依 PRD §7.1.6 只回 `List<TaskTrendPoint>`（不含事件清單）；M-02 選「全部批次」時，時間軸取最新一筆批次（`executions` 列表第一筆）當來源。**追蹤鏈視圖（US-M-09）以「批次下拉＋事件時間軸＋日誌查詢」涵蓋，不另做獨立視圖**（主控裁決 2026-10-15，C-14；設計稿與契約皆無獨立的追蹤鏈視圖） |
 | M-13 | 執行日誌查詢卡：等級下拉（全部／INFO／WARN／ERROR）、日誌列 | `GET …/logs?level&q&page&size` → `timestamp／level／message` | PRD 另有關鍵字搜尋（`q`）、任務 id 篩選（`taskId`）；設計稿只畫等級下拉 |
 | M-14 | 告警卡：列、「已確認」或「確認」 | `GET …/alerts` → `createdAt／message／severity／acknowledged`；確認 → `POST /monitor/alerts/{id}/acknowledge`（204） | 即時新增 ← SSE `alert`（執行頁／監控頁皆可訂閱同一 run） |
 | M-15 | 「查看詳情」（PRD） | 無專用端點：展開該列顯示 `rule／subject／runId／message` | |
-| M-16 | 「匯出報表」 | `GET …/report?format=csv`（檔案下載；`Accept: text/csv`） | PDF 回 501（W5） |
+| M-16 | 「匯出報表」 | `GET …/report?format=csv｜pdf`（檔案下載；CSV 送 `Accept: text/csv`、PDF 送 `Accept: application/pdf`） | v1.2：PDF 已提供（§1.3.7，C-4；取代 v1.1 的 501）；檔名取 `Content-Disposition`（CORS 已暴露） |
 | M-17 | 「設定告警」 | 導向 `/settings` 的「監控」分頁（`monitor.*`） | 無專用端點 |
 | M-18 | 「自訂儀表板」（US-M-08） | 純前端（版面存 `localStorage`，ADR-001 G-18） | 無後端欄位 |
 | M-19 | Agent 狀態指示燈（US-M-10；設計稿未畫） | `metrics.agentAvailability`；即時連線 ← `GET /executions/{runId}`→`bridge.connected／status`、`currentStep` | 「資源使用情況（CPU／記憶體）」Bridge 契約沒有此資料（ADR-001 G-18） |
@@ -1566,13 +1751,13 @@ AutoClaude 沒有審核鉤子，也不改它：閘點由 `ReviewGatePolicy` 依�
 |---|---------|----------|------|
 | S-01 | 分類頁籤（模型／Agent／執行／監控／AutoClaude／SDD） | `GET /settings` 的六個 key | 頁籤文字與圖示由前端字典提供 |
 | S-02 | 每個參數列：label、說明 | **label**：前端字典（鍵 `category.key`；契約不含）；**說明**：`ConfigResponse.description` | §4.6 G-S1。`model.apiUrl` 的表單提示寫「完整的 chat-completions 端點 URL」（AR-09）；`monitor.refreshIntervalMs` 最小 10000（AR-06） |
-| S-03 | 控制項型別（text／number／password／enum／bool） | `valueType`：`STRING`→text、`INTEGER／LONG／FLOAT`→number、`ENCRYPTED`→password、`ENUM`→enum（選項＝`options`）、`BOOLEAN`→bool；數字範圍＝`min`／`max` | |
+| S-03 | 控制項型別（text／number／password／enum／bool） | `valueType`：`STRING`→text、`INTEGER／LONG／FLOAT`→number、`ENCRYPTED`→password、`ENUM`→enum（選項＝`options`）、`BOOLEAN`→bool；數字範圍＝`min`／`max` | 加密鍵（`ENCRYPTED`）的 `value` 恆為遮罩字串，前端以 **`hasValue`** 判斷「尚未設定」（F1-6；`components/domain/settings/SettingsView.tsx`、`SettingControl.tsx`） |
 | S-04 | 值與預設值 | `value／defaultValue`；重置圖示 → `POST /settings/{category}/{key}/reset` | 加密鍵重置需 `?confirm=true` |
-| S-05 | 密碼欄遮罩與顯示切換 | 預設 `value=••••••••`＋`hasValue`；顯示 → `GET /settings/{category}?reveal=true`（**僅 ADMIN**） | 非 ADMIN 時切換按鈕應禁用（設計稿未畫角色差異，§4.6 G-S2） |
+| S-05 | 密碼欄遮罩與顯示切換 | 預設 `value=••••••••`＋`hasValue`；顯示 → `GET /settings/{category}?reveal=true`（**僅 ADMIN**） | 非 ADMIN 時切換按鈕應禁用（設計稿未畫角色差異，§4.6 G-S2）。`reveal=true` 以**分類**為單位（沒有單鍵揭露端點）：前端每按一次「顯示」＝一次 `GET /settings/{category}?reveal=true`＝一筆審計（`settings.reveal`，只記分類與次數），只取要的那一鍵（F1-5） |
 | S-06 | 驗證錯誤紅字 | 400 `errors[].field／message`；token_guard 違規見 reason `halt_threshold_pct 必須大於 compact_threshold_pct` | 前端以 zod 鏡射同規則（NFR-SEC-05 第 ③ 道） |
 | S-07 | 「測試連線」與結果（連線成功（延遲 230ms）） | `POST /settings/test-connection`（可帶表單內尚未儲存的 `apiUrl`／`apiKey`）→ `success／latencyMs／message` | 422（SSRF／allowlist）顯示 reason 與 `details.violation`。`apiUrl` 是完整端點，測試會對它送一則 1-token 的 ping（供應商端約消耗一個 token），不再是 `GET /v1/models`（§1.5.7） |
 | S-08 | 修改歷史卡（時間／參數／舊值→新值／@使用者） | `GET /settings/history?category&page&size` → `changedAt／category.key／oldValue／newValue／changedBy` | 加密值顯示 `••••••••` |
-| S-09 | 「儲存變更」 | **逐鍵** `PUT /settings/{category}/{key}`（僅送有修改的鍵）；token_guard 兩鍵都改 → 改用 `PUT /settings/execution/token-guard`（原子） | 沒有單一的批次儲存端點；PRD 的「修改後立即儲存」也可逐欄儲存 |
+| S-09 | 「儲存變更」 | **逐鍵** `PUT /settings/{category}/{key}`（僅送有修改的鍵）；token_guard **任一**鍵有改就改用 `PUT /settings/execution/token-guard`（原子；對端沒改就帶畫面目前值，PRD §7.1.8；F1-4——契約 §1.5.3 的單鍵端點加跨鍵校驗仍然可用，但前端一律走群組端點）。值未變的鍵不寫歷史（§1.5.4），所以帶對端現值不會多一筆歷史 | 沒有單一的批次儲存端點；PRD 的「修改後立即儲存」也可逐欄儲存。取捨：他人恰在同時改了對端鍵時，會被畫面上的舊值覆寫（單人使用機率極低；`SettingsView.tsx` 的 `useUpdateTokenGuard`） |
 | S-10 | 「全部重置為預設值」 | `POST /settings/{category}/reset`（補充端點；整個分類） | |
 | S-11 | 「匯出設定」「匯入設定」 | `POST /settings/export`（下載 JSON）；`POST /settings/import`（multipart）→ `applied／skipped／errors[]` | |
 | S-12 | 影響範圍提示（US-S-08） | `ConfigResponse.impactNote`：寫入前的確認對話框顯示 | |
@@ -1590,7 +1775,8 @@ AutoClaude 沒有審核鉤子，也不改它：閘點由 `ReviewGatePolicy` 依�
 | G-05 | 搜尋列「搜尋專案、目標、任務…」 | Phase 2 `GET /projects?q=`（只搜專案名稱） | PRD §7 沒有跨目標／任務的搜尋端點（§4.6 G-G1） |
 | G-06 | Dashboard「待審批草案數」 | `summary.pendingSignoffs`（跨專案、含目標與任務層級，§1.4.1） | 取代 Phase 2 前端只算專案與草案目標的近似值（ADR-002 已知限制） |
 | G-07 | Dashboard「執行中 run 數」「進行中的執行」卡 | Phase 2 `GET /projects?status=EXECUTING` 的 `totalElements`；每個執行中專案再 `GET /projects/{id}/executions?size=1` 取最新批次的 `tasksCompleted／tasksTotal` 畫進度條 | 沒有全域 run 端點；一個專案同時只會有一個 `EXECUTING` 批次。已暫停的批次其專案為 `READY`，不計入「執行中」 |
-| G-08 | Dashboard「本週完成任務數」 | 無全域端點（§4.6 G-G3） | 做法見該列（主控裁決，§6.3 第 9 項） |
+| G-08 | Dashboard「本週完成任務數」 | `GET /monitor/task-totals`（§1.3.8；v1.2，C-1）→ `completed` | `from`＝本週一 00:00（瀏覽器本機時區）轉 ISO-8601、`to` 省略；輪詢每 60 秒 1 次（分頁隱藏不輪詢）。取代 v1.1 對各專案扇出 `task-trend` 的近似做法（§4.6 G-G3） |
+| G-09 | 專案列表「已刪除」篩選與「復原」按鈕（v1.2，C-3） | `GET /projects?deleted=true`（§1.6.2）→ `deletedAt`；`POST /projects/{id}/restore`（§1.6.1） | OPERATOR 以上才看得到篩選與按鈕（VIEWER 打 `deleted=true` 是 403）；復原成功 toast 並刷新列表；409 `project_not_deleted`／`restore_window_expired` 與 404 顯示對應原因 |
 
 ### 4.6 設計稿元素在契約裡沒有資料來源（或需補設計）
 
@@ -1609,7 +1795,7 @@ AutoClaude 沒有審核鉤子，也不改它：閘點由 `ReviewGatePolicy` 依�
 | G-S2 | 非 ADMIN 角色的唯讀呈現（輸入框、儲存、顯示切換、測試連線） | 設計稿未畫角色差異；契約 403 | 前端依角色禁用控制項（角色取自登入回應 `role`） |
 | G-G1 | 全域搜尋跨目標／任務 | PRD §7 沒有端點 | 超出 Phase 3～6；目前只搜專案 |
 | G-G2 | 頂列「通知總覽」連結頁 | 無對應頁面與端點 | 暫以通知鈴的計數取代，不做列表頁 |
-| G-G3 | Dashboard「本週完成任務數」（跨專案） | 沒有全域聚合端點（`metrics`／`task-trend` 都以單一專案為範圍） | 主控裁決（§6.3 第 9 項）：前端對每個非封存專案呼叫 `task-trend?from=<本週一 00:00>&bucket=DAY`，加總各桶 `completed`（同一任務被還原重跑會重複計，屬近似值）；專案數多時另開全域端點列入 W5 |
+| G-G3 | Dashboard「本週完成任務數」（跨專案） | **v1.2 已補**：全域端點 `GET /monitor/task-totals`（§1.3.8；C-1） | 前端改打該端點（每 60 秒 1 次），取代 v1.1 的近似做法（前 30 個專案各打一次 `task-trend` 再加總：單一分頁穩態每分鐘約 31 次請求，QA DEF-AC-009）；同一任務被還原重跑會重複計的語意不變（`completed` 是步驟事件列數） |
 
 ---
 ## 5. E2E 情境（QA 與兩位開發者共用；全部以 `aisdlc-mock-claude` 為 Claude 替身，結果可決定）
@@ -1687,7 +1873,7 @@ AutoClaude 沒有審核鉤子，也不改它：閘點由 `ReviewGatePolicy` 依�
 |---|------|------|
 | 1 | `POST /import/text` `{content, sourceFileName:"e2e-brd.md", sourceType:"MARKDOWN"}` | **201**；`status=UPLOADED`、`signedOff=false`、`sourceType=MARKDOWN` |
 | 2 | `POST /import/{id}/parse` `{autonomyLevel:3, executionPath:"<E2E_ROOT>/proj-import", additionalPrompt:"盡量少於 5 個任務"}` | **200**；`status=PARSED`、`path=LLM`、`aiModel=e2e-model`、`tokenUsed=1152`、`signedOff=false`、`errors=[]`、`warnings=[]`；`parsedResult.goals` 2 個（g1 任務 2、g2 任務 1）、`goals[1].dependsOn=["g1"]`；`project.executionPath` ＝請求值（LLM 的 `/ignored` 被丟棄）。**WireMock 驗證**：收到 1 次 `POST /v1/chat/completions`（路徑就是 `model.apiUrl` 的路徑，後端沒有補任何路徑，AR-09），標頭 `Authorization: Bearer sk-e2e-dummy`；本文 `model=e2e-model`、`stream=false`、`response_format.type=json_object`；`messages[0].role=system`；`messages[1].content` 含 `自治等級: 3`、`補充說明: 盡量少於 5 個任務` 與文件原文 |
-| 3 | `GET /import/{id}` | **200**；含 `sourceContent`、與步驟 2 相同的 `parsedResult`、`parsePath=LLM`，`lastParseErrors` 缺席或 null |
+| 3 | `GET /import/{id}` | **200**；含 `sourceContent`、與步驟 2 相同的 `parsedResult`、`parsePath=LLM`，`lastParseErrors` 缺席或 null；**`warnings=[]`、`parseOptions` 等於步驟 2 的請求**（`autonomyLevel=3`、`executionPath`、`additionalPrompt`；v1.2，C-10） |
 | 4 | `PUT /import/{id}/result`：把 g1 改名「基礎建設」、在 g2 新增任務 T4（`請輸出 [T4_DONE]`） | **200**；`status=REVIEWING`、`signedOff=false`；goals／tasks 順序與 `sortOrder`（0 起連續）依陣列重編 |
 | 5 | `POST /import/{id}/confirm`（尚未 signoff） | **409**；`reason=草案尚未 signoff，不可確認匯入`；`GET /projects?q=E2E 匯入專案` 的 `totalElements=0` |
 | 6 | `POST /import/{id}/signoff` `{approver:"  "}` | **400**；`errors[0].field=approver` |
@@ -1696,7 +1882,7 @@ AutoClaude 沒有審核鉤子，也不改它：閘點由 `ReviewGatePolicy` 依�
 | 9 | `PUT result`（同一棵樹、改一個任務描述） | **200**；`signedOff=false`（**編輯撤銷 signoff**）；`GET /import/{id}` 的 `signedOffBy=null` |
 | 10 | 重新 `signoff` `{approver:"e2e-approver"}` | **200** |
 | 11 | `POST /import/{id}/confirm` | **201**：`signedOff=true`、`signedOffBy=e2e-approver`、`status=DRAFT`、`goalsCount=2`、`tasksCount=4`、`autonomyLevel=3`、`executionPath=<E2E_ROOT>/proj-import`、`name=E2E 匯入專案`、`createdBy=operator` |
-| 12 | Phase 2 讀取：`GET /projects/{pid}/goals`、`GET /goals/{g2}`、`GET /goals/{g}/tasks` | 兩個目標皆 `signedOff=true`、`signedOffBy=e2e-approver`；g2 的 `dependsOn=[g1 的 id]`；四個任務皆 `signedOff=true`；DB：專案／目標／任務的 `signed_off_at` 與匯入記錄的 `signed_off_at` 相同 |
+| 12 | Phase 2 讀取：`GET /projects/{pid}/goals`、`GET /goals/{g2}`、`GET /goals/{g}/tasks` | 兩個目標皆 `signedOff=true`；`signedOffBy=e2e-approver` 只在**詳情端點**（`GET /goals/{id}`、`GET /tasks/{id}`、`GET /projects/{pid}`）斷言——**清單端點只帶 `signedOff`**，不帶 `signedOffBy`／`signedOffAt`（QA O-03：v1.1 的措辭過寬；`GoalSummaryResponse`／`TaskSummaryResponse`）；g2 的 `dependsOn=[g1 的 id]`；四個任務皆 `signedOff=true`；DB：專案／目標／任務的 `signed_off_at` 與匯入記錄的 `signed_off_at` 相同 |
 | 13 | `GET /import/{id}` | `status=IMPORTED`、`projectId=pid`；再次 `confirm` → **409** `已匯入`（`details.projectId`）；`reject` → **409** `匯入記錄狀態不允許此操作`（`details.action=reject`） |
 | 14 | `GET /import?status=IMPORTED&sort=createdAt,desc` | 含此筆，`projectId` 已回填 |
 | 15 | 角色：viewer `POST /import/text` → **403**（`ACCESS_DENIED`）；viewer `GET /import` → **200**；operator `PUT /settings/…` 不在此情境 | |
@@ -1764,7 +1950,7 @@ AutoClaude 沒有審核鉤子，也不改它：閘點由 `ReviewGatePolicy` 依�
 | 12 | `GET …/logs?runId={runId}&order=asc&size=200` | 含 `Run #1 開始執行（自治等級 4）`（`source=RUN`）、六筆 `source=STEP` 與 `Run #1 已完成`；`level=ERROR` 篩選 → 0 筆 |
 | 13 | `GET …/alerts?runId={runId}`；`GET /projects/{pid}/executions` | `[]`；一筆批次：`runNumber=1`、`status=COMPLETED`、`tasksTotal=3`、`tasksCompleted=3`、`tasksFailed=0`、`successRate=100.0`、`durationSec≥1` |
 | 14 | 一致性（A1） | Bridge 直接 `GET /autoclaude/runs/{runId}`：`status=COMPLETED`、`completed_steps=3`、`tokens_used=3720`，與 Console 回應、DB 列一致 |
-| 15 | 報表：`GET /monitor/projects/{pid}/report?format=csv&runId={runId}`（`Accept: text/csv`） | **200**；`Content-Type` 為 `text/csv`；`Content-Disposition` 含 `monitor-report-`；本文以 BOM 開頭，第一行 `#report,`，依序含 `#section,summary`、`#section,runs`、`#section,tasks`、`#section,alerts` 四段；`summary` 段有 `totalTokens,3720,0,3720,TOKENS`；`runs` 段 1 列、`tasks` 段 3 列、`alerts` 段 0 列；`format=pdf` → **501**（`PDF 報表尚未提供（W5）`）；`format=xls` → **400**（`不支援的報表格式`）；viewer 亦可下載 |
+| 15 | 報表：`GET /monitor/projects/{pid}/report?format=csv&runId={runId}`（`Accept: text/csv`） | **200**；`Content-Type` 為 `text/csv`；`Content-Disposition` 含 `monitor-report-`；本文以 BOM 開頭，第一行 `#report,`，依序含 `#section,summary`、`#section,runs`、`#section,tasks`、`#section,alerts` 四段；`summary` 段有 `totalTokens,3720,0,3720,TOKENS`；`runs` 段 1 列、`tasks` 段 3 列、`alerts` 段 0 列；`format=pdf` → **200**、`Content-Type: application/pdf`、本文以 `%PDF-` 開頭、`Content-Disposition` 檔名以 `.pdf` 結尾（v1.2，C-4；內容驗收見 E2E-13 第 4 列）；`format=xls` → **400**（`不支援的報表格式`）；viewer 亦可下載 |
 
 ---
 
@@ -1913,6 +2099,7 @@ AutoClaude 沒有審核鉤子，也不改它：閘點由 `ReviewGatePolicy` 依�
 | `{apiUrl:"http://[::1]:8080"}` | **422** `loopback`（`::1` 不在 allowlist） |
 | `{apiUrl:"http://0x7f.0.0.1"}`、`http://2130706433` | **422** `malformed_url`（非標準 IP 寫法一律拒絕） |
 | `{apiUrl:"ftp://api.minimax.io/v1/text/chatcompletion_v2"}` | **422** `scheme` |
+| `{apiUrl:"file:///etc/passwd"}`（空 host；規則 1 先於規則 2） | **422** `malformed_url`（不是 `scheme`；B1-2） |
 | `{apiUrl:"http://exämple.com/v1"}`（host 含非 ASCII 字元） | **422** `malformed_url`（IDN 一律拒絕） |
 | `{apiUrl:"http://user:your_password_here@api.minimax.io/v1/text/chatcompletion_v2"}`（userinfo 一律拒絕；此為測試夾具，不是真值） | **422** `userinfo` |
 | `{apiUrl:"https://example.com"}`、`http://localhost.evil.example` | **422** `not_in_allowlist` |
@@ -1965,9 +2152,31 @@ AutoClaude 沒有審核鉤子，也不改它：閘點由 `ReviewGatePolicy` 依�
 | 9 | 進行中的 run 開 `/metrics` | 連線後先收到 3 則最新快照（id `<S>.1`／`<S>.2`／`<S>.3`），再隨即時事件更新（id `<S+1>` 起，嚴格大於 `<S>.3`）；`Last-Event-ID` 的值不影響（收斂快照） |
 | 10 | PAUSED 的 run（E2E-04）閒置 | 連線保持；每 ≤ `console.sse.keep-alive-seconds`（e2e 為 2 秒）收到一則 keep-alive 註解（解析後內容為 `keep-alive`） |
 | 11 | 瀏覽器預檢：自允許的 origin 對 `/api/v1/stream/…` 送 `OPTIONS`，`Access-Control-Request-Headers: last-event-id,authorization` | 回應的 `Access-Control-Allow-Headers` 含 `Last-Event-ID` |
-| 12 | 日誌稽核（AR-05） | 整份**後端日誌**（存取與審計）**不含**任何 `access_token` 的值（後端整合測試以收集到的日誌斷言；`AuditLoggingFilter` 只審寫入方法、記不含 query 的 `getRequestURI()`，本來就不會記）；Docker 全棧另以 `docker compose logs nginx` 確認沒有 `access_token` 的值（nginx 的 `log_format` 遮罩，§0.7 第 4 項） |
+| 12 | 日誌稽核（AR-05） | 整份**後端日誌**（存取與審計）**不含**任何 `access_token` 的值（後端整合測試以收集到的日誌斷言；`AuditLoggingFilter` 只審寫入方法、記不含 query 的 `getRequestURI()`，本來就不會記）；Docker 全棧另以 `docker compose logs nginx` 確認沒有 `access_token` 的值（nginx 的 `log_format` 遮罩，§0.7 第 4 項；**v1.2 另含 `error_log`**：重啟 backend 讓上游被切斷後，`error_log` 同樣不得出現 token——`error_log … crit`，§0.7 第 5 項） |
 | 13 | Bridge 暫時不可達（後端整合測試：假 Bridge 回連線重設） | 串流不關閉；送一則**不帶 `id:` 行**的 `alert`（`origin=CONSOLE`、`code=BRIDGE_UNREACHABLE`、`severity=WARNING`）；Bridge 恢復後自動補齊事件、無缺漏 |
 | 14 | 串流正常結束時的授權（TBC-1） | 步驟 5～8 的串流（含終態關閉）結束後，console-api 日誌**沒有** `AccessDeniedException`（`SseEmitter` 完成的 ASYNC dispatch 已被放行，§2.1 的實作提醒） |
+
+---
+
+### E2E-13　v1.2 追加情境（W5；C-1～C-12）　〔API-MON-08、API-PRJ-06、BR-26、NFR-9.3-04、NFR-9.4-04、US-S-06、US-M-07〕
+
+**前置**：照 §5.0；各列各用新專案（名稱含情境編號）；operator 寫、viewer 讀；列 5 在 Docker 全棧（經 nginx）、列 13 需能直連 Bridge，其餘用本機 e2e 環境。以下是 W5 的**最低驗證矩陣**（QA 可再加）。
+
+| # | 情境（裁決） | 動作 | 預期 |
+|---|--------------|------|------|
+| 1 | task-totals 與 task-trend 加總一致（C-1） | 兩個專案各以等級 4 跑一批 PRJ-A 到 `COMPLETED`；`GET /monitor/task-totals?from=<批次開始前>`；再對這兩個專案各 `GET …/task-trend?from=<同>&bucket=DAY` | `started`／`completed`／`failed`／`retried` **逐欄等於**兩專案各桶加總；`projectsCounted` 等於有步驟列的專案數；封存或軟刪的專案不計；viewer **200**；`to−from` 超過 92 天 → **400** `時間範圍不合法`（`errors[0].field=to`）；缺 `from` → **400**（`errors[0].field=from`） |
+| 2 | 專案復原（C-3） | operator `DELETE /projects/{id}` → **204**；`GET /projects?deleted=true`；`POST /projects/{id}/restore`；`GET /projects/{id}` 與其目標、任務 | 已刪除清單含該專案（`deletedAt` 非 null）；restore **200**（`ProjectDetailResponse`）：`status` 與刪除前相同、連帶軟刪的目標與任務一併回來，**刪除專案前就單獨刪除的目標不回來**；`GET /projects` 又列得到它；`audit_log` 有 `project.restore` |
+| 3 | restore 的錯誤路徑（C-3） | ① 對沒被刪的專案 restore；② 以 DB 把 `deleted_at` 改到 31 天前再 restore；③ 隨機 uuid；④ viewer 呼叫 restore 與 `GET /projects?deleted=true` | ① **409** `project_not_deleted`；② **409** `restore_window_expired`（`details.retentionDays=30`）；③ **404**；④ **403**（`ACCESS_DENIED`） |
+| 4 | PDF 報表（C-4） | `GET …/report?format=pdf&runId=…`（`Accept: application/pdf`） | **200**；`Content-Type: application/pdf`；本文以 `%PDF-` 開頭；`Content-Disposition` 檔名 `monitor-report-<8 碼>-<yyyyMMdd-HHmm>.pdf`；以 PDF 文字抽取可找到專案名稱、四個區段標題與 `totalTokens`；不再有 **501** |
+| 5 | refresh 暫時失敗不登出（C-5） | Docker 全棧（經 nginx）：開著執行頁，重啟 backend 容器 | `POST /auth/refresh` 得到 **502** 時 session 不被清除、不導向 `/login`；串流狀態點為「重新連線中」；backend 恢復後自動重連、事件不重複；refresh token 真的失效（401）才登出 |
+| 6 | 設定原樣匯入（C-6） | admin `POST /settings/export`，把得到的檔原樣 `POST /settings/import`（e2e profile，`model.apiUrl` 現值的主機不在 allowlist）；另匯入一個把 `model.apiUrl` 改成不在 allowlist 主機的檔 | 原樣匯入 **200**：`errors=[]`、`applied=0`、`skipped=50`（2 筆 `<encrypted>`＋48 筆值未變）；改值的那一檔該鍵進 `errors`（`目標位址未通過 SSRF／allowlist 檢查`），其餘 `skipped` |
+| 7 | escalation 跨批次不被吞（C-7） | 同一專案連續兩批都在 `G1-T1` 失敗（任務帶 `[FAIL_ME]`），**不確認**第一批的 `ENGINE_ESCALATION` 告警 | 第二批同樣產生新的 `ENGINE_ESCALATION` 告警列：`GET …/alerts` 共 2 列，`subject` 分別為 `step:<runId1>:G1-T1`、`step:<runId2>:G1-T1`；同一批次內同一步驟再次升級仍被去重（E2E-05 步驟 5） |
+| 8 | 執行中刪除（C-8） | 專案有 `RUNNING` 或 `PAUSED` 批次時，`DELETE /goals/{尚未開始的目標}`、`DELETE /tasks/{尚未開始的任務}` | 皆 **409** `project_executing`（`details.projectId`、`runId`）；批次進入終態後同一請求 **204** |
+| 9 | 手動重試（C-9） | 對 `maxRetries=1` 的 ESCALATED 任務 `POST /tasks/{id}/retry`；再把它設回 FAILED（或讓它再失敗）後第二次 retry | 兩次皆 **200**；`retryCount` 每次 +1 且**大於 `maxRetries`**（ESCALATED 任務本來就已有 `retryCount≥1`，所以第一次手動重試後 ≥2、第二次後 ≥3）；不報 409（`maxRetries` 不限制手動重試） |
+| 10 | 匯入記錄重開（C-10） | parse 出含警告的記錄（例：路徑 C 的任務沒有通過標準 → `passcriteria_placeholder`）後重新 `GET /import/{id}`；再 `PUT result`；另做一次被有界閘拒絕的 parse | `warnings[]` 與 parse 回應相同、`parseOptions` 等於 parse 請求；`PUT result` 後 `warnings` 以重算值覆寫；被拒的 parse 後 `parseOptions` 為該次請求、`warnings` 不變 |
+| 11 | 批次列表 `bridgeStatus`（C-11） | Level 4 的批次進行中 `POST pause`；另一個專案的批次進行中 `POST cancel`；各自立即 `GET /projects/{id}/executions` | 該批 `bridgeStatus=PAUSING`／`CANCELLING`（`status` 仍為 `RUNNING`）；終態批次的 `bridgeStatus` 等於 `status` |
+| 12 | traceId 貫穿（C-12） | 對 backend 發 `POST execute`，記下回應的 `X-Trace-Id`；Bridge 以 `BRIDGE_LOG_DIR`（或 stdout）留日誌；另直連 Bridge `GET /health` 不帶標頭 | Bridge 日誌至少有一行帶 `trace_id=<該值>`（`POST /autoclaude/runs` 那一行）；Bridge 日誌**每一行**都有 `trace_id` 欄位；直連時回應仍帶自產的 `X-Trace-Id` |
+| 13 | Bridge 深度探針（C-2） | `GET {bridge}/health/deep`；再把 workspace 設成唯讀（或讓 `PATH` 不含 git）重打一次；Docker 全棧看 healthcheck 與 `docker run --rm <bridge 映像> git --version` | 正常 **200**、`checks.git.version` 非空；異常 **503**、`status=degraded`、對應項 `ok:false` 帶 `reason`；全棧 healthcheck 走這一支，映像內 `git --version` 可執行；全棧跑一個批次到 `COMPLETED`（DEF-AC-003 的證明） |
 
 ---
 ## 6. 差異與裁決
@@ -2004,7 +2213,7 @@ AutoClaude 沒有審核鉤子，也不改它：閘點由 `ReviewGatePolicy` 依�
 | D-22 | `execution_steps.step_number` 的意義 | PRD §5.3.5：「步驟序號」 | Bridge 寫入該 step 事件的 `seq`（位置放在 `input`） | `stepNumber`＝事件 `seq`，`afterSeq` 直接對 `Last-Event-ID`；`stepNumber`／`stepId` 在各型別的多義處見 §0.6 | PRD §7.1.7 本來就要求 `step_number`「對應事件序」；位置另有 `stepId`／`input.step_id` |
 | D-23 | `ExecutionStepResponse.tokensUsed` | Architecture §11.2：由 `execution_steps` 帶出 | Bridge 不寫 | 同 D-16：COMPLETED／FAILED 列由歸因回算，其餘 null | |
 | D-24 | 設定匯出的加密值 | Architecture §11.2：匯出「不含敏感值」 | W3：輸出 `"<encrypted>"` 佔位、匯入跳過 | 採 **W3 佔位** | 匯出檔與匯入檔同形狀、可往返；敏感值仍不出現 |
-| D-25 | 報表 | PRD §7.1.6：`application/pdf` or `text/csv` | 主控裁決：CSV 必做、PDF 標 W5 | CSV 格式在 §1.3.7 固定（四段、BOM、CRLF、注入防護）；PDF＝501 | |
+| D-25 | 報表 | PRD §7.1.6：`application/pdf` or `text/csv` | 主控裁決：CSV 必做、PDF 標 W5 | CSV 格式在 §1.3.7 固定（四段、BOM、CRLF、注入防護）；PDF＝v1.1 回 501；**v1.2 起回 200**（與 CSV 同四個區段，PDFBox 3＋內嵌 OFL CJK 字型，C-4） | |
 | D-26 | KPI 集合 | PRD §5.4.2：八項 | 設計稿：四張卡（含「完成率」「重試率」） | `metrics` 回十個 KPI（八項＋`taskCompletionRate`＋`retryRate`）與分布 | ADR-001 G-13（兩者皆實作）；設計稿「完成率」是專案內進度，不是 PRD 的全域專案完成率 |
 | D-27 | `autoclaude.dalBackend` 等的物化 | Architecture §11.4：`dalBackend`→`storage.mode` | Bridge：`storage` 固定 `yaml_only`，帶了會發 `CONFIG_OVERRIDE_IGNORED` | Console **不送** `storage`／`checkpoint_dir`／`log_dir`；三個鍵標 `STORED_ONLY` | 避免每個 run 都帶噪音告警；誠實標示無效參數 |
 | D-28 | `model.*` → `minimax.*` | Architecture §11.4：一律映射 | Bridge 會驗證「實際生效的 MiniMax URL」；引擎只靠 `MINIMAX_API_KEY` 的有無決定要不要建 Brain | **只在 `model.apiKey` 有值時**才送 `minimax.*` 與 `MINIMAX_API_KEY`；`model.apiUrl` 原樣當 `minimax.base_url`（D-48）；預設值與 allowlist 已對齊 Bridge（D-53） | 沒有金鑰就不送，引擎本來就用不到 Brain（也是 E2E 關閉演化的做法，D-58）；有金鑰時預設端點在 Bridge 的 allowlist 內，不會被 `outbound_not_allowed` 拒絕 |
@@ -2013,7 +2222,7 @@ AutoClaude 沒有審核鉤子，也不改它：閘點由 `ReviewGatePolicy` 依�
 | D-31 | execute 可接受的專案狀態 | W3：`READY／DRAFT／FAILED`；W3-B2 任務書另含 `COMPLETED` | 附錄 B.1：`DRAFT→EXECUTING`、`FAILED→EXECUTING`、`COMPLETED→EXECUTING` 都不是合法轉移（`COMPLETED` 只能 `→ARCHIVED`） | 接受 `DRAFT`／`READY`／`FAILED`／`COMPLETED`（只擋 `EXECUTING`、`ARCHIVED`）；`DRAFT`／`FAILED` 在同一交易內先 `→READY` 再 `→EXECUTING`（兩步都合法）；`COMPLETED` 屬系統重設（§3.5.3） | 不違反 B.1 的手動轉移表，又保留任務書的可用性；`COMPLETED` 專案補了新任務後可再跑（沒有可執行任務則由 7c 擋下） |
 | D-32 | `/metrics` 串流的重播 | PRD §7.1.7：每個 event 帶單調遞增 id，重連從 `Last-Event-ID` 重播 | 三個事件都是 latest-wins 的狀態快照 | **收斂快照**：重連先送各一則最新快照，不重播歷史；三則快照的 id 互異（`<S>.1`／`<S>.2`／`<S>.3`），之後的即時事件 id 嚴格大於 `<S>.3` | 對快照語意等價；省去為歷史指標再存一份。互異才不會被客戶端「已處理的最大 id」去重規則丟掉（v1.0 的 `<S>`、`<S>`、`<S>.1` 會丟第二則，AR-02） |
 | D-33 | 審核產生後續批次時如何回報 | PRD：`204 No Content` | 需要告訴客戶端新 run id | 204 保持，新 run id 放回應標頭 `X-Follow-Up-Run-Id`（CORS 已暴露） | 不違反主控的 204 裁決 |
-| D-34 | Phase 2 `POST /tasks/{id}/retry` | PRD：重試失敗任務 | 引擎無「單任務重跑」介面 | 維持 Phase 2 行為：只改 DB（`QUEUED`、`retryCount+1`），**不啟動 run**；實際重跑要 `execute`（範圍含該任務）或審核 `RETRY` | 避免兩條重試路徑語意混淆 |
+| D-34 | Phase 2 `POST /tasks/{id}/retry` | PRD：重試失敗任務 | 引擎無「單任務重跑」介面 | 維持 Phase 2 行為：只改 DB（`QUEUED`、`retryCount+1`），**不啟動 run**；實際重跑要 `execute`（範圍含該任務）或審核 `RETRY`；**v1.2 明文：不受 `maxRetries` 限制**（C-9，§1.6.4） | 避免兩條重試路徑語意混淆 |
 | D-35 | `scope.limits` 的執行 | PRD US-E-10：單一任務／目標／整體 Token 上限 | 引擎只認整體 token_guard | 整體＝`tokenBudget`；任務／目標上限由 Console 依 token 事件歸因判定，超過走 `TOKEN_BUDGET_EXCEEDED`＋`:pause` | 不改引擎即可滿足 |
 | D-36 | 分頁預設 | PRD §7.2：`size:10` 範例 | `steps`／`logs` 資料量大 | 預設 10／上限 100；`steps`、`logs` 預設 50／上限 200；`settings/history` 預設 20 | |
 | D-37 | 時間格式 | 主控裁決：ISO-8601 帶 offset | Phase 2：`Instant` 輸出 `Z`、封包 `timestamp` 輸出伺服器 offset | 兩種都是合法 offset 表示；client 以日期函式解析，不比對字串 | 不改 Phase 2 已鎖的輸出 |
@@ -2044,7 +2253,7 @@ AutoClaude 沒有審核鉤子，也不改它：閘點由 `ReviewGatePolicy` 依�
 
 W3-B1／B2、W4-F1／F2、W4-QA 五份任務書寫於本契約之前，都規定「衝突時以契約為準」；主控已於 2026-10-15 在每份檔尾加〈主控裁決補充〉。補充節已與本契約 v1.1 對齊的項目不再列入：B1 的失敗存放（V5 兩欄）、`apiUrl` 語意與預設值、SSRF 釘 IP 與 loopback 放行方式、限流鍵、nginx、`@Max(20)`、通知摘要欄位、既有測試同步、reason 一律中文逐字、路徑探測；B2 的 V7、`step_id`、`mock-env`、DB 位移、探測環 2,880、`SKIP`＝後續批次、halt 不判 `ESCALATED`、啟動對帳 404 只記 WARN、AR-01 相依、補償刪除守門、人工判定優先、ASYNC dispatch、E2E 啟動環境、自治等級；F1／F2／QA 的 reason、輪詢地板 10 秒、時間軸改用 steps、Level 4 跑完、儀表板統計、Bridge 連線點、RTM 三項裁決。**下表只列補充節之後仍與契約不同的點**：實作者照契約；主控若要改採任務書的寫法，請改契約，不要各包各自偏離。
 
-| # | 任務書 | 項目 | 任務書字面 | 契約 v1.1 | 出處 |
+| # | 任務書 | 項目 | 任務書字面 | 契約 v1.1 | 已回寫（v1.2 位置） |
 |---|--------|------|-----------|-----------|------|
 | 1 | W3-B1 | 有界閘 `empty_prompt` 的檢查欄位 | 每個任務的 `description` 與 `passCriteria` 非空 | 任務 `name` 或 `description` 去空白後為空＝閘 `empty_prompt`（422）；`passCriteria` 空白在 `PUT result` 是 400（結構），parse 的路徑 B／C 則填佔位字串並加 warning `passcriteria_placeholder` | §3.3.5、§1.1.4 |
 | 2 | W3-B1 | `parsedResult.path` 的大小寫 | `sdd／llm／decompose` | `SDD／LLM／DECOMPOSE`（主控「列舉全大寫」裁決） | §0.2 |
@@ -2067,6 +2276,8 @@ W3-B1／B2、W4-F1／F2、W4-QA 五份任務書寫於本契約之前，都規定
 | 19 | W4-F2 | SSE 斷線後的回補順序 | 先 `GET steps?afterSeq` 分頁回補，再以 `Last-Event-ID` 續接 | 先以 `Last-Event-ID` 自動重連（伺服器端重播）；連續失敗兩次以上才退回 REST 回補再連（`steps` 只含步驟事件） | §2.3 第 6 點、§2.8 |
 | 20 | W4-QA | Docker 全棧驗證（矩陣 D） | 登入後走一次「匯入貼文字 → signoff → confirm → 執行（映像內建 mock claude）→ COMPLETED」 | Docker 全棧不載入 e2e profile：沒有 `allow-loopback`、`mock-env`，路徑 B／C 沒有可用模型；匯入步驟改走路徑 A（凍結規格放進容器內專案目錄）或直接用 Phase 2 REST 建專案；10MB 上傳與 `access_token` 不入 nginx 日誌仍須驗 | §5.0.1、§0.7 |
 
+v1.2 註：本表 20 列都是契約為準的定案，最後一欄即各差異在契約正文已寫定的位置（無待回寫項）。**W4 補充節〈契約漂移裁決〉與四份開發者交卷提出的新漂移**不屬於本表（本表是任務書對契約），另列於 §6.5.2，同樣逐條已回寫正文並附程式位置。
+
 ### 6.3 主控裁決（2026-10-15）
 
 v1.0 交卷時列為〈未決問題〉的 11 項，主控全部採用本契約的建議預設；本節是這些裁決的正式記錄，各列的落點已在對應章節改成定案寫法。
@@ -2081,7 +2292,7 @@ v1.0 交卷時列為〈未決問題〉的 11 項，主控全部採用本契約�
 | 6 | D-46：`pendingSignoffs` 計數 | 照契約：匯入記錄只計 `PARSED`／`REVIEWING` 且未 signoff | D-46、§1.4.1 |
 | 7 | v1.0 §6.2 第 2 項：`reason` 風格 | 維持**中文逐字常數**（B1／F1／F2／QA 補充節已改用） | 附錄 B、§0.3 |
 | 8 | 事件時間軸的資料來源 | 照 PRD 形狀：`task-trend` 只回 `List<TaskTrendPoint>`；時間軸用 `GET /executions/{runId}/steps` | §1.3.3、§4.3 M-12 |
-| 9 | Dashboard「本週完成任務數」 | 先由前端加總各專案 `task-trend` 的 `completed`（近似值；全域端點留待 W5） | §4.6 G-G3 |
+| 9 | Dashboard「本週完成任務數」 | 先由前端加總各專案 `task-trend` 的 `completed`（近似值；全域端點留待 W5）→ **v1.2 已補**：全域端點 `GET /monitor/task-totals`（C-1），前端改打該端點、不再扇出 | §1.3.8、§4.6 G-G3 |
 | 10 | 評估指令的可執行檔白名單 | 採用附錄 D.3 的預設名單 | D-40、附錄 D.3 |
 | 11 | e2e 專用屬性的載入範圍 | `allow-loopback`、`test-dns-overrides`、`mock-env`、`sse.keep-alive-seconds` 只在 e2e／test profile 載入，production／docker 不得出現 | §5.0.1、附錄 D.2、D-47 |
 
@@ -2118,6 +2329,80 @@ v1.0 交卷時列為〈未決問題〉的 11 項，主控全部採用本契約�
 | TBC-2 | E2E-05 時引擎會對 `minimax.base_url` 發演化提案，退避可能拖垮輪詢預算 | 以 AR-12 關閉演化處理：執行類情境 `model.apiKey` 必為空、清 `MINIMAX_*` | §3.4.2、§5.0.2、E2E-01 結束動作、E2E-05 前置、D-58 | — |
 | TBC-3 | 路徑 A 實務合約數量不明 | 併入 AR-19：切分設計不依賴實際合約數 | §3.3.2、D-49 | — |
 | RTM | `API-AUT-06`、`US-M-10`、`US-I-05` 的判定 | `API-AUT-06` 🟡；`US-M-10`（資源使用情況）🟡；`US-I-05`（瀏覽按鈕）⛔ | 附錄 E、§4.6 G-I2／G-M3 | — |
+
+### 6.5 v1.2 變更一覽（W5；2026-10-15）
+
+W4 獨立 QA（`docs/06_quality/QA_P3-6_E2E_Verification.md`）登記 10 筆缺陷（DEF-AC-001～010）與 21 筆觀察（O-01～O-21）。W5 修復波的 22 項主控裁決（`docs/04_planning/agent_briefs/W5_OVERVIEW.md` §3 的 C-1～C-22）與 W4 補充節〈契約漂移裁決〉的漂移，在 v1.2 一次回寫本契約。分三張表：6.5.1 是裁決逐條（改了哪一節）；6.5.2 是漂移回寫逐條（以實作為準，附程式位置）；6.5.3 是 SA 在落筆時做的判斷與請主控確認的偏離。
+
+#### 6.5.1 裁決 C-1～C-22 對照
+
+| 裁決 | 來源 | 內容（一句話） | 契約位置 | YAML | 實作 |
+|------|------|----------------|----------|------|------|
+| C-1 | DEF-AC-009（P2） | 全域任務總計端點；前端「本週完成」改打它、拿掉 30 專案扇出 | §1.0 #41、§1.3.8、§0.4 角色矩陣、§4.5 G-08、§4.6 G-G3、§6.3 第 9 項、附錄 D.1、附錄 E（`API-MON-08`） | `/api/v1/monitor/task-totals`、`TaskTotalsResponse` | BE、FE |
+| C-2 | DEF-AC-003（P1） | Bridge 映像裝 git；新增免認證的 `GET /health/deep`；compose healthcheck 改打它 | §3.1.1、§3.1、E2E-13 第 13 列、附錄 E（`BR-26`） | `/health/deep`（Bridge 端點，路徑層級 `servers` 覆寫）、`BridgeDeepHealthResponse`、`BridgeHealthCheck` | INFRA |
+| C-3 | NFR-9.3-04 | 軟刪除復原：`POST /projects/{id}/restore`、`GET /projects?deleted=true`、保留期屬性與預設關閉的清除排程 | §0.4、§0.5 V9、§1.0 #42、§1.6.1／1.6.2／1.6.5、附錄 B.2／B.3／D.2、E2E-13 第 2～3 列、§4.5 G-09；ADR-001 D19；附錄 E（`API-PRJ-06`） | `/api/v1/projects/{id}/restore`、`/api/v1/projects`（`deleted`）、`ProjectSummaryResponse.deletedAt`、`ProjectDetailResponse` | BE、FE |
+| C-4 | US-M-07／API-MON-07 | PDF 報表改回 200；501 與 `PDF 報表尚未提供（W5）` 退役 | §0.3 第 6 點、§1.3.7、§4.3 M-16、附錄 B.2、附錄 D.4、E2E-03 步驟 15、E2E-13 第 4 列 | `…/report`（移除 501 與 `NotImplemented`） | BE、FE |
+| C-5 | DEF-AC-007（P2） | `POST /auth/refresh` 失敗分 `renewed`／`invalid`／`unavailable` 三類；SSE 取 token 與 1→30 秒退避 | §2.8 第 7～9 點、附錄 B.2（`upstream_unavailable`）、E2E-13 第 5 列 | — | FE |
+| C-6 | DEF-AC-002（P3） | 設定匯入：值未變一律 `skipped`，先於值規則與 allowlist 驗證 | §1.5.10、E2E-13 第 6 列 | `/api/v1/settings/import` 描述 | BE |
+| C-7 | O-14 | `ENGINE_ESCALATION` 去重鍵 `step:<runId>:<stepId>` | §3.7、E2E-13 第 7 列 | `AlertResponse.subject` 描述 | BE |
+| C-8 | O-05 | 專案有進行中批次時，刪除目標／任務回 409 `project_executing` | §0.3、§1.6.3、附錄 B.2、E2E-13 第 8 列 | `/api/v1/goals/{id}`、`/api/v1/tasks/{id}`（DELETE） | BE、FE |
+| C-9 | O-04 | 手動重試不受 `maxRetries` 限制；toast 文案改「手動重試第 N 次（不計入自動重試上限 M）」 | §1.2.11、§1.6.4、D-34、E2E-13 第 9 列 | — | FE（文案） |
+| C-10 | F1-1／F1-2 | 匯入記錄補 `warnings`、`parse_options`（V8）；詳情回 `warnings[]`、`parseOptions` | §0.5 V8、§1.1.3、§1.1.4、§1.1.9、§4.1 I-12／I-18、E2E-01 步驟 3、E2E-13 第 10 列 | `ImportRecordDetailResponse` | BE、FE |
+| C-11 | F2-4 | 批次列表項加 `bridgeStatus` | §1.2.2、§4.3 M-02、E2E-13 第 11 列 | `ExecutionRunSummaryResponse.bridgeStatus` | BE、FE |
+| C-12 | NFR-9.4-04／O-11 | `X-Trace-Id` 貫穿 console-api→Bridge；Bridge 回帶標頭、每行日誌含 `trace_id` | §0.4 第 6 點、§3.1.1、E2E-13 第 12 列 | — | BE、INFRA |
+| C-13 | UI-KPI-01／02 | KPI「環形」以設計稿數值卡為準 | §4.3 M-07；ADR-001 §4、§5 G-20 | — | （文件） |
+| C-14 | US-M-09 | 追蹤鏈視圖以批次下拉＋事件時間軸＋日誌查詢涵蓋 | §4.3 M-12 | — | （文件） |
+| C-15 | DEF-AC-008／O-08／O-09 | nginx `error_log` 降為 `crit`、`/api/health` 導向前端、`Cache-Control` 只留一份 | §0.7 第 5～6 項、E2E-12 步驟 12 | — | INFRA |
+| C-16 | DEF-AC-006／INF-VOL-06／O-20 | compose 的 `CONSOLE_ENCRYPTION_KEY` 必填；`LOG_DIR`／`BRIDGE_LOG_DIR`；`CONSOLE_INTERNAL_PROXIES` | 附錄 D.2（`LOG_DIR`、`server.tomcat.remoteip.internal-proxies`）、§3.1.1（`BRIDGE_LOG_DIR`） | — | INFRA、BE |
+| C-17 | DEF-AC-010 | `restore.sh` 對全新空卷先 `mkdir -p`；README 補核對步驟 | 契約不涉及（`docker/README.md` §4.3） | — | INFRA |
+| C-18 | DEF-AC-004／005 | 無障礙：主色底小字、`wg-muted`、aria 與 list 結構 | 契約不涉及（設計 token 與元件） | — | FE |
+| C-19 | NFR-9.4-01／NFR-9.1-05 | 前端 Prettier；Markdown 預覽去抖 | 契約不涉及 | — | FE |
+| C-20 | O-06／O-16 | 文件寫明預設帳密必換、`/actuator/prometheus` 只靠網路隔離 | 契約不涉及（`docker/README.md`） | — | INFRA |
+| C-21 | 契約漂移 | 漂移逐條回寫正文 | §6.5.2 | — | SA |
+| C-22 | O-15 | `CONSECUTIVE_FAILURES` 觸發路徑說明（不改規則） | §3.7 | — | SA |
+
+QA 缺陷與觀察的對帳：DEF-AC-002＝C-6、003＝C-2、004／005＝C-18、006＝C-16、007＝C-5、008＝C-15、009＝C-1、010＝C-17；O-04＝C-9、O-05＝C-8、O-08／09＝C-15、O-11＝C-12、O-14＝C-7、O-15＝C-22、O-16／20＝C-16／C-20。**DEF-AC-001**（匯入頁把 `maxRetries: null` 當字面「null」）是前端判空缺陷，契約 §0.2 本來就規定「client 視 `null` 與缺席等價」，**不改契約**。**O-03**（E2E-01 步驟 12 對清單端點寫 `signedOffBy` 過寬）已更正該步驟的措辭。其餘觀察（O-01 `X-RateLimit-*` 不暴露、O-02、O-06／07、O-10、O-12、O-13、O-17～19、O-21）維持觀察或另案（見 `W5_OVERVIEW.md` §3 末段〈不在 W5 範圍〉）；O-01 已在 §0.4 第 3 點明文，O-12／O-13 的行為（審核項被系統關閉的 `comment`、`ENGINE_ESCALATION` 訊息即失敗原因）本來就是 §3.5.3／§3.7 的規格。
+
+#### 6.5.2 漂移回寫對照（C-21；以實作為準；對應程式位置相對 `AgentConsole/`）
+
+| 編號 | 漂移與採用的實作 | v1.2 寫入位置 | 對應程式位置 |
+|------|------------------|---------------|--------------|
+| B1-1 | `execution.globalTokenBudget` 的範圍上限（13 位）與驗證規則（12 位）矛盾；以規則為準，上限 999999999999 | 附錄 C.3、§0.8 | `backend/src/main/resources/db/migration/V5__seed_engine_configs.sql`（規則 `^[1-9][0-9]{0,11}$`）；`…/domain/service/ConfigValueRules`；`…/domain/model/config/ConfigCatalog`（`max` 常數目前仍是 1000000000000，W5-BE 改 999999999999） |
+| B1-2 | `file:///x`（空 host）判 `malformed_url` 而非 `scheme`；host 去尾端 `.` 對 IP 字面仍套分類與 allowlist | §1.5.7 規則 1、4；E2E-10 | `…/domain/service/OutboundUrlPolicy`（`checkStatic` 的空 host 判斷早於 scheme 判斷；`normalizeHost`） |
+| B1-3 | 沒有 location 的閘，`errors[].field`＝閘名、`message`＝detail | §1.1.3 | `…/adapter/in/web/dto/ApiError.FieldError.ofGate`、`…/adapter/in/web/GlobalExceptionHandler.errorsOf` |
+| B1-4 | `GET /settings`、`GET /settings/{category}` 的 `reveal` 非布林回 400 | §0.3、§1.5.1、§1.5.2 | `…/adapter/in/web/SettingsController`（`listAll`／`listCategory` 的 `boolean reveal`）、`GlobalExceptionHandler.handleTypeMismatch` |
+| B1-5 | Bridge 基底位址＝管理員改過的 `engineUrl` 優先，否則 `ENGINE_BRIDGE_URL`（預設 `http://localhost:8081`） | §3.1 | `…/adapter/out/bridge/BridgeEndpoints.base`、`…/infrastructure/config/BridgeProperties` |
+| B1-6 | 單鍵 PUT／重置的 token_guard 違規 `errors[].field=value`；群組端點為 `haltThresholdPct` | §1.5.3 第 4 項、§1.5.4 | `…/application/service/SettingsService`（`update`／`reset`／`resetCategory` 傳 `"value"`；`updateTokenGuard` 傳 `"haltThresholdPct"`） |
+| B1-7 | 設定匯入：加密鍵給明文 → errors 不套用；項目結構不合法 → `missing_configs`（400）；415 判準＝副檔名 `.json` 且內容型別含 `json`／`octet-stream` 或為空 | §1.5.10 | `SettingsService.importSettings`、`…/adapter/in/web/SettingsFileReader.read` |
+| B1-8 | 新增依賴的實際版本：pdfbox 3.0.8、poi-ooxml 5.5.1、bucket4j-core 8.10.1（最後一版，之後改名 `bucket4j_jdk17-core`）、httpclient5 由 BOM 管 | 附錄 D.4 | `backend/build.gradle.kts`（版本區） |
+| B1-9 | 限流是固定視窗（每 60 秒 100 次；`Retry-After` 取視窗剩餘秒數進位、不小於 1） | §0.4 第 4 點 | `…/infrastructure/security/RateLimiter`、`RateLimitFilter` |
+| F1-1／F1-2 | `GET /import/{id}` 不回 warnings、解析選項不存記錄 → **v1.2 已補**（C-10） | §0.5 V8、§1.1.9、§4.1 I-12／I-18 | （W5-BE 實作） |
+| F1-3 | `specDir` 沒有 UI 欄位（契約 D-03） | §4.1 I-05 | `frontend/components/domain/import/SourceCard.tsx`、`sourceRules.ts` |
+| F1-4 | token_guard 任一鍵有改就走群組端點（PRD §7.1.8） | §4.4 S-09 | `frontend/components/domain/settings/SettingsView.tsx`（`useUpdateTokenGuard`） |
+| F1-5 | `reveal` 以分類為單位、每按一次「顯示」＝一筆審計 | §1.5.1、§4.4 S-05 | `SettingsView.tsx`（`listSettingsByCategory(category,{reveal:true})`）；後端 `SettingsService.listCategory`（`auditReveal`） |
+| F1-6 | ENCRYPTED 的 `value` 恆為遮罩，前端以 `hasValue` 判「尚未設定」 | §4.4 S-03 | `SettingsView.tsx`、`SettingControl.tsx` |
+| F2-1 | 圖表 `DAY` 桶標籤用瀏覽器本機時區（桶起點仍是 UTC） | §1.3 共通參數 `bucket`、§4.3 M-08 | `frontend/lib/domain/metrics.ts`（`formatBucketLabel`） |
+| F2-2 | 審核 `RETRY` 內部的 restore 也發 ENGINE 告警 `RESTORE` | §3.6.3 備註 | `frontend/lib/domain/runLive.ts`（`isRestoreAlert`）；後端 `ExecutionGateApiIT`（恰 1 次） |
+| F2-3 | 儀表板「本週完成」是前 30 個專案的近似聚合 → **v1.2 已補**（C-1） | §1.3.8、§4.5 G-08 | — |
+| F2-4 | 批次列表沒有 `bridgeStatus` → **v1.2 已補**（C-11） | §1.2.2、§4.3 M-02 | — |
+| F2-5 | 「查看結果／查看日誌」只做「查看任務」連結 | §4.2 E-18 | `frontend/components/domain/execute/ReviewCard.tsx` |
+| F2-6 | keep-alive 註解行前端不可見，以批次詳情 15 秒輪詢兜底 | §2.1 keep-alive 列 | `frontend/lib/api/queries.ts`（`EXECUTION_POLL_MS`） |
+| B2-1 | execute 的簽核檢查取整案（範圍外的未簽任務也擋） | §1.2.1 第 5 項 | `…/application/service/ExecuteProjectService.requireSignedOff` |
+| B2-2 | 7b：`COMPLETED` 與 `SKIPPED` 的前置目標都視為已滿足；後續批次不做 7b | §1.2.1 第 7b 項 | `…/domain/service/ExecutionPlanner`（`requireDependenciesAreSelectedOrDone`、`plan(…, enforceDependencies)`） |
+| B2-3 | 啟動對帳多補「批次在 DB 已終態、專案仍 `EXECUTING`」，依 `console_last_seq` 補處理 | §3.5.4 | `…/application/service/MonitorTicker.reconcile` |
+| B2-4 | 閘點暫停旗標存記憶體；console-api 在 `:pause` 與 `PAUSED` 事件之間重啟會遺失，該次不建審核項、需手動 resume | §3.6.1 | `…/application/service/RunRegistry.Runtime`（`gatePauseRequested`）、`RunEventProcessor` |
+| B2-5 | `STEP FAILED` 即時框架的 `errorMessage` 取自 DB 的 `FAILED` 列，列晚於事件時即時框架可能缺文字、重播會補 | §2.5 `log` 備註 | `…/application/service/RunEventProcessor`、`StreamService` |
+| B2-6 | 時間查詢參數容忍未編碼 `+`；CSV `runs` 區段含 `started_at < to` 的全部批次、`alerts` 取視窗內 | §1.3（共通）、§1.3.7 | `…/adapter/in/web/TimeParams`、`…/application/service/MonitorService.report` |
+
+#### 6.5.3 SA 的判斷與請主控確認的偏離
+
+1. **C-1 的 400 reason**：裁決寫「400 `validation_error`（`errors[].field=to`）」。契約沒有 `validation_error` 這個常數，同族的監控端點用 `時間範圍不合法`；本版採 `時間範圍不合法`＋`errors[].field=to`＋`details={from,to,maxDays:92}`，不新增常數（QA 斷言 `status=400` 與 `errors[0].field=to` 即可）。若主控確要 `validation_error`，請改契約 §1.3.8 與附錄 B 並通知 FE。
+2. **C-4 的區段數**：裁決寫「與 CSV 相同的三段（指標摘要、任務趨勢表、告警清單）」。CSV 實為四段（`summary`／`runs`／`tasks`／`alerts`），沒有「任務趨勢表」；為保持 CSV／PDF 同源，PDF 定為「與 CSV 相同的四個區段」＋標題與產生時間。
+3. **C-3 的資料面**：裁決沒有說復原後的專案狀態與清除範圍。本版補：V9 增 `projects.deleted_at`／`status_before_delete`、`goals`／`tasks.deleted_at`；復原還原刪除前的狀態；「同一次刪除連帶軟刪」以相同 `deleted_at` 辨識；清除排程只清專案層級（連同子樹），單獨軟刪的目標／任務不清；`ProjectSummaryResponse` 加 `deletedAt`（只在 `deleted=true` 列表帶值）。
+4. **C-8 的 reason 與既有常數並存**：`project_executing`（刪除目標／任務被擋）與 execute 的 `專案正在執行中`（啟動執行被擋）語意相近、字串不同。本版照裁決用 `project_executing`，並在 §0.3 第 5 點註明兩者不可混用；若主控想統一，請改用既有的 `專案正在執行中`（FE 已有對應常數）。
+5. **C-5 的未列狀態碼**：裁決只列了 `invalid`（400／401／403）與 `unavailable`（網路錯誤、5xx、429）。其餘狀態碼（例：404、408）本版保守歸 `unavailable`（寧可保留 session，也不誤登出）。
+6. **C-7 只改 `ENGINE_ESCALATION`**：`ENGINE_TOKEN_HALT` 的 `step:<stepId>` 有同型缺口，本版依裁決未動，§3.7 已註明並列為後續候選。
+7. **B1-1 的 `ConfigCatalog.max`**：實作的規則是 12 位，但 `ConfigCatalog` 的 `max` 常數與 `ConfigResponse.max` 仍報 1000000000000；契約以規則為準（999999999999），W5-BE 須把常數對齊（§0.8），否則 `GET /settings` 的 `max` 會比規則多 1。
 
 ---
 
@@ -2165,6 +2450,7 @@ HTTP 狀態與端點見各小節。**404 沿用 Phase 2：`reason` 省略，只�
 | 通用 | 502 | `引擎橋接服務無法連線` | — |
 | 通用 | 504 | `引擎橋接服務逾時` | — |
 | 通用 | 502 | `引擎橋接服務錯誤` | `bridgeStatus,bridgeReason` |
+| 認證（前端合成） | 503 | `upstream_unavailable` | —（**後端永不回此 reason**：`POST /auth/refresh` 因網路錯誤、5xx、429 暫時失敗時，前端合成 `ApiError{status:503, reason:"upstream_unavailable", message:"伺服器暫時無法連線，請稍後再試"}`，不登出；§2.8，v1.2） |
 | 匯入 | 400 | `未提供檔案` | — |
 | 匯入 | 400 | `檔案是空的` | — |
 | 匯入 | 413 | `檔案超過 10MB 上限` | `limitBytes` |
@@ -2203,9 +2489,11 @@ HTTP 狀態與端點見各小節。**404 沿用 Phase 2：`reason` 省略，只�
 | 執行 | 409 | `只能還原專案最新的執行批次` | `latestRunId,latestRunNumber` |
 | 執行 | 409 | `審核項已處理` | `status,decidedBy,decidedAt` |
 | 執行 | 409 | `此審核項不允許該決定` | `kind,decision,allowedDecisions` |
-| 監控 | 400 | `時間範圍不合法` | `from,to` |
+| 專案 | 409 | `project_executing` | `projectId,runId`（刪除目標／任務時專案有進行中批次，§1.6.3；**不是** execute 的 `專案正在執行中`；v1.2） |
+| 專案 | 409 | `project_not_deleted` | `projectId,status`（復原一個沒被軟刪除的專案，§1.6.1；v1.2） |
+| 專案 | 409 | `restore_window_expired` | `projectId,deletedAt,retentionDays`（軟刪除已超過保留期，§1.6.1；v1.2） |
+| 監控 | 400 | `時間範圍不合法` | `from,to`（`task-totals` 另帶 `maxDays`，§1.3.8） |
 | 監控 | 400 | `不支援的報表格式` | `format,supported` |
-| 監控 | 501 | `PDF 報表尚未提供（W5）` | — |
 | 設定 | 403 | `僅 ADMIN 可揭露敏感參數` | — |
 | 設定 | 400 | `參數值不符合型別或驗證規則` | `valueType,validationRule,min,max,options` |
 | 設定 | 400 | `halt_threshold_pct 必須大於 compact_threshold_pct`（PRD 逐字） | `compactThresholdPct,haltThresholdPct` |
@@ -2218,7 +2506,7 @@ HTTP 狀態與端點見各小節。**404 沿用 Phase 2：`reason` 省略，只�
 
 ### B.3 404 訊息樣板（`reason` 省略）
 
-`匯入記錄不存在或已刪除：<id>`、`專案不存在或已刪除：<id>`、`執行批次不存在或已刪除：<id>`、`執行批次不存在或不屬於此專案：<id>`、`checkpoint 不存在或不屬於此執行：<id>`、`審核項不存在或不屬於此執行：<id>`、`告警不存在：<id>`、`設定分類不存在：<category>`、`設定鍵不存在：<category>.<key>`。
+`匯入記錄不存在或已刪除：<id>`、`專案不存在或已刪除：<id>`、`執行批次不存在或已刪除：<id>`、`執行批次不存在或不屬於此專案：<id>`、`checkpoint 不存在或不屬於此執行：<id>`、`審核項不存在或不屬於此執行：<id>`、`告警不存在：<id>`、`設定分類不存在：<category>`、`設定鍵不存在：<category>.<key>`；v1.2 新增 `專案不存在或已清除：<id>`（`POST /projects/{id}/restore` 找不到該 id 或已被清除排程實體刪除，§1.6.1）。
 
 ---
 ## 附錄 C　設定鍵目錄（50 鍵；`ConfigCatalog` 與 V5 `validation_rule` 的唯一真相源）
@@ -2258,7 +2546,7 @@ HTTP 狀態與端點見各小節。**404 沿用 Phase 2：`reason` 省略，只�
 
 | 鍵 | 型別 | 預設 | `validationRule`／範圍／選項 | effect | `impactNote` |
 |----|------|------|------------------------------|:------:|--------------|
-| `globalTokenBudget` | LONG | `1000000` | `^[1-9][0-9]{0,11}$`；1～1000000000000 | C | 新批次的預設 Token 預算；不改動既有批次 |
+| `globalTokenBudget` | LONG | `1000000` | `^[1-9][0-9]{0,11}$`；1～999999999999（規則最多 12 位；v1.2 更正：v1.1 寫的上限 1000000000000 有 13 位、與規則矛盾，以規則為準，B1-1） | C | 新批次的預設 Token 預算；不改動既有批次 |
 | `tokenBudgetWarningThreshold` | FLOAT | `0.8` | `^0\.[0-9]{1,2}$`；0.01～0.99 | C | 即時生效於進行中的批次（告警每次評估時讀取） |
 | `maxParallelGoals` | INTEGER | `2` | `^([1-9]\|1[0-6])$`；1～16 | S | 引擎序列執行，目前不生效 |
 | `dagSchedulerStrategy` | ENUM | `TOPOLOGICAL` | `^(TOPOLOGICAL\|PRIORITY\|SHORTEST_FIRST)$` | C | 影響新批次同層目標的排序 |
@@ -2332,6 +2620,8 @@ HTTP 狀態與端點見各小節。**404 沿用 Phase 2：`reason` 省略，只�
 | 輪詢間隔地板 | 10 秒（`monitor.refreshIntervalMs` 的預設與最小值） | §0.4 第 4 點、附錄 C.4 |
 | SSE keep-alive／佇列 | 15 秒／1,000 框架 | §2.1 |
 | 監控視窗上限 | 366 天；趨勢桶數 ≤ 1,000 | §1.3 |
+| 全域任務總計視窗上限 | 92 天（`to − from`；`from` 必填） | §1.3.8 |
+| 軟刪除保留期 | 30 天（`console.retention.soft-delete-days`）；清除排程預設關閉 | §1.6.5、ADR-001 D19 |
 | 命令黑名單字元（NFR-SEC-03 第 1、2 層） | `` ! ` > < ~ $ & ; ``（8 個）＋換行、回車、NUL（Bridge 另加） | SSOT：`AutoClaude/autoclaude/utils/shell_deny_chars.py` 的 `BASE_DENY_CHARS`；後端複製並於檔頭註明（W4 QA 腳本比對兩端字元集一致） |
 
 ### D.2 `console.*` 屬性（Spring，環境變數以 `CONSOLE_…` 覆寫）
@@ -2350,7 +2640,11 @@ HTTP 狀態與端點見各小節。**404 沿用 Phase 2：`reason` 省略，只�
 | `console.sse.queue-size` | `1000` | |
 | `console.import.max-prompt-chars` | `120000` | |
 | `console.execution.mock-env` | （空；**僅 e2e／test profile**） | 附加到 Bridge 請求 `env` 的 `MOCK_CLAUDE_*` |
-| `CONSOLE_ENCRYPTION_KEY`（環境變數） | 必填 | base64 的 32 bytes（AES-256-GCM）；缺少或長度不對＝啟動失敗 |
+| `console.retention.soft-delete-days` | `30` | 軟刪除專案可復原的天數（≥ 1；v1.2，§1.6.5） |
+| `console.retention.purge-enabled` | **`false`** | 是否註冊每日清除排程；預設關閉（實體刪除不可逆；v1.2，§1.6.5、ADR-001 D19） |
+| `LOG_DIR`（環境變數） | （空；docker compose 設 `/app/logs`） | 有值時 logback 另啟 JSON 行的 `RollingFileAppender`（`${LOG_DIR}/console.log`，每日切檔、保留 7 天）；沒設時行為不變（C-16） |
+| `server.tomcat.remoteip.internal-proxies`（環境變數 `CONSOLE_INTERNAL_PROXIES`） | 只信 compose 子網（值寫在 `docker/README.md`） | Tomcat `RemoteIpValve` 信任的代理位址；縮小它可避免內網客戶端以 `X-Forwarded-For` 繞過未認證限流（QA O-20；C-16） |
+| `CONSOLE_ENCRYPTION_KEY`（環境變數） | 必填 | base64 的 32 bytes（AES-256-GCM）；缺少或長度不對＝啟動失敗；docker-compose 對應 `${CONSOLE_ENCRYPTION_KEY:?…}`，未設時 `compose config`／`up` 直接失敗（C-16） |
 | `spring.servlet.multipart.max-file-size`／`max-request-size` | `10MB`／`11MB` | 匯入上傳（設定檔另有 1MB 檢查） |
 
 ### D.3 評估指令可執行檔白名單（建議預設，Architecture §8.3「預設值由 W3 後端定案」）
@@ -2367,10 +2661,12 @@ HTTP 狀態與端點見各小節。**404 沿用 Phase 2：`reason` 省略，只�
 
 | 依賴 | 用途 | 版本 | 核可來源 |
 |------|------|------|----------|
-| `org.apache.pdfbox:pdfbox`（3.x） | PDF 文字擷取（§1.1.1） | 實作時現查最新穩定版並釘在 `build.gradle.kts` 的版本區 | W3-B1 任務書 |
-| `org.apache.poi:poi-ooxml` | DOCX 文字擷取（§1.1.1） | 同上 | W3-B1 任務書 |
-| `com.bucket4j:bucket4j-core` | 限流（記憶體實作，§0.4 第 4 點） | 同上 | W3-B1 任務書 |
+| `org.apache.pdfbox:pdfbox`（3.x） | PDF 文字擷取（§1.1.1）；**v1.2 起另用於 PDF 報表產生**（§1.3.7，`PDType0Font` 內嵌 CJK 字型；不新增相依） | 釘在 `build.gradle.kts` 的版本區：**3.0.8**（B1-8） | W3-B1 任務書 |
+| `org.apache.poi:poi-ooxml` | DOCX 文字擷取（§1.1.1） | **5.5.1**（同上） | W3-B1 任務書 |
+| `com.bucket4j:bucket4j-core` | 限流（記憶體實作，§0.4 第 4 點） | **8.10.1**（Maven Central 上的最後一版，之後改名 `bucket4j_jdk17-core`；同上） | W3-B1 任務書 |
 | `org.apache.httpcomponents.client5:httpclient5` | SSRF 防護的外呼 HTTP 客戶端：自訂 `DnsResolver` 釘 IP、Host／SNI 用原 host、不跟 redirect（§1.5.7；AR-10；D-51） | 由 Spring Boot BOM 管理，**不自行指定版本** | 主控補充裁決（W3-B1 補充節） |
+
+**字型資源（v1.2，C-4；不是相依）**：PDF 報表需要的 CJK 字型（建議 Noto Sans TC 靜態 Regular，SIL OFL 1.1）與其授權檔放 `backend/src/main/resources/fonts/`；來源網址與檔案雜湊寫在 W5-BE 交卷。
 
 ---
 
@@ -2385,7 +2681,7 @@ HTTP 狀態與端點見各小節。**404 沿用 Phase 2：`reason` 省略，只�
 | API-IMP-03、09 | §1.1.3、§3.3.3 | E2E-01（含有界閘變體） |
 | API-IMP-04 | §1.1.4 | E2E-01 步驟 4、9 |
 | API-IMP-05 | §1.1.6 | E2E-01 步驟 5、11 |
-| API-IMP-06 | §1.1.8、§1.1.9 | E2E-01 步驟 3、14 |
+| API-IMP-06 | §1.1.8、§1.1.9 | E2E-01 步驟 3、14；`warnings`／`parseOptions`（v1.2）：E2E-13 第 10 列 |
 | API-IMP-08 | §3.3.1、§3.3.2 | IT（假 Bridge：compile 200／各 422／不可達） |
 | API-IMP-10 | §1.1 狀態圖與表 | E2E-01 步驟 13、IT（非法轉移矩陣） |
 | API-SGN-01 | §1.1.5 | E2E-01 步驟 6～10 |
@@ -2401,16 +2697,21 @@ HTTP 狀態與端點見各小節。**404 沿用 Phase 2：`reason` 省略，只�
 | API-EXE-10 | §1.2.11、§3.6.3 | E2E-04、E2E-05 |
 | API-EXE-12 | §1.2.1 第 10 項 | IT（同專案同路徑兩次 execute，Bridge 409＋補償；另以迷你 Bridge 回 `spawn_failed` 驗補償刪除，AR-15）；E2E-02 步驟 7 為 Console 層檢查 |
 | API-EXE-13 | §3.4 | E2E-03（mock trace 驗 prompt 與關鍵字）、IT（欄位逐項） |
-| API-EXE-14 | §1.2.2 | E2E-03 步驟 13、E2E-05 步驟 7 |
+| API-EXE-14 | §1.2.2 | E2E-03 步驟 13、E2E-05 步驟 7；`bridgeStatus`（v1.2）：E2E-13 第 11 列 |
 | API-AUT-01～03 | §3.6.1、§3.6.2 | E2E-04（含 Level 2／3 對照） |
 | API-AUT-04、05 | §3.6.2 | E2E-05 變體 V4；決策表單元測試 |
 | API-AUT-06 | §3.6.1 | 單元（等級 6～10 行為同 5；`UNVERIFIED`）。**RTM 判定 🟡**（主控裁決：等級 6～10 不送引擎設定，保留 `UNVERIFIED`，待引擎支援後驗證） |
 | API-MON-01～04、06 | §1.3.1～§1.3.4、§1.3.6 | E2E-03 步驟 9～13 |
 | API-MON-05 | §1.3.5 | E2E-08 步驟 7 |
-| API-MON-07 | §1.3.7 | E2E-03 步驟 15 |
+| API-MON-07 | §1.3.7 | E2E-03 步驟 15（CSV 與 PDF 皆 200）、E2E-13 第 4 列 |
+| API-MON-08（v1.2） | §1.3.8 | E2E-13 第 1 列；IT（與各專案 `task-trend` 加總逐欄相等、封存與軟刪專案不計、視窗 92 天、VIEWER 200） |
+| API-PRJ-06（v1.2） | §1.6.1、§1.6.2 | E2E-13 第 2～3 列；IT（復原連帶目標／任務、單獨先刪的不回來、404／409×2、VIEWER 403） |
+| NFR-9.3-04（軟刪除 30 天內可復原；v1.2） | §1.6.1、§1.6.5、§0.5 V9 | E2E-13 第 2～3 列；單元（清除排程：逾期專案連同子樹實體刪除、`purge-enabled=false` 不註冊） |
+| BR-26（Bridge 深度探針；v1.2） | §3.1.1 | E2E-13 第 13 列；Bridge pytest（200／503）；Docker 全棧 healthcheck 與批次跑到 `COMPLETED` |
+| NFR-9.4-04（日誌 traceId 串聯；v1.2） | §0.4 第 6 點、§3.1.1 | E2E-13 第 12 列；`BridgeRunsAdapterTest`（標頭存在）、Bridge pytest（回帶標頭、每行日誌含 `trace_id`） |
 | API-NTF-01 | §1.4.1 | E2E-04 步驟 3、E2E-05 步驟 3、E2E-08 步驟 5 |
 | API-ALR-01、02 | §3.7 | E2E-08 |
-| API-ALR-03 | §3.7 | E2E-05（`ENGINE_ESCALATION`）；連續失敗規則為單元（假事件序列） |
+| API-ALR-03 | §3.7 | E2E-05（`ENGINE_ESCALATION`）、E2E-13 第 7 列（跨批次不被吞）；連續失敗規則為單元（假事件序列；觸發路徑說明見 §3.7） |
 | API-ALR-04～06 | §3.7 | 單元（假時鐘與假探測環） |
 | API-SSE-01～03 | §2 | E2E-03、E2E-04（重播）、E2E-12 |
 | API-SET-01、02 | §1.5.1、§1.5.2 | E2E-09 步驟 1、8 |
@@ -2418,7 +2719,7 @@ HTTP 狀態與端點見各小節。**404 沿用 Phase 2：`reason` 省略，只�
 | API-SET-05 | §1.5.5、§1.5.6 | E2E-09 步驟 10、11 |
 | API-SET-06 | §1.5.7 | E2E-10 |
 | API-SET-07 | §1.5.8 | E2E-09 步驟 16 |
-| API-SET-08、09 | §1.5.9、§1.5.10 | E2E-09 步驟 12～14 |
+| API-SET-08、09 | §1.5.9、§1.5.10 | E2E-09 步驟 12～14；匯出後原樣匯入（v1.2）：E2E-13 第 6 列 |
 | API-SET-10 | §3.4.2 | E2E-03（替身 `claude.command` 生效）、IT（物化表逐列） |
 | NFR-SEC-03 | §1.1.4、§1.2.1 第 9 項 | E2E-01（消毒變體）、IT（第 2 層複驗與白名單） |
 | NFR-SEC-04 | §1.5.7、§3.3.3 | E2E-10、E2E-01（`brain_unsupported`）、E2E-09 步驟 15 |
@@ -2430,7 +2731,7 @@ HTTP 狀態與端點見各小節。**404 沿用 Phase 2：`reason` 省略，只�
 | US-E-04～06 | §1.2.4～§1.2.6 | E2E-04、E2E-06、E2E-08 |
 | US-E-07、08 | §1.2.11、§1.4.1 | E2E-04、E2E-05 |
 | US-E-11 | §1.2.9、§1.2.10 | E2E-07 |
-| US-M-01～07、09 | §1.3 | E2E-03、E2E-08；US-M-06 見 `executions` 列表（E2E-03 步驟 13） |
+| US-M-01～07、09 | §1.3 | E2E-03、E2E-08；US-M-06 見 `executions` 列表（E2E-03 步驟 13）；US-M-07 的 PDF 見 E2E-13 第 4 列；**US-M-09（追蹤鏈）以批次下拉＋事件時間軸＋日誌查詢涵蓋，不另做獨立視圖**（主控裁決 C-14，§4.3 M-12） |
 | US-M-08 | 純前端（§4.3 M-18） | 前端測試 |
 | US-M-10 | §1.2.3、§1.3.1 | E2E-03 步驟 4、9。**「資源使用情況」判 🟡**（主控裁決：Bridge 沒有 CPU／記憶體資料來源，§4.6 G-M3；連線狀態、目前任務、Token 與步驟進度有） |
 | US-S-01～08 | §1.5 | E2E-09、E2E-10 |

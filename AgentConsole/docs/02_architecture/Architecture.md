@@ -370,11 +370,11 @@ Get-ChildItem AgentConsole\frontend\app -Recurse -Filter *.tsx | Where-Object { 
 
 ### 6(a) CRUD（US-P／G／T、API-PRJ／GOL／TSK）
 
-1. 瀏覽器 → nginx `/api/v1/**`（本機開發則直連 8080）→ backend；帶 `Authorization: Bearer`，`X-Trace-Id` 缺則由後端生成。
+1. 瀏覽器 → nginx `/api/v1/**`（本機開發則直連 8080）→ backend；帶 `Authorization: Bearer`；後端 `TraceIdFilter` 對每個請求自產 traceId（回應標頭 `X-Trace-Id`；**不採信**入站值，與契約 §0.4 第 6 點一致）。
 2. `JwtAuthenticationFilter` → RBAC（§8.2）→ Controller（`adapter.in.web`）→ Bean Validation → UseCase（`application.service`，`@Transactional`）。
 3. UseCase 經 Repository 埠載入聚合 → 領域方法（狀態機守門、signoff 預設、Kahn 防環）→ 經埠儲存 → JPA 轉接器 → `console.*`。
 4. 回應包 `{code,message,data,timestamp,traceId}`；分頁 `data={content,page,size,totalElements,totalPages}`；錯誤由 `GlobalExceptionHandler` 輸出 `{code,message,errors[],timestamp,traceId}`。
-5. 軟刪除：`is_deleted=true`；專案同時 `status=ARCHIVED`；連帶軟刪其目標與任務；EXECUTING 的專案、RUNNING 的任務回 409。
+5. 軟刪除：`is_deleted=true`；專案同時 `status=ARCHIVED`；連帶軟刪其目標與任務；EXECUTING 的專案、RUNNING 的任務回 409。W5（ADR-001 D19）：同時寫 `deleted_at`（同一次刪除連帶軟刪的專案、目標、任務寫同一個值）與 `status_before_delete`；`POST /projects/{id}/restore` 於 30 天保留期內復原（只復原同一次連帶軟刪者）；專案有進行中批次時刪除其目標／任務回 409 `project_executing`。
 6. 手動建立的專案／目標／任務 `signedOff=true`；建立請求帶 `draft=true` 則 `signedOff=false`（AI／外部程式與 E2E 造草案用，ADR-001 D12）。
 7. 每次寫入輸出一行 `audit` 結構化日誌（subject、method、path、目標 id、status、traceId）。
 
@@ -550,6 +550,8 @@ console-api 對 Bridge 欄位**只讀**；Bridge 對 console 欄位**只讀**（
 | `execution_steps`、`checkpoints` | **Bridge**（INSERT；`task_id`＝playbook 的 `goal_task_id`） | console-api（唯讀） |
 | `projects`、`goals`、`tasks`、`goal_dependencies`、`import_records`、`system_configs`、`system_config_history`、`review_requests`、`alerts` | **console-api**（唯一） | Bridge 不寫；僅 `execution_steps.task_id` 的外鍵檢查會觸及 `tasks` |
 
+W5（契約 v1.2）增補的欄位，同樣只由 console-api 寫：`import_records.warnings`（JSONB，預設 `[]`）、`import_records.parse_options`（JSONB，可 NULL）——重開匯入記錄時還原黃色解析提示與解析選項（V8，主控裁決 C-10）；`projects.deleted_at`／`projects.status_before_delete`、`goals.deleted_at`、`tasks.deleted_at`——軟刪除保留期與復原（V9，主控裁決 C-3，ADR-001 D19；刪除專案時專案與連帶軟刪的目標、任務寫同一個 `deleted_at`）。欄位定義見 §11.3 與契約 §0.5。
+
 | Bridge 狀態（8 態） | 寫入 PG `execution_runs.status`（PRD 6 態） |
 |--------------------|-----------------------------------------------|
 | INITIALIZING | INITIALIZING |
@@ -590,6 +592,7 @@ JWT（HS256）；access 30 分鐘、refresh 7 天；`POST /api/v1/auth/login`、
 | 讀取專案／目標／任務／匯入記錄／執行／監控／SSE 串流 | — | ✅ | ✅ | ✅ |
 | 讀取系統參數（敏感值遮罩）、匯出監控報表 | — | ✅ | ✅ | ✅ |
 | 專案／目標／任務的建立、編輯、刪除、重試 | — | — | ✅ | ✅ |
+| 專案復原（`POST /projects/{id}/restore`）、檢視已刪除專案（`GET /projects?deleted=true`；VIEWER 回 403，由 controller 檢查）——W5 C-3 | — | — | ✅ | ✅ |
 | signoff（匯入／專案／目標／任務） | — | — | ✅ | ✅ |
 | 匯入 upload／text／parse／編輯／confirm | — | — | ✅ | ✅ |
 | 執行 execute／pause／resume／cancel／restore／review | — | — | ✅ | ✅ |
@@ -635,6 +638,7 @@ Bridge 端點不對任何使用者開放，只有 console-api 以服務身分呼
 | Rate Limit（NFR-9.2-06） | 每分鐘 100 次（以 Redis 計數；無 Redis 退回記憶體） |
 | 審計（NFR-9.2-07） | 每次寫入輸出 `audit` 結構化 JSON 日誌（subject、method、path、目標 id、status、traceId）；PRD §6.2 無審計表，故不新增資料表 |
 | SQL 注入（NFR-9.2-04） | 全部經 JPA／參數化查詢；Bean Validation 於 Controller 邊界 |
+| traceId 貫穿（NFR-9.4-04；W5 C-12） | console-api 的 `TraceIdFilter` 對每個請求自產 traceId（寫入 MDC、回應標頭 `X-Trace-Id` 與封包 `traceId`，不採信入站值）；console-api 對 Bridge 的**每個請求**帶 `X-Trace-Id`（背景消費者用該 run 的 traceId 或新產）；Bridge 中介層讀取（缺則自產 uuid4）、回應回帶同名標頭、每一行應用日誌帶 `trace_id`（契約 §0.4 第 6 點、§3.1.1） |
 | Bridge 暴露面 | 無認證（§12 L-6）：僅 backend-net 可達；本機開發綁 `127.0.0.1`；對 host 發布 8081 視為缺陷 |
 
 ## 9. 執行模式
@@ -840,20 +844,22 @@ Bridge 執行狀態：INITIALIZING／RUNNING／PAUSING／PAUSED／CANCELLING／C
 | `alert` 事件 | Bridge 會發（ESCALATION、TOKEN_HALT、LIMIT_RETRY、RESTORE、ENV_LOST 等）；console-api 轉發，並依 §6(d) 另行產生 Console 自己的告警 |
 | 時間戳 | ISO-8601 含 offset（UTC），不得為 naive 時間 |
 | 錯誤封包 | 400／409／422 皆含 `code` 與 `reason`／`gate`／`violations`；console-api 轉成 PRD §7.2 錯誤格式並逐字保留原因 |
+| 深度探針（W5 C-2；`BR-26`） | `GET /health/deep`（免認證）：`git --version`（逾時 5 秒）、`import autoclaude`、workspace 可寫、DB ping（有設 DSN 才做）；全過 → 200 `{"status":"ok","checks":{"git":{"ok":true,"version":"…"},"autoclaude":{…},"workspace":{"ok":true},"db":{"ok":true｜null}}}`，任一失敗 → 503 `{"status":"degraded","reason":"…","checks":{…}}`。compose 的 bridge healthcheck 用它；console-api 的探測環仍打 `/health`；Bridge 映像須安裝 `git`（QA DEF-AC-003）。契約 §3.1.1 |
+| `X-Trace-Id`（W5 C-12） | console-api 對 Bridge 的每個請求帶此標頭；Bridge 中介層讀取（缺則自產 uuid4）、回應回帶同名標頭、每一行應用日誌帶 `trace_id`。契約 §0.4 第 6 點、§3.1.1 |
 | 落地差異 | W1-B 交卷須列出與本節的差異；主控回寫本節與 RTM `BR-*`；回寫前以 Bridge 實作與其 `/openapi.json` 為準 |
 
 ## 11. 後端 API
 
 ### 11.1 端點與狀態碼語意
 
-端點表以 **PRD §7.1.1～§7.1.8 為 SSOT**，本文不重抄。補充端點（PRD 缺口，ADR-001 G-16／G-17）：`POST /api/v1/auth/login`、`/api/v1/auth/refresh`、`GET /actuator/health`、`GET /actuator/prometheus`、`GET /api/v1/projects/{projectId}/executions`（列出專案執行批次，`API-EXE-14`）、`GET /api/v1/notifications/summary`（`API-NTF-01`，回 `NotificationSummaryResponse{pendingSignoffs, pendingReviews, unacknowledgedAlerts}`，供頂列通知鈴與 signoff 佇列徽章）；監控端點補充查詢參數 `runId`、`from`、`to`（對應設計稿「執行批次」「時間範圍」選單）。回應格式依 PRD §7.2。狀態碼語意：
+端點表以 **PRD §7.1.1～§7.1.8 為 SSOT**，本文不重抄。補充端點（PRD 缺口，ADR-001 G-16／G-17）：`POST /api/v1/auth/login`、`/api/v1/auth/refresh`、`GET /actuator/health`、`GET /actuator/prometheus`、`GET /api/v1/projects/{projectId}/executions`（列出專案執行批次，`API-EXE-14`）、`GET /api/v1/notifications/summary`（`API-NTF-01`，回 `NotificationSummaryResponse{pendingSignoffs, pendingReviews, unacknowledgedAlerts}`，供頂列通知鈴與 signoff 佇列徽章）；監控端點補充查詢參數 `runId`、`from`、`to`（對應設計稿「執行批次」「時間範圍」選單）。W5（契約 v1.2）再增補：`GET /api/v1/monitor/task-totals`（全域任務總計，`API-MON-08`，儀表板「本週完成」用，取代前端對各專案扇出 `task-trend`）、`POST /api/v1/projects/{id}/restore` 與 `GET /api/v1/projects?deleted=true`（軟刪除復原，`API-PRJ-06`，ADR-001 D19）。回應格式依 PRD §7.2。狀態碼語意：
 
 | 碼 | 語意 |
 |----|------|
 | 400 | 驗證失敗；`approver` 缺漏或空白；halt ≤ compact；goal 依賴成環／自依賴／跨專案；黑名單字元命中 |
 | 401／403 | 未認證／角色不足 |
 | 404 | 資源不存在或已軟刪除 |
-| 409 | 草案未 signoff 即執行／resume／restore；EXECUTING 專案受限操作；非法狀態轉移；並發互斥（Bridge 409）；import 未 signoff 即 confirm；Bridge 草案失效 |
+| 409 | 草案未 signoff 即執行／resume／restore；EXECUTING 專案受限操作；非法狀態轉移；並發互斥（Bridge 409）；import 未 signoff 即 confirm；Bridge 草案失效；專案有進行中批次時刪除其目標／任務（`project_executing`）；專案復原前提不符（`project_not_deleted`、`restore_window_expired`）（W5） |
 | 422 | Bridge 有界閘或消毒拒絕（結構化原因逐字帶出） |
 | 502／504 | Bridge 不可達／逾時（建立執行失敗已補償刪除 run 列） |
 
@@ -878,6 +884,7 @@ Bridge 執行狀態：INITIALIZING／RUNNING／PAUSING／PAUSED／CANCELLING／C
 | goalsCount／tasksCount／tasksDone | Integer | — | — | ● | ● | ● | 僅算未軟刪 |
 | goals | List<GoalBrief> | — | — | — | — | ● | `{id,name,status,sortOrder,signedOff,taskCount,completedTaskCount}` |
 | createdAt／updatedAt／createdBy | Instant／Instant／String | — | — | ● | updatedAt | ● | createdBy＝JWT subject |
+| deletedAt | Instant | — | — | — | ● | — | W5（V9，主控裁決 C-3）：軟刪除時間；只有 `GET /projects?deleted=true` 的列表項帶值，其餘缺席 |
 
 **Goal**（`CreateGoalRequest`／`UpdateGoalRequest`／`GoalResponse`／`GoalSummaryResponse`／`GoalDetailResponse`／`ReorderRequest{projectId, orderedGoalIds[]}`）
 
@@ -926,6 +933,7 @@ Bridge 執行狀態：INITIALIZING／RUNNING／PAUSING／PAUSED／CANCELLING／C
 | `EditParsedResultRequest` | `parsedResult`●*（三層樹 JSON） |
 | `SignoffRequest` | `approver`●*（非空；用於所有 signoff 端點） |
 | `ImportRecordResponse` | `id, sourceType, sourceFileName, status, signedOff, signedOffBy, signedOffAt, projectId, createdAt, aiModel, tokenUsed`（列表不含 `sourceContent`、`parsedResult`） |
+| `ImportRecordDetailResponse`（`GET /import/{id}`） | `ImportRecordResponse` 全部欄位＋`parsePath, lastParseErrors, sourceContent, parsedResult`；W5（V8，主控裁決 C-10）另帶 `warnings[]`（最近一次成功 parse／PUT result 的解析提示，永遠出現）與 `parseOptions`（最近一次 parse 請求的選項，可 null） |
 | `ParseResultResponse` | `importId, status, parsedResult, signedOff(=false), aiModel, tokenUsed, reasoning?, errors?[{gate,detail}]` |
 
 **ExecutionRun**
@@ -988,6 +996,18 @@ CREATE TABLE console.alerts (
     acknowledged_at TIMESTAMP WITH TIME ZONE
 );
 CREATE INDEX idx_alerts_project_ack ON console.alerts(project_id, acknowledged);
+
+-- V5～V7 的欄位與表見契約 API_Contract_P3-6.md §0.5；W5（契約 v1.2）再增補 V8、V9：
+-- V8__import_record_warnings_and_options.sql（主控裁決 C-10）
+ALTER TABLE console.import_records
+    ADD COLUMN warnings JSONB NOT NULL DEFAULT '[]'::jsonb,
+    ADD COLUMN parse_options JSONB;
+
+-- V9__soft_delete_timestamps.sql（主控裁決 C-3；ADR-001 D19）
+ALTER TABLE console.projects ADD COLUMN deleted_at TIMESTAMP WITH TIME ZONE,
+                             ADD COLUMN status_before_delete VARCHAR(20);
+ALTER TABLE console.goals ADD COLUMN deleted_at TIMESTAMP WITH TIME ZONE;
+ALTER TABLE console.tasks ADD COLUMN deleted_at TIMESTAMP WITH TIME ZONE;
 ```
 
 ### 11.4 系統參數 → 引擎設定對映（`API-SET-10`；Phase 4 起由 `ConfigMaterializer` 實作）
