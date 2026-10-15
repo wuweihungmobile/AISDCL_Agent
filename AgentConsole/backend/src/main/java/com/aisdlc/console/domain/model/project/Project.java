@@ -174,6 +174,16 @@ public final class Project {
         updatedAt = now;
     }
 
+    /**
+     * 匯入確認落庫專用（契約 §1.1.6）：專案／目標／任務一律 {@code signedOff=true}，
+     * {@code signedOffBy／At} 承襲匯入記錄上那一次人工 signoff（人工審批已發生在匯入記錄上，不是落庫時才簽）。
+     */
+    public void inheritSignoff(String approver, Instant at) {
+        signedOff = true;
+        signedOffBy = approver;
+        signedOffAt = at;
+    }
+
     /** 軟刪除：status=ARCHIVED 且 deleted=true；EXECUTING 不可刪除（409）。 */
     public void softDelete(Instant now) {
         if (status == ProjectStatus.EXECUTING) {

@@ -9,8 +9,9 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * system_configs 表（PRD §6.2）的 JPA 映射；Phase 6（設定頁）才會用到，本波只需 validate 通過。
+ * system_configs 表（PRD §6.2）的 JPA 映射（Phase 6 系統設定）。
  * Java 欄位名 {@code configKey}／{@code configValue} 對應 {@code key}／{@code value} 欄（避開 HQL 關鍵字）。
+ * {@code impact_note} 為 V5 增補（US-S-08 影響範圍提示）。加密參數的 {@code value} 存 {@code v1:<iv>:<密文>}（空字串＝沒有值）。
  */
 @Entity
 @Table(name = "system_configs")
@@ -43,6 +44,9 @@ public class SystemConfigEntity {
 
     @Column(name = "validation_rule", length = 500)
     public String validationRule;
+
+    @Column(name = "impact_note", length = 500)
+    public String impactNote;
 
     @Column(name = "updated_at")
     public Instant updatedAt;

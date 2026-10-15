@@ -2,6 +2,7 @@ package com.aisdlc.console.adapter.in.web.dto;
 
 import com.aisdlc.console.domain.model.task.NewTask;
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
@@ -19,7 +20,8 @@ public record CreateTaskRequest(
         @Schema(description = "須可被 Java Pattern.compile，否則回 400") String expectedOutputRegex,
         @Schema(description = "結構化通過標準（JSON 物件）") Map<String, Object> passCriteriaSpec,
         @Min(value = 0, message = "預估 Token 不可為負數") Long estimatedTokens,
-        @Min(value = 0, message = "最大重試次數不可為負數") @Schema(description = "預設 3") Integer maxRetries,
+        @Min(value = 0, message = "最大重試次數不可為負數") @Max(value = 20, message = "最大重試次數不可超過 20")
+        @Schema(description = "預設 3；上限 20（Bridge PlaybookIn 的上限，契約 §0.8／AR-14）") Integer maxRetries,
         @Schema(description = "true＝草案（signedOff=false）；預設 false＝手動建立（signedOff=true）") Boolean draft) {
 
     public NewTask toDomain() {

@@ -4,10 +4,17 @@ import com.aisdlc.console.adapter.in.web.dto.ApiError;
 import com.aisdlc.console.adapter.in.web.dto.ApiError.FieldError;
 import com.aisdlc.console.domain.exception.ConflictException;
 import com.aisdlc.console.domain.exception.DomainException;
+import com.aisdlc.console.domain.exception.ErrorReasons;
 import com.aisdlc.console.domain.exception.ForbiddenException;
 import com.aisdlc.console.domain.exception.NotFoundException;
+import com.aisdlc.console.domain.exception.PayloadTooLargeException;
+import com.aisdlc.console.domain.exception.RateLimitedException;
 import com.aisdlc.console.domain.exception.UnauthorizedException;
+import com.aisdlc.console.domain.exception.UnprocessableException;
+import com.aisdlc.console.domain.exception.UnsupportedFormatException;
+import com.aisdlc.console.domain.exception.UpstreamException;
 import com.aisdlc.console.domain.exception.ValidationException;
+import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -22,9 +29,12 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
 import tools.jackson.core.JacksonException;
 
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -44,10 +54,41 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(DomainException.class)
     public ResponseEntity<ApiError> handleDomain(DomainException ex) {
         HttpStatus status = statusOf(ex);
-        List<FieldError> errors = ex instanceof ValidationException validation
-                ? validation.violations().stream().map(v -> new FieldError(v.field(), v.message())).toList()
-                : List.of();
-        return respond(status, ex.getMessage(), ex.reason(), errors, ex.details());
+        return respond(status, ex.getMessage(), ex.reason(), errorsOf(ex), ex.details());
+    }
+
+    /** 上傳超過 Spring multipart 上限（10MB／請求 11MB）：設定檔匯入與匯入檔案各有專屬 reason（契約 §1.1.1、§1.5.10）。 */
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<ApiError> handleUploadTooLarge(MaxUploadSizeExceededException ex,
+                                                         HttpServletRequest request) {
+        boolean settingsFile = request.getRequestURI().startsWith("/api/v1/settings/import");
+        return handleDomain(settingsFile
+                ? new PayloadTooLargeException("設定檔超過 1MB 上限", ErrorReasons.SETTINGS_FILE_TOO_LARGE,
+                        Map.of("limitBytes", 1_048_576))
+                : new PayloadTooLargeException("檔案超過 10MB 上限", ErrorReasons.FILE_TOO_LARGE,
+                        Map.of("limitBytes", 10_485_760)));
+    }
+
+    /** multipart 缺少 {@code file} 部件。 */
+    @ExceptionHandler(MissingServletRequestPartException.class)
+    public ResponseEntity<ApiError> handleMissingPart(MissingServletRequestPartException ex) {
+        String message = "請求缺少檔案部件 " + ex.getRequestPartName();
+        return respond(HttpStatus.BAD_REQUEST, message, ErrorReasons.FILE_MISSING,
+                List.of(new FieldError(ex.getRequestPartName(), message)), Map.of());
+    }
+
+    /** {@link ValidationException} 帶欄位違規；{@link UnprocessableException} 另帶有界閘違規（一次列出全部，不截斷）。 */
+    private static List<FieldError> errorsOf(DomainException ex) {
+        if (ex instanceof ValidationException validation) {
+            return validation.violations().stream().map(v -> new FieldError(v.field(), v.message())).toList();
+        }
+        if (ex instanceof UnprocessableException unprocessable) {
+            List<FieldError> errors = new ArrayList<>(unprocessable.gateErrors().stream()
+                    .map(FieldError::ofGate).toList());
+            unprocessable.violations().forEach(v -> errors.add(new FieldError(v.field(), v.message())));
+            return errors;
+        }
+        return List.of();
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
@@ -55,7 +96,7 @@ public class GlobalExceptionHandler {
         BindingResult result = ex.getBindingResult();
         List<FieldError> errors = result.getFieldErrors().stream()
                 .map(e -> new FieldError(e.getField(), e.getDefaultMessage() == null ? "不合法" : e.getDefaultMessage()))
-                .collect(Collectors.toCollection(java.util.ArrayList::new));
+                .collect(Collectors.toCollection(ArrayList::new));
         result.getGlobalErrors().forEach(e -> errors.add(new FieldError(e.getObjectName(),
                 e.getDefaultMessage() == null ? "不合法" : e.getDefaultMessage())));
         return respond(HttpStatus.BAD_REQUEST, "Validation failed", null, errors, Map.of());
@@ -107,6 +148,24 @@ public class GlobalExceptionHandler {
         }
         if (ex instanceof ConflictException) {
             return HttpStatus.CONFLICT;
+        }
+        if (ex instanceof UnprocessableException) {
+            return HttpStatus.UNPROCESSABLE_CONTENT;
+        }
+        if (ex instanceof PayloadTooLargeException) {
+            return HttpStatus.CONTENT_TOO_LARGE;
+        }
+        if (ex instanceof UnsupportedFormatException) {
+            return HttpStatus.UNSUPPORTED_MEDIA_TYPE;
+        }
+        if (ex instanceof RateLimitedException) {
+            return HttpStatus.TOO_MANY_REQUESTS;
+        }
+        if (ex instanceof UpstreamException.TimedOut) {
+            return HttpStatus.GATEWAY_TIMEOUT;
+        }
+        if (ex instanceof UpstreamException) {
+            return HttpStatus.BAD_GATEWAY;
         }
         return HttpStatus.INTERNAL_SERVER_ERROR;
     }

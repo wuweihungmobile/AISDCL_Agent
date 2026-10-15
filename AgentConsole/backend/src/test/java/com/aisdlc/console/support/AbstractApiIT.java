@@ -1,6 +1,7 @@
 package com.aisdlc.console.support;
 
 import java.util.LinkedHashMap;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -31,6 +32,7 @@ public abstract class AbstractApiIT extends AbstractIntegrationTest {
     void resetDataAndPrepareClient() {
         api = new ApiClient(mvc);
         jdbc.execute("TRUNCATE console.projects CASCADE");
+        resetSystemConfigs();
         if (tokens == null) {
             synchronized (AbstractApiIT.class) {
                 if (tokens == null) {
@@ -41,6 +43,24 @@ public abstract class AbstractApiIT extends AbstractIntegrationTest {
                 }
             }
         }
+        // 審計表跨測試累積：每個測試從空表開始，才能對「這個測試的請求留下幾列」做精確斷言（登入的審計列也一併清掉）。
+        jdbc.execute("TRUNCATE console.audit_log");
+    }
+
+    /**
+     * 設定測試會改系統參數：結束後立刻還原，免得「最後一支設定測試」的殘值漏進同一個 JVM 之後執行的其他 IT
+     * （例如斷言種子預設值的 SchemaMigrationIT 不繼承本基底，不會在 @BeforeEach 還原）。
+     */
+    @AfterEach
+    void restoreSystemConfigsAfterTest() {
+        resetSystemConfigs();
+    }
+
+    /** 種子的 value 恆等於 default_value（V2／V5）：把全部鍵設回預設、清修改者與歷史，即回到種子狀態。 */
+    protected void resetSystemConfigs() {
+        jdbc.update("update console.system_configs set value = coalesce(default_value, ''), updated_at = now(), "
+                + "updated_by = null");
+        jdbc.update("delete from console.system_config_history");
     }
 
     private String loginToken(String username, String password) {

@@ -7,6 +7,11 @@ spring:
     url: jdbc:postgresql://localhost:5432/aisdlc
     username: aisdlc
     # password 刻意不給預設值：SPRING_DATASOURCE_PASSWORD 必填（缺則連線失敗，不是靜默用弱密碼）。
+  servlet:
+    multipart:
+      # 匯入上傳（契約 §1.1.1、附錄 D.1）：檔案 10MB、整個 multipart 請求 11MB；設定檔匯入另有 1MB 的應用層檢查。
+      max-file-size: 10MB
+      max-request-size: 11MB
   jpa:
     open-in-view: false
     hibernate:
@@ -72,3 +77,26 @@ console:
   cors:
     # 逗號分隔；全棧同源（經 nginx）時不會用到。NFR-9.2-05。
     allowed-origins: ${CONSOLE_CORS_ALLOWED_ORIGINS:http://localhost:3000}
+  encryption:
+    # 敏感參數（model.apiKey、autoclaude.dbDsn）的 AES-256-GCM 金鑰：base64 編碼的 32 bytes（openssl rand -base64 32）。
+    # 缺少、不是合法 base64、或解碼後不是 32 bytes＝啟動失敗（EncryptionProperties；與 JWT_SECRET 同款 fail-fast）。
+    key: ${CONSOLE_ENCRYPTION_KEY:}
+  security:
+    # SEC-04 外呼 host 白名單（精確比對）：預設與 Bridge 的 MiniMax 兩個網域對齊（契約 §0.7 D.2、AR-09）。
+    # 要用其他供應商（api.anthropic.com／api.openai.com…）須由部署者明確加入，且 Bridge 的 BRIDGE_OUTBOUND_ALLOWLIST 也要含該 host。
+    # 🔴 allow-loopback／test-dns-overrides 刻意不出現在這裡：只在 e2e／test profile 載入（application-e2e.yml）。
+    outbound-allowlist: ${CONSOLE_SECURITY_OUTBOUND_ALLOWLIST:api.minimax.io,api.minimax.chat}
+    rate-limit:
+      # NFR-9.2-06：每個使用者（JWT subject；未認證才以客戶端 IP）每 60 秒 100 次。
+      enabled: true
+      requests-per-minute: 100
+      # production 直連維持 false；docker／e2e profile 為 true（並設 server.forward-headers-strategy=native）。
+      trust-forwarded-for: false
+  import:
+    # 路徑 B 的 LLM 輸入（系統訊息＋使用者訊息）字元上限；超過不呼叫模型，直接 prompt_too_long（契約 §3.3.3）。
+    max-prompt-chars: 120000
+    # 每個目標任務數／目標數的上限：只准下調、不准上調（硬上限 24，ParsedResultValidator 夾回）。
+    max-steps: 24
+  bridge:
+    # Engine Bridge 位址（契約 §3.1）：管理員在設定頁改過的 autoclaude.engineUrl／sdd.engineUrl 優先，否則用這個。
+    url: ${ENGINE_BRIDGE_URL:http://localhost:8081}

@@ -144,6 +144,13 @@ public final class Goal {
         updatedAt = now;
     }
 
+    /** 匯入確認落庫專用：{@code signedOff=true}，{@code signedOffBy／At} 承襲匯入記錄（契約 §1.1.6）。 */
+    public void inheritSignoff(String approver, Instant at) {
+        signedOff = true;
+        signedOffBy = approver;
+        signedOffAt = at;
+    }
+
     /** 軟刪除（deleted=true）；連帶任務由 application 層處理。 */
     public void softDelete(Instant now) {
         deleted = true;

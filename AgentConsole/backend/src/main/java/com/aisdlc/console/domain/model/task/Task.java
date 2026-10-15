@@ -215,6 +215,13 @@ public final class Task {
         updatedAt = now;
     }
 
+    /** 匯入確認落庫專用：{@code signedOff=true}，{@code signedOffBy／At} 承襲匯入記錄（契約 §1.1.6）。 */
+    public void inheritSignoff(String approver, Instant at) {
+        signedOff = true;
+        signedOffBy = approver;
+        signedOffAt = at;
+    }
+
     /** 軟刪除：RUNNING 的任務不可直接刪除（US-T-04，409）。 */
     public void softDelete(Instant now) {
         if (status == TaskStatus.RUNNING) {

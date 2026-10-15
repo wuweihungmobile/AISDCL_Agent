@@ -8,7 +8,7 @@ import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.UUID;
 
-/** system_config_history 表（PRD §6.2）的 JPA 映射；Phase 6 才會用到，本波只需 validate 通過。 */
+/** system_config_history 表（PRD §6.2）的 JPA 映射（Phase 6）；加密參數的新舊值一律存遮罩標記，不存明文或密文。 */
 @Entity
 @Table(name = "system_config_history")
 public class SystemConfigHistoryEntity {

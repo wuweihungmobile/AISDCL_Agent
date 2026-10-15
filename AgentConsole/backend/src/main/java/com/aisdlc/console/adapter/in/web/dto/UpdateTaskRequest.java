@@ -2,6 +2,7 @@ package com.aisdlc.console.adapter.in.web.dto;
 
 import com.aisdlc.console.domain.model.task.TaskUpdate;
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Size;
 
@@ -15,7 +16,8 @@ public record UpdateTaskRequest(
         @Size(max = 200, message = "名稱長度不可超過 200 字元") String name,
         @Schema(description = "給空白字串＝清除說明") String description,
         String passCriteria,
-        @Min(value = 0, message = "最大重試次數不可為負數") Integer maxRetries,
+        @Min(value = 0, message = "最大重試次數不可為負數") @Max(value = 20, message = "最大重試次數不可超過 20")
+        @Schema(description = "上限 20（Bridge PlaybookIn 的上限，契約 §0.8／AR-14）") Integer maxRetries,
         @Size(max = 1000, message = "驗證命令長度不可超過 1000 字元")
         @Schema(description = "NFR-SEC-03；給空白字串＝清除") String evaluatorCommand,
         @Size(max = 1000, message = "期望輸出正規表示式長度不可超過 1000 字元")

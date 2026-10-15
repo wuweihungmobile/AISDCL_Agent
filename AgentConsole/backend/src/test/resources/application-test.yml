@@ -1,7 +1,15 @@
-# 整合測試用設定（profile=test）。以下 JWT 密鑰僅供測試，長度 ≥ 32 字元，非真實機密。
+# 整合測試用設定（profile=test）。以下 JWT 密鑰與加密金鑰僅供測試（長度／格式合法），非真實機密。
 console:
   auth:
     jwt-secret: integration-test-only-jwt-secret-0123456789-abcdef
+  encryption:
+    # base64 編碼的 32 bytes（ASCII 字串 "test-only-encryption-key-32bytes"）；僅供測試，非真實機密。
+    key: dGVzdC1vbmx5LWVuY3J5cHRpb24ta2V5LTMyYnl0ZXM=
+  security:
+    rate-limit:
+      # 測試 profile 預設關閉限流（否則整套 IT 共用同一批 token 會互相擠掉額度）；
+      # RateLimitIT 以 @TestPropertySource 開著它打 101 次，驗第 101 次回 429（契約 §0.4 第 4 點）。
+      enabled: false
 management:
   prometheus:
     metrics:

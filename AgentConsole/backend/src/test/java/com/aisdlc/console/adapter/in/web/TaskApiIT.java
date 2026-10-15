@@ -90,6 +90,36 @@ class TaskApiIT extends AbstractApiIT {
                 "estimatedTokens");
     }
 
+    /**
+     * 契約 §0.8／AR-14：最大重試次數上限 20（Phase 3 的匯入草案與 Phase 4 的執行都以此為界；引擎無上限會讓失敗步驟重試到天荒地老）。
+     * 邊界兩側都要有證據：20 可以、21 不行、負數不行。
+     */
+    @Test
+    void maxRetriesIsCappedAtTwentyOnCreateAndUpdate() {
+        for (int ok : new int[] {0, 1, 20}) {
+            Map<String, Object> body = task("Retries " + ok);
+            body.put("maxRetries", ok);
+            Resp created = api.post(operator(), tasksUrl(), body);
+            assertThat(created.status()).as("maxRetries=" + ok).isEqualTo(201);
+            assertThat(created.<Integer>read("$.data.maxRetries")).isEqualTo(ok);
+        }
+        for (int bad : new int[] {21, 25, 1000, -1}) {
+            Map<String, Object> body = task("Too many " + bad);
+            body.put("maxRetries", bad);
+            Resp rejected = api.post(operator(), tasksUrl(), body);
+            assertThat(rejected.status()).as("maxRetries=" + bad).isEqualTo(400);
+            assertThat(rejected.errorFields()).containsExactly("maxRetries");
+        }
+
+        String id = createTask(goal, "Updatable");
+        assertThat(api.put(operator(), "/api/v1/tasks/" + id, Map.of("maxRetries", 20)).status()).isEqualTo(200);
+        Resp tooMany = api.put(operator(), "/api/v1/tasks/" + id, Map.of("maxRetries", 25));
+        assertThat(tooMany.status()).isEqualTo(400);
+        assertThat(tooMany.errorFields()).containsExactly("maxRetries");
+        assertThat(api.get(viewer(), "/api/v1/tasks/" + id).<Integer>read("$.data.maxRetries"))
+                .as("被拒絕的更新沒有改值").isEqualTo(20);
+    }
+
     @Test
     void createUnderAMissingGoalIs404() {
         assertThat(api.post(operator(), "/api/v1/goals/" + UUID.randomUUID() + "/tasks", task("T")).status())

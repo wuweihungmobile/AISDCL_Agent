@@ -16,18 +16,21 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * Flyway 遷移（V1～V4）與 JPA schema 驗證（ADR-001 D5）。
+ * Flyway 遷移（V1～V6）與 JPA schema 驗證（ADR-001 D5）。
  *
- * <p>能啟動本 context 本身就代表 {@code ddl-auto=validate} 通過（12 個實體與 Flyway 建出的表一致）；
+ * <p>能啟動本 context 本身就代表 {@code ddl-auto=validate} 通過（13 個實體與 Flyway 建出的表一致）；
  * 這裡另外把「為什麼重要」寫成斷言：DDL 必須由 Flyway 擁有、表必須全在 console schema（不與 AutoClaude 的
  * public.checkpoints 等同名表撞名）、種子要齊、關鍵 CHECK／UNIQUE／partial index 要真的存在。
+ *
+ * <p>契約 §0.8 的既有測試同步：V5（九個新鍵、impact_note、parse_path／last_parse_errors、預設校正）與
+ * V6（audit_log）落地後，種子計數、加密鍵數與版本清單的「真值」改變，測試的意圖不變。
  */
 class SchemaMigrationIT extends AbstractIntegrationTest {
 
     private static final Set<String> CONSOLE_TABLES = Set.of(
             "projects", "goals", "goal_dependencies", "tasks", "execution_runs", "execution_steps",
             "checkpoints", "import_records", "system_configs", "system_config_history",
-            "review_requests", "alerts");
+            "review_requests", "alerts", "audit_log");
 
     @Autowired
     JdbcTemplate jdbc;
@@ -43,7 +46,7 @@ class SchemaMigrationIT extends AbstractIntegrationTest {
     }
 
     @Test
-    void allTwelveTablesLiveInTheConsoleSchemaAndNoneLeakIntoPublic() {
+    void allThirteenTablesLiveInTheConsoleSchemaAndNoneLeakIntoPublic() {
         List<String> inConsole = jdbc.queryForList(
                 "select table_name from information_schema.tables where table_schema = 'console' "
                         + "and table_type = 'BASE TABLE'", String.class);
@@ -56,11 +59,11 @@ class SchemaMigrationIT extends AbstractIntegrationTest {
     }
 
     @Test
-    void flywayAppliedVersionsOneToFourSuccessfully() {
+    void flywayAppliedVersionsOneToSixSuccessfully() {
         List<Map<String, Object>> history = jdbc.queryForList(
                 "select version, success from console.flyway_schema_history where version is not null "
                         + "order by installed_rank");
-        assertThat(history).extracting(row -> row.get("version")).containsExactly("1", "2", "3", "4");
+        assertThat(history).extracting(row -> row.get("version")).containsExactly("1", "2", "3", "4", "5", "6");
         assertThat(history).allSatisfy(row -> assertThat(row.get("success")).isEqualTo(true));
     }
 
@@ -71,8 +74,10 @@ class SchemaMigrationIT extends AbstractIntegrationTest {
                 rs -> {
                     counts.put(rs.getString("category"), rs.getInt("n"));
                 });
+        // 契約附錄 C：10＋9＋10＋6＋11＋4＝50（V5 補 model.enableKernelBrain、execution 兩個 token_guard 續跑鍵、autoclaude 六個）
         assertThat(counts).containsExactlyInAnyOrderEntriesOf(Map.of(
-                "model", 9, "agent", 9, "execution", 8, "monitor", 6, "autoclaude", 5, "sdd", 4));
+                "model", 10, "agent", 9, "execution", 10, "monitor", 6, "autoclaude", 11, "sdd", 4));
+        assertThat(counts.values().stream().mapToInt(Integer::intValue).sum()).isEqualTo(50);
     }
 
     @Test
@@ -88,12 +93,70 @@ class SchemaMigrationIT extends AbstractIntegrationTest {
     }
 
     @Test
-    void onlyTheApiKeyIsEncryptedAndItsValueIsEmpty() {
+    void onlyTheApiKeyAndTheDbDsnAreEncryptedAndBothValuesAreEmpty() {
         List<Map<String, Object>> encrypted = jdbc.queryForList(
-                "select category, key, value, value_type from console.system_configs where is_encrypted");
-        assertThat(encrypted).hasSize(1);
-        assertThat(encrypted.get(0)).containsEntry("category", "model").containsEntry("key", "apiKey")
+                "select category, key, value, value_type from console.system_configs where is_encrypted "
+                        + "order by category, key");
+        // V5 後 autoclaude.dbDsn 是第二把加密鍵（附錄 C：model.apiKey 與 autoclaude.dbDsn 皆 ENCRYPTED）。
+        assertThat(encrypted).hasSize(2);
+        assertThat(encrypted.get(0)).containsEntry("category", "autoclaude").containsEntry("key", "dbDsn")
                 .containsEntry("value", "").containsEntry("value_type", "ENCRYPTED");
+        assertThat(encrypted.get(1)).containsEntry("category", "model").containsEntry("key", "apiKey")
+                .containsEntry("value", "").containsEntry("value_type", "ENCRYPTED");
+    }
+
+    @Test
+    void v5CorrectsTheThreeSeedDefaultsToTheEngineAndPollingFloorValues() {
+        assertThat(setting("model", "apiUrl", "value")).isEqualTo("https://api.minimax.io/v1/text/chatcompletion_v2");
+        assertThat(setting("model", "apiUrl", "default_value"))
+                .isEqualTo("https://api.minimax.io/v1/text/chatcompletion_v2");
+        assertThat(setting("model", "name", "default_value")).isEqualTo("MiniMax-M2.7");
+        assertThat(setting("monitor", "refreshIntervalMs", "default_value")).isEqualTo("10000");
+        assertThat(setting("monitor", "refreshIntervalMs", "value")).as("輪詢地板 10 秒（AR-06）").isEqualTo("10000");
+    }
+
+    @Test
+    void everySeededValueAndDefaultSatisfiesItsOwnValidationRule() {
+        List<Map<String, Object>> rows = jdbc.queryForList(
+                "select category, key, value, default_value, validation_rule from console.system_configs");
+        assertThat(rows).hasSize(50);
+        for (Map<String, Object> row : rows) {
+            String label = row.get("category") + "." + row.get("key");
+            assertThat(row.get("validation_rule")).as(label + " 必須有 validation_rule").isNotNull();
+            java.util.regex.Pattern rule = java.util.regex.Pattern.compile((String) row.get("validation_rule"));
+            // 加密鍵的預設值是空字串（沒有值），其規則也允許空字串。
+            assertThat(rule.matcher((String) row.get("value")).matches()).as(label + " value").isTrue();
+            assertThat(rule.matcher((String) row.get("default_value")).matches()).as(label + " default").isTrue();
+        }
+    }
+
+    @Test
+    void theEightKeyParametersCarryAnImpactNote() {
+        for (String key : List.of("agent.defaultAutonomyLevel", "execution.globalTokenBudget",
+                "execution.compactThresholdPct", "execution.haltThresholdPct", "model.apiUrl", "model.apiKey",
+                "autoclaude.dalBackend", "autoclaude.claudeCommand")) {
+            String[] parts = key.split("\\.");
+            assertThat(setting(parts[0], parts[1], "impact_note")).as(key).isNotBlank();
+        }
+    }
+
+    @Test
+    void importRecordsGainParsePathAndLastParseErrorsAndSystemConfigsGainImpactNote() {
+        List<String> importColumns = jdbc.queryForList(
+                "select column_name from information_schema.columns where table_schema = 'console' "
+                        + "and table_name = 'import_records'", String.class);
+        assertThat(importColumns).contains("parse_path", "last_parse_errors");
+        assertThat(jdbc.queryForObject("select data_type from information_schema.columns where table_schema = "
+                + "'console' and table_name = 'import_records' and column_name = 'last_parse_errors'",
+                String.class)).isEqualTo("jsonb");
+        assertThat(jdbc.queryForObject("select count(*) from information_schema.columns where table_schema = "
+                + "'console' and table_name = 'system_configs' and column_name = 'impact_note'",
+                Integer.class)).isEqualTo(1);
+    }
+
+    private String setting(String category, String key, String column) {
+        return jdbc.queryForObject("select " + column + " from console.system_configs where category = ? and key = ?",
+                String.class, category, key);
     }
 
     @Test

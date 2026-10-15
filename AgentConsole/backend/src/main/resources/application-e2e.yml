@@ -1,0 +1,23 @@
+# ============================================================================
+# application-e2e.yml — E2E／本機驗證專用 profile（SPRING_PROFILES_ACTIVE=e2e；契約 §5.0.1、附錄 D.2）
+#
+# 🔴 這些屬性「只在 e2e／test profile 載入」：production 與 docker profile 不得出現（主控裁決 §6.3 第 11 項）。
+#    - allow-loopback：放行「列在 allowlist 內」的 loopback（假 chat-completions 伺服器綁在 127.0.0.1）；
+#      link-local／私網任何情形都拒，沒有「允許私網」的旗標（D-47）。
+#    - test-dns-overrides：讓 dns_rebinding 可決定性重現（rebind.e2e.test 在 allowlist 內，但解析到私網 10.0.0.5）。
+# 不是真實機密：本檔不含任何金鑰；CONSOLE_ENCRYPTION_KEY、JWT_SECRET 由啟動環境提供（測試值即可）。
+# W3-B2 在本檔補 console.execution.mock-env、console.sse.keep-alive-seconds（執行與 SSE 的 e2e 專用屬性）。
+# ============================================================================
+server:
+  # Tomcat 的 RemoteIpValve 只信任內網代理位址（預設即涵蓋 nginx 容器與本機測試 client），
+  # 限流取處理後的 getRemoteAddr()，不自行解析 X-Forwarded-For（契約 §0.4 第 4 點）。
+  forward-headers-strategy: native
+console:
+  security:
+    outbound-allowlist: 127.0.0.1,localhost,rebind.e2e.test
+    allow-loopback: true
+    test-dns-overrides:
+      "[rebind.e2e.test]": 10.0.0.5
+    rate-limit:
+      enabled: true
+      trust-forwarded-for: true

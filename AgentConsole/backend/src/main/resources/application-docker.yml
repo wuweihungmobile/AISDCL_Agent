@@ -1,0 +1,14 @@
+# ============================================================================
+# application-docker.yml — 全棧 Docker（經 nginx）專用 profile（SPRING_PROFILES_ACTIVE=docker；契約 §0.4 第 4 點、附錄 D.2）
+#
+# 所有使用者都經 nginx 進來，連線位址相同：限流對「未認證請求」以客戶端 IP 為鍵，所以要讓 Tomcat 還原 nginx 轉送的
+# 客戶端位址（server.forward-headers-strategy=native，只信任內網代理）。限流取處理後的 getRemoteAddr()，
+# 不自行解析 X-Forwarded-For。
+# 🔴 本檔刻意不含 allow-loopback／test-dns-overrides／mock-env（只在 e2e／test profile 載入）。
+# ============================================================================
+server:
+  forward-headers-strategy: native
+console:
+  security:
+    rate-limit:
+      trust-forwarded-for: true

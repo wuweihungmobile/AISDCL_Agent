@@ -23,10 +23,14 @@ repositories {
 	mavenCentral()
 }
 
-// 版本集中宣告：Spring Boot BOM 沒管的第三方才在此釘版（springdoc／jjwt／ArchUnit／Checkstyle）。
+// 版本集中宣告：Spring Boot BOM 沒管的第三方才在此釘版（springdoc／jjwt／ArchUnit／PDFBox／POI／Bucket4j）。
+// Apache HttpClient 5 由 Spring Boot BOM 管理版本，刻意不在此釘（契約附錄 D.4）。
 val springdocVersion = "3.1.1"
 val jjwtVersion = "0.12.7"
 val archunitVersion = "1.5.1"
+val pdfboxVersion = "3.0.8"          // Maven Central 現查（2026-10-15）：org.apache.pdfbox:pdfbox 最新 3.x
+val poiVersion = "5.5.1"             // Maven Central 現查（2026-10-15）：org.apache.poi:poi-ooxml
+val bucket4jVersion = "8.10.1"       // Maven Central 現查（2026-10-15）：com.bucket4j:bucket4j-core 最後一版（後續版本改名為 bucket4j_jdk17-core）
 
 dependencies {
 	implementation("org.springframework.boot:spring-boot-starter-actuator")
@@ -48,6 +52,12 @@ dependencies {
 	implementation("io.jsonwebtoken:jjwt-api:$jjwtVersion")
 	runtimeOnly("io.jsonwebtoken:jjwt-impl:$jjwtVersion")
 	runtimeOnly("io.jsonwebtoken:jjwt-jackson:$jjwtVersion")
+
+	// Phase 3（契約附錄 D.4；主控核可，除此之外不得新增）：
+	implementation("org.apache.pdfbox:pdfbox:$pdfboxVersion")             // 匯入 .pdf 文字擷取
+	implementation("org.apache.poi:poi-ooxml:$poiVersion")                // 匯入 .docx 文字擷取
+	implementation("com.bucket4j:bucket4j-core:$bucket4jVersion")         // NFR-9.2-06 限流（記憶體）
+	implementation("org.apache.httpcomponents.client5:httpclient5")       // SSRF 外呼：自訂 DnsResolver 釘 IP、不跟 redirect
 
 	testImplementation("org.springframework.boot:spring-boot-starter-actuator-test")
 	testImplementation("org.springframework.boot:spring-boot-starter-data-jpa-test")

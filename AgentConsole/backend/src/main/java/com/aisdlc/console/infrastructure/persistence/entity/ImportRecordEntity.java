@@ -10,7 +10,10 @@ import org.hibernate.type.SqlTypes;
 import java.time.Instant;
 import java.util.UUID;
 
-/** import_records 表（PRD §6.2）的 JPA 映射；Phase 3（匯入）才會用到，本波只需 validate 通過。 */
+/**
+ * import_records 表（PRD §6.2）的 JPA 映射（Phase 3 匯入）。{@code parse_path}／{@code last_parse_errors} 為 V5 增補
+ * （契約 §0.5、AR-07）：{@code parsed_result} 在第一次成功解析前為 NULL，失敗的 parse 不寫它。
+ */
 @Entity
 @Table(name = "import_records")
 public class ImportRecordEntity {
@@ -55,4 +58,13 @@ public class ImportRecordEntity {
 
     @Column(name = "token_used")
     public Long tokenUsed;
+
+    /** SDD／LLM／DECOMPOSE；第一次成功解析後才有值。 */
+    @Column(name = "parse_path", length = 20)
+    public String parsePath;
+
+    /** GateError 陣列（JSON 文字）；僅「被有界閘拒絕」時寫入，成功解析後清為 NULL。 */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "last_parse_errors", columnDefinition = "jsonb")
+    public String lastParseErrors;
 }

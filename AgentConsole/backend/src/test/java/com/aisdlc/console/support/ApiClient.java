@@ -6,9 +6,12 @@ import com.jayway.jsonpath.PathNotFoundException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.RequestBuilder;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
+import org.springframework.test.web.servlet.request.MockMultipartHttpServletRequestBuilder;
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -59,10 +62,34 @@ public final class ApiClient {
                 .content(rawBody));
     }
 
+    /** multipart/form-data 上傳一個檔案（部件名 {@code partName}）。 */
+    public Resp multipart(String token, String url, String partName, String filename, String contentType,
+                          byte[] content) {
+        MockMultipartHttpServletRequestBuilder builder = MockMvcRequestBuilders.multipart(url)
+                .file(new MockMultipartFile(partName, filename, contentType, content));
+        if (token != null) {
+            builder.header(HttpHeaders.AUTHORIZATION, "Bearer " + token);
+        }
+        return perform(builder);
+    }
+
+    /** multipart 請求但<b>沒有任何部件</b>（用來測「未提供檔案」）。 */
+    public Resp multipartWithoutParts(String token, String url) {
+        MockMultipartHttpServletRequestBuilder builder = MockMvcRequestBuilders.multipart(url);
+        if (token != null) {
+            builder.header(HttpHeaders.AUTHORIZATION, "Bearer " + token);
+        }
+        return perform(builder);
+    }
+
     public Resp send(String token, MockHttpServletRequestBuilder builder) {
         if (token != null) {
             builder.header(HttpHeaders.AUTHORIZATION, "Bearer " + token);
         }
+        return perform(builder);
+    }
+
+    private Resp perform(RequestBuilder builder) {
         try {
             return new Resp(mvc.perform(builder).andReturn());
         } catch (Exception e) {
