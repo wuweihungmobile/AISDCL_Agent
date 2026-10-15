@@ -1,0 +1,3714 @@
+openapi: 3.1.0
+info:
+  title: AISDLC Agent Console — console-api（Phase 3～6 契約）
+  version: v1-p3-6
+  description: |
+    契約先行文件：BRD/PRD 匯入（Phase 3）、專案執行（Phase 4）、專案監控（Phase 5）、系統參數（Phase 6）。
+    本檔只含 Phase 3～6 的端點與 schema；Phase 1+2 的專案／目標／任務／認證端點不在此重複（schema 名稱與其一致）。
+
+    人類可讀的完整契約（逐端點錯誤 reason 常數、SSE 事件逐欄、Bridge 對映、E2E 情境）見同目錄的
+    `API_Contract_P3-6.md`；兩份文件衝突時以 Markdown 為準，並回報主控修正本檔。
+
+    共通約定（與 Phase 1+2 相同）：
+    - 成功回應包 `{code,message,data,timestamp,traceId}`（`ApiResultXxx`）；分頁資料放在 `data` 內（`PageDataXxx`）。
+    - 錯誤回應一律 `ApiError`：`{code,message,reason?,errors[{field,message}],details?,timestamp,traceId}`。
+    - 時間一律 ISO-8601 帶 offset（`Instant` 輸出 `Z`）；列舉值全大寫；JSON 欄位 camelCase。
+    - 本檔的列舉以具名 schema 表示以便閱讀；springdoc 實作時會內聯，值域以本檔為準。
+    - `x-required-role` 是最低角色（VIEWER／OPERATOR／ADMIN），`x-rtm` 是 RTM 對照列。
+servers:
+  - url: http://localhost:8080
+    description: 本機開發（backend bootRun；全棧經 nginx 時為同源）
+security:
+  - bearerAuth: []
+tags:
+  - name: BRD/PRD 匯入
+    description: Phase 3；API-IMP／API-SGN
+  - name: 專案執行
+    description: Phase 4；API-EXE／API-AUT／API-DAG
+  - name: 專案監控
+    description: Phase 5；API-MON／API-ALR／API-NTF
+  - name: SSE 推送
+    description: Phase 4；API-SSE
+  - name: 系統參數
+    description: Phase 6；API-SET／NFR-SEC-04／NFR-SEC-05
+paths:
+  /api/v1/import:
+    get:
+      tags: [BRD/PRD 匯入]
+      operationId: listImports
+      summary: 查詢匯入歷史（分頁）
+      description: |
+        列表不含 `sourceContent`、`parsedResult`（用 `GET /api/v1/import/{id}` 取詳情）。預設依 `createdAt` 由新到舊。
+      x-required-role: VIEWER
+      x-rtm: [API-IMP-06, US-I-06]
+      parameters:
+        - $ref: '#/components/parameters/PageQuery'
+        - $ref: '#/components/parameters/SizeQuery'
+        - name: status
+          in: query
+          required: false
+          description: 依匯入狀態篩選
+          schema:
+            $ref: '#/components/schemas/ImportStatus'
+        - name: q
+          in: query
+          required: false
+          description: 來源檔名模糊搜尋（不分大小寫；萬用字元視為字面）
+          schema:
+            type: string
+            maxLength: 200
+        - name: sort
+          in: query
+          required: false
+          description: 欄位[,asc|desc]；欄位限 createdAt／status；預設 createdAt,desc
+          schema:
+            type: string
+            default: createdAt,desc
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResultPageDataImportRecordResponse'
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+  /api/v1/import/upload:
+    post:
+      tags: [BRD/PRD 匯入]
+      operationId: uploadImport
+      summary: 上傳 BRD/PRD 檔案
+      description: |
+        副檔名限 `.md／.pdf／.docx`（不分大小寫）、大小 ≤ 10MB。後端擷取純文字存入 `sourceContent`
+        （.md 須為 UTF-8；.pdf 用 PDFBox；.docx 用 POI 抽段落與表格文字），建立 `status=UPLOADED`、`signedOff=false` 的匯入記錄。
+        錯誤 reason 常數見 Markdown 契約 §1.1.1（413／415／422 各有固定字串）。
+      x-required-role: OPERATOR
+      x-rtm: [API-IMP-01, API-IMP-07, US-I-01]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: 要匯入的檔案（.md／.pdf／.docx，≤ 10MB）
+      responses:
+        '201':
+          description: 已建立匯入記錄
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResultImportRecordResponse'
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '415': {$ref: '#/components/responses/UnsupportedMediaType'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+  /api/v1/import/text:
+    post:
+      tags: [BRD/PRD 匯入]
+      operationId: importText
+      summary: 貼上純文字建立匯入記錄
+      description: |
+        直接貼上需求文字（支援 Markdown）。`sourceType` 只接受 `PLAIN_TEXT`（預設）與 `MARKDOWN`。
+        路徑判斷（高階目標 vs 結構化文件）在 parse 階段進行，見 Markdown 契約 §3.3。
+      x-required-role: OPERATOR
+      x-rtm: [API-IMP-02, US-I-02]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TextImportRequest'
+      responses:
+        '201':
+          description: 已建立匯入記錄
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResultImportRecordResponse'
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+  /api/v1/import/{id}:
+    get:
+      tags: [BRD/PRD 匯入]
+      operationId: getImport
+      summary: 查詢匯入記錄詳情（補充端點）
+      description: |
+        含 `sourceContent` 與 `parsedResult`，供「歷史記錄」重新開啟審核與重新整理後還原預覽。PRD §7.1.4 未列，
+        為設計稿「歷史記錄」頁籤所需（Markdown 契約 §6 D-05）。
+      x-required-role: VIEWER
+      x-rtm: [API-IMP-06, US-I-03, US-I-06]
+      parameters:
+        - $ref: '#/components/parameters/ImportIdPath'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResultImportRecordDetailResponse'
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+  /api/v1/import/{id}/parse:
+    post:
+      tags: [BRD/PRD 匯入]
+      operationId: parseImport
+      summary: 觸發 AI 解析（三條路徑擇一）
+      description: |
+        同步呼叫（UI 顯示「解析中」）；路徑 B 的逾時為 `model.timeout` 秒，nginx 需放寬 read timeout。
+
+        路徑選擇（先到先得）：
+        1. A `SDD`：`specDir` 有值，或 `executionPath` 下有 Bridge `/sdd/compile` 接受的凍結規格 → 規格驅動。
+        2. C `DECOMPOSE`：`sourceType=PLAIN_TEXT` 且全文 < 2,000 字且無 Markdown 標題 → Bridge `/autoclaude/decompose`。
+        3. B `LLM`：其餘 → OpenAI 相容 chat completions（`model.apiUrl`／`model.apiKey`／`model.name`）。
+
+        三道有界閘（每個 Goal 任務數 ≤ 24、目標依賴 Kahn 無環、每個 Task 描述非空）與 `prompt_too_long`、
+        `brain_unsupported`、`brain_failed` 任一不過 → 422（`ParseGateErrorResponse`），不截斷、不修剪（US-I-10），
+        記錄狀態退回 `UPLOADED` 並把錯誤存入 `lastParseErrors`。
+        規格被拒（凍結／污染／版本）→ 422（`ApiError`，reason＝「SDD 規格檢查未通過」）。
+      x-required-role: OPERATOR
+      x-rtm: [API-IMP-03, API-IMP-08, API-IMP-09, US-I-03, US-I-05, US-I-07, US-I-08, US-I-10, NFR-SEC-04]
+      parameters:
+        - $ref: '#/components/parameters/ImportIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ParseOptions'
+      responses:
+        '200':
+          description: 解析成功；記錄 `status=PARSED`、`signedOff=false`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResultParseResultResponse'
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422':
+          description: 未通過有界閘或規格被拒
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ParseGateErrorResponse'
+                  - $ref: '#/components/schemas/ApiError'
+              examples:
+                gate-max-steps:
+                  summary: 單一 Goal 任務數超過 24
+                  value:
+                    code: 422
+                    message: 解析結果未通過有界閘
+                    reason: 解析結果未通過有界閘
+                    errors:
+                      - field: goals[0].tasks
+                        message: 目標「建立基礎架構」的任務數 25 超過上限 24（不截斷、不修剪）
+                        gate: max_steps
+                        detail: 目標「建立基礎架構」的任務數 25 超過上限 24（不截斷、不修剪）
+                        location: goals[0].tasks
+                    details:
+                      path: LLM
+                    timestamp: '2026-10-15T08:30:12Z'
+                    traceId: 0f7c2a58-4e1d-4b29-9d3e-6a1b5c8d9e02
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '502': {$ref: '#/components/responses/BadGateway'}
+        '504': {$ref: '#/components/responses/GatewayTimeout'}
+  /api/v1/import/{id}/result:
+    put:
+      tags: [BRD/PRD 匯入]
+      operationId: editImportResult
+      summary: 編輯解析結果（重新過有界閘）
+      description: |
+        以整棵樹覆寫 `parsedResult.project` 與 `parsedResult.goals`（陣列順序即排序；`sortOrder` 由伺服器依陣列順序重編為 0 起連續整數）。
+        伺服器擁有的欄位（`path`／`aiModel`／`tokenUsed`／`reasoning`／`draftIds`／`specDigest`）以庫內值為準，請求帶了也忽略。
+        成功後 `status=REVIEWING`；**編輯會撤銷既有 signoff**（`signedOff` 回 false、`signedOffBy／At` 清空），須重新 signoff。
+        違反有界閘 → 422；命令含禁用字元或 regex 無法編譯 → 400（與 Phase 2 任務建立同規則）。
+      x-required-role: OPERATOR
+      x-rtm: [API-IMP-04, US-I-04, US-I-10]
+      parameters:
+        - $ref: '#/components/parameters/ImportIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EditParsedResultRequest'
+      responses:
+        '200':
+          description: 已儲存
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResultParseResultResponse'
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422':
+          description: 未通過有界閘
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ParseGateErrorResponse'
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+  /api/v1/import/{id}/signoff:
+    post:
+      tags: [BRD/PRD 匯入]
+      operationId: signoffImport
+      summary: 🔴 人工 signoff 匯入草案（只批准，不落庫）
+      description: |
+        `approver` 必填、非空白（不可匿名）。對路徑 C 的每個 `draftIds` 呼叫 Bridge `:approve`（審計）；任一失敗 → 502 且不改任何狀態；
+        Bridge 回 `already_signed_off` 視為成功（冪等）。成功設 `signedOff／By／At`。
+        **偏離 PRD §7.1.4.1 的回傳型別**：回 `ImportRecordResponse`（ADR-001 D12；`confirm` 才建立專案）。
+      x-required-role: OPERATOR
+      x-rtm: [API-SGN-01, US-I-09]
+      parameters:
+        - $ref: '#/components/parameters/ImportIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignoffRequest'
+      responses:
+        '200':
+          description: 已 signoff
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResultImportRecordResponse'
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '502': {$ref: '#/components/responses/BadGateway'}
+        '504': {$ref: '#/components/responses/GatewayTimeout'}
+  /api/v1/import/{id}/confirm:
+    post:
+      tags: [BRD/PRD 匯入]
+      operationId: confirmImport
+      summary: 確認匯入（單一交易建立專案／目標／任務）
+      description: |
+        要求 `signedOff=true`，否則 409。成功時在單一交易內建立 Project（`status=DRAFT`）、Goals、Tasks 與目標依賴，
+        全部 `signedOff=true`、`signedOffBy／At` 承襲匯入記錄；記錄轉 `IMPORTED` 並回填 `projectId`。
+      x-required-role: OPERATOR
+      x-rtm: [API-IMP-05, API-IMP-10, US-I-09]
+      parameters:
+        - $ref: '#/components/parameters/ImportIdPath'
+      responses:
+        '201':
+          description: 已建立專案
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResultProjectResponse'
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+  /api/v1/import/{id}/reject:
+    post:
+      tags: [BRD/PRD 匯入]
+      operationId: rejectImport
+      summary: 放棄匯入（補充端點）
+      description: |
+        設計稿步驟 2 的「放棄」。`status` 轉 `REJECTED`；已 `IMPORTED` 者 409。PRD §7.1.4 未列（Markdown 契約 §6 D-05）。
+      x-required-role: OPERATOR
+      x-rtm: [API-IMP-10]
+      parameters:
+        - $ref: '#/components/parameters/ImportIdPath'
+      responses:
+        '200':
+          description: 已放棄
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResultImportRecordResponse'
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+  /api/v1/projects/{projectId}/execute:
+    post:
+      tags: [專案執行]
+      operationId: executeProject
+      summary: 啟動專案執行
+      description: |
+        後端二次硬校驗（前端按鈕禁用只是體驗）。驗證順序固定（QA 依序斷言）：
+        404 專案 → 400 欄位驗證 → 409 專案正在執行中 → 409 專案狀態不允許執行 → 409 未經人工審批的草案不可執行
+        → 400 範圍 id 不屬於此專案 → 409 範圍問題（已完成／缺前置目標／無可執行任務）→ 409 目標依賴成環
+        → 422 物化失敗（prompt 超過 20000 字元、評估指令消毒、regex 無法編譯）→ Bridge（409 鎖／422／502／504，並補償刪除剛建的 run 列）。
+
+        成功：建立 `execution_runs`（`run_number` 同專案遞增）→ Bridge `POST /autoclaude/runs` → 專案 `EXECUTING`、
+        範圍內任務 `QUEUED`、啟動事件消費者。`autonomyLevel`／`tokenBudget`／`scope` 皆可省略（預設見 schema）。
+      x-required-role: OPERATOR
+      x-rtm: [API-EXE-01, API-EXE-11, API-EXE-12, API-EXE-13, API-DAG-01, API-AUT-01, API-AUT-02, API-AUT-03, API-AUT-04, API-AUT-05, API-AUT-06, API-SET-10, US-E-01, US-E-02, US-E-10, NFR-SEC-03]
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartExecutionRequest'
+            examples:
+              level-1-all:
+                summary: Level 1、全部範圍、預算 100,000
+                value:
+                  autonomyLevel: 1
+                  tokenBudget: 100000
+                  scope:
+                    mode: ALL
+      responses:
+        '201':
+          description: 已建立執行批次（Bridge 已接受）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResultExecutionRunResponse'
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409':
+          description: 草案未 signoff、狀態不允許、範圍問題或 Bridge 並發互斥
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              examples:
+                draft-not-signed-off:
+                  summary: 未經人工審批（US-E-01）
+                  value:
+                    code: 409
+                    message: 草案未經人工審批，禁止執行
+                    reason: 未經人工審批的草案不可執行
+                    errors: []
+                    details:
+                      unsignedProjectId: null
+                      unsignedGoalIds: [a1f4c2d3-5b6e-4c7d-8e9f-0a1b2c3d4e12]
+                      unsignedTaskIds: [c7e2b1a0-3d4f-4a5b-9c6d-7e8f9a0b1c23]
+                    timestamp: '2026-10-15T08:30:12Z'
+                    traceId: 0f7c2a58-4e1d-4b29-9d3e-6a1b5c8d9e02
+                lock-held:
+                  summary: 同專案同路徑已有執行中的批次（Bridge advisory lock）
+                  value:
+                    code: 409
+                    message: 同專案同路徑已有執行中的批次
+                    reason: 同專案同路徑已有執行中的批次
+                    errors: []
+                    details:
+                      holderRunId: e5a7c3b9-2f1d-4b6a-8c0e-1d2f3a4b5c31
+                    timestamp: '2026-10-15T08:30:12Z'
+                    traceId: 0f7c2a58-4e1d-4b29-9d3e-6a1b5c8d9e02
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '502': {$ref: '#/components/responses/BadGateway'}
+        '504': {$ref: '#/components/responses/GatewayTimeout'}
+  /api/v1/projects/{projectId}/executions:
+    get:
+      tags: [專案執行]
+      operationId: listProjectExecutions
+      summary: 列出專案執行批次（補充端點，ADR-001 G-16）
+      description: |
+        分頁；預設 `startedAt,desc`。每列帶批次比較所需的 Token／時間／成功率（US-M-06），
+        供執行頁挑選目前批次與監控頁「執行批次」下拉。
+      x-required-role: VIEWER
+      x-rtm: [API-EXE-14, US-M-06]
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdPath'
+        - $ref: '#/components/parameters/PageQuery'
+        - $ref: '#/components/parameters/SizeQuery'
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/RunStatus'
+        - name: sort
+          in: query
+          required: false
+          description: 欄位[,asc|desc]；欄位限 startedAt／runNumber；預設 startedAt,desc
+          schema:
+            type: string
+            default: startedAt,desc
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResultPageDataExecutionRunSummaryResponse'
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+  /api/v1/executions/{runId}:
+    get:
+      tags: [專案執行]
+      operationId: getExecution
+      summary: 查詢執行狀態
+      description: |
+        合併 DB 列與 Bridge `GET /autoclaude/runs/{id}`。**Bridge 不可達時仍回 200**，`bridge.connected=false`，
+        進度欄位退回 DB 衍生值（`currentStep=null`），不回 5xx。`pendingReviews` 只含 `PENDING`。
+      x-required-role: VIEWER
+      x-rtm: [API-EXE-05, US-E-07, US-M-10]
+      parameters:
+        - $ref: '#/components/parameters/RunIdPath'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResultExecutionRunDetailResponse'
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+  /api/v1/executions/{runId}/pause:
+    post:
+      tags: [專案執行]
+      operationId: pauseExecution
+      summary: 暫停執行（下一個步驟邊界生效）
+      description: |
+        Bridge `:pause`（只收 RUNNING；PAUSING 時冪等）。回應的 `bridgeStatus` 為 `PAUSING`，
+        `status` 仍是 `RUNNING`，直到 SSE 送出 `status-change`（PAUSED）。已在最後一步時暫停來不及，run 照常 COMPLETED。
+      x-required-role: OPERATOR
+      x-rtm: [API-EXE-02, US-E-04]
+      parameters:
+        - $ref: '#/components/parameters/RunIdPath'
+      responses:
+        '200':
+          description: 已要求暫停
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResultExecutionRunResponse'
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '502': {$ref: '#/components/responses/BadGateway'}
+        '504': {$ref: '#/components/responses/GatewayTimeout'}
+  /api/v1/executions/{runId}/resume:
+    post:
+      tags: [專案執行]
+      operationId: resumeExecution
+      summary: 恢復執行（PAUSED 同進度接續）
+      description: |
+        Bridge `:resume`（只收 PAUSED）。後端先重驗範圍內 Goal／Task 皆 signedOff（否則 409「未經人工審批的草案不可執行」）。
+        回應 `bridgeStatus=RUNNING`。
+      x-required-role: OPERATOR
+      x-rtm: [API-EXE-03, API-EXE-11, US-E-05]
+      parameters:
+        - $ref: '#/components/parameters/RunIdPath'
+      responses:
+        '200':
+          description: 已恢復
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResultExecutionRunResponse'
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '502': {$ref: '#/components/responses/BadGateway'}
+        '504': {$ref: '#/components/responses/GatewayTimeout'}
+  /api/v1/executions/{runId}/cancel:
+    post:
+      tags: [專案執行]
+      operationId: cancelExecution
+      summary: 取消執行（stop）
+      description: |
+        Bridge `:stop`（RUNNING／PAUSING／PAUSED 可收）。回應 `bridgeStatus=CANCELLING`；終態 `CANCELLED` 由 SSE 通知。
+        取消後範圍內 `RUNNING／QUEUED` 任務轉 `CANCELLED`（系統重設，US-E-06），專案回 `READY`。
+      x-required-role: OPERATOR
+      x-rtm: [API-EXE-04, US-E-06]
+      parameters:
+        - $ref: '#/components/parameters/RunIdPath'
+      responses:
+        '200':
+          description: 已要求取消
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResultExecutionRunResponse'
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '502': {$ref: '#/components/responses/BadGateway'}
+        '504': {$ref: '#/components/responses/GatewayTimeout'}
+  /api/v1/executions/{runId}/steps:
+    get:
+      tags: [專案執行]
+      operationId: listExecutionSteps
+      summary: 分頁查詢執行步驟（亦為 SSE 斷線的 REST 回補）
+      description: |
+        資料列由 Bridge 寫入 `execution_steps`（每個 step 事件一列）。**`stepNumber` 等於該 step 事件的 Bridge `seq`**
+        （與 SSE `id:` 同一個序號空間），所以 `afterSeq` 直接對 SSE 的 `Last-Event-ID` 整數部分。
+        依 `stepNumber` 升冪；`afterSeq` 為嚴格大於。預設 `size=50`、上限 200。
+      x-required-role: VIEWER
+      x-rtm: [API-EXE-06, API-SSE-03, US-M-03, US-M-09]
+      parameters:
+        - $ref: '#/components/parameters/RunIdPath'
+        - $ref: '#/components/parameters/PageQuery'
+        - name: size
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+            maximum: 200
+            default: 50
+        - name: afterSeq
+          in: query
+          required: false
+          description: 只回傳 stepNumber（＝事件 seq）大於此值的列
+          schema:
+            type: integer
+            format: int32
+            minimum: 0
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResultPageDataExecutionStepResponse'
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+  /api/v1/executions/{runId}/dag:
+    get:
+      tags: [專案執行]
+      operationId: getExecutionDag
+      summary: 查詢 DAG 圖
+      description: |
+        節點與邊在建立批次時凍結於 `execution_runs.dag`；每個節點的 `status` 於讀取時疊加目標／任務的**現況**
+        （歷史批次也是現況，見 `statusAsOf`）。
+      x-required-role: VIEWER
+      x-rtm: [API-EXE-07, API-DAG-01, US-E-09]
+      parameters:
+        - $ref: '#/components/parameters/RunIdPath'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResultDagResponse'
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+  /api/v1/executions/{runId}/checkpoints:
+    get:
+      tags: [專案執行]
+      operationId: listExecutionCheckpoints
+      summary: 查詢可用斷點列表
+      description: |
+        由 `console.checkpoints` 讀取（Bridge 於每個步驟完成時自行記錄歷史快照，append-only），依建立時間舊→新。
+        不含 `stateSnapshot` 本體；`stepIdx`／`stepId` 取自快照內的 `step_idx`／`step_id`（＝還原後下一個要跑的步驟）。
+      x-required-role: VIEWER
+      x-rtm: [API-EXE-08, US-E-11]
+      parameters:
+        - $ref: '#/components/parameters/RunIdPath'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResultListCheckpointResponse'
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+  /api/v1/executions/{runId}/restore/{checkpointId}:
+    post:
+      tags: [專案執行]
+      operationId: restoreExecution
+      summary: 從指定歷史 checkpoint 還原並續跑
+      description: |
+        Bridge `POST /autoclaude/runs/{id}/restore`（接受 PAUSED 與終態 COMPLETED／FAILED／CANCELLED；終態已放的鎖須重新取得，可能 409）。
+        還原點之後的任務與目標由後端「系統重設」（見 Markdown 契約 §3.5.3）；專案回 `EXECUTING`。
+        後端先重驗範圍內 signedOff（409「未經人工審批的草案不可執行」）。注意：restore 沿用該 run 建立時的 playbook，
+        之後修改任務內容不會生效（要用新內容請另開批次）。
+      x-required-role: OPERATOR
+      x-rtm: [API-EXE-09, API-EXE-11, US-E-11]
+      parameters:
+        - $ref: '#/components/parameters/RunIdPath'
+        - $ref: '#/components/parameters/CheckpointIdPath'
+      responses:
+        '200':
+          description: 已開始還原續跑（bridgeStatus=RUNNING）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResultExecutionRunResponse'
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '502': {$ref: '#/components/responses/BadGateway'}
+        '504': {$ref: '#/components/responses/GatewayTimeout'}
+  /api/v1/executions/{runId}/review/{stepId}:
+    post:
+      tags: [專案執行]
+      operationId: reviewExecution
+      summary: 審核執行結果（通過／拒絕／重試／跳過）
+      description: |
+        路徑的 `{stepId}` **是 `review_requests.id`（UUID），不是 playbook 的 step_id**。審核人取自 JWT subject。
+        可用的決定由審核項的 `allowedDecisions` 決定；不在其內 → 409「此審核項不允許該決定」。
+        成功 204。`SKIP`（以及找不到還原點的 `RETRY`）會另開後續批次（follow-up run），其 id 放在回應標頭
+        `X-Follow-Up-Run-Id`；其餘決定該標頭不出現。動作對照表見 Markdown 契約 §3.6.3。
+      x-required-role: OPERATOR
+      x-rtm: [API-EXE-10, US-E-07, US-E-08]
+      parameters:
+        - $ref: '#/components/parameters/RunIdPath'
+        - $ref: '#/components/parameters/ReviewIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewRequest'
+            examples:
+              approve:
+                value:
+                  decision: APPROVE
+                  comment: 第一個任務結果符合預期
+      responses:
+        '204':
+          description: 已處理（無內容）
+          headers:
+            X-Follow-Up-Run-Id:
+              description: 後續批次 id（僅 SKIP／無還原點的 RETRY 會出現）
+              schema:
+                type: string
+                format: uuid
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '502': {$ref: '#/components/responses/BadGateway'}
+        '504': {$ref: '#/components/responses/GatewayTimeout'}
+  /api/v1/monitor/projects/{projectId}/metrics:
+    get:
+      tags: [專案監控]
+      operationId: getProjectMetrics
+      summary: 查詢專案指標（PRD 八項 KPI＋設計稿所需欄位）
+      description: |
+        百分比一律 0～100 並四捨五入到小數 1 位；平均值四捨五入到小數 2 位。`previousValue`／`delta` 是與「緊鄰前一個等長視窗」的比較，
+        無法計算時為 null（UI 顯示「—」）。公式見 Markdown 契約 §3.8。
+        預設視窗：`to=現在`、`from=to−24h`；`runId` 省略＝專案全部批次。
+      x-required-role: VIEWER
+      x-rtm: [API-MON-01, US-M-01, US-M-10]
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdPath'
+        - $ref: '#/components/parameters/MonitorRunIdQuery'
+        - $ref: '#/components/parameters/MonitorFromQuery'
+        - $ref: '#/components/parameters/MonitorToQuery'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResultProjectMetricsResponse'
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+  /api/v1/monitor/projects/{projectId}/token-trend:
+    get:
+      tags: [專案監控]
+      operationId: getTokenTrend
+      summary: Token 使用趨勢（含預算線）
+      description: |
+        依 `bucket` 分桶（預設：視窗 ≤ 48 小時用 HOUR，否則 DAY）；資料來源 `console.run_token_samples`（由 Bridge `token` 事件寫入）。
+        沒有資料的桶不補零（前端自行補）。`budget` 為該桶所屬批次的 `tokenBudget`（多批次時取最新批次；無預算為 null）。
+      x-required-role: VIEWER
+      x-rtm: [API-MON-02, US-M-02]
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdPath'
+        - $ref: '#/components/parameters/MonitorRunIdQuery'
+        - $ref: '#/components/parameters/MonitorFromQuery'
+        - $ref: '#/components/parameters/MonitorToQuery'
+        - $ref: '#/components/parameters/BucketQuery'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResultListTokenTrendPoint'
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+  /api/v1/monitor/projects/{projectId}/task-trend:
+    get:
+      tags: [專案監控]
+      operationId: getTaskTrend
+      summary: 任務執行趨勢（依步驟事件分桶）
+      description: |
+        資料來源 `console.execution_steps`（STARTED／COMPLETED／FAILED／RETRYING 各自計數）。成功／失敗比率由 `completed` 與 `failed` 推得。
+      x-required-role: VIEWER
+      x-rtm: [API-MON-03, US-M-03]
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdPath'
+        - $ref: '#/components/parameters/MonitorRunIdQuery'
+        - $ref: '#/components/parameters/MonitorFromQuery'
+        - $ref: '#/components/parameters/MonitorToQuery'
+        - $ref: '#/components/parameters/BucketQuery'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResultListTaskTrendPoint'
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+  /api/v1/monitor/projects/{projectId}/alerts:
+    get:
+      tags: [專案監控]
+      operationId: listProjectAlerts
+      summary: 查詢告警
+      description: |
+        由新到舊；PRD 回傳 `List<AlertResponse>`（不分頁），以 `limit`（預設 50，上限 200）截斷。
+      x-required-role: VIEWER
+      x-rtm: [API-MON-04, API-ALR-01, API-ALR-02, API-ALR-03, API-ALR-04, API-ALR-05, API-ALR-06, US-M-05]
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdPath'
+        - $ref: '#/components/parameters/MonitorRunIdQuery'
+        - name: acknowledged
+          in: query
+          required: false
+          description: true＝只看已確認；false＝只看未確認；省略＝全部
+          schema:
+            type: boolean
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+            maximum: 200
+            default: 50
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResultListAlertResponse'
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+  /api/v1/monitor/alerts/{alertId}/acknowledge:
+    post:
+      tags: [專案監控]
+      operationId: acknowledgeAlert
+      summary: 確認告警
+      description: |
+        寫入 `acknowledged／By／At`。**冪等**：已確認的告警再次確認仍回 204，且不改寫第一次的確認人與時間。
+        確認後同一規則＋對象可再產生新告警。
+      x-required-role: OPERATOR
+      x-rtm: [API-MON-05, US-M-05]
+      parameters:
+        - $ref: '#/components/parameters/AlertIdPath'
+      responses:
+        '204':
+          description: 已確認（無內容）
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+  /api/v1/monitor/projects/{projectId}/logs:
+    get:
+      tags: [專案監控]
+      operationId: listProjectLogs
+      summary: 查詢結構化日誌
+      description: |
+        日誌由 `execution_steps`、批次生命週期（`execution_runs`）、`alerts`、`review_requests` 衍生，**不含引擎原始 stdout**
+        （原始行只在 SSE `log` 事件，來源 `ENGINE`）。等級對映：FAILED／CRITICAL→ERROR；RETRYING／WARNING／CANCELLED→WARN；其餘 INFO。
+        預設 `order=desc`（新到舊）。
+      x-required-role: VIEWER
+      x-rtm: [API-MON-06, US-M-04]
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdPath'
+        - $ref: '#/components/parameters/MonitorRunIdQuery'
+        - $ref: '#/components/parameters/MonitorFromQuery'
+        - $ref: '#/components/parameters/MonitorToQuery'
+        - name: level
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [ALL, INFO, WARN, ERROR]
+            default: ALL
+        - name: taskId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: q
+          in: query
+          required: false
+          description: 訊息關鍵字（不分大小寫；萬用字元視為字面）
+          schema:
+            type: string
+            maxLength: 200
+        - name: order
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+        - $ref: '#/components/parameters/PageQuery'
+        - name: size
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+            maximum: 200
+            default: 50
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResultPageDataLogEntryResponse'
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+  /api/v1/monitor/projects/{projectId}/report:
+    get:
+      tags: [專案監控]
+      operationId: downloadProjectReport
+      summary: 匯出監控報表（CSV 必做；PDF 標 W5）
+      description: |
+        **不包 ApiResult 封包**，直接回檔案並帶 `Content-Disposition: attachment`。呼叫端須送 `Accept: text/csv`（或 `*/*`）。
+        CSV：UTF-8 含 BOM、CRLF、RFC 4180 引號；多個區段以 `#section,<名稱>` 行分隔（summary／runs／tasks／alerts），格式見 Markdown 契約 §1.3.7。
+        `format=pdf` 在 W5 之前回 501（reason「PDF 報表尚未提供（W5）」）。
+      x-required-role: VIEWER
+      x-rtm: [API-MON-07, US-M-07]
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdPath'
+        - name: format
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [csv, pdf]
+            default: csv
+        - $ref: '#/components/parameters/MonitorRunIdQuery'
+        - $ref: '#/components/parameters/MonitorFromQuery'
+        - $ref: '#/components/parameters/MonitorToQuery'
+      responses:
+        '200':
+          description: 報表檔案
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+              description: attachment; filename="monitor-report-<projectId 前 8 碼>-<yyyyMMdd-HHmm>.csv"
+          content:
+            text/csv:
+              schema:
+                type: string
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '501': {$ref: '#/components/responses/NotImplemented'}
+  /api/v1/notifications/summary:
+    get:
+      tags: [專案監控]
+      operationId: getNotificationSummary
+      summary: 通知與待辦計數（補充端點，ADR-001 G-17）
+      description: |
+        供頂列通知鈴與 signoff 佇列徽章。`pendingSignoffs`＝專案、目標、任務三表中未 signoff 且未軟刪的列數＋待審批的匯入記錄數（PARSED／REVIEWING 且未 signoff）；
+        `pendingReviews`＝`review_requests.status=PENDING` 總數；`unacknowledgedAlerts`＝`alerts.acknowledged=false` 總數。皆跨專案。
+      x-required-role: VIEWER
+      x-rtm: [API-NTF-01, US-E-07]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResultNotificationSummaryResponse'
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+  /api/v1/stream/executions/{runId}/logs:
+    get:
+      tags: [SSE 推送]
+      operationId: streamExecutionLogs
+      summary: 即時執行日誌（SSE）
+      description: |
+        事件：`log`、`status-change`、`review-request`、`alert`（`data` 形狀見各 `*EventData` schema 與 Markdown 契約 §2）。
+        認證：`Authorization: Bearer` 與 `?access_token=` 兩者皆收（EventSource 不能帶標頭）。
+        `id:` 沿用 Bridge `seq`；後端自產的事件用 `<seq>.<n>`。`Last-Event-ID` 重播未送達事件。
+        每 15 秒無事件送 `: keep-alive` 註解。PAUSED 不結束串流；終態後送 `status-change` 並關閉；
+        重連時若 run 已終態且無事件可重播 → **204**（EventSource 收到 204 不再重連）。
+      x-required-role: VIEWER
+      x-rtm: [API-SSE-01, API-SSE-03, US-E-03, US-E-07]
+      security:
+        - bearerAuth: []
+        - queryAccessToken: []
+      parameters:
+        - $ref: '#/components/parameters/RunIdPath'
+        - $ref: '#/components/parameters/AccessTokenQuery'
+        - $ref: '#/components/parameters/LastEventIdHeader'
+        - name: tail
+          in: query
+          required: false
+          description: 沒有 Last-Event-ID 時，先重播最後 N 則事件再接即時（預設 200；0＝只收之後的新事件）
+          schema:
+            type: integer
+            format: int32
+            minimum: 0
+            maximum: 5000
+            default: 200
+      responses:
+        '200':
+          description: text/event-stream
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+              description: no-cache
+            X-Accel-Buffering:
+              schema:
+                type: string
+              description: no
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: SSE 文字框架；每個事件 `id:`／`event:`／`data:`（單行 JSON）。
+        '204':
+          description: run 已終態且沒有可重播的事件（結束重連）
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      x-event-schemas:
+        log: LogEventData
+        status-change: StatusChangeEventData
+        review-request: ReviewRequestEventData
+        alert: AlertEventData
+  /api/v1/stream/executions/{runId}/metrics:
+    get:
+      tags: [SSE 推送]
+      operationId: streamExecutionMetrics
+      summary: 即時執行指標（SSE）
+      description: |
+        事件：`metric-update`、`token-update`、`progress-update`。三者都是**狀態快照（latest-wins）**：
+        重連時不重播歷史，伺服器先送各一則最新快照再接即時事件（收斂重播）。其餘認證／keep-alive／終態規則同 `/logs`。
+      x-required-role: VIEWER
+      x-rtm: [API-SSE-02, API-SSE-03, US-E-03]
+      security:
+        - bearerAuth: []
+        - queryAccessToken: []
+      parameters:
+        - $ref: '#/components/parameters/RunIdPath'
+        - $ref: '#/components/parameters/AccessTokenQuery'
+        - $ref: '#/components/parameters/LastEventIdHeader'
+      responses:
+        '200':
+          description: text/event-stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '204':
+          description: run 已終態且沒有可送的事件（結束重連）
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      x-event-schemas:
+        metric-update: MetricUpdateEventData
+        token-update: TokenUpdateEventData
+        progress-update: ProgressUpdateEventData
+  /api/v1/settings:
+    get:
+      tags: [系統參數]
+      operationId: listSettings
+      summary: 查詢所有參數（依分類）
+      description: |
+        回傳 `Map<category, List<ConfigResponse>>`，六個分類：model／agent／execution／monitor／autoclaude／sdd。
+        加密值一律 `••••••••` 並附 `hasValue`；`reveal=true` 僅 ADMIN（其他角色 403），每次揭露寫審計。
+      x-required-role: VIEWER
+      x-rtm: [API-SET-01, US-S-01, US-S-04, US-S-08]
+      parameters:
+        - $ref: '#/components/parameters/RevealQuery'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResultMapStringListConfigResponse'
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+  /api/v1/settings/history:
+    get:
+      tags: [系統參數]
+      operationId: listSettingsHistory
+      summary: 查詢參數修改歷史（分頁）
+      description: |
+        由新到舊。加密參數的 `oldValue`／`newValue` 一律遮罩為 `••••••••`（不論 reveal）。
+      x-required-role: VIEWER
+      x-rtm: [API-SET-07, US-S-07]
+      parameters:
+        - name: category
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: key
+          in: query
+          required: false
+          description: 需與 category 併用（單獨給 key 回 400）
+          schema:
+            type: string
+        - $ref: '#/components/parameters/PageQuery'
+        - name: size
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResultPageDataConfigHistoryResponse'
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+  /api/v1/settings/export:
+    post:
+      tags: [系統參數]
+      operationId: exportSettings
+      summary: 匯出設定（JSON 檔）
+      description: |
+        **不包 ApiResult 封包**，直接回 `SettingsExportDocument` 並帶 `Content-Disposition: attachment`。
+        加密參數的 `value` 一律輸出佔位字串 `<encrypted>`（匯入時略過）。
+      x-required-role: ADMIN
+      x-rtm: [API-SET-08, US-S-06]
+      responses:
+        '200':
+          description: 設定檔
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+              description: attachment; filename="aisdlc-settings-<yyyyMMdd>.json"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SettingsExportDocument'
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+  /api/v1/settings/import:
+    post:
+      tags: [系統參數]
+      operationId: importSettings
+      summary: 匯入設定（JSON 檔）
+      description: |
+        multipart 欄位 `file`（≤ 1MB、`version=1` 的 `SettingsExportDocument`）。逐筆驗證（型別／規則／SEC-04 allowlist）；
+        通過者在同一交易套用並寫歷史，失敗者列入 `errors`；`<encrypted>` 佔位值略過（算入 `skipped`）。
+        token_guard 兩鍵以合併後的最終值做 `halt > compact` 跨鍵校驗，不滿足則兩鍵皆拒絕。
+      x-required-role: ADMIN
+      x-rtm: [API-SET-09, US-S-06, NFR-SEC-05]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: 設定檔（application/json）
+      responses:
+        '200':
+          description: 處理完成（可能部分略過或失敗）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResultImportSettingsResponse'
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '415': {$ref: '#/components/responses/UnsupportedMediaType'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+  /api/v1/settings/test-connection:
+    post:
+      tags: [系統參數]
+      operationId: testConnection
+      summary: 測試模型連線（SEC-04）
+      description: |
+        預設測試已儲存的 `model.apiUrl`／`model.apiKey`；body（選填）可帶尚未儲存的 `apiUrl`／`apiKey`／`model`（金鑰不回顯、不寫日誌）。
+        SSRF／allowlist 檢查未過 → **422**（reason「目標位址未通過 SSRF／allowlist 檢查」，`details.violation` 為規則碼）；
+        通過檢查後的網路層結果（逾時、拒絕連線、HTTP 401、重新導向）→ **200** 且 `success=false`。
+        檢查順序與規則碼見 Markdown 契約 §1.5.7。
+      x-required-role: ADMIN
+      x-rtm: [API-SET-06, US-S-05, NFR-SEC-04]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TestConnectionRequest'
+      responses:
+        '200':
+          description: 已實際嘗試連線（成功或失敗皆 200）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResultConnectionTestResponse'
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '422':
+          description: 目標位址未通過 SSRF／allowlist 檢查（未發出任何連線）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              examples:
+                private-ip:
+                  value:
+                    code: 422
+                    message: 目標位址未通過 SSRF／allowlist 檢查
+                    reason: 目標位址未通過 SSRF／allowlist 檢查
+                    errors: []
+                    details:
+                      host: 10.0.0.5
+                      violation: private_ip
+                    timestamp: '2026-10-15T08:30:12Z'
+                    traceId: 0f7c2a58-4e1d-4b29-9d3e-6a1b5c8d9e02
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+  /api/v1/settings/execution/token-guard:
+    put:
+      tags: [系統參數]
+      operationId: updateTokenGuard
+      summary: 原子更新 token_guard 群組（NFR-SEC-05）
+      description: |
+        `compactThresholdPct` 與 `haltThresholdPct` 一併提交，同一交易內做跨鍵校驗：皆為整數，`compact` 1～99、`halt` 2～100，
+        且 `halt > compact`；不滿足 → 400（reason 逐字：`halt_threshold_pct 必須大於 compact_threshold_pct`）。
+        成功回兩個 `ConfigResponse` 並各寫一筆歷史。
+      x-required-role: ADMIN
+      x-rtm: [API-SET-04, NFR-SEC-05]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenGuardRequest'
+            examples:
+              valid:
+                value:
+                  compactThresholdPct: 70
+                  haltThresholdPct: 95
+      responses:
+        '200':
+          description: 已更新
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResultListConfigResponse'
+        '400':
+          description: 驗證失敗，含 halt ≤ compact
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              examples:
+                halt-not-greater:
+                  value:
+                    code: 400
+                    message: Token Guard 閾值不合法
+                    reason: halt_threshold_pct 必須大於 compact_threshold_pct
+                    errors:
+                      - field: haltThresholdPct
+                        message: 必須大於 compactThresholdPct
+                    details:
+                      compactThresholdPct: 90
+                      haltThresholdPct: 80
+                    timestamp: '2026-10-15T08:30:12Z'
+                    traceId: 0f7c2a58-4e1d-4b29-9d3e-6a1b5c8d9e02
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+  /api/v1/settings/{category}:
+    get:
+      tags: [系統參數]
+      operationId: listSettingsByCategory
+      summary: 查詢特定分類參數
+      description: 同 `GET /api/v1/settings` 的遮罩與 `reveal` 規則；分類不存在 → 404。
+      x-required-role: VIEWER
+      x-rtm: [API-SET-02, US-S-01, US-S-04, US-S-08]
+      parameters:
+        - $ref: '#/components/parameters/CategoryPath'
+        - $ref: '#/components/parameters/RevealQuery'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResultListConfigResponse'
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+  /api/v1/settings/{category}/reset:
+    post:
+      tags: [系統參數]
+      operationId: resetCategory
+      summary: 重置整個分類為預設值（補充端點）
+      description: |
+        設計稿底部「全部重置為預設值」。同一交易內逐鍵重置並各寫歷史；加密鍵預設略過（要連同重置須 `confirm=true`）；
+        token_guard 以重置後的最終值做跨鍵校驗。
+      x-required-role: ADMIN
+      x-rtm: [API-SET-05, US-S-03]
+      parameters:
+        - $ref: '#/components/parameters/CategoryPath'
+        - $ref: '#/components/parameters/ConfirmQuery'
+      responses:
+        '200':
+          description: 已重置
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResultListConfigResponse'
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+  /api/v1/settings/{category}/{key}:
+    put:
+      tags: [系統參數]
+      operationId: updateSetting
+      summary: 更新單一參數
+      description: |
+        驗證順序：404 鍵不存在 → 400 型別／`validationRule`／範圍／SEC-04 allowlist（`model.apiUrl`）→ 400 token_guard 單鍵跨鍵校驗
+        （讀對端鍵的現值，reason 同群組端點）→ 409 敏感參數未帶 `confirm=true`。
+        `value` 一律是字串（BOOLEAN 為 `true`／`false`；FLOAT 用小數點）。成功寫歷史；加密值以 AES-256-GCM 儲存。
+      x-required-role: ADMIN
+      x-rtm: [API-SET-03, API-SET-10, US-S-02, US-S-08, NFR-SEC-05]
+      parameters:
+        - $ref: '#/components/parameters/CategoryPath'
+        - $ref: '#/components/parameters/KeyPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateConfigRequest'
+            examples:
+              plain:
+                value:
+                  value: '0.5'
+              sensitive:
+                value:
+                  value: sk-example
+                  confirm: true
+      responses:
+        '200':
+          description: 已更新
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResultConfigResponse'
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+  /api/v1/settings/{category}/{key}/reset:
+    post:
+      tags: [系統參數]
+      operationId: resetSetting
+      summary: 重置單一參數為預設值
+      description: |
+        寫歷史。token_guard 單鍵重置後若違反 `halt > compact` → 400（reason 同群組端點）；加密鍵需 `confirm=true`，否則 409。
+      x-required-role: ADMIN
+      x-rtm: [API-SET-05, US-S-03, NFR-SEC-05]
+      parameters:
+        - $ref: '#/components/parameters/CategoryPath'
+        - $ref: '#/components/parameters/KeyPath'
+        - $ref: '#/components/parameters/ConfirmQuery'
+      responses:
+        '200':
+          description: 已重置
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResultConfigResponse'
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Authorization 標頭帶 access token（30 分鐘）
+    queryAccessToken:
+      type: apiKey
+      in: query
+      name: access_token
+      description: |
+        只有 `/api/v1/stream/**` 接受（EventSource 不能帶標頭）；必須是 access token（refresh token 一律 401）。
+        伺服器存取日誌須遮罩此參數，回應帶 `Cache-Control: no-store`。
+  parameters:
+    PageQuery:
+      name: page
+      in: query
+      required: false
+      description: 頁碼（0 起算）
+      schema:
+        type: integer
+        format: int32
+        minimum: 0
+        default: 0
+    SizeQuery:
+      name: size
+      in: query
+      required: false
+      description: 每頁筆數（1～100）
+      schema:
+        type: integer
+        format: int32
+        minimum: 1
+        maximum: 100
+        default: 10
+    ImportIdPath:
+      name: id
+      in: path
+      required: true
+      description: 匯入記錄 id
+      schema:
+        type: string
+        format: uuid
+    ProjectIdPath:
+      name: projectId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    RunIdPath:
+      name: runId
+      in: path
+      required: true
+      description: 執行批次 id（同時是 Bridge 的 run_id）
+      schema:
+        type: string
+        format: uuid
+    CheckpointIdPath:
+      name: checkpointId
+      in: path
+      required: true
+      description: checkpoints.id（同時是 Bridge 的 checkpoint_id）
+      schema:
+        type: string
+        format: uuid
+    ReviewIdPath:
+      name: stepId
+      in: path
+      required: true
+      description: 審核項 id＝review_requests.id（不是 playbook 的 step_id）
+      schema:
+        type: string
+        format: uuid
+    AlertIdPath:
+      name: alertId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    CategoryPath:
+      name: category
+      in: path
+      required: true
+      schema:
+        type: string
+        enum: [model, agent, execution, monitor, autoclaude, sdd]
+    KeyPath:
+      name: key
+      in: path
+      required: true
+      description: 參數鍵名（區分大小寫，例：compactThresholdPct）
+      schema:
+        type: string
+        maxLength: 200
+    MonitorRunIdQuery:
+      name: runId
+      in: query
+      required: false
+      description: 只看此執行批次（必須屬於該專案，否則 404）；省略＝專案全部批次
+      schema:
+        type: string
+        format: uuid
+    MonitorFromQuery:
+      name: from
+      in: query
+      required: false
+      description: 視窗起點（ISO-8601 帶 offset）；預設 to 之前 24 小時
+      schema:
+        type: string
+        format: date-time
+    MonitorToQuery:
+      name: to
+      in: query
+      required: false
+      description: 視窗終點（ISO-8601 帶 offset）；預設現在。`from` 必須早於 `to`，否則 400
+      schema:
+        type: string
+        format: date-time
+    BucketQuery:
+      name: bucket
+      in: query
+      required: false
+      description: 分桶粒度；預設視窗 ≤ 48 小時用 HOUR，否則 DAY
+      schema:
+        type: string
+        enum: [HOUR, DAY]
+    RevealQuery:
+      name: reveal
+      in: query
+      required: false
+      description: true＝揭露加密值明文（僅 ADMIN；其他角色 403；每次寫審計）
+      schema:
+        type: boolean
+        default: false
+    ConfirmQuery:
+      name: confirm
+      in: query
+      required: false
+      description: 涉及加密參數的重置須明確帶 true，否則 409
+      schema:
+        type: boolean
+        default: false
+    AccessTokenQuery:
+      name: access_token
+      in: query
+      required: false
+      description: access token（與 Authorization 標頭擇一）
+      schema:
+        type: string
+    LastEventIdHeader:
+      name: Last-Event-ID
+      in: header
+      required: false
+      description: 最後收到的事件 id（`<seq>` 或 `<seq>.<n>`）；伺服器從其後重播
+      schema:
+        type: string
+        pattern: '^[0-9]+(\.[0-9]+)?$'
+  responses:
+    BadRequest:
+      description: 請求格式或欄位驗證失敗（errors 列出每個欄位的問題；reason 常數見 Markdown 契約附錄 B）
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    Unauthorized:
+      description: 未登入，或 access token 無效／過期（reason：UNAUTHENTICATED／TOKEN_EXPIRED／TOKEN_INVALID）
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    Forbidden:
+      description: 角色不足（reason：ACCESS_DENIED；`reveal=true` 非 ADMIN 時 reason 為「僅 ADMIN 可揭露敏感參數」）
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    NotFound:
+      description: 資源不存在或已軟刪除
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    Conflict:
+      description: 與目前狀態衝突（reason 與 details 逐端點固定，見 Markdown 契約）
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    PayloadTooLarge:
+      description: 上傳檔案超過大小上限
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    UnsupportedMediaType:
+      description: 副檔名或 Content-Type 不被支援
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    Unprocessable:
+      description: Bridge 或後端消毒／有界閘拒絕（結構化原因逐字帶出）
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    TooManyRequests:
+      description: 超過每分鐘 100 次請求上限（每 IP；reason「超過每分鐘 100 次請求上限」）
+      headers:
+        Retry-After:
+          description: 建議等待秒數
+          schema:
+            type: integer
+            format: int32
+        X-RateLimit-Limit:
+          description: 視窗內上限（100）
+          schema:
+            type: integer
+            format: int32
+        X-RateLimit-Remaining:
+          description: 視窗內剩餘次數（429 時為 0）
+          schema:
+            type: integer
+            format: int32
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    BadGateway:
+      description: Bridge 無法連線或回了非預期的錯誤（reason「引擎橋接服務無法連線」／「引擎橋接服務錯誤」）
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    GatewayTimeout:
+      description: Bridge 逾時（reason「引擎橋接服務逾時」）
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    NotImplemented:
+      description: 功能尚未提供（PDF 報表，reason「PDF 報表尚未提供（W5）」）
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+  schemas:
+    ApiError:
+      type: object
+      description: 統一錯誤封包（Phase 1+2 同名 schema，逐字沿用）
+      required: [code, message, errors, timestamp, traceId]
+      properties:
+        code:
+          type: integer
+          format: int32
+        message:
+          type: string
+        reason:
+          type: string
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/FieldError'
+        details:
+          type: object
+          additionalProperties: true
+        timestamp:
+          type: string
+          format: date-time
+        traceId:
+          type: string
+    FieldError:
+      type: object
+      required: [field, message]
+      properties:
+        field:
+          type: string
+        message:
+          type: string
+    GateName:
+      type: string
+      description: 有界閘名稱（逐字常數）
+      enum: [max_steps, cycle, empty_prompt, brain_unsupported, brain_failed, prompt_too_long]
+    GateError:
+      type: object
+      description: 單一有界閘違規
+      required: [gate, detail]
+      properties:
+        gate:
+          $ref: '#/components/schemas/GateName'
+        detail:
+          type: string
+          description: 給人看的完整原因（不截斷）
+        location:
+          type: string
+          description: 違規位置，例如 goals[0].tasks[3].description
+    GateFieldError:
+      description: 422 有界閘回應的 errors 項目＝FieldError 加上 gate／detail／location（一般 client 當 FieldError 讀即可）
+      allOf:
+        - $ref: '#/components/schemas/FieldError'
+        - $ref: '#/components/schemas/GateError'
+    ParseGateErrorResponse:
+      type: object
+      description: parse／editResult 未通過有界閘時的 422 本文（ApiError 的特化：errors 項目帶 gate 欄位）
+      required: [code, message, reason, errors, timestamp, traceId]
+      properties:
+        code:
+          type: integer
+          format: int32
+          const: 422
+        message:
+          type: string
+        reason:
+          type: string
+          const: 解析結果未通過有界閘
+        errors:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/GateFieldError'
+        details:
+          type: object
+          additionalProperties: true
+        timestamp:
+          type: string
+          format: date-time
+        traceId:
+          type: string
+    ImportSourceType:
+      type: string
+      enum: [MARKDOWN, PDF, DOCX, PLAIN_TEXT]
+    ImportStatus:
+      type: string
+      description: |
+        UPLOADED→PARSING→PARSED→REVIEWING→IMPORTED／REJECTED；解析失敗時 PARSING 退回 UPLOADED。
+      enum: [UPLOADED, PARSING, PARSED, REVIEWING, IMPORTED, REJECTED]
+    ParsePath:
+      type: string
+      description: 解析路徑：SDD＝規格驅動（Bridge /sdd/compile）；LLM＝OpenAI 相容 chat completions；DECOMPOSE＝Bridge /autoclaude/decompose
+      enum: [SDD, LLM, DECOMPOSE]
+    TextImportRequest:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+          minLength: 1
+          maxLength: 2000000
+          description: 需求文字（支援 Markdown）；不可全為空白
+        sourceFileName:
+          type: string
+          maxLength: 500
+          description: 選填的來源名稱（例：來自剪貼簿）
+        sourceType:
+          type: string
+          enum: [PLAIN_TEXT, MARKDOWN]
+          default: PLAIN_TEXT
+    ParseOptions:
+      type: object
+      required: [executionPath]
+      properties:
+        autonomyLevel:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 10
+          default: 3
+          description: 解析前選擇的自治等級；也成為落庫專案的 autonomyLevel
+        executionPath:
+          type: string
+          maxLength: 500
+          description: 專案執行路徑（絕對路徑格式：POSIX、磁碟機代號或 UNC）；Bridge 的 allowlist 在執行時才驗
+        additionalPrompt:
+          type: string
+          maxLength: 4000
+          description: 補充說明（引導 AI 解析方向）
+        specDir:
+          type: string
+          maxLength: 500
+          description: 明示的 SDD 規格目錄（絕對路徑）；省略則以 executionPath 探測是否有凍結規格
+    ParsedProject:
+      type: object
+      required: [name, executionPath, passCriteria]
+      properties:
+        name:
+          type: string
+          maxLength: 200
+        executionPath:
+          type: string
+          maxLength: 500
+        passCriteria:
+          type: string
+          description: Markdown
+        description:
+          type: string
+          description: Markdown
+        autonomyLevel:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 10
+    ParsedTask:
+      type: object
+      required: [name, description, passCriteria]
+      properties:
+        name:
+          type: string
+          maxLength: 200
+        description:
+          type: string
+          description: Markdown；不可為空白（空白→ 422 gate=empty_prompt）
+        passCriteria:
+          type: string
+          description: Markdown；落庫時 NotBlank
+        sortOrder:
+          type: integer
+          format: int32
+          description: 伺服器依陣列順序重編（0 起連續）；請求帶了也忽略
+        estimatedTokens:
+          type: integer
+          format: int64
+          minimum: 0
+        evaluatorCommand:
+          type: string
+          maxLength: 1000
+          description: NFR-SEC-03；含禁用字元 → 400
+        expectedOutputRegex:
+          type: string
+          maxLength: 1000
+          description: 須可編譯，否則 400
+        passCriteriaSpec:
+          type: object
+          additionalProperties: true
+          description: 結構化通過標準（路徑 C 會放 {source, stepId, draftId}）
+        maxRetries:
+          type: integer
+          format: int32
+          minimum: 0
+          maximum: 20
+    ParsedGoal:
+      type: object
+      required: [key, name, passCriteria, tasks]
+      properties:
+        key:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: 樹內唯一的穩定鍵（伺服器解析時賦予 g1、g2…；前端新增目標自行產生）。dependsOn 引用它
+        name:
+          type: string
+          maxLength: 200
+        description:
+          type: string
+        passCriteria:
+          type: string
+        sortOrder:
+          type: integer
+          format: int32
+        dependsOn:
+          type: array
+          description: 前置目標的 key；自依賴、不存在的 key、成環 → 422 gate=cycle
+          items:
+            type: string
+        tasks:
+          type: array
+          description: 每個目標任務數 ≤ 24（超過 → 422 gate=max_steps）；至少 1 個
+          items:
+            $ref: '#/components/schemas/ParsedTask'
+    ParsedResult:
+      type: object
+      description: 三層草案樹（PRD §5.2.4 輸出 JSON 的超集）。存於 import_records.parsed_result（JSONB）
+      required: [project, goals]
+      properties:
+        project:
+          $ref: '#/components/schemas/ParsedProject'
+        goals:
+          type: array
+          description: 至多 24 個目標；陣列順序即排序
+          items:
+            $ref: '#/components/schemas/ParsedGoal'
+        path:
+          $ref: '#/components/schemas/ParsePath'
+        aiModel:
+          type: string
+        tokenUsed:
+          type: integer
+          format: int64
+        reasoning:
+          type: string
+          description: 路徑 C 的 Bridge decompose reasoning
+        draftIds:
+          type: array
+          description: 路徑 C 的 Bridge draft_id 清單（signoff 時逐一 :approve）
+          items:
+            type: string
+        specDigest:
+          type: string
+          description: 路徑 A 的 SDD 規格 digest
+    EditParsedResultRequest:
+      type: object
+      required: [parsedResult]
+      properties:
+        parsedResult:
+          $ref: '#/components/schemas/ParsedResult'
+    ParseWarning:
+      type: object
+      description: 非阻擋提示（例如不安全的 evaluatorCommand 被清空）
+      required: [code, detail]
+      properties:
+        code:
+          type: string
+          description: 例：evaluator_command_dropped、passcriteria_placeholder
+        detail:
+          type: string
+        location:
+          type: string
+    ImportRecordResponse:
+      type: object
+      required: [id, sourceType, status, signedOff, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        sourceType:
+          $ref: '#/components/schemas/ImportSourceType'
+        sourceFileName:
+          type: string
+        status:
+          $ref: '#/components/schemas/ImportStatus'
+        signedOff:
+          type: boolean
+        signedOffBy:
+          type: string
+        signedOffAt:
+          type: string
+          format: date-time
+        projectId:
+          type: string
+          format: uuid
+          description: confirm 之後才有值
+        createdAt:
+          type: string
+          format: date-time
+        aiModel:
+          type: string
+        tokenUsed:
+          type: integer
+          format: int64
+        parsePath:
+          $ref: '#/components/schemas/ParsePath'
+        lastParseErrors:
+          type: array
+          description: 最近一次 parse 被有界閘拒絕的原因（成功解析後清空）
+          items:
+            $ref: '#/components/schemas/GateError'
+      example:
+        id: 7d9f3b52-1c0a-4e8e-9a43-5f6b2c1d8e01
+        sourceType: MARKDOWN
+        sourceFileName: e2e-brd.md
+        status: UPLOADED
+        signedOff: false
+        createdAt: '2026-10-15T08:30:12Z'
+    ImportRecordDetailResponse:
+      description: ImportRecordResponse ＋ 原文與解析結果
+      allOf:
+        - $ref: '#/components/schemas/ImportRecordResponse'
+        - type: object
+          required: [sourceContent]
+          properties:
+            sourceContent:
+              type: string
+            parsedResult:
+              $ref: '#/components/schemas/ParsedResult'
+    ParseResultResponse:
+      type: object
+      description: |
+        parse／editResult 成功的回應。**有界閘違規不走這裡**（422 `ParseGateErrorResponse`），所以成功時 `errors` 恆為空陣列；
+        欄位保留以維持主控裁決的形狀（Markdown 契約 §6 D-04）。
+      required: [importId, status, path, parsedResult, signedOff, errors, warnings]
+      properties:
+        importId:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/ImportStatus'
+        path:
+          $ref: '#/components/schemas/ParsePath'
+        parsedResult:
+          $ref: '#/components/schemas/ParsedResult'
+        signedOff:
+          type: boolean
+          description: parse 成功時恆為 false；editResult 後為 false（編輯撤銷 signoff）
+        aiModel:
+          type: string
+        tokenUsed:
+          type: integer
+          format: int64
+        reasoning:
+          type: string
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/GateError'
+        warnings:
+          type: array
+          items:
+            $ref: '#/components/schemas/ParseWarning'
+    SignoffRequest:
+      type: object
+      description: Phase 2 同名 schema（逐字）
+      required: [approver]
+      properties:
+        approver:
+          type: string
+          minLength: 1
+          description: 審批者；不可為空白（人工 signoff 不可匿名）
+    ProjectResponse:
+      type: object
+      description: Phase 2 同名 schema（逐字）；confirm 回傳
+      required: [id, name, executionPath, passCriteria, status, autonomyLevel, signedOff, goalsCount, tasksCount, tasksDone, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        executionPath:
+          type: string
+        passCriteria:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+          enum: [DRAFT, READY, EXECUTING, COMPLETED, FAILED, ARCHIVED]
+        autonomyLevel:
+          type: integer
+          format: int32
+        signedOff:
+          type: boolean
+        signedOffBy:
+          type: string
+        signedOffAt:
+          type: string
+          format: date-time
+        goalsCount:
+          type: integer
+          format: int32
+        tasksCount:
+          type: integer
+          format: int32
+        tasksDone:
+          type: integer
+          format: int32
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        createdBy:
+          type: string
+    RunStatus:
+      type: string
+      description: PRD 附錄 B／§5.3.5 的六態（寫入 PG 的值域）
+      enum: [INITIALIZING, RUNNING, PAUSED, COMPLETED, FAILED, CANCELLED]
+    BridgeRunStatus:
+      type: string
+      description: Bridge 的八態（PAUSING／CANCELLING 是過渡態，寫 PG 時折回 RUNNING）
+      enum: [INITIALIZING, RUNNING, PAUSING, PAUSED, CANCELLING, COMPLETED, FAILED, CANCELLED]
+    ScopeMode:
+      type: string
+      enum: [ALL, SELECTED]
+    ExecutionLimits:
+      type: object
+      description: US-E-10 的單一任務／單一目標 Token 上限（整體上限是 tokenBudget）；超過 → TOKEN_BUDGET_EXCEEDED 告警＋自動暫停
+      properties:
+        taskTokens:
+          type: integer
+          format: int64
+          minimum: 1
+        goalTokens:
+          type: integer
+          format: int64
+          minimum: 1
+    ExecutionScope:
+      type: object
+      description: |
+        ALL＝全部「可執行」任務（排除 COMPLETED／SKIPPED）；SELECTED＝`goalIds` 的全部可執行任務 ∪ `taskIds`。
+        `followUpOfRunId` 只出現在後續批次（follow-up run）的回應。
+        請求中 `mode` 可省略（預設 ALL）；回應一律帶 `mode`。
+      properties:
+        mode:
+          $ref: '#/components/schemas/ScopeMode'
+        goalIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        taskIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        limits:
+          $ref: '#/components/schemas/ExecutionLimits'
+        followUpOfRunId:
+          type: string
+          format: uuid
+    StartExecutionRequest:
+      type: object
+      description: 全部欄位可省略（body 可為 `{}`）。Architecture §11.2 把三者標必填，這裡放寬並給預設（Markdown 契約 §6 D-10）
+      properties:
+        autonomyLevel:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 10
+          description: 預設取專案的 autonomyLevel
+        tokenBudget:
+          type: integer
+          format: int64
+          minimum: 1
+          description: 預設取系統參數 execution.globalTokenBudget
+        scope:
+          $ref: '#/components/schemas/ExecutionScope'
+    ExecutionRunResponse:
+      type: object
+      required: [id, projectId, runNumber, status, autonomyLevel, scope, totalTokensUsed, startedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        projectId:
+          type: string
+          format: uuid
+        runNumber:
+          type: integer
+          format: int32
+          description: 同專案內遞增
+        status:
+          $ref: '#/components/schemas/RunStatus'
+        bridgeStatus:
+          $ref: '#/components/schemas/BridgeRunStatus'
+        autonomyLevel:
+          type: integer
+          format: int32
+        scope:
+          $ref: '#/components/schemas/ExecutionScope'
+        totalTokensUsed:
+          type: integer
+          format: int64
+          description: Bridge 寫入 execution_runs.total_tokens_used（console-api 只讀）
+        tokenBudget:
+          type: integer
+          format: int64
+        startedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+        followUpOfRunId:
+          type: string
+          format: uuid
+      example:
+        id: e5a7c3b9-2f1d-4b6a-8c0e-1d2f3a4b5c31
+        projectId: 0b8c5d1e-6a47-4d3f-8f2a-9c1e7b3a5d02
+        runNumber: 1
+        status: RUNNING
+        bridgeStatus: RUNNING
+        autonomyLevel: 1
+        scope:
+          mode: ALL
+          goalIds: []
+          taskIds: []
+        totalTokensUsed: 0
+        tokenBudget: 100000
+        startedAt: '2026-10-15T08:30:12Z'
+    ExecutionRunSummaryResponse:
+      type: object
+      description: 批次列表（含 US-M-06 批次比較所需欄位）
+      required: [id, projectId, runNumber, status, autonomyLevel, scopeMode, totalTokensUsed, startedAt, tasksTotal, tasksCompleted, tasksFailed]
+      properties:
+        id:
+          type: string
+          format: uuid
+        projectId:
+          type: string
+          format: uuid
+        runNumber:
+          type: integer
+          format: int32
+        status:
+          $ref: '#/components/schemas/RunStatus'
+        autonomyLevel:
+          type: integer
+          format: int32
+        scopeMode:
+          $ref: '#/components/schemas/ScopeMode'
+        totalTokensUsed:
+          type: integer
+          format: int64
+        tokenBudget:
+          type: integer
+          format: int64
+        startedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+        durationSec:
+          type: integer
+          format: int64
+          description: 已完成批次＝completedAt−startedAt；進行中＝現在−startedAt
+        tasksTotal:
+          type: integer
+          format: int32
+          description: 範圍內任務數（取自凍結的 dag）
+        tasksCompleted:
+          type: integer
+          format: int32
+          description: 該批次內有 COMPLETED 步驟列的相異任務數
+        tasksFailed:
+          type: integer
+          format: int32
+          description: 該批次內有 FAILED 步驟列的相異任務數
+        successRate:
+          type:
+            - number
+            - 'null'
+          description: tasksCompleted÷(tasksCompleted＋tasksFailed)×100（小數 1 位）；兩者皆 0 為 null
+    CurrentStep:
+      type: object
+      required: [stepId, stepNumber, taskName, attempt]
+      properties:
+        stepId:
+          type: string
+          description: playbook step_id（例：G1-T2）
+        stepNumber:
+          type: integer
+          format: int32
+          description: 該步驟在 playbook 內的位置（1 起算，Bridge 的 current_step_number）
+        taskId:
+          type: string
+          format: uuid
+        taskName:
+          type: string
+        goalId:
+          type: string
+          format: uuid
+        attempt:
+          type: integer
+          format: int32
+          description: 第幾次嘗試（1＝首次；RETRYING 為 2 起）
+    BridgeInfo:
+      type: object
+      required: [connected, checkedAt]
+      properties:
+        connected:
+          type: boolean
+          description: Bridge 是否可達（網路層）；false 時進度欄位為 DB 衍生值
+        instance:
+          type: string
+          description: Bridge 實例識別（bridge_instance）；不含 pid、lock key
+        status:
+          $ref: '#/components/schemas/BridgeRunStatus'
+        runKnown:
+          type: boolean
+          description: Bridge 可達但回 404 run_not_found 時為 false（workspace 已清除）
+        checkedAt:
+          type: string
+          format: date-time
+    ReviewKind:
+      type: string
+      description: 與 V3 migration 的 CHECK 一致（不擴充）
+      enum: [TASK_CONFIRM, GOAL_CONFIRM, GOAL_COMPLETED, ESCALATED]
+    ReviewStatus:
+      type: string
+      enum: [PENDING, APPROVED, REJECTED, RETRIED, SKIPPED]
+    ReviewDecision:
+      type: string
+      enum: [APPROVE, REJECT, RETRY, SKIP]
+    ReviewRequestResponse:
+      type: object
+      description: 待審核／已處理的審核項；`allowedDecisions` 決定 UI 哪些按鈕可按
+      required: [id, runId, kind, status, reason, requestedAt, allowedDecisions]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: review_requests.id；也是 POST review/{stepId} 路徑的 {stepId}
+        runId:
+          type: string
+          format: uuid
+        kind:
+          $ref: '#/components/schemas/ReviewKind'
+        status:
+          $ref: '#/components/schemas/ReviewStatus'
+        stepId:
+          type: string
+          format: uuid
+          description: 佐證步驟列 execution_steps.id（TASK_CONFIRM／GOAL_*＝剛完成的步驟；ESCALATED＝失敗步驟）
+        taskId:
+          type: string
+          format: uuid
+        goalId:
+          type: string
+          format: uuid
+        taskName:
+          type: string
+        goalName:
+          type: string
+        reason:
+          type: string
+          description: 給人看的原因（樣板見 Markdown 契約 §3.6.4）
+        requestedAt:
+          type: string
+          format: date-time
+        decidedBy:
+          type: string
+        decidedAt:
+          type: string
+          format: date-time
+        comment:
+          type: string
+        allowedDecisions:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReviewDecision'
+      example:
+        id: f0b1c2d3-e4f5-4a6b-8c7d-9e0f1a2b3c41
+        runId: e5a7c3b9-2f1d-4b6a-8c0e-1d2f3a4b5c31
+        kind: TASK_CONFIRM
+        status: PENDING
+        taskId: c7e2b1a0-3d4f-4a5b-9c6d-7e8f9a0b1c22
+        goalId: a1f4c2d3-5b6e-4c7d-8e9f-0a1b2c3d4e11
+        taskName: 設定
+        goalName: 基礎
+        reason: Level 1：請確認是否繼續執行任務「設定」
+        requestedAt: '2026-10-15T08:30:20Z'
+        allowedDecisions: [APPROVE, REJECT]
+    ReviewRequest:
+      type: object
+      required: [decision]
+      properties:
+        decision:
+          $ref: '#/components/schemas/ReviewDecision'
+        comment:
+          type: string
+          maxLength: 2000
+    ExecutionRunDetailResponse:
+      description: ExecutionRunResponse ＋ 進度、待審核項與 Bridge 連線資訊
+      allOf:
+        - $ref: '#/components/schemas/ExecutionRunResponse'
+        - type: object
+          required: [completedSteps, totalSteps, pendingReviews, bridge]
+          properties:
+            currentStep:
+              $ref: '#/components/schemas/CurrentStep'
+            completedSteps:
+              type: integer
+              format: int32
+            totalSteps:
+              type: integer
+              format: int32
+            lastEventSeq:
+              type: integer
+              format: int32
+              description: Bridge 最後一則事件 seq；Bridge 不可達時為 DB 內最大 step_number 或 null
+            reason:
+              type: string
+              description: Bridge 的狀態原因（例：「引擎升級（ESCALATION）：…」）
+            elapsedSec:
+              type: integer
+              format: int64
+            pendingReviews:
+              type: array
+              items:
+                $ref: '#/components/schemas/ReviewRequestResponse'
+            bridge:
+              $ref: '#/components/schemas/BridgeInfo'
+    ExecutionStepStatus:
+      type: string
+      enum: [STARTED, IN_PROGRESS, COMPLETED, FAILED, RETRYING]
+    ExecutionStepResponse:
+      type: object
+      required: [id, runId, taskId, stepNumber, action, status, timestamp]
+      properties:
+        id:
+          type: string
+          format: uuid
+        runId:
+          type: string
+          format: uuid
+        taskId:
+          type: string
+          format: uuid
+        taskName:
+          type: string
+        goalId:
+          type: string
+          format: uuid
+        stepNumber:
+          type: integer
+          format: int32
+          description: ＝該 step 事件的 Bridge seq（與 SSE id 同序號空間）
+        stepId:
+          type: string
+          description: playbook step_id（取自 input.step_id）
+        attempt:
+          type: integer
+          format: int32
+          description: 取自 input.attempt
+        action:
+          type: string
+          description: "Bridge 寫成「<step_id>: <任務名稱>」"
+        status:
+          $ref: '#/components/schemas/ExecutionStepStatus'
+        tokensUsed:
+          type:
+            - integer
+            - 'null'
+          format: int64
+          description: Bridge 不寫此欄；COMPLETED／FAILED 列由 Console 以 token 事件歸因後回傳，其餘為 null
+        errorMessage:
+          type: string
+        output:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+    DagNodeKind:
+      type: string
+      enum: [GOAL, TASK]
+    DagEdgeKind:
+      type: string
+      description: DEPENDENCY＝目標前置依賴（from＝前置 → to＝依賴者）；CONTAINS＝目標包含任務
+      enum: [DEPENDENCY, CONTAINS]
+    DagNode:
+      type: object
+      required: [id, kind, label, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: 目標或任務的 UUID
+        kind:
+          $ref: '#/components/schemas/DagNodeKind'
+        label:
+          type: string
+        status:
+          type: string
+          description: GOAL＝PENDING／IN_PROGRESS／COMPLETED／FAILED／SKIPPED；TASK＝十一態（現況疊加）
+        goalId:
+          type: string
+          format: uuid
+          description: TASK 節點的所屬目標
+        stepId:
+          type: string
+          description: TASK 節點在該批次 playbook 的 step_id
+        sequence:
+          type: integer
+          format: int32
+          description: 執行順序（GOAL＝目標序；TASK＝展平後的位置，1 起算）
+    DagEdge:
+      type: object
+      required: [from, to, kind]
+      properties:
+        from:
+          type: string
+          format: uuid
+        to:
+          type: string
+          format: uuid
+        kind:
+          $ref: '#/components/schemas/DagEdgeKind'
+    DagResponse:
+      type: object
+      required: [runId, nodes, edges, statusAsOf]
+      properties:
+        runId:
+          type: string
+          format: uuid
+        nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/DagNode'
+        edges:
+          type: array
+          items:
+            $ref: '#/components/schemas/DagEdge'
+        statusAsOf:
+          type: string
+          format: date-time
+          description: 節點 status 的取值時間（現況，不是該批次當時）
+    CheckpointResponse:
+      type: object
+      required: [id, runId, name, createdAt, isAutomatic]
+      properties:
+        id:
+          type: string
+          format: uuid
+        runId:
+          type: string
+          format: uuid
+        name:
+          type: string
+          description: Bridge 命名「after-<step_id>」
+        createdAt:
+          type: string
+          format: date-time
+        isAutomatic:
+          type: boolean
+        stepIdx:
+          type: integer
+          format: int32
+          description: 還原後下一個要跑的步驟位置（0 起算；＝快照的 step_idx）
+        stepId:
+          type: string
+          description: 還原後下一個要跑的步驟 step_id；已跑完時為空字串
+        completedSteps:
+          type: integer
+          format: int32
+          description: 快照內已完成步驟數
+    MetricValue:
+      type: object
+      description: 一個 KPI 的數值與「緊鄰前一個等長視窗」的比較；無法計算者為 null（UI 顯示「—」）
+      required: [value]
+      properties:
+        value:
+          type:
+            - number
+            - 'null'
+          description: 百分比 0～100（小數 1 位）；平均值小數 2 位；Token 為整數
+        previousValue:
+          type:
+            - number
+            - 'null'
+        delta:
+          type:
+            - number
+            - 'null'
+          description: value−previousValue（百分比為百分點）
+    TaskDurationItem:
+      type: object
+      required: [taskId, taskName, durationSec]
+      properties:
+        taskId:
+          type: string
+          format: uuid
+        taskName:
+          type: string
+        goalName:
+          type: string
+        durationSec:
+          type: number
+          format: double
+          description: completedAt−startedAt（秒，小數 1 位）
+    RetryBucket:
+      type: object
+      required: [retries, tasks]
+      properties:
+        retries:
+          type: integer
+          format: int32
+          description: 重試次數（0、1、2…；≥5 併入 5）
+        tasks:
+          type: integer
+          format: int32
+    ProjectMetricsResponse:
+      type: object
+      description: |
+        PRD §5.4.2 八項 KPI 全數提供，另含設計稿使用的 `taskCompletionRate`（卡片「完成率」）與 `retryRate`（卡片「重試率」），
+        以及任務狀態分佈、執行時間分佈、重試次數分佈（ADR-001 G-13）。
+      required: [projectId, from, to, generatedAt, projectCompletionRate, goalAchievementRate, taskCompletionRate, taskSuccessRate, averageRetryCount, retryRate, totalTokens, tokenBudgetUsageRate, averageTaskDurationSec, agentAvailability, taskStatusDistribution, taskDurations, retryDistribution]
+      properties:
+        projectId:
+          type: string
+          format: uuid
+        runId:
+          type: string
+          format: uuid
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        generatedAt:
+          type: string
+          format: date-time
+        projectCompletionRate:
+          $ref: '#/components/schemas/MetricValue'
+        goalAchievementRate:
+          $ref: '#/components/schemas/MetricValue'
+        taskCompletionRate:
+          $ref: '#/components/schemas/MetricValue'
+        taskSuccessRate:
+          $ref: '#/components/schemas/MetricValue'
+        averageRetryCount:
+          $ref: '#/components/schemas/MetricValue'
+        retryRate:
+          $ref: '#/components/schemas/MetricValue'
+        totalTokens:
+          $ref: '#/components/schemas/MetricValue'
+        tokenBudgetUsageRate:
+          $ref: '#/components/schemas/MetricValue'
+        averageTaskDurationSec:
+          $ref: '#/components/schemas/MetricValue'
+        agentAvailability:
+          $ref: '#/components/schemas/MetricValue'
+        tokenBudget:
+          type:
+            - integer
+            - 'null'
+          format: int64
+          description: 視窗內各批次 tokenBudget 之和；無預算為 null
+        taskStatusDistribution:
+          type: object
+          description: 任務十一態的現況計數（key＝TaskStatus，缺的狀態為 0 且一律出現）
+          additionalProperties:
+            type: integer
+            format: int32
+        taskDurations:
+          type: array
+          description: 視窗內完成的任務，依耗時由長到短，最多 10 筆
+          items:
+            $ref: '#/components/schemas/TaskDurationItem'
+        retryDistribution:
+          type: array
+          items:
+            $ref: '#/components/schemas/RetryBucket'
+    TokenTrendPoint:
+      type: object
+      required: [bucketStart, tokens, cumulativeTokens]
+      properties:
+        bucketStart:
+          type: string
+          format: date-time
+          description: 桶起點（UTC 整點或整日）
+        tokens:
+          type: integer
+          format: int64
+          description: 該桶內 Token 增量之和
+        cumulativeTokens:
+          type: integer
+          format: int64
+          description: 視窗起點起累計
+        budget:
+          type:
+            - integer
+            - 'null'
+          format: int64
+          description: 預算線；無預算為 null
+    TaskTrendPoint:
+      type: object
+      required: [bucketStart, started, completed, failed, retried]
+      properties:
+        bucketStart:
+          type: string
+          format: date-time
+        started:
+          type: integer
+          format: int32
+        completed:
+          type: integer
+          format: int32
+        failed:
+          type: integer
+          format: int32
+        retried:
+          type: integer
+          format: int32
+    AlertRule:
+      type: string
+      description: 前六個是 PRD §5.4.4 的規則；後兩個是引擎原生告警（ESCALATION／TOKEN_HALT）的持久化規則名
+      enum: [TOKEN_BUDGET_WARNING, TOKEN_BUDGET_EXCEEDED, CONSECUTIVE_FAILURES, AGENT_UNRESPONSIVE, TASK_DURATION_EXCEEDED, HIGH_RETRY_RATE, ENGINE_ESCALATION, ENGINE_TOKEN_HALT]
+    AlertSeverity:
+      type: string
+      enum: [WARNING, CRITICAL]
+    AlertResponse:
+      type: object
+      required: [id, projectId, rule, severity, message, createdAt, acknowledged]
+      properties:
+        id:
+          type: string
+          format: uuid
+        projectId:
+          type: string
+          format: uuid
+        runId:
+          type: string
+          format: uuid
+        rule:
+          $ref: '#/components/schemas/AlertRule'
+        severity:
+          $ref: '#/components/schemas/AlertSeverity'
+        subject:
+          type: string
+          description: 去重對象：run:<uuid>／task:<uuid>／goal:<uuid>／step:<step_id>
+        message:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        acknowledged:
+          type: boolean
+        acknowledgedBy:
+          type: string
+        acknowledgedAt:
+          type: string
+          format: date-time
+    LogLevel:
+      type: string
+      enum: [INFO, WARN, ERROR]
+    LogSource:
+      type: string
+      description: STEP＝步驟事件；RUN＝批次生命週期；ALERT＝告警；REVIEW＝審核項
+      enum: [STEP, RUN, ALERT, REVIEW]
+    LogEntryResponse:
+      type: object
+      required: [id, timestamp, level, source, message]
+      properties:
+        id:
+          type: string
+          description: 穩定的衍生 id（來源表 id 加前綴，例：step:<uuid>）
+        timestamp:
+          type: string
+          format: date-time
+        level:
+          $ref: '#/components/schemas/LogLevel'
+        source:
+          $ref: '#/components/schemas/LogSource'
+        message:
+          type: string
+        runId:
+          type: string
+          format: uuid
+        taskId:
+          type: string
+          format: uuid
+        stepId:
+          type: string
+    NotificationSummaryResponse:
+      type: object
+      required: [pendingSignoffs, pendingReviews, unacknowledgedAlerts]
+      properties:
+        pendingSignoffs:
+          type: integer
+          format: int32
+        pendingReviews:
+          type: integer
+          format: int32
+        unacknowledgedAlerts:
+          type: integer
+          format: int32
+        bridgeConnected:
+          type:
+            - boolean
+            - 'null'
+          description: 最近一次 Bridge 健康探測的結果（頂列「Engine Bridge · 已連線」）；尚未探測過為 null
+        bridgeCheckedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+    LogEventData:
+      type: object
+      description: "SSE `event: log` 的 data（單行 JSON）"
+      required: [seq, ts, source, level, message]
+      properties:
+        seq:
+          type: integer
+          format: int32
+          description: Bridge 事件 seq
+        ts:
+          type: string
+          format: date-time
+        source:
+          type: string
+          description: ENGINE＝引擎原始 stdout 行；STEP＝由 step 事件衍生的摘要行
+          enum: [ENGINE, STEP]
+        level:
+          type: string
+          enum: [DEBUG, INFO, WARN, ERROR, CRITICAL]
+        message:
+          type: string
+        stepId:
+          type: string
+        stepNumber:
+          type: integer
+          format: int32
+        taskId:
+          type: string
+          format: uuid
+        taskName:
+          type: string
+        goalId:
+          type: string
+          format: uuid
+        attempt:
+          type: integer
+          format: int32
+        stepStatus:
+          $ref: '#/components/schemas/ExecutionStepStatus'
+        tokensUsed:
+          type:
+            - integer
+            - 'null'
+          format: int64
+    StatusChangeEventData:
+      type: object
+      description: "SSE `event: status-change` 的 data"
+      required: [seq, ts, runStatus, bridgeStatus, reason]
+      properties:
+        seq:
+          type: integer
+          format: int32
+        ts:
+          type: string
+          format: date-time
+        runStatus:
+          $ref: '#/components/schemas/RunStatus'
+        bridgeStatus:
+          $ref: '#/components/schemas/BridgeRunStatus'
+        reason:
+          type: string
+    ReviewRequestEventData:
+      type: object
+      description: "SSE `event: review-request` 的 data；id 為 `<seq>.<sub>`（sub ≥ 1）"
+      required: [seq, sub, ts, review]
+      properties:
+        seq:
+          type: integer
+          format: int32
+          description: 錨點＝建立當下已處理的最後一則 Bridge 事件 seq
+        sub:
+          type: integer
+          format: int32
+        ts:
+          type: string
+          format: date-time
+        review:
+          $ref: '#/components/schemas/ReviewRequestResponse'
+    AlertEventData:
+      type: object
+      description: "SSE `event: alert` 的 data；ENGINE 來源 id＝Bridge seq，CONSOLE 來源 id＝`<seq>.<sub>`"
+      required: [seq, ts, origin, severity, message]
+      properties:
+        seq:
+          type: integer
+          format: int32
+        sub:
+          type: integer
+          format: int32
+          description: CONSOLE 來源才有（≥ 1）
+        ts:
+          type: string
+          format: date-time
+        origin:
+          type: string
+          enum: [ENGINE, CONSOLE]
+        alertId:
+          type: string
+          format: uuid
+          description: 該事件新增的告警列 id（ENGINE 的 info／純記帳類不持久化、被「未確認前不重複產生」去重者亦無此欄）
+        rule:
+          $ref: '#/components/schemas/AlertRule'
+        code:
+          type: string
+          description: Bridge alert 的 code（ESCALATION、TOKEN_HALT、RESTORE、FORCE_KILL…）
+        severity:
+          type: string
+          description: Bridge level 對映：info→INFO、warning→WARNING、error→CRITICAL
+          enum: [INFO, WARNING, CRITICAL]
+        subject:
+          type: string
+        message:
+          type: string
+        stepId:
+          type: string
+    ProgressUpdateEventData:
+      type: object
+      description: "SSE `event: progress-update` 的 data（狀態快照）"
+      required: [seq, ts, runStatus, bridgeStatus, completedSteps, totalSteps, progressPct]
+      properties:
+        seq:
+          type: integer
+          format: int32
+        ts:
+          type: string
+          format: date-time
+        runStatus:
+          $ref: '#/components/schemas/RunStatus'
+        bridgeStatus:
+          $ref: '#/components/schemas/BridgeRunStatus'
+        completedSteps:
+          type: integer
+          format: int32
+        totalSteps:
+          type: integer
+          format: int32
+        progressPct:
+          type: number
+          format: double
+          description: completedSteps÷totalSteps×100（小數 1 位）
+        currentStep:
+          $ref: '#/components/schemas/CurrentStep'
+    TokenUpdateEventData:
+      type: object
+      description: "SSE `event: token-update` 的 data（狀態快照）"
+      required: [seq, ts, tokensUsed, delta, contextPct]
+      properties:
+        seq:
+          type: integer
+          format: int32
+        ts:
+          type: string
+          format: date-time
+        tokensUsed:
+          type: integer
+          format: int64
+          description: 本批次累計（＝Bridge token 事件的 tokens_used）
+        delta:
+          type: integer
+          format: int64
+          description: 與前一則 token 事件的差
+        contextPct:
+          type: number
+          format: double
+          description: 引擎回報的 context 視窗使用百分比（不是預算百分比）
+        tokenBudget:
+          type:
+            - integer
+            - 'null'
+          format: int64
+        budgetUsageRate:
+          type:
+            - number
+            - 'null'
+          description: tokensUsed÷tokenBudget×100（小數 1 位）
+        taskId:
+          type: string
+          format: uuid
+          description: 本次增量歸因的任務（目前 RUNNING 的步驟）
+    MetricUpdateEventData:
+      type: object
+      description: "SSE `event: metric-update` 的 data（狀態快照；id＝`<seq>.1`，隨 token-update 之後）"
+      required: [seq, sub, ts, completedTasks, failedTasks, totalTasks, retriedTasks, averageRetryCount, totalTokensUsed, elapsedSec]
+      properties:
+        seq:
+          type: integer
+          format: int32
+        sub:
+          type: integer
+          format: int32
+        ts:
+          type: string
+          format: date-time
+        completedTasks:
+          type: integer
+          format: int32
+        failedTasks:
+          type: integer
+          format: int32
+        totalTasks:
+          type: integer
+          format: int32
+        retriedTasks:
+          type: integer
+          format: int32
+        averageRetryCount:
+          type: number
+          format: double
+        totalTokensUsed:
+          type: integer
+          format: int64
+        tokenBudgetUsageRate:
+          type:
+            - number
+            - 'null'
+        elapsedSec:
+          type: integer
+          format: int64
+    ConfigValueType:
+      type: string
+      enum: [STRING, INTEGER, LONG, FLOAT, BOOLEAN, ENUM, ENCRYPTED]
+    ConfigEffect:
+      type: string
+      description: |
+        參數對引擎的實際效果（誠實標示，Architecture §11.4）：
+        ENGINE＝物化進 config_overrides／env／playbook；CONSOLE＝Console 內部使用；
+        STORED_ONLY＝只儲存、不影響引擎（引擎無對應欄位）；UNVERIFIED＝可能對映，尚未驗證。
+      enum: [ENGINE, CONSOLE, STORED_ONLY, UNVERIFIED]
+    ConfigResponse:
+      type: object
+      description: |
+        `isEncrypted=true` 時 `value` 一律為 `••••••••`（`hasValue` 才表示有沒有值）；ADMIN 以 `reveal=true` 揭露明文。
+        JSON 欄位名必須是 `isEncrypted`（Java record 的 boolean 欄位要注意序列化名稱）。
+      required: [id, category, key, value, valueType, isEncrypted, hasValue, effect]
+      properties:
+        id:
+          type: string
+          format: uuid
+        category:
+          type: string
+          enum: [model, agent, execution, monitor, autoclaude, sdd]
+        key:
+          type: string
+        value:
+          type: string
+        valueType:
+          $ref: '#/components/schemas/ConfigValueType'
+        defaultValue:
+          type: string
+        description:
+          type: string
+        isEncrypted:
+          type: boolean
+        hasValue:
+          type: boolean
+          description: 加密參數是否已有非空值（非加密參數恆等於 value 非空）
+        validationRule:
+          type: string
+          description: Java 正規表示式（對完整字串比對）；範圍另由 min／max 表達
+        options:
+          type: array
+          description: ENUM 的可選值
+          items:
+            type: string
+        min:
+          type:
+            - number
+            - 'null'
+        max:
+          type:
+            - number
+            - 'null'
+        impactNote:
+          type:
+            - string
+            - 'null'
+          description: US-S-08 影響範圍提示；UI 在確認對話框顯示
+        effect:
+          $ref: '#/components/schemas/ConfigEffect'
+        updatedAt:
+          type: string
+          format: date-time
+        updatedBy:
+          type: string
+      example:
+        id: 5c2d9f10-7b3a-4e61-8d52-0a9b8c7d6e51
+        category: model
+        key: apiKey
+        value: ••••••••
+        valueType: ENCRYPTED
+        defaultValue: ''
+        description: API Key（加密儲存）
+        isEncrypted: true
+        hasValue: true
+        effect: ENGINE
+        impactNote: 變更後新啟動的執行批次才會使用新金鑰；進行中的批次沿用啟動時的值
+        updatedAt: '2026-10-15T08:30:12Z'
+        updatedBy: admin
+    UpdateConfigRequest:
+      type: object
+      required: [value]
+      properties:
+        value:
+          type: string
+          maxLength: 4000
+          description: 一律字串；BOOLEAN 為 true／false，FLOAT 用小數點
+        confirm:
+          type: boolean
+          description: 加密（敏感）參數須明確帶 true，否則 409
+    TokenGuardRequest:
+      type: object
+      required: [compactThresholdPct, haltThresholdPct]
+      properties:
+        compactThresholdPct:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 99
+          description: 達此 context 百分比觸發 /compact
+        haltThresholdPct:
+          type: integer
+          format: int32
+          minimum: 2
+          maximum: 100
+          description: 達此 context 百分比 checkpoint 收斂；必須大於 compactThresholdPct
+    TestConnectionRequest:
+      type: object
+      description: 全部選填；省略的欄位取已儲存的 model.* 設定
+      properties:
+        apiUrl:
+          type: string
+          maxLength: 500
+        apiKey:
+          type: string
+          maxLength: 512
+          writeOnly: true
+          description: 不回顯、不寫日誌
+        model:
+          type: string
+          maxLength: 100
+    ConnectionTestResponse:
+      type: object
+      required: [success, message]
+      properties:
+        success:
+          type: boolean
+        latencyMs:
+          type:
+            - integer
+            - 'null'
+          format: int64
+        message:
+          type: string
+          description: 給人看的結果（例：連線成功、認證失敗（HTTP 401）、連線逾時）
+        resolvedHost:
+          type: string
+          description: 實際連線的主機（DNS 解析並通過檢查後）
+        httpStatus:
+          type:
+            - integer
+            - 'null'
+          format: int32
+      example:
+        success: true
+        latencyMs: 230
+        message: 連線成功
+        resolvedHost: api.anthropic.com
+        httpStatus: 200
+    ConfigHistoryResponse:
+      type: object
+      required: [id, configId, category, key, newValue, changedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        configId:
+          type: string
+          format: uuid
+        category:
+          type: string
+        key:
+          type: string
+        oldValue:
+          type: string
+        newValue:
+          type: string
+        changedAt:
+          type: string
+          format: date-time
+        changedBy:
+          type: string
+    ExportedConfig:
+      type: object
+      required: [category, key, value]
+      properties:
+        category:
+          type: string
+        key:
+          type: string
+        value:
+          type: string
+          description: 加密參數固定為 `<encrypted>`
+    SettingsExportDocument:
+      type: object
+      required: [version, exportedAt, configs]
+      properties:
+        version:
+          type: integer
+          format: int32
+          const: 1
+        exportedAt:
+          type: string
+          format: date-time
+        configs:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExportedConfig'
+    ImportSettingsError:
+      type: object
+      required: [category, key, reason]
+      properties:
+        category:
+          type: string
+        key:
+          type: string
+        reason:
+          type: string
+    ImportSettingsResponse:
+      type: object
+      required: [applied, skipped, errors]
+      properties:
+        applied:
+          type: integer
+          format: int32
+        skipped:
+          type: integer
+          format: int32
+          description: 值未變、或加密佔位值略過的筆數
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/ImportSettingsError'
+    ApiResultImportRecordResponse:
+      type: object
+      required: [code, message, data, timestamp, traceId]
+      properties:
+        code:
+          type: integer
+          format: int32
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/ImportRecordResponse'
+        timestamp:
+          type: string
+          format: date-time
+        traceId:
+          type: string
+    ApiResultImportRecordDetailResponse:
+      type: object
+      required: [code, message, data, timestamp, traceId]
+      properties:
+        code:
+          type: integer
+          format: int32
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/ImportRecordDetailResponse'
+        timestamp:
+          type: string
+          format: date-time
+        traceId:
+          type: string
+    ApiResultParseResultResponse:
+      type: object
+      required: [code, message, data, timestamp, traceId]
+      properties:
+        code:
+          type: integer
+          format: int32
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/ParseResultResponse'
+        timestamp:
+          type: string
+          format: date-time
+        traceId:
+          type: string
+    ApiResultProjectResponse:
+      type: object
+      required: [code, message, data, timestamp, traceId]
+      properties:
+        code:
+          type: integer
+          format: int32
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/ProjectResponse'
+        timestamp:
+          type: string
+          format: date-time
+        traceId:
+          type: string
+    ApiResultExecutionRunResponse:
+      type: object
+      required: [code, message, data, timestamp, traceId]
+      properties:
+        code:
+          type: integer
+          format: int32
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/ExecutionRunResponse'
+        timestamp:
+          type: string
+          format: date-time
+        traceId:
+          type: string
+    ApiResultExecutionRunDetailResponse:
+      type: object
+      required: [code, message, data, timestamp, traceId]
+      properties:
+        code:
+          type: integer
+          format: int32
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/ExecutionRunDetailResponse'
+        timestamp:
+          type: string
+          format: date-time
+        traceId:
+          type: string
+    ApiResultDagResponse:
+      type: object
+      required: [code, message, data, timestamp, traceId]
+      properties:
+        code:
+          type: integer
+          format: int32
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/DagResponse'
+        timestamp:
+          type: string
+          format: date-time
+        traceId:
+          type: string
+    ApiResultProjectMetricsResponse:
+      type: object
+      required: [code, message, data, timestamp, traceId]
+      properties:
+        code:
+          type: integer
+          format: int32
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/ProjectMetricsResponse'
+        timestamp:
+          type: string
+          format: date-time
+        traceId:
+          type: string
+    ApiResultNotificationSummaryResponse:
+      type: object
+      required: [code, message, data, timestamp, traceId]
+      properties:
+        code:
+          type: integer
+          format: int32
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/NotificationSummaryResponse'
+        timestamp:
+          type: string
+          format: date-time
+        traceId:
+          type: string
+    ApiResultConfigResponse:
+      type: object
+      required: [code, message, data, timestamp, traceId]
+      properties:
+        code:
+          type: integer
+          format: int32
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/ConfigResponse'
+        timestamp:
+          type: string
+          format: date-time
+        traceId:
+          type: string
+    ApiResultConnectionTestResponse:
+      type: object
+      required: [code, message, data, timestamp, traceId]
+      properties:
+        code:
+          type: integer
+          format: int32
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/ConnectionTestResponse'
+        timestamp:
+          type: string
+          format: date-time
+        traceId:
+          type: string
+    ApiResultImportSettingsResponse:
+      type: object
+      required: [code, message, data, timestamp, traceId]
+      properties:
+        code:
+          type: integer
+          format: int32
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/ImportSettingsResponse'
+        timestamp:
+          type: string
+          format: date-time
+        traceId:
+          type: string
+    ApiResultListCheckpointResponse:
+      type: object
+      required: [code, message, data, timestamp, traceId]
+      properties:
+        code:
+          type: integer
+          format: int32
+        message:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/CheckpointResponse'
+        timestamp:
+          type: string
+          format: date-time
+        traceId:
+          type: string
+    ApiResultListTokenTrendPoint:
+      type: object
+      required: [code, message, data, timestamp, traceId]
+      properties:
+        code:
+          type: integer
+          format: int32
+        message:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/TokenTrendPoint'
+        timestamp:
+          type: string
+          format: date-time
+        traceId:
+          type: string
+    ApiResultListTaskTrendPoint:
+      type: object
+      required: [code, message, data, timestamp, traceId]
+      properties:
+        code:
+          type: integer
+          format: int32
+        message:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskTrendPoint'
+        timestamp:
+          type: string
+          format: date-time
+        traceId:
+          type: string
+    ApiResultListAlertResponse:
+      type: object
+      required: [code, message, data, timestamp, traceId]
+      properties:
+        code:
+          type: integer
+          format: int32
+        message:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/AlertResponse'
+        timestamp:
+          type: string
+          format: date-time
+        traceId:
+          type: string
+    ApiResultListConfigResponse:
+      type: object
+      required: [code, message, data, timestamp, traceId]
+      properties:
+        code:
+          type: integer
+          format: int32
+        message:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConfigResponse'
+        timestamp:
+          type: string
+          format: date-time
+        traceId:
+          type: string
+    ApiResultMapStringListConfigResponse:
+      type: object
+      required: [code, message, data, timestamp, traceId]
+      properties:
+        code:
+          type: integer
+          format: int32
+        message:
+          type: string
+        data:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              $ref: '#/components/schemas/ConfigResponse'
+        timestamp:
+          type: string
+          format: date-time
+        traceId:
+          type: string
+    PageDataImportRecordResponse:
+      type: object
+      required: [content, page, size, totalElements, totalPages]
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/ImportRecordResponse'
+        page:
+          type: integer
+          format: int32
+        size:
+          type: integer
+          format: int32
+        totalElements:
+          type: integer
+          format: int64
+        totalPages:
+          type: integer
+          format: int32
+    ApiResultPageDataImportRecordResponse:
+      type: object
+      required: [code, message, data, timestamp, traceId]
+      properties:
+        code:
+          type: integer
+          format: int32
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/PageDataImportRecordResponse'
+        timestamp:
+          type: string
+          format: date-time
+        traceId:
+          type: string
+    PageDataExecutionRunSummaryResponse:
+      type: object
+      required: [content, page, size, totalElements, totalPages]
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExecutionRunSummaryResponse'
+        page:
+          type: integer
+          format: int32
+        size:
+          type: integer
+          format: int32
+        totalElements:
+          type: integer
+          format: int64
+        totalPages:
+          type: integer
+          format: int32
+    ApiResultPageDataExecutionRunSummaryResponse:
+      type: object
+      required: [code, message, data, timestamp, traceId]
+      properties:
+        code:
+          type: integer
+          format: int32
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/PageDataExecutionRunSummaryResponse'
+        timestamp:
+          type: string
+          format: date-time
+        traceId:
+          type: string
+    PageDataExecutionStepResponse:
+      type: object
+      required: [content, page, size, totalElements, totalPages]
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExecutionStepResponse'
+        page:
+          type: integer
+          format: int32
+        size:
+          type: integer
+          format: int32
+        totalElements:
+          type: integer
+          format: int64
+        totalPages:
+          type: integer
+          format: int32
+    ApiResultPageDataExecutionStepResponse:
+      type: object
+      required: [code, message, data, timestamp, traceId]
+      properties:
+        code:
+          type: integer
+          format: int32
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/PageDataExecutionStepResponse'
+        timestamp:
+          type: string
+          format: date-time
+        traceId:
+          type: string
+    PageDataLogEntryResponse:
+      type: object
+      required: [content, page, size, totalElements, totalPages]
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/LogEntryResponse'
+        page:
+          type: integer
+          format: int32
+        size:
+          type: integer
+          format: int32
+        totalElements:
+          type: integer
+          format: int64
+        totalPages:
+          type: integer
+          format: int32
+    ApiResultPageDataLogEntryResponse:
+      type: object
+      required: [code, message, data, timestamp, traceId]
+      properties:
+        code:
+          type: integer
+          format: int32
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/PageDataLogEntryResponse'
+        timestamp:
+          type: string
+          format: date-time
+        traceId:
+          type: string
+    PageDataConfigHistoryResponse:
+      type: object
+      required: [content, page, size, totalElements, totalPages]
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConfigHistoryResponse'
+        page:
+          type: integer
+          format: int32
+        size:
+          type: integer
+          format: int32
+        totalElements:
+          type: integer
+          format: int64
+        totalPages:
+          type: integer
+          format: int32
+    ApiResultPageDataConfigHistoryResponse:
+      type: object
+      required: [code, message, data, timestamp, traceId]
+      properties:
+        code:
+          type: integer
+          format: int32
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/PageDataConfigHistoryResponse'
+        timestamp:
+          type: string
+          format: date-time
+        traceId:
+          type: string
