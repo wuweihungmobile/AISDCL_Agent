@@ -41,7 +41,9 @@ describe("通知鈴（契約 §4.5 G-01、G-G2）", () => {
   it("徽章＝待審核項目＋未確認告警（前端加總）；待簽核草案不進鈴（它歸 signoff 佇列鈕）", () => {
     render(<NotificationBell summary={SUMMARY} />);
     expect(screen.getByTestId("bell-badge")).toHaveTextContent("5");
-    expect(screen.getByRole("button", { name: "通知（5 筆待處理）" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "通知 5 筆待處理" })).toBeInTheDocument();
+    // 徽章上的可見數字要出現在名稱裡（WCAG 2.5.3 Label in Name；DEF-AC-005）
+    expect(screen.getByTestId("bell-trigger").getAttribute("aria-label")).toContain(screen.getByTestId("bell-badge").textContent ?? "");
   });
 
   it("全部為 0 或摘要尚未載入：不顯示徽章，鈴照常可點", () => {

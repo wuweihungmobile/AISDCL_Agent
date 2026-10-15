@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 
 import { expect, test, type Page } from "@playwright/test";
 
+import { expectNoA11yViolations } from "./a11y";
 import { collectConsoleErrors, compose, fail, installApiMock, shellHandler, signInAs, snap, type MockHandler } from "./mockApi";
 import { CATEGORIES, MASK, createSettingsServer } from "./settingsFixture";
 
@@ -37,6 +38,7 @@ test.describe("系統參數設定（route mock）", () => {
     await expect(page.getByRole("tab", { name: "模型" })).toHaveAttribute("aria-selected", "true");
     await expect(page.getByRole("button", { name: "匯出設定" })).toBeEnabled();
     await expect(page.getByRole("button", { name: "匯入設定" })).toBeEnabled();
+    await expectNoA11yViolations(page, "系統設定（模型 tab）");
     await snap(page, "09-settings-model.png", { tall: true });
 
     for (const [i, label] of TAB_LABELS.entries()) {
@@ -65,6 +67,7 @@ test.describe("系統參數設定（route mock）", () => {
     await expect(guard.getByLabel("壓縮門檻（%）", { exact: true })).toHaveValue("80");
     await expect(guard.getByLabel("停機門檻（%）", { exact: true })).toHaveValue("90");
     await expect(guard.getByRole("button", { name: "套用 Token Guard" })).toBeDisabled();
+    await expectNoA11yViolations(page, "系統設定（執行 tab，含 Token Guard 小卡與修改歷史）");
     await snap(page, "09-settings-execution.png", { tall: true });
 
     // 監控 tab：refreshIntervalMs 最小 10000
@@ -284,7 +287,12 @@ test.describe("系統參數設定（route mock）", () => {
     await expect(confirm).toContainText("API Key");
     await confirm.getByRole("button", { name: "確認重置" }).click();
     await expect(toast(page, "已重置為預設值：API Key")).toBeVisible();
-    expect(calls.filter((c) => c.method === "POST").at(-1)?.query.get("confirm")).toBe("true");
+    expect(
+      calls
+        .filter((c) => c.method === "POST")
+        .at(-1)
+        ?.query.get("confirm"),
+    ).toBe("true");
     await expect(row(page, "model.apiKey").getByLabel("API Key", { exact: true })).toHaveValue("");
 
     // 全部重置：六個分類各呼叫一次分類級 reset

@@ -3,20 +3,7 @@ import { describe, expect, it } from "vitest";
 import { REASONS } from "@/lib/api/reasons";
 import type { ConfigHistory } from "@/lib/api/types";
 import { FIXTURE, MASKED } from "@/tests/helpers/settingsFixtures";
-import {
-  MASK,
-  baselineOf,
-  buildSavePlan,
-  configId,
-  formatHistoryLine,
-  isDirty,
-  isTokenGuardKey,
-  pendingChanges,
-  sensitiveChanges,
-  validateTokenGuard,
-  validateValue,
-  valueOf,
-} from "./settingsModel";
+import { MASK, baselineOf, buildSavePlan, configId, formatHistoryLine, isDirty, isTokenGuardKey, pendingChanges, sensitiveChanges, validateTokenGuard, validateValue, valueOf } from "./settingsModel";
 
 describe("遮罩與基準值", () => {
   it("遮罩字串是 U+2022 共八個（契約 §1.5 通則）", () => {

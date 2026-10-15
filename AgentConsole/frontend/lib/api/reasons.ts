@@ -26,6 +26,10 @@ export const REASONS = {
   BRIDGE_TIMEOUT: "引擎橋接服務逾時",
   BRIDGE_ERROR: "引擎橋接服務錯誤",
 
+  // ── B.2 認證（前端合成；v1.2）────────────────────────────────────────────
+  /** 只由前端合成（POST /auth/refresh 因網路錯誤、5xx、429 暫時失敗；§2.8 第 7 點），後端永不回它；不登出 */
+  UPSTREAM_UNAVAILABLE: "upstream_unavailable",
+
   // ── B.2 匯入 ─────────────────────────────────────────────────────────
   IMPORT_NO_FILE: "未提供檔案",
   IMPORT_EMPTY_FILE: "檔案是空的",
@@ -68,10 +72,17 @@ export const REASONS = {
   EXEC_REVIEW_ALREADY_DECIDED: "審核項已處理",
   EXEC_DECISION_NOT_ALLOWED: "此審核項不允許該決定",
 
+  // ── B.2 專案（v1.2；英文識別字，與 Phase 3～6 的中文逐字常數並存，契約 §0.3 第 5 點）──────────
+  /** 刪除目標／任務時專案有進行中批次（§1.6.3）；不是 execute 的 EXEC_PROJECT_RUNNING（「專案正在執行中」），兩者不可混用 */
+  PROJECT_EXECUTING: "project_executing",
+  /** 復原一個沒被軟刪除的專案（§1.6.1） */
+  PROJECT_NOT_DELETED: "project_not_deleted",
+  /** 軟刪除已超過保留期（§1.6.1；details.retentionDays） */
+  RESTORE_WINDOW_EXPIRED: "restore_window_expired",
+
   // ── B.2 監控 ─────────────────────────────────────────────────────────
   MONITOR_RANGE_INVALID: "時間範圍不合法",
   MONITOR_REPORT_FORMAT_UNSUPPORTED: "不支援的報表格式",
-  MONITOR_PDF_NOT_READY: "PDF 報表尚未提供（W5）",
 
   // ── B.2 設定 ─────────────────────────────────────────────────────────
   SETTINGS_REVEAL_ADMIN_ONLY: "僅 ADMIN 可揭露敏感參數",

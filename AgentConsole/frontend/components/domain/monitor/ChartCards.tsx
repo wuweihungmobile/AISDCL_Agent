@@ -9,15 +9,7 @@ import { Card, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/states";
 import type { ProjectMetrics, TaskTrendPoint, TokenTrendPoint, TrendBucket } from "@/lib/api/types";
-import {
-  durationColumns,
-  formatDuration,
-  groupTaskStatus,
-  ratioRows,
-  retryColumns,
-  taskTrendRows,
-  tokenTrendRows,
-} from "@/lib/domain/metrics";
+import { durationColumns, formatDuration, groupTaskStatus, ratioRows, retryColumns, taskTrendRows, tokenTrendRows } from "@/lib/domain/metrics";
 
 /** 「Token 使用趨勢」卡（設計稿畫面 8）：折線（累計）＋虛線預算線＋面積；圖例「預算線／Token 使用」靜態。 */
 export function TokenTrendCard({
@@ -65,17 +57,7 @@ export function TokenTrendCard({
 }
 
 /** 兩欄：「任務狀態分佈」（水平 bar）與「執行時間分佈」（垂直柱）。 */
-export function DistributionCards({
-  metrics,
-  loading,
-  error,
-  onRetry,
-}: {
-  metrics: ProjectMetrics | undefined;
-  loading: boolean;
-  error: unknown;
-  onRetry: () => void;
-}) {
+export function DistributionCards({ metrics, loading, error, onRetry }: { metrics: ProjectMetrics | undefined; loading: boolean; error: unknown; onRetry: () => void }) {
   return (
     <div className="grid grid-cols-2 gap-6 max-lg:grid-cols-1" data-testid="distribution-cards">
       <Card className="px-[22px] py-5" data-testid="status-distribution-card">
@@ -95,13 +77,7 @@ export function DistributionCards({
         ) : loading && !metrics ? (
           <Skeleton className="h-[140px]" />
         ) : (
-          <ColumnChart
-            columns={durationColumns(metrics?.taskDurations ?? [])}
-            formatValue={formatDuration}
-            ariaLabel="執行時間分佈圖"
-            testId="duration-chart"
-            empty="這段時間沒有完成的任務"
-          />
+          <ColumnChart columns={durationColumns(metrics?.taskDurations ?? [])} formatValue={formatDuration} ariaLabel="執行時間分佈圖" testId="duration-chart" empty="這段時間沒有完成的任務" />
         )}
       </Card>
     </div>
@@ -160,23 +136,11 @@ export function TrendCards({
       </Card>
       <Card className="min-w-0 px-[22px] py-5" data-testid="ratio-card">
         <CardTitle className="mb-3">成功／失敗比率</CardTitle>
-        {error && !taskTrend ? (
-          <ErrorState error={error} onRetry={onRetry} />
-        ) : loading && !taskTrend ? (
-          <Skeleton className="h-[160px]" />
-        ) : (
-          <RatioChart rows={ratios} />
-        )}
+        {error && !taskTrend ? <ErrorState error={error} onRetry={onRetry} /> : loading && !taskTrend ? <Skeleton className="h-[160px]" /> : <RatioChart rows={ratios} />}
       </Card>
       <Card className="min-w-0 px-[22px] py-5" data-testid="retry-card">
         <CardTitle className="mb-3">重試次數分佈</CardTitle>
-        <ColumnChart
-          columns={retryColumns(metrics?.retryDistribution ?? [])}
-          formatValue={(v) => `${v}`}
-          ariaLabel="重試次數分佈圖"
-          testId="retry-chart"
-          empty="這段時間沒有任務資料"
-        />
+        <ColumnChart columns={retryColumns(metrics?.retryDistribution ?? [])} formatValue={(v) => `${v}`} ariaLabel="重試次數分佈圖" testId="retry-chart" empty="這段時間沒有任務資料" />
       </Card>
     </div>
   );

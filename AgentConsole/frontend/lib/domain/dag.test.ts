@@ -4,7 +4,15 @@ import type { Dag, DagNode } from "@/lib/api/types";
 import { TONE_LABEL, deriveGoalStatus, layoutDag, nodeCode, nodeTone, overlayDag } from "./dag";
 
 const goal = (id: string, sequence: number, status = "PENDING", label = `目標 ${sequence}`): DagNode => ({ id, kind: "GOAL", label, status, sequence });
-const task = (id: string, goalId: string, sequence: number, status = "PENDING", stepId = `${goalId}-T${sequence}`): DagNode => ({ id, kind: "TASK", label: `任務 ${id}`, status, goalId, sequence, stepId });
+const task = (id: string, goalId: string, sequence: number, status = "PENDING", stepId = `${goalId}-T${sequence}`): DagNode => ({
+  id,
+  kind: "TASK",
+  label: `任務 ${id}`,
+  status,
+  goalId,
+  sequence,
+  stepId,
+});
 
 const DAG: Dag = {
   runId: "run1",

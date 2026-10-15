@@ -69,13 +69,7 @@ export function SettingControl({
       // 目前值不在選項內（後端新增選項、舊資料）時仍要顯示出來，避免 select 悄悄跳到第一項
       const shown = options.includes(value) || value === "" ? options : [...options, value];
       return (
-        <Select
-          aria-label={label}
-          aria-invalid={invalid || undefined}
-          value={value}
-          disabled={disabled}
-          onChange={(e) => onChange(e.target.value)}
-        >
+        <Select aria-label={label} aria-invalid={invalid || undefined} value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)}>
           {shown.map((opt) => (
             <option key={opt} value={opt}>
               {opt}

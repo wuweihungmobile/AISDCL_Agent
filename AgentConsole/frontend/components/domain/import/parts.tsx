@@ -9,10 +9,7 @@ import { gateLabel, type ParseFailure } from "./gateErrors";
 export function StepHeader({ step, title, right }: { step: number; title: string; right?: ReactNode }) {
   return (
     <div className="mb-[18px] flex flex-wrap items-center gap-2.5">
-      <span
-        aria-hidden
-        className="inline-flex size-[26px] shrink-0 items-center justify-center rounded-full bg-wg-primary text-sm font-semibold text-white"
-      >
+      <span aria-hidden className="inline-flex size-[26px] shrink-0 items-center justify-center rounded-full bg-wg-primary text-sm font-semibold text-white">
         {step}
       </span>
       <h3 className="text-lg font-semibold">{title}</h3>
@@ -32,11 +29,7 @@ export const WARNING_LABEL: Record<string, string> = {
 export function ParseWarnings({ warnings }: { warnings: readonly ParseWarning[] }) {
   if (warnings.length === 0) return null;
   return (
-    <div
-      role="status"
-      data-testid="parse-warnings"
-      className="mb-4 rounded-md border border-wg-alert-border bg-wg-alert-bg px-4 py-3"
-    >
+    <div role="status" data-testid="parse-warnings" className="mb-4 rounded-md border border-wg-alert-border bg-wg-alert-bg px-4 py-3">
       <div className="flex items-center gap-2 text-sm font-semibold">
         <Info size={18} className="shrink-0 text-wg-warning" aria-hidden />
         解析提示（共 {warnings.length} 項，不阻擋儲存）
@@ -61,11 +54,7 @@ export function ParseWarnings({ warnings }: { warnings: readonly ParseWarning[] 
 export function ParseFailurePanel({ failure, className }: { failure: ParseFailure; className?: string }) {
   const count = failure.rows.length;
   return (
-    <div
-      role="alert"
-      data-testid="parse-failure"
-      className={cn("rounded-md border border-wg-draft-border bg-wg-draft-bg px-4 py-3.5", className)}
-    >
+    <div role="alert" data-testid="parse-failure" className={cn("rounded-md border border-wg-draft-border bg-wg-draft-bg px-4 py-3.5", className)}>
       <div className="flex items-start gap-2.5">
         <AlertTriangle size={20} className="mt-0.5 shrink-0 text-wg-accent" aria-hidden />
         <div className="min-w-0 flex-1">
@@ -82,16 +71,9 @@ export function ParseFailurePanel({ failure, className }: { failure: ParseFailur
           {count > 0 ? (
             <ol data-testid="gate-error-list" className="mt-2.5 flex flex-col gap-2">
               {failure.rows.map((row, i) => (
-                <li
-                  key={`${i}-${row.gate ?? ""}-${row.location ?? ""}`}
-                  data-testid="gate-error-row"
-                  className="flex flex-col gap-1 rounded-md border border-wg-draft-border bg-white px-3 py-2"
-                >
+                <li key={`${i}-${row.gate ?? ""}-${row.location ?? ""}`} data-testid="gate-error-row" className="flex flex-col gap-1 rounded-md border border-wg-draft-border bg-white px-3 py-2">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span
-                      data-testid="gate-error-gate"
-                      className="rounded-sm bg-wg-draft-bg px-[7px] py-0.5 text-xs font-semibold text-wg-accent"
-                    >
+                    <span data-testid="gate-error-gate" className="rounded-sm bg-wg-draft-bg px-[7px] py-0.5 text-xs font-semibold text-wg-accent">
                       {row.gate ? gateLabel(row.gate) : "欄位"}
                     </span>
                     {row.gate ? <code className="font-mono text-xs text-wg-muted">{row.gate}</code> : null}

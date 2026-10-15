@@ -22,5 +22,4 @@ describe("匯入檔案預檢（US-I-01：.md／.pdf／.docx、≤10MB）", () =>
   it("副檔名不符優先於大小（與後端先驗副檔名再驗大小的順序一致）", () => {
     expect(validateSourceFile({ name: "big.txt", size: MAX_UPLOAD_BYTES + 1 })).toBe(REASONS.IMPORT_UNSUPPORTED_EXTENSION);
   });
-
 });

@@ -65,20 +65,10 @@ export function LoginForm() {
         </div>
         <form onSubmit={handleSubmit(onSubmit)} noValidate className="flex flex-col gap-4">
           <Field label="使用者名稱" error={errors.username?.message}>
-            <Input
-              autoComplete="username"
-              autoFocus
-              aria-invalid={errors.username ? true : undefined}
-              {...register("username")}
-            />
+            <Input autoComplete="username" autoFocus aria-invalid={errors.username ? true : undefined} {...register("username")} />
           </Field>
           <Field label="密碼" error={errors.password?.message}>
-            <Input
-              type="password"
-              autoComplete="current-password"
-              aria-invalid={errors.password ? true : undefined}
-              {...register("password")}
-            />
+            <Input type="password" autoComplete="current-password" aria-invalid={errors.password ? true : undefined} {...register("password")} />
           </Field>
           {formError ? (
             <p role="alert" className="rounded-md border border-wg-draft-border bg-wg-draft-bg px-3 py-2 text-sm text-wg-accent">

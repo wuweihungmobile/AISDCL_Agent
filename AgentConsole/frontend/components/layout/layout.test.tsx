@@ -68,9 +68,7 @@ describe("四區塊共用版面只住 app/layout.tsx（UI-LAY-05）", () => {
   });
 
   it("components/layout 底下恰好四個元件檔（每個共用區塊只有一個元件檔）", () => {
-    const files = readdirSync(path.join(ROOT, "components/layout")).filter(
-      (f) => f.endsWith(".tsx") && !f.endsWith(".test.tsx"),
-    );
+    const files = readdirSync(path.join(ROOT, "components/layout")).filter((f) => f.endsWith(".tsx") && !f.endsWith(".test.tsx"));
     expect(files.sort()).toEqual(["BottomRegion.tsx", "ContentRegion.tsx", "ToolsRegion.tsx", "TopRegion.tsx"]);
   });
 });
@@ -94,7 +92,10 @@ function stubApi(summary: Record<string, unknown> = SUMMARY) {
               { id: "p1", name: "專案甲", status: "EXECUTING", signedOff: true, goalsCount: 1, tasksCount: 2, tasksDone: 1, autonomyLevel: 3, executionPath: "/x", updatedAt: "2026-01-01T00:00:00Z" },
               { id: "p2", name: "專案乙", status: "DRAFT", signedOff: false, goalsCount: 0, tasksCount: 0, tasksDone: 0, autonomyLevel: 3, executionPath: "/y", updatedAt: "2026-01-01T00:00:00Z" },
             ],
-            page: 0, size: 100, totalElements: 2, totalPages: 1,
+            page: 0,
+            size: 100,
+            totalElements: 2,
+            totalPages: 1,
           }
         : url.includes("/api/v1/notifications/summary")
           ? summary
@@ -155,6 +156,33 @@ describe("RootLayout 渲染：四區塊各一份", () => {
     expect(screen.getByTestId("app-version")).toHaveTextContent(/^Console v/);
   });
 
+  it("頂列的無障礙名稱含它們的可見文字（WCAG 2.5.3 Label in Name；DEF-AC-005）：logo、通知鈴、待審批佇列鈕；主色底小字一律純白", async () => {
+    stubApi();
+    saveSession({ accessToken: "a", refreshToken: "r", expiresAt: Date.now() + 1e6, role: "OPERATOR", username: "operator" });
+    render(layoutBody(<p>x</p>));
+
+    // logo 連結：可見的是「AISDLC Console」與「AGENT CONTROL PANEL」兩段字，名稱必須兩段都含（否則語音操控喊「點 AISDLC Console」找不到）
+    const logo = screen.getByRole("link", { name: /AISDLC Console/ });
+    expect(logo).toHaveAttribute("href", "/");
+    // 兩段字之間要有空白字元：可見文字串起來才是「AISDLC Console AGENT CONTROL PANEL」（沒有空白會變成「ConsoleAGENT」，名稱比對對不上）
+    const visibleText = (logo.textContent ?? "").replace(/\s+/g, " ").trim();
+    expect(visibleText).toBe("AISDLC Console AGENT CONTROL PANEL");
+    expect(logo.getAttribute("aria-label") ?? "", "logo 名稱應含整段可見文字").toContain(visibleText);
+    // 副標在主色底（#498428）上：純白 4.55:1，過了 alpha／opacity 就掉到 4.5:1 以下（axe color-contrast）
+    const subtitle = within(logo).getByText("AGENT CONTROL PANEL");
+    expect(subtitle.className).not.toMatch(/opacity-/);
+
+    // 徽章上的可見數字要出現在名稱裡
+    const bellBadge = await screen.findByTestId("bell-badge");
+    expect(screen.getByTestId("bell-trigger").getAttribute("aria-label")).toContain(bellBadge.textContent ?? "");
+    const queue = screen.getByRole("link", { name: /^待審批佇列/ });
+    expect(queue.getAttribute("aria-label")).toContain(screen.getByTestId("signoff-badge").textContent ?? "");
+    // 最近專案 chips 也在主色底上
+    const chips = await screen.findByRole("navigation", { name: "最近專案" });
+    expect(chips.className).not.toMatch(/text-white\/|opacity-/);
+    expect(chips.className).toContain("text-white");
+  });
+
   it("Engine Bridge 連線點（契約 §1.4.1、§4.5 G-03）：bridgeConnected true＝綠點「已連線」並在 title 帶最近探測時間；false＝紅點「未連線」；null＝灰點「未知」", async () => {
     const dotOf = (el: HTMLElement) => el.querySelector("span[aria-hidden]")?.className ?? "";
 
@@ -197,7 +225,10 @@ describe("RootLayout 渲染：四區塊各一份", () => {
       vi.fn(async (url: string) =>
         url.includes("/api/v1/notifications/summary")
           ? new Response(JSON.stringify({ code: 500, message: "伺服器錯誤", errors: [] }), { status: 500, headers: { "content-type": "application/json" } })
-          : new Response(JSON.stringify({ code: 200, message: "success", data: url.includes("/api/v1/projects?") ? { content: [], page: 0, size: 100, totalElements: 0, totalPages: 0 } : [] }), { status: 200, headers: { "content-type": "application/json" } }),
+          : new Response(JSON.stringify({ code: 200, message: "success", data: url.includes("/api/v1/projects?") ? { content: [], page: 0, size: 100, totalElements: 0, totalPages: 0 } : [] }), {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            }),
       ),
     );
     saveSession({ accessToken: "a", refreshToken: "r", expiresAt: Date.now() + 1e6, role: "OPERATOR", username: "operator" });

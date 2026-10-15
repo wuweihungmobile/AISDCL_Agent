@@ -23,17 +23,8 @@ export function Progress({
 }) {
   const clamped = Math.max(0, Math.min(100, value));
   return (
-    <ProgressPrimitive.Root
-      data-slot="progress"
-      value={clamped}
-      aria-label={label}
-      className={cn("relative h-2 w-full overflow-hidden rounded-full bg-wg-base", className)}
-    >
-      <ProgressPrimitive.Indicator
-        data-slot="progress-indicator"
-        className={cn("h-full bg-wg-primary transition-[width] duration-[400ms]", barClassName)}
-        style={{ width: `${clamped}%` }}
-      />
+    <ProgressPrimitive.Root data-slot="progress" value={clamped} aria-label={label} className={cn("relative h-2 w-full overflow-hidden rounded-full bg-wg-base", className)}>
+      <ProgressPrimitive.Indicator data-slot="progress-indicator" className={cn("h-full bg-wg-primary transition-[width] duration-[400ms]", barClassName)} style={{ width: `${clamped}%` }} />
     </ProgressPrimitive.Root>
   );
 }

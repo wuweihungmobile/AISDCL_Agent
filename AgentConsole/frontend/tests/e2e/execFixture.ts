@@ -41,7 +41,21 @@ type Review = {
   decidedBy?: string;
   comment?: string;
 };
-type StepRow = { id: string; runId: string; taskId: string; taskName: string; goalId: string; stepNumber: number; stepId: string; attempt: number; action: string; status: string; tokensUsed?: number; errorMessage?: string; timestamp: string };
+type StepRow = {
+  id: string;
+  runId: string;
+  taskId: string;
+  taskName: string;
+  goalId: string;
+  stepNumber: number;
+  stepId: string;
+  attempt: number;
+  action: string;
+  status: string;
+  tokensUsed?: number;
+  errorMessage?: string;
+  timestamp: string;
+};
 type Checkpoint = { id: string; runId: string; name: string; createdAt: string; isAutomatic: boolean; stepIdx: number; stepId: string; completedSteps: number };
 
 export type RunStatus = "RUNNING" | "PAUSED" | "COMPLETED" | "FAILED" | "CANCELLED";
@@ -94,8 +108,7 @@ const TERMINAL: readonly RunStatus[] = ["COMPLETED", "FAILED", "CANCELLED"];
 const frameOf = (e: Ev) => `id:${e.id}\nevent:${e.name}\ndata:${JSON.stringify(e.data)}\n\n`;
 
 /** 終態事件：/logs 的終態 status-change、/metrics 的終態 progress-update（之後伺服器關閉連線）。 */
-const isTerminalEvent = (kind: "logs" | "metrics", e: Ev): boolean =>
-  (kind === "logs" ? e.name === "status-change" : e.name === "progress-update") && TERMINAL.includes(e.data.runStatus as RunStatus);
+const isTerminalEvent = (kind: "logs" | "metrics", e: Ev): boolean => (kind === "logs" ? e.name === "status-change" : e.name === "progress-update") && TERMINAL.includes(e.data.runStatus as RunStatus);
 
 export type EngineOptions = {
   signedOff?: boolean;
@@ -121,6 +134,8 @@ export class Engine {
   private base = "";
   private readonly conns = new Set<Conn>();
   private refuse = 0;
+  /** 後端整個不可用（nginx 在上游掛掉時立即回 502）：REST、換新與串流一律 502 */
+  private outage = false;
 
   constructor(opts: EngineOptions = {}) {
     this.project.signedOff = opts.signedOff ?? true;
@@ -263,8 +278,38 @@ export class Engine {
     run.current = pos;
     run.taskStatus[task.id] = "RUNNING";
     const stepId = this.stepIdOf(run, pos);
-    this.log(run, "log", { seq, ts: iso(), source: "STEP", level: "INFO", message: `開始：${task.name}（${stepId}，第 1 次）`, stepId, stepNumber: pos + 1, taskId: task.id, taskName: task.name, goalId: GOAL_IDS[task.goalIdx], attempt: 1, stepStatus: "STARTED" }, String(seq));
-    run.steps.push({ id: nextUuid("5b1d5b1d"), runId: run.id, taskId: task.id, taskName: task.name, goalId: GOAL_IDS[task.goalIdx], stepNumber: seq, stepId, attempt: 1, action: `${stepId}: ${task.name}`, status: "STARTED", timestamp: iso() });
+    this.log(
+      run,
+      "log",
+      {
+        seq,
+        ts: iso(),
+        source: "STEP",
+        level: "INFO",
+        message: `開始：${task.name}（${stepId}，第 1 次）`,
+        stepId,
+        stepNumber: pos + 1,
+        taskId: task.id,
+        taskName: task.name,
+        goalId: GOAL_IDS[task.goalIdx],
+        attempt: 1,
+        stepStatus: "STARTED",
+      },
+      String(seq),
+    );
+    run.steps.push({
+      id: nextUuid("5b1d5b1d"),
+      runId: run.id,
+      taskId: task.id,
+      taskName: task.name,
+      goalId: GOAL_IDS[task.goalIdx],
+      stepNumber: seq,
+      stepId,
+      attempt: 1,
+      action: `${stepId}: ${task.name}`,
+      status: "STARTED",
+      timestamp: iso(),
+    });
     this.metric(run, "progress-update", this.progressData(run, seq), String(seq));
     const engineSeq = this.bridgeSeq(run);
     this.log(run, "log", { seq: engineSeq, ts: iso(), source: "ENGINE", level: "INFO", message: `claude 執行 ${stepId}…` }, String(engineSeq));
@@ -279,17 +324,72 @@ export class Engine {
 
     const tokenSeq = this.bridgeSeq(run);
     run.tokens += TOKENS_PER_STEP;
-    this.metric(run, "token-update", { seq: tokenSeq, ts: iso(), tokensUsed: run.tokens, delta: TOKENS_PER_STEP, contextPct: 0.6, tokenBudget: run.budget, budgetUsageRate: run.budget ? Math.round((run.tokens / run.budget) * 1000) / 10 : null, taskId: task.id }, String(tokenSeq));
+    this.metric(
+      run,
+      "token-update",
+      {
+        seq: tokenSeq,
+        ts: iso(),
+        tokensUsed: run.tokens,
+        delta: TOKENS_PER_STEP,
+        contextPct: 0.6,
+        tokenBudget: run.budget,
+        budgetUsageRate: run.budget ? Math.round((run.tokens / run.budget) * 1000) / 10 : null,
+        taskId: task.id,
+      },
+      String(tokenSeq),
+    );
     this.metric(run, "metric-update", this.metricData(run, tokenSeq, 1), `${tokenSeq}.1`);
 
     const seq = this.bridgeSeq(run);
     run.cursor = pos + 1;
     run.current = null;
     run.taskStatus[task.id] = "COMPLETED";
-    this.log(run, "log", { seq, ts: iso(), source: "STEP", level: "INFO", message: `完成：${task.name}（${stepId}） Token: ${TOKENS_PER_STEP}`, stepId, stepNumber: pos + 1, taskId: task.id, taskName: task.name, goalId: GOAL_IDS[task.goalIdx], attempt: 1, stepStatus: "COMPLETED", tokensUsed: TOKENS_PER_STEP }, String(seq));
-    run.steps.push({ id: nextUuid("5b1d5b1d"), runId: run.id, taskId: task.id, taskName: task.name, goalId: GOAL_IDS[task.goalIdx], stepNumber: seq, stepId, attempt: 1, action: `${stepId}: ${task.name}`, status: "COMPLETED", tokensUsed: TOKENS_PER_STEP, timestamp: iso() });
+    this.log(
+      run,
+      "log",
+      {
+        seq,
+        ts: iso(),
+        source: "STEP",
+        level: "INFO",
+        message: `完成：${task.name}（${stepId}） Token: ${TOKENS_PER_STEP}`,
+        stepId,
+        stepNumber: pos + 1,
+        taskId: task.id,
+        taskName: task.name,
+        goalId: GOAL_IDS[task.goalIdx],
+        attempt: 1,
+        stepStatus: "COMPLETED",
+        tokensUsed: TOKENS_PER_STEP,
+      },
+      String(seq),
+    );
+    run.steps.push({
+      id: nextUuid("5b1d5b1d"),
+      runId: run.id,
+      taskId: task.id,
+      taskName: task.name,
+      goalId: GOAL_IDS[task.goalIdx],
+      stepNumber: seq,
+      stepId,
+      attempt: 1,
+      action: `${stepId}: ${task.name}`,
+      status: "COMPLETED",
+      tokensUsed: TOKENS_PER_STEP,
+      timestamp: iso(),
+    });
     const nextStepId = run.cursor < run.scope.length ? this.stepIdOf(run, run.cursor) : "";
-    run.checkpoints.push({ id: nextUuid("9d4e9d4e"), runId: run.id, name: `after-${stepId}`, createdAt: iso(), isAutomatic: true, stepIdx: run.cursor, stepId: nextStepId, completedSteps: run.cursor });
+    run.checkpoints.push({
+      id: nextUuid("9d4e9d4e"),
+      runId: run.id,
+      name: `after-${stepId}`,
+      createdAt: iso(),
+      isAutomatic: true,
+      stepIdx: run.cursor,
+      stepId: nextStepId,
+      completedSteps: run.cursor,
+    });
     this.metric(run, "progress-update", this.progressData(run, seq), String(seq));
     this.metric(run, "metric-update", this.metricData(run, seq, 1), `${seq}.1`);
 
@@ -336,12 +436,73 @@ export class Engine {
     const task = TASKS[run.scope[pos]];
     const stepId = this.stepIdOf(run, pos);
     const retrySeq = this.bridgeSeq(run);
-    this.log(run, "log", { seq: retrySeq, ts: iso(), source: "STEP", level: "WARN", message: `重試：${task.name}（${stepId}，第 2 次）`, stepId, stepNumber: pos + 1, taskId: task.id, taskName: task.name, goalId: GOAL_IDS[task.goalIdx], attempt: 2, stepStatus: "RETRYING" }, String(retrySeq));
-    run.steps.push({ id: nextUuid("5b1d5b1d"), runId: run.id, taskId: task.id, taskName: task.name, goalId: GOAL_IDS[task.goalIdx], stepNumber: retrySeq, stepId, attempt: 2, action: `${stepId}: ${task.name}`, status: "RETRYING", timestamp: iso() });
+    this.log(
+      run,
+      "log",
+      {
+        seq: retrySeq,
+        ts: iso(),
+        source: "STEP",
+        level: "WARN",
+        message: `重試：${task.name}（${stepId}，第 2 次）`,
+        stepId,
+        stepNumber: pos + 1,
+        taskId: task.id,
+        taskName: task.name,
+        goalId: GOAL_IDS[task.goalIdx],
+        attempt: 2,
+        stepStatus: "RETRYING",
+      },
+      String(retrySeq),
+    );
+    run.steps.push({
+      id: nextUuid("5b1d5b1d"),
+      runId: run.id,
+      taskId: task.id,
+      taskName: task.name,
+      goalId: GOAL_IDS[task.goalIdx],
+      stepNumber: retrySeq,
+      stepId,
+      attempt: 2,
+      action: `${stepId}: ${task.name}`,
+      status: "RETRYING",
+      timestamp: iso(),
+    });
     const failSeq = this.bridgeSeq(run);
     run.taskStatus[task.id] = "ESCALATED";
-    this.log(run, "log", { seq: failSeq, ts: iso(), source: "STEP", level: "ERROR", message: `失敗：${task.name}（${stepId}，第 2 次）：${errorMessage}`, stepId, stepNumber: pos + 1, taskId: task.id, taskName: task.name, goalId: GOAL_IDS[task.goalIdx], attempt: 2, stepStatus: "FAILED" }, String(failSeq));
-    run.steps.push({ id: nextUuid("5b1d5b1d"), runId: run.id, taskId: task.id, taskName: task.name, goalId: GOAL_IDS[task.goalIdx], stepNumber: failSeq, stepId, attempt: 2, action: `${stepId}: ${task.name}`, status: "FAILED", errorMessage, timestamp: iso() });
+    this.log(
+      run,
+      "log",
+      {
+        seq: failSeq,
+        ts: iso(),
+        source: "STEP",
+        level: "ERROR",
+        message: `失敗：${task.name}（${stepId}，第 2 次）：${errorMessage}`,
+        stepId,
+        stepNumber: pos + 1,
+        taskId: task.id,
+        taskName: task.name,
+        goalId: GOAL_IDS[task.goalIdx],
+        attempt: 2,
+        stepStatus: "FAILED",
+      },
+      String(failSeq),
+    );
+    run.steps.push({
+      id: nextUuid("5b1d5b1d"),
+      runId: run.id,
+      taskId: task.id,
+      taskName: task.name,
+      goalId: GOAL_IDS[task.goalIdx],
+      stepNumber: failSeq,
+      stepId,
+      attempt: 2,
+      action: `${stepId}: ${task.name}`,
+      status: "FAILED",
+      errorMessage,
+      timestamp: iso(),
+    });
     const alertSeq = this.bridgeSeq(run);
     this.log(run, "alert", { seq: alertSeq, ts: iso(), origin: "ENGINE", code: "ESCALATION", severity: "CRITICAL", message: `引擎升級（ESCALATION）：${errorMessage}`, stepId }, String(alertSeq));
     run.status = "FAILED";
@@ -430,6 +591,8 @@ export class Engine {
       projectId: PROJECT_ID,
       runNumber: r.runNumber,
       status: r.status,
+      // 批次列表項帶 bridgeStatus（契約 §1.2.2，C-11）：PAUSING／CANCELLING 在列表就看得到
+      bridgeStatus: r.bridgeStatus,
       autonomyLevel: r.level,
       scopeMode: "ALL",
       totalTokensUsed: r.tokens,
@@ -459,7 +622,9 @@ export class Engine {
       tokenBudget: r.budget ?? undefined,
       startedAt: r.startedAt,
       completedAt: r.completedAt,
-      currentStep: cur ? { stepId: this.stepIdOf(r, r.current as number), stepNumber: (r.current as number) + 1, taskId: cur.id, taskName: cur.name, goalId: GOAL_IDS[cur.goalIdx], attempt: 1 } : undefined,
+      currentStep: cur
+        ? { stepId: this.stepIdOf(r, r.current as number), stepNumber: (r.current as number) + 1, taskId: cur.id, taskName: cur.name, goalId: GOAL_IDS[cur.goalIdx], attempt: 1 }
+        : undefined,
       completedSteps: r.cursor,
       totalSteps: r.scope.length,
       lastEventSeq: r.seq,
@@ -475,10 +640,24 @@ export class Engine {
     const nodes = [
       ...goalIdxs.map((g, seq) => {
         const statuses = r.scope.filter((i) => TASKS[i].goalIdx === g).map((i) => r.taskStatus[TASKS[i].id]);
-        const status = statuses.every((s) => s === "COMPLETED") ? "COMPLETED" : statuses.some((s) => s === "ESCALATED" || s === "FAILED") ? "FAILED" : statuses.some((s) => s === "RUNNING" || s === "COMPLETED") ? "IN_PROGRESS" : "PENDING";
+        const status = statuses.every((s) => s === "COMPLETED")
+          ? "COMPLETED"
+          : statuses.some((s) => s === "ESCALATED" || s === "FAILED")
+            ? "FAILED"
+            : statuses.some((s) => s === "RUNNING" || s === "COMPLETED")
+              ? "IN_PROGRESS"
+              : "PENDING";
         return { id: GOAL_IDS[g], kind: "GOAL", label: GOAL_NAMES[g], status, sequence: seq + 1 };
       }),
-      ...r.scope.map((i, pos) => ({ id: TASKS[i].id, kind: "TASK", label: TASKS[i].name, status: r.taskStatus[TASKS[i].id], goalId: GOAL_IDS[TASKS[i].goalIdx], stepId: this.stepIdOf(r, pos), sequence: pos + 1 })),
+      ...r.scope.map((i, pos) => ({
+        id: TASKS[i].id,
+        kind: "TASK",
+        label: TASKS[i].name,
+        status: r.taskStatus[TASKS[i].id],
+        goalId: GOAL_IDS[TASKS[i].goalIdx],
+        stepId: this.stepIdOf(r, pos),
+        sequence: pos + 1,
+      })),
     ];
     const edges = [
       ...(goalIdxs.length > 1 ? [{ from: GOAL_IDS[0], to: GOAL_IDS[1], kind: "DEPENDENCY" }] : []),
@@ -497,7 +676,15 @@ export class Engine {
     const goals = GOAL_IDS.map((gid, g) => {
       const mine = TASKS.filter((t) => t.goalIdx === g);
       const done = mine.filter((t) => taskStatus(t.id) === "COMPLETED").length;
-      return { id: gid, name: GOAL_NAMES[g], status: done === mine.length ? "COMPLETED" : done > 0 ? "IN_PROGRESS" : "PENDING", sortOrder: g, signedOff: this.project.signedOff, taskCount: mine.length, completedTaskCount: done };
+      return {
+        id: gid,
+        name: GOAL_NAMES[g],
+        status: done === mine.length ? "COMPLETED" : done > 0 ? "IN_PROGRESS" : "PENDING",
+        sortOrder: g,
+        signedOff: this.project.signedOff,
+        taskCount: mine.length,
+        completedTaskCount: done,
+      };
     });
     return {
       id: PROJECT_ID,
@@ -568,6 +755,20 @@ export class Engine {
     this.validTokens.clear();
   }
 
+  /**
+   * 模擬後端整個暫時不可用（DEF-AC-007：經 nginx 部署、backend 重啟的那幾秒，上游不可用時 nginx 立即回 502）：
+   * `/api/v1/**` 的 REST 與 `POST /auth/refresh` 回 502（HTML 本文），串流請求也回 502（EventSource 看到非 200＝放棄）。
+   * 不會自己切斷既有連線：要同時模擬「連線被切斷」請另呼叫 dropStreams()。
+   */
+  setOutage(on: boolean): void {
+    this.outage = on;
+  }
+
+  /** 假 nginx 的 502：本文是 HTML（不是 console-api 的 JSON 封包），前端不得拿它當登入失效。 */
+  private badGateway(): MockReply {
+    return { status: 502, raw: "<html><body>502 Bad Gateway</body></html>", headers: { "content-type": "text/html" } };
+  }
+
   private emit(run: Run, kind: "logs" | "metrics", ev: Ev): void {
     for (const c of this.conns) {
       if (c.run !== run || c.kind !== kind || c.res.writableEnded) continue;
@@ -590,7 +791,19 @@ export class Engine {
     const s = run.seq;
     return [
       { id: `${s}.1`, name: "progress-update", data: this.progressData(run, s) },
-      { id: `${s}.2`, name: "token-update", data: { seq: s, ts: iso(), tokensUsed: run.tokens, delta: run.tokens, contextPct: 0.6, tokenBudget: run.budget, budgetUsageRate: run.budget ? Math.round((run.tokens / run.budget) * 1000) / 10 : null } },
+      {
+        id: `${s}.2`,
+        name: "token-update",
+        data: {
+          seq: s,
+          ts: iso(),
+          tokensUsed: run.tokens,
+          delta: run.tokens,
+          contextPct: 0.6,
+          tokenBudget: run.budget,
+          budgetUsageRate: run.budget ? Math.round((run.tokens / run.budget) * 1000) / 10 : null,
+        },
+      },
       { id: `${s}.3`, name: "metric-update", data: this.metricData(run, s, 3) },
     ];
   }
@@ -615,6 +828,7 @@ export class Engine {
       res.end(JSON.stringify({ code: status, message, errors: [], timestamp: iso(), traceId: `tr-sse-${status}` }));
     };
 
+    if (this.outage) return reject(502, "Bad Gateway");
     const run = m ? this.runs.find((r) => r.id === m[1]) : undefined;
     if (!run) return reject(404, `執行批次不存在或已刪除：${m?.[1] ?? ""}`);
     // 串流開始前驗 token（契約 §2.1）：無效或過期＝401 JSON，EventSource 只看得到「連線被放棄」
@@ -646,6 +860,9 @@ export class Engine {
     const { method, path } = call;
     const body = (call.body ?? {}) as Record<string, unknown>;
 
+    // ── 後端不可用（setOutage）：除串流外的 /api/v1/** 一律 502；串流由串流伺服器自己回 502 ──
+    if (this.outage && !path.startsWith("/api/v1/stream/")) return this.badGateway();
+
     // ── 認證：換發 token（前端在 SSE 連線被放棄時會強制換新；契約 §0.4）──
     if (method === "POST" && path === "/api/v1/auth/refresh") {
       this.tokenGen += 1;
@@ -661,7 +878,19 @@ export class Engine {
       return { data: { pendingSignoffs: this.project.signedOff ? 0 : 1, pendingReviews, unacknowledgedAlerts: 0, bridgeConnected: true, bridgeCheckedAt: iso() } };
     }
     if (method === "GET" && path === "/api/v1/settings/execution") {
-      const cfg = (key: string, value: string, valueType: string) => ({ id: nextUuid("c0ffee00"), category: "execution", key, value, valueType, defaultValue: value, description: key, isEncrypted: false, hasValue: true, effect: "CONSOLE", updatedAt: iso() });
+      const cfg = (key: string, value: string, valueType: string) => ({
+        id: nextUuid("c0ffee00"),
+        category: "execution",
+        key,
+        value,
+        valueType,
+        defaultValue: value,
+        description: key,
+        isEncrypted: false,
+        hasValue: true,
+        effect: "CONSOLE",
+        updatedAt: iso(),
+      });
       return { data: [cfg("globalTokenBudget", "100000", "LONG"), cfg("tokenBudgetWarningThreshold", "0.8", "FLOAT")] };
     }
 
@@ -675,13 +904,32 @@ export class Engine {
     if (method === "GET" && goalTasks) {
       const g = GOAL_IDS.indexOf(goalTasks[1] as (typeof GOAL_IDS)[number]);
       const latest = this.runs[0];
-      return { data: TASKS.filter((t) => t.goalIdx === g).map((t, i) => ({ id: t.id, goalId: goalTasks[1], name: t.name, sortOrder: i, status: latest?.taskStatus[t.id] ?? "PENDING", retryCount: 0, maxRetries: 1, signedOff: true, updatedAt: iso() })) };
+      return {
+        data: TASKS.filter((t) => t.goalIdx === g).map((t, i) => ({
+          id: t.id,
+          goalId: goalTasks[1],
+          name: t.name,
+          sortOrder: i,
+          status: latest?.taskStatus[t.id] ?? "PENDING",
+          retryCount: 0,
+          maxRetries: 1,
+          signedOff: true,
+          updatedAt: iso(),
+        })),
+      };
     }
 
     // ── 執行（Phase 4）──
     if (method === "POST" && path === `/api/v1/projects/${PROJECT_ID}/execute`) {
       if (!this.project.signedOff) {
-        return { status: 409, error: { message: "草案未經人工審批，禁止執行", reason: "未經人工審批的草案不可執行", details: { unsignedProjectId: PROJECT_ID, unsignedGoalIds: [...GOAL_IDS], unsignedTaskIds: TASKS.map((t) => t.id) } } };
+        return {
+          status: 409,
+          error: {
+            message: "草案未經人工審批，禁止執行",
+            reason: "未經人工審批的草案不可執行",
+            details: { unsignedProjectId: PROJECT_ID, unsignedGoalIds: [...GOAL_IDS], unsignedTaskIds: TASKS.map((t) => t.id) },
+          },
+        };
       }
       if (this.project.status === "EXECUTING") return { status: 409, error: { message: "專案正在執行中", reason: "專案正在執行中", details: { projectId: PROJECT_ID, runId: this.latest?.id } } };
       const scopeBody = (body.scope ?? {}) as { mode?: string; goalIds?: string[]; taskIds?: string[] };
@@ -689,11 +937,31 @@ export class Engine {
       if (scopeBody.mode === "SELECTED") {
         idxs = idxs.filter((i) => (scopeBody.goalIds ?? []).includes(GOAL_IDS[TASKS[i].goalIdx]) || (scopeBody.taskIds ?? []).includes(TASKS[i].id));
       }
-      const done = this.latest ? new Set(Object.entries(this.latest.taskStatus).filter(([, s]) => s === "COMPLETED").map(([id]) => id)) : new Set<string>();
+      const done = this.latest
+        ? new Set(
+            Object.entries(this.latest.taskStatus)
+              .filter(([, s]) => s === "COMPLETED")
+              .map(([id]) => id),
+          )
+        : new Set<string>();
       idxs = idxs.filter((i) => !done.has(TASKS[i].id));
       if (idxs.length === 0) return { status: 409, error: { message: "沒有可執行的任務", reason: "沒有可執行的任務" } };
       const run = this.createRun(Number(body.autonomyLevel ?? 4), typeof body.tokenBudget === "number" ? body.tokenBudget : 100000, idxs);
-      return { status: 201, data: { id: run.id, projectId: PROJECT_ID, runNumber: run.runNumber, status: run.status, bridgeStatus: run.bridgeStatus, autonomyLevel: run.level, scope: { mode: scopeBody.mode ?? "ALL", goalIds: scopeBody.goalIds ?? [], taskIds: scopeBody.taskIds ?? [] }, totalTokensUsed: 0, tokenBudget: run.budget ?? undefined, startedAt: run.startedAt } };
+      return {
+        status: 201,
+        data: {
+          id: run.id,
+          projectId: PROJECT_ID,
+          runNumber: run.runNumber,
+          status: run.status,
+          bridgeStatus: run.bridgeStatus,
+          autonomyLevel: run.level,
+          scope: { mode: scopeBody.mode ?? "ALL", goalIds: scopeBody.goalIds ?? [], taskIds: scopeBody.taskIds ?? [] },
+          totalTokensUsed: 0,
+          tokenBudget: run.budget ?? undefined,
+          startedAt: run.startedAt,
+        },
+      };
     }
     if (method === "GET" && path === `/api/v1/projects/${PROJECT_ID}/executions`) return { data: this.page(this.runs.map((r) => this.summary(r))) };
 
@@ -711,10 +979,30 @@ export class Engine {
       if (method === "GET" && sub === "checkpoints") return { data: run.checkpoints };
       if (method === "GET" && sub === "steps") {
         const after = Number(call.query.get("afterSeq") ?? 0);
-        return { data: this.page(run.steps.filter((s) => s.stepNumber > after), 200) };
+        return {
+          data: this.page(
+            run.steps.filter((s) => s.stepNumber > after),
+            200,
+          ),
+        };
       }
-      const snapshot = () => ({ id: run.id, projectId: PROJECT_ID, runNumber: run.runNumber, status: run.status, bridgeStatus: run.bridgeStatus, autonomyLevel: run.level, scope: { mode: "ALL", goalIds: [], taskIds: [] }, totalTokensUsed: run.tokens, tokenBudget: run.budget ?? undefined, startedAt: run.startedAt, completedAt: run.completedAt });
-      const stateError = (action: string): MockReply => ({ status: 409, error: { message: "目前執行狀態不允許此操作", reason: "目前執行狀態不允許此操作", details: { action, runStatus: run.status, bridgeStatus: run.bridgeStatus } } });
+      const snapshot = () => ({
+        id: run.id,
+        projectId: PROJECT_ID,
+        runNumber: run.runNumber,
+        status: run.status,
+        bridgeStatus: run.bridgeStatus,
+        autonomyLevel: run.level,
+        scope: { mode: "ALL", goalIds: [], taskIds: [] },
+        totalTokensUsed: run.tokens,
+        tokenBudget: run.budget ?? undefined,
+        startedAt: run.startedAt,
+        completedAt: run.completedAt,
+      });
+      const stateError = (action: string): MockReply => ({
+        status: 409,
+        error: { message: "目前執行狀態不允許此操作", reason: "目前執行狀態不允許此操作", details: { action, runStatus: run.status, bridgeStatus: run.bridgeStatus } },
+      });
       if (method === "POST" && sub === "pause") {
         if (run.status !== "RUNNING") return stateError("pause");
         run.pauseRequested = true;
@@ -756,7 +1044,8 @@ export class Engine {
         if (!r) return { status: 404, error: { message: `審核項不存在或不屬於此執行：${review[1]}` } };
         const decision = String(body.decision);
         if (r.status !== "PENDING") return { status: 409, error: { message: "審核項已被處理", reason: "審核項已處理", details: { status: r.status, decidedBy: r.decidedBy } } };
-        if (!r.allowedDecisions.includes(decision)) return { status: 409, error: { message: "此審核項不允許該決定", reason: "此審核項不允許該決定", details: { kind: r.kind, decision, allowedDecisions: r.allowedDecisions } } };
+        if (!r.allowedDecisions.includes(decision))
+          return { status: 409, error: { message: "此審核項不允許該決定", reason: "此審核項不允許該決定", details: { kind: r.kind, decision, allowedDecisions: r.allowedDecisions } } };
         r.comment = typeof body.comment === "string" ? body.comment : undefined;
         r.decidedBy = "operator";
         if (r.kind !== "ESCALATED") {

@@ -1,123 +1,92 @@
 // Tremor AreaChart [v1.0.0] —— 取自 tremorlabs/tremor（Tremor Raw，copy-paste 元件，Apache-2.0）
 // 本專案改動：remixicon → lucide-react、import 路徑、色票改設計 token（見 chartColors.ts）；元件邏輯未改。
+// 另一處標記修正（W5 C-18）：圖例的 list 結構（見下方 LegendProps 前的註解），純 DOM 層級，不動行為。
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // 上游原始碼的 ScrollButton 在 effect 內同步 setIsPressed(false)，違反 React Compiler 規則 react-hooks/set-state-in-effect；
 // 為了「元件邏輯不改」只在本檔停用這一條規則，不放寬整個專案。
 /* eslint-disable react-hooks/set-state-in-effect */
 
-"use client"
+"use client";
 
-import React from "react"
-import { ChevronLeft as RiArrowLeftSLine, ChevronRight as RiArrowRightSLine } from "lucide-react"
-import {
-  Area,
-  CartesianGrid,
-  Dot,
-  Label,
-  Line,
-  AreaChart as RechartsAreaChart,
-  Legend as RechartsLegend,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts"
-import type { AxisDomain } from "recharts/types/util/types"
+import React from "react";
+import { ChevronLeft as RiArrowLeftSLine, ChevronRight as RiArrowRightSLine } from "lucide-react";
+import { Area, CartesianGrid, Dot, Label, Line, AreaChart as RechartsAreaChart, Legend as RechartsLegend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import type { AxisDomain } from "recharts/types/util/types";
 
-import { useOnWindowResize } from "./useOnWindowResize"
-import {
-  AvailableChartColors,
-  type AvailableChartColorsKeys,
-  constructCategoryColors,
-  getColorClassName,
-} from "./chartColors"
-import { cx } from "./cx"
-import { getYAxisDomain } from "./getYAxisDomain"
-import { hasOnlyOneValueForKey } from "./hasOnlyOneValueForKey"
+import { useOnWindowResize } from "./useOnWindowResize";
+import { AvailableChartColors, type AvailableChartColorsKeys, constructCategoryColors, getColorClassName } from "./chartColors";
+import { cx } from "./cx";
+import { getYAxisDomain } from "./getYAxisDomain";
+import { hasOnlyOneValueForKey } from "./hasOnlyOneValueForKey";
 
 //#region Legend
 
 interface LegendItemProps {
-  name: string
-  color: AvailableChartColorsKeys
-  onClick?: (name: string, color: AvailableChartColorsKeys) => void
-  activeLegend?: string
+  name: string;
+  color: AvailableChartColorsKeys;
+  onClick?: (name: string, color: AvailableChartColorsKeys) => void;
+  activeLegend?: string;
 }
 
-const LegendItem = ({
-  name,
-  color,
-  onClick,
-  activeLegend,
-}: LegendItemProps) => {
-  const hasOnValueChange = !!onClick
+const LegendItem = ({ name, color, onClick, activeLegend }: LegendItemProps) => {
+  const hasOnValueChange = !!onClick;
   return (
     <li
       className={cx(
         // base
         "group inline-flex flex-nowrap items-center gap-1.5 rounded-sm px-2 py-1 whitespace-nowrap transition",
-        hasOnValueChange
-          ? "cursor-pointer hover:bg-wg-base"
-          : "cursor-default",
+        hasOnValueChange ? "cursor-pointer hover:bg-wg-base" : "cursor-default",
       )}
       onClick={(e) => {
-        e.stopPropagation()
-        onClick?.(name, color)
+        e.stopPropagation();
+        onClick?.(name, color);
       }}
     >
-      <span
-        className={cx(
-          "h-[3px] w-3.5 shrink-0 rounded-full",
-          getColorClassName(color, "bg"),
-          activeLegend && activeLegend !== name ? "opacity-40" : "opacity-100",
-        )}
-        aria-hidden={true}
-      />
+      <span className={cx("h-[3px] w-3.5 shrink-0 rounded-full", getColorClassName(color, "bg"), activeLegend && activeLegend !== name ? "opacity-40" : "opacity-100")} aria-hidden={true} />
       <p
         className={cx(
           // base
           "truncate text-xs whitespace-nowrap",
           // text color
           "text-wg-text",
-          hasOnValueChange &&
-            "group-hover:text-wg-text",
+          hasOnValueChange && "group-hover:text-wg-text",
           activeLegend && activeLegend !== name ? "opacity-40" : "opacity-100",
         )}
       >
         {name}
       </p>
     </li>
-  )
-}
+  );
+};
 
 interface ScrollButtonProps {
-  icon: React.ElementType
-  onClick?: () => void
-  disabled?: boolean
+  icon: React.ElementType;
+  onClick?: () => void;
+  disabled?: boolean;
 }
 
 const ScrollButton = ({ icon, onClick, disabled }: ScrollButtonProps) => {
-  const Icon = icon
-  const [isPressed, setIsPressed] = React.useState(false)
-  const intervalRef = React.useRef<NodeJS.Timeout | null>(null)
+  const Icon = icon;
+  const [isPressed, setIsPressed] = React.useState(false);
+  const intervalRef = React.useRef<NodeJS.Timeout | null>(null);
 
   React.useEffect(() => {
     if (isPressed) {
       intervalRef.current = setInterval(() => {
-        onClick?.()
-      }, 300)
+        onClick?.();
+      }, 300);
     } else {
-      clearInterval(intervalRef.current as NodeJS.Timeout)
+      clearInterval(intervalRef.current as NodeJS.Timeout);
     }
-    return () => clearInterval(intervalRef.current as NodeJS.Timeout)
-  }, [isPressed, onClick])
+    return () => clearInterval(intervalRef.current as NodeJS.Timeout);
+  }, [isPressed, onClick]);
 
   React.useEffect(() => {
     if (disabled) {
-      clearInterval(intervalRef.current as NodeJS.Timeout)
-      setIsPressed(false)
+      clearInterval(intervalRef.current as NodeJS.Timeout);
+      setIsPressed(false);
     }
-  }, [disabled])
+  }, [disabled]);
 
   return (
     <button
@@ -125,165 +94,139 @@ const ScrollButton = ({ icon, onClick, disabled }: ScrollButtonProps) => {
       className={cx(
         // base
         "group inline-flex size-5 items-center truncate rounded-sm transition",
-        disabled
-          ? "cursor-not-allowed text-wg-disabled-text"
-          : "cursor-pointer text-wg-text hover:bg-wg-base hover:text-wg-text",
+        disabled ? "cursor-not-allowed text-wg-disabled-text" : "cursor-pointer text-wg-text hover:bg-wg-base hover:text-wg-text",
       )}
       disabled={disabled}
       onClick={(e) => {
-        e.stopPropagation()
-        onClick?.()
+        e.stopPropagation();
+        onClick?.();
       }}
       onMouseDown={(e) => {
-        e.stopPropagation()
-        setIsPressed(true)
+        e.stopPropagation();
+        setIsPressed(true);
       }}
       onMouseUp={(e) => {
-        e.stopPropagation()
-        setIsPressed(false)
+        e.stopPropagation();
+        setIsPressed(false);
       }}
     >
       <Icon className="size-full" aria-hidden="true" />
     </button>
-  )
-}
+  );
+};
 
-interface LegendProps extends React.OlHTMLAttributes<HTMLOListElement> {
-  categories: string[]
-  colors?: AvailableChartColorsKeys[]
-  onClickLegendItem?: (category: string, color: string) => void
-  activeLegend?: string
-  enableLegendSlider?: boolean
+// W5 C-18（DEF-AC-005）：上游把 <ol> 當外框、<li> 放在裡面那層 <div>——<ol> 的直接子層不是 <li>、<li> 的父層又不是 list（axe list／listitem）。
+// 改成外框 <div>、可捲動的那層本身是 <ol>，<li> 直接放在 <ol> 裡；捲動按鈕仍在外框內、不在 <ol> 裡。
+interface LegendProps extends React.HTMLAttributes<HTMLDivElement> {
+  categories: string[];
+  colors?: AvailableChartColorsKeys[];
+  onClickLegendItem?: (category: string, color: string) => void;
+  activeLegend?: string;
+  enableLegendSlider?: boolean;
 }
 
 type HasScrollProps = {
-  left: boolean
-  right: boolean
-}
+  left: boolean;
+  right: boolean;
+};
 
-const Legend = React.forwardRef<HTMLOListElement, LegendProps>((props, ref) => {
-  const {
-    categories,
-    colors = AvailableChartColors,
-    className,
-    onClickLegendItem,
-    activeLegend,
-    enableLegendSlider = false,
-    ...other
-  } = props
-  const scrollableRef = React.useRef<HTMLInputElement>(null)
-  const scrollButtonsRef = React.useRef<HTMLDivElement>(null)
-  const [hasScroll, setHasScroll] = React.useState<HasScrollProps | null>(null)
-  const [isKeyDowned, setIsKeyDowned] = React.useState<string | null>(null)
-  const intervalRef = React.useRef<NodeJS.Timeout | null>(null)
+const Legend = React.forwardRef<HTMLDivElement, LegendProps>((props, ref) => {
+  const { categories, colors = AvailableChartColors, className, onClickLegendItem, activeLegend, enableLegendSlider = false, ...other } = props;
+  const scrollableRef = React.useRef<HTMLOListElement>(null);
+  const scrollButtonsRef = React.useRef<HTMLDivElement>(null);
+  const [hasScroll, setHasScroll] = React.useState<HasScrollProps | null>(null);
+  const [isKeyDowned, setIsKeyDowned] = React.useState<string | null>(null);
+  const intervalRef = React.useRef<NodeJS.Timeout | null>(null);
 
   const checkScroll = React.useCallback(() => {
-    const scrollable = scrollableRef?.current
-    if (!scrollable) return
+    const scrollable = scrollableRef?.current;
+    if (!scrollable) return;
 
-    const hasLeftScroll = scrollable.scrollLeft > 0
-    const hasRightScroll =
-      scrollable.scrollWidth - scrollable.clientWidth > scrollable.scrollLeft
+    const hasLeftScroll = scrollable.scrollLeft > 0;
+    const hasRightScroll = scrollable.scrollWidth - scrollable.clientWidth > scrollable.scrollLeft;
 
-    setHasScroll({ left: hasLeftScroll, right: hasRightScroll })
-  }, [setHasScroll])
+    setHasScroll({ left: hasLeftScroll, right: hasRightScroll });
+  }, [setHasScroll]);
 
   const scrollToTest = React.useCallback(
     (direction: "left" | "right") => {
-      const element = scrollableRef?.current
-      const scrollButtons = scrollButtonsRef?.current
-      const scrollButtonsWith = scrollButtons?.clientWidth ?? 0
-      const width = element?.clientWidth ?? 0
+      const element = scrollableRef?.current;
+      const scrollButtons = scrollButtonsRef?.current;
+      const scrollButtonsWith = scrollButtons?.clientWidth ?? 0;
+      const width = element?.clientWidth ?? 0;
 
       if (element && enableLegendSlider) {
         element.scrollTo({
-          left:
-            direction === "left"
-              ? element.scrollLeft - width + scrollButtonsWith
-              : element.scrollLeft + width - scrollButtonsWith,
+          left: direction === "left" ? element.scrollLeft - width + scrollButtonsWith : element.scrollLeft + width - scrollButtonsWith,
           behavior: "smooth",
-        })
+        });
         setTimeout(() => {
-          checkScroll()
-        }, 400)
+          checkScroll();
+        }, 400);
       }
     },
     [enableLegendSlider, checkScroll],
-  )
+  );
 
   React.useEffect(() => {
     const keyDownHandler = (key: string) => {
       if (key === "ArrowLeft") {
-        scrollToTest("left")
+        scrollToTest("left");
       } else if (key === "ArrowRight") {
-        scrollToTest("right")
+        scrollToTest("right");
       }
-    }
+    };
     if (isKeyDowned) {
-      keyDownHandler(isKeyDowned)
+      keyDownHandler(isKeyDowned);
       intervalRef.current = setInterval(() => {
-        keyDownHandler(isKeyDowned)
-      }, 300)
+        keyDownHandler(isKeyDowned);
+      }, 300);
     } else {
-      clearInterval(intervalRef.current as NodeJS.Timeout)
+      clearInterval(intervalRef.current as NodeJS.Timeout);
     }
-    return () => clearInterval(intervalRef.current as NodeJS.Timeout)
-  }, [isKeyDowned, scrollToTest])
+    return () => clearInterval(intervalRef.current as NodeJS.Timeout);
+  }, [isKeyDowned, scrollToTest]);
 
   const keyDown = (e: KeyboardEvent) => {
-    e.stopPropagation()
+    e.stopPropagation();
     if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
-      e.preventDefault()
-      setIsKeyDowned(e.key)
+      e.preventDefault();
+      setIsKeyDowned(e.key);
     }
-  }
+  };
   const keyUp = (e: KeyboardEvent) => {
-    e.stopPropagation()
-    setIsKeyDowned(null)
-  }
+    e.stopPropagation();
+    setIsKeyDowned(null);
+  };
 
   React.useEffect(() => {
-    const scrollable = scrollableRef?.current
+    const scrollable = scrollableRef?.current;
     if (enableLegendSlider) {
-      checkScroll()
-      scrollable?.addEventListener("keydown", keyDown)
-      scrollable?.addEventListener("keyup", keyUp)
+      checkScroll();
+      scrollable?.addEventListener("keydown", keyDown);
+      scrollable?.addEventListener("keyup", keyUp);
     }
 
     return () => {
-      scrollable?.removeEventListener("keydown", keyDown)
-      scrollable?.removeEventListener("keyup", keyUp)
-    }
-  }, [checkScroll, enableLegendSlider])
+      scrollable?.removeEventListener("keydown", keyDown);
+      scrollable?.removeEventListener("keyup", keyUp);
+    };
+  }, [checkScroll, enableLegendSlider]);
 
   return (
-    <ol
-      ref={ref}
-      className={cx("relative overflow-hidden", className)}
-      {...other}
-    >
-      <div
+    <div ref={ref} className={cx("relative overflow-hidden", className)} {...other}>
+      <ol
         ref={scrollableRef}
         tabIndex={0}
         className={cx(
           "flex h-full",
-          enableLegendSlider
-            ? hasScroll?.right || hasScroll?.left
-              ? "snap-mandatory items-center overflow-auto pr-12 pl-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-              : ""
-            : "flex-wrap",
+          enableLegendSlider ? (hasScroll?.right || hasScroll?.left ? "snap-mandatory items-center overflow-auto pr-12 pl-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" : "") : "flex-wrap",
         )}
       >
         {categories.map((category, index) => (
-          <LegendItem
-            key={`item-${index}`}
-            name={category}
-            color={colors[index] as AvailableChartColorsKeys}
-            onClick={onClickLegendItem}
-            activeLegend={activeLegend}
-          />
+          <LegendItem key={`item-${index}`} name={category} color={colors[index] as AvailableChartColorsKeys} onClick={onClickLegendItem} activeLegend={activeLegend} />
         ))}
-      </div>
+      </ol>
       {enableLegendSlider && (hasScroll?.right || hasScroll?.left) ? (
         <>
           <div
@@ -297,27 +240,27 @@ const Legend = React.forwardRef<HTMLOListElement, LegendProps>((props, ref) => {
             <ScrollButton
               icon={RiArrowLeftSLine}
               onClick={() => {
-                setIsKeyDowned(null)
-                scrollToTest("left")
+                setIsKeyDowned(null);
+                scrollToTest("left");
               }}
               disabled={!hasScroll?.left}
             />
             <ScrollButton
               icon={RiArrowRightSLine}
               onClick={() => {
-                setIsKeyDowned(null)
-                scrollToTest("right")
+                setIsKeyDowned(null);
+                scrollToTest("right");
               }}
               disabled={!hasScroll?.right}
             />
           </div>
         </>
       ) : null}
-    </ol>
-  )
-})
+    </div>
+  );
+});
 
-Legend.displayName = "Legend"
+Legend.displayName = "Legend";
 
 const ChartLegend = (
   { payload }: any,
@@ -329,69 +272,55 @@ const ChartLegend = (
   legendPosition?: "left" | "center" | "right",
   yAxisWidth?: number,
 ) => {
-  const legendRef = React.useRef<HTMLDivElement>(null)
+  const legendRef = React.useRef<HTMLDivElement>(null);
 
   useOnWindowResize(() => {
-    const calculateHeight = (height: number | undefined) =>
-      height ? Number(height) + 15 : 60
-    setLegendHeight(calculateHeight(legendRef.current?.clientHeight))
-  })
+    const calculateHeight = (height: number | undefined) => (height ? Number(height) + 15 : 60);
+    setLegendHeight(calculateHeight(legendRef.current?.clientHeight));
+  });
 
-  const legendPayload = payload.filter((item: any) => item.type !== "none")
+  const legendPayload = payload.filter((item: any) => item.type !== "none");
 
-  const paddingLeft =
-    legendPosition === "left" && yAxisWidth ? yAxisWidth - 8 : 0
+  const paddingLeft = legendPosition === "left" && yAxisWidth ? yAxisWidth - 8 : 0;
 
   return (
     <div
       ref={legendRef}
       style={{ paddingLeft: paddingLeft }}
-      className={cx(
-        "flex items-center",
-        { "justify-center": legendPosition === "center" },
-        { "justify-start": legendPosition === "left" },
-        { "justify-end": legendPosition === "right" },
-      )}
+      className={cx("flex items-center", { "justify-center": legendPosition === "center" }, { "justify-start": legendPosition === "left" }, { "justify-end": legendPosition === "right" })}
     >
       <Legend
         categories={legendPayload.map((entry: any) => entry.value)}
-        colors={legendPayload.map((entry: any) =>
-          categoryColors.get(entry.value),
-        )}
+        colors={legendPayload.map((entry: any) => categoryColors.get(entry.value))}
         onClickLegendItem={onClick}
         activeLegend={activeLegend}
         enableLegendSlider={enableLegendSlider}
       />
     </div>
-  )
-}
+  );
+};
 
 //#region Tooltip
 
-type TooltipProps = Pick<ChartTooltipProps, "active" | "payload" | "label">
+type TooltipProps = Pick<ChartTooltipProps, "active" | "payload" | "label">;
 
 type PayloadItem = {
-  category: string
-  value: number
-  index: string
-  color: AvailableChartColorsKeys
-  type?: string
-  payload: any
-}
+  category: string;
+  value: number;
+  index: string;
+  color: AvailableChartColorsKeys;
+  type?: string;
+  payload: any;
+};
 
 interface ChartTooltipProps {
-  active: boolean | undefined
-  payload: PayloadItem[]
-  label: string
-  valueFormatter: (value: number) => string
+  active: boolean | undefined;
+  payload: PayloadItem[];
+  label: string;
+  valueFormatter: (value: number) => string;
 }
 
-const ChartTooltip = ({
-  active,
-  payload,
-  label,
-  valueFormatter,
-}: ChartTooltipProps) => {
+const ChartTooltip = ({ active, payload, label, valueFormatter }: ChartTooltipProps) => {
   if (active && payload && payload.length) {
     return (
       <div
@@ -418,18 +347,9 @@ const ChartTooltip = ({
         </div>
         <div className={cx("space-y-1 px-4 py-2")}>
           {payload.map(({ value, category, color }, index) => (
-            <div
-              key={`id-${index}`}
-              className="flex items-center justify-between space-x-8"
-            >
+            <div key={`id-${index}`} className="flex items-center justify-between space-x-8">
               <div className="flex items-center space-x-2">
-                <span
-                  aria-hidden="true"
-                  className={cx(
-                    "h-[3px] w-3.5 shrink-0 rounded-full",
-                    getColorClassName(color, "bg"),
-                  )}
-                />
+                <span aria-hidden="true" className={cx("h-[3px] w-3.5 shrink-0 rounded-full", getColorClassName(color, "bg"))} />
                 <p
                   className={cx(
                     // base
@@ -455,539 +375,402 @@ const ChartTooltip = ({
           ))}
         </div>
       </div>
-    )
+    );
   }
-  return null
-}
+  return null;
+};
 
 //#region AreaChart
 
 interface ActiveDot {
-  index?: number
-  dataKey?: string
+  index?: number;
+  dataKey?: string;
 }
 
 type BaseEventProps = {
-  eventType: "dot" | "category"
-  categoryClicked: string
-  [key: string]: number | string
-}
+  eventType: "dot" | "category";
+  categoryClicked: string;
+  [key: string]: number | string;
+};
 
-type AreaChartEventProps = BaseEventProps | null | undefined
+type AreaChartEventProps = BaseEventProps | null | undefined;
 
 interface AreaChartProps extends React.HTMLAttributes<HTMLDivElement> {
-  data: Record<string, any>[]
-  index: string
-  categories: string[]
-  colors?: AvailableChartColorsKeys[]
-  valueFormatter?: (value: number) => string
-  startEndOnly?: boolean
-  showXAxis?: boolean
-  showYAxis?: boolean
-  showGridLines?: boolean
-  yAxisWidth?: number
-  intervalType?: "preserveStartEnd" | "equidistantPreserveStart"
-  showTooltip?: boolean
-  showLegend?: boolean
-  autoMinValue?: boolean
-  minValue?: number
-  maxValue?: number
-  allowDecimals?: boolean
-  onValueChange?: (value: AreaChartEventProps) => void
-  enableLegendSlider?: boolean
-  tickGap?: number
-  connectNulls?: boolean
-  xAxisLabel?: string
-  yAxisLabel?: string
-  type?: "default" | "stacked" | "percent"
-  legendPosition?: "left" | "center" | "right"
-  fill?: "gradient" | "solid" | "none"
-  tooltipCallback?: (tooltipCallbackContent: TooltipProps) => void
-  customTooltip?: React.ComponentType<TooltipProps>
+  data: Record<string, any>[];
+  index: string;
+  categories: string[];
+  colors?: AvailableChartColorsKeys[];
+  valueFormatter?: (value: number) => string;
+  startEndOnly?: boolean;
+  showXAxis?: boolean;
+  showYAxis?: boolean;
+  showGridLines?: boolean;
+  yAxisWidth?: number;
+  intervalType?: "preserveStartEnd" | "equidistantPreserveStart";
+  showTooltip?: boolean;
+  showLegend?: boolean;
+  autoMinValue?: boolean;
+  minValue?: number;
+  maxValue?: number;
+  allowDecimals?: boolean;
+  onValueChange?: (value: AreaChartEventProps) => void;
+  enableLegendSlider?: boolean;
+  tickGap?: number;
+  connectNulls?: boolean;
+  xAxisLabel?: string;
+  yAxisLabel?: string;
+  type?: "default" | "stacked" | "percent";
+  legendPosition?: "left" | "center" | "right";
+  fill?: "gradient" | "solid" | "none";
+  tooltipCallback?: (tooltipCallbackContent: TooltipProps) => void;
+  customTooltip?: React.ComponentType<TooltipProps>;
 }
 
-const AreaChart = React.forwardRef<HTMLDivElement, AreaChartProps>(
-  (props, ref) => {
-    const {
-      data = [],
-      categories = [],
-      index,
-      colors = AvailableChartColors,
-      valueFormatter = (value: number) => value.toString(),
-      startEndOnly = false,
-      showXAxis = true,
-      showYAxis = true,
-      showGridLines = true,
-      yAxisWidth = 56,
-      intervalType = "equidistantPreserveStart",
-      showTooltip = true,
-      showLegend = true,
-      autoMinValue = false,
-      minValue,
-      maxValue,
-      allowDecimals = true,
-      connectNulls = false,
-      className,
-      onValueChange,
-      enableLegendSlider = false,
-      tickGap = 5,
-      xAxisLabel,
-      yAxisLabel,
-      type = "default",
-      legendPosition = "right",
-      fill = "gradient",
-      tooltipCallback,
-      customTooltip,
-      ...other
-    } = props
-    const CustomTooltip = customTooltip
-    const paddingValue =
-      (!showXAxis && !showYAxis) || (startEndOnly && !showYAxis) ? 0 : 20
-    const [legendHeight, setLegendHeight] = React.useState(60)
-    const [activeDot, setActiveDot] = React.useState<ActiveDot | undefined>(
-      undefined,
-    )
-    const [activeLegend, setActiveLegend] = React.useState<string | undefined>(
-      undefined,
-    )
-    const categoryColors = constructCategoryColors(categories, colors)
+const AreaChart = React.forwardRef<HTMLDivElement, AreaChartProps>((props, ref) => {
+  const {
+    data = [],
+    categories = [],
+    index,
+    colors = AvailableChartColors,
+    valueFormatter = (value: number) => value.toString(),
+    startEndOnly = false,
+    showXAxis = true,
+    showYAxis = true,
+    showGridLines = true,
+    yAxisWidth = 56,
+    intervalType = "equidistantPreserveStart",
+    showTooltip = true,
+    showLegend = true,
+    autoMinValue = false,
+    minValue,
+    maxValue,
+    allowDecimals = true,
+    connectNulls = false,
+    className,
+    onValueChange,
+    enableLegendSlider = false,
+    tickGap = 5,
+    xAxisLabel,
+    yAxisLabel,
+    type = "default",
+    legendPosition = "right",
+    fill = "gradient",
+    tooltipCallback,
+    customTooltip,
+    ...other
+  } = props;
+  const CustomTooltip = customTooltip;
+  const paddingValue = (!showXAxis && !showYAxis) || (startEndOnly && !showYAxis) ? 0 : 20;
+  const [legendHeight, setLegendHeight] = React.useState(60);
+  const [activeDot, setActiveDot] = React.useState<ActiveDot | undefined>(undefined);
+  const [activeLegend, setActiveLegend] = React.useState<string | undefined>(undefined);
+  const categoryColors = constructCategoryColors(categories, colors);
 
-    const yAxisDomain = getYAxisDomain(autoMinValue, minValue, maxValue)
-    const hasOnValueChange = !!onValueChange
-    const stacked = type === "stacked" || type === "percent"
-    const areaId = React.useId()
+  const yAxisDomain = getYAxisDomain(autoMinValue, minValue, maxValue);
+  const hasOnValueChange = !!onValueChange;
+  const stacked = type === "stacked" || type === "percent";
+  const areaId = React.useId();
 
-    const prevActiveRef = React.useRef<boolean | undefined>(undefined)
-    const prevLabelRef = React.useRef<string | undefined>(undefined)
+  const prevActiveRef = React.useRef<boolean | undefined>(undefined);
+  const prevLabelRef = React.useRef<string | undefined>(undefined);
 
-    const getFillContent = ({
-      fillType,
-      activeDot,
-      activeLegend,
-      category,
-    }: {
-      fillType: AreaChartProps["fill"]
-      activeDot: ActiveDot | undefined
-      activeLegend: string | undefined
-      category: string
-    }) => {
-      const stopOpacity =
-        activeDot || (activeLegend && activeLegend !== category) ? 0.1 : 0.3
+  const getFillContent = ({
+    fillType,
+    activeDot,
+    activeLegend,
+    category,
+  }: {
+    fillType: AreaChartProps["fill"];
+    activeDot: ActiveDot | undefined;
+    activeLegend: string | undefined;
+    category: string;
+  }) => {
+    const stopOpacity = activeDot || (activeLegend && activeLegend !== category) ? 0.1 : 0.3;
 
-      switch (fillType) {
-        case "none":
-          return <stop stopColor="currentColor" stopOpacity={0} />
-        case "gradient":
-          return (
-            <>
-              <stop
-                offset="5%"
-                stopColor="currentColor"
-                stopOpacity={stopOpacity}
-              />
-              <stop offset="95%" stopColor="currentColor" stopOpacity={0} />
-            </>
-          )
-        case "solid":
-        default:
-          return <stop stopColor="currentColor" stopOpacity={stopOpacity} />
-      }
+    switch (fillType) {
+      case "none":
+        return <stop stopColor="currentColor" stopOpacity={0} />;
+      case "gradient":
+        return (
+          <>
+            <stop offset="5%" stopColor="currentColor" stopOpacity={stopOpacity} />
+            <stop offset="95%" stopColor="currentColor" stopOpacity={0} />
+          </>
+        );
+      case "solid":
+      default:
+        return <stop stopColor="currentColor" stopOpacity={stopOpacity} />;
     }
+  };
 
-    function valueToPercent(value: number) {
-      return `${(value * 100).toFixed(0)}%`
+  function valueToPercent(value: number) {
+    return `${(value * 100).toFixed(0)}%`;
+  }
+
+  function onDotClick(itemData: any, event: React.MouseEvent) {
+    event.stopPropagation();
+
+    if (!hasOnValueChange) return;
+    if ((itemData.index === activeDot?.index && itemData.dataKey === activeDot?.dataKey) || (hasOnlyOneValueForKey(data, itemData.dataKey) && activeLegend && activeLegend === itemData.dataKey)) {
+      setActiveLegend(undefined);
+      setActiveDot(undefined);
+      onValueChange?.(null);
+    } else {
+      setActiveLegend(itemData.dataKey);
+      setActiveDot({
+        index: itemData.index,
+        dataKey: itemData.dataKey,
+      });
+      onValueChange?.({
+        eventType: "dot",
+        categoryClicked: itemData.dataKey,
+        ...itemData.payload,
+      });
     }
+  }
 
-    function onDotClick(itemData: any, event: React.MouseEvent) {
-      event.stopPropagation()
-
-      if (!hasOnValueChange) return
-      if (
-        (itemData.index === activeDot?.index &&
-          itemData.dataKey === activeDot?.dataKey) ||
-        (hasOnlyOneValueForKey(data, itemData.dataKey) &&
-          activeLegend &&
-          activeLegend === itemData.dataKey)
-      ) {
-        setActiveLegend(undefined)
-        setActiveDot(undefined)
-        onValueChange?.(null)
-      } else {
-        setActiveLegend(itemData.dataKey)
-        setActiveDot({
-          index: itemData.index,
-          dataKey: itemData.dataKey,
-        })
-        onValueChange?.({
-          eventType: "dot",
-          categoryClicked: itemData.dataKey,
-          ...itemData.payload,
-        })
-      }
+  function onCategoryClick(dataKey: string) {
+    if (!hasOnValueChange) return;
+    if ((dataKey === activeLegend && !activeDot) || (hasOnlyOneValueForKey(data, dataKey) && activeDot && activeDot.dataKey === dataKey)) {
+      setActiveLegend(undefined);
+      onValueChange?.(null);
+    } else {
+      setActiveLegend(dataKey);
+      onValueChange?.({
+        eventType: "category",
+        categoryClicked: dataKey,
+      });
     }
+    setActiveDot(undefined);
+  }
 
-    function onCategoryClick(dataKey: string) {
-      if (!hasOnValueChange) return
-      if (
-        (dataKey === activeLegend && !activeDot) ||
-        (hasOnlyOneValueForKey(data, dataKey) &&
-          activeDot &&
-          activeDot.dataKey === dataKey)
-      ) {
-        setActiveLegend(undefined)
-        onValueChange?.(null)
-      } else {
-        setActiveLegend(dataKey)
-        onValueChange?.({
-          eventType: "category",
-          categoryClicked: dataKey,
-        })
-      }
-      setActiveDot(undefined)
-    }
-
-    return (
-      <div
-        ref={ref}
-        className={cx("h-80 w-full", className)}
-        tremor-id="tremor-raw"
-        {...other}
-      >
-        <ResponsiveContainer>
-          <RechartsAreaChart
-            data={data}
-            onClick={
-              hasOnValueChange && (activeLegend || activeDot)
-                ? () => {
-                    setActiveDot(undefined)
-                    setActiveLegend(undefined)
-                    onValueChange?.(null)
-                  }
-                : undefined
-            }
-            margin={{
-              bottom: xAxisLabel ? 30 : undefined,
-              left: yAxisLabel ? 20 : undefined,
-              right: yAxisLabel ? 5 : undefined,
-              top: 5,
-            }}
-            stackOffset={type === "percent" ? "expand" : undefined}
+  return (
+    <div ref={ref} className={cx("h-80 w-full", className)} tremor-id="tremor-raw" {...other}>
+      <ResponsiveContainer>
+        <RechartsAreaChart
+          data={data}
+          onClick={
+            hasOnValueChange && (activeLegend || activeDot)
+              ? () => {
+                  setActiveDot(undefined);
+                  setActiveLegend(undefined);
+                  onValueChange?.(null);
+                }
+              : undefined
+          }
+          margin={{
+            bottom: xAxisLabel ? 30 : undefined,
+            left: yAxisLabel ? 20 : undefined,
+            right: yAxisLabel ? 5 : undefined,
+            top: 5,
+          }}
+          stackOffset={type === "percent" ? "expand" : undefined}
+        >
+          {showGridLines ? <CartesianGrid className={cx("stroke-wg-line stroke-1")} horizontal={true} vertical={false} /> : null}
+          <XAxis
+            padding={{ left: paddingValue, right: paddingValue }}
+            hide={!showXAxis}
+            dataKey={index}
+            interval={startEndOnly ? "preserveStartEnd" : intervalType}
+            tick={{ transform: "translate(0, 6)" }}
+            ticks={startEndOnly ? [data[0][index], data[data.length - 1][index]] : undefined}
+            fill=""
+            stroke=""
+            className={cx(
+              // base
+              "text-xs",
+              // text fill
+              "fill-wg-muted",
+            )}
+            tickLine={false}
+            axisLine={false}
+            minTickGap={tickGap}
           >
-            {showGridLines ? (
-              <CartesianGrid
-                className={cx("stroke-wg-line stroke-1")}
-                horizontal={true}
-                vertical={false}
-              />
-            ) : null}
-            <XAxis
-              padding={{ left: paddingValue, right: paddingValue }}
-              hide={!showXAxis}
-              dataKey={index}
-              interval={startEndOnly ? "preserveStartEnd" : intervalType}
-              tick={{ transform: "translate(0, 6)" }}
-              ticks={
-                startEndOnly
-                  ? [data[0][index], data[data.length - 1][index]]
-                  : undefined
-              }
-              fill=""
-              stroke=""
-              className={cx(
-                // base
-                "text-xs",
-                // text fill
-                "fill-wg-muted",
-              )}
-              tickLine={false}
-              axisLine={false}
-              minTickGap={tickGap}
-            >
-              {xAxisLabel && (
-                <Label
-                  position="insideBottom"
-                  offset={-20}
-                  className="fill-wg-text text-sm font-medium"
-                >
-                  {xAxisLabel}
-                </Label>
-              )}
-            </XAxis>
-            <YAxis
-              width={yAxisWidth}
-              hide={!showYAxis}
-              axisLine={false}
-              tickLine={false}
-              type="number"
-              domain={yAxisDomain as AxisDomain}
-              tick={{ transform: "translate(-3, 0)" }}
-              fill=""
-              stroke=""
-              className={cx(
-                // base
-                "text-xs",
-                // text fill
-                "fill-wg-muted",
-              )}
-              tickFormatter={
-                type === "percent" ? valueToPercent : valueFormatter
-              }
-              allowDecimals={allowDecimals}
-            >
-              {yAxisLabel && (
-                <Label
-                  position="insideLeft"
-                  style={{ textAnchor: "middle" }}
-                  angle={-90}
-                  offset={-15}
-                  className="fill-wg-text text-sm font-medium"
-                >
-                  {yAxisLabel}
-                </Label>
-              )}
-            </YAxis>
-            <Tooltip
-              wrapperStyle={{ outline: "none" }}
-              isAnimationActive={true}
-              animationDuration={100}
-              cursor={{ stroke: "#d1d5db", strokeWidth: 1 }}
-              offset={20}
-              position={{ y: 0 }}
-              content={({ active, payload, label }) => {
-                const cleanPayload: TooltipProps["payload"] = payload
-                  ? payload.map((item: any) => ({
-                      category: item.dataKey,
-                      value: item.value,
-                      index: item.payload[index],
-                      color: categoryColors.get(
-                        item.dataKey,
-                      ) as AvailableChartColorsKeys,
-                      type: item.type,
-                      payload: item.payload,
-                    }))
-                  : []
+            {xAxisLabel && (
+              <Label position="insideBottom" offset={-20} className="fill-wg-text text-sm font-medium">
+                {xAxisLabel}
+              </Label>
+            )}
+          </XAxis>
+          <YAxis
+            width={yAxisWidth}
+            hide={!showYAxis}
+            axisLine={false}
+            tickLine={false}
+            type="number"
+            domain={yAxisDomain as AxisDomain}
+            tick={{ transform: "translate(-3, 0)" }}
+            fill=""
+            stroke=""
+            className={cx(
+              // base
+              "text-xs",
+              // text fill
+              "fill-wg-muted",
+            )}
+            tickFormatter={type === "percent" ? valueToPercent : valueFormatter}
+            allowDecimals={allowDecimals}
+          >
+            {yAxisLabel && (
+              <Label position="insideLeft" style={{ textAnchor: "middle" }} angle={-90} offset={-15} className="fill-wg-text text-sm font-medium">
+                {yAxisLabel}
+              </Label>
+            )}
+          </YAxis>
+          <Tooltip
+            wrapperStyle={{ outline: "none" }}
+            isAnimationActive={true}
+            animationDuration={100}
+            cursor={{ stroke: "#d1d5db", strokeWidth: 1 }}
+            offset={20}
+            position={{ y: 0 }}
+            content={({ active, payload, label }) => {
+              const cleanPayload: TooltipProps["payload"] = payload
+                ? payload.map((item: any) => ({
+                    category: item.dataKey,
+                    value: item.value,
+                    index: item.payload[index],
+                    color: categoryColors.get(item.dataKey) as AvailableChartColorsKeys,
+                    type: item.type,
+                    payload: item.payload,
+                  }))
+                : [];
 
-                if (
-                  tooltipCallback &&
-                  (active !== prevActiveRef.current ||
-                    label !== prevLabelRef.current)
-                ) {
-                  tooltipCallback({ active, payload: cleanPayload, label })
-                  prevActiveRef.current = active
-                  prevLabelRef.current = label
-                }
+              if (tooltipCallback && (active !== prevActiveRef.current || label !== prevLabelRef.current)) {
+                tooltipCallback({ active, payload: cleanPayload, label });
+                prevActiveRef.current = active;
+                prevLabelRef.current = label;
+              }
 
-                return showTooltip && active ? (
-                  CustomTooltip ? (
-                    <CustomTooltip
-                      active={active}
-                      payload={cleanPayload}
-                      label={label}
-                    />
-                  ) : (
-                    <ChartTooltip
-                      active={active}
-                      payload={cleanPayload}
-                      label={label}
-                      valueFormatter={valueFormatter}
-                    />
-                  )
-                ) : null
-              }}
+              return showTooltip && active ? (
+                CustomTooltip ? (
+                  <CustomTooltip active={active} payload={cleanPayload} label={label} />
+                ) : (
+                  <ChartTooltip active={active} payload={cleanPayload} label={label} valueFormatter={valueFormatter} />
+                )
+              ) : null;
+            }}
+          />
+
+          {showLegend ? (
+            <RechartsLegend
+              verticalAlign="top"
+              height={legendHeight}
+              content={({ payload }) =>
+                ChartLegend(
+                  { payload },
+                  categoryColors,
+                  setLegendHeight,
+                  activeLegend,
+                  hasOnValueChange ? (clickedLegendItem: string) => onCategoryClick(clickedLegendItem) : undefined,
+                  enableLegendSlider,
+                  legendPosition,
+                  yAxisWidth,
+                )
+              }
             />
+          ) : null}
+          {categories.map((category) => {
+            const categoryId = `${areaId}-${category.replace(/[^a-zA-Z0-9]/g, "")}`;
+            return (
+              <React.Fragment key={category}>
+                <defs key={category}>
+                  <linearGradient key={category} className={cx(getColorClassName(categoryColors.get(category) as AvailableChartColorsKeys, "text"))} id={categoryId} x1="0" y1="0" x2="0" y2="1">
+                    {getFillContent({
+                      fillType: fill,
+                      activeDot: activeDot,
+                      activeLegend: activeLegend,
+                      category: category,
+                    })}
+                  </linearGradient>
+                </defs>
+                <Area
+                  className={cx(getColorClassName(categoryColors.get(category) as AvailableChartColorsKeys, "stroke"))}
+                  strokeOpacity={activeDot || (activeLegend && activeLegend !== category) ? 0.3 : 1}
+                  activeDot={(props: any) => {
+                    const { cx: cxCoord, cy: cyCoord, stroke, strokeLinecap, strokeLinejoin, strokeWidth, dataKey } = props;
+                    return (
+                      <Dot
+                        className={cx("stroke-wg-surface", onValueChange ? "cursor-pointer" : "", getColorClassName(categoryColors.get(dataKey) as AvailableChartColorsKeys, "fill"))}
+                        cx={cxCoord}
+                        cy={cyCoord}
+                        r={5}
+                        fill=""
+                        stroke={stroke}
+                        strokeLinecap={strokeLinecap}
+                        strokeLinejoin={strokeLinejoin}
+                        strokeWidth={strokeWidth}
+                        onClick={(_, event) => onDotClick(props, event)}
+                      />
+                    );
+                  }}
+                  dot={(props: any) => {
+                    const { stroke, strokeLinecap, strokeLinejoin, strokeWidth, cx: cxCoord, cy: cyCoord, dataKey, index } = props;
 
-            {showLegend ? (
-              <RechartsLegend
-                verticalAlign="top"
-                height={legendHeight}
-                content={({ payload }) =>
-                  ChartLegend(
-                    { payload },
-                    categoryColors,
-                    setLegendHeight,
-                    activeLegend,
-                    hasOnValueChange
-                      ? (clickedLegendItem: string) =>
-                          onCategoryClick(clickedLegendItem)
-                      : undefined,
-                    enableLegendSlider,
-                    legendPosition,
-                    yAxisWidth,
-                  )
-                }
-              />
-            ) : null}
-            {categories.map((category) => {
-              const categoryId = `${areaId}-${category.replace(/[^a-zA-Z0-9]/g, "")}`
-              return (
-                <React.Fragment key={category}>
-                  <defs key={category}>
-                    <linearGradient
-                      key={category}
-                      className={cx(
-                        getColorClassName(
-                          categoryColors.get(
-                            category,
-                          ) as AvailableChartColorsKeys,
-                          "text",
-                        ),
-                      )}
-                      id={categoryId}
-                      x1="0"
-                      y1="0"
-                      x2="0"
-                      y2="1"
-                    >
-                      {getFillContent({
-                        fillType: fill,
-                        activeDot: activeDot,
-                        activeLegend: activeLegend,
-                        category: category,
-                      })}
-                    </linearGradient>
-                  </defs>
-                  <Area
-                    className={cx(
-                      getColorClassName(
-                        categoryColors.get(
-                          category,
-                        ) as AvailableChartColorsKeys,
-                        "stroke",
-                      ),
-                    )}
-                    strokeOpacity={
-                      activeDot || (activeLegend && activeLegend !== category)
-                        ? 0.3
-                        : 1
-                    }
-                    activeDot={(props: any) => {
-                      const {
-                        cx: cxCoord,
-                        cy: cyCoord,
-                        stroke,
-                        strokeLinecap,
-                        strokeLinejoin,
-                        strokeWidth,
-                        dataKey,
-                      } = props
+                    if ((hasOnlyOneValueForKey(data, category) && !(activeDot || (activeLegend && activeLegend !== category))) || (activeDot?.index === index && activeDot?.dataKey === category)) {
                       return (
                         <Dot
-                          className={cx(
-                            "stroke-wg-surface",
-                            onValueChange ? "cursor-pointer" : "",
-                            getColorClassName(
-                              categoryColors.get(
-                                dataKey,
-                              ) as AvailableChartColorsKeys,
-                              "fill",
-                            ),
-                          )}
+                          key={index}
                           cx={cxCoord}
                           cy={cyCoord}
                           r={5}
-                          fill=""
                           stroke={stroke}
+                          fill=""
                           strokeLinecap={strokeLinecap}
                           strokeLinejoin={strokeLinejoin}
                           strokeWidth={strokeWidth}
-                          onClick={(_, event) => onDotClick(props, event)}
+                          className={cx("stroke-wg-surface", onValueChange ? "cursor-pointer" : "", getColorClassName(categoryColors.get(dataKey) as AvailableChartColorsKeys, "fill"))}
                         />
-                      )
-                    }}
-                    dot={(props: any) => {
-                      const {
-                        stroke,
-                        strokeLinecap,
-                        strokeLinejoin,
-                        strokeWidth,
-                        cx: cxCoord,
-                        cy: cyCoord,
-                        dataKey,
-                        index,
-                      } = props
+                      );
+                    }
+                    return <React.Fragment key={index}></React.Fragment>;
+                  }}
+                  key={category}
+                  name={category}
+                  type="linear"
+                  dataKey={category}
+                  stroke=""
+                  strokeWidth={2}
+                  strokeLinejoin="round"
+                  strokeLinecap="round"
+                  isAnimationActive={false}
+                  connectNulls={connectNulls}
+                  stackId={stacked ? "stack" : undefined}
+                  fill={`url(#${categoryId})`}
+                />
+              </React.Fragment>
+            );
+          })}
+          {/* hidden lines to increase clickable target area */}
+          {onValueChange
+            ? categories.map((category) => (
+                <Line
+                  className={cx("cursor-pointer")}
+                  strokeOpacity={0}
+                  key={category}
+                  name={category}
+                  type="linear"
+                  dataKey={category}
+                  stroke="transparent"
+                  fill="transparent"
+                  legendType="none"
+                  tooltipType="none"
+                  strokeWidth={12}
+                  connectNulls={connectNulls}
+                  onClick={(props: any, event) => {
+                    event.stopPropagation();
+                    const { name } = props;
+                    onCategoryClick(name);
+                  }}
+                />
+              ))
+            : null}
+        </RechartsAreaChart>
+      </ResponsiveContainer>
+    </div>
+  );
+});
 
-                      if (
-                        (hasOnlyOneValueForKey(data, category) &&
-                          !(
-                            activeDot ||
-                            (activeLegend && activeLegend !== category)
-                          )) ||
-                        (activeDot?.index === index &&
-                          activeDot?.dataKey === category)
-                      ) {
-                        return (
-                          <Dot
-                            key={index}
-                            cx={cxCoord}
-                            cy={cyCoord}
-                            r={5}
-                            stroke={stroke}
-                            fill=""
-                            strokeLinecap={strokeLinecap}
-                            strokeLinejoin={strokeLinejoin}
-                            strokeWidth={strokeWidth}
-                            className={cx(
-                              "stroke-wg-surface",
-                              onValueChange ? "cursor-pointer" : "",
-                              getColorClassName(
-                                categoryColors.get(
-                                  dataKey,
-                                ) as AvailableChartColorsKeys,
-                                "fill",
-                              ),
-                            )}
-                          />
-                        )
-                      }
-                      return <React.Fragment key={index}></React.Fragment>
-                    }}
-                    key={category}
-                    name={category}
-                    type="linear"
-                    dataKey={category}
-                    stroke=""
-                    strokeWidth={2}
-                    strokeLinejoin="round"
-                    strokeLinecap="round"
-                    isAnimationActive={false}
-                    connectNulls={connectNulls}
-                    stackId={stacked ? "stack" : undefined}
-                    fill={`url(#${categoryId})`}
-                  />
-                </React.Fragment>
-              )
-            })}
-            {/* hidden lines to increase clickable target area */}
-            {onValueChange
-              ? categories.map((category) => (
-                  <Line
-                    className={cx("cursor-pointer")}
-                    strokeOpacity={0}
-                    key={category}
-                    name={category}
-                    type="linear"
-                    dataKey={category}
-                    stroke="transparent"
-                    fill="transparent"
-                    legendType="none"
-                    tooltipType="none"
-                    strokeWidth={12}
-                    connectNulls={connectNulls}
-                    onClick={(props: any, event) => {
-                      event.stopPropagation()
-                      const { name } = props
-                      onCategoryClick(name)
-                    }}
-                  />
-                ))
-              : null}
-          </RechartsAreaChart>
-        </ResponsiveContainer>
-      </div>
-    )
-  },
-)
+AreaChart.displayName = "AreaChart";
 
-AreaChart.displayName = "AreaChart"
-
-export { AreaChart, type AreaChartEventProps, type TooltipProps }
+export { AreaChart, type AreaChartEventProps, type TooltipProps };

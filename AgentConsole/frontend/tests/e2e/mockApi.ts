@@ -42,10 +42,7 @@ const CORS = {
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** 錯誤回覆的簡寫（契約 §0.3 的 ApiError 形狀）。 */
-export function fail(
-  status: number,
-  error: { message?: string; reason?: string; errors?: unknown[]; details?: Record<string, unknown> } = {},
-): MockReply {
+export function fail(status: number, error: { message?: string; reason?: string; errors?: unknown[]; details?: Record<string, unknown> } = {}): MockReply {
   return { status, error };
 }
 
@@ -141,11 +138,7 @@ export async function installApiMock(pw: Page, handler: MockHandler): Promise<{ 
 }
 
 /** 把已登入狀態寫進 sessionStorage（login 端點不需要存在）；須在 page.goto 之前呼叫。 */
-export async function signInAs(
-  pw: Page,
-  role: "ADMIN" | "OPERATOR" | "VIEWER" = "OPERATOR",
-  username = role.toLowerCase(),
-): Promise<void> {
+export async function signInAs(pw: Page, role: "ADMIN" | "OPERATOR" | "VIEWER" = "OPERATOR", username = role.toLowerCase()): Promise<void> {
   const session = JSON.stringify({
     accessToken: "mock-access-token",
     refreshToken: "mock-refresh-token",

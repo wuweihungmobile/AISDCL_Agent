@@ -14,13 +14,7 @@ import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/states";
 import { StatusLabel } from "@/components/ui/status-dot";
-import {
-  useAllProjects,
-  useLatestRuns,
-  useNotificationSummary,
-  useSignoffQueue,
-  useWeekCompletedTasks,
-} from "@/lib/api/queries";
+import { useAllProjects, useLatestRuns, useNotificationSummary, useSignoffQueue, useWeekCompletedTasks } from "@/lib/api/queries";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { weekStart } from "@/lib/domain/metrics";
 import { projectStatus } from "@/lib/domain/status";
@@ -53,16 +47,7 @@ function KpiCard({
       <div data-testid={testId} className="mt-3 text-[32px] leading-none font-bold">
         {value}
       </div>
-      <div
-        className={cn(
-          "mt-2 text-[13px]",
-          tone === "muted" && "text-wg-muted",
-          tone === "primary" && "text-wg-primary",
-          tone === "accent" && "text-wg-accent",
-        )}
-      >
-        {delta}
-      </div>
+      <div className={cn("mt-2 text-[13px]", tone === "muted" && "text-wg-muted", tone === "primary" && "text-wg-primary", tone === "accent" && "text-wg-accent")}>{delta}</div>
     </Card>
   );
 }
@@ -71,8 +56,9 @@ function KpiCard({
  * 總覽儀表板（設計稿 1）：四張 KPI 卡、進行中的執行、待人工審批。
  * KPI：活躍專案數由專案 API 算；待審批草案數取 GET /notifications/summary 的 pendingSignoffs（跨專案，含目標、任務與匯入草案，
  * 契約 §4.5 G-06，取代 Phase 2 前端只算專案與草案目標的近似值）；
- * 本週完成任務數＝各專案 task-trend（from＝本週一 00:00、bucket=DAY）的 completed 加總（契約 §4.6 G-G3、主控裁決：沒有全域端點，
- * 前端聚合；近似值，專案多時只取最近更新的前 30 個）；執行中 run 數＝各 EXECUTING 專案「最新批次」仍在跑的計數（契約 §4.5 G-07）。
+ * 本週完成任務數＝GET /monitor/task-totals 的 completed（v1.2，C-1；契約 §1.3.8、§4.5 G-08：from＝本週一 00:00、to 省略＝現在，
+ * 一次請求、每 60 秒輪詢一次；取代 v1.1 對各專案扇出 task-trend 的近似做法，QA DEF-AC-009）；
+ * 執行中 run 數＝各 EXECUTING 專案「最新批次」仍在跑的計數（契約 §4.5 G-07）。
  * 「進行中的執行」卡列 EXECUTING 專案與其最新批次的進度（tasksCompleted／tasksTotal）。
  * 「待人工審批」卡的清單仍由專案／目標 API 組（可直接點「審批」的項目）。
  */
@@ -91,7 +77,8 @@ export function DashboardView() {
   const active = projects.filter((p) => !["COMPLETED", "FAILED", "ARCHIVED"].includes(p.status));
   const loading = all.isLoading;
 
-  const weekly = useWeekCompletedTasks(projects, weekStartIso);
+  const weekly = useWeekCompletedTasks(weekStartIso);
+  const weeklyDelta = weekly.data ? (weekly.isError ? "更新失敗，顯示的是上一次的數字" : `本週一起 · 跨 ${weekly.data.projectsCounted} 個專案`) : weekly.isError ? "無法載入本週完成任務數" : "統計中…";
   const latest = useLatestRuns(live.map((p) => p.id));
   // 專案 EXECUTING 但最新批次已不在跑（例如剛結束、專案狀態還沒更新）不算；批次資料還沒回來時當作在跑
   const liveRunCount = live.filter((p) => {
@@ -120,40 +107,22 @@ export function DashboardView() {
               [0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-[130px] rounded-lg" />)
             ) : (
               <>
-                <KpiCard
-                  testId="kpi-active"
-                  label="活躍專案數"
-                  icon={CircleCheckBig}
-                  value={String(active.length)}
-                  delta={`共 ${all.data?.totalElements ?? 0} 個專案 · 執行中 ${live.length}`}
-                />
+                <KpiCard testId="kpi-active" label="活躍專案數" icon={CircleCheckBig} value={String(active.length)} delta={`共 ${all.data?.totalElements ?? 0} 個專案 · 執行中 ${live.length}`} />
                 <KpiCard
                   testId="kpi-drafts"
                   label="待審批草案數"
                   icon={ClipboardCheck}
                   value={pendingSignoffs === undefined ? "—" : String(pendingSignoffs)}
-                  delta={
-                    pendingSignoffs === undefined
-                      ? "待通知摘要載入"
-                      : pendingSignoffs > 0
-                        ? "需 signoff 才可執行"
-                        : "全部已審批"
-                  }
+                  delta={pendingSignoffs === undefined ? "待通知摘要載入" : pendingSignoffs > 0 ? "需 signoff 才可執行" : "全部已審批"}
                   tone={pendingSignoffs ? "accent" : "muted"}
                 />
                 <KpiCard
                   testId="kpi-week-done"
                   label="本週完成任務數"
                   icon={ListChecks}
-                  value={weekly.loading ? "—" : String(weekly.total)}
-                  delta={
-                    weekly.loading
-                      ? "統計中…"
-                      : weekly.partial
-                        ? "部分專案查詢失敗，數字可能偏低"
-                        : `本週一起 · 跨 ${weekly.projects} 個專案（近似值）`
-                  }
-                  tone={weekly.partial ? "accent" : "primary"}
+                  value={weekly.data ? String(weekly.data.completed) : "—"}
+                  delta={weeklyDelta}
+                  tone={weekly.isError ? "accent" : "primary"}
                 />
                 <KpiCard
                   testId="kpi-runs"
@@ -188,10 +157,7 @@ export function DashboardView() {
                   return (
                     <div key={p.id} data-testid="active-run" className="border-t border-wg-line py-3.5">
                       <div className="mb-2 flex items-center justify-between gap-3">
-                        <Link
-                          href={`/projects/${p.id}/execute`}
-                          className="truncate text-[15px] font-semibold text-wg-text transition-colors hover:text-wg-primary"
-                        >
+                        <Link href={`/projects/${p.id}/execute`} className="truncate text-[15px] font-semibold text-wg-text transition-colors hover:text-wg-primary">
                           {p.name}
                         </Link>
                         <StatusLabel meta={projectStatus(p.status)} live className="shrink-0 text-[13px]" />
@@ -222,11 +188,7 @@ export function DashboardView() {
                 <EmptyState title="沒有待審批的草案" />
               ) : (
                 queue.items.map((d) => (
-                  <div
-                    key={`${d.kind}:${d.id}`}
-                    data-testid="pending-item"
-                    className="flex items-center justify-between gap-2 border-t border-wg-line py-3"
-                  >
+                  <div key={`${d.kind}:${d.id}`} data-testid="pending-item" className="flex items-center justify-between gap-2 border-t border-wg-line py-3">
                     <div className="min-w-0">
                       <Link
                         href={d.kind === "project" ? `/projects/${d.id}` : `/projects/${d.projectId}/goals/${d.id}`}

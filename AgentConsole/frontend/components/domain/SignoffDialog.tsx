@@ -22,10 +22,7 @@ export function SignoffDialog({ target, onClose }: { target: SignoffTarget | nul
   return (
     <Dialog open={target !== null} onOpenChange={(open) => !open && onClose()}>
       {target ? (
-        <DialogContent
-          title={`審批 signoff：${LABEL[target.kind]}`}
-          description="人工 signoff 硬閘：審批者不可匿名"
-        >
+        <DialogContent title={`審批 signoff：${LABEL[target.kind]}`} description="人工 signoff 硬閘：審批者不可匿名">
           <SignoffBody key={`${target.kind}:${target.id}`} target={target} onClose={onClose} />
         </DialogContent>
       ) : null}
@@ -79,12 +76,7 @@ function SignoffBody({ target, onClose }: { target: SignoffTarget; onClose: () =
           確認審批{LABEL[target.kind]}「<b>{target.name}</b>」？審批後才可{target.kind === "import" ? "確認匯入並執行" : "執行"}；審批動作會記錄審批者與時間。
         </p>
         <Field label="審批者" error={fieldError}>
-          <Input
-            value={approver}
-            onChange={(e) => setApprover(e.target.value)}
-            autoComplete="off"
-            aria-invalid={fieldError ? true : undefined}
-          />
+          <Input value={approver} onChange={(e) => setApprover(e.target.value)} autoComplete="off" aria-invalid={fieldError ? true : undefined} />
         </Field>
         {error ? (
           <p role="alert" className="rounded-md border border-wg-draft-border bg-wg-draft-bg px-3 py-2 text-sm text-wg-accent">

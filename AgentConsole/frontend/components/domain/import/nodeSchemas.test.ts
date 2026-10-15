@@ -1,17 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  MAX_RETRIES_LIMIT,
-  goalNodeSchema,
-  parseMaxRetries,
-  projectNodeSchema,
-  taskNodeSchema,
-} from "./nodeSchemas";
+import { MAX_RETRIES_LIMIT, goalNodeSchema, parseMaxRetries, projectNodeSchema, taskNodeSchema } from "./nodeSchemas";
 
 const okTask = { name: "實作", description: "請輸出 [T3_DONE]", passCriteria: "輸出含 [T3_DONE]", evaluatorCommand: "", expectedOutputRegex: "", maxRetries: "" };
 
-const firstMessage = (result: { success: boolean; error?: { issues: Array<{ message: string }> } }) =>
-  result.success ? null : result.error?.issues[0].message;
+const firstMessage = (result: { success: boolean; error?: { issues: Array<{ message: string }> } }) => (result.success ? null : result.error?.issues[0].message);
 
 describe("節點編輯表單驗證", () => {
   it("任務：名稱、說明、通過標準都必填（說明是 prompt，空白會被 empty_prompt 閘擋下）", () => {

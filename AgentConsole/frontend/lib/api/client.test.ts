@@ -154,14 +154,14 @@ describe("API client：檔案下載（apiDownload）", () => {
     saveSession(SESSION);
     const fetchMock = stubFetch(
       () =>
-        new Response("{\"version\":1}", {
+        new Response('{"version":1}', {
           status: 200,
-          headers: { "content-type": "application/json", "content-disposition": "attachment; filename=\"a.json\"" },
+          headers: { "content-type": "application/json", "content-disposition": 'attachment; filename="a.json"' },
         }),
     );
     const out = await apiDownload("/api/v1/settings/export", { method: "POST" });
     expect(out.filename).toBe("a.json");
-    expect(await out.blob.text()).toBe("{\"version\":1}");
+    expect(await out.blob.text()).toBe('{"version":1}');
     expect(authHeader(fetchMock.mock.calls[0][1])).toBe("Bearer access-old");
   });
 
@@ -176,7 +176,7 @@ describe("API client：檔案下載（apiDownload）", () => {
   });
 
   it.each([
-    ["attachment; filename=\"aisdlc-settings-20261015.json\"", "aisdlc-settings-20261015.json"],
+    ['attachment; filename="aisdlc-settings-20261015.json"', "aisdlc-settings-20261015.json"],
     ["attachment; filename=plain.json", "plain.json"],
     ["attachment; filename*=UTF-8''%E8%A8%AD%E5%AE%9A.json", "設定.json"],
     ["attachment", null],
@@ -228,7 +228,7 @@ describe("API client：給 SSE 用的 token 換新（EventSource 不能帶標頭
     await expect(getFreshAccessToken({ force: true })).resolves.toBe("access-new");
   });
 
-  it("沒有登入狀態回 null；換新失敗＝登入失效（清 session、呼叫處理器）並回 null", async () => {
+  it("沒有登入狀態回 null；refresh token 無效（401）＝登入失效（清 session、呼叫處理器）並回 null", async () => {
     stubFetch(refreshReply);
     await expect(getFreshAccessToken()).resolves.toBeNull();
 
@@ -241,17 +241,211 @@ describe("API client：給 SSE 用的 token 換新（EventSource 不能帶標頭
     expect(loadSession()).toBeNull();
   });
 
-  it("renewSession：成功回 true 並寫回新 token；沒有 session 回 false 且觸發登入失效", async () => {
+  it("renewSession：成功回 renewed 並寫回新 token；沒有 session 回 invalid 且觸發登入失效", async () => {
     saveSession(SESSION);
     stubFetch(refreshReply);
-    await expect(renewSession()).resolves.toBe(true);
+    await expect(renewSession()).resolves.toBe("renewed");
     expect(loadSession()?.accessToken).toBe("access-new");
 
     clearSession();
     const onUnauthorized = vi.fn();
     setUnauthorizedHandler(onUnauthorized);
-    await expect(renewSession()).resolves.toBe(false);
+    await expect(renewSession()).resolves.toBe("invalid");
     expect(onUnauthorized).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * DEF-AC-007（P2）：經 nginx 部署時，backend 重啟的那幾秒 POST /auth/refresh 會立即得到 502；
+ * v1.1 把任何失敗都當成登入失效而登出，backend 恢復後仍停在登入頁。契約 §2.8 第 7～9 點：只有 invalid（400／401／403）才登出。
+ */
+describe("API client：換新失敗分三類（renewed／invalid／unavailable；契約 §2.8 第 7～9 點，DEF-AC-007）", () => {
+  const refreshReply = () => ok({ accessToken: "access-new", refreshToken: "refresh-new", expiresIn: 1800, role: "OPERATOR" });
+  const bad = (status: number) => json({ code: status, message: "x", errors: [] }, status);
+
+  it.each([400, 401, 403])("HTTP %i＝invalid：清 session、呼叫登入失效處理器（唯一會登出的情形）", async (status) => {
+    saveSession(SESSION);
+    const onUnauthorized = vi.fn();
+    setUnauthorizedHandler(onUnauthorized);
+    stubFetch(() => bad(status));
+    await expect(renewSession()).resolves.toBe("invalid");
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
+    expect(loadSession()).toBeNull();
+  });
+
+  it.each([
+    ["502（nginx 在 backend 重啟時立即回的）", () => new Response("<html>Bad Gateway</html>", { status: 502 })],
+    ["503", () => bad(503)],
+    ["504", () => bad(504)],
+    ["500", () => bad(500)],
+    ["429（限流）", () => bad(429)],
+    ["404（未列狀態碼：保守視為 unavailable）", () => bad(404)],
+    ["408（未列狀態碼）", () => bad(408)],
+    ["200 卻不是 token 封包（代理回的 HTML 頁）", () => new Response("<html>maintenance</html>", { status: 200, headers: { "content-type": "text/html" } })],
+  ])("%s＝unavailable：保留 session、不呼叫登入失效處理器、不動現有 token", async (_label, reply) => {
+    saveSession(SESSION);
+    const onUnauthorized = vi.fn();
+    setUnauthorizedHandler(onUnauthorized);
+    stubFetch(reply);
+    await expect(renewSession()).resolves.toBe("unavailable");
+    expect(onUnauthorized).not.toHaveBeenCalled();
+    expect(loadSession()).toMatchObject({ accessToken: "access-old", refreshToken: "refresh-old" });
+  });
+
+  it("網路錯誤（fetch 丟例外）＝unavailable：保留 session", async () => {
+    saveSession(SESSION);
+    const onUnauthorized = vi.fn();
+    setUnauthorizedHandler(onUnauthorized);
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+    await expect(renewSession()).resolves.toBe("unavailable");
+    expect(onUnauthorized).not.toHaveBeenCalled();
+    expect(loadSession()?.accessToken).toBe("access-old");
+  });
+
+  describe("getFreshAccessToken（SSE 取 token，契約 §2.8 第 8 點）", () => {
+    it("換新 unavailable 且現有 token 尚未過期：沿用現有 token（連線建立後不再驗 token），不登出", async () => {
+      saveSession({ ...SESSION, expiresAt: Date.now() + 120_000 });
+      const onUnauthorized = vi.fn();
+      setUnauthorizedHandler(onUnauthorized);
+      const fetchMock = stubFetch(() => bad(502));
+      await expect(getFreshAccessToken({ force: true })).resolves.toBe("access-old");
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(onUnauthorized).not.toHaveBeenCalled();
+      expect(loadSession()?.refreshToken).toBe("refresh-old");
+    });
+
+    it("快到期（在換新餘裕內、但尚未過期）換新 unavailable：同樣沿用現有 token", async () => {
+      saveSession({ ...SESSION, expiresAt: Date.now() + TOKEN_RENEW_MARGIN_MS - 1_000 });
+      stubFetch(() => bad(503));
+      await expect(getFreshAccessToken()).resolves.toBe("access-old");
+    });
+
+    it("換新 unavailable 且現有 token 已過期：回 null，但**不登出**（session 還在，退避重試後可再換）", async () => {
+      saveSession({ ...SESSION, expiresAt: Date.now() - 1_000 });
+      const onUnauthorized = vi.fn();
+      setUnauthorizedHandler(onUnauthorized);
+      stubFetch(() => bad(502));
+      await expect(getFreshAccessToken({ force: true })).resolves.toBeNull();
+      expect(onUnauthorized).not.toHaveBeenCalled();
+      expect(loadSession()).toMatchObject({ accessToken: "access-old", refreshToken: "refresh-old" });
+
+      // backend 恢復後的下一次嘗試：換新成功、拿到新 token（DEF-AC-007：恢復後不再停在登入頁）
+      stubFetch(refreshReply);
+      await expect(getFreshAccessToken({ force: true })).resolves.toBe("access-new");
+    });
+
+    it("到期時間未知（expiresAt=0 的舊 session）換新 unavailable：視為未過期，沿用現有 token", async () => {
+      saveSession({ ...SESSION, expiresAt: 0 });
+      stubFetch(() => bad(502));
+      await expect(getFreshAccessToken({ force: true })).resolves.toBe("access-old");
+    });
+
+    it("換新 invalid（refresh token 真的失效）：登出並回 null——與 unavailable 區分的另一半", async () => {
+      saveSession({ ...SESSION, expiresAt: Date.now() + 120_000 });
+      const onUnauthorized = vi.fn();
+      setUnauthorizedHandler(onUnauthorized);
+      stubFetch(() => bad(401));
+      await expect(getFreshAccessToken({ force: true })).resolves.toBeNull();
+      expect(onUnauthorized).toHaveBeenCalledTimes(1);
+      expect(loadSession()).toBeNull();
+    });
+  });
+
+  describe("REST 路徑（sendWithRenewal；契約 §2.8 第 7、9 點）", () => {
+    const expect503 = (e: unknown) => {
+      expect(e).toBeInstanceOf(ApiError);
+      const err = e as ApiError;
+      expect(err.status).toBe(503);
+      expect(err.reason).toBe("upstream_unavailable");
+      expect(err.message).toBe("伺服器暫時無法連線，請稍後再試");
+    };
+
+    it("401 後換新得到 502：丟 ApiError{503, upstream_unavailable}，不登出、不導向登入；traceId 取自原請求的 401 回應", async () => {
+      saveSession(SESSION);
+      const onUnauthorized = vi.fn();
+      setUnauthorizedHandler(onUnauthorized);
+      stubFetch((url) => (url.endsWith("/api/v1/auth/refresh") ? bad(502) : json({ code: 401, message: "未認證", errors: [] }, 401, { "X-Trace-Id": "tr-401" })));
+      const e = await apiRequest("/api/v1/projects").catch((x: unknown) => x);
+      expect503(e);
+      expect((e as ApiError).traceId).toBe("tr-401");
+      expect(describeError(e)).toBe("伺服器暫時無法連線，請稍後再試：upstream_unavailable（traceId：tr-401）");
+      expect(onUnauthorized).not.toHaveBeenCalled();
+      expect(loadSession()).toMatchObject({ accessToken: "access-old", refreshToken: "refresh-old" });
+    });
+
+    it("換新遇到網路錯誤或 429 一樣是 503 upstream_unavailable（不登出）", async () => {
+      saveSession(SESSION);
+      const onUnauthorized = vi.fn();
+      setUnauthorizedHandler(onUnauthorized);
+      stubFetch((url) => (url.endsWith("/api/v1/auth/refresh") ? bad(429) : bad(401)));
+      expect503(await apiRequest("/api/v1/projects").catch((x: unknown) => x));
+
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string) => {
+          if (String(url).endsWith("/api/v1/auth/refresh")) throw new TypeError("Failed to fetch");
+          return bad(401);
+        }),
+      );
+      expect503(await apiRequest("/api/v1/projects").catch((x: unknown) => x));
+      expect(onUnauthorized).not.toHaveBeenCalled();
+      expect(loadSession()?.accessToken).toBe("access-old");
+    });
+
+    it("apiDownload 與 apiRequestWithHeaders 共用同一條路徑：換新 unavailable 一樣是 503、不登出", async () => {
+      saveSession(SESSION);
+      const onUnauthorized = vi.fn();
+      setUnauthorizedHandler(onUnauthorized);
+      stubFetch((url) => (url.endsWith("/api/v1/auth/refresh") ? bad(503) : bad(401)));
+      expect503(await apiDownload("/api/v1/settings/export", { method: "POST" }).catch((x: unknown) => x));
+      expect503(await apiRequestWithHeaders("/api/v1/executions/r/review/v", { method: "POST", body: {} }).catch((x: unknown) => x));
+      expect(onUnauthorized).not.toHaveBeenCalled();
+      expect(loadSession()).not.toBeNull();
+    });
+
+    it("同時多個 401、換新暫時失敗：只換新一次，三個請求都得到 503，session 保留", async () => {
+      saveSession(SESSION);
+      let refreshes = 0;
+      stubFetch((url) => {
+        if (url.endsWith("/api/v1/auth/refresh")) {
+          refreshes += 1;
+          return bad(502);
+        }
+        return bad(401);
+      });
+      const results = await Promise.all([apiRequest("/a"), apiRequest("/b"), apiRequest("/c")].map((p) => p.catch((x: unknown) => x)));
+      for (const r of results) expect503(r);
+      expect(refreshes).toBe(1);
+      expect(loadSession()?.refreshToken).toBe("refresh-old");
+    });
+
+    it("backend 恢復後（DEF-AC-007 的完整時序）：先 502 不登出，之後換新成功、原請求重送成功", async () => {
+      saveSession(SESSION);
+      const onUnauthorized = vi.fn();
+      setUnauthorizedHandler(onUnauthorized);
+      let backendUp = false;
+      stubFetch((url, init) => {
+        if (url.endsWith("/api/v1/auth/refresh")) return backendUp ? refreshReply() : bad(502);
+        return authHeader(init) === "Bearer access-new" ? ok({ id: "p1" }) : bad(401);
+      });
+      expect503(await apiRequest("/api/v1/projects/p1").catch((x: unknown) => x));
+      backendUp = true;
+      await expect(apiRequest("/api/v1/projects/p1")).resolves.toEqual({ id: "p1" });
+      expect(onUnauthorized).not.toHaveBeenCalled();
+      expect(loadSession()).toMatchObject({ accessToken: "access-new", refreshToken: "refresh-new" });
+    });
+
+    it("換新 invalid（403）：照舊登出並丟 401「登入已逾期」——與 unavailable 區分", async () => {
+      saveSession(SESSION);
+      const onUnauthorized = vi.fn();
+      setUnauthorizedHandler(onUnauthorized);
+      stubFetch((url) => (url.endsWith("/api/v1/auth/refresh") ? bad(403) : bad(401)));
+      const e = (await apiRequest("/api/v1/projects").catch((x: unknown) => x)) as ApiError;
+      expect(e.status).toBe(401);
+      expect(e.message).toContain("登入已逾期");
+      expect(onUnauthorized).toHaveBeenCalledTimes(1);
+      expect(loadSession()).toBeNull();
+    });
   });
 });
 
@@ -264,9 +458,7 @@ describe("API client：401 → refresh token 換新 → 重送一次", () => {
         expect(authHeader(init)).toBeUndefined(); // 換新請求不帶舊的 Bearer
         return ok({ accessToken: "access-new", refreshToken: "refresh-new", expiresIn: 1800, role: "OPERATOR" });
       }
-      return authHeader(init) === "Bearer access-new"
-        ? ok({ id: "p1" })
-        : json({ code: 401, message: "未認證", errors: [], timestamp: "t", traceId: "x" }, 401);
+      return authHeader(init) === "Bearer access-new" ? ok({ id: "p1" }) : json({ code: 401, message: "未認證", errors: [], timestamp: "t", traceId: "x" }, 401);
     });
 
     await expect(apiRequest("/api/v1/projects/p1")).resolves.toEqual({ id: "p1" });
@@ -306,9 +498,7 @@ describe("API client：401 → refresh token 換新 → 重送一次", () => {
     const onUnauthorized = vi.fn();
     setUnauthorizedHandler(onUnauthorized);
     const fetchMock = stubFetch(() => json({ code: 401, message: "帳號或密碼錯誤", errors: [] }, 401));
-    const e = (await apiRequest("/api/v1/auth/login", { method: "POST", body: {}, auth: false }).catch(
-      (x: unknown) => x,
-    )) as ApiError;
+    const e = (await apiRequest("/api/v1/auth/login", { method: "POST", body: {}, auth: false }).catch((x: unknown) => x)) as ApiError;
     expect(e.status).toBe(401);
     expect(e.message).toBe("帳號或密碼錯誤");
     expect(fetchMock).toHaveBeenCalledTimes(1);

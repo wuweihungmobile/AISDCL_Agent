@@ -48,15 +48,15 @@
   border-radius: 4px;
   padding: 1px 5px;
 }
+/* 程式碼區塊自動換行（縮排照樣保留），不做橫向捲動：捲動區域沒有鍵盤入口（axe scrollable-region-focusable；DEF-AC-005 同類） */
 .md-view pre {
   background: var(--color-bg-base);
   border: 1px solid var(--color-border);
   border-radius: 8px;
   padding: 12px 14px;
-  overflow-x: auto;
   line-height: 1.6;
 }
-.md-view pre code { background: transparent; border: 0; padding: 0; font-size: 13px; }
+.md-view pre code { background: transparent; border: 0; padding: 0; font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
 
 /* GFM 表格 */
 .md-view .md-table-wrap { overflow-x: auto; }
@@ -64,15 +64,17 @@
 .md-view th, .md-view td { border: 1px solid var(--color-border); padding: 6px 12px; text-align: left; }
 .md-view th { background: var(--color-bg-base); font-weight: 600; }
 
-/* 語法高亮：highlight.js（rehype-highlight）類別 → 設計 token */
+/* 語法高亮：highlight.js（rehype-highlight）類別 → 設計 token。
+   程式碼底是 bg-base，這些都是「文字」，一律用 ≥4.5:1 的文字色（DEF-AC-004）：
+   主色／warning／secondary 本色在 bg-base 上只有 4.22／1.87／2.34，所以分別換成 primary-strong／warning-text／secondary-text。 */
 .md-view .hljs-comment, .md-view .hljs-quote { color: var(--color-text-muted); font-style: italic; }
-.md-view .hljs-keyword, .md-view .hljs-selector-tag, .md-view .hljs-built_in, .md-view .hljs-type { color: var(--color-primary); font-weight: 600; }
+.md-view .hljs-keyword, .md-view .hljs-selector-tag, .md-view .hljs-built_in, .md-view .hljs-type { color: var(--color-primary-strong); font-weight: 600; }
 .md-view .hljs-string, .md-view .hljs-attr, .md-view .hljs-template-variable, .md-view .hljs-regexp { color: var(--color-accent-strong); }
-.md-view .hljs-number, .md-view .hljs-literal, .md-view .hljs-symbol, .md-view .hljs-bullet { color: var(--color-warning); }
+.md-view .hljs-number, .md-view .hljs-literal, .md-view .hljs-symbol, .md-view .hljs-bullet { color: var(--color-warning-text); }
 .md-view .hljs-title, .md-view .hljs-section, .md-view .hljs-name, .md-view .hljs-function { color: var(--color-primary-strong); font-weight: 600; }
-.md-view .hljs-variable, .md-view .hljs-params, .md-view .hljs-attribute { color: var(--color-secondary); }
+.md-view .hljs-variable, .md-view .hljs-params, .md-view .hljs-attribute { color: var(--color-secondary-text); }
 .md-view .hljs-meta, .md-view .hljs-link { color: var(--color-text-muted); }
-.md-view .hljs-addition { color: var(--color-primary); }
+.md-view .hljs-addition { color: var(--color-primary-strong); }
 .md-view .hljs-deletion { color: var(--color-error); }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -93,6 +95,8 @@
   --color-accent-fg: var(--color-primary);
   --color-accent-emphasis: var(--color-primary);
   --color-neutral-muted: var(--color-tertiary);
+  /* 程式碼註解色：套件的 #6E7781 在程式碼底（bg-base）上只有 4.21:1（DEF-AC-004），改用已加深的次要文字色（5.21:1） */
+  --color-prettylights-syntax-comment: var(--color-text-muted);
   --md-editor-box-shadow-color: transparent;
   --md-editor-background-color: var(--color-bg-surface);
   --md-editor-font-family: var(--font-mono);
@@ -116,6 +120,13 @@
 .md-editor-box .w-md-editor-preview {
   box-shadow: none;
   border-left: 1px solid var(--color-border);
+}
+/* 預覽端的程式碼區塊：套件預設橫向捲動（pre > code { overflow: auto }），預覽窗只有半個欄位寬、長行很常見，
+   捲動區域又沒有鍵盤入口。改成自動換行，縮排照樣保留（同上方 .md-view pre code）。 */
+.md-editor-box .wmde-markdown pre > code {
+  white-space: pre-wrap;
+  overflow: visible;
+  overflow-wrap: anywhere;
 }
 .md-editor-box .w-md-editor-toolbar li > button:hover,
 .md-editor-box .w-md-editor-toolbar li.active > button {

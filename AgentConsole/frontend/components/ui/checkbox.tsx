@@ -11,10 +11,7 @@ import { cn } from "@/lib/utils";
  * 基於 Radix Checkbox，支援鍵盤與 aria-checked；checked="indeterminate"＝部分選取（主色底＋白色短橫），
  * 用在執行範圍樹的「全部目標」與只選了部分任務的目標。
  */
-export function Checkbox({
-  className,
-  ...props
-}: React.ComponentProps<typeof CheckboxPrimitive.Root>) {
+export function Checkbox({ className, ...props }: React.ComponentProps<typeof CheckboxPrimitive.Root>) {
   return (
     <CheckboxPrimitive.Root
       data-slot="checkbox"

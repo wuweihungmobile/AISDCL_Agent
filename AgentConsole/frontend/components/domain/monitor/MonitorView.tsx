@@ -1,14 +1,6 @@
 "use client";
 
-import {
-  closestCenter,
-  DndContext,
-  KeyboardSensor,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-} from "@dnd-kit/core";
+import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { Activity, GripVertical } from "lucide-react";
@@ -19,26 +11,10 @@ import { RunSelect } from "@/components/domain/execute/parts";
 import { BackLink, PageTitle } from "@/components/domain/PageHeader";
 import { Select } from "@/components/ui/select";
 import { ErrorState, PageSkeleton } from "@/components/ui/states";
-import {
-  useMonitorPollMs,
-  useProject,
-  useProjectExecutions,
-  useProjectMetrics,
-  useTaskTrend,
-  useTokenTrend,
-} from "@/lib/api/queries";
+import { useMonitorPollMs, useProject, useProjectExecutions, useProjectMetrics, useTaskTrend, useTokenTrend } from "@/lib/api/queries";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { DEFAULT_RANGE, MONITOR_RANGES, bucketFor, isRangeId, type RangeId } from "@/lib/domain/metrics";
-import {
-  SECTION_TITLE,
-  getLayout,
-  getServerLayout,
-  moveSection,
-  resetLayout,
-  saveLayout,
-  subscribeLayout,
-  type SectionId,
-} from "@/lib/nav/monitorLayout";
+import { SECTION_TITLE, getLayout, getServerLayout, moveSection, resetLayout, saveLayout, subscribeLayout, type SectionId } from "@/lib/nav/monitorLayout";
 import { cn } from "@/lib/utils";
 import { AgentCard } from "./AgentCard";
 import { AlertsCard } from "./AlertsCard";
@@ -113,10 +89,7 @@ export function MonitorView() {
 
   const order = useSyncExternalStore(subscribeLayout, getLayout, getServerLayout);
   const [editing, setEditing] = useState(false);
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
-  );
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
 
   function onDragEnd(e: DragEndEvent) {
     const { active, over } = e;
@@ -168,13 +141,7 @@ export function MonitorView() {
           <>
             <label className="inline-flex items-center gap-2 text-sm text-wg-muted">
               時間範圍
-              <Select
-                size="sm"
-                value={range}
-                onChange={(e) => isRangeId(e.target.value) && setRange(e.target.value)}
-                aria-label="時間範圍"
-                data-testid="range-select"
-              >
+              <Select size="sm" value={range} onChange={(e) => isRangeId(e.target.value) && setRange(e.target.value)} aria-label="時間範圍" data-testid="range-select">
                 {MONITOR_RANGES.map((r) => (
                   <option key={r.id} value={r.id}>
                     {r.label}
@@ -199,14 +166,7 @@ export function MonitorView() {
         </SortableContext>
       </DndContext>
 
-      <ExportBar
-        projectId={projectId}
-        range={range}
-        runId={runId}
-        editing={editing}
-        onToggleEditing={() => setEditing((v) => !v)}
-        onResetLayout={resetLayout}
-      />
+      <ExportBar projectId={projectId} range={range} runId={runId} editing={editing} onToggleEditing={() => setEditing((v) => !v)} onResetLayout={resetLayout} />
     </div>
   );
 }

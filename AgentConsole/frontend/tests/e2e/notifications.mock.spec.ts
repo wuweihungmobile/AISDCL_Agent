@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 
+import { expectNoA11yViolations } from "./a11y";
 import { compose, installApiMock, paged, signInAs, snap, type MockHandler } from "./mockApi";
 
 /**
@@ -18,6 +19,8 @@ function backend(summary: () => Record<string, unknown>): MockHandler {
     if (call.path === "/api/v1/notifications/summary") return { data: { bridgeConnected: null, bridgeCheckedAt: null, ...summary() } };
     if (call.path === "/api/v1/projects") return { data: paged([project], 100) };
     if (call.path === `/api/v1/projects/${P1}/goals`) return { data: [] };
+    // Dashboard 的「本週完成任務數」打全域端點（v1.2，C-1）：這個 spec 沒有任何執行紀錄
+    if (call.path === "/api/v1/monitor/task-totals") return { data: { from: NOW, to: NOW, started: 0, completed: 0, failed: 0, retried: 0, projectsCounted: 0 } };
     return undefined;
   };
 }
@@ -33,7 +36,7 @@ test.describe("通知徽章（route mock）", () => {
 
     await expect(page.getByTestId("bell-badge")).toHaveText("4");
     await expect(page.getByTestId("signoff-badge")).toHaveText("2");
-    await expect(page.getByRole("button", { name: "通知（4 筆待處理）" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "通知 4 筆待處理" })).toBeVisible();
 
     await page.getByTestId("bell-trigger").click();
     const panel = page.getByTestId("notification-panel");
@@ -45,6 +48,7 @@ test.describe("通知徽章（route mock）", () => {
     await expect(panel.getByTestId("notification-signoffs")).toHaveAttribute("href", "/#pending-signoff");
     await expect(panel.getByTestId("notification-reviews")).toHaveAttribute("href", `/projects/${P1}/execute`);
     await expect(panel.getByTestId("notification-alerts")).toHaveAttribute("href", `/projects/${P1}/monitor`);
+    await expectNoA11yViolations(page, "通知面板（開啟）");
     await snap(page, "00-notification-panel.png");
 
     // Esc 關閉

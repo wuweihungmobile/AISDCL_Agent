@@ -117,8 +117,7 @@ function CheckpointBody({
                   <span className="min-w-0 flex-1">
                     <span className="block font-mono text-sm font-semibold">{c.name}</span>
                     <span className="block text-[13px] text-wg-muted">
-                      {formatDateTime(c.createdAt)} · 已完成 {c.completedSteps ?? "?"} 步 ·{" "}
-                      {c.stepId ? `還原後從 ${c.stepId} 繼續` : "已跑完所有步驟，還原後重新確認收尾"}
+                      {formatDateTime(c.createdAt)} · 已完成 {c.completedSteps ?? "?"} 步 · {c.stepId ? `還原後從 ${c.stepId} 繼續` : "已跑完所有步驟，還原後重新確認收尾"}
                       {c.isAutomatic ? " · 自動" : ""}
                     </span>
                   </span>

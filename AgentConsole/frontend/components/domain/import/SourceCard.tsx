@@ -6,6 +6,7 @@
  * 兩種模式：
  *  - 新來源（沒有記錄）：選檔或貼文字，按「開始解析」時才建立匯入記錄並解析（一次完成兩個呼叫）；
  *  - 沿用既有記錄（status=UPLOADED：從歷史重開，或解析被有界閘拒絕後）：來源已定，只調整解析選項後重試；
+ *    自治等級、執行路徑、補充說明由記錄上的 parseOptions 還原（v1.2，C-10；契約 §1.1.9）；
  *    要改來源文字時按「改用其他來源」，原文會帶回「貼上文字」供修改。
  */
 import { ClipboardPaste, CloudUpload, FileText, FileUp, History, Sparkles, X } from "lucide-react";
@@ -26,18 +27,9 @@ import { cn } from "@/lib/utils";
 import type { ParseFailure } from "./gateErrors";
 import { HistoryPanel } from "./HistoryPanel";
 import { ParseFailurePanel, StepHeader } from "./parts";
-import {
-  ALLOWED_EXTENSIONS,
-  EXECUTION_PATH_HINT,
-  MAX_ADDITIONAL_PROMPT_CHARS,
-  MAX_TEXT_CHARS,
-  validateSourceFile,
-} from "./sourceRules";
+import { ALLOWED_EXTENSIONS, EXECUTION_PATH_HINT, MAX_ADDITIONAL_PROMPT_CHARS, MAX_TEXT_CHARS, validateSourceFile } from "./sourceRules";
 
-export type SourcePayload =
-  | { kind: "file"; file: File }
-  | { kind: "text"; content: string; sourceFileName?: string; sourceType: "PLAIN_TEXT" | "MARKDOWN" }
-  | { kind: "existing" };
+export type SourcePayload = { kind: "file"; file: File } | { kind: "text"; content: string; sourceFileName?: string; sourceType: "PLAIN_TEXT" | "MARKDOWN" } | { kind: "existing" };
 
 export type ParseRequest = { source: SourcePayload; options: ParseOptions };
 
@@ -96,9 +88,16 @@ export function SourceCard({
   const [text, setText] = useState("");
   const [sourceName, setSourceName] = useState("");
   const [sourceType, setSourceType] = useState<"PLAIN_TEXT" | "MARKDOWN">("PLAIN_TEXT");
-  const [executionPath, setExecutionPath] = useState("");
-  const [autonomy, setAutonomy] = useState<number | null>(null);
-  const [additional, setAdditional] = useState("");
+  // 解析選項草稿（null＝沿用「還原值」或預設，避免用 effect 把伺服器值灌進 state；契約 §1.1.9、§4.1 I-18，C-10）：
+  // 重開 UPLOADED 記錄（歷史、重新整理、解析被擋下後）時，記錄上存的最近一次 parse 請求選項就是還原值；使用者一動欄位就以草稿為準，
+  // 之後記錄重抓也不會把使用者剛打的字蓋回去。
+  const [pathDraft, setPathDraft] = useState<string | null>(null);
+  const [autonomyDraft, setAutonomyDraft] = useState<number | null>(null);
+  const [additionalDraft, setAdditionalDraft] = useState<string | null>(null);
+  const restored = existing?.parseOptions ?? null;
+  const executionPath = pathDraft ?? restored?.executionPath ?? "";
+  const effectiveAutonomy = autonomyDraft ?? restored?.autonomyLevel ?? defaultAutonomy;
+  const additional = additionalDraft ?? restored?.additionalPrompt ?? "";
   const [errors, setErrors] = useState<Record<string, string>>({});
   /** 最近一次按「開始解析」時所在的 tab：建立記錄階段的失敗說明只顯示在那個 tab，切走就不跟過去 */
   const [startedTab, setStartedTab] = useState<SourceTab | null>(null);
@@ -153,29 +152,41 @@ export function SourceCard({
     onStart({
       source,
       options: {
-        autonomyLevel: autonomy ?? defaultAutonomy,
+        autonomyLevel: effectiveAutonomy,
         executionPath: path,
         additionalPrompt: additional.trim() || undefined,
+        // specDir 沒有 UI 欄位（契約 §4.1 I-05）；API 呼叫端設過的值在重新解析時原樣帶回，不因為從畫面重試而被丟掉
+        ...(existing && restored?.specDir ? { specDir: restored.specDir } : {}),
       },
     });
   }
 
   function leaveExisting() {
     if (existing) {
-      // 原文（檔案則是後端擷取出的文字）帶回「貼上文字」，讓使用者修改後以新記錄重新解析
+      // 原文（檔案則是後端擷取出的文字）帶回「貼上文字」，讓使用者修改後以新記錄重新解析；還原的選項一併保留給新來源用
       setText(existing.sourceContent);
       setSourceName(existing.sourceFileName ?? "");
       setSourceType(existing.sourceType === "MARKDOWN" ? "MARKDOWN" : "PLAIN_TEXT");
       setFile(null);
       setFileError(null);
       setTab("text");
+      setPathDraft(executionPath);
+      setAutonomyDraft(effectiveAutonomy);
+      setAdditionalDraft(additional);
     }
     onLeaveExisting();
   }
 
-  const effectiveAutonomy = autonomy ?? defaultAutonomy;
-  const sourceMessage =
-    errors.source || (tab === "file" ? fileError : null) || (startedTab === tab ? sourceError : null);
+  /** 從歷史開另一筆記錄：上一筆記錄上打過的選項草稿不屬於它，清掉後改用它自己的還原值。 */
+  function openFromHistory(id: string) {
+    setPathDraft(null);
+    setAutonomyDraft(null);
+    setAdditionalDraft(null);
+    setTab("file");
+    onOpenFromHistory(id);
+  }
+
+  const sourceMessage = errors.source || (tab === "file" ? fileError : null) || (startedTab === tab ? sourceError : null);
 
   const existingPanel = existing ? (
     <div data-testid="existing-source" className="rounded-md border border-wg-line bg-wg-base p-4">
@@ -183,17 +194,9 @@ export function SourceCard({
         <FileText size={18} className="shrink-0 text-wg-primary" aria-hidden />
         <span className="font-medium break-all">{existing.sourceFileName ?? "（貼上文字）"}</span>
         <span className="text-xs text-wg-muted">
-          {SOURCE_TYPE_LABEL[existing.sourceType]} · {formatNumber(existing.sourceContent.length)} 字元 · 建立於{" "}
-          {formatDateTime(existing.createdAt)}
+          {SOURCE_TYPE_LABEL[existing.sourceType]} · {formatNumber(existing.sourceContent.length)} 字元 · 建立於 {formatDateTime(existing.createdAt)}
         </span>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="ml-auto"
-          disabled={!canWrite}
-          title={writeHint}
-          onClick={leaveExisting}
-        >
+        <Button variant="ghost" size="sm" className="ml-auto" disabled={!canWrite} title={writeHint} onClick={leaveExisting}>
           改用其他來源
         </Button>
       </div>
@@ -203,134 +206,104 @@ export function SourceCard({
           {existing.sourceContent.length > 600 ? `\n…（來源預覽，全文共 ${formatNumber(existing.sourceContent.length)} 字元）` : ""}
         </pre>
       ) : null}
-      <p className="mt-2 text-[13px] text-wg-muted">
-        已建立匯入記錄，來源不會重複上傳；調整下方解析選項後按「開始解析」重試。
-      </p>
+      <p className="mt-2 text-[13px] text-wg-muted">已建立匯入記錄，來源不會重複上傳；調整下方解析選項後按「開始解析」重試。</p>
     </div>
   ) : null;
 
   return (
     <Card className="mb-6 p-6" data-testid="import-step1">
       <StepHeader step={1} title="輸入來源" />
-      <PillTabs
-        label="輸入來源"
-        idBase={ID_BASE}
-        tabs={TABS}
-        value={tab}
-        onChange={(next) => setTab(next)}
-        className="mb-[18px]"
-      />
+      <PillTabs label="輸入來源" idBase={ID_BASE} tabs={TABS} value={tab} onChange={(next) => setTab(next)} className="mb-[18px]" />
 
       {tab === "history" ? (
         <div role="tabpanel" id={pillPanelId(ID_BASE, "history")} aria-labelledby={pillTabId(ID_BASE, "history")}>
-          <HistoryPanel
-            onOpen={(id) => {
-              setTab("file");
-              onOpenFromHistory(id);
-            }}
-          />
+          <HistoryPanel onOpen={openFromHistory} />
         </div>
       ) : (
         <>
           <div role="tabpanel" id={pillPanelId(ID_BASE, tab)} aria-labelledby={pillTabId(ID_BASE, tab)}>
-            {existingPanel ?? (tab === "file" ? (
-              <div>
-                <input
-                  ref={inputRef}
-                  type="file"
-                  accept={ALLOWED_EXTENSIONS.join(",")}
-                  className="sr-only"
-                  tabIndex={-1}
-                  aria-label="選擇要匯入的檔案"
-                  data-testid="import-file-input"
-                  onChange={(e) => {
-                    chooseFile(e.target.files?.[0]);
-                    e.target.value = ""; // 允許連續選同一個檔案
-                  }}
-                />
-                <button
-                  type="button"
-                  disabled={!canWrite}
-                  title={writeHint}
-                  data-testid="import-dropzone"
-                  onClick={() => inputRef.current?.click()}
-                  onDragEnter={(e) => {
-                    e.preventDefault();
-                    setDragging(true);
-                  }}
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                    setDragging(true);
-                  }}
-                  onDragLeave={() => setDragging(false)}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    setDragging(false);
-                    if (canWrite) chooseFile(e.dataTransfer.files?.[0]);
-                  }}
-                  className={cn(
-                    "flex w-full cursor-pointer flex-col items-center gap-2 rounded-lg border-2 border-dashed px-6 py-[38px] text-center transition-colors disabled:cursor-not-allowed disabled:bg-wg-disabled-bg",
-                    dragging ? "border-wg-primary bg-wg-tertiary" : "border-wg-line bg-wg-surface hover:border-wg-secondary",
-                  )}
-                >
-                  <CloudUpload size={40} className="text-wg-secondary" aria-hidden />
-                  <span className="text-[15px] font-medium">拖曳檔案至此，或點擊選擇</span>
-                  <span className="text-[13px] text-wg-muted">支援格式：.md · .pdf · .docx　|　檔案大小限制 10MB</span>
-                </button>
-                {file ? (
-                  <div
-                    data-testid="selected-file"
-                    className="mt-3 flex items-center gap-2 rounded-md border border-wg-line px-3 py-2 text-sm"
-                  >
-                    <FileText size={16} className="shrink-0 text-wg-primary" aria-hidden />
-                    <span className="min-w-0 flex-1 truncate">{file.name}</span>
-                    <span className="shrink-0 text-wg-muted">{formatBytes(file.size)}</span>
-                    <IconButton icon={X} label="移除檔案" size={28} onClick={() => setFile(null)} />
-                  </div>
-                ) : null}
-                {sourceMessage ? (
-                  <p role="alert" data-testid="source-error" className="mt-2 text-[13px] text-wg-error">
-                    {sourceMessage}
-                  </p>
-                ) : null}
-              </div>
-            ) : (
-              <div className="flex flex-col gap-4">
-                <Field label="需求文字" hint="(支援 Markdown)" error={sourceMessage ?? undefined}>
-                  <Textarea
-                    className="min-h-[220px]"
-                    value={text}
-                    disabled={!canWrite}
-                    placeholder="貼上 BRD／PRD 內容…"
-                    onChange={(e) => setText(e.target.value)}
+            {existingPanel ??
+              (tab === "file" ? (
+                <div>
+                  <input
+                    ref={inputRef}
+                    type="file"
+                    accept={ALLOWED_EXTENSIONS.join(",")}
+                    className="sr-only"
+                    tabIndex={-1}
+                    aria-label="選擇要匯入的檔案"
+                    data-testid="import-file-input"
+                    onChange={(e) => {
+                      chooseFile(e.target.files?.[0]);
+                      e.target.value = ""; // 允許連續選同一個檔案
+                    }}
                   />
-                </Field>
-                <div className="grid grid-cols-[1fr_200px] gap-4 max-md:grid-cols-1">
-                  <Field label="來源名稱" hint="(選填，例如 e2e-brd.md)">
-                    <Input value={sourceName} disabled={!canWrite} onChange={(e) => setSourceName(e.target.value)} maxLength={500} />
-                  </Field>
-                  <Field label="格式">
-                    <Select
-                      value={sourceType}
-                      disabled={!canWrite}
-                      onChange={(e) => setSourceType(e.target.value as "PLAIN_TEXT" | "MARKDOWN")}
-                    >
-                      <option value="PLAIN_TEXT">純文字</option>
-                      <option value="MARKDOWN">Markdown</option>
-                    </Select>
-                  </Field>
+                  <button
+                    type="button"
+                    disabled={!canWrite}
+                    title={writeHint}
+                    data-testid="import-dropzone"
+                    onClick={() => inputRef.current?.click()}
+                    onDragEnter={(e) => {
+                      e.preventDefault();
+                      setDragging(true);
+                    }}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      setDragging(true);
+                    }}
+                    onDragLeave={() => setDragging(false)}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      setDragging(false);
+                      if (canWrite) chooseFile(e.dataTransfer.files?.[0]);
+                    }}
+                    className={cn(
+                      "flex w-full cursor-pointer flex-col items-center gap-2 rounded-lg border-2 border-dashed px-6 py-[38px] text-center transition-colors disabled:cursor-not-allowed disabled:bg-wg-disabled-bg",
+                      dragging ? "border-wg-primary bg-wg-tertiary" : "border-wg-line bg-wg-surface hover:border-wg-secondary",
+                    )}
+                  >
+                    <CloudUpload size={40} className="text-wg-secondary" aria-hidden />
+                    <span className="text-[15px] font-medium">拖曳檔案至此，或點擊選擇</span>
+                    <span className="text-[13px] text-wg-muted">支援格式：.md · .pdf · .docx　|　檔案大小限制 10MB</span>
+                  </button>
+                  {file ? (
+                    <div data-testid="selected-file" className="mt-3 flex items-center gap-2 rounded-md border border-wg-line px-3 py-2 text-sm">
+                      <FileText size={16} className="shrink-0 text-wg-primary" aria-hidden />
+                      <span className="min-w-0 flex-1 truncate">{file.name}</span>
+                      <span className="shrink-0 text-wg-muted">{formatBytes(file.size)}</span>
+                      <IconButton icon={X} label="移除檔案" size={28} onClick={() => setFile(null)} />
+                    </div>
+                  ) : null}
+                  {sourceMessage ? (
+                    <p role="alert" data-testid="source-error" className="mt-2 text-[13px] text-wg-error">
+                      {sourceMessage}
+                    </p>
+                  ) : null}
                 </div>
-              </div>
-            ))}
+              ) : (
+                <div className="flex flex-col gap-4">
+                  <Field label="需求文字" hint="(支援 Markdown)" error={sourceMessage ?? undefined}>
+                    <Textarea className="min-h-[220px]" value={text} disabled={!canWrite} placeholder="貼上 BRD／PRD 內容…" onChange={(e) => setText(e.target.value)} />
+                  </Field>
+                  <div className="grid grid-cols-[1fr_200px] gap-4 max-md:grid-cols-1">
+                    <Field label="來源名稱" hint="(選填，例如 e2e-brd.md)">
+                      <Input value={sourceName} disabled={!canWrite} onChange={(e) => setSourceName(e.target.value)} maxLength={500} />
+                    </Field>
+                    <Field label="格式">
+                      <Select value={sourceType} disabled={!canWrite} onChange={(e) => setSourceType(e.target.value as "PLAIN_TEXT" | "MARKDOWN")}>
+                        <option value="PLAIN_TEXT">純文字</option>
+                        <option value="MARKDOWN">Markdown</option>
+                      </Select>
+                    </Field>
+                  </div>
+                </div>
+              ))}
           </div>
 
           <div className="mt-5 grid grid-cols-[200px_1fr] gap-4 max-md:grid-cols-1">
             <Field label="自治等級" hint="(影響任務粒度)">
-              <Select
-                value={String(effectiveAutonomy)}
-                disabled={!canWrite}
-                onChange={(e) => setAutonomy(Number(e.target.value))}
-              >
+              <Select value={String(effectiveAutonomy)} disabled={!canWrite} onChange={(e) => setAutonomyDraft(Number(e.target.value))}>
                 {LEVELS.map((n) => (
                   <option key={n} value={n}>
                     Level {n}
@@ -345,38 +318,20 @@ export function SourceCard({
                 disabled={!canWrite}
                 placeholder="/home/user/projects/new-service"
                 aria-invalid={errors.executionPath || fieldErrors.executionPath ? true : undefined}
-                onChange={(e) => setExecutionPath(e.target.value)}
+                onChange={(e) => setPathDraft(e.target.value)}
               />
             </Field>
           </div>
           <p className="mt-1.5 text-xs leading-relaxed text-wg-muted">{EXECUTION_PATH_HINT}</p>
 
-          <Field
-            className="mt-4"
-            label="補充說明"
-            hint="(可選，引導 AI 解析方向)"
-            error={errors.additionalPrompt || fieldErrors.additionalPrompt}
-          >
-            <Textarea
-              value={additional}
-              disabled={!canWrite}
-              placeholder="引導 AI 解析方向…"
-              onChange={(e) => setAdditional(e.target.value)}
-            />
+          <Field className="mt-4" label="補充說明" hint="(可選，引導 AI 解析方向)" error={errors.additionalPrompt || fieldErrors.additionalPrompt}>
+            <Textarea value={additional} disabled={!canWrite} placeholder="引導 AI 解析方向…" onChange={(e) => setAdditionalDraft(e.target.value)} />
           </Field>
 
           {failure ? <ParseFailurePanel failure={failure} className="mt-5" /> : null}
 
           <div className="mt-5 flex justify-end">
-            <Button
-              size="lg"
-              className="min-h-11"
-              iconLeft={Sparkles}
-              loading={busy}
-              disabled={!canWrite}
-              title={writeHint}
-              onClick={start}
-            >
+            <Button size="lg" className="min-h-11" iconLeft={Sparkles} loading={busy} disabled={!canWrite} title={writeHint} onClick={start}>
               開始解析
             </Button>
           </div>

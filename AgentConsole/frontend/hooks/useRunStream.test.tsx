@@ -3,10 +3,12 @@ import { act, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { setUnauthorizedHandler } from "@/lib/api/client";
 import { qk } from "@/lib/api/queries";
 import type { ExecutionRunDetail } from "@/lib/api/types";
+import { loadSession, saveSession } from "@/lib/auth/store";
 import { FakeEventSource } from "@/tests/helpers/fakeEventSource";
-import { makeClient, signIn, stubApi } from "@/tests/helpers/api";
+import { failure, makeClient, signIn, stubApi } from "@/tests/helpers/api";
 import { FLUSH_MS, MAX_REVIVES, REFRESH_DEBOUNCE_MS, REVIVE_DELAY_MS, useRunStream, type UseRunStreamOptions } from "./useRunStream";
 
 const RUN_A = "e5a7c3b9-2f1d-4b6a-8c0e-1d2f3a4b5c31";
@@ -110,7 +112,20 @@ describe("useRunStream：連線與事件", () => {
     const metrics = FakeEventSource.lastOf("metrics")!;
     act(() => {
       metrics.open();
-      metrics.emit("progress-update", { seq: 20, ts: TS, runStatus: "RUNNING", bridgeStatus: "RUNNING", completedSteps: 2, totalSteps: 3, progressPct: 66.7, currentStep: { stepId: "G2-T1", stepNumber: 3, taskName: "實作", attempt: 1 } }, "20");
+      metrics.emit(
+        "progress-update",
+        {
+          seq: 20,
+          ts: TS,
+          runStatus: "RUNNING",
+          bridgeStatus: "RUNNING",
+          completedSteps: 2,
+          totalSteps: 3,
+          progressPct: 66.7,
+          currentStep: { stepId: "G2-T1", stepNumber: 3, taskName: "實作", attempt: 1 },
+        },
+        "20",
+      );
       metrics.emit("token-update", { seq: 20, ts: TS, tokensUsed: 2480, delta: 1240, contextPct: 1.2, tokenBudget: 100000, budgetUsageRate: 2.5 }, "20.1");
       metrics.emit("metric-update", { seq: 20, sub: 1, ts: TS, completedTasks: 2, failedTasks: 0, totalTasks: 3, retriedTasks: 0, averageRetryCount: 0, totalTokensUsed: 2480, elapsedSec: 9 }, "20.2");
     });
@@ -136,7 +151,11 @@ describe("useRunStream：連線與事件", () => {
     act(() => {
       logs.open();
       logs.emit("status-change", { seq: 41, ts: TS, runStatus: "PAUSED", bridgeStatus: "PAUSED", reason: "在步驟邊界暫停（已完成 1 步，續跑點：G1-T2）" }, "41");
-      logs.emit("review-request", { seq: 41, sub: 1, ts: TS, review: { id: "rv1", runId: RUN_A, kind: "TASK_CONFIRM", status: "PENDING", reason: "Level 1：請確認", requestedAt: TS, allowedDecisions: ["APPROVE", "REJECT"] } }, "41.1");
+      logs.emit(
+        "review-request",
+        { seq: 41, sub: 1, ts: TS, review: { id: "rv1", runId: RUN_A, kind: "TASK_CONFIRM", status: "PENDING", reason: "Level 1：請確認", requestedAt: TS, allowedDecisions: ["APPROVE", "REJECT"] } },
+        "41.1",
+      );
     });
     await advance(FLUSH_MS + 1);
     const patched = client.getQueryData<ExecutionRunDetail>(qk.execution(RUN_A))!;
@@ -158,6 +177,93 @@ describe("useRunStream：連線與事件", () => {
     act(() => metrics.emit("progress-update", { seq: 3, ts: TS, runStatus: "RUNNING", bridgeStatus: "RUNNING", completedSteps: 1, totalSteps: 3, progressPct: 33.3 }, "3.1"));
     await advance(FLUSH_MS + 1);
     expect(client.getQueryData(qk.execution(RUN_A))).toBeUndefined();
+  });
+});
+
+/**
+ * DEF-AC-007（P2）整條時序（QA 全棧實測：重啟 backend 約 10 秒後被導到 /login，恢復後仍停在 /login）：
+ * 經 nginx 時 backend 不可用會立即回 502 → 串流被瀏覽器放棄 → 強制換 token 的 POST /auth/refresh 也是 502。
+ * 契約 §2.8 第 7～8 點：換新 unavailable 不登出；現有 token 未過期就沿用、已過期則退避重試，狀態點維持「重新連線中」。
+ */
+describe("useRunStream：後端暫時不可用（DEF-AC-007；契約 §2.8 第 7～8 點）", () => {
+  it("refresh 502：session 不被清除、不導向登入；token 還沒過期就沿用重連，過期後退避重試、狀態維持「重新連線中」；backend 恢復後換新並連回", async () => {
+    // 40 秒後到期：高於換新餘裕（30 秒），第一次連線不會觸發換新；下面讓時間走過去，模擬「後端掛著的這段期間 token 到期」
+    saveSession({ accessToken: "tok-old", refreshToken: "ref-old", expiresAt: Date.now() + 40_000, role: "OPERATOR", username: "operator" });
+    const onUnauthorized = vi.fn();
+    setUnauthorizedHandler(onUnauthorized);
+    try {
+      let backendUp = false;
+      const { calls } = stubApi((c) => {
+        if (!backendUp) return failure(502, { message: "Bad Gateway" }); // nginx 在上游不可用時立即回 502（REST、換新一律）
+        if (c.path === "/api/v1/auth/refresh") return { data: { accessToken: "tok-new", refreshToken: "ref-new", expiresIn: 1800, role: "OPERATOR" } };
+        if (c.path === `/api/v1/executions/${RUN_A}`) return { data: detail(RUN_A) };
+        return undefined;
+      });
+      const { result } = mount(RUN_A);
+      await flushMicro();
+      act(() => {
+        FakeEventSource.lastOf("logs")!.open();
+        FakeEventSource.lastOf("metrics")!.open();
+      });
+      expect(result.current.connection).toBe("open");
+      const opened = FakeEventSource.instances.length;
+
+      // ① /logs 被 502 擋下，瀏覽器放棄 → 問 REST（502）→ 退避 1 秒 → 強制換新（502：unavailable）→ token 還沒過期 → 沿用並重建
+      act(() => FakeEventSource.lastOf("logs")!.dropClosed());
+      await flushMicro();
+      await advance(1_000);
+      expect(FakeEventSource.instances).toHaveLength(opened + 1);
+      expect(FakeEventSource.lastOf("logs")!.url).toContain("access_token=tok-old");
+      expect(calls.filter((c) => c.method === "POST" && c.path === "/api/v1/auth/refresh")).toHaveLength(1);
+      expect(result.current.connection).toBe("reconnecting");
+      expect(loadSession()?.refreshToken).toBe("ref-old"); // 缺陷版本：refresh 502 即清 session
+
+      // ② 重建的連線同樣被 502 擋下，而 token 此時已過期 → 換新 502 又沒有可沿用的 token → 回 null；不登出、不放棄，繼續退避
+      await advance(40_000);
+      act(() => FakeEventSource.lastOf("logs")!.dropClosed());
+      await flushMicro();
+      await advance(20_000);
+      expect(FakeEventSource.instances).toHaveLength(opened + 1); // 沒有新連線（拿不到可用 token）
+      expect(result.current.connection).toBe("reconnecting");
+      expect(result.current.logsState).toBe("reconnecting");
+      expect(onUnauthorized).not.toHaveBeenCalled();
+      expect(loadSession()).toMatchObject({ accessToken: "tok-old", refreshToken: "ref-old" });
+
+      // ③ backend 恢復：下一次退避後換新成功（新 token）、連回、狀態點回到「已連線」
+      backendUp = true;
+      await advance(40_000);
+      expect(FakeEventSource.instances).toHaveLength(opened + 2);
+      expect(FakeEventSource.lastOf("logs")!.url).toContain("access_token=tok-new");
+      act(() => FakeEventSource.lastOf("logs")!.open());
+      expect(result.current.connection).toBe("open");
+      expect(loadSession()).toMatchObject({ accessToken: "tok-new", refreshToken: "ref-new" });
+      expect(onUnauthorized).not.toHaveBeenCalled();
+    } finally {
+      setUnauthorizedHandler(null);
+    }
+  });
+
+  it("refresh token 真的失效（換新 401）才登出：清 session、呼叫登入失效處理器，串流不再重連", async () => {
+    saveSession({ accessToken: "tok-old", refreshToken: "ref-old", expiresAt: Date.now() + 60_000, role: "OPERATOR", username: "operator" });
+    const onUnauthorized = vi.fn();
+    setUnauthorizedHandler(onUnauthorized);
+    try {
+      stubApi((c) => {
+        if (c.path === "/api/v1/auth/refresh") return failure(401, { message: "refresh token 無效", reason: "INVALID_REFRESH_TOKEN" });
+        if (c.path === `/api/v1/executions/${RUN_A}`) return failure(401, { message: "未認證", reason: "TOKEN_EXPIRED" });
+        return undefined;
+      });
+      mount(RUN_A);
+      await flushMicro();
+      act(() => FakeEventSource.lastOf("logs")!.open());
+      act(() => FakeEventSource.lastOf("logs")!.dropClosed());
+      await flushMicro();
+      await advance(30_000);
+      expect(onUnauthorized).toHaveBeenCalled();
+      expect(loadSession()).toBeNull();
+    } finally {
+      setUnauthorizedHandler(null);
+    }
   });
 });
 
@@ -294,7 +400,20 @@ describe("useRunStream：斷線回補（連續失敗兩次以上才走 REST）",
         return {
           data: {
             content: [
-              { id: "s1", runId: RUN_A, taskId: TASK, taskName: "初始化", goalId: "g1", stepNumber: 8, stepId: "G1-T1", attempt: 1, action: "G1-T1: 初始化", status: "COMPLETED", tokensUsed: 1240, timestamp: TS },
+              {
+                id: "s1",
+                runId: RUN_A,
+                taskId: TASK,
+                taskName: "初始化",
+                goalId: "g1",
+                stepNumber: 8,
+                stepId: "G1-T1",
+                attempt: 1,
+                action: "G1-T1: 初始化",
+                status: "COMPLETED",
+                tokensUsed: 1240,
+                timestamp: TS,
+              },
             ],
             page: 0,
             size: 200,
@@ -325,10 +444,7 @@ describe("useRunStream：斷線回補（連續失敗兩次以上才走 REST）",
     expect(stepCalls[0].query.get("size")).toBe("200");
 
     await advance(FLUSH_MS + 1);
-    expect(result.current.live.lines.map((l) => l.message)).toEqual([
-      "開始：初始化（G1-T1，第 1 次）",
-      "完成：初始化（G1-T1） Token: 1240",
-    ]);
+    expect(result.current.live.lines.map((l) => l.message)).toEqual(["開始：初始化（G1-T1，第 1 次）", "完成：初始化（G1-T1） Token: 1240"]);
     expect(result.current.live.taskStatus[TASK]).toEqual({ status: "COMPLETED", seq: 8 });
 
     await advance(2000); // 第二次失敗的退避＝2 秒
@@ -337,9 +453,7 @@ describe("useRunStream：斷線回補（連續失敗兩次以上才走 REST）",
   });
 
   it("連線被瀏覽器放棄（401／404／204）：先 GET 批次狀態（寫回快取）；run 已終態就收工、不重建", async () => {
-    const { calls } = stubApi((c) =>
-      c.path === `/api/v1/executions/${RUN_A}` ? { data: detail(RUN_A, { status: "COMPLETED", bridgeStatus: "COMPLETED" }) } : undefined,
-    );
+    const { calls } = stubApi((c) => (c.path === `/api/v1/executions/${RUN_A}` ? { data: detail(RUN_A, { status: "COMPLETED", bridgeStatus: "COMPLETED" }) } : undefined));
     const { result } = mount(RUN_A);
     await flushMicro();
     act(() => FakeEventSource.lastOf("logs")!.dropClosed());

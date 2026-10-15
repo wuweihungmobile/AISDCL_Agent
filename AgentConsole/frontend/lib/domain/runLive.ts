@@ -8,15 +8,7 @@
  *     版本戳＝lastEventSeq：事件 seq 小於快取內已知的最後 seq（例如 /metrics 與 /logs 兩條串流交錯、或 REST 剛重抓過）
  *     就不覆寫狀態類欄位，避免「舊事件把新狀態蓋回去」。
  */
-import type {
-  AlertEventData,
-  ExecutionRunDetail,
-  ExecutionStep,
-  ExecutionStepStatus,
-  LogEventData,
-  LogLevel,
-  StatusChangeEventData,
-} from "@/lib/api/types";
+import type { AlertEventData, ExecutionRunDetail, ExecutionStep, ExecutionStepStatus, LogEventData, LogLevel, StatusChangeEventData } from "@/lib/api/types";
 import type { RunStreamEvent } from "@/lib/api/sse";
 import { alertSeverity, runStatusMeta } from "@/lib/domain/status";
 

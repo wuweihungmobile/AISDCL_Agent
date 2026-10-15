@@ -77,22 +77,13 @@ export function ProjectDetailView() {
         <span>建立者 {p.createdBy ?? "—"}</span>
       </div>
 
-      {!p.signedOff ? (
-        <SignoffBanner
-          kind="project"
-          canApprove={canWrite}
-          onApprove={() => setSignoff({ kind: "project", id: p.id, name: p.name })}
-        />
-      ) : null}
+      {!p.signedOff ? <SignoffBanner kind="project" canApprove={canWrite} onApprove={() => setSignoff({ kind: "project", id: p.id, name: p.name })} /> : null}
 
       <div className="mb-6 grid grid-cols-2 gap-6 max-lg:grid-cols-1">
         <Card className="min-w-0 px-[22px] py-5">
           <CardTitle className="mb-3.5">基本資訊</CardTitle>
           <div className="mb-1 text-[13px] text-wg-muted">執行路徑</div>
-          <div
-            data-testid="project-path"
-            className="mb-4 rounded-md border border-wg-line bg-wg-base px-3 py-2 font-mono text-sm break-all"
-          >
+          <div data-testid="project-path" className="mb-4 rounded-md border border-wg-line bg-wg-base px-3 py-2 font-mono text-sm break-all">
             {p.executionPath}
           </div>
           <div className="mb-2 text-[13px] text-wg-muted">通過標準</div>
@@ -104,12 +95,7 @@ export function ProjectDetailView() {
         </Card>
       </div>
 
-      <GoalListCard
-        projectId={p.id}
-        goals={p.goals}
-        canWrite={canWrite}
-        onAdd={() => setEntity({ kind: "goal", mode: "create", projectId: p.id })}
-      />
+      <GoalListCard projectId={p.id} goals={p.goals} canWrite={canWrite} onAdd={() => setEntity({ kind: "goal", mode: "create", projectId: p.id })} />
 
       <div className="flex flex-wrap gap-2.5">
         <Button asChild iconLeft={Play}>
@@ -118,23 +104,10 @@ export function ProjectDetailView() {
         <Button asChild variant="ghost" iconLeft={Activity}>
           <Link href={`/projects/${p.id}/monitor`}>查看監控</Link>
         </Button>
-        <Button
-          variant="ghost"
-          iconLeft={Pencil}
-          disabled={!canWrite}
-          title={writeHint}
-          onClick={() => setEntity({ kind: "project", mode: "edit", id: p.id })}
-        >
+        <Button variant="ghost" iconLeft={Pencil} disabled={!canWrite} title={writeHint} onClick={() => setEntity({ kind: "project", mode: "edit", id: p.id })}>
           編輯專案
         </Button>
-        <Button
-          variant="ghost"
-          iconLeft={Trash2}
-          disabled={!canWrite}
-          title={writeHint}
-          className="text-wg-accent hover:text-wg-accent-strong"
-          onClick={() => setConfirmDelete(true)}
-        >
+        <Button variant="ghost" iconLeft={Trash2} disabled={!canWrite} title={writeHint} className="text-wg-accent hover:text-wg-accent-strong" onClick={() => setConfirmDelete(true)}>
           刪除專案
         </Button>
       </div>

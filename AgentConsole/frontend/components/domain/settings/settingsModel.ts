@@ -19,8 +19,7 @@ export const TOKEN_GUARD = {
 /** `category.key` */
 export const configId = (c: { category: string; key: string }): string => `${c.category}.${c.key}`;
 
-export const isTokenGuardKey = (c: { category: string; key: string }): boolean =>
-  c.category === TOKEN_GUARD.category && (c.key === TOKEN_GUARD.compact || c.key === TOKEN_GUARD.halt);
+export const isTokenGuardKey = (c: { category: string; key: string }): boolean => c.category === TOKEN_GUARD.category && (c.key === TOKEN_GUARD.compact || c.key === TOKEN_GUARD.halt);
 
 /** 使用者編輯中的值（只存「改過的鍵」；沒改的鍵一律讀伺服器值，所以伺服器資料更新時畫面自動跟上）。 */
 export type DraftMap = Record<string, string>;
@@ -65,9 +64,7 @@ export function validateValue(c: Config, value: string): string | null {
     case "BOOLEAN":
       return value === "true" || value === "false" ? null : "需為 true 或 false";
     case "ENUM":
-      return c.options && c.options.length > 0 && !c.options.includes(value)
-        ? `需為下列之一：${c.options.join("、")}`
-        : null;
+      return c.options && c.options.length > 0 && !c.options.includes(value) ? `需為下列之一：${c.options.join("、")}` : null;
     case "INTEGER":
     case "LONG": {
       if (!INT_RE.test(value)) return rangeText(c, "整數");
@@ -120,9 +117,7 @@ export type Change = { config: Config; id: string; value: string };
 
 /** 所有「改過且與基準不同」的參數，依傳入順序（分類順序＋附錄 C 順序）。 */
 export function pendingChanges(configs: readonly Config[], drafts: DraftMap, revealed: RevealedMap): Change[] {
-  return configs
-    .filter((c) => isDirty(c, drafts, revealed))
-    .map((c) => ({ config: c, id: configId(c), value: drafts[configId(c)] }));
+  return configs.filter((c) => isDirty(c, drafts, revealed)).map((c) => ({ config: c, id: configId(c), value: drafts[configId(c)] }));
 }
 
 export type SaveOp =

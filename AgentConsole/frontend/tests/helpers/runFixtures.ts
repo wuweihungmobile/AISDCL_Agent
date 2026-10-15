@@ -2,16 +2,7 @@
  * 執行頁與監控頁的測試夾具（vitest 用）：契約 §1.2、§1.3 的 ProjectDetail／ExecutionRunDetail／Dag／Checkpoint／審核項／告警／指標。
  * 形狀取自 schema-p3-6.d.ts；id 用短字串（測試只比對相等，不驗 UUID 格式）。
  */
-import type {
-  Alert,
-  Checkpoint,
-  Dag,
-  ExecutionRunDetail,
-  ExecutionRunSummary,
-  ProjectDetail,
-  ProjectMetrics,
-  ReviewItem,
-} from "@/lib/api/types";
+import type { Alert, Checkpoint, Dag, ExecutionRunDetail, ExecutionRunSummary, ProjectDetail, ProjectMetrics, ReviewItem } from "@/lib/api/types";
 
 export const TS = "2026-10-15T08:30:12Z";
 
@@ -42,11 +33,14 @@ export function taskSummary(id: string, goalId: string, name: string, patch: Rec
 }
 
 export function runSummary(patch: Partial<ExecutionRunSummary> = {}): ExecutionRunSummary {
+  const status = patch.status ?? "RUNNING";
   return {
     id: "r1",
     projectId: "p1",
     runNumber: 1,
-    status: "RUNNING",
+    status,
+    // 批次列表項的 bridgeStatus（契約 §1.2.2，C-11）：預設與 status 同名值；過渡態（PAUSING／CANCELLING）由測試覆寫
+    bridgeStatus: status,
     autonomyLevel: 4,
     scopeMode: "ALL",
     totalTokensUsed: 1240,

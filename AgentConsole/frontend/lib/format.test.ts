@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatBytes, formatClock, formatDate, formatDateTime, formatElapsed, formatNumber, percent, retryLabel } from "./format";
+import { formatBytes, formatClock, formatDate, formatDateTime, formatElapsed, formatNumber, manualRetryLabel, percent, retryLabel } from "./format";
 
 describe("format", () => {
   // 用本機時區建構時間，避免測試依賴執行機器的時區
@@ -41,5 +41,10 @@ describe("format", () => {
     expect(percent(3, 8)).toBe(38);
     expect(percent(0, 0)).toBe(0);
     expect(retryLabel(1, 3)).toBe("1 / 3");
+  });
+
+  it("手動重試文案（C-9）：第 N 次、明說不計入自動重試上限 M——手動重試可超過上限，不寫成「3 / 1」", () => {
+    expect(manualRetryLabel(1, 3)).toBe("手動重試第 1 次（不計入自動重試上限 3）");
+    expect(manualRetryLabel(3, 1)).toBe("手動重試第 3 次（不計入自動重試上限 1）");
   });
 });

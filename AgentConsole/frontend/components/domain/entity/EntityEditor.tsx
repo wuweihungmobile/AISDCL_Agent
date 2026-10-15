@@ -8,17 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { DialogBody } from "@/components/ui/dialog";
 import { ErrorState } from "@/components/ui/states";
 import { useToast } from "@/components/ui/toast";
-import {
-  useCreateGoal,
-  useCreateProject,
-  useCreateTask,
-  useGoal,
-  useProject,
-  useTask,
-  useUpdateGoal,
-  useUpdateProject,
-  useUpdateTask,
-} from "@/lib/api/queries";
+import { useCreateGoal, useCreateProject, useCreateTask, useGoal, useProject, useTask, useUpdateGoal, useUpdateProject, useUpdateTask } from "@/lib/api/queries";
 import { GoalForm, ProjectForm, TaskForm } from "./EntityForms";
 import {
   GOAL_DEFAULTS,
@@ -111,17 +101,7 @@ function ProjectEditor({ target, variant, onDone, onCancel }: EditorProps & { ta
     }
   }
 
-  return (
-    <ProjectForm
-      key={d?.id ?? "new"}
-      mode={target.mode}
-      variant={variant}
-      defaultValues={defaults}
-      lockedToNameAndDescription={locked}
-      onSubmit={onSubmit}
-      onCancel={onCancel}
-    />
-  );
+  return <ProjectForm key={d?.id ?? "new"} mode={target.mode} variant={variant} defaultValues={defaults} lockedToNameAndDescription={locked} onSubmit={onSubmit} onCancel={onCancel} />;
 }
 
 function GoalEditor({ target, variant, onDone, onCancel }: EditorProps & { target: Extract<EntityTarget, { kind: "goal" }> }) {
@@ -136,9 +116,7 @@ function GoalEditor({ target, variant, onDone, onCancel }: EditorProps & { targe
     if (!detail.data) return <FormSkeleton variant={variant} />;
   }
   const d = detail.data;
-  const defaults: GoalFormValues = d
-    ? { name: d.name, description: d.description ?? "", passCriteria: d.passCriteria, dependsOn: d.dependsOn }
-    : GOAL_DEFAULTS;
+  const defaults: GoalFormValues = d ? { name: d.name, description: d.description ?? "", passCriteria: d.passCriteria, dependsOn: d.dependsOn } : GOAL_DEFAULTS;
 
   async function onSubmit(values: GoalFormValues) {
     if (target.mode === "create") {
@@ -201,16 +179,7 @@ function TaskEditor({ target, variant, onDone, onCancel }: EditorProps & { targe
     }
   }
 
-  return (
-    <TaskForm
-      key={d?.id ?? "new"}
-      mode={target.mode}
-      variant={variant}
-      defaultValues={defaults}
-      onSubmit={onSubmit}
-      onCancel={onCancel}
-    />
-  );
+  return <TaskForm key={d?.id ?? "new"} mode={target.mode} variant={variant} defaultValues={defaults} onSubmit={onSubmit} onCancel={onCancel} />;
 }
 
 export function EntityEditor({ target, ...rest }: EditorProps & { target: EntityTarget }) {

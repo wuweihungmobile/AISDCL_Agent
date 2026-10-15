@@ -2,8 +2,38 @@
    styles/tokens.console.css — Console 延伸 token
    設計稿 README〈Design Tokens〉表列出、但 _ds 的 tokens 目錄未定義的固定色票；
    元件一律引用這些變數，不在元件內寫死色碼（styles/tokens.css 保持逐字，不在此檔改動）。
+   本檔另有一節「無障礙覆寫」：偏離設計稿色票的地方只有那一節，原因與數字都寫在裡面。
    ════════════════════════════════════════════════════════════════════════ */
 :root {
+  /* ── 無障礙覆寫（W5 C-18，DEF-AC-004；與 tokens.css 同層、載入在後，所以同名變數以本檔為準）──
+     WCAG 2.1 AA 一般文字要 4.5:1。設計稿的三個語意色拿來當「文字」時，在白底／頁面底／草案底上都不夠，
+     只改下列變數（其餘色票與設計稿相同）；每個值都以 axe 在真瀏覽器實測、並由 styles/tokens.test.ts 鎖住。
+
+     次要文字 --color-text-muted　#7A8775 → #5F6B5A
+       原值：白 3.78／bg-base 3.51／tertiary 3.18。QA 建議的 #6B7766 在白底 4.71，但 bg-base 只有 4.37、tertiary 3.96，仍不過；
+       #5F6B5A：白 5.62／bg-base 5.21／tertiary 4.72／草案底 4.97／告警底 5.27／skeleton 5.11／disabled 4.67。
+     強調色 --color-accent　#E55B3C → #B93F22（警示文字、未審批標籤、草案橫幅、徽章底）
+       原值：白 3.56／草案底 3.15／bg-base 3.30，白字在它上面也只有 3.56；
+       #B93F22：白 5.53／bg-base 5.13／草案底 4.89／tertiary 4.65／告警底 5.19，白字 5.53。
+     強調色加深 --color-accent-strong　#C9492B → #9A3219（hover 要比 accent 更深，否則 hover 反而變亮）
+     錯誤色 --color-error　#D35B58 → #B8433F（錯誤文字、失敗狀態）
+       原值：白 3.88／bg-base 3.60；#B8433F：白 5.37／bg-base 4.98／草案底 4.75／tertiary 4.51／告警底 5.04。
+     --color-primary 不動：圖表線色與焦點環的 E2E 斷言（rgb 73,132,40）釘著它；主色拿來當文字時在白底是 4.55（過）、
+     在 bg-base 是 4.22（不過）——所以放在 bg-base 上的文字改用 --color-primary-strong（6.02），不是改主色。 */
+  --color-text-muted: #5F6B5A;
+  --color-accent: #B93F22;
+  --color-accent-strong: #9A3219;
+  --color-error: #B8433F;
+
+  /* 淺色底上的警示「文字」：--color-warning（#F5A623）在淺底只有 1.87～2.03，只適合圖示與深底上的字。#8A5A00：bg-base 5.49／白 5.93／告警底 5.56 */
+  --color-warning-text: #8A5A00;
+  /* 淺色底上的 secondary 色「文字」（程式碼語法高亮的變數、參數）：--color-secondary（#80B155）在 bg-base 只有 2.34。#477629：bg-base 5.00／白 5.40 */
+  --color-secondary-text: #477629;
+
+  /* 終端機（深底 #1c241a）上的強調與錯誤文字：上面兩個加深後的值在深底只剩 2.6，所以深底另用亮色（#F4856A 6.39、#EE8F8C 6.79） */
+  --color-terminal-accent: #F4856A;
+  --color-terminal-error: #EE8F8C;
+
   /* 終端機（執行日誌）深色面板 */
   --color-terminal-bg:   #1c241a;
   --color-terminal-text: #d7e4cd;

@@ -1,15 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  COMMAND_DENY,
-  goalSchema,
-  projectSchema,
-  taskSchema,
-  toCreateProject,
-  toCreateTask,
-  toUpdateProject,
-  toUpdateTask,
-} from "./schemas";
+import { COMMAND_DENY, goalSchema, projectSchema, taskSchema, toCreateProject, toCreateTask, toUpdateProject, toUpdateTask } from "./schemas";
 
 const project = { name: "P", executionPath: "/home/u/p", description: "", passCriteria: "- ok", autonomyLevel: 3 };
 const task = { name: "T", description: "", passCriteria: "- ok", maxRetries: 3, evaluatorCommand: "", expectedOutputRegex: "" };
@@ -21,9 +12,7 @@ function firstMessage(result: { success: boolean; error?: { issues: Array<{ mess
 describe("表單驗證（繁中訊息；後端仍是權威）", () => {
   it("名稱不能為空（trim 後）、通過標準不能為空", () => {
     expect(firstMessage(projectSchema.safeParse({ ...project, name: "   " }))).toBe("名稱不能為空");
-    expect(firstMessage(goalSchema.safeParse({ name: "G", description: "", passCriteria: " ", dependsOn: [] }))).toBe(
-      "通過標準不能為空",
-    );
+    expect(firstMessage(goalSchema.safeParse({ name: "G", description: "", passCriteria: " ", dependsOn: [] }))).toBe("通過標準不能為空");
   });
 
   it.each(["/home/user/p", "C:\\work\\p", "D:/work/p", "\\\\server\\share\\p"])("接受絕對路徑 %s", (p) => {
@@ -84,8 +73,6 @@ describe("請求轉換", () => {
 
   it("專案 EXECUTING 時只送名稱與說明（其他欄位後端會回 409）", () => {
     expect(toUpdateProject(project, true)).toEqual({ name: "P", description: "" });
-    expect(Object.keys(toUpdateProject(project, false)).sort()).toEqual(
-      ["autonomyLevel", "description", "executionPath", "name", "passCriteria"].sort(),
-    );
+    expect(Object.keys(toUpdateProject(project, false)).sort()).toEqual(["autonomyLevel", "description", "executionPath", "name", "passCriteria"].sort());
   });
 });

@@ -24,25 +24,13 @@ export function LogPanel({ log }: { log: string | null | undefined }) {
         </label>
         <div className="relative max-w-[320px] flex-1">
           <Search size={16} className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-wg-muted" aria-hidden />
-          <Input
-            id={searchId}
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="搜尋日誌…"
-            className="min-h-9 py-1.5 pl-9 text-sm"
-          />
+          <Input id={searchId} type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜尋日誌…" className="min-h-9 py-1.5 pl-9 text-sm" />
         </div>
         <span className="text-xs text-wg-muted" aria-live="polite">
           {q ? `${shown.length} / ${lines.length} 行` : `${lines.length} 行`}
         </span>
       </div>
-      <div
-        role="log"
-        aria-label="執行日誌"
-        tabIndex={0}
-        className="max-h-[260px] overflow-y-auto rounded-md bg-wg-terminal px-4 py-3.5 font-mono text-[13px] leading-[1.8] text-wg-terminal-text"
-      >
+      <div role="log" aria-label="執行日誌" tabIndex={0} className="max-h-[260px] overflow-y-auto rounded-md bg-wg-terminal px-4 py-3.5 font-mono text-[13px] leading-[1.8] text-wg-terminal-text">
         {lines.length === 0 ? (
           <div className="opacity-60">（尚無執行日誌；任務由執行引擎跑過之後，這裡會顯示最近一次的日誌）</div>
         ) : shown.length === 0 ? (

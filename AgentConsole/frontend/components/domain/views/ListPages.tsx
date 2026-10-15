@@ -28,12 +28,7 @@ export function GoalsListPage() {
       ) : !q.data ? (
         <PageSkeleton />
       ) : (
-        <GoalListCard
-          projectId={projectId}
-          goals={q.data.goals}
-          canWrite={canWrite}
-          onAdd={() => setEntity({ kind: "goal", mode: "create", projectId })}
-        />
+        <GoalListCard projectId={projectId} goals={q.data.goals} canWrite={canWrite} onAdd={() => setEntity({ kind: "goal", mode: "create", projectId })} />
       )}
       <EntityDialog target={entity} onClose={() => setEntity(null)} />
     </div>
@@ -56,13 +51,7 @@ export function TasksListPage() {
       ) : !q.data ? (
         <PageSkeleton />
       ) : (
-        <TaskListCard
-          projectId={projectId}
-          goalId={goalId}
-          tasks={q.data.tasks}
-          canWrite={canWrite}
-          onAdd={() => setEntity({ kind: "task", mode: "create", goalId, projectId })}
-        />
+        <TaskListCard projectId={projectId} goalId={goalId} tasks={q.data.tasks} canWrite={canWrite} onAdd={() => setEntity({ kind: "task", mode: "create", goalId, projectId })} />
       )}
       <EntityDialog target={entity} onClose={() => setEntity(null)} />
     </div>

@@ -12,12 +12,15 @@ import { formatClock } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { SseDot } from "./parts";
 
-/** 終端機配色（設計稿：深色面板 #1c241a、文字 #d7e4cd）；狀態變化用強調色插一行，告警與錯誤各用警示色。 */
+/**
+ * 終端機配色（設計稿：深色面板 #1c241a、文字 #d7e4cd）；狀態變化用強調色插一行，告警與錯誤各用警示色。
+ * 強調與錯誤用深底專用的亮色 token（terminal-accent／terminal-error）：淺底用的 accent／error 加深後在深底只剩 2.6:1（DEF-AC-004）。
+ * 引擎原始輸出的淡化只套在訊息本身（見下方 message 的 span）：時間戳記自己已經淡化一次，整行再淡化會疊成 0.36 倍、對比掉到 2.77:1。
+ */
 function lineClass(line: LogLine): string {
-  if (line.kind === "status") return "font-semibold text-wg-accent";
-  if (line.level === "ERROR" || line.level === "CRITICAL") return "text-wg-error";
+  if (line.kind === "status") return "font-semibold text-wg-terminal-accent";
+  if (line.level === "ERROR" || line.level === "CRITICAL") return "text-wg-terminal-error";
   if (line.level === "WARN") return "text-wg-warning";
-  if (line.kind === "engine") return "opacity-60";
   return "";
 }
 
@@ -26,15 +29,7 @@ function lineClass(line: LogLine): string {
  * 深色終端、高 240px、自動捲動開關、搜尋過濾、「SSE 串流」狀態點。
  * 預設只看步驟摘要、狀態變化、告警與審核（STEP／狀態／告警）；引擎原始 stdout 量大，另設「顯示引擎原始輸出」開關。
  */
-export function LiveLogCard({
-  live,
-  connection,
-  onReconnect,
-}: {
-  live: LiveState;
-  connection: StreamState;
-  onReconnect: () => void;
-}) {
+export function LiveLogCard({ live, connection, onReconnect }: { live: LiveState; connection: StreamState; onReconnect: () => void }) {
   const [query, setQuery] = useState("");
   const [autoScroll, setAutoScroll] = useState(true);
   const [showEngine, setShowEngine] = useState(false);
@@ -71,15 +66,7 @@ export function LiveLogCard({
               搜尋日誌
             </label>
             <Search size={16} className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-wg-muted" aria-hidden />
-            <Input
-              id={searchId}
-              type="search"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="搜尋日誌…"
-              className="min-h-9 py-1.5 pl-9 text-sm"
-              data-testid="log-search"
-            />
+            <Input id={searchId} type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜尋日誌…" className="min-h-9 py-1.5 pl-9 text-sm" data-testid="log-search" />
           </div>
           <span className="text-xs text-wg-muted" aria-live="polite" data-testid="log-count">
             {q ? `${shown.length} / ${all.length} 行` : `${all.length} 行`}
@@ -100,11 +87,15 @@ export function LiveLogCard({
         ) : shown.length === 0 ? (
           <div className="opacity-60">（沒有符合「{query.trim()}」的日誌行）</div>
         ) : (
-          shown.map((l) => (
-            <div key={l.key} data-testid="log-line" data-kind={l.kind} className={cn("break-words whitespace-pre-wrap", lineClass(l))}>
-              <span className="opacity-60">[{formatClock(l.ts)}]</span> {l.message}
-            </div>
-          ))
+          shown.map((l) => {
+            const tone = lineClass(l);
+            return (
+              <div key={l.key} data-testid="log-line" data-kind={l.kind} className={cn("break-words whitespace-pre-wrap", tone)}>
+                {/* 時間戳記固定用終端機文字色再淡化：它若繼承整行的強調／錯誤色再淡化，會掉到 3.15:1（DEF-AC-004） */}
+                <span className="text-wg-terminal-text opacity-60">[{formatClock(l.ts)}]</span> <span className={l.kind === "engine" && !tone ? "opacity-60" : undefined}>{l.message}</span>
+              </div>
+            );
+          })
         )}
       </div>
     </Card>

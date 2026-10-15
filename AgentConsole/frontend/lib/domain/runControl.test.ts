@@ -29,7 +29,10 @@ describe("執行控制按鈕狀態機（每個 run 狀態顯示哪些按鈕；�
 
   it("INITIALIZING（引擎啟動中）：暫停與取消都顯示但停用（後端會 409）", () => {
     const buttons = controlButtons({ ...base, run: run("INITIALIZING") });
-    expect(buttons.map((b) => [b.action, b.enabled])).toEqual([["pause", false], ["cancel", false]]);
+    expect(buttons.map((b) => [b.action, b.enabled])).toEqual([
+      ["pause", false],
+      ["cancel", false],
+    ]);
     expect(buttons.every((b) => b.hint)).toBe(true);
   });
 

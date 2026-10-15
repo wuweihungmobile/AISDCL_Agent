@@ -15,25 +15,9 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "r
 
 import { getExecution, listExecutionSteps } from "@/lib/api/endpoints";
 import { STEPS_MAX_PAGES, STEPS_PAGE_SIZE, invalidateRuns, qk } from "@/lib/api/queries";
-import {
-  RunChannel,
-  combineStreamStates,
-  defaultChannelDeps,
-  shouldReviveStream,
-  type EventSourceCtor,
-  type RunStreamEvent,
-  type StreamKind,
-  type StreamState,
-} from "@/lib/api/sse";
+import { RunChannel, combineStreamStates, defaultChannelDeps, shouldReviveStream, type EventSourceCtor, type RunStreamEvent, type StreamKind, type StreamState } from "@/lib/api/sse";
 import type { ExecutionRunDetail, RunStatus } from "@/lib/api/types";
-import {
-  initialLive,
-  liveReducer,
-  patchRunDetail,
-  refreshPlan,
-  stepToLogData,
-  type LiveState,
-} from "@/lib/domain/runLive";
+import { initialLive, liveReducer, patchRunDetail, refreshPlan, stepToLogData, type LiveState } from "@/lib/domain/runLive";
 
 /** 事件佇列的批次間隔（毫秒）。 */
 export const FLUSH_MS = 80;
@@ -104,9 +88,7 @@ export function useRunStream(runId: string | null | undefined, options: UseRunSt
       if (!alive || queue.length === 0) return;
       const batch = queue.splice(0, queue.length);
       dispatch({ type: "events", runId: id, events: batch });
-      qc.setQueryData<ExecutionRunDetail>(qk.execution(id), (old) =>
-        old ? batch.reduce<ExecutionRunDetail>(patchRunDetail, old) : old,
-      );
+      qc.setQueryData<ExecutionRunDetail>(qk.execution(id), (old) => (old ? batch.reduce<ExecutionRunDetail>(patchRunDetail, old) : old));
       const plan = refreshPlan(batch);
       if (plan.detail || plan.dag || plan.notifications || plan.runs) {
         pendingPlan = {

@@ -53,14 +53,7 @@ export function ScopeTree({
   return (
     <div data-testid="scope-tree" role="group" aria-label="執行範圍" className="flex flex-col gap-1.5">
       <label className="flex cursor-pointer items-center gap-2.5 py-1 text-[15px] font-medium">
-        <Checkbox
-          className="size-5"
-          checked={toChecked(all)}
-          disabled={disabled}
-          onCheckedChange={() => onChange(toggleAll(selection, goals))}
-          data-testid="scope-all"
-          aria-label="全部目標"
-        />
+        <Checkbox className="size-5" checked={toChecked(all)} disabled={disabled} onCheckedChange={() => onChange(toggleAll(selection, goals))} data-testid="scope-all" aria-label="全部目標" />
         全部目標
       </label>
       {goals.map((g, i) => {

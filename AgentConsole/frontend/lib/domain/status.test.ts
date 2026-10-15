@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { resolveVar } from "@/tests/helpers/tokens";
+import { contrastRatio, resolveVar, tokenHex } from "@/tests/helpers/tokens";
 import {
   ALERT_RULE_LABEL,
   ALERT_SEVERITY,
@@ -17,6 +17,7 @@ import {
   STEP_STATUS,
   TASK_STATUS,
   alertSeverity,
+  alertSeverityTextColor,
   goalStatus,
   importStatus,
   isImportReopenable,
@@ -65,6 +66,17 @@ const README = {
   },
 } as const;
 
+/**
+ * 無障礙覆寫（W5 C-18；DEF-AC-004）：設計稿的三個語意色拿來當文字時對比不足 WCAG AA，
+ * styles/tokens.console.css 的「無障礙覆寫」一節把它們改深（原因與逐底色的數字在該檔；styles/tokens.test.ts 鎖對比）。
+ * 上面的抄錄表維持設計稿原值；比對時只有這三個色碼套用覆寫，其餘一律要與設計稿相同——偏離面因此只有這三格，不會悄悄變大。
+ */
+const A11Y_OVERRIDE: Record<string, string> = {
+  "#7A8775": "#5F6B5A", // --color-text-muted（草稿、暫停的狀態色）
+  "#E55B3C": "#B93F22", // --color-accent（待人工）
+  "#D35B58": "#B8433F", // --color-error（失敗）
+};
+
 describe("狀態 enum 對照表（lib/domain/status.ts 是唯一出處）", () => {
   it("專案 6／目標 5／任務 11 個狀態都有中文標籤", () => {
     expect(Object.keys(PROJECT_STATUS)).toHaveLength(6);
@@ -87,7 +99,7 @@ describe("狀態 enum 對照表（lib/domain/status.ts 是唯一出處）", () =
       expect(meta.label, `${kind}.${status} 標籤`).toBe(label);
       // 顏色必須是 token 引用（不寫死色碼），且 token 解析後等於設計稿色碼
       expect(meta.color, `${kind}.${status} 色碼應引用 token`).toMatch(/^var\(--color-[a-z-]+\)$/);
-      expect(resolveVar(meta.color), `${kind}.${status} 色碼`).toBe(hex);
+      expect(resolveVar(meta.color), `${kind}.${status} 色碼`).toBe(A11Y_OVERRIDE[hex] ?? hex);
     }
   });
 
@@ -177,6 +189,21 @@ describe("執行批次與審核項標籤（契約 §1.2、§3.6、附錄 A.1；R
     for (const [level, color] of Object.entries(LOG_LEVEL_COLOR)) {
       expect(resolveVar(color), `${level} 色碼`).toMatch(/^#[0-9A-F]{6}$/);
     }
+  });
+
+  it("拿來當「文字」的顏色（日誌等級、告警規則名稱）在它們的底色上 ≥ 4.5:1（WCAG AA；DEF-AC-004）——狀態點的顏色不能直接當文字用", () => {
+    // 日誌查詢列放在 bg-base 上；告警列放在 alert-bg 上
+    for (const [level, color] of Object.entries(LOG_LEVEL_COLOR)) {
+      expect(contrastRatio(resolveVar(color)!, tokenHex("color-bg-base")!), `日誌等級 ${level}`).toBeGreaterThanOrEqual(4.5);
+    }
+    for (const severity of ["INFO", "WARNING", "CRITICAL", "UNKNOWN"]) {
+      const color = alertSeverityTextColor(severity);
+      expect(color, `${severity} 應引用 token`).toMatch(/^var\(--color-[a-z-]+\)$/);
+      expect(contrastRatio(resolveVar(color)!, tokenHex("color-alert-bg")!), `告警 ${severity}`).toBeGreaterThanOrEqual(4.5);
+    }
+    // 反面：狀態點用的 WARNING／INFO 顏色當文字在告警底上確實不過，所以才需要另一組文字色
+    expect(contrastRatio(resolveVar(ALERT_SEVERITY.WARNING.color)!, tokenHex("color-alert-bg")!)).toBeLessThan(4.5);
+    expect(contrastRatio(resolveVar(ALERT_SEVERITY.INFO.color)!, tokenHex("color-alert-bg")!)).toBeLessThan(4.5);
   });
 });
 

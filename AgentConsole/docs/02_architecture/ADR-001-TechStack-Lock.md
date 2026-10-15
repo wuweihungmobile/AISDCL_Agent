@@ -212,6 +212,7 @@
 | `autoclaude.dalBackend` 預設值 | §5.5.1.5 | D13 |
 | US-I-05 驗收字樣「支援瀏覽按鈕」不提供（以路徑輸入＋allowlist 驗證取代） | §5.2.3 | G-15 |
 | KPI「專案完成率」「目標達成率」的「環形進度圖（Tremor DonutChart）」→ 設計稿畫面 8 的數值卡＋delta（W5 主控裁決 C-13，2026-10-15） | §5.4.2 | D11；G-20 |
+| 設計稿 water_green 色票用作**文字**時對比不足（text-muted 3.78:1、accent／error／warning／secondary 當文字 3.1～3.6:1，QA DEF-AC-004）→ `frontend/styles/tokens.console.css`〈無障礙覆寫〉加深文字色並新增 warning-text／secondary-text／terminal-* 四個文字專用色，達 WCAG 2.1 AA 4.5:1；設計稿原值仍在 `tokens.css` 逐字保留、主色 `#498428` 與區塊底色不動（W5 主控裁決 C-18，2026-10-16；axe 閘 `tests/e2e/a11y.ts` 釘住，設計若改色票須同時過閘） | §8.2、§8.4 | D11；DEF-AC-004 |
 
 ## 5. PRD 缺口與矛盾登記
 

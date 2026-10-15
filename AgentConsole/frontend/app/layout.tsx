@@ -29,10 +29,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html lang="zh-Hant-TW" className="h-full">
       <body className="h-full">
         <Providers>
-          <a
-            href="#main-content"
-            className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[100] focus:rounded-md focus:bg-wg-surface focus:px-3 focus:py-2"
-          >
+          <a href="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[100] focus:rounded-md focus:bg-wg-surface focus:px-3 focus:py-2">
             跳到主要內容
           </a>
           <div className="flex h-screen flex-col overflow-hidden bg-wg-base font-sans text-wg-text">

@@ -43,7 +43,13 @@ type World = {
 const page = <T,>(content: T[], size = 20, p = 0, total = content.length) => ({ content, page: p, size, totalElements: total, totalPages: Math.max(1, Math.ceil(total / size)) });
 
 function backend(over: Partial<World> = {}) {
-  const w: World = { runs: [runSummary({ id: "r2", runNumber: 2 }), runSummary({ id: "r1", runNumber: 1, status: "COMPLETED", tasksCompleted: 3, successRate: 100, totalTokensUsed: 3720, durationSec: 65 })], metrics: metrics(), alerts: [], detail: runDetail({ id: "r2", runNumber: 2 }), ...over };
+  const w: World = {
+    runs: [runSummary({ id: "r2", runNumber: 2 }), runSummary({ id: "r1", runNumber: 1, status: "COMPLETED", tasksCompleted: 3, successRate: 100, totalTokensUsed: 3720, durationSec: 65 })],
+    metrics: metrics(),
+    alerts: [],
+    detail: runDetail({ id: "r2", runNumber: 2 }),
+    ...over,
+  };
   const { calls } = stubApi((c) => {
     const custom = w.extra?.(c);
     if (custom) return custom;
@@ -58,13 +64,28 @@ function backend(over: Partial<World> = {}) {
       case "/api/v1/monitor/projects/p1/metrics":
         return { data: w.metrics };
       case "/api/v1/monitor/projects/p1/token-trend":
-        return { data: [{ bucketStart: "2026-10-15T08:00:00Z", tokens: 1240, cumulativeTokens: 1240, budget: 100000 }, { bucketStart: "2026-10-15T09:00:00Z", tokens: 2480, cumulativeTokens: 3720, budget: 100000 }] };
+        return {
+          data: [
+            { bucketStart: "2026-10-15T08:00:00Z", tokens: 1240, cumulativeTokens: 1240, budget: 100000 },
+            { bucketStart: "2026-10-15T09:00:00Z", tokens: 2480, cumulativeTokens: 3720, budget: 100000 },
+          ],
+        };
       case "/api/v1/monitor/projects/p1/task-trend":
         return { data: [{ bucketStart: "2026-10-15T08:00:00Z", started: 3, completed: 2, failed: 1, retried: 1 }] };
       case "/api/v1/monitor/projects/p1/alerts":
         return { data: w.alerts };
       case "/api/v1/monitor/projects/p1/logs":
-        return { data: page([{ id: "step:1", timestamp: "2026-10-15T08:30:13Z", level: "INFO", source: "STEP", message: "開始：初始化（G1-T1，第 1 次）" }, { id: "step:2", timestamp: "2026-10-15T08:30:20Z", level: "ERROR", source: "STEP", message: "失敗：實作（G2-T1，第 2 次）：評估未通過" }], 20, 0, 45) };
+        return {
+          data: page(
+            [
+              { id: "step:1", timestamp: "2026-10-15T08:30:13Z", level: "INFO", source: "STEP", message: "開始：初始化（G1-T1，第 1 次）" },
+              { id: "step:2", timestamp: "2026-10-15T08:30:20Z", level: "ERROR", source: "STEP", message: "失敗：實作（G2-T1，第 2 次）：評估未通過" },
+            ],
+            20,
+            0,
+            45,
+          ),
+        };
     }
     const steps = /^\/api\/v1\/executions\/([^/]+)\/steps$/.exec(c.path);
     if (steps) {
@@ -72,9 +93,33 @@ function backend(over: Partial<World> = {}) {
         data: page(
           [
             { id: "s1", runId: steps[1], taskId: "t1", taskName: "初始化", stepNumber: 5, stepId: "G1-T1", attempt: 1, action: "G1-T1: 初始化", status: "STARTED", timestamp: "2026-10-15T08:30:13Z" },
-            { id: "s2", runId: steps[1], taskId: "t1", taskName: "初始化", stepNumber: 7, stepId: "G1-T1", attempt: 1, action: "G1-T1: 初始化", status: "COMPLETED", tokensUsed: 1240, timestamp: "2026-10-15T08:30:15Z" },
+            {
+              id: "s2",
+              runId: steps[1],
+              taskId: "t1",
+              taskName: "初始化",
+              stepNumber: 7,
+              stepId: "G1-T1",
+              attempt: 1,
+              action: "G1-T1: 初始化",
+              status: "COMPLETED",
+              tokensUsed: 1240,
+              timestamp: "2026-10-15T08:30:15Z",
+            },
             { id: "s3", runId: steps[1], taskId: "t2", taskName: "設定", stepNumber: 9, stepId: "G1-T2", attempt: 2, action: "G1-T2: 設定", status: "RETRYING", timestamp: "2026-10-15T08:30:18Z" },
-            { id: "s4", runId: steps[1], taskId: "t2", taskName: "設定", stepNumber: 11, stepId: "G1-T2", attempt: 2, action: "G1-T2: 設定", status: "FAILED", errorMessage: "評估未通過", timestamp: "2026-10-15T08:30:20Z" },
+            {
+              id: "s4",
+              runId: steps[1],
+              taskId: "t2",
+              taskName: "設定",
+              stepNumber: 11,
+              stepId: "G1-T2",
+              attempt: 2,
+              action: "G1-T2: 設定",
+              status: "FAILED",
+              errorMessage: "評估未通過",
+              timestamp: "2026-10-15T08:30:20Z",
+            },
           ],
           200,
         ),
@@ -122,7 +167,9 @@ describe("監控頁：版面（設計稿畫面 8）", () => {
     backend();
     view();
     await screen.findByTestId("kpi-cards");
-    const ids = within(screen.getByTestId("monitor-sections")).getAllByRole("region").map((s) => s.getAttribute("data-section"));
+    const ids = within(screen.getByTestId("monitor-sections"))
+      .getAllByRole("region")
+      .map((s) => s.getAttribute("data-section"));
     expect(ids).toEqual(["kpi", "token", "distribution", "trends", "timeline", "logs", "alerts", "compare", "agent"]);
     expect(screen.getByTestId("export-csv")).toHaveTextContent("匯出報表");
     expect(screen.getByTestId("alert-settings-link")).toHaveAttribute("href", "/settings");
@@ -390,6 +437,42 @@ describe("監控頁：批次比較與 Agent 狀態（US-M-06、M-10）", () => {
     expect(within(screen.getByTestId("compare-table")).getAllByText("Run #2")).toHaveLength(2);
   });
 
+  it("批次列表項的 bridgeStatus（契約 §1.2.2，C-11）：RUNNING＋PAUSING／CANCELLING 在批次比較顯示「暫停中」「取消中」晶片，下拉與比較選單的狀態字樣一併換成過渡態", async () => {
+    backend({
+      runs: [
+        runSummary({ id: "r3", runNumber: 3, status: "RUNNING", bridgeStatus: "CANCELLING" }),
+        runSummary({ id: "r2", runNumber: 2, status: "RUNNING", bridgeStatus: "PAUSING" }),
+        runSummary({ id: "r1", runNumber: 1, status: "COMPLETED" }),
+      ],
+    });
+    view();
+    await screen.findByTestId("compare-table");
+    // 預設比較最新兩批：A＝Run #2（PAUSING）、B＝Run #3（CANCELLING）
+    const status = screen.getByTestId("compare-row-status");
+    expect(within(status.querySelector('[data-col="a"]') as HTMLElement).getByTestId("bridge-chip")).toHaveTextContent("暫停中");
+    expect(within(status.querySelector('[data-col="b"]') as HTMLElement).getByTestId("bridge-chip")).toHaveTextContent("取消中");
+    expect(within(status.querySelector('[data-col="b"]') as HTMLElement).getByTestId("bridge-chip")).toHaveAttribute("data-bridge", "CANCELLING");
+    const optionsA = [...(screen.getByTestId("compare-a") as HTMLSelectElement).options].map((o) => o.text);
+    expect(optionsA).toEqual(["Run #3 · 取消中", "Run #2 · 暫停中", "Run #1 · 已完成"]);
+
+    // 批次下拉：選項字樣是過渡態；選中過渡態的批次時，下拉旁附晶片（已完成的批次沒有）
+    const runSel = (await screen.findByTestId("run-select")) as HTMLSelectElement;
+    await waitFor(() => expect([...runSel.options].map((o) => o.text.split(" · ")[1])).toEqual([undefined, "取消中", "暫停中", "已完成"]));
+    await userEvent.selectOptions(runSel, "r2");
+    const chips = screen.getAllByTestId("bridge-chip").filter((c) => c.closest("label"));
+    expect(chips.map((c) => c.textContent)).toContain("暫停中");
+    await userEvent.selectOptions(runSel, "r1");
+    expect(screen.getByTestId("run-select").closest("label")!.querySelector('[data-testid="bridge-chip"]')).toBeNull();
+  });
+
+  it("批次比較：已完成／失敗的批次沒有晶片，只有狀態文字（過渡態只在 RUNNING 底下成立）", async () => {
+    backend({ runs: [runSummary({ id: "r2", runNumber: 2, status: "PAUSED", bridgeStatus: "PAUSING" }), runSummary({ id: "r1", runNumber: 1, status: "COMPLETED" })] });
+    view();
+    const status = await screen.findByTestId("compare-row-status");
+    expect(within(status).queryByTestId("bridge-chip")).toBeNull();
+    expect(status.querySelector('[data-col="b"]')).toHaveTextContent("已暫停");
+  });
+
   it("只有一個批次：提示至少需要兩個", async () => {
     backend({ runs: [runSummary({ id: "r1" })] });
     view();
@@ -430,7 +513,10 @@ describe("監控頁：匯出報表（US-M-07）", () => {
     const { world, calls } = backend();
     world.extra = (c) =>
       c.path === "/api/v1/monitor/projects/p1/report"
-        ? new Response("#report,AISDLC", { status: 200, headers: { "content-type": "text/csv; charset=UTF-8", "content-disposition": 'attachment; filename="monitor-report-0b8c5d1e-20261015-0840.csv"' } })
+        ? new Response("#report,AISDLC", {
+            status: 200,
+            headers: { "content-type": "text/csv; charset=UTF-8", "content-disposition": 'attachment; filename="monitor-report-0b8c5d1e-20261015-0840.csv"' },
+          })
         : undefined;
     view();
     await userEvent.selectOptions(await screen.findByTestId("range-select"), "7d");
@@ -457,18 +543,32 @@ describe("監控頁：匯出報表（US-M-07）", () => {
     expect(lastOf(calls, "/report")!.query.get("runId")).toBe("r1");
   });
 
-  it("PDF：後端 501 → 顯示「尚未提供」，不當成錯誤；其他失敗（403）才是錯誤 toast", async () => {
-    const { world } = backend();
-    world.extra = (c) => (c.path.endsWith("/report") ? failure(501, { message: "尚未提供", reason: "PDF 報表尚未提供（W5）" }) : undefined);
-    const first = view();
-    await userEvent.click(await screen.findByTestId("export-pdf"));
-    expect(await screen.findByText(/PDF 報表尚未提供/)).toBeInTheDocument();
-    first.unmount();
-
-    const second = backend();
-    second.world.extra = (c) => (c.path.endsWith("/report") ? failure(403, { message: "權限不足", reason: "ACCESS_DENIED" }) : undefined);
+  it("「匯出 PDF」（v1.2，C-4）：GET report?format=pdf（帶目前的時間範圍與批次、Accept: application/pdf），以 Content-Disposition 的 .pdf 檔名下載並 toast", async () => {
+    const clicked = stubDownload();
+    const { world, calls } = backend();
+    world.extra = (c) =>
+      c.path === "/api/v1/monitor/projects/p1/report"
+        ? new Response("%PDF-1.7", { status: 200, headers: { "content-type": "application/pdf", "content-disposition": 'attachment; filename="monitor-report-0b8c5d1e-20261015-0840.pdf"' } })
+        : undefined;
     view();
-    await userEvent.click(await screen.findByTestId("export-csv"));
+    const runSel = await screen.findByTestId("run-select");
+    await waitFor(() => expect((runSel as HTMLSelectElement).options).toHaveLength(3));
+    await userEvent.selectOptions(runSel, "r1");
+    await userEvent.click(screen.getByTestId("export-pdf"));
+    await waitFor(() => expect(clicked).toHaveLength(1));
+    expect(clicked[0].download).toBe("monitor-report-0b8c5d1e-20261015-0840.pdf");
+    const req = lastOf(calls, "/report")!;
+    expect(req.query.get("format")).toBe("pdf");
+    expect(req.query.get("runId")).toBe("r1");
+    expect(await screen.findByText("已匯出報表：monitor-report-0b8c5d1e-20261015-0840.pdf")).toBeInTheDocument();
+    expect(screen.queryByText(/尚未提供/)).toBeNull(); // 501 與「尚未提供」提示已退役
+  });
+
+  it("匯出失敗（403）：錯誤 toast 帶 reason 與 traceId（CSV 與 PDF 同一條路徑；沒有特殊的 501 分支）", async () => {
+    const { world } = backend();
+    world.extra = (c) => (c.path.endsWith("/report") ? failure(403, { message: "權限不足", reason: "ACCESS_DENIED" }) : undefined);
+    view();
+    await userEvent.click(await screen.findByTestId("export-pdf"));
     expect(await screen.findByText(/匯出失敗：權限不足：ACCESS_DENIED（traceId：tr-403）/)).toBeInTheDocument();
   });
 });
@@ -480,7 +580,9 @@ describe("監控頁：自訂儀表板（US-M-08；版面存 localStorage console
     backend();
     view();
     await screen.findByTestId("kpi-cards");
-    const ids = within(screen.getByTestId("monitor-sections")).getAllByRole("region").map((s) => s.getAttribute("data-section"));
+    const ids = within(screen.getByTestId("monitor-sections"))
+      .getAllByRole("region")
+      .map((s) => s.getAttribute("data-section"));
     expect(ids).toEqual(["agent", "alerts", "kpi", "token", "distribution", "trends", "timeline", "logs", "compare"]);
   });
 
@@ -497,7 +599,9 @@ describe("監控頁：自訂儀表板（US-M-08；版面存 localStorage console
     expect(screen.getAllByRole("button", { name: /^拖曳排序：/ })).toHaveLength(9);
 
     await userEvent.click(screen.getByTestId("layout-reset"));
-    const ids = within(screen.getByTestId("monitor-sections")).getAllByRole("region").map((s) => s.getAttribute("data-section"));
+    const ids = within(screen.getByTestId("monitor-sections"))
+      .getAllByRole("region")
+      .map((s) => s.getAttribute("data-section"));
     expect(ids[0]).toBe("kpi");
     expect(ids[1]).toBe("token");
     expect(window.localStorage.getItem(LAYOUT_STORAGE_KEY)).toBeNull();

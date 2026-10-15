@@ -11,22 +11,16 @@
  *    連續失敗兩次以上才改走 `GET /executions/{runId}/steps?afterSeq=` 回補，再重新連線。
  *  - EventSource 看不到 HTTP 狀態碼：401、404、204 都只是「連線被瀏覽器放棄（readyState=CLOSED）」。
  *    處理法＝先問一次 REST（順便讓 apiRequest 處理 401 換新）：run 已終態就收工，否則強制換新 token 後重建連線（§2.1、§2.4）。
+ *  - 後端暫時不可用（v1.2，C-5，QA DEF-AC-007；§2.8 第 7～8 點）：換新失敗分 renewed／invalid／unavailable 三類，只有 invalid 才登出
+ *    （client.ts）。getToken 在 unavailable 時沿用尚未過期的現有 token、否則回 null——**null 不是失敗**：不登出、不放棄，
+ *    與連線失敗一樣以 1→2→4→…→30 秒退避重建，狀態點維持「重新連線中」（直到連上，或連續失敗超過 DEFAULT_MAX_FAILURES 才 failed）。
  *  - 終態（COMPLETED／FAILED／CANCELLED）：伺服器先送該 status 再送衍生事件（例如 ESCALATED 的審核項）才關連線（§2.4），
  *    所以看到終態不能立刻關，要等伺服器關（或一小段閒置）才收工；收工後不再重連。
  *  - PAUSED／PAUSING／CANCELLING 不結束串流；restore 會讓終態 run 重新變 RUNNING，須由呼叫端 reconnect()（§2.4、§2.8 第 5 點）。
  *  - 離頁 close()：之後不再有任何事件、狀態或重連。
  */
 import { apiBase, getFreshAccessToken } from "./client";
-import type {
-  AlertEventData,
-  LogEventData,
-  MetricUpdateEventData,
-  ProgressUpdateEventData,
-  ReviewRequestEventData,
-  RunStatus,
-  StatusChangeEventData,
-  TokenUpdateEventData,
-} from "./types";
+import type { AlertEventData, LogEventData, MetricUpdateEventData, ProgressUpdateEventData, ReviewRequestEventData, RunStatus, StatusChangeEventData, TokenUpdateEventData } from "./types";
 import { isRunTerminal } from "@/lib/domain/status";
 
 export type StreamKind = "logs" | "metrics";
@@ -116,7 +110,10 @@ export type EventSourceCtor = new (url: string) => EventSourceLike;
 
 export type ChannelDeps = {
   EventSourceCtor: EventSourceCtor;
-  /** 取得可放進網址的 access token（快到期或 force 時先換新）；沒有登入狀態或換新失敗回 null。 */
+  /**
+   * 取得可放進網址的 access token（快到期或 force 時先換新）。回 null＝眼前拿不到可用的 token：
+   * 換新時後端暫時不可用且現有 token 已過期（不登出，稍後重試），或登入已失效（getToken 已負責登出／導向登入，頁面隨即卸載）。
+   */
   getToken: (opts?: { force?: boolean }) => Promise<string | null>;
   /** 連線被瀏覽器放棄時問一次 REST（順便讓 apiRequest 處理 401 換新）：run 現在的狀態；問不到回 null。 */
   fetchRunStatus: () => Promise<RunStatus | null>;
@@ -135,19 +132,29 @@ export type ChannelOptions = {
   base?: string;
   /** 重建連線時的 tail（預設 1000；契約上限 5000）。 */
   rebuildTail?: number;
-  /** 連續失敗幾次後放棄（預設 6）。 */
+  /** 連續失敗幾次後放棄（預設 DEFAULT_MAX_FAILURES）。 */
   maxFailures?: number;
   /** 終態後等伺服器關連線的最長閒置（預設 4 秒）；逾時就自己收工。 */
   terminalGraceMs?: number;
-  /** 重建前的等待（預設指數退避 1→15 秒）；測試可覆寫。 */
+  /** 重建前的等待（預設指數退避 1→30 秒，契約 §2.8 第 8 點）；測試可覆寫。 */
   backoffMs?: (failures: number) => number;
 };
 
 /** 連續失敗幾次之後，不再等瀏覽器自己重連、改走 REST 回補再重建（契約 §2.8 第 4 點：「兩次以上」）。 */
 export const BACKFILL_AFTER_FAILURES = 2;
 
+/** 退避的上限（毫秒）：契約 §2.8 第 8 點「1→2→4→…→30 秒（上限 30 秒）」。 */
+export const MAX_BACKOFF_MS = 30_000;
+
+/**
+ * 連續失敗幾次後才放棄（進入 failed、由使用者按「重新連線」）。後端重啟經 nginx 約 15～40 秒、較長的維護也只是數分鐘，
+ * 這段期間狀態必須維持「重新連線中」而不是「連線失敗」（DEF-AC-007）；30 秒上限的退避下 60 次約 28 分鐘，
+ * 之後才停手，避免頁面開著卻對永遠回不來的後端（例如批次已被清除）無止境地重試。
+ */
+export const DEFAULT_MAX_FAILURES = 60;
+
 export function defaultBackoffMs(failures: number): number {
-  return Math.min(1000 * 2 ** Math.max(0, failures - 1), 15_000);
+  return Math.min(1000 * 2 ** Math.max(0, failures - 1), MAX_BACKOFF_MS);
 }
 
 /**
@@ -236,7 +243,14 @@ export class RunChannel {
     const token = await this.deps.getToken({ force: this.forceRefresh });
     if (gen !== this.generation) return;
     if (!token) {
-      this.setState("failed");
+      // 眼前拿不到可用 token（換新時後端暫時不可用且現有 token 已過期；契約 §2.8 第 8 點）：不登出、不放棄——
+      // 與連線失敗同一條路：計一次失敗、退避後重試，狀態點維持「重新連線中」（DEF-AC-007）
+      this.failures += 1;
+      if (this.failures > (this.options.maxFailures ?? DEFAULT_MAX_FAILURES)) {
+        this.setState("failed");
+        return;
+      }
+      this.scheduleRebuild(gen, rebuilt);
       return;
     }
     const url = buildStreamUrl({
@@ -334,7 +348,7 @@ export class RunChannel {
 
   /** 連續失敗兩次以上：REST 回補，再（退避後）重建連線。 */
   private async fallback(gen: number): Promise<void> {
-    if (this.failures > (this.options.maxFailures ?? 6)) {
+    if (this.failures > (this.options.maxFailures ?? DEFAULT_MAX_FAILURES)) {
       this.setState("failed");
       return;
     }
@@ -361,7 +375,7 @@ export class RunChannel {
       this.finish();
       return;
     }
-    if (this.failures > (this.options.maxFailures ?? 6)) {
+    if (this.failures > (this.options.maxFailures ?? DEFAULT_MAX_FAILURES)) {
       this.setState("failed");
       return;
     }
@@ -377,14 +391,15 @@ export class RunChannel {
     this.scheduleRebuild(gen);
   }
 
-  private scheduleRebuild(gen: number): void {
+  /** 退避後重建連線；rebuilt＝是否沿用「重建」的 tail（第一次連線就拿不到 token 時仍是首次連線，不放大 tail）。 */
+  private scheduleRebuild(gen: number, rebuilt = true): void {
     this.setState("reconnecting");
     const wait = (this.options.backoffMs ?? defaultBackoffMs)(this.failures);
     if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(() => {
       if (gen !== this.generation) return;
       this.timer = null;
-      void this.connect(true);
+      void this.connect(rebuilt);
     }, wait);
   }
 }
@@ -413,9 +428,6 @@ export function shouldReviveStream(states: readonly StreamState[], runStatus: Ru
 }
 
 /** 正式用的依賴：瀏覽器的 EventSource 與 client.ts 的 token 換新；fetchRunStatus／backfill 由呼叫端（hook）提供。 */
-export function defaultChannelDeps(
-  extra: Pick<ChannelDeps, "fetchRunStatus" | "backfill">,
-  ctor: EventSourceCtor = EventSource as unknown as EventSourceCtor,
-): ChannelDeps {
+export function defaultChannelDeps(extra: Pick<ChannelDeps, "fetchRunStatus" | "backfill">, ctor: EventSourceCtor = EventSource as unknown as EventSourceCtor): ChannelDeps {
   return { EventSourceCtor: ctor, getToken: getFreshAccessToken, ...extra };
 }

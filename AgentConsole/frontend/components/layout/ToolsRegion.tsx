@@ -7,16 +7,7 @@
  *   <768：底部 Tab 導航（由 app/layout.tsx 的 flex-col-reverse 把本區塊排到內容下方）。
  * 側欄背景透明、無卡片無邊框（融入頁面底色）；active 項＝左側 4px 主色條＋tertiary 底。
  */
-import {
-  Activity,
-  FolderOpen,
-  LayoutDashboard,
-  LayoutGrid,
-  Play,
-  Settings,
-  Upload,
-  type LucideIcon,
-} from "lucide-react";
+import { Activity, FolderOpen, LayoutDashboard, LayoutGrid, Play, Settings, Upload, type LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -107,15 +98,11 @@ export function ToolsRegion() {
                 "flex w-full items-center gap-2.5 border-l-4 px-3 py-[11px] text-left text-base font-medium text-wg-text transition-colors",
                 "hover:bg-wg-tertiary max-xl:justify-center max-xl:px-0",
                 "max-md:flex-1 max-md:flex-col max-md:gap-0.5 max-md:border-l-0 max-md:border-t-4 max-md:px-1 max-md:py-2",
-                isActive
-                  ? "border-wg-primary bg-wg-tertiary"
-                  : "border-transparent bg-transparent",
+                isActive ? "border-wg-primary bg-wg-tertiary" : "border-transparent bg-transparent",
               )}
             >
               <Icon size={18} aria-hidden className="max-md:size-5" />
-              <span className="max-xl:hidden max-md:inline max-md:text-[10px] max-md:leading-tight">
-                {label}
-              </span>
+              <span className="max-xl:hidden max-md:inline max-md:text-[10px] max-md:leading-tight">{label}</span>
             </Link>
           );
         })}

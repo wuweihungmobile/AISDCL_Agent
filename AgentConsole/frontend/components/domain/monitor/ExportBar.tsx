@@ -5,15 +5,14 @@ import Link from "next/link";
 
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
-import { ApiError, describeError, saveBlob } from "@/lib/api/client";
-import { REASONS } from "@/lib/api/reasons";
+import { describeError, saveBlob } from "@/lib/api/client";
 import { useDownloadReport } from "@/lib/api/queries";
 import { rangeParams, type RangeId } from "@/lib/domain/metrics";
 
 /**
- * 底部行動列（設計稿畫面 8 與 PRD §5.4.5）：「匯出報表」「設定告警」「自訂儀表板」。
- *  - 匯出報表：GET report?format=csv（不包封包的檔案下載，檔名取自 Content-Disposition）；PDF 在 W5 前回 501，
- *    依契約顯示「尚未提供」（reason `PDF 報表尚未提供（W5）`）。匯出範圍＝目前的時間範圍與批次選擇。
+ * 底部行動列（設計稿畫面 8 與 PRD §5.4.5）：「匯出報表」「匯出 PDF」「設定告警」「自訂儀表板」。
+ *  - 匯出報表／匯出 PDF：GET report?format=csv｜pdf（不包封包的檔案下載，檔名取自 Content-Disposition；v1.2 起 PDF 與 CSV 同樣回 200，
+ *    內容是同一份四個區段，C-4）。匯出範圍＝目前的時間範圍與批次選擇。
  *  - 設定告警：導向 /settings（契約 §4.3 M-17：監控分頁 monitor.*，沒有專用端點）。
  *  - 自訂儀表板：切換編輯模式，各區塊出現拖曳把手（US-M-08；版面存 localStorage）。
  */
@@ -42,10 +41,6 @@ export function ExportBar({
       saveBlob(blob, name);
       toast.success(`已匯出報表：${name}`);
     } catch (err) {
-      if (err instanceof ApiError && (err.status === 501 || err.reason === REASONS.MONITOR_PDF_NOT_READY)) {
-        toast.info("PDF 報表尚未提供（預計 W5 提供），請先匯出 CSV");
-        return;
-      }
       toast.error(`匯出失敗：${describeError(err)}`);
     }
   }

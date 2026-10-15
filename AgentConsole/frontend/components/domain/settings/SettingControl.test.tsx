@@ -10,16 +10,7 @@ import { MASK } from "./settingsModel";
 function setup(config: Config, over: Partial<Parameters<typeof SettingControl>[0]> = {}) {
   const onChange = vi.fn();
   const onToggleVisible = vi.fn();
-  render(
-    <SettingControl
-      config={config}
-      label="測試參數"
-      value={config.value}
-      onChange={onChange}
-      onToggleVisible={onToggleVisible}
-      {...over}
-    />,
-  );
+  render(<SettingControl config={config} label="測試參數" value={config.value} onChange={onChange} onToggleVisible={onToggleVisible} {...over} />);
   return { onChange, onToggleVisible };
 }
 
@@ -85,9 +76,7 @@ describe("設定控制項依 valueType 渲染（七種各一）", () => {
   });
 
   it("ENCRYPTED → password input（預設遮罩）＋「顯示」按鈕；展開後改成明文輸入框、按鈕變「隱藏」", () => {
-    const { unmount } = render(
-      <SettingControl config={FIXTURE.apiKey()} label="金鑰" value={MASK} onChange={() => {}} canReveal />,
-    );
+    const { unmount } = render(<SettingControl config={FIXTURE.apiKey()} label="金鑰" value={MASK} onChange={() => {}} canReveal />);
     const input = screen.getByLabelText("金鑰");
     expect(input).toHaveAttribute("type", "password");
     expect(input).toHaveValue(MASK);
@@ -99,9 +88,7 @@ describe("設定控制項依 valueType 渲染（七種各一）", () => {
   });
 
   it("ENCRYPTED：非 ADMIN 不能揭露——按鈕停用並說明；尚未設定的鍵沒有可顯示的值", () => {
-    const { unmount } = render(
-      <SettingControl config={FIXTURE.apiKey()} label="金鑰" value={MASK} onChange={() => {}} canReveal={false} />,
-    );
+    const { unmount } = render(<SettingControl config={FIXTURE.apiKey()} label="金鑰" value={MASK} onChange={() => {}} canReveal={false} />);
     expect(screen.getByRole("button", { name: "顯示：金鑰" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "顯示：金鑰" })).toHaveAttribute("title", "僅 ADMIN 可揭露敏感參數");
     unmount();

@@ -121,9 +121,7 @@ describe("步驟 1：解析選項與開始解析（US-I-05／07／08）", () => 
     await fillPath();
     await userEvent.type(screen.getByLabelText(/^補充說明/), " 盡量少於 5 個任務 ");
     await userEvent.click(screen.getByRole("button", { name: "開始解析" }));
-    expect(props.onStart).toHaveBeenCalledWith(
-      expect.objectContaining({ options: { autonomyLevel: 7, executionPath: "/home/user/projects/new-service", additionalPrompt: "盡量少於 5 個任務" } }),
-    );
+    expect(props.onStart).toHaveBeenCalledWith(expect.objectContaining({ options: { autonomyLevel: 7, executionPath: "/home/user/projects/new-service", additionalPrompt: "盡量少於 5 個任務" } }));
   });
 
   it("貼上文字：空白擋下；填入後連同來源名稱與格式送出", async () => {
@@ -193,6 +191,8 @@ describe("步驟 1：沿用既有記錄（從歷史重開，或解析被擋下�
     createdAt: "2026-10-15T08:30:12Z",
     sourceContent: "# BRD\n這是上一次貼上的需求原文",
     parsedResult: null,
+    warnings: [],
+    parseOptions: null,
   };
 
   it("顯示來源摘要而非拖放區；開始解析只送解析選項（不重複上傳）", async () => {
@@ -207,6 +207,63 @@ describe("步驟 1：沿用既有記錄（從歷史重開，或解析被擋下�
     expect(props.onStart).toHaveBeenCalledWith({
       source: { kind: "existing" },
       options: { autonomyLevel: 3, executionPath: "/home/user/projects/new-service", additionalPrompt: undefined },
+    });
+  });
+
+  describe("解析選項還原（v1.2，C-10；契約 §1.1.9、§4.1 I-18）", () => {
+    const withOptions: ImportRecordDetail = {
+      ...existing,
+      parseOptions: { autonomyLevel: 7, executionPath: "/work/restored", additionalPrompt: "只拆前端", specDir: "/work/restored/spec" },
+    };
+
+    it("記錄上存的 parseOptions 填回表單（自治等級、執行路徑、補充說明）；重新解析時 specDir 原樣帶回（沒有 UI 欄位，不能因為從畫面重試而丟掉）", async () => {
+      const props = setup({ existing: withOptions });
+      expect(screen.getByLabelText(/^自治等級/)).toHaveValue("7");
+      expect(screen.getByLabelText("執行路徑")).toHaveValue("/work/restored");
+      expect(screen.getByLabelText(/^補充說明/)).toHaveValue("只拆前端");
+      await userEvent.click(screen.getByRole("button", { name: "開始解析" }));
+      expect(props.onStart).toHaveBeenCalledWith({
+        source: { kind: "existing" },
+        options: { autonomyLevel: 7, executionPath: "/work/restored", additionalPrompt: "只拆前端", specDir: "/work/restored/spec" },
+      });
+    });
+
+    it("使用者改過的欄位以草稿為準：記錄重抓（重新渲染）不會把剛打的字蓋回伺服器值", async () => {
+      const props = setup({ existing: withOptions });
+      const additional = screen.getByLabelText(/^補充說明/);
+      await userEvent.clear(additional);
+      await userEvent.type(additional, "改成後端");
+      await userEvent.selectOptions(screen.getByLabelText(/^自治等級/), "2");
+      props.rerender({ existing: { ...withOptions } }); // 例如解析失敗後的 invalidate 重抓
+      expect(screen.getByLabelText(/^補充說明/)).toHaveValue("改成後端");
+      expect(screen.getByLabelText(/^自治等級/)).toHaveValue("2");
+      expect(screen.getByLabelText("執行路徑")).toHaveValue("/work/restored"); // 沒動過的欄位仍是還原值
+    });
+
+    it("記錄沒有 parseOptions（從未 parse 過，null）：維持預設——預設自治等級、路徑空白，且不帶 specDir", async () => {
+      const props = setup({ existing: { ...existing, parseOptions: null } });
+      expect(screen.getByLabelText(/^自治等級/)).toHaveValue("3");
+      expect(screen.getByLabelText("執行路徑")).toHaveValue("");
+      await fillPath();
+      await userEvent.click(screen.getByRole("button", { name: "開始解析" }));
+      const options = (props.onStart as ReturnType<typeof vi.fn>).mock.calls[0][0].options;
+      expect(options).toEqual({ autonomyLevel: 3, executionPath: "/home/user/projects/new-service", additionalPrompt: undefined });
+      expect(options).not.toHaveProperty("specDir");
+    });
+
+    it("改用其他來源：還原的選項留給新來源使用（不必重填）", async () => {
+      const view = setup({ existing: withOptions });
+      await userEvent.click(screen.getByRole("button", { name: "改用其他來源" }));
+      view.rerender({ existing: null });
+      expect(screen.getByRole("tab", { name: "貼上文字" })).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByLabelText(/^自治等級/)).toHaveValue("7");
+      expect(screen.getByLabelText("執行路徑")).toHaveValue("/work/restored");
+      expect(screen.getByLabelText(/^補充說明/)).toHaveValue("只拆前端");
+      // 新來源不帶舊記錄的 specDir
+      await userEvent.click(screen.getByRole("button", { name: "開始解析" }));
+      expect(view.onStart).toHaveBeenCalledWith(expect.objectContaining({ source: expect.objectContaining({ kind: "text" }) }));
+      const options = (view.onStart as ReturnType<typeof vi.fn>).mock.calls[0][0].options;
+      expect(options).not.toHaveProperty("specDir");
     });
   });
 

@@ -57,7 +57,13 @@ function installServer(role: "ADMIN" | "OPERATOR" | "VIEWER" = "ADMIN") {
     if (role !== "ADMIN" && method !== "GET") return failure(403, { message: "權限不足", reason: "ACCESS_DENIED" });
     if (method === "PUT" && path === "/api/v1/settings/execution/token-guard") {
       const { compactThresholdPct: c, haltThresholdPct: h } = call.body as { compactThresholdPct: number; haltThresholdPct: number };
-      if (h <= c) return failure(400, { message: "跨鍵校驗失敗", reason: REASONS.SETTINGS_TOKEN_GUARD_ORDER, errors: [{ field: "haltThresholdPct", message: "必須大於 compactThresholdPct" }], details: { compactThresholdPct: c, haltThresholdPct: h } });
+      if (h <= c)
+        return failure(400, {
+          message: "跨鍵校驗失敗",
+          reason: REASONS.SETTINGS_TOKEN_GUARD_ORDER,
+          errors: [{ field: "haltThresholdPct", message: "必須大於 compactThresholdPct" }],
+          details: { compactThresholdPct: c, haltThresholdPct: h },
+        });
       find("execution", "compactThresholdPct")!.value = String(c);
       find("execution", "haltThresholdPct")!.value = String(h);
       return { data: [find("execution", "compactThresholdPct"), find("execution", "haltThresholdPct")] };
@@ -67,7 +73,8 @@ function installServer(role: "ADMIN" | "OPERATOR" | "VIEWER" = "ADMIN") {
       if (!c) return failure(404, { message: `設定鍵不存在：${m[1]}.${m[2]}` });
       const body = call.body as { value: string; confirm?: boolean };
       if (c.isEncrypted && body.confirm !== true) return failure(409, { message: "需二次確認", reason: REASONS.SETTINGS_UPDATE_NEEDS_CONFIRM, details: { category: m[1], key: m[2] } });
-      if (c.key === "maxTokensPerRequest" && Number(body.value) > 200000) return failure(400, { message: "參數驗證失敗", reason: REASONS.SETTINGS_VALUE_INVALID, errors: [{ field: "value", message: "需為整數（1～200000）" }] });
+      if (c.key === "maxTokensPerRequest" && Number(body.value) > 200000)
+        return failure(400, { message: "參數驗證失敗", reason: REASONS.SETTINGS_VALUE_INVALID, errors: [{ field: "value", message: "需為整數（1～200000）" }] });
       const next = c.isEncrypted ? { ...c, hasValue: body.value !== "" } : { ...c, value: body.value };
       store[c.category] = store[c.category].map((x) => (x.key === c.key ? next : x));
       return { data: next };
@@ -218,7 +225,7 @@ describe("修改與儲存（US-S-02）", () => {
     expect(screen.getByTestId("unsaved-count")).toHaveTextContent("2 項變更尚未儲存");
   });
 
-  it("BOOLEAN：toggle 點一下變髒，儲存送 \"true\"", async () => {
+  it('BOOLEAN：toggle 點一下變髒，儲存送 "true"', async () => {
     await mount();
     await userEvent.click(inRow("model.enableKernelBrain").getByRole("switch"));
     expect(inRow("model.enableKernelBrain").getByRole("switch")).toHaveAttribute("aria-checked", "true");
@@ -334,11 +341,7 @@ describe("重置（US-S-03）", () => {
     const dialog = screen.getByRole("dialog", { name: "全部重置為預設值" });
     await userEvent.click(within(dialog).getByRole("button", { name: "全部重置" }));
     expect(await within(dialog).findByText(/重置「執行」失敗：halt_threshold_pct 必須大於 compact_threshold_pct/)).toBeInTheDocument();
-    expect(calls.filter((c) => c.method === "POST").map((c) => c.url)).toEqual([
-      "/api/v1/settings/model/reset",
-      "/api/v1/settings/agent/reset",
-      "/api/v1/settings/execution/reset",
-    ]);
+    expect(calls.filter((c) => c.method === "POST").map((c) => c.url)).toEqual(["/api/v1/settings/model/reset", "/api/v1/settings/agent/reset", "/api/v1/settings/execution/reset"]);
     expect(dialog).toBeInTheDocument(); // 不關閉，讓使用者看到原因
   });
 });
@@ -385,7 +388,12 @@ describe("Token Guard 小卡（NFR-SEC-05）", () => {
     await userEvent.click(screen.getByRole("tab", { name: "執行" }));
     overrides.push((c) =>
       c.method === "PUT" && c.path.endsWith("/token-guard")
-        ? failure(400, { message: "跨鍵校驗失敗", reason: REASONS.SETTINGS_TOKEN_GUARD_ORDER, errors: [{ field: "haltThresholdPct", message: "必須大於 compactThresholdPct" }], details: { compactThresholdPct: 70, haltThresholdPct: 95 } })
+        ? failure(400, {
+            message: "跨鍵校驗失敗",
+            reason: REASONS.SETTINGS_TOKEN_GUARD_ORDER,
+            errors: [{ field: "haltThresholdPct", message: "必須大於 compactThresholdPct" }],
+            details: { compactThresholdPct: 70, haltThresholdPct: 95 },
+          })
         : undefined,
     );
     const card = within(screen.getByTestId("token-guard-card"));
@@ -430,13 +438,16 @@ describe("測試連線（US-S-05）", () => {
     await mount();
     let release!: (r: Response) => void;
     overrides.push((c) => (c.path === "/api/v1/settings/test-connection" ? undefined : undefined));
-    vi.stubGlobal("fetch", vi.fn((input: string, init?: RequestInit) => {
-      if (String(input).endsWith("/test-connection")) {
-        calls.push({ method: init?.method ?? "GET", url: input, path: input, query: new URLSearchParams(), body: init?.body });
-        return new Promise<Response>((resolve) => (release = resolve));
-      }
-      return Promise.resolve(failure(404));
-    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string, init?: RequestInit) => {
+        if (String(input).endsWith("/test-connection")) {
+          calls.push({ method: init?.method ?? "GET", url: input, path: input, query: new URLSearchParams(), body: init?.body });
+          return new Promise<Response>((resolve) => (release = resolve));
+        }
+        return Promise.resolve(failure(404));
+      }),
+    );
     await userEvent.click(screen.getByRole("button", { name: "測試連線" }));
     expect(await screen.findByText("測試中…")).toBeInTheDocument();
     expect(calls.at(-1)?.body).toBeUndefined();
@@ -447,9 +458,7 @@ describe("測試連線（US-S-05）", () => {
   it("帶表單內尚未儲存的 apiUrl／apiKey／model；失敗顯示紅字原因", async () => {
     await mount();
     overrides.push((c) =>
-      c.path === "/api/v1/settings/test-connection"
-        ? envelope({ success: false, latencyMs: null, message: "認證失敗（HTTP 401）", resolvedHost: "api.minimax.io", httpStatus: 401 })
-        : undefined,
+      c.path === "/api/v1/settings/test-connection" ? envelope({ success: false, latencyMs: null, message: "認證失敗（HTTP 401）", resolvedHost: "api.minimax.io", httpStatus: 401 }) : undefined,
     );
     const url = inRow("model.apiUrl").getByRole("textbox");
     await userEvent.clear(url);
@@ -465,9 +474,7 @@ describe("測試連線（US-S-05）", () => {
   it("422 SSRF／allowlist：顯示 reason 與違規類別、host", async () => {
     await mount();
     overrides.push((c) =>
-      c.path === "/api/v1/settings/test-connection"
-        ? failure(422, { message: "位址被拒", reason: REASONS.SETTINGS_URL_REJECTED, details: { host: "10.0.0.5", violation: "private_ip" } })
-        : undefined,
+      c.path === "/api/v1/settings/test-connection" ? failure(422, { message: "位址被拒", reason: REASONS.SETTINGS_URL_REJECTED, details: { host: "10.0.0.5", violation: "private_ip" } }) : undefined,
     );
     await userEvent.click(screen.getByRole("button", { name: "測試連線" }));
     const result = await screen.findByTestId("test-connection-result");
@@ -525,7 +532,14 @@ describe("匯出／匯入設定（US-S-06）", () => {
     await mount();
     overrides.push((c) =>
       c.path === "/api/v1/settings/import"
-        ? envelope({ applied: 1, skipped: 47, errors: [{ category: "monitor", key: "refreshIntervalMs", reason: REASONS.SETTINGS_VALUE_INVALID }, { category: "model", key: "ghost", reason: "設定鍵不存在" }] })
+        ? envelope({
+            applied: 1,
+            skipped: 47,
+            errors: [
+              { category: "monitor", key: "refreshIntervalMs", reason: REASONS.SETTINGS_VALUE_INVALID },
+              { category: "model", key: "ghost", reason: "設定鍵不存在" },
+            ],
+          })
         : undefined,
     );
     await userEvent.click(screen.getByRole("button", { name: "匯入設定" }));

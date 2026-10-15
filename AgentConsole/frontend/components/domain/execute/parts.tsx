@@ -18,24 +18,13 @@ import type { StartErrorView } from "./startErrors";
  */
 export function LockBanner({ onApprove, canApprove }: { onApprove: () => void; canApprove: boolean }) {
   return (
-    <div
-      role="status"
-      data-testid="execute-lock-banner"
-      className="mb-5 flex items-center gap-3 rounded-md border border-wg-draft-border bg-wg-draft-bg px-[18px] py-3.5 max-md:flex-wrap"
-    >
+    <div role="status" data-testid="execute-lock-banner" className="mb-5 flex items-center gap-3 rounded-md border border-wg-draft-border bg-wg-draft-bg px-[18px] py-3.5 max-md:flex-wrap">
       <Lock size={22} className="shrink-0 text-wg-accent" aria-hidden />
       <div className="min-w-0 flex-1">
         <div className="font-semibold text-wg-accent">執行已鎖定 — 草案未 signoff，啟動回 409 Conflict</div>
-        <div className="text-[13px] text-wg-muted">
-          此專案 signed_off=false，未經掌舵者審批前禁止執行（後端會二次校驗，前端停用只是體驗）。
-        </div>
+        <div className="text-[13px] text-wg-muted">此專案 signed_off=false，未經掌舵者審批前禁止執行（後端會二次校驗，前端停用只是體驗）。</div>
       </div>
-      <Button
-        iconLeft={ShieldCheck}
-        onClick={onApprove}
-        disabled={!canApprove}
-        title={canApprove ? undefined : "權限不足（唯讀角色不可審批）"}
-      >
+      <Button iconLeft={ShieldCheck} onClick={onApprove} disabled={!canApprove} title={canApprove ? undefined : "權限不足（唯讀角色不可審批）"}>
         前往審批
       </Button>
     </div>
@@ -83,11 +72,7 @@ export function SseDot({ state, onReconnect, className }: { state: StreamState; 
 /** 啟動失敗的說明（409／400／422／502 的 reason 與 details 轉成人話；契約附錄 B.2「執行」列）。 */
 export function StartErrorPanel({ view, onApprove }: { view: StartErrorView; onApprove?: () => void }) {
   return (
-    <div
-      role="alert"
-      data-testid="start-error"
-      className="mt-4 flex items-start gap-2.5 rounded-md border border-wg-draft-border bg-wg-draft-bg px-3.5 py-3 text-sm"
-    >
+    <div role="alert" data-testid="start-error" className="mt-4 flex items-start gap-2.5 rounded-md border border-wg-draft-border bg-wg-draft-bg px-3.5 py-3 text-sm">
       <AlertTriangle size={18} className="mt-0.5 shrink-0 text-wg-accent" aria-hidden />
       <div className="min-w-0 flex-1">
         <p className="font-semibold text-wg-accent">啟動失敗：{view.title}</p>
@@ -107,7 +92,29 @@ export function StartErrorPanel({ view, onApprove }: { view: StartErrorView; onA
   );
 }
 
-/** 執行批次下拉（預設最新；「Run #3 · 執行中 · 2026-10-15 14:32」）。 */
+/** 批次列表項是否處於 Bridge 過渡態（RUNNING＋PAUSING／CANCELLING；契約 §1.2.2 的 bridgeStatus，C-11）。 */
+export function isBridgeTransition(run: Pick<ExecutionRunSummary, "status" | "bridgeStatus">): boolean {
+  return run.status === "RUNNING" && (run.bridgeStatus === "PAUSING" || run.bridgeStatus === "CANCELLING");
+}
+
+/**
+ * Bridge 過渡態晶片（契約 §1.2.2，C-11）：批次列表項帶 bridgeStatus，RUNNING＋PAUSING／CANCELLING 時顯示「暫停中」「取消中」，
+ * 讓使用者在批次下拉與批次比較看得到「正在處理中」；其餘狀態不顯示。
+ */
+export function BridgeChip({ run, className }: { run: Pick<ExecutionRunSummary, "status" | "bridgeStatus">; className?: string }): ReactNode {
+  if (!isBridgeTransition(run)) return null;
+  return (
+    <span
+      data-testid="bridge-chip"
+      data-bridge={run.bridgeStatus ?? undefined}
+      className={cn("inline-flex shrink-0 items-center rounded-sm border border-wg-alert-border bg-wg-alert-bg px-[7px] py-0.5 text-xs font-semibold text-wg-text", className)}
+    >
+      {runStatusMeta(run.status, run.bridgeStatus).label}
+    </span>
+  );
+}
+
+/** 執行批次下拉（預設最新；「Run #3 · 執行中 · 2026-10-15 14:32」）；過渡態批次的狀態字樣是「暫停中」「取消中」，選中時另附晶片。 */
 export function RunSelect({
   runs,
   value,
@@ -124,26 +131,21 @@ export function RunSelect({
   allOption?: string;
   className?: string;
 }): ReactNode {
+  const selected = runs.find((r) => r.id === value);
   return (
     <label className={cn("inline-flex items-center gap-2 text-sm text-wg-muted", className)}>
       {label}
-      <Select
-        size="sm"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        aria-label={label}
-        data-testid="run-select"
-        disabled={runs.length === 0 && !allOption}
-      >
+      <Select size="sm" value={value} onChange={(e) => onChange(e.target.value)} aria-label={label} data-testid="run-select" disabled={runs.length === 0 && !allOption}>
         {allOption ? <option value="">{allOption}</option> : null}
         {runs.length === 0 && !allOption ? <option value="">尚無執行批次</option> : null}
         {runs.map((r, i) => (
           <option key={r.id} value={r.id}>
             Run #{r.runNumber}
-            {i === 0 ? "（最新）" : ""} · {runStatusMeta(r.status).label} · {formatDateTime(r.startedAt)}
+            {i === 0 ? "（最新）" : ""} · {runStatusMeta(r.status, r.bridgeStatus).label} · {formatDateTime(r.startedAt)}
           </option>
         ))}
       </Select>
+      {selected ? <BridgeChip run={selected} /> : null}
     </label>
   );
 }

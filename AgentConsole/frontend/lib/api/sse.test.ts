@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeEventSource } from "@/tests/helpers/fakeEventSource";
 import {
   BACKFILL_AFTER_FAILURES,
+  DEFAULT_MAX_FAILURES,
+  MAX_BACKOFF_MS,
   RunChannel,
   STREAM_EVENT_NAMES,
   buildStreamUrl,
@@ -42,11 +44,7 @@ type Harness = {
   es: () => FakeEventSource;
 };
 
-function harness(
-  kind: StreamKind = "logs",
-  overrides: Partial<ChannelDeps> = {},
-  options: { maxFailures?: number; terminalGraceMs?: number } = {},
-): Harness {
+function harness(kind: StreamKind = "logs", overrides: Partial<ChannelDeps> = {}, options: { maxFailures?: number; terminalGraceMs?: number } = {}): Harness {
   const events: RunStreamEvent[] = [];
   const states: StreamState[] = [];
   const deps = {
@@ -92,15 +90,9 @@ describe("事件 id（契約 §2.2）", () => {
   });
 
   it("buildStreamUrl：token 放網址並編碼；tail 只在 /logs 出現（/metrics 沒有這個參數）", () => {
-    expect(buildStreamUrl({ base: "http://api.test", runId: RUN, kind: "logs", token: "a b+c" })).toBe(
-      `http://api.test/api/v1/stream/executions/${RUN}/logs?access_token=a+b%2Bc`,
-    );
-    expect(buildStreamUrl({ base: "", runId: RUN, kind: "logs", token: "t", tail: 1000 })).toBe(
-      `/api/v1/stream/executions/${RUN}/logs?access_token=t&tail=1000`,
-    );
-    expect(buildStreamUrl({ base: "", runId: RUN, kind: "metrics", token: "t", tail: 1000 })).toBe(
-      `/api/v1/stream/executions/${RUN}/metrics?access_token=t`,
-    );
+    expect(buildStreamUrl({ base: "http://api.test", runId: RUN, kind: "logs", token: "a b+c" })).toBe(`http://api.test/api/v1/stream/executions/${RUN}/logs?access_token=a+b%2Bc`);
+    expect(buildStreamUrl({ base: "", runId: RUN, kind: "logs", token: "t", tail: 1000 })).toBe(`/api/v1/stream/executions/${RUN}/logs?access_token=t&tail=1000`);
+    expect(buildStreamUrl({ base: "", runId: RUN, kind: "metrics", token: "t", tail: 1000 })).toBe(`/api/v1/stream/executions/${RUN}/metrics?access_token=t`);
   });
 
   it("終態事件：status-change／progress-update 帶終態 runStatus 才算；暫態告警＝origin=CONSOLE 且沒有 sub", () => {
@@ -217,7 +209,11 @@ describe("RunChannel：去重（at-least-once，契約 §2.3 第 4 點）", () =
     // metrics 收斂快照 <S>.1／.2／.3 的 id 互異且嚴格遞增：三則都要收到（不被去重丟掉第二、三則）
     FakeEventSource.instances[1].emit("progress-update", progress(36), "36.1");
     FakeEventSource.instances[1].emit("token-update", { seq: 36, ts: TS, tokensUsed: 1240, delta: 1240, contextPct: 0.6 }, "36.2");
-    FakeEventSource.instances[1].emit("metric-update", { seq: 36, sub: 3, ts: TS, completedTasks: 0, failedTasks: 0, totalTasks: 3, retriedTasks: 0, averageRetryCount: 0, totalTokensUsed: 1240, elapsedSec: 2 }, "36.3");
+    FakeEventSource.instances[1].emit(
+      "metric-update",
+      { seq: 36, sub: 3, ts: TS, completedTasks: 0, failedTasks: 0, totalTasks: 3, retriedTasks: 0, averageRetryCount: 0, totalTokensUsed: 1240, elapsedSec: 2 },
+      "36.3",
+    );
     expect(metrics.events.map((e) => e.id)).toEqual(["10.1", "36.1", "36.2", "36.3"]);
   });
 });
@@ -371,12 +367,121 @@ describe("RunChannel：401 換 token 重建（EventSource 看不到狀態碼，�
     expect(FakeEventSource.instances).toHaveLength(3);
   });
 
-  it("換不到 token（登入已失效）：failed，不建立連線", async () => {
-    const h = harness("logs", { getToken: vi.fn(async () => null) });
+  /**
+   * DEF-AC-007／C-5（契約 §2.8 第 8 點）：getToken 回 null 不再代表「登入失效、放棄」——登入真的失效時 getToken 已登出並導向登入
+   * （頁面卸載、close()）；回 null 通常是「換新時後端暫時不可用、且現有 token 已過期」。這時不登出、不放棄，
+   * 以 1→2→4→…→30 秒退避重建，狀態點維持「重新連線中」。
+   */
+  it("換不到 token（後端暫時不可用、現有 token 已過期）：不 failed、不建立連線；以 1→2→4 秒退避重試，狀態維持「重新連線中」，token 一回來就連上", async () => {
+    let tokenBack = false;
+    const getToken = vi.fn(async () => (tokenBack ? "tok-back" : null));
+    // 這個測試要驗預設的退避節奏（harness 把退避覆寫成固定 1 秒）：直接建一條不覆寫 backoffMs 的通道
+    const states: StreamState[] = [];
+    const channel = new RunChannel(
+      { runId: RUN, kind: "logs", base: "http://api.test" },
+      { EventSourceCtor: FakeEventSource, getToken, fetchRunStatus: vi.fn(async () => "RUNNING" as const), backfill: vi.fn(async () => {}) },
+      { onEvent: () => {}, onState: (s) => states.push(s) },
+    );
+    channel.start();
+    await settle();
+    expect(getToken).toHaveBeenCalledTimes(1);
+    expect(channel.currentState).toBe("reconnecting");
+    expect(FakeEventSource.instances).toHaveLength(0);
+
+    await vi.advanceTimersByTimeAsync(999); // 第 1 次失敗後等 1 秒
+    expect(getToken).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(getToken).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(1999); // 第 2 次失敗後等 2 秒
+    expect(getToken).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(getToken).toHaveBeenCalledTimes(3);
+    await vi.advanceTimersByTimeAsync(3999); // 第 3 次失敗後等 4 秒
+    expect(getToken).toHaveBeenCalledTimes(3);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(getToken).toHaveBeenCalledTimes(4);
+    expect(states).not.toContain("failed");
+    expect(FakeEventSource.instances).toHaveLength(0);
+    expect(channel.currentState).toBe("reconnecting");
+
+    tokenBack = true;
+    await vi.advanceTimersByTimeAsync(8000); // 第 4 次失敗後等 8 秒；這次拿得到 token
+    expect(FakeEventSource.instances).toHaveLength(1);
+    // 第一次連線就拿不到 token：仍是「首次連線」，不放大 tail（重建才放大）
+    expect(FakeEventSource.instances[0].url).toBe(`http://api.test/api/v1/stream/executions/${RUN}/logs?access_token=tok-back`);
+    FakeEventSource.instances[0].open();
+    expect(channel.currentState).toBe("open");
+    channel.close();
+  });
+
+  it("拿不到 token 的退避以 30 秒封頂（1、2、4、8、16、30、30…）；再久也不 failed（預設要連續失敗 DEFAULT_MAX_FAILURES 次）", async () => {
+    const getToken = vi.fn(async () => null);
+    const channel = new RunChannel(
+      { runId: RUN, kind: "logs", base: "http://api.test" },
+      { EventSourceCtor: FakeEventSource, getToken, fetchRunStatus: vi.fn(async () => "RUNNING" as const), backfill: vi.fn(async () => {}) },
+      { onEvent: () => {}, onState: () => {} },
+    );
+    channel.start();
+    await settle();
+    let calls = 1;
+    for (const wait of [1000, 2000, 4000, 8000, 16_000, 30_000, 30_000, 30_000]) {
+      await vi.advanceTimersByTimeAsync(wait - 1);
+      expect(getToken, `等 ${wait}ms 之前不該再試`).toHaveBeenCalledTimes(calls);
+      await vi.advanceTimersByTimeAsync(1);
+      calls += 1;
+      expect(getToken).toHaveBeenCalledTimes(calls);
+      expect(channel.currentState).toBe("reconnecting");
+    }
+    channel.close();
+  });
+
+  it("拿不到 token 連續超過 maxFailures 次：才進入 failed（可手動 reconnect）——不是一次就放棄", async () => {
+    const getToken = vi.fn(async () => null);
+    const states: StreamState[] = [];
+    const channel = new RunChannel(
+      { runId: RUN, kind: "logs", base: "http://api.test", maxFailures: 3, backoffMs: () => 1000 },
+      { EventSourceCtor: FakeEventSource, getToken, fetchRunStatus: vi.fn(async () => "RUNNING" as const), backfill: vi.fn(async () => {}) },
+      { onEvent: () => {}, onState: (s) => states.push(s) },
+    );
+    channel.start();
+    await settle(); // failures=1
+    await vi.advanceTimersByTimeAsync(1000); // 2
+    await vi.advanceTimersByTimeAsync(1000); // 3
+    expect(channel.currentState).toBe("reconnecting");
+    await vi.advanceTimersByTimeAsync(1000); // 4 > 3
+    expect(channel.currentState).toBe("failed");
+    expect(getToken).toHaveBeenCalledTimes(4);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(getToken).toHaveBeenCalledTimes(4); // 不再重試
+    expect(FakeEventSource.instances).toHaveLength(0);
+  });
+
+  it("連線被瀏覽器放棄後強制換 token 拿到 null（換新暫時失敗）：不登出、不 failed，退避後再強制換新，連上之後恢復正常（DEF-AC-007 的串流時序）", async () => {
+    let backendUp = false;
+    const getToken = vi.fn(async (opts?: { force?: boolean }) => (backendUp ? "tok-new" : opts?.force ? null : "tok-1"));
+    const h = harness("logs", { getToken });
     h.channel.start();
     await settle();
-    expect(h.channel.currentState).toBe("failed");
-    expect(FakeEventSource.instances).toHaveLength(0);
+    h.es().open();
+    expect(h.channel.currentState).toBe("open");
+
+    h.es().dropClosed(); // nginx 在 backend 重啟時對 /logs 回 502 → 瀏覽器放棄
+    await settle();
+    await vi.advanceTimersByTimeAsync(1000); // 退避後重建：force 換 token → 換新 502 → 現有 token 已過期 → null
+    expect(getToken).toHaveBeenLastCalledWith({ force: true });
+    expect(h.channel.currentState).toBe("reconnecting");
+    expect(FakeEventSource.instances).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(h.channel.currentState).toBe("reconnecting");
+    expect(h.states).not.toContain("failed");
+
+    backendUp = true;
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(FakeEventSource.instances).toHaveLength(2);
+    expect(FakeEventSource.instances[1].url).toContain("access_token=tok-new");
+    FakeEventSource.instances[1].open();
+    expect(h.channel.currentState).toBe("open");
   });
 });
 
@@ -492,9 +597,17 @@ describe("RunChannel：終態、暫停與關閉（契約 §2.4）", () => {
   });
 });
 
-describe("退避", () => {
-  it("defaultBackoffMs：1→2→4→8→15 秒封頂", () => {
-    expect([1, 2, 3, 4, 5, 9].map(defaultBackoffMs)).toEqual([1000, 2000, 4000, 8000, 15_000, 15_000]);
+describe("退避（契約 §2.8 第 8 點：1→2→4→…→30 秒，上限 30 秒）", () => {
+  it("defaultBackoffMs：1→2→4→8→16→30 秒封頂", () => {
+    expect([1, 2, 3, 4, 5, 6, 9].map(defaultBackoffMs)).toEqual([1000, 2000, 4000, 8000, 16_000, 30_000, 30_000]);
+    expect(MAX_BACKOFF_MS).toBe(30_000);
+    expect(defaultBackoffMs(0)).toBe(1000); // 防禦：失敗次數不會是 0，但不得算出 0.5 秒
+  });
+
+  it("DEFAULT_MAX_FAILURES：夠長（30 秒封頂的退避下約 28 分鐘），後端重啟與短時維護都不會讓狀態點變成「連線失敗」", () => {
+    let total = 0;
+    for (let n = 1; n <= DEFAULT_MAX_FAILURES; n += 1) total += defaultBackoffMs(n);
+    expect(total).toBeGreaterThan(20 * 60_000);
   });
 });
 

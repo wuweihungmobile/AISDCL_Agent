@@ -138,11 +138,21 @@ describe("applyStreamEvents：即時日誌", () => {
   });
 
   it("告警與審核請求也進日誌：嚴重度對映等級；暫態告警（沒有 sub）依 code 與時間去重", () => {
-    const alert = (seq: number, patch: object): E => ({ name: "alert", id: patch["sub" as keyof typeof patch] ? `${seq}.${(patch as { sub: number }).sub}` : String(seq), data: { seq, ts: TS, origin: "ENGINE", severity: "CRITICAL", message: "引擎升級", ...patch } }) as E;
+    const alert = (seq: number, patch: object): E =>
+      ({
+        name: "alert",
+        id: patch["sub" as keyof typeof patch] ? `${seq}.${(patch as { sub: number }).sub}` : String(seq),
+        data: { seq, ts: TS, origin: "ENGINE", severity: "CRITICAL", message: "引擎升級", ...patch },
+      }) as E;
     const review: E = {
       name: "review-request",
       id: "41.1",
-      data: { seq: 41, sub: 1, ts: TS, review: { id: "rv1", runId: "r", kind: "TASK_CONFIRM", status: "PENDING", reason: "Level 1：請確認是否繼續執行任務「設定」", requestedAt: TS, allowedDecisions: ["APPROVE", "REJECT"] } },
+      data: {
+        seq: 41,
+        sub: 1,
+        ts: TS,
+        review: { id: "rv1", runId: "r", kind: "TASK_CONFIRM", status: "PENDING", reason: "Level 1：請確認是否繼續執行任務「設定」", requestedAt: TS, allowedDecisions: ["APPROVE", "REJECT"] },
+      },
     };
     const transient = alert(42, { origin: "CONSOLE", code: "BRIDGE_UNREACHABLE", severity: "WARNING", message: "Bridge 暫時無法連線" });
     const s = applyStreamEvents(initialLive("r"), [alert(40, {}), review, alert(41, { origin: "CONSOLE", sub: 2, severity: "WARNING", message: "Token 使用量已達預算的 83%" }), transient, transient]);
@@ -209,10 +219,7 @@ describe("applyStreamEvents：任務即時狀態（DAG 疊加用）", () => {
     expect(applyStreamEvents(s, [escalation, consoleRestore]).taskStatus[T2]).toEqual({ status: "RUNNING", seq: 22 });
   });
   it("只有 taskId 沒有 stepStatus 的 log、沒有 currentStep 的 progress-update：不產生任務狀態", () => {
-    const s = applyStreamEvents(initialLive("r"), [
-      { name: "log", id: "3", data: { seq: 3, ts: TS, source: "STEP", level: "INFO", message: "x", taskId: T1 } },
-      progress(4),
-    ]);
+    const s = applyStreamEvents(initialLive("r"), [{ name: "log", id: "3", data: { seq: 3, ts: TS, source: "STEP", level: "INFO", message: "x", taskId: T1 } }, progress(4)]);
     expect(s.taskStatus).toEqual({});
   });
 });
@@ -289,7 +296,7 @@ describe("patchRunDetail：SSE 事件修補批次詳情快取（REST 當底）",
     // 引擎的還原告警：一批任務回到待處理，DAG 要重抓；別的引擎告警（升級）不必
     const restoreAlert: E = { name: "alert", id: "7", data: { seq: 7, ts: TS, origin: "ENGINE", code: "RESTORE", severity: "INFO", message: "已還原" } };
     expect(refreshPlan([restoreAlert])).toMatchObject({ detail: true, dag: true, notifications: true });
-    expect(refreshPlan([engineAlert]).dag).toBe(false);    // 多則事件合併：任何一則需要就要
+    expect(refreshPlan([engineAlert]).dag).toBe(false); // 多則事件合併：任何一則需要就要
     expect(refreshPlan([stepLog(1, "STARTED"), review, stepLog(2, "COMPLETED")])).toEqual({ detail: true, dag: true, notifications: true, runs: false });
   });
 

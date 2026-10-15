@@ -62,6 +62,8 @@ function baseRecord(over: Partial<ImportRecordDetail> = {}): ImportRecordDetail 
     parsePath: "LLM",
     sourceContent: "# BRD",
     parsedResult: TREE,
+    warnings: [],
+    parseOptions: null,
     ...over,
   };
 }
@@ -80,7 +82,17 @@ function installServer() {
       if (forced) return forced;
       const parsedResult = (call.body as { parsedResult: ParsedResult }).parsedResult;
       server.record = { ...server.record, status: "REVIEWING", signedOff: false, signedOffBy: undefined, signedOffAt: undefined, parsedResult };
-      return { data: { importId: "I1", status: "REVIEWING", path: "LLM", parsedResult, signedOff: false, errors: [], warnings: [{ code: "passcriteria_placeholder", detail: "佔位", location: "goals[1].tasks[0]" }] } };
+      return {
+        data: {
+          importId: "I1",
+          status: "REVIEWING",
+          path: "LLM",
+          parsedResult,
+          signedOff: false,
+          errors: [],
+          warnings: [{ code: "passcriteria_placeholder", detail: "佔位", location: "goals[1].tasks[0]" }],
+        },
+      };
     }
     if (method === "POST" && path === "/api/v1/import/I1/signoff") {
       const approver = (call.body as { approver: string }).approver;
@@ -179,9 +191,7 @@ describe("步驟 2：signoff 硬閘（US-I-09）", () => {
     await mount({ record: { signedOff: true, signedOffBy: "someone" } });
     // 換成「確認匯入一律 409」的後端（讀取仍回目前記錄）
     stubApi((call) =>
-      call.method === "GET"
-        ? { data: server.record }
-        : failure(409, { message: "草案尚未 signoff", reason: REASONS.IMPORT_NOT_SIGNED_OFF, details: { status: "PARSED", signedOff: false } }),
+      call.method === "GET" ? { data: server.record } : failure(409, { message: "草案尚未 signoff", reason: REASONS.IMPORT_NOT_SIGNED_OFF, details: { status: "PARSED", signedOff: false } }),
     );
     await userEvent.click(screen.getByRole("button", { name: "確認匯入" }));
     const alert = await screen.findByText(/草案尚未 signoff，不可確認匯入/);
@@ -213,6 +223,25 @@ describe("步驟 2：編輯（US-I-04）", () => {
     expect(screen.getByRole("button", { name: "確認匯入" })).toHaveAttribute("title", "有未儲存的編輯，請先儲存編輯");
   });
 
+  it("DEF-AC-001：AI 解析的任務 maxRetries 為 null（契約 §0.2 與缺席等價）：對話框欄位是空字串、預覽不印「null」、不改欄位就能按確定且不算未儲存編輯", async () => {
+    // 型別宣告只有 number | undefined，真後端實際回 null；用斷言模擬線上資料
+    const nullRetries = null as unknown as number;
+    const withNull: ParsedResult = {
+      ...TREE,
+      goals: TREE.goals.map((g) => ({ ...g, tasks: g.tasks.map((t) => ({ ...t, maxRetries: nullRetries })) })),
+    };
+    await mount({ record: { parsedResult: withNull } });
+    await userEvent.click(screen.getByRole("button", { name: "展開詳情：設定" }));
+    expect(screen.getByTestId("task-details")).not.toHaveTextContent("null");
+
+    await userEvent.click(screen.getByRole("button", { name: "編輯任務：設定" }));
+    const dialog = screen.getByRole("dialog", { name: "編輯任務" });
+    expect(within(dialog).getByLabelText(/^最大重試次數/)).toHaveValue(""); // 缺陷版本是字面 "null"
+    await userEvent.click(within(dialog).getByRole("button", { name: "確定" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull()); // 缺陷版本：zod 擋住，對話框關不掉
+    expect(screen.queryByTestId("dirty-notice")).toBeNull();
+  });
+
   it("還原：丟掉本地編輯回到伺服器版本，提示消失", async () => {
     await mount();
     await renameTask("設定", "設定環境");
@@ -229,7 +258,10 @@ describe("步驟 2：編輯（US-I-04）", () => {
     expect(await screen.findByText("已儲存編輯；先前的 signoff 已撤銷，請重新審批")).toBeInTheDocument();
     const put = calls.find((c) => c.method === "PUT" && c.path === "/api/v1/import/I1/result");
     const sent = (put?.body as { parsedResult: ParsedResult }).parsedResult;
-    expect(sent.goals[0].tasks.map((t) => [t.name, t.sortOrder])).toEqual([["初始化", 0], ["設定環境", 1]]);
+    expect(sent.goals[0].tasks.map((t) => [t.name, t.sortOrder])).toEqual([
+      ["初始化", 0],
+      ["設定環境", 1],
+    ]);
     expect(sent.goals[1].dependsOn).toEqual(["g1"]);
     for (const key of ["path", "aiModel", "tokenUsed"]) expect(sent).not.toHaveProperty(key);
     await waitFor(() => expect(screen.queryByTestId("dirty-notice")).toBeNull());

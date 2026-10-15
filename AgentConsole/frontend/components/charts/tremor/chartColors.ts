@@ -2,7 +2,7 @@
 // 本專案改動：色票對照表換成 water_green 設計 token（wg-* 別名，見 app/globals.css），不使用 Tailwind 預設調色盤。
 // 類別名稱（primary／secondary…）是圖表的語意色；要換色只改這張表。
 
-export type ColorUtility = "bg" | "stroke" | "fill" | "text"
+export type ColorUtility = "bg" | "stroke" | "fill" | "text";
 
 export const chartColors = {
   primary: {
@@ -43,36 +43,28 @@ export const chartColors = {
   },
 } as const satisfies {
   [color: string]: {
-    [key in ColorUtility]: string
-  }
-}
+    [key in ColorUtility]: string;
+  };
+};
 
-export type AvailableChartColorsKeys = keyof typeof chartColors
+export type AvailableChartColorsKeys = keyof typeof chartColors;
 
-export const AvailableChartColors: AvailableChartColorsKeys[] = Object.keys(
-  chartColors,
-) as Array<AvailableChartColorsKeys>
+export const AvailableChartColors: AvailableChartColorsKeys[] = Object.keys(chartColors) as Array<AvailableChartColorsKeys>;
 
-export const constructCategoryColors = (
-  categories: string[],
-  colors: AvailableChartColorsKeys[],
-): Map<string, AvailableChartColorsKeys> => {
-  const categoryColors = new Map<string, AvailableChartColorsKeys>()
+export const constructCategoryColors = (categories: string[], colors: AvailableChartColorsKeys[]): Map<string, AvailableChartColorsKeys> => {
+  const categoryColors = new Map<string, AvailableChartColorsKeys>();
   categories.forEach((category, index) => {
-    categoryColors.set(category, colors[index % colors.length])
-  })
-  return categoryColors
-}
+    categoryColors.set(category, colors[index % colors.length]);
+  });
+  return categoryColors;
+};
 
-export const getColorClassName = (
-  color: AvailableChartColorsKeys,
-  type: ColorUtility,
-): string => {
+export const getColorClassName = (color: AvailableChartColorsKeys, type: ColorUtility): string => {
   const fallbackColor = {
     bg: "bg-wg-muted",
     stroke: "stroke-wg-muted",
     fill: "fill-wg-muted",
     text: "text-wg-muted",
-  }
-  return chartColors[color]?.[type] ?? fallbackColor[type]
-}
+  };
+  return chartColors[color]?.[type] ?? fallbackColor[type];
+};

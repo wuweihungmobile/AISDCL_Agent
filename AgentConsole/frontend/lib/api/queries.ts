@@ -6,14 +6,7 @@
  *  - 專案／目標／任務三層的計數互相牽動（goalsCount、tasksDone…），任何寫入成功就把三層快取全部標為過期，
  *    資料量小，換取「不會顯示過期計數」的簡單正確性。
  */
-import {
-  keepPreviousData,
-  useMutation,
-  useQueries,
-  useQuery,
-  useQueryClient,
-  type QueryClient,
-} from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQueries, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { bucketFor, rangeParams, type RangeId } from "@/lib/domain/metrics";
@@ -40,6 +33,7 @@ import {
   getProject,
   getProjectMetrics,
   getTask,
+  getTaskTotals,
   getTaskTrend,
   getTokenTrend,
   importSettings,
@@ -63,6 +57,7 @@ import {
   resetCategory,
   resetSetting,
   restoreExecution,
+  restoreProject,
   resumeExecution,
   retryTask,
   reviewExecution,
@@ -100,7 +95,6 @@ import type {
   ParsedResult,
   ParseResult,
   ProjectDetail,
-  ProjectSummary,
   ReportParams,
   ReviewDecision,
   StartExecutionRequest,
@@ -137,7 +131,7 @@ export const qk = {
   taskTrend: (projectId: string, q: MonitorQuery) => ["monitor", "task-trend", projectId, q] as const,
   alerts: (projectId: string, params: ListAlertsParams) => ["monitor", "alerts", projectId, params] as const,
   logs: (projectId: string, q: LogQuery) => ["monitor", "logs", projectId, q] as const,
-  weekCompleted: (projectId: string, weekStartIso: string) => ["dashboard", "week-completed", projectId, weekStartIso] as const,
+  taskTotals: (weekStartIso: string) => ["dashboard", "task-totals", weekStartIso] as const,
 };
 
 const POLL_MS = 30_000;
@@ -152,11 +146,7 @@ export const NOTIFICATION_POLL_MS = 30_000;
 
 /** 寫入成功後：三層快取全部標為過期（進行中的查詢會自動重抓）。 */
 export function invalidateTree(qc: QueryClient): Promise<unknown> {
-  return Promise.all([
-    qc.invalidateQueries({ queryKey: ["projects"] }),
-    qc.invalidateQueries({ queryKey: ["goals"] }),
-    qc.invalidateQueries({ queryKey: ["tasks"] }),
-  ]);
+  return Promise.all([qc.invalidateQueries({ queryKey: ["projects"] }), qc.invalidateQueries({ queryKey: ["goals"] }), qc.invalidateQueries({ queryKey: ["tasks"] })]);
 }
 
 function useEnabled(extra = true): boolean {
@@ -298,28 +288,22 @@ function useWrite<TVars, TData>(fn: (vars: TVars) => Promise<TData>) {
 }
 
 export const useCreateProject = () => useWrite((body: CreateProjectRequest) => createProject(body));
-export const useUpdateProject = () =>
-  useWrite((v: { id: string; body: UpdateProjectRequest }) => updateProject(v.id, v.body));
+export const useUpdateProject = () => useWrite((v: { id: string; body: UpdateProjectRequest }) => updateProject(v.id, v.body));
 export const useDeleteProject = () => useWrite((id: string) => deleteProject(id));
-export const useSignoffProject = () =>
-  useWrite((v: { id: string; approver: string }) => signoffProject(v.id, v.approver));
+/** 復原軟刪除的專案（C-3）：成功後三層快取全部標為過期（專案、目標、任務一併回來）。 */
+export const useRestoreProject = () => useWrite((id: string) => restoreProject(id));
+export const useSignoffProject = () => useWrite((v: { id: string; approver: string }) => signoffProject(v.id, v.approver));
 
-export const useCreateGoal = () =>
-  useWrite((v: { projectId: string; body: CreateGoalRequest }) => createGoal(v.projectId, v.body));
-export const useUpdateGoal = () =>
-  useWrite((v: { id: string; body: UpdateGoalRequest }) => updateGoal(v.id, v.body));
+export const useCreateGoal = () => useWrite((v: { projectId: string; body: CreateGoalRequest }) => createGoal(v.projectId, v.body));
+export const useUpdateGoal = () => useWrite((v: { id: string; body: UpdateGoalRequest }) => updateGoal(v.id, v.body));
 export const useDeleteGoal = () => useWrite((id: string) => deleteGoal(id));
-export const useSignoffGoal = () =>
-  useWrite((v: { id: string; approver: string }) => signoffGoal(v.id, v.approver));
+export const useSignoffGoal = () => useWrite((v: { id: string; approver: string }) => signoffGoal(v.id, v.approver));
 
-export const useCreateTask = () =>
-  useWrite((v: { goalId: string; body: CreateTaskRequest }) => createTask(v.goalId, v.body));
-export const useUpdateTask = () =>
-  useWrite((v: { id: string; body: UpdateTaskRequest }) => updateTask(v.id, v.body));
+export const useCreateTask = () => useWrite((v: { goalId: string; body: CreateTaskRequest }) => createTask(v.goalId, v.body));
+export const useUpdateTask = () => useWrite((v: { id: string; body: UpdateTaskRequest }) => updateTask(v.id, v.body));
 export const useDeleteTask = () => useWrite((id: string) => deleteTask(id));
 export const useRetryTask = () => useWrite((id: string) => retryTask(id));
-export const useSignoffTask = () =>
-  useWrite((v: { id: string; approver: string }) => signoffTask(v.id, v.approver));
+export const useSignoffTask = () => useWrite((v: { id: string; approver: string }) => signoffTask(v.id, v.approver));
 
 /**
  * 目標拖曳排序：先樂觀改寫專案詳情快取內的目標順序（畫面立即換位），
@@ -371,10 +355,7 @@ export function useNotificationSummary() {
 // ══ BRD/PRD 匯入（契約 §1.1）═════════════════════════════════════════════════
 /** 匯入記錄變動後：列表、詳情與通知摘要（pendingSignoffs 含 PARSED／REVIEWING 的匯入草案）都要重抓。 */
 function invalidateImports(qc: QueryClient): Promise<unknown> {
-  return Promise.all([
-    qc.invalidateQueries({ queryKey: ["imports"] }),
-    qc.invalidateQueries({ queryKey: ["notifications"] }),
-  ]);
+  return Promise.all([qc.invalidateQueries({ queryKey: ["imports"] }), qc.invalidateQueries({ queryKey: ["notifications"] })]);
 }
 
 /** 把變動直接合併進已快取的匯入詳情（畫面立即更新，不等重抓）；快取裡沒有就略過，交給重抓。 */
@@ -382,7 +363,10 @@ function patchImportDetail(qc: QueryClient, id: string, patch: Partial<ImportRec
   qc.setQueryData<ImportRecordDetail>(qk.importDetail(id), (old) => (old ? { ...old, ...patch } : old));
 }
 
-/** parse／PUT result 成功：狀態、樹與路徑更新；兩者都會撤銷 signoff 並清掉上一次的有界閘錯誤（契約 §1.1.3、§1.1.4）。 */
+/**
+ * parse／PUT result 成功：狀態、樹與路徑更新；兩者都會撤銷 signoff 並清掉上一次的有界閘錯誤（契約 §1.1.3、§1.1.4）；
+ * 記錄的 warnings 也以這次回傳的值覆寫（v1.2，C-10：重開記錄時黃色解析提示以記錄上的 warnings 為準）。
+ */
 function parseResultPatch(r: ParseResult): Partial<ImportRecordDetail> {
   return {
     status: r.status,
@@ -394,6 +378,7 @@ function parseResultPatch(r: ParseResult): Partial<ImportRecordDetail> {
     aiModel: r.aiModel,
     tokenUsed: r.tokenUsed,
     lastParseErrors: [],
+    warnings: r.warnings ?? [],
   };
 }
 
@@ -424,7 +409,13 @@ export function useUploadImport() {
     mutationFn: (file: File) => uploadImport(file),
     onSuccess: (record) => {
       // 先放一份基底詳情（原文要等重抓才有），讓接下來的解析流程馬上有東西可合併
-      qc.setQueryData<ImportRecordDetail>(qk.importDetail(record.id), { ...record, sourceContent: "", parsedResult: null });
+      qc.setQueryData<ImportRecordDetail>(qk.importDetail(record.id), {
+        ...record,
+        sourceContent: "",
+        parsedResult: null,
+        warnings: [],
+        parseOptions: null,
+      });
       return invalidateImports(qc);
     },
   });
@@ -439,6 +430,8 @@ export function useImportText() {
         ...record,
         sourceContent: body.content,
         parsedResult: null,
+        warnings: [],
+        parseOptions: null,
       });
       return invalidateImports(qc);
     },
@@ -450,7 +443,8 @@ export function useParseImport() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (v: { id: string; options: ParseOptions }) => parseImport(v.id, v.options),
-    onSuccess: (result, v) => patchImportDetail(qc, v.id, parseResultPatch(result)),
+    // 伺服器在進入 PARSING 時就把本次選項存進記錄（不論成敗，契約 §1.1.3）；成功時先在快取內同步，失敗由 onSettled 重抓
+    onSuccess: (result, v) => patchImportDetail(qc, v.id, { ...parseResultPatch(result), parseOptions: v.options }),
     onSettled: () => invalidateImports(qc),
   });
 }
@@ -555,8 +549,7 @@ function patchSettings(qc: QueryClient, updated: readonly Config[]): void {
 export function useUpdateSetting() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (v: { category: ConfigCategory; key: string; body: UpdateConfigRequest }) =>
-      updateSetting(v.category, v.key, v.body),
+    mutationFn: (v: { category: ConfigCategory; key: string; body: UpdateConfigRequest }) => updateSetting(v.category, v.key, v.body),
     onSuccess: (config) => patchSettings(qc, [config]),
   });
 }
@@ -570,8 +563,7 @@ export function useUpdateTokenGuard() {
 export function useResetSetting() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (v: { category: ConfigCategory; key: string; confirm?: boolean }) =>
-      resetSetting(v.category, v.key, v.confirm),
+    mutationFn: (v: { category: ConfigCategory; key: string; confirm?: boolean }) => resetSetting(v.category, v.key, v.confirm),
     onSuccess: (config) => patchSettings(qc, [config]),
   });
 }
@@ -582,8 +574,7 @@ export function useResetCategory() {
     onSuccess: (configs) => patchSettings(qc, configs),
   });
 }
-export const useTestConnection = () =>
-  useMutation({ mutationFn: (body?: TestConnectionRequest) => testConnection(body) });
+export const useTestConnection = () => useMutation({ mutationFn: (body?: TestConnectionRequest) => testConnection(body) });
 /** 匯出設定（ADMIN）：回 Blob＋檔名，由呼叫端觸發下載（apiDownload；不包封包）。 */
 export const useExportSettings = () => useMutation({ mutationFn: () => exportSettings() });
 export function useImportSettings() {
@@ -604,19 +595,11 @@ export const STEPS_MAX_PAGES = 5;
 
 /** 批次的狀態或專案狀態改變後要重抓的東西：批次列表／詳情／DAG／專案三層（專案會 EXECUTING⇄READY）／通知摘要。 */
 export function invalidateRuns(qc: QueryClient): Promise<unknown> {
-  return Promise.all([
-    qc.invalidateQueries({ queryKey: ["executions"] }),
-    invalidateTree(qc),
-    qc.invalidateQueries({ queryKey: ["notifications"] }),
-  ]);
+  return Promise.all([qc.invalidateQueries({ queryKey: ["executions"] }), invalidateTree(qc), qc.invalidateQueries({ queryKey: ["notifications"] })]);
 }
 
 /** 專案的執行批次列表（預設最新在前）；執行頁與監控頁的批次下拉、Dashboard 的最新批次進度共用。 */
-export function useProjectExecutions(
-  projectId: string | undefined,
-  params: ListExecutionsParams = { size: 20, sort: "startedAt,desc" },
-  opts: { pollMs?: number | false } = {},
-) {
+export function useProjectExecutions(projectId: string | undefined, params: ListExecutionsParams = { size: 20, sort: "startedAt,desc" }, opts: { pollMs?: number | false } = {}) {
   const enabled = useEnabled(Boolean(projectId));
   return useQuery({
     queryKey: qk.executions(projectId ?? "", params),
@@ -674,11 +657,7 @@ export function useExecutionSteps(runId: string | undefined | null, pollMs: numb
       const out: ExecutionStep[] = [];
       let after = 0;
       for (let i = 0; i < STEPS_MAX_PAGES; i++) {
-        const page = await listExecutionSteps(
-          runId as string,
-          { size: STEPS_PAGE_SIZE, afterSeq: after > 0 ? after : undefined },
-          { signal },
-        );
+        const page = await listExecutionSteps(runId as string, { size: STEPS_PAGE_SIZE, afterSeq: after > 0 ? after : undefined }, { signal });
         out.push(...page.content);
         if (page.content.length < STEPS_PAGE_SIZE) break;
         after = page.content[page.content.length - 1].stepNumber;
@@ -752,9 +731,7 @@ export function useReviewExecution() {
     onMutate: async (v) => {
       await qc.cancelQueries({ queryKey: qk.execution(v.runId) });
       const previous = qc.getQueryData<ExecutionRunDetail>(qk.execution(v.runId));
-      qc.setQueryData<ExecutionRunDetail>(qk.execution(v.runId), (old) =>
-        old ? { ...old, pendingReviews: old.pendingReviews.filter((r) => r.id !== v.reviewId) } : old,
-      );
+      qc.setQueryData<ExecutionRunDetail>(qk.execution(v.runId), (old) => (old ? { ...old, pendingReviews: old.pendingReviews.filter((r) => r.id !== v.reviewId) } : old));
       return { previous };
     },
     onError: (_error, v, ctx) => {
@@ -792,8 +769,7 @@ export function useProjectMetrics(projectId: string | undefined, q: MonitorQuery
   const enabled = useEnabled(Boolean(projectId));
   return useQuery({
     queryKey: qk.metrics(projectId ?? "", q),
-    queryFn: ({ signal }) =>
-      getProjectMetrics(projectId as string, { runId: q.runId, ...rangeParams(q.range) }, { signal }),
+    queryFn: ({ signal }) => getProjectMetrics(projectId as string, { runId: q.runId, ...rangeParams(q.range) }, { signal }),
     enabled,
     placeholderData: keepPreviousData,
     refetchInterval: pollMs,
@@ -804,8 +780,7 @@ export function useTokenTrend(projectId: string | undefined, q: MonitorQuery, po
   const enabled = useEnabled(Boolean(projectId));
   return useQuery({
     queryKey: qk.tokenTrend(projectId ?? "", q),
-    queryFn: ({ signal }) =>
-      getTokenTrend(projectId as string, { runId: q.runId, ...rangeParams(q.range), bucket: bucketFor(q.range) }, { signal }),
+    queryFn: ({ signal }) => getTokenTrend(projectId as string, { runId: q.runId, ...rangeParams(q.range), bucket: bucketFor(q.range) }, { signal }),
     enabled,
     placeholderData: keepPreviousData,
     refetchInterval: pollMs,
@@ -816,8 +791,7 @@ export function useTaskTrend(projectId: string | undefined, q: MonitorQuery, pol
   const enabled = useEnabled(Boolean(projectId));
   return useQuery({
     queryKey: qk.taskTrend(projectId ?? "", q),
-    queryFn: ({ signal }) =>
-      getTaskTrend(projectId as string, { runId: q.runId, ...rangeParams(q.range), bucket: bucketFor(q.range) }, { signal }),
+    queryFn: ({ signal }) => getTaskTrend(projectId as string, { runId: q.runId, ...rangeParams(q.range), bucket: bucketFor(q.range) }, { signal }),
     enabled,
     placeholderData: keepPreviousData,
     refetchInterval: pollMs,
@@ -863,68 +837,39 @@ export function useAcknowledgeAlert() {
       const snapshots = qc.getQueriesData<Alert[]>({ queryKey: ["monitor", "alerts"] });
       const now = new Date().toISOString();
       qc.setQueriesData<Alert[]>({ queryKey: ["monitor", "alerts"] }, (old) =>
-        old?.map((a) =>
-          a.id === alertId && !a.acknowledged
-            ? { ...a, acknowledged: true, acknowledgedBy: username || undefined, acknowledgedAt: now }
-            : a,
-        ),
+        old?.map((a) => (a.id === alertId && !a.acknowledged ? { ...a, acknowledged: true, acknowledgedBy: username || undefined, acknowledgedAt: now } : a)),
       );
       return { snapshots };
     },
     onError: (_error, _alertId, ctx) => {
       for (const [key, data] of ctx?.snapshots ?? []) qc.setQueryData(key, data);
     },
-    onSettled: () =>
-      Promise.all([
-        qc.invalidateQueries({ queryKey: ["monitor", "alerts"] }),
-        qc.invalidateQueries({ queryKey: ["notifications"] }),
-      ]),
+    onSettled: () => Promise.all([qc.invalidateQueries({ queryKey: ["monitor", "alerts"] }), qc.invalidateQueries({ queryKey: ["notifications"] })]),
   });
 }
 
-/** 匯出報表：回 Blob＋檔名，由呼叫端觸發下載（apiDownload；不包封包）；PDF 在 W5 前回 501。 */
-export const useDownloadReport = () =>
-  useMutation({ mutationFn: (v: { projectId: string; params: ReportParams }) => downloadProjectReport(v.projectId, v.params) });
+/** 匯出報表：回 Blob＋檔名，由呼叫端觸發下載（apiDownload；不包封包）；CSV 與 PDF 都回 200（v1.2，C-4）。 */
+export const useDownloadReport = () => useMutation({ mutationFn: (v: { projectId: string; params: ReportParams }) => downloadProjectReport(v.projectId, v.params) });
 
-// ══ Dashboard 的跨專案聚合（契約 §4.5 G-07、G-08；沒有全域端點，W5 再開）═══════════════════
-/** 「本週完成任務數」最多聚合幾個專案：每個專案 1 次請求，專案多時會吃限流額度，所以設上限（近似值，見 §4.6 G-G3）。 */
-export const WEEK_COMPLETED_MAX_PROJECTS = 30;
+// ══ Dashboard 的跨專案聚合（契約 §4.5 G-07、G-08）═══════════════════════════════════
 export const DASHBOARD_AGG_POLL_MS = 60_000;
 
 /**
- * 需要查「本週完成」的專案：非封存，且「有任務完成過」或正在執行（沒完成過任何任務又沒在跑的專案本週不可能有完成事件，省一次請求）；
- * 取最近更新的前 WEEK_COMPLETED_MAX_PROJECTS 個（輸入已依更新時間新到舊）。
+ * 「本週完成任務數」：GET /monitor/task-totals **一次**，取 `completed`（v1.2，C-1；契約 §1.3.8、§4.5 G-08）。
+ * from＝本週一 00:00（本機時區）轉 ISO-8601、to 省略＝現在；輪詢每 60 秒 1 次，分頁隱藏時 TanStack Query 預設不輪詢。
+ * 取代 v1.1 對各專案（最多 30 個）各打一次 task-trend 再加總的近似做法——那會讓單一總覽分頁穩態每分鐘約 31 次請求、
+ * 佔每使用者每分鐘 100 次額度的三成（QA DEF-AC-009）；現在請求數與專案數無關。
+ * `completed` 是步驟事件的列數，同一任務被還原重跑會重複計（語意同 task-trend）；畫面狀態由 isPending／isError 表達。
  */
-export function projectsForWeeklyCompleted(projects: readonly ProjectSummary[]): ProjectSummary[] {
-  return projects
-    .filter((p) => p.status !== "ARCHIVED" && (p.tasksDone > 0 || p.status === "EXECUTING"))
-    .slice(0, WEEK_COMPLETED_MAX_PROJECTS);
-}
-
-/**
- * 各專案 task-trend（from＝本週一 00:00、bucket=DAY）的 completed 加總。
- * 同一任務被還原重跑會重複計（近似值，契約 §4.6 G-G3）；只要有一個專案查詢失敗就標 partial，畫面據此不假裝精確。
- */
-export function useWeekCompletedTasks(projects: readonly ProjectSummary[], weekStartIso: string) {
+export function useWeekCompletedTasks(weekStartIso: string) {
   const enabled = useEnabled();
-  const targets = projectsForWeeklyCompleted(projects);
-  const results = useQueries({
-    queries: targets.map((p) => ({
-      queryKey: qk.weekCompleted(p.id, weekStartIso),
-      queryFn: ({ signal }: { signal: AbortSignal }) =>
-        getTaskTrend(p.id, { from: weekStartIso, to: new Date().toISOString(), bucket: "DAY" }, { signal }),
-      enabled,
-      staleTime: 30_000,
-      refetchInterval: DASHBOARD_AGG_POLL_MS,
-    })),
+  return useQuery({
+    queryKey: qk.taskTotals(weekStartIso),
+    queryFn: ({ signal }) => getTaskTotals({ from: weekStartIso }, { signal }),
+    enabled,
+    staleTime: 30_000,
+    refetchInterval: DASHBOARD_AGG_POLL_MS,
   });
-  const loading = enabled && results.some((r) => r.isPending);
-  const partial = results.some((r) => r.isError);
-  const total = results.reduce(
-    (sum, r) => sum + (r.data ?? []).reduce((s, point) => s + point.completed, 0),
-    0,
-  );
-  return { total, loading, partial, projects: targets.length };
 }
 
 /** 各「執行中」專案的最新批次（size=1）：Dashboard 的「執行中 run 數」與「進行中的執行」進度條。 */

@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -125,7 +125,21 @@ describe("執行頁：啟動執行（US-E-01、E-02、E-10）", () => {
       if (c.method === "POST" && c.path === "/api/v1/projects/p1/execute") {
         world.runs = [runSummary()];
         world.details.r1 = runDetail();
-        return { status: 201, data: { id: "r1", projectId: "p1", runNumber: 1, status: "RUNNING", bridgeStatus: "RUNNING", autonomyLevel: 3, scope: { mode: "ALL" }, totalTokensUsed: 0, tokenBudget: 200000, startedAt: "2026-10-15T08:30:12Z" } };
+        return {
+          status: 201,
+          data: {
+            id: "r1",
+            projectId: "p1",
+            runNumber: 1,
+            status: "RUNNING",
+            bridgeStatus: "RUNNING",
+            autonomyLevel: 3,
+            scope: { mode: "ALL" },
+            totalTokensUsed: 0,
+            tokenBudget: 200000,
+            startedAt: "2026-10-15T08:30:12Z",
+          },
+        };
       }
       return undefined;
     };
@@ -259,7 +273,19 @@ describe("執行頁：按鈕狀態機與控制動作（US-E-04、05、06、11）
     const { calls, world } = backend(withRun());
     world.extra = (c) =>
       c.method === "POST" && c.path === "/api/v1/executions/r1/pause"
-        ? { data: { id: "r1", projectId: "p1", runNumber: 1, status: "RUNNING", bridgeStatus: "PAUSING", autonomyLevel: 4, scope: { mode: "ALL" }, totalTokensUsed: 1240, startedAt: "2026-10-15T08:30:12Z" } }
+        ? {
+            data: {
+              id: "r1",
+              projectId: "p1",
+              runNumber: 1,
+              status: "RUNNING",
+              bridgeStatus: "PAUSING",
+              autonomyLevel: 4,
+              scope: { mode: "ALL" },
+              totalTokensUsed: 1240,
+              startedAt: "2026-10-15T08:30:12Z",
+            },
+          }
         : undefined;
     view();
     await userEvent.click(await screen.findByTestId("control-pause"));
@@ -269,10 +295,7 @@ describe("執行頁：按鈕狀態機與控制動作（US-E-04、05、06、11）
 
   it("按「恢復」：POST resume；後端 409 時 toast 顯示 reason 與 traceId，不吞錯", async () => {
     const { calls, world } = backend(withRun({ status: "PAUSED", bridgeStatus: "PAUSED" }));
-    world.extra = (c) =>
-      c.method === "POST" && c.path === "/api/v1/executions/r1/resume"
-        ? failure(409, { message: "草案未經人工審批，禁止執行", reason: "未經人工審批的草案不可執行" })
-        : undefined;
+    world.extra = (c) => (c.method === "POST" && c.path === "/api/v1/executions/r1/resume" ? failure(409, { message: "草案未經人工審批，禁止執行", reason: "未經人工審批的草案不可執行" }) : undefined);
     view();
     await userEvent.click(await screen.findByTestId("control-resume"));
     await waitFor(() => expect(post(calls, "/r1/resume")).toBeDefined());
@@ -283,7 +306,19 @@ describe("執行頁：按鈕狀態機與控制動作（US-E-04、05、06、11）
     const { calls, world } = backend(withRun());
     world.extra = (c) =>
       c.method === "POST" && c.path === "/api/v1/executions/r1/cancel"
-        ? { data: { id: "r1", projectId: "p1", runNumber: 1, status: "RUNNING", bridgeStatus: "CANCELLING", autonomyLevel: 4, scope: { mode: "ALL" }, totalTokensUsed: 1240, startedAt: "2026-10-15T08:30:12Z" } }
+        ? {
+            data: {
+              id: "r1",
+              projectId: "p1",
+              runNumber: 1,
+              status: "RUNNING",
+              bridgeStatus: "CANCELLING",
+              autonomyLevel: 4,
+              scope: { mode: "ALL" },
+              totalTokensUsed: 1240,
+              startedAt: "2026-10-15T08:30:12Z",
+            },
+          }
         : undefined;
     view();
     await userEvent.click(await screen.findByTestId("control-cancel"));
@@ -297,16 +332,25 @@ describe("執行頁：按鈕狀態機與控制動作（US-E-04、05、06、11）
     const { calls, world } = backend(withRun({ status: "PAUSED", bridgeStatus: "PAUSED" }));
     world.extra = (c) =>
       c.method === "POST" && c.path === "/api/v1/executions/r1/restore/c2"
-        ? { data: { id: "r1", projectId: "p1", runNumber: 1, status: "RUNNING", bridgeStatus: "RUNNING", autonomyLevel: 4, scope: { mode: "ALL" }, totalTokensUsed: 1240, startedAt: "2026-10-15T08:30:12Z" } }
+        ? {
+            data: {
+              id: "r1",
+              projectId: "p1",
+              runNumber: 1,
+              status: "RUNNING",
+              bridgeStatus: "RUNNING",
+              autonomyLevel: 4,
+              scope: { mode: "ALL" },
+              totalTokensUsed: 1240,
+              startedAt: "2026-10-15T08:30:12Z",
+            },
+          }
         : undefined;
     view();
     await userEvent.click(await screen.findByTestId("control-restore"));
     const dialog = await screen.findByTestId("checkpoint-dialog");
     const options = await within(dialog).findAllByTestId("checkpoint-option");
-    expect(options.map((o) => o.textContent)).toEqual([
-      expect.stringContaining("after-G1-T2"),
-      expect.stringContaining("after-G1-T1"),
-    ]);
+    expect(options.map((o) => o.textContent)).toEqual([expect.stringContaining("after-G1-T2"), expect.stringContaining("after-G1-T1")]);
     expect(options[0]).toHaveTextContent("還原後從 G2-T1 繼續");
     expect(within(dialog).getByTestId("checkpoint-confirm")).toBeDisabled();
     await userEvent.click(within(options[0]).getByRole("radio"));
@@ -372,7 +416,10 @@ describe("執行頁：執行進度卡（US-E-09 的進度、E-10 的 Token）", 
 });
 
 describe("執行頁：待審核項目與審核動作（US-E-07、E-08）", () => {
-  const reviews = (...items: ReturnType<typeof reviewItem>[]) => ({ runs: [runSummary({ status: "PAUSED" })], details: { r1: runDetail({ status: "PAUSED", bridgeStatus: "PAUSED", pendingReviews: items }) } });
+  const reviews = (...items: ReturnType<typeof reviewItem>[]) => ({
+    runs: [runSummary({ status: "PAUSED" })],
+    details: { r1: runDetail({ status: "PAUSED", bridgeStatus: "PAUSED", pendingReviews: items }) },
+  });
 
   it("每列：種類中文、原因、所屬目標／任務、查看任務連結；四顆按鈕依 allowedDecisions 啟用（TASK_CONFIRM 只有通過／拒絕）", async () => {
     backend(reviews(reviewItem()));
@@ -383,7 +430,9 @@ describe("執行頁：待審核項目與審核動作（US-E-07、E-08）", () =>
     expect(row).toHaveTextContent("基礎 / 設定");
     expect(within(row).getByTestId("review-task-link")).toHaveAttribute("href", "/projects/p1/goals/g1/tasks/t2");
     expect(screen.getByTestId("review-count")).toHaveTextContent("1");
-    const labels = within(row).getAllByRole("button").map((b) => b.textContent);
+    const labels = within(row)
+      .getAllByRole("button")
+      .map((b) => b.textContent);
     expect(labels).toEqual(["通過", "重試", "跳過", "拒絕"]);
     expect(screen.getByTestId("review-approve")).toBeEnabled();
     expect(screen.getByTestId("review-reject")).toBeEnabled();
@@ -479,6 +528,38 @@ describe("執行頁：待審核項目與審核動作（US-E-07、E-08）", () =>
   });
 });
 
+describe("執行頁：後端暫時不可用（DEF-AC-007；經 nginx 時 backend 重啟的那幾秒一律 502）", () => {
+  it("第一次就載不到專案（沒有任何資料）：顯示「無法載入專案」與重試", async () => {
+    stubApi(() => failure(502, { message: "Bad Gateway" }));
+    view();
+    expect(await screen.findByText("無法載入專案")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "重試" })).toBeInTheDocument();
+    expect(screen.queryByTestId("execute-view")).toBeNull();
+  });
+
+  it("已載入之後的背景重抓失敗（502）：整頁不換成錯誤畫面——標題、串流狀態點、日誌與審核卡都還在，等後端恢復後自己回來", async () => {
+    vi.stubGlobal("EventSource", FakeEventSource);
+    backend({ runs: [runSummary({ status: "RUNNING" })], details: { r1: runDetail() } });
+    const client = makeClient();
+    render(
+      <Providers client={client}>
+        <ExecuteView />
+      </Providers>,
+    );
+    await screen.findByRole("heading", { name: "專案執行：AISDLC Core Platform" });
+    await screen.findByTestId("sse-status");
+
+    stubApi(() => failure(502, { message: "Bad Gateway" })); // 此後所有請求都是 502
+    await act(async () => {
+      await client.invalidateQueries({ queryKey: ["projects"] }); // 例如串流事件之後的去抖重抓
+    });
+    await waitFor(() => expect(client.getQueryState(["projects", "detail", "p1"])?.status).toBe("error"));
+    expect(screen.queryByText("無法載入專案")).toBeNull(); // 缺陷版本：整頁換成錯誤，串流狀態點與日誌一併消失
+    expect(screen.getByRole("heading", { name: "專案執行：AISDLC Core Platform" })).toBeInTheDocument();
+    for (const id of ["sse-status", "log-card", "review-card"]) expect(screen.getByTestId(id)).toBeInTheDocument();
+  });
+});
+
 describe("執行頁：批次下拉（預設最新；切換重訂閱）", () => {
   it("列出批次（最新標示、狀態、開始時間）；切換後改看該批次的詳情，兩條串流重新連到新批次", async () => {
     vi.stubGlobal("EventSource", FakeEventSource);
@@ -499,6 +580,22 @@ describe("執行頁：批次下拉（預設最新；切換重訂閱）", () => {
     await waitFor(() => expect(FakeEventSource.instances.length).toBe(4));
     expect(FakeEventSource.instances[0].closed).toBe(true);
     expect(FakeEventSource.lastOf("logs")!.url).toContain("/executions/r1/logs");
+  });
+
+  it("批次列表項的 bridgeStatus（契約 §1.2.2，C-11）：RUNNING＋PAUSING 時下拉的狀態字樣是「暫停中」並附晶片；切到已完成的批次，晶片消失", async () => {
+    vi.stubGlobal("EventSource", FakeEventSource);
+    backend({
+      runs: [runSummary({ id: "r2", runNumber: 2, status: "RUNNING", bridgeStatus: "PAUSING" }), runSummary({ id: "r1", runNumber: 1, status: "COMPLETED" })],
+      details: { r2: runDetail({ id: "r2", runNumber: 2, bridgeStatus: "PAUSING" }), r1: runDetail({ id: "r1", runNumber: 1, status: "COMPLETED", bridgeStatus: "COMPLETED" }) },
+    });
+    view();
+    const select = (await screen.findByTestId("run-select")) as HTMLSelectElement;
+    expect([...select.options].map((o) => o.text.split(" · ").slice(0, 2).join(" · "))).toEqual(["Run #2（最新） · 暫停中", "Run #1 · 已完成"]);
+    expect(await screen.findByTestId("bridge-chip")).toHaveTextContent("暫停中");
+    expect(screen.getByTestId("bridge-chip")).toHaveAttribute("data-bridge", "PAUSING");
+
+    await userEvent.selectOptions(select, "r1");
+    await waitFor(() => expect(screen.queryByTestId("bridge-chip")).toBeNull());
   });
 });
 

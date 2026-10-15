@@ -1,18 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { ParsedResult } from "@/lib/api/types";
-import {
-  blankGoal,
-  blankTask,
-  countTasks,
-  isTreeDirty,
-  toParsedResult,
-  toTree,
-  treeReducer,
-  treeSignature,
-  uniqueGoalKey,
-  type Tree,
-} from "./tree";
+import { blankGoal, blankTask, countTasks, isTreeDirty, toParsedResult, toTree, treeReducer, treeSignature, uniqueGoalKey, type Tree } from "./tree";
 
 /** 契約 E2E-01 的 S-OK 解析結果（g1 兩個任務、g2 一個任務且依賴 g1），再加上伺服器擁有的欄位。 */
 const SERVER_TREE: ParsedResult = {
@@ -102,6 +91,22 @@ describe("契約 ⇄ 編輯樹", () => {
     }
   });
 
+  it("DEF-AC-001：真後端對 AI 解析的任務回 maxRetries: null（契約 §0.2：與缺席等價）——不當成「有值」送回，也不讓樹被誤判成未儲存編輯", () => {
+    // 型別宣告只有 number | undefined，但真後端實際回 null：用斷言模擬線上資料，才測得到執行期行為
+    const nullRetries = null as unknown as number;
+    const fromServer: ParsedResult = {
+      ...SERVER_TREE,
+      goals: SERVER_TREE.goals.map((g) => ({ ...g, tasks: g.tasks.map((t) => ({ ...t, maxRetries: nullRetries })) })),
+    };
+    const tree = toTree(fromServer);
+    const baseline = treeSignature(tree);
+    for (const goal of toParsedResult(tree).goals) for (const t of goal.tasks) expect(t, "null 不送").not.toHaveProperty("maxRetries");
+    // 對話框不改欄位就按確定：patch.maxRetries 為 undefined（欄位空白）→ 與伺服器版本一致，不算未儲存編輯
+    const uid = tree.goals[0].tasks[0].uid;
+    const same = treeReducer(tree, { type: "editTask", goalKey: "g1", uid, patch: { maxRetries: undefined } });
+    expect(isTreeDirty(same, baseline)).toBe(false);
+  });
+
   it("autonomyLevel 缺席時預設 3（契約 §1.1.6：parsedResult.project.autonomyLevel ?? 3）；目標缺 key 時補不衝突的 g<n>", () => {
     const sparse = toTree({
       project: { name: "p", executionPath: "/x", passCriteria: "c" },
@@ -175,7 +180,10 @@ describe("編輯操作（reducer）", () => {
     const next = treeReducer(fresh(), { type: "moveGoal", activeKey: "g2", overKey: "g1" });
     expect(names(next)).toEqual(["核心", "基礎"]);
     const out = toParsedResult(next);
-    expect(out.goals.map((g) => [g.key, g.sortOrder])).toEqual([["g2", 0], ["g1", 1]]);
+    expect(out.goals.map((g) => [g.key, g.sortOrder])).toEqual([
+      ["g2", 0],
+      ["g1", 1],
+    ]);
     expect(out.goals[0].dependsOn).toEqual(["g1"]);
   });
 

@@ -19,7 +19,8 @@ const buttonVariants = cva(
       variant: {
         solid: "bg-wg-primary text-white hover:bg-wg-primary-strong",
         accent: "bg-wg-accent text-white hover:bg-wg-accent-strong",
-        ghost: "bg-transparent text-wg-text hover:bg-wg-base hover:text-wg-primary",
+        // hover 底是 bg-base：主色字在它上面只有 4.22:1，所以 hover 字色用 primary-strong（6.02:1；DEF-AC-004）
+        ghost: "bg-transparent text-wg-text hover:bg-wg-base hover:text-wg-primary-strong",
       },
       size: {
         sm: "gap-1.5 px-4 py-1.5 text-sm",
@@ -42,19 +43,7 @@ export type ButtonProps = React.ComponentProps<"button"> &
     loading?: boolean;
   };
 
-export function Button({
-  className,
-  variant,
-  size,
-  asChild = false,
-  iconLeft: IconLeft,
-  iconRight: IconRight,
-  loading = false,
-  disabled,
-  children,
-  type = "button",
-  ...props
-}: ButtonProps) {
+export function Button({ className, variant, size, asChild = false, iconLeft: IconLeft, iconRight: IconRight, loading = false, disabled, children, type = "button", ...props }: ButtonProps) {
   const px = ICON_PX[size ?? "md"];
   if (asChild) {
     // asChild：樣式與屬性交給唯一的子元素（例如 <Link>）；圖示要放進子元素內部，才會和文字一起落在連結裡
@@ -76,14 +65,7 @@ export function Button({
     );
   }
   return (
-    <button
-      data-slot="button"
-      type={type}
-      disabled={disabled || loading}
-      aria-busy={loading || undefined}
-      className={cn(buttonVariants({ variant, size }), className)}
-      {...props}
-    >
+    <button data-slot="button" type={type} disabled={disabled || loading} aria-busy={loading || undefined} className={cn(buttonVariants({ variant, size }), className)} {...props}>
       {loading ? <Spinner size={px} tone="onSolid" /> : IconLeft ? <IconLeft size={px} aria-hidden /> : null}
       {children}
       {IconRight ? <IconRight size={px} aria-hidden /> : null}

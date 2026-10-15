@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import { expectNoA11yViolations } from "./a11y";
 import { Engine, FIRST_TOKEN, GOAL_IDS, PROJECT_ID, TASKS, type EngineOptions } from "./execFixture";
 import { collectConsoleErrors, compose, installApiMock, signInAs, snap, type MockHandler } from "./mockApi";
 
@@ -69,6 +70,7 @@ test.describe("專案執行頁（route mock＋假引擎 SSE）", () => {
     await expect(page.getByTestId("control-start")).toBeDisabled();
     await expect(page.getByTestId("control-start")).toHaveAttribute("title", /草案未經 signoff/);
     await expect(page.getByTestId("progress-card")).toContainText("尚未啟動執行");
+    await expectNoA11yViolations(page, "執行頁（鎖定橫幅）");
     await snap(page, "07-execute-locked.png", { tall: true });
 
     await page.getByRole("button", { name: "前往審批" }).click();
@@ -134,6 +136,7 @@ test.describe("專案執行頁（route mock＋假引擎 SSE）", () => {
     engine.finishCurrent();
     await expect(page.getByTestId("progress-tasks")).toHaveText("2 / 3 任務完成");
     await expect(page.getByTestId("token-warning")).toContainText("Token 已超出預算");
+    await expectNoA11yViolations(page, "執行頁（進行中：進度、DAG、日誌、Token 超出預算）");
     await snap(page, "07-execute-running.png", { tall: true });
 
     // 引擎原始輸出預設隱藏、可開；搜尋過濾顯示「符合 / 全部」行數
@@ -162,6 +165,7 @@ test.describe("專案執行頁（route mock＋假引擎 SSE）", () => {
     await expect(page.getByTestId("control-start")).toBeEnabled(); // 終態批次：可再啟動
     await expect(page.getByTestId("exec-level")).toBeEnabled();
     await expect(page.getByTestId("run-select")).toContainText("已完成"); // 批次列表也跟著狀態變化重抓（invalidateRuns），不是停在「執行中」
+    await expectNoA11yViolations(page, "執行頁（批次完成）");
     await snap(page, "07-execute-completed.png", { tall: true });
 
     // 終態批次也可從斷點恢復（契約 §1.2.10）：三個斷點，最新那個已跑完所有步驟
@@ -238,10 +242,16 @@ test.describe("專案執行頁（route mock＋假引擎 SSE）", () => {
     await expect(page.getByTestId("control-pause")).toHaveText("暫停中…");
     await expect(page.getByTestId("control-pause")).toBeDisabled();
     await expect(page.getByTestId("run-status")).toContainText("暫停中");
+    // 批次列表項也帶 bridgeStatus（契約 §1.2.2，C-11）：暫停後的重抓讓下拉的狀態字樣與選中批次的晶片都是「暫停中」
+    await expect(page.getByTestId("run-select")).toContainText("暫停中");
+    await expect(page.getByTestId("bridge-chip")).toHaveText("暫停中");
+    await expect(page.getByTestId("bridge-chip")).toHaveAttribute("data-bridge", "PAUSING");
 
     engine.finishCurrent(); // 步驟邊界：真的停下
     await expect(page.getByTestId("run-status")).toContainText("已暫停");
+    // 暫停原因只在 SSE 事件裡（假引擎的 REST 詳情沒有它），事件後的去抖重抓會把它換掉：先驗它，再驗列表的晶片
     await expect(page.getByTestId("run-reason")).toContainText("在步驟邊界暫停");
+    await expect(page.getByTestId("bridge-chip")).toHaveCount(0); // 過渡結束（列表重抓後），晶片消失
     await expect(page.getByTestId("control-resume")).toBeEnabled();
     await expect(page.getByTestId("control-restore")).toBeEnabled();
     await expect(page.getByTestId("run-select")).toContainText("已暫停");
@@ -504,8 +514,14 @@ test.describe("專案執行頁（route mock＋假引擎 SSE）", () => {
     await expect(page.getByTestId("progress-tasks")).toHaveText("1 / 3 任務完成");
     await expect(page.getByTestId("sse-status")).toHaveAttribute("data-state", "open", { timeout: 30_000 });
     const attempts = engine.sseConnections.slice(before);
-    expect(attempts.some((c) => c.status === 401 && c.token === FIRST_TOKEN), "舊 token 被拒").toBe(true);
-    expect(attempts.some((c) => c.status === 200 && c.token !== FIRST_TOKEN && c.token?.startsWith(FIRST_TOKEN)), "換新 token 後連上").toBe(true);
+    expect(
+      attempts.some((c) => c.status === 401 && c.token === FIRST_TOKEN),
+      "舊 token 被拒",
+    ).toBe(true);
+    expect(
+      attempts.some((c) => c.status === 200 && c.token !== FIRST_TOKEN && c.token?.startsWith(FIRST_TOKEN)),
+      "換新 token 後連上",
+    ).toBe(true);
     expect(calls.some((c) => c.method === "POST" && c.path === "/api/v1/auth/refresh")).toBe(true);
     await expect(page.getByTestId("log-line").filter({ hasText: "完成：初始化" })).toHaveCount(1);
     expectClean(errors, unhandled, { dropsConnections: true });
@@ -531,6 +547,52 @@ test.describe("專案執行頁（route mock＋假引擎 SSE）", () => {
     expect(engine.sseConnections.slice(before).filter((c) => c.status === 503)).toHaveLength(4);
     const backfill = calls.filter((c) => c.method === "GET" && c.path.endsWith("/steps") && c.query.has("afterSeq"));
     expect(backfill.length, "連續失敗兩次以上才改用 REST 回補（steps?afterSeq=）").toBeGreaterThan(0);
+    for (const name of ["初始化", "設定"]) {
+      await expect(page.getByTestId("log-line").filter({ hasText: `完成：${name}` })).toHaveCount(1);
+    }
+    expectClean(errors, unhandled, { dropsConnections: true });
+  });
+
+  test("後端整個暫時不可用（nginx 回 502；DEF-AC-007）：換新失敗不登出——session 原封不動、留在執行頁、狀態點「重新連線中」；恢復後換新並自動連回，日誌不丟不重複", async ({ page }) => {
+    const { engine, calls, errors, unhandled } = await open(page);
+    await page.getByTestId("control-start").click();
+    await expect(page.getByTestId("run-number")).toHaveText("Run #1");
+    await expect(page.getByTestId("sse-status")).toHaveAttribute("data-state", "open");
+    engine.startNext();
+    engine.finishCurrent();
+    await expect(page.getByTestId("progress-tasks")).toHaveText("1 / 3 任務完成");
+    const session = () => page.evaluate(() => window.sessionStorage.getItem("aisdlc.console.session"));
+    const before = await session();
+    expect(before).toContain("mock-refresh-token");
+
+    // 後端整個掛掉：REST、換新、串流一律 502；舊 token 同時失效（恢復後要靠換新才連得回來）；既有連線被切斷
+    const refreshCount = () => calls.filter((c) => c.method === "POST" && c.path === "/api/v1/auth/refresh").length;
+    engine.setOutage(true);
+    engine.expireTokens();
+    engine.dropStreams();
+    await expect(page.getByTestId("sse-status")).toHaveAttribute("data-state", "reconnecting");
+    // 等到「強制換新被 502」至少發生一次——缺陷版本就在這一刻清掉 session、把頁面導向 /login
+    await expect.poll(refreshCount, { timeout: 30_000 }).toBeGreaterThan(0);
+    await page.waitForTimeout(3_000);
+    expect(new URL(page.url()).pathname, "不得被導向 /login").toBe(EXEC_URL);
+    expect(await session(), "session 原封不動（沒清、也沒被換掉）").toBe(before);
+    await expect(page.getByTestId("sse-status")).toHaveAttribute("data-state", "reconnecting"); // 不是「連線失敗」
+    expect(refreshCount()).toBeGreaterThan(0);
+
+    // 斷線期間引擎照常工作；後端恢復
+    engine.startNext();
+    engine.finishCurrent();
+    engine.setOutage(false);
+    await expect(page.getByTestId("sse-status")).toHaveAttribute("data-state", "open", { timeout: 60_000 });
+    await expect(page.getByTestId("progress-tasks")).toHaveText("2 / 3 任務完成");
+    expect(new URL(page.url()).pathname).toBe(EXEC_URL);
+    expect(await session(), "恢復後換新成功：session 換成新的 token").not.toBe(before);
+    expect(await session()).toMatch(/"refreshToken":"mock-refresh-token-\d+"/); // 換發的 refresh token（編號依換新次數，兩條串流可能各換一次）
+    expect(
+      engine.sseConnections.some((c) => c.status === 200 && c.token !== FIRST_TOKEN && c.token?.startsWith(FIRST_TOKEN)),
+      "用換發的新 token 連上",
+    ).toBe(true);
+    expect(engine.sseConnections.filter((c) => c.status === 502).length, "停機期間串流被 502 擋下").toBeGreaterThan(0);
     for (const name of ["初始化", "設定"]) {
       await expect(page.getByTestId("log-line").filter({ hasText: `完成：${name}` })).toHaveCount(1);
     }

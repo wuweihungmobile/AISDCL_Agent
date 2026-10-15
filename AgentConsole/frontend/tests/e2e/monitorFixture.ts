@@ -30,6 +30,9 @@ const metric = (value: number | null, previousValue?: number | null) => ({
 
 export const CSV_FILENAME = "monitor-report-20261015.csv";
 export const CSV_BODY = "runNumber,status,tokens\n1,COMPLETED,3720\n2,FAILED,1240\n3,RUNNING,1240\n";
+/** PDF 報表（v1.2，C-4）：回 200 application/pdf；本文是假的 PDF 前綴，足以驗證「前端把位元組原樣存成 .pdf」 */
+export const PDF_FILENAME = "monitor-report-20261015.pdf";
+export const PDF_BODY = "%PDF-1.7\n% mock monitor report\n";
 
 /** 一批 45 筆日誌（由新到舊：index 0 最新）：每 9 筆有 1 筆 ERROR、每 3 筆有 1 筆 WARN，其餘 INFO；任務交替落在 T1／T2。 */
 export function makeLogs(now = Date.now()): LogRow[] {
@@ -41,7 +44,12 @@ export function makeLogs(now = Date.now()): LogRow[] {
       timestamp: new Date(now - i * 60_000).toISOString(),
       level,
       source: "STEP",
-      message: level === "ERROR" ? `失敗：${task.name}（${task.stepId}）：測試未通過 #${i}` : level === "WARN" ? `重試：${task.name}（${task.stepId}，第 2 次） #${i}` : `完成：${task.name}（${task.stepId}） #${i}`,
+      message:
+        level === "ERROR"
+          ? `失敗：${task.name}（${task.stepId}）：測試未通過 #${i}`
+          : level === "WARN"
+            ? `重試：${task.name}（${task.stepId}，第 2 次） #${i}`
+            : `完成：${task.name}（${task.stepId}） #${i}`,
       taskId: task.id,
       stepId: task.stepId,
     };
@@ -63,9 +71,41 @@ export class MonitorWorld {
     const run = (n: number) => this.engine.runs.find((r) => r.runNumber === n)?.id;
     const t = (minAgo: number) => new Date(Date.now() - minAgo * 60_000).toISOString();
     this.alerts = [
-      { id: "a1000000-0000-4000-8000-000000000001", projectId: PROJECT_ID, runId: run(3), rule: "TOKEN_BUDGET_WARNING", severity: "WARNING", subject: `run:${run(3)}`, message: "Token 使用量已達預算的 80%（1,240 / 1,500）", createdAt: t(2), acknowledged: false },
-      { id: "a1000000-0000-4000-8000-000000000002", projectId: PROJECT_ID, runId: run(2), rule: "CONSECUTIVE_FAILURES", severity: "CRITICAL", subject: `task:${TASKS[2].id}`, message: "任務「實作」連續失敗 2 次", createdAt: t(30), acknowledged: false },
-      { id: "a1000000-0000-4000-8000-000000000003", projectId: PROJECT_ID, runId: run(2), rule: "ENGINE_ESCALATION", severity: "CRITICAL", subject: "step:G2-T1", message: "引擎升級（ESCALATION）：評估未通過", createdAt: t(31), acknowledged: true, acknowledgedBy: "admin", acknowledgedAt: t(20) },
+      {
+        id: "a1000000-0000-4000-8000-000000000001",
+        projectId: PROJECT_ID,
+        runId: run(3),
+        rule: "TOKEN_BUDGET_WARNING",
+        severity: "WARNING",
+        subject: `run:${run(3)}`,
+        message: "Token 使用量已達預算的 80%（1,240 / 1,500）",
+        createdAt: t(2),
+        acknowledged: false,
+      },
+      {
+        id: "a1000000-0000-4000-8000-000000000002",
+        projectId: PROJECT_ID,
+        runId: run(2),
+        rule: "CONSECUTIVE_FAILURES",
+        severity: "CRITICAL",
+        subject: `task:${TASKS[2].id}`,
+        message: "任務「實作」連續失敗 2 次",
+        createdAt: t(30),
+        acknowledged: false,
+      },
+      {
+        id: "a1000000-0000-4000-8000-000000000003",
+        projectId: PROJECT_ID,
+        runId: run(2),
+        rule: "ENGINE_ESCALATION",
+        severity: "CRITICAL",
+        subject: "step:G2-T1",
+        message: "引擎升級（ESCALATION）：評估未通過",
+        createdAt: t(31),
+        acknowledged: true,
+        acknowledgedBy: "admin",
+        acknowledgedAt: t(20),
+      },
     ];
   }
 
@@ -122,7 +162,19 @@ export class MonitorWorld {
   readonly handler: MockHandler = (call): MockReply => {
     const { method, path, query } = call;
     if (method === "GET" && path === "/api/v1/settings/monitor") {
-      const cfg = (key: string, value: string, valueType: string) => ({ id: `c0ffee00-0000-4000-8000-0000000000${key.length}`, category: "monitor", key, value, valueType, defaultValue: value, description: key, isEncrypted: false, hasValue: true, effect: "CONSOLE", updatedAt: new Date().toISOString() });
+      const cfg = (key: string, value: string, valueType: string) => ({
+        id: `c0ffee00-0000-4000-8000-0000000000${key.length}`,
+        category: "monitor",
+        key,
+        value,
+        valueType,
+        defaultValue: value,
+        description: key,
+        isEncrypted: false,
+        hasValue: true,
+        effect: "CONSOLE",
+        updatedAt: new Date().toISOString(),
+      });
       return { data: [cfg("refreshIntervalMs", this.refreshIntervalMs, "INT")] };
     }
     const ack = /^\/api\/v1\/monitor\/alerts\/([^/]+)\/acknowledge$/.exec(path);
@@ -154,7 +206,13 @@ export class MonitorWorld {
       }
       case "task-trend":
         return {
-          data: this.buckets(query.get("bucket") ?? "HOUR", to).map((bucketStart, i) => ({ bucketStart, started: [1, 2, 0, 3, 1][i % 5], completed: [1, 1, 0, 2, 1][i % 5], failed: [0, 1, 0, 1, 0][i % 5], retried: [0, 1, 0, 0, 1][i % 5] })),
+          data: this.buckets(query.get("bucket") ?? "HOUR", to).map((bucketStart, i) => ({
+            bucketStart,
+            started: [1, 2, 0, 3, 1][i % 5],
+            completed: [1, 1, 0, 2, 1][i % 5],
+            failed: [0, 1, 0, 1, 0][i % 5],
+            retried: [0, 1, 0, 0, 1][i % 5],
+          })),
         };
       case "alerts": {
         const runId = query.get("runId");
@@ -165,7 +223,9 @@ export class MonitorWorld {
         return { data: this.logsPage(query) };
       default: {
         // report
-        if (query.get("format") === "pdf") return { status: 501, error: { message: "PDF 報表尚未提供（W5）", reason: "PDF 報表尚未提供（W5）" } };
+        if (query.get("format") === "pdf") {
+          return { status: 200, raw: PDF_BODY, headers: { "content-type": "application/pdf", "content-disposition": `attachment; filename="${PDF_FILENAME}"` } };
+        }
         return { status: 200, raw: CSV_BODY, headers: { "content-type": "text/csv;charset=UTF-8", "content-disposition": `attachment; filename="${CSV_FILENAME}"` } };
       }
     }

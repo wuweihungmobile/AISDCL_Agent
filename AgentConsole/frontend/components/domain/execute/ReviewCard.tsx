@@ -23,17 +23,7 @@ export type DecideHandler = (review: ReviewItem, decision: ReviewDecision, comme
  * 按鈕是否可按＝後端給的 review.allowedDecisions（ESCALATED 沒有「通過」、gate 類沒有「跳過」）；
  * 按下去先開確認對話框（顯示原因與後果、可填意見），確認後才送出 POST review。
  */
-export function ReviewCard({
-  projectId,
-  reviews,
-  canWrite,
-  onDecide,
-}: {
-  projectId: string;
-  reviews: readonly ReviewItem[];
-  canWrite: boolean;
-  onDecide: DecideHandler;
-}) {
+export function ReviewCard({ projectId, reviews, canWrite, onDecide }: { projectId: string; reviews: readonly ReviewItem[]; canWrite: boolean; onDecide: DecideHandler }) {
   const [picked, setPicked] = useState<{ review: ReviewItem; decision: ReviewDecision } | null>(null);
 
   return (
@@ -98,13 +88,7 @@ export function ReviewCard({
       <Dialog open={picked !== null} onOpenChange={(open) => !open && setPicked(null)}>
         {picked ? (
           <DialogContent title={`${REVIEW_DECISION_LABEL[picked.decision]}：${reviewKind(picked.review.kind).label}`} description="審核決定會寫入審核人與時間">
-            <ReviewBody
-              key={picked.review.id}
-              review={picked.review}
-              decision={picked.decision}
-              onClose={() => setPicked(null)}
-              onDecide={onDecide}
-            />
+            <ReviewBody key={picked.review.id} review={picked.review} decision={picked.decision} onClose={() => setPicked(null)} onDecide={onDecide} />
           </DialogContent>
         ) : null}
       </Dialog>
@@ -112,17 +96,7 @@ export function ReviewCard({
   );
 }
 
-function ReviewBody({
-  review,
-  decision,
-  onClose,
-  onDecide,
-}: {
-  review: ReviewItem;
-  decision: ReviewDecision;
-  onClose: () => void;
-  onDecide: DecideHandler;
-}) {
+function ReviewBody({ review, decision, onClose, onDecide }: { review: ReviewItem; decision: ReviewDecision; onClose: () => void; onDecide: DecideHandler }) {
   const [comment, setComment] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);

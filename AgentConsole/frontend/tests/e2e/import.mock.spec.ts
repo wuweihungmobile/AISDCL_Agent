@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import { expectNoA11yViolations } from "./a11y";
 import { collectConsoleErrors, compose, fail, installApiMock, paged, shellHandler, signInAs, snap, type MockHandler } from "./mockApi";
 
 /**
@@ -51,6 +52,9 @@ const GATE_ERRORS = [
 
 const BRD = `# BRD：E2E 匯入專案\n\n## 基礎\n建立專案骨架與設定環境，確保任何人 clone 之後都能一鍵啟動。\n\n## 核心\n實作核心模組並補上單元測試，覆蓋率達標才算完成。\n\n（以上為測試用需求文件，長度刻意超過 200 字元以走路徑 B）${"細節描述。".repeat(20)}`;
 
+type Warning = { code: string; detail: string; location?: string };
+type ParseOpts = { autonomyLevel: number; executionPath: string; additionalPrompt?: string; specDir?: string };
+
 type Rec = {
   id: string;
   sourceType: string;
@@ -67,11 +71,20 @@ type Rec = {
   lastParseErrors?: unknown[];
   sourceContent: string;
   parsedResult: typeof TREE | null;
+  /** 契約 §1.1.9（v1.2，C-10）：最近一次成功的 parse／PUT result 的黃色解析提示；GET /import/{id} 永遠帶（沒有就是 []） */
+  warnings?: Warning[];
+  /** 契約 §1.1.9：最近一次 parse 請求的選項（進入 PARSING 時寫入，不論成敗）；從未 parse 過為 null */
+  parseOptions?: ParseOpts | null;
 };
 
-/** 列表與寫入端點回的 ImportRecordResponse：不含原文與解析結果（那兩欄只在 GET /import/{id}） */
-const summary = (r: Rec) =>
-  Object.fromEntries(Object.entries(r).filter(([key]) => key !== "sourceContent" && key !== "parsedResult"));
+/** 列表與寫入端點回的 ImportRecordResponse：不含原文與解析結果（那兩欄只在 GET /import/{id}），也不含 v1.2 的 warnings／parseOptions */
+const summary = (r: Rec) => Object.fromEntries(Object.entries(r).filter(([key]) => !["sourceContent", "parsedResult", "warnings", "parseOptions"].includes(key)));
+
+/** GET /import/{id} 的詳情（契約 §1.1.9）：warnings 永遠出現、parseOptions 從未 parse 過為 null */
+const detailOf = (r: Rec) => ({ ...r, warnings: r.warnings ?? [], parseOptions: r.parseOptions ?? null });
+
+/** PUT result 之後重算的解析提示（只含仍成立者；mock 固定回一條佔位警告） */
+const PLACEHOLDER_WARNING: Warning = { code: "passcriteria_placeholder", detail: "通過標準為佔位字串，請於 signoff 前補齊", location: "goals[1].tasks[0]" };
 
 /** 一份「假後端」：狀態轉移照契約 §1.1（UPLOADED→PARSED→REVIEWING→IMPORTED），可切換 parse／PUT 的 422 模式。 */
 function createServer(initial: Rec[] = []) {
@@ -79,6 +92,8 @@ function createServer(initial: Rec[] = []) {
     records: new Map<string, Rec>(initial.map((r) => [r.id, r])),
     parseMode: "ok" as "ok" | "gate",
     putMode: "ok" as "ok" | "gate",
+    /** parse 成功時回傳（並存進記錄）的黃色解析提示 */
+    parseWarnings: [] as Warning[],
     parseDelayMs: 0,
     uploadStatus: 201 as 201 | 413,
     tree: structuredClone(TREE),
@@ -119,9 +134,22 @@ function createServer(initial: Rec[] = []) {
       if (method === "GET" && p && p[1] === PROJECT_ID) {
         return {
           data: {
-            id: PROJECT_ID, name: "E2E 匯入專案", executionPath: "/e2e/proj-import", passCriteria: "三個目標全部完成", description: "由 BRD 匯入",
-            status: "DRAFT", autonomyLevel: 4, signedOff: true, signedOffBy: "operator", signedOffAt: NOW, goalsCount: 2, tasksCount: 3, tasksDone: 0,
-            createdAt: NOW, updatedAt: NOW, createdBy: "operator",
+            id: PROJECT_ID,
+            name: "E2E 匯入專案",
+            executionPath: "/e2e/proj-import",
+            passCriteria: "三個目標全部完成",
+            description: "由 BRD 匯入",
+            status: "DRAFT",
+            autonomyLevel: 4,
+            signedOff: true,
+            signedOffBy: "operator",
+            signedOffAt: NOW,
+            goalsCount: 2,
+            tasksCount: 3,
+            tasksDone: 0,
+            createdAt: NOW,
+            updatedAt: NOW,
+            createdBy: "operator",
             goals: [
               { id: "g-1", name: "基礎", status: "PENDING", sortOrder: 0, signedOff: true, taskCount: 2, completedTaskCount: 0 },
               { id: "g-2", name: "核心", status: "PENDING", sortOrder: 1, signedOff: true, taskCount: 1, completedTaskCount: 0 },
@@ -135,11 +163,12 @@ function createServer(initial: Rec[] = []) {
     if (!rec) return fail(404, { message: `匯入記錄不存在或已刪除：${m[1]}` });
     const action = m[2];
 
-    if (method === "GET" && !action) return { data: rec };
+    if (method === "GET" && !action) return { data: detailOf(rec) };
 
     if (method === "POST" && action === "parse") {
-      const opts = call.body as { executionPath?: string };
+      const opts = call.body as ParseOpts;
       if (!opts.executionPath) return fail(400, { message: "驗證失敗", errors: [{ field: "executionPath", message: "必須是絕對路徑" }] });
+      rec.parseOptions = opts; // 進入 PARSING 時就把本次選項存進記錄，不論成敗（契約 §1.1.3）
       if (s.parseMode === "gate") {
         rec.lastParseErrors = GATE_ERRORS.map(({ gate, detail, location }) => ({ gate, detail, location }));
         return { status: 422, error: { message: "解析結果未通過有界閘（3 項）", reason: "解析結果未通過有界閘", errors: GATE_ERRORS, details: { path: "LLM" } }, delayMs: s.parseDelayMs };
@@ -150,8 +179,9 @@ function createServer(initial: Rec[] = []) {
       rec.aiModel = "e2e-model";
       rec.tokenUsed = 1152;
       rec.lastParseErrors = undefined;
+      rec.warnings = s.parseWarnings; // 成功時以這次的 warnings 覆寫；失敗不動（契約 §1.1.3）
       return {
-        data: { importId: rec.id, status: "PARSED", path: "LLM", parsedResult: rec.parsedResult, signedOff: false, aiModel: "e2e-model", tokenUsed: 1152, errors: [], warnings: [] },
+        data: { importId: rec.id, status: "PARSED", path: "LLM", parsedResult: rec.parsedResult, signedOff: false, aiModel: "e2e-model", tokenUsed: 1152, errors: [], warnings: s.parseWarnings },
         delayMs: s.parseDelayMs,
       };
     }
@@ -166,10 +196,18 @@ function createServer(initial: Rec[] = []) {
       rec.signedOff = false;
       rec.signedOffBy = undefined;
       rec.signedOffAt = undefined;
+      rec.warnings = [PLACEHOLDER_WARNING]; // PUT result 以重算後的值覆寫記錄的 warnings（契約 §1.1.4）
       return {
         data: {
-          importId: rec.id, status: "REVIEWING", path: "LLM", parsedResult: rec.parsedResult, signedOff: false, aiModel: "e2e-model", tokenUsed: 1152, errors: [],
-          warnings: [{ code: "passcriteria_placeholder", detail: "通過標準為佔位字串，請於 signoff 前補齊", location: "goals[1].tasks[0]" }],
+          importId: rec.id,
+          status: "REVIEWING",
+          path: "LLM",
+          parsedResult: rec.parsedResult,
+          signedOff: false,
+          aiModel: "e2e-model",
+          tokenUsed: 1152,
+          errors: [],
+          warnings: rec.warnings,
         },
       };
     }
@@ -188,7 +226,20 @@ function createServer(initial: Rec[] = []) {
       if (!rec.signedOff) return fail(409, { message: "草案尚未 signoff", reason: "草案尚未 signoff，不可確認匯入", details: { status: rec.status, signedOff: false } });
       rec.status = "IMPORTED";
       rec.projectId = PROJECT_ID;
-      return { status: 201, data: { id: PROJECT_ID, name: "E2E 匯入專案", executionPath: "/e2e/proj-import", passCriteria: "三個目標全部完成", status: "DRAFT", autonomyLevel: 4, signedOff: true, goalsCount: 2, tasksCount: 3 } };
+      return {
+        status: 201,
+        data: {
+          id: PROJECT_ID,
+          name: "E2E 匯入專案",
+          executionPath: "/e2e/proj-import",
+          passCriteria: "三個目標全部完成",
+          status: "DRAFT",
+          autonomyLevel: 4,
+          signedOff: true,
+          goalsCount: 2,
+          tasksCount: 3,
+        },
+      };
     }
 
     if (method === "POST" && action === "reject") {
@@ -202,12 +253,17 @@ function createServer(initial: Rec[] = []) {
 
 async function setup(page: Page, server: ReturnType<typeof createServer>, role: "ADMIN" | "OPERATOR" | "VIEWER" = "OPERATOR") {
   await signInAs(page, role);
-  return installApiMock(page, compose(shellHandler(() => ({ pendingSignoffs: server.pending() })), server.handler));
+  return installApiMock(
+    page,
+    compose(
+      shellHandler(() => ({ pendingSignoffs: server.pending() })),
+      server.handler,
+    ),
+  );
 }
 
 /** 首次造訪頁面時 next dev 要編譯，給寬鬆的等待時間（之後的操作用預設 15 秒）。 */
 const FIRST_LOAD = { timeout: 60_000 };
-
 
 test.describe("BRD/PRD 匯入（route mock）", () => {
   test.setTimeout(150_000);
@@ -231,6 +287,7 @@ test.describe("BRD/PRD 匯入（route mock）", () => {
     await page.getByLabel("格式").selectOption("MARKDOWN");
     await page.getByLabel("執行路徑").fill("/e2e/proj-import");
     await page.getByLabel("補充說明").fill("盡量少於 5 個任務");
+    await expectNoA11yViolations(page, "匯入頁（步驟 1：貼上文字）");
     await snap(page, "06-import-step1.png");
 
     await page.getByRole("button", { name: "開始解析" }).click();
@@ -253,6 +310,7 @@ test.describe("BRD/PRD 匯入（route mock）", () => {
     await expect(page.getByTestId("signoff-badge")).toHaveText("1");
     await page.getByRole("button", { name: "展開詳情：初始化" }).click();
     await expect(page.getByTestId("task-details")).toContainText("請輸出 [T1_DONE]");
+    await expectNoA11yViolations(page, "匯入頁（步驟 2：三層樹＋草案橫幅）");
     await snap(page, "06-import-step2.png", { tall: true });
 
     // 送出內容檢查：文字來源與解析選項（US-I-02／05／07／08）
@@ -285,6 +343,7 @@ test.describe("BRD/PRD 匯入（route mock）", () => {
     await expect(page.getByTestId("tree-goal").nth(1)).toHaveAttribute("data-highlighted", "true");
     await expect(page.getByTestId("tree-task").nth(1)).toHaveAttribute("data-highlighted", "true");
     await expect(page.getByTestId("dirty-notice")).toBeVisible(); // 編輯還在，可修改後重試
+    await expectNoA11yViolations(page, "匯入頁（有界閘失敗清單）");
     await snap(page, "06-import-gate-errors.png", { tall: true });
 
     // ── 修正後重試 → 儲存成功（狀態轉審核中、顯示解析提示）──
@@ -353,13 +412,53 @@ test.describe("BRD/PRD 匯入（route mock）", () => {
   });
 
   test("歷史記錄：列出時間／來源／狀態／專案連結／模型 Token；重開已解析的記錄，重新整理後仍還原；重開被擋下的記錄還原閘清單", async ({ page }) => {
-    const parsed: Rec = { id: "aaaaaaaa-0000-4000-8000-000000000001", sourceType: "MARKDOWN", sourceFileName: "parsed.md", status: "PARSED", signedOff: false, createdAt: "2026-10-15T08:00:00Z", aiModel: "e2e-model", tokenUsed: 1152, parsePath: "LLM", sourceContent: "# parsed", parsedResult: structuredClone(TREE) };
+    const parsed: Rec = {
+      id: "aaaaaaaa-0000-4000-8000-000000000001",
+      sourceType: "MARKDOWN",
+      sourceFileName: "parsed.md",
+      status: "PARSED",
+      signedOff: false,
+      createdAt: "2026-10-15T08:00:00Z",
+      aiModel: "e2e-model",
+      tokenUsed: 1152,
+      parsePath: "LLM",
+      sourceContent: "# parsed",
+      parsedResult: structuredClone(TREE),
+    };
     const stuck: Rec = {
-      id: "aaaaaaaa-0000-4000-8000-000000000002", sourceType: "PLAIN_TEXT", status: "UPLOADED", signedOff: false, createdAt: "2026-10-15T07:00:00Z", sourceContent: "太長的需求文字", parsedResult: null,
+      id: "aaaaaaaa-0000-4000-8000-000000000002",
+      sourceType: "PLAIN_TEXT",
+      status: "UPLOADED",
+      signedOff: false,
+      createdAt: "2026-10-15T07:00:00Z",
+      sourceContent: "太長的需求文字",
+      parsedResult: null,
       lastParseErrors: GATE_ERRORS.map(({ gate, detail, location }) => ({ gate, detail, location })),
     };
-    const done: Rec = { id: "aaaaaaaa-0000-4000-8000-000000000003", sourceType: "PDF", sourceFileName: "done.pdf", status: "IMPORTED", signedOff: true, signedOffBy: "operator", projectId: PROJECT_ID, createdAt: "2026-10-14T09:00:00Z", aiModel: "e2e-model", tokenUsed: 2048, sourceContent: "x", parsedResult: structuredClone(TREE) };
-    const dropped: Rec = { id: "aaaaaaaa-0000-4000-8000-000000000004", sourceType: "DOCX", sourceFileName: "dropped.docx", status: "REJECTED", signedOff: false, createdAt: "2026-10-13T09:00:00Z", sourceContent: "x", parsedResult: null };
+    const done: Rec = {
+      id: "aaaaaaaa-0000-4000-8000-000000000003",
+      sourceType: "PDF",
+      sourceFileName: "done.pdf",
+      status: "IMPORTED",
+      signedOff: true,
+      signedOffBy: "operator",
+      projectId: PROJECT_ID,
+      createdAt: "2026-10-14T09:00:00Z",
+      aiModel: "e2e-model",
+      tokenUsed: 2048,
+      sourceContent: "x",
+      parsedResult: structuredClone(TREE),
+    };
+    const dropped: Rec = {
+      id: "aaaaaaaa-0000-4000-8000-000000000004",
+      sourceType: "DOCX",
+      sourceFileName: "dropped.docx",
+      status: "REJECTED",
+      signedOff: false,
+      createdAt: "2026-10-13T09:00:00Z",
+      sourceContent: "x",
+      parsedResult: null,
+    };
     const server = createServer([parsed, stuck, done, dropped]);
     await setup(page, server);
 
@@ -384,7 +483,10 @@ test.describe("BRD/PRD 匯入（route mock）", () => {
     await snap(page, "06-import-history.png");
 
     // 開啟已解析的記錄 → 步驟 2；重新整理後仍還原（?id= ＋ GET /import/{id}）
-    await rows.nth(0).getByRole("button", { name: /^開啟匯入記錄/ }).click();
+    await rows
+      .nth(0)
+      .getByRole("button", { name: /^開啟匯入記錄/ })
+      .click();
     await expect(page.getByTestId("import-step2")).toBeVisible();
     await expect(page.getByTestId("tree-task")).toHaveCount(3);
     await page.reload();
@@ -394,11 +496,97 @@ test.describe("BRD/PRD 匯入（route mock）", () => {
     // 開啟被有界閘擋下的記錄 → 步驟 1（沿用既有記錄）＋還原 lastParseErrors 清單
     await page.goto("/import");
     await page.getByRole("tab", { name: "歷史記錄" }).click();
-    await page.getByTestId("import-history-row").nth(1).getByRole("button", { name: /^開啟匯入記錄/ }).click();
+    await page
+      .getByTestId("import-history-row")
+      .nth(1)
+      .getByRole("button", { name: /^開啟匯入記錄/ })
+      .click();
     await expect(page.getByTestId("existing-source")).toBeVisible();
     await expect(page.getByTestId("gate-error-row")).toHaveCount(3);
     await expect(page.getByTestId("gate-error-detail").nth(2)).toHaveText("目標依賴成環：基礎 -> 核心 -> 基礎");
     await snap(page, "06-import-restored-gates.png", { tall: true });
+  });
+
+  test("重開記錄還原解析提示與解析選項（C-10；契約 §1.1.9、§4.1 I-12／I-18）：PARSED 的黃色 warnings 直接由記錄還原；被有界閘擋下的 UPLOADED 記錄把自治等級、路徑、補充說明填回表單，重新解析帶回 specDir", async ({
+    page,
+  }) => {
+    const parsed: Rec = {
+      id: "bbbbbbbb-0000-4000-8000-000000000001",
+      sourceType: "MARKDOWN",
+      sourceFileName: "parsed.md",
+      status: "PARSED",
+      signedOff: false,
+      createdAt: "2026-10-15T08:00:00Z",
+      aiModel: "e2e-model",
+      tokenUsed: 1152,
+      parsePath: "LLM",
+      sourceContent: "# parsed",
+      parsedResult: structuredClone(TREE),
+      warnings: [PLACEHOLDER_WARNING, { code: "evaluator_command_dropped", detail: "驗證命令含禁用字元", location: "goals[0].tasks[0]" }],
+      parseOptions: { autonomyLevel: 4, executionPath: "/e2e/proj-import" },
+    };
+    const stuck: Rec = {
+      id: "bbbbbbbb-0000-4000-8000-000000000002",
+      sourceType: "PLAIN_TEXT",
+      status: "UPLOADED",
+      signedOff: false,
+      createdAt: "2026-10-15T07:00:00Z",
+      sourceContent: "太長的需求文字",
+      parsedResult: null,
+      lastParseErrors: GATE_ERRORS.map(({ gate, detail, location }) => ({ gate, detail, location })),
+      parseOptions: { autonomyLevel: 7, executionPath: "/work/restored-path", additionalPrompt: "只拆前端部分", specDir: "/work/restored-path/spec" },
+    };
+    const server = createServer([parsed, stuck]);
+    const { calls } = await setup(page, server);
+
+    // PARSED：用網址直接重開（沒有任何「本次操作」的暫存）——黃色解析提示由記錄上的 warnings 還原
+    await page.goto(`/import?id=${parsed.id}`);
+    await expect(page.getByTestId("import-step2")).toBeVisible(FIRST_LOAD);
+    await expect(page.getByTestId("parse-warning")).toHaveCount(2);
+    await expect(page.getByTestId("parse-warning").nth(0)).toContainText("通過標準是佔位字串，signoff 前請補齊");
+    await expect(page.getByTestId("parse-warning").nth(1)).toContainText("驗證命令含禁用字元，已被清空");
+    await snap(page, "06-import-restored-warnings.png", { tall: true });
+
+    // UPLOADED（解析被有界閘擋下）：解析選項填回表單，閘清單照舊還原
+    await page.goto(`/import?id=${stuck.id}`);
+    await expect(page.getByTestId("existing-source")).toBeVisible(FIRST_LOAD);
+    await expect(page.getByLabel("自治等級")).toHaveValue("7");
+    await expect(page.getByLabel("執行路徑")).toHaveValue("/work/restored-path");
+    await expect(page.getByLabel("補充說明")).toHaveValue("只拆前端部分");
+    await expect(page.getByTestId("gate-error-row")).toHaveCount(3);
+
+    // 改了欄位之後，之後的重抓不得把使用者剛打的字蓋回伺服器值
+    await page.getByLabel("補充說明").fill("改成只拆後端");
+    await page.waitForTimeout(500);
+    await expect(page.getByLabel("補充說明")).toHaveValue("改成只拆後端");
+
+    // 重新解析：沒有 specDir 欄位，但 API 呼叫端設過的 specDir 原樣帶回
+    await page.getByRole("button", { name: "開始解析" }).click();
+    await expect(page.getByTestId("import-step2")).toBeVisible();
+    const body = calls.filter((c) => c.method === "POST" && c.path === `/api/v1/import/${stuck.id}/parse`).at(-1)?.body;
+    expect(body).toEqual({ autonomyLevel: 7, executionPath: "/work/restored-path", additionalPrompt: "改成只拆後端", specDir: "/work/restored-path/spec" });
+  });
+
+  test("解析被有界閘擋下後重新整理：自治等級、執行路徑、補充說明由記錄還原，不必重填（C-10）", async ({ page }) => {
+    const server = createServer();
+    server.s.parseMode = "gate";
+    await setup(page, server);
+    await page.goto("/import");
+    await expect(page.getByTestId("import-step1")).toBeVisible(FIRST_LOAD);
+    await page.getByRole("tab", { name: "貼上文字" }).click();
+    await page.getByLabel("需求文字").fill(BRD);
+    await page.getByLabel("自治等級").selectOption("6");
+    await page.getByLabel("執行路徑").fill("/e2e/restore-me");
+    await page.getByLabel("補充說明").fill("請拆細一點");
+    await page.getByRole("button", { name: "開始解析" }).click();
+    await expect(page.getByTestId("gate-error-row")).toHaveCount(3);
+
+    await page.reload();
+    await expect(page.getByTestId("existing-source")).toBeVisible(FIRST_LOAD);
+    await expect(page.getByTestId("gate-error-row")).toHaveCount(3);
+    await expect(page.getByLabel("自治等級")).toHaveValue("6");
+    await expect(page.getByLabel("執行路徑")).toHaveValue("/e2e/restore-me");
+    await expect(page.getByLabel("補充說明")).toHaveValue("請拆細一點");
   });
 
   test("上傳檔案：選檔（含拖放區說明）→ multipart 上傳 → 解析；副檔名不符當場擋下；後端 413 顯示 reason", async ({ page }) => {

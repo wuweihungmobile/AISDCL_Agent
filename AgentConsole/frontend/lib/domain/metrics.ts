@@ -4,14 +4,7 @@
  *  - KPI 卡：數值與 delta 的格式化、delta 的好壞色調（完成率↑好、重試率↑壞…）；
  *  - 分佈與趨勢的資料整形（任務狀態分組、執行時間欄、Token／任務趨勢列、事件時間軸）。
  */
-import type {
-  ExecutionStep,
-  RetryBucket,
-  TaskDurationItem,
-  TaskTrendPoint,
-  TokenTrendPoint,
-  TrendBucket,
-} from "@/lib/api/types";
+import type { ExecutionStep, RetryBucket, TaskDurationItem, TaskTrendPoint, TokenTrendPoint, TrendBucket } from "@/lib/api/types";
 import { stepStatus } from "@/lib/domain/status";
 
 const DASH = "—";
@@ -120,13 +113,7 @@ export function formatDelta(kind: MetricKind, delta: number | null | undefined):
   const arrow = delta > 0 ? "↑" : delta < 0 ? "↓" : "→";
   const magnitude = Math.abs(delta);
   const text =
-    kind === "percent"
-      ? `${magnitude.toFixed(1)}%`
-      : kind === "tokens"
-        ? Math.round(magnitude).toLocaleString("en-US")
-        : kind === "decimal"
-          ? magnitude.toFixed(2)
-          : formatDuration(magnitude);
+    kind === "percent" ? `${magnitude.toFixed(1)}%` : kind === "tokens" ? Math.round(magnitude).toLocaleString("en-US") : kind === "decimal" ? magnitude.toFixed(2) : formatDuration(magnitude);
   return `${arrow} ${text}`;
 }
 
@@ -158,10 +145,7 @@ export function groupTaskStatus(distribution: Readonly<Record<string, number>>):
   const rest = Object.entries(distribution)
     .filter(([status]) => !taken.has(status))
     .reduce((sum, [, n]) => sum + n, 0);
-  return [
-    ...STATUS_GROUPS.map((g) => ({ id: g.id, label: g.label, count: count(g.statuses) })),
-    { id: "pending", label: "待處理", count: rest },
-  ];
+  return [...STATUS_GROUPS.map((g) => ({ id: g.id, label: g.label, count: count(g.statuses) })), { id: "pending", label: "待處理", count: rest }];
 }
 
 export type Column = { label: string; value: number; heightPct: number; highlight: boolean };
@@ -184,11 +168,7 @@ export function durationColumns(items: readonly TaskDurationItem[], limit = 8): 
 
 /** 重試次數分佈（桶 0～5 一律出現；≥5 併入 5）。 */
 export function retryColumns(buckets: readonly RetryBucket[]): Column[] {
-  return toColumns(
-    [...buckets]
-      .sort((a, b) => a.retries - b.retries)
-      .map((b) => ({ label: b.retries >= 5 ? "≥5 次" : `${b.retries} 次`, value: b.tasks })),
-  );
+  return toColumns([...buckets].sort((a, b) => a.retries - b.retries).map((b) => ({ label: b.retries >= 5 ? "≥5 次" : `${b.retries} 次`, value: b.tasks })));
 }
 
 // ── 趨勢 ──────────────────────────────────────────────────────────────────

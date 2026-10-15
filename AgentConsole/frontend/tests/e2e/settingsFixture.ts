@@ -29,21 +29,24 @@ export type Cfg = {
 };
 
 export const MASK = "•".repeat(8);
-const E = "ENGINE", C = "CONSOLE", S = "STORED_ONLY", U = "UNVERIFIED";
+const E = "ENGINE",
+  C = "CONSOLE",
+  S = "STORED_ONLY",
+  U = "UNVERIFIED";
 
-type Row = [
-  key: string,
-  type: string,
-  def: string,
-  effect: Cfg["effect"],
-  extra?: Partial<Pick<Cfg, "options" | "min" | "max" | "impactNote" | "validationRule" | "value">>,
-];
+type Row = [key: string, type: string, def: string, effect: Cfg["effect"], extra?: Partial<Pick<Cfg, "options" | "min" | "max" | "impactNote" | "validationRule" | "value">>];
 
 /** 附錄 C 逐鍵（C.1～C.6） */
 const CATALOG: Record<Cat, Row[]> = {
   model: [
     ["provider", "ENUM", "ANTHROPIC", S, { options: ["ANTHROPIC", "OPENAI", "LOCAL", "CUSTOM"], impactNote: "僅為 Console 抽象層欄位；引擎是 MiniMax＋Claude CLI 雙腦，不會依此切換" }],
-    ["apiUrl", "STRING", "https://api.minimax.io/v1/text/chatcompletion_v2", E, { validationRule: "^https?://[^\\s/?#][^\\s]*$", impactNote: "須填完整的 chat-completions 端點 URL（後端不補路徑）；原樣當引擎 minimax.base_url，也用於匯入解析與測試連線；新批次起生效" }],
+    [
+      "apiUrl",
+      "STRING",
+      "https://api.minimax.io/v1/text/chatcompletion_v2",
+      E,
+      { validationRule: "^https?://[^\\s/?#][^\\s]*$", impactNote: "須填完整的 chat-completions 端點 URL（後端不補路徑）；原樣當引擎 minimax.base_url，也用於匯入解析與測試連線；新批次起生效" },
+    ],
     ["apiKey", "ENCRYPTED", "", E, { impactNote: "加密儲存；新批次起使用新金鑰；留空＝不再帶 MiniMax 設定（引擎不建 Brain，AI 演化提案停用）" }],
     ["name", "STRING", "MiniMax-M2.7", E, { validationRule: "^[A-Za-z0-9._:/\\-]{1,100}$", impactNote: "新批次起生效；也用於匯入解析" }],
     ["maxTokensPerRequest", "INTEGER", "8192", C, { min: 1, max: 200000, impactNote: "只影響匯入解析（路徑 B）的 max_tokens；引擎無對應欄位" }],

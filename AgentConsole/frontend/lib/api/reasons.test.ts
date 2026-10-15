@@ -27,7 +27,10 @@ function contractReasons(): string[] {
   const out: string[] = [];
   for (const line of appendixB().split("\n")) {
     if (!line.startsWith("|")) continue;
-    const cells = line.split("|").slice(1, -1).map((c) => c.trim());
+    const cells = line
+      .split("|")
+      .slice(1, -1)
+      .map((c) => c.trim());
     if (cells.length < 2 || /^-+$/.test(cells[0]) || cells[0] === "HTTP" || cells[0] === "區") continue;
     const reasonCell = cells.length === 2 ? cells[1] : cells[2];
     out.push(...backticked(reasonCell));

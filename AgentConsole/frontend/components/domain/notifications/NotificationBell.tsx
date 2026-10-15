@@ -36,15 +36,14 @@ export function NotificationBell({ summary }: { summary: NotificationSummary | u
       <Popover.Trigger asChild>
         <button
           type="button"
-          aria-label={bellCount > 0 ? `通知（${bellCount} 筆待處理）` : "通知"}
+          // 徽章上的可見數字必須出現在名稱裡（WCAG 2.5.3 Label in Name；axe label-content-name-mismatch）；括號會讓 axe 認不出數字，所以用空格分隔
+          aria-label={bellCount > 0 ? `通知 ${bellCount} 筆待處理` : "通知"}
           title="通知"
           data-testid="bell-trigger"
           className="relative inline-flex size-11 cursor-pointer items-center justify-center rounded-full border-none bg-transparent text-white transition-opacity hover:opacity-85"
         >
           <Bell size={24} aria-hidden />
-          {bellCount > 0 ? (
-            <CountBadge count={bellCount} floating className="top-0 right-0" data-testid="bell-badge" />
-          ) : null}
+          {bellCount > 0 ? <CountBadge count={bellCount} floating className="top-0 right-0" data-testid="bell-badge" /> : null}
         </button>
       </Popover.Trigger>
       <Popover.Portal>
@@ -60,11 +59,7 @@ export function NotificationBell({ summary }: { summary: NotificationSummary | u
             {rows.map(({ id, label, icon: Icon, count, href }) => (
               <li key={id} className="border-t border-wg-line first:border-t-0">
                 <Popover.Close asChild>
-                  <Link
-                    href={href}
-                    data-testid={`notification-${id}`}
-                    className="flex items-center gap-2.5 py-2.5 text-sm transition-colors hover:text-wg-primary"
-                  >
+                  <Link href={href} data-testid={`notification-${id}`} className="flex items-center gap-2.5 py-2.5 text-sm transition-colors hover:text-wg-primary">
                     <Icon size={18} className="shrink-0 text-wg-primary" aria-hidden />
                     <span className="flex-1">{label}</span>
                     <span className="font-mono text-[15px] font-semibold" data-testid={`notification-${id}-count`}>

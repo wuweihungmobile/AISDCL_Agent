@@ -17,9 +17,7 @@ const THREE_GATES = [
 
 describe("有界閘錯誤呈現（US-I-10：完整列出、不截斷）", () => {
   it("給 3 條 errors：三條全部顯示，各帶閘別、位置與完整原因，順序與後端回報一致", () => {
-    const failure = parseFailureFromError(
-      apiError({ status: 422, message: "解析結果未通過有界閘", reason: REASONS.IMPORT_GATE_REJECTED, errors: THREE_GATES, traceId: "tr-422" }),
-    );
+    const failure = parseFailureFromError(apiError({ status: 422, message: "解析結果未通過有界閘", reason: REASONS.IMPORT_GATE_REJECTED, errors: THREE_GATES, traceId: "tr-422" }));
     render(<ParseFailurePanel failure={failure} />);
 
     expect(screen.getByRole("alert")).toBeInTheDocument();
@@ -68,11 +66,7 @@ describe("有界閘錯誤呈現（US-I-10：完整列出、不截斷）", () => 
       detail: `目標 ${i} 的任務數 25 超過上限 24`,
       location: `goals[${i}].tasks`,
     }));
-    render(
-      <ParseFailurePanel
-        failure={parseFailureFromError(apiError({ status: 422, message: "m", reason: REASONS.IMPORT_GATE_REJECTED, errors }))}
-      />,
-    );
+    render(<ParseFailurePanel failure={parseFailureFromError(apiError({ status: 422, message: "m", reason: REASONS.IMPORT_GATE_REJECTED, errors }))} />);
     expect(screen.getAllByTestId("gate-error-row")).toHaveLength(20);
     expect(screen.getByTestId("parse-failure-title")).toHaveTextContent("（共 20 項）");
   });

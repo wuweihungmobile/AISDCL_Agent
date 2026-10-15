@@ -2,15 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { ApiError } from "@/lib/api/client";
 import { REASONS } from "@/lib/api/reasons";
-import {
-  GATE_LABEL,
-  gateLabel,
-  highlightsFromRows,
-  parseFailureFromError,
-  parseFailureFromRecord,
-  rowsFromApiError,
-  rowsFromGateErrors,
-} from "./gateErrors";
+import { GATE_LABEL, gateLabel, highlightsFromRows, parseFailureFromError, parseFailureFromRecord, rowsFromApiError, rowsFromGateErrors } from "./gateErrors";
 
 /** 422 有界閘回應的 errors 項目帶 gate／detail／location（比 ApiError 的 FieldError 型別多），測試以此函式組出。 */
 const apiError = (init: Record<string, unknown>) => new ApiError(init as unknown as ConstructorParameters<typeof ApiError>[0]);

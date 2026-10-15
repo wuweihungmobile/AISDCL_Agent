@@ -12,10 +12,7 @@ const err = (status: number, reason: string, details: Record<string, unknown> = 
 
 describe("啟動失敗的說明（契約 §1.2.1 驗證順序表）", () => {
   it("未 signoff（409）：標記 unsigned；專案本身、未審批的目標與任務分層列出（id 轉名稱，查不到退成前 8 碼）", () => {
-    const v = describeStartError(
-      err(409, REASONS.EXEC_UNSIGNED_DRAFT, { unsignedProjectId: "p1", unsignedGoalIds: ["g1", "g2"], unsignedTaskIds: ["t1", "abcdef0123456789"] }),
-      nameOf,
-    );
+    const v = describeStartError(err(409, REASONS.EXEC_UNSIGNED_DRAFT, { unsignedProjectId: "p1", unsignedGoalIds: ["g1", "g2"], unsignedTaskIds: ["t1", "abcdef0123456789"] }), nameOf);
     expect(v.unsigned).toBe(true);
     expect(v.title).toBe("未經人工審批的草案不可執行");
     expect(v.lines).toEqual(["專案本身尚未 signoff", "未審批的目標：基礎、核心", "未審批的任務：初始化、abcdef01"]);
@@ -50,10 +47,7 @@ describe("啟動失敗的說明（契約 §1.2.1 驗證順序表）", () => {
   });
 
   it("400 的欄位錯誤（Bean Validation）逐欄列出；未知 reason 與 502 退回後端訊息；非 ApiError 退回例外訊息", () => {
-    const fields = describeStartError(
-      new ApiError({ status: 400, message: "驗證失敗", errors: [{ field: "autonomyLevel", message: "必須介於 1～10" }] }),
-      nameOf,
-    );
+    const fields = describeStartError(new ApiError({ status: 400, message: "驗證失敗", errors: [{ field: "autonomyLevel", message: "必須介於 1～10" }] }), nameOf);
     expect(fields.lines).toEqual(["autonomyLevel：必須介於 1～10"]);
     const gw = describeStartError(new ApiError({ status: 502, message: "引擎橋接服務無法連線", reason: REASONS.BRIDGE_UNREACHABLE }), nameOf);
     expect(gw.title).toBe("引擎橋接服務無法連線");

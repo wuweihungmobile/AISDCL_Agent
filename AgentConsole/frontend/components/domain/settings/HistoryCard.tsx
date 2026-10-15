@@ -47,11 +47,17 @@ export function HistoryCard({ category }: { category: ConfigCategory }) {
             return (
               <li key={h.id} data-testid="history-line" className="flex flex-wrap gap-x-2 gap-y-0.5 break-all">
                 <span>{line.time}</span>
-                <span aria-hidden className="text-wg-muted">│</span>
+                <span aria-hidden className="text-wg-muted">
+                  │
+                </span>
                 <span className="text-wg-primary">{line.param}</span>
-                <span aria-hidden className="text-wg-muted">│</span>
+                <span aria-hidden className="text-wg-muted">
+                  │
+                </span>
                 <span>{line.change}</span>
-                <span aria-hidden className="text-wg-muted">│</span>
+                <span aria-hidden className="text-wg-muted">
+                  │
+                </span>
                 <span className="text-wg-muted">{line.by}</span>
               </li>
             );

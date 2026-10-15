@@ -2,9 +2,10 @@ import { readFile } from "node:fs/promises";
 
 import { expect, test, type Page } from "@playwright/test";
 
+import { expectNoA11yViolations } from "./a11y";
 import { Engine, PROJECT_ID, TASKS } from "./execFixture";
 import { SHOTS } from "./helpers";
-import { CSV_BODY, CSV_FILENAME, MonitorWorld } from "./monitorFixture";
+import { CSV_BODY, CSV_FILENAME, MonitorWorld, PDF_BODY, PDF_FILENAME } from "./monitorFixture";
 import { collectConsoleErrors, compose, installApiMock, signInAs, snap, type MockHandler } from "./mockApi";
 
 /**
@@ -101,7 +102,10 @@ test.describe("專案監控頁（route mock）", () => {
     // 折線顏色來自設計 token（圖例的主色小線段與折線同色），預算線是虛線
     const area = chart.locator(".recharts-area-curve");
     await expect(area).toHaveCount(1);
-    const primary = await page.locator('[data-testid="token-trend-card"] span.bg-wg-primary').first().evaluate((el) => getComputedStyle(el).backgroundColor);
+    const primary = await page
+      .locator('[data-testid="token-trend-card"] span.bg-wg-primary')
+      .first()
+      .evaluate((el) => getComputedStyle(el).backgroundColor);
     expect(await area.evaluate((el) => getComputedStyle(el).stroke)).toBe(primary);
     const budget = chart.locator(".recharts-line-curve");
     await expect(budget).toHaveCount(1);
@@ -126,6 +130,8 @@ test.describe("專案監控頁（route mock）", () => {
     await expect(page.getByTestId("retry-chart-col")).toHaveCount(6); // 重試次數桶 0～5 一律出現
     await expect(page.getByTestId("retry-chart")).toContainText("≥5 次");
 
+    // 無障礙（DEF-AC-004／005）：圖例的 list 結構、卡片文字對比等
+    await expectNoA11yViolations(page, "監控頁（指標＋圖表）");
     await page.setViewportSize({ width: 1440, height: 3400 }); // 整頁一次拍完
     await snap(page, "08-monitor-full.png");
     await page.setViewportSize({ width: 1440, height: 900 });
@@ -206,7 +212,10 @@ test.describe("專案監控頁（route mock）", () => {
     const before = world.seen.filter((s) => s.path.endsWith("/logs")).length;
     await page.getByTestId("log-keyword").pressSequentially("重試", { delay: 80 });
     await expect(page.getByTestId("log-total")).toHaveText("共 10 筆");
-    const keywords = world.seen.filter((s) => s.path.endsWith("/logs")).slice(before).map((s) => s.query.get("q"));
+    const keywords = world.seen
+      .filter((s) => s.path.endsWith("/logs"))
+      .slice(before)
+      .map((s) => s.query.get("q"));
     expect(keywords, "去抖：沒有為輸入到一半的「重」送請求").not.toContain("重");
     expect(keywords).toContain("重試");
     await page.getByTestId("log-keyword").fill("");
@@ -236,6 +245,7 @@ test.describe("專案監控頁（route mock）", () => {
     await expect(detail).toContainText("Token 預算警告（警告）");
     await expect(detail).toContainText("run:");
     await rows.first().getByTestId("alert-detail-toggle").click();
+    await expectNoA11yViolations(page, "監控頁（告警）");
     await snap(page, "08-monitor-alerts.png", { focus: page.getByTestId("alerts-card") });
 
     // 失敗：先樂觀、再還原並 toast
@@ -271,7 +281,7 @@ test.describe("專案監控頁（route mock）", () => {
     expectClean(errors, unhandled);
   });
 
-  test("匯出報表：CSV 下載（檔名取自 Content-Disposition、帶 Accept: text/csv、範圍＝目前選擇）；PDF 回 501 顯示「尚未提供」", async ({ page }) => {
+  test("匯出報表：CSV 與 PDF 下載（檔名取自 Content-Disposition、CSV 帶 Accept: text/csv、PDF 帶 application/pdf、範圍＝目前選擇）", async ({ page }) => {
     const { world, errors, unhandled, runId } = await open(page);
     await page.getByTestId("run-select").selectOption(runId(2));
     await expect(kpi(page, "totalTokens")).toHaveText("1,240");
@@ -286,9 +296,17 @@ test.describe("專案監控頁（route mock）", () => {
     expect(span(req!.query)).toBe(DAY); // 與目前的時間範圍
     expect(req!.headers.accept).toContain("text/csv");
 
-    await page.getByTestId("export-pdf").click();
-    await expect(page.getByText("PDF 報表尚未提供（預計 W5 提供），請先匯出 CSV")).toBeVisible();
-    expect(lastOf(world, "/report")!.query.get("format")).toBe("pdf");
+    // PDF（v1.2，C-4）：同樣回 200，檔名取自 Content-Disposition（.pdf）、位元組原樣存檔、範圍與 CSV 相同
+    const [pdf] = await Promise.all([page.waitForEvent("download"), page.getByTestId("export-pdf").click()]);
+    expect(pdf.suggestedFilename()).toBe(PDF_FILENAME);
+    expect(await readFile((await pdf.path()) as string, "utf8")).toBe(PDF_BODY);
+    await expect(page.getByText(`已匯出報表：${PDF_FILENAME}`)).toBeVisible();
+    const pdfReq = lastOf(world, "/report");
+    expect(pdfReq!.query.get("format")).toBe("pdf");
+    expect(pdfReq!.query.get("runId")).toBe(runId(2));
+    expect(span(pdfReq!.query)).toBe(DAY);
+    expect(pdfReq!.headers.accept).toContain("application/pdf");
+    await expect(page.getByText(/尚未提供/)).toHaveCount(0); // 501 與「尚未提供」提示已退役
     await expect(page.getByTestId("alert-settings-link")).toHaveAttribute("href", "/settings");
     expectClean(errors, unhandled);
   });
@@ -316,7 +334,10 @@ test.describe("專案監控頁（route mock）", () => {
     await expect(cell("tokens", "a")).toHaveText("3,720");
     await expect(cell("tasks", "a")).toHaveText("3 / 3");
     await expect(cell("success", "a")).toHaveText("100.0%");
-    expect(calls.filter((c) => c.path.includes("/metrics") && c.query.has("runId")), "比較批次不另外查 metrics").toHaveLength(0);
+    expect(
+      calls.filter((c) => c.path.includes("/metrics") && c.query.has("runId")),
+      "比較批次不另外查 metrics",
+    ).toHaveLength(0);
 
     // 事件時間軸：最新批次（Run #3）的步驟事件——T1 開始、T1 完成、T2 開始
     const items = page.getByTestId("timeline-item");
@@ -335,6 +356,7 @@ test.describe("專案監控頁（route mock）", () => {
     await expect(page.getByTestId("agent-availability")).toHaveText("99.1%");
     await expect(page.getByTestId("agent-note")).toContainText("Bridge 實例：e2e-bridge。");
     await expect(page.getByTestId("agent-note")).toContainText("資源使用情況（CPU／記憶體）：Engine Bridge 目前沒有提供這項資料");
+    await expectNoA11yViolations(page, "監控頁（批次比較＋事件時間軸＋Agent 狀態）");
     expectClean(errors, unhandled);
   });
 

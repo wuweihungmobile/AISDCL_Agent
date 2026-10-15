@@ -34,12 +34,7 @@ export function HistoryPanel({ onOpen }: { onOpen: (id: string) => void }) {
     <div data-testid="import-history-panel">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <span className="text-sm text-wg-muted">共 {data?.totalElements ?? 0} 筆匯入記錄</span>
-        <Select
-          size="sm"
-          aria-label="依狀態篩選"
-          value={status}
-          onChange={(e) => setStatus(e.target.value as "" | ImportStatus)}
-        >
+        <Select size="sm" aria-label="依狀態篩選" value={status} onChange={(e) => setStatus(e.target.value as "" | ImportStatus)}>
           <option value="">全部狀態</option>
           {(Object.keys(IMPORT_STATUS) as ImportStatus[]).map((s) => (
             <option key={s} value={s}>
@@ -82,10 +77,7 @@ export function HistoryPanel({ onOpen }: { onOpen: (id: string) => void }) {
                   </td>
                   <td className="py-2.5 pr-3 whitespace-nowrap">
                     {r.projectId ? (
-                      <Link
-                        href={`/projects/${r.projectId}`}
-                        className="text-wg-primary transition-opacity hover:opacity-85"
-                      >
+                      <Link href={`/projects/${r.projectId}`} className="text-wg-primary transition-opacity hover:opacity-85">
                         查看專案
                       </Link>
                     ) : (
@@ -97,12 +89,7 @@ export function HistoryPanel({ onOpen }: { onOpen: (id: string) => void }) {
                   </td>
                   <td className="py-1.5 text-right">
                     {isImportReopenable(r.status) ? (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        aria-label={`開啟匯入記錄：${r.sourceFileName ?? "貼上文字"}`}
-                        onClick={() => onOpen(r.id)}
-                      >
+                      <Button variant="ghost" size="sm" aria-label={`開啟匯入記錄：${r.sourceFileName ?? "貼上文字"}`} onClick={() => onOpen(r.id)}>
                         開啟
                       </Button>
                     ) : null}
@@ -114,14 +101,7 @@ export function HistoryPanel({ onOpen }: { onOpen: (id: string) => void }) {
         </div>
       )}
 
-      {totalPages > 1 ? (
-        <Pagination
-          className="mt-5"
-          page={page}
-          totalPages={totalPages}
-          onPageChange={(p) => setPaging({ key: status, page: p })}
-        />
-      ) : null}
+      {totalPages > 1 ? <Pagination className="mt-5" page={page} totalPages={totalPages} onPageChange={(p) => setPaging({ key: status, page: p })} /> : null}
     </div>
   );
 }

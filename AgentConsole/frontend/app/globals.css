@@ -37,6 +37,9 @@
   --color-wg-skeleton: var(--color-skeleton);
   --color-wg-terminal: var(--color-terminal-bg);
   --color-wg-terminal-text: var(--color-terminal-text);
+  --color-wg-terminal-accent: var(--color-terminal-accent);
+  --color-wg-terminal-error: var(--color-terminal-error);
+  --color-wg-warning-text: var(--color-warning-text);
   --color-wg-draft-bg: var(--color-draft-bg);
   --color-wg-draft-border: var(--color-draft-border);
   --color-wg-alert-bg: var(--color-alert-bg);
@@ -146,11 +149,12 @@
   *::-webkit-scrollbar-thumb { background: var(--color-scrollbar); border-radius: 8px; }
   *::-webkit-scrollbar-track { background: transparent; }
 
-  /* 設計稿 .wg-sel：原生 select 去外觀、自訂下拉箭頭（箭頭色＝--color-text-muted 的 #7A8775，data-URI 無法引用變數） */
+  /* 設計稿 .wg-sel：原生 select 去外觀、自訂下拉箭頭（箭頭色＝--color-text-muted 目前的值 #5F6B5A，data-URI 無法引用變數；
+     改 --color-text-muted 時要一起改這裡，styles/tokens.test.ts 會核對兩者一致） */
   select.wg-sel {
     appearance: none;
     -webkit-appearance: none;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%237A8775' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%235F6B5A' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
     background-repeat: no-repeat;
     background-position: right 12px center;
     cursor: pointer;

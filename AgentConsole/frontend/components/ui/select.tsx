@@ -7,11 +7,7 @@ import { cn } from "@/lib/utils";
  * 刻意不用 Radix Select：設計稿是原生控制項，原生 select 對鍵盤、行動裝置與 E2E（selectOption）都最穩。
  *  size="sm"＝工具列用（14px 字、8/36/8/14 內距）；size="md"＝表單用（15px 字、11px 垂直內距）。
  */
-export function Select({
-  className,
-  size = "md",
-  ...props
-}: Omit<React.ComponentProps<"select">, "size"> & { size?: "sm" | "md" }) {
+export function Select({ className, size = "md", ...props }: Omit<React.ComponentProps<"select">, "size"> & { size?: "sm" | "md" }) {
   return (
     <select
       data-slot="select"

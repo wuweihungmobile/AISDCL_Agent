@@ -67,17 +67,12 @@ export function controlButtons(input: ControlInput): ControlButton[] {
   const bridge = run.bridgeStatus ?? undefined;
   switch (run.status) {
     case "INITIALIZING":
-      return [
-        base("pause", "暫停", { enabled: false, hint: "引擎啟動中，啟動完成後才能暫停" }),
-        base("cancel", "取消", { enabled: false, hint: "引擎啟動中，啟動完成後才能取消" }),
-      ];
+      return [base("pause", "暫停", { enabled: false, hint: "引擎啟動中，啟動完成後才能暫停" }), base("cancel", "取消", { enabled: false, hint: "引擎啟動中，啟動完成後才能取消" })];
     case "RUNNING": {
       const pausing = bridge === "PAUSING";
       const cancelling = bridge === "CANCELLING";
       return [
-        pausing
-          ? base("pause", "暫停中…", { enabled: false, hint: "已要求暫停，會在下一個步驟邊界生效" })
-          : base("pause", "暫停", cancelling ? { enabled: false, hint: "取消處理中" } : {}),
+        pausing ? base("pause", "暫停中…", { enabled: false, hint: "已要求暫停，會在下一個步驟邊界生效" }) : base("pause", "暫停", cancelling ? { enabled: false, hint: "取消處理中" } : {}),
         cancelling ? base("cancel", "取消中…", { enabled: false, hint: "已要求取消，引擎收尾中" }) : base("cancel", "取消"),
       ];
     }

@@ -12,7 +12,7 @@ import { useToast } from "@/components/ui/toast";
 import { describeError } from "@/lib/api/client";
 import { useAcknowledgeAlert, useProjectAlerts } from "@/lib/api/queries";
 import type { Alert } from "@/lib/api/types";
-import { ALERT_RULE_LABEL, alertSeverity } from "@/lib/domain/status";
+import { ALERT_RULE_LABEL, alertSeverity, alertSeverityTextColor } from "@/lib/domain/status";
 import { formatClock, formatDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -25,7 +25,7 @@ function AlertRow({ alert, canWrite, onAck, pending }: { alert: Alert; canWrite:
         <AlertTriangle size={18} className={cn("shrink-0", alert.severity === "CRITICAL" ? "text-wg-error" : "text-wg-warning")} aria-hidden />
         <span className="shrink-0 font-mono text-xs text-wg-muted">{formatClock(alert.createdAt)}</span>
         <span className="min-w-0 flex-1 text-sm">
-          <span className="font-semibold" style={{ color: sev.color }}>
+          <span className="font-semibold" style={{ color: alertSeverityTextColor(alert.severity) }}>
             [{ALERT_RULE_LABEL[alert.rule] ?? alert.rule}]
           </span>{" "}
           {alert.message}
@@ -39,14 +39,7 @@ function AlertRow({ alert, canWrite, onAck, pending }: { alert: Alert; canWrite:
             已確認
           </span>
         ) : (
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={!canWrite || pending}
-            title={canWrite ? undefined : "權限不足（唯讀角色不可確認）"}
-            onClick={() => onAck(alert)}
-            data-testid="alert-ack"
-          >
+          <Button variant="ghost" size="sm" disabled={!canWrite || pending} title={canWrite ? undefined : "權限不足（唯讀角色不可確認）"} onClick={() => onAck(alert)} data-testid="alert-ack">
             確認
           </Button>
         )}
@@ -54,7 +47,9 @@ function AlertRow({ alert, canWrite, onAck, pending }: { alert: Alert; canWrite:
       {open ? (
         <dl className="mt-2 grid grid-cols-[88px_1fr] gap-x-3 gap-y-1 border-t border-wg-alert-border pt-2 text-[13px]" data-testid="alert-detail">
           <dt className="text-wg-muted">規則</dt>
-          <dd>{ALERT_RULE_LABEL[alert.rule] ?? alert.rule}（{sev.label}）</dd>
+          <dd>
+            {ALERT_RULE_LABEL[alert.rule] ?? alert.rule}（{sev.label}）
+          </dd>
           <dt className="text-wg-muted">對象</dt>
           <dd className="font-mono break-all">{alert.subject ?? "—"}</dd>
           <dt className="text-wg-muted">批次</dt>
@@ -80,17 +75,7 @@ function AlertRow({ alert, canWrite, onAck, pending }: { alert: Alert; canWrite:
  * 每列＝alert-triangle＋時間＋規則與訊息＋「確認」ghost 或「已確認」（#fef7ea 底、#f5e2bd 邊，用 token）；「詳情」展開規則／對象／批次。
  * 確認走樂觀更新（畫面立刻變「已確認」，失敗還原並 toast）；契約冪等，已確認者再確認仍 204。
  */
-export function AlertsCard({
-  projectId,
-  runId,
-  pollMs,
-  canWrite,
-}: {
-  projectId: string;
-  runId: string | undefined;
-  pollMs: number | false;
-  canWrite: boolean;
-}) {
+export function AlertsCard({ projectId, runId, pollMs, canWrite }: { projectId: string; runId: string | undefined; pollMs: number | false; canWrite: boolean }) {
   const toast = useToast();
   const q = useProjectAlerts(projectId, { runId, limit: 50 }, pollMs);
   const ack = useAcknowledgeAlert();

@@ -118,12 +118,7 @@ export type LockReport = {
  * 啟動鎖定判斷（契約 §4.2 E-02：專案、所選目標、所選任務皆 signedOff 才可啟動）。
  * 任務層級只看「已載入」的任務（展開過的目標）；沒載入的由後端 409 的 details 兜底。
  */
-export function lockReport(
-  projectSigned: boolean,
-  goals: readonly ScopeGoal[],
-  sel: Selection,
-  tasksByGoal: Readonly<Record<string, readonly ScopeTask[] | undefined>>,
-): LockReport {
+export function lockReport(projectSigned: boolean, goals: readonly ScopeGoal[], sel: Selection, tasksByGoal: Readonly<Record<string, readonly ScopeTask[] | undefined>>): LockReport {
   const unsignedGoals: string[] = [];
   const unsignedTasks: string[] = [];
   for (const g of goals) {

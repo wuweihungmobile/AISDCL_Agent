@@ -11,16 +11,10 @@ const required = (label: string) => z.string().trim().min(1, `${label}不能為�
 
 export const projectNodeSchema = z.object({
   name: required("專案名稱").max(200, "名稱最多 200 個字元"),
-  executionPath: required("執行路徑")
-    .max(500, "執行路徑最多 500 個字元")
-    .regex(ABSOLUTE_PATH, "執行路徑必須是絕對路徑（POSIX 以 / 開頭，或 Windows 磁碟機代號／UNC 開頭）"),
+  executionPath: required("執行路徑").max(500, "執行路徑最多 500 個字元").regex(ABSOLUTE_PATH, "執行路徑必須是絕對路徑（POSIX 以 / 開頭，或 Windows 磁碟機代號／UNC 開頭）"),
   description: z.string(),
   passCriteria: required("通過標準"),
-  autonomyLevel: z
-    .number({ error: "請輸入 1～10 的整數" })
-    .int("自治等級必須是整數")
-    .min(1, "自治等級最小為 1")
-    .max(10, "自治等級最大為 10"),
+  autonomyLevel: z.number({ error: "請輸入 1～10 的整數" }).int("自治等級必須是整數").min(1, "自治等級最小為 1").max(10, "自治等級最大為 10"),
 });
 export type ProjectNodeValues = z.infer<typeof projectNodeSchema>;
 
@@ -56,12 +50,7 @@ export const taskNodeSchema = z.object({
         return false;
       }
     }, "不是合法的正規表示式"),
-  maxRetries: z
-    .string()
-    .refine(
-      (v) => v.trim() === "" || (/^\d+$/.test(v.trim()) && Number(v.trim()) <= MAX_RETRIES_LIMIT),
-      `最大重試次數需為 0～${MAX_RETRIES_LIMIT} 的整數（空白＝沿用預設）`,
-    ),
+  maxRetries: z.string().refine((v) => v.trim() === "" || (/^\d+$/.test(v.trim()) && Number(v.trim()) <= MAX_RETRIES_LIMIT), `最大重試次數需為 0～${MAX_RETRIES_LIMIT} 的整數（空白＝沿用預設）`),
 });
 export type TaskNodeValues = z.infer<typeof taskNodeSchema>;
 

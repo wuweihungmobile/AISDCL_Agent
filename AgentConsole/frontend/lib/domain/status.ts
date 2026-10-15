@@ -5,21 +5,11 @@
  * 顏色一律引用設計 token（styles/tokens.css），不寫死色碼：
  *   #7A8775＝--color-text-muted　#80B155＝--color-secondary　#498428＝--color-primary
  *   #D35B58＝--color-error　#A6B0A1＝--color-disabled-text　#F5A623＝--color-warning　#E55B3C＝--color-accent
- * （lib/domain/status.test.ts 解析 tokens.css 後逐一核對成設計稿的色碼。）
+ * （lib/domain/status.test.ts 解析 token 檔後逐一核對成設計稿的色碼。）
+ * 偏離只有三格：--color-text-muted（#5F6B5A）、--color-accent（#B93F22）、--color-error（#B8433F）為了 WCAG AA 對比，
+ * 在 styles/tokens.console.css 的「無障礙覆寫」一節改深（W5 C-18；原因與數字見該檔）。
  */
-import type {
-  AlertRule,
-  AlertSeverity,
-  BridgeRunStatus,
-  ExecutionStepStatus,
-  GoalStatus,
-  ImportStatus,
-  ProjectStatus,
-  ReviewDecision,
-  ReviewKind,
-  RunStatus,
-  TaskStatus,
-} from "@/lib/api/types";
+import type { AlertRule, AlertSeverity, BridgeRunStatus, ExecutionStepStatus, GoalStatus, ImportStatus, ProjectStatus, ReviewDecision, ReviewKind, RunStatus, TaskStatus } from "@/lib/api/types";
 
 export type StatusMeta = {
   /** 繁體中文標籤 */
@@ -141,6 +131,17 @@ export const ALERT_SEVERITY: Record<AlertSeverity | "INFO", StatusMeta> = {
   CRITICAL: { label: "嚴重", color: ERROR },
 };
 
+/**
+ * 告警規則名稱是「文字」，放在告警底（--color-alert-bg）上：不能直接用上面狀態點的顏色
+ * （WARNING 的 --color-warning 只有 1.9:1、INFO 的 --color-secondary 只有 2.3:1；DEF-AC-004），改用文字專用的深色。
+ */
+export function alertSeverityTextColor(severity: string): string {
+  if (severity === "CRITICAL") return ERROR;
+  if (severity === "WARNING") return "var(--color-warning-text)";
+  if (severity === "INFO") return "var(--color-primary-strong)";
+  return MUTED;
+}
+
 /** 告警規則名稱（PRD §5.4.4 六條＋引擎原生兩條；契約 §3.7）。 */
 export const ALERT_RULE_LABEL: Record<AlertRule, string> = {
   TOKEN_BUDGET_WARNING: "Token 預算警告",
@@ -179,11 +180,15 @@ export function autonomyHint(level: number): string {
   return AUTONOMY_HINTS[level] ?? "進階自治：等級會記錄在批次上，但目前不另傳給引擎（對映尚未驗證），行為與 Level 5 相同";
 }
 
-/** 日誌等級顏色（設計稿監控頁：等級文字依等級著色、寬 48px）。 */
+/**
+ * 日誌等級顏色（設計稿監控頁：等級文字依等級著色、寬 48px）。
+ * 這些是「文字」，列放在 bg-base 上，所以不能直接用狀態點的顏色（DEF-AC-004）：
+ * INFO 用 primary-strong（bg-base 上 6.02:1；主色只有 4.22:1）、WARN 用 warning-text（5.49:1；warning 本色只有 1.87:1）。
+ */
 export const LOG_LEVEL_COLOR: Record<string, string> = {
   DEBUG: MUTED,
-  INFO: PRIMARY,
-  WARN: WARNING,
+  INFO: "var(--color-primary-strong)",
+  WARN: "var(--color-warning-text)",
   ERROR: ERROR,
   CRITICAL: ERROR,
 };
@@ -228,13 +233,7 @@ export function isRetryable(status: string): boolean {
 
 /** 狀態點需要「呼吸」動畫的狀態（進行中的工作） */
 export function isLive(status: string): boolean {
-  return (
-    status === "EXECUTING" ||
-    status === "IN_PROGRESS" ||
-    status === "RUNNING" ||
-    status === "PARSING" ||
-    status === "INITIALIZING"
-  );
+  return status === "EXECUTING" || status === "IN_PROGRESS" || status === "RUNNING" || status === "PARSING" || status === "INITIALIZING";
 }
 
 /**

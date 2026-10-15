@@ -27,11 +27,7 @@ export function ContentRegion({ children }: { children: ReactNode }) {
   const blocked = !isLogin && status !== "authed";
 
   return (
-    <main
-      id="main-content"
-      data-region="content"
-      className="min-w-0 flex-1 overflow-y-auto pb-12 max-md:pb-6"
-    >
+    <main id="main-content" data-region="content" className="min-w-0 flex-1 overflow-y-auto pb-12 max-md:pb-6">
       {blocked ? (
         <div className="flex h-64 items-center justify-center">
           <Spinner />

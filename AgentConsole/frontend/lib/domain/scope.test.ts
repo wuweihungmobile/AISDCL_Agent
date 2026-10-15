@@ -1,19 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  allCheckState,
-  buildScope,
-  goalCheckState,
-  initialSelection,
-  isTaskChecked,
-  lockReport,
-  toggleAll,
-  toggleGoal,
-  toggleTask,
-  type ScopeGoal,
-  type ScopeTask,
-  type Selection,
-} from "./scope";
+import { allCheckState, buildScope, goalCheckState, initialSelection, isTaskChecked, lockReport, toggleAll, toggleGoal, toggleTask, type ScopeGoal, type ScopeTask, type Selection } from "./scope";
 
 const goal = (id: string, patch: Partial<ScopeGoal> = {}): ScopeGoal => ({ id, name: `目標 ${id}`, status: "PENDING", signedOff: true, taskCount: 2, ...patch });
 const task = (id: string, patch: Partial<ScopeTask> = {}): ScopeTask => ({ id, name: `任務 ${id}`, status: "PENDING", signedOff: true, ...patch });

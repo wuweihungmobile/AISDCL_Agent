@@ -10,6 +10,7 @@ import { BackLink } from "@/components/domain/PageHeader";
 import { SignoffBanner } from "@/components/domain/SignoffBanner";
 import { SignoffDialog, type SignoffTarget } from "@/components/domain/SignoffDialog";
 import { TaskListCard } from "@/components/domain/TaskListCard";
+import { describeDeleteError } from "@/components/domain/entity/apiErrors";
 import { EntityDialog } from "@/components/domain/entity/EntityDialog";
 import type { EntityTarget } from "@/components/domain/entity/EntityEditor";
 import { MarkdownView } from "@/components/markdown/MarkdownView";
@@ -83,35 +84,25 @@ export function GoalDetailView() {
         </span>
         <span className="inline-flex flex-wrap items-center gap-1.5" data-testid="goal-deps">
           前置依賴：
-          {g.dependsOn.length === 0 ? (
-            "無"
-          ) : (
-            g.dependsOn.map((id) => {
-              const dep = goalsById.get(id);
-              return (
-                <Link
-                  key={id}
-                  href={`/projects/${projectId}/goals/${id}`}
-                  className="inline-flex items-center gap-1 rounded-sm border border-wg-line bg-wg-surface px-2 py-0.5 text-[13px] text-wg-text transition-colors hover:border-wg-primary hover:text-wg-primary"
-                >
-                  {dep?.name ?? id.slice(0, 8)}
-                  {dep?.status === "COMPLETED" ? (
-                    <CircleCheck size={13} className="text-wg-primary" aria-label="已完成" />
-                  ) : null}
-                </Link>
-              );
-            })
-          )}
+          {g.dependsOn.length === 0
+            ? "無"
+            : g.dependsOn.map((id) => {
+                const dep = goalsById.get(id);
+                return (
+                  <Link
+                    key={id}
+                    href={`/projects/${projectId}/goals/${id}`}
+                    className="inline-flex items-center gap-1 rounded-sm border border-wg-line bg-wg-surface px-2 py-0.5 text-[13px] text-wg-text transition-colors hover:border-wg-primary hover:text-wg-primary"
+                  >
+                    {dep?.name ?? id.slice(0, 8)}
+                    {dep?.status === "COMPLETED" ? <CircleCheck size={13} className="text-wg-primary" aria-label="已完成" /> : null}
+                  </Link>
+                );
+              })}
         </span>
       </div>
 
-      {!g.signedOff ? (
-        <SignoffBanner
-          kind="goal"
-          canApprove={canWrite}
-          onApprove={() => setSignoff({ kind: "goal", id: g.id, name: g.name })}
-        />
-      ) : null}
+      {!g.signedOff ? <SignoffBanner kind="goal" canApprove={canWrite} onApprove={() => setSignoff({ kind: "goal", id: g.id, name: g.name })} /> : null}
 
       <div className="mb-6 grid grid-cols-2 gap-6 max-lg:grid-cols-1">
         <Card className="min-w-0 px-[22px] py-5">
@@ -124,32 +115,13 @@ export function GoalDetailView() {
         </Card>
       </div>
 
-      <TaskListCard
-        projectId={projectId}
-        goalId={g.id}
-        tasks={g.tasks}
-        canWrite={canWrite}
-        onAdd={() => setEntity({ kind: "task", mode: "create", goalId: g.id, projectId })}
-      />
+      <TaskListCard projectId={projectId} goalId={g.id} tasks={g.tasks} canWrite={canWrite} onAdd={() => setEntity({ kind: "task", mode: "create", goalId: g.id, projectId })} />
 
       <div className="flex flex-wrap gap-2.5">
-        <Button
-          variant="ghost"
-          iconLeft={Pencil}
-          disabled={!canWrite}
-          title={writeHint}
-          onClick={() => setEntity({ kind: "goal", mode: "edit", id: g.id, projectId })}
-        >
+        <Button variant="ghost" iconLeft={Pencil} disabled={!canWrite} title={writeHint} onClick={() => setEntity({ kind: "goal", mode: "edit", id: g.id, projectId })}>
           編輯目標
         </Button>
-        <Button
-          variant="ghost"
-          iconLeft={Trash2}
-          disabled={!canWrite}
-          title={writeHint}
-          className="text-wg-accent hover:text-wg-accent-strong"
-          onClick={() => setConfirmDelete(true)}
-        >
+        <Button variant="ghost" iconLeft={Trash2} disabled={!canWrite} title={writeHint} className="text-wg-accent hover:text-wg-accent-strong" onClick={() => setConfirmDelete(true)}>
           刪除目標
         </Button>
       </div>
@@ -160,6 +132,7 @@ export function GoalDetailView() {
         open={confirmDelete}
         title="刪除目標"
         confirmLabel="確認刪除"
+        formatError={describeDeleteError}
         onClose={() => setConfirmDelete(false)}
         onConfirm={async () => {
           await del.mutateAsync(g.id);
@@ -167,7 +140,7 @@ export function GoalDetailView() {
           router.replace(back);
         }}
       >
-        確定刪除目標「<b>{g.name}</b>」？其下任務會一併軟刪除；含執行中任務時無法刪除。
+        確定刪除目標「<b>{g.name}</b>」？其下任務會一併軟刪除；含執行中任務、或專案有進行中的執行批次時無法刪除。
       </ConfirmDialog>
     </div>
   );

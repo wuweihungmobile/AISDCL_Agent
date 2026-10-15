@@ -63,9 +63,7 @@ export function PillTabs<T extends string>({
             onKeyDown={(e) => onKeyDown(e, index)}
             className={cn(
               "inline-flex cursor-pointer items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors",
-              active
-                ? "border-wg-primary bg-wg-primary text-white"
-                : "border-wg-line bg-wg-surface text-wg-text hover:text-wg-primary",
+              active ? "border-wg-primary bg-wg-primary text-white" : "border-wg-line bg-wg-surface text-wg-text hover:text-wg-primary",
             )}
           >
             {Icon ? <Icon size={16} aria-hidden /> : null}

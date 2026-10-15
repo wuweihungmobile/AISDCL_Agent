@@ -1,21 +1,7 @@
 "use client";
 
-import {
-  closestCenter,
-  DndContext,
-  KeyboardSensor,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-} from "@dnd-kit/core";
-import {
-  arrayMove,
-  SortableContext,
-  sortableKeyboardCoordinates,
-  useSortable,
-  verticalListSortingStrategy,
-} from "@dnd-kit/sortable";
+import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
+import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { GripVertical, Plus } from "lucide-react";
 import Link from "next/link";
@@ -33,17 +19,8 @@ import { goalStatus } from "@/lib/domain/status";
 import { percent } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
-function GoalRow({
-  goal: g,
-  projectId,
-  sortable,
-}: {
-  goal: GoalBrief;
-  projectId: string;
-  sortable: boolean;
-}) {
-  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } =
-    useSortable({ id: g.id, disabled: !sortable });
+function GoalRow({ goal: g, projectId, sortable }: { goal: GoalBrief; projectId: string; sortable: boolean }) {
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id: g.id, disabled: !sortable });
   const meta = goalStatus(g.status);
   const href = `/projects/${projectId}/goals/${g.id}`;
   return (
@@ -52,10 +29,7 @@ function GoalRow({
       data-testid="goal-row"
       data-goal-id={g.id}
       style={{ transform: CSS.Transform.toString(transform), transition }}
-      className={cn(
-        "flex items-center gap-3.5 border-t border-wg-line bg-wg-surface py-3.5 max-md:flex-wrap",
-        isDragging && "relative z-10 bg-wg-tertiary opacity-80",
-      )}
+      className={cn("flex items-center gap-3.5 border-t border-wg-line bg-wg-surface py-3.5 max-md:flex-wrap", isDragging && "relative z-10 bg-wg-tertiary opacity-80")}
     >
       {sortable ? (
         <button
@@ -71,19 +45,12 @@ function GoalRow({
         </button>
       ) : null}
       <StatusDot color={meta.color} size={10} live={g.status === "IN_PROGRESS"} />
-      <Link
-        href={href}
-        className="shrink-0 text-[15px] font-semibold text-wg-text transition-colors hover:text-wg-primary"
-      >
+      <Link href={href} className="shrink-0 text-[15px] font-semibold text-wg-text transition-colors hover:text-wg-primary">
         {g.name}
       </Link>
       <span className="text-[13px] text-wg-muted">{meta.label}</span>
       <div className="flex max-w-[320px] flex-1 items-center gap-2.5">
-        <Progress
-          value={percent(g.completedTaskCount, g.taskCount)}
-          label={`${g.name} 任務完成度`}
-          className="h-[7px] flex-1"
-        />
+        <Progress value={percent(g.completedTaskCount, g.taskCount)} label={`${g.name} 任務完成度`} className="h-[7px] flex-1" />
         <span className="text-[13px] whitespace-nowrap text-wg-muted">
           {g.completedTaskCount} / {g.taskCount}
         </span>
@@ -99,23 +66,10 @@ function GoalRow({
  * 目標清單卡（設計稿 3）：狀態點、名稱、狀態、進度條、done/total、查看；標題旁「新增目標」。
  * 拖曳排序（@dnd-kit：指標與鍵盤皆可）→ PUT /goals/reorder；先樂觀換位，失敗還原並 toast。
  */
-export function GoalListCard({
-  projectId,
-  goals,
-  canWrite,
-  onAdd,
-}: {
-  projectId: string;
-  goals: GoalBrief[];
-  canWrite: boolean;
-  onAdd: () => void;
-}) {
+export function GoalListCard({ projectId, goals, canWrite, onAdd }: { projectId: string; goals: GoalBrief[]; canWrite: boolean; onAdd: () => void }) {
   const toast = useToast();
   const reorder = useReorderGoals(projectId);
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
-  );
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
   const ordered = [...goals].sort((a, b) => a.sortOrder - b.sortOrder);
 
   function onDragEnd(e: DragEndEvent) {
@@ -135,14 +89,7 @@ export function GoalListCard({
     <Card className="mb-6 px-[22px] py-5" data-testid="goal-list-card">
       <div className="mb-2 flex items-center justify-between">
         <CardTitle>目標清單 ({ordered.length})</CardTitle>
-        <Button
-          variant="ghost"
-          size="sm"
-          iconLeft={Plus}
-          onClick={onAdd}
-          disabled={!canWrite}
-          title={canWrite ? undefined : "權限不足（唯讀角色）"}
-        >
+        <Button variant="ghost" size="sm" iconLeft={Plus} onClick={onAdd} disabled={!canWrite} title={canWrite ? undefined : "權限不足（唯讀角色）"}>
           新增目標
         </Button>
       </div>

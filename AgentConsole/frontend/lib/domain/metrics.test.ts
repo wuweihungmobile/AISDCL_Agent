@@ -72,14 +72,7 @@ describe("時間範圍（1h／24h／7d／30d → from／to）", () => {
 describe("KPI 卡格式化（契約：百分比 0～100 小數 1 位；null＝無法計算顯示「—」）", () => {
   it("設計稿四張卡與 PRD 另外六項：鍵、標籤、種類齊全", () => {
     expect(PRIMARY_KPIS.map((k) => k.label)).toEqual(["完成率", "任務成功率", "重試率", "Token 消耗"]);
-    expect(SECONDARY_KPIS.map((k) => k.key)).toEqual([
-      "projectCompletionRate",
-      "goalAchievementRate",
-      "averageRetryCount",
-      "tokenBudgetUsageRate",
-      "averageTaskDurationSec",
-      "agentAvailability",
-    ]);
+    expect(SECONDARY_KPIS.map((k) => k.key)).toEqual(["projectCompletionRate", "goalAchievementRate", "averageRetryCount", "tokenBudgetUsageRate", "averageTaskDurationSec", "agentAvailability"]);
     // 十個 KPI 一個不漏（契約 §1.3.1：十個 MetricValue）
     expect(new Set([...PRIMARY_KPIS, ...SECONDARY_KPIS].map((k) => k.key)).size).toBe(10);
   });

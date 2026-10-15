@@ -17,9 +17,7 @@ export function describeSettingsError(error: unknown): string {
   if (error.reason === REASONS.SETTINGS_URL_REJECTED) {
     const violation = typeof error.details?.violation === "string" ? error.details.violation : undefined;
     const host = typeof error.details?.host === "string" ? error.details.host : undefined;
-    const parts = [violation ? (URL_VIOLATION_LABEL[violation] ?? violation) : undefined, host ? `host：${host}` : undefined].filter(
-      Boolean,
-    );
+    const parts = [violation ? (URL_VIOLATION_LABEL[violation] ?? violation) : undefined, host ? `host：${host}` : undefined].filter(Boolean);
     return `${error.reason}${parts.length > 0 ? `（${parts.join("；")}）` : ""}${trace}`;
   }
 

@@ -9,6 +9,7 @@ import { LogPanel } from "@/components/domain/LogPanel";
 import { BackLink } from "@/components/domain/PageHeader";
 import { SignoffBanner } from "@/components/domain/SignoffBanner";
 import { SignoffDialog, type SignoffTarget } from "@/components/domain/SignoffDialog";
+import { describeDeleteError } from "@/components/domain/entity/apiErrors";
 import { EntityDialog } from "@/components/domain/entity/EntityDialog";
 import type { EntityTarget } from "@/components/domain/entity/EntityEditor";
 import { MarkdownView } from "@/components/markdown/MarkdownView";
@@ -21,7 +22,7 @@ import { describeError } from "@/lib/api/client";
 import { useDeleteTask, useGoal, useProject, useRetryTask, useTask } from "@/lib/api/queries";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { isRetryable, taskStatus } from "@/lib/domain/status";
-import { formatClock, formatDateTime, formatNumber, retryLabel } from "@/lib/format";
+import { formatClock, formatDateTime, formatNumber, manualRetryLabel, retryLabel } from "@/lib/format";
 
 function Metric({ icon, label, value, testId }: { icon: ReactNode; label: string; value: string; testId: string }) {
   return (
@@ -78,7 +79,7 @@ export function TaskDetailView() {
   async function onRetry() {
     try {
       const r = await retry.mutateAsync(t.id);
-      toast.success(`已重新排入佇列（重試 ${retryLabel(r.retryCount, r.maxRetries)}）`);
+      toast.success(`已重新排入佇列：${manualRetryLabel(r.retryCount, r.maxRetries)}`);
     } catch (e) {
       toast.error(`重試失敗：${describeError(e)}`);
     }
@@ -97,37 +98,15 @@ export function TaskDetailView() {
         <StatusLabel meta={meta} dot={9} live={t.status === "RUNNING"} className="text-sm" />
       </div>
       <div className="mb-[18px] pl-[58px] text-sm text-wg-muted max-md:pl-0" data-testid="task-meta">
-        {project.data?.name ?? "…"} › {goal.data?.name ?? "…"}　·　重試 {retryLabel(t.retryCount, t.maxRetries)}　·　Agent{" "}
-        {t.assignedAgent ?? "—"}
+        {project.data?.name ?? "…"} › {goal.data?.name ?? "…"}　·　重試 {retryLabel(t.retryCount, t.maxRetries)}　·　Agent {t.assignedAgent ?? "—"}
       </div>
 
-      {!t.signedOff ? (
-        <SignoffBanner
-          kind="task"
-          canApprove={canWrite}
-          onApprove={() => setSignoff({ kind: "task", id: t.id, name: t.name })}
-        />
-      ) : null}
+      {!t.signedOff ? <SignoffBanner kind="task" canApprove={canWrite} onApprove={() => setSignoff({ kind: "task", id: t.id, name: t.name })} /> : null}
 
       <div className="mb-6 grid grid-cols-3 gap-4 max-md:grid-cols-1">
-        <Metric
-          icon={<Clock size={15} aria-hidden />}
-          label="開始時間"
-          value={formatClock(t.startedAt)}
-          testId="metric-started"
-        />
-        <Metric
-          icon={<Flame size={15} aria-hidden />}
-          label="Token 消耗"
-          value={formatNumber(t.actualTokens)}
-          testId="metric-tokens"
-        />
-        <Metric
-          icon={<Repeat size={15} aria-hidden />}
-          label="重試次數"
-          value={retryLabel(t.retryCount, t.maxRetries)}
-          testId="metric-retries"
-        />
+        <Metric icon={<Clock size={15} aria-hidden />} label="開始時間" value={formatClock(t.startedAt)} testId="metric-started" />
+        <Metric icon={<Flame size={15} aria-hidden />} label="Token 消耗" value={formatNumber(t.actualTokens)} testId="metric-tokens" />
+        <Metric icon={<Repeat size={15} aria-hidden />} label="重試次數" value={retryLabel(t.retryCount, t.maxRetries)} testId="metric-retries" />
       </div>
 
       <div className="mb-6 grid grid-cols-2 gap-6 max-lg:grid-cols-1">
@@ -143,17 +122,13 @@ export function TaskDetailView() {
               {t.evaluatorCommand ? (
                 <div>
                   <dt className="text-wg-muted">驗證命令</dt>
-                  <dd className="mt-0.5 rounded-md border border-wg-line bg-wg-base px-2.5 py-1.5 font-mono break-all">
-                    {t.evaluatorCommand}
-                  </dd>
+                  <dd className="mt-0.5 rounded-md border border-wg-line bg-wg-base px-2.5 py-1.5 font-mono break-all">{t.evaluatorCommand}</dd>
                 </div>
               ) : null}
               {t.expectedOutputRegex ? (
                 <div>
                   <dt className="text-wg-muted">期望輸出 Regex</dt>
-                  <dd className="mt-0.5 rounded-md border border-wg-line bg-wg-base px-2.5 py-1.5 font-mono break-all">
-                    {t.expectedOutputRegex}
-                  </dd>
+                  <dd className="mt-0.5 rounded-md border border-wg-line bg-wg-base px-2.5 py-1.5 font-mono break-all">{t.expectedOutputRegex}</dd>
                 </div>
               ) : null}
             </dl>
@@ -192,23 +167,10 @@ export function TaskDetailView() {
         >
           重試
         </Button>
-        <Button
-          variant="ghost"
-          iconLeft={Pencil}
-          disabled={!canWrite}
-          title={writeHint}
-          onClick={() => setEntity({ kind: "task", mode: "edit", id: t.id, goalId, projectId })}
-        >
+        <Button variant="ghost" iconLeft={Pencil} disabled={!canWrite} title={writeHint} onClick={() => setEntity({ kind: "task", mode: "edit", id: t.id, goalId, projectId })}>
           編輯
         </Button>
-        <Button
-          variant="ghost"
-          iconLeft={Trash2}
-          disabled={!canWrite}
-          title={writeHint}
-          className="text-wg-accent hover:text-wg-accent-strong"
-          onClick={() => setConfirmDelete(true)}
-        >
+        <Button variant="ghost" iconLeft={Trash2} disabled={!canWrite} title={writeHint} className="text-wg-accent hover:text-wg-accent-strong" onClick={() => setConfirmDelete(true)}>
           刪除
         </Button>
       </div>
@@ -219,6 +181,7 @@ export function TaskDetailView() {
         open={confirmDelete}
         title="刪除任務"
         confirmLabel="確認刪除"
+        formatError={describeDeleteError}
         onClose={() => setConfirmDelete(false)}
         onConfirm={async () => {
           await del.mutateAsync(t.id);
@@ -226,7 +189,7 @@ export function TaskDetailView() {
           router.replace(back);
         }}
       >
-        確定刪除任務「<b>{t.name}</b>」？執行中（RUNNING）的任務不可直接刪除。
+        確定刪除任務「<b>{t.name}</b>」？執行中（RUNNING）的任務不可直接刪除；專案有進行中的執行批次時也不能刪除。
       </ConfirmDialog>
     </div>
   );

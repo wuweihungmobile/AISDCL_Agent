@@ -79,8 +79,7 @@ function ImportBody({ onClose, onApplied }: { onClose: () => void; onApplied: (r
     <>
       <DialogBody>
         <p className="text-sm leading-relaxed text-wg-muted">
-          選擇由「匯出設定」產生的 JSON 檔（≤ 1MB）。每筆設定會逐一驗證後在同一交易套用；加密參數的{" "}
-          <code className="font-mono text-xs">&lt;encrypted&gt;</code> 佔位值不會被匯入。
+          選擇由「匯出設定」產生的 JSON 檔（≤ 1MB）。每筆設定會逐一驗證後在同一交易套用；加密參數的 <code className="font-mono text-xs">&lt;encrypted&gt;</code> 佔位值不會被匯入。
         </p>
         <div className="flex flex-wrap items-center gap-3">
           <input

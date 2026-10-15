@@ -37,10 +37,7 @@ function TrendTooltip({ active, label, payload }: TipProps) {
 export function TokenTrendChart({ rows, className }: { rows: readonly TokenTrendRow[]; className?: string }) {
   const hasBudget = rows.some((r) => r.budget !== null);
   const last = rows[rows.length - 1];
-  const summary =
-    rows.length === 0
-      ? "沒有資料"
-      : `${rows.length} 個時間點，最新累計 ${last.used.toLocaleString("en-US")} Token${last.budget ? `，預算 ${last.budget.toLocaleString("en-US")}` : ""}`;
+  const summary = rows.length === 0 ? "沒有資料" : `${rows.length} 個時間點，最新累計 ${last.used.toLocaleString("en-US")} Token${last.budget ? `，預算 ${last.budget.toLocaleString("en-US")}` : ""}`;
   return (
     <div>
       <div role="img" aria-label={`Token 使用趨勢圖：${summary}`} data-testid="token-trend-chart" className={cn("h-[200px] w-full", className)}>

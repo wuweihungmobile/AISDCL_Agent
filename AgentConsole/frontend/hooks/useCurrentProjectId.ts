@@ -4,12 +4,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useSyncExternalStore } from "react";
 
 import { useAllProjects } from "@/lib/api/queries";
-import {
-  getLastProjectId,
-  projectIdFromPath,
-  rememberProjectId,
-  subscribeLastProject,
-} from "@/lib/nav/lastProject";
+import { getLastProjectId, projectIdFromPath, rememberProjectId, subscribeLastProject } from "@/lib/nav/lastProject";
 
 /** 目前專案 id：網址 → 最近造訪 → 列表第一筆；都沒有回 null。 */
 export function useCurrentProjectId(): string | null {

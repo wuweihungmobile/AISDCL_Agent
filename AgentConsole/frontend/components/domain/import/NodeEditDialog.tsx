@@ -17,21 +17,10 @@ import { Dialog, DialogBody, DialogContent, DialogFooter } from "@/components/ui
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
-import {
-  goalNodeSchema,
-  parseMaxRetries,
-  projectNodeSchema,
-  taskNodeSchema,
-  type GoalNodeValues,
-  type ProjectNodeValues,
-  type TaskNodeValues,
-} from "./nodeSchemas";
+import { goalNodeSchema, parseMaxRetries, projectNodeSchema, taskNodeSchema, type GoalNodeValues, type ProjectNodeValues, type TaskNodeValues } from "./nodeSchemas";
 import { blankGoal, blankTask, type Tree, type TreeAction } from "./tree";
 
-export type NodeTarget =
-  | { kind: "project" }
-  | { kind: "goal"; mode: "create" | "edit"; key: string }
-  | { kind: "task"; mode: "create" | "edit"; goalKey: string; uid: string };
+export type NodeTarget = { kind: "project" } | { kind: "goal"; mode: "create" | "edit"; key: string } | { kind: "task"; mode: "create" | "edit"; goalKey: string; uid: string };
 
 export function nodeDialogTitle(target: NodeTarget): string {
   if (target.kind === "project") return "編輯專案";
@@ -39,17 +28,7 @@ export function nodeDialogTitle(target: NodeTarget): string {
   return `${target.mode === "create" ? "新增" : "編輯"}${noun}`;
 }
 
-export function NodeEditDialog({
-  target,
-  tree,
-  dispatch,
-  onClose,
-}: {
-  target: NodeTarget | null;
-  tree: Tree;
-  dispatch: (action: TreeAction) => void;
-  onClose: () => void;
-}) {
+export function NodeEditDialog({ target, tree, dispatch, onClose }: { target: NodeTarget | null; tree: Tree; dispatch: (action: TreeAction) => void; onClose: () => void }) {
   return (
     <Dialog open={target !== null} onOpenChange={(open) => !open && onClose()}>
       {target ? (
@@ -69,19 +48,7 @@ export function NodeEditDialog({
 
 // ── 共用小件 ────────────────────────────────────────────────────────────
 
-function MarkdownField<T extends FieldValues>({
-  control,
-  name,
-  label,
-  placeholder,
-  error,
-}: {
-  control: Control<T>;
-  name: Path<T>;
-  label: string;
-  placeholder: string;
-  error?: string;
-}) {
+function MarkdownField<T extends FieldValues>({ control, name, label, placeholder, error }: { control: Control<T>; name: Path<T>; label: string; placeholder: string; error?: string }) {
   const toast = useToast();
   return (
     <Field label={label} hint="(Markdown)" as="group" error={error}>
@@ -104,15 +71,7 @@ function MarkdownField<T extends FieldValues>({
   );
 }
 
-function Shell({
-  onSubmit,
-  onClose,
-  children,
-}: {
-  onSubmit: (e?: React.BaseSyntheticEvent) => Promise<void>;
-  onClose: () => void;
-  children: ReactNode;
-}) {
+function Shell({ onSubmit, onClose, children }: { onSubmit: (e?: React.BaseSyntheticEvent) => Promise<void>; onClose: () => void; children: ReactNode }) {
   return (
     <form onSubmit={onSubmit} noValidate className="flex min-h-0 flex-col">
       <DialogBody>{children}</DialogBody>
@@ -177,14 +136,7 @@ function ProjectBody({ tree, dispatch, onClose }: BodyProps) {
       <MarkdownField control={control} name="description" label="說明描述" placeholder="## 概述…" error={errors.description?.message} />
       <MarkdownField control={control} name="passCriteria" label="通過標準" placeholder="- 所有單元測試通過…" error={errors.passCriteria?.message} />
       <Field label="自治等級" hint="(1-10)" error={errors.autonomyLevel?.message}>
-        <Input
-          type="number"
-          min={1}
-          max={10}
-          step={1}
-          aria-invalid={errors.autonomyLevel ? true : undefined}
-          {...register("autonomyLevel", { valueAsNumber: true })}
-        />
+        <Input type="number" min={1} max={10} step={1} aria-invalid={errors.autonomyLevel ? true : undefined} {...register("autonomyLevel", { valueAsNumber: true })} />
       </Field>
     </Shell>
   );
@@ -231,21 +183,13 @@ function GoalBody({ target, tree, dispatch, onClose }: BodyProps & { target: Ext
           control={control}
           name="dependsOn"
           render={({ field }) => (
-            <div
-              data-testid="node-depends-on"
-              className="flex max-h-40 flex-col gap-2.5 overflow-y-auto rounded-md border border-wg-line bg-white px-4 py-3"
-            >
+            <div data-testid="node-depends-on" className="flex max-h-40 flex-col gap-2.5 overflow-y-auto rounded-md border border-wg-line bg-white px-4 py-3">
               {others.length === 0 ? (
                 <p className="text-sm text-wg-muted">此樹沒有其他目標可作為前置依賴</p>
               ) : (
                 others.map((g) => (
                   <label key={g.key} className="flex cursor-pointer items-center gap-2.5 text-sm">
-                    <Checkbox
-                      checked={field.value.includes(g.key)}
-                      onCheckedChange={(next) =>
-                        field.onChange(next === true ? [...field.value, g.key] : field.value.filter((k) => k !== g.key))
-                      }
-                    />
+                    <Checkbox checked={field.value.includes(g.key)} onCheckedChange={(next) => field.onChange(next === true ? [...field.value, g.key] : field.value.filter((k) => k !== g.key))} />
                     <span className="min-w-0 flex-1 truncate">{g.name || "（未命名目標）"}</span>
                   </label>
                 ))
@@ -275,7 +219,8 @@ function TaskBody({ target, tree, dispatch, onClose }: BodyProps & { target: Ext
       passCriteria: existing?.passCriteria ?? "",
       evaluatorCommand: existing?.evaluatorCommand ?? "",
       expectedOutputRegex: existing?.expectedOutputRegex ?? "",
-      maxRetries: existing?.maxRetries === undefined ? "" : String(existing.maxRetries),
+      // 契約 §0.2：null 與缺席等價；`=== undefined` 會把 null 顯示成字面「null」並讓 zod 擋住「確定」（DEF-AC-001）
+      maxRetries: existing?.maxRetries == null ? "" : String(existing.maxRetries),
     },
   });
   const submit = handleSubmit((v) => {
@@ -302,20 +247,10 @@ function TaskBody({ target, tree, dispatch, onClose }: BodyProps & { target: Ext
       <MarkdownField control={control} name="description" label="說明描述" placeholder="## 概述…" error={errors.description?.message} />
       <MarkdownField control={control} name="passCriteria" label="通過標準" placeholder="- 端點回傳符合統一回應格式" error={errors.passCriteria?.message} />
       <Field label="驗證命令" hint="(evaluatorCommand，選填)" error={errors.evaluatorCommand?.message}>
-        <Input
-          className="font-mono text-sm"
-          placeholder="pytest -q"
-          aria-invalid={errors.evaluatorCommand ? true : undefined}
-          {...register("evaluatorCommand")}
-        />
+        <Input className="font-mono text-sm" placeholder="pytest -q" aria-invalid={errors.evaluatorCommand ? true : undefined} {...register("evaluatorCommand")} />
       </Field>
       <Field label="期望輸出 Regex" hint="(expectedOutputRegex，選填)" error={errors.expectedOutputRegex?.message}>
-        <Input
-          className="font-mono text-sm"
-          placeholder="^OK$"
-          aria-invalid={errors.expectedOutputRegex ? true : undefined}
-          {...register("expectedOutputRegex")}
-        />
+        <Input className="font-mono text-sm" placeholder="^OK$" aria-invalid={errors.expectedOutputRegex ? true : undefined} {...register("expectedOutputRegex")} />
       </Field>
       <Field label="最大重試次數" hint="(選填，0～20；空白沿用預設)" error={errors.maxRetries?.message}>
         <Input inputMode="numeric" aria-invalid={errors.maxRetries ? true : undefined} {...register("maxRetries")} />

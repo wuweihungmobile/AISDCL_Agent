@@ -46,21 +46,7 @@ export type SettingRowProps = {
   revealing?: boolean;
 };
 
-export function SettingRow({
-  config: c,
-  value,
-  dirty,
-  error,
-  disabled,
-  onChange,
-  canReset,
-  resetHint,
-  onReset,
-  visible,
-  onToggleVisible,
-  canReveal,
-  revealing,
-}: SettingRowProps) {
+export function SettingRow({ config: c, value, dirty, error, disabled, onChange, canReset, resetHint, onReset, visible, onToggleVisible, canReveal, revealing }: SettingRowProps) {
   const id = configId(c);
   const label = settingLabel(c.category, c.key);
   const range = rangeHint(c);
@@ -77,10 +63,7 @@ export function SettingRow({
         <div className="text-[15px] font-medium break-words">{label}</div>
         {c.description ? <div className="mt-0.5 text-xs leading-relaxed text-wg-muted">{c.description}</div> : null}
         {effect ? (
-          <span
-            data-testid="effect-tag"
-            className="mt-1.5 inline-flex rounded-sm border border-wg-line bg-wg-base px-1.5 py-0.5 text-[11px] text-wg-muted"
-          >
+          <span data-testid="effect-tag" className="mt-1.5 inline-flex rounded-sm border border-wg-line bg-wg-base px-1.5 py-0.5 text-[11px] text-wg-muted">
             {effect}
           </span>
         ) : null}
@@ -100,14 +83,7 @@ export function SettingRow({
             canReveal={canReveal}
             revealing={revealing}
           />
-          <IconButton
-            icon={RotateCcw}
-            label={`重置：${label}`}
-            size={36}
-            disabled={!canReset}
-            title={canReset ? `重置為預設值：${label}` : resetHint}
-            onClick={onReset}
-          />
+          <IconButton icon={RotateCcw} label={`重置：${label}`} size={36} disabled={!canReset} title={canReset ? `重置為預設值：${label}` : resetHint} onClick={onReset} />
         </div>
         {hint || range ? (
           <p className="mt-1.5 text-xs text-wg-muted" data-testid="setting-hint">

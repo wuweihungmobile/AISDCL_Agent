@@ -28,17 +28,7 @@ import { formatDateTime, formatNumber } from "@/lib/format";
 import { highlightsFromRows, parseFailureFromError, type ParseFailure } from "./gateErrors";
 import { NodeEditDialog, type NodeTarget } from "./NodeEditDialog";
 import { ParseFailurePanel, ParseWarnings, StepHeader } from "./parts";
-import {
-  countTasks,
-  isTreeDirty,
-  randomId,
-  toParsedResult,
-  toTree,
-  treeReducer,
-  treeSignature,
-  uniqueGoalKey,
-  type TreeAction,
-} from "./tree";
+import { countTasks, isTreeDirty, randomId, toParsedResult, toTree, treeReducer, treeSignature, uniqueGoalKey, type TreeAction } from "./tree";
 import { TreeEditor } from "./TreeEditor";
 
 const PATH_LABEL: Record<ParsePath, string> = {
@@ -88,13 +78,7 @@ export function StructureCard({
   const writeHint = canWrite ? undefined : "權限不足（唯讀角色）";
   const highlights = failure && failure.atEdit === edits ? highlightsFromRows(failure.value.rows) : null;
   const canConfirm = record.signedOff && !dirty && canWrite;
-  const confirmHint = !canWrite
-    ? writeHint
-    : dirty
-      ? "有未儲存的編輯，請先儲存編輯"
-      : !record.signedOff
-        ? "須先 signoff 才能確認匯入"
-        : undefined;
+  const confirmHint = !canWrite ? writeHint : dirty ? "有未儲存的編輯，請先儲存編輯" : !record.signedOff ? "須先 signoff 才能確認匯入" : undefined;
 
   async function save() {
     setActionError(null);
@@ -142,9 +126,7 @@ export function StructureCard({
               </span>
             ) : null}
             {record.aiModel ? <span className="text-xs text-wg-muted">{record.aiModel}</span> : null}
-            {record.tokenUsed != null ? (
-              <span className="font-mono text-xs text-wg-muted">{formatNumber(record.tokenUsed)} tokens</span>
-            ) : null}
+            {record.tokenUsed != null ? <span className="font-mono text-xs text-wg-muted">{formatNumber(record.tokenUsed)} tokens</span> : null}
             <span data-testid="import-status">
               <StatusLabel meta={importStatus(record.status)} live={isLive(record.status)} className="text-xs" />
             </span>
@@ -163,7 +145,16 @@ export function StructureCard({
         canEdit={canWrite}
         highlights={highlights}
         onEditProject={() => setNode({ kind: "project" })}
-        onAddGoal={() => setNode({ kind: "goal", mode: "create", key: uniqueGoalKey(tree.goals.map((g) => g.key), randomId) })}
+        onAddGoal={() =>
+          setNode({
+            kind: "goal",
+            mode: "create",
+            key: uniqueGoalKey(
+              tree.goals.map((g) => g.key),
+              randomId,
+            ),
+          })
+        }
         onEditGoal={(key) => setNode({ kind: "goal", mode: "edit", key })}
         onDeleteGoal={(key) => act({ type: "deleteGoal", key })}
         onAddTask={(goalKey) => setNode({ kind: "task", mode: "create", goalKey, uid: `t-${randomId()}` })}
@@ -174,15 +165,9 @@ export function StructureCard({
       />
 
       {dirty ? (
-        <div
-          role="status"
-          data-testid="dirty-notice"
-          className="mt-3 flex flex-wrap items-center gap-3 rounded-md border border-wg-alert-border bg-wg-alert-bg px-4 py-3"
-        >
+        <div role="status" data-testid="dirty-notice" className="mt-3 flex flex-wrap items-center gap-3 rounded-md border border-wg-alert-border bg-wg-alert-bg px-4 py-3">
           <TriangleAlert size={18} className="shrink-0 text-wg-warning" aria-hidden />
-          <span className="min-w-0 flex-1 text-sm">
-            有未儲存的編輯。儲存後{record.signedOff ? "會撤銷目前的 signoff，需重新審批" : "狀態轉為「審核中」"}；儲存前無法 signoff 或確認匯入。
-          </span>
+          <span className="min-w-0 flex-1 text-sm">有未儲存的編輯。儲存後{record.signedOff ? "會撤銷目前的 signoff，需重新審批" : "狀態轉為「審核中」"}；儲存前無法 signoff 或確認匯入。</span>
           <Button variant="ghost" size="sm" iconLeft={RotateCcw} onClick={revert} disabled={edit.isPending}>
             還原
           </Button>
@@ -194,11 +179,7 @@ export function StructureCard({
 
       <div className="mt-5">
         {record.signedOff ? (
-          <div
-            role="status"
-            data-testid="import-signed-off"
-            className="flex items-center gap-3 rounded-md border border-wg-line bg-wg-tertiary px-[18px] py-3.5"
-          >
+          <div role="status" data-testid="import-signed-off" className="flex items-center gap-3 rounded-md border border-wg-line bg-wg-tertiary px-[18px] py-3.5">
             <CircleCheckBig size={22} className="shrink-0 text-wg-primary" aria-hidden />
             <div className="min-w-0 flex-1 text-sm">
               <b className="text-wg-primary">已 signoff</b> — 審批者 {record.signedOffBy ?? "—"}（{formatDateTime(record.signedOffAt)}
@@ -206,25 +187,17 @@ export function StructureCard({
             </div>
           </div>
         ) : (
-          <div
-            role="status"
-            data-testid="import-signoff-banner"
-            className="flex items-center gap-3 rounded-md border border-wg-draft-border bg-wg-draft-bg px-[18px] py-3.5 max-md:flex-wrap"
-          >
+          <div role="status" data-testid="import-signoff-banner" className="flex items-center gap-3 rounded-md border border-wg-draft-border bg-wg-draft-bg px-[18px] py-3.5 max-md:flex-wrap">
             <ShieldAlert size={22} className="shrink-0 text-wg-accent" aria-hidden />
             <div className="min-w-0 flex-1">
               <div className="font-semibold text-wg-accent">AI 草案 — 待人工 signoff 硬閘</div>
-              <div className="text-[13px] text-wg-muted">
-                此草案 signed_off=false，未經掌舵者審批前禁止確認匯入與執行（後端二次校驗 409）。
-              </div>
+              <div className="text-[13px] text-wg-muted">此草案 signed_off=false，未經掌舵者審批前禁止確認匯入與執行（後端二次校驗 409）。</div>
             </div>
             <Button
               iconLeft={Check}
               disabled={!canWrite || dirty}
               title={!canWrite ? writeHint : dirty ? "有未儲存的編輯，請先儲存編輯" : undefined}
-              onClick={() =>
-                setSignoff({ kind: "import", id: record.id, name: record.sourceFileName ?? tree.project.name })
-              }
+              onClick={() => setSignoff({ kind: "import", id: record.id, name: record.sourceFileName ?? tree.project.name })}
             >
               signoff 審批
             </Button>
@@ -242,13 +215,7 @@ export function StructureCard({
         <Button variant="ghost" disabled={!canWrite} title={writeHint} onClick={() => setConfirmReject(true)}>
           放棄
         </Button>
-        <Button
-          iconLeft={Check}
-          loading={confirm.isPending}
-          disabled={!canConfirm}
-          title={confirmHint}
-          onClick={confirmImport}
-        >
+        <Button iconLeft={Check} loading={confirm.isPending} disabled={!canConfirm} title={confirmHint} onClick={confirmImport}>
           確認匯入
         </Button>
       </div>

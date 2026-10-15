@@ -36,20 +36,8 @@ export function CountBadge({
 }
 
 /** 扁平標籤（設計稿「未審批」：#fdeee9 底、accent 字、4px 圓角）。 */
-export function Tag({
-  tone = "draft",
-  className,
-  ...props
-}: React.ComponentProps<"span"> & { tone?: "draft" }) {
+export function Tag({ tone = "draft", className, ...props }: React.ComponentProps<"span"> & { tone?: "draft" }) {
   return (
-    <span
-      data-slot="tag"
-      data-tone={tone}
-      className={cn(
-        "inline-flex shrink-0 items-center rounded-sm bg-wg-draft-bg px-[7px] py-0.5 text-xs font-semibold text-wg-accent",
-        className,
-      )}
-      {...props}
-    />
+    <span data-slot="tag" data-tone={tone} className={cn("inline-flex shrink-0 items-center rounded-sm bg-wg-draft-bg px-[7px] py-0.5 text-xs font-semibold text-wg-accent", className)} {...props} />
   );
 }

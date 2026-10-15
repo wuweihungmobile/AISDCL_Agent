@@ -114,8 +114,7 @@ export function ImportView() {
   const status = record?.status;
   const hasTree = (status === "PARSED" || status === "REVIEWING") && Boolean(record?.parsedResult);
   // 失敗清單：本次操作的結果優先；沒有就用記錄上「最近一次被有界閘拒絕」的 lastParseErrors（重新整理／歷史重開後還原）
-  const shownFailure =
-    (failure && failure.id === id ? failure.value : null) ?? parseFailureFromRecord(record?.lastParseErrors);
+  const shownFailure = (failure && failure.id === id ? failure.value : null) ?? parseFailureFromRecord(record?.lastParseErrors);
 
   return (
     <div className="max-w-[960px]">
@@ -123,8 +122,7 @@ export function ImportView() {
         title="BRD / PRD 智能匯入"
         subtitle={
           <>
-            AI 解析需求文件 → 自動拆解三層結構 →{" "}
-            <span aria-hidden className="mr-1 inline-block size-2 rounded-full bg-wg-accent align-middle" />
+            AI 解析需求文件 → 自動拆解三層結構 → <span aria-hidden className="mr-1 inline-block size-2 rounded-full bg-wg-accent align-middle" />
             人工 signoff 後落為正式專案
           </>
         }
@@ -179,7 +177,8 @@ export function ImportView() {
           key={record.id}
           record={record}
           canWrite={canWrite}
-          warnings={warnings && warnings.id === record.id ? warnings.items : []}
+          // 本次操作（解析／儲存編輯）的結果優先；沒有就用記錄上存的 warnings——重新整理或從歷史重開後黃色提示照樣在（C-10；契約 §1.1.9）
+          warnings={warnings && warnings.id === record.id ? warnings.items : (record.warnings ?? [])}
           onWarnings={(items) => setWarnings({ id: record.id, items })}
           onDiscarded={startOver}
         />

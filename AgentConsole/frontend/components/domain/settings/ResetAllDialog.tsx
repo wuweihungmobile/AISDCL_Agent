@@ -73,12 +73,7 @@ function Body({ onClose, onFinished }: { onClose: () => void; onFinished: (compl
           這會把<b>模型、Agent、執行、監控、AutoClaude、SDD</b>六個分類的全部參數重置為預設值，並各寫一筆修改歷史。
         </p>
         <label className="flex cursor-pointer items-start gap-2.5 text-sm">
-          <Checkbox
-            checked={includeSensitive}
-            onCheckedChange={(v) => setIncludeSensitive(v === true)}
-            disabled={pending}
-            className="mt-0.5"
-          />
+          <Checkbox checked={includeSensitive} onCheckedChange={(v) => setIncludeSensitive(v === true)} disabled={pending} className="mt-0.5" />
           <span>
             同時重置加密參數（API Key、資料庫連線字串）
             <span className="mt-0.5 block text-xs text-wg-muted">未勾選時加密參數維持原值（後端預設略過）；勾選會清空它們。</span>

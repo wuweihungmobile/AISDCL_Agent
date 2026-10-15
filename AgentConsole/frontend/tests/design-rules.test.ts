@@ -24,13 +24,9 @@ function walk(dir: string, exts: RegExp, out: string[] = []): string[] {
 const rel = (f: string) => path.relative(ROOT, f).split(path.sep).join("/");
 const stripComments = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`])\/\/.*$/gm, "$1");
 
-const code = ["app", "components", "lib", "hooks"]
-  .flatMap((d) => walk(path.join(ROOT, d), /\.(ts|tsx)$/))
-  .map((f) => ({ file: rel(f), text: stripComments(readFileSync(f, "utf-8")) }));
+const code = ["app", "components", "lib", "hooks"].flatMap((d) => walk(path.join(ROOT, d), /\.(ts|tsx)$/)).map((f) => ({ file: rel(f), text: stripComments(readFileSync(f, "utf-8")) }));
 const own = code.filter((c) => !c.file.startsWith(VENDORED));
-const css = ["app", "styles"]
-  .flatMap((d) => walk(path.join(ROOT, d), /\.css$/))
-  .map((f) => ({ file: rel(f), text: stripComments(readFileSync(f, "utf-8")) }));
+const css = ["app", "styles"].flatMap((d) => walk(path.join(ROOT, d), /\.css$/)).map((f) => ({ file: rel(f), text: stripComments(readFileSync(f, "utf-8")) }));
 
 function offenders(files: Array<{ file: string; text: string }>, re: RegExp): string[] {
   return files.filter((f) => re.test(f.text)).map((f) => f.file);
@@ -40,9 +36,7 @@ describe("設計系統硬規則（靜態守衛）", () => {
   it("UI-DS-03 扁平：沒有 shadow／drop-shadow 工具類別，CSS 的 box-shadow 只允許 none", () => {
     expect(offenders(code, /(^|[\s"'`:])(drop-)?shadow(-[a-z0-9[\]/_.-]+)?(?=[\s"'`])/)).toEqual([]);
     // 取出每個 box-shadow 宣告的值，只允許 none（用 (?!none) 前瞻會因 \s* 回溯而誤判）
-    const shadowed = css
-      .filter((f) => [...f.text.matchAll(/box-shadow\s*:\s*([^;}]+)/g)].some((m) => m[1].trim() !== "none"))
-      .map((f) => f.file);
+    const shadowed = css.filter((f) => [...f.text.matchAll(/box-shadow\s*:\s*([^;}]+)/g)].some((m) => m[1].trim() !== "none")).map((f) => f.file);
     expect(shadowed).toEqual([]);
     expect(offenders(css, /drop-shadow\s*\(/)).toEqual([]);
   });

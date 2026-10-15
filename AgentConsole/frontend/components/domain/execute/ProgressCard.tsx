@@ -49,9 +49,7 @@ export function ProgressCard({
   const tone = tokenTone(used, budget, warnThreshold);
   // 進行中（含暫停）：現在－開始時間每秒跳動；終態：伺服器給的 elapsedSec
   const ticking = !isRunTerminal(run.status);
-  const elapsed = ticking
-    ? Math.max(run.elapsedSec ?? 0, Math.floor((now - Date.parse(run.startedAt)) / 1000))
-    : run.elapsedSec;
+  const elapsed = ticking ? Math.max(run.elapsedSec ?? 0, Math.floor((now - Date.parse(run.startedAt)) / 1000)) : run.elapsedSec;
   const step = run.currentStep;
 
   return (

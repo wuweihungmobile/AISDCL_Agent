@@ -38,17 +38,7 @@ describe("監控頁版面順序（US-M-08；localStorage 鍵 console.monitor.lay
   });
 
   it("淨化：丟未知 id 與重複、保留使用者順序、缺的依預設順序補在尾端；非陣列回預設", () => {
-    expect(sanitizeLayout(["logs", "kpi", "logs", "不存在", 42, null])).toEqual([
-      "logs",
-      "kpi",
-      "token",
-      "distribution",
-      "trends",
-      "timeline",
-      "alerts",
-      "compare",
-      "agent",
-    ]);
+    expect(sanitizeLayout(["logs", "kpi", "logs", "不存在", 42, null])).toEqual(["logs", "kpi", "token", "distribution", "trends", "timeline", "alerts", "compare", "agent"]);
     for (const bad of [null, undefined, "kpi", { kpi: 1 }, 7]) expect(sanitizeLayout(bad)).toEqual([...DEFAULT_LAYOUT]);
   });
 

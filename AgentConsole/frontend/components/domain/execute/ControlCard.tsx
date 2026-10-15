@@ -62,12 +62,7 @@ export function ControlCard(props: ControlCardProps) {
       <div className="mb-4 grid grid-cols-2 gap-4 max-sm:grid-cols-1">
         <label className="flex flex-col gap-1.5">
           <span className="text-sm font-medium">自治等級</span>
-          <Select
-            value={String(props.level)}
-            onChange={(e) => props.onLevel(Number(e.target.value))}
-            disabled={frozen}
-            data-testid="exec-level"
-          >
+          <Select value={String(props.level)} onChange={(e) => props.onLevel(Number(e.target.value))} disabled={frozen} data-testid="exec-level">
             {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
               <option key={n} value={n}>
                 {autonomyLabel(n)}
@@ -103,11 +98,27 @@ export function ControlCard(props: ControlCardProps) {
         <div className="mt-2 grid grid-cols-2 gap-3 max-sm:grid-cols-1">
           <label className="flex flex-col gap-1">
             <span className="text-[13px]">單一任務上限</span>
-            <Input inputMode="numeric" value={props.taskLimit} onChange={(e) => props.onTaskLimit(e.target.value)} disabled={frozen} placeholder="不限" data-testid="exec-task-limit" className="font-mono" />
+            <Input
+              inputMode="numeric"
+              value={props.taskLimit}
+              onChange={(e) => props.onTaskLimit(e.target.value)}
+              disabled={frozen}
+              placeholder="不限"
+              data-testid="exec-task-limit"
+              className="font-mono"
+            />
           </label>
           <label className="flex flex-col gap-1">
             <span className="text-[13px]">單一目標上限</span>
-            <Input inputMode="numeric" value={props.goalLimit} onChange={(e) => props.onGoalLimit(e.target.value)} disabled={frozen} placeholder="不限" data-testid="exec-goal-limit" className="font-mono" />
+            <Input
+              inputMode="numeric"
+              value={props.goalLimit}
+              onChange={(e) => props.onGoalLimit(e.target.value)}
+              disabled={frozen}
+              placeholder="不限"
+              data-testid="exec-goal-limit"
+              className="font-mono"
+            />
           </label>
         </div>
         <p className="mt-1.5 text-xs text-wg-muted">超過上限會產生 Token 超限告警並自動暫停（US-E-10）。</p>

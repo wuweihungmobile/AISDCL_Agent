@@ -9,7 +9,8 @@ type S = components["schemas"];
 /** Phase 3～6 契約（openapi-p3-6.yaml 產生的 schema-p3-6.d.ts）；匯入、通知摘要、系統參數的型別住這裡 */
 type S36 = components36["schemas"];
 
-export type ProjectSummary = S["ProjectSummaryResponse"];
+/** 專案列表項；`deletedAt` 是 v1.2（C-3）新增：只有 `GET /projects?deleted=true` 的列表項帶值，其餘缺席。 */
+export type ProjectSummary = S["ProjectSummaryResponse"] & Pick<S36["ProjectSummaryResponse"], "deletedAt">;
 export type ProjectDetail = S["ProjectDetailResponse"];
 export type ProjectResponse = S["ProjectResponse"];
 export type GoalBrief = S["GoalBrief"];
@@ -55,6 +56,8 @@ export type ListProjectsParams = {
   status?: ProjectStatus;
   /** 欄位[,asc|desc]；欄位白名單 name／status／createdAt／updatedAt */
   sort?: string;
+  /** true＝只列軟刪除的專案（v1.2，C-3；OPERATOR 以上，VIEWER 回 403）；省略／false＝只列未刪除者 */
+  deleted?: boolean;
 };
 
 // ── Phase 3：BRD/PRD 匯入（契約 §1.1）────────────────────────────────────
@@ -164,6 +167,11 @@ export type MonitorRangeParams = {
 
 export type MonitorTrendParams = MonitorRangeParams & { bucket?: TrendBucket };
 
+/** 全域任務總計（契約 §1.3.8，v1.2，C-1）：跨全部未封存且未軟刪除的專案，視窗內各狀態的步驟列數，不分桶。 */
+export type TaskTotals = S36["TaskTotalsResponse"];
+/** from 必填（帶 offset 的 ISO-8601）；to 省略＝現在；to−from 不可超過 92 天，否則 400 `時間範圍不合法`。 */
+export type TaskTotalsParams = { from: string; to?: string };
+
 export type ListAlertsParams = {
   runId?: string;
   acknowledged?: boolean;
@@ -191,14 +199,7 @@ export type TokenUpdateEventData = S36["TokenUpdateEventData"];
 export type MetricUpdateEventData = S36["MetricUpdateEventData"];
 
 /** 六個設定分類（順序＝契約：model,agent,execution,monitor,autoclaude,sdd） */
-export const CONFIG_CATEGORIES: readonly ConfigCategory[] = [
-  "model",
-  "agent",
-  "execution",
-  "monitor",
-  "autoclaude",
-  "sdd",
-];
+export const CONFIG_CATEGORIES: readonly ConfigCategory[] = ["model", "agent", "execution", "monitor", "autoclaude", "sdd"];
 
 /** 設定修改歷史查詢參數（key 須與 category 併用，單獨給 key 後端回 400） */
 export type ListSettingsHistoryParams = {

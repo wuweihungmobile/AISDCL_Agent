@@ -5,14 +5,7 @@
  */
 import { z } from "zod";
 
-import type {
-  CreateGoalRequest,
-  CreateProjectRequest,
-  CreateTaskRequest,
-  UpdateGoalRequest,
-  UpdateProjectRequest,
-  UpdateTaskRequest,
-} from "@/lib/api/types";
+import type { CreateGoalRequest, CreateProjectRequest, CreateTaskRequest, UpdateGoalRequest, UpdateProjectRequest, UpdateTaskRequest } from "@/lib/api/types";
 
 /** NFR-SEC-03：evaluatorCommand 禁用字元（SSOT 在後端 BASE_DENY_CHARS；這裡只為即時回饋，後端仍會二次校驗） */
 export const COMMAND_DENY = /[!`><~$&;\u0000-\u001f\u007f]/;
@@ -26,19 +19,10 @@ const passCriteria = z.string().trim().min(1, "通過標準不能為空");
 
 export const projectSchema = z.object({
   name,
-  executionPath: z
-    .string()
-    .trim()
-    .min(1, "執行路徑不能為空")
-    .max(500, "執行路徑最多 500 個字元")
-    .regex(ABSOLUTE_PATH, "執行路徑必須是絕對路徑（POSIX 以 / 開頭，或 Windows 磁碟機代號／UNC 開頭）"),
+  executionPath: z.string().trim().min(1, "執行路徑不能為空").max(500, "執行路徑最多 500 個字元").regex(ABSOLUTE_PATH, "執行路徑必須是絕對路徑（POSIX 以 / 開頭，或 Windows 磁碟機代號／UNC 開頭）"),
   description,
   passCriteria,
-  autonomyLevel: z
-    .number({ error: "請輸入 1～10 的整數" })
-    .int("自治等級必須是整數")
-    .min(1, "自治等級最小為 1")
-    .max(10, "自治等級最大為 10"),
+  autonomyLevel: z.number({ error: "請輸入 1～10 的整數" }).int("自治等級必須是整數").min(1, "自治等級最小為 1").max(10, "自治等級最大為 10"),
 });
 export type ProjectFormValues = z.infer<typeof projectSchema>;
 
@@ -54,10 +38,7 @@ export const taskSchema = z.object({
   name,
   description,
   passCriteria,
-  maxRetries: z
-    .number({ error: "請輸入 0 以上的整數" })
-    .int("最大重試次數必須是整數")
-    .min(0, "最大重試次數不可為負數"),
+  maxRetries: z.number({ error: "請輸入 0 以上的整數" }).int("最大重試次數必須是整數").min(0, "最大重試次數不可為負數"),
   evaluatorCommand: z
     .string()
     .max(1000, "驗證命令最多 1000 個字元")

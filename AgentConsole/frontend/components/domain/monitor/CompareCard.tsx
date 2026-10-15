@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 
+import { BridgeChip, isBridgeTransition } from "@/components/domain/execute/parts";
 import { Card, CardTitle } from "@/components/ui/card";
 import { Select } from "@/components/ui/select";
 import type { ExecutionRunSummary } from "@/lib/api/types";
@@ -9,10 +10,15 @@ import { budgetUsagePct, formatDuration, formatMetricValue } from "@/lib/domain/
 import { runStatusMeta } from "@/lib/domain/status";
 import { formatDateTime, formatNumber } from "@/lib/format";
 
-type Row = { key: string; label: string; value: (r: ExecutionRunSummary) => string };
+type Row = { key: string; label: string; value: (r: ExecutionRunSummary) => ReactNode };
 
 const ROWS: readonly Row[] = [
-  { key: "status", label: "狀態", value: (r) => runStatusMeta(r.status).label },
+  // 狀態列：Bridge 過渡態（暫停中／取消中，契約 §1.2.2 的 bridgeStatus，C-11）以晶片顯示，其餘是狀態文字
+  {
+    key: "status",
+    label: "狀態",
+    value: (r) => (isBridgeTransition(r) ? <BridgeChip run={r} /> : runStatusMeta(r.status, r.bridgeStatus).label),
+  },
   { key: "level", label: "自治等級", value: (r) => `Level ${r.autonomyLevel}` },
   { key: "started", label: "開始時間", value: (r) => formatDateTime(r.startedAt) },
   { key: "duration", label: "時長", value: (r) => formatDuration(r.durationSec) },
@@ -23,7 +29,7 @@ const ROWS: readonly Row[] = [
   { key: "success", label: "成功率", value: (r) => formatMetricValue("percent", r.successRate) },
 ];
 
-const optionLabel = (r: ExecutionRunSummary) => `Run #${r.runNumber} · ${runStatusMeta(r.status).label}`;
+const optionLabel = (r: ExecutionRunSummary) => `Run #${r.runNumber} · ${runStatusMeta(r.status, r.bridgeStatus).label}`;
 
 /**
  * 「批次比較」卡（PRD US-M-06；契約 §1.2.2：批次列表每列帶 Token／時間／成功率，供比較）：選兩個批次橫向對比。

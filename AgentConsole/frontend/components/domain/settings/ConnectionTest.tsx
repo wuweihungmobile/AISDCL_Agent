@@ -26,14 +26,7 @@ export function ConnectionTest({
   const result = test.data;
   return (
     <div className="mt-2 flex flex-wrap items-center gap-3 border-t border-wg-line pt-4" data-testid="connection-test">
-      <Button
-        variant="ghost"
-        iconLeft={Plug}
-        loading={test.isPending}
-        disabled={disabled}
-        title={disabled ? "權限不足（僅 ADMIN 可測試連線）" : undefined}
-        onClick={() => test.mutate(buildRequest())}
-      >
+      <Button variant="ghost" iconLeft={Plug} loading={test.isPending} disabled={disabled} title={disabled ? "權限不足（僅 ADMIN 可測試連線）" : undefined} onClick={() => test.mutate(buildRequest())}>
         測試連線
       </Button>
       <div role="status" aria-live="polite" data-testid="test-connection-result" className="min-w-0 flex-1 text-sm">

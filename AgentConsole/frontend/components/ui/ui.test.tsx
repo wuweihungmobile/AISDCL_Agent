@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { Plus } from "lucide-react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { contrastRatio, tokenHex } from "@/tests/helpers/tokens";
 import { Button } from "./button";
 import { Pagination } from "./pagination";
 import { ToastHost, ToastProvider, useToast } from "./toast";
@@ -46,6 +47,20 @@ describe("Toast（底部置中、一次一則、自動消失）", () => {
     expect(screen.queryByText("儲存失敗")).toBeNull();
   });
 
+  it("toast 在深底上：錯誤圖示用深底專用的亮色（terminal-accent），不用淺底用的 accent（加深後在深底只剩 2.3:1，低於非文字的 3:1；DEF-AC-004）", () => {
+    render(
+      <ToastProvider>
+        <ToastDemo />
+      </ToastProvider>,
+    );
+    act(() => screen.getByText("bad").click());
+    const icon = screen.getByText("儲存失敗").parentElement!.querySelector("svg") as SVGElement;
+    expect(icon.getAttribute("class")).toContain("text-wg-terminal-accent");
+    expect(icon.getAttribute("class")).not.toContain("text-wg-accent");
+    expect(contrastRatio(tokenHex("color-terminal-accent")!, tokenHex("color-text-main")!)).toBeGreaterThanOrEqual(3);
+    expect(contrastRatio(tokenHex("color-accent")!, tokenHex("color-text-main")!)).toBeLessThan(3);
+  });
+
   it("Toast 宿主是 aria-live 區域（螢幕閱讀器會朗讀）", () => {
     render(
       <ToastProvider>
@@ -82,7 +97,9 @@ describe("Button", () => {
     const link = screen.getByRole("link", { name: "匯入" });
     expect(link).toHaveAttribute("href", "/import");
     expect(link.querySelector("svg")).not.toBeNull();
-    expect(link.className).toContain("hover:text-wg-primary");
+    // ghost 的 hover 底是 bg-base：字色必須用 primary-strong（6.02:1），主色字在 bg-base 上只有 4.22:1（DEF-AC-004）
+    expect(link.className).toContain("hover:bg-wg-base");
+    expect(link.className).toContain("hover:text-wg-primary-strong");
   });
 
   it("loading 時停用並標示 aria-busy；disabled 套用停用配色", () => {

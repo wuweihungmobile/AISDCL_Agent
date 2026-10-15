@@ -1,0 +1,36 @@
+# Prettier 的檢查與套用範圍：只看程式碼（ts／tsx／mts／mjs，見 package.json 的 format 腳本），下列路徑一律略過。
+
+# 建置與測試產物、依賴
+node_modules
+.next
+coverage
+test-results
+playwright-report
+package-lock.json
+
+# 工具自動產生（改了下次產生又會被蓋掉）
+next-env.d.ts
+lib/api/schema*.d.ts
+
+# 截圖基準（二進位）
+tests/e2e/__screenshots__
+
+# 真後端 E2E（W5-QA 持有；QA 對真後端驗完、改完之後，把它們從這份清單移除並跑一次 npm run format）
+tests/e2e/p3-import.spec.ts
+tests/e2e/p4-execute.spec.ts
+tests/e2e/p4b-execute-more.spec.ts
+tests/e2e/p5-monitor.spec.ts
+tests/e2e/p6-settings.spec.ts
+tests/e2e/p7-cors-ratelimit.spec.ts
+tests/e2e/p8-docker-stack.stack.ts
+tests/e2e/signoff.spec.ts
+tests/e2e/crud-flow.spec.ts
+tests/e2e/design-system.spec.ts
+tests/e2e/chart.spec.ts
+tests/e2e/shells-and-layout.spec.ts
+tests/e2e/task-retry.spec.ts
+tests/e2e/markdown-editor.spec.ts
+tests/e2e/helpers.ts
+tests/e2e/realBackend.ts
+tests/e2e/docker.config.ts
+tests/e2e/support

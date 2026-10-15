@@ -81,6 +81,9 @@ export interface paths {
          * @description 含 `sourceContent` 與 `parsedResult`，供「歷史記錄」重新開啟審核與重新整理後還原預覽。PRD §7.1.4 未列，
          *     為設計稿「歷史記錄」頁籤所需（Markdown 契約 §6 D-05）。`parsedResult` 在第一次成功解析前為 null；
          *     `parsePath`、`lastParseErrors` 來自 V5 新增的欄位（AR-07）。
+         *     **v1.2（C-10）**：另回 `warnings[]`（最近一次成功的 parse／PUT result 的黃色解析提示；永遠出現，沒有就是 `[]`）
+         *     與 `parseOptions`（最近一次 parse 請求的選項；從未 parse 過為 null），儲存於 V8 新增的 `warnings`／`parse_options`
+         *     （Markdown 契約 §0.5、§1.1.9）；前端重開記錄時據此還原黃色提示與解析選項。
          */
         get: operations["getImport"];
         put?: never;
@@ -115,6 +118,9 @@ export interface paths {
          *     記錄狀態退回 `UPLOADED`；被有界閘拒絕時把錯誤存入 `lastParseErrors`，**失敗不寫 `parsedResult`／`parsePath`**（AR-07）。
          *     狀態為 `PARSING` 時再 parse → 409「解析中，請稍候」（其餘狀態不允許 → 409「匯入記錄狀態不允許此操作」；AR-21）。
          *     規格被拒（凍結／污染／版本）→ 422（`ApiError`，reason＝「SDD 規格檢查未通過」）。
+         *     有界閘 422 的 `errors[]` 項目：`field`＝`location`（沒有 location 的閘退回閘名）、`message`＝`detail`（B1-3）。
+         *     **v1.2（C-10）**：進入 `PARSING` 時把本次請求的選項原樣存進 `parse_options`（不論成敗，保存最近一次請求）；
+         *     成功時以該次 `warnings` 覆寫記錄的 `warnings`；失敗不動 `warnings`（Markdown 契約 §0.5 V8）。
          */
         post: operations["parseImport"];
         delete?: never;
@@ -135,7 +141,8 @@ export interface paths {
          * 編輯解析結果（重新過有界閘）
          * @description 以整棵樹覆寫 `parsedResult.project` 與 `parsedResult.goals`（陣列順序即排序；`sortOrder` 由伺服器依陣列順序重編為 0 起連續整數）。
          *     伺服器擁有的欄位（`path`／`aiModel`／`tokenUsed`／`reasoning`／`draftIds`／`specDigest`）以庫內值為準，請求帶了也忽略。
-         *     成功後 `status=REVIEWING`；**編輯會撤銷既有 signoff**（`signedOff` 回 false、`signedOffBy／At` 清空），須重新 signoff。
+         *     成功後 `status=REVIEWING`；**編輯會撤銷既有 signoff**（`signedOff` 回 false、`signedOffBy／At` 清空），須重新 signoff；
+         *     記錄的 `warnings` 以重算後的值覆寫（v1.2，C-10）。
          *     違反有界閘 → 422（任務 name／description 為**空白字串**也是閘 `empty_prompt`，欄位缺漏或 null 才是 400；AR-21）；
          *     命令含禁用字元或 regex 無法編譯 → 400（與 Phase 2 任務建立同規則）。
          */
@@ -227,6 +234,8 @@ export interface paths {
          *     → 422 物化失敗（prompt 超過 20000 字元、評估指令消毒與白名單、regex 無法編譯、範圍任務數超過 500、
          *     任務 `maxRetries` 超過 20〔第 9f 項，AR-14〕）→ Bridge（409 鎖／422／502／504，並補償刪除剛建的 run 列）。
          *     補償刪除的守門只有「該 run 尚無 `execution_steps`」，不看列的狀態（`spawn_failed` 時列已被標成 FAILED，仍要刪；AR-15）。
+         *     第 5 項簽核檢查取**整案**（專案與其全部未刪目標、任務；`SELECTED` 時範圍外的未簽任務也會擋；B2-1）；
+         *     第 7b 項的前置目標 `COMPLETED` 與 `SKIPPED` 都算已滿足，審核 SKIP／RETRY 開的後續批次不做 7b（B2-2）。
          *
          *     成功：建立 `execution_runs`（`run_number` 同專案遞增）→ Bridge `POST /autoclaude/runs` → 專案 `EXECUTING`、
          *     範圍內任務 `QUEUED`、啟動事件消費者。`autonomyLevel`／`tokenBudget`／`scope` 皆可省略（預設見 schema）。
@@ -249,6 +258,9 @@ export interface paths {
          * 列出專案執行批次（補充端點，ADR-001 G-16）
          * @description 分頁；預設 `startedAt,desc`。每列帶批次比較所需的 Token／時間／成功率（US-M-06），
          *     供執行頁挑選目前批次與監控頁「執行批次」下拉。
+         *     **v1.2（C-11）**：每列加 `bridgeStatus`（可 null；與詳情同義）——不為此欄位逐批呼叫 Bridge，取 console-api 記憶體中
+         *     該批次最近一則 `status` 事件的 Bridge 狀態（`PAUSING`／`CANCELLING` 因此只在 console-api 仍消費該批次時可見）；
+         *     記憶體沒有（已終態、重啟後尚無事件）時以 `status` 同名值補，僅 `status=RUNNING` 且記憶體也沒有時為 null。
          */
         get: operations["listProjectExecutions"];
         put?: never;
@@ -521,6 +533,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/monitor/task-totals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 全域任務總計（跨專案；v1.2 補充端點）
+         * @description 跨全部**未封存且未軟刪除**的專案，`execution_steps` 在 `[from, to)` 內 `STARTED`／`COMPLETED`／`FAILED`／`RETRYING`
+         *     的**列數**（與 `task-trend` 同一張表、同一判準，只計所屬任務未軟刪的列；只是不分桶、不分專案）。
+         *     取代前端對每個專案各打一次 `task-trend` 再加總的做法（QA DEF-AC-009）：儀表板「本週完成」改打這一支，每 60 秒 1 次。
+         *     `from` 必填；`to` 省略＝現在；`from` 必須早於 `to` 且 `to − from` 不可超過 **92 天**，違反 → 400
+         *     （reason「時間範圍不合法」，`errors[].field=to`，`details={from,to,maxDays:92}`）。
+         *     不變量：同一視窗下，各專案（未封存且未軟刪除）`task-trend` 的各桶加總逐欄等於本端點（Markdown 契約 §1.3.8）。
+         *     未編碼的 `+` 容錯同其他監控端點（Markdown 契約 §1.3，B2-6）。
+         */
+        get: operations["getTaskTotals"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/monitor/projects/{projectId}/alerts": {
         parameters: {
             query?: never;
@@ -592,10 +630,13 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * 匯出監控報表（CSV 必做；PDF 標 W5）
-         * @description **不包 ApiResult 封包**，直接回檔案並帶 `Content-Disposition: attachment`。呼叫端須送 `Accept: text/csv`（或 `*\/*`）。
+         * 匯出監控報表（CSV 或 PDF）
+         * @description **不包 ApiResult 封包**，直接回檔案並帶 `Content-Disposition: attachment`。CSV 呼叫端送 `Accept: text/csv`（或 `*\/*`）。
          *     CSV：UTF-8 含 BOM、CRLF、RFC 4180 引號；多個區段以 `#section,<名稱>` 行分隔（summary／runs／tasks／alerts），格式見 Markdown 契約 §1.3.7。
-         *     `format=pdf` 在 W5 之前回 501（reason「PDF 報表尚未提供（W5）」）。
+         *     區段取數：`runs` 含所有 `started_at < to` 的批次、`alerts` 只含視窗內的告警（B2-6）。
+         *     **v1.2（C-4）**：`format=pdf` 回 200 `application/pdf`，內容是與 CSV 相同的四個區段加標題、時間範圍與產生時間；
+         *     以 PDFBox 3 產生、內嵌 OFL 授權的 CJK 字型（字型缺字以 `?` 取代，不得讓整份報表失敗）；PDF 送 `Accept: application/pdf`（或 `*\/*`），
+         *     後端以 `format` 為準、不因 Accept 不符回 406。原 501（reason「PDF 報表尚未提供（W5）」）退役。
          */
         get: operations["downloadProjectReport"];
         put?: never;
@@ -695,6 +736,7 @@ export interface paths {
          * 查詢所有參數（依分類）
          * @description 回傳 `Map<category, List<ConfigResponse>>`，六個分類：model／agent／execution／monitor／autoclaude／sdd。
          *     加密值一律 `••••••••` 並附 `hasValue`；`reveal=true` 僅 ADMIN（其他角色 403），每次揭露寫審計。
+         *     `reveal` 不是布林值（例：`reveal=abc`）→ 400（message「參數 reveal 的值格式不正確」，`errors=[{field:reveal}]`，reason 省略；B1-4）。
          */
         get: operations["listSettings"];
         put?: never;
@@ -757,9 +799,13 @@ export interface paths {
         put?: never;
         /**
          * 匯入設定（JSON 檔）
-         * @description multipart 欄位 `file`（≤ 1MB、`version=1` 的 `SettingsExportDocument`）。逐筆驗證（型別／規則／SEC-04 allowlist）；
-         *     通過者在同一交易套用並寫歷史，失敗者列入 `errors`；`<encrypted>` 佔位值略過（算入 `skipped`）。
-         *     token_guard 兩鍵以合併後的最終值做 `halt > compact` 跨鍵校驗，不滿足則兩鍵皆拒絕。
+         * @description multipart 欄位 `file`（≤ 1MB、`version=1` 的 `SettingsExportDocument`）。每一項依固定順序判定（v1.2，C-6、B1-7）：
+         *     ① 未知鍵 → `errors`；② `<encrypted>` 佔位 → 略過（算入 `skipped`）；③ 加密鍵給了明文 → `errors`、不套用；
+         *     ④ **值與現值相同 → `skipped`，不做任何值規則與 allowlist 驗證**（匯出後原樣匯入因此一定 `errors=[]`；DEF-AC-002）；
+         *     ⑤ 驗證（型別／規則／範圍／選項／SEC-04 allowlist）不過 → `errors`；⑥ 通過者成為候選，在同一交易套用並寫歷史（`applied`）。
+         *     token_guard 兩鍵以「候選＋現值」合併後的最終值做 `halt > compact` 跨鍵校驗，不滿足則兩鍵皆拒絕。
+         *     400 `設定檔格式錯誤` 的 `details.problem`：`invalid_json`／`unsupported_version`／`missing_configs`（缺 `configs`，或其中某項結構不合法）；
+         *     415 判準＝副檔名 `.json` 且內容型別含 `json`／`octet-stream` 或為空。
          *     **部署**：經 nginx 時須有 `location = /api/v1/settings/import { client_max_body_size 2m; … }`（Markdown 契約 §0.7 第 2 項；AR-04）。
          */
         post: operations["importSettings"];
@@ -787,7 +833,7 @@ export interface paths {
          *     SSRF／allowlist 檢查未過 → **422**（reason「目標位址未通過 SSRF／allowlist 檢查」，`details.violation` 為規則碼）；
          *     通過檢查後的網路層結果（逾時、拒絕連線、HTTP 401、404／405、重新導向）→ **200** 且 `success=false`。
          *     loopback 預設拒絕，只有 e2e／test／本機 profile 的 `console.security.allow-loopback=true` 才放行；`link_local`／`private_ip` 任何 profile 都拒。
-         *     檢查順序與規則碼見 Markdown 契約 §1.5.7。
+         *     檢查順序與規則碼見 Markdown 契約 §1.5.7（規則 1 先於規則 2：空 host 的 `file:///x` 回 `malformed_url` 而非 `scheme`；B1-2）。
          */
         post: operations["testConnection"];
         delete?: never;
@@ -827,7 +873,7 @@ export interface paths {
         };
         /**
          * 查詢特定分類參數
-         * @description 同 `GET /api/v1/settings` 的遮罩與 `reveal` 規則；分類不存在 → 404。
+         * @description 同 `GET /api/v1/settings` 的遮罩與 `reveal` 規則（`reveal` 非布林 → 400，B1-4）；分類不存在 → 404。
          */
         get: operations["listSettingsByCategory"];
         put?: never;
@@ -871,7 +917,8 @@ export interface paths {
          * 更新單一參數
          * @description 驗證順序：404 鍵不存在 → 400 型別／`validationRule`／範圍（例：`monitor.refreshIntervalMs` 最小 10000）／SEC-04 allowlist
          *     （`model.apiUrl`：須為完整的 chat-completions 端點 URL，只做格式、scheme、userinfo、IP 字面類別與 allowlist 檢查，不做 DNS）
-         *     → 400 token_guard 單鍵跨鍵校驗（讀對端鍵的現值，reason 同群組端點）→ 409 敏感參數未帶 `confirm=true`。
+         *     → 400 token_guard 單鍵跨鍵校驗（讀對端鍵的現值，reason 同群組端點；單鍵端點的 `errors[].field` 一律是 `value`，
+         *     群組端點才是 `haltThresholdPct`；B1-6）→ 409 敏感參數未帶 `confirm=true`。
          *     `value` 一律是字串（BOOLEAN 為 `true`／`false`；FLOAT 用小數點）。成功寫歷史；加密值以 AES-256-GCM 儲存。
          */
         put: operations["updateSetting"];
@@ -896,6 +943,128 @@ export interface paths {
          * @description 寫歷史。token_guard 單鍵重置後若違反 `halt > compact` → 400（reason 同群組端點）；加密鍵需 `confirm=true`，否則 409。
          */
         post: operations["resetSetting"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查詢專案列表（Phase 2 既有；v1.2 新增 deleted 參數）
+         * @description Phase 2 既有端點（分頁、名稱模糊搜尋、狀態篩選、排序）；本檔只為 v1.2（C-3）新增的 **`deleted`** 查詢參數而列出。
+         *     `deleted=true`＝**只列軟刪除的專案**（OPERATOR 以上；VIEWER → 403 `ACCESS_DENIED`，由 controller 檢查）；
+         *     `false`／省略＝只列未軟刪除者（原行為不變）。`deleted=true` 的列表項帶 `deletedAt`（其餘缺席）。
+         *     保留期已過（復原會得到 `restore_window_expired`）的專案仍會列出：資料還在，清除排程預設又是關的。
+         *     `sort` 白名單不變（name／status／createdAt／updatedAt），預設 `updatedAt,desc`——軟刪除當下會更新 `updated_at`，
+         *     所以「已刪除」清單預設即「最近刪除的在前」。`deleted` 不是布林值 → 400（Markdown 契約 §1.6.2）。
+         */
+        get: operations["listProjects"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 復原軟刪除的專案（v1.2 補充端點）
+         * @description 復原專案與**同一次刪除連帶軟刪**的目標／任務（以相同的 `deleted_at` 辨識；單獨先刪除的目標／任務不回來）；
+         *     專案 `status` 還原為刪除前的狀態（`status_before_delete`；升級前就已軟刪、該欄為 NULL 者：未 signoff → DRAFT，已 signoff → READY）。
+         *     前置：專案已軟刪除，且 `deleted_at` 在保留期內（`console.retention.soft-delete-days`，預設 30 天；與清除排程是否開啟無關）。
+         *     找不到該 id（含已被清除排程實體刪除）→ 404（訊息「專案不存在或已清除：<id>」）；未被刪除 → 409 `project_not_deleted`；
+         *     已逾保留期 → 409 `restore_window_expired`。寫 audit（`action=project.restore`）。
+         *     （Markdown 契約 §1.6.1；ADR-001 D19；C-3）
+         */
+        post: operations["restoreProject"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/goals/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * 刪除目標（Phase 2 既有；v1.2 新增執行中的 409）
+         * @description Phase 2 既有端點（軟刪除，連帶軟刪其任務；204）。本檔只為 v1.2（C-8，QA O-05）新增的 409 而列出：
+         *     所屬專案有**進行中批次**（`execution_runs.status ∈ {INITIALIZING, RUNNING, PAUSED}`，即 Bridge 的 RUNNING／PAUSING／PAUSED／CANCELLING）時一律 409，
+         *     `reason=project_executing`、`details={projectId, runId}`；既有的 409 `RUNNING 狀態的任務不可刪除`（目標含 RUNNING 任務）不變，
+         *     兩者並存時先回 `project_executing`。（Markdown 契約 §1.6.3）
+         */
+        delete: operations["deleteGoal"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tasks/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * 刪除任務（Phase 2 既有；v1.2 新增執行中的 409）
+         * @description Phase 2 既有端點（軟刪除；204）。本檔只為 v1.2（C-8，QA O-05）新增的 409 而列出：所屬專案有**進行中批次**
+         *     （`execution_runs.status ∈ {INITIALIZING, RUNNING, PAUSED}`）時一律 409，`reason=project_executing`、`details={projectId, runId}`；
+         *     既有的 409 `RUNNING 狀態的任務不可刪除`（任務本身 RUNNING）不變，兩者並存時先回 `project_executing`。（Markdown 契約 §1.6.3）
+         *     另：`POST /api/v1/tasks/{id}/retry` 的「手動重試不受 `maxRetries` 限制」明文見 Markdown 契約 §1.6.4（行為不變，故不在本檔列出）。
+         */
+        delete: operations["deleteTask"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/health/deep": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Bridge 深度探針（v1.2 補充端點；免認證）
+         * @description **這是 Engine Bridge 自己的端點**（不是 console-api 的；為讓 v1.2 的新端點在機器可讀版也有紀錄而列在這裡，`servers` 已覆寫為 Bridge）。
+         *     原 `GET /health`（淺探測）不動；console-api 的探測環仍打 `/health`，本端點只供容器編排的 healthcheck（docker compose 的 bridge 服務）。
+         *     檢查：① `git`——subprocess 執行 `git --version`，逾時 5 秒；② `autoclaude`——`import autoclaude`；③ `workspace`——在
+         *     `ENGINE_WORKSPACE` 內建立並刪除暫存檔；④ `db`——只有設了 `BRIDGE_DB_DSN` 才 ping，沒設時 `ok` 為 `null`（不算失敗）。
+         *     全部通過 → 200 `status=ok`；任一失敗 → 503 `status=degraded`，頂層 `reason` 為失敗項原因（多項以「；」連接），失敗項的 `ok:false` 並各附 `reason`。
+         *     Bridge 映像須安裝 `git` 與 `ca-certificates`（QA DEF-AC-003，P1）。請求可帶 `X-Trace-Id`；回應一律帶同名標頭（缺則 Bridge 自產 uuid4，C-12）。
+         *     （Markdown 契約 §3.1.1）
+         */
+        get: operations["bridgeDeepHealth"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1109,6 +1278,13 @@ export interface components {
             sourceContent: string;
             /** @description 第一次成功解析前為 null（或缺席）；失敗的 parse 不會寫入它（Markdown 契約 §0.5 V5、§1.1.3；AR-07） */
             parsedResult?: components["schemas"]["ParsedResult"] | null;
+            /**
+             * @description 最近一次成功的 parse 或 PUT result 的黃色解析提示（與 `ParseResultResponse.warnings` 同形）；沒有就是 `[]`，**永遠出現**。
+             *     儲存於 V8 新增的 `warnings`；parse 失敗不動它（v1.2，C-10；Markdown 契約 §0.5、§1.1.9）
+             */
+            warnings: components["schemas"]["ParseWarning"][];
+            /** @description 最近一次 parse 請求的選項（進入 PARSING 時寫入，不論成敗）；從未 parse 過為 null。V8 新增的 `parse_options`（v1.2，C-10） */
+            parseOptions?: components["schemas"]["ParseOptions"] | null;
         };
         /**
          * @description parse／editResult 成功的回應。**有界閘違規不走這裡**（422 `ParseGateErrorResponse`），所以成功時 `errors` 恆為空陣列；
@@ -1161,6 +1337,83 @@ export interface components {
             /** Format: date-time */
             updatedAt: string;
             createdBy?: string;
+        };
+        /**
+         * @description 專案狀態（Phase 2；PRD 附錄 B.1）。軟刪除會把狀態改成 ARCHIVED，復原時還原為刪除前的狀態（v1.2，C-3）
+         * @enum {string}
+         */
+        ProjectStatus: "DRAFT" | "READY" | "EXECUTING" | "COMPLETED" | "FAILED" | "ARCHIVED";
+        /**
+         * @description 目標狀態（Phase 2；PRD 附錄 B.2）
+         * @enum {string}
+         */
+        GoalStatus: "PENDING" | "IN_PROGRESS" | "COMPLETED" | "FAILED" | "SKIPPED";
+        /** @description 專案詳情內的目標摘要（Phase 2 同名 schema；US-P-06 每個目標標題旁顯示任務數量） */
+        GoalBrief: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            status: components["schemas"]["GoalStatus"];
+            /** Format: int32 */
+            sortOrder: number;
+            signedOff: boolean;
+            /** Format: int32 */
+            taskCount: number;
+            /** Format: int32 */
+            completedTaskCount: number;
+        };
+        /** @description 專案列表的一列（Phase 2 同名 schema；v1.2 新增 `deletedAt`，只有 `deleted=true` 的列表帶值） */
+        ProjectSummaryResponse: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            executionPath: string;
+            status: components["schemas"]["ProjectStatus"];
+            /** Format: int32 */
+            autonomyLevel: number;
+            signedOff: boolean;
+            /** Format: int32 */
+            goalsCount: number;
+            /** Format: int32 */
+            tasksCount: number;
+            /** Format: int32 */
+            tasksDone: number;
+            /** Format: date-time */
+            updatedAt: string;
+            /**
+             * Format: date-time
+             * @description 軟刪除時間（V9 `deleted_at`）；只有 `GET /projects?deleted=true` 的列表項帶值，其餘缺席（v1.2，C-3）
+             */
+            deletedAt?: string;
+        };
+        /** @description 專案詳情（Phase 2 同名 schema）：全部欄位＋目標摘要清單（依 sortOrder）。`POST /projects/{id}/restore` 成功時回傳 */
+        ProjectDetailResponse: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            executionPath: string;
+            passCriteria: string;
+            description?: string;
+            status: components["schemas"]["ProjectStatus"];
+            /** Format: int32 */
+            autonomyLevel: number;
+            signedOff: boolean;
+            signedOffBy?: string;
+            /** Format: date-time */
+            signedOffAt?: string;
+            /** Format: int32 */
+            goalsCount: number;
+            /** Format: int32 */
+            tasksCount: number;
+            /** Format: int32 */
+            tasksDone: number;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            createdBy?: string;
+            /** @description 目標摘要（只含未軟刪除者；復原後只含「同一次刪除連帶軟刪」而回來的目標） */
+            goals: components["schemas"]["GoalBrief"][];
         };
         /**
          * @description PRD 附錄 B／§5.3.5 的六態（寫入 PG 的值域）
@@ -1262,6 +1515,12 @@ export interface components {
             /** Format: int32 */
             runNumber: number;
             status: components["schemas"]["RunStatus"];
+            /**
+             * @description Bridge 原值（可 null；與 `ExecutionRunDetailResponse` 的 `bridgeStatus` 同義；v1.2，C-11）。不為列表逐批呼叫 Bridge：
+             *     取 console-api 記憶體中該批次最近一則 `status` 事件的 Bridge 狀態（`PAUSING`／`CANCELLING` 因此只在 console-api 仍消費該批次時可見）；
+             *     記憶體沒有（已終態、重啟後尚無事件）時以 `status` 同名值補；僅 `status=RUNNING` 且記憶體也沒有時為 null（缺席）
+             */
+            bridgeStatus?: components["schemas"]["BridgeRunStatus"];
             /** Format: int32 */
             autonomyLevel: number;
             scopeMode: components["schemas"]["ScopeMode"];
@@ -1619,6 +1878,82 @@ export interface components {
             /** Format: int32 */
             retried: number;
         };
+        /** @description 深度探針單一檢查項的結果（Bridge 端；v1.2，C-2） */
+        BridgeHealthCheck: {
+            /** @description 通過為 true、失敗為 false；`null`＝未做（只有 `db` 在沒設 `BRIDGE_DB_DSN` 時） */
+            ok: boolean | null;
+            /** @description 成功時的版本字串（`git` 為 `git --version` 的輸出、`autoclaude` 為套件版本） */
+            version?: string;
+            /** @description 失敗時的簡短原因 */
+            reason?: string;
+        };
+        /**
+         * @description Bridge `GET /health/deep` 的本文（200 與 503 同形）。`status=ok` 時全部檢查通過（`db.ok` 可為 `null`）；
+         *     `status=degraded` 時頂層 `reason` 出現，失敗項 `ok:false` 並附 `reason`（v1.2，C-2；Markdown 契約 §3.1.1）
+         */
+        BridgeDeepHealthResponse: {
+            /** @enum {string} */
+            status: "ok" | "degraded";
+            /** @description 僅 `degraded` 時出現：失敗項的簡短原因，多項以「；」連接 */
+            reason?: string;
+            checks: {
+                git: components["schemas"]["BridgeHealthCheck"];
+                autoclaude: components["schemas"]["BridgeHealthCheck"];
+                workspace: components["schemas"]["BridgeHealthCheck"];
+                db: components["schemas"]["BridgeHealthCheck"];
+            };
+        };
+        /**
+         * @description 全域任務總計（`GET /monitor/task-totals`；v1.2，C-1）：跨全部**未封存且未軟刪除**的專案，`execution_steps` 在 `[from, to)` 內
+         *     各狀態的**列數**——與 `task-trend` 同一張表、同一判準（只計所屬任務未軟刪的列），只是不分桶、不分專案。
+         *     不變量：同一視窗下，各專案 `task-trend` 各桶的同名欄位加總逐欄等於本物件
+         * @example {
+         *       "from": "2026-10-12T00:00:00Z",
+         *       "to": "2026-10-15T08:40:00Z",
+         *       "started": 42,
+         *       "completed": 40,
+         *       "failed": 2,
+         *       "retried": 3,
+         *       "projectsCounted": 5
+         *     }
+         */
+        TaskTotalsResponse: {
+            /**
+             * Format: date-time
+             * @description 實際採用的視窗起點（含）
+             */
+            from: string;
+            /**
+             * Format: date-time
+             * @description 實際採用的視窗終點（不含）；請求省略 `to` 時為伺服器處理當下的時間
+             */
+            to: string;
+            /**
+             * Format: int64
+             * @description 視窗內 `STARTED` 列數
+             */
+            started: number;
+            /**
+             * Format: int64
+             * @description 視窗內 `COMPLETED` 列數（步驟事件的列數；同一任務被還原重跑會重複計）
+             */
+            completed: number;
+            /**
+             * Format: int64
+             * @description 視窗內 `FAILED` 列數
+             */
+            failed: number;
+            /**
+             * Format: int64
+             * @description 視窗內 `RETRYING` 列數
+             */
+            retried: number;
+            /**
+             * Format: int32
+             * @description 在視窗內至少有一列被計入上述四個計數之一的專案數
+             */
+            projectsCounted: number;
+        };
         /**
          * @description 前六個是 PRD §5.4.4 的規則；後兩個是引擎原生告警（ESCALATION／TOKEN_HALT）的持久化規則名
          * @enum {string}
@@ -1635,7 +1970,7 @@ export interface components {
             runId?: string;
             rule: components["schemas"]["AlertRule"];
             severity: components["schemas"]["AlertSeverity"];
-            /** @description 去重對象：run:<uuid>／task:<uuid>／goal:<uuid>／step:<step_id> */
+            /** @description 去重對象：run:<uuid>／task:<uuid>／goal:<uuid>／step:<step_id>（`ENGINE_TOKEN_HALT`）／step:<run_id>:<step_id>（`ENGINE_ESCALATION`；v1.2，C-7：step_id 每批次重新編號，不帶 run_id 會讓不同批次的升級被舊告警吞掉） */
             subject?: string;
             message: string;
             /** Format: date-time */
@@ -2022,6 +2357,24 @@ export interface components {
             timestamp: string;
             traceId: string;
         };
+        ApiResultProjectDetailResponse: {
+            /** Format: int32 */
+            code: number;
+            message: string;
+            data: components["schemas"]["ProjectDetailResponse"];
+            /** Format: date-time */
+            timestamp: string;
+            traceId: string;
+        };
+        ApiResultTaskTotalsResponse: {
+            /** Format: int32 */
+            code: number;
+            message: string;
+            data: components["schemas"]["TaskTotalsResponse"];
+            /** Format: date-time */
+            timestamp: string;
+            traceId: string;
+        };
         ApiResultExecutionRunResponse: {
             /** Format: int32 */
             code: number;
@@ -2166,6 +2519,26 @@ export interface components {
             code: number;
             message: string;
             data: components["schemas"]["PageDataImportRecordResponse"];
+            /** Format: date-time */
+            timestamp: string;
+            traceId: string;
+        };
+        PageDataProjectSummaryResponse: {
+            content: components["schemas"]["ProjectSummaryResponse"][];
+            /** Format: int32 */
+            page: number;
+            /** Format: int32 */
+            size: number;
+            /** Format: int64 */
+            totalElements: number;
+            /** Format: int32 */
+            totalPages: number;
+        };
+        ApiResultPageDataProjectSummaryResponse: {
+            /** Format: int32 */
+            code: number;
+            message: string;
+            data: components["schemas"]["PageDataProjectSummaryResponse"];
             /** Format: date-time */
             timestamp: string;
             traceId: string;
@@ -2357,15 +2730,6 @@ export interface components {
                 "application/json": components["schemas"]["ApiError"];
             };
         };
-        /** @description 功能尚未提供（PDF 報表，reason「PDF 報表尚未提供（W5）」） */
-        NotImplemented: {
-            headers: {
-                [name: string]: unknown;
-            };
-            content: {
-                "application/json": components["schemas"]["ApiError"];
-            };
-        };
     };
     parameters: {
         /** @description 頁碼（0 起算） */
@@ -2401,9 +2765,28 @@ export interface components {
         AccessTokenQuery: string;
         /** @description 最後收到的事件 id（`<seq>` 或 `<seq>.<n>`）；伺服器從其後重播 */
         LastEventIdHeader: string;
+        /** @description 專案 id（Phase 2 資源的路徑變數名為 `id`，與 `ProjectIdPath` 的 `projectId` 不同） */
+        ProjectResourceIdPath: string;
+        /** @description 目標 id（Phase 2） */
+        GoalIdPath: string;
+        /** @description 任務 id（Phase 2） */
+        TaskIdPath: string;
+        /**
+         * @description true＝只列軟刪除的專案（OPERATOR 以上；VIEWER → 403）；false／省略＝只列未軟刪除者。
+         *     不是布林值 → 400（v1.2，C-3）
+         */
+        DeletedQuery: boolean;
+        /**
+         * @description 追蹤碼（v1.2，C-12）。console-api 對 Bridge 的每個請求都帶；Bridge 缺漏或格式不合時自產 uuid4。
+         *     console-api 自己的 `TraceIdFilter` 則一律自產、不採信入站值（Markdown 契約 §0.4 第 6 點）
+         */
+        TraceIdHeader: string;
     };
     requestBodies: never;
-    headers: never;
+    headers: {
+        /** @description 與請求的 `X-Trace-Id` 相同（缺則自產的 uuid4）；Bridge 的每個回應都帶（v1.2，C-12） */
+        TraceIdResponseHeader: string;
+    };
     pathItems: never;
 }
 export type $defs = Record<string, never>;
@@ -3172,6 +3555,42 @@ export interface operations {
             429: components["responses"]["TooManyRequests"];
         };
     };
+    getTaskTotals: {
+        parameters: {
+            query: {
+                /** @description 視窗起點（含；ISO-8601 帶 offset） */
+                from: string;
+                /** @description 視窗終點（不含；ISO-8601 帶 offset）；預設現在。`to − from` 不可超過 92 天 */
+                to?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResultTaskTotalsResponse"];
+                };
+            };
+            /** @description `from` 缺漏或格式不合；`from` 不早於 `to`；視窗超過 92 天 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            429: components["responses"]["TooManyRequests"];
+        };
+    };
     listProjectAlerts: {
         parameters: {
             query?: {
@@ -3292,7 +3711,7 @@ export interface operations {
             /** @description 報表檔案 */
             200: {
                 headers: {
-                    /** @description attachment; filename="monitor-report-<projectId 前 8 碼>-<yyyyMMdd-HHmm>.csv" */
+                    /** @description attachment; filename="monitor-report-<projectId 前 8 碼>-<yyyyMMdd-HHmm>.csv"（`format=pdf` 時副檔名為 .pdf） */
                     "Content-Disposition"?: string;
                     [name: string]: unknown;
                 };
@@ -3305,7 +3724,6 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             429: components["responses"]["TooManyRequests"];
-            501: components["responses"]["NotImplemented"];
         };
     };
     getNotificationSummary: {
@@ -3437,6 +3855,7 @@ export interface operations {
                     "application/json": components["schemas"]["ApiResultMapStringListConfigResponse"];
                 };
             };
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             429: components["responses"]["TooManyRequests"];
@@ -3629,6 +4048,7 @@ export interface operations {
                     "application/json": components["schemas"]["ApiResultListConfigResponse"];
                 };
             };
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -3730,6 +4150,190 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             429: components["responses"]["TooManyRequests"];
+        };
+    };
+    listProjects: {
+        parameters: {
+            query?: {
+                /** @description 頁碼（0 起算） */
+                page?: components["parameters"]["PageQuery"];
+                /** @description 每頁筆數（1～100） */
+                size?: components["parameters"]["SizeQuery"];
+                /** @description 名稱模糊搜尋（不分大小寫） */
+                q?: string;
+                /** @description 依專案狀態篩選 */
+                status?: components["schemas"]["ProjectStatus"];
+                /** @description 欄位[,asc|desc]；欄位限 name／status／createdAt／updatedAt；預設 updatedAt,desc */
+                sort?: string;
+                /**
+                 * @description true＝只列軟刪除的專案（OPERATOR 以上；VIEWER → 403）；false／省略＝只列未軟刪除者。
+                 *     不是布林值 → 400（v1.2，C-3）
+                 */
+                deleted?: components["parameters"]["DeletedQuery"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResultPageDataProjectSummaryResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            429: components["responses"]["TooManyRequests"];
+        };
+    };
+    restoreProject: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 專案 id（Phase 2 資源的路徑變數名為 `id`，與 `ProjectIdPath` 的 `projectId` 不同） */
+                id: components["parameters"]["ProjectResourceIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已復原（專案詳情；目標清單只含復原後未刪的目標） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResultProjectDetailResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description 專案未被軟刪除，或已逾保留期 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            429: components["responses"]["TooManyRequests"];
+        };
+    };
+    deleteGoal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 目標 id（Phase 2） */
+                id: components["parameters"]["GoalIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已軟刪除（無本文） */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description 專案有進行中批次（`project_executing`），或目標含 RUNNING 任務（`RUNNING 狀態的任務不可刪除`） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            429: components["responses"]["TooManyRequests"];
+        };
+    };
+    deleteTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 任務 id（Phase 2） */
+                id: components["parameters"]["TaskIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已軟刪除（無本文） */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description 專案有進行中批次（`project_executing`），或任務本身 RUNNING（`RUNNING 狀態的任務不可刪除`） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            429: components["responses"]["TooManyRequests"];
+        };
+    };
+    bridgeDeepHealth: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description 追蹤碼（v1.2，C-12）。console-api 對 Bridge 的每個請求都帶；Bridge 缺漏或格式不合時自產 uuid4。
+                 *     console-api 自己的 `TraceIdFilter` 則一律自產、不採信入站值（Markdown 契約 §0.4 第 6 點）
+                 */
+                "X-Trace-Id"?: components["parameters"]["TraceIdHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 全部檢查通過 */
+            200: {
+                headers: {
+                    "X-Trace-Id": components["headers"]["TraceIdResponseHeader"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BridgeDeepHealthResponse"];
+                };
+            };
+            /** @description 至少一項檢查失敗（degraded） */
+            503: {
+                headers: {
+                    "X-Trace-Id": components["headers"]["TraceIdResponseHeader"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BridgeDeepHealthResponse"];
+                };
+            };
         };
     };
 }

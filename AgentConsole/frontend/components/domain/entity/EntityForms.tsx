@@ -23,14 +23,7 @@ import { useGoals } from "@/lib/api/queries";
 import { goalStatus } from "@/lib/domain/status";
 import { cn } from "@/lib/utils";
 import { applyServerErrors } from "./apiErrors";
-import {
-  goalSchema,
-  projectSchema,
-  taskSchema,
-  type GoalFormValues,
-  type ProjectFormValues,
-  type TaskFormValues,
-} from "./schemas";
+import { goalSchema, projectSchema, taskSchema, type GoalFormValues, type ProjectFormValues, type TaskFormValues } from "./schemas";
 
 type Variant = "dialog" | "page";
 
@@ -141,10 +134,7 @@ function FormShell({
 
 function FormErrorBanner({ message }: { message: string }) {
   return (
-    <p
-      role="alert"
-      className="rounded-md border border-wg-draft-border bg-wg-draft-bg px-3 py-2 text-sm text-wg-accent"
-    >
+    <p role="alert" className="rounded-md border border-wg-draft-border bg-wg-draft-bg px-3 py-2 text-sm text-wg-accent">
       {message}
     </p>
   );
@@ -185,29 +175,14 @@ export function ProjectForm({
 
   return (
     <FormShell variant={variant} mode={mode} onCancel={onCancel} isSubmitting={isSubmitting} formError={formError} onSubmit={submit}>
-      {locked ? (
-        <FormErrorBanner message="專案執行中：只能修改名稱與說明，其他欄位已鎖定。" />
-      ) : null}
+      {locked ? <FormErrorBanner message="專案執行中：只能修改名稱與說明，其他欄位已鎖定。" /> : null}
       <Field label="專案名稱" error={errors.name?.message}>
         <Input placeholder="輸入名稱…" aria-invalid={errors.name ? true : undefined} {...register("name")} />
       </Field>
       <Field label="執行路徑" error={errors.executionPath?.message}>
-        <Input
-          placeholder="/home/user/projects/…"
-          disabled={locked}
-          aria-invalid={errors.executionPath ? true : undefined}
-          {...register("executionPath")}
-        />
+        <Input placeholder="/home/user/projects/…" disabled={locked} aria-invalid={errors.executionPath ? true : undefined} {...register("executionPath")} />
       </Field>
-      <MarkdownField
-        control={control}
-        name="description"
-        label="說明描述"
-        placeholder="## 概述…"
-        exportName="專案說明"
-        variant={variant}
-        error={errors.description?.message}
-      />
+      <MarkdownField control={control} name="description" label="說明描述" placeholder="## 概述…" exportName="專案說明" variant={variant} error={errors.description?.message} />
       <MarkdownField
         control={control}
         name="passCriteria"
@@ -219,15 +194,7 @@ export function ProjectForm({
         disabled={locked}
       />
       <Field label="自治等級" hint="(1-10)" error={errors.autonomyLevel?.message}>
-        <Input
-          type="number"
-          min={1}
-          max={10}
-          step={1}
-          disabled={locked}
-          aria-invalid={errors.autonomyLevel ? true : undefined}
-          {...register("autonomyLevel", { valueAsNumber: true })}
-        />
+        <Input type="number" min={1} max={10} step={1} disabled={locked} aria-invalid={errors.autonomyLevel ? true : undefined} {...register("autonomyLevel", { valueAsNumber: true })} />
       </Field>
     </FormShell>
   );
@@ -237,17 +204,7 @@ export function ProjectForm({
 const GOAL_FIELDS = ["name", "description", "passCriteria", "dependsOn"] as const;
 
 /** 前置依賴多選：同專案其他目標的核取清單（成環時顯示後端 400 原因） */
-function DependsOnField({
-  control,
-  projectId,
-  selfId,
-  error,
-}: {
-  control: Control<GoalFormValues>;
-  projectId: string;
-  selfId?: string;
-  error?: string;
-}) {
+function DependsOnField({ control, projectId, selfId, error }: { control: Control<GoalFormValues>; projectId: string; selfId?: string; error?: string }) {
   const goals = useGoals(projectId);
   const others = (goals.data ?? []).filter((g) => g.id !== selfId);
   return (
@@ -256,10 +213,7 @@ function DependsOnField({
         control={control}
         name="dependsOn"
         render={({ field }) => (
-          <div
-            data-testid="depends-on-list"
-            className="flex max-h-44 flex-col gap-2.5 overflow-y-auto rounded-md border border-wg-line bg-white px-4 py-3"
-          >
+          <div data-testid="depends-on-list" className="flex max-h-44 flex-col gap-2.5 overflow-y-auto rounded-md border border-wg-line bg-white px-4 py-3">
             {goals.isLoading ? (
               <p className="text-sm text-wg-muted">載入目標清單…</p>
             ) : others.length === 0 ? (
@@ -269,12 +223,7 @@ function DependsOnField({
                 const checked = field.value.includes(g.id);
                 return (
                   <label key={g.id} className="flex cursor-pointer items-center gap-2.5 text-sm">
-                    <Checkbox
-                      checked={checked}
-                      onCheckedChange={(next) =>
-                        field.onChange(next === true ? [...field.value, g.id] : field.value.filter((id) => id !== g.id))
-                      }
-                    />
+                    <Checkbox checked={checked} onCheckedChange={(next) => field.onChange(next === true ? [...field.value, g.id] : field.value.filter((id) => id !== g.id))} />
                     <span className="min-w-0 flex-1 truncate">{g.name}</span>
                     <StatusLabel meta={goalStatus(g.status)} dot={8} className="text-xs" />
                   </label>
@@ -288,15 +237,7 @@ function DependsOnField({
   );
 }
 
-export function GoalForm({
-  mode,
-  variant,
-  defaultValues,
-  onSubmit,
-  onCancel,
-  projectId,
-  selfId,
-}: CommonProps<GoalFormValues> & { projectId: string; selfId?: string }) {
+export function GoalForm({ mode, variant, defaultValues, onSubmit, onCancel, projectId, selfId }: CommonProps<GoalFormValues> & { projectId: string; selfId?: string }) {
   const [formError, setFormError] = useState<string | null>(null);
   const goals = useGoals(projectId);
   const {
@@ -332,15 +273,7 @@ export function GoalForm({
       <Field label="目標名稱" error={errors.name?.message}>
         <Input placeholder="輸入名稱…" aria-invalid={errors.name ? true : undefined} {...register("name")} />
       </Field>
-      <MarkdownField
-        control={control}
-        name="description"
-        label="說明描述"
-        placeholder="## 概述…"
-        exportName="目標說明"
-        variant={variant}
-        error={errors.description?.message}
-      />
+      <MarkdownField control={control} name="description" label="說明描述" placeholder="## 概述…" exportName="目標說明" variant={variant} error={errors.description?.message} />
       <MarkdownField
         control={control}
         name="passCriteria"
@@ -356,14 +289,7 @@ export function GoalForm({
 }
 
 // ── 任務 ────────────────────────────────────────────────────────────────
-const TASK_FIELDS = [
-  "name",
-  "description",
-  "passCriteria",
-  "maxRetries",
-  "evaluatorCommand",
-  "expectedOutputRegex",
-] as const;
+const TASK_FIELDS = ["name", "description", "passCriteria", "maxRetries", "evaluatorCommand", "expectedOutputRegex"] as const;
 
 export function TaskForm({ mode, variant, defaultValues, onSubmit, onCancel }: CommonProps<TaskFormValues>) {
   const [formError, setFormError] = useState<string | null>(null);
@@ -397,48 +323,16 @@ export function TaskForm({ mode, variant, defaultValues, onSubmit, onCancel }: C
       <Field label="任務名稱" error={errors.name?.message}>
         <Input placeholder="輸入名稱…" aria-invalid={errors.name ? true : undefined} {...register("name")} />
       </Field>
-      <MarkdownField
-        control={control}
-        name="description"
-        label="說明描述"
-        placeholder="## 概述…"
-        exportName="任務說明"
-        variant={variant}
-        error={errors.description?.message}
-      />
-      <MarkdownField
-        control={control}
-        name="passCriteria"
-        label="通過標準"
-        placeholder="- 端點回傳符合統一回應格式"
-        exportName="任務通過標準"
-        variant={variant}
-        error={errors.passCriteria?.message}
-      />
+      <MarkdownField control={control} name="description" label="說明描述" placeholder="## 概述…" exportName="任務說明" variant={variant} error={errors.description?.message} />
+      <MarkdownField control={control} name="passCriteria" label="通過標準" placeholder="- 端點回傳符合統一回應格式" exportName="任務通過標準" variant={variant} error={errors.passCriteria?.message} />
       <Field label="最大重試次數" error={errors.maxRetries?.message}>
-        <Input
-          type="number"
-          min={0}
-          step={1}
-          aria-invalid={errors.maxRetries ? true : undefined}
-          {...register("maxRetries", { valueAsNumber: true })}
-        />
+        <Input type="number" min={0} step={1} aria-invalid={errors.maxRetries ? true : undefined} {...register("maxRetries", { valueAsNumber: true })} />
       </Field>
       <Field label="驗證命令" hint="(evaluatorCommand，選填)" error={errors.evaluatorCommand?.message}>
-        <Input
-          placeholder="pytest -q"
-          className="font-mono text-sm"
-          aria-invalid={errors.evaluatorCommand ? true : undefined}
-          {...register("evaluatorCommand")}
-        />
+        <Input placeholder="pytest -q" className="font-mono text-sm" aria-invalid={errors.evaluatorCommand ? true : undefined} {...register("evaluatorCommand")} />
       </Field>
       <Field label="期望輸出 Regex" hint="(expectedOutputRegex，選填)" error={errors.expectedOutputRegex?.message}>
-        <Input
-          placeholder="^OK$"
-          className="font-mono text-sm"
-          aria-invalid={errors.expectedOutputRegex ? true : undefined}
-          {...register("expectedOutputRegex")}
-        />
+        <Input placeholder="^OK$" className="font-mono text-sm" aria-invalid={errors.expectedOutputRegex ? true : undefined} {...register("expectedOutputRegex")} />
       </Field>
     </FormShell>
   );

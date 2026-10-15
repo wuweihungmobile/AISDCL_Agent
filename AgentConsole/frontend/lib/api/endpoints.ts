@@ -51,6 +51,8 @@ import type {
   TaskDetail,
   TaskResponse,
   TaskSummary,
+  TaskTotals,
+  TaskTotalsParams,
   TaskTrendPoint,
   TestConnectionRequest,
   TextImportRequest,
@@ -87,10 +89,7 @@ export function createProject(body: CreateProjectRequest): Promise<ProjectRespon
   return apiRequest<ProjectResponse>("/api/v1/projects", { method: "POST", body });
 }
 
-export function listProjects(
-  params: ListProjectsParams = {},
-  opts: Opts = {},
-): Promise<PageData<ProjectSummary>> {
+export function listProjects(params: ListProjectsParams = {}, opts: Opts = {}): Promise<PageData<ProjectSummary>> {
   return apiRequest<PageData<ProjectSummary>>("/api/v1/projects", {
     query: { ...params },
     signal: opts.signal,
@@ -114,6 +113,14 @@ export function signoffProject(id: string, approver: string): Promise<ProjectRes
     method: "POST",
     body: { approver },
   });
+}
+
+/**
+ * 復原軟刪除的專案（v1.2，C-3；契約 §1.6.1；OPERATOR 以上）：連同「同一次刪除」連帶軟刪的目標與任務一併回來，專案狀態還原為刪除前。
+ * 409 `project_not_deleted`（沒有被刪除）／`restore_window_expired`（超過保留期，details.retentionDays）；404＝不存在或已被清除。
+ */
+export function restoreProject(id: string): Promise<ProjectDetail> {
+  return apiRequest<ProjectDetail>(`/api/v1/projects/${id}/restore`, { method: "POST" });
 }
 
 // ── 目標（API-GOL-01～06、API-SGN-03）────────────────────────────────────
@@ -186,10 +193,7 @@ export function signoffTask(id: string, approver: string): Promise<TaskResponse>
 }
 
 // ── BRD/PRD 匯入（Phase 3；契約 §1.1；API-IMP-01～10、API-SGN-01）──────────────
-export function listImports(
-  params: ListImportsParams = {},
-  opts: Opts = {},
-): Promise<PageData<ImportRecord>> {
+export function listImports(params: ListImportsParams = {}, opts: Opts = {}): Promise<PageData<ImportRecord>> {
   return apiRequest<PageData<ImportRecord>>("/api/v1/import", { query: { ...params }, signal: opts.signal });
 }
 
@@ -292,10 +296,7 @@ export function testConnection(body?: TestConnectionRequest): Promise<Connection
   return apiRequest<ConnectionTestResult>("/api/v1/settings/test-connection", { method: "POST", body });
 }
 
-export function listSettingsHistory(
-  params: ListSettingsHistoryParams = {},
-  opts: Opts = {},
-): Promise<PageData<ConfigHistory>> {
+export function listSettingsHistory(params: ListSettingsHistoryParams = {}, opts: Opts = {}): Promise<PageData<ConfigHistory>> {
   return apiRequest<PageData<ConfigHistory>>("/api/v1/settings/history", {
     query: { ...params },
     signal: opts.signal,
@@ -324,11 +325,7 @@ export function executeProject(projectId: string, body: StartExecutionRequest = 
 }
 
 /** 專案的執行批次列表（預設 startedAt,desc；執行頁挑目前批次、監控頁「執行批次」下拉與批次比較用）。 */
-export function listProjectExecutions(
-  projectId: string,
-  params: ListExecutionsParams = {},
-  opts: Opts = {},
-): Promise<PageData<ExecutionRunSummary>> {
+export function listProjectExecutions(projectId: string, params: ListExecutionsParams = {}, opts: Opts = {}): Promise<PageData<ExecutionRunSummary>> {
   return apiRequest<PageData<ExecutionRunSummary>>(`/api/v1/projects/${projectId}/executions`, {
     query: { ...params },
     signal: opts.signal,
@@ -356,11 +353,7 @@ export function cancelExecution(runId: string): Promise<ExecutionRun> {
 }
 
 /** 步驟分頁（依 stepNumber 升冪；stepNumber 是事件 seq）：SSE 斷線回補用 afterSeq（嚴格大於）。 */
-export function listExecutionSteps(
-  runId: string,
-  params: ListStepsParams = {},
-  opts: Opts = {},
-): Promise<PageData<ExecutionStep>> {
+export function listExecutionSteps(runId: string, params: ListStepsParams = {}, opts: Opts = {}): Promise<PageData<ExecutionStep>> {
   return apiRequest<PageData<ExecutionStep>>(`/api/v1/executions/${runId}/steps`, {
     query: { ...params },
     signal: opts.signal,
@@ -385,11 +378,7 @@ export function restoreExecution(runId: string, checkpointId: string): Promise<E
  * 審核（204）。路徑的 stepId 是 review_requests.id（不是 playbook 的 step_id；契約 §0.6）。
  * SKIP 與「找不到還原點的 RETRY」會另開後續批次，其 id 在回應標頭 X-Follow-Up-Run-Id（否則為 null）。
  */
-export async function reviewExecution(
-  runId: string,
-  reviewId: string,
-  body: ReviewBody,
-): Promise<{ followUpRunId: string | null }> {
+export async function reviewExecution(runId: string, reviewId: string, body: ReviewBody): Promise<{ followUpRunId: string | null }> {
   const { headers } = await apiRequestWithHeaders<void>(`/api/v1/executions/${runId}/review/${reviewId}`, {
     method: "POST",
     body,
@@ -397,46 +386,38 @@ export async function reviewExecution(
   return { followUpRunId: headers.get("X-Follow-Up-Run-Id") };
 }
 
-// ── 專案監控（Phase 5；契約 §1.3；API-MON-01～07）──────────────────────────────
-export function getProjectMetrics(
-  projectId: string,
-  params: MonitorRangeParams = {},
-  opts: Opts = {},
-): Promise<ProjectMetrics> {
+// ── 專案監控（Phase 5；契約 §1.3；API-MON-01～08）──────────────────────────────
+export function getProjectMetrics(projectId: string, params: MonitorRangeParams = {}, opts: Opts = {}): Promise<ProjectMetrics> {
   return apiRequest<ProjectMetrics>(`/api/v1/monitor/projects/${projectId}/metrics`, {
     query: { ...params },
     signal: opts.signal,
   });
 }
 
-export function getTokenTrend(
-  projectId: string,
-  params: MonitorTrendParams = {},
-  opts: Opts = {},
-): Promise<TokenTrendPoint[]> {
+export function getTokenTrend(projectId: string, params: MonitorTrendParams = {}, opts: Opts = {}): Promise<TokenTrendPoint[]> {
   return apiRequest<TokenTrendPoint[]>(`/api/v1/monitor/projects/${projectId}/token-trend`, {
     query: { ...params },
     signal: opts.signal,
   });
 }
 
-export function getTaskTrend(
-  projectId: string,
-  params: MonitorTrendParams = {},
-  opts: Opts = {},
-): Promise<TaskTrendPoint[]> {
+export function getTaskTrend(projectId: string, params: MonitorTrendParams = {}, opts: Opts = {}): Promise<TaskTrendPoint[]> {
   return apiRequest<TaskTrendPoint[]>(`/api/v1/monitor/projects/${projectId}/task-trend`, {
     query: { ...params },
     signal: opts.signal,
   });
 }
 
+/**
+ * 全域任務總計（契約 §1.3.8，v1.2，C-1；API-MON-08）：跨全部未封存且未軟刪除的專案，`[from, to)` 內 STARTED／COMPLETED／FAILED／RETRYING 的步驟列數
+ * （與 task-trend 同一張表、同一判準，只是不分桶）。取代前端對每個專案各打一次 task-trend 再加總的做法（DEF-AC-009）。
+ */
+export function getTaskTotals(params: TaskTotalsParams, opts: Opts = {}): Promise<TaskTotals> {
+  return apiRequest<TaskTotals>("/api/v1/monitor/task-totals", { query: { ...params }, signal: opts.signal });
+}
+
 /** 告警（由新到舊）；acknowledged 省略＝全部。 */
-export function listProjectAlerts(
-  projectId: string,
-  params: ListAlertsParams = {},
-  opts: Opts = {},
-): Promise<Alert[]> {
+export function listProjectAlerts(projectId: string, params: ListAlertsParams = {}, opts: Opts = {}): Promise<Alert[]> {
   return apiRequest<Alert[]>(`/api/v1/monitor/projects/${projectId}/alerts`, {
     query: { ...params },
     signal: opts.signal,
@@ -449,11 +430,7 @@ export function acknowledgeAlert(alertId: string): Promise<void> {
 }
 
 /** 日誌查詢（由既有資料衍生，不含引擎原始 stdout）：等級、關鍵字、任務、排序與分頁。 */
-export function listProjectLogs(
-  projectId: string,
-  params: ListLogsParams = {},
-  opts: Opts = {},
-): Promise<PageData<LogEntry>> {
+export function listProjectLogs(projectId: string, params: ListLogsParams = {}, opts: Opts = {}): Promise<PageData<LogEntry>> {
   return apiRequest<PageData<LogEntry>>(`/api/v1/monitor/projects/${projectId}/logs`, {
     query: { ...params },
     signal: opts.signal,
@@ -461,13 +438,14 @@ export function listProjectLogs(
 }
 
 /**
- * 匯出報表：不包封包的檔案下載（CSV 必做；PDF 在 W5 前一律回 501）。
- * 契約要求呼叫端送 Accept: text/csv（或萬用型別）；補上 application/json 是為了讓錯誤封包（400／404／501）也能協商出來，
- * 否則 Spring 對「只接受 text/csv」的請求會把 JSON 錯誤封包變成 406。
+ * 匯出報表：不包封包的檔案下載，CSV 與 PDF 都回 200（v1.2，C-4；契約 §1.3.7），檔名取自 Content-Disposition。
+ * 契約要求呼叫端 CSV 送 Accept: text/csv、PDF 送 application/pdf（皆可用萬用型別；後端以 format 為準、不因 Accept 回 406）；
+ * 補上 application/json 是為了讓錯誤封包（400／404）也能協商出來，否則 Spring 對「只接受單一檔案型別」的請求會把 JSON 錯誤封包變成 406。
  */
 export function downloadProjectReport(projectId: string, params: ReportParams = {}): Promise<DownloadResult> {
+  const fileType = params.format === "pdf" ? "application/pdf" : "text/csv";
   return apiDownload(`/api/v1/monitor/projects/${projectId}/report`, {
     query: { ...params },
-    accept: "text/csv,application/json;q=0.9,*/*;q=0.8",
+    accept: `${fileType},application/json;q=0.9,*/*;q=0.8`,
   });
 }

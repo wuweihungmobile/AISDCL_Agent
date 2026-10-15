@@ -22,7 +22,8 @@ export type TaskNode = {
   evaluatorCommand: string;
   /** 空字串＝沒有 */
   expectedOutputRegex: string;
-  maxRetries?: number;
+  /** 契約 §0.2：null 與缺席等價（真後端對 AI 解析的任務回 null，DEF-AC-001），一律以 `== null` 判空 */
+  maxRetries?: number | null;
   /** 以下兩欄畫面不編輯，原樣帶回（路徑 A／C 會放來源資訊） */
   estimatedTokens?: number;
   passCriteriaSpec?: Record<string, unknown>;
@@ -107,30 +108,28 @@ export function toParsedResult(tree: Tree): ParsedResult {
       description: tree.project.description,
       autonomyLevel: tree.project.autonomyLevel,
     },
-    goals: tree.goals.map(
-      (g, gi): ParsedGoal => ({
-        key: g.key,
-        name: g.name,
-        description: g.description,
-        passCriteria: g.passCriteria,
-        sortOrder: gi,
-        dependsOn: [...g.dependsOn],
-        tasks: g.tasks.map((t, ti): ParsedTask => {
-          const out: ParsedTask = {
-            name: t.name,
-            description: t.description,
-            passCriteria: t.passCriteria,
-            sortOrder: ti,
-          };
-          if (t.evaluatorCommand.trim()) out.evaluatorCommand = t.evaluatorCommand;
-          if (t.expectedOutputRegex.trim()) out.expectedOutputRegex = t.expectedOutputRegex;
-          if (t.maxRetries !== undefined) out.maxRetries = t.maxRetries;
-          if (t.estimatedTokens !== undefined) out.estimatedTokens = t.estimatedTokens;
-          if (t.passCriteriaSpec) out.passCriteriaSpec = t.passCriteriaSpec;
-          return out;
-        }),
+    goals: tree.goals.map((g, gi): ParsedGoal => ({
+      key: g.key,
+      name: g.name,
+      description: g.description,
+      passCriteria: g.passCriteria,
+      sortOrder: gi,
+      dependsOn: [...g.dependsOn],
+      tasks: g.tasks.map((t, ti): ParsedTask => {
+        const out: ParsedTask = {
+          name: t.name,
+          description: t.description,
+          passCriteria: t.passCriteria,
+          sortOrder: ti,
+        };
+        if (t.evaluatorCommand.trim()) out.evaluatorCommand = t.evaluatorCommand;
+        if (t.expectedOutputRegex.trim()) out.expectedOutputRegex = t.expectedOutputRegex;
+        if (t.maxRetries != null) out.maxRetries = t.maxRetries;
+        if (t.estimatedTokens !== undefined) out.estimatedTokens = t.estimatedTokens;
+        if (t.passCriteriaSpec) out.passCriteriaSpec = t.passCriteriaSpec;
+        return out;
       }),
-    ),
+    })),
   };
 }
 
@@ -228,9 +227,7 @@ export function treeReducer(state: Tree, action: TreeAction): Tree {
       return {
         ...state,
         // 其他目標對它的依賴一併清掉，避免留下指向不存在 key 的依賴（伺服器會把它判成 cycle 閘）
-        goals: state.goals
-          .filter((g) => g.key !== action.key)
-          .map((g) => (g.dependsOn.includes(action.key) ? { ...g, dependsOn: g.dependsOn.filter((k) => k !== action.key) } : g)),
+        goals: state.goals.filter((g) => g.key !== action.key).map((g) => (g.dependsOn.includes(action.key) ? { ...g, dependsOn: g.dependsOn.filter((k) => k !== action.key) } : g)),
       };
     }
 
@@ -242,9 +239,7 @@ export function treeReducer(state: Tree, action: TreeAction): Tree {
     }
 
     case "addTask":
-      return mapGoal(state, action.goalKey, (g) =>
-        g.tasks.some((t) => t.uid === action.task.uid) ? g : { ...g, tasks: [...g.tasks, action.task] },
-      );
+      return mapGoal(state, action.goalKey, (g) => (g.tasks.some((t) => t.uid === action.task.uid) ? g : { ...g, tasks: [...g.tasks, action.task] }));
 
     case "editTask":
       return mapGoal(state, action.goalKey, (g) => ({

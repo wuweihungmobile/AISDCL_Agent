@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 
-import { MAX_IMPORT_BYTES, MarkdownEditorImpl, safeFileName } from "./MarkdownEditorImpl";
+import { DEFER_ABOVE_CHARS, MAX_IMPORT_BYTES, MarkdownEditorImpl, safeFileName } from "./MarkdownEditorImpl";
 import { MarkdownView } from "./MarkdownView";
 
 /**
@@ -51,11 +51,95 @@ describe("UI-MD-03 常用語法工具列", () => {
     expect(toolbar).not.toBeNull();
     const labels = Array.from(toolbar.querySelectorAll("button")).map((b) => (b.getAttribute("aria-label") ?? "").toLowerCase());
     for (const keyword of ["bold", "italic", "title", "unordered list", "ordered list", "checked list", "table", "code"]) {
-      expect(labels.some((l) => l.includes(keyword)), `工具列缺少「${keyword}」`).toBe(true);
+      expect(
+        labels.some((l) => l.includes(keyword)),
+        `工具列缺少「${keyword}」`,
+      ).toBe(true);
     }
     const bold = Array.from(toolbar.querySelectorAll("button")).find((b) => /bold/i.test(b.getAttribute("aria-label") ?? ""))!;
     fireEvent.click(bold);
     expect(screen.getByTestId("value").textContent).toContain("****");
+  });
+});
+
+describe("UI-A11Y-01 工具列圖示是裝飾（axe svg-img-alt；DEF-AC-005）", () => {
+  it("工具列（左側指令與右側模式切換）的 svg 圖示全部 aria-hidden，沒有會被讀出卻沒有名字的 role=img", () => {
+    const { container } = render(<Harness />);
+    const svgs = Array.from(container.querySelectorAll(".w-md-editor-toolbar svg"));
+    expect(svgs.length, "工具列應有圖示").toBeGreaterThan(10);
+    for (const svg of svgs) expect(svg.getAttribute("aria-hidden"), svg.outerHTML.slice(0, 90)).toBe("true");
+    expect(container.querySelectorAll('svg[role="img"]:not([aria-hidden="true"])')).toHaveLength(0);
+  });
+
+  it("圖示藏起來之後，每顆工具列按鈕仍靠自己的 aria-label 有名字（不能讓按鈕變成無名按鈕）", () => {
+    const { container } = render(<Harness />);
+    const buttons = Array.from(container.querySelectorAll(".w-md-editor-toolbar button"));
+    expect(buttons.length).toBeGreaterThan(10);
+    for (const b of buttons) expect(b.getAttribute("aria-label") || b.textContent, b.outerHTML.slice(0, 90)).toBeTruthy();
+  });
+});
+
+describe("預覽窗（C-19／NFR-9.1-05：輸入與預覽分開排程；DEF-AC-005 同類：鍵盤可達）", () => {
+  it("預覽窗是 tabIndex=0 的區域，名稱含欄位名（同頁多個編輯器各自唯一），並且還在套件的 .w-md-editor-preview 底下（捲動同步與外部選取器不受影響）", () => {
+    const { container } = render(<Harness />);
+    const region = screen.getByRole("region", { name: "說明描述 預覽" });
+    expect(region).toHaveAttribute("tabindex", "0");
+    expect(region.closest(".w-md-editor-preview")).not.toBeNull();
+    expect(container.querySelectorAll(".w-md-editor-preview")).toHaveLength(1);
+    // 預覽內容仍是套件的 Markdown 渲染（wmde-markdown），不是自己另寫的容器
+    expect(region.querySelector(".wmde-markdown")).not.toBeNull();
+  });
+
+  it("輸入後輸入框立刻是新值，預覽稍後（deferred）跟上；預覽內容仍含 GFM 表格、程式碼高亮（hljs＋prism token）", async () => {
+    const { container } = render(<Harness />);
+    fireEvent.change(textarea(), { target: { value: "## 新標題\n\n```ts\nconst a = 1;\n```" } });
+    expect((textarea() as HTMLTextAreaElement).value).toContain("新標題"); // 輸入框是急件：不等預覽
+    const preview = container.querySelector(".w-md-editor-preview") as HTMLElement;
+    await waitFor(() => expect(within(preview).getByRole("heading", { level: 2, name: "新標題" })).toBeInTheDocument());
+    const code = preview.querySelector("pre code.language-ts") as HTMLElement;
+    expect(code).not.toBeNull();
+    expect(code.className).toContain("hljs"); // rehype-highlight（真後端 spec markdown-editor.spec.ts 也斷言這個 class）
+  });
+});
+
+describe("預覽窗：大文件（超過 DEFER_ABOVE_CHARS 才分開排程）也要正確跟上輸入", () => {
+  it("超過門檻的文件：預覽最終顯示最後一次輸入的內容（中間的值可以被跳過，但最終值不能丟）", async () => {
+    const big = "## 大文件\n\n" + "這是一段說明文字，用來把文件撐到門檻以上。\n\n".repeat(Math.ceil(DEFER_ABOVE_CHARS / 20));
+    expect(big.length).toBeGreaterThan(DEFER_ABOVE_CHARS);
+    const { container } = render(<Harness initial={big} />);
+    const preview = container.querySelector(".w-md-editor-preview") as HTMLElement;
+    await waitFor(() => expect(within(preview).getByRole("heading", { level: 2, name: "大文件" })).toBeInTheDocument(), { timeout: 5000 });
+    // 連續兩次輸入（模擬打字）：最終預覽必須是第二次的內容
+    fireEvent.change(textarea(), { target: { value: big + "\n\n第一次" } });
+    fireEvent.change(textarea(), { target: { value: big + "\n\n## 最終標題" } });
+    await waitFor(() => expect(within(preview).getByRole("heading", { level: 2, name: "最終標題" })).toBeInTheDocument(), { timeout: 5000 });
+    expect(within(preview).queryByText("第一次")).toBeNull();
+  });
+});
+
+describe("UI-A11Y-01 核取清單的核取方塊要有名稱（axe aria-toggle-field-name；DEF-AC-005 同類）", () => {
+  it("唯讀渲染：每個核取方塊的名稱＝該項目的文字；巢狀子清單的文字不混進父項目的名稱", () => {
+    render(<MarkdownView source={"- [ ] 父項目\n  - [x] 子項目一\n  - [ ] 子項目二\n- [x] **粗體** 與 `code` 的項目"} />);
+    expect(screen.getByRole("checkbox", { name: "父項目" })).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByRole("checkbox", { name: "子項目一" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("checkbox", { name: "子項目二" })).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByRole("checkbox", { name: "粗體 與 code 的項目" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getAllByRole("checkbox")).toHaveLength(4);
+  });
+
+  it("鬆散清單（項目之間有空行，核取方塊在 <p> 裡）也有名稱；一般清單不受影響", () => {
+    render(<MarkdownView source={"- [ ] 第一項\n\n- [x] 第二項\n\n- 普通項目"} />);
+    expect(screen.getByRole("checkbox", { name: "第一項" })).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "第二項" })).toBeInTheDocument();
+    expect(screen.getAllByRole("checkbox")).toHaveLength(2);
+    expect(screen.getByText("普通項目")).toBeInTheDocument();
+  });
+
+  it("編輯器預覽端的核取方塊（原生 input）同樣有名稱", async () => {
+    const { container } = render(<Harness initial={"- [ ] 預覽中的待辦\n- [x] 預覽中的完成項"} />);
+    const preview = container.querySelector(".w-md-editor-preview") as HTMLElement;
+    await waitFor(() => expect(within(preview).getByRole("checkbox", { name: "預覽中的待辦" })).toBeInTheDocument());
+    expect(within(preview).getByRole("checkbox", { name: "預覽中的完成項" })).toBeChecked();
   });
 });
 

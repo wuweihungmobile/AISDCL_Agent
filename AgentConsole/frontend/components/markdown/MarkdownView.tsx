@@ -12,16 +12,18 @@ import remarkGfm from "remark-gfm";
 
 import "@/styles/markdown.css";
 import { cn } from "@/lib/utils";
+import { rehypeTaskLabels } from "./rehypeTaskLabels";
 
 const components: Components = {
-  // GFM task list：唯讀核取方塊，視覺同設計稿 18px 方塊（勾選＝主色底＋白勾）
-  input({ type, checked }) {
+  // GFM task list：唯讀核取方塊，視覺同設計稿 18px 方塊（勾選＝主色底＋白勾）；名稱＝該項目的文字（rehypeTaskLabels 補上 aria-label）
+  input({ type, checked, "aria-label": ariaLabel }) {
     if (type !== "checkbox") return null;
     return (
       <span
         role="checkbox"
         aria-checked={Boolean(checked)}
         aria-readonly="true"
+        aria-label={ariaLabel}
         data-checked={Boolean(checked)}
         className="md-checkbox inline-flex size-[18px] shrink-0 items-center justify-center rounded-sm border border-wg-line text-white data-[checked=true]:border-wg-primary data-[checked=true]:bg-wg-primary"
       >
@@ -38,8 +40,9 @@ const components: Components = {
     );
   },
   table({ children }) {
+    // 寬表格在這個容器內橫向捲動：可捲動區域要能用鍵盤聚焦（axe scrollable-region-focusable），所以容器是 tabIndex=0 的區域
     return (
-      <div className="md-table-wrap">
+      <div className="md-table-wrap" tabIndex={0} role="region" aria-label="表格（可橫向捲動）">
         <table>{children}</table>
       </div>
     );
@@ -63,15 +66,8 @@ export function MarkdownView({
     return <p className={cn("text-sm text-wg-muted", className)}>{empty}</p>;
   }
   return (
-    <div
-      data-slot="markdown-view"
-      className={cn("md-view", variant === "criteria" && "md-criteria", className)}
-    >
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        rehypePlugins={[[rehypeHighlight, { detect: false, ignoreMissing: true }]]}
-        components={components}
-      >
+    <div data-slot="markdown-view" className={cn("md-view", variant === "criteria" && "md-criteria", className)}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[[rehypeHighlight, { detect: false, ignoreMissing: true }], rehypeTaskLabels]} components={components}>
         {text}
       </ReactMarkdown>
     </div>

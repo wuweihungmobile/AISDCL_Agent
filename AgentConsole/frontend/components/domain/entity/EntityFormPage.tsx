@@ -10,11 +10,7 @@ import { BackLink, PageTitle } from "@/components/domain/PageHeader";
 import { Card } from "@/components/ui/card";
 import { EntityEditor, entityTitle, type EntityKind, type EntityTarget } from "./EntityEditor";
 
-function buildTarget(
-  kind: EntityKind,
-  mode: "create" | "edit",
-  p: { projectId?: string; goalId?: string; taskId?: string },
-): EntityTarget | null {
+function buildTarget(kind: EntityKind, mode: "create" | "edit", p: { projectId?: string; goalId?: string; taskId?: string }): EntityTarget | null {
   if (kind === "project") {
     if (mode === "create") return { kind, mode };
     return p.projectId ? { kind, mode, id: p.projectId } : null;
@@ -59,13 +55,7 @@ export function EntityFormPage({ kind, mode }: { kind: EntityKind; mode: "create
       <BackLink href={backHref}>返回</BackLink>
       <PageTitle title={entityTitle(target)} />
       <Card className="p-[22px]">
-        <EntityEditor
-          key={JSON.stringify(target)}
-          target={target}
-          variant="page"
-          onCancel={() => router.push(backHref)}
-          onDone={(done) => router.push(detailHref(done.id))}
-        />
+        <EntityEditor key={JSON.stringify(target)} target={target} variant="page" onCancel={() => router.push(backHref)} onDone={(done) => router.push(detailHref(done.id))} />
       </Card>
     </div>
   );

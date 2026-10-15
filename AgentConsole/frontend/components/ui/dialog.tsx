@@ -29,10 +29,7 @@ export function DialogContent({
 }) {
   return (
     <DialogPrimitive.Portal>
-      <DialogPrimitive.Overlay
-        data-slot="dialog-overlay"
-        className="fixed inset-0 z-[80] bg-wg-overlay"
-      />
+      <DialogPrimitive.Overlay data-slot="dialog-overlay" className="fixed inset-0 z-[80] bg-wg-overlay" />
       <DialogPrimitive.Content
         data-slot="dialog-content"
         className={cn(
@@ -48,9 +45,7 @@ export function DialogContent({
             <IconButton icon={X} label="關閉" size={36} />
           </DialogPrimitive.Close>
         </div>
-        {description ? (
-          <DialogPrimitive.Description className="sr-only">{description}</DialogPrimitive.Description>
-        ) : null}
+        {description ? <DialogPrimitive.Description className="sr-only">{description}</DialogPrimitive.Description> : null}
         {children}
       </DialogPrimitive.Content>
     </DialogPrimitive.Portal>
@@ -62,10 +57,5 @@ export function DialogBody({ className, ...props }: React.ComponentProps<"div">)
 }
 
 export function DialogFooter({ className, ...props }: React.ComponentProps<"div">) {
-  return (
-    <div
-      className={cn("flex justify-end gap-2.5 border-t border-wg-line px-6 py-4", className)}
-      {...props}
-    />
-  );
+  return <div className={cn("flex justify-end gap-2.5 border-t border-wg-line px-6 py-4", className)} {...props} />;
 }

@@ -35,18 +35,15 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     setToast(null);
   }, []);
 
-  const show = React.useCallback(
-    (message: string, tone: ToastTone = "success") => {
-      if (timer.current) clearTimeout(timer.current);
-      counter.current += 1;
-      setToast({ id: counter.current, message, tone });
-      timer.current = setTimeout(() => {
-        setToast(null);
-        timer.current = null;
-      }, DURATION[tone]);
-    },
-    [],
-  );
+  const show = React.useCallback((message: string, tone: ToastTone = "success") => {
+    if (timer.current) clearTimeout(timer.current);
+    counter.current += 1;
+    setToast({ id: counter.current, message, tone });
+    timer.current = setTimeout(() => {
+      setToast(null);
+      timer.current = null;
+    }, DURATION[tone]);
+  }, []);
 
   React.useEffect(
     () => () => {
@@ -79,9 +76,10 @@ export function useToast() {
 }
 
 const ICON = { success: CircleCheck, error: CircleAlert, info: Info } as const;
+// toast 是深底（bg-wg-text）：圖示要用深底上的亮色。error 用 terminal-accent（5.08:1）；淺底用的 accent 已加深成 #B93F22，在深底只剩 2.30:1（低於非文字的 3:1，DEF-AC-004）
 const ICON_COLOR = {
   success: "text-wg-online",
-  error: "text-wg-accent",
+  error: "text-wg-terminal-accent",
   info: "text-wg-secondary",
 } as const;
 
@@ -89,17 +87,9 @@ export function ToastHost() {
   const { toast } = useToastContext();
   const Icon = toast ? ICON[toast.tone] : null;
   return (
-    <div
-      data-slot="toast-host"
-      role="status"
-      aria-live="polite"
-      className="pointer-events-none fixed bottom-7 left-1/2 z-[90] -translate-x-1/2"
-    >
+    <div data-slot="toast-host" role="status" aria-live="polite" className="pointer-events-none fixed bottom-7 left-1/2 z-[90] -translate-x-1/2">
       {toast && Icon ? (
-        <div
-          key={toast.id}
-          className="pointer-events-auto flex max-w-[min(560px,calc(100vw-32px))] items-center gap-2 rounded-md bg-wg-text px-[22px] py-3 text-sm text-white animate-wg-fade"
-        >
+        <div key={toast.id} className="pointer-events-auto flex max-w-[min(560px,calc(100vw-32px))] items-center gap-2 rounded-md bg-wg-text px-[22px] py-3 text-sm text-white animate-wg-fade">
           <Icon size={18} className={cn("shrink-0", ICON_COLOR[toast.tone])} aria-hidden />
           <span className="break-words">{toast.message}</span>
         </div>

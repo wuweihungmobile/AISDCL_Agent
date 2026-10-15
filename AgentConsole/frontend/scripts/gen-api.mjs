@@ -11,9 +11,6 @@ const out = resolve(import.meta.dirname, "..", "lib", "api", "schema.d.ts");
 
 const ast = await openapiTS(new URL(url));
 const banner =
-  "/**\n" +
-  " * 由 scripts/gen-api.mjs 依後端 /v3/api-docs 自動產生（openapi-typescript），請勿手改。\n" +
-  " * 重新產生：npm run gen:api（後端需在線；位址見 scripts/gen-api.mjs）。\n" +
-  " */\n\n";
+  "/**\n" + " * 由 scripts/gen-api.mjs 依後端 /v3/api-docs 自動產生（openapi-typescript），請勿手改。\n" + " * 重新產生：npm run gen:api（後端需在線；位址見 scripts/gen-api.mjs）。\n" + " */\n\n";
 writeFileSync(out, banner + astToString(ast), { encoding: "utf-8" });
 console.log(`已產生 ${out}（來源 ${url}）`);

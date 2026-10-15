@@ -56,7 +56,11 @@ describe("三層樹預覽（US-I-03）", () => {
     expect(goals).toHaveLength(2);
     expect(within(goals[0]).getByTestId("goal-name")).toHaveTextContent("基礎");
     expect(goals[0]).toHaveTextContent("目標 · 2 任務");
-    expect(within(goals[0]).getAllByTestId("tree-task").map((t) => within(t).getByTestId("task-name").textContent)).toEqual(["初始化", "設定"]);
+    expect(
+      within(goals[0])
+        .getAllByTestId("tree-task")
+        .map((t) => within(t).getByTestId("task-name").textContent),
+    ).toEqual(["初始化", "設定"]);
     expect(within(goals[1]).getAllByTestId("tree-task")).toHaveLength(1);
   });
 
@@ -71,6 +75,25 @@ describe("三層樹預覽（US-I-03）", () => {
     expect(details.getByText("最大重試次數：2")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "收合詳情：初始化" }));
     expect(screen.queryByTestId("task-details")).toBeNull();
+  });
+
+  it("DEF-AC-001：maxRetries 為 null（真後端對 AI 解析的任務回 null，契約 §0.2 與缺席等價）時預覽不印「最大重試次數：null」", async () => {
+    const withNull = toTree({
+      project: { name: "p", executionPath: "/x", passCriteria: "c" },
+      goals: [
+        {
+          key: "g1",
+          name: "基礎",
+          passCriteria: "c",
+          tasks: [{ name: "初始化", description: "d", passCriteria: "c", maxRetries: null as unknown as number }],
+        },
+      ],
+    });
+    setup({ tree: withNull });
+    await userEvent.click(screen.getByRole("button", { name: "展開詳情：初始化" }));
+    const details = screen.getByTestId("task-details");
+    expect(details).not.toHaveTextContent("最大重試次數");
+    expect(details).not.toHaveTextContent("null");
   });
 
   it("展開目標看前置依賴（以目標名稱顯示，不露出 key）", async () => {

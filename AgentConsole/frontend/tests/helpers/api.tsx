@@ -33,10 +33,7 @@ export function envelope(data: unknown, status = 200): Response {
 }
 
 /** 錯誤封包（契約 §0.3；errors 項目可帶 gate／detail／location） */
-export function failure(
-  status: number,
-  body: { message?: string; reason?: string; errors?: unknown[]; details?: Record<string, unknown> } = {},
-): Response {
+export function failure(status: number, body: { message?: string; reason?: string; errors?: unknown[]; details?: Record<string, unknown> } = {}): Response {
   return new Response(
     JSON.stringify({
       code: status,

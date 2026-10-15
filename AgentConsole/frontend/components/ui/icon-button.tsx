@@ -15,17 +15,7 @@ export type IconButtonProps = Omit<React.ComponentProps<"button">, "children"> &
   iconSize?: number;
 };
 
-export function IconButton({
-  icon: Icon,
-  label,
-  variant = "ghost",
-  size = 40,
-  iconSize,
-  className,
-  style,
-  type = "button",
-  ...props
-}: IconButtonProps) {
+export function IconButton({ icon: Icon, label, variant = "ghost", size = 40, iconSize, className, style, type = "button", ...props }: IconButtonProps) {
   return (
     <button
       type={type}

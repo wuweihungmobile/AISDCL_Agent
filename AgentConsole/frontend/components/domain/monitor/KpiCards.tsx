@@ -4,15 +4,7 @@ import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/states";
 import type { MetricValue, ProjectMetrics } from "@/lib/api/types";
-import {
-  PRIMARY_KPIS,
-  SECONDARY_KPIS,
-  deltaTone,
-  formatDelta,
-  formatMetricValue,
-  type DeltaTone,
-  type KpiDef,
-} from "@/lib/domain/metrics";
+import { PRIMARY_KPIS, SECONDARY_KPIS, deltaTone, formatDelta, formatMetricValue, type DeltaTone, type KpiDef } from "@/lib/domain/metrics";
 import { cn } from "@/lib/utils";
 
 const TONE_CLASS: Record<DeltaTone, string> = {
@@ -47,17 +39,7 @@ function KpiCard({ def, metric }: { def: KpiDef; metric: MetricValue | undefined
  * 指標卡（設計稿畫面 8：完成率／任務成功率／重試率／Token 消耗，數值 30px／700）＋PRD §5.4.2 另外六項（較小的指標列）。
  * delta 取契約給的前一視窗比較值（delta＝value−previousValue；百分比為百分點）；顏色依語意：成功率升＝好、重試率升＝壞。
  */
-export function KpiCards({
-  metrics,
-  loading,
-  error,
-  onRetry,
-}: {
-  metrics: ProjectMetrics | undefined;
-  loading: boolean;
-  error: unknown;
-  onRetry: () => void;
-}) {
+export function KpiCards({ metrics, loading, error, onRetry }: { metrics: ProjectMetrics | undefined; loading: boolean; error: unknown; onRetry: () => void }) {
   if (error && !metrics) return <ErrorState error={error} onRetry={onRetry} title="無法載入指標" />;
   if (loading && !metrics) {
     return (

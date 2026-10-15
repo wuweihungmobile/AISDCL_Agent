@@ -32,14 +32,7 @@ import {
 import type { Checkpoint, ReviewDecision, ReviewItem, StartExecutionRequest } from "@/lib/api/types";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { controlButtons, type ControlAction } from "@/lib/domain/runControl";
-import {
-  buildScope,
-  initialSelection,
-  lockReport,
-  type ScopeGoal,
-  type ScopeTask,
-  type Selection,
-} from "@/lib/domain/scope";
+import { buildScope, initialSelection, lockReport, type ScopeGoal, type ScopeTask, type Selection } from "@/lib/domain/scope";
 import { isRunTerminal } from "@/lib/domain/status";
 import { CheckpointDialog } from "./CheckpointDialog";
 import { ControlCard } from "./ControlCard";
@@ -100,10 +93,7 @@ export function ExecuteView() {
   })();
 
   // ── 控制表單（草稿 null＝沿用預設，避免用 effect 把預設值灌進 state）──
-  const goals: ScopeGoal[] = useMemo(
-    () => [...(project.data?.goals ?? [])].sort((a, b) => a.sortOrder - b.sortOrder),
-    [project.data],
-  );
+  const goals: ScopeGoal[] = useMemo(() => [...(project.data?.goals ?? [])].sort((a, b) => a.sortOrder - b.sortOrder), [project.data]);
   const [levelDraft, setLevelDraft] = useState<number | null>(null);
   const [budgetDraft, setBudgetDraft] = useState<string | null>(null);
   const [selectionDraft, setSelectionDraft] = useState<Selection | null>(null);
@@ -133,7 +123,10 @@ export function ExecuteView() {
 
   const lock = lockReport(project.data?.signedOff ?? true, goals, selection, tasksByGoal);
   const nameOf = (id: string): string | undefined =>
-    goals.find((g) => g.id === id)?.name ?? Object.values(tasksByGoal).flatMap((t) => t ?? []).find((t) => t.id === id)?.name;
+    goals.find((g) => g.id === id)?.name ??
+    Object.values(tasksByGoal)
+      .flatMap((t) => t ?? [])
+      .find((t) => t.id === id)?.name;
 
   // ── 動作 ──
   const startM = useStartExecution();
@@ -244,7 +237,9 @@ export function ExecuteView() {
       return next;
     });
 
-  if (project.isError) {
+  // 只有「根本沒有專案資料」才換成錯誤畫面：背景重抓失敗（例如後端暫時不可用，DEF-AC-007）時 data 仍是上一份，
+  // 整頁換成錯誤會讓串流狀態點、日誌與審核項消失，恢復後也不會自己回來
+  if (project.isError && !project.data) {
     return (
       <div>
         <BackLink href={`/projects/${projectId}`}>返回專案</BackLink>

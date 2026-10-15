@@ -23,17 +23,7 @@ const PAGE_SIZE = 20;
  * 右上等級下拉（全部／INFO／WARN／ERROR），另有關鍵字（去抖 400ms，不分大小寫）與任務 id 篩選、由新到舊、分頁；
  * 每列＝時間（muted）＋等級（顏色依等級、寬 48px）＋訊息，等寬字體、#F5F7F2 底。日誌由既有資料衍生、不含引擎原始 stdout。
  */
-export function LogQueryCard({
-  projectId,
-  range,
-  runId,
-  pollMs,
-}: {
-  projectId: string;
-  range: RangeId;
-  runId: string | undefined;
-  pollMs: number | false;
-}) {
+export function LogQueryCard({ projectId, range, runId, pollMs }: { projectId: string; range: RangeId; runId: string | undefined; pollMs: number | false }) {
   const [level, setLevel] = useState<Level>("ALL");
   const [keyword, setKeyword] = useState("");
   const [taskId, setTaskId] = useState("");
@@ -59,10 +49,12 @@ export function LogQueryCard({
   const totalPages = Math.max(1, data?.totalPages ?? 1);
 
   // 篩選條件一變，回到第一頁
-  const reset = <T,>(set: (v: T) => void) => (v: T) => {
-    set(v);
-    setPage(0);
-  };
+  const reset =
+    <T,>(set: (v: T) => void) =>
+    (v: T) => {
+      set(v);
+      setPage(0);
+    };
 
   return (
     <Card className="px-[22px] py-5" data-testid="log-query-card">

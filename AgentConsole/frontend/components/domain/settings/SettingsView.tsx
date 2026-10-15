@@ -25,14 +25,7 @@ import { ErrorState } from "@/components/ui/states";
 import { useToast } from "@/components/ui/toast";
 import { saveBlob } from "@/lib/api/client";
 import { listSettingsByCategory } from "@/lib/api/endpoints";
-import {
-  invalidateSettings,
-  useExportSettings,
-  useResetSetting,
-  useSettings,
-  useUpdateSetting,
-  useUpdateTokenGuard,
-} from "@/lib/api/queries";
+import { invalidateSettings, useExportSettings, useResetSetting, useSettings, useUpdateSetting, useUpdateTokenGuard } from "@/lib/api/queries";
 import { CONFIG_CATEGORIES, type Config, type ConfigCategory, type TestConnectionRequest } from "@/lib/api/types";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { ConnectionTest } from "./ConnectionTest";
@@ -99,10 +92,7 @@ export function SettingsView() {
   const [resetAllOpen, setResetAllOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
 
-  const all = useMemo(
-    () => (settings.data ? CONFIG_CATEGORIES.flatMap((c) => settings.data[c] ?? []) : []),
-    [settings.data],
-  );
+  const all = useMemo(() => (settings.data ? CONFIG_CATEGORIES.flatMap((c) => settings.data[c] ?? []) : []), [settings.data]);
   const byId = useMemo(() => new Map(all.map((c) => [configId(c), c])), [all]);
   const busy = saving || updateGuard.isPending || resetOne.isPending;
 
@@ -118,18 +108,10 @@ export function SettingsView() {
   const haltCfg = byId.get(`${TOKEN_GUARD.category}.${TOKEN_GUARD.halt}`);
   const compactId = compactCfg ? configId(compactCfg) : "";
   const haltId = haltCfg ? configId(haltCfg) : "";
-  const guardDirty = Boolean(
-    (compactCfg && isDirty(compactCfg, drafts, revealed)) || (haltCfg && isDirty(haltCfg, drafts, revealed)),
-  );
-  const guardValues =
-    compactCfg && haltCfg
-      ? { compact: valueOf(compactCfg, drafts, revealed), halt: valueOf(haltCfg, drafts, revealed) }
-      : null;
+  const guardDirty = Boolean((compactCfg && isDirty(compactCfg, drafts, revealed)) || (haltCfg && isDirty(haltCfg, drafts, revealed)));
+  const guardValues = compactCfg && haltCfg ? { compact: valueOf(compactCfg, drafts, revealed), halt: valueOf(haltCfg, drafts, revealed) } : null;
   // 每個鍵自己的範圍錯誤優先顯示在該列；兩鍵各自合法才檢查「halt 必須大於 compact」
-  const guardOrderError =
-    guardDirty && guardValues && !localErrors[compactId] && !localErrors[haltId]
-      ? validateTokenGuard(guardValues.compact, guardValues.halt)
-      : null;
+  const guardOrderError = guardDirty && guardValues && !localErrors[compactId] && !localErrors[haltId] ? validateTokenGuard(guardValues.compact, guardValues.halt) : null;
   const guardBlocked = Boolean(localErrors[compactId] || localErrors[haltId] || guardOrderError);
   const blockingCount = Object.keys(localErrors).length + (guardOrderError ? 1 : 0);
 
@@ -242,8 +224,7 @@ export function SettingsView() {
           const failedKey = op.kind === "tokenGuard" ? GUARD_ERROR_KEY : op.change.id;
           setErrors({ [failedKey]: describeSettingsError(e) });
           setCategory(op.kind === "tokenGuard" ? TOKEN_GUARD.category : op.change.config.category);
-          const failedLabel =
-            op.kind === "tokenGuard" ? "Token Guard" : settingLabel(op.change.config.category, op.change.config.key);
+          const failedLabel = op.kind === "tokenGuard" ? "Token Guard" : settingLabel(op.change.config.category, op.change.config.key);
           toast.error(`儲存失敗：${failedLabel}（已儲存 ${saved} 項，其餘未送出）`);
           return;
         }
@@ -336,14 +317,7 @@ export function SettingsView() {
         icon={Settings}
         actions={
           <>
-            <Button
-              variant="ghost"
-              iconLeft={Download}
-              loading={exporter.isPending}
-              disabled={!isAdmin}
-              title={adminHint}
-              onClick={() => void doExport()}
-            >
+            <Button variant="ghost" iconLeft={Download} loading={exporter.isPending} disabled={!isAdmin} title={adminHint} onClick={() => void doExport()}>
               匯出設定
             </Button>
             <Button variant="ghost" iconLeft={Upload} disabled={!isAdmin} title={adminHint} onClick={() => setImportOpen(true)}>
@@ -354,11 +328,7 @@ export function SettingsView() {
       />
 
       {!isAdmin && role ? (
-        <p
-          role="status"
-          data-testid="readonly-banner"
-          className="mb-4 rounded-md border border-wg-line bg-wg-surface px-4 py-3 text-sm text-wg-muted"
-        >
+        <p role="status" data-testid="readonly-banner" className="mb-4 rounded-md border border-wg-line bg-wg-surface px-4 py-3 text-sm text-wg-muted">
           目前角色（{role}）只能檢視系統參數；修改、重置、測試連線、匯出與匯入都需要 ADMIN。
         </p>
       ) : null}
@@ -374,13 +344,7 @@ export function SettingsView() {
         <>
           <PillTabs label="參數分類" idBase={ID_BASE} tabs={TABS} value={category} onChange={setCategory} className="mb-4" />
 
-          <Card
-            role="tabpanel"
-            id={pillPanelId(ID_BASE, category)}
-            aria-labelledby={pillTabId(ID_BASE, category)}
-            className="px-6 py-5"
-            data-testid="settings-panel"
-          >
+          <Card role="tabpanel" id={pillPanelId(ID_BASE, category)} aria-labelledby={pillTabId(ID_BASE, category)} className="px-6 py-5" data-testid="settings-panel">
             <h3 className="mb-1 flex items-center gap-2 text-lg font-semibold">
               <CategoryIcon size={20} className="text-wg-primary" aria-hidden />
               {CATEGORY_META[category].label}設定
@@ -407,22 +371,10 @@ export function SettingsView() {
           <HistoryCard key={category} category={category} />
 
           <div className="mt-6 flex flex-wrap items-center gap-3">
-            <Button
-              iconLeft={Check}
-              loading={saving}
-              disabled={!isAdmin || changes.length === 0 || busy}
-              title={adminHint}
-              onClick={startSave}
-            >
+            <Button iconLeft={Check} loading={saving} disabled={!isAdmin || changes.length === 0 || busy} title={adminHint} onClick={startSave}>
               儲存變更
             </Button>
-            <Button
-              variant="ghost"
-              iconLeft={RotateCcw}
-              disabled={!isAdmin || busy}
-              title={adminHint}
-              onClick={() => setResetAllOpen(true)}
-            >
+            <Button variant="ghost" iconLeft={RotateCcw} disabled={!isAdmin || busy} title={adminHint} onClick={() => setResetAllOpen(true)}>
               全部重置為預設值
             </Button>
             {changes.length > 0 ? (
@@ -445,7 +397,11 @@ export function SettingsView() {
       >
         <p>
           即將更新敏感參數：
-          <b>{sensitiveChanges(confirmSave ?? []).map((c) => settingLabel(c.config.category, c.config.key)).join("、")}</b>
+          <b>
+            {sensitiveChanges(confirmSave ?? [])
+              .map((c) => settingLabel(c.config.category, c.config.key))
+              .join("、")}
+          </b>
           。這會留下審計紀錄，儲存時以 confirm=true 送出（修改歷史只記遮罩、不記明文）。
         </p>
         {(confirmSave ?? []).some((c) => c.config.impactNote) ? (
@@ -473,8 +429,7 @@ export function SettingsView() {
         }}
       >
         <p>
-          將把敏感參數「<b>{confirmReset ? settingLabel(confirmReset.category, confirmReset.key) : ""}</b>」重置為預設值（清空）。
-          這會留下審計紀錄，以 confirm=true 送出。
+          將把敏感參數「<b>{confirmReset ? settingLabel(confirmReset.category, confirmReset.key) : ""}</b>」重置為預設值（清空）。 這會留下審計紀錄，以 confirm=true 送出。
         </p>
       </ConfirmDialog>
 
@@ -502,9 +457,7 @@ export function SettingsView() {
           setRevealed({});
           setVisible(new Set());
           setErrors({});
-          toast.success(
-            `已匯入設定：套用 ${result.applied} 項、略過 ${result.skipped} 項${result.errors.length > 0 ? `、失敗 ${result.errors.length} 項` : ""}`,
-          );
+          toast.success(`已匯入設定：套用 ${result.applied} 項、略過 ${result.skipped} 項${result.errors.length > 0 ? `、失敗 ${result.errors.length} 項` : ""}`);
         }}
       />
     </div>

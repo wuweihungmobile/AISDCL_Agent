@@ -56,3 +56,11 @@ export function percent(done: number, total: number): number {
 export function retryLabel(retryCount: number, maxRetries: number): string {
   return `${retryCount} / ${maxRetries}`;
 }
+
+/**
+ * 手動重試後的文案（C-9；契約 §1.6.4、QA O-04）：手動重試不受 maxRetries 限制（那是引擎「自動重試」的上限），
+ * 所以 retryCount 可以大於 maxRetries——不再寫成容易誤讀的「3 / 1」，明說「不計入自動重試上限」。
+ */
+export function manualRetryLabel(retryCount: number, maxRetries: number): string {
+  return `手動重試第 ${retryCount} 次（不計入自動重試上限 ${maxRetries}）`;
+}

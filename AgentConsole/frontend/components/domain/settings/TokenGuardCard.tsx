@@ -33,20 +33,14 @@ export function TokenGuardCard({
   onApply: () => void;
 }) {
   return (
-    <section
-      aria-labelledby="token-guard-title"
-      data-testid="token-guard-card"
-      className="mb-2 rounded-lg border border-wg-line bg-wg-base px-5 pt-4 pb-3"
-    >
+    <section aria-labelledby="token-guard-title" data-testid="token-guard-card" className="mb-2 rounded-lg border border-wg-line bg-wg-base px-5 pt-4 pb-3">
       <div className="flex items-center gap-2">
         <ShieldCheck size={18} className="text-wg-primary" aria-hidden />
         <h4 id="token-guard-title" className="text-base font-semibold">
           Token Guard
         </h4>
       </div>
-      <p className="mt-0.5 text-xs text-wg-muted">
-        壓縮門檻與停機門檻成對編輯：停機門檻必須大於壓縮門檻，後端以原子交易一併校驗，不得經 Console 提高上限繞過安全收斂。
-      </p>
+      <p className="mt-0.5 text-xs text-wg-muted">壓縮門檻與停機門檻成對編輯：停機門檻必須大於壓縮門檻，後端以原子交易一併校驗，不得經 Console 提高上限繞過安全收斂。</p>
       <div className="mt-1">{children}</div>
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-wg-line pt-3">
         {error ? (

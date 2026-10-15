@@ -9,28 +9,12 @@
  */
 import { useQueryClient } from "@tanstack/react-query";
 import { usePathname, useRouter } from "next/navigation";
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useSyncExternalStore,
-  type ReactNode,
-} from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useSyncExternalStore, type ReactNode } from "react";
 
 import { setUnauthorizedHandler } from "@/lib/api/client";
 import { login as apiLogin } from "@/lib/api/endpoints";
 import type { Role } from "@/lib/api/types";
-import {
-  canWrite as roleCanWrite,
-  clearSession,
-  jwtSubject,
-  loadSession,
-  saveSession,
-  subscribeSession,
-  type Session,
-} from "./store";
+import { canWrite as roleCanWrite, clearSession, jwtSubject, loadSession, saveSession, subscribeSession, type Session } from "./store";
 
 export type AuthStatus = "loading" | "authed" | "anon";
 

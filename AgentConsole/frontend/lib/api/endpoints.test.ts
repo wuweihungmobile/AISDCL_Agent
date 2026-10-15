@@ -13,6 +13,8 @@ const EXPECTED: Array<[fn: keyof typeof api, call: () => Promise<unknown>, metho
   ["updateProject", () => api.updateProject("P", { name: "n2" }), "PUT", "/api/v1/projects/P", { name: "n2" }],
   ["deleteProject", () => api.deleteProject("P"), "DELETE", "/api/v1/projects/P"],
   ["signoffProject", () => api.signoffProject("P", "me"), "POST", "/api/v1/projects/P/signoff", { approver: "me" }],
+  // v1.2（C-3，API-PRJ-06）：復原軟刪除的專案（POST，無 body）
+  ["restoreProject", () => api.restoreProject("P"), "POST", "/api/v1/projects/P/restore"],
   ["createGoal", () => api.createGoal("P", { name: "g", passCriteria: "c" }), "POST", "/api/v1/projects/P/goals", { name: "g", passCriteria: "c" }],
   ["listGoals", () => api.listGoals("P"), "GET", "/api/v1/projects/P/goals"],
   ["getGoal", () => api.getGoal("G"), "GET", "/api/v1/goals/G"],
@@ -30,7 +32,13 @@ const EXPECTED: Array<[fn: keyof typeof api, call: () => Promise<unknown>, metho
 
   // ── Phase 3：BRD/PRD 匯入（契約 §1.1）：上傳是 multipart，另見下方專屬測試 ──
   ["listImports", () => api.listImports({ page: 0, size: 10, status: "PARSED", sort: "createdAt,desc" }), "GET", "/api/v1/import?page=0&size=10&status=PARSED&sort=createdAt%2Cdesc"],
-  ["importText", () => api.importText({ content: "# BRD", sourceFileName: "e2e-brd.md", sourceType: "MARKDOWN" }), "POST", "/api/v1/import/text", { content: "# BRD", sourceFileName: "e2e-brd.md", sourceType: "MARKDOWN" }],
+  [
+    "importText",
+    () => api.importText({ content: "# BRD", sourceFileName: "e2e-brd.md", sourceType: "MARKDOWN" }),
+    "POST",
+    "/api/v1/import/text",
+    { content: "# BRD", sourceFileName: "e2e-brd.md", sourceType: "MARKDOWN" },
+  ],
   ["getImport", () => api.getImport("I"), "GET", "/api/v1/import/I"],
   ["parseImport", () => api.parseImport("I", { autonomyLevel: 3, executionPath: "/x" }), "POST", "/api/v1/import/I/parse", { autonomyLevel: 3, executionPath: "/x" }],
   [
@@ -51,14 +59,32 @@ const EXPECTED: Array<[fn: keyof typeof api, call: () => Promise<unknown>, metho
   ["listSettings", () => api.listSettings(), "GET", "/api/v1/settings"],
   ["listSettingsByCategory", () => api.listSettingsByCategory("model", { reveal: true }), "GET", "/api/v1/settings/model?reveal=true"],
   ["updateSetting", () => api.updateSetting("model", "apiKey", { value: "k", confirm: true }), "PUT", "/api/v1/settings/model/apiKey", { value: "k", confirm: true }],
-  ["updateTokenGuard", () => api.updateTokenGuard({ compactThresholdPct: 70, haltThresholdPct: 95 }), "PUT", "/api/v1/settings/execution/token-guard", { compactThresholdPct: 70, haltThresholdPct: 95 }],
+  [
+    "updateTokenGuard",
+    () => api.updateTokenGuard({ compactThresholdPct: 70, haltThresholdPct: 95 }),
+    "PUT",
+    "/api/v1/settings/execution/token-guard",
+    { compactThresholdPct: 70, haltThresholdPct: 95 },
+  ],
   ["resetSetting", () => api.resetSetting("model", "apiKey", true), "POST", "/api/v1/settings/model/apiKey/reset?confirm=true"],
   ["resetCategory", () => api.resetCategory("execution"), "POST", "/api/v1/settings/execution/reset"],
-  ["testConnection", () => api.testConnection({ apiUrl: "https://api.minimax.io/v1/text/chatcompletion_v2" }), "POST", "/api/v1/settings/test-connection", { apiUrl: "https://api.minimax.io/v1/text/chatcompletion_v2" }],
+  [
+    "testConnection",
+    () => api.testConnection({ apiUrl: "https://api.minimax.io/v1/text/chatcompletion_v2" }),
+    "POST",
+    "/api/v1/settings/test-connection",
+    { apiUrl: "https://api.minimax.io/v1/text/chatcompletion_v2" },
+  ],
   ["listSettingsHistory", () => api.listSettingsHistory({ category: "execution", page: 1, size: 20 }), "GET", "/api/v1/settings/history?category=execution&page=1&size=20"],
 
   // ── Phase 4：專案執行（契約 §1.2）──
-  ["executeProject", () => api.executeProject("P", { autonomyLevel: 4, tokenBudget: 100000, scope: { mode: "ALL" } }), "POST", "/api/v1/projects/P/execute", { autonomyLevel: 4, tokenBudget: 100000, scope: { mode: "ALL" } }],
+  [
+    "executeProject",
+    () => api.executeProject("P", { autonomyLevel: 4, tokenBudget: 100000, scope: { mode: "ALL" } }),
+    "POST",
+    "/api/v1/projects/P/execute",
+    { autonomyLevel: 4, tokenBudget: 100000, scope: { mode: "ALL" } },
+  ],
   ["listProjectExecutions", () => api.listProjectExecutions("P", { page: 0, size: 1, sort: "startedAt,desc" }), "GET", "/api/v1/projects/P/executions?page=0&size=1&sort=startedAt%2Cdesc"],
   ["getExecution", () => api.getExecution("R"), "GET", "/api/v1/executions/R"],
   ["pauseExecution", () => api.pauseExecution("R"), "POST", "/api/v1/executions/R/pause"],
@@ -74,9 +100,16 @@ const EXPECTED: Array<[fn: keyof typeof api, call: () => Promise<unknown>, metho
   ["getProjectMetrics", () => api.getProjectMetrics("P", { runId: "R", from: "2026-10-14T00:00:00Z" }), "GET", "/api/v1/monitor/projects/P/metrics?runId=R&from=2026-10-14T00%3A00%3A00Z"],
   ["getTokenTrend", () => api.getTokenTrend("P", { bucket: "HOUR" }), "GET", "/api/v1/monitor/projects/P/token-trend?bucket=HOUR"],
   ["getTaskTrend", () => api.getTaskTrend("P", { bucket: "DAY", runId: "R" }), "GET", "/api/v1/monitor/projects/P/task-trend?bucket=DAY&runId=R"],
+  // v1.2（C-1，API-MON-08）：全域任務總計——from 必填、to 省略＝現在
+  ["getTaskTotals", () => api.getTaskTotals({ from: "2026-10-12T00:00:00.000Z" }), "GET", "/api/v1/monitor/task-totals?from=2026-10-12T00%3A00%3A00.000Z"],
   ["listProjectAlerts", () => api.listProjectAlerts("P", { acknowledged: false, limit: 50 }), "GET", "/api/v1/monitor/projects/P/alerts?acknowledged=false&limit=50"],
   ["acknowledgeAlert", () => api.acknowledgeAlert("A"), "POST", "/api/v1/monitor/alerts/A/acknowledge"],
-  ["listProjectLogs", () => api.listProjectLogs("P", { level: "ERROR", q: "失敗", order: "desc", page: 0, size: 50 }), "GET", "/api/v1/monitor/projects/P/logs?level=ERROR&q=%E5%A4%B1%E6%95%97&order=desc&page=0&size=50"],
+  [
+    "listProjectLogs",
+    () => api.listProjectLogs("P", { level: "ERROR", q: "失敗", order: "desc", page: 0, size: 50 }),
+    "GET",
+    "/api/v1/monitor/projects/P/logs?level=ERROR&q=%E5%A4%B1%E6%95%97&order=desc&page=0&size=50",
+  ],
 ];
 
 /** 不走 JSON 的端點：上傳（multipart）與下載（Blob）。 */
@@ -97,10 +130,28 @@ function okJson(data: unknown = {}): Response {
 }
 
 describe("endpoints：每個後端端點一個函式", () => {
-  it("匯出的函式恰好是 Phase 1～6 對應的 60 個（Phase 1+2 共 22、匯入 9、通知 1、設定 10、執行 11、監控 7；不多不少）", () => {
+  it("匯出的函式恰好是 Phase 1～6 對應的 62 個（Phase 1+2 共 23、匯入 9、通知 1、設定 10、執行 11、監控 8；不多不少）", () => {
     const names = [...EXPECTED.map(([name]) => name), ...MULTIPART, ...DOWNLOAD];
     expect(Object.keys(api).sort()).toEqual(names.sort());
-    expect(names).toHaveLength(60);
+    expect(names).toHaveLength(62);
+  });
+
+  it("listProjects：deleted=true 只列軟刪除的專案（C-3）；省略時網址上沒有 deleted", async () => {
+    const fetchMock = vi.fn(async () => okJson());
+    vi.stubGlobal("fetch", fetchMock);
+    await api.listProjects({ page: 0, size: 10, deleted: true, sort: "updatedAt,desc" });
+    await api.listProjects({ page: 0, size: 10 });
+    const urls = fetchMock.mock.calls.map((c) => (c as unknown as [string])[0]);
+    expect(urls[0]).toBe("/api/v1/projects?page=0&size=10&deleted=true&sort=updatedAt%2Cdesc");
+    expect(urls[1]).toBe("/api/v1/projects?page=0&size=10");
+  });
+
+  it("getTaskTotals：帶 to 時兩個參數都在網址上（契約 §1.3.8）", async () => {
+    const fetchMock = vi.fn(async () => okJson());
+    vi.stubGlobal("fetch", fetchMock);
+    await api.getTaskTotals({ from: "2026-10-12T00:00:00.000Z", to: "2026-10-15T08:40:00.000Z" });
+    const [url] = fetchMock.mock.calls[0] as unknown as [string];
+    expect(url).toBe("/api/v1/monitor/task-totals?from=2026-10-12T00%3A00%3A00.000Z&to=2026-10-15T08%3A40%3A00.000Z");
   });
 
   it.each(EXPECTED)("%s → %s %s", async (_name, call, method, path, body) => {
@@ -175,28 +226,34 @@ describe("endpoints：檔案上傳（multipart）與下載（Blob）", () => {
     expect(await result.blob.text()).toBe("#report,AISDLC");
   });
 
-  it("downloadProjectReport：PDF 回 501 時照常解成 ApiError（reason 保留，前端據此顯示「尚未提供」）", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(
-        async () =>
-          new Response(JSON.stringify({ code: 501, message: "尚未提供", reason: "PDF 報表尚未提供（W5）", errors: [], traceId: "tr-501" }), {
-            status: 501,
-            headers: { "content-type": "application/json" },
-          }),
-      ),
+  it("downloadProjectReport：PDF 回 200（v1.2，C-4）——Accept 帶 application/pdf（契約 §1.3.7），取回 PDF Blob，檔名取自 Content-Disposition（.pdf）", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response("%PDF-1.7 mock", {
+          status: 200,
+          headers: {
+            "content-type": "application/pdf",
+            "content-disposition": 'attachment; filename="monitor-report-0b8c5d1e-20261015-0840.pdf"',
+          },
+        }),
     );
-    const e = (await api.downloadProjectReport("P", { format: "pdf" }).catch((x: unknown) => x)) as { status: number; reason: string };
-    expect(e.status).toBe(501);
-    expect(e.reason).toBe("PDF 報表尚未提供（W5）");
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await api.downloadProjectReport("P", { format: "pdf", runId: "R" });
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("/api/v1/monitor/projects/P/report?format=pdf&runId=R");
+    const accept = (init.headers as Record<string, string>).Accept;
+    expect(accept.startsWith("application/pdf")).toBe(true);
+    expect(accept).toContain("application/json"); // 錯誤封包（400／404）仍可協商
+    expect(result.filename).toBe("monitor-report-0b8c5d1e-20261015-0840.pdf");
+    expect(await result.blob.text()).toBe("%PDF-1.7 mock");
   });
 
   it("reviewExecution：204 無本文；SKIP／無還原點的 RETRY 以回應標頭 X-Follow-Up-Run-Id 回傳後續批次 id，其餘回 null", async () => {
-    const replies = [
-      new Response(null, { status: 204, headers: { "X-Follow-Up-Run-Id": "11111111-2222-4333-8444-555555555555" } }),
-      new Response(null, { status: 204 }),
-    ];
-    vi.stubGlobal("fetch", vi.fn(async () => replies.shift() as Response));
+    const replies = [new Response(null, { status: 204, headers: { "X-Follow-Up-Run-Id": "11111111-2222-4333-8444-555555555555" } }), new Response(null, { status: 204 })];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => replies.shift() as Response),
+    );
     await expect(api.reviewExecution("R", "V", { decision: "SKIP" })).resolves.toEqual({
       followUpRunId: "11111111-2222-4333-8444-555555555555",
     });

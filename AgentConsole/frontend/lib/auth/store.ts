@@ -37,11 +37,7 @@ function readFromStorage(): Session | null {
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw) as Partial<Session>;
-    if (
-      typeof parsed.accessToken === "string" &&
-      typeof parsed.refreshToken === "string" &&
-      typeof parsed.username === "string"
-    ) {
+    if (typeof parsed.accessToken === "string" && typeof parsed.refreshToken === "string" && typeof parsed.username === "string") {
       return {
         accessToken: parsed.accessToken,
         refreshToken: parsed.refreshToken,

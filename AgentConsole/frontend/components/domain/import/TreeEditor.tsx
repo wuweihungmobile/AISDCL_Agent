@@ -6,21 +6,8 @@
  * （@dnd-kit：指標與鍵盤皆可；任務只能在同一個目標內換位）。
  * 這支元件只負責呈現與回報意圖（callbacks）；樹的狀態與 reducer 在 StructureCard／tree.ts。
  */
-import {
-  closestCenter,
-  DndContext,
-  KeyboardSensor,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-} from "@dnd-kit/core";
-import {
-  SortableContext,
-  sortableKeyboardCoordinates,
-  useSortable,
-  verticalListSortingStrategy,
-} from "@dnd-kit/sortable";
+import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
+import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { ChevronDown, ChevronRight, FileText, Folder, GripVertical, Pencil, Plus, Target, Trash2 } from "lucide-react";
 import { useState, type ReactNode } from "react";
@@ -52,10 +39,7 @@ export type TreeEditorProps = {
 const UNNAMED = "（未命名）";
 
 function useDragSensors() {
-  return useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
-  );
+  return useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
 }
 
 function DragHandle({
@@ -129,7 +113,7 @@ function TaskDetails({ task }: { task: TaskNode }) {
           {task.expectedOutputRegex}
         </p>
       ) : null}
-      {task.maxRetries !== undefined ? <p className="text-xs text-wg-muted">最大重試次數：{task.maxRetries}</p> : null}
+      {task.maxRetries != null ? <p className="text-xs text-wg-muted">最大重試次數：{task.maxRetries}</p> : null}
     </div>
   );
 }
@@ -167,12 +151,7 @@ function TaskRow({
       style={{ transform: CSS.Transform.toString(transform), transition }}
       className={cn("rounded-md", isDragging && "relative z-10 bg-wg-tertiary opacity-80")}
     >
-      <div
-        className={cn(
-          "flex items-center gap-1.5 rounded-md py-1 pl-1 pr-1.5",
-          highlighted && "border border-wg-error bg-wg-draft-bg",
-        )}
-      >
+      <div className={cn("flex items-center gap-1.5 rounded-md py-1 pl-1 pr-1.5", highlighted && "border border-wg-error bg-wg-draft-bg")}>
         {canEdit && goal.tasks.length > 1 ? (
           <DragHandle label={label} setActivatorNodeRef={setActivatorNodeRef} attributes={attributes} listeners={listeners} />
         ) : (
@@ -245,12 +224,7 @@ function GoalBlock({
       style={{ transform: CSS.Transform.toString(transform), transition }}
       className={cn("rounded-md", isDragging && "relative z-10 bg-wg-tertiary opacity-80")}
     >
-      <div
-        className={cn(
-          "flex items-center gap-1.5 rounded-md py-1.5 pr-1.5 pl-1",
-          highlighted && "border border-wg-error bg-wg-draft-bg",
-        )}
-      >
+      <div className={cn("flex items-center gap-1.5 rounded-md py-1.5 pr-1.5 pl-1", highlighted && "border border-wg-error bg-wg-draft-bg")}>
         {canEdit && tree.goals.length > 1 ? (
           <DragHandle label={label} setActivatorNodeRef={setActivatorNodeRef} attributes={attributes} listeners={listeners} />
         ) : (
@@ -320,14 +294,7 @@ function GoalBlock({
           </SortableContext>
         </DndContext>
         {canEdit ? (
-          <Button
-            variant="ghost"
-            size="sm"
-            iconLeft={Plus}
-            className="my-1 ml-1"
-            aria-label={`新增任務到目標：${label}`}
-            onClick={() => props.onAddTask(goal.key)}
-          >
+          <Button variant="ghost" size="sm" iconLeft={Plus} className="my-1 ml-1" aria-label={`新增任務到目標：${label}`} onClick={() => props.onAddTask(goal.key)}>
             新增任務
           </Button>
         ) : null}
@@ -360,12 +327,7 @@ export function TreeEditor(props: TreeEditorProps) {
     <div data-testid="import-tree" className="rounded-md bg-wg-base p-4">
       {/* 專案 */}
       <div data-testid="tree-project" data-highlighted={highlights?.project || undefined}>
-        <div
-          className={cn(
-            "flex items-center gap-1.5 rounded-md py-1.5 pr-1.5 pl-1",
-            highlights?.project && "border border-wg-error bg-wg-draft-bg",
-          )}
-        >
+        <div className={cn("flex items-center gap-1.5 rounded-md py-1.5 pr-1.5 pl-1", highlights?.project && "border border-wg-error bg-wg-draft-bg")}>
           <span className="size-6 shrink-0" aria-hidden />
           <Chevron open={open.has("project")} onToggle={() => toggle("project")} label={projectLabel} />
           <Folder size={18} className="shrink-0 text-wg-primary" aria-hidden />
@@ -395,16 +357,7 @@ export function TreeEditor(props: TreeEditorProps) {
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onGoalDragEnd}>
           <SortableContext items={tree.goals.map((g) => g.key)} strategy={verticalListSortingStrategy}>
             {tree.goals.map((g, gi) => (
-              <GoalBlock
-                key={g.key}
-                goal={g}
-                index={gi}
-                tree={tree}
-                props={props}
-                open={isOpen(`goal:${g.key}`)}
-                isOpen={isOpen}
-                toggle={toggle}
-              />
+              <GoalBlock key={g.key} goal={g} index={gi} tree={tree} props={props} open={isOpen(`goal:${g.key}`)} isOpen={isOpen} toggle={toggle} />
             ))}
           </SortableContext>
         </DndContext>

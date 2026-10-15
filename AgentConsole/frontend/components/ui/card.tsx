@@ -7,13 +7,7 @@ import { cn } from "@/lib/utils";
  * 內距由使用處決定（設計稿各處為 16／18／20／22／24px 不等，不強行統一）。
  */
 export function Card({ className, ...props }: React.ComponentProps<"div">) {
-  return (
-    <div
-      data-slot="card"
-      className={cn("rounded-lg border border-wg-line bg-wg-surface", className)}
-      {...props}
-    />
-  );
+  return <div data-slot="card" className={cn("rounded-lg border border-wg-line bg-wg-surface", className)} {...props} />;
 }
 
 /** 卡片標題（設計稿 H3：18px／600） */
