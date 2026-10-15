@@ -30,6 +30,23 @@ export async function apiDelete(request: APIRequestContext, token: string, path:
   await request.delete(`${API_URL}${path}`, { headers: { Authorization: `Bearer ${token}` } });
 }
 
+/**
+ * 限流是固定視窗：每個使用者每 60 秒 100 次，UI 與 REST 共用同一個桶（總覽頁每次載入就是 30 次上下，QA 報告 DEF-AC-009）。
+ * 前一支 spec 跑得很快時，這個使用者的額度可能已見底，下一支 spec 一開頭就撞 429（整套 Playwright 第 2 次最終跑，signoff 即如此）。
+ * 情境開始前先確認餘額（X-RateLimit-Remaining），不夠就等視窗過去；最多等三個視窗，之後照跑（真有問題由後續斷言現形）。
+ */
+export async function waitForQuota(request: APIRequestContext, token: string, need = 45): Promise<void> {
+  for (let i = 0; i < 3; i += 1) {
+    const res = await request.get(`${API_URL}/api/v1/notifications/summary`, {
+      headers: { Authorization: `Bearer ${token}` },
+      failOnStatusCode: false,
+    });
+    const remaining = Number(res.headers()["x-ratelimit-remaining"] ?? "100");
+    if (res.status() === 200 && remaining >= need) return;
+    await new Promise((resolve) => setTimeout(resolve, 62_000));
+  }
+}
+
 /** 以 UI 登入（驗證登入頁與導回行為）；已在 /login（可能帶 next 參數）時不重新導覽，才測得到「導回原頁」。 */
 export async function loginViaUi(page: Page, username = USER, password = PASS): Promise<void> {
   if (!page.url().includes("/login")) await page.goto("/login");

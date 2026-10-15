@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { SHOTS, apiDelete, apiPost, apiToken, loginViaStorage, uniq } from "./helpers";
+import { SHOTS, apiDelete, apiPost, apiToken, loginViaStorage, uniq, waitForQuota } from "./helpers";
 
 /**
  * Signoff 硬閘（對真後端）：以 API 建立 draft:true 的草案（signedOff=false，後端提供的正式旗標，不需 mock），
@@ -15,8 +15,14 @@ test.describe("signoff 流程", () => {
   let project: Created;
   let goal: Created;
 
+  // 限流是固定視窗（每使用者每 60 秒 100 次）；前一支 spec（shells-and-layout）跑得快時 operator 的額度已見底，
+  // 總覽頁每次載入又要 30 次上下（DEF-AC-009），所以每個情境前先確認餘額，不夠就等視窗過去（最多等一個視窗，故拉高逾時）。
+  test.setTimeout(240_000);
+
   test.beforeAll(async ({ request }) => {
+    test.setTimeout(240_000);
     token = await apiToken(request);
+    await waitForQuota(request, token, 60);
     project = await apiPost<Created>(request, token, "/api/v1/projects", {
       name,
       executionPath: "/tmp/e2e-draft",
@@ -30,9 +36,15 @@ test.describe("signoff 流程", () => {
     });
   });
 
+  test.beforeEach(async ({ request }) => {
+    await waitForQuota(request, token, 45);
+  });
+
   test.afterAll(async ({ request }) => {
+    test.setTimeout(240_000);
     const t = token || (await apiToken(request));
-    await apiDelete(request, t, `/api/v1/projects/${project.id}`);
+    await waitForQuota(request, t, 5);
+    if (project) await apiDelete(request, t, `/api/v1/projects/${project.id}`); // beforeAll 失敗時 project 尚未建立
   });
 
   test("Dashboard 待審批卡 → 審批專案：approver 預設帶使用者名稱，確認後 toast 並從佇列消失", async ({ page, request }) => {

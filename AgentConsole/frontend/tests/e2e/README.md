@@ -1,7 +1,7 @@
 # E2E（Playwright，對真後端）
 
 驗證前端對真實 console-api（含 PostgreSQL）的完整流程：登入 → 專案／目標／任務 CRUD → 依賴與成環錯誤 → 拖曳排序 → signoff 硬閘 → 刪除；
-另含響應式（1440／1024／390px）、路由導覽與四區塊版面、圖表回歸守衛，以及 FAILED 任務重試（該情境後端目前無入口，用 route mock）。
+另含響應式（1440／1024／390px）、路由導覽與四區塊版面、圖表回歸守衛、Markdown 編輯器八項功能（`markdown-editor.spec.ts`：即時預覽、原始碼著色、工具列、GFM 表格、程式碼高亮、Checklist、匯入／匯出 .md），以及 FAILED 任務重試（該情境後端目前無入口，用 route mock）。
 每個重點畫面存一張截圖到 `tests/e2e/__screenshots__/`。測試資料一律帶每次執行唯一的後綴，並在結束時刪除；`workers: 1` 序列執行。
 
 ## route mock 版（`*.mock.spec.ts`；不需要後端、不需要資料庫）
@@ -64,6 +64,69 @@ Push-Location AgentConsole\frontend; npx playwright test; Pop-Location
 Push-Location AgentConsole\frontend; $env:E2E_API_URL="http://localhost:18080"; $env:E2E_WEB_PORT="3100"; npx playwright test; Pop-Location
 ```
 
+## 真 Bridge specs（`p3-import`／`p4-execute`／`p4b-execute-more`／`p5-monitor`／`p6-settings`／`p7-cors-ratelimit`）
+
+對真後端（e2e profile）＋真 Engine Bridge＋`aisdlc-mock-claude`，驗契約 `API_Contract_P3-6.md` §5 的 E2E-01～12；**沒設 `E2E_ROOT` 時整批略過**（一般開發機沒有真 Bridge）。
+環境依契約 §5.0（完整 Bridge 與 backend 環境變數見 [engine-bridge/README.md](../../../engine-bridge/README.md)、[backend/README.md](../../../backend/README.md)）：
+
+1. `E2E_ROOT`＝一個空目錄（絕對路徑），底下建 `projects`、`workspace`、`quota-cache` 三個子目錄；專案的 `executionPath` 一律建在 `projects` 之下。
+2. PostgreSQL 18：`docker run -d --rm --name qa-pg -e POSTGRES_USER=aisdlc -e POSTGRES_DB=aisdlc -e POSTGRES_PASSWORD=<YOUR_PASSWORD> -p 25433:5432 pgvector/pgvector:pg18`（5433 常被本機原生 PG 佔用，所以用 25433）。
+3. **啟動順序：backend → Bridge → 重啟 backend**。Bridge 的 DB 模式要等 backend 的 Flyway 建好 `console` schema；backend 的連線探測環要在 Bridge 起來之後才看得到它（否則 `agentAvailability` 不是 100）。
+4. backend 以 `e2e` profile 啟動（才有 `console.security.allow-loopback` 與 `console.execution.mock-env`）；Bridge 啟動前清掉 `AUTOSDD_*`／`AUTOCLAUDE_*`／`MINIMAX_*`／`MOCK_CLAUDE_*` 環境變數，`PATH` 前置根層 `.venv` 的 `Scripts`（POSIX：`bin`），`AUTOSDD_QUOTA_CACHE_DIR` 指向 `<E2E_ROOT>/quota-cache`。
+5. 前端要用 `npm run build`（`NEXT_PUBLIC_API_URL` 於 build 時內嵌）後以 `E2E_MODE=standalone` 跑：`next dev` 偶爾在頁面載入後被 HMR 全頁重載（見上節），長情境會被它打斷。
+
+```bash
+# bash（相對於 monorepo 根；〈…〉換成自己的值，密碼與金鑰一律用環境變數、不寫進檔案）
+export E2E_ROOT=<ABS_PATH_TO_EMPTY_DIR>; mkdir -p "$E2E_ROOT"/{projects,workspace,quota-cache}
+(cd AgentConsole/backend && SPRING_PROFILES_ACTIVE=e2e SERVER_PORT=18080 JWT_SECRET='<YOUR_JWT_SECRET_MIN_32_CHARS>' CONSOLE_ENCRYPTION_KEY='<YOUR_CONSOLE_ENCRYPTION_KEY>' \
+  SPRING_DATASOURCE_URL=jdbc:postgresql://127.0.0.1:25433/aisdlc SPRING_DATASOURCE_USERNAME=aisdlc SPRING_DATASOURCE_PASSWORD='<YOUR_PASSWORD>' \
+  ENGINE_BRIDGE_URL=http://127.0.0.1:18081 CONSOLE_CORS_ALLOWED_ORIGINS=http://localhost:3000 \
+  java -jar build/libs/console-0.0.1-SNAPSHOT.jar "--console.execution.mock-env[MOCK_CLAUDE_TRACE]=$E2E_ROOT/mock-trace.jsonl")
+unset ${!AUTOSDD_*} ${!AUTOCLAUDE_*} ${!MINIMAX_*} ${!MOCK_CLAUDE_*}   # 契約 §5.0.1：Bridge 啟動前先清掉
+(cd AgentConsole/engine-bridge && PATH="$PWD/../../.venv/bin:$PATH" AUTOSDD_QUOTA_CACHE_DIR="$E2E_ROOT/quota-cache" ENGINE_WORKSPACE="$E2E_ROOT/workspace" \
+  BRIDGE_ALLOWED_PATH_ROOTS="$E2E_ROOT/projects:$E2E_ROOT/workspace" BRIDGE_DB_DSN='postgresql://aisdlc:<YOUR_PASSWORD>@127.0.0.1:25433/aisdlc' BRIDGE_DB_SCHEMA=console \
+  BRIDGE_OUTBOUND_ALLOWLIST=127.0.0.1,localhost BRIDGE_STOP_GRACE_SECONDS=5 BRIDGE_INSTANCE=e2e-bridge \
+  ../../.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 18081 --workers 1)
+(cd AgentConsole/frontend && E2E_API_URL=http://localhost:18080 E2E_WEB_PORT=3000 E2E_MODE=standalone npx playwright test tests/e2e/p3-import.spec.ts tests/e2e/p4-execute.spec.ts tests/e2e/p4b-execute-more.spec.ts tests/e2e/p5-monitor.spec.ts tests/e2e/p6-settings.spec.ts tests/e2e/p7-cors-ratelimit.spec.ts)
+```
+
+```powershell
+# PowerShell（不用裸 cd；〈…〉換成自己的值）
+$env:E2E_ROOT = "<ABS_PATH_TO_EMPTY_DIR>"; "projects", "workspace", "quota-cache" | ForEach-Object { New-Item -ItemType Directory -Force "$env:E2E_ROOT\$_" | Out-Null }
+# backend（e2e profile）；另開終端，Bridge 同理
+$env:SPRING_PROFILES_ACTIVE = "e2e"; $env:SERVER_PORT = "18080"; $env:JWT_SECRET = "<YOUR_JWT_SECRET_MIN_32_CHARS>"; $env:CONSOLE_ENCRYPTION_KEY = "<YOUR_CONSOLE_ENCRYPTION_KEY>"
+$env:SPRING_DATASOURCE_URL = "jdbc:postgresql://127.0.0.1:25433/aisdlc"; $env:SPRING_DATASOURCE_USERNAME = "aisdlc"; $env:SPRING_DATASOURCE_PASSWORD = "<YOUR_PASSWORD>"
+$env:ENGINE_BRIDGE_URL = "http://127.0.0.1:18081"; $env:CONSOLE_CORS_ALLOWED_ORIGINS = "http://localhost:3000"
+Push-Location AgentConsole\backend; java -jar build\libs\console-0.0.1-SNAPSHOT.jar "--console.execution.mock-env[MOCK_CLAUDE_TRACE]=$env:E2E_ROOT\mock-trace.jsonl"; Pop-Location
+# Bridge
+Get-ChildItem Env: | Where-Object Name -match "^(AUTOSDD_|AUTOCLAUDE_|MINIMAX_|MOCK_CLAUDE_)" | ForEach-Object { Remove-Item "Env:$($_.Name)" }
+$env:PATH = "$((Resolve-Path .venv\Scripts).Path);$env:PATH"; $env:AUTOSDD_QUOTA_CACHE_DIR = "$env:E2E_ROOT\quota-cache"; $env:ENGINE_WORKSPACE = "$env:E2E_ROOT\workspace"
+$env:BRIDGE_ALLOWED_PATH_ROOTS = "$env:E2E_ROOT\projects;$env:E2E_ROOT\workspace"; $env:BRIDGE_DB_DSN = "postgresql://aisdlc:<YOUR_PASSWORD>@127.0.0.1:25433/aisdlc"; $env:BRIDGE_DB_SCHEMA = "console"
+$env:BRIDGE_OUTBOUND_ALLOWLIST = "127.0.0.1,localhost"; $env:BRIDGE_STOP_GRACE_SECONDS = "5"; $env:BRIDGE_INSTANCE = "e2e-bridge"
+Push-Location AgentConsole\engine-bridge; ..\..\.venv\Scripts\uvicorn.exe app.main:app --host 127.0.0.1 --port 18081 --workers 1; Pop-Location
+# Playwright
+$env:E2E_API_URL = "http://localhost:18080"; $env:E2E_WEB_PORT = "3000"; $env:E2E_MODE = "standalone"
+Push-Location AgentConsole\frontend; npx playwright test tests/e2e/p3-import.spec.ts tests/e2e/p4-execute.spec.ts tests/e2e/p4b-execute-more.spec.ts tests/e2e/p5-monitor.spec.ts tests/e2e/p6-settings.spec.ts tests/e2e/p7-cors-ratelimit.spec.ts; Pop-Location
+```
+
+- **限流**：e2e profile 每個使用者（JWT subject）每 60 秒 100 次，UI 與 REST 共用同一個桶，所以輪詢一律用 viewer、UI 用 operator、設定用 admin；`realBackend.ts` 的 `ensureQuota()` 在情境開始前確認餘額，不夠就等視窗過去（多步驟 UI 情境中途撞 429 會被誤判成功能缺陷）；不需要 `E2E_ROOT` 的既有 spec（例如 `signoff.spec.ts`）用 `helpers.ts` 的 `waitForQuota()`。總覽頁每次載入就要 30 次上下請求（QA 報告 DEF-AC-009），整套連續跑時，前一支 spec 可能已把這個使用者的額度用光。
+- 選配環境變數：`E2E_JWT_SECRET`（backend 的 `JWT_SECRET`，用來偽造過期 token，E2E-12 步驟 1）、`E2E_RESTART_BACKEND`（停止並重新啟動 backend、等到 `/actuator/health` 才返回的腳本路徑；沒設就略過「重啟 backend 看 SSE 重連」的情境）、`E2E_DEFECTS_FIXED=1`（關掉 `test.fail` 釘住的已登記缺陷，看真實失敗訊息；缺陷清單見 `docs/06_quality/QA_P3-6_E2E_Verification.md`）。
+- 路徑 C（高階目標拆解）要真 Brain，E2E 環境沒有；`support/fake_brain_bridge.py` 以假 Brain 啟動同一個 Bridge（`uvicorn --app-dir AgentConsole/frontend/tests/e2e/support fake_brain_bridge:app --host 127.0.0.1 --port 18081`，環境同上），再設 `E2E_FAKE_BRAIN=1` 跑 `p3-import.spec.ts` 即多跑一支路徑 C 情境（後端 → 真 Bridge 的 decompose 與草案 approve 都是真的，只有「拆解出什麼」是假的）。
+
+## Docker 全棧（`*.stack.ts`，經 nginx 同源）
+
+`docker compose --profile db --profile app --profile full up -d` 之後，用 `docker.config.ts` 跑 `p8-docker-stack.stack.ts`：入口（首頁／`/actuator/` 被封／401）、路徑 A 匯入全鏈（凍結規格放進 Bridge 容器的 `/workspace`，因為全棧不載入 e2e profile、沒有 allow-loopback）、SSE 經 nginx（`proxy_buffering off`）與重啟 backend 後重連、10MB 上傳、nginx 日誌不含 `access_token` 的值。
+同一份設定也會跑不依賴 e2e profile 的既有真後端 specs（`crud-flow`／`signoff`／`design-system`／`chart`／`shells-and-layout`）：全棧是乾淨的資料庫、經 nginx 同源。需要 docker CLI；`E2E_API_URL` 必須是 nginx 入口（預設 `http://localhost`）。
+全棧的 backend 沒有 `allow-loopback`，所以 `p3`～`p7` 那批（假 LLM 伺服器綁 127.0.0.1）不能在這裡跑。
+
+```bash
+(cd AgentConsole/frontend && E2E_API_URL=http://localhost npx playwright test -c tests/e2e/docker.config.ts)
+```
+
+```powershell
+Push-Location AgentConsole\frontend; $env:E2E_API_URL = "http://localhost"; npx playwright test -c tests/e2e/docker.config.ts; Pop-Location
+```
+
 ## 環境變數
 
 | 變數 | 預設 | 說明 |
@@ -73,6 +136,8 @@ Push-Location AgentConsole\frontend; $env:E2E_API_URL="http://localhost:18080"; 
 | `E2E_MODE` | `dev` | `dev`＝由 Playwright 起 `next dev`（`NEXT_PUBLIC_API_URL` 於啟動時決定）；`standalone`＝用已建置產物（`node scripts/start-standalone.mjs`），此時 `NEXT_PUBLIC_API_URL` 已在 `npm run build` 時內嵌，須以同一個後端位址先 build |
 | `E2E_USER`／`E2E_PASSWORD` | operator／開發預設 | 登入帳密 |
 | `E2E_VIEWER_PASSWORD` | viewer 開發預設 | 唯讀角色測試用 |
+| `E2E_ROOT` | （空） | 真 Bridge specs 的根目錄；沒設就略過那批 specs（見〈真 Bridge specs〉） |
+| `E2E_JWT_SECRET`／`E2E_RESTART_BACKEND`／`E2E_DEFECTS_FIXED`／`E2E_FAKE_BRAIN` | （空） | 真 Bridge specs 的選配項（同上節） |
 
 前端埠上已有服務且 `/api/health` 可達時（例如先以 `docker run -p` 起了前端映像），Playwright 會直接沿用、不另起伺服器。
 
